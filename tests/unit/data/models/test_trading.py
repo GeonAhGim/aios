@@ -76,15 +76,26 @@ def test_position_requires_money_fields():
     assert position.asset_class == AssetClass.CRYPTO
 
 
-def test_account_balance_currency_specific():
+def test_account_balance_holds_arbitrary_asset_quantity():
+    # AccountBalance는 Money가 아니라 Decimal — asset이 임의 코인일 수 있어
+    # Currency enum(USDT/KRW)으로 표현 불가하기 때문(01번 §1.4 v1.4 정정).
     balance = AccountBalance(
-        exchange="kis",
-        asset="KRW",
-        total=_money("1000000", Currency.KRW),
-        available=_money("900000", Currency.KRW),
-        used_margin=_money("100000", Currency.KRW),
+        exchange="bitget",
+        asset="BTC",
+        total=Decimal("0.5"),
+        available=Decimal("0.4"),
+        used_margin=Decimal("0.1"),
     )
-    assert balance.total.currency == Currency.KRW
+    assert balance.asset == "BTC"
+    assert balance.total == Decimal("0.5")
+    assert balance.used_margin == Decimal("0.1")
+
+
+def test_account_balance_used_margin_defaults_to_zero():
+    balance = AccountBalance(
+        exchange="bitget", asset="USDT", total=Decimal("100"), available=Decimal("100")
+    )
+    assert balance.used_margin == Decimal("0")
 
 
 def test_secret_bundle_repr_masks_values():

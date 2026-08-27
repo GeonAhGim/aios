@@ -133,9 +133,15 @@ class SecretBundle(BaseModel):
 
 
 class AccountBalance(BaseModel):
+    """v1.4(ADR-2026-08-28) — 실제 Bitget 잔고 API 조사 중 발견: 이 모델은
+    Money(currency: Currency)를 쓰면 안 된다. Currency enum은 USDT/KRW
+    (결제·표시 통화)만 정의하는데, 실제 잔고는 BTC/ETH/SOL 등 임의 코인
+    보유량이라 Currency로 표현할 수 없다. asset 필드가 이미 "무엇의 수량인지"
+    를 담당하므로 Decimal을 그대로 쓴다(01번 §1.4 주석 참조)."""
+
     exchange: str
     asset: str
-    total: Money
-    available: Money
-    used_margin: Money
+    total: Decimal
+    available: Decimal
+    used_margin: Decimal = Decimal("0")
     updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
