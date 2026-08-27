@@ -1,0 +1,191 @@
+"""6.11 — KISAdapter 통합 테스트.
+
+실제 KIS 모의투자 앱키가 없는 상태(.env KIS_APP_KEY 비어있음)라
+httpx.MockTransport로 조사한 실제 응답 형태를 재현해 검증한다. 실제
+모의투자 계좌 왕복 테스트는 사용자가 앱키를 채운 뒤 별도로 수행해야 한다.
+"""
+import json
+from decimal import Decimal
+
+import httpx
+import pytest
+
+from src.core.exceptions import FatalExchangeError
+from src.data.models.base import AssetClass
+from src.exchanges.kis.adapter import KISAdapter
+
+TOKEN_RESPONSE = {"access_token": "tok-1", "access_token_token_expired": "2099-01-01 00:00:00"}
+
+
+def _make_adapter(handler) -> KISAdapter:
+    transport = httpx.MockTransport(handler)
+    client = httpx.AsyncClient(
+        base_url="https://openapivts.koreainvestment.com:29443", transport=transport
+    )
+    return KISAdapter("app", "secret", "12345678", "01", is_paper_trading=True, http_client=client)
+
+
+def _route(request: httpx.Request, routes: dict) -> httpx.Response:
+    if request.url.path == "/oauth2/tokenP":
+        return httpx.Response(200, json=TOKEN_RESPONSE)
+    handler = routes.get(request.url.path)
+    assert handler is not None, f"no route for {request.url.path}"
+    return handler(request)
+
+
+async def test_get_ticker_combines_price_and_orderbook_endpoints():
+    def price_handler(request: httpx.Request) -> httpx.Response:
+        assert request.headers["tr_id"] == "FHKST01010100"
+        return httpx.Response(
+            200,
+            json={
+                "rt_cd": "0",
+                "msg1": "ok",
+                "output": {"stck_prpr": "70000", "acml_vol": "12345"},
+            },
+        )
+
+    def book_handler(request: httpx.Request) -> httpx.Response:
+        assert request.headers["tr_id"] == "FHKST01010200"
+        return httpx.Response(
+            200,
+            json={
+                "rt_cd": "0",
+                "msg1": "ok",
+                "output1": {"askp1": "70100", "bidp1": "69900"},
+            },
+        )
+
+    routes = {
+        "/uapi/domestic-stock/v1/quotations/inquire-price": price_handler,
+        "/uapi/domestic-stock/v1/quotations/inquire-asking-price-exp-ccn": book_handler,
+    }
+    adapter = _make_adapter(lambda request: _route(request, routes))
+
+    ticker = await adapter.get_ticker("005930")
+
+    assert ticker.price == Decimal("70000")
+    assert ticker.bid == Decimal("69900")
+    assert ticker.ask == Decimal("70100")
+    assert ticker.exchange == "kis"
+
+
+async def test_capabilities_declare_kr_equity_only():
+    adapter = _make_adapter(lambda request: httpx.Response(200, json=TOKEN_RESPONSE))
+    caps = adapter.get_capabilities()
+
+    assert caps.supported_asset_classes == [AssetClass.KR_EQUITY]
+    assert caps.supports_websocket is False
+    assert caps.market_hours is not None
+    assert caps.market_hours.timezone == "Asia/Seoul"
+
+
+async def test_subscribe_ticker_stream_not_implemented():
+    adapter = _make_adapter(lambda request: httpx.Response(200, json=TOKEN_RESPONSE))
+    with pytest.raises(NotImplementedError):
+        await adapter.subscribe_ticker_stream("005930", lambda t: None)
+
+
+async def test_get_ohlcv_rejects_non_daily_timeframe():
+    adapter = _make_adapter(lambda request: httpx.Response(200, json=TOKEN_RESPONSE))
+    with pytest.raises(ValueError):
+        await adapter.get_ohlcv("005930", "1m")
+
+
+async def test_get_balance_maps_holdings_and_cash():
+    def balance_handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={
+                "rt_cd": "0",
+                "msg1": "ok",
+                "output1": [{"pdno": "005930", "hldg_qty": "10", "ord_psbl_qty": "10"}],
+                "output2": [{"dnca_tot_amt": "1000000"}],
+            },
+        )
+
+    adapter = _make_adapter(
+        lambda request: _route(
+            request, {"/uapi/domestic-stock/v1/trading/inquire-balance": balance_handler}
+        )
+    )
+    balances = await adapter.get_balance()
+
+    assets = {b.asset: b.total for b in balances}
+    assert assets["005930"] == Decimal("10")
+    assert assets["KRW"] == Decimal("1000000")
+
+
+async def test_get_positions_always_empty():
+    adapter = _make_adapter(lambda request: httpx.Response(200, json=TOKEN_RESPONSE))
+    assert await adapter.get_positions() == []
+
+
+async def test_place_order_packs_composite_exchange_order_id():
+    def order_handler(request: httpx.Request) -> httpx.Response:
+        assert request.headers["tr_id"] == "VTTC0012U"  # 모의투자 치환 확인
+        body = json.loads(request.content)
+        assert body["PDNO"] == "005930"
+        return httpx.Response(
+            200,
+            json={
+                "rt_cd": "0",
+                "msg1": "ok",
+                "output": {"KRX_FWDG_ORD_ORGNO": "1234", "ODNO": "999", "ORD_TMD": "091500"},
+            },
+        )
+
+    from src.data.models.trading import Order, OrderSide, OrderType
+
+    adapter = _make_adapter(
+        lambda request: _route(
+            request, {"/uapi/domestic-stock/v1/trading/order-cash": order_handler}
+        )
+    )
+    order = Order(
+        client_order_id="c-1",
+        strategy_id="s-1",
+        strategy_version="v1",
+        symbol="005930",
+        exchange="kis",
+        side=OrderSide.BUY,
+        order_type=OrderType.MARKET,
+        quantity=Decimal("10"),
+        asset_class=AssetClass.KR_EQUITY,
+    )
+
+    result = await adapter.place_order(order)
+
+    assert result.exchange_order_id == "1234:999"
+
+
+async def test_cancel_order_requires_composite_id_format():
+    adapter = _make_adapter(lambda request: httpx.Response(200, json=TOKEN_RESPONSE))
+    with pytest.raises(FatalExchangeError):
+        await adapter.cancel_order("not-composite")
+
+
+async def test_cancel_order_success():
+    def handler(request: httpx.Request) -> httpx.Response:
+        body = json.loads(request.content)
+        assert body["RVSE_CNCL_DVSN_CD"] == "02"
+        assert body["KRX_FWDG_ORD_ORGNO"] == "1234"
+        assert body["ORGN_ODNO"] == "999"
+        return httpx.Response(200, json={"rt_cd": "0", "msg1": "ok", "output": {}})
+
+    adapter = _make_adapter(
+        lambda request: _route(request, {"/uapi/domestic-stock/v1/trading/order-rvsecncl": handler})
+    )
+    assert await adapter.cancel_order("1234:999") is True
+
+
+async def test_health_check_true_on_success():
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={"rt_cd": "0", "msg1": "ok", "output1": [], "output2": []})
+
+    adapter = _make_adapter(
+        lambda request: _route(
+            request, {"/uapi/domestic-stock/v1/trading/inquire-balance": handler}
+        )
+    )
+    assert await adapter.health_check() is True
