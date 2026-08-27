@@ -1,0 +1,10 @@
+# FROZEN — 15.6-D 종료조건 충족 전까지 어떤 PR도 이 소유자 없이 병합 불가
+# TODO: @{owner}를 실제 GitHub 계정으로 교체하세요(로컬 저장소 단계라 아직 미지정)
+/src/core/strategy/       @{owner}
+/src/core/portfolio/      @{owner}
+/src/core/risk/decision/  @{owner}
+/src/core/executor/       @{owner}
+# SCAFFOLD — 자동게이트 + 인간 리뷰어 1인(15.6-A)
+/src/core/safety/         @{owner}
+/src/api/                 @{owner}
+/src/services/            @{owner}

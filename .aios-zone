@@ -1,0 +1,21 @@
+zones:
+  FROZEN:
+    - "src/core/strategy/**"
+    - "src/core/portfolio/**"
+    - "src/core/risk/decision/**"      # 15.6-A: "매매 승인·거부 최종판단"만
+    - "src/core/executor/**"
+    - "aios/kernel/policy/**"           # Phase 4, 06번 §6.4 제외 대상
+    - "aios/kernel/permission/**"       # Phase 4, 06번 §6.4 제외 대상
+  SCAFFOLD:
+    - "src/core/safety/**"              # 15.6-A: "감시"는 FROZEN 아님
+    - "src/core/*/interfaces.py"
+    - "src/data/models/**"
+    - "src/exchanges/common/**"
+    - "src/api/**"
+    - "src/services/**"
+    - "src/db/**"
+  OPEN:
+    - "docs/**"
+    - "tests/**"
+    - "config/**"
+    - "scripts/**"
