@@ -24,6 +24,8 @@ EXPECTED_TABLES = {
     "positions",
     "reconciliation_events",
     "audit_log",
+    "notifications",
+    "notification_preferences",
 }
 
 
