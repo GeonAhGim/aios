@@ -1,0 +1,70 @@
+# config/risk_policy.yaml
+# 이 파일은 FROZEN Zone과 동일하게 취급 — 15.6-A CODEOWNERS 보호 대상
+# 마지막 인간 승인: (미기재 — 실제 승인 시 ADR 번호와 승인자 기록)
+#
+# 모든 수치는 여전히 Draft다 — 8.2-B 원문과 동일하게, 실제 시장 데이터·
+# 백테스트 검증 및 인간 승인 없이 프로덕션에 적용하지 않는다.
+# Spec: 07_logging_config_v1.3.md#§7.2
+
+version: "draft-1"
+
+daily_loss:
+  warning_pct: 3.0
+  halt_pct: 5.0
+
+max_drawdown:
+  warning_pct: 10.0
+  hard_stop_pct: 15.0
+
+leverage:
+  default_max: 3.0
+  # 8.6-A-1 강화 — Reference 커버리지 등급별 조정 배수
+  coverage_multiplier:
+    high: 1.0
+    medium: 0.7
+    low: 0.5
+
+position_concentration:
+  single_asset_max_pct: 20.0
+
+strategy_allocation:
+  unverified_max_pct: 10.0
+  certified_level4_max_pct: 25.0
+
+var:
+  confidence: 0.95
+  horizon_days: 1
+  max_pct: 5.0
+
+correlation_risk:
+  threshold: 0.7
+  aggregate_exposure_max_pct: 30.0
+
+trade_frequency:
+  anomaly_multiplier: 3.0 # 직전 24시간 대비
+
+# 8.6 Circuit Breaker 단계 임계치
+circuit_breaker:
+  warning:
+    api_error_rate_pct: 10.0
+    data_delay_sec: 2.0
+  restricted:
+    api_error_rate_pct: 25.0
+    order_reject_rate_pct: 15.0
+  halted:
+    data_delay_sec: 5.0
+  emergency:
+    daily_loss_pct: 5.0
+    api_disconnect_sec: 30.0
+
+# 8.6-A Watchdog
+watchdog:
+  loss_threshold_pct: 7.0
+  unresponsive_sec: 30
+  window_min: 5
+
+# 8.1-A Data Distrust Mode (히스테리시스)
+data_distrust:
+  enter_threshold_pct: 1.5
+  exit_threshold_pct: 0.75
+  exit_sustain_sec: 60
