@@ -3,7 +3,7 @@
 로컬 dev Postgres(docker-compose.dev.yml)에 마이그레이션이 적용된 상태를
 전제로 한다: `alembic upgrade head`.
 
-Spec: 04_db_schema_v1.6.md, 06_mvp_scope_v1.2.md#§6.3 DoD
+Spec: 04_db_schema_v1.7.md, 06_mvp_scope_v1.3.md#§6.3 DoD
 ("audit_log 테이블에 WORM 제약(REVOKE UPDATE, DELETE) 적용 확인")
 """
 from pathlib import Path
@@ -76,3 +76,27 @@ async def test_tasks_capability_token_fk_wired(db_conn):
         )
     )
     assert result.first() is not None
+
+
+MULTI_ASSET_COLUMNS = {
+    "asset_class",
+    "option_type",
+    "strike_price",
+    "expiry_date",
+    "contract_multiplier",
+    "underlying_symbol",
+}
+
+
+async def test_orders_and_positions_have_multi_asset_columns(db_conn):
+    """ADR-2026-08-28 — 04번 §v1.7 다자산군 확장 컬럼(f5dd798b2e28)."""
+    for table in ("orders", "positions"):
+        result = await db_conn.execute(
+            text(
+                "SELECT column_name FROM information_schema.columns "
+                "WHERE table_name = :table AND column_name = ANY(:cols)"
+            ),
+            {"table": table, "cols": list(MULTI_ASSET_COLUMNS)},
+        )
+        found = {row[0] for row in result}
+        assert found == MULTI_ASSET_COLUMNS, f"{table} missing {MULTI_ASSET_COLUMNS - found}"
