@@ -27,6 +27,29 @@ class Currency(str, Enum):
     KRW = "KRW"
 
 
+class AssetClass(str, Enum):
+    """AIOS가 표현할 수 있는 전체 자산군 상위집합. 개별 거래소가 이 중 무엇을
+    실제로 지원하는지는 ExchangeCapability.supported_asset_classes가
+    선언한다 — 이 enum에 있다고 모든 거래소에서 거래 가능하다는 뜻이 아니다."""
+
+    CRYPTO = "CRYPTO"
+    KR_EQUITY = "KR_EQUITY"
+    KR_ETF = "KR_ETF"
+    KR_ETN = "KR_ETN"
+    KR_FUTURES = "KR_FUTURES"
+    KR_OPTION = "KR_OPTION"
+    US_EQUITY = "US_EQUITY"
+    US_ETF = "US_ETF"
+    US_ETN = "US_ETN"
+    OVERSEAS_FUTURES = "OVERSEAS_FUTURES"
+    OVERSEAS_OPTION = "OVERSEAS_OPTION"
+
+
+class OptionType(str, Enum):
+    CALL = "CALL"
+    PUT = "PUT"
+
+
 class Money(BaseModel):
     """모든 금액 필드는 원시 Decimal이 아니라 이 타입을 쓴다."""
 

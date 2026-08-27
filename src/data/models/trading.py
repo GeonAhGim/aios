@@ -1,18 +1,19 @@
-"""2.9 / 2.10 / 2.11 — Trading 모델.
+"""2.9 / 2.10 / 2.11 / 2.14 — Trading 모델.
 
-Spec: 01_data_models_v1.3.md#§1.4, 11_implementation_rules_v1.2.md#§11.1
-(금액 필드는 Money로 교체 — 다중 거래소/다중 통화 합산 오류 방지)
+Spec: 01_data_models_v1.4.md#§1.4, 11_implementation_rules_v1.2.md#§11.1
+(금액 필드는 Money로 교체 — 다중 거래소/다중 통화 합산 오류 방지),
+01_data_models_v1.4.md#§1.0 (다자산군 확장, ADR-2026-08-28)
 """
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from decimal import Decimal
 from enum import Enum
 from uuid import UUID, uuid4
 
 from pydantic import BaseModel, Field
 
-from src.data.models.base import Money
+from src.data.models.base import AssetClass, Money, OptionType
 
 
 class OrderStatus(str, Enum):
@@ -68,6 +69,16 @@ class Order(BaseModel):
     execution_slice_id: str | None = None
     is_liquidation: bool = False
 
+    # ADR-2026-08-28 다자산군 확장 — asset_class는 필수(기본값 없음, 침묵
+    # 오분류 방지). 나머지는 옵션/선물 주문에서만 채워지고 크립토/현물·주식
+    # 주문은 전부 None 유지.
+    asset_class: AssetClass
+    option_type: OptionType | None = None
+    strike_price: Decimal | None = None
+    expiry_date: date | None = None
+    contract_multiplier: Decimal | None = None
+    underlying_symbol: str | None = None
+
 
 class Position(BaseModel):
     symbol: str
@@ -83,6 +94,14 @@ class Position(BaseModel):
     margin: Money | None = None
     entry_time: datetime
     updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+    # ADR-2026-08-28 다자산군 확장 — Order와 동일 원칙.
+    asset_class: AssetClass
+    option_type: OptionType | None = None
+    strike_price: Decimal | None = None
+    expiry_date: date | None = None
+    contract_multiplier: Decimal | None = None
+    underlying_symbol: str | None = None
 
 
 class SecretBundle(BaseModel):
