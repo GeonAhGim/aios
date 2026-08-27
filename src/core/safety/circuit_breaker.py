@@ -18,6 +18,7 @@ in-memory가 아니다.
 """
 from __future__ import annotations
 
+import logging
 from collections.abc import Awaitable, Callable
 from decimal import Decimal
 from enum import Enum
@@ -28,6 +29,8 @@ from pydantic import BaseModel
 
 from src.core.approval import service as approval
 from src.core.loader.risk_policy_loader import CircuitBreakerPolicy
+
+logger = logging.getLogger(__name__)
 
 PublishFn = Callable[[str, dict[str, Any]], Awaitable[None]]
 
@@ -150,6 +153,27 @@ class CircuitBreakerService:
                     "risk.circuit_breaker.reactivation_requested",
                     {"approval_request_id": request.id, "current_level": current.level.value},
                 )
+        return await self.get_state()
+
+    async def force_escalate(
+        self, min_level: CircuitBreakerLevel, reason: str
+    ) -> CircuitBreakerState:
+        """9.6 Reconciliation 에스컬레이션 등 다른 안전장치가 직접 특정 단계
+        이상으로 강제 격상할 때 사용 — 절대 하향은 하지 않는다(이미 그
+        이상이면 그대로 유지, "더 격상하지 않는다" 원칙과 동일하게 여러 번
+        호출해도 멱등적으로 동작)."""
+        current = await self.get_state()
+        if _SEVERITY[min_level] > _SEVERITY[current.level]:
+            if current.reactivation_approval_id is not None:
+                await approval.cancel(self._pool, current.reactivation_approval_id)
+            await self._set_level(min_level, reactivation_approval_id=None)
+            await self._publish_level_changed(current.level, min_level)
+            logger.critical(
+                "Circuit Breaker 강제 격상: %s -> %s (%s)",
+                current.level.value,
+                min_level.value,
+                reason,
+            )
         return await self.get_state()
 
     async def check_reactivation(self) -> CircuitBreakerState:
