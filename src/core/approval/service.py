@@ -71,6 +71,11 @@ async def _fetch(pool: asyncpg.Pool, request_id: int) -> ApprovalRequest:
     return _row_to_model(row)
 
 
+async def get_request(pool: asyncpg.Pool, request_id: int) -> ApprovalRequest:
+    """다른 서비스(예: 9.4b Circuit Breaker 재가동)가 요청 상태를 폴링할 때 사용."""
+    return await _fetch(pool, request_id)
+
+
 async def create_request(
     pool: asyncpg.Pool,
     *,
