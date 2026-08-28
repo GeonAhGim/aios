@@ -41,7 +41,8 @@ def reconciliation(pool, circuit_breaker):
     return ReconciliationService(pool, circuit_breaker)
 
 
-async def _record(reconciliation, *, symbol="BTC/USDT", exchange="bitget", discrepancy_pct=None):
+async def _record(reconciliation, *, symbol=None, exchange="bitget", discrepancy_pct=None):
+    symbol = symbol or f"TEST{uuid4().hex[:8]}/USDT"
     return await reconciliation.record_and_escalate(
         user_id=uuid4(),
         symbol=symbol,
