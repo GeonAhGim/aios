@@ -45,6 +45,7 @@ def create_app() -> FastAPI:
         exchange_credentials,
         marketplace,
         strategy_builder,
+        suitability,
         users,
     )
 
@@ -57,6 +58,7 @@ def create_app() -> FastAPI:
     app.include_router(
         strategy_builder.router, prefix="/strategy-builder", tags=["strategy-builder"]
     )
+    app.include_router(suitability.router)
 
     return app
 
