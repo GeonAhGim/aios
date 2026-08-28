@@ -43,6 +43,7 @@ def create_app() -> FastAPI:
     from src.api.routers import (
         admin,
         auth,
+        device_tokens,
         exchange_credentials,
         executions,
         marketplace,
@@ -69,6 +70,9 @@ def create_app() -> FastAPI:
     app.include_router(admin.router, tags=["admin"])
     app.include_router(portfolio.router, prefix="/portfolio", tags=["portfolio"])
     app.include_router(reports.router, prefix="/reports", tags=["reports"])
+    app.include_router(
+        device_tokens.router, prefix="/device-tokens", tags=["device-tokens"]
+    )
 
     return app
 

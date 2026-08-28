@@ -67,11 +67,15 @@ class DeviceTokenService:
             device_id=row["id"], registered_at=row["registered_at"], is_active=True
         )
 
-    async def deactivate(self, device_id: int) -> None:
+    async def deactivate(self, device_id: int, user_id: UUID) -> None:
+        """이 세션에서 처음 HTTP로 노출하며 발견 — user_id 소유권 확인 없이는
+        다른 사용자의 device_id를 추측해 해지시킬 수 있었다(IDOR)."""
         async with self._pool.acquire() as conn:
             result = await conn.execute(
-                "UPDATE device_tokens SET is_active = false WHERE id = $1 AND is_active",
+                "UPDATE device_tokens SET is_active = false "
+                "WHERE id = $1 AND user_id = $2 AND is_active",
                 device_id,
+                user_id,
             )
         if result == "UPDATE 0":
             raise DeviceTokenError("존재하지 않거나 이미 비활성화된 디바이스입니다.")
