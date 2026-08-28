@@ -1,0 +1,137 @@
+"""16번대 통합테스트 — 실제 FastAPI 앱 + 실제 dev DB, HTTP 계층까지 왕복.
+
+httpx ASGITransport로 실제 uvicorn 없이 앱을 직접 구동한다 —
+app.router.lifespan_context로 main.py의 lifespan(asyncpg pool 생성)을
+그대로 태운다.
+"""
+import uuid
+
+import pytest
+from httpx import ASGITransport, AsyncClient
+
+from src.main import app
+
+STRONG_PASSWORD = "Str0ng!Passw0rd"
+
+
+@pytest.fixture
+async def client():
+    async with app.router.lifespan_context(app):
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://test") as ac:
+            yield ac
+
+
+def _unique_email() -> str:
+    return f"test-{uuid.uuid4().hex}@example.com"
+
+
+async def test_register_returns_access_token(client):
+    response = await client.post(
+        "/auth/register", json={"email": _unique_email(), "password": STRONG_PASSWORD}
+    )
+
+    assert response.status_code == 201
+    body = response.json()
+    assert "access_token" in body
+    assert body["token_type"] == "bearer"
+
+
+async def test_register_rejects_weak_password(client):
+    response = await client.post(
+        "/auth/register", json={"email": _unique_email(), "password": "short"}
+    )
+
+    assert response.status_code in (400, 422)
+
+
+async def test_login_after_register_succeeds(client):
+    email = _unique_email()
+    await client.post("/auth/register", json={"email": email, "password": STRONG_PASSWORD})
+
+    response = await client.post(
+        "/auth/login", json={"email": email, "password": STRONG_PASSWORD}
+    )
+
+    assert response.status_code == 200
+    assert "access_token" in response.json()
+
+
+async def test_login_with_wrong_password_rejected(client):
+    email = _unique_email()
+    await client.post("/auth/register", json={"email": email, "password": STRONG_PASSWORD})
+
+    response = await client.post(
+        "/auth/login", json={"email": email, "password": "WrongPassword1!"}
+    )
+
+    assert response.status_code == 401
+
+
+async def test_get_me_requires_authentication(client):
+    response = await client.get("/users/me")
+
+    assert response.status_code == 401
+
+
+async def test_get_me_returns_current_user_with_valid_token(client):
+    email = _unique_email()
+    register_response = await client.post(
+        "/auth/register", json={"email": email, "password": STRONG_PASSWORD}
+    )
+    token = register_response.json()["access_token"]
+
+    response = await client.get("/users/me", headers={"Authorization": f"Bearer {token}"})
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["email"] == email
+    assert body["mfa_enabled"] is False
+
+
+async def test_get_me_rejects_invalid_token(client):
+    response = await client.get(
+        "/users/me", headers={"Authorization": "Bearer not-a-real-token"}
+    )
+
+    assert response.status_code == 401
+
+
+async def test_mfa_setup_and_verify_round_trip(client):
+    import pyotp
+
+    email = _unique_email()
+    register_response = await client.post(
+        "/auth/register", json={"email": email, "password": STRONG_PASSWORD}
+    )
+    token = register_response.json()["access_token"]
+    headers = {"Authorization": f"Bearer {token}"}
+
+    setup_response = await client.post("/auth/mfa/setup", headers=headers)
+    assert setup_response.status_code == 200
+    secret = setup_response.json()["secret"]
+
+    code = pyotp.totp.TOTP(secret).now()
+    verify_response = await client.post(
+        "/auth/mfa/verify", json={"totp_code": code}, headers=headers
+    )
+    assert verify_response.status_code == 200
+    assert verify_response.json()["mfa_enabled"] is True
+
+    login_without_code = await client.post(
+        "/auth/login", json={"email": email, "password": STRONG_PASSWORD}
+    )
+    assert login_without_code.status_code == 401
+
+    login_code = pyotp.totp.TOTP(secret).now()
+    login_with_code = await client.post(
+        "/auth/login",
+        json={"email": email, "password": STRONG_PASSWORD, "totp_code": login_code},
+    )
+    assert login_with_code.status_code == 200
+
+
+async def test_logout_requires_authentication(client):
+    response = await client.post("/auth/logout")
+
+    assert response.status_code == 401

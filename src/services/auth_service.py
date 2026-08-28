@@ -84,6 +84,13 @@ def _row_to_user(row: asyncpg.Record) -> User:
     )
 
 
+async def get_user_by_id(pool: asyncpg.Pool, user_id: UUID) -> User | None:
+    """앱 조립 단계(get_current_user JWT 검증)가 사용하는 공개 조회 함수."""
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow("SELECT * FROM users WHERE user_id = $1", user_id)
+    return _row_to_user(row) if row is not None else None
+
+
 class AuthService:
     def __init__(
         self,
