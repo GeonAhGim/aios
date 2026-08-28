@@ -16,6 +16,11 @@ verify_totp DI 콜백으로 주입받는다(이 세션에서 반복 적용한 �
 WatchdogService.compute_equity/SurgeDetector.verify_provenance 등과 동일).
 콜백을 넘기지 않았는데 mfa_enabled=true인 계정이 로그인을 시도하면
 안전하게 실패 처리한다(fail-safe — 검증 불가를 통과로 취급하지 않음).
+
+11.6 연동 — PENDING_DELETION(FD-11.4 탈퇴 유예기간) 상태에서 로그인에
+성공하면 탈퇴가 자동 취소된다(ACTIVE로 복귀, deletion_requested_at
+초기화) — FD-11.4 원문 "유예기간 중 재로그인 시 탈퇴 취소 가능"의
+실제 강제 지점.
 """
 from __future__ import annotations
 
@@ -151,12 +156,22 @@ class AuthService:
                     )
                     raise AuthError(_GENERIC_AUTH_ERROR)
 
-            await conn.execute(
-                "UPDATE users SET failed_login_attempts = 0, locked_until = NULL, "
-                "last_login_at = now() WHERE user_id = $1",
-                row["user_id"],
-            )
-        return _row_to_user(row)
+            cancels_deletion = row["status"] == "PENDING_DELETION"
+            if cancels_deletion:
+                await conn.execute(
+                    "UPDATE users SET failed_login_attempts = 0, locked_until = NULL, "
+                    "last_login_at = now(), status = 'ACTIVE', deletion_requested_at = NULL "
+                    "WHERE user_id = $1",
+                    row["user_id"],
+                )
+            else:
+                await conn.execute(
+                    "UPDATE users SET failed_login_attempts = 0, locked_until = NULL, "
+                    "last_login_at = now() WHERE user_id = $1",
+                    row["user_id"],
+                )
+        final_status = "ACTIVE" if cancels_deletion else row["status"]
+        return _row_to_user({**dict(row), "status": final_status})
 
     def issue_token(self, user: User) -> str:
         payload = {
