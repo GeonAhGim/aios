@@ -48,6 +48,7 @@ def create_app() -> FastAPI:
         marketplace,
         notifications,
         portfolio,
+        reports,
         strategy_builder,
         suitability,
         users,
@@ -67,6 +68,7 @@ def create_app() -> FastAPI:
     app.include_router(notifications.router, prefix="/notifications", tags=["notifications"])
     app.include_router(admin.router, tags=["admin"])
     app.include_router(portfolio.router, prefix="/portfolio", tags=["portfolio"])
+    app.include_router(reports.router, prefix="/reports", tags=["reports"])
 
     return app
 
