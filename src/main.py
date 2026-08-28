@@ -41,6 +41,7 @@ def create_app() -> FastAPI:
     app = FastAPI(title="AIOS API", lifespan=lifespan)
 
     from src.api.routers import (
+        admin,
         auth,
         exchange_credentials,
         executions,
@@ -63,6 +64,7 @@ def create_app() -> FastAPI:
     app.include_router(suitability.router)
     app.include_router(executions.router, prefix="/executions", tags=["executions"])
     app.include_router(notifications.router, prefix="/notifications", tags=["notifications"])
+    app.include_router(admin.router, tags=["admin"])
 
     return app
 
