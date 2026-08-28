@@ -143,6 +143,23 @@ class ExchangeCredentialService:
         if result == "UPDATE 0":
             raise ExchangeCredentialError(f"활성 상태인 {exchange} 자격증명이 없습니다.")
 
+    async def list_for_user(self, user_id: UUID) -> list[CredentialSummary]:
+        async with self._pool.acquire() as conn:
+            rows = await conn.fetch(
+                "SELECT id, exchange, is_active, linked_at FROM exchange_credentials "
+                "WHERE user_id = $1 ORDER BY linked_at DESC",
+                user_id,
+            )
+        return [
+            CredentialSummary(
+                id=row["id"],
+                exchange=row["exchange"],
+                is_active=row["is_active"],
+                linked_at=row["linked_at"],
+            )
+            for row in rows
+        ]
+
     async def get_decrypted(
         self, user_id: UUID, exchange: str
     ) -> tuple[str, str, dict[str, str]] | None:

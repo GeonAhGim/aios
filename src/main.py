@@ -40,10 +40,13 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 def create_app() -> FastAPI:
     app = FastAPI(title="AIOS API", lifespan=lifespan)
 
-    from src.api.routers import auth, users
+    from src.api.routers import auth, exchange_credentials, users
 
     app.include_router(auth.router, prefix="/auth", tags=["auth"])
     app.include_router(users.router, prefix="/users", tags=["users"])
+    app.include_router(
+        exchange_credentials.router, prefix="/exchange-credentials", tags=["exchanges"]
+    )
 
     return app
 
