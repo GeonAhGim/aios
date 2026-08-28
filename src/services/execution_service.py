@@ -15,6 +15,12 @@ leaf 없음) — 안전 원칙상 더 보수적인 "항상 승인 필요"로 처
 승인 요청과 실행 행을 연결할 전용 컬럼이 strategy_executions에 없어
 (설계 누락) approval_requests.context에 execution_id를 담아 연결한다 —
 16.3(시작 제어)이 이 값으로 역참조해 승인 상태를 확인한다.
+
+16.3 — 시작/일시정지/중지(start/pause/retire): 8.6-B Kill Switch 우선순위
+원칙 — Watchdog/Circuit Breaker(FD-9)가 이미 PAUSED(paused_by=
+SAFETY_LAYER)로 전환한 실행은 사용자가 "시작"을 눌러도 거부된다(시스템
+트리거가 사용자보다 우선). 사용자 자신이 일시정지(paused_by=USER)한
+것만 사용자가 재시작할 수 있다.
 """
 from __future__ import annotations
 
@@ -36,6 +42,10 @@ VALID_MODES = ("PAPER", "LIVE")
 
 class ExecutionCreateError(Exception):
     """FD-16.1/16.2 실패 — 라우터가 400/403/404로 변환."""
+
+
+class ExecutionControlError(Exception):
+    """FD-16.3 실패 — 시작/일시정지/중지 거부. 라우터가 400/403/404로 변환."""
 
 
 class ExecutionSummary(BaseModel):
@@ -139,4 +149,129 @@ class ExecutionService:
             exchange=exchange,
             allocated_capital=allocated_capital,
             approval_request_id=approval_request_id,
+        )
+
+    async def start(self, execution_id: int, user_id: UUID) -> ExecutionSummary:
+        async with self._pool.acquire() as conn:
+            execution = await conn.fetchrow(
+                "SELECT user_id, status, mode, paused_by, allocated_capital, exchange "
+                "FROM strategy_executions WHERE id = $1",
+                execution_id,
+            )
+            if execution is None:
+                raise ExecutionControlError("존재하지 않는 실행입니다.")
+            if execution["user_id"] != user_id:
+                raise ExecutionControlError("본인의 실행만 제어할 수 있습니다.")
+            if execution["status"] == "RETIRED":
+                raise ExecutionControlError("이미 중지된 실행은 다시 시작할 수 없습니다.")
+
+            if execution["status"] == "PAUSED" and execution["paused_by"] == "SAFETY_LAYER":
+                raise ExecutionControlError(
+                    "안전장치(Watchdog/Circuit Breaker)가 정지시킨 실행입니다 — "
+                    "사용자가 직접 재시작할 수 없습니다."
+                )
+
+            if execution["status"] == "PENDING_APPROVAL" and execution["mode"] == "LIVE":
+                approved = await conn.fetchval(
+                    "SELECT status FROM approval_requests "
+                    "WHERE trigger_source = 'execution_high_allocation' "
+                    "AND (context->>'execution_id')::bigint = $1 "
+                    "ORDER BY created_at DESC LIMIT 1",
+                    execution_id,
+                )
+                if approved != "APPROVED":
+                    raise ExecutionControlError(
+                        f"LIVE 실행은 승인이 완료되어야 시작할 수 있습니다(현재 승인 상태: "
+                        f"{approved or '요청 없음'})."
+                    )
+
+            row = await conn.fetchrow(
+                "UPDATE strategy_executions "
+                "SET status = 'RUNNING', paused_by = NULL, "
+                "started_at = COALESCE(started_at, now()) "
+                "WHERE id = $1 RETURNING status, mode, exchange, allocated_capital",
+                execution_id,
+            )
+        return ExecutionSummary(
+            id=execution_id,
+            status=row["status"],
+            mode=row["mode"],
+            exchange=row["exchange"],
+            allocated_capital=row["allocated_capital"],
+        )
+
+    async def pause(
+        self,
+        execution_id: int,
+        *,
+        paused_by: str = "USER",
+        user_id: UUID | None = None,
+    ) -> ExecutionSummary:
+        if paused_by not in ("USER", "SAFETY_LAYER"):
+            raise ExecutionControlError(f"알 수 없는 paused_by 값입니다: {paused_by}")
+
+        async with self._pool.acquire() as conn:
+            execution = await conn.fetchrow(
+                "SELECT user_id, status, mode, exchange, allocated_capital "
+                "FROM strategy_executions WHERE id = $1",
+                execution_id,
+            )
+            if execution is None:
+                raise ExecutionControlError("존재하지 않는 실행입니다.")
+            if paused_by == "USER":
+                if user_id is None or execution["user_id"] != user_id:
+                    raise ExecutionControlError("본인의 실행만 제어할 수 있습니다.")
+            if execution["status"] != "RUNNING":
+                raise ExecutionControlError(
+                    f"RUNNING 상태에서만 일시정지할 수 있습니다(현재: {execution['status']})."
+                )
+
+            row = await conn.fetchrow(
+                "UPDATE strategy_executions SET status = 'PAUSED', paused_by = $2 "
+                "WHERE id = $1 RETURNING status, mode, exchange, allocated_capital",
+                execution_id,
+                paused_by,
+            )
+        return ExecutionSummary(
+            id=execution_id,
+            status=row["status"],
+            mode=row["mode"],
+            exchange=row["exchange"],
+            allocated_capital=row["allocated_capital"],
+        )
+
+    async def retire(
+        self, execution_id: int, user_id: UUID, *, liquidation: str = "KEEP_POSITIONS"
+    ) -> ExecutionSummary:
+        if liquidation not in ("IMMEDIATE_MARKET", "KEEP_POSITIONS"):
+            raise ExecutionControlError(f"알 수 없는 청산 방식입니다: {liquidation}")
+
+        async with self._pool.acquire() as conn:
+            execution = await conn.fetchrow(
+                "SELECT user_id, status, mode, exchange, allocated_capital "
+                "FROM strategy_executions WHERE id = $1",
+                execution_id,
+            )
+            if execution is None:
+                raise ExecutionControlError("존재하지 않는 실행입니다.")
+            if execution["user_id"] != user_id:
+                raise ExecutionControlError("본인의 실행만 제어할 수 있습니다.")
+            if execution["status"] not in ("RUNNING", "PAUSED"):
+                raise ExecutionControlError(
+                    f"RUNNING/PAUSED 상태에서만 중지할 수 있습니다(현재: {execution['status']})."
+                )
+
+            row = await conn.fetchrow(
+                "UPDATE strategy_executions "
+                "SET status = 'RETIRED', retire_liquidation = $2, retired_at = now() "
+                "WHERE id = $1 RETURNING status, mode, exchange, allocated_capital",
+                execution_id,
+                liquidation,
+            )
+        return ExecutionSummary(
+            id=execution_id,
+            status=row["status"],
+            mode=row["mode"],
+            exchange=row["exchange"],
+            allocated_capital=row["allocated_capital"],
         )
