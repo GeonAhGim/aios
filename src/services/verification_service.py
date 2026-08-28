@@ -11,6 +11,10 @@ Black/Killer Team 자동화(Phase 4 의존)가 아직 없어 플랫폼 운영자
 서비스가 유일한 LISTED 전이 경로라는 애플리케이션 레벨 강제로 만족한다
 (DB 트리거는 이 MVP 단계에서 과잉설계로 보류 — 다른 코드 경로 어디에도
 status를 직접 LISTED로 바꾸는 곳이 없다).
+
+APPROVE 시 verified_at도 함께 기록한다 — FD-13.8(검색·정렬)의 기본
+정렬 기준(생성일이 아닌 검증통과일 역순, 재등록 조작 방지)이 이 값을
+그대로 쓴다.
 """
 from __future__ import annotations
 
@@ -61,9 +65,18 @@ class VerificationService:
                 )
 
             new_status = "LISTED" if decision == "APPROVE" else "DRAFT"
-            await conn.execute(
-                "UPDATE strategy_listings SET status = $2 WHERE id = $1", listing_id, new_status
-            )
+            if decision == "APPROVE":
+                await conn.execute(
+                    "UPDATE strategy_listings SET status = $2, verified_at = now() WHERE id = $1",
+                    listing_id,
+                    new_status,
+                )
+            else:
+                await conn.execute(
+                    "UPDATE strategy_listings SET status = $2 WHERE id = $1",
+                    listing_id,
+                    new_status,
+                )
 
         return VerificationResult(
             listing_id=listing_id,

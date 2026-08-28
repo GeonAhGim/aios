@@ -71,6 +71,12 @@ async def test_approve_transitions_to_listed(service, pool):
     assert result.status == "LISTED"
     assert result.rejection_reason is None
 
+    async with pool.acquire() as conn:
+        verified_at = await conn.fetchval(
+            "SELECT verified_at FROM strategy_listings WHERE id = $1", listing.id
+        )
+    assert verified_at is not None
+
 
 async def test_reject_returns_to_draft_with_reason(service, pool):
     seller = await create_test_user(pool)
