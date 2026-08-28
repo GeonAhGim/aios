@@ -12,6 +12,7 @@ from dotenv import dotenv_values
 
 from src.core.approval import service as approval
 from src.core.approval.surge import SurgeDetector
+from tests.integration.conftest import create_test_user
 
 
 def _asyncpg_dsn() -> str:
@@ -32,7 +33,7 @@ async def _create(pool, trigger_source, *, provenance=None):
     return await approval.create_request(
         pool,
         scope="USER",
-        user_id=uuid4(),
+        user_id=await create_test_user(pool),
         trigger_source=trigger_source,
         requested_action="LIQUIDATE_POSITION",
         context={},

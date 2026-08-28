@@ -2,7 +2,6 @@
 DB를 쓴다 — withdrawal_whitelist는 아직 없어 fetch_whitelist를 인메모리
 스텁으로 주입한다)."""
 from pathlib import Path
-from uuid import uuid4
 
 import asyncpg
 import pytest
@@ -14,6 +13,7 @@ from src.core.approval.panic_prompt import (
     PanicPromptGenerator,
     WhitelistEntry,
 )
+from tests.integration.conftest import create_test_user
 
 
 def _asyncpg_dsn() -> str:
@@ -49,7 +49,7 @@ async def test_two_agreeing_sources_activate_fast_path(pool):
     generator = PanicPromptGenerator(pool, fetch_whitelist=_fetch_whitelist)
 
     result = await generator.generate(
-        user_id=uuid4(),
+        user_id=await create_test_user(pool),
         exchange="bitget",
         corroboration=[
             CorroborationSignal(source="exchange_status_page", risk_confirmed=True),
@@ -66,7 +66,7 @@ async def test_single_source_falls_back_to_normal_approval(pool):
     generator = PanicPromptGenerator(pool, fetch_whitelist=_fetch_whitelist)
 
     result = await generator.generate(
-        user_id=uuid4(),
+        user_id=await create_test_user(pool),
         exchange="bitget",
         corroboration=[CorroborationSignal(source="exchange_status_page", risk_confirmed=True)],
     )
@@ -84,7 +84,7 @@ async def test_contradicting_sources_fall_back_to_normal_approval(pool):
     generator = PanicPromptGenerator(pool, fetch_whitelist=_fetch_whitelist)
 
     result = await generator.generate(
-        user_id=uuid4(),
+        user_id=await create_test_user(pool),
         exchange="bitget",
         corroboration=[
             CorroborationSignal(source="exchange_status_page", risk_confirmed=True),
@@ -99,7 +99,9 @@ async def test_contradicting_sources_fall_back_to_normal_approval(pool):
 async def test_no_sources_fall_back_to_normal_approval(pool):
     generator = PanicPromptGenerator(pool, fetch_whitelist=_fetch_whitelist)
 
-    result = await generator.generate(user_id=uuid4(), exchange="bitget", corroboration=[])
+    result = await generator.generate(
+        user_id=await create_test_user(pool), exchange="bitget", corroboration=[]
+    )
 
     assert result.fast_path_activated is False
     assert result.fallback_approval_request_id is not None
@@ -109,7 +111,7 @@ async def test_empty_whitelist_activates_fast_path_with_no_destinations(pool):
     generator = PanicPromptGenerator(pool, fetch_whitelist=_empty_whitelist)
 
     result = await generator.generate(
-        user_id=uuid4(),
+        user_id=await create_test_user(pool),
         exchange="bitget",
         corroboration=[
             CorroborationSignal(source="exchange_status_page", risk_confirmed=True),

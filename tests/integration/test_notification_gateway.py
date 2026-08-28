@@ -1,7 +1,6 @@
 """17.1/17.5 통합테스트 — EventBus 연동 + 실제 dev DB 기록 검증."""
 import asyncio
 from pathlib import Path
-from uuid import uuid4
 
 import asyncpg
 import pytest
@@ -11,6 +10,7 @@ from src.core.event_bus.in_process import InProcessEventBus
 from src.core.event_bus.policy import HandlerCriticality
 from src.core.notifications.channel_policy import NotificationChannel
 from src.core.notifications.gateway import NotificationGateway
+from tests.integration.conftest import create_test_user
 
 
 def _asyncpg_dsn() -> str:
@@ -35,7 +35,7 @@ async def _history(pool, user_id):
 
 
 async def test_forced_event_sends_all_forced_channels_and_records(pool):
-    user_id = uuid4()
+    user_id = await create_test_user(pool)
     sent: list[NotificationChannel] = []
 
     async def send_email(uid, event_type, payload):
@@ -71,7 +71,7 @@ async def test_channel_send_failure_escalates_via_event_bus_critical_path(pool):
     최종적으로 event_bus.handler.escalated로 격상된다(FD-17.1 exception 원칙)."""
     from src.core.event_bus.in_process import HANDLER_ESCALATED_TOPIC
 
-    user_id = uuid4()
+    user_id = await create_test_user(pool)
 
     async def always_fail(uid, event_type, payload):
         return False

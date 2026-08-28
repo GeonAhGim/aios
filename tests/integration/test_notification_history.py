@@ -7,6 +7,7 @@ import pytest
 from dotenv import dotenv_values
 
 from src.core.notifications.history import list_notification_history
+from tests.integration.conftest import create_test_user
 
 
 def _asyncpg_dsn() -> str:
@@ -41,7 +42,7 @@ async def test_empty_history_returns_empty_list_not_error(pool):
 
 
 async def test_history_filters_by_event_type(pool):
-    user_id = uuid4()
+    user_id = await create_test_user(pool)
     await _insert(pool, user_id, "approval.request.created")
     await _insert(pool, user_id, "marketplace.purchase.requested")
 
@@ -52,7 +53,7 @@ async def test_history_filters_by_event_type(pool):
 
 
 async def test_history_does_not_leak_other_users(pool):
-    user_a, user_b = uuid4(), uuid4()
+    user_a, user_b = await create_test_user(pool), uuid4()
     await _insert(pool, user_a, "approval.request.created")
 
     history = await list_notification_history(pool, user_b)

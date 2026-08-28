@@ -19,6 +19,7 @@ from src.core.approval.service import (
     expire_pending,
     reject,
 )
+from tests.integration.conftest import create_test_user
 
 
 def _asyncpg_dsn() -> str:
@@ -48,7 +49,7 @@ async def test_solo_approval_blocked_before_mandatory_wait(pool):
     request = await create_request(
         pool,
         scope="USER",
-        user_id=uuid4(),
+        user_id=await create_test_user(pool),
         trigger_source="watchdog_liquidate",
         requested_action="LIQUIDATE_POSITION",
         context={"symbol": "BTC/USDT"},
@@ -62,7 +63,7 @@ async def test_solo_approval_succeeds_after_wait_elapsed(pool):
     request = await create_request(
         pool,
         scope="USER",
-        user_id=uuid4(),
+        user_id=await create_test_user(pool),
         trigger_source="watchdog_liquidate",
         requested_action="LIQUIDATE_POSITION",
         context={"symbol": "BTC/USDT"},
@@ -81,7 +82,7 @@ async def test_dual_approval_requires_two_different_accounts(pool):
     request = await create_request(
         pool,
         scope="USER",
-        user_id=uuid4(),
+        user_id=await create_test_user(pool),
         trigger_source="execution_high_allocation",
         requested_action="START_LIVE_EXECUTION",
         context={},
@@ -123,7 +124,7 @@ async def test_expire_pending_auto_rejects_stale_requests(pool):
     request = await create_request(
         pool,
         scope="USER",
-        user_id=uuid4(),
+        user_id=await create_test_user(pool),
         trigger_source="watchdog_liquidate",
         requested_action="LIQUIDATE_POSITION",
         context={},
@@ -144,7 +145,7 @@ async def test_reject_marks_status_rejected(pool):
     request = await create_request(
         pool,
         scope="USER",
-        user_id=uuid4(),
+        user_id=await create_test_user(pool),
         trigger_source="watchdog_liquidate",
         requested_action="LIQUIDATE_POSITION",
         context={},
@@ -173,7 +174,7 @@ async def test_context_roundtrips_with_decimal_values(pool):
     request = await create_request(
         pool,
         scope="USER",
-        user_id=uuid4(),
+        user_id=await create_test_user(pool),
         trigger_source="watchdog_liquidate",
         requested_action="LIQUIDATE_POSITION",
         context={"loss_pct": Decimal("7.25")},

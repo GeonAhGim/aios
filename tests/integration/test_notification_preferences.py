@@ -10,6 +10,7 @@ from src.core.notifications.preferences import (
     get_notification_preferences,
     update_notification_preferences,
 )
+from tests.integration.conftest import create_test_user
 
 
 def _asyncpg_dsn() -> str:
@@ -36,7 +37,7 @@ async def test_get_preferences_defaults_to_all_true_for_new_user(pool):
 
 
 async def test_update_applies_allowed_field(pool):
-    user_id = uuid4()
+    user_id = await create_test_user(pool)
     result = await update_notification_preferences(
         pool, user_id, {"marketplace_purchase_email": False}
     )
@@ -48,7 +49,7 @@ async def test_update_applies_allowed_field(pool):
 
 
 async def test_update_rejects_forced_field_but_applies_the_rest(pool):
-    user_id = uuid4()
+    user_id = await create_test_user(pool)
     result = await update_notification_preferences(
         pool,
         user_id,
@@ -59,7 +60,7 @@ async def test_update_rejects_forced_field_but_applies_the_rest(pool):
 
 
 async def test_update_partial_upsert_preserves_other_fields(pool):
-    user_id = uuid4()
+    user_id = await create_test_user(pool)
     await update_notification_preferences(pool, user_id, {"risk_mismatch_email": False})
     result = await update_notification_preferences(
         pool, user_id, {"marketplace_purchase_email": False}
