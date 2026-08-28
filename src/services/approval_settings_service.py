@@ -5,6 +5,10 @@ Spec: 기능설계문서_v1.20.md#FD-11.3, 정책문서 4.9/4.10, 13번 §13.1
 mandatory_wait_seconds는 사용자 입력을 받지 않는다 — 플랫폼이 강제하는
 60초 하한(DB CHECK, 13번 §13.2)을 그대로 유지, 사용자는 mode/
 second_approver_contact만 바꿀 수 있다.
+
+SOLO 모드 선택은 FD-15.3 매칭경고 훅③ 지점이다 — RISK_MATCHING.
+APPROVAL_MODE_RISK_LEVEL 해석대로 SOLO를 "공격형"에 대응시켜 사용자
+risk_profile과 대조한다(불일치 시 경고, 명시적 동의 없이는 저장 거부).
 """
 from __future__ import annotations
 
@@ -12,6 +16,8 @@ from uuid import UUID
 
 import asyncpg
 from pydantic import BaseModel
+
+from src.services.risk_matching import APPROVAL_MODE_RISK_LEVEL, check_mismatch
 
 APPROVAL_MODES = ("SOLO", "DUAL")
 
@@ -25,6 +31,7 @@ class ApprovalSettings(BaseModel):
     mode: str
     second_approver_contact: str | None
     mandatory_wait_seconds: int
+    risk_warning: str | None = None
 
 
 class ApprovalSettingsService:
@@ -46,7 +53,12 @@ class ApprovalSettingsService:
         return ApprovalSettings(**dict(row))
 
     async def update(
-        self, user_id: UUID, *, mode: str, second_approver_contact: str | None = None
+        self,
+        user_id: UUID,
+        *,
+        mode: str,
+        second_approver_contact: str | None = None,
+        risk_warning_acknowledged: bool = False,
     ) -> ApprovalSettings:
         if mode not in APPROVAL_MODES:
             raise ApprovalSettingsError(f"알 수 없는 승인 모드: {mode}")
@@ -56,6 +68,17 @@ class ApprovalSettingsService:
             )
 
         async with self._pool.acquire() as conn:
+            user_risk_profile = await conn.fetchval(
+                "SELECT risk_profile FROM users WHERE user_id = $1", user_id
+            )
+            risk_warning = None
+            if user_risk_profile is not None:
+                risk_warning = check_mismatch(
+                    user_risk_profile, APPROVAL_MODE_RISK_LEVEL.get(mode)
+                )
+                if risk_warning is not None and not risk_warning_acknowledged:
+                    raise ApprovalSettingsError(risk_warning)
+
             row = await conn.fetchrow(
                 """
                 INSERT INTO user_approval_settings (user_id, mode, second_approver_contact)
@@ -70,4 +93,6 @@ class ApprovalSettingsService:
                 mode,
                 second_approver_contact,
             )
-        return ApprovalSettings(**dict(row))
+        settings = ApprovalSettings(**dict(row))
+        settings.risk_warning = risk_warning if risk_warning_acknowledged else None
+        return settings

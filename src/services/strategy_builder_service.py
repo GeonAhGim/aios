@@ -14,6 +14,10 @@ REJECTED/FAILED는 이 순서 어느 단계에서든 진입 가능한 종단 상
 assert_executable()은 FD-14.3 예외상황("저장 직후 실행 시도 → 시스템
 차단")의 실제 강제 지점 — FD-16(실행 제어판, 아직 없음)이
 strategy_executions을 만들기 직전 호출해야 한다.
+
+APPROVED 전이는 FD-15.3 매칭경고 훅②(전략 소유자 자신의 risk_profile
+vs 그 전략의 risk_level) 지점이다 — 불일치인데 미동의 상태면 전이 자체를
+막는다(FD-15.3 처리: "경고 노출 + 명시적 동의 필요 → 동의 후에만 진행").
 """
 from __future__ import annotations
 
@@ -23,6 +27,8 @@ from uuid import UUID
 
 import asyncpg
 from pydantic import BaseModel
+
+from src.services.risk_matching import check_mismatch
 
 LIFECYCLE_ORDER = (
     "GENERATED",
@@ -49,6 +55,7 @@ class SavedStrategy(BaseModel):
     strategy_id: str
     version: str
     lifecycle_status: str
+    risk_warning: str | None = None
 
 
 class StrategyBuilderService:
@@ -97,14 +104,21 @@ class StrategyBuilderService:
         )
 
     async def transition_lifecycle(
-        self, strategy_id: str, version: str, new_status: str
+        self,
+        strategy_id: str,
+        version: str,
+        new_status: str,
+        *,
+        risk_warning_acknowledged: bool = False,
     ) -> SavedStrategy:
         if new_status not in LIFECYCLE_ORDER and new_status not in TERMINAL_FAILURE_STATUSES:
             raise StrategyLifecycleError(f"알 수 없는 생애주기 상태입니다: {new_status}")
 
         async with self._pool.acquire() as conn:
             row = await conn.fetchrow(
-                "SELECT lifecycle_status FROM strategies WHERE strategy_id = $1 AND version = $2",
+                "SELECT s.lifecycle_status, s.risk_level, u.risk_profile "
+                "FROM strategies s JOIN users u ON u.user_id = s.owner_user_id "
+                "WHERE s.strategy_id = $1 AND s.version = $2",
                 strategy_id,
                 version,
             )
@@ -125,6 +139,12 @@ class StrategyBuilderService:
                         f"{LIFECYCLE_ORDER[current_idx + 1]}이어야 합니다(요청: {new_status})."
                     )
 
+            risk_warning = None
+            if new_status == "APPROVED" and row["risk_profile"] is not None:
+                risk_warning = check_mismatch(row["risk_profile"], row["risk_level"])
+                if risk_warning is not None and not risk_warning_acknowledged:
+                    raise StrategyLifecycleError(risk_warning)
+
             await conn.execute(
                 "UPDATE strategies SET lifecycle_status = $3, updated_at = now() "
                 "WHERE strategy_id = $1 AND version = $2",
@@ -132,7 +152,12 @@ class StrategyBuilderService:
                 version,
                 new_status,
             )
-        return SavedStrategy(strategy_id=strategy_id, version=version, lifecycle_status=new_status)
+        return SavedStrategy(
+            strategy_id=strategy_id,
+            version=version,
+            lifecycle_status=new_status,
+            risk_warning=risk_warning if risk_warning_acknowledged else None,
+        )
 
 
 def assert_executable(lifecycle_status: str) -> None:
