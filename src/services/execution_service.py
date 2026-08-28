@@ -21,6 +21,14 @@ leaf 없음) — 안전 원칙상 더 보수적인 "항상 승인 필요"로 처
 SAFETY_LAYER)로 전환한 실행은 사용자가 "시작"을 눌러도 거부된다(시스템
 트리거가 사용자보다 우선). 사용자 자신이 일시정지(paused_by=USER)한
 것만 사용자가 재시작할 수 있다.
+
+16.6 — PAPER→LIVE 전환(convert_to_live): 기존 PAPER 실행은 종료하지
+않고 그대로 이력 보존(성과 비교 근거), 신규 LIVE 실행을 별도 행으로
+생성한다(converted_from_execution_id로 연결) — 가상 포지션이 실제
+포지션으로 "마법처럼" 전환되는 경로 자체를 만들지 않는다(오해·오류
+소지 원천 차단). create_execution()을 그대로 재사용해 16.1/16.2 절차
+(자본배분·거래소·모드 검증, LIVE 승인)를 다시 거친다 — 승인 절차
+생략 불가.
 """
 from __future__ import annotations
 
@@ -275,3 +283,45 @@ class ExecutionService:
             exchange=row["exchange"],
             allocated_capital=row["allocated_capital"],
         )
+
+    async def convert_to_live(
+        self,
+        user_id: UUID,
+        source_execution_id: int,
+        *,
+        allocated_capital: Decimal,
+        currency: str,
+        exchange: str,
+        available_balance: Decimal,
+    ) -> ExecutionSummary:
+        async with self._pool.acquire() as conn:
+            source = await conn.fetchrow(
+                "SELECT user_id, strategy_id, strategy_version, mode "
+                "FROM strategy_executions WHERE id = $1",
+                source_execution_id,
+            )
+            if source is None:
+                raise ExecutionControlError("존재하지 않는 실행입니다.")
+            if source["user_id"] != user_id:
+                raise ExecutionControlError("본인의 실행만 전환할 수 있습니다.")
+            if source["mode"] != "PAPER":
+                raise ExecutionControlError("PAPER 모드 실행만 실매매로 전환할 수 있습니다.")
+
+        result = await self.create_execution(
+            user_id,
+            source["strategy_id"],
+            source["strategy_version"],
+            allocated_capital=allocated_capital,
+            currency=currency,
+            exchange=exchange,
+            mode="LIVE",
+            available_balance=available_balance,
+        )
+
+        async with self._pool.acquire() as conn:
+            await conn.execute(
+                "UPDATE strategy_executions SET converted_from_execution_id = $2 WHERE id = $1",
+                result.id,
+                source_execution_id,
+            )
+        return result
