@@ -45,6 +45,7 @@ def create_app() -> FastAPI:
         exchange_credentials,
         executions,
         marketplace,
+        notifications,
         strategy_builder,
         suitability,
         users,
@@ -61,6 +62,7 @@ def create_app() -> FastAPI:
     )
     app.include_router(suitability.router)
     app.include_router(executions.router, prefix="/executions", tags=["executions"])
+    app.include_router(notifications.router, prefix="/notifications", tags=["notifications"])
 
     return app
 
