@@ -1,5 +1,6 @@
 """13.4 통합테스트 — 실제 dev DB 대상."""
 import json
+from decimal import Decimal
 from pathlib import Path
 from uuid import uuid4
 
@@ -50,14 +51,15 @@ async def _always_eligible(strategy_id, version):
     return True
 
 
-async def _listed_listing(pool, seller, price=None):
-    from decimal import Decimal
+_UNSET = object()
 
+
+async def _listed_listing(pool, seller, price=_UNSET):
     listing_service = ListingService(pool, verify_paper_trading_eligibility=_always_eligible)
     verification_service = VerificationService(pool)
     strategy_id, version = await _create_strategy(pool, seller)
     listing = await listing_service.create_listing(
-        seller, strategy_id, version, price or Decimal("50.00")
+        seller, strategy_id, version, Decimal("50.00") if price is _UNSET else price
     )
     submitted = await listing_service.submit_for_verification(listing.id, seller)
     verifier = await create_test_user(pool)
@@ -134,8 +136,6 @@ async def test_purchase_succeeds_with_acknowledged_risk_warning(pool):
 
 
 async def test_price_paid_recorded_from_listing_price(service, pool):
-    from decimal import Decimal
-
     seller = await create_test_user(pool)
     listing = await _listed_listing(pool, seller, price=Decimal("75.50"))
     buyer = await create_test_user(pool)
@@ -147,3 +147,35 @@ async def test_price_paid_recorded_from_listing_price(service, pool):
             "SELECT price_paid FROM strategy_purchases WHERE id = $1", result.purchase_id
         )
     assert price_paid == Decimal("75.50")
+
+
+async def test_purchase_computes_and_stores_commission(service, pool):
+    seller = await create_test_user(pool)
+    listing = await _listed_listing(pool, seller, price=Decimal("100.00"))
+    buyer = await create_test_user(pool)
+
+    result = await service.purchase(buyer, listing.listing_id)
+
+    assert result.platform_commission_amount == Decimal("15.0000")
+    assert result.seller_payout_amount == Decimal("85.0000")
+
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            "SELECT platform_commission_rate, platform_commission_amount, seller_payout_amount "
+            "FROM strategy_purchases WHERE id = $1",
+            result.purchase_id,
+        )
+    assert row["platform_commission_rate"] == Decimal("0.1500")
+    assert row["platform_commission_amount"] == Decimal("15.00")
+    assert row["seller_payout_amount"] == Decimal("85.00")
+
+
+async def test_purchase_with_no_price_stores_no_commission(service, pool):
+    seller = await create_test_user(pool)
+    listing = await _listed_listing(pool, seller, price=None)
+    buyer = await create_test_user(pool)
+
+    result = await service.purchase(buyer, listing.listing_id)
+
+    assert result.platform_commission_amount is None
+    assert result.seller_payout_amount is None
