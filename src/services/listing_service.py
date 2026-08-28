@@ -10,6 +10,9 @@ Spec: 기능설계문서_v1.20.md#FD-13.1/FD-13.1b, 13번 §13.5, 15번 §15.5
 없어 그 이력을 실제로 추적할 방법이 없다 — verify_paper_trading_eligibility
 DI 콜백으로 주입받는다(이 세션에서 반복 적용한 패턴, WatchdogService.
 compute_equity/SurgeDetector.verify_provenance 등과 동일).
+
+create_listing()은 users.seller_suspended도 확인한다 — FD-18.4(판매자
+정지)가 이 플래그를 토글하면 신규 리스팅 생성이 즉시 거부된다.
 """
 from __future__ import annotations
 
@@ -62,6 +65,12 @@ class ListingService:
                 raise ListingError("존재하지 않는 전략입니다.")
             if owner_user_id != seller_user_id:
                 raise ListingError("본인이 소유한 전략만 리스팅할 수 있습니다.")
+
+            seller_suspended = await conn.fetchval(
+                "SELECT seller_suspended FROM users WHERE user_id = $1", seller_user_id
+            )
+            if seller_suspended:
+                raise ListingError("판매 정지된 계정은 신규 리스팅을 등록할 수 없습니다.")
 
             row = await conn.fetchrow(
                 "INSERT INTO strategy_listings "
