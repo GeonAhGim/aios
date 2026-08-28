@@ -1,0 +1,100 @@
+"""13.2 — 전략 리스팅 API (생성 + 검증 제출).
+
+Spec: 기능설계문서_v1.20.md#FD-13.1/FD-13.1b, 13번 §13.5, 15번 §15.5
+
+리스팅 생성(DRAFT)과 검증 제출(PENDING_VERIFICATION)은 별도 액션으로
+분리한다(재점검 라운드 정정 — 생성 즉시 자동으로 검증 대기열에 넣지
+않고, 판매자가 가격 등을 다시 검토할 여지를 준 뒤 명시적으로 제출).
+
+3개월 Paper Trading 이력 확인(9.5-A 원칙)은 FD-16(전략 실행)이 아직
+없어 그 이력을 실제로 추적할 방법이 없다 — verify_paper_trading_eligibility
+DI 콜백으로 주입받는다(이 세션에서 반복 적용한 패턴, WatchdogService.
+compute_equity/SurgeDetector.verify_provenance 등과 동일).
+"""
+from __future__ import annotations
+
+from collections.abc import Awaitable, Callable
+from datetime import datetime
+from decimal import Decimal
+from uuid import UUID
+
+import asyncpg
+from pydantic import BaseModel
+
+VerifyEligibilityFn = Callable[[str, str], Awaitable[bool]]
+
+
+class ListingError(Exception):
+    """FD-13.1/13.1b 실패 — 라우터가 400/403/404로 변환."""
+
+
+class Listing(BaseModel):
+    id: int
+    strategy_id: str
+    strategy_version: str
+    seller_user_id: UUID
+    price: Decimal | None
+    status: str
+    created_at: datetime
+
+
+class ListingService:
+    def __init__(
+        self, pool: asyncpg.Pool, *, verify_paper_trading_eligibility: VerifyEligibilityFn
+    ) -> None:
+        self._pool = pool
+        self._verify_eligibility = verify_paper_trading_eligibility
+
+    async def create_listing(
+        self,
+        seller_user_id: UUID,
+        strategy_id: str,
+        strategy_version: str,
+        price: Decimal | None,
+    ) -> Listing:
+        async with self._pool.acquire() as conn:
+            owner_user_id = await conn.fetchval(
+                "SELECT owner_user_id FROM strategies WHERE strategy_id = $1 AND version = $2",
+                strategy_id,
+                strategy_version,
+            )
+            if owner_user_id is None:
+                raise ListingError("존재하지 않는 전략입니다.")
+            if owner_user_id != seller_user_id:
+                raise ListingError("본인이 소유한 전략만 리스팅할 수 있습니다.")
+
+            row = await conn.fetchrow(
+                "INSERT INTO strategy_listings "
+                "(strategy_id, strategy_version, seller_user_id, price) "
+                "VALUES ($1, $2, $3, $4) RETURNING *",
+                strategy_id,
+                strategy_version,
+                seller_user_id,
+                price,
+            )
+        return Listing(**dict(row))
+
+    async def submit_for_verification(self, listing_id: int, seller_user_id: UUID) -> Listing:
+        async with self._pool.acquire() as conn:
+            row = await conn.fetchrow(
+                "SELECT * FROM strategy_listings WHERE id = $1", listing_id
+            )
+            if row is None:
+                raise ListingError("존재하지 않는 리스팅입니다.")
+            if row["seller_user_id"] != seller_user_id:
+                raise ListingError("본인의 리스팅만 제출할 수 있습니다.")
+            if row["status"] != "DRAFT":
+                raise ListingError(f"DRAFT 상태에서만 제출할 수 있습니다(현재: {row['status']}).")
+
+            eligible = await self._verify_eligibility(
+                row["strategy_id"], row["strategy_version"]
+            )
+            if not eligible:
+                raise ListingError("3개월 이상의 Paper Trading 이력이 필요합니다.")
+
+            updated = await conn.fetchrow(
+                "UPDATE strategy_listings SET status = 'PENDING_VERIFICATION' "
+                "WHERE id = $1 RETURNING *",
+                listing_id,
+            )
+        return Listing(**dict(updated))
