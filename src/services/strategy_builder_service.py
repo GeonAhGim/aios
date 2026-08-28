@@ -58,6 +58,17 @@ class SavedStrategy(BaseModel):
     risk_warning: str | None = None
 
 
+class StrategyDetail(BaseModel):
+    strategy_id: str
+    version: str
+    owner_user_id: UUID
+    target_asset: str
+    market: str
+    exchange: str
+    lifecycle_status: str
+    fsm_definition: dict[str, Any]
+
+
 class StrategyBuilderService:
     def __init__(self, pool: asyncpg.Pool) -> None:
         self._pool = pool
@@ -101,6 +112,32 @@ class StrategyBuilderService:
             )
         return SavedStrategy(
             strategy_id=strategy_id, version=version, lifecycle_status="GENERATED"
+        )
+
+    async def get_strategy(
+        self, owner_user_id: UUID, strategy_id: str, version: str
+    ) -> StrategyDetail:
+        """FD-14 Draft "GET /strategies/{id}" — 소유자 전용 조회다(FD-13.4의
+        구매자 포함 접근권한 판정과는 별개, 편집기는 본인 작업물만 본다)."""
+        async with self._pool.acquire() as conn:
+            row = await conn.fetchrow(
+                "SELECT strategy_id, version, owner_user_id, target_asset, market, exchange, "
+                "lifecycle_status, fsm_definition FROM strategies "
+                "WHERE strategy_id = $1 AND version = $2",
+                strategy_id,
+                version,
+            )
+        if row is None or row["owner_user_id"] != owner_user_id:
+            raise StrategyLifecycleError("존재하지 않거나 접근 권한이 없는 전략입니다.")
+        return StrategyDetail(
+            strategy_id=row["strategy_id"],
+            version=row["version"],
+            owner_user_id=row["owner_user_id"],
+            target_asset=row["target_asset"],
+            market=row["market"],
+            exchange=row["exchange"],
+            lifecycle_status=row["lifecycle_status"],
+            fsm_definition=json.loads(row["fsm_definition"]),
         )
 
     async def transition_lifecycle(

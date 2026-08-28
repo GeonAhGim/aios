@@ -99,6 +99,16 @@ def _clean(arr: np.ndarray[Any, Any]) -> list[float | None]:
     return [None if np.isnan(v) else float(v) for v in arr]
 
 
+def period_param_name(indicator: str) -> str | None:
+    """14번 라우터가 지표별 TA-Lib 파라미터명(예: MACD는 slowperiod, STOCH는
+    fastk_period)을 몰라도 되도록 _SPECS를 단일 출처로 노출한다."""
+    spec = _SPECS.get(indicator)
+    if spec is None:
+        raise IndicatorError(f"지원하지 않는 지표입니다: {indicator}")
+    period_param: str | None = spec["period_param"]
+    return period_param
+
+
 class IndicatorService:
     def calculate(
         self, indicator: str, candles: Sequence[Candle], **params: int
