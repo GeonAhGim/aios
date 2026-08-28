@@ -1,0 +1,161 @@
+"""18.2 통합테스트 — 실제 dev DB 대상."""
+import json
+from decimal import Decimal
+from pathlib import Path
+from uuid import uuid4
+
+import asyncpg
+import pytest
+from dotenv import dotenv_values
+
+from src.services.dispute_resolution_service import (
+    DisputeResolutionError,
+    DisputeResolutionService,
+)
+from src.services.dispute_service import DisputeService
+from src.services.listing_service import ListingService
+from src.services.purchase_service import PurchaseService
+from src.services.verification_service import VerificationService
+from tests.integration.conftest import create_test_user
+
+
+def _asyncpg_dsn() -> str:
+    env = dotenv_values(Path(__file__).resolve().parents[2] / ".env")
+    url = env.get("DATABASE_URL")
+    assert url
+    return url.replace("postgresql+asyncpg://", "postgresql://")
+
+
+@pytest.fixture
+async def pool():
+    p = await asyncpg.create_pool(_asyncpg_dsn(), min_size=1, max_size=2)
+    yield p
+    await p.close()
+
+
+@pytest.fixture
+def service(pool):
+    return DisputeResolutionService(pool)
+
+
+async def _always_eligible(strategy_id, version):
+    return True
+
+
+async def _create_strategy(pool, owner_user_id):
+    strategy_id = f"test-strategy-{uuid4().hex[:8]}"
+    version = "1.0.0"
+    async with pool.acquire() as conn:
+        await conn.execute(
+            """
+            INSERT INTO strategies
+                (strategy_id, version, owner_user_id, target_asset, market, exchange,
+                 fsm_definition, author_agent)
+            VALUES ($1, $2, $3, 'BTC/USDT', 'crypto', 'bitget', $4::jsonb, 'test-author')
+            """,
+            strategy_id,
+            version,
+            owner_user_id,
+            json.dumps({}),
+        )
+    return strategy_id, version
+
+
+async def _open_dispute(pool):
+    seller = await create_test_user(pool)
+    buyer = await create_test_user(pool)
+    listing_service = ListingService(pool, verify_paper_trading_eligibility=_always_eligible)
+    verification_service = VerificationService(pool)
+    purchase_service = PurchaseService(pool)
+    dispute_service = DisputeService(pool)
+
+    strategy_id, version = await _create_strategy(pool, seller)
+    listing = await listing_service.create_listing(seller, strategy_id, version, Decimal("10"))
+    submitted = await listing_service.submit_for_verification(listing.id, seller)
+    verifier = await create_test_user(pool)
+    approved = await verification_service.decide(submitted.id, verifier, "APPROVE")
+    purchase = await purchase_service.purchase(buyer, approved.listing_id)
+    dispute = await dispute_service.submit(buyer, purchase.purchase_id, "성과가 다릅니다")
+    return dispute, approved.listing_id, seller, buyer
+
+
+async def test_get_detail_joins_listing_and_purchase(service, pool):
+    dispute, listing_id, seller, buyer = await _open_dispute(pool)
+
+    detail = await service.get_detail(dispute.id)
+
+    assert detail.listing_id == listing_id
+    assert detail.seller_user_id == seller
+    assert detail.buyer_user_id == buyer
+    assert detail.status == "OPEN"
+
+
+async def test_resolve_normal_risk_realization_keeps_listing_status(service, pool):
+    dispute, listing_id, _, _ = await _open_dispute(pool)
+    admin = await create_test_user(pool)
+
+    result = await service.resolve(
+        dispute.id, admin, "NORMAL_RISK_REALIZATION", "정상적인 시장 리스크로 판단"
+    )
+
+    assert result.listing_status == "LISTED"
+    async with pool.acquire() as conn:
+        listing_status = await conn.fetchval(
+            "SELECT status FROM strategy_listings WHERE id = $1", listing_id
+        )
+    assert listing_status == "LISTED"
+
+
+async def test_resolve_delisted_and_refund_delists_listing(service, pool):
+    dispute, listing_id, _, _ = await _open_dispute(pool)
+    admin = await create_test_user(pool)
+
+    result = await service.resolve(
+        dispute.id, admin, "DELISTED_AND_REFUND", "표시 성과와 실제 결과 불일치 확인"
+    )
+
+    assert result.listing_status == "DELISTED"
+    async with pool.acquire() as conn:
+        listing_status = await conn.fetchval(
+            "SELECT status FROM strategy_listings WHERE id = $1", listing_id
+        )
+    assert listing_status == "DELISTED"
+
+
+async def test_resolve_records_audit_log(service, pool):
+    dispute, listing_id, _, _ = await _open_dispute(pool)
+    admin = await create_test_user(pool)
+
+    await service.resolve(dispute.id, admin, "NORMAL_RISK_REALIZATION", "사유")
+
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            "SELECT decision_data FROM audit_log "
+            "WHERE action_type = 'dispute.resolved' AND target_id = $1",
+            str(dispute.id),
+        )
+    assert row is not None
+    decision_data = json.loads(row["decision_data"])
+    assert decision_data["dispute_id"] == dispute.id
+
+
+async def test_resolve_rejects_already_resolved_dispute(service, pool):
+    dispute, _, _, _ = await _open_dispute(pool)
+    admin = await create_test_user(pool)
+    await service.resolve(dispute.id, admin, "NORMAL_RISK_REALIZATION", "사유")
+
+    with pytest.raises(DisputeResolutionError):
+        await service.resolve(dispute.id, admin, "NORMAL_RISK_REALIZATION", "재처리 시도")
+
+
+async def test_resolve_rejects_unknown_decision(service, pool):
+    dispute, _, _, _ = await _open_dispute(pool)
+    admin = await create_test_user(pool)
+
+    with pytest.raises(DisputeResolutionError):
+        await service.resolve(dispute.id, admin, "UNKNOWN", "사유")
+
+
+async def test_get_detail_rejects_nonexistent_dispute(service):
+    with pytest.raises(DisputeResolutionError):
+        await service.get_detail(999999999)
