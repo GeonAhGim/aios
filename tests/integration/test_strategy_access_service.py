@@ -149,3 +149,27 @@ async def test_access_survives_seller_delisting_after_confirmed_purchase(service
         )
 
     assert await service.can_access(buyer, strategy_id, version) is True
+
+
+async def test_seller_never_receives_buyer_identifying_data(service, pool):
+    """13.6 완료조건(정책문서 10.3-B 실증) — 판매자가 자기 전략을 조회해도
+    StrategyDefinition에는 buyer_user_id/구매내역 등 구매자 식별 정보가
+    구조적으로 존재하지 않는다(FD-16 실행 인스턴스 자체가 없어 노출할
+    데이터가 아예 없다는 사실을 스키마 레벨로 고정 — 나중에 누군가
+    실수로 buyer 필드를 추가하면 이 테스트가 잡아낸다)."""
+    seller = await create_test_user(pool)
+    strategy_id, version, listing_id = await _listed_strategy(pool, seller)
+    buyer = await create_test_user(pool)
+    purchase_service = PurchaseService(pool)
+    result = await purchase_service.purchase(buyer, listing_id)
+    await _confirm_payment(pool, result.purchase_id)
+
+    definition = await service.get_strategy_for_execution(seller, strategy_id, version)
+
+    assert set(type(definition).model_fields) == {
+        "strategy_id",
+        "version",
+        "owner_user_id",
+        "fsm_definition",
+    }
+    assert definition.owner_user_id == seller
