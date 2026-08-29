@@ -6,6 +6,7 @@ from functools import partial
 import asyncpg
 from fastapi import Depends
 
+from src.core.event_bus.bus import EventBus
 from src.services.dispute_service import DisputeService
 from src.services.listing_search_service import ListingSearchService
 from src.services.listing_service import ListingService
@@ -15,7 +16,7 @@ from src.services.risk_matching import check_purchase_risk_warning
 from src.services.strategy_access_service import StrategyAccessService
 from src.services.verification_service import VerificationService
 
-from .deps import get_pool
+from .deps import get_event_bus, get_pool
 
 
 async def _always_eligible(strategy_id: str, version: str) -> bool:
@@ -29,8 +30,11 @@ def get_listing_service(pool: asyncpg.Pool = Depends(get_pool)) -> ListingServic
     return ListingService(pool, verify_paper_trading_eligibility=_always_eligible)
 
 
-def get_verification_service(pool: asyncpg.Pool = Depends(get_pool)) -> VerificationService:
-    return VerificationService(pool)
+def get_verification_service(
+    pool: asyncpg.Pool = Depends(get_pool),
+    event_bus: EventBus = Depends(get_event_bus),
+) -> VerificationService:
+    return VerificationService(pool, publish=event_bus.publish)
 
 
 def get_listing_search_service(
@@ -39,8 +43,15 @@ def get_listing_search_service(
     return ListingSearchService(pool)
 
 
-def get_purchase_service(pool: asyncpg.Pool = Depends(get_pool)) -> PurchaseService:
-    return PurchaseService(pool, check_risk_warning=partial(check_purchase_risk_warning, pool))
+def get_purchase_service(
+    pool: asyncpg.Pool = Depends(get_pool),
+    event_bus: EventBus = Depends(get_event_bus),
+) -> PurchaseService:
+    return PurchaseService(
+        pool,
+        check_risk_warning=partial(check_purchase_risk_warning, pool),
+        publish=event_bus.publish,
+    )
 
 
 def get_strategy_access_service(

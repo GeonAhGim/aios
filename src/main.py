@@ -18,7 +18,9 @@ from contextlib import asynccontextmanager
 import asyncpg
 from fastapi import FastAPI
 
+from src.core.event_bus.in_process import InProcessEventBus
 from src.core.loader.secret_loader import load_env_secrets
+from src.core.notifications.gateway import NotificationGateway
 
 
 def _asyncpg_dsn(database_url: str) -> str:
@@ -29,11 +31,23 @@ def _asyncpg_dsn(database_url: str) -> str:
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     secrets = load_env_secrets()
     pool = await asyncpg.create_pool(_asyncpg_dsn(secrets.database_url))
+
+    # FD-17.1 — 실제 이메일/푸시 발송기(SMTP·FCM/APNs)는 아직 미확정(Draft)이라
+    # senders 없이 등록한다. "발송 실패"로 정직하게 기록되고(§17.1 원칙 —
+    # 발송됐는지 확인 못 하는 상태를 성공으로 위장하지 않는다) EventBus의
+    # CRITICAL 재시도(최대 5회, §5.5)를 거쳐 audit_log에 남는다. 실제 발송기가
+    # 정해지면 NotificationGateway(pool, senders={...})로 교체하기만 하면 된다.
+    event_bus = InProcessEventBus()
+    NotificationGateway(pool).register(event_bus)
+    await event_bus.start()
+
     app.state.pool = pool
     app.state.secrets = secrets
+    app.state.event_bus = event_bus
     try:
         yield
     finally:
+        await event_bus.stop()
         await pool.close()
 
 

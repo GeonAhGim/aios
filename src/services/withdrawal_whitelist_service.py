@@ -15,9 +15,14 @@ Circuit Breaker(FD-9.4)의 RESTRICTED 이상 레벨을 "위기 상황"으로 재
 destination_address는 AES-256-GCM으로 암호화 저장(src/core/security/
 encryption.py, 07번 §7.3 CREDENTIAL_ENCRYPTION_KEY 재사용). 삭제(revoke)
 기능은 04번 원문 그대로 의도적으로 제공하지 않는다.
+
+FD-17.1 이벤트 발행 — 등록 성공 시 "security.withdrawal_whitelist.added"를
+발행한다(4.9 강제원칙 — 이 채널은 사용자가 끌 수 없다, channel_policy.py).
 """
 from __future__ import annotations
 
+from collections.abc import Awaitable, Callable
+from typing import Any
 from uuid import UUID
 
 import asyncpg
@@ -26,6 +31,8 @@ from pydantic import BaseModel
 from src.core.approval.panic_prompt import WhitelistEntry
 from src.core.safety.circuit_breaker import CircuitBreakerLevel, CircuitBreakerService
 from src.core.security.encryption import decrypt, encrypt
+
+PublishFn = Callable[[str, dict[str, Any]], Awaitable[None]]
 
 _CRISIS_LEVELS = {
     CircuitBreakerLevel.RESTRICTED,
@@ -52,10 +59,12 @@ class WithdrawalWhitelistService:
         circuit_breaker: CircuitBreakerService,
         *,
         encryption_key: str,
+        publish: PublishFn | None = None,
     ) -> None:
         self._pool = pool
         self._circuit_breaker = circuit_breaker
         self._encryption_key = encryption_key
+        self._publish = publish
 
     async def register(
         self,
@@ -81,6 +90,16 @@ class WithdrawalWhitelistService:
                 encrypted_address,
                 label,
             )
+        if self._publish is not None:
+            await self._publish(
+                "security.withdrawal_whitelist.added",
+                {
+                    "event_type": "security.withdrawal_whitelist.added",
+                    "user_id": str(user_id),
+                    "exchange": exchange,
+                },
+            )
+
         return WithdrawalWhitelistEntry(
             id=row["id"],
             exchange=row["exchange"],

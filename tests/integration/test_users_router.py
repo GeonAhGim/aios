@@ -9,7 +9,9 @@ import pytest
 from dotenv import dotenv_values
 from httpx import ASGITransport, AsyncClient
 
+from src.api.deps import get_event_bus
 from src.main import app
+from tests.integration.conftest import NoopEventBus
 
 STRONG_PASSWORD = "Str0ng!Passw0rd"
 
@@ -22,7 +24,12 @@ def _asyncpg_dsn() -> str:
 
 
 @pytest.fixture
-async def client():
+def event_bus():
+    return NoopEventBus()
+
+
+@pytest.fixture
+async def client(event_bus):
     # 화이트리스트 등록이 system_safety_state(공유 싱글톤 행)의 circuit_breaker
     # 상태를 확인한다 — 다른 테스트 파일이 남긴 상태에 좌우되지 않도록 리셋.
     conn = await asyncpg.connect(_asyncpg_dsn())
@@ -33,9 +40,11 @@ async def client():
     await conn.close()
 
     async with app.router.lifespan_context(app):
+        app.dependency_overrides[get_event_bus] = lambda: event_bus
         transport = ASGITransport(app=app)
         async with AsyncClient(transport=transport, base_url="http://test") as ac:
             yield ac
+        app.dependency_overrides.pop(get_event_bus, None)
 
 
 def _unique_email() -> str:
@@ -111,7 +120,7 @@ async def test_register_whitelist_entry_requires_correct_password(client):
     assert response.status_code == 403
 
 
-async def test_register_and_list_whitelist_entry(client):
+async def test_register_and_list_whitelist_entry(client, event_bus):
     _, headers = await _register(client)
 
     register_response = await client.post(
@@ -125,6 +134,9 @@ async def test_register_and_list_whitelist_entry(client):
         headers=headers,
     )
     assert register_response.status_code == 201
+    assert any(
+        topic == "security.withdrawal_whitelist.added" for topic, _ in event_bus.published
+    )
 
     list_response = await client.get("/users/me/withdrawal-whitelist", headers=headers)
     assert list_response.status_code == 200

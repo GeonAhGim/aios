@@ -5,18 +5,20 @@ import asyncpg
 from fastapi import Depends
 
 from src.api.service_deps import get_risk_policy
+from src.core.event_bus.bus import EventBus
 from src.core.loader.risk_policy_loader import RiskPolicy
 from src.services.execution_monitoring_service import ExecutionMonitoringService
 from src.services.execution_service import ExecutionService
 
-from .deps import get_pool
+from .deps import get_event_bus, get_pool
 
 
 def get_execution_service(
     pool: asyncpg.Pool = Depends(get_pool),
     policy: RiskPolicy = Depends(get_risk_policy),
+    event_bus: EventBus = Depends(get_event_bus),
 ) -> ExecutionService:
-    return ExecutionService(pool, policy)
+    return ExecutionService(pool, policy, publish=event_bus.publish)
 
 
 def get_execution_monitoring_service(

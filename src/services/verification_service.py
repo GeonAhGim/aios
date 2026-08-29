@@ -15,15 +15,22 @@ status를 직접 LISTED로 바꾸는 곳이 없다).
 APPROVE 시 verified_at도 함께 기록한다 — FD-13.8(검색·정렬)의 기본
 정렬 기준(생성일이 아닌 검증통과일 역순, 재등록 조작 방지)이 이 값을
 그대로 쓴다.
+
+FD-17.1 이벤트 발행 — 검수 완료(승인/거부 모두) 시 리스팅 소유자에게
+"strategy.verification.completed"를 발행한다.
 """
 from __future__ import annotations
 
+from collections.abc import Awaitable, Callable
+from typing import Any
 from uuid import UUID
 
 import asyncpg
 from pydantic import BaseModel
 
 VALID_DECISIONS = ("APPROVE", "REJECT")
+
+PublishFn = Callable[[str, dict[str, Any]], Awaitable[None]]
 
 
 class VerificationError(Exception):
@@ -37,8 +44,9 @@ class VerificationResult(BaseModel):
 
 
 class VerificationService:
-    def __init__(self, pool: asyncpg.Pool) -> None:
+    def __init__(self, pool: asyncpg.Pool, *, publish: PublishFn | None = None) -> None:
         self._pool = pool
+        self._publish = publish
 
     async def decide(
         self,
@@ -55,7 +63,7 @@ class VerificationService:
 
         async with self._pool.acquire() as conn:
             row = await conn.fetchrow(
-                "SELECT status FROM strategy_listings WHERE id = $1", listing_id
+                "SELECT status, seller_user_id FROM strategy_listings WHERE id = $1", listing_id
             )
             if row is None:
                 raise VerificationError("존재하지 않는 리스팅입니다.")
@@ -77,6 +85,17 @@ class VerificationService:
                     listing_id,
                     new_status,
                 )
+
+        if self._publish is not None:
+            await self._publish(
+                "strategy.verification.completed",
+                {
+                    "event_type": "strategy.verification.completed",
+                    "user_id": str(row["seller_user_id"]),
+                    "listing_id": listing_id,
+                    "decision": decision,
+                },
+            )
 
         return VerificationResult(
             listing_id=listing_id,

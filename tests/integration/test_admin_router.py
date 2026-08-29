@@ -10,10 +10,11 @@ from dotenv import dotenv_values
 from fastapi import Depends
 from httpx import ASGITransport, AsyncClient
 
-from src.api.deps import get_pool
+from src.api.deps import get_event_bus, get_pool
 from src.api.service_deps import get_credential_resolver
 from src.data.models.trading import AccountBalance
 from src.main import app
+from tests.integration.conftest import NoopEventBus
 
 STRONG_PASSWORD = "Str0ng!Passw0rd"
 
@@ -54,13 +55,20 @@ async def _override_resolver(pool=Depends(get_pool)):
 
 
 @pytest.fixture
-async def client():
+def event_bus():
+    return NoopEventBus()
+
+
+@pytest.fixture
+async def client(event_bus):
     async with app.router.lifespan_context(app):
         app.dependency_overrides[get_credential_resolver] = _override_resolver
+        app.dependency_overrides[get_event_bus] = lambda: event_bus
         transport = ASGITransport(app=app)
         async with AsyncClient(transport=transport, base_url="http://test") as ac:
             yield ac
         app.dependency_overrides.pop(get_credential_resolver, None)
+        app.dependency_overrides.pop(get_event_bus, None)
 
 
 def _unique_email() -> str:
@@ -296,7 +304,7 @@ async def test_admin_can_suspend_seller(client, pool):
     assert response.json()["seller_suspended"] is True
 
 
-async def test_admin_can_view_and_confirm_pending_payment(client, pool):
+async def test_admin_can_view_and_confirm_pending_payment(client, pool, event_bus):
     admin_headers, admin_id = await _register(client)
     await _make_admin(pool, admin_id)
     _, purchase_id = await _create_dispute(client, pool)
@@ -317,6 +325,7 @@ async def test_admin_can_view_and_confirm_pending_payment(client, pool):
     )
     assert confirm_response.status_code == 200
     assert confirm_response.json()["payment_status"] == "CONFIRMED"
+    assert any(topic == "marketplace.payment.confirmed" for topic, _ in event_bus.published)
 
 
 async def test_admin_can_approve_live_execution_request(client, pool):

@@ -9,6 +9,7 @@ from __future__ import annotations
 import asyncpg
 from fastapi import Depends, Request
 
+from src.core.event_bus.bus import EventBus
 from src.core.loader.risk_policy_loader import RiskPolicy, load_risk_policy
 from src.core.safety.circuit_breaker import CircuitBreakerService
 from src.services.account_deletion_service import AccountDeletionService
@@ -17,7 +18,7 @@ from src.services.credential_resolver import CredentialResolver
 from src.services.exchange_credential_service import ExchangeCredentialService
 from src.services.withdrawal_whitelist_service import WithdrawalWhitelistService
 
-from .deps import get_pool
+from .deps import get_event_bus, get_pool
 
 
 def get_risk_policy() -> RiskPolicy:
@@ -41,10 +42,14 @@ def get_withdrawal_whitelist_service(
     request: Request,
     pool: asyncpg.Pool = Depends(get_pool),
     circuit_breaker: CircuitBreakerService = Depends(get_circuit_breaker_service),
+    event_bus: EventBus = Depends(get_event_bus),
 ) -> WithdrawalWhitelistService:
     secrets = request.app.state.secrets
     return WithdrawalWhitelistService(
-        pool, circuit_breaker, encryption_key=secrets.credential_encryption_key
+        pool,
+        circuit_breaker,
+        encryption_key=secrets.credential_encryption_key,
+        publish=event_bus.publish,
     )
 
 

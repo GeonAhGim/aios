@@ -4,13 +4,14 @@ from __future__ import annotations
 import asyncpg
 from fastapi import Depends
 
+from src.core.event_bus.bus import EventBus
 from src.services.dispute_resolution_service import DisputeResolutionService
 from src.services.payment_confirmation_service import PaymentConfirmationService
 from src.services.seller_suspension_service import SellerSuspensionService
 from src.services.user_admin_service import UserAdminService
 from src.services.verification_queue_service import VerificationQueueService
 
-from .deps import get_pool
+from .deps import get_event_bus, get_pool
 
 
 def get_verification_queue_service(
@@ -37,5 +38,6 @@ def get_seller_suspension_service(
 
 def get_payment_confirmation_service(
     pool: asyncpg.Pool = Depends(get_pool),
+    event_bus: EventBus = Depends(get_event_bus),
 ) -> PaymentConfirmationService:
-    return PaymentConfirmationService(pool)
+    return PaymentConfirmationService(pool, publish=event_bus.publish)

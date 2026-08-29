@@ -18,6 +18,7 @@ import jwt
 from fastapi import Depends, HTTPException, Request, status
 from fastapi.security import OAuth2PasswordBearer
 
+from src.core.event_bus.bus import EventBus
 from src.services.auth_service import AuthService, User, get_user_by_id
 from src.services.mfa_service import MfaService
 
@@ -27,6 +28,15 @@ oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/auth/login", auto_error=False)
 async def get_pool(request: Request) -> asyncpg.Pool:
     pool: asyncpg.Pool = request.app.state.pool
     return pool
+
+
+async def get_event_bus(request: Request) -> EventBus:
+    """앱 조립 단계(main.py lifespan)가 채워둔 InProcessEventBus를 그대로
+    반환한다 — 테스트는 이 의존성을 dependency_overrides로 교체해 실제
+    발송기(SMTP/FCM) 부재로 인한 CRITICAL 재시도 지연(최대 31초, §5.5)을
+    피한다."""
+    event_bus: EventBus = request.app.state.event_bus
+    return event_bus
 
 
 async def get_current_user(

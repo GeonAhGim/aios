@@ -151,7 +151,11 @@ class CircuitBreakerService:
             if self._publish is not None:
                 await self._publish(
                     "risk.circuit_breaker.reactivation_requested",
-                    {"approval_request_id": request.id, "current_level": current.level.value},
+                    {
+                        "event_type": "risk.circuit_breaker.reactivation_requested",
+                        "approval_request_id": request.id,
+                        "current_level": current.level.value,
+                    },
                 )
         return await self.get_state()
 

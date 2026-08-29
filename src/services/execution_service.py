@@ -66,9 +66,16 @@ class ExecutionSummary(BaseModel):
 
 
 class ExecutionService:
-    def __init__(self, pool: asyncpg.Pool, risk_policy: RiskPolicy) -> None:
+    def __init__(
+        self,
+        pool: asyncpg.Pool,
+        risk_policy: RiskPolicy,
+        *,
+        publish: approval.PublishFn | None = None,
+    ) -> None:
         self._pool = pool
         self._risk_policy = risk_policy
+        self._publish = publish
 
     async def create_execution(
         self,
@@ -147,6 +154,7 @@ class ExecutionService:
                     "allocated_capital": allocated_capital,
                 },
                 approval_mode=settings.mode,
+                publish=self._publish,
             )
             approval_request_id = request.id
 

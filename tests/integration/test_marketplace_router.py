@@ -8,7 +8,9 @@ import pytest
 from dotenv import dotenv_values
 from httpx import ASGITransport, AsyncClient
 
+from src.api.deps import get_event_bus
 from src.main import app
+from tests.integration.conftest import NoopEventBus
 
 STRONG_PASSWORD = "Str0ng!Passw0rd"
 
@@ -28,11 +30,18 @@ async def pool():
 
 
 @pytest.fixture
-async def client():
+def event_bus():
+    return NoopEventBus()
+
+
+@pytest.fixture
+async def client(event_bus):
     async with app.router.lifespan_context(app):
+        app.dependency_overrides[get_event_bus] = lambda: event_bus
         transport = ASGITransport(app=app)
         async with AsyncClient(transport=transport, base_url="http://test") as ac:
             yield ac
+        app.dependency_overrides.pop(get_event_bus, None)
 
 
 def _unique_email() -> str:
@@ -101,7 +110,7 @@ async def test_create_listing_starts_as_draft(client, pool):
     assert response.json()["status"] == "DRAFT"
 
 
-async def test_full_listing_to_purchase_flow(client, pool):
+async def test_full_listing_to_purchase_flow(client, pool, event_bus):
     _, seller_headers, seller_id = await _register(client)
     _, buyer_headers, buyer_id = await _register(client)
     _, verifier_headers, verifier_id = await _register(client)
@@ -139,6 +148,10 @@ async def test_full_listing_to_purchase_flow(client, pool):
     )
     assert purchase_response.status_code == 201
     assert purchase_response.json()["status"] == "PENDING_PAYMENT"
+
+    topics = [topic for topic, _ in event_bus.published]
+    assert "strategy.verification.completed" in topics
+    assert "marketplace.purchase.requested" in topics
 
 
 async def test_purchase_is_idempotent_on_retry(client, pool):

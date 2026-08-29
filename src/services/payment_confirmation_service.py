@@ -107,7 +107,8 @@ class PaymentConfirmationService:
         newly_confirmed = False
         async with self._pool.acquire() as conn, conn.transaction():
             current = await conn.fetchrow(
-                "SELECT payment_status, confirmed_at FROM strategy_purchases WHERE id = $1",
+                "SELECT payment_status, confirmed_at, buyer_user_id "
+                "FROM strategy_purchases WHERE id = $1",
                 purchase_id,
             )
             if current is None:
@@ -142,7 +143,14 @@ class PaymentConfirmationService:
             )
 
         if newly_confirmed and self._publish is not None:
-            await self._publish("marketplace.payment.confirmed", {"purchase_id": purchase_id})
+            await self._publish(
+                "marketplace.payment.confirmed",
+                {
+                    "event_type": "marketplace.payment.confirmed",
+                    "user_id": str(current["buyer_user_id"]),
+                    "purchase_id": purchase_id,
+                },
+            )
 
         return PaymentConfirmationResult(
             purchase_id=purchase_id,

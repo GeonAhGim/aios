@@ -19,6 +19,7 @@ RESPONSE_WINDOW_SECONDS로 계산한다.
 from __future__ import annotations
 
 import json
+from collections.abc import Awaitable, Callable
 from datetime import datetime, timedelta, timezone
 from typing import Any
 from uuid import UUID
@@ -31,6 +32,8 @@ from src.data.models.serialization import DecimalSafeEncoder
 USER_WAIT_SECONDS = 60
 PLATFORM_WAIT_SECONDS = 180
 RESPONSE_WINDOW_SECONDS = 300  # Draft — 위 docstring 편차 설명 참조
+
+PublishFn = Callable[[str, dict[str, Any]], Awaitable[None]]
 
 
 class ApprovalError(Exception):
@@ -86,6 +89,7 @@ async def create_request(
     approval_mode: str = "SOLO",
     user_id: UUID | None = None,
     provenance: str | None = None,
+    publish: PublishFn | None = None,
 ) -> ApprovalRequest:
     if scope == "PLATFORM":
         wait_seconds = PLATFORM_WAIT_SECONDS
@@ -116,7 +120,24 @@ async def create_request(
             wait_seconds,
             expires_at,
         )
-    return _row_to_model(row)
+    result = _row_to_model(row)
+
+    # PLATFORM 범위(특정 user_id 없음)는 "관리자 전체 수신" 설계가 아직 없어
+    # 오늘은 발행하지 않는다 — 수신자 없이 발행하면 NotificationGateway가
+    # user_id 누락으로 매번 실패 처리한다(가짜 성공보다 조용한 누락이 낫다는
+    # 판단, 이 게이트가 생기면 이 조건만 풀면 된다).
+    if publish is not None and scope == "USER" and user_id is not None:
+        await publish(
+            "approval.request.created",
+            {
+                "event_type": "approval.request.created",
+                "user_id": str(user_id),
+                "approval_request_id": result.id,
+                "requested_action": requested_action,
+            },
+        )
+
+    return result
 
 
 async def approve(pool: asyncpg.Pool, request_id: int, approver_id: UUID) -> ApprovalRequest:

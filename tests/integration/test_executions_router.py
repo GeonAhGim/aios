@@ -14,10 +14,11 @@ from dotenv import dotenv_values
 from fastapi import Depends
 from httpx import ASGITransport, AsyncClient
 
-from src.api.deps import get_pool
+from src.api.deps import get_event_bus, get_pool
 from src.api.service_deps import get_credential_resolver
 from src.data.models.trading import AccountBalance
 from src.main import app
+from tests.integration.conftest import NoopEventBus
 
 STRONG_PASSWORD = "Str0ng!Passw0rd"
 
@@ -55,13 +56,20 @@ async def _override_resolver(pool=Depends(get_pool)):
 
 
 @pytest.fixture
-async def client():
+def event_bus():
+    return NoopEventBus()
+
+
+@pytest.fixture
+async def client(event_bus):
     async with app.router.lifespan_context(app):
         app.dependency_overrides[get_credential_resolver] = _override_resolver
+        app.dependency_overrides[get_event_bus] = lambda: event_bus
         transport = ASGITransport(app=app)
         async with AsyncClient(transport=transport, base_url="http://test") as ac:
             yield ac
         app.dependency_overrides.pop(get_credential_resolver, None)
+        app.dependency_overrides.pop(get_event_bus, None)
 
 
 def _unique_email() -> str:
@@ -159,7 +167,7 @@ async def test_create_execution_over_allocation_cap_rejected(client, pool):
     assert response.status_code == 400
 
 
-async def test_live_execution_requires_approval_before_start(client, pool):
+async def test_live_execution_requires_approval_before_start(client, pool, event_bus):
     headers, user_id = await _register(client)
     strategy_id, version = await _create_approved_strategy(pool, user_id, certified_badge=True)
     await _link_credential(pool, user_id)
@@ -179,6 +187,7 @@ async def test_live_execution_requires_approval_before_start(client, pool):
     assert create_response.status_code == 201
     execution_id = create_response.json()["id"]
     assert create_response.json()["approval_request_id"] is not None
+    assert any(topic == "approval.request.created" for topic, _ in event_bus.published)
 
     start_response = await client.post(f"/executions/{execution_id}/start", headers=headers)
     assert start_response.status_code == 400
