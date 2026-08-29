@@ -124,6 +124,10 @@ class SecretBundle(BaseModel):
     smtp_password: str | None = None
     fcm_server_key: str | None = None
     apns_key_id: str | None = None
+    # FD-17 프론트엔드(17번 문서, apps/web) 로컬 개발 서버가 별도 오리진(Vite,
+    # 기본 5173)에서 API를 호출하므로 CORS 허용이 필요 — 비밀값은 아니지만
+    # 이 번들이 .env 전체 설정의 단일 출처라 여기 포함한다.
+    cors_allowed_origins: list[str] = Field(default_factory=list)
 
     def __repr__(self) -> str:
         """07번 §7.1 마스킹 원칙 — 어떤 필드도 평문 노출 금지."""

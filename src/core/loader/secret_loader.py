@@ -51,4 +51,9 @@ def load_env_secrets(source: Mapping[str, str] | None = None) -> SecretBundle:
         smtp_password=env.get("SMTP_PASSWORD") or None,
         fcm_server_key=env.get("FCM_SERVER_KEY") or None,
         apns_key_id=env.get("APNS_KEY_ID") or None,
+        cors_allowed_origins=[
+            origin.strip()
+            for origin in env.get("CORS_ALLOWED_ORIGINS", "").split(",")
+            if origin.strip()
+        ],
     )
