@@ -6,6 +6,7 @@
 동일한 감지→판정→실제 DB 조치 경로를 검증한다(watchdog.py 기존
 단위테스트도 실제 프로세스 kill 대신 파일 조작으로 검증하는 것과 동일
 패턴)."""
+import asyncio
 import json
 import time
 import uuid
@@ -17,8 +18,9 @@ import pytest
 from dotenv import dotenv_values
 
 from src.core.safety.heartbeat import write_heartbeat
+from src.core.safety.split_brain import SplitBrainDiagnostics
 from src.core.safety.watchdog import WatchdogAction, WatchdogDecision, WatchdogService, decide
-from src.watchdog_process import _apply_decision
+from src.watchdog_process import _apply_decision, run_one_cycle
 from tests.integration.conftest import create_test_user
 
 
@@ -128,6 +130,86 @@ async def test_stale_heartbeat_leads_to_halt_and_real_pause(pool, tmp_path):
     assert decision.reason == "main_process_unresponsive"
 
     await _apply_decision(pool, decision)
+
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            "SELECT status, paused_by FROM strategy_executions WHERE id = $1", execution_id
+        )
+    assert row["status"] == "PAUSED"
+    assert row["paused_by"] == "SAFETY_LAYER"
+
+
+async def test_run_one_cycle_suppresses_action_on_db_isolated_failure(pool, tmp_path):
+    """FD-9.3 완료조건 — "DB만 강제로 차단했을 때 강제청산이 발동하지 않고
+    신규주문만 보류되는지 확인". 여기서는 실제로 DB 연결을 끊을 수 없으니
+    (그러면 검증용 SELECT도 못 함) check_db 콜백만 가짜로 "끊겼다"고
+    보고하게 만들어 진단 로직 자체를 검증한다 — decide()는 HALT를
+    내리는데도(고립된 손실) 최종적으로 실행에 아무 조치가 안 가야 한다."""
+    user_id = await create_test_user(pool)
+    execution_id = await _create_running_execution(pool, user_id)
+    heartbeat = tmp_path / "hb"
+    write_heartbeat(heartbeat)
+
+    async def compute_equity() -> Decimal:
+        return Decimal("8000")
+
+    async def check_exchange() -> bool:
+        return True
+
+    async def check_db() -> bool:
+        return False  # DB만 끊긴 것으로 진단 유도
+
+    service = WatchdogService(
+        compute_equity=compute_equity, health_check=check_exchange, heartbeat_path=heartbeat
+    )
+    # 실제 5분 대신 즉시 히스테리시스가 확정되도록 임계값을 짧게.
+    split_brain = SplitBrainDiagnostics(entry_confirm_seconds=0.01, recovery_confirm_seconds=0.01)
+
+    await run_one_cycle(
+        pool, service, split_brain, check_exchange=check_exchange, check_db=check_db
+    )
+    await asyncio.sleep(0.02)  # entry_confirm_seconds 경과시켜 히스테리시스 확정
+    await run_one_cycle(
+        pool, service, split_brain, check_exchange=check_exchange, check_db=check_db
+    )
+
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            "SELECT status, paused_by FROM strategy_executions WHERE id = $1", execution_id
+        )
+    assert row["status"] == "RUNNING"
+    assert row["paused_by"] is None
+
+
+async def test_run_one_cycle_applies_action_when_not_db_isolated(pool, tmp_path):
+    """대조군 — DB는 멀쩡하고 메인 프로세스만 응답불능이면(Split-Brain
+    진단상 DB_ISOLATED_FAILURE가 아님) 평소대로 강제조치가 적용돼야 한다."""
+    user_id = await create_test_user(pool)
+    execution_id = await _create_running_execution(pool, user_id)
+    heartbeat = tmp_path / "hb"
+    heartbeat.write_text(str(time.time() - 60))  # 응답불능 시뮬레이션
+
+    async def compute_equity() -> Decimal:
+        return Decimal("10000")
+
+    async def check_exchange() -> bool:
+        return True
+
+    async def check_db() -> bool:
+        return True
+
+    service = WatchdogService(
+        compute_equity=compute_equity, health_check=check_exchange, heartbeat_path=heartbeat
+    )
+    split_brain = SplitBrainDiagnostics(entry_confirm_seconds=0.01, recovery_confirm_seconds=0.01)
+
+    await run_one_cycle(
+        pool, service, split_brain, check_exchange=check_exchange, check_db=check_db
+    )
+    await asyncio.sleep(0.02)
+    await run_one_cycle(
+        pool, service, split_brain, check_exchange=check_exchange, check_db=check_db
+    )
 
     async with pool.acquire() as conn:
         row = await conn.fetchrow(
