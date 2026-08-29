@@ -66,8 +66,10 @@ def get_exchange_credential_service(
     return ExchangeCredentialService(pool, encryption_key=secrets.credential_encryption_key)
 
 
-def get_credential_resolver(
-    pool: asyncpg.Pool = Depends(get_pool),
-    credential_service: ExchangeCredentialService = Depends(get_exchange_credential_service),
-) -> CredentialResolver:
-    return CredentialResolver(credential_service)
+def get_credential_resolver(request: Request) -> CredentialResolver:
+    """레드팀 감사(docs/RED_TEAM_FINDINGS.md #02) 반영 — 매 요청 새로
+    만들면 CredentialResolver의 5분 TTL 캐시가 절대 재사용되지 않는다.
+    main.py lifespan이 앱 시작 시 한 번만 만들어 둔 것을 그대로 반환한다
+    (pool/event_bus와 동일 패턴)."""
+    resolver: CredentialResolver = request.app.state.credential_resolver
+    return resolver

@@ -1,4 +1,5 @@
 """18.2 통합테스트 — 실제 dev DB 대상."""
+import asyncio
 import json
 from decimal import Decimal
 from pathlib import Path
@@ -146,6 +147,30 @@ async def test_resolve_rejects_already_resolved_dispute(service, pool):
 
     with pytest.raises(DisputeResolutionError):
         await service.resolve(dispute.id, admin, "NORMAL_RISK_REALIZATION", "재처리 시도")
+
+
+async def test_concurrent_resolutions_only_one_succeeds(service, pool):
+    """docs/RED_TEAM_FINDINGS.md #05 회귀 — conn.transaction()이 있어도
+    READ COMMITTED에서는 두 관리자가 같은 분쟁을 거의 동시에 서로 다른
+    결정으로 처리하면 하나가 조용히 덮어써졌다."""
+    dispute, _, _, _ = await _open_dispute(pool)
+    admin_a = await create_test_user(pool)
+    admin_b = await create_test_user(pool)
+
+    results = await asyncio.gather(
+        service.resolve(dispute.id, admin_a, "NORMAL_RISK_REALIZATION", "정상 리스크"),
+        service.resolve(dispute.id, admin_b, "DELISTED_AND_REFUND", "표시 성과 불일치"),
+        return_exceptions=True,
+    )
+
+    successes = [r for r in results if not isinstance(r, Exception)]
+    failures = [r for r in results if isinstance(r, DisputeResolutionError)]
+    assert len(successes) == 1
+    assert len(failures) == 1
+
+    async with pool.acquire() as conn:
+        status = await conn.fetchval("SELECT status FROM disputes WHERE id = $1", dispute.id)
+    assert status == "RESOLVED"
 
 
 async def test_resolve_rejects_unknown_decision(service, pool):

@@ -61,29 +61,44 @@ class VerificationService:
         if decision == "REJECT" and not rejection_reason:
             raise VerificationError("REJECT 결정에는 사유가 필요합니다.")
 
+        # 레드팀 감사(docs/RED_TEAM_FINDINGS.md #05) 반영 — "읽고 나서 별도로
+        # 쓰기"였을 때는 서로 다른 두 검증담당자가 같은 리스팅을 거의 동시에
+        # 하나는 승인, 하나는 반려하면 나중에 커밋되는 쪽이 조용히 덮어썼다.
+        # UPDATE 자체에 status='PENDING_VERIFICATION' 조건을 걸어(payment_
+        # confirmation_service.py::confirm_payment()와 동일 패턴) RETURNING이
+        # 빈 행이면 그사이 다른 검증담당자가 먼저 처리했다는 뜻으로 실패시킨다.
         async with self._pool.acquire() as conn:
-            row = await conn.fetchrow(
+            pre_check = await conn.fetchrow(
                 "SELECT status, seller_user_id FROM strategy_listings WHERE id = $1", listing_id
             )
-            if row is None:
+            if pre_check is None:
                 raise VerificationError("존재하지 않는 리스팅입니다.")
-            if row["status"] != "PENDING_VERIFICATION":
+            if pre_check["status"] != "PENDING_VERIFICATION":
                 raise VerificationError(
-                    f"PENDING_VERIFICATION 상태에서만 검증할 수 있습니다(현재: {row['status']})."
+                    f"PENDING_VERIFICATION 상태에서만 검증할 수 있습니다"
+                    f"(현재: {pre_check['status']})."
                 )
 
             new_status = "LISTED" if decision == "APPROVE" else "DRAFT"
             if decision == "APPROVE":
-                await conn.execute(
-                    "UPDATE strategy_listings SET status = $2, verified_at = now() WHERE id = $1",
+                row = await conn.fetchrow(
+                    "UPDATE strategy_listings SET status = $2, verified_at = now() "
+                    "WHERE id = $1 AND status = 'PENDING_VERIFICATION' "
+                    "RETURNING seller_user_id",
                     listing_id,
                     new_status,
                 )
             else:
-                await conn.execute(
-                    "UPDATE strategy_listings SET status = $2 WHERE id = $1",
+                row = await conn.fetchrow(
+                    "UPDATE strategy_listings SET status = $2 "
+                    "WHERE id = $1 AND status = 'PENDING_VERIFICATION' "
+                    "RETURNING seller_user_id",
                     listing_id,
                     new_status,
+                )
+            if row is None:
+                raise VerificationError(
+                    "이미 다른 검증담당자가 처리했습니다(동시 처리 충돌)."
                 )
 
         if self._publish is not None:

@@ -1,4 +1,5 @@
 """13.3 통합테스트 — 실제 dev DB 대상."""
+import asyncio
 import json
 from pathlib import Path
 from uuid import uuid4
@@ -109,6 +110,33 @@ async def test_cannot_decide_on_draft_listing(service, pool):
 
     with pytest.raises(VerificationError):
         await service.decide(draft_listing.id, verifier, "APPROVE")
+
+
+async def test_concurrent_decisions_only_one_succeeds(service, pool):
+    """docs/RED_TEAM_FINDINGS.md #05 회귀 — "읽고 나서 별도로 쓰기"였을 때는
+    서로 다른 두 검증담당자가 같은 리스팅을 거의 동시에 하나는 승인, 하나는
+    반려하면 나중에 커밋되는 쪽이 조용히 덮어썼다."""
+    seller = await create_test_user(pool)
+    listing = await _pending_listing(pool, seller)
+    verifier_a = await create_test_user(pool)
+    verifier_b = await create_test_user(pool)
+
+    results = await asyncio.gather(
+        service.decide(listing.id, verifier_a, "APPROVE"),
+        service.decide(listing.id, verifier_b, "REJECT", rejection_reason="오버피팅 의심"),
+        return_exceptions=True,
+    )
+
+    successes = [r for r in results if not isinstance(r, Exception)]
+    failures = [r for r in results if isinstance(r, VerificationError)]
+    assert len(successes) == 1
+    assert len(failures) == 1
+
+    async with pool.acquire() as conn:
+        status = await conn.fetchval(
+            "SELECT status FROM strategy_listings WHERE id = $1", listing.id
+        )
+    assert status == successes[0].status
 
 
 async def test_unknown_decision_value_is_rejected(service, pool):

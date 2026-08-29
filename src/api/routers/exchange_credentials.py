@@ -38,6 +38,7 @@ async def register_credential(
     body: CredentialRequest,
     user: User = Depends(get_current_user),
     service: ExchangeCredentialService = Depends(get_exchange_credential_service),
+    resolver: CredentialResolver = Depends(get_credential_resolver),
 ) -> CredentialResponse:
     try:
         summary = await service.register(
@@ -49,6 +50,10 @@ async def register_credential(
         )
     except ExchangeCredentialError as exc:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from exc
+    # 레드팀 감사(docs/RED_TEAM_FINDINGS.md #02) 반영 — 캐시가 실제로 살아있는
+    # 싱글턴이 된 이상, 재등록 직후 TTL이 끝나지 않은 옛 자격증명으로 만든
+    # 어댑터가 계속 쓰이지 않도록 반드시 함께 지워야 한다.
+    resolver.invalidate(user.user_id, body.exchange)
     return to_credential_response(summary)
 
 
@@ -57,11 +62,13 @@ async def revoke_credential(
     exchange: str,
     user: User = Depends(get_current_user),
     service: ExchangeCredentialService = Depends(get_exchange_credential_service),
+    resolver: CredentialResolver = Depends(get_credential_resolver),
 ) -> dict[str, str]:
     try:
         await service.revoke(user.user_id, exchange)
     except ExchangeCredentialError as exc:
         raise HTTPException(status.HTTP_404_NOT_FOUND, str(exc)) from exc
+    resolver.invalidate(user.user_id, exchange)
     return {"exchange": exchange, "status": "revoked"}
 
 

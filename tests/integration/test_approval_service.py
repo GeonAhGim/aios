@@ -3,6 +3,7 @@
 mandatory_wait_seconds(60/180초) 실제 대기 대신, DB의 created_at을 직접
 과거로 돌려 "대기시간이 지난 상태"를 결정적으로 재현한다.
 """
+import asyncio
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from uuid import uuid4
@@ -166,6 +167,101 @@ async def test_cancel_marks_status_cancelled(pool):
     )
     result = await cancel(pool, request.id)
     assert result.status == "CANCELLED"
+
+
+async def test_concurrent_solo_approvals_only_one_succeeds(pool):
+    """docs/RED_TEAM_FINDINGS.md #04 회귀 — approve()가 "읽고 나서 별도로
+    쓰기"였을 때는 거의 동시에 들어온 두 승인이 둘 다 통과할 수 있었다."""
+    request = await create_request(
+        pool,
+        scope="USER",
+        user_id=await create_test_user(pool),
+        trigger_source="watchdog_liquidate",
+        requested_action="LIQUIDATE_POSITION",
+        context={},
+        approval_mode="SOLO",
+    )
+    await _rewind_created_at(pool, request.id, 61)
+
+    approver_a, approver_b = uuid4(), uuid4()
+    results = await asyncio.gather(
+        approve(pool, request.id, approver_a),
+        approve(pool, request.id, approver_b),
+        return_exceptions=True,
+    )
+
+    successes = [r for r in results if not isinstance(r, Exception)]
+    failures = [r for r in results if isinstance(r, ApprovalError)]
+    assert len(successes) == 1
+    assert len(failures) == 1
+
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            "SELECT status, first_approver_id FROM approval_requests WHERE id = $1", request.id
+        )
+    assert row["status"] == "APPROVED"
+    assert row["first_approver_id"] == successes[0].first_approver_id
+
+
+async def test_concurrent_dual_first_signature_only_one_succeeds(pool, monkeypatch):
+    """docs/RED_TEAM_FINDINGS.md #04 회귀 — DUAL 첫 서명 레이스에서 나중에
+    커밋되는 쪽이 앞선 서명자를 조용히 덮어쓸 수 있었다(독립된 두 사람의
+    서명이라는 전제가 타이밍만으로 깨짐).
+
+    asyncio.gather만으로는 두 approve() 호출의 초기 조회(_fetch)가 실제로
+    동시에 겹치는 보장이 없다 — 커넥션 풀 라운드트립이 우연히 어긋나면
+    첫 번째 호출이 완전히 끝난 뒤 두 번째가 시작돼(첫서명→둘째서명 정상
+    흐름) 레이스 자체가 재현되지 않을 수 있다. barrier로 두 호출의
+    `_fetch()`가 반드시 같은 시점에 끝나도록 강제해 "둘 다
+    first_approver_id=None을 봤다"는 원래 레이스 조건을 결정적으로
+    재현한다."""
+    import src.core.approval.service as approval_service
+
+    request = await create_request(
+        pool,
+        scope="USER",
+        user_id=await create_test_user(pool),
+        trigger_source="execution_high_allocation",
+        requested_action="START_LIVE_EXECUTION",
+        context={},
+        approval_mode="DUAL",
+    )
+    await _rewind_created_at(pool, request.id, 61)
+
+    arrived = 0
+    released = asyncio.Event()
+    original_fetch = approval_service._fetch
+
+    async def _synced_fetch(pool_, request_id):
+        nonlocal arrived
+        result = await original_fetch(pool_, request_id)
+        arrived += 1
+        if arrived >= 2:
+            released.set()
+        else:
+            await released.wait()
+        return result
+
+    monkeypatch.setattr(approval_service, "_fetch", _synced_fetch)
+
+    approver_a, approver_b = uuid4(), uuid4()
+    results = await asyncio.gather(
+        approve(pool, request.id, approver_a),
+        approve(pool, request.id, approver_b),
+        return_exceptions=True,
+    )
+
+    successes = [r for r in results if not isinstance(r, Exception)]
+    failures = [r for r in results if isinstance(r, ApprovalError)]
+    assert len(successes) == 1
+    assert len(failures) == 1
+
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            "SELECT status, first_approver_id FROM approval_requests WHERE id = $1", request.id
+        )
+    assert row["status"] == "PENDING"
+    assert row["first_approver_id"] == successes[0].first_approver_id
 
 
 async def test_context_roundtrips_with_decimal_values(pool):

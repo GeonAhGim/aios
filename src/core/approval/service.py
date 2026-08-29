@@ -141,6 +141,13 @@ async def create_request(
 
 
 async def approve(pool: asyncpg.Pool, request_id: int, approver_id: UUID) -> ApprovalRequest:
+    """레드팀 감사(docs/RED_TEAM_FINDINGS.md #04) 반영 — "읽고 나서 별도로
+    쓰기"는 두 승인이 거의 동시에 들어오면 둘 다 통과시킬 수 있다(SOLO
+    이중승인, DUAL 첫서명자 위조). 아래 세 UPDATE 모두 WHERE절에 그
+    시점의 실제 DB 상태를 다시 검사해 원자적으로 만든다 — RETURNING이
+    빈 행이면 그사이 다른 요청이 먼저 상태를 바꿨다는 뜻이므로
+    ApprovalError로 실패시킨다(payment_confirmation_service.py::
+    confirm_payment()가 이미 쓰던 것과 동일 패턴)."""
     request = await _fetch(pool, request_id)
     if request.status != "PENDING":
         raise ApprovalError(f"이미 처리된 요청: status={request.status}")
@@ -149,35 +156,73 @@ async def approve(pool: asyncpg.Pool, request_id: int, approver_id: UUID) -> App
     if now < request.created_at + timedelta(seconds=request.mandatory_wait_seconds):
         raise ApprovalError("강제 대기시간이 아직 지나지 않았습니다.")
     if now > request.expires_at:
-        await _update(pool, request_id, status="EXPIRED", resolved_at=now)
+        async with pool.acquire() as conn:
+            await conn.execute(
+                "UPDATE approval_requests SET status = 'EXPIRED', resolved_at = $2 "
+                "WHERE id = $1 AND status = 'PENDING'",
+                request_id,
+                now,
+            )
         raise ApprovalError("요청이 만료되어 자동 거부되었습니다.")
 
     if request.approval_mode == "SOLO":
-        return await _update(
-            pool,
-            request_id,
-            status="APPROVED",
-            first_approver_id=approver_id,
-            resolved_at=now,
-        )
+        async with pool.acquire() as conn:
+            row = await conn.fetchrow(
+                "UPDATE approval_requests SET status = 'APPROVED', first_approver_id = $2, "
+                "resolved_at = $3 WHERE id = $1 AND status = 'PENDING' RETURNING *",
+                request_id,
+                approver_id,
+                now,
+            )
+        if row is None:
+            raise ApprovalError("이미 처리된 요청입니다(동시 요청 충돌).")
+        return _row_to_model(row)
 
     # DUAL — 서로 다른 계정의 순차 서명(4.9 원칙)
     if request.first_approver_id is None:
-        return await _update(pool, request_id, first_approver_id=approver_id)
+        async with pool.acquire() as conn:
+            row = await conn.fetchrow(
+                "UPDATE approval_requests SET first_approver_id = $2 "
+                "WHERE id = $1 AND status = 'PENDING' AND first_approver_id IS NULL "
+                "RETURNING *",
+                request_id,
+                approver_id,
+            )
+        if row is None:
+            raise ApprovalError("이미 다른 사용자가 먼저 서명했습니다(동시 요청 충돌).")
+        return _row_to_model(row)
+
     if request.first_approver_id == approver_id:
         raise ApprovalError("DUAL 모드는 서로 다른 계정의 순차 서명이 필요합니다.")
-    return await _update(
-        pool, request_id, status="APPROVED", second_approver_id=approver_id, resolved_at=now
-    )
+
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            "UPDATE approval_requests SET status = 'APPROVED', second_approver_id = $2, "
+            "resolved_at = $3 WHERE id = $1 AND status = 'PENDING' "
+            "AND first_approver_id IS NOT NULL AND first_approver_id != $2 RETURNING *",
+            request_id,
+            approver_id,
+            now,
+        )
+    if row is None:
+        raise ApprovalError("이미 처리됐거나 동시 서명 충돌이 발생했습니다.")
+    return _row_to_model(row)
 
 
 async def reject(pool: asyncpg.Pool, request_id: int, approver_id: UUID) -> ApprovalRequest:
     request = await _fetch(pool, request_id)
     if request.status != "PENDING":
         raise ApprovalError(f"이미 처리된 요청: status={request.status}")
-    return await _update(
-        pool, request_id, status="REJECTED", resolved_at=datetime.now(timezone.utc)
-    )
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            "UPDATE approval_requests SET status = 'REJECTED', resolved_at = $2 "
+            "WHERE id = $1 AND status = 'PENDING' RETURNING *",
+            request_id,
+            datetime.now(timezone.utc),
+        )
+    if row is None:
+        raise ApprovalError("이미 처리된 요청입니다(동시 요청 충돌).")
+    return _row_to_model(row)
 
 
 async def cancel(pool: asyncpg.Pool, request_id: int) -> ApprovalRequest:

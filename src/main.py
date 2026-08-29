@@ -20,12 +20,15 @@ from typing import Any
 
 import asyncpg
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 
 from src.core.event_bus.in_process import InProcessEventBus
 from src.core.loader.secret_loader import load_env_secrets
 from src.core.logging.audit_log import record_audit_log
 from src.core.notifications.gateway import NotificationGateway
 from src.core.safety.heartbeat import DEFAULT_HEARTBEAT_PATH, write_heartbeat
+from src.services.credential_resolver import CredentialResolver
+from src.services.exchange_credential_service import ExchangeCredentialService
 
 HEARTBEAT_INTERVAL_SECONDS = 2.0  # Draft — watchdog_process.py의 5초 폴링 주기보다 짧게
 
@@ -73,9 +76,20 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
     heartbeat_task = asyncio.create_task(_heartbeat_loop())
 
+    # 레드팀 감사(docs/RED_TEAM_FINDINGS.md #02) 반영 — CredentialResolver는
+    # 5분 TTL로 어댑터를 캐싱하도록 설계됐는데, get_credential_resolver()가
+    # 매 요청마다 새 인스턴스를 만들면 내부 _cache가 매번 빈 채로 시작해
+    # 캐시가 한 번도 실제로 작동한 적이 없었다 — pool/event_bus와 동일하게
+    # 앱 시작 시 한 번만 만들어 app.state에 둔다.
+    credential_service = ExchangeCredentialService(
+        pool, encryption_key=secrets.credential_encryption_key
+    )
+    credential_resolver = CredentialResolver(credential_service)
+
     app.state.pool = pool
     app.state.secrets = secrets
     app.state.event_bus = event_bus
+    app.state.credential_resolver = credential_resolver
     try:
         yield
     finally:
@@ -88,6 +102,20 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
 def create_app() -> FastAPI:
     app = FastAPI(title="AIOS API", lifespan=lifespan)
+
+    # FD-17 프론트엔드(apps/web, 기본 Vite 포트 5173)가 별도 오리진에서 API를
+    # 호출하므로 CORS 허용이 필요 — .env CORS_ALLOWED_ORIGINS는 정의만 되어
+    # 있었고 실제로 적용된 적이 없었다(프론트엔드가 없어 아무도 마주친 적 없는
+    # 상태였음). lifespan과 별개로 미들웨어는 앱 생성 시점에 등록해야 해서
+    # secrets를 여기서 한 번 더 읽는다.
+    secrets = load_env_secrets()
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=secrets.cors_allowed_origins,
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
 
     from src.api.routers import (
         admin,

@@ -197,3 +197,60 @@ async def test_credentials_require_authentication(client):
     response = await client.get("/exchange-credentials")
 
     assert response.status_code == 401
+
+
+async def test_register_and_revoke_invalidate_resolver_cache():
+    """docs/RED_TEAM_FINDINGS.md #02 회귀 — 캐시가 실제 싱글턴이 된 이상,
+    재등록/해지 직후 옛 자격증명으로 만든 어댑터가 TTL 동안 계속 쓰이지
+    않으려면 라우터가 반드시 invalidate()를 호출해야 한다."""
+    invalidated: list[tuple] = []
+
+    class _TrackingResolver(CredentialResolver):
+        def invalidate(self, user_id, exchange):
+            invalidated.append((user_id, exchange))
+            super().invalidate(user_id, exchange)
+
+    async def _override_tracking_resolver(pool=Depends(get_pool)):
+        service = ExchangeCredentialService(
+            pool, encryption_key=ENCRYPTION_KEY, adapter_factory=_fake_factory
+        )
+        return _TrackingResolver(service, adapter_factory=_fake_factory)
+
+    async with app.router.lifespan_context(app):
+        app.dependency_overrides[get_exchange_credential_service] = _override_credential_service
+        app.dependency_overrides[get_credential_resolver] = _override_tracking_resolver
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://test") as ac:
+            headers = await _register_user(ac)
+            register_response = await ac.post(
+                "/exchange-credentials",
+                json={"exchange": "bitget", "api_key": "good-key", "api_secret": "secret"},
+                headers=headers,
+            )
+            assert register_response.status_code == 201
+            revoke_response = await ac.delete("/exchange-credentials/bitget", headers=headers)
+            assert revoke_response.status_code == 200
+        app.dependency_overrides.pop(get_exchange_credential_service, None)
+        app.dependency_overrides.pop(get_credential_resolver, None)
+
+    assert len(invalidated) == 2
+    assert all(exchange == "bitget" for _, exchange in invalidated)
+
+
+async def test_credential_resolver_is_a_real_singleton_across_requests():
+    """docs/RED_TEAM_FINDINGS.md #02 회귀 — get_credential_resolver()가 매
+    요청 CredentialResolver(credential_service)를 새로 만들면 내부 5분
+    TTL _cache가 매번 빈 채로 시작해 캐시가 한 번도 실제로 작동한 적이
+    없었다. main.py lifespan이 app.state에 한 번만 만들어 둔 인스턴스를
+    그대로 재사용하는지 직접 확인한다(이 테스트는 client fixture의 가짜
+    resolver 오버라이드를 쓰지 않는다 — 실제 배선을 검증해야 하므로)."""
+
+    class _FakeRequest:
+        def __init__(self, app):
+            self.app = app
+
+    async with app.router.lifespan_context(app):
+        first = get_credential_resolver(_FakeRequest(app))
+        second = get_credential_resolver(_FakeRequest(app))
+        assert first is second
+        assert first is app.state.credential_resolver

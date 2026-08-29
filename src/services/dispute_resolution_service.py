@@ -94,15 +94,24 @@ class DisputeResolutionService:
 
         new_listing_status = detail.listing_status
         async with self._pool.acquire() as conn, conn.transaction():
+            # 레드팀 감사(docs/RED_TEAM_FINDINGS.md #05) 반영 — conn.transaction()이
+            # 있어도 기본 격리수준(READ COMMITTED)에서는 다른 트랜잭션이 커밋 전
+            # 상태를 읽고 동시에 진행하는 것 자체를 막지 않는다. UPDATE 자체에
+            # status='OPEN' 조건을 걸어(payment_confirmation_service.py와 동일
+            # 패턴) 두 관리자가 같은 분쟁을 거의 동시에 처리해도 한쪽만 반영되게 한다.
             row = await conn.fetchrow(
                 "UPDATE disputes SET status = 'RESOLVED', resolution_decision = $2, "
                 "resolution_reason = $3, resolved_by = $4, resolved_at = now() "
-                "WHERE id = $1 RETURNING resolved_at",
+                "WHERE id = $1 AND status = 'OPEN' RETURNING resolved_at",
                 dispute_id,
                 decision,
                 reason,
                 admin_user_id,
             )
+            if row is None:
+                raise DisputeResolutionError(
+                    "이미 다른 관리자가 처리했습니다(동시 처리 충돌)."
+                )
 
             if decision == "DELISTED_AND_REFUND":
                 await conn.execute(
