@@ -1,6 +1,7 @@
 import { useListingReviews, usePurchaseListing, useSubmitForVerification } from "@aios/shared-hooks";
 import { ApiError } from "@aios/api-client";
 import type { ListingSummary } from "@aios/shared-types";
+import { Alert, Button, Card, EmptyState } from "@aios/ui-web";
 import { useState } from "react";
 import { Link, useLocation, useParams } from "react-router-dom";
 import { AppShell } from "../../components/layout/AppShell";
@@ -47,55 +48,50 @@ export function ListingDetailPage() {
     <AppShell>
       <div className="max-w-2xl space-y-6">
         <div>
-          <h1 className="text-2xl font-semibold text-slate-100">
+          <h1 className="text-2xl font-semibold text-fg">
             {listing?.strategyId ?? `리스팅 #${id}`}
           </h1>
           {listing && (
-            <p className="mt-1 text-sm text-slate-500">
+            <p className="tabular mt-1 text-sm text-fg-muted">
               v{listing.strategyVersion} · {listing.price ? `${listing.price} USDT` : "가격 미정"}
             </p>
           )}
         </div>
 
         {purchased ? (
-          <div className="rounded border border-emerald-900 bg-emerald-950/30 p-4 text-sm text-emerald-300">
-            구매가 완료됐습니다 (구매ID {purchased.purchaseId}, 상태: {purchased.status}).
-            관리자의 결제 확인 후 실행 권한이 부여됩니다.
-          </div>
+          <Alert tone="success">
+            구매가 완료됐습니다 (구매ID {purchased.purchaseId}, 상태: {purchased.status}). 관리자의
+            결제 확인 후 실행 권한이 부여됩니다.
+          </Alert>
         ) : (
           <div className="space-y-2">
-            {error && <p className="text-sm text-red-400">{error}</p>}
-            <button
-              type="button"
-              onClick={() => attemptPurchase(false)}
-              disabled={purchase.isPending}
-              className="rounded bg-slate-100 px-4 py-2 text-sm font-medium text-slate-950 hover:bg-white disabled:opacity-50"
-            >
-              {purchase.isPending ? "처리 중..." : "구매하기"}
-            </button>
+            {error && <Alert>{error}</Alert>}
+            <Button type="button" onClick={() => attemptPurchase(false)} loading={purchase.isPending}>
+              구매하기
+            </Button>
           </div>
         )}
 
-        <div className="flex gap-3 text-sm">
+        <div className="flex gap-4 text-sm">
           <button
             type="button"
             onClick={() => submitForVerification.mutate(id)}
-            className="text-slate-400 hover:text-slate-200"
+            className="text-fg-muted hover:text-fg"
           >
             검수 제출 (판매자)
           </button>
-          <Link to="/disputes/submit" className="text-slate-400 hover:text-slate-200">
+          <Link to="/disputes/submit" className="text-fg-muted hover:text-fg">
             분쟁 신고
           </Link>
         </div>
 
-        <section className="rounded-lg border border-slate-800 p-6">
+        <Card>
           <div className="mb-4 flex items-center justify-between">
-            <h2 className="text-lg font-medium text-slate-100">리뷰</h2>
+            <h2 className="text-lg font-semibold text-fg">리뷰</h2>
             {purchased && (
               <Link
                 to={`/reviews/write/${purchased.purchaseId}`}
-                className="text-sm text-slate-400 hover:text-slate-200"
+                className="text-sm text-accent-hover hover:underline"
               >
                 리뷰 작성
               </Link>
@@ -103,22 +99,22 @@ export function ListingDetailPage() {
           </div>
           {reviews && reviews.reviewCount > 0 ? (
             <div className="space-y-3">
-              <p className="text-sm text-slate-400">
+              <p className="text-sm text-fg-muted">
                 평균 {reviews.averageRating?.toFixed(1)} · {reviews.reviewCount}개 리뷰
               </p>
               <ul className="space-y-2">
                 {reviews.reviews.map((r) => (
-                  <li key={r.reviewId} className="rounded border border-slate-800 p-3 text-sm">
-                    <p className="text-slate-200">★ {r.rating}</p>
-                    {r.comment && <p className="mt-1 text-slate-400">{r.comment}</p>}
+                  <li key={r.reviewId} className="rounded-md border border-border p-3 text-sm">
+                    <p className="text-fg">★ {r.rating}</p>
+                    {r.comment && <p className="mt-1 text-fg-muted">{r.comment}</p>}
                   </li>
                 ))}
               </ul>
             </div>
           ) : (
-            <p className="text-sm text-slate-500">아직 리뷰가 없습니다.</p>
+            <EmptyState>아직 리뷰가 없습니다.</EmptyState>
           )}
-        </section>
+        </Card>
       </div>
 
       {riskWarningReason && (

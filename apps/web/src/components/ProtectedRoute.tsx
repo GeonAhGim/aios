@@ -15,7 +15,11 @@ export function ProtectedRoute({ children }: { children: ReactNode }) {
     return <Navigate to="/login" replace />;
   }
   if (meLoading || riskLoading) {
-    return <div className="flex h-screen items-center justify-center text-slate-400">로딩 중...</div>;
+    return (
+      <div className="flex h-screen items-center justify-center bg-bg text-fg-muted">
+        로딩 중...
+      </div>
+    );
   }
   if (!me) {
     return <Navigate to="/login" replace />;

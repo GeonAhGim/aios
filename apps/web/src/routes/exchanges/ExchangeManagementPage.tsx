@@ -5,6 +5,19 @@ import {
   useRevokeExchangeCredential,
 } from "@aios/shared-hooks";
 import { ApiError } from "@aios/api-client";
+import {
+  Alert,
+  Badge,
+  Button,
+  Card,
+  CardTitle,
+  EmptyState,
+  Field,
+  Input,
+  LoadingState,
+  PageHeader,
+  Select,
+} from "@aios/ui-web";
 import { useState, type FormEvent } from "react";
 import { AppShell } from "../../components/layout/AppShell";
 
@@ -43,56 +56,60 @@ export function ExchangeManagementPage() {
   return (
     <AppShell>
       <div className="space-y-8">
-        <h1 className="text-2xl font-semibold text-slate-100">거래소 연동</h1>
+        <PageHeader title="거래소 연동" />
 
-        <section className="rounded-lg border border-slate-800 p-6">
-          <h2 className="mb-4 text-lg font-medium text-slate-100">연동된 거래소</h2>
+        <Card>
+          <CardTitle>연동된 거래소</CardTitle>
           {isLoading ? (
-            <p className="text-slate-500">불러오는 중...</p>
+            <LoadingState />
           ) : credentials && credentials.length > 0 ? (
-            <ul className="divide-y divide-slate-800">
+            <ul className="divide-y divide-border">
               {credentials.map((c) => (
                 <li key={c.id} className="flex items-center justify-between py-3">
                   <div>
-                    <p className="font-medium text-slate-100">{c.exchange}</p>
-                    <p className="text-sm text-slate-500">
-                      {c.isActive ? "활성" : "비활성"} · 연동일{" "}
-                      {new Date(c.linkedAt).toLocaleDateString()}
+                    <div className="flex items-center gap-2">
+                      <p className="font-medium text-fg">{c.exchange}</p>
+                      <Badge tone={c.isActive ? "success" : "neutral"}>
+                        {c.isActive ? "활성" : "비활성"}
+                      </Badge>
+                    </div>
+                    <p className="text-sm text-fg-muted">
+                      연동일 {new Date(c.linkedAt).toLocaleDateString()}
                     </p>
                     {c.withdrawalPermissionWarning && (
-                      <p className="mt-1 text-sm text-amber-400">
-                        ⚠ {c.withdrawalPermissionWarning}
-                      </p>
+                      <p className="mt-1 text-sm text-warning">⚠ {c.withdrawalPermissionWarning}</p>
                     )}
                   </div>
                   <div className="flex gap-2">
-                    <button
+                    <Button
                       type="button"
+                      variant="secondary"
+                      size="sm"
                       onClick={() => setSelectedExchange(c.exchange)}
-                      className="rounded border border-slate-700 px-3 py-1 text-sm text-slate-300 hover:bg-slate-800"
                     >
                       잔고 조회
-                    </button>
-                    <button
+                    </Button>
+                    <Button
                       type="button"
+                      variant="danger"
+                      size="sm"
                       onClick={() => revoke.mutate(c.exchange)}
-                      className="rounded border border-red-900 px-3 py-1 text-sm text-red-400 hover:bg-red-950"
                     >
                       해지
-                    </button>
+                    </Button>
                   </div>
                 </li>
               ))}
             </ul>
           ) : (
-            <p className="text-slate-500">연동된 거래소가 없습니다.</p>
+            <EmptyState>연동된 거래소가 없습니다.</EmptyState>
           )}
 
           {selectedExchange && balances && (
-            <div className="mt-4 rounded border border-slate-800 p-4">
-              <p className="mb-2 text-sm text-slate-400">{selectedExchange} 잔고</p>
+            <div className="mt-4 rounded-md border border-border bg-surface-hover p-4">
+              <p className="mb-2 text-sm text-fg-secondary">{selectedExchange} 잔고</p>
               {balances.length > 0 ? (
-                <ul className="space-y-1 text-sm text-slate-200">
+                <ul className="tabular space-y-1 text-sm text-fg">
                   {balances.map((b) => (
                     <li key={b.asset}>
                       {b.asset}: {b.available} / {b.total}
@@ -100,71 +117,51 @@ export function ExchangeManagementPage() {
                   ))}
                 </ul>
               ) : (
-                <p className="text-sm text-slate-500">잔고 정보가 없습니다.</p>
+                <p className="text-sm text-fg-muted">잔고 정보가 없습니다.</p>
               )}
             </div>
           )}
-        </section>
+        </Card>
 
-        <section className="rounded-lg border border-slate-800 p-6">
-          <h2 className="mb-4 text-lg font-medium text-slate-100">새 거래소 연동</h2>
-          <form onSubmit={handleSubmit} className="max-w-sm space-y-3">
-            <div className="space-y-1">
-              <label className="text-sm text-slate-400">거래소</label>
-              <select
-                value={exchange}
-                onChange={(e) => setExchange(e.target.value)}
-                className="w-full rounded border border-slate-700 bg-slate-900 px-3 py-2 text-slate-100"
-              >
+        <Card className="max-w-lg">
+          <CardTitle>새 거래소 연동</CardTitle>
+          <form onSubmit={handleSubmit} className="space-y-3">
+            <Field label="거래소">
+              <Select value={exchange} onChange={(e) => setExchange(e.target.value)}>
                 {EXCHANGES.map((ex) => (
                   <option key={ex} value={ex}>
                     {ex}
                   </option>
                 ))}
-              </select>
-            </div>
-            <div className="space-y-1">
-              <label className="text-sm text-slate-400">API Key</label>
-              <input
-                type="text"
-                required
-                value={apiKey}
-                onChange={(e) => setApiKey(e.target.value)}
-                className="w-full rounded border border-slate-700 bg-slate-900 px-3 py-2 text-slate-100"
-              />
-            </div>
-            <div className="space-y-1">
-              <label className="text-sm text-slate-400">API Secret</label>
-              <input
+              </Select>
+            </Field>
+            <Field label="API Key">
+              <Input type="text" required value={apiKey} onChange={(e) => setApiKey(e.target.value)} />
+            </Field>
+            <Field label="API Secret">
+              <Input
                 type="password"
                 required
                 value={apiSecret}
                 onChange={(e) => setApiSecret(e.target.value)}
-                className="w-full rounded border border-slate-700 bg-slate-900 px-3 py-2 text-slate-100"
               />
-            </div>
+            </Field>
             {exchange === "bitget" && (
-              <div className="space-y-1">
-                <label className="text-sm text-slate-400">API Passphrase</label>
-                <input
+              <Field label="API Passphrase">
+                <Input
                   type="password"
                   required
                   value={apiPassphrase}
                   onChange={(e) => setApiPassphrase(e.target.value)}
-                  className="w-full rounded border border-slate-700 bg-slate-900 px-3 py-2 text-slate-100"
                 />
-              </div>
+              </Field>
             )}
-            {error && <p className="text-sm text-red-400">{error}</p>}
-            <button
-              type="submit"
-              disabled={register.isPending}
-              className="w-full rounded bg-slate-100 px-3 py-2 font-medium text-slate-950 hover:bg-white disabled:opacity-50"
-            >
-              {register.isPending ? "등록 중..." : "등록"}
-            </button>
+            {error && <Alert>{error}</Alert>}
+            <Button type="submit" loading={register.isPending} className="w-full">
+              등록
+            </Button>
           </form>
-        </section>
+        </Card>
       </div>
     </AppShell>
   );

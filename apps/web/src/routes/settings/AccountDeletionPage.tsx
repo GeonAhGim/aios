@@ -5,6 +5,7 @@ import {
   useWhitelistEntries,
 } from "@aios/shared-hooks";
 import { ApiError } from "@aios/api-client";
+import { Alert, Button, Card, CardTitle, EmptyState, Field, Input, LoadingState, PageHeader, Select } from "@aios/ui-web";
 import { useState, type FormEvent } from "react";
 import { useNavigate } from "react-router-dom";
 import { AppShell } from "../../components/layout/AppShell";
@@ -61,17 +62,17 @@ export function AccountDeletionPage() {
   return (
     <AppShell>
       <div className="max-w-lg space-y-8">
-        <h1 className="text-2xl font-semibold text-slate-100">계정 보안 설정</h1>
+        <PageHeader title="계정 보안 설정" />
 
-        <section className="rounded-lg border border-slate-800 p-6">
-          <h2 className="mb-2 text-lg font-medium text-slate-100">비상 출금 목적지 화이트리스트</h2>
-          <p className="mb-4 text-xs text-slate-500">
+        <Card>
+          <CardTitle>비상 출금 목적지 화이트리스트</CardTitle>
+          <p className="mb-4 text-xs text-fg-muted">
             위기 상황이 닥친 뒤에는 신규 등록이 불가능합니다 — 평상시에 미리 등록해두세요.
           </p>
           {whitelistLoading ? (
-            <p className="text-slate-500">불러오는 중...</p>
+            <LoadingState />
           ) : whitelist && whitelist.length > 0 ? (
-            <ul className="mb-4 space-y-1 text-sm text-slate-300">
+            <ul className="mb-4 space-y-1 text-sm text-fg-secondary">
               {whitelist.map((w) => (
                 <li key={w.id}>
                   {w.exchange} — {w.destinationAddress} {w.label && `(${w.label})`}
@@ -79,92 +80,75 @@ export function AccountDeletionPage() {
               ))}
             </ul>
           ) : (
-            <p className="mb-4 text-sm text-slate-500">등록된 목적지가 없습니다.</p>
-          )}
-          <form onSubmit={handleWhitelistSubmit} className="space-y-2">
-            <div className="grid grid-cols-2 gap-2">
-              <select
-                value={wlExchange}
-                onChange={(e) => setWlExchange(e.target.value)}
-                className="rounded border border-slate-700 bg-slate-900 px-3 py-2 text-slate-100"
-              >
-                <option value="bitget">bitget</option>
-              </select>
-              <input
-                type="text"
-                placeholder="라벨(선택)"
-                value={wlLabel}
-                onChange={(e) => setWlLabel(e.target.value)}
-                className="rounded border border-slate-700 bg-slate-900 px-3 py-2 text-slate-100"
-              />
+            <div className="mb-4">
+              <EmptyState>등록된 목적지가 없습니다.</EmptyState>
             </div>
-            <input
-              type="text"
-              required
-              placeholder="출금 목적지 주소"
-              value={wlAddress}
-              onChange={(e) => setWlAddress(e.target.value)}
-              className="w-full rounded border border-slate-700 bg-slate-900 px-3 py-2 text-slate-100"
-            />
-            <input
-              type="password"
-              required
-              placeholder="비밀번호 확인"
-              value={wlPassword}
-              onChange={(e) => setWlPassword(e.target.value)}
-              className="w-full rounded border border-slate-700 bg-slate-900 px-3 py-2 text-slate-100"
-            />
-            {wlError && <p className="text-sm text-red-400">{wlError}</p>}
-            <button
-              type="submit"
-              disabled={registerWhitelist.isPending}
-              className="rounded bg-slate-100 px-4 py-2 text-sm font-medium text-slate-950 hover:bg-white disabled:opacity-50"
-            >
-              {registerWhitelist.isPending ? "등록 중..." : "목적지 등록"}
-            </button>
+          )}
+          <form onSubmit={handleWhitelistSubmit} className="space-y-3">
+            <div className="grid grid-cols-2 gap-3">
+              <Field label="거래소">
+                <Select value={wlExchange} onChange={(e) => setWlExchange(e.target.value)}>
+                  <option value="bitget">bitget</option>
+                </Select>
+              </Field>
+              <Field label="라벨 (선택)">
+                <Input type="text" value={wlLabel} onChange={(e) => setWlLabel(e.target.value)} />
+              </Field>
+            </div>
+            <Field label="출금 목적지 주소">
+              <Input type="text" required value={wlAddress} onChange={(e) => setWlAddress(e.target.value)} />
+            </Field>
+            <Field label="비밀번호 확인">
+              <Input
+                type="password"
+                required
+                value={wlPassword}
+                onChange={(e) => setWlPassword(e.target.value)}
+              />
+            </Field>
+            {wlError && <Alert>{wlError}</Alert>}
+            <Button type="submit" loading={registerWhitelist.isPending}>
+              목적지 등록
+            </Button>
           </form>
-        </section>
+        </Card>
 
-        <section className="rounded-lg border border-red-900 p-6">
-          <h2 className="mb-2 text-lg font-medium text-red-400">회원 탈퇴</h2>
+        <Card className="border-danger/30">
+          <h2 className="mb-2 text-lg font-semibold text-danger">회원 탈퇴</h2>
           {deletionResult ? (
             <div className="space-y-3">
-              <p className="text-sm text-emerald-300">{deletionResult}</p>
-              <button
+              <Alert tone="success">{deletionResult}</Alert>
+              <Button
                 type="button"
+                variant="secondary"
                 onClick={() => {
                   logout();
                   navigate("/login");
                 }}
-                className="rounded border border-slate-700 px-4 py-2 text-sm text-slate-300 hover:bg-slate-800"
               >
                 로그아웃
-              </button>
+              </Button>
             </div>
           ) : (
-            <form onSubmit={handleDeleteSubmit} className="space-y-2">
-              <p className="text-xs text-slate-500">
+            <form onSubmit={handleDeleteSubmit} className="space-y-3">
+              <p className="text-xs text-fg-muted">
                 RUNNING 상태 실행이 있으면 탈퇴가 거부됩니다 — 먼저 모든 실행을 중지해주세요.
               </p>
-              <input
-                type="password"
-                required
-                placeholder="비밀번호 확인"
-                value={deletePassword}
-                onChange={(e) => setDeletePassword(e.target.value)}
-                className="w-full rounded border border-slate-700 bg-slate-900 px-3 py-2 text-slate-100"
-              />
-              {deleteError && <p className="text-sm text-red-400">{deleteError}</p>}
-              <button
-                type="submit"
-                disabled={requestDeletion.isPending}
-                className="rounded border border-red-800 px-4 py-2 text-sm text-red-400 hover:bg-red-950 disabled:opacity-50"
-              >
-                {requestDeletion.isPending ? "처리 중..." : "탈퇴 요청"}
-              </button>
+              <Field label="비밀번호 확인">
+                <Input
+                  type="password"
+                  required
+                  value={deletePassword}
+                  onChange={(e) => setDeletePassword(e.target.value)}
+                />
+              </Field>
+              {deleteError && <Alert>{deleteError}</Alert>}
+              <Button type="submit" variant="danger" loading={requestDeletion.isPending}>
+                탈퇴 요청
+              </Button>
             </form>
           )}
-        </section>
+        </Card>
       </div>
     </AppShell>
   );

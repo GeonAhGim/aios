@@ -1,5 +1,6 @@
 import { useSubmitDispute } from "@aios/shared-hooks";
 import { ApiError } from "@aios/api-client";
+import { Alert, Button, Field, Input, PageHeader, Textarea } from "@aios/ui-web";
 import { useState, type FormEvent } from "react";
 import { AppShell } from "../../components/layout/AppShell";
 
@@ -27,41 +28,28 @@ export function DisputeSubmitPage() {
   return (
     <AppShell>
       <div className="max-w-md space-y-6">
-        <h1 className="text-2xl font-semibold text-slate-100">분쟁 신고</h1>
+        <PageHeader title="분쟁 신고" />
         {submitted ? (
-          <div className="rounded border border-emerald-900 bg-emerald-950/30 p-4 text-sm text-emerald-300">
+          <Alert tone="success">
             분쟁이 접수됐습니다 (#{submitted.disputeId}, {submitted.status}).
-          </div>
+          </Alert>
         ) : (
-          <form onSubmit={handleSubmit} className="space-y-3">
-            <div className="space-y-1">
-              <label className="text-sm text-slate-400">구매 ID</label>
-              <input
+          <form onSubmit={handleSubmit} className="space-y-3 rounded-lg border border-border bg-surface p-6">
+            <Field label="구매 ID">
+              <Input
                 type="number"
                 required
                 value={purchaseId}
                 onChange={(e) => setPurchaseId(e.target.value)}
-                className="w-full rounded border border-slate-700 bg-slate-900 px-3 py-2 text-slate-100"
               />
-            </div>
-            <div className="space-y-1">
-              <label className="text-sm text-slate-400">사유</label>
-              <textarea
-                required
-                value={reason}
-                onChange={(e) => setReason(e.target.value)}
-                rows={4}
-                className="w-full rounded border border-slate-700 bg-slate-900 px-3 py-2 text-slate-100"
-              />
-            </div>
-            {error && <p className="text-sm text-red-400">{error}</p>}
-            <button
-              type="submit"
-              disabled={submitDispute.isPending}
-              className="w-full rounded bg-slate-100 px-3 py-2 font-medium text-slate-950 hover:bg-white disabled:opacity-50"
-            >
-              {submitDispute.isPending ? "제출 중..." : "분쟁 신고 제출"}
-            </button>
+            </Field>
+            <Field label="사유">
+              <Textarea required value={reason} onChange={(e) => setReason(e.target.value)} rows={4} />
+            </Field>
+            {error && <Alert>{error}</Alert>}
+            <Button type="submit" loading={submitDispute.isPending} className="w-full">
+              분쟁 신고 제출
+            </Button>
           </form>
         )}
       </div>

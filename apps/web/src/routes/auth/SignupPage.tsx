@@ -1,7 +1,9 @@
 import { useSignup } from "@aios/shared-hooks";
 import { ApiError } from "@aios/api-client";
+import { Alert, Button, Field, Input } from "@aios/ui-web";
 import { useState, type FormEvent } from "react";
 import { Link, useNavigate } from "react-router-dom";
+import { AuthLayout } from "./AuthLayout";
 
 export function SignupPage() {
   const [email, setEmail] = useState("");
@@ -22,51 +24,40 @@ export function SignupPage() {
   }
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-slate-950 px-4">
-      <form onSubmit={handleSubmit} className="w-full max-w-sm space-y-4">
-        <h1 className="text-2xl font-semibold text-slate-100">회원가입</h1>
-        <div className="space-y-1">
-          <label className="text-sm text-slate-400" htmlFor="email">
-            이메일
-          </label>
-          <input
+    <AuthLayout title="AIOS 회원가입" subtitle="자동매매를 시작하기 위한 첫 단계입니다">
+      <form onSubmit={handleSubmit} className="space-y-4">
+        <Field label="이메일" htmlFor="email">
+          <Input
             id="email"
             type="email"
             required
+            autoComplete="email"
             value={email}
             onChange={(e) => setEmail(e.target.value)}
-            className="w-full rounded border border-slate-700 bg-slate-900 px-3 py-2 text-slate-100 outline-none focus:border-slate-400"
           />
-        </div>
-        <div className="space-y-1">
-          <label className="text-sm text-slate-400" htmlFor="password">
-            비밀번호 (12자 이상)
-          </label>
-          <input
+        </Field>
+        <Field label="비밀번호" htmlFor="password" hint="12자 이상">
+          <Input
             id="password"
             type="password"
             required
             minLength={12}
+            autoComplete="new-password"
             value={password}
             onChange={(e) => setPassword(e.target.value)}
-            className="w-full rounded border border-slate-700 bg-slate-900 px-3 py-2 text-slate-100 outline-none focus:border-slate-400"
           />
-        </div>
-        {error && <p className="text-sm text-red-400">{error}</p>}
-        <button
-          type="submit"
-          disabled={signup.isPending}
-          className="w-full rounded bg-slate-100 px-3 py-2 font-medium text-slate-950 hover:bg-white disabled:opacity-50"
-        >
-          {signup.isPending ? "가입 중..." : "가입하기"}
-        </button>
-        <p className="text-center text-sm text-slate-400">
+        </Field>
+        {error && <Alert>{error}</Alert>}
+        <Button type="submit" loading={signup.isPending} className="w-full">
+          가입하기
+        </Button>
+        <p className="text-center text-sm text-fg-muted">
           이미 계정이 있으신가요?{" "}
-          <Link to="/login" className="text-slate-100 underline">
+          <Link to="/login" className="text-accent-hover hover:underline">
             로그인
           </Link>
         </p>
       </form>
-    </div>
+    </AuthLayout>
   );
 }

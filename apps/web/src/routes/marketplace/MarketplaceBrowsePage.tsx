@@ -1,5 +1,6 @@
 import { useListingSearch } from "@aios/shared-hooks";
 import type { ListingSummary } from "@aios/shared-types";
+import { Button, EmptyState, LoadingState, PageHeader } from "@aios/ui-web";
 import { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { AppShell } from "../../components/layout/AppShell";
@@ -16,18 +17,17 @@ export function MarketplaceBrowsePage() {
   return (
     <AppShell>
       <div className="space-y-6">
-        <div className="flex items-center justify-between">
-          <h1 className="text-2xl font-semibold text-slate-100">마켓플레이스</h1>
-          <Link
-            to="/marketplace/sell"
-            className="rounded bg-slate-100 px-4 py-2 text-sm font-medium text-slate-950 hover:bg-white"
-          >
-            내 전략 판매하기
-          </Link>
-        </div>
+        <PageHeader
+          title="마켓플레이스"
+          action={
+            <Link to="/marketplace/sell">
+              <Button type="button">내 전략 판매하기</Button>
+            </Link>
+          }
+        />
 
         {isLoading ? (
-          <p className="text-slate-500">불러오는 중...</p>
+          <LoadingState />
         ) : data && data.items.length > 0 ? (
           <div className="grid grid-cols-3 gap-4">
             {data.items.map((listing) => (
@@ -35,42 +35,44 @@ export function MarketplaceBrowsePage() {
                 key={listing.id}
                 type="button"
                 onClick={() => openListing(listing)}
-                className="rounded-lg border border-slate-800 p-4 text-left hover:border-slate-600"
+                className="rounded-lg border border-border bg-surface p-4 text-left transition-colors hover:border-border-strong hover:bg-surface-hover"
               >
-                <p className="font-medium text-slate-100">{listing.strategyId}</p>
-                <p className="text-sm text-slate-500">v{listing.strategyVersion}</p>
-                <p className="mt-2 text-lg font-semibold text-slate-100">
+                <p className="font-medium text-fg">{listing.strategyId}</p>
+                <p className="text-sm text-fg-muted">v{listing.strategyVersion}</p>
+                <p className="tabular mt-2 text-lg font-semibold text-fg">
                   {listing.price ? `${listing.price} USDT` : "가격 미정"}
                 </p>
                 {listing.sharpeRatio && (
-                  <p className="text-xs text-slate-500">Sharpe {listing.sharpeRatio}</p>
+                  <p className="tabular text-xs text-fg-muted">Sharpe {listing.sharpeRatio}</p>
                 )}
               </button>
             ))}
           </div>
         ) : (
-          <p className="text-slate-500">등록된 리스팅이 없습니다.</p>
+          <EmptyState>등록된 리스팅이 없습니다.</EmptyState>
         )}
 
         {data && data.total > data.pageSize && (
           <div className="flex justify-center gap-2">
-            <button
+            <Button
               type="button"
+              variant="secondary"
+              size="sm"
               disabled={page <= 1}
               onClick={() => setPage((p) => p - 1)}
-              className="rounded border border-slate-700 px-3 py-1 text-sm text-slate-300 disabled:opacity-40"
             >
               이전
-            </button>
-            <span className="text-sm text-slate-400">{page}</span>
-            <button
+            </Button>
+            <span className="flex items-center px-2 text-sm text-fg-muted">{page}</span>
+            <Button
               type="button"
+              variant="secondary"
+              size="sm"
               disabled={page * data.pageSize >= data.total}
               onClick={() => setPage((p) => p + 1)}
-              className="rounded border border-slate-700 px-3 py-1 text-sm text-slate-300 disabled:opacity-40"
             >
               다음
-            </button>
+            </Button>
           </div>
         )}
       </div>

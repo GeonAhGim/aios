@@ -1,5 +1,6 @@
 import { useApproveRequest, useRejectRequest } from "@aios/shared-hooks";
 import { ApiError } from "@aios/api-client";
+import { Alert, Button, Field, Input, PageHeader } from "@aios/ui-web";
 import { useState } from "react";
 import { useParams } from "react-router-dom";
 import { AppShell } from "../../components/layout/AppShell";
@@ -40,42 +41,40 @@ export function AdminApprovalRequestPage() {
   return (
     <AppShell>
       <div className="max-w-md space-y-6">
-        <h1 className="text-2xl font-semibold text-slate-100">승인 요청 처리</h1>
-        <p className="text-xs text-slate-500">
+        <PageHeader title="승인 요청 처리" />
+        <p className="text-xs text-fg-muted">
           FD-10.1(LIVE 실행 승인) / FD-9.4b(Circuit Breaker 재가동 승인)이 동일 구조를 공유합니다.
         </p>
-        <div className="space-y-1">
-          <label className="text-sm text-slate-400">승인요청 ID</label>
-          <input
-            type="number"
-            value={requestId}
-            onChange={(e) => setRequestId(e.target.value)}
-            className="w-full rounded border border-slate-700 bg-slate-900 px-3 py-2 text-slate-100"
-          />
-        </div>
-        {error && <p className="text-sm text-red-400">{error}</p>}
-        {result && (
-          <p className="text-sm text-emerald-300">
-            {result.requestedAction} → {result.status}
-          </p>
-        )}
-        <div className="flex gap-3">
-          <button
-            type="button"
-            onClick={handleApprove}
-            disabled={!requestId || approve.isPending}
-            className="rounded bg-emerald-700 px-4 py-2 text-sm text-white hover:bg-emerald-600 disabled:opacity-50"
-          >
-            승인
-          </button>
-          <button
-            type="button"
-            onClick={handleReject}
-            disabled={!requestId || reject.isPending}
-            className="rounded border border-red-900 px-4 py-2 text-sm text-red-400 hover:bg-red-950 disabled:opacity-50"
-          >
-            거절
-          </button>
+        <div className="space-y-4 rounded-lg border border-border bg-surface p-6">
+          <Field label="승인요청 ID">
+            <Input type="number" value={requestId} onChange={(e) => setRequestId(e.target.value)} />
+          </Field>
+          {error && <Alert>{error}</Alert>}
+          {result && (
+            <Alert tone="success">
+              {result.requestedAction} → {result.status}
+            </Alert>
+          )}
+          <div className="flex gap-3">
+            <Button
+              type="button"
+              className="!bg-success hover:!bg-success/90"
+              onClick={handleApprove}
+              disabled={!requestId}
+              loading={approve.isPending}
+            >
+              승인
+            </Button>
+            <Button
+              type="button"
+              variant="danger"
+              onClick={handleReject}
+              disabled={!requestId}
+              loading={reject.isPending}
+            >
+              거절
+            </Button>
+          </div>
         </div>
       </div>
     </AppShell>

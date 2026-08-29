@@ -1,6 +1,7 @@
 import { useCreateStrategy, useIndicators, usePreviewStrategy } from "@aios/shared-hooks";
 import { ApiError } from "@aios/api-client";
 import type { PreviewCondition } from "@aios/shared-types";
+import { Alert, Button, Field, PageHeader, Select } from "@aios/ui-web";
 import { useState } from "react";
 import { AppShell } from "../../components/layout/AppShell";
 import { ConditionGroup } from "./components/ConditionGroup";
@@ -96,43 +97,32 @@ export function StrategyBuilderPage() {
   return (
     <AppShell>
       <div className="space-y-6">
-        <h1 className="text-2xl font-semibold text-slate-100">전략 편집기</h1>
+        <PageHeader title="전략 편집기" />
 
-        <div className="grid grid-cols-3 gap-4">
-          <div className="space-y-1">
-            <label className="text-sm text-slate-400">전략 ID</label>
+        <div className="grid grid-cols-3 gap-4 rounded-lg border border-border bg-surface p-4">
+          <Field label="전략 ID">
             <input
               type="text"
               value={strategyId}
               onChange={(e) => setStrategyId(e.target.value)}
               placeholder="my-rsi-strategy"
-              className="w-full rounded border border-slate-700 bg-slate-900 px-3 py-2 text-slate-100"
+              className="w-full rounded-md border border-border bg-bg px-3 py-2 text-sm text-fg placeholder:text-fg-muted outline-none focus:border-accent focus:ring-1 focus:ring-accent"
             />
-          </div>
-          <div className="space-y-1">
-            <label className="text-sm text-slate-400">대상 자산</label>
-            <select
-              value={targetAsset}
-              onChange={(e) => setTargetAsset(e.target.value)}
-              className="w-full rounded border border-slate-700 bg-slate-900 px-3 py-2 text-slate-100"
-            >
+          </Field>
+          <Field label="대상 자산">
+            <Select value={targetAsset} onChange={(e) => setTargetAsset(e.target.value)}>
               {TARGET_ASSETS.map((asset) => (
                 <option key={asset} value={asset}>
                   {asset}
                 </option>
               ))}
-            </select>
-          </div>
-          <div className="space-y-1">
-            <label className="text-sm text-slate-400">거래소</label>
-            <select
-              value={exchange}
-              onChange={(e) => setExchange(e.target.value)}
-              className="w-full rounded border border-slate-700 bg-slate-900 px-3 py-2 text-slate-100"
-            >
+            </Select>
+          </Field>
+          <Field label="거래소">
+            <Select value={exchange} onChange={(e) => setExchange(e.target.value)}>
               <option value="bitget">bitget</option>
-            </select>
-          </div>
+            </Select>
+          </Field>
         </div>
 
         <ConditionGroup
@@ -160,32 +150,27 @@ export function StrategyBuilderPage() {
           indicators={indicators}
         />
 
-        {error && <p className="text-sm text-red-400">{error}</p>}
+        {error && <Alert>{error}</Alert>}
 
         <div className="flex gap-3">
-          <button
+          <Button
             type="button"
+            variant="secondary"
             onClick={handlePreview}
-            disabled={previewStrategy.isPending}
-            className="rounded border border-slate-700 px-4 py-2 text-sm text-slate-200 hover:bg-slate-800 disabled:opacity-50"
+            loading={previewStrategy.isPending}
           >
-            {previewStrategy.isPending ? "미리보기 중..." : "진입 조건 미리보기"}
-          </button>
-          <button
-            type="button"
-            onClick={handleSave}
-            disabled={createStrategy.isPending}
-            className="rounded bg-slate-100 px-4 py-2 text-sm font-medium text-slate-950 hover:bg-white disabled:opacity-50"
-          >
-            {createStrategy.isPending ? "저장 중..." : "전략 저장"}
-          </button>
+            진입 조건 미리보기
+          </Button>
+          <Button type="button" onClick={handleSave} loading={createStrategy.isPending}>
+            전략 저장
+          </Button>
         </div>
 
         {previewStrategy.data && (
-          <div className="rounded border border-slate-800 p-4 text-sm text-slate-300">
-            <p className="mb-1 text-xs text-amber-400">{previewStrategy.data.disclaimer}</p>
+          <div className="rounded-lg border border-border bg-surface p-4 text-sm text-fg-secondary">
+            <p className="mb-1 text-xs text-warning">{previewStrategy.data.disclaimer}</p>
             {previewStrategy.data.message ? (
-              <p className="text-slate-500">{previewStrategy.data.message}</p>
+              <p className="text-fg-muted">{previewStrategy.data.message}</p>
             ) : (
               <p>
                 최근 {previewStrategy.data.signalIndices.length}개 신호 발생 시점:{" "}
@@ -197,9 +182,9 @@ export function StrategyBuilderPage() {
         )}
 
         {saved && (
-          <div className="rounded border border-emerald-900 bg-emerald-950/30 p-4 text-sm text-emerald-300">
+          <Alert tone="success">
             전략이 저장됐습니다 — {saved.strategyId}@{saved.version} ({saved.status})
-          </div>
+          </Alert>
         )}
       </div>
     </AppShell>

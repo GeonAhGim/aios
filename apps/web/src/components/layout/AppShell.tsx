@@ -1,6 +1,7 @@
 import { useLogout, useMe } from "@aios/shared-hooks";
+import { cn } from "@aios/ui-web";
 import type { ReactNode } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { Link, useLocation, useNavigate } from "react-router-dom";
 
 const NAV_ITEMS = [
   { to: "/dashboard", label: "대시보드" },
@@ -12,42 +13,80 @@ const NAV_ITEMS = [
   { to: "/reports", label: "보고서" },
 ];
 
+function Logo() {
+  return (
+    <Link to="/dashboard" className="flex items-center gap-2 text-fg">
+      <span className="flex h-7 w-7 items-center justify-center rounded-md bg-accent text-sm font-bold text-white">
+        A
+      </span>
+      <span className="text-base font-semibold tracking-tight">AIOS</span>
+    </Link>
+  );
+}
+
 export function AppShell({ children }: { children: ReactNode }) {
   const { data: me } = useMe();
   const logout = useLogout();
   const navigate = useNavigate();
+  const location = useLocation();
 
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-100">
-      <header className="border-b border-slate-800 px-6 py-4">
-        <div className="mx-auto flex max-w-6xl flex-wrap items-center justify-between gap-y-2">
-          <Link to="/dashboard" className="text-lg font-semibold tracking-tight">
-            AIOS
-          </Link>
-          <nav className="flex flex-wrap items-center gap-4 text-sm text-slate-300">
-            {NAV_ITEMS.map((item) => (
-              <Link key={item.to} to={item.to} className="hover:text-white">
-                {item.label}
-              </Link>
-            ))}
-            <Link to="/settings/approval" className="hover:text-white">
+    <div className="min-h-screen bg-bg text-fg">
+      <header className="border-b border-border">
+        <div className="mx-auto flex max-w-6xl flex-wrap items-center justify-between gap-y-2 px-6 py-3">
+          <Logo />
+          <nav className="flex flex-wrap items-center gap-1 text-sm">
+            {NAV_ITEMS.map((item) => {
+              const isActive = location.pathname.startsWith(item.to);
+              return (
+                <Link
+                  key={item.to}
+                  to={item.to}
+                  className={cn(
+                    "rounded-md px-3 py-1.5 transition-colors",
+                    isActive
+                      ? "bg-accent-muted text-accent-hover"
+                      : "text-fg-secondary hover:bg-surface-hover hover:text-fg",
+                  )}
+                >
+                  {item.label}
+                </Link>
+              );
+            })}
+            <Link
+              to="/settings/approval"
+              className={cn(
+                "rounded-md px-3 py-1.5 transition-colors",
+                location.pathname.startsWith("/settings")
+                  ? "bg-accent-muted text-accent-hover"
+                  : "text-fg-secondary hover:bg-surface-hover hover:text-fg",
+              )}
+            >
               설정
             </Link>
             {me?.isPlatformAdmin && (
-              <Link to="/admin" className="text-amber-400 hover:text-amber-300">
+              <Link
+                to="/admin"
+                className={cn(
+                  "rounded-md px-3 py-1.5 transition-colors",
+                  location.pathname.startsWith("/admin")
+                    ? "bg-warning-muted text-warning"
+                    : "text-warning/80 hover:bg-warning-muted hover:text-warning",
+                )}
+              >
                 관리자
               </Link>
             )}
           </nav>
-          <div className="flex items-center gap-4 text-sm text-slate-400">
-            <span>{me?.email}</span>
+          <div className="flex items-center gap-3 text-sm">
+            <span className="text-fg-muted">{me?.email}</span>
             <button
               type="button"
               onClick={() => {
                 logout();
                 navigate("/login");
               }}
-              className="rounded border border-slate-700 px-3 py-1 hover:bg-slate-800"
+              className="rounded-md border border-border-strong px-3 py-1.5 text-fg-secondary transition-colors hover:bg-surface-hover hover:text-fg"
             >
               로그아웃
             </button>

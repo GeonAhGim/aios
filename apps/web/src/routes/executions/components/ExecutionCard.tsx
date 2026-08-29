@@ -1,5 +1,6 @@
 import { usePauseExecution, useRetireExecution, useStartExecution } from "@aios/shared-hooks";
 import type { ExecutionCardResponse } from "@aios/shared-types";
+import { Button, StatusBadge } from "@aios/ui-web";
 
 interface ExecutionCardProps {
   execution: ExecutionCardResponse;
@@ -15,56 +16,62 @@ export function ExecutionCard({ execution }: ExecutionCardProps) {
   const pause = usePauseExecution();
   const retire = useRetireExecution();
 
+  const realized = Number(execution.realizedPnl);
+  const unrealized = Number(execution.unrealizedPnl);
+
   return (
-    <div className="rounded-lg border border-slate-800 p-4">
+    <div className="rounded-lg border border-border bg-surface p-4">
       <div className="flex items-center justify-between">
         <div>
-          <p className="font-medium text-slate-100">{execution.strategyId}</p>
-          <p className="text-sm text-slate-500">
+          <p className="font-medium text-fg">{execution.strategyId}</p>
+          <p className="text-sm text-fg-muted">
             {execution.exchange} · {execution.mode} · 배분 {execution.allocatedCapital}
           </p>
         </div>
-        <span className="rounded bg-slate-800 px-2 py-1 text-xs text-slate-300">
-          {execution.status}
-        </span>
+        <StatusBadge status={execution.status} />
       </div>
-      <div className="mt-3 grid grid-cols-2 gap-x-4 text-sm text-slate-400">
-        <p>실현 손익: {execution.realizedPnl}</p>
-        <p>미실현 손익: {execution.unrealizedPnl}</p>
+      <div className="tabular mt-3 grid grid-cols-2 gap-x-4 text-sm">
+        <p className={realized >= 0 ? "text-success" : "text-danger"}>
+          실현 손익 {execution.realizedPnl}
+        </p>
+        <p className={unrealized >= 0 ? "text-success" : "text-danger"}>
+          미실현 손익 {execution.unrealizedPnl}
+        </p>
       </div>
-      {start.isError && (
-        <p className="mt-2 text-xs text-red-400">{(start.error as Error).message}</p>
-      )}
+      {start.isError && <p className="mt-2 text-xs text-danger">{(start.error as Error).message}</p>}
       <div className="mt-3 flex gap-2">
         {execution.status !== "RUNNING" && execution.status !== "RETIRED" && (
-          <button
+          <Button
             type="button"
+            variant="secondary"
+            size="sm"
             onClick={() => start.mutate(execution.executionId)}
-            disabled={start.isPending}
-            className="rounded border border-slate-700 px-3 py-1 text-sm text-slate-200 hover:bg-slate-800 disabled:opacity-50"
+            loading={start.isPending}
           >
             시작
-          </button>
+          </Button>
         )}
         {execution.status === "RUNNING" && (
-          <button
+          <Button
             type="button"
+            variant="secondary"
+            size="sm"
             onClick={() => pause.mutate(execution.executionId)}
-            disabled={pause.isPending}
-            className="rounded border border-slate-700 px-3 py-1 text-sm text-slate-200 hover:bg-slate-800 disabled:opacity-50"
+            loading={pause.isPending}
           >
             일시정지
-          </button>
+          </Button>
         )}
         {execution.status !== "RETIRED" && (
-          <button
+          <Button
             type="button"
+            variant="danger"
+            size="sm"
             onClick={() => retire.mutate({ executionId: execution.executionId })}
-            disabled={retire.isPending}
-            className="rounded border border-red-900 px-3 py-1 text-sm text-red-400 hover:bg-red-950 disabled:opacity-50"
+            loading={retire.isPending}
           >
             중지
-          </button>
+          </Button>
         )}
       </div>
     </div>

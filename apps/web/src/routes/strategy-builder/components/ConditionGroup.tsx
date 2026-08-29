@@ -1,4 +1,5 @@
 import type { PreviewCondition } from "@aios/shared-types";
+import { Select } from "@aios/ui-web";
 import { ConditionRow } from "./ConditionRow";
 
 interface ConditionGroupProps {
@@ -26,18 +27,18 @@ export function ConditionGroup({
   indicators,
 }: ConditionGroupProps) {
   return (
-    <div className="space-y-2 rounded border border-slate-800 p-4">
+    <div className="space-y-3 rounded-lg border border-border bg-surface p-4">
       <div className="flex items-center justify-between">
-        <h3 className="text-sm font-medium text-slate-200">{title}</h3>
+        <h3 className="text-sm font-semibold text-fg">{title}</h3>
         {conditions.length > 1 && (
-          <select
+          <Select
             value={combine}
             onChange={(e) => onCombineChange(e.target.value as "AND" | "OR")}
-            className="rounded border border-slate-700 bg-slate-900 px-2 py-1 text-xs text-slate-300"
+            className="w-auto py-1 text-xs"
           >
             <option value="AND">모두 만족(AND)</option>
             <option value="OR">하나라도 만족(OR)</option>
-          </select>
+          </Select>
         )}
       </div>
       <div className="space-y-2">
@@ -56,7 +57,7 @@ export function ConditionGroup({
       <button
         type="button"
         onClick={() => onConditionsChange([...conditions, { ...EMPTY_CONDITION }])}
-        className="text-xs text-slate-400 hover:text-slate-200"
+        className="text-xs font-medium text-accent-hover hover:underline"
       >
         + 조건 추가
       </button>

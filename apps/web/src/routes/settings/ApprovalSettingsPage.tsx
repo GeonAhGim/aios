@@ -1,5 +1,6 @@
 import { useApprovalSettings, useUpdateApprovalSettings } from "@aios/shared-hooks";
 import { ApiError } from "@aios/api-client";
+import { Alert, Button, Field, Input, LoadingState, PageHeader } from "@aios/ui-web";
 import { useEffect, useState } from "react";
 import { AppShell } from "../../components/layout/AppShell";
 import { RiskWarningModal } from "../../components/RiskWarningModal";
@@ -41,54 +42,49 @@ export function ApprovalSettingsPage() {
   return (
     <AppShell>
       <div className="max-w-md space-y-6">
-        <h1 className="text-2xl font-semibold text-slate-100">승인 방식 설정</h1>
+        <PageHeader title="승인 방식 설정" />
         {isLoading ? (
-          <p className="text-slate-500">불러오는 중...</p>
+          <LoadingState />
         ) : (
-          <div className="space-y-4">
+          <div className="space-y-4 rounded-lg border border-border bg-surface p-6">
             <div className="space-y-2">
-              <label className="flex items-center gap-2 text-slate-200">
+              <label className="flex items-center gap-2 text-sm text-fg">
                 <input
                   type="radio"
                   checked={mode === "SOLO"}
                   onChange={() => setMode("SOLO")}
+                  className="accent-accent"
                 />
                 SOLO — 본인 1인 승인(강제 대기 60초)
               </label>
-              <label className="flex items-center gap-2 text-slate-200">
+              <label className="flex items-center gap-2 text-sm text-fg">
                 <input
                   type="radio"
                   checked={mode === "DUAL"}
                   onChange={() => setMode("DUAL")}
+                  className="accent-accent"
                 />
                 DUAL — 서로 다른 두 계정의 순차 서명
               </label>
             </div>
             {mode === "DUAL" && (
-              <div className="space-y-1">
-                <label className="text-sm text-slate-400">2차 승인자 연락처</label>
-                <input
+              <Field label="2차 승인자 연락처">
+                <Input
                   type="text"
                   value={secondApproverContact}
                   onChange={(e) => setSecondApproverContact(e.target.value)}
-                  className="w-full rounded border border-slate-700 bg-slate-900 px-3 py-2 text-slate-100"
                 />
-              </div>
+              </Field>
             )}
             {settings && (
-              <p className="text-sm text-slate-500">
+              <p className="text-sm text-fg-muted">
                 현재 강제 대기시간: {settings.mandatoryWaitSeconds}초
               </p>
             )}
-            {error && <p className="text-sm text-red-400">{error}</p>}
-            <button
-              type="button"
-              onClick={() => attemptUpdate(false)}
-              disabled={update.isPending}
-              className="rounded bg-slate-100 px-4 py-2 text-sm font-medium text-slate-950 hover:bg-white disabled:opacity-50"
-            >
-              {update.isPending ? "저장 중..." : "저장"}
-            </button>
+            {error && <Alert>{error}</Alert>}
+            <Button type="button" onClick={() => attemptUpdate(false)} loading={update.isPending}>
+              저장
+            </Button>
           </div>
         )}
       </div>

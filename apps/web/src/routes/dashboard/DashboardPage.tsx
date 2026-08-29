@@ -1,4 +1,15 @@
 import { useExecutions, usePortfolio, useRiskProfile } from "@aios/shared-hooks";
+import {
+  AllocationBarChart,
+  Badge,
+  Card,
+  CardTitle,
+  EmptyState,
+  LoadingState,
+  PageHeader,
+  Stat,
+  StatusBadge,
+} from "@aios/ui-web";
 import { AppShell } from "../../components/layout/AppShell";
 
 export function DashboardPage() {
@@ -9,70 +20,57 @@ export function DashboardPage() {
   return (
     <AppShell>
       <div className="space-y-8">
-        <div>
-          <h1 className="text-2xl font-semibold text-slate-100">대시보드</h1>
-          {riskProfile && (
-            <p className="mt-1 text-sm text-slate-400">
-              현재 위험등급:{" "}
-              <span className="font-medium text-slate-200">{riskProfile.riskProfile}</span>
-            </p>
-          )}
-        </div>
+        <PageHeader
+          title="대시보드"
+          action={riskProfile && <Badge tone="accent">위험등급 {riskProfile.riskProfile}</Badge>}
+        />
 
-        <section className="rounded-lg border border-slate-800 p-6">
-          <h2 className="mb-4 text-lg font-medium text-slate-100">포트폴리오 요약</h2>
+        <Card>
+          <CardTitle>포트폴리오 요약</CardTitle>
           {portfolioLoading ? (
-            <p className="text-slate-500">불러오는 중...</p>
+            <LoadingState />
           ) : portfolio ? (
-            <div className="grid grid-cols-3 gap-4 text-sm">
-              <div>
-                <p className="text-slate-500">총 포트폴리오 가치</p>
-                <p className="text-xl font-semibold text-slate-100">
-                  {portfolio.totalPortfolioValue}
-                </p>
+            <div className="space-y-6">
+              <div className="grid grid-cols-3 gap-4">
+                <Stat label="총 포트폴리오 가치" value={portfolio.totalPortfolioValue} />
+                <Stat label="미배분 현금" value={portfolio.unallocatedCash} />
+                <Stat label="배분된 실행 수" value={portfolio.allocations.length} />
               </div>
-              <div>
-                <p className="text-slate-500">미배분 현금</p>
-                <p className="text-xl font-semibold text-slate-100">
-                  {portfolio.unallocatedCash}
-                </p>
-              </div>
-              <div>
-                <p className="text-slate-500">배분된 실행 수</p>
-                <p className="text-xl font-semibold text-slate-100">
-                  {portfolio.allocations.length}
-                </p>
-              </div>
+              {portfolio.allocations.length > 0 && (
+                <AllocationBarChart
+                  allocations={portfolio.allocations.map((a) => ({
+                    name: a.strategyId,
+                    value: Number(a.weightPct),
+                  }))}
+                  unallocatedPct={Number(portfolio.unallocatedCashWeightPct)}
+                />
+              )}
             </div>
-          ) : (
-            <p className="text-slate-500">데이터가 없습니다.</p>
-          )}
-        </section>
+          ) : null}
+        </Card>
 
-        <section className="rounded-lg border border-slate-800 p-6">
-          <h2 className="mb-4 text-lg font-medium text-slate-100">실행 중인 전략</h2>
+        <Card>
+          <CardTitle>실행 중인 전략</CardTitle>
           {executionsLoading ? (
-            <p className="text-slate-500">불러오는 중...</p>
+            <LoadingState />
           ) : executions && executions.length > 0 ? (
-            <ul className="divide-y divide-slate-800">
+            <ul className="divide-y divide-border">
               {executions.map((exec) => (
                 <li key={exec.executionId} className="flex items-center justify-between py-3">
                   <div>
-                    <p className="font-medium text-slate-100">{exec.strategyId}</p>
-                    <p className="text-sm text-slate-500">
+                    <p className="font-medium text-fg">{exec.strategyId}</p>
+                    <p className="text-sm text-fg-muted">
                       {exec.exchange} · {exec.mode}
                     </p>
                   </div>
-                  <span className="rounded bg-slate-800 px-2 py-1 text-xs text-slate-300">
-                    {exec.status}
-                  </span>
+                  <StatusBadge status={exec.status} />
                 </li>
               ))}
             </ul>
           ) : (
-            <p className="text-slate-500">실행 중인 전략이 없습니다.</p>
+            <EmptyState>실행 중인 전략이 없습니다.</EmptyState>
           )}
-        </section>
+        </Card>
       </div>
     </AppShell>
   );

@@ -7,7 +7,11 @@ export function AdminRoute({ children }: { children: ReactNode }) {
   const { data: me, isLoading } = useMe();
 
   if (isLoading) {
-    return <div className="flex h-screen items-center justify-center text-slate-400">로딩 중...</div>;
+    return (
+      <div className="flex h-screen items-center justify-center bg-bg text-fg-muted">
+        로딩 중...
+      </div>
+    );
   }
   if (!me?.isPlatformAdmin) {
     return <Navigate to="/dashboard" replace />;

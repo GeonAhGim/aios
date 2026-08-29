@@ -3,6 +3,7 @@ import {
   useNotificationPreferences,
   useUpdateNotificationPreferences,
 } from "@aios/shared-hooks";
+import { Card, CardTitle, EmptyState, LoadingState, PageHeader, StatusBadge } from "@aios/ui-web";
 import { AppShell } from "../../components/layout/AppShell";
 
 export function NotificationSettingsPage() {
@@ -13,51 +14,49 @@ export function NotificationSettingsPage() {
   return (
     <AppShell>
       <div className="max-w-2xl space-y-8">
-        <h1 className="text-2xl font-semibold text-slate-100">알림 설정</h1>
+        <PageHeader title="알림 설정" />
 
-        <section className="rounded-lg border border-slate-800 p-6">
-          <h2 className="mb-4 text-lg font-medium text-slate-100">수신 설정</h2>
+        <Card>
+          <CardTitle>수신 설정</CardTitle>
           {isLoading ? (
-            <p className="text-slate-500">불러오는 중...</p>
+            <LoadingState />
           ) : preferences ? (
-            <div className="space-y-2">
+            <div className="space-y-3">
               {Object.entries(preferences).map(([key, value]) => (
-                <label key={key} className="flex items-center justify-between text-slate-200">
-                  <span className="text-sm">{key}</span>
+                <label key={key} className="flex items-center justify-between text-sm text-fg">
+                  <span>{key}</span>
                   <input
                     type="checkbox"
                     checked={value}
                     onChange={(e) => update.mutate({ [key]: e.target.checked })}
+                    className="accent-accent"
                   />
                 </label>
               ))}
-              <p className="text-xs text-slate-500">
+              <p className="text-xs text-fg-muted">
                 강제 알림(승인요청, 안전장치 경고 등)은 여기서 끌 수 없습니다.
               </p>
             </div>
           ) : null}
-        </section>
+        </Card>
 
-        <section className="rounded-lg border border-slate-800 p-6">
-          <h2 className="mb-4 text-lg font-medium text-slate-100">알림 이력</h2>
+        <Card>
+          <CardTitle>알림 이력</CardTitle>
           {history && history.length > 0 ? (
-            <ul className="divide-y divide-slate-800 text-sm">
+            <ul className="divide-y divide-border text-sm">
               {history.map((h, i) => (
                 <li key={i} className="flex items-center justify-between py-2">
-                  <span className="text-slate-200">{h.eventType}</span>
-                  <span className="text-slate-500">
-                    {h.channel} ·{" "}
-                    <span className={h.status === "SENT" ? "text-emerald-400" : "text-red-400"}>
-                      {h.status}
-                    </span>
+                  <span className="text-fg">{h.eventType}</span>
+                  <span className="flex items-center gap-2 text-fg-muted">
+                    {h.channel} <StatusBadge status={h.status} />
                   </span>
                 </li>
               ))}
             </ul>
           ) : (
-            <p className="text-sm text-slate-500">알림 이력이 없습니다.</p>
+            <EmptyState>알림 이력이 없습니다.</EmptyState>
           )}
-        </section>
+        </Card>
       </div>
     </AppShell>
   );

@@ -1,4 +1,5 @@
 import { useReport } from "@aios/shared-hooks";
+import { Card, CardTitle, EmptyState, Input, LoadingState, PageHeader, PnlChart, Stat } from "@aios/ui-web";
 import { useState } from "react";
 import { AppShell } from "../../components/layout/AppShell";
 
@@ -16,68 +17,61 @@ export function ReportsPage() {
   return (
     <AppShell>
       <div className="space-y-6">
-        <h1 className="text-2xl font-semibold text-slate-100">기간별 보고서</h1>
+        <PageHeader title="기간별 보고서" />
 
         <div className="flex gap-4">
-          <div className="space-y-1">
-            <label className="text-sm text-slate-400">시작일</label>
-            <input
-              type="date"
-              value={periodStart}
-              onChange={(e) => setPeriodStart(e.target.value)}
-              className="rounded border border-slate-700 bg-slate-900 px-3 py-2 text-slate-100"
-            />
-          </div>
-          <div className="space-y-1">
-            <label className="text-sm text-slate-400">종료일</label>
-            <input
-              type="date"
-              value={periodEnd}
-              onChange={(e) => setPeriodEnd(e.target.value)}
-              className="rounded border border-slate-700 bg-slate-900 px-3 py-2 text-slate-100"
-            />
-          </div>
+          <label className="space-y-1.5">
+            <span className="block text-sm font-medium text-fg-secondary">시작일</span>
+            <Input type="date" value={periodStart} onChange={(e) => setPeriodStart(e.target.value)} />
+          </label>
+          <label className="space-y-1.5">
+            <span className="block text-sm font-medium text-fg-secondary">종료일</span>
+            <Input type="date" value={periodEnd} onChange={(e) => setPeriodEnd(e.target.value)} />
+          </label>
         </div>
 
         {isLoading ? (
-          <p className="text-slate-500">불러오는 중...</p>
+          <LoadingState />
         ) : report ? (
           <>
             <div className="grid grid-cols-4 gap-4">
-              <div className="rounded-lg border border-slate-800 p-4">
-                <p className="text-sm text-slate-500">총 수익률</p>
-                <p className="text-xl font-semibold text-slate-100">{report.totalReturn}%</p>
-              </div>
-              <div className="rounded-lg border border-slate-800 p-4">
-                <p className="text-sm text-slate-500">승률</p>
-                <p className="text-xl font-semibold text-slate-100">
-                  {report.winRate ?? "N/A"}
-                </p>
-              </div>
-              <div className="rounded-lg border border-slate-800 p-4">
-                <p className="text-sm text-slate-500">최대 낙폭(MDD)</p>
-                <p className="text-xl font-semibold text-slate-100">{report.maxDrawdown}%</p>
-              </div>
-              <div className="rounded-lg border border-slate-800 p-4">
-                <p className="text-sm text-slate-500">거래 횟수</p>
-                <p className="text-xl font-semibold text-slate-100">{report.tradeCount}</p>
-              </div>
+              <Stat
+                label="총 수익률"
+                value={`${report.totalReturn}%`}
+                tone={Number(report.totalReturn) >= 0 ? "success" : "danger"}
+              />
+              <Stat label="승률" value={report.winRate ?? "N/A"} />
+              <Stat label="최대 낙폭(MDD)" value={`${report.maxDrawdown}%`} tone="danger" />
+              <Stat label="거래 횟수" value={report.tradeCount} />
             </div>
 
-            <section className="rounded-lg border border-slate-800 p-6">
-              <h2 className="mb-4 text-lg font-medium text-slate-100">전략별 기여도</h2>
+            {report.dailyPnl.length > 0 && (
+              <Card>
+                <CardTitle>손익 추이</CardTitle>
+                <PnlChart
+                  data={report.dailyPnl.map((d) => ({
+                    tradeDate: d.tradeDate,
+                    dailyPnl: Number(d.dailyPnl),
+                    cumulativePnl: Number(d.cumulativePnl),
+                  }))}
+                />
+              </Card>
+            )}
+
+            <Card>
+              <CardTitle>전략별 기여도</CardTitle>
               {report.strategyContributions.length > 0 ? (
                 <table className="w-full text-sm">
-                  <thead className="text-left text-slate-500">
+                  <thead className="text-left text-fg-muted">
                     <tr>
-                      <th className="pb-2">전략</th>
-                      <th className="pb-2">실현 손익</th>
-                      <th className="pb-2">거래수</th>
+                      <th className="pb-2 font-normal">전략</th>
+                      <th className="pb-2 font-normal">실현 손익</th>
+                      <th className="pb-2 font-normal">거래수</th>
                     </tr>
                   </thead>
-                  <tbody className="text-slate-200">
+                  <tbody className="tabular text-fg">
                     {report.strategyContributions.map((c) => (
-                      <tr key={`${c.strategyId}-${c.strategyVersion}`} className="border-t border-slate-800">
+                      <tr key={`${c.strategyId}-${c.strategyVersion}`} className="border-t border-border">
                         <td className="py-2">
                           {c.strategyId}@{c.strategyVersion}
                         </td>
@@ -88,9 +82,9 @@ export function ReportsPage() {
                   </tbody>
                 </table>
               ) : (
-                <p className="text-slate-500">해당 기간 거래 내역이 없습니다.</p>
+                <EmptyState>해당 기간 거래 내역이 없습니다.</EmptyState>
               )}
-            </section>
+            </Card>
           </>
         ) : null}
       </div>

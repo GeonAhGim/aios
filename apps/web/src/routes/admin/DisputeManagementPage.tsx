@@ -1,4 +1,5 @@
 import { useAdminDisputes, useResolveDispute } from "@aios/shared-hooks";
+import { Button, EmptyState, Input, LoadingState, PageHeader, StatusBadge } from "@aios/ui-web";
 import { useState } from "react";
 import { AppShell } from "../../components/layout/AppShell";
 
@@ -10,34 +11,39 @@ export function DisputeManagementPage() {
   return (
     <AppShell>
       <div className="space-y-6">
-        <h1 className="text-2xl font-semibold text-slate-100">분쟁 관리</h1>
+        <PageHeader title="분쟁 관리" />
         {isLoading ? (
-          <p className="text-slate-500">불러오는 중...</p>
+          <LoadingState />
         ) : disputes && disputes.length > 0 ? (
           <ul className="space-y-3">
             {disputes.map((d) => (
-              <li key={d.id} className="rounded-lg border border-slate-800 p-4">
+              <li key={d.id} className="rounded-lg border border-border bg-surface p-4">
                 <div className="flex items-center justify-between">
                   <div>
-                    <p className="font-medium text-slate-100">
-                      분쟁 #{d.id} · 구매 #{d.purchaseId}
-                    </p>
-                    <p className="text-sm text-slate-500">{d.reason}</p>
-                    <p className="text-xs text-slate-600">
-                      상태 {d.status} · {new Date(d.createdAt).toLocaleString()}
+                    <div className="flex items-center gap-2">
+                      <p className="font-medium text-fg">
+                        분쟁 #{d.id} · 구매 #{d.purchaseId}
+                      </p>
+                      <StatusBadge status={d.status} />
+                    </div>
+                    <p className="text-sm text-fg-muted">{d.reason}</p>
+                    <p className="text-xs text-fg-muted">
+                      {new Date(d.createdAt).toLocaleString()}
                     </p>
                   </div>
                   {d.status === "OPEN" && (
                     <div className="flex items-center gap-2">
-                      <input
+                      <Input
                         type="text"
                         placeholder="처리 사유"
                         value={reasons[d.id] ?? ""}
                         onChange={(e) => setReasons((r) => ({ ...r, [d.id]: e.target.value }))}
-                        className="rounded border border-slate-700 bg-slate-900 px-2 py-1 text-sm text-slate-100"
+                        className="w-40"
                       />
-                      <button
+                      <Button
                         type="button"
+                        variant="secondary"
+                        size="sm"
                         onClick={() =>
                           resolve.mutate({
                             disputeId: d.id,
@@ -47,12 +53,13 @@ export function DisputeManagementPage() {
                             },
                           })
                         }
-                        className="rounded border border-slate-700 px-3 py-1 text-sm text-slate-200 hover:bg-slate-800"
                       >
                         정상 리스크 실현(기각)
-                      </button>
-                      <button
+                      </Button>
+                      <Button
                         type="button"
+                        variant="secondary"
+                        size="sm"
                         onClick={() =>
                           resolve.mutate({
                             disputeId: d.id,
@@ -62,10 +69,9 @@ export function DisputeManagementPage() {
                             },
                           })
                         }
-                        className="rounded border border-slate-700 px-3 py-1 text-sm text-slate-200 hover:bg-slate-800"
                       >
                         상장폐지+환불
-                      </button>
+                      </Button>
                     </div>
                   )}
                 </div>
@@ -73,7 +79,7 @@ export function DisputeManagementPage() {
             ))}
           </ul>
         ) : (
-          <p className="text-slate-500">분쟁 건이 없습니다.</p>
+          <EmptyState>분쟁 건이 없습니다.</EmptyState>
         )}
       </div>
     </AppShell>

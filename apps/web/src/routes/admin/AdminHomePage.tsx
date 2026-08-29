@@ -1,3 +1,4 @@
+import { PageHeader } from "@aios/ui-web";
 import { Link } from "react-router-dom";
 import { AppShell } from "../../components/layout/AppShell";
 
@@ -13,16 +14,16 @@ export function AdminHomePage() {
   return (
     <AppShell>
       <div className="space-y-6">
-        <h1 className="text-2xl font-semibold text-slate-100">관리자 도구</h1>
+        <PageHeader title="관리자 도구" />
         <div className="grid grid-cols-2 gap-4">
           {SECTIONS.map((s) => (
             <Link
               key={s.to}
               to={s.to}
-              className="rounded-lg border border-slate-800 p-4 hover:border-slate-600"
+              className="rounded-lg border border-border bg-surface p-4 transition-colors hover:border-border-strong hover:bg-surface-hover"
             >
-              <p className="font-medium text-slate-100">{s.label}</p>
-              <p className="text-sm text-slate-500">{s.desc}</p>
+              <p className="font-medium text-fg">{s.label}</p>
+              <p className="text-sm text-fg-muted">{s.desc}</p>
             </Link>
           ))}
         </div>

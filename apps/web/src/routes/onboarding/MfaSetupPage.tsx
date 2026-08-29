@@ -1,8 +1,10 @@
 import { useSetupMfa, useVerifyMfa } from "@aios/shared-hooks";
 import { ApiError } from "@aios/api-client";
+import { Alert, Button, Input } from "@aios/ui-web";
 import QRCode from "qrcode";
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { useNavigate } from "react-router-dom";
+import { AuthLayout } from "../auth/AuthLayout";
 
 // FD-11.2 필수 게이트 — 정책문서 §4.10 "MFA는 사용자 레벨에서도 예외 없이
 // 강제". 완료 전까지 ProtectedRoute가 다른 화면 진입을 막는다.
@@ -44,43 +46,39 @@ export function MfaSetupPage() {
   }
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-slate-950 px-4">
-      <div className="w-full max-w-sm space-y-4 text-slate-100">
-        <h1 className="text-2xl font-semibold">2단계 인증 설정 (필수)</h1>
-        <p className="text-sm text-slate-400">
-          Google Authenticator 등 인증 앱으로 아래 QR코드를 스캔한 뒤, 앱에 표시된 6자리
-          코드를 입력해주세요.
-        </p>
+    <AuthLayout
+      title="2단계 인증 설정 (필수)"
+      subtitle="Google Authenticator 등 인증 앱으로 QR코드를 스캔해주세요"
+    >
+      <div className="space-y-4">
         {qrDataUrl ? (
-          <img src={qrDataUrl} alt="MFA QR 코드" className="mx-auto rounded bg-white p-2" />
+          <img src={qrDataUrl} alt="MFA QR 코드" className="mx-auto rounded-lg bg-white p-3" />
         ) : (
-          <p className="text-center text-slate-500">QR코드 생성 중...</p>
+          <div className="flex h-40 items-center justify-center text-sm text-fg-muted">
+            QR코드 생성 중...
+          </div>
         )}
         {secret && (
-          <p className="break-all text-center text-xs text-slate-500">
+          <p className="break-all rounded-md bg-surface-hover px-3 py-2 text-center font-mono text-xs text-fg-muted">
             수동 입력용 코드: {secret}
           </p>
         )}
         <form onSubmit={handleSubmit} className="space-y-3">
-          <input
+          <Input
             type="text"
             inputMode="numeric"
             required
             placeholder="6자리 코드"
             value={totpCode}
             onChange={(e) => setTotpCode(e.target.value)}
-            className="w-full rounded border border-slate-700 bg-slate-900 px-3 py-2 text-center text-lg tracking-widest text-slate-100 outline-none focus:border-slate-400"
+            className="text-center text-lg tracking-[0.3em]"
           />
-          {error && <p className="text-sm text-red-400">{error}</p>}
-          <button
-            type="submit"
-            disabled={verifyMfa.isPending || !qrDataUrl}
-            className="w-full rounded bg-slate-100 px-3 py-2 font-medium text-slate-950 hover:bg-white disabled:opacity-50"
-          >
-            {verifyMfa.isPending ? "확인 중..." : "인증 완료"}
-          </button>
+          {error && <Alert>{error}</Alert>}
+          <Button type="submit" loading={verifyMfa.isPending} disabled={!qrDataUrl} className="w-full">
+            인증 완료
+          </Button>
         </form>
       </div>
-    </div>
+    </AuthLayout>
   );
 }

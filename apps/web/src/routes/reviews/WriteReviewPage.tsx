@@ -1,5 +1,6 @@
 import { useCreateReview } from "@aios/shared-hooks";
 import { ApiError } from "@aios/api-client";
+import { Alert, Button, Field, PageHeader, Textarea } from "@aios/ui-web";
 import { useState, type FormEvent } from "react";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { AppShell } from "../../components/layout/AppShell";
@@ -32,36 +33,25 @@ export function WriteReviewPage() {
   return (
     <AppShell>
       <div className="max-w-md space-y-6">
-        <h1 className="text-2xl font-semibold text-slate-100">리뷰 작성 (구매 #{purchaseId})</h1>
-        <form onSubmit={handleSubmit} className="space-y-3">
-          <div className="space-y-1">
-            <label className="text-sm text-slate-400">평점: {rating}</label>
+        <PageHeader title={`리뷰 작성 (구매 #${purchaseId})`} />
+        <form onSubmit={handleSubmit} className="space-y-4 rounded-lg border border-border bg-surface p-6">
+          <Field label={`평점 — ${rating}`}>
             <input
               type="range"
               min={1}
               max={5}
               value={rating}
               onChange={(e) => setRating(Number(e.target.value))}
-              className="w-full"
+              className="w-full accent-accent"
             />
-          </div>
-          <div className="space-y-1">
-            <label className="text-sm text-slate-400">코멘트 (선택)</label>
-            <textarea
-              value={comment}
-              onChange={(e) => setComment(e.target.value)}
-              rows={4}
-              className="w-full rounded border border-slate-700 bg-slate-900 px-3 py-2 text-slate-100"
-            />
-          </div>
-          {error && <p className="text-sm text-red-400">{error}</p>}
-          <button
-            type="submit"
-            disabled={createReview.isPending}
-            className="w-full rounded bg-slate-100 px-3 py-2 font-medium text-slate-950 hover:bg-white disabled:opacity-50"
-          >
-            {createReview.isPending ? "제출 중..." : "리뷰 제출"}
-          </button>
+          </Field>
+          <Field label="코멘트 (선택)">
+            <Textarea value={comment} onChange={(e) => setComment(e.target.value)} rows={4} />
+          </Field>
+          {error && <Alert>{error}</Alert>}
+          <Button type="submit" loading={createReview.isPending} className="w-full">
+            리뷰 제출
+          </Button>
         </form>
       </div>
     </AppShell>

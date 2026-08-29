@@ -1,5 +1,6 @@
 import { useCreateListing } from "@aios/shared-hooks";
 import { ApiError } from "@aios/api-client";
+import { Alert, Button, Field, Input, PageHeader } from "@aios/ui-web";
 import { useState, type FormEvent } from "react";
 import { useNavigate } from "react-router-dom";
 import { AppShell } from "../../components/layout/AppShell";
@@ -33,46 +34,31 @@ export function SellStrategyPage() {
   return (
     <AppShell>
       <div className="max-w-md space-y-6">
-        <h1 className="text-2xl font-semibold text-slate-100">내 전략 판매하기</h1>
-        <form onSubmit={handleSubmit} className="space-y-3">
-          <div className="space-y-1">
-            <label className="text-sm text-slate-400">전략 ID</label>
-            <input
-              type="text"
-              required
-              value={strategyId}
-              onChange={(e) => setStrategyId(e.target.value)}
-              className="w-full rounded border border-slate-700 bg-slate-900 px-3 py-2 text-slate-100"
-            />
-          </div>
-          <div className="space-y-1">
-            <label className="text-sm text-slate-400">버전</label>
-            <input
+        <PageHeader title="내 전략 판매하기" />
+        <form onSubmit={handleSubmit} className="space-y-3 rounded-lg border border-border bg-surface p-6">
+          <Field label="전략 ID">
+            <Input type="text" required value={strategyId} onChange={(e) => setStrategyId(e.target.value)} />
+          </Field>
+          <Field label="버전">
+            <Input
               type="text"
               required
               value={strategyVersion}
               onChange={(e) => setStrategyVersion(e.target.value)}
-              className="w-full rounded border border-slate-700 bg-slate-900 px-3 py-2 text-slate-100"
             />
-          </div>
-          <div className="space-y-1">
-            <label className="text-sm text-slate-400">가격 (USDT)</label>
-            <input
+          </Field>
+          <Field label="가격 (USDT)">
+            <Input
               type="number"
               step="0.01"
               value={price}
               onChange={(e) => setPrice(e.target.value)}
-              className="w-full rounded border border-slate-700 bg-slate-900 px-3 py-2 text-slate-100"
             />
-          </div>
-          {error && <p className="text-sm text-red-400">{error}</p>}
-          <button
-            type="submit"
-            disabled={createListing.isPending}
-            className="w-full rounded bg-slate-100 px-3 py-2 font-medium text-slate-950 hover:bg-white disabled:opacity-50"
-          >
-            {createListing.isPending ? "등록 중..." : "리스팅 등록 (초안)"}
-          </button>
+          </Field>
+          {error && <Alert>{error}</Alert>}
+          <Button type="submit" loading={createListing.isPending} className="w-full">
+            리스팅 등록 (초안)
+          </Button>
         </form>
       </div>
     </AppShell>

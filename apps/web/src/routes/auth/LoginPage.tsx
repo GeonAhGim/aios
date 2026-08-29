@@ -1,7 +1,9 @@
 import { useLogin } from "@aios/shared-hooks";
 import { ApiError } from "@aios/api-client";
+import { Alert, Button, Field, Input } from "@aios/ui-web";
 import { useState, type FormEvent } from "react";
 import { Link, useNavigate } from "react-router-dom";
+import { AuthLayout } from "./AuthLayout";
 
 export function LoginPage() {
   const [email, setEmail] = useState("");
@@ -23,63 +25,48 @@ export function LoginPage() {
   }
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-slate-950 px-4">
-      <form onSubmit={handleSubmit} className="w-full max-w-sm space-y-4">
-        <h1 className="text-2xl font-semibold text-slate-100">로그인</h1>
-        <div className="space-y-1">
-          <label className="text-sm text-slate-400" htmlFor="email">
-            이메일
-          </label>
-          <input
+    <AuthLayout title="AIOS 로그인">
+      <form onSubmit={handleSubmit} className="space-y-4">
+        <Field label="이메일" htmlFor="email">
+          <Input
             id="email"
             type="email"
             required
+            autoComplete="email"
             value={email}
             onChange={(e) => setEmail(e.target.value)}
-            className="w-full rounded border border-slate-700 bg-slate-900 px-3 py-2 text-slate-100 outline-none focus:border-slate-400"
           />
-        </div>
-        <div className="space-y-1">
-          <label className="text-sm text-slate-400" htmlFor="password">
-            비밀번호
-          </label>
-          <input
+        </Field>
+        <Field label="비밀번호" htmlFor="password">
+          <Input
             id="password"
             type="password"
             required
+            autoComplete="current-password"
             value={password}
             onChange={(e) => setPassword(e.target.value)}
-            className="w-full rounded border border-slate-700 bg-slate-900 px-3 py-2 text-slate-100 outline-none focus:border-slate-400"
           />
-        </div>
-        <div className="space-y-1">
-          <label className="text-sm text-slate-400" htmlFor="totp">
-            2단계 인증 코드 (설정한 경우만)
-          </label>
-          <input
+        </Field>
+        <Field label="2단계 인증 코드" htmlFor="totp" hint="설정한 경우만 입력">
+          <Input
             id="totp"
             type="text"
             inputMode="numeric"
             value={totpCode}
             onChange={(e) => setTotpCode(e.target.value)}
-            className="w-full rounded border border-slate-700 bg-slate-900 px-3 py-2 text-slate-100 outline-none focus:border-slate-400"
           />
-        </div>
-        {error && <p className="text-sm text-red-400">{error}</p>}
-        <button
-          type="submit"
-          disabled={login.isPending}
-          className="w-full rounded bg-slate-100 px-3 py-2 font-medium text-slate-950 hover:bg-white disabled:opacity-50"
-        >
-          {login.isPending ? "로그인 중..." : "로그인"}
-        </button>
-        <p className="text-center text-sm text-slate-400">
+        </Field>
+        {error && <Alert>{error}</Alert>}
+        <Button type="submit" loading={login.isPending} className="w-full">
+          로그인
+        </Button>
+        <p className="text-center text-sm text-fg-muted">
           계정이 없으신가요?{" "}
-          <Link to="/signup" className="text-slate-100 underline">
+          <Link to="/signup" className="text-accent-hover hover:underline">
             회원가입
           </Link>
         </p>
       </form>
-    </div>
+    </AuthLayout>
   );
 }
