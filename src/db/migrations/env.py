@@ -1,4 +1,5 @@
 import asyncio
+import os
 from logging.config import fileConfig
 from pathlib import Path
 
@@ -24,12 +25,17 @@ target_metadata = None
 
 
 def get_database_url() -> str:
-    """DATABASE_URL은 .env(01_data_models SecretBundle과 동일 목록)에서 읽는다."""
+    """Use process ``DATABASE_URL`` first, then local ``.env`` as a fallback.
+
+    CI and tests deliberately supply an isolated database through the process
+    environment.  A developer's local file remains a convenience for manual
+    migrations, but may never override an explicitly selected deployment DB.
+    """
     project_root = Path(__file__).resolve().parents[3]
     env_values = dotenv_values(project_root / ".env")
-    url = env_values.get("DATABASE_URL")
+    url = os.environ.get("DATABASE_URL") or env_values.get("DATABASE_URL")
     if not url:
-        raise RuntimeError(".env에 DATABASE_URL이 설정되어 있지 않습니다.")
+        raise RuntimeError("DATABASE_URL이 환경변수 또는 .env에 설정되어 있지 않습니다.")
     return url
 
 
