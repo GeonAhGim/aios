@@ -58,6 +58,13 @@ async def get_current_user(
     user = await get_user_by_id(pool, UUID(payload["sub"]))
     if user is None:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "존재하지 않는 사용자입니다.")
+    if user.status in ("SUSPENDED", "DELETED"):
+        # AuthService.authenticate()는 로그인 시점에 SUSPENDED/DELETED를
+        # 거부하지만, 발급된 JWT는 만료 전까지(기본 60분) 그 자체로 유효해
+        # 매 요청마다 이 검사가 없으면 정지 이후에도 기존 토큰으로 계속
+        # API를 쓸 수 있었다(라우터 조립 중 발견, 로그인 시점 검사만으로는
+        # 충분하지 않다는 것을 실증).
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "정지되었거나 삭제된 계정입니다.")
     return user
 
 

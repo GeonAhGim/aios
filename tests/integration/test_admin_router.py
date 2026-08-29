@@ -277,6 +277,23 @@ async def test_admin_can_list_and_change_user_status(client, pool):
     assert response.json()["status"] == "SUSPENDED"
 
 
+async def test_suspended_user_existing_token_is_rejected(client, pool):
+    admin_headers, admin_id = await _register(client)
+    await _make_admin(pool, admin_id)
+    target_headers, target_id = await _register(client)
+
+    before = await client.get("/users/me", headers=target_headers)
+    assert before.status_code == 200
+
+    status_response = await client.patch(
+        f"/admin/users/{target_id}/status", json={"status": "SUSPENDED"}, headers=admin_headers
+    )
+    assert status_response.status_code == 200
+
+    after = await client.get("/users/me", headers=target_headers)
+    assert after.status_code == 401
+
+
 async def test_admin_cannot_set_deleted_status(client, pool):
     admin_headers, admin_id = await _register(client)
     await _make_admin(pool, admin_id)
