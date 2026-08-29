@@ -1,8 +1,25 @@
-import { useQuery } from "@tanstack/react-query";
+import type { ExecutionCreateRequest, RebalanceRequest } from "@aios/shared-types";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiClient } from "./clientInstance";
 
 export function usePortfolio() {
   return useQuery({ queryKey: ["portfolio"], queryFn: () => apiClient.getPortfolio() });
+}
+
+export function useRebalancePortfolio() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (body: RebalanceRequest) => apiClient.rebalancePortfolio(body),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["portfolio"] }),
+  });
+}
+
+export function useReport(periodStart: string, periodEnd: string, executionId?: number) {
+  return useQuery({
+    queryKey: ["report", periodStart, periodEnd, executionId],
+    queryFn: () => apiClient.generateReport(periodStart, periodEnd, executionId),
+    enabled: !!periodStart && !!periodEnd,
+  });
 }
 
 export function useExecutions() {
@@ -11,5 +28,43 @@ export function useExecutions() {
     queryKey: ["executions"],
     queryFn: () => apiClient.listExecutions(),
     refetchInterval: 5000,
+  });
+}
+
+export function useCreateExecution() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (body: ExecutionCreateRequest) => apiClient.createExecution(body),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["executions"] }),
+  });
+}
+
+export function useStartExecution() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (executionId: number) => apiClient.startExecution(executionId),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["executions"] }),
+  });
+}
+
+export function usePauseExecution() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (executionId: number) => apiClient.pauseExecution(executionId),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["executions"] }),
+  });
+}
+
+export function useRetireExecution() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({
+      executionId,
+      liquidation,
+    }: {
+      executionId: number;
+      liquidation?: "IMMEDIATE_MARKET" | "KEEP_POSITIONS";
+    }) => apiClient.retireExecution(executionId, liquidation),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["executions"] }),
   });
 }

@@ -19,3 +19,42 @@ export interface PortfolioView {
   unallocatedCashWeightPct: string;
   totalPortfolioValue: string;
 }
+
+export interface RebalanceAdjustmentRequest {
+  executionId: number;
+  newAllocatedCapital: string;
+}
+
+export interface RebalanceRequest {
+  adjustments: RebalanceAdjustmentRequest[];
+}
+
+export interface RebalanceResult {
+  adjusted: number;
+  pendingApproval: number;
+  approvalRequestIds: number[];
+}
+
+export interface DailyPnL {
+  tradeDate: string;
+  dailyPnl: string;
+  cumulativePnl: string;
+}
+
+export interface StrategyContribution {
+  strategyId: string;
+  strategyVersion: string;
+  realizedPnl: string;
+  tradeCount: number;
+}
+
+export interface ReportSummary {
+  periodStart: string;
+  periodEnd: string;
+  totalReturn: string;
+  winRate: string | null;
+  maxDrawdown: string;
+  tradeCount: number;
+  strategyContributions: StrategyContribution[];
+  dailyPnl: DailyPnL[];
+}

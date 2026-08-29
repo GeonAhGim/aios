@@ -4,8 +4,12 @@ import { Link, useNavigate } from "react-router-dom";
 
 const NAV_ITEMS = [
   { to: "/dashboard", label: "대시보드" },
-  { to: "/executions", label: "실행 제어판" },
+  { to: "/exchanges", label: "거래소" },
+  { to: "/strategy-builder", label: "전략편집기" },
+  { to: "/marketplace", label: "마켓플레이스" },
+  { to: "/executions", label: "실행제어판" },
   { to: "/portfolio", label: "포트폴리오" },
+  { to: "/reports", label: "보고서" },
 ];
 
 export function AppShell({ children }: { children: ReactNode }) {
@@ -16,16 +20,24 @@ export function AppShell({ children }: { children: ReactNode }) {
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100">
       <header className="border-b border-slate-800 px-6 py-4">
-        <div className="mx-auto flex max-w-6xl items-center justify-between">
+        <div className="mx-auto flex max-w-6xl flex-wrap items-center justify-between gap-y-2">
           <Link to="/dashboard" className="text-lg font-semibold tracking-tight">
             AIOS
           </Link>
-          <nav className="flex items-center gap-6 text-sm text-slate-300">
+          <nav className="flex flex-wrap items-center gap-4 text-sm text-slate-300">
             {NAV_ITEMS.map((item) => (
               <Link key={item.to} to={item.to} className="hover:text-white">
                 {item.label}
               </Link>
             ))}
+            <Link to="/settings/approval" className="hover:text-white">
+              설정
+            </Link>
+            {me?.isPlatformAdmin && (
+              <Link to="/admin" className="text-amber-400 hover:text-amber-300">
+                관리자
+              </Link>
+            )}
           </nav>
           <div className="flex items-center gap-4 text-sm text-slate-400">
             <span>{me?.email}</span>

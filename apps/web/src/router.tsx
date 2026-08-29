@@ -1,37 +1,75 @@
+import type { ReactNode } from "react";
 import { createBrowserRouter, Navigate } from "react-router-dom";
+import { AdminRoute } from "./components/AdminRoute";
 import { ProtectedRoute } from "./components/ProtectedRoute";
+import { AdminApprovalRequestPage } from "./routes/admin/AdminApprovalRequestPage";
+import { AdminHomePage } from "./routes/admin/AdminHomePage";
+import { DisputeManagementPage } from "./routes/admin/DisputeManagementPage";
+import { PendingPaymentsPage } from "./routes/admin/PendingPaymentsPage";
+import { UserManagementPage } from "./routes/admin/UserManagementPage";
+import { VerificationQueuePage } from "./routes/admin/VerificationQueuePage";
 import { LoginPage } from "./routes/auth/LoginPage";
 import { SignupPage } from "./routes/auth/SignupPage";
 import { DashboardPage } from "./routes/dashboard/DashboardPage";
+import { DisputeSubmitPage } from "./routes/disputes/DisputeSubmitPage";
+import { ExchangeManagementPage } from "./routes/exchanges/ExchangeManagementPage";
+import { ExecutionControlPage } from "./routes/executions/ExecutionControlPage";
+import { ListingDetailPage } from "./routes/marketplace/ListingDetailPage";
+import { MarketplaceBrowsePage } from "./routes/marketplace/MarketplaceBrowsePage";
+import { SellStrategyPage } from "./routes/marketplace/SellStrategyPage";
 import { MfaSetupPage } from "./routes/onboarding/MfaSetupPage";
 import { RiskAssessmentPage } from "./routes/onboarding/RiskAssessmentPage";
+import { PortfolioPage } from "./routes/portfolio/PortfolioPage";
+import { ReportsPage } from "./routes/reports/ReportsPage";
+import { WriteReviewPage } from "./routes/reviews/WriteReviewPage";
+import { AccountDeletionPage } from "./routes/settings/AccountDeletionPage";
+import { ApprovalSettingsPage } from "./routes/settings/ApprovalSettingsPage";
+import { NotificationSettingsPage } from "./routes/settings/NotificationSettingsPage";
+import { StrategyBuilderPage } from "./routes/strategy-builder/StrategyBuilderPage";
+
+function protect(element: ReactNode) {
+  return <ProtectedRoute>{element}</ProtectedRoute>;
+}
+
+function protectAdmin(element: ReactNode) {
+  return (
+    <ProtectedRoute>
+      <AdminRoute>{element}</AdminRoute>
+    </ProtectedRoute>
+  );
+}
 
 export const router = createBrowserRouter([
   { path: "/", element: <Navigate to="/dashboard" replace /> },
   { path: "/signup", element: <SignupPage /> },
   { path: "/login", element: <LoginPage /> },
+  { path: "/onboarding/mfa-setup", element: protect(<MfaSetupPage />) },
+  { path: "/onboarding/risk-assessment", element: protect(<RiskAssessmentPage />) },
+  { path: "/dashboard", element: protect(<DashboardPage />) },
+  { path: "/exchanges", element: protect(<ExchangeManagementPage />) },
+  { path: "/strategy-builder", element: protect(<StrategyBuilderPage />) },
+  { path: "/marketplace", element: protect(<MarketplaceBrowsePage />) },
+  { path: "/marketplace/sell", element: protect(<SellStrategyPage />) },
+  { path: "/marketplace/:listingId", element: protect(<ListingDetailPage />) },
+  { path: "/executions", element: protect(<ExecutionControlPage />) },
+  { path: "/portfolio", element: protect(<PortfolioPage />) },
+  { path: "/reports", element: protect(<ReportsPage />) },
+  { path: "/settings/approval", element: protect(<ApprovalSettingsPage />) },
+  { path: "/settings/notifications", element: protect(<NotificationSettingsPage />) },
+  { path: "/settings/account", element: protect(<AccountDeletionPage />) },
+  { path: "/reviews/write/:purchaseId", element: protect(<WriteReviewPage />) },
+  { path: "/disputes/submit", element: protect(<DisputeSubmitPage />) },
+  { path: "/admin", element: protectAdmin(<AdminHomePage />) },
+  { path: "/admin/verification-queue", element: protectAdmin(<VerificationQueuePage />) },
+  { path: "/admin/disputes", element: protectAdmin(<DisputeManagementPage />) },
+  { path: "/admin/users", element: protectAdmin(<UserManagementPage />) },
+  { path: "/admin/pending-payments", element: protectAdmin(<PendingPaymentsPage />) },
   {
-    path: "/onboarding/mfa-setup",
-    element: (
-      <ProtectedRoute>
-        <MfaSetupPage />
-      </ProtectedRoute>
-    ),
+    path: "/admin/approval-requests",
+    element: protectAdmin(<AdminApprovalRequestPage />),
   },
   {
-    path: "/onboarding/risk-assessment",
-    element: (
-      <ProtectedRoute>
-        <RiskAssessmentPage />
-      </ProtectedRoute>
-    ),
-  },
-  {
-    path: "/dashboard",
-    element: (
-      <ProtectedRoute>
-        <DashboardPage />
-      </ProtectedRoute>
-    ),
+    path: "/admin/approval-requests/:requestId",
+    element: protectAdmin(<AdminApprovalRequestPage />),
   },
 ]);
