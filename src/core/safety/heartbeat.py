@@ -12,9 +12,15 @@ from __future__ import annotations
 import time
 from pathlib import Path
 
+# main.py(메인 프로세스)와 watchdog_process.py(별도 프로세스)가 공유하는
+# 유일한 통신 경로 — 프로세스 메모리 경계를 파일 하나로 명확히 넘는다.
+_PROJECT_ROOT = Path(__file__).resolve().parents[3]
+DEFAULT_HEARTBEAT_PATH = _PROJECT_ROOT / "runtime" / "main_process.heartbeat"
+
 
 def write_heartbeat(path: Path) -> None:
     """메인 프로세스가 주기적으로 호출 — 파일에 현재 시각을 기록한다."""
+    path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(str(time.time()), encoding="utf-8")
 
 

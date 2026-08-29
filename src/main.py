@@ -12,6 +12,8 @@ AsyncSession 기반 get_db()를 가정했지만, 이 세션에서 실제로 만�
 """
 from __future__ import annotations
 
+import asyncio
+import contextlib
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from typing import Any
@@ -23,6 +25,9 @@ from src.core.event_bus.in_process import InProcessEventBus
 from src.core.loader.secret_loader import load_env_secrets
 from src.core.logging.audit_log import record_audit_log
 from src.core.notifications.gateway import NotificationGateway
+from src.core.safety.heartbeat import DEFAULT_HEARTBEAT_PATH, write_heartbeat
+
+HEARTBEAT_INTERVAL_SECONDS = 2.0  # Draft — watchdog_process.py의 5초 폴링 주기보다 짧게
 
 
 def _asyncpg_dsn(database_url: str) -> str:
@@ -58,12 +63,25 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     NotificationGateway(pool).register(event_bus)
     await event_bus.start()
 
+    async def _heartbeat_loop() -> None:
+        """FD-9.1 — watchdog_process.py(별도 OS 프로세스)가 이 메인 프로세스의
+        생사를 판정하는 유일한 신호. 프로세스 메모리를 공유하지 않으므로
+        파일 타임스탬프로만 통신한다(core/safety/heartbeat.py)."""
+        while True:
+            write_heartbeat(DEFAULT_HEARTBEAT_PATH)
+            await asyncio.sleep(HEARTBEAT_INTERVAL_SECONDS)
+
+    heartbeat_task = asyncio.create_task(_heartbeat_loop())
+
     app.state.pool = pool
     app.state.secrets = secrets
     app.state.event_bus = event_bus
     try:
         yield
     finally:
+        heartbeat_task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await heartbeat_task
         await event_bus.stop()
         await pool.close()
 
