@@ -14,12 +14,14 @@ from __future__ import annotations
 
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from typing import Any
 
 import asyncpg
 from fastapi import FastAPI
 
 from src.core.event_bus.in_process import InProcessEventBus
 from src.core.loader.secret_loader import load_env_secrets
+from src.core.logging.audit_log import record_audit_log
 from src.core.notifications.gateway import NotificationGateway
 
 
@@ -32,12 +34,27 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     secrets = load_env_secrets()
     pool = await asyncpg.create_pool(_asyncpg_dsn(secrets.database_url))
 
+    async def _event_bus_audit_sink(record: dict[str, Any]) -> None:
+        """§5.5가 요구하는 "모든 handler 예외는 audit_log에 자동 기록"을 실제
+        audit_log 테이블(7.4)에 연결한다 — InProcessEventBus 기본값은 로거
+        대체 기록뿐이라 이 콜백 없이는 EventBus 자체의 실패가 감사 이력에
+        남지 않는다."""
+        async with pool.acquire() as conn:
+            await record_audit_log(
+                conn,
+                actor_agent=record["actor_agent"],
+                action_type=record["action_type"],
+                target_type=record.get("target_type"),
+                target_id=record.get("target_id"),
+                decision_data=record["decision_data"],
+            )
+
     # FD-17.1 — 실제 이메일/푸시 발송기(SMTP·FCM/APNs)는 아직 미확정(Draft)이라
     # senders 없이 등록한다. "발송 실패"로 정직하게 기록되고(§17.1 원칙 —
     # 발송됐는지 확인 못 하는 상태를 성공으로 위장하지 않는다) EventBus의
     # CRITICAL 재시도(최대 5회, §5.5)를 거쳐 audit_log에 남는다. 실제 발송기가
     # 정해지면 NotificationGateway(pool, senders={...})로 교체하기만 하면 된다.
-    event_bus = InProcessEventBus()
+    event_bus = InProcessEventBus(audit_sink=_event_bus_audit_sink)
     NotificationGateway(pool).register(event_bus)
     await event_bus.start()
 
