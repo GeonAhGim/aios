@@ -56,14 +56,21 @@ class WatchdogDecision(BaseModel):
 
 
 class _EquityWindow:
-    """5분 롤링 윈도우의 peak-to-current 손실률(§FD-9.1 처리단계1)."""
+    """5분 롤링 윈도우의 peak-to-current 손실률(§FD-9.1 처리단계1).
 
-    def __init__(self, window_seconds: float) -> None:
+    clock은 기본값이 time.monotonic이라 운영 동작은 그대로다 — 9.7 Watchdog
+    오탐 시뮬레이터(watchdog_simulator.py)가 과거 데이터를 실시간 대기 없이
+    재생하려고 가짜 시계를 주입할 수 있도록만 열어둔다."""
+
+    def __init__(
+        self, window_seconds: float, *, clock: Callable[[], float] = time.monotonic
+    ) -> None:
         self._window_seconds = window_seconds
+        self._clock = clock
         self._readings: list[tuple[float, Decimal]] = []
 
     def record(self, equity: Decimal) -> None:
-        now = time.monotonic()
+        now = self._clock()
         self._readings.append((now, equity))
         cutoff = now - self._window_seconds
         self._readings = [(t, e) for t, e in self._readings if t >= cutoff]
@@ -86,11 +93,12 @@ class WatchdogService:
         health_check: HealthCheckFn,
         heartbeat_path: Path,
         window_seconds: float = DEFAULT_WINDOW_SECONDS,
+        clock: Callable[[], float] = time.monotonic,
     ) -> None:
         self._compute_equity = compute_equity
         self._health_check = health_check
         self._heartbeat_path = heartbeat_path
-        self._equity_window = _EquityWindow(window_seconds)
+        self._equity_window = _EquityWindow(window_seconds, clock=clock)
         self._last_snapshot: WatchdogSnapshot | None = None
 
     async def take_snapshot(self) -> WatchdogSnapshot:

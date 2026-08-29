@@ -118,6 +118,32 @@ async def test_sustained_backpressure_escalates_to_meta_topic(fast_bus):
     assert sustained[0]["topic"] == "market.ticker.updated"
 
 
+async def test_publish_subscribe_on_audit_decision_logged_topic(fast_bus):
+    """06_mvp_scope §6.3 Definition of Done — InProcessEventBus가 최소 3개
+    토픽(market.ticker.updated/order.status.changed/audit.decision.logged)
+    으로 실제 publish/subscribe 동작해야 한다. 앞의 두 토픽은 이미 위
+    테스트들이 증명하고, 세 번째가 빠져 있었다 — 이 토픽도 다른 둘과
+    동일하게 순수 EventBus 메커니즘(라우팅/워커/재시도) 대상이지 아직
+    실제 프로듀서가 있는 건 아니다(audit_log에 쓰는 20여 곳을 전부
+    이 토픽 발행과 묶는 건 이 DoD 항목이 요구하는 범위를 넘는 별도
+    설계 작업 — record_audit_log()에 publish 콜백을 추가하고 모든
+    호출부를 갱신해야 함)."""
+    received = []
+
+    async def handler(payload):
+        received.append(payload)
+
+    fast_bus.subscribe("audit.decision.logged", handler, criticality=HandlerCriticality.SAFE)
+    await fast_bus.start()
+    await fast_bus.publish(
+        "audit.decision.logged", {"action_type": "payment.confirmed", "target_id": "123"}
+    )
+    await asyncio.sleep(0.05)
+    await fast_bus.stop()
+
+    assert received == [{"action_type": "payment.confirmed", "target_id": "123"}]
+
+
 async def test_get_event_bus_returns_same_instance():
     reset_event_bus()
     try:
