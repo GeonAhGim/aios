@@ -75,6 +75,16 @@ async def _always_eligible(strategy_id, version):
     return True
 
 
+async def _fund_wallet(pool, user_id, amount) -> None:
+    async with pool.acquire() as conn:
+        await conn.execute(
+            "INSERT INTO user_wallets (user_id, balance) VALUES ($1, $2) "
+            "ON CONFLICT (user_id) DO UPDATE SET balance = user_wallets.balance + $2",
+            user_id,
+            amount,
+        )
+
+
 # ---------- 훅① 구매(PurchaseService.check_risk_warning) ----------
 
 
@@ -91,6 +101,7 @@ async def test_purchase_risk_check_warns_for_conservative_buyer(pool):
 
     buyer = await create_test_user(pool)
     await _set_risk_profile(pool, buyer, "안정형")
+    await _fund_wallet(pool, buyer, Decimal("10"))
     purchase_service = PurchaseService(
         pool, check_risk_warning=partial(check_purchase_risk_warning, pool)
     )

@@ -19,6 +19,26 @@ from src.services.purchase_service import PurchaseService
 from src.services.verification_service import VerificationService
 from tests.integration.conftest import create_test_user
 
+_PURCHASE_PRICE = Decimal("10")
+
+
+async def _fund_wallet(pool, user_id, amount) -> None:
+    async with pool.acquire() as conn:
+        await conn.execute(
+            "INSERT INTO user_wallets (user_id, balance) VALUES ($1, $2) "
+            "ON CONFLICT (user_id) DO UPDATE SET balance = user_wallets.balance + $2",
+            user_id,
+            amount,
+        )
+
+
+async def _wallet_balance(pool, user_id) -> Decimal:
+    async with pool.acquire() as conn:
+        balance = await conn.fetchval(
+            "SELECT balance FROM user_wallets WHERE user_id = $1", user_id
+        )
+    return balance if balance is not None else Decimal("0")
+
 
 def _asyncpg_dsn() -> str:
     env = dotenv_values(Path(__file__).resolve().parents[2] / ".env")
@@ -71,10 +91,13 @@ async def _open_dispute(pool):
     dispute_service = DisputeService(pool)
 
     strategy_id, version = await _create_strategy(pool, seller)
-    listing = await listing_service.create_listing(seller, strategy_id, version, Decimal("10"))
+    listing = await listing_service.create_listing(
+        seller, strategy_id, version, _PURCHASE_PRICE
+    )
     submitted = await listing_service.submit_for_verification(listing.id, seller)
     verifier = await create_test_user(pool)
     approved = await verification_service.decide(submitted.id, verifier, "APPROVE")
+    await _fund_wallet(pool, buyer, _PURCHASE_PRICE)
     purchase = await purchase_service.purchase(buyer, approved.listing_id)
     dispute = await dispute_service.submit(buyer, purchase.purchase_id, "성과가 다릅니다")
     return dispute, approved.listing_id, seller, buyer
@@ -121,6 +144,32 @@ async def test_resolve_delisted_and_refund_delists_listing(service, pool):
             "SELECT status FROM strategy_listings WHERE id = $1", listing_id
         )
     assert listing_status == "DELISTED"
+
+
+async def test_resolve_delisted_and_refund_credits_buyer_wallet(service, pool):
+    dispute, _, _, buyer = await _open_dispute(pool)
+    admin = await create_test_user(pool)
+    balance_before = await _wallet_balance(pool, buyer)
+
+    result = await service.resolve(
+        dispute.id, admin, "DELISTED_AND_REFUND", "표시 성과와 실제 결과 불일치 확인"
+    )
+
+    assert result.refund_amount == _PURCHASE_PRICE
+    assert await _wallet_balance(pool, buyer) == balance_before + _PURCHASE_PRICE
+
+
+async def test_resolve_normal_risk_realization_does_not_refund(service, pool):
+    dispute, _, _, buyer = await _open_dispute(pool)
+    admin = await create_test_user(pool)
+    balance_before = await _wallet_balance(pool, buyer)
+
+    result = await service.resolve(
+        dispute.id, admin, "NORMAL_RISK_REALIZATION", "정상적인 시장 리스크로 판단"
+    )
+
+    assert result.refund_amount is None
+    assert await _wallet_balance(pool, buyer) == balance_before
 
 
 async def test_resolve_records_audit_log(service, pool):

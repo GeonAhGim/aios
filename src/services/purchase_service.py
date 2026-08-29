@@ -16,6 +16,15 @@ FD-17.1 이벤트 발행 — 구매 성공 시 "marketplace.purchase.requested"(
 생략한다 — 앱 조립 단계(main.py) 이전의 단위테스트가 이 서비스를
 EventBus 없이 그대로 쓸 수 있어야 하기 때문(check_risk_warning과 동일
 Optional 패턴).
+
+편차(ADR-2026-08-29 §1): 가격 통화가 플랫폼 내부 크레딧 지갑
+(wallet_service.py)으로 바뀌면서 "결제 확인" 중간 상태가 사라졌다 —
+지갑 잔액은 구매 시점에 이미 검증된 자금이므로, 구매가 성공하면 그
+즉시 payment_status='CONFIRMED'로 기록한다(구 payment_confirmation_
+service.py가 담당하던 사후 관리자 확인 단계는 삭제됐다). 리스팅 조회에
+`FOR UPDATE`를 걸고 전체를 하나의 트랜잭션으로 묶어, 같은 리스팅에 대한
+동시 구매 요청이 잔액 검증을 통과한 뒤 이중으로 차감·정산되는 경쟁을
+막는다. 무료 리스팅(price가 NULL)은 지갑을 전혀 건드리지 않는다.
 """
 from __future__ import annotations
 
@@ -28,6 +37,12 @@ import asyncpg
 from pydantic import BaseModel
 
 from src.services.commission import DEFAULT_COMMISSION_RATE, calculate_commission
+from src.services.wallet_service import (
+    PLATFORM_HOUSE_USER_ID,
+    InsufficientBalanceError,
+    credit,
+    debit,
+)
 
 CheckRiskWarningFn = Callable[[UUID, str, str], Awaitable[str | None]]
 PublishFn = Callable[[str, dict[str, Any]], Awaitable[None]]
@@ -39,6 +54,10 @@ async def _no_risk_warning(buyer_user_id: UUID, strategy_id: str, strategy_versi
 
 class PurchaseError(Exception):
     """FD-13.3 실패 — 라우터가 400/403/404/409로 변환."""
+
+
+class InsufficientWalletBalanceError(PurchaseError):
+    """지갑 잔액 부족 — 라우터가 402로 변환."""
 
 
 class PurchaseResult(BaseModel):
@@ -70,9 +89,10 @@ class PurchaseService:
         *,
         risk_warning_acknowledged: bool = False,
     ) -> PurchaseResult:
-        async with self._pool.acquire() as conn:
+        warning: str | None = None
+        async with self._pool.acquire() as conn, conn.transaction():
             listing = await conn.fetchrow(
-                "SELECT * FROM strategy_listings WHERE id = $1", listing_id
+                "SELECT * FROM strategy_listings WHERE id = $1 FOR UPDATE", listing_id
             )
             if listing is None:
                 raise PurchaseError("존재하지 않는 리스팅입니다.")
@@ -98,8 +118,10 @@ class PurchaseService:
             row = await conn.fetchrow(
                 "INSERT INTO strategy_purchases "
                 "(listing_id, buyer_user_id, price_paid, platform_commission_rate, "
-                "platform_commission_amount, seller_payout_amount) "
-                "VALUES ($1, $2, $3, $4, $5, $6) RETURNING id, payment_status",
+                "platform_commission_amount, seller_payout_amount, payment_status, "
+                "confirmed_at) "
+                "VALUES ($1, $2, $3, $4, $5, $6, 'CONFIRMED', now()) "
+                "RETURNING id, payment_status",
                 listing_id,
                 buyer_user_id,
                 price_paid,
@@ -107,6 +129,35 @@ class PurchaseService:
                 commission_amount,
                 seller_payout_amount,
             )
+
+            if price_paid is not None:
+                assert seller_payout_amount is not None  # calculate_commission 불변식
+                try:
+                    await debit(
+                        conn,
+                        buyer_user_id,
+                        price_paid,
+                        "PURCHASE_DEBIT",
+                        related_purchase_id=row["id"],
+                    )
+                except InsufficientBalanceError as exc:
+                    raise InsufficientWalletBalanceError(str(exc)) from exc
+                await credit(
+                    conn,
+                    listing["seller_user_id"],
+                    seller_payout_amount,
+                    "SALE_CREDIT",
+                    related_purchase_id=row["id"],
+                )
+                if commission_amount:
+                    await credit(
+                        conn,
+                        PLATFORM_HOUSE_USER_ID,
+                        commission_amount,
+                        "COMMISSION_CREDIT",
+                        related_purchase_id=row["id"],
+                    )
+
         if self._publish is not None:
             await self._publish(
                 "marketplace.purchase.requested",

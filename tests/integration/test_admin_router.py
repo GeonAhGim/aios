@@ -192,12 +192,23 @@ async def test_verification_queue_requires_verifier_role(client):
     assert response.status_code == 403
 
 
+async def _fund_wallet(pool, user_id, amount) -> None:
+    async with pool.acquire() as conn:
+        await conn.execute(
+            "INSERT INTO user_wallets (user_id, balance) VALUES ($1, $2) "
+            "ON CONFLICT (user_id) DO UPDATE SET balance = user_wallets.balance + $2",
+            uuid.UUID(user_id),
+            amount,
+        )
+
+
 async def _create_dispute(client, pool) -> tuple[dict, int]:
     seller_headers, seller_id = await _register(client)
     buyer_headers, buyer_id = await _register(client)
     verifier_headers, verifier_id = await _register(client)
     await _make_verifier(pool, verifier_id)
     await _set_risk_profile(pool, buyer_id)
+    await _fund_wallet(pool, buyer_id, Decimal("10.00"))
     strategy_id, version = await _create_strategy(pool, seller_id)
 
     create_response = await client.post(
@@ -321,28 +332,34 @@ async def test_admin_can_suspend_seller(client, pool):
     assert response.json()["seller_suspended"] is True
 
 
-async def test_admin_can_view_and_confirm_pending_payment(client, pool, event_bus):
+async def test_admin_can_view_and_confirm_pending_wallet_topup(client, pool):
     admin_headers, admin_id = await _register(client)
     await _make_admin(pool, admin_id)
-    _, purchase_id = await _create_dispute(client, pool)
+    user_headers, _ = await _register(client)
+
+    topup_response = await client.post(
+        "/wallet/topup-requests", json={"amount": "30000"}, headers=user_headers
+    )
+    assert topup_response.status_code == 200
+    topup_id = topup_response.json()["id"]
 
     probe = await client.get(
-        "/admin/payments/pending", params={"page_size": 1}, headers=admin_headers
+        "/admin/wallet/topups/pending", params={"page_size": 1}, headers=admin_headers
     )
     total = probe.json()["total"]
     pending_response = await client.get(
-        "/admin/payments/pending", params={"page_size": total}, headers=admin_headers
+        "/admin/wallet/topups/pending", params={"page_size": total}, headers=admin_headers
     )
     assert pending_response.status_code == 200
-    assert any(item["purchase_id"] == purchase_id for item in pending_response.json()["items"])
+    assert any(item["id"] == topup_id for item in pending_response.json()["items"])
 
     confirm_response = await client.post(
-        f"/admin/payments/{purchase_id}/confirm",
+        f"/admin/wallet/topups/{topup_id}/confirm",
         headers={**admin_headers, "Idempotency-Key": f"test-{uuid.uuid4().hex}"},
     )
     assert confirm_response.status_code == 200
-    assert confirm_response.json()["payment_status"] == "CONFIRMED"
-    assert any(topic == "marketplace.payment.confirmed" for topic, _ in event_bus.published)
+    assert confirm_response.json()["status"] == "CONFIRMED"
+    assert Decimal(str(confirm_response.json()["balance_after"])) == Decimal("30000")
 
 
 async def test_admin_can_approve_live_execution_request(client, pool):

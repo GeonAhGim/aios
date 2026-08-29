@@ -146,8 +146,8 @@ async def approve(pool: asyncpg.Pool, request_id: int, approver_id: UUID) -> App
     이중승인, DUAL 첫서명자 위조). 아래 세 UPDATE 모두 WHERE절에 그
     시점의 실제 DB 상태를 다시 검사해 원자적으로 만든다 — RETURNING이
     빈 행이면 그사이 다른 요청이 먼저 상태를 바꿨다는 뜻이므로
-    ApprovalError로 실패시킨다(payment_confirmation_service.py::
-    confirm_payment()가 이미 쓰던 것과 동일 패턴)."""
+    ApprovalError로 실패시킨다(wallet_service.py::confirm_topup()이
+    쓰는 것과 동일 패턴)."""
     request = await _fetch(pool, request_id)
     if request.status != "PENDING":
         raise ApprovalError(f"이미 처리된 요청: status={request.status}")

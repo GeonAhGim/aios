@@ -19,7 +19,6 @@ from fastapi import APIRouter, Depends, Header, HTTPException, status
 
 from src.api.admin_deps import (
     get_dispute_resolution_service,
-    get_payment_confirmation_service,
     get_seller_suspension_service,
     get_user_admin_service,
     get_verification_queue_service,
@@ -32,6 +31,7 @@ from src.api.schemas.admin import (
     UserStatusChangeRequest,
     to_dispute_summary,
 )
+from src.api.service_deps import get_wallet_service
 from src.core.approval.service import ApprovalError, ApprovalRequest, approve, reject
 from src.services.auth_service import User
 from src.services.dispute_resolution_service import (
@@ -39,12 +39,6 @@ from src.services.dispute_resolution_service import (
     DisputeResolutionError,
     DisputeResolutionResult,
     DisputeResolutionService,
-)
-from src.services.payment_confirmation_service import (
-    PaymentConfirmationError,
-    PaymentConfirmationResult,
-    PaymentConfirmationService,
-    PendingPaymentPage,
 )
 from src.services.seller_suspension_service import (
     SellerSuspensionError,
@@ -58,6 +52,12 @@ from src.services.user_admin_service import (
     UserSummary,
 )
 from src.services.verification_queue_service import QueuedListing, VerificationQueueService
+from src.services.wallet_service import (
+    WalletService,
+    WalletTopupConfirmResult,
+    WalletTopupError,
+    WalletTopupPage,
+)
 
 router = APIRouter(prefix="/admin")
 
@@ -140,28 +140,28 @@ async def suspend_seller(
         raise HTTPException(status.HTTP_404_NOT_FOUND, str(exc)) from exc
 
 
-@router.get("/payments/pending")
-async def list_pending_payments(
+@router.get("/wallet/topups/pending")
+async def list_pending_topups(
     page: int = 1,
     page_size: int = 20,
     admin: User = Depends(get_current_admin),
-    service: PaymentConfirmationService = Depends(get_payment_confirmation_service),
-) -> PendingPaymentPage:
-    return await service.list_pending_payments(page=page, page_size=page_size)
+    service: WalletService = Depends(get_wallet_service),
+) -> WalletTopupPage:
+    return await service.list_pending_topups(page=page, page_size=page_size)
 
 
-@router.post("/payments/{purchase_id}/confirm")
-async def confirm_payment(
-    purchase_id: int,
+@router.post("/wallet/topups/{topup_id}/confirm")
+async def confirm_topup(
+    topup_id: int,
     idempotency_key: str = Header(..., alias="Idempotency-Key"),
     admin: User = Depends(get_current_admin),
-    service: PaymentConfirmationService = Depends(get_payment_confirmation_service),
-) -> PaymentConfirmationResult:
+    service: WalletService = Depends(get_wallet_service),
+) -> WalletTopupConfirmResult:
     try:
-        return await service.confirm_payment(
-            purchase_id, admin.user_id, idempotency_key=idempotency_key
+        return await service.confirm_topup(
+            topup_id, admin.user_id, idempotency_key=idempotency_key
         )
-    except PaymentConfirmationError as exc:
+    except WalletTopupError as exc:
         raise HTTPException(status.HTTP_404_NOT_FOUND, str(exc)) from exc
 
 

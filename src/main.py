@@ -130,6 +130,7 @@ def create_app() -> FastAPI:
         strategy_builder,
         suitability,
         users,
+        wallet,
     )
 
     app.include_router(auth.router, prefix="/auth", tags=["auth"])
@@ -150,6 +151,7 @@ def create_app() -> FastAPI:
     app.include_router(
         device_tokens.router, prefix="/device-tokens", tags=["device-tokens"]
     )
+    app.include_router(wallet.router, prefix="/wallet", tags=["wallet"])
 
     return app
 

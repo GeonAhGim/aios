@@ -3,9 +3,12 @@
 Spec: 기능설계문서_v1.20.md#FD-18.2, 14번 문서 §14.5, 8.10
 
 처리 결정은 두 갈래뿐이다 — "정상 리스크 실현으로 종결"(리스팅 상태
-불변)과 "DELISTED + 환불 처리"(리스팅을 DELISTED로 전환). PG 미연동
-Phase 1 전제라 실제 환불 자금 이동은 스콥 밖 — 여기서는 리스팅 상태
-전환까지만 다룬다.
+불변)과 "DELISTED + 환불 처리"(리스팅을 DELISTED로 전환).
+
+편차(ADR-2026-08-29 §1): 원래는 "PG 미연동 Phase 1 전제라 실제 환불
+자금 이동은 스콥 밖"이었으나, wallet_service.py(플랫폼 내부 크레딧
+지갑) 도입으로 이 갭이 해소됐다 — DELISTED_AND_REFUND 결정 시 구매자가
+지불한 price_paid를 구매자 지갑으로 그대로 환불 크레딧한다.
 
 금전/신뢰 관련 운영자 판단이라 8.10 원칙에 따라 반드시 audit_log에
 기록한다(FD-7.2 record_audit_log 재사용 — 이 프로젝트에서 최초 실호출
@@ -14,6 +17,7 @@ Phase 1 전제라 실제 환불 자금 이동은 스콥 밖 — 여기서는 리
 from __future__ import annotations
 
 from datetime import datetime
+from decimal import Decimal
 from typing import Any
 from uuid import UUID
 
@@ -21,6 +25,7 @@ import asyncpg
 from pydantic import BaseModel
 
 from src.core.logging.audit_log import record_audit_log
+from src.services.wallet_service import credit
 
 VALID_DECISIONS = ("NORMAL_RISK_REALIZATION", "DELISTED_AND_REFUND")
 
@@ -46,6 +51,7 @@ class DisputeResolutionResult(BaseModel):
     dispute_id: int
     listing_status: str
     resolved_at: datetime
+    refund_amount: Decimal | None = None
 
 
 class DisputeResolutionService:
@@ -93,11 +99,12 @@ class DisputeResolutionService:
             )
 
         new_listing_status = detail.listing_status
+        refund_amount: Decimal | None = None
         async with self._pool.acquire() as conn, conn.transaction():
             # 레드팀 감사(docs/RED_TEAM_FINDINGS.md #05) 반영 — conn.transaction()이
             # 있어도 기본 격리수준(READ COMMITTED)에서는 다른 트랜잭션이 커밋 전
             # 상태를 읽고 동시에 진행하는 것 자체를 막지 않는다. UPDATE 자체에
-            # status='OPEN' 조건을 걸어(payment_confirmation_service.py와 동일
+            # status='OPEN' 조건을 걸어(wallet_service.py::confirm_topup()과 동일
             # 패턴) 두 관리자가 같은 분쟁을 거의 동시에 처리해도 한쪽만 반영되게 한다.
             row = await conn.fetchrow(
                 "UPDATE disputes SET status = 'RESOLVED', resolution_decision = $2, "
@@ -120,6 +127,20 @@ class DisputeResolutionService:
                 )
                 new_listing_status = "DELISTED"
 
+                price_paid = await conn.fetchval(
+                    "SELECT price_paid FROM strategy_purchases WHERE id = $1",
+                    detail.purchase_id,
+                )
+                if price_paid is not None:
+                    await credit(
+                        conn,
+                        detail.buyer_user_id,
+                        price_paid,
+                        "REFUND",
+                        related_purchase_id=detail.purchase_id,
+                    )
+                    refund_amount = price_paid
+
             await record_audit_log(
                 conn,
                 actor_agent=str(admin_user_id),
@@ -130,6 +151,7 @@ class DisputeResolutionService:
                     "reason": reason,
                     "listing_id": detail.listing_id,
                     "new_listing_status": new_listing_status,
+                    "refund_amount": str(refund_amount) if refund_amount is not None else None,
                 },
                 target_type="dispute",
                 target_id=str(dispute_id),
@@ -139,4 +161,5 @@ class DisputeResolutionService:
             dispute_id=dispute_id,
             listing_status=new_listing_status,
             resolved_at=row["resolved_at"],
+            refund_amount=refund_amount,
         )

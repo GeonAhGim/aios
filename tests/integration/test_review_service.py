@@ -72,8 +72,19 @@ async def _create_listed_listing(pool, seller):
     return approved.listing_id
 
 
+async def _fund_wallet(pool, user_id, amount) -> None:
+    async with pool.acquire() as conn:
+        await conn.execute(
+            "INSERT INTO user_wallets (user_id, balance) VALUES ($1, $2) "
+            "ON CONFLICT (user_id) DO UPDATE SET balance = user_wallets.balance + $2",
+            user_id,
+            amount,
+        )
+
+
 async def _purchase_listing(pool, listing_id, buyer, *, days_ago=31):
     purchase_service = PurchaseService(pool)
+    await _fund_wallet(pool, buyer, Decimal("10"))
     result = await purchase_service.purchase(buyer, listing_id)
 
     async with pool.acquire() as conn:

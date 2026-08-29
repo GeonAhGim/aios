@@ -44,7 +44,11 @@ from src.services.auth_service import User
 from src.services.dispute_service import DisputeError, DisputeService
 from src.services.listing_search_service import ListingSearchService
 from src.services.listing_service import ListingError, ListingService
-from src.services.purchase_service import PurchaseError, PurchaseService
+from src.services.purchase_service import (
+    InsufficientWalletBalanceError,
+    PurchaseError,
+    PurchaseService,
+)
 from src.services.review_service import ReviewError, ReviewService
 from src.services.strategy_access_service import StrategyAccessError, StrategyAccessService
 from src.services.verification_service import VerificationError, VerificationService
@@ -140,6 +144,8 @@ async def purchase_listing(
                 listing_id,
                 risk_warning_acknowledged=body.risk_warning_acknowledged,
             )
+        except InsufficientWalletBalanceError as exc:
+            return status.HTTP_402_PAYMENT_REQUIRED, {"detail": str(exc)}
         except PurchaseError as exc:
             return status.HTTP_400_BAD_REQUEST, {"detail": str(exc)}
         return status.HTTP_201_CREATED, to_purchase_response(result).model_dump(mode="json")

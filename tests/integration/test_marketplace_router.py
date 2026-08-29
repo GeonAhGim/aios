@@ -1,6 +1,7 @@
 """16번대 통합테스트 — /marketplace 라우터. 실제 FastAPI 앱 + 실제 dev DB."""
 import json
 import uuid
+from decimal import Decimal
 from pathlib import Path
 
 import asyncpg
@@ -96,6 +97,16 @@ async def _set_risk_profile(pool, user_id, profile="공격형"):
         )
 
 
+async def _fund_wallet(pool, user_id, amount) -> None:
+    async with pool.acquire() as conn:
+        await conn.execute(
+            "INSERT INTO user_wallets (user_id, balance) VALUES ($1, $2) "
+            "ON CONFLICT (user_id) DO UPDATE SET balance = user_wallets.balance + $2",
+            uuid.UUID(user_id),
+            amount,
+        )
+
+
 async def test_create_listing_starts_as_draft(client, pool):
     _, headers, seller_id = await _register(client)
     strategy_id, version = await _create_strategy(pool, seller_id)
@@ -116,6 +127,7 @@ async def test_full_listing_to_purchase_flow(client, pool, event_bus):
     _, verifier_headers, verifier_id = await _register(client)
     await _make_verifier(pool, verifier_id)
     await _set_risk_profile(pool, buyer_id)
+    await _fund_wallet(pool, buyer_id, Decimal("10.00"))
     strategy_id, version = await _create_strategy(pool, seller_id)
 
     create_response = await client.post(
@@ -147,7 +159,7 @@ async def test_full_listing_to_purchase_flow(client, pool, event_bus):
         headers={**buyer_headers, "Idempotency-Key": f"test-{uuid.uuid4().hex}"},
     )
     assert purchase_response.status_code == 201
-    assert purchase_response.json()["status"] == "PENDING_PAYMENT"
+    assert purchase_response.json()["status"] == "CONFIRMED"
 
     topics = [topic for topic, _ in event_bus.published]
     assert "strategy.verification.completed" in topics
@@ -160,6 +172,7 @@ async def test_purchase_is_idempotent_on_retry(client, pool):
     _, verifier_headers, verifier_id = await _register(client)
     await _make_verifier(pool, verifier_id)
     await _set_risk_profile(pool, buyer_id)
+    await _fund_wallet(pool, buyer_id, Decimal("10.00"))
     strategy_id, version = await _create_strategy(pool, seller_id)
 
     create_response = await client.post(

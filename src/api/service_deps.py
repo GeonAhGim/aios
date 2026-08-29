@@ -16,6 +16,7 @@ from src.services.account_deletion_service import AccountDeletionService
 from src.services.approval_settings_service import ApprovalSettingsService
 from src.services.credential_resolver import CredentialResolver
 from src.services.exchange_credential_service import ExchangeCredentialService
+from src.services.wallet_service import WalletService
 from src.services.withdrawal_whitelist_service import WithdrawalWhitelistService
 
 from .deps import get_event_bus, get_pool
@@ -64,6 +65,10 @@ def get_exchange_credential_service(
 ) -> ExchangeCredentialService:
     secrets = request.app.state.secrets
     return ExchangeCredentialService(pool, encryption_key=secrets.credential_encryption_key)
+
+
+def get_wallet_service(pool: asyncpg.Pool = Depends(get_pool)) -> WalletService:
+    return WalletService(pool)
 
 
 def get_credential_resolver(request: Request) -> CredentialResolver:

@@ -1,4 +1,10 @@
-"""13.5 통합테스트 — 실제 dev DB 대상."""
+"""13.5 통합테스트 — 실제 dev DB 대상.
+
+ADR-2026-08-29 §1 반영 — 구매는 지갑 차감으로 즉시 CONFIRMED되므로,
+구 PENDING_PAYMENT 중간 상태를 전제하던 시나리오(수동 `_confirm_payment`)는
+더 이상 재현 불가능해 제거했다. 구매 성공 = 실행 접근권한 즉시 부여를
+직접 검증한다.
+"""
 import json
 from decimal import Decimal
 from pathlib import Path
@@ -68,12 +74,20 @@ async def _listed_strategy(pool, seller):
     return strategy_id, version, approved.listing_id
 
 
-async def _confirm_payment(pool, purchase_id):
+async def _fund_wallet(pool, user_id, amount) -> None:
     async with pool.acquire() as conn:
         await conn.execute(
-            "UPDATE strategy_purchases SET payment_status = 'CONFIRMED' WHERE id = $1",
-            purchase_id,
+            "INSERT INTO user_wallets (user_id, balance) VALUES ($1, $2) "
+            "ON CONFLICT (user_id) DO UPDATE SET balance = user_wallets.balance + $2",
+            user_id,
+            amount,
         )
+
+
+async def _funded_purchase(pool, listing_id, buyer):
+    await _fund_wallet(pool, buyer, Decimal("10"))
+    purchase_service = PurchaseService(pool)
+    return await purchase_service.purchase(buyer, listing_id)
 
 
 async def test_owner_can_always_access(service, pool):
@@ -91,23 +105,12 @@ async def test_stranger_cannot_access(service, pool):
     assert await service.can_access(stranger, strategy_id, version) is False
 
 
-async def test_buyer_without_confirmed_payment_cannot_access(service, pool):
+async def test_buyer_gains_access_immediately_after_purchase(service, pool):
     seller = await create_test_user(pool)
     strategy_id, version, listing_id = await _listed_strategy(pool, seller)
     buyer = await create_test_user(pool)
-    purchase_service = PurchaseService(pool)
-    await purchase_service.purchase(buyer, listing_id)
 
-    assert await service.can_access(buyer, strategy_id, version) is False
-
-
-async def test_buyer_with_confirmed_payment_can_access(service, pool):
-    seller = await create_test_user(pool)
-    strategy_id, version, listing_id = await _listed_strategy(pool, seller)
-    buyer = await create_test_user(pool)
-    purchase_service = PurchaseService(pool)
-    result = await purchase_service.purchase(buyer, listing_id)
-    await _confirm_payment(pool, result.purchase_id)
+    await _funded_purchase(pool, listing_id, buyer)
 
     assert await service.can_access(buyer, strategy_id, version) is True
 
@@ -121,13 +124,11 @@ async def test_get_strategy_for_execution_raises_for_unauthorized_user(service, 
         await service.get_strategy_for_execution(stranger, strategy_id, version)
 
 
-async def test_get_strategy_for_execution_returns_definition_for_confirmed_buyer(service, pool):
+async def test_get_strategy_for_execution_returns_definition_for_buyer(service, pool):
     seller = await create_test_user(pool)
     strategy_id, version, listing_id = await _listed_strategy(pool, seller)
     buyer = await create_test_user(pool)
-    purchase_service = PurchaseService(pool)
-    result = await purchase_service.purchase(buyer, listing_id)
-    await _confirm_payment(pool, result.purchase_id)
+    await _funded_purchase(pool, listing_id, buyer)
 
     definition = await service.get_strategy_for_execution(buyer, strategy_id, version)
 
@@ -135,13 +136,11 @@ async def test_get_strategy_for_execution_returns_definition_for_confirmed_buyer
     assert definition.fsm_definition == {"states": ["IDLE"]}
 
 
-async def test_access_survives_seller_delisting_after_confirmed_purchase(service, pool):
+async def test_access_survives_seller_delisting_after_purchase(service, pool):
     seller = await create_test_user(pool)
     strategy_id, version, listing_id = await _listed_strategy(pool, seller)
     buyer = await create_test_user(pool)
-    purchase_service = PurchaseService(pool)
-    result = await purchase_service.purchase(buyer, listing_id)
-    await _confirm_payment(pool, result.purchase_id)
+    await _funded_purchase(pool, listing_id, buyer)
 
     async with pool.acquire() as conn:
         await conn.execute(
@@ -160,9 +159,7 @@ async def test_seller_never_receives_buyer_identifying_data(service, pool):
     seller = await create_test_user(pool)
     strategy_id, version, listing_id = await _listed_strategy(pool, seller)
     buyer = await create_test_user(pool)
-    purchase_service = PurchaseService(pool)
-    result = await purchase_service.purchase(buyer, listing_id)
-    await _confirm_payment(pool, result.purchase_id)
+    await _funded_purchase(pool, listing_id, buyer)
 
     definition = await service.get_strategy_for_execution(seller, strategy_id, version)
 

@@ -57,6 +57,16 @@ async def _always_eligible(strategy_id, version):
     return True
 
 
+async def _fund_wallet(pool, user_id, amount) -> None:
+    async with pool.acquire() as conn:
+        await conn.execute(
+            "INSERT INTO user_wallets (user_id, balance) VALUES ($1, $2) "
+            "ON CONFLICT (user_id) DO UPDATE SET balance = user_wallets.balance + $2",
+            user_id,
+            amount,
+        )
+
+
 async def _purchase(pool, seller, buyer):
     listing_service = ListingService(pool, verify_paper_trading_eligibility=_always_eligible)
     verification_service = VerificationService(pool)
@@ -66,6 +76,7 @@ async def _purchase(pool, seller, buyer):
     submitted = await listing_service.submit_for_verification(listing.id, seller)
     verifier = await create_test_user(pool)
     approved = await verification_service.decide(submitted.id, verifier, "APPROVE")
+    await _fund_wallet(pool, buyer, Decimal("10"))
     result = await purchase_service.purchase(buyer, approved.listing_id)
     return result.purchase_id
 
