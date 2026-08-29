@@ -362,6 +362,42 @@ async def test_admin_can_view_and_confirm_pending_wallet_topup(client, pool):
     assert Decimal(str(confirm_response.json()["balance_after"])) == Decimal("30000")
 
 
+async def test_admin_can_create_platform_listing(client, pool):
+    admin_headers, admin_id = await _register(client)
+    await _make_admin(pool, admin_id)
+    strategy_id, version = await _create_strategy(pool, admin_id)
+
+    response = await client.post(
+        "/admin/marketplace/platform-listings",
+        json={"strategy_id": strategy_id, "strategy_version": version, "price": "20.00"},
+        headers=admin_headers,
+    )
+
+    assert response.status_code == 201
+    body = response.json()
+    assert body["seller_type"] == "PLATFORM"
+    assert body["status"] == "LISTED"
+
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            "SELECT seller_type, status FROM strategy_listings WHERE id = $1", body["id"]
+        )
+    assert row["seller_type"] == "PLATFORM"
+    assert row["status"] == "LISTED"
+
+
+async def test_platform_listing_endpoint_requires_admin(client):
+    headers, _ = await _register(client)
+
+    response = await client.post(
+        "/admin/marketplace/platform-listings",
+        json={"strategy_id": "nonexistent", "strategy_version": "1.0.0"},
+        headers=headers,
+    )
+
+    assert response.status_code == 403
+
+
 async def test_admin_can_approve_live_execution_request(client, pool):
     admin_headers, admin_id = await _register(client)
     await _make_admin(pool, admin_id)

@@ -13,6 +13,13 @@ compute_equity/SurgeDetector.verify_provenance 등과 동일).
 
 create_listing()은 users.seller_suspended도 확인한다 — FD-18.4(판매자
 정지)가 이 플래그를 토글하면 신규 리스팅 생성이 즉시 거부된다.
+
+편차(ADR-2026-08-29 §2): seller_type='PLATFORM'(플랫폼 직접판매) 리스팅은
+create_platform_listing()이라는 별도 경로로 만든다 — 제3자 판매자용
+DRAFT→PENDING_VERIFICATION→LISTED 검증 파이프라인을 그대로 재사용하지
+않고 관리자 등록 즉시 LISTED로 게시한다(아래 메서드 docstring 참조).
+커미션 계산(commission.py)은 그대로 재사용한다 — 동일 커미션 구조로
+취급하기로 결정했기 때문.
 """
 from __future__ import annotations
 
@@ -23,6 +30,8 @@ from uuid import UUID
 
 import asyncpg
 from pydantic import BaseModel
+
+from src.services.wallet_service import PLATFORM_HOUSE_USER_ID
 
 VerifyEligibilityFn = Callable[[str, str], Awaitable[bool]]
 
@@ -39,6 +48,7 @@ class Listing(BaseModel):
     price: Decimal | None
     status: str
     created_at: datetime
+    seller_type: str = "USER"
 
 
 class ListingService:
@@ -79,6 +89,36 @@ class ListingService:
                 strategy_id,
                 strategy_version,
                 seller_user_id,
+                price,
+            )
+        return Listing(**dict(row))
+
+    async def create_platform_listing(
+        self, strategy_id: str, strategy_version: str, price: Decimal | None
+    ) -> Listing:
+        """ADR-2026-08-29 §2 — 플랫폼이 직접 등록하는 리스팅(seller_type=
+        'PLATFORM')은 제3자 판매자용 사기방지 검증 파이프라인(DRAFT→
+        PENDING_VERIFICATION→LISTED, submit_for_verification/decide)을
+        거칠 필요가 없다 — 관리자가 등록하는 행위 자체가 이미 검증이므로
+        LISTED로 즉시 게시한다. 판매자는 wallet_service.PLATFORM_HOUSE_
+        USER_ID(하우스 계정) 고정 — 이 계정은 정지 대상이 아니라 seller_
+        suspended 확인도 건너뛴다."""
+        async with self._pool.acquire() as conn:
+            owner_user_id = await conn.fetchval(
+                "SELECT owner_user_id FROM strategies WHERE strategy_id = $1 AND version = $2",
+                strategy_id,
+                strategy_version,
+            )
+            if owner_user_id is None:
+                raise ListingError("존재하지 않는 전략입니다.")
+
+            row = await conn.fetchrow(
+                "INSERT INTO strategy_listings "
+                "(strategy_id, strategy_version, seller_user_id, price, seller_type, status) "
+                "VALUES ($1, $2, $3, $4, 'PLATFORM', 'LISTED') RETURNING *",
+                strategy_id,
+                strategy_version,
+                PLATFORM_HOUSE_USER_ID,
                 price,
             )
         return Listing(**dict(row))

@@ -9,6 +9,7 @@ import pytest
 from dotenv import dotenv_values
 
 from src.services.listing_service import ListingError, ListingService
+from src.services.wallet_service import PLATFORM_HOUSE_USER_ID
 from tests.integration.conftest import create_test_user
 
 
@@ -66,6 +67,23 @@ async def test_create_listing_starts_as_draft(service, pool):
 
     assert listing.status == "DRAFT"
     assert listing.seller_user_id == seller
+    assert listing.seller_type == "USER"
+
+
+async def test_create_platform_listing_is_listed_immediately(service, pool):
+    owner = await create_test_user(pool)
+    strategy_id, version = await _create_strategy(pool, owner)
+
+    listing = await service.create_platform_listing(strategy_id, version, Decimal("50.00"))
+
+    assert listing.status == "LISTED"
+    assert listing.seller_type == "PLATFORM"
+    assert listing.seller_user_id == PLATFORM_HOUSE_USER_ID
+
+
+async def test_create_platform_listing_rejects_nonexistent_strategy(service, pool):
+    with pytest.raises(ListingError):
+        await service.create_platform_listing("does-not-exist", "1.0.0", None)
 
 
 async def test_create_listing_rejects_non_owner(service, pool):

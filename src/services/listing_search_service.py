@@ -30,6 +30,7 @@ class ListingSummary(BaseModel):
     strategy_id: str
     strategy_version: str
     seller_user_id: UUID
+    seller_type: str
     price: Decimal | None
     verified_at: datetime | None
     sharpe_ratio: Decimal | None
@@ -83,7 +84,7 @@ class ListingSearchService:
             rows = await conn.fetch(
                 f"""
                 SELECT l.id, l.strategy_id, l.strategy_version, l.seller_user_id,
-                       l.price, l.verified_at, l.sharpe_ratio
+                       l.seller_type, l.price, l.verified_at, l.sharpe_ratio
                 FROM strategy_listings l
                 JOIN strategies s ON s.strategy_id = l.strategy_id
                     AND s.version = l.strategy_version

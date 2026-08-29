@@ -24,12 +24,18 @@ from src.api.admin_deps import (
     get_verification_queue_service,
 )
 from src.api.deps import get_current_admin, get_current_verifier, get_pool
+from src.api.marketplace_deps import get_listing_service
 from src.api.schemas.admin import (
     DisputeResolveRequest,
     DisputeSummary,
     SuspendSellerRequest,
     UserStatusChangeRequest,
     to_dispute_summary,
+)
+from src.api.schemas.marketplace import (
+    ListingResponse,
+    PlatformListingCreateRequest,
+    to_listing_response,
 )
 from src.api.service_deps import get_wallet_service
 from src.core.approval.service import ApprovalError, ApprovalRequest, approve, reject
@@ -40,6 +46,7 @@ from src.services.dispute_resolution_service import (
     DisputeResolutionResult,
     DisputeResolutionService,
 )
+from src.services.listing_service import ListingError, ListingService
 from src.services.seller_suspension_service import (
     SellerSuspensionError,
     SellerSuspensionResult,
@@ -163,6 +170,21 @@ async def confirm_topup(
         )
     except WalletTopupError as exc:
         raise HTTPException(status.HTTP_404_NOT_FOUND, str(exc)) from exc
+
+
+@router.post("/marketplace/platform-listings", status_code=status.HTTP_201_CREATED)
+async def create_platform_listing(
+    body: PlatformListingCreateRequest,
+    admin: User = Depends(get_current_admin),
+    service: ListingService = Depends(get_listing_service),
+) -> ListingResponse:
+    try:
+        listing = await service.create_platform_listing(
+            body.strategy_id, body.strategy_version, body.price
+        )
+    except ListingError as exc:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from exc
+    return to_listing_response(listing)
 
 
 @router.post("/approval-requests/{request_id}/approve")

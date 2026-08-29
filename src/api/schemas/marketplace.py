@@ -24,6 +24,7 @@ class ListingResponse(BaseModel):
     strategy_id: str
     strategy_version: str
     seller_user_id: str
+    seller_type: str
     price: Decimal | None
     status: str
     created_at: datetime
@@ -35,10 +36,17 @@ def to_listing_response(listing: Listing) -> ListingResponse:
         strategy_id=listing.strategy_id,
         strategy_version=listing.strategy_version,
         seller_user_id=str(listing.seller_user_id),
+        seller_type=listing.seller_type,
         price=listing.price,
         status=listing.status,
         created_at=listing.created_at,
     )
+
+
+class PlatformListingCreateRequest(BaseModel):
+    strategy_id: str
+    strategy_version: str
+    price: Decimal | None = None
 
 
 class ListingSearchResponse(BaseModel):
