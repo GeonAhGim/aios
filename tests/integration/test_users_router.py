@@ -10,6 +10,7 @@ from dotenv import dotenv_values
 from httpx import ASGITransport, AsyncClient
 
 from src.api.deps import get_event_bus
+from src.core.approval.service import create_request
 from src.main import app
 from tests.integration.conftest import NoopEventBus
 
@@ -47,6 +48,13 @@ async def client(event_bus):
         app.dependency_overrides.pop(get_event_bus, None)
 
 
+@pytest.fixture
+async def pool():
+    p = await asyncpg.create_pool(_asyncpg_dsn(), min_size=1, max_size=2)
+    yield p
+    await p.close()
+
+
 def _unique_email() -> str:
     return f"test-{uuid.uuid4().hex}@example.com"
 
@@ -58,6 +66,12 @@ async def _register(client) -> tuple[str, dict]:
     )
     token = response.json()["access_token"]
     return email, {"Authorization": f"Bearer {token}"}
+
+
+async def _register_with_id(client) -> tuple[dict, uuid.UUID]:
+    _, headers = await _register(client)
+    me = await client.get("/users/me", headers=headers)
+    return headers, uuid.UUID(me.json()["user_id"])
 
 
 # ---------- approval settings ----------
@@ -215,3 +229,97 @@ async def test_relogin_after_deletion_request_cancels_it(client):
         "/users/me", headers={"Authorization": f"Bearer {token}"}
     )
     assert me_response.json()["status"] == "ACTIVE"
+
+
+# ---------- self-service 승인 요청 (FD-10.1 SOLO/DUAL 갭 해소) ----------
+
+
+async def _rewind_created_at(pool, request_id: int, seconds_ago: float) -> None:
+    from datetime import datetime, timedelta, timezone
+
+    async with pool.acquire() as conn:
+        await conn.execute(
+            "UPDATE approval_requests SET created_at = $2 WHERE id = $1",
+            request_id,
+            datetime.now(timezone.utc) - timedelta(seconds=seconds_ago),
+        )
+
+
+async def test_list_my_approval_requests_shows_own_pending_request(client, pool):
+    headers, user_id = await _register_with_id(client)
+    request = await create_request(
+        pool,
+        scope="USER",
+        user_id=user_id,
+        trigger_source="execution_high_allocation",
+        requested_action="START_LIVE_EXECUTION",
+        context={},
+        approval_mode="SOLO",
+    )
+
+    response = await client.get("/users/me/approval-requests", headers=headers)
+
+    assert response.status_code == 200
+    assert any(item["id"] == request.id for item in response.json())
+
+
+async def test_self_approve_solo_request_succeeds_after_wait(client, pool):
+    headers, user_id = await _register_with_id(client)
+    request = await create_request(
+        pool,
+        scope="USER",
+        user_id=user_id,
+        trigger_source="execution_high_allocation",
+        requested_action="START_LIVE_EXECUTION",
+        context={},
+        approval_mode="SOLO",
+    )
+    await _rewind_created_at(pool, request.id, 61)
+
+    response = await client.post(
+        f"/users/me/approval-requests/{request.id}/approve", headers=headers
+    )
+
+    assert response.status_code == 200
+    assert response.json()["status"] == "APPROVED"
+
+
+async def test_self_approve_rejects_other_users_request(client, pool):
+    _, owner_id = await _register_with_id(client)
+    stranger_headers, _ = await _register_with_id(client)
+    request = await create_request(
+        pool,
+        scope="USER",
+        user_id=owner_id,
+        trigger_source="execution_high_allocation",
+        requested_action="START_LIVE_EXECUTION",
+        context={},
+        approval_mode="SOLO",
+    )
+    await _rewind_created_at(pool, request.id, 61)
+
+    response = await client.post(
+        f"/users/me/approval-requests/{request.id}/approve", headers=stranger_headers
+    )
+
+    assert response.status_code == 403
+
+
+async def test_self_reject_own_request_succeeds(client, pool):
+    headers, user_id = await _register_with_id(client)
+    request = await create_request(
+        pool,
+        scope="USER",
+        user_id=user_id,
+        trigger_source="watchdog_liquidate",
+        requested_action="LIQUIDATE_POSITION",
+        context={},
+        approval_mode="SOLO",
+    )
+
+    response = await client.post(
+        f"/users/me/approval-requests/{request.id}/reject", headers=headers
+    )
+
+    assert response.status_code == 200
+    assert response.json()["status"] == "REJECTED"

@@ -428,6 +428,36 @@ async def test_platform_listing_endpoint_requires_admin(client):
     assert response.status_code == 403
 
 
+async def test_admin_can_list_pending_approval_requests(client, pool):
+    from src.core.approval.service import create_request
+
+    admin_headers, admin_id = await _register(client)
+    await _make_admin(pool, admin_id)
+    platform_request = await create_request(
+        pool,
+        scope="PLATFORM",
+        trigger_source="circuit_breaker_reactivation",
+        requested_action="REACTIVATE",
+        context={},
+        approval_mode="SOLO",
+    )
+
+    response = await client.get(
+        "/admin/approval-requests/pending", params={"scope": "PLATFORM"}, headers=admin_headers
+    )
+
+    assert response.status_code == 200
+    assert any(item["id"] == platform_request.id for item in response.json())
+
+
+async def test_pending_approval_requests_require_admin_role(client):
+    headers, _ = await _register(client)
+
+    response = await client.get("/admin/approval-requests/pending", headers=headers)
+
+    assert response.status_code == 403
+
+
 async def test_admin_can_approve_live_execution_request(client, pool):
     admin_headers, admin_id = await _register(client)
     await _make_admin(pool, admin_id)

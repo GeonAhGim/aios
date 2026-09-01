@@ -39,7 +39,7 @@ from src.api.schemas.marketplace import (
     to_listing_response,
 )
 from src.api.service_deps import get_wallet_service
-from src.core.approval.service import ApprovalError, ApprovalRequest, approve, reject
+from src.core.approval.service import ApprovalError, ApprovalRequest, approve, list_pending, reject
 from src.services.audit_log_read_service import AuditLogPage, AuditLogReadService
 from src.services.auth_service import User
 from src.services.dispute_resolution_service import (
@@ -206,6 +206,15 @@ async def create_platform_listing(
     except ListingError as exc:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from exc
     return to_listing_response(listing)
+
+
+@router.get("/approval-requests/pending")
+async def list_pending_approval_requests(
+    scope: str | None = None,
+    admin: User = Depends(get_current_admin),
+    pool: asyncpg.Pool = Depends(get_pool),
+) -> list[ApprovalRequest]:
+    return await list_pending(pool, scope=scope)
 
 
 @router.post("/approval-requests/{request_id}/approve")

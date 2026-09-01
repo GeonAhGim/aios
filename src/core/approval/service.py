@@ -15,6 +15,18 @@ Spec: 기능설계문서_v1.20.md#FD-10.1, ADR-2026-08-10-D
 버튼이 열리는 시점)와 이후 응답 가능 창(RESPONSE_WINDOW_SECONDS, Draft
 5분)을 분리해 expires_at = created_at + mandatory_wait_seconds +
 RESPONSE_WINDOW_SECONDS로 계산한다.
+
+편차(2026-09-01, 앱 조립 이후 발견된 갭 해소): approve()/reject() 자체는
+"누가 호출했는지"를 검증하지 않는다 — scope="USER"(SOLO=본인 1인,
+DUAL=서로 다른 두 계정 순차 서명)인데도 HTTP 노출은 admin.py의 관리자
+전용 엔드포인트뿐이었다. src/api/routers/users.py에 자기 요청만 처리할
+수 있는 self-service 엔드포인트(/users/me/approval-requests/*)를 추가해
+"본인 소유 요청"으로 제한된 승인·거절을 연다 — SOLO 전체와 DUAL의 첫
+서명은 이걸로 충분하지만, DUAL의 두 번째 서명자는 시스템에 신원이
+등록돼 있지 않다(user_approval_settings.second_approver_contact는
+연락처 문자열일 뿐 user_id로 해석하는 로직이 없음) — 검증 없이 아무나
+"두 번째 서명자"를 자처하게 둘 수 없으므로, 그 경로는 여전히 관리자
+전용 엔드포인트로만 남긴다(신원 해석 설계가 생기기 전까지 정직한 축소).
 """
 from __future__ import annotations
 
@@ -77,6 +89,36 @@ async def _fetch(pool: asyncpg.Pool, request_id: int) -> ApprovalRequest:
 async def get_request(pool: asyncpg.Pool, request_id: int) -> ApprovalRequest:
     """다른 서비스(예: 9.4b Circuit Breaker 재가동)가 요청 상태를 폴링할 때 사용."""
     return await _fetch(pool, request_id)
+
+
+async def list_pending(
+    pool: asyncpg.Pool,
+    *,
+    scope: str | None = None,
+    user_id: UUID | None = None,
+) -> list[ApprovalRequest]:
+    """편차(2026-09-01, 앱 조립 이후 발견된 갭 해소): 승인 대기 요청을
+    "목록으로" 조회할 방법이 스펙 어디에도 없어, 요청자가 자기 요청 ID를
+    알 방법이 없었다(FD-17 발송기가 아직 없어 알림 본문 딥링크로도 못
+    받음) — get_request()는 이미 id를 아는 경우만 쓸 수 있다. user_id로
+    거르면(scope="USER" 요청은 항상 user_id가 채워짐) 자연히 본인 요청만
+    보인다."""
+    conditions = ["status = 'PENDING'"]
+    params: list[object] = []
+    if scope is not None:
+        params.append(scope)
+        conditions.append(f"scope = ${len(params)}")
+    if user_id is not None:
+        params.append(user_id)
+        conditions.append(f"user_id = ${len(params)}")
+    where_clause = " AND ".join(conditions)
+
+    async with pool.acquire() as conn:
+        rows = await conn.fetch(
+            f"SELECT * FROM approval_requests WHERE {where_clause} ORDER BY created_at DESC",
+            *params,
+        )
+    return [_row_to_model(row) for row in rows]
 
 
 async def create_request(

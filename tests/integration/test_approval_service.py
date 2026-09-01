@@ -18,6 +18,7 @@ from src.core.approval.service import (
     cancel,
     create_request,
     expire_pending,
+    list_pending,
     reject,
 )
 from tests.integration.conftest import create_test_user
@@ -262,6 +263,61 @@ async def test_concurrent_dual_first_signature_only_one_succeeds(pool, monkeypat
         )
     assert row["status"] == "PENDING"
     assert row["first_approver_id"] == successes[0].first_approver_id
+
+
+async def test_list_pending_filters_by_user(pool):
+    owner = await create_test_user(pool)
+    stranger = await create_test_user(pool)
+    request = await create_request(
+        pool,
+        scope="USER",
+        user_id=owner,
+        trigger_source="execution_high_allocation",
+        requested_action="START_LIVE_EXECUTION",
+        context={},
+        approval_mode="SOLO",
+    )
+
+    owner_pending = await list_pending(pool, user_id=owner)
+    stranger_pending = await list_pending(pool, user_id=stranger)
+
+    assert any(r.id == request.id for r in owner_pending)
+    assert all(r.id != request.id for r in stranger_pending)
+
+
+async def test_list_pending_filters_by_scope(pool):
+    platform_request = await create_request(
+        pool,
+        scope="PLATFORM",
+        trigger_source="circuit_breaker_reactivation",
+        requested_action="REACTIVATE",
+        context={},
+        approval_mode="SOLO",
+    )
+
+    platform_pending = await list_pending(pool, scope="PLATFORM")
+    user_pending = await list_pending(pool, scope="USER")
+
+    assert any(r.id == platform_request.id for r in platform_pending)
+    assert all(r.id != platform_request.id for r in user_pending)
+
+
+async def test_list_pending_excludes_resolved_requests(pool):
+    owner = await create_test_user(pool)
+    request = await create_request(
+        pool,
+        scope="USER",
+        user_id=owner,
+        trigger_source="watchdog_liquidate",
+        requested_action="LIQUIDATE_POSITION",
+        context={},
+        approval_mode="SOLO",
+    )
+    await reject(pool, request.id, uuid4())
+
+    owner_pending = await list_pending(pool, user_id=owner)
+
+    assert all(r.id != request.id for r in owner_pending)
 
 
 async def test_context_roundtrips_with_decimal_values(pool):

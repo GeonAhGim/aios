@@ -9,9 +9,10 @@ AuthService.authenticate()를 그대로 재사용한다(로그인 가능 = 재�
 """
 from __future__ import annotations
 
+import asyncpg
 from fastapi import APIRouter, Depends, HTTPException, status
 
-from src.api.deps import get_auth_service, get_current_user
+from src.api.deps import get_auth_service, get_current_user, get_pool
 from src.api.schemas.account import (
     ApprovalSettingsRequest,
     ApprovalSettingsResponse,
@@ -28,6 +29,7 @@ from src.api.service_deps import (
     get_approval_settings_service,
     get_withdrawal_whitelist_service,
 )
+from src.core.approval.service import ApprovalError, ApprovalRequest, approve, list_pending, reject
 from src.services.account_deletion_service import AccountDeletionError, AccountDeletionService
 from src.services.approval_settings_service import ApprovalSettingsError, ApprovalSettingsService
 from src.services.auth_service import AuthError, AuthService, User
@@ -122,3 +124,49 @@ async def request_account_deletion(
     return DeletionResponse(
         status=result.status, deletion_effective_at=result.deletion_effective_at
     )
+
+
+@router.get("/me/approval-requests")
+async def list_my_approval_requests(
+    user: User = Depends(get_current_user),
+    pool: asyncpg.Pool = Depends(get_pool),
+) -> list[ApprovalRequest]:
+    return await list_pending(pool, user_id=user.user_id)
+
+
+async def _require_own_request(pool: asyncpg.Pool, request_id: int, user: User) -> None:
+    """자기 소유 PENDING 요청인지 확인 — approval/service.py 모듈 docstring
+    참조(DUAL 두 번째 서명자는 신원 해석이 없어 self-service 대상이 아님,
+    이 검사가 그 경로를 자연히 차단한다: request.user_id는 항상 요청자
+    본인이라 다른 계정으로는 이 목록에 잡히지 않는다)."""
+    own_pending = await list_pending(pool, user_id=user.user_id)
+    if not any(r.id == request_id for r in own_pending):
+        raise HTTPException(
+            status.HTTP_403_FORBIDDEN, "본인의 승인 요청만 처리할 수 있습니다."
+        )
+
+
+@router.post("/me/approval-requests/{request_id}/approve")
+async def approve_my_request(
+    request_id: int,
+    user: User = Depends(get_current_user),
+    pool: asyncpg.Pool = Depends(get_pool),
+) -> ApprovalRequest:
+    await _require_own_request(pool, request_id, user)
+    try:
+        return await approve(pool, request_id, user.user_id)
+    except ApprovalError as exc:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from exc
+
+
+@router.post("/me/approval-requests/{request_id}/reject")
+async def reject_my_request(
+    request_id: int,
+    user: User = Depends(get_current_user),
+    pool: asyncpg.Pool = Depends(get_pool),
+) -> ApprovalRequest:
+    await _require_own_request(pool, request_id, user)
+    try:
+        return await reject(pool, request_id, user.user_id)
+    except ApprovalError as exc:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from exc
