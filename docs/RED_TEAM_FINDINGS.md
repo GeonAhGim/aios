@@ -11,6 +11,42 @@
 
 ---
 
+## 2026-09-01-08 · PAPER 실행 루프가 adapter의 실제 sandbox 상태를 증명하지 않음
+
+**상태**: 🔴 OPEN — 설계/구현 보강 필요. 현재 production router나 scheduler가
+`run_execution_tick()`을 호출하는 경로는 확인되지 않았고, 통합 테스트는
+`FakeExchangeAdapter`만 사용한다. 그러나 이 라이브러리 경계가 이후 배선될
+때 안전한 paper-only 보장을 제공하지 못하므로, production wiring 전에
+해소해야 한다.
+
+**발견**: `src/core/executor/executor.py::Executor.execute()`는
+`mode != "PAPER"`을 차단하지만, 전달받은 `ExchangeAdapter`의 실제 계정·endpoint·demo
+상태는 확인하지 않은 채 `src/services/order_service/submit.py::submit_order()`가
+`adapter.place_order(order)`를 호출한다. `ExchangeAdapter` interface에는
+"현재 sandbox/paper account에 바인딩됨"을 증명하는 속성/attestation이 없다.
+실제 구현도 `BitgetAdapter(demo_mode=False)` 또는
+`KISAdapter(is_paper_trading=False)`로 생성 가능하다. 따라서 단지 DB execution
+mode가 `PAPER`라는 사실만으로, 잘못 구성된 real adapter를 통한 외부 주문을
+코드 수준에서 막지는 못한다.
+
+**영향**: 현재에는 호출 배선이 없는 library code이므로 즉시 외부 주문이
+노출됐다는 증거는 없다. 다만 향후 scheduler/worker가 `run_execution_tick()`에
+실제 adapter를 주입하면 configuration error 하나가 paper 실행을 real endpoint로
+보낼 수 있다. 이는 `PAPER 모드는 hard guard`라는 Executor docstring의 보장보다
+약하며, 플랫폼 기준 문서가 요구하는 account/credential/provider adapter 수준의
+paper/live 분리와도 맞지 않는다.
+
+**권장 수정 방향**: execution plane에 별도 `PaperExecutionAdapter` 또는
+검증 가능한 immutable `ExecutionEnvironment` attestation을 도입한다. paper
+worker는 sandbox endpoint, sandbox credential provenance, egress allowlist를
+확인한 adapter만 얻을 수 있어야 하며, `Executor.execute()`/tick entrypoint는
+attestation이 없거나 LIVE인 adapter를 fail-closed로 거부해야 한다. 이 경계에는
+`PAPER + live-configured adapter` negative test와 실제 network egress를 막는
+integration test를 추가한다. 기존 LIVE path를 수정/활성화하는 작업은 별도
+ADR·owner review·release approval로 분리한다.
+
+---
+
 ## 2026-08-29-01 · get_current_user()가 계정 정지 상태를 요청마다 확인하지 않음
 
 **상태**: ✅ FIXED (커밋 `5c04f2d`, 감사 세션이 실행해 확인 — 525 tests passed)
