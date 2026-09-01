@@ -1,4 +1,7 @@
-# FROZEN — 15.6-D 종료조건 충족 전까지 어떤 PR도 이 소유자 없이 병합 불가
+# FROZEN-PAPER-ONLY (ADR-2026-08-29-E) — PAPER 모드 판단·실행 로직은 이
+# 소유자 리뷰만 거치면 병합 가능. LIVE 경로는 15.6-D 조건 2(실계정
+# MFA·이중승인) 충족 전까지 코드 레벨로 하드 차단(정책 문서상 봉쇄가
+# 아니라 실행되는 코드 자체의 가드).
 # TODO: @{owner}를 실제 GitHub 계정으로 교체하세요(로컬 저장소 단계라 아직 미지정)
 /src/core/strategy/       @{owner}
 /src/core/portfolio/      @{owner}
