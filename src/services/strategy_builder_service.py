@@ -208,13 +208,25 @@ class StrategyBuilderService:
                 if risk_warning is not None and not risk_warning_acknowledged:
                     raise StrategyLifecycleError(risk_warning)
 
-            await conn.execute(
+            # 레드팀 감사(docs/RED_TEAM_FINDINGS.md #17) 반영 — 04/05/08/09/16번과
+            # 같은 "읽고 나서 별도로 조건 없이 쓰기" 패턴이었다. 방금 읽은
+            # lifecycle_status를 UPDATE 자체의 조건으로 걸어, 그 사이 다른
+            # 요청(예: 관리자의 REJECTED 판정과 자동 파이프라인의 다음 단계
+            # 전이)이 먼저 커밋됐다면 조용히 덮어쓰지 않고 실패시킨다.
+            updated = await conn.fetchrow(
                 "UPDATE strategies SET lifecycle_status = $3, updated_at = now() "
-                "WHERE strategy_id = $1 AND version = $2",
+                "WHERE strategy_id = $1 AND version = $2 AND lifecycle_status = $4 "
+                "RETURNING strategy_id",
                 strategy_id,
                 version,
                 new_status,
+                current,
             )
+            if updated is None:
+                raise StrategyLifecycleError(
+                    "다른 요청이 이 전략의 생애주기를 방금 이미 변경했습니다"
+                    "(동시 처리 충돌) — 다시 조회 후 시도하세요."
+                )
         return SavedStrategy(
             strategy_id=strategy_id,
             version=version,

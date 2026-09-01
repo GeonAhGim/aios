@@ -1,4 +1,5 @@
 """14.3 통합테스트 — 실제 dev DB 대상."""
+import asyncio
 from pathlib import Path
 from uuid import uuid4
 
@@ -130,6 +131,37 @@ async def test_transition_to_next_stage_succeeds(service, pool):
     result = await service.transition_lifecycle(strategy_id, "1.0.0", "BACKTESTING")
 
     assert result.lifecycle_status == "BACKTESTING"
+
+
+async def test_concurrent_transitions_only_one_succeeds(service, pool):
+    """레드팀 감사 #17 — transition_lifecycle()이 방금 읽은 lifecycle_status를
+    UPDATE 조건으로 다시 걸지 않으면, 거의 동시에 들어온 두 전이 요청이
+    서로의 아직 커밋 안 된 변경을 못 본 채 둘 다 통과해버릴 수 있다
+    (04/05/08/09/16번과 같은 "읽고 나서 별도로 조건 없이 쓰기" 근본원인).
+    같은 GENERATED 상태에서 동시에 BACKTESTING 전이를 두 번 시도하면
+    정확히 하나만 성공해야 한다."""
+    owner = await create_test_user(pool)
+    strategy_id = f"test-strategy-{uuid4().hex[:8]}"
+    await service.save_strategy(
+        owner,
+        strategy_id,
+        "1.0.0",
+        target_asset="BTC/USDT",
+        market="crypto",
+        exchange="bitget",
+        fsm_definition={},
+    )
+
+    results = await asyncio.gather(
+        service.transition_lifecycle(strategy_id, "1.0.0", "BACKTESTING"),
+        service.transition_lifecycle(strategy_id, "1.0.0", "BACKTESTING"),
+        return_exceptions=True,
+    )
+
+    successes = [r for r in results if not isinstance(r, Exception)]
+    failures = [r for r in results if isinstance(r, StrategyLifecycleError)]
+    assert len(successes) == 1
+    assert len(failures) == 1
 
 
 async def test_cannot_skip_lifecycle_stages(service, pool):
