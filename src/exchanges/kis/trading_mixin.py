@@ -59,8 +59,14 @@ class KISTradingMixin:
         raw = await self._request(  # type: ignore[attr-defined]
             "POST", "/uapi/domestic-stock/v1/trading/order-cash", tr_id, body=body
         )
-        output = raw["output"]
-        exchange_order_id = f"{output['KRX_FWDG_ORD_ORGNO']}:{output['ODNO']}"
+        # 레드팀 감사(docs/RED_TEAM_FINDINGS.md #18b) 반영 — market_data_mixin과
+        # 동일하게 예상 필드 누락을 FatalExchangeError로 통일한다(설명 없는
+        # KeyError 대신 어떤 필드가 없었는지 드러낸다).
+        try:
+            output = raw["output"]
+            exchange_order_id = f"{output['KRX_FWDG_ORD_ORGNO']}:{output['ODNO']}"
+        except KeyError as exc:
+            raise FatalExchangeError(f"KIS 주문 응답에 예상 필드 없음: {exc}") from exc
         return order.model_copy(
             update={"exchange_order_id": exchange_order_id, "status": OrderStatus.SUBMITTED}
         )

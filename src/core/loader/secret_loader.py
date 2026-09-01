@@ -13,6 +13,7 @@ from collections.abc import Mapping
 from pathlib import Path
 
 from dotenv import dotenv_values
+from pydantic import SecretStr
 
 from src.data.models.trading import SecretBundle
 
@@ -35,22 +36,26 @@ def load_env_secrets(source: Mapping[str, str] | None = None) -> SecretBundle:
     """
     env = source if source is not None else _merged_environment()
 
+    smtp_password = env.get("SMTP_PASSWORD") or None
+    fcm_server_key = env.get("FCM_SERVER_KEY") or None
+    apns_key_id = env.get("APNS_KEY_ID") or None
+
     return SecretBundle(
-        database_url=env["DATABASE_URL"],
-        jwt_secret_key=env["JWT_SECRET_KEY"],
+        database_url=SecretStr(env["DATABASE_URL"]),
+        jwt_secret_key=SecretStr(env["JWT_SECRET_KEY"]),
         jwt_algorithm=env.get("JWT_ALGORITHM", "HS256"),
         jwt_expire_minutes=int(env.get("JWT_EXPIRE_MINUTES", "60")),
-        credential_encryption_key=env["CREDENTIAL_ENCRYPTION_KEY"],
-        bitget_api_key=env["BITGET_API_KEY"],
-        bitget_api_secret=env["BITGET_API_SECRET"],
-        kis_app_key=env["KIS_APP_KEY"],
-        kis_app_secret=env["KIS_APP_SECRET"],
+        credential_encryption_key=SecretStr(env["CREDENTIAL_ENCRYPTION_KEY"]),
+        bitget_api_key=SecretStr(env["BITGET_API_KEY"]),
+        bitget_api_secret=SecretStr(env["BITGET_API_SECRET"]),
+        kis_app_key=SecretStr(env["KIS_APP_KEY"]),
+        kis_app_secret=SecretStr(env["KIS_APP_SECRET"]),
         smtp_host=env.get("SMTP_HOST") or None,
         smtp_port=int(env.get("SMTP_PORT", "587")),
         smtp_user=env.get("SMTP_USER") or None,
-        smtp_password=env.get("SMTP_PASSWORD") or None,
-        fcm_server_key=env.get("FCM_SERVER_KEY") or None,
-        apns_key_id=env.get("APNS_KEY_ID") or None,
+        smtp_password=SecretStr(smtp_password) if smtp_password is not None else None,
+        fcm_server_key=SecretStr(fcm_server_key) if fcm_server_key is not None else None,
+        apns_key_id=SecretStr(apns_key_id) if apns_key_id is not None else None,
         cors_allowed_origins=[
             origin.strip()
             for origin in env.get("CORS_ALLOWED_ORIGINS", "").split(",")

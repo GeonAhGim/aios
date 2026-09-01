@@ -205,9 +205,21 @@ class ExecutionService:
                 "UPDATE strategy_executions "
                 "SET status = 'RUNNING', paused_by = NULL, "
                 "started_at = COALESCE(started_at, now()) "
-                "WHERE id = $1 RETURNING status, mode, exchange, allocated_capital",
+                "WHERE id = $1 AND status = $2 "
+                "RETURNING status, mode, exchange, allocated_capital",
                 execution_id,
+                execution["status"],
             )
+            if row is None:
+                # 레드팀 감사(docs/RED_TEAM_FINDINGS.md #08) 반영 — 방금 읽은
+                # status 그대로 조건을 걸어 그 사이 Watchdog(별도 프로세스)이
+                # 안전정지를 먼저 커밋했다면 이 UPDATE 자체가 0행이 된다.
+                # 8.6-B Kill Switch 우선순위 — 사용자 요청이 안전정지를
+                # 조용히 덮어쓰지 않는다.
+                raise ExecutionControlError(
+                    "다른 프로세스가 이 실행의 상태를 방금 변경했습니다 — "
+                    "다시 조회 후 시도하세요(안전장치가 정지시켰을 수 있습니다)."
+                )
         return ExecutionSummary(
             id=execution_id,
             status=row["status"],
@@ -244,10 +256,18 @@ class ExecutionService:
 
             row = await conn.fetchrow(
                 "UPDATE strategy_executions SET status = 'PAUSED', paused_by = $2 "
-                "WHERE id = $1 RETURNING status, mode, exchange, allocated_capital",
+                "WHERE id = $1 AND status = 'RUNNING' "
+                "RETURNING status, mode, exchange, allocated_capital",
                 execution_id,
                 paused_by,
             )
+            if row is None:
+                # #08 반영 — 방금 읽었을 때 RUNNING이었어도 그 사이 이미
+                # 다른 경로(Watchdog 또는 동시 요청)가 상태를 바꿨을 수
+                # 있다. 조용히 덮어쓰지 않고 충돌로 알린다.
+                raise ExecutionControlError(
+                    "다른 프로세스가 이 실행을 방금 이미 정지시켰습니다 — 다시 조회하세요."
+                )
         return ExecutionSummary(
             id=execution_id,
             status=row["status"],
@@ -280,10 +300,17 @@ class ExecutionService:
             row = await conn.fetchrow(
                 "UPDATE strategy_executions "
                 "SET status = 'RETIRED', retire_liquidation = $2, retired_at = now() "
-                "WHERE id = $1 RETURNING status, mode, exchange, allocated_capital",
+                "WHERE id = $1 AND status IN ('RUNNING', 'PAUSED') "
+                "RETURNING status, mode, exchange, allocated_capital",
                 execution_id,
                 liquidation,
             )
+            if row is None:
+                # #08과 같은 계열 — 동시에 이미 RETIRED/다른 상태로 전이된
+                # 경우 조용히 성공을 가장하지 않는다.
+                raise ExecutionControlError(
+                    "다른 프로세스가 이 실행의 상태를 방금 이미 변경했습니다 — 다시 조회하세요."
+                )
         return ExecutionSummary(
             id=execution_id,
             status=row["status"],

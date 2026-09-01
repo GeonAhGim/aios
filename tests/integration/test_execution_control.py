@@ -5,6 +5,7 @@ test_safety_layer_pause_blocks_user_restart가 실증한다 — 별도 리프
 파일을 만들 만큼 다른 관심사가 아니라 ExecutionService.start()의
 핵심 요구사항이라 이 파일에서 함께 다룬다.
 """
+import asyncio
 import json
 from decimal import Decimal
 from pathlib import Path
@@ -191,3 +192,55 @@ async def test_retire_rejects_non_owner(service, pool):
 
     with pytest.raises(ExecutionControlError):
         await service.retire(created.id, other_user)
+
+
+async def test_concurrent_safety_pause_blocks_racing_user_start(service, pool, monkeypatch):
+    """docs/RED_TEAM_FINDINGS.md #08 회귀 — start()가 RUNNING을 읽은 직후,
+    커밋 전 그 사이에 Watchdog(SAFETY_LAYER)의 pause()가 먼저 커밋되면
+    start()의 UPDATE는 방금 읽은 status 조건에 걸려 0행이 돼야 한다
+    (조용히 안전정지를 덮어쓰고 재개시키면 안 됨, 8.6-B Kill Switch 우선순위).
+
+    04번 항목 수정 때 확인한 대로 asyncio.gather만으로는 두 코루틴의 SELECT가
+    실제로 겹친다는 보장이 없어, start()의 SELECT 직후 지점에 barrier를
+    걸어 pause()가 반드시 그 사이에 커밋되도록 강제한다."""
+    user_id = await create_test_user(pool)
+    created = await _create_execution(service, pool, user_id)
+    await service.start(created.id, user_id)
+
+    reached_update = asyncio.Event()
+    allow_update = asyncio.Event()
+    original_fetchrow = asyncpg.Connection.fetchrow
+
+    async def patched_fetchrow(self, query, *args, **kwargs):
+        # start()가 (여전히 RUNNING이던) 값을 이미 다 읽고 UPDATE를 실행하려는
+        # 바로 그 시점에만 끼어든다 — SELECT 자체를 막으면 start()의 기존
+        # Python 레벨 사전검사(184-188행)가 새 값을 보고 먼저 막아버려서
+        # 정작 이번에 고친 "UPDATE 자체의 조건부 WHERE"는 검증되지 않는다.
+        if "SET status = 'RUNNING'" in query:
+            reached_update.set()
+            await allow_update.wait()
+        return await original_fetchrow(self, query, *args, **kwargs)
+
+    monkeypatch.setattr(asyncpg.Connection, "fetchrow", patched_fetchrow)
+
+    async def racing_start():
+        return await service.start(created.id, user_id)
+
+    async def racing_safety_pause():
+        await reached_update.wait()
+        await service.pause(created.id, paused_by="SAFETY_LAYER")
+        allow_update.set()
+
+    start_task = asyncio.create_task(racing_start())
+    pause_task = asyncio.create_task(racing_safety_pause())
+
+    await pause_task
+    with pytest.raises(ExecutionControlError):
+        await start_task
+
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            "SELECT status, paused_by FROM strategy_executions WHERE id = $1", created.id
+        )
+    assert row["status"] == "PAUSED"
+    assert row["paused_by"] == "SAFETY_LAYER"

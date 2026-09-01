@@ -49,7 +49,7 @@ def get_withdrawal_whitelist_service(
     return WithdrawalWhitelistService(
         pool,
         circuit_breaker,
-        encryption_key=secrets.credential_encryption_key,
+        encryption_key=secrets.credential_encryption_key.get_secret_value(),
         publish=event_bus.publish,
     )
 
@@ -64,7 +64,9 @@ def get_exchange_credential_service(
     request: Request, pool: asyncpg.Pool = Depends(get_pool)
 ) -> ExchangeCredentialService:
     secrets = request.app.state.secrets
-    return ExchangeCredentialService(pool, encryption_key=secrets.credential_encryption_key)
+    return ExchangeCredentialService(
+        pool, encryption_key=secrets.credential_encryption_key.get_secret_value()
+    )
 
 
 def get_wallet_service(pool: asyncpg.Pool = Depends(get_pool)) -> WalletService:

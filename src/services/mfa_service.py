@@ -19,6 +19,8 @@ mfa_secret을 NULL로 되돌려 폐기한다(반쯤 활성화된 상태로 남�
 """
 from __future__ import annotations
 
+from collections.abc import Callable
+from datetime import datetime, timezone
 from uuid import UUID
 
 import asyncpg
@@ -40,9 +42,19 @@ class MfaSetupResult(BaseModel):
 
 
 class MfaService:
-    def __init__(self, pool: asyncpg.Pool, *, encryption_key: str) -> None:
+    def __init__(
+        self,
+        pool: asyncpg.Pool,
+        *,
+        encryption_key: str,
+        now: Callable[[], datetime] = lambda: datetime.now(timezone.utc),
+    ) -> None:
         self._pool = pool
         self._encryption_key = encryption_key
+        # #13 재사용 방지 테스트가 실제로 30초를 기다리지 않고도 "다음
+        # 구간"을 결정적으로 재현할 수 있도록 시계를 주입 가능하게 둔다
+        # (watchdog.py의 clock 주입과 동일 원칙, 운영 동작은 기본값 그대로).
+        self._now = now
 
     async def setup(self, user_id: UUID, email: str) -> MfaSetupResult:
         secret = pyotp.random_base32()
@@ -65,10 +77,19 @@ class MfaService:
             row = await conn.fetchrow(
                 "SELECT mfa_secret, mfa_enabled FROM users WHERE user_id = $1", user_id
             )
-            encrypted_secret = row["mfa_secret"] if row is not None else None
+            encrypted_secret: str | None = row["mfa_secret"] if row is not None else None
             already_enabled = bool(row["mfa_enabled"]) if row is not None else False
 
-            if encrypted_secret is None or not self._check_code(encrypted_secret, totp_code):
+            valid = False
+            if encrypted_secret is not None and self._totp_code_valid(
+                encrypted_secret, totp_code
+            ):
+                # 레드팀 감사(#13) — 코드 자체가 유효해도 이미 한 번 성공한
+                # 타임코드와 같으면(재사용) 거부한다.
+                timecode = self._current_timecode(encrypted_secret)
+                valid = await self._consume_timecode(conn, user_id, timecode)
+
+            if not valid:
                 if not already_enabled:
                     # 레드팀 감사(#11) — 최초 설정(mfa_enabled=false, 검증
                     # 대기 중) 실패만 secret을 폐기한다("반쯤 활성화된 상태로
@@ -90,11 +111,37 @@ class MfaService:
                 "UPDATE users SET mfa_enabled = true WHERE user_id = $1", user_id
             )
 
-    def _check_code(self, encrypted_secret: str, totp_code: str) -> bool:
+    def _totp_code_valid(self, encrypted_secret: str, totp_code: str) -> bool:
         secret = decrypt(encrypted_secret, self._encryption_key)
-        return bool(pyotp.totp.TOTP(secret).verify(totp_code))
+        return bool(pyotp.totp.TOTP(secret).verify(totp_code, for_time=self._now()))
 
-    async def verify_totp_for_login(self, encrypted_secret: str, totp_code: str) -> bool:
+    def _current_timecode(self, encrypted_secret: str) -> int:
+        secret = decrypt(encrypted_secret, self._encryption_key)
+        return int(pyotp.totp.TOTP(secret).timecode(self._now()))
+
+    async def _consume_timecode(
+        self, conn: asyncpg.Connection, user_id: UUID, timecode: int
+    ) -> bool:
+        """레드팀 감사(docs/RED_TEAM_FINDINGS.md #13) — 이 타임코드가 이미
+        사용된 적이 있으면(재사용) False. 원자적 조건부 UPDATE라 동시에
+        같은 코드로 두 번 요청해도 하나만 통과한다."""
+        row = await conn.fetchrow(
+            "UPDATE users SET mfa_last_used_timecode = $2 "
+            "WHERE user_id = $1 "
+            "AND (mfa_last_used_timecode IS NULL OR mfa_last_used_timecode < $2) "
+            "RETURNING user_id",
+            user_id,
+            timecode,
+        )
+        return row is not None
+
+    async def verify_totp_for_login(
+        self, user_id: UUID, encrypted_secret: str, totp_code: str
+    ) -> bool:
         """AuthService.authenticate()의 verify_totp DI 콜백으로 그대로 주입되는
-        진입점 — mfa_secret 컬럼 값(암호화된 채)과 코드만 받아 bool을 반환."""
-        return self._check_code(encrypted_secret, totp_code)
+        진입점."""
+        if not self._totp_code_valid(encrypted_secret, totp_code):
+            return False
+        timecode = self._current_timecode(encrypted_secret)
+        async with self._pool.acquire() as conn:
+            return await self._consume_timecode(conn, user_id, timecode)

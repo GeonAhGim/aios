@@ -24,6 +24,18 @@ class ExchangeAdapter(ABC):
         """7.6 — 이 거래소가 지원하는 기능을 선언한다."""
         ...
 
+    @property
+    @abstractmethod
+    def is_sandboxed(self) -> bool:
+        """레드팀 감사(docs/RED_TEAM_FINDINGS.md, 2026-09-01-08) 반영 — 이
+        어댑터 인스턴스가 실제로 sandbox/demo/paper 계정에 바인딩됐는지
+        스스로 증명한다. DB의 실행 mode 컬럼만으로는 "잘못 구성된 real
+        adapter"(예: demo_mode=False로 생성된 BitgetAdapter)를 걸러낼 수
+        없다 — FD-8.4(Executor)가 PAPER 모드 실행에 이 값을 반드시 함께
+        확인해야 한다(mode 문자열과 실제 adapter 상태 둘 다 일치해야
+        통과, 어느 한쪽만 봐서는 안 됨)."""
+        ...
+
     # ---- Market Data ----
     @abstractmethod
     async def get_ticker(self, symbol: str) -> Ticker: ...

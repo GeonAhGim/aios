@@ -128,6 +128,11 @@ class InProcessEventBus(EventBus):
             try:
                 for handler, criticality in list(self._subscribers.get(topic, [])):
                     await self._dispatch(topic, handler, criticality, payload)
+            except Exception:  # noqa: BLE001 — #15 심층 방어: _dispatch가 이미 handler/
+                # audit_sink 예외를 흡수하지만, 예기치 못한 예외까지 이 워커
+                # 태스크를 죽이는 일은 절대 없어야 한다(그 순간부터 이 토픽의
+                # 이후 이벤트가 전부 조용히 처리되지 않게 되므로).
+                logger.exception("[%s] 워커 루프에서 예기치 못한 예외 — 워커는 계속 동작", topic)
             finally:
                 queue.task_done()
             if not self._running:
@@ -154,15 +159,22 @@ class InProcessEventBus(EventBus):
         """log_and_continue — 다른 handler에 영향 없이 계속 진행."""
         wrapped = EventHandlerError(f"[{topic}] SAFE handler 실패: {exc}")
         logger.warning("%s", wrapped, exc_info=exc)
-        await self._audit_sink(
-            {
-                "actor_agent": "event_bus",
-                "action_type": "handler_error_safe",
-                "target_type": "topic",
-                "target_id": topic,
-                "decision_data": {"payload_repr": repr(payload), "error": str(exc)},
-            }
-        )
+        # 레드팀 감사(docs/RED_TEAM_FINDINGS.md #15) 반영 — audit_sink 자체가
+        # 실패해도(예: 실 DB 연동 후 커넥션 오류) 이 예외가 _worker_loop까지
+        # 전파되면 해당 토픽의 워커 태스크 자체가 조용히 죽는다. 감사기록
+        # 실패가 handler 처리 자체를 막지 않도록 여기서 흡수한다.
+        try:
+            await self._audit_sink(
+                {
+                    "actor_agent": "event_bus",
+                    "action_type": "handler_error_safe",
+                    "target_type": "topic",
+                    "target_id": topic,
+                    "decision_data": {"payload_repr": repr(payload), "error": str(exc)},
+                }
+            )
+        except Exception:  # noqa: BLE001
+            logger.exception("[%s] audit_sink 호출 실패(SAFE handler 오류 기록 중)", topic)
 
     async def _handle_critical_error(
         self, topic: str, handler: EventHandler, payload: Any, exc: Exception
@@ -184,19 +196,24 @@ class InProcessEventBus(EventBus):
             f"[{topic}] CRITICAL handler {self._max_retries}회 재시도 모두 실패: {last_exc}"
         )
         logger.error("%s", wrapped, exc_info=last_exc)
-        await self._audit_sink(
-            {
-                "actor_agent": "event_bus",
-                "action_type": "handler_error_critical_escalated",
-                "target_type": "topic",
-                "target_id": topic,
-                "decision_data": {
-                    "payload_repr": repr(payload),
-                    "error": str(last_exc),
-                    "retries": self._max_retries,
-                },
-            }
-        )
+        try:
+            await self._audit_sink(
+                {
+                    "actor_agent": "event_bus",
+                    "action_type": "handler_error_critical_escalated",
+                    "target_type": "topic",
+                    "target_id": topic,
+                    "decision_data": {
+                        "payload_repr": repr(payload),
+                        "error": str(last_exc),
+                        "retries": self._max_retries,
+                    },
+                }
+            )
+        except Exception:  # noqa: BLE001 — #15와 동일 원칙, 워커 태스크를 죽이지 않는다
+            logger.exception(
+                "[%s] audit_sink 호출 실패(CRITICAL handler 에스컬레이션 기록 중)", topic
+            )
         try:
             await self.publish(
                 HANDLER_ESCALATED_TOPIC,

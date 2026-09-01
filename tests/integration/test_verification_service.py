@@ -92,6 +92,34 @@ async def test_reject_returns_to_draft_with_reason(service, pool):
     assert result.rejection_reason == "오버피팅 의심"
 
 
+async def test_reject_reason_is_persisted_and_published(pool):
+    """docs/RED_TEAM_FINDINGS.md #16 회귀 — 반려 사유가 DB에도 이벤트
+    페이로드에도 남아야 한다(응답이 나간 순간 사라지면 안 됨)."""
+    published = []
+
+    async def publish(topic, payload):
+        published.append((topic, payload))
+
+    service = VerificationService(pool, publish=publish)
+    seller = await create_test_user(pool)
+    listing = await _pending_listing(pool, seller)
+    verifier = await create_test_user(pool)
+
+    await service.decide(
+        listing.id, verifier, "REJECT", rejection_reason="Look-ahead Bias 의심"
+    )
+
+    async with pool.acquire() as conn:
+        stored = await conn.fetchval(
+            "SELECT rejection_reason FROM strategy_listings WHERE id = $1", listing.id
+        )
+    assert stored == "Look-ahead Bias 의심"
+
+    topic, payload = published[0]
+    assert topic == "strategy.verification.completed"
+    assert payload["rejection_reason"] == "Look-ahead Bias 의심"
+
+
 async def test_reject_without_reason_is_rejected(service, pool):
     seller = await create_test_user(pool)
     listing = await _pending_listing(pool, seller)

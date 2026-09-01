@@ -74,6 +74,17 @@ class Executor:
                 "(실계정 MFA·이중승인) 충족 및 별도 ADR 전까지 차단됩니다"
                 "(ADR-2026-08-29-E)."
             )
+        if not adapter.is_sandboxed:
+            # 레드팀 감사(2026-09-01-08) 반영 — DB의 mode='PAPER'만으로는
+            # 잘못 구성된 real adapter(예: demo_mode=False로 생성된
+            # BitgetAdapter)를 통한 실주문을 막지 못한다. adapter 스스로
+            # sandbox 바인딩을 증명하지 못하면 mode 값과 무관하게 차단한다
+            # — 두 신호(DB mode, adapter 상태) 중 하나만 봐서는 안 된다.
+            raise FrozenZoneLiveModeBlockedError(
+                f"execution_id={execution_id}: PAPER 모드 실행인데 전달된 adapter가 "
+                "sandbox/demo 계정에 바인딩돼 있지 않습니다(is_sandboxed=False) — "
+                "설정 오류로 실계정에 주문이 나갈 뻔했습니다. 이 adapter는 사용할 수 없습니다."
+            )
 
         client_order_id = (
             f"{execution_id}:{pending_fsm_state.value}:{datetime.now(timezone.utc).isoformat()}"

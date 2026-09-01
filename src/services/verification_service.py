@@ -89,12 +89,16 @@ class VerificationService:
                     new_status,
                 )
             else:
+                # 레드팀 감사(#16) 반영 — 반려 사유를 UPDATE 자체에 저장한다.
+                # 이전에는 검증만 하고 실제로 어디에도 남기지 않아 응답이
+                # 나간 순간 완전히 사라졌다(판매자가 이유를 다시 알 수 없음).
                 row = await conn.fetchrow(
-                    "UPDATE strategy_listings SET status = $2 "
+                    "UPDATE strategy_listings SET status = $2, rejection_reason = $3 "
                     "WHERE id = $1 AND status = 'PENDING_VERIFICATION' "
                     "RETURNING seller_user_id",
                     listing_id,
                     new_status,
+                    rejection_reason,
                 )
             if row is None:
                 raise VerificationError(
@@ -109,6 +113,7 @@ class VerificationService:
                     "user_id": str(row["seller_user_id"]),
                     "listing_id": listing_id,
                     "decision": decision,
+                    "rejection_reason": rejection_reason if decision == "REJECT" else None,
                 },
             )
 

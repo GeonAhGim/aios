@@ -152,14 +152,20 @@ class PortfolioService:
         if not adjustments:
             raise RebalanceError("조정할 실행이 최소 1개 이상 필요합니다.")
 
-        async with self._pool.acquire() as conn:
+        async with self._pool.acquire() as conn, conn.transaction():
+            # 레드팀 감사(docs/RED_TEAM_FINDINGS.md #09) 반영 — 트랜잭션 +
+            # FOR UPDATE로 이 사용자의 RUNNING/PAUSED 실행 전체를 잠근다.
+            # 동시에 들어온 두 번째 재구성 요청은 이 트랜잭션이 끝날 때까지
+            # 자신의 SELECT ... FOR UPDATE에서 블록되므로, "서로의 아직
+            # 커밋 안 된 변경을 못 본 채 각자 통과"하는 경합이 원천 차단된다.
             rows = await conn.fetch(
                 "SELECT e.id AS execution_id, e.user_id, e.mode, e.allocated_capital, "
                 "s.certified_badge "
                 "FROM strategy_executions e "
                 "JOIN strategies s ON s.strategy_id = e.strategy_id "
                 "AND s.version = e.strategy_version "
-                "WHERE e.id = ANY($1) AND e.status IN ('RUNNING', 'PAUSED')",
+                "WHERE e.id = ANY($1) AND e.status IN ('RUNNING', 'PAUSED') "
+                "FOR UPDATE OF e",
                 [a.execution_id for a in adjustments],
             )
             found = {row["execution_id"]: row for row in rows}
@@ -176,7 +182,8 @@ class PortfolioService:
 
             all_execution_ids = await conn.fetch(
                 "SELECT id, allocated_capital FROM strategy_executions "
-                "WHERE user_id = $1 AND status IN ('RUNNING', 'PAUSED')",
+                "WHERE user_id = $1 AND status IN ('RUNNING', 'PAUSED') "
+                "FOR UPDATE",
                 user_id,
             )
             adjusted_by_id = {a.execution_id: a.new_allocated_capital for a in adjustments}

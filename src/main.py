@@ -40,7 +40,7 @@ def _asyncpg_dsn(database_url: str) -> str:
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     secrets = load_env_secrets()
-    pool = await asyncpg.create_pool(_asyncpg_dsn(secrets.database_url))
+    pool = await asyncpg.create_pool(_asyncpg_dsn(secrets.database_url.get_secret_value()))
 
     async def _event_bus_audit_sink(record: dict[str, Any]) -> None:
         """§5.5가 요구하는 "모든 handler 예외는 audit_log에 자동 기록"을 실제
@@ -82,7 +82,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # 캐시가 한 번도 실제로 작동한 적이 없었다 — pool/event_bus와 동일하게
     # 앱 시작 시 한 번만 만들어 app.state에 둔다.
     credential_service = ExchangeCredentialService(
-        pool, encryption_key=secrets.credential_encryption_key
+        pool, encryption_key=secrets.credential_encryption_key.get_secret_value()
     )
     credential_resolver = CredentialResolver(credential_service)
 

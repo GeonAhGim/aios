@@ -11,7 +11,7 @@ from decimal import Decimal
 from enum import Enum
 from uuid import UUID, uuid4
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, SecretStr
 
 from src.data.models.base import AssetClass, Money, OptionType
 
@@ -106,31 +106,39 @@ class Position(BaseModel):
 
 class SecretBundle(BaseModel):
     """FD-1.1/03번 §3.1(Loader.load_env_secrets)가 반환하는 타입.
-    07번 §7.3 `.env.example` 전체 목록과 1:1 대응."""
+    07번 §7.3 `.env.example` 전체 목록과 1:1 대응.
 
-    database_url: str
-    jwt_secret_key: str
+    레드팀 감사(docs/RED_TEAM_FINDINGS.md #10) 반영 — `__repr__`/`__str__`만
+    마스킹해서는 `model_dump()`/`model_dump_json()`(FastAPI가 실제로 쓰는
+    직렬화 경로)이 그대로 우회해 평문을 반환했다. 실제 자격증명·키류
+    필드는 전부 `SecretStr`로 선언해 Pydantic의 모든 직렬화 경로에서
+    일관되게 마스킹되도록 한다 — 필요한 곳에서만 `.get_secret_value()`로
+    꺼내 쓴다."""
+
+    database_url: SecretStr
+    jwt_secret_key: SecretStr
     jwt_algorithm: str = "HS256"
     jwt_expire_minutes: int = 60
     # FD-12.1 거래소 자격증명 + FD-11.5 출금 화이트리스트 암호화 공용
-    credential_encryption_key: str
-    bitget_api_key: str
-    bitget_api_secret: str
-    kis_app_key: str
-    kis_app_secret: str
+    credential_encryption_key: SecretStr
+    bitget_api_key: SecretStr
+    bitget_api_secret: SecretStr
+    kis_app_key: SecretStr
+    kis_app_secret: SecretStr
     smtp_host: str | None = None
     smtp_port: int = 587
     smtp_user: str | None = None
-    smtp_password: str | None = None
-    fcm_server_key: str | None = None
-    apns_key_id: str | None = None
+    smtp_password: SecretStr | None = None
+    fcm_server_key: SecretStr | None = None
+    apns_key_id: SecretStr | None = None
     # FD-17 프론트엔드(17번 문서, apps/web) 로컬 개발 서버가 별도 오리진(Vite,
     # 기본 5173)에서 API를 호출하므로 CORS 허용이 필요 — 비밀값은 아니지만
     # 이 번들이 .env 전체 설정의 단일 출처라 여기 포함한다.
     cors_allowed_origins: list[str] = Field(default_factory=list)
 
     def __repr__(self) -> str:
-        """07번 §7.1 마스킹 원칙 — 어떤 필드도 평문 노출 금지."""
+        """07번 §7.1 마스킹 원칙 — 어떤 필드도 평문 노출 금지(SecretStr이
+        이미 보장하지만, 압축된 표시를 위해 이 오버라이드도 유지한다)."""
         return f"SecretBundle(<{len(self.__class__.model_fields)} fields, masked>)"
 
     __str__ = __repr__

@@ -211,7 +211,7 @@ async def run_forever(pool: asyncpg.Pool) -> None:
 
 async def main() -> None:
     secrets = load_env_secrets()
-    pool = await asyncpg.create_pool(_asyncpg_dsn(secrets.database_url))
+    pool = await asyncpg.create_pool(_asyncpg_dsn(secrets.database_url.get_secret_value()))
     try:
         await run_forever(pool)
     finally:

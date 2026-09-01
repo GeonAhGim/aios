@@ -159,6 +159,39 @@ async def test_place_order_packs_composite_exchange_order_id():
     assert result.exchange_order_id == "1234:999"
 
 
+async def test_place_order_missing_expected_field_raises_fatal_exchange_error():
+    """docs/RED_TEAM_FINDINGS.md #18b 회귀 — 응답 형식이 바뀌어 예상 필드가
+    없으면 설명 없는 KeyError 대신 FatalExchangeError로 통일돼야 한다."""
+
+    def order_handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={"rt_cd": "0", "msg1": "ok", "output": {"ODNO": "999"}},  # KRX_FWDG_ORD_ORGNO 누락
+        )
+
+    from src.data.models.trading import Order, OrderSide, OrderType
+
+    adapter = _make_adapter(
+        lambda request: _route(
+            request, {"/uapi/domestic-stock/v1/trading/order-cash": order_handler}
+        )
+    )
+    order = Order(
+        client_order_id="c-1",
+        strategy_id="s-1",
+        strategy_version="v1",
+        symbol="005930",
+        exchange="kis",
+        side=OrderSide.BUY,
+        order_type=OrderType.MARKET,
+        quantity=Decimal("10"),
+        asset_class=AssetClass.KR_EQUITY,
+    )
+
+    with pytest.raises(FatalExchangeError):
+        await adapter.place_order(order)
+
+
 async def test_cancel_order_requires_composite_id_format():
     adapter = _make_adapter(lambda request: httpx.Response(200, json=TOKEN_RESPONSE))
     with pytest.raises(FatalExchangeError):

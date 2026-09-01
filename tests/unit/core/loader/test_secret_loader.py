@@ -16,7 +16,7 @@ MINIMAL_ENV = {
 def test_load_env_secrets_from_explicit_source():
     bundle = load_env_secrets(MINIMAL_ENV)
 
-    assert bundle.database_url == MINIMAL_ENV["DATABASE_URL"]
+    assert bundle.database_url.get_secret_value() == MINIMAL_ENV["DATABASE_URL"]
     assert bundle.jwt_algorithm == "HS256"  # 기본값
     assert bundle.jwt_expire_minutes == 60  # 기본값
     assert bundle.smtp_host is None
@@ -40,3 +40,18 @@ def test_load_env_secrets_missing_required_key_raises():
 def test_load_env_secrets_repr_never_leaks_values():
     bundle = load_env_secrets(MINIMAL_ENV)
     assert "test-secret" not in repr(bundle)
+
+
+def test_load_env_secrets_model_dump_never_leaks_values():
+    """docs/RED_TEAM_FINDINGS.md #10 회귀 — __repr__/__str__만 마스킹해서는
+    FastAPI가 실제로 쓰는 model_dump()/model_dump_json() 경로를 그대로
+    우회해 평문을 반환했다. SecretStr로 바꾼 뒤에는 이 경로도 마스킹돼야
+    한다."""
+    bundle = load_env_secrets(MINIMAL_ENV)
+
+    dumped = bundle.model_dump()
+    dumped_json = bundle.model_dump_json()
+
+    for value in MINIMAL_ENV.values():
+        assert value not in repr(dumped)
+        assert value not in dumped_json

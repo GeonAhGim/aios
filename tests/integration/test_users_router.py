@@ -1,5 +1,6 @@
 """16번대 통합테스트 — /users/me/approval-settings, /users/me/withdrawal-whitelist,
 /users/me/delete 라우터. 실제 FastAPI 앱 + 실제 dev DB."""
+import asyncio
 import uuid
 from pathlib import Path
 
@@ -177,6 +178,9 @@ async def test_register_whitelist_entry_with_mfa_requires_totp(client):
     )
     assert without_totp.status_code == 403
 
+    # docs/RED_TEAM_FINDINGS.md #13 반영 — 위 verify()가 이미 이 구간의
+    # 코드를 소비했으므로 재인증용 코드는 다음 구간에서 새로 받아야 한다.
+    await asyncio.sleep(31)
     login_code = pyotp.totp.TOTP(secret).now()
     with_totp = await client.post(
         "/users/me/withdrawal-whitelist",

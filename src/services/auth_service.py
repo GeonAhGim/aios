@@ -42,8 +42,22 @@ MIN_PASSWORD_LENGTH = 12
 _GENERIC_AUTH_ERROR = "이메일 또는 비밀번호가 올바르지 않습니다."
 
 _hasher = PasswordHasher()
+# 레드팀 감사(docs/RED_TEAM_FINDINGS.md #12) 반영 — 계정 미존재/정지/잠김
+# 경로가 실제 Argon2 verify()를 타지 않아 마지막(존재하는 계정+틀린
+# 비밀번호) 경로보다 훨씬 빨리 응답했다. 동일 메시지를 반환하면서도
+# 처리시간이 다르면 그 자체가 계정 존재 여부를 드러내는 타이밍
+# 사이드채널이 된다 — 모든 실패 경로에서 고정 더미 해시를 검증해
+# 처리시간을 실제 사용자 경로와 비슷하게 맞춘다.
+_DUMMY_PASSWORD_HASH = _hasher.hash("timing-normalization-dummy-password")
 
-VerifyTotpFn = Callable[[str, str], Awaitable[bool]]
+VerifyTotpFn = Callable[[UUID, str, str], Awaitable[bool]]
+
+
+def _consume_verify_timing(password: str) -> None:
+    try:
+        _hasher.verify(_DUMMY_PASSWORD_HASH, password)
+    except VerifyMismatchError:
+        pass
 
 
 class AuthError(Exception):
@@ -134,13 +148,16 @@ class AuthService:
         async with self._pool.acquire() as conn:
             row = await conn.fetchrow("SELECT * FROM users WHERE email = $1", email)
             if row is None:
+                _consume_verify_timing(password)
                 raise AuthError(_GENERIC_AUTH_ERROR)
 
             if row["status"] in ("SUSPENDED", "DELETED"):
+                _consume_verify_timing(password)
                 raise AuthError(_GENERIC_AUTH_ERROR)
 
             now = datetime.now(timezone.utc)
             if row["locked_until"] is not None and now < row["locked_until"]:
+                _consume_verify_timing(password)
                 raise AuthError(_GENERIC_AUTH_ERROR)
 
             try:
@@ -155,7 +172,7 @@ class AuthService:
                 totp_ok = (
                     totp_code is not None
                     and self._verify_totp is not None
-                    and await self._verify_totp(row["mfa_secret"], totp_code)
+                    and await self._verify_totp(row["user_id"], row["mfa_secret"], totp_code)
                 )
                 if not totp_ok:
                     await self._register_failed_attempt(

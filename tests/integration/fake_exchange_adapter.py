@@ -40,8 +40,10 @@ class FakeExchangeAdapter(ExchangeAdapter):
         get_order_status: OrderStatus = OrderStatus.FILLED,
         closes: list[Decimal] | None = None,
         usdt_balance: AccountBalance | None = None,
+        is_sandboxed: bool = True,
     ) -> None:
         self._exchange_name = exchange_name
+        self._is_sandboxed = is_sandboxed
         self._place_order_result_status = place_order_result_status
         self._on_place_order = on_place_order
         self._cancel_result = cancel_result
@@ -54,6 +56,10 @@ class FakeExchangeAdapter(ExchangeAdapter):
         )
         self.placed_orders: list[Order] = []
         self.place_order_call_count = 0
+
+    @property
+    def is_sandboxed(self) -> bool:
+        return self._is_sandboxed
 
     def get_capabilities(self) -> ExchangeCapability:
         return ExchangeCapability(

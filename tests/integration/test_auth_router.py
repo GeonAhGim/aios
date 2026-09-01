@@ -4,6 +4,7 @@ httpx ASGITransport로 실제 uvicorn 없이 앱을 직접 구동한다 —
 app.router.lifespan_context로 main.py의 lifespan(asyncpg pool 생성)을
 그대로 태운다.
 """
+import asyncio
 import uuid
 
 import pytest
@@ -123,6 +124,9 @@ async def test_mfa_setup_and_verify_round_trip(client):
     )
     assert login_without_code.status_code == 401
 
+    # docs/RED_TEAM_FINDINGS.md #13 반영 — 같은 30초 구간의 코드는 재사용
+    # 거부 대상이라, 로그인용 코드는 다음 구간에서 새로 받아야 한다.
+    await asyncio.sleep(31)
     login_code = pyotp.totp.TOTP(secret).now()
     login_with_code = await client.post(
         "/auth/login",
@@ -167,6 +171,9 @@ async def test_mfa_resetup_with_correct_password_succeeds(client):
     code = pyotp.totp.TOTP(old_secret).now()
     await client.post("/auth/mfa/verify", json={"totp_code": code}, headers=headers)
 
+    # docs/RED_TEAM_FINDINGS.md #13 반영 — 위 verify()가 이미 이 구간의
+    # 코드를 소비했으므로 재인증용 코드는 다음 구간에서 새로 받아야 한다.
+    await asyncio.sleep(31)
     reauth_code = pyotp.totp.TOTP(old_secret).now()
     resetup_response = await client.post(
         "/auth/mfa/setup",

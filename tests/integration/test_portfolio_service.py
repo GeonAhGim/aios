@@ -1,4 +1,5 @@
 """19.1 통합테스트 — 실제 dev DB 대상."""
+import asyncio
 import json
 from decimal import Decimal
 from pathlib import Path
@@ -317,3 +318,81 @@ async def test_rebalance_rejects_retired_execution(execution_service, portfolio_
             ],
             total_cash_balance=Decimal("10000"),
         )
+
+
+async def test_concurrent_rebalance_does_not_allow_combined_total_to_exceed_balance(
+    execution_service, portfolio_service, pool, monkeypatch
+):
+    """docs/RED_TEAM_FINDINGS.md #09 회귀 — 트랜잭션/잠금 없이 동시에 두
+    재구성 요청이 들어오면 서로의 아직 커밋 안 된 변경을 못 본 채 각자
+    통과해버려 합산이 잔고를 초과할 수 있었다. FOR UPDATE로 잠근 뒤에는
+    두 번째 요청이 첫 번째의 커밋을 기다렸다가 최신 값으로 재검증해야
+    하므로 최소 하나는 거부돼야 한다.
+
+    실제 asyncio.gather만으로는 두 코루틴의 SELECT가 겹친다는 보장이
+    없어(이 세션에서 반복 확인한 사실), 첫 번째 호출의 SELECT 직후에
+    실제 sleep을 살짝 끼워 넣어 두 번째 호출이 그 사이 반드시 진입하도록
+    강제한다 — 잠금 자체는 이 인위적 지연이 아니라 실제 Postgres
+    FOR UPDATE가 담당한다."""
+    user_id = await create_test_user(pool)
+    # 미인증 전략 배분 상한(10%, config/risk_policy.yaml)을 개별 조정 각각은
+    # 넘지 않으면서(90/1000=9%) A+B 합산은 잔고를 초과하도록, 이미 잔고
+    # 대부분을 쓰는 실행 C를 함께 둔다(850 + 90 + 90 = 1030 > 1000).
+    await _create_running_execution(
+        execution_service, pool, user_id, capital=Decimal("850")
+    )
+    exec_a = await _create_running_execution(
+        execution_service, pool, user_id, capital=Decimal("50"), link_credential=False
+    )
+    exec_b = await _create_running_execution(
+        execution_service, pool, user_id, capital=Decimal("50"), link_credential=False
+    )
+
+    call_count = {"n": 0}
+    original_fetch = asyncpg.Connection.fetch
+
+    async def patched_fetch(self, query, *args, **kwargs):
+        result = await original_fetch(self, query, *args, **kwargs)
+        if "SELECT id, allocated_capital FROM strategy_executions" in query:
+            call_count["n"] += 1
+            if call_count["n"] == 1:
+                await asyncio.sleep(0.3)
+        return result
+
+    monkeypatch.setattr(asyncpg.Connection, "fetch", patched_fetch)
+
+    async def rebalance_a():
+        return await portfolio_service.rebalance(
+            user_id,
+            [RebalanceAdjustment(execution_id=exec_a, new_allocated_capital=Decimal("90"))],
+            total_cash_balance=Decimal("1000"),
+        )
+
+    async def rebalance_b():
+        return await portfolio_service.rebalance(
+            user_id,
+            [RebalanceAdjustment(execution_id=exec_b, new_allocated_capital=Decimal("90"))],
+            total_cash_balance=Decimal("1000"),
+        )
+
+    task_a = asyncio.create_task(rebalance_a())
+    await asyncio.sleep(0.05)  # task_a가 먼저 SELECT를 마치고 sleep에 들어가도록 보장
+    task_b = asyncio.create_task(rebalance_b())
+
+    results = await asyncio.gather(task_a, task_b, return_exceptions=True)
+
+    successes = [r for r in results if not isinstance(r, Exception)]
+    failures = [r for r in results if isinstance(r, RebalanceError)]
+    assert len(successes) == 1
+    assert len(failures) == 1
+
+    async with pool.acquire() as conn:
+        row_a = await conn.fetchval(
+            "SELECT allocated_capital FROM strategy_executions WHERE id = $1", exec_a
+        )
+        row_b = await conn.fetchval(
+            "SELECT allocated_capital FROM strategy_executions WHERE id = $1", exec_b
+        )
+    # 하나는 90(성공)으로 바뀌고 다른 하나는 50(원래값)에 그대로 남아야 한다
+    # — 둘 다 90으로 바뀌면(180) #09가 재발한 것.
+    assert row_a + row_b == Decimal("140")

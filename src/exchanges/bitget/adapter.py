@@ -84,15 +84,19 @@ class _BitgetHTTPClient:
     ) -> dict[str, Any]:
         query_string = ""
         if params:
-            # 서명용 쿼리스트링과 실제 전송 쿼리스트링이 정확히 일치해야 한다.
-            query_string = "?" + "&".join(f"{k}={v}" for k, v in params.items())
+            # 레드팀 감사(docs/RED_TEAM_FINDINGS.md #18a) 반영 — 서명용
+            # 쿼리스트링을 수동으로 f"{k}={v}" 조합하면 httpx가 실제 전송 시
+            # 적용하는 퍼센트인코딩과 어긋날 수 있다(지금 쓰는 값은 전부
+            # 영숫자라 우연히 일치했을 뿐). httpx.QueryParams로 인코딩한
+            # 문자열을 서명과 실제 전송 양쪽에 동일하게 재사용한다.
+            query_string = "?" + str(httpx.QueryParams(params))
         body_str = json.dumps(body) if body else ""
         request_path = path + query_string
         headers = self._headers(method, request_path, body_str)
 
         try:
             response = await self._client.request(
-                method, path, params=params, content=body_str or None, headers=headers
+                method, request_path, content=body_str or None, headers=headers
             )
         except httpx.TransportError as exc:
             raise RetryableExchangeError(f"Bitget 요청 전송 실패: {exc}") from exc
@@ -135,3 +139,9 @@ class BitgetAdapter(
             reference_feed_coverage="high",
             has_official_sandbox=True,
         )
+
+    @property
+    def is_sandboxed(self) -> bool:
+        """레드팀 감사(2026-09-01-08) — 생성자의 demo_mode 그대로 노출.
+        `_headers()`가 paptrading 헤더를 붙이는 바로 그 조건과 동일하다."""
+        return self._demo_mode

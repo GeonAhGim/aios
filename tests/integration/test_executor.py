@@ -133,6 +133,36 @@ async def test_live_mode_is_hard_blocked_before_any_order_is_placed(pool):
     assert calls == []
 
 
+async def test_paper_mode_with_non_sandboxed_adapter_is_hard_blocked(pool):
+    """레드팀 감사(2026-09-01-08) 회귀 — DB mode='PAPER'라도 전달된
+    adapter가 스스로 sandbox 바인딩을 증명하지 못하면(예: demo_mode=False로
+    잘못 구성된 real adapter) 차단해야 한다. mode 문자열만 믿지 않는다."""
+    user_id = await create_test_user(pool)
+    execution_id = await _create_execution(pool, user_id, mode="PAPER")
+    adapter = FakeExchangeAdapter(is_sandboxed=False)
+    writer, calls = await _fsm_state_writer_for(pool)
+    executor = Executor()
+
+    with pytest.raises(FrozenZoneLiveModeBlockedError):
+        await executor.execute(
+            _allocation(),
+            _approved_risk_result(),
+            adapter,
+            execution_id=execution_id,
+            user_id=user_id,
+            strategy_version="1.0.0",
+            mode="PAPER",
+            side=OrderSide.BUY,
+            pending_fsm_state=FSMState.BUY_ORDER_PENDING,
+            fsm_config=_fsm_config(),
+            fsm_state_writer=writer,
+            pool=pool,
+        )
+
+    assert adapter.place_order_call_count == 0
+    assert calls == []
+
+
 async def test_risk_not_approved_raises_before_any_order_is_placed(pool):
     user_id = await create_test_user(pool)
     execution_id = await _create_execution(pool, user_id, mode="PAPER")

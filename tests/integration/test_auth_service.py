@@ -122,7 +122,7 @@ async def test_mfa_enabled_login_fails_without_verify_totp_callback(pool):
 
 
 async def test_mfa_enabled_login_succeeds_with_verifying_callback(pool):
-    async def verify_totp(secret, code):
+    async def verify_totp(user_id, secret, code):
         return secret == "dummy" and code == "123456"
 
     auth_with_totp = AuthService(pool, jwt_secret_key=JWT_SECRET, verify_totp=verify_totp)
@@ -135,3 +135,33 @@ async def test_mfa_enabled_login_succeeds_with_verifying_callback(pool):
 
     user = await auth_with_totp.authenticate(email, STRONG_PASSWORD, totp_code="123456")
     assert user.email == email
+
+
+async def test_nonexistent_account_timing_matches_wrong_password_timing(auth):
+    """docs/RED_TEAM_FINDINGS.md #12 회귀 — 계정 미존재 경로가 Argon2
+    verify()를 건너뛰면 존재하는 계정+틀린 비밀번호 경로보다 훨씬 빨리
+    응답해, 응답 메시지가 같아도 처리시간으로 계정 존재 여부가 드러난다.
+    Argon2 verify()는 의도적으로 느려서(수십~수백 ms) DB 조회 자체의
+    변동폭을 압도한다 — 더미 해시 검증이 빠지면 두 경로의 비율이 크게
+    벌어져야 하고, 있으면 비슷해야 한다."""
+    import time
+
+    email = _unique_email()
+    await auth.signup(email, STRONG_PASSWORD)
+
+    start = time.perf_counter()
+    with pytest.raises(AuthError):
+        await auth.authenticate(_unique_email(), "WrongPassword1!")
+    nonexistent_elapsed = time.perf_counter() - start
+
+    start = time.perf_counter()
+    with pytest.raises(AuthError):
+        await auth.authenticate(email, "WrongPassword1!")
+    wrong_password_elapsed = time.perf_counter() - start
+
+    slower = max(nonexistent_elapsed, wrong_password_elapsed)
+    faster = min(nonexistent_elapsed, wrong_password_elapsed)
+    assert slower / faster < 3.0, (
+        f"두 경로의 처리시간 차이가 너무 큽니다(계정 존재 여부 유출 가능): "
+        f"nonexistent={nonexistent_elapsed:.4f}s, wrong_password={wrong_password_elapsed:.4f}s"
+    )

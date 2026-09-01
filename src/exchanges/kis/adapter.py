@@ -171,3 +171,8 @@ class KISAdapter(
                 trading_days=["MON", "TUE", "WED", "THU", "FRI"],
             ),
         )
+
+    @property
+    def is_sandboxed(self) -> bool:
+        """레드팀 감사(2026-09-01-08) — 생성자의 is_paper_trading 그대로 노출."""
+        return self._is_paper_trading

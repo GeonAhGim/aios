@@ -1,4 +1,5 @@
 """11.3 통합테스트 — 실제 dev DB 대상."""
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import asyncpg
@@ -31,6 +32,21 @@ async def pool():
 @pytest.fixture
 def mfa(pool):
     return MfaService(pool, encryption_key=ENCRYPTION_KEY)
+
+
+class _MutableClock:
+    """#13 재사용 방지 테스트 전용 — 실제로 30초를 기다리지 않고도 서로
+    다른 TOTP 타임코드 구간을 결정적으로 재현한다(watchdog.py의 주입식
+    clock과 동일 원칙)."""
+
+    def __init__(self) -> None:
+        self.current = datetime.now(timezone.utc)
+
+    def __call__(self) -> datetime:
+        return self.current
+
+    def advance(self, seconds: int) -> None:
+        self.current += timedelta(seconds=seconds)
 
 
 async def _real_user(pool):
@@ -86,13 +102,15 @@ async def test_verify_with_wrong_code_discards_secret(mfa, pool):
     assert row["mfa_enabled"] is False
 
 
-async def test_verify_with_wrong_code_after_already_enabled_does_not_disable_mfa(mfa, pool):
+async def test_verify_with_wrong_code_after_already_enabled_does_not_disable_mfa(pool):
     """레드팀 감사 #11 — 이미 켜진 MFA는 탈취한 Bearer 토큰 + 틀린 코드
     한 번만으로 영구 비활성화되면 안 된다(비밀번호 없이도 가능한 인증
     우회였음)."""
+    clock = _MutableClock()
+    mfa = MfaService(pool, encryption_key=ENCRYPTION_KEY, now=clock)
     user_id, email = await _real_user(pool)
     result = await mfa.setup(user_id, email)
-    correct_code = pyotp.totp.TOTP(result.secret).now()
+    correct_code = pyotp.totp.TOTP(result.secret).at(clock.current)
     await mfa.verify(user_id, correct_code)
 
     with pytest.raises(MfaError):
@@ -105,15 +123,40 @@ async def test_verify_with_wrong_code_after_already_enabled_does_not_disable_mfa
     assert row["mfa_secret"] is not None
     assert row["mfa_enabled"] is True
 
-    # 기존 secret이 그대로 살아있으니 정상 코드로는 여전히 로그인/재검증 가능해야 한다.
-    still_valid_code = pyotp.totp.TOTP(result.secret).now()
+    # 기존 secret이 그대로 살아있으니 다음 구간의 정상 코드로는 여전히
+    # 재검증 가능해야 한다(같은 구간 코드를 재사용하는 것은 #13이 막는
+    # 별개의 정상 동작).
+    clock.advance(31)
+    still_valid_code = pyotp.totp.TOTP(result.secret).at(clock.current)
     await mfa.verify(user_id, still_valid_code)
 
 
-async def test_login_with_mfa_enabled_uses_verify_totp_for_login_callback(mfa, pool):
+async def test_verify_rejects_replaying_the_same_totp_code(pool):
+    """docs/RED_TEAM_FINDINGS.md #13 회귀 — 같은 30초 구간 안에서 이미
+    성공한 코드를 다시 보내면(유출된 코드 재사용 시나리오) valid_window
+    안이라도 거부해야 한다."""
+    clock = _MutableClock()
+    mfa = MfaService(pool, encryption_key=ENCRYPTION_KEY, now=clock)
     user_id, email = await _real_user(pool)
     result = await mfa.setup(user_id, email)
-    code = pyotp.totp.TOTP(result.secret).now()
+    code = pyotp.totp.TOTP(result.secret).at(clock.current)
+    await mfa.verify(user_id, code)
+
+    async with pool.acquire() as conn:
+        await conn.execute(
+            "UPDATE users SET mfa_enabled = false WHERE user_id = $1", user_id
+        )
+
+    with pytest.raises(MfaError):
+        await mfa.verify(user_id, code)  # 같은 구간, 같은 코드 재사용 시도
+
+
+async def test_login_with_mfa_enabled_uses_verify_totp_for_login_callback(pool):
+    clock = _MutableClock()
+    mfa = MfaService(pool, encryption_key=ENCRYPTION_KEY, now=clock)
+    user_id, email = await _real_user(pool)
+    result = await mfa.setup(user_id, email)
+    code = pyotp.totp.TOTP(result.secret).at(clock.current)
     await mfa.verify(user_id, code)
 
     auth = AuthService(
@@ -127,7 +170,8 @@ async def test_login_with_mfa_enabled_uses_verify_totp_for_login_callback(mfa, p
             _hash_for_test(),
         )
 
-    login_code = pyotp.totp.TOTP(result.secret).now()
+    clock.advance(31)  # #13 반영 — 로그인 시점 코드는 설정검증 때와 다른 구간이어야 함
+    login_code = pyotp.totp.TOTP(result.secret).at(clock.current)
     user = await auth.authenticate(email, _TEST_PASSWORD, totp_code=login_code)
     assert user.user_id == user_id
 

@@ -13,11 +13,39 @@
 
 ## 2026-09-01-08 · PAPER 실행 루프가 adapter의 실제 sandbox 상태를 증명하지 않음
 
-**상태**: 🔴 OPEN — 설계/구현 보강 필요. 현재 production router나 scheduler가
+**상태**: 🟢 구현 세션이 수정(이 세션 자체 확인 — 관련 통합테스트 25개
+통과, ruff/mypy clean). 감사 세션 재검증 대기.
+
+**수정 내용**: 권장 방향의 축소판 — 전체 `PaperExecutionAdapter`/
+`ExecutionEnvironment` attestation 체계(별도 ADR·owner review 대상으로
+명시된 큰 리팩터링)까지는 가지 않고, `ExchangeAdapter`에 `is_sandboxed:
+bool` 추상 프로퍼티를 신설해 최소한의 실효성 있는 방어를 지금 바로
+넣었다. `BitgetAdapter.is_sandboxed`는 생성자의 `demo_mode`를,
+`KISAdapter.is_sandboxed`는 `is_paper_trading`을 그대로 노출한다(둘 다
+paptrading 헤더/모의투자 base URL 전환과 동일 조건 — 새 상태를 만들지
+않고 이미 있던 진실의 원천을 노출만 함). `Executor.execute()`는 이제
+`mode == 'PAPER'`뿐 아니라 `adapter.is_sandboxed`도 함께 확인해, 둘 중
+하나라도 아니면 `FrozenZoneLiveModeBlockedError`를 던진다 — DB의 mode
+문자열과 실제 adapter 상태가 반드시 둘 다 일치해야 통과한다.
+
+**새 테스트**:
+`test_paper_mode_with_non_sandboxed_adapter_is_hard_blocked`
+(`tests/integration/test_executor.py`) — `mode='PAPER'`인데
+`is_sandboxed=False`인 adapter를 넘기면 주문이 전혀 나가지 않고
+차단되는지 확인.
+
+**남은 축소(정직하게 명시)**: 이 수정은 "adapter 객체 스스로가 보고하는
+값"을 신뢰한다 — 이 세션이 만든 `CredentialResolver`가 여전히 유일한
+adapter 생성 경로(`main.py`에서 `demo_mode` override 없이 기본값 True로
+생성)라 지금은 안전하지만, egress allowlist·credential provenance 검증까지
+포함한 완전한 attestation 체계는 이 리프의 스콥이 아니다 — 권장사항이
+명시한 대로 실계정 도입 시점에 별도 ADR·owner review로 분리해야 한다.
+
+**발견 당시 배경**: production router나 scheduler가
 `run_execution_tick()`을 호출하는 경로는 확인되지 않았고, 통합 테스트는
-`FakeExchangeAdapter`만 사용한다. 그러나 이 라이브러리 경계가 이후 배선될
+`FakeExchangeAdapter`만 사용했다. 그러나 이 라이브러리 경계가 이후 배선될
 때 안전한 paper-only 보장을 제공하지 못하므로, production wiring 전에
-해소해야 한다.
+해소가 필요하다고 판단됐다.
 
 **발견**: `src/core/executor/executor.py::Executor.execute()`는
 `mode != "PAPER"`을 차단하지만, 전달받은 `ExchangeAdapter`의 실제 계정·endpoint·demo
@@ -397,5 +425,490 @@ Windows NTFS 둘 다 `os.replace`는 원자적). 부수적으로, `decide()`
 자체에 unresponsive 판정 히스테리시스가 없다는 점도 같이 확인해볼
 가치가 있음(split_brain.py의 진입 3초/복귀 10초 비대칭 히스테리시스와
 같은 원칙을 여기도 적용할지는 스펙 의도 확인 필요).
+
+---
+
+## 2026-08-29-08 · execution_service의 start()/pause()가 원자적 조건부 UPDATE가 아님 — Watchdog 강제정지(Kill Switch)를 사용자 요청이 덮어쓸 수 있음 — 심각도 높음, 감사 세션이 직접 재현조건까지 확인함
+
+**상태**: 🟢 구현 세션이 수정(이 세션 자체 확인 — 관련 통합테스트 11개
+통과, ruff/mypy clean). 감사 세션 재검증 대기.
+
+**수정 내용**: 04/05번과 동일 패턴 — `start()`의 UPDATE에 방금 읽은
+`execution["status"]`를 `AND status = $2` 조건으로 추가(허용되는 시작
+전 상태가 PENDING_APPROVAL/PAUSED 등 여러 값일 수 있어 리터럴이 아니라
+변수 바인딩), `pause()`의 UPDATE에는 `AND status = 'RUNNING'`을
+추가했다. 둘 다 `RETURNING`이 빈 행이면 `ExecutionControlError`(동시
+처리 충돌)를 던진다 — Watchdog가 `status = 'RUNNING'` 조건으로 먼저
+커밋하면 `start()`/`pause()`의 UPDATE 자체가 대상 행을 찾지 못해
+자연히 실패한다(별도 SAFETY_LAYER 재확인 로직을 추가하지 않고도 조건부
+UPDATE 하나로 막힘). `retire()`도 같은 계열 취약점이라 같이 하드닝
+(`WHERE status IN ('RUNNING','PAUSED')` 추가).
+
+**새 테스트**: `test_concurrent_safety_pause_blocks_racing_user_start`
+(`tests/integration/test_execution_control.py`) — 04번 수정 때 확인한
+대로 `asyncio.gather`만으로는 두 코루틴이 실제로 겹친다는 보장이 없어,
+`start()`의 UPDATE 직전에 barrier를 걸어 그 사이 SAFETY_LAYER `pause()`가
+반드시 먼저 커밋되도록 강제해 원래 시나리오를 결정적으로 재현했다(수정
+전 코드로 되돌려 이 테스트가 실제로 실패하는 것까지 직접 확인).
+
+**발견**: `src/services/execution_service.py::start()`(170-217행)와
+`pause()`(219-257행) 둘 다 상태를 Python에서 SELECT로 읽어 검사한 뒤,
+최종 UPDATE는 `WHERE id = $1`만 걸려 있고 방금 읽은 상태를 조건으로
+다시 확인하지 않는다(`FOR UPDATE`도, `conn.transaction()`도 없음) —
+04/05번 항목과 완전히 같은 근본원인.
+
+**발견**: `src/services/execution_service.py::start()`(170-217행)와
+`pause()`(219-257행) 둘 다 상태를 Python에서 SELECT로 읽어 검사한 뒤,
+최종 UPDATE는 `WHERE id = $1`만 걸려 있고 방금 읽은 상태를 조건으로
+다시 확인하지 않는다(`FOR UPDATE`도, `conn.transaction()`도 없음) —
+04/05번 항목과 완전히 같은 근본원인.
+
+**재현 시나리오 — 안전계층 Kill Switch 무력화**: 정책문서가 명시한
+"8.6-B Kill Switch 우선순위"(사용자가 안전장치의 강제정지를 직접
+재시작할 수 없어야 한다)를 실제로 깨뜨릴 수 있다.
+1. 실행 X가 `RUNNING`.
+2. `POST /executions/X/start`가 X를 SELECT — 아직 `status=RUNNING`,
+   `paused_by=NULL`이라 "SAFETY_LAYER가 정지시킨 것" 검사(186-189행)를
+   통과, 계속 진행.
+3. 그 사이(별도 OS 프로세스인) `watchdog_process.py::_apply_decision()`이
+   HALT/LIQUIDATE 판정으로 `UPDATE strategy_executions SET status='PAUSED',
+   paused_by='SAFETY_LAYER' WHERE status='RUNNING'`을 먼저 커밋 — X가
+   실제로 안전정지됨.
+4. 2번의 `start()`가 이어서 실행하는 조건 없는 `UPDATE ... SET
+   status='RUNNING', paused_by=NULL ... WHERE id=$1`이 그대로 커밋돼
+   **방금 워치독이 건 안전정지를 조용히 덮어쓰고 실행을 재개시킨다.**
+   `pause(paused_by='USER')`도 같은 구조라, 사용자의 일반 정지 호출이
+   `SAFETY_LAYER` 정지와 경합하면 `paused_by` 값 자체가 덮어써질 수
+   있고, 이후 `start()`의 SAFETY_LAYER 검사가 그 값에 의존하므로 연쇄적으로
+   더 취약해진다.
+
+이번 세션이 오늘 직접 감사한 Watchdog(2026-08-29-06/07번 항목)이
+실제로 발동시키는 강제조치가 바로 이 `strategy_executions.paused_by`
+갱신이라, 이 항목은 "워치독이 원래 하려던 일이 애초에 다른 경로로
+무효화될 수 있다"는 점에서 06/07번보다 실제 영향이 더 크다.
+
+**권장 수정 방향**: `payment_confirmation_service`/`verification_service`/
+`dispute_resolution_service`가 04/05번 수정 때 이미 쓴 패턴 그대로 —
+`start()`의 UPDATE에 `AND status = $2`(방금 읽은 값)를, `pause()`의
+UPDATE에 `AND status = 'RUNNING'`을 추가하고 `RETURNING`이 빈 행이면
+"동시 처리 충돌" 에러를 던지도록 수정. 특히 `start()`는 SAFETY_LAYER
+정지 여부를 재확인하는 조건도 UPDATE 자체에 포함시켜야 한다(예:
+`WHERE id=$1 AND NOT (status='PAUSED' AND paused_by='SAFETY_LAYER')`).
+
+---
+
+## 2026-08-29-09 · portfolio_service.rebalance()에 트랜잭션/잠금이 없어 동시 재조정 시 잔고 초과 배분이 가능 — 심각도 높음
+
+**상태**: 🟢 구현 세션이 수정(이 세션 자체 확인 — 관련 통합테스트 11개
+통과, ruff/mypy clean). 감사 세션 재검증 대기.
+
+**수정 내용**: 권장 방향 그대로 — `rebalance()` 전체를
+`conn.transaction()`으로 감싸고, 조정 대상 실행 조회(`e.id = ANY($1)`)에
+`FOR UPDATE OF e`, 전체 합계 재검증용 조회(`WHERE user_id = $1 AND
+status IN (...)`)에 `FOR UPDATE`를 추가했다. 두 번째 동시 요청은 첫
+번째 트랜잭션이 커밋할 때까지 자신의 `FOR UPDATE` 조회에서 실제로
+블록되고, 커밋 후에는 최신(이미 반영된) 값으로 합계를 재검증하므로
+"서로의 아직 커밋 안 된 변경을 못 본 채 각자 통과"하는 경합이 원천
+차단된다. 부수적으로 트랜잭션 도입 자체가 "총합 초과 시 전체 원자적
+거부(부분 반영 없음)"라는 기존 docstring의 약속도 실제로 보장하게 됐다
+(이전에는 개별 UPDATE가 트랜잭션 없이 각각 즉시 커밋됐음).
+
+**새 테스트**:
+`test_concurrent_rebalance_does_not_allow_combined_total_to_exceed_balance`
+(`tests/integration/test_portfolio_service.py`) — 미인증 전략 10% 배분
+상한은 개별적으로 넘지 않으면서 두 실행의 합산만 잔고를 초과하도록
+구성한 뒤, 첫 호출의 SELECT 직후에 실제 `asyncio.sleep`을 끼워 넣어
+두 번째 호출이 그 사이 반드시 진입하도록 강제했다(잠금 자체는 인위적
+지연이 아니라 실제 Postgres `FOR UPDATE`가 담당). 수정 전 코드로
+되돌려 이 테스트가 실제로 실패(둘 다 성공해 합산이 잔고를 초과)하는
+것까지 직접 확인.
+
+**발견**: `src/services/portfolio_service.py::rebalance()`(145-240행)가
+`conn.transaction()`도 `FOR UPDATE`도 없이, 잔고 초과 여부(`new_total
+&gt; total_cash_balance`)를 일반 SELECT로 읽은 값만으로 검사한 뒤 각
+실행의 `allocated_capital`을 순차적으로 UPDATE한다.
+
+**재현 시나리오**: `total_cash_balance=250`, 실행 A/B 각각
+`allocated_capital=50`(합 100, 여유 150). 동시에 두 요청 — 요청1
+`rebalance([A→150])`, 요청2 `rebalance([B→150])` — 이 도착하면 둘 다
+서로의 아직 커밋 안 된 변경을 못 본 채로 "150(자신) + 50(상대,
+stale) = 200 ≤ 250"으로 각자 통과·커밋해버려, 최종 A=150+B=150=300이
+실제 잔고 250을 초과한 채로 둘 다 "성공"으로 기록된다. docstring 자신이
+약속한 "총합 초과 시 전체 원자적 거부(부분반영 없음)"도 트랜잭션이
+없어 중간에 실패하면 깨질 수 있다.
+
+**권장 수정 방향**: 전체를 `conn.transaction()`으로 감싸고, 재조정
+대상 실행들을 `SELECT ... FOR UPDATE`로 잠그거나, 쓰기 직전에 같은
+트랜잭션 안에서 잔고 제약을 다시 검증. 이 항목은 여러 행에 걸친
+금액 불변식이라 `SERIALIZABLE` 격리수준도 고려할 만함.
+
+---
+
+## 2026-08-29-10 · SecretBundle.model_dump()/model_dump_json()이 __repr__ 마스킹을 우회해 모든 시크릿을 평문으로 반환함
+
+**상태**: 🟢 구현 세션이 수정(이 세션 자체 확인 — 관련 테스트 15개
+통과, ruff/mypy clean). 감사 세션 재검증 대기.
+
+**수정 내용**: 권장 방향 그대로 — 실제 자격증명·키류 필드(database_url,
+jwt_secret_key, credential_encryption_key, bitget_api_key/secret,
+kis_app_key/secret, smtp_password, fcm_server_key, apns_key_id)를 전부
+`pydantic.SecretStr`로 변경했다(jwt_algorithm/jwt_expire_minutes/
+smtp_host/smtp_port/smtp_user/cors_allowed_origins는 자격증명 자체가
+아니라 그대로 둠). `model_dump()`/`model_dump_json()`을 포함한 Pydantic의
+모든 직렬화 경로가 이제 일관되게 마스킹된다. 이 필드들을 실제 값으로
+소비하는 4개 호출부(`src/api/deps.py`, `src/api/service_deps.py`,
+`src/main.py`, `src/watchdog_process.py`)는 전부 `.get_secret_value()`로
+꺼내 쓰도록 갱신 — 이 4곳을 벗어나면 평문 문자열이 존재하지 않는다.
+`secret_loader.py::load_env_secrets()`도 `.env` 원시 문자열을
+`SecretStr(...)`로 감싸 전달하도록 갱신.
+
+**새 테스트**: `test_load_env_secrets_model_dump_never_leaks_values`
+(`tests/unit/core/loader/test_secret_loader.py`) — 감사가 재현한
+시나리오 그대로 `model_dump()`/`model_dump_json()` 양쪽에서 원본 시크릿
+값이 전혀 등장하지 않는지 직접 확인(기존 `repr()`만 확인하던 테스트로는
+이 취약점 자체를 잡지 못했다는 점이 이번 감사의 핵심 지적이었음).
+
+**발견**: `src/data/models/trading.py::SecretBundle`(107-136행)은
+`__repr__`/`__str__`만 마스킹하도록 오버라이드했다("07번 §7.1 마스킹
+원칙 — 어떤 필드도 평문 노출 금지"라고 자체 docstring에 명시). 직접
+실행해 확인:
+
+```
+>>> b = SecretBundle(database_url=..., jwt_secret_key='SECRET123', ...)
+>>> repr(b)
+'SecretBundle(&lt;16 fields, masked&gt;)'
+>>> b.model_dump()
+{'database_url': '...', 'jwt_secret_key': 'SECRET123', 'credential_encryption_key': ...,
+ 'bitget_api_key': ..., 'bitget_api_secret': ..., 'kis_app_key': ..., 'kis_app_secret': ...,
+ 'smtp_password': ..., ...}  # 전부 평문
+```
+
+FastAPI는 라우트가 반환하는 Pydantic 객체를 `repr()`이 아니라
+`model_dump_json()`으로 직렬화한다 — 지금 이 값은 `main.py`에서
+`app.state.secrets`로 저장돼 있고(90행), 오늘 기준 이걸 그대로
+반환/로깅하는 코드 경로는 없는 것으로 확인됐지만, 나중에 디버그용
+엔드포인트나 "구조화 로깅"을 위해 무심코 `secrets.model_dump()`를
+호출하는 코드가 추가되는 순간 DB 접속정보·JWT 서명키·거래소
+API키·SMTP 비밀번호 전부가 그대로 노출된다 — 이 코드베이스가 다른
+곳에서 계속 의존하고 있는 "SecretBundle은 절대 평문 노출 안 됨"이라는
+전제 자체가 실제로는 성립하지 않는다.
+
+**권장 수정 방향**: 각 시크릿 필드를 Pydantic v2의 `SecretStr` 타입으로
+바꾸면(관용적인 방법) `model_dump()` 결과도 자동으로
+`SecretStr('**********')`로 마스킹되면서 필요한 곳에서만
+`.get_secret_value()`로 꺼내 쓸 수 있다. 또는 `model_dump`/
+`model_dump_json` 자체를 오버라이드해도 되지만, Pydantic이 내부적으로
+쓰는 다른 직렬화 경로(예: FastAPI의 `jsonable_encoder`)까지 전부
+우회하지 않으려면 `SecretStr` 쪽이 더 안전함.
+
+---
+
+## 2026-08-29-11 · MfaService.verify()가 이미 활성화된 MFA를 아무 실패한 코드로든 영구 비활성화시킴 — 심각도 높음
+
+**상태**: 🟢 구현 세션이 수정(이 세션 자체 확인 — 관련 통합테스트
+35개 통과, ruff/mypy strict clean). 감사 세션 재검증 대기.
+
+**수정 내용**: 권장 방향 그대로 — `MfaService.verify()`가 이제 SELECT
+시점에 `mfa_enabled`도 함께 읽어, 이미 `true`(정상 활성화)인 상태의
+검증 실패는 `MfaError`만 던지고 `mfa_secret`/`mfa_enabled` 행을 전혀
+건드리지 않는다(secret 폐기는 `mfa_enabled=false`, 즉 최초 설정
+검증대기 중일 때만 유지). 새 테스트
+`test_verify_with_wrong_code_after_already_enabled_does_not_disable_mfa`
+(`tests/integration/test_mfa_service.py`)가 이미 켜진 MFA는 틀린 코드
+한 번으로 안 꺼지고 기존 secret으로 계속 검증 가능함을 실증.
+
+별도로 권장됐던 `/mfa/setup` 재인증도 함께 적용 — `users.py`의
+`_reauthenticate()`를 `src/api/deps.py::reauthenticate()`로 공용화해
+재사용(중복 정의 대신 단일 지점), `MfaSetupRequest`(password/totp_code
+선택 필드) 신설. `user.mfa_enabled=true`인 계정이 `/auth/mfa/setup`을
+다시 호출하면 이제 비밀번호(+MFA 활성 상태이므로 TOTP도 함께) 재인증
+없이는 403으로 거부되어 기존 secret을 덮어쓸 수 없다(최초 설정,
+즉 `mfa_enabled=false`일 때는 로그인 자체가 이미 증명이라 재인증을
+요구하지 않음 — 기존 동작 유지). 새 테스트
+`test_mfa_resetup_without_password_rejected_when_already_enabled`/
+`test_mfa_resetup_with_correct_password_succeeds`
+(`tests/integration/test_auth_router.py`)가 왕복 검증.
+
+**발견**: `src/services/mfa_service.py::verify()`(63-79행)는
+`mfa_enabled`이 이미 `true`(정상 활성화 상태)인지 `false`(최초 설정
+검증 대기 중)인지 구분하지 않고, 코드가 하나라도 틀리면 무조건
+`UPDATE users SET mfa_secret = NULL, mfa_enabled = false WHERE user_id
+= $1`을 실행한다. `POST /auth/mfa/verify`(`auth.py:62-72`)는
+`get_current_user`(단순 Bearer 토큰)로만 보호되고, `users.py`의 출금
+화이트리스트 등록·회원탈퇴처럼 민감한 동작에 이미 쓰이고 있는
+`_reauthenticate()`(비밀번호 재확인) 같은 추가 인증이 전혀 없다.
+
+**재현 시나리오**: 이미 MFA를 켜둔 사용자의 Bearer 토큰을 탈취한
+공격자(XSS, 로그 유출, 방치된 세션 등 — 비밀번호는 모름)가
+`POST /auth/mfa/verify`에 아무 틀린 코드나 한 번만 보내면, 그 즉시
+피해자 계정의 MFA가 영구히 꺼진다 — 비밀번호를 몰라도 계정의 보안
+수준을 원격으로 영구 하향시킬 수 있고, 이 효과는 탈취한 토큰이
+만료된 뒤에도 그대로 남는다.
+
+**권장 수정 방향**: `mfa_enabled`이 이미 `true`인 상태에서의 실패는
+그냥 `MfaError`만 던지고 행은 건드리지 않는다 — secret을 폐기하는
+현재 동작은 `mfa_enabled=false`(설정 대기 중)일 때만 남긴다. 별도로,
+`/mfa/setup`(이미 MFA가 켜진 계정이 이걸 다시 호출하면 기존 secret을
+덮어쓸 수 있다는 점도 같은 문제)에 `users.py`의 `_reauthenticate()`
+패턴을 적용하는 걸 권장.
+
+---
+
+## 2026-08-29-12 · 로그인 실패 응답이 "동일 메시지"인데도 처리 시간이 경로별로 크게 달라 타이밍 사이드채널로 계정 존재 여부를 알아낼 수 있음
+
+**상태**: 🟢 구현 세션이 수정(이 세션 자체 확인 — 관련 테스트 10개
+통과, ruff/mypy clean). 감사 세션 재검증 대기.
+
+**수정 내용**: 권장 방향 그대로 — 모듈 로드 시 고정 더미 비밀번호로
+Argon2 해시(`_DUMMY_PASSWORD_HASH`)를 한 번 계산해두고, 계정
+미존재/정지·삭제/잠김 세 빠른 실패 경로 각각에서 실제 사용자 경로와
+동일하게 `_hasher.verify()`를 한 번씩 호출(결과는 버림)한 뒤 예외를
+던지도록 `_consume_verify_timing()` 헬퍼를 추가했다. Argon2 verify()는
+의도적으로 느려서(수십~수백 ms) DB 조회 자체의 변동폭을 압도하므로,
+네 경로의 처리시간이 비슷해진다.
+
+**새 테스트**:
+`test_nonexistent_account_timing_matches_wrong_password_timing`
+(`tests/integration/test_auth_service.py`) — 계정 미존재 경로와
+존재하는 계정+틀린 비밀번호 경로의 실제 처리시간을 측정해 비율이
+3배를 넘지 않는지 확인(수정 전에는 더미 verify 자체가 없어 이 비율이
+훨씬 크게 벌어짐 — Argon2 verify 자체가 유일한 지배적 비용이라
+플레이키하지 않음).
+
+**발견**: `src/services/auth_service.py::authenticate()`(134-164행)는
+계정 없음/정지·삭제됨/잠김/비밀번호 틀림 네 경우 모두 동일한 일반
+메시지를 반환한다고 docstring에 명시돼 있지만, 앞의 세 경우는 즉시
+반환하는 반면 마지막(존재하는 계정+틀린 비밀번호)만 느린 Argon2
+`_hasher.verify()`를 실제로 호출한다. 이 처리시간 차이가 응답
+메시지의 "동일함"이 막으려던 계정 존재 여부 노출을 그대로
+가능하게 한다.
+
+**권장 수정 방향**: 계정 미존재/정지/잠김 등 빠른 실패 경로에서도
+고정된 더미 해시에 대해 Argon2 `verify()`를 한 번 호출해, 실제 사용자
+경로와 처리시간을 비슷하게 맞춘다.
+
+---
+
+## 2026-08-29-13 · TOTP 코드에 재사용(replay) 방지가 없음
+
+**상태**: 🟢 구현 세션이 수정(이 세션 자체 확인 — 관련 테스트 17개
+통과, ruff/mypy clean). 감사 세션 재검증 대기.
+
+**수정 내용**: 권장 방향 그대로 — `users.mfa_last_used_timecode BIGINT`
+컬럼을 추가(마이그레이션 `6e70519072a5`)하고, 코드 자체가 유효해도
+`pyotp.TOTP.timecode(now)`로 계산한 현재 타임코드가 이미 저장된 값보다
+크지 않으면(같은 구간 재사용, 또는 과거 구간) 거부하도록
+`_consume_timecode()`를 추가했다 — `WHERE user_id=$1 AND
+(mfa_last_used_timecode IS NULL OR mfa_last_used_timecode < $2)`
+조건부 UPDATE라 동시에 같은 코드로 두 번 요청해도 하나만 통과한다.
+`MfaService.verify()`(최초 설정 검증)와 `verify_totp_for_login()`(로그인
+시점) 둘 다 이 경로를 공유한다 — 로그인 콜백 시그니처에 `user_id`가
+없어(기존에는 `(secret, code)` 2개 인자) `(user_id, secret, code)` 3개
+인자로 확장(`AuthService.VerifyTotpFn` 타입도 함께 갱신).
+`MfaService`에 테스트 전용 `now` 콜백 주입 지점도 추가해(watchdog.py의
+clock 주입과 동일 원칙) 실제로 30초를 기다리지 않고도 서로 다른
+타임코드 구간을 결정적으로 재현할 수 있게 했다.
+
+**새 테스트**: `test_verify_rejects_replaying_the_same_totp_code`
+(`tests/integration/test_mfa_service.py`) — 같은 구간, 같은 코드로 두
+번째 검증을 시도하면 거부되는지 확인. 기존 테스트 2개(설정 검증 후
+로그인, MFA 활성화 후 재검증)도 재사용 방지로 인해 실제 동작이
+바뀌어(같은 코드 두 번 통과가 더 이상 허용되지 않음) 주입 clock으로
+다음 구간 코드를 만들도록 갱신.
+
+**발견**: `mfa_service.py::_check_code()`가 `pyotp`의 `TOTP.verify()`를
+`valid_window` 기본값(0)으로만 호출하고, 성공한 코드를 "이미 썼다"고
+기록하는 곳이 어디에도 없다(`users` 테이블 마이그레이션에도 해당
+컬럼 없음). 같은 30초 유효구간 안에서는 한 번 유출된 코드를
+반복해서 재사용할 수 있다.
+
+**권장 수정 방향**: 사용자별로 마지막으로 성공한 TOTP 타임코드(또는
+그 해시)를 저장해두고, 이미 사용한 코드와 같은 타임코드면 유효구간
+안이라도 거부.
+
+---
+
+## 2026-08-29-14 · risk_policy.yaml의 수치 필드에 범위 검증이 전혀 없음
+
+**상태**: 🟢 구현 세션이 수정(이 세션 자체 확인 — 관련 테스트 6개 통과,
+ruff/mypy clean). 감사 세션 재검증 대기.
+
+**수정 내용**: 권장 방향 그대로 — 퍼센트류 필드(daily_loss/max_drawdown/
+position_concentration/strategy_allocation/var.max_pct/correlation_risk.
+aggregate_exposure_max_pct/circuit_breaker 각 단계/watchdog.
+loss_threshold_pct/data_distrust 임계치)에 `Field(gt=0, le=100)`,
+`var.confidence`에 `Field(gt=0, lt=1)`, `correlation_risk.threshold`(상관계수
+크기)에 `Field(gt=0, le=1)`, 배수류(leverage.default_max/coverage_
+multiplier/trade_frequency.anomaly_multiplier)에 `Field(gt=0)`, 기간/구간류
+(var.horizon_days/watchdog.unresponsive_sec/window_min/data_distrust.
+exit_sustain_sec/circuit_breaker의 초 단위 필드/execution_loop.interval_sec)에
+`Field(gt=0)`을 추가했다. 실제 `config/risk_policy.yaml` 값은 전부 이
+범위 안이라 기존 로딩은 그대로 통과한다.
+
+**새 테스트**: `test_out_of_range_percentage_raises_validation_error`,
+`test_position_concentration_over_100_pct_raises_validation_error`,
+`test_var_confidence_out_of_unit_interval_raises_validation_error`
+(`tests/unit/core/loader/test_risk_policy_loader.py`) — 각각 음수 손실
+임계값, 100% 초과 집중도 상한, 0~1 범위를 벗어난 신뢰도를 넣었을 때
+`ValidationError`가 발생하는지 확인.
+
+**발견**: `src/core/loader/risk_policy_loader.py`(19-117행)의 모든
+`RiskPolicy` 하위 모델이 퍼센트/배수/임계값 필드를 순수 `float`/`int`로만
+선언하고 `Field(ge=..., le=...)`나 `@field_validator`가 전혀 없다.
+`load_risk_policy()`의 docstring은 "스키마 위반 시 ValidationError로
+실패한다 — 조용히 기본값으로 대체하지 않는다"고 명시하지만, 타입만
+맞으면 범위를 벗어난 값(음수 손실 임계값, 100% 넘는 집중도 상한, 0으로
+비워진 서킷브레이커 임계값 등)도 그대로 통과해 실제 운영 정책이
+된다. `config/risk_policy.yaml`은 이 리포에서 FROZEN Zone과 동일하게
+취급되는 파일이라, 여기서의 오타 하나가 유일한 방어선이 될 수 있다.
+
+**권장 수정 방향**: 퍼센트류 필드에 `Field(gt=0, le=100)`, 신뢰도류에
+`Field(gt=0, lt=1)`, 기간/구간류에 양의 정수 제약 등 필드별 의미에 맞는
+범위를 추가.
+
+---
+
+## 2026-08-29-15 · EventBus의 audit_sink 호출 실패가 그 토픽의 워커 태스크를 조용히 죽일 수 있음
+
+**상태**: 🟢 구현 세션이 수정(이 세션 자체 확인 — 관련 테스트 9개 통과,
+ruff/mypy clean). 감사 세션 재검증 대기.
+
+**수정 내용**: 권장 방향 그대로 — `_handle_safe_error`/
+`_handle_critical_error`의 `audit_sink` 호출 각각을 try/except로 감싸
+실패해도 로그만 남기고 계속 진행하도록 했다. 심층 방어로
+`_worker_loop`의 디스패치 구간(`for handler... await self._dispatch(...)`)
+전체도 넓은 try/except로 한 번 더 감쌌다 — `_dispatch`가 이미 handler/
+audit_sink 예외를 흡수하지만, 예기치 못한 예외까지 워커 태스크를 죽이는
+일은 절대 없어야 한다는 원칙을 코드로 강제한다.
+
+**새 테스트**:
+`test_audit_sink_failure_does_not_kill_worker_for_safe_handler`,
+`test_audit_sink_failure_does_not_kill_worker_for_critical_handler`
+(`tests/integration/test_event_bus.py`) — audit_sink가 예외를 던지도록
+구성한 뒤, 같은 토픽에 발행한 두 번째 이벤트가 여전히 정상 처리되는지
+확인. 수정 전 코드로 되돌려 SAFE 핸들러 테스트가 실제로 실패(두 번째
+이벤트 미수신 + "Task exception was never retrieved" 로그)하는 것까지
+직접 확인.
+
+**발견**: `src/core/event_bus/in_process.py`의 `_handle_safe_error`/
+`_handle_critical_error`(136-199행)가 핸들러 실패를 감사기록하려고
+`await self._audit_sink(...)`를 호출하는데, 이 호출 자체는 try/except로
+안 감싸여 있다(반면 몇 줄 아래의 에스컬레이션 `publish()`는 감싸여
+있음). `audit_sink`가 예외를 던지면(지금은 로깅 스텁이라 안 던지지만,
+FD-7.4 실DB 연동 후에는 커넥션 오류 등으로 던질 수 있음) 그 예외가
+`_worker_loop`까지 전파돼 해당 토픽의 워커 태스크 자체가 죽는다 —
+아무도 이 태스크를 감시하지 않아서, 이후 그 토픽에 발행되는 이벤트가
+(CRITICAL 핸들러 포함) 전부 조용히 처리되지 않는다.
+
+**권장 수정 방향**: `_handle_safe_error`/`_handle_critical_error`의
+`audit_sink` 호출도 자체 try/except로 감싸고(로그만 남기고 계속
+진행), `_worker_loop`의 디스패치 루프 자체에도 넓은 try/except를
+둬서 어떤 예외도 루프를 빠져나가지 못하게 하거나, 워커 태스크에
+done-callback을 달아 죽는 즉시 로그+재기동하도록 보강.
+
+---
+
+## 2026-08-29-16 · verification_service.decide()의 REJECT 사유가 DB에도 이벤트에도 저장되지 않음 (보안 아님, 데이터 유실)
+
+**상태**: 🟢 구현 세션이 수정(이 세션 자체 확인 — 관련 테스트 7개 통과,
+ruff/mypy clean). 감사 세션 재검증 대기.
+
+**수정 내용**: `strategy_listings.rejection_reason TEXT` 컬럼을
+추가(마이그레이션 `946d3f25d19a`)하고, REJECT 분기의 UPDATE와
+`strategy.verification.completed` 이벤트 페이로드 양쪽에 이 값을
+포함하도록 수정했다.
+
+**새 테스트**: `test_reject_reason_is_persisted_and_published`
+(`tests/integration/test_verification_service.py`) — 반려 후 DB
+컬럼과 발행된 이벤트 페이로드 양쪽에서 사유가 그대로 조회되는지 확인.
+
+**발견**: `verification_service.py::decide()`가 REJECT 시 `rejection_reason`을
+필수로 받아 검증까지 하지만(56-58행), 실제 UPDATE(87-91행)도
+`strategy.verification.completed` 이벤트 페이로드(103-110행)도 이
+값을 포함하지 않는다 — `strategy_listings` 테이블 자체에 해당 컬럼이
+없다. 검증담당자가 입력한 반려 사유가 응답이 나간 순간 완전히
+사라져서, 판매자는 왜 반려됐는지 다시는 알 수 없다.
+
+**권장 수정 방향**: `strategy_listings`에 `rejection_reason` 컬럼을
+추가하고 UPDATE·이벤트 페이로드 양쪽에 포함.
+
+---
+
+## 2026-08-29-17 · strategy_builder_service.transition_lifecycle()도 같은 미조건부 UPDATE 패턴 — 현재는 HTTP 미배선이라 잠재적(dormant)
+
+**상태**: 🟢 구현 세션이 수정(이 세션 자체 확인 — strategy_builder_service
+12개 + strategy_builder 라우터 16개 통과, ruff/mypy strict clean). 감사
+세션 재검증 대기.
+
+**수정 내용**: 권장 방향 그대로 — UPDATE에 방금 읽은 `current`
+(lifecycle_status)를 `AND lifecycle_status = $4` 조건으로 추가하고
+`RETURNING`이 빈 행이면 `StrategyLifecycleError`(동시 처리 충돌)를
+던진다. 아직 라우터에 배선되지 않아(문서화된 의도적 편차, 여전히
+유지) 지금 당장 HTTP로 트리거할 방법은 없지만, 나중에 배선되는
+순간 같은 취약점이 재발하지 않도록 지금 하드닝해뒀다. 새 테스트
+`test_concurrent_transitions_only_one_succeeds`
+(`tests/integration/test_strategy_builder_service.py`)가
+`asyncio.gather`로 같은 GENERATED 상태에서 동시에 두 전이를 시도해
+정확히 하나만 성공함을 실증(04/05/08/09/16번이 이미 쓴 것과 동일한
+회귀 검증 방식).
+
+**발견**: `strategy_builder_service.py::transition_lifecycle()`(143-197행)도
+04/05/08번과 같은 패턴(상태를 읽고 검증한 뒤 `WHERE strategy_id=$1 AND
+version=$2`만으로 UPDATE, 상태 조건 없음) — 다만 `strategy_builder.py`
+라우터에 이 함수가 아직 연결돼 있지 않아(문서화된 의도적 편차) 지금
+당장 외부에서 트리거할 방법이 없다. 나중에 자동 백테스트/검증
+파이프라인이 이 함수를 호출하도록 배선되는 순간, 예를 들어 관리자의
+REJECTED 판정과 자동 파이프라인의 다음 단계 전이가 경합하면 반려된
+전략이 조용히 되살아나 거래 가능 상태로 넘어갈 수 있다.
+
+**권장 수정 방향**: 지금 당장 위험하진 않지만, 배선되기 전에
+`WHERE strategy_id=$1 AND version=$2 AND lifecycle_status=$3`(방금
+읽은 값) 조건을 미리 추가해두는 걸 권장 — 이미 한 번 공들여
+하드닝한 파일(`APPROVED` 전이 리스크체크)에 같은 클래스 버그가 또
+배선되는 걸 사전에 막는 차원.
+
+---
+
+## 2026-08-29-18 · 거래소 어댑터 사소 항목 2건 (참고용, 우선순위 낮음)
+
+**상태**: 🟢 구현 세션이 수정(이 세션 자체 확인 — 관련 테스트 22개
+통과, ruff/mypy clean). 감사 세션 재검증 대기.
+
+**수정 내용**:
+(a) `_BitgetHTTPClient._request()`가 서명용/실제 전송용 쿼리스트링을
+`httpx.QueryParams(params)`로 한 번만 인코딩해 양쪽에 동일하게
+재사용하도록 변경 — `_client.request(method, request_path, ...)`처럼
+이미 쿼리스트링이 붙은 경로를 그대로 넘겨 httpx가 별도로 다시
+인코딩하지 않게 했다.
+(b) `KISTradingMixin.place_order()`의 `raw["output"]["KRX_FWDG_ORD_ORGNO"]`/
+`["ODNO"]` 접근을 `market_data_mixin.py`와 동일한 패턴(try/except
+KeyError → `FatalExchangeError`)으로 감쌌다.
+
+**새 테스트**: `test_place_order_missing_expected_field_raises_fatal_exchange_error`
+(`tests/integration/test_kis_adapter.py`) — 응답에서 `KRX_FWDG_ORD_ORGNO`
+필드를 빼고 호출하면 `FatalExchangeError`가 발생하는지 확인. (a)는
+기존 Bitget 어댑터 통합테스트가 그대로 통과하는 것으로 회귀 없음을
+확인(전부 영숫자 값이라 인코딩 결과 자체는 이전과 동일 — 이 수정은
+향후 퍼센트인코딩이 필요한 값에 대한 예방 조치).
+
+**a) Bitget GET 서명이 수동 쿼리스트링 조합** —
+`src/exchanges/bitget/adapter.py`(85-96행)가 서명용 문자열을
+`f"{k}={v}"` 수동 join으로 만드는데, 실제 요청은 httpx의 `params=`
+인코딩을 따로 탄다. 지금 쓰는 값(symbol/limit/coin 등)은 전부
+영숫자라 우연히 일치하지만, 나중에 퍼센트인코딩이 필요한 값이
+생기면 서명 문자열과 실제 전송 문자열이 어긋나 서명오류(40012,
+`FatalExchangeError`)로 실패한다 — 조용히 잘못되는 게 아니라 크게
+실패하는 쪽이라 심각도는 낮음.
+
+**b) KIS trading_mixin의 응답 필드 접근이 다른 곳처럼 안 감싸여 있음** —
+`src/exchanges/kis/trading_mixin.py`(62-66행)가
+`raw["output"]["KRX_FWDG_ORD_ORGNO"]`류를 다른 메서드들과 달리
+`FatalExchangeError`로 감싸지 않고 그대로 접근 — 응답 형식이 바뀌면
+설명 없는 `KeyError`가 난다(이것도 조용히 틀린 값이 되는 게 아니라
+그냥 실패).
+
+**권장 수정 방향**: (a) 서명용 쿼리스트링과 실제 전송 쿼리스트링을
+한 번만 만들어 공유. (b) 다른 메서드처럼 `KeyError`를
+`FatalExchangeError`로 감싸 에러 메시지를 통일.
 
 ---

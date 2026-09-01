@@ -86,6 +86,75 @@ async def test_critical_handler_escalates_after_retries_exhausted(fast_bus):
     assert escalated[0]["topic"] == "order.status.changed"
 
 
+async def test_audit_sink_failure_does_not_kill_worker_for_safe_handler(fast_bus):
+    """docs/RED_TEAM_FINDINGS.md #15 회귀 — audit_sink 자체가 예외를 던져도
+    (예: 실 DB 연동 후 커넥션 오류) 워커 태스크가 죽지 않고 같은 토픽의
+    다음 이벤트를 계속 처리해야 한다."""
+
+    async def failing_audit_sink(record):
+        raise RuntimeError("audit DB 연결 실패")
+
+    bus = InProcessEventBus(
+        max_queue_depth=10,
+        backpressure_sustained_seconds=0.05,
+        max_retries=1,
+        retry_initial_delay_seconds=0.01,
+        audit_sink=failing_audit_sink,
+    )
+    received = []
+
+    async def failing_handler(payload):
+        raise RuntimeError("boom")
+
+    async def healthy_handler(payload):
+        received.append(payload)
+
+    bus.subscribe("order.status.changed", failing_handler, criticality=HandlerCriticality.SAFE)
+    bus.subscribe("order.status.changed", healthy_handler, criticality=HandlerCriticality.SAFE)
+    await bus.start()
+    await bus.publish("order.status.changed", {"order_id": "first"})
+    await asyncio.sleep(0.05)
+    # 첫 이벤트의 audit_sink 실패로 워커가 죽었다면 이 두 번째 이벤트는
+    # 영원히 처리되지 않는다.
+    await bus.publish("order.status.changed", {"order_id": "second"})
+    await asyncio.sleep(0.05)
+    await bus.stop()
+
+    assert received == [{"order_id": "first"}, {"order_id": "second"}]
+
+
+async def test_audit_sink_failure_does_not_kill_worker_for_critical_handler(fast_bus):
+    async def failing_audit_sink(record):
+        raise RuntimeError("audit DB 연결 실패")
+
+    bus = InProcessEventBus(
+        max_queue_depth=10,
+        backpressure_sustained_seconds=0.05,
+        max_retries=1,
+        retry_initial_delay_seconds=0.01,
+        audit_sink=failing_audit_sink,
+    )
+    received = []
+
+    async def always_fails(payload):
+        raise RuntimeError("persistent failure")
+
+    async def healthy_handler(payload):
+        received.append(payload)
+
+    bus.subscribe("order.status.changed", always_fails, criticality=HandlerCriticality.CRITICAL)
+    await bus.start()
+    await bus.publish("order.status.changed", {"order_id": "first"})
+    await asyncio.sleep(0.1)
+
+    bus.subscribe("order.status.changed", healthy_handler, criticality=HandlerCriticality.SAFE)
+    await bus.publish("order.status.changed", {"order_id": "second"})
+    await asyncio.sleep(0.1)
+    await bus.stop()
+
+    assert {"order_id": "second"} in received
+
+
 async def test_backpressure_rejects_publish_when_queue_full(fast_bus):
     # 워커를 시작하지 않아 큐가 절대 비워지지 않게 한 뒤 maxsize(1)를 채운다.
     await fast_bus.publish("market.ticker.updated", {"n": 1})
