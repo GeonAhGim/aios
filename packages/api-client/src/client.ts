@@ -1,5 +1,6 @@
 import type {
   AccountBalance,
+  AlertCreateRequest,
   ApprovalRequest,
   DisputeDetail,
   DisputeResolutionResult,
@@ -41,6 +42,7 @@ import type {
   PreferenceUpdateResult,
   PreviewRequest,
   PreviewResponse,
+  PriceAlert,
   PromptGenerateRequest,
   PurchaseCreateRequest,
   PurchaseResponse,
@@ -223,6 +225,19 @@ export class AiosApiClient {
 
   async requestTopup(body: TopupRequestBody): Promise<WalletTopupRequest> {
     return this.post("/wallet/topup-requests", body);
+  }
+
+  // ---- FD-14(신설) 가격/지표 알림 ----
+  async createAlert(body: AlertCreateRequest): Promise<PriceAlert> {
+    return this.post("/alerts", body);
+  }
+
+  async listMyAlerts(): Promise<PriceAlert[]> {
+    return this.request("/alerts");
+  }
+
+  async cancelAlert(alertId: number): Promise<PriceAlert> {
+    return this.post(`/alerts/${alertId}/cancel`);
   }
 
   // ---- FD-20 보고서 ----

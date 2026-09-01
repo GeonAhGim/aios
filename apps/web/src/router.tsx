@@ -10,6 +10,7 @@ import { PlatformListingPage } from "./routes/admin/PlatformListingPage";
 import { UserManagementPage } from "./routes/admin/UserManagementPage";
 import { VerificationQueuePage } from "./routes/admin/VerificationQueuePage";
 import { WalletTopupsPage } from "./routes/admin/WalletTopupsPage";
+import { AlertsPage } from "./routes/alerts/AlertsPage";
 import { LoginPage } from "./routes/auth/LoginPage";
 import { SignupPage } from "./routes/auth/SignupPage";
 import { DashboardPage } from "./routes/dashboard/DashboardPage";
@@ -58,6 +59,7 @@ export const router = createBrowserRouter([
   { path: "/portfolio", element: protect(<PortfolioPage />) },
   { path: "/reports", element: protect(<ReportsPage />) },
   { path: "/wallet", element: protect(<WalletPage />) },
+  { path: "/alerts", element: protect(<AlertsPage />) },
   { path: "/approval-requests", element: protect(<MyApprovalRequestsPage />) },
   { path: "/settings/approval", element: protect(<ApprovalSettingsPage />) },
   { path: "/settings/notifications", element: protect(<NotificationSettingsPage />) },

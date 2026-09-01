@@ -10,3 +10,4 @@ export * from "./notification";
 export * from "./deviceToken";
 export * from "./admin";
 export * from "./wallet";
+export * from "./alert";

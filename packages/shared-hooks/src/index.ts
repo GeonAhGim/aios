@@ -65,6 +65,7 @@ export {
   useRejectRequest,
 } from "./useAdmin";
 export { useWalletBalance, useRequestTopup } from "./useWallet";
+export { useMyAlerts, useCreateAlert, useCancelAlert } from "./useAlerts";
 export {
   useMyApprovalRequests,
   useApproveMyRequest,
