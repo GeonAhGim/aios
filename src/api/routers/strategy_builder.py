@@ -49,7 +49,11 @@ from src.services.auth_service import User
 from src.services.condition_compiler import ConditionCompileError, ConditionCompiler
 from src.services.credential_resolver import CredentialNotFoundError, CredentialResolver
 from src.services.preview_service import PreviewCalculator
-from src.services.strategy_builder_service import StrategyBuilderService, StrategyLifecycleError
+from src.services.strategy_builder_service import (
+    StrategyBuilderService,
+    StrategyLifecycleError,
+    StrategySummary,
+)
 from src.services.strategy_prompt_service import (
     PromptGenerationUnavailableError,
     StrategyPromptService,
@@ -94,6 +98,14 @@ async def compute_indicator(
     kwargs = {param_name: period} if param_name is not None and period is not None else {}
     result = indicator_service.calculate(name, candles, **kwargs)
     return IndicatorComputeResponse(**result.model_dump())
+
+
+@router.get("/strategies")
+async def list_strategies(
+    user: User = Depends(get_current_user),
+    service: StrategyBuilderService = Depends(get_strategy_builder_service),
+) -> list[StrategySummary]:
+    return await service.list_strategies(user.user_id)
 
 
 @router.post("/strategies", status_code=status.HTTP_201_CREATED)

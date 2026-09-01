@@ -332,6 +332,36 @@ async def test_admin_can_suspend_seller(client, pool):
     assert response.json()["seller_suspended"] is True
 
 
+async def test_admin_can_list_audit_log(client, pool):
+    admin_headers, admin_id = await _register(client)
+    await _make_admin(pool, admin_id)
+    _, target_id = await _register(client)
+    await client.post(
+        f"/admin/users/{target_id}/suspend-seller",
+        json={"reason": "판매 정책 위반"},
+        headers=admin_headers,
+    )
+
+    response = await client.get(
+        "/admin/audit-log",
+        params={"action_type": "seller.suspended", "target_id": target_id},
+        headers=admin_headers,
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["total"] >= 1
+    assert any(item["target_id"] == target_id for item in body["items"])
+
+
+async def test_audit_log_requires_admin_role(client):
+    headers, _ = await _register(client)
+
+    response = await client.get("/admin/audit-log", headers=headers)
+
+    assert response.status_code == 403
+
+
 async def test_admin_can_view_and_confirm_pending_wallet_topup(client, pool):
     admin_headers, admin_id = await _register(client)
     await _make_admin(pool, admin_id)

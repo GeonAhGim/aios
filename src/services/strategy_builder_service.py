@@ -18,10 +18,16 @@ strategy_executions을 만들기 직전 호출해야 한다.
 APPROVED 전이는 FD-15.3 매칭경고 훅②(전략 소유자 자신의 risk_profile
 vs 그 전략의 risk_level) 지점이다 — 불일치인데 미동의 상태면 전이 자체를
 막는다(FD-15.3 처리: "경고 노출 + 명시적 동의 필요 → 동의 후에만 진행").
+
+편차(2026-09-01, 앱 조립 이후 발견된 갭 해소): "내 전략 목록" 조회
+엔드포인트가 스펙 어디에도 명시되지 않아, 마켓플레이스 리스팅 등록
+화면(SellStrategyPage.tsx)이 strategy_id/version을 사용자가 직접
+타이핑해야 했다 — list_strategies()로 채운다.
 """
 from __future__ import annotations
 
 import json
+from datetime import datetime
 from typing import Any
 from uuid import UUID
 
@@ -67,6 +73,16 @@ class StrategyDetail(BaseModel):
     exchange: str
     lifecycle_status: str
     fsm_definition: dict[str, Any]
+
+
+class StrategySummary(BaseModel):
+    strategy_id: str
+    version: str
+    target_asset: str
+    market: str
+    exchange: str
+    lifecycle_status: str
+    created_at: datetime
 
 
 class StrategyBuilderService:
@@ -139,6 +155,16 @@ class StrategyBuilderService:
             lifecycle_status=row["lifecycle_status"],
             fsm_definition=json.loads(row["fsm_definition"]),
         )
+
+    async def list_strategies(self, owner_user_id: UUID) -> list[StrategySummary]:
+        async with self._pool.acquire() as conn:
+            rows = await conn.fetch(
+                "SELECT strategy_id, version, target_asset, market, exchange, "
+                "lifecycle_status, created_at FROM strategies "
+                "WHERE owner_user_id = $1 ORDER BY created_at DESC",
+                owner_user_id,
+            )
+        return [StrategySummary(**dict(row)) for row in rows]
 
     async def transition_lifecycle(
         self,

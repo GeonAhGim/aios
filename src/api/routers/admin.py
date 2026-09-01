@@ -18,6 +18,7 @@ import asyncpg
 from fastapi import APIRouter, Depends, Header, HTTPException, status
 
 from src.api.admin_deps import (
+    get_audit_log_read_service,
     get_dispute_resolution_service,
     get_seller_suspension_service,
     get_user_admin_service,
@@ -39,6 +40,7 @@ from src.api.schemas.marketplace import (
 )
 from src.api.service_deps import get_wallet_service
 from src.core.approval.service import ApprovalError, ApprovalRequest, approve, reject
+from src.services.audit_log_read_service import AuditLogPage, AuditLogReadService
 from src.services.auth_service import User
 from src.services.dispute_resolution_service import (
     DisputeDetail,
@@ -67,6 +69,25 @@ from src.services.wallet_service import (
 )
 
 router = APIRouter(prefix="/admin")
+
+
+@router.get("/audit-log")
+async def list_audit_log(
+    action_type: str | None = None,
+    target_type: str | None = None,
+    target_id: str | None = None,
+    page: int = 1,
+    page_size: int = 50,
+    admin: User = Depends(get_current_admin),
+    service: AuditLogReadService = Depends(get_audit_log_read_service),
+) -> AuditLogPage:
+    return await service.list_entries(
+        action_type=action_type,
+        target_type=target_type,
+        target_id=target_id,
+        page=page,
+        page_size=page_size,
+    )
 
 
 @router.get("/verification-queue")

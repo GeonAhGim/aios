@@ -267,6 +267,45 @@ async def test_preview_returns_signals_and_disclaimer(client):
     assert len(body["signal_indices"]) > 0
 
 
+async def test_list_strategies_returns_only_own_strategies(client):
+    owner_headers = await _register(client)
+    other_headers = await _register(client)
+    strategy_id = f"editor-strategy-{uuid.uuid4().hex[:8]}"
+    other_strategy_id = f"editor-strategy-{uuid.uuid4().hex[:8]}"
+    body_template = {
+        "version": "1.0.0",
+        "target_asset": "BTC/USDT",
+        "market": "crypto",
+        "exchange": "bitget",
+        "entry_conditions": [
+            {"indicator": "RSI", "params": {}, "operator": "<", "threshold": 30}
+        ],
+        "exit_conditions": [
+            {"indicator": "RSI", "params": {}, "operator": ">", "threshold": 70}
+        ],
+        "stop_loss_conditions": [
+            {"indicator": "close", "params": {}, "operator": "<", "threshold": 90}
+        ],
+    }
+    await client.post(
+        "/strategy-builder/strategies",
+        json={**body_template, "strategy_id": strategy_id},
+        headers=owner_headers,
+    )
+    await client.post(
+        "/strategy-builder/strategies",
+        json={**body_template, "strategy_id": other_strategy_id},
+        headers=other_headers,
+    )
+
+    response = await client.get("/strategy-builder/strategies", headers=owner_headers)
+
+    assert response.status_code == 200
+    ids = [item["strategy_id"] for item in response.json()]
+    assert strategy_id in ids
+    assert other_strategy_id not in ids
+
+
 async def test_wizard_generates_conditions(client):
     headers = await _register(client)
 

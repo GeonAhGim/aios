@@ -4,6 +4,7 @@ from __future__ import annotations
 import asyncpg
 from fastapi import Depends
 
+from src.services.audit_log_read_service import AuditLogReadService
 from src.services.dispute_resolution_service import DisputeResolutionService
 from src.services.seller_suspension_service import SellerSuspensionService
 from src.services.user_admin_service import UserAdminService
@@ -32,3 +33,7 @@ def get_seller_suspension_service(
     pool: asyncpg.Pool = Depends(get_pool),
 ) -> SellerSuspensionService:
     return SellerSuspensionService(pool)
+
+
+def get_audit_log_read_service(pool: asyncpg.Pool = Depends(get_pool)) -> AuditLogReadService:
+    return AuditLogReadService(pool)

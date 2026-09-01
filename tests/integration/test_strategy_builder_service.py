@@ -34,6 +34,44 @@ def service(pool):
     return StrategyBuilderService(pool)
 
 
+async def test_list_strategies_returns_only_owned_strategies(service, pool):
+    owner = await create_test_user(pool)
+    other = await create_test_user(pool)
+    strategy_id = f"test-strategy-{uuid4().hex[:8]}"
+    other_strategy_id = f"test-strategy-{uuid4().hex[:8]}"
+    await service.save_strategy(
+        owner,
+        strategy_id,
+        "1.0.0",
+        target_asset="BTC/USDT",
+        market="crypto",
+        exchange="bitget",
+        fsm_definition={"states": ["IDLE"]},
+    )
+    await service.save_strategy(
+        other,
+        other_strategy_id,
+        "1.0.0",
+        target_asset="ETH/USDT",
+        market="crypto",
+        exchange="bitget",
+        fsm_definition={"states": ["IDLE"]},
+    )
+
+    summaries = await service.list_strategies(owner)
+
+    assert any(s.strategy_id == strategy_id for s in summaries)
+    assert all(s.strategy_id != other_strategy_id for s in summaries)
+
+
+async def test_list_strategies_empty_for_new_user(service, pool):
+    owner = await create_test_user(pool)
+
+    summaries = await service.list_strategies(owner)
+
+    assert summaries == []
+
+
 async def test_save_strategy_starts_at_generated(service, pool):
     owner = await create_test_user(pool)
     strategy_id = f"test-strategy-{uuid4().hex[:8]}"
