@@ -34,15 +34,17 @@ class FakeExchangeAdapter(ExchangeAdapter):
         self,
         *,
         exchange_name: str = "bitget",
+        is_paper_trading: bool = True,
+        is_sandboxed: bool = True,
         place_order_result_status: OrderStatus = OrderStatus.SUBMITTED,
         on_place_order: PlaceOrderHook | None = None,
         cancel_result: bool = True,
         get_order_status: OrderStatus = OrderStatus.FILLED,
         closes: list[Decimal] | None = None,
         usdt_balance: AccountBalance | None = None,
-        is_sandboxed: bool = True,
     ) -> None:
         self._exchange_name = exchange_name
+        self._is_paper_trading = is_paper_trading
         self._is_sandboxed = is_sandboxed
         self._place_order_result_status = place_order_result_status
         self._on_place_order = on_place_order
@@ -60,6 +62,10 @@ class FakeExchangeAdapter(ExchangeAdapter):
     @property
     def is_sandboxed(self) -> bool:
         return self._is_sandboxed
+
+    @property
+    def is_paper_trading(self) -> bool:
+        return self._is_paper_trading
 
     def get_capabilities(self) -> ExchangeCapability:
         return ExchangeCapability(

@@ -8,7 +8,7 @@ import asyncpg
 import pytest
 from dotenv import dotenv_values
 
-from src.core.exceptions import FrozenZoneLiveModeBlockedError
+from src.core.exceptions import FrozenZoneLiveModeBlockedError, FrozenZonePaperAdapterBlockedError
 from src.core.executor.executor import Executor
 from src.core.portfolio.models import AllocationDecision
 from src.core.risk.models import RiskCheckResult
@@ -143,8 +143,34 @@ async def test_paper_mode_with_non_sandboxed_adapter_is_hard_blocked(pool):
     writer, calls = await _fsm_state_writer_for(pool)
     executor = Executor()
 
-    with pytest.raises(FrozenZoneLiveModeBlockedError):
+    with pytest.raises(FrozenZonePaperAdapterBlockedError):
         await executor.execute(
+            _allocation(),
+            _approved_risk_result(),
+            adapter,
+            execution_id=execution_id,
+            user_id=user_id,
+            strategy_version="1.0.0",
+            mode="PAPER",
+            side=OrderSide.BUY,
+            pending_fsm_state=FSMState.BUY_ORDER_PENDING,
+            fsm_config=_fsm_config(),
+            fsm_state_writer=writer,
+            pool=pool,
+        )
+
+    assert adapter.place_order_call_count == 0
+    assert calls == []
+
+
+async def test_paper_mode_rejects_a_live_configured_adapter_before_order_submission(pool):
+    user_id = await create_test_user(pool)
+    execution_id = await _create_execution(pool, user_id, mode="PAPER")
+    adapter = FakeExchangeAdapter(is_paper_trading=False)
+    writer, calls = await _fsm_state_writer_for(pool)
+
+    with pytest.raises(FrozenZonePaperAdapterBlockedError):
+        await Executor().execute(
             _allocation(),
             _approved_risk_result(),
             adapter,

@@ -122,6 +122,18 @@ class BitgetAdapter(
 ):
     """7.8 조사결과: 공식 Demo Trading API 존재."""
 
+    @property
+    def is_paper_trading(self) -> bool:
+        return self._demo_mode
+
+    @property
+    def is_sandboxed(self) -> bool:
+        """레드팀 감사(2026-09-01-08) — 생성자의 demo_mode 그대로 노출.
+        `is_paper_trading`과 같은 값(이 어댑터는 하나의 플래그로 두 신호를
+        전부 만족시킨다) — `_headers()`가 paptrading 헤더를 붙이는 바로
+        그 조건과 동일하다."""
+        return self._demo_mode
+
     def get_capabilities(self) -> ExchangeCapability:
         """v1.4(ADR-2026-08-28) — Phase 1 실거래 대상은 crypto 현물뿐(06번
         §6.1). Bitget이 futures/margin도 지원하지만 Phase 1 스콥 밖이라
@@ -139,9 +151,3 @@ class BitgetAdapter(
             reference_feed_coverage="high",
             has_official_sandbox=True,
         )
-
-    @property
-    def is_sandboxed(self) -> bool:
-        """레드팀 감사(2026-09-01-08) — 생성자의 demo_mode 그대로 노출.
-        `_headers()`가 paptrading 헤더를 붙이는 바로 그 조건과 동일하다."""
-        return self._demo_mode

@@ -19,21 +19,31 @@ from src.exchanges.common.types import ExchangeCapability, TickerCallback
 
 
 class ExchangeAdapter(ABC):
+    @property
     @abstractmethod
-    def get_capabilities(self) -> ExchangeCapability:
-        """7.6 — 이 거래소가 지원하는 기능을 선언한다."""
+    def is_paper_trading(self) -> bool:
+        """Whether this adapter is configured for a provider sandbox account.
+
+        This is an execution-boundary assertion, not a UI label. PAPER
+        executors fail closed unless it is true; production egress policy and
+        credential provenance remain independent deployment controls.
+        """
         ...
 
     @property
     @abstractmethod
     def is_sandboxed(self) -> bool:
-        """레드팀 감사(docs/RED_TEAM_FINDINGS.md, 2026-09-01-08) 반영 — 이
-        어댑터 인스턴스가 실제로 sandbox/demo/paper 계정에 바인딩됐는지
-        스스로 증명한다. DB의 실행 mode 컬럼만으로는 "잘못 구성된 real
-        adapter"(예: demo_mode=False로 생성된 BitgetAdapter)를 걸러낼 수
-        없다 — FD-8.4(Executor)가 PAPER 모드 실행에 이 값을 반드시 함께
-        확인해야 한다(mode 문자열과 실제 adapter 상태 둘 다 일치해야
-        통과, 어느 한쪽만 봐서는 안 됨)."""
+        """레드팀 감사(2026-09-01-08) — adapter 스스로가 sandbox/demo 계정에
+        바인딩돼 있음을 증명하는 두 번째 독립 신호. `is_paper_trading`과
+        같은 값을 반환하는 구현이 많지만(현재 모든 콘크리트 어댑터가 그럼),
+        DB의 mode 문자열 하나만으로는 잘못 구성된 실계정 adapter를 막지
+        못하므로 Executor는 이 값도 별도로 확인한다.
+        """
+        ...
+
+    @abstractmethod
+    def get_capabilities(self) -> ExchangeCapability:
+        """7.6 — 이 거래소가 지원하는 기능을 선언한다."""
         ...
 
     # ---- Market Data ----

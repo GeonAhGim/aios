@@ -13,33 +13,42 @@
 
 ## 2026-09-01-08 · PAPER 실행 루프가 adapter의 실제 sandbox 상태를 증명하지 않음
 
-**상태**: 🟢 구현 세션이 수정(이 세션 자체 확인 — 관련 통합테스트 25개
-통과, ruff/mypy clean). 감사 세션 재검증 대기.
+**상태**: 🟢 두 세션이 독립적으로 수정한 결과가 병합됨(이 세션 자체
+확인 — `is_sandboxed`/`is_paper_trading` 두 테스트 모두 포함해 관련
+통합테스트 통과, ruff/mypy clean). 감사 세션 재검증 대기.
 
-**수정 내용**: 권장 방향의 축소판 — 전체 `PaperExecutionAdapter`/
-`ExecutionEnvironment` attestation 체계(별도 ADR·owner review 대상으로
-명시된 큰 리팩터링)까지는 가지 않고, `ExchangeAdapter`에 `is_sandboxed:
-bool` 추상 프로퍼티를 신설해 최소한의 실효성 있는 방어를 지금 바로
-넣었다. `BitgetAdapter.is_sandboxed`는 생성자의 `demo_mode`를,
-`KISAdapter.is_sandboxed`는 `is_paper_trading`을 그대로 노출한다(둘 다
-paptrading 헤더/모의투자 base URL 전환과 동일 조건 — 새 상태를 만들지
-않고 이미 있던 진실의 원천을 노출만 함). `Executor.execute()`는 이제
-`mode == 'PAPER'`뿐 아니라 `adapter.is_sandboxed`도 함께 확인해, 둘 중
-하나라도 아니면 `FrozenZoneLiveModeBlockedError`를 던진다 — DB의 mode
-문자열과 실제 adapter 상태가 반드시 둘 다 일치해야 통과한다.
+**수정 내용**: 서로 다른 두 세션이 같은 발견을 각자 독립적으로 막았고,
+병합 결과 두 검사가 모두 남아 상호 보완한다.
 
-**새 테스트**:
-`test_paper_mode_with_non_sandboxed_adapter_is_hard_blocked`
-(`tests/integration/test_executor.py`) — `mode='PAPER'`인데
-`is_sandboxed=False`인 adapter를 넘기면 주문이 전혀 나가지 않고
-차단되는지 확인.
+1. (이 세션) `ExchangeAdapter`에 `is_sandboxed: bool` 추상 프로퍼티를
+   신설. `BitgetAdapter.is_sandboxed`는 생성자의 `demo_mode`를,
+   `KISAdapter.is_sandboxed`는 `is_paper_trading`을 그대로 노출한다(둘 다
+   paper 헤더/모의투자 base URL 전환과 동일 조건 — 새 상태를 만들지 않고
+   이미 있던 진실의 원천을 노출만 함).
+2. (`d9548c1`, PR #7) `ExchangeAdapter.is_paper_trading`이 false인
+   adapter를 별도로 거부하는 code-level fail-closed guard.
+
+`Executor.execute()`는 이제 `mode == 'PAPER'`, `adapter.is_sandboxed`,
+`adapter.is_paper_trading` 세 가지를 모두 확인해, 하나라도 아니면
+`FrozenZoneLiveModeBlockedError`/`FrozenZonePaperAdapterBlockedError`를
+던진다 — DB의 mode 문자열과 실제 adapter 상태가 반드시 다 일치해야
+통과한다.
+
+**새 테스트**(둘 다 유지, `tests/integration/test_executor.py`):
+`test_paper_mode_with_non_sandboxed_adapter_is_hard_blocked`(
+`is_sandboxed=False` 차단 확인) +
+`test_paper_mode_rejects_a_live_configured_adapter_before_order_submission`(
+`is_paper_trading=False` 차단 확인).
 
 **남은 축소(정직하게 명시)**: 이 수정은 "adapter 객체 스스로가 보고하는
-값"을 신뢰한다 — 이 세션이 만든 `CredentialResolver`가 여전히 유일한
-adapter 생성 경로(`main.py`에서 `demo_mode` override 없이 기본값 True로
-생성)라 지금은 안전하지만, egress allowlist·credential provenance 검증까지
-포함한 완전한 attestation 체계는 이 리프의 스콥이 아니다 — 권장사항이
-명시한 대로 실계정 도입 시점에 별도 ADR·owner review로 분리해야 한다.
+값"을 신뢰한다 — `CredentialResolver`가 여전히 유일한 adapter 생성
+경로(`main.py`에서 override 없이 기본값 True로 생성)라 지금은 안전하지만,
+egress allowlist·credential provenance 검증까지 포함한 완전한 attestation
+체계는 이 리프의 스콥이 아니다. 실계정 도입 시점에 별도 ADR·owner
+review로 분리해야 한다 — 이 판단은 코덱스 문서군의
+`103_enterprise_architecture_full_audit_and_remediation_brief_v1.0.md`
+RT-02(PAPER→LIVE egress 우회, P0)와 정확히 같은 결론이다: 코드 플래그
+수준의 격리는 배포/네트워크 수준 격리가 아니다.
 
 **발견 당시 배경**: production router나 scheduler가
 `run_execution_tick()`을 호출하는 경로는 확인되지 않았고, 통합 테스트는
@@ -64,14 +73,11 @@ mode가 `PAPER`라는 사실만으로, 잘못 구성된 real adapter를 통한 �
 약하며, 플랫폼 기준 문서가 요구하는 account/credential/provider adapter 수준의
 paper/live 분리와도 맞지 않는다.
 
-**권장 수정 방향**: execution plane에 별도 `PaperExecutionAdapter` 또는
-검증 가능한 immutable `ExecutionEnvironment` attestation을 도입한다. paper
-worker는 sandbox endpoint, sandbox credential provenance, egress allowlist를
-확인한 adapter만 얻을 수 있어야 하며, `Executor.execute()`/tick entrypoint는
-attestation이 없거나 LIVE인 adapter를 fail-closed로 거부해야 한다. 이 경계에는
-`PAPER + live-configured adapter` negative test와 실제 network egress를 막는
-integration test를 추가한다. 기존 LIVE path를 수정/활성화하는 작업은 별도
-ADR·owner review·release approval로 분리한다.
+**남은 조치**: `is_paper_trading`은 adapter configuration의 code-level
+assertion이다. execution plane은 다음 단계에서 sandbox endpoint, sandbox
+credential provenance, egress allowlist를 deployment 수준에서도 검증해야 한다.
+특히 실제 network egress를 막는 integration test를 추가하고, 기존 LIVE path의
+수정·활성화는 별도 ADR·owner review·release approval로 분리한다.
 
 ---
 
