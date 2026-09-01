@@ -35,5 +35,13 @@ class ZoneViolationError(MihwaError):
     """15.6-A FROZEN Zone 경로를 SCAFFOLD 코드가 잘못 import하려 할 때(런타임 방어선)."""
 
 
+class FrozenZoneLiveModeBlockedError(MihwaError):
+    """ADR-2026-08-29-E — FROZEN-PAPER-ONLY 하드 가드. Executor.execute()가
+    mode != 'PAPER'인 실행을 넘겨받으면 정책 문서상 금지가 아니라 이
+    예외로 실제 코드 레벨에서 차단한다. 15.6-D 조건 2(실계정 MFA·이중승인
+    운영 적용) 충족 후 별도 ADR로만 제거 가능 — 이 세션의 어떤 leaf도
+    이 가드를 우회하거나 약화시켜서는 안 된다."""
+
+
 class EventHandlerError(MihwaError):
     ...

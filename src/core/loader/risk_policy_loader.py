@@ -99,6 +99,13 @@ class DataDistrustPolicy(BaseModel):
     exit_sustain_sec: int
 
 
+class ExecutionLoopPolicy(BaseModel):
+    """FD-8.1 — 실행 루프 폴링 주기(리스크 수치는 아니지만 판단 계층
+    설정의 단일 출처 원칙에 따라 이 파일에 함께 둔다)."""
+
+    interval_sec: float
+
+
 class RiskPolicy(BaseModel):
     """risk_policy.yaml 전체 구조(§7.2) 1:1 대응."""
 
@@ -114,6 +121,7 @@ class RiskPolicy(BaseModel):
     circuit_breaker: CircuitBreakerPolicy
     watchdog: WatchdogPolicy
     data_distrust: DataDistrustPolicy
+    execution_loop: ExecutionLoopPolicy
 
 
 def load_risk_policy(path: Path = DEFAULT_RISK_POLICY_PATH) -> RiskPolicy:

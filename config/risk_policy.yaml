@@ -68,3 +68,9 @@ data_distrust:
   enter_threshold_pct: 1.5
   exit_threshold_pct: 0.75
   exit_sustain_sec: 60
+
+# FD-8.1(기능설계문서 v1.21) — 실행 루프 폴링 주기. 리스크 수치가 아니라
+# 스케줄 설정이지만 이 파일이 "판단 계층의 결정론적 설정" 단일 출처이므로
+# 여기에 둔다(8.2-B 확장).
+execution_loop:
+  interval_sec: 1.0
