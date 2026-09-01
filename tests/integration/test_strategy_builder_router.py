@@ -267,6 +267,81 @@ async def test_preview_returns_signals_and_disclaimer(client):
     assert len(body["signal_indices"]) > 0
 
 
+async def test_wizard_generates_conditions(client):
+    headers = await _register(client)
+
+    response = await client.post(
+        "/strategy-builder/wizard",
+        json={"goal": "STEADY_GROWTH", "risk_tolerance": "MEDIUM"},
+        headers=headers,
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["entry_conditions"]
+    assert body["exit_conditions"]
+    assert body["stop_loss_conditions"]
+    assert body["explanation"]
+
+
+async def test_wizard_rejects_unknown_goal(client):
+    headers = await _register(client)
+
+    response = await client.post(
+        "/strategy-builder/wizard",
+        json={"goal": "NOT_A_GOAL", "risk_tolerance": "MEDIUM"},
+        headers=headers,
+    )
+
+    assert response.status_code == 400
+
+
+async def test_wizard_output_can_be_saved_as_a_strategy(client):
+    """마법사 결과물을 그대로 기존 전략 저장 엔드포인트에 넣어도
+    작동한다는 것 — 별도 저장 경로를 새로 만들지 않은 설계 확인."""
+    headers = await _register(client)
+    wizard_response = await client.post(
+        "/strategy-builder/wizard",
+        json={"goal": "AGGRESSIVE_GROWTH", "risk_tolerance": "HIGH"},
+        headers=headers,
+    )
+    generated = wizard_response.json()
+    strategy_id = f"wizard-strategy-{uuid.uuid4().hex[:8]}"
+
+    response = await client.post(
+        "/strategy-builder/strategies",
+        json={
+            "strategy_id": strategy_id,
+            "version": "1.0.0",
+            "target_asset": "BTC/USDT",
+            "market": "crypto",
+            "exchange": "bitget",
+            "entry_conditions": generated["entry_conditions"],
+            "exit_conditions": generated["exit_conditions"],
+            "stop_loss_conditions": generated["stop_loss_conditions"],
+            "entry_combine": generated["entry_combine"],
+            "exit_combine": generated["exit_combine"],
+            "stop_loss_combine": generated["stop_loss_combine"],
+        },
+        headers=headers,
+    )
+
+    assert response.status_code == 201
+    assert response.json()["fsm_definition"]["strategy_id"] == strategy_id
+
+
+async def test_generate_from_prompt_is_not_yet_available(client):
+    headers = await _register(client)
+
+    response = await client.post(
+        "/strategy-builder/generate-from-prompt",
+        json={"prompt": "RSI 과매도에서 반등 매수하는 전략 만들어줘"},
+        headers=headers,
+    )
+
+    assert response.status_code == 501
+
+
 async def test_strategy_builder_requires_authentication(client):
     response = await client.post(
         "/strategy-builder/preview",

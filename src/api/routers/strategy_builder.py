@@ -29,9 +29,11 @@ from src.api.schemas.strategy_builder import (
     IndicatorListResponse,
     PreviewRequest,
     PreviewResponse,
+    PromptGenerateRequest,
     StrategyCreateRequest,
     StrategyDetailResponse,
     StrategyResponse,
+    WizardGenerateRequest,
     to_strategy_detail_response,
     to_strategy_response,
 )
@@ -48,6 +50,15 @@ from src.services.condition_compiler import ConditionCompileError, ConditionComp
 from src.services.credential_resolver import CredentialNotFoundError, CredentialResolver
 from src.services.preview_service import PreviewCalculator
 from src.services.strategy_builder_service import StrategyBuilderService, StrategyLifecycleError
+from src.services.strategy_prompt_service import (
+    PromptGenerationUnavailableError,
+    StrategyPromptService,
+)
+from src.services.strategy_wizard_service import (
+    GeneratedConditions,
+    StrategyWizardService,
+    WizardError,
+)
 
 router = APIRouter()
 
@@ -155,3 +166,25 @@ async def preview(
         disclaimer=result.disclaimer,
         message=result.message,
     )
+
+
+@router.post("/wizard")
+async def generate_wizard_strategy(
+    body: WizardGenerateRequest,
+    user: User = Depends(get_current_user),
+) -> GeneratedConditions:
+    try:
+        return StrategyWizardService().generate(body.goal, body.risk_tolerance)
+    except WizardError as exc:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from exc
+
+
+@router.post("/generate-from-prompt")
+async def generate_from_prompt(
+    body: PromptGenerateRequest,
+    user: User = Depends(get_current_user),
+) -> GeneratedConditions:
+    try:
+        return await StrategyPromptService().generate(body.prompt)
+    except PromptGenerationUnavailableError as exc:
+        raise HTTPException(status.HTTP_501_NOT_IMPLEMENTED, str(exc)) from exc

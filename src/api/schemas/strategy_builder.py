@@ -95,3 +95,12 @@ class PreviewResponse(BaseModel):
     signal_times: list[str]
     disclaimer: str
     message: str | None = None
+
+
+class WizardGenerateRequest(BaseModel):
+    goal: str
+    risk_tolerance: str
+
+
+class PromptGenerateRequest(BaseModel):
+    prompt: str
