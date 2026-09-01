@@ -47,7 +47,7 @@ export function SellStrategyPage() {
               onChange={(e) => setStrategyVersion(e.target.value)}
             />
           </Field>
-          <Field label="가격 (USDT)">
+          <Field label="가격 (크레딧)">
             <Input
               type="number"
               step="0.01"

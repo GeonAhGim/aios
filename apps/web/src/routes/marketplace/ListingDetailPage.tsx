@@ -1,7 +1,7 @@
 import { useListingReviews, usePurchaseListing, useSubmitForVerification } from "@aios/shared-hooks";
 import { ApiError } from "@aios/api-client";
 import type { ListingSummary } from "@aios/shared-types";
-import { Alert, Button, Card, EmptyState } from "@aios/ui-web";
+import { Alert, Badge, Button, Card, EmptyState } from "@aios/ui-web";
 import { useState } from "react";
 import { Link, useLocation, useParams } from "react-router-dom";
 import { AppShell } from "../../components/layout/AppShell";
@@ -48,24 +48,39 @@ export function ListingDetailPage() {
     <AppShell>
       <div className="max-w-2xl space-y-6">
         <div>
-          <h1 className="text-2xl font-semibold text-fg">
-            {listing?.strategyId ?? `리스팅 #${id}`}
-          </h1>
+          <div className="flex items-center gap-2">
+            <h1 className="text-2xl font-semibold text-fg">
+              {listing?.strategyId ?? `리스팅 #${id}`}
+            </h1>
+            {listing?.sellerType === "PLATFORM" && <Badge tone="accent">플랫폼</Badge>}
+          </div>
           {listing && (
             <p className="tabular mt-1 text-sm text-fg-muted">
-              v{listing.strategyVersion} · {listing.price ? `${listing.price} USDT` : "가격 미정"}
+              v{listing.strategyVersion} · {listing.price ? `${listing.price} 크레딧` : "무료"}
             </p>
           )}
         </div>
 
         {purchased ? (
           <Alert tone="success">
-            구매가 완료됐습니다 (구매ID {purchased.purchaseId}, 상태: {purchased.status}). 관리자의
-            결제 확인 후 실행 권한이 부여됩니다.
+            구매가 완료됐습니다 (구매ID {purchased.purchaseId}, 상태: {purchased.status}) — 지갑
+            잔액에서 즉시 결제되어 실행 권한이 바로 부여됩니다.
           </Alert>
         ) : (
           <div className="space-y-2">
-            {error && <Alert>{error}</Alert>}
+            {error && (
+              <Alert>
+                {error}
+                {error.includes("잔액") && (
+                  <>
+                    {" "}
+                    <Link to="/wallet" className="underline">
+                      지갑 충전하기
+                    </Link>
+                  </>
+                )}
+              </Alert>
+            )}
             <Button type="button" onClick={() => attemptPurchase(false)} loading={purchase.isPending}>
               구매하기
             </Button>

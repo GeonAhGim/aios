@@ -11,6 +11,7 @@ const NAV_ITEMS = [
   { to: "/executions", label: "실행제어판" },
   { to: "/portfolio", label: "포트폴리오" },
   { to: "/reports", label: "보고서" },
+  { to: "/wallet", label: "지갑" },
 ];
 
 function Logo() {

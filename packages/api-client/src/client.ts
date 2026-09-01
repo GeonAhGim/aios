@@ -5,8 +5,6 @@ import type {
   DisputeResolutionResult,
   DisputeResolveRequest,
   DisputeSummary,
-  PaymentConfirmationResult,
-  PendingPaymentPage,
   QueuedListing,
   SellerSuspensionResult,
   SuspendSellerRequest,
@@ -36,6 +34,7 @@ import type {
   MfaVerifyRequest,
   NotificationHistoryEntry,
   NotificationPreferences,
+  PlatformListingCreateRequest,
   PortfolioView,
   PreferenceUpdateResult,
   PreviewRequest,
@@ -57,8 +56,13 @@ import type {
   StrategyResponse,
   SuitabilityAnswers,
   TokenResponse,
+  TopupRequestBody,
   UserResponse,
   VerificationDecisionRequest,
+  WalletBalance,
+  WalletTopupConfirmResult,
+  WalletTopupPage,
+  WalletTopupRequest,
   WhitelistEntryRequest,
   WhitelistEntryResponse,
 } from "@aios/shared-types";
@@ -204,7 +208,16 @@ export class AiosApiClient {
   }
 
   async rebalancePortfolio(body: RebalanceRequest): Promise<RebalanceResult> {
-    return this.put("/portfolio/rebalance", body);
+    return this.post("/portfolio/rebalance", body);
+  }
+
+  // ---- FD-13.11 지갑(크레딧) ----
+  async getWalletBalance(): Promise<WalletBalance> {
+    return this.request("/wallet/balance");
+  }
+
+  async requestTopup(body: TopupRequestBody): Promise<WalletTopupRequest> {
+    return this.post("/wallet/topup-requests", body);
   }
 
   // ---- FD-20 보고서 ----
@@ -442,20 +455,24 @@ export class AiosApiClient {
     return this.post(`/admin/users/${userId}/suspend-seller`, body);
   }
 
-  async listPendingPayments(page = 1, pageSize = 20): Promise<PendingPaymentPage> {
+  async listPendingTopups(page = 1, pageSize = 20): Promise<WalletTopupPage> {
     return this.request(
-      this.withQuery("/admin/payments/pending", { page, page_size: pageSize }),
+      this.withQuery("/admin/wallet/topups/pending", { page, page_size: pageSize }),
     );
   }
 
-  async confirmPayment(
-    purchaseId: number,
+  async confirmTopup(
+    topupId: number,
     idempotencyKey: string,
-  ): Promise<PaymentConfirmationResult> {
-    return this.request(`/admin/payments/${purchaseId}/confirm`, {
+  ): Promise<WalletTopupConfirmResult> {
+    return this.request(`/admin/wallet/topups/${topupId}/confirm`, {
       method: "POST",
       headers: { "Idempotency-Key": idempotencyKey },
     });
+  }
+
+  async createPlatformListing(body: PlatformListingCreateRequest): Promise<ListingResponse> {
+    return this.post("/admin/marketplace/platform-listings", body);
   }
 
   async approveRequest(requestId: number): Promise<ApprovalRequest> {

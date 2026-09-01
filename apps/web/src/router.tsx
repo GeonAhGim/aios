@@ -5,9 +5,10 @@ import { ProtectedRoute } from "./components/ProtectedRoute";
 import { AdminApprovalRequestPage } from "./routes/admin/AdminApprovalRequestPage";
 import { AdminHomePage } from "./routes/admin/AdminHomePage";
 import { DisputeManagementPage } from "./routes/admin/DisputeManagementPage";
-import { PendingPaymentsPage } from "./routes/admin/PendingPaymentsPage";
+import { PlatformListingPage } from "./routes/admin/PlatformListingPage";
 import { UserManagementPage } from "./routes/admin/UserManagementPage";
 import { VerificationQueuePage } from "./routes/admin/VerificationQueuePage";
+import { WalletTopupsPage } from "./routes/admin/WalletTopupsPage";
 import { LoginPage } from "./routes/auth/LoginPage";
 import { SignupPage } from "./routes/auth/SignupPage";
 import { DashboardPage } from "./routes/dashboard/DashboardPage";
@@ -26,6 +27,7 @@ import { AccountDeletionPage } from "./routes/settings/AccountDeletionPage";
 import { ApprovalSettingsPage } from "./routes/settings/ApprovalSettingsPage";
 import { NotificationSettingsPage } from "./routes/settings/NotificationSettingsPage";
 import { StrategyBuilderPage } from "./routes/strategy-builder/StrategyBuilderPage";
+import { WalletPage } from "./routes/wallet/WalletPage";
 
 function protect(element: ReactNode) {
   return <ProtectedRoute>{element}</ProtectedRoute>;
@@ -54,6 +56,7 @@ export const router = createBrowserRouter([
   { path: "/executions", element: protect(<ExecutionControlPage />) },
   { path: "/portfolio", element: protect(<PortfolioPage />) },
   { path: "/reports", element: protect(<ReportsPage />) },
+  { path: "/wallet", element: protect(<WalletPage />) },
   { path: "/settings/approval", element: protect(<ApprovalSettingsPage />) },
   { path: "/settings/notifications", element: protect(<NotificationSettingsPage />) },
   { path: "/settings/account", element: protect(<AccountDeletionPage />) },
@@ -63,7 +66,11 @@ export const router = createBrowserRouter([
   { path: "/admin/verification-queue", element: protectAdmin(<VerificationQueuePage />) },
   { path: "/admin/disputes", element: protectAdmin(<DisputeManagementPage />) },
   { path: "/admin/users", element: protectAdmin(<UserManagementPage />) },
-  { path: "/admin/pending-payments", element: protectAdmin(<PendingPaymentsPage />) },
+  { path: "/admin/wallet-topups", element: protectAdmin(<WalletTopupsPage />) },
+  {
+    path: "/admin/marketplace/platform-listings",
+    element: protectAdmin(<PlatformListingPage />),
+  },
   {
     path: "/admin/approval-requests",
     element: protectAdmin(<AdminApprovalRequestPage />),

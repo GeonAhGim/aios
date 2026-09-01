@@ -1,4 +1,8 @@
-import type { DisputeResolveRequest, SuspendSellerRequest } from "@aios/shared-types";
+import type {
+  DisputeResolveRequest,
+  PlatformListingCreateRequest,
+  SuspendSellerRequest,
+} from "@aios/shared-types";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiClient } from "./clientInstance";
 
@@ -56,24 +60,32 @@ export function useSuspendSeller() {
   });
 }
 
-export function usePendingPayments(page = 1, pageSize = 20) {
+export function usePendingTopups(page = 1, pageSize = 20) {
   return useQuery({
-    queryKey: ["pendingPayments", page, pageSize],
-    queryFn: () => apiClient.listPendingPayments(page, pageSize),
+    queryKey: ["pendingTopups", page, pageSize],
+    queryFn: () => apiClient.listPendingTopups(page, pageSize),
   });
 }
 
-export function useConfirmPayment() {
+export function useConfirmTopup() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: ({
-      purchaseId,
+      topupId,
       idempotencyKey,
     }: {
-      purchaseId: number;
+      topupId: number;
       idempotencyKey: string;
-    }) => apiClient.confirmPayment(purchaseId, idempotencyKey),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["pendingPayments"] }),
+    }) => apiClient.confirmTopup(topupId, idempotencyKey),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["pendingTopups"] }),
+  });
+}
+
+export function useCreatePlatformListing() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (body: PlatformListingCreateRequest) => apiClient.createPlatformListing(body),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["listings"] }),
   });
 }
 

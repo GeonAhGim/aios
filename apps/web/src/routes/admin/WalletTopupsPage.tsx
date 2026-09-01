@@ -1,30 +1,28 @@
-import { useConfirmPayment, usePendingPayments } from "@aios/shared-hooks";
+import { useConfirmTopup, usePendingTopups } from "@aios/shared-hooks";
 import { Button, EmptyState, LoadingState, PageHeader } from "@aios/ui-web";
 import { AppShell } from "../../components/layout/AppShell";
 
-export function PendingPaymentsPage() {
-  const { data, isLoading } = usePendingPayments();
-  const confirm = useConfirmPayment();
+export function WalletTopupsPage() {
+  const { data, isLoading } = usePendingTopups();
+  const confirm = useConfirmTopup();
 
   return (
     <AppShell>
       <div className="space-y-6">
-        <PageHeader title="결제 대기 목록" />
+        <PageHeader title="충전 요청 대기 목록" />
         {isLoading ? (
           <LoadingState />
         ) : data && data.items.length > 0 ? (
           <ul className="space-y-3">
-            {data.items.map((p) => (
+            {data.items.map((t) => (
               <li
-                key={p.purchaseId}
+                key={t.id}
                 className="flex items-center justify-between rounded-lg border border-border bg-surface p-4"
               >
                 <div>
-                  <p className="font-medium text-fg">
-                    구매 #{p.purchaseId} — {p.strategyId}@{p.strategyVersion}
-                  </p>
+                  <p className="font-medium text-fg">충전요청 #{t.id}</p>
                   <p className="tabular text-sm text-fg-muted">
-                    {p.pricePaid ?? "가격 없음"} · {new Date(p.purchasedAt).toLocaleString()}
+                    {t.requestedAmount} 크레딧 · {new Date(t.requestedAt).toLocaleString()}
                   </p>
                 </div>
                 <Button
@@ -33,7 +31,7 @@ export function PendingPaymentsPage() {
                   loading={confirm.isPending}
                   onClick={() =>
                     confirm.mutate({
-                      purchaseId: p.purchaseId,
+                      topupId: t.id,
                       idempotencyKey: crypto.randomUUID(),
                     })
                   }
@@ -44,7 +42,7 @@ export function PendingPaymentsPage() {
             ))}
           </ul>
         ) : (
-          <EmptyState>대기 중인 결제가 없습니다.</EmptyState>
+          <EmptyState>대기 중인 충전 요청이 없습니다.</EmptyState>
         )}
       </div>
     </AppShell>

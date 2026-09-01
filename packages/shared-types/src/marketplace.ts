@@ -11,6 +11,7 @@ export interface ListingResponse {
   strategyId: string;
   strategyVersion: string;
   sellerUserId: string;
+  sellerType: "USER" | "PLATFORM";
   price: string | null;
   status: string;
   createdAt: string;
@@ -21,9 +22,16 @@ export interface ListingSummary {
   strategyId: string;
   strategyVersion: string;
   sellerUserId: string;
+  sellerType: "USER" | "PLATFORM";
   price: string | null;
   verifiedAt: string | null;
   sharpeRatio: string | null;
+}
+
+export interface PlatformListingCreateRequest {
+  strategyId: string;
+  strategyVersion: string;
+  price?: string;
 }
 
 export interface ListingSearchResponse {

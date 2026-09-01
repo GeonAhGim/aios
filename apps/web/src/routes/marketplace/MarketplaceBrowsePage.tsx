@@ -1,6 +1,6 @@
 import { useListingSearch } from "@aios/shared-hooks";
 import type { ListingSummary } from "@aios/shared-types";
-import { Button, EmptyState, LoadingState, PageHeader } from "@aios/ui-web";
+import { Badge, Button, EmptyState, LoadingState, PageHeader } from "@aios/ui-web";
 import { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { AppShell } from "../../components/layout/AppShell";
@@ -37,10 +37,13 @@ export function MarketplaceBrowsePage() {
                 onClick={() => openListing(listing)}
                 className="rounded-lg border border-border bg-surface p-4 text-left transition-colors hover:border-border-strong hover:bg-surface-hover"
               >
-                <p className="font-medium text-fg">{listing.strategyId}</p>
+                <div className="flex items-center gap-2">
+                  <p className="font-medium text-fg">{listing.strategyId}</p>
+                  {listing.sellerType === "PLATFORM" && <Badge tone="accent">플랫폼</Badge>}
+                </div>
                 <p className="text-sm text-fg-muted">v{listing.strategyVersion}</p>
                 <p className="tabular mt-2 text-lg font-semibold text-fg">
-                  {listing.price ? `${listing.price} USDT` : "가격 미정"}
+                  {listing.price ? `${listing.price} 크레딧` : "무료"}
                 </p>
                 {listing.sharpeRatio && (
                   <p className="tabular text-xs text-fg-muted">Sharpe {listing.sharpeRatio}</p>
