@@ -9,6 +9,7 @@ Watchdog은 메인 프로세스와 완전히 격리된 별도 프로세스로 �
 """
 from __future__ import annotations
 
+import os
 import time
 from pathlib import Path
 
@@ -19,9 +20,18 @@ DEFAULT_HEARTBEAT_PATH = _PROJECT_ROOT / "runtime" / "main_process.heartbeat"
 
 
 def write_heartbeat(path: Path) -> None:
-    """메인 프로세스가 주기적으로 호출 — 파일에 현재 시각을 기록한다."""
+    """메인 프로세스가 주기적으로 호출 — 파일에 현재 시각을 기록한다.
+
+    레드팀 감사(docs/RED_TEAM_FINDINGS.md #07) 반영 — 대상 파일에 직접
+    write_text()하면 Watchdog이 정확히 그 truncate~쓰기 사이 찰나에
+    같은 파일을 읽을 경우 손상된 값을 보고 거짓 HALT를 유발할 수 있다.
+    임시파일에 먼저 쓰고 os.replace()로 교체한다 — POSIX/Windows NTFS
+    모두 os.replace는 원자적이라 읽는 쪽은 항상 "이전 값 전체" 또는
+    "새 값 전체" 중 하나만 본다."""
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(str(time.time()), encoding="utf-8")
+    tmp_path = path.with_name(path.name + ".tmp")
+    tmp_path.write_text(str(time.time()), encoding="utf-8")
+    os.replace(tmp_path, path)
 
 
 def read_heartbeat_age_seconds(path: Path) -> float:

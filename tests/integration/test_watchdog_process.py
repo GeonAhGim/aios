@@ -20,7 +20,7 @@ from dotenv import dotenv_values
 from src.core.safety.heartbeat import write_heartbeat
 from src.core.safety.split_brain import SplitBrainDiagnostics
 from src.core.safety.watchdog import WatchdogAction, WatchdogDecision, WatchdogService, decide
-from src.watchdog_process import _apply_decision, run_one_cycle
+from src.watchdog_process import _apply_decision, _LatestExchangeHealth, run_one_cycle
 from tests.integration.conftest import create_test_user
 
 
@@ -159,18 +159,31 @@ async def test_run_one_cycle_suppresses_action_on_db_isolated_failure(pool, tmp_
     async def check_db() -> bool:
         return False  # DB만 끊긴 것으로 진단 유도
 
+    exchange_health_cache = _LatestExchangeHealth()
     service = WatchdogService(
-        compute_equity=compute_equity, health_check=check_exchange, heartbeat_path=heartbeat
+        compute_equity=compute_equity,
+        health_check=exchange_health_cache.get,
+        heartbeat_path=heartbeat,
     )
     # 실제 5분 대신 즉시 히스테리시스가 확정되도록 임계값을 짧게.
     split_brain = SplitBrainDiagnostics(entry_confirm_seconds=0.01, recovery_confirm_seconds=0.01)
 
     await run_one_cycle(
-        pool, service, split_brain, check_exchange=check_exchange, check_db=check_db
+        pool,
+        service,
+        split_brain,
+        check_exchange=check_exchange,
+        check_db=check_db,
+        exchange_health_cache=exchange_health_cache,
     )
     await asyncio.sleep(0.02)  # entry_confirm_seconds 경과시켜 히스테리시스 확정
     await run_one_cycle(
-        pool, service, split_brain, check_exchange=check_exchange, check_db=check_db
+        pool,
+        service,
+        split_brain,
+        check_exchange=check_exchange,
+        check_db=check_db,
+        exchange_health_cache=exchange_health_cache,
     )
 
     async with pool.acquire() as conn:
@@ -198,17 +211,30 @@ async def test_run_one_cycle_applies_action_when_not_db_isolated(pool, tmp_path)
     async def check_db() -> bool:
         return True
 
+    exchange_health_cache = _LatestExchangeHealth()
     service = WatchdogService(
-        compute_equity=compute_equity, health_check=check_exchange, heartbeat_path=heartbeat
+        compute_equity=compute_equity,
+        health_check=exchange_health_cache.get,
+        heartbeat_path=heartbeat,
     )
     split_brain = SplitBrainDiagnostics(entry_confirm_seconds=0.01, recovery_confirm_seconds=0.01)
 
     await run_one_cycle(
-        pool, service, split_brain, check_exchange=check_exchange, check_db=check_db
+        pool,
+        service,
+        split_brain,
+        check_exchange=check_exchange,
+        check_db=check_db,
+        exchange_health_cache=exchange_health_cache,
     )
     await asyncio.sleep(0.02)
     await run_one_cycle(
-        pool, service, split_brain, check_exchange=check_exchange, check_db=check_db
+        pool,
+        service,
+        split_brain,
+        check_exchange=check_exchange,
+        check_db=check_db,
+        exchange_health_cache=exchange_health_cache,
     )
 
     async with pool.acquire() as conn:
@@ -217,3 +243,57 @@ async def test_run_one_cycle_applies_action_when_not_db_isolated(pool, tmp_path)
         )
     assert row["status"] == "PAUSED"
     assert row["paused_by"] == "SAFETY_LAYER"
+
+
+async def test_run_one_cycle_calls_check_exchange_exactly_once(pool, tmp_path):
+    """docs/RED_TEAM_FINDINGS.md #06 회귀 — take_snapshot()의 health_check와
+    split_brain.diagnose()의 check_exchange가 각자 실제 API를 호출하면
+    사이클당 2회 중복 호출됐다. 캐시(_LatestExchangeHealth)로 사이클당
+    정확히 1회만 호출되는지 확인한다."""
+    heartbeat = tmp_path / "hb"
+    write_heartbeat(heartbeat)
+    call_count = 0
+
+    async def compute_equity() -> Decimal:
+        return Decimal("10000")
+
+    async def check_exchange() -> bool:
+        nonlocal call_count
+        call_count += 1
+        return True
+
+    async def check_db() -> bool:
+        return True
+
+    exchange_health_cache = _LatestExchangeHealth()
+    service = WatchdogService(
+        compute_equity=compute_equity,
+        health_check=exchange_health_cache.get,
+        heartbeat_path=heartbeat,
+    )
+    split_brain = SplitBrainDiagnostics()
+
+    await run_one_cycle(
+        pool,
+        service,
+        split_brain,
+        check_exchange=check_exchange,
+        check_db=check_db,
+        exchange_health_cache=exchange_health_cache,
+    )
+
+    assert call_count == 1
+
+
+async def test_write_heartbeat_leaves_no_temp_file_and_content_is_valid(tmp_path):
+    """docs/RED_TEAM_FINDINGS.md #07 회귀 — 임시파일+os.replace 패턴으로
+    바뀐 뒤에도 최종 파일 내용이 그대로 유효하고, 임시파일이 남지 않는지
+    확인한다(원자성 자체는 OS 레벨 경쟁조건이라 단위테스트로 직접
+    재현하지 않는다 — os.replace의 원자성은 표준 라이브러리가 보장)."""
+    heartbeat = tmp_path / "hb"
+
+    write_heartbeat(heartbeat)
+
+    assert heartbeat.exists()
+    assert not (tmp_path / "hb.tmp").exists()
+    float(heartbeat.read_text(encoding="utf-8"))  # 유효한 timestamp여야 함(예외 없이 파싱)

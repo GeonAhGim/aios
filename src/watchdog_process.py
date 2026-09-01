@@ -104,6 +104,21 @@ async def _apply_decision(pool: asyncpg.Pool, decision: WatchdogDecision) -> Non
     )
 
 
+class _LatestExchangeHealth:
+    """레드팀 감사(docs/RED_TEAM_FINDINGS.md #06) 반영 — 사이클당
+    check_exchange()를 정확히 한 번만 실제로 호출하고, 그 결과를
+    WatchdogService.take_snapshot()(생성자에 바인딩된 health_check)와
+    split_brain.diagnose()가 같은 사이클 안에서 재사용하기 위한 캐시.
+    이전에는 두 곳이 각각 실제 Bitget 공개 API를 호출해 사이클당 2회
+    중복 호출됐다."""
+
+    def __init__(self) -> None:
+        self.value = False
+
+    async def get(self) -> bool:
+        return self.value
+
+
 async def run_one_cycle(
     pool: asyncpg.Pool,
     service: WatchdogService,
@@ -111,15 +126,24 @@ async def run_one_cycle(
     *,
     check_exchange: CheckFn,
     check_db: CheckFn,
+    exchange_health_cache: _LatestExchangeHealth,
 ) -> None:
-    """한 사이클(스냅샷→판정→Split-Brain 진단→조건부 조치) — run_forever의
-    루프 몸체를 그대로 분리한 것. 무한루프 안에 인라인돼 있으면 테스트가
-    불가능해서 뽑아냈다(동작은 동일, 순수 리팩터링)."""
+    """한 사이클(거래소 헬스체크→스냅샷→판정→Split-Brain 진단→조건부 조치)
+    — run_forever의 루프 몸체를 그대로 분리한 것. 무한루프 안에 인라인돼
+    있으면 테스트가 불가능해서 뽑아냈다(동작은 동일, 순수 리팩터링).
+
+    exchange_healthy는 FD-9.2 decide()의 판정 입력이 아니다(HALT/
+    LIQUIDATE/NORMAL 판정은 loss_pct·unresponsive_sec만 본다 — 기능
+    설계문서 FD-9.2 처리단계 원문 그대로) — 거래소 자체 응답성 판정은
+    FD-9.3 Split-Brain이 전담하는 것이 원래 설계다. WatchdogSnapshot에
+    담기는 건 사람이 로그로 확인할 수 있게 남기는 관측치일 뿐이다."""
+    exchange_health_cache.value = await check_exchange()
+
     snapshot = await service.take_snapshot()
     decision = decide(snapshot, market_wide_correlated=None)
 
     failure_domain = await split_brain.diagnose(
-        check_exchange=check_exchange,
+        check_exchange=exchange_health_cache.get,
         check_db=check_db,
         main_process_ok_raw=snapshot.unresponsive_sec < DEFAULT_UNRESPONSIVE_SEC_THRESHOLD,
     )
@@ -161,9 +185,11 @@ async def run_forever(pool: asyncpg.Pool) -> None:
             return False
         return True
 
+    exchange_health_cache = _LatestExchangeHealth()
+
     service = WatchdogService(
         compute_equity=compute_equity,
-        health_check=check_exchange,
+        health_check=exchange_health_cache.get,
         heartbeat_path=DEFAULT_HEARTBEAT_PATH,
     )
     split_brain = SplitBrainDiagnostics()
@@ -171,7 +197,12 @@ async def run_forever(pool: asyncpg.Pool) -> None:
     try:
         while True:
             await run_one_cycle(
-                pool, service, split_brain, check_exchange=check_exchange, check_db=check_db
+                pool,
+                service,
+                split_brain,
+                check_exchange=check_exchange,
+                check_db=check_db,
+                exchange_health_cache=exchange_health_cache,
             )
             await asyncio.sleep(POLL_INTERVAL_SECONDS)
     finally:

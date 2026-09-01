@@ -254,3 +254,112 @@ Error를 던지도록 수정 — `payment_confirmation_service.py`와 완전히 
 훑어보는 걸 권장(이 감사는 전수조사가 아니라 발견된 것만 확인한 것).
 
 ---
+
+## 2026-08-29-06 · WatchdogSnapshot.exchange_healthy가 계산만 되고 decide() 판정에는 반영되지 않음
+
+**상태**: 🟢 구현 세션이 수정(이 세션 자체 확인 — 549 tests passed,
+ruff/mypy clean). 감사 세션 재검증 대기.
+
+**수정 내용**: 권장 방향 (b) 채택 — `exchange_healthy`를 `decide()`에
+새로 넘기지 않고, 대신 API 중복호출만 없앴다. `watchdog_process.py`에
+`_LatestExchangeHealth` 캐시 클래스를 추가해 `run_one_cycle()` 맨 앞에서
+`check_exchange()`를 사이클당 정확히 한 번만 실제로 호출하고, 그 결과를
+`WatchdogService`(생성자에 `health_check=exchange_health_cache.get`으로
+바인딩, 스냅샷의 `exchange_healthy` 필드는 관측용으로 유지)와
+`split_brain.diagnose(check_exchange=exchange_health_cache.get, ...)`
+양쪽이 캐시에서 재사용하도록 배선했다 — 필드 자체를 제거하지 않은 이유는
+사람이 로그(`snapshot`)로 확인할 수 있는 관측치로서 가치가 있고, 판정
+경로는 이미 Split-Brain(9.3)이 원문대로 전담하고 있어 `decide()`에 새
+파라미터를 추가하는 (a)안은 8.2-A 원칙("판정 로직 변경은 최소")에 비해
+불필요한 표면적 확장이라고 판단했기 때문이다.
+
+**새 테스트**: `test_run_one_cycle_calls_check_exchange_exactly_once`
+(`check_exchange` 콜백에 호출 카운터를 심어 `run_one_cycle()` 1회 실행 시
+정확히 1회만 호출됐는지 직접 확인).
+
+**발견**: `src/core/safety/watchdog.py::decide()`(137-163행)는
+`snapshot.unresponsive_sec`와 `snapshot.loss_pct`만 보고 판정한다 —
+`WatchdogSnapshot.exchange_healthy`(44행, `WatchdogService.take_snapshot()`이
+매 사이클 실제로 계산해 채워넣는 필드)는 `decide()` 시그니처에 아예
+들어가지 않아 HALT/LIQUIDATE/NORMAL 어느 쪽 판정에도 영향을 주지 않는다.
+
+**참고**: 안전 기능 자체가 완전히 빠진 것은 아니다 — `watchdog_process.py`의
+`run_one_cycle()`(107-140행)을 보면 거래소 헬스체크(`check_exchange`)가
+Split-Brain 진단(`split_brain.diagnose(check_exchange=...)`, 9.3)
+쪽에는 별도로 다시 전달돼 그쪽 판정에는 실제로 반영되고 있다. 다만:
+1. `check_exchange()`가 같은 사이클에 **두 번** 호출된다 — 한 번은
+   `WatchdogService.take_snapshot()` 내부의 `health_check()`로(그
+   결과가 `exchange_healthy`에 저장되지만 이후 어디서도 안 읽힘), 한
+   번은 `split_brain.diagnose(check_exchange=check_exchange, ...)`로.
+   Bitget 공개 API를 폴링 주기(Draft 5초)마다 불필요하게 2배로 호출.
+2. `WatchdogSnapshot.exchange_healthy` 필드 자체가 죽은 코드라, 나중에
+   이 필드를 보고 "판정에 반영되고 있겠지"라고 오해하기 쉽다 —
+   FD-9.1 원문("거래소 API 자체 헬스체크를 독립적으로 감시한다")이
+   `decide()` 자체의 판정 근거를 의도한 것인지, 지금처럼 Split-Brain
+   경로로만 처리해도 되는 것인지는 스펙 의도 확인이 필요.
+
+**권장 수정 방향**: (a) `exchange_healthy`를 실제로 `decide()`에 넘겨
+판정에 반영하거나, (b) 지금처럼 Split-Brain 경로가 전담하는 게
+의도라면 `WatchdogSnapshot`에서 이 필드를 빼고 `health_check`를
+`WatchdogService` 생성자에서 제거해 중복 호출과 죽은 필드를 둘 다
+없애는 쪽이 더 깔끔해 보임. 어느 쪽이든 `check_exchange()` 결과를
+사이클당 한 번만 계산해 `take_snapshot()`과 `split_brain.diagnose()`
+양쪽에 공유하도록 하면 중복호출 문제는 같이 해결됨.
+
+---
+
+## 2026-08-29-07 · heartbeat.write_heartbeat()가 원자적 쓰기가 아님 — 이론상 거짓 HALT 유발 가능
+
+**상태**: 🟢 구현 세션이 수정(이 세션 자체 확인 — 549 tests passed,
+ruff/mypy clean). 감사 세션 재검증 대기.
+
+**수정 내용**: 권장 방향 그대로 — `write_heartbeat()`가 대상 경로에 직접
+쓰지 않고, 같은 디렉터리의 `.tmp` 파일에 먼저 쓴 뒤 `os.replace(tmp_path,
+path)`로 교체하도록 변경했다. `os.replace`는 POSIX와 Windows NTFS 둘 다
+원자적이라 읽는 쪽(`read_heartbeat_age_seconds`)은 항상 "이전 값 전체"
+또는 "새 값 전체" 중 하나만 관측한다 — truncate~쓰기 사이 찰나가 아예
+존재하지 않게 되므로 재현 시나리오 자체가 성립하지 않는다.
+`decide()` 자체에 히스테리시스가 없다는 부수 관찰은 이번 수정 범위
+밖으로 남겨둔다(원자적 쓰기로 이 항목이 지적한 근본 원인은 제거됐고,
+히스테리시스 도입 여부는 스펙 의도 확인이 별도로 필요한 사안이라 이
+leaf에 묶지 않음).
+
+**새 테스트**: `test_write_heartbeat_leaves_no_temp_file_and_content_is_valid`
+(쓰기 후 `.tmp` 파일이 남지 않고, 최종 파일 내용이 유효한 timestamp로
+파싱되는지 확인 — 원자성 자체는 OS 레벨 보장이라 경쟁조건을 직접
+재현하지는 않음, `os.replace`의 원자성은 표준 라이브러리 계약으로 신뢰).
+
+**발견**: `src/core/safety/heartbeat.py::write_heartbeat()`(21-24행)가
+`path.write_text(str(time.time()), encoding="utf-8")`로 파일에 직접
+쓴다 — 임시파일에 쓴 뒤 `os.replace()`로 교체하는 원자적 패턴이
+아니다. 같은 파일을 읽는 `read_heartbeat_age_seconds()`(27-36행)는
+"파일이 없거나 손상된 경우 무한대로 간주"하는 fail-closed 원칙을
+이미 갖고 있다(빈 문자열은 `float()` 변환 실패 → `ValueError` →
+`float("inf")` 반환).
+
+**재현 시나리오(이론상)**: 메인 프로세스가 `write_heartbeat()`를
+호출하는 도중(파일이 truncate된 직후, 새 값이 아직 다 안 써진 순간)
+Watchdog 프로세스가 정확히 그 찰나에 같은 파일을 읽으면 빈 문자열
+또는 잘린 숫자 문자열을 읽게 되고, `read_heartbeat_age_seconds`가
+이를 "손상됨"으로 판단해 `float("inf")`(무응답)를 반환한다 —
+`decide()`의 `unresponsive_sec_threshold`(기본 30초) 기준에서 이
+찰나의 값은 다음 폴링 사이클(5초 후)이면 정상으로 돌아오므로
+`_StreakTracker`류 히스테리시스가 없는 `decide()` 자체는 단발성
+false HALT를 그대로 트리거할 수 있다(watchdog.py의 decide()에는
+split_brain.py 같은 진입/복귀 히스테리시스가 없음 — 이것도 별개로
+확인할 가치가 있어 보임).
+
+**참고**: 실제 경쟁 구간은 마이크로초 단위(15바이트 남짓 쓰는 시간)라
+발생 확률은 극히 낮다. 다만 오늘 함께 추가된 "Watchdog 오탐
+시뮬레이터"(9.7, `watchdog_simulator.py`)는 임계값 기반 통계적
+오탐(과거 시세 재생)만 다루고, 이런 IPC 메커니즘 자체의 경쟁조건은
+시뮬레이터 범위 밖이라 지금 테스트 커버리지가 없다.
+
+**권장 수정 방향**: `write_heartbeat()`를 임시파일에 쓴 뒤
+`os.replace(tmp_path, path)`로 교체하는 원자적 패턴으로 변경(POSIX와
+Windows NTFS 둘 다 `os.replace`는 원자적). 부수적으로, `decide()`
+자체에 unresponsive 판정 히스테리시스가 없다는 점도 같이 확인해볼
+가치가 있음(split_brain.py의 진입 3초/복귀 10초 비대칭 히스테리시스와
+같은 원칙을 여기도 적용할지는 스펙 의도 확인 필요).
+
+---
