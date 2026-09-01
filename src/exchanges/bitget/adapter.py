@@ -118,6 +118,10 @@ class BitgetAdapter(
 ):
     """7.8 조사결과: 공식 Demo Trading API 존재."""
 
+    @property
+    def is_paper_trading(self) -> bool:
+        return self._demo_mode
+
     def get_capabilities(self) -> ExchangeCapability:
         """v1.4(ADR-2026-08-28) — Phase 1 실거래 대상은 crypto 현물뿐(06번
         §6.1). Bitget이 futures/margin도 지원하지만 Phase 1 스콥 밖이라

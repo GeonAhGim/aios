@@ -20,7 +20,7 @@ from uuid import UUID
 
 import asyncpg
 
-from src.core.exceptions import FrozenZoneLiveModeBlockedError
+from src.core.exceptions import FrozenZoneLiveModeBlockedError, FrozenZonePaperAdapterBlockedError
 from src.core.portfolio.models import AllocationDecision
 from src.core.risk.models import RiskCheckResult
 from src.core.validator.order_validator import validate_order_params
@@ -73,6 +73,11 @@ class Executor:
                 f"LIVE 모드 실행(execution_id={execution_id})은 15.6-D 조건 2"
                 "(실계정 MFA·이중승인) 충족 및 별도 ADR 전까지 차단됩니다"
                 "(ADR-2026-08-29-E)."
+            )
+
+        if not adapter.is_paper_trading:
+            raise FrozenZonePaperAdapterBlockedError(
+                "PAPER 실행에는 sandbox로 구성된 거래소 adapter만 주입할 수 있습니다."
             )
 
         client_order_id = (

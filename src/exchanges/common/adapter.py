@@ -19,6 +19,17 @@ from src.exchanges.common.types import ExchangeCapability, TickerCallback
 
 
 class ExchangeAdapter(ABC):
+    @property
+    @abstractmethod
+    def is_paper_trading(self) -> bool:
+        """Whether this adapter is configured for a provider sandbox account.
+
+        This is an execution-boundary assertion, not a UI label. PAPER
+        executors fail closed unless it is true; production egress policy and
+        credential provenance remain independent deployment controls.
+        """
+        ...
+
     @abstractmethod
     def get_capabilities(self) -> ExchangeCapability:
         """7.6 — 이 거래소가 지원하는 기능을 선언한다."""

@@ -34,6 +34,7 @@ class FakeExchangeAdapter(ExchangeAdapter):
         self,
         *,
         exchange_name: str = "bitget",
+        is_paper_trading: bool = True,
         place_order_result_status: OrderStatus = OrderStatus.SUBMITTED,
         on_place_order: PlaceOrderHook | None = None,
         cancel_result: bool = True,
@@ -42,6 +43,7 @@ class FakeExchangeAdapter(ExchangeAdapter):
         usdt_balance: AccountBalance | None = None,
     ) -> None:
         self._exchange_name = exchange_name
+        self._is_paper_trading = is_paper_trading
         self._place_order_result_status = place_order_result_status
         self._on_place_order = on_place_order
         self._cancel_result = cancel_result
@@ -54,6 +56,10 @@ class FakeExchangeAdapter(ExchangeAdapter):
         )
         self.placed_orders: list[Order] = []
         self.place_order_call_count = 0
+
+    @property
+    def is_paper_trading(self) -> bool:
+        return self._is_paper_trading
 
     def get_capabilities(self) -> ExchangeCapability:
         return ExchangeCapability(

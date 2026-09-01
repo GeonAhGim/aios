@@ -150,6 +150,10 @@ class KISAdapter(
     Adapter는 client_order_id를 KIS에 전달하지 않는다(전달할 방법이 없음).
     """
 
+    @property
+    def is_paper_trading(self) -> bool:
+        return self._is_paper_trading
+
     def get_capabilities(self) -> ExchangeCapability:
         """v1.4(ADR-2026-08-28) — 06번 §6.1-A: Phase 1은 KR_EQUITY만 확정,
         해외주식·선물옵션 등 KIS의 나머지 지원 범위는 Draft(공식 문서

@@ -43,5 +43,9 @@ class FrozenZoneLiveModeBlockedError(MihwaError):
     이 가드를 우회하거나 약화시켜서는 안 된다."""
 
 
+class FrozenZonePaperAdapterBlockedError(MihwaError):
+    """PAPER execution에 live-configured adapter가 주입된 경우의 fail-closed guard."""
+
+
 class EventHandlerError(MihwaError):
     ...
