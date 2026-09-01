@@ -1,7 +1,6 @@
 // src/api/schemas/admin.py, src/services/verification_queue_service.py,
 // src/services/dispute_resolution_service.py, src/services/user_admin_service.py,
-// src/services/seller_suspension_service.py, src/services/payment_confirmation_service.py,
-// src/core/approval/service.py 1:1 대응.
+// src/services/seller_suspension_service.py, src/core/approval/service.py 1:1 대응.
 
 export interface QueuedListing {
   listingId: number;
@@ -70,28 +69,6 @@ export interface SellerSuspensionResult {
   userId: string;
   sellerSuspended: boolean;
   suspendedAt: string;
-}
-
-export interface PendingPayment {
-  purchaseId: number;
-  buyerUserId: string;
-  strategyId: string;
-  strategyVersion: string;
-  pricePaid: string | null;
-  purchasedAt: string;
-}
-
-export interface PendingPaymentPage {
-  items: PendingPayment[];
-  total: number;
-  page: number;
-  pageSize: number;
-}
-
-export interface PaymentConfirmationResult {
-  purchaseId: number;
-  paymentStatus: string;
-  confirmedAt: string | null;
 }
 
 export interface ApprovalRequest {

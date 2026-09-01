@@ -89,6 +89,13 @@ export function useCreatePlatformListing() {
   });
 }
 
+export function usePendingApprovalRequests(scope?: "USER" | "PLATFORM") {
+  return useQuery({
+    queryKey: ["pendingApprovalRequests", scope],
+    queryFn: () => apiClient.listPendingApprovalRequests(scope),
+  });
+}
+
 export function useApproveRequest() {
   return useMutation({
     mutationFn: (requestId: number) => apiClient.approveRequest(requestId),

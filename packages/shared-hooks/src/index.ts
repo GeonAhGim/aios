@@ -59,7 +59,13 @@ export {
   usePendingTopups,
   useConfirmTopup,
   useCreatePlatformListing,
+  usePendingApprovalRequests,
   useApproveRequest,
   useRejectRequest,
 } from "./useAdmin";
 export { useWalletBalance, useRequestTopup } from "./useWallet";
+export {
+  useMyApprovalRequests,
+  useApproveMyRequest,
+  useRejectMyRequest,
+} from "./useApprovals";

@@ -498,4 +498,21 @@ export class AiosApiClient {
   async rejectRequest(requestId: number): Promise<ApprovalRequest> {
     return this.post(`/admin/approval-requests/${requestId}/reject`);
   }
+
+  async listPendingApprovalRequests(scope?: "USER" | "PLATFORM"): Promise<ApprovalRequest[]> {
+    return this.request(this.withQuery("/admin/approval-requests/pending", { scope }));
+  }
+
+  // ---- FD-10.1 승인요청 self-service ----
+  async listMyApprovalRequests(): Promise<ApprovalRequest[]> {
+    return this.request("/users/me/approval-requests");
+  }
+
+  async approveMyRequest(requestId: number): Promise<ApprovalRequest> {
+    return this.post(`/users/me/approval-requests/${requestId}/approve`);
+  }
+
+  async rejectMyRequest(requestId: number): Promise<ApprovalRequest> {
+    return this.post(`/users/me/approval-requests/${requestId}/reject`);
+  }
 }

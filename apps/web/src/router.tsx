@@ -3,6 +3,7 @@ import { createBrowserRouter, Navigate } from "react-router-dom";
 import { AdminRoute } from "./components/AdminRoute";
 import { ProtectedRoute } from "./components/ProtectedRoute";
 import { AdminApprovalRequestPage } from "./routes/admin/AdminApprovalRequestPage";
+import { MyApprovalRequestsPage } from "./routes/approvals/MyApprovalRequestsPage";
 import { AdminHomePage } from "./routes/admin/AdminHomePage";
 import { DisputeManagementPage } from "./routes/admin/DisputeManagementPage";
 import { PlatformListingPage } from "./routes/admin/PlatformListingPage";
@@ -57,6 +58,7 @@ export const router = createBrowserRouter([
   { path: "/portfolio", element: protect(<PortfolioPage />) },
   { path: "/reports", element: protect(<ReportsPage />) },
   { path: "/wallet", element: protect(<WalletPage />) },
+  { path: "/approval-requests", element: protect(<MyApprovalRequestsPage />) },
   { path: "/settings/approval", element: protect(<ApprovalSettingsPage />) },
   { path: "/settings/notifications", element: protect(<NotificationSettingsPage />) },
   { path: "/settings/account", element: protect(<AccountDeletionPage />) },
