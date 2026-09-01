@@ -56,6 +56,7 @@ import type {
   StrategyDefinition,
   StrategyDetailResponse,
   StrategyResponse,
+  StrategySummary,
   SuitabilityAnswers,
   TokenResponse,
   TopupRequestBody,
@@ -293,6 +294,10 @@ export class AiosApiClient {
   // ---- FD-14 전략 편집기 ----
   async listIndicators(): Promise<IndicatorListResponse> {
     return this.request("/strategy-builder/indicators");
+  }
+
+  async listMyStrategies(): Promise<StrategySummary[]> {
+    return this.request("/strategy-builder/strategies");
   }
 
   async computeIndicator(

@@ -11,6 +11,10 @@ export function useIndicators() {
   return useQuery({ queryKey: ["indicators"], queryFn: () => apiClient.listIndicators() });
 }
 
+export function useMyStrategies() {
+  return useQuery({ queryKey: ["myStrategies"], queryFn: () => apiClient.listMyStrategies() });
+}
+
 export function useCreateStrategy() {
   return useMutation({
     mutationFn: (body: StrategyCreateRequest) => apiClient.createStrategy(body),

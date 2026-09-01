@@ -1,24 +1,36 @@
-import { useCreateListing } from "@aios/shared-hooks";
+import { useCreateListing, useMyStrategies } from "@aios/shared-hooks";
 import { ApiError } from "@aios/api-client";
-import { Alert, Button, Field, Input, PageHeader } from "@aios/ui-web";
-import { useState, type FormEvent } from "react";
-import { useNavigate } from "react-router-dom";
+import { Alert, Button, EmptyState, Field, Input, LoadingState, PageHeader, Select } from "@aios/ui-web";
+import { useEffect, useState, type FormEvent } from "react";
+import { Link, useNavigate } from "react-router-dom";
 import { AppShell } from "../../components/layout/AppShell";
 
-// 알려진 제약 — 백엔드에 "내 전략 목록" 조회 엔드포인트가 아직 없어
-// strategy_id/version을 직접 입력받는다(전략 편집기에서 저장 시 확인한
-// 값을 그대로 사용).
+function strategyKey(strategyId: string, version: string): string {
+  return `${strategyId}@${version}`;
+}
+
 export function SellStrategyPage() {
-  const [strategyId, setStrategyId] = useState("");
-  const [strategyVersion, setStrategyVersion] = useState("1.0.0");
+  const { data: strategies, isLoading } = useMyStrategies();
+  const [selectedKey, setSelectedKey] = useState("");
   const [price, setPrice] = useState("10.00");
   const [error, setError] = useState<string | null>(null);
   const createListing = useCreateListing();
   const navigate = useNavigate();
 
+  useEffect(() => {
+    if (strategies && strategies.length > 0 && !selectedKey) {
+      setSelectedKey(strategyKey(strategies[0].strategyId, strategies[0].version));
+    }
+  }, [strategies, selectedKey]);
+
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
     setError(null);
+    const [strategyId, strategyVersion] = selectedKey.split("@");
+    if (!strategyId || !strategyVersion) {
+      setError("판매할 전략을 선택해주세요.");
+      return;
+    }
     try {
       const listing = await createListing.mutateAsync({
         strategyId,
@@ -35,31 +47,44 @@ export function SellStrategyPage() {
     <AppShell>
       <div className="max-w-md space-y-6">
         <PageHeader title="내 전략 판매하기" />
-        <form onSubmit={handleSubmit} className="space-y-3 rounded-lg border border-border bg-surface p-6">
-          <Field label="전략 ID">
-            <Input type="text" required value={strategyId} onChange={(e) => setStrategyId(e.target.value)} />
-          </Field>
-          <Field label="버전">
-            <Input
-              type="text"
-              required
-              value={strategyVersion}
-              onChange={(e) => setStrategyVersion(e.target.value)}
-            />
-          </Field>
-          <Field label="가격 (크레딧)">
-            <Input
-              type="number"
-              step="0.01"
-              value={price}
-              onChange={(e) => setPrice(e.target.value)}
-            />
-          </Field>
-          {error && <Alert>{error}</Alert>}
-          <Button type="submit" loading={createListing.isPending} className="w-full">
-            리스팅 등록 (초안)
-          </Button>
-        </form>
+        {isLoading ? (
+          <LoadingState />
+        ) : !strategies || strategies.length === 0 ? (
+          <EmptyState>
+            등록된 전략이 없습니다.{" "}
+            <Link to="/strategy-builder" className="text-accent-hover hover:underline">
+              전략 편집기에서 먼저 만들어보세요
+            </Link>
+            .
+          </EmptyState>
+        ) : (
+          <form
+            onSubmit={handleSubmit}
+            className="space-y-3 rounded-lg border border-border bg-surface p-6"
+          >
+            <Field label="판매할 전략">
+              <Select value={selectedKey} onChange={(e) => setSelectedKey(e.target.value)}>
+                {strategies.map((s) => (
+                  <option key={strategyKey(s.strategyId, s.version)} value={strategyKey(s.strategyId, s.version)}>
+                    {s.strategyId}@{s.version} ({s.lifecycleStatus})
+                  </option>
+                ))}
+              </Select>
+            </Field>
+            <Field label="가격 (크레딧)">
+              <Input
+                type="number"
+                step="0.01"
+                value={price}
+                onChange={(e) => setPrice(e.target.value)}
+              />
+            </Field>
+            {error && <Alert>{error}</Alert>}
+            <Button type="submit" loading={createListing.isPending} className="w-full">
+              리스팅 등록 (초안)
+            </Button>
+          </form>
+        )}
       </div>
     </AppShell>
   );

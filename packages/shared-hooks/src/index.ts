@@ -20,6 +20,7 @@ export {
 } from "./useExchanges";
 export {
   useIndicators,
+  useMyStrategies,
   useCreateStrategy,
   usePreviewStrategy,
   useStrategy,

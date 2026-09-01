@@ -49,6 +49,16 @@ export interface StrategyResponse {
   fsmDefinition: unknown;
 }
 
+export interface StrategySummary {
+  strategyId: string;
+  version: string;
+  targetAsset: string;
+  market: string;
+  exchange: string;
+  lifecycleStatus: string;
+  createdAt: string;
+}
+
 export interface StrategyDetailResponse {
   strategyId: string;
   version: string;
