@@ -20,13 +20,13 @@ interface CandlestickChartProps {
   height?: number;
 }
 
-// 다크 네이비 트레이딩-터미널 팔레트(apps/web/src/index.css)와 맞춘 리터럴
-// 값 — lightweight-charts는 캔버스 렌더러라 CSS 커스텀 프로퍼티(var())를
+// 검은색+골드 팔레트(apps/web/src/index.css)와 맞춘 리터럴 값 —
+// lightweight-charts는 캔버스 렌더러라 CSS 커스텀 프로퍼티(var())를
 // 직접 해석하지 못해 실제 색상값을 그대로 넣는다.
 const CHART_COLORS = {
   background: "transparent",
-  text: "#9aa3bd", // --color-fg-secondary
-  grid: "rgba(35, 42, 66, 0.6)", // --color-border, 반투명
+  text: "#b5a98c", // --color-fg-secondary
+  grid: "rgba(42, 38, 32, 0.6)", // --color-border, 반투명
   up: "#34d399", // --color-success
   down: "#f87171", // --color-danger
 };

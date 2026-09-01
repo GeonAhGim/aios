@@ -18,7 +18,7 @@ const NAV_ITEMS = [
 function Logo() {
   return (
     <Link to="/dashboard" className="flex items-center gap-2 text-fg">
-      <span className="flex h-7 w-7 items-center justify-center rounded-md bg-accent text-sm font-bold text-white">
+      <span className="flex h-7 w-7 items-center justify-center rounded-md bg-accent text-sm font-bold text-bg">
         A
       </span>
       <span className="text-base font-semibold tracking-tight">AIOS</span>

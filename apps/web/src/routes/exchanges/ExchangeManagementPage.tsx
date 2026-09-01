@@ -20,6 +20,7 @@ import {
 } from "@aios/ui-web";
 import { useState, type FormEvent } from "react";
 import { AppShell } from "../../components/layout/AppShell";
+import { exchangeLabel } from "../../lib/exchangeLabels";
 
 const EXCHANGES = ["bitget", "kis"];
 
@@ -68,7 +69,7 @@ export function ExchangeManagementPage() {
                 <li key={c.id} className="flex items-center justify-between py-3">
                   <div>
                     <div className="flex items-center gap-2">
-                      <p className="font-medium text-fg">{c.exchange}</p>
+                      <p className="font-medium text-fg">{exchangeLabel(c.exchange)}</p>
                       <Badge tone={c.isActive ? "success" : "neutral"}>
                         {c.isActive ? "활성" : "비활성"}
                       </Badge>
@@ -107,7 +108,7 @@ export function ExchangeManagementPage() {
 
           {selectedExchange && balances && (
             <div className="mt-4 rounded-md border border-border bg-surface-hover p-4">
-              <p className="mb-2 text-sm text-fg-secondary">{selectedExchange} 잔고</p>
+              <p className="mb-2 text-sm text-fg-secondary">{exchangeLabel(selectedExchange)} 잔고</p>
               {balances.length > 0 ? (
                 <ul className="tabular space-y-1 text-sm text-fg">
                   {balances.map((b) => (
@@ -130,7 +131,7 @@ export function ExchangeManagementPage() {
               <Select value={exchange} onChange={(e) => setExchange(e.target.value)}>
                 {EXCHANGES.map((ex) => (
                   <option key={ex} value={ex}>
-                    {ex}
+                    {exchangeLabel(ex)}
                   </option>
                 ))}
               </Select>

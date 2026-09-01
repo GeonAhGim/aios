@@ -5,7 +5,7 @@ export function AuthLayout({ title, subtitle, children }: { title: string; subti
     <div className="flex min-h-screen items-center justify-center bg-bg px-4">
       <div className="w-full max-w-sm">
         <div className="mb-8 flex flex-col items-center gap-3">
-          <span className="flex h-11 w-11 items-center justify-center rounded-xl bg-accent text-lg font-bold text-white">
+          <span className="flex h-11 w-11 items-center justify-center rounded-xl bg-accent text-lg font-bold text-bg">
             A
           </span>
           <div className="text-center">

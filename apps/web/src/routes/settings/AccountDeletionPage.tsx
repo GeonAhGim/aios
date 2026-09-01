@@ -9,6 +9,7 @@ import { Alert, Button, Card, CardTitle, EmptyState, Field, Input, LoadingState,
 import { useState, type FormEvent } from "react";
 import { useNavigate } from "react-router-dom";
 import { AppShell } from "../../components/layout/AppShell";
+import { exchangeLabel } from "../../lib/exchangeLabels";
 
 // 17번 문서 라우팅 표에 출금 화이트리스트(FD-11.5) 전용 화면이 없어(스펙
 // 누락으로 판단) 계정 보안 성격이 같은 이 화면에 함께 둔다.
@@ -75,7 +76,7 @@ export function AccountDeletionPage() {
             <ul className="mb-4 space-y-1 text-sm text-fg-secondary">
               {whitelist.map((w) => (
                 <li key={w.id}>
-                  {w.exchange} — {w.destinationAddress} {w.label && `(${w.label})`}
+                  {exchangeLabel(w.exchange)} — {w.destinationAddress} {w.label && `(${w.label})`}
                 </li>
               ))}
             </ul>

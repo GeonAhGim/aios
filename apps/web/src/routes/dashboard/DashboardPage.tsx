@@ -11,6 +11,7 @@ import {
   StatusBadge,
 } from "@aios/ui-web";
 import { AppShell } from "../../components/layout/AppShell";
+import { exchangeLabel } from "../../lib/exchangeLabels";
 
 export function DashboardPage() {
   const { data: riskProfile } = useRiskProfile();
@@ -60,7 +61,7 @@ export function DashboardPage() {
                   <div>
                     <p className="font-medium text-fg">{exec.strategyId}</p>
                     <p className="text-sm text-fg-muted">
-                      {exec.exchange} · {exec.mode}
+                      {exchangeLabel(exec.exchange)} · {exec.mode}
                     </p>
                   </div>
                   <StatusBadge status={exec.status} />

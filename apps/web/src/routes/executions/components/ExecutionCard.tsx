@@ -1,6 +1,7 @@
 import { usePauseExecution, useRetireExecution, useStartExecution } from "@aios/shared-hooks";
 import type { ExecutionCardResponse } from "@aios/shared-types";
 import { Button, StatusBadge } from "@aios/ui-web";
+import { exchangeLabel } from "../../../lib/exchangeLabels";
 
 interface ExecutionCardProps {
   execution: ExecutionCardResponse;
@@ -25,7 +26,8 @@ export function ExecutionCard({ execution }: ExecutionCardProps) {
         <div>
           <p className="font-medium text-fg">{execution.strategyId}</p>
           <p className="text-sm text-fg-muted">
-            {execution.exchange} · {execution.mode} · 배분 {execution.allocatedCapital}
+            {exchangeLabel(execution.exchange)} · {execution.mode} · 배분{" "}
+            {execution.allocatedCapital}
           </p>
         </div>
         <StatusBadge status={execution.status} />

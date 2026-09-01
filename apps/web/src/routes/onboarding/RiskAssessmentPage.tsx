@@ -37,7 +37,7 @@ export function RiskAssessmentPage() {
     <div className="flex min-h-screen items-center justify-center bg-bg px-4 py-12">
       <div className="w-full max-w-lg">
         <div className="mb-6 text-center">
-          <span className="mx-auto mb-3 flex h-11 w-11 items-center justify-center rounded-xl bg-accent text-lg font-bold text-white">
+          <span className="mx-auto mb-3 flex h-11 w-11 items-center justify-center rounded-xl bg-accent text-lg font-bold text-bg">
             A
           </span>
           <h1 className="text-xl font-semibold text-fg">투자자 적합성평가 (필수)</h1>
