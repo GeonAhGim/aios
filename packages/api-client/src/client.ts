@@ -24,6 +24,7 @@ import type {
   ExecutionCardResponse,
   ExecutionCreateRequest,
   ExecutionResponse,
+  GeneratedConditions,
   IndicatorComputeResponse,
   IndicatorListResponse,
   ListingCreateRequest,
@@ -39,6 +40,7 @@ import type {
   PreferenceUpdateResult,
   PreviewRequest,
   PreviewResponse,
+  PromptGenerateRequest,
   PurchaseCreateRequest,
   PurchaseResponse,
   RebalanceRequest,
@@ -65,6 +67,7 @@ import type {
   WalletTopupRequest,
   WhitelistEntryRequest,
   WhitelistEntryResponse,
+  WizardGenerateRequest,
 } from "@aios/shared-types";
 import { keysToCamel, keysToSnake } from "./caseConvert";
 
@@ -311,6 +314,14 @@ export class AiosApiClient {
 
   async previewStrategy(body: PreviewRequest): Promise<PreviewResponse> {
     return this.post("/strategy-builder/preview", body);
+  }
+
+  async generateWizardStrategy(body: WizardGenerateRequest): Promise<GeneratedConditions> {
+    return this.post("/strategy-builder/wizard", body);
+  }
+
+  async generateFromPrompt(body: PromptGenerateRequest): Promise<GeneratedConditions> {
+    return this.post("/strategy-builder/generate-from-prompt", body);
   }
 
   // ---- FD-13 마켓플레이스 ----

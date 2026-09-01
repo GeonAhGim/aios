@@ -74,3 +74,26 @@ export interface PreviewResponse {
   disclaimer: string;
   message: string | null;
 }
+
+// ADR-2026-08-29 §3 — 목표기반 마법사 + 자연어 프롬프트(현재 미구현).
+export type StrategyGoal = "STEADY_GROWTH" | "AGGRESSIVE_GROWTH" | "HEDGE";
+export type RiskTolerance = "LOW" | "MEDIUM" | "HIGH";
+
+export interface WizardGenerateRequest {
+  goal: StrategyGoal;
+  riskTolerance: RiskTolerance;
+}
+
+export interface PromptGenerateRequest {
+  prompt: string;
+}
+
+export interface GeneratedConditions {
+  entryConditions: PreviewCondition[];
+  exitConditions: PreviewCondition[];
+  stopLossConditions: PreviewCondition[];
+  entryCombine: "AND" | "OR";
+  exitCombine: "AND" | "OR";
+  stopLossCombine: "AND" | "OR";
+  explanation: string;
+}

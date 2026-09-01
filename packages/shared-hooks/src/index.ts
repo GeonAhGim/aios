@@ -23,6 +23,8 @@ export {
   useCreateStrategy,
   usePreviewStrategy,
   useStrategy,
+  useGenerateWizardStrategy,
+  useGenerateFromPrompt,
 } from "./useStrategyBuilder";
 export {
   useListingSearch,

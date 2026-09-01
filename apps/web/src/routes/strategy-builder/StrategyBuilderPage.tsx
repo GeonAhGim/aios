@@ -1,10 +1,11 @@
 import { useCreateStrategy, useIndicators, usePreviewStrategy } from "@aios/shared-hooks";
 import { ApiError } from "@aios/api-client";
-import type { PreviewCondition } from "@aios/shared-types";
+import type { GeneratedConditions, PreviewCondition } from "@aios/shared-types";
 import { Alert, Button, Field, PageHeader, Select } from "@aios/ui-web";
 import { useState } from "react";
 import { AppShell } from "../../components/layout/AppShell";
 import { ConditionGroup } from "./components/ConditionGroup";
+import { StrategyWizardPanel } from "./components/StrategyWizardPanel";
 
 // 06번 §6.2 Draft 화이트리스트 — src/services/condition_compiler.py::
 // TARGET_ASSET_WHITELIST와 1:1.
@@ -51,6 +52,15 @@ export function StrategyBuilderPage() {
   );
 
   const indicators = indicatorList?.indicators ?? ["RSI", "SMA", "EMA"];
+
+  function applyGenerated(generated: GeneratedConditions) {
+    setEntryConditions(generated.entryConditions);
+    setExitConditions(generated.exitConditions);
+    setStopLossConditions(generated.stopLossConditions);
+    setEntryCombine(generated.entryCombine);
+    setExitCombine(generated.exitCombine);
+    setStopLossCombine(generated.stopLossCombine);
+  }
 
   async function handlePreview() {
     setError(null);
@@ -124,6 +134,8 @@ export function StrategyBuilderPage() {
             </Select>
           </Field>
         </div>
+
+        <StrategyWizardPanel onApply={applyGenerated} />
 
         <ConditionGroup
           title="진입 조건"
