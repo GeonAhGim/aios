@@ -13,11 +13,12 @@
 
 ## 2026-09-01-08 · PAPER 실행 루프가 adapter의 실제 sandbox 상태를 증명하지 않음
 
-**상태**: 🔴 OPEN — 설계/구현 보강 필요. 현재 production router나 scheduler가
-`run_execution_tick()`을 호출하는 경로는 확인되지 않았고, 통합 테스트는
-`FakeExchangeAdapter`만 사용한다. 그러나 이 라이브러리 경계가 이후 배선될
-때 안전한 paper-only 보장을 제공하지 못하므로, production wiring 전에
-해소해야 한다.
+**상태**: 🟡 PARTIALLY FIXED — `d9548c1` (PR #7)이 code-level fail-closed
+guard를 추가했다. `ExchangeAdapter.is_paper_trading`이 false인 adapter는
+`Executor.execute()`에서 주문 제출 전에 거부되고, `PAPER + live-configured
+adapter` negative integration test가 이를 검증한다. 현재 production router나
+scheduler가 `run_execution_tick()`을 호출하는 경로는 여전히 확인되지 않았고,
+network egress allowlist와 credential provenance는 deployment control로 남는다.
 
 **발견**: `src/core/executor/executor.py::Executor.execute()`는
 `mode != "PAPER"`을 차단하지만, 전달받은 `ExchangeAdapter`의 실제 계정·endpoint·demo
@@ -36,14 +37,11 @@ mode가 `PAPER`라는 사실만으로, 잘못 구성된 real adapter를 통한 �
 약하며, 플랫폼 기준 문서가 요구하는 account/credential/provider adapter 수준의
 paper/live 분리와도 맞지 않는다.
 
-**권장 수정 방향**: execution plane에 별도 `PaperExecutionAdapter` 또는
-검증 가능한 immutable `ExecutionEnvironment` attestation을 도입한다. paper
-worker는 sandbox endpoint, sandbox credential provenance, egress allowlist를
-확인한 adapter만 얻을 수 있어야 하며, `Executor.execute()`/tick entrypoint는
-attestation이 없거나 LIVE인 adapter를 fail-closed로 거부해야 한다. 이 경계에는
-`PAPER + live-configured adapter` negative test와 실제 network egress를 막는
-integration test를 추가한다. 기존 LIVE path를 수정/활성화하는 작업은 별도
-ADR·owner review·release approval로 분리한다.
+**남은 조치**: `is_paper_trading`은 adapter configuration의 code-level
+assertion이다. execution plane은 다음 단계에서 sandbox endpoint, sandbox
+credential provenance, egress allowlist를 deployment 수준에서도 검증해야 한다.
+특히 실제 network egress를 막는 integration test를 추가하고, 기존 LIVE path의
+수정·활성화는 별도 ADR·owner review·release approval로 분리한다.
 
 ---
 
