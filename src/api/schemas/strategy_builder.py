@@ -9,12 +9,35 @@ PreviewCalculator는 진입/청산/손절 조건 각각을 리스트+AND/OR 결�
 """
 from __future__ import annotations
 
+from datetime import datetime
+from decimal import Decimal
 from typing import Any, Literal
 
 from pydantic import BaseModel
 
+from src.data.models.market_data import Candle
 from src.services.preview_service import PreviewCondition
 from src.services.strategy_builder_service import SavedStrategy, StrategyDetail
+
+
+class CandleResponse(BaseModel):
+    open_time: datetime
+    open: Decimal
+    high: Decimal
+    low: Decimal
+    close: Decimal
+    volume: Decimal
+
+
+def to_candle_response(candle: Candle) -> CandleResponse:
+    return CandleResponse(
+        open_time=candle.open_time,
+        open=candle.open,
+        high=candle.high,
+        low=candle.low,
+        close=candle.close,
+        volume=candle.volume,
+    )
 
 
 class IndicatorListResponse(BaseModel):

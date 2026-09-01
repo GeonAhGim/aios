@@ -25,6 +25,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 
 from src.api.deps import get_current_user
 from src.api.schemas.strategy_builder import (
+    CandleResponse,
     IndicatorComputeResponse,
     IndicatorListResponse,
     PreviewRequest,
@@ -34,6 +35,7 @@ from src.api.schemas.strategy_builder import (
     StrategyDetailResponse,
     StrategyResponse,
     WizardGenerateRequest,
+    to_candle_response,
     to_strategy_detail_response,
     to_strategy_response,
 )
@@ -106,6 +108,29 @@ async def list_strategies(
     service: StrategyBuilderService = Depends(get_strategy_builder_service),
 ) -> list[StrategySummary]:
     return await service.list_strategies(user.user_id)
+
+
+@router.get("/candles")
+async def get_candles(
+    exchange: str,
+    symbol: str,
+    timeframe: str = "1h",
+    limit: int = 200,
+    user: User = Depends(get_current_user),
+    resolver: CredentialResolver = Depends(get_credential_resolver),
+) -> list[CandleResponse]:
+    """편차(2026-09-01, 앱 조립 이후 발견된 갭 해소): compute_indicator/
+    preview는 서버 내부에서만 캔들을 조회하고 지표값·신호만 반환한다 —
+    프론트엔드가 실제 캔들스틱 차트(가격 자체)를 그릴 방법이 없었다.
+    같은 CredentialResolver 패턴을 그대로 재사용해 원시 OHLCV를 그대로
+    반환한다(신규 계산 로직 없음)."""
+    try:
+        adapter = await resolver.get_adapter(user.user_id, exchange)
+    except CredentialNotFoundError as exc:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, str(exc)) from exc
+
+    candles = await adapter.get_ohlcv(symbol, timeframe, limit=limit)
+    return [to_candle_response(c) for c in candles]
 
 
 @router.post("/strategies", status_code=status.HTTP_201_CREATED)

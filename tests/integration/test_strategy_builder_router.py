@@ -110,6 +110,30 @@ async def test_compute_indicator(client):
     assert any(v is not None for v in body["values"])
 
 
+async def test_get_candles_returns_ohlcv(client):
+    headers = await _register(client)
+
+    response = await client.get(
+        "/strategy-builder/candles",
+        params={"exchange": "bitget", "symbol": "BTC/USDT", "timeframe": "1h", "limit": 10},
+        headers=headers,
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert len(body) == len(_RISING_CLOSES[-10:])
+    assert set(body[0].keys()) == {"open_time", "open", "high", "low", "close", "volume"}
+
+
+async def test_get_candles_requires_authentication(client):
+    response = await client.get(
+        "/strategy-builder/candles",
+        params={"exchange": "bitget", "symbol": "BTC/USDT"},
+    )
+
+    assert response.status_code == 401
+
+
 async def test_compute_indicator_unsupported_returns_400(client):
     headers = await _register(client)
 
