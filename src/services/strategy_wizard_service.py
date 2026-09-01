@@ -26,7 +26,8 @@ from typing import Literal
 
 from pydantic import BaseModel
 
-from src.services.preview_service import Operator, PreviewCondition
+from src.services.condition_evaluation import Operator
+from src.services.preview_service import PreviewCondition
 
 Goal = Literal["STEADY_GROWTH", "AGGRESSIVE_GROWTH", "HEDGE"]
 RiskTolerance = Literal["LOW", "MEDIUM", "HIGH"]

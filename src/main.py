@@ -27,10 +27,12 @@ from src.core.loader.secret_loader import load_env_secrets
 from src.core.logging.audit_log import record_audit_log
 from src.core.notifications.gateway import NotificationGateway
 from src.core.safety.heartbeat import DEFAULT_HEARTBEAT_PATH, write_heartbeat
+from src.services.alert_service import AlertService
 from src.services.credential_resolver import CredentialResolver
 from src.services.exchange_credential_service import ExchangeCredentialService
 
 HEARTBEAT_INTERVAL_SECONDS = 2.0  # Draft — watchdog_process.py의 5초 폴링 주기보다 짧게
+ALERT_EVALUATION_INTERVAL_SECONDS = 60.0  # Draft — 가격/지표 알림 평가 주기
 
 
 def _asyncpg_dsn(database_url: str) -> str:
@@ -86,6 +88,21 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     )
     credential_resolver = CredentialResolver(credential_service)
 
+    # FD-14(신설) — 가격/지표 알림 평가 루프. heartbeat_loop과 동일 패턴
+    # (main.py가 유일한 백그라운드 스케줄러 지점) — 알림 하나 평가가
+    # 실패해도(자격증명 해지 등) 다음 알림·다음 주기로 계속 진행한다
+    # (alert_service.py::evaluate_all_active 참조).
+    alert_service = AlertService(
+        pool, credential_resolver=credential_resolver, publish=event_bus.publish
+    )
+
+    async def _alert_evaluation_loop() -> None:
+        while True:
+            await asyncio.sleep(ALERT_EVALUATION_INTERVAL_SECONDS)
+            await alert_service.evaluate_all_active()
+
+    alert_task = asyncio.create_task(_alert_evaluation_loop())
+
     app.state.pool = pool
     app.state.secrets = secrets
     app.state.event_bus = event_bus
@@ -94,8 +111,11 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         yield
     finally:
         heartbeat_task.cancel()
+        alert_task.cancel()
         with contextlib.suppress(asyncio.CancelledError):
             await heartbeat_task
+        with contextlib.suppress(asyncio.CancelledError):
+            await alert_task
         await event_bus.stop()
         await pool.close()
 
@@ -119,6 +139,7 @@ def create_app() -> FastAPI:
 
     from src.api.routers import (
         admin,
+        alerts,
         auth,
         device_tokens,
         exchange_credentials,
@@ -152,6 +173,7 @@ def create_app() -> FastAPI:
         device_tokens.router, prefix="/device-tokens", tags=["device-tokens"]
     )
     app.include_router(wallet.router, prefix="/wallet", tags=["wallet"])
+    app.include_router(alerts.router, prefix="/alerts", tags=["alerts"])
 
     return app
 

@@ -76,6 +76,12 @@ _POLICY_TABLE: dict[str, ChannelPolicy] = {
     "strategy.verification.completed": ChannelPolicy(
         rules=[ChannelRule(channel=NotificationChannel.EMAIL, user_overridable=True)]
     ),
+    "alert.triggered": ChannelPolicy(
+        rules=[
+            ChannelRule(channel=NotificationChannel.IN_APP, user_overridable=False),
+            ChannelRule(channel=NotificationChannel.EMAIL, user_overridable=True),
+        ]
+    ),
 }
 
 _DEFAULT_POLICY = ChannelPolicy(

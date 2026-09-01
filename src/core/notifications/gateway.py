@@ -41,6 +41,7 @@ SUBSCRIBED_EVENT_TYPES = (
     "marketplace.purchase.requested",
     "marketplace.payment.confirmed",
     "strategy.verification.completed",
+    "alert.triggered",
 )
 
 

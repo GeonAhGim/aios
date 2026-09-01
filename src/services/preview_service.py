@@ -19,10 +19,9 @@ from pydantic import BaseModel
 
 from src.core.indicators.talib_adapter import IndicatorService
 from src.data.models.market_data import Candle
+from src.services.condition_evaluation import Operator, compare_value
 
 DISCLAIMER = "이것은 정식 백테스트가 아닙니다 — 조건의 대략적인 작동만 보여줍니다."
-
-Operator = Literal[">", "<", ">=", "<=", "==", "crosses_above", "crosses_below"]
 
 
 class PreviewCondition(BaseModel):
@@ -37,26 +36,6 @@ class PreviewResult(BaseModel):
     signal_times: list[str]
     disclaimer: str = DISCLAIMER
     message: str | None = None
-
-
-def _compare(
-    value: float, operator: str, threshold: float, prev_value: float | None
-) -> bool:
-    if operator == ">":
-        return value > threshold
-    if operator == "<":
-        return value < threshold
-    if operator == ">=":
-        return value >= threshold
-    if operator == "<=":
-        return value <= threshold
-    if operator == "==":
-        return value == threshold
-    if operator == "crosses_above":
-        return prev_value is not None and prev_value <= threshold < value
-    if operator == "crosses_below":
-        return prev_value is not None and prev_value >= threshold > value
-    raise ValueError(f"지원하지 않는 연산자입니다: {operator}")
 
 
 class PreviewCalculator:
@@ -92,7 +71,7 @@ class PreviewCalculator:
                     continue
                 prev_value = values[i - 1] if i > 0 else None
                 evaluations.append(
-                    _compare(value, condition.operator, condition.threshold, prev_value)
+                    compare_value(value, condition.operator, condition.threshold, prev_value)
                 )
             combined = all(evaluations) if combine == "AND" else any(evaluations)
             if combined:

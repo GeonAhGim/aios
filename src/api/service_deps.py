@@ -13,6 +13,7 @@ from src.core.event_bus.bus import EventBus
 from src.core.loader.risk_policy_loader import RiskPolicy, load_risk_policy
 from src.core.safety.circuit_breaker import CircuitBreakerService
 from src.services.account_deletion_service import AccountDeletionService
+from src.services.alert_service import AlertService
 from src.services.approval_settings_service import ApprovalSettingsService
 from src.services.credential_resolver import CredentialResolver
 from src.services.exchange_credential_service import ExchangeCredentialService
@@ -80,3 +81,11 @@ def get_credential_resolver(request: Request) -> CredentialResolver:
     (pool/event_bus와 동일 패턴)."""
     resolver: CredentialResolver = request.app.state.credential_resolver
     return resolver
+
+
+def get_alert_service(
+    pool: asyncpg.Pool = Depends(get_pool),
+    resolver: CredentialResolver = Depends(get_credential_resolver),
+    event_bus: EventBus = Depends(get_event_bus),
+) -> AlertService:
+    return AlertService(pool, credential_resolver=resolver, publish=event_bus.publish)
