@@ -21,6 +21,7 @@ export {
 export {
   useIndicators,
   useMyStrategies,
+  useCandles,
   useCreateStrategy,
   usePreviewStrategy,
   useStrategy,

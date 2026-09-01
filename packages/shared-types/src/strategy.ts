@@ -20,6 +20,15 @@ export interface IndicatorListResponse {
   indicators: string[];
 }
 
+export interface CandleResponse {
+  openTime: string;
+  open: string;
+  high: string;
+  low: string;
+  close: string;
+  volume: string;
+}
+
 export interface IndicatorComputeResponse {
   indicator: string;
   values: (number | null)[];

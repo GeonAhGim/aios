@@ -1,7 +1,7 @@
-import { useCreateStrategy, useIndicators, usePreviewStrategy } from "@aios/shared-hooks";
+import { useCandles, useCreateStrategy, useIndicators, usePreviewStrategy } from "@aios/shared-hooks";
 import { ApiError } from "@aios/api-client";
 import type { GeneratedConditions, PreviewCondition } from "@aios/shared-types";
-import { Alert, Button, Field, PageHeader, Select } from "@aios/ui-web";
+import { Alert, Button, CandlestickChart, Card, Field, PageHeader, Select } from "@aios/ui-web";
 import { useState } from "react";
 import { AppShell } from "../../components/layout/AppShell";
 import { ConditionGroup } from "./components/ConditionGroup";
@@ -52,6 +52,12 @@ export function StrategyBuilderPage() {
   );
 
   const indicators = indicatorList?.indicators ?? ["RSI", "SMA", "EMA"];
+  const { data: candles, isError: candlesFailed } = useCandles({
+    exchange,
+    symbol: targetAsset,
+    timeframe: "1h",
+    limit: 200,
+  });
 
   function applyGenerated(generated: GeneratedConditions) {
     setEntryConditions(generated.entryConditions);
@@ -134,6 +140,29 @@ export function StrategyBuilderPage() {
             </Select>
           </Field>
         </div>
+
+        <Card>
+          <h2 className="mb-3 text-lg font-semibold text-fg">
+            {targetAsset} · {exchange}
+          </h2>
+          {candlesFailed ? (
+            <p className="text-sm text-fg-muted">
+              차트를 불러올 수 없습니다 — {exchange} 거래소 연동이 필요합니다.
+            </p>
+          ) : candles && candles.length > 0 ? (
+            <CandlestickChart
+              data={candles.map((c) => ({
+                time: Math.floor(new Date(c.openTime).getTime() / 1000),
+                open: Number(c.open),
+                high: Number(c.high),
+                low: Number(c.low),
+                close: Number(c.close),
+              }))}
+            />
+          ) : (
+            <p className="text-sm text-fg-muted">차트 데이터를 불러오는 중...</p>
+          )}
+        </Card>
 
         <StrategyWizardPanel onApply={applyGenerated} />
 

@@ -12,6 +12,7 @@ import type {
   UserSummary,
   ApprovalSettingsRequest,
   ApprovalSettingsResponse,
+  CandleResponse,
   CredentialRequest,
   CredentialResponse,
   DeletionRequest,
@@ -298,6 +299,15 @@ export class AiosApiClient {
 
   async listMyStrategies(): Promise<StrategySummary[]> {
     return this.request("/strategy-builder/strategies");
+  }
+
+  async getCandles(params: {
+    exchange: string;
+    symbol: string;
+    timeframe?: string;
+    limit?: number;
+  }): Promise<CandleResponse[]> {
+    return this.request(this.withQuery("/strategy-builder/candles", params));
   }
 
   async computeIndicator(

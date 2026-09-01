@@ -7,5 +7,6 @@ export { Badge } from "./Badge";
 export { StatusBadge } from "./StatusBadge";
 export { Alert, EmptyState, LoadingState, PageHeader } from "./Feedback";
 export { AllocationBarChart, type AllocationSlice } from "./AllocationBarChart";
+export { CandlestickChart, type CandlestickPoint } from "./CandlestickChart";
 export { PnlChart, type DailyPnlPoint } from "./PnlChart";
 export { CATEGORICAL_PALETTE, NEUTRAL_SLOT, DIVERGING_UP, DIVERGING_DOWN } from "./chartPalette";

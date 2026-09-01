@@ -15,6 +15,19 @@ export function useMyStrategies() {
   return useQuery({ queryKey: ["myStrategies"], queryFn: () => apiClient.listMyStrategies() });
 }
 
+export function useCandles(params: {
+  exchange: string;
+  symbol: string;
+  timeframe?: string;
+  limit?: number;
+}) {
+  return useQuery({
+    queryKey: ["candles", params],
+    queryFn: () => apiClient.getCandles(params),
+    retry: false,
+  });
+}
+
 export function useCreateStrategy() {
   return useMutation({
     mutationFn: (body: StrategyCreateRequest) => apiClient.createStrategy(body),
