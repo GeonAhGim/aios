@@ -19,7 +19,7 @@ from fastapi import Depends, HTTPException, Request, status
 from fastapi.security import OAuth2PasswordBearer
 
 from src.core.event_bus.bus import EventBus
-from src.services.auth_service import AuthService, User, get_user_by_id
+from src.services.auth_service import AuthError, AuthService, User, get_user_by_id
 from src.services.mfa_service import MfaService
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/auth/login", auto_error=False)
@@ -50,7 +50,7 @@ async def get_current_user(
     secrets = request.app.state.secrets
     try:
         payload = jwt.decode(
-            token, secrets.jwt_secret_key, algorithms=[secrets.jwt_algorithm]
+            token, secrets.jwt_secret_key.get_secret_value(), algorithms=[secrets.jwt_algorithm]
         )
     except jwt.PyJWTError as exc:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "유효하지 않은 토큰입니다.") from exc
@@ -66,6 +66,20 @@ async def get_current_user(
         # 충분하지 않다는 것을 실증).
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "정지되었거나 삭제된 계정입니다.")
     return user
+
+
+async def reauthenticate(
+    auth: AuthService, user: User, password: str, totp_code: str | None = None
+) -> None:
+    """비밀번호(+MFA 활성 시 TOTP)를 다시 확인한다 — 이미 로그인된 세션이라도
+    자금 이동/보안설정 변경처럼 민감한 액션 앞에서는 Bearer 토큰 탈취만으로
+    통과할 수 없게 막는다. AuthService.authenticate()를 그대로 재사용한다
+    (로그인 가능 = 재인증 성공, 새 검증 로직을 만들지 않는다). users.py의
+    화이트리스트/탈퇴 라우터와 동일한 원칙을 공유 지점으로 뺀 것."""
+    try:
+        await auth.authenticate(user.email, password, totp_code=totp_code)
+    except AuthError as exc:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "재인증에 실패했습니다.") from exc
 
 
 async def get_current_verifier(user: User = Depends(get_current_user)) -> User:
@@ -84,7 +98,7 @@ def get_mfa_service(
     request: Request, pool: asyncpg.Pool = Depends(get_pool)
 ) -> MfaService:
     secrets = request.app.state.secrets
-    return MfaService(pool, encryption_key=secrets.credential_encryption_key)
+    return MfaService(pool, encryption_key=secrets.credential_encryption_key.get_secret_value())
 
 
 def get_auth_service(
@@ -95,7 +109,7 @@ def get_auth_service(
     secrets = request.app.state.secrets
     return AuthService(
         pool,
-        jwt_secret_key=secrets.jwt_secret_key,
+        jwt_secret_key=secrets.jwt_secret_key.get_secret_value(),
         jwt_algorithm=secrets.jwt_algorithm,
         jwt_expire_minutes=secrets.jwt_expire_minutes,
         verify_totp=mfa.verify_totp_for_login,

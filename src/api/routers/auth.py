@@ -9,9 +9,10 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException, status
 
-from src.api.deps import get_auth_service, get_current_user, get_mfa_service
+from src.api.deps import get_auth_service, get_current_user, get_mfa_service, reauthenticate
 from src.api.schemas.auth import (
     LoginRequest,
+    MfaSetupRequest,
     MfaVerifyRequest,
     SignupRequest,
     TokenResponse,
@@ -54,8 +55,24 @@ async def logout(user: User = Depends(get_current_user)) -> dict[str, str]:
 
 @router.post("/mfa/setup")
 async def setup_mfa(
-    user: User = Depends(get_current_user), mfa: MfaService = Depends(get_mfa_service)
+    body: MfaSetupRequest | None = None,
+    user: User = Depends(get_current_user),
+    auth: AuthService = Depends(get_auth_service),
+    mfa: MfaService = Depends(get_mfa_service),
 ) -> MfaSetupResult:
+    body = body or MfaSetupRequest()
+    if user.mfa_enabled:
+        # 레드팀 감사 #11 — 이미 MFA가 켜진 계정이 다시 이 엔드포인트를
+        # 호출하면 기존 secret을 조용히 덮어쓸 수 있었다(Bearer 토큰만
+        # 있으면 비밀번호 없이도 공격자가 자신의 secret으로 재설정 가능).
+        # 최초 설정(mfa_enabled=false)은 로그인 자체가 이미 증명이라
+        # 재인증을 요구하지 않는다.
+        if not body.password:
+            raise HTTPException(
+                status.HTTP_403_FORBIDDEN,
+                "이미 활성화된 MFA를 재설정하려면 비밀번호 재인증이 필요합니다.",
+            )
+        await reauthenticate(auth, user, body.password, body.totp_code)
     return await mfa.setup(user.user_id, user.email)
 
 

@@ -131,6 +131,53 @@ async def test_mfa_setup_and_verify_round_trip(client):
     assert login_with_code.status_code == 200
 
 
+async def test_mfa_resetup_without_password_rejected_when_already_enabled(client):
+    """레드팀 감사 #11 후속 — 이미 켜진 MFA를 탈취한 Bearer 토큰만으로
+    (비밀번호 없이) 재설정해 secret을 갈아치울 수 있으면 안 된다."""
+    import pyotp
+
+    email = _unique_email()
+    register_response = await client.post(
+        "/auth/register", json={"email": email, "password": STRONG_PASSWORD}
+    )
+    token = register_response.json()["access_token"]
+    headers = {"Authorization": f"Bearer {token}"}
+
+    setup_response = await client.post("/auth/mfa/setup", headers=headers)
+    secret = setup_response.json()["secret"]
+    code = pyotp.totp.TOTP(secret).now()
+    await client.post("/auth/mfa/verify", json={"totp_code": code}, headers=headers)
+
+    resetup_response = await client.post("/auth/mfa/setup", headers=headers)
+    assert resetup_response.status_code == 403
+
+
+async def test_mfa_resetup_with_correct_password_succeeds(client):
+    import pyotp
+
+    email = _unique_email()
+    register_response = await client.post(
+        "/auth/register", json={"email": email, "password": STRONG_PASSWORD}
+    )
+    token = register_response.json()["access_token"]
+    headers = {"Authorization": f"Bearer {token}"}
+
+    setup_response = await client.post("/auth/mfa/setup", headers=headers)
+    old_secret = setup_response.json()["secret"]
+    code = pyotp.totp.TOTP(old_secret).now()
+    await client.post("/auth/mfa/verify", json={"totp_code": code}, headers=headers)
+
+    reauth_code = pyotp.totp.TOTP(old_secret).now()
+    resetup_response = await client.post(
+        "/auth/mfa/setup",
+        json={"password": STRONG_PASSWORD, "totp_code": reauth_code},
+        headers=headers,
+    )
+    assert resetup_response.status_code == 200
+    new_secret = resetup_response.json()["secret"]
+    assert new_secret != old_secret
+
+
 async def test_logout_requires_authentication(client):
     response = await client.post("/auth/logout")
 

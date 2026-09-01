@@ -63,15 +63,27 @@ class MfaService:
     async def verify(self, user_id: UUID, totp_code: str) -> None:
         async with self._pool.acquire() as conn:
             row = await conn.fetchrow(
-                "SELECT mfa_secret FROM users WHERE user_id = $1", user_id
+                "SELECT mfa_secret, mfa_enabled FROM users WHERE user_id = $1", user_id
             )
             encrypted_secret = row["mfa_secret"] if row is not None else None
+            already_enabled = bool(row["mfa_enabled"]) if row is not None else False
 
             if encrypted_secret is None or not self._check_code(encrypted_secret, totp_code):
-                await conn.execute(
-                    "UPDATE users SET mfa_secret = NULL, mfa_enabled = false WHERE user_id = $1",
-                    user_id,
-                )
+                if not already_enabled:
+                    # 레드팀 감사(#11) — 최초 설정(mfa_enabled=false, 검증
+                    # 대기 중) 실패만 secret을 폐기한다("반쯤 활성화된 상태로
+                    # 남기지 않는다"는 FD-11.2 원칙은 이 경우에만 적용된다.
+                    await conn.execute(
+                        "UPDATE users SET mfa_secret = NULL, mfa_enabled = false "
+                        "WHERE user_id = $1",
+                        user_id,
+                    )
+                else:
+                    # already_enabled=true일 때는 행을 절대 건드리지 않는다 —
+                    # 탈취한 Bearer 토큰만으로(비밀번호 없이) 아무 틀린 코드나
+                    # 보내 이미 켜진 MFA를 원격으로 영구 비활성화시킬 수 있던
+                    # 인증 우회 구멍을 막는다.
+                    pass
                 raise MfaError("인증 코드가 올바르지 않습니다.")
 
             await conn.execute(

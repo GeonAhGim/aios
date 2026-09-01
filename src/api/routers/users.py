@@ -12,7 +12,7 @@ from __future__ import annotations
 import asyncpg
 from fastapi import APIRouter, Depends, HTTPException, status
 
-from src.api.deps import get_auth_service, get_current_user, get_pool
+from src.api.deps import get_auth_service, get_current_user, get_pool, reauthenticate
 from src.api.schemas.account import (
     ApprovalSettingsRequest,
     ApprovalSettingsResponse,
@@ -32,7 +32,7 @@ from src.api.service_deps import (
 from src.core.approval.service import ApprovalError, ApprovalRequest, approve, list_pending, reject
 from src.services.account_deletion_service import AccountDeletionError, AccountDeletionService
 from src.services.approval_settings_service import ApprovalSettingsError, ApprovalSettingsService
-from src.services.auth_service import AuthError, AuthService, User
+from src.services.auth_service import AuthService, User
 from src.services.withdrawal_whitelist_service import (
     WithdrawalWhitelistError,
     WithdrawalWhitelistService,
@@ -73,15 +73,6 @@ async def update_approval_settings(
     return to_approval_settings_response(settings)
 
 
-async def _reauthenticate(
-    auth: AuthService, user: User, password: str, totp_code: str | None
-) -> None:
-    try:
-        await auth.authenticate(user.email, password, totp_code=totp_code)
-    except AuthError as exc:
-        raise HTTPException(status.HTTP_403_FORBIDDEN, "재인증에 실패했습니다.") from exc
-
-
 @router.get("/me/withdrawal-whitelist")
 async def list_whitelist_entries(
     user: User = Depends(get_current_user),
@@ -98,7 +89,7 @@ async def register_whitelist_entry(
     auth: AuthService = Depends(get_auth_service),
     service: WithdrawalWhitelistService = Depends(get_withdrawal_whitelist_service),
 ) -> WhitelistEntryResponse:
-    await _reauthenticate(auth, user, body.password, body.totp_code)
+    await reauthenticate(auth, user, body.password, body.totp_code)
     try:
         entry = await service.register(
             user.user_id,

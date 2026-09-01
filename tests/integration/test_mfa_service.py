@@ -86,6 +86,30 @@ async def test_verify_with_wrong_code_discards_secret(mfa, pool):
     assert row["mfa_enabled"] is False
 
 
+async def test_verify_with_wrong_code_after_already_enabled_does_not_disable_mfa(mfa, pool):
+    """레드팀 감사 #11 — 이미 켜진 MFA는 탈취한 Bearer 토큰 + 틀린 코드
+    한 번만으로 영구 비활성화되면 안 된다(비밀번호 없이도 가능한 인증
+    우회였음)."""
+    user_id, email = await _real_user(pool)
+    result = await mfa.setup(user_id, email)
+    correct_code = pyotp.totp.TOTP(result.secret).now()
+    await mfa.verify(user_id, correct_code)
+
+    with pytest.raises(MfaError):
+        await mfa.verify(user_id, "000000")
+
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            "SELECT mfa_secret, mfa_enabled FROM users WHERE user_id = $1", user_id
+        )
+    assert row["mfa_secret"] is not None
+    assert row["mfa_enabled"] is True
+
+    # 기존 secret이 그대로 살아있으니 정상 코드로는 여전히 로그인/재검증 가능해야 한다.
+    still_valid_code = pyotp.totp.TOTP(result.secret).now()
+    await mfa.verify(user_id, still_valid_code)
+
+
 async def test_login_with_mfa_enabled_uses_verify_totp_for_login_callback(mfa, pool):
     user_id, email = await _real_user(pool)
     result = await mfa.setup(user_id, email)

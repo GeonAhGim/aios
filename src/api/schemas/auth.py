@@ -33,6 +33,16 @@ class MfaVerifyRequest(BaseModel):
     totp_code: str
 
 
+class MfaSetupRequest(BaseModel):
+    """최초 설정(mfa_enabled=false)은 재인증 없이 그대로 허용한다 — 로그인
+    자체가 이미 인증 증명이다. 이미 켜진 MFA를 다시 설정(재발급)하는
+    경우에만 password가 필요하다(레드팀 감사 #11 — Bearer 토큰 탈취만으로
+    기존 secret을 덮어써 2FA를 탈취하는 경로를 막는다)."""
+
+    password: str | None = None
+    totp_code: str | None = None
+
+
 class UserResponse(BaseModel):
     user_id: str
     email: str
