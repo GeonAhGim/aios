@@ -7,12 +7,22 @@ Spec: 04_db_schema_v1.7.md, 06_mvp_scope_v1.3.md#§6.3 DoD
 ("audit_log 테이블에 WORM 제약(REVOKE UPDATE, DELETE) 적용 확인")
 """
 from pathlib import Path
+from uuid import uuid4
 
+import asyncpg
 import pytest
 from dotenv import dotenv_values
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import create_async_engine
 from sqlalchemy.pool import NullPool
+
+from src.foundation.ledger.contracts.v1 import AccountType
+from src.foundation.ledger.domain.chart_of_accounts import (
+    PLATFORM_CASH_CLEARING,
+    PLATFORM_COMMISSION_REVENUE,
+    PLATFORM_PAYOUT_CLEARING,
+    PLATFORM_REFUND_RESERVE,
+)
 
 EXPECTED_TABLES = {
     "tasks",
@@ -44,6 +54,44 @@ async def db_conn():
     async with engine.connect() as conn:
         yield conn
     await engine.dispose()
+
+
+@pytest.fixture
+async def raw_conn():
+    """LC-6 트랜잭션·롤 테스트용 — deferred 트리거의 커밋 시점 동작과
+    `SET ROLE`은 asyncpg 원시 커넥션(`test_db_roles.py`와 동일 패턴)으로만
+    직접 검증할 수 있다(SQLAlchemy `AsyncConnection`은 커밋 시점을 감춘다)."""
+    dsn = _database_url().replace("postgresql+asyncpg://", "postgresql://")
+    connection = await asyncpg.connect(dsn)
+    yield connection
+    await connection.close()
+
+
+async def _insert_audit_event(conn: asyncpg.Connection):
+    row = await conn.fetchrow(
+        "INSERT INTO foundation_audit_event "
+        "(sequence_no, aggregate_type, aggregate_id, action, outcome, trace_id, "
+        " payload_hash, payload, event_hash) "
+        "VALUES ($1, 'test.ledger', gen_random_uuid(), 'test.ledger.post', 'SUCCESS', "
+        " gen_random_uuid(), 'deadbeef', '{}'::jsonb, 'deadbeef') RETURNING id",
+        uuid4().int % (2**62),  # system(tenant_id IS NULL) sequence_no 유일 제약 회피용 난수
+    )
+    return row["id"]
+
+
+async def _insert_entry(conn: asyncpg.Connection, *, audit_event_id) -> object:
+    row = await conn.fetchrow(
+        "INSERT INTO ledger_journal_entry "
+        "(sequence_no, event_type, event_ref, idempotency_key, lines_digest, entry_hash, "
+        " audit_event_id) "
+        "VALUES ($1, 'MANUAL_ADJUSTMENT', $2, $3, repeat('0', 64), repeat('0', 64), $4) "
+        "RETURNING entry_id",
+        uuid4().int % (2**62) + 1,
+        f"test:{uuid4().hex}",
+        f"MANUAL_ADJUSTMENT:test:{uuid4().hex}",
+        audit_event_id,
+    )
+    return row["entry_id"]
 
 
 async def test_all_section_3_tables_exist(db_conn):
@@ -119,3 +167,216 @@ async def test_orders_and_positions_have_multi_asset_columns(db_conn):
         )
         found = {row[0] for row in result}
         assert found == MULTI_ASSET_COLUMNS, f"{table} missing {MULTI_ASSET_COLUMNS - found}"
+
+
+# --- LC-6 (4a1d0c0de005_ledger_core) ---------------------------------------
+
+LEDGER_CORE_TABLES = {
+    "ledger_account",
+    "ledger_journal_entry",
+    "ledger_posting_line",
+    "ledger_balance",
+    "ledger_control",
+}
+
+PLATFORM_HOUSE_USER_ID = "00000000-0000-0000-0000-000000000001"
+
+
+async def test_ledger_core_tables_exist(db_conn):
+    result = await db_conn.execute(
+        text(
+            "SELECT table_name FROM information_schema.tables "
+            "WHERE table_schema = 'public' AND table_name = ANY(:names)"
+        ),
+        {"names": list(LEDGER_CORE_TABLES)},
+    )
+    found = {row[0] for row in result}
+    assert found == LEDGER_CORE_TABLES
+
+
+@pytest.mark.parametrize("table", ["ledger_journal_entry", "ledger_posting_line"])
+async def test_ledger_entry_and_line_worm_revoked_from_public(db_conn, table):
+    result = await db_conn.execute(
+        text(
+            "SELECT privilege_type FROM information_schema.table_privileges "
+            "WHERE table_name = :table AND grantee = 'PUBLIC'"
+        ),
+        {"table": table},
+    )
+    granted = {row[0] for row in result}
+    assert "UPDATE" not in granted
+    assert "DELETE" not in granted
+
+
+async def test_ledger_platform_and_house_accounts_seeded(db_conn):
+    """계정코드·유형이 `domain/chart_of_accounts.py`(LC-2)의 상수와 어긋나면
+    LC-9(post_entry)가 계정을 못 찾거나 잘못된 부호로 분개한다 — 마이그레이션
+    시드값이 도메인 모듈과 같은 값인지 여기서 고정한다."""
+    expected = {
+        PLATFORM_CASH_CLEARING: AccountType.ASSET.value,
+        PLATFORM_COMMISSION_REVENUE: AccountType.REVENUE.value,
+        PLATFORM_REFUND_RESERVE: AccountType.EXPENSE.value,
+        PLATFORM_PAYOUT_CLEARING: AccountType.CLEARING.value,
+        f"USER:{PLATFORM_HOUSE_USER_ID}:AVAILABLE": AccountType.LIABILITY.value,
+    }
+    result = await db_conn.execute(
+        text(
+            "SELECT account_code, account_type, currency, allow_negative FROM ledger_account "
+            "WHERE account_code = ANY(:codes)"
+        ),
+        {"codes": list(expected)},
+    )
+    rows = {row[0]: row for row in result}
+    assert set(rows) == set(expected)
+    for code, expected_type in expected.items():
+        row = rows[code]
+        assert row.account_type == expected_type, code
+        assert row.currency == "KRW", code
+        assert row.allow_negative is False, code
+
+
+async def test_ledger_balance_seeded_for_platform_and_house_accounts(db_conn):
+    result = await db_conn.execute(
+        text(
+            "SELECT b.balance, b.held, b.pending_payout, b.allow_negative "
+            "FROM ledger_balance b JOIN ledger_account a ON a.account_id = b.account_id "
+            "WHERE a.account_code = ANY(:codes)"
+        ),
+        {
+            "codes": [
+                PLATFORM_CASH_CLEARING,
+                PLATFORM_COMMISSION_REVENUE,
+                PLATFORM_REFUND_RESERVE,
+                PLATFORM_PAYOUT_CLEARING,
+                f"USER:{PLATFORM_HOUSE_USER_ID}:AVAILABLE",
+            ]
+        },
+    )
+    rows = list(result)
+    assert len(rows) == 5
+    for row in rows:
+        assert row.balance == 0
+        assert row.held == 0
+        assert row.pending_payout == 0
+        assert row.allow_negative is False
+
+
+async def test_ledger_control_singleton_seeded(db_conn):
+    result = await db_conn.execute(
+        text("SELECT id, write_frozen FROM ledger_control")
+    )
+    rows = list(result)
+    assert len(rows) == 1
+    assert rows[0].id == 1
+    assert rows[0].write_frozen is False
+
+
+async def test_unbalanced_entry_fails_at_commit(raw_conn):
+    """§4.4 deferred constraint trigger — Σ차변 != Σ대변인 분개는 개별
+    INSERT가 아니라 COMMIT 시점에 실패해야 한다(entry의 모든 행이 다
+    들어온 뒤에야 판정 가능하므로)."""
+    audit_event_id = await _insert_audit_event(raw_conn)
+    entry_id = await _insert_entry(raw_conn, audit_event_id=audit_event_id)
+    accounts = await raw_conn.fetch(
+        "SELECT account_id, account_code FROM ledger_account "
+        "WHERE account_code = ANY($1::text[])",
+        [PLATFORM_CASH_CLEARING, PLATFORM_COMMISSION_REVENUE],
+    )
+    account_id = {row["account_code"]: row["account_id"] for row in accounts}
+
+    with pytest.raises(asyncpg.RaiseError, match="unbalanced"):
+        async with raw_conn.transaction():
+            await raw_conn.execute(
+                "INSERT INTO ledger_posting_line "
+                "(entry_id, line_no, account_id, side, amount, currency) "
+                "VALUES ($1, 1, $2, 'DEBIT', 100.00, 'KRW')",
+                entry_id,
+                account_id[PLATFORM_CASH_CLEARING],
+            )
+            await raw_conn.execute(
+                "INSERT INTO ledger_posting_line "
+                "(entry_id, line_no, account_id, side, amount, currency) "
+                "VALUES ($1, 2, $2, 'CREDIT', 99.00, 'KRW')",
+                entry_id,
+                account_id[PLATFORM_COMMISSION_REVENUE],
+            )
+
+
+async def test_balanced_entry_commits_successfully(raw_conn):
+    """위 테스트의 대조군 — deferred 트리거가 균형 잡힌 분개까지 잘못
+    막지 않는지 확인한다."""
+    audit_event_id = await _insert_audit_event(raw_conn)
+    entry_id = await _insert_entry(raw_conn, audit_event_id=audit_event_id)
+    accounts = await raw_conn.fetch(
+        "SELECT account_id, account_code FROM ledger_account "
+        "WHERE account_code = ANY($1::text[])",
+        [PLATFORM_CASH_CLEARING, PLATFORM_COMMISSION_REVENUE],
+    )
+    account_id = {row["account_code"]: row["account_id"] for row in accounts}
+
+    async with raw_conn.transaction():
+        await raw_conn.execute(
+            "INSERT INTO ledger_posting_line "
+            "(entry_id, line_no, account_id, side, amount, currency) "
+            "VALUES ($1, 1, $2, 'DEBIT', 100.00, 'KRW')",
+            entry_id,
+            account_id[PLATFORM_CASH_CLEARING],
+        )
+        await raw_conn.execute(
+            "INSERT INTO ledger_posting_line "
+            "(entry_id, line_no, account_id, side, amount, currency) "
+            "VALUES ($1, 2, $2, 'CREDIT', 100.00, 'KRW')",
+            entry_id,
+            account_id[PLATFORM_COMMISSION_REVENUE],
+        )
+
+    row = await raw_conn.fetchrow(
+        "SELECT entry_id FROM ledger_journal_entry WHERE entry_id = $1", entry_id
+    )
+    assert row is not None
+
+
+async def test_aios_app_cannot_update_ledger_journal_entry(raw_conn):
+    audit_event_id = await _insert_audit_event(raw_conn)
+    entry_id = await _insert_entry(raw_conn, audit_event_id=audit_event_id)
+
+    with pytest.raises(asyncpg.RaiseError, match="append-only violation"):
+        async with raw_conn.transaction():
+            await raw_conn.execute("SET ROLE aios_app")
+            await raw_conn.execute(
+                "UPDATE ledger_journal_entry SET event_ref = 'tampered' WHERE entry_id = $1",
+                entry_id,
+            )
+
+
+async def test_aios_app_cannot_delete_ledger_posting_line(raw_conn):
+    audit_event_id = await _insert_audit_event(raw_conn)
+    entry_id = await _insert_entry(raw_conn, audit_event_id=audit_event_id)
+    accounts = await raw_conn.fetch(
+        "SELECT account_id, account_code FROM ledger_account "
+        "WHERE account_code = ANY($1::text[])",
+        [PLATFORM_CASH_CLEARING, PLATFORM_COMMISSION_REVENUE],
+    )
+    account_id = {row["account_code"]: row["account_id"] for row in accounts}
+    async with raw_conn.transaction():
+        await raw_conn.execute(
+            "INSERT INTO ledger_posting_line "
+            "(entry_id, line_no, account_id, side, amount, currency) "
+            "VALUES ($1, 1, $2, 'DEBIT', 100.00, 'KRW')",
+            entry_id,
+            account_id[PLATFORM_CASH_CLEARING],
+        )
+        await raw_conn.execute(
+            "INSERT INTO ledger_posting_line "
+            "(entry_id, line_no, account_id, side, amount, currency) "
+            "VALUES ($1, 2, $2, 'CREDIT', 100.00, 'KRW')",
+            entry_id,
+            account_id[PLATFORM_COMMISSION_REVENUE],
+        )
+
+    with pytest.raises(asyncpg.RaiseError, match="append-only violation"):
+        async with raw_conn.transaction():
+            await raw_conn.execute("SET ROLE aios_app")
+            await raw_conn.execute(
+                "DELETE FROM ledger_posting_line WHERE entry_id = $1", entry_id
+            )
