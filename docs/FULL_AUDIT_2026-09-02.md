@@ -124,10 +124,10 @@ mypy strict 통과의 실질: `type: ignore` 178건 중 160건이 거래소 믹�
 |---|---|---|---|
 | agent-platform-12 (PM) | 감사·marketplace | ① 실행 루프 운영 배선 — **완료 `2e943c9`** ② 전체 진행 추적·§2-A 갱신 ③ 장부 정합 + 거버넌스 — **완료 `a784493`**(secret scan·벤치마크 단언·#05/#17 barrier는 후속) ④ 세션별 테스트 DB 분리 스크립트 ⑤ 마이그레이션 체인 직렬화(c2 `a6636fcf92fc` → 44 → 9f) | A → B |
 | agent-platform-44 | foundation(trust/mandates/evidence/risk_gate/reconciliation), `foundation_deps`, `main.py` 라우터 등록 | ① mandates fingerprint(진행 중) ② `risk_guard` 루프 try/except(레드팀 #25, `main.py:131-135`) ③ foundation→실행 경로 연결: `order_service.submit` 앞 risk_gate PRE_SUBMIT, `execution_service.start` 앞 mandate 평가, 주요 커맨드 `append_audit_event` (§11 5단계) | A → B |
-| agent-platform-c2 | connections, paper_control | ①②③ — **완료 `a77e9e4`** ④ FND-08 reconciliation 테스트(현재 0건: REC-001~003 통합 + cross-tenant adversarial) ⑤ FND-01 trust 결손: MFA step-up 실구현, consent `expires_at`, ACTIVE membership 규칙 | B |
+| agent-platform-c2 | connections, paper_control | ①②③ — **완료 `a77e9e4`** ④ FND-08 reconciliation 테스트 — 감사 기준(`4e0f8db`)에선 0건이었으나 `1eb7e12`에 REC-001~007 통합·규칙 단위·cross-tenant 17개가 이미 포함됨(c2 확인, PM 재검증) → 불필요 ⑤ FND-01 trust 결손: MFA step-up 실구현, consent `expires_at`, ACTIVE membership 규칙 — 진행 중 | B |
 | agent-platform-9f | risk_gate, exchanges 가드, execution_loop/alert | ① positions 기록 — **완료 `c017525`** ② FSM 복귀(#39) — **완료 `53d56d2`** ③ 일손실·MDD 기준점 영속화 — 코드 `a948e94`, 마이그레이션(parent `a6636fcf92fc`) 진행 중 ④ RiskEngine 레버리지 실검사, watchdog `compute_equity` 실계산 — **FROZEN_PAPER_ONLY 수정 사용자 승인(2026-09-02)** | A → B |
 | agent-platform-30 | exchanges bitget/kis | ③ `_row_to_order` priceAvg/price/cTime 파싱(먼저, 소규모) → **NH투자증권 어댑터 100% (사용자 지시)**: `C:\aios\02d_nh_api_spec_v1.md` 스펙 → `src/exchanges/nh/` ABC 12메서드·capability·토큰 생애주기·에러 분류·`@require_paper_sandbox`·MockTransport 실패 경로 테스트·`build_adapter` 등록 → 이후 ①②④ 내구성. ⑤ Bitget Demo e2e는 키 확보 시(사용자: 나중) | A → B |
-| agent-platform-f0 | DevEngine 전용 | AIOS 저장소 작업 없음(반려). DevEngine이 mihwa-aios에 자동 push하기 전 PM 공지 | — |
+| agent-platform-f0 | DevEngine (Cursor 키 대기로 보류 중) | OPEN 존 잔여 인수: ① 벤치마크 50ms 단언 + `docs/benchmarks` 자동 덮어쓰기 제거 ② 레드팀 #05/#17 barrier 주입, #21 회귀 테스트 ③ CI secret scan 단계. DevEngine이 mihwa-aios에 자동 push하기 전 PM 공지 | B |
 | agent-platform-6a | DevEngine 파이프라인 | DevEngine 유지. PR #2 정리 시 `src/core/utils/is_even.py`를 main에서도 제거 | — |
 
 **공통 규칙**
