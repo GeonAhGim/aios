@@ -233,3 +233,33 @@ async def test_resolve_rejects_unknown_decision(service, pool):
 async def test_get_detail_rejects_nonexistent_dispute(service):
     with pytest.raises(DisputeResolutionError):
         await service.get_detail(999999999)
+
+
+async def test_refund_is_credited_only_once_across_disputes(service, pool):
+    """전수감사 §2 — RESOLVED 뒤 같은 구매에 새 분쟁을 열어 다시
+    DELISTED_AND_REFUND해도 환불은 한 번만 적립되고, 두 번째 분쟁은 OPEN으로
+    남는다(트랜잭션 전체 롤백)."""
+    dispute, _, _, buyer = await _open_dispute(pool)
+    admin = await create_test_user(pool)
+
+    first = await service.resolve(dispute.id, admin, "DELISTED_AND_REFUND", "성과 불일치")
+    assert first.refund_amount == _PURCHASE_PRICE
+    balance_after_first = await _wallet_balance(pool, buyer)
+    assert balance_after_first == _PURCHASE_PRICE
+
+    second_dispute = await DisputeService(pool).submit(buyer, dispute.purchase_id, "재차 제기")
+    with pytest.raises(DisputeResolutionError, match="이미 환불"):
+        await service.resolve(second_dispute.id, admin, "DELISTED_AND_REFUND", "재환불 시도")
+
+    assert await _wallet_balance(pool, buyer) == balance_after_first
+    async with pool.acquire() as conn:
+        second_status = await conn.fetchval(
+            "SELECT status FROM disputes WHERE id = $1", second_dispute.id
+        )
+        refund_count = await conn.fetchval(
+            "SELECT COUNT(*) FROM wallet_transactions "
+            "WHERE related_purchase_id = $1 AND tx_type = 'REFUND'",
+            dispute.purchase_id,
+        )
+    assert second_status == "OPEN"
+    assert refund_count == 1

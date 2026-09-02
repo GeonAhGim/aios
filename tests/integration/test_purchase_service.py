@@ -263,3 +263,27 @@ async def _strategy_ref(pool, listing) -> tuple[str, str]:
             listing.listing_id,
         )
     return row["strategy_id"], row["strategy_version"]
+
+
+async def test_same_buyer_cannot_purchase_same_listing_twice(service, pool):
+    """전수감사 §2 — 다른 Idempotency-Key로 재요청해도 같은 리스팅은 한 번만
+    차감·정산된다."""
+    seller = await create_test_user(pool)
+    listing = await _listed_listing(pool, seller)
+    buyer = await create_test_user(pool)
+    await _fund_wallet(pool, buyer, Decimal("100.00"))
+
+    first = await service.purchase(buyer, listing.listing_id)
+    with pytest.raises(PurchaseError, match="이미 구매"):
+        await service.purchase(buyer, listing.listing_id)
+
+    assert await _wallet_balance(pool, buyer) == Decimal("50.00")
+    async with pool.acquire() as conn:
+        count = await conn.fetchval(
+            "SELECT COUNT(*) FROM strategy_purchases "
+            "WHERE listing_id = $1 AND buyer_user_id = $2",
+            listing.listing_id,
+            buyer,
+        )
+    assert count == 1
+    assert first.status == "CONFIRMED"

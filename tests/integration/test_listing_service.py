@@ -140,3 +140,20 @@ async def test_submit_rejects_already_submitted_listing(service, pool):
 
     with pytest.raises(ListingError):
         await service.submit_for_verification(listing.id, seller)
+
+
+async def test_create_listing_rejects_negative_price(service, pool):
+    """전수감사 §2 — 음수 가격은 서비스 계층에서도 거부한다."""
+    seller = await create_test_user(pool)
+    strategy_id, version = await _create_strategy(pool, seller)
+
+    with pytest.raises(ListingError, match="0 이상"):
+        await service.create_listing(seller, strategy_id, version, Decimal("-1"))
+
+
+async def test_create_platform_listing_rejects_negative_price(service, pool):
+    owner = await create_test_user(pool)
+    strategy_id, version = await _create_strategy(pool, owner)
+
+    with pytest.raises(ListingError, match="0 이상"):
+        await service.create_platform_listing(strategy_id, version, Decimal("-0.01"))

@@ -4,7 +4,7 @@ from __future__ import annotations
 from datetime import datetime
 from decimal import Decimal
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from src.services.dispute_service import Dispute
 from src.services.listing_search_service import ListingSummary
@@ -16,7 +16,10 @@ from src.services.review_service import Review
 class ListingCreateRequest(BaseModel):
     strategy_id: str
     strategy_version: str
-    price: Decimal | None = None
+    # 전수감사(docs/FULL_AUDIT_2026-09-02.md §2) 반영 — 음수 가격은 구매 시
+    # wallet_service.debit()의 `balance >= amount` 조건을 항상 통과시켜 구매자
+    # 지갑을 늘리는 경로가 된다. 스키마·서비스·DB CHECK 세 겹으로 막는다.
+    price: Decimal | None = Field(default=None, ge=0)
 
 
 class ListingResponse(BaseModel):
@@ -46,7 +49,7 @@ def to_listing_response(listing: Listing) -> ListingResponse:
 class PlatformListingCreateRequest(BaseModel):
     strategy_id: str
     strategy_version: str
-    price: Decimal | None = None
+    price: Decimal | None = Field(default=None, ge=0)
 
 
 class ListingSearchResponse(BaseModel):

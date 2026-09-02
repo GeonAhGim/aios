@@ -174,3 +174,18 @@ async def test_unknown_decision_value_is_rejected(service, pool):
 
     with pytest.raises(VerificationError):
         await service.decide(listing.id, verifier, "MAYBE")
+
+
+async def test_verifier_cannot_decide_own_listing(service, pool):
+    """전수감사 §2 / 15번 §15.6 — 검증담당자는 자기 리스팅을 승인·반려할 수 없다."""
+    seller = await create_test_user(pool)
+    listing = await _pending_listing(pool, seller)
+
+    with pytest.raises(VerificationError, match="이해상충"):
+        await service.decide(listing.id, seller, "APPROVE")
+
+    async with pool.acquire() as conn:
+        status = await conn.fetchval(
+            "SELECT status FROM strategy_listings WHERE id = $1", listing.id
+        )
+    assert status == "PENDING_VERIFICATION"

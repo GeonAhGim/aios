@@ -51,6 +51,14 @@ class Listing(BaseModel):
     seller_type: str = "USER"
 
 
+def _validate_price(price: Decimal | None) -> None:
+    """전수감사(docs/FULL_AUDIT_2026-09-02.md §2) 반영 — 음수 가격은 구매
+    시점에 지갑 차감이 아니라 증액이 되므로 서비스 계층에서도 거부한다
+    (API 스키마 `Field(ge=0)`·DB CHECK와 함께 세 겹)."""
+    if price is not None and price < 0:
+        raise ListingError("가격은 0 이상이어야 합니다.")
+
+
 class ListingService:
     def __init__(
         self, pool: asyncpg.Pool, *, verify_paper_trading_eligibility: VerifyEligibilityFn
@@ -65,6 +73,7 @@ class ListingService:
         strategy_version: str,
         price: Decimal | None,
     ) -> Listing:
+        _validate_price(price)
         async with self._pool.acquire() as conn:
             owner_user_id = await conn.fetchval(
                 "SELECT owner_user_id FROM strategies WHERE strategy_id = $1 AND version = $2",
@@ -103,6 +112,7 @@ class ListingService:
         LISTED로 즉시 게시한다. 판매자는 wallet_service.PLATFORM_HOUSE_
         USER_ID(하우스 계정) 고정 — 이 계정은 정지 대상이 아니라 seller_
         suspended 확인도 건너뛴다."""
+        _validate_price(price)
         async with self._pool.acquire() as conn:
             owner_user_id = await conn.fetchval(
                 "SELECT owner_user_id FROM strategies WHERE strategy_id = $1 AND version = $2",

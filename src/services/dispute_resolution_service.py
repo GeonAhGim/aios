@@ -127,10 +127,19 @@ class DisputeResolutionService:
                 )
                 new_listing_status = "DELISTED"
 
-                price_paid = await conn.fetchval(
-                    "SELECT price_paid FROM strategy_purchases WHERE id = $1",
+                # 전수감사(docs/FULL_AUDIT_2026-09-02.md §2) 반영 — 같은 구매에
+                # RESOLVED 뒤 새 분쟁을 열고 다시 DELISTED_AND_REFUND하면 환불이
+                # 두 번 적립됐다. refunded_at을 조건부 UPDATE로 한 번만 찍고,
+                # 이미 찍혀 있으면 이 트랜잭션 전체(분쟁 RESOLVED 전이 포함)를
+                # 되돌린다.
+                purchase = await conn.fetchrow(
+                    "UPDATE strategy_purchases SET refunded_at = now() "
+                    "WHERE id = $1 AND refunded_at IS NULL RETURNING price_paid",
                     detail.purchase_id,
                 )
+                if purchase is None:
+                    raise DisputeResolutionError("이미 환불 처리된 구매 건입니다.")
+                price_paid = purchase["price_paid"]
                 if price_paid is not None:
                     await credit(
                         conn,

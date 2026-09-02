@@ -152,8 +152,11 @@ async def purchase_listing(
             return status.HTTP_400_BAD_REQUEST, {"detail": str(exc)}
         return status.HTTP_201_CREATED, to_purchase_response(result).model_dump(mode="json")
 
+    # 전수감사(docs/FULL_AUDIT_2026-09-02.md §2) 반영 — 키에 사용자 ID를 넣어
+    # 스코프를 사용자 단위로 고정한다. 헤더값만으로 키를 만들면 다른 사용자가
+    # 같은 값을 보냈을 때 남의 구매 응답(purchase_id·정산액)을 그대로 돌려받는다.
     status_code, response_body = await with_idempotency(
-        pool, f"purchase:{idempotency_key}", compute
+        pool, f"purchase:{user.user_id}:{idempotency_key}", compute
     )
     if status_code != status.HTTP_201_CREATED:
         raise HTTPException(status_code, response_body.get("detail"))

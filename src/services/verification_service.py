@@ -51,7 +51,7 @@ class VerificationService:
     async def decide(
         self,
         listing_id: int,
-        verifier_id: UUID,  # noqa: ARG002 — 감사기록용, 저장 컬럼은 audit_log 연동 시 추가 예정
+        verifier_id: UUID,
         decision: str,
         *,
         rejection_reason: str | None = None,
@@ -78,6 +78,12 @@ class VerificationService:
                     f"PENDING_VERIFICATION 상태에서만 검증할 수 있습니다"
                     f"(현재: {pre_check['status']})."
                 )
+            # 전수감사(docs/FULL_AUDIT_2026-09-02.md §2) 반영 — 15번 §15.6이
+            # "API 레벨 강제"로 못박은 이해상충 규칙. 검증담당자가 자기 리스팅을
+            # 승인하는 경로를 서비스 계층에서 닫는다(verification_queue_service의
+            # 대기열 필터만으로는 listing_id를 직접 지정한 호출을 막지 못한다).
+            if pre_check["seller_user_id"] == verifier_id:
+                raise VerificationError("본인이 판매하는 리스팅은 검증할 수 없습니다(이해상충).")
 
             new_status = "LISTED" if decision == "APPROVE" else "DRAFT"
             if decision == "APPROVE":

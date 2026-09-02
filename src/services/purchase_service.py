@@ -103,6 +103,20 @@ class PurchaseService:
             if listing["seller_user_id"] == buyer_user_id:
                 raise PurchaseError("본인이 판매 중인 전략은 구매할 수 없습니다.")
 
+            # 전수감사(docs/FULL_AUDIT_2026-09-02.md §2) 반영 — 같은 구매자가
+            # 같은 리스팅을 다른 Idempotency-Key로 재요청하면 두 번 차감·정산됐다.
+            # 위 FOR UPDATE가 같은 리스팅에 대한 동시 구매를 직렬화하므로 이
+            # 조회는 경합에 안전하다. DB UNIQUE(listing_id, buyer_user_id)는
+            # 그 위에 덧댄 마지막 방어선이다(아래 UniqueViolationError 처리).
+            already_purchased = await conn.fetchval(
+                "SELECT id FROM strategy_purchases "
+                "WHERE listing_id = $1 AND buyer_user_id = $2",
+                listing_id,
+                buyer_user_id,
+            )
+            if already_purchased is not None:
+                raise PurchaseError("이미 구매한 리스팅입니다.")
+
             warning = await self._check_risk_warning(
                 buyer_user_id, listing["strategy_id"], listing["strategy_version"]
             )
@@ -115,20 +129,23 @@ class PurchaseService:
             )
             commission_rate = self._commission_rate if price_paid is not None else None
 
-            row = await conn.fetchrow(
-                "INSERT INTO strategy_purchases "
-                "(listing_id, buyer_user_id, price_paid, platform_commission_rate, "
-                "platform_commission_amount, seller_payout_amount, payment_status, "
-                "confirmed_at) "
-                "VALUES ($1, $2, $3, $4, $5, $6, 'CONFIRMED', now()) "
-                "RETURNING id, payment_status",
-                listing_id,
-                buyer_user_id,
-                price_paid,
-                commission_rate,
-                commission_amount,
-                seller_payout_amount,
-            )
+            try:
+                row = await conn.fetchrow(
+                    "INSERT INTO strategy_purchases "
+                    "(listing_id, buyer_user_id, price_paid, platform_commission_rate, "
+                    "platform_commission_amount, seller_payout_amount, payment_status, "
+                    "confirmed_at) "
+                    "VALUES ($1, $2, $3, $4, $5, $6, 'CONFIRMED', now()) "
+                    "RETURNING id, payment_status",
+                    listing_id,
+                    buyer_user_id,
+                    price_paid,
+                    commission_rate,
+                    commission_amount,
+                    seller_payout_amount,
+                )
+            except asyncpg.UniqueViolationError as exc:
+                raise PurchaseError("이미 구매한 리스팅입니다.") from exc
 
             if price_paid is not None:
                 assert seller_payout_amount is not None  # calculate_commission 불변식

@@ -299,3 +299,103 @@ async def test_dispute_submission_requires_own_purchase(client, pool):
     )
 
     assert response.status_code == 400
+
+
+# --- 전수감사(docs/FULL_AUDIT_2026-09-02.md §2) 회귀 테스트 ---
+
+
+async def _listed_listing_via_api(client, pool, seller_headers, seller_id, price="10.00"):
+    strategy_id, version = await _create_strategy(pool, seller_id)
+    create_response = await client.post(
+        "/marketplace/listings",
+        json={"strategy_id": strategy_id, "strategy_version": version, "price": price},
+        headers=seller_headers,
+    )
+    listing_id = create_response.json()["id"]
+    await client.post(
+        f"/marketplace/listings/{listing_id}/submit-verification", headers=seller_headers
+    )
+    _, verifier_headers, verifier_id = await _register(client)
+    await _make_verifier(pool, verifier_id)
+    await client.post(
+        f"/marketplace/listings/{listing_id}/verify",
+        json={"decision": "APPROVE"},
+        headers=verifier_headers,
+    )
+    return listing_id
+
+
+async def _wallet_balance(pool, user_id) -> Decimal:
+    async with pool.acquire() as conn:
+        balance = await conn.fetchval(
+            "SELECT balance FROM user_wallets WHERE user_id = $1", uuid.UUID(user_id)
+        )
+    return balance if balance is not None else Decimal("0")
+
+
+async def test_negative_price_listing_is_rejected_at_schema(client, pool):
+    """음수 가격은 구매 시 지갑 증액 경로가 되므로 스키마에서 422로 막는다."""
+    _, headers, seller_id = await _register(client)
+    strategy_id, version = await _create_strategy(pool, seller_id)
+
+    response = await client.post(
+        "/marketplace/listings",
+        json={"strategy_id": strategy_id, "strategy_version": version, "price": "-1000000"},
+        headers=headers,
+    )
+
+    assert response.status_code == 422
+
+
+async def test_idempotency_key_is_scoped_per_user(client, pool):
+    """같은 Idempotency-Key 헤더값을 다른 사용자가 보내도 서로의 구매 응답을
+    받지 않고 각자 실제로 구매된다."""
+    _, seller_headers, seller_id = await _register(client)
+    _, buyer_a_headers, buyer_a_id = await _register(client)
+    _, buyer_b_headers, buyer_b_id = await _register(client)
+    for buyer_id in (buyer_a_id, buyer_b_id):
+        await _set_risk_profile(pool, buyer_id)
+        await _fund_wallet(pool, buyer_id, Decimal("10.00"))
+    listing_id = await _listed_listing_via_api(client, pool, seller_headers, seller_id)
+
+    key = f"shared-{uuid.uuid4().hex}"
+    first = await client.post(
+        f"/marketplace/listings/{listing_id}/purchase",
+        json={},
+        headers={**buyer_a_headers, "Idempotency-Key": key},
+    )
+    second = await client.post(
+        f"/marketplace/listings/{listing_id}/purchase",
+        json={},
+        headers={**buyer_b_headers, "Idempotency-Key": key},
+    )
+
+    assert first.status_code == 201
+    assert second.status_code == 201
+    assert first.json()["purchase_id"] != second.json()["purchase_id"]
+    assert await _wallet_balance(pool, buyer_a_id) == Decimal("0")
+    assert await _wallet_balance(pool, buyer_b_id) == Decimal("0")
+
+
+async def test_failed_purchase_is_not_cached_under_idempotency_key(client, pool):
+    """잔액 부족 402는 캐시되지 않아 충전 후 같은 키로 재시도하면 구매된다.
+    그 뒤 같은 키 재요청은 성공 응답을 캐시에서 돌려준다."""
+    _, seller_headers, seller_id = await _register(client)
+    _, buyer_headers, buyer_id = await _register(client)
+    await _set_risk_profile(pool, buyer_id)
+    listing_id = await _listed_listing_via_api(client, pool, seller_headers, seller_id)
+
+    key = f"retry-{uuid.uuid4().hex}"
+    headers = {**buyer_headers, "Idempotency-Key": key}
+    url = f"/marketplace/listings/{listing_id}/purchase"
+    denied = await client.post(url, json={}, headers=headers)
+    assert denied.status_code == 402
+
+    await _fund_wallet(pool, buyer_id, Decimal("10.00"))
+    retried = await client.post(url, json={}, headers=headers)
+    assert retried.status_code == 201
+
+    replayed = await client.post(url, json={}, headers=headers)
+    assert replayed.status_code == 201
+    assert replayed.json()["purchase_id"] == retried.json()["purchase_id"]
+    assert await _wallet_balance(pool, buyer_id) == Decimal("0")
