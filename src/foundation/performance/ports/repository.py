@@ -21,6 +21,12 @@ from src.foundation.performance.domain.models import (
 class PerformanceRepository(Protocol):
     async def get_methodology(self, version: str) -> Methodology | None: ...
 
+    async def insert_methodology(self, methodology: Methodology) -> Methodology:
+        """버전 문자열이 내용 주소 성격이라(methodology_hash가 정의를 완전히
+        결정) 이미 있으면 재정의하지 않고 기존 행을 그대로 반환한다
+        (구현체가 `ON CONFLICT DO NOTHING` + 재조회로 멱등성을 보장)."""
+        ...
+
     async def insert_statement(self, statement: PerformanceStatement) -> PerformanceStatement:
         """M5 `performance_statement`은 `REVOKE UPDATE, DELETE`(WORM) — append만
         가능하다. 정정은 새 리비전(state=CORRECTED)을 또 insert하는 것으로
@@ -37,10 +43,14 @@ class PerformanceRepository(Protocol):
 
     async def get_latest_statement(
         self, *, tenant_id: UUID, scope: str, scope_ref: str, period_start: datetime,
-        period_end: datetime,
+        period_end: datetime, methodology_version: str,
     ) -> PerformanceStatement | None:
-        """같은 (tenant, scope, scope_ref, period)의 가장 최신 리비전 — 정정
-        여부를 확인하거나 `prior_statement_id` 체인을 이을 때 쓴다."""
+        """같은 (tenant, scope, scope_ref, period, methodology_version)의 가장
+        최신 리비전 — 정정 여부를 확인하거나 `prior_statement_id` 체인을 이을
+        때 쓴다. `methodology_version`도 키에 포함하는 이유(PRF-009): 방법론이
+        바뀌면 이전 방법론의 리비전 번호를 이어받지 않고 새 계보를 시작해야
+        "조용한 재계산"이 아니라 "새 statement"임이 리비전 번호 자체로도
+        드러난다."""
         ...
 
     async def insert_attribution(self, slice_: AttributionSlice) -> AttributionSlice:

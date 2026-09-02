@@ -146,6 +146,7 @@ async def test_get_latest_statement_returns_highest_revision(pool, repo):
         scope_ref="deployment-1",
         period_start=_NOW,
         period_end=_NOW,
+        methodology_version=DEFAULT_METHODOLOGY.version,
     )
 
     assert latest is not None

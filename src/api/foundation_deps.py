@@ -22,6 +22,11 @@ from src.foundation.paper_control.adapters.postgres_repository import (
     PostgresPaperControlRepository,
 )
 from src.foundation.paper_control.ports.repository import PaperControlRepository
+from src.foundation.performance.adapters.paper_input_adapter import PaperStatementInputAdapter
+from src.foundation.performance.adapters.postgres_repository import (
+    PostgresPerformanceRepository,
+)
+from src.foundation.performance.ports.repository import PerformanceRepository, StatementInputPort
 from src.foundation.reconciliation.adapters.postgres_repository import (
     PostgresReconciliationRepository,
 )
@@ -75,6 +80,18 @@ def get_reconciliation_repository(
     pool: asyncpg.Pool = Depends(get_pool),
 ) -> ReconciliationRepository:
     return PostgresReconciliationRepository(pool)
+
+
+def get_performance_repository(
+    pool: asyncpg.Pool = Depends(get_pool),
+) -> PerformanceRepository:
+    return PostgresPerformanceRepository(pool)
+
+
+def get_paper_statement_input_adapter(
+    pool: asyncpg.Pool = Depends(get_pool),
+) -> StatementInputPort:
+    return PaperStatementInputAdapter(pool)
 
 
 # 전수감사(agent-platform-12, docs/FULL_AUDIT_2026-09-02.md §6) 발견 반영 —

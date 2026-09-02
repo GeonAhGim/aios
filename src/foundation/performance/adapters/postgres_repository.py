@@ -262,17 +262,20 @@ class PostgresPerformanceRepository:
         scope_ref: str,
         period_start: datetime,
         period_end: datetime,
+        methodology_version: str,
     ) -> PerformanceStatement | None:
         async with self._pool.acquire() as conn:
             row = await conn.fetchrow(
                 _SELECT_WITH_METHODOLOGY_HASH + " WHERE ps.tenant_id = $1 AND ps.scope = $2 "
                 "AND ps.scope_ref = $3 AND ps.period_start = $4 AND ps.period_end = $5 "
+                "AND ps.methodology_version = $6 "
                 "ORDER BY ps.revision_no DESC LIMIT 1",
                 tenant_id,
                 scope,
                 scope_ref,
                 period_start,
                 period_end,
+                methodology_version,
             )
         return _row_to_statement(row) if row is not None else None
 
