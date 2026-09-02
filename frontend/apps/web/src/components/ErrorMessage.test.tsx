@@ -56,6 +56,21 @@ describe("ErrorMessage", () => {
     expect(screen.queryByText(/초 후 재시도 가능/)).not.toBeInTheDocument();
   });
 
+  it("fieldErrors가 매핑되면 중복 배너를 숨긴다", () => {
+    const { container } = render(
+      <ErrorMessage
+        errorCode="VALIDATION_INVALID_FIELD"
+        fieldErrors={{ email: "이메일 형식이 올바르지 않습니다." }}
+      />,
+    );
+    expect(container).toBeEmptyDOMElement();
+  });
+
+  it("fieldErrors가 빈 객체면 배너를 그대로 보여준다", () => {
+    render(<ErrorMessage errorCode="VALIDATION_INVALID_FIELD" fieldErrors={{}} />);
+    expect(screen.getByText("입력값을 확인해주세요.")).toBeInTheDocument();
+  });
+
   it("RATE_LIMIT_EXCEEDED이고 retryAfterSec이 있으면 카운트다운 후 재시도 버튼이 활성화된다", () => {
     vi.useFakeTimers();
     try {
