@@ -16,6 +16,10 @@ interface ErrorMessageProps {
   traceId?: string | null;
   retryAfterSec?: number | null;
   onRetry?: () => void;
+  // useFieldErrors가 뽑아낸 필드별 오류 맵(VALIDATION_INVALID_FIELD의 details.fields[]).
+  // 값이 있으면 각 필드 옆에 이미 개별 오류가 표시된다는 뜻이므로, 이 배너는
+  // 중복 안내를 피하기 위해 렌더링하지 않는다.
+  fieldErrors?: Record<string, string>;
 }
 
 export function ErrorMessage({
@@ -24,9 +28,11 @@ export function ErrorMessage({
   traceId,
   retryAfterSec,
   onRetry,
+  fieldErrors,
 }: ErrorMessageProps) {
   const text = getApiErrorMessage(errorCode, message);
   const isRateLimited = errorCode === RATE_LIMIT_ERROR_CODE;
+  const hasMappedFieldErrors = Boolean(fieldErrors && Object.keys(fieldErrors).length > 0);
   const [remainingSec, setRemainingSec] = useState(
     retryAfterSec && retryAfterSec > 0 ? retryAfterSec : 0,
   );
@@ -40,6 +46,8 @@ export function ErrorMessage({
     const timer = setTimeout(() => setRemainingSec((prev) => Math.max(0, prev - 1)), 1000);
     return () => clearTimeout(timer);
   }, [isRateLimited, remainingSec]);
+
+  if (hasMappedFieldErrors) return null;
 
   return (
     <Alert tone="danger">
