@@ -19,8 +19,12 @@ orderbook,candles}) 및 공개 WebSocket(wss://ws.bitget.com/v2/ws/public,
 from __future__ import annotations
 
 import asyncio
+import base64
+import hashlib
+import hmac
 import json
 import logging
+import time
 from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import AbstractAsyncContextManager
 from datetime import datetime, timezone
@@ -34,11 +38,14 @@ from src.core.parser.candle_parser import parse_candles
 from src.core.parser.orderbook_parser import parse_orderbook
 from src.core.parser.ticker_parser import parse_ticker
 from src.data.models.market_data import Candle, OrderBook, OrderBookLevel, Ticker
+from src.data.models.trading import Order
+from src.exchanges.bitget.trading_mixin import _row_to_order
 from src.exchanges.common.types import TickerCallback
 
 logger = logging.getLogger(__name__)
 
 WS_PUBLIC_URL = "wss://ws.bitget.com/v2/ws/public"
+WS_PRIVATE_URL = "wss://ws.bitget.com/v2/ws/private"
 
 # AIOS 표준 timeframe -> Bitget REST candles granularity 파라미터
 _GRANULARITY_MAP = {
@@ -66,6 +73,7 @@ _WS_CANDLE_CHANNEL_MAP = {
 ReconnectHook = Callable[[], Awaitable[None]]
 CandleCallback = Callable[[Candle], Awaitable[None]]
 OrderBookCallback = Callable[[OrderBook], Awaitable[None]]
+OrderCallback = Callable[[Order], Awaitable[None]]
 MessageHandler = Callable[[dict[str, Any]], Awaitable[None]]
 
 
@@ -91,7 +99,40 @@ def _to_bitget_symbol(canonical_symbol: str) -> str:
 
 
 def _is_control_message(message: dict[str, Any]) -> bool:
-    return message.get("event") in ("subscribe", "error")
+    return message.get("event") in ("subscribe", "error", "login")
+
+
+def _build_login_message(api_key: str, api_secret: str, api_passphrase: str) -> dict[str, Any]:
+    """Private 채널 로그인 메시지 — 02b 스펙 §6 "Private 채널 로그인" 절
+    기준 최선 추정치(공식 문서 조사, 2026-09-02). REST(`adapter.py::_sign`)와
+    prehash 방식(HMAC-SHA256 후 base64)은 같지만 서명 대상 문자열이 다르다:
+    REST는 실제 요청 경로/바디를 서명하는 반면, WS 로그인은 문서 관례상
+    고정 문자열 "GET" + "/user/verify"를 쓴다(타임스탬프도 REST의 밀리초와
+    달리 초 단위 문자열). 실제 Demo API 키로 라이브 검증 전까지 확정 아님."""
+    timestamp = str(int(time.time()))
+    prehash = timestamp + "GET" + "/user/verify"
+    mac = hmac.new(api_secret.encode("utf-8"), prehash.encode("utf-8"), hashlib.sha256)
+    sign = base64.b64encode(mac.digest()).decode("utf-8")
+    return {
+        "op": "login",
+        "args": [
+            {
+                "apiKey": api_key,
+                "passphrase": api_passphrase,
+                "timestamp": timestamp,
+                "sign": sign,
+            }
+        ],
+    }
+
+
+def parse_order_ws_message(message: dict[str, Any]) -> list[Order]:
+    """Private `orders` 채널 메시지 파싱 — REST orderInfo/unfilled-orders와
+    행 형태를 공유한다고 가정(trading_mixin.py의 `_row_to_order()` 재사용,
+    라이브 검증 필요)."""
+    if _is_control_message(message):
+        return []
+    return [_row_to_order(row) for row in message.get("data", [])]
 
 
 def parse_ticker_ws_message(message: dict[str, Any]) -> list[Ticker]:
@@ -138,6 +179,7 @@ async def _run_ws_subscription(
     subscribe_msg: dict[str, Any],
     on_message: MessageHandler,
     *,
+    pre_messages: list[dict[str, Any]] | None = None,
     connect_fn: ConnectFn = _connect,
     on_reconnecting: ReconnectHook | None = None,
     on_reconnected: ReconnectHook | None = None,
@@ -146,7 +188,10 @@ async def _run_ws_subscription(
 ) -> None:
     """연결·구독·재연결(지수 백오프)을 전담하는 공통 루프 — 메시지
     자체의 의미는 모른다(on_message에 그대로 위임). 채널이 몇 개든
-    이 루프 하나를 재사용한다(§2.1 재연결 책임 원칙, 로직 중복 방지)."""
+    이 루프 하나를 재사용한다(§2.1 재연결 책임 원칙, 로직 중복 방지).
+    `pre_messages`(예: Private 채널의 login)는 매 연결(최초 포함, 재연결
+    포함)마다 subscribe_msg보다 먼저 순서대로 전송된다 — 재연결 시
+    재로그인이 자동으로 이뤄지는 이유가 이것이다."""
     backoff = 1.0
     first_attempt = True
 
@@ -156,6 +201,8 @@ async def _run_ws_subscription(
         first_attempt = False
         try:
             async with connect_fn(url) as ws:
+                for pre_message in pre_messages or []:
+                    await ws.send(json.dumps(pre_message))
                 await ws.send(json.dumps(subscribe_msg))
                 if backoff > 1.0 and on_reconnected is not None:
                     await on_reconnected()
@@ -267,6 +314,46 @@ class BitgetMarketDataMixin:
             WS_PUBLIC_URL,
             subscribe_msg,
             on_message,
+            connect_fn=connect_fn,
+            on_reconnecting=on_reconnecting,
+            on_reconnected=on_reconnected,
+        )
+
+    async def subscribe_order_stream(
+        self,
+        callback: OrderCallback,
+        *,
+        inst_type: str = "SPOT",
+        on_reconnecting: ReconnectHook | None = None,
+        on_reconnected: ReconnectHook | None = None,
+        connect_fn: ConnectFn = _connect,
+    ) -> None:
+        """02b 스펙 §6/§9 작업분해 4 — Private `orders` 채널(P0). FD-4.5
+        (UNKNOWN 재조회)를 폴링 대신 실시간 이벤트로 대체하는 근본
+        해결책 — 이 채널이 붙으면 기존 3회 폴링 재시도 로직은 "최후의
+        폴백"으로 격하되고 정상 경로는 실시간 확인이 된다(호출부 연결은
+        별도 leaf). 로그인 메커니즘은 `_build_login_message()` docstring
+        참조 — 라이브 검증 전까지 최선 추정치. `ExchangeAdapter` ABC에는
+        아직 없음(다른 확장 메서드들과 동일 원칙, 모듈 docstring 참조)."""
+        login_msg = _build_login_message(
+            self._api_key,  # type: ignore[attr-defined]
+            self._api_secret,  # type: ignore[attr-defined]
+            self._api_passphrase,  # type: ignore[attr-defined]
+        )
+        subscribe_msg = {
+            "op": "subscribe",
+            "args": [{"instType": inst_type, "channel": "orders", "instId": "default"}],
+        }
+
+        async def on_message(message: dict[str, Any]) -> None:
+            for order in parse_order_ws_message(message):
+                await callback(order)
+
+        await _run_ws_subscription(
+            WS_PRIVATE_URL,
+            subscribe_msg,
+            on_message,
+            pre_messages=[login_msg],
             connect_fn=connect_fn,
             on_reconnecting=on_reconnecting,
             on_reconnected=on_reconnected,

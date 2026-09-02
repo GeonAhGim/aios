@@ -5,8 +5,11 @@
 """
 from decimal import Decimal
 
+from src.data.models.trading import OrderStatus
 from src.exchanges.bitget.market_data_mixin import (
+    _build_login_message,
     parse_candle_ws_message,
+    parse_order_ws_message,
     parse_orderbook_ws_message,
     parse_ticker_ws_message,
 )
@@ -84,3 +87,45 @@ def test_parse_orderbook_ws_message_parses_snapshot():
     assert book.bids[0].price == Decimal("80000")
     assert book.asks[0].quantity == Decimal("2.0")
     assert book.symbol == "BTC/USDT"
+
+
+def test_build_login_message_has_expected_shape():
+    login_msg = _build_login_message("key123", "secret456", "phrase789")
+
+    assert login_msg["op"] == "login"
+    arg = login_msg["args"][0]
+    assert arg["apiKey"] == "key123"
+    assert arg["passphrase"] == "phrase789"
+    assert arg["timestamp"].isdigit()
+    assert isinstance(arg["sign"], str) and len(arg["sign"]) > 0
+
+
+def test_parse_order_ws_message_ignores_login_ack():
+    assert parse_order_ws_message({"event": "login", "code": "0"}) == []
+
+
+def test_parse_order_ws_message_ignores_error_event():
+    assert parse_order_ws_message({"event": "error", "code": "30005"}) == []
+
+
+def test_parse_order_ws_message_parses_data_rows():
+    message = {
+        "action": "snapshot",
+        "data": [
+            {
+                "orderId": "12345",
+                "clientOid": "abc",
+                "symbol": "BTCUSDT",
+                "side": "buy",
+                "orderType": "limit",
+                "size": "0.5",
+                "status": "live",
+            }
+        ],
+    }
+
+    orders = parse_order_ws_message(message)
+
+    assert len(orders) == 1
+    assert orders[0].exchange_order_id == "12345"
+    assert orders[0].status == OrderStatus.ACKNOWLEDGED

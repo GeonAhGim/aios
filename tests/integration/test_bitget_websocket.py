@@ -1,9 +1,12 @@
 """02b_bitget_api_v2_full_spec_v1.md §6/§9-4 — _run_ws_subscription()의
 연결관리/재연결/백오프 루프. 실제 소켓 대신 가짜 connect_fn/sleep_fn을
 주입해 결정적으로 재현한다(market_data_mixin.py 리팩터링 목적 그 자체)."""
+import json
+
 import pytest
 from websockets.exceptions import ConnectionClosed
 
+from src.exchanges.bitget.adapter import BitgetAdapter
 from src.exchanges.bitget.market_data_mixin import _run_ws_subscription
 
 
@@ -126,3 +129,33 @@ async def test_run_ws_subscription_calls_reconnect_hooks_only_after_first_attemp
     # 최초 연결이라 backoff==1.0이라 불리지 않고, call 3은 애초에 연결에
     # 성공하지 못한다(StopTest).
     assert reconnected_calls == 1
+
+
+async def test_subscribe_order_stream_sends_login_before_subscribe():
+    connection = _FakeConnection([], raise_after=ConnectionClosed(None, None))
+    call_count = {"n": 0}
+
+    def connect_fn(url: str):
+        call_count["n"] += 1
+        if call_count["n"] == 1:
+            assert url == "wss://ws.bitget.com/v2/ws/private"
+            return _FakeConnectCtx(connection)
+        raise _StopTest
+
+    adapter = BitgetAdapter(api_key="key123", api_secret="secret456", api_passphrase="phrase789")
+
+    async def callback(order) -> None:
+        pass
+
+    with pytest.raises(_StopTest):
+        await adapter.subscribe_order_stream(callback, connect_fn=connect_fn)
+
+    assert len(connection.sent) == 2
+    login_msg = json.loads(connection.sent[0])
+    subscribe_msg = json.loads(connection.sent[1])
+    assert login_msg["op"] == "login"
+    assert login_msg["args"][0]["apiKey"] == "key123"
+    assert subscribe_msg == {
+        "op": "subscribe",
+        "args": [{"instType": "SPOT", "channel": "orders", "instId": "default"}],
+    }
