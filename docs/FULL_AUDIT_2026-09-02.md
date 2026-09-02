@@ -103,7 +103,7 @@ mypy strict 통과의 실질: `type: ignore` 178건 중 160건이 거래소 믹�
 | `configure_logging` 미호출 (§3) | **수정됨** (`2e943c9`) | lifespan 첫 줄. trace_id·tenant_id 필드 관통은 §11 8단계로 남음 |
 | risk_guard 루프 try/except 없음 (P1, 레드팀 #25) | **수정됨** (`2e943c9`) | — |
 | 손실한도 자동정지 미발동 (positions 미기록) | **수정됨** (`c017525`+`2d6c71a`, 9f 세션) | `order_service/position_ledger.py` — 체결(동기 FILLED·폴링 apply_fill 양쪽)에서 positions open/close 기록. RiskGuard·watchdog·portfolio·report의 PnL 입력이 채워짐 |
-| 리스크 기준 인메모리 | 진행 중 (9f) | 코드 `a948e94`, 마이그레이션은 c2 `cdd905e63ffe` 뒤 |
+| 리스크 기준 인메모리 | **수정됨** (`a948e94`+`3b64387`, 9f 세션) | `equity_tracker` DB 영속화(리비전 `4747bb11f733`), `account_state.py` 연결, 재시작 시 복원 |
 | RiskEngine 레버리지 무검사 (P1) · watchdog equity 상수 0 | **수정됨** (`b5630c7`, 9f 세션, FROZEN_PAPER_ONLY 사용자 승인) | 레버리지 실검사, `compute_equity` 실계산 |
 | 거버넌스 불일치 (§4: `.aios-zone` 실제 경로·ADR-E 부재·CODEOWNERS 미치환·CI zone 검증 없음) | **수정됨** (`a784493`) | FROZEN_PAPER_ONLY zone 신설, `src/core/**` 등 미선언 모듈 등록, `scripts/check_zone_manifest.py` CI 게이트, ADR-E를 `docs/`에, CODEOWNERS @GeonAhGim |
 | 커버리지 미측정 (§9) | **측정 시작** (`a784493`) | CI `pytest --cov=src` + coverage.xml 아티팩트. 임계치는 첫 측정치 확인 후 |
@@ -123,7 +123,7 @@ mypy strict 통과의 실질: `type: ignore` 178건 중 160건이 거래소 믹�
 
 | 세션 | 담당 영역(기존) | 배정 작업 | 순서 |
 |---|---|---|---|
-| agent-platform-12 (PM) | 감사·marketplace | ① 실행 루프 운영 배선 — **완료 `2e943c9`** ② 전체 진행 추적·§2-A 갱신 ③ 장부 정합 + 거버넌스 — **완료 `a784493`**(secret scan·벤치마크 단언·#05/#17 barrier는 후속) ④ 세션별 테스트 DB 분리 스크립트 ⑤ 마이그레이션 체인 직렬화: `b7e2c4d9f1a6`(PM) → `a6636fcf92fc`(c2) → `cdd905e63ffe`(c2, `3d0f4fe`) → `4747bb11f733`(9f equity, 진행 중) → `b3f7e0c1a4d5`(44 mandate_revision_id) → c2 snapshot 수치 | A → B |
+| agent-platform-12 (PM) | 감사·marketplace | ① 실행 루프 운영 배선 — **완료 `2e943c9`** ② 전체 진행 추적·§2-A 갱신 ③ 장부 정합 + 거버넌스 — **완료 `a784493`**(secret scan·벤치마크 단언·#05/#17 barrier는 후속) ④ 세션별 테스트 DB 분리 스크립트 ⑤ 마이그레이션 체인 직렬화: `b7e2c4d9f1a6`(PM) → `a6636fcf92fc`(c2) → `cdd905e63ffe`(c2, `3d0f4fe`) → `4747bb11f733`(9f, `3b64387`) → `b3f7e0c1a4d5`(44 mandate_revision_id) → c2 snapshot 수치 | A → B |
 | agent-platform-44 | foundation(trust/mandates/evidence/risk_gate/reconciliation), `foundation_deps` | ① mandates fingerprint — **완료 `0598fda`** ② #25 — PM이 흡수(`2e943c9`) ③ foundation→실행 경로: PRE_SUBMIT 게이트 모듈 `2d6c71a`, tick.py 직전 검사 `027cf96`, `execution_service.start` 게이트 `e1c2d81` — **완료** · mandate_revision_id 마이그레이션 `b3f7e0c1a4d5`(parent `4747bb11f733`) 대기 ④ 감사 체인 실사용: `record_command_event` 헬퍼, mandates/risk_gate 커맨드에 감사 이벤트, `verify_audit_chain` 라우터 — 진행 중 | B |
 | agent-platform-c2 | connections, paper_control, trust | ①②③ — **완료 `a77e9e4`** ④ 불필요(17개 기존재) ⑤ trust MFA step-up·consent expires_at — **완료 `3d0f4fe`** ⑥ FND-05 실체화: 실제 `ReadonlyAccountProvider`(거래소 어댑터 read-only), snapshot 잔고·포지션 수치(마이그레이션은 44 뒤), fake는 테스트 전용 ⑦ FND-09 performance 컨텍스트 골격(81번) ⑧ 44 헬퍼 이후 자기 컨텍스트에 감사 이벤트 부착 | B |
 | agent-platform-9f | risk_gate, exchanges 가드, execution_loop/alert | ① positions 기록 — **완료 `c017525`** ② FSM 복귀(#39) — **완료 `53d56d2`** ③ 일손실·MDD 기준점 영속화 — 코드 `a948e94`, 마이그레이션 `4747bb11f733`(parent `cdd905e63ffe`) 진행 중 ④ 레버리지 실검사·watchdog equity — **완료 `b5630c7`** ⑤ Circuit Breaker `evaluate(metrics)` 지표 수집 배선(`core/safety/metrics_collector.py`) ⑥ DataDistrustMonitor를 tick 캔들 수집 지점에 배선 | B |
