@@ -38,10 +38,46 @@ def _flat_candles(price: str, n: int = 5) -> list[Candle]:
     ]
 
 
-async def test_quorum_not_met_returns_suspicious():
+async def test_no_reference_sources_with_normal_price_returns_degraded_single_source():
+    # R-48 — 참조가 하나도 없으면(둘 다 None) 더 이상 SUSPICIOUS로 영구
+    # 고착되지 않는다. 통계적 타당성 검사만 통과하면 DEGRADED_SINGLE_SOURCE.
     monitor = DataDistrustMonitor()
-    level = await monitor.check("BTC/USDT", _ticker("100"), [None], _flat_candles("100"))
-    assert level == DataDistrustLevel.SUSPICIOUS
+    level = await monitor.check("BTC/USDT", _ticker("100"), [None, None], _flat_candles("100"))
+    assert level == DataDistrustLevel.DEGRADED_SINGLE_SOURCE
+
+
+async def test_no_reference_sources_with_empty_list_also_returns_degraded_single_source():
+    monitor = DataDistrustMonitor()
+    level = await monitor.check("BTC/USDT", _ticker("100"), [], _flat_candles("100"))
+    assert level == DataDistrustLevel.DEGRADED_SINGLE_SOURCE
+
+
+async def test_no_reference_sources_with_abnormal_jump_returns_distrusted():
+    # 참조가 없어도 통계적 이상(평평한 캔들 대비 큰 가격 점프)은 그 자체로
+    # 위험 신호라 DISTRUSTED로 격상한다 — DEGRADED_SINGLE_SOURCE로 숨지 않는다.
+    monitor = DataDistrustMonitor(volatility_multiplier=Decimal("5"))
+    level = await monitor.check(
+        "BTC/USDT", _ticker("120"), [None, None], _flat_candles("100", n=10)
+    )
+    assert level == DataDistrustLevel.DISTRUSTED
+
+
+async def test_restore_sets_level_without_since():
+    monitor = DataDistrustMonitor()
+    monitor.restore("BTC/USDT", DataDistrustLevel.DISTRUSTED)
+    assert monitor.current_level("BTC/USDT") == DataDistrustLevel.DISTRUSTED
+
+
+async def test_restore_with_since_seeds_exit_hysteresis_timer():
+    # since=61초 전에 이미 편차가 낮아지기 시작했다고 복원하면, 바로 다음
+    # check()에서 exit_sustain_seconds(60s)를 넘겨 NORMAL로 빠져나가야 한다.
+    monitor = DataDistrustMonitor(exit_sustain_seconds=60.0)
+    monitor.restore("BTC/USDT", DataDistrustLevel.DISTRUSTED, since=61.0)
+
+    level = await monitor.check(
+        "BTC/USDT", _ticker("100.1"), [_ticker("100"), _ticker("100")], []
+    )
+    assert level == DataDistrustLevel.NORMAL
 
 
 async def test_all_sources_agree_stays_normal():

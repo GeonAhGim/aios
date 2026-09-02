@@ -1,22 +1,19 @@
 """9.5 — Data Distrust Mode 판정 (쿼럼 확장).
 
-Spec: 기능설계문서_v1.20.md#FD-9.5, 정책문서 8.1-A
+Spec: 기능설계문서_v1.20.md#FD-9.5, 정책문서 8.1-A. FD-2.6(5.11,
+core/parser/data_trust_checker.py)의 2소스 히스테리시스를 다중 오라클
+쿼럼 방어까지 포함해 시스템 상태로 승격 — 이 모듈이 5.11을 대체한다.
 
-FD-2.6(5.11, core/parser/data_trust_checker.py)의 2소스 히스테리시스를
-시스템 상태로 승격 — 다중 오라클 동시 스푸핑 방어(쿼럼)까지 포함해
-완성한다. 이 모듈이 5.11을 대체한다(작업트리 10번 문서 9.5 각주: "5.11
-기존 리프 확장").
+판정 로직: primary + 참조 최소 2개(총 3소스 쿼럼)의 중앙값 대비 편차를
+히스테리시스로 감시하고, 피드 비교와 무관한 통계적 타당성 검사(최근
+캔들 실현변동성 대비 괴리 5배 초과 여부)를 병행 — 둘 다 "이상없음"이어야
+정상 유지. 수치(5배, 1.5%/0.75%+60초)는 Draft, 5.11과 동일 기본값.
 
-판정 로직: primary + Reference 최소 2개(총 3소스 쿼럼)의 중앙값을 계산해
-primary가 그 중앙값에서 얼마나 벗어났는지를 히스테리시스로 감시하고,
-피드 비교와 무관한 통계적 타당성 검사(최근 캔들 실현변동성 대비 현재
-괴리가 5배 초과하는지)를 병행한다 — 둘 다 "이상없음"이어야 정상 유지.
-
-편차/해석: 원문 수치(5배, 1.5%/0.75%+60초)는 Draft이며 여기서는 5.11과
-동일한 기본값을 재사용한다. "3소스 중 2개 이상 동시 조회 실패"는 primary
-포함 전체 가용 소스가 2개 미만인 경우로 해석했다(대부분의 실무 구현에서
-primary 자체는 항상 응답 가능하다고 가정하지 않는 것이 안전측).
-"""
+R-48(PM 결정, 2026-09-03) — 참조가 *하나도* 없으면(크립토는 독립 참조가
+아직 2개뿐, 둘 다 실패 시 바로 이 상태) SUSPICIOUS로 고착시키지 않는다
+— 게이트가 신규 진입을 영구히 막게 된다. 대신 `DEGRADED_SINGLE_SOURCE`로
+분리해 피드 비교는 건너뛰고 통계 검사만 적용, 실패 시에만(이례적 급변)
+DISTRUSTED로 격상한다."""
 from __future__ import annotations
 
 import logging
@@ -37,13 +34,14 @@ DEFAULT_DEVIATION_ENTER_PCT = Decimal("1.5")
 DEFAULT_DEVIATION_EXIT_PCT = Decimal("0.75")
 DEFAULT_EXIT_SUSTAIN_SECONDS = 60.0
 DEFAULT_VOLATILITY_MULTIPLIER = Decimal("5")
-MIN_QUORUM_SOURCES = 2  # 미만이면 "판정 불가"(SUSPICIOUS)
+MIN_QUORUM_SOURCES = 2  # primary+참조 1개 이상이면 항상 충족(check() 참조)
 
 
 class DataDistrustLevel(str, Enum):
     NORMAL = "NORMAL"
-    SUSPICIOUS = "SUSPICIOUS"  # 쿼럼 불성립("판정 불가") — 정상도 불신도 아님
+    SUSPICIOUS = "SUSPICIOUS"  # 쿼럼 불성립("판정 불가")
     DISTRUSTED = "DISTRUSTED"
+    DEGRADED_SINGLE_SOURCE = "DEGRADED_SINGLE_SOURCE"  # R-48, 참조 0개 — 게이트 DENY 없음
 
 
 def _realized_volatility(candles: list[Candle]) -> Decimal:
@@ -80,6 +78,18 @@ class DataDistrustMonitor:
     def current_level(self, symbol: str) -> DataDistrustLevel:
         return self._level.get(symbol, DataDistrustLevel.NORMAL)
 
+    def restore(
+        self, symbol: str, level: DataDistrustLevel, since: float | None = None
+    ) -> None:
+        """R-48 — 재시작 후 영속 상태에서 인메모리 상태를 복원(기동 시 1회,
+        distrust_wiring.py). `since`는 절대시각이 아니라 EXIT 타이머 경과
+        초(모노토닉은 재시작마다 0 리셋 — wall-clock 직접대입 불가, 호출부가
+        updated_at과 now() 차이로 계산). None이면 타이머 새로 시작(더 오래
+        DISTRUSTED 유지 — 안전한 방향 편향)."""
+        self._level[symbol] = level
+        if since is not None:
+            self._below_exit_since[symbol] = time.monotonic() - since
+
     async def check(
         self,
         symbol: str,
@@ -87,12 +97,17 @@ class DataDistrustMonitor:
         references: list[Ticker | None],
         recent_candles: list[Candle],
     ) -> DataDistrustLevel:
-        available = [t for t in [primary, *references] if t is not None]
+        available_references = [t for t in references if t is not None]
 
-        if len(available) < MIN_QUORUM_SOURCES:
-            return await self._transition(
-                symbol, DataDistrustLevel.SUSPICIOUS, reason="quorum_not_met"
-            )
+        if not available_references:
+            # R-48 — 참조 0개, median 비교 불가 -> 통계 검사만으로 판정.
+            degraded = DataDistrustLevel.DEGRADED_SINGLE_SOURCE
+            distrusted = DataDistrustLevel.DISTRUSTED
+            new_level = degraded if self._statistical_check(primary, recent_candles) else distrusted
+            return await self._transition(symbol, new_level, reason="no_reference_sources")
+
+        available = [primary, *available_references]  # 참조 1개 이상 -> quorum 항상 충족
+        assert len(available) >= MIN_QUORUM_SOURCES
 
         median_price = median(t.price for t in available)
         if median_price == 0:
