@@ -63,71 +63,109 @@ class PostgresAuditEventRepository:
         classification: Classification,
     ) -> AuditEvent:
         async with self._pool.acquire() as conn, conn.transaction():
-            # 79번 §1 체인 직렬화 지점 — 같은 tenant(또는 system)에 대한
-            # append를 이 트랜잭션이 끝날 때까지 블록한다. 두 개의 int4 키를
-            # 쓰는 건 다른 advisory lock 용도(예: 다른 bounded context가
-            # tenant_id 기반 lock을 또 쓸 때)와 네임스페이스가 섞이지 않게
-            # 하기 위해서다(Postgres 관용 패턴).
-            await conn.execute(
-                "SELECT pg_advisory_xact_lock(hashtext('foundation_audit_event'), "
-                "hashtext($1))",
-                str(tenant_id) if tenant_id is not None else "system",
-            )
-
-            if tenant_id is not None:
-                prev_row = await conn.fetchrow(
-                    "SELECT sequence_no, event_hash FROM foundation_audit_event "
-                    "WHERE tenant_id = $1 ORDER BY sequence_no DESC LIMIT 1",
-                    tenant_id,
-                )
-            else:
-                prev_row = await conn.fetchrow(
-                    "SELECT sequence_no, event_hash FROM foundation_audit_event "
-                    "WHERE tenant_id IS NULL ORDER BY sequence_no DESC LIMIT 1"
-                )
-            next_sequence_no = 1 if prev_row is None else prev_row["sequence_no"] + 1
-            previous_hash = None if prev_row is None else prev_row["event_hash"]
-
-            occurred_at = datetime.now(timezone.utc)
-            event_hash = compute_event_hash(
-                previous_hash=previous_hash,
+            return await self.append_event_in(
+                conn,
                 tenant_id=tenant_id,
-                sequence_no=next_sequence_no,
                 aggregate_type=aggregate_type,
                 aggregate_id=aggregate_id,
+                aggregate_revision=aggregate_revision,
                 action=action,
                 outcome=outcome,
+                actor_subject_id=actor_subject_id,
+                trace_id=trace_id,
                 payload_hash=payload_hash,
+                payload=payload,
                 classification=classification,
-                occurred_at=occurred_at,
             )
 
-            row = await conn.fetchrow(
-                "INSERT INTO foundation_audit_event "
-                "(id, tenant_id, sequence_no, aggregate_type, aggregate_id, "
-                " aggregate_revision, action, outcome, actor_subject_id, trace_id, "
-                " payload_hash, payload, classification, previous_hash, event_hash, "
-                " occurred_at) "
-                "VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12::jsonb, "
-                "$13, $14, $15, $16) "
-                "RETURNING *",
-                uuid4(),
+    async def append_event_in(
+        self,
+        conn: asyncpg.Connection,
+        *,
+        tenant_id: UUID | None,
+        aggregate_type: str,
+        aggregate_id: UUID,
+        aggregate_revision: int | None,
+        action: str,
+        outcome: Outcome,
+        actor_subject_id: UUID | None,
+        trace_id: UUID,
+        payload_hash: str,
+        payload: dict[str, object],
+        classification: Classification,
+    ) -> AuditEvent:
+        """105번 §5.1 — 호출자가 이미 열어 둔 트랜잭션(`conn`) 안에서 실행한다.
+        자체 커넥션을 획득하거나 트랜잭션을 열지 않는다(전수감사 §2 P1
+        "커넥션 쥔 채 두 번째 커넥션 획득" 금지 패턴 회피 — `post_entry` 같은
+        상위 트랜잭션이 이 함수를 호출한 뒤 실패하면 이 INSERT도 함께
+        롤백된다). advisory lock은 `pg_advisory_xact_lock`이라 트랜잭션이
+        끝나야 풀리므로, `conn`이 실제로 트랜잭션 안에 있어야 직렬화가
+        성립한다 — 호출자 책임."""
+        # 79번 §1 체인 직렬화 지점 — 같은 tenant(또는 system)에 대한
+        # append를 이 트랜잭션이 끝날 때까지 블록한다. 두 개의 int4 키를
+        # 쓰는 건 다른 advisory lock 용도(예: 다른 bounded context가
+        # tenant_id 기반 lock을 또 쓸 때)와 네임스페이스가 섞이지 않게
+        # 하기 위해서다(Postgres 관용 패턴).
+        await conn.execute(
+            "SELECT pg_advisory_xact_lock(hashtext('foundation_audit_event'), "
+            "hashtext($1))",
+            str(tenant_id) if tenant_id is not None else "system",
+        )
+
+        if tenant_id is not None:
+            prev_row = await conn.fetchrow(
+                "SELECT sequence_no, event_hash FROM foundation_audit_event "
+                "WHERE tenant_id = $1 ORDER BY sequence_no DESC LIMIT 1",
                 tenant_id,
-                next_sequence_no,
-                aggregate_type,
-                aggregate_id,
-                aggregate_revision,
-                action,
-                outcome.value,
-                actor_subject_id,
-                trace_id,
-                payload_hash,
-                json.dumps(payload),
-                classification.value,
-                previous_hash,
-                event_hash,
-                occurred_at,
             )
+        else:
+            prev_row = await conn.fetchrow(
+                "SELECT sequence_no, event_hash FROM foundation_audit_event "
+                "WHERE tenant_id IS NULL ORDER BY sequence_no DESC LIMIT 1"
+            )
+        next_sequence_no = 1 if prev_row is None else prev_row["sequence_no"] + 1
+        previous_hash = None if prev_row is None else prev_row["event_hash"]
+
+        occurred_at = datetime.now(timezone.utc)
+        event_hash = compute_event_hash(
+            previous_hash=previous_hash,
+            tenant_id=tenant_id,
+            sequence_no=next_sequence_no,
+            aggregate_type=aggregate_type,
+            aggregate_id=aggregate_id,
+            action=action,
+            outcome=outcome,
+            payload_hash=payload_hash,
+            classification=classification,
+            occurred_at=occurred_at,
+        )
+
+        row = await conn.fetchrow(
+            "INSERT INTO foundation_audit_event "
+            "(id, tenant_id, sequence_no, aggregate_type, aggregate_id, "
+            " aggregate_revision, action, outcome, actor_subject_id, trace_id, "
+            " payload_hash, payload, classification, previous_hash, event_hash, "
+            " occurred_at) "
+            "VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12::jsonb, "
+            "$13, $14, $15, $16) "
+            "RETURNING *",
+            uuid4(),
+            tenant_id,
+            next_sequence_no,
+            aggregate_type,
+            aggregate_id,
+            aggregate_revision,
+            action,
+            outcome.value,
+            actor_subject_id,
+            trace_id,
+            payload_hash,
+            json.dumps(payload),
+            classification.value,
+            previous_hash,
+            event_hash,
+            occurred_at,
+        )
         return _row_to_event(row)
 
     async def list_timeline(
