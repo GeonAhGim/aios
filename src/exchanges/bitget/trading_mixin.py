@@ -1,12 +1,23 @@
 """6.7 / 6.8 — BitgetAdapter Trading 메서드군 + health_check().
 
-Spec: 02_exchange_adapter_v1.2.md#§2.1
+Spec: 02_exchange_adapter_v1.3.md#§2.1, 02b_bitget_api_v2_full_spec_v1.md#§3.2
 
-엔드포인트(2026-08-28 문서 조사 확인 — 실제 응답은 Demo API 키로 라이브
-검증 필요):
+엔드포인트(2026-08-28 문서 조사 확인, 미체결/이력/체결/정정 4종은
+2026-09-02 02b 스펙 작업으로 추가 — 실제 응답은 Demo API 키로 라이브
+검증 필요, 04번 문서 §11.3 "정직한 최선 추정치" 원칙 그대로 적용):
 - POST /api/v2/spot/trade/place-order
 - POST /api/v2/spot/trade/cancel-order
+- POST /api/v2/spot/trade/cancel-replace-order (FD-4.4 실제 구현)
 - GET  /api/v2/spot/trade/orderInfo
+- GET  /api/v2/spot/trade/unfilled-orders (FD-4.5/FD-16.4 보강)
+- GET  /api/v2/spot/trade/history-orders (FD-6.4 재시작 정합성 복구 보강)
+- GET  /api/v2/spot/trade/fills (평균 체결가 정밀 계산)
+
+02b 스펙 §2 "인터페이스 계약 불변" 원칙 — 아래 신규 메서드들은
+`ExchangeAdapter` 추상 인터페이스에 아직 없다(어떤 FD-4/8 호출부도 아직
+소비하지 않음, 17.9-A 과잉설계 방지). 실제로 소비하는 호출부가 생기면
+그때 ABC로 승격하고 KISAdapter에도 동일 계약을 요구한다 — 지금은
+BitgetAdapter 전용 확장 메서드로만 존재한다.
 """
 from __future__ import annotations
 
@@ -30,6 +41,38 @@ _STATUS_MAP = {
 
 def _map_status(raw_status: str) -> OrderStatus:
     return _STATUS_MAP.get(raw_status, OrderStatus.UNKNOWN)
+
+
+def _row_to_order(data: dict[str, Any]) -> Order:
+    """orderInfo/unfilled-orders/history-orders 3개 엔드포인트가 공유하는
+    행 형태 — Bitget 스팟 거래 API는 이 3곳에서 동일한 필드 이름을 쓴다
+    (place-order/orderInfo에서 이미 확인된 규칙과 동일). `get_order()`의
+    기존 파싱 로직을 그대로 뽑아 재사용한다(중복 방지)."""
+    status = _map_status(data.get("status", ""))
+    filled_quantity = (
+        Decimal(data["fillSize"])
+        if "fillSize" in data
+        else Decimal(data["size"]) if status == OrderStatus.FILLED else Decimal("0")
+    )
+    return Order(
+        order_id=uuid4(),
+        exchange_order_id=data["orderId"],
+        client_order_id=data.get("clientOid", ""),
+        strategy_id="",  # 자리표시자 — 호출부가 DB 조회로 채워야 함
+        strategy_version="",
+        symbol=data.get("symbol", ""),
+        exchange="bitget",
+        side=OrderSide(data["side"].upper()) if "side" in data else OrderSide.BUY,
+        order_type=(
+            OrderType(data["orderType"].upper()) if "orderType" in data else OrderType.LIMIT
+        ),
+        quantity=Decimal(data.get("size", "0")),
+        status=status,
+        filled_quantity=filled_quantity,
+        created_at=datetime.now(timezone.utc),
+        updated_at=datetime.now(timezone.utc),
+        asset_class=AssetClass.CRYPTO,
+    )
 
 
 class BitgetTradingMixin:
@@ -60,12 +103,21 @@ class BitgetTradingMixin:
         return bool(raw.get("code") == "00000")
 
     async def modify_order(self, order_id: str, **kwargs: Any) -> Order:
-        # Bitget 스팟 주문 정정(cancel-replace) 엔드포인트 존재 여부는
-        # 아직 문서로 확인 못 함 — 착수 시(Demo 키 확보 후) 확정 필요.
-        # 현재는 "취소 후 재주문"이 안전한 폴백이므로 여기서 직접 정정하지 않는다.
-        raise NotImplementedError(
-            "Bitget 스팟 주문 정정은 아직 미확인 — 취소(cancel_order) 후 재주문 사용"
+        """02b 스펙 §3.2(FD-4.4 실제 구현) — cancel-replace-order로 지정가
+        주문의 가격/수량을 정정한다. 시장가 주문 정정 시도는 FD-4.1(사전
+        검증)에서 이미 거래소 호출 전에 차단되므로 여기 도달하는 건 항상
+        지정가다."""
+        body: dict[str, Any] = {"orderId": order_id}
+        if "price" in kwargs:
+            body["price"] = str(kwargs["price"])
+        if "size" in kwargs:
+            body["size"] = str(kwargs["size"])
+
+        raw = await self._request(  # type: ignore[attr-defined]
+            "POST", "/api/v2/spot/trade/cancel-replace-order", body=body
         )
+        data = raw["data"]
+        return await self.get_order(data["orderId"])
 
     async def get_order(self, order_id: str) -> Order:
         """편차: 02번 인터페이스가 order_id 하나만으로 완전한 Order를
@@ -78,32 +130,49 @@ class BitgetTradingMixin:
             "GET", "/api/v2/spot/trade/orderInfo", params={"orderId": order_id}
         )
         data = raw["data"][0] if isinstance(raw["data"], list) else raw["data"]
-        status = _map_status(data.get("status", ""))
-        filled_quantity = (
-            Decimal(data["fillSize"])
-            if "fillSize" in data
-            else Decimal(data["size"]) if status == OrderStatus.FILLED else Decimal("0")
-        )
+        return _row_to_order(data)
 
-        return Order(
-            order_id=uuid4(),
-            exchange_order_id=data["orderId"],
-            client_order_id=data.get("clientOid", ""),
-            strategy_id="",  # 자리표시자 — 호출부가 DB 조회로 채워야 함
-            strategy_version="",
-            symbol=data.get("symbol", ""),
-            exchange="bitget",
-            side=OrderSide(data["side"].upper()) if "side" in data else OrderSide.BUY,
-            order_type=(
-                OrderType(data["orderType"].upper()) if "orderType" in data else OrderType.LIMIT
-            ),
-            quantity=Decimal(data.get("size", "0")),
-            status=status,
-            filled_quantity=filled_quantity,
-            created_at=datetime.now(timezone.utc),
-            updated_at=datetime.now(timezone.utc),
-            asset_class=AssetClass.CRYPTO,
+    async def get_open_orders(self, symbol: str | None = None) -> list[Order]:
+        """02b 스펙 §3.2 — FD-4.5(UNKNOWN 재조회)/FD-16.4(실행 모니터링)
+        보강용. `ExchangeAdapter` ABC에는 아직 없는 Bitget 전용 확장 메서드
+        (모듈 docstring 참조)."""
+        params: dict[str, Any] = {}
+        if symbol is not None:
+            params["symbol"] = symbol.replace("/", "")
+        raw = await self._request(  # type: ignore[attr-defined]
+            "GET", "/api/v2/spot/trade/unfilled-orders", params=params or None
         )
+        return [_row_to_order(row) for row in raw["data"]]
+
+    async def get_order_history(
+        self, symbol: str | None = None, *, limit: int = 100
+    ) -> list[Order]:
+        """FD-6.4(재시작 시 정합성 복구) 보강용."""
+        params: dict[str, Any] = {"limit": str(limit)}
+        if symbol is not None:
+            params["symbol"] = symbol.replace("/", "")
+        raw = await self._request(  # type: ignore[attr-defined]
+            "GET", "/api/v2/spot/trade/history-orders", params=params
+        )
+        return [_row_to_order(row) for row in raw["data"]]
+
+    async def get_fills(
+        self, symbol: str | None = None, *, order_id: str | None = None
+    ) -> list[dict[str, Any]]:
+        """개별 체결 내역(하나의 주문이 여러 번 나눠 체결될 수 있음) —
+        `average_fill_price` 근사치를 정밀 계산하려는 호출부를 위한 원시
+        데이터. 별도 모델을 만들지 않고 raw dict를 그대로 반환한다(02b
+        §2 모델 재사용 원칙 — 이 데이터를 소비하는 호출부가 생기기 전까지
+        구조를 섣불리 확정하지 않는다)."""
+        params: dict[str, Any] = {}
+        if symbol is not None:
+            params["symbol"] = symbol.replace("/", "")
+        if order_id is not None:
+            params["orderId"] = order_id
+        raw = await self._request(  # type: ignore[attr-defined]
+            "GET", "/api/v2/spot/trade/fills", params=params or None
+        )
+        return list(raw["data"])
 
     async def health_check(self) -> bool:
         """Watchdog이 State DB와 무관하게 호출하는 경량 응답성 확인."""

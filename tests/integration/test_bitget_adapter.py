@@ -176,3 +176,112 @@ async def test_health_check_returns_true_on_success():
 
     adapter = _make_adapter(handler)
     assert await adapter.health_check() is True
+
+
+def _order_row(**overrides: object) -> dict:
+    row = {
+        "orderId": "999",
+        "clientOid": "c-1",
+        "symbol": "BTCUSDT",
+        "side": "buy",
+        "orderType": "limit",
+        "size": "0.01",
+        "status": "live",
+    }
+    row.update(overrides)
+    return row
+
+
+async def test_get_open_orders_parses_unfilled_orders_response():
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == "/api/v2/spot/trade/unfilled-orders"
+        assert request.url.params["symbol"] == "BTCUSDT"
+        return _json_response(
+            {
+                "code": "00000",
+                "msg": "success",
+                "requestTime": 1,
+                "data": [_order_row(), _order_row(orderId="1000", status="partially_filled")],
+            }
+        )
+
+    adapter = _make_adapter(handler)
+    orders = await adapter.get_open_orders("BTC/USDT")
+
+    assert len(orders) == 2
+    assert orders[0].exchange_order_id == "999"
+    assert orders[0].status == OrderStatus.ACKNOWLEDGED
+    assert orders[1].status == OrderStatus.PARTIALLY_FILLED
+
+
+async def test_get_order_history_parses_history_orders_response():
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == "/api/v2/spot/trade/history-orders"
+        assert request.url.params["limit"] == "50"
+        return _json_response(
+            {
+                "code": "00000",
+                "msg": "success",
+                "requestTime": 1,
+                "data": [_order_row(status="filled", fillSize="0.01")],
+            }
+        )
+
+    adapter = _make_adapter(handler)
+    orders = await adapter.get_order_history("BTC/USDT", limit=50)
+
+    assert orders[0].status == OrderStatus.FILLED
+    assert orders[0].filled_quantity == Decimal("0.01")
+
+
+async def test_get_fills_returns_raw_rows():
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == "/api/v2/spot/trade/fills"
+        assert request.url.params["orderId"] == "999"
+        return _json_response(
+            {
+                "code": "00000",
+                "msg": "success",
+                "requestTime": 1,
+                "data": [{"orderId": "999", "tradeId": "t-1", "price": "80000", "size": "0.01"}],
+            }
+        )
+
+    adapter = _make_adapter(handler)
+    fills = await adapter.get_fills(order_id="999")
+
+    assert fills == [{"orderId": "999", "tradeId": "t-1", "price": "80000", "size": "0.01"}]
+
+
+async def test_modify_order_cancel_replaces_then_reconfirms():
+    calls: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls.append(request.url.path)
+        if request.url.path == "/api/v2/spot/trade/cancel-replace-order":
+            body = json.loads(request.content)
+            assert body["orderId"] == "999"
+            assert body["price"] == "81000"
+            return _json_response(
+                {
+                    "code": "00000",
+                    "msg": "success",
+                    "requestTime": 1,
+                    "data": {"orderId": "999", "clientOid": "c-1"},
+                }
+            )
+        assert request.url.path == "/api/v2/spot/trade/orderInfo"
+        return _json_response(
+            {
+                "code": "00000",
+                "msg": "success",
+                "requestTime": 1,
+                "data": _order_row(price="81000"),
+            }
+        )
+
+    adapter = _make_adapter(handler)
+    order = await adapter.modify_order("999", price=Decimal("81000"))
+
+    assert calls == ["/api/v2/spot/trade/cancel-replace-order", "/api/v2/spot/trade/orderInfo"]
+    assert order.exchange_order_id == "999"
