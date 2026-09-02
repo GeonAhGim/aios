@@ -87,7 +87,10 @@ def test_event_bus_end_to_end_latency_benchmark():
     p95_ms = all_samples_ms[int(len(all_samples_ms) * 0.95)]
     max_ms = all_samples_ms[-1]
 
-    print(f"\nEvent Bus latency: mean={mean_ms:.3f}ms p50={p50_ms:.3f}ms p95={p95_ms:.3f}ms")
+    print(
+        f"\nEvent Bus latency: mean={mean_ms:.3f}ms p50={p50_ms:.3f}ms "
+        f"p95={p95_ms:.3f}ms max={max_ms:.3f}ms"
+    )
 
     assert len(all_samples_ms) == SAMPLE_COUNT
     # DoD 자체는 "측정만 하면 충족"이라 목표 미달을 실패로 취급하지 않지만,

@@ -334,7 +334,12 @@ async def _wallet_balance(pool, user_id) -> Decimal:
 
 
 async def test_negative_price_listing_is_rejected_at_schema(client, pool):
-    """음수 가격은 구매 시 지갑 증액 경로가 되므로 스키마에서 422로 막는다."""
+    """음수 가격은 구매 시 지갑 증액 경로가 되므로 스키마에서 막는다.
+
+    L4_platform_observability_tenancy_api_v1.0.md §708 — 422 vs 400 충돌은
+    15_api_spec_rbac_v1.6.md#§15.3(400)을 택했다. 전역 RequestValidationError
+    핸들러(src/api/contracts/handlers.py)가 pydantic 검증 실패를 전부 400
+    VALIDATION_INVALID_FIELD로 봉투에 담아 응답한다."""
     _, headers, seller_id = await _register(client)
     strategy_id, version = await _create_strategy(pool, seller_id)
 
@@ -344,7 +349,7 @@ async def test_negative_price_listing_is_rejected_at_schema(client, pool):
         headers=headers,
     )
 
-    assert response.status_code == 422
+    assert response.status_code == 400
 
 
 async def test_idempotency_key_is_scoped_per_user(client, pool):

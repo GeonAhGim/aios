@@ -42,7 +42,11 @@ _STATUS_DEFAULT_CODE: dict[int, ErrorCode] = {
 
 
 def _error_response(
-    code: ErrorCode, message: str, details: dict[str, Any] | None = None
+    code: ErrorCode,
+    message: str,
+    details: dict[str, Any] | None = None,
+    *,
+    status_code: int | None = None,
 ) -> JSONResponse:
     trace_id = current_trace_id()
     error = ApiError(
@@ -53,7 +57,9 @@ def _error_response(
         retry_after_seconds=None,
     )
     body = error.model_dump(mode="json")
-    return JSONResponse(status_code=HTTP_STATUS[code], content=body)
+    return JSONResponse(
+        status_code=status_code if status_code is not None else HTTP_STATUS[code], content=body
+    )
 
 
 def install_exception_handlers(app: FastAPI) -> None:
@@ -65,7 +71,12 @@ def install_exception_handlers(app: FastAPI) -> None:
         else:
             code = _STATUS_DEFAULT_CODE.get(exc.status_code, ErrorCode.INTERNAL_ERROR)
             message = str(exc.detail)
-        return _error_response(code, message)
+        # 레거시 라우터가 `_STATUS_DEFAULT_CODE`에 없는 상태코드(예: 402)로
+        # raise HTTPException하면 위 fallback이 INTERNAL_ERROR를 고르는데,
+        # 그렇다고 응답까지 500으로 바꿔치기하면 라우터가 명시적으로 고른
+        # 상태코드가 사라진다 — 봉투의 error_code는 기본값을 쓰더라도
+        # HTTP status는 항상 exc.status_code를 그대로 돌려준다.
+        return _error_response(code, message, status_code=exc.status_code)
 
     @app.exception_handler(RequestValidationError)
     async def _handle_validation_error(
