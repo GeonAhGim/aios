@@ -1,0 +1,170 @@
+"""RiskGateRepository의 asyncpg 구현.
+
+Spec: AIOSproject 78번 §1/§3.
+
+insert_safety_control()의 fence 증가는 105번 표준의 conditional_update가
+아니라 단일 `UPDATE ... SET current_token = current_token + 1 ... RETURNING`
+이다 — 낙관적 동시성(기대값과 다르면 실패)이 아니라 "누가 먼저 오든 항상
+성공하고, 매번 유일하게 커지는 토큰을 받는다"는 단조증가 카운터가 필요하기
+때문(78번 §3 "increments target fence token" — 여러 요청이 동시에 kill
+switch를 걸어도 전부 성공해야 하고, 각자 서로 다른 토큰을 받아야 한다).
+"""
+from __future__ import annotations
+
+from uuid import UUID
+
+import asyncpg
+
+from src.core.db.conditional_write import ConcurrencyConflictError
+from src.foundation.risk_gate.domain.models import (
+    GateKind,
+    RiskEvaluation,
+    RiskOutcome,
+    SafetyControl,
+    SafetyControlState,
+    SafetyScope,
+)
+
+
+def _row_to_control(row: asyncpg.Record) -> SafetyControl:
+    return SafetyControl(
+        id=row["id"],
+        scope=SafetyScope(row["scope"]),
+        scope_ref=row["scope_ref"],
+        state=SafetyControlState(row["state"]),
+        reason=row["reason"],
+        actor_subject_id=row["actor_subject_id"],
+        fence_token=row["fence_token"],
+        created_at=row["created_at"],
+        deactivated_at=row["deactivated_at"],
+    )
+
+
+def _row_to_evaluation(row: asyncpg.Record) -> RiskEvaluation:
+    return RiskEvaluation(
+        id=row["id"],
+        tenant_id=row["tenant_id"],
+        gate_kind=GateKind(row["gate_kind"]),
+        subject_fingerprint=row["subject_fingerprint"],
+        outcome=RiskOutcome(row["outcome"]),
+        reason_codes=tuple(row["reason_codes"]),
+        obligations=tuple(row["obligations"]),
+        rule_version=row["rule_version"],
+        evaluated_at=row["evaluated_at"],
+        expires_at=row["expires_at"],
+    )
+
+
+class PostgresRiskGateRepository:
+    def __init__(self, pool: asyncpg.Pool) -> None:
+        self._pool = pool
+
+    async def list_active_controls(
+        self, *, tenant_id: UUID, provider_code: str | None = None
+    ) -> tuple[SafetyControl, ...]:
+        refs: list[tuple[str, str]] = [
+            ("GLOBAL", ""),
+            ("TENANT", str(tenant_id)),
+            ("ACCOUNT", str(tenant_id)),
+        ]
+        if provider_code is not None:
+            refs.append(("PROVIDER", provider_code))
+
+        # asyncpg는 "튜플의 리스트"를 그대로 배열 파라미터로 바인딩하지
+        # 못하므로(record[] 캐스팅이 드라이버 버전에 따라 불안정), 각 (scope,
+        # scope_ref) 쌍을 개별 위치 파라미터로 풀어 OR로 잇는다 — 후보가
+        # 최대 4개뿐이라 동적 SQL 없이도 충분하다.
+        conditions = " OR ".join(
+            f"(scope = ${i * 2 + 1} AND scope_ref = ${i * 2 + 2})" for i in range(len(refs))
+        )
+        flat_params: list[object] = []
+        for scope, ref in refs:
+            flat_params.extend([scope, ref])
+
+        async with self._pool.acquire() as conn:
+            rows = await conn.fetch(
+                f"SELECT * FROM safety_control WHERE state = 'ACTIVE' AND ({conditions})",
+                *flat_params,
+            )
+        return tuple(_row_to_control(row) for row in rows)
+
+    async def insert_safety_control(
+        self,
+        *,
+        scope: SafetyScope,
+        scope_ref: str,
+        reason: str,
+        actor_subject_id: UUID,
+    ) -> SafetyControl:
+        async with self._pool.acquire() as conn, conn.transaction():
+            fence_row = await conn.fetchrow(
+                "INSERT INTO safety_fence (scope, scope_ref, current_token) "
+                "VALUES ($1, $2, 1) "
+                "ON CONFLICT (scope, scope_ref) DO UPDATE SET "
+                " current_token = safety_fence.current_token + 1 "
+                "RETURNING current_token",
+                scope.value,
+                scope_ref,
+            )
+            fence_token = fence_row["current_token"]
+
+            row = await conn.fetchrow(
+                "INSERT INTO safety_control "
+                "(scope, scope_ref, reason, actor_subject_id, fence_token) "
+                "VALUES ($1, $2, $3, $4, $5) RETURNING *",
+                scope.value,
+                scope_ref,
+                reason,
+                actor_subject_id,
+                fence_token,
+            )
+        return _row_to_control(row)
+
+    async def get_safety_control(self, control_id: UUID) -> SafetyControl | None:
+        async with self._pool.acquire() as conn:
+            row = await conn.fetchrow("SELECT * FROM safety_control WHERE id = $1", control_id)
+        return _row_to_control(row) if row is not None else None
+
+    async def deactivate_safety_control(self, control_id: UUID) -> SafetyControl:
+        async with self._pool.acquire() as conn:
+            row = await conn.fetchrow(
+                "UPDATE safety_control SET state = 'INACTIVE', deactivated_at = now() "
+                "WHERE id = $1 AND state = 'ACTIVE' RETURNING *",
+                control_id,
+            )
+        if row is None:
+            raise ConcurrencyConflictError(
+                f"safety_control.id={control_id}: 이미 비활성 상태이거나 존재하지 않습니다."
+            )
+        return _row_to_control(row)
+
+    async def insert_evaluation(self, evaluation: RiskEvaluation) -> RiskEvaluation:
+        async with self._pool.acquire() as conn:
+            row = await conn.fetchrow(
+                "INSERT INTO risk_evaluation "
+                "(tenant_id, gate_kind, subject_fingerprint, outcome, reason_codes, "
+                " obligations, rule_version, expires_at) "
+                "VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING *",
+                evaluation.tenant_id,
+                evaluation.gate_kind.value,
+                evaluation.subject_fingerprint,
+                evaluation.outcome.value,
+                list(evaluation.reason_codes),
+                list(evaluation.obligations),
+                evaluation.rule_version,
+                evaluation.expires_at,
+            )
+        return _row_to_evaluation(row)
+
+    async def get_cached_evaluation(
+        self, tenant_id: UUID, fingerprint: str
+    ) -> RiskEvaluation | None:
+        async with self._pool.acquire() as conn:
+            row = await conn.fetchrow(
+                "SELECT * FROM risk_evaluation WHERE tenant_id = $1 AND subject_fingerprint = $2 "
+                "AND (expires_at IS NULL OR expires_at > now()) "
+                "ORDER BY evaluated_at DESC LIMIT 1",
+                tenant_id,
+                fingerprint,
+            )
+        return _row_to_evaluation(row) if row is not None else None

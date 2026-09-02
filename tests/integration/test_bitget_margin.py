@@ -167,3 +167,157 @@ async def test_get_margin_open_orders():
 
     assert orders[0].exchange_order_id == "555"
     assert orders[0].quantity == Decimal("0.01")
+
+
+async def test_get_margin_currencies_returns_raw_rows():
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == "/api/v2/margin/currencies"
+        return _json_response(
+            {
+                "code": "00000",
+                "msg": "success",
+                "requestTime": 1,
+                "data": [{"coin": "USDT", "maxCrossedLeverage": "10"}],
+            }
+        )
+
+    adapter = _make_adapter(handler)
+    currencies = await adapter.get_margin_currencies()
+
+    assert currencies == [{"coin": "USDT", "maxCrossedLeverage": "10"}]
+
+
+async def test_borrow_margin_sends_amount():
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == "/api/v2/margin/crossed/account/borrow"
+        body = json.loads(request.content)
+        assert body == {"coin": "USDT", "borrowAmount": "100"}
+        return _json_response(
+            {
+                "code": "00000",
+                "msg": "success",
+                "requestTime": 1,
+                "data": {"coin": "USDT", "borrowAmount": "100"},
+            }
+        )
+
+    adapter = _make_adapter(handler)
+    result = await adapter.borrow_margin(CROSSED, "usdt", Decimal("100"))
+
+    assert result == {"coin": "USDT", "borrowAmount": "100"}
+
+
+async def test_repay_margin_sends_amount():
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == "/api/v2/margin/crossed/account/repay"
+        body = json.loads(request.content)
+        assert body == {"coin": "USDT", "repayAmount": "50"}
+        return _json_response(
+            {"code": "00000", "msg": "success", "requestTime": 1, "data": {"coin": "USDT"}}
+        )
+
+    adapter = _make_adapter(handler)
+    result = await adapter.repay_margin(CROSSED, "usdt", Decimal("50"))
+
+    assert result == {"coin": "USDT"}
+
+
+async def test_get_max_borrowable_amount():
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == "/api/v2/margin/crossed/account/max-borrowable-amount"
+        return _json_response(
+            {
+                "code": "00000",
+                "msg": "success",
+                "requestTime": 1,
+                "data": {"maxBorrowableAmount": "1000"},
+            }
+        )
+
+    adapter = _make_adapter(handler)
+    amount = await adapter.get_max_borrowable_amount(CROSSED, "usdt")
+
+    assert amount == Decimal("1000")
+
+
+async def test_get_margin_interest_rate_and_limit():
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == "/api/v2/margin/isolated/interest-rate-and-limit"
+        return _json_response(
+            {
+                "code": "00000",
+                "msg": "success",
+                "requestTime": 1,
+                "data": [{"coin": "USDT", "dailyInterestRate": "0.0002"}],
+            }
+        )
+
+    adapter = _make_adapter(handler)
+    rates = await adapter.get_margin_interest_rate_and_limit(ISOLATED)
+
+    assert rates == [{"coin": "USDT", "dailyInterestRate": "0.0002"}]
+
+
+async def test_get_margin_order_history():
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == "/api/v2/margin/crossed/history-orders"
+        return _json_response(
+            {
+                "code": "00000",
+                "msg": "success",
+                "requestTime": 1,
+                "data": [
+                    {
+                        "orderId": "777",
+                        "clientOid": "c-2",
+                        "symbol": "BTCUSDT",
+                        "side": "sell",
+                        "orderType": "limit",
+                        "baseSize": "0.02",
+                        "status": "filled",
+                    }
+                ],
+            }
+        )
+
+    adapter = _make_adapter(handler)
+    orders = await adapter.get_margin_order_history(CROSSED)
+
+    assert orders[0].exchange_order_id == "777"
+    assert orders[0].quantity == Decimal("0.02")
+
+
+async def test_get_margin_fills_returns_raw_rows():
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == "/api/v2/margin/crossed/fills"
+        return _json_response(
+            {
+                "code": "00000",
+                "msg": "success",
+                "requestTime": 1,
+                "data": [{"orderId": "777", "tradeId": "t-1", "price": "80000"}],
+            }
+        )
+
+    adapter = _make_adapter(handler)
+    fills = await adapter.get_margin_fills(CROSSED, order_id="777")
+
+    assert fills == [{"orderId": "777", "tradeId": "t-1", "price": "80000"}]
+
+
+async def test_get_margin_liquidation_orders_returns_raw_rows():
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == "/api/v2/margin/isolated/liquidation-order"
+        return _json_response(
+            {
+                "code": "00000",
+                "msg": "success",
+                "requestTime": 1,
+                "data": [{"orderId": "888", "liquidationType": "force_cancel"}],
+            }
+        )
+
+    adapter = _make_adapter(handler)
+    liquidations = await adapter.get_margin_liquidation_orders(ISOLATED, symbol="BTC/USDT")
+
+    assert liquidations == [{"orderId": "888", "liquidationType": "force_cancel"}]

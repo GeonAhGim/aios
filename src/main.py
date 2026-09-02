@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from typing import Any
@@ -33,6 +34,8 @@ from src.services.credential_resolver import CredentialResolver
 from src.services.exchange_credential_service import ExchangeCredentialService
 from src.services.execution_service import ExecutionService
 from src.services.risk_guard_service import RiskGuardService
+
+logger = logging.getLogger(__name__)
 
 HEARTBEAT_INTERVAL_SECONDS = 2.0  # Draft — watchdog_process.py의 5초 폴링 주기보다 짧게
 ALERT_EVALUATION_INTERVAL_SECONDS = 60.0  # Draft — 가격/지표 알림 평가 주기
@@ -103,7 +106,15 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     async def _alert_evaluation_loop() -> None:
         while True:
             await asyncio.sleep(ALERT_EVALUATION_INTERVAL_SECONDS)
-            await alert_service.evaluate_all_active()
+            # 레드팀 #2026-09-02-21 — evaluate_all_active()는 개별 알림 실패를
+            # 내부에서 이미 건너뛰지만, 이 호출 자체(또는 그 안에서 예상 못한
+            # 예외)가 이 루프를 빠져나가면 alert_task 코루틴이 영구히 죽어
+            # 재시작 전까지 아무 사용자의 알림도 평가되지 않는다 — 두 번째
+            # 방어선으로 여기서도 잡아 다음 주기에 계속 시도한다.
+            try:
+                await alert_service.evaluate_all_active()
+            except Exception:
+                logger.exception("alert_evaluation_loop: 이번 주기 평가 실패 — 다음 주기에 재시도합니다.")
 
     alert_task = asyncio.create_task(_alert_evaluation_loop())
 
@@ -178,7 +189,9 @@ def create_app() -> FastAPI:
     from src.api.routers.foundation import connections as foundation_connections
     from src.api.routers.foundation import evidence as foundation_evidence
     from src.api.routers.foundation import mandates as foundation_mandates
+    from src.api.routers.foundation import risk_gate as foundation_risk_gate
     from src.api.routers.foundation import trust as foundation_trust
+    from src.api.routers.foundation import validation as foundation_validation
 
     app.include_router(auth.router, prefix="/auth", tags=["auth"])
     app.include_router(users.router, prefix="/users", tags=["users"])
@@ -194,6 +207,8 @@ def create_app() -> FastAPI:
     app.include_router(foundation_mandates.router)
     app.include_router(foundation_evidence.router)
     app.include_router(foundation_connections.router)
+    app.include_router(foundation_validation.router)
+    app.include_router(foundation_risk_gate.router)
     app.include_router(executions.router, prefix="/executions", tags=["executions"])
     app.include_router(notifications.router, prefix="/notifications", tags=["notifications"])
     app.include_router(admin.router, tags=["admin"])
