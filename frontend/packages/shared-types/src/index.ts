@@ -22,3 +22,4 @@ export * from "./notFound";
 export * from "./forbidden";
 export * from "./stateConflict";
 export * from "./badRequest";
+export * from "./tokenPair";
