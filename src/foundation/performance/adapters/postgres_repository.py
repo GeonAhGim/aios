@@ -2,9 +2,9 @@
 
 Spec: docs/specs/L4_strategy_portfolio_backtest_v1.0.md §2.6/§3.7 M5.
 
-`components`/`returns`/`risk`/`benchmark`는 JSONB에 넣어야 하므로 Decimal을
-문자열로 직렬화한다(부동소수 표현 오차로 값이 흔들리지 않게 — 이 세션
-전반의 관례, reconciliation의 `compute_input_hash`와 같은 이유)."""
+statement 행의 Decimal↔JSONB (역)직렬화는 postgres_statement_repository.py로
+분리했다(P6: 300줄 초과 분할) — 이 파일은 쿼리 실행과 methodology/attribution
+매핑만 담당한다."""
 from __future__ import annotations
 
 import json
@@ -14,118 +14,22 @@ from uuid import UUID
 
 import asyncpg
 
+from src.foundation.performance.adapters.postgres_statement_repository import (
+    breakdown_to_json,
+    decimal_dict_to_json,
+    returns_to_json,
+    row_to_statement,
+)
 from src.foundation.performance.domain.models import (
     AttributionSlice,
-    ComponentBreakdown,
     Methodology,
     PerformanceStatement,
-    ReturnFigure,
-    StatementState,
 )
 
 _SELECT_WITH_METHODOLOGY_HASH = (
     "SELECT ps.*, pm.methodology_hash FROM performance_statement ps "
     "JOIN performance_methodology pm ON pm.version = ps.methodology_version"
 )
-
-_BREAKDOWN_FIELDS = (
-    "gross_pnl",
-    "fees",
-    "slippage",
-    "funding",
-    "fx",
-    "cashflows_net",
-    "estimated_tax",
-    "net_pnl",
-)
-
-
-def _decimal_or_none_to_str(value: Decimal | None) -> str | None:
-    return str(value) if value is not None else None
-
-
-def _str_to_decimal_or_none(value: str | None) -> Decimal | None:
-    return Decimal(value) if value is not None else None
-
-
-def _breakdown_to_json(b: ComponentBreakdown) -> str:
-    return json.dumps({f: _decimal_or_none_to_str(getattr(b, f)) for f in _BREAKDOWN_FIELDS})
-
-
-def _breakdown_from_json(raw: str) -> ComponentBreakdown:
-    data = json.loads(raw)
-    return ComponentBreakdown(**{f: _str_to_decimal_or_none(data[f]) for f in _BREAKDOWN_FIELDS})
-
-
-def _returns_to_json(returns: tuple[ReturnFigure, ...]) -> str:
-    return json.dumps(
-        [
-            {
-                "value_pct": _decimal_or_none_to_str(r.value_pct),
-                "basis": r.basis,
-                "method": r.method,
-                "period_start": r.period_start.isoformat(),
-                "period_end": r.period_end.isoformat(),
-                "annualized": r.annualized,
-                "periods_per_year": r.periods_per_year,
-            }
-            for r in returns
-        ]
-    )
-
-
-def _returns_from_json(raw: str) -> tuple[ReturnFigure, ...]:
-    return tuple(
-        ReturnFigure(
-            value_pct=_str_to_decimal_or_none(r["value_pct"]),
-            basis=r["basis"],
-            method=r["method"],
-            period_start=datetime.fromisoformat(r["period_start"]),
-            period_end=datetime.fromisoformat(r["period_end"]),
-            annualized=r["annualized"],
-            periods_per_year=r["periods_per_year"],
-        )
-        for r in json.loads(raw)
-    )
-
-
-def _decimal_dict_to_json(d: dict[str, Decimal | None] | None) -> str | None:
-    if d is None:
-        return None
-    return json.dumps({k: _decimal_or_none_to_str(v) for k, v in d.items()})
-
-
-def _decimal_dict_from_json(raw: str | None) -> dict[str, Decimal | None] | None:
-    if raw is None:
-        return None
-    return {k: _str_to_decimal_or_none(v) for k, v in json.loads(raw).items()}
-
-
-def _row_to_statement(row: asyncpg.Record) -> PerformanceStatement:
-    return PerformanceStatement(
-        id=row["id"],
-        tenant_id=row["tenant_id"],
-        scope=row["scope"],
-        scope_ref=row["scope_ref"],
-        period_start=row["period_start"],
-        period_end=row["period_end"],
-        as_of=row["as_of"],
-        methodology_version=row["methodology_version"],
-        methodology_hash=row["methodology_hash"],
-        input_refs=tuple(json.loads(row["input_refs"])),
-        components=_breakdown_from_json(row["components"]),
-        returns=_returns_from_json(row["returns"]),
-        risk=_decimal_dict_from_json(row["risk"]) or {},
-        benchmark=_decimal_dict_from_json(row["benchmark"]),
-        benchmark_ref=row["benchmark_ref"],
-        state=StatementState(row["state"]),
-        revision_no=row["revision_no"],
-        prior_statement_id=row["prior_statement_id"],
-        identity_ok=row["identity_ok"],
-        identity_residual=row["identity_residual"],
-        limitations=tuple(row["limitations"]),
-        evidence_refs=tuple(json.loads(row["evidence_refs"])),
-    )
 
 
 def _row_to_methodology(row: asyncpg.Record) -> Methodology:
@@ -209,10 +113,10 @@ class PostgresPerformanceRepository:
                 statement.as_of,
                 statement.methodology_version,
                 json.dumps(list(statement.input_refs)),
-                _breakdown_to_json(statement.components),
-                _returns_to_json(statement.returns),
-                _decimal_dict_to_json(statement.risk) or "{}",
-                _decimal_dict_to_json(statement.benchmark),
+                breakdown_to_json(statement.components),
+                returns_to_json(statement.returns),
+                decimal_dict_to_json(statement.risk) or "{}",
+                decimal_dict_to_json(statement.benchmark),
                 statement.benchmark_ref,
                 statement.state.value,
                 statement.revision_no,
@@ -227,13 +131,13 @@ class PostgresPerformanceRepository:
                 statement.methodology_version,
             )
         assert hash_row is not None  # FK 제약이 이미 존재를 보장한다
-        return _row_to_statement({**dict(row), "methodology_hash": hash_row["methodology_hash"]})
+        return row_to_statement({**dict(row), "methodology_hash": hash_row["methodology_hash"]})
 
     async def get_statement(self, statement_id: UUID) -> PerformanceStatement | None:
         async with self._pool.acquire() as conn:
             row = await conn.fetchrow(_SELECT_WITH_METHODOLOGY_HASH + " WHERE ps.id = $1",
                                        statement_id)
-        return _row_to_statement(row) if row is not None else None
+        return row_to_statement(row) if row is not None else None
 
     async def list_statements(
         self, *, tenant_id: UUID, scope: str | None = None
@@ -252,7 +156,7 @@ class PostgresPerformanceRepository:
                     tenant_id,
                     scope,
                 )
-        return tuple(_row_to_statement(r) for r in rows)
+        return tuple(row_to_statement(r) for r in rows)
 
     async def get_latest_statement(
         self,
@@ -277,7 +181,7 @@ class PostgresPerformanceRepository:
                 period_end,
                 methodology_version,
             )
-        return _row_to_statement(row) if row is not None else None
+        return row_to_statement(row) if row is not None else None
 
     async def insert_attribution(self, slice_: AttributionSlice) -> AttributionSlice:
         async with self._pool.acquire() as conn:
