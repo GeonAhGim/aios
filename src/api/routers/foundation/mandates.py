@@ -8,6 +8,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 
 from src.api.deps import get_auth_service, get_current_user, reauthenticate
 from src.api.foundation_deps import (
+    get_audit_event_repository,
     get_mandate_repository,
     get_risk_gate_repository,
     get_trust_repository,
@@ -21,6 +22,7 @@ from src.api.schemas.foundation.mandates import (
     PolicyEvaluationSubject,
 )
 from src.core.db.conditional_write import ConcurrencyConflictError
+from src.foundation.evidence.ports.repository import AuditEventRepository
 from src.foundation.mandates.application.activate_revision import (
     CoolingOffNotElapsedError,
     CrossTenantMandateAccessError,
@@ -98,6 +100,7 @@ async def post_activate_revision(
     mandate_repo: MandateRepository = Depends(get_mandate_repository),
     trust_repo: TrustRepository = Depends(get_trust_repository),
     risk_gate_repo: RiskGateRepository = Depends(get_risk_gate_repository),
+    audit_repo: AuditEventRepository = Depends(get_audit_event_repository),
     auth: AuthService = Depends(get_auth_service),
 ) -> MandateRevisionView:
     reauthenticated = False
@@ -113,6 +116,7 @@ async def post_activate_revision(
             subject_id=user.user_id,
             revision_id=revision_id,
             reauthenticated=reauthenticated,
+            audit_repo=audit_repo,
         )
     except RevisionNotFoundError as exc:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "존재하지 않는 revision입니다.") from exc
@@ -153,9 +157,10 @@ async def post_pause_mandate(
     user: User = Depends(get_current_user),
     repo: MandateRepository = Depends(get_mandate_repository),
     risk_gate_repo: RiskGateRepository = Depends(get_risk_gate_repository),
+    audit_repo: AuditEventRepository = Depends(get_audit_event_repository),
 ) -> MandateRevisionView:
     try:
-        result = await pause_mandate(repo, tenant_id=user.user_id)
+        result = await pause_mandate(repo, tenant_id=user.user_id, audit_repo=audit_repo)
     except ConcurrencyConflictError as exc:
         raise HTTPException(status.HTTP_409_CONFLICT, str(exc)) from exc
     await risk_gate_repo.invalidate_evaluations(tenant_id=user.user_id)
@@ -167,9 +172,10 @@ async def post_resume_mandate(
     user: User = Depends(get_current_user),
     repo: MandateRepository = Depends(get_mandate_repository),
     risk_gate_repo: RiskGateRepository = Depends(get_risk_gate_repository),
+    audit_repo: AuditEventRepository = Depends(get_audit_event_repository),
 ) -> MandateRevisionView:
     try:
-        result = await resume_mandate(repo, tenant_id=user.user_id)
+        result = await resume_mandate(repo, tenant_id=user.user_id, audit_repo=audit_repo)
     except ConcurrencyConflictError as exc:
         raise HTTPException(status.HTTP_409_CONFLICT, str(exc)) from exc
     await risk_gate_repo.invalidate_evaluations(tenant_id=user.user_id)

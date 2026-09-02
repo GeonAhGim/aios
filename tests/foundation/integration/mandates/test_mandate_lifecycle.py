@@ -9,6 +9,8 @@ import pytest
 from dotenv import dotenv_values
 
 from src.core.db.conditional_write import ConcurrencyConflictError
+from src.foundation.evidence.adapters.postgres_repository import PostgresAuditEventRepository
+from src.foundation.evidence.application.get_audit_timeline import get_audit_timeline
 from src.foundation.mandates.adapters.postgres_repository import PostgresMandateRepository
 from src.foundation.mandates.application.activate_revision import (
     CoolingOffNotElapsedError,
@@ -61,6 +63,11 @@ def repo(pool):
 @pytest.fixture
 def trust_repo(pool):
     return PostgresTrustRepository(pool)
+
+
+@pytest.fixture
+def audit_repo(pool):
+    return PostgresAuditEventRepository(pool)
 
 
 async def _tenant(pool):
@@ -369,3 +376,16 @@ async def test_concurrent_activation_of_two_proposed_revisions_only_one_succeeds
     )
     successes = [r for r in results if not isinstance(r, Exception)]
     assert len(successes) == 1
+
+
+async def test_pause_resume_record_audit_events(pool, repo, trust_repo, audit_repo):
+    """전수감사 §6 회귀 — pause/resume이 실제 감사 이벤트를 남기는지."""
+    tenant_id = await _activated_tenant(pool, repo, trust_repo)
+
+    await pause_mandate(repo, tenant_id=tenant_id, audit_repo=audit_repo)
+    await resume_mandate(repo, tenant_id=tenant_id, audit_repo=audit_repo)
+
+    page = await get_audit_timeline(audit_repo, tenant_id=tenant_id, limit=10)
+    actions = [e.action for e in page.items]
+    assert "mandate_paused" in actions
+    assert "mandate_resumed" in actions

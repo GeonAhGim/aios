@@ -12,6 +12,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 
 from src.api.deps import get_current_admin, get_current_user
 from src.api.foundation_deps import (
+    get_audit_event_repository,
     get_connection_repository,
     get_mandate_repository,
     get_paper_control_repository,
@@ -25,6 +26,7 @@ from src.api.schemas.foundation.risk_gate import (
     SafetyControlView,
 )
 from src.foundation.connections.ports.repository import ConnectionRepository
+from src.foundation.evidence.ports.repository import AuditEventRepository
 from src.foundation.mandates.ports.repository import MandateRepository
 from src.foundation.paper_control.application.apply_safety_control import (
     apply_safety_control_to_deployments,
@@ -87,6 +89,7 @@ async def post_activate_safety_control(
     user: User = Depends(get_current_user),
     repo: RiskGateRepository = Depends(get_risk_gate_repository),
     paper_control_repo: PaperControlRepository = Depends(get_paper_control_repository),
+    audit_repo: AuditEventRepository = Depends(get_audit_event_repository),
 ) -> SafetyControlView:
     try:
         control = await activate_safety_control(
@@ -97,6 +100,7 @@ async def post_activate_safety_control(
             scope=SafetyScope(body.scope.value),
             scope_ref=body.scope_ref,
             reason=body.reason,
+            audit_repo=audit_repo,
         )
     except UnauthorizedSafetyControlScopeError as exc:
         raise HTTPException(status.HTTP_403_FORBIDDEN, str(exc)) from exc
@@ -122,6 +126,7 @@ async def post_deactivate_safety_control(
     control_id: UUID,
     user: User = Depends(get_current_user),
     repo: RiskGateRepository = Depends(get_risk_gate_repository),
+    audit_repo: AuditEventRepository = Depends(get_audit_event_repository),
 ) -> SafetyControlView:
     try:
         return await deactivate_safety_control(
@@ -129,6 +134,7 @@ async def post_deactivate_safety_control(
             tenant_id=user.user_id,
             actor_is_admin=user.is_platform_admin,
             control_id=control_id,
+            audit_repo=audit_repo,
         )
     except SafetyControlNotFoundError as exc:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "존재하지 않는 통제입니다.") from exc
@@ -142,6 +148,7 @@ async def post_admin_activate_safety_control(
     admin: User = Depends(get_current_admin),
     repo: RiskGateRepository = Depends(get_risk_gate_repository),
     paper_control_repo: PaperControlRepository = Depends(get_paper_control_repository),
+    audit_repo: AuditEventRepository = Depends(get_audit_event_repository),
 ) -> SafetyControlView:
     """78번 §4 "Only authorized operator ... routes may create scoped safety
     controls" 중 GLOBAL/TENANT/PROVIDER 범위 전용 경로 — 위 self-service
@@ -157,6 +164,7 @@ async def post_admin_activate_safety_control(
             scope=SafetyScope(body.scope.value),
             scope_ref=body.scope_ref,
             reason=body.reason,
+            audit_repo=audit_repo,
         )
     except MissingScopeRefError as exc:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from exc

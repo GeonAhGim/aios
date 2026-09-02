@@ -18,6 +18,8 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from uuid import UUID
 
+from src.foundation.evidence.application.record_command_event import record_command_event
+from src.foundation.evidence.ports.repository import AuditEventRepository
 from src.foundation.mandates.application.create_draft_mandate import revision_to_view
 from src.foundation.mandates.contracts.v1 import MandateRevisionView
 from src.foundation.mandates.domain.models import MandateRevisionState
@@ -71,6 +73,7 @@ async def activate_revision(
     subject_id: UUID,
     revision_id: UUID,
     reauthenticated: bool,
+    audit_repo: AuditEventRepository | None = None,
 ) -> MandateRevisionView:
     revision = await mandate_repo.get_revision(revision_id)
     if revision is None:
@@ -110,4 +113,16 @@ async def activate_revision(
                 )
 
     activated = await mandate_repo.activate_revision(mandate.id, revision_id)
+
+    if audit_repo is not None:
+        await record_command_event(
+            audit_repo,
+            tenant_id=tenant_id,
+            aggregate_type="mandate_revision",
+            aggregate_id=revision_id,
+            action="mandate_revision_activated",
+            actor_subject_id=subject_id,
+            payload={"mandate_id": str(mandate.id)},
+        )
+
     return revision_to_view(activated)

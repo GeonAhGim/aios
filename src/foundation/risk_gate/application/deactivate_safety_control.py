@@ -10,6 +10,9 @@ from __future__ import annotations
 
 from uuid import UUID
 
+from src.foundation.evidence.application.record_command_event import record_command_event
+from src.foundation.evidence.contracts.v1 import Classification as AuditClassification
+from src.foundation.evidence.ports.repository import AuditEventRepository
 from src.foundation.risk_gate.application.activate_safety_control import (
     UnauthorizedSafetyControlScopeError,
     control_to_view,
@@ -31,6 +34,7 @@ async def deactivate_safety_control(
     tenant_id: UUID,
     actor_is_admin: bool,
     control_id: UUID,
+    audit_repo: AuditEventRepository | None = None,
 ) -> SafetyControlView:
     control = await repo.get_safety_control(control_id)
     if control is None:
@@ -51,5 +55,22 @@ async def deactivate_safety_control(
         await repo.invalidate_evaluations(tenant_id=None)
     elif control.scope in (SafetyScope.TENANT, SafetyScope.ACCOUNT):
         await repo.invalidate_evaluations(tenant_id=UUID(control.scope_ref))
+
+    if audit_repo is not None:
+        event_tenant_id = (
+            UUID(control.scope_ref)
+            if control.scope in (SafetyScope.TENANT, SafetyScope.ACCOUNT)
+            else None
+        )
+        await record_command_event(
+            audit_repo,
+            tenant_id=event_tenant_id,
+            aggregate_type="safety_control",
+            aggregate_id=control.id,
+            action="safety_control_deactivated",
+            actor_subject_id=tenant_id,
+            classification=AuditClassification.CONFIDENTIAL,
+            payload={"scope": control.scope.value, "scope_ref": control.scope_ref},
+        )
 
     return control_to_view(deactivated)

@@ -14,6 +14,8 @@ from __future__ import annotations
 
 from uuid import UUID
 
+from src.foundation.evidence.application.record_command_event import record_command_event
+from src.foundation.evidence.ports.repository import AuditEventRepository
 from src.foundation.mandates.application.create_draft_mandate import revision_to_view
 from src.foundation.mandates.contracts.v1 import MandateRevisionView
 from src.foundation.mandates.domain.models import MandateRevisionState
@@ -24,7 +26,12 @@ class NoActiveMandateError(Exception):
     pass
 
 
-async def pause_mandate(repo: MandateRepository, *, tenant_id: UUID) -> MandateRevisionView:
+async def pause_mandate(
+    repo: MandateRepository,
+    *,
+    tenant_id: UUID,
+    audit_repo: AuditEventRepository | None = None,
+) -> MandateRevisionView:
     mandate = await repo.get_mandate(tenant_id)
     if mandate is None:
         raise NoActiveMandateError(str(tenant_id))
@@ -37,10 +44,26 @@ async def pause_mandate(repo: MandateRepository, *, tenant_id: UUID) -> MandateR
         expected_state=MandateRevisionState.ACTIVE.value,
         new_state=MandateRevisionState.PAUSED.value,
     )
+
+    if audit_repo is not None:
+        await record_command_event(
+            audit_repo,
+            tenant_id=tenant_id,
+            aggregate_type="mandate_revision",
+            aggregate_id=active.id,
+            action="mandate_paused",
+            actor_subject_id=tenant_id,
+        )
+
     return revision_to_view(paused)
 
 
-async def resume_mandate(repo: MandateRepository, *, tenant_id: UUID) -> MandateRevisionView:
+async def resume_mandate(
+    repo: MandateRepository,
+    *,
+    tenant_id: UUID,
+    audit_repo: AuditEventRepository | None = None,
+) -> MandateRevisionView:
     mandate = await repo.get_mandate(tenant_id)
     if mandate is None:
         raise NoActiveMandateError(str(tenant_id))
@@ -53,4 +76,15 @@ async def resume_mandate(repo: MandateRepository, *, tenant_id: UUID) -> Mandate
         expected_state=MandateRevisionState.PAUSED.value,
         new_state=MandateRevisionState.ACTIVE.value,
     )
+
+    if audit_repo is not None:
+        await record_command_event(
+            audit_repo,
+            tenant_id=tenant_id,
+            aggregate_type="mandate_revision",
+            aggregate_id=active_revision_id,
+            action="mandate_resumed",
+            actor_subject_id=tenant_id,
+        )
+
     return revision_to_view(resumed)

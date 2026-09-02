@@ -91,3 +91,40 @@ async def test_timeline_shows_own_events_only(client, pool):
     items = response.json()["items"]
     assert len(items) == 1
     assert items[0]["action"] == "mandate_activated"
+
+
+async def test_verify_chain_requires_admin(client):
+    headers, _ = await _register(client)
+    response = await client.post("/v1/foundation/evidence/chain:verify", headers=headers)
+    assert response.status_code == 403
+
+
+async def test_verify_chain_succeeds_for_admin_with_intact_chain(client, pool):
+    headers, user_id = await _register(client)
+    async with pool.acquire() as conn:
+        await conn.execute(
+            "UPDATE users SET is_platform_admin = true WHERE user_id = $1", uuid.UUID(user_id)
+        )
+
+    repo = PostgresAuditEventRepository(pool)
+    await append_audit_event(
+        repo,
+        RecordAuditEventCommand(
+            tenant_id=uuid.UUID(user_id),
+            aggregate_type="mandate_revision",
+            aggregate_id=uuid4(),
+            action="mandate_activated",
+            outcome=Outcome.SUCCESS,
+            actor_subject_id=uuid.UUID(user_id),
+            trace_id=uuid4(),
+            payload={},
+        ),
+    )
+
+    response = await client.post(
+        "/v1/foundation/evidence/chain:verify",
+        params={"tenant_id": user_id},
+        headers=headers,
+    )
+    assert response.status_code == 200
+    assert response.json() == {"verified": True}

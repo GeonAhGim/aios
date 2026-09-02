@@ -24,6 +24,9 @@ from __future__ import annotations
 
 from uuid import UUID
 
+from src.foundation.evidence.application.record_command_event import record_command_event
+from src.foundation.evidence.contracts.v1 import Classification as AuditClassification
+from src.foundation.evidence.ports.repository import AuditEventRepository
 from src.foundation.risk_gate.contracts.v1 import SafetyControlState as ContractState
 from src.foundation.risk_gate.contracts.v1 import SafetyControlView
 from src.foundation.risk_gate.contracts.v1 import SafetyScope as ContractScope
@@ -75,6 +78,7 @@ async def activate_safety_control(
     scope: SafetyScope,
     scope_ref: str | None,
     reason: str,
+    audit_repo: AuditEventRepository | None = None,
 ) -> SafetyControlView:
     if scope == SafetyScope.GLOBAL:
         resolved_ref = GLOBAL_SCOPE_REF
@@ -109,5 +113,23 @@ async def activate_safety_control(
         await repo.invalidate_evaluations(tenant_id=UUID(resolved_ref))
     # STRATEGY_DEPLOYMENT: 이 범위를 조회하는 평가 경로 자체가 아직 없어
     # (#2026-09-02-28) 무효화할 캐시도 없다 — 의도적으로 건너뜀.
+
+    if audit_repo is not None:
+        # GLOBAL/PROVIDER/STRATEGY_DEPLOYMENT는 특정 tenant 하나에 귀속되지
+        # 않는다(79번 §1 "tenant_id가 None이면 system 이벤트") — TENANT/
+        # ACCOUNT만 resolved_ref 자체가 대상 tenant_id다.
+        event_tenant_id = (
+            UUID(resolved_ref) if scope in (SafetyScope.TENANT, SafetyScope.ACCOUNT) else None
+        )
+        await record_command_event(
+            audit_repo,
+            tenant_id=event_tenant_id,
+            aggregate_type="safety_control",
+            aggregate_id=control.id,
+            action="safety_control_activated",
+            actor_subject_id=actor_subject_id,
+            classification=AuditClassification.CONFIDENTIAL,
+            payload={"scope": scope.value, "scope_ref": resolved_ref, "reason": reason},
+        )
 
     return control_to_view(control)

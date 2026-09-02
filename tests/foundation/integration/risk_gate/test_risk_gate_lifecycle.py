@@ -19,6 +19,8 @@ from src.foundation.connections.domain.models import (
     ConnectionState,
     HealthState,
 )
+from src.foundation.evidence.adapters.postgres_repository import PostgresAuditEventRepository
+from src.foundation.evidence.application.get_audit_timeline import get_audit_timeline
 from src.foundation.mandates.adapters.postgres_repository import PostgresMandateRepository
 from src.foundation.risk_gate.adapters.postgres_repository import PostgresRiskGateRepository
 from src.foundation.risk_gate.application.activate_safety_control import (
@@ -100,6 +102,11 @@ def trust_repo(pool):
 @pytest.fixture
 def connection_repo(pool):
     return PostgresConnectionRepository(pool)
+
+
+@pytest.fixture
+def audit_repo(pool):
+    return PostgresAuditEventRepository(pool)
 
 
 async def _tenant(pool):
@@ -407,3 +414,41 @@ async def test_activate_missing_scope_ref_for_tenant_scope_is_rejected(pool, rep
             scope_ref=None,
             reason="scope_ref 누락 테스트",
         )
+
+
+async def test_activate_and_deactivate_safety_control_record_audit_events(
+    pool, repo, audit_repo
+):
+    """전수감사 §6 — safety control 활성화/비활성화가 실제 감사 이벤트를
+    남기는지 확인(append_audit_event 호출자 0이던 문제의 회귀 테스트)."""
+    tenant_id = await _tenant(pool)
+    control = await activate_safety_control(
+        repo,
+        tenant_id=tenant_id,
+        actor_subject_id=tenant_id,
+        actor_is_admin=False,
+        scope=SafetyScope.ACCOUNT,
+        scope_ref=str(tenant_id),
+        reason="감사 이벤트 테스트",
+        audit_repo=audit_repo,
+    )
+
+    activated_page = await get_audit_timeline(audit_repo, tenant_id=tenant_id, limit=10)
+    assert any(
+        e.action == "safety_control_activated" and e.aggregate_id == control.id
+        for e in activated_page.items
+    )
+
+    await deactivate_safety_control(
+        repo,
+        tenant_id=tenant_id,
+        actor_is_admin=False,
+        control_id=control.id,
+        audit_repo=audit_repo,
+    )
+
+    deactivated_page = await get_audit_timeline(audit_repo, tenant_id=tenant_id, limit=10)
+    assert any(
+        e.action == "safety_control_deactivated" and e.aggregate_id == control.id
+        for e in deactivated_page.items
+    )
