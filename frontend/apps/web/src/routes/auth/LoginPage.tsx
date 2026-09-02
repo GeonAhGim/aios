@@ -43,7 +43,7 @@ export function LoginPage() {
       await login.mutateAsync({ email, password, totpCode: totpCode || undefined });
       navigate(sanitizeNextPath(searchParams.get("next")));
     } catch (err) {
-      setError(err instanceof Error ? err : new Error("로그인에 실패했습니다."));
+      setError(err instanceof ApiError ? err : new Error("로그인에 실패했습니다."));
       setLockoutRemainingSec(deriveLockout(err).retryAfterSec);
     }
   }

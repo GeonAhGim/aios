@@ -25,7 +25,7 @@ export function WalletPage() {
       setSubmitted({ id: result.id, amount: result.requestedAmount });
     } catch (err) {
       if (err instanceof DuplicateSubmitError) return;
-      setError(err instanceof Error ? err : new Error("충전 요청에 실패했습니다."));
+      setError(err instanceof ApiError ? err : new Error("충전 요청에 실패했습니다."));
     }
   }
 
@@ -55,7 +55,13 @@ export function WalletPage() {
           <p className="text-xs text-fg-muted">
             신청 후 실제 계좌로 입금하면 관리자 확인 즉시 크레딧이 반영됩니다.
           </p>
-          {error && <ErrorMessage traceId={error instanceof ApiError ? error.traceId : null} />}
+          {error && (
+            <ErrorMessage
+              errorCode={error instanceof ApiError ? error.errorCode : null}
+              message={error.message}
+              traceId={error instanceof ApiError ? error.traceId : null}
+            />
+          )}
           {submitted && (
             <Alert tone="success">
               충전 요청 #{submitted.id} 접수됨 ({submitted.amount} 크레딧) — 관리자 확인 대기 중

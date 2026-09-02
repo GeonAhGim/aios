@@ -133,6 +133,18 @@ describe("LoginPage 계정 잠금(AUTH_ACCOUNT_LOCKED)", () => {
     expect(screen.getByRole("button", { name: "로그인" })).toBeEnabled();
   });
 
+  // negative: ApiError가 아닌 실패(네트워크 예외 등)의 raw message를 그대로
+  // 노출하면 안 된다 — 항상 안전한 fallback 문구로 수렴해야 한다.
+  it("negative: ApiError가 아닌 실패는 raw message 대신 안전한 fallback 문구를 보여준다", async () => {
+    mutateAsync.mockRejectedValue(new Error("ECONNRESET"));
+    renderAt("/login");
+
+    submitLoginForm();
+
+    await waitFor(() => expect(screen.getByText("로그인에 실패했습니다.")).toBeInTheDocument());
+    expect(screen.queryByText("ECONNRESET")).not.toBeInTheDocument();
+  });
+
   it("unmount 시 카운트다운 타이머를 정리한다", async () => {
     vi.useFakeTimers();
     mutateAsync.mockRejectedValue(new ApiError(423, "잠김", undefined, "AUTH_ACCOUNT_LOCKED", 30));

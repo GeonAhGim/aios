@@ -50,7 +50,7 @@ export function ExchangeManagementPage() {
       setApiSecret("");
       setApiPassphrase("");
     } catch (err) {
-      setError(err instanceof Error ? err : new Error("등록에 실패했습니다."));
+      setError(err instanceof ApiError ? err : new Error("등록에 실패했습니다."));
     }
   }
 
@@ -157,7 +157,13 @@ export function ExchangeManagementPage() {
                 />
               </Field>
             )}
-            {error && <ErrorMessage traceId={error instanceof ApiError ? error.traceId : null} />}
+            {error && (
+              <ErrorMessage
+                errorCode={error instanceof ApiError ? error.errorCode : null}
+                message={error.message}
+                traceId={error instanceof ApiError ? error.traceId : null}
+              />
+            )}
             <Button type="submit" loading={register.isPending} className="w-full">
               등록
             </Button>
