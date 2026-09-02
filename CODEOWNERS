@@ -1,13 +1,21 @@
-# FROZEN-PAPER-ONLY (ADR-2026-08-29-E) — PAPER 모드 판단·실행 로직은 이
-# 소유자 리뷰만 거치면 병합 가능. LIVE 경로는 15.6-D 조건 2(실계정
-# MFA·이중승인) 충족 전까지 코드 레벨로 하드 차단(정책 문서상 봉쇄가
-# 아니라 실행되는 코드 자체의 가드).
-# TODO: @{owner}를 실제 GitHub 계정으로 교체하세요(로컬 저장소 단계라 아직 미지정)
-/src/core/strategy/       @{owner}
-/src/core/portfolio/      @{owner}
-/src/core/risk/           @{owner}
-/src/core/executor/       @{owner}
+# .aios-zone과 1:1 대응. 소유자는 저장소 소유 계정(GeonAhGim/mihwa-aios).
+# branch protection은 private repo free plan 제약으로 아직 API로 켤 수 없어
+# (docs/QUALITY_ELEVATION_ROADMAP.md), 이 파일은 현재 리뷰 요청 안내용이다.
+#
+# FROZEN — 15.6-D 종료조건 전까지 어떤 PR도 불가 (아직 파일 없음)
+/aios/kernel/policy/      @GeonAhGim
+/aios/kernel/permission/  @GeonAhGim
+# FROZEN-PAPER-ONLY (ADR-2026-08-29-E) — PAPER 판단·실행 로직은 소유자 리뷰만
+# 거치면 병합 가능. LIVE 경로는 15.6-D 조건 2(실계정 MFA·이중승인) 충족 전까지
+# Executor 코드 레벨 하드 차단.
+/src/core/strategy/       @GeonAhGim
+/src/core/portfolio/      @GeonAhGim
+/src/core/risk/           @GeonAhGim
+/src/core/executor/       @GeonAhGim
 # SCAFFOLD — 자동게이트 + 인간 리뷰어 1인(15.6-A)
-/src/core/safety/         @{owner}
-/src/api/                 @{owner}
-/src/services/            @{owner}
+/src/core/safety/         @GeonAhGim
+/src/foundation/          @GeonAhGim
+/src/exchanges/           @GeonAhGim
+/src/api/                 @GeonAhGim
+/src/services/            @GeonAhGim
+/src/db/migrations/       @GeonAhGim

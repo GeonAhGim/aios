@@ -1,6 +1,5 @@
 """16번대 통합테스트 — /users/me/approval-settings, /users/me/withdrawal-whitelist,
 /users/me/delete 라우터. 실제 FastAPI 앱 + 실제 dev DB."""
-import asyncio
 import uuid
 from pathlib import Path
 
@@ -14,6 +13,7 @@ from src.api.deps import get_event_bus
 from src.core.approval.service import create_request
 from src.main import app
 from tests.integration.conftest import NoopEventBus
+from tests.integration.mfa_clock import mfa_clock_shifted, totp_at
 
 STRONG_PASSWORD = "Str0ng!Passw0rd"
 
@@ -180,27 +180,26 @@ async def test_register_whitelist_entry_with_mfa_requires_totp(client):
 
     # docs/RED_TEAM_FINDINGS.md #13 반영 — 위 verify()가 이미 이 구간의
     # 코드를 소비했으므로 재인증용 코드는 다음 구간에서 새로 받아야 한다.
-    await asyncio.sleep(31)
-    # 이 엔드포인트는 system_safety_state(전역 싱글톤 행)의 circuit_breaker
-    # 상태를 확인한다 — 31초 실시간 대기 동안 공유 dev/test DB를 쓰는 다른
-    # 프로세스(동시 실행 중인 다른 세션 등)가 그 값을 바꿔놨을 가능성을
-    # 배제할 수 없어, 실제 어서션 직전에 한 번 더 리셋해 창을 최소화한다.
+    # 실시간 31초 대기 대신 MfaService 시계를 31초 앞당긴다(전수감사 §9).
+    # system_safety_state(전역 싱글톤 행)는 공유 DB의 다른 세션이 바꿔놨을 수
+    # 있어 어서션 직전에 리셋한다.
     async with app.state.pool.acquire() as conn:
         await conn.execute(
             "UPDATE system_safety_state SET circuit_breaker_level = 'normal', "
             "reactivation_approval_id = NULL WHERE id = 1"
         )
-    login_code = pyotp.totp.TOTP(secret).now()
-    with_totp = await client.post(
-        "/users/me/withdrawal-whitelist",
-        json={
-            "exchange": "bitget",
-            "destination_address": "bc1qcoldwallet",
-            "password": STRONG_PASSWORD,
-            "totp_code": login_code,
-        },
-        headers=headers,
-    )
+    with mfa_clock_shifted(app, 31) as shifted_now:
+        login_code = totp_at(secret, shifted_now())
+        with_totp = await client.post(
+            "/users/me/withdrawal-whitelist",
+            json={
+                "exchange": "bitget",
+                "destination_address": "bc1qcoldwallet",
+                "password": STRONG_PASSWORD,
+                "totp_code": login_code,
+            },
+            headers=headers,
+        )
     assert with_totp.status_code == 201
 
 

@@ -49,5 +49,21 @@ jobs:
       - name: Type check
         run: mypy src
 
+      # 08_test_plan §8.7 — .aios-zone 매니페스트 검증(전수감사 §4에서 실제
+      # 경로와 어긋난 FROZEN 패턴이 발견됨). scripts/check_zone_manifest.py 참조.
+      - name: Zone manifest
+        run: python scripts/check_zone_manifest.py
+
+      # 커버리지는 우선 "측정"만 한다 — 전수감사 §9: 이 프로젝트의 품질 근거가
+      # "N passed" 하나뿐이었다. 임계치 게이트(--cov-fail-under)는 첫 측정치를
+      # 본 뒤 별도 결정.
       - name: Test
-        run: pytest -q
+        run: pytest -q --cov=src --cov-report=term --cov-report=xml
+
+      - name: Upload coverage report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-xml
+          path: coverage.xml
+          retention-days: 14

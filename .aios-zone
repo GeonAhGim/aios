@@ -1,21 +1,38 @@
+# Zone 매니페스트 — 15.6-A(정책문서) + ADR-2026-08-29-E(FROZEN-PAPER-ONLY).
+# scripts/check_zone_manifest.py가 CI에서 검증한다: 모든 패턴은 실제 파일과
+# 매칭돼야 하고(존재하지 않는 경로를 보호한다고 착각하는 상태 방지), zone
+# 이름은 아래 넷뿐이다.
+#
+# 전수감사(docs/FULL_AUDIT_2026-09-02.md §4) 정정: 이전 매니페스트는
+# strategy/portfolio/executor를 FROZEN으로 두고 있었지만 그 안에 647줄의
+# 실제 판단 엔진이 ADR-E에 따라 들어가 있었고, risk는 실제 파일
+# (src/core/risk/engine.py)과 다른 경로(risk/decision/**)를 가리키고 있었다.
 zones:
-  FROZEN:
-    - "src/core/strategy/**"
+  FROZEN:                                # 15.6-D 종료조건 전까지 어떤 PR도 불가
+    - "aios/kernel/policy/**"            # Phase 4, 06번 §6.4 제외 대상 (아직 미생성)
+    - "aios/kernel/permission/**"        # Phase 4, 06번 §6.4 제외 대상 (아직 미생성)
+  FROZEN_PAPER_ONLY:                     # ADR-2026-08-29-E — PAPER 판단·실행 로직만 개방,
+    - "src/core/strategy/**"             # LIVE 경로는 Executor 코드 레벨 하드 차단 유지
     - "src/core/portfolio/**"
-    - "src/core/risk/decision/**"      # 15.6-A: "매매 승인·거부 최종판단"만
+    - "src/core/risk/**"                 # engine.py가 8.2-B 8지표 판단 — "감시"가 아니라 "판단"
     - "src/core/executor/**"
-    - "aios/kernel/policy/**"           # Phase 4, 06번 §6.4 제외 대상
-    - "aios/kernel/permission/**"       # Phase 4, 06번 §6.4 제외 대상
-  SCAFFOLD:
-    - "src/core/safety/**"              # 15.6-A: "감시"는 FROZEN 아님
-    - "src/core/*/interfaces.py"
-    - "src/data/models/**"
-    - "src/exchanges/common/**"
+  SCAFFOLD:                              # 자동게이트 + 인간 리뷰어 1인
+    - "src/core/**"                      # loader/parser/validator/scanner/event_bus/logging/
+                                         # approval/safety/notifications 등 — 06번 §6.3 SCAFFOLD.
+                                         # 위 FROZEN_PAPER_ONLY 하위 경로가 우선한다.
+    - "src/__init__.py"
+    - "src/data/**"
+    - "src/exchanges/**"
+    - "src/foundation/**"
+    - "src/contracts/**"
     - "src/api/**"
     - "src/services/**"
     - "src/db/**"
+    - "src/main.py"
+    - "src/watchdog_process.py"
   OPEN:
     - "docs/**"
     - "tests/**"
     - "config/**"
     - "scripts/**"
+    - ".github/**"

@@ -17,6 +17,117 @@ AIOS 구현을 맡은 세션이 이 문서를 보고 판단해서 고치는 용�
 
 ---
 
+## 2026-09-02-전수감사 · 설계문서 대 코드 전수 점검 파생 항목 (#35~#40)
+
+`docs/FULL_AUDIT_2026-09-02.md`(PM 세션 agent-platform-12)가 설계문서
+00~17·ADR·L3 명세 71~81·표준 103~108 전체를 코드와 대조하며 찾은 항목
+중, 이 장부에 번호가 없던 것을 등재한다. 감사 보고서 §2가 원본이며 여기는
+장부 정합용 요약이다. #35~#38은 발견 즉시 같은 세션이 수정·검증했고(커밋
+`90feab5`), #39는 OPEN, #40은 이미 수정됐으나 장부에 빠져 있던 항목이다.
+#25도 같은 세션의 `2e943c9`로 닫혔다(아래 항목 상태 갱신).
+
+---
+
+## 2026-09-02-35 · [marketplace] 음수 가격 리스팅으로 구매자 지갑이 증액됨 — 심각도 높음
+
+**상태**: ✅ FIXED (커밋 `90feab5`, PM 세션 — ruff/mypy/대상 통합테스트 72개 통과)
+
+**발견**: `ListingCreateRequest.price: Decimal | None`에 하한이 없고
+`ListingService.create_listing()`도 검사하지 않는다. 구매 시
+`wallet_service.debit()`의 `WHERE balance >= $2`는 amount가 음수면 항상
+참이라 `balance - (-x)` 로 잔액이 늘어난다. 판매자가 `price=-1000000`으로
+등록·검증 통과 후 부계정으로 구매하면 지갑을 원하는 만큼 불릴 수 있었다.
+
+**수정**: 스키마 `Field(ge=0)` + `_validate_price()` + DB
+`CHECK (price IS NULL OR price >= 0)`(마이그레이션 `b7e2c4d9f1a6`) 세 겹.
+회귀: `test_marketplace_router.py::test_negative_price_listing_is_rejected_at_schema`,
+`test_listing_service.py::test_create_listing_rejects_negative_price` 외 1.
+
+---
+
+## 2026-09-02-36 · [marketplace] 구매 Idempotency-Key가 사용자 스코프 없이 전역 + 실패 응답까지 캐시 — 심각도 높음
+
+**상태**: ✅ FIXED (커밋 `90feab5`)
+
+**발견**: 라우터가 `purchase:{header}`만으로 키를 만들어(`marketplace.py:155-156`)
+사용자 B가 A와 같은 헤더값을 보내면 A의 캐시된 `PurchaseResponse`
+(purchase_id·정산액)를 받고 B의 구매는 일어나지 않았다. 또 402/400도
+캐시돼(`core/idempotency.py:37-43`) 잔액 부족 후 충전해도 같은 키로는
+영원히 402였다. 캐시 조회→compute→INSERT가 비원자적이었고, 커넥션을 쥔 채
+compute() 안에서 풀을 다시 잡아 풀 크기 10에서 교착 가능했다.
+
+**수정**: 키를 `purchase:{user_id}:{header}`로. `with_idempotency`를
+claim-first로 재작성 — 자리표시자(status 0) 선점 → 같은 키 동시 요청은
+409 → 2xx만 저장, 4xx/5xx·예외는 선점 해제 → compute() 전에 커넥션 반납.
+회귀: `test_idempotency_key_is_scoped_per_user`,
+`test_failed_purchase_is_not_cached_under_idempotency_key`.
+
+---
+
+## 2026-09-02-37 · [marketplace] 동일 리스팅 중복 구매·환불 이중 적립 — 심각도 높음
+
+**상태**: ✅ FIXED (커밋 `90feab5`)
+
+**발견**: `strategy_purchases`에 UNIQUE(listing_id, buyer_user_id)가 없고
+`PurchaseService.purchase()`도 기존 구매를 확인하지 않아 다른 키로
+재요청하면 두 번 차감·정산됐다. `DisputeResolutionService.resolve()`는
+RESOLVED 뒤 같은 구매에 새 분쟁을 열고 다시 `DELISTED_AND_REFUND`하면
+`credit(REFUND)`을 재적립했다(구매행에 환불 상태 없음).
+
+**수정**: `purchase()`가 리스팅 `FOR UPDATE` 잠금 안에서 기존 구매를 조회해
+거부(경합 안전) + UNIQUE 인덱스 `uq_strategy_purchases_listing_buyer`;
+`strategy_purchases.refunded_at` 조건부 UPDATE로 환불 1회 보장(이미 환불이면
+분쟁 RESOLVED 전이까지 롤백). 회귀:
+`test_same_buyer_cannot_purchase_same_listing_twice`,
+`test_refund_is_credited_only_once_across_disputes`.
+
+---
+
+## 2026-09-02-38 · [marketplace] 검증담당자가 자기 리스팅을 승인할 수 있음 — 15번 §15.6 "API 레벨 강제" 규칙 미구현 — 심각도 높음
+
+**상태**: ✅ FIXED (커밋 `90feab5`)
+
+**발견**: `VerificationService.decide()`가 `seller_user_id`를 읽고도
+`verifier_id`와 비교하지 않았다(`verification_service.py:71-80`).
+대기열 필터(`verification_queue_service.py:37-42`)는 본인 리스팅을
+숨기지만 listing_id를 직접 지정한 호출은 막지 못한다. 테스트도 없었다.
+
+**수정**: `pre_check["seller_user_id"] == verifier_id`이면
+`VerificationError("이해상충")`. 회귀:
+`test_verification_service.py::test_verifier_cannot_decide_own_listing`.
+
+---
+
+## 2026-09-02-39 · [execution_loop] 취소·거부·만료로 끝난 주문 뒤 FSM이 BUY/SELL_ORDER_PENDING에 영구 고착 — 심각도 높음
+
+**상태**: 🔴 OPEN (agent-platform-9f 배정 — 감사 보고서 §2-A)
+
+**발견**: 실행 루프를 운영 앱에 배선(`2e943c9`)하면서 확인. tick의
+`_handle_pending_fill_check`는 최신 주문이 최종 상태면 즉시 return하고
+FILLED일 때만 `apply_fill` + FSM 전이를 한다(`tick.py:100-140`).
+`cancel.py`는 orders.status만 CANCELLED로 바꾸고 FSM은 건드리지 않는다.
+즉 주문이 CANCELLED/REJECTED/EXPIRED/FAILED로 끝나면 fsm_state가
+`*_ORDER_PENDING`에 남아 그 실행은 영원히 새 신호를 평가하지 않는다.
+재시작 복구(`recovery_wiring.py`)는 이 이유로 FILLED를 쓰지 않고 tick에
+위임하며, 취소·거부만 영속화한다 — 그 뒤의 FSM 복귀는 이 항목의 몫이다.
+
+**권장 수정 방향**: `_handle_pending_fill_check`에서 최종 상태가 FILLED가
+아니면 FSM을 PENDING 진입 전 상태(IDLE 또는 HOLDING — FSM 정의의
+역전이로 결정)로 조건부 갱신하고 `order.status.changed`를 발행. cancel.py는
+그대로 두고 tick 한 곳에서 처리하면 복구·취소·거부 세 경로가 모두 해결된다.
+
+---
+
+## 2026-09-02-40 · [connections] CON-004 revoke/sync TOCTOU — 수정됐으나 장부 누락 (정합 보정)
+
+**상태**: ✅ FIXED (커밋 `bbec6c6`, 재확인+저장을 `FOR UPDATE` 트랜잭션으로
+원자화 — `test_real_concurrent_revoke_and_sync_never_leaves_post_revocation_snapshot`)
+
+**메모**: 수정 커밋 메시지와 코드 주석에만 존재하고 이 장부에 항목이
+없었다(감사 보고서 §9). 추적성을 위해 등재만 한다.
+
+---
+
 ## 2026-09-02-재감사 · FND-04~09 + Bitget 신규 확장 API 3개 영역 병렬 감사 완료
 
 91eee31(제 백테스트 커밋) 이후 origin/main에 새로 쌓인 커밋 전부를
@@ -345,7 +456,11 @@ permission`로 확인. Demo API 키로 거래소 실제 기본 동작을 라이�
 
 ## 2026-09-02-25 · risk_guard_loop도 alert_evaluation_loop과 같은 클래스 — 예외 시 손실한도 자동정지 루프가 영구 정지 가능 (참고용, #21 수정 중 발견)
 
-**상태**: 🔴 OPEN
+**상태**: ✅ FIXED (커밋 `2e943c9`, PM 세션 — `main.py::_risk_guard_loop()`에
+alert 루프와 동일한 try/except 추가. 같은 커밋이 실행 루프 스케줄러·재시작
+복구·Circuit Breaker check_reactivation 루프도 배선했으므로, 이 루프가
+감시하는 `positions` PnL이 실제로 채워지는 것은 #39 및 감사 §2-A "positions
+미기록" 항목(9f)에 달려 있다)
 
 **발견**: #21을 고치며 `src/main.py`를 보다가 발견 — `_risk_guard_loop()`
 (`main.py`)도 `_alert_evaluation_loop()`와 정확히 같은 구조다:
