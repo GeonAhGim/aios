@@ -2,6 +2,7 @@ import { classifyServerError, isSessionExpiredErrorCode } from "@aios/shared-typ
 import { keysToCamel, keysToSnake } from "./caseConvert";
 import type { ApiErrorBody } from "./envelope";
 import { resolveRetryAfterSec, resolveTraceId, unwrap } from "./envelope";
+import { requestIdHeaders } from "./requestId";
 import { refreshAccessToken } from "./tokenRefresh";
 
 export class ApiError extends Error {
@@ -95,6 +96,18 @@ export function resetUnauthorizedGuard(): void {
   unauthorizedNotified = false;
 }
 
+export type TenantHeadersProvider = () => Record<string, string>;
+
+let tenantHeadersProvider: TenantHeadersProvider | null = null;
+
+// spec §3.5: 활성 테넌트가 있을 때만 X-Tenant-Id를 싣는다. configureUnauthorizedHandler와
+// 같은 이유로(순환 의존 방지 + 계층 분리) api-client는 tenantContext.ts의
+// createTenantStore 인스턴스를 직접 소유하지 않는다 — 앱 부트스트랩이
+// useTenant.ts 등에서 만든 스토어의 tenantHeaders를 이 함수로 주입한다.
+export function configureTenantHeadersProvider(provider: TenantHeadersProvider | null): void {
+  tenantHeadersProvider = provider;
+}
+
 // 화면 진입 시 병렬로 나가는 여러 요청이 동시에 401을 받아도(예: 대시보드의
 // useMe+usePortfolio+useExecutions) 콜백은 세션당 1회만 호출한다 —
 // 중복 로그아웃·중복 리다이렉트를 막기 위함.
@@ -146,6 +159,14 @@ export class ApiClientBase {
     const headers = new Headers(init?.headers);
     headers.set("Content-Type", "application/json");
     if (token) headers.set("Authorization", `Bearer ${token}`);
+
+    // spec §3.1/§3.5: 요청마다 X-Request-Id를 싣고(호출자가 미리 실어 둔
+    // 유효값은 그대로 재사용), 활성 테넌트가 있으면 X-Tenant-Id도 싣는다.
+    // 서버가 아직 두 헤더를 다 처리하지 않아도 무해하므로 배선은 항상 켠다.
+    headers.set("X-Request-Id", requestIdHeaders(headers.get("X-Request-Id") ?? undefined)["X-Request-Id"]);
+    for (const [key, value] of Object.entries(tenantHeadersProvider?.() ?? {})) {
+      headers.set(key, value);
+    }
 
     const response = await fetch(`${this.baseUrl}${path}`, { ...init, headers });
     const traceId = response.headers.get("X-Trace-Id") ?? undefined;
