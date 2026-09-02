@@ -1,4 +1,4 @@
-import { isSessionExpiredErrorCode } from "@aios/shared-types";
+import { classifyServerError, isSessionExpiredErrorCode } from "@aios/shared-types";
 import { keysToCamel, keysToSnake } from "./caseConvert";
 import type { ApiErrorBody } from "./envelope";
 import { resolveRetryAfterSec, resolveTraceId, unwrap } from "./envelope";
@@ -29,6 +29,29 @@ export class ApiError extends Error {
 // [A-Za-z0-9_-])가 필수다. UUID(36자, 하이픈 포함)는 이 규격을 만족한다.
 export function generateIdempotencyKey(): string {
   return crypto.randomUUID();
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+// spec §3.3: 503(EXCHANGE_UNAVAILABLE/DEPENDENCY_NOT_READY)은 표에 "백오프"만
+// 명시되고 retry_after_seconds가 없는 경우가 많아 클라이언트가 직접 스케줄을
+// 정한다 — 상한 2회(1초, 2초).
+const SERVER_ERROR_BACKOFF_SEC = [1, 2] as const;
+
+// withGetRetry가 다음 재시도까지 기다릴 초. undefined면 그대로 throw한다.
+// 429는 attempt 0에서만 서버 값으로 1회, 503(classifyServerError가
+// "retryable")은 위 스케줄대로 상한 2회, 502/500 등 그 외는 즉시 안내한다.
+function nextRetryDelaySec(err: unknown, attempt: number): number | undefined {
+  if (!(err instanceof ApiError)) return undefined;
+  if (err.statusCode === 429) {
+    return attempt === 0 && typeof err.retryAfterSec === "number" ? err.retryAfterSec : undefined;
+  }
+  if (classifyServerError(err).kind === "retryable" && attempt < SERVER_ERROR_BACKOFF_SEC.length) {
+    return SERVER_ERROR_BACKOFF_SEC[attempt];
+  }
+  return undefined;
 }
 
 function extractDetailMessage(body: unknown): string {
@@ -137,24 +160,19 @@ export class ApiClientBase {
     return { status: response.status, body, traceId, retryAfterHeader };
   }
 
-  // spec §9 PLT-25: GET 계열만 429 응답의 retryAfterSec 경과 후 1회 자동
-  // 재시도한다. POST/PUT/PATCH/DELETE는 멱등키 규약과 충돌하므로(재시도가
-  // 곧 새 요청 의미가 될 수 있음) 여기서 절대 재시도하지 않는다 — 호출부는
-  // method가 명시된 경우에만 이 분기를 벗어난다.
+  // spec §9 PLT-25/§3.3: GET 계열만 자동 재시도한다 — POST 등은 멱등키 규약과
+  // 충돌하므로 절대 재시도하지 않는다. 간격은 nextRetryDelaySec이 결정한다.
   private async withGetRetry<T>(method: string, exec: () => Promise<T>): Promise<T> {
-    try {
-      return await exec();
-    } catch (err) {
-      if (
-        method === "GET" &&
-        err instanceof ApiError &&
-        err.statusCode === 429 &&
-        typeof err.retryAfterSec === "number"
-      ) {
-        await new Promise((resolve) => setTimeout(resolve, err.retryAfterSec! * 1000));
+    if (method !== "GET") return exec();
+
+    for (let attempt = 0; ; attempt++) {
+      try {
         return await exec();
+      } catch (err) {
+        const delaySec = nextRetryDelaySec(err, attempt);
+        if (delaySec === undefined) throw err;
+        await sleep(delaySec * 1000);
       }
-      throw err;
     }
   }
 

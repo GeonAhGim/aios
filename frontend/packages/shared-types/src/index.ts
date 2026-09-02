@@ -15,6 +15,7 @@ export * from "./apiError";
 export * from "./fieldErrors";
 export * from "./reasonCodes";
 export * from "./retryable";
+export * from "./serverError";
 export * from "./idempotencyFailure";
 export * from "./accountLockout";
 export * from "./notFound";

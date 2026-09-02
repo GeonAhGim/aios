@@ -120,6 +120,118 @@ describe("AiosApiClient", () => {
     expect(caught).toMatchObject({ statusCode: 429, retryAfterSec: 5 });
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
+
+  // spec §3.3: EXCHANGE_UNAVAILABLE/DEPENDENCY_NOT_READY(503)는 GET 한정 지수
+  // 백오프(1초→2초)로 재시도한다.
+  it("GET 요청은 503 EXCHANGE_UNAVAILABLE을 지수 백오프로 재시도해 성공하면 결과를 반환한다", async () => {
+    vi.useFakeTimers();
+    try {
+      const unavailableBody = {
+        error_code: "EXCHANGE_UNAVAILABLE",
+        message: "거래소 연결이 원활하지 않습니다.",
+        details: {},
+        trace_id: "trace-7",
+        retry_after_seconds: null,
+      };
+      const fetchMock = vi
+        .fn()
+        .mockResolvedValueOnce(jsonResponse(503, unavailableBody))
+        .mockResolvedValueOnce(jsonResponse(503, unavailableBody))
+        .mockResolvedValueOnce(jsonResponse(200, { total_value: "1000.00", positions: [] }));
+      vi.stubGlobal("fetch", fetchMock);
+
+      const resultPromise = makeClient().getPortfolio();
+      await vi.advanceTimersByTimeAsync(1000);
+      await vi.advanceTimersByTimeAsync(2000);
+      const result = await resultPromise;
+
+      expect(result).toEqual({ totalValue: "1000.00", positions: [] });
+      expect(fetchMock).toHaveBeenCalledTimes(3);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  // negative: 상한(2회)을 넘겨 계속 503이면 더 재시도하지 않고 마지막 에러를 던진다.
+  it("GET 요청은 503이 상한(2회)까지 반복되면 더 재시도하지 않고 에러를 던진다", async () => {
+    vi.useFakeTimers();
+    try {
+      const notReadyBody = {
+        error_code: "DEPENDENCY_NOT_READY",
+        message: "서비스가 준비 중입니다.",
+        details: {},
+        trace_id: "trace-8",
+        retry_after_seconds: null,
+      };
+      const fetchMock = vi.fn().mockImplementation(() => Promise.resolve(jsonResponse(503, notReadyBody)));
+      vi.stubGlobal("fetch", fetchMock);
+
+      const resultPromise = makeClient().getPortfolio();
+      resultPromise.catch(() => {});
+      await vi.advanceTimersByTimeAsync(1000);
+      await vi.advanceTimersByTimeAsync(2000);
+
+      let caught: unknown;
+      try {
+        await resultPromise;
+      } catch (e) {
+        caught = e;
+      }
+
+      expect(caught).toMatchObject({ statusCode: 503, errorCode: "DEPENDENCY_NOT_READY" });
+      expect(fetchMock).toHaveBeenCalledTimes(3);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  // negative: 502 EXCHANGE_FATAL·500 INTERNAL_ERROR는 재시도해도 같은 결과가
+  // 반복되므로 즉시 trace_id와 함께 던진다(재시도 없음).
+  it("GET 요청도 502 EXCHANGE_FATAL은 재시도 없이 즉시 trace_id와 함께 던진다", async () => {
+    const fatalBody = {
+      error_code: "EXCHANGE_FATAL",
+      message: "거래소 자격증명을 확인해주세요.",
+      details: {},
+      trace_id: "trace-9",
+      retry_after_seconds: null,
+    };
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse(502, fatalBody));
+    vi.stubGlobal("fetch", fetchMock);
+
+    let caught: unknown;
+    try {
+      await makeClient().getPortfolio();
+    } catch (e) {
+      caught = e;
+    }
+
+    expect(caught).toMatchObject({ statusCode: 502, errorCode: "EXCHANGE_FATAL", traceId: "trace-9" });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  // negative: 금전 라우트(POST)는 503이어도 멱등키 규약과 충돌하므로 자동
+  // 재시도하지 않는다.
+  it("POST 요청은 503 EXCHANGE_UNAVAILABLE이어도 자동 재시도하지 않는다", async () => {
+    const unavailableBody = {
+      error_code: "EXCHANGE_UNAVAILABLE",
+      message: "거래소 연결이 원활하지 않습니다.",
+      details: {},
+      trace_id: "trace-10",
+      retry_after_seconds: null,
+    };
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse(503, unavailableBody));
+    vi.stubGlobal("fetch", fetchMock);
+
+    let caught: unknown;
+    try {
+      await makeClient().approveMyRequest(1);
+    } catch (e) {
+      caught = e;
+    }
+
+    expect(caught).toMatchObject({ statusCode: 503, errorCode: "EXCHANGE_UNAVAILABLE" });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
 });
 
 // task-354: 401 AUTH_* 전역 처리 — http.ts에 주입된 onUnauthorized 훅의 계약.
