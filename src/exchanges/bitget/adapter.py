@@ -30,6 +30,7 @@ from src.exchanges.bitget.futures_market_mixin import BitgetFuturesMarketMixin
 from src.exchanges.bitget.futures_trading_mixin import BitgetFuturesTradingMixin
 from src.exchanges.bitget.margin_mixin import BitgetMarginMixin
 from src.exchanges.bitget.market_data_mixin import BitgetMarketDataMixin
+from src.exchanges.bitget.subaccount_mixin import BitgetSubaccountMixin
 from src.exchanges.bitget.trading_mixin import BitgetTradingMixin
 from src.exchanges.common.adapter import ExchangeAdapter
 from src.exchanges.common.types import ExchangeCapability
@@ -128,6 +129,7 @@ class BitgetAdapter(
     BitgetFuturesAccountMixin,
     BitgetFuturesTradingMixin,
     BitgetConvertMixin,
+    BitgetSubaccountMixin,
     ExchangeAdapter,
 ):
     """7.8 조사결과: 공식 Demo Trading API 존재."""
