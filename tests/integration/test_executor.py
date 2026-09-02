@@ -1,7 +1,7 @@
 """FD-8.4 통합테스트 — Executor의 LIVE 하드가드 + PAPER 제출 + FSM 전이."""
 import json
 import uuid
-from decimal import Decimal
+from decimal import ROUND_HALF_EVEN, Decimal
 from pathlib import Path
 
 import asyncpg
@@ -12,9 +12,11 @@ from src.core.exceptions import FrozenZoneLiveModeBlockedError, FrozenZonePaperA
 from src.core.executor.executor import Executor
 from src.core.portfolio.models import AllocationDecision
 from src.core.risk.models import RiskCheckResult
+from src.data.models.base import AssetClass, Currency, Money
 from src.data.models.strategy_fsm import FSMState
-from src.data.models.trading import Order, OrderSide, OrderStatus
+from src.data.models.trading import Order, OrderSide, OrderStatus, OrderType
 from src.services.condition_compiler import ConditionCompiler
+from src.services.order_service.position_ledger import record_fill_in_position_ledger
 from src.services.preview_service import PreviewCondition
 from tests.integration.conftest import create_test_user
 from tests.integration.fake_exchange_adapter import FakeExchangeAdapter
@@ -276,6 +278,60 @@ async def test_paper_mode_pending_fill_does_not_advance_fsm_state(pool):
 
     assert result.status == OrderStatus.SUBMITTED
     assert calls == []
+
+
+async def test_record_fill_partial_close_computes_accurate_average_and_pnl(pool):
+    """LB-12 DoD — BUY 2회 후 SELL 1회 부분청산의 수량·평단·실현손익이
+    Phase 1 근사(전량청산만)가 아니라 record_fill(FIFO)의 정확한 값과
+    같아야 한다. Executor의 FSM 전이는 이 검증과 무관해 직접
+    record_fill_in_position_ledger를 호출한다(test_record_fill.py와 달리
+    legacy positions 투영까지 거친다는 게 이 테스트의 차이점)."""
+    user_id = await create_test_user(pool)
+    execution_id = await _create_execution(pool, user_id, mode="PAPER")
+
+    def _filled_order(side: OrderSide, quantity: Decimal, price: Decimal) -> Order:
+        return Order(
+            client_order_id=f"lb12-{uuid.uuid4().hex}",
+            strategy_id="strat-executor-test",
+            strategy_version="1.0.0",
+            execution_id=execution_id,
+            symbol="BTC/USDT",
+            exchange="bitget",
+            side=side,
+            order_type=OrderType.MARKET,
+            quantity=quantity,
+            status=OrderStatus.FILLED,
+            filled_quantity=quantity,
+            average_fill_price=Money(amount=price, currency=Currency.USDT),
+            asset_class=AssetClass.CRYPTO,
+        )
+
+    await record_fill_in_position_ledger(
+        pool, _filled_order(OrderSide.BUY, Decimal("10"), Decimal("100"))
+    )
+    await record_fill_in_position_ledger(
+        pool, _filled_order(OrderSide.BUY, Decimal("5"), Decimal("110"))
+    )
+    await record_fill_in_position_ledger(
+        pool, _filled_order(OrderSide.SELL, Decimal("4"), Decimal("120"))
+    )
+
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            "SELECT quantity, average_entry_price, realized_pnl, closed_at FROM positions "
+            "WHERE execution_id = $1",
+            execution_id,
+        )
+
+    assert row is not None
+    # FIFO: 매도 4는 lot1(10@100)에서 소진 → 남은 lot1 6@100 + lot2 5@110.
+    assert row["quantity"] == Decimal("11")
+    expected_avg = (Decimal("1150") / Decimal("11")).quantize(
+        Decimal("1e-10"), rounding=ROUND_HALF_EVEN
+    )
+    assert row["average_entry_price"] == expected_avg
+    assert row["realized_pnl"] == (Decimal("120") - Decimal("100")) * Decimal("4")
+    assert row["closed_at"] is None
 
 
 async def test_submission_failure_does_not_roll_back_fsm_state(pool):

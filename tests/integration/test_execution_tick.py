@@ -355,10 +355,11 @@ async def test_paused_execution_still_checks_pending_order_fill(pool):
     assert fsm_state == "BUY_ORDER_PENDING"
 
     # 2틱: 정지된 상태에서도 미체결 주문이 실제로는 체결됐는지 확인돼야 한다.
-    fill_adapter = FakeExchangeAdapter(
-        closes=[Decimal("50")] * 30, get_order_status=OrderStatus.FILLED
-    )
-    await run_execution_tick(pool, fill_adapter, execution_id, **_engines())
+    # LB-12 — get_order()는 자신이 실제로 낸 주문(placed_orders)의 수량을
+    # 돌려주므로, 여기서도 1틱과 같은 어댑터를 재사용해야 한다(새 인스턴스는
+    # placed_orders가 비어 있어 filled_quantity=0인 비현실적 체결이 된다).
+    submit_adapter._get_order_status = OrderStatus.FILLED
+    await run_execution_tick(pool, submit_adapter, execution_id, **_engines())
 
     async with pool.acquire() as conn:
         order_status = await conn.fetchval(

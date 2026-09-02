@@ -13,7 +13,7 @@ from datetime import datetime, timezone
 from decimal import Decimal
 from uuid import uuid4
 
-from src.data.models.base import AssetClass
+from src.data.models.base import AssetClass, Currency, Money
 from src.data.models.market_data import Candle, OrderBook, Ticker
 from src.data.models.trading import (
     AccountBalance,
@@ -123,11 +123,18 @@ class FakeExchangeAdapter(ExchangeAdapter):
     async def get_positions(self, symbol: str | None = None) -> list[Position]:
         return []
 
+    def _fill_price(self, order: Order | None) -> Money:
+        amount = order.price.amount if order is not None and order.price is not None else None
+        return Money(
+            amount=amount if amount is not None else self._closes[-1], currency=Currency.USDT
+        )
+
     async def get_order(self, order_id: str) -> Order:
         # Bitget.get_order()와 동일 원칙(자체 docstring 참조) — 거래소는
         # AIOS 전용 컨텍스트(strategy_id 등)를 모르니 자리표시자로 둔다.
         # FD-4.5/FD-3.4 호출부는 status/filled_quantity만 신뢰하면 된다.
         last = self.placed_orders[-1] if self.placed_orders else None
+        quantity = last.quantity if last is not None else Decimal("0")
         return Order(
             order_id=uuid4(),
             exchange_order_id=order_id,
@@ -138,9 +145,10 @@ class FakeExchangeAdapter(ExchangeAdapter):
             exchange=self._exchange_name,
             side=last.side if last is not None else OrderSide.BUY,
             order_type=last.order_type if last is not None else OrderType.MARKET,
-            quantity=last.quantity if last is not None else Decimal("0"),
+            quantity=quantity,
             status=self._get_order_status,
-            filled_quantity=last.quantity if last is not None else Decimal("0"),
+            filled_quantity=quantity,
+            average_fill_price=self._fill_price(last) if quantity > 0 else None,
             asset_class=AssetClass.CRYPTO,
         )
 
@@ -149,9 +157,14 @@ class FakeExchangeAdapter(ExchangeAdapter):
         self.placed_orders.append(order)
         if self._on_place_order is not None:
             return await self._on_place_order(order)
-        return order.model_copy(
-            update={"exchange_order_id": f"ex-{uuid4()}", "status": self._place_order_result_status}
-        )
+        update: dict[str, object] = {
+            "exchange_order_id": f"ex-{uuid4()}",
+            "status": self._place_order_result_status,
+        }
+        if self._place_order_result_status == OrderStatus.FILLED:
+            update["filled_quantity"] = order.quantity
+            update["average_fill_price"] = self._fill_price(order)
+        return order.model_copy(update=update)
 
     async def cancel_order(self, order_id: str) -> bool:
         return self._cancel_result

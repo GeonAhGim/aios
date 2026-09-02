@@ -1,116 +1,116 @@
-"""FD-8.2/8.3 — 체결(FILLED) 주문을 positions 테이블에 반영.
+"""FD-8.2/8.3 — 체결(FILLED) 주문을 positions 원장에 반영.
 
-Spec: 04_db_schema_v1.7.md (Positions). PM 배정(agent-platform-12,
-2026-09-02) — risk_guard_service.py/portfolio_service.py가 이미
-positions를 LEFT JOIN해 PnL을 합산하지만, 이 테이블에 실제로 쓰는
-경로가 지금까지 없어서 항상 0/NULL이었다(position.py 모듈 docstring이
-이를 이미 인지: "positions 테이블에 아직 아무 서비스도 쓰지 않는다").
-
-호출 지점 2곳 — 둘 다 "주문이 FILLED로 확정된 순간"이지만 서로 다른
-경로다: `submit.py::apply_fill()`(FD-3.4 폴링으로 나중에 체결 확인)과
-`executor.py::Executor.execute()`의 동기체결 분기(place_order가 즉시
-FILLED를 반환한 경우, apply_fill을 거치지 않고 submit_order 안에서
-바로 영속화됨). 두 경로를 하나로 합치면 submit_order()가 FSM/포지션
-개념을 알아야 해 FD-4.2의 경계선(8.2-A)을 넘으므로, 로직은 이 파일
-하나에 두고 호출부만 2곳에서 부른다.
-
-Phase 1 가정(position.py와 동일): 실행당 종목 1개, 분할청산 없음
-(전량청산만) — BUY는 항상 새 포지션을 열고, SELL은 항상 그 포지션
-전체를 닫는다.
+LB-12: 계산은 B 도메인 record_fill(LB-11)에 위임(원가법·부분청산은
+LB-2/LB-3 selector가 SSOT, 재구현 금지). pos_account/pos_snapshot 부트
+스트랩 → record_fill → legacy positions 투영, 3단계 얇은 어댑터. 미검증:
+동시 첫 체결 경합 시 pos_account 중복 생성 가능(connection_id NULL은
+UNIQUE 제약이 구분 못함) — Phase 1과 동일하게 막지 않는다.
 """
 from __future__ import annotations
 
 import logging
+from datetime import datetime, timezone
 from decimal import Decimal
+from uuid import uuid4
 
 import asyncpg
 
-from src.data.models.trading import Order, OrderSide, OrderStatus
+from src.data.models.base import Currency, Money
+from src.data.models.trading import Order, OrderStatus
+from src.foundation.evidence.adapters.postgres_repository import PostgresAuditEventRepository
+from src.foundation.positions.adapters.postgres_journal_repository import PostgresJournalRepository
+from src.foundation.positions.adapters.postgres_snapshot_repository import (
+    PostgresSnapshotRepository,
+)
+from src.foundation.positions.application.record_fill import record_fill
+from src.foundation.positions.contracts.v1 import (
+    CostMethod,
+    PositionSnapshotView,
+    RecordFillCommand,
+)
+from src.foundation.positions.domain.position_key import PositionKey
 
 logger = logging.getLogger(__name__)
 
 
 async def record_fill_in_position_ledger(pool: asyncpg.Pool, order: Order) -> None:
-    """`order.status`가 FILLED가 아니면 아무것도 하지 않는다 — 호출부가
-    이미 확인했더라도 방어적으로 한 번 더 checked."""
-    if order.status != OrderStatus.FILLED:
+    """FILLED가 아니거나 실행 컨텍스트가 없으면 아무것도 하지 않는다."""
+    if order.status != OrderStatus.FILLED or order.execution_id is None:
         return
-    if order.execution_id is None:
-        # FD-8 실행 컨텍스트 없이 만들어진 주문(테스트/시뮬레이션 등) —
-        # 포지션 원장 대상이 아니다.
-        return
-
-    if order.side == OrderSide.BUY:
-        await _open_position(pool, order)
-    else:
-        await _close_position(pool, order)
-
-
-def _fill_price(order: Order) -> Decimal:
-    return order.average_fill_price.amount if order.average_fill_price is not None else Decimal("0")
-
-
-async def _open_position(pool: asyncpg.Pool, order: Order) -> None:
     async with pool.acquire() as conn:
         user_id = await conn.fetchval(
             "SELECT user_id FROM strategy_executions WHERE id = $1", order.execution_id
         )
         if user_id is None:
-            logger.warning(
-                "position_ledger: execution_id=%s의 user_id를 찾을 수 없어 "
-                "포지션을 열지 못했습니다.",
-                order.execution_id,
-            )
+            logger.warning("position_ledger: execution_id=%s user_id 없음", order.execution_id)
             return
-        await conn.execute(
-            """
-            INSERT INTO positions (
-                user_id, symbol, exchange, strategy_id, execution_id,
-                quantity, average_entry_price, entry_time, asset_class
-            ) VALUES ($1, $2, $3, $4, $5, $6, $7, now(), $8)
-            """,
-            user_id,
-            order.symbol,
-            order.exchange,
-            order.strategy_id,
-            order.execution_id,
-            order.filled_quantity,
-            _fill_price(order),
-            order.asset_class.value,
-        )
-
-
-async def _close_position(pool: asyncpg.Pool, order: Order) -> None:
-    async with pool.acquire() as conn:
-        open_position = await conn.fetchrow(
-            """
-            SELECT id, average_entry_price FROM positions
-            WHERE execution_id = $1 AND closed_at IS NULL AND quantity <> 0
-            ORDER BY entry_time DESC LIMIT 1
-            """,
-            order.execution_id,
-        )
-        if open_position is None:
-            # Phase 1 가정(SELL은 항상 여는 포지션이 있음)이 깨진 상태 —
-            # 조용히 realized_pnl을 유실하는 대신 로그를 남긴다. 이 함수의
-            # 책임 밖(대사/reconciliation 대상)이라 예외로 fill 자체를
-            # 실패시키지는 않는다.
-            logger.warning(
-                "position_ledger: execution_id=%s에 닫을 열린 포지션이 없습니다 "
-                "(order_id=%s) — realized_pnl 기록 생략.",
-                order.execution_id,
-                order.order_id,
+        position_key = str(PositionKey(
+            venue=order.exchange, instrument_id=order.symbol, strategy_id=order.strategy_id,
+            execution_id=str(order.execution_id),
+        ))
+        fill_price = order.average_fill_price
+        currency = fill_price.currency if fill_price else Currency.USDT
+        price = fill_price.amount if fill_price else Decimal("0")
+        async with conn.transaction():
+            snapshots = PostgresSnapshotRepository(pool)
+            existing = await snapshots.get(conn, position_key)
+            if existing is not None:
+                account_id = existing.account_id
+            else:
+                account_id = await conn.fetchval(
+                    "SELECT account_id FROM pos_account WHERE tenant_id = $1 AND venue = $2 "
+                    "AND connection_id IS NULL",
+                    user_id, order.exchange,
+                )
+                if account_id is None:
+                    account_id = await conn.fetchval(
+                        "INSERT INTO pos_account (tenant_id, venue, base_currency, cost_method) "
+                        "VALUES ($1, $2, $3, $4) RETURNING account_id",
+                        user_id, order.exchange, currency.value, CostMethod.FIFO.value,
+                    )
+                empty = PositionSnapshotView(
+                    position_key=position_key, tenant_id=user_id, account_id=account_id,
+                    instrument_id=uuid4(), quantity=Decimal("0"), cost_method=CostMethod.FIFO,
+                    avg_cost=Money(amount=Decimal("0"), currency=currency), lots=[],
+                    realized_pnl_base=Decimal("0"), unrealized_pnl_base=None,
+                    fees_base=Decimal("0"), funding_base=Decimal("0"),
+                    mark_price=None, mark_at=None, base_currency=currency,
+                    last_journal_seq=0, updated_at=datetime.now(timezone.utc),
+                )
+                await snapshots.upsert(conn, empty, expected_seq=0)
+            command = RecordFillCommand(
+                tenant_id=user_id, account_id=account_id, position_key=position_key,
+                order_id=order.order_id, fill_seq=1, side=order.side,
+                quantity=order.filled_quantity, price=Money(amount=price, currency=currency),
+                fee=None, occurred_at=order.updated_at, trace_id=uuid4(),
             )
-            return
-        realized_pnl = (_fill_price(order) - open_position["average_entry_price"]) * (
-            order.filled_quantity
-        )
-        await conn.execute(
-            """
-            UPDATE positions SET quantity = 0, realized_pnl = realized_pnl + $2,
-                closed_at = now(), updated_at = now()
-            WHERE id = $1
-            """,
-            open_position["id"],
-            realized_pnl,
-        )
+            snapshot = await record_fill(
+                conn, command, asset_class=order.asset_class, snapshots=snapshots,
+                journal=PostgresJournalRepository(pool), audit=PostgresAuditEventRepository(pool),
+                clock=lambda: datetime.now(timezone.utc),
+            )
+            legacy_id = await conn.fetchval(
+                "SELECT legacy_position_id FROM pos_snapshot WHERE position_key = $1", position_key
+            )
+            closed_at = None if snapshot.quantity != 0 else datetime.now(timezone.utc)
+            if legacy_id is None:
+                legacy_id = await conn.fetchval(
+                    "INSERT INTO positions (user_id, symbol, exchange, strategy_id, "
+                    "execution_id, quantity, average_entry_price, realized_pnl, entry_time, "
+                    "closed_at, asset_class) VALUES "
+                    "($1,$2,$3,$4,$5,$6,$7,$8,now(),$9,$10) RETURNING id",
+                    user_id, order.symbol, order.exchange, order.strategy_id,
+                    order.execution_id, snapshot.quantity, snapshot.avg_cost.amount,
+                    snapshot.realized_pnl_base, closed_at, order.asset_class.value,
+                )
+                await conn.execute(
+                    "UPDATE pos_snapshot SET legacy_position_id = $1 WHERE position_key = $2",
+                    legacy_id, position_key,
+                )
+            else:
+                await conn.execute(
+                    "UPDATE positions SET quantity = $2, average_entry_price = $3, "
+                    "realized_pnl = $4, closed_at = $5, updated_at = now() WHERE id = $1",
+                    legacy_id, snapshot.quantity, snapshot.avg_cost.amount,
+                    snapshot.realized_pnl_base, closed_at,
+                )
