@@ -13,6 +13,10 @@ from src.foundation.evidence.adapters.postgres_repository import PostgresAuditEv
 from src.foundation.evidence.ports.repository import AuditEventRepository
 from src.foundation.mandates.adapters.postgres_repository import PostgresMandateRepository
 from src.foundation.mandates.ports.repository import MandateRepository
+from src.foundation.paper_control.adapters.postgres_repository import (
+    PostgresPaperControlRepository,
+)
+from src.foundation.paper_control.ports.repository import PaperControlRepository
 from src.foundation.risk_gate.adapters.postgres_repository import PostgresRiskGateRepository
 from src.foundation.risk_gate.ports.repository import RiskGateRepository
 from src.foundation.trust.adapters.postgres_repository import PostgresTrustRepository
@@ -49,6 +53,12 @@ def get_validation_repository(
 
 def get_risk_gate_repository(pool: asyncpg.Pool = Depends(get_pool)) -> RiskGateRepository:
     return PostgresRiskGateRepository(pool)
+
+
+def get_paper_control_repository(
+    pool: asyncpg.Pool = Depends(get_pool),
+) -> PaperControlRepository:
+    return PostgresPaperControlRepository(pool)
 
 
 # 74번 §7 rollout gate 1단계 — 실 provider는 71번 §6 "provider/legal review 후
