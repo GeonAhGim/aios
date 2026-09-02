@@ -18,7 +18,6 @@ from decimal import Decimal
 
 from src.core.exceptions import FatalExchangeError
 from src.data.models.market_data import Candle, OrderBook, OrderBookLevel, Ticker
-from src.exchanges.common.types import TickerCallback
 
 _MARKET_CODE = "J"  # KRX
 
@@ -193,8 +192,3 @@ class KISMarketDataMixin:
             return False
         return bool(rows[0].get("opnd_yn") == "N")
 
-    async def subscribe_ticker_stream(self, symbol: str, callback: TickerCallback) -> None:
-        """KIS WebSocket(승인키 기반 별도 인증 체계)은 6.9/6.10 스콥 밖 —
-        get_capabilities().supports_websocket=False이므로 02번 §2.1 원칙대로
-        NotImplementedError를 발생시키고 호출부가 REST 폴링으로 폴백한다."""
-        raise NotImplementedError("KISAdapter는 아직 WebSocket 실시간 구독을 지원하지 않음")

@@ -75,15 +75,11 @@ async def test_capabilities_declare_kr_equity_only():
     caps = adapter.get_capabilities()
 
     assert caps.supported_asset_classes == [AssetClass.KR_EQUITY]
-    assert caps.supports_websocket is False
+    # 02d 스펙 §6 — 승인키 인증 확인 후 실시간 구독 구현됨
+    # (tests/integration/test_kis_websocket.py 참조).
+    assert caps.supports_websocket is True
     assert caps.market_hours is not None
     assert caps.market_hours.timezone == "Asia/Seoul"
-
-
-async def test_subscribe_ticker_stream_not_implemented():
-    adapter = _make_adapter(lambda request: httpx.Response(200, json=TOKEN_RESPONSE))
-    with pytest.raises(NotImplementedError):
-        await adapter.subscribe_ticker_stream("005930", lambda t: None)
 
 
 async def test_get_ohlcv_rejects_unsupported_timeframe_early():

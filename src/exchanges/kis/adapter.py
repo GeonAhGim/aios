@@ -39,6 +39,7 @@ from src.exchanges.kis.etf_mixin import KISEtfMixin
 from src.exchanges.kis.market_data_mixin import KISMarketDataMixin
 from src.exchanges.kis.overseas_stock_mixin import KISOverseasStockMixin
 from src.exchanges.kis.trading_mixin import KISTradingMixin
+from src.exchanges.kis.websocket_mixin import KISWebSocketMixin
 
 REAL_BASE_URL = "https://openapi.koreainvestment.com:9443"
 PAPER_BASE_URL = "https://openapivts.koreainvestment.com:29443"
@@ -150,6 +151,7 @@ class KISAdapter(
     KISDomesticBondMixin,
     KISElwMixin,
     KISEtfMixin,
+    KISWebSocketMixin,
     ExchangeAdapter,
 ):
     """한국투자증권(KIS) — 국내 REST+WebSocket 공식 API, OAuth 2.0 인증.
@@ -179,7 +181,11 @@ class KISAdapter(
             supports_spot=True,
             supports_futures=False,
             supports_leverage=False,
-            supports_websocket=False,  # WS는 미구현(6.9/6.10 스콥 밖, 향후 확장)
+            # 02d 스펙 §6 — 승인키 인증 확인 후 실시간 체결가/호가/체결통보
+            # 구현됨(websocket_mixin.py). 체결통보 채널(암호화)은 다른 두
+            # 채널보다 신뢰도가 낮음(모듈 docstring 참조) — 그래도 API
+            # 연동 자체는 존재하므로 True로 선언한다.
+            supports_websocket=True,
             max_leverage=Decimal("1"),
             reference_feed_coverage="high",
             has_official_sandbox=True,
