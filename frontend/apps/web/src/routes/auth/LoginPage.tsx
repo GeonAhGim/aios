@@ -2,9 +2,17 @@ import { useLogin } from "@aios/shared-hooks";
 import { ApiError } from "@aios/api-client";
 import { Button, Field, Input } from "@aios/ui-web";
 import { useState, type FormEvent } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { ErrorMessage } from "../../components/ErrorMessage";
 import { AuthLayout } from "./AuthLayout";
+
+// task-354: ProtectedRoute가 세션 만료·미로그인 시 남긴 ?next=<원경로>로
+// 로그인 성공 후 복귀한다. 외부 사이트로 여는 open-redirect를 막기 위해
+// "/"로 시작하되 "//"(프로토콜 상대 URL)는 아닌 경로만 신뢰한다.
+function sanitizeNextPath(next: string | null): string {
+  if (next && next.startsWith("/") && !next.startsWith("//")) return next;
+  return "/dashboard";
+}
 
 export function LoginPage() {
   const [email, setEmail] = useState("");
@@ -13,13 +21,14 @@ export function LoginPage() {
   const [error, setError] = useState<ApiError | Error | null>(null);
   const login = useLogin();
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
     setError(null);
     try {
       await login.mutateAsync({ email, password, totpCode: totpCode || undefined });
-      navigate("/dashboard");
+      navigate(sanitizeNextPath(searchParams.get("next")));
     } catch (err) {
       setError(err instanceof Error ? err : new Error("로그인에 실패했습니다."));
     }

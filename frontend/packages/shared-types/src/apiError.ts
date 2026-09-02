@@ -94,3 +94,11 @@ export function getApiErrorMessage(
   }
   return fallbackMessage || DEFAULT_API_ERROR_MESSAGE;
 }
+
+// task-354: 세션이 실제로 무효화됐다고 볼 수 있는 코드만 전역 로그아웃 대상이다.
+// AUTH_TENANT_MISMATCH는 접두는 AUTH_지만 "유효한 세션으로 잘못된 테넌트
+// 리소스에 접근"한 것뿐이라 로그아웃하면 안 된다(에러 표시만, negative test로
+// 고정) — 그래서 접두 매칭에서 명시적으로 제외한다.
+export function isSessionExpiredErrorCode(errorCode?: string | null): boolean {
+  return !!errorCode && errorCode.startsWith("AUTH_") && errorCode !== "AUTH_TENANT_MISMATCH";
+}

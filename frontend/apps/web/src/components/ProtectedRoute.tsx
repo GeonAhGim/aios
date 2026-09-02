@@ -11,8 +11,12 @@ export function ProtectedRoute({ children }: { children: ReactNode }) {
   const { data: me, isLoading: meLoading } = useMe();
   const { data: riskProfile, isLoading: riskLoading } = useRiskProfile();
 
+  // task-354: 세션 만료(401 AUTH_*)로 인한 로그아웃도, 최초 미로그인 접근도
+  // 결국 이 분기를 탄다 — 여기서 원경로(next)를 보존해야 로그인 후 복귀된다.
+  const loginRedirect = `/login?next=${encodeURIComponent(location.pathname + location.search)}`;
+
   if (!token) {
-    return <Navigate to="/login" replace />;
+    return <Navigate to={loginRedirect} replace />;
   }
   if (meLoading || riskLoading) {
     return (
@@ -22,7 +26,7 @@ export function ProtectedRoute({ children }: { children: ReactNode }) {
     );
   }
   if (!me) {
-    return <Navigate to="/login" replace />;
+    return <Navigate to={loginRedirect} replace />;
   }
   if (!me.mfaEnabled && location.pathname !== "/onboarding/mfa-setup") {
     return <Navigate to="/onboarding/mfa-setup" replace />;

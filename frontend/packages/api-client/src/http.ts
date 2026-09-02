@@ -1,3 +1,4 @@
+import { isSessionExpiredErrorCode } from "@aios/shared-types";
 import { keysToCamel, keysToSnake } from "./caseConvert";
 import type { ApiErrorBody } from "./envelope";
 import { resolveRetryAfterSec, resolveTraceId, unwrap } from "./envelope";
@@ -50,6 +51,35 @@ function isEnvelopeError(body: unknown): body is ApiErrorBody {
   return typeof body === "object" && body !== null && "error_code" in body;
 }
 
+export type UnauthorizedHandler = (errorCode: string) => void;
+
+let unauthorizedHandler: UnauthorizedHandler | null = null;
+let unauthorizedNotified = false;
+
+// task-354: 401 AUTH_* 전역 처리용 훅. api-client는 라우터/스토어를 직접
+// import하지 않고(순환 의존 방지 + 계층 분리) 상위 계층(앱 부트스트랩)이
+// 이 함수로 콜백을 주입한다. 새 핸들러 등록(예: 재로그인 후 재구독)은
+// 알림 가드도 함께 초기화한다.
+export function configureUnauthorizedHandler(handler: UnauthorizedHandler | null): void {
+  unauthorizedHandler = handler;
+  unauthorizedNotified = false;
+}
+
+// 로그인 성공 등으로 새 세션이 시작되면 다음 401을 다시 알릴 수 있도록
+// 가드를 푼다. useAuthStore.setToken이 호출한다.
+export function resetUnauthorizedGuard(): void {
+  unauthorizedNotified = false;
+}
+
+// 화면 진입 시 병렬로 나가는 여러 요청이 동시에 401을 받아도(예: 대시보드의
+// useMe+usePortfolio+useExecutions) 콜백은 세션당 1회만 호출한다 —
+// 중복 로그아웃·중복 리다이렉트를 막기 위함.
+function notifyUnauthorized(errorCode: string): void {
+  if (unauthorizedNotified) return;
+  unauthorizedNotified = true;
+  unauthorizedHandler?.(errorCode);
+}
+
 // 429(RATE_LIMIT_EXCEEDED)는 미들웨어가 봉투 미적용 라우트에도 §2.3 봉투로
 // 응답하므로(spec §9 PLT-25), 봉투/레거시 두 형태를 여기서 함께 처리한다.
 function buildApiError(
@@ -61,13 +91,17 @@ function buildApiError(
   const envelopeError = isEnvelopeError(body) ? body : undefined;
   const message = envelopeError ? envelopeError.message : extractDetailMessage(body);
   const retryAfterSec = resolveRetryAfterSec(envelopeError?.retry_after_seconds, retryAfterHeader);
-  return new ApiError(
+  const error = new ApiError(
     status,
     message,
     resolveTraceId(envelopeError?.trace_id, traceId),
     envelopeError?.error_code,
     retryAfterSec,
   );
+  if (status === 401 && isSessionExpiredErrorCode(error.errorCode)) {
+    notifyUnauthorized(error.errorCode!);
+  }
+  return error;
 }
 
 // task-112(28cf21b)로 ApiResponse 봉투가 적용된 라우터(auth/users/admin)만
@@ -187,13 +221,17 @@ export class ApiClientBase {
     const result = unwrap<unknown>(body);
     if (!result.ok) {
       const retryAfterSec = resolveRetryAfterSec(result.error.retry_after_seconds, retryAfterHeader);
-      throw new ApiError(
+      const error = new ApiError(
         status,
         result.error.message,
         resolveTraceId(result.error.trace_id, traceId),
         result.error.error_code,
         retryAfterSec,
       );
+      if (status === 401 && isSessionExpiredErrorCode(error.errorCode)) {
+        notifyUnauthorized(error.errorCode!);
+      }
+      throw error;
     }
     return keysToCamel<T>(result.data);
   }

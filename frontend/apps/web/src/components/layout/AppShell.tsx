@@ -86,6 +86,9 @@ export function AppShell({ children }: { children: ReactNode }) {
             <button
               type="button"
               onClick={() => {
+                // 사용자가 직접 누른 로그아웃이라 next 복귀가 필요 없다 — 세션
+                // 만료로 인한 자동 로그아웃(task-354)은 useAuthStore의 401
+                // 핸들러가 처리하고, ProtectedRoute가 next를 붙여 리다이렉트한다.
                 logout();
                 navigate("/login");
               }}
