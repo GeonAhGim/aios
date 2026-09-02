@@ -150,6 +150,55 @@ async def test_password_only_login_does_not_set_mfa_verified_at(pool, auth):
     assert user.mfa_verified_at is None
 
 
+async def test_login_success_failure_and_lockout_are_audit_logged(auth, pool):
+    """FD-7.2 감사기록 — 로그인 성공/실패/잠금을 record_audit_log로 남긴다.
+    비밀번호 값은 어떤 경우에도 decision_data에 없어야 한다."""
+    email = _unique_email()
+    await auth.signup(email, STRONG_PASSWORD)
+
+    with pytest.raises(AuthError):
+        await auth.authenticate(email, "WrongPassword1!")
+    user = await auth.authenticate(email, STRONG_PASSWORD)
+
+    async with pool.acquire() as conn:
+        rows = await conn.fetch(
+            "SELECT action_type, decision_data FROM audit_log "
+            "WHERE user_id = $1 ORDER BY created_at",
+            user.user_id,
+        )
+    action_types = [r["action_type"] for r in rows]
+    assert "auth.login_failed" in action_types
+    assert "auth.login_success" in action_types
+    for row in rows:
+        assert STRONG_PASSWORD not in row["decision_data"]
+        assert "WrongPassword1!" not in row["decision_data"]
+
+
+async def test_account_lockout_is_audit_logged(auth, pool):
+    import json
+
+    email = _unique_email()
+    await auth.signup(email, STRONG_PASSWORD)
+    async with pool.acquire() as conn:
+        await conn.execute(
+            "UPDATE users SET failed_login_attempts = 4 WHERE email = $1", email
+        )
+        user_id = await conn.fetchval("SELECT user_id FROM users WHERE email = $1", email)
+
+    with pytest.raises(AuthError):
+        await auth.authenticate(email, "WrongPassword1!")
+
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            "SELECT decision_data FROM audit_log "
+            "WHERE user_id = $1 AND action_type = 'auth.account_locked'",
+            user_id,
+        )
+    assert row is not None
+    decision_data = json.loads(row["decision_data"])
+    assert decision_data["failed_attempts"] == 5
+
+
 async def test_nonexistent_account_timing_matches_wrong_password_timing(auth):
     """docs/RED_TEAM_FINDINGS.md #12 회귀 — 계정 미존재 경로가 Argon2
     verify()를 건너뛰면 존재하는 계정+틀린 비밀번호 경로보다 훨씬 빨리

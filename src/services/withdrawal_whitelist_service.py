@@ -29,6 +29,7 @@ import asyncpg
 from pydantic import BaseModel
 
 from src.core.approval.panic_prompt import WhitelistEntry
+from src.core.logging.audit_log import record_audit_log
 from src.core.safety.circuit_breaker import CircuitBreakerLevel, CircuitBreakerService
 from src.core.security.encryption import decrypt, encrypt
 
@@ -89,6 +90,14 @@ class WithdrawalWhitelistService:
                 exchange,
                 encrypted_address,
                 label,
+            )
+            # destination_address는 절대 남기지 않는다 — 실제 출금 목적지라
+            # audit_log에조차 평문으로 두면 안 됨(어느 거래소에 등록했는지·
+            # 라벨·결과만 기록).
+            await record_audit_log(
+                conn, actor_agent=str(user_id), action_type="withdrawal_whitelist.registered",
+                user_id=user_id,
+                decision_data={"exchange": exchange, "label": label, "entry_id": row["id"]},
             )
         if self._publish is not None:
             await self._publish(

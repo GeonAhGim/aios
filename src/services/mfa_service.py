@@ -27,6 +27,7 @@ import asyncpg
 import pyotp
 from pydantic import BaseModel
 
+from src.core.logging.audit_log import record_audit_log
 from src.core.security.encryption import decrypt, encrypt
 
 ISSUER_NAME = "AIOS"
@@ -69,6 +70,12 @@ class MfaService:
                 user_id,
                 encrypted_secret,
             )
+            # secret/provisioning_uri은 여기 절대 남기지 않는다 — 설정을
+            # 시도했다는 사실 자체만 기록.
+            await record_audit_log(
+                conn, actor_agent=str(user_id), action_type="mfa.setup",
+                user_id=user_id, decision_data={},
+            )
 
         return MfaSetupResult(secret=secret, provisioning_uri=provisioning_uri)
 
@@ -101,12 +108,23 @@ class MfaService:
                         "WHERE user_id = $1",
                         user_id,
                     )
+                    reset_reason = "replayed" if replayed else "invalid_code"
+                    await record_audit_log(
+                        conn, actor_agent=str(user_id), action_type="mfa.reset",
+                        user_id=user_id,
+                        decision_data={"reason": reset_reason, "stage": "initial_setup"},
+                    )
                 else:
                     # already_enabled=true일 때는 행을 절대 건드리지 않는다 —
                     # 탈취한 Bearer 토큰만으로(비밀번호 없이) 아무 틀린 코드나
                     # 보내 이미 켜진 MFA를 원격으로 영구 비활성화시킬 수 있던
                     # 인증 우회 구멍을 막는다.
                     pass
+                await record_audit_log(
+                    conn, actor_agent=str(user_id), action_type="mfa.verify_failed",
+                    user_id=user_id,
+                    decision_data={"reason": "replayed" if replayed else "invalid_code"},
+                )
                 # 이 엔드포인트(/auth/mfa/verify)는 이미 Bearer 토큰으로 인증된
                 # 사용자만 호출하므로(#12의 로그인 타이밍 사이드채널과 무관),
                 # "재사용"과 "코드 자체가 틀림"을 구분해줘도 계정 존재 여부 등이
@@ -122,6 +140,10 @@ class MfaService:
 
             await conn.execute(
                 "UPDATE users SET mfa_enabled = true WHERE user_id = $1", user_id
+            )
+            await record_audit_log(
+                conn, actor_agent=str(user_id), action_type="mfa.verify_success",
+                user_id=user_id, decision_data={"already_enabled": already_enabled},
             )
 
     def _totp_code_valid(self, encrypted_secret: str, totp_code: str) -> bool:

@@ -35,6 +35,8 @@ from argon2 import PasswordHasher
 from argon2.exceptions import VerifyMismatchError
 from pydantic import BaseModel
 
+from src.core.logging.audit_log import record_audit_log
+
 MAX_FAILED_ATTEMPTS = 5
 LOCKOUT_MINUTES = 15
 MIN_PASSWORD_LENGTH = 12
@@ -151,20 +153,41 @@ class AuthService:
             row = await conn.fetchrow("SELECT * FROM users WHERE email = $1", email)
             if row is None:
                 _consume_verify_timing(password)
+                # 비밀번호/TOTP 값은 절대 기록하지 않는다 — 시도한 이메일과
+                # 결과 사유만 남긴다(계정이 없어 user_id 자체가 없음).
+                await record_audit_log(
+                    conn, actor_agent="unknown", action_type="auth.login_failed",
+                    decision_data={"email": email, "reason": "account_not_found"},
+                )
                 raise AuthError(_GENERIC_AUTH_ERROR)
 
             if row["status"] in ("SUSPENDED", "DELETED"):
                 _consume_verify_timing(password)
+                await record_audit_log(
+                    conn, actor_agent=str(row["user_id"]), action_type="auth.login_failed",
+                    user_id=row["user_id"],
+                    decision_data={
+                        "reason": "account_suspended_or_deleted", "status": row["status"]
+                    },
+                )
                 raise AuthError(_GENERIC_AUTH_ERROR)
 
             now = datetime.now(timezone.utc)
             if row["locked_until"] is not None and now < row["locked_until"]:
                 _consume_verify_timing(password)
+                await record_audit_log(
+                    conn, actor_agent=str(row["user_id"]), action_type="auth.login_failed",
+                    user_id=row["user_id"], decision_data={"reason": "account_locked"},
+                )
                 raise AuthError(_GENERIC_AUTH_ERROR)
 
             try:
                 _hasher.verify(row["password_hash"], password)
             except VerifyMismatchError:
+                await record_audit_log(
+                    conn, actor_agent=str(row["user_id"]), action_type="auth.login_failed",
+                    user_id=row["user_id"], decision_data={"reason": "wrong_password"},
+                )
                 await self._register_failed_attempt(
                     conn, row["user_id"], row["failed_login_attempts"]
                 )
@@ -178,11 +201,20 @@ class AuthService:
                     and await self._verify_totp(row["user_id"], row["mfa_secret"], totp_code)
                 )
                 if not totp_ok:
+                    await record_audit_log(
+                        conn, actor_agent=str(row["user_id"]), action_type="auth.login_failed",
+                        user_id=row["user_id"], decision_data={"reason": "mfa_failed"},
+                    )
                     await self._register_failed_attempt(
                         conn, row["user_id"], row["failed_login_attempts"]
                     )
                     raise AuthError(_GENERIC_AUTH_ERROR)
                 totp_verified_now = True
+
+            await record_audit_log(
+                conn, actor_agent=str(row["user_id"]), action_type="auth.login_success",
+                user_id=row["user_id"], decision_data={"mfa_verified_now": totp_verified_now},
+            )
 
             cancels_deletion = row["status"] == "PENDING_DELETION"
             if cancels_deletion:
@@ -220,9 +252,10 @@ class AuthService:
         self, conn: asyncpg.Connection, user_id: UUID, current_attempts: int
     ) -> None:
         attempts = current_attempts + 1
+        newly_locked = attempts >= MAX_FAILED_ATTEMPTS
         locked_until = (
             datetime.now(timezone.utc) + timedelta(minutes=LOCKOUT_MINUTES)
-            if attempts >= MAX_FAILED_ATTEMPTS
+            if newly_locked
             else None
         )
         await conn.execute(
@@ -231,3 +264,11 @@ class AuthService:
             attempts,
             locked_until,
         )
+        if newly_locked:
+            # 실패 시도 자체와는 별개의 이벤트 — 잠금이 "지금 막 걸렸다"는
+            # 사실 자체가 운영자에게 알림/모니터링 대상이 되는 신호다.
+            await record_audit_log(
+                conn, actor_agent=str(user_id), action_type="auth.account_locked",
+                user_id=user_id,
+                decision_data={"failed_attempts": attempts, "locked_minutes": LOCKOUT_MINUTES},
+            )

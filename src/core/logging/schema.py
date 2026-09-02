@@ -23,6 +23,8 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
+from src.core.logging.request_context import get_current_request_id
+
 
 class LogEntry(BaseModel):
     timestamp: datetime
@@ -39,12 +41,15 @@ class JSONLinesFormatter(logging.Formatter):
     형태로 호출하면 각각 LogEntry.event_type/correlation_id/extra로 매핑된다."""
 
     def format(self, record: logging.LogRecord) -> str:
+        # 호출자가 correlation_id를 명시하지 않았으면 요청 미들웨어가 채워둔
+        # request_id로 대체한다(HTTP 요청 컨텍스트 밖이면 여전히 None).
+        correlation_id = getattr(record, "correlation_id", None) or get_current_request_id()
         entry = LogEntry(
             timestamp=datetime.fromtimestamp(record.created, tz=timezone.utc),
             level=record.levelname,
             module=record.name,
             event_type=getattr(record, "event_type", "log.unstructured"),
-            correlation_id=getattr(record, "correlation_id", None),
+            correlation_id=correlation_id,
             message=record.getMessage(),
             extra=getattr(record, "payload", {}),
         )

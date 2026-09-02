@@ -71,6 +71,25 @@ async def test_destination_address_stored_encrypted_not_plaintext(whitelist, poo
     assert raw != "bc1qcoldwallet"
 
 
+async def test_register_is_audit_logged_without_destination_address(whitelist, pool):
+    """FD-7.2 감사기록 — destination_address는 실제 출금 목적지라
+    audit_log에조차 평문으로 남으면 안 된다."""
+    user_id = await create_test_user(pool)
+    await whitelist.register(
+        user_id, exchange="bitget", destination_address="bc1qcoldwallet", label="콜드월렛"
+    )
+
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            "SELECT decision_data FROM audit_log "
+            "WHERE user_id = $1 AND action_type = 'withdrawal_whitelist.registered'",
+            user_id,
+        )
+    assert row is not None
+    assert "bc1qcoldwallet" not in row["decision_data"]
+    assert "콜드월렛" in row["decision_data"]  # 라벨은 목적지 자체가 아니라 남겨도 됨
+
+
 async def test_registration_blocked_during_crisis(whitelist, pool, circuit_breaker):
     user_id = await create_test_user(pool)
     async with pool.acquire() as conn:

@@ -155,6 +155,35 @@ async def test_verify_rejects_replaying_the_same_totp_code(pool):
         await mfa.verify(user_id, code)  # 같은 구간, 같은 코드 재사용 시도
 
 
+async def test_setup_verify_and_reset_are_audit_logged(mfa, pool):
+    """FD-7.2 감사기록 — setup/verify_success/verify_failed(=reset, 최초
+    설정 실패 시)를 남긴다. secret/TOTP 코드 값은 어디에도 없어야 한다."""
+    user_id, email = await _real_user(pool)
+    result = await mfa.setup(user_id, email)
+
+    with pytest.raises(MfaError):
+        await mfa.verify(user_id, "000000")
+
+    result2 = await mfa.setup(user_id, email)
+    code = pyotp.totp.TOTP(result2.secret).now()
+    await mfa.verify(user_id, code)
+
+    async with pool.acquire() as conn:
+        rows = await conn.fetch(
+            "SELECT action_type, decision_data FROM audit_log "
+            "WHERE user_id = $1 ORDER BY created_at",
+            user_id,
+        )
+    action_types = [r["action_type"] for r in rows]
+    assert action_types.count("mfa.setup") == 2
+    assert "mfa.reset" in action_types
+    assert "mfa.verify_failed" in action_types
+    assert "mfa.verify_success" in action_types
+    for row in rows:
+        assert result.secret not in row["decision_data"]
+        assert result2.secret not in row["decision_data"]
+
+
 async def test_login_with_mfa_enabled_uses_verify_totp_for_login_callback(pool):
     clock = _MutableClock()
     mfa = MfaService(pool, encryption_key=ENCRYPTION_KEY, now=clock)

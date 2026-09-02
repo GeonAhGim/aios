@@ -150,7 +150,7 @@ async def change_user_status(
     service: UserAdminService = Depends(get_user_admin_service),
 ) -> UserStatusChangeResult:
     try:
-        return await service.change_status(user_id, body.status)
+        return await service.change_status(user_id, body.status, admin_user_id=admin.user_id)
     except UserAdminError as exc:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from exc
 

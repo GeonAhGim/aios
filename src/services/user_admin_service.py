@@ -14,6 +14,8 @@ from uuid import UUID
 import asyncpg
 from pydantic import BaseModel
 
+from src.core.logging.audit_log import record_audit_log
+
 ADMIN_SETTABLE_STATUSES = ("ACTIVE", "SUSPENDED")
 
 
@@ -53,7 +55,9 @@ class UserAdminService:
                 )
         return [UserSummary(**dict(row)) for row in rows]
 
-    async def change_status(self, user_id: UUID, new_status: str) -> UserStatusChangeResult:
+    async def change_status(
+        self, user_id: UUID, new_status: str, *, admin_user_id: UUID
+    ) -> UserStatusChangeResult:
         if new_status not in ADMIN_SETTABLE_STATUSES:
             raise UserAdminError(
                 f"운영자는 {'/'.join(ADMIN_SETTABLE_STATUSES)}로만 상태를 바꿀 수 있습니다 "
@@ -66,8 +70,15 @@ class UserAdminService:
                 user_id,
                 new_status,
             )
-        if row is None:
-            raise UserAdminError("존재하지 않는 사용자입니다.")
+            if row is None:
+                raise UserAdminError("존재하지 않는 사용자입니다.")
+            # actor_agent는 대상 본인이 아니라 이 변경을 실행한 운영자다 —
+            # dispute_resolution_service.resolve()와 동일한 원칙.
+            await record_audit_log(
+                conn, actor_agent=str(admin_user_id), action_type="user.status_changed",
+                user_id=user_id,
+                decision_data={"new_status": new_status, "changed_by": str(admin_user_id)},
+            )
         return UserStatusChangeResult(
             user_id=user_id, status=new_status, changed_at=datetime.now(timezone.utc)
         )

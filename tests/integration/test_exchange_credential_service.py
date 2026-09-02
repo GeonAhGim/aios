@@ -130,6 +130,26 @@ async def test_revoke_marks_inactive_not_deleted(service, pool):
     assert row["revoked_at"] is not None
 
 
+async def test_register_and_revoke_are_audit_logged(service, pool):
+    """FD-7.2 감사기록 — api_key/api_secret 값은 어디에도 없어야 한다."""
+    user_id = await create_test_user(pool)
+    await service.register(user_id, "bitget", "good-key", "good-secret")
+    await service.revoke(user_id, "bitget")
+
+    async with pool.acquire() as conn:
+        rows = await conn.fetch(
+            "SELECT action_type, decision_data FROM audit_log "
+            "WHERE user_id = $1 ORDER BY created_at",
+            user_id,
+        )
+    action_types = [r["action_type"] for r in rows]
+    assert "exchange_credential.registered" in action_types
+    assert "exchange_credential.revoked" in action_types
+    for row in rows:
+        assert "good-key" not in row["decision_data"]
+        assert "good-secret" not in row["decision_data"]
+
+
 async def test_revoke_without_active_credential_raises(service, pool):
     user_id = await create_test_user(pool)
 

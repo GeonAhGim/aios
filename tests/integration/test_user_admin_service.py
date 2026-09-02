@@ -16,6 +16,7 @@ from tests.integration.conftest import create_test_user
 
 JWT_SECRET = "test-secret-key-not-for-production"
 STRONG_PASSWORD = "Str0ng!Passw0rd"
+_ADMIN_ID = uuid.uuid4()
 
 
 def _asyncpg_dsn() -> str:
@@ -51,7 +52,7 @@ async def test_list_users_filters_by_email_search(service, pool):
 async def test_change_status_to_suspended(service, pool):
     user_id = await create_test_user(pool)
 
-    result = await service.change_status(user_id, "SUSPENDED")
+    result = await service.change_status(user_id, "SUSPENDED", admin_user_id=_ADMIN_ID)
 
     assert result.status == "SUSPENDED"
     async with pool.acquire() as conn:
@@ -63,19 +64,40 @@ async def test_change_status_rejects_deleted(service, pool):
     user_id = await create_test_user(pool)
 
     with pytest.raises(UserAdminError):
-        await service.change_status(user_id, "DELETED")
+        await service.change_status(user_id, "DELETED", admin_user_id=_ADMIN_ID)
 
 
 async def test_change_status_rejects_pending_deletion(service, pool):
     user_id = await create_test_user(pool)
 
     with pytest.raises(UserAdminError):
-        await service.change_status(user_id, "PENDING_DELETION")
+        await service.change_status(user_id, "PENDING_DELETION", admin_user_id=_ADMIN_ID)
 
 
 async def test_change_status_rejects_nonexistent_user(service):
     with pytest.raises(UserAdminError):
-        await service.change_status(uuid.uuid4(), "SUSPENDED")
+        await service.change_status(uuid.uuid4(), "SUSPENDED", admin_user_id=_ADMIN_ID)
+
+
+async def test_change_status_is_audit_logged_with_admin_as_actor(service, pool):
+    """FD-7.2 감사기록 — actor_agent는 대상 사용자가 아니라 실제로
+    변경을 실행한 운영자여야 한다."""
+    import json
+
+    user_id = await create_test_user(pool)
+
+    await service.change_status(user_id, "SUSPENDED", admin_user_id=_ADMIN_ID)
+
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            "SELECT actor_agent, decision_data FROM audit_log "
+            "WHERE user_id = $1 AND action_type = 'user.status_changed'",
+            user_id,
+        )
+    assert row is not None
+    assert row["actor_agent"] == str(_ADMIN_ID)
+    decision_data = json.loads(row["decision_data"])
+    assert decision_data["new_status"] == "SUSPENDED"
 
 
 async def test_suspended_user_login_rejected(service, pool):
@@ -83,7 +105,7 @@ async def test_suspended_user_login_rejected(service, pool):
     email = f"test-{uuid.uuid4().hex}@example.com"
     user = await auth.signup(email, STRONG_PASSWORD)
 
-    await service.change_status(user.user_id, "SUSPENDED")
+    await service.change_status(user.user_id, "SUSPENDED", admin_user_id=_ADMIN_ID)
 
     with pytest.raises(AuthError):
         await auth.authenticate(email, STRONG_PASSWORD)
@@ -93,9 +115,9 @@ async def test_reactivating_user_allows_login_again(service, pool):
     auth = AuthService(pool, jwt_secret_key=JWT_SECRET)
     email = f"test-{uuid.uuid4().hex}@example.com"
     user = await auth.signup(email, STRONG_PASSWORD)
-    await service.change_status(user.user_id, "SUSPENDED")
+    await service.change_status(user.user_id, "SUSPENDED", admin_user_id=_ADMIN_ID)
 
-    await service.change_status(user.user_id, "ACTIVE")
+    await service.change_status(user.user_id, "ACTIVE", admin_user_id=_ADMIN_ID)
     logged_in = await auth.authenticate(email, STRONG_PASSWORD)
 
     assert logged_in.email == email

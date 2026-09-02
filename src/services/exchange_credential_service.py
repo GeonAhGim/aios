@@ -23,6 +23,7 @@ from uuid import UUID
 import asyncpg
 from pydantic import BaseModel
 
+from src.core.logging.audit_log import record_audit_log
 from src.core.security.encryption import decrypt, encrypt
 from src.exchanges.common.adapter import ExchangeAdapter
 from src.exchanges.factory import UnsupportedExchangeError, build_adapter
@@ -123,6 +124,12 @@ class ExchangeCredentialService:
                 encrypted_secret,
                 encrypted_extra,
             )
+            # api_key/api_secret/extra 값은 절대 남기지 않는다 — 어느
+            # 거래소에 등록했는지와 결과만.
+            await record_audit_log(
+                conn, actor_agent=str(user_id), action_type="exchange_credential.registered",
+                user_id=user_id, decision_data={"exchange": exchange},
+            )
         return CredentialSummary(
             id=row["id"],
             exchange=row["exchange"],
@@ -140,8 +147,12 @@ class ExchangeCredentialService:
                 user_id,
                 exchange,
             )
-        if result == "UPDATE 0":
-            raise ExchangeCredentialError(f"활성 상태인 {exchange} 자격증명이 없습니다.")
+            if result == "UPDATE 0":
+                raise ExchangeCredentialError(f"활성 상태인 {exchange} 자격증명이 없습니다.")
+            await record_audit_log(
+                conn, actor_agent=str(user_id), action_type="exchange_credential.revoked",
+                user_id=user_id, decision_data={"exchange": exchange},
+            )
 
     async def list_for_user(self, user_id: UUID) -> list[CredentialSummary]:
         async with self._pool.acquire() as conn:
