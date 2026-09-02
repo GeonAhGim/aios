@@ -30,8 +30,13 @@ class StatementNotFoundError(Exception):
 
 
 class CrossTenantStatementAccessError(Exception):
-    """73번 TRU-006과 같은 원칙 — 다른 tenant의 statement는 존재 여부도 흘리지
-    않고 거부한다(호출부가 404로 통일해 매핑)."""
+    """72번 에러 taxonomy `AUTH_PERFORMANCE_SCOPE_DENIED` — 호출부가 403으로
+    매핑한다(get_statement.py와 동일 원칙 — 81번 §3이 이 코드를 404와
+    별개로 명명한다)."""
+
+    def __init__(self, statement_id: UUID) -> None:
+        super().__init__(f"AUTH_PERFORMANCE_SCOPE_DENIED: {statement_id}")
+        self.reason_code = "AUTH_PERFORMANCE_SCOPE_DENIED"
 
 
 async def correct_statement(
@@ -47,7 +52,7 @@ async def correct_statement(
     if original is None:
         raise StatementNotFoundError(str(statement_id))
     if original.tenant_id != tenant_id:
-        raise CrossTenantStatementAccessError(str(statement_id))
+        raise CrossTenantStatementAccessError(statement_id)
 
     latest = await repo.get_latest_statement(
         tenant_id=tenant_id,
