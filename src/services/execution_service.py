@@ -63,6 +63,7 @@ class ExecutionSummary(BaseModel):
     exchange: str
     allocated_capital: Decimal
     approval_request_id: int | None = None
+    max_drawdown_pct: Decimal | None = None
 
 
 class ExecutionService:
@@ -274,6 +275,36 @@ class ExecutionService:
             mode=row["mode"],
             exchange=row["exchange"],
             allocated_capital=row["allocated_capital"],
+        )
+
+    async def set_max_drawdown(
+        self, execution_id: int, user_id: UUID, max_drawdown_pct: Decimal | None
+    ) -> ExecutionSummary:
+        """ZuluTrade식 "위험 관리"(ZuluGuard) — 실행별 손실 한도(%)를 설정하면
+        risk_guard_service.py::evaluate_all_running()이 주기적으로 실현+
+        미실현 손익을 이 한도와 비교해 초과 시 paused_by='SAFETY_LAYER'로
+        자동 정지시킨다. None으로 설정하면 가드를 끈다(기본값)."""
+        if max_drawdown_pct is not None and not (0 < max_drawdown_pct <= 100):
+            raise ExecutionControlError("손실 한도는 0보다 크고 100 이하여야 합니다.")
+
+        async with self._pool.acquire() as conn:
+            row = await conn.fetchrow(
+                "UPDATE strategy_executions SET max_drawdown_pct = $3 "
+                "WHERE id = $1 AND user_id = $2 "
+                "RETURNING status, mode, exchange, allocated_capital, max_drawdown_pct",
+                execution_id,
+                user_id,
+                max_drawdown_pct,
+            )
+        if row is None:
+            raise ExecutionControlError("본인의 실행만 제어할 수 있습니다.")
+        return ExecutionSummary(
+            id=execution_id,
+            status=row["status"],
+            mode=row["mode"],
+            exchange=row["exchange"],
+            allocated_capital=row["allocated_capital"],
+            max_drawdown_pct=row["max_drawdown_pct"],
         )
 
     async def retire(

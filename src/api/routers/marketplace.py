@@ -76,6 +76,7 @@ async def list_listings(
     asset_class: str | None = None,
     exchange: str | None = None,
     max_price: Decimal | None = None,
+    sort_by: str = "RECOMMENDED",
     page: int = 1,
     page_size: int = 20,
     service: ListingSearchService = Depends(get_listing_search_service),
@@ -84,6 +85,7 @@ async def list_listings(
         asset_class=asset_class,
         exchange=exchange,
         max_price=max_price,
+        sort_by=sort_by,
         page=page,
         page_size=page_size,
     )

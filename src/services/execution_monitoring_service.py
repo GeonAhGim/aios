@@ -33,6 +33,7 @@ class ExecutionCard(BaseModel):
     days_since_start: int | None
     realized_pnl: Decimal
     unrealized_pnl: Decimal
+    max_drawdown_pct: Decimal | None
 
 
 class ExecutionMonitoringService:
@@ -45,6 +46,7 @@ class ExecutionMonitoringService:
                 """
                 SELECT e.id AS execution_id, e.strategy_id, e.strategy_version, e.status,
                        e.mode, e.exchange, e.allocated_capital, e.started_at,
+                       e.max_drawdown_pct,
                        COALESCE(SUM(p.realized_pnl), 0) AS realized_pnl,
                        COALESCE(SUM(p.unrealized_pnl), 0) AS unrealized_pnl
                 FROM strategy_executions e
@@ -73,6 +75,7 @@ class ExecutionMonitoringService:
                     days_since_start=days_since_start,
                     realized_pnl=row["realized_pnl"],
                     unrealized_pnl=row["unrealized_pnl"],
+                    max_drawdown_pct=row["max_drawdown_pct"],
                 )
             )
         return cards

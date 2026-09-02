@@ -129,6 +129,27 @@ async def test_sort_is_by_verified_at_descending_not_created_at(service, pool):
     )
 
 
+async def test_sort_by_sharpe_ratio_orders_purely_by_performance(service, pool):
+    """ZuluRank식 랭킹(2026-09-02 신설) — sort_by="SHARPE_RATIO"는 검증통과일과
+    무관하게 샤프비율 내림차순으로만 정렬한다."""
+    seller = await create_test_user(pool)
+    low_sharpe = await _listed_listing(pool, seller)
+    high_sharpe = await _listed_listing(pool, seller)  # 나중에 검증통과(기본 정렬이면 더 앞)
+    async with pool.acquire() as conn:
+        await conn.execute(
+            "UPDATE strategy_listings SET sharpe_ratio = 0.5 WHERE id = $1", low_sharpe.listing_id
+        )
+        await conn.execute(
+            "UPDATE strategy_listings SET sharpe_ratio = 2.5 WHERE id = $1",
+            high_sharpe.listing_id,
+        )
+
+    result = await service.search(sort_by="SHARPE_RATIO", page_size=100)
+
+    ids_in_order = [item.id for item in result.items]
+    assert ids_in_order.index(high_sharpe.listing_id) < ids_in_order.index(low_sharpe.listing_id)
+
+
 async def test_pagination_limits_and_offsets(service, pool):
     seller = await create_test_user(pool)
     for _ in range(3):

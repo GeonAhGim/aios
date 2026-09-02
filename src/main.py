@@ -23,6 +23,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from src.core.event_bus.in_process import InProcessEventBus
+from src.core.loader.risk_policy_loader import load_risk_policy
 from src.core.loader.secret_loader import load_env_secrets
 from src.core.logging.audit_log import record_audit_log
 from src.core.notifications.gateway import NotificationGateway
@@ -30,9 +31,12 @@ from src.core.safety.heartbeat import DEFAULT_HEARTBEAT_PATH, write_heartbeat
 from src.services.alert_service import AlertService
 from src.services.credential_resolver import CredentialResolver
 from src.services.exchange_credential_service import ExchangeCredentialService
+from src.services.execution_service import ExecutionService
+from src.services.risk_guard_service import RiskGuardService
 
 HEARTBEAT_INTERVAL_SECONDS = 2.0  # Draft — watchdog_process.py의 5초 폴링 주기보다 짧게
 ALERT_EVALUATION_INTERVAL_SECONDS = 60.0  # Draft — 가격/지표 알림 평가 주기
+RISK_GUARD_INTERVAL_SECONDS = 30.0  # Draft — 손실 한도 자동정지 평가 주기
 
 
 def _asyncpg_dsn(database_url: str) -> str:
@@ -103,6 +107,21 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
     alert_task = asyncio.create_task(_alert_evaluation_loop())
 
+    # ZuluTrade식 "위험 관리" — 실행별 손실 한도(%) 자동 정지 루프. 위 두
+    # 루프와 동일 패턴(main.py가 유일한 백그라운드 스케줄러 지점).
+    risk_guard_service = RiskGuardService(
+        pool,
+        ExecutionService(pool, load_risk_policy(), publish=event_bus.publish),
+        publish=event_bus.publish,
+    )
+
+    async def _risk_guard_loop() -> None:
+        while True:
+            await asyncio.sleep(RISK_GUARD_INTERVAL_SECONDS)
+            await risk_guard_service.evaluate_all_running()
+
+    risk_guard_task = asyncio.create_task(_risk_guard_loop())
+
     app.state.pool = pool
     app.state.secrets = secrets
     app.state.event_bus = event_bus
@@ -112,10 +131,13 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     finally:
         heartbeat_task.cancel()
         alert_task.cancel()
+        risk_guard_task.cancel()
         with contextlib.suppress(asyncio.CancelledError):
             await heartbeat_task
         with contextlib.suppress(asyncio.CancelledError):
             await alert_task
+        with contextlib.suppress(asyncio.CancelledError):
+            await risk_guard_task
         await event_bus.stop()
         await pool.close()
 
@@ -153,6 +175,7 @@ def create_app() -> FastAPI:
         users,
         wallet,
     )
+    from src.api.routers.foundation import trust as foundation_trust
 
     app.include_router(auth.router, prefix="/auth", tags=["auth"])
     app.include_router(users.router, prefix="/users", tags=["users"])
@@ -164,6 +187,7 @@ def create_app() -> FastAPI:
         strategy_builder.router, prefix="/strategy-builder", tags=["strategy-builder"]
     )
     app.include_router(suitability.router)
+    app.include_router(foundation_trust.router)
     app.include_router(executions.router, prefix="/executions", tags=["executions"])
     app.include_router(notifications.router, prefix="/notifications", tags=["notifications"])
     app.include_router(admin.router, tags=["admin"])

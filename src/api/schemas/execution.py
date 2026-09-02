@@ -28,6 +28,10 @@ class RetireRequest(BaseModel):
     liquidation: str = "KEEP_POSITIONS"
 
 
+class SetMaxDrawdownRequest(BaseModel):
+    max_drawdown_pct: Decimal | None = None
+
+
 class ExecutionResponse(BaseModel):
     id: int
     status: str
@@ -35,6 +39,7 @@ class ExecutionResponse(BaseModel):
     exchange: str
     allocated_capital: Decimal
     approval_request_id: int | None = None
+    max_drawdown_pct: Decimal | None = None
 
 
 def to_execution_response(summary: ExecutionSummary) -> ExecutionResponse:
@@ -45,6 +50,7 @@ def to_execution_response(summary: ExecutionSummary) -> ExecutionResponse:
         exchange=summary.exchange,
         allocated_capital=summary.allocated_capital,
         approval_request_id=summary.approval_request_id,
+        max_drawdown_pct=summary.max_drawdown_pct,
     )
 
 
@@ -59,6 +65,7 @@ class ExecutionCardResponse(BaseModel):
     days_since_start: int | None
     realized_pnl: Decimal
     unrealized_pnl: Decimal
+    max_drawdown_pct: Decimal | None
 
 
 def to_execution_card_response(card: ExecutionCard) -> ExecutionCardResponse:

@@ -26,6 +26,7 @@ from src.api.schemas.execution import (
     ExecutionCreateRequest,
     ExecutionResponse,
     RetireRequest,
+    SetMaxDrawdownRequest,
     to_execution_card_response,
     to_execution_response,
 )
@@ -111,6 +112,22 @@ async def pause_execution(
 ) -> ExecutionResponse:
     try:
         summary = await service.pause(execution_id, paused_by="USER", user_id=user.user_id)
+    except ExecutionControlError as exc:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from exc
+    return to_execution_response(summary)
+
+
+@router.patch("/{execution_id}/risk-guard")
+async def set_execution_risk_guard(
+    execution_id: int,
+    body: SetMaxDrawdownRequest,
+    user: User = Depends(get_current_user),
+    service: ExecutionService = Depends(get_execution_service),
+) -> ExecutionResponse:
+    try:
+        summary = await service.set_max_drawdown(
+            execution_id, user.user_id, body.max_drawdown_pct
+        )
     except ExecutionControlError as exc:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from exc
     return to_execution_response(summary)

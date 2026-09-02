@@ -287,6 +287,93 @@ async def test_convert_paper_to_live(client, pool):
     assert response.json()["approval_request_id"] is not None
 
 
+async def test_set_and_view_risk_guard(client, pool):
+    headers, user_id = await _register(client)
+    strategy_id, version = await _create_approved_strategy(pool, user_id)
+    await _link_credential(pool, user_id)
+    create_response = await client.post(
+        "/executions",
+        json={
+            "strategy_id": strategy_id,
+            "strategy_version": version,
+            "allocated_capital": "500",
+            "currency": "USDT",
+            "exchange": "bitget",
+            "mode": "PAPER",
+        },
+        headers=headers,
+    )
+    execution_id = create_response.json()["id"]
+
+    response = await client.patch(
+        f"/executions/{execution_id}/risk-guard",
+        json={"max_drawdown_pct": 15},
+        headers=headers,
+    )
+
+    assert response.status_code == 200
+    assert response.json()["max_drawdown_pct"] == "15.00"
+
+    list_response = await client.get("/executions", headers=headers)
+    card = next(c for c in list_response.json() if c["execution_id"] == execution_id)
+    assert card["max_drawdown_pct"] == "15.00"
+
+
+async def test_risk_guard_rejects_out_of_range_value(client, pool):
+    headers, user_id = await _register(client)
+    strategy_id, version = await _create_approved_strategy(pool, user_id)
+    await _link_credential(pool, user_id)
+    create_response = await client.post(
+        "/executions",
+        json={
+            "strategy_id": strategy_id,
+            "strategy_version": version,
+            "allocated_capital": "500",
+            "currency": "USDT",
+            "exchange": "bitget",
+            "mode": "PAPER",
+        },
+        headers=headers,
+    )
+    execution_id = create_response.json()["id"]
+
+    response = await client.patch(
+        f"/executions/{execution_id}/risk-guard",
+        json={"max_drawdown_pct": 200},
+        headers=headers,
+    )
+
+    assert response.status_code == 400
+
+
+async def test_risk_guard_rejects_other_users_execution(client, pool):
+    owner_headers, owner_id = await _register(client)
+    stranger_headers, _ = await _register(client)
+    strategy_id, version = await _create_approved_strategy(pool, owner_id)
+    await _link_credential(pool, owner_id)
+    create_response = await client.post(
+        "/executions",
+        json={
+            "strategy_id": strategy_id,
+            "strategy_version": version,
+            "allocated_capital": "500",
+            "currency": "USDT",
+            "exchange": "bitget",
+            "mode": "PAPER",
+        },
+        headers=owner_headers,
+    )
+    execution_id = create_response.json()["id"]
+
+    response = await client.patch(
+        f"/executions/{execution_id}/risk-guard",
+        json={"max_drawdown_pct": 15},
+        headers=stranger_headers,
+    )
+
+    assert response.status_code == 400
+
+
 async def test_executions_require_authentication(client):
     response = await client.get("/executions")
 
