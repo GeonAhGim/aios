@@ -1,4 +1,5 @@
 import { ApiError } from "@aios/api-client";
+import { classifyIdempotencyFailure } from "@aios/shared-types";
 import { useCallback, useRef, useState } from "react";
 import { createIdempotencyKeyManager, type IdempotencyKeyManager } from "../lib/idempotency";
 
@@ -42,7 +43,19 @@ export function useIdempotentSubmit(requestKey: string): UseIdempotentSubmitResu
         manager.discardKey(requestKey);
         return result;
       } catch (err) {
-        if (isNonRetryableFailure(err)) {
+        // task-383: INTEGRITY_IDEMPOTENCY_CONFLICT(new_key)/VALIDATION_IDEMPOTENCY_KEY_REQUIRED
+        // (missing_header) 둘 다 400/409 범위라 discardKey는 isNonRetryableFailure로 이미
+        // 처리되지만, missing_header는 클라이언트가 헤더 자체를 안 보낸 개발 결함이므로
+        // 콘솔 경고를 남겨 조용히 묻히지 않게 한다. 두 경우 모두 여기서 자동 재제출은
+        // 하지 않는다(new_key: 중복 결제 위험 — 사용자 확인 후 재시도만 허용).
+        const failureKind = classifyIdempotencyFailure(err);
+        if (failureKind === "missing_header") {
+          console.warn(
+            "[useIdempotentSubmit] Idempotency-Key 헤더 없이 요청됨(클라이언트 결함) — 재시도해도 같은 결과입니다.",
+            err,
+          );
+        }
+        if (isNonRetryableFailure(err) || failureKind !== "none") {
           manager.discardKey(requestKey);
         }
         throw err;
