@@ -1,5 +1,10 @@
-import { useCancelAlert, useCreateAlert, useIndicators, useMyAlerts } from "@aios/shared-hooks";
-import { ApiError } from "@aios/api-client";
+import {
+  useCancelAlert,
+  useCreateAlert,
+  useIndicators,
+  useMyAlerts,
+} from "@aios/shared-hooks";
+import { ApiError, type ApiResponsePageMeta } from "@aios/api-client";
 import type { AlertCreateRequest } from "@aios/shared-types";
 import {
   Alert,
@@ -14,11 +19,26 @@ import {
   Select,
 } from "@aios/ui-web";
 import { useState, type FormEvent } from "react";
+import { useSearchParams } from "react-router-dom";
 import { AppShell } from "../../components/layout/AppShell";
+import { Pagination } from "../../components/Pagination";
 import { exchangeLabel } from "../../lib/exchangeLabels";
+import { derivePageState } from "../../lib/pagination";
 
 const EXCHANGES = ["bitget", "kis"];
-const OPERATORS = ["<", ">", "<=", ">=", "==", "crosses_above", "crosses_below"];
+const OPERATORS = [
+  "<",
+  ">",
+  "<=",
+  ">=",
+  "==",
+  "crosses_above",
+  "crosses_below",
+];
+// listMyAlerts()는 봉투 미적용 레거시 배열 응답이라(§9 PLT-12 대상 밖) 서버가
+// 페이지를 나눠주지 않는다. 이미 받은 전체 배열을 derivePageState로 클라이언트
+// 쪽에서 잘라 보여준다.
+const ALERTS_PAGE_SIZE = 10;
 
 const STATUS_TONE: Record<string, "neutral" | "success" | "warning"> = {
   ACTIVE: "neutral",
@@ -37,6 +57,28 @@ export function AlertsPage() {
   const { data: indicatorList } = useIndicators();
   const createAlert = useCreateAlert();
   const cancelAlert = useCancelAlert();
+  const [searchParams, setSearchParams] = useSearchParams();
+
+  const requestedPage = Math.max(1, Number(searchParams.get("page")) || 1);
+  const meta: ApiResponsePageMeta | null = alerts
+    ? {
+        total: alerts.length,
+        page: requestedPage,
+        size: ALERTS_PAGE_SIZE,
+        next_cursor: null,
+      }
+    : null;
+  const pageState = derivePageState(meta, { defaultSize: ALERTS_PAGE_SIZE });
+  const pageAlerts =
+    alerts && pageState.totalPages !== null && pageState.totalPages > 0
+      ? alerts.slice(pageState.rangeStart - 1, pageState.rangeEnd)
+      : [];
+
+  function goToPage(nextPage: number) {
+    const next = new URLSearchParams(searchParams);
+    next.set("page", String(nextPage));
+    setSearchParams(next, { replace: true });
+  }
 
   const indicators = indicatorList?.indicators ?? ["RSI", "SMA", "EMA"];
   const [exchange, setExchange] = useState(EXCHANGES[0]);
@@ -62,7 +104,9 @@ export function AlertsPage() {
         threshold: Number(threshold),
       });
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : "알림 생성에 실패했습니다.");
+      setError(
+        err instanceof ApiError ? err.message : "알림 생성에 실패했습니다.",
+      );
     }
   }
 
@@ -75,7 +119,10 @@ export function AlertsPage() {
           <form onSubmit={handleSubmit} className="space-y-3">
             <div className="grid grid-cols-2 gap-3">
               <Field label="거래소">
-                <Select value={exchange} onChange={(e) => setExchange(e.target.value)}>
+                <Select
+                  value={exchange}
+                  onChange={(e) => setExchange(e.target.value)}
+                >
                   {EXCHANGES.map((ex) => (
                     <option key={ex} value={ex}>
                       {exchangeLabel(ex)}
@@ -95,7 +142,10 @@ export function AlertsPage() {
             </div>
             <div className="grid grid-cols-2 gap-3">
               <Field label="지표">
-                <Select value={indicator} onChange={(e) => setIndicator(e.target.value)}>
+                <Select
+                  value={indicator}
+                  onChange={(e) => setIndicator(e.target.value)}
+                >
                   {indicators.map((ind) => (
                     <option key={ind} value={ind}>
                       {ind}
@@ -113,7 +163,10 @@ export function AlertsPage() {
             </div>
             <div className="grid grid-cols-3 gap-3">
               <Field label="타임프레임">
-                <Select value={timeframe} onChange={(e) => setTimeframe(e.target.value)}>
+                <Select
+                  value={timeframe}
+                  onChange={(e) => setTimeframe(e.target.value)}
+                >
                   <option value="15m">15분</option>
                   <option value="1h">1시간</option>
                   <option value="4h">4시간</option>
@@ -124,7 +177,9 @@ export function AlertsPage() {
                 <Select
                   value={operator}
                   onChange={(e) =>
-                    setOperator(e.target.value as AlertCreateRequest["operator"])
+                    setOperator(
+                      e.target.value as AlertCreateRequest["operator"],
+                    )
                   }
                 >
                   {OPERATORS.map((op) => (
@@ -143,10 +198,15 @@ export function AlertsPage() {
               </Field>
             </div>
             <p className="text-xs text-fg-muted">
-              예: RSI가 30 밑으로(&lt;) 떨어지면 알림 — 약 1분마다 조건을 확인합니다.
+              예: RSI가 30 밑으로(&lt;) 떨어지면 알림 — 약 1분마다 조건을
+              확인합니다.
             </p>
             {error && <Alert>{error}</Alert>}
-            <Button type="submit" loading={createAlert.isPending} className="w-full">
+            <Button
+              type="submit"
+              loading={createAlert.isPending}
+              className="w-full"
+            >
               알림 등록
             </Button>
           </form>
@@ -155,45 +215,51 @@ export function AlertsPage() {
         {isLoading ? (
           <LoadingState />
         ) : alerts && alerts.length > 0 ? (
-          <ul className="space-y-3">
-            {alerts.map((a) => (
-              <li
-                key={a.id}
-                className="flex items-center justify-between rounded-lg border border-border bg-surface p-4"
-              >
-                <div>
-                  <div className="flex items-center gap-2">
-                    <p className="font-medium text-fg">
-                      {a.symbol} · {a.indicator} {a.operator} {a.threshold}
+          <>
+            <ul className="space-y-3">
+              {pageAlerts.map((a) => (
+                <li
+                  key={a.id}
+                  className="flex items-center justify-between rounded-lg border border-border bg-surface p-4"
+                >
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <p className="font-medium text-fg">
+                        {a.symbol} · {a.indicator} {a.operator} {a.threshold}
+                      </p>
+                      <Badge tone={STATUS_TONE[a.status] ?? "neutral"}>
+                        {STATUS_LABEL[a.status] ?? a.status}
+                      </Badge>
+                    </div>
+                    <p className="text-sm text-fg-muted">
+                      {exchangeLabel(a.exchange)} · {a.timeframe} ·{" "}
+                      {new Date(a.createdAt).toLocaleString()}
                     </p>
-                    <Badge tone={STATUS_TONE[a.status] ?? "neutral"}>
-                      {STATUS_LABEL[a.status] ?? a.status}
-                    </Badge>
+                    {a.status === "TRIGGERED" && (
+                      <p className="tabular text-sm text-success">
+                        발동값 {a.triggeredValue} (
+                        {a.triggeredAt &&
+                          new Date(a.triggeredAt).toLocaleString()}
+                        )
+                      </p>
+                    )}
                   </div>
-                  <p className="text-sm text-fg-muted">
-                    {exchangeLabel(a.exchange)} · {a.timeframe} ·{" "}
-                    {new Date(a.createdAt).toLocaleString()}
-                  </p>
-                  {a.status === "TRIGGERED" && (
-                    <p className="tabular text-sm text-success">
-                      발동값 {a.triggeredValue} ({a.triggeredAt && new Date(a.triggeredAt).toLocaleString()})
-                    </p>
+                  {a.status === "ACTIVE" && (
+                    <Button
+                      type="button"
+                      variant="secondary"
+                      size="sm"
+                      loading={cancelAlert.isPending}
+                      onClick={() => cancelAlert.mutate(a.id)}
+                    >
+                      취소
+                    </Button>
                   )}
-                </div>
-                {a.status === "ACTIVE" && (
-                  <Button
-                    type="button"
-                    variant="secondary"
-                    size="sm"
-                    loading={cancelAlert.isPending}
-                    onClick={() => cancelAlert.mutate(a.id)}
-                  >
-                    취소
-                  </Button>
-                )}
-              </li>
-            ))}
-          </ul>
+                </li>
+              ))}
+            </ul>
+            <Pagination state={pageState} onPageChange={goToPage} />
+          </>
         ) : (
           <EmptyState>등록된 알림이 없습니다.</EmptyState>
         )}
