@@ -5,6 +5,8 @@ export { configureUnauthorizedHandler, resetUnauthorizedGuard } from "./http";
 export type { UnauthorizedHandler } from "./http";
 export { configureTokenRefreshHandler, refreshAccessToken } from "./tokenRefresh";
 export type { TokenRefreshHandler } from "./tokenRefresh";
+export { createLogoutClient } from "./logout";
+export type { LogoutClient, LogoutClientOptions, LogoutTokenStore } from "./logout";
 export type {
   ApiResponsePageMeta,
   ApiResponseMeta,
