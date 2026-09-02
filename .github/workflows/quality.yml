@@ -8,6 +8,12 @@ on:
 permissions:
   contents: read
 
+# 연속 push 시 이전 실행을 취소해 Actions 분(minute)을 아낀다 — 2026-09-01부터 모든 실행이
+# startup_failure(BuildFailed)인 원인이 private repo 무료 분 소진으로 추정됨.
+concurrency:
+  group: quality-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   verify:
     runs-on: ubuntu-latest
