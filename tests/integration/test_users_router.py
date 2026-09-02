@@ -181,6 +181,15 @@ async def test_register_whitelist_entry_with_mfa_requires_totp(client):
     # docs/RED_TEAM_FINDINGS.md #13 반영 — 위 verify()가 이미 이 구간의
     # 코드를 소비했으므로 재인증용 코드는 다음 구간에서 새로 받아야 한다.
     await asyncio.sleep(31)
+    # 이 엔드포인트는 system_safety_state(전역 싱글톤 행)의 circuit_breaker
+    # 상태를 확인한다 — 31초 실시간 대기 동안 공유 dev/test DB를 쓰는 다른
+    # 프로세스(동시 실행 중인 다른 세션 등)가 그 값을 바꿔놨을 가능성을
+    # 배제할 수 없어, 실제 어서션 직전에 한 번 더 리셋해 창을 최소화한다.
+    async with app.state.pool.acquire() as conn:
+        await conn.execute(
+            "UPDATE system_safety_state SET circuit_breaker_level = 'normal', "
+            "reactivation_approval_id = NULL WHERE id = 1"
+        )
     login_code = pyotp.totp.TOTP(secret).now()
     with_totp = await client.post(
         "/users/me/withdrawal-whitelist",
