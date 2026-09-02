@@ -1,10 +1,12 @@
 import { useListingReviews, usePurchaseListing, useSubmitForVerification } from "@aios/shared-hooks";
 import { ApiError } from "@aios/api-client";
-import type { ListingSummary } from "@aios/shared-types";
+import { isResourceNotFound, type ListingSummary } from "@aios/shared-types";
 import { Alert, Badge, Button, Card, EmptyState } from "@aios/ui-web";
 import { useState } from "react";
 import { Link, useLocation, useParams } from "react-router-dom";
 import { AppShell } from "../../components/layout/AppShell";
+import { ErrorMessage } from "../../components/ErrorMessage";
+import { NotFoundState } from "../../components/NotFoundState";
 import { RiskWarningModal } from "../../components/RiskWarningModal";
 import { DuplicateSubmitError, useIdempotentSubmit } from "../../hooks/useIdempotentSubmit";
 
@@ -12,7 +14,9 @@ export function ListingDetailPage() {
   const { listingId } = useParams<{ listingId: string }>();
   const location = useLocation();
   const listing = (location.state as { listing?: ListingSummary } | null)?.listing;
-  const { data: reviews } = useListingReviews(listingId ? Number(listingId) : null);
+  const { data: reviews, error: reviewsError } = useListingReviews(
+    listingId ? Number(listingId) : null,
+  );
   const purchase = usePurchaseListing();
   const submitForVerification = useSubmitForVerification();
   const [error, setError] = useState<string | null>(null);
@@ -117,7 +121,19 @@ export function ListingDetailPage() {
               </Link>
             )}
           </div>
-          {reviews && reviews.reviewCount > 0 ? (
+          {reviewsError ? (
+            isResourceNotFound(reviewsError) ? (
+              <NotFoundState
+                title="리스팅을 찾을 수 없습니다"
+                description="삭제되었거나 존재하지 않는 리스팅입니다."
+              />
+            ) : (
+              <ErrorMessage
+                errorCode={reviewsError instanceof ApiError ? reviewsError.errorCode : undefined}
+                traceId={reviewsError instanceof ApiError ? reviewsError.traceId : null}
+              />
+            )
+          ) : reviews && reviews.reviewCount > 0 ? (
             <div className="space-y-3">
               <p className="text-sm text-fg-muted">
                 평균 {reviews.averageRating?.toFixed(1)} · {reviews.reviewCount}개 리뷰

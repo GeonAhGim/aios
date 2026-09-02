@@ -17,3 +17,4 @@ export * from "./reasonCodes";
 export * from "./retryable";
 export * from "./idempotencyFailure";
 export * from "./accountLockout";
+export * from "./notFound";
