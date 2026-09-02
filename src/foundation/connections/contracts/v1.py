@@ -10,6 +10,7 @@ domain/models.py를 직접 참조하지 않는다(71번 §4, 106번 §5).
 from __future__ import annotations
 
 from datetime import datetime
+from decimal import Decimal
 from enum import Enum
 from uuid import UUID
 
@@ -51,7 +52,17 @@ class AccountConnectionView(BaseModel):
     capability_profile: list[CapabilityScope]
     revision: int
     created_at: datetime | None
+    scope_verified: bool = False
+    """감사 §6 — provider가 요청 스코프를 독립적으로 확인해줬는지. 실
+    provider(거래소) 경로는 항상 False(정직 표기, LiveReadonlyAccountProvider
+    참조) — 연결이 비활성이거나 아직 confirm 전이면 False."""
     schema_version: str = SCHEMA_VERSION
+
+
+class SnapshotValueView(BaseModel):
+    entity_type: str
+    entity_key: str
+    value: Decimal
 
 
 class AccountSnapshotView(BaseModel):
@@ -60,4 +71,5 @@ class AccountSnapshotView(BaseModel):
     provider_as_of: datetime
     freshness: str
     currency: str
+    values: list[SnapshotValueView] = []
     schema_version: str = SCHEMA_VERSION

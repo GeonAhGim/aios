@@ -6,6 +6,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import datetime
+from decimal import Decimal
 from enum import Enum
 from uuid import UUID
 
@@ -61,6 +62,12 @@ class CredentialBinding:
     credential_class: CredentialClass
     expires_at: datetime | None
     rotation_state: str = "CURRENT"
+    scope_verified: bool = False
+    """감사 §6 — provider가 실제로 승인된 스코프를 독립적으로 확인해줬는지.
+    거래소 API에는 AIOS의 READ_BALANCE/READ_POSITION/READ_ACTIVITY 분류로
+    직접 매핑되는 조회 수단이 없어(LiveReadonlyAccountProvider 참조), 실
+    provider 경로는 이 값을 항상 False로 정직하게 남긴다 — 연결 자체를
+    막지는 않는다. FakeReadonlyAccountProvider(시뮬레이션)만 True다."""
 
 
 @dataclass(frozen=True)
@@ -77,6 +84,19 @@ class ConnectionConsent:
 
 
 @dataclass(frozen=True)
+class SnapshotValue:
+    """스냅샷 하나가 실제로 담는 수치 하나 — reconciliation(FND-08)의
+    `EntitySnapshot.provider_value`가 그대로 소비할 수 있는 (entity_type,
+    entity_key, value) 모양이다. entity_type="BALANCE"만 실제로 채워진다
+    (get_positions()는 이 리프가 붙이는 거래소 전부 spot이라 항상 빈
+    리스트 — LiveReadonlyAccountProvider 참조)."""
+
+    entity_type: str
+    entity_key: str
+    value: Decimal
+
+
+@dataclass(frozen=True)
 class AccountSnapshot:
     id: UUID
     connection_id: UUID
@@ -85,6 +105,7 @@ class AccountSnapshot:
     freshness: str
     currency: str
     source_evidence_ref: str
+    values: tuple[SnapshotValue, ...] = field(default_factory=tuple)
 
 
 class HealthState(str, Enum):
@@ -109,6 +130,12 @@ class ScopeProof:
 
     granted_scopes: tuple[CapabilityScope, ...]
     provider_credential_ref: str
+    provider_verified: bool = False
+    """감사 §6 — provider 자신이 이 스코프를 독립적으로 확인해준 것인지
+    (True), 아니면 요청한 스코프를 그대로 승인된 것으로 가정한 것인지
+    (False). 거래소 API에는 이 taxonomy로 직접 매핑되는 조회 수단이 없어
+    LiveReadonlyAccountProvider는 항상 False다 — FakeReadonlyAccountProvider
+    (시뮬레이션)만 True."""
 
 
 @dataclass(frozen=True)
@@ -118,3 +145,4 @@ class ProviderSnapshot:
     provider_as_of: datetime
     currency: str
     raw_payload_ref: str = field(default="")
+    values: tuple[SnapshotValue, ...] = field(default_factory=tuple)

@@ -20,6 +20,7 @@ from src.foundation.connections.domain.models import (
     AccountConnection,
     ConnectionConsent,
     ConnectionState,
+    CredentialBinding,
 )
 from src.foundation.connections.domain.rules import (
     ForbiddenCapabilityScopeError,
@@ -53,7 +54,9 @@ def _mask(opaque_account_ref: str) -> str:
     return "*" * (len(opaque_account_ref) - 4) + opaque_account_ref[-4:]
 
 
-def connection_to_view(connection: AccountConnection) -> AccountConnectionView:
+def connection_to_view(
+    connection: AccountConnection, binding: CredentialBinding | None = None
+) -> AccountConnectionView:
     return AccountConnectionView(
         id=connection.id,
         provider_code=connection.provider_code,
@@ -62,6 +65,7 @@ def connection_to_view(connection: AccountConnection) -> AccountConnectionView:
         capability_profile=[ContractScope(s.value) for s in connection.capability_profile],
         revision=connection.revision,
         created_at=connection.created_at,
+        scope_verified=binding.scope_verified if binding is not None else False,
     )
 
 

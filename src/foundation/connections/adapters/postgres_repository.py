@@ -28,6 +28,7 @@ from src.foundation.connections.domain.models import (
     CredentialBinding,
     CredentialClass,
     HealthState,
+    SnapshotValue,
 )
 
 
@@ -54,10 +55,13 @@ def _row_to_binding(row: asyncpg.Record) -> CredentialBinding:
         credential_class=CredentialClass(row["credential_class"]),
         expires_at=row["expires_at"],
         rotation_state=row["rotation_state"],
+        scope_verified=row["scope_verified"],
     )
 
 
-def _row_to_snapshot(row: asyncpg.Record) -> AccountSnapshot:
+def _row_to_snapshot(
+    row: asyncpg.Record, values: tuple[SnapshotValue, ...] = ()
+) -> AccountSnapshot:
     return AccountSnapshot(
         id=row["id"],
         connection_id=row["connection_id"],
@@ -66,6 +70,7 @@ def _row_to_snapshot(row: asyncpg.Record) -> AccountSnapshot:
         freshness=row["freshness"],
         currency=row["currency"],
         source_evidence_ref=row["source_evidence_ref"],
+        values=values,
     )
 
 
@@ -161,14 +166,16 @@ class PostgresConnectionRepository:
         async with self._pool.acquire() as conn:
             row = await conn.fetchrow(
                 "INSERT INTO credential_binding (connection_id, vault_secret_ref, "
-                " scope_fingerprint, credential_class, expires_at, rotation_state) "
-                "VALUES ($1, $2, $3, $4, $5, $6) RETURNING *",
+                " scope_fingerprint, credential_class, expires_at, rotation_state, "
+                " scope_verified) "
+                "VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING *",
                 binding.connection_id,
                 binding.vault_secret_ref,
                 binding.scope_fingerprint,
                 binding.credential_class.value,
                 binding.expires_at,
                 binding.rotation_state,
+                binding.scope_verified,
             )
         return _row_to_binding(row)
 
@@ -227,6 +234,7 @@ class PostgresConnectionRepository:
                 snapshot.currency,
                 snapshot.source_evidence_ref,
             )
+            newly_inserted = snapshot_row is not None
             if snapshot_row is None:
                 snapshot_row = await conn.fetchrow(
                     "SELECT * FROM account_snapshot WHERE connection_id = $1 "
@@ -235,6 +243,25 @@ class PostgresConnectionRepository:
                     snapshot.provider_as_of,
                     snapshot.source_evidence_ref,
                 )
+            if newly_inserted:
+                # 이 트랜잭션이 실제로 새로 만든 행일 때만 값을 쓴다 — 위
+                # ON CONFLICT DO NOTHING으로 기존 행을 재조회한 경우(중복
+                # 응답)는 그 값도 이미 저장돼 있다.
+                for value in snapshot.values:
+                    await conn.execute(
+                        "INSERT INTO account_snapshot_value "
+                        "(snapshot_id, entity_type, entity_key, value) "
+                        "VALUES ($1, $2, $3, $4)",
+                        snapshot_row["id"],
+                        value.entity_type,
+                        value.entity_key,
+                        value.value,
+                    )
+            value_rows = await conn.fetch(
+                "SELECT entity_type, entity_key, value FROM account_snapshot_value "
+                "WHERE snapshot_id = $1",
+                snapshot_row["id"],
+            )
             await conn.execute(
                 "INSERT INTO connection_health (connection_id, state, error_code, "
                 " retry_after, provider_trace_ref) VALUES ($1, $2, $3, $4, $5)",
@@ -250,7 +277,13 @@ class PostgresConnectionRepository:
                     connection_id,
                     ConnectionState.ACTIVE_READONLY.value,
                 )
-        return _row_to_snapshot(snapshot_row)
+        values = tuple(
+            SnapshotValue(
+                entity_type=v["entity_type"], entity_key=v["entity_key"], value=v["value"]
+            )
+            for v in value_rows
+        )
+        return _row_to_snapshot(snapshot_row, values)
 
     async def get_latest_snapshot(self, connection_id: UUID) -> AccountSnapshot | None:
         async with self._pool.acquire() as conn:
@@ -259,7 +292,20 @@ class PostgresConnectionRepository:
                 "ORDER BY captured_at DESC LIMIT 1",
                 connection_id,
             )
-        return _row_to_snapshot(row) if row is not None else None
+            if row is None:
+                return None
+            value_rows = await conn.fetch(
+                "SELECT entity_type, entity_key, value FROM account_snapshot_value "
+                "WHERE snapshot_id = $1",
+                row["id"],
+            )
+        values = tuple(
+            SnapshotValue(
+                entity_type=v["entity_type"], entity_key=v["entity_key"], value=v["value"]
+            )
+            for v in value_rows
+        )
+        return _row_to_snapshot(row, values)
 
     async def insert_health_record(self, health: ConnectionHealth) -> ConnectionHealth:
         async with self._pool.acquire() as conn:

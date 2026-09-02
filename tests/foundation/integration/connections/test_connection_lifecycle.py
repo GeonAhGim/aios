@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from datetime import datetime, timedelta, timezone
+from decimal import Decimal
 from pathlib import Path
 
 import asyncpg
@@ -33,7 +34,11 @@ from src.foundation.connections.application.sync_snapshot import (
     ProviderUnavailableError,
     sync_snapshot,
 )
-from src.foundation.connections.domain.models import CapabilityScope, ProviderSnapshot
+from src.foundation.connections.domain.models import (
+    CapabilityScope,
+    ProviderSnapshot,
+    SnapshotValue,
+)
 from src.foundation.connections.domain.rules import ForbiddenCapabilityScopeError
 from src.foundation.connections.ports.provider import (
     OpaqueRef,
@@ -336,15 +341,26 @@ class _FixedAsOfProvider:
     `FakeReadonlyAccountProvider`는 항상 `now()`를 반환해 stale/future 응답을
     재현할 수 없다."""
 
-    def __init__(self, provider_as_of: datetime) -> None:
+    def __init__(
+        self,
+        provider_as_of: datetime,
+        *,
+        raw_payload_ref: str = "x",
+        values: tuple[SnapshotValue, ...] = (),
+    ) -> None:
         self._provider_as_of = provider_as_of
+        self._raw_payload_ref = raw_payload_ref
+        self._values = values
 
     async def verify_readonly_scope(self, lease: SecretLease):  # noqa: ANN201
         raise NotImplementedError
 
     async def fetch_snapshot(self, account_ref: OpaqueRef, as_of: datetime) -> ProviderSnapshot:
         return ProviderSnapshot(
-            provider_as_of=self._provider_as_of, currency="USD", raw_payload_ref="x"
+            provider_as_of=self._provider_as_of,
+            currency="USD",
+            raw_payload_ref=self._raw_payload_ref,
+            values=self._values,
         )
 
 
@@ -405,3 +421,79 @@ async def test_future_dated_provider_response_is_rejected(pool, repo, trust_repo
     health = await repo.get_latest_health(created.id)
     assert health is not None
     assert health.error_code == "INTEGRITY_FUTURE_DATA"
+
+
+async def test_confirmed_connection_view_reflects_scope_verified(pool, repo, trust_repo):
+    """전수감사 §6 — FakeReadonlyAccountProvider(시뮬레이션)는 scope_verified=
+    True, credential_binding에도 그대로 영속화된다."""
+    tenant_id = await _tenant(pool)
+    created = await _begin(pool, repo, trust_repo, tenant_id)
+    assert created.scope_verified is False  # 아직 confirm 전
+
+    confirmed = await confirm_connection(
+        repo,
+        FakeReadonlyAccountProvider(),
+        tenant_id=tenant_id,
+        connection_id=created.id,
+        encryption_key=ENCRYPTION_KEY,
+    )
+    assert confirmed.scope_verified is True
+
+    binding = await repo.get_credential_binding(created.id)
+    assert binding.scope_verified is True
+
+
+async def test_snapshot_values_persist_and_round_trip(pool, repo, trust_repo):
+    """전수감사 §6 — provider가 실제 잔고 수치를 돌려주면 account_snapshot_
+    value에 저장되고 get_latest_snapshot()으로 그대로 되돌아온다."""
+    tenant_id = await _tenant(pool)
+    created = await _begin(pool, repo, trust_repo, tenant_id)
+    provider = FakeReadonlyAccountProvider(
+        snapshot_values=(
+            SnapshotValue(entity_type="BALANCE", entity_key="USDT", value=Decimal("1234.5")),
+            SnapshotValue(entity_type="BALANCE", entity_key="BTC", value=Decimal("0.01")),
+        )
+    )
+    await confirm_connection(
+        repo, provider, tenant_id=tenant_id, connection_id=created.id, encryption_key=ENCRYPTION_KEY
+    )
+
+    await sync_snapshot(repo, provider, tenant_id=tenant_id, connection_id=created.id)
+
+    latest = await repo.get_latest_snapshot(created.id)
+    assert latest is not None
+    values_by_key = {v.entity_key: v.value for v in latest.values}
+    assert values_by_key == {"USDT": Decimal("1234.5000000000"), "BTC": Decimal("0.0100000000")}
+
+
+async def test_duplicate_sync_does_not_duplicate_snapshot_values(pool, repo, trust_repo):
+    """REC-004/006과 같은 원칙 — 같은 provider_as_of/증적으로 중복 sync가
+    와도(재시도) 값 행이 두 번 쌓이지 않는다(ON CONFLICT DO NOTHING 재조회
+    경로에서는 값을 다시 쓰지 않는다)."""
+    tenant_id = await _tenant(pool)
+    created = await _begin(pool, repo, trust_repo, tenant_id)
+    await confirm_connection(
+        repo,
+        FakeReadonlyAccountProvider(),
+        tenant_id=tenant_id,
+        connection_id=created.id,
+        encryption_key=ENCRYPTION_KEY,
+    )
+
+    fixed_as_of = datetime.now(timezone.utc)
+    provider = _FixedAsOfProvider(
+        fixed_as_of,
+        raw_payload_ref="dup-test",
+        values=(SnapshotValue(entity_type="BALANCE", entity_key="USDT", value=Decimal("10")),),
+    )
+    first = await sync_snapshot(repo, provider, tenant_id=tenant_id, connection_id=created.id)
+    second = await sync_snapshot(repo, provider, tenant_id=tenant_id, connection_id=created.id)
+    assert first.provider_as_of == second.provider_as_of
+
+    async with pool.acquire() as conn:
+        count = await conn.fetchval(
+            "SELECT count(*) FROM account_snapshot_value av "
+            "JOIN account_snapshot s ON s.id = av.snapshot_id WHERE s.connection_id = $1",
+            created.id,
+        )
+    assert count == 1

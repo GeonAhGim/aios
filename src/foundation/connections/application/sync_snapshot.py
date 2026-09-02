@@ -161,6 +161,7 @@ async def sync_snapshot(
                 freshness="PROVIDER_CONFIRMED",
                 currency=provider_snapshot.currency,
                 source_evidence_ref=provider_snapshot.raw_payload_ref,
+                values=provider_snapshot.values,
             ),
             ConnectionHealth(
                 connection_id=connection_id, evaluated_at=now, state=HealthState.HEALTHY

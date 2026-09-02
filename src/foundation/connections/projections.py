@@ -23,7 +23,8 @@ async def build_connection_list_view(
     repo: ConnectionRepository, tenant_id: UUID
 ) -> ConnectionListView:
     connections = await repo.list_connections(tenant_id)
-    return ConnectionListView(
-        connections=[connection_to_view(c) for c in connections],
-        as_of=datetime.now(timezone.utc),
-    )
+    views = []
+    for c in connections:
+        binding = await repo.get_credential_binding(c.id)
+        views.append(connection_to_view(c, binding))
+    return ConnectionListView(connections=views, as_of=datetime.now(timezone.utc))

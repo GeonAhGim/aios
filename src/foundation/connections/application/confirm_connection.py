@@ -74,7 +74,7 @@ async def confirm_connection(
         raise ForbiddenCapabilityScopeError(rejected=rejected or granted_values)
 
     vault_secret_ref = encrypt(proof.provider_credential_ref, encryption_key)
-    await repo.insert_credential_binding(
+    binding = await repo.insert_credential_binding(
         CredentialBinding(
             id=uuid4(),
             connection_id=connection_id,
@@ -82,10 +82,11 @@ async def confirm_connection(
             scope_fingerprint=compute_scope_fingerprint(connection.capability_profile),
             credential_class=CredentialClass.READONLY,
             expires_at=None,
+            scope_verified=proof.provider_verified,
         )
     )
 
     activated = await repo.transition_connection_state(
         connection_id, expected_state="CONNECTING", new_state="ACTIVE_READONLY"
     )
-    return connection_to_view(activated)
+    return connection_to_view(activated, binding)

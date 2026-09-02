@@ -11,6 +11,7 @@ from src.foundation.connections.domain.models import (
     CapabilityScope,
     ProviderSnapshot,
     ScopeProof,
+    SnapshotValue,
 )
 from src.foundation.connections.ports.provider import OpaqueRef, SecretLease
 
@@ -29,10 +30,12 @@ class FakeReadonlyAccountProvider:
         ),
         fail_verification: bool = False,
         fail_fetch: bool = False,
+        snapshot_values: tuple[SnapshotValue, ...] = (),
     ) -> None:
         self._granted_scopes = granted_scopes
         self._fail_verification = fail_verification
         self._fail_fetch = fail_fetch
+        self._snapshot_values = snapshot_values
 
     async def verify_readonly_scope(self, lease: SecretLease) -> ScopeProof:
         if self._fail_verification:
@@ -40,6 +43,7 @@ class FakeReadonlyAccountProvider:
         return ScopeProof(
             granted_scopes=self._granted_scopes,
             provider_credential_ref=f"fake-cred-{uuid4().hex[:8]}",
+            provider_verified=True,
         )
 
     async def fetch_snapshot(self, account_ref: OpaqueRef, as_of: datetime) -> ProviderSnapshot:
@@ -49,4 +53,5 @@ class FakeReadonlyAccountProvider:
             provider_as_of=datetime.now(timezone.utc),
             currency="USD",
             raw_payload_ref=f"fake-payload-{uuid4().hex[:8]}",
+            values=self._snapshot_values,
         )

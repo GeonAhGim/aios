@@ -2,12 +2,15 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
+from uuid import UUID
 
 import asyncpg
-from fastapi import Depends, Request
+from fastapi import Depends, HTTPException, Request, status
 
 from src.api.deps import get_current_user, get_pool
-from src.foundation.connections.adapters.fake_provider import FakeReadonlyAccountProvider
+from src.api.service_deps import get_credential_resolver
+from src.exchanges.factory import SUPPORTED_EXCHANGES
+from src.foundation.connections.adapters.live_provider import LiveReadonlyAccountProvider
 from src.foundation.connections.adapters.postgres_repository import PostgresConnectionRepository
 from src.foundation.connections.ports.provider import ReadonlyAccountProvider
 from src.foundation.connections.ports.repository import ConnectionRepository
@@ -31,6 +34,7 @@ from src.foundation.trust.ports.repository import TrustRepository
 from src.foundation.validation.adapters.postgres_repository import PostgresValidationRepository
 from src.foundation.validation.ports.repository import ValidationRepository
 from src.services.auth_service import User
+from src.services.credential_resolver import CredentialResolver
 
 
 def get_trust_repository(pool: asyncpg.Pool = Depends(get_pool)) -> TrustRepository:
@@ -73,11 +77,39 @@ def get_reconciliation_repository(
     return PostgresReconciliationRepository(pool)
 
 
-# 74번 §7 rollout gate 1단계 — 실 provider는 71번 §6 "provider/legal review 후
-# 결정" 대상이라 아직 없다. 이 함수 하나만 바꾸면 실 provider로 교체된다
-# (adapters/fake_provider.py 참조).
-def get_readonly_account_provider() -> ReadonlyAccountProvider:
-    return FakeReadonlyAccountProvider()
+# 전수감사(agent-platform-12, docs/FULL_AUDIT_2026-09-02.md §6) 발견 반영 —
+# 예전에는 여기서 무조건 FakeReadonlyAccountProvider를 반환해, 운영 경로가
+# 실제로는 한 번도 실 거래소를 만지지 않았다. 이제 connection_id 경로
+# 파라미터(FastAPI가 이름으로 자동 바인딩)로 connection을 먼저 읽어
+# provider_code에 맞는 실 어댑터(legacy CredentialResolver 기반,
+# adapters/live_provider.py)를 구성한다 — Fake는 이제 이 DI 경로 어디서도
+# 안 쓴다. 테스트가 필요하면 애플리케이션 함수를 직접 호출하며 Fake를
+# 명시적으로 넘기거나(기존 통합테스트가 이미 그렇게 함), FastAPI
+# `app.dependency_overrides`로 이 함수 자체를 교체한다 — "테스트 전용
+# 플래그로만" 도달 가능하다는 게 이 뜻이다.
+async def get_readonly_account_provider(
+    connection_id: UUID,
+    user: User = Depends(get_current_user),
+    connection_repo: ConnectionRepository = Depends(get_connection_repository),
+    resolver: CredentialResolver = Depends(get_credential_resolver),
+) -> ReadonlyAccountProvider:
+    connection = await connection_repo.get_connection(connection_id)
+    if connection is None or connection.tenant_id != user.user_id:
+        # 존재하지 않거나 다른 tenant 소유 — 여기서 곧장 404. 커맨드
+        # 함수도 같은 검사를 다시 하지만(방어적 중복, 74번 §5), provider를
+        # 만들 수 없는 이 시점에는 어차피 더 진행할 수 없다.
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "존재하지 않는 연결입니다.")
+    if connection.provider_code not in SUPPORTED_EXCHANGES:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            f"지원하지 않는 provider_code={connection.provider_code}입니다.",
+        )
+    return LiveReadonlyAccountProvider(
+        resolver,
+        user_id=user.user_id,
+        exchange=connection.provider_code,
+        requested_capability_profile=connection.capability_profile,
+    )
 
 
 def get_credential_encryption_key(request: Request) -> str:
