@@ -33,6 +33,7 @@ from src.exchanges.bitget.grid_mixin import BitgetGridMixin
 from src.exchanges.bitget.loan_mixin import BitgetLoanMixin
 from src.exchanges.bitget.margin_mixin import BitgetMarginMixin
 from src.exchanges.bitget.market_data_mixin import BitgetMarketDataMixin
+from src.exchanges.bitget.p2p_mixin import BitgetP2PMixin
 from src.exchanges.bitget.strategy_mixin import BitgetStrategyMixin
 from src.exchanges.bitget.subaccount_mixin import BitgetSubaccountMixin
 from src.exchanges.bitget.tax_mixin import BitgetTaxMixin
@@ -140,6 +141,7 @@ class BitgetAdapter(
     BitgetLoanMixin,
     BitgetGridMixin,
     BitgetStrategyMixin,
+    BitgetP2PMixin,
     ExchangeAdapter,
 ):
     """7.8 조사결과: 공식 Demo Trading API 존재."""
