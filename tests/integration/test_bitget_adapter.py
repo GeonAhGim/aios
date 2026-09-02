@@ -474,3 +474,58 @@ async def test_get_current_plan_orders_returns_raw_rows():
     orders = await adapter.get_current_plan_orders("BTC/USDT")
 
     assert orders == [{"orderId": "p-1", "triggerPrice": "75000"}]
+
+
+async def test_get_account_info_returns_raw_dict():
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == "/api/v2/spot/account/info"
+        return _json_response(
+            {
+                "code": "00000",
+                "msg": "success",
+                "requestTime": 1,
+                "data": {"userId": "u-1", "authorities": ["spot_trade"]},
+            }
+        )
+
+    adapter = _make_adapter(handler)
+    info = await adapter.get_account_info()
+
+    assert info == {"userId": "u-1", "authorities": ["spot_trade"]}
+
+
+async def test_get_account_bills_returns_raw_rows():
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == "/api/v2/spot/account/bills"
+        assert request.url.params["coin"] == "USDT"
+        return _json_response(
+            {
+                "code": "00000",
+                "msg": "success",
+                "requestTime": 1,
+                "data": [{"billId": "b-1", "coin": "USDT", "amount": "10"}],
+            }
+        )
+
+    adapter = _make_adapter(handler)
+    bills = await adapter.get_account_bills("USDT")
+
+    assert bills == [{"billId": "b-1", "coin": "USDT", "amount": "10"}]
+
+
+async def test_transfer_returns_true_on_success():
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == "/api/v2/spot/wallet/transfer"
+        body = json.loads(request.content)
+        assert body == {
+            "fromType": "spot",
+            "toType": "usdt_futures",
+            "amount": "100",
+            "coin": "USDT",
+        }
+        return _json_response({"code": "00000", "msg": "success", "requestTime": 1, "data": {}})
+
+    adapter = _make_adapter(handler)
+    result = await adapter.transfer("spot", "usdt_futures", Decimal("100"), "usdt")
+
+    assert result is True
