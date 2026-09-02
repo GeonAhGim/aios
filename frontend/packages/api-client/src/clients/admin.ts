@@ -62,12 +62,9 @@ export function withAdmin<TBase extends AnyConstructor>(Base: TBase) {
 
     async confirmTopup(
       topupId: number,
-      idempotencyKey: string,
+      idempotencyKey?: string,
     ): Promise<WalletTopupConfirmResult> {
-      return this.requestEnvelope(`/admin/wallet/topups/${topupId}/confirm`, {
-        method: "POST",
-        headers: { "Idempotency-Key": idempotencyKey },
-      });
+      return this.postEnvelopeIdempotent(`/admin/wallet/topups/${topupId}/confirm`, undefined, idempotencyKey);
     }
 
     async createPlatformListing(body: PlatformListingCreateRequest): Promise<ListingResponse> {

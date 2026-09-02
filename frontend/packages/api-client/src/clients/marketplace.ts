@@ -12,7 +12,6 @@ import type {
   StrategyDefinition,
   VerificationDecisionRequest,
 } from "@aios/shared-types";
-import { keysToSnake } from "../caseConvert";
 import type { AnyConstructor } from "../http";
 
 // FD-13 마켓플레이스 — marketplace 라우터는 봉투 미적용, 기존 경로 유지.
@@ -56,13 +55,9 @@ export function withMarketplace<TBase extends AnyConstructor>(Base: TBase) {
     async purchaseListing(
       listingId: number,
       body: PurchaseCreateRequest,
-      idempotencyKey: string,
+      idempotencyKey?: string,
     ): Promise<PurchaseResponse> {
-      return this.request(`/marketplace/listings/${listingId}/purchase`, {
-        method: "POST",
-        headers: { "Idempotency-Key": idempotencyKey },
-        body: JSON.stringify(keysToSnake(body)),
-      });
+      return this.postIdempotent(`/marketplace/listings/${listingId}/purchase`, body, idempotencyKey);
     }
 
     async getStrategyDefinition(strategyId: string, version: string): Promise<StrategyDefinition> {

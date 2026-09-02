@@ -13,12 +13,15 @@ export function withExecutions<TBase extends AnyConstructor>(Base: TBase) {
       return this.request("/executions");
     }
 
-    async createExecution(body: ExecutionCreateRequest): Promise<ExecutionResponse> {
-      return this.post("/executions", body);
+    async createExecution(
+      body: ExecutionCreateRequest,
+      idempotencyKey?: string,
+    ): Promise<ExecutionResponse> {
+      return this.postIdempotent("/executions", body, idempotencyKey);
     }
 
-    async startExecution(executionId: number): Promise<ExecutionResponse> {
-      return this.post(`/executions/${executionId}/start`);
+    async startExecution(executionId: number, idempotencyKey?: string): Promise<ExecutionResponse> {
+      return this.postIdempotent(`/executions/${executionId}/start`, undefined, idempotencyKey);
     }
 
     async pauseExecution(executionId: number): Promise<ExecutionResponse> {
@@ -35,8 +38,9 @@ export function withExecutions<TBase extends AnyConstructor>(Base: TBase) {
     async convertToLive(
       executionId: number,
       body: { allocatedCapital: string; currency: string; exchange: string },
+      idempotencyKey?: string,
     ): Promise<ExecutionResponse> {
-      return this.post(`/executions/${executionId}/convert-to-live`, body);
+      return this.postIdempotent(`/executions/${executionId}/convert-to-live`, body, idempotencyKey);
     }
 
     async setExecutionRiskGuard(

@@ -10,6 +10,12 @@ export class ApiError extends Error {
   }
 }
 
+// L4 platform spec §9 PLT-14/15: 금전 POST는 `Idempotency-Key` 헤더(16~128자,
+// [A-Za-z0-9_-])가 필수다. UUID(36자, 하이픈 포함)는 이 규격을 만족한다.
+export function generateIdempotencyKey(): string {
+  return crypto.randomUUID();
+}
+
 function extractDetailMessage(body: unknown): string {
   if (typeof body === "object" && body !== null && "detail" in body) {
     const detail = (body as { detail: unknown }).detail;
@@ -129,6 +135,24 @@ export class ApiClientBase {
   protected patchEnvelope<T>(path: string, body?: unknown): Promise<T> {
     return this.requestEnvelope<T>(path, {
       method: "PATCH",
+      body: body !== undefined ? JSON.stringify(keysToSnake(body)) : undefined,
+    });
+  }
+
+  // 금전 라우트(spec §9 PLT-15)용 POST. idempotencyKey를 넘기지 않으면 자동
+  // 생성한다 — 재시도 시 같은 키를 재사용하려는 호출자만 명시적으로 넘기면 된다.
+  protected postIdempotent<T>(path: string, body: unknown | undefined, idempotencyKey?: string): Promise<T> {
+    return this.request<T>(path, {
+      method: "POST",
+      headers: { "Idempotency-Key": idempotencyKey ?? generateIdempotencyKey() },
+      body: body !== undefined ? JSON.stringify(keysToSnake(body)) : undefined,
+    });
+  }
+
+  protected postEnvelopeIdempotent<T>(path: string, body: unknown | undefined, idempotencyKey?: string): Promise<T> {
+    return this.requestEnvelope<T>(path, {
+      method: "POST",
+      headers: { "Idempotency-Key": idempotencyKey ?? generateIdempotencyKey() },
       body: body !== undefined ? JSON.stringify(keysToSnake(body)) : undefined,
     });
   }

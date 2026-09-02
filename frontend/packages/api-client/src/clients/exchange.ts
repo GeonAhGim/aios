@@ -9,8 +9,11 @@ import type { AnyConstructor } from "../http";
 // FD-12 거래소 연동 — exchange-credentials 라우터는 봉투 미적용, 기존 경로 유지.
 export function withExchange<TBase extends AnyConstructor>(Base: TBase) {
   return class extends Base {
-    async registerExchangeCredential(body: CredentialRequest): Promise<CredentialResponse> {
-      return this.post("/exchange-credentials", body);
+    async registerExchangeCredential(
+      body: CredentialRequest,
+      idempotencyKey?: string,
+    ): Promise<CredentialResponse> {
+      return this.postIdempotent("/exchange-credentials", body, idempotencyKey);
     }
 
     async listExchangeCredentials(): Promise<CredentialResponse[]> {

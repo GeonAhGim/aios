@@ -19,8 +19,8 @@ export function withPortfolio<TBase extends AnyConstructor>(Base: TBase) {
       return this.request("/portfolio");
     }
 
-    async rebalancePortfolio(body: RebalanceRequest): Promise<RebalanceResult> {
-      return this.post("/portfolio/rebalance", body);
+    async rebalancePortfolio(body: RebalanceRequest, idempotencyKey?: string): Promise<RebalanceResult> {
+      return this.postIdempotent("/portfolio/rebalance", body, idempotencyKey);
     }
 
     async getWalletBalance(): Promise<WalletBalance> {
