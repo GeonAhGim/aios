@@ -11,8 +11,9 @@ from __future__ import annotations
 from src.exchanges.bitget.adapter import BitgetAdapter
 from src.exchanges.common.adapter import ExchangeAdapter
 from src.exchanges.kis.adapter import KISAdapter
+from src.exchanges.nh.adapter import NHAdapter
 
-SUPPORTED_EXCHANGES = ("bitget", "kis")
+SUPPORTED_EXCHANGES = ("bitget", "kis", "nh")
 
 
 class UnsupportedExchangeError(Exception):
@@ -47,5 +48,12 @@ def build_adapter(
                 "KIS는 cano/acnt_prdt_cd가 필요합니다."
             ) from exc
         return KISAdapter(api_key, api_secret, cano, acnt_prdt_cd, is_paper_trading=demo_mode)
+
+    if exchange == "nh":
+        try:
+            act_no = extra["act_no"]
+        except KeyError as exc:
+            raise UnsupportedExchangeError("NH는 act_no가 필요합니다.") from exc
+        return NHAdapter(api_key, api_secret, act_no, is_paper_trading=demo_mode)
 
     raise UnsupportedExchangeError(f"지원하지 않는 거래소입니다: {exchange}")
