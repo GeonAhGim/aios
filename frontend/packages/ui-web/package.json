@@ -1,0 +1,15 @@
+{
+  "name": "@aios/ui-web",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "main": "src/index.ts",
+  "types": "src/index.ts",
+  "peerDependencies": {
+    "react": "^19.0.0"
+  },
+  "dependencies": {
+    "lightweight-charts": "^5.2.1",
+    "recharts": "^3.2.1"
+  }
+}

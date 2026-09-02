@@ -1,0 +1,203 @@
+import { useCancelAlert, useCreateAlert, useIndicators, useMyAlerts } from "@aios/shared-hooks";
+import { ApiError } from "@aios/api-client";
+import type { AlertCreateRequest } from "@aios/shared-types";
+import {
+  Alert,
+  Badge,
+  Button,
+  Card,
+  EmptyState,
+  Field,
+  Input,
+  LoadingState,
+  PageHeader,
+  Select,
+} from "@aios/ui-web";
+import { useState, type FormEvent } from "react";
+import { AppShell } from "../../components/layout/AppShell";
+import { exchangeLabel } from "../../lib/exchangeLabels";
+
+const EXCHANGES = ["bitget", "kis"];
+const OPERATORS = ["<", ">", "<=", ">=", "==", "crosses_above", "crosses_below"];
+
+const STATUS_TONE: Record<string, "neutral" | "success" | "warning"> = {
+  ACTIVE: "neutral",
+  TRIGGERED: "success",
+  CANCELLED: "warning",
+};
+
+const STATUS_LABEL: Record<string, string> = {
+  ACTIVE: "감시 중",
+  TRIGGERED: "발동됨",
+  CANCELLED: "취소됨",
+};
+
+export function AlertsPage() {
+  const { data: alerts, isLoading } = useMyAlerts();
+  const { data: indicatorList } = useIndicators();
+  const createAlert = useCreateAlert();
+  const cancelAlert = useCancelAlert();
+
+  const indicators = indicatorList?.indicators ?? ["RSI", "SMA", "EMA"];
+  const [exchange, setExchange] = useState(EXCHANGES[0]);
+  const [symbol, setSymbol] = useState("BTC/USDT");
+  const [timeframe, setTimeframe] = useState("1h");
+  const [indicator, setIndicator] = useState("RSI");
+  const [period, setPeriod] = useState("14");
+  const [operator, setOperator] = useState<AlertCreateRequest["operator"]>("<");
+  const [threshold, setThreshold] = useState("30");
+  const [error, setError] = useState<string | null>(null);
+
+  async function handleSubmit(e: FormEvent) {
+    e.preventDefault();
+    setError(null);
+    try {
+      await createAlert.mutateAsync({
+        exchange,
+        symbol,
+        timeframe,
+        indicator,
+        params: period ? { timeperiod: Number(period) } : {},
+        operator,
+        threshold: Number(threshold),
+      });
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "알림 생성에 실패했습니다.");
+    }
+  }
+
+  return (
+    <AppShell>
+      <div className="space-y-6">
+        <PageHeader title="가격/지표 알림" />
+
+        <Card className="max-w-2xl">
+          <form onSubmit={handleSubmit} className="space-y-3">
+            <div className="grid grid-cols-2 gap-3">
+              <Field label="거래소">
+                <Select value={exchange} onChange={(e) => setExchange(e.target.value)}>
+                  {EXCHANGES.map((ex) => (
+                    <option key={ex} value={ex}>
+                      {exchangeLabel(ex)}
+                    </option>
+                  ))}
+                </Select>
+              </Field>
+              <Field label="종목/심볼">
+                <Input
+                  type="text"
+                  required
+                  value={symbol}
+                  onChange={(e) => setSymbol(e.target.value)}
+                  placeholder="BTC/USDT"
+                />
+              </Field>
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <Field label="지표">
+                <Select value={indicator} onChange={(e) => setIndicator(e.target.value)}>
+                  {indicators.map((ind) => (
+                    <option key={ind} value={ind}>
+                      {ind}
+                    </option>
+                  ))}
+                </Select>
+              </Field>
+              <Field label="기간(period)">
+                <Input
+                  type="number"
+                  value={period}
+                  onChange={(e) => setPeriod(e.target.value)}
+                />
+              </Field>
+            </div>
+            <div className="grid grid-cols-3 gap-3">
+              <Field label="타임프레임">
+                <Select value={timeframe} onChange={(e) => setTimeframe(e.target.value)}>
+                  <option value="15m">15분</option>
+                  <option value="1h">1시간</option>
+                  <option value="4h">4시간</option>
+                  <option value="1d">1일</option>
+                </Select>
+              </Field>
+              <Field label="조건">
+                <Select
+                  value={operator}
+                  onChange={(e) =>
+                    setOperator(e.target.value as AlertCreateRequest["operator"])
+                  }
+                >
+                  {OPERATORS.map((op) => (
+                    <option key={op} value={op}>
+                      {op}
+                    </option>
+                  ))}
+                </Select>
+              </Field>
+              <Field label="임계값">
+                <Input
+                  type="number"
+                  value={threshold}
+                  onChange={(e) => setThreshold(e.target.value)}
+                />
+              </Field>
+            </div>
+            <p className="text-xs text-fg-muted">
+              예: RSI가 30 밑으로(&lt;) 떨어지면 알림 — 약 1분마다 조건을 확인합니다.
+            </p>
+            {error && <Alert>{error}</Alert>}
+            <Button type="submit" loading={createAlert.isPending} className="w-full">
+              알림 등록
+            </Button>
+          </form>
+        </Card>
+
+        {isLoading ? (
+          <LoadingState />
+        ) : alerts && alerts.length > 0 ? (
+          <ul className="space-y-3">
+            {alerts.map((a) => (
+              <li
+                key={a.id}
+                className="flex items-center justify-between rounded-lg border border-border bg-surface p-4"
+              >
+                <div>
+                  <div className="flex items-center gap-2">
+                    <p className="font-medium text-fg">
+                      {a.symbol} · {a.indicator} {a.operator} {a.threshold}
+                    </p>
+                    <Badge tone={STATUS_TONE[a.status] ?? "neutral"}>
+                      {STATUS_LABEL[a.status] ?? a.status}
+                    </Badge>
+                  </div>
+                  <p className="text-sm text-fg-muted">
+                    {exchangeLabel(a.exchange)} · {a.timeframe} ·{" "}
+                    {new Date(a.createdAt).toLocaleString()}
+                  </p>
+                  {a.status === "TRIGGERED" && (
+                    <p className="tabular text-sm text-success">
+                      발동값 {a.triggeredValue} ({a.triggeredAt && new Date(a.triggeredAt).toLocaleString()})
+                    </p>
+                  )}
+                </div>
+                {a.status === "ACTIVE" && (
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    size="sm"
+                    loading={cancelAlert.isPending}
+                    onClick={() => cancelAlert.mutate(a.id)}
+                  >
+                    취소
+                  </Button>
+                )}
+              </li>
+            ))}
+          </ul>
+        ) : (
+          <EmptyState>등록된 알림이 없습니다.</EmptyState>
+        )}
+      </div>
+    </AppShell>
+  );
+}

@@ -1,0 +1,45 @@
+@import "tailwindcss";
+
+@theme {
+  --font-sans:
+    "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", "Malgun Gothic", sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, "SFMono-Regular", monospace;
+
+  /* 검은색 + 골드 — 순수 회색/남색이 아니라 아주 옅은 온기(warm) 톤을
+     섞은 무채색 위에 골드 악센트를 얹는다("파란 화면"을 피한다). */
+  --color-bg: #0d0c0a;
+  --color-surface: #141210;
+  --color-surface-hover: #1c1815;
+  --color-surface-raised: #1a1613;
+
+  --color-border: #2a2620;
+  --color-border-strong: #40392c;
+
+  --color-fg: #f2ede0;
+  --color-fg-secondary: #b5a98c;
+  --color-fg-muted: #877c64;
+
+  --color-accent: #d4af37;
+  --color-accent-hover: #e6c765;
+  --color-accent-muted: #3d3115;
+
+  --color-danger: #f87171;
+  --color-danger-muted: #451a1a;
+  --color-success: #34d399;
+  --color-success-muted: #052e21;
+  --color-warning: #e0972b;
+  --color-warning-muted: #45330a;
+}
+
+body {
+  background-color: var(--color-bg);
+  color: var(--color-fg);
+  font-feature-settings: "cv11", "ss01";
+}
+
+/* 금액/수치는 고정폭 숫자로 정렬을 맞춘다(표·카드에서 자릿수가 흔들리지
+   않도록) — 트레이딩 UI의 기본 원칙. */
+.tabular {
+  font-variant-numeric: tabular-nums;
+  font-family: var(--font-mono);
+}
