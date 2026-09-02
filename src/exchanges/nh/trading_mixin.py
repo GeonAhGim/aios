@@ -2,37 +2,43 @@
 
 Spec: 02_exchange_adapter_v1.3.md#§2.1, 02e_nh_api_spec_v1.md#§3
 
-확인된 엔드포인트(2026-09-03 공식 SDK 소스코드 확인):
-- POST /krstock/order/v1/cashBuy — body {act_no, iem_cd, orr_qty,
-  orr_pr, nmn_pr_tp_cd:"01"(지정가)|"05"(시장가), orr_cnd_dit_cd,
-  ssl_nmn_pr_dit_cd, rmt_mkt_cd:"KRX", sor_mkt_sli_yn}
-- POST /krstock/order/v1/cashSell — cashBuy와 동일 파라미터 관례로 추정
-  (매도 전용 필드가 있을 수 있으나 이번 조사에서 확인 못함)
+2026-09-03(task-114) 재조사 — 공식 REST 클라이언트 소스(`nhplug/client.py`)
+로 rsp_cd/rsp_msg 판정 로직을 재확인했고, 무엇보다 도메인이 정본(SSOT)이라고
+명시된 자산군별 OpenAPI 스펙(`https://www.nhplug.com/openapi-docs/krstock/
+openapi.json`, `nhplug-sdk` 레포 `docs/README.md`/`AGENTS.md`가 이 URL을
+정본으로 지목)을 직접 내려받아 확인했다. 그 결과 이전 "추정" 3개
+(정정/취소/주문조회)의 실제 경로와 place_order 응답 필드명이 **모두
+틀렸다**는 것을 확인했다 — 이번 리프에서 아래처럼 수정한다.
 
-**추정 엔드포인트**(공식 예제 없음 — cashBuy/cashSell·inquiry/v1/balance
-명명 관례를 그대로 연장, PM 배정 지침 (2): 파싱 실패 시 조용히 기본값을
-채우지 않고 FatalExchangeError로 실패):
-- POST /krstock/order/v1/cashModify (정정)
-- POST /krstock/order/v1/cashCancel (취소)
-- POST /krstock/inquiry/v1/orderHistory (주문조회)
+**확인**(openapi.json 직접 확인, 이하 전부 동일 출처):
+- 매수/매도: `POST /krstock/order/v1/cashBuy`|`cashSell` — 요청 필드는
+  기존 추정과 대부분 일치했으나, **응답 주문번호 필드는 `odno`가 아니라
+  `mkt_orr_no`(시장주문번호, int64)였다** — 이전 구현은 항상
+  FatalExchangeError로 실패했을 것이다(존재하지 않는 필드를 찾았으므로).
+- 정정: `POST /krstock/order/v1/modify`(이전 추정 `cashModify`는 존재하지
+  않는 경로) — Input_0 필수 필드 `act_no, org_mkt_orr_no, all_pat_dit_cd,
+  iem_cd, cor_qty, cor_pr, sop_cnd_pr, rmt_mkt_cd, sor_mkt_sli_yn`.
+- 취소: `POST /krstock/order/v1/cancel`(이전 추정 `cashCancel`은 존재하지
+  않는 경로) — Input_0 필수 필드 `act_no, org_mkt_orr_no, all_pat_dit_cd,
+  iem_cd`.
+- 두 엔드포인트 모두 대상 주문을 `org_mkt_orr_no`(place_order 응답의
+  `mkt_orr_no`)로 지정하고, **`iem_cd`(종목코드)도 반드시 함께 보내야
+  한다** — `ExchangeAdapter.cancel_order(order_id)`/`modify_order(order_id)`
+  계약(common/adapter.py)엔 심볼 인자가 없으므로, KIS(`orgno:odno`)와
+  동일한 이유로 `exchange_order_id`를 `"{iem_cd}:{mkt_orr_no}"` 합성키로
+  구성한다(place_order 참조).
 
-응답의 주문번호 필드명도 SDK 스니펫에 없었다 — `odno`(KIS 관례)를
-최선 추정치로 사용, 없으면 즉시 실패한다(조용한 폴백 금지).
-
-2026-09-03 재확인(task-106) — place_order/cancel_order/modify_order는
-`@require_paper_sandbox`를 붙이지 않는다. Bitget/KIS의 core ABC
-place_order/cancel_order/modify_order도 동일하게 무데코레이터다 —
-그 데코레이터는 Executor를 거치지 않는 확장 메서드(margin/futures/
-02c 카테고리 등, live_guard.py 모듈독스트링 참조)를 위한 것이지,
-Executor가 이미 이중 검사(mode!=PAPER 하드차단 + adapter.is_paper_
-trading/is_sandboxed 확인)로 보호하는 core ABC 메서드까지 또 감쌀
-필요는 없다. 특히 지금은 `is_paper_trading`/`is_sandboxed`가 (모의
-투자 도메인 미확인으로) 항상 False이므로(adapter.py 참조), 여기에
-데코레이터까지 얹으면 이 메서드들은 어떤 설정으로도 영원히 호출
-불가능해진다 — 그건 "안전"이 아니라 "이 adapter의 매매 기능이
-테스트조차 안 되는 죽은 코드"가 된다는 뜻이다. Executor의 두 번째
-검사가 이미 정확히 같은 신호(is_paper_trading/is_sandboxed)로
-차단하므로 중복 방어가 아니라 단순 중복이다.
+**확인된 구조적 불일치 — `get_order()`는 구현하지 않는다(§0-1 재조사
+결론 격상)**: "주문조회"에 가장 가까운 카테고리는
+`POST /krstock/inquiry/v1/dailyOrderExecution`(주식일별주문체결조회)였다.
+그런데 이 응답(Output_1 배열)의 각 행은 `itg_orr_no`(통합주문번호)만
+가지고 있고 **`mkt_orr_no` 필드가 없다** — place_order/modify_order가
+반환하는 식별자(`mkt_orr_no`)와 dailyOrderExecution이 조회 가능한
+식별자(`itg_orr_no`)가 서로 다른 번호 체계이고, 두 값을 연결할 필드가
+응답 스키마 어디에도 없다. 즉 "추정 엔드포인트라 신뢰도 낮음"이 아니라
+"공식 스펙으로 확인한 결과 이 경로로는 우리 exchange_order_id를 조회할
+방법이 없다"는 것이 확정됐다 — 근거 없는 매핑(예: itg_orr_no==mkt_orr_no
+가정)으로 조용히 틀린 Order를 만드는 대신 명시적으로 NotImplementedError.
 """
 from __future__ import annotations
 
@@ -50,6 +56,27 @@ _MARKET_CODE = "KRX"
 
 def _order_division(order_type: OrderType) -> str:
     return "05" if order_type == OrderType.MARKET else "01"
+
+
+def _split_exchange_order_id(exchange_order_id: str) -> tuple[str, str]:
+    """place_order()가 심는 합성키(`iem_cd:mkt_orr_no`) 분해 — 모듈
+    docstring 참조(KIS `orgno:odno`와 동일한 이유)."""
+    if ":" not in exchange_order_id:
+        raise FatalExchangeError(
+            f"NH exchange_order_id는 'iem_cd:mkt_orr_no' 형식이어야 함: {exchange_order_id}"
+        )
+    symbol, mkt_orr_no = exchange_order_id.split(":", 1)
+    return symbol, mkt_orr_no
+
+
+def _parse_mkt_orr_no(mkt_orr_no: str) -> int:
+    """openapi.json 확인 — `org_mkt_orr_no`는 int64. 숫자가 아니면(합성키가
+    손상됐거나 다른 거래소의 id가 잘못 전달된 경우) 조용히 잘못된 주문을
+    건드리지 않고 즉시 실패한다."""
+    try:
+        return int(mkt_orr_no)
+    except ValueError as exc:
+        raise FatalExchangeError(f"NH mkt_orr_no가 정수가 아님: {mkt_orr_no!r}") from exc
 
 
 class NHTradingMixin:
@@ -71,95 +98,109 @@ class NHTradingMixin:
         raw = await self._request("POST", path, body=body)  # type: ignore[attr-defined]
         try:
             output = raw["Output_0"]
-            exchange_order_id = str(output["odno"])
+            mkt_orr_no = str(output["mkt_orr_no"])
         except KeyError as exc:
             raise FatalExchangeError(
-                f"NH 주문 응답에 예상 필드 없음(응답 스키마 미확인 — "
-                f"02e 스펙 §3 caveat 참조): {exc}"
+                f"NH 주문 응답에 예상 필드 없음(공식 openapi.json 기준 mkt_orr_no "
+                f"필요, 02e 스펙 §3 참조): {exc}"
             ) from exc
+        exchange_order_id = f"{order.symbol}:{mkt_orr_no}"
         return order.model_copy(
             update={"exchange_order_id": exchange_order_id, "status": OrderStatus.SUBMITTED}
         )
 
     async def cancel_order(self, order_id: str) -> bool:
-        """**추정 엔드포인트**(모듈 docstring 참조) — 응답 파싱 실패 시
-        성공으로 위장하지 않고 그대로 예외를 전파한다(True/False로
-        조용히 뭉개지 않음, PM 배정 지침 (2))."""
+        """`POST /krstock/order/v1/cancel`(공식 openapi.json 확인, 모듈
+        docstring 참조). `_request()`가 이미 rsp_cd 실패를 예외로 올리므로
+        (RetryableExchangeError/FatalExchangeError), 이 지점에 도달했다는
+        것 자체가 성공을 뜻한다 — 이전 구현은 `raw.get("rsp_cd") == "00000"`
+        로 재검사했는데, 성공 코드가 "00166"/"00221"/"13578"인 정상 취소를
+        실패(False)로 잘못 보고하는 버그였다(실패경로 테스트로 발견)."""
+        symbol, mkt_orr_no = _split_exchange_order_id(order_id)
         body = {
             "act_no": self._act_no,  # type: ignore[attr-defined]
-            "orgn_odno": order_id,
-            "orr_cnd_dit_cd": "0",
+            "org_mkt_orr_no": _parse_mkt_orr_no(mkt_orr_no),
+            "all_pat_dit_cd": "1",  # 1=전체(잔량) 취소만 지원 — 부분 취소는 미구현
+            "iem_cd": symbol,
         }
-        raw = await self._request(  # type: ignore[attr-defined]
-            "POST", "/krstock/order/v1/cashCancel", body=body
+        await self._request(  # type: ignore[attr-defined]
+            "POST", "/krstock/order/v1/cancel", body=body
         )
-        return bool(raw.get("rsp_cd") == "00000")
+        return True
 
     async def modify_order(self, order_id: str, **kwargs: Any) -> Order:
-        """**추정 엔드포인트**(모듈 docstring 참조)."""
-        body: dict[str, Any] = {
-            "act_no": self._act_no,  # type: ignore[attr-defined]
-            "orgn_odno": order_id,
-        }
-        if "price" in kwargs:
-            body["orr_pr"] = str(kwargs["price"])
-        if "quantity" in kwargs:
-            body["orr_qty"] = str(kwargs["quantity"])
-        await self._request(  # type: ignore[attr-defined]
-            "POST", "/krstock/order/v1/cashModify", body=body
-        )
-        return await self.get_order(order_id)
+        """`POST /krstock/order/v1/modify`(공식 openapi.json 확인, 모듈
+        docstring 참조). `cor_qty`/`cor_pr`가 필수 필드라 가격/수량을 모두
+        요구한다 — 부분 정보만 주는 정정은 지원하지 않는다(fail-closed).
 
-    async def get_order(self, order_id: str) -> Order:
-        """**추정 엔드포인트, 신뢰도 낮음**(모듈 docstring 참조) —
-        2026-09-03 재확인(task-106): 공식 API 가이드 포털의 국내주식
-        조회 카테고리 목록에 "주문조회"라는 이름 자체가 없다(02e 스펙
-        §0-1) — 실제로는 `국내_주식_조회_체결`(체결 조회)이나
-        `국내_주식_조회_예약주문`(미체결 조회) 중 하나가 이 역할을
-        대신할 가능성이 높다. 즉 필드명 불일치 수준이 아니라 **경로
-        자체가 틀렸을 위험**이 있다 — 응답 필드가 예상과 다르면 잘못된
-        Order를 만드는 대신 즉시 FatalExchangeError로 실패한다."""
-        raw = await self._request(  # type: ignore[attr-defined]
-            "POST",
-            "/krstock/inquiry/v1/orderHistory",
-            body={"act_no": self._act_no, "orgn_odno": order_id},  # type: ignore[attr-defined]
-        )
-        rows = raw.get("Output_0", [])
-        if not rows:
-            raise FatalExchangeError(f"NH 주문을 찾을 수 없음: order_id={order_id}")
-        row = rows[0]
-        try:
-            filled_qty = Decimal(row.get("ccld_qty", "0"))
-            ord_qty = Decimal(row.get("orr_qty", "0"))
-        except Exception as exc:  # noqa: BLE001 — 필드 형식 자체가 예상과 다를 수 있음
+        kwargs 키 이름: 실제 호출부(src/services/order_service/modify.py)는
+        `price`/`size`를 쓰고 Bitget도 `size`를 쓰지만, KIS는 `quantity`를
+        쓴다(레포 내 기존 불일치) — 이 어댑터는 실제 호출부와 맞추기 위해
+        `size`를 우선하고 `quantity`도 하위호환으로 받는다.
+
+        정정 후 새 `mkt_orr_no`가 발급되므로(응답 확인) 그것으로
+        `exchange_order_id`를 갱신해 반환한다. `get_order()`가 구조적으로
+        불가능해(모듈 docstring 참조) 재조회 없이 직접 Order를 구성한다 —
+        `side`/AIOS 전용 필드(client_order_id 등)는 자리표시자이며, 실제
+        호출부는 이 반환값에서 `exchange_order_id`/`status`만 읽고 나머지는
+        원본 DB 행을 유지한다(order_service/modify.py 확인)."""
+        symbol, mkt_orr_no = _split_exchange_order_id(order_id)
+        if "price" not in kwargs or ("size" not in kwargs and "quantity" not in kwargs):
             raise FatalExchangeError(
-                f"NH 주문조회 응답 파싱 실패(응답 스키마 미확인 — 02e 스펙 "
-                f"§3 caveat 참조): {exc}"
+                "NH modify_order는 price와 size(또는 quantity)를 모두 요구함"
+                "(공식 openapi.json — cor_qty/cor_pr 모두 필수 필드로 확인)"
+            )
+        quantity = kwargs["size"] if "size" in kwargs else kwargs["quantity"]
+        body = {
+            "act_no": self._act_no,  # type: ignore[attr-defined]
+            "org_mkt_orr_no": _parse_mkt_orr_no(mkt_orr_no),
+            "all_pat_dit_cd": "1",  # 1=전체(잔량) 정정만 지원 — 부분 정정은 미구현
+            "iem_cd": symbol,
+            "cor_qty": str(quantity),
+            "cor_pr": str(kwargs["price"]),
+            "sop_cnd_pr": "0",  # 스톱지정가(16) 정정이 아니면 0
+            "rmt_mkt_cd": _MARKET_CODE,
+            "sor_mkt_sli_yn": "N",
+        }
+        raw = await self._request(  # type: ignore[attr-defined]
+            "POST", "/krstock/order/v1/modify", body=body
+        )
+        try:
+            new_mkt_orr_no = str(raw["Output_0"]["mkt_orr_no"])
+        except KeyError as exc:
+            raise FatalExchangeError(
+                f"NH 정정 응답에 예상 필드 없음(공식 openapi.json 기준 mkt_orr_no "
+                f"필요): {exc}"
             ) from exc
-
-        if filled_qty == 0:
-            status = OrderStatus.ACKNOWLEDGED
-        elif filled_qty < ord_qty:
-            status = OrderStatus.PARTIALLY_FILLED
-        else:
-            status = OrderStatus.FILLED
-
+        now = datetime.now(timezone.utc)
         return Order(
             order_id=uuid4(),
-            exchange_order_id=order_id,
+            exchange_order_id=f"{symbol}:{new_mkt_orr_no}",
             client_order_id="",
             strategy_id="",
             strategy_version="",
-            symbol=row.get("iem_cd", ""),
+            symbol=symbol,
             exchange="nh",
-            side=OrderSide.BUY if row.get("ssl_byv_dit_cd") == "02" else OrderSide.SELL,
+            side=OrderSide.BUY,  # placeholder — 호출부가 원본 side를 유지함(위 docstring)
             order_type=OrderType.LIMIT,
-            quantity=ord_qty,
-            status=status,
-            filled_quantity=filled_qty,
-            created_at=datetime.now(timezone.utc),
-            updated_at=datetime.now(timezone.utc),
+            quantity=Decimal(str(quantity)),
+            status=OrderStatus.ACKNOWLEDGED,
+            filled_quantity=Decimal("0"),
+            created_at=now,
+            updated_at=now,
             asset_class=AssetClass.KR_EQUITY,
+        )
+
+    async def get_order(self, order_id: str) -> Order:
+        """모듈 docstring 참조 — 공식 openapi.json으로 확인한 구조적
+        불일치(주문조회 응답에 우리 exchange_order_id 체계인 mkt_orr_no가
+        없음) 때문에 근거 있는 구현이 불가능하다. 추측으로 잘못된 주문
+        상태를 만드는 것보다 명시적 미구현이 안전하다(PM 배정 지침 (2))."""
+        raise NotImplementedError(
+            "NHAdapter.get_order: dailyOrderExecution 응답에 mkt_orr_no(당사 "
+            "exchange_order_id 체계)를 조회할 필드가 없음이 공식 openapi.json으로 "
+            "확인됨(itg_orr_no만 존재, 02e 스펙 §3 참조) — 라이브 계좌로 두 "
+            "식별자의 매핑 관계를 확인하기 전까지 구현 보류"
         )
 
     async def health_check(self) -> bool:

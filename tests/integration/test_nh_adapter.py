@@ -1,18 +1,23 @@
 """NHAdapter 통합 테스트.
 
-실제 NH API 키가 없는 상태라 httpx.MockTransport로 공식 SDK 소스코드
-기준 요청 형태를 재현해 검증한다(test_kis_adapter.py와 동일 원칙).
-응답 필드명은 02e_nh_api_spec_v1.md §3에 명시한 대로 미확인 최선
-추정치라 실제 필드명이 다를 수 있음 — 여기서는 "그 추정 필드명이
-있으면 정상 파싱되고, 없으면 FatalExchangeError로 실패한다"를 검증한다.
+실제 NH API 키가 없는 상태라 httpx.MockTransport로 공식 REST 요청 형태를
+재현해 검증한다(test_kis_adapter.py와 동일 원칙). market_data/account/
+trading의 요청·응답 필드명은 2026-09-03(task-114) 공식 OpenAPI 스펙
+(`https://www.nhplug.com/openapi-docs/krstock/openapi.json`, 도메인이
+정본임을 `nhplug-sdk` 레포 `docs/README.md`가 명시)을 직접 내려받아
+확인한 값이다 — 02e_nh_api_spec_v1.md §3 참조. WebSocket 구독은
+`nhplug/realtime.py` 공식 소스로 확인한 연결/구독/재연결 책임만
+검증한다(데이터 프레임 필드 스키마는 여전히 미확인, websocket_mixin.py
+모듈 docstring 참조).
 """
 import json
 from decimal import Decimal
 
 import httpx
 import pytest
+from websockets.exceptions import ConnectionClosed
 
-from src.core.exceptions import FatalExchangeError
+from src.core.exceptions import FatalExchangeError, RetryableExchangeError
 from src.data.models.base import AssetClass
 from src.data.models.trading import Order, OrderSide, OrderStatus, OrderType
 from src.exchanges.nh.adapter import NHAdapter
@@ -97,7 +102,6 @@ async def test_request_raises_retryable_on_non_json_response():
         )
 
     adapter = _make_adapter(handler)
-    from src.core.exceptions import RetryableExchangeError
 
     with pytest.raises(RetryableExchangeError):
         await adapter.get_ticker("005930")
@@ -114,8 +118,6 @@ async def test_request_raises_retryable_on_business_failure_code():
             },
         )
 
-    from src.core.exceptions import RetryableExchangeError
-
     adapter = _make_adapter(handler)
     with pytest.raises(RetryableExchangeError):
         await adapter.get_ticker("005930")
@@ -123,7 +125,8 @@ async def test_request_raises_retryable_on_business_failure_code():
 
 async def test_request_treats_wanryo_message_as_success_even_with_unlisted_code():
     """SDK 관례 — rsp_cd가 알려진 성공코드 목록에 없어도 rsp_msg에
-    "완료"가 포함되면 성공으로 취급한다(02e 스펙 §2)."""
+    "완료"가 포함되면 성공으로 취급한다(공식 nhplug/client.py::is_success()
+    확인)."""
 
     def handler(request: httpx.Request) -> httpx.Response:
         return _route(
@@ -134,7 +137,7 @@ async def test_request_treats_wanryo_message_as_success_even_with_unlisted_code(
                     json={
                         "rsp_cd": "ZZZZZ",
                         "rsp_msg": "처리 완료",
-                        "Output_0": {"prpr": "70000", "bidp": "69900", "askp": "70100"},
+                        "Output_0": {"stck_prpr": "70000", "bidp": "69900", "askp": "70100"},
                     },
                 )
             },
@@ -155,7 +158,7 @@ async def test_get_ticker_parses_output():
         body = json.loads(request.content)
         assert body["iem_cd"] == "005930"
         return httpx.Response(
-            200, json=_success({"prpr": "70000", "bidp": "69900", "askp": "70100"})
+            200, json=_success({"stck_prpr": "70000", "bidp": "69900", "askp": "70100"})
         )
 
     adapter = _make_adapter(
@@ -178,24 +181,53 @@ async def test_get_ticker_raises_fatal_when_field_missing():
         await adapter.get_ticker("005930")
 
 
-async def test_get_orderbook_parses_bid_ask():
+def _depth_output(**extra) -> dict:
+    output = {"stck_prpr": "70000"}
+    output.update(extra)
+    return output
+
+
+async def test_get_orderbook_parses_full_depth():
+    output = _depth_output(
+        askp1="70100", askp2="70200", askp_rsqn1="10", askp_rsqn2="20",
+        bidp1="69900", bidp2="69800", bidp_rsqn1="30", bidp_rsqn2="40",
+    )
+
     def handler(request: httpx.Request) -> httpx.Response:
-        return httpx.Response(
-            200, json=_success({"prpr": "70000", "bidp": "69900", "askp": "70100"})
-        )
+        return httpx.Response(200, json=_success(output))
 
     adapter = _make_adapter(
         lambda request: _route(request, {"/krstock/quote/v1/currentPrice": handler})
     )
     book = await adapter.get_orderbook("005930")
 
+    assert len(book.bids) == 2
+    assert len(book.asks) == 2
     assert book.bids[0].price == Decimal("69900")
+    assert book.bids[0].quantity == Decimal("30")
     assert book.asks[0].price == Decimal("70100")
+    assert book.asks[0].quantity == Decimal("10")
 
 
 async def test_get_orderbook_raises_fatal_when_no_quote_fields():
     def handler(request: httpx.Request) -> httpx.Response:
-        return httpx.Response(200, json=_success({"prpr": "70000"}))
+        return httpx.Response(200, json=_success({"stck_prpr": "70000"}))
+
+    adapter = _make_adapter(
+        lambda request: _route(request, {"/krstock/quote/v1/currentPrice": handler})
+    )
+    with pytest.raises(FatalExchangeError):
+        await adapter.get_orderbook("005930")
+
+
+async def test_get_orderbook_raises_fatal_when_depth_quantity_missing():
+    """askp1은 있는데 짝이 되는 잔량 askp_rsqn1이 없는 경우(비대칭 필드
+    누락) — 조용히 quantity=0으로 채우지 않고 실패한다."""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200, json=_success(_depth_output(askp1="70100", bidp1="69900", bidp_rsqn1="30"))
+        )
 
     adapter = _make_adapter(
         lambda request: _route(request, {"/krstock/quote/v1/currentPrice": handler})
@@ -221,7 +253,7 @@ async def test_capabilities_declare_websocket_unsupported():
     caps = adapter.get_capabilities()
 
     assert caps.supported_asset_classes == [AssetClass.KR_EQUITY]
-    assert caps.supports_websocket is False  # 데이터 메시지 포맷 미확인
+    assert caps.supports_websocket is False  # 데이터 메시지 필드 스키마 미확인
     assert caps.market_hours is not None
 
 
@@ -236,8 +268,8 @@ async def test_get_balance_maps_holdings_and_cash():
         return httpx.Response(
             200,
             json=_success(
-                Output_1=[{"iem_cd": "005930", "hld_qty": "10", "ord_psb_qty": "10"}],
-                Output_2=[{"dpst_amt": "1000000"}],
+                {"dca": "1000000"},
+                Output_1=[{"iem_cd": "005930", "itg_bnc_qty": "10", "rsdl_qty": "8"}],
             ),
         )
 
@@ -246,9 +278,24 @@ async def test_get_balance_maps_holdings_and_cash():
     )
     balances = await adapter.get_balance()
 
-    assets = {b.asset: b.total for b in balances}
-    assert assets["005930"] == Decimal("10")
-    assert assets["KRW"] == Decimal("1000000")
+    by_asset = {b.asset: b for b in balances}
+    assert by_asset["005930"].total == Decimal("10")
+    assert by_asset["005930"].available == Decimal("8")
+    assert by_asset["KRW"].total == Decimal("1000000")
+
+
+async def test_get_balance_raises_fatal_when_holding_field_missing():
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json=_success({"dca": "1000000"}, Output_1=[{"iem_cd": "005930"}]),
+        )
+
+    adapter = _make_adapter(
+        lambda request: _route(request, {"/krstock/inquiry/v1/balance": handler})
+    )
+    with pytest.raises(FatalExchangeError):
+        await adapter.get_balance()
 
 
 async def test_get_positions_always_empty():
@@ -256,7 +303,7 @@ async def test_get_positions_always_empty():
     assert await adapter.get_positions() == []
 
 
-# ---------- trading ----------
+# ---------- trading: place_order ----------
 
 
 async def test_place_order_buy_uses_cash_buy_endpoint():
@@ -264,7 +311,7 @@ async def test_place_order_buy_uses_cash_buy_endpoint():
         assert request.url.path == "/krstock/order/v1/cashBuy"
         body = json.loads(request.content)
         assert body["nmn_pr_tp_cd"] == "01"  # 지정가
-        return httpx.Response(200, json=_success({"odno": "999"}))
+        return httpx.Response(200, json=_success({"mkt_orr_no": 999}))
 
     adapter = _make_adapter(
         lambda request: _route(request, {"/krstock/order/v1/cashBuy": handler})
@@ -273,14 +320,14 @@ async def test_place_order_buy_uses_cash_buy_endpoint():
 
     result = await adapter.place_order(order)
 
-    assert result.exchange_order_id == "999"
+    assert result.exchange_order_id == "005930:999"
     assert result.status == OrderStatus.SUBMITTED
 
 
 async def test_place_order_sell_uses_cash_sell_endpoint():
     def handler(request: httpx.Request) -> httpx.Response:
         assert request.url.path == "/krstock/order/v1/cashSell"
-        return httpx.Response(200, json=_success({"odno": "999"}))
+        return httpx.Response(200, json=_success({"mkt_orr_no": 999}))
 
     adapter = _make_adapter(
         lambda request: _route(request, {"/krstock/order/v1/cashSell": handler})
@@ -294,7 +341,7 @@ async def test_place_order_market_type_uses_market_division_code():
     def handler(request: httpx.Request) -> httpx.Response:
         body = json.loads(request.content)
         assert body["nmn_pr_tp_cd"] == "05"  # 시장가
-        return httpx.Response(200, json=_success({"odno": "999"}))
+        return httpx.Response(200, json=_success({"mkt_orr_no": 999}))
 
     adapter = _make_adapter(
         lambda request: _route(request, {"/krstock/order/v1/cashBuy": handler})
@@ -315,17 +362,144 @@ async def test_place_order_raises_fatal_when_field_missing():
         await adapter.place_order(_order())
 
 
-async def test_cancel_order_returns_true_on_success():
+# ---------- trading: cancel_order ----------
+
+
+async def test_cancel_order_sends_confirmed_cancel_endpoint():
     def handler(request: httpx.Request) -> httpx.Response:
-        assert request.url.path == "/krstock/order/v1/cashCancel"
+        assert request.url.path == "/krstock/order/v1/cancel"
         body = json.loads(request.content)
-        assert body["orgn_odno"] == "999"
+        assert body["org_mkt_orr_no"] == 999
+        assert body["iem_cd"] == "005930"
+        assert body["all_pat_dit_cd"] == "1"
         return httpx.Response(200, json=_success())
 
     adapter = _make_adapter(
-        lambda request: _route(request, {"/krstock/order/v1/cashCancel": handler})
+        lambda request: _route(request, {"/krstock/order/v1/cancel": handler})
     )
-    assert await adapter.cancel_order("999") is True
+    assert await adapter.cancel_order("005930:999") is True
+
+
+async def test_cancel_order_returns_true_on_alternate_success_code():
+    """회귀 테스트 — 이전 구현은 `rsp_cd == "00000"`만 성공으로 봐서
+    "00166" 같은 다른 성공 코드에서도 취소를 실패(False)로 잘못 보고하는
+    버그가 있었다(_request()가 이미 성공 판정을 끝냈으므로 여기 도달한
+    것 자체가 성공)."""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={"rsp_cd": "00166", "rsp_msg": "정상처리완료"})
+
+    adapter = _make_adapter(
+        lambda request: _route(request, {"/krstock/order/v1/cancel": handler})
+    )
+    assert await adapter.cancel_order("005930:999") is True
+
+
+async def test_cancel_order_raises_retryable_on_business_failure():
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={"rsp_cd": "99999", "rsp_msg": "이미 체결된 주문입니다"})
+
+    adapter = _make_adapter(
+        lambda request: _route(request, {"/krstock/order/v1/cancel": handler})
+    )
+    with pytest.raises(RetryableExchangeError):
+        await adapter.cancel_order("005930:999")
+
+
+async def test_cancel_order_raises_fatal_on_malformed_order_id():
+    adapter = _make_adapter(lambda request: httpx.Response(200, json=TOKEN_RESPONSE))
+    with pytest.raises(FatalExchangeError):
+        await adapter.cancel_order("no-separator")
+
+
+async def test_cancel_order_raises_fatal_on_non_numeric_mkt_orr_no():
+    adapter = _make_adapter(lambda request: httpx.Response(200, json=TOKEN_RESPONSE))
+    with pytest.raises(FatalExchangeError):
+        await adapter.cancel_order("005930:not-a-number")
+
+
+# ---------- trading: modify_order ----------
+
+
+async def test_modify_order_sends_confirmed_modify_endpoint():
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == "/krstock/order/v1/modify"
+        body = json.loads(request.content)
+        assert body["org_mkt_orr_no"] == 999
+        assert body["iem_cd"] == "005930"
+        assert body["cor_qty"] == "5"
+        assert body["cor_pr"] == "71000"
+        return httpx.Response(200, json=_success({"mkt_orr_no": 1000}))
+
+    adapter = _make_adapter(
+        lambda request: _route(request, {"/krstock/order/v1/modify": handler})
+    )
+    order = await adapter.modify_order("005930:999", price=Decimal("71000"), size=Decimal("5"))
+
+    assert order.exchange_order_id == "005930:1000"
+    assert order.status == OrderStatus.ACKNOWLEDGED
+
+
+async def test_modify_order_accepts_quantity_kwarg_for_backward_compat():
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json=_success({"mkt_orr_no": 1000}))
+
+    adapter = _make_adapter(
+        lambda request: _route(request, {"/krstock/order/v1/modify": handler})
+    )
+    order = await adapter.modify_order(
+        "005930:999", price=Decimal("71000"), quantity=Decimal("5")
+    )
+    assert order.quantity == Decimal("5")
+
+
+async def test_modify_order_raises_fatal_when_price_missing():
+    adapter = _make_adapter(lambda request: httpx.Response(200, json=TOKEN_RESPONSE))
+    with pytest.raises(FatalExchangeError):
+        await adapter.modify_order("005930:999", size=Decimal("5"))
+
+
+async def test_modify_order_raises_fatal_when_size_missing():
+    adapter = _make_adapter(lambda request: httpx.Response(200, json=TOKEN_RESPONSE))
+    with pytest.raises(FatalExchangeError):
+        await adapter.modify_order("005930:999", price=Decimal("71000"))
+
+
+async def test_modify_order_raises_retryable_on_business_failure():
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={"rsp_cd": "99999", "rsp_msg": "실패"})
+
+    adapter = _make_adapter(
+        lambda request: _route(request, {"/krstock/order/v1/modify": handler})
+    )
+    with pytest.raises(RetryableExchangeError):
+        await adapter.modify_order("005930:999", price=Decimal("71000"), size=Decimal("5"))
+
+
+async def test_modify_order_raises_fatal_when_response_field_missing():
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json=_success({"unexpected": "1"}))
+
+    adapter = _make_adapter(
+        lambda request: _route(request, {"/krstock/order/v1/modify": handler})
+    )
+    with pytest.raises(FatalExchangeError):
+        await adapter.modify_order("005930:999", price=Decimal("71000"), size=Decimal("5"))
+
+
+# ---------- trading: get_order (confirmed structurally blocked) ----------
+
+
+async def test_get_order_raises_not_implemented():
+    """02e 스펙 §0-1/§3 — 공식 openapi.json으로 확인한 구조적 불일치
+    (dailyOrderExecution 응답에 mkt_orr_no가 없음, trading_mixin.py 모듈
+    docstring 참조) 때문에 근거 있는 구현이 불가능함을 검증한다."""
+    adapter = _make_adapter(lambda request: httpx.Response(200, json=TOKEN_RESPONSE))
+    with pytest.raises(NotImplementedError):
+        await adapter.get_order("005930:999")
+
+
+# ---------- misc ----------
 
 
 async def test_is_paper_trading_and_sandboxed_are_always_false():
@@ -340,85 +514,12 @@ async def test_is_paper_trading_and_sandboxed_are_always_false():
     assert adapter.is_sandboxed is False
 
 
-async def test_modify_order_calls_cash_modify_then_reconfirms():
-    calls: list[str] = []
-
-    def handler(request: httpx.Request) -> httpx.Response:
-        calls.append(request.url.path)
-        if request.url.path == "/krstock/order/v1/cashModify":
-            return httpx.Response(200, json=_success())
-        assert request.url.path == "/krstock/inquiry/v1/orderHistory"
-        return httpx.Response(
-            200,
-            json=_success(
-                [
-                    {
-                        "iem_cd": "005930",
-                        "orr_qty": "10",
-                        "ccld_qty": "0",
-                        "ssl_byv_dit_cd": "02",
-                    }
-                ]
-            ),
-        )
-
-    adapter = _make_adapter(
-        lambda request: _route(
-            request,
-            {
-                "/krstock/order/v1/cashModify": handler,
-                "/krstock/inquiry/v1/orderHistory": handler,
-            },
-        )
-    )
-    order = await adapter.modify_order("999", price=Decimal("71000"))
-
-    assert calls == ["/krstock/order/v1/cashModify", "/krstock/inquiry/v1/orderHistory"]
-    assert order.exchange_order_id == "999"
-
-
-async def test_get_order_not_found_raises_fatal():
-    def handler(request: httpx.Request) -> httpx.Response:
-        return httpx.Response(200, json=_success([]))
-
-    adapter = _make_adapter(
-        lambda request: _route(request, {"/krstock/inquiry/v1/orderHistory": handler})
-    )
-    with pytest.raises(FatalExchangeError):
-        await adapter.get_order("999")
-
-
-async def test_get_order_parses_status():
-    def handler(request: httpx.Request) -> httpx.Response:
-        return httpx.Response(
-            200,
-            json=_success(
-                [
-                    {
-                        "iem_cd": "005930",
-                        "orr_qty": "10",
-                        "ccld_qty": "10",
-                        "ssl_byv_dit_cd": "02",
-                    }
-                ]
-            ),
-        )
-
-    adapter = _make_adapter(
-        lambda request: _route(request, {"/krstock/inquiry/v1/orderHistory": handler})
-    )
-    order = await adapter.get_order("999")
-
-    assert order.status == OrderStatus.FILLED
-    assert order.side == OrderSide.BUY
-
-
 # ---------- health check ----------
 
 
 async def test_health_check_true_on_success():
     def handler(request: httpx.Request) -> httpx.Response:
-        return httpx.Response(200, json=_success(Output_1=[], Output_2=[]))
+        return httpx.Response(200, json=_success({"dca": "0"}, Output_1=[]))
 
     adapter = _make_adapter(
         lambda request: _route(request, {"/krstock/inquiry/v1/balance": handler})
@@ -434,3 +535,160 @@ async def test_health_check_false_on_error():
         lambda request: _route(request, {"/krstock/inquiry/v1/balance": handler})
     )
     assert await adapter.health_check() is False
+
+
+# ---------- WebSocket 구독 (connect_and_subscribe) ----------
+#
+# 실제 소켓 대신 가짜 connect_fn을 주입해 결정적으로 재현한다(KIS WS 테스트와
+# 동일 원칙, tests/integration/test_kis_websocket.py 참조).
+
+
+class _StopTest(Exception):
+    """무한 재연결 루프를 테스트 안에서 의도적으로 끊기 위한 표식 예외."""
+
+
+class _FakeConnection:
+    def __init__(self, messages, *, raise_after=None):
+        self._messages = messages
+        self._raise_after = raise_after
+        self.sent: list[str] = []
+
+    async def send(self, message: str) -> None:
+        self.sent.append(message)
+
+    def __aiter__(self):
+        return self._iter()
+
+    async def _iter(self):
+        for message in self._messages:
+            yield message
+        if self._raise_after is not None:
+            raise self._raise_after
+
+
+class _FakeConnectCtx:
+    def __init__(self, connection: _FakeConnection):
+        self._connection = connection
+
+    async def __aenter__(self):
+        return self._connection
+
+    async def __aexit__(self, exc_type, exc, tb):
+        return False
+
+
+async def test_connect_and_subscribe_sends_confirmed_envelope():
+    connection = _FakeConnection(
+        [json.dumps({"header": {"tr_cd": "mc", "tr_key": "005930"}, "body": {"x": 1}})],
+        raise_after=ConnectionClosed(None, None),
+    )
+    call_count = {"n": 0}
+
+    def connect_fn(url: str):
+        call_count["n"] += 1
+        if call_count["n"] == 1:
+            assert url == "wss://moapi.nhplug.com:17070/websocket"  # 모의투자 URL
+            return _FakeConnectCtx(connection)
+        raise _StopTest
+
+    adapter = _make_adapter(
+        lambda request: httpx.Response(200, json=TOKEN_RESPONSE), is_paper_trading=True
+    )
+
+    received: list[str] = []
+
+    async def on_raw_frame(raw: str) -> None:
+        received.append(raw)
+
+    with pytest.raises(_StopTest):
+        await adapter.connect_and_subscribe("mc", "005930", on_raw_frame, connect_fn=connect_fn)
+
+    subscribe_msg = json.loads(connection.sent[0])
+    assert subscribe_msg["header"]["token"] == "tok-1"
+    assert subscribe_msg["header"]["tr_type"] == "1"
+    assert subscribe_msg["body"]["tr_cd"] == "mc"
+    assert subscribe_msg["body"]["tr_key"] == "005930"
+    assert len(received) == 1
+
+
+async def test_connect_and_subscribe_uses_domestic_url_for_live_account():
+    def connect_fn(url: str):
+        assert url == "wss://api.nhplug.com:7070/websocket"
+        raise _StopTest
+
+    adapter = _make_adapter(
+        lambda request: httpx.Response(200, json=TOKEN_RESPONSE), is_paper_trading=False
+    )
+
+    async def on_raw_frame(raw: str) -> None:
+        pass
+
+    with pytest.raises(_StopTest):
+        await adapter.connect_and_subscribe("mc", "005930", on_raw_frame, connect_fn=connect_fn)
+
+
+async def test_connect_and_subscribe_uses_overseas_url_when_requested():
+    def connect_fn(url: str):
+        assert url == "wss://api.nhplug.com:7080/websocket"
+        raise _StopTest
+
+    adapter = _make_adapter(
+        lambda request: httpx.Response(200, json=TOKEN_RESPONSE), is_paper_trading=False
+    )
+
+    async def on_raw_frame(raw: str) -> None:
+        pass
+
+    with pytest.raises(_StopTest):
+        await adapter.connect_and_subscribe(
+            "RC", "GIC123", on_raw_frame, is_domestic=False, connect_fn=connect_fn
+        )
+
+
+async def test_connect_and_subscribe_reconnects_after_disconnect():
+    """연결이 끊기면(ConnectionClosed) 재연결을 시도한다(§2.1 재연결
+    책임) — on_reconnecting/on_reconnected 훅이 두 번째 연결에서만
+    호출되는지 확인한다."""
+    first = _FakeConnection([], raise_after=ConnectionClosed(None, None))
+    second = _FakeConnection([], raise_after=ConnectionClosed(None, None))
+    call_count = {"n": 0}
+    hooks: list[str] = []
+
+    def connect_fn(url: str):
+        call_count["n"] += 1
+        if call_count["n"] == 1:
+            return _FakeConnectCtx(first)
+        if call_count["n"] == 2:
+            return _FakeConnectCtx(second)
+        raise _StopTest
+
+    async def on_reconnecting() -> None:
+        hooks.append("reconnecting")
+
+    async def on_reconnected() -> None:
+        hooks.append("reconnected")
+
+    async def on_raw_frame(raw: str) -> None:
+        pass
+
+    async def instant_sleep(_seconds: float) -> None:
+        return None
+
+    from src.exchanges.nh import websocket_mixin
+
+    with pytest.raises(_StopTest):
+        await websocket_mixin._run_nh_ws_subscription(
+            "wss://moapi.nhplug.com:17070/websocket",
+            {"header": {"token": "t", "tr_type": "1"}, "body": {"tr_cd": "mc", "tr_key": "x"}},
+            on_raw_frame,
+            connect_fn=connect_fn,
+            on_reconnecting=on_reconnecting,
+            on_reconnected=on_reconnected,
+            sleep_fn=instant_sleep,
+        )
+
+    # 1차 연결(끊김) → 2차 연결(reconnecting→성공→reconnected, 끊김) →
+    # 3차 시도 직전에 connect_fn이 _StopTest를 던짐(그 전에 reconnecting은
+    # 이미 호출됨).
+    assert hooks == ["reconnecting", "reconnected", "reconnecting"]
+    assert call_count["n"] == 3

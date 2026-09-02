@@ -36,6 +36,7 @@ from src.exchanges.common.types import ExchangeCapability, MarketHours
 from src.exchanges.nh.account_mixin import NHAccountMixin
 from src.exchanges.nh.market_data_mixin import NHMarketDataMixin
 from src.exchanges.nh.trading_mixin import NHTradingMixin
+from src.exchanges.nh.websocket_mixin import NHWebSocketMixin
 
 REAL_BASE_URL = "https://api.nhplug.com:8443"
 PAPER_BASE_URL = "https://moapi.nhplug.com:8443"
@@ -138,6 +139,7 @@ class NHAdapter(
     NHMarketDataMixin,
     NHAccountMixin,
     NHTradingMixin,
+    NHWebSocketMixin,
     ExchangeAdapter,
 ):
     """NH투자증권(NH Investment Securities) — NAMUH PLUG OpenAPI, OAuth2 인증.
@@ -146,8 +148,17 @@ class NHAdapter(
     COM/DLL 기반, REST 아님)와 신규 NAMUH PLUG(진짜 REST+WS). 이 어댑터는
     후자만 구현한다 — 전자는 이 어댑터 구조와 근본적으로 안 맞는다.
 
-    ⚠️ 02e 스펙 §3 — 정정/취소/주문조회 3개 엔드포인트는 공식 예제가
-    없어 명명 관례를 연장한 추정치다(라이브 검증 전까지 확정 아님).
+    2026-09-03(task-114) 재조사 — 도메인이 정본(SSOT)인 공식 OpenAPI
+    스펙(`https://www.nhplug.com/openapi-docs/krstock/openapi.json`)을 직접
+    확인해 정정/취소는 확인된 엔드포인트로 격상했다(trading_mixin.py 모듈
+    docstring 참조: 실제 경로는 `/krstock/order/v1/modify`|`cancel`이지
+    이전 추정 `cashModify`|`cashCancel`이 아니었다). 다만 **주문조회는
+    공식 스펙으로 "구조적으로 불가능"이 확인됐다** — 가장 가까운
+    엔드포인트(dailyOrderExecution)의 응답에 place_order가 반환하는
+    식별자(mkt_orr_no)를 조회할 필드가 없다(trading_mixin.py 참조).
+    WebSocket은 연결/구독/재연결까지 확인해 구현했지만(websocket_mixin.py)
+    데이터 프레임의 필드 스키마는 아직 미확인이라 `subscribe_ticker_stream()`
+    은 여전히 NotImplementedError다.
     """
 
     @property
