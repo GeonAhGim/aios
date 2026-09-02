@@ -19,6 +19,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 from decimal import Decimal
+from typing import Any
 
 from src.data.models.market_data import Candle, FundingRate, OrderBook, OrderBookLevel, Ticker
 from src.data.models.trading import FuturesContractInfo
@@ -146,6 +147,71 @@ class BitgetFuturesMarketMixin:
                 )
             )
         return candles
+
+    async def get_futures_history_funding_rate(
+        self, symbol: str, *, limit: int = 100, product_type: str = DEFAULT_PRODUCT_TYPE
+    ) -> list[FundingRate]:
+        """02b 스펙 §5.1(P1)."""
+        raw = await self._request(  # type: ignore[attr-defined]
+            "GET",
+            "/api/v2/mix/market/history-fund-rate",
+            params={
+                "symbol": _to_bitget_symbol(symbol),
+                "productType": product_type,
+                "pageSize": str(limit),
+            },
+        )
+        return [
+            FundingRate(
+                symbol=symbol,
+                exchange="bitget",
+                current_rate=Decimal(item["fundingRate"]),
+                next_funding_time=datetime.fromtimestamp(
+                    int(item["fundingTime"]) / 1000, tz=timezone.utc
+                ),
+                timestamp=datetime.fromtimestamp(int(item["fundingTime"]) / 1000, tz=timezone.utc),
+            )
+            for item in raw["data"]
+        ]
+
+    async def get_futures_funding_time(
+        self, symbol: str, *, product_type: str = DEFAULT_PRODUCT_TYPE
+    ) -> datetime:
+        """02b 스펙 §5.1(P1) — 다음 펀딩 정산 시각 단독 조회."""
+        raw = await self._request(  # type: ignore[attr-defined]
+            "GET",
+            "/api/v2/mix/market/funding-time",
+            params={"symbol": _to_bitget_symbol(symbol), "productType": product_type},
+        )
+        data = raw["data"][0] if isinstance(raw["data"], list) else raw["data"]
+        return datetime.fromtimestamp(int(data["nextFundingTime"]) / 1000, tz=timezone.utc)
+
+    async def get_futures_open_interest(
+        self, symbol: str, *, product_type: str = DEFAULT_PRODUCT_TYPE
+    ) -> Decimal:
+        """02b 스펙 §5.1(P1) — FD-2.6류 시장 전체 신호 보강."""
+        raw = await self._request(  # type: ignore[attr-defined]
+            "GET",
+            "/api/v2/mix/market/open-interest",
+            params={"symbol": _to_bitget_symbol(symbol), "productType": product_type},
+        )
+        data = raw["data"]
+        rows = data.get("openInterestList", data) if isinstance(data, dict) else data
+        row = rows[0] if isinstance(rows, list) else rows
+        return Decimal(row["size"])
+
+    async def get_futures_position_lever_tiers(
+        self, symbol: str, *, product_type: str = DEFAULT_PRODUCT_TYPE
+    ) -> list[dict[str, Any]]:
+        """02b 스펙 §5.1(P1) — 심볼별 레버리지 구간표. 구간별 필드가
+        제각각이라(최대레버리지/최대포지션/유지증거금율 등) 아직 모델화
+        하지 않는다(raw dict, get_fills와 동일 판단)."""
+        raw = await self._request(  # type: ignore[attr-defined]
+            "GET",
+            "/api/v2/mix/market/query-position-lever",
+            params={"symbol": _to_bitget_symbol(symbol), "productType": product_type},
+        )
+        return list(raw["data"])
 
     async def get_futures_current_funding_rate(
         self, symbol: str, *, product_type: str = DEFAULT_PRODUCT_TYPE

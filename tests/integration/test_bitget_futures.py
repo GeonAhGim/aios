@@ -8,6 +8,7 @@ import json
 from decimal import Decimal
 
 import httpx
+import pytest
 
 from src.data.models.base import AssetClass
 from src.data.models.trading import Order, OrderSide, OrderStatus, OrderType
@@ -419,3 +420,246 @@ async def test_get_futures_fills():
     fills = await adapter.get_futures_fills()
 
     assert fills == [{"orderId": "777", "price": "81000", "baseVolume": "0.01"}]
+
+
+async def test_get_futures_history_funding_rate():
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == "/api/v2/mix/market/history-fund-rate"
+        return _json_response(
+            {
+                "code": "00000",
+                "msg": "success",
+                "requestTime": 1,
+                "data": [{"fundingRate": "0.0001", "fundingTime": "1700000000000"}],
+            }
+        )
+
+    adapter = _make_adapter(handler)
+    rates = await adapter.get_futures_history_funding_rate("BTC/USDT")
+
+    assert rates[0].current_rate == Decimal("0.0001")
+
+
+async def test_get_futures_funding_time():
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == "/api/v2/mix/market/funding-time"
+        return _json_response(
+            {
+                "code": "00000",
+                "msg": "success",
+                "requestTime": 1,
+                "data": {"nextFundingTime": "1700000000000"},
+            }
+        )
+
+    adapter = _make_adapter(handler)
+    next_time = await adapter.get_futures_funding_time("BTC/USDT")
+
+    assert next_time.year == 2023
+
+
+async def test_get_futures_open_interest():
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == "/api/v2/mix/market/open-interest"
+        return _json_response(
+            {
+                "code": "00000",
+                "msg": "success",
+                "requestTime": 1,
+                "data": {"openInterestList": [{"symbol": "BTCUSDT", "size": "1234.5"}]},
+            }
+        )
+
+    adapter = _make_adapter(handler)
+    oi = await adapter.get_futures_open_interest("BTC/USDT")
+
+    assert oi == Decimal("1234.5")
+
+
+async def test_get_futures_position_lever_tiers():
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == "/api/v2/mix/market/query-position-lever"
+        return _json_response(
+            {
+                "code": "00000",
+                "msg": "success",
+                "requestTime": 1,
+                "data": [{"level": "1", "maxLever": "125"}],
+            }
+        )
+
+    adapter = _make_adapter(handler)
+    tiers = await adapter.get_futures_position_lever_tiers("BTC/USDT")
+
+    assert tiers == [{"level": "1", "maxLever": "125"}]
+
+
+async def test_set_futures_margin_sends_amount():
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == "/api/v2/mix/account/set-margin"
+        body = json.loads(request.content)
+        assert body["amount"] == "50"
+        return _json_response({"code": "00000", "msg": "success", "requestTime": 1, "data": {}})
+
+    adapter = _make_adapter(handler)
+    await adapter.set_futures_margin("BTC/USDT", Decimal("50"))
+
+
+async def test_get_futures_max_open_amount():
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == "/api/v2/mix/account/max-open"
+        return _json_response(
+            {
+                "code": "00000",
+                "msg": "success",
+                "requestTime": 1,
+                "data": {"maxOpenAvailable": "10"},
+            }
+        )
+
+    adapter = _make_adapter(handler)
+    amount = await adapter.get_futures_max_open_amount("BTC/USDT")
+
+    assert amount == Decimal("10")
+
+
+async def test_get_futures_account_bills_returns_raw_rows():
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == "/api/v2/mix/account/bill"
+        return _json_response(
+            {
+                "code": "00000",
+                "msg": "success",
+                "requestTime": 1,
+                "data": [{"billId": "b-1", "amount": "10"}],
+            }
+        )
+
+    adapter = _make_adapter(handler)
+    bills = await adapter.get_futures_account_bills()
+
+    assert bills == [{"billId": "b-1", "amount": "10"}]
+
+
+async def test_get_futures_position_history_returns_raw_rows():
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == "/api/v2/mix/position/history-position"
+        return _json_response(
+            {
+                "code": "00000",
+                "msg": "success",
+                "requestTime": 1,
+                "data": [{"symbol": "BTCUSDT", "netProfit": "12.5"}],
+            }
+        )
+
+    adapter = _make_adapter(handler)
+    history = await adapter.get_futures_position_history(symbol="BTC/USDT")
+
+    assert history == [{"symbol": "BTCUSDT", "netProfit": "12.5"}]
+
+
+async def test_cancel_all_futures_orders_returns_true_on_success():
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == "/api/v2/mix/order/cancel-all-orders"
+        return _json_response({"code": "00000", "msg": "success", "requestTime": 1, "data": {}})
+
+    adapter = _make_adapter(handler)
+    assert await adapter.cancel_all_futures_orders(symbol="BTC/USDT") is True
+
+
+async def test_place_futures_tpsl_order_sends_trigger_price():
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == "/api/v2/mix/order/place-tpsl-order"
+        body = json.loads(request.content)
+        assert body["triggerPrice"] == "85000"
+        assert body["planType"] == "profit_plan"
+        return _json_response(
+            {
+                "code": "00000",
+                "msg": "success",
+                "requestTime": 1,
+                "data": {"orderId": "tp-1"},
+            }
+        )
+
+    adapter = _make_adapter(handler)
+    result = await adapter.place_futures_tpsl_order("BTC/USDT", "profit_plan", Decimal("85000"))
+
+    assert result == {"orderId": "tp-1"}
+
+
+async def test_place_futures_position_tpsl_requires_at_least_one_trigger():
+    adapter = _make_adapter(lambda request: _json_response({"code": "00000", "data": {}}))
+    with pytest.raises(ValueError):
+        await adapter.place_futures_position_tpsl("BTC/USDT")
+
+
+async def test_place_futures_position_tpsl_sends_both_triggers():
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == "/api/v2/mix/order/place-pos-tpsl"
+        body = json.loads(request.content)
+        assert body["stopSurplusTriggerPrice"] == "90000"
+        assert body["stopLossTriggerPrice"] == "70000"
+        return _json_response(
+            {"code": "00000", "msg": "success", "requestTime": 1, "data": {"orderId": "pos-tp-1"}}
+        )
+
+    adapter = _make_adapter(handler)
+    result = await adapter.place_futures_position_tpsl(
+        "BTC/USDT", take_profit_trigger=Decimal("90000"), stop_loss_trigger=Decimal("70000")
+    )
+
+    assert result == {"orderId": "pos-tp-1"}
+
+
+async def test_place_futures_plan_order_sends_trigger_price():
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == "/api/v2/mix/order/place-plan-order"
+        body = json.loads(request.content)
+        assert body["triggerPrice"] == "75000"
+        return _json_response(
+            {"code": "00000", "msg": "success", "requestTime": 1, "data": {"orderId": "plan-1"}}
+        )
+
+    adapter = _make_adapter(handler)
+    result = await adapter.place_futures_plan_order(_order(), Decimal("75000"))
+
+    assert result == {"orderId": "plan-1"}
+
+
+async def test_cancel_futures_plan_order_returns_true_on_success():
+    adapter = _make_adapter(
+        lambda request: _json_response(
+            {"code": "00000", "msg": "success", "requestTime": 1, "data": {}}
+        )
+    )
+    assert await adapter.cancel_futures_plan_order("plan-1", symbol="BTC/USDT") is True
+
+
+async def test_get_futures_current_plan_orders():
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == "/api/v2/mix/order/orders-plan-pending"
+        return _json_response(
+            {
+                "code": "00000",
+                "msg": "success",
+                "requestTime": 1,
+                "data": {"entrustedList": [{"orderId": "plan-1", "triggerPrice": "75000"}]},
+            }
+        )
+
+    adapter = _make_adapter(handler)
+    orders = await adapter.get_futures_current_plan_orders(symbol="BTC/USDT")
+
+    assert orders == [{"orderId": "plan-1", "triggerPrice": "75000"}]
+
+
+async def test_get_futures_current_plan_orders_handles_null_entrusted_list():
+    def handler(request: httpx.Request) -> httpx.Response:
+        return _json_response(
+            {"code": "00000", "msg": "success", "requestTime": 1, "data": {"entrustedList": None}}
+        )
+
+    adapter = _make_adapter(handler)
+    assert await adapter.get_futures_current_plan_orders() == []
