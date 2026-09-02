@@ -17,6 +17,10 @@ from src.foundation.paper_control.adapters.postgres_repository import (
     PostgresPaperControlRepository,
 )
 from src.foundation.paper_control.ports.repository import PaperControlRepository
+from src.foundation.reconciliation.adapters.postgres_repository import (
+    PostgresReconciliationRepository,
+)
+from src.foundation.reconciliation.ports.repository import ReconciliationRepository
 from src.foundation.risk_gate.adapters.postgres_repository import PostgresRiskGateRepository
 from src.foundation.risk_gate.ports.repository import RiskGateRepository
 from src.foundation.trust.adapters.postgres_repository import PostgresTrustRepository
@@ -59,6 +63,12 @@ def get_paper_control_repository(
     pool: asyncpg.Pool = Depends(get_pool),
 ) -> PaperControlRepository:
     return PostgresPaperControlRepository(pool)
+
+
+def get_reconciliation_repository(
+    pool: asyncpg.Pool = Depends(get_pool),
+) -> ReconciliationRepository:
+    return PostgresReconciliationRepository(pool)
 
 
 # 74번 §7 rollout gate 1단계 — 실 provider는 71번 §6 "provider/legal review 후
