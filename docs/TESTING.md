@@ -54,4 +54,12 @@ export TEST_DATABASE_URL=postgresql+asyncpg://user:password@localhost:5432/aios_
 
 - 편집 전 파일 경로를 PM 세션에 공지하고, 다른 세션이 공지한 파일은 건드리지 않는다.
 - `git add <자기 파일>`만. `git add -A`·stash·rebase 금지.
+- **커밋은 반드시 `git commit -F - -- <자기 경로들>` 형태로 경로를 명시한다.** 작업트리뿐
+  아니라 **인덱스(staging)도 공유**되므로, 다른 세션이 `git add`만 해둔 파일이 있으면
+  경로 없는 `git commit`은 그 파일까지 함께 커밋한다(실제 사고: `a77e9e4`에 다른
+  세션이 스테이징해 둔 paper_control 파일 10개가 함께 실림). 커밋 전
+  `git diff --cached --stat`으로 인덱스 상태를 본다.
+- 같은 파일에 다른 세션의 미커밋 hunk가 섞여 있으면 그 세션에 먼저 커밋을 요청한다.
+  (실제 사고: `c017525`가 다른 세션의 미커밋 훅을 함께 커밋해 그 훅이 import하는
+  파일이 없는 상태가 origin에 올라갔고 `2d6c71a`로 보충됐다.)
 - 커밋마다 즉시 push. 마이그레이션을 만들면 리비전 id를 공지하고 체인을 직렬화한다.

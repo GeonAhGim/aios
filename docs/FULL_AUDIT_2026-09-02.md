@@ -102,16 +102,16 @@ mypy strict 통과의 실질: `type: ignore` 178건 중 160건이 거래소 믹�
 | Circuit Breaker `check_reactivation` 호출자 0 (§3) | **수정됨** (`2e943c9`) | `main.py` 10초 주기 루프. `evaluate(metrics)`는 지표 수집(positions·어댑터 계측) 이후 |
 | `configure_logging` 미호출 (§3) | **수정됨** (`2e943c9`) | lifespan 첫 줄. trace_id·tenant_id 필드 관통은 §11 8단계로 남음 |
 | risk_guard 루프 try/except 없음 (P1, 레드팀 #25) | **수정됨** (`2e943c9`) | — |
-| 손실한도 자동정지 미발동 (positions 미기록) | 미착수 (9f 배정) | 체결→positions upsert. 스케줄러가 돌기 시작했으므로 이제 실제로 발동 가능한 경로가 됨 |
-| 리스크 기준 인메모리 | 미착수 (9f 배정) | §11 6단계 |
+| 손실한도 자동정지 미발동 (positions 미기록) | **수정됨** (`c017525`+`2d6c71a`, 9f 세션) | `order_service/position_ledger.py` — 체결(동기 FILLED·폴링 apply_fill 양쪽)에서 positions open/close 기록. RiskGuard·watchdog·portfolio·report의 PnL 입력이 채워짐 |
+| 리스크 기준 인메모리 | 진행 중 (9f) | `equity_tracker` DB 영속화 — 마이그레이션은 44 리비전 뒤 |
 | 거버넌스 불일치 (§4: `.aios-zone` 실제 경로·ADR-E 부재·CODEOWNERS 미치환·CI zone 검증 없음) | **수정됨** (`a784493`) | FROZEN_PAPER_ONLY zone 신설, `src/core/**` 등 미선언 모듈 등록, `scripts/check_zone_manifest.py` CI 게이트, ADR-E를 `docs/`에, CODEOWNERS @GeonAhGim |
 | 커버리지 미측정 (§9) | **측정 시작** (`a784493`) | CI `pytest --cov=src` + coverage.xml 아티팩트. 임계치는 첫 측정치 확인 후 |
 | 31초 실시간 sleep ×3 (§9) | **수정됨** (`a784493`) | `tests/integration/mfa_clock.py` DI 시계 주입. 라우터 테스트 93초 단축 |
 | 레드팀 장부 구멍 (§9: CON-004 누락, 신규 4건 미등재, #25) | **수정됨** (`a784493`) | `RED_TEAM_FINDINGS.md` #35~#40 등재, #25 FIXED. #05/#17 barrier·#21 회귀 테스트는 미착수 |
-| **신규** 취소·거부·만료 후 FSM이 PENDING에 고착 | 미착수 (9f 배정, 레드팀 #39) | `cancel.py`·`tick._handle_pending_fill_check`·`recovery_wiring` 어디에도 BUY/SELL_ORDER_PENDING→이전 상태 복귀 로직 없음. 최종 상태가 FILLED가 아니면 실행이 영원히 새 신호를 평가하지 않는다 |
+| **신규** 취소·거부·만료 후 FSM이 PENDING에 고착 (레드팀 #39) | **수정됨** (`53d56d2`, 9f 세션) — `tick._handle_pending_fill_check`가 REJECTED/CANCELLED/EXPIRED/FAILED면 FSM 정의의 역전이로 이전 상태에 조건부 복귀 | `cancel.py`·`tick._handle_pending_fill_check`·`recovery_wiring` 어디에도 BUY/SELL_ORDER_PENDING→이전 상태 복귀 로직 없음. 최종 상태가 FILLED가 아니면 실행이 영원히 새 신호를 평가하지 않는다 |
 | Kill switch 직후 stale ALLOW — risk_gate | **수정됨** (`8a0734c`, 다른 세션) | `activate/deactivate_safety_control`이 `invalidate_evaluations`를 호출. PROVIDER 범위 조회 누락, scope_ref 없는 고아 통제도 같이 수정. 레드팀 #26~34 |
 | Kill switch 직후 stale ALLOW — mandates | **수정됨** (`0598fda`, 다른 세션) | `_fingerprint`에 `revision_id`·`revision_state` 포함, pause/resume/activate 라우터에서 risk_gate 캐시도 무효화. 테스트 2개 |
-| Kill switch가 RUNNING 배포·intent 제출을 못 멈춤 | 미착수 (paper_control 세션 배정) | `submit_paper_intent` safety control 조회 + fence 소비 경로 |
+| Kill switch가 RUNNING 배포·intent 제출을 못 멈춤 | **수정됨** (`a77e9e4`, c2 세션 — PM 커밋에 함께 실림) | `paper_control/application/apply_safety_control.py`: kill switch 활성화 시 GLOBAL/TENANT/ACCOUNT 범위의 RUNNING 배포를 실제 PAUSED로 전이(fence 소비). `submit_paper_intent`도 safety control 조회. 같은 커밋에 PAP-006 멱등키 digest(중복 REQUEST 차단·불일치 409)·라우터 `ConcurrencyConflictError`→409 매핑 4곳·start/resume 500→409 버그 수정 |
 | Bitget 확장 믹스인의 Executor 가드 우회 자금이동 (§4·§7, 레드팀 #32) | **수정됨** (`8a0734c`, 다른 세션) | `src/exchanges/common/live_guard.py`의 `@require_paper_sandbox`를 convert/grid/strategy/margin/futures/loan/subaccount에 적용. WS 재연결 시 로그인 서명 재사용(#31)도 수정 |
 | P1 4건 | 미착수 | — |
 
@@ -132,7 +132,7 @@ mypy strict 통과의 실질: `type: ignore` 178건 중 160건이 거래소 믹�
 
 **공통 규칙**
 1. 파일을 편집하기 전에 PM(agent-platform-12)에게 한 줄로 파일 경로를 공지한다. 다른 세션이 공지한 파일은 건드리지 않는다. `src/main.py`는 PM이 직렬화한다(편집 전 PM 승인).
-2. `git add <자기 파일>`만. `git add -A`·stash·rebase 금지(같은 작업트리를 공유한다).
+2. `git add <자기 파일>`만. `git add -A`·stash·rebase 금지(같은 작업트리를 공유한다). **커밋은 `git commit -F - -- <자기 경로들>`로 경로를 명시** — 인덱스도 공유되므로 경로 없는 commit은 다른 세션이 스테이징해 둔 파일까지 실어 보낸다(`a77e9e4` 사고). 같은 파일에 다른 세션의 hunk가 섞여 있으면 그 세션에 먼저 커밋을 요청한다(`c017525`/`2d6c71a` 사고). 상세: `docs/TESTING.md`.
 3. 커밋마다 즉시 `git push origin main`. 완료 보고는 커밋 해시 한 줄.
 4. 마이그레이션을 추가하거나 pull했으면 `alembic upgrade head`를 공유 DB에 적용하고 PM에게 알린다.
 5. PM에게 보내는 회신은 한 줄. 상세는 커밋 메시지와 `RED_TEAM_FINDINGS.md`에 쓴다.
