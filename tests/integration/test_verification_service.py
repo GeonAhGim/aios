@@ -140,14 +140,39 @@ async def test_cannot_decide_on_draft_listing(service, pool):
         await service.decide(draft_listing.id, verifier, "APPROVE")
 
 
-async def test_concurrent_decisions_only_one_succeeds(service, pool):
+async def test_concurrent_decisions_only_one_succeeds(service, pool, monkeypatch):
     """docs/RED_TEAM_FINDINGS.md #05 회귀 — "읽고 나서 별도로 쓰기"였을 때는
     서로 다른 두 검증담당자가 같은 리스팅을 거의 동시에 하나는 승인, 하나는
-    반려하면 나중에 커밋되는 쪽이 조용히 덮어썼다."""
+    반려하면 나중에 커밋되는 쪽이 조용히 덮어썼다.
+
+    asyncio.gather만으로는 두 decide() 호출의 사전조회(pre_check)가 실제로
+    동시에 겹친다는 보장이 없다 — 커넥션 풀 라운드트립이 우연히 어긋나면
+    첫 호출이 UPDATE까지 완전히 끝난 뒤 두 번째가 시작돼(정상적인 순차
+    처리) 원래 보고된 레이스가 재현되지 않을 수 있다. #04(test_approval_
+    service.py)와 같은 원칙 — barrier로 두 호출의 사전조회가 반드시 같은
+    시점에 끝나도록 강제해 "둘 다 PENDING_VERIFICATION을 봤다"는 레이스
+    조건을 결정적으로 재현한다."""
     seller = await create_test_user(pool)
     listing = await _pending_listing(pool, seller)
     verifier_a = await create_test_user(pool)
     verifier_b = await create_test_user(pool)
+
+    arrived = 0
+    released = asyncio.Event()
+    original_fetchrow = asyncpg.pool.PoolConnectionProxy.fetchrow
+
+    async def _synced_fetchrow(self, query, *args, **kwargs):
+        nonlocal arrived
+        result = await original_fetchrow(self, query, *args, **kwargs)
+        if "SELECT status, seller_user_id FROM strategy_listings" in query:
+            arrived += 1
+            if arrived >= 2:
+                released.set()
+            else:
+                await released.wait()
+        return result
+
+    monkeypatch.setattr(asyncpg.pool.PoolConnectionProxy, "fetchrow", _synced_fetchrow)
 
     results = await asyncio.gather(
         service.decide(listing.id, verifier_a, "APPROVE"),

@@ -9,22 +9,27 @@ Spec: 05_communication_architecture_v1.2.md#§5.4("이 결정은 8.2-D 지연
 "종단간"의 실제 의미는 InProcessEventBus.publish() 호출 시점부터 구독
 handler가 payload를 실제로 처리하기 시작하는 시점까지다(다른 프로세스로
 넘어가는 홉이 아예 없음). §6.3 DoD의 완료조건은 "목표 미달이어도 측정
-자체"이므로, 이 테스트는 pytest-benchmark로 실제 측정하고 그 결과를
-있는 그대로 docs/benchmarks/event_bus_latency.md에 기록한다.
+자체"이므로 목표 미달 자체가 테스트 실패는 아니지만, 실측(p95 0.1ms
+안팎)이 목표(50ms) 대비 500배 가까운 여유가 있어 — p95가 그 여유를
+다 까먹을 정도로 나빠지면 그건 그 자체로 회귀이므로 하한 단언을
+추가한다(2026-09-02 재점검).
+
+docs/benchmarks/event_bus_latency.md는 더 이상 테스트 실행마다 덮어쓰지
+않는다 — tracked 파일이 매 실행 dirty가 되는 문제가 있었다. 그 문서는
+최초 측정치를 기록해둔 정적 스냅샷으로 고정하고, 실행 시 최신 수치는
+stdout(-s 옵션 시 표시)으로만 확인한다.
 """
 from __future__ import annotations
 
 import asyncio
 import statistics
 import time
-from pathlib import Path
 
 from src.core.event_bus.in_process import InProcessEventBus
 from src.core.event_bus.policy import HandlerCriticality
 
 TARGET_LATENCY_MS = 50.0  # 정책문서 8.2-D 목표치(Draft)
 SAMPLE_COUNT = 200
-REPORT_PATH = Path(__file__).resolve().parents[2] / "docs" / "benchmarks" / "event_bus_latency.md"
 
 
 def _measure_round_trip_latencies_ms(
@@ -82,24 +87,12 @@ def test_event_bus_end_to_end_latency_benchmark():
     p95_ms = all_samples_ms[int(len(all_samples_ms) * 0.95)]
     max_ms = all_samples_ms[-1]
 
-    REPORT_PATH.parent.mkdir(parents=True, exist_ok=True)
-    REPORT_PATH.write_text(
-        "# 8.2-D 종단간 지연 벤치마크\n\n"
-        "정책문서 8.2-D · 06_mvp_scope_v1.3.md#SS6.3 Definition of Done\n\n"
-        "측정 대상: InProcessEventBus.publish() -> 구독 handler 처리 시작까지"
-        "(Phase 1 단일 프로세스 구조라 이게 곧 '종단간').\n\n"
-        f"- 샘플 수: {SAMPLE_COUNT}\n"
-        f"- 평균: {mean_ms:.3f} ms\n"
-        f"- p50: {p50_ms:.3f} ms\n"
-        f"- p95: {p95_ms:.3f} ms\n"
-        f"- 최대: {max_ms:.3f} ms\n"
-        f"- 목표(Draft): {TARGET_LATENCY_MS} ms\n"
-        f"- 목표 충족 여부(p95 기준): {'예' if p95_ms < TARGET_LATENCY_MS else '아니오'}\n\n"
-        "측정 자체가 Phase 1 SCAFFOLD 완료조건이며, 목표 미달이어도 조건은 "
-        "충족한다(FROZEN 착수 조건인 20.1-A A그룹 통과와는 별개).\n",
-        encoding="utf-8",
-    )
-
     print(f"\nEvent Bus latency: mean={mean_ms:.3f}ms p50={p50_ms:.3f}ms p95={p95_ms:.3f}ms")
 
     assert len(all_samples_ms) == SAMPLE_COUNT
+    # DoD 자체는 "측정만 하면 충족"이라 목표 미달을 실패로 취급하지 않지만,
+    # 지금 여유(500배 안팎)를 다 까먹는 수준의 회귀는 잡아야 한다.
+    assert p95_ms < TARGET_LATENCY_MS, (
+        f"p95 지연({p95_ms:.3f}ms)이 목표({TARGET_LATENCY_MS}ms)를 초과 — "
+        "이 정도면 여유(500배 안팎)를 다 까먹은 실질적 회귀다."
+    )

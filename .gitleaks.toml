@@ -1,0 +1,17 @@
+title = "AIOS gitleaks config"
+
+# CI 시크릿 스캔(quality.yml "Secret scan") 설정. 기본 규칙셋은 그대로
+# 쓰고, 로컬로 미리 스캔해 확인한 알려진 오탐만 허용목록에 올린다
+# (2026-09-02 확인 — docs/RED_TEAM_FINDINGS.md #10 이후 도입).
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = "알려진 오탐 — 실제 자격증명이 아닌 테스트 픽스처"
+paths = [
+  # AES 라운드트립 자체의 정확성만 검증하는 테스트라 key/iv가 알파벳
+  # 나열 placeholder다("abcdefghijklmnop1234567890ABCDEF") — 실제
+  # KIS 서버와 통신하지 않는다(파일 docstring 참조).
+  '''tests/unit/exchanges/test_kis_ws_messages\.py''',
+]

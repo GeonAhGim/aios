@@ -133,13 +133,17 @@ async def test_transition_to_next_stage_succeeds(service, pool):
     assert result.lifecycle_status == "BACKTESTING"
 
 
-async def test_concurrent_transitions_only_one_succeeds(service, pool):
+async def test_concurrent_transitions_only_one_succeeds(service, pool, monkeypatch):
     """레드팀 감사 #17 — transition_lifecycle()이 방금 읽은 lifecycle_status를
     UPDATE 조건으로 다시 걸지 않으면, 거의 동시에 들어온 두 전이 요청이
     서로의 아직 커밋 안 된 변경을 못 본 채 둘 다 통과해버릴 수 있다
     (04/05/08/09/16번과 같은 "읽고 나서 별도로 조건 없이 쓰기" 근본원인).
     같은 GENERATED 상태에서 동시에 BACKTESTING 전이를 두 번 시도하면
-    정확히 하나만 성공해야 한다."""
+    정확히 하나만 성공해야 한다.
+
+    asyncio.gather만으로는 두 transition_lifecycle() 호출의 사전조회가
+    실제로 동시에 겹친다는 보장이 없다 — #04/#05와 같은 원칙으로 barrier를
+    걸어 원래 레이스 조건을 결정적으로 재현한다."""
     owner = await create_test_user(pool)
     strategy_id = f"test-strategy-{uuid4().hex[:8]}"
     await service.save_strategy(
@@ -151,6 +155,23 @@ async def test_concurrent_transitions_only_one_succeeds(service, pool):
         exchange="bitget",
         fsm_definition={},
     )
+
+    arrived = 0
+    released = asyncio.Event()
+    original_fetchrow = asyncpg.pool.PoolConnectionProxy.fetchrow
+
+    async def _synced_fetchrow(self, query, *args, **kwargs):
+        nonlocal arrived
+        result = await original_fetchrow(self, query, *args, **kwargs)
+        if "SELECT s.lifecycle_status" in query:
+            arrived += 1
+            if arrived >= 2:
+                released.set()
+            else:
+                await released.wait()
+        return result
+
+    monkeypatch.setattr(asyncpg.pool.PoolConnectionProxy, "fetchrow", _synced_fetchrow)
 
     results = await asyncio.gather(
         service.transition_lifecycle(strategy_id, "1.0.0", "BACKTESTING"),

@@ -235,6 +235,55 @@ async def test_evaluate_all_active_skips_non_matching_alert(pool):
     assert updated.status == "ACTIVE"
 
 
+async def test_evaluate_all_active_survives_bad_indicator_and_still_evaluates_others(pool):
+    """docs/RED_TEAM_FINDINGS.md #21 회귀 — 미검증 indicator/params가
+    calculate()에서 예외를 던지면 원래는 evaluate_all_active() 루프
+    전체가 죽어(그 루프를 감싼 백그라운드 태스크까지) 재시작 전까지
+    어떤 사용자의 알림도 다시는 평가되지 않았다. 존재하지 않는 지표명
+    알림 하나가 있어도 (1) evaluate_all_active() 자체가 예외 없이
+    끝나고, (2) 그 뒤로도 서비스가 여전히 정상 작동해 다른 정상 알림을
+    평가할 수 있어야 한다."""
+    user = await create_test_user(pool)
+    service = AlertService(
+        pool, credential_resolver=_FakeResolver(_make_candles(_FALLING_CLOSES))
+    )
+    bad_alert = await service.create_alert(
+        user,
+        exchange="bitget",
+        symbol="BTC/USDT",
+        timeframe="1h",
+        indicator="NOT_A_REAL_INDICATOR",
+        params={},
+        operator="<",
+        threshold=50.0,
+    )
+
+    # 예외 없이 끝나야 한다 — 원래는 여기서 IndicatorError/TypeError가
+    # evaluate_all_active() 밖으로 그대로 튀어나갔다.
+    triggered = await service.evaluate_all_active()
+    assert all(a.id != bad_alert.id for a in triggered)
+
+    remaining = await service.list_my_alerts(user)
+    still_active = next(a for a in remaining if a.id == bad_alert.id)
+    assert still_active.status == "ACTIVE"  # 건너뛴 것이지 잘못 처리된 게 아님
+
+    # 루프가 죽지 않았으니, 같은 서비스로 그 뒤에 만든 정상 알림도 여전히
+    # 평가돼야 한다.
+    good_alert = await service.create_alert(
+        user,
+        exchange="bitget",
+        symbol="BTC/USDT",
+        timeframe="1h",
+        indicator="RSI",
+        params={"timeperiod": 14},
+        operator="<",
+        threshold=50.0,
+    )
+
+    triggered_again = await service.evaluate_all_active()
+    assert any(a.id == good_alert.id for a in triggered_again)
+
+
 async def test_evaluate_all_active_skips_alert_without_credentials(pool):
     user = await create_test_user(pool)
     service = AlertService(pool, credential_resolver=_FakeResolver(None))

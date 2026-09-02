@@ -198,13 +198,33 @@ async def test_resolve_rejects_already_resolved_dispute(service, pool):
         await service.resolve(dispute.id, admin, "NORMAL_RISK_REALIZATION", "재처리 시도")
 
 
-async def test_concurrent_resolutions_only_one_succeeds(service, pool):
+async def test_concurrent_resolutions_only_one_succeeds(service, pool, monkeypatch):
     """docs/RED_TEAM_FINDINGS.md #05 회귀 — conn.transaction()이 있어도
     READ COMMITTED에서는 두 관리자가 같은 분쟁을 거의 동시에 서로 다른
-    결정으로 처리하면 하나가 조용히 덮어써졌다."""
+    결정으로 처리하면 하나가 조용히 덮어써졌다.
+
+    asyncio.gather만으로는 두 resolve() 호출의 get_detail() 조회가 실제로
+    동시에 겹친다는 보장이 없다 — #04/#05(test_verification_service.py)와
+    같은 원칙으로 barrier를 걸어 원래 레이스 조건을 결정적으로 재현한다."""
     dispute, _, _, _ = await _open_dispute(pool)
     admin_a = await create_test_user(pool)
     admin_b = await create_test_user(pool)
+
+    arrived = 0
+    released = asyncio.Event()
+    original_get_detail = type(service).get_detail
+
+    async def _synced_get_detail(self, dispute_id):
+        nonlocal arrived
+        result = await original_get_detail(self, dispute_id)
+        arrived += 1
+        if arrived >= 2:
+            released.set()
+        else:
+            await released.wait()
+        return result
+
+    monkeypatch.setattr(type(service), "get_detail", _synced_get_detail)
 
     results = await asyncio.gather(
         service.resolve(dispute.id, admin_a, "NORMAL_RISK_REALIZATION", "정상 리스크"),
