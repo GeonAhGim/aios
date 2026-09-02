@@ -55,7 +55,20 @@ class _FullOutboxRepo:
     async def claim_batch(self, conn, **kwargs): ...
     async def mark_done(self, conn, id, **kwargs): ...
     async def mark_retry(self, conn, id, **kwargs): ...
-    async def mark_dead(self, conn, id, reason): ...
+    async def mark_dead(self, conn, id, **kwargs): ...
+
+
+class _StrictOutboxRepo:
+    """`OutboxRepoPort`의 mark_* 시그니처를 그대로 구현 — expected_worker가
+    누락되면 실제 어댑터가 만들어지기 전에도 TypeError로 fail-closed됨을 증명."""
+
+    async def enqueue(self, conn, **kwargs): ...
+    async def claim_batch(self, conn, **kwargs): ...
+    async def mark_done(self, conn, id, *, expected_worker): ...
+    async def mark_retry(
+        self, conn, id, *, attempt, not_before, last_error, expected_worker
+    ): ...
+    async def mark_dead(self, conn, id, *, reason, expected_worker): ...
 
 
 class _FullInboxRepo:
@@ -104,6 +117,17 @@ def test_outbox_row_rejects_unknown_command_type() -> None:
 def test_claim_result_new_has_no_order_id() -> None:
     result = ClaimResult(kind="NEW")
     assert result.order_id is None
+
+
+def test_mark_retry_and_mark_dead_require_expected_worker() -> None:
+    """366행 규칙표: done/retry/dead 모두 `worker_id=$2` 펜싱 — expected_worker
+    없이 호출하면(늦은 워커의 조건 없는 쓰기 시도에 대응) TypeError로 막혀야 한다."""
+    repo = _StrictOutboxRepo()
+    now = datetime.now(timezone.utc)
+    with pytest.raises(TypeError):
+        repo.mark_retry(None, uuid4(), attempt=1, not_before=now, last_error="x")
+    with pytest.raises(TypeError):
+        repo.mark_dead(None, uuid4(), reason="x")
 
 
 def test_claim_result_ttl_type_is_timedelta() -> None:

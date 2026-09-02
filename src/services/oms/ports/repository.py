@@ -116,9 +116,17 @@ class OutboxRepoPort(Protocol):
         attempt: int,
         not_before: datetime,
         last_error: str,
+        expected_worker: str,
     ) -> None: ...
 
-    async def mark_dead(self, conn: asyncpg.Connection, id: UUID, reason: str) -> None: ...
+    async def mark_dead(
+        self,
+        conn: asyncpg.Connection,
+        id: UUID,
+        *,
+        reason: str,
+        expected_worker: str,
+    ) -> None: ...
 
 
 @runtime_checkable
