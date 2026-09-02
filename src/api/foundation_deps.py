@@ -5,6 +5,8 @@ import asyncpg
 from fastapi import Depends
 
 from src.api.deps import get_current_user, get_pool
+from src.foundation.mandates.adapters.postgres_repository import PostgresMandateRepository
+from src.foundation.mandates.ports.repository import MandateRepository
 from src.foundation.trust.adapters.postgres_repository import PostgresTrustRepository
 from src.foundation.trust.contracts.v1 import TenantContext
 from src.foundation.trust.ports.repository import TrustRepository
@@ -13,6 +15,10 @@ from src.services.auth_service import User
 
 def get_trust_repository(pool: asyncpg.Pool = Depends(get_pool)) -> TrustRepository:
     return PostgresTrustRepository(pool)
+
+
+def get_mandate_repository(pool: asyncpg.Pool = Depends(get_pool)) -> MandateRepository:
+    return PostgresMandateRepository(pool)
 
 
 def get_tenant_context(user: User = Depends(get_current_user)) -> TenantContext:

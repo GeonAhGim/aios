@@ -1,0 +1,208 @@
+"""FND-02 통합테스트 — /v1/foundation/mandates 라우터. 실제 FastAPI 앱 + 실제 dev DB."""
+import time
+import uuid
+from pathlib import Path
+
+import asyncpg
+import pytest
+from dotenv import dotenv_values
+from httpx import ASGITransport, AsyncClient
+
+from src.main import app
+
+STRONG_PASSWORD = "Str0ng!Passw0rd"
+
+DEFAULT_RULES = {
+    "max_total_exposure_pct": 80.0,
+    "max_single_instrument_pct": 20.0,
+    "min_cash_buffer_pct": 5.0,
+    "max_daily_loss_pct": 3.0,
+    "allowed_autonomy": "PAPER",
+    "forbidden_assets": ["XYZ"],
+}
+
+
+def _asyncpg_dsn() -> str:
+    env = dotenv_values(Path(__file__).resolve().parents[2] / ".env")
+    url = env.get("DATABASE_URL")
+    assert url
+    return url.replace("postgresql+asyncpg://", "postgresql://")
+
+
+@pytest.fixture
+async def pool():
+    p = await asyncpg.create_pool(_asyncpg_dsn(), min_size=1, max_size=2)
+    yield p
+    await p.close()
+
+
+@pytest.fixture
+async def client():
+    async with app.router.lifespan_context(app):
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://test") as ac:
+            yield ac
+
+
+def _unique_email() -> str:
+    return f"test-{uuid.uuid4().hex}@example.com"
+
+
+async def _register(client) -> dict:
+    email = _unique_email()
+    response = await client.post(
+        "/auth/register", json={"email": email, "password": STRONG_PASSWORD}
+    )
+    token = response.json()["access_token"]
+    return {"Authorization": f"Bearer {token}"}
+
+
+async def test_mandate_status_requires_authentication(client):
+    response = await client.get("/v1/foundation/mandates/status")
+    assert response.status_code == 401
+
+
+async def test_mandate_status_starts_empty(client):
+    headers = await _register(client)
+    response = await client.get("/v1/foundation/mandates/status", headers=headers)
+    assert response.status_code == 200
+    assert response.json()["active_revision"] is None
+
+
+async def test_create_draft_then_activate_then_evaluate(client):
+    headers = await _register(client)
+
+    draft_response = await client.post(
+        "/v1/foundation/mandates/drafts", json=DEFAULT_RULES, headers=headers
+    )
+    assert draft_response.status_code == 201
+    draft = draft_response.json()
+    assert draft["state"] == "DRAFT"
+
+    activate_response = await client.post(
+        f"/v1/foundation/mandates/revisions/{draft['id']}:activate",
+        json={},
+        headers=headers,
+    )
+    assert activate_response.status_code == 200
+    assert activate_response.json()["state"] == "ACTIVE"
+
+    status_response = await client.get("/v1/foundation/mandates/status", headers=headers)
+    assert status_response.json()["active_revision"]["id"] == draft["id"]
+
+    evaluate_response = await client.post(
+        "/v1/foundation/mandates/policy:evaluate",
+        json={"command_type": "paper_deployment", "asset": "XYZ"},
+        headers=headers,
+    )
+    assert evaluate_response.status_code == 200
+    assert evaluate_response.json()["outcome"] == "DENY"
+    assert "POLICY_FORBIDDEN_ASSET" in evaluate_response.json()["reason_codes"]
+
+
+async def test_evaluate_policy_without_mandate_is_404(client):
+    headers = await _register(client)
+    response = await client.post(
+        "/v1/foundation/mandates/policy:evaluate",
+        json={"command_type": "x"},
+        headers=headers,
+    )
+    assert response.status_code == 404
+
+
+async def test_material_amendment_via_api_requires_password_reauth(client):
+    headers = await _register(client)
+    draft = (
+        await client.post("/v1/foundation/mandates/drafts", json=DEFAULT_RULES, headers=headers)
+    ).json()
+    await client.post(
+        f"/v1/foundation/mandates/revisions/{draft['id']}:activate", json={}, headers=headers
+    )
+
+    amended = (
+        await client.post(
+            "/v1/foundation/mandates/amendments",
+            json={**DEFAULT_RULES, "max_total_exposure_pct": 95.0},
+            headers=headers,
+        )
+    ).json()
+    assert amended["cooling_off_started_at"] is not None
+
+    no_reauth_response = await client.post(
+        f"/v1/foundation/mandates/revisions/{amended['id']}:activate",
+        json={},
+        headers=headers,
+    )
+    assert no_reauth_response.status_code == 403
+
+    wrong_password_response = await client.post(
+        f"/v1/foundation/mandates/revisions/{amended['id']}:activate",
+        json={"password": "WrongPassword1!"},
+        headers=headers,
+    )
+    assert wrong_password_response.status_code == 403
+
+
+async def test_material_amendment_full_gate_flow_via_api(client, pool):
+    headers = await _register(client)
+    draft = (
+        await client.post("/v1/foundation/mandates/drafts", json=DEFAULT_RULES, headers=headers)
+    ).json()
+    await client.post(
+        f"/v1/foundation/mandates/revisions/{draft['id']}:activate", json={}, headers=headers
+    )
+
+    amended = (
+        await client.post(
+            "/v1/foundation/mandates/amendments",
+            json={**DEFAULT_RULES, "max_total_exposure_pct": 95.0},
+            headers=headers,
+        )
+    ).json()
+
+    # 재인증은 통과하지만 아직 Trust Core 동의가 없어 403이어야 한다.
+    reauth_only_response = await client.post(
+        f"/v1/foundation/mandates/revisions/{amended['id']}:activate",
+        json={"password": STRONG_PASSWORD},
+        headers=headers,
+    )
+    assert reauth_only_response.status_code == 403
+
+    purpose_revision = int(time.time())  # disclosure.revision은 INT(int32) — ms 단위는 넘친다
+    async with pool.acquire() as conn:
+        await conn.execute(
+            "INSERT INTO disclosure (purpose, revision, content_hash) "
+            "VALUES ('portfolio_mandate_material_change', $1, 'hash')",
+            purpose_revision,
+        )
+    await client.post(
+        "/v1/foundation/trust/consents",
+        json={
+            "purpose": "portfolio_mandate_material_change",
+            "disclosure_revision": purpose_revision,
+        },
+        headers=headers,
+    )
+
+    # 동의는 했지만 cooling-off이 아직 안 지났다.
+    cooling_off_response = await client.post(
+        f"/v1/foundation/mandates/revisions/{amended['id']}:activate",
+        json={"password": STRONG_PASSWORD},
+        headers=headers,
+    )
+    assert cooling_off_response.status_code == 409
+
+    async with pool.acquire() as conn:
+        await conn.execute(
+            "UPDATE mandate_revision SET cooling_off_started_at = now() - interval '120 seconds' "
+            "WHERE id = $1",
+            amended["id"],
+        )
+
+    final_response = await client.post(
+        f"/v1/foundation/mandates/revisions/{amended['id']}:activate",
+        json={"password": STRONG_PASSWORD},
+        headers=headers,
+    )
+    assert final_response.status_code == 200
+    assert final_response.json()["state"] == "ACTIVE"

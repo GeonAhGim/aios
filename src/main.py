@@ -175,6 +175,7 @@ def create_app() -> FastAPI:
         users,
         wallet,
     )
+    from src.api.routers.foundation import mandates as foundation_mandates
     from src.api.routers.foundation import trust as foundation_trust
 
     app.include_router(auth.router, prefix="/auth", tags=["auth"])
@@ -188,6 +189,7 @@ def create_app() -> FastAPI:
     )
     app.include_router(suitability.router)
     app.include_router(foundation_trust.router)
+    app.include_router(foundation_mandates.router)
     app.include_router(executions.router, prefix="/executions", tags=["executions"])
     app.include_router(notifications.router, prefix="/notifications", tags=["notifications"])
     app.include_router(admin.router, tags=["admin"])

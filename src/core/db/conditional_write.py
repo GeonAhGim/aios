@@ -35,8 +35,15 @@ async def conditional_update(
     set_values: dict[str, Any],
     returning: str = "*",
 ) -> asyncpg.Record:
-    """`WHERE <id_column> = $1 AND <expected_state_column> = $2`로 조건부 UPDATE하고
-    RETURNING이 빈 결과면 ConcurrencyConflictError를 던진다.
+    """`WHERE <id_column> = $1 AND <expected_state_column> IS NOT DISTINCT FROM $2`로
+    조건부 UPDATE하고 RETURNING이 빈 결과면 ConcurrencyConflictError를 던진다.
+
+    `IS NOT DISTINCT FROM`을 쓰는 이유(`=` 대신) — FND-02 activate_revision()처럼
+    "아직 아무 값도 없음"(NULL)을 기대 상태로 거는 전이(최초 활성화 등)가 실제로
+    있다. 일반 `=`는 `NULL = NULL`이 NULL(거짓 취급)이라 이 경우 항상 매치
+    실패하므로, 호출자가 NULL을 다뤄야 할 때마다 이 헬퍼를 우회하게 된다 —
+    `IS NOT DISTINCT FROM`은 NULL과 non-NULL 양쪽에서 직관대로 동작해 그 우회를
+    막는다.
 
     `table`/`id_column`/`expected_state_column`/`returning`과 `set_values`의
     **키**(컬럼명)는 호출자 코드에 상수로 박혀 있어야 한다(사용자 입력을 그대로
@@ -47,7 +54,7 @@ async def conditional_update(
     set_clause = ", ".join(f"{col} = ${i + 3}" for i, col in enumerate(set_columns))
     sql = (
         f"UPDATE {table} SET {set_clause} "  # noqa: S608 — 컬럼명은 호출자 상수(위 docstring)
-        f"WHERE {id_column} = $1 AND {expected_state_column} = $2 "
+        f"WHERE {id_column} = $1 AND {expected_state_column} IS NOT DISTINCT FROM $2 "
         f"RETURNING {returning}"
     )
     params = [id_value, expected_state_value, *(set_values[col] for col in set_columns)]
