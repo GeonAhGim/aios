@@ -55,3 +55,10 @@ def _test_dotenv_values(dotenv_path: str | os.PathLike[str] | None = None, *args
 
 
 dotenv.dotenv_values = _test_dotenv_values
+
+# 전수감사 §3 배선(실행 루프·재시작 복구) — 통합테스트는 lifespan을 통째로 띄우므로
+# 공유 dev DB에 남은 RUNNING 실행·미결 주문을 실거래소로 tick/조회하지 않도록 끈다.
+# 스케줄러·복구 자체는 test_execution_scheduler.py / test_restart_recovery.py가
+# 직접 호출해 검증한다.
+os.environ.setdefault("AIOS_EXECUTION_LOOP_ENABLED", "0")
+os.environ.setdefault("AIOS_STARTUP_RECOVERY_ENABLED", "0")

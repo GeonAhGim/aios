@@ -15,6 +15,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
+import os
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from typing import Any
@@ -27,11 +28,15 @@ from src.core.event_bus.in_process import InProcessEventBus
 from src.core.loader.risk_policy_loader import load_risk_policy
 from src.core.loader.secret_loader import load_env_secrets
 from src.core.logging.audit_log import record_audit_log
+from src.core.logging.schema import configure_logging
 from src.core.notifications.gateway import NotificationGateway
+from src.core.safety.circuit_breaker import CircuitBreakerService
 from src.core.safety.heartbeat import DEFAULT_HEARTBEAT_PATH, write_heartbeat
 from src.services.alert_service import AlertService
 from src.services.credential_resolver import CredentialResolver
 from src.services.exchange_credential_service import ExchangeCredentialService
+from src.services.execution_loop.recovery_wiring import recover_orders_on_startup
+from src.services.execution_loop.scheduler import ExecutionLoopScheduler
 from src.services.execution_service import ExecutionService
 from src.services.risk_guard_service import RiskGuardService
 
@@ -40,6 +45,14 @@ logger = logging.getLogger(__name__)
 HEARTBEAT_INTERVAL_SECONDS = 2.0  # Draft — watchdog_process.py의 5초 폴링 주기보다 짧게
 ALERT_EVALUATION_INTERVAL_SECONDS = 60.0  # Draft — 가격/지표 알림 평가 주기
 RISK_GUARD_INTERVAL_SECONDS = 30.0  # Draft — 손실 한도 자동정지 평가 주기
+SAFETY_REACTIVATION_INTERVAL_SECONDS = 10.0  # Draft — Circuit Breaker 재가동 승인 반영 주기
+
+
+def _flag_enabled(name: str) -> bool:
+    """운영 기본값은 켜짐. 통합테스트(tests/conftest.py)는 lifespan을 통째로
+    띄우므로, 공유 dev DB에 남은 RUNNING 실행을 실제 거래소로 tick하거나
+    재시작 복구가 실거래소를 조회하지 않도록 "0"으로 끈다."""
+    return os.environ.get(name, "1") != "0"
 
 
 def _asyncpg_dsn(database_url: str) -> str:
@@ -48,7 +61,11 @@ def _asyncpg_dsn(database_url: str) -> str:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+    # 07번 §7.1 — JSON Lines 구조화 로깅. 스키마는 있었으나 호출자가 없어
+    # 운영에서 한 번도 활성화되지 않았다(전수감사 §3).
+    configure_logging(os.environ.get("LOG_LEVEL", "INFO"))
     secrets = load_env_secrets()
+    policy = load_risk_policy()
     pool = await asyncpg.create_pool(_asyncpg_dsn(secrets.database_url.get_secret_value()))
 
     async def _event_bus_audit_sink(record: dict[str, Any]) -> None:
@@ -124,33 +141,84 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # 루프와 동일 패턴(main.py가 유일한 백그라운드 스케줄러 지점).
     risk_guard_service = RiskGuardService(
         pool,
-        ExecutionService(pool, load_risk_policy(), publish=event_bus.publish),
+        ExecutionService(pool, policy, publish=event_bus.publish),
         publish=event_bus.publish,
     )
 
     async def _risk_guard_loop() -> None:
         while True:
             await asyncio.sleep(RISK_GUARD_INTERVAL_SECONDS)
-            await risk_guard_service.evaluate_all_running()
+            # 레드팀 #25 / 전수감사 §2 P1 — alert 루프와 같은 방어선. 이 호출이
+            # 예외를 내면 손실 한도 자동정지가 재시작 전까지 영구히 죽는다.
+            try:
+                await risk_guard_service.evaluate_all_running()
+            except Exception:
+                logger.exception(
+                    "risk_guard_loop: 이번 주기 평가 실패 — 다음 주기에 재시도합니다."
+                )
 
     risk_guard_task = asyncio.create_task(_risk_guard_loop())
+
+    # 05번 §5.6 — 재시작 복구. 백그라운드 루프를 띄우기 전에 1회. 거래소가
+    # 응답하지 않아도 앱 기동 자체는 막지 않는다(복구는 다음 틱이 이어받는다).
+    if _flag_enabled("AIOS_STARTUP_RECOVERY_ENABLED"):
+        try:
+            await recover_orders_on_startup(
+                pool, resolve_adapter=credential_resolver.get_adapter, publish=event_bus.publish
+            )
+        except Exception:
+            logger.exception("restart_recovery: 재시작 복구 실패 — 실행 루프 tick이 이어받습니다.")
+
+    # FD-8 실행 루프 — 전수감사 §3에서 확인된 최대 배선 결함. run_execution_tick은
+    # 완전했지만 호출자가 테스트뿐이었다. 주기는 risk_policy.yaml
+    # execution_loop.interval_sec(판단 계층 설정의 단일 출처)에서 읽는다.
+    execution_scheduler = ExecutionLoopScheduler(
+        pool,
+        resolve_adapter=credential_resolver.get_adapter,
+        policy=policy,
+        publish=event_bus.publish,
+    )
+    execution_loop_task: asyncio.Task[None] | None = None
+    if _flag_enabled("AIOS_EXECUTION_LOOP_ENABLED"):
+        execution_loop_task = asyncio.create_task(execution_scheduler.run_forever())
+    else:
+        logger.warning(
+            "execution_loop: AIOS_EXECUTION_LOOP_ENABLED=0 — 실행 루프를 띄우지 않습니다."
+        )
+
+    # FD-9.4b — Circuit Breaker 재가동 승인 반영. check_reactivation()도 호출자가
+    # 없어 승인이 나도 레벨이 영원히 내려오지 않았다. evaluate(metrics)는 지표
+    # 수집(API 오류율·데이터 지연·일손실)이 positions 기록·어댑터 계측에
+    # 의존하므로 그 leaf들이 끝난 뒤 같은 루프에 붙인다.
+    circuit_breaker = CircuitBreakerService(pool, policy.circuit_breaker, publish=event_bus.publish)
+
+    async def _safety_reactivation_loop() -> None:
+        while True:
+            await asyncio.sleep(SAFETY_REACTIVATION_INTERVAL_SECONDS)
+            try:
+                await circuit_breaker.check_reactivation()
+            except Exception:
+                logger.exception("safety_reactivation_loop: 이번 주기 실패 — 다음 주기에 재시도")
+
+    safety_task = asyncio.create_task(_safety_reactivation_loop())
+
+    background_tasks = [heartbeat_task, alert_task, risk_guard_task, safety_task]
+    if execution_loop_task is not None:
+        background_tasks.append(execution_loop_task)
 
     app.state.pool = pool
     app.state.secrets = secrets
     app.state.event_bus = event_bus
     app.state.credential_resolver = credential_resolver
+    app.state.execution_scheduler = execution_scheduler
     try:
         yield
     finally:
-        heartbeat_task.cancel()
-        alert_task.cancel()
-        risk_guard_task.cancel()
-        with contextlib.suppress(asyncio.CancelledError):
-            await heartbeat_task
-        with contextlib.suppress(asyncio.CancelledError):
-            await alert_task
-        with contextlib.suppress(asyncio.CancelledError):
-            await risk_guard_task
+        for task in background_tasks:
+            task.cancel()
+        for task in background_tasks:
+            with contextlib.suppress(asyncio.CancelledError):
+                await task
         await event_bus.stop()
         await pool.close()
 
