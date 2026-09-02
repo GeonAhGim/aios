@@ -1,0 +1,1166 @@
+{
+  "Lot": {
+    "description": "원가법 로트 하나(FIFO/WEIGHTED 공통 표현, LB-2/LB-3 소비).",
+    "properties": {
+      "opened_at": {
+        "format": "date-time",
+        "title": "Opened At",
+        "type": "string"
+      },
+      "quantity": {
+        "anyOf": [
+          {
+            "type": "number"
+          },
+          {
+            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+            "type": "string"
+          }
+        ],
+        "title": "Quantity"
+      },
+      "schema_version": {
+        "const": "v1",
+        "default": "v1",
+        "title": "Schema Version",
+        "type": "string"
+      },
+      "unit_cost": {
+        "anyOf": [
+          {
+            "type": "number"
+          },
+          {
+            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+            "type": "string"
+          }
+        ],
+        "title": "Unit Cost"
+      }
+    },
+    "required": [
+      "quantity",
+      "unit_cost",
+      "opened_at"
+    ],
+    "title": "Lot",
+    "type": "object"
+  },
+  "NAVSnapshot": {
+    "$defs": {
+      "Currency": {
+        "enum": [
+          "USDT",
+          "KRW"
+        ],
+        "title": "Currency",
+        "type": "string"
+      },
+      "FXRate": {
+        "description": "환율 스냅샷. 8.1-A 다중소스 교차검증과 동일한 원칙 적용 대상.",
+        "properties": {
+          "base": {
+            "$ref": "#/$defs/Currency"
+          },
+          "quote": {
+            "$ref": "#/$defs/Currency"
+          },
+          "rate": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                "type": "string"
+              }
+            ],
+            "title": "Rate"
+          },
+          "source": {
+            "title": "Source",
+            "type": "string"
+          },
+          "timestamp": {
+            "format": "date-time",
+            "title": "Timestamp",
+            "type": "string"
+          }
+        },
+        "required": [
+          "base",
+          "quote",
+          "rate",
+          "timestamp",
+          "source"
+        ],
+        "title": "FXRate",
+        "type": "object"
+      }
+    },
+    "description": "일별 NAV 체인 한 행(§4.3 \"전일 NAV + 손익 + 자금흐름 = 당일 NAV\",\nDB `CHECK(closing_nav = cash + positions_mv)`).",
+    "properties": {
+      "account_id": {
+        "format": "uuid",
+        "title": "Account Id",
+        "type": "string"
+      },
+      "base_currency": {
+        "$ref": "#/$defs/Currency"
+      },
+      "cash": {
+        "anyOf": [
+          {
+            "type": "number"
+          },
+          {
+            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+            "type": "string"
+          }
+        ],
+        "title": "Cash"
+      },
+      "closing_nav": {
+        "anyOf": [
+          {
+            "type": "number"
+          },
+          {
+            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+            "type": "string"
+          }
+        ],
+        "title": "Closing Nav"
+      },
+      "fees": {
+        "anyOf": [
+          {
+            "type": "number"
+          },
+          {
+            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+            "type": "string"
+          }
+        ],
+        "title": "Fees"
+      },
+      "flows": {
+        "anyOf": [
+          {
+            "type": "number"
+          },
+          {
+            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+            "type": "string"
+          }
+        ],
+        "title": "Flows"
+      },
+      "funding": {
+        "anyOf": [
+          {
+            "type": "number"
+          },
+          {
+            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+            "type": "string"
+          }
+        ],
+        "title": "Funding"
+      },
+      "fx_rates": {
+        "items": {
+          "$ref": "#/$defs/FXRate"
+        },
+        "title": "Fx Rates",
+        "type": "array"
+      },
+      "nav_date": {
+        "format": "date",
+        "title": "Nav Date",
+        "type": "string"
+      },
+      "opening_nav": {
+        "anyOf": [
+          {
+            "type": "number"
+          },
+          {
+            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+            "type": "string"
+          }
+        ],
+        "title": "Opening Nav"
+      },
+      "positions_mv": {
+        "anyOf": [
+          {
+            "type": "number"
+          },
+          {
+            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+            "type": "string"
+          }
+        ],
+        "title": "Positions Mv"
+      },
+      "realized": {
+        "anyOf": [
+          {
+            "type": "number"
+          },
+          {
+            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+            "type": "string"
+          }
+        ],
+        "title": "Realized"
+      },
+      "schema_version": {
+        "const": "v1",
+        "default": "v1",
+        "title": "Schema Version",
+        "type": "string"
+      },
+      "source_hash": {
+        "title": "Source Hash",
+        "type": "string"
+      },
+      "unrealized_delta": {
+        "anyOf": [
+          {
+            "type": "number"
+          },
+          {
+            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+            "type": "string"
+          }
+        ],
+        "title": "Unrealized Delta"
+      }
+    },
+    "required": [
+      "account_id",
+      "nav_date",
+      "base_currency",
+      "opening_nav",
+      "cash",
+      "positions_mv",
+      "realized",
+      "unrealized_delta",
+      "funding",
+      "fees",
+      "flows",
+      "closing_nav",
+      "fx_rates",
+      "source_hash"
+    ],
+    "title": "NAVSnapshot",
+    "type": "object"
+  },
+  "PnLBreakdown": {
+    "$defs": {
+      "Currency": {
+        "enum": [
+          "USDT",
+          "KRW"
+        ],
+        "title": "Currency",
+        "type": "string"
+      },
+      "FXRate": {
+        "description": "환율 스냅샷. 8.1-A 다중소스 교차검증과 동일한 원칙 적용 대상.",
+        "properties": {
+          "base": {
+            "$ref": "#/$defs/Currency"
+          },
+          "quote": {
+            "$ref": "#/$defs/Currency"
+          },
+          "rate": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                "type": "string"
+              }
+            ],
+            "title": "Rate"
+          },
+          "source": {
+            "title": "Source",
+            "type": "string"
+          },
+          "timestamp": {
+            "format": "date-time",
+            "title": "Timestamp",
+            "type": "string"
+          }
+        },
+        "required": [
+          "base",
+          "quote",
+          "rate",
+          "timestamp",
+          "source"
+        ],
+        "title": "FXRate",
+        "type": "object"
+      }
+    },
+    "properties": {
+      "base_currency": {
+        "$ref": "#/$defs/Currency"
+      },
+      "fees": {
+        "anyOf": [
+          {
+            "type": "number"
+          },
+          {
+            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+            "type": "string"
+          }
+        ],
+        "title": "Fees"
+      },
+      "funding": {
+        "anyOf": [
+          {
+            "type": "number"
+          },
+          {
+            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+            "type": "string"
+          }
+        ],
+        "title": "Funding"
+      },
+      "fx_rates_used": {
+        "items": {
+          "$ref": "#/$defs/FXRate"
+        },
+        "title": "Fx Rates Used",
+        "type": "array"
+      },
+      "realized": {
+        "anyOf": [
+          {
+            "type": "number"
+          },
+          {
+            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+            "type": "string"
+          }
+        ],
+        "title": "Realized"
+      },
+      "schema_version": {
+        "const": "v1",
+        "default": "v1",
+        "title": "Schema Version",
+        "type": "string"
+      },
+      "total": {
+        "anyOf": [
+          {
+            "type": "number"
+          },
+          {
+            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+            "type": "string"
+          }
+        ],
+        "title": "Total"
+      },
+      "unrealized": {
+        "anyOf": [
+          {
+            "type": "number"
+          },
+          {
+            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+            "type": "string"
+          }
+        ],
+        "title": "Unrealized"
+      }
+    },
+    "required": [
+      "realized",
+      "unrealized",
+      "fees",
+      "funding",
+      "total",
+      "base_currency",
+      "fx_rates_used"
+    ],
+    "title": "PnLBreakdown",
+    "type": "object"
+  },
+  "PositionJournalEntryView": {
+    "$defs": {
+      "Currency": {
+        "enum": [
+          "USDT",
+          "KRW"
+        ],
+        "title": "Currency",
+        "type": "string"
+      },
+      "JournalEntryType": {
+        "enum": [
+          "FILL",
+          "FUNDING",
+          "FEE",
+          "ADJUSTMENT",
+          "CORP_ACTION"
+        ],
+        "title": "JournalEntryType",
+        "type": "string"
+      },
+      "Money": {
+        "description": "모든 금액 필드는 원시 Decimal이 아니라 이 타입을 쓴다.",
+        "properties": {
+          "amount": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                "type": "string"
+              }
+            ],
+            "title": "Amount"
+          },
+          "currency": {
+            "$ref": "#/$defs/Currency"
+          }
+        },
+        "required": [
+          "amount",
+          "currency"
+        ],
+        "title": "Money",
+        "type": "object"
+      }
+    },
+    "description": "append-only `pos_journal` 행 하나의 뷰(§4.3 저널 불변조건).",
+    "properties": {
+      "entry_hash": {
+        "title": "Entry Hash",
+        "type": "string"
+      },
+      "entry_type": {
+        "$ref": "#/$defs/JournalEntryType"
+      },
+      "fee": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/Money"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "fx_rate": {
+        "anyOf": [
+          {
+            "type": "number"
+          },
+          {
+            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "title": "Fx Rate"
+      },
+      "fx_source": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "title": "Fx Source"
+      },
+      "id": {
+        "title": "Id",
+        "type": "integer"
+      },
+      "idempotency_key": {
+        "title": "Idempotency Key",
+        "type": "string"
+      },
+      "occurred_at": {
+        "format": "date-time",
+        "title": "Occurred At",
+        "type": "string"
+      },
+      "position_key": {
+        "title": "Position Key",
+        "type": "string"
+      },
+      "prev_hash": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "title": "Prev Hash"
+      },
+      "price": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/Money"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "qty_delta": {
+        "anyOf": [
+          {
+            "type": "number"
+          },
+          {
+            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+            "type": "string"
+          }
+        ],
+        "title": "Qty Delta"
+      },
+      "realized_pnl_base": {
+        "anyOf": [
+          {
+            "type": "number"
+          },
+          {
+            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+            "type": "string"
+          }
+        ],
+        "title": "Realized Pnl Base"
+      },
+      "recorded_at": {
+        "format": "date-time",
+        "title": "Recorded At",
+        "type": "string"
+      },
+      "schema_version": {
+        "const": "v1",
+        "default": "v1",
+        "title": "Schema Version",
+        "type": "string"
+      },
+      "sequence_no": {
+        "title": "Sequence No",
+        "type": "integer"
+      },
+      "source_event_id": {
+        "title": "Source Event Id",
+        "type": "string"
+      },
+      "source_event_type": {
+        "title": "Source Event Type",
+        "type": "string"
+      }
+    },
+    "required": [
+      "id",
+      "position_key",
+      "sequence_no",
+      "entry_type",
+      "qty_delta",
+      "price",
+      "fee",
+      "realized_pnl_base",
+      "fx_rate",
+      "fx_source",
+      "source_event_type",
+      "source_event_id",
+      "idempotency_key",
+      "prev_hash",
+      "entry_hash",
+      "occurred_at",
+      "recorded_at"
+    ],
+    "title": "PositionJournalEntryView",
+    "type": "object"
+  },
+  "PositionSnapshotView": {
+    "$defs": {
+      "CostMethod": {
+        "enum": [
+          "FIFO",
+          "WEIGHTED"
+        ],
+        "title": "CostMethod",
+        "type": "string"
+      },
+      "Currency": {
+        "enum": [
+          "USDT",
+          "KRW"
+        ],
+        "title": "Currency",
+        "type": "string"
+      },
+      "Lot": {
+        "description": "원가법 로트 하나(FIFO/WEIGHTED 공통 표현, LB-2/LB-3 소비).",
+        "properties": {
+          "opened_at": {
+            "format": "date-time",
+            "title": "Opened At",
+            "type": "string"
+          },
+          "quantity": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                "type": "string"
+              }
+            ],
+            "title": "Quantity"
+          },
+          "schema_version": {
+            "const": "v1",
+            "default": "v1",
+            "title": "Schema Version",
+            "type": "string"
+          },
+          "unit_cost": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                "type": "string"
+              }
+            ],
+            "title": "Unit Cost"
+          }
+        },
+        "required": [
+          "quantity",
+          "unit_cost",
+          "opened_at"
+        ],
+        "title": "Lot",
+        "type": "object"
+      },
+      "Money": {
+        "description": "모든 금액 필드는 원시 Decimal이 아니라 이 타입을 쓴다.",
+        "properties": {
+          "amount": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                "type": "string"
+              }
+            ],
+            "title": "Amount"
+          },
+          "currency": {
+            "$ref": "#/$defs/Currency"
+          }
+        },
+        "required": [
+          "amount",
+          "currency"
+        ],
+        "title": "Money",
+        "type": "object"
+      }
+    },
+    "description": "저널의 fold 결과(§4.3 \"스냅샷 = fold(저널)\"). 미실현 PnL은 마크\n없으면 `None`(0 아님).",
+    "properties": {
+      "account_id": {
+        "format": "uuid",
+        "title": "Account Id",
+        "type": "string"
+      },
+      "avg_cost": {
+        "$ref": "#/$defs/Money"
+      },
+      "base_currency": {
+        "$ref": "#/$defs/Currency"
+      },
+      "cost_method": {
+        "$ref": "#/$defs/CostMethod"
+      },
+      "fees_base": {
+        "anyOf": [
+          {
+            "type": "number"
+          },
+          {
+            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+            "type": "string"
+          }
+        ],
+        "title": "Fees Base"
+      },
+      "funding_base": {
+        "anyOf": [
+          {
+            "type": "number"
+          },
+          {
+            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+            "type": "string"
+          }
+        ],
+        "title": "Funding Base"
+      },
+      "instrument_id": {
+        "format": "uuid",
+        "title": "Instrument Id",
+        "type": "string"
+      },
+      "last_journal_seq": {
+        "title": "Last Journal Seq",
+        "type": "integer"
+      },
+      "lots": {
+        "items": {
+          "$ref": "#/$defs/Lot"
+        },
+        "title": "Lots",
+        "type": "array"
+      },
+      "mark_at": {
+        "anyOf": [
+          {
+            "format": "date-time",
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "title": "Mark At"
+      },
+      "mark_price": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/Money"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "position_key": {
+        "title": "Position Key",
+        "type": "string"
+      },
+      "quantity": {
+        "anyOf": [
+          {
+            "type": "number"
+          },
+          {
+            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+            "type": "string"
+          }
+        ],
+        "title": "Quantity"
+      },
+      "realized_pnl_base": {
+        "anyOf": [
+          {
+            "type": "number"
+          },
+          {
+            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+            "type": "string"
+          }
+        ],
+        "title": "Realized Pnl Base"
+      },
+      "schema_version": {
+        "const": "v1",
+        "default": "v1",
+        "title": "Schema Version",
+        "type": "string"
+      },
+      "tenant_id": {
+        "format": "uuid",
+        "title": "Tenant Id",
+        "type": "string"
+      },
+      "unrealized_pnl_base": {
+        "anyOf": [
+          {
+            "type": "number"
+          },
+          {
+            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "title": "Unrealized Pnl Base"
+      },
+      "updated_at": {
+        "format": "date-time",
+        "title": "Updated At",
+        "type": "string"
+      }
+    },
+    "required": [
+      "position_key",
+      "tenant_id",
+      "account_id",
+      "instrument_id",
+      "quantity",
+      "avg_cost",
+      "cost_method",
+      "lots",
+      "realized_pnl_base",
+      "unrealized_pnl_base",
+      "fees_base",
+      "funding_base",
+      "mark_price",
+      "mark_at",
+      "base_currency",
+      "last_journal_seq",
+      "updated_at"
+    ],
+    "title": "PositionSnapshotView",
+    "type": "object"
+  },
+  "RebuildReport": {
+    "description": "`rebuild_snapshot`(LB-13) 결과 — 재빌드 전후 값이 다른 필드만\n`drift`에 `(old, new)`로 기록한다(§4.3 재빌드 drift 검증).",
+    "properties": {
+      "applied": {
+        "title": "Applied",
+        "type": "boolean"
+      },
+      "drift": {
+        "additionalProperties": {
+          "maxItems": 2,
+          "minItems": 2,
+          "prefixItems": [
+            {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                  "type": "string"
+                }
+              ]
+            },
+            {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                  "type": "string"
+                }
+              ]
+            }
+          ],
+          "type": "array"
+        },
+        "title": "Drift",
+        "type": "object"
+      },
+      "entries": {
+        "title": "Entries",
+        "type": "integer"
+      },
+      "position_key": {
+        "title": "Position Key",
+        "type": "string"
+      },
+      "schema_version": {
+        "const": "v1",
+        "default": "v1",
+        "title": "Schema Version",
+        "type": "string"
+      }
+    },
+    "required": [
+      "position_key",
+      "entries",
+      "drift",
+      "applied"
+    ],
+    "title": "RebuildReport",
+    "type": "object"
+  },
+  "RecordFillCommand": {
+    "$defs": {
+      "Currency": {
+        "enum": [
+          "USDT",
+          "KRW"
+        ],
+        "title": "Currency",
+        "type": "string"
+      },
+      "Money": {
+        "description": "모든 금액 필드는 원시 Decimal이 아니라 이 타입을 쓴다.",
+        "properties": {
+          "amount": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                "type": "string"
+              }
+            ],
+            "title": "Amount"
+          },
+          "currency": {
+            "$ref": "#/$defs/Currency"
+          }
+        },
+        "required": [
+          "amount",
+          "currency"
+        ],
+        "title": "Money",
+        "type": "object"
+      },
+      "OrderSide": {
+        "enum": [
+          "BUY",
+          "SELL"
+        ],
+        "title": "OrderSide",
+        "type": "string"
+      }
+    },
+    "description": "`record_fill`(LB-11)의 입력. 멱등키는 `f\"fill:{order_id}:{fill_seq}\"`\n(§5 저널 append 멱등성).",
+    "properties": {
+      "account_id": {
+        "format": "uuid",
+        "title": "Account Id",
+        "type": "string"
+      },
+      "contract_multiplier": {
+        "anyOf": [
+          {
+            "type": "number"
+          },
+          {
+            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+            "type": "string"
+          }
+        ],
+        "default": "1",
+        "title": "Contract Multiplier"
+      },
+      "fee": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/Money"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "fill_seq": {
+        "title": "Fill Seq",
+        "type": "integer"
+      },
+      "occurred_at": {
+        "format": "date-time",
+        "title": "Occurred At",
+        "type": "string"
+      },
+      "order_id": {
+        "format": "uuid",
+        "title": "Order Id",
+        "type": "string"
+      },
+      "position_key": {
+        "title": "Position Key",
+        "type": "string"
+      },
+      "price": {
+        "$ref": "#/$defs/Money"
+      },
+      "quantity": {
+        "anyOf": [
+          {
+            "type": "number"
+          },
+          {
+            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+            "type": "string"
+          }
+        ],
+        "title": "Quantity"
+      },
+      "schema_version": {
+        "const": "v1",
+        "default": "v1",
+        "title": "Schema Version",
+        "type": "string"
+      },
+      "side": {
+        "$ref": "#/$defs/OrderSide"
+      },
+      "tenant_id": {
+        "format": "uuid",
+        "title": "Tenant Id",
+        "type": "string"
+      },
+      "trace_id": {
+        "format": "uuid",
+        "title": "Trace Id",
+        "type": "string"
+      }
+    },
+    "required": [
+      "tenant_id",
+      "account_id",
+      "position_key",
+      "order_id",
+      "fill_seq",
+      "side",
+      "quantity",
+      "price",
+      "fee",
+      "occurred_at",
+      "trace_id"
+    ],
+    "title": "RecordFillCommand",
+    "type": "object"
+  },
+  "RecordFundingCommand": {
+    "$defs": {
+      "Currency": {
+        "enum": [
+          "USDT",
+          "KRW"
+        ],
+        "title": "Currency",
+        "type": "string"
+      },
+      "Money": {
+        "description": "모든 금액 필드는 원시 Decimal이 아니라 이 타입을 쓴다.",
+        "properties": {
+          "amount": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                "type": "string"
+              }
+            ],
+            "title": "Amount"
+          },
+          "currency": {
+            "$ref": "#/$defs/Currency"
+          }
+        },
+        "required": [
+          "amount",
+          "currency"
+        ],
+        "title": "Money",
+        "type": "object"
+      }
+    },
+    "description": "`record_funding_fee`(LB-13)의 입력. 멱등키는\n`f\"funding:{funding_id}\"`.",
+    "properties": {
+      "account_id": {
+        "format": "uuid",
+        "title": "Account Id",
+        "type": "string"
+      },
+      "amount": {
+        "$ref": "#/$defs/Money"
+      },
+      "funding_id": {
+        "title": "Funding Id",
+        "type": "string"
+      },
+      "occurred_at": {
+        "format": "date-time",
+        "title": "Occurred At",
+        "type": "string"
+      },
+      "position_key": {
+        "title": "Position Key",
+        "type": "string"
+      },
+      "rate": {
+        "anyOf": [
+          {
+            "type": "number"
+          },
+          {
+            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+            "type": "string"
+          }
+        ],
+        "title": "Rate"
+      },
+      "schema_version": {
+        "const": "v1",
+        "default": "v1",
+        "title": "Schema Version",
+        "type": "string"
+      },
+      "tenant_id": {
+        "format": "uuid",
+        "title": "Tenant Id",
+        "type": "string"
+      },
+      "trace_id": {
+        "format": "uuid",
+        "title": "Trace Id",
+        "type": "string"
+      }
+    },
+    "required": [
+      "tenant_id",
+      "account_id",
+      "position_key",
+      "funding_id",
+      "amount",
+      "rate",
+      "occurred_at",
+      "trace_id"
+    ],
+    "title": "RecordFundingCommand",
+    "type": "object"
+  }
+}
