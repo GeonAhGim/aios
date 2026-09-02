@@ -104,6 +104,22 @@ class Position(BaseModel):
     underlying_symbol: str | None = None
 
 
+class FuturesContractInfo(BaseModel):
+    """02b_bitget_api_v2_full_spec_v1.md §8 — 무기한 선물 계약 사양
+    (계약단위/최소주문수량/최대레버리지). Validator(03번 §3.3)가 주문
+    파라미터를 이 값과 대조해 형식 검증에 쓸 수 있도록 준비해둔다 —
+    지금 당장 소비하는 호출부는 없다(17.9-A, 필요해지면 배선)."""
+
+    symbol: str
+    exchange: str
+    base_coin: str
+    quote_coin: str
+    min_order_size: Decimal
+    price_tick_size: Decimal
+    size_tick_size: Decimal
+    max_leverage: Decimal
+
+
 class SecretBundle(BaseModel):
     """FD-1.1/03번 §3.1(Loader.load_env_secrets)가 반환하는 타입.
     07번 §7.3 `.env.example` 전체 목록과 1:1 대응.
@@ -156,4 +172,23 @@ class AccountBalance(BaseModel):
     total: Decimal
     available: Decimal
     used_margin: Decimal = Decimal("0")
+    updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+
+class MarginAccountAsset(BaseModel):
+    """02b_bitget_api_v2_full_spec_v1.md §8 — 마진 계좌 자산·부채·리스크율.
+    AccountBalance와 별도 모델인 이유: 마진은 "빌린 돈"(borrowed/interest)과
+    "청산까지 여유"(risk_rate)라는 스팟 잔고에 없는 개념이 핵심이라 억지로
+    끼워맞추면 두 도메인이 뒤섞인다(17.9-A 과잉설계 방지의 반대 방향 —
+    여기서는 억지 재사용이 오히려 과소설계)."""
+
+    exchange: str
+    margin_type: str  # "crossed" | "isolated"
+    symbol: str | None = None  # isolated만 심볼별로 존재, crossed는 None
+    coin: str
+    available: Decimal
+    borrowed: Decimal
+    interest: Decimal
+    net_asset: Decimal
+    risk_rate: Decimal | None = None  # FD-8.3 청산위험 판단 입력값 후보
     updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))

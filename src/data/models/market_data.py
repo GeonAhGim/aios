@@ -45,3 +45,15 @@ class OrderBook(BaseModel):
     bids: list[OrderBookLevel]
     asks: list[OrderBookLevel]
     timestamp: datetime
+
+
+class FundingRate(BaseModel):
+    """02b_bitget_api_v2_full_spec_v1.md §8 — 무기한 선물 펀딩레이트.
+    Ticker/Candle과 동일 계층(시장 공개 데이터)에 둔다 — Order/Position
+    같은 계좌 상태가 아니라 시세 데이터의 일종."""
+
+    symbol: str
+    exchange: str
+    current_rate: Decimal
+    next_funding_time: datetime
+    timestamp: datetime
