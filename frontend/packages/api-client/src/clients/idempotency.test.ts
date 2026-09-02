@@ -75,14 +75,14 @@ describe("금전 라우트의 Idempotency-Key 자동 부착", () => {
     expect(idempotencyKeyOf(fetchMock)).toMatch(UUID_RE);
   });
 
-  it("startExecution: 키를 넘기지 않으면 자동 생성한다", async () => {
+  // startExecution/convertToLive/rebalancePortfolio/requestTopup: idempotencyKey가
+  // 필수 인자다(누락 시 타입 에러) — 호출부(useIdempotentSubmit)가 넘긴 키를 그대로 싣는지만 확인.
+  it("startExecution: 넘긴 키를 그대로 헤더에 싣는다", async () => {
     const startFetch = stubFetch({ id: 1, status: "RUNNING" });
-    await makeClient().startExecution(1);
-    expect(idempotencyKeyOf(startFetch)).toMatch(UUID_RE);
+    await makeClient().startExecution(1, "caller-supplied-key-0005");
+    expect(idempotencyKeyOf(startFetch)).toBe("caller-supplied-key-0005");
   });
 
-  // convertToLive/rebalancePortfolio/requestTopup: task-338부터 idempotencyKey가
-  // 필수 인자다(누락 시 타입 에러) — 호출부(useIdempotentSubmit)가 넘긴 키를 그대로 싣는지만 확인.
   it("convertToLive: 넘긴 키를 그대로 헤더에 싣는다", async () => {
     const convertFetch = stubFetch({ id: 1, status: "LIVE" });
     await makeClient().convertToLive(

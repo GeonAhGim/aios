@@ -20,7 +20,9 @@ export function withExecutions<TBase extends AnyConstructor>(Base: TBase) {
       return this.postIdempotent("/executions", body, idempotencyKey);
     }
 
-    async startExecution(executionId: number, idempotencyKey?: string): Promise<ExecutionResponse> {
+    // spec §9 PLT-15: idempotencyKey를 필수 인자로 받아 호출부(useIdempotentSubmit)가
+    // 키 수명주기를 직접 관리하도록 강제한다 — 누락 시 타입 에러.
+    async startExecution(executionId: number, idempotencyKey: string): Promise<ExecutionResponse> {
       return this.postIdempotent(`/executions/${executionId}/start`, undefined, idempotencyKey);
     }
 

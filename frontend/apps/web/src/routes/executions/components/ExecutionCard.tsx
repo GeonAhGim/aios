@@ -7,6 +7,7 @@ import {
 import type { ExecutionCardResponse } from "@aios/shared-types";
 import { Button, Input, StatusBadge } from "@aios/ui-web";
 import { useState } from "react";
+import { DuplicateSubmitError, useIdempotentSubmit } from "../../../hooks/useIdempotentSubmit";
 import { exchangeLabel } from "../../../lib/exchangeLabels";
 
 interface ExecutionCardProps {
@@ -23,10 +24,21 @@ export function ExecutionCard({ execution }: ExecutionCardProps) {
   const pause = usePauseExecution();
   const retire = useRetireExecution();
   const setRiskGuard = useSetExecutionRiskGuard();
+  const { submit: submitStart } = useIdempotentSubmit(`executions.start:${execution.executionId}`);
   const [maxDrawdown, setMaxDrawdown] = useState(execution.maxDrawdownPct ?? "");
 
   const realized = Number(execution.realizedPnl);
   const unrealized = Number(execution.unrealizedPnl);
+
+  async function handleStart() {
+    try {
+      await submitStart((idempotencyKey) =>
+        start.mutateAsync({ executionId: execution.executionId, idempotencyKey }),
+      );
+    } catch (err) {
+      if (err instanceof DuplicateSubmitError) return;
+    }
+  }
 
   return (
     <div className="rounded-lg border border-border bg-surface p-4">
@@ -83,7 +95,7 @@ export function ExecutionCard({ execution }: ExecutionCardProps) {
             type="button"
             variant="secondary"
             size="sm"
-            onClick={() => start.mutate(execution.executionId)}
+            onClick={() => void handleStart()}
             loading={start.isPending}
           >
             시작
