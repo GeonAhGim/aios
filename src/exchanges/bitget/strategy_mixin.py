@@ -16,11 +16,8 @@ from __future__ import annotations
 from decimal import Decimal
 from typing import Any
 
+from src.exchanges.bitget.symbols import to_bitget_symbol as _to_bitget_symbol
 from src.exchanges.common.live_guard import require_paper_sandbox
-
-
-def _to_bitget_symbol(canonical_symbol: str) -> str:
-    return canonical_symbol.replace("/", "")
 
 
 class BitgetStrategyMixin:

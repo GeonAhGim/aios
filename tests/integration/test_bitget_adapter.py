@@ -116,8 +116,62 @@ async def test_get_balance_maps_coin_amounts():
     assert balances[0].available == Decimal("100")
 
 
-async def test_get_positions_always_empty_for_spot():
-    adapter = _make_adapter(lambda request: _json_response(REAL_TICKER_ENVELOPE))
+async def test_get_positions_empty_when_no_balances():
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == "/api/v2/spot/account/assets"
+        return _json_response({"code": "00000", "msg": "success", "requestTime": 1, "data": []})
+
+    adapter = _make_adapter(handler)
+    assert await adapter.get_positions() == []
+
+
+async def test_get_positions_synthesizes_from_balance_and_ticker():
+    """FULL_AUDIT §2-B ④ 회귀 — 이전엔 get_positions()가 항상 빈 리스트를
+    반환했다(HTTP 호출조차 없었음). 이제 get_balance()의 코인별 보유량을
+    현재가와 합쳐 Position으로 합성하고, quote 통화(USDT)는 현금이라
+    제외한다."""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/api/v2/spot/account/assets":
+            return _json_response(
+                {
+                    "code": "00000",
+                    "msg": "success",
+                    "requestTime": 1,
+                    "data": [
+                        {"coin": "btc", "available": "0.5", "frozen": "0", "locked": "0"},
+                        {"coin": "usdt", "available": "1000", "frozen": "0", "locked": "0"},
+                    ],
+                }
+            )
+        assert request.url.path == "/api/v2/spot/market/tickers"
+        return _json_response(REAL_TICKER_ENVELOPE)
+
+    adapter = _make_adapter(handler)
+    positions = await adapter.get_positions()
+
+    assert len(positions) == 1
+    assert positions[0].symbol == "BTC/USDT"
+    assert positions[0].quantity == Decimal("0.5")
+    assert positions[0].current_price.amount == Decimal("80663.08")
+    assert positions[0].unrealized_pnl.amount == Decimal("0")
+
+
+async def test_get_positions_skips_coin_when_ticker_fails():
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/api/v2/spot/account/assets":
+            return _json_response(
+                {
+                    "code": "00000",
+                    "msg": "success",
+                    "requestTime": 1,
+                    "data": [{"coin": "xyz", "available": "1", "frozen": "0", "locked": "0"}],
+                }
+            )
+        assert request.url.path == "/api/v2/spot/market/tickers"
+        return _json_response({"code": "99999", "msg": "not found", "requestTime": 1, "data": {}})
+
+    adapter = _make_adapter(handler)
     assert await adapter.get_positions() == []
 
 

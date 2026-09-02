@@ -8,10 +8,16 @@ Spec: 02_exchange_adapter_v1.2.md#§2.1
 """
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from decimal import Decimal
 from typing import Any
 
+from src.core.exceptions import ExchangeAPIError
+from src.data.models.base import AssetClass, Currency, Money
 from src.data.models.trading import AccountBalance, Position
+from src.exchanges.bitget.symbols import to_bitget_symbol as _to_bitget_symbol
+
+_QUOTE_CURRENCIES = ("USDT",)  # Phase 1 스콥(06번 §6.1) — USDT 마켓만
 
 
 class BitgetAccountMixin:
@@ -37,12 +43,52 @@ class BitgetAccountMixin:
         return balances
 
     async def get_positions(self, symbol: str | None = None) -> list[Position]:
-        """스팟 거래소는 선물/마진과 달리 네이티브 "포지션" 개념이 없다 —
-        AIOS 자체가 체결 내역으로부터 포지션을 내부적으로 계산·추적하고,
-        Reconciliation(FD-9.6)은 get_balance()를 거래소측 진실 소스로
-        사용한다. Phase 1은 Bitget spot만 대상(06번 §6.1)이므로 항상
-        빈 리스트를 반환한다."""
-        return []
+        """FULL_AUDIT_2026-09-02.md §2-B ④ — 이전엔 "스팟은 네이티브
+        포지션이 없다"는 이유로 항상 빈 리스트였다. 하지만 그 이유는
+        get_balance()를 진실 소스로 쓰는 이유는 되어도 get_positions()를
+        영구히 비워두는 정당화는 아니다 — 이 메서드를 소비하는 호출부
+        (Reconciliation 등)는 "포지션"이라는 형태로 조회하지, "잔고"라는
+        형태로 다시 조회하지 않는다.
+
+        보유 코인별로 Position을 합성한다 — 스팟 거래소는 평단가/미실현
+        손익을 추적하지 않으므로(그건 AIOS 자체 전략 실행 기록의 몫)
+        `average_entry_price`는 현재가로 대체한 자리표시자이고
+        `unrealized_pnl`은 항상 0이다. quote 통화(USDT) 자체는 현금이지
+        포지션이 아니라 제외한다. 코인마다 get_ticker() 호출이 필요해
+        (N+1) 보유 종목이 많으면 느릴 수 있음 — Phase 1 스콥(06번 §6.1)
+        전제상 보유 종목 수가 적다고 가정. 시세 조회에 실패한 코인은
+        전체를 실패시키지 않고 건너뛴다(8.3 원칙 — 일부 실패가 전체
+        조회를 막으면 안 됨)."""
+        asset_filter = symbol.split("/")[0] if symbol else None
+        balances = await self.get_balance(asset_filter)
+
+        positions = []
+        now = datetime.now(timezone.utc)
+        for balance in balances:
+            if balance.asset in _QUOTE_CURRENCIES or balance.total == 0:
+                continue
+            pair_symbol = f"{balance.asset}/USDT"
+            try:
+                ticker = await self.get_ticker(pair_symbol)  # type: ignore[attr-defined]
+            except ExchangeAPIError:
+                continue
+            current_price = Money(amount=ticker.price, currency=Currency.USDT)
+            positions.append(
+                Position(
+                    symbol=pair_symbol,
+                    exchange="bitget",
+                    strategy_id="",  # 자리표시자 — 호출부가 DB 조회로 채워야 함
+                    quantity=balance.total,
+                    average_entry_price=current_price,  # 거래소가 평단가를 모름
+                    current_price=current_price,
+                    unrealized_pnl=Money(amount=Decimal("0"), currency=Currency.USDT),
+                    realized_pnl=Money(amount=Decimal("0"), currency=Currency.USDT),
+                    entry_time=now,
+                    updated_at=now,
+                    asset_class=AssetClass.CRYPTO,
+                )
+            )
+        return positions
 
     async def get_trade_rate(self, symbol: str, *, business_type: str = "spot") -> dict[str, Any]:
         """02b 스펙 §7(P1) — FD-8.2 수수료 미반영 Draft를 벗어날 때 필요.
@@ -52,7 +98,7 @@ class BitgetAccountMixin:
         raw = await self._request(  # type: ignore[attr-defined]
             "GET",
             "/api/v2/common/trade-rate",
-            params={"symbol": symbol.replace("/", ""), "businessType": business_type},
+            params={"symbol": _to_bitget_symbol(symbol), "businessType": business_type},
         )
         return dict(raw["data"])
 
@@ -99,7 +145,7 @@ class BitgetAccountMixin:
             "coin": coin.upper(),
         }
         if symbol is not None:
-            body["symbol"] = symbol.replace("/", "")
+            body["symbol"] = _to_bitget_symbol(symbol)
         raw = await self._request(  # type: ignore[attr-defined]
             "POST", "/api/v2/spot/wallet/transfer", body=body
         )

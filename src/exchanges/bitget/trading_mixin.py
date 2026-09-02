@@ -28,6 +28,7 @@ from uuid import uuid4
 
 from src.data.models.base import AssetClass, Currency, Money
 from src.data.models.trading import Order, OrderSide, OrderStatus, OrderType
+from src.exchanges.bitget.symbols import to_bitget_symbol as _to_bitget_symbol
 
 # 확인된 값(라이브/문서 조사) + 미확인 값은 UNKNOWN으로 안전하게 폴백
 # (8.3 원칙 — 모르는 상태를 실패로 단정하지 않는다).
@@ -101,7 +102,7 @@ def _row_to_order(data: dict[str, Any]) -> Order:
 class BitgetTradingMixin:
     async def place_order(self, order: Order) -> Order:
         body: dict[str, Any] = {
-            "symbol": order.symbol.replace("/", ""),
+            "symbol": _to_bitget_symbol(order.symbol),
             "side": order.side.value.lower(),
             "orderType": order.order_type.value.lower(),
             "force": "gtc",
@@ -161,7 +162,7 @@ class BitgetTradingMixin:
         (모듈 docstring 참조)."""
         params: dict[str, Any] = {}
         if symbol is not None:
-            params["symbol"] = symbol.replace("/", "")
+            params["symbol"] = _to_bitget_symbol(symbol)
         raw = await self._request(  # type: ignore[attr-defined]
             "GET", "/api/v2/spot/trade/unfilled-orders", params=params or None
         )
@@ -173,7 +174,7 @@ class BitgetTradingMixin:
         """FD-6.4(재시작 시 정합성 복구) 보강용."""
         params: dict[str, Any] = {"limit": str(limit)}
         if symbol is not None:
-            params["symbol"] = symbol.replace("/", "")
+            params["symbol"] = _to_bitget_symbol(symbol)
         raw = await self._request(  # type: ignore[attr-defined]
             "GET", "/api/v2/spot/trade/history-orders", params=params
         )
@@ -189,7 +190,7 @@ class BitgetTradingMixin:
         구조를 섣불리 확정하지 않는다)."""
         params: dict[str, Any] = {}
         if symbol is not None:
-            params["symbol"] = symbol.replace("/", "")
+            params["symbol"] = _to_bitget_symbol(symbol)
         if order_id is not None:
             params["orderId"] = order_id
         raw = await self._request(  # type: ignore[attr-defined]
@@ -221,7 +222,7 @@ class BitgetTradingMixin:
         raw = await self._request(  # type: ignore[attr-defined]
             "POST",
             "/api/v2/spot/trade/batch-orders",
-            body={"symbol": symbol.replace("/", ""), "orderList": order_list},
+            body={"symbol": _to_bitget_symbol(symbol), "orderList": order_list},
         )
         data = raw["data"]
         success_by_client_oid = {item["clientOid"]: item for item in data.get("successList", [])}
@@ -249,7 +250,7 @@ class BitgetTradingMixin:
         """02b 스펙 §3.2(P1)."""
         body: dict[str, Any] = {"orderIdList": [{"orderId": oid} for oid in order_ids]}
         if symbol is not None:
-            body["symbol"] = symbol.replace("/", "")
+            body["symbol"] = _to_bitget_symbol(symbol)
         raw = await self._request(  # type: ignore[attr-defined]
             "POST", "/api/v2/spot/trade/batch-cancel-order", body=body
         )
@@ -272,7 +273,7 @@ class BitgetTradingMixin:
         생기기 전까지 새 필드 추가를 보류) — `get_fills()`와 동일하게 raw
         dict를 반환한다."""
         body: dict[str, Any] = {
-            "symbol": symbol.replace("/", ""),
+            "symbol": _to_bitget_symbol(symbol),
             "side": side.value.lower(),
             "orderType": order_type.value.lower(),
             "size": str(size),
@@ -298,7 +299,7 @@ class BitgetTradingMixin:
         """02b 스펙 §3.2(P1)."""
         params: dict[str, Any] = {}
         if symbol is not None:
-            params["symbol"] = symbol.replace("/", "")
+            params["symbol"] = _to_bitget_symbol(symbol)
         raw = await self._request(  # type: ignore[attr-defined]
             "GET", "/api/v2/spot/trade/current-plan-order", params=params or None
         )

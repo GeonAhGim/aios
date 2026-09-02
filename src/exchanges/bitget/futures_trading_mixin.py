@@ -21,7 +21,8 @@ from uuid import uuid4
 
 from src.data.models.base import AssetClass
 from src.data.models.trading import Order, OrderSide, OrderStatus, OrderType
-from src.exchanges.bitget.futures_market_mixin import DEFAULT_PRODUCT_TYPE, _to_bitget_symbol
+from src.exchanges.bitget.futures_market_mixin import DEFAULT_PRODUCT_TYPE
+from src.exchanges.bitget.symbols import to_bitget_symbol as _to_bitget_symbol
 from src.exchanges.common.live_guard import require_paper_sandbox
 
 _STATUS_MAP = {

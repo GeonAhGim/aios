@@ -47,6 +47,7 @@ from src.data.models.market_data import (
 )
 from src.data.models.trading import AccountBalance, Order, Position
 from src.exchanges.bitget.futures_account_mixin import _row_to_position
+from src.exchanges.bitget.symbols import to_bitget_symbol as _to_bitget_symbol
 from src.exchanges.bitget.trading_mixin import _row_to_order
 from src.exchanges.common.types import TickerCallback
 
@@ -101,11 +102,6 @@ def _connect(url: str) -> AbstractAsyncContextManager[WsConnection]:
     시그니처는 그보다 훨씬 넓다(헤더/ping 설정 등) — 테스트가 주입하는
     가짜 `connect_fn`과 정확히 같은 좁은 타입으로 맞추기 위한 얇은 래퍼."""
     return _default_connect(url)  # type: ignore[return-value]
-
-
-def _to_bitget_symbol(canonical_symbol: str) -> str:
-    """"BTC/USDT" -> "BTCUSDT" """
-    return canonical_symbol.replace("/", "")
 
 
 def _is_control_message(message: dict[str, Any]) -> bool:

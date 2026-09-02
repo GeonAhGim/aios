@@ -23,6 +23,8 @@ from typing import Any
 
 from src.data.models.market_data import Candle, FundingRate, OrderBook, OrderBookLevel, Ticker
 from src.data.models.trading import FuturesContractInfo
+from src.exchanges.bitget.symbols import to_bitget_symbol as _to_bitget_symbol
+from src.exchanges.bitget.symbols import to_canonical_symbol as _to_canonical_symbol
 
 DEFAULT_PRODUCT_TYPE = "USDT-FUTURES"
 
@@ -39,10 +41,6 @@ _GRANULARITY_MAP = {
     "4h": "4H",
     "1d": "1D",
 }
-
-
-def _to_bitget_symbol(canonical_symbol: str) -> str:
-    return canonical_symbol.replace("/", "")
 
 
 def _rows_to_candles(rows: list[list[str]], symbol: str, timeframe: str) -> list[Candle]:
@@ -67,16 +65,6 @@ def _rows_to_candles(rows: list[list[str]], symbol: str, timeframe: str) -> list
             )
         )
     return candles
-
-
-def _to_canonical_symbol(bitget_symbol: str) -> str:
-    """"BTCUSDT" -> "BTC/USDT". ticker_parser.py의 동일 로직을 여기서
-    복제한다(순환 임포트 방지 + 모듈-비공개 함수는 재사용하지 않는 기존
-    관례, futures_market_mixin.py 상단 _GRANULARITY_MAP 주석 참조). Phase 1
-    스콥(06번 §6.1)은 USDT-마진 선물만 대상이라 USDT 접미사만 처리한다."""
-    if bitget_symbol.endswith("USDT"):
-        return f"{bitget_symbol[:-4]}/USDT"
-    return bitget_symbol
 
 
 class BitgetFuturesMarketMixin:

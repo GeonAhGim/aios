@@ -19,7 +19,8 @@ from typing import Any
 
 from src.data.models.base import AssetClass, Currency, Money
 from src.data.models.trading import AccountBalance, Position
-from src.exchanges.bitget.futures_market_mixin import DEFAULT_PRODUCT_TYPE, _to_bitget_symbol
+from src.exchanges.bitget.futures_market_mixin import DEFAULT_PRODUCT_TYPE
+from src.exchanges.bitget.symbols import to_bitget_symbol as _to_bitget_symbol
 
 
 class BitgetFuturesAccountMixin:

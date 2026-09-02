@@ -24,6 +24,7 @@ from uuid import uuid4
 
 from src.data.models.base import AssetClass
 from src.data.models.trading import MarginAccountAsset, Order, OrderSide, OrderStatus, OrderType
+from src.exchanges.bitget.symbols import to_bitget_symbol as _to_bitget_symbol
 from src.exchanges.common.live_guard import require_paper_sandbox
 
 CROSSED = "crossed"
@@ -73,7 +74,7 @@ class BitgetMarginMixin:
         _validate_margin_type(margin_type)
         params: dict[str, Any] = {}
         if symbol is not None:
-            params["symbol"] = symbol.replace("/", "")
+            params["symbol"] = _to_bitget_symbol(symbol)
         raw = await self._request(  # type: ignore[attr-defined]
             "GET", f"/api/v2/margin/{margin_type}/account/assets", params=params or None
         )
@@ -102,7 +103,7 @@ class BitgetMarginMixin:
         _validate_margin_type(margin_type)
         params: dict[str, Any] = {}
         if symbol is not None:
-            params["symbol"] = symbol.replace("/", "")
+            params["symbol"] = _to_bitget_symbol(symbol)
         raw = await self._request(  # type: ignore[attr-defined]
             "GET", f"/api/v2/margin/{margin_type}/account/risk-rate", params=params or None
         )
@@ -118,7 +119,7 @@ class BitgetMarginMixin:
         if order.quantity <= 0:
             raise ValueError("order.quantity는 0보다 커야 합니다.")
         body: dict[str, Any] = {
-            "symbol": order.symbol.replace("/", ""),
+            "symbol": _to_bitget_symbol(order.symbol),
             "side": order.side.value.lower(),
             "orderType": order.order_type.value.lower(),
             "force": "gtc",
@@ -165,7 +166,7 @@ class BitgetMarginMixin:
             raise ValueError("amount는 0보다 커야 합니다.")
         body: dict[str, Any] = {"coin": coin.upper(), "borrowAmount": str(amount)}
         if symbol is not None:
-            body["symbol"] = symbol.replace("/", "")
+            body["symbol"] = _to_bitget_symbol(symbol)
         raw = await self._request(  # type: ignore[attr-defined]
             "POST", f"/api/v2/margin/{margin_type}/account/borrow", body=body
         )
@@ -181,7 +182,7 @@ class BitgetMarginMixin:
             raise ValueError("amount는 0보다 커야 합니다.")
         body: dict[str, Any] = {"coin": coin.upper(), "repayAmount": str(amount)}
         if symbol is not None:
-            body["symbol"] = symbol.replace("/", "")
+            body["symbol"] = _to_bitget_symbol(symbol)
         raw = await self._request(  # type: ignore[attr-defined]
             "POST", f"/api/v2/margin/{margin_type}/account/repay", body=body
         )
@@ -194,7 +195,7 @@ class BitgetMarginMixin:
         _validate_margin_type(margin_type)
         params: dict[str, Any] = {"coin": coin.upper()}
         if symbol is not None:
-            params["symbol"] = symbol.replace("/", "")
+            params["symbol"] = _to_bitget_symbol(symbol)
         raw = await self._request(  # type: ignore[attr-defined]
             "GET", f"/api/v2/margin/{margin_type}/account/max-borrowable-amount", params=params
         )
@@ -223,7 +224,7 @@ class BitgetMarginMixin:
         _validate_margin_type(margin_type)
         params: dict[str, Any] = {"limit": str(limit)}
         if symbol is not None:
-            params["symbol"] = symbol.replace("/", "")
+            params["symbol"] = _to_bitget_symbol(symbol)
         raw = await self._request(  # type: ignore[attr-defined]
             "GET", f"/api/v2/margin/{margin_type}/history-orders", params=params
         )
@@ -236,7 +237,7 @@ class BitgetMarginMixin:
         _validate_margin_type(margin_type)
         params: dict[str, Any] = {}
         if symbol is not None:
-            params["symbol"] = symbol.replace("/", "")
+            params["symbol"] = _to_bitget_symbol(symbol)
         if order_id is not None:
             params["orderId"] = order_id
         raw = await self._request(  # type: ignore[attr-defined]
@@ -252,7 +253,7 @@ class BitgetMarginMixin:
         _validate_margin_type(margin_type)
         params: dict[str, Any] = {}
         if symbol is not None:
-            params["symbol"] = symbol.replace("/", "")
+            params["symbol"] = _to_bitget_symbol(symbol)
         raw = await self._request(  # type: ignore[attr-defined]
             "GET", f"/api/v2/margin/{margin_type}/liquidation-order", params=params or None
         )
@@ -264,7 +265,7 @@ class BitgetMarginMixin:
         _validate_margin_type(margin_type)
         params: dict[str, Any] = {}
         if symbol is not None:
-            params["symbol"] = symbol.replace("/", "")
+            params["symbol"] = _to_bitget_symbol(symbol)
         raw = await self._request(  # type: ignore[attr-defined]
             "GET", f"/api/v2/margin/{margin_type}/open-orders", params=params or None
         )
