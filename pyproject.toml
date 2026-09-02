@@ -42,13 +42,40 @@ asyncio_mode = "auto"
 line-length = 100
 
 [tool.ruff.lint]
-select = ["E", "F", "I", "UP", "B"]
+select = ["E", "F", "I", "UP", "B", "TID251"]
 
 [tool.ruff.lint.flake8-bugbear]
 # FastAPI의 Depends()/Query() 등은 인자 기본값에 호출하는 것이 표준 관용구다
 # (B008이 일반적인 "가변 기본값" 버그로 오인하는 지점) — 16번대 라우터 전체에서
 # 이 패턴을 계속 쓰므로 매번 noqa를 붙이는 대신 여기서 한 번에 허용한다.
 extend-immutable-calls = ["fastapi.Depends", "fastapi.Query", "fastapi.Path", "fastapi.Body"]
+
+# L0-2(docs/specs/L4_market_data_positions_ledger_v1.0.md §9): domain/**는 I/O 순수해야
+# 한다. TID251(banned-api)이 정적 분석 단계에서, tests/unit/test_zone_purity.py가 AST로
+# 한 번 더(설정 우회·삭제에도 항상 재현되도록) 같은 규칙을 강제한다.
+[tool.ruff.lint.flake8-tidy-imports.banned-api]
+"asyncpg" = { msg = "L0-2: domain/**는 I/O 순수해야 한다 — asyncpg는 adapters/**로 옮길 것" }
+"httpx" = { msg = "L0-2: domain/**는 I/O 순수해야 한다 — httpx는 adapters/**로 옮길 것" }
+"sqlalchemy" = { msg = "L0-2: domain/**는 I/O 순수해야 한다 — sqlalchemy는 adapters/**로 옮길 것" }
+
+[tool.ruff.lint.per-file-ignores]
+# TID251은 기본적으로 모든 소스에 적용된다 — 아래는 실제로 asyncpg/httpx/sqlalchemy가
+# 필요한 어댑터·게이트웨이 계층만 예외로 둔다. domain/** 자체를 여기 추가하지 말 것
+# (그러면 tests/unit/test_zone_purity.py의 AST 검사만 남아 이중 방어가 무의미해진다).
+"src/api/**" = ["TID251"]
+"src/core/**" = ["TID251"]
+"src/db/**" = ["TID251"]
+"src/exchanges/**" = ["TID251"]
+"src/foundation/*/adapters/**" = ["TID251"]
+"src/main.py" = ["TID251"]
+"src/services/*.py" = ["TID251"]
+"src/services/execution_loop/**" = ["TID251"]
+"src/services/order_service/**" = ["TID251"]
+"src/services/oms/ports/**" = ["TID251"]
+"src/services/safety/**" = ["TID251"]
+"src/watchdog_process.py" = ["TID251"]
+"tests/**" = ["TID251"]
+"scripts/**" = ["TID251"]
 
 [tool.mypy]
 strict = true
