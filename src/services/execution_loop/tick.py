@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import json
 import logging
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Sequence
 from decimal import Decimal
 from typing import Any
 
@@ -26,6 +26,7 @@ from src.core.executor.executor import Executor, next_fsm_state_after_fill
 from src.core.loader.risk_policy_loader import RiskPolicy
 from src.core.portfolio.engine import PortfolioEngine
 from src.core.risk.engine import RiskEngine
+from src.core.safety.data_distrust import DataDistrustLevel, DataDistrustMonitor
 from src.core.strategy.engine import StrategyEngine
 from src.data.models.strategy_fsm import FSMState, FSMStrategyConfig
 from src.exchanges.common.adapter import ExchangeAdapter
@@ -38,6 +39,10 @@ from src.services.execution_loop.pre_submit_check import is_submission_allowed
 from src.services.order_service import repository
 from src.services.order_service.gate import PreSubmitGate
 from src.services.order_service.submit import PublishFn, apply_fill
+from src.services.safety.distrust_wiring import check_and_persist_distrust
+from src.services.safety.reference_quotes import ReferenceQuoteProvider
+
+_ENTRY_DENYING_LEVELS = frozenset({DataDistrustLevel.SUSPICIOUS, DataDistrustLevel.DISTRUSTED})
 
 logger = logging.getLogger(__name__)
 
@@ -188,6 +193,8 @@ async def run_execution_tick(
     policy: RiskPolicy,
     publish: PublishFn | None = None,
     pre_submit_gate: PreSubmitGate | None = None,
+    distrust_monitor: DataDistrustMonitor | None = None,
+    distrust_providers: Sequence[ReferenceQuoteProvider] = (),
 ) -> None:
     execution, fsm_config, certified_badge = await _load_execution_context(pool, execution_id)
     current_fsm_state = FSMState(execution["fsm_state"])
@@ -210,11 +217,41 @@ async def run_execution_tick(
     candles = await adapter.get_ohlcv(symbol, "1m", limit=100)
     market_state = build_market_state(fsm_config, candles)
 
+    # R-48 — 캔들 수집 직후 데이터 신뢰도를 매 틱 관측·영속한다(신호가
+    # 없어도 상태는 계속 최신으로 유지해야 관측 공백이 없다). 실제 주문
+    # 거부 여부는 신호가 나온 뒤, 이게 신규 진입인지 청산/축소인지 알 수
+    # 있는 시점에 판단한다(아래 distrust_level 사용부 참조).
+    distrust_level = DataDistrustLevel.NORMAL
+    if distrust_monitor is not None:
+        primary_ticker = await adapter.get_ticker(symbol)
+        distrust_level = await check_and_persist_distrust(
+            pool,
+            distrust_monitor,
+            distrust_providers,
+            exchange=adapter.get_capabilities().exchange_name,
+            symbol=symbol,
+            primary=primary_ticker,
+            candles=candles,
+        )
+
     signal = strategy_engine.evaluate(
         fsm_config, market_state, execution_id=execution_id, fsm_state=current_fsm_state
     )
     if signal is None:
         return
+
+    if distrust_level == DataDistrustLevel.DISTRUSTED:
+        logger.info(
+            "run_execution_tick(execution_id=%s): DISTRUSTED 데이터 — 신규 주문 건너뜁니다.",
+            execution_id,
+        )
+        return  # 모든 신규 주문 거부(청산도) — 다음 틱 재평가
+    if distrust_level == DataDistrustLevel.SUSPICIOUS and current_fsm_state == FSMState.IDLE:
+        logger.info(
+            "run_execution_tick(execution_id=%s): SUSPICIOUS 데이터 — 신규 진입만 건너뜁니다.",
+            execution_id,
+        )
+        return  # 신규 진입만 거부 — HOLDING(청산/축소)은 아래로 계속 진행
 
     position_quantity = await compute_position_quantity(pool, execution_id)
     current_price = candles[-1].close if candles else None
