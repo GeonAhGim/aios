@@ -71,3 +71,58 @@ export function resolveRetryAfterSec(
   }
   return undefined;
 }
+
+// spec §3.3 ApiResponse.meta.as_of — 화면에 "데이터가 언제 기준인지"를 보여주기
+// 위한 순수 판정 함수. 파싱 실패/미래 시각/누락을 fresh로 침묵 처리하면 실제로는
+// 신선도를 알 수 없는 데이터가 "최신"으로 보이게 되므로, 세 경우 모두 isStale을
+// null(판정 불가)로 명시하고 kind로 원인을 구분해서 반환한다.
+export type FreshnessKind = "ok" | "missing" | "invalid" | "future";
+
+export interface FreshnessOk {
+  kind: "ok";
+  asOfDate: Date;
+  ageSec: number;
+  isStale: boolean;
+}
+
+export interface FreshnessFuture {
+  kind: "future";
+  asOfDate: Date;
+  ageSec: number;
+  isStale: null;
+}
+
+export interface FreshnessUnavailable {
+  kind: "missing" | "invalid";
+  asOfDate: null;
+  ageSec: null;
+  isStale: null;
+}
+
+export type Freshness = FreshnessOk | FreshnessFuture | FreshnessUnavailable;
+
+export interface DeriveFreshnessOptions {
+  staleAfterSec: number;
+}
+
+export function deriveFreshness(
+  asOf: string | null | undefined,
+  now: Date,
+  { staleAfterSec }: DeriveFreshnessOptions,
+): Freshness {
+  if (!asOf) {
+    return { kind: "missing", asOfDate: null, ageSec: null, isStale: null };
+  }
+
+  const asOfDate = new Date(asOf);
+  if (Number.isNaN(asOfDate.getTime())) {
+    return { kind: "invalid", asOfDate: null, ageSec: null, isStale: null };
+  }
+
+  const ageSec = (now.getTime() - asOfDate.getTime()) / 1000;
+  if (ageSec < 0) {
+    return { kind: "future", asOfDate, ageSec, isStale: null };
+  }
+
+  return { kind: "ok", asOfDate, ageSec, isStale: ageSec >= staleAfterSec };
+}

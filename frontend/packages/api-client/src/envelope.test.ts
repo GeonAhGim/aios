@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { EnvelopeFormatError, resolveRetryAfterSec, resolveTraceId, unwrap } from "./envelope";
+import {
+  EnvelopeFormatError,
+  deriveFreshness,
+  resolveRetryAfterSec,
+  resolveTraceId,
+  unwrap,
+} from "./envelope";
 
 describe("unwrap", () => {
   it("성공 응답에서 data와 meta를 꺼낸다", () => {
@@ -115,5 +121,55 @@ describe("resolveRetryAfterSec", () => {
   it("둘 다 없으면 undefined를 반환한다(호출부가 재시도 버튼을 즉시 활성화하는 기준)", () => {
     expect(resolveRetryAfterSec(null, undefined)).toBeUndefined();
     expect(resolveRetryAfterSec(undefined, null)).toBeUndefined();
+  });
+});
+
+// spec §3.3 ApiResponse.meta.as_of를 화면 표시용 신선도로 바꾸는 순수 함수.
+// 판정 불가 상태(누락/파싱불가/미래시각)를 fresh로 침묵 처리하지 않는지가 핵심.
+describe("deriveFreshness", () => {
+  it("정상 케이스: staleAfterSec 이내면 isStale=false", () => {
+    const now = new Date("2026-09-03T00:05:00Z");
+    const result = deriveFreshness("2026-09-03T00:00:00Z", now, { staleAfterSec: 600 });
+
+    expect(result.kind).toBe("ok");
+    expect(result.ageSec).toBe(300);
+    expect(result.isStale).toBe(false);
+    expect(result.asOfDate).toEqual(new Date("2026-09-03T00:00:00Z"));
+  });
+
+  it("경계 케이스: ageSec이 staleAfterSec과 정확히 같으면 stale로 판정한다", () => {
+    const now = new Date("2026-09-03T00:10:00Z");
+    const result = deriveFreshness("2026-09-03T00:00:00Z", now, { staleAfterSec: 600 });
+
+    expect(result.kind).toBe("ok");
+    expect(result.ageSec).toBe(600);
+    expect(result.isStale).toBe(true);
+  });
+
+  it("미래 시각: as_of가 now보다 미래면 isStale을 null(판정 불가)로 반환한다", () => {
+    const now = new Date("2026-09-03T00:00:00Z");
+    const result = deriveFreshness("2026-09-03T00:05:00Z", now, { staleAfterSec: 600 });
+
+    expect(result.kind).toBe("future");
+    expect(result.isStale).toBeNull();
+    expect(result.ageSec).toBe(-300);
+  });
+
+  it("파싱 불가/누락: silent fallback 없이 명시적 판정 불가 상태를 반환한다", () => {
+    const now = new Date("2026-09-03T00:00:00Z");
+
+    const invalid = deriveFreshness("not-a-date", now, { staleAfterSec: 600 });
+    expect(invalid.kind).toBe("invalid");
+    expect(invalid.isStale).toBeNull();
+    expect(invalid.asOfDate).toBeNull();
+    expect(invalid.ageSec).toBeNull();
+
+    const missing = deriveFreshness(undefined, now, { staleAfterSec: 600 });
+    expect(missing.kind).toBe("missing");
+    expect(missing.isStale).toBeNull();
+
+    const empty = deriveFreshness("", now, { staleAfterSec: 600 });
+    expect(empty.kind).toBe("missing");
+    expect(empty.isStale).toBeNull();
   });
 });

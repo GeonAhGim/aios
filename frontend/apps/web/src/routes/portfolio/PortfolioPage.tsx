@@ -14,10 +14,11 @@ import {
 } from "@aios/ui-web";
 import { useState } from "react";
 import { AppShell } from "../../components/layout/AppShell";
+import { DataFreshness } from "../../components/DataFreshness";
 import { DuplicateSubmitError, useIdempotentSubmit } from "../../hooks/useIdempotentSubmit";
 
 export function PortfolioPage() {
-  const { data: portfolio, isLoading } = usePortfolio();
+  const { data: portfolio, isLoading, dataUpdatedAt } = usePortfolio();
   const rebalance = useRebalancePortfolio();
   const { submit } = useIdempotentSubmit("portfolio.rebalance");
   const [drafts, setDrafts] = useState<Record<number, string>>({});
@@ -46,7 +47,10 @@ export function PortfolioPage() {
   return (
     <AppShell>
       <div className="space-y-6">
-        <PageHeader title="포트폴리오" />
+        <PageHeader
+          title="포트폴리오"
+          action={portfolio && <DataFreshness asOf={new Date(dataUpdatedAt).toISOString()} />}
+        />
 
         {isLoading ? (
           <LoadingState />

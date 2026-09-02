@@ -11,11 +11,12 @@ import {
   StatusBadge,
 } from "@aios/ui-web";
 import { AppShell } from "../../components/layout/AppShell";
+import { DataFreshness } from "../../components/DataFreshness";
 import { exchangeLabel } from "../../lib/exchangeLabels";
 
 export function DashboardPage() {
   const { data: riskProfile } = useRiskProfile();
-  const { data: portfolio, isLoading: portfolioLoading } = usePortfolio();
+  const { data: portfolio, isLoading: portfolioLoading, dataUpdatedAt } = usePortfolio();
   const { data: executions, isLoading: executionsLoading } = useExecutions();
 
   return (
@@ -27,7 +28,10 @@ export function DashboardPage() {
         />
 
         <Card>
-          <CardTitle>포트폴리오 요약</CardTitle>
+          <div className="flex items-center justify-between">
+            <CardTitle>포트폴리오 요약</CardTitle>
+            {portfolio && <DataFreshness asOf={new Date(dataUpdatedAt).toISOString()} />}
+          </div>
           {portfolioLoading ? (
             <LoadingState />
           ) : portfolio ? (
