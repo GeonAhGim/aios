@@ -1,0 +1,756 @@
+{
+  "BalanceView": {
+    "$defs": {
+      "Currency": {
+        "enum": [
+          "USDT",
+          "KRW"
+        ],
+        "title": "Currency",
+        "type": "string"
+      }
+    },
+    "properties": {
+      "account_code": {
+        "title": "Account Code",
+        "type": "string"
+      },
+      "as_of": {
+        "format": "date-time",
+        "title": "As Of",
+        "type": "string"
+      },
+      "available": {
+        "anyOf": [
+          {
+            "type": "number"
+          },
+          {
+            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+            "type": "string"
+          }
+        ],
+        "title": "Available"
+      },
+      "balance": {
+        "anyOf": [
+          {
+            "type": "number"
+          },
+          {
+            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+            "type": "string"
+          }
+        ],
+        "title": "Balance"
+      },
+      "currency": {
+        "$ref": "#/$defs/Currency"
+      },
+      "held": {
+        "anyOf": [
+          {
+            "type": "number"
+          },
+          {
+            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+            "type": "string"
+          }
+        ],
+        "title": "Held"
+      },
+      "last_entry_seq": {
+        "title": "Last Entry Seq",
+        "type": "integer"
+      },
+      "pending_payout": {
+        "anyOf": [
+          {
+            "type": "number"
+          },
+          {
+            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+            "type": "string"
+          }
+        ],
+        "title": "Pending Payout"
+      },
+      "schema_version": {
+        "const": "v1",
+        "default": "v1",
+        "title": "Schema Version",
+        "type": "string"
+      }
+    },
+    "required": [
+      "account_code",
+      "balance",
+      "held",
+      "available",
+      "pending_payout",
+      "currency",
+      "last_entry_seq",
+      "as_of"
+    ],
+    "title": "BalanceView",
+    "type": "object"
+  },
+  "HoldView": {
+    "$defs": {
+      "HoldState": {
+        "enum": [
+          "PENDING",
+          "CAPTURED",
+          "RELEASED",
+          "EXPIRED"
+        ],
+        "title": "HoldState",
+        "type": "string"
+      }
+    },
+    "properties": {
+      "account_code": {
+        "title": "Account Code",
+        "type": "string"
+      },
+      "amount": {
+        "anyOf": [
+          {
+            "type": "number"
+          },
+          {
+            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+            "type": "string"
+          }
+        ],
+        "title": "Amount"
+      },
+      "entry_id": {
+        "format": "uuid",
+        "title": "Entry Id",
+        "type": "string"
+      },
+      "expires_at": {
+        "format": "date-time",
+        "title": "Expires At",
+        "type": "string"
+      },
+      "hold_id": {
+        "format": "uuid",
+        "title": "Hold Id",
+        "type": "string"
+      },
+      "purpose": {
+        "title": "Purpose",
+        "type": "string"
+      },
+      "reference": {
+        "title": "Reference",
+        "type": "string"
+      },
+      "schema_version": {
+        "const": "v1",
+        "default": "v1",
+        "title": "Schema Version",
+        "type": "string"
+      },
+      "state": {
+        "$ref": "#/$defs/HoldState"
+      }
+    },
+    "required": [
+      "hold_id",
+      "account_code",
+      "amount",
+      "purpose",
+      "reference",
+      "state",
+      "expires_at",
+      "entry_id"
+    ],
+    "title": "HoldView",
+    "type": "object"
+  },
+  "IntegrityReport": {
+    "properties": {
+      "chain_ok": {
+        "title": "Chain Ok",
+        "type": "boolean"
+      },
+      "checked_at": {
+        "format": "date-time",
+        "title": "Checked At",
+        "type": "string"
+      },
+      "drifts": {
+        "items": {
+          "maxItems": 3,
+          "minItems": 3,
+          "prefixItems": [
+            {
+              "type": "string"
+            },
+            {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                  "type": "string"
+                }
+              ]
+            },
+            {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                  "type": "string"
+                }
+              ]
+            }
+          ],
+          "type": "array"
+        },
+        "title": "Drifts",
+        "type": "array"
+      },
+      "entries_verified": {
+        "title": "Entries Verified",
+        "type": "integer"
+      },
+      "first_broken_seq": {
+        "anyOf": [
+          {
+            "type": "integer"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "title": "First Broken Seq"
+      },
+      "schema_version": {
+        "const": "v1",
+        "default": "v1",
+        "title": "Schema Version",
+        "type": "string"
+      },
+      "zero_sum_ok": {
+        "title": "Zero Sum Ok",
+        "type": "boolean"
+      }
+    },
+    "required": [
+      "checked_at",
+      "entries_verified",
+      "chain_ok",
+      "zero_sum_ok",
+      "drifts",
+      "first_broken_seq"
+    ],
+    "title": "IntegrityReport",
+    "type": "object"
+  },
+  "JournalEntryView": {
+    "$defs": {
+      "Currency": {
+        "enum": [
+          "USDT",
+          "KRW"
+        ],
+        "title": "Currency",
+        "type": "string"
+      },
+      "LedgerEventType": {
+        "enum": [
+          "TOPUP_CONFIRMED",
+          "HOLD_PLACED",
+          "HOLD_CAPTURED",
+          "HOLD_RELEASED",
+          "REFUND",
+          "CHARGEBACK",
+          "PAYOUT_RELEASE",
+          "PAYOUT_PAID",
+          "MANUAL_ADJUSTMENT"
+        ],
+        "title": "LedgerEventType",
+        "type": "string"
+      },
+      "PostingLine": {
+        "description": "분개 행 하나. `amount`는 항상 양수 — 방향은 `side`가 표현한다\n(§3.3 원장 금액 NUMERIC(20,2) KRW quantize).",
+        "properties": {
+          "account_code": {
+            "title": "Account Code",
+            "type": "string"
+          },
+          "amount": {
+            "anyOf": [
+              {
+                "exclusiveMinimum": 0.0,
+                "type": "number"
+              },
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d{0,2}0*$",
+                "type": "string"
+              }
+            ],
+            "title": "Amount"
+          },
+          "currency": {
+            "$ref": "#/$defs/Currency"
+          },
+          "line_no": {
+            "title": "Line No",
+            "type": "integer"
+          },
+          "side": {
+            "$ref": "#/$defs/Side"
+          }
+        },
+        "required": [
+          "line_no",
+          "account_code",
+          "side",
+          "amount",
+          "currency"
+        ],
+        "title": "PostingLine",
+        "type": "object"
+      },
+      "Side": {
+        "enum": [
+          "DEBIT",
+          "CREDIT"
+        ],
+        "title": "Side",
+        "type": "string"
+      }
+    },
+    "properties": {
+      "audit_event_id": {
+        "format": "uuid",
+        "title": "Audit Event Id",
+        "type": "string"
+      },
+      "entry_hash": {
+        "title": "Entry Hash",
+        "type": "string"
+      },
+      "entry_id": {
+        "format": "uuid",
+        "title": "Entry Id",
+        "type": "string"
+      },
+      "event_ref": {
+        "title": "Event Ref",
+        "type": "string"
+      },
+      "event_type": {
+        "$ref": "#/$defs/LedgerEventType"
+      },
+      "idempotency_key": {
+        "title": "Idempotency Key",
+        "type": "string"
+      },
+      "lines": {
+        "items": {
+          "$ref": "#/$defs/PostingLine"
+        },
+        "title": "Lines",
+        "type": "array"
+      },
+      "lines_digest": {
+        "title": "Lines Digest",
+        "type": "string"
+      },
+      "posted_at": {
+        "format": "date-time",
+        "title": "Posted At",
+        "type": "string"
+      },
+      "prev_hash": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "title": "Prev Hash"
+      },
+      "replayed": {
+        "default": false,
+        "title": "Replayed",
+        "type": "boolean"
+      },
+      "schema_version": {
+        "const": "v1",
+        "default": "v1",
+        "title": "Schema Version",
+        "type": "string"
+      },
+      "sequence_no": {
+        "title": "Sequence No",
+        "type": "integer"
+      }
+    },
+    "required": [
+      "entry_id",
+      "sequence_no",
+      "event_type",
+      "event_ref",
+      "idempotency_key",
+      "lines",
+      "lines_digest",
+      "prev_hash",
+      "entry_hash",
+      "audit_event_id",
+      "posted_at"
+    ],
+    "title": "JournalEntryView",
+    "type": "object"
+  },
+  "LedgerEvent": {
+    "$defs": {
+      "Currency": {
+        "enum": [
+          "USDT",
+          "KRW"
+        ],
+        "title": "Currency",
+        "type": "string"
+      },
+      "LedgerEventType": {
+        "enum": [
+          "TOPUP_CONFIRMED",
+          "HOLD_PLACED",
+          "HOLD_CAPTURED",
+          "HOLD_RELEASED",
+          "REFUND",
+          "CHARGEBACK",
+          "PAYOUT_RELEASE",
+          "PAYOUT_PAID",
+          "MANUAL_ADJUSTMENT"
+        ],
+        "title": "LedgerEventType",
+        "type": "string"
+      }
+    },
+    "description": "`post_entry`(LC-9)의 입력. `event_ref`는 \"purchase:123\" 형태의\n도메인 참조이며, `idempotency_key`(LC-3)는 이로부터 파생된다.",
+    "properties": {
+      "actor_subject_id": {
+        "anyOf": [
+          {
+            "format": "uuid",
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "title": "Actor Subject Id"
+      },
+      "amount": {
+        "anyOf": [
+          {
+            "exclusiveMinimum": 0.0,
+            "type": "number"
+          },
+          {
+            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+            "type": "string"
+          }
+        ],
+        "title": "Amount"
+      },
+      "currency": {
+        "$ref": "#/$defs/Currency",
+        "default": "KRW"
+      },
+      "event_ref": {
+        "title": "Event Ref",
+        "type": "string"
+      },
+      "event_type": {
+        "$ref": "#/$defs/LedgerEventType"
+      },
+      "extra": {
+        "additionalProperties": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+              "type": "string"
+            },
+            {
+              "type": "string"
+            }
+          ]
+        },
+        "default": {},
+        "title": "Extra",
+        "type": "object"
+      },
+      "parties": {
+        "additionalProperties": {
+          "format": "uuid",
+          "type": "string"
+        },
+        "title": "Parties",
+        "type": "object"
+      },
+      "schema_version": {
+        "const": "v1",
+        "default": "v1",
+        "title": "Schema Version",
+        "type": "string"
+      },
+      "tenant_id": {
+        "anyOf": [
+          {
+            "format": "uuid",
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "title": "Tenant Id"
+      },
+      "trace_id": {
+        "format": "uuid",
+        "title": "Trace Id",
+        "type": "string"
+      }
+    },
+    "required": [
+      "event_type",
+      "event_ref",
+      "tenant_id",
+      "actor_subject_id",
+      "trace_id",
+      "amount",
+      "parties"
+    ],
+    "title": "LedgerEvent",
+    "type": "object"
+  },
+  "PayoutBatchView": {
+    "properties": {
+      "amount": {
+        "anyOf": [
+          {
+            "type": "number"
+          },
+          {
+            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+            "type": "string"
+          }
+        ],
+        "title": "Amount"
+      },
+      "batch_id": {
+        "format": "uuid",
+        "title": "Batch Id",
+        "type": "string"
+      },
+      "capture_entry_ids": {
+        "items": {
+          "format": "uuid",
+          "type": "string"
+        },
+        "title": "Capture Entry Ids",
+        "type": "array"
+      },
+      "paid_entry_id": {
+        "anyOf": [
+          {
+            "format": "uuid",
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "title": "Paid Entry Id"
+      },
+      "period_end": {
+        "format": "date",
+        "title": "Period End",
+        "type": "string"
+      },
+      "period_start": {
+        "format": "date",
+        "title": "Period Start",
+        "type": "string"
+      },
+      "release_entry_id": {
+        "anyOf": [
+          {
+            "format": "uuid",
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "title": "Release Entry Id"
+      },
+      "schema_version": {
+        "const": "v1",
+        "default": "v1",
+        "title": "Schema Version",
+        "type": "string"
+      },
+      "seller_user_id": {
+        "format": "uuid",
+        "title": "Seller User Id",
+        "type": "string"
+      },
+      "state": {
+        "enum": [
+          "SCHEDULED",
+          "RELEASED",
+          "PAID",
+          "FAILED"
+        ],
+        "title": "State",
+        "type": "string"
+      }
+    },
+    "required": [
+      "batch_id",
+      "seller_user_id",
+      "period_start",
+      "period_end",
+      "amount",
+      "state",
+      "capture_entry_ids",
+      "release_entry_id",
+      "paid_entry_id"
+    ],
+    "title": "PayoutBatchView",
+    "type": "object"
+  },
+  "PostingLine": {
+    "$defs": {
+      "Currency": {
+        "enum": [
+          "USDT",
+          "KRW"
+        ],
+        "title": "Currency",
+        "type": "string"
+      },
+      "Side": {
+        "enum": [
+          "DEBIT",
+          "CREDIT"
+        ],
+        "title": "Side",
+        "type": "string"
+      }
+    },
+    "description": "분개 행 하나. `amount`는 항상 양수 — 방향은 `side`가 표현한다\n(§3.3 원장 금액 NUMERIC(20,2) KRW quantize).",
+    "properties": {
+      "account_code": {
+        "title": "Account Code",
+        "type": "string"
+      },
+      "amount": {
+        "anyOf": [
+          {
+            "exclusiveMinimum": 0.0,
+            "type": "number"
+          },
+          {
+            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d{0,2}0*$",
+            "type": "string"
+          }
+        ],
+        "title": "Amount"
+      },
+      "currency": {
+        "$ref": "#/$defs/Currency"
+      },
+      "line_no": {
+        "title": "Line No",
+        "type": "integer"
+      },
+      "side": {
+        "$ref": "#/$defs/Side"
+      }
+    },
+    "required": [
+      "line_no",
+      "account_code",
+      "side",
+      "amount",
+      "currency"
+    ],
+    "title": "PostingLine",
+    "type": "object"
+  },
+  "TrialBalanceView": {
+    "description": "`total`은 복식부기 항등식에 의해 항상 0이어야 한다(LC-5, §4.4).",
+    "properties": {
+      "as_of": {
+        "format": "date-time",
+        "title": "As Of",
+        "type": "string"
+      },
+      "balances": {
+        "additionalProperties": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+              "type": "string"
+            }
+          ]
+        },
+        "title": "Balances",
+        "type": "object"
+      },
+      "last_entry_seq": {
+        "title": "Last Entry Seq",
+        "type": "integer"
+      },
+      "schema_version": {
+        "const": "v1",
+        "default": "v1",
+        "title": "Schema Version",
+        "type": "string"
+      },
+      "total": {
+        "anyOf": [
+          {
+            "type": "number"
+          },
+          {
+            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+            "type": "string"
+          }
+        ],
+        "title": "Total"
+      }
+    },
+    "required": [
+      "as_of",
+      "last_entry_seq",
+      "balances",
+      "total"
+    ],
+    "title": "TrialBalanceView",
+    "type": "object"
+  }
+}
