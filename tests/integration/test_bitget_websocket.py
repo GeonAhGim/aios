@@ -3,6 +3,7 @@
 주입해 결정적으로 재현한다(market_data_mixin.py 리팩터링 목적 그 자체)."""
 import json
 
+import httpx
 import pytest
 from websockets.exceptions import ConnectionClosed
 
@@ -45,8 +46,12 @@ class _FakeConnectCtx:
 
 
 async def test_run_ws_subscription_reconnects_after_connection_closed_with_backoff():
+    # FULL_AUDIT §2-B ② 반영 — "event":"subscribe" 메시지는 이제 로그만
+    # 남기고 on_message로 넘기지 않는다(구독 ack). 일반 데이터 메시지
+    # 전달을 검증하려는 이 테스트의 원래 의도를 지키려면 control 메시지가
+    # 아닌 형태를 써야 한다.
     first_connection = _FakeConnection(
-        ['{"event":"subscribe"}'], raise_after=ConnectionClosed(None, None)
+        ['{"data": [{"foo": "bar"}]}'], raise_after=ConnectionClosed(None, None)
     )
     call_count = {"n": 0}
 
@@ -77,7 +82,7 @@ async def test_run_ws_subscription_reconnects_after_connection_closed_with_backo
 
     assert call_count["n"] == 2
     assert sleep_calls == [1.0]
-    assert received == [{"event": "subscribe"}]
+    assert received == [{"data": [{"foo": "bar"}]}]
     assert first_connection.sent == ['{"op": "subscribe", "args": []}']
 
 
@@ -231,3 +236,160 @@ async def test_reconnect_resends_login_with_fresh_timestamp_not_stale_one(monkey
     assert second_login["op"] == "login"
     assert first_login["args"][0]["timestamp"] != second_login["args"][0]["timestamp"]
     assert first_login["args"][0]["sign"] != second_login["args"][0]["sign"]
+
+
+# ---------- FULL_AUDIT §2-B ② — ping/pong 하트비트, ack 로깅, 재동기화 ----------
+
+
+async def test_run_ws_subscription_sends_periodic_pings():
+    """핑 전송 자체는 ping_sleep_fn으로 결정적으로 재현 — 백오프용
+    sleep_fn과 분리돼 있어야 한다(같은 걸 쓰면 서로 오염됨, 모듈
+    docstring 참조). `_run_ws_subscription()` 전체를 통해서 테스트하면
+    핑 태스크와 메시지 수신 루프 사이의 asyncio 스케줄링 순서에 테스트
+    결과가 좌우되므로(연결이 메시지 하나 없이 바로 끊기면 핑 태스크가
+    단 한 번도 스케줄될 기회를 못 받을 수 있음), `_send_periodic_pings()`
+    자체를 직접 호출해 결정적으로 검증한다."""
+    from src.exchanges.bitget.market_data_mixin import _send_periodic_pings
+
+    connection = _FakeConnection([])
+    sleep_calls = {"n": 0}
+
+    async def fake_ping_sleep(seconds: float) -> None:
+        sleep_calls["n"] += 1
+        if sleep_calls["n"] > 3:
+            raise _StopTest
+
+    with pytest.raises(_StopTest):
+        await _send_periodic_pings(connection, 30.0, fake_ping_sleep)
+
+    assert connection.sent == ["ping", "ping", "ping"]
+
+
+async def test_run_ws_subscription_ignores_plaintext_pong_without_crashing():
+    connection = _FakeConnection(["pong"], raise_after=ConnectionClosed(None, None))
+    call_count = {"n": 0}
+
+    def connect_fn(url: str):
+        call_count["n"] += 1
+        if call_count["n"] == 1:
+            return _FakeConnectCtx(connection)
+        raise _StopTest
+
+    received: list[dict] = []
+
+    async def on_message(message: dict) -> None:
+        received.append(message)
+
+    with pytest.raises(_StopTest):
+        await _run_ws_subscription(
+            "wss://fake", {"op": "subscribe", "args": []}, on_message, connect_fn=connect_fn
+        )
+
+    assert received == []  # "pong"은 json.loads()로 넘어가지 않고 조용히 무시됨
+
+
+async def test_run_ws_subscription_logs_subscribe_ack_and_does_not_forward_it(caplog):
+    connection = _FakeConnection(
+        ['{"event":"subscribe","arg":{"channel":"ticker"}}'],
+        raise_after=ConnectionClosed(None, None),
+    )
+    call_count = {"n": 0}
+
+    def connect_fn(url: str):
+        call_count["n"] += 1
+        if call_count["n"] == 1:
+            return _FakeConnectCtx(connection)
+        raise _StopTest
+
+    received: list[dict] = []
+
+    async def on_message(message: dict) -> None:
+        received.append(message)
+
+    with caplog.at_level("INFO"):
+        with pytest.raises(_StopTest):
+            await _run_ws_subscription(
+                "wss://fake", {"op": "subscribe", "args": []}, on_message, connect_fn=connect_fn
+            )
+
+    assert received == []
+    assert any("구독 성공" in record.message for record in caplog.records)
+
+
+async def test_run_ws_subscription_logs_error_event_and_does_not_forward_it(caplog):
+    connection = _FakeConnection(
+        ['{"event":"error","code":"30001","msg":"channel does not exist"}'],
+        raise_after=ConnectionClosed(None, None),
+    )
+    call_count = {"n": 0}
+
+    def connect_fn(url: str):
+        call_count["n"] += 1
+        if call_count["n"] == 1:
+            return _FakeConnectCtx(connection)
+        raise _StopTest
+
+    received: list[dict] = []
+
+    async def on_message(message: dict) -> None:
+        received.append(message)
+
+    with caplog.at_level("WARNING"):
+        with pytest.raises(_StopTest):
+            await _run_ws_subscription(
+                "wss://fake", {"op": "subscribe", "args": []}, on_message, connect_fn=connect_fn
+            )
+
+    assert received == []
+    assert any("오류 이벤트" in record.message for record in caplog.records)
+
+
+async def test_subscribe_ticker_stream_resyncs_via_rest_after_reconnect():
+    """FULL_AUDIT §2-B ② — 재연결 성공 시 REST get_ticker()로 재동기화된
+    Ticker가 먼저 callback에 전달돼야 한다."""
+    first_connection = _FakeConnection([], raise_after=ConnectionClosed(None, None))
+    second_connection = _FakeConnection([], raise_after=ConnectionClosed(None, None))
+    connections = [first_connection, second_connection]
+    call_count = {"n": 0}
+
+    def connect_fn(url: str):
+        call_count["n"] += 1
+        if call_count["n"] <= len(connections):
+            return _FakeConnectCtx(connections[call_count["n"] - 1])
+        raise _StopTest
+
+    ticker_envelope = {
+        "code": "00000",
+        "msg": "success",
+        "requestTime": 1,
+        "data": [
+            {
+                "symbol": "BTCUSDT",
+                "lastPr": "80663.08",
+                "bidPr": "80664.02",
+                "askPr": "80664.03",
+                "baseVolume": "3407.42",
+                "ts": "1787851009318",
+            }
+        ],
+    }
+
+    def http_handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json=ticker_envelope)
+
+    transport = httpx.MockTransport(http_handler)
+    client = httpx.AsyncClient(base_url="https://api.bitget.com", transport=transport)
+    adapter = BitgetAdapter(
+        api_key="key", api_secret="secret", api_passphrase="pass", http_client=client
+    )
+
+    received = []
+
+    async def callback(ticker) -> None:
+        received.append(ticker)
+
+    with pytest.raises(_StopTest):
+        await adapter.subscribe_ticker_stream("BTC/USDT", callback, connect_fn=connect_fn)
+
+    assert len(received) == 1
+    assert received[0].symbol == "BTC/USDT"
