@@ -118,3 +118,23 @@ jobs:
         with:
           name: guard-report
           path: guard-report.json
+
+  frontend:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci --workspaces --include-workspace-root
+      - run: npm run lint --workspace=apps/web
+      - run: npm run build --workspace=apps/web
+      - name: Unit tests (vitest, 있을 때)
+        run: |
+          if grep -q '"vitest"' apps/web/package.json; then npx vitest run --workspace=apps/web; else echo "vitest 미도입 — task-119에서 도입"; fi

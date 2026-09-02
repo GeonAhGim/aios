@@ -19,3 +19,5 @@
 /src/api/                 @GeonAhGim
 /src/services/            @GeonAhGim
 /src/db/migrations/       @GeonAhGim
+/frontend/                @GeonAhGim
+/docs/design/             @GeonAhGim

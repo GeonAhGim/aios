@@ -180,7 +180,7 @@ mypy strict 통과의 실질: `type: ignore` 178건 중 160건이 거래소 믹�
   채 확장이 진행됐다.
 - **FROZEN 존 모순.** `.aios-zone`은 `src/core/strategy,portfolio,executor`를
   FROZEN으로 선언하고, 그 안에 647줄의 실제 판단 엔진이 있다. 근거로 인용된
-  `ADR-2026-08-29-E`는 `C:\aios\mihwa-aios-docs\`에만 있고 저장소 `docs/`와
+  `ADR-2026-08-29-E`는 `C:\aios\aios-docs\`에만 있고 저장소 `docs/`와
   `C:\aios\` 루트에는 없다. `src/core/risk/decision/**`로 지정된 FROZEN 경로는
   실제 파일(`risk/engine.py`)과 다르다. CI에는 zone 검증이 없고 CODEOWNERS의
   `@{owner}`는 치환되지 않았다.
@@ -331,7 +331,7 @@ connections gather)는 이름값을 한다. 레드팀 22개 항목의 코드 수
 
 ## 10. 프론트엔드
 
-`C:\aios\mihwa-aios-frontend`: React 19 + Vite 모노레포, 85파일 6.2K줄, 11커밋.
+`C:\aios\aios-frontend`: React 19 + Vite 모노레포, 85파일 6.2K줄, 11커밋.
 테스트 0건. 백엔드 엔드포인트 약 60개를 호출하지만 foundation 엔드포인트 참조는
 0건이다. 즉 사용자가 실제로 만지는 화면과 foundation 안전 계층 사이에도 연결이
 없다. 103번 P1-02가 요구한 page route→BFF→contract 매핑과 계약 테스트는
