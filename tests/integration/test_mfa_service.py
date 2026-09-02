@@ -91,7 +91,7 @@ async def test_verify_with_wrong_code_discards_secret(mfa, pool):
     user_id, email = await _real_user(pool)
     await mfa.setup(user_id, email)
 
-    with pytest.raises(MfaError):
+    with pytest.raises(MfaError, match="인증 코드가 올바르지 않습니다"):
         await mfa.verify(user_id, "000000")
 
     async with pool.acquire() as conn:
@@ -147,7 +147,11 @@ async def test_verify_rejects_replaying_the_same_totp_code(pool):
             "UPDATE users SET mfa_enabled = false WHERE user_id = $1", user_id
         )
 
-    with pytest.raises(MfaError):
+    # 코드 자체는 올바른 재사용이므로, "코드가 틀렸다"는 오인을 막기 위해
+    # 일반 실패와는 다른 메시지여야 한다 — 사용자가 방금 전송 실패로
+    # 같은 코드를 재시도한 것과 구별이 안 되면 2단계 인증이 고장난
+    # 것처럼 보인다.
+    with pytest.raises(MfaError, match="이미 사용한 코드"):
         await mfa.verify(user_id, code)  # 같은 구간, 같은 코드 재사용 시도
 
 

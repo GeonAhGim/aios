@@ -81,6 +81,7 @@ class MfaService:
             already_enabled = bool(row["mfa_enabled"]) if row is not None else False
 
             valid = False
+            replayed = False
             if encrypted_secret is not None and self._totp_code_valid(
                 encrypted_secret, totp_code
             ):
@@ -88,6 +89,7 @@ class MfaService:
                 # 타임코드와 같으면(재사용) 거부한다.
                 timecode = self._current_timecode(encrypted_secret)
                 valid = await self._consume_timecode(conn, user_id, timecode)
+                replayed = not valid
 
             if not valid:
                 if not already_enabled:
@@ -105,6 +107,17 @@ class MfaService:
                     # 보내 이미 켜진 MFA를 원격으로 영구 비활성화시킬 수 있던
                     # 인증 우회 구멍을 막는다.
                     pass
+                # 이 엔드포인트(/auth/mfa/verify)는 이미 Bearer 토큰으로 인증된
+                # 사용자만 호출하므로(#12의 로그인 타이밍 사이드채널과 무관),
+                # "재사용"과 "코드 자체가 틀림"을 구분해줘도 계정 존재 여부 등이
+                # 새어나가지 않는다 — 오히려 구분 없이 뭉뚱그리면 사용자가 (특히
+                # 방금 전송이 실패해 같은 코드로 재시도했을 때) 정상 코드인데도
+                # "코드가 틀렸다"고 오인해 2단계 인증이 고장난 것처럼 보인다.
+                if replayed:
+                    raise MfaError(
+                        "이미 사용한 코드입니다. 인증 앱에 새로 표시되는 코드로 "
+                        "다시 시도해주세요."
+                    )
                 raise MfaError("인증 코드가 올바르지 않습니다.")
 
             await conn.execute(

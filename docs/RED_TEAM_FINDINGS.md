@@ -11,6 +11,241 @@
 
 ---
 
+## 2026-09-02-재검증 · 01~18번 전수 재검증 완료
+
+이전 재검증 대기(🟢) 항목 전체를 이 세션이 직접 실행해 확인했다 —
+`TEST_DATABASE_URL`을 `aios_test`(격리된 DB, `docker-compose.dev.yml`의
+postgres 컨테이너)로 설정한 뒤 `pytest`(709 passed, 0 failed),
+`ruff check .`(all checks passed), `mypy src`(222 files, no issues)를
+전부 직접 실행. 01~18번 전 항목이 자체 보고가 아니라 실제 실행 결과로
+검증됨. 03번(버그 아님)·18번(참고용) 제외 나머지는 이제 ✅ FIXED로
+간주해도 된다 — 다만 상태 라벨 자체는 각 항목 원문 그대로 두고 여기
+한 곳에 재검증 결과만 기록한다(각 항목을 개별로 다시 쓰지 않기 위함).
+
+이어서, 아직 아무도 감사하지 않은 최근 커밋(`f74204a` FD-4/FD-8 주문
+전송+판단 계층, `826f7fa` 가격/지표 알림, `0a19589`/`0eb5c68`/`d9cb7c5`/
+`cf502cd` 신규 엔드포인트들)을 새로 감사해 아래 19~24번을 추가한다.
+19~22번은 이 세션이 실제 코드를 직접 읽어 재확인했다(19/20/21번은
+해당 파일 원문을 직접 Read로 대조).
+
+---
+
+## 2026-09-02-19 · order_service.submit_order()의 멱등성 체크가 TOCTOU — 거래소엔 나갔지만 DB엔 없는 고아 주문이 발생할 수 있음 — 심각도 높음
+
+**상태**: 🔴 OPEN
+
+**발견**: `src/services/order_service/submit.py::submit_order()`가 (1)
+`repository.get_by_client_order_id`로 기존 주문 존재 여부를 확인 →
+(2) 없으면 `adapter.place_order(order)`로 실제 거래소에 주문 전송 →
+(3) `repository.insert`로 DB에 영속화, 순서로 진행한다. 이 세 단계
+사이에 잠금이나 단일 트랜잭션이 없다. `orders.client_order_id`는 DB
+UNIQUE 제약이 걸려 있지만, 그 제약 위반(`asyncpg.UniqueViolationError`)을
+`submit_order()` 어디서도 잡지 않는다.
+
+**재현 시나리오**: 같은 `client_order_id`로 `submit_order()`가 거의
+동시에 두 번 호출되면(중복 디스패치, 클라이언트 재시도 등) 둘 다 (1)
+단계에서 "기존 주문 없음"을 확인하고 통과, 둘 다 (2)단계에서 실제
+거래소에 주문을 전송할 수 있다(거래소가 `client_order_id`를 서버측에서
+멱등키로 인식해 중복을 걸러줄 수도 있으나, `ExchangeAdapter` 인터페이스
+계약에는 그 보장이 없고 KIS 어댑터의 실제 동작은 확인되지 않았다).
+(3)단계에서 하나는 정상 insert, 다른 하나는 UNIQUE 위반으로 예외가
+발생하는데 — **이 호출자 입장에서는 실제로 거래소에 주문을 넣었는데도
+예외를 받는다.** 그 주문은 DB에 없고, `order_id`도 없고, FD-4.5
+UNKNOWN 재조회 로직도 이 주문의 존재 자체를 모른다 — 완전히 고아
+상태로 거래소에만 살아있는 실제 주문이 된다. 동시성 없이도, "거래소
+전송 성공 → DB insert 시점에 커넥션 끊김" 같은 일반적인 일시 장애
+만으로도 동일한 고아 주문이 생길 수 있다.
+
+**영향**: PAPER 모드에서는 실제 자금 위험은 없지만, FakeExchangeAdapter가
+아닌 실제 거래소 sandbox와 연결되는 순간부터는 실제(모의)계좌에 추적
+불가능한 포지션이 남는다 — 이 시스템이 요구하는 "모든 주문은 DB에
+영속화되고 추적 가능해야 한다"는 전제 자체가 깨진다.
+
+**권장 수정 방향**: (2)/(3) 사이 순서를 뒤집기는 어렵지만(거래소가
+먼저 진실의 원천), 최소한 (3)의 `UniqueViolationError`를 명시적으로
+잡아 "이미 처리된 client_order_id — 거래소엔 전송됐을 수 있으니
+재조회로 확인" 흐름으로 연결해야 한다. 근본적으로는 (1)+(2)+(3) 전체를
+`client_order_id` 기준 advisory lock 또는 DB 레벨 `INSERT ... ON
+CONFLICT DO NOTHING`을 먼저 걸어 "이 주문을 시도할 권리"를 원자적으로
+선점한 뒤에만 거래소를 호출하는 순서로 재구성하는 걸 권장.
+
+---
+
+## 2026-09-02-20 · order_service.repository의 update_from_exchange/update_after_modify가 이미 고친 줄 알았던 "조건없는 UPDATE" 패턴으로 새 모듈에서 재발 — 심각도 높음
+
+**상태**: 🔴 OPEN
+
+**발견**: `src/services/order_service/repository.py::update_from_exchange()`(98-116행)와
+`update_after_modify()`(119-134행) 둘 다 `UPDATE orders SET ... WHERE
+order_id = $1`만 걸려 있고, **직전에 읽은 상태를 WHERE절에서 재확인하지
+않는다** — 04/05/08/09/16/17번 항목에서 이미 확인·수정된 것과 정확히
+같은 근본원인이 이번 세션에 새로 추가된 모듈에서 그대로 재발했다.
+호출부 3곳(`cancel.py:44-45`, `submit.py:89-90` `apply_fill()`,
+`reconcile.py:54-55` `resolve_unknown()`, `modify.py:56-57`)이 전부
+먼저 SELECT로 상태를 Python에서 확인한 뒤, 이 조건없는 UPDATE로
+덮어쓴다.
+
+**재현 시나리오**: 주문 X가 SUBMITTED 상태. Watchdog가 안전정지 목적으로
+`cancel_order(X)`를 호출해 거래소 취소 확인 후 status=CANCELLED로
+쓰려는 순간, 동시에 체결통보/폴링 핸들러가 취소 직전에 거래소에서
+이미 발생한 체결을 받아 `apply_fill(X, ...)`을 호출해 status=FILLED로
+쓰려 한다. 두 UPDATE 모두 `order_id`만으로 무조건 통과하므로, Postgres에
+나중에 커밋되는 쪽이 아무 충돌 감지 없이 조용히 이긴다 — 실제로는
+체결됐는데 DB엔 CANCELLED로 남아 체결이 손익/리스크/포지션 계산에서
+누락되거나, 반대로 실제로는 취소됐는데 FILLED로 남을 수 있다.
+`resolve_unknown()` ↔ `cancel_order()`/`apply_fill()` 사이, `modify_order()`의
+`update_after_modify` ↔ 다른 상태변경 호출 사이에도 동일 경합이
+존재한다.
+
+**권장 수정 방향**: 04/05/08/09/16/17번이 이미 쓴 패턴 그대로 —
+`WHERE order_id=$1 AND status = $expected_prior` 조건을 추가하고
+`RETURNING`이 빈 행이면 "동시 상태 변경 감지, 재조회 후 재판단"으로
+연결. 이 프로젝트 안에 이미 5곳 넘게 정착된 패턴이 새 코드에 자동으로
+적용되지 않은 것 자체가, 이 클래스의 버그를 코드리뷰 체크리스트나
+린트 규칙으로 강제할 필요가 있다는 신호이기도 하다.
+
+---
+
+## 2026-09-02-21 · AlertService.evaluate_all_active()가 미검증 indicator/params로 인한 예외를 잡지 않아 전체 사용자의 알림 평가 루프를 영구 정지시킴 — 15번과 동일 클래스, 새 모듈에서 재발 — 심각도 높음
+
+**상태**: 🔴 OPEN
+
+**발견**: `src/api/schemas/alerts.py::AlertCreateRequest.indicator`는
+검증 없는 순수 `str`이고, `POST /alerts`(`src/api/routers/alerts.py::create_alert`)도
+`AlertService.create_alert()`도 이 값을 `IndicatorService`가 실제로
+지원하는 지표 집합과 대조하지 않는다. 배경 루프
+`src/services/alert_service.py::evaluate_all_active()`(133-189행)는
+자격증명 미등록만 `try/except CredentialNotFoundError`(143-149행)로
+방어하고, 바로 다음 줄 `self._indicators.calculate(alert.indicator,
+candles, **alert.params)`(151행)는 어떤 try/except로도 감싸여 있지
+않다. `IndicatorService.calculate()`는 미지원 지표명에 `IndicatorError`를
+던지고, 잘못된 `params` 키는 TA-Lib 호출에서 `TypeError`를 던진다.
+호출부 `src/main.py::_alert_evaluation_loop()`(99-102행)도
+`await alert_service.evaluate_all_active()` 자체를 try/except 없이
+호출하고, 이 코루틴을 감싼 `asyncio.create_task(...)`(104행)는
+종료 시점(`finally` 블록) 외에는 아무도 결과/예외를 회수하지 않는다.
+
+**재현 시나리오**: 인증된 사용자 아무나 `POST /alerts`에
+`{"indicator": "NOT_REAL", "operator": "<", "threshold": 1, ...}`처럼
+존재하지 않는 지표명을 보내면 201로 그대로 생성되어 ACTIVE 상태로
+저장된다. 다음 60초 평가 주기에 `evaluate_all_active()`가
+`IndicatorError`를 던지고, 이 예외가 `_alert_evaluation_loop()`의
+`while True` 루프 자체를 빠져나가 `alert_task` 코루틴을 영구히
+죽인다 — **재시작 로직이 없어 프로세스를 재기동하기 전까지 그 어떤
+사용자의 알림도 다시는 평가되지 않는다.** 이는
+`alert_service.py`가 자기 docstring/모듈 설명에 명시한 보장("개별
+알림 평가 실패는 그 알림만 건너뛰고... 다른 사용자의 알림 평가를
+막으면 안 되므로 루프 전체를 실패시키지 않는다")과 정면으로 모순된다
+— 정확히 15번 항목(EventBus의 audit_sink 실패가 워커 태스크를 조용히
+죽임)과 같은 클래스의 버그가 새 모듈에서 재발한 것.
+
+**권장 수정 방향**: (a) `evaluate_all_active()`의 `for alert in
+alerts` 루프 안에서 `self._indicators.calculate(...)` 호출도
+try/except로 감싸 실패한 알림 하나만 건너뛰도록 한다(모듈이 원래
+약속한 동작). (b) `_alert_evaluation_loop()` 자체에도 15번 수정 때
+적용한 것과 같은 원칙 — 넓은 try/except로 감싸 어떤 예외도 루프를
+빠져나가지 못하게 하거나 태스크에 done-callback을 달아 죽는 즉시
+로그+재기동. (c) 부수적으로 `AlertCreateRequest.indicator`를 생성
+시점에 `IndicatorService`가 지원하는 이름 집합으로 검증해,애초에
+잘못된 지표명이 저장되지 않도록 막는 것도 권장(사후 방어와 사전
+검증 둘 다 필요 — 사전 검증만으로는 이미 저장된 레거시/악의적 데이터를
+못 막고, 사후 방어만으로는 매 사이클 불필요한 실패를 반복함).
+
+---
+
+## 2026-09-02-22 · execution_loop의 fsm_state 갱신이 동시 tick에 대해 조건부가 아니라, 승인된 자본배분을 초과하는 중복 실주문 제출이 가능 — 심각도 높음(현재는 스케줄러 미배선으로 잠재적)
+
+**상태**: 🔴 OPEN (latent — `main.py`에 `run_execution_tick()`을 호출하는
+스케줄러가 아직 배선되지 않아 지금 당장 트리거할 방법은 없음. 배선
+전에 반드시 해소 필요)
+
+**발견**: `src/services/execution_loop/tick.py::run_execution_tick()`이
+`fsm_state`를 일반 `SELECT`(143/148행, 잠금 없음)로 한 번 읽고, 신호
+평가·PortfolioEngine·RiskEngine을 거쳐 최종적으로 `_make_fsm_state_writer`
+(75-84행)가 `UPDATE strategy_executions SET fsm_state = $2 WHERE id =
+$1`로 **직전에 읽은 fsm_state를 재확인하지 않고** 조건없이 쓴다 — 이
+프로젝트가 이미 같은 이유로 `SELECT ... FOR UPDATE`를 쓰고 있는
+`portfolio_service.py`/`purchase_service.py`와 대조된다.
+
+**재현 시나리오**: 같은 `execution_id`에 대해 두 번의 tick이 겹치면
+(느린 거래소 응답으로 tick N이 끝나기 전에 tick N+1이 시작하거나,
+스케줄러가 두 개 이상이면) 둘 다 `fsm_state=IDLE`을 읽고, 둘 다 매수
+신호를 평가하고, 각자 독립적으로 `get_balance()`를 조회해 서로의
+아직 미체결 주문을 못 본 채 PortfolioEngine/RiskEngine을 각각 통과한다.
+`submit_order()`의 멱등키(`client_order_id`, `execution_id:state:
+isoformat(now)`, `executor.py:87-89`)는 마이크로초 타임스탬프를
+포함해 두 호출이 우연히 같은 키가 될 확률이 사실상 0이라 **19/20번의
+멱등성 방어로도 이 중복을 못 잡는다** — 신호 하나에 실제 주문 두
+개가 나가 `allocated_capital`을 초과한 포지션이 만들어질 수 있다.
+
+**권장 수정 방향**: `run_execution_tick()`의 대상 실행 행을 `SELECT
+... FOR UPDATE`로 잠그거나(advisory lock도 대안), 최소한 최종 쓰기를
+`WHERE id=$1 AND fsm_state=$expected`(방금 읽은 값) 조건부로 바꿔
+`RETURNING`이 빈 행이면 그 tick 자체를 건너뛰도록 해야 한다. **이
+스케줄러가 아직 배선되지 않았다는 점이 유일한 안전장치이므로, 실제
+scheduler 배선 PR과 반드시 같이 묶어서 처리할 것을 강하게 권고.**
+
+---
+
+## 2026-09-02-23 · 이번 감사에서 함께 발견한 중간 심각도 항목 4건 (execution_loop 2건 + 비동기 원자성 2건)
+
+**상태**: 🔴 OPEN (모두 중간 심각도 — fail-safe 방향으로 실패하거나
+발생 확률이 낮음)
+
+**a) tick.py의 pause 체크가 tick 시작 시점 1회뿐** —
+`tick.py:145-146`이 `paused_by`를 tick 시작 시 한 번만 확인한다. 그
+직후~Executor 호출(230행) 사이에 들어온 pause 요청은 이번 tick의
+주문 제출을 막지 못한다. Watchdog가 이 사이 안전정지를 걸어도 이번
+tick은 이미 진행 중인 주문 제출을 끝까지 마친다.
+
+**b) Executor 호출 실패 시 fsm_state가 PENDING에 고아로 남을 수 있음** —
+`tick.py:213-214`가 `fsm_state=PENDING`을 쓴 **다음에** `Executor.execute()`를
+호출한다. 이 호출이 order 행 생성 전에 예외를 던지거나(파라미터
+검증 실패 등) 프로세스가 죽으면, 실행은 order 없이 PENDING에 영구히
+갇힌다 — 다음 tick의 `_handle_pending_fill_check`(98-106행)는 `order
+is None`이면 조용히 리턴할 뿐 복구 로직이 없고, `watchdog_process.py`도
+`fsm_state`는 건드리지 않는다. 틀린 주문이 나가는 건 아니지만(fail-safe
+방향), 아무 자동 복구 없이 조용히 멈춘 실행이 방치된다.
+
+**c) paused 상태의 실행은 미체결 주문의 fill 반영을 영원히 못 받음** —
+`tick.py:145-146`의 `paused_by is not None` 체크가 150행의 PENDING
+상태 체크보다 먼저 실행돼 조기 리턴한다. 즉 주문 제출 직후 일시정지된
+실행은 그 주문이 실제로 체결됐는지 다시는 확인되지 않는다 —
+`fsm_state`가 실제 거래소 상태와 영구히 어긋난 채로 남을 수 있다.
+
+**d) order_service의 DB 쓰기와 이벤트 발행이 원자적이지 않음** —
+`submit.py:55-64`/`cancel.py:47-56`/`reconcile.py:56-65` 모두 DB
+커밋 후 `publish()`를 별도 단계로 호출한다(순서 자체는 올바름). 그
+사이 예외나 프로세스 종료가 끼면 상태는 영속화됐지만 이벤트는 영원히
+발행되지 않는다 — 데이터 손상은 아니고 이벤트 유실이라 심각도는
+낮지만, 이벤트를 구독하는 다른 서비스(알림 등)가 그 변화를 영원히
+모르게 된다.
+
+**권장 수정 방향**: (a) Executor 호출 직전에 pause 상태를 한 번 더
+확인. (b) tick이 크래시 복구 스캔(예: PENDING인데 N분 넘게 order가
+없는 실행을 주기적으로 찾아 IDLE로 되돌리거나 알림)을 갖추도록 보강.
+(c) paused 체크와 PENDING-fill-check 체크의 순서를 바꾸거나, paused여도
+fill 확인만은 계속 수행하도록 분리. (d) outbox 패턴(같은 트랜잭션에
+이벤트를 임시 테이블로 같이 쓰고 별도 워커가 발행) 도입 여부는
+비용 대비 지금 급하지 않음 — 낮은 우선순위로 기록만.
+
+---
+
+## 2026-09-02-24 · Alert 생성에 사용자당 개수 상한이 없음 (참고용, 우선순위 낮음)
+
+**상태**: 🔴 OPEN (낮은 심각도)
+
+**발견**: `AlertService.create_alert()`(`alert_service.py:82-111행`)에
+사용자당 활성 알림 개수 제한이 없다. `evaluate_all_active()`가 전체
+알림을 순차 `for` 루프로 도는 구조라, 한 사용자가 알림을 대량 생성하면
+그 사용자 몫만큼 매 평가 주기(60초)의 처리 시간이 늘어나 다른 모든
+사용자의 알림 평가도 함께 지연된다.
+
+**권장 수정 방향**: `create_alert()`에 사용자별 ACTIVE 알림 개수
+상한(예: 20~50개)을 추가.
+
+---
+
 ## 2026-09-01-08 · PAPER 실행 루프가 adapter의 실제 sandbox 상태를 증명하지 않음
 
 **상태**: 🟢 두 세션이 독립적으로 수정한 결과가 병합됨(이 세션 자체
@@ -721,6 +956,24 @@ clock 주입과 동일 원칙) 실제로 30초를 기다리지 않고도 서로 
 로그인, MFA 활성화 후 재검증)도 재사용 방지로 인해 실제 동작이
 바뀌어(같은 코드 두 번 통과가 더 이상 허용되지 않음) 주입 clock으로
 다음 구간 코드를 만들도록 갱신.
+
+**후속 개선(2026-09-02, 구현 세션)**: 사용자가 직접 "2차인증에 문제가
+있었다"고 보고해 재조사한 결과, 이 재사용 방지 자체는 정확히 의도대로
+동작하지만 `MfaService.verify()`가 "코드 재사용" 실패와 "코드 자체가
+틀림" 실패에 똑같이 `"인증 코드가 올바르지 않습니다"`를 던지고
+있었다 — 실제 사용자 시나리오(예: 응답 지연/일시적 DB 장애로 첫
+`/auth/mfa/verify` 요청이 실패한 줄 알고 인증 앱에 아직 떠 있는 같은
+코드로 재시도)에서는 코드가 틀린 게 아니라 "이미 성공 처리된 코드"인데
+"코드가 틀렸다"는 메시지를 받아 2단계 인증 자체가 고장난 것처럼
+보인다. `/auth/mfa/verify`는 `get_current_user`(Bearer 토큰)로 이미
+인증된 사용자만 호출하는 엔드포인트라(#12의 로그인 타이밍
+사이드채널과 무관 — 로그인/재인증 경로의 메시지는 그대로 뭉뚱그려
+둠) 재사용 여부를 구분해 알려줘도 계정 정보가 새어나가지 않는다. 이제
+재사용으로 막힌 경우엔 `"이미 사용한 코드입니다. 인증 앱에 새로
+표시되는 코드로 다시 시도해주세요."`를 던진다. 기존 테스트 2개에
+메시지 검증(`pytest.raises(MfaError, match=...)`)을 추가해 두 실패
+경로가 서로 다른 메시지임을 고정했다(관련 테스트 6개 통과,
+ruff/mypy strict clean).
 
 **발견**: `mfa_service.py::_check_code()`가 `pyotp`의 `TOTP.verify()`를
 `valid_window` 기본값(0)으로만 호출하고, 성공한 코드를 "이미 썼다"고
