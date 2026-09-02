@@ -192,6 +192,70 @@ def _order_row(**overrides: object) -> dict:
     return row
 
 
+async def test_row_to_order_parses_avg_price_and_timestamps():
+    """FULL_AUDIT §2-B ③ 회귀 — priceAvg/cTime/uTime이 버려지지 않고
+    average_fill_price/created_at/updated_at으로 반영돼야 한다."""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return _json_response(
+            {
+                "code": "00000",
+                "msg": "success",
+                "requestTime": 1,
+                "data": _order_row(
+                    status="filled",
+                    fillSize="0.01",
+                    priceAvg="81234.5",
+                    cTime="1700000000000",
+                    uTime="1700000100000",
+                ),
+            }
+        )
+
+    adapter = _make_adapter(handler)
+    order = await adapter.get_order("999")
+
+    assert order.average_fill_price is not None
+    assert order.average_fill_price.amount == Decimal("81234.5")
+    assert order.created_at.year == 2023
+    assert order.updated_at > order.created_at
+
+
+async def test_row_to_order_falls_back_to_price_when_no_avg_price():
+    def handler(request: httpx.Request) -> httpx.Response:
+        return _json_response(
+            {
+                "code": "00000",
+                "msg": "success",
+                "requestTime": 1,
+                "data": _order_row(price="80000"),
+            }
+        )
+
+    adapter = _make_adapter(handler)
+    order = await adapter.get_order("999")
+
+    assert order.average_fill_price is not None
+    assert order.average_fill_price.amount == Decimal("80000")
+
+
+async def test_row_to_order_leaves_avg_price_none_when_unfilled():
+    def handler(request: httpx.Request) -> httpx.Response:
+        return _json_response(
+            {
+                "code": "00000",
+                "msg": "success",
+                "requestTime": 1,
+                "data": _order_row(priceAvg="0"),
+            }
+        )
+
+    adapter = _make_adapter(handler)
+    order = await adapter.get_order("999")
+
+    assert order.average_fill_price is None
+
+
 async def test_get_open_orders_parses_unfilled_orders_response():
     def handler(request: httpx.Request) -> httpx.Response:
         assert request.url.path == "/api/v2/spot/trade/unfilled-orders"

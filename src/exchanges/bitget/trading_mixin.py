@@ -26,7 +26,7 @@ from decimal import Decimal
 from typing import Any
 from uuid import uuid4
 
-from src.data.models.base import AssetClass
+from src.data.models.base import AssetClass, Currency, Money
 from src.data.models.trading import Order, OrderSide, OrderStatus, OrderType
 
 # 확인된 값(라이브/문서 조사) + 미확인 값은 UNKNOWN으로 안전하게 폴백
@@ -43,16 +43,38 @@ def _map_status(raw_status: str) -> OrderStatus:
     return _STATUS_MAP.get(raw_status, OrderStatus.UNKNOWN)
 
 
+def _parse_bitget_timestamp(raw_ts: str | None) -> datetime:
+    """Bitget는 밀리초 epoch를 문자열로 준다(cTime/uTime 등, 기존
+    place-order 응답 조사와 동일 관례). 값이 없으면(구버전 응답 등)
+    호출 시점으로 안전하게 폴백한다(8.3 원칙 — 모르는 값을 실패로
+    단정하지 않는다)."""
+    if not raw_ts:
+        return datetime.now(timezone.utc)
+    return datetime.fromtimestamp(int(raw_ts) / 1000, tz=timezone.utc)
+
+
 def _row_to_order(data: dict[str, Any]) -> Order:
     """orderInfo/unfilled-orders/history-orders 3개 엔드포인트가 공유하는
     행 형태 — Bitget 스팟 거래 API는 이 3곳에서 동일한 필드 이름을 쓴다
     (place-order/orderInfo에서 이미 확인된 규칙과 동일). `get_order()`의
-    기존 파싱 로직을 그대로 뽑아 재사용한다(중복 방지)."""
+    기존 파싱 로직을 그대로 뽑아 재사용한다(중복 방지).
+
+    2026-09-03 거래소 내구성 감사 반영(FULL_AUDIT §2-B ③) — 이전에는
+    priceAvg/price/cTime을 버려 average_fill_price가 항상 None으로
+    영속화됐다. `priceAvg`(평균체결가) 우선, 없으면(미체결 주문 등)
+    `price`(지정가)로 폴백 — 둘 다 없거나 "0"이면 시장가 미체결처럼
+    아직 가격 정보가 없는 상태이므로 None 유지."""
     status = _map_status(data.get("status", ""))
     filled_quantity = (
         Decimal(data["fillSize"])
         if "fillSize" in data
         else Decimal(data["size"]) if status == OrderStatus.FILLED else Decimal("0")
+    )
+    avg_price_raw = data.get("priceAvg") or data.get("price")
+    average_fill_price = (
+        Money(amount=Decimal(avg_price_raw), currency=Currency.USDT)
+        if avg_price_raw and Decimal(avg_price_raw) != 0
+        else None
     )
     return Order(
         order_id=uuid4(),
@@ -69,8 +91,9 @@ def _row_to_order(data: dict[str, Any]) -> Order:
         quantity=Decimal(data.get("size", "0")),
         status=status,
         filled_quantity=filled_quantity,
-        created_at=datetime.now(timezone.utc),
-        updated_at=datetime.now(timezone.utc),
+        average_fill_price=average_fill_price,
+        created_at=_parse_bitget_timestamp(data.get("cTime")),
+        updated_at=_parse_bitget_timestamp(data.get("uTime")),
         asset_class=AssetClass.CRYPTO,
     )
 
