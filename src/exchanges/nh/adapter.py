@@ -152,17 +152,22 @@ class NHAdapter(
 
     @property
     def is_paper_trading(self) -> bool:
-        """PM 배정 지침 (1) — 공식 SDK README로 모의투자 도메인
-        (moapi.nhplug.com, 계좌구분 "03")이 실제로 존재함을 확인했다
-        (02e 스펙 §2) — 추측이 아니라 확인된 사실이라 생성자 플래그를
-        그대로 True로 반환해도 된다."""
-        return self._is_paper_trading
+        """2026-09-03 재확인(task-106, PM 배정 지침 (1)) — 이전엔 SDK
+        README의 `moapi.nhplug.com` 언급만 믿고 True를 반환했으나, 공식
+        API 가이드 포털(nhplug.com)을 직접 열람해보니 접근토큰발급
+        엔드포인트의 "모의투자 도메인" 항목이 명시적으로 "미제공"이었다
+        (02e 스펙 §0-1). SDK README와 공식 포털이 서로 다른 얘기를 하는
+        상태 — "확인될 때만 True" 원칙에 따라 확정되기 전까지 False로
+        고정한다. 생성자의 `is_paper_trading` 인자는 여전히 REST 호스트
+        선택(실전/모의 URL)에는 쓰이지만, 그 값이 "안전한 샌드박스"를
+        보증하지는 않는다 — Executor의 PAPER 전용 게이트가 이 adapter를
+        항상 차단하는 게 의도된 안전 방향의 결과다."""
+        return False
 
     @property
     def is_sandboxed(self) -> bool:
-        """`is_paper_trading`과 동일 근거(위 참조) — 이 어댑터는 하나의
-        플래그(모의투자 도메인 선택)로 두 신호를 전부 만족시킨다."""
-        return self._is_paper_trading
+        """`is_paper_trading`과 동일 근거(위 참조)."""
+        return False
 
     def get_capabilities(self) -> ExchangeCapability:
         """02e 스펙 §5 — Phase 1은 국내주식(krstock)만, 해외주식/파생상품/

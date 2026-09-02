@@ -18,6 +18,21 @@ Spec: 02_exchange_adapter_v1.3.md#§2.1, 02e_nh_api_spec_v1.md#§3
 
 응답의 주문번호 필드명도 SDK 스니펫에 없었다 — `odno`(KIS 관례)를
 최선 추정치로 사용, 없으면 즉시 실패한다(조용한 폴백 금지).
+
+2026-09-03 재확인(task-106) — place_order/cancel_order/modify_order는
+`@require_paper_sandbox`를 붙이지 않는다. Bitget/KIS의 core ABC
+place_order/cancel_order/modify_order도 동일하게 무데코레이터다 —
+그 데코레이터는 Executor를 거치지 않는 확장 메서드(margin/futures/
+02c 카테고리 등, live_guard.py 모듈독스트링 참조)를 위한 것이지,
+Executor가 이미 이중 검사(mode!=PAPER 하드차단 + adapter.is_paper_
+trading/is_sandboxed 확인)로 보호하는 core ABC 메서드까지 또 감쌀
+필요는 없다. 특히 지금은 `is_paper_trading`/`is_sandboxed`가 (모의
+투자 도메인 미확인으로) 항상 False이므로(adapter.py 참조), 여기에
+데코레이터까지 얹으면 이 메서드들은 어떤 설정으로도 영원히 호출
+불가능해진다 — 그건 "안전"이 아니라 "이 adapter의 매매 기능이
+테스트조차 안 되는 죽은 코드"가 된다는 뜻이다. Executor의 두 번째
+검사가 이미 정확히 같은 신호(is_paper_trading/is_sandboxed)로
+차단하므로 중복 방어가 아니라 단순 중복이다.
 """
 from __future__ import annotations
 
@@ -29,7 +44,6 @@ from uuid import uuid4
 from src.core.exceptions import FatalExchangeError
 from src.data.models.base import AssetClass
 from src.data.models.trading import Order, OrderSide, OrderStatus, OrderType
-from src.exchanges.common.live_guard import require_paper_sandbox
 
 _MARKET_CODE = "KRX"
 
@@ -39,7 +53,6 @@ def _order_division(order_type: OrderType) -> str:
 
 
 class NHTradingMixin:
-    @require_paper_sandbox
     async def place_order(self, order: Order) -> Order:
         path = "/krstock/order/v1/cashBuy" if order.side == OrderSide.BUY else (
             "/krstock/order/v1/cashSell"
@@ -68,7 +81,6 @@ class NHTradingMixin:
             update={"exchange_order_id": exchange_order_id, "status": OrderStatus.SUBMITTED}
         )
 
-    @require_paper_sandbox
     async def cancel_order(self, order_id: str) -> bool:
         """**추정 엔드포인트**(모듈 docstring 참조) — 응답 파싱 실패 시
         성공으로 위장하지 않고 그대로 예외를 전파한다(True/False로
@@ -83,7 +95,6 @@ class NHTradingMixin:
         )
         return bool(raw.get("rsp_cd") == "00000")
 
-    @require_paper_sandbox
     async def modify_order(self, order_id: str, **kwargs: Any) -> Order:
         """**추정 엔드포인트**(모듈 docstring 참조)."""
         body: dict[str, Any] = {
@@ -100,9 +111,14 @@ class NHTradingMixin:
         return await self.get_order(order_id)
 
     async def get_order(self, order_id: str) -> Order:
-        """**추정 엔드포인트**(모듈 docstring 참조) — 응답 필드가 예상과
-        다르면(스키마 미확인 상태이므로 충분히 가능) 잘못된 Order를
-        만드는 대신 즉시 FatalExchangeError로 실패한다."""
+        """**추정 엔드포인트, 신뢰도 낮음**(모듈 docstring 참조) —
+        2026-09-03 재확인(task-106): 공식 API 가이드 포털의 국내주식
+        조회 카테고리 목록에 "주문조회"라는 이름 자체가 없다(02e 스펙
+        §0-1) — 실제로는 `국내_주식_조회_체결`(체결 조회)이나
+        `국내_주식_조회_예약주문`(미체결 조회) 중 하나가 이 역할을
+        대신할 가능성이 높다. 즉 필드명 불일치 수준이 아니라 **경로
+        자체가 틀렸을 위험**이 있다 — 응답 필드가 예상과 다르면 잘못된
+        Order를 만드는 대신 즉시 FatalExchangeError로 실패한다."""
         raw = await self._request(  # type: ignore[attr-defined]
             "POST",
             "/krstock/inquiry/v1/orderHistory",

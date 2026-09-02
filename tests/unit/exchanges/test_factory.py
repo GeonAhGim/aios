@@ -22,7 +22,9 @@ def test_build_adapter_nh_returns_nh_adapter():
     adapter = build_adapter("nh", "key", "secret", extra={"act_no": "1234567890"})
 
     assert isinstance(adapter, NHAdapter)
-    assert adapter.is_paper_trading is True
+    # task-106 재확인 — 모의투자 도메인이 공식 문서상 "미제공"이라
+    # 확인되기 전까지 is_paper_trading은 항상 False(adapter.py 참조).
+    assert adapter.is_paper_trading is False
 
 
 def test_build_adapter_unknown_exchange_raises():

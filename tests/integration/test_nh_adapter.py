@@ -12,7 +12,7 @@ from decimal import Decimal
 import httpx
 import pytest
 
-from src.core.exceptions import FatalExchangeError, FrozenZonePaperAdapterBlockedError
+from src.core.exceptions import FatalExchangeError
 from src.data.models.base import AssetClass
 from src.data.models.trading import Order, OrderSide, OrderStatus, OrderType
 from src.exchanges.nh.adapter import NHAdapter
@@ -315,14 +315,6 @@ async def test_place_order_raises_fatal_when_field_missing():
         await adapter.place_order(_order())
 
 
-async def test_place_order_blocked_on_live_configured_adapter():
-    adapter = _make_adapter(
-        lambda request: httpx.Response(200, json=TOKEN_RESPONSE), is_paper_trading=False
-    )
-    with pytest.raises(FrozenZonePaperAdapterBlockedError):
-        await adapter.place_order(_order())
-
-
 async def test_cancel_order_returns_true_on_success():
     def handler(request: httpx.Request) -> httpx.Response:
         assert request.url.path == "/krstock/order/v1/cashCancel"
@@ -336,12 +328,16 @@ async def test_cancel_order_returns_true_on_success():
     assert await adapter.cancel_order("999") is True
 
 
-async def test_cancel_order_blocked_on_live_configured_adapter():
+async def test_is_paper_trading_and_sandboxed_are_always_false():
+    """task-106 재확인 — 모의투자 도메인이 공식 문서상 "미제공"이라
+    확인되기 전까지 항상 False(생성자 플래그와 무관, adapter.py 참조).
+    Executor의 이중 검사(mode!=PAPER + 이 두 프로퍼티)가 이 신호로
+    이 adapter의 실거래를 차단하는 것이 의도된 동작이다."""
     adapter = _make_adapter(
-        lambda request: httpx.Response(200, json=TOKEN_RESPONSE), is_paper_trading=False
+        lambda request: httpx.Response(200, json=TOKEN_RESPONSE), is_paper_trading=True
     )
-    with pytest.raises(FrozenZonePaperAdapterBlockedError):
-        await adapter.cancel_order("999")
+    assert adapter.is_paper_trading is False
+    assert adapter.is_sandboxed is False
 
 
 async def test_modify_order_calls_cash_modify_then_reconfirms():
