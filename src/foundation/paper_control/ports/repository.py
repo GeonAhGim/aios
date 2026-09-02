@@ -19,7 +19,25 @@ class PaperControlRepository(Protocol):
 
     async def list_deployments(self, tenant_id: UUID) -> list[PaperDeployment]: ...
 
-    async def insert_deployment(self, deployment: PaperDeployment) -> PaperDeployment: ...
+    async def list_running_deployments(self) -> list[PaperDeployment]:
+        """전 tenant 대상 — GLOBAL 범위 kill switch가 실제로 정지시켜야 할
+        대상을 찾는 용도 하나뿐이다(77번 §2 "risk/emergency PAUSE outranks
+        START/RESUME"). 그 외 목적으로 쓰지 않는다."""
+        ...
+
+    async def get_deployment_by_request_key(
+        self, tenant_id: UUID, request_idempotency_key: str
+    ) -> PaperDeployment | None:
+        """PAP-006 — REQUEST 재시도를 새 deployment 대신 기존 것으로 되돌린다."""
+        ...
+
+    async def insert_deployment(self, deployment: PaperDeployment) -> PaperDeployment:
+        """`deployment.request_idempotency_key`가 채워져 있으면 `(tenant_id,
+        request_idempotency_key)` UNIQUE 충돌 시 새로 만들지 않고 기존 행을
+        그대로 반환한다(구현체 책임 — ON CONFLICT DO NOTHING + 재조회, CON-006과
+        같은 패턴). 호출자는 반환된 행이 자신이 방금 만든 것인지 이미 있던
+        것인지 구분하지 않는다 — digest 비교는 애플리케이션 레이어의 몫."""
+        ...
 
     async def get_command_by_idempotency_key(
         self, deployment_id: UUID, idempotency_key: str

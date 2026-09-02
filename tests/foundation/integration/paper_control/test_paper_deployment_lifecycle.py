@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from pathlib import Path
+from uuid import uuid4
 
 import asyncpg
 import pytest
@@ -21,6 +22,7 @@ from src.foundation.paper_control.application.pause_deployment import (
     stop_deployment,
 )
 from src.foundation.paper_control.application.request_deployment import (
+    IdempotencyKeyConflictError,
     NoActiveMandateError,
     request_deployment,
 )
@@ -465,3 +467,156 @@ async def test_concurrent_pause_and_stop_never_double_counts_fence(
     exceptions = [r for r in results if isinstance(r, Exception)]
     for exc in exceptions:
         assert isinstance(exc, InvalidDeploymentStateError)
+
+
+async def test_kill_switch_activation_actually_pauses_running_deployment(
+    pool, repo, risk_repo, mandate_repo, trust_repo, connection_repo
+):
+    """PM 배정 ② — kill switch가 fence를 실제로 소비해 RUNNING을 PAUSED로
+    옮기는지 확인한다(apply_safety_control.py). test_kill_switch_activated_
+    after_running_blocks_further_submits()는 activate_safety_control()만
+    부르므로 deployment가 RUNNING으로 남는다 — 이 테스트는 실제 라우터가
+    하는 것처럼 apply_safety_control_to_deployments()까지 이어서 부른다."""
+    from src.foundation.paper_control.application.apply_safety_control import (
+        apply_safety_control_to_deployments,
+    )
+    from src.foundation.risk_gate.application.activate_safety_control import (
+        activate_safety_control,
+    )
+    from src.foundation.risk_gate.domain.models import SafetyScope
+
+    tenant_id = await _tenant_with_mandate(pool, mandate_repo, trust_repo)
+    deployment = await _request(repo, mandate_repo, tenant_id)
+    started = await start_deployment(
+        repo,
+        risk_repo,
+        mandate_repo,
+        connection_repo,
+        tenant_id=tenant_id,
+        actor_subject_id=tenant_id,
+        deployment_id=deployment.id,
+        idempotency_key="start-then-cascade-pause",
+    )
+    assert started.fence_token == 0
+
+    control = await activate_safety_control(
+        risk_repo,
+        tenant_id=tenant_id,
+        actor_subject_id=tenant_id,
+        actor_is_admin=False,
+        scope=SafetyScope.ACCOUNT,
+        scope_ref=str(tenant_id),
+        reason="cascade pause 테스트",
+    )
+    paused_views = await apply_safety_control_to_deployments(
+        repo,
+        scope=SafetyScope.ACCOUNT,
+        scope_ref=str(tenant_id),
+        safety_control_id=control.id,
+        actor_subject_id=tenant_id,
+        reason="cascade pause 테스트",
+    )
+    assert [v.id for v in paused_views] == [deployment.id]
+
+    after = await repo.get_deployment(deployment.id)
+    assert after.state.value == "PAUSED"
+    assert after.fence_token == 1  # 실제로 fence가 소비됐다
+
+
+async def test_apply_safety_control_skips_non_running_and_unhandled_scopes(
+    pool, repo, risk_repo, mandate_repo, trust_repo, connection_repo
+):
+    """READY 상태 배포는 건드리지 않고(RUNNING만 대상), PROVIDER/
+    STRATEGY_DEPLOYMENT 범위는 아직 처리 대상이 아니므로 조용히 빈 목록을
+    돌려준다(apply_safety_control.py 상단 docstring의 명시적 스콥 축소)."""
+    from src.foundation.paper_control.application.apply_safety_control import (
+        apply_safety_control_to_deployments,
+    )
+    from src.foundation.risk_gate.domain.models import SafetyScope
+
+    tenant_id = await _tenant_with_mandate(pool, mandate_repo, trust_repo)
+    ready_deployment = await _request(repo, mandate_repo, tenant_id)
+    assert ready_deployment.state.value == "READY"
+
+    result = await apply_safety_control_to_deployments(
+        repo,
+        scope=SafetyScope.ACCOUNT,
+        scope_ref=str(tenant_id),
+        safety_control_id=uuid4(),
+        actor_subject_id=tenant_id,
+        reason="READY는 대상이 아님",
+    )
+    assert result == []
+    still_ready = await repo.get_deployment(ready_deployment.id)
+    assert still_ready.state.value == "READY"
+
+    provider_scope_result = await apply_safety_control_to_deployments(
+        repo,
+        scope=SafetyScope.PROVIDER,
+        scope_ref="bitget",
+        safety_control_id=uuid4(),
+        actor_subject_id=tenant_id,
+        reason="PROVIDER 범위 미구현",
+    )
+    assert provider_scope_result == []
+
+
+async def test_duplicate_request_with_same_key_returns_existing_deployment(
+    pool, repo, mandate_repo, trust_repo
+):
+    """PM 배정 ③ — 전수감사 발견 회귀. 이전에는 request_deployment()가 매번
+    새 deployment_id를 만들어 같은 idempotency_key로 재시도해도 중복
+    deployment가 생겼다."""
+    tenant_id = await _tenant_with_mandate(pool, mandate_repo, trust_repo)
+    first = await _request(repo, mandate_repo, tenant_id, key_suffix="-dup-req")
+    second = await _request(repo, mandate_repo, tenant_id, key_suffix="-dup-req")
+    assert first.id == second.id
+
+    all_deployments = await repo.list_deployments(tenant_id)
+    assert len(all_deployments) == 1
+
+
+async def test_duplicate_request_key_with_different_body_is_conflict(
+    pool, repo, mandate_repo, trust_repo
+):
+    """같은 키를 다른 요청에 재사용하면(클라이언트 버그) 예전 응답을 조용히
+    재사용하는 대신 명시적으로 거부한다 — 진짜 idempotency는 "같은 요청의
+    재시도"만 캐시해야 한다."""
+    tenant_id = await _tenant_with_mandate(pool, mandate_repo, trust_repo)
+    await _request(repo, mandate_repo, tenant_id, key_suffix="-conflict-req")
+    with pytest.raises(IdempotencyKeyConflictError):
+        await _request(
+            repo,
+            mandate_repo,
+            tenant_id,
+            key_suffix="-conflict-req",
+            package_ref="pkg-ref-DIFFERENT",
+        )
+
+
+async def test_failed_request_replay_reraises_same_error_without_duplicating(
+    pool, repo, mandate_repo, trust_repo
+):
+    """FAILED로 끝난 REQUEST도(PAP-002) 같은 키 재시도는 새 deployment를
+    만들지 않고 같은 예외를 재현해야 한다."""
+    tenant_id = await _tenant_with_mandate(pool, mandate_repo, trust_repo)
+    with pytest.raises(InvalidProvenanceError):
+        await _request(
+            repo,
+            mandate_repo,
+            tenant_id,
+            key_suffix="-failed-req",
+            endpoint_classification="LIVE_PRODUCTION",
+        )
+    with pytest.raises(InvalidProvenanceError):
+        await _request(
+            repo,
+            mandate_repo,
+            tenant_id,
+            key_suffix="-failed-req",
+            endpoint_classification="LIVE_PRODUCTION",
+        )
+
+    all_deployments = await repo.list_deployments(tenant_id)
+    assert len(all_deployments) == 1
+    assert all_deployments[0].state.value == "FAILED"

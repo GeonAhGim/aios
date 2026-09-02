@@ -42,6 +42,8 @@ def _row_to_deployment(row: asyncpg.Record) -> PaperDeployment:
         ),
         state=DeploymentState(row["state"]),
         fence_token=row["fence_token"],
+        request_idempotency_key=row["request_idempotency_key"],
+        request_digest=row["request_digest"],
         created_at=row["created_at"],
         updated_at=row["updated_at"],
     )
@@ -90,14 +92,35 @@ class PostgresPaperControlRepository:
             )
         return [_row_to_deployment(row) for row in rows]
 
+    async def list_running_deployments(self) -> list[PaperDeployment]:
+        async with self._pool.acquire() as conn:
+            rows = await conn.fetch(
+                "SELECT * FROM paper_deployment WHERE state = 'RUNNING' ORDER BY created_at"
+            )
+        return [_row_to_deployment(row) for row in rows]
+
+    async def get_deployment_by_request_key(
+        self, tenant_id: UUID, request_idempotency_key: str
+    ) -> PaperDeployment | None:
+        async with self._pool.acquire() as conn:
+            row = await conn.fetchrow(
+                "SELECT * FROM paper_deployment "
+                "WHERE tenant_id = $1 AND request_idempotency_key = $2",
+                tenant_id,
+                request_idempotency_key,
+            )
+        return _row_to_deployment(row) if row is not None else None
+
     async def insert_deployment(self, deployment: PaperDeployment) -> PaperDeployment:
         async with self._pool.acquire() as conn:
             row = await conn.fetchrow(
                 "INSERT INTO paper_deployment "
                 "(tenant_id, connection_id, package_ref, mandate_revision_id, adapter_type, "
                 " credential_class, endpoint_classification, provider_sandbox_account_ref, "
-                " state, fence_token) "
-                "VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) RETURNING *",
+                " state, fence_token, request_idempotency_key, request_digest) "
+                "VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12) "
+                "ON CONFLICT (tenant_id, request_idempotency_key) DO NOTHING "
+                "RETURNING *",
                 deployment.tenant_id,
                 deployment.connection_id,
                 deployment.package_ref,
@@ -108,7 +131,21 @@ class PostgresPaperControlRepository:
                 deployment.provenance.provider_sandbox_account_ref,
                 deployment.state.value,
                 deployment.fence_token,
+                deployment.request_idempotency_key,
+                deployment.request_digest,
             )
+            if row is None:
+                # 경합에서 졌다 — 이미 같은 (tenant_id, request_idempotency_key)로
+                # 다른 요청이 먼저 커밋했다. 그 행을 그대로 돌려준다(CON-006과
+                # 같은 ON CONFLICT DO NOTHING + 재조회 패턴).
+                assert deployment.request_idempotency_key is not None
+                row = await conn.fetchrow(
+                    "SELECT * FROM paper_deployment "
+                    "WHERE tenant_id = $1 AND request_idempotency_key = $2",
+                    deployment.tenant_id,
+                    deployment.request_idempotency_key,
+                )
+                assert row is not None
         return _row_to_deployment(row)
 
     async def get_command_by_idempotency_key(

@@ -13,6 +13,8 @@ PAPER_ELIGIBLE 패키지 lifecycle 자체를 구현하지 않아(validation-run�
 lifecycle이 생기면 이 함수의 package 검증 부분만 교체하면 된다."""
 from __future__ import annotations
 
+import hashlib
+import json
 from uuid import UUID, uuid4
 
 from src.foundation.mandates.domain.models import MandateRevisionState
@@ -33,6 +35,52 @@ from src.foundation.paper_control.ports.repository import PaperControlRepository
 
 class NoActiveMandateError(Exception):
     pass
+
+
+class IdempotencyKeyConflictError(Exception):
+    """PAP-006 — 같은 idempotency_key로 이전과 다른 내용의 REQUEST가 왔다.
+    진짜 idempotency는 "같은 요청의 재시도"만 캐시해야 한다 — 다른 요청에
+    키를 잘못 재사용한 클라이언트 버그를 조용히 삼켜 엉뚱한 배포를 돌려주면
+    안 된다(전수감사 agent-platform-12 발견)."""
+
+
+def _compute_request_digest(
+    *,
+    package_ref: str,
+    connection_id: UUID | None,
+    adapter_type: str,
+    provider_sandbox_account_ref: str,
+    endpoint_classification: str,
+) -> str:
+    payload = {
+        "package_ref": package_ref,
+        "connection_id": str(connection_id) if connection_id is not None else None,
+        "adapter_type": adapter_type,
+        "provider_sandbox_account_ref": provider_sandbox_account_ref,
+        "endpoint_classification": endpoint_classification,
+    }
+    return hashlib.sha256(json.dumps(payload, sort_keys=True).encode()).hexdigest()
+
+
+async def _replay_or_conflict(
+    repo: PaperControlRepository,
+    existing: PaperDeployment,
+    *,
+    digest: str,
+    idempotency_key: str,
+) -> PaperDeploymentView:
+    if existing.request_digest != digest:
+        raise IdempotencyKeyConflictError(
+            f"idempotency_key={idempotency_key}는 이전과 다른 요청 내용에 이미 "
+            "쓰였습니다."
+        )
+    if existing.state == DeploymentState.FAILED:
+        # FAILED 결과도 최초 응답을 그대로 재현한다(원래 request_deployment()가
+        # 이 경우 예외를 던졌으므로, 재시도도 같은 예외를 받아야 한다).
+        command = await repo.get_command_by_idempotency_key(existing.id, idempotency_key)
+        detail = command.detail if command is not None else None
+        raise InvalidProvenanceError(detail or "provenance 검증 실패")
+    return deployment_to_view(existing)
 
 
 def deployment_to_view(deployment: PaperDeployment) -> PaperDeploymentView:
@@ -60,6 +108,22 @@ async def request_deployment(
     endpoint_classification: str,
     idempotency_key: str,
 ) -> PaperDeploymentView:
+    digest = _compute_request_digest(
+        package_ref=package_ref,
+        connection_id=connection_id,
+        adapter_type=adapter_type,
+        provider_sandbox_account_ref=provider_sandbox_account_ref,
+        endpoint_classification=endpoint_classification,
+    )
+    # PAP-006 — 같은 (tenant_id, idempotency_key)로 이미 만들어진 deployment가
+    # 있으면 새로 만들지 않는다(전수감사 발견 — 이전에는 이 확인 자체가 없어
+    # 매 재시도가 새 deployment를 만들었다).
+    existing = await repo.get_deployment_by_request_key(tenant_id, idempotency_key)
+    if existing is not None:
+        return await _replay_or_conflict(
+            repo, existing, digest=digest, idempotency_key=idempotency_key
+        )
+
     mandate = await mandate_repo.get_mandate(tenant_id)
     if mandate is None or mandate.active_revision_id is None:
         raise NoActiveMandateError(str(tenant_id))
@@ -98,8 +162,19 @@ async def request_deployment(
             provenance=provenance,
             state=final_state,
             fence_token=0,
+            request_idempotency_key=idempotency_key,
+            request_digest=digest,
         )
     )
+    if deployment.id != deployment_id:
+        # 위의 사전 조회(get_deployment_by_request_key) 이후 이 INSERT 사이의
+        # 좁은 창에서 진짜 동시 요청에 졌다 — insert_deployment()가 이미
+        # ON CONFLICT DO NOTHING + 재조회로 승자의 행을 돌려줬다. 커맨드는
+        # 승자 쪽이 이미 기록했으니 여기서 다시 쓰지 않는다.
+        return await _replay_or_conflict(
+            repo, deployment, digest=digest, idempotency_key=idempotency_key
+        )
+
     await repo.insert_command(
         deployment_id=deployment.id,
         idempotency_key=idempotency_key,

@@ -23,18 +23,25 @@ from src.api.schemas.foundation.paper_control import (
     PaperDeploymentView,
     RequestDeploymentRequest,
 )
+from src.core.db.conditional_write import ConcurrencyConflictError
 from src.foundation.connections.ports.repository import ConnectionRepository
 from src.foundation.mandates.ports.repository import MandateRepository
 from src.foundation.paper_control.application.pause_deployment import (
     CrossTenantDeploymentAccessError,
     DeploymentNotFoundError,
-    InvalidDeploymentStateError,
     pause_deployment,
     stop_deployment,
 )
+from src.foundation.paper_control.application.pause_deployment import (
+    InvalidDeploymentStateError as PauseInvalidDeploymentStateError,
+)
 from src.foundation.paper_control.application.request_deployment import (
+    IdempotencyKeyConflictError,
     NoActiveMandateError,
     request_deployment,
+)
+from src.foundation.paper_control.application.start_deployment import (
+    InvalidDeploymentStateError as StartInvalidDeploymentStateError,
 )
 from src.foundation.paper_control.application.start_deployment import (
     RiskGateDeniedError,
@@ -46,6 +53,14 @@ from src.foundation.paper_control.ports.repository import PaperControlRepository
 from src.foundation.paper_control.projections import build_deployment_list_view
 from src.foundation.risk_gate.ports.repository import RiskGateRepository
 from src.services.auth_service import User
+
+# start/resume(start_deployment.py)와 pause/stop(pause_deployment.py)이
+# 이름은 같지만 서로 다른 InvalidDeploymentStateError 클래스를 각자 정의해뒀다
+# (전수감사 이전부터 있던 중복 — 리뷰 중 발견, CON-006 커밋 docstring 참조).
+# 새 공용 클래스로 합치는 대신(두 애플리케이션 모듈의 기존 계약을 건드리지
+# 않기 위해) 라우터에서 둘 다 잡는다 — 하나만 잡으면 나머지 절반이 매핑되지
+# 않은 채 500으로 샌다(실제로 start/resume 쪽이 그랬다).
+_InvalidDeploymentStateErrors = (PauseInvalidDeploymentStateError, StartInvalidDeploymentStateError)
 
 router = APIRouter(prefix="/v1/foundation/paper-deployments", tags=["foundation:paper-control"])
 
@@ -83,6 +98,8 @@ async def post_request_deployment(
         raise HTTPException(status.HTTP_404_NOT_FOUND, "활성 mandate가 없습니다.") from exc
     except InvalidProvenanceError as exc:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from exc
+    except IdempotencyKeyConflictError as exc:
+        raise HTTPException(status.HTTP_409_CONFLICT, str(exc)) from exc
 
 
 @router.post("/{deployment_id}:start")
@@ -108,10 +125,12 @@ async def post_start_deployment(
         )
     except (DeploymentNotFoundError, CrossTenantDeploymentAccessError) as exc:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "존재하지 않는 배포입니다.") from exc
-    except InvalidDeploymentStateError as exc:
+    except _InvalidDeploymentStateErrors as exc:
         raise HTTPException(status.HTTP_409_CONFLICT, str(exc)) from exc
     except RiskGateDeniedError as exc:
         raise HTTPException(status.HTTP_403_FORBIDDEN, str(exc)) from exc
+    except ConcurrencyConflictError as exc:
+        raise HTTPException(status.HTTP_409_CONFLICT, str(exc)) from exc
 
 
 @router.post("/{deployment_id}:resume")
@@ -137,10 +156,12 @@ async def post_resume_deployment(
         )
     except (DeploymentNotFoundError, CrossTenantDeploymentAccessError) as exc:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "존재하지 않는 배포입니다.") from exc
-    except InvalidDeploymentStateError as exc:
+    except _InvalidDeploymentStateErrors as exc:
         raise HTTPException(status.HTTP_409_CONFLICT, str(exc)) from exc
     except RiskGateDeniedError as exc:
         raise HTTPException(status.HTTP_403_FORBIDDEN, str(exc)) from exc
+    except ConcurrencyConflictError as exc:
+        raise HTTPException(status.HTTP_409_CONFLICT, str(exc)) from exc
 
 
 @router.post("/{deployment_id}:pause")
@@ -160,7 +181,9 @@ async def post_pause_deployment(
         )
     except (DeploymentNotFoundError, CrossTenantDeploymentAccessError) as exc:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "존재하지 않는 배포입니다.") from exc
-    except InvalidDeploymentStateError as exc:
+    except _InvalidDeploymentStateErrors as exc:
+        raise HTTPException(status.HTTP_409_CONFLICT, str(exc)) from exc
+    except ConcurrencyConflictError as exc:
         raise HTTPException(status.HTTP_409_CONFLICT, str(exc)) from exc
 
 
@@ -181,5 +204,7 @@ async def post_stop_deployment(
         )
     except (DeploymentNotFoundError, CrossTenantDeploymentAccessError) as exc:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "존재하지 않는 배포입니다.") from exc
-    except InvalidDeploymentStateError as exc:
+    except _InvalidDeploymentStateErrors as exc:
+        raise HTTPException(status.HTTP_409_CONFLICT, str(exc)) from exc
+    except ConcurrencyConflictError as exc:
         raise HTTPException(status.HTTP_409_CONFLICT, str(exc)) from exc

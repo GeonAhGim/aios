@@ -14,6 +14,7 @@ from src.api.deps import get_current_admin, get_current_user
 from src.api.foundation_deps import (
     get_connection_repository,
     get_mandate_repository,
+    get_paper_control_repository,
     get_risk_gate_repository,
 )
 from src.api.schemas.foundation.risk_gate import (
@@ -25,6 +26,10 @@ from src.api.schemas.foundation.risk_gate import (
 )
 from src.foundation.connections.ports.repository import ConnectionRepository
 from src.foundation.mandates.ports.repository import MandateRepository
+from src.foundation.paper_control.application.apply_safety_control import (
+    apply_safety_control_to_deployments,
+)
+from src.foundation.paper_control.ports.repository import PaperControlRepository
 from src.foundation.risk_gate.application.activate_safety_control import (
     MissingScopeRefError,
     UnauthorizedSafetyControlScopeError,
@@ -81,9 +86,10 @@ async def post_activate_safety_control(
     body: ActivateSafetyControlRequest,
     user: User = Depends(get_current_user),
     repo: RiskGateRepository = Depends(get_risk_gate_repository),
+    paper_control_repo: PaperControlRepository = Depends(get_paper_control_repository),
 ) -> SafetyControlView:
     try:
-        return await activate_safety_control(
+        control = await activate_safety_control(
             repo,
             tenant_id=user.user_id,
             actor_subject_id=user.user_id,
@@ -96,6 +102,19 @@ async def post_activate_safety_control(
         raise HTTPException(status.HTTP_403_FORBIDDEN, str(exc)) from exc
     except MissingScopeRefError as exc:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from exc
+    # 교차세션 감사 발견(agent-platform-12) 반영 — kill switch가 이미 RUNNING인
+    # 배포를 실제로 PAUSED로 전이시킨다(apply_safety_control.py 참조). 이 호출이
+    # 실패해도 위 control 생성 자체는 이미 커밋됐다 — kill switch는 걸렸으니
+    # 최소한 새 제출은 막힌다(PRE_INTENT 게이트, submit_paper_intent.py).
+    await apply_safety_control_to_deployments(
+        paper_control_repo,
+        scope=SafetyScope(control.scope.value),
+        scope_ref=control.scope_ref,
+        safety_control_id=control.id,
+        actor_subject_id=user.user_id,
+        reason=body.reason,
+    )
+    return control
 
 
 @router.post("/safety-controls/{control_id}:deactivate")
@@ -122,6 +141,7 @@ async def post_admin_activate_safety_control(
     body: ActivateSafetyControlRequest,
     admin: User = Depends(get_current_admin),
     repo: RiskGateRepository = Depends(get_risk_gate_repository),
+    paper_control_repo: PaperControlRepository = Depends(get_paper_control_repository),
 ) -> SafetyControlView:
     """78번 §4 "Only authorized operator ... routes may create scoped safety
     controls" 중 GLOBAL/TENANT/PROVIDER 범위 전용 경로 — 위 self-service
@@ -129,7 +149,7 @@ async def post_admin_activate_safety_control(
     (RSK-006과 같은 원칙 — 권한 체크를 애플리케이션 로직에만 맡기지
     않는다)."""
     try:
-        return await activate_safety_control(
+        control = await activate_safety_control(
             repo,
             tenant_id=admin.user_id,
             actor_subject_id=admin.user_id,
@@ -140,3 +160,12 @@ async def post_admin_activate_safety_control(
         )
     except MissingScopeRefError as exc:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from exc
+    await apply_safety_control_to_deployments(
+        paper_control_repo,
+        scope=SafetyScope(control.scope.value),
+        scope_ref=control.scope_ref,
+        safety_control_id=control.id,
+        actor_subject_id=admin.user_id,
+        reason=body.reason,
+    )
+    return control
