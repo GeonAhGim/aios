@@ -577,7 +577,7 @@ DoD 공통: `.venv/Scripts/python.exe -m pytest -q <테스트 경로>` 통과, `
 | 항목 | 상태 | 결정 필요자 |
 |---|---|---|
 | `src/core/risk/**` 신규 파일·engine.py 축약은 FROZEN_PAPER_ONLY 변경 | PM 승인 필요(§2-B 규칙 6). 대안: rules를 `src/core/risk_rules/`(SC)로 두고 engine.py만 1줄 위임 — 판단 로직이 FPO 밖으로 나가는 것이라 ADR-E 취지와 충돌, 권장하지 않음 | PM |
-| 참조 시세 소스(쿼럼 3) | **미확인**: Binance `GET /api/v3/ticker/price`, OKX `GET /api/v5/market/ticker` 공개 엔드포인트의 무인증 가용성·레이트리밋·심볼 표기. KIS/NH는 KRW 시장이라 크립토 참조 불가 | 외부 문서 확인 후 R-47 |
+| 참조 시세 소스(쿼럼 3) | **결정됨(PM, 2026-09-03)**: R-47 `ReferenceQuotePort` 어댑터 2종 — ① bitget 선물 mark price(동일 거래소 제2 피드, "약한 참조"로 표기), ② Binance `GET /api/v3/ticker/price`(무인증 공개, "미검증"으로 표기). 둘 다 타임아웃·실패는 예외를 올리지 않고 `None` 반환. 참조가 0개면(둘 다 None) `DataDistrustLevel.DEGRADED_SINGLE_SOURCE` — quorum_not_met→SUSPICIOUS 영구 고착을 피하기 위해 이 경우엔 통계적 타당성 검사(`_statistical_check`)만 적용하고 신규 진입은 계속 허용, 메트릭·로그로만 노출한다. 참조가 1개 이상 있고 실제로 괴리가 감지되면 기존 SUSPICIOUS/DISTRUSTED 경로를 그대로 탄다. 게이트: DISTRUSTED→모든 신규 주문 DENY, SUSPICIOUS→신규 진입만 DENY(청산·축소는 허용), DEGRADED_SINGLE_SOURCE→DENY 없음(관측만). KIS/NH는 KRW 시장이라 크립토 참조 대상에서 제외(변경 없음) | R-47/R-48 구현 중 |
 | 분할 청산 seed 비밀키(HMAC) | 서버 비밀(`secret_loader`)에 `AIOS_LIQUIDATION_SEED_KEY` 추가 — 없으면 worker 기동 거부(fail-closed). 키 회전 시 진행 중 request는 기존 plan JSONB로 계속 | PM |
 | `risk_decision` REVOKE UPDATE/DELETE는 DB role 분리 전제 | 현재 단일 role(`wallet_transactions` WORM 보류 사유와 동일) → 트리거로 먼저 강제, role 분리는 별도 결정 | PM/DBA |
 | `orders` 트리거 cutover | 마이그레이션 적용 시각 이후 행만 강제. 적용 전 실행 중 tick이 결정 없이 INSERT하면 실패 → R-32 배포 **후** R-37 적용(순서 고정) | PM |
