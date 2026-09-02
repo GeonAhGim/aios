@@ -136,6 +136,7 @@ mypy strict 통과의 실질: `type: ignore` 178건 중 160건이 거래소 믹�
 3. 커밋마다 즉시 `git push origin main`. 완료 보고는 커밋 해시 한 줄.
 4. 마이그레이션을 추가하거나 pull했으면 `alembic upgrade head`를 공유 DB에 적용하고 PM에게 알린다.
 5. PM에게 보내는 회신은 한 줄. 상세는 커밋 메시지와 `RED_TEAM_FINDINGS.md`에 쓴다.
+6. **승인·확인 요청은 사용자가 아니라 PM에게 보낸다**(사용자 지시 2026-09-03). FROZEN_PAPER_ONLY 수정을 포함해 설계·범위 판단은 PM이 승인한다. 승인을 기다리는 동안 다른 배정 작업을 멈추지 않는다 — 대기 상태로 세션을 비워두지 않는다.
 
 마이그레이션 `b7e2c4d9f1a6`(revises `f2b8e5d1a734`)는 공유 dev DB에 적용됐다.
 `wallet_transactions` WORM과 `strategy_listings` UNIQUE(strategy, version)은 이

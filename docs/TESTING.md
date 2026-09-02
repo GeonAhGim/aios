@@ -63,3 +63,4 @@ export TEST_DATABASE_URL=postgresql+asyncpg://user:password@localhost:5432/aios_
   (실제 사고: `c017525`가 다른 세션의 미커밋 훅을 함께 커밋해 그 훅이 import하는
   파일이 없는 상태가 origin에 올라갔고 `2d6c71a`로 보충됐다.)
 - 커밋마다 즉시 push. 마이그레이션을 만들면 리비전 id를 공지하고 체인을 직렬화한다.
+- 승인·확인 요청은 사용자가 아니라 PM 세션에 보낸다. 승인 대기 중에도 다른 배정 작업을 이어간다.
