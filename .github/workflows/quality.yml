@@ -81,7 +81,7 @@ jobs:
 
   # Meta-Control Plane Guard — 에이전트 통제 밖(aios-meta 저장소, 사람만 수정)에서
   # 정의된 Architecture/Security Guard를 이 저장소의 변경 범위에 실행한다.
-  # 토큰·ref가 없으면 실패한다(건너뛰지 않음): 보호 설정 전에는 빨간 것이 의도다.
+  # ref가 없으면 실패한다(건너뛰지 않음).
   # 설정 절차: aios-meta/SETUP_PROTECTION.md
   guards:
     runs-on: ubuntu-latest
@@ -90,18 +90,14 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      - name: Require meta credentials
+      - name: Require pinned guard ref
         env:
-          META_REPO_TOKEN: ${{ secrets.META_REPO_TOKEN }}
           META_GUARDS_REF: ${{ vars.META_GUARDS_REF }}
-        run: |
-          test -n "$META_REPO_TOKEN" || { echo "META_REPO_TOKEN secret 없음 — aios-meta/SETUP_PROTECTION.md §3"; exit 1; }
-          test -n "$META_GUARDS_REF" || { echo "META_GUARDS_REF variable 없음 (aios-meta 고정 커밋 SHA)"; exit 1; }
+        run: test -n "$META_GUARDS_REF" || { echo "META_GUARDS_REF variable 없음 (aios-meta 고정 커밋 SHA)"; exit 1; }
       - uses: actions/checkout@v4
         with:
-          repository: GeonAhGim/aios-meta
+          repository: GeonAhGim/aios-meta    # public — 토큰 불필요
           ref: ${{ vars.META_GUARDS_REF }}
-          token: ${{ secrets.META_REPO_TOKEN }}
           path: .meta
       - uses: actions/setup-python@v5
         with:
