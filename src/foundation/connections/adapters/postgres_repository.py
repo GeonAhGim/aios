@@ -2,10 +2,14 @@
 
 Spec: AIOSproject 74번 §2/§5, 105번(동시성 표준).
 
-transition_connection_state()는 105번 표준의 conditional_update를 그대로
-쓴다 — CON-004(동시 revoke와 sync 경합)는 sync_snapshot.py가 스냅샷을 쓰기
-직전에 이 메서드로 "여전히 ACTIVE_READONLY/DEGRADED인가"를 재확인하는 것으로
-막는다(74번 §5 "workers re-read write state immediately before ... persistence").
+`persist_snapshot_if_syncable()`이 CON-004(동시 revoke와 sync 경합)의 실제
+방어 지점이다 — "connection이 여전히 ACTIVE_READONLY/DEGRADED인가" 재확인과
+snapshot/health 저장을 한 트랜잭션 + row lock(`SELECT ... FOR UPDATE`)으로
+묶는다. 처음엔 `get_connection()`으로 먼저 읽고 나중에 별도 호출로
+`insert_snapshot()`하는 두 단계였는데, 그 두 왕복 사이에 revoke가 커밋될 수
+있는 진짜 TOCTOU 틈이 있었다(리뷰 중 발견, 2026-09-02) — 재확인과 쓰기가
+같은 트랜잭션에 있어야만 그 틈이 없어진다는 걸 확인하고 이 메서드로
+합쳤다.
 """
 from __future__ import annotations
 
@@ -13,7 +17,7 @@ from uuid import UUID
 
 import asyncpg
 
-from src.core.db.conditional_write import conditional_update
+from src.core.db.conditional_write import ConcurrencyConflictError, conditional_update
 from src.foundation.connections.domain.models import (
     AccountConnection,
     AccountSnapshot,
@@ -182,9 +186,30 @@ class PostgresConnectionRepository:
                 connection_id,
             )
 
-    async def insert_snapshot(self, snapshot: AccountSnapshot) -> AccountSnapshot:
-        async with self._pool.acquire() as conn:
+    async def persist_snapshot_if_syncable(
+        self,
+        connection_id: UUID,
+        snapshot: AccountSnapshot,
+        health: ConnectionHealth,
+    ) -> AccountSnapshot:
+        async with self._pool.acquire() as conn, conn.transaction():
+            # CON-004 진짜 방어 지점 — 이 SELECT가 행을 잠가서, 이 트랜잭션이
+            # 커밋될 때까지 같은 connection에 대한 revoke_connection()의
+            # transition_connection_state() UPDATE는 블록된다(같은 행을 대상으로
+            # 하므로). 재확인과 쓰기 사이에 별도 왕복이 없어 TOCTOU 틈이 없다.
             row = await conn.fetchrow(
+                "SELECT state FROM account_connection WHERE id = $1 FOR UPDATE", connection_id
+            )
+            if row is None or row["state"] in (
+                ConnectionState.REVOKED.value,
+                ConnectionState.DISCONNECTED.value,
+            ):
+                raise ConcurrencyConflictError(
+                    f"account_connection.id={connection_id}: sync 도중 연결이 "
+                    "종료됐습니다(동시 처리 충돌) — 스냅샷을 저장하지 않습니다."
+                )
+
+            snapshot_row = await conn.fetchrow(
                 "INSERT INTO account_snapshot (connection_id, provider_as_of, freshness, "
                 " currency, source_evidence_ref) VALUES ($1, $2, $3, $4, $5) RETURNING *",
                 snapshot.connection_id,
@@ -193,7 +218,22 @@ class PostgresConnectionRepository:
                 snapshot.currency,
                 snapshot.source_evidence_ref,
             )
-        return _row_to_snapshot(row)
+            await conn.execute(
+                "INSERT INTO connection_health (connection_id, state, error_code, "
+                " retry_after, provider_trace_ref) VALUES ($1, $2, $3, $4, $5)",
+                health.connection_id,
+                health.state.value,
+                health.error_code,
+                health.retry_after,
+                health.provider_trace_ref,
+            )
+            if row["state"] == ConnectionState.DEGRADED.value:
+                await conn.execute(
+                    "UPDATE account_connection SET state = $2 WHERE id = $1",
+                    connection_id,
+                    ConnectionState.ACTIVE_READONLY.value,
+                )
+        return _row_to_snapshot(snapshot_row)
 
     async def get_latest_snapshot(self, connection_id: UUID) -> AccountSnapshot | None:
         async with self._pool.acquire() as conn:

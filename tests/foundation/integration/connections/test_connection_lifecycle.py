@@ -2,6 +2,7 @@
 provider/real infra 없이 재현 가능한 범위."""
 from __future__ import annotations
 
+import asyncio
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -274,3 +275,56 @@ def test_provider_protocol_has_no_trade_transfer_sign_method():
     for method in methods:
         lowered = method.lower()
         assert not any(f in lowered for f in forbidden_substrings), method
+
+
+async def test_real_concurrent_revoke_and_sync_never_leaves_post_revocation_snapshot(
+    pool, repo, trust_repo
+):
+    """CON-004 회귀 — 리뷰 중 발견한 진짜 TOCTOU를 재현한다. 이전 버전은 상태
+    재확인(get_connection)과 저장(insert_snapshot)이 별도 DB 왕복 두 번이라
+    그 사이에 revoke가 커밋될 수 있는 틈이 있었다. 이번엔 인위적으로 순서를
+    강제하지 않고(위 test_concurrent_revoke_during_sync_discards_snapshot처럼
+    fetch_snapshot 안에서 revoke를 호출하는 방식이 아니라) 진짜
+    asyncio.gather로 동시에 실행한다 — persist_snapshot_if_syncable()의
+    SELECT ... FOR UPDATE 행 잠금이 revoke_connection()의
+    transition_connection_state() UPDATE와 실제로 직렬화되는지 확인한다."""
+    tenant_id = await _tenant(pool)
+    created = await _begin(pool, repo, trust_repo, tenant_id)
+    provider = FakeReadonlyAccountProvider()
+    await confirm_connection(
+        repo, provider, tenant_id=tenant_id, connection_id=created.id, encryption_key=ENCRYPTION_KEY
+    )
+
+    class _SlowProvider:
+        async def verify_readonly_scope(self, lease: SecretLease):  # noqa: ANN201
+            raise NotImplementedError
+
+        async def fetch_snapshot(self, account_ref: OpaqueRef, as_of: datetime):
+            # provider 호출 자체에 약간의 지연을 둬서, revoke_connection()이
+            # persist_snapshot_if_syncable()의 SELECT ... FOR UPDATE보다 먼저
+            # 도착할 확률을 높인다 — 어느 쪽이 이기든 결과가 일관되어야 한다.
+            await asyncio.sleep(0.05)
+            return ProviderSnapshot(
+                provider_as_of=datetime.now(timezone.utc), currency="USD", raw_payload_ref="x"
+            )
+
+    slow_provider: ReadonlyAccountProvider = _SlowProvider()
+
+    sync_result, revoke_result = await asyncio.gather(
+        sync_snapshot(repo, slow_provider, tenant_id=tenant_id, connection_id=created.id),
+        revoke_connection(repo, tenant_id=tenant_id, connection_id=created.id),
+        return_exceptions=True,
+    )
+
+    final = await repo.get_connection(created.id)
+    assert final.state.value == "REVOKED"
+
+    snapshot_persisted = not isinstance(sync_result, Exception)
+    if not snapshot_persisted:
+        assert isinstance(sync_result, ConnectionRevokedDuringSyncError)
+    assert not isinstance(revoke_result, Exception)
+    # 핵심 불변조건 — sync가 성공했다면 그건 revoke의 실제 커밋보다 먼저
+    # 일어났다는 뜻이고(row lock이 강제하는 직렬 순서), 실패했다면 저장된
+    # 스냅샷이 전혀 없어야 한다. 둘 다 "REVOKED 이후 스냅샷"은 없다.
+    if not snapshot_persisted:
+        assert await repo.get_latest_snapshot(created.id) is None

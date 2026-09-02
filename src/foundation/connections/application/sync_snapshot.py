@@ -9,15 +9,19 @@ Spec: AIOSproject 74번 §2/§3/§5.
 트리거할 대상이 없다. fetch 성공 = HEALTHY, 실패 = DEGRADED로 관측한다.
 
 CON-004("concurrent revoke and sync cannot persist a post-revocation
-snapshot") — 74번 §5 "workers re-read write state immediately before ...
-persistence" 원칙대로, provider 호출 이후 스냅샷을 쓰기 직전에 connection
-상태를 다시 읽어 REVOKED/DISCONNECTED면 그 결과를 버린다.
+snapshot") — provider 호출 이후 connection 상태 재확인과 snapshot/health
+저장을 `ConnectionRepository.persist_snapshot_if_syncable()` 하나의 트랜잭션
++ row lock으로 묶어 처리한다(74번 §5 "workers re-read write state
+immediately before ... persistence"). 재확인과 저장이 별도 두 번의 DB
+왕복이면 그 사이에 TOCTOU 틈이 남는다는 걸 리뷰 중 발견해 고쳤다 — 자세한
+내용은 adapters/postgres_repository.py 참조.
 """
 from __future__ import annotations
 
 from datetime import datetime, timezone
 from uuid import UUID, uuid4
 
+from src.core.db.conditional_write import ConcurrencyConflictError
 from src.foundation.connections.application.errors import (
     ConnectionNotFoundError,
     CrossTenantConnectionAccessError,
@@ -32,7 +36,6 @@ from src.foundation.connections.domain.models import (
 from src.foundation.connections.ports.provider import OpaqueRef, ReadonlyAccountProvider
 from src.foundation.connections.ports.repository import ConnectionRepository
 
-_TERMINAL_STATES = frozenset({ConnectionState.REVOKED, ConnectionState.DISCONNECTED})
 _SYNCABLE_STATES = frozenset({ConnectionState.ACTIVE_READONLY, ConnectionState.DEGRADED})
 
 
@@ -99,28 +102,26 @@ async def sync_snapshot(
             )
         raise ProviderUnavailableError("DEPENDENCY_PROVIDER_UNAVAILABLE") from exc
 
-    # CON-004 재확인 — provider 호출은 시간이 걸리므로, 그 사이 revoke가
-    # 먼저 커밋됐을 수 있다.
-    fresh = await repo.get_connection(connection_id)
-    if fresh is None or fresh.state in _TERMINAL_STATES:
-        raise ConnectionRevokedDuringSyncError(str(connection_id))
-
-    snapshot = await repo.insert_snapshot(
-        AccountSnapshot(
-            id=uuid4(),
-            connection_id=connection_id,
-            captured_at=now,
-            provider_as_of=provider_snapshot.provider_as_of,
-            freshness="PROVIDER_CONFIRMED",
-            currency=provider_snapshot.currency,
-            source_evidence_ref=provider_snapshot.raw_payload_ref,
+    # CON-004 — provider 호출은 시간이 걸리므로, 그 사이 revoke가 먼저
+    # 커밋됐을 수 있다. 재확인과 저장을 별도 왕복 두 번으로 하면 그 사이에도
+    # TOCTOU 틈이 남는다 — persist_snapshot_if_syncable()이 재확인+저장을
+    # 트랜잭션 하나로 묶어 그 틈을 없앤다(어댑터 docstring 참조).
+    try:
+        snapshot = await repo.persist_snapshot_if_syncable(
+            connection_id,
+            AccountSnapshot(
+                id=uuid4(),
+                connection_id=connection_id,
+                captured_at=now,
+                provider_as_of=provider_snapshot.provider_as_of,
+                freshness="PROVIDER_CONFIRMED",
+                currency=provider_snapshot.currency,
+                source_evidence_ref=provider_snapshot.raw_payload_ref,
+            ),
+            ConnectionHealth(
+                connection_id=connection_id, evaluated_at=now, state=HealthState.HEALTHY
+            ),
         )
-    )
-    await repo.insert_health_record(
-        ConnectionHealth(connection_id=connection_id, evaluated_at=now, state=HealthState.HEALTHY)
-    )
-    if fresh.state == ConnectionState.DEGRADED:
-        await repo.transition_connection_state(
-            connection_id, expected_state="DEGRADED", new_state="ACTIVE_READONLY"
-        )
+    except ConcurrencyConflictError as exc:
+        raise ConnectionRevokedDuringSyncError(str(connection_id)) from exc
     return snapshot_to_view(snapshot)

@@ -30,9 +30,10 @@ class ConnectionRepository(Protocol):
         expected_state: str,
         new_state: str,
     ) -> AccountConnection:
-        """105번 표준의 conditional_update로 상태 전이. 대상이 기대 상태가
-        아니면 ConcurrencyConflictError(구현체 책임) — CON-004(동시 revoke와
-        sync 경합)가 이 조건에 기댄다."""
+        """105번 표준의 conditional_update로 상태 전이(revoke/disconnect 등
+        단발 전이용). sync 경로의 CON-004 방어는 이 메서드가 아니라 아래
+        `persist_snapshot_if_syncable()`이 담당한다 — 재확인과 저장 사이에
+        또 다른 왕복이 끼면 이 메서드 하나만으로는 그 틈을 못 막는다."""
         ...
 
     async def insert_consent_link(self, link: ConnectionConsent) -> ConnectionConsent: ...
@@ -48,7 +49,20 @@ class ConnectionRepository(Protocol):
         추적 보존, 49번 원칙) — expires_at을 과거로 당겨 재사용을 막는다."""
         ...
 
-    async def insert_snapshot(self, snapshot: AccountSnapshot) -> AccountSnapshot: ...
+    async def persist_snapshot_if_syncable(
+        self,
+        connection_id: UUID,
+        snapshot: AccountSnapshot,
+        health: ConnectionHealth,
+    ) -> AccountSnapshot:
+        """CON-004 — "connection이 여전히 ACTIVE_READONLY/DEGRADED인가" 재확인과
+        snapshot/health 저장(+ DEGRADED였다면 ACTIVE_READONLY로 복구)을 하나의
+        트랜잭션 + row lock(`SELECT ... FOR UPDATE`)으로 묶는다. `get_connection()`
+        으로 먼저 읽고 나중에 `insert_snapshot()`을 따로 호출하는 두 번의 왕복
+        사이에는 revoke가 끼어들 진짜 틈(TOCTOU)이 남는다 — 이 메서드는 그 틈을
+        구조적으로 없앤다. 그 사이 revoke/disconnect가 커밋됐으면
+        ConcurrencyConflictError(105번 표준)."""
+        ...
 
     async def get_latest_snapshot(self, connection_id: UUID) -> AccountSnapshot | None: ...
 
