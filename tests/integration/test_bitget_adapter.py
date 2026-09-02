@@ -285,3 +285,81 @@ async def test_modify_order_cancel_replaces_then_reconfirms():
 
     assert calls == ["/api/v2/spot/trade/cancel-replace-order", "/api/v2/spot/trade/orderInfo"]
     assert order.exchange_order_id == "999"
+
+
+async def test_get_history_candles_parses_rows():
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == "/api/v2/spot/market/history-candles"
+        assert request.url.params["endTime"] == "1700000000000"
+        return _json_response(
+            {
+                "code": "00000",
+                "msg": "success",
+                "requestTime": 1,
+                "data": [["1700000000000", "80000", "81000", "79500", "80500", "12.3"]],
+            }
+        )
+
+    adapter = _make_adapter(handler)
+    candles = await adapter.get_history_candles("BTC/USDT", "1h", end_time="1700000000000")
+
+    assert candles[0].close == Decimal("80500")
+    assert candles[0].timeframe == "1h"
+
+
+async def test_get_symbol_info_derives_tick_and_lot_from_precision():
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == "/api/v2/spot/public/symbols"
+        return _json_response(
+            {
+                "code": "00000",
+                "msg": "success",
+                "requestTime": 1,
+                "data": [
+                    {
+                        "baseCoin": "BTC",
+                        "quoteCoin": "USDT",
+                        "pricePrecision": "2",
+                        "quantityPrecision": "4",
+                        "minTradeAmount": "0.0001",
+                        "status": "online",
+                    }
+                ],
+            }
+        )
+
+    adapter = _make_adapter(handler)
+    symbols = await adapter.get_symbol_info()
+
+    assert symbols[0].symbol == "BTC/USDT"
+    assert symbols[0].tick_size == Decimal("0.01")
+    assert symbols[0].lot_size == Decimal("0.0001")
+    assert symbols[0].status == "online"
+
+
+async def test_get_public_trades_parses_fills():
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == "/api/v2/spot/market/fills"
+        return _json_response(
+            {
+                "code": "00000",
+                "msg": "success",
+                "requestTime": 1,
+                "data": [
+                    {
+                        "tradeId": "t-1",
+                        "price": "80000",
+                        "size": "0.5",
+                        "side": "buy",
+                        "ts": "1700000000000",
+                    }
+                ],
+            }
+        )
+
+    adapter = _make_adapter(handler)
+    trades = await adapter.get_public_trades("BTC/USDT")
+
+    assert trades[0].trade_id == "t-1"
+    assert trades[0].price == Decimal("80000")
+    assert trades[0].side == "buy"

@@ -37,7 +37,14 @@ from websockets.exceptions import ConnectionClosed
 from src.core.parser.candle_parser import parse_candles
 from src.core.parser.orderbook_parser import parse_orderbook
 from src.core.parser.ticker_parser import parse_ticker
-from src.data.models.market_data import Candle, OrderBook, OrderBookLevel, Ticker
+from src.data.models.market_data import (
+    Candle,
+    OrderBook,
+    OrderBookLevel,
+    PublicTrade,
+    SpotSymbolInfo,
+    Ticker,
+)
 from src.data.models.trading import Order
 from src.exchanges.bitget.trading_mixin import _row_to_order
 from src.exchanges.common.types import TickerCallback
@@ -250,6 +257,75 @@ class BitgetMarketDataMixin:
             },
         )
         return parse_candles(raw["data"], "bitget", symbol, timeframe)
+
+    async def get_history_candles(
+        self, symbol: str, timeframe: str, *, limit: int = 100, end_time: str | None = None
+    ) -> list[Candle]:
+        """02b 스펙 §3.1(P1) — FD-2.3 백테스트 데이터 확장용. `end_time`은
+        Bitget 밀리초 타임스탬프 문자열(그 시점 이전 데이터 조회, 페이지네이션
+        용도) — 생략 시 최신 구간부터."""
+        granularity = _GRANULARITY_MAP.get(timeframe)
+        if granularity is None:
+            raise ValueError(f"지원하지 않는 timeframe: {timeframe}")
+        params: dict[str, Any] = {
+            "symbol": _to_bitget_symbol(symbol),
+            "granularity": granularity,
+            "limit": str(limit),
+        }
+        if end_time is not None:
+            params["endTime"] = end_time
+        raw = await self._request(  # type: ignore[attr-defined]
+            "GET", "/api/v2/spot/market/history-candles", params=params
+        )
+        return parse_candles(raw["data"], "bitget", symbol, timeframe)
+
+    async def get_symbol_info(self, symbol: str | None = None) -> list[SpotSymbolInfo]:
+        """02b 스펙 §3.1(P1)/§8 — FD-4.1(사전검증)이 필요로 하는 심볼
+        규격. `symbol` 생략 시 전체 심볼 목록."""
+        params: dict[str, Any] = {}
+        if symbol is not None:
+            params["symbol"] = _to_bitget_symbol(symbol)
+        raw = await self._request(  # type: ignore[attr-defined]
+            "GET", "/api/v2/spot/public/symbols", params=params or None
+        )
+        result = []
+        for item in raw["data"]:
+            price_precision = int(item.get("pricePrecision", "0"))
+            quantity_precision = int(item.get("quantityPrecision", "0"))
+            result.append(
+                SpotSymbolInfo(
+                    symbol=f"{item.get('baseCoin', '')}/{item.get('quoteCoin', '')}",
+                    exchange="bitget",
+                    base_coin=item.get("baseCoin", ""),
+                    quote_coin=item.get("quoteCoin", ""),
+                    tick_size=Decimal(1).scaleb(-price_precision),
+                    lot_size=Decimal(1).scaleb(-quantity_precision),
+                    min_trade_amount=Decimal(item.get("minTradeAmount", "0")),
+                    status=item.get("status", ""),
+                )
+            )
+        return result
+
+    async def get_public_trades(self, symbol: str, *, limit: int = 100) -> list[PublicTrade]:
+        """02b 스펙 §3.1(P1) — 시장 전체 체결 스트림(FD-2.6 데이터 신뢰도
+        교차검증 보강용, 내 주문이 아닌 그 심볼의 전체 체결)."""
+        raw = await self._request(  # type: ignore[attr-defined]
+            "GET",
+            "/api/v2/spot/market/fills",
+            params={"symbol": _to_bitget_symbol(symbol), "limit": str(limit)},
+        )
+        return [
+            PublicTrade(
+                symbol=symbol,
+                exchange="bitget",
+                trade_id=item["tradeId"],
+                price=Decimal(item["price"]),
+                quantity=Decimal(item["size"]),
+                side=item.get("side", ""),
+                timestamp=datetime.fromtimestamp(int(item["ts"]) / 1000, tz=timezone.utc),
+            )
+            for item in raw["data"]
+        ]
 
     async def subscribe_ticker_stream(
         self,

@@ -47,6 +47,38 @@ class OrderBook(BaseModel):
     timestamp: datetime
 
 
+class SpotSymbolInfo(BaseModel):
+    """02b_bitget_api_v2_full_spec_v1.md §3.1/§8 — FD-4.1(사전검증)이
+    필요로 하는 심볼 규격. Bitget V2는 tick/lot을 직접 내려주지 않고
+    소수자리수(pricePrecision/quantityPrecision)만 제공하므로, tick_size/
+    lot_size는 10**-precision으로 환산한 값이다 — 실제 최소 단위가 이
+    값과 정확히 일치하는지는 라이브 검증 필요(일부 거래소는 precision과
+    별개로 비표준 tick을 쓰기도 함)."""
+
+    symbol: str
+    exchange: str
+    base_coin: str
+    quote_coin: str
+    tick_size: Decimal
+    lot_size: Decimal
+    min_trade_amount: Decimal
+    status: str
+
+
+class PublicTrade(BaseModel):
+    """02b_bitget_api_v2_full_spec_v1.md §3.1 — 시장 전체 체결 스트림(내
+    주문이 아닌, 그 심볼에서 일어난 모든 체결). FD-2.6(데이터 신뢰도
+    교차검증) 보강용 — Ticker/Candle과 달리 체결 단위 원시 데이터다."""
+
+    symbol: str
+    exchange: str
+    trade_id: str
+    price: Decimal
+    quantity: Decimal
+    side: str  # "buy" | "sell"
+    timestamp: datetime
+
+
 class FundingRate(BaseModel):
     """02b_bitget_api_v2_full_spec_v1.md §8 — 무기한 선물 펀딩레이트.
     Ticker/Candle과 동일 계층(시장 공개 데이터)에 둔다 — Order/Position
