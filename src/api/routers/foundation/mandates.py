@@ -7,7 +7,11 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, status
 
 from src.api.deps import get_auth_service, get_current_user, reauthenticate
-from src.api.foundation_deps import get_mandate_repository, get_trust_repository
+from src.api.foundation_deps import (
+    get_mandate_repository,
+    get_risk_gate_repository,
+    get_trust_repository,
+)
 from src.api.schemas.foundation.mandates import (
     ActivateRevisionRequest,
     MandateRevisionView,
@@ -38,6 +42,7 @@ from src.foundation.mandates.application.pause_mandate import pause_mandate, res
 from src.foundation.mandates.application.propose_amendment import propose_amendment
 from src.foundation.mandates.ports.repository import MandateRepository
 from src.foundation.mandates.projections import build_mandate_status_view
+from src.foundation.risk_gate.ports.repository import RiskGateRepository
 from src.foundation.trust.ports.repository import TrustRepository
 from src.services.auth_service import AuthService, User
 
@@ -92,6 +97,7 @@ async def post_activate_revision(
     user: User = Depends(get_current_user),
     mandate_repo: MandateRepository = Depends(get_mandate_repository),
     trust_repo: TrustRepository = Depends(get_trust_repository),
+    risk_gate_repo: RiskGateRepository = Depends(get_risk_gate_repository),
     auth: AuthService = Depends(get_auth_service),
 ) -> MandateRevisionView:
     reauthenticated = False
@@ -100,7 +106,7 @@ async def post_activate_revision(
         reauthenticated = True
 
     try:
-        return await activate_revision_command(
+        result = await activate_revision_command(
             mandate_repo,
             trust_repo,
             tenant_id=user.user_id,
@@ -131,27 +137,43 @@ async def post_activate_revision(
     except ConcurrencyConflictError as exc:
         raise HTTPException(status.HTTP_409_CONFLICT, str(exc)) from exc
 
+    # 레드팀 지적(agent-platform-12) — evaluate_policy.py의 fingerprint 수정만으로
+    # mandates 자신의 30초 캐시는 즉시 무효화되지만, risk_gate가 그 위에 얹은
+    # 별도 10초 캐시(risk_evaluation)는 mandate 변경을 알 방법이 없어 그대로
+    # stale ALLOW를 돌려줄 수 있다 — mandates 도메인이 risk_gate를 직접 알면
+    # 안 되므로(71번 §4 방향성 위반), 이미 두 저장소를 다 아는 이 라우터가
+    # orchestration만 담당한다(risk_gate.evaluate_risk_gate 라우터가 이미
+    # mandates+connections+risk_gate 셋을 함께 의존하는 것과 동일한 패턴).
+    await risk_gate_repo.invalidate_evaluations(tenant_id=user.user_id)
+    return result
+
 
 @router.post("/mandate:pause")
 async def post_pause_mandate(
     user: User = Depends(get_current_user),
     repo: MandateRepository = Depends(get_mandate_repository),
+    risk_gate_repo: RiskGateRepository = Depends(get_risk_gate_repository),
 ) -> MandateRevisionView:
     try:
-        return await pause_mandate(repo, tenant_id=user.user_id)
+        result = await pause_mandate(repo, tenant_id=user.user_id)
     except ConcurrencyConflictError as exc:
         raise HTTPException(status.HTTP_409_CONFLICT, str(exc)) from exc
+    await risk_gate_repo.invalidate_evaluations(tenant_id=user.user_id)
+    return result
 
 
 @router.post("/mandate:resume")
 async def post_resume_mandate(
     user: User = Depends(get_current_user),
     repo: MandateRepository = Depends(get_mandate_repository),
+    risk_gate_repo: RiskGateRepository = Depends(get_risk_gate_repository),
 ) -> MandateRevisionView:
     try:
-        return await resume_mandate(repo, tenant_id=user.user_id)
+        result = await resume_mandate(repo, tenant_id=user.user_id)
     except ConcurrencyConflictError as exc:
         raise HTTPException(status.HTTP_409_CONFLICT, str(exc)) from exc
+    await risk_gate_repo.invalidate_evaluations(tenant_id=user.user_id)
+    return result
 
 
 @router.post("/policy:evaluate")

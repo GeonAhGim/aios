@@ -110,6 +110,35 @@ async def test_evaluate_policy_without_mandate_is_404(client):
     assert response.status_code == 404
 
 
+async def test_pause_invalidates_risk_gate_cache_via_api(client):
+    """레드팀 지적(agent-platform-12) 회귀 — mandates 자신의 캐시(fingerprint에
+    revision state 포함)뿐 아니라 risk_gate가 그 위에 얹은 별도 10초 캐시도
+    pause 즉시 무효화돼야 한다. 먼저 risk_gate 평가를 한 번 호출해 그 캐시를
+    데운 뒤 pause하고, 곧바로 다시 평가해 stale ALLOW가 아니라 PAUSE 계열
+    outcome이 나오는지 확인한다."""
+    headers = await _register(client)
+    draft = (
+        await client.post("/v1/foundation/mandates/drafts", json=DEFAULT_RULES, headers=headers)
+    ).json()
+    await client.post(
+        f"/v1/foundation/mandates/revisions/{draft['id']}:activate", json={}, headers=headers
+    )
+
+    warm_response = await client.post(
+        "/v1/foundation/risk-gate/evaluate", json={"gate_kind": "DEPLOYMENT"}, headers=headers
+    )
+    assert warm_response.status_code == 200
+    assert warm_response.json()["outcome"] == "ALLOW"
+
+    await client.post("/v1/foundation/mandates/mandate:pause", json={}, headers=headers)
+
+    after_pause_response = await client.post(
+        "/v1/foundation/risk-gate/evaluate", json={"gate_kind": "DEPLOYMENT"}, headers=headers
+    )
+    assert after_pause_response.status_code == 200
+    assert after_pause_response.json()["outcome"] != "ALLOW"
+
+
 async def test_material_amendment_via_api_requires_password_reauth(client):
     headers = await _register(client)
     draft = (

@@ -2,9 +2,17 @@
 
 Spec: AIOSproject 75번 §3 (`EvaluatePolicy`).
 
-다른 bounded context(risk_gate, paper_control 등, 아직 미구현)는 이 함수를
-통해서만 mandate 판단을 소비한다 — 71번 §4 Contract ownership.
-"""
+다른 bounded context(risk_gate, paper_control 등)는 이 함수를 통해서만
+mandate 판단을 소비한다 — 71번 §4 Contract ownership.
+
+레드팀 지적(2026-09-02, agent-platform-12 보고) — fingerprint가 tenant_id
++subject만 해시해 active revision id/state를 반영하지 않았다. pause_mandate가
+revision.state를 ACTIVE→PAUSED로 바꿔도 같은 subject로 재요청하면 fingerprint가
+그대로라 캐시된(일시정지 이전) ALLOW 결정을 최대 DECISION_CACHE_TTL_SECONDS초
+동안 그대로 돌려줄 수 있었다. 이제 revision id+state를 fingerprint에 포함해,
+mandate가 바뀌는 즉시(별도 invalidate 호출 없이) 자연히 캐시 미스가 나게
+한다 — "명시적 무효화를 잊으면 뚫린다"는 클래스의 결함(risk_gate #26과 동일
+클래스)을 fingerprint 설계 자체로 막는다."""
 from __future__ import annotations
 
 import hashlib
@@ -36,9 +44,16 @@ class NoActiveMandateError(Exception):
     pass
 
 
-def _fingerprint(tenant_id: UUID, subject: PolicyEvaluationSubject) -> str:
+def _fingerprint(
+    tenant_id: UUID, subject: PolicyEvaluationSubject, *, revision_id: UUID, revision_state: str
+) -> str:
     payload = json.dumps(
-        {"tenant_id": str(tenant_id), **subject.model_dump(mode="json")},
+        {
+            "tenant_id": str(tenant_id),
+            "revision_id": str(revision_id),
+            "revision_state": revision_state,
+            **subject.model_dump(mode="json"),
+        },
         sort_keys=True,
     )
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()
@@ -61,16 +76,22 @@ def _decision_to_view(decision: DomainDecision) -> PolicyDecisionView:
 async def evaluate(
     repo: MandateRepository, *, tenant_id: UUID, subject: PolicyEvaluationSubject
 ) -> PolicyDecisionView:
-    fingerprint = _fingerprint(tenant_id, subject)
-    cached = await repo.get_cached_decision(tenant_id, fingerprint)
-    if cached is not None:
-        return _decision_to_view(cached)
-
+    # fingerprint에 revision id/state를 넣으려면 캐시 조회보다 먼저
+    # mandate/revision을 읽어야 한다 — 캐시 히트 여부와 무관하게 매번 이
+    # 조회 하나는 추가로 든다(mandates는 hot path가 아니라 감당 가능한
+    # 트레이드오프 — 위 클래스 docstring 참조).
     mandate = await repo.get_mandate(tenant_id)
     if mandate is None or mandate.active_revision_id is None:
         raise NoActiveMandateError(str(tenant_id))
     revision = await repo.get_revision(mandate.active_revision_id)
     assert revision is not None  # FK가 보장
+
+    fingerprint = _fingerprint(
+        tenant_id, subject, revision_id=revision.id, revision_state=revision.state.value
+    )
+    cached = await repo.get_cached_decision(tenant_id, fingerprint)
+    if cached is not None:
+        return _decision_to_view(cached)
 
     if revision.state == MandateRevisionState.PAUSED:
         outcome, reasons, obligations = (

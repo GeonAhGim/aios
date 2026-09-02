@@ -198,6 +198,26 @@ async def test_evaluate_policy_denies_when_mandate_paused(pool, repo, trust_repo
     assert "STATE_MANDATE_PAUSED" in decision.reason_codes
 
 
+async def test_pause_immediately_invalidates_a_warm_cache(pool, repo, trust_repo):
+    """레드팀 지적(agent-platform-12) 회귀 테스트 — fingerprint가 tenant_id+
+    subject만 해시하던 시절엔, 캐시가 이미 ALLOW로 데워진 상태에서 pause해도
+    같은 subject 재평가가 최대 DECISION_CACHE_TTL_SECONDS초 동안 그 stale
+    ALLOW를 그대로 돌려줬다. fingerprint에 revision id+state를 넣은 뒤로는
+    pause 직후 첫 재평가부터 곧바로 PAUSE_REQUIRED여야 한다(별도 캐시
+    무효화 호출 없이)."""
+    tenant_id = await _activated_tenant(pool, repo, trust_repo)
+    subject = PolicyEvaluationSubject(command_type="x")
+
+    warm = await evaluate_policy_command(repo, tenant_id=tenant_id, subject=subject)
+    assert warm.outcome == PolicyOutcome.ALLOW
+
+    await pause_mandate(repo, tenant_id=tenant_id)
+
+    decision = await evaluate_policy_command(repo, tenant_id=tenant_id, subject=subject)
+    assert decision.outcome == PolicyOutcome.PAUSE_REQUIRED
+    assert decision.id != warm.id
+
+
 async def test_resume_mandate_allows_evaluation_again(pool, repo, trust_repo):
     tenant_id = await _activated_tenant(pool, repo, trust_repo)
     await pause_mandate(repo, tenant_id=tenant_id)
