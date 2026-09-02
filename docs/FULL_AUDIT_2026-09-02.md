@@ -99,7 +99,10 @@ mypy strict 통과의 실질: `type: ignore` 178건 중 160건이 거래소 믹�
 | PAPER 격리 미검증 헤더 | 미착수 | Bitget Demo 키 필요 — §11 4단계 |
 | 손실한도 자동정지 미발동 (positions 미기록) | 미착수 | §11 3·6단계. 실행 루프 배선과 함께 |
 | 리스크 기준 인메모리 | 미착수 | §11 6단계 |
-| Kill switch 직후 stale ALLOW | 미착수 | foundation 담당 세션 영역 — §11 5단계 |
+| Kill switch 직후 stale ALLOW — risk_gate | **수정됨** (`8a0734c`, 다른 세션) | `activate/deactivate_safety_control`이 `invalidate_evaluations`를 호출. PROVIDER 범위 조회 누락, scope_ref 없는 고아 통제도 같이 수정. 레드팀 #26~34 |
+| Kill switch 직후 stale ALLOW — mandates | 미착수 (foundation 세션 배정) | `evaluate_policy._fingerprint`는 여전히 tenant+subject만 포함. mandate pause 후 30초간 캐시 ALLOW |
+| Kill switch가 RUNNING 배포·intent 제출을 못 멈춤 | 미착수 (paper_control 세션 배정) | `submit_paper_intent` safety control 조회 + fence 소비 경로 |
+| Bitget 확장 믹스인의 Executor 가드 우회 자금이동 (§4·§7, 레드팀 #32) | **수정됨** (`8a0734c`, 다른 세션) | `src/exchanges/common/live_guard.py`의 `@require_paper_sandbox`를 convert/grid/strategy/margin/futures/loan/subaccount에 적용. WS 재연결 시 로그인 서명 재사용(#31)도 수정 |
 | P1 4건 | 미착수 | — |
 
 마이그레이션 `b7e2c4d9f1a6`(revises `f2b8e5d1a734`)는 공유 dev DB에 적용됐다.
