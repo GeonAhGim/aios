@@ -136,6 +136,7 @@ def create_app() -> FastAPI:
         exchange_credentials,
         executions,
         marketplace,
+        metrics,
         notifications,
         portfolio,
         reports,
@@ -183,6 +184,7 @@ def create_app() -> FastAPI:
     )
     app.include_router(wallet.router, prefix="/wallet", tags=["wallet"])
     app.include_router(alerts.router, prefix="/alerts", tags=["alerts"])
+    app.include_router(metrics.router)
 
     return app
 
