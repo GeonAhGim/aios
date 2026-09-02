@@ -1,12 +1,14 @@
 import { keysToCamel, keysToSnake } from "./caseConvert";
-import { unwrap } from "./envelope";
+import { resolveTraceId, unwrap } from "./envelope";
 
 export class ApiError extends Error {
   statusCode: number;
+  traceId?: string;
 
-  constructor(statusCode: number, message: string) {
+  constructor(statusCode: number, message: string, traceId?: string) {
     super(message);
     this.statusCode = statusCode;
+    this.traceId = traceId;
   }
 }
 
@@ -45,29 +47,33 @@ export class ApiClientBase {
     this.getToken = getToken;
   }
 
-  private async fetchJson(path: string, init?: RequestInit): Promise<{ status: number; body: unknown }> {
+  private async fetchJson(
+    path: string,
+    init?: RequestInit,
+  ): Promise<{ status: number; body: unknown; traceId?: string }> {
     const token = this.getToken();
     const headers = new Headers(init?.headers);
     headers.set("Content-Type", "application/json");
     if (token) headers.set("Authorization", `Bearer ${token}`);
 
     const response = await fetch(`${this.baseUrl}${path}`, { ...init, headers });
+    const traceId = response.headers.get("X-Trace-Id") ?? undefined;
 
     if (response.status === 204) {
-      return { status: response.status, body: undefined };
+      return { status: response.status, body: undefined, traceId };
     }
 
     const text = await response.text();
     const body: unknown = text ? JSON.parse(text) : undefined;
-    return { status: response.status, body };
+    return { status: response.status, body, traceId };
   }
 
   protected async request<T>(path: string, init?: RequestInit): Promise<T> {
-    const { status, body } = await this.fetchJson(path, init);
+    const { status, body, traceId } = await this.fetchJson(path, init);
     if (status === 204) return undefined as T;
 
     if (status < 200 || status >= 300) {
-      throw new ApiError(status, extractDetailMessage(body));
+      throw new ApiError(status, extractDetailMessage(body), resolveTraceId(undefined, traceId));
     }
 
     return keysToCamel<T>(body);
@@ -108,12 +114,12 @@ export class ApiClientBase {
   }
 
   protected async requestEnvelope<T>(path: string, init?: RequestInit): Promise<T> {
-    const { status, body } = await this.fetchJson(path, init);
+    const { status, body, traceId } = await this.fetchJson(path, init);
     if (status === 204) return undefined as T;
 
     const result = unwrap<unknown>(body);
     if (!result.ok) {
-      throw new ApiError(status, result.error.message);
+      throw new ApiError(status, result.error.message, resolveTraceId(result.error.trace_id, traceId));
     }
     return keysToCamel<T>(result.data);
   }

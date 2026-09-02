@@ -45,3 +45,13 @@ export function unwrap<T>(body: unknown): EnvelopeResult<T> {
   }
   throw new EnvelopeFormatError("ApiResponse 봉투 형식이 아닙니다.");
 }
+
+// spec §9 PLT-05/13: 응답 헤더 X-Trace-Id와 에러 봉투 trace_id 중 존재하는 값을
+// 지원코드로 노출한다. 봉투 쪽이 우선이고(§3.3 계약값), 봉투가 없는 레거시
+// 에러 응답은 헤더만 남는다. 둘 다 없으면 undefined — throw 금지.
+export function resolveTraceId(
+  envelopeTraceId: string | null | undefined,
+  headerTraceId: string | null | undefined,
+): string | undefined {
+  return envelopeTraceId || headerTraceId || undefined;
+}
