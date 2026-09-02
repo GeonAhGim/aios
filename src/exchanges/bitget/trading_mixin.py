@@ -174,6 +174,113 @@ class BitgetTradingMixin:
         )
         return list(raw["data"])
 
+    async def place_batch_orders(self, orders: list[Order]) -> list[Order]:
+        """02b 스펙 §3.2(P1) — FD-19(포트폴리오) 다중 실행 동시 진입용.
+        Bitget V2 batch-orders는 한 심볼 안에서만 배치를 허용한다(커뮤니티
+        SDK 레퍼런스 기준, 라이브 검증 필요) — 여러 심볼을 섞으면 호출부가
+        심볼별로 나눠 호출해야 한다."""
+        if not orders:
+            return []
+        symbol = orders[0].symbol
+        order_list: list[dict[str, Any]] = []
+        for order in orders:
+            row: dict[str, Any] = {
+                "side": order.side.value.lower(),
+                "orderType": order.order_type.value.lower(),
+                "force": "gtc",
+                "size": str(order.quantity),
+                "clientOid": order.client_order_id,
+            }
+            if order.price is not None:
+                row["price"] = str(order.price.amount)
+            order_list.append(row)
+
+        raw = await self._request(  # type: ignore[attr-defined]
+            "POST",
+            "/api/v2/spot/trade/batch-orders",
+            body={"symbol": symbol.replace("/", ""), "orderList": order_list},
+        )
+        data = raw["data"]
+        success_by_client_oid = {item["clientOid"]: item for item in data.get("successList", [])}
+        failed_client_oids = {item["clientOid"] for item in data.get("failureList", [])}
+
+        result = []
+        for order in orders:
+            if order.client_order_id in success_by_client_oid:
+                success = success_by_client_oid[order.client_order_id]
+                result.append(
+                    order.model_copy(
+                        update={
+                            "exchange_order_id": success["orderId"],
+                            "status": OrderStatus.SUBMITTED,
+                        }
+                    )
+                )
+            elif order.client_order_id in failed_client_oids:
+                result.append(order.model_copy(update={"status": OrderStatus.REJECTED}))
+            else:
+                result.append(order)
+        return result
+
+    async def cancel_batch_orders(self, order_ids: list[str], *, symbol: str | None = None) -> bool:
+        """02b 스펙 §3.2(P1)."""
+        body: dict[str, Any] = {"orderIdList": [{"orderId": oid} for oid in order_ids]}
+        if symbol is not None:
+            body["symbol"] = symbol.replace("/", "")
+        raw = await self._request(  # type: ignore[attr-defined]
+            "POST", "/api/v2/spot/trade/batch-cancel-order", body=body
+        )
+        return bool(raw.get("code") == "00000")
+
+    async def place_plan_order(
+        self,
+        symbol: str,
+        side: OrderSide,
+        size: Decimal,
+        trigger_price: Decimal,
+        *,
+        order_price: Decimal | None = None,
+        order_type: OrderType = OrderType.LIMIT,
+        plan_type: str = "normal_plan",
+    ) -> dict[str, Any]:
+        """02b 스펙 §3.2(P1) — FD-8.1 stop_loss/take_profit을 폴링 대신
+        거래소 네이티브 트리거로 이관할 후보. `Order` 모델에는 트리거가격
+        개념이 없다(§2 모델 재사용 원칙 — 실제 소비하는 FD-8 호출부가
+        생기기 전까지 새 필드 추가를 보류) — `get_fills()`와 동일하게 raw
+        dict를 반환한다."""
+        body: dict[str, Any] = {
+            "symbol": symbol.replace("/", ""),
+            "side": side.value.lower(),
+            "orderType": order_type.value.lower(),
+            "size": str(size),
+            "triggerPrice": str(trigger_price),
+            "planType": plan_type,
+            "force": "gtc",
+        }
+        if order_price is not None:
+            body["executePrice"] = str(order_price)
+        raw = await self._request(  # type: ignore[attr-defined]
+            "POST", "/api/v2/spot/trade/place-plan-order", body=body
+        )
+        return dict(raw["data"])
+
+    async def cancel_plan_order(self, order_id: str) -> bool:
+        """02b 스펙 §3.2(P1)."""
+        raw = await self._request(  # type: ignore[attr-defined]
+            "POST", "/api/v2/spot/trade/cancel-plan-order", body={"orderId": order_id}
+        )
+        return bool(raw.get("code") == "00000")
+
+    async def get_current_plan_orders(self, symbol: str | None = None) -> list[dict[str, Any]]:
+        """02b 스펙 §3.2(P1)."""
+        params: dict[str, Any] = {}
+        if symbol is not None:
+            params["symbol"] = symbol.replace("/", "")
+        raw = await self._request(  # type: ignore[attr-defined]
+            "GET", "/api/v2/spot/trade/current-plan-order", params=params or None
+        )
+        return list(raw["data"])
+
     async def health_check(self) -> bool:
         """Watchdog이 State DB와 무관하게 호출하는 경량 응답성 확인."""
         try:

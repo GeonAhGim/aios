@@ -363,3 +363,114 @@ async def test_get_public_trades_parses_fills():
     assert trades[0].trade_id == "t-1"
     assert trades[0].price == Decimal("80000")
     assert trades[0].side == "buy"
+
+
+def _new_order(**overrides: object) -> Order:
+    defaults: dict[str, object] = {
+        "client_order_id": "c-1",
+        "strategy_id": "s-1",
+        "strategy_version": "v1",
+        "symbol": "BTC/USDT",
+        "exchange": "bitget",
+        "side": OrderSide.BUY,
+        "order_type": OrderType.LIMIT,
+        "quantity": Decimal("0.01"),
+        "asset_class": AssetClass.CRYPTO,
+        "price": None,
+    }
+    defaults.update(overrides)
+    return Order(**defaults)  # type: ignore[arg-type]
+
+
+async def test_place_batch_orders_maps_success_and_failure_by_client_oid():
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == "/api/v2/spot/trade/batch-orders"
+        body = json.loads(request.content)
+        assert body["symbol"] == "BTCUSDT"
+        assert len(body["orderList"]) == 2
+        return _json_response(
+            {
+                "code": "00000",
+                "msg": "success",
+                "requestTime": 1,
+                "data": {
+                    "successList": [{"clientOid": "c-1", "orderId": "1"}],
+                    "failureList": [{"clientOid": "c-2", "errorMsg": "insufficient balance"}],
+                },
+            }
+        )
+
+    adapter = _make_adapter(handler)
+    orders = [_new_order(client_order_id="c-1"), _new_order(client_order_id="c-2")]
+
+    result = await adapter.place_batch_orders(orders)
+
+    assert result[0].exchange_order_id == "1"
+    assert result[0].status == OrderStatus.SUBMITTED
+    assert result[1].status == OrderStatus.REJECTED
+
+
+async def test_place_batch_orders_empty_list_short_circuits():
+    adapter = _make_adapter(lambda request: _json_response(REAL_TICKER_ENVELOPE))
+    assert await adapter.place_batch_orders([]) == []
+
+
+async def test_cancel_batch_orders_returns_true_on_success():
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == "/api/v2/spot/trade/batch-cancel-order"
+        body = json.loads(request.content)
+        assert body["orderIdList"] == [{"orderId": "1"}, {"orderId": "2"}]
+        return _json_response({"code": "00000", "msg": "success", "requestTime": 1, "data": {}})
+
+    adapter = _make_adapter(handler)
+    assert await adapter.cancel_batch_orders(["1", "2"]) is True
+
+
+async def test_place_plan_order_sends_trigger_price():
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == "/api/v2/spot/trade/place-plan-order"
+        body = json.loads(request.content)
+        assert body["triggerPrice"] == "75000"
+        assert body["side"] == "sell"
+        return _json_response(
+            {
+                "code": "00000",
+                "msg": "success",
+                "requestTime": 1,
+                "data": {"orderId": "p-1", "clientOid": "c-1"},
+            }
+        )
+
+    adapter = _make_adapter(handler)
+    result = await adapter.place_plan_order(
+        "BTC/USDT", OrderSide.SELL, Decimal("0.01"), Decimal("75000")
+    )
+
+    assert result == {"orderId": "p-1", "clientOid": "c-1"}
+
+
+async def test_cancel_plan_order_returns_true_on_success():
+    adapter = _make_adapter(
+        lambda request: _json_response(
+            {"code": "00000", "msg": "success", "requestTime": 1, "data": {"orderId": "p-1"}}
+        )
+    )
+    assert await adapter.cancel_plan_order("p-1") is True
+
+
+async def test_get_current_plan_orders_returns_raw_rows():
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == "/api/v2/spot/trade/current-plan-order"
+        return _json_response(
+            {
+                "code": "00000",
+                "msg": "success",
+                "requestTime": 1,
+                "data": [{"orderId": "p-1", "triggerPrice": "75000"}],
+            }
+        )
+
+    adapter = _make_adapter(handler)
+    orders = await adapter.get_current_plan_orders("BTC/USDT")
+
+    assert orders == [{"orderId": "p-1", "triggerPrice": "75000"}]
