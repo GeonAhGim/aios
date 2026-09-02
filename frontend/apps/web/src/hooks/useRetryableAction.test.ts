@@ -100,6 +100,22 @@ describe("useRetryableAction", () => {
     expect(seenKeys[1]).toBe(seenKeys[0]);
   });
 
+  it("409 STATE_INVALID_TRANSITION은 같은 409여도 재시도하지 않는다(task-414)", async () => {
+    const refetch = vi.fn().mockResolvedValue(undefined);
+    const { result } = renderHook(() => useRetryableAction<string>({ refetch }));
+
+    let calls = 0;
+    await expect(
+      result.current.run(async () => {
+        calls += 1;
+        throw new ApiError(409, "잘못된 상태 전이", undefined, "STATE_INVALID_TRANSITION");
+      }),
+    ).rejects.toMatchObject({ errorCode: "STATE_INVALID_TRANSITION" });
+
+    expect(calls).toBe(1);
+    expect(refetch).not.toHaveBeenCalled();
+  });
+
   it("INTERNAL_ERROR는 재시도 없이 즉시 던진다", async () => {
     const { result } = renderHook(() => useRetryableAction<string>());
 
