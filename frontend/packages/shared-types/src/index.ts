@@ -11,3 +11,4 @@ export * from "./deviceToken";
 export * from "./admin";
 export * from "./wallet";
 export * from "./alert";
+export * from "./apiError";
