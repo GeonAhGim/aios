@@ -32,6 +32,7 @@ from src.data.models.base import AssetClass
 from src.exchanges.common.adapter import ExchangeAdapter
 from src.exchanges.common.types import ExchangeCapability, MarketHours
 from src.exchanges.kis.account_mixin import KISAccountMixin
+from src.exchanges.kis.domestic_stock_extra_mixin import KISDomesticStockExtraMixin
 from src.exchanges.kis.market_data_mixin import KISMarketDataMixin
 from src.exchanges.kis.trading_mixin import KISTradingMixin
 
@@ -140,6 +141,7 @@ class KISAdapter(
     KISMarketDataMixin,
     KISAccountMixin,
     KISTradingMixin,
+    KISDomesticStockExtraMixin,
     ExchangeAdapter,
 ):
     """한국투자증권(KIS) — 국내 REST+WebSocket 공식 API, OAuth 2.0 인증.
