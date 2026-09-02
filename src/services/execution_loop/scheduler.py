@@ -38,6 +38,7 @@ from src.exchanges.common.adapter import ExchangeAdapter
 from src.services.credential_resolver import CredentialNotFoundError
 from src.services.execution_loop.equity_tracker import ExecutionEquityTracker
 from src.services.execution_loop.tick import run_execution_tick
+from src.services.order_service.gate import PreSubmitGate
 from src.services.order_service.submit import PublishFn
 
 logger = logging.getLogger(__name__)
@@ -64,11 +65,13 @@ class ExecutionLoopScheduler:
         publish: PublishFn | None = None,
         max_concurrent_ticks: int = DEFAULT_MAX_CONCURRENT_TICKS,
         equity_tracker: ExecutionEquityTracker | None = None,
+        pre_submit_gate: PreSubmitGate | None = None,
     ) -> None:
         self._pool = pool
         self._resolve_adapter = resolve_adapter
         self._policy = policy
         self._publish = publish
+        self._pre_submit_gate = pre_submit_gate
         self._semaphore = asyncio.Semaphore(max_concurrent_ticks)
         self._strategy_engine = StrategyEngine()
         self._portfolio_engine = PortfolioEngine()
@@ -120,6 +123,7 @@ class ExecutionLoopScheduler:
                     equity_tracker=self._equity_tracker,
                     policy=self._policy,
                     publish=self._publish,
+                    pre_submit_gate=self._pre_submit_gate,
                 )
             except Exception as exc:
                 report.failed[execution_id] = f"{type(exc).__name__}: {exc}"

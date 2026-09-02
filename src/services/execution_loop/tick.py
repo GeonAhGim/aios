@@ -34,7 +34,9 @@ from src.services.execution_loop.account_state import assemble_account_state
 from src.services.execution_loop.equity_tracker import ExecutionEquityTracker
 from src.services.execution_loop.market_state import build_market_state
 from src.services.execution_loop.position import compute_position_quantity
+from src.services.execution_loop.pre_submit_check import is_submission_allowed
 from src.services.order_service import repository
+from src.services.order_service.gate import PreSubmitGate
 from src.services.order_service.submit import PublishFn, apply_fill
 
 logger = logging.getLogger(__name__)
@@ -185,6 +187,7 @@ async def run_execution_tick(
     equity_tracker: ExecutionEquityTracker,
     policy: RiskPolicy,
     publish: PublishFn | None = None,
+    pre_submit_gate: PreSubmitGate | None = None,
 ) -> None:
     execution, fsm_config, certified_badge = await _load_execution_context(pool, execution_id)
     current_fsm_state = FSMState(execution["fsm_state"])
@@ -276,6 +279,20 @@ async def run_execution_tick(
             "주문 제출을 건너뜁니다.",
             execution_id,
         )
+        return
+
+    # 전수감사 §6 / FND-06 배선 — FSM을 PENDING류로 전이하기 *전에* 검사한다.
+    # executor.py는 FROZEN_PAPER_ONLY라 시그니처를 바꿔 게이트를 그 안까지
+    # 관통시키지 않는다 — 여기서 거부하면 executor.execute()를 아예 안 부르므로
+    # 동일한 안전효과를 얻으면서 FSM은 전혀 건드리지 않는다(전이 이후에
+    # 거부하면 PENDING류에 영구히 갇히는 #2026-09-02-39류 결함을 재현하게 됨).
+    allowed = await is_submission_allowed(
+        pre_submit_gate,
+        user_id=execution["user_id"],
+        execution_id=execution_id,
+        exchange=adapter.get_capabilities().exchange_name,
+    )
+    if not allowed:
         return
 
     writer = await _make_fsm_state_writer(pool)
