@@ -46,15 +46,18 @@ class FailureDomain(BaseModel):
 class _StreakTracker:
     """진입/복귀에 서로 다른 지속시간을 요구하는 비대칭 히스테리시스."""
 
-    def __init__(self, entry_seconds: float, recovery_seconds: float) -> None:
+    def __init__(
+        self, entry_seconds: float, recovery_seconds: float, clock: Callable[[], float]
+    ) -> None:
         self._entry_seconds = entry_seconds
         self._recovery_seconds = recovery_seconds
+        self._clock = clock
         self._confirmed_ok = True
         self._pending_since: float | None = None
         self._pending_value: bool | None = None
 
     def update(self, raw_ok: bool) -> bool:
-        now = time.monotonic()
+        now = self._clock()
         if raw_ok == self._confirmed_ok:
             self._pending_since = None
             self._pending_value = None
@@ -88,11 +91,16 @@ class SplitBrainDiagnostics:
         entry_confirm_seconds: float = DEFAULT_ENTRY_CONFIRM_SECONDS,
         recovery_confirm_seconds: float = DEFAULT_RECOVERY_CONFIRM_SECONDS,
         check_timeout_seconds: float = DEFAULT_CHECK_TIMEOUT_SECONDS,
+        clock: Callable[[], float] = time.monotonic,
     ) -> None:
         self._check_timeout_seconds = check_timeout_seconds
-        self._exchange_tracker = _StreakTracker(entry_confirm_seconds, recovery_confirm_seconds)
-        self._db_tracker = _StreakTracker(entry_confirm_seconds, recovery_confirm_seconds)
-        self._main_process_tracker = _StreakTracker(entry_confirm_seconds, recovery_confirm_seconds)
+        self._exchange_tracker = _StreakTracker(
+            entry_confirm_seconds, recovery_confirm_seconds, clock
+        )
+        self._db_tracker = _StreakTracker(entry_confirm_seconds, recovery_confirm_seconds, clock)
+        self._main_process_tracker = _StreakTracker(
+            entry_confirm_seconds, recovery_confirm_seconds, clock
+        )
 
     async def diagnose(
         self,
