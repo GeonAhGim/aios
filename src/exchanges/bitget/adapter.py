@@ -24,6 +24,7 @@ import httpx
 from src.core.exceptions import FatalExchangeError, RetryableExchangeError
 from src.data.models.base import AssetClass
 from src.exchanges.bitget.account_mixin import BitgetAccountMixin
+from src.exchanges.bitget.convert_mixin import BitgetConvertMixin
 from src.exchanges.bitget.futures_account_mixin import BitgetFuturesAccountMixin
 from src.exchanges.bitget.futures_market_mixin import BitgetFuturesMarketMixin
 from src.exchanges.bitget.futures_trading_mixin import BitgetFuturesTradingMixin
@@ -126,6 +127,7 @@ class BitgetAdapter(
     BitgetFuturesMarketMixin,
     BitgetFuturesAccountMixin,
     BitgetFuturesTradingMixin,
+    BitgetConvertMixin,
     ExchangeAdapter,
 ):
     """7.8 조사결과: 공식 Demo Trading API 존재."""
