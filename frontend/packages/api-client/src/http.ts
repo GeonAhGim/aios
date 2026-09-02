@@ -1,14 +1,25 @@
 import { keysToCamel, keysToSnake } from "./caseConvert";
-import { resolveTraceId, unwrap } from "./envelope";
+import type { ApiErrorBody } from "./envelope";
+import { resolveRetryAfterSec, resolveTraceId, unwrap } from "./envelope";
 
 export class ApiError extends Error {
   statusCode: number;
   traceId?: string;
+  errorCode?: string;
+  retryAfterSec?: number;
 
-  constructor(statusCode: number, message: string, traceId?: string) {
+  constructor(
+    statusCode: number,
+    message: string,
+    traceId?: string,
+    errorCode?: string,
+    retryAfterSec?: number,
+  ) {
     super(message);
     this.statusCode = statusCode;
     this.traceId = traceId;
+    this.errorCode = errorCode;
+    this.retryAfterSec = retryAfterSec;
   }
 }
 
@@ -35,6 +46,30 @@ function extractDetailMessage(body: unknown): string {
   return "요청을 처리할 수 없습니다.";
 }
 
+function isEnvelopeError(body: unknown): body is ApiErrorBody {
+  return typeof body === "object" && body !== null && "error_code" in body;
+}
+
+// 429(RATE_LIMIT_EXCEEDED)는 미들웨어가 봉투 미적용 라우트에도 §2.3 봉투로
+// 응답하므로(spec §9 PLT-25), 봉투/레거시 두 형태를 여기서 함께 처리한다.
+function buildApiError(
+  status: number,
+  body: unknown,
+  traceId: string | undefined,
+  retryAfterHeader: string | undefined,
+): ApiError {
+  const envelopeError = isEnvelopeError(body) ? body : undefined;
+  const message = envelopeError ? envelopeError.message : extractDetailMessage(body);
+  const retryAfterSec = resolveRetryAfterSec(envelopeError?.retry_after_seconds, retryAfterHeader);
+  return new ApiError(
+    status,
+    message,
+    resolveTraceId(envelopeError?.trace_id, traceId),
+    envelopeError?.error_code,
+    retryAfterSec,
+  );
+}
+
 // task-112(28cf21b)로 ApiResponse 봉투가 적용된 라우터(auth/users/admin)만
 // requestEnvelope 계열을 쓴다. 나머지 라우터는 아직 body를 그대로 반환하므로
 // request/post/put/patch/del 계열(봉투 미적용)을 그대로 쓴다.
@@ -50,7 +85,7 @@ export class ApiClientBase {
   private async fetchJson(
     path: string,
     init?: RequestInit,
-  ): Promise<{ status: number; body: unknown; traceId?: string }> {
+  ): Promise<{ status: number; body: unknown; traceId?: string; retryAfterHeader?: string }> {
     const token = this.getToken();
     const headers = new Headers(init?.headers);
     headers.set("Content-Type", "application/json");
@@ -58,22 +93,49 @@ export class ApiClientBase {
 
     const response = await fetch(`${this.baseUrl}${path}`, { ...init, headers });
     const traceId = response.headers.get("X-Trace-Id") ?? undefined;
+    const retryAfterHeader = response.headers.get("Retry-After") ?? undefined;
 
     if (response.status === 204) {
-      return { status: response.status, body: undefined, traceId };
+      return { status: response.status, body: undefined, traceId, retryAfterHeader };
     }
 
     const text = await response.text();
     const body: unknown = text ? JSON.parse(text) : undefined;
-    return { status: response.status, body, traceId };
+    return { status: response.status, body, traceId, retryAfterHeader };
+  }
+
+  // spec §9 PLT-25: GET 계열만 429 응답의 retryAfterSec 경과 후 1회 자동
+  // 재시도한다. POST/PUT/PATCH/DELETE는 멱등키 규약과 충돌하므로(재시도가
+  // 곧 새 요청 의미가 될 수 있음) 여기서 절대 재시도하지 않는다 — 호출부는
+  // method가 명시된 경우에만 이 분기를 벗어난다.
+  private async withGetRetry<T>(method: string, exec: () => Promise<T>): Promise<T> {
+    try {
+      return await exec();
+    } catch (err) {
+      if (
+        method === "GET" &&
+        err instanceof ApiError &&
+        err.statusCode === 429 &&
+        typeof err.retryAfterSec === "number"
+      ) {
+        await new Promise((resolve) => setTimeout(resolve, err.retryAfterSec! * 1000));
+        return await exec();
+      }
+      throw err;
+    }
   }
 
   protected async request<T>(path: string, init?: RequestInit): Promise<T> {
-    const { status, body, traceId } = await this.fetchJson(path, init);
+    const method = (init?.method ?? "GET").toUpperCase();
+    return this.withGetRetry(method, () => this.performRequest<T>(path, init));
+  }
+
+  private async performRequest<T>(path: string, init?: RequestInit): Promise<T> {
+    const { status, body, traceId, retryAfterHeader } = await this.fetchJson(path, init);
     if (status === 204) return undefined as T;
 
     if (status < 200 || status >= 300) {
-      throw new ApiError(status, extractDetailMessage(body), resolveTraceId(undefined, traceId));
+      throw buildApiError(status, body, traceId, retryAfterHeader);
     }
 
     return keysToCamel<T>(body);
@@ -114,12 +176,24 @@ export class ApiClientBase {
   }
 
   protected async requestEnvelope<T>(path: string, init?: RequestInit): Promise<T> {
-    const { status, body, traceId } = await this.fetchJson(path, init);
+    const method = (init?.method ?? "GET").toUpperCase();
+    return this.withGetRetry(method, () => this.performRequestEnvelope<T>(path, init));
+  }
+
+  private async performRequestEnvelope<T>(path: string, init?: RequestInit): Promise<T> {
+    const { status, body, traceId, retryAfterHeader } = await this.fetchJson(path, init);
     if (status === 204) return undefined as T;
 
     const result = unwrap<unknown>(body);
     if (!result.ok) {
-      throw new ApiError(status, result.error.message, resolveTraceId(result.error.trace_id, traceId));
+      const retryAfterSec = resolveRetryAfterSec(result.error.retry_after_seconds, retryAfterHeader);
+      throw new ApiError(
+        status,
+        result.error.message,
+        resolveTraceId(result.error.trace_id, traceId),
+        result.error.error_code,
+        retryAfterSec,
+      );
     }
     return keysToCamel<T>(result.data);
   }

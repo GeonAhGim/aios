@@ -65,4 +65,58 @@ describe("AiosApiClient", () => {
 
     expect(result).toEqual({ totalValue: "1000.00", positions: [] });
   });
+
+  // spec §9 PLT-25: GET 계열은 429(RATE_LIMIT_EXCEEDED)의 retry_after_seconds
+  // 경과 후 1회 자동 재시도한다.
+  it("GET 요청은 429 응답의 retryAfterSec 경과 후 1회 자동 재시도한다", async () => {
+    vi.useFakeTimers();
+    try {
+      const rateLimitedBody = {
+        error_code: "RATE_LIMIT_EXCEEDED",
+        message: "요청이 너무 많습니다.",
+        details: {},
+        trace_id: "trace-5",
+        retry_after_seconds: 2,
+      };
+      const fetchMock = vi
+        .fn()
+        .mockResolvedValueOnce(jsonResponse(429, rateLimitedBody))
+        .mockResolvedValueOnce(jsonResponse(200, { total_value: "1000.00", positions: [] }));
+      vi.stubGlobal("fetch", fetchMock);
+
+      const resultPromise = makeClient().getPortfolio();
+      await vi.advanceTimersByTimeAsync(2000);
+      const result = await resultPromise;
+
+      expect(result).toEqual({ totalValue: "1000.00", positions: [] });
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  // negative: 금전/POST 계열은 멱등키 규약과 충돌하므로 429여도 절대
+  // 자동 재시도하지 않는다 — retryAfterSec은 UI 카운트다운용으로만 노출된다.
+  it("POST 요청은 429여도 자동 재시도하지 않는다", async () => {
+    const rateLimitedBody = {
+      error_code: "RATE_LIMIT_EXCEEDED",
+      message: "요청이 너무 많습니다.",
+      details: {},
+      trace_id: "trace-6",
+      retry_after_seconds: 5,
+    };
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse(429, rateLimitedBody));
+    vi.stubGlobal("fetch", fetchMock);
+
+    let caught: unknown;
+    try {
+      await makeClient().approveMyRequest(1);
+    } catch (e) {
+      caught = e;
+    }
+
+    expect(caught).toBeInstanceOf(ApiError);
+    expect(caught).toMatchObject({ statusCode: 429, retryAfterSec: 5 });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
 });

@@ -33,6 +33,10 @@ export type ApiErrorCode =
 export const DEFAULT_API_ERROR_MESSAGE =
   "요청을 처리할 수 없습니다. 잠시 후 다시 시도해주세요.";
 
+// spec §9 PLT-25: 429 응답의 error_code. ErrorMessage가 카운트다운 UI를 보여줄지
+// 판단하는 단일 출처 — 문자열을 직접 비교하지 않도록 export한다.
+export const RATE_LIMIT_ERROR_CODE: ApiErrorCode = "RATE_LIMIT_EXCEEDED";
+
 const EXACT_MESSAGES: Partial<Record<ApiErrorCode, string>> = {
   VALIDATION_INVALID_FIELD: "입력값을 확인해주세요.",
   VALIDATION_IDEMPOTENCY_KEY_REQUIRED: "요청이 올바르지 않습니다. 새로고침 후 다시 시도해주세요.",

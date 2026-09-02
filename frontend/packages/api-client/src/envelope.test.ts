@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { EnvelopeFormatError, resolveTraceId, unwrap } from "./envelope";
+import { EnvelopeFormatError, resolveRetryAfterSec, resolveTraceId, unwrap } from "./envelope";
 
 describe("unwrap", () => {
   it("성공 응답에서 data와 meta를 꺼낸다", () => {
@@ -98,5 +98,22 @@ describe("resolveTraceId", () => {
     expect(() => resolveTraceId(undefined, undefined)).not.toThrow();
     expect(resolveTraceId(undefined, undefined)).toBeUndefined();
     expect(resolveTraceId(null, null)).toBeUndefined();
+  });
+});
+
+// spec §9 PLT-25: ApiError.retryAfterSec을 어떤 값에서 뽑아낼지 결정하는 규칙.
+describe("resolveRetryAfterSec", () => {
+  it("봉투 retry_after_seconds가 있으면 헤더보다 그 값을 우선한다", () => {
+    expect(resolveRetryAfterSec(30, "60")).toBe(30);
+  });
+
+  it("봉투 값이 없으면 Retry-After 헤더로 폴백한다", () => {
+    expect(resolveRetryAfterSec(null, "15")).toBe(15);
+    expect(resolveRetryAfterSec(undefined, "15")).toBe(15);
+  });
+
+  it("둘 다 없으면 undefined를 반환한다(호출부가 재시도 버튼을 즉시 활성화하는 기준)", () => {
+    expect(resolveRetryAfterSec(null, undefined)).toBeUndefined();
+    expect(resolveRetryAfterSec(undefined, null)).toBeUndefined();
   });
 });

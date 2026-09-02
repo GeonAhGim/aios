@@ -1,7 +1,9 @@
 import "@testing-library/jest-dom/vitest";
-import { render, screen } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import { act, cleanup, render, screen } from "@testing-library/react";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { ErrorMessage } from "./ErrorMessage";
+
+afterEach(() => cleanup());
 
 describe("ErrorMessage", () => {
   it("알려진 error_code는 고정된 한국어 메시지로 보여준다", () => {
@@ -37,5 +39,47 @@ describe("ErrorMessage", () => {
 
     rerender(<ErrorMessage errorCode="INTERNAL_ERROR" />);
     expect(screen.queryByText(/지원코드/)).not.toBeInTheDocument();
+  });
+
+  it("RATE_LIMIT_EXCEEDED가 아니면 onRetry가 있어도 재시도 버튼을 보여주지 않는다", () => {
+    render(<ErrorMessage errorCode="INTERNAL_ERROR" onRetry={vi.fn()} retryAfterSec={10} />);
+    expect(screen.queryByRole("button", { name: "다시 시도" })).not.toBeInTheDocument();
+  });
+
+  // spec §9 PLT-25: retryAfterSec이 없으면(둘 다 없음 케이스) 재시도 버튼이
+  // 카운트다운 없이 즉시 활성화된다.
+  it("RATE_LIMIT_EXCEEDED이고 retryAfterSec이 없으면 재시도 버튼이 즉시 활성화된다", () => {
+    render(<ErrorMessage errorCode="RATE_LIMIT_EXCEEDED" onRetry={vi.fn()} />);
+
+    const button = screen.getByRole("button", { name: "다시 시도" });
+    expect(button).toBeEnabled();
+    expect(screen.queryByText(/초 후 재시도 가능/)).not.toBeInTheDocument();
+  });
+
+  it("RATE_LIMIT_EXCEEDED이고 retryAfterSec이 있으면 카운트다운 후 재시도 버튼이 활성화된다", () => {
+    vi.useFakeTimers();
+    try {
+      const onRetry = vi.fn();
+      render(<ErrorMessage errorCode="RATE_LIMIT_EXCEEDED" onRetry={onRetry} retryAfterSec={2} />);
+
+      const button = screen.getByRole("button", { name: "다시 시도" });
+      expect(button).toBeDisabled();
+      expect(screen.getByText("2초 후 재시도 가능")).toBeInTheDocument();
+
+      act(() => {
+        vi.advanceTimersByTime(1000);
+      });
+      act(() => {
+        vi.advanceTimersByTime(1000);
+      });
+
+      expect(button).toBeEnabled();
+      expect(screen.queryByText(/초 후 재시도 가능/)).not.toBeInTheDocument();
+
+      button.click();
+      expect(onRetry).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

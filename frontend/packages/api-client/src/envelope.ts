@@ -55,3 +55,19 @@ export function resolveTraceId(
 ): string | undefined {
   return envelopeTraceId || headerTraceId || undefined;
 }
+
+// spec §9 PLT-25: 429 RATE_LIMIT_EXCEEDED 재시도 대기 시간(초). 봉투
+// error.retry_after_seconds가 있으면 그 값을 쓰고(§2.3 계약값), 없는 응답은
+// `Retry-After` 헤더로 폴백한다. 둘 다 없으면 undefined — 임의 기본값을 두지
+// 않는다(호출부가 "재시도 버튼 즉시 활성" 등으로 스스로 해석해야 한다).
+export function resolveRetryAfterSec(
+  envelopeRetryAfterSec: number | null | undefined,
+  headerRetryAfter: string | null | undefined,
+): number | undefined {
+  if (typeof envelopeRetryAfterSec === "number") return envelopeRetryAfterSec;
+  if (headerRetryAfter) {
+    const parsed = Number(headerRetryAfter);
+    if (Number.isFinite(parsed) && parsed >= 0) return parsed;
+  }
+  return undefined;
+}
