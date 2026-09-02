@@ -30,3 +30,15 @@ def test_commission_plus_payout_equals_price_paid():
     commission, payout = calculate_commission(price, rate=Decimal("0.15"))
 
     assert commission + payout == price
+
+
+def test_commission_delegates_rounding_to_domain_rounding_module():
+    """LC-2: price × rate가 정확히 2dp로 안 떨어지는 경우 domain/rounding의
+    ROUND_HALF_EVEN 규칙이 적용되고(§3.3), commission + payout == price가 유지된다."""
+    price = Decimal("0.10")
+
+    commission, payout = calculate_commission(price, rate=Decimal("0.15"))
+
+    assert commission == Decimal("0.02")  # 0.10*0.15=0.015 -> HALF_EVEN -> 0.02
+    assert payout == Decimal("0.08")
+    assert commission + payout == price
