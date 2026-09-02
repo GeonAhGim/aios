@@ -114,6 +114,9 @@ mypy strict 통과의 실질: `type: ignore` 178건 중 160건이 거래소 믹�
 | Kill switch 직후 stale ALLOW — mandates | **수정됨** (`0598fda`, 다른 세션) | `_fingerprint`에 `revision_id`·`revision_state` 포함, pause/resume/activate 라우터에서 risk_gate 캐시도 무효화. 테스트 2개 |
 | Kill switch가 RUNNING 배포·intent 제출을 못 멈춤 | **수정됨** (`a77e9e4`, c2 세션 — PM 커밋에 함께 실림) | `paper_control/application/apply_safety_control.py`: kill switch 활성화 시 GLOBAL/TENANT/ACCOUNT 범위의 RUNNING 배포를 실제 PAUSED로 전이(fence 소비). `submit_paper_intent`도 safety control 조회. 같은 커밋에 PAP-006 멱등키 digest(중복 REQUEST 차단·불일치 409)·라우터 `ConcurrencyConflictError`→409 매핑 4곳·start/resume 500→409 버그 수정 |
 | Bitget 확장 믹스인의 Executor 가드 우회 자금이동 (§4·§7, 레드팀 #32) | **수정됨** (`8a0734c`, 다른 세션) | `src/exchanges/common/live_guard.py`의 `@require_paper_sandbox`를 convert/grid/strategy/margin/futures/loan/subaccount에 적용. WS 재연결 시 로그인 서명 재사용(#31)도 수정 |
+| **신규** 환불이 돈을 생성 (판매자 정산·커미션 미회수, 레드팀 #41) | **수정됨** (`9ce7cc9`, PM) | `_refund_with_clawback` — Σ 보존, 판매자 부족분 하우스 부담, 하우스 부족 시 fail-closed. L4 원장 명세 R1에서 발견 |
+| FND-05 운영 DI가 fake provider (§6) | **수정됨** (`da3573e`, c2) | `LiveReadonlyAccountProvider`(거래소 어댑터 read-only), `account_snapshot_value`, `scope_verified` 정직 표기 |
+| Circuit Breaker `evaluate(metrics)` 지표 없음 (§3·§5) | **수정됨** (`67a7f92`+`d649004`+`10ed170`, 9f) | `metrics_collector.py`, `InstrumentedAdapter` 프록시(adapter_factory 주입), main.py 안전 루프에서 evaluate |
 | P1 4건 | 미착수 | — |
 
 ### 2-B. 작업 배정 (PM: agent-platform-12, 2026-09-02)
@@ -123,7 +126,7 @@ mypy strict 통과의 실질: `type: ignore` 178건 중 160건이 거래소 믹�
 
 | 세션 | 담당 영역(기존) | 배정 작업 | 순서 |
 |---|---|---|---|
-| agent-platform-12 (PM) | 감사·marketplace | ① 실행 루프 운영 배선 — **완료 `2e943c9`** ② 전체 진행 추적·§2-A 갱신 ③ 장부 정합 + 거버넌스 — **완료 `a784493`**(secret scan·벤치마크 단언·#05/#17 barrier는 후속) ④ 세션별 테스트 DB 분리 스크립트 ⑤ 마이그레이션 체인 직렬화: `b7e2c4d9f1a6`(PM) → `a6636fcf92fc`(c2) → `cdd905e63ffe`(c2, `3d0f4fe`) → `4747bb11f733`(9f, `3b64387`) → `b3f7e0c1a4d5`(44, `2b1c23a`) → c2 snapshot 수치(진행 중) | A → B |
+| agent-platform-12 (PM) | 감사·marketplace | ① 실행 루프 운영 배선 — **완료 `2e943c9`** ② 전체 진행 추적·§2-A 갱신 ③ 장부 정합 + 거버넌스 — **완료 `a784493`**(secret scan·벤치마크 단언·#05/#17 barrier는 후속) ④ 세션별 테스트 DB 분리 스크립트 ⑤ 마이그레이션 체인 직렬화: `b7e2c4d9f1a6`(PM) → `a6636fcf92fc`(c2) → `cdd905e63ffe`(c2, `3d0f4fe`) → `4747bb11f733`(9f, `3b64387`) → `b3f7e0c1a4d5`(44, `2b1c23a`) → `5ed4921f9873`(c2, `da3573e`) → `d2c8b1e4f6a0`(PM 환불 회수, `9ce7cc9`) — **현재 head** | A → B |
 | agent-platform-44 | foundation(trust/mandates/evidence/risk_gate/reconciliation), `foundation_deps` | ① mandates fingerprint — **완료 `0598fda`** ② #25 — PM이 흡수(`2e943c9`) ③ foundation→실행 경로: PRE_SUBMIT 게이트 모듈 `2d6c71a`, tick.py 직전 검사 `027cf96`, `execution_service.start` 게이트 `e1c2d81` — **완료** · mandate_revision_id 마이그레이션 `b3f7e0c1a4d5` — **완료 `2b1c23a`** ④ 감사 체인 실사용: `record_command_event` 헬퍼, mandates/risk_gate 커맨드에 감사 이벤트, `verify_audit_chain` 라우터 — 진행 중 | B |
 | agent-platform-c2 | connections, paper_control, trust | ①②③ — **완료 `a77e9e4`** ④ 불필요(17개 기존재) ⑤ trust MFA step-up·consent expires_at — **완료 `3d0f4fe`** ⑥ FND-05 실체화: 실제 `ReadonlyAccountProvider`(거래소 어댑터 read-only), snapshot 잔고·포지션 수치(마이그레이션은 44 뒤), fake는 테스트 전용 ⑦ FND-09 performance 컨텍스트 골격(81번) ⑧ 44 헬퍼 이후 자기 컨텍스트에 감사 이벤트 부착 | B |
 | agent-platform-9f | risk_gate, exchanges 가드, execution_loop/alert | ① positions 기록 — **완료 `c017525`** ② FSM 복귀(#39) — **완료 `53d56d2`** ③ 일손실·MDD 기준점 영속화 — 코드 `a948e94`, 마이그레이션 `4747bb11f733`(parent `cdd905e63ffe`) 진행 중 ④ 레버리지 실검사·watchdog equity — **완료 `b5630c7`** ⑤ Circuit Breaker `evaluate(metrics)` 지표 수집 배선(`core/safety/metrics_collector.py`) ⑥ DataDistrustMonitor를 tick 캔들 수집 지점에 배선 | B |

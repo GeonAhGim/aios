@@ -17,7 +17,7 @@ AIOS 구현을 맡은 세션이 이 문서를 보고 판단해서 고치는 용�
 
 ---
 
-## 2026-09-02-전수감사 · 설계문서 대 코드 전수 점검 파생 항목 (#35~#40)
+## 2026-09-02-전수감사 · 설계문서 대 코드 전수 점검 파생 항목 (#35~#41)
 
 `docs/FULL_AUDIT_2026-09-02.md`(PM 세션 agent-platform-12)가 설계문서
 00~17·ADR·L3 명세 71~81·표준 103~108 전체를 코드와 대조하며 찾은 항목
@@ -25,6 +25,28 @@ AIOS 구현을 맡은 세션이 이 문서를 보고 판단해서 고치는 용�
 장부 정합용 요약이다. #35~#38은 발견 즉시 같은 세션이 수정·검증했고(커밋
 `90feab5`), #39는 OPEN, #40은 이미 수정됐으나 장부에 빠져 있던 항목이다.
 #25도 같은 세션의 `2e943c9`로 닫혔다(아래 항목 상태 갱신).
+
+---
+
+## 2026-09-03-41 · [wallet] 환불이 판매자 정산·커미션을 회수하지 않아 환불마다 시스템 총잔액이 증가 — 심각도 높음
+
+**상태**: ✅ FIXED (커밋 `9ce7cc9`, PM 세션 — 마이그레이션 `d2c8b1e4f6a0`, 테스트 3개)
+
+**발견**: L4 원장 명세(`docs/specs/L4_market_data_positions_ledger_v1.0.md` R1)
+작성 중. `DisputeResolutionService.resolve()`의 `DELISTED_AND_REFUND`가 구매자
+지갑에 `price_paid`를 `credit(REFUND)`하기만 하고, 구매 시 적립된 판매자
+`SALE_CREDIT`(S)과 하우스 `COMMISSION_CREDIT`(C)을 회수하지 않았다. P = S + C
+이므로 환불 한 번마다 시스템 총잔액이 P만큼 늘었다 — 판매자·구매자가 공모하면
+구매→분쟁→환불 반복으로 크레딧을 무한 생성할 수 있었다(#37의 이중 환불 차단과는
+별개 결함).
+
+**수정**: `_refund_with_clawback()` — buyer +P, seller −S(`REFUND_SELLER_CLAWBACK`),
+house −C(`REFUND_COMMISSION_CLAWBACK`). 판매자 잔액이 S에 못 미치면 부족분을
+하우스가 `REFUND_SHORTFALL_COVER`로 부담(원장 기록). 하우스도 부족하면
+fail-closed — 분쟁 RESOLVED 전이·`refunded_at`까지 전부 롤백. 회귀:
+`test_refund_preserves_total_balance_across_buyer_seller_house`(Σ 보존),
+`test_refund_shortfall_is_covered_by_house_when_seller_spent_payout`,
+`test_refund_fails_closed_when_house_cannot_cover`.
 
 ---
 
