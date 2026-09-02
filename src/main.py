@@ -24,6 +24,7 @@ import asyncpg
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from src.api.middleware.request_id import RequestIdMiddleware
 from src.core.event_bus.in_process import InProcessEventBus
 from src.core.loader.risk_policy_loader import load_risk_policy
 from src.core.loader.secret_loader import load_env_secrets
@@ -253,6 +254,10 @@ def create_app() -> FastAPI:
         allow_methods=["*"],
         allow_headers=["*"],
     )
+    # 요청 상관관계 ID(src/api/middleware/request_id.py) — CORS보다 나중에
+    # 등록해 요청 처리 스택의 가장 바깥쪽을 감싸도록 한다(가장 먼저
+    # request_id가 설정돼야 그 아래 모든 계층의 로그에 반영된다).
+    app.add_middleware(RequestIdMiddleware)
 
     from src.api.routers import (
         admin,
