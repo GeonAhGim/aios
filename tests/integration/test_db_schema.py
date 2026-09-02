@@ -70,6 +70,23 @@ async def test_audit_log_worm_revoked_from_public(db_conn):
     assert "DELETE" not in granted
 
 
+async def test_foundation_audit_event_worm_revoked_from_public(db_conn):
+    """79번 §1 append-only — FND-03(마이그레이션 4453afe74725)도 legacy
+    audit_log와 같은 WORM 강제를 쓴다. 소유자 role에는 REVOKE FROM PUBLIC이
+    적용되지 않는다는 PostgreSQL 제약(위 test_audit_log_worm_revoked_from_public
+    주석 참조)은 여기도 동일하다 — 그래서 실제 UPDATE 시도가 아니라 카탈로그
+    권한만 확인한다."""
+    result = await db_conn.execute(
+        text(
+            "SELECT privilege_type FROM information_schema.table_privileges "
+            "WHERE table_name = 'foundation_audit_event' AND grantee = 'PUBLIC'"
+        )
+    )
+    granted = {row[0] for row in result}
+    assert "UPDATE" not in granted
+    assert "DELETE" not in granted
+
+
 async def test_tasks_capability_token_fk_wired(db_conn):
     result = await db_conn.execute(
         text(

@@ -2,9 +2,15 @@
 from __future__ import annotations
 
 import asyncpg
-from fastapi import Depends
+from fastapi import Depends, Request
 
 from src.api.deps import get_current_user, get_pool
+from src.foundation.connections.adapters.fake_provider import FakeReadonlyAccountProvider
+from src.foundation.connections.adapters.postgres_repository import PostgresConnectionRepository
+from src.foundation.connections.ports.provider import ReadonlyAccountProvider
+from src.foundation.connections.ports.repository import ConnectionRepository
+from src.foundation.evidence.adapters.postgres_repository import PostgresAuditEventRepository
+from src.foundation.evidence.ports.repository import AuditEventRepository
 from src.foundation.mandates.adapters.postgres_repository import PostgresMandateRepository
 from src.foundation.mandates.ports.repository import MandateRepository
 from src.foundation.trust.adapters.postgres_repository import PostgresTrustRepository
@@ -19,6 +25,28 @@ def get_trust_repository(pool: asyncpg.Pool = Depends(get_pool)) -> TrustReposit
 
 def get_mandate_repository(pool: asyncpg.Pool = Depends(get_pool)) -> MandateRepository:
     return PostgresMandateRepository(pool)
+
+
+def get_audit_event_repository(
+    pool: asyncpg.Pool = Depends(get_pool),
+) -> AuditEventRepository:
+    return PostgresAuditEventRepository(pool)
+
+
+def get_connection_repository(pool: asyncpg.Pool = Depends(get_pool)) -> ConnectionRepository:
+    return PostgresConnectionRepository(pool)
+
+
+# 74번 §7 rollout gate 1단계 — 실 provider는 71번 §6 "provider/legal review 후
+# 결정" 대상이라 아직 없다. 이 함수 하나만 바꾸면 실 provider로 교체된다
+# (adapters/fake_provider.py 참조).
+def get_readonly_account_provider() -> ReadonlyAccountProvider:
+    return FakeReadonlyAccountProvider()
+
+
+def get_credential_encryption_key(request: Request) -> str:
+    secrets = request.app.state.secrets
+    return str(secrets.credential_encryption_key.get_secret_value())
 
 
 def get_tenant_context(user: User = Depends(get_current_user)) -> TenantContext:

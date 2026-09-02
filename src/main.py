@@ -175,6 +175,8 @@ def create_app() -> FastAPI:
         users,
         wallet,
     )
+    from src.api.routers.foundation import connections as foundation_connections
+    from src.api.routers.foundation import evidence as foundation_evidence
     from src.api.routers.foundation import mandates as foundation_mandates
     from src.api.routers.foundation import trust as foundation_trust
 
@@ -190,6 +192,8 @@ def create_app() -> FastAPI:
     app.include_router(suitability.router)
     app.include_router(foundation_trust.router)
     app.include_router(foundation_mandates.router)
+    app.include_router(foundation_evidence.router)
+    app.include_router(foundation_connections.router)
     app.include_router(executions.router, prefix="/executions", tags=["executions"])
     app.include_router(notifications.router, prefix="/notifications", tags=["notifications"])
     app.include_router(admin.router, tags=["admin"])
