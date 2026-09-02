@@ -24,7 +24,7 @@ import asyncpg
 from pydantic import BaseModel
 
 from src.core.logging.audit_log import record_audit_log
-from src.core.security.encryption import decrypt, encrypt
+from src.core.security.encryption import legacy_decrypt, legacy_encrypt
 from src.exchanges.common.adapter import ExchangeAdapter
 from src.exchanges.factory import UnsupportedExchangeError, build_adapter
 
@@ -99,9 +99,11 @@ class ExchangeCredentialService:
             if aclose is not None:
                 await aclose()
 
-        encrypted_key = encrypt(api_key, self._encryption_key).encode("ascii")
-        encrypted_secret = encrypt(api_secret, self._encryption_key).encode("ascii")
-        encrypted_extra = encrypt(json.dumps(extra or {}), self._encryption_key).encode("ascii")
+        encrypted_key = legacy_encrypt(api_key, self._encryption_key).encode("ascii")
+        encrypted_secret = legacy_encrypt(api_secret, self._encryption_key).encode("ascii")
+        encrypted_extra = legacy_encrypt(
+            json.dumps(extra or {}), self._encryption_key
+        ).encode("ascii")
 
         async with self._pool.acquire() as conn:
             row = await conn.fetchrow(
@@ -187,11 +189,13 @@ class ExchangeCredentialService:
         if row is None:
             return None
 
-        api_key = decrypt(row["api_key_encrypted"].decode("ascii"), self._encryption_key)
-        api_secret = decrypt(row["api_secret_encrypted"].decode("ascii"), self._encryption_key)
+        api_key = legacy_decrypt(row["api_key_encrypted"].decode("ascii"), self._encryption_key)
+        api_secret = legacy_decrypt(
+            row["api_secret_encrypted"].decode("ascii"), self._encryption_key
+        )
         extra_raw = row["extra_encrypted"]
         extra = (
-            json.loads(decrypt(extra_raw.decode("ascii"), self._encryption_key))
+            json.loads(legacy_decrypt(extra_raw.decode("ascii"), self._encryption_key))
             if extra_raw is not None
             else {}
         )

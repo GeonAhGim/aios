@@ -28,7 +28,7 @@ import pyotp
 from pydantic import BaseModel
 
 from src.core.logging.audit_log import record_audit_log
-from src.core.security.encryption import decrypt, encrypt
+from src.core.security.encryption import legacy_decrypt, legacy_encrypt
 
 ISSUER_NAME = "AIOS"
 
@@ -62,7 +62,7 @@ class MfaService:
         provisioning_uri = pyotp.totp.TOTP(secret).provisioning_uri(
             name=email, issuer_name=ISSUER_NAME
         )
-        encrypted_secret = encrypt(secret, self._encryption_key)
+        encrypted_secret = legacy_encrypt(secret, self._encryption_key)
 
         async with self._pool.acquire() as conn:
             await conn.execute(
@@ -147,11 +147,11 @@ class MfaService:
             )
 
     def _totp_code_valid(self, encrypted_secret: str, totp_code: str) -> bool:
-        secret = decrypt(encrypted_secret, self._encryption_key)
+        secret = legacy_decrypt(encrypted_secret, self._encryption_key)
         return bool(pyotp.totp.TOTP(secret).verify(totp_code, for_time=self._now()))
 
     def _current_timecode(self, encrypted_secret: str) -> int:
-        secret = decrypt(encrypted_secret, self._encryption_key)
+        secret = legacy_decrypt(encrypted_secret, self._encryption_key)
         return int(pyotp.totp.TOTP(secret).timecode(self._now()))
 
     async def _consume_timecode(

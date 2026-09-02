@@ -11,7 +11,7 @@ import asyncpg
 import pytest
 from dotenv import dotenv_values
 
-from src.core.security.encryption import decrypt
+from src.core.security.encryption import legacy_decrypt
 from src.foundation.connections.adapters.fake_provider import FakeReadonlyAccountProvider
 from src.foundation.connections.adapters.postgres_repository import PostgresConnectionRepository
 from src.foundation.connections.application.begin_connection import (
@@ -147,7 +147,7 @@ async def test_full_lifecycle_begin_confirm_sync_revoke_masks_opaque_refs(pool, 
     assert binding is not None
     # vault_secret_ref는 암호문이지 원문 provider_credential_ref가 아니다.
     assert "fake-cred-" not in binding.vault_secret_ref
-    assert decrypt(binding.vault_secret_ref, ENCRYPTION_KEY).startswith("fake-cred-")
+    assert legacy_decrypt(binding.vault_secret_ref, ENCRYPTION_KEY).startswith("fake-cred-")
 
     snapshot = await sync_snapshot(
         repo, provider, tenant_id=tenant_id, connection_id=created.id

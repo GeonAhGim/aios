@@ -31,7 +31,7 @@ from pydantic import BaseModel
 from src.core.approval.panic_prompt import WhitelistEntry
 from src.core.logging.audit_log import record_audit_log
 from src.core.safety.circuit_breaker import CircuitBreakerLevel, CircuitBreakerService
-from src.core.security.encryption import decrypt, encrypt
+from src.core.security.encryption import legacy_decrypt, legacy_encrypt
 
 PublishFn = Callable[[str, dict[str, Any]], Awaitable[None]]
 
@@ -81,7 +81,7 @@ class WithdrawalWhitelistService:
                 "위기 상황 중에는 새 목적지를 등록할 수 없습니다. 평상시에 미리 등록해주세요."
             )
 
-        encrypted_address = encrypt(destination_address, self._encryption_key)
+        encrypted_address = legacy_encrypt(destination_address, self._encryption_key)
         async with self._pool.acquire() as conn:
             row = await conn.fetchrow(
                 "INSERT INTO withdrawal_whitelist (user_id, exchange, destination_address, label) "
@@ -127,7 +127,9 @@ class WithdrawalWhitelistService:
             WithdrawalWhitelistEntry(
                 id=row["id"],
                 exchange=row["exchange"],
-                destination_address=decrypt(row["destination_address"], self._encryption_key),
+                destination_address=legacy_decrypt(
+                    row["destination_address"], self._encryption_key
+                ),
                 label=row["label"],
             )
             for row in rows

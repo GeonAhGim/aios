@@ -13,7 +13,7 @@ from __future__ import annotations
 
 from uuid import UUID, uuid4
 
-from src.core.security.encryption import encrypt
+from src.core.security.encryption import legacy_encrypt
 from src.foundation.connections.application.begin_connection import connection_to_view
 from src.foundation.connections.application.errors import (
     ConnectionNotFoundError,
@@ -73,7 +73,7 @@ async def confirm_connection(
         ]
         raise ForbiddenCapabilityScopeError(rejected=rejected or granted_values)
 
-    vault_secret_ref = encrypt(proof.provider_credential_ref, encryption_key)
+    vault_secret_ref = legacy_encrypt(proof.provider_credential_ref, encryption_key)
     binding = await repo.insert_credential_binding(
         CredentialBinding(
             id=uuid4(),
