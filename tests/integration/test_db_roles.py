@@ -47,6 +47,18 @@ async def _insert_user(conn: asyncpg.Connection) -> str:
     return str(row["user_id"])
 
 
+def _assert_append_only_violation(exc_info: pytest.ExceptionInfo) -> None:
+    """`aios_app`의 쓰기는 REVOKE·WORM 트리거 두 방어층 중 하나로 막힌다.
+
+    어느 쪽이 먼저 발동하는지(`asyncpg.InsufficientPrivilegeError` vs
+    `asyncpg.RaiseError`)는 PostgreSQL 권한 검사와 트리거 실행 순서에 달려 있고
+    이 순서는 계약이 아니다 — "쓰기가 막힌다"만 계약이므로 트리거가 실제로
+    발동한 경우(RaiseError)에 한해 그 메시지가 WORM 가드인지 확인한다.
+    """
+    if isinstance(exc_info.value, asyncpg.RaiseError):
+        assert "append-only violation" in str(exc_info.value)
+
+
 async def test_aios_migrator_and_aios_app_roles_exist(conn):
     rows = await conn.fetch(
         "SELECT rolname FROM pg_roles WHERE rolname IN ('aios_migrator', 'aios_app')"
@@ -61,12 +73,13 @@ async def test_aios_app_cannot_update_audit_log(conn):
     )
     log_id = row["log_id"]
 
-    with pytest.raises(asyncpg.RaiseError, match="append-only violation"):
+    with pytest.raises((asyncpg.InsufficientPrivilegeError, asyncpg.RaiseError)) as exc_info:
         async with conn.transaction():
             await conn.execute("SET ROLE aios_app")
             await conn.execute(
                 "UPDATE audit_log SET actor_agent = 'tampered' WHERE log_id = $1", log_id
             )
+    _assert_append_only_violation(exc_info)
 
 
 async def test_aios_app_cannot_delete_audit_log(conn):
@@ -76,10 +89,11 @@ async def test_aios_app_cannot_delete_audit_log(conn):
     )
     log_id = row["log_id"]
 
-    with pytest.raises(asyncpg.RaiseError, match="append-only violation"):
+    with pytest.raises((asyncpg.InsufficientPrivilegeError, asyncpg.RaiseError)) as exc_info:
         async with conn.transaction():
             await conn.execute("SET ROLE aios_app")
             await conn.execute("DELETE FROM audit_log WHERE log_id = $1", log_id)
+    _assert_append_only_violation(exc_info)
 
 
 async def test_aios_app_cannot_update_foundation_audit_event(conn):
@@ -93,12 +107,13 @@ async def test_aios_app_cannot_update_foundation_audit_event(conn):
     )
     event_id = row["id"]
 
-    with pytest.raises(asyncpg.RaiseError, match="append-only violation"):
+    with pytest.raises((asyncpg.InsufficientPrivilegeError, asyncpg.RaiseError)) as exc_info:
         async with conn.transaction():
             await conn.execute("SET ROLE aios_app")
             await conn.execute(
                 "UPDATE foundation_audit_event SET outcome = 'DENIED' WHERE id = $1", event_id
             )
+    _assert_append_only_violation(exc_info)
 
 
 async def test_aios_app_cannot_update_wallet_transactions(conn):
@@ -110,10 +125,33 @@ async def test_aios_app_cannot_update_wallet_transactions(conn):
     )
     tx_id = row["id"]
 
-    with pytest.raises(asyncpg.RaiseError, match="append-only violation"):
+    with pytest.raises((asyncpg.InsufficientPrivilegeError, asyncpg.RaiseError)) as exc_info:
         async with conn.transaction():
             await conn.execute("SET ROLE aios_app")
             await conn.execute("UPDATE wallet_transactions SET amount = 999 WHERE id = $1", tx_id)
+    _assert_append_only_violation(exc_info)
+
+
+async def test_worm_trigger_blocks_table_owner_on_audit_log(conn):
+    """REVOKE는 테이블 소유자에게 적용되지 않는다(PostgreSQL 원칙) — 그래서 실제
+    강제 수단은 트리거([[src/core/db/append_only.py]] 참고)뿐이다. `conn`은
+    `SET ROLE` 없이 접속하며 `audit_log`를 실제로 소유하고 있으므로(마이그레이션을
+    이 계정으로 실행했다), 여기서 UPDATE가 막힌다면 REVOKE 우회 여부와 무관하게
+    트리거 자체가 살아 있다는 뜻이다.
+
+    Spec: L0-3 '소유자도 우회 불가'.
+    """
+    row = await conn.fetchrow(
+        "INSERT INTO audit_log (actor_agent, action_type, decision_data) "
+        "VALUES ('test-suite', 'test.worm.audit_log.owner', '{}'::jsonb) RETURNING log_id"
+    )
+    log_id = row["log_id"]
+
+    with pytest.raises(asyncpg.RaiseError, match="append-only violation"):
+        async with conn.transaction():
+            await conn.execute(
+                "UPDATE audit_log SET actor_agent = 'tampered' WHERE log_id = $1", log_id
+            )
 
 
 async def test_metrics_endpoint_returns_200():
