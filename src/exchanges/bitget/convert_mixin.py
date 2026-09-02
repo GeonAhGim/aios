@@ -16,6 +16,8 @@ from __future__ import annotations
 from decimal import Decimal
 from typing import Any
 
+from src.exchanges.common.live_guard import require_paper_sandbox
+
 
 class BitgetConvertMixin:
     async def get_convert_currencies(self) -> list[dict[str, Any]]:
@@ -40,6 +42,7 @@ class BitgetConvertMixin:
         )
         return dict(raw["data"])
 
+    @require_paper_sandbox
     async def execute_convert(
         self,
         trace_id: str,
@@ -49,7 +52,13 @@ class BitgetConvertMixin:
         to_amount: Decimal,
     ) -> dict[str, Any]:
         """`get_convert_quote()`가 반환한 `traceId`/금액을 그대로 재전달해야
-        한다(문서 관례 — 견적과 다른 금액을 보내면 거래소가 거부)."""
+        한다(문서 관례 — 견적과 다른 금액을 보내면 거래소가 거부).
+
+        레드팀 #2026-09-02-32/33 — Executor를 거치지 않으므로 최소한의
+        방어선(LIVE adapter 차단 + 금액 sanity check)을 이 메서드 자체에
+        건다."""
+        if from_amount <= 0 or to_amount <= 0:
+            raise ValueError("from_amount/to_amount는 0보다 커야 합니다.")
         raw = await self._request(  # type: ignore[attr-defined]
             "POST",
             "/api/v2/convert/trade",

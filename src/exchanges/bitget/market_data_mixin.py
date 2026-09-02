@@ -223,7 +223,7 @@ async def _run_ws_subscription(
     subscribe_msg: dict[str, Any],
     on_message: MessageHandler,
     *,
-    pre_messages: list[dict[str, Any]] | None = None,
+    pre_messages_factory: Callable[[], list[dict[str, Any]]] | None = None,
     connect_fn: ConnectFn = _connect,
     on_reconnecting: ReconnectHook | None = None,
     on_reconnected: ReconnectHook | None = None,
@@ -233,9 +233,15 @@ async def _run_ws_subscription(
     """연결·구독·재연결(지수 백오프)을 전담하는 공통 루프 — 메시지
     자체의 의미는 모른다(on_message에 그대로 위임). 채널이 몇 개든
     이 루프 하나를 재사용한다(§2.1 재연결 책임 원칙, 로직 중복 방지).
-    `pre_messages`(예: Private 채널의 login)는 매 연결(최초 포함, 재연결
-    포함)마다 subscribe_msg보다 먼저 순서대로 전송된다 — 재연결 시
-    재로그인이 자동으로 이뤄지는 이유가 이것이다."""
+    `pre_messages_factory`(예: Private 채널의 login)는 매 연결(최초 포함,
+    재연결 포함) *시작될 때마다 새로 호출돼* subscribe_msg보다 먼저
+    순서대로 전송된다.
+
+    레드팀 #2026-09-02-31 — 이전엔 고정 `list[dict]`를 받아 재연결마다
+    같은(오래된 타임스탬프로 서명된) 메시지를 재전송했다 — Bitget의 WS
+    로그인 서명은 REST처럼 타임스탬프가 일정 범위 안이어야 유효하므로,
+    최초 연결 이후 재연결부터는 반드시 실패한다. 팩토리로 바꿔 매
+    시도마다 새로 서명하게 한다."""
     backoff = 1.0
     first_attempt = True
 
@@ -245,7 +251,7 @@ async def _run_ws_subscription(
         first_attempt = False
         try:
             async with connect_fn(url) as ws:
-                for pre_message in pre_messages or []:
+                for pre_message in (pre_messages_factory() if pre_messages_factory else []):
                     await ws.send(json.dumps(pre_message))
                 await ws.send(json.dumps(subscribe_msg))
                 if backoff > 1.0 and on_reconnected is not None:
@@ -253,6 +259,23 @@ async def _run_ws_subscription(
                 backoff = 1.0
                 async for raw_message in ws:
                     message = json.loads(raw_message)
+                    if message.get("event") == "login":
+                        # 레드팀 #2026-09-02-31 — 이전엔 로그인 성공/실패를
+                        # 전혀 구분하지 않고 각 parse_*_ws_message가 조용히
+                        # 버려서(_is_control_message), 재연결 후 인증이
+                        # 깨져도 로그 한 줄 안 남았다.
+                        if str(message.get("code", "0")) in ("0", "None"):
+                            logger.info(
+                                "Bitget WS 로그인 성공(channel=%s)", subscribe_msg.get("args")
+                            )
+                        else:
+                            logger.warning(
+                                "Bitget WS 로그인 실패(channel=%s): %s — private 채널 데이터를 "
+                                "받지 못하고 있을 수 있습니다.",
+                                subscribe_msg.get("args"),
+                                message,
+                            )
+                        continue
                     await on_message(message)
         except (ConnectionClosed, OSError) as exc:
             logger.warning(
@@ -454,11 +477,15 @@ class BitgetMarketDataMixin:
         별도 leaf). 로그인 메커니즘은 `_build_login_message()` docstring
         참조 — 라이브 검증 전까지 최선 추정치. `ExchangeAdapter` ABC에는
         아직 없음(다른 확장 메서드들과 동일 원칙, 모듈 docstring 참조)."""
-        login_msg = _build_login_message(
-            self._api_key,  # type: ignore[attr-defined]
-            self._api_secret,  # type: ignore[attr-defined]
-            self._api_passphrase,  # type: ignore[attr-defined]
-        )
+        def _login() -> list[dict[str, Any]]:
+            return [
+                _build_login_message(
+                    self._api_key,  # type: ignore[attr-defined]
+                    self._api_secret,  # type: ignore[attr-defined]
+                    self._api_passphrase,  # type: ignore[attr-defined]
+                )
+            ]
+
         subscribe_msg = {
             "op": "subscribe",
             "args": [{"instType": inst_type, "channel": "orders", "instId": "default"}],
@@ -472,7 +499,7 @@ class BitgetMarketDataMixin:
             WS_PRIVATE_URL,
             subscribe_msg,
             on_message,
-            pre_messages=[login_msg],
+            pre_messages_factory=_login,
             connect_fn=connect_fn,
             on_reconnecting=on_reconnecting,
             on_reconnected=on_reconnected,
@@ -492,11 +519,15 @@ class BitgetMarketDataMixin:
         있는 후보(호출부 연결은 별도 leaf). 로그인은
         `subscribe_order_stream`과 동일 메커니즘(§6 "Private 채널 로그인"
         절) — 라이브 검증 전까지 최선 추정치."""
-        login_msg = _build_login_message(
-            self._api_key,  # type: ignore[attr-defined]
-            self._api_secret,  # type: ignore[attr-defined]
-            self._api_passphrase,  # type: ignore[attr-defined]
-        )
+        def _login() -> list[dict[str, Any]]:
+            return [
+                _build_login_message(
+                    self._api_key,  # type: ignore[attr-defined]
+                    self._api_secret,  # type: ignore[attr-defined]
+                    self._api_passphrase,  # type: ignore[attr-defined]
+                )
+            ]
+
         subscribe_msg = {
             "op": "subscribe",
             "args": [{"instType": inst_type, "channel": "account", "instId": "default"}],
@@ -510,7 +541,7 @@ class BitgetMarketDataMixin:
             WS_PRIVATE_URL,
             subscribe_msg,
             on_message,
-            pre_messages=[login_msg],
+            pre_messages_factory=_login,
             connect_fn=connect_fn,
             on_reconnecting=on_reconnecting,
             on_reconnected=on_reconnected,
@@ -528,11 +559,15 @@ class BitgetMarketDataMixin:
         """02b 스펙 §6(P1) — Private `positions` 채널(선물 전용). Phase 1은
         크립토 현물 전용(06번 §6.1)이라 아직 소비하는 호출부가 없다 —
         API 연동만 우선 완료해둔다(다른 확장 메서드와 동일 원칙)."""
-        login_msg = _build_login_message(
-            self._api_key,  # type: ignore[attr-defined]
-            self._api_secret,  # type: ignore[attr-defined]
-            self._api_passphrase,  # type: ignore[attr-defined]
-        )
+        def _login() -> list[dict[str, Any]]:
+            return [
+                _build_login_message(
+                    self._api_key,  # type: ignore[attr-defined]
+                    self._api_secret,  # type: ignore[attr-defined]
+                    self._api_passphrase,  # type: ignore[attr-defined]
+                )
+            ]
+
         subscribe_msg = {
             "op": "subscribe",
             "args": [{"instType": inst_type, "channel": "positions", "instId": "default"}],
@@ -546,7 +581,7 @@ class BitgetMarketDataMixin:
             WS_PRIVATE_URL,
             subscribe_msg,
             on_message,
-            pre_messages=[login_msg],
+            pre_messages_factory=_login,
             connect_fn=connect_fn,
             on_reconnecting=on_reconnecting,
             on_reconnected=on_reconnected,

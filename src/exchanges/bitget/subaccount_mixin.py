@@ -18,6 +18,14 @@ from __future__ import annotations
 from decimal import Decimal
 from typing import Any
 
+from src.exchanges.common.live_guard import require_paper_sandbox
+
+# 레드팀 #2026-09-02-34 — permissions를 생략하면 Bitget이 어떤 기본 권한을
+# 부여하는지 코드/문서로 확인할 수 없었다(모듈 자신도 "라이브 검증
+# 필요"라고 인정). 최소권한(조회 전용)을 클라이언트 쪽에서 명시적으로
+# 강제해, 거래소의 미지정 시 기본 동작에 암묵적으로 의존하지 않는다.
+_DEFAULT_SUBACCOUNT_PERMISSIONS = ["read"]
+
 
 class BitgetSubaccountMixin:
     async def get_subaccounts(self, *, limit: int = 100) -> list[dict[str, Any]]:
@@ -34,6 +42,7 @@ class BitgetSubaccountMixin:
         )
         return dict(raw["data"])
 
+    @require_paper_sandbox
     async def create_subaccount_apikey(
         self,
         subaccount_uid: str,
@@ -41,9 +50,17 @@ class BitgetSubaccountMixin:
         *,
         permissions: list[str] | None = None,
     ) -> dict[str, Any]:
-        body: dict[str, Any] = {"subAccountUid": subaccount_uid, "passphrase": passphrase}
-        if permissions is not None:
-            body["permType"] = ",".join(permissions)
+        """레드팀 #2026-09-02-34 — `permissions`를 생략해도 Bitget의
+        미지정 시 기본값에 맡기지 않고 명시적으로 최소권한(read)을
+        보낸다. 실제 필요한 권한을 아는 호출부는 그대로 지정하면 된다."""
+        resolved_permissions = permissions if permissions is not None else (
+            _DEFAULT_SUBACCOUNT_PERMISSIONS
+        )
+        body: dict[str, Any] = {
+            "subAccountUid": subaccount_uid,
+            "passphrase": passphrase,
+            "permType": ",".join(resolved_permissions),
+        }
         raw = await self._request(  # type: ignore[attr-defined]
             "POST", "/api/v2/user/create-virtual-subaccount-apikey", body=body
         )
@@ -63,6 +80,7 @@ class BitgetSubaccountMixin:
         )
         return list(raw["data"])
 
+    @require_paper_sandbox
     async def transfer_to_subaccount(
         self,
         subaccount_uid: str,
@@ -73,7 +91,10 @@ class BitgetSubaccountMixin:
         to_type: str = "spot",
     ) -> bool:
         """계정 내부(모회사↔서브계정) 이체 — 7.9 원칙 무관(외부 주소로
-        나가는 출금이 아니다, `account_mixin.py::transfer()`와 동일 판단)."""
+        나가는 출금이 아니다, `account_mixin.py::transfer()`와 동일 판단).
+        레드팀 #2026-09-02-32/33 참조."""
+        if amount <= 0:
+            raise ValueError("amount는 0보다 커야 합니다.")
         raw = await self._request(  # type: ignore[attr-defined]
             "POST",
             "/api/v2/spot/wallet/subaccount-transfer",

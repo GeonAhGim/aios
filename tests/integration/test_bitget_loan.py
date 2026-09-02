@@ -6,7 +6,9 @@ import json
 from decimal import Decimal
 
 import httpx
+import pytest
 
+from src.core.exceptions import FrozenZonePaperAdapterBlockedError
 from src.exchanges.bitget.adapter import BitgetAdapter
 
 
@@ -70,6 +72,33 @@ async def test_borrow_loan_sends_pledge():
     result = await adapter.borrow_loan("usdt", "btc", Decimal("0.5"))
 
     assert result == {"orderId": "l-1"}
+
+
+async def test_borrow_loan_blocked_on_live_configured_adapter():
+    """레드팀 #2026-09-02-32 회귀 테스트."""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        raise AssertionError("가드가 막았어야 할 요청이 실제로 나갔습니다.")
+
+    transport = httpx.MockTransport(handler)
+    client = httpx.AsyncClient(base_url="https://api.bitget.com", transport=transport)
+    live_adapter = BitgetAdapter(
+        "key", "secret", "passphrase", demo_mode=False, http_client=client
+    )
+
+    with pytest.raises(FrozenZonePaperAdapterBlockedError):
+        await live_adapter.borrow_loan("usdt", "btc", Decimal("0.5"))
+
+
+async def test_borrow_loan_rejects_non_positive_pledge_amount():
+    """레드팀 #2026-09-02-33 회귀 테스트."""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        raise AssertionError("검증에 걸렸어야 할 요청이 실제로 나갔습니다.")
+
+    adapter = _make_adapter(handler)
+    with pytest.raises(ValueError):
+        await adapter.borrow_loan("usdt", "btc", Decimal("0"))
 
 
 async def test_repay_loan_sends_amount():

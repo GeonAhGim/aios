@@ -187,3 +187,47 @@ async def test_subscribe_positions_stream_sends_login_before_subscribe():
         "op": "subscribe",
         "args": [{"instType": "USDT-FUTURES", "channel": "positions", "instId": "default"}],
     }
+
+
+async def test_reconnect_resends_login_with_fresh_timestamp_not_stale_one(monkeypatch):
+    """레드팀 #2026-09-02-31 회귀 테스트 — 이전엔 최초 연결 시 만든 고정
+    로그인 메시지를 재연결마다 그대로 재전송해, 재연결 시점엔 이미
+    타임스탬프가 오래돼 서명이 무효할 수밖에 없었다. 지금은 매 연결
+    시도마다 `_login()`이 새로 호출돼 그때그때 타임스탬프로 재서명한다
+    — `time.time()`을 결정적으로 증가시켜(실제 벽시계 타이밍에 기대지
+    않고) 두 로그인 메시지의 timestamp/sign이 실제로 달라지는지 확인."""
+    fake_now = [1000.0]
+
+    def fake_time() -> float:
+        fake_now[0] += 1.0
+        return fake_now[0]
+
+    monkeypatch.setattr(
+        "src.exchanges.bitget.market_data_mixin.time.time", fake_time
+    )
+
+    first_connection = _FakeConnection([], raise_after=ConnectionClosed(None, None))
+    second_connection = _FakeConnection([], raise_after=ConnectionClosed(None, None))
+    connections = [first_connection, second_connection]
+    call_count = {"n": 0}
+
+    def connect_fn(url: str):
+        call_count["n"] += 1
+        if call_count["n"] <= len(connections):
+            return _FakeConnectCtx(connections[call_count["n"] - 1])
+        raise _StopTest
+
+    adapter = BitgetAdapter(api_key="key123", api_secret="secret456", api_passphrase="phrase789")
+
+    async def callback(order) -> None:
+        pass
+
+    with pytest.raises(_StopTest):
+        await adapter.subscribe_order_stream(callback, connect_fn=connect_fn)
+
+    first_login = json.loads(first_connection.sent[0])
+    second_login = json.loads(second_connection.sent[0])
+    assert first_login["op"] == "login"
+    assert second_login["op"] == "login"
+    assert first_login["args"][0]["timestamp"] != second_login["args"][0]["timestamp"]
+    assert first_login["args"][0]["sign"] != second_login["args"][0]["sign"]

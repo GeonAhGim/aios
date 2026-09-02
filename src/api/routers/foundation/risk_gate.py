@@ -26,6 +26,7 @@ from src.api.schemas.foundation.risk_gate import (
 from src.foundation.connections.ports.repository import ConnectionRepository
 from src.foundation.mandates.ports.repository import MandateRepository
 from src.foundation.risk_gate.application.activate_safety_control import (
+    MissingScopeRefError,
     UnauthorizedSafetyControlScopeError,
     activate_safety_control,
 )
@@ -93,6 +94,8 @@ async def post_activate_safety_control(
         )
     except UnauthorizedSafetyControlScopeError as exc:
         raise HTTPException(status.HTTP_403_FORBIDDEN, str(exc)) from exc
+    except MissingScopeRefError as exc:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from exc
 
 
 @router.post("/safety-controls/{control_id}:deactivate")
@@ -125,12 +128,15 @@ async def post_admin_activate_safety_control(
     엔드포인트와 분리해, 운영자 권한 없이는 라우팅 자체가 되지 않게 한다
     (RSK-006과 같은 원칙 — 권한 체크를 애플리케이션 로직에만 맡기지
     않는다)."""
-    return await activate_safety_control(
-        repo,
-        tenant_id=admin.user_id,
-        actor_subject_id=admin.user_id,
-        actor_is_admin=True,
-        scope=SafetyScope(body.scope.value),
-        scope_ref=body.scope_ref,
-        reason=body.reason,
-    )
+    try:
+        return await activate_safety_control(
+            repo,
+            tenant_id=admin.user_id,
+            actor_subject_id=admin.user_id,
+            actor_is_admin=True,
+            scope=SafetyScope(body.scope.value),
+            scope_ref=body.scope_ref,
+            reason=body.reason,
+        )
+    except MissingScopeRefError as exc:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from exc

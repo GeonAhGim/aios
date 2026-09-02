@@ -8,7 +8,9 @@ import json
 from decimal import Decimal
 
 import httpx
+import pytest
 
+from src.core.exceptions import FrozenZonePaperAdapterBlockedError
 from src.exchanges.bitget.adapter import BitgetAdapter
 
 
@@ -76,6 +78,37 @@ async def test_execute_convert_sends_trace_id():
     )
 
     assert result == {"cnvtId": "c-1"}
+
+
+async def test_execute_convert_blocked_on_live_configured_adapter():
+    """레드팀 #2026-09-02-32 회귀 테스트 — Executor를 거치지 않는 이
+    메서드도 LIVE(demo_mode=False)로 구성된 adapter에서는 거래소 호출
+    자체가 막혀야 한다."""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        raise AssertionError("가드가 막았어야 할 요청이 실제로 나갔습니다.")
+
+    transport = httpx.MockTransport(handler)
+    client = httpx.AsyncClient(base_url="https://api.bitget.com", transport=transport)
+    live_adapter = BitgetAdapter(
+        "key", "secret", "passphrase", demo_mode=False, http_client=client
+    )
+
+    with pytest.raises(FrozenZonePaperAdapterBlockedError):
+        await live_adapter.execute_convert(
+            "t-1", "usdt", "btc", Decimal("100"), Decimal("0.001")
+        )
+
+
+async def test_execute_convert_rejects_non_positive_amount():
+    """레드팀 #2026-09-02-33 회귀 테스트 — 금액 sanity check."""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        raise AssertionError("검증에 걸렸어야 할 요청이 실제로 나갔습니다.")
+
+    adapter = _make_adapter(handler)
+    with pytest.raises(ValueError):
+        await adapter.execute_convert("t-1", "usdt", "btc", Decimal("0"), Decimal("0.001"))
 
 
 async def test_get_convert_history_returns_raw_rows():

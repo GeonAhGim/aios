@@ -15,7 +15,7 @@ from src.foundation.risk_gate.application.activate_safety_control import (
     control_to_view,
 )
 from src.foundation.risk_gate.contracts.v1 import SafetyControlView
-from src.foundation.risk_gate.domain.models import SafetyScope
+from src.foundation.risk_gate.domain.models import SYSTEM_WIDE_SCOPES, SafetyScope
 from src.foundation.risk_gate.ports.repository import RiskGateRepository
 
 _SELF_SERVICE_SCOPES = frozenset({SafetyScope.ACCOUNT})
@@ -43,4 +43,13 @@ async def deactivate_safety_control(
             )
 
     deactivated = await repo.deactivate_safety_control(control_id)
+
+    # 레드팀 #2026-09-02-26과 동일 원칙 — 해제도 즉시 반영돼야 한다(예:
+    # 실수로 건 GLOBAL 킬스위치를 급히 해제했는데 10초간 여전히 막혀
+    # 있으면 그 자체가 새로운 안전 문제가 된다).
+    if control.scope in SYSTEM_WIDE_SCOPES:
+        await repo.invalidate_evaluations(tenant_id=None)
+    elif control.scope in (SafetyScope.TENANT, SafetyScope.ACCOUNT):
+        await repo.invalidate_evaluations(tenant_id=UUID(control.scope_ref))
+
     return control_to_view(deactivated)

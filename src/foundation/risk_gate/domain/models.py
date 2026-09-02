@@ -47,6 +47,11 @@ class SafetyControlState(str, Enum):
 # Postgres에서 "NULL != NULL"이라 같은 GLOBAL 행이 여러 개 생길 수 있다.
 GLOBAL_SCOPE_REF = ""
 
+# 레드팀 #2026-09-02-26 — 이 범위의 control이 활성화/비활성화되면 특정
+# tenant 하나가 아니라 시스템 전체(모든 tenant)의 캐시된 risk_evaluation을
+# 무효화해야 한다(activate/deactivate_safety_control.py가 공유).
+SYSTEM_WIDE_SCOPES = frozenset({SafetyScope.GLOBAL, SafetyScope.PROVIDER})
+
 
 @dataclass(frozen=True)
 class SafetyControl:

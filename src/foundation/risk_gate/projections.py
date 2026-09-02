@@ -23,7 +23,9 @@ class SafetyControlListView:
 async def build_safety_control_list_view(
     repo: RiskGateRepository, tenant_id: UUID
 ) -> SafetyControlListView:
-    controls = await repo.list_active_controls(tenant_id=tenant_id)
+    # 레드팀 #2026-09-02-27 — 운영자 목록에는 특정 provider 하나로 좁히지
+    # 않고 걸려있는 PROVIDER 통제 전부를 보여줘야 한다.
+    controls = await repo.list_active_controls(tenant_id=tenant_id, include_all_providers=True)
     return SafetyControlListView(
         controls=[control_to_view(c) for c in controls],
         as_of=datetime.now(timezone.utc),

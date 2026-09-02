@@ -6,7 +6,9 @@ import json
 from decimal import Decimal
 
 import httpx
+import pytest
 
+from src.core.exceptions import FrozenZonePaperAdapterBlockedError
 from src.exchanges.bitget.adapter import BitgetAdapter
 
 
@@ -118,3 +120,34 @@ async def test_get_grid_profit_returns_dict():
     profit = await adapter.get_grid_profit("g-1")
 
     assert profit == {"gridId": "g-1", "totalProfit": "12.5"}
+
+
+async def test_place_spot_grid_blocked_on_live_configured_adapter():
+    """레드팀 #2026-09-02-32 회귀 테스트."""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        raise AssertionError("가드가 막았어야 할 요청이 실제로 나갔습니다.")
+
+    transport = httpx.MockTransport(handler)
+    client = httpx.AsyncClient(base_url="https://api.bitget.com", transport=transport)
+    live_adapter = BitgetAdapter(
+        "key", "secret", "passphrase", demo_mode=False, http_client=client
+    )
+
+    with pytest.raises(FrozenZonePaperAdapterBlockedError):
+        await live_adapter.place_spot_grid(
+            "BTC/USDT", Decimal("70000"), Decimal("90000"), 10, Decimal("1000")
+        )
+
+
+async def test_place_spot_grid_rejects_inverted_price_range():
+    """레드팀 #2026-09-02-33 회귀 테스트 — lower_price >= upper_price."""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        raise AssertionError("검증에 걸렸어야 할 요청이 실제로 나갔습니다.")
+
+    adapter = _make_adapter(handler)
+    with pytest.raises(ValueError):
+        await adapter.place_spot_grid(
+            "BTC/USDT", Decimal("90000"), Decimal("70000"), 10, Decimal("1000")
+        )

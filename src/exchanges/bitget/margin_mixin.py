@@ -24,6 +24,7 @@ from uuid import uuid4
 
 from src.data.models.base import AssetClass
 from src.data.models.trading import MarginAccountAsset, Order, OrderSide, OrderStatus, OrderType
+from src.exchanges.common.live_guard import require_paper_sandbox
 
 CROSSED = "crossed"
 ISOLATED = "isolated"
@@ -108,8 +109,14 @@ class BitgetMarginMixin:
         data = raw["data"][0] if isinstance(raw["data"], list) else raw["data"]
         return Decimal(data["riskRate"])
 
+    @require_paper_sandbox
     async def place_margin_order(self, margin_type: str, order: Order) -> Order:
+        """레드팀 #2026-09-02-32/33 — Executor를 거치지 않으므로 최소
+        방어선(LIVE adapter 차단 + 수량 sanity check)을 이 메서드 자체에
+        건다."""
         _validate_margin_type(margin_type)
+        if order.quantity <= 0:
+            raise ValueError("order.quantity는 0보다 커야 합니다.")
         body: dict[str, Any] = {
             "symbol": order.symbol.replace("/", ""),
             "side": order.side.value.lower(),
@@ -142,6 +149,7 @@ class BitgetMarginMixin:
         raw = await self._request("GET", "/api/v2/margin/currencies")  # type: ignore[attr-defined]
         return list(raw["data"])
 
+    @require_paper_sandbox
     async def borrow_margin(
         self, margin_type: str, coin: str, amount: Decimal, *, symbol: str | None = None
     ) -> dict[str, Any]:
@@ -150,8 +158,11 @@ class BitgetMarginMixin:
         재검증 통과 시에만 트리거되어야 한다(set_futures_leverage와 동일
         원칙). 이 메서드 자체는 그 게이트를 강제하지 않는다 — API 연동
         레이어이지 정책 레이어가 아니다(§2 인터페이스 계약 불변 원칙,
-        정책 적용은 호출부 책임)."""
+        정책 적용은 호출부 책임). 레드팀 #2026-09-02-32 — 최소한 LIVE
+        adapter 차단(데코레이터)과 금액 sanity check는 여기서 건다."""
         _validate_margin_type(margin_type)
+        if amount <= 0:
+            raise ValueError("amount는 0보다 커야 합니다.")
         body: dict[str, Any] = {"coin": coin.upper(), "borrowAmount": str(amount)}
         if symbol is not None:
             body["symbol"] = symbol.replace("/", "")
@@ -160,11 +171,14 @@ class BitgetMarginMixin:
         )
         return dict(raw["data"])
 
+    @require_paper_sandbox
     async def repay_margin(
         self, margin_type: str, coin: str, amount: Decimal, *, symbol: str | None = None
     ) -> dict[str, Any]:
-        """02b 스펙 §4(P1)."""
+        """02b 스펙 §4(P1). 레드팀 #2026-09-02-32/33 참조."""
         _validate_margin_type(margin_type)
+        if amount <= 0:
+            raise ValueError("amount는 0보다 커야 합니다.")
         body: dict[str, Any] = {"coin": coin.upper(), "repayAmount": str(amount)}
         if symbol is not None:
             body["symbol"] = symbol.replace("/", "")

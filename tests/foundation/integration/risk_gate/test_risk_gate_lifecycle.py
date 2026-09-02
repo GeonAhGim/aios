@@ -3,7 +3,9 @@ FND-07(paper_control)/order adapter 없이 재현 가능한 범위(RSK-001~005).
 from __future__ import annotations
 
 import asyncio
+from datetime import datetime, timezone
 from pathlib import Path
+from uuid import UUID, uuid4
 
 import asyncpg
 import pytest
@@ -11,9 +13,16 @@ from dotenv import dotenv_values
 
 from src.core.db.conditional_write import ConcurrencyConflictError
 from src.foundation.connections.adapters.postgres_repository import PostgresConnectionRepository
+from src.foundation.connections.domain.models import (
+    AccountConnection,
+    ConnectionHealth,
+    ConnectionState,
+    HealthState,
+)
 from src.foundation.mandates.adapters.postgres_repository import PostgresMandateRepository
 from src.foundation.risk_gate.adapters.postgres_repository import PostgresRiskGateRepository
 from src.foundation.risk_gate.application.activate_safety_control import (
+    MissingScopeRefError,
     UnauthorizedSafetyControlScopeError,
     activate_safety_control,
 )
@@ -25,6 +34,38 @@ from src.foundation.risk_gate.domain.models import GateKind, SafetyScope
 from src.foundation.trust.adapters.postgres_repository import PostgresTrustRepository
 from tests.foundation.integration.risk_gate.conftest import activate_mandate_with_defaults
 from tests.integration.conftest import create_test_user
+
+
+class _FakeHealthyConnectionRepo:
+    """provider_code를 고정으로 돌려주는 최소 fake — 실제 connection
+    lifecycle(begin/confirm, MFA/consent) 없이 evaluate_risk_gate()의
+    provider_code 전달 경로만 검증하기 위함(#2026-09-02-27)."""
+
+    def __init__(self, *, tenant_id: UUID, provider_code: str) -> None:
+        self._connection = AccountConnection(
+            id=uuid4(),
+            tenant_id=tenant_id,
+            owner_subject_id=tenant_id,
+            provider_code=provider_code,
+            opaque_account_ref="ACCT-TEST",
+            state=ConnectionState.ACTIVE_READONLY,
+            capability_profile=(),
+            revision=1,
+        )
+
+    async def get_connection(self, connection_id: UUID) -> AccountConnection | None:
+        return self._connection if connection_id == self._connection.id else None
+
+    async def get_latest_health(self, connection_id: UUID) -> ConnectionHealth | None:
+        return ConnectionHealth(
+            connection_id=connection_id,
+            evaluated_at=datetime.now(timezone.utc),
+            state=HealthState.HEALTHY,
+        )
+
+    @property
+    def connection_id(self) -> UUID:
+        return self._connection.id
 
 
 def _asyncpg_dsn() -> str:
@@ -231,3 +272,138 @@ async def test_concurrent_activations_never_lose_a_fence_token(pool, repo):
     tokens = sorted(r.fence_token for r in results)
     assert tokens == sorted(set(tokens)), "fence token이 중복됐다 — 유실된 증가가 있다"
     assert len(tokens) == 5
+
+
+async def test_kill_switch_after_cached_allow_takes_effect_immediately(
+    pool, repo, mandate_repo, trust_repo, connection_repo
+):
+    """레드팀 #2026-09-02-26 회귀 테스트 — ALLOW가 캐시된 뒤 킬스위치가
+    걸리면, 캐시 TTL(10초)이 끝나길 기다리지 않고 같은 fingerprint로
+    다시 평가해도 즉시 DENY여야 한다."""
+    tenant_id = await _tenant(pool)
+    await activate_mandate_with_defaults(mandate_repo, trust_repo, tenant_id=tenant_id)
+
+    first = await evaluate_risk_gate(
+        repo, mandate_repo, connection_repo, tenant_id=tenant_id, gate_kind=GateKind.DEPLOYMENT
+    )
+    assert first.outcome.value == "ALLOW"  # 이 시점에 캐시됨
+
+    await activate_safety_control(
+        repo,
+        tenant_id=tenant_id,
+        actor_subject_id=tenant_id,
+        actor_is_admin=False,
+        scope=SafetyScope.ACCOUNT,
+        scope_ref=str(tenant_id),
+        reason="캐시 무효화 회귀 테스트",
+    )
+
+    second = await evaluate_risk_gate(
+        repo, mandate_repo, connection_repo, tenant_id=tenant_id, gate_kind=GateKind.DEPLOYMENT
+    )
+    assert second.outcome.value == "DENY"
+    assert second.id != first.id  # 캐시가 무효화돼 새로 평가됐음을 방증
+
+
+async def test_global_kill_switch_invalidates_cached_allow_for_every_tenant(
+    pool, repo, mandate_repo, trust_repo, connection_repo
+):
+    """#2026-09-02-26 — GLOBAL 범위는 tenant 하나가 아니라 캐시 전체를
+    무효화해야 한다."""
+    tenant_a = await _tenant(pool)
+    tenant_b = await _tenant(pool)
+    await activate_mandate_with_defaults(mandate_repo, trust_repo, tenant_id=tenant_a)
+    await activate_mandate_with_defaults(mandate_repo, trust_repo, tenant_id=tenant_b)
+
+    for tenant_id in (tenant_a, tenant_b):
+        cached = await evaluate_risk_gate(
+            repo, mandate_repo, connection_repo, tenant_id=tenant_id, gate_kind=GateKind.DEPLOYMENT
+        )
+        assert cached.outcome.value == "ALLOW"
+
+    admin_id = await _tenant(pool)
+    control = await activate_safety_control(
+        repo,
+        tenant_id=admin_id,
+        actor_subject_id=admin_id,
+        actor_is_admin=True,
+        scope=SafetyScope.GLOBAL,
+        scope_ref=None,
+        reason="글로벌 캐시 무효화 테스트",
+    )
+    try:
+        for tenant_id in (tenant_a, tenant_b):
+            result = await evaluate_risk_gate(
+                repo,
+                mandate_repo,
+                connection_repo,
+                tenant_id=tenant_id,
+                gate_kind=GateKind.DEPLOYMENT,
+            )
+            assert result.outcome.value == "DENY"
+    finally:
+        await deactivate_safety_control(
+            repo, tenant_id=admin_id, actor_is_admin=True, control_id=control.id
+        )
+
+
+async def test_provider_scope_kill_switch_denies_connection_on_that_provider(
+    pool, repo, mandate_repo, trust_repo
+):
+    """레드팀 #2026-09-02-27 회귀 테스트 — PROVIDER 범위 킬스위치가 그
+    provider의 connection에 대한 평가를 실제로 막아야 한다."""
+    tenant_id = await _tenant(pool)
+    await activate_mandate_with_defaults(mandate_repo, trust_repo, tenant_id=tenant_id)
+    connection_repo = _FakeHealthyConnectionRepo(tenant_id=tenant_id, provider_code="binance")
+
+    baseline = await evaluate_risk_gate(
+        repo,
+        mandate_repo,
+        connection_repo,
+        tenant_id=tenant_id,
+        gate_kind=GateKind.DEPLOYMENT,
+        connection_id=connection_repo.connection_id,
+    )
+    assert baseline.outcome.value == "ALLOW"
+
+    admin_id = await _tenant(pool)
+    control = await activate_safety_control(
+        repo,
+        tenant_id=admin_id,
+        actor_subject_id=admin_id,
+        actor_is_admin=True,
+        scope=SafetyScope.PROVIDER,
+        scope_ref="binance",
+        reason="거래소 장애 대응 테스트",
+    )
+    try:
+        result = await evaluate_risk_gate(
+            repo,
+            mandate_repo,
+            connection_repo,
+            tenant_id=tenant_id,
+            gate_kind=GateKind.DEPLOYMENT,
+            connection_id=connection_repo.connection_id,
+        )
+        assert result.outcome.value == "DENY"
+        assert "RISK_KILL_SWITCH_ACTIVE_PROVIDER" in result.reason_codes
+    finally:
+        await deactivate_safety_control(
+            repo, tenant_id=admin_id, actor_is_admin=True, control_id=control.id
+        )
+
+
+async def test_activate_missing_scope_ref_for_tenant_scope_is_rejected(pool, repo):
+    """레드팀 #2026-09-02-29 회귀 테스트 — scope_ref 없이는 절대 매치될
+    수 없는 고아 control이 조용히 생성되던 문제."""
+    admin_id = await _tenant(pool)
+    with pytest.raises(MissingScopeRefError):
+        await activate_safety_control(
+            repo,
+            tenant_id=admin_id,
+            actor_subject_id=admin_id,
+            actor_is_admin=True,
+            scope=SafetyScope.TENANT,
+            scope_ref=None,
+            reason="scope_ref 누락 테스트",
+        )

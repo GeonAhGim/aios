@@ -10,6 +10,7 @@ from decimal import Decimal
 import httpx
 import pytest
 
+from src.core.exceptions import FrozenZonePaperAdapterBlockedError
 from src.data.models.base import AssetClass
 from src.data.models.trading import Order, OrderSide, OrderStatus, OrderType
 from src.exchanges.bitget.adapter import BitgetAdapter
@@ -287,6 +288,22 @@ async def test_place_futures_order():
 
     assert result.exchange_order_id == "777"
     assert result.status == OrderStatus.SUBMITTED
+
+
+async def test_place_futures_order_blocked_on_live_configured_adapter():
+    """레드팀 #2026-09-02-32 회귀 테스트."""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        raise AssertionError("가드가 막았어야 할 요청이 실제로 나갔습니다.")
+
+    transport = httpx.MockTransport(handler)
+    client = httpx.AsyncClient(base_url="https://api.bitget.com", transport=transport)
+    live_adapter = BitgetAdapter(
+        "key", "secret", "passphrase", demo_mode=False, http_client=client
+    )
+
+    with pytest.raises(FrozenZonePaperAdapterBlockedError):
+        await live_adapter.place_futures_order(_order())
 
 
 async def test_cancel_futures_order():

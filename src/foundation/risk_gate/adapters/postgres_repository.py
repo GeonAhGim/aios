@@ -60,7 +60,11 @@ class PostgresRiskGateRepository:
         self._pool = pool
 
     async def list_active_controls(
-        self, *, tenant_id: UUID, provider_code: str | None = None
+        self,
+        *,
+        tenant_id: UUID,
+        provider_code: str | None = None,
+        include_all_providers: bool = False,
     ) -> tuple[SafetyControl, ...]:
         refs: list[tuple[str, str]] = [
             ("GLOBAL", ""),
@@ -80,6 +84,12 @@ class PostgresRiskGateRepository:
         flat_params: list[object] = []
         for scope, ref in refs:
             flat_params.extend([scope, ref])
+
+        if include_all_providers:
+            # 특정 provider_code로 좁히지 않고 PROVIDER 범위 전체를 포함
+            # (#2026-09-02-27) — scope_ref는 파라미터로 바인딩할 필요 없는
+            # 리터럴 비교라 OR로 그냥 덧붙인다.
+            conditions = f"({conditions}) OR scope = 'PROVIDER'"
 
         async with self._pool.acquire() as conn:
             rows = await conn.fetch(
@@ -168,3 +178,12 @@ class PostgresRiskGateRepository:
                 fingerprint,
             )
         return _row_to_evaluation(row) if row is not None else None
+
+    async def invalidate_evaluations(self, *, tenant_id: UUID | None) -> None:
+        async with self._pool.acquire() as conn:
+            if tenant_id is None:
+                await conn.execute("DELETE FROM risk_evaluation")
+            else:
+                await conn.execute(
+                    "DELETE FROM risk_evaluation WHERE tenant_id = $1", tenant_id
+                )

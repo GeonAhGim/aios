@@ -16,12 +16,15 @@ from __future__ import annotations
 from decimal import Decimal
 from typing import Any
 
+from src.exchanges.common.live_guard import require_paper_sandbox
+
 
 def _to_bitget_symbol(canonical_symbol: str) -> str:
     return canonical_symbol.replace("/", "")
 
 
 class BitgetStrategyMixin:
+    @require_paper_sandbox
     async def place_strategy_order(
         self,
         symbol: str,
@@ -34,7 +37,16 @@ class BitgetStrategyMixin:
     ) -> dict[str, Any]:
         """`strategy_type`은 Bitget 문서값 그대로("iceberg"|"twap" 등,
         라이브 검증 필요). Plan/TPSL 주문과 마찬가지로 `Order` 모델과
-        형태가 달라(전략 파라미터 위주) raw dict를 반환한다."""
+        형태가 달라(전략 파라미터 위주) raw dict를 반환한다.
+
+        레드팀 #2026-09-02-32/33 — Executor를 거치지 않으므로 최소
+        방어선을 이 메서드 자체에 건다."""
+        if total_amount <= 0:
+            raise ValueError("total_amount는 0보다 커야 합니다.")
+        if price is not None and price <= 0:
+            raise ValueError("price는 0보다 커야 합니다.")
+        if duration_seconds is not None and duration_seconds <= 0:
+            raise ValueError("duration_seconds는 0보다 커야 합니다.")
         body: dict[str, Any] = {
             "symbol": _to_bitget_symbol(symbol),
             "side": side.lower(),

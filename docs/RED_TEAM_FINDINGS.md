@@ -32,7 +32,15 @@ Safety Gate(킬스위치), (2) Bitget Subaccount/Loan/Margin/Futures P1,
 
 ## 2026-09-02-26 · [FND-06] 킬스위치 평가가 캐시를 먼저 확인해, 활성화 직후 최대 10초간 이미 발동된 킬스위치를 우회할 수 있음 — 심각도 높음
 
-**상태**: 🔴 OPEN
+**상태**: ✅ FIXED — `RiskGateRepository.invalidate_evaluations(tenant_id)`
+신설, `activate_safety_control()`/`deactivate_safety_control()`이
+통제 변경 직후 호출(GLOBAL/PROVIDER는 전체 tenant 무효화, TENANT/
+ACCOUNT는 해당 tenant만). 회귀 테스트
+`test_kill_switch_after_cached_allow_takes_effect_immediately`,
+`test_global_kill_switch_invalidates_cached_allow_for_every_tenant`로
+확인(먼저 ALLOW를 캐시시킨 뒤 킬스위치를 걸고, 같은 fingerprint로
+즉시 재평가해 DENY 확인). fence_token 실제 검증(근본 해법)은 이번
+스콥에 포함하지 않음 — 캐시 무효화만으로 이 재현 시나리오는 닫힘.
 
 **발견**: `src/foundation/risk_gate/application/evaluate_risk_gate.py:73-75` —
 `evaluate_risk_gate()`가 `repo.get_cached_evaluation(tenant_id,
@@ -74,7 +82,14 @@ fence_token을 실제로 검증하는 경로(평가 시점 토큰을 기록해�
 
 ## 2026-09-02-27 · [FND-06] PROVIDER 범위 킬스위치가 실제 평가 경로에서 단 한 번도 조회되지 않음 — 심각도 높음
 
-**상태**: 🔴 OPEN
+**상태**: ✅ FIXED — `evaluate_risk_gate()`가 connection의
+`provider_code`를 `list_active_controls(provider_code=...)`로 전달.
+Control Center 목록(`projections.py`)은 `include_all_providers=True`로
+특정 provider에 안 좁히고 PROVIDER 범위 전체를 노출하도록 별도 반영.
+회귀 테스트 `test_provider_scope_kill_switch_denies_connection_on_
+that_provider`(fake connection repo로 provider_code="binance" 고정,
+PROVIDER 킬스위치 발동 후 DENY+RISK_KILL_SWITCH_ACTIVE_PROVIDER 확인)로
+검증.
 
 **발견**: `src/foundation/risk_gate/adapters/postgres_repository.py::
 list_active_controls(*, tenant_id, provider_code=None)` — `provider_code`가
@@ -108,7 +123,12 @@ Center 목록(`build_safety_control_list_view`)에도 PROVIDER 범위가
 
 ## 2026-09-02-28 · [FND-06] STRATEGY_DEPLOYMENT 범위는 API로 생성 가능하지만 이를 조회하는 코드가 아예 없음 — 의도된 제약이나 API가 이를 알리지 않음 — 심각도 중간
 
-**상태**: 🔴 OPEN
+**상태**: 🟢 문서로 명확화(기능 변경 없음) — `activate_safety_control.py`
+모듈 docstring에 "지금 생성해도 아직 어떤 평가에도 영향을 주지
+못한다"는 경고를 명시적으로 추가. 원 작성자의 의도(FND-07 이전
+선반영, 운영자 전용)를 존중해 요청 자체를 거부하지는 않기로 판단 —
+API 응답 필드에 경고를 싣는 계약 변경까지는 이번 스콥에서 하지
+않음(v1 계약 안정성 우선).
 
 **발견**: `list_active_controls`가 조회하는 범위는 `{GLOBAL, TENANT,
 ACCOUNT}` (+옵션 PROVIDER)뿐 — `STRATEGY_DEPLOYMENT`를 조회하는
@@ -135,7 +155,11 @@ FND-07(주문 어댑터) 부재라는 명시적으로 인지된 스코프 제약
 
 ## 2026-09-02-29 · [FND-06] scope_ref 누락 시 검증 없이 조용히 무효한 TENANT/PROVIDER 킬스위치가 생성됨 — 심각도 중간
 
-**상태**: 🔴 OPEN
+**상태**: ✅ FIXED — `activate_safety_control()`에 `MissingScopeRefError`
+추가, TENANT/PROVIDER/STRATEGY_DEPLOYMENT 범위에서 `scope_ref`가
+비어있으면 즉시 거부. 라우터(`/safety-controls`, `/admin/safety-controls`
+둘 다)에서 400으로 변환. 회귀 테스트
+`test_activate_missing_scope_ref_for_tenant_scope_is_rejected`로 확인.
 
 **발견**: `application/activate_safety_control.py:56-59` —
 `GLOBAL`만 `scope_ref`를 강제하고, 나머지 범위는 `resolved_ref =
@@ -157,7 +181,10 @@ scope_ref or ""`로 누락 시 빈 문자열로 조용히 대체한다.
 
 ## 2026-09-02-30 · [FND-06] 킬스위치가 아직 실제 주문 제출/실행 경로에 배선돼 있지 않음 — 이미 인지된 스코프 제약, 버그 아님(참고용)
 
-**상태**: 🔴 OPEN(구조적 — 코드 결함 아님)
+**상태**: 🟢 문서로 명확화(기능 변경 없음) — `activate_safety_control.py`
+모듈 docstring에 "신규 배포 시작만 차단, 이미 RUNNING인 배포는 영향
+없음, 기존 execution_loop 킬스위치와는 별개 시스템" 경고를 명시적으로
+추가. 코드 수정 대상이 아니라는 원래 판단 유지.
 
 **발견**: `grep risk_gate src/services/`는 0건. 현재 유일한 실제
 연동 지점은 `paper_control.start_deployment`/`resume_deployment`(배포가
@@ -177,7 +204,15 @@ RUNNING으로 "전이"할 때만 게이트) — 이미 RUNNING인 배포가 계�
 
 ## 2026-09-02-31 · [Bitget WS] 프라이빗 채널 재연결 시 로그인 서명을 재사용해 재연결 이후 인증이 조용히 영구 실패할 수 있음 — 심각도 높음(현재 호출부 없어 도달 불가)
 
-**상태**: 🔴 OPEN (latent)
+**상태**: ✅ FIXED — `_run_ws_subscription()`의 `pre_messages`(고정
+list)를 `pre_messages_factory`(매 연결 시도마다 새로 호출되는
+callable)로 전환, `subscribe_order_stream`/`subscribe_account_stream`/
+`subscribe_positions_stream` 3곳 모두 갱신. login 성공/실패도
+`event=="login"` 분기에서 명시적으로 `logger.info`/`logger.warning`으로
+표면화(이전엔 다른 control 메시지처럼 조용히 버려짐). 회귀 테스트
+`test_reconnect_resends_login_with_fresh_timestamp_not_stale_one`(`time.time()`을
+결정적으로 증가시켜, 재연결 시 timestamp/sign이 실제로 달라지는지
+확인)로 검증.
 
 **발견**: `src/exchanges/bitget/market_data_mixin.py::_build_login_message()`가
 `subscribe_order_stream()` 등 호출 시 **한 번만** 실행돼 그 시점
@@ -208,8 +243,22 @@ RUNNING으로 "전이"할 때만 게이트) — 이미 RUNNING인 배포가 계�
 
 ## 2026-09-02-32 · [Bitget] Convert/Grid/Strategy 및 Subaccount/Loan/Margin/Futures 확장 메서드가 Executor의 LIVE 하드가드·멱등성을 전혀 거치지 않음 — 심각도 높음(구조적, 현재 호출부 없어 도달 불가)
 
-**상태**: 🔴 OPEN (latent — 두 감사 에이전트가 각자 다른 파일군에서
-독립적으로 발견한 동일 패턴을 통합)
+**상태**: ✅ FIXED(부분) — `src/exchanges/common/live_guard.py`에
+`@require_paper_sandbox` 공용 데코레이터 신설(`self.is_paper_trading
+and self.is_sandboxed`가 아니면 `FrozenZonePaperAdapterBlockedError`).
+주문/자금 이동성 메서드 전부에 적용: `execute_convert`,
+`place_spot_grid`/`place_futures_grid`, `place_strategy_order`,
+`place_margin_order`/`borrow_margin`/`repay_margin`,
+`place_futures_order`/`place_futures_tpsl_order`/
+`place_futures_position_tpsl`/`place_futures_plan_order`,
+`borrow_loan`/`repay_loan`/`revise_loan_pledge`,
+`create_subaccount_apikey`/`transfer_to_subaccount`(15개 메서드).
+**"부분"인 이유**: Executor의 두 가드 중 `is_sandboxed`만 재현
+가능하다 — `mode != "PAPER"` 검사는 실행 레코드라는 adapter가 모르는
+호출자 컨텍스트라 데코레이터로 못 만든다. cancel/modify/close류
+(risk-reducing)는 의도적으로 가드하지 않음. 각 파일에 회귀
+테스트(`test_*_blocked_on_live_configured_adapter`) 추가, 총 82→94개
+Bitget 확장 테스트 통과.
 
 **발견**: `Executor.execute()`(`src/core/executor/executor.py:71-85`)만
 `mode != "PAPER"` 하드차단 + `is_paper_trading`/`is_sandboxed` 이중
@@ -247,7 +296,13 @@ Executor와 동등한 가드를 다시 만들어 넣는 걸 잊으면, 그리드
 
 ## 2026-09-02-33 · [Bitget] Convert/Grid/Strategy/Margin/Loan 신규 메서드에 금액·가격 로컬 검증이 전무 — 심각도 낮음~중간(기존 관례와 대체로 일관, #32와 결합 시 위험 증폭)
 
-**상태**: 🔴 OPEN
+**상태**: ✅ FIXED — #32와 같은 커밋으로 처리. 양수 금액/가격, grid의
+`lower_price < upper_price`, `grid_count > 0` 등 최소 sanity check를
+각 메서드 진입부에 추가(0/음수/역전된 범위는 `ValueError`). 회귀
+테스트로 대표 케이스 확인(`test_execute_convert_rejects_non_positive_
+amount`, `test_place_spot_grid_rejects_inverted_price_range`,
+`test_borrow_margin_rejects_non_positive_amount`,
+`test_borrow_loan_rejects_non_positive_pledge_amount`).
 
 **발견**: `from_amount`(convert), `lower_price`/`upper_price`/
 `grid_count`/`investment`(grid), `total_amount`/`price`/
@@ -266,7 +321,12 @@ Executor와 동등한 가드를 다시 만들어 넣는 걸 잊으면, 그리드
 
 ## 2026-09-02-34 · [Bitget] 서브계정 API 키 생성 시 permissions 생략 가능 — 실제 기본 권한이 read/trade/withdraw 중 무엇인지 코드로 확인 불가 — 심각도 중간
 
-**상태**: 🔴 OPEN
+**상태**: ✅ FIXED — `permissions=None`이면 거래소의 미지정 기본값에
+맡기지 않고 명시적으로 `["read"]`를 `permType`에 보내도록 수정.
+회귀 테스트 `test_create_subaccount_apikey_defaults_to_read_only_
+permission`로 확인. Demo API 키로 거래소 실제 기본 동작을 라이브
+검증하는 건 이 세션에서 못 함(Demo 키 미보유, 모듈 자신이 이미
+인정하는 한계) — 후속 세션 과제로 남음.
 
 **발견**: `subaccount_mixin.py::create_subaccount_apikey`에서
 `permissions: list[str] | None = None`이고, `None`이면 `permType`

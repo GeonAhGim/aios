@@ -87,14 +87,22 @@ async def evaluate_risk_gate(
         mandate_reason_codes = ()
 
     connection_fresh: bool | None = None
+    provider_code: str | None = None
     if connection_id is not None:
         connection = await connection_repo.get_connection(connection_id)
         if connection is None or connection.tenant_id != tenant_id:
             raise CrossTenantConnectionReferenceError(str(connection_id))
         health = await connection_repo.get_latest_health(connection_id)
         connection_fresh = health is not None and health.state.value == "HEALTHY"
+        provider_code = connection.provider_code
 
-    active_controls = await repo.list_active_controls(tenant_id=tenant_id)
+    # 레드팀 #2026-09-02-27 — provider_code를 안 넘기면 PROVIDER 범위
+    # safety control이 여기서 영원히 조회되지 않는다(list_active_controls의
+    # provider_code=None 기본값 참조) — connection이 있으면 반드시 그
+    # provider의 통제도 함께 확인한다.
+    active_controls = await repo.list_active_controls(
+        tenant_id=tenant_id, provider_code=provider_code
+    )
 
     outcome, reasons, obligations = evaluate_risk(
         RiskEvaluationInput(

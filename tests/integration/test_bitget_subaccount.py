@@ -6,7 +6,9 @@ import json
 from decimal import Decimal
 
 import httpx
+import pytest
 
+from src.core.exceptions import FrozenZonePaperAdapterBlockedError
 from src.exchanges.bitget.adapter import BitgetAdapter
 
 
@@ -80,6 +82,24 @@ async def test_create_subaccount_apikey_sends_permissions():
     assert result == {"apikey": "k-1"}
 
 
+async def test_create_subaccount_apikey_defaults_to_read_only_permission():
+    """레드팀 #2026-09-02-34 회귀 테스트 — permissions 생략 시 거래소의
+    미지정 기본값에 맡기지 않고 명시적으로 read-only를 보낸다."""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == "/api/v2/user/create-virtual-subaccount-apikey"
+        body = json.loads(request.content)
+        assert body["permType"] == "read"
+        return _json_response(
+            {"code": "00000", "msg": "success", "requestTime": 1, "data": {"apikey": "k-2"}}
+        )
+
+    adapter = _make_adapter(handler)
+    result = await adapter.create_subaccount_apikey("u-1", "passphrase123")
+
+    assert result == {"apikey": "k-2"}
+
+
 async def test_get_subaccount_apikeys_returns_raw_rows():
     def handler(request: httpx.Request) -> httpx.Response:
         assert request.url.path == "/api/v2/user/virtual-subaccount-apikey-list"
@@ -130,3 +150,19 @@ async def test_transfer_to_subaccount_returns_true_on_success():
     result = await adapter.transfer_to_subaccount("u-1", "usdt", Decimal("50"))
 
     assert result is True
+
+
+async def test_transfer_to_subaccount_blocked_on_live_configured_adapter():
+    """레드팀 #2026-09-02-32 회귀 테스트."""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        raise AssertionError("가드가 막았어야 할 요청이 실제로 나갔습니다.")
+
+    transport = httpx.MockTransport(handler)
+    client = httpx.AsyncClient(base_url="https://api.bitget.com", transport=transport)
+    live_adapter = BitgetAdapter(
+        "key", "secret", "passphrase", demo_mode=False, http_client=client
+    )
+
+    with pytest.raises(FrozenZonePaperAdapterBlockedError):
+        await live_adapter.transfer_to_subaccount("u-1", "usdt", Decimal("50"))
