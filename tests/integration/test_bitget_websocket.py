@@ -159,3 +159,31 @@ async def test_subscribe_order_stream_sends_login_before_subscribe():
         "op": "subscribe",
         "args": [{"instType": "SPOT", "channel": "orders", "instId": "default"}],
     }
+
+
+async def test_subscribe_positions_stream_sends_login_before_subscribe():
+    connection = _FakeConnection([], raise_after=ConnectionClosed(None, None))
+    call_count = {"n": 0}
+
+    def connect_fn(url: str):
+        call_count["n"] += 1
+        if call_count["n"] == 1:
+            return _FakeConnectCtx(connection)
+        raise _StopTest
+
+    adapter = BitgetAdapter(api_key="key123", api_secret="secret456", api_passphrase="phrase789")
+
+    async def callback(position) -> None:
+        pass
+
+    with pytest.raises(_StopTest):
+        await adapter.subscribe_positions_stream(callback, connect_fn=connect_fn)
+
+    assert len(connection.sent) == 2
+    login_msg = json.loads(connection.sent[0])
+    subscribe_msg = json.loads(connection.sent[1])
+    assert login_msg["op"] == "login"
+    assert subscribe_msg == {
+        "op": "subscribe",
+        "args": [{"instType": "USDT-FUTURES", "channel": "positions", "instId": "default"}],
+    }

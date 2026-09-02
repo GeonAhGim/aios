@@ -8,9 +8,11 @@ from decimal import Decimal
 from src.data.models.trading import OrderStatus
 from src.exchanges.bitget.market_data_mixin import (
     _build_login_message,
+    parse_account_ws_message,
     parse_candle_ws_message,
     parse_order_ws_message,
     parse_orderbook_ws_message,
+    parse_position_ws_message,
     parse_ticker_ws_message,
 )
 
@@ -129,3 +131,37 @@ def test_parse_order_ws_message_parses_data_rows():
     assert len(orders) == 1
     assert orders[0].exchange_order_id == "12345"
     assert orders[0].status == OrderStatus.ACKNOWLEDGED
+
+
+def test_parse_account_ws_message_ignores_control_message():
+    assert parse_account_ws_message({"event": "login", "code": "0"}) == []
+
+
+def test_parse_account_ws_message_parses_data_rows():
+    message = {
+        "action": "snapshot",
+        "data": [{"coin": "usdt", "available": "100", "frozen": "5", "locked": "0"}],
+    }
+
+    balances = parse_account_ws_message(message)
+
+    assert len(balances) == 1
+    assert balances[0].asset == "USDT"
+    assert balances[0].total == Decimal("105")
+
+
+def test_parse_position_ws_message_ignores_control_message():
+    assert parse_position_ws_message({"event": "error"}) == []
+
+
+def test_parse_position_ws_message_parses_data_rows():
+    message = {
+        "action": "snapshot",
+        "data": [{"symbol": "BTCUSDT", "total": "0.5", "openPriceAvg": "80000"}],
+    }
+
+    positions = parse_position_ws_message(message)
+
+    assert len(positions) == 1
+    assert positions[0].symbol == "BTCUSDT"
+    assert positions[0].quantity == Decimal("0.5")

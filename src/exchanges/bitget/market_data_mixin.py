@@ -45,7 +45,8 @@ from src.data.models.market_data import (
     SpotSymbolInfo,
     Ticker,
 )
-from src.data.models.trading import Order
+from src.data.models.trading import AccountBalance, Order, Position
+from src.exchanges.bitget.futures_account_mixin import _row_to_position
 from src.exchanges.bitget.trading_mixin import _row_to_order
 from src.exchanges.common.types import TickerCallback
 
@@ -81,6 +82,8 @@ ReconnectHook = Callable[[], Awaitable[None]]
 CandleCallback = Callable[[Candle], Awaitable[None]]
 OrderBookCallback = Callable[[OrderBook], Awaitable[None]]
 OrderCallback = Callable[[Order], Awaitable[None]]
+AccountCallback = Callable[[AccountBalance], Awaitable[None]]
+PositionCallback = Callable[[Position], Awaitable[None]]
 MessageHandler = Callable[[dict[str, Any]], Awaitable[None]]
 
 
@@ -140,6 +143,40 @@ def parse_order_ws_message(message: dict[str, Any]) -> list[Order]:
     if _is_control_message(message):
         return []
     return [_row_to_order(row) for row in message.get("data", [])]
+
+
+def parse_account_ws_message(message: dict[str, Any]) -> list[AccountBalance]:
+    """Private `account` 채널 메시지 파싱 — REST get_balance()와 동일
+    available/frozen/locked 필드 구조를 가정(라이브 검증 필요)."""
+    if _is_control_message(message):
+        return []
+    balances = []
+    for item in message.get("data", []):
+        available = Decimal(item.get("available", "0"))
+        frozen = Decimal(item.get("frozen", "0"))
+        locked = Decimal(item.get("locked", "0"))
+        balances.append(
+            AccountBalance(
+                exchange="bitget",
+                asset=item.get("coin", "").upper(),
+                total=available + frozen + locked,
+                available=available,
+                used_margin=frozen + locked,
+            )
+        )
+    return balances
+
+
+def parse_position_ws_message(message: dict[str, Any]) -> list[Position]:
+    """Private `positions` 채널(선물 전용) 메시지 파싱 —
+    futures_account_mixin.py의 `_row_to_position()` 재사용(라이브 검증
+    필요)."""
+    if _is_control_message(message):
+        return []
+    return [
+        _row_to_position(item, item.get("symbol", item.get("instId", "")))
+        for item in message.get("data", [])
+    ]
 
 
 def parse_ticker_ws_message(message: dict[str, Any]) -> list[Ticker]:
@@ -424,6 +461,80 @@ class BitgetMarketDataMixin:
         async def on_message(message: dict[str, Any]) -> None:
             for order in parse_order_ws_message(message):
                 await callback(order)
+
+        await _run_ws_subscription(
+            WS_PRIVATE_URL,
+            subscribe_msg,
+            on_message,
+            pre_messages=[login_msg],
+            connect_fn=connect_fn,
+            on_reconnecting=on_reconnecting,
+            on_reconnected=on_reconnected,
+        )
+
+    async def subscribe_account_stream(
+        self,
+        callback: AccountCallback,
+        *,
+        inst_type: str = "SPOT",
+        on_reconnecting: ReconnectHook | None = None,
+        on_reconnected: ReconnectHook | None = None,
+        connect_fn: ConnectFn = _connect,
+    ) -> None:
+        """02b 스펙 §6(P1) — Private `account` 채널. FD-16.4(실행
+        모니터링)이 현재 폴링 기반인 잔고 확인을 실시간으로 보강할 수
+        있는 후보(호출부 연결은 별도 leaf). 로그인은
+        `subscribe_order_stream`과 동일 메커니즘(§6 "Private 채널 로그인"
+        절) — 라이브 검증 전까지 최선 추정치."""
+        login_msg = _build_login_message(
+            self._api_key,  # type: ignore[attr-defined]
+            self._api_secret,  # type: ignore[attr-defined]
+            self._api_passphrase,  # type: ignore[attr-defined]
+        )
+        subscribe_msg = {
+            "op": "subscribe",
+            "args": [{"instType": inst_type, "channel": "account", "instId": "default"}],
+        }
+
+        async def on_message(message: dict[str, Any]) -> None:
+            for balance in parse_account_ws_message(message):
+                await callback(balance)
+
+        await _run_ws_subscription(
+            WS_PRIVATE_URL,
+            subscribe_msg,
+            on_message,
+            pre_messages=[login_msg],
+            connect_fn=connect_fn,
+            on_reconnecting=on_reconnecting,
+            on_reconnected=on_reconnected,
+        )
+
+    async def subscribe_positions_stream(
+        self,
+        callback: PositionCallback,
+        *,
+        inst_type: str = "USDT-FUTURES",
+        on_reconnecting: ReconnectHook | None = None,
+        on_reconnected: ReconnectHook | None = None,
+        connect_fn: ConnectFn = _connect,
+    ) -> None:
+        """02b 스펙 §6(P1) — Private `positions` 채널(선물 전용). Phase 1은
+        크립토 현물 전용(06번 §6.1)이라 아직 소비하는 호출부가 없다 —
+        API 연동만 우선 완료해둔다(다른 확장 메서드와 동일 원칙)."""
+        login_msg = _build_login_message(
+            self._api_key,  # type: ignore[attr-defined]
+            self._api_secret,  # type: ignore[attr-defined]
+            self._api_passphrase,  # type: ignore[attr-defined]
+        )
+        subscribe_msg = {
+            "op": "subscribe",
+            "args": [{"instType": inst_type, "channel": "positions", "instId": "default"}],
+        }
+
+        async def on_message(message: dict[str, Any]) -> None:
+            for position in parse_position_ws_message(message):
+                await callback(position)
 
         await _run_ws_subscription(
             WS_PRIVATE_URL,
