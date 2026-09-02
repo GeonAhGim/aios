@@ -2,6 +2,7 @@ import { isSessionExpiredErrorCode } from "@aios/shared-types";
 import { keysToCamel, keysToSnake } from "./caseConvert";
 import type { ApiErrorBody } from "./envelope";
 import { resolveRetryAfterSec, resolveTraceId, unwrap } from "./envelope";
+import { refreshAccessToken } from "./tokenRefresh";
 
 export class ApiError extends Error {
   statusCode: number;
@@ -82,6 +83,8 @@ function notifyUnauthorized(errorCode: string): void {
 
 // 429(RATE_LIMIT_EXCEEDED)는 미들웨어가 봉투 미적용 라우트에도 §2.3 봉투로
 // 응답하므로(spec §9 PLT-25), 봉투/레거시 두 형태를 여기서 함께 처리한다.
+// 순수 함수 — 401 처리(재로그인 유도 vs refresh 후 재시도)는 호출부인
+// handleAuthFailure가 비동기로 담당한다(task-386).
 function buildApiError(
   status: number,
   body: unknown,
@@ -91,17 +94,13 @@ function buildApiError(
   const envelopeError = isEnvelopeError(body) ? body : undefined;
   const message = envelopeError ? envelopeError.message : extractDetailMessage(body);
   const retryAfterSec = resolveRetryAfterSec(envelopeError?.retry_after_seconds, retryAfterHeader);
-  const error = new ApiError(
+  return new ApiError(
     status,
     message,
     resolveTraceId(envelopeError?.trace_id, traceId),
     envelopeError?.error_code,
     retryAfterSec,
   );
-  if (status === 401 && isSessionExpiredErrorCode(error.errorCode)) {
-    notifyUnauthorized(error.errorCode!);
-  }
-  return error;
 }
 
 // task-112(28cf21b)로 ApiResponse 봉투가 적용된 라우터(auth/users/admin)만
@@ -164,7 +163,18 @@ export class ApiClientBase {
     return this.withGetRetry(method, () => this.performRequest<T>(path, init));
   }
 
+  // task-386: AUTH_TOKEN_EXPIRED 1회만 refresh 후 원요청 재시도. 재시도(두
+  // 번째 executeRequest 호출)는 handleAuthFailure를 다시 거치지 않으므로
+  // refresh가 무한 반복될 수 없다 — 실패하면 그 자리에서 그대로 던진다.
   private async performRequest<T>(path: string, init?: RequestInit): Promise<T> {
+    try {
+      return await this.executeRequest<T>(path, init);
+    } catch (err) {
+      return this.handleAuthFailure(err, () => this.executeRequest<T>(path, init));
+    }
+  }
+
+  private async executeRequest<T>(path: string, init?: RequestInit): Promise<T> {
     const { status, body, traceId, retryAfterHeader } = await this.fetchJson(path, init);
     if (status === 204) return undefined as T;
 
@@ -173,6 +183,24 @@ export class ApiClientBase {
     }
 
     return keysToCamel<T>(body);
+  }
+
+  // AUTH_TOKEN_EXPIRED만 refresh 대상(spec §3.3: "재시도: expired만
+  // refresh") — AUTH_TOKEN_INVALID/AUTH_SESSION_REVOKED는 refresh를 시도하지
+  // 않고 바로 로그아웃 알림으로 넘어간다. refresh 자체가 실패해도(refresh
+  // token도 만료·재사용 감지 등) 동일하게 로그아웃 알림 후 원본 에러를 던진다.
+  private async handleAuthFailure<T>(err: unknown, retry: () => Promise<T>): Promise<T> {
+    if (!(err instanceof ApiError) || err.statusCode !== 401) throw err;
+
+    if (err.errorCode === "AUTH_TOKEN_EXPIRED") {
+      const refreshed = await refreshAccessToken();
+      if (refreshed) return retry();
+    }
+
+    if (isSessionExpiredErrorCode(err.errorCode)) {
+      notifyUnauthorized(err.errorCode!);
+    }
+    throw err;
   }
 
   protected post<T>(path: string, body?: unknown): Promise<T> {
@@ -215,23 +243,20 @@ export class ApiClientBase {
   }
 
   private async performRequestEnvelope<T>(path: string, init?: RequestInit): Promise<T> {
+    try {
+      return await this.executeRequestEnvelope<T>(path, init);
+    } catch (err) {
+      return this.handleAuthFailure(err, () => this.executeRequestEnvelope<T>(path, init));
+    }
+  }
+
+  private async executeRequestEnvelope<T>(path: string, init?: RequestInit): Promise<T> {
     const { status, body, traceId, retryAfterHeader } = await this.fetchJson(path, init);
     if (status === 204) return undefined as T;
 
     const result = unwrap<unknown>(body);
     if (!result.ok) {
-      const retryAfterSec = resolveRetryAfterSec(result.error.retry_after_seconds, retryAfterHeader);
-      const error = new ApiError(
-        status,
-        result.error.message,
-        resolveTraceId(result.error.trace_id, traceId),
-        result.error.error_code,
-        retryAfterSec,
-      );
-      if (status === 401 && isSessionExpiredErrorCode(error.errorCode)) {
-        notifyUnauthorized(error.errorCode!);
-      }
-      throw error;
+      throw buildApiError(status, body, traceId, retryAfterHeader);
     }
     return keysToCamel<T>(result.data);
   }
