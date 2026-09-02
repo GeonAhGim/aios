@@ -1,5 +1,6 @@
 """Trust Core 통합테스트 — 실제 dev DB 대상. 71번 §7 "정상 흐름 + negative test"."""
 import asyncio
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import asyncpg
@@ -9,6 +10,7 @@ from dotenv import dotenv_values
 from src.core.db.conditional_write import ConcurrencyConflictError
 from src.foundation.trust.adapters.postgres_repository import PostgresTrustRepository
 from src.foundation.trust.application.accept_disclosure import (
+    DEFAULT_CONSENT_VALIDITY,
     ConsentAlreadyActiveError,
     DisclosureNotFoundError,
     DisclosureRetiredError,
@@ -172,3 +174,39 @@ async def test_new_disclosure_revision_requires_new_consent(pool, repo, purpose)
 
     decision_after = await evaluate_trust_freshness(repo, context, purpose=purpose)
     assert decision_after.is_fresh is True
+
+
+async def test_accept_disclosure_sets_a_real_default_expiry(pool, repo, purpose):
+    """전수감사 발견 회귀 — 이전에는 accept_disclosure()가 항상 expires_at=None을
+    넣어, domain/rules.py의 만료 검사(is_consent_fresh, 이미 올바르게 구현됨)가
+    실제로는 한 번도 발동할 데이터가 없었다. 이제는 실제 미래 시각이 들어간다."""
+    context = await _context_for(pool)
+    await create_disclosure(pool, purpose=purpose, revision=1)
+    before = datetime.now(timezone.utc)
+
+    accepted = await accept_disclosure(repo, context, purpose=purpose, disclosure_revision=1)
+
+    assert accepted.expires_at is not None
+    expected = before + DEFAULT_CONSENT_VALIDITY
+    assert abs((accepted.expires_at - expected).total_seconds()) < 5
+
+
+async def test_expired_consent_is_not_fresh_even_if_not_revoked(pool, repo, purpose):
+    """만료된 동의는(철회되지 않았어도) 즉시 신선하지 않다(73번 §3.2) — DB에
+    직접 과거 expires_at을 심어 실제로 그 경로가 작동하는지 확인한다(mandates
+    cooling-off 테스트와 같은 패턴, is_consent_fresh() 자체는 이미 단위테스트로
+    커버돼 있어 여기서는 accept_disclosure()가 만든 실제 행에 대해서만 확인)."""
+    context = await _context_for(pool)
+    await create_disclosure(pool, purpose=purpose, revision=1)
+    accepted = await accept_disclosure(repo, context, purpose=purpose, disclosure_revision=1)
+
+    async with pool.acquire() as conn:
+        await conn.execute(
+            "UPDATE consent_record SET expires_at = $2 WHERE id = $1",
+            accepted.consent_id,
+            datetime.now(timezone.utc) - timedelta(seconds=1),
+        )
+
+    decision = await evaluate_trust_freshness(repo, context, purpose=purpose)
+    assert decision.is_fresh is False
+    assert decision.reason_code == "POLICY_CONSENT_EXPIRED"

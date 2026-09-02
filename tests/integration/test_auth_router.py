@@ -5,14 +5,31 @@ app.router.lifespan_context로 main.py의 lifespan(asyncpg pool 생성)을
 그대로 태운다.
 """
 import uuid
+from pathlib import Path
 
+import asyncpg
 import pytest
+from dotenv import dotenv_values
 from httpx import ASGITransport, AsyncClient
 
 from src.main import app
 from tests.integration.mfa_clock import mfa_clock_shifted, totp_at
 
 STRONG_PASSWORD = "Str0ng!Passw0rd"
+
+
+def _asyncpg_dsn() -> str:
+    env = dotenv_values(Path(__file__).resolve().parents[2] / ".env")
+    url = env.get("DATABASE_URL")
+    assert url
+    return url.replace("postgresql+asyncpg://", "postgresql://")
+
+
+@pytest.fixture
+async def pool():
+    p = await asyncpg.create_pool(_asyncpg_dsn(), min_size=1, max_size=2)
+    yield p
+    await p.close()
 
 
 @pytest.fixture
@@ -56,6 +73,30 @@ async def test_login_after_register_succeeds(client):
 
     assert response.status_code == 200
     assert "access_token" in response.json()
+
+
+async def test_suspended_account_loses_access_mid_session_not_just_at_next_login(client, pool):
+    """73번 §6 규칙1 "A command requires an ACTIVE membership" — P0 단일-owner
+    스콥에서는 "ACTIVE membership"이 곧 "이 계정 자체가 ACTIVE"다(TenantContext.role
+    주석 참조, household/organization membership은 아직 없음). deps.py의
+    get_current_user()가 이미 매 요청마다 SUSPENDED/DELETED를 막는다는 주석이
+    있었지만(로그인 시점 검사만으로는 불충분하다는 실제 발견 기록) 이를
+    고정하는 회귀테스트가 없었다 — 발급된 토큰이 만료 전까지 계속 유효한
+    시나리오를 실제로 재현한다."""
+    email = _unique_email()
+    register_response = await client.post(
+        "/auth/register", json={"email": email, "password": STRONG_PASSWORD}
+    )
+    headers = {"Authorization": f"Bearer {register_response.json()['access_token']}"}
+
+    before_suspend = await client.get("/v1/foundation/trust/status", headers=headers)
+    assert before_suspend.status_code == 200
+
+    async with pool.acquire() as conn:
+        await conn.execute("UPDATE users SET status = 'SUSPENDED' WHERE email = $1", email)
+
+    after_suspend = await client.get("/v1/foundation/trust/status", headers=headers)
+    assert after_suspend.status_code == 401
 
 
 async def test_login_with_wrong_password_rejected(client):

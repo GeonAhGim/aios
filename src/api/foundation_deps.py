@@ -1,6 +1,8 @@
 """foundation/* 라우터 공용 의존성 — src/api/suitability_deps.py와 동일 패턴."""
 from __future__ import annotations
 
+from datetime import datetime, timedelta, timezone
+
 import asyncpg
 from fastapi import Depends, Request
 
@@ -83,19 +85,34 @@ def get_credential_encryption_key(request: Request) -> str:
     return str(secrets.credential_encryption_key.get_secret_value())
 
 
+# 73번 §6 규칙 2 "issued within configured step-up window" — 이 창을 넘으면
+# mfa_enabled=True인 계정이라도 "최근 실제로 TOTP를 통과했다"고 볼 수 없다.
+# 로그인 세션(JWT, 기본 60분)보다 짧게 잡는다 — 세션이 살아있는 동안에도
+# 민감 커맨드는 "로그인했다"가 아니라 "최근 재확인했다"를 요구해야 한다.
+MFA_STEP_UP_WINDOW = timedelta(minutes=15)
+
+
 def get_tenant_context(user: User = Depends(get_current_user)) -> TenantContext:
     """71번 §4 "API body에서 생성 금지" — 게이트웨이 인증(get_current_user)에서만
     발급한다. P0 스콥은 tenant_id == subject_id == user_id다(84b7d0faf14f 마이그레이션
     편차 설명 참조 — organization/household tenant는 아직 없음).
 
-    `mfa_verified`는 계정에 MFA가 켜져 있는지를 그대로 옮긴다 — 로그인 자체가
-    mfa_enabled=True인 계정에는 TOTP 통과를 강제하므로(auth_service.py), 유효한
-    세션이 있다는 것 자체가 "이 세션은 MFA를 통과했다"는 뜻이다. 민감 커맨드별
-    step-up 재인증(73번 §6 규칙 2)은 이 리프의 스콥이 아니다 — 기존
-    `reauthenticate()`(deps.py) 패턴을 개별 라우터가 필요할 때 그대로 쓴다."""
+    전수감사(agent-platform-12, docs/FULL_AUDIT_2026-09-02.md §2-B) 발견 반영 —
+    예전에는 `mfa_verified = user.mfa_enabled`로, "계정에 MFA가 켜져 있다"(계정
+    설정)와 "이 세션이 최근 실제로 TOTP를 통과했다"(세션 사실)를 구분하지
+    못했다. `auth_service.py`의 `mfa_verified_at`(TOTP 통과 시각, 마이그레이션
+    cdd905e63ffe)을 기준으로 `MFA_STEP_UP_WINDOW` 안에 있을 때만 True다 —
+    로그인 후 오래 켜둔 세션은 다시 step-up하지 않는 한 "MFA 검증됨"으로
+    보지 않는다. mfa_enabled=False인 계정은 여전히 항상 False(애초에 검증할
+    대상이 없다)."""
+    mfa_verified = (
+        user.mfa_enabled
+        and user.mfa_verified_at is not None
+        and (datetime.now(timezone.utc) - user.mfa_verified_at) <= MFA_STEP_UP_WINDOW
+    )
     return TenantContext(
         tenant_id=user.user_id,
         subject_id=user.user_id,
         role="OWNER",
-        mfa_verified=user.mfa_enabled,
+        mfa_verified=mfa_verified,
     )

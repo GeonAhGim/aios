@@ -135,6 +135,19 @@ async def test_mfa_enabled_login_succeeds_with_verifying_callback(pool):
 
     user = await auth_with_totp.authenticate(email, STRONG_PASSWORD, totp_code="123456")
     assert user.email == email
+    # 전수감사 발견 회귀 — mfa_verified_at이 실제로 이 로그인 시각에 찍혀야
+    # foundation_deps.get_tenant_context()의 step-up 신선도 계산이 의미가 있다.
+    assert user.mfa_verified_at is not None
+
+
+async def test_password_only_login_does_not_set_mfa_verified_at(pool, auth):
+    """mfa_enabled=False인 계정은 TOTP를 아예 검증하지 않으므로 mfa_verified_at도
+    계속 비어있어야 한다 — "로그인했다"와 "MFA를 통과했다"를 혼동하면 안 된다."""
+    email = _unique_email()
+    await auth.signup(email, STRONG_PASSWORD)
+
+    user = await auth.authenticate(email, STRONG_PASSWORD)
+    assert user.mfa_verified_at is None
 
 
 async def test_nonexistent_account_timing_matches_wrong_password_timing(auth):

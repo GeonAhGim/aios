@@ -69,6 +69,7 @@ class User(BaseModel):
     email: str
     display_name: str | None
     mfa_enabled: bool
+    mfa_verified_at: datetime | None
     status: str
     is_verifier: bool
     is_platform_admin: bool
@@ -92,6 +93,7 @@ def _row_to_user(row: asyncpg.Record) -> User:
         email=row["email"],
         display_name=row["display_name"],
         mfa_enabled=row["mfa_enabled"],
+        mfa_verified_at=row["mfa_verified_at"],
         status=row["status"],
         is_verifier=row["is_verifier"],
         is_platform_admin=row["is_platform_admin"],
@@ -168,6 +170,7 @@ class AuthService:
                 )
                 raise AuthError(_GENERIC_AUTH_ERROR) from None
 
+            totp_verified_now = False
             if row["mfa_enabled"]:
                 totp_ok = (
                     totp_code is not None
@@ -179,23 +182,32 @@ class AuthService:
                         conn, row["user_id"], row["failed_login_attempts"]
                     )
                     raise AuthError(_GENERIC_AUTH_ERROR)
+                totp_verified_now = True
 
             cancels_deletion = row["status"] == "PENDING_DELETION"
             if cancels_deletion:
                 await conn.execute(
                     "UPDATE users SET failed_login_attempts = 0, locked_until = NULL, "
-                    "last_login_at = now(), status = 'ACTIVE', deletion_requested_at = NULL "
+                    "last_login_at = now(), status = 'ACTIVE', deletion_requested_at = NULL, "
+                    "mfa_verified_at = CASE WHEN $2 THEN now() ELSE mfa_verified_at END "
                     "WHERE user_id = $1",
                     row["user_id"],
+                    totp_verified_now,
                 )
             else:
                 await conn.execute(
                     "UPDATE users SET failed_login_attempts = 0, locked_until = NULL, "
-                    "last_login_at = now() WHERE user_id = $1",
+                    "last_login_at = now(), "
+                    "mfa_verified_at = CASE WHEN $2 THEN now() ELSE mfa_verified_at END "
+                    "WHERE user_id = $1",
                     row["user_id"],
+                    totp_verified_now,
                 )
         final_status = "ACTIVE" if cancels_deletion else row["status"]
-        return _row_to_user({**dict(row), "status": final_status})
+        final_mfa_verified_at = now if totp_verified_now else row["mfa_verified_at"]
+        return _row_to_user(
+            {**dict(row), "status": final_status, "mfa_verified_at": final_mfa_verified_at}
+        )
 
     def issue_token(self, user: User) -> str:
         payload = {
