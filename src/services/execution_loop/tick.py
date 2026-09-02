@@ -29,6 +29,7 @@ from src.core.risk.engine import RiskEngine
 from src.core.strategy.engine import StrategyEngine
 from src.data.models.strategy_fsm import FSMState, FSMStrategyConfig
 from src.exchanges.common.adapter import ExchangeAdapter
+from src.services.condition_compiler import ORDER_FILLED
 from src.services.execution_loop.account_state import assemble_account_state
 from src.services.execution_loop.equity_tracker import ExecutionEquityTracker
 from src.services.execution_loop.market_state import build_market_state
@@ -40,6 +41,9 @@ logger = logging.getLogger(__name__)
 
 _PENDING_STATES = (FSMState.BUY_ORDER_PENDING, FSMState.SELL_ORDER_PENDING, FSMState.STOP_LOSS)
 _FINAL_ORDER_STATUSES = frozenset({"FILLED", "REJECTED", "CANCELLED", "EXPIRED", "FAILED"})
+# PM 배정(agent-platform-12, 2026-09-02) — 체결 없이 끝난 종결 상태. FILLED는
+# 별도 분기(_handle_pending_fill_check 참조)라 여기 포함하지 않는다.
+_FAILURE_TERMINAL_STATUSES = frozenset({"REJECTED", "CANCELLED", "EXPIRED", "FAILED"})
 
 
 async def _load_execution_context(
@@ -96,6 +100,17 @@ async def _make_fsm_state_writer(pool: asyncpg.Pool) -> FsmStateWriter:
     return writer
 
 
+def _previous_fsm_state(fsm_config: FSMStrategyConfig, pending_state: FSMState) -> FSMState:
+    """`pending_state`로 들어오는 신호평가 전이(ORDER_FILLED가 아닌 것)의
+    from_state를 찾는다 — 주문이 체결 없이 종결됐을 때 되돌아갈 상태.
+    컴파일러가 만드는 고정 FSM 모양(IDLE→BUY_ORDER_PENDING, HOLDING→
+    SELL_ORDER_PENDING/STOP_LOSS)에서는 항상 정확히 하나 존재한다."""
+    for transition in fsm_config.transitions:
+        if transition.to_state == pending_state and transition.condition != ORDER_FILLED:
+            return transition.from_state
+    raise ValueError(f"{pending_state}로 들어오는 전이가 FSM에 없습니다 — FSM 정의 오류")
+
+
 async def _handle_pending_fill_check(
     pool: asyncpg.Pool,
     adapter: ExchangeAdapter,
@@ -113,9 +128,28 @@ async def _handle_pending_fill_check(
             "FROM orders WHERE execution_id = $1 ORDER BY created_at DESC LIMIT 1",
             execution_id,
         )
-    is_final = order is not None and order["status"] in _FINAL_ORDER_STATUSES
-    if order is None or is_final or order["exchange_order_id"] is None:
+    if order is None or order["exchange_order_id"] is None:
         return
+
+    if order["status"] in _FAILURE_TERMINAL_STATUSES:
+        # PM 배정(agent-platform-12, 2026-09-02) — 이전엔 이 경우 아무것도
+        # 안 하고 return해, fsm_state가 PENDING에 영원히 갇혀 이후 어떤
+        # 신호도 다시 평가되지 않았다(cancel.py에도 이 되돌림 로직이
+        # 없음). 신호평가로 이 PENDING에 들어왔던 이전 상태로 되돌린다.
+        previous_state = _previous_fsm_state(fsm_config, pending_state)
+        writer = await _make_fsm_state_writer(pool)
+        try:
+            await writer(execution_id, pending_state, previous_state)
+        except ConcurrencyConflictError:
+            logger.info(
+                "_handle_pending_fill_check(execution_id=%s): fsm_state 복귀 중 "
+                "동시성 충돌 — 다음 tick에서 재시도됩니다.",
+                execution_id,
+            )
+        return
+
+    if order["status"] in _FINAL_ORDER_STATUSES:
+        return  # FILLED 등 — 이미 이전 틱에서 처리됐어야 정상(방어적 no-op)
 
     reconfirmed = await adapter.get_order(order["exchange_order_id"])
     if reconfirmed.status.value != "FILLED":

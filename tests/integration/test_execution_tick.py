@@ -346,3 +346,48 @@ async def test_concurrent_tick_race_only_submits_one_order(pool):
             "SELECT fsm_state FROM strategy_executions WHERE id = $1", execution_id
         )
     assert fsm_state == "BUY_ORDER_PENDING"  # "다른 tick"이 쓴 값 그대로 — 이 tick이 덮어쓰지 않음
+
+
+async def test_cancelled_order_reverts_fsm_state_instead_of_getting_stuck(pool):
+    """PM 배정(agent-platform-12, 2026-09-02, 레드팀 #39) 회귀 테스트 —
+    이전엔 PENDING 상태에서 마지막 주문이 체결 없이 종결(CANCELLED 등)되면
+    fsm_state가 영원히 PENDING에 갇혀 이후 어떤 신호도 재평가되지 않았다.
+    지금은 신호평가로 그 PENDING에 들어오기 전 상태(IDLE)로 되돌아가야
+    한다."""
+    user_id = await create_test_user(pool)
+    execution_id = await _create_execution(pool, user_id, entry_threshold=100.0)
+    async with pool.acquire() as conn:
+        execution = await conn.fetchrow(
+            "SELECT strategy_id, strategy_version FROM strategy_executions WHERE id = $1",
+            execution_id,
+        )
+        await conn.execute(
+            "UPDATE strategy_executions SET fsm_state = 'BUY_ORDER_PENDING' WHERE id = $1",
+            execution_id,
+        )
+        await conn.execute(
+            """
+            INSERT INTO orders (
+                order_id, user_id, client_order_id, exchange_order_id, strategy_id,
+                strategy_version, execution_id, symbol, exchange, side, order_type,
+                quantity, status, filled_quantity, is_liquidation, asset_class
+            ) VALUES (
+                gen_random_uuid(), $1, $2, 'ex-cancelled-1', $3, $4,
+                $5, 'BTC/USDT', 'bitget', 'BUY', 'MARKET', 0.01, 'CANCELLED', 0, false, 'CRYPTO'
+            )
+            """,
+            user_id,
+            f"cancelled-{uuid.uuid4().hex}",
+            execution["strategy_id"],
+            execution["strategy_version"],
+            execution_id,
+        )
+
+    adapter = FakeExchangeAdapter(closes=[Decimal("50")] * 30)
+    await run_execution_tick(pool, adapter, execution_id, **_engines())
+
+    async with pool.acquire() as conn:
+        fsm_state = await conn.fetchval(
+            "SELECT fsm_state FROM strategy_executions WHERE id = $1", execution_id
+        )
+    assert fsm_state == "IDLE"
