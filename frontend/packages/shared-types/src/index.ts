@@ -16,3 +16,4 @@ export * from "./fieldErrors";
 export * from "./reasonCodes";
 export * from "./retryable";
 export * from "./idempotencyFailure";
+export * from "./accountLockout";

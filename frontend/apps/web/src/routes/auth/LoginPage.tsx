@@ -1,7 +1,8 @@
 import { useLogin } from "@aios/shared-hooks";
 import { ApiError } from "@aios/api-client";
+import { deriveLockout } from "@aios/shared-types";
 import { Button, Field, Input } from "@aios/ui-web";
-import { useState, type FormEvent } from "react";
+import { useEffect, useState, type FormEvent } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { ErrorMessage } from "../../components/ErrorMessage";
 import { AuthLayout } from "./AuthLayout";
@@ -19,18 +20,31 @@ export function LoginPage() {
   const [password, setPassword] = useState("");
   const [totpCode, setTotpCode] = useState("");
   const [error, setError] = useState<ApiError | Error | null>(null);
+  // task-387: PLT-22 AUTH_ACCOUNT_LOCKED(423) — 0보다 크면 잠금 상태다. 매초 감소하고
+  // 0이 되면 자동 해제(재제출 가능)된다. deriveLockout이 순수 계산만 하고, 카운트다운
+  // 자체는 이 화면의 관심사(잠금 UI는 화면마다 다를 수 있음)다.
+  const [lockoutRemainingSec, setLockoutRemainingSec] = useState(0);
   const login = useLogin();
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
+  const locked = lockoutRemainingSec > 0;
+
+  useEffect(() => {
+    if (lockoutRemainingSec <= 0) return;
+    const timer = setTimeout(() => setLockoutRemainingSec((sec) => Math.max(0, sec - 1)), 1000);
+    return () => clearTimeout(timer);
+  }, [lockoutRemainingSec]);
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
+    if (locked) return;
     setError(null);
     try {
       await login.mutateAsync({ email, password, totpCode: totpCode || undefined });
       navigate(sanitizeNextPath(searchParams.get("next")));
     } catch (err) {
       setError(err instanceof Error ? err : new Error("로그인에 실패했습니다."));
+      setLockoutRemainingSec(deriveLockout(err).retryAfterSec);
     }
   }
 
@@ -44,6 +58,7 @@ export function LoginPage() {
             required
             autoComplete="email"
             value={email}
+            disabled={locked}
             onChange={(e) => setEmail(e.target.value)}
           />
         </Field>
@@ -54,6 +69,7 @@ export function LoginPage() {
             required
             autoComplete="current-password"
             value={password}
+            disabled={locked}
             onChange={(e) => setPassword(e.target.value)}
           />
         </Field>
@@ -63,11 +79,23 @@ export function LoginPage() {
             type="text"
             inputMode="numeric"
             value={totpCode}
+            disabled={locked}
             onChange={(e) => setTotpCode(e.target.value)}
           />
         </Field>
-        {error && <ErrorMessage traceId={error instanceof ApiError ? error.traceId : null} />}
-        <Button type="submit" loading={login.isPending} className="w-full">
+        {error && (
+          <ErrorMessage
+            errorCode={error instanceof ApiError ? error.errorCode : null}
+            message={error.message}
+            traceId={error instanceof ApiError ? error.traceId : null}
+          />
+        )}
+        {locked && (
+          <p role="status" className="text-sm text-fg-muted">
+            {lockoutRemainingSec}초 후 다시 시도할 수 있습니다.
+          </p>
+        )}
+        <Button type="submit" loading={login.isPending} disabled={locked} className="w-full">
           로그인
         </Button>
         <p className="text-center text-sm text-fg-muted">

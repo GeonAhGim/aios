@@ -1,7 +1,8 @@
 import "@testing-library/jest-dom/vitest";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
+import { ApiError } from "@aios/api-client";
 import { LoginPage } from "./LoginPage";
 
 const mutateAsync = vi.fn();
@@ -62,5 +63,91 @@ describe("LoginPage next 복귀", () => {
     submitLoginForm();
 
     await waitFor(() => expect(screen.getByText("대시보드 페이지")).toBeInTheDocument());
+  });
+});
+
+// task-387: PLT-22 AUTH_ACCOUNT_LOCKED(423) — 잠금 동안 입력·제출을 막고 남은 초를
+// 보여주다가 0이 되면 자동으로 해제한다.
+describe("LoginPage 계정 잠금(AUTH_ACCOUNT_LOCKED)", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("423 + retry_after_seconds가 있으면 잠기고 정확한 초를 보여준다", async () => {
+    vi.useFakeTimers();
+    mutateAsync.mockRejectedValue(new ApiError(423, "잠김", undefined, "AUTH_ACCOUNT_LOCKED", 45));
+    renderAt("/login");
+
+    await act(async () => submitLoginForm());
+
+    expect(screen.getByText("45초 후 다시 시도할 수 있습니다.")).toBeInTheDocument();
+    expect(screen.getByLabelText("이메일")).toBeDisabled();
+    expect(screen.getByLabelText("비밀번호")).toBeDisabled();
+    expect(screen.getByRole("button", { name: "로그인" })).toBeDisabled();
+  });
+
+  it("retry_after_seconds가 없으면 기본 60초로 잠근다", async () => {
+    vi.useFakeTimers();
+    mutateAsync.mockRejectedValue(new ApiError(423, "잠김", undefined, "AUTH_ACCOUNT_LOCKED"));
+    renderAt("/login");
+
+    await act(async () => submitLoginForm());
+
+    expect(screen.getByText("60초 후 다시 시도할 수 있습니다.")).toBeInTheDocument();
+  });
+
+  it("카운트다운이 0이 되면 자동으로 해제되어 재제출할 수 있다", async () => {
+    vi.useFakeTimers();
+    mutateAsync.mockRejectedValueOnce(new ApiError(423, "잠김", undefined, "AUTH_ACCOUNT_LOCKED", 2));
+    renderAt("/login");
+
+    await act(async () => submitLoginForm());
+    expect(screen.getByRole("button", { name: "로그인" })).toBeDisabled();
+
+    await act(async () => vi.advanceTimersByTime(1000));
+    expect(screen.getByText("1초 후 다시 시도할 수 있습니다.")).toBeInTheDocument();
+
+    await act(async () => vi.advanceTimersByTime(1000));
+    expect(screen.queryByText(/초 후 다시 시도할 수 있습니다\./)).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "로그인" })).toBeEnabled();
+    expect(screen.getByLabelText("이메일")).toBeEnabled();
+
+    vi.useRealTimers();
+    mutateAsync.mockResolvedValueOnce({ accessToken: "t-4" });
+    submitLoginForm();
+    await waitFor(() => expect(screen.getByText("대시보드 페이지")).toBeInTheDocument());
+  });
+
+  it("401 등 잠금 외 에러는 잠그지 않는다", async () => {
+    mutateAsync.mockRejectedValue(
+      new ApiError(401, "이메일 또는 비밀번호가 올바르지 않습니다.", undefined, "AUTH_INVALID_CREDENTIALS"),
+    );
+    renderAt("/login");
+
+    submitLoginForm();
+
+    await waitFor(() =>
+      expect(screen.getByText("이메일 또는 비밀번호가 올바르지 않습니다.")).toBeInTheDocument(),
+    );
+    expect(screen.queryByText(/초 후 다시 시도할 수 있습니다\./)).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "로그인" })).toBeEnabled();
+  });
+
+  it("unmount 시 카운트다운 타이머를 정리한다", async () => {
+    vi.useFakeTimers();
+    mutateAsync.mockRejectedValue(new ApiError(423, "잠김", undefined, "AUTH_ACCOUNT_LOCKED", 30));
+    const { unmount } = render(
+      <MemoryRouter initialEntries={["/login"]}>
+        <Routes>
+          <Route path="/login" element={<LoginPage />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+
+    await act(async () => submitLoginForm());
+    expect(vi.getTimerCount()).toBeGreaterThan(0);
+
+    unmount();
+    expect(vi.getTimerCount()).toBe(0);
   });
 });
