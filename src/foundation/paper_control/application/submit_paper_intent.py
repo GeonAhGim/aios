@@ -31,6 +31,14 @@ class FenceSupersededError(Exception):
     fence를 이미 올렸다). 늦은 주문 제출이 아니라 no-op이다."""
 
 
+class ProviderUnavailableError(Exception):
+    """PAP-007 "provider timeout produces DEGRADED/retry policy and never
+    switches modes" — paper adapter 호출이 실패하면(시뮬레이션이라도 timeout/
+    거부 가능) RUNNING을 DEGRADED로 내리고, 원문 adapter 예외는 노출하지
+    않는다(72번 §4 에러 taxonomy와 동일 원칙). "모드를 절대 바꾸지 않는다"는
+    이 예외가 mode=PAPER를 그대로 유지한 채 상태만 옮긴다는 뜻이다."""
+
+
 async def submit_paper_intent(
     repo: PaperControlRepository,
     adapter: PaperExecutionAdapter,
@@ -56,7 +64,23 @@ async def submit_paper_intent(
     context = PaperExecutionContext(
         deployment_id=str(deployment_id), provenance=deployment.provenance
     )
-    ack = await adapter.submit_paper_intent(context, sequence)
+    try:
+        ack = await adapter.submit_paper_intent(context, sequence)
+    except Exception as exc:
+        # PAP-007 — adapter 호출 실패는 fence 문제가 아니라 provider 자체의
+        # 문제다. RUNNING이 아니게 된 사이 다른 요청이 먼저 상태를 바꿨을 수도
+        # 있으니 조건부로만 내린다 — 실패해도(이미 DEGRADED/PAUSED 등) 무시하고
+        # 원래 예외를 그대로 올린다(105번 §2.2, 상태 전이 실패가 "더 급한
+        # 원인"을 가리는 이차 예외가 되지 않게).
+        try:
+            await repo.transition_deployment_state(
+                deployment_id,
+                expected_state=DeploymentState.RUNNING.value,
+                new_state=DeploymentState.DEGRADED.value,
+            )
+        except Exception:  # noqa: BLE001 — 위 주석대로 원래 예외를 가리지 않는다
+            pass
+        raise ProviderUnavailableError("DEPENDENCY_PAPER_PROVIDER_UNAVAILABLE") from exc
 
     # "immediately before adapter call" 재확인 — adapter 호출 자체가
     # 네트워크 왕복이라 그 사이 pause/stop이 커밋됐을 수 있다.

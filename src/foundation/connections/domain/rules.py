@@ -5,6 +5,8 @@ Spec: AIOSproject 74_connected_asset_l3_build_and_operational_specification_v1.0
 from __future__ import annotations
 
 import hashlib
+from datetime import datetime
+from enum import Enum
 
 from src.foundation.connections.domain.models import CapabilityScope, ConnectionState
 
@@ -78,3 +80,32 @@ def require_transition_allowed(current: ConnectionState, target: ConnectionState
         raise InvalidConnectionTransitionError(
             f"{current.value} -> {target.value} 전이는 허용되지 않습니다."
         )
+
+
+class ProviderResponseClassification(str, Enum):
+    """CON-006 "malformed/stale/duplicate provider response is classified
+    and does not overwrite history" — 이 세 판정 중 FRESH만 실제로 저장
+    대상이다."""
+
+    FRESH = "FRESH"
+    STALE = "STALE"
+    FUTURE_DATED = "FUTURE_DATED"
+
+
+def classify_provider_response(
+    *,
+    provider_as_of: datetime,
+    latest_known_as_of: datetime | None,
+    now: datetime,
+) -> ProviderResponseClassification:
+    """provider가 미래 시각을 보고하면(시계 오류·변조) FUTURE_DATED —
+    저장 자체를 거부한다(76번 문서군이 공유하는 "INTEGRITY_FUTURE_DATA"
+    원칙과 동일). 이미 알고 있는 것보다 과거이거나 같은 시각이면 STALE —
+    지연 도착/재전송된 오래된 응답이라 "최신"을 덮어쓰지 않는다(순서가
+    뒤바뀐 응답이 `captured_at`만 보고 최신인 척하는 걸 막는다). 그 외엔
+    FRESH."""
+    if provider_as_of > now:
+        return ProviderResponseClassification.FUTURE_DATED
+    if latest_known_as_of is not None and provider_as_of <= latest_known_as_of:
+        return ProviderResponseClassification.STALE
+    return ProviderResponseClassification.FRESH

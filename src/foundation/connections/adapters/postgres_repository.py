@@ -209,15 +209,32 @@ class PostgresConnectionRepository:
                     "종료됐습니다(동시 처리 충돌) — 스냅샷을 저장하지 않습니다."
                 )
 
+            # CON-006 방어의 마지막 층 — application 계층의 classify_provider_
+            # response()는 이 트랜잭션 밖에서 latest_snapshot을 조회하므로, 두
+            # sync가 동시에 "이 provider_as_of는 처음 본다"고 판단하고 여기까지
+            # 올 수 있다. UNIQUE(connection_id, provider_as_of, source_evidence_ref)
+            # 위반을 에러로 올리지 않고 ON CONFLICT DO NOTHING + 기존 행 재조회로
+            # 흡수한다 — "이미 그 정확한 스냅샷이 있다"는 실패가 아니라 중복
+            # 응답의 정상적인 결과다.
             snapshot_row = await conn.fetchrow(
                 "INSERT INTO account_snapshot (connection_id, provider_as_of, freshness, "
-                " currency, source_evidence_ref) VALUES ($1, $2, $3, $4, $5) RETURNING *",
+                " currency, source_evidence_ref) VALUES ($1, $2, $3, $4, $5) "
+                "ON CONFLICT (connection_id, provider_as_of, source_evidence_ref) DO NOTHING "
+                "RETURNING *",
                 snapshot.connection_id,
                 snapshot.provider_as_of,
                 snapshot.freshness,
                 snapshot.currency,
                 snapshot.source_evidence_ref,
             )
+            if snapshot_row is None:
+                snapshot_row = await conn.fetchrow(
+                    "SELECT * FROM account_snapshot WHERE connection_id = $1 "
+                    "AND provider_as_of = $2 AND source_evidence_ref = $3",
+                    snapshot.connection_id,
+                    snapshot.provider_as_of,
+                    snapshot.source_evidence_ref,
+                )
             await conn.execute(
                 "INSERT INTO connection_health (connection_id, state, error_code, "
                 " retry_after, provider_trace_ref) VALUES ($1, $2, $3, $4, $5)",

@@ -3,7 +3,7 @@ provider/real infra 없이 재현 가능한 범위."""
 from __future__ import annotations
 
 import asyncio
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import asyncpg
@@ -29,6 +29,7 @@ from src.foundation.connections.application.revoke_connection import (
 from src.foundation.connections.application.sync_snapshot import (
     ConnectionNotSyncableError,
     ConnectionRevokedDuringSyncError,
+    MalformedProviderResponseError,
     ProviderUnavailableError,
     sync_snapshot,
 )
@@ -328,3 +329,79 @@ async def test_real_concurrent_revoke_and_sync_never_leaves_post_revocation_snap
     # 스냅샷이 전혀 없어야 한다. 둘 다 "REVOKED 이후 스냅샷"은 없다.
     if not snapshot_persisted:
         assert await repo.get_latest_snapshot(created.id) is None
+
+
+class _FixedAsOfProvider:
+    """CON-006 테스트 전용 — provider_as_of를 원하는 값으로 고정한다.
+    `FakeReadonlyAccountProvider`는 항상 `now()`를 반환해 stale/future 응답을
+    재현할 수 없다."""
+
+    def __init__(self, provider_as_of: datetime) -> None:
+        self._provider_as_of = provider_as_of
+
+    async def verify_readonly_scope(self, lease: SecretLease):  # noqa: ANN201
+        raise NotImplementedError
+
+    async def fetch_snapshot(self, account_ref: OpaqueRef, as_of: datetime) -> ProviderSnapshot:
+        return ProviderSnapshot(
+            provider_as_of=self._provider_as_of, currency="USD", raw_payload_ref="x"
+        )
+
+
+async def test_stale_provider_response_does_not_overwrite_latest_snapshot(
+    pool, repo, trust_repo
+):
+    """CON-006 — 지연 도착·재전송된 오래된 응답은 저장된 "최신"을 덮어쓰지
+    않는다. sync 자체는 실패로 취급하지 않는다(provider 호출은 정상적으로
+    성공했으므로) — 기존 최신 스냅샷을 그대로 반환한다."""
+    tenant_id = await _tenant(pool)
+    created = await _begin(pool, repo, trust_repo, tenant_id)
+    provider = FakeReadonlyAccountProvider()
+    await confirm_connection(
+        repo, provider, tenant_id=tenant_id, connection_id=created.id, encryption_key=ENCRYPTION_KEY
+    )
+
+    now = datetime.now(timezone.utc)
+    fresh_provider: ReadonlyAccountProvider = _FixedAsOfProvider(now)
+    first = await sync_snapshot(
+        repo, fresh_provider, tenant_id=tenant_id, connection_id=created.id
+    )
+
+    stale_provider: ReadonlyAccountProvider = _FixedAsOfProvider(now - timedelta(hours=1))
+    second = await sync_snapshot(
+        repo, stale_provider, tenant_id=tenant_id, connection_id=created.id
+    )
+
+    assert second.provider_as_of == first.provider_as_of  # 최신이 여전히 첫 번째 응답
+    latest = await repo.get_latest_snapshot(created.id)
+    assert latest is not None and latest.provider_as_of == first.provider_as_of
+
+    # DB에도 오래된 응답이 새 행으로 남지 않았어야 한다 — 이력을 덮어쓰지도,
+    # 오염시키지도 않는다.
+    async with pool.acquire() as conn:
+        count = await conn.fetchval(
+            "SELECT count(*) FROM account_snapshot WHERE connection_id = $1", created.id
+        )
+    assert count == 1
+
+
+async def test_future_dated_provider_response_is_rejected(pool, repo, trust_repo):
+    """CON-006 — provider가 미래 시각을 보고하면(시계 오류·변조 가능성)
+    저장을 거부하고 DEGRADED로 관측한다."""
+    tenant_id = await _tenant(pool)
+    created = await _begin(pool, repo, trust_repo, tenant_id)
+    provider = FakeReadonlyAccountProvider()
+    await confirm_connection(
+        repo, provider, tenant_id=tenant_id, connection_id=created.id, encryption_key=ENCRYPTION_KEY
+    )
+
+    future_provider: ReadonlyAccountProvider = _FixedAsOfProvider(
+        datetime.now(timezone.utc) + timedelta(days=1)
+    )
+    with pytest.raises(MalformedProviderResponseError):
+        await sync_snapshot(repo, future_provider, tenant_id=tenant_id, connection_id=created.id)
+
+    assert await repo.get_latest_snapshot(created.id) is None
+    health = await repo.get_latest_health(created.id)
+    assert health is not None
+    assert health.error_code == "INTEGRITY_FUTURE_DATA"

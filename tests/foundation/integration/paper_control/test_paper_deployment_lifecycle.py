@@ -25,12 +25,16 @@ from src.foundation.paper_control.application.request_deployment import (
     request_deployment,
 )
 from src.foundation.paper_control.application.start_deployment import (
+    InvalidDeploymentStateError as StartInvalidDeploymentStateError,
+)
+from src.foundation.paper_control.application.start_deployment import (
     RiskGateDeniedError,
     resume_deployment,
     start_deployment,
 )
 from src.foundation.paper_control.application.submit_paper_intent import (
     FenceSupersededError,
+    ProviderUnavailableError,
     submit_paper_intent,
 )
 from src.foundation.paper_control.domain.rules import InvalidProvenanceError
@@ -294,6 +298,60 @@ async def test_submit_paper_intent_rejects_superseded_fence(
     with pytest.raises(FenceSupersededError):
         await submit_paper_intent(
             repo, adapter, deployment_id=deployment.id, expected_fence_token=stale_fence, sequence=1
+        )
+
+
+async def test_provider_failure_during_submit_degrades_deployment_never_switches_mode(
+    pool, repo, risk_repo, mandate_repo, trust_repo, connection_repo
+):
+    """PAP-007 — provider timeout produces DEGRADED, never switches modes.
+    실패해도 deployment.provenance(mode=PAPER 근거)는 그대로다 — 상태만
+    RUNNING에서 DEGRADED로 내려간다."""
+    tenant_id = await _tenant_with_mandate(pool, mandate_repo, trust_repo)
+    deployment = await _request(repo, mandate_repo, tenant_id)
+    started = await start_deployment(
+        repo,
+        risk_repo,
+        mandate_repo,
+        connection_repo,
+        tenant_id=tenant_id,
+        actor_subject_id=tenant_id,
+        deployment_id=deployment.id,
+        idempotency_key="start-fail",
+    )
+
+    failing_adapter = FakePaperExecutionAdapter(fail_submit=True)
+    with pytest.raises(ProviderUnavailableError) as excinfo:
+        await submit_paper_intent(
+            repo,
+            failing_adapter,
+            deployment_id=deployment.id,
+            expected_fence_token=started.fence_token,
+            sequence=1,
+        )
+    assert "시뮬레이션" not in str(excinfo.value)  # 원문 adapter 예외를 노출하지 않는다
+
+    degraded = await repo.get_deployment(deployment.id)
+    assert degraded.state.value == "DEGRADED"
+    assert degraded.provenance.credential_class.value == "PAPER"  # 모드는 그대로
+
+    # PAP-008 "recovery needs fresh policy/risk/reconciliation decision; no
+    # auto-resume" — DEGRADED가 된 뒤 resume_deployment()(PAUSED 전용)로
+    # 우회 재개할 수 없다. 실제 명령 계층에서도(도메인 규칙 표뿐 아니라)
+    # 이 불변조건이 지켜지는지 확인한다. (pause_deployment.py와
+    # start_deployment.py는 서로 다른 InvalidDeploymentStateError 클래스를
+    # 독립적으로 정의한다 — resume_deployment는 start_deployment.py 소속이라
+    # 그쪽 클래스로 잡아야 한다.)
+    with pytest.raises(StartInvalidDeploymentStateError):
+        await resume_deployment(
+            repo,
+            risk_repo,
+            mandate_repo,
+            connection_repo,
+            tenant_id=tenant_id,
+            actor_subject_id=tenant_id,
+            deployment_id=deployment.id,
+            idempotency_key="resume-after-degraded",
         )
 
 
