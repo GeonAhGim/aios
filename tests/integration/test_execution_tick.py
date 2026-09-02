@@ -391,3 +391,62 @@ async def test_cancelled_order_reverts_fsm_state_instead_of_getting_stuck(pool):
             "SELECT fsm_state FROM strategy_executions WHERE id = $1", execution_id
         )
     assert fsm_state == "IDLE"
+
+
+async def test_equity_baseline_persists_and_survives_simulated_restart(pool):
+    """PM 배정 ③(agent-platform-12, 2026-09-02) 회귀 테스트 — 이전엔
+    일손실/MDD 기준점이 프로세스 메모리에만 있어 재시작하면 유실됐다.
+    "재시작"은 매번 새 ExecutionEquityTracker(빈 메모리)로 tick을 다시
+    부르는 것으로 시뮬레이션한다(_engines()가 매번 새 인스턴스를 만듦).
+    RiskEngine이 항상 거부하도록(자본배분 상한 초과, test_risk_rejection_
+    leaves_fsm_state_idle_for_retry와 동일 설정) fsm_state를 IDLE에
+    묶어둬 매 tick마다 assemble_account_state가 반복 호출되게 한다."""
+    user_id = await create_test_user(pool)
+    execution_id = await _create_execution(
+        pool, user_id, entry_threshold=100.0, allocated_capital=Decimal("5000")
+    )
+    first_tick_adapter = FakeExchangeAdapter(
+        closes=[Decimal("50")] * 30,
+        usdt_balance=AccountBalance(
+            exchange="bitget", asset="USDT", total=Decimal("10000"), available=Decimal("10000")
+        ),
+    )
+
+    # "프로세스 1" — 최초 tick, 빈 메모리 tracker로 기준점을 처음 만든다.
+    await run_execution_tick(pool, first_tick_adapter, execution_id, **_engines())
+
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            "SELECT equity_day_start_date, equity_day_start_value, equity_peak_value "
+            "FROM strategy_executions WHERE id = $1",
+            execution_id,
+        )
+    assert row["equity_day_start_date"] is not None
+    assert row["equity_day_start_value"] == Decimal("10000.0000000000")
+    assert row["equity_peak_value"] == Decimal("10000.0000000000")
+
+    # "프로세스 2"(재시작 시뮬레이션) — 새 tracker(빈 메모리)로 다시 tick,
+    # 이번엔 잔고가 바뀐 상태(9000)다. DB에서 기준점을 seed()로 복구해야
+    # "오늘 시작"이 지금 이 순간(9000)으로 리셋되지 않고 원래 10000을
+    # 그대로 이어받는다 — 그래야 오늘 이미 나던 손실이 재시작으로
+    # 사라지지 않는다.
+    second_tick_adapter = FakeExchangeAdapter(
+        closes=[Decimal("50")] * 30,
+        usdt_balance=AccountBalance(
+            exchange="bitget", asset="USDT", total=Decimal("9000"), available=Decimal("9000")
+        ),
+    )
+    await run_execution_tick(pool, second_tick_adapter, execution_id, **_engines())
+
+    async with pool.acquire() as conn:
+        row_after_restart = await conn.fetchrow(
+            "SELECT equity_day_start_date, equity_day_start_value, equity_peak_value "
+            "FROM strategy_executions WHERE id = $1",
+            execution_id,
+        )
+    # 시작 기준점은 그대로 10000 유지(재시작으로 리셋되지 않음).
+    assert row_after_restart["equity_day_start_date"] == row["equity_day_start_date"]
+    assert row_after_restart["equity_day_start_value"] == Decimal("10000.0000000000")
+    # peak은 10000 그대로(9000 < 10000이라 갱신 안 됨) — 이것도 기준점이
+    # 실제로 이어받아졌다는 방증.
+    assert row_after_restart["equity_peak_value"] == Decimal("10000.0000000000")

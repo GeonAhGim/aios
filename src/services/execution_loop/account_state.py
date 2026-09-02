@@ -16,7 +16,10 @@ import asyncpg
 from src.core.loader.risk_policy_loader import RiskPolicy
 from src.data.models.market_data import Candle
 from src.services.execution_loop.correlation import aggregate_correlated_exposure_pct
-from src.services.execution_loop.equity_tracker import ExecutionEquityTracker
+from src.services.execution_loop.equity_tracker import (
+    ExecutionEquityTracker,
+    record_and_persist_equity,
+)
 from src.services.execution_loop.position import compute_user_positions
 from src.services.execution_loop.var_estimator import estimate_var_pct
 from src.services.order_service.repository import count_recent_trades
@@ -38,12 +41,13 @@ async def assemble_account_state(
     policy: RiskPolicy,
 ) -> dict[str, Any]:
     # PM 배정 ③(agent-platform-12, 2026-09-02) — 일손실/MDD 기준점을
-    # strategy_executions에 write-through로 영속화(equity_tracker.py 참조).
-    # 마이그레이션(equity_day_start_date 등 컬럼) 적용 전까지는 아직 이
-    # 훅을 걸지 않는다 — 지금 걸면 그 컬럼이 없는 공유 dev/test DB에서
-    # 이 함수를 부르는 모든 tick이 즉시 실패한다. 마이그레이션 리비전이
-    # push된 뒤 이 줄을 record_and_persist_equity(...)로 교체한다.
-    daily_pnl_pct, drawdown_pct = equity_tracker.record(execution_id, total_equity)
+    # strategy_executions(equity_day_start_date/value, equity_peak_value —
+    # 마이그레이션 4747bb11f733)에 write-through로 영속화. 재시작 후에도
+    # seed()로 복구되므로 "재시작 직후엔 오늘 손실이 0으로 보임" 문제가
+    # 사라진다(equity_tracker.py 참조).
+    daily_pnl_pct, drawdown_pct = await record_and_persist_equity(
+        pool, equity_tracker, execution_id, total_equity
+    )
 
     var_pct = estimate_var_pct(
         candles, confidence=policy.var.confidence, horizon_days=policy.var.horizon_days
