@@ -1,15 +1,16 @@
 import { useEffect, useState } from "react";
-import { getApiErrorMessage, RATE_LIMIT_ERROR_CODE } from "@aios/shared-types";
+import { classifyRetry, getApiErrorMessage } from "@aios/shared-types";
 import { Alert, Button } from "@aios/ui-web";
 
 // ApiError(§3.3 ApiError 봉투)의 error_code를 사용자용 한국어 메시지로 바꿔
 // 보여주는 표시 전용 컴포넌트. 매핑 로직 자체는 shared-types/apiError.ts에
 // 있으므로 여기서는 UI 배치만 담당한다.
 //
-// spec §9 PLT-25: RATE_LIMIT_EXCEEDED이고 onRetry가 주어지면 retryAfterSec을
-// 초 단위로 카운트다운하고, 0이 되면(또는 애초에 값이 없으면) 재시도 버튼을
-// 활성화한다. 버튼 클릭 시 실제 재시도(GET 자동 재시도와 별개의 수동 재시도)는
-// 호출부 책임 — 이 컴포넌트는 표시만 한다.
+// spec §3.3 재시도 열: classifyRetry(kind)가 "none"이 아닐 때만(refetch/backoff)
+// 재시도 버튼을 보여준다. "backoff"(예: RATE_LIMIT_EXCEEDED)는 retryAfterSec을
+// 초 단위로 카운트다운하고, 0이 되면(또는 애초에 값이 없으면) 버튼을 활성화한다.
+// "refetch"(STATE_CONCURRENCY_CONFLICT)는 대기 없이 즉시 활성화된다. 버튼 클릭 시
+// 실제 재시도는 호출부 책임(useRetryableAction 등) — 이 컴포넌트는 표시만 한다.
 interface ErrorMessageProps {
   errorCode?: string | null;
   message?: string | null;
@@ -31,8 +32,10 @@ export function ErrorMessage({
   fieldErrors,
 }: ErrorMessageProps) {
   const text = getApiErrorMessage(errorCode, message);
-  const isRateLimited = errorCode === RATE_LIMIT_ERROR_CODE;
   const hasMappedFieldErrors = Boolean(fieldErrors && Object.keys(fieldErrors).length > 0);
+  const classification = classifyRetry({ errorCode, retryAfterSec });
+  const canRetry = classification.kind !== "none";
+  const isBackoff = classification.kind === "backoff";
   const [remainingSec, setRemainingSec] = useState(
     retryAfterSec && retryAfterSec > 0 ? retryAfterSec : 0,
   );
@@ -42,10 +45,10 @@ export function ErrorMessage({
   }, [retryAfterSec, errorCode]);
 
   useEffect(() => {
-    if (!isRateLimited || remainingSec <= 0) return;
+    if (!isBackoff || remainingSec <= 0) return;
     const timer = setTimeout(() => setRemainingSec((prev) => Math.max(0, prev - 1)), 1000);
     return () => clearTimeout(timer);
-  }, [isRateLimited, remainingSec]);
+  }, [isBackoff, remainingSec]);
 
   if (hasMappedFieldErrors) return null;
 
@@ -53,7 +56,7 @@ export function ErrorMessage({
     <Alert tone="danger">
       <p>{text}</p>
       {traceId && <p className="mt-1 text-xs text-fg-muted">지원코드: {traceId}</p>}
-      {isRateLimited && onRetry && (
+      {canRetry && onRetry && (
         <div className="mt-2 flex items-center gap-2">
           {remainingSec > 0 && (
             <span className="text-xs text-fg-muted">{remainingSec}초 후 재시도 가능</span>
