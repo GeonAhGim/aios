@@ -12,7 +12,7 @@ from __future__ import annotations
 from collections.abc import Sequence
 from datetime import date
 from decimal import Decimal
-from typing import Protocol
+from typing import Protocol, runtime_checkable
 from uuid import UUID
 
 import asyncpg
@@ -20,6 +20,7 @@ import asyncpg
 from src.foundation.ledger.contracts.v1 import PayoutBatchView
 
 
+@runtime_checkable
 class PayoutRepository(Protocol):
     async def create_batch(
         self,

@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from datetime import datetime
 from decimal import Decimal
-from typing import Protocol
+from typing import Protocol, runtime_checkable
 from uuid import UUID
 
 import asyncpg
@@ -18,6 +18,7 @@ import asyncpg
 from src.foundation.ledger.contracts.v1 import HoldState, HoldView
 
 
+@runtime_checkable
 class HoldRepository(Protocol):
     async def create(
         self,

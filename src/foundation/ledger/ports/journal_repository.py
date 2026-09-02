@@ -11,13 +11,14 @@ LC-8b/task-320)은 모른다(71번 §4). 이 파일 자체는 I/O를 하지 않�
 """
 from __future__ import annotations
 
-from typing import Protocol
+from typing import Protocol, runtime_checkable
 
 import asyncpg
 
 from src.foundation.ledger.contracts.v1 import JournalEntryView, LedgerEvent, PostingLine
 
 
+@runtime_checkable
 class LedgerJournalRepository(Protocol):
     async def append(
         self,

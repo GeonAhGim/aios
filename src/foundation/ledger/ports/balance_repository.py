@@ -11,13 +11,14 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from decimal import Decimal
-from typing import Protocol
+from typing import Protocol, runtime_checkable
 
 import asyncpg
 
 from src.foundation.ledger.contracts.v1 import BalanceView
 
 
+@runtime_checkable
 class BalanceRepository(Protocol):
     async def get_for_update(
         self, conn: asyncpg.Connection, account_ids: Sequence[str]
