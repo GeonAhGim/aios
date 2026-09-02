@@ -20,3 +20,4 @@ export * from "./idempotencyFailure";
 export * from "./accountLockout";
 export * from "./notFound";
 export * from "./forbidden";
+export * from "./stateConflict";
