@@ -41,7 +41,19 @@ PLATFORM_HOUSE_USER_ID = UUID("00000000-0000-0000-0000-000000000001")
 users/user_wallets 행을 시드한다."""
 
 _WALLET_TX_TYPES = frozenset(
-    {"TOPUP", "PURCHASE_DEBIT", "SALE_CREDIT", "COMMISSION_CREDIT", "REFUND"}
+    {
+        "TOPUP",
+        "PURCHASE_DEBIT",
+        "SALE_CREDIT",
+        "COMMISSION_CREDIT",
+        "REFUND",
+        # 레드팀 #41 — 환불 시 판매자 정산·플랫폼 커미션 회수. 이전에는 구매자에게
+        # price_paid를 적립만 하고 판매자/하우스에서 회수하지 않아 환불마다
+        # 시스템 총잔액이 price_paid만큼 늘어났다(돈이 생성됨).
+        "REFUND_SELLER_CLAWBACK",
+        "REFUND_COMMISSION_CLAWBACK",
+        "REFUND_SHORTFALL_COVER",
+    }
 )
 
 

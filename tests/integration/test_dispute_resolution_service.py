@@ -17,6 +17,7 @@ from src.services.dispute_service import DisputeService
 from src.services.listing_service import ListingService
 from src.services.purchase_service import PurchaseService
 from src.services.verification_service import VerificationService
+from src.services.wallet_service import PLATFORM_HOUSE_USER_ID
 from tests.integration.conftest import create_test_user
 
 _PURCHASE_PRICE = Decimal("10")
@@ -283,3 +284,87 @@ async def test_refund_is_credited_only_once_across_disputes(service, pool):
         )
     assert second_status == "OPEN"
     assert refund_count == 1
+
+
+# --- 레드팀 #41 / L4 원장 명세 R1 — 환불은 총잔액을 보존한다 ---
+
+
+async def _set_wallet_balance(pool, user_id, amount) -> None:
+    async with pool.acquire() as conn:
+        await conn.execute(
+            "INSERT INTO user_wallets (user_id, balance) VALUES ($1, $2) "
+            "ON CONFLICT (user_id) DO UPDATE SET balance = EXCLUDED.balance",
+            user_id,
+            amount,
+        )
+
+
+async def _total(pool, *user_ids) -> Decimal:
+    return sum([await _wallet_balance(pool, u) for u in user_ids], Decimal("0"))
+
+
+async def test_refund_preserves_total_balance_across_buyer_seller_house(service, pool):
+    dispute, _, seller, buyer = await _open_dispute(pool)
+    admin = await create_test_user(pool)
+    house = PLATFORM_HOUSE_USER_ID
+    before = await _total(pool, buyer, seller, house)
+    seller_before = await _wallet_balance(pool, seller)
+
+    result = await service.resolve(dispute.id, admin, "DELISTED_AND_REFUND", "환불")
+
+    assert result.refund_amount == _PURCHASE_PRICE
+    assert await _wallet_balance(pool, buyer) == _PURCHASE_PRICE
+    assert await _wallet_balance(pool, seller) < seller_before
+    assert await _total(pool, buyer, seller, house) == before
+    async with pool.acquire() as conn:
+        rows = await conn.fetch(
+            "SELECT amount FROM wallet_transactions WHERE related_purchase_id = $1 "
+            "AND tx_type LIKE 'REFUND%'",
+            dispute.purchase_id,
+        )
+    assert sum((r["amount"] for r in rows), Decimal("0")) == Decimal("0")
+
+
+async def test_refund_shortfall_is_covered_by_house_when_seller_spent_payout(service, pool):
+    dispute, _, seller, buyer = await _open_dispute(pool)
+    admin = await create_test_user(pool)
+    house = PLATFORM_HOUSE_USER_ID
+    await _set_wallet_balance(pool, seller, Decimal("0"))  # 판매자가 정산금을 이미 소진
+    await _fund_wallet(pool, house, _PURCHASE_PRICE)
+    before = await _total(pool, buyer, seller, house)
+
+    await service.resolve(dispute.id, admin, "DELISTED_AND_REFUND", "환불")
+
+    assert await _wallet_balance(pool, buyer) == _PURCHASE_PRICE
+    assert await _wallet_balance(pool, seller) == Decimal("0")
+    assert await _total(pool, buyer, seller, house) == before
+    async with pool.acquire() as conn:
+        cover = await conn.fetchval(
+            "SELECT COUNT(*) FROM wallet_transactions WHERE related_purchase_id = $1 "
+            "AND tx_type = 'REFUND_SHORTFALL_COVER'",
+            dispute.purchase_id,
+        )
+    assert cover == 1
+
+
+async def test_refund_fails_closed_when_house_cannot_cover(service, pool):
+    dispute, _, seller, buyer = await _open_dispute(pool)
+    admin = await create_test_user(pool)
+    house = PLATFORM_HOUSE_USER_ID
+    house_before = await _wallet_balance(pool, house)
+    await _set_wallet_balance(pool, seller, Decimal("0"))
+    await _set_wallet_balance(pool, house, Decimal("0"))
+    try:
+        with pytest.raises(DisputeResolutionError, match="하우스"):
+            await service.resolve(dispute.id, admin, "DELISTED_AND_REFUND", "환불")
+
+        assert await _wallet_balance(pool, buyer) == Decimal("0")
+        async with pool.acquire() as conn:
+            status = await conn.fetchval("SELECT status FROM disputes WHERE id = $1", dispute.id)
+            refunded_at = await conn.fetchval(
+                "SELECT refunded_at FROM strategy_purchases WHERE id = $1", dispute.purchase_id
+            )
+        assert status == "OPEN"
+        assert refunded_at is None
+    finally:
+        await _set_wallet_balance(pool, house, house_before)

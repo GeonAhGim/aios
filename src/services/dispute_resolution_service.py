@@ -25,7 +25,12 @@ import asyncpg
 from pydantic import BaseModel
 
 from src.core.logging.audit_log import record_audit_log
-from src.services.wallet_service import credit
+from src.services.wallet_service import (
+    PLATFORM_HOUSE_USER_ID,
+    InsufficientBalanceError,
+    credit,
+    debit,
+)
 
 VALID_DECISIONS = ("NORMAL_RISK_REALIZATION", "DELISTED_AND_REFUND")
 
@@ -134,21 +139,23 @@ class DisputeResolutionService:
                 # 되돌린다.
                 purchase = await conn.fetchrow(
                     "UPDATE strategy_purchases SET refunded_at = now() "
-                    "WHERE id = $1 AND refunded_at IS NULL RETURNING price_paid",
+                    "WHERE id = $1 AND refunded_at IS NULL "
+                    "RETURNING price_paid, seller_payout_amount, platform_commission_amount",
                     detail.purchase_id,
                 )
                 if purchase is None:
                     raise DisputeResolutionError("이미 환불 처리된 구매 건입니다.")
                 price_paid = purchase["price_paid"]
                 if price_paid is not None:
-                    await credit(
+                    refund_amount = await _refund_with_clawback(
                         conn,
-                        detail.buyer_user_id,
-                        price_paid,
-                        "REFUND",
-                        related_purchase_id=detail.purchase_id,
+                        purchase_id=detail.purchase_id,
+                        buyer_user_id=detail.buyer_user_id,
+                        seller_user_id=detail.seller_user_id,
+                        price_paid=price_paid,
+                        seller_payout_amount=purchase["seller_payout_amount"],
+                        commission_amount=purchase["platform_commission_amount"],
                     )
-                    refund_amount = price_paid
 
             await record_audit_log(
                 conn,
@@ -172,3 +179,65 @@ class DisputeResolutionService:
             resolved_at=row["resolved_at"],
             refund_amount=refund_amount,
         )
+
+
+async def _refund_with_clawback(
+    conn: asyncpg.Connection,
+    *,
+    purchase_id: int,
+    buyer_user_id: UUID,
+    seller_user_id: UUID,
+    price_paid: Decimal,
+    seller_payout_amount: Decimal | None,
+    commission_amount: Decimal | None,
+) -> Decimal:
+    """레드팀 #41 / L4 원장 명세 R1 — 환불은 총잔액을 보존해야 한다.
+
+    구매 시 buyer −P, seller +S, house +C (P = S + C). 환불은 그 역:
+    buyer +P, seller −S, house −C. 판매자 잔액이 S에 못 미치면 부족분을
+    하우스가 대신 부담(REFUND_SHORTFALL_COVER)하고 원장에 남긴다.
+    하우스도 부족하면 fail-closed — 트랜잭션 전체(분쟁 RESOLVED 전이·
+    refunded_at 포함)가 되돌아가고 운영자가 하우스를 충전한 뒤 재시도한다.
+    돈이 생성되는 경로보다 환불이 잠시 막히는 편이 낫다.
+    """
+    seller_share = seller_payout_amount if seller_payout_amount is not None else price_paid
+    house_share = commission_amount if commission_amount is not None else Decimal("0")
+
+    await credit(conn, buyer_user_id, price_paid, "REFUND", related_purchase_id=purchase_id)
+
+    seller_balance = await conn.fetchval(
+        "SELECT balance FROM user_wallets WHERE user_id = $1 FOR UPDATE", seller_user_id
+    )
+    seller_take = min(seller_balance or Decimal("0"), seller_share)
+    shortfall = seller_share - seller_take
+    if seller_take > 0:
+        await debit(
+            conn,
+            seller_user_id,
+            seller_take,
+            "REFUND_SELLER_CLAWBACK",
+            related_purchase_id=purchase_id,
+        )
+    try:
+        if house_share > 0:
+            await debit(
+                conn,
+                PLATFORM_HOUSE_USER_ID,
+                house_share,
+                "REFUND_COMMISSION_CLAWBACK",
+                related_purchase_id=purchase_id,
+            )
+        if shortfall > 0:
+            await debit(
+                conn,
+                PLATFORM_HOUSE_USER_ID,
+                shortfall,
+                "REFUND_SHORTFALL_COVER",
+                related_purchase_id=purchase_id,
+            )
+    except InsufficientBalanceError as exc:
+        raise DisputeResolutionError(
+            "플랫폼 하우스 지갑 잔액이 부족해 환불을 완료할 수 없습니다 — "
+            "하우스 충전 후 다시 처리하세요."
+        ) from exc
+    return price_paid
