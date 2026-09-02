@@ -6,6 +6,8 @@
 """
 from __future__ import annotations
 
+import asyncio
+
 import pytest
 
 from src.core.safety.metrics_collector import ApiCallTracker
@@ -85,3 +87,33 @@ async def test_factory_wraps_base_factory_result(tracker):
     assert isinstance(wrapped, InstrumentedAdapter)
     assert await wrapped.get_ticker("ETH/USDT") == "ticker:ETH/USDT"
     assert tracker.error_rate_pct() == 0
+
+
+class _FakeAdapterWithSyncTime(_FakeAdapter):
+    def __init__(self) -> None:
+        super().__init__()
+        self.sync_calls = 0
+
+    async def sync_server_time(self) -> None:
+        self.sync_calls += 1
+
+
+async def test_factory_schedules_sync_server_time_when_adapter_supports_it(tracker):
+    fake = _FakeAdapterWithSyncTime()
+    factory = instrumented_adapter_factory(tracker, lambda *a, **kw: fake)
+
+    factory("bitget", "key", "secret", None, demo_mode=True)
+    await asyncio.sleep(0)  # let the scheduled task run
+
+    assert fake.sync_calls == 1
+
+
+async def test_factory_does_not_schedule_sync_server_time_when_adapter_lacks_it(tracker):
+    fake = _FakeAdapter()
+    factory = instrumented_adapter_factory(tracker, lambda *a, **kw: fake)
+
+    tasks_before = len(asyncio.all_tasks())
+    factory("bitget", "key", "secret", None, demo_mode=True)
+    await asyncio.sleep(0)
+
+    assert len(asyncio.all_tasks()) == tasks_before

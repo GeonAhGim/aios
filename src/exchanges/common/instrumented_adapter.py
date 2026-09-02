@@ -14,14 +14,27 @@ get_balance/place_order 등)만 성공/실패를 기록하고, `is_paper_trading
 `is_sandboxed` 같은 프로퍼티나 동기 메서드는 그대로 통과시킨다 —
 `require_paper_sandbox` 데코레이터(src/exchanges/common/live_guard.py)가
 이 값들을 그대로 읽어야 하므로 값 자체를 바꾸면 안 된다.
+
+세션30의 ab86e22(sync_server_time() opt-in 서버시간 동기화) 반영 —
+CredentialResolver.get_adapter()는 동기 `adapter_factory(...)` 호출이라
+여기서 await할 수 없다(credential_resolver.py는 이 배선을 위해 고치지
+않기로 함). 그래서 어댑터가 sync_server_time을 갖고 있으면 생성 직후
+`asyncio.ensure_future`로 백그라운드 실행만 예약하고, 실패는
+done-callback에서 경고 로그만 남긴다(어댑터 자체 sync_server_time()은
+이미 내부에서 예외를 삼키므로 대부분 이 콜백까지 오지 않음 — 향후
+다른 거래소 구현이 다르게 동작할 경우의 안전망).
 """
 from __future__ import annotations
 
+import asyncio
 import inspect
+import logging
 from typing import Any
 
 from src.core.safety.metrics_collector import ApiCallTracker
 from src.exchanges.common.adapter import ExchangeAdapter
+
+logger = logging.getLogger(__name__)
 
 
 class InstrumentedAdapter:
@@ -46,6 +59,14 @@ class InstrumentedAdapter:
         return wrapper
 
 
+def _warn_on_sync_server_time_failure(task: asyncio.Task[Any]) -> None:
+    if task.cancelled():
+        return
+    exc = task.exception()
+    if exc is not None:
+        logger.warning("sync_server_time() 백그라운드 호출 실패 — 오프셋 0 유지: %s", exc)
+
+
 def instrumented_adapter_factory(
     tracker: ApiCallTracker,
     base_factory: Any,
@@ -63,6 +84,11 @@ def instrumented_adapter_factory(
         demo_mode: bool = True,
     ) -> InstrumentedAdapter:
         real_adapter = base_factory(exchange, api_key, api_secret, extra, demo_mode=demo_mode)
-        return InstrumentedAdapter(real_adapter, tracker)
+        wrapped = InstrumentedAdapter(real_adapter, tracker)
+        sync_time = getattr(wrapped, "sync_server_time", None)
+        if sync_time is not None:
+            task = asyncio.ensure_future(sync_time())
+            task.add_done_callback(_warn_on_sync_server_time_failure)
+        return wrapped
 
     return factory

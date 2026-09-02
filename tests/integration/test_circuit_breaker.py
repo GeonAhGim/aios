@@ -18,6 +18,15 @@ from src.core.safety.circuit_breaker import (
     CircuitBreakerService,
     compute_level,
 )
+from src.core.safety.metrics_collector import ApiCallTracker, collect_circuit_breaker_metrics
+
+_LEVEL_SEVERITY = {
+    CircuitBreakerLevel.NORMAL: 0,
+    CircuitBreakerLevel.WARNING: 1,
+    CircuitBreakerLevel.RESTRICTED: 2,
+    CircuitBreakerLevel.HALTED: 3,
+    CircuitBreakerLevel.EMERGENCY: 4,
+}
 
 
 def _asyncpg_dsn() -> str:
@@ -119,6 +128,28 @@ async def test_worsening_during_reactivation_wait_cancels_request(pool, policy):
     assert worsened.reactivation_approval_id is None
     cancelled_request = await approval.get_request(pool, request_id)
     assert cancelled_request.status == "CANCELLED"
+
+
+async def test_wiring_high_tracker_error_rate_escalates_via_collected_metrics(pool, policy):
+    """main.py::_safety_reactivation_loop 실배선 검증 — ApiCallTracker에
+    쌓인 실패율이 collect_circuit_breaker_metrics()를 거쳐 evaluate()로
+    전달되면 실제로 격상되는지, 두 leaf(tracker/collector)가 아니라
+    이어붙인 전체 경로로 확인한다. api_error_rate_pct=30%는 restricted
+    임계(25%) 이상이라 order_reject_rate_pct/daily_loss_pct가 공유
+    dev/test DB의 다른 데이터로 얼마가 나오든(둘 다 그 자체로는 severity를
+    낮추지 못함 — compute_level은 최댓값 채택) 최소 RESTRICTED 이상이
+    보장된다."""
+    service = CircuitBreakerService(pool, policy)
+    tracker = ApiCallTracker()
+    for _ in range(7):
+        tracker.record_success()
+    for _ in range(3):
+        tracker.record_failure()
+
+    metrics = await collect_circuit_breaker_metrics(pool, tracker)
+    result = await service.evaluate(metrics)
+
+    assert _LEVEL_SEVERITY[result.level] >= _LEVEL_SEVERITY[CircuitBreakerLevel.RESTRICTED]
 
 
 async def test_escalation_from_halted_to_emergency_allowed_even_while_pending(pool, policy):

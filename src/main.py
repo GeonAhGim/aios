@@ -32,6 +32,9 @@ from src.core.logging.schema import configure_logging
 from src.core.notifications.gateway import NotificationGateway
 from src.core.safety.circuit_breaker import CircuitBreakerService
 from src.core.safety.heartbeat import DEFAULT_HEARTBEAT_PATH, write_heartbeat
+from src.core.safety.metrics_collector import ApiCallTracker, collect_circuit_breaker_metrics
+from src.exchanges.common.instrumented_adapter import instrumented_adapter_factory
+from src.exchanges.factory import build_adapter
 from src.services.alert_service import AlertService
 from src.services.credential_resolver import CredentialResolver
 from src.services.exchange_credential_service import ExchangeCredentialService
@@ -110,7 +113,15 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     credential_service = ExchangeCredentialService(
         pool, encryption_key=secrets.credential_encryption_key.get_secret_value()
     )
-    credential_resolver = CredentialResolver(credential_service)
+    # PM 배정 ⑤ 2단계 — CircuitBreakerMetrics의 api_error_rate_pct/
+    # api_disconnect_sec가 소비할 실제 어댑터 호출 성공/실패를 여기 한
+    # 곳(InstrumentedAdapter)에서만 계측한다. api_tracker는 이 프로세스
+    # 안에서 _safety_reactivation_loop와 공유된다.
+    api_tracker = ApiCallTracker()
+    credential_resolver = CredentialResolver(
+        credential_service,
+        adapter_factory=instrumented_adapter_factory(api_tracker, build_adapter),
+    )
 
     # FD-14(신설) — 가격/지표 알림 평가 루프. heartbeat_loop과 동일 패턴
     # (main.py가 유일한 백그라운드 스케줄러 지점) — 알림 하나 평가가
@@ -186,16 +197,19 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             "execution_loop: AIOS_EXECUTION_LOOP_ENABLED=0 — 실행 루프를 띄우지 않습니다."
         )
 
-    # FD-9.4b — Circuit Breaker 재가동 승인 반영. check_reactivation()도 호출자가
-    # 없어 승인이 나도 레벨이 영원히 내려오지 않았다. evaluate(metrics)는 지표
-    # 수집(API 오류율·데이터 지연·일손실)이 positions 기록·어댑터 계측에
-    # 의존하므로 그 leaf들이 끝난 뒤 같은 루프에 붙인다.
+    # FD-9.4b — Circuit Breaker 재가동 승인 반영 + 지표 기반 격상/완화 평가.
+    # check_reactivation()만으로는 승인 나간 재가동만 반영될 뿐, 실제
+    # 지표(API 오류율·주문 거부율·일손실)가 다시 악화되는 것을 잡지
+    # 못한다 — 같은 주기에 evaluate(metrics)를 먼저 돌려 최신 상태를
+    # 반영한 뒤 check_reactivation()으로 승인 결과까지 마저 반영한다.
     circuit_breaker = CircuitBreakerService(pool, policy.circuit_breaker, publish=event_bus.publish)
 
     async def _safety_reactivation_loop() -> None:
         while True:
             await asyncio.sleep(SAFETY_REACTIVATION_INTERVAL_SECONDS)
             try:
+                metrics = await collect_circuit_breaker_metrics(pool, api_tracker)
+                await circuit_breaker.evaluate(metrics)
                 await circuit_breaker.check_reactivation()
             except Exception:
                 logger.exception("safety_reactivation_loop: 이번 주기 실패 — 다음 주기에 재시도")
