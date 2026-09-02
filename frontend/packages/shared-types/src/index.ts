@@ -25,3 +25,4 @@ export * from "./badRequest";
 export * from "./tokenPair";
 export * from "./canonicalDigest";
 export * from "./membership";
+export * from "./secretRef";

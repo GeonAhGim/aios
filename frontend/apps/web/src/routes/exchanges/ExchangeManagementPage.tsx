@@ -5,6 +5,7 @@ import {
   useRevokeExchangeCredential,
 } from "@aios/shared-hooks";
 import { ApiError } from "@aios/api-client";
+import { redactSecret } from "@aios/shared-types";
 import {
   Badge,
   Button,
@@ -50,6 +51,8 @@ export function ExchangeManagementPage() {
       setApiSecret("");
       setApiPassphrase("");
     } catch (err) {
+      setApiSecret("");
+      setApiPassphrase("");
       setError(err instanceof ApiError ? err : new Error("등록에 실패했습니다."));
     }
   }
@@ -137,7 +140,12 @@ export function ExchangeManagementPage() {
               </Select>
             </Field>
             <Field label="API Key">
-              <Input type="text" required value={apiKey} onChange={(e) => setApiKey(e.target.value)} />
+              <Input
+                type="password"
+                required
+                value={apiKey}
+                onChange={(e) => setApiKey(e.target.value)}
+              />
             </Field>
             <Field label="API Secret">
               <Input
@@ -160,7 +168,7 @@ export function ExchangeManagementPage() {
             {error && (
               <ErrorMessage
                 errorCode={error instanceof ApiError ? error.errorCode : null}
-                message={error.message}
+                message={redactSecret(error.message)}
                 traceId={error instanceof ApiError ? error.traceId : null}
               />
             )}
