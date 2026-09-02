@@ -182,7 +182,8 @@ mypy strict 통과의 실질: `type: ignore` 178건 중 160건이 거래소 믹�
   실제 파일(`risk/engine.py`)과 다르다. CI에는 zone 검증이 없고 CODEOWNERS의
   `@{owner}`는 치환되지 않았다.
 - **DevEngine 스모크 아티팩트.** `src/core/utils/is_even.py`가 트레이딩 저장소
-  코어에 남아 있다(PR #2).
+  코어에 남아 있다(PR #2). → 2026-09-03 PM이 제거(테스트 포함). DevEngine DB의 PR #2
+  상태 정합화는 DevEngine 세션이 코드 경로(외부 머지 감지 → MERGED 전이)로 처리.
 - **리스팅 게이트 열림.** "3개월 Paper Trading 검증" 자격 검사가
   `_always_eligible`로 항상 True다(`src/api/marketplace_deps.py:22-26`). 거래소
   키 출금권한 검사도 경고 문자열만 반환한다.
