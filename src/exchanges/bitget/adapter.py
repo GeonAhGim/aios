@@ -11,11 +11,13 @@ Content-Type: application/json + locale. Demo 모드는 paptrading: 1 헤더
 """
 from __future__ import annotations
 
+import asyncio
 import base64
 import hashlib
 import hmac
 import json
 import time
+from collections.abc import Awaitable, Callable
 from decimal import Decimal
 from typing import Any
 
@@ -51,6 +53,11 @@ BASE_URL = "https://api.bitget.com"
 # 키 확보 후 라이브 검증하며 목록을 넓혀야 한다.
 _FATAL_ERROR_CODES = {"40012", "40037"}  # 서명 오류 / API 키 없음(문서 조사 기준)
 
+# FULL_AUDIT_2026-09-02.md §2-B ① — 429/5xx는 일시적 장애로 보고 재시도,
+# 그 외 4xx는 재시도해도 성공할 가능성이 없어(잘못된 요청/인증) 즉시 Fatal.
+_MAX_RETRIES = 3
+_MAX_BACKOFF_SECONDS = 30.0
+
 
 class _BitgetHTTPClient:
     """REST 요청 서명·전송 공통 로직. Mixin들이 self._request()로 접근한다."""
@@ -63,20 +70,50 @@ class _BitgetHTTPClient:
         *,
         demo_mode: bool = True,
         http_client: httpx.AsyncClient | None = None,
+        sleep_fn: Callable[[float], Awaitable[None]] | None = None,
     ) -> None:
         self._api_key = api_key
         self._api_secret = api_secret
         self._api_passphrase = api_passphrase
         self._demo_mode = demo_mode
         self._client = http_client or httpx.AsyncClient(base_url=BASE_URL, timeout=10.0)
+        self._sleep_fn = sleep_fn or asyncio.sleep
+        # FULL_AUDIT §2-B ① 서버시간 오프셋 — 기본 0(로컬 시계 그대로 사용),
+        # sync_server_time()을 명시적으로 호출해야 갱신된다. 매 요청마다
+        # 자동으로 동기화하면 기존 MockTransport 테스트 전부(14개 파일)가
+        # 추가 요청 하나를 더 받게 돼 깨진다 — 그 정도로 매 요청 지연을
+        # 감수할 가치도 없다(클럭 드리프트는 보통 안정적이라 1회 동기화로
+        # 충분). Executor 시작 시 또는 서명 오류가 반복될 때 호출부가
+        # 명시적으로 부르는 옵션 메서드로 둔다(정책은 호출부 책임 원칙,
+        # borrow_margin() 등 기존 확장 메서드 docstring과 동일 판단).
+        self._time_offset_ms = 0
 
     def _sign(self, timestamp: str, method: str, request_path: str, body: str = "") -> str:
         prehash = timestamp + method.upper() + request_path + body
         mac = hmac.new(self._api_secret.encode("utf-8"), prehash.encode("utf-8"), hashlib.sha256)
         return base64.b64encode(mac.digest()).decode("utf-8")
 
+    async def sync_server_time(self) -> None:
+        """FULL_AUDIT §2-B ① — Bitget 서버시간과의 오프셋을 측정해 이후
+        요청의 ACCESS-TIMESTAMP에 반영한다. 왕복지연 절반만큼 보정
+        (요청 전송 직전/직후 로컬시각의 평균을 서버 응답 시각과 비교하는
+        일반적인 NTP류 관례) — 완벽하지 않지만 클럭 드리프트로 인한
+        서명 타임스탬프 거부(40012류)를 크게 줄인다. 실패해도 예외를
+        올리지 않고 오프셋 0으로 안전하게 유지한다(8.3 원칙 — 시간 동기화
+        실패가 거래 자체를 막으면 안 됨)."""
+        try:
+            local_before = time.time()
+            response = await self._client.get("/api/v2/public/time")
+            local_after = time.time()
+            data = response.json()
+            server_time_ms = int(data["data"]["serverTime"])
+            local_mid_ms = (local_before + local_after) / 2 * 1000
+            self._time_offset_ms = int(server_time_ms - local_mid_ms)
+        except Exception:  # noqa: BLE001 — 동기화 실패는 오프셋 0 유지로 안전하게 수렴
+            self._time_offset_ms = 0
+
     def _headers(self, method: str, request_path: str, body: str = "") -> dict[str, str]:
-        timestamp = str(int(time.time() * 1000))
+        timestamp = str(int(time.time() * 1000) + self._time_offset_ms)
         headers = {
             "ACCESS-KEY": self._api_key,
             "ACCESS-SIGN": self._sign(timestamp, method, request_path, body),
@@ -107,22 +144,54 @@ class _BitgetHTTPClient:
             query_string = "?" + str(httpx.QueryParams(params))
         body_str = json.dumps(body) if body else ""
         request_path = path + query_string
-        headers = self._headers(method, request_path, body_str)
 
-        try:
-            response = await self._client.request(
-                method, request_path, content=body_str or None, headers=headers
-            )
-        except httpx.TransportError as exc:
-            raise RetryableExchangeError(f"Bitget 요청 전송 실패: {exc}") from exc
+        backoff = 1.0
+        for attempt in range(_MAX_RETRIES + 1):
+            headers = self._headers(method, request_path, body_str)
+            try:
+                response = await self._client.request(
+                    method, request_path, content=body_str or None, headers=headers
+                )
+            except httpx.TransportError as exc:
+                raise RetryableExchangeError(f"Bitget 요청 전송 실패: {exc}") from exc
 
-        data: dict[str, Any] = response.json()
-        code = data.get("code")
-        if code != "00000":
-            if code in _FATAL_ERROR_CODES:
-                raise FatalExchangeError(f"Bitget 인증/서명 오류: {data}")
-            raise RetryableExchangeError(f"Bitget API 오류: {data}")
-        return data
+            # FULL_AUDIT §2-B ① — 이전에는 HTTP 상태코드를 전혀 보지 않고
+            # 바로 response.json()으로 넘어갔다. 429(rate limit)/5xx(서버
+            # 장애)는 일시적이라 지수 백오프로 재시도, Retry-After 헤더가
+            # 있으면 그 값을 우선한다.
+            if response.status_code == 429 or response.status_code >= 500:
+                if attempt == _MAX_RETRIES:
+                    raise RetryableExchangeError(
+                        f"Bitget HTTP {response.status_code} 재시도 소진: {response.text}"
+                    )
+                retry_after = response.headers.get("Retry-After")
+                wait = float(retry_after) if retry_after else backoff
+                await self._sleep_fn(wait)
+                backoff = min(backoff * 2, _MAX_BACKOFF_SECONDS)
+                continue
+
+            # 그 외 4xx는 재시도해도 성공할 가능성이 없다(잘못된 요청/
+            # 인증 오류) — 즉시 Fatal.
+            if response.status_code >= 400:
+                raise FatalExchangeError(
+                    f"Bitget HTTP {response.status_code}: {response.text}"
+                )
+
+            try:
+                data: dict[str, Any] = response.json()
+            except ValueError as exc:
+                raise RetryableExchangeError(
+                    f"Bitget 응답이 JSON이 아님: {response.text}"
+                ) from exc
+
+            code = data.get("code")
+            if code != "00000":
+                if code in _FATAL_ERROR_CODES:
+                    raise FatalExchangeError(f"Bitget 인증/서명 오류: {data}")
+                raise RetryableExchangeError(f"Bitget API 오류: {data}")
+            return data
+
+        raise RetryableExchangeError("Bitget 요청 재시도 루프 종료(도달 불가 경로)")
 
     async def aclose(self) -> None:
         await self._client.aclose()

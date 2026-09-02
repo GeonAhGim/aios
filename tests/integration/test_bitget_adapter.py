@@ -43,10 +43,12 @@ REAL_TICKER_ENVELOPE = {
 }
 
 
-def _make_adapter(handler) -> BitgetAdapter:
+def _make_adapter(handler, *, sleep_fn=None) -> BitgetAdapter:
     transport = httpx.MockTransport(handler)
     client = httpx.AsyncClient(base_url="https://api.bitget.com", transport=transport)
-    return BitgetAdapter("key", "secret", "passphrase", demo_mode=True, http_client=client)
+    return BitgetAdapter(
+        "key", "secret", "passphrase", demo_mode=True, http_client=client, sleep_fn=sleep_fn
+    )
 
 
 def _json_response(payload: dict, status_code: int = 200) -> httpx.Response:
@@ -630,3 +632,103 @@ async def test_transfer_returns_true_on_success():
     result = await adapter.transfer("spot", "usdt_futures", Decimal("100"), "usdt")
 
     assert result is True
+
+
+# ---------- FULL_AUDIT §2-B ① — HTTP 상태코드/재시도/서버시간 오프셋 ----------
+
+
+async def test_request_retries_429_then_succeeds():
+    calls = {"n": 0}
+    sleep_calls: list[float] = []
+
+    async def fake_sleep(seconds: float) -> None:
+        sleep_calls.append(seconds)
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls["n"] += 1
+        if calls["n"] < 3:
+            return httpx.Response(429, text="rate limited")
+        return _json_response(REAL_TICKER_ENVELOPE)
+
+    adapter = _make_adapter(handler, sleep_fn=fake_sleep)
+    ticker = await adapter.get_ticker("BTC/USDT")
+
+    assert ticker.price == Decimal("80663.08")
+    assert calls["n"] == 3
+    assert sleep_calls == [1.0, 2.0]  # 지수 백오프
+
+
+async def test_request_respects_retry_after_header():
+    calls = {"n": 0}
+    sleep_calls: list[float] = []
+
+    async def fake_sleep(seconds: float) -> None:
+        sleep_calls.append(seconds)
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls["n"] += 1
+        if calls["n"] == 1:
+            return httpx.Response(429, headers={"Retry-After": "5"}, text="rate limited")
+        return _json_response(REAL_TICKER_ENVELOPE)
+
+    adapter = _make_adapter(handler, sleep_fn=fake_sleep)
+    await adapter.get_ticker("BTC/USDT")
+
+    assert sleep_calls == [5.0]
+
+
+async def test_request_retries_5xx_then_raises_retryable_after_exhausting():
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(503, text="service unavailable")
+
+    async def fake_sleep(seconds: float) -> None:
+        return None
+
+    adapter = _make_adapter(handler, sleep_fn=fake_sleep)
+    with pytest.raises(RetryableExchangeError):
+        await adapter.get_ticker("BTC/USDT")
+
+
+async def test_request_raises_fatal_immediately_on_other_4xx_without_retry():
+    calls = {"n": 0}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls["n"] += 1
+        return httpx.Response(400, text="bad request")
+
+    adapter = _make_adapter(handler)
+    with pytest.raises(FatalExchangeError):
+        await adapter.get_ticker("BTC/USDT")
+    assert calls["n"] == 1  # 재시도 없이 즉시 실패
+
+
+async def test_request_raises_retryable_on_non_json_response():
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, text="<html>not json</html>")
+
+    adapter = _make_adapter(handler)
+    with pytest.raises(RetryableExchangeError):
+        await adapter.get_ticker("BTC/USDT")
+
+
+async def test_sync_server_time_updates_offset():
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == "/api/v2/public/time"
+        return _json_response(
+            {"code": "00000", "msg": "success", "data": {"serverTime": "9999999999999"}}
+        )
+
+    adapter = _make_adapter(handler)
+    await adapter.sync_server_time()
+
+    assert adapter._time_offset_ms != 0
+
+
+async def test_sync_server_time_falls_back_to_zero_offset_on_failure():
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(500, text="down")
+
+    adapter = _make_adapter(handler)
+    await adapter.sync_server_time()
+
+    assert adapter._time_offset_ms == 0
