@@ -23,6 +23,35 @@ from src.exchanges.bitget.futures_market_mixin import DEFAULT_PRODUCT_TYPE, _to_
 
 
 class BitgetFuturesAccountMixin:
+    async def get_futures_account(
+        self,
+        symbol: str,
+        *,
+        margin_coin: str = "USDT",
+        product_type: str = DEFAULT_PRODUCT_TYPE,
+    ) -> AccountBalance:
+        """02b 스펙 §5.2(P0) — 단일 마진코인 계좌 조회. `get_futures_accounts()`
+        (전체 조회)와 짝을 이루는 단건 조회(문서상 별도 엔드포인트)."""
+        raw = await self._request(  # type: ignore[attr-defined]
+            "GET",
+            "/api/v2/mix/account/account",
+            params={
+                "symbol": _to_bitget_symbol(symbol),
+                "productType": product_type,
+                "marginCoin": margin_coin,
+            },
+        )
+        data = raw["data"][0] if isinstance(raw["data"], list) else raw["data"]
+        available = Decimal(data.get("available", "0"))
+        frozen = Decimal(data.get("locked", "0"))
+        return AccountBalance(
+            exchange="bitget",
+            asset=data.get("marginCoin", margin_coin).upper(),
+            total=Decimal(data.get("accountEquity", available + frozen)),
+            available=available,
+            used_margin=frozen,
+        )
+
     async def get_futures_accounts(
         self, *, product_type: str = DEFAULT_PRODUCT_TYPE
     ) -> list[AccountBalance]:

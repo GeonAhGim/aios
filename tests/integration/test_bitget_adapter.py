@@ -513,6 +513,43 @@ async def test_get_account_bills_returns_raw_rows():
     assert bills == [{"billId": "b-1", "coin": "USDT", "amount": "10"}]
 
 
+async def test_get_server_time_parses_timestamp():
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == "/api/v2/public/time"
+        return _json_response(
+            {
+                "code": "00000",
+                "msg": "success",
+                "requestTime": 1,
+                "data": {"serverTime": "1700000000000"},
+            }
+        )
+
+    adapter = _make_adapter(handler)
+    server_time = await adapter.get_server_time()
+
+    assert server_time.year == 2023
+
+
+async def test_get_trade_rate_returns_raw_dict():
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == "/api/v2/common/trade-rate"
+        assert request.url.params["symbol"] == "BTCUSDT"
+        return _json_response(
+            {
+                "code": "00000",
+                "msg": "success",
+                "requestTime": 1,
+                "data": {"makerFeeRate": "0.001", "takerFeeRate": "0.001"},
+            }
+        )
+
+    adapter = _make_adapter(handler)
+    rate = await adapter.get_trade_rate("BTC/USDT")
+
+    assert rate == {"makerFeeRate": "0.001", "takerFeeRate": "0.001"}
+
+
 async def test_transfer_returns_true_on_success():
     def handler(request: httpx.Request) -> httpx.Response:
         assert request.url.path == "/api/v2/spot/wallet/transfer"

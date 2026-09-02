@@ -44,6 +44,18 @@ class BitgetAccountMixin:
         빈 리스트를 반환한다."""
         return []
 
+    async def get_trade_rate(self, symbol: str, *, business_type: str = "spot") -> dict[str, Any]:
+        """02b 스펙 §7(P1) — FD-8.2 수수료 미반영 Draft를 벗어날 때 필요.
+        VIP 등급별 수수료율은 계정마다 달라(인증 필요) raw dict를 그대로
+        반환한다(§2 모델 재사용 원칙, 소비하는 FD-8 호출부가 생기기 전까지
+        모델화 보류)."""
+        raw = await self._request(  # type: ignore[attr-defined]
+            "GET",
+            "/api/v2/common/trade-rate",
+            params={"symbol": symbol.replace("/", ""), "businessType": business_type},
+        )
+        return dict(raw["data"])
+
     async def get_account_info(self) -> dict[str, Any]:
         """02b 스펙 §3.3(P1) — UID·권한(authorities) 확인용. 아직 소비하는
         호출부가 없어(§2 모델 재사용 원칙) raw dict 그대로 반환한다."""

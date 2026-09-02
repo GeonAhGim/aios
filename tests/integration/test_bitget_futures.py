@@ -404,6 +404,65 @@ async def test_get_futures_open_orders_handles_null_entrusted_list():
     assert await adapter.get_futures_open_orders() == []
 
 
+async def test_get_futures_tickers_converts_symbol_to_canonical():
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == "/api/v2/mix/market/tickers"
+        return _json_response(
+            {
+                "code": "00000",
+                "msg": "success",
+                "requestTime": 1,
+                "data": [{"symbol": "BTCUSDT", "lastPr": "80000", "baseVolume": "100"}],
+            }
+        )
+
+    adapter = _make_adapter(handler)
+    tickers = await adapter.get_futures_tickers()
+
+    assert tickers[0].symbol == "BTC/USDT"
+    assert tickers[0].price == Decimal("80000")
+
+
+async def test_get_futures_history_candles():
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == "/api/v2/mix/market/history-candles"
+        assert request.url.params["endTime"] == "1700000000000"
+        return _json_response(
+            {
+                "code": "00000",
+                "msg": "success",
+                "requestTime": 1,
+                "data": [["1700000000000", "80000", "81000", "79500", "80500", "12.3"]],
+            }
+        )
+
+    adapter = _make_adapter(handler)
+    candles = await adapter.get_futures_history_candles(
+        "BTC/USDT", "1h", end_time="1700000000000"
+    )
+
+    assert candles[0].close == Decimal("80500")
+
+
+async def test_get_futures_account_single():
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == "/api/v2/mix/account/account"
+        return _json_response(
+            {
+                "code": "00000",
+                "msg": "success",
+                "requestTime": 1,
+                "data": {"marginCoin": "USDT", "available": "1000", "locked": "0"},
+            }
+        )
+
+    adapter = _make_adapter(handler)
+    balance = await adapter.get_futures_account("BTC/USDT")
+
+    assert balance.asset == "USDT"
+    assert balance.available == Decimal("1000")
+
+
 async def test_get_futures_fills():
     def handler(request: httpx.Request) -> httpx.Response:
         assert request.url.path == "/api/v2/mix/order/fills"

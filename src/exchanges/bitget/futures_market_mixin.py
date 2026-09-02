@@ -45,6 +45,40 @@ def _to_bitget_symbol(canonical_symbol: str) -> str:
     return canonical_symbol.replace("/", "")
 
 
+def _rows_to_candles(rows: list[list[str]], symbol: str, timeframe: str) -> list[Candle]:
+    """candles/history-candles 2개 엔드포인트가 공유하는 행 형태
+    ([ts, open, high, low, close, baseVolume, ...])."""
+    candles = []
+    for row in rows:
+        ts_ms, o, h, low, c, base_vol = row[0], row[1], row[2], row[3], row[4], row[5]
+        open_time = datetime.fromtimestamp(int(ts_ms) / 1000, tz=timezone.utc)
+        candles.append(
+            Candle(
+                symbol=symbol,
+                exchange="bitget",
+                timeframe=timeframe,
+                open=Decimal(o),
+                high=Decimal(h),
+                low=Decimal(low),
+                close=Decimal(c),
+                volume=Decimal(base_vol),
+                open_time=open_time,
+                close_time=open_time,
+            )
+        )
+    return candles
+
+
+def _to_canonical_symbol(bitget_symbol: str) -> str:
+    """"BTCUSDT" -> "BTC/USDT". ticker_parser.py의 동일 로직을 여기서
+    복제한다(순환 임포트 방지 + 모듈-비공개 함수는 재사용하지 않는 기존
+    관례, futures_market_mixin.py 상단 _GRANULARITY_MAP 주석 참조). Phase 1
+    스콥(06번 §6.1)은 USDT-마진 선물만 대상이라 USDT 접미사만 처리한다."""
+    if bitget_symbol.endswith("USDT"):
+        return f"{bitget_symbol[:-4]}/USDT"
+    return bitget_symbol
+
+
 class BitgetFuturesMarketMixin:
     async def get_futures_contracts(
         self, *, product_type: str = DEFAULT_PRODUCT_TYPE
@@ -85,6 +119,28 @@ class BitgetFuturesMarketMixin:
             timestamp=datetime.now(timezone.utc),
             source_type="primary",
         )
+
+    async def get_futures_tickers(
+        self, *, product_type: str = DEFAULT_PRODUCT_TYPE
+    ) -> list[Ticker]:
+        """02b 스펙 §5.1(P0) — 전체 심볼 현재가. get_futures_ticker()의
+        단일 심볼 조회와 짝을 이루는 전체 조회(문서상 별도 엔드포인트)."""
+        raw = await self._request(  # type: ignore[attr-defined]
+            "GET", "/api/v2/mix/market/tickers", params={"productType": product_type}
+        )
+        return [
+            Ticker(
+                symbol=_to_canonical_symbol(item["symbol"]),
+                exchange="bitget",
+                price=Decimal(item["lastPr"]),
+                bid=Decimal(item.get("bidPr", item["lastPr"])),
+                ask=Decimal(item.get("askPr", item["lastPr"])),
+                volume_24h=Decimal(item.get("baseVolume", "0")),
+                timestamp=datetime.now(timezone.utc),
+                source_type="primary",
+            )
+            for item in raw["data"]
+        ]
 
     async def get_futures_orderbook(
         self, symbol: str, *, depth: int = 20, product_type: str = DEFAULT_PRODUCT_TYPE
@@ -128,25 +184,35 @@ class BitgetFuturesMarketMixin:
                 "limit": str(limit),
             },
         )
-        candles = []
-        for row in raw["data"]:
-            ts_ms, o, h, low, c, base_vol = row[0], row[1], row[2], row[3], row[4], row[5]
-            open_time = datetime.fromtimestamp(int(ts_ms) / 1000, tz=timezone.utc)
-            candles.append(
-                Candle(
-                    symbol=symbol,
-                    exchange="bitget",
-                    timeframe=timeframe,
-                    open=Decimal(o),
-                    high=Decimal(h),
-                    low=Decimal(low),
-                    close=Decimal(c),
-                    volume=Decimal(base_vol),
-                    open_time=open_time,
-                    close_time=open_time,
-                )
-            )
-        return candles
+        return _rows_to_candles(raw["data"], symbol, timeframe)
+
+    async def get_futures_history_candles(
+        self,
+        symbol: str,
+        timeframe: str,
+        *,
+        limit: int = 100,
+        end_time: str | None = None,
+        product_type: str = DEFAULT_PRODUCT_TYPE,
+    ) -> list[Candle]:
+        """02b 스펙 §5.1(P0) — get_futures_candles()와 짝을 이루는 과거
+        캔들 조회(FD-2.3 백테스트 데이터, market_data_mixin.py의
+        get_history_candles()와 동일 목적의 Futures 버전)."""
+        granularity = _GRANULARITY_MAP.get(timeframe)
+        if granularity is None:
+            raise ValueError(f"지원하지 않는 timeframe: {timeframe}")
+        params: dict[str, Any] = {
+            "symbol": _to_bitget_symbol(symbol),
+            "productType": product_type,
+            "granularity": granularity,
+            "limit": str(limit),
+        }
+        if end_time is not None:
+            params["endTime"] = end_time
+        raw = await self._request(  # type: ignore[attr-defined]
+            "GET", "/api/v2/mix/market/history-candles", params=params
+        )
+        return _rows_to_candles(raw["data"], symbol, timeframe)
 
     async def get_futures_history_funding_rate(
         self, symbol: str, *, limit: int = 100, product_type: str = DEFAULT_PRODUCT_TYPE

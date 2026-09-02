@@ -343,6 +343,12 @@ class BitgetMarketDataMixin:
             )
         return result
 
+    async def get_server_time(self) -> datetime:
+        """02b 스펙 §7(P1) — 타임스탬프 서명 오차 디버깅에 유용."""
+        raw = await self._request("GET", "/api/v2/public/time")  # type: ignore[attr-defined]
+        data = raw["data"]
+        return datetime.fromtimestamp(int(data["serverTime"]) / 1000, tz=timezone.utc)
+
     async def get_public_trades(self, symbol: str, *, limit: int = 100) -> list[PublicTrade]:
         """02b 스펙 §3.1(P1) — 시장 전체 체결 스트림(FD-2.6 데이터 신뢰도
         교차검증 보강용, 내 주문이 아닌 그 심볼의 전체 체결)."""
