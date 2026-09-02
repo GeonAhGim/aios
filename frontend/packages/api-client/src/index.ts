@@ -9,6 +9,14 @@ export { createLogoutClient } from "./logout";
 export type { LogoutClient, LogoutClientOptions, LogoutTokenStore } from "./logout";
 export { createTenantStore, isValidTenantId } from "./tenantContext";
 export type { TenantStore, TenantMismatchFallback, TenantKind, MembershipRole } from "./tenantContext";
+export { parseReadiness, summarizeReadiness } from "./readiness";
+export type {
+  CheckResult,
+  ReadinessReport,
+  ParsedReadiness,
+  FailedCheck,
+  ReadinessSummary,
+} from "./readiness";
 export type {
   ApiResponsePageMeta,
   ApiResponseMeta,
