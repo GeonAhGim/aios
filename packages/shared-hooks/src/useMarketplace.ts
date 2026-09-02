@@ -12,6 +12,7 @@ export function useListingSearch(params: {
   assetClass?: string;
   exchange?: string;
   maxPrice?: string;
+  sortBy?: "RECOMMENDED" | "SHARPE_RATIO";
   page?: number;
   pageSize?: number;
 }) {

@@ -1,13 +1,16 @@
 import { useListingSearch } from "@aios/shared-hooks";
 import type { ListingSummary } from "@aios/shared-types";
-import { Badge, Button, EmptyState, LoadingState, PageHeader } from "@aios/ui-web";
+import { Badge, Button, EmptyState, LoadingState, PageHeader, Select } from "@aios/ui-web";
 import { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { AppShell } from "../../components/layout/AppShell";
 
+type SortBy = "RECOMMENDED" | "SHARPE_RATIO";
+
 export function MarketplaceBrowsePage() {
   const [page, setPage] = useState(1);
-  const { data, isLoading } = useListingSearch({ page, pageSize: 20 });
+  const [sortBy, setSortBy] = useState<SortBy>("RECOMMENDED");
+  const { data, isLoading } = useListingSearch({ page, pageSize: 20, sortBy });
   const navigate = useNavigate();
 
   function openListing(listing: ListingSummary) {
@@ -25,6 +28,21 @@ export function MarketplaceBrowsePage() {
             </Link>
           }
         />
+
+        <div className="flex items-center gap-2 text-sm">
+          <span className="text-fg-muted">정렬</span>
+          <Select
+            value={sortBy}
+            onChange={(e) => {
+              setSortBy(e.target.value as SortBy);
+              setPage(1);
+            }}
+            className="w-40"
+          >
+            <option value="RECOMMENDED">추천순</option>
+            <option value="SHARPE_RATIO">샤프비율순(랭킹)</option>
+          </Select>
+        </div>
 
         {isLoading ? (
           <LoadingState />

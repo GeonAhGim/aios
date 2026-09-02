@@ -1,4 +1,8 @@
-import type { ExecutionCreateRequest, RebalanceRequest } from "@aios/shared-types";
+import type {
+  ExecutionCreateRequest,
+  RebalanceRequest,
+  SetMaxDrawdownRequest,
+} from "@aios/shared-types";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiClient } from "./clientInstance";
 
@@ -51,6 +55,20 @@ export function usePauseExecution() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (executionId: number) => apiClient.pauseExecution(executionId),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["executions"] }),
+  });
+}
+
+export function useSetExecutionRiskGuard() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({
+      executionId,
+      body,
+    }: {
+      executionId: number;
+      body: SetMaxDrawdownRequest;
+    }) => apiClient.setExecutionRiskGuard(executionId, body),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["executions"] }),
   });
 }

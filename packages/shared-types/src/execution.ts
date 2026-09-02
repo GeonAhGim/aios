@@ -18,6 +18,7 @@ export interface ExecutionResponse {
   exchange: string;
   allocatedCapital: string;
   approvalRequestId: number | null;
+  maxDrawdownPct: string | null;
 }
 
 export interface ExecutionCardResponse {
@@ -31,4 +32,9 @@ export interface ExecutionCardResponse {
   daysSinceStart: number | null;
   realizedPnl: string;
   unrealizedPnl: string;
+  maxDrawdownPct: string | null;
+}
+
+export interface SetMaxDrawdownRequest {
+  maxDrawdownPct: string | null;
 }

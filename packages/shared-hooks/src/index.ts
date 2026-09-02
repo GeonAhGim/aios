@@ -11,6 +11,7 @@ export {
   useStartExecution,
   usePauseExecution,
   useRetireExecution,
+  useSetExecutionRiskGuard,
 } from "./usePortfolio";
 export {
   useExchangeCredentials,

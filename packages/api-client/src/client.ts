@@ -54,6 +54,7 @@ import type {
   ReviewResponse,
   RiskProfileHistoryEntry,
   RiskProfileResponse,
+  SetMaxDrawdownRequest,
   SignupRequest,
   StrategyCreateRequest,
   StrategyDefinition,
@@ -286,6 +287,13 @@ export class AiosApiClient {
     return this.post(`/executions/${executionId}/convert-to-live`, body);
   }
 
+  async setExecutionRiskGuard(
+    executionId: number,
+    body: SetMaxDrawdownRequest,
+  ): Promise<ExecutionResponse> {
+    return this.patch(`/executions/${executionId}/risk-guard`, body);
+  }
+
   // ---- FD-12 거래소 연동 ----
   async registerExchangeCredential(body: CredentialRequest): Promise<CredentialResponse> {
     return this.post("/exchange-credentials", body);
@@ -363,6 +371,7 @@ export class AiosApiClient {
     assetClass?: string;
     exchange?: string;
     maxPrice?: string;
+    sortBy?: "RECOMMENDED" | "SHARPE_RATIO";
     page?: number;
     pageSize?: number;
   }): Promise<ListingSearchResponse> {
@@ -371,6 +380,7 @@ export class AiosApiClient {
         asset_class: params.assetClass,
         exchange: params.exchange,
         max_price: params.maxPrice,
+        sort_by: params.sortBy,
         page: params.page,
         page_size: params.pageSize,
       }),
