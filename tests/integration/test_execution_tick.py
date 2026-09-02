@@ -10,15 +10,17 @@ import asyncpg
 import pytest
 from dotenv import dotenv_values
 
+from src.core.db.conditional_write import ConcurrencyConflictError
 from src.core.executor.executor import Executor
 from src.core.loader.risk_policy_loader import load_risk_policy
 from src.core.portfolio.engine import PortfolioEngine
 from src.core.risk.engine import RiskEngine
 from src.core.strategy.engine import StrategyEngine
+from src.data.models.strategy_fsm import FSMState
 from src.data.models.trading import AccountBalance, OrderStatus
 from src.services.condition_compiler import ConditionCompiler
 from src.services.execution_loop.equity_tracker import ExecutionEquityTracker
-from src.services.execution_loop.tick import run_execution_tick
+from src.services.execution_loop.tick import _make_fsm_state_writer, run_execution_tick
 from src.services.preview_service import PreviewCondition
 from tests.integration.conftest import create_test_user
 from tests.integration.fake_exchange_adapter import FakeExchangeAdapter
@@ -203,3 +205,63 @@ async def test_paused_execution_is_skipped(pool):
     await run_execution_tick(pool, adapter, execution_id, **_engines())
 
     assert adapter.place_order_call_count == 0
+
+
+async def test_fsm_state_writer_raises_on_concurrent_state_change(pool):
+    """레드팀 #2026-09-02-22 회귀 테스트 — writer가 읽었던 expected_state와
+    실제 DB 값이 다르면(다른 tick이 먼저 바꿈) ConcurrencyConflictError를
+    던지고 아무것도 쓰지 않아야 한다."""
+    user_id = await create_test_user(pool)
+    execution_id = await _create_execution(pool, user_id)
+    async with pool.acquire() as conn:
+        await conn.execute(
+            "UPDATE strategy_executions SET fsm_state = 'BUY_ORDER_PENDING' WHERE id = $1",
+            execution_id,
+        )
+
+    writer = await _make_fsm_state_writer(pool)
+    with pytest.raises(ConcurrencyConflictError):
+        # 이 tick은 IDLE을 읽었다고 주장하지만 실제론 이미 BUY_ORDER_PENDING.
+        await writer(execution_id, FSMState.IDLE, FSMState.BUY_ORDER_PENDING)
+
+    async with pool.acquire() as conn:
+        fsm_state = await conn.fetchval(
+            "SELECT fsm_state FROM strategy_executions WHERE id = $1", execution_id
+        )
+    assert fsm_state == "BUY_ORDER_PENDING"  # 충돌한 쓰기는 반영되지 않음
+
+
+async def test_concurrent_tick_race_only_submits_one_order(pool):
+    """레드팀 #2026-09-02-22 회귀 테스트 — get_balance() 호출 시점에 "다른
+    tick"이 이미 이 execution을 BUY_ORDER_PENDING으로 선점했다고 가정하면
+    (run_execution_tick이 IDLE을 읽은 *이후*, 자기 자신의 조건부 쓰기 *전*
+    끼어든 상황을 시뮬레이션), 이 tick의 조건부 쓰기가 충돌해야 하고
+    Executor.execute()까지 가서 실제 주문을 내면 안 된다."""
+    user_id = await create_test_user(pool)
+    execution_id = await _create_execution(pool, user_id, entry_threshold=100.0)
+
+    class _RacingAdapter(FakeExchangeAdapter):
+        async def get_balance(self, asset: str | None = None):  # noqa: ANN001
+            async with pool.acquire() as conn:
+                await conn.execute(
+                    "UPDATE strategy_executions SET fsm_state = 'BUY_ORDER_PENDING' "
+                    "WHERE id = $1",
+                    execution_id,
+                )
+            return await super().get_balance(asset)
+
+    adapter = _RacingAdapter(
+        closes=[Decimal("50")] * 30,
+        usdt_balance=AccountBalance(
+            exchange="bitget", asset="USDT", total=Decimal("10000"), available=Decimal("10000")
+        ),
+    )
+
+    await run_execution_tick(pool, adapter, execution_id, **_engines())
+
+    assert adapter.place_order_call_count == 0
+    async with pool.acquire() as conn:
+        fsm_state = await conn.fetchval(
+            "SELECT fsm_state FROM strategy_executions WHERE id = $1", execution_id
+        )
+    assert fsm_state == "BUY_ORDER_PENDING"  # "다른 tick"이 쓴 값 그대로 — 이 tick이 덮어쓰지 않음

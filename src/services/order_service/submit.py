@@ -34,22 +34,44 @@ async def submit_order(
     pool: asyncpg.Pool,
     publish: PublishFn | None = None,
 ) -> Order:
+    # FD-4.2-a 멱등성 — 레드팀 #2026-09-02-19 — "먼저 SELECT로 없음을
+    # 확인하고, 거래소 전송 후에야 INSERT한다"는 TOCTOU였다: 동시에 같은
+    # client_order_id로 두 번 호출되면 둘 다 SELECT를 통과해 거래소에 실제
+    # 주문을 두 번 낼 수 있었고, 뒤늦은 INSERT의 UNIQUE 위반은 아무 데서도
+    # 잡히지 않아 거래소엔 나갔지만 DB엔 없는 고아 주문이 됐다.
+    #
+    # 지금은 거래소를 부르기 *전에* client_order_id를 이 INSERT로 원자적
+    # 선점한다 — status=CREATED, exchange_order_id=NULL인 "아직 전송 안 됨"
+    # 표식 행이다. 두 번째 호출은 UNIQUE 위반으로 이 시점에서 즉시 걸러져
+    # 거래소를 아예 부르지 않는다(이미 있는 행을 그대로 반환).
     async with pool.acquire() as conn:
-        # FD-4.2-a 멱등성 사전 확인 — 동일 client_order_id가 이미 있으면
-        # 재전송 아님, 기존 상태 재확인으로 전환(실제 거래소 호출 생략).
-        existing = await repository.get_by_client_order_id(conn, order.client_order_id)
-        if existing is not None:
+        try:
+            claimed = await repository.insert(conn, order, user_id=user_id)
+        except asyncpg.UniqueViolationError:
+            existing = await repository.get_by_client_order_id(conn, order.client_order_id)
+            if existing is None:
+                raise  # UNIQUE 위반인데 그 행이 없다 — 예상 못한 상태, 그대로 전파
             return existing
 
     # FD-4.2-b 거래소 전송 — REJECTED는 예외가 아니라 정상 흐름(place_order가
-    # status=REJECTED로 반환). 네트워크 오류(RetryableExchangeError)는 그대로
-    # 전파한다 — 재시도 전 반드시 이 함수를 처음부터(멱등성 확인부터)
-    # 다시 거쳐야 하므로 이 함수 내부에서 자체 재시도하지 않는다.
-    submitted = await adapter.place_order(order)
+    # status=REJECTED로 반환, 아래에서 그대로 영속화). 네트워크 오류
+    # (RetryableExchangeError) 등 실제 예외가 나면, "전송 실패는 DB에 아무
+    # 흔적도 남기지 않는다"는 기존 불변조건을 지키기 위해 claim 행을 지우고
+    # 그대로 전파한다 — 재시도는 같은(또는 새) client_order_id로 이 함수를
+    # 처음부터 다시 거쳐야 한다(이 함수 내부에서 자체 재시도하지 않는다).
+    try:
+        submitted = await adapter.place_order(claimed)
+    except Exception:
+        async with pool.acquire() as conn:
+            await repository.delete(conn, claimed.order_id)
+        raise
 
-    # FD-4.2-c DB 영속화 — 이벤트 발행보다 먼저 커밋(05번 §5.6).
+    # FD-4.2-c DB 영속화 — claimed 행을 실제 거래소 응답으로 갱신한다.
+    # 이벤트 발행보다 먼저 커밋(05번 §5.6).
     async with pool.acquire() as conn:
-        persisted = await repository.insert(conn, submitted, user_id=user_id)
+        persisted = await repository.update_from_exchange(
+            conn, submitted, expected_status=claimed.status
+        )
 
     # FD-4.2-d 이벤트 발행(FD-6.1 재사용).
     if publish is not None:
@@ -87,7 +109,9 @@ async def apply_fill(
         }
     )
     async with pool.acquire() as conn:
-        persisted = await repository.update_from_exchange(conn, updated)
+        persisted = await repository.update_from_exchange(
+            conn, updated, expected_status=order.status
+        )
 
     if publish is not None:
         await publish(

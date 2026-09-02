@@ -22,6 +22,7 @@ triggered_at/triggered_value로 DB에 남아 사용자가 알림 목록 화면�
 from __future__ import annotations
 
 import json
+import logging
 from collections.abc import Awaitable, Callable
 from datetime import datetime
 from typing import Any
@@ -35,6 +36,8 @@ from src.services.condition_evaluation import Operator, compare_value
 from src.services.credential_resolver import CredentialNotFoundError, CredentialResolver
 
 DEFAULT_CANDLE_LIMIT = 200
+
+logger = logging.getLogger(__name__)
 
 PublishFn = Callable[[str, dict[str, Any]], Awaitable[None]]
 
@@ -148,7 +151,22 @@ class AlertService:
             except CredentialNotFoundError:
                 continue
 
-            result = self._indicators.calculate(alert.indicator, candles, **alert.params)
+            # 레드팀 #2026-09-02-21 — 미검증 indicator/params가 여기서 예외를
+            # 던지면(IndicatorError/TypeError 등) 이 알림 하나만 건너뛰어야
+            # 한다(위 docstring 약속) — 원래는 이 호출이 try/except 밖에 있어
+            # 예외가 루프(그리고 그 루프를 감싼 백그라운드 태스크)를 통째로
+            # 죽여 전체 사용자의 알림 평가가 영구 정지했다.
+            try:
+                result = self._indicators.calculate(alert.indicator, candles, **alert.params)
+            except Exception:
+                logger.warning(
+                    "alert_id=%s의 indicator=%r/params=%r 계산 실패 — 이 알림만 건너뜁니다.",
+                    alert.id,
+                    alert.indicator,
+                    alert.params,
+                    exc_info=True,
+                )
+                continue
             if not result.values:
                 continue
             value = result.values[-1]

@@ -52,7 +52,9 @@ async def resolve_unknown(
                 }
             )
             async with pool.acquire() as conn:
-                persisted = await repository.update_from_exchange(conn, updated)
+                persisted = await repository.update_from_exchange(
+                    conn, updated, expected_status=current.status
+                )
             if publish is not None:
                 await publish(
                     "order.status.changed",

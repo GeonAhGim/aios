@@ -54,4 +54,6 @@ async def modify_order(
         }
     )
     async with pool.acquire() as conn:
-        return await repository.update_after_modify(conn, updated)
+        return await repository.update_after_modify(
+            conn, updated, expected_status=order.status
+        )

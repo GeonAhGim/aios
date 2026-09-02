@@ -42,7 +42,9 @@ async def cancel_order(
 
     updated = order.model_copy(update={"status": OrderStatus.CANCELLED})
     async with pool.acquire() as conn:
-        persisted = await repository.update_from_exchange(conn, updated)
+        persisted = await repository.update_from_exchange(
+            conn, updated, expected_status=order.status
+        )
 
     if publish is not None:
         await publish(

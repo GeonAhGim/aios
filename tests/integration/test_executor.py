@@ -67,8 +67,8 @@ async def _create_execution(pool: asyncpg.Pool, user_id: uuid.UUID, *, mode: str
             """
             INSERT INTO strategy_executions
                 (strategy_id, strategy_version, user_id, exchange, mode,
-                 allocated_capital, currency, status)
-            VALUES ($1, '1.0.0', $2, 'bitget', $3, 100, 'USDT', 'RUNNING')
+                 allocated_capital, currency, status, fsm_state)
+            VALUES ($1, '1.0.0', $2, 'bitget', $3, 100, 'USDT', 'RUNNING', 'BUY_ORDER_PENDING')
             RETURNING id
             """,
             strategy_id,
@@ -92,15 +92,16 @@ def _allocation() -> AllocationDecision:
 
 
 async def _fsm_state_writer_for(pool: asyncpg.Pool):
-    calls: list[tuple[int, FSMState]] = []
+    calls: list[tuple[int, FSMState, FSMState]] = []
 
-    async def writer(execution_id: int, new_state: FSMState) -> None:
-        calls.append((execution_id, new_state))
+    async def writer(execution_id: int, expected_state: FSMState, new_state: FSMState) -> None:
+        calls.append((execution_id, expected_state, new_state))
         async with pool.acquire() as conn:
             await conn.execute(
-                "UPDATE strategy_executions SET fsm_state = $2 WHERE id = $1",
+                "UPDATE strategy_executions SET fsm_state = $2 WHERE id = $1 AND fsm_state = $3",
                 execution_id,
                 new_state.value,
+                expected_state.value,
             )
 
     return writer, calls
@@ -239,7 +240,7 @@ async def test_paper_mode_synchronous_fill_advances_fsm_state(pool):
     )
 
     assert result.status == OrderStatus.FILLED
-    assert calls == [(execution_id, FSMState.HOLDING)]
+    assert calls == [(execution_id, FSMState.BUY_ORDER_PENDING, FSMState.HOLDING)]
 
     async with pool.acquire() as conn:
         fsm_state = await conn.fetchval(

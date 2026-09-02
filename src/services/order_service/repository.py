@@ -10,11 +10,13 @@ Order 모델(01번)과 orders 테이블(04번) 사이의 매핑만 담당 — �
 """
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from decimal import Decimal
 from uuid import UUID
 
 import asyncpg
 
+from src.core.db.conditional_write import conditional_update
 from src.data.models.base import AssetClass, Currency, Money
 from src.data.models.trading import Order, OrderSide, OrderStatus, OrderType
 
@@ -95,43 +97,67 @@ async def insert(conn: asyncpg.Connection, order: Order, *, user_id: UUID) -> Or
     return _row_to_order(row)
 
 
-async def update_from_exchange(conn: asyncpg.Connection, order: Order) -> Order:
+async def update_from_exchange(
+    conn: asyncpg.Connection, order: Order, *, expected_status: OrderStatus
+) -> Order:
     """거래소 응답 반영 후(FD-4.2-b/FD-3.4) 상태를 갱신한다. `order_id`로
     대상 행을 특정한다(client_order_id는 UNIQUE라 order_id 대신 써도
-    무방하지만, order_id가 이 시스템의 정식 기본키다)."""
-    row = await conn.fetchrow(
-        """
-        UPDATE orders SET
-            exchange_order_id = $2, status = $3, filled_quantity = $4,
-            average_fill_price = $5, updated_at = now()
-        WHERE order_id = $1
-        RETURNING *
-        """,
-        order.order_id,
-        order.exchange_order_id,
-        order.status.value,
-        order.filled_quantity,
-        order.average_fill_price.amount if order.average_fill_price is not None else None,
+    무방하지만, order_id가 이 시스템의 정식 기본키다).
+
+    레드팀 #2026-09-02-20 — 이 행을 마지막으로 읽었을 때의 status
+    (`expected_status`)와 실제로 쓰는 시점의 status가 다르면(동시에 다른
+    경로가 먼저 갱신) `ConcurrencyConflictError`를 던진다 — 105번 표준의
+    `conditional_update()`를 그대로 쓴다. 호출자는 항상 자신이 읽은
+    order의 갱신 *이전* status를 넘겨야 한다(tick.py/cancel.py/
+    reconcile.py 모두 갱신 직전에 fresh read한 order를 그대로 쓴다)."""
+    row = await conditional_update(
+        conn,
+        table="orders",
+        id_column="order_id",
+        id_value=order.order_id,
+        expected_state_column="status",
+        expected_state_value=expected_status.value,
+        set_values={
+            "exchange_order_id": order.exchange_order_id,
+            "status": order.status.value,
+            "filled_quantity": order.filled_quantity,
+            "average_fill_price": (
+                order.average_fill_price.amount if order.average_fill_price is not None else None
+            ),
+            "updated_at": datetime.now(timezone.utc),
+        },
     )
     return _row_to_order(row)
 
 
-async def update_after_modify(conn: asyncpg.Connection, order: Order) -> Order:
+async def update_after_modify(
+    conn: asyncpg.Connection, order: Order, *, expected_status: OrderStatus
+) -> Order:
     """FD-4.4 전용 — 정정은 status/체결정보뿐 아니라 price/quantity 자체가
-    바뀌므로 update_from_exchange와 별도 UPDATE 문이 필요하다."""
-    row = await conn.fetchrow(
-        """
-        UPDATE orders SET
-            price = $2, quantity = $3, status = $4, updated_at = now()
-        WHERE order_id = $1
-        RETURNING *
-        """,
-        order.order_id,
-        order.price.amount if order.price is not None else None,
-        order.quantity,
-        order.status.value,
+    바뀌므로 update_from_exchange와 별도 UPDATE 문이 필요하다. 동시성
+    방어 원칙은 update_from_exchange와 동일(#2026-09-02-20)."""
+    row = await conditional_update(
+        conn,
+        table="orders",
+        id_column="order_id",
+        id_value=order.order_id,
+        expected_state_column="status",
+        expected_state_value=expected_status.value,
+        set_values={
+            "price": order.price.amount if order.price is not None else None,
+            "quantity": order.quantity,
+            "status": order.status.value,
+            "updated_at": datetime.now(timezone.utc),
+        },
     )
     return _row_to_order(row)
+
+
+async def delete(conn: asyncpg.Connection, order_id: UUID) -> None:
+    """#2026-09-02-19 — claim-then-send 순서에서 거래소 전송 자체가 실패했을
+    때 claim 행을 정리한다. "전송 실패는 DB에 아무 흔적도 남기지 않는다"는
+    기존 불변조건(test_submit_order_network_error_propagates)을 유지한다."""
+    await conn.execute("DELETE FROM orders WHERE order_id = $1", order_id)
 
 
 async def count_recent_trades(

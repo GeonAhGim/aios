@@ -21,6 +21,7 @@ from typing import Any
 
 import asyncpg
 
+from src.core.db.conditional_write import ConcurrencyConflictError, conditional_update
 from src.core.executor.executor import Executor, next_fsm_state_after_fill
 from src.core.loader.risk_policy_loader import RiskPolicy
 from src.core.portfolio.engine import PortfolioEngine
@@ -69,16 +70,27 @@ async def _load_execution_context(
     return dict(execution), fsm_config, strategy["certified_badge"]
 
 
-FsmStateWriter = Callable[[int, FSMState], Awaitable[None]]
+FsmStateWriter = Callable[[int, FSMState, FSMState], Awaitable[None]]
 
 
 async def _make_fsm_state_writer(pool: asyncpg.Pool) -> FsmStateWriter:
-    async def writer(execution_id: int, new_state: FSMState) -> None:
+    async def writer(execution_id: int, expected_state: FSMState, new_state: FSMState) -> None:
+        """레드팀 #2026-09-02-22 — 이전엔 조건없이 덮어써서, 같은 execution_id에
+        대한 두 tick이 동시에 IDLE을 읽고 둘 다 PENDING으로 쓰면 나중 것이
+        조용히 이겨 fsm_state 자체는 하나로 수렴하지만, 그 사이 두 tick 모두
+        이미 실제 주문 제출(Executor.execute) 단계까지 진행해버릴 수 있었다.
+        지금은 `expected_state`(이 tick이 애초에 읽은 값)를 조건으로 걸어,
+        두 tick 중 나중에 도착한 쪽은 여기서 ConcurrencyConflictError를
+        맞고 그 뒤의 Executor.execute() 호출까지 가지 못하고 멈춘다."""
         async with pool.acquire() as conn:
-            await conn.execute(
-                "UPDATE strategy_executions SET fsm_state = $2 WHERE id = $1",
-                execution_id,
-                new_state.value,
+            await conditional_update(
+                conn,
+                table="strategy_executions",
+                id_column="id",
+                id_value=execution_id,
+                expected_state_column="fsm_state",
+                expected_state_value=expected_state.value,
+                set_values={"fsm_state": new_state.value},
             )
 
     return writer
@@ -124,7 +136,7 @@ async def _handle_pending_fill_check(
     )
     next_state = next_fsm_state_after_fill(fsm_config, pending_state)
     writer = await _make_fsm_state_writer(pool)
-    await writer(execution_id, next_state)
+    await writer(execution_id, pending_state, next_state)
 
 
 async def run_execution_tick(
@@ -211,7 +223,17 @@ async def run_execution_tick(
         return  # 다음 틱 재평가 — fsm_state는 IDLE/HOLDING 그대로
 
     writer = await _make_fsm_state_writer(pool)
-    await writer(execution_id, signal.to_state)
+    try:
+        await writer(execution_id, current_fsm_state, signal.to_state)
+    except ConcurrencyConflictError:
+        # 이 execution_id에 대한 다른 tick이 먼저 IDLE/HOLDING을 선점했다 —
+        # RiskEngine 거부와 동일하게 이번 tick은 조용히 포기하고 다음 tick에서
+        # 최신 fsm_state로 다시 평가한다(#2026-09-02-22).
+        logger.info(
+            "run_execution_tick(execution_id=%s): fsm_state 동시성 충돌 — 이번 tick 건너뜁니다.",
+            execution_id,
+        )
+        return
 
     await executor.execute(
         allocation,

@@ -1,4 +1,5 @@
 """FD-4 통합테스트 — 실제 dev/test DB 대상, 거래소는 FakeExchangeAdapter로 대역."""
+import asyncio
 import json
 import uuid
 from decimal import Decimal
@@ -8,6 +9,7 @@ import asyncpg
 import pytest
 from dotenv import dotenv_values
 
+from src.core.db.conditional_write import ConcurrencyConflictError
 from src.core.exceptions import RetryableExchangeError
 from src.data.models.base import AssetClass
 from src.data.models.trading import Order, OrderSide, OrderStatus, OrderType
@@ -19,6 +21,7 @@ from src.services.order_service import (
     resolve_unknown,
     submit_order,
 )
+from src.services.order_service import repository as order_repository
 from tests.integration.conftest import create_test_user
 from tests.integration.fake_exchange_adapter import FakeExchangeAdapter
 
@@ -119,6 +122,37 @@ async def test_submit_order_idempotent_on_same_client_order_id(pool):
     assert first.order_id == second.order_id
 
 
+async def test_submit_order_concurrent_calls_only_send_to_exchange_once(pool):
+    """레드팀 #2026-09-02-19 회귀 테스트 — 이전엔 "SELECT로 없음 확인 →
+    거래소 전송 → INSERT" 순서라 동시 호출 둘 다 SELECT를 통과해 거래소에
+    실제 주문을 두 번 낼 수 있었다. 지금은 거래소 호출 전에 INSERT로
+    client_order_id를 먼저 원자적으로 선점하므로, 동시에 호출해도 실제
+    place_order()는 정확히 1번만 일어나야 한다."""
+    user_id = await create_test_user(pool)
+    execution_id = await _create_running_execution(pool, user_id)
+
+    async def slow_place_order(order: Order) -> Order:
+        # 두 호출이 모두 claim-insert를 마치고 거래소 호출 구간에 동시에
+        # 들어와 있을 시간을 인위적으로 벌어준다(경합 창을 넓힘).
+        await asyncio.sleep(0.05)
+        return order.model_copy(
+            update={"exchange_order_id": f"ex-{uuid.uuid4()}", "status": OrderStatus.SUBMITTED}
+        )
+
+    adapter = FakeExchangeAdapter(on_place_order=slow_place_order)
+    client_order_id = f"concurrent-key-{uuid.uuid4().hex}"
+    order_a = _market_order(execution_id, client_order_id=client_order_id)
+    order_b = _market_order(execution_id, client_order_id=client_order_id)
+
+    results = await asyncio.gather(
+        submit_order(order_a, user_id=user_id, adapter=adapter, pool=pool),
+        submit_order(order_b, user_id=user_id, adapter=adapter, pool=pool),
+    )
+
+    assert adapter.place_order_call_count == 1
+    assert results[0].order_id == results[1].order_id
+
+
 async def test_submit_order_rejected_is_not_an_exception(pool):
     """FD-4.2-b 예외상황 — 거래소 REJECTED는 예외가 아니라 정상 흐름으로
     status=REJECTED 처리된다."""
@@ -153,6 +187,38 @@ async def test_submit_order_network_error_propagates(pool):
             "SELECT * FROM orders WHERE client_order_id = $1", order.client_order_id
         )
     assert row is None  # 전송 실패 — DB에 남지 않아야 함(반쯤 걸친 상태 방지)
+
+
+async def test_update_from_exchange_raises_on_status_mismatch(pool):
+    """레드팀 #2026-09-02-20 회귀 테스트 — 갱신 시점에 실제 DB의 status가
+    호출자가 읽었던 값과 다르면(다른 경로가 먼저 바꿈) 조용히 덮어쓰지
+    않고 ConcurrencyConflictError를 던져야 한다."""
+    user_id = await create_test_user(pool)
+    execution_id = await _create_running_execution(pool, user_id)
+    adapter = FakeExchangeAdapter()
+    order = _market_order(execution_id)
+    submitted = await submit_order(order, user_id=user_id, adapter=adapter, pool=pool)
+    assert submitted.status == OrderStatus.SUBMITTED
+
+    # 다른 경로가 먼저 CANCELLED로 바꿨다고 가정 — 이 시점에 apply_fill이
+    # (여전히 SUBMITTED인 줄 알고) FILLED로 덮어쓰려 하면 충돌해야 한다.
+    async with pool.acquire() as conn:
+        await conn.execute(
+            "UPDATE orders SET status = 'CANCELLED' WHERE order_id = $1", submitted.order_id
+        )
+
+    stale_update = submitted.model_copy(update={"status": OrderStatus.FILLED})
+    async with pool.acquire() as conn:
+        with pytest.raises(ConcurrencyConflictError):
+            await order_repository.update_from_exchange(
+                conn, stale_update, expected_status=OrderStatus.SUBMITTED
+            )
+
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            "SELECT status FROM orders WHERE order_id = $1", submitted.order_id
+        )
+    assert row["status"] == "CANCELLED"  # 충돌한 쓰기는 반영되지 않았어야 함
 
 
 async def test_cancel_order_updates_status(pool):

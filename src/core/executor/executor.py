@@ -34,7 +34,7 @@ from src.services.order_service.submit import PublishFn
 
 logger = logging.getLogger(__name__)
 
-FsmStateWriter = Callable[[int, FSMState], Awaitable[None]]
+FsmStateWriter = Callable[[int, FSMState, FSMState], Awaitable[None]]
 
 
 def next_fsm_state_after_fill(fsm_config: FSMStrategyConfig, pending_state: FSMState) -> FSMState:
@@ -127,6 +127,6 @@ class Executor:
 
         if submitted.status == OrderStatus.FILLED:
             next_state = next_fsm_state_after_fill(fsm_config, pending_fsm_state)
-            await fsm_state_writer(execution_id, next_state)
+            await fsm_state_writer(execution_id, pending_fsm_state, next_state)
 
         return submitted

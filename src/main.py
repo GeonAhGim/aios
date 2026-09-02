@@ -114,7 +114,9 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             try:
                 await alert_service.evaluate_all_active()
             except Exception:
-                logger.exception("alert_evaluation_loop: 이번 주기 평가 실패 — 다음 주기에 재시도합니다.")
+                logger.exception(
+                    "alert_evaluation_loop: 이번 주기 평가 실패 — 다음 주기에 재시도합니다."
+                )
 
     alert_task = asyncio.create_task(_alert_evaluation_loop())
 
