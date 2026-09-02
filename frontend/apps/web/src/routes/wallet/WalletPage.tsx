@@ -4,10 +4,16 @@ import { Alert, Button, Field, Input, PageHeader, Stat } from "@aios/ui-web";
 import { useState, type FormEvent } from "react";
 import { AppShell } from "../../components/layout/AppShell";
 import { ErrorMessage } from "../../components/ErrorMessage";
+import { DuplicateSubmitError, useIdempotentSubmit } from "../../hooks/useIdempotentSubmit";
 
 export function WalletPage() {
   const { data: balance, isLoading } = useWalletBalance();
   const requestTopup = useRequestTopup();
+  // NOTE: api-client의 requestTopup(POST /wallet/topup-requests)은 task-216 범위에서
+  // postIdempotent로 이관되지 않아 Idempotency-Key 헤더를 아직 못 붙인다(api-client 미수정
+  // 제약 — task-321 note 참조). 여기서는 키 수명주기 + in-flight 가드만 적용해 버튼
+  // 연타로 인한 중복 제출은 막는다.
+  const { submit } = useIdempotentSubmit("wallet.topup");
   const [amount, setAmount] = useState("30000");
   const [error, setError] = useState<ApiError | Error | null>(null);
   const [submitted, setSubmitted] = useState<{ id: number; amount: string } | null>(null);
@@ -17,9 +23,10 @@ export function WalletPage() {
     setError(null);
     setSubmitted(null);
     try {
-      const result = await requestTopup.mutateAsync({ amount });
+      const result = await submit(() => requestTopup.mutateAsync({ amount }));
       setSubmitted({ id: result.id, amount: result.requestedAmount });
     } catch (err) {
+      if (err instanceof DuplicateSubmitError) return;
       setError(err instanceof Error ? err : new Error("충전 요청에 실패했습니다."));
     }
   }

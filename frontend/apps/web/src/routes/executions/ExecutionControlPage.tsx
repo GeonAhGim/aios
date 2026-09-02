@@ -14,11 +14,13 @@ import {
 } from "@aios/ui-web";
 import { useState, type FormEvent } from "react";
 import { AppShell } from "../../components/layout/AppShell";
+import { DuplicateSubmitError, useIdempotentSubmit } from "../../hooks/useIdempotentSubmit";
 import { ExecutionCard } from "./components/ExecutionCard";
 
 export function ExecutionControlPage() {
   const { data: executions, isLoading } = useExecutions();
   const createExecution = useCreateExecution();
+  const { submit } = useIdempotentSubmit("executions.create");
   const [strategyId, setStrategyId] = useState("");
   const [strategyVersion, setStrategyVersion] = useState("1.0.0");
   const [allocatedCapital, setAllocatedCapital] = useState("100");
@@ -30,16 +32,22 @@ export function ExecutionControlPage() {
     e.preventDefault();
     setError(null);
     try {
-      await createExecution.mutateAsync({
-        strategyId,
-        strategyVersion,
-        allocatedCapital,
-        currency: "USDT",
-        exchange,
-        mode,
-      });
+      await submit((idempotencyKey) =>
+        createExecution.mutateAsync({
+          body: {
+            strategyId,
+            strategyVersion,
+            allocatedCapital,
+            currency: "USDT",
+            exchange,
+            mode,
+          },
+          idempotencyKey,
+        }),
+      );
       setStrategyId("");
     } catch (err) {
+      if (err instanceof DuplicateSubmitError) return;
       setError(err instanceof ApiError ? err.message : "실행 생성에 실패했습니다.");
     }
   }

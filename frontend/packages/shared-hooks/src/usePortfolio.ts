@@ -38,7 +38,13 @@ export function useExecutions() {
 export function useCreateExecution() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (body: ExecutionCreateRequest) => apiClient.createExecution(body),
+    mutationFn: ({
+      body,
+      idempotencyKey,
+    }: {
+      body: ExecutionCreateRequest;
+      idempotencyKey?: string;
+    }) => apiClient.createExecution(body, idempotencyKey),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["executions"] }),
   });
 }

@@ -6,6 +6,7 @@ import { useState } from "react";
 import { Link, useLocation, useParams } from "react-router-dom";
 import { AppShell } from "../../components/layout/AppShell";
 import { RiskWarningModal } from "../../components/RiskWarningModal";
+import { DuplicateSubmitError, useIdempotentSubmit } from "../../hooks/useIdempotentSubmit";
 
 export function ListingDetailPage() {
   const { listingId } = useParams<{ listingId: string }>();
@@ -17,6 +18,7 @@ export function ListingDetailPage() {
   const [error, setError] = useState<string | null>(null);
   const [riskWarningReason, setRiskWarningReason] = useState<string | null>(null);
   const [purchased, setPurchased] = useState<{ purchaseId: number; status: string } | null>(null);
+  const { submit } = useIdempotentSubmit(`marketplace.purchase:listing-${listingId ?? "unknown"}`);
 
   if (!listingId) return null;
   const id = Number(listingId);
@@ -24,14 +26,17 @@ export function ListingDetailPage() {
   async function attemptPurchase(acknowledged: boolean) {
     setError(null);
     try {
-      const result = await purchase.mutateAsync({
-        listingId: id,
-        body: { riskWarningAcknowledged: acknowledged },
-        idempotencyKey: crypto.randomUUID(),
-      });
+      const result = await submit((idempotencyKey) =>
+        purchase.mutateAsync({
+          listingId: id,
+          body: { riskWarningAcknowledged: acknowledged },
+          idempotencyKey,
+        }),
+      );
       setPurchased({ purchaseId: result.purchaseId, status: result.status });
       setRiskWarningReason(null);
     } catch (err) {
+      if (err instanceof DuplicateSubmitError) return;
       if (err instanceof ApiError) {
         if (!acknowledged && err.message.includes("위험등급")) {
           setRiskWarningReason(err.message);
