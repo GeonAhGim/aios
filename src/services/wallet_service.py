@@ -20,18 +20,31 @@ seller_type='PLATFORM' 리스팅(ADR §2, 동일 커미션 구조로 취급)의 
 수취인도 이 하우스 계정이다 — 플랫폼이 스스로에게 커미션을 떼는 구조가
 되어 실질적으로 판매대금 전액이 이 지갑에 쌓인다(회계상 자연스러움,
 purchase_service.py에 별도 분기 불필요).
+
+LC-12(§5.4 3단계) — `debit`/`credit`→`legacy_wallet_bridge`,
+`confirm_topup`→`application/topup.post_topup` 위임(상세는 그 모듈들의
+docstring). 공개 시그니처·`InsufficientBalanceError`는 불변, 진실은
+이제 `ledger_balance`이고 `user_wallets`/`wallet_transactions`는 투영이다.
 """
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timezone
 from decimal import Decimal
-from typing import cast
 from uuid import UUID
 
 import asyncpg
 from pydantic import BaseModel
 
 from src.core.logging.audit_log import record_audit_log
+from src.foundation.evidence.adapters.postgres_repository import PostgresAuditEventRepository
+from src.foundation.ledger.adapters.legacy_wallet_bridge import (
+    BridgeInsufficientBalanceError,
+    bridge_credit,
+    bridge_debit,
+)
+from src.foundation.ledger.adapters.postgres_balance_repository import PostgresBalanceRepository
+from src.foundation.ledger.adapters.postgres_journal_repository import PostgresJournalRepository
+from src.foundation.ledger.application.topup import post_topup
 
 DEFAULT_PAGE_SIZE = 20
 
@@ -102,30 +115,15 @@ async def debit(
     *,
     related_purchase_id: int | None = None,
 ) -> Decimal:
-    """호출부의 `conn.transaction()` 안에서만 호출한다 — 여기서 별도
-    트랜잭션을 열지 않는다(원자성은 호출부 책임, purchase_service.py 참조).
-    `WHERE ... AND balance >= amount` 조건 자체가 잔액부족 검증과 동시성
-    제어를 겸한다(같은 지갑에 대한 동시 차감 시도 중 하나만 성공)."""
+    """호출부의 `conn.transaction()` 안에서만 호출한다. 잔액부족 검증은
+    `post_entry`(LC-9)의 `FOR UPDATE`+`allow_negative=False`가 겸한다."""
     assert tx_type in _WALLET_TX_TYPES, f"알 수 없는 거래 유형: {tx_type}"
-    row = await conn.fetchrow(
-        "UPDATE user_wallets SET balance = balance - $2, updated_at = now() "
-        "WHERE user_id = $1 AND balance >= $2 RETURNING balance",
-        user_id,
-        amount,
-    )
-    if row is None:
-        raise InsufficientBalanceError("지갑 잔액이 부족합니다.")
-    await conn.execute(
-        "INSERT INTO wallet_transactions "
-        "(user_id, tx_type, amount, balance_after, related_purchase_id) "
-        "VALUES ($1, $2, $3, $4, $5)",
-        user_id,
-        tx_type,
-        -amount,
-        row["balance"],
-        related_purchase_id,
-    )
-    return cast(Decimal, row["balance"])
+    try:
+        return await bridge_debit(
+            conn, user_id, amount, tx_type, related_purchase_id=related_purchase_id
+        )
+    except BridgeInsufficientBalanceError as exc:
+        raise InsufficientBalanceError("지갑 잔액이 부족합니다.") from exc
 
 
 async def credit(
@@ -136,37 +134,23 @@ async def credit(
     *,
     related_purchase_id: int | None = None,
 ) -> Decimal:
-    """지갑이 아직 없는 사용자(가입 후 최초 충전/환불)는 여기서 생성한다
-    — request_topup()은 지갑 존재를 전제하지 않는다."""
+    """지갑이 아직 없는 사용자(가입 후 최초 충전/환불)는 투영에서 생성한다."""
     assert tx_type in _WALLET_TX_TYPES, f"알 수 없는 거래 유형: {tx_type}"
-    row = await conn.fetchrow(
-        "UPDATE user_wallets SET balance = balance + $2, updated_at = now() "
-        "WHERE user_id = $1 RETURNING balance",
-        user_id,
-        amount,
+    return await bridge_credit(
+        conn, user_id, amount, tx_type, related_purchase_id=related_purchase_id
     )
-    if row is None:
-        row = await conn.fetchrow(
-            "INSERT INTO user_wallets (user_id, balance) VALUES ($1, $2) RETURNING balance",
-            user_id,
-            amount,
-        )
-    await conn.execute(
-        "INSERT INTO wallet_transactions "
-        "(user_id, tx_type, amount, balance_after, related_purchase_id) "
-        "VALUES ($1, $2, $3, $4, $5)",
-        user_id,
-        tx_type,
-        amount,
-        row["balance"],
-        related_purchase_id,
-    )
-    return cast(Decimal, row["balance"])
+
+
+def _utcnow() -> datetime:
+    return datetime.now(timezone.utc)
 
 
 class WalletService:
     def __init__(self, pool: asyncpg.Pool) -> None:
         self._pool = pool
+        self._journal = PostgresJournalRepository(pool)
+        self._balances = PostgresBalanceRepository(pool)
+        self._audit = PostgresAuditEventRepository(pool)
 
     async def get_balance(self, user_id: UUID) -> WalletBalance:
         async with self._pool.acquire() as conn:
@@ -184,8 +168,7 @@ class WalletService:
             row = await conn.fetchrow(
                 "INSERT INTO wallet_topup_requests (user_id, requested_amount) "
                 "VALUES ($1, $2) RETURNING *",
-                user_id,
-                amount,
+                user_id, amount,
             )
         return WalletTopupRequest(**dict(row))
 
@@ -199,8 +182,7 @@ class WalletService:
             rows = await conn.fetch(
                 "SELECT * FROM wallet_topup_requests WHERE status = 'PENDING' "
                 "ORDER BY requested_at ASC LIMIT $1 OFFSET $2",
-                page_size,
-                (page - 1) * page_size,
+                page_size, (page - 1) * page_size,
             )
         return WalletTopupPage(
             items=[WalletTopupRequest(**dict(row)) for row in rows],
@@ -227,41 +209,33 @@ class WalletService:
 
             if current["status"] == "CONFIRMED":
                 return WalletTopupConfirmResult(
-                    id=topup_id,
-                    status="CONFIRMED",
-                    balance_after=None,
+                    id=topup_id, status="CONFIRMED", balance_after=None,
                     confirmed_at=current["confirmed_at"],
                 )
 
             updated = await conn.fetchrow(
                 "UPDATE wallet_topup_requests SET status = 'CONFIRMED', confirmed_at = now(), "
                 "confirmed_by = $2 WHERE id = $1 AND status = 'PENDING' RETURNING confirmed_at",
-                topup_id,
-                admin_user_id,
+                topup_id, admin_user_id,
             )
             if updated is None:
                 raise WalletTopupError("이미 다른 관리자가 처리했습니다(동시 처리 충돌).")
 
-            balance_after = await credit(
-                conn, current["user_id"], current["requested_amount"], "TOPUP"
+            balance_after = await post_topup(
+                conn, topup_id, current["user_id"], current["requested_amount"], admin_user_id,
+                journal=self._journal, balances=self._balances, audit=self._audit, clock=_utcnow,
             )
 
             await record_audit_log(
-                conn,
-                actor_agent=str(admin_user_id),
-                action_type="wallet.topup.confirmed",
+                conn, actor_agent=str(admin_user_id), action_type="wallet.topup.confirmed",
                 decision_data={
-                    "topup_id": topup_id,
-                    "user_id": str(current["user_id"]),
+                    "topup_id": topup_id, "user_id": str(current["user_id"]),
                     "amount": str(current["requested_amount"]),
                 },
-                target_type="wallet_topup_request",
-                target_id=str(topup_id),
+                target_type="wallet_topup_request", target_id=str(topup_id),
             )
 
         return WalletTopupConfirmResult(
-            id=topup_id,
-            status="CONFIRMED",
-            balance_after=balance_after,
+            id=topup_id, status="CONFIRMED", balance_after=balance_after,
             confirmed_at=updated["confirmed_at"],
         )
