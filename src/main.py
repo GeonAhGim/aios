@@ -24,6 +24,7 @@ import asyncpg
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from src.api.contracts.handlers import install_exception_handlers
 from src.api.middleware.request_id import RequestIdMiddleware
 from src.core.event_bus.in_process import InProcessEventBus
 from src.core.loader.risk_policy_loader import load_risk_policy
@@ -240,6 +241,14 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
 def create_app() -> FastAPI:
     app = FastAPI(title="AIOS API", lifespan=lifespan)
+
+    # L4 §2.3(C) — 전역 예외 핸들러(src/api/contracts/handlers.py). 지금
+    # 당장은 대부분의 레거시 라우터가 여전히 자체적으로 예외를 잡아
+    # HTTPException으로 변환하므로 이 핸들러가 실제로 개입하는 경우는
+    # 아직 적지만(그 자체가 규칙 안전망 — 어디선가 도메인 예외가 새어
+    # 나가도 구조화되지 않은 500 대신 봉투 형식으로 응답한다), 라우터별
+    # 이관(§9 PLT-2x)이 진행될수록 실제 사용 비중이 늘어난다.
+    install_exception_handlers(app)
 
     # FD-17 프론트엔드(apps/web, 기본 Vite 포트 5173)가 별도 오리진에서 API를
     # 호출하므로 CORS 허용이 필요 — .env CORS_ALLOWED_ORIGINS는 정의만 되어
