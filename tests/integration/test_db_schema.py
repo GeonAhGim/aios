@@ -6,6 +6,7 @@
 Spec: 04_db_schema_v1.7.md, 06_mvp_scope_v1.3.md#§6.3 DoD
 ("audit_log 테이블에 WORM 제약(REVOKE UPDATE, DELETE) 적용 확인")
 """
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from uuid import uuid4
 
@@ -379,4 +380,103 @@ async def test_aios_app_cannot_delete_ledger_posting_line(raw_conn):
             await raw_conn.execute("SET ROLE aios_app")
             await raw_conn.execute(
                 "DELETE FROM ledger_posting_line WHERE entry_id = $1", entry_id
+            )
+
+
+# --- LC-7 (4a1d0c0de006_ledger_holds_payouts) ------------------------------
+
+LEDGER_HOLDS_PAYOUTS_TABLES = {
+    "ledger_hold",
+    "ledger_payout_batch",
+    "ledger_payout_item",
+    "ledger_integrity_check",
+}
+
+
+async def test_ledger_holds_payouts_tables_exist(db_conn):
+    result = await db_conn.execute(
+        text(
+            "SELECT table_name FROM information_schema.tables "
+            "WHERE table_schema = 'public' AND table_name = ANY(:names)"
+        ),
+        {"names": list(LEDGER_HOLDS_PAYOUTS_TABLES)},
+    )
+    found = {row[0] for row in result}
+    assert found == LEDGER_HOLDS_PAYOUTS_TABLES
+
+
+async def _cash_clearing_account_id(conn: asyncpg.Connection):
+    return await conn.fetchval(
+        "SELECT account_id FROM ledger_account WHERE account_code = $1",
+        PLATFORM_CASH_CLEARING,
+    )
+
+
+async def test_ledger_hold_duplicate_purpose_reference_rejected(raw_conn):
+    """LC-7 DoD — UNIQUE(purpose, reference) negative: 같은 (purpose, reference)
+    쌍은 두 번째 홀드 생성 시도를 막아야 한다(이중 홀드 방지)."""
+    audit_event_id = await _insert_audit_event(raw_conn)
+    entry_id = await _insert_entry(raw_conn, audit_event_id=audit_event_id)
+    account_id = await _cash_clearing_account_id(raw_conn)
+    expires_at = datetime.now(timezone.utc) + timedelta(days=1)
+    purpose = f"test-purpose-{uuid4().hex}"
+    reference = f"test-ref-{uuid4().hex}"
+
+    await raw_conn.execute(
+        "INSERT INTO ledger_hold "
+        "(account_id, amount, currency, purpose, reference, state, expires_at, entry_id) "
+        "VALUES ($1, 100.00, 'KRW', $2, $3, 'PENDING', $4, $5)",
+        account_id,
+        purpose,
+        reference,
+        expires_at,
+        entry_id,
+    )
+    with pytest.raises(asyncpg.UniqueViolationError):
+        await raw_conn.execute(
+            "INSERT INTO ledger_hold "
+            "(account_id, amount, currency, purpose, reference, state, expires_at, entry_id) "
+            "VALUES ($1, 50.00, 'KRW', $2, $3, 'PENDING', $4, $5)",
+            account_id,
+            purpose,
+            reference,
+            expires_at,
+            entry_id,
+        )
+
+
+async def test_ledger_hold_invalid_state_rejected(raw_conn):
+    """LC-7 DoD — state CHECK negative: `HoldState`(§4.5)에 없는 값은 DB
+    레벨에서 거부되어야 한다(도메인 검증 우회 시 최후 방어선)."""
+    audit_event_id = await _insert_audit_event(raw_conn)
+    entry_id = await _insert_entry(raw_conn, audit_event_id=audit_event_id)
+    account_id = await _cash_clearing_account_id(raw_conn)
+    expires_at = datetime.now(timezone.utc) + timedelta(days=1)
+
+    with pytest.raises(asyncpg.CheckViolationError):
+        await raw_conn.execute(
+            "INSERT INTO ledger_hold "
+            "(account_id, amount, currency, purpose, reference, state, expires_at, entry_id) "
+            "VALUES ($1, 100.00, 'KRW', $2, $3, 'BOGUS_STATE', $4, $5)",
+            account_id,
+            f"test-purpose-{uuid4().hex}",
+            f"test-ref-{uuid4().hex}",
+            expires_at,
+            entry_id,
+        )
+
+
+async def test_aios_app_cannot_update_ledger_integrity_check(raw_conn):
+    """LC-7 DoD — `ledger_integrity_check`는 WORM: `aios_app` 롤로 UPDATE를
+    시도하면 append-only 가드 트리거가 막아야 한다(LC-6 패턴과 동일)."""
+    check_id = await raw_conn.fetchval(
+        "INSERT INTO ledger_integrity_check (result, report) "
+        "VALUES ('OK', '{}'::jsonb) RETURNING check_id"
+    )
+    with pytest.raises(asyncpg.RaiseError, match="append-only violation"):
+        async with raw_conn.transaction():
+            await raw_conn.execute("SET ROLE aios_app")
+            await raw_conn.execute(
+                "UPDATE ledger_integrity_check SET result = 'DRIFT' WHERE check_id = $1",
+                check_id,
             )
