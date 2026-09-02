@@ -52,7 +52,7 @@ async def _register(client) -> tuple[dict, str]:
     response = await client.post(
         "/auth/register", json={"email": email, "password": STRONG_PASSWORD}
     )
-    token = response.json()["access_token"]
+    token = response.json()["data"]["access_token"]
     # AuthService.issue_token()은 "sub"에 user_id를 담는다(auth_service.py) —
     # 서명 검증 없이 클레임만 꺼낸다(토큰 자체는 client가 방금 서버에서 발급
     # 받은 것이라 여기선 신뢰 문제가 없다).

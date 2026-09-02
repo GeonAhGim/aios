@@ -55,10 +55,10 @@ async def _register(client) -> tuple[str, dict, str]:
         "/auth/register", json={"email": email, "password": STRONG_PASSWORD}
     )
     body = response.json()
-    token = body["access_token"]
+    token = body["data"]["access_token"]
     headers = {"Authorization": f"Bearer {token}"}
     me = await client.get("/users/me", headers=headers)
-    return email, headers, me.json()["user_id"]
+    return email, headers, me.json()["data"]["user_id"]
 
 
 async def _create_strategy(pool, owner_user_id):

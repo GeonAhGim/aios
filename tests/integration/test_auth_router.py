@@ -35,7 +35,14 @@ async def pool():
 @pytest.fixture
 async def client():
     async with app.router.lifespan_context(app):
-        transport = ASGITransport(app=app)
+        # raise_app_exceptions=False — 도메인 예외(AuthError 등)는 전역
+        # Exception 핸들러(src/api/contracts/handlers.py)가 처리하는데,
+        # FastAPI가 그 핸들러를 ServerErrorMiddleware로 승격시켜 정상
+        # 응답을 보낸 뒤에도 예외를 다시 던진다(Starlette 설계) — httpx
+        # ASGITransport 기본값(True)은 그걸 테스트 프로세스로 재전파해
+        # 정상적으로 처리된 4xx 응답까지 테스트 실패로 만든다
+        # (tests/unit/api/contracts/test_handlers.py에 동일 근거 기록됨).
+        transport = ASGITransport(app=app, raise_app_exceptions=False)
         async with AsyncClient(transport=transport, base_url="http://test") as ac:
             yield ac
 
@@ -51,8 +58,10 @@ async def test_register_returns_access_token(client):
 
     assert response.status_code == 201
     body = response.json()
-    assert "access_token" in body
-    assert body["token_type"] == "bearer"
+    assert "trace_id" in body["meta"]
+    data = body["data"]
+    assert "access_token" in data
+    assert data["token_type"] == "bearer"
 
 
 async def test_register_rejects_weak_password(client):
@@ -72,7 +81,7 @@ async def test_login_after_register_succeeds(client):
     )
 
     assert response.status_code == 200
-    assert "access_token" in response.json()
+    assert "access_token" in response.json()["data"]
 
 
 async def test_suspended_account_loses_access_mid_session_not_just_at_next_login(client, pool):
@@ -87,7 +96,7 @@ async def test_suspended_account_loses_access_mid_session_not_just_at_next_login
     register_response = await client.post(
         "/auth/register", json={"email": email, "password": STRONG_PASSWORD}
     )
-    headers = {"Authorization": f"Bearer {register_response.json()['access_token']}"}
+    headers = {"Authorization": f"Bearer {register_response.json()['data']['access_token']}"}
 
     before_suspend = await client.get("/v1/foundation/trust/status", headers=headers)
     assert before_suspend.status_code == 200
@@ -108,6 +117,9 @@ async def test_login_with_wrong_password_rejected(client):
     )
 
     assert response.status_code == 401
+    body = response.json()
+    assert body["error_code"] == "AUTH_INVALID_CREDENTIALS"
+    assert "trace_id" in body
 
 
 async def test_get_me_requires_authentication(client):
@@ -121,12 +133,12 @@ async def test_get_me_returns_current_user_with_valid_token(client):
     register_response = await client.post(
         "/auth/register", json={"email": email, "password": STRONG_PASSWORD}
     )
-    token = register_response.json()["access_token"]
+    token = register_response.json()["data"]["access_token"]
 
     response = await client.get("/users/me", headers={"Authorization": f"Bearer {token}"})
 
     assert response.status_code == 200
-    body = response.json()
+    body = response.json()["data"]
     assert body["email"] == email
     assert body["mfa_enabled"] is False
 
@@ -146,19 +158,19 @@ async def test_mfa_setup_and_verify_round_trip(client):
     register_response = await client.post(
         "/auth/register", json={"email": email, "password": STRONG_PASSWORD}
     )
-    token = register_response.json()["access_token"]
+    token = register_response.json()["data"]["access_token"]
     headers = {"Authorization": f"Bearer {token}"}
 
     setup_response = await client.post("/auth/mfa/setup", headers=headers)
     assert setup_response.status_code == 200
-    secret = setup_response.json()["secret"]
+    secret = setup_response.json()["data"]["secret"]
 
     code = pyotp.totp.TOTP(secret).now()
     verify_response = await client.post(
         "/auth/mfa/verify", json={"totp_code": code}, headers=headers
     )
     assert verify_response.status_code == 200
-    assert verify_response.json()["mfa_enabled"] is True
+    assert verify_response.json()["data"]["mfa_enabled"] is True
 
     login_without_code = await client.post(
         "/auth/login", json={"email": email, "password": STRONG_PASSWORD}
@@ -186,11 +198,11 @@ async def test_mfa_resetup_without_password_rejected_when_already_enabled(client
     register_response = await client.post(
         "/auth/register", json={"email": email, "password": STRONG_PASSWORD}
     )
-    token = register_response.json()["access_token"]
+    token = register_response.json()["data"]["access_token"]
     headers = {"Authorization": f"Bearer {token}"}
 
     setup_response = await client.post("/auth/mfa/setup", headers=headers)
-    secret = setup_response.json()["secret"]
+    secret = setup_response.json()["data"]["secret"]
     code = pyotp.totp.TOTP(secret).now()
     await client.post("/auth/mfa/verify", json={"totp_code": code}, headers=headers)
 
@@ -205,11 +217,11 @@ async def test_mfa_resetup_with_correct_password_succeeds(client):
     register_response = await client.post(
         "/auth/register", json={"email": email, "password": STRONG_PASSWORD}
     )
-    token = register_response.json()["access_token"]
+    token = register_response.json()["data"]["access_token"]
     headers = {"Authorization": f"Bearer {token}"}
 
     setup_response = await client.post("/auth/mfa/setup", headers=headers)
-    old_secret = setup_response.json()["secret"]
+    old_secret = setup_response.json()["data"]["secret"]
     code = pyotp.totp.TOTP(old_secret).now()
     await client.post("/auth/mfa/verify", json={"totp_code": code}, headers=headers)
 
@@ -223,7 +235,7 @@ async def test_mfa_resetup_with_correct_password_succeeds(client):
             headers=headers,
         )
     assert resetup_response.status_code == 200
-    new_secret = resetup_response.json()["secret"]
+    new_secret = resetup_response.json()["data"]["secret"]
     assert new_secret != old_secret
 
 

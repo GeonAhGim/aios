@@ -64,7 +64,10 @@ async def client(event_bus):
     async with app.router.lifespan_context(app):
         app.dependency_overrides[get_credential_resolver] = _override_resolver
         app.dependency_overrides[get_event_bus] = lambda: event_bus
-        transport = ASGITransport(app=app)
+        # raise_app_exceptions=False — 이유는 test_auth_router.py의 client
+        # 픽스처 주석 참조(도메인 예외가 전역 Exception 핸들러를 거쳐도
+        # httpx가 원본 예외를 재전파해 정상 처리된 4xx까지 실패로 만든다).
+        transport = ASGITransport(app=app, raise_app_exceptions=False)
         async with AsyncClient(transport=transport, base_url="http://test") as ac:
             yield ac
         app.dependency_overrides.pop(get_credential_resolver, None)
@@ -80,10 +83,10 @@ async def _register(client) -> tuple[dict, str]:
     response = await client.post(
         "/auth/register", json={"email": email, "password": STRONG_PASSWORD}
     )
-    token = response.json()["access_token"]
+    token = response.json()["data"]["access_token"]
     headers = {"Authorization": f"Bearer {token}"}
     me = await client.get("/users/me", headers=headers)
-    return headers, me.json()["user_id"]
+    return headers, me.json()["data"]["user_id"]
 
 
 async def _make_admin(pool, user_id):
@@ -181,7 +184,7 @@ async def test_verification_queue_visible_to_verifier(client, pool):
     response = await client.get("/admin/verification-queue", headers=verifier_headers)
 
     assert response.status_code == 200
-    assert any(item["listing_id"] == listing_id for item in response.json())
+    assert any(item["listing_id"] == listing_id for item in response.json()["data"])
 
 
 async def test_verification_queue_requires_verifier_role(client):
@@ -248,11 +251,11 @@ async def test_admin_can_list_and_resolve_dispute(client, pool):
 
     list_response = await client.get("/admin/disputes", headers=admin_headers)
     assert list_response.status_code == 200
-    assert any(d["id"] == dispute_id for d in list_response.json())
+    assert any(d["id"] == dispute_id for d in list_response.json()["data"])
 
     detail_response = await client.get(f"/admin/disputes/{dispute_id}", headers=admin_headers)
     assert detail_response.status_code == 200
-    assert detail_response.json()["dispute_id"] == dispute_id
+    assert detail_response.json()["data"]["dispute_id"] == dispute_id
 
     resolve_response = await client.post(
         f"/admin/disputes/{dispute_id}/resolve",
@@ -260,7 +263,7 @@ async def test_admin_can_list_and_resolve_dispute(client, pool):
         headers=admin_headers,
     )
     assert resolve_response.status_code == 200
-    assert resolve_response.json()["listing_status"] == "DELISTED"
+    assert resolve_response.json()["data"]["listing_status"] == "DELISTED"
 
 
 async def test_dispute_endpoints_require_admin_role(client):
@@ -285,7 +288,7 @@ async def test_admin_can_list_and_change_user_status(client, pool):
         f"/admin/users/{target_id}/status", json={"status": "SUSPENDED"}, headers=admin_headers
     )
     assert response.status_code == 200
-    assert response.json()["status"] == "SUSPENDED"
+    assert response.json()["data"]["status"] == "SUSPENDED"
 
 
 async def test_suspended_user_existing_token_is_rejected(client, pool):
@@ -315,6 +318,7 @@ async def test_admin_cannot_set_deleted_status(client, pool):
     )
 
     assert response.status_code == 400
+    assert response.json()["error_code"] == "VALIDATION_INVALID_FIELD"
 
 
 async def test_admin_can_suspend_seller(client, pool):
@@ -329,7 +333,7 @@ async def test_admin_can_suspend_seller(client, pool):
     )
 
     assert response.status_code == 200
-    assert response.json()["seller_suspended"] is True
+    assert response.json()["data"]["seller_suspended"] is True
 
 
 async def test_admin_can_list_audit_log(client, pool):
@@ -349,7 +353,7 @@ async def test_admin_can_list_audit_log(client, pool):
     )
 
     assert response.status_code == 200
-    body = response.json()
+    body = response.json()["data"]
     assert body["total"] >= 1
     assert any(item["target_id"] == target_id for item in body["items"])
 
@@ -376,20 +380,21 @@ async def test_admin_can_view_and_confirm_pending_wallet_topup(client, pool):
     probe = await client.get(
         "/admin/wallet/topups/pending", params={"page_size": 1}, headers=admin_headers
     )
-    total = probe.json()["total"]
+    total = probe.json()["data"]["total"]
     pending_response = await client.get(
         "/admin/wallet/topups/pending", params={"page_size": total}, headers=admin_headers
     )
     assert pending_response.status_code == 200
-    assert any(item["id"] == topup_id for item in pending_response.json()["items"])
+    assert any(item["id"] == topup_id for item in pending_response.json()["data"]["items"])
 
     confirm_response = await client.post(
         f"/admin/wallet/topups/{topup_id}/confirm",
         headers={**admin_headers, "Idempotency-Key": f"test-{uuid.uuid4().hex}"},
     )
     assert confirm_response.status_code == 200
-    assert confirm_response.json()["status"] == "CONFIRMED"
-    assert Decimal(str(confirm_response.json()["balance_after"])) == Decimal("30000")
+    confirm_body = confirm_response.json()["data"]
+    assert confirm_body["status"] == "CONFIRMED"
+    assert Decimal(str(confirm_body["balance_after"])) == Decimal("30000")
 
 
 async def test_admin_can_create_platform_listing(client, pool):
@@ -404,7 +409,7 @@ async def test_admin_can_create_platform_listing(client, pool):
     )
 
     assert response.status_code == 201
-    body = response.json()
+    body = response.json()["data"]
     assert body["seller_type"] == "PLATFORM"
     assert body["status"] == "LISTED"
 
@@ -447,7 +452,7 @@ async def test_admin_can_list_pending_approval_requests(client, pool):
     )
 
     assert response.status_code == 200
-    assert any(item["id"] == platform_request.id for item in response.json())
+    assert any(item["id"] == platform_request.id for item in response.json()["data"])
 
 
 async def test_pending_approval_requests_require_admin_role(client):
@@ -491,7 +496,7 @@ async def test_admin_can_approve_live_execution_request(client, pool):
     )
 
     assert approve_response.status_code == 200
-    assert approve_response.json()["status"] == "APPROVED"
+    assert approve_response.json()["data"]["status"] == "APPROVED"
 
 
 async def test_admin_can_reject_approval_request(client, pool):
@@ -520,7 +525,7 @@ async def test_admin_can_reject_approval_request(client, pool):
     )
 
     assert response.status_code == 200
-    assert response.json()["status"] == "REJECTED"
+    assert response.json()["data"]["status"] == "REJECTED"
 
 
 async def test_admin_endpoints_require_authentication(client):

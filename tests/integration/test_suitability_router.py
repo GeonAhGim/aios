@@ -53,7 +53,7 @@ async def _register(client) -> dict:
     response = await client.post(
         "/auth/register", json={"email": email, "password": STRONG_PASSWORD}
     )
-    token = response.json()["access_token"]
+    token = response.json()["data"]["access_token"]
     return {"Authorization": f"Bearer {token}"}
 
 
@@ -162,7 +162,7 @@ async def test_reassessment_warns_on_running_execution_still_mismatched(
 ):
     headers = await _register(client)
     me = await client.get("/users/me", headers=headers)
-    user_id = me.json()["user_id"]
+    user_id = me.json()["data"]["user_id"]
 
     await client.post("/users/me/risk-assessment", json=_STABLE_ANSWERS, headers=headers)
     await _create_running_execution(pool, user_id, risk_level="공격형")
@@ -185,7 +185,7 @@ async def test_reassessment_to_still_mismatched_neutral_does_not_warn_for_matchi
 ):
     headers = await _register(client)
     me = await client.get("/users/me", headers=headers)
-    user_id = me.json()["user_id"]
+    user_id = me.json()["data"]["user_id"]
 
     await client.post("/users/me/risk-assessment", json=_STABLE_ANSWERS, headers=headers)
     await _create_running_execution(pool, user_id, risk_level="안정형")

@@ -9,6 +9,8 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException, status
 
+from src.api.contracts.envelope import ApiResponse, ok
+from src.api.contracts.error_codes import ErrorCode
 from src.api.deps import get_auth_service, get_current_user, get_mfa_service, reauthenticate
 from src.api.schemas.auth import (
     LoginRequest,
@@ -17,8 +19,8 @@ from src.api.schemas.auth import (
     SignupRequest,
     TokenResponse,
 )
-from src.services.auth_service import AuthError, AuthService, User
-from src.services.mfa_service import MfaError, MfaService, MfaSetupResult
+from src.services.auth_service import AuthService, User
+from src.services.mfa_service import MfaService, MfaSetupResult
 
 router = APIRouter()
 
@@ -26,31 +28,25 @@ router = APIRouter()
 @router.post("/register", status_code=status.HTTP_201_CREATED)
 async def register(
     body: SignupRequest, auth: AuthService = Depends(get_auth_service)
-) -> TokenResponse:
-    try:
-        user = await auth.signup(body.email, body.password)
-    except AuthError as exc:
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from exc
-    return TokenResponse(access_token=auth.issue_token(user))
+) -> ApiResponse[TokenResponse]:
+    user = await auth.signup(body.email, body.password)
+    return ok(TokenResponse(access_token=auth.issue_token(user)))
 
 
 @router.post("/login")
 async def login(
     body: LoginRequest, auth: AuthService = Depends(get_auth_service)
-) -> TokenResponse:
-    try:
-        user = await auth.authenticate(body.email, body.password, totp_code=body.totp_code)
-    except AuthError as exc:
-        raise HTTPException(status.HTTP_401_UNAUTHORIZED, str(exc)) from exc
-    return TokenResponse(access_token=auth.issue_token(user))
+) -> ApiResponse[TokenResponse]:
+    user = await auth.authenticate(body.email, body.password, totp_code=body.totp_code)
+    return ok(TokenResponse(access_token=auth.issue_token(user)))
 
 
 @router.post("/logout")
-async def logout(user: User = Depends(get_current_user)) -> dict[str, str]:
+async def logout(user: User = Depends(get_current_user)) -> ApiResponse[dict[str, str]]:
     """Draft — stateless JWT라 서버측 무효화 메커니즘은 착수 시 확정 필요
     (16_backend_signatures.md 원문 그대로, 지금은 클라이언트가 토큰을
     버리는 것으로 충분하다고 가정)."""
-    return {"status": "logged_out"}
+    return ok({"status": "logged_out"})
 
 
 @router.post("/mfa/setup")
@@ -59,7 +55,7 @@ async def setup_mfa(
     user: User = Depends(get_current_user),
     auth: AuthService = Depends(get_auth_service),
     mfa: MfaService = Depends(get_mfa_service),
-) -> MfaSetupResult:
+) -> ApiResponse[MfaSetupResult]:
     body = body or MfaSetupRequest()
     if user.mfa_enabled:
         # 레드팀 감사 #11 — 이미 MFA가 켜진 계정이 다시 이 엔드포인트를
@@ -70,10 +66,14 @@ async def setup_mfa(
         if not body.password:
             raise HTTPException(
                 status.HTTP_403_FORBIDDEN,
-                "이미 활성화된 MFA를 재설정하려면 비밀번호 재인증이 필요합니다.",
+                {
+                    "error_code": ErrorCode.AUTH_MFA_REQUIRED.value,
+                    "message": "이미 활성화된 MFA를 재설정하려면 비밀번호 재인증이 필요합니다.",
+                },
             )
         await reauthenticate(auth, user, body.password, body.totp_code)
-    return await mfa.setup(user.user_id, user.email)
+    result = await mfa.setup(user.user_id, user.email)
+    return ok(result)
 
 
 @router.post("/mfa/verify")
@@ -81,9 +81,6 @@ async def verify_mfa(
     body: MfaVerifyRequest,
     user: User = Depends(get_current_user),
     mfa: MfaService = Depends(get_mfa_service),
-) -> dict[str, bool]:
-    try:
-        await mfa.verify(user.user_id, body.totp_code)
-    except MfaError as exc:
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from exc
-    return {"mfa_enabled": True}
+) -> ApiResponse[dict[str, bool]]:
+    await mfa.verify(user.user_id, body.totp_code)
+    return ok({"mfa_enabled": True})

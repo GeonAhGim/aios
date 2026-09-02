@@ -49,10 +49,10 @@ async def _register(client) -> tuple[dict, str]:
     response = await client.post(
         "/auth/register", json={"email": email, "password": STRONG_PASSWORD}
     )
-    token = response.json()["access_token"]
+    token = response.json()["data"]["access_token"]
     headers = {"Authorization": f"Bearer {token}"}
     me = await client.get("/users/me", headers=headers)
-    return headers, me.json()["user_id"]
+    return headers, me.json()["data"]["user_id"]
 
 
 async def test_timeline_requires_authentication(client):

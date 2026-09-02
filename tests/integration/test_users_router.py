@@ -43,7 +43,10 @@ async def client(event_bus):
 
     async with app.router.lifespan_context(app):
         app.dependency_overrides[get_event_bus] = lambda: event_bus
-        transport = ASGITransport(app=app)
+        # raise_app_exceptions=False — 이유는 test_auth_router.py의 client
+        # 픽스처 주석 참조(도메인 예외가 전역 Exception 핸들러를 거쳐도
+        # httpx가 원본 예외를 재전파해 정상 처리된 4xx까지 실패로 만든다).
+        transport = ASGITransport(app=app, raise_app_exceptions=False)
         async with AsyncClient(transport=transport, base_url="http://test") as ac:
             yield ac
         app.dependency_overrides.pop(get_event_bus, None)
@@ -65,14 +68,14 @@ async def _register(client) -> tuple[str, dict]:
     response = await client.post(
         "/auth/register", json={"email": email, "password": STRONG_PASSWORD}
     )
-    token = response.json()["access_token"]
+    token = response.json()["data"]["access_token"]
     return email, {"Authorization": f"Bearer {token}"}
 
 
 async def _register_with_id(client) -> tuple[dict, uuid.UUID]:
     _, headers = await _register(client)
     me = await client.get("/users/me", headers=headers)
-    return headers, uuid.UUID(me.json()["user_id"])
+    return headers, uuid.UUID(me.json()["data"]["user_id"])
 
 
 # ---------- approval settings ----------
@@ -84,7 +87,7 @@ async def test_get_approval_settings_defaults_to_solo(client):
     response = await client.get("/users/me/approval-settings", headers=headers)
 
     assert response.status_code == 200
-    assert response.json()["mode"] == "SOLO"
+    assert response.json()["data"]["mode"] == "SOLO"
 
 
 async def test_update_approval_settings_to_dual(client):
@@ -97,7 +100,7 @@ async def test_update_approval_settings_to_dual(client):
     )
 
     assert response.status_code == 200
-    assert response.json()["mode"] == "DUAL"
+    assert response.json()["data"]["mode"] == "DUAL"
 
 
 async def test_update_approval_settings_dual_without_contact_rejected(client):
@@ -108,6 +111,7 @@ async def test_update_approval_settings_dual_without_contact_rejected(client):
     )
 
     assert response.status_code == 400
+    assert response.json()["error_code"] == "VALIDATION_INVALID_FIELD"
 
 
 async def test_approval_settings_requires_authentication(client):
@@ -155,7 +159,7 @@ async def test_register_and_list_whitelist_entry(client, event_bus):
 
     list_response = await client.get("/users/me/withdrawal-whitelist", headers=headers)
     assert list_response.status_code == 200
-    entries = list_response.json()
+    entries = list_response.json()["data"]
     assert any(e["destination_address"] == "bc1qcoldwallet" for e in entries)
 
 
@@ -163,7 +167,7 @@ async def test_register_whitelist_entry_with_mfa_requires_totp(client):
     email, headers = await _register(client)
 
     setup_response = await client.post("/auth/mfa/setup", headers=headers)
-    secret = setup_response.json()["secret"]
+    secret = setup_response.json()["data"]["secret"]
     code = pyotp.totp.TOTP(secret).now()
     await client.post("/auth/mfa/verify", json={"totp_code": code}, headers=headers)
 
@@ -214,7 +218,7 @@ async def test_request_deletion_succeeds_with_correct_password(client):
     )
 
     assert response.status_code == 200
-    assert response.json()["status"] == "PENDING_DELETION"
+    assert response.json()["data"]["status"] == "PENDING_DELETION"
 
 
 async def test_request_deletion_rejects_wrong_password(client):
@@ -224,7 +228,12 @@ async def test_request_deletion_rejects_wrong_password(client):
         "/users/me/delete", json={"password": "WrongPassword1!"}, headers=headers
     )
 
-    assert response.status_code == 400
+    # AccountDeletionError는 "존재하지 않는 사용자"/"비밀번호 불일치"/"이미
+    # 탈퇴 대기중" 등 여러 사유를 한 클래스로 묶는다(exception_mapping.py
+    # 문서화된 한계) — EXCEPTION_MAP은 대표 사유로 STATE_INVALID_TRANSITION
+    # (409)에 매핑한다.
+    assert response.status_code == 409
+    assert response.json()["error_code"] == "STATE_INVALID_TRANSITION"
 
 
 async def test_relogin_after_deletion_request_cancels_it(client):
@@ -236,11 +245,11 @@ async def test_relogin_after_deletion_request_cancels_it(client):
     )
     assert login_response.status_code == 200
 
-    token = login_response.json()["access_token"]
+    token = login_response.json()["data"]["access_token"]
     me_response = await client.get(
         "/users/me", headers={"Authorization": f"Bearer {token}"}
     )
-    assert me_response.json()["status"] == "ACTIVE"
+    assert me_response.json()["data"]["status"] == "ACTIVE"
 
 
 # ---------- self-service 승인 요청 (FD-10.1 SOLO/DUAL 갭 해소) ----------
@@ -272,7 +281,7 @@ async def test_list_my_approval_requests_shows_own_pending_request(client, pool)
     response = await client.get("/users/me/approval-requests", headers=headers)
 
     assert response.status_code == 200
-    assert any(item["id"] == request.id for item in response.json())
+    assert any(item["id"] == request.id for item in response.json()["data"])
 
 
 async def test_self_approve_solo_request_succeeds_after_wait(client, pool):
@@ -293,7 +302,7 @@ async def test_self_approve_solo_request_succeeds_after_wait(client, pool):
     )
 
     assert response.status_code == 200
-    assert response.json()["status"] == "APPROVED"
+    assert response.json()["data"]["status"] == "APPROVED"
 
 
 async def test_self_approve_rejects_other_users_request(client, pool):
@@ -334,4 +343,4 @@ async def test_self_reject_own_request_succeeds(client, pool):
     )
 
     assert response.status_code == 200
-    assert response.json()["status"] == "REJECTED"
+    assert response.json()["data"]["status"] == "REJECTED"

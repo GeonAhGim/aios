@@ -87,7 +87,7 @@ async def _register_user(client) -> dict:
     response = await client.post(
         "/auth/register", json={"email": email, "password": STRONG_PASSWORD}
     )
-    token = response.json()["access_token"]
+    token = response.json()["data"]["access_token"]
     return {"Authorization": f"Bearer {token}"}
 
 

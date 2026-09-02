@@ -12,6 +12,8 @@ from __future__ import annotations
 import asyncpg
 from fastapi import APIRouter, Depends, HTTPException, status
 
+from src.api.contracts.envelope import ApiResponse, ok
+from src.api.contracts.error_codes import ErrorCode
 from src.api.deps import get_auth_service, get_current_user, get_pool, reauthenticate
 from src.api.schemas.account import (
     ApprovalSettingsRequest,
@@ -29,30 +31,27 @@ from src.api.service_deps import (
     get_approval_settings_service,
     get_withdrawal_whitelist_service,
 )
-from src.core.approval.service import ApprovalError, ApprovalRequest, approve, list_pending, reject
-from src.services.account_deletion_service import AccountDeletionError, AccountDeletionService
-from src.services.approval_settings_service import ApprovalSettingsError, ApprovalSettingsService
+from src.core.approval.service import ApprovalRequest, approve, list_pending, reject
+from src.services.account_deletion_service import AccountDeletionService
+from src.services.approval_settings_service import ApprovalSettingsService
 from src.services.auth_service import AuthService, User
-from src.services.withdrawal_whitelist_service import (
-    WithdrawalWhitelistError,
-    WithdrawalWhitelistService,
-)
+from src.services.withdrawal_whitelist_service import WithdrawalWhitelistService
 
 router = APIRouter()
 
 
 @router.get("/me")
-async def get_me(user: User = Depends(get_current_user)) -> UserResponse:
-    return to_user_response(user)
+async def get_me(user: User = Depends(get_current_user)) -> ApiResponse[UserResponse]:
+    return ok(to_user_response(user))
 
 
 @router.get("/me/approval-settings")
 async def get_approval_settings(
     user: User = Depends(get_current_user),
     service: ApprovalSettingsService = Depends(get_approval_settings_service),
-) -> ApprovalSettingsResponse:
+) -> ApiResponse[ApprovalSettingsResponse]:
     settings = await service.get(user.user_id)
-    return to_approval_settings_response(settings)
+    return ok(to_approval_settings_response(settings))
 
 
 @router.put("/me/approval-settings")
@@ -60,26 +59,23 @@ async def update_approval_settings(
     body: ApprovalSettingsRequest,
     user: User = Depends(get_current_user),
     service: ApprovalSettingsService = Depends(get_approval_settings_service),
-) -> ApprovalSettingsResponse:
-    try:
-        settings = await service.update(
-            user.user_id,
-            mode=body.mode,
-            second_approver_contact=body.second_approver_contact,
-            risk_warning_acknowledged=body.risk_warning_acknowledged,
-        )
-    except ApprovalSettingsError as exc:
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from exc
-    return to_approval_settings_response(settings)
+) -> ApiResponse[ApprovalSettingsResponse]:
+    settings = await service.update(
+        user.user_id,
+        mode=body.mode,
+        second_approver_contact=body.second_approver_contact,
+        risk_warning_acknowledged=body.risk_warning_acknowledged,
+    )
+    return ok(to_approval_settings_response(settings))
 
 
 @router.get("/me/withdrawal-whitelist")
 async def list_whitelist_entries(
     user: User = Depends(get_current_user),
     service: WithdrawalWhitelistService = Depends(get_withdrawal_whitelist_service),
-) -> list[WhitelistEntryResponse]:
+) -> ApiResponse[list[WhitelistEntryResponse]]:
     entries = await service.list_for_user(user.user_id)
-    return [to_whitelist_response(entry) for entry in entries]
+    return ok([to_whitelist_response(entry) for entry in entries])
 
 
 @router.post("/me/withdrawal-whitelist", status_code=status.HTTP_201_CREATED)
@@ -88,18 +84,15 @@ async def register_whitelist_entry(
     user: User = Depends(get_current_user),
     auth: AuthService = Depends(get_auth_service),
     service: WithdrawalWhitelistService = Depends(get_withdrawal_whitelist_service),
-) -> WhitelistEntryResponse:
+) -> ApiResponse[WhitelistEntryResponse]:
     await reauthenticate(auth, user, body.password, body.totp_code)
-    try:
-        entry = await service.register(
-            user.user_id,
-            exchange=body.exchange,
-            destination_address=body.destination_address,
-            label=body.label,
-        )
-    except WithdrawalWhitelistError as exc:
-        raise HTTPException(status.HTTP_409_CONFLICT, str(exc)) from exc
-    return to_whitelist_response(entry)
+    entry = await service.register(
+        user.user_id,
+        exchange=body.exchange,
+        destination_address=body.destination_address,
+        label=body.label,
+    )
+    return ok(to_whitelist_response(entry))
 
 
 @router.post("/me/delete")
@@ -107,13 +100,10 @@ async def request_account_deletion(
     body: DeletionRequest,
     user: User = Depends(get_current_user),
     service: AccountDeletionService = Depends(get_account_deletion_service),
-) -> DeletionResponse:
-    try:
-        result = await service.request_deletion(user.user_id, body.password)
-    except AccountDeletionError as exc:
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from exc
-    return DeletionResponse(
-        status=result.status, deletion_effective_at=result.deletion_effective_at
+) -> ApiResponse[DeletionResponse]:
+    result = await service.request_deletion(user.user_id, body.password)
+    return ok(
+        DeletionResponse(status=result.status, deletion_effective_at=result.deletion_effective_at)
     )
 
 
@@ -121,8 +111,8 @@ async def request_account_deletion(
 async def list_my_approval_requests(
     user: User = Depends(get_current_user),
     pool: asyncpg.Pool = Depends(get_pool),
-) -> list[ApprovalRequest]:
-    return await list_pending(pool, user_id=user.user_id)
+) -> ApiResponse[list[ApprovalRequest]]:
+    return ok(await list_pending(pool, user_id=user.user_id))
 
 
 async def _require_own_request(pool: asyncpg.Pool, request_id: int, user: User) -> None:
@@ -133,7 +123,11 @@ async def _require_own_request(pool: asyncpg.Pool, request_id: int, user: User) 
     own_pending = await list_pending(pool, user_id=user.user_id)
     if not any(r.id == request_id for r in own_pending):
         raise HTTPException(
-            status.HTTP_403_FORBIDDEN, "본인의 승인 요청만 처리할 수 있습니다."
+            status.HTTP_403_FORBIDDEN,
+            {
+                "error_code": ErrorCode.AUTHZ_FORBIDDEN.value,
+                "message": "본인의 승인 요청만 처리할 수 있습니다.",
+            },
         )
 
 
@@ -142,12 +136,9 @@ async def approve_my_request(
     request_id: int,
     user: User = Depends(get_current_user),
     pool: asyncpg.Pool = Depends(get_pool),
-) -> ApprovalRequest:
+) -> ApiResponse[ApprovalRequest]:
     await _require_own_request(pool, request_id, user)
-    try:
-        return await approve(pool, request_id, user.user_id)
-    except ApprovalError as exc:
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from exc
+    return ok(await approve(pool, request_id, user.user_id))
 
 
 @router.post("/me/approval-requests/{request_id}/reject")
@@ -155,9 +146,6 @@ async def reject_my_request(
     request_id: int,
     user: User = Depends(get_current_user),
     pool: asyncpg.Pool = Depends(get_pool),
-) -> ApprovalRequest:
+) -> ApiResponse[ApprovalRequest]:
     await _require_own_request(pool, request_id, user)
-    try:
-        return await reject(pool, request_id, user.user_id)
-    except ApprovalError as exc:
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from exc
+    return ok(await reject(pool, request_id, user.user_id))
