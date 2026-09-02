@@ -20,7 +20,12 @@ from dotenv import dotenv_values
 from src.core.safety.heartbeat import write_heartbeat
 from src.core.safety.split_brain import SplitBrainDiagnostics
 from src.core.safety.watchdog import WatchdogAction, WatchdogDecision, WatchdogService, decide
-from src.watchdog_process import _apply_decision, _LatestExchangeHealth, run_one_cycle
+from src.watchdog_process import (
+    _apply_decision,
+    _LatestExchangeHealth,
+    compute_system_equity,
+    run_one_cycle,
+)
 from tests.integration.conftest import create_test_user
 
 
@@ -297,3 +302,43 @@ async def test_write_heartbeat_leaves_no_temp_file_and_content_is_valid(tmp_path
     assert heartbeat.exists()
     assert not (tmp_path / "hb.tmp").exists()
     float(heartbeat.read_text(encoding="utf-8"))  # 유효한 timestamp여야 함(예외 없이 파싱)
+
+
+async def test_compute_system_equity_sums_running_allocated_capital_and_realized_pnl(pool):
+    """사용자 승인(2026-09-02) FROZEN 존 수정 회귀 테스트 — 이전엔 항상
+    0을 반환하던 compute_equity가 이제 RUNNING 실행들의 (allocated_capital
+    + realized_pnl 합)을 실제로 집계하는지 확인. 한 실행에 종가 포지션을
+    2개 심어(LEFT JOIN + GROUP BY 없이 잘못 짜면 allocated_capital이
+    포지션 행 수만큼 중복 합산된다) 정확히 1번만 더해지는지도 함께 검증."""
+    # 공유 dev/test DB에 다른 테스트가 남긴 RUNNING 실행이 있을 수 있어
+    # (compute_system_equity는 설계상 시스템 전체를 집계) 절대값이 아니라
+    # 이 테스트가 만든 데이터로 인한 증가분(delta)만 검증한다.
+    baseline = await compute_system_equity(pool)
+
+    user_id = await create_test_user(pool)
+    execution_with_pnl = await _create_running_execution(pool, user_id)
+    await _create_running_execution(pool, user_id)
+    paused_execution = await _create_running_execution(pool, user_id)
+
+    async with pool.acquire() as conn:
+        await conn.execute(
+            "UPDATE strategy_executions SET status = 'PAUSED' WHERE id = $1", paused_execution
+        )
+        for realized_pnl in (Decimal("10"), Decimal("5")):
+            await conn.execute(
+                """
+                INSERT INTO positions (
+                    user_id, symbol, exchange, strategy_id, execution_id,
+                    quantity, average_entry_price, realized_pnl, entry_time, closed_at
+                ) VALUES ($1, 'BTC/USDT', 'bitget', 'strat-1', $2, 0, 50000, $3, now(), now())
+                """,
+                user_id,
+                execution_with_pnl,
+                realized_pnl,
+            )
+
+    equity = await compute_system_equity(pool)
+
+    # 두 RUNNING 실행의 allocated_capital(100+100) + realized_pnl 합(10+5).
+    # PAUSED 실행의 allocated_capital(100)은 제외돼야 한다.
+    assert equity - baseline == Decimal("215")

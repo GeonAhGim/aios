@@ -11,17 +11,25 @@ core/safety/heartbeat.py의 파일 타임스탬프와 Postgres뿐이다. main.py
 InProcessEventBus/app.state는 다른 OS 프로세스인 이 스크립트에서 애초에
 접근할 방법이 없다(같은 컴퓨터라도 별도 프로세스는 별도 메모리 공간).
 
-편차(정직한 축소) — FD-9.1의 loss_pct 계산(compute_equity)은 사용자별
-실제 계좌 자본곡선이 있어야 의미가 생기는데, 그러려면 사용자별 거래소
-자격증명 조회 + 실제 주문 체결 파이프라인(FD-4/FD-8, FROZEN Zone)이
-필요하다 — 이 세션엔 그 실행 엔진 자체가 없다(strategy_executions는
-행만 만들 뿐 실제로 매매하는 루프가 없다, execution_service.py 자체
-docstring 참조). 그래서 compute_equity는 항상 같은 값을 반환해
-loss_pct=0으로 고정한다 — 데이터가 없다고 손실을 지어내지 않는다는
-판단이다. 결과적으로 지금 실제로 동작하는 건 FD-9.1
-unresponsive_sec 감시 → FD-9.2 HALT 판정 경로뿐이고, loss_pct 기반
-LIQUIDATE 경로는 FD-4/8이 생기기 전까지 사실상 죽어있다 — 버그가
-아니라 이 세션이 실제로 만들 수 있는 것을 정직하게 반영한 상태다.
+편차(정직한 축소, 사용자 승인 2026-09-02로 부분 해소) — FD-9.1의
+loss_pct 계산(compute_equity)은 실제 계좌 자본곡선이 있어야 의미가
+생기는데, 원래는 그러려면 실제 주문 체결 파이프라인(FD-4/FD-8)이
+필요했다 — 이제 execution_loop이 실제로 돈다(main.py의
+ExecutionLoopScheduler, PM 배정 ①/② 참조)는 근거로 항상 0을 반환하던
+스텁을 걷어냈다. 지금은 RUNNING 실행들의 (allocated_capital +
+realized_pnl 합) 을 시스템 전체 근사 equity로 쓴다 — 거래소 자격증명
+없이 DB만으로 계산 가능해(9.1이 요구하는 "메인 프로세스와 완전
+격리" 원칙 유지, 별도 프로세스가 credential_resolver 배선까지 새로
+갖출 필요 없음) 이 프로세스의 독립성을 해치지 않는다.
+
+남은 알려진 근사 한계(여전히 정직한 축소): (1) positions.unrealized_pnl은
+아직 mark-to-market 갱신 경로가 없어 항상 0이다 — 보유 중인 포지션의
+미실현 손익은 포지션을 닫아야만(realized_pnl로 전환돼야만) 이 신호에
+잡힌다. 완전한 실시간 감시는 아니지만 상시 0 고정보다는 실질적
+보호다. (2) 다중테넌시 — 모든 사용자의 RUNNING 실행을 하나의 시스템
+전체 숫자로 합산한다(FD-9.1 원문의 "계좌"가 사용자별인지 시스템
+전체인지 명시하지 않음 — 사용자별 개별 감시가 필요해지면 이 함수를
+그 단위로 다시 나눠야 한다).
 
 exchange_healthy(FD-9.1 원문: "거래소 API 자체의 독립 응답성")는 실제로
 Bitget 공개 시세 API(GET /api/v2/spot/market/tickers)를 호출해 확인한다
@@ -164,11 +172,32 @@ async def run_one_cycle(
         await _apply_decision(pool, decision)
 
 
+async def compute_system_equity(pool: asyncpg.Pool) -> Decimal:
+    """모듈 docstring 편차 설명 참조 — RUNNING 실행들의 (allocated_capital
+    + 종가 실현손익 합)을 시스템 전체 근사 equity로 쓴다. portfolio_service.py
+    의 GROUP BY 패턴과 동일(LEFT JOIN 뒤 SUM하면 allocated_capital이
+    포지션 행 수만큼 중복 합산되는 실수를 피하기 위해 실행당 1행으로
+    묶는다)."""
+    async with pool.acquire() as conn:
+        rows = await conn.fetch(
+            """
+            SELECT e.allocated_capital, COALESCE(SUM(p.realized_pnl), 0) AS realized_pnl
+            FROM strategy_executions e
+            LEFT JOIN positions p ON p.execution_id = e.id
+            WHERE e.status = 'RUNNING'
+            GROUP BY e.id
+            """
+        )
+    return sum(
+        (row["allocated_capital"] + row["realized_pnl"] for row in rows), Decimal("0")
+    )
+
+
 async def run_forever(pool: asyncpg.Pool) -> None:
     exchange_probe = BitgetAdapter("", "", "", demo_mode=True)
 
     async def compute_equity() -> Decimal:
-        return Decimal("0")  # 모듈 docstring 편차 설명 참조 — 항상 loss_pct=0
+        return await compute_system_equity(pool)
 
     async def check_exchange() -> bool:
         try:

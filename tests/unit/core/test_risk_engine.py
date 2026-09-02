@@ -37,6 +37,7 @@ def _valid_account_state(**overrides):
         "avg_trade_count_24h": 5.0,
         "circuit_breaker_level": "normal",
         "execution_paused_by_safety": False,
+        "leverage": Decimal("1"),
     }
     base.update(overrides)
     return base
@@ -138,6 +139,27 @@ def test_correlation_risk_rejects_when_exceeded(policy, allocation):
     assert result.rejection_reason == "correlation_risk_exceeded"
 
 
+def test_leverage_rejects_when_exceeded(policy, allocation):
+    """사용자 승인(2026-09-02) FROZEN 존 수정 회귀 테스트 — 이전엔 leverage가
+    `checked_rules`에만 이름을 올릴 뿐 실제로는 아무것도 비교하지 않았다."""
+    engine = RiskEngine(policy)
+
+    result = engine.check(allocation, _valid_account_state(leverage=Decimal("5")))
+
+    assert result.approved is False
+    assert result.rejection_reason == "leverage_exceeded"
+
+
+def test_leverage_at_policy_default_max_is_allowed(policy, allocation):
+    engine = RiskEngine(policy)
+
+    result = engine.check(
+        allocation, _valid_account_state(leverage=Decimal(str(policy.leverage.default_max)))
+    )
+
+    assert result.approved is True
+
+
 def test_trade_frequency_rejects_anomaly(policy, allocation):
     engine = RiskEngine(policy)
 
@@ -206,6 +228,7 @@ def test_safety_state_checked_last_even_if_it_would_reject(policy, allocation):
         "correlated_exposure_pct",
         "recent_trade_count_1h",
         "circuit_breaker_level",
+        "leverage",
     ],
 )
 def test_missing_data_rejects_not_approves(policy, allocation, missing_key):

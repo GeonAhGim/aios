@@ -72,11 +72,22 @@ async def assemble_account_state(
         execution_row = await conn.fetchrow(
             "SELECT paused_by FROM strategy_executions WHERE id = $1", execution_id
         )
+        # 사용자 승인(2026-09-02) FROZEN 존 수정 — RiskEngine의 "leverage"
+        # 검사가 실제로 비교할 값이 없어 이름뿐인 checked 항목이었다.
+        # positions.leverage(스키마 기본값 1, c8ead41fd624)는 이미 존재하는
+        # 컬럼이라 여기서 읽기만 하면 된다 — 열린 포지션이 없으면(신규
+        # 진입) 아직 아무 레버리지도 안 쓴 상태이므로 1.0.
+        open_position_leverage = await conn.fetchval(
+            "SELECT leverage FROM positions WHERE execution_id = $1 AND closed_at IS NULL "
+            "AND quantity <> 0 ORDER BY entry_time DESC LIMIT 1",
+            execution_id,
+        )
 
     circuit_breaker_level = safety_row["circuit_breaker_level"] if safety_row else None
     execution_paused_by_safety = (
         execution_row is not None and execution_row["paused_by"] == "SAFETY_LAYER"
     )
+    leverage = open_position_leverage if open_position_leverage is not None else Decimal("1")
 
     return {
         "daily_pnl_pct": daily_pnl_pct,
@@ -92,4 +103,5 @@ async def assemble_account_state(
         "avg_trade_count_24h": trade_count_24h / 24.0,
         "circuit_breaker_level": circuit_breaker_level,
         "execution_paused_by_safety": execution_paused_by_safety,
+        "leverage": leverage,
     }

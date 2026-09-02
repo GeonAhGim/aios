@@ -85,9 +85,26 @@ class RiskEngine:
                 checked_rules=checked.copy(),
             )
 
-        # Leverage — PAPER 모드는 Phase 1 크립토 현물 전용이라 항상 1.0
-        # (파생상품 확장은 별도 leaf, ADR 대상 아님 — 06번 §6.1-A).
+        # Leverage — 사용자 승인(2026-09-02) FROZEN 존 수정. Phase 1은 크립토
+        # 현물 전용이라 지금은 account_state["leverage"]가 항상 1.0으로
+        # 들어온다(positions.leverage 스키마 기본값, account_state.py 참조).
+        # coverage_multiplier(참조데이터 커버리지 등급별 조정, risk_policy.yaml)는
+        # 그 등급을 계산해 넣는 입력 경로가 아직 없어 default_max만 비교한다
+        # — 파생상품 확장 시 이 필드가 채워지면 이 비교식은 그대로 재사용된다.
         checked.append("leverage")
+        leverage = account_state.get("leverage")
+        if leverage is None:
+            return RiskCheckResult(
+                approved=False,
+                rejection_reason="leverage_data_unavailable",
+                checked_rules=checked.copy(),
+            )
+        if leverage > Decimal(str(policy.leverage.default_max)):
+            return RiskCheckResult(
+                approved=False,
+                rejection_reason="leverage_exceeded",
+                checked_rules=checked.copy(),
+            )
 
         checked.append("position_concentration")
         total_equity = account_state.get("total_equity")
