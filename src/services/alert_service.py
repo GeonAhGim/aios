@@ -36,6 +36,12 @@ from src.services.condition_evaluation import Operator, compare_value
 from src.services.credential_resolver import CredentialNotFoundError, CredentialResolver
 
 DEFAULT_CANDLE_LIMIT = 200
+# 레드팀 #24 — 사용자당 ACTIVE 알림 상한. evaluate_all_active()가 전체
+# 알림을 순차 for 루프로 도는 구조라, 한 사용자가 대량 생성하면 그
+# 사용자 몫만큼 매 평가 주기의 처리 시간이 늘어나 다른 모든 사용자의
+# 평가도 함께 지연된다 — Draft 값(정책 문서에 정식 근거는 아직 없음,
+# DoS 방지 목적의 안전한 상한).
+MAX_ACTIVE_ALERTS_PER_USER = 50
 
 logger = logging.getLogger(__name__)
 
@@ -95,6 +101,15 @@ class AlertService:
         threshold: float,
     ) -> PriceAlert:
         async with self._pool.acquire() as conn:
+            active_count = await conn.fetchval(
+                "SELECT COUNT(*) FROM price_alerts WHERE user_id = $1 AND status = 'ACTIVE'",
+                user_id,
+            )
+            if active_count >= MAX_ACTIVE_ALERTS_PER_USER:
+                raise AlertError(
+                    f"활성 알림 상한({MAX_ACTIVE_ALERTS_PER_USER}개)에 도달했습니다 — "
+                    "기존 알림을 취소한 뒤 다시 시도하세요."
+                )
             row = await conn.fetchrow(
                 """
                 INSERT INTO price_alerts

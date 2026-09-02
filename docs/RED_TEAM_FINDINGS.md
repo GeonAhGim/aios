@@ -17,6 +17,272 @@ AIOS 구현을 맡은 세션이 이 문서를 보고 판단해서 고치는 용�
 
 ---
 
+## 2026-09-02-재감사 · FND-04~09 + Bitget 신규 확장 API 3개 영역 병렬 감사 완료
+
+91eee31(제 백테스트 커밋) 이후 origin/main에 새로 쌓인 커밋 전부를
+스코프로 3개 에이전트에게 병렬 감사를 맡겼다 — (1) FND-06 Risk &
+Safety Gate(킬스위치), (2) Bitget Subaccount/Loan/Margin/Futures P1,
+(3) Bitget WebSocket 프라이빗 채널 + Convert/Grid/Strategy. 가장 심각한
+#26/#27(킬스위치 캐시 레이스, PROVIDER 범위 미조회)은 이 세션이 직접
+`evaluate_risk_gate.py`/`postgres_repository.py`를 읽어 재확인했다.
+나머지는 에이전트 보고를 그대로 옮기되, 코드 인용이 구체적이라 신뢰도가
+높다고 판단해 별도 재검증 없이 기록한다(후속 세션이 필요시 재확인).
+
+---
+
+## 2026-09-02-26 · [FND-06] 킬스위치 평가가 캐시를 먼저 확인해, 활성화 직후 최대 10초간 이미 발동된 킬스위치를 우회할 수 있음 — 심각도 높음
+
+**상태**: 🔴 OPEN
+
+**발견**: `src/foundation/risk_gate/application/evaluate_risk_gate.py:73-75` —
+`evaluate_risk_gate()`가 `repo.get_cached_evaluation(tenant_id,
+fingerprint)`를 **가장 먼저** 확인하고, 캐시가 있으면(`EVALUATION_CACHE_
+TTL_SECONDS = 10`, 33행) `repo.list_active_controls()`(97행, 실제
+킬스위치 조회)를 **호출조차 하지 않고** 캐시된 과거 판정을 그대로
+반환한다. `activate_safety_control()`/`insert_safety_control()`
+(postgres adapter) 어디에도 이 tenant의 기존 `risk_evaluation` 캐시
+행을 무효화하는 코드가 없다. fingerprint는 `tenant_id | gate_kind |
+connection_id | plan`로 결정되는데, `paper_control/start_deployment.py`는
+`plan`을 넘기지 않아 같은 배포/커넥션에 대한 반복 호출은 같은
+fingerprint로 수렴한다 — 이 세션이 직접 코드를 읽어 재확인함(자체
+보고 아님).
+
+**재현 시나리오**: T0에 트레이더가 배포 D를 `:start` — 킬스위치 없음
+→ ALLOW가 캐시에 10초간 저장됨. T0+2초에 운영자가 GLOBAL 킬스위치를
+`POST /admin/safety-controls`로 발동(응답 201, `GET /safety-controls`에도
+정상 표시됨). T0+2~10초 사이에 같은 배포/커넥션으로 `:start`나
+`:resume`을 다시 호출하면(같은 fingerprint) 캐시가 살아있어 방금
+발동한 GLOBAL 킬스위치를 전혀 거치지 않고 stale ALLOW를 그대로
+반환 — 배포가 RUNNING으로 전이된다. `SafetyControl.fence_token`이
+존재하고 원자적으로 증가는 하지만(postgres_repository.py 91-120행),
+`evaluate_risk_gate`도 `start_deployment.py`도 이 토큰을 한 번도
+읽거나 비교하지 않아 78번 스펙 RSK-005(활성화-제출 레이스를 fence로
+방지)가 실제로는 구현돼 있지 않다.
+
+**영향**: "최종 거부권(veto)"이라는 이 계층의 존재 이유 자체가 무너진다
+— 운영자가 명시적으로 긴급정지를 걸었는데도 최대 10초는 여전히 새
+배포가 뚫고 나갈 수 있다. 성능 트레이드오프가 아니라 안전 결함으로
+봐야 한다(78번 §2 "새 제한 규칙은 즉시 적용" 요구사항 위반).
+
+**권장 수정 방향**: 캐시 적중 여부와 무관하게 `list_active_controls()`는
+매번 새로 조회(그 자체는 저렴한 조회)하거나, `insert_safety_control()`
+실행 시 해당 tenant의 `risk_evaluation` 캐시 행을 무효화/삭제. 근본적으로는
+fence_token을 실제로 검증하는 경로(평가 시점 토큰을 기록해두고 상태
+전이 직전 토큰이 그대로인지 재확인) 구현을 권장.
+
+---
+
+## 2026-09-02-27 · [FND-06] PROVIDER 범위 킬스위치가 실제 평가 경로에서 단 한 번도 조회되지 않음 — 심각도 높음
+
+**상태**: 🔴 OPEN
+
+**발견**: `src/foundation/risk_gate/adapters/postgres_repository.py::
+list_active_controls(*, tenant_id, provider_code=None)` — `provider_code`가
+주어질 때만 PROVIDER 범위를 쿼리 조건에 추가한다(직접 코드 확인).
+그런데 `evaluate_risk_gate.py:97`의 유일한 호출부는
+`repo.list_active_controls(tenant_id=tenant_id)`로 `provider_code`를
+**절대 넘기지 않는다** — `connection_repo.get_connection()`으로 이미
+connection을 조회해(91행) `.provider_code` 필드까지 갖고 있으면서도
+전달하지 않는다. 저장소 전체에서 `list_active_controls`를 호출하는
+곳은 이 함수와 `projections.py` 단 두 곳뿐이며 둘 다 동일하게
+`provider_code`를 넘기지 않는다.
+
+**재현 시나리오**: 운영자가 `scope=PROVIDER, scope_ref="BINANCE"`로
+킬스위치를 발동(성공, DB에 정상 저장) → 이후 Binance 커넥션에 대한
+모든 `evaluate_risk_gate()` 호출은 이 행을 영원히 못 보고 계속
+ALLOW를 낼 수 있다. `GET /safety-controls` Control Center 목록에도
+누락돼(같은 근본 원인) 운영자가 "왜 안 먹히지"조차 알아챌 방법이 없다.
+
+**영향**: "이 거래소만 멈춰라"라는, 실무에서 가장 자주 쓰일 법한
+긴급조치 하나가 통째로 무동작이다. #26과 결합하면 더 심각 — 캐시
+문제를 고쳐도 PROVIDER 범위 자체는 여전히 죽어있다.
+
+**권장 수정 방향**: `evaluate_risk_gate()`에서 이미 조회한
+`connection.provider_code`를 `list_active_controls(tenant_id=...,
+provider_code=connection.provider_code)`로 그대로 전달. Control
+Center 목록(`build_safety_control_list_view`)에도 PROVIDER 범위가
+노출되도록 반영. "GLOBAL/PROVIDER 킬스위치가 실제로 ALLOW를
+막는다"는 회귀 테스트 추가 권장.
+
+---
+
+## 2026-09-02-28 · [FND-06] STRATEGY_DEPLOYMENT 범위는 API로 생성 가능하지만 이를 조회하는 코드가 아예 없음 — 의도된 제약이나 API가 이를 알리지 않음 — 심각도 중간
+
+**상태**: 🔴 OPEN
+
+**발견**: `list_active_controls`가 조회하는 범위는 `{GLOBAL, TENANT,
+ACCOUNT}` (+옵션 PROVIDER)뿐 — `STRATEGY_DEPLOYMENT`를 조회하는
+코드 경로는 저장소 어디에도 없다(`grep risk_gate src/services/`도
+0건 — 주문 실행 경로 자체가 이 모듈과 아직 연결 안 됨, 마이그레이션
+`c7d4e1a9f052...py` 주석이 이를 "아직 배선 안 함"으로 명시). 그런데
+`ActivateSafetyControlRequest`/`SafetyScope`(contracts/v1.py)는
+`STRATEGY_DEPLOYMENT`를 정상 값으로 받아들이고 `POST
+/admin/safety-controls`가 201로 성공 응답한다.
+
+**재현 시나리오**: `scope=STRATEGY_DEPLOYMENT, scope_ref=<배포ID>`로
+킬스위치 생성 → 성공 응답, DB에 저장, fence_token 증가까지 전부
+정상처럼 보이지만 이 값을 소비하는 코드가 전무해 어떤 평가에도
+영향을 못 준다.
+
+**영향**: #27과 같은 "성공 응답인데 사실 무동작" 패턴. 다만 이건
+FND-07(주문 어댑터) 부재라는 명시적으로 인지된 스코프 제약이라
+버그라기보다 API가 그 한계를 호출자에게 알리지 않는 게 문제.
+
+**권장 수정 방향**: FND-07 전까지는 `STRATEGY_DEPLOYMENT` 요청을
+400으로 거부하거나, 응답에 "아직 집행되지 않음" 경고 필드를 포함.
+
+---
+
+## 2026-09-02-29 · [FND-06] scope_ref 누락 시 검증 없이 조용히 무효한 TENANT/PROVIDER 킬스위치가 생성됨 — 심각도 중간
+
+**상태**: 🔴 OPEN
+
+**발견**: `application/activate_safety_control.py:56-59` —
+`GLOBAL`만 `scope_ref`를 강제하고, 나머지 범위는 `resolved_ref =
+scope_ref or ""`로 누락 시 빈 문자열로 조용히 대체한다.
+`ActivateSafetyControlRequest.scope_ref`도 `str | None = None`이라
+스키마 레벨 검증이 없다. `list_active_controls`는 TENANT 행을 항상
+실제 tenant UUID 문자열로 조회하므로, `scope_ref=""`로 저장된 행은
+영원히 매치될 수 없는 고아 행이 된다.
+
+**재현 시나리오**: `POST /admin/safety-controls {"scope":"TENANT",
+"reason":"..."}`(scope_ref 누락) → 201 성공, `scope_ref=''`로 저장 →
+어떤 평가도 이 행을 못 찾음.
+
+**권장 수정 방향**: `scope in {TENANT, PROVIDER, STRATEGY_DEPLOYMENT}`인데
+`scope_ref`가 비어있으면 Pydantic validator + 애플리케이션 계층
+양쪽에서 400 거부.
+
+---
+
+## 2026-09-02-30 · [FND-06] 킬스위치가 아직 실제 주문 제출/실행 경로에 배선돼 있지 않음 — 이미 인지된 스코프 제약, 버그 아님(참고용)
+
+**상태**: 🔴 OPEN(구조적 — 코드 결함 아님)
+
+**발견**: `grep risk_gate src/services/`는 0건. 현재 유일한 실제
+연동 지점은 `paper_control.start_deployment`/`resume_deployment`(배포가
+RUNNING으로 "전이"할 때만 게이트) — 이미 RUNNING인 배포가 계속
+주문을 내는 것은 이 게이트로 전혀 막지 못한다. 마이그레이션 주석이
+이를 명시적으로 인지하고 있다("71번 §1 FROZEN 영역 미변경").
+
+**영향**: "GLOBAL 킬스위치를 걸면 전체 거래가 멈춘다"고 가정하면
+틀렸다 — 지금은 "새 배포 시작만 막는다". 기존 킬스위치
+메커니즘(레드팀 #08 대상, execution_loop 쪽)과는 별개 시스템이다.
+
+**권장 수정 방향**: 코드 수정보다 운영 커뮤니케이션 — 킬스위치
+활성화 응답에 "신규 배포 시작만 차단, 이미 RUNNING인 배포는 FND-07
+전까지 영향 없음" 같은 경고를 포함해 운영자가 과신하지 않도록.
+
+---
+
+## 2026-09-02-31 · [Bitget WS] 프라이빗 채널 재연결 시 로그인 서명을 재사용해 재연결 이후 인증이 조용히 영구 실패할 수 있음 — 심각도 높음(현재 호출부 없어 도달 불가)
+
+**상태**: 🔴 OPEN (latent)
+
+**발견**: `src/exchanges/bitget/market_data_mixin.py::_build_login_message()`가
+`subscribe_order_stream()` 등 호출 시 **한 번만** 실행돼 그 시점
+타임스탬프로 서명한 `login_msg`를 만들고, 이 고정 dict가
+`_run_ws_subscription()`의 `pre_messages`로 전달돼 최초 연결이든
+재연결이든 **매번 같은 stale 서명을 재전송**한다(221-266행,
+441-553행). `_is_control_message()`가 login/error 이벤트를 그냥
+버려(111-112, 143-144행) 로그인 실패가 예외로도 로그로도 드러나지
+않는다.
+
+**재현 시나리오**: 연결 → 정상 로그인 → 몇 분 뒤 네트워크 단절로
+재연결(백오프 1s→...→30s) → 매 재연결마다 오래된 타임스탬프로 서명된
+동일 메시지 재전송 → Bitget이 타임스탬프 범위 초과로 거부(추정,
+관례상 초 단위 허용 범위) → orders/account/positions 채널이
+겉으로는 "연결됨"인데 실제로는 데이터를 영원히 못 받음.
+
+**영향**: 아직 이 스트림을 실제로 소비하는 코드가 없어(전체 검색
+결과 호출부는 mixin 자신과 테스트뿐) 지금 당장은 도달 불가능한
+잠재 결함. 다음 세션이 FD-4.5/FD-16.4용으로 이 콜백을 배선하면
+"3회 폴링 폴백"만 믿고 실시간 스트림 신뢰도를 과대평가하게 된다.
+
+**권장 수정 방향**: `pre_messages`를 고정 리스트가 아니라 매 연결
+시도마다 재평가되는 팩토리로 바꿔 재연결마다 새 타임스탬프로
+재서명. login 실패 이벤트(`event=="login" and code != "0"`)를
+구분해 최소 `logger.warning`으로 표면화.
+
+---
+
+## 2026-09-02-32 · [Bitget] Convert/Grid/Strategy 및 Subaccount/Loan/Margin/Futures 확장 메서드가 Executor의 LIVE 하드가드·멱등성을 전혀 거치지 않음 — 심각도 높음(구조적, 현재 호출부 없어 도달 불가)
+
+**상태**: 🔴 OPEN (latent — 두 감사 에이전트가 각자 다른 파일군에서
+독립적으로 발견한 동일 패턴을 통합)
+
+**발견**: `Executor.execute()`(`src/core/executor/executor.py:71-85`)만
+`mode != "PAPER"` 하드차단 + `is_paper_trading`/`is_sandboxed` 이중
+확인 + `submit_order()`의 claim-first 멱등성(#19에서 고친 바로 그
+경로)을 거친다. 반면 이번에 새로 추가된
+`convert_mixin.py::execute_convert`, `grid_mixin.py::place_spot_grid/
+place_futures_grid`, `strategy_mixin.py::place_strategy_order`,
+`margin_mixin.py::place_margin_order/borrow_margin/repay_margin`,
+`futures_trading_mixin.py::place_futures_order/place_futures_tpsl_order/
+place_futures_plan_order`, `loan_mixin.py::borrow_loan/repay_loan/
+revise_loan_pledge`, `subaccount_mixin.py::create_subaccount_apikey/
+transfer_to_subaccount`는 전부 `self._request()`로 거래소에 직접
+도달하며 이 네 가드(mode 체크, sandbox 체크, 검증, idempotency) 중
+무엇도 거치지 않는다. `margin_mixin.py::borrow_margin`만 "이 게이트를
+강제하지 않는다"는 경고 docstring이 있고, 나머지는 그런 경고조차
+없어 문서화 수준이 불균일하다.
+
+**재현 시나리오**: `build_adapter("bitget", key, secret, extra,
+demo_mode=False)`로 만든 LIVE adapter에 대해 이 메서드들 중 아무거나
+직접 호출하면 FrozenZone 어떤 검사도 거치지 않고 즉시 거래소에
+요청이 나간다. 저장소 전체 검색 결과 이 메서드들의 호출부는 각자의
+mixin·테스트뿐이라 **지금은 도달 불가능**.
+
+**영향**: 다음 세션이 이 메서드들을 라우터/전략 로직에 배선할 때
+Executor와 동등한 가드를 다시 만들어 넣는 걸 잊으면, 그리드봇/TWAP/
+환전/대출/서브계정 이체가 승인 절차 없이 LIVE로 나갈 수 있다.
+
+**권장 수정 방향**: Executor가 쓰는 이중 가드(mode + is_sandboxed)를
+재사용 가능한 공용 데코레이터/래퍼로 뽑아, 이 신규 메서드 계열이
+배선될 때 강제로 걸리도록 인터페이스 수준에서 표준화 권장. 최소한
+`borrow_loan`/`create_subaccount_apikey`/`transfer_to_subaccount`에도
+`borrow_margin`과 동일한 "게이트 미강제" 경고 docstring부터 추가.
+
+---
+
+## 2026-09-02-33 · [Bitget] Convert/Grid/Strategy/Margin/Loan 신규 메서드에 금액·가격 로컬 검증이 전무 — 심각도 낮음~중간(기존 관례와 대체로 일관, #32와 결합 시 위험 증폭)
+
+**상태**: 🔴 OPEN
+
+**발견**: `from_amount`(convert), `lower_price`/`upper_price`/
+`grid_count`/`investment`(grid), `total_amount`/`price`/
+`duration_seconds`(strategy), 대출/마진 금액 전부 0/음수/역전된
+범위(`lower_price >= upper_price`) 등 어떤 사전 검증도 없이 그대로
+직렬화돼 나간다. 기존 `trading_mixin.place_order()`도 자체 검증은
+없지만 그건 상위 `Executor.execute() → validate_order_params()`가
+걸러준다는 전제(§8.3 원칙)인데, 이 신규 메서드들은 그 상위 계층
+자체가 없다(#32와 동일 근본원인).
+
+**권장 수정 방향**: 이 메서드들을 실제로 소비하는 호출부를 만들
+때 `validate_order_params()`에 준하는 최소 검증(양수 금액,
+`lower_price < upper_price`, 유효한 symbol 형식 등)을 반드시 포함.
+
+---
+
+## 2026-09-02-34 · [Bitget] 서브계정 API 키 생성 시 permissions 생략 가능 — 실제 기본 권한이 read/trade/withdraw 중 무엇인지 코드로 확인 불가 — 심각도 중간
+
+**상태**: 🔴 OPEN
+
+**발견**: `subaccount_mixin.py::create_subaccount_apikey`에서
+`permissions: list[str] | None = None`이고, `None`이면 `permType`
+필드 자체를 요청 바디에서 생략한다. Bitget이 `permType` 미지정 시
+어떤 기본 권한을 부여하는지 코드/주석 어디에도 명시돼 있지 않고
+(모듈 docstring 자체가 "라이브 검증 필요"라고 인정), 클라이언트
+측에서 명시적 최소권한(read-only)을 강제하지 않는다. 이 프로젝트의
+"거래 권한 ≠ 출금 권한" 원칙(7.9)과 직결 — 서브계정 키에 출금
+권한까지 부여 가능한지도 미확인.
+
+**권장 수정 방향**: `permissions`를 필수 인자로 바꾸거나 `None`일
+때 `["read"]`를 명시적으로 채워 보내도록 수정. Demo API 키로 실제
+기본 동작 라이브 검증 필요(모듈 자신이 이미 요구하는 작업).
+
+---
+
 ## 2026-09-02-25 · risk_guard_loop도 alert_evaluation_loop과 같은 클래스 — 예외 시 손실한도 자동정지 루프가 영구 정지 가능 (참고용, #21 수정 중 발견)
 
 **상태**: 🔴 OPEN
@@ -259,8 +525,29 @@ scheduler 배선 PR과 반드시 같이 묶어서 처리할 것을 강하게 권
 
 ## 2026-09-02-23 · 이번 감사에서 함께 발견한 중간 심각도 항목 4건 (execution_loop 2건 + 비동기 원자성 2건)
 
-**상태**: 🔴 OPEN (모두 중간 심각도 — fail-safe 방향으로 실패하거나
-발생 확률이 낮음)
+**상태**: 🟡 부분 수정 (a/c는 DevEngine 감사 세션이 직접 고침 — 관련
+통합테스트 20개 통과, ruff/mypy strict clean. b/d는 아직 미착수, 아래
+참조)
+
+**a/c 수정 내용**: (a) `run_execution_tick()`에서 RiskEngine 승인 직후,
+fsm_state를 PENDING류로 쓰기 **직전**에 `paused_by`를 DB에서 다시
+한번 조회하도록 추가 — 신호 평가·RiskEngine 검사를 거치는 사이
+Watchdog가 안전정지를 걸었다면 여기서 걸려 주문 제출로 이어지지
+않는다(fsm_state를 아직 안 건드린 시점이라 되돌림도 필요 없음). (c)
+`paused_by is not None` 조기 리턴을 PENDING-fill-check 분기
+**뒤로** 옮겨, 정지된 실행이라도 이미 제출한 주문의 체결 확인은 계속
+이뤄지도록 순서를 바꿨다. 새 테스트
+`test_safety_pause_mid_tick_blocks_order_submission`(기존
+`test_concurrent_tick_race_only_submits_one_order`와 동일한 주입
+지점 — `get_balance()` 호출 시점에 pause를 걸어 재현),
+`test_paused_execution_still_checks_pending_order_fill`(2틱 시나리오 —
+1틱에서 주문 제출 후 정지, 2틱에서 체결 확인이 여전히 이뤄지는지
+확인) 추가. (c) 테스트는 수정 전 코드로 되돌려 실제로 실패
+(`order_status == 'SUBMITTED'`, FILLED로 못 감)하는 것까지 직접
+확인. **b/d는 이번에 손대지 않음** — (b)는 주기적 크래시 복구
+스캔이라는 별도 기능 신설이 필요해 빠른 수정 범위를 벗어남, (d)는
+원문 자체가 이미 "비용 대비 지금 급하지 않음, 낮은 우선순위로 기록만"이라고
+명시해둬 그대로 둠.
 
 **a) tick.py의 pause 체크가 tick 시작 시점 1회뿐** —
 `tick.py:145-146`이 `paused_by`를 tick 시작 시 한 번만 확인한다. 그
@@ -303,7 +590,15 @@ fill 확인만은 계속 수행하도록 분리. (d) outbox 패턴(같은 트랜
 
 ## 2026-09-02-24 · Alert 생성에 사용자당 개수 상한이 없음 (참고용, 우선순위 낮음)
 
-**상태**: 🔴 OPEN (낮은 심각도)
+**상태**: ✅ FIXED — DevEngine 감사 세션이 직접 고침(관련 통합테스트
+9개 통과, ruff/mypy strict clean)
+
+**수정 내용**: `alert_service.py`에 `MAX_ACTIVE_ALERTS_PER_USER = 50`
+Draft 상수를 추가하고, `create_alert()`가 INSERT 전에 해당 사용자의
+`status = 'ACTIVE'` 알림 개수를 세어 상한 이상이면 `AlertError`를
+던지도록 수정. 새 테스트
+`test_create_alert_rejects_over_per_user_cap`(monkeypatch로 상한을
+2로 낮춰 재현) 추가.
 
 **발견**: `AlertService.create_alert()`(`alert_service.py:82-111행`)에
 사용자당 활성 알림 개수 제한이 없다. `evaluate_all_active()`가 전체

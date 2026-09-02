@@ -153,17 +153,21 @@ async def run_execution_tick(
     publish: PublishFn | None = None,
 ) -> None:
     execution, fsm_config, certified_badge = await _load_execution_context(pool, execution_id)
-
-    if execution["paused_by"] is not None:
-        return  # 사용자/안전장치가 정지시킨 실행은 평가 대상이 아님(FD-16.3)
-
     current_fsm_state = FSMState(execution["fsm_state"])
 
     if current_fsm_state in _PENDING_STATES:
+        # 레드팀 #23-c — paused_by 체크보다 이 분기를 먼저 둔다. 정지된
+        # 실행이라도 이미 제출한 주문의 체결 여부는 계속 확인해야 한다 —
+        # 그렇지 않으면 주문 제출 직후 일시정지된 실행은 그 주문이 실제로
+        # 체결됐는지 다시는 확인되지 않고, fsm_state가 실제 거래소 상태와
+        # 영구히 어긋난 채로 남는다.
         await _handle_pending_fill_check(
             pool, adapter, execution_id, fsm_config, current_fsm_state, publish
         )
         return
+
+    if execution["paused_by"] is not None:
+        return  # 사용자/안전장치가 정지시킨 실행은 새 신호 평가 대상이 아님(FD-16.3)
 
     symbol = fsm_config.target_asset
     candles = await adapter.get_ohlcv(symbol, "1m", limit=100)
@@ -221,6 +225,24 @@ async def run_execution_tick(
             risk_result.checked_rules,
         )
         return  # 다음 틱 재평가 — fsm_state는 IDLE/HOLDING 그대로
+
+    # 레드팀 #23-a — 신호 평가·PortfolioEngine·RiskEngine을 거치는 동안
+    # Watchdog가 안전정지를 걸었을 수 있다(이번 tick 시작 시점에는
+    # paused_by가 비어 있었더라도). fsm_state를 PENDING류로 전환해 실제
+    # 주문 제출로 이어지기 직전, 최신 paused_by를 다시 한번 확인한다 —
+    # 여기서 걸리면 fsm_state 자체를 아직 안 건드린 상태라 별도 되돌림도
+    # 필요 없다.
+    async with pool.acquire() as conn:
+        still_paused = await conn.fetchval(
+            "SELECT paused_by FROM strategy_executions WHERE id = $1", execution_id
+        )
+    if still_paused is not None:
+        logger.info(
+            "run_execution_tick(execution_id=%s): 신호 평가 중 안전정지 감지 — "
+            "주문 제출을 건너뜁니다.",
+            execution_id,
+        )
+        return
 
     writer = await _make_fsm_state_writer(pool)
     try:

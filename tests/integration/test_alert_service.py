@@ -150,6 +150,41 @@ async def test_cancel_alert_rejects_other_users_alert(service, pool):
         await service.cancel_alert(stranger, alert.id)
 
 
+async def test_create_alert_rejects_over_per_user_cap(service, pool, monkeypatch):
+    """레드팀 #24 — evaluate_all_active()가 전체 알림을 순차 for 루프로
+    돌기 때문에, 한 사용자가 알림을 무한정 생성하면 다른 모든 사용자의
+    평가 주기가 함께 늘어진다. 사용자당 ACTIVE 알림 개수 상한을 실제로
+    막는지 확인."""
+    import src.services.alert_service as alert_service_module
+
+    monkeypatch.setattr(alert_service_module, "MAX_ACTIVE_ALERTS_PER_USER", 2)
+    user = await create_test_user(pool)
+
+    for _ in range(2):
+        await service.create_alert(
+            user,
+            exchange="bitget",
+            symbol="BTC/USDT",
+            timeframe="1h",
+            indicator="RSI",
+            params={},
+            operator="<",
+            threshold=30.0,
+        )
+
+    with pytest.raises(AlertError):
+        await service.create_alert(
+            user,
+            exchange="bitget",
+            symbol="BTC/USDT",
+            timeframe="1h",
+            indicator="RSI",
+            params={},
+            operator="<",
+            threshold=30.0,
+        )
+
+
 async def test_evaluate_all_active_triggers_matching_alert(pool):
     user = await create_test_user(pool)
     service = AlertService(

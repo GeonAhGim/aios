@@ -207,6 +207,87 @@ async def test_paused_execution_is_skipped(pool):
     assert adapter.place_order_call_count == 0
 
 
+async def test_safety_pause_mid_tick_blocks_order_submission(pool):
+    """레드팀 #23-a 회귀 테스트 — tick 시작 시점(_load_execution_context)에는
+    paused_by가 비어 있었지만, 신호 평가·RiskEngine 검사를 거치는 사이
+    Watchdog가 안전정지를 걸면(get_balance() 호출 시점에 주입해 시뮬레이션)
+    이번 tick은 주문을 제출하지 않아야 하고, fsm_state도 PENDING류에
+    갇히지 않고 원래 상태(IDLE)를 유지해야 한다."""
+    user_id = await create_test_user(pool)
+    execution_id = await _create_execution(pool, user_id, entry_threshold=100.0)
+
+    class _PausingAdapter(FakeExchangeAdapter):
+        async def get_balance(self, asset: str | None = None):  # noqa: ANN001
+            async with pool.acquire() as conn:
+                await conn.execute(
+                    "UPDATE strategy_executions SET status = 'PAUSED', "
+                    "paused_by = 'SAFETY_LAYER' WHERE id = $1",
+                    execution_id,
+                )
+            return await super().get_balance(asset)
+
+    adapter = _PausingAdapter(
+        closes=[Decimal("50")] * 30,
+        usdt_balance=AccountBalance(
+            exchange="bitget", asset="USDT", total=Decimal("10000"), available=Decimal("10000")
+        ),
+    )
+
+    await run_execution_tick(pool, adapter, execution_id, **_engines())
+
+    assert adapter.place_order_call_count == 0
+    async with pool.acquire() as conn:
+        fsm_state = await conn.fetchval(
+            "SELECT fsm_state FROM strategy_executions WHERE id = $1", execution_id
+        )
+    assert fsm_state == "IDLE"  # PENDING류에 갇히지 않음 — 되돌림이 필요 없는 설계
+
+
+async def test_paused_execution_still_checks_pending_order_fill(pool):
+    """레드팀 #23-c 회귀 테스트 — 주문 제출 직후 일시정지된 실행이라도,
+    이미 제출한 주문의 체결 여부는 계속 확인해야 한다. 정지 체크가
+    PENDING-fill-check보다 먼저 실행되면 이 확인 자체가 영원히 스킵된다."""
+    user_id = await create_test_user(pool)
+    execution_id = await _create_execution(pool, user_id, entry_threshold=100.0)
+
+    # 1틱: 주문 제출 직후 아직 미체결(SUBMITTED) → fsm_state=BUY_ORDER_PENDING.
+    submit_adapter = FakeExchangeAdapter(
+        closes=[Decimal("50")] * 30,
+        place_order_result_status=OrderStatus.SUBMITTED,
+        usdt_balance=AccountBalance(
+            exchange="bitget", asset="USDT", total=Decimal("10000"), available=Decimal("10000")
+        ),
+    )
+    await run_execution_tick(pool, submit_adapter, execution_id, **_engines())
+    async with pool.acquire() as conn:
+        fsm_state = await conn.fetchval(
+            "SELECT fsm_state FROM strategy_executions WHERE id = $1", execution_id
+        )
+        # Watchdog가 그 사이 이 실행을 안전정지시켰다고 가정.
+        await conn.execute(
+            "UPDATE strategy_executions SET status = 'PAUSED', paused_by = 'SAFETY_LAYER' "
+            "WHERE id = $1",
+            execution_id,
+        )
+    assert fsm_state == "BUY_ORDER_PENDING"
+
+    # 2틱: 정지된 상태에서도 미체결 주문이 실제로는 체결됐는지 확인돼야 한다.
+    fill_adapter = FakeExchangeAdapter(
+        closes=[Decimal("50")] * 30, get_order_status=OrderStatus.FILLED
+    )
+    await run_execution_tick(pool, fill_adapter, execution_id, **_engines())
+
+    async with pool.acquire() as conn:
+        order_status = await conn.fetchval(
+            "SELECT status FROM orders WHERE execution_id = $1", execution_id
+        )
+        fsm_state = await conn.fetchval(
+            "SELECT fsm_state FROM strategy_executions WHERE id = $1", execution_id
+        )
+    assert order_status == "FILLED"
+    assert fsm_state == "HOLDING"  # 체결 반영으로 PENDING을 벗어남 — 정지 중에도 이뤄져야 함
+
+
 async def test_fsm_state_writer_raises_on_concurrent_state_change(pool):
     """레드팀 #2026-09-02-22 회귀 테스트 — writer가 읽었던 expected_state와
     실제 DB 값이 다르면(다른 tick이 먼저 바꿈) ConcurrencyConflictError를
