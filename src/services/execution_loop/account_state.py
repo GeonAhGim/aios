@@ -37,6 +37,12 @@ async def assemble_account_state(
     equity_tracker: ExecutionEquityTracker,
     policy: RiskPolicy,
 ) -> dict[str, Any]:
+    # PM 배정 ③(agent-platform-12, 2026-09-02) — 일손실/MDD 기준점을
+    # strategy_executions에 write-through로 영속화(equity_tracker.py 참조).
+    # 마이그레이션(equity_day_start_date 등 컬럼) 적용 전까지는 아직 이
+    # 훅을 걸지 않는다 — 지금 걸면 그 컬럼이 없는 공유 dev/test DB에서
+    # 이 함수를 부르는 모든 tick이 즉시 실패한다. 마이그레이션 리비전이
+    # push된 뒤 이 줄을 record_and_persist_equity(...)로 교체한다.
     daily_pnl_pct, drawdown_pct = equity_tracker.record(execution_id, total_equity)
 
     var_pct = estimate_var_pct(
