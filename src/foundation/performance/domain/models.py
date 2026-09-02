@@ -90,6 +90,11 @@ class ReturnFigure:
 
 @dataclass(frozen=True)
 class AttributionSlice:
+    """M5 `performance_attribution_slice` 1행 — 항상 statement 하나에
+    속한다(reconciliation의 `ReconciliationItem.run_id`와 같은 이유로
+    `statement_id`를 갖는다)."""
+
+    statement_id: UUID
     dimension: str
     key: str
     contribution: Decimal
