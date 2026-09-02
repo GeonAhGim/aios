@@ -2,14 +2,15 @@
 
 Spec: AIOSproject 75번 §2/§4, 105번(동시성 표준).
 
-activate_revision()이 이 파일에서 가장 섬세한 부분이다 — 75번 §2 "One
-transaction promotes a revision and supersedes the prior revision"을
-실제로 원자적으로 만들려면, "이 mandate의 현재 active_revision_id가 내가
-읽은 값과 같을 때만" portfolio_mandate 행 자체를 조건부로 갱신하는 게
-진짜 직렬화 지점이다 — revision 행 하나만 조건부로 갱신하면 서로 다른 두
-PROPOSED revision이 동시에 ACTIVE로 전이해 mandate 하나에 ACTIVE가 둘
-생길 수 있다(같은 mandate를 가리키는 서로 다른 revision 두 개가 경합하는
-경우, revision별 conditional_update는 서로의 존재를 모른다).
+activate_revision()의 진짜 직렬화 지점은 portfolio_mandate.active_revision_id를
+호출자가 게이트 판단 시점에 관찰한 값(expected_active_revision_id) 그대로에
+조건부로 거는 것이다 — revision 행 하나만 조건부 갱신하면 서로 다른 두
+PROPOSED revision이 동시에 ACTIVE로 전이할 수 있고, 트랜잭션 내부에서 그
+기대값을 재조회(예: `SELECT ... FOR UPDATE` 후 다시 읽기)하면 락은 순서만
+정할 뿐 두 번째 요청이 자기가 방금 다시 읽은 값을 기준으로 성공해버려 결국
+둘 다 순차적으로 activate되는 실결함이 된다. `UPDATE ... WHERE
+active_revision_id IS NOT DISTINCT FROM $expected` 자체가 행 잠금 + 커밋 후
+재검사(EvalPlanQual)이므로 별도 FOR UPDATE는 불필요하다.
 """
 from __future__ import annotations
 
@@ -186,48 +187,47 @@ class PostgresMandateRepository:
             )
         return _row_to_revision(row)
 
-    async def activate_revision(self, mandate_id: UUID, revision_id: UUID) -> MandateRevision:
+    async def activate_revision(
+        self,
+        mandate_id: UUID,
+        revision_id: UUID,
+        *,
+        expected_active_revision_id: UUID | None,
+    ) -> MandateRevision:
         async with self._pool.acquire() as conn, conn.transaction():
-            mandate_row = await conn.fetchrow(
-                "SELECT active_revision_id FROM portfolio_mandate WHERE id = $1 FOR UPDATE",
-                mandate_id,
-            )
-            if mandate_row is None:
-                raise LookupError(f"존재하지 않는 mandate입니다: {mandate_id}")
-            old_active_id = mandate_row["active_revision_id"]
+            # 진짜 직렬화 지점(모듈 docstring 참조) — expected_active_revision_id를
+            # 트랜잭션 내부에서 다시 읽지 않는다.
+            try:
+                await conditional_update(
+                    conn,
+                    table="portfolio_mandate",
+                    id_column="id",
+                    id_value=mandate_id,
+                    expected_state_column="active_revision_id",
+                    expected_state_value=expected_active_revision_id,
+                    set_values={"active_revision_id": revision_id},
+                )
+            except ConcurrencyConflictError:
+                exists = await conn.fetchval(
+                    "SELECT 1 FROM portfolio_mandate WHERE id = $1", mandate_id
+                )
+                if exists is None:
+                    raise LookupError(f"존재하지 않는 mandate입니다: {mandate_id}") from None
+                raise
 
-            # 진짜 직렬화 지점 — mandate의 active_revision_id 포인터를 원자적으로
-            # 선점한다. 여기서 지면(다른 요청이 그 사이 먼저 포인터를 바꿨으면)
-            # 아래 revision 상태 변경은 시도조차 하지 않는다.
-            claimed = await conditional_update(
-                conn,
-                table="portfolio_mandate",
-                id_column="id",
-                id_value=mandate_id,
-                expected_state_column="active_revision_id",
-                expected_state_value=old_active_id,
-                set_values={"active_revision_id": revision_id},
-            )
-            del claimed
-
-            if old_active_id is not None:
+            if expected_active_revision_id is not None:
                 await conditional_update(
                     conn,
                     table="mandate_revision",
                     id_column="id",
-                    id_value=old_active_id,
+                    id_value=expected_active_revision_id,
                     expected_state_column="state",
                     expected_state_value=MandateRevisionState.ACTIVE.value,
                     set_values={"state": MandateRevisionState.SUPERSEDED.value},
                 )
 
-            # 여기까지 오면 이 트랜잭션이 mandate의 active_revision_id 포인터를
-            # 이미 선점했다(위 conditional_update) + 행 잠금(FOR UPDATE)까지 쥐고
-            # 있어 같은 mandate에 대한 동시 activate_revision() 호출은 이 커밋이
-            # 끝날 때까지 블록된다 — 이 revision 자체에 대한 조건부 방어가 굳이
-            # 더 필요하지 않다. 다만 "PROPOSED/DRAFT가 아닌 걸 activate하려는"
-            # 애플리케이션 계층 버그는 방어적으로 걸러 조용히 잘못된 상태를 만들지
-            # 않는다.
+            # "PROPOSED/DRAFT가 아닌 걸 activate하려는" 애플리케이션 계층 버그는
+            # 방어적으로 걸러 조용히 잘못된 상태를 만들지 않는다.
             activated_row = await conn.fetchrow(
                 "UPDATE mandate_revision SET state = $2, activated_at = $3 "
                 "WHERE id = $1 AND state IN ('DRAFT', 'PROPOSED') "

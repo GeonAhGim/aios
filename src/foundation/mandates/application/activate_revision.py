@@ -112,7 +112,11 @@ async def activate_revision(
                     remaining_seconds=MIN_COOLING_OFF_SECONDS - elapsed
                 )
 
-    activated = await mandate_repo.activate_revision(mandate.id, revision_id)
+    activated = await mandate_repo.activate_revision(
+        mandate.id,
+        revision_id,
+        expected_active_revision_id=current_active.id if current_active is not None else None,
+    )
 
     if audit_repo is not None:
         await record_command_event(

@@ -59,11 +59,23 @@ class MandateRepository(Protocol):
         아니면 ConcurrencyConflictError(구현체 책임)."""
         ...
 
-    async def activate_revision(self, mandate_id: UUID, revision_id: UUID) -> MandateRevision:
+    async def activate_revision(
+        self,
+        mandate_id: UUID,
+        revision_id: UUID,
+        *,
+        expected_active_revision_id: UUID | None,
+    ) -> MandateRevision:
         """revision을 ACTIVE로 전이하고 동시에 이전 ACTIVE revision을
         SUPERSEDED로, portfolio_mandate.active_revision_id를 갱신한다 — 75번
         §2 "One transaction promotes a revision and supersedes the prior
-        revision." 한 트랜잭션 안에서 처리(구현체 책임)."""
+        revision." 한 트랜잭션 안에서 처리(구현체 책임).
+
+        `expected_active_revision_id`는 호출자가 게이트 판단 시점에 관찰한
+        현재 active_revision_id(없으면 None)다 — 105번 §4 형태 A: 실제
+        DB 상태가 이 값과 다르면(다른 요청이 그 사이 먼저 activate했으면)
+        ConcurrencyConflictError(구현체 책임). mandate_id가 존재하지 않으면
+        LookupError."""
         ...
 
     async def insert_policy_bundle(self, bundle: PolicyBundle) -> PolicyBundle: ...
