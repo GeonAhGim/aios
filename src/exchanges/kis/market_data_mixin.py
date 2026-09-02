@@ -93,10 +93,14 @@ class KISMarketDataMixin:
         )
 
     async def get_ohlcv(self, symbol: str, timeframe: str, limit: int = 100) -> list[Candle]:
+        if timeframe == "1m":
+            return await self._get_intraday_candles(symbol, limit=limit)
         if timeframe != "1d":
             raise ValueError(
-                f"KISAdapter는 현재 일봉(1d)만 지원 — '{timeframe}'은 별도 분봉 엔드포인트 "
-                "(inquire-time-itemchartprice) 미구현(6.9/6.10 스콥 밖)"
+                f"KISAdapter는 일봉(1d)/분봉(1m)만 지원 — '{timeframe}'. KIS "
+                "inquire-time-itemchartprice는 1분 단위만 제공하고 그 외 분봉"
+                "(3m/5m/...)은 거래소가 직접 주지 않는다 — 필요하면 호출부가 "
+                "1분봉을 리샘플링해야 한다(02d 스펙 §2, 어댑터 스콥 밖)."
             )
         today = datetime.now(timezone.utc).strftime("%Y%m%d")
         raw = await self._request(  # type: ignore[attr-defined]
@@ -132,6 +136,62 @@ class KISMarketDataMixin:
                 )
             )
         return candles
+
+    async def _get_intraday_candles(self, symbol: str, *, limit: int = 100) -> list[Candle]:
+        """02d 스펙 §2(P0) — 분봉 조회. 공식 예제(inquire_time_itemchartprice)
+        기준 최선 추정치, 라이브 검증 필요. 현재 시각부터 과거 방향으로
+        최대 30건까지 한 번에 내려주는 것으로 알려져 있음(문서 관례) —
+        `limit`은 응답을 자르는 용도일 뿐 요청 파라미터로 직접 전달되지
+        않는다."""
+        now = datetime.now(timezone.utc)
+        raw = await self._request(  # type: ignore[attr-defined]
+            "GET",
+            "/uapi/domestic-stock/v1/quotations/inquire-time-itemchartprice",
+            "FHKST03010200",
+            params={
+                "FID_ETC_CLS_CODE": "",
+                "FID_COND_MRKT_DIV_CODE": _MARKET_CODE,
+                "FID_INPUT_ISCD": symbol,
+                "FID_INPUT_HOUR_1": now.strftime("%H%M%S"),
+                "FID_PW_DATA_INCU_YN": "Y",
+            },
+        )
+        rows = raw.get("output2", [])[:limit]
+        candles = []
+        for row in rows:
+            day = row.get("stck_bsop_date", now.strftime("%Y%m%d"))
+            hour = row["stck_cntg_hour"]  # "HHMMSS"
+            open_time = datetime.strptime(day + hour, "%Y%m%d%H%M%S").replace(tzinfo=timezone.utc)
+            candles.append(
+                Candle(
+                    symbol=symbol,
+                    exchange="kis",
+                    timeframe="1m",
+                    open=Decimal(row["stck_oprc"]),
+                    high=Decimal(row["stck_hgpr"]),
+                    low=Decimal(row["stck_lwpr"]),
+                    close=Decimal(row["stck_prpr"]),
+                    volume=Decimal(row["cntg_vol"]),
+                    open_time=open_time,
+                    close_time=open_time,
+                )
+            )
+        return candles
+
+    async def is_market_holiday(self, date: str) -> bool:
+        """02d 스펙 §2(P0) — `date`는 "YYYYMMDD". MarketHours 정확도
+        보강용(현재 get_capabilities()의 고정 스케줄은 공휴일을 모른다).
+        공식 예제(chk_holiday) 기준 최선 추정치, 라이브 검증 필요."""
+        raw = await self._request(  # type: ignore[attr-defined]
+            "GET",
+            "/uapi/domestic-stock/v1/quotations/chk-holiday",
+            "CTCA0903R",
+            params={"BASS_DT": date, "CTX_AREA_NK": "", "CTX_AREA_FK": ""},
+        )
+        rows = raw.get("output", [])
+        if not rows:
+            return False
+        return bool(rows[0].get("opnd_yn") == "N")
 
     async def subscribe_ticker_stream(self, symbol: str, callback: TickerCallback) -> None:
         """KIS WebSocket(승인키 기반 별도 인증 체계)은 6.9/6.10 스콥 밖 —

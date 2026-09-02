@@ -86,10 +86,13 @@ async def test_subscribe_ticker_stream_not_implemented():
         await adapter.subscribe_ticker_stream("005930", lambda t: None)
 
 
-async def test_get_ohlcv_rejects_non_daily_timeframe():
+async def test_get_ohlcv_rejects_unsupported_timeframe_early():
+    """02d 스펙 §2 — 1m 지원 추가 이후, 여전히 지원 안 하는 분봉(3m 등)은
+    거부해야 한다(test_get_ohlcv_rejects_unsupported_timeframe와 중복
+    방지를 위해 여기선 토큰 요청조차 가지 않는 조기 검증만 확인)."""
     adapter = _make_adapter(lambda request: httpx.Response(200, json=TOKEN_RESPONSE))
     with pytest.raises(ValueError):
-        await adapter.get_ohlcv("005930", "1m")
+        await adapter.get_ohlcv("005930", "3m")
 
 
 async def test_get_balance_maps_holdings_and_cash():
@@ -222,3 +225,133 @@ async def test_health_check_true_on_success():
         )
     )
     assert await adapter.health_check() is True
+
+
+async def test_get_ohlcv_1m_uses_intraday_endpoint():
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.headers["tr_id"] == "FHKST03010200"
+        return httpx.Response(
+            200,
+            json={
+                "rt_cd": "0",
+                "msg1": "ok",
+                "output2": [
+                    {
+                        "stck_bsop_date": "20260902",
+                        "stck_cntg_hour": "093000",
+                        "stck_oprc": "70000",
+                        "stck_hgpr": "70500",
+                        "stck_lwpr": "69900",
+                        "stck_prpr": "70200",
+                        "cntg_vol": "1000",
+                    }
+                ],
+            },
+        )
+
+    adapter = _make_adapter(
+        lambda request: _route(
+            request, {"/uapi/domestic-stock/v1/quotations/inquire-time-itemchartprice": handler}
+        )
+    )
+    candles = await adapter.get_ohlcv("005930", "1m")
+
+    assert candles[0].close == Decimal("70200")
+    assert candles[0].timeframe == "1m"
+
+
+async def test_get_ohlcv_rejects_unsupported_timeframe():
+    adapter = _make_adapter(lambda request: httpx.Response(200, json=TOKEN_RESPONSE))
+    with pytest.raises(ValueError):
+        await adapter.get_ohlcv("005930", "5m")
+
+
+async def test_is_market_holiday_true_when_closed():
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.headers["tr_id"] == "VTCA0903R"  # 모의투자 치환 확인
+        return httpx.Response(
+            200, json={"rt_cd": "0", "msg1": "ok", "output": [{"opnd_yn": "N"}]}
+        )
+
+    adapter = _make_adapter(
+        lambda request: _route(request, {"/uapi/domestic-stock/v1/quotations/chk-holiday": handler})
+    )
+    assert await adapter.is_market_holiday("20260901") is True
+
+
+async def test_get_buyable_amount_returns_raw_dict():
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.headers["tr_id"] == "VTTC8908R"  # 모의투자 치환 확인
+        return httpx.Response(
+            200,
+            json={
+                "rt_cd": "0",
+                "msg1": "ok",
+                "output": {"ord_psbl_cash": "1000000", "max_buy_qty": "14"},
+            },
+        )
+
+    adapter = _make_adapter(
+        lambda request: _route(
+            request, {"/uapi/domestic-stock/v1/trading/inquire-psbl-order": handler}
+        )
+    )
+    result = await adapter.get_buyable_amount("005930", Decimal("70000"))
+
+    assert result == {"ord_psbl_cash": "1000000", "max_buy_qty": "14"}
+
+
+async def test_get_sellable_quantity_parses_qty():
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.headers["tr_id"] == "VTTC8408R"  # 모의투자 치환 확인
+        return httpx.Response(
+            200, json={"rt_cd": "0", "msg1": "ok", "output": {"ord_psbl_qty": "10"}}
+        )
+
+    adapter = _make_adapter(
+        lambda request: _route(
+            request, {"/uapi/domestic-stock/v1/trading/inquire-psbl-sell": handler}
+        )
+    )
+    qty = await adapter.get_sellable_quantity("005930")
+
+    assert qty == Decimal("10")
+
+
+async def test_get_cancelable_orders_returns_raw_rows():
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.headers["tr_id"] == "VTTC0084R"  # 모의투자 치환 확인
+        return httpx.Response(
+            200, json={"rt_cd": "0", "msg1": "ok", "output": [{"odno": "999"}]}
+        )
+
+    adapter = _make_adapter(
+        lambda request: _route(
+            request, {"/uapi/domestic-stock/v1/trading/inquire-psbl-rvsecncl": handler}
+        )
+    )
+    orders = await adapter.get_cancelable_orders()
+
+    assert orders == [{"odno": "999"}]
+
+
+async def test_get_realized_pnl_returns_raw_rows():
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.headers["tr_id"] == "VTTC8494R"  # 모의투자 치환 확인
+        return httpx.Response(
+            200,
+            json={
+                "rt_cd": "0",
+                "msg1": "ok",
+                "output1": [{"pdno": "005930", "rlzt_pfls": "5000"}],
+            },
+        )
+
+    adapter = _make_adapter(
+        lambda request: _route(
+            request, {"/uapi/domestic-stock/v1/trading/inquire-balance-rlz-pl": handler}
+        )
+    )
+    pnl = await adapter.get_realized_pnl()
+
+    assert pnl == [{"pdno": "005930", "rlzt_pfls": "5000"}]

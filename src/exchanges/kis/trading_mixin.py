@@ -160,6 +160,87 @@ class KISTradingMixin:
             asset_class=AssetClass.KR_EQUITY,
         )
 
+    async def get_buyable_amount(self, symbol: str, price: Decimal) -> dict[str, Any]:
+        """02d 스펙 §2(P0) — FD-4.1 사전검증(주문가능금액/수량). 공식
+        예제(inquire_psbl_order) 기준 최선 추정치, 라이브 검증 필요.
+        raw dict 반환 — 현금/신용/증거금 등 여러 금액 필드가 함께
+        내려와(§2 모델 재사용 원칙) 아직 모델화하지 않는다."""
+        raw = await self._request(  # type: ignore[attr-defined]
+            "GET",
+            "/uapi/domestic-stock/v1/trading/inquire-psbl-order",
+            "TTTC8908R",
+            params={
+                "CANO": self._cano,  # type: ignore[attr-defined]
+                "ACNT_PRDT_CD": self._acnt_prdt_cd,  # type: ignore[attr-defined]
+                "PDNO": symbol,
+                "ORD_UNPR": str(price),
+                "ORD_DVSN": "00",
+                "CMA_EVLU_AMT_ICLD_YN": "N",
+                "OVRS_ICLD_YN": "N",
+            },
+        )
+        return dict(raw.get("output", {}))
+
+    async def get_sellable_quantity(self, symbol: str) -> Decimal:
+        """02d 스펙 §2(P0). 공식 예제(inquire_psbl_sell) 기준 최선
+        추정치, 라이브 검증 필요."""
+        raw = await self._request(  # type: ignore[attr-defined]
+            "GET",
+            "/uapi/domestic-stock/v1/trading/inquire-psbl-sell",
+            "TTTC8408R",
+            params={
+                "CANO": self._cano,  # type: ignore[attr-defined]
+                "ACNT_PRDT_CD": self._acnt_prdt_cd,  # type: ignore[attr-defined]
+                "PDNO": symbol,
+            },
+        )
+        output = raw.get("output", {})
+        return Decimal(output.get("ord_psbl_qty", "0"))
+
+    async def get_cancelable_orders(self) -> list[dict[str, Any]]:
+        """02d 스펙 §2(P0) — FD-4.4 정정 전 검증. 공식 예제
+        (inquire_psbl_rvsecncl) 기준 최선 추정치, 라이브 검증 필요. raw
+        dict 리스트 반환(정정취소 가능수량 등 KIS 전용 필드 위주라
+        Order 모델과 형태가 다름)."""
+        raw = await self._request(  # type: ignore[attr-defined]
+            "GET",
+            "/uapi/domestic-stock/v1/trading/inquire-psbl-rvsecncl",
+            "TTTC0084R",
+            params={
+                "CANO": self._cano,  # type: ignore[attr-defined]
+                "ACNT_PRDT_CD": self._acnt_prdt_cd,  # type: ignore[attr-defined]
+                "CTX_AREA_FK100": "",
+                "CTX_AREA_NK100": "",
+                "INQR_DVSN_1": "0",
+                "INQR_DVSN_2": "0",
+            },
+        )
+        return list(raw.get("output", []))
+
+    async def get_realized_pnl(
+        self, *, start_date: str | None = None, end_date: str | None = None
+    ) -> list[dict[str, Any]]:
+        """02d 스펙 §2(P0) — FD-20(운용보고서) 보강용. 공식 예제
+        (inquire_balance_rlz_pl) 기준 최선 추정치, 라이브 검증 필요.
+        `start_date`/`end_date`는 "YYYYMMDD", 생략 시 당일."""
+        today = datetime.now(timezone.utc).strftime("%Y%m%d")
+        raw = await self._request(  # type: ignore[attr-defined]
+            "GET",
+            "/uapi/domestic-stock/v1/trading/inquire-balance-rlz-pl",
+            "TTTC8494R",
+            params={
+                "CANO": self._cano,  # type: ignore[attr-defined]
+                "ACNT_PRDT_CD": self._acnt_prdt_cd,  # type: ignore[attr-defined]
+                "INQR_STRT_DT": start_date or today,
+                "INQR_END_DT": end_date or today,
+                "PDNO": "",
+                "CBLC_DVSN": "00",
+                "CTX_AREA_FK100": "",
+                "CTX_AREA_NK100": "",
+            },
+        )
+        return list(raw.get("output1", []))
+
     async def health_check(self) -> bool:
         try:
             await self.get_balance()  # type: ignore[attr-defined]
