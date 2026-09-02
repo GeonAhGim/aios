@@ -7,6 +7,8 @@ export { configureTokenRefreshHandler, refreshAccessToken } from "./tokenRefresh
 export type { TokenRefreshHandler } from "./tokenRefresh";
 export { createLogoutClient } from "./logout";
 export type { LogoutClient, LogoutClientOptions, LogoutTokenStore } from "./logout";
+export { createTenantStore, isValidTenantId } from "./tenantContext";
+export type { TenantStore, TenantMismatchFallback, TenantKind, MembershipRole } from "./tenantContext";
 export type {
   ApiResponsePageMeta,
   ApiResponseMeta,
