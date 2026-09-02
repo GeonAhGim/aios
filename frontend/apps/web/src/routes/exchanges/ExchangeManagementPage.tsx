@@ -6,7 +6,6 @@ import {
 } from "@aios/shared-hooks";
 import { ApiError } from "@aios/api-client";
 import {
-  Alert,
   Badge,
   Button,
   Card,
@@ -20,6 +19,7 @@ import {
 } from "@aios/ui-web";
 import { useState, type FormEvent } from "react";
 import { AppShell } from "../../components/layout/AppShell";
+import { ErrorMessage } from "../../components/ErrorMessage";
 import { exchangeLabel } from "../../lib/exchangeLabels";
 
 const EXCHANGES = ["bitget", "kis"];
@@ -32,7 +32,7 @@ export function ExchangeManagementPage() {
   const [apiKey, setApiKey] = useState("");
   const [apiSecret, setApiSecret] = useState("");
   const [apiPassphrase, setApiPassphrase] = useState("");
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<ApiError | Error | null>(null);
   const [selectedExchange, setSelectedExchange] = useState<string | null>(null);
   const { data: balances } = useExchangeBalance(selectedExchange);
 
@@ -50,7 +50,7 @@ export function ExchangeManagementPage() {
       setApiSecret("");
       setApiPassphrase("");
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : "등록에 실패했습니다.");
+      setError(err instanceof Error ? err : new Error("등록에 실패했습니다."));
     }
   }
 
@@ -157,7 +157,7 @@ export function ExchangeManagementPage() {
                 />
               </Field>
             )}
-            {error && <Alert>{error}</Alert>}
+            {error && <ErrorMessage traceId={error instanceof ApiError ? error.traceId : null} />}
             <Button type="submit" loading={register.isPending} className="w-full">
               등록
             </Button>

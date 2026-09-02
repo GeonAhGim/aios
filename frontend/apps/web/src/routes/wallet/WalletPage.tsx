@@ -3,12 +3,13 @@ import { ApiError } from "@aios/api-client";
 import { Alert, Button, Field, Input, PageHeader, Stat } from "@aios/ui-web";
 import { useState, type FormEvent } from "react";
 import { AppShell } from "../../components/layout/AppShell";
+import { ErrorMessage } from "../../components/ErrorMessage";
 
 export function WalletPage() {
   const { data: balance, isLoading } = useWalletBalance();
   const requestTopup = useRequestTopup();
   const [amount, setAmount] = useState("30000");
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<ApiError | Error | null>(null);
   const [submitted, setSubmitted] = useState<{ id: number; amount: string } | null>(null);
 
   async function handleSubmit(e: FormEvent) {
@@ -19,7 +20,7 @@ export function WalletPage() {
       const result = await requestTopup.mutateAsync({ amount });
       setSubmitted({ id: result.id, amount: result.requestedAmount });
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : "충전 요청에 실패했습니다.");
+      setError(err instanceof Error ? err : new Error("충전 요청에 실패했습니다."));
     }
   }
 
@@ -49,7 +50,7 @@ export function WalletPage() {
           <p className="text-xs text-fg-muted">
             신청 후 실제 계좌로 입금하면 관리자 확인 즉시 크레딧이 반영됩니다.
           </p>
-          {error && <Alert>{error}</Alert>}
+          {error && <ErrorMessage traceId={error instanceof ApiError ? error.traceId : null} />}
           {submitted && (
             <Alert tone="success">
               충전 요청 #{submitted.id} 접수됨 ({submitted.amount} 크레딧) — 관리자 확인 대기 중

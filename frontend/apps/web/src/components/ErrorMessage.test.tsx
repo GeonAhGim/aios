@@ -31,11 +31,11 @@ describe("ErrorMessage", () => {
     ).toBeInTheDocument();
   });
 
-  it("traceId가 있으면 문의용 참조번호를 함께 보여주고, 없으면 생략한다", () => {
+  it("traceId가 있으면 지원코드를 함께 보여주고, 없으면 생략한다", () => {
     const { rerender } = render(<ErrorMessage errorCode="INTERNAL_ERROR" traceId="trace-123" />);
-    expect(screen.getByText("문의 시 참조번호: trace-123")).toBeInTheDocument();
+    expect(screen.getByText("지원코드: trace-123")).toBeInTheDocument();
 
     rerender(<ErrorMessage errorCode="INTERNAL_ERROR" />);
-    expect(screen.queryByText(/문의 시 참조번호/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/지원코드/)).not.toBeInTheDocument();
   });
 });

@@ -1,15 +1,16 @@
 import { useLogin } from "@aios/shared-hooks";
 import { ApiError } from "@aios/api-client";
-import { Alert, Button, Field, Input } from "@aios/ui-web";
+import { Button, Field, Input } from "@aios/ui-web";
 import { useState, type FormEvent } from "react";
 import { Link, useNavigate } from "react-router-dom";
+import { ErrorMessage } from "../../components/ErrorMessage";
 import { AuthLayout } from "./AuthLayout";
 
 export function LoginPage() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [totpCode, setTotpCode] = useState("");
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<ApiError | Error | null>(null);
   const login = useLogin();
   const navigate = useNavigate();
 
@@ -20,7 +21,7 @@ export function LoginPage() {
       await login.mutateAsync({ email, password, totpCode: totpCode || undefined });
       navigate("/dashboard");
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : "로그인에 실패했습니다.");
+      setError(err instanceof Error ? err : new Error("로그인에 실패했습니다."));
     }
   }
 
@@ -56,7 +57,7 @@ export function LoginPage() {
             onChange={(e) => setTotpCode(e.target.value)}
           />
         </Field>
-        {error && <Alert>{error}</Alert>}
+        {error && <ErrorMessage traceId={error instanceof ApiError ? error.traceId : null} />}
         <Button type="submit" loading={login.isPending} className="w-full">
           로그인
         </Button>

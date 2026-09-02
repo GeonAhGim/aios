@@ -15,7 +15,7 @@ export function ErrorMessage({ errorCode, message, traceId }: ErrorMessageProps)
   return (
     <Alert tone="danger">
       <p>{text}</p>
-      {traceId && <p className="mt-1 text-xs text-fg-muted">문의 시 참조번호: {traceId}</p>}
+      {traceId && <p className="mt-1 text-xs text-fg-muted">지원코드: {traceId}</p>}
     </Alert>
   );
 }
