@@ -29,6 +29,30 @@ async def pool():
     await p.close()
 
 
+@pytest.fixture(autouse=True)
+async def _ledger_control_clean_slate(pool):
+    """`ledger_control`(id=1)의 `write_frozen`은 원장 전역 상태라, LC-10
+    tamper 통합테스트(`test_verify_integrity.py`)가 세운 동결이 하나라도
+    남으면 이 디렉터리의 다른 모든 리프(구매·환불·정산 `post_entry` 호출)가
+    영구히 거부돼 재실행마다 false-red를 낸다(task-312 QA가 공유
+    TEST_DATABASE_URL에서 실제로 재현). 테스트 바디 안의 `try/finally`만으로는
+    "이전 실행이 크래시·타임아웃으로 중간에 죽어 finally를 못 밟은 경우"를
+    못 막으므로, 매 테스트 전(이전 잔류 자기치유)·후(이번 실행의 잔류 예방)
+    양쪽에서 pytest가 보장하는 fixture teardown으로 무조건 원복한다 —
+    이미 원복돼 있으면 UPDATE가 그냥 no-op이라 다른 테스트에 부작용이 없다."""
+
+    async def _reset() -> None:
+        async with pool.acquire() as conn:
+            await conn.execute(
+                "UPDATE ledger_control SET write_frozen = FALSE, frozen_reason = NULL, "
+                "frozen_at = NULL WHERE id = 1"
+            )
+
+    await _reset()
+    yield
+    await _reset()
+
+
 async def create_ledger_account(
     pool: asyncpg.Pool,
     *,

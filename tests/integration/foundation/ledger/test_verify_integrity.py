@@ -16,10 +16,14 @@ write_frozen=true → post_entry 거부"(spec 605행 test 목록과 동일 시�
 못하는 이유가 정확히 이것, `src/core/db/append_only.py` 참고). `lines_digest`
 컬럼 하나만 건드려 이 엔트리의 체인 검증만 깨뜨리고 `entry_hash`는
 그대로 둔다 — 그래야 이후 엔트리들의 `prev_hash` 연결은 안 깨져서 실패
-지점(`first_broken_seq`)이 정확히 이 엔트리로 특정된다. 테스트 종료 후
-원본 값과 `ledger_control`을 복원한다 — 이 테이블들은 전체 스위트가 공유하는
-전역 상태라 복원하지 않으면 다른 테스트 파일이 오염된다(`test_post_entry.py`의
-동결 테스트와 동일 관행).
+지점(`first_broken_seq`)이 정확히 이 엔트리로 특정된다. 손상 주입부터
+`lines_digest` 원복까지를 하나의 try/finally로 감싸 빈틈없이 복원한다
+(`test_post_entry.py`의 동결 테스트와 동일 관행) — `ledger_control`은
+전체 스위트가 공유하는 전역 상태라, 이 테스트가 도중에 죽어 자체 복원을
+못 밟는 경우까지 대비해 `conftest.py`의 `_ledger_control_clean_slate`
+autouse fixture가 매 테스트 전후로 무조건 원복하는 전역 안전망 역할을
+한다(task-312 QA가 재현한 "이전 실행의 write_frozen 잔류가 재실행을
+깨뜨리는" 격리 결함의 근본 수정).
 """
 from __future__ import annotations
 
@@ -137,17 +141,30 @@ async def test_verify_ledger_integrity_freezes_and_blocks_posting_on_tamper(pool
         original_digest = await conn.fetchval(
             "SELECT lines_digest FROM ledger_journal_entry WHERE entry_id = $1", entry_id
         )
-        await conn.execute(f"ALTER TABLE ledger_journal_entry DISABLE TRIGGER {_WORM_TRIGGER}")
-        try:
-            await conn.execute(
-                "UPDATE ledger_journal_entry SET lines_digest = $1 WHERE entry_id = $2",
-                "tampered" * 8,
-                entry_id,
-            )
-        finally:
-            await conn.execute(f"ALTER TABLE ledger_journal_entry ENABLE TRIGGER {_WORM_TRIGGER}")
+
+    async def _set_digest(new_digest: str) -> None:
+        # WORM 트리거를 우회해 값을 바꾸는 유일한 목적이 "변조 후 원상복구"라,
+        # 손상 주입과 복원을 같은 헬퍼로 묶는다 — 복원도 결국 같은 종류의
+        # 트리거-우회 UPDATE라 로직을 둘로 나눌 이유가 없고, 이렇게 하나로
+        # 합쳐야 아래 try/finally 안에서 손상 주입 시점부터 복원까지 빈틈없이
+        # 감싸진다(예전 버전은 손상 주입이 try 진입 *전*에 일어나 그 사이에
+        # 예외가 나면 finally가 아예 실행되지 않는 구간이 있었다).
+        async with pool.acquire() as conn:
+            await conn.execute(f"ALTER TABLE ledger_journal_entry DISABLE TRIGGER {_WORM_TRIGGER}")
+            try:
+                await conn.execute(
+                    "UPDATE ledger_journal_entry SET lines_digest = $1 WHERE entry_id = $2",
+                    new_digest,
+                    entry_id,
+                )
+            finally:
+                await conn.execute(
+                    f"ALTER TABLE ledger_journal_entry ENABLE TRIGGER {_WORM_TRIGGER}"
+                )
 
     try:
+        await _set_digest("tampered" * 8)
+
         report = await verify_ledger_integrity(
             journal=ports.journal, balances=ports.balances, audit=ports.audit,
             pool=pool, registry=MetricsRegistry(),
@@ -169,19 +186,8 @@ async def test_verify_ledger_integrity_freezes_and_blocks_posting_on_tamper(pool
                     audit=ports.audit, clock=_clock,
                 )
     finally:
-        async with pool.acquire() as conn:
-            await conn.execute(f"ALTER TABLE ledger_journal_entry DISABLE TRIGGER {_WORM_TRIGGER}")
-            try:
-                await conn.execute(
-                    "UPDATE ledger_journal_entry SET lines_digest = $1 WHERE entry_id = $2",
-                    original_digest,
-                    entry_id,
-                )
-            finally:
-                await conn.execute(
-                    f"ALTER TABLE ledger_journal_entry ENABLE TRIGGER {_WORM_TRIGGER}"
-                )
-            await conn.execute(
-                "UPDATE ledger_control SET write_frozen = FALSE, frozen_reason = NULL, "
-                "frozen_at = NULL WHERE id = 1"
-            )
+        # `ledger_control.write_frozen` 원복은 `conftest.py`의
+        # `_ledger_control_clean_slate` autouse fixture teardown이 전역
+        # 안전망으로 보장한다(이 테스트가 여기서 죽어도 커버) — 여기서는
+        # 이 테스트가 직접 손상시킨 `lines_digest`만 원복한다.
+        await _set_digest(original_digest)
