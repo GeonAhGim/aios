@@ -103,7 +103,8 @@ mypy strict 통과의 실질: `type: ignore` 178건 중 160건이 거래소 믹�
 | `configure_logging` 미호출 (§3) | **수정됨** (`2e943c9`) | lifespan 첫 줄. trace_id·tenant_id 필드 관통은 §11 8단계로 남음 |
 | risk_guard 루프 try/except 없음 (P1, 레드팀 #25) | **수정됨** (`2e943c9`) | — |
 | 손실한도 자동정지 미발동 (positions 미기록) | **수정됨** (`c017525`+`2d6c71a`, 9f 세션) | `order_service/position_ledger.py` — 체결(동기 FILLED·폴링 apply_fill 양쪽)에서 positions open/close 기록. RiskGuard·watchdog·portfolio·report의 PnL 입력이 채워짐 |
-| 리스크 기준 인메모리 | 진행 중 (9f) | `equity_tracker` DB 영속화 — 마이그레이션은 44 리비전 뒤 |
+| 리스크 기준 인메모리 | 진행 중 (9f) | 코드 `a948e94`, 마이그레이션은 c2 `cdd905e63ffe` 뒤 |
+| RiskEngine 레버리지 무검사 (P1) · watchdog equity 상수 0 | **수정됨** (`b5630c7`, 9f 세션, FROZEN_PAPER_ONLY 사용자 승인) | 레버리지 실검사, `compute_equity` 실계산 |
 | 거버넌스 불일치 (§4: `.aios-zone` 실제 경로·ADR-E 부재·CODEOWNERS 미치환·CI zone 검증 없음) | **수정됨** (`a784493`) | FROZEN_PAPER_ONLY zone 신설, `src/core/**` 등 미선언 모듈 등록, `scripts/check_zone_manifest.py` CI 게이트, ADR-E를 `docs/`에, CODEOWNERS @GeonAhGim |
 | 커버리지 미측정 (§9) | **측정 시작** (`a784493`) | CI `pytest --cov=src` + coverage.xml 아티팩트. 임계치는 첫 측정치 확인 후 |
 | 31초 실시간 sleep ×3 (§9) | **수정됨** (`a784493`) | `tests/integration/mfa_clock.py` DI 시계 주입. 라우터 테스트 93초 단축 |
@@ -122,7 +123,7 @@ mypy strict 통과의 실질: `type: ignore` 178건 중 160건이 거래소 믹�
 
 | 세션 | 담당 영역(기존) | 배정 작업 | 순서 |
 |---|---|---|---|
-| agent-platform-12 (PM) | 감사·marketplace | ① 실행 루프 운영 배선 — **완료 `2e943c9`** ② 전체 진행 추적·§2-A 갱신 ③ 장부 정합 + 거버넌스 — **완료 `a784493`**(secret scan·벤치마크 단언·#05/#17 barrier는 후속) ④ 세션별 테스트 DB 분리 스크립트 ⑤ 마이그레이션 체인 직렬화(c2 `a6636fcf92fc` → 44 → 9f) | A → B |
+| agent-platform-12 (PM) | 감사·marketplace | ① 실행 루프 운영 배선 — **완료 `2e943c9`** ② 전체 진행 추적·§2-A 갱신 ③ 장부 정합 + 거버넌스 — **완료 `a784493`**(secret scan·벤치마크 단언·#05/#17 barrier는 후속) ④ 세션별 테스트 DB 분리 스크립트 ⑤ 마이그레이션 체인 직렬화: `b7e2c4d9f1a6`(PM) → `a6636fcf92fc`(c2, 완료) → `cdd905e63ffe`(c2 mfa_verified_at) → 9f equity → 44 mandate_revision_id | A → B |
 | agent-platform-44 | foundation(trust/mandates/evidence/risk_gate/reconciliation), `foundation_deps`, `main.py` 라우터 등록 | ① mandates fingerprint(진행 중) ② `risk_guard` 루프 try/except(레드팀 #25, `main.py:131-135`) ③ foundation→실행 경로 연결: `order_service.submit` 앞 risk_gate PRE_SUBMIT, `execution_service.start` 앞 mandate 평가, 주요 커맨드 `append_audit_event` (§11 5단계) | A → B |
 | agent-platform-c2 | connections, paper_control | ①②③ — **완료 `a77e9e4`** ④ FND-08 reconciliation 테스트 — 감사 기준(`4e0f8db`)에선 0건이었으나 `1eb7e12`에 REC-001~007 통합·규칙 단위·cross-tenant 17개가 이미 포함됨(c2 확인, PM 재검증) → 불필요 ⑤ FND-01 trust 결손: MFA step-up 실구현, consent `expires_at`, ACTIVE membership 규칙 — 진행 중 | B |
 | agent-platform-9f | risk_gate, exchanges 가드, execution_loop/alert | ① positions 기록 — **완료 `c017525`** ② FSM 복귀(#39) — **완료 `53d56d2`** ③ 일손실·MDD 기준점 영속화 — 코드 `a948e94`, 마이그레이션(parent `a6636fcf92fc`) 진행 중 ④ RiskEngine 레버리지 실검사, watchdog `compute_equity` 실계산 — **FROZEN_PAPER_ONLY 수정 사용자 승인(2026-09-02)** | A → B |
