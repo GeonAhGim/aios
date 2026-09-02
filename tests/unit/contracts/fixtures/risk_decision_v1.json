@@ -1,0 +1,243 @@
+{
+  "$defs": {
+    "GateKind": {
+      "enum": [
+        "DEPLOYMENT",
+        "PRE_INTENT",
+        "PRE_TRADE",
+        "PRE_SUBMIT",
+        "INTRADAY",
+        "RECOVERY"
+      ],
+      "title": "GateKind",
+      "type": "string"
+    },
+    "RiskOutcome": {
+      "enum": [
+        "ALLOW",
+        "DENY",
+        "REDUCE",
+        "PAUSE",
+        "ESCALATE"
+      ],
+      "title": "RiskOutcome",
+      "type": "string"
+    },
+    "RuleResult": {
+      "properties": {
+        "limit": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Limit"
+        },
+        "missing_fields": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Missing Fields",
+          "type": "array"
+        },
+        "observed": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Observed"
+        },
+        "outcome": {
+          "$ref": "#/$defs/RiskOutcome"
+        },
+        "reason_code": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Reason Code"
+        },
+        "rule_id": {
+          "title": "Rule Id",
+          "type": "string"
+        },
+        "unit": {
+          "enum": [
+            "pct",
+            "x",
+            "count",
+            "notional"
+          ],
+          "title": "Unit",
+          "type": "string"
+        }
+      },
+      "required": [
+        "rule_id",
+        "outcome",
+        "unit"
+      ],
+      "title": "RuleResult",
+      "type": "object"
+    }
+  },
+  "properties": {
+    "decision_id": {
+      "format": "uuid",
+      "title": "Decision Id",
+      "type": "string"
+    },
+    "engine_version": {
+      "title": "Engine Version",
+      "type": "string"
+    },
+    "evaluated_at": {
+      "format": "date-time",
+      "title": "Evaluated At",
+      "type": "string"
+    },
+    "evidence_ref": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "title": "Evidence Ref"
+    },
+    "execution_ref": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "title": "Execution Ref"
+    },
+    "expires_at": {
+      "format": "date-time",
+      "title": "Expires At",
+      "type": "string"
+    },
+    "gate_kind": {
+      "$ref": "#/$defs/GateKind"
+    },
+    "input_refs": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Input Refs",
+      "type": "array"
+    },
+    "inputs_hash": {
+      "title": "Inputs Hash",
+      "type": "string"
+    },
+    "latency_us": {
+      "title": "Latency Us",
+      "type": "integer"
+    },
+    "obligations": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Obligations",
+      "type": "array"
+    },
+    "outcome": {
+      "$ref": "#/$defs/RiskOutcome"
+    },
+    "reason_codes": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Reason Codes",
+      "type": "array"
+    },
+    "rule_hash": {
+      "title": "Rule Hash",
+      "type": "string"
+    },
+    "rule_results": {
+      "items": {
+        "$ref": "#/$defs/RuleResult"
+      },
+      "title": "Rule Results",
+      "type": "array"
+    },
+    "rule_version": {
+      "title": "Rule Version",
+      "type": "string"
+    },
+    "schema_version": {
+      "const": "v1",
+      "default": "v1",
+      "title": "Schema Version",
+      "type": "string"
+    },
+    "subject_fingerprint": {
+      "title": "Subject Fingerprint",
+      "type": "string"
+    },
+    "tenant_id": {
+      "format": "uuid",
+      "title": "Tenant Id",
+      "type": "string"
+    },
+    "trace_id": {
+      "format": "uuid",
+      "title": "Trace Id",
+      "type": "string"
+    }
+  },
+  "required": [
+    "decision_id",
+    "gate_kind",
+    "tenant_id",
+    "execution_ref",
+    "subject_fingerprint",
+    "outcome",
+    "reason_codes",
+    "obligations",
+    "rule_results",
+    "rule_version",
+    "rule_hash",
+    "engine_version",
+    "inputs_hash",
+    "input_refs",
+    "evaluated_at",
+    "expires_at",
+    "trace_id",
+    "evidence_ref",
+    "latency_us"
+  ],
+  "title": "RiskDecision",
+  "type": "object"
+}
