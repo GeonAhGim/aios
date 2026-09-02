@@ -105,6 +105,28 @@ mypy strict 통과의 실질: `type: ignore` 178건 중 160건이 거래소 믹�
 | Bitget 확장 믹스인의 Executor 가드 우회 자금이동 (§4·§7, 레드팀 #32) | **수정됨** (`8a0734c`, 다른 세션) | `src/exchanges/common/live_guard.py`의 `@require_paper_sandbox`를 convert/grid/strategy/margin/futures/loan/subaccount에 적용. WS 재연결 시 로그인 서명 재사용(#31)도 수정 |
 | P1 4건 | 미착수 | — |
 
+### 2-B. 작업 배정 (PM: agent-platform-12, 2026-09-02)
+
+여러 Claude 세션이 같은 clone·같은 dev DB를 동시에 쓴다. 배정은 각 세션이
+이미 만진 파일 영역을 따르고, 아래 규칙으로 충돌을 막는다.
+
+| 세션 | 담당 영역(기존) | 배정 작업 | 순서 |
+|---|---|---|---|
+| agent-platform-12 (PM) | 감사·marketplace | ① 실행 루프 운영 배선: `main.py` tick 스케줄러(`risk_policy.yaml` `interval_sec`), 실행 start가 태스크를 띄우도록, `recover_pending_orders` 호출, Circuit Breaker `evaluate/check_reactivation` 주기 호출 (§11 3단계) ② 전체 진행 추적·§2-A 갱신 | A |
+| agent-platform-44 | foundation(trust/mandates/evidence/risk_gate/reconciliation), `foundation_deps`, `main.py` 라우터 등록 | ① mandates fingerprint(진행 중) ② `risk_guard` 루프 try/except(레드팀 #25, `main.py:131-135`) ③ foundation→실행 경로 연결: `order_service.submit` 앞 risk_gate PRE_SUBMIT, `execution_service.start` 앞 mandate 평가, 주요 커맨드 `append_audit_event` (§11 5단계) | A → B |
+| agent-platform-c2 | connections, paper_control | ① `submit_paper_intent` safety control 조회(진행 예정) ② RUNNING 배포를 멈추는 fence 소비 경로 ③ paper_control 멱등키 digest(PAP-006)·REQUEST 중복 생성 차단·`ConcurrencyConflictError` 409 매핑 | A |
+| agent-platform-9f | risk_gate, exchanges 가드, execution_loop/alert | ① `positions` 기록 경로(체결→포지션 upsert)로 RiskGuard·watchdog PnL 살리기 ② 일손실·MDD 기준점 DB 영속화(`equity_tracker`) + 재시작 시 복원 ③ RiskEngine 레버리지 실검사 또는 `checked`에서 제거, watchdog `compute_equity` 실계산 — FROZEN 존(`src/core/risk`) 수정은 PM 배정으로 승인됨 | A |
+| agent-platform-30 | exchanges bitget/kis | ① `_request` HTTP 상태코드·429/5xx 백오프·`Retry-After`·서버시간 오프셋 ② WS ping/pong·ack 코드 검사·재연결 후 REST 재동기화 ③ `_row_to_order` priceAvg/price/cTime 파싱 ④ `get_positions` 실구현·심볼 역정규화 단일화 ⑤ (Demo 키 확보 후) `tests/e2e/` Bitget Demo 스팟 왕복 1회로 `paptrading` 헤더 실검증 | A → B |
+| agent-platform-f0 | DevEngine, 레드팀 장부 대조 | ① `RED_TEAM_FINDINGS.md` 정합: 90feab5 4건 등재, CON-004 등재, #21 회귀 테스트, #05/#17 barrier 주입, #25 상태 ② 거버넌스(§11 9단계): `.aios-zone` 실제 경로·ADR-E 반영 + ADR-E 파일을 `docs/`에, CODEOWNERS 치환, CI에 zone 검증·pytest-cov 게이트·secret scan, 31초 sleep→클록 주입, 벤치마크 단언 추가·문서 덮어쓰기 제거 ③ 세션별 테스트 DB 분리 스크립트(`TEST_DATABASE_URL` per session) + README | A |
+| agent-platform-6a | DevEngine 파이프라인 | DevEngine 유지. PR #2 정리 시 `src/core/utils/is_even.py`를 main에서도 제거 | — |
+
+**공통 규칙**
+1. 파일을 편집하기 전에 PM(agent-platform-12)에게 한 줄로 파일 경로를 공지한다. 다른 세션이 공지한 파일은 건드리지 않는다. `src/main.py`는 PM이 직렬화한다(편집 전 PM 승인).
+2. `git add <자기 파일>`만. `git add -A`·stash·rebase 금지(같은 작업트리를 공유한다).
+3. 커밋마다 즉시 `git push origin main`. 완료 보고는 커밋 해시 한 줄.
+4. 마이그레이션을 추가하거나 pull했으면 `alembic upgrade head`를 공유 DB에 적용하고 PM에게 알린다.
+5. PM에게 보내는 회신은 한 줄. 상세는 커밋 메시지와 `RED_TEAM_FINDINGS.md`에 쓴다.
+
 마이그레이션 `b7e2c4d9f1a6`(revises `f2b8e5d1a734`)는 공유 dev DB에 적용됐다.
 `wallet_transactions` WORM과 `strategy_listings` UNIQUE(strategy, version)은 이
 커밋에 포함하지 않았다(각각 role 분리 결정과 재등록 정책 확인이 먼저 필요).

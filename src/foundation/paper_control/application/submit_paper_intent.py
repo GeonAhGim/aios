@@ -9,17 +9,45 @@ immediately before intent and immediately before adapter call. Superseded
 fence token means no-op/audit, never late order submission." — 이 함수는
 그 "즉시 확인"을 하나의 원자적 UPDATE(increment 없이 상태/토큰만 조건부
 확인)로 구현한다.
+
+교차세션 감사 발견(agent-platform-12, 2026-09-02) 반영 — start_deployment/
+resume_deployment는 진입 시점에 risk_gate를 확인하지만, RUNNING이 된
+*이후* 관리자가 kill switch를 켜도 fence_token 자체는 안 바뀌므로(kill
+switch 활성화는 이 deployment의 pause/stop을 자동으로 트리거하지 않는다)
+fence 재확인만으로는 이 경로를 못 막는다. GateKind.PRE_INTENT로 매 제출마다
+risk_gate를 다시 확인해 이 틈을 막는다 — evaluate_risk_gate()는 10초
+TTL로 자체 캐시하므로(78번 §2) 매 tick마다 전체 재계산을 강제하지는 않는다.
 """
 from __future__ import annotations
 
 from uuid import UUID, uuid4
 
+from src.foundation.connections.ports.repository import ConnectionRepository
+from src.foundation.mandates.ports.repository import MandateRepository
+from src.foundation.paper_control.application.start_deployment import RiskGateDeniedError
 from src.foundation.paper_control.domain.models import DeploymentState, PaperOrderIntent
 from src.foundation.paper_control.ports.paper_adapter import (
     PaperExecutionAdapter,
     PaperExecutionContext,
 )
 from src.foundation.paper_control.ports.repository import PaperControlRepository
+from src.foundation.risk_gate.application.evaluate_risk_gate import evaluate_risk_gate
+from src.foundation.risk_gate.contracts.v1 import RiskOutcome
+from src.foundation.risk_gate.domain.models import GateKind
+from src.foundation.risk_gate.ports.repository import RiskGateRepository
+
+__all__ = [
+    "DeploymentNotFoundError",
+    "FenceSupersededError",
+    "ProviderUnavailableError",
+    "RiskGateDeniedError",
+    "submit_paper_intent",
+]
+"""RiskGateDeniedError를 여기서도 re-export한다 — start_deployment.py와
+pause_deployment.py가 각자 독립된 InvalidDeploymentStateError를 정의해뒀던
+걸 리뷰 중 발견한 뒤(같은 이름, 다른 클래스라 pytest.raises가 조용히
+틀린 걸 잡을 뻔했다), 같은 실수를 반복하지 않기로 했다 — 새 클래스를
+또 만드는 대신 start_deployment.py의 것을 그대로 재사용한다."""
 
 
 class DeploymentNotFoundError(Exception):
@@ -42,6 +70,9 @@ class ProviderUnavailableError(Exception):
 async def submit_paper_intent(
     repo: PaperControlRepository,
     adapter: PaperExecutionAdapter,
+    risk_repo: RiskGateRepository,
+    mandate_repo: MandateRepository,
+    connection_repo: ConnectionRepository,
     *,
     deployment_id: UUID,
     expected_fence_token: int,
@@ -60,6 +91,19 @@ async def submit_paper_intent(
             f"유효하지 않습니다(현재 상태={deployment.state.value}, "
             f"현재 fence={deployment.fence_token})."
         )
+
+    # 교차세션 감사 발견 반영 — fence가 유효해도 kill switch가 RUNNING
+    # *도중에* 켜졌을 수 있다. PRE_INTENT 게이트로 매 제출 직전 다시 확인한다.
+    risk_result = await evaluate_risk_gate(
+        risk_repo,
+        mandate_repo,
+        connection_repo,
+        tenant_id=deployment.tenant_id,
+        gate_kind=GateKind.PRE_INTENT,
+        connection_id=deployment.connection_id,
+    )
+    if risk_result.outcome != RiskOutcome.ALLOW:
+        raise RiskGateDeniedError(risk_result.reason_codes)
 
     context = PaperExecutionContext(
         deployment_id=str(deployment_id), provenance=deployment.provenance

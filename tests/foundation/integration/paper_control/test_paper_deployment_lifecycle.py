@@ -297,7 +297,14 @@ async def test_submit_paper_intent_rejects_superseded_fence(
     adapter = FakePaperExecutionAdapter()
     with pytest.raises(FenceSupersededError):
         await submit_paper_intent(
-            repo, adapter, deployment_id=deployment.id, expected_fence_token=stale_fence, sequence=1
+            repo,
+            adapter,
+            risk_repo,
+            mandate_repo,
+            connection_repo,
+            deployment_id=deployment.id,
+            expected_fence_token=stale_fence,
+            sequence=1,
         )
 
 
@@ -325,6 +332,9 @@ async def test_provider_failure_during_submit_degrades_deployment_never_switches
         await submit_paper_intent(
             repo,
             failing_adapter,
+            risk_repo,
+            mandate_repo,
+            connection_repo,
             deployment_id=deployment.id,
             expected_fence_token=started.fence_token,
             sequence=1,
@@ -353,6 +363,64 @@ async def test_provider_failure_during_submit_degrades_deployment_never_switches
             deployment_id=deployment.id,
             idempotency_key="resume-after-degraded",
         )
+
+
+async def test_kill_switch_activated_after_running_blocks_further_submits(
+    pool, repo, risk_repo, mandate_repo, trust_repo, connection_repo
+):
+    """교차세션 감사 발견(agent-platform-12, 2026-09-02) 회귀 — kill switch가
+    deployment의 fence를 건드리지 않으므로(pause/stop을 자동으로 트리거하지
+    않는다), fence 재확인만으로는 RUNNING *도중* 켜진 kill switch를 못 잡는다.
+    PRE_INTENT 게이트가 이 틈을 실제로 막는지 확인한다."""
+    from src.foundation.risk_gate.application.activate_safety_control import (
+        activate_safety_control,
+    )
+    from src.foundation.risk_gate.domain.models import SafetyScope
+
+    tenant_id = await _tenant_with_mandate(pool, mandate_repo, trust_repo)
+    deployment = await _request(repo, mandate_repo, tenant_id)
+    started = await start_deployment(
+        repo,
+        risk_repo,
+        mandate_repo,
+        connection_repo,
+        tenant_id=tenant_id,
+        actor_subject_id=tenant_id,
+        deployment_id=deployment.id,
+        idempotency_key="start-then-kill",
+    )
+    # fence는 여전히 start 시점 값 그대로다 — kill switch는 이 값을 안 바꾼다.
+    assert started.fence_token == 0
+
+    await activate_safety_control(
+        risk_repo,
+        tenant_id=tenant_id,
+        actor_subject_id=tenant_id,
+        actor_is_admin=False,
+        scope=SafetyScope.ACCOUNT,
+        scope_ref=str(tenant_id),
+        reason="RUNNING 도중 kill switch 테스트",
+    )
+
+    adapter = FakePaperExecutionAdapter()
+    with pytest.raises(RiskGateDeniedError):
+        await submit_paper_intent(
+            repo,
+            adapter,
+            risk_repo,
+            mandate_repo,
+            connection_repo,
+            deployment_id=deployment.id,
+            expected_fence_token=started.fence_token,  # 여전히 "유효한" fence
+            sequence=1,
+        )
+
+    # 거부 이후에도 deployment 자체는 여전히 RUNNING이다 — PRE_INTENT 거부는
+    # PAP-007(DEGRADED)과 다른 종류다: provider가 아니라 정책이 막은 것이므로
+    # deployment 상태를 바꾸지 않는다(다음 tick에서 kill switch가 풀리면
+    # 그대로 재개 가능해야 한다).
+    still_running = await repo.get_deployment(deployment.id)
+    assert still_running.state.value == "RUNNING"
 
 
 async def test_concurrent_pause_and_stop_never_double_counts_fence(
