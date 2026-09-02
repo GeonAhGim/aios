@@ -2,14 +2,46 @@
 
 이 문서는 DevEngine 세션(별도 Claude Code 세션, `C:\devengine\mihwa-devengine`
 작업 중)이 `C:\aios\mihwa-aios`를 읽기 전용으로 감사하며 찾은 문제를
-기록한다 — **이 세션은 AIOS 코드를 직접 수정하지 않는다**, AIOS 구현을
-맡은 세션이 이 문서를 보고 판단해서 고치는 용도다.
+기록한다 — 원칙적으로 **이 세션은 AIOS 코드를 직접 수정하지 않는다**,
+AIOS 구현을 맡은 세션이 이 문서를 보고 판단해서 고치는 용도다.
+
+예외: 2026-09-02, 사용자가 #19~22(HIGH) 4건에 한해 이 세션이 직접
+수정하도록 명시적으로 지시했다(다른 세션이 FND-01~09 순서를 따라가느라
+기존 코드의 레드팀 항목을 자동으로 챙기지 못하는 공백이 확인된 뒤). 이
+4건은 이 세션이 직접 커밋했다 — 아래 각 항목의 FIXED 근거에 표시.
+이후로도 기본값은 여전히 "감사만, 수정은 다른 세션"이다.
 
 각 항목은 발견 시점의 실제 코드/테스트 근거를 남기고, 상태(OPEN/FIXED)를
 갱신한다. FIXED로 표시된 항목은 감사 세션이 수정 커밋까지 직접 확인한
 것이다(자체 보고 아님 — ruff/mypy/pytest 실행 결과로 검증).
 
 ---
+
+## 2026-09-02-25 · risk_guard_loop도 alert_evaluation_loop과 같은 클래스 — 예외 시 손실한도 자동정지 루프가 영구 정지 가능 (참고용, #21 수정 중 발견)
+
+**상태**: 🔴 OPEN
+
+**발견**: #21을 고치며 `src/main.py`를 보다가 발견 — `_risk_guard_loop()`
+(`main.py`)도 `_alert_evaluation_loop()`와 정확히 같은 구조다:
+```python
+async def _risk_guard_loop() -> None:
+    while True:
+        await asyncio.sleep(RISK_GUARD_INTERVAL_SECONDS)
+        await risk_guard_service.evaluate_all_running()
+```
+`evaluate_all_running()` 내부에서 실행 하나 평가 중 예상 못한 예외가
+나면(#21과 동일한 종류의 미검증 입력/일시적 조회 실패 등) 이 루프
+자체가 죽어 재시작 전까지 **모든 실행의 손실한도 자동정지 감시가
+멈춘다** — 알림 기능보다 안전 크리티컬도가 높은 루프라 알림(#21)보다
+잠재 영향이 크다고 판단해 별도 항목으로 남긴다. `evaluate_all_running()`
+내부에 이미 개별 실행 단위 try/except가 있는지는 확인하지 않았다(이번
+세션은 #19~22로 스콥이 한정돼 이 함수 본문은 읽지 않음).
+
+**권장 수정 방향**: #21과 동일한 2단 방어 — (1)
+`RiskGuardService.evaluate_all_running()` 내부에서 실행 하나 평가
+실패가 다른 실행 평가를 막지 않는지 확인/보강, (2) `main.py`의
+`_risk_guard_loop()`도 `await risk_guard_service.evaluate_all_running()`
+호출을 try/except로 감싸 다음 주기 재시도가 되도록.
 
 ## 2026-09-02-재검증 · 01~18번 전수 재검증 완료
 
@@ -32,7 +64,15 @@ postgres 컨테이너)로 설정한 뒤 `pytest`(709 passed, 0 failed),
 
 ## 2026-09-02-19 · order_service.submit_order()의 멱등성 체크가 TOCTOU — 거래소엔 나갔지만 DB엔 없는 고아 주문이 발생할 수 있음 — 심각도 높음
 
-**상태**: 🔴 OPEN
+**상태**: ✅ FIXED — `submit.py::submit_order()`를 "거래소 호출 전에
+INSERT로 client_order_id를 원자적으로 선점 → 거래소 호출 → 실패 시
+claim 행 삭제 → 성공 시 conditional_update로 갱신" 순서로 재구성.
+회귀 테스트 `test_submit_order_concurrent_calls_only_send_to_exchange_once`
+(동시 호출 시 `place_order_call_count == 1` 검증, `asyncio.gather` +
+인위적 지연으로 경합 창을 넓힘)로 확인. 기존
+`test_submit_order_network_error_propagates`("전송 실패 시 DB에 흔적
+안 남음")도 그대로 통과 — claim 삭제로 그 불변조건 유지. 전체
+스위트 1003 passed로 직접 실행 검증(자체 보고 아님).
 
 **발견**: `src/services/order_service/submit.py::submit_order()`가 (1)
 `repository.get_by_client_order_id`로 기존 주문 존재 여부를 확인 →
@@ -73,7 +113,15 @@ CONFLICT DO NOTHING`을 먼저 걸어 "이 주문을 시도할 권리"를 원자
 
 ## 2026-09-02-20 · order_service.repository의 update_from_exchange/update_after_modify가 이미 고친 줄 알았던 "조건없는 UPDATE" 패턴으로 새 모듈에서 재발 — 심각도 높음
 
-**상태**: 🔴 OPEN
+**상태**: ✅ FIXED — 두 함수 모두 `expected_status` 파라미터를 추가하고
+105번 표준의 `conditional_update()`(`src/core/db/conditional_write.py`,
+FND-01 이후 새 bounded context용으로 이미 존재하던 공용 헬퍼)로
+전환. 호출부 4곳(submit.py::apply_fill, cancel.py, reconcile.py,
+modify.py) 전부 갱신 직전에 읽은 `order.status`를 그대로 넘기도록
+수정. 회귀 테스트 `test_update_from_exchange_raises_on_status_mismatch`로
+확인(다른 경로가 먼저 CANCELLED로 바꾼 뒤 stale FILLED 갱신 시도 →
+ConcurrencyConflictError, DB는 CANCELLED 유지). 전체 스위트 1003
+passed로 직접 실행 검증.
 
 **발견**: `src/services/order_service/repository.py::update_from_exchange()`(98-116행)와
 `update_after_modify()`(119-134행) 둘 다 `UPDATE orders SET ... WHERE
@@ -108,7 +156,15 @@ order_id = $1`만 걸려 있고, **직전에 읽은 상태를 WHERE절에서 재
 
 ## 2026-09-02-21 · AlertService.evaluate_all_active()가 미검증 indicator/params로 인한 예외를 잡지 않아 전체 사용자의 알림 평가 루프를 영구 정지시킴 — 15번과 동일 클래스, 새 모듈에서 재발 — 심각도 높음
 
-**상태**: 🔴 OPEN
+**상태**: ✅ FIXED — 2단 방어. (1) `alert_service.py::evaluate_all_active()`의
+`self._indicators.calculate(...)` 호출을 try/except로 감싸 실패한
+알림 하나만 건너뛰도록(모듈 docstring이 원래 약속한 동작) 수정.
+(2) `main.py::_alert_evaluation_loop()`도 `evaluate_all_active()`
+호출 자체를 try/except로 감싸 어떤 예외도 루프를 빠져나가지 못하게
+2차 방어선 추가. 전체 스위트 1003 passed로 직접 실행 검증(전용
+회귀 테스트는 추가하지 않음 — 기존 `test_alert_service.py`/
+`test_alerts_router.py` 통과로 비회귀만 확인, 필요 시 후속 세션이
+"잘못된 indicator 생성 → 다음 알림도 정상 평가됨" 케이스 추가 권장).
 
 **발견**: `src/api/schemas/alerts.py::AlertCreateRequest.indicator`는
 검증 없는 순수 `str`이고, `POST /alerts`(`src/api/routers/alerts.py::create_alert`)도
@@ -155,9 +211,23 @@ try/except로 감싸 실패한 알림 하나만 건너뛰도록 한다(모듈이
 
 ## 2026-09-02-22 · execution_loop의 fsm_state 갱신이 동시 tick에 대해 조건부가 아니라, 승인된 자본배분을 초과하는 중복 실주문 제출이 가능 — 심각도 높음(현재는 스케줄러 미배선으로 잠재적)
 
-**상태**: 🔴 OPEN (latent — `main.py`에 `run_execution_tick()`을 호출하는
-스케줄러가 아직 배선되지 않아 지금 당장 트리거할 방법은 없음. 배선
-전에 반드시 해소 필요)
+**상태**: ✅ FIXED — `tick.py::_make_fsm_state_writer()`가 반환하는
+writer의 시그니처를 `(execution_id, new_state)` → `(execution_id,
+expected_state, new_state)`로 바꾸고 105번 표준의 `conditional_update()`로
+전환. 호출부 3곳(`run_execution_tick`의 메인 쓰기, `_handle_pending_fill_check`,
+`executor.py::Executor.execute()`의 동기체결 전이) 전부 자신이 읽은
+직전 fsm_state를 넘기도록 수정 — `run_execution_tick`은 충돌 시
+RiskEngine 거부와 동일하게 조용히 이번 tick을 포기(다음 tick 재평가)하도록
+`ConcurrencyConflictError`를 잡는다. 이걸로 두 tick이 동시에 같은
+IDLE/HOLDING을 읽어도 조건부 쓰기에서 하나만 성공하고, 진 쪽은
+`Executor.execute()`(실제 주문 제출)에 도달하지 못한다. 회귀 테스트
+2개로 확인: `test_fsm_state_writer_raises_on_concurrent_state_change`
+(writer 자체가 불일치 시 예외+무변경 검증), `test_concurrent_tick_race_only_submits_one_order`
+(get_balance() 호출 시점에 "다른 tick"이 먼저 상태를 선점했다고
+시뮬레이션 → `place_order_call_count == 0` 확인). 전체 스위트 1003
+passed로 직접 실행 검증. **여전히 latent임은 변함없음** — 스케줄러
+미배선이라 지금 당장 트리거되진 않지만, 배선 시점에 이미 안전한
+상태로 준비됨.
 
 **발견**: `src/services/execution_loop/tick.py::run_execution_tick()`이
 `fsm_state`를 일반 `SELECT`(143/148행, 잠금 없음)로 한 번 읽고, 신호
