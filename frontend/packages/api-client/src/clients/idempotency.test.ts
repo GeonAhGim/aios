@@ -75,22 +75,38 @@ describe("금전 라우트의 Idempotency-Key 자동 부착", () => {
     expect(idempotencyKeyOf(fetchMock)).toMatch(UUID_RE);
   });
 
-  it("startExecution / convertToLive: 키를 넘기지 않으면 자동 생성한다", async () => {
+  it("startExecution: 키를 넘기지 않으면 자동 생성한다", async () => {
     const startFetch = stubFetch({ id: 1, status: "RUNNING" });
     await makeClient().startExecution(1);
     expect(idempotencyKeyOf(startFetch)).toMatch(UUID_RE);
-
-    const convertFetch = stubFetch({ id: 1, status: "LIVE" });
-    await makeClient().convertToLive(1, { allocatedCapital: "100", currency: "USDT", exchange: "bitget" });
-    expect(idempotencyKeyOf(convertFetch)).toMatch(UUID_RE);
   });
 
-  it("rebalancePortfolio: 키를 넘기지 않으면 자동 생성한다", async () => {
+  // convertToLive/rebalancePortfolio/requestTopup: task-338부터 idempotencyKey가
+  // 필수 인자다(누락 시 타입 에러) — 호출부(useIdempotentSubmit)가 넘긴 키를 그대로 싣는지만 확인.
+  it("convertToLive: 넘긴 키를 그대로 헤더에 싣는다", async () => {
+    const convertFetch = stubFetch({ id: 1, status: "LIVE" });
+    await makeClient().convertToLive(
+      1,
+      { allocatedCapital: "100", currency: "USDT", exchange: "bitget" },
+      "caller-supplied-key-0002",
+    );
+    expect(idempotencyKeyOf(convertFetch)).toBe("caller-supplied-key-0002");
+  });
+
+  it("rebalancePortfolio: 넘긴 키를 그대로 헤더에 싣는다", async () => {
     const fetchMock = stubFetch({ adjusted: 1, pending_approval: 0, approval_request_ids: [] });
 
-    await makeClient().rebalancePortfolio({ adjustments: [] });
+    await makeClient().rebalancePortfolio({ adjustments: [] }, "caller-supplied-key-0003");
 
-    expect(idempotencyKeyOf(fetchMock)).toMatch(UUID_RE);
+    expect(idempotencyKeyOf(fetchMock)).toBe("caller-supplied-key-0003");
+  });
+
+  it("requestTopup: 넘긴 키를 그대로 헤더에 싣는다", async () => {
+    const fetchMock = stubFetch({ id: 1, requested_amount: "30000", status: "PENDING" });
+
+    await makeClient().requestTopup({ amount: "30000" }, "caller-supplied-key-0004");
+
+    expect(idempotencyKeyOf(fetchMock)).toBe("caller-supplied-key-0004");
   });
 
   it("registerExchangeCredential: 키를 넘기지 않으면 자동 생성한다", async () => {

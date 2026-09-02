@@ -9,6 +9,7 @@ export {
   useExecutions,
   useCreateExecution,
   useStartExecution,
+  useConvertToLive,
   usePauseExecution,
   useRetireExecution,
   useSetExecutionRiskGuard,

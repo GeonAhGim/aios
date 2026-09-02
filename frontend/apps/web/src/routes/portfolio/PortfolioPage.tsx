@@ -14,10 +14,12 @@ import {
 } from "@aios/ui-web";
 import { useState } from "react";
 import { AppShell } from "../../components/layout/AppShell";
+import { DuplicateSubmitError, useIdempotentSubmit } from "../../hooks/useIdempotentSubmit";
 
 export function PortfolioPage() {
   const { data: portfolio, isLoading } = usePortfolio();
   const rebalance = useRebalancePortfolio();
+  const { submit } = useIdempotentSubmit("portfolio.rebalance");
   const [drafts, setDrafts] = useState<Record<number, string>>({});
   const [error, setError] = useState<string | null>(null);
 
@@ -31,9 +33,12 @@ export function PortfolioPage() {
       }));
     if (adjustments.length === 0) return;
     try {
-      await rebalance.mutateAsync({ adjustments });
+      await submit((idempotencyKey) =>
+        rebalance.mutateAsync({ body: { adjustments }, idempotencyKey }),
+      );
       setDrafts({});
     } catch (err) {
+      if (err instanceof DuplicateSubmitError) return;
       setError(err instanceof ApiError ? err.message : "재조정에 실패했습니다.");
     }
   }

@@ -13,7 +13,13 @@ export function usePortfolio() {
 export function useRebalancePortfolio() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (body: RebalanceRequest) => apiClient.rebalancePortfolio(body),
+    mutationFn: ({
+      body,
+      idempotencyKey,
+    }: {
+      body: RebalanceRequest;
+      idempotencyKey: string;
+    }) => apiClient.rebalancePortfolio(body, idempotencyKey),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["portfolio"] }),
   });
 }
@@ -53,6 +59,24 @@ export function useStartExecution() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (executionId: number) => apiClient.startExecution(executionId),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["executions"] }),
+  });
+}
+
+// spec §9 PLT-15: 실행을 LIVE로 전환하는 금전 라우트 — idempotencyKey 필수(호출부가
+// useIdempotentSubmit으로 키 수명주기를 관리해 넘긴다).
+export function useConvertToLive() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({
+      executionId,
+      body,
+      idempotencyKey,
+    }: {
+      executionId: number;
+      body: { allocatedCapital: string; currency: string; exchange: string };
+      idempotencyKey: string;
+    }) => apiClient.convertToLive(executionId, body, idempotencyKey),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["executions"] }),
   });
 }

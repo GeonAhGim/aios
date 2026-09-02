@@ -9,10 +9,6 @@ import { DuplicateSubmitError, useIdempotentSubmit } from "../../hooks/useIdempo
 export function WalletPage() {
   const { data: balance, isLoading } = useWalletBalance();
   const requestTopup = useRequestTopup();
-  // NOTE: api-client의 requestTopup(POST /wallet/topup-requests)은 task-216 범위에서
-  // postIdempotent로 이관되지 않아 Idempotency-Key 헤더를 아직 못 붙인다(api-client 미수정
-  // 제약 — task-321 note 참조). 여기서는 키 수명주기 + in-flight 가드만 적용해 버튼
-  // 연타로 인한 중복 제출은 막는다.
   const { submit } = useIdempotentSubmit("wallet.topup");
   const [amount, setAmount] = useState("30000");
   const [error, setError] = useState<ApiError | Error | null>(null);
@@ -23,7 +19,9 @@ export function WalletPage() {
     setError(null);
     setSubmitted(null);
     try {
-      const result = await submit(() => requestTopup.mutateAsync({ amount }));
+      const result = await submit((idempotencyKey) =>
+        requestTopup.mutateAsync({ body: { amount }, idempotencyKey }),
+      );
       setSubmitted({ id: result.id, amount: result.requestedAmount });
     } catch (err) {
       if (err instanceof DuplicateSubmitError) return;

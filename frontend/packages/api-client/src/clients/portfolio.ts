@@ -19,7 +19,9 @@ export function withPortfolio<TBase extends AnyConstructor>(Base: TBase) {
       return this.request("/portfolio");
     }
 
-    async rebalancePortfolio(body: RebalanceRequest, idempotencyKey?: string): Promise<RebalanceResult> {
+    // spec §9 PLT-15: idempotencyKey를 필수 인자로 받아 호출부(useIdempotentSubmit)가
+    // 키 수명주기를 직접 관리하도록 강제한다 — 누락 시 타입 에러.
+    async rebalancePortfolio(body: RebalanceRequest, idempotencyKey: string): Promise<RebalanceResult> {
       return this.postIdempotent("/portfolio/rebalance", body, idempotencyKey);
     }
 
@@ -27,8 +29,8 @@ export function withPortfolio<TBase extends AnyConstructor>(Base: TBase) {
       return this.request("/wallet/balance");
     }
 
-    async requestTopup(body: TopupRequestBody): Promise<WalletTopupRequest> {
-      return this.post("/wallet/topup-requests", body);
+    async requestTopup(body: TopupRequestBody, idempotencyKey: string): Promise<WalletTopupRequest> {
+      return this.postIdempotent("/wallet/topup-requests", body, idempotencyKey);
     }
 
     async createAlert(body: AlertCreateRequest): Promise<PriceAlert> {

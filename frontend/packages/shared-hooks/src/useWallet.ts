@@ -12,7 +12,8 @@ export function useWalletBalance() {
 export function useRequestTopup() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (body: TopupRequestBody) => apiClient.requestTopup(body),
+    mutationFn: ({ body, idempotencyKey }: { body: TopupRequestBody; idempotencyKey: string }) =>
+      apiClient.requestTopup(body, idempotencyKey),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["walletBalance"] }),
   });
 }
