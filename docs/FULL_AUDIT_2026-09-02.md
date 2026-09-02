@@ -97,8 +97,14 @@ mypy strict 통과의 실질: `type: ignore` 178건 중 160건이 거래소 믹�
 | 중복 구매·환불 이중 적립 | **수정됨** | `purchase()`가 FOR UPDATE 잠금 안에서 기존 구매 조회 + UNIQUE(listing_id, buyer_user_id). resolve는 `refunded_at` 조건부 UPDATE로 환불 1회. 테스트 2개 |
 | 검증담당자 이해상충 | **수정됨** | `decide()`가 `seller_user_id == verifier_id` 거부. 테스트 1개 |
 | PAPER 격리 미검증 헤더 | 미착수 | Bitget Demo 키 필요 — §11 4단계 |
-| 손실한도 자동정지 미발동 (positions 미기록) | 미착수 | §11 3·6단계. 실행 루프 배선과 함께 |
-| 리스크 기준 인메모리 | 미착수 | §11 6단계 |
+| 실행 루프 미배선 (tick 호출자 0, §3) | **수정됨** (`2e943c9`) | `execution_loop/scheduler.py` — RUNNING·PAPER 실행을 `interval_sec` 주기로 tick, 실행별 실패 격리, LIVE 제외. `main.py` 백그라운드 태스크. 테스트 5개 |
+| 재시작 복구 미배선 (§3) | **수정됨** (`2e943c9`) | `execution_loop/recovery_wiring.py` — 미결 주문 재조회·이벤트 재발행·audit_log. FILLED는 tick에 위임(PENDING 고착 방지). 테스트 3개 |
+| Circuit Breaker `check_reactivation` 호출자 0 (§3) | **수정됨** (`2e943c9`) | `main.py` 10초 주기 루프. `evaluate(metrics)`는 지표 수집(positions·어댑터 계측) 이후 |
+| `configure_logging` 미호출 (§3) | **수정됨** (`2e943c9`) | lifespan 첫 줄. trace_id·tenant_id 필드 관통은 §11 8단계로 남음 |
+| risk_guard 루프 try/except 없음 (P1, 레드팀 #25) | **수정됨** (`2e943c9`) | — |
+| 손실한도 자동정지 미발동 (positions 미기록) | 미착수 (9f 배정) | 체결→positions upsert. 스케줄러가 돌기 시작했으므로 이제 실제로 발동 가능한 경로가 됨 |
+| 리스크 기준 인메모리 | 미착수 (9f 배정) | §11 6단계 |
+| **신규** 취소·거부·만료 후 FSM이 PENDING에 고착 | 미착수 (9f 배정) | `cancel.py`·`tick._handle_pending_fill_check`·`recovery_wiring` 어디에도 BUY/SELL_ORDER_PENDING→이전 상태 복귀 로직 없음. 최종 상태가 FILLED가 아니면 실행이 영원히 새 신호를 평가하지 않는다 |
 | Kill switch 직후 stale ALLOW — risk_gate | **수정됨** (`8a0734c`, 다른 세션) | `activate/deactivate_safety_control`이 `invalidate_evaluations`를 호출. PROVIDER 범위 조회 누락, scope_ref 없는 고아 통제도 같이 수정. 레드팀 #26~34 |
 | Kill switch 직후 stale ALLOW — mandates | 미착수 (foundation 세션 배정) | `evaluate_policy._fingerprint`는 여전히 tenant+subject만 포함. mandate pause 후 30초간 캐시 ALLOW |
 | Kill switch가 RUNNING 배포·intent 제출을 못 멈춤 | 미착수 (paper_control 세션 배정) | `submit_paper_intent` safety control 조회 + fence 소비 경로 |
