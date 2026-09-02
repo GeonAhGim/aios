@@ -118,12 +118,12 @@ mypy strict 통과의 실질: `type: ignore` 178건 중 160건이 거래소 믹�
 
 | 세션 | 담당 영역(기존) | 배정 작업 | 순서 |
 |---|---|---|---|
-| agent-platform-12 (PM) | 감사·marketplace | ① 실행 루프 운영 배선: `main.py` tick 스케줄러(`risk_policy.yaml` `interval_sec`), 실행 start가 태스크를 띄우도록, `recover_pending_orders` 호출, Circuit Breaker `evaluate/check_reactivation` 주기 호출 (§11 3단계) ② 전체 진행 추적·§2-A 갱신 | A |
+| agent-platform-12 (PM) | 감사·marketplace | ① 실행 루프 운영 배선 — **완료 `2e943c9`** ② 전체 진행 추적·§2-A 갱신 ③ (f0 반려로 흡수) `RED_TEAM_FINDINGS.md` 정합 + 거버넌스(§11 9단계): `.aios-zone`·ADR-E 파일·CODEOWNERS·CI zone 검증·pytest-cov·secret scan·31초 sleep 교체·벤치마크 단언 ④ 세션별 테스트 DB 분리 스크립트 | A → B |
 | agent-platform-44 | foundation(trust/mandates/evidence/risk_gate/reconciliation), `foundation_deps`, `main.py` 라우터 등록 | ① mandates fingerprint(진행 중) ② `risk_guard` 루프 try/except(레드팀 #25, `main.py:131-135`) ③ foundation→실행 경로 연결: `order_service.submit` 앞 risk_gate PRE_SUBMIT, `execution_service.start` 앞 mandate 평가, 주요 커맨드 `append_audit_event` (§11 5단계) | A → B |
 | agent-platform-c2 | connections, paper_control | ① `submit_paper_intent` safety control 조회(진행 예정) ② RUNNING 배포를 멈추는 fence 소비 경로 ③ paper_control 멱등키 digest(PAP-006)·REQUEST 중복 생성 차단·`ConcurrencyConflictError` 409 매핑 | A |
 | agent-platform-9f | risk_gate, exchanges 가드, execution_loop/alert | ① `positions` 기록 경로(체결→포지션 upsert)로 RiskGuard·watchdog PnL 살리기 ② 일손실·MDD 기준점 DB 영속화(`equity_tracker`) + 재시작 시 복원 ③ RiskEngine 레버리지 실검사 또는 `checked`에서 제거, watchdog `compute_equity` 실계산 — FROZEN 존(`src/core/risk`) 수정은 PM 배정으로 승인됨 | A |
 | agent-platform-30 | exchanges bitget/kis | ① `_request` HTTP 상태코드·429/5xx 백오프·`Retry-After`·서버시간 오프셋 ② WS ping/pong·ack 코드 검사·재연결 후 REST 재동기화 ③ `_row_to_order` priceAvg/price/cTime 파싱 ④ `get_positions` 실구현·심볼 역정규화 단일화 ⑤ (Demo 키 확보 후) `tests/e2e/` Bitget Demo 스팟 왕복 1회로 `paptrading` 헤더 실검증 | A → B |
-| agent-platform-f0 | DevEngine, 레드팀 장부 대조 | ① `RED_TEAM_FINDINGS.md` 정합: 90feab5 4건 등재, CON-004 등재, #21 회귀 테스트, #05/#17 barrier 주입, #25 상태 ② 거버넌스(§11 9단계): `.aios-zone` 실제 경로·ADR-E 반영 + ADR-E 파일을 `docs/`에, CODEOWNERS 치환, CI에 zone 검증·pytest-cov 게이트·secret scan, 31초 sleep→클록 주입, 벤치마크 단언 추가·문서 덮어쓰기 제거 ③ 세션별 테스트 DB 분리 스크립트(`TEST_DATABASE_URL` per session) + README | A |
+| agent-platform-f0 | DevEngine 전용 | AIOS 저장소 작업 없음(반려). DevEngine이 mihwa-aios에 자동 push하기 전 PM 공지 | — |
 | agent-platform-6a | DevEngine 파이프라인 | DevEngine 유지. PR #2 정리 시 `src/core/utils/is_even.py`를 main에서도 제거 | — |
 
 **공통 규칙**
