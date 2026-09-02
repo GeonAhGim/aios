@@ -17,6 +17,8 @@ import asyncpg
 from src.data.models.trading import Order, OrderStatus
 from src.exchanges.common.adapter import ExchangeAdapter
 from src.services.order_service import repository
+from src.services.order_service.gate import GateOutcome, OrderContext, PreSubmitGate
+from src.services.order_service.position_ledger import record_fill_in_position_ledger
 
 PublishFn = Callable[[str, dict[str, Any]], Awaitable[None]]
 
@@ -26,6 +28,16 @@ class OrderSubmissionError(Exception):
     Executor가 아니라 상위(FD-8.2 Allocation) 로직 버그 신호."""
 
 
+class OrderDeniedByRiskGateError(Exception):
+    """전수감사 §6 — kill switch/mandate 정책이 legacy 주문 경로를 전혀
+    막지 못하던 결함(안전 통제가 배선 안 된 병렬 섬)의 수정. `reason_codes`는
+    `pre_submit_gate`가 돌려준 것을 그대로 옮긴다."""
+
+    def __init__(self, reason_codes: tuple[str, ...]) -> None:
+        self.reason_codes = reason_codes
+        super().__init__(f"주문이 위험 게이트에 의해 거부됐습니다: {reason_codes}")
+
+
 async def submit_order(
     order: Order,
     *,
@@ -33,7 +45,26 @@ async def submit_order(
     adapter: ExchangeAdapter,
     pool: asyncpg.Pool,
     publish: PublishFn | None = None,
+    pre_submit_gate: PreSubmitGate | None = None,
+    mandate_revision_id: UUID | None = None,
 ) -> Order:
+    # 전수감사 §6 / FND-06 배선 — 클레임(아래 a)보다 먼저 검사한다. 거부된
+    # 시도는 애초에 orders 테이블에 흔적을 남기지 않는다(클레임 후 거부하면
+    # "제출 안 됐지만 claim 행은 남은" 상태를 별도로 청소해야 함).
+    # `pre_submit_gate`가 없으면(기본값) 기존 동작과 완전히 동일 — 이미
+    # 존재하는 실행 전부에 대한 회귀 없음(마감 게이트 없이 그대로 통과).
+    if pre_submit_gate is not None:
+        decision = await pre_submit_gate(
+            OrderContext(
+                user_id=user_id,
+                execution_id=order.execution_id,
+                exchange=order.exchange,
+                mandate_revision_id=mandate_revision_id,
+            )
+        )
+        if decision.outcome != GateOutcome.ALLOW:
+            raise OrderDeniedByRiskGateError(decision.reason_codes)
+
     # FD-4.2-a 멱등성 — 레드팀 #2026-09-02-19 — "먼저 SELECT로 없음을
     # 확인하고, 거래소 전송 후에야 INSERT한다"는 TOCTOU였다: 동시에 같은
     # client_order_id로 두 번 호출되면 둘 다 SELECT를 통과해 거래소에 실제
@@ -72,6 +103,12 @@ async def submit_order(
         persisted = await repository.update_from_exchange(
             conn, submitted, expected_status=claimed.status
         )
+
+    # PM 배정(agent-platform-12, 2026-09-02) — 거래소가 place_order 응답에서
+    # 즉시 FILLED를 돌려주는 동기체결 케이스. apply_fill()을 거치지 않고
+    # 여기서 바로 확정되므로, positions 기록도 이 지점에서 해야 놓치지
+    # 않는다(position_ledger.py 참조 — 다른 호출부는 apply_fill 쪽).
+    await record_fill_in_position_ledger(pool, persisted)
 
     # FD-4.2-d 이벤트 발행(FD-6.1 재사용).
     if publish is not None:
@@ -112,6 +149,9 @@ async def apply_fill(
         persisted = await repository.update_from_exchange(
             conn, updated, expected_status=order.status
         )
+
+    # PM 배정(agent-platform-12, 2026-09-02) — position_ledger.py 참조.
+    await record_fill_in_position_ledger(pool, persisted)
 
     if publish is not None:
         await publish(

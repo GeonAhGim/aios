@@ -11,7 +11,7 @@ from dotenv import dotenv_values
 
 from src.core.db.conditional_write import ConcurrencyConflictError
 from src.core.exceptions import RetryableExchangeError
-from src.data.models.base import AssetClass
+from src.data.models.base import AssetClass, Currency, Money
 from src.data.models.trading import Order, OrderSide, OrderStatus, OrderType
 from src.services.order_service import (
     OrderCancelError,
@@ -318,3 +318,53 @@ async def test_resolve_unknown_gives_up_after_max_attempts(pool):
 
     assert resolved.status == OrderStatus.UNKNOWN
     assert sleep_calls == [2.0, 2.0]  # 3회 시도 중 마지막을 제외한 2회만 대기
+
+
+async def test_synchronous_fill_round_trip_opens_and_closes_position(pool):
+    """PM 배정(agent-platform-12, 2026-09-02) 회귀 테스트 — positions
+    테이블에 아무도 쓰지 않아 risk_guard_service/portfolio_service의
+    PnL 합산이 항상 0이었던 결함. BUY 동기체결로 포지션이 열리고, SELL
+    동기체결로 realized_pnl과 함께 닫히는지 확인."""
+    user_id = await create_test_user(pool)
+    execution_id = await _create_running_execution(pool, user_id)
+
+    def _fill_at(price: str):
+        async def on_place_order(order: Order) -> Order:
+            return order.model_copy(
+                update={
+                    "exchange_order_id": f"ex-{uuid.uuid4()}",
+                    "status": OrderStatus.FILLED,
+                    "filled_quantity": order.quantity,
+                    "average_fill_price": Money(amount=Decimal(price), currency=Currency.USDT),
+                }
+            )
+
+        return on_place_order
+
+    buy_adapter = FakeExchangeAdapter(on_place_order=_fill_at("50000"))
+    buy_order = _market_order(execution_id)
+    await submit_order(buy_order, user_id=user_id, adapter=buy_adapter, pool=pool)
+
+    async with pool.acquire() as conn:
+        opened = await conn.fetchrow(
+            "SELECT * FROM positions WHERE execution_id = $1", execution_id
+        )
+    assert opened is not None
+    assert opened["quantity"] == Decimal("0.0100000000")
+    assert opened["average_entry_price"] == Decimal("50000.0000000000")
+    assert opened["closed_at"] is None
+
+    sell_adapter = FakeExchangeAdapter(on_place_order=_fill_at("55000"))
+    sell_order = _market_order(execution_id).model_copy(
+        update={"side": OrderSide.SELL, "client_order_id": f"sell-{uuid.uuid4().hex}"}
+    )
+    await submit_order(sell_order, user_id=user_id, adapter=sell_adapter, pool=pool)
+
+    async with pool.acquire() as conn:
+        closed = await conn.fetchrow(
+            "SELECT * FROM positions WHERE id = $1", opened["id"]
+        )
+    assert closed["quantity"] == Decimal("0")
+    assert closed["closed_at"] is not None
+    # (55000 - 50000) * 0.01 = 50
+    assert closed["realized_pnl"] == Decimal("50.0000000000")
