@@ -39,11 +39,17 @@ function RebalanceError({ error }: { error: unknown }) {
 }
 
 export function PortfolioPage() {
-  const { data: portfolio, isLoading } = usePortfolio();
+  const { data: portfolio, isLoading, isError, error: portfolioError, refetch } = usePortfolio();
   const rebalance = useRebalancePortfolio();
   const { submit } = useIdempotentSubmit("portfolio.rebalance");
   const [drafts, setDrafts] = useState<Record<number, string>>({});
   const [error, setError] = useState<unknown>(null);
+  // spec §3.3 5xx: 조회(GET /portfolio) 실패는 재조정 에러와 별개로 routeApiError로
+  // 판정한다(task-937 규약 재사용) — EXCHANGE_UNAVAILABLE/DEPENDENCY_NOT_READY만
+  // refetch() 재시도 버튼을 보여주고 EXCHANGE_FATAL은 안내만 한다.
+  const routedPortfolioError = isError ? routeApiError(portfolioError) : null;
+  const canRetryPortfolio =
+    routedPortfolioError?.kind === "refetch_retry" || routedPortfolioError?.kind === "backoff_retry";
 
   async function handleRebalance() {
     setError(null);
@@ -78,7 +84,17 @@ export function PortfolioPage() {
           action={portfolio && <DataFreshness asOf={null} />}
         />
 
-        {isLoading ? (
+        {isError ? (
+          <ErrorMessage
+            errorCode={portfolioError instanceof ApiError ? portfolioError.errorCode : undefined}
+            message={portfolioError instanceof Error ? portfolioError.message : undefined}
+            traceId={portfolioError instanceof ApiError ? portfolioError.traceId : undefined}
+            retryAfterSec={
+              routedPortfolioError?.kind === "backoff_retry" ? routedPortfolioError.afterSec : undefined
+            }
+            onRetry={canRetryPortfolio ? () => refetch() : undefined}
+          />
+        ) : isLoading ? (
           <LoadingState />
         ) : portfolio ? (
           <>

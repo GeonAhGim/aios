@@ -121,4 +121,35 @@ describe("CandlesPage", () => {
     await waitFor(() => expect(screen.getByText("요청한 항목을 찾을 수 없습니다.")).toBeInTheDocument());
     expect(screen.queryByText("internal detail not for users")).not.toBeInTheDocument();
   });
+
+  // task-1057 §3.3 5xx: EXCHANGE_UNAVAILABLE/DEPENDENCY_NOT_READY(503)는 재시도
+  // 버튼을 보여주고, EXCHANGE_FATAL(502)은 재시도 없이 안내만 한다(task-937 규약
+  // 재사용 — classifyServerError를 감싼 routeApiError로만 판정, 새 분류기 없음).
+  it("negative: EXCHANGE_UNAVAILABLE(503)은 다시 시도 버튼과 함께 매핑된 문구를 보여준다", async () => {
+    const fetchCandles = vi.fn(async () => {
+      throw new ApiError(503, "raw server detail", "trace-503", "EXCHANGE_UNAVAILABLE");
+    });
+    renderPage(fetchCandles);
+
+    await waitFor(() =>
+      expect(
+        screen.getByText("거래소 연결이 원활하지 않습니다. 잠시 후 다시 시도해주세요."),
+      ).toBeInTheDocument(),
+    );
+    expect(screen.queryByText("raw server detail")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "다시 시도" })).toBeEnabled();
+  });
+
+  it("negative: EXCHANGE_FATAL(502)은 재시도 버튼 없이 매핑된 문구만 보여준다", async () => {
+    const fetchCandles = vi.fn(async () => {
+      throw new ApiError(502, "raw server detail", "trace-502", "EXCHANGE_FATAL");
+    });
+    renderPage(fetchCandles);
+
+    await waitFor(() =>
+      expect(screen.getByText("거래소 자격증명을 확인해주세요.")).toBeInTheDocument(),
+    );
+    expect(screen.queryByText("raw server detail")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "다시 시도" })).not.toBeInTheDocument();
+  });
 });

@@ -1,6 +1,8 @@
 import type { ApiResponsePageMeta } from "@aios/api-client";
+import { ApiError } from "@aios/api-client";
 import { useListingSearch } from "@aios/shared-hooks";
 import type { ListingSummary } from "@aios/shared-types";
+import { routeApiError } from "@aios/shared-types";
 import {
   Badge,
   Button,
@@ -11,6 +13,7 @@ import {
 } from "@aios/ui-web";
 import { useCallback, useEffect, useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
+import { ErrorMessage } from "../../components/ErrorMessage";
 import { AppShell } from "../../components/layout/AppShell";
 import { Pagination } from "../../components/Pagination";
 import { derivePageState } from "../../lib/pagination";
@@ -27,12 +30,17 @@ export function MarketplaceBrowsePage() {
     1,
     Number(searchParams.get("size")) || DEFAULT_PAGE_SIZE,
   );
-  const { data, isLoading } = useListingSearch({
+  const { data, isLoading, isError, error, refetch } = useListingSearch({
     page,
     pageSize: size,
     sortBy,
   });
   const navigate = useNavigate();
+  // spec §3.3 5xx: 목록 조회 실패는 routeApiError(내부에서 classifyServerError
+  // 위임)로 판정한다(task-937 규약 재사용) — EXCHANGE_UNAVAILABLE/DEPENDENCY_NOT_READY만
+  // refetch() 재시도 버튼을 보여주고 EXCHANGE_FATAL은 안내만 한다.
+  const routed = isError ? routeApiError(error) : null;
+  const canRetry = routed?.kind === "refetch_retry" || routed?.kind === "backoff_retry";
 
   const meta: ApiResponsePageMeta | null = data
     ? {
@@ -103,7 +111,15 @@ export function MarketplaceBrowsePage() {
           </Select>
         </div>
 
-        {isLoading ? (
+        {isError ? (
+          <ErrorMessage
+            errorCode={error instanceof ApiError ? error.errorCode : undefined}
+            message={error instanceof Error ? error.message : undefined}
+            traceId={error instanceof ApiError ? error.traceId : undefined}
+            retryAfterSec={routed?.kind === "backoff_retry" ? routed.afterSec : undefined}
+            onRetry={canRetry ? () => refetch() : undefined}
+          />
+        ) : isLoading ? (
           <LoadingState />
         ) : data && data.items.length > 0 ? (
           <div className="grid grid-cols-3 gap-4">
