@@ -1,19 +1,41 @@
 import { useCreateListing, useMyStrategies } from "@aios/shared-hooks";
 import { ApiError } from "@aios/api-client";
+import { classifyBadRequest, classifyForbidden, routeApiError } from "@aios/shared-types";
 import { Alert, Button, EmptyState, Field, Input, LoadingState, PageHeader, Select } from "@aios/ui-web";
 import { useEffect, useState, type FormEvent } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { AppShell } from "../../components/layout/AppShell";
+import { BadRequestNotice } from "../../components/BadRequestNotice";
+import { ErrorMessage } from "../../components/ErrorMessage";
+import { ForbiddenNotice } from "../../components/ForbiddenNotice";
 
 function strategyKey(strategyId: string, version: string): string {
   return `${strategyId}@${version}`;
+}
+
+// spec §3.3 에러 taxonomy: 리스팅 생성 실패는 err.message를 직접 노출하지 않고
+// routeApiError(task-483)로 판정해 400/403/그 외를 각각 BadRequestNotice/
+// ForbiddenNotice/ErrorMessage 경로로만 보여준다(task-901 패턴).
+function CreateListingError({ error }: { error: unknown }) {
+  if (classifyBadRequest(error)) return <BadRequestNotice error={error} />;
+  if (classifyForbidden(error)) return <ForbiddenNotice error={error} />;
+  const routed = routeApiError(error);
+  return (
+    <ErrorMessage
+      errorCode={error instanceof ApiError ? error.errorCode : undefined}
+      message={error instanceof Error ? error.message : undefined}
+      traceId={error instanceof ApiError ? error.traceId : undefined}
+      retryAfterSec={routed.kind === "backoff_retry" ? routed.afterSec : undefined}
+    />
+  );
 }
 
 export function SellStrategyPage() {
   const { data: strategies, isLoading } = useMyStrategies();
   const [selectedKey, setSelectedKey] = useState("");
   const [price, setPrice] = useState("10.00");
-  const [error, setError] = useState<string | null>(null);
+  const [clientError, setClientError] = useState<string | null>(null);
+  const [error, setError] = useState<unknown>(null);
   const createListing = useCreateListing();
   const navigate = useNavigate();
 
@@ -25,10 +47,11 @@ export function SellStrategyPage() {
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
+    setClientError(null);
     setError(null);
     const [strategyId, strategyVersion] = selectedKey.split("@");
     if (!strategyId || !strategyVersion) {
-      setError("판매할 전략을 선택해주세요.");
+      setClientError("판매할 전략을 선택해주세요.");
       return;
     }
     try {
@@ -39,7 +62,7 @@ export function SellStrategyPage() {
       });
       navigate(`/marketplace/${listing.id}`, { state: { listing } });
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : "리스팅 생성에 실패했습니다.");
+      setError(err instanceof ApiError ? err : new Error("리스팅 생성에 실패했습니다."));
     }
   }
 
@@ -79,7 +102,8 @@ export function SellStrategyPage() {
                 onChange={(e) => setPrice(e.target.value)}
               />
             </Field>
-            {error && <Alert>{error}</Alert>}
+            {clientError && <Alert>{clientError}</Alert>}
+            {error !== null && <CreateListingError error={error} />}
             <Button type="submit" loading={createListing.isPending} className="w-full">
               리스팅 등록 (초안)
             </Button>

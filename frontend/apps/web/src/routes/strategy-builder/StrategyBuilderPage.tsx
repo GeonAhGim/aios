@@ -1,11 +1,37 @@
 import { useCandles, useCreateStrategy, useIndicators, usePreviewStrategy } from "@aios/shared-hooks";
 import { ApiError } from "@aios/api-client";
-import type { GeneratedConditions, PreviewCondition } from "@aios/shared-types";
+import {
+  classifyBadRequest,
+  classifyForbidden,
+  routeApiError,
+  type GeneratedConditions,
+  type PreviewCondition,
+} from "@aios/shared-types";
 import { Alert, Button, CandlestickChart, Card, Field, PageHeader, Select } from "@aios/ui-web";
 import { useState } from "react";
 import { AppShell } from "../../components/layout/AppShell";
+import { BadRequestNotice } from "../../components/BadRequestNotice";
+import { ErrorMessage } from "../../components/ErrorMessage";
+import { ForbiddenNotice } from "../../components/ForbiddenNotice";
 import { ConditionGroup } from "./components/ConditionGroup";
 import { StrategyWizardPanel } from "./components/StrategyWizardPanel";
+
+// spec §3.3 에러 taxonomy: 미리보기·저장 실패는 err.message를 직접 노출하지 않고
+// routeApiError(task-483)로 판정해 400/403/그 외를 각각 BadRequestNotice/
+// ForbiddenNotice/ErrorMessage 경로로만 보여준다(task-901 패턴).
+function StrategyActionError({ error }: { error: unknown }) {
+  if (classifyBadRequest(error)) return <BadRequestNotice error={error} />;
+  if (classifyForbidden(error)) return <ForbiddenNotice error={error} />;
+  const routed = routeApiError(error);
+  return (
+    <ErrorMessage
+      errorCode={error instanceof ApiError ? error.errorCode : undefined}
+      message={error instanceof Error ? error.message : undefined}
+      traceId={error instanceof ApiError ? error.traceId : undefined}
+      retryAfterSec={routed.kind === "backoff_retry" ? routed.afterSec : undefined}
+    />
+  );
+}
 
 // 06번 §6.2 Draft 화이트리스트 — src/services/condition_compiler.py::
 // TARGET_ASSET_WHITELIST와 1:1.
@@ -46,7 +72,8 @@ export function StrategyBuilderPage() {
   const [entryCombine, setEntryCombine] = useState<"AND" | "OR">("AND");
   const [exitCombine, setExitCombine] = useState<"AND" | "OR">("AND");
   const [stopLossCombine, setStopLossCombine] = useState<"AND" | "OR">("AND");
-  const [error, setError] = useState<string | null>(null);
+  const [clientError, setClientError] = useState<string | null>(null);
+  const [error, setError] = useState<unknown>(null);
   const [saved, setSaved] = useState<{ strategyId: string; version: string; status: string } | null>(
     null,
   );
@@ -69,6 +96,7 @@ export function StrategyBuilderPage() {
   }
 
   async function handlePreview() {
+    setClientError(null);
     setError(null);
     try {
       await previewStrategy.mutateAsync({
@@ -80,14 +108,15 @@ export function StrategyBuilderPage() {
         combine: entryCombine,
       });
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : "미리보기에 실패했습니다.");
+      setError(err instanceof ApiError ? err : new Error("미리보기에 실패했습니다."));
     }
   }
 
   async function handleSave() {
+    setClientError(null);
     setError(null);
     if (!strategyId.trim()) {
-      setError("전략 ID를 입력해주세요.");
+      setClientError("전략 ID를 입력해주세요.");
       return;
     }
     try {
@@ -106,7 +135,7 @@ export function StrategyBuilderPage() {
       });
       setSaved({ strategyId: result.strategyId, version: result.version, status: result.status });
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : "저장에 실패했습니다.");
+      setError(err instanceof ApiError ? err : new Error("저장에 실패했습니다."));
     }
   }
 
@@ -191,7 +220,8 @@ export function StrategyBuilderPage() {
           indicators={indicators}
         />
 
-        {error && <Alert>{error}</Alert>}
+        {clientError && <Alert>{clientError}</Alert>}
+        {error !== null && <StrategyActionError error={error} />}
 
         <div className="flex gap-3">
           <Button

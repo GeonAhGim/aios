@@ -1,12 +1,18 @@
 import { useGenerateFromPrompt, useGenerateWizardStrategy } from "@aios/shared-hooks";
 import { ApiError } from "@aios/api-client";
-import type {
-  GeneratedConditions,
-  RiskTolerance,
-  StrategyGoal,
+import {
+  classifyBadRequest,
+  classifyForbidden,
+  routeApiError,
+  type GeneratedConditions,
+  type RiskTolerance,
+  type StrategyGoal,
 } from "@aios/shared-types";
-import { Alert, Button, Card, Select, Textarea } from "@aios/ui-web";
+import { Button, Card, Select, Textarea } from "@aios/ui-web";
 import { useState } from "react";
+import { BadRequestNotice } from "../../../components/BadRequestNotice";
+import { ErrorMessage } from "../../../components/ErrorMessage";
+import { ForbiddenNotice } from "../../../components/ForbiddenNotice";
 
 const GOAL_LABELS: Record<StrategyGoal, string> = {
   STEADY_GROWTH: "안정적 성장",
@@ -22,6 +28,23 @@ const RISK_LABELS: Record<RiskTolerance, string> = {
 
 type Mode = "WIZARD" | "PROMPT";
 
+// spec §3.3 에러 taxonomy: 생성 실패는 err.message를 직접 노출하지 않고
+// routeApiError(task-483)로 판정해 400/403/그 외를 각각 BadRequestNotice/
+// ForbiddenNotice/ErrorMessage 경로로만 보여준다(task-901 패턴).
+function GenerateError({ error }: { error: unknown }) {
+  if (classifyBadRequest(error)) return <BadRequestNotice error={error} />;
+  if (classifyForbidden(error)) return <ForbiddenNotice error={error} />;
+  const routed = routeApiError(error);
+  return (
+    <ErrorMessage
+      errorCode={error instanceof ApiError ? error.errorCode : undefined}
+      message={error instanceof Error ? error.message : undefined}
+      traceId={error instanceof ApiError ? error.traceId : undefined}
+      retryAfterSec={routed.kind === "backoff_retry" ? routed.afterSec : undefined}
+    />
+  );
+}
+
 // ADR-2026-08-29 §3 — 조건식을 직접 조립하는 것보다 쉬운 고차원 전략 생성.
 // 결과는 항상 기존 조건 에디터(ConditionGroup)로 그대로 넘어가 검토·수정
 // 화면으로 계속 쓰인다 — 여기서 결과를 직접 저장하지 않는다.
@@ -35,7 +58,7 @@ export function StrategyWizardPanel({
   const [riskTolerance, setRiskTolerance] = useState<RiskTolerance>("MEDIUM");
   const [prompt, setPrompt] = useState("");
   const [result, setResult] = useState<GeneratedConditions | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<unknown>(null);
   const generateWizard = useGenerateWizardStrategy();
   const generateFromPrompt = useGenerateFromPrompt();
 
@@ -49,11 +72,7 @@ export function StrategyWizardPanel({
           : await generateFromPrompt.mutateAsync({ prompt });
       setResult(generated);
     } catch (err) {
-      setError(
-        err instanceof ApiError
-          ? err.message
-          : "생성에 실패했습니다.",
-      );
+      setError(err instanceof ApiError ? err : new Error("생성에 실패했습니다."));
     }
   }
 
@@ -141,7 +160,7 @@ export function StrategyWizardPanel({
         생성하기
       </Button>
 
-      {error && <Alert>{error}</Alert>}
+      {error !== null && <GenerateError error={error} />}
 
       {result && (
         <div className="space-y-3 rounded-lg border border-border-strong bg-bg p-4">
