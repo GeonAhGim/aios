@@ -4,14 +4,33 @@ import {
   useSetExecutionRiskGuard,
   useStartExecution,
 } from "@aios/shared-hooks";
-import type { ExecutionCardResponse } from "@aios/shared-types";
+import { ApiError } from "@aios/api-client";
+import { classifyForbidden, routeApiError, type ExecutionCardResponse } from "@aios/shared-types";
 import { Button, Input, StatusBadge } from "@aios/ui-web";
 import { useState } from "react";
 import { DuplicateSubmitError, useIdempotentSubmit } from "../../../hooks/useIdempotentSubmit";
 import { exchangeLabel } from "../../../lib/exchangeLabels";
+import { ErrorMessage } from "../../../components/ErrorMessage";
+import { ForbiddenNotice } from "../../../components/ForbiddenNotice";
 
 interface ExecutionCardProps {
   execution: ExecutionCardResponse;
+}
+
+// spec §3.3 에러 taxonomy: 재시작 실패는 err.message를 직접 노출하지 않고
+// routeApiError(task-483)로 판정해 403/그 외를 각각 ForbiddenNotice/ErrorMessage
+// 경로로만 보여준다(task-901 패턴, task-1048에서 여기 남아있던 직접 렌더를 교체).
+function StartExecutionError({ error }: { error: unknown }) {
+  if (classifyForbidden(error)) return <ForbiddenNotice error={error} />;
+  const routed = routeApiError(error);
+  return (
+    <ErrorMessage
+      errorCode={error instanceof ApiError ? error.errorCode : undefined}
+      message={error instanceof Error ? error.message : undefined}
+      traceId={error instanceof ApiError ? error.traceId : undefined}
+      retryAfterSec={routed.kind === "backoff_retry" ? routed.afterSec : undefined}
+    />
+  );
 }
 
 // 16번 문서 §17.5.2 패턴 — pausedBy로 Watchdog 자동정지(SAFETY_LAYER)와
@@ -60,7 +79,7 @@ export function ExecutionCard({ execution }: ExecutionCardProps) {
           미실현 손익 {execution.unrealizedPnl}
         </p>
       </div>
-      {start.isError && <p className="mt-2 text-xs text-danger">{(start.error as Error).message}</p>}
+      {start.isError && <StartExecutionError error={start.error} />}
       {execution.status !== "RETIRED" && (
         <div className="mt-3 flex items-center gap-2 text-xs">
           <span className="text-fg-muted">위험 관리 — 손실 한도(%)</span>
