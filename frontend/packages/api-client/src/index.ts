@@ -59,4 +59,11 @@ export type { MembershipsClient, GrantMembershipBody } from "./memberships";
 // AiosApiClient 합성(client.ts)에는 아직 배선되지 않았다(서버 라우터 미마운트) —
 // 후속 리프 소관.
 export { createMarketDataClient } from "./clients/marketData";
-export type { MarketDataClient, CandleQueryParams, ReplayQueryParams, CandleQueryResult } from "./clients/marketData";
+export type {
+  MarketDataClient,
+  CandleQueryParams,
+  ReplayQueryParams,
+  CandleQueryResult,
+  InstrumentListParams,
+  InstrumentListResult,
+} from "./clients/marketData";

@@ -15,10 +15,15 @@
 // 필드를 강제로 요구하지는 않는다.
 import {
   parseCandleSeries,
+  parseInstrumentView,
   parseQualityVerdict,
+  parseSymbolAlias,
   type Adjustment,
   type ParsedCandleSeries,
+  type ParsedInstrumentView,
   type ParsedQualityVerdict,
+  type ParsedSymbolAlias,
+  type SymbolStatus,
   type Timeframe,
   type Venue,
 } from "@aios/shared-types";
@@ -102,6 +107,34 @@ function toQuery(params: CandleQueryParams): Record<string, string> {
   return query;
 }
 
+// task-824: §3.1 InstrumentView 목록·§4.2 별칭 조회. 목록 응답 형태(items/next_cursor)와
+// 항목별 schema_version 포함 여부는 아직 없는 라우터를 위해 이 leaf가 정하는 최소 계약이다
+// — parseInstrumentView(task-708)를 항목마다 그대로 재사용할 수 있도록 각 항목이 단건
+// InstrumentView 응답과 동일한 모양(schema_version 포함)이라고 가정한다. 새 파서는
+// 만들지 않는다.
+export interface InstrumentListParams {
+  venue?: Venue;
+  status?: SymbolStatus;
+  /** 생략하면 첫 페이지(useCursorPage.cursor와 동일한 값을 그대로 전달). */
+  cursor?: string;
+}
+
+export interface InstrumentListResult {
+  items: ParsedInstrumentView[];
+  /** useCursorPage/createCursorNavigator가 기대하는 CursorNavigatorMeta.next_cursor와 동일한 이름. */
+  nextCursor: string | null;
+}
+
+function toInstrumentListResult(raw: unknown): InstrumentListResult {
+  if (!isRecord(raw) || !Array.isArray(raw.items)) {
+    return { items: [], nextCursor: null };
+  }
+  return {
+    items: raw.items.map((item) => parseInstrumentView(item)),
+    nextCursor: typeof raw.next_cursor === "string" ? raw.next_cursor : null,
+  };
+}
+
 class MarketDataApiClient extends ApiClientBase {
   private async fetchCandles(route: ApiRouteName, query: Record<string, string>): Promise<CandleQueryResult> {
     const path = this.withQuery(resolvePath(route), query);
@@ -123,11 +156,29 @@ class MarketDataApiClient extends ApiClientBase {
     requireKnownTimeframe(params.timeframe);
     return this.fetchCandles("marketData.candles.replay", toQuery(params));
   }
+
+  async listInstruments(params: InstrumentListParams = {}): Promise<InstrumentListResult> {
+    const query: Record<string, string> = {};
+    if (params.venue !== undefined) query.venue = params.venue;
+    if (params.status !== undefined) query.status = params.status;
+    if (params.cursor !== undefined) query.cursor = params.cursor;
+    const path = this.withQuery(resolvePath("marketData.instruments.list"), query);
+    const raw = keysToSnake(await this.request<unknown>(path));
+    return toInstrumentListResult(raw);
+  }
+
+  async listInstrumentAliases(instrumentId: string): Promise<ParsedSymbolAlias[]> {
+    const path = resolvePath("marketData.instruments.aliases").replace(":instrumentId", instrumentId);
+    const raw = keysToSnake(await this.request<unknown>(path));
+    return Array.isArray(raw) ? raw.map((item) => parseSymbolAlias(item)) : [];
+  }
 }
 
 export interface MarketDataClient {
   getCandles(params: CandleQueryParams): Promise<CandleQueryResult>;
   replayCandles(params: ReplayQueryParams): Promise<CandleQueryResult>;
+  listInstruments(params?: InstrumentListParams): Promise<InstrumentListResult>;
+  listInstrumentAliases(instrumentId: string): Promise<ParsedSymbolAlias[]>;
 }
 
 export function createMarketDataClient(baseUrl: string, getToken: () => string | null): MarketDataClient {
@@ -135,5 +186,7 @@ export function createMarketDataClient(baseUrl: string, getToken: () => string |
   return {
     getCandles: (params) => client.getCandles(params),
     replayCandles: (params) => client.replayCandles(params),
+    listInstruments: (params) => client.listInstruments(params),
+    listInstrumentAliases: (instrumentId) => client.listInstrumentAliases(instrumentId),
   };
 }

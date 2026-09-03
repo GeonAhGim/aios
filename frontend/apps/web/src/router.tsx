@@ -18,6 +18,7 @@ import { DisputeSubmitPage } from "./routes/disputes/DisputeSubmitPage";
 import { ExchangeManagementPage } from "./routes/exchanges/ExchangeManagementPage";
 import { ExecutionControlPage } from "./routes/executions/ExecutionControlPage";
 import { CandlesPage } from "./routes/market/CandlesPage";
+import { InstrumentsPage } from "./routes/market/InstrumentsPage";
 import { ListingDetailPage } from "./routes/marketplace/ListingDetailPage";
 import { MarketplaceBrowsePage } from "./routes/marketplace/MarketplaceBrowsePage";
 import { SellStrategyPage } from "./routes/marketplace/SellStrategyPage";
@@ -56,6 +57,7 @@ export const router = createBrowserRouter([
   { path: "/onboarding/risk-assessment", element: protect(<RiskAssessmentPage />) },
   { path: "/dashboard", element: protect(<DashboardPage />) },
   { path: "/exchanges", element: protect(<ExchangeManagementPage />) },
+  { path: "/market/instruments", element: protect(<InstrumentsPage />) },
   { path: "/strategy-builder", element: protect(<StrategyBuilderPage />) },
   { path: "/market/candles", element: protect(<CandlesPage />) },
   { path: "/marketplace", element: protect(<MarketplaceBrowsePage />) },

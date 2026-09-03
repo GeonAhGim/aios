@@ -133,6 +133,17 @@ export const API_ROUTES = defineApiRoutes({
   // 경로가 확정되면(라우터 파일 확인 후) 이 값만 고친다.
   "marketData.candles.get": route("/v1/foundation/market-data/candles", false, null),
   "marketData.candles.replay": route("/v1/foundation/market-data/candles/replay", false, null),
+
+  // task-824: §3.1 InstrumentView 목록·별칭 조회. LA-9(ports/reference_repository.py)에는
+  // get_instrument(단건)만 있고 목록·별칭 조회 메서드가 아직 없다 — marketData.candles.*와
+  // 같은 이유(라우터 자체가 아직 없음)로 v1Path=null·legacy만 등록해둔다. 실제 라우터가
+  // 생기면(LA-9 확장 후) 이 값만 고친다.
+  "marketData.instruments.list": route("/v1/foundation/market-data/instruments", false, null),
+  "marketData.instruments.aliases": route(
+    "/v1/foundation/market-data/instruments/:instrumentId/aliases",
+    false,
+    null,
+  ),
 });
 
 export type ApiRouteName = keyof typeof API_ROUTES;
