@@ -100,6 +100,23 @@ describe("useRetryableAction", () => {
     expect(seenKeys[1]).toBe(seenKeys[0]);
   });
 
+  it("503 EXCHANGE_UNAVAILABLE이 백오프 상한(3회)까지 반복되면 최종 실패를 그대로 던진다", async () => {
+    vi.useFakeTimers();
+    const { result } = renderHook(() => useRetryableAction<string>());
+
+    let calls = 0;
+    const promise = result.current.run(async () => {
+      calls += 1;
+      throw new ApiError(503, "일시적 오류", undefined, "EXCHANGE_UNAVAILABLE");
+    });
+    const assertion = expect(promise).rejects.toMatchObject({ errorCode: "EXCHANGE_UNAVAILABLE" });
+
+    await vi.advanceTimersByTimeAsync(1000 + 2000 + 4000);
+    await assertion;
+
+    expect(calls).toBe(4);
+  });
+
   it("409 STATE_INVALID_TRANSITION은 같은 409여도 재시도하지 않는다(task-414)", async () => {
     const refetch = vi.fn().mockResolvedValue(undefined);
     const { result } = renderHook(() => useRetryableAction<string>({ refetch }));

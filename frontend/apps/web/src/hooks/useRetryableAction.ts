@@ -2,7 +2,9 @@ import { useCallback, useState } from "react";
 import { classifyRetry } from "@aios/shared-types";
 import { createIdempotencyKeyManager, type IdempotencyKeyManager } from "../lib/idempotency";
 
-// spec §9 PLT-25 원문: afterSec이 없는 backoff는 1s→2s→4s, 상한 3회.
+// afterSec이 없는 backoff(EXCHANGE_UNAVAILABLE/DEPENDENCY_NOT_READY 등 서버가
+// retry_after_seconds를 안 주는 경우)의 로컬 기본 스케줄 — spec §3.3은 "백오프"만
+// 명시하고 구체 수치는 정하지 않으므로 1s→2s→4s, 상한 3회로 클라이언트가 정한다.
 const BACKOFF_SCHEDULE_SEC = [1, 2, 4] as const;
 const MAX_BACKOFF_RETRIES = BACKOFF_SCHEDULE_SEC.length;
 
