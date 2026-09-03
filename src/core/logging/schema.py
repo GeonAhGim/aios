@@ -75,12 +75,33 @@ class JSONLinesFormatter(logging.Formatter):
         )
         line = entry.model_dump(mode="json")
 
-        structured = log_fields.from_record(record, current_request_context())
+        # QueueHandler 경로에서는 `_ContextCapturingQueueHandler.prepare()`가 호출
+        # 스레드(=원래 RequestContext가 바인딩된 스레드)에서 미리 떠 둔 스냅샷을
+        # 쓴다 — 이 format()이 실행되는 QueueListener 스레드는 ContextVar가
+        # 전파되지 않아 `current_request_context()`를 여기서 다시 호출하면 항상
+        # fallback(기본) 값이 된다. QueueHandler를 거치지 않는 직접 호출(테스트 등)은
+        # 스냅샷이 없으므로 지금 스레드에서 그대로 계산한다.
+        ctx = getattr(record, "structured_context", None) or current_request_context()
+        structured = log_fields.from_record(record, ctx)
         structured_line = structured.model_dump(mode="json")
         for field_name in log_fields.REQUIRED_FIELDS:
             line.setdefault(field_name, structured_line[field_name])
 
         return json.dumps(line, ensure_ascii=False)
+
+
+class _ContextCapturingQueueHandler(QueueHandler):
+    """`QueueHandler.prepare()` 기본 구현은 큐에 넣기 전에 `self.format()`으로
+    레코드를 완성된 문자열로 덮어쓴다 — 리스너 스레드가 같은 포매터로 다시
+    `format()`을 호출하면 이미 JSON인 문자열을 또 감싸는 이중 인코딩이 된다.
+    그래서 여기서는 문자열로 굳히지 않고, 호출 스레드(=RequestContext가 실제로
+    바인딩된 스레드)에 있는 지금 이 순간의 컨텍스트만 레코드에 스냅샷으로
+    얹어 둔다 — 실제 JSON 렌더링은 기존 설계대로 리스너 스레드의
+    `target_handler`가 한 번만 수행한다."""
+
+    def prepare(self, record: logging.LogRecord) -> logging.LogRecord:
+        record.structured_context = current_request_context()
+        return record
 
 
 def configure_logging(level: str = "INFO", *, redact: bool = True) -> QueueListener:
@@ -104,11 +125,12 @@ def configure_logging(level: str = "INFO", *, redact: bool = True) -> QueueListe
     listener = QueueListener(log_queue, target_handler, respect_handler_level=True)
     listener.start()
 
-    queue_handler = QueueHandler(log_queue)
-    # QueueHandler.emit()은 format()을 호출하지 않는다(레코드를 그대로 큐에 넣기만
-    # 한다) — 실제 포맷팅은 위 target_handler가 리스너 스레드에서 수행한다. 그래도
-    # formatter를 여기 붙여두는 건 하위호환 때문이다: 이 핸들러가 부착되기 전에도
-    # `root.handlers[0].formatter`로 JSONLinesFormatter 존재를 확인하던 소비처가 있다.
+    queue_handler = _ContextCapturingQueueHandler(log_queue)
+    # emit() 자체는 여전히 큐에 넣기만 한다 — 실제 포맷팅은 위 target_handler가
+    # 리스너 스레드에서 수행한다(prepare()는 컨텍스트 스냅샷만 얹는다, 위 클래스
+    # docstring 참조). 그래도 formatter를 여기 붙여두는 건 하위호환 때문이다: 이
+    # 핸들러가 부착되기 전에도 `root.handlers[0].formatter`로 JSONLinesFormatter
+    # 존재를 확인하던 소비처가 있다.
     queue_handler.setFormatter(formatter)
 
     root = logging.getLogger()

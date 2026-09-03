@@ -104,7 +104,7 @@ def test_configure_logging_attaches_queue_handler_for_non_blocking_emit():
 def test_configure_logging_end_to_end_emits_redacted_8_field_json_line(capsys):
     listener = configure_logging(level="INFO")
     try:
-        with bind(tenant_id=uuid.uuid4()):
+        with bind(tenant_id=uuid.uuid4()) as ctx:
             logging.getLogger("src.exchanges.bitget.adapter").warning(
                 "주문 재시도",
                 extra={
@@ -124,6 +124,32 @@ def test_configure_logging_end_to_end_emits_redacted_8_field_json_line(capsys):
     assert line["level"] == "WARNING"  # 07 §7.1 계약 유지 — 108의 소문자 매핑 아님
     assert line["extra"]["api_key"] == REDACTED
     assert line["extra"]["n"] == 1
+    # 리스너 스레드에서 다시 계산한 fallback 값이 아니라, 로그 호출 시점(호출
+    # 스레드)에 실제로 바인딩돼 있던 RequestContext 값이어야 한다.
+    assert line["trace_id"] == str(ctx.trace_id)
+    assert line["tenant_id"] == str(ctx.tenant_id)
+    # QueueHandler.prepare()가 큐에 넣기 전에 미리 포맷해버리면 리스너 스레드가
+    # 그 결과를 다시 감싸 "message"가 JSON 블롭이 된다(이중 인코딩) — 원본 메시지
+    # 그대로여야 한다.
+    assert line["message"] == "주문 재시도"
+
+
+def test_configure_logging_queue_handler_does_not_double_encode_message(capsys):
+    """`_ContextCapturingQueueHandler.prepare()`는 컨텍스트 스냅샷만 얹고 문자열로
+    굳히지 않는다 — 굳혀버리면(QueueHandler 기본 동작) 리스너 스레드가 이미 JSON인
+    문자열을 다시 JSONLinesFormatter에 통과시켜 "message" 필드가 통째로 중첩 JSON이
+    된다."""
+    listener = configure_logging(level="INFO")
+    try:
+        logging.getLogger("x").info("plain message", extra={"event_type": "t"})
+    finally:
+        listener.stop()
+
+    line = json.loads(capsys.readouterr().err.strip().splitlines()[-1])
+
+    assert line["message"] == "plain message"
+    # 이중 인코딩됐다면 message 자체가 `{`로 시작하는 JSON 문자열이 된다.
+    assert not line["message"].startswith("{")
 
 
 def test_formatter_json_line_carries_all_108_required_fields():
