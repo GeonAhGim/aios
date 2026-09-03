@@ -3,7 +3,7 @@ import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/re
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { ApiResponseMeta } from "@aios/api-client";
+import { ApiError, type ApiResponseMeta } from "@aios/api-client";
 import { LedgerHistoryPage, type FetchLedgerHistoryPage } from "./LedgerHistoryPage";
 
 vi.mock("@aios/shared-hooks", () => ({
@@ -105,6 +105,17 @@ describe("LedgerHistoryPage", () => {
     renderPage(async () => ({ entries: [entry()], meta: meta({ as_of: "2026-09-03T00:00:00Z" }) }), now);
 
     await waitFor(() => expect(screen.getByTestId("data-freshness-stale-badge")).toBeInTheDocument());
+  });
+
+  it("fetchPage가 ApiError 봉투로 실패하면 매핑된 메시지와 지원코드를 보여준다", async () => {
+    renderPage(async () => {
+      throw new ApiError(503, "server message", "trace-ledger-1", "DEPENDENCY_NOT_READY");
+    });
+
+    await waitFor(() =>
+      expect(screen.getByText("서비스가 준비 중입니다. 잠시 후 다시 시도해주세요.")).toBeInTheDocument(),
+    );
+    expect(screen.getByText("지원코드: trace-ledger-1")).toBeInTheDocument();
   });
 
   it("fetchPage가 없으면 기본 구현이 표시 불가 오류를 routeApiError+ErrorMessage 경로로 보여준다", async () => {

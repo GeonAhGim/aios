@@ -3,7 +3,7 @@ import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-li
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { ApiResponseMeta } from "@aios/api-client";
+import { ApiError, type ApiResponseMeta } from "@aios/api-client";
 import { PayoutsPage, type FetchHoldsPage, type FetchPayoutBatchesPage } from "./PayoutsPage";
 
 vi.mock("@aios/shared-hooks", () => ({
@@ -121,6 +121,21 @@ describe("PayoutsPage", () => {
 
     await waitFor(() => expect(screen.getByText("12345678.12345678")).toBeInTheDocument());
     expect(screen.getByText("0.00000001")).toBeInTheDocument();
+  });
+
+  it("정산 배치 조회가 ApiError 봉투로 실패하면 매핑된 메시지와 지원코드를 보여준다", async () => {
+    renderPage({
+      fetchPayoutBatches: async () => {
+        throw new ApiError(500, "server message", "trace-payout-1", "INTERNAL_ERROR");
+      },
+    });
+
+    await waitFor(() =>
+      expect(
+        screen.getByText("일시적인 오류가 발생했습니다. 문제가 계속되면 문의해주세요."),
+      ).toBeInTheDocument(),
+    );
+    expect(screen.getByText("지원코드: trace-payout-1")).toBeInTheDocument();
   });
 
   it("파싱 실패 항목은 조용히 숨기지 않고 사유와 함께 노출한다", async () => {
