@@ -262,7 +262,6 @@ def create_app() -> FastAPI:
     from src.api.routers.foundation import reconciliation as foundation_reconciliation
     from src.api.routers.foundation import risk_gate as foundation_risk_gate
     from src.api.routers.foundation import trust as foundation_trust
-    from src.api.routers.foundation import trust_memberships as foundation_trust_memberships
     from src.api.routers.foundation import validation as foundation_validation
 
     app.include_router(auth.router, prefix="/auth", tags=["auth"])
@@ -274,7 +273,6 @@ def create_app() -> FastAPI:
         strategy_builder.router, prefix="/strategy-builder", tags=["strategy-builder"])
     app.include_router(suitability.router)
     app.include_router(foundation_trust.router)
-    app.include_router(foundation_trust_memberships.router)
     app.include_router(foundation_mandates.router)
     app.include_router(foundation_evidence.router)
     app.include_router(foundation_ledger_admin.router)
