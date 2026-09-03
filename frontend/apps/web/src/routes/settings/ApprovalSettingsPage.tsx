@@ -1,9 +1,18 @@
 import { useApprovalSettings, useUpdateApprovalSettings } from "@aios/shared-hooks";
 import { ApiError } from "@aios/api-client";
-import type { MembershipCapabilities } from "@aios/shared-types";
+import {
+  classifyBadRequest,
+  classifyForbidden,
+  getApiErrorMessage,
+  routeApiError,
+  type MembershipCapabilities,
+} from "@aios/shared-types";
 import { Alert, Button, Field, Input, LoadingState, PageHeader } from "@aios/ui-web";
 import { useEffect, useState } from "react";
 import { AppShell } from "../../components/layout/AppShell";
+import { BadRequestNotice } from "../../components/BadRequestNotice";
+import { ErrorMessage } from "../../components/ErrorMessage";
+import { ForbiddenNotice } from "../../components/ForbiddenNotice";
 import { RiskWarningModal } from "../../components/RiskWarningModal";
 import { TenantSwitcher } from "../../components/TenantSwitcher";
 
@@ -13,12 +22,30 @@ import { TenantSwitcher } from "../../components/TenantSwitcher";
 // 버튼 게이팅)만 미리 갖춘다.
 const NO_MEMBERSHIPS: never[] = [];
 
+// spec §3.3 에러 taxonomy: 설정 변경 실패는 err.message를 직접 노출하지 않고
+// routeApiError(task-483)로 판정해 400/403/그 외를 각각 BadRequestNotice/
+// ForbiddenNotice/ErrorMessage 경로로만 보여준다(task-911). 위험등급 경고는
+// attemptUpdate에서 먼저 걸러내므로 이 경로에는 도달하지 않는다.
+function UpdateSettingsError({ error }: { error: unknown }) {
+  if (classifyBadRequest(error)) return <BadRequestNotice error={error} />;
+  if (classifyForbidden(error)) return <ForbiddenNotice error={error} />;
+  const routed = routeApiError(error);
+  return (
+    <ErrorMessage
+      errorCode={error instanceof ApiError ? error.errorCode : undefined}
+      message={error instanceof Error ? error.message : undefined}
+      traceId={error instanceof ApiError ? error.traceId : undefined}
+      retryAfterSec={routed.kind === "backoff_retry" ? routed.afterSec : undefined}
+    />
+  );
+}
+
 export function ApprovalSettingsPage() {
   const { data: settings, isLoading } = useApprovalSettings();
   const update = useUpdateApprovalSettings();
   const [mode, setMode] = useState<"SOLO" | "DUAL">("SOLO");
   const [secondApproverContact, setSecondApproverContact] = useState("");
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<unknown>(null);
   const [riskWarningReason, setRiskWarningReason] = useState<string | null>(null);
   const [capabilities, setCapabilities] = useState<MembershipCapabilities>({
     canView: true,
@@ -41,13 +68,18 @@ export function ApprovalSettingsPage() {
       setRiskWarningReason(null);
     } catch (err) {
       if (err instanceof ApiError) {
-        if (!acknowledged && err.message.includes("위험등급")) {
-          setRiskWarningReason(err.message);
+        // §3.3 봉투를 아직 쓰지 않는 엔드포인트(HTTPException(400, str(exc)) 그대로)라
+        // error_code가 없다 — 위험등급 불일치 경고만 유일하게 서버가 문구로 구분해
+        // 보내므로, getApiErrorMessage로 매핑한 결과(폴백 시 서버 message와 동일)를
+        // 판별에 쓴다. 새 error_code를 만들지 않는다(task-901 DoD, ListingDetailPage 선례).
+        const mapped = getApiErrorMessage(err.errorCode, err.message);
+        if (!acknowledged && mapped.includes("위험등급")) {
+          setRiskWarningReason(mapped);
           return;
         }
-        setError(err.message);
+        setError(err);
       } else {
-        setError("설정 변경에 실패했습니다.");
+        setError(new Error("설정 변경에 실패했습니다."));
       }
     }
   }
@@ -98,7 +130,7 @@ export function ApprovalSettingsPage() {
                 현재 강제 대기시간: {settings.mandatoryWaitSeconds}초
               </p>
             )}
-            {error && <Alert>{error}</Alert>}
+            {error !== null && <UpdateSettingsError error={error} />}
             <Button
               type="button"
               onClick={() => attemptUpdate(false)}

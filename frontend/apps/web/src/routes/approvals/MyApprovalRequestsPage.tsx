@@ -4,14 +4,33 @@ import {
   useRejectMyRequest,
 } from "@aios/shared-hooks";
 import { ApiError } from "@aios/api-client";
-import type { ApprovalRequest } from "@aios/shared-types";
-import { Alert, Badge, Button, EmptyState, LoadingState, PageHeader } from "@aios/ui-web";
+import { classifyForbidden, routeApiError, type ApprovalRequest } from "@aios/shared-types";
+import { Badge, Button, EmptyState, LoadingState, PageHeader } from "@aios/ui-web";
 import { useEffect, useState } from "react";
 import { AppShell } from "../../components/layout/AppShell";
+import { ErrorMessage } from "../../components/ErrorMessage";
+import { ForbiddenNotice } from "../../components/ForbiddenNotice";
 
 // FD-10.1 self-service — SOLO(본인 1인)와 DUAL의 첫 서명을 여기서 처리한다.
 // DUAL 두 번째 서명자는 아직 신원 해석 로직이 없어(계정 연결 안 됨)
 // 이 화면 대상이 아니다 — 관리자 경로로만 처리 가능(알려진 제약).
+//
+// spec §3.3 에러 taxonomy: 처리 실패는 err.message를 직접 노출하지 않고
+// routeApiError(task-483)로 판정해 403/그 외를 각각 ForbiddenNotice/
+// ErrorMessage 경로로만 보여준다(task-911).
+function RequestActionError({ error }: { error: unknown }) {
+  if (classifyForbidden(error)) return <ForbiddenNotice error={error} />;
+  const routed = routeApiError(error);
+  return (
+    <ErrorMessage
+      errorCode={error instanceof ApiError ? error.errorCode : undefined}
+      message={error instanceof Error ? error.message : undefined}
+      traceId={error instanceof ApiError ? error.traceId : undefined}
+      retryAfterSec={routed.kind === "backoff_retry" ? routed.afterSec : undefined}
+    />
+  );
+}
+
 function waitRemainingSeconds(request: ApprovalRequest): number {
   const readyAt = new Date(request.createdAt).getTime() + request.mandatoryWaitSeconds * 1000;
   return Math.max(0, Math.ceil((readyAt - Date.now()) / 1000));
@@ -21,7 +40,7 @@ function RequestCard({ request }: { request: ApprovalRequest }) {
   const approve = useApproveMyRequest();
   const reject = useRejectMyRequest();
   const [remaining, setRemaining] = useState(() => waitRemainingSeconds(request));
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<unknown>(null);
 
   useEffect(() => {
     if (remaining <= 0) return;
@@ -35,7 +54,7 @@ function RequestCard({ request }: { request: ApprovalRequest }) {
       if (action === "approve") await approve.mutateAsync(request.id);
       else await reject.mutateAsync(request.id);
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : "처리에 실패했습니다.");
+      setError(err instanceof ApiError ? err : new Error("처리에 실패했습니다."));
     }
   }
 
@@ -51,7 +70,7 @@ function RequestCard({ request }: { request: ApprovalRequest }) {
         요청 #{request.id} · {new Date(request.createdAt).toLocaleString()}
         {request.firstApproverId && " · 1차 서명 완료(2차 서명 대기)"}
       </p>
-      {error && <Alert>{error}</Alert>}
+      {error !== null && <RequestActionError error={error} />}
       <div className="flex items-center gap-3">
         <Button
           type="button"

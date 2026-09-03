@@ -1,16 +1,36 @@
 import { useCreatePlatformListing } from "@aios/shared-hooks";
 import { ApiError } from "@aios/api-client";
+import { classifyForbidden, routeApiError } from "@aios/shared-types";
 import { Alert, Button, Field, Input, PageHeader } from "@aios/ui-web";
 import { useState, type FormEvent } from "react";
 import { AppShell } from "../../components/layout/AppShell";
+import { ErrorMessage } from "../../components/ErrorMessage";
+import { ForbiddenNotice } from "../../components/ForbiddenNotice";
 
 // ADR-2026-08-29 §2 — 플랫폼이 하우스 계정 명의로 직접 등록하는 리스팅.
 // 제3자 판매자용 검증 절차 없이 등록 즉시 LISTED로 게시된다.
+//
+// spec §3.3 에러 taxonomy: 등록 실패는 err.message를 직접 노출하지 않고
+// routeApiError(task-483)로 판정해 403/그 외를 각각 ForbiddenNotice/
+// ErrorMessage 경로로만 보여준다(task-911).
+function CreateListingError({ error }: { error: unknown }) {
+  if (classifyForbidden(error)) return <ForbiddenNotice error={error} />;
+  const routed = routeApiError(error);
+  return (
+    <ErrorMessage
+      errorCode={error instanceof ApiError ? error.errorCode : undefined}
+      message={error instanceof Error ? error.message : undefined}
+      traceId={error instanceof ApiError ? error.traceId : undefined}
+      retryAfterSec={routed.kind === "backoff_retry" ? routed.afterSec : undefined}
+    />
+  );
+}
+
 export function PlatformListingPage() {
   const [strategyId, setStrategyId] = useState("");
   const [strategyVersion, setStrategyVersion] = useState("1.0.0");
   const [price, setPrice] = useState("");
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<unknown>(null);
   const [created, setCreated] = useState<{ id: number } | null>(null);
   const createPlatformListing = useCreatePlatformListing();
 
@@ -26,7 +46,7 @@ export function PlatformListingPage() {
       });
       setCreated({ id: listing.id });
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : "리스팅 등록에 실패했습니다.");
+      setError(err instanceof ApiError ? err : new Error("리스팅 등록에 실패했습니다."));
     }
   }
 
@@ -66,7 +86,7 @@ export function PlatformListingPage() {
               onChange={(e) => setPrice(e.target.value)}
             />
           </Field>
-          {error && <Alert>{error}</Alert>}
+          {error !== null && <CreateListingError error={error} />}
           {created && <Alert tone="success">리스팅 #{created.id} 게시 완료</Alert>}
           <Button type="submit" loading={createPlatformListing.isPending} className="w-full">
             등록
