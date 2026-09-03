@@ -44,14 +44,24 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 from decimal import Decimal
-from typing import Any
+from typing import Any, Protocol
 from uuid import uuid4
 
 from src.core.exceptions import FatalExchangeError
 from src.data.models.base import AssetClass
-from src.data.models.trading import Order, OrderSide, OrderStatus, OrderType
+from src.data.models.trading import AccountBalance, Order, OrderSide, OrderStatus, OrderType
+from src.exchanges.common.http_client import NHHTTPClient
 
 _MARKET_CODE = "KRX"
+
+
+class _BalanceReadingClient(NHHTTPClient, Protocol):
+    """health_check()가 같은 클래스의 get_balance()(account_mixin.py)를
+    교차 호출하지만, self가 NHHTTPClient로 좁혀진 메서드 안에서는 그
+    사실이 보이지 않으므로 명시적으로 계약에 포함한다(bitget
+    `_TickerReadingClient`/kis `_IntradayCandleClient`와 동일 패턴)."""
+
+    async def get_balance(self, asset: str | None = None) -> list[AccountBalance]: ...
 
 
 def _order_division(order_type: OrderType) -> str:
@@ -80,12 +90,12 @@ def _parse_mkt_orr_no(mkt_orr_no: str) -> int:
 
 
 class NHTradingMixin:
-    async def place_order(self, order: Order) -> Order:
+    async def place_order(self: NHHTTPClient, order: Order) -> Order:
         path = "/krstock/order/v1/cashBuy" if order.side == OrderSide.BUY else (
             "/krstock/order/v1/cashSell"
         )
         body: dict[str, Any] = {
-            "act_no": self._act_no,  # type: ignore[attr-defined]
+            "act_no": self._act_no,
             "iem_cd": order.symbol,
             "orr_qty": str(order.quantity),
             "orr_pr": str(order.price.amount) if order.price is not None else "0",
@@ -95,7 +105,7 @@ class NHTradingMixin:
             "rmt_mkt_cd": _MARKET_CODE,
             "sor_mkt_sli_yn": "N",
         }
-        raw = await self._request("POST", path, body=body)  # type: ignore[attr-defined]
+        raw = await self._request("POST", path, body=body)
         try:
             output = raw["Output_0"]
             mkt_orr_no = str(output["mkt_orr_no"])
@@ -109,7 +119,7 @@ class NHTradingMixin:
             update={"exchange_order_id": exchange_order_id, "status": OrderStatus.SUBMITTED}
         )
 
-    async def cancel_order(self, order_id: str) -> bool:
+    async def cancel_order(self: NHHTTPClient, order_id: str) -> bool:
         """`POST /krstock/order/v1/cancel`(공식 openapi.json 확인, 모듈
         docstring 참조). `_request()`가 이미 rsp_cd 실패를 예외로 올리므로
         (RetryableExchangeError/FatalExchangeError), 이 지점에 도달했다는
@@ -118,17 +128,15 @@ class NHTradingMixin:
         실패(False)로 잘못 보고하는 버그였다(실패경로 테스트로 발견)."""
         symbol, mkt_orr_no = _split_exchange_order_id(order_id)
         body = {
-            "act_no": self._act_no,  # type: ignore[attr-defined]
+            "act_no": self._act_no,
             "org_mkt_orr_no": _parse_mkt_orr_no(mkt_orr_no),
             "all_pat_dit_cd": "1",  # 1=전체(잔량) 취소만 지원 — 부분 취소는 미구현
             "iem_cd": symbol,
         }
-        await self._request(  # type: ignore[attr-defined]
-            "POST", "/krstock/order/v1/cancel", body=body
-        )
+        await self._request("POST", "/krstock/order/v1/cancel", body=body)
         return True
 
-    async def modify_order(self, order_id: str, **kwargs: Any) -> Order:
+    async def modify_order(self: NHHTTPClient, order_id: str, **kwargs: Any) -> Order:
         """`POST /krstock/order/v1/modify`(공식 openapi.json 확인, 모듈
         docstring 참조). `cor_qty`/`cor_pr`가 필수 필드라 가격/수량을 모두
         요구한다 — 부분 정보만 주는 정정은 지원하지 않는다(fail-closed).
@@ -152,7 +160,7 @@ class NHTradingMixin:
             )
         quantity = kwargs["size"] if "size" in kwargs else kwargs["quantity"]
         body = {
-            "act_no": self._act_no,  # type: ignore[attr-defined]
+            "act_no": self._act_no,
             "org_mkt_orr_no": _parse_mkt_orr_no(mkt_orr_no),
             "all_pat_dit_cd": "1",  # 1=전체(잔량) 정정만 지원 — 부분 정정은 미구현
             "iem_cd": symbol,
@@ -162,9 +170,7 @@ class NHTradingMixin:
             "rmt_mkt_cd": _MARKET_CODE,
             "sor_mkt_sli_yn": "N",
         }
-        raw = await self._request(  # type: ignore[attr-defined]
-            "POST", "/krstock/order/v1/modify", body=body
-        )
+        raw = await self._request("POST", "/krstock/order/v1/modify", body=body)
         try:
             new_mkt_orr_no = str(raw["Output_0"]["mkt_orr_no"])
         except KeyError as exc:
@@ -203,9 +209,9 @@ class NHTradingMixin:
             "식별자의 매핑 관계를 확인하기 전까지 구현 보류"
         )
 
-    async def health_check(self) -> bool:
+    async def health_check(self: _BalanceReadingClient) -> bool:
         try:
-            await self.get_balance()  # type: ignore[attr-defined]
+            await self.get_balance()
             return True
         except Exception:  # noqa: BLE001 — 헬스체크는 어떤 예외든 False로 수렴
             return False

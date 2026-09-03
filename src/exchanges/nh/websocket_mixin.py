@@ -39,7 +39,7 @@ import json
 import logging
 from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import AbstractAsyncContextManager
-from typing import Any, Protocol
+from typing import Any, Protocol, cast
 
 from websockets.asyncio.client import connect as _default_connect
 from websockets.exceptions import ConnectionClosed
@@ -63,7 +63,13 @@ ConnectFn = Callable[[str], AbstractAsyncContextManager[WsConnection]]
 
 
 def _connect(url: str) -> AbstractAsyncContextManager[WsConnection]:
-    return _default_connect(url)  # type: ignore[return-value]
+    """`websockets.asyncio.client.connect()`가 반환하는 `Connect`는
+    구조적으로 `WsConnection`(send/__aiter__)을 만족하는 `ClientConnection`을
+    내지만, mypy는 라이브러리 반환 타입 자체를 `AbstractAsyncContextManager`의
+    서브타입으로 인식하지 못한다(PLT-40c 조사 확인) — `cast()`는 런타임에
+    아무 동작도 하지 않으므로(단순 타입 단언) 기존 `# type: ignore[return-value]`
+    와 동일하게 무해하다."""
+    return cast(AbstractAsyncContextManager[WsConnection], _default_connect(url))
 
 
 def build_subscribe_message(
@@ -112,9 +118,21 @@ async def _run_nh_ws_subscription(
             backoff = min(backoff * 2, max_backoff_seconds)
 
 
+class _TokenizedClient(Protocol):
+    """connect_and_subscribe()가 `_NHHTTPClient`(adapter.py)의 토큰 캐싱/
+    모의투자 판별 상태에 접근한다 — `_request`/`_act_no`(NHHTTPClient)와는
+    무관한 별개 계약이라 공용 http_client.py에 넣지 않고 이 파일에
+    로컬로 좁혀 선언한다(bitget `_TickerReadingClient` 등과 동일한
+    "파일-로컬 확장 Protocol" 패턴)."""
+
+    _is_paper_trading: bool
+
+    async def _ensure_token(self) -> str: ...
+
+
 class NHWebSocketMixin:
     async def connect_and_subscribe(
-        self,
+        self: _TokenizedClient,
         tr_cd: str,
         tr_key: str,
         on_raw_frame: RawFrameHandler,
@@ -127,8 +145,8 @@ class NHWebSocketMixin:
         """02e 스펙 §4(P1) — 연결/구독/재연결까지 확인된 범위로 구현한다
         (모듈 docstring 참조). 데이터 프레임 파싱은 아직 하지 않으므로
         호출부가 `on_raw_frame`으로 원시 JSON 문자열을 직접 받는다."""
-        token = await self._ensure_token()  # type: ignore[attr-defined]
-        if self._is_paper_trading:  # type: ignore[attr-defined]
+        token = await self._ensure_token()
+        if self._is_paper_trading:
             url = WS_PAPER_URL
         else:
             url = WS_DOMESTIC_URL if is_domestic else WS_OVERSEAS_URL

@@ -28,15 +28,18 @@ from decimal import Decimal
 
 from src.core.exceptions import FatalExchangeError
 from src.data.models.trading import AccountBalance, Position
+from src.exchanges.common.http_client import NHHTTPClient
 
 
 class NHAccountMixin:
-    async def get_balance(self, asset: str | None = None) -> list[AccountBalance]:
-        raw = await self._request(  # type: ignore[attr-defined]
+    async def get_balance(
+        self: NHHTTPClient, asset: str | None = None
+    ) -> list[AccountBalance]:
+        raw = await self._request(
             "POST",
             "/krstock/inquiry/v1/balance",
             body={
-                "act_no": self._act_no,  # type: ignore[attr-defined]
+                "act_no": self._act_no,
                 "bnc_bse_cd": "5",
                 "ltg_aot_dit_cd": "9",
                 "aet_bse": "2",

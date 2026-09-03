@@ -63,3 +63,27 @@ class KISHTTPClient(Protocol):
         params: dict[str, Any] | None = None,
         body: dict[str, Any] | None = None,
     ) -> dict[str, Any]: ...
+
+
+@runtime_checkable
+class NHHTTPClient(Protocol):
+    """PLT-40c — NH 믹스인이 요구하는 최소 HTTP 계약.
+
+    `_request` 시그니처 자체는 `SignedRequestClient`(bitget)와 같지만
+    (`_request(method, path, *, params=, body=)`), NH는 `_demo_mode` 대신
+    계좌번호 `_act_no`를 요구한다(bitget/kis와 다른 계좌 필수 파라미터,
+    account_mixin.py/trading_mixin.py 참조) — `SignedRequestClient`를
+    상속하면 bitget이 요구하지 않는 `_act_no`까지 그 계약에 섞이므로
+    KISHTTPClient와 동일하게 별개 Protocol로 선언한다.
+    """
+
+    _act_no: str
+
+    async def _request(
+        self,
+        method: str,
+        path: str,
+        *,
+        params: dict[str, Any] | None = None,
+        body: dict[str, Any] | None = None,
+    ) -> dict[str, Any]: ...

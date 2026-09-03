@@ -22,14 +22,15 @@ from decimal import Decimal
 
 from src.core.exceptions import FatalExchangeError
 from src.data.models.market_data import Candle, OrderBook, OrderBookLevel, Ticker
+from src.exchanges.common.http_client import NHHTTPClient
 from src.exchanges.common.types import TickerCallback
 
 _MARKET_CODE = "KRX"
 
 
 class NHMarketDataMixin:
-    async def get_ticker(self, symbol: str) -> Ticker:
-        raw = await self._request(  # type: ignore[attr-defined]
+    async def get_ticker(self: NHHTTPClient, symbol: str) -> Ticker:
+        raw = await self._request(
             "POST",
             "/krstock/quote/v1/currentPrice",
             body={"iem_cd": symbol, "market_cd": _MARKET_CODE},
@@ -52,13 +53,13 @@ class NHMarketDataMixin:
                 f"stck_prpr 필요, 02e 스펙 §3 참조): {exc}"
             ) from exc
 
-    async def get_orderbook(self, symbol: str, depth: int = 20) -> OrderBook:
+    async def get_orderbook(self: NHHTTPClient, symbol: str, depth: int = 20) -> OrderBook:
         """공식 openapi.json 확인 — 별도 호가 조회 엔드포인트는 없고
         currentPrice 응답에 10단계 호가(askp1..10/bidp1..10, 잔량
         askp_rsqn{1..10}/bidp_rsqn{1..10})가 함께 내려온다(모듈 docstring
         참조) — 이전 세션의 "재사용 추정"이 맞았고, 이번에 1호가 전용
         가짜 depth(quantity=0)에서 실제 10단계 depth로 승격한다."""
-        raw = await self._request(  # type: ignore[attr-defined]
+        raw = await self._request(
             "POST",
             "/krstock/quote/v1/currentPrice",
             body={"iem_cd": symbol, "market_cd": _MARKET_CODE},
