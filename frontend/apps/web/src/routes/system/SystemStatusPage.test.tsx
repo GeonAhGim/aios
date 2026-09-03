@@ -100,4 +100,29 @@ describe("SystemStatusPage", () => {
       screen.getByText("상태를 확인할 수 없습니다 — 서버 응답이 없거나 형식이 예상과 다릅니다."),
     ).toBeInTheDocument();
   });
+
+  // task-936: ReadinessReport.as_of(§3.2, meta 아닌 body 필드)가
+  // STALE_AFTER_SEC(300초)를 넘기면 DataFreshness가 stale 배지를 보여줘야
+  // 한다 — 실제 "now"는 테스트 환경마다 달라지므로 vi.setSystemTime으로
+  // 고정해 결정적으로 검증한다.
+  it("as_of가 STALE_AFTER_SEC(300초)을 넘기면 지연됨 배지를 보여준다", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-09-03T00:10:00Z"));
+    queryResult = { data: READY_REPORT, isLoading: false, isError: false };
+    renderPage();
+
+    expect(screen.getByTestId("data-freshness-stale-badge")).toBeInTheDocument();
+    expect(screen.getByText("지연됨")).toBeInTheDocument();
+    vi.useRealTimers();
+  });
+
+  it("as_of가 STALE_AFTER_SEC 이내면 지연됨 배지를 보여주지 않는다", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-09-03T00:02:00Z"));
+    queryResult = { data: READY_REPORT, isLoading: false, isError: false };
+    renderPage();
+
+    expect(screen.queryByTestId("data-freshness-stale-badge")).not.toBeInTheDocument();
+    vi.useRealTimers();
+  });
 });

@@ -16,7 +16,7 @@ import { exchangeLabel } from "../../lib/exchangeLabels";
 
 export function DashboardPage() {
   const { data: riskProfile } = useRiskProfile();
-  const { data: portfolio, isLoading: portfolioLoading, dataUpdatedAt } = usePortfolio();
+  const { data: portfolio, isLoading: portfolioLoading } = usePortfolio();
   const { data: executions, isLoading: executionsLoading } = useExecutions();
 
   return (
@@ -30,7 +30,12 @@ export function DashboardPage() {
         <Card>
           <div className="flex items-center justify-between">
             <CardTitle>포트폴리오 요약</CardTitle>
-            {portfolio && <DataFreshness asOf={new Date(dataUpdatedAt).toISOString()} />}
+            {/* GET /portfolio는 아직 ApiResponse 봉투 미적용(apiPaths.ts "portfolio.get" ·
+                PLT-19 예정)이라 meta.as_of가 없다 — react-query dataUpdatedAt(클라이언트가
+                응답을 받은 시각)을 as_of 대신 넣으면 항상 "방금" 취급되어 실제 서버 데이터가
+                오래됐어도 stale 배지가 절대 뜨지 않는다(task-936 decision, Date.now() 대입
+                금지). 봉투가 붙기 전까지는 null로 두어 "확인 불가"를 정직하게 보여준다. */}
+            {portfolio && <DataFreshness asOf={null} />}
           </div>
           {portfolioLoading ? (
             <LoadingState />

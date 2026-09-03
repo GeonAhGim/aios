@@ -39,7 +39,7 @@ function RebalanceError({ error }: { error: unknown }) {
 }
 
 export function PortfolioPage() {
-  const { data: portfolio, isLoading, dataUpdatedAt } = usePortfolio();
+  const { data: portfolio, isLoading } = usePortfolio();
   const rebalance = useRebalancePortfolio();
   const { submit } = useIdempotentSubmit("portfolio.rebalance");
   const [drafts, setDrafts] = useState<Record<number, string>>({});
@@ -70,7 +70,12 @@ export function PortfolioPage() {
       <div className="space-y-6">
         <PageHeader
           title="포트폴리오"
-          action={portfolio && <DataFreshness asOf={new Date(dataUpdatedAt).toISOString()} />}
+          // GET /portfolio는 아직 ApiResponse 봉투 미적용(apiPaths.ts "portfolio.get" ·
+          // PLT-19 예정)이라 meta.as_of가 없다 — dataUpdatedAt(react-query가 응답을 받은
+          // 시각)을 as_of 대신 쓰면 항상 fresh로 보여 stale 배지가 절대 뜨지 않는다
+          // (task-936 decision, Date.now() 대입 금지). 봉투가 붙기 전까지 null로 두어
+          // "확인 불가"를 정직하게 보여준다.
+          action={portfolio && <DataFreshness asOf={null} />}
         />
 
         {isLoading ? (

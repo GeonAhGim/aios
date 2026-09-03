@@ -18,7 +18,6 @@ vi.mock("@aios/shared-hooks", () => ({
       totalPortfolioValue: "1000.00",
     },
     isLoading: false,
-    dataUpdatedAt: Date.parse("2026-09-03T00:00:00Z"),
   }),
   useRebalancePortfolio: () => ({ mutateAsync, isPending: false, data: undefined }),
   useMe: () => ({ data: { email: "a@example.com", isPlatformAdmin: false } }),
@@ -70,6 +69,18 @@ describe("PortfolioPage", () => {
 
     expect(screen.getByTestId("portfolio-positions-section")).toBeInTheDocument();
     expect(screen.getByText("포지션 스냅샷이 없습니다.")).toBeInTheDocument();
+  });
+
+  // task-936: GET /portfolio는 아직 봉투(meta.as_of) 미적용이라 실제 서버
+  // as_of를 받을 수 없다 — dataUpdatedAt(react-query가 응답을 받은 시각)을
+  // as_of 대신 넣으면 항상 "방금"으로 보여 stale 배지가 영영 안 뜨는 은폐가
+  // 된다(task-936 decision, Date.now() 대입 금지). 그래서 정직하게 "확인
+  // 불가"를 보여주고 stale 배지를 그리지 않는지만 검증한다.
+  it("negative: 포트폴리오 데이터가 있어도 meta.as_of가 없으면 확인 불가를 보여주고 stale 배지를 그리지 않는다", () => {
+    renderPage();
+
+    expect(screen.getByText("기준 시각 확인 불가")).toBeInTheDocument();
+    expect(screen.queryByTestId("data-freshness-stale-badge")).not.toBeInTheDocument();
   });
 });
 
