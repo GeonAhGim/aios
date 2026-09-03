@@ -736,3 +736,96 @@ async def test_aios_app_cannot_delete_pos_nav_daily(raw_conn):
         async with raw_conn.transaction():
             await raw_conn.execute("SET ROLE aios_app")
             await raw_conn.execute("DELETE FROM pos_nav_daily WHERE nav_id = $1", nav_id)
+
+
+# --- LA-10 (4a1d0c0de007_md_reference_registry) ----------------------------
+
+MD_REFERENCE_REGISTRY_TABLES = {
+    "md_instrument",
+    "md_symbol_alias",
+    "md_corporate_action",
+    "md_venue_calendar_day",
+}
+
+
+async def test_md_reference_registry_tables_exist(db_conn):
+    result = await db_conn.execute(
+        text(
+            "SELECT table_name FROM information_schema.tables "
+            "WHERE table_schema = 'public' AND table_name = ANY(:names)"
+        ),
+        {"names": list(MD_REFERENCE_REGISTRY_TABLES)},
+    )
+    found = {row[0] for row in result}
+    assert found == MD_REFERENCE_REGISTRY_TABLES
+
+
+async def _insert_md_instrument(conn: asyncpg.Connection, *, canonical_symbol: str) -> object:
+    return await conn.fetchval(
+        "INSERT INTO md_instrument "
+        "(venue, canonical_symbol, venue_symbol, asset_class, tick_size, lot_size, "
+        " status, listed_at) "
+        "VALUES ('BITGET', $1, $1, 'CRYPTO', 0.01, 0.0001, 'LISTED', now()) "
+        "RETURNING instrument_id",
+        canonical_symbol,
+    )
+
+
+async def test_md_instrument_invalid_status_rejected(raw_conn):
+    """LA-10 DoD — status CHECK negative: `SymbolStatus`(§3.1)에 없는 값은
+    DB 레벨에서 거부되어야 한다."""
+    with pytest.raises(asyncpg.CheckViolationError):
+        await raw_conn.execute(
+            "INSERT INTO md_instrument "
+            "(venue, canonical_symbol, venue_symbol, asset_class, tick_size, lot_size, "
+            " status, listed_at) "
+            "VALUES ('BITGET', $1, $1, 'CRYPTO', 0.01, 0.0001, 'BOGUS_STATUS', now())",
+            f"TEST-{uuid4().hex}",
+        )
+
+
+async def test_md_symbol_alias_overlapping_period_rejected(raw_conn):
+    """LA-10 DoD — `EXCLUDE USING gist` negative(btree_gist): 같은
+    (venue, alias_symbol)의 유효기간이 겹치면 두 번째 별칭 insert가
+    거부되어야 한다."""
+    instrument_id = await _insert_md_instrument(raw_conn, canonical_symbol=f"TEST-{uuid4().hex}")
+    alias_symbol = f"ALIAS-{uuid4().hex}"
+    valid_from = datetime(2026, 1, 1, tzinfo=timezone.utc)
+
+    await raw_conn.execute(
+        "INSERT INTO md_symbol_alias (instrument_id, venue, alias_symbol, valid_from) "
+        "VALUES ($1, 'BITGET', $2, $3)",
+        instrument_id,
+        alias_symbol,
+        valid_from,
+    )
+    with pytest.raises(asyncpg.ExclusionViolationError):
+        await raw_conn.execute(
+            "INSERT INTO md_symbol_alias (instrument_id, venue, alias_symbol, valid_from) "
+            "VALUES ($1, 'BITGET', $2, $3)",
+            instrument_id,
+            alias_symbol,
+            valid_from + timedelta(days=1),
+        )
+
+
+async def test_md_corporate_action_non_positive_ratio_rejected(raw_conn):
+    """LA-10 DoD — CHECK(ratio > 0) negative."""
+    instrument_id = await _insert_md_instrument(raw_conn, canonical_symbol=f"TEST-{uuid4().hex}")
+    with pytest.raises(asyncpg.CheckViolationError):
+        await raw_conn.execute(
+            "INSERT INTO md_corporate_action "
+            "(instrument_id, action_type, ex_date, ratio, source_ref) "
+            "VALUES ($1, 'SPLIT', '2026-06-01', 0, 'test')",
+            instrument_id,
+        )
+
+
+async def test_md_venue_calendar_day_trading_flag_mismatch_rejected(raw_conn):
+    """LA-10 DoD — CHECK(is_trading_day = (open_at IS NOT NULL)) negative."""
+    with pytest.raises(asyncpg.CheckViolationError):
+        await raw_conn.execute(
+            "INSERT INTO md_venue_calendar_day "
+            "(venue, trade_date, is_trading_day, open_at, source) "
+            "VALUES ('BITGET', '2026-06-01', true, NULL, 'test')"
+        )
