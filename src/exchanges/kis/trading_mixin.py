@@ -26,6 +26,7 @@ from src.core.exceptions import FatalExchangeError
 from src.data.models.base import AssetClass
 from src.data.models.trading import AccountBalance, Order, OrderSide, OrderStatus, OrderType
 from src.exchanges.common.http_client import KISHTTPClient
+from src.exchanges.common.live_guard import require_paper_sandbox
 
 _EXCHANGE_ID = "KRX"  # Phase 1 대상(06번 §6.1)
 
@@ -64,6 +65,7 @@ class _OrderMutatingClient(KISHTTPClient, Protocol):
 
 
 class KISTradingMixin:
+    @require_paper_sandbox
     async def place_order(self: KISHTTPClient, order: Order) -> Order:
         body: dict[str, Any] = {
             "CANO": self._cano,
@@ -112,10 +114,12 @@ class KISTradingMixin:
             "POST", "/uapi/domestic-stock/v1/trading/order-rvsecncl", "TTTC0013U", body=body
         )
 
+    @require_paper_sandbox
     async def cancel_order(self: _OrderMutatingClient, order_id: str) -> bool:
         raw = await self._rvsecncl(order_id, decision="02", quantity=None)
         return bool(raw.get("rt_cd") == "0")
 
+    @require_paper_sandbox
     async def modify_order(self: _OrderMutatingClient, order_id: str, **kwargs: Any) -> Order:
         quantity = kwargs.get("quantity")
         await self._rvsecncl(order_id, decision="01", quantity=quantity)
