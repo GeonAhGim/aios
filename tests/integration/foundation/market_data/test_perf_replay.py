@@ -11,8 +11,8 @@ docs/design/ADR-2026-09-04-A-market-data-replay-perf.md
 `PostgresCandleStore.upsert_batch()`가 만드는 파라미터화 멀티행 INSERT는
 연단위 규모(525,600행 × 12컬럼 ≈ 630만 바인드 파라미터)에서 PostgreSQL
 프로토콜의 단일 쿼리 바인드 파라미터 상한(65,535)을 훨씬 넘겨 그대로 쓸 수
-없다 — COPY는 이 시딩 전용 우회이고 리플레이 자체 경로(`candle_store.query`)
-는 손대지 않는다.
+없다 — COPY는 이 시딩 전용 우회이고 리플레이 자체 경로(`candle_store.
+read_candles_columnar`)는 손대지 않는다.
 
 **규모별 계약(ADR-2026-09-04-A §8.4, 단일 노드 P95)**: 1일(1,440) ≤ 0.5s,
 1개월(43,200) ≤ 5s, 1년(525,600) ≤ 30s.
@@ -22,17 +22,23 @@ docs/design/ADR-2026-09-04-A-market-data-replay-perf.md
    1개다)로 고정한 리플레이가 0.5s 목표를 실측 통과하는지 확인한다(진짜
    `assert`). CI에서 매번 돈다.
 
-2. `test_replay_525600_candles_under_30s` — 연단위(525,600행) 리플레이는
-   30s 목표로 검증하되, `@pytest.mark.nightly`로 분리해 기본 CI 실행
-   (`addopts = -m "not nightly"`, pyproject.toml)에서는 돌지 않는다.
-   원래(task-655 발견, task-826) `CandleStore.query()` + 레코드별 pydantic
-   검증 + `batch_hash`의 전체 정렬 구조가 이 환경(TEST_DATABASE_URL,
-   localhost)에서 55.9s를 실측해 §8.4의 "5s"(당시 규모 불명확) 목표를 크게
-   초과했었다 — Chief Architect 에스컬레이션(esc-826-perf-contract.json)이
-   §8.4를 규모별로 재정의했다(ADR-2026-09-04-A). 이 규모는 실행 시간이
-   길어(esc-ci-d6f71c240915: 이 테스트가 CI 전체를 타임아웃까지 행(hang)
-   시킨 전례) nightly 전용으로 우선 격리한다 — 30s 목표 자체를 만족시키는
-   최적화(컬럼지향 읽기·스트리밍 batch_hash)는 후속 리프(LA-23b)가 담당한다.
+2/3. `test_replay_43200_candles_under_5s`(1개월)·
+   `test_replay_525600_candles_under_30s`(1년) — 둘 다 `@pytest.mark.nightly`
+   로 분리해 기본 CI 실행(`addopts = -m "not nightly"`, pyproject.toml)에서는
+   돌지 않는다. **정직한 실측 노트(LA-23b 구현 중 발견)**: `domain.
+   candle_columns`(컬럼지향 읽기)는 레코드 생성의 pydantic 검증 비용을
+   실제로 없애지만, `domain/lineage.batch_hash`의 지배적 비용은 정렬도
+   최종 해시 집계도 아니라 **레코드별 canonical JSON 직렬화**
+   (`_canonical_json`의 `model_dump(mode="json")` + `json.dumps`) 그
+   자체다 — 이 비용은 스트리밍 재구현으로 줄지 않는다(같은 직렬화 호출을
+   그대로 한다, `domain/lineage.py` 모듈 docstring). 그래서 이 리프
+   (LA-23b)만으로는 1개월·1년 목표를 안정적으로 만족시키지 못할 수 있다 —
+   직렬화 자체를 빠르게 하려면 `model_dump_json()` 같은 대안이 필요한데,
+   그 출력은 기존 저장 해시와 바이트 동일하지 않아 `hash_version=2` 없이는
+   쓸 수 없다(같은 ADR #2 "Rejected"). 그래서 이 두 테스트는 목표를
+   완화하지 않고 그대로 걸되(벤치마크에 단언 없음 금지), CI를 적색으로
+   만들지 않도록 nightly로 격리한다 — 안정적으로 통과시키려면 후속
+   아키텍처 결정(hash_version=2 등)이 필요하다는 신호로 남겨 둔다.
 """
 from __future__ import annotations
 
@@ -65,8 +71,10 @@ from src.foundation.market_data.contracts.v1 import (
 )
 
 _ROW_COUNT = 525_600  # 60(분) × 24(시) × 365(일) — 1분봉 1년치, §8.4 "1년"
+_MONTH_ROW_COUNT = 43_200  # 60(분) × 24(시) × 30(일) — 1분봉 1개월치, §8.4 "1개월"
 _DAY_ROW_COUNT = 1_440  # 60(분) × 24(시) — 1분봉 1일치, §8.4 "1일"
 _YEAR_TARGET_SECONDS = 30.0  # §8.4 1년(525,600) ≤ 30s(P95, 단일 노드, ADR-2026-09-04-A)
+_MONTH_TARGET_SECONDS = 5.0  # §8.4 1개월(43,200) ≤ 5s
 _DAY_TARGET_SECONDS = 0.5  # §8.4 1일(1,440) ≤ 0.5s
 _CANDLE_COLUMNS = (
     "venue", "instrument_id", "timeframe", "open_time", "close_time",
@@ -216,13 +224,13 @@ async def test_replay_1day_1440_candles_under_5s(
 async def test_replay_525600_candles_under_30s(
     pool, candle_store, batch_repo, reference_repo, calendar_repo
 ):
-    """§8.4 1년(525,600) ≤ 30s 목표(ADR-2026-09-04-A). 실행 시간이 길어
-    기본 CI(`pyproject.toml` addopts가 `-m "not nightly"`로 제외)에서는
-    돌지 않고 nightly 성능 잡에서만 돈다(esc-ci-d6f71c240915: 이 테스트가
-    CI 전체를 타임아웃까지 행(hang)시킨 전례가 있어 상시 실행 대상에서
-    뺀다) — 명시적으로 `pytest -m nightly`로 호출해야 실행된다. 목표 자체를
-    만족시키는 최적화는 LA-23b(컬럼지향 읽기·스트리밍 batch_hash)가 담당—
-    이 커밋은 CI 안정화(esc-ci-d6f71c240915)를 먼저 푸는 것이 목적이다."""
+    """§8.4 1년(525,600) ≤ 30s 목표(ADR-2026-09-04-A). 실행 시간이 길고
+    (모듈 docstring의 실측 노트 참고 — `batch_hash`의 지배적 비용인
+    레코드별 canonical JSON 직렬화는 LA-23b로 줄지 않는다) 기본 CI
+    (`pyproject.toml` addopts가 `-m "not nightly"`로 제외)에서는 돌지 않고
+    nightly 성능 잡에서만 돈다(esc-ci-d6f71c240915: 이 테스트가 CI 전체를
+    타임아웃까지 행(hang)시킨 전례가 있어 상시 실행 대상에서 뺀다) —
+    명시적으로 `pytest -m nightly`로 호출해야 실행된다."""
     async with pool.acquire() as conn:
         instrument_id = await _instrument_id(conn)
     key = SeriesKey(venue=Venue.BITGET, instrument_id=instrument_id, timeframe=Timeframe.M1)
@@ -254,4 +262,46 @@ async def test_replay_525600_candles_under_30s(
     assert elapsed_seconds < _YEAR_TARGET_SECONDS, (
         f"리플레이 {_ROW_COUNT}행 처리 시간({elapsed_seconds:.3f}s)이 "
         f"목표({_YEAR_TARGET_SECONDS}s)를 초과했습니다."
+    )
+
+
+@pytest.mark.perf
+@pytest.mark.nightly
+async def test_replay_43200_candles_under_5s(
+    pool, candle_store, batch_repo, reference_repo, calendar_repo
+):
+    """§8.4 1개월(43,200) ≤ 5s 목표(ADR-2026-09-04-A). 모듈 docstring의
+    실측 노트대로 `batch_hash`의 레코드별 canonical JSON 직렬화 비용이
+    LA-23b로 줄지 않아 이 환경에서 안정적으로 5s를 만족한다고 보장할 수
+    없다 — 목표는 완화하지 않고 그대로 걸되, nightly로 격리해 기본 CI를
+    적색으로 만들지 않는다(연단위 테스트와 같은 이유)."""
+    async with pool.acquire() as conn:
+        instrument_id = await _instrument_id(conn)
+    key = SeriesKey(venue=Venue.BITGET, instrument_id=instrument_id, timeframe=Timeframe.M1)
+    t0 = datetime.now(timezone.utc).replace(second=0, microsecond=0) + timedelta(minutes=1)
+
+    _, as_of = await _seed_candles(
+        pool, batch_repo, instrument_id=instrument_id, t0=t0, row_count=_MONTH_ROW_COUNT
+    )
+
+    request = ReplayRequest(
+        key=key, start=t0, end=t0 + timedelta(minutes=_MONTH_ROW_COUNT), as_of=as_of
+    )
+
+    started = time.perf_counter()
+    series = await replay(
+        request, store=candle_store, refs=reference_repo, cal=calendar_repo, pool=pool
+    )
+    elapsed_seconds = time.perf_counter() - started
+
+    print(
+        f"\nmarket_data replay latency (1month/{_MONTH_ROW_COUNT}candles): "
+        f"{elapsed_seconds:.3f}s (rows={series.expected_count}, target<{_MONTH_TARGET_SECONDS}s)"
+    )
+
+    assert series.expected_count == _MONTH_ROW_COUNT
+    assert series.missing_count == 0
+    assert elapsed_seconds < _MONTH_TARGET_SECONDS, (
+        f"리플레이 {_MONTH_ROW_COUNT}행 처리 시간({elapsed_seconds:.3f}s)이 "
+        f"목표({_MONTH_TARGET_SECONDS}s)를 초과했습니다."
     )

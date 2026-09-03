@@ -622,7 +622,7 @@ A(ingest) → B(mark) → B(recon) → B(NAV) 순서 의존이 있으나 결합�
 ### 8.4 계약·성능
 
 - `tests/foundation/unit/{market_data,positions,ledger}/test_contracts_schema.py`: `model_json_schema()` 스냅샷을 `tests/contracts/snapshots/*.json`과 비교(107번 — 필드 제거 시 실패).
-- `tests/foundation/integration/**/test_perf_*.py`(`pytest-benchmark`, 단언 포함 — 감사 §9 "벤치마크에 단언 없음" 반복 금지): 리플레이는 규모별 계약(단일 노드, P95 — ADR-2026-09-04-A, esc-826-perf-contract): **1일(1,440행) ≤ 0.5s, 1개월(43,200행) ≤ 5s, 1년(525,600행) ≤ 30s**. 1일 규모는 CI에서 매번 강제한다. 1년 규모는 `@pytest.mark.nightly`로 분리해 nightly 성능 잡에서만 돈다(CI 전체 pytest가 연단위 리플레이 때문에 타임아웃까지 행(hang)하는 것을 막기 위함, esc-ci-d6f71c240915). 그 외: 저널 append p95 < 30ms(100회), 포스팅 p95 < 50ms(200회), 무결성 검증 10k 분개 < 3s.
+- `tests/foundation/integration/**/test_perf_*.py`(`pytest-benchmark`, 단언 포함 — 감사 §9 "벤치마크에 단언 없음" 반복 금지): 리플레이는 규모별 계약(단일 노드, P95 — ADR-2026-09-04-A, esc-826-perf-contract): **1일(1,440행) ≤ 0.5s, 1개월(43,200행) ≤ 5s, 1년(525,600행) ≤ 30s**. 1일 규모만 CI에서 매번 강제한다. 1개월·1년 규모는 `@pytest.mark.nightly`로 분리해 nightly 성능 잡에서만 돈다 — CI 전체 pytest가 연단위 리플레이 때문에 타임아웃까지 행(hang)하는 것을 막기 위함(esc-ci-d6f71c240915)이자, LA-23b 구현 중 발견한 실측 노트(`tests/integration/foundation/market_data/test_perf_replay.py` 모듈 docstring) 때문이다: `domain/lineage.batch_hash`의 지배적 비용은 정렬이 아니라 레코드별 canonical JSON 직렬화라 스트리밍 재구현으로 줄지 않으며, 저장된 해시와 바이트 동일해야 하는 제약(P3 WORM) 안에서는 `hash_version=2` 없이 더 줄이기 어렵다 — 그래서 1개월·1년 목표는 완화하지 않고 그대로 걸되(진짜 `assert`), CI가 그 결과에 좌우되지 않도록 nightly로 격리한다. 그 외: 저널 append p95 < 30ms(100회), 포스팅 p95 < 50ms(200회), 무결성 검증 10k 분개 < 3s.
 - `tests/unit/test_zone_purity.py`: `src/foundation/*/domain/**`가 `asyncpg|httpx|sqlalchemy`를 import하지 않음(AST 검사).
 
 ---

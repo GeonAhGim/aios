@@ -34,6 +34,7 @@ from src.foundation.market_data.contracts.v1 import (
 )
 from src.foundation.market_data.domain.calendar.known_venues import KNOWN_SESSIONS
 from src.foundation.market_data.domain.calendar.session_rules import SessionSpec, VenueCalendar
+from src.foundation.market_data.domain.candle_columns import to_candle_records
 from src.foundation.market_data.domain.corporate_actions.adjustment import adjust, factor_chain
 from src.foundation.market_data.domain.lineage import batch_hash
 from src.foundation.market_data.domain.quality.gap_detector import detect_gaps
@@ -193,7 +194,12 @@ async def load_series(
     key = q.key
     await _ensure_known_series(conn, store, key)
 
-    candles = await store.query(conn, key, q.start, q.end, q.as_of)
+    # LA-23b(ADR-2026-09-04-A #1): 대량 소비자(리플레이·이 함수의 갭 판정)는
+    # `query()`의 레코드별 pydantic 검증 대신 컬럼지향 경로로 읽는다 —
+    # `to_candle_records`가 `model_construct`로 재구성하므로 결과 값은
+    # `query()`와 동일하다(ohlc_sanity가 쓰기 시점에 이미 강제한 불변식).
+    columns = await store.read_candles_columnar(conn, key, q.start, q.end, q.as_of)
+    candles = to_candle_records(columns, key)
 
     if q.adjustment is Adjustment.ADJUSTED:
         as_of_for_factors = q.as_of if q.as_of is not None else now
