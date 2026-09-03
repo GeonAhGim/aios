@@ -10,11 +10,17 @@ FD-15.3(위험등급-전략 매칭 경고)은 별도 엔드포인트가 없다 �
 (strategy_executions)이 없어 대조 자체가 불가능했지만, 이제 있으므로
 is_higher_risk_than_previous일 때 RUNNING 실행을 대조해 즉시 경고를
 발행한다("다음 화면 진입 시가 아니라 즉시" — FD-15.2 원문).
+
+PLT-18 — raw `HTTPException` raise를 도메인 예외(RiskProfileNotFoundError,
+risk_profile_service.py)로 이관했다(§9 PLT-17~21). `RiskProfileService.
+get_current()`는 `None`을 반환하는 기존 계약을 그대로 유지하고(호출부가
+없는 다른 테스트가 이를 가정한다), 이 라우터가 `None`일 때 직접 예외를
+던진다.
 """
 from __future__ import annotations
 
 import asyncpg
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, status
 
 from src.api.deps import get_current_user, get_event_bus, get_pool
 from src.api.schemas.suitability import (
@@ -27,7 +33,7 @@ from src.api.suitability_deps import get_risk_profile_service, get_suitability_q
 from src.core.event_bus.bus import EventBus
 from src.services.auth_service import User
 from src.services.risk_matching import find_running_execution_mismatches
-from src.services.risk_profile_service import RiskProfileService
+from src.services.risk_profile_service import RiskProfileNotFoundError, RiskProfileService
 from src.services.suitability_questionnaire import SuitabilityAnswers, SuitabilityQuestionnaire
 
 router = APIRouter(prefix="/users/me", tags=["suitability"])
@@ -70,9 +76,7 @@ async def get_risk_profile(
 ) -> RiskProfileResponse:
     record = await service.get_current(user.user_id)
     if record is None:
-        raise HTTPException(
-            status.HTTP_404_NOT_FOUND, "아직 적합성평가를 완료하지 않았습니다."
-        )
+        raise RiskProfileNotFoundError("아직 적합성평가를 완료하지 않았습니다.")
     return to_risk_profile_response(record)
 
 

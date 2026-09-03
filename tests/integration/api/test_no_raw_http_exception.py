@@ -8,8 +8,8 @@ attribute)인지 판정한다. 도메인 예외는 전역 핸들러(src/api/cont
 handlers.py)가 EXCEPTION_MAP을 통해 상태코드·error_code·trace_id를
 채우므로 라우터가 직접 HTTPException을 만들 이유가 없다.
 
-MIGRATED_ROUTERS는 허용목록이다 — 아직 이관되지 않은 라우터(marketplace/
-foundation/executions/admin 등)는 여기 없다. 후속 리프(PLT-18~21)가 이관을
+MIGRATED_ROUTERS는 허용목록이다 — 아직 이관되지 않은 라우터(foundation/
+executions/admin 등)는 여기 없다. 후속 리프(PLT-19~21)가 이관을
 끝낼 때마다 이 목록에 파일을 추가해 검사 범위를 넓힌다.
 """
 from __future__ import annotations
@@ -21,6 +21,9 @@ MIGRATED_ROUTERS: list[Path] = [
     Path("src/api/routers/auth.py"),
     Path("src/api/routers/users.py"),
     Path("src/api/routers/exchange_credentials.py"),
+    Path("src/api/routers/marketplace.py"),
+    Path("src/api/routers/strategy_builder.py"),
+    Path("src/api/routers/suitability.py"),
 ]
 
 _REPO_ROOT = Path(__file__).resolve().parents[3]

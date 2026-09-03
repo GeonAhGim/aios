@@ -18,10 +18,20 @@ Trading 파이프라인(FD-9.3 등, 아직 미구현)이 자동으로 호출해�
 전이를 사용자가 HTTP로 직접 호출하면 본인 전략을 셀프 승인해 9.1
 생애주기 강제를 무력화하는 구멍이 생긴다. 그 파이프라인들이 생기면
 그때 내부 호출 경로로 연결한다.
+
+PLT-18 — raw `HTTPException` raise를 전부 도메인 예외로 이관했다(§9
+PLT-17~21). `get_strategy()`가 던지는 "존재하지 않음" 사유는
+`StrategyNotFoundError`(strategy_builder_service.py, `StrategyLifecycleError`
+서브클래스)로 분리했다 — 같은 `StrategyLifecycleError`를 `create_strategy`
+(저장 거부, 400)와 `get_strategy`(조회 대상 없음, 404) 양쪽에서 던지면
+exception_mapping.py의 타입 기반 EXCEPTION_MAP이 상태코드를 하나로만
+고를 수 없기 때문이다. `PromptGenerationUnavailableError`(501)는
+STATUS_OVERRIDE로 상태코드만 개별 지정한다(marketplace.py 모듈
+docstring과 동일 근거 — 501에 대응하는 새 ErrorCode를 만들지 않는다).
 """
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, status
 
 from src.api.deps import get_current_user
 from src.api.schemas.strategy_builder import (
@@ -43,28 +53,16 @@ from src.api.service_deps import get_credential_resolver
 from src.api.strategy_builder_deps import get_indicator_service, get_strategy_builder_service
 from src.core.indicators.talib_adapter import (
     SUPPORTED_INDICATORS,
-    IndicatorError,
     IndicatorService,
     period_param_name,
 )
 from src.services.auth_service import User
-from src.services.condition_compiler import ConditionCompileError, ConditionCompiler
-from src.services.credential_resolver import CredentialNotFoundError, CredentialResolver
+from src.services.condition_compiler import ConditionCompiler
+from src.services.credential_resolver import CredentialResolver
 from src.services.preview_service import PreviewCalculator
-from src.services.strategy_builder_service import (
-    StrategyBuilderService,
-    StrategyLifecycleError,
-    StrategySummary,
-)
-from src.services.strategy_prompt_service import (
-    PromptGenerationUnavailableError,
-    StrategyPromptService,
-)
-from src.services.strategy_wizard_service import (
-    GeneratedConditions,
-    StrategyWizardService,
-    WizardError,
-)
+from src.services.strategy_builder_service import StrategyBuilderService, StrategySummary
+from src.services.strategy_prompt_service import StrategyPromptService
+from src.services.strategy_wizard_service import GeneratedConditions, StrategyWizardService
 
 router = APIRouter()
 
@@ -86,15 +84,8 @@ async def compute_indicator(
     resolver: CredentialResolver = Depends(get_credential_resolver),
     indicator_service: IndicatorService = Depends(get_indicator_service),
 ) -> IndicatorComputeResponse:
-    try:
-        param_name = period_param_name(name)
-    except IndicatorError as exc:
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from exc
-
-    try:
-        adapter = await resolver.get_adapter(user.user_id, exchange)
-    except CredentialNotFoundError as exc:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, str(exc)) from exc
+    param_name = period_param_name(name)
+    adapter = await resolver.get_adapter(user.user_id, exchange)
 
     candles = await adapter.get_ohlcv(symbol, timeframe, limit=limit)
     kwargs = {param_name: period} if param_name is not None and period is not None else {}
@@ -124,11 +115,7 @@ async def get_candles(
     프론트엔드가 실제 캔들스틱 차트(가격 자체)를 그릴 방법이 없었다.
     같은 CredentialResolver 패턴을 그대로 재사용해 원시 OHLCV를 그대로
     반환한다(신규 계산 로직 없음)."""
-    try:
-        adapter = await resolver.get_adapter(user.user_id, exchange)
-    except CredentialNotFoundError as exc:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, str(exc)) from exc
-
+    adapter = await resolver.get_adapter(user.user_id, exchange)
     candles = await adapter.get_ohlcv(symbol, timeframe, limit=limit)
     return [to_candle_response(c) for c in candles]
 
@@ -139,34 +126,31 @@ async def create_strategy(
     user: User = Depends(get_current_user),
     service: StrategyBuilderService = Depends(get_strategy_builder_service),
 ) -> StrategyResponse:
-    try:
-        compiled = ConditionCompiler().compile(
-            strategy_id=body.strategy_id,
-            version=body.version,
-            target_asset=body.target_asset,
-            market=body.market,
-            exchange=body.exchange,
-            author_agent=str(user.user_id),
-            entry_conditions=body.entry_conditions,
-            exit_conditions=body.exit_conditions,
-            stop_loss_conditions=body.stop_loss_conditions,
-            entry_combine=body.entry_combine,
-            exit_combine=body.exit_combine,
-            stop_loss_combine=body.stop_loss_combine,
-        )
-        fsm_definition = compiled.model_dump(mode="json")
-        saved = await service.save_strategy(
-            user.user_id,
-            body.strategy_id,
-            body.version,
-            target_asset=body.target_asset,
-            market=body.market,
-            exchange=body.exchange,
-            fsm_definition=fsm_definition,
-            author_agent=str(user.user_id),
-        )
-    except (ConditionCompileError, StrategyLifecycleError) as exc:
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from exc
+    compiled = ConditionCompiler().compile(
+        strategy_id=body.strategy_id,
+        version=body.version,
+        target_asset=body.target_asset,
+        market=body.market,
+        exchange=body.exchange,
+        author_agent=str(user.user_id),
+        entry_conditions=body.entry_conditions,
+        exit_conditions=body.exit_conditions,
+        stop_loss_conditions=body.stop_loss_conditions,
+        entry_combine=body.entry_combine,
+        exit_combine=body.exit_combine,
+        stop_loss_combine=body.stop_loss_combine,
+    )
+    fsm_definition = compiled.model_dump(mode="json")
+    saved = await service.save_strategy(
+        user.user_id,
+        body.strategy_id,
+        body.version,
+        target_asset=body.target_asset,
+        market=body.market,
+        exchange=body.exchange,
+        fsm_definition=fsm_definition,
+        author_agent=str(user.user_id),
+    )
     return to_strategy_response(saved, fsm_definition)
 
 
@@ -177,10 +161,7 @@ async def get_strategy(
     user: User = Depends(get_current_user),
     service: StrategyBuilderService = Depends(get_strategy_builder_service),
 ) -> StrategyDetailResponse:
-    try:
-        detail = await service.get_strategy(user.user_id, strategy_id, version)
-    except StrategyLifecycleError as exc:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, str(exc)) from exc
+    detail = await service.get_strategy(user.user_id, strategy_id, version)
     return to_strategy_detail_response(detail)
 
 
@@ -190,11 +171,7 @@ async def preview(
     user: User = Depends(get_current_user),
     resolver: CredentialResolver = Depends(get_credential_resolver),
 ) -> PreviewResponse:
-    try:
-        adapter = await resolver.get_adapter(user.user_id, body.exchange)
-    except CredentialNotFoundError as exc:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, str(exc)) from exc
-
+    adapter = await resolver.get_adapter(user.user_id, body.exchange)
     candles = await adapter.get_ohlcv(body.symbol, body.timeframe, limit=body.limit)
     result = PreviewCalculator().preview(candles, body.conditions, combine=body.combine)
     return PreviewResponse(
@@ -210,10 +187,7 @@ async def generate_wizard_strategy(
     body: WizardGenerateRequest,
     user: User = Depends(get_current_user),
 ) -> GeneratedConditions:
-    try:
-        return StrategyWizardService().generate(body.goal, body.risk_tolerance)
-    except WizardError as exc:
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from exc
+    return StrategyWizardService().generate(body.goal, body.risk_tolerance)
 
 
 @router.post("/generate-from-prompt")
@@ -221,7 +195,4 @@ async def generate_from_prompt(
     body: PromptGenerateRequest,
     user: User = Depends(get_current_user),
 ) -> GeneratedConditions:
-    try:
-        return await StrategyPromptService().generate(body.prompt)
-    except PromptGenerationUnavailableError as exc:
-        raise HTTPException(status.HTTP_501_NOT_IMPLEMENTED, str(exc)) from exc
+    return await StrategyPromptService().generate(body.prompt)

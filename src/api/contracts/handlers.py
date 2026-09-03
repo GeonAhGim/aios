@@ -20,7 +20,7 @@ from fastapi.responses import JSONResponse
 
 from src.api.contracts.envelope import ApiError, current_trace_id
 from src.api.contracts.error_codes import HTTP_STATUS, ErrorCode
-from src.api.contracts.exception_mapping import map_exception
+from src.api.contracts.exception_mapping import map_exception, override_status
 from src.core.logging.request_context import get_current_request_id
 
 logger = logging.getLogger(__name__)
@@ -104,7 +104,7 @@ def install_exception_handlers(app: FastAPI) -> None:
             )
             message = "일시적인 오류가 발생했습니다. 계속되면 trace_id와 함께 문의해주세요."
             details = {}
-        return _error_response(code, message, details)
+        return _error_response(code, message, details, status_code=override_status(exc))
 
 
 __all__ = ["install_exception_handlers"]

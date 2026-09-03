@@ -34,7 +34,14 @@ _SEVERITY = {RISK_PROFILE_STABLE: 0, RISK_PROFILE_NEUTRAL: 1, RISK_PROFILE_AGGRE
 
 
 class RiskProfileError(Exception):
-    """FD-15.2 실패 — 라우터가 400/404로 변환."""
+    """FD-15.2 실패 — VALIDATION_INVALID_FIELD(400)."""
+
+
+class RiskProfileNotFoundError(RiskProfileError):
+    """`GET /users/me/risk-profile` 조회 시점에 아직 적합성평가를 완료하지
+    않음 — RESOURCE_NOT_FOUND(404). `get_current()`는 그대로 `None`을
+    반환하는 기존 계약을 유지하고(tests/integration/test_risk_profile_service.py
+    무수정), 라우터(suitability.py)가 `None`일 때 이 예외를 직접 던진다."""
 
 
 class RiskProfileRecord(BaseModel):

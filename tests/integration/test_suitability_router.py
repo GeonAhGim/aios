@@ -38,7 +38,11 @@ def event_bus():
 async def client(event_bus):
     async with app.router.lifespan_context(app):
         app.dependency_overrides[get_event_bus] = lambda: event_bus
-        transport = ASGITransport(app=app)
+        # raise_app_exceptions=False — PLT-18 이후 라우터가 도메인 예외를 그대로
+        # 던지고 전역 Exception 핸들러(src/api/contracts/handlers.py)가 변환한다.
+        # test_exchange_credentials_router.py client 픽스처와 동일 근거
+        # (Starlette가 정상 응답 뒤에도 예외를 재전파한다).
+        transport = ASGITransport(app=app, raise_app_exceptions=False)
         async with AsyncClient(transport=transport, base_url="http://test") as ac:
             yield ac
         app.dependency_overrides.pop(get_event_bus, None)

@@ -54,7 +54,15 @@ EXECUTABLE_STATUSES = frozenset({"APPROVED", "DEPLOYED", "MONITORING"})
 
 
 class StrategyLifecycleError(Exception):
-    """FD-14.3 실패 — 저장 거부 또는 잘못된 상태전이. 라우터가 400으로 변환."""
+    """FD-14.3 실패 — 저장 거부 또는 잘못된 상태전이. VALIDATION_INVALID_FIELD(400)."""
+
+
+class StrategyNotFoundError(StrategyLifecycleError):
+    """`get_strategy()` 조회 대상이 없거나 소유자가 아님 — RESOURCE_NOT_FOUND(404)로
+    구분 매핑되도록 별도 서브클래스를 둔다(exception_mapping.py EXCEPTION_MAP은
+    타입 기반이라 `StrategyLifecycleError` 그대로면 저장 시 409/400 사유와
+    상태코드를 하나로만 고를 수 있다 — PLT-17 `ExchangeCredentialNotFoundError`와
+    동일 근거)."""
 
 
 class SavedStrategy(BaseModel):
@@ -144,7 +152,7 @@ class StrategyBuilderService:
                 version,
             )
         if row is None or row["owner_user_id"] != owner_user_id:
-            raise StrategyLifecycleError("존재하지 않거나 접근 권한이 없는 전략입니다.")
+            raise StrategyNotFoundError("존재하지 않거나 접근 권한이 없는 전략입니다.")
         return StrategyDetail(
             strategy_id=row["strategy_id"],
             version=row["version"],
