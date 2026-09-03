@@ -1,5 +1,6 @@
 import { useRequestTopup, useWalletBalance } from "@aios/shared-hooks";
 import { ApiError } from "@aios/api-client";
+import { routeApiError } from "@aios/shared-types";
 import { Alert, Button, Field, Input, PageHeader, Stat } from "@aios/ui-web";
 import { useState, type FormEvent } from "react";
 import { AppShell } from "../../components/layout/AppShell";
@@ -14,8 +15,7 @@ export function WalletPage() {
   const [error, setError] = useState<ApiError | Error | null>(null);
   const [submitted, setSubmitted] = useState<{ id: number; amount: string } | null>(null);
 
-  async function handleSubmit(e: FormEvent) {
-    e.preventDefault();
+  async function attemptTopup() {
     setError(null);
     setSubmitted(null);
     try {
@@ -28,6 +28,17 @@ export function WalletPage() {
       setError(err instanceof ApiError ? err : new Error("충전 요청에 실패했습니다."));
     }
   }
+
+  async function handleSubmit(e: FormEvent) {
+    e.preventDefault();
+    await attemptTopup();
+  }
+
+  // spec §9 PLT-25: RATE_LIMIT_EXCEEDED(429)만 재시도 버튼을 보여준다 — 카운트다운은
+  // ErrorMessage(task-483 routeApiError 경유)가 담당하고, 여기서는 그 판정 결과로
+  // 재시도 실행 여부만 결정한다.
+  const routed = error ? routeApiError(error) : null;
+  const canRetry = routed?.kind === "backoff_retry";
 
   return (
     <AppShell>
@@ -60,6 +71,8 @@ export function WalletPage() {
               errorCode={error instanceof ApiError ? error.errorCode : null}
               message={error.message}
               traceId={error instanceof ApiError ? error.traceId : null}
+              retryAfterSec={routed?.kind === "backoff_retry" ? routed.afterSec : undefined}
+              onRetry={canRetry ? () => attemptTopup() : undefined}
             />
           )}
           {submitted && (

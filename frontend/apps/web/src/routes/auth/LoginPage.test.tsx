@@ -145,6 +145,40 @@ describe("LoginPage 계정 잠금(AUTH_ACCOUNT_LOCKED)", () => {
     expect(screen.queryByText("ECONNRESET")).not.toBeInTheDocument();
   });
 
+  // task-930 §9 PLT-25: 429 RATE_LIMIT_EXCEEDED는 423 잠금과 별개로 routeApiError의
+  // backoff_retry로 판정돼 재시도 버튼이 카운트다운 후 활성화된다.
+  it("negative: 429 RATE_LIMIT_EXCEEDED는 retry_after 카운트다운 후 재시도 버튼을 활성화한다", async () => {
+    vi.useFakeTimers();
+    try {
+      mutateAsync.mockRejectedValue(
+        new ApiError(429, "too many requests", "trace-login-1", "RATE_LIMIT_EXCEEDED", 3),
+      );
+      renderAt("/login");
+
+      await act(async () => submitLoginForm());
+
+      expect(
+        screen.getByText("요청이 너무 많습니다. 잠시 후 다시 시도해주세요."),
+      ).toBeInTheDocument();
+      const retryButton = screen.getByRole("button", { name: "다시 시도" });
+      expect(retryButton).toBeDisabled();
+      expect(screen.getByText("3초 후 재시도 가능")).toBeInTheDocument();
+      expect(screen.getByLabelText("이메일")).toBeEnabled();
+
+      await act(async () => vi.advanceTimersByTime(1000));
+      await act(async () => vi.advanceTimersByTime(1000));
+      await act(async () => vi.advanceTimersByTime(1000));
+      expect(retryButton).toBeEnabled();
+
+      vi.useRealTimers();
+      mutateAsync.mockResolvedValueOnce({ accessToken: "t-5" });
+      retryButton.click();
+      await waitFor(() => expect(screen.getByText("대시보드 페이지")).toBeInTheDocument());
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("unmount 시 카운트다운 타이머를 정리한다", async () => {
     vi.useFakeTimers();
     mutateAsync.mockRejectedValue(new ApiError(423, "잠김", undefined, "AUTH_ACCOUNT_LOCKED", 30));

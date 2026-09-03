@@ -1,6 +1,6 @@
 import { useLogin } from "@aios/shared-hooks";
 import { ApiError } from "@aios/api-client";
-import { deriveLockout } from "@aios/shared-types";
+import { deriveLockout, routeApiError } from "@aios/shared-types";
 import { Button, Field, Input } from "@aios/ui-web";
 import { useEffect, useState, type FormEvent } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
@@ -35,9 +35,7 @@ export function LoginPage() {
     return () => clearTimeout(timer);
   }, [lockoutRemainingSec]);
 
-  async function handleSubmit(e: FormEvent) {
-    e.preventDefault();
-    if (locked) return;
+  async function attemptLogin() {
     setError(null);
     try {
       await login.mutateAsync({ email, password, totpCode: totpCode || undefined });
@@ -47,6 +45,18 @@ export function LoginPage() {
       setLockoutRemainingSec(deriveLockout(err).retryAfterSec);
     }
   }
+
+  async function handleSubmit(e: FormEvent) {
+    e.preventDefault();
+    if (locked) return;
+    await attemptLogin();
+  }
+
+  // spec §9 PLT-25: RATE_LIMIT_EXCEEDED(429)만 routeApiError의 backoff_retry로 잡혀
+  // 재시도 버튼이 카운트다운 후 활성화된다. 423 잠금은 deriveLockout이 별도로 다룬다
+  // (task-387) — 두 판정은 서로 다른 상태 코드라 겹치지 않는다.
+  const routed = error ? routeApiError(error) : null;
+  const canRetry = routed?.kind === "backoff_retry";
 
   return (
     <AuthLayout title="AIOS 로그인">
@@ -88,6 +98,8 @@ export function LoginPage() {
             errorCode={error instanceof ApiError ? error.errorCode : null}
             message={error.message}
             traceId={error instanceof ApiError ? error.traceId : null}
+            retryAfterSec={routed?.kind === "backoff_retry" ? routed.afterSec : undefined}
+            onRetry={canRetry ? () => attemptLogin() : undefined}
           />
         )}
         {locked && (

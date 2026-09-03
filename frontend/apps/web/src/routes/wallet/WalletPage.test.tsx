@@ -1,5 +1,5 @@
 import "@testing-library/jest-dom/vitest";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { MemoryRouter } from "react-router-dom";
 import { ApiError } from "@aios/api-client";
@@ -68,5 +68,37 @@ describe("WalletPage 에러 표시", () => {
     submitTopup();
 
     await waitFor(() => expect(screen.getByText("지원코드: trace-wallet-1")).toBeInTheDocument());
+  });
+
+  // task-930 §9 PLT-25: 429 RATE_LIMIT_EXCEEDED는 routeApiError의 backoff_retry로
+  // 판정돼 재시도 버튼이 카운트다운 후 활성화된다.
+  it("negative: 429 RATE_LIMIT_EXCEEDED는 retry_after 카운트다운 후 재시도 버튼을 활성화한다", async () => {
+    vi.useFakeTimers();
+    try {
+      mutateAsync.mockRejectedValue(
+        new ApiError(429, "too many requests", "trace-wallet-2", "RATE_LIMIT_EXCEEDED", 2),
+      );
+      renderPage();
+
+      await act(async () => submitTopup());
+
+      expect(
+        screen.getByText("요청이 너무 많습니다. 잠시 후 다시 시도해주세요."),
+      ).toBeInTheDocument();
+      const retryButton = screen.getByRole("button", { name: "다시 시도" });
+      expect(retryButton).toBeDisabled();
+      expect(screen.getByText("2초 후 재시도 가능")).toBeInTheDocument();
+
+      await act(async () => vi.advanceTimersByTime(1000));
+      await act(async () => vi.advanceTimersByTime(1000));
+      expect(retryButton).toBeEnabled();
+
+      vi.useRealTimers();
+      mutateAsync.mockResolvedValueOnce({ id: 7, requestedAmount: "30000" });
+      retryButton.click();
+      await waitFor(() => expect(screen.getByText(/충전 요청 #7/)).toBeInTheDocument());
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

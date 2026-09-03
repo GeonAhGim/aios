@@ -5,9 +5,8 @@ import {
   useMyAlerts,
 } from "@aios/shared-hooks";
 import { ApiError, type ApiResponsePageMeta } from "@aios/api-client";
-import type { AlertCreateRequest } from "@aios/shared-types";
+import { classifyBadRequest, classifyForbidden, routeApiError, type AlertCreateRequest } from "@aios/shared-types";
 import {
-  Alert,
   Badge,
   Button,
   Card,
@@ -21,9 +20,29 @@ import {
 import { useState, type FormEvent } from "react";
 import { useSearchParams } from "react-router-dom";
 import { AppShell } from "../../components/layout/AppShell";
+import { BadRequestNotice } from "../../components/BadRequestNotice";
+import { ErrorMessage } from "../../components/ErrorMessage";
+import { ForbiddenNotice } from "../../components/ForbiddenNotice";
 import { Pagination } from "../../components/Pagination";
 import { exchangeLabel } from "../../lib/exchangeLabels";
 import { derivePageState } from "../../lib/pagination";
+
+// spec §3.3 에러 taxonomy: 알림 생성 실패는 err.message를 직접 노출하지 않고
+// routeApiError(task-483)로 판정해 400/403/그 외를 각각 BadRequestNotice/
+// ForbiddenNotice/ErrorMessage 경로로만 보여준다(task-901 패턴 재사용).
+function CreateAlertError({ error }: { error: unknown }) {
+  if (classifyBadRequest(error)) return <BadRequestNotice error={error} />;
+  if (classifyForbidden(error)) return <ForbiddenNotice error={error} />;
+  const routed = routeApiError(error);
+  return (
+    <ErrorMessage
+      errorCode={error instanceof ApiError ? error.errorCode : undefined}
+      message={error instanceof Error ? error.message : undefined}
+      traceId={error instanceof ApiError ? error.traceId : undefined}
+      retryAfterSec={routed.kind === "backoff_retry" ? routed.afterSec : undefined}
+    />
+  );
+}
 
 const EXCHANGES = ["bitget", "kis"];
 const OPERATORS = [
@@ -88,7 +107,7 @@ export function AlertsPage() {
   const [period, setPeriod] = useState("14");
   const [operator, setOperator] = useState<AlertCreateRequest["operator"]>("<");
   const [threshold, setThreshold] = useState("30");
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<unknown>(null);
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
@@ -104,9 +123,7 @@ export function AlertsPage() {
         threshold: Number(threshold),
       });
     } catch (err) {
-      setError(
-        err instanceof ApiError ? err.message : "알림 생성에 실패했습니다.",
-      );
+      setError(err instanceof ApiError ? err : new Error("알림 생성에 실패했습니다."));
     }
   }
 
@@ -201,7 +218,7 @@ export function AlertsPage() {
               예: RSI가 30 밑으로(&lt;) 떨어지면 알림 — 약 1분마다 조건을
               확인합니다.
             </p>
-            {error && <Alert>{error}</Alert>}
+            {error !== null && <CreateAlertError error={error} />}
             <Button
               type="submit"
               loading={createAlert.isPending}

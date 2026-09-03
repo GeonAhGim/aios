@@ -1,7 +1,8 @@
 import "@testing-library/jest-dom/vitest";
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter, useLocation } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { ApiError } from "@aios/api-client";
 import type { PriceAlert } from "@aios/shared-types";
 import { AlertsPage } from "./AlertsPage";
 
@@ -24,11 +25,12 @@ function makeAlerts(count: number): PriceAlert[] {
 }
 
 let alerts: PriceAlert[] = [];
+const createAlertMutateAsync = vi.fn();
 
 vi.mock("@aios/shared-hooks", () => ({
   useMyAlerts: () => ({ data: alerts, isLoading: false }),
   useIndicators: () => ({ data: { indicators: ["RSI"] } }),
-  useCreateAlert: () => ({ mutateAsync: vi.fn(), isPending: false }),
+  useCreateAlert: () => ({ mutateAsync: createAlertMutateAsync, isPending: false }),
   useCancelAlert: () => ({ mutate: vi.fn(), isPending: false }),
   useMe: () => ({ data: { email: "a@example.com" } }),
   useLogout: () => vi.fn(),
@@ -51,7 +53,12 @@ function renderAt(path: string) {
 afterEach(() => {
   cleanup();
   alerts = [];
+  createAlertMutateAsync.mockReset();
 });
+
+function submitAlertForm() {
+  fireEvent.click(screen.getByRole("button", { name: "알림 등록" }));
+}
 
 // task-323: listMyAlerts()는 봉투 미적용 레거시 배열 응답이라 서버 페이지네이션이
 // 없다 — derivePageState로 클라이언트에서 자른 결과가 실제로 올바른 구간인지 검증한다.
@@ -94,5 +101,46 @@ describe("AlertsPage 페이지네이션", () => {
 
     expect(screen.getByText("1 / 3")).toBeInTheDocument();
     expect(screen.getByText(/SYM1 /)).toBeInTheDocument();
+  });
+});
+
+// task-930 §3.3: 알림 생성 실패는 err.message를 직접 노출하지 않고 routeApiError로
+// 판정해 BadRequestNotice/ForbiddenNotice/ErrorMessage 경로로만 보여준다.
+describe("AlertsPage 알림 생성 에러 표시", () => {
+  it("negative: 미지 error_code(서버 상세 메시지 없음)는 안전한 기본 안내 문구로 수렴한다", async () => {
+    createAlertMutateAsync.mockRejectedValue(new ApiError(402, "", "trace-alert-1", "X_UNMAPPED_CODE"));
+    renderAt("/alerts");
+
+    submitAlertForm();
+
+    await waitFor(() =>
+      expect(
+        screen.getByText("요청을 처리할 수 없습니다. 잠시 후 다시 시도해주세요."),
+      ).toBeInTheDocument(),
+    );
+  });
+
+  it("negative: POLICY_*(403) 거부는 ForbiddenNotice의 매핑 문구를 보여준다", async () => {
+    createAlertMutateAsync.mockRejectedValue(
+      new ApiError(403, "raw server detail", "trace-alert-2", "POLICY_LIVE_BLOCKED"),
+    );
+    renderAt("/alerts");
+
+    submitAlertForm();
+
+    await waitFor(() =>
+      expect(screen.getByText("실거래 모드에서는 허용되지 않는 작업입니다.")).toBeInTheDocument(),
+    );
+    expect(screen.queryByText("raw server detail")).not.toBeInTheDocument();
+  });
+
+  it("negative: ApiError가 아닌 실패는 raw message 대신 안전한 fallback 문구를 보여준다", async () => {
+    createAlertMutateAsync.mockRejectedValue(new Error("ECONNRESET"));
+    renderAt("/alerts");
+
+    submitAlertForm();
+
+    await waitFor(() => expect(screen.getByText("알림 생성에 실패했습니다.")).toBeInTheDocument());
+    expect(screen.queryByText("ECONNRESET")).not.toBeInTheDocument();
   });
 });
