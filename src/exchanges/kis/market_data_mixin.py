@@ -18,6 +18,10 @@ from decimal import Decimal
 
 from src.core.exceptions import FatalExchangeError
 from src.data.models.market_data import Candle, OrderBook, OrderBookLevel, Ticker
+from src.foundation.market_data.contracts.v1 import Venue
+from src.foundation.market_data.domain.reference.symbol_normalizer import (
+    to_canonical as _to_canonical_symbol,
+)
 
 _MARKET_CODE = "J"  # KRX
 
@@ -26,7 +30,13 @@ class KISMarketDataMixin:
     async def get_ticker(self, symbol: str) -> Ticker:
         """현재가(inquire-price)와 호가(inquire-asking-price-exp-ccn) 두
         엔드포인트를 조합한다 — KIS는 Bitget과 달리 단일 응답에 가격과
-        최우선호가를 함께 주지 않는다."""
+        최우선호가를 함께 주지 않는다.
+
+        LA-19 — KRX는 원시 심볼과 canonical 표현이 같은 6자리 코드라
+        변환은 필요 없지만, 형식 검증까지 생략하면 잘못된 심볼이 조용히
+        거래소로 그대로 전달된다. `symbol_normalizer`(LA-7)에 검증을
+        위임해 fail-closed로 만든다."""
+        symbol = _to_canonical_symbol(Venue.KIS_KRX, symbol)
         price_raw = await self._request(  # type: ignore[attr-defined]
             "GET",
             "/uapi/domestic-stock/v1/quotations/inquire-price",
@@ -56,6 +66,7 @@ class KISMarketDataMixin:
             raise FatalExchangeError(f"KIS ticker 응답에 예상 필드 없음: {exc}") from exc
 
     async def get_orderbook(self, symbol: str, depth: int = 20) -> OrderBook:
+        symbol = _to_canonical_symbol(Venue.KIS_KRX, symbol)
         raw = await self._request(  # type: ignore[attr-defined]
             "GET",
             "/uapi/domestic-stock/v1/quotations/inquire-asking-price-exp-ccn",
@@ -92,6 +103,7 @@ class KISMarketDataMixin:
         )
 
     async def get_ohlcv(self, symbol: str, timeframe: str, limit: int = 100) -> list[Candle]:
+        symbol = _to_canonical_symbol(Venue.KIS_KRX, symbol)
         if timeframe == "1m":
             return await self._get_intraday_candles(symbol, limit=limit)
         if timeframe != "1d":

@@ -1,27 +1,33 @@
-"""FULL_AUDIT_2026-09-02.md §2-B ④ — Bitget 심볼 정규화 단일 소스.
+"""LA-19 — Bitget 심볼 변환을 `symbol_normalizer`(LA-7) 위임으로 교체.
 
-이전에는 market_data_mixin.py/futures_market_mixin.py/grid_mixin.py/
-strategy_mixin.py 4곳에 `_to_bitget_symbol()`이 각자 독립적으로
-복제돼 있었다(내용은 우연히 동일했음) — 하나만 고치고 나머지를
-깜빡하면 조용히 서로 어긋날 위험이 있어 단일 모듈로 통합한다.
-`to_canonical_symbol()`은 futures_market_mixin.py에만 있던 역방향
-변환(Phase 1 스콥, 06번 §6.1 — USDT 마켓만 지원)도 함께 통합.
+Spec: docs/specs/L4_market_data_positions_ledger_v1.0.md#§9.2 LA-19.
+
+FULL_AUDIT_2026-09-02.md §7 — 어댑터 자체 변환과 LA-7 단일 규칙(symbol_normalizer)이
+따로 놀면 언젠가 서로 어긋난다(예: 조회 경로만 새 quote를 지원하도록 고치고
+주문 경로는 깜빡하는 사고). 이 모듈은 이제 규칙을 직접 구현하지 않고
+`symbol_normalizer`에 위임만 한다 — 8개 Bitget 믹스인이 이미 이 모듈의
+`to_bitget_symbol`/`to_canonical_symbol`을 임포트하고 있어(모듈 상단 주석
+이전 판 참조) 공개 시그니처(이름·인자·반환 타입)는 그대로 유지해 호출부를
+건드리지 않는다(하위호환).
 """
 from __future__ import annotations
 
-_KNOWN_QUOTE_SUFFIXES = ("USDT",)
+from src.foundation.market_data.contracts.v1 import Venue
+from src.foundation.market_data.domain.reference.symbol_normalizer import (
+    to_canonical as _to_canonical,
+)
+from src.foundation.market_data.domain.reference.symbol_normalizer import (
+    to_venue as _to_venue,
+)
+
+__all__ = ["to_bitget_symbol", "to_canonical_symbol"]
 
 
 def to_bitget_symbol(canonical_symbol: str) -> str:
     """"BTC/USDT" -> "BTCUSDT" """
-    return canonical_symbol.replace("/", "")
+    return _to_venue(Venue.BITGET, canonical_symbol)
 
 
 def to_canonical_symbol(bitget_symbol: str) -> str:
-    """"BTCUSDT" -> "BTC/USDT". Phase 1 스콥(06번 §6.1)은 USDT 마켓만
-    대상이라 그 접미사만 처리한다 — 매칭 안 되면 원문 그대로 반환."""
-    for quote in _KNOWN_QUOTE_SUFFIXES:
-        if bitget_symbol.endswith(quote):
-            base = bitget_symbol[: -len(quote)]
-            return f"{base}/{quote}"
-    return bitget_symbol
+    """"BTCUSDT" -> "BTC/USDT" """
+    return _to_canonical(Venue.BITGET, bitget_symbol)
