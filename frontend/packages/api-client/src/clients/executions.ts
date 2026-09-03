@@ -9,10 +9,13 @@ import type { AnyConstructor } from "../http";
 
 // FD-16 실행 제어판 — executions.py 라우터는 봉투 미적용, 기존 경로 유지.
 // 경로 문자열은 apiPaths.ts(task-605) 레지스트리에만 있다(marketData.ts와 동일 관용).
+// task-1160: listExecutions(치환·쿼리 없는 단순 조회)는 requestByRoute로 옮겨
+// request/requestEnvelope 분기를 apiPaths.ts 레지스트리 단일 출처로 이관했다
+// (admin.ts task-1159 선례와 동일 관용) — 분기 결과 자체는 바꾸지 않는다.
 export function withExecutions<TBase extends AnyConstructor>(Base: TBase) {
   return class extends Base {
     async listExecutions(): Promise<ExecutionCardResponse[]> {
-      return this.request(resolvePath("executions.base"));
+      return this.requestByRoute("executions.base");
     }
 
     async createExecution(

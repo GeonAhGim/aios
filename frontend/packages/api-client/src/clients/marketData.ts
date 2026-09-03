@@ -157,19 +157,31 @@ class MarketDataApiClient extends ApiClientBase {
     return this.fetchCandles("marketData.candles.replay", toQuery(params));
   }
 
+  // task-1160: 이전에는 request()만 무조건 호출했다(marketData.instruments.*는
+  // 현재 envelope=false라 결과는 같았지만, fetchCandles와 달리 레지스트리를
+  // 참조하지 않는 하드코딩이었다) — fetchCandles와 동일한 resolveEnvelope 분기로
+  // 맞춰 단일 출처화한다.
   async listInstruments(params: InstrumentListParams = {}): Promise<InstrumentListResult> {
     const query: Record<string, string> = {};
     if (params.venue !== undefined) query.venue = params.venue;
     if (params.status !== undefined) query.status = params.status;
     if (params.cursor !== undefined) query.cursor = params.cursor;
     const path = this.withQuery(resolvePath("marketData.instruments.list"), query);
-    const raw = keysToSnake(await this.request<unknown>(path));
+    const raw = keysToSnake(
+      resolveEnvelope("marketData.instruments.list")
+        ? await this.requestEnvelope<unknown>(path)
+        : await this.request<unknown>(path),
+    );
     return toInstrumentListResult(raw);
   }
 
   async listInstrumentAliases(instrumentId: string): Promise<ParsedSymbolAlias[]> {
     const path = resolvePath("marketData.instruments.aliases").replace(":instrumentId", instrumentId);
-    const raw = keysToSnake(await this.request<unknown>(path));
+    const raw = keysToSnake(
+      resolveEnvelope("marketData.instruments.aliases")
+        ? await this.requestEnvelope<unknown>(path)
+        : await this.request<unknown>(path),
+    );
     return Array.isArray(raw) ? raw.map((item) => parseSymbolAlias(item)) : [];
   }
 }
