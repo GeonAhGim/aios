@@ -9,7 +9,7 @@
 - implemented by: `src/foundation/market_data/coverage/**`, `src/foundation/market_data/providers/**`,
   `src/core/indicators/**`(확장), `src/core/script/**`(신규), `src/foundation/backtest/**`(확장),
   `src/foundation/marketplace/**`(신규 컨텍스트, 기존 `services/listing_service.py` 등은 파사드로 유지),
-  `src/foundation/signals/**`(신규), `frontend/apps/web/src/chart/**`, `frontend/packages/chart-core/**`
+  `src/foundation/signals/**`(신규), `frontend/apps/web/src/chart/**`, `frontend/packages/chart-engine/**`
 - verification evidence: 각 리프 DoD의 테스트 경로(§9)
 - 리프 접두: **DC**(데이터 커버리지) **CH**(차트) **IND**(지표) **DSL**(AIOS Script) **BT**(백테스트) **MP**(마켓) **SIG**(신호 유입)
 
@@ -55,15 +55,16 @@
 | `application/realtime_fanout.py` | 실시간 틱/캔들 pub-sub(테넌트 권한 필터, backpressure) | | PLT-06 event_bus | 260 | OPEN |
 | `src/db/migrations/versions/…_instruments_coverage.py` | `instruments`, `venue_listings`, `coverage_spans`, `entitlements` | | | 200 | OPEN |
 
-### 2.2 (CH) 차트 — `frontend/packages/chart-core/`, `frontend/apps/web/src/chart/`
+### 2.2 (CH) 차트 — `frontend/packages/chart-engine/`(자체 렌더링 코어, OSS 포크 기반), `frontend/apps/web/src/chart/`
 | 파일 | 단일 책임 | 계약 | 상한 |
 |---|---|---|---|
-| `packages/chart-core/src/adapter/lightweightAdapter.ts` | `lightweight-charts` 래핑(시리즈 생성·업데이트·시간축·페인) | `ChartAdapter` 인터페이스 | 280 |
-| `packages/chart-core/src/data/candleStream.ts` | 히스토리 페이지네이션 + 실시간 병합(중복·역순·갭 처리) | `CandleStream` | 240 |
-| `packages/chart-core/src/indicators/overlayRegistry.ts` | 서버 지표 결과를 페인/오버레이로 매핑 | | 200 |
-| `packages/chart-core/src/drawings/{model,tools,serialize}.ts` | 드로잉 도메인(추세선·수평선·피보나치·사각형·텍스트)·직렬화 v1 | `drawings-v1` | 260×3 |
-| `packages/chart-core/src/replay/replayController.ts` | 리플레이(재생·속도·스텝, 백테스트 동일 데이터 경로) | | 220 |
-| `packages/chart-core/src/layout/{layoutModel,persistence}.ts` | 멀티차트 레이아웃·워치리스트 저장/복원 | `layout-v1` | 220×2 |
+| `packages/chart-engine/vendor/**` | 포크한 OSS 엔진 원본(원 라이선스·NOTICE 유지, 점진적으로 src로 이전해 비운다) | — | 예외(§2.8) |
+| `packages/chart-engine/src/core/{renderer,timeScale,priceScale,series}.ts` | AIOS 소유 렌더링 코어(캔버스·시간축·가격축·시리즈) — vendor를 감싸다가 재작성으로 대체 | `ChartEngine` 인터페이스 | 각 ≤300 |
+| `packages/chart-engine/src/data/candleStream.ts` | 히스토리 페이지네이션 + 실시간 병합(중복·역순·갭 처리) | `CandleStream` | 240 |
+| `packages/chart-engine/src/indicators/overlayRegistry.ts` | 서버 지표 결과를 페인/오버레이로 매핑 | | 200 |
+| `packages/chart-engine/src/drawings/{model,tools,serialize}.ts` | 드로잉 도메인(추세선·수평선·피보나치·사각형·텍스트)·직렬화 v1 | `drawings-v1` | 260×3 |
+| `packages/chart-engine/src/replay/replayController.ts` | 리플레이(재생·속도·스텝, 백테스트 동일 데이터 경로) | | 220 |
+| `packages/chart-engine/src/layout/{layoutModel,persistence}.ts` | 멀티차트 레이아웃·워치리스트 저장/복원 | `layout-v1` | 220×2 |
 | `apps/web/src/chart/ChartPage.tsx`, `ChartToolbar.tsx`, `IndicatorPicker.tsx`, `AlertFromChart.tsx`, `StrategyMarkers.tsx` | 화면 조립(각 ≤300줄) | | 300 |
 | backend `src/api/routers/chart.py` + `src/foundation/charting/{contracts/v1.py, application/*.py, adapters/postgres_*.py}` | 드로잉·레이아웃·워치리스트 저장(테넌트·사용자 스코프, 감사) | `charting-v1` | 각 ≤260 |
 
@@ -125,6 +126,7 @@
 | `src/api/routers/signals.py` | `POST /signals/tradingview`, `POST /signals/generic`, 시크릿 회전 | 200 |
 
 ### 2.8 분할 규칙
+`frontend/packages/chart-engine/vendor/**`는 포크 원본이라 300줄 규칙 예외다(Guard P6는 `src/**/*.py`만 검사). `chart-engine/src/**`는 규칙을 그대로 따르며, vendor 모듈을 재작성해 src로 옮길 때마다 vendor에서 삭제한다.
 파서·인터프리터·어댑터가 300줄을 넘길 지점은 표에 미리 분할했다(lexer/parser/ast, builtins_ta/builtins_math/builtins_strategy).
 넘기면 리프를 나누고 Guard P6이 막는다.
 
@@ -323,7 +325,8 @@ DoD 공통: `ruff` · `mypy --strict` · `scripts/check_zone_manifest.py` 통과
 ### 9.6 (CH) 차트
 | 리프 | 파일 | 선행 | DoD | 크기 |
 |---|---|---|---|---|
-| CH-1 | `packages/chart-core` 패키지 골격 + `lightweight-charts` 의존성 + `lightweightAdapter.ts` + 테스트 | — | 시리즈 생성·업데이트·리사이즈, 라이선스 표기 | 280 |
+| CH-0 | `docs/design/CHART_ENGINE_FORK_EVAL.md` + 벤치 스크립트 | — | 후보 4종(KLineChart·Lightweight Charts·NightVision·react-financial-charts) 라이선스 원문 확인·10만 봉 fps·드로잉 확장성·TS 모듈 경계 채점표, 포크 추천 1순위. CA 확정 후 CH-1 착수 | 240 |
+| CH-1 | `packages/chart-engine` 골격 + `vendor/`에 포크 반입(NOTICE·LICENSE) + `src/core/*.ts` 래퍼 + 테스트 | CH-0 | 시리즈 생성·업데이트·리사이즈, 라이선스 고지 파일 존재, 빌드 통과 | 600 |
 | CH-2 | `data/candleStream.ts` + 테스트 | CH-1, DC-18 | 페이지네이션+실시간 병합, 중복/역순/갭 | 240 |
 | CH-3 | `indicators/overlayRegistry.ts` + 테스트 | CH-1 | 페인/오버레이 매핑 | 200 |
 | CH-4 | `drawings/{model,tools,serialize}.ts` + 테스트 | CH-1 | 5종 도구, 직렬화 왕복 | 780 |
@@ -352,11 +355,11 @@ DoD 공통: `ruff` · `mypy --strict` · `scripts/check_zone_manifest.py` 통과
 **원칙: AIOS는 TradingView에 연결해 쓰는 제품이 아니라 그 없이 독립적으로 같은 수준을 제공하는 제품이다.**
 DC-1~18(R/L4 잔여보다 먼저, backend 4 중 2 고정) → CH-1~10 ∥ IND-1~8 → DSL-1~13 → BT-1~13 → MP-1~10 → SIG-1~6(선택 백로그, 외부 신호를 받고 싶은 사용자를 위한 부가 기능·맨 마지막).
 프론트 리프(CH·DSL-13·BT-13·MP-10·SIG-6)는 frontend 풀, 나머지는 backend 풀. 각 영역 첫 리프는 QA에서 명세 §3 계약 스냅샷을 반드시 남긴다.
-`lightweight-charts`는 TradingView 서비스가 아니라 자체 호스팅하는 Apache-2.0 오픈소스 렌더링 라이브러리다(외부 계정·API·네트워크 의존 없음). 렌더링 코어를 자체 개발하는 안은 ADR-B Rejected.
+차트 렌더링 코어는 AIOS 소유 코드(`chart-engine`)다. OSS를 포크해 시작하되 점진 재작성으로 완전히 소유한다(ADR-B D2). 외부 서비스·계정·API 의존 없음.
 
 ## 10. 미확정·리스크
 - 데이터 벤더 선택·라이선스(Polygon, Databento, EODHD, Kiwoom 등)는 **미확인·사람 결정**. 명세는 SPI 형태만 고정.
-- `lightweight-charts` 라이선스 조건(Apache-2.0 + 로고 표기) 준수 방식은 CH-1에서 확인.
+- 포크 후보의 라이선스·고지 의무(KLineChart, Lightweight Charts, NightVision, react-financial-charts)는 CH-0에서 원문 확인. 확인 전에는 어느 것도 반입하지 않는다.
 - `pyarrow` 도입 여부(warm 계층)는 DC-14에서 벤치 후 결정; 대안은 numpy `.npz`.
 - IND 100종 목록은 IND-2에서 카테고리별 확정(TA-Lib 전 종 + VWAP/anchored VWAP/Ichimoku/Volume Profile/Pivot/Supertrend 등).
 - Pine Script 가져오기 변환기는 범위 밖(ADR-B Rejected). 요청이 많으면 별도 ADR.
