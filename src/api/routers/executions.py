@@ -10,13 +10,20 @@ FD-16.1 처리단계 ①"사용자 계좌 잔고(FD-3.2) 대비 배분 가능 �
 HTTP 엔드포인트는 이 leaf에 없다 — 승인 결정은 관리자 액션이라
 18번(관리자 도구) 스콥이며, 여기서는 승인 대기 상태를 정직하게
 노출(approval_request_id, PENDING_APPROVAL)만 한다.
+
+PLT-19(task-1016): raw HTTPException을 전부 제거했다 — ExecutionCreateError/
+ExecutionControlError/CapitalAllocationError/CredentialNotFoundError는
+전역 핸들러(src/api/contracts/handlers.py)가 exception_mapping.py의
+EXCEPTION_MAP을 통해 동일한 상태코드(400/404)로 변환한다. 이 라우터의
+성공 응답 봉투화는 PLT-17 decision과 동일 사유로 보류한다(exchange_credentials.py
+모듈 docstring 참조).
 """
 from __future__ import annotations
 
 from decimal import Decimal
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, status
 
 from src.api.deps import get_current_user
 from src.api.execution_deps import get_execution_monitoring_service, get_execution_service
@@ -32,14 +39,9 @@ from src.api.schemas.execution import (
 )
 from src.api.service_deps import get_credential_resolver
 from src.services.auth_service import User
-from src.services.capital_allocation import CapitalAllocationError
-from src.services.credential_resolver import CredentialNotFoundError, CredentialResolver
+from src.services.credential_resolver import CredentialResolver
 from src.services.execution_monitoring_service import ExecutionMonitoringService
-from src.services.execution_service import (
-    ExecutionControlError,
-    ExecutionCreateError,
-    ExecutionService,
-)
+from src.services.execution_service import ExecutionService
 
 router = APIRouter()
 
@@ -47,10 +49,7 @@ router = APIRouter()
 async def _available_balance(
     resolver: CredentialResolver, user_id: UUID, exchange: str, currency: str
 ) -> Decimal:
-    try:
-        adapter = await resolver.get_adapter(user_id, exchange)
-    except CredentialNotFoundError as exc:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, str(exc)) from exc
+    adapter = await resolver.get_adapter(user_id, exchange)
     balances = await adapter.get_balance()
     for balance in balances:
         if balance.asset.upper() == currency.upper():
@@ -66,19 +65,16 @@ async def create_execution(
     service: ExecutionService = Depends(get_execution_service),
 ) -> ExecutionResponse:
     available = await _available_balance(resolver, user.user_id, body.exchange, body.currency)
-    try:
-        summary = await service.create_execution(
-            user.user_id,
-            body.strategy_id,
-            body.strategy_version,
-            allocated_capital=body.allocated_capital,
-            currency=body.currency,
-            exchange=body.exchange,
-            mode=body.mode,
-            available_balance=available,
-        )
-    except (ExecutionCreateError, CapitalAllocationError) as exc:
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from exc
+    summary = await service.create_execution(
+        user.user_id,
+        body.strategy_id,
+        body.strategy_version,
+        allocated_capital=body.allocated_capital,
+        currency=body.currency,
+        exchange=body.exchange,
+        mode=body.mode,
+        available_balance=available,
+    )
     return to_execution_response(summary)
 
 
@@ -97,10 +93,7 @@ async def start_execution(
     user: User = Depends(get_current_user),
     service: ExecutionService = Depends(get_execution_service),
 ) -> ExecutionResponse:
-    try:
-        summary = await service.start(execution_id, user.user_id)
-    except ExecutionControlError as exc:
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from exc
+    summary = await service.start(execution_id, user.user_id)
     return to_execution_response(summary)
 
 
@@ -110,10 +103,7 @@ async def pause_execution(
     user: User = Depends(get_current_user),
     service: ExecutionService = Depends(get_execution_service),
 ) -> ExecutionResponse:
-    try:
-        summary = await service.pause(execution_id, paused_by="USER", user_id=user.user_id)
-    except ExecutionControlError as exc:
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from exc
+    summary = await service.pause(execution_id, paused_by="USER", user_id=user.user_id)
     return to_execution_response(summary)
 
 
@@ -124,12 +114,7 @@ async def set_execution_risk_guard(
     user: User = Depends(get_current_user),
     service: ExecutionService = Depends(get_execution_service),
 ) -> ExecutionResponse:
-    try:
-        summary = await service.set_max_drawdown(
-            execution_id, user.user_id, body.max_drawdown_pct
-        )
-    except ExecutionControlError as exc:
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from exc
+    summary = await service.set_max_drawdown(execution_id, user.user_id, body.max_drawdown_pct)
     return to_execution_response(summary)
 
 
@@ -140,12 +125,7 @@ async def retire_execution(
     user: User = Depends(get_current_user),
     service: ExecutionService = Depends(get_execution_service),
 ) -> ExecutionResponse:
-    try:
-        summary = await service.retire(
-            execution_id, user.user_id, liquidation=body.liquidation
-        )
-    except ExecutionControlError as exc:
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from exc
+    summary = await service.retire(execution_id, user.user_id, liquidation=body.liquidation)
     return to_execution_response(summary)
 
 
@@ -158,15 +138,12 @@ async def convert_to_live(
     service: ExecutionService = Depends(get_execution_service),
 ) -> ExecutionResponse:
     available = await _available_balance(resolver, user.user_id, body.exchange, body.currency)
-    try:
-        summary = await service.convert_to_live(
-            user.user_id,
-            execution_id,
-            allocated_capital=body.allocated_capital,
-            currency=body.currency,
-            exchange=body.exchange,
-            available_balance=available,
-        )
-    except (ExecutionControlError, ExecutionCreateError, CapitalAllocationError) as exc:
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from exc
+    summary = await service.convert_to_live(
+        user.user_id,
+        execution_id,
+        allocated_capital=body.allocated_capital,
+        currency=body.currency,
+        exchange=body.exchange,
+        available_balance=available,
+    )
     return to_execution_response(summary)

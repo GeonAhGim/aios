@@ -1,4 +1,4 @@
-"""PLT-17/PLT-18/PLT-20 — auth/users 응답이 실제로 `ApiResponse` 봉투(`{"data": ...,
+"""PLT-17/PLT-18/PLT-19/PLT-20 — auth/users 응답이 실제로 `ApiResponse` 봉투(`{"data": ...,
 "meta": {"trace_id", "as_of"}}`)인지, 이관된 라우터 전부의 에러 응답이 §15.3
 ApiError 포맷인지 실제 FastAPI 앱 + 실제 dev DB로 왕복 확인한다.
 
@@ -9,8 +9,9 @@ mock으로 ApiResponse를 직접 만들어 검증하는 동어반복을 피하�
 HTTP 요청(httpx ASGITransport)으로 앱을 왕복한다.
 
 exchange_credentials/marketplace/strategy_builder/suitability/notifications/
-alerts/device_tokens/wallet의 성공 응답 봉투화는 보류했다(task-1002 PLT-17
-needs_decision → task-1009 PLT-18, task-1017 PLT-20 PM 선반영으로 확정, 각
+alerts/device_tokens/wallet/executions/portfolio/reports의 성공 응답
+봉투화는 보류했다(task-1002 PLT-17 needs_decision → task-1009 PLT-18,
+task-1017 PLT-20 PM 선반영, task-1016 PLT-19도 동일 선반영으로 확정, 각
 라우터 모듈 docstring 참조) — spec §2.3(line 307)이 이 변경을 MAJOR로
 규정하고 `/api/v1` 경로에만 적용하라고 명시하는데, 그 경로를 여는 `mount_v1`
 배선(PLT-16, src/api/versioning.py)이 아직 `src/main.py`에 없어 legacy 단일
@@ -250,6 +251,51 @@ async def test_wallet_topup_validation_error_response_is_the_apierror_envelope(c
 
     response = await client.post(
         "/wallet/topup-requests", json={"amount": "0"}, headers=headers
+    )
+
+    assert response.status_code == 400
+    body = response.json()
+    _assert_error_envelope(body)
+    assert body["error_code"] == "VALIDATION_INVALID_FIELD"
+
+
+async def test_executions_create_without_credential_is_the_apierror_envelope(client):
+    """executions.py PLT-19 — 연동되지 않은 거래소로 실행 생성을 시도하면
+    `_available_balance`가 CredentialResolver.get_adapter()의
+    CredentialNotFoundError를 그대로 propagate하고, 전역 핸들러가
+    RESOURCE_NOT_FOUND(404) ApiError로 변환하는지 확인한다.
+    CredentialNotFoundError는 PLT-17부터 이미 EXCEPTION_MAP에 있었으므로
+    이 테스트는 라우터가 더 이상 자체 HTTPException으로 가로채지 않는다는
+    것만 새로 고정한다."""
+    _, headers = await _register_user(client)
+
+    response = await client.post(
+        "/executions",
+        json={
+            "strategy_id": "does-not-exist",
+            "strategy_version": "1.0.0",
+            "allocated_capital": "500",
+            "currency": "USDT",
+            "exchange": "bitget",
+            "mode": "PAPER",
+        },
+        headers=headers,
+    )
+
+    assert response.status_code == 404
+    body = response.json()
+    _assert_error_envelope(body)
+    assert body["error_code"] == "RESOURCE_NOT_FOUND"
+
+
+async def test_portfolio_rebalance_empty_adjustments_is_the_apierror_envelope(client):
+    """portfolio.py PLT-19 — PortfolioService.rebalance()가 빈 adjustments에
+    RebalanceError를 던지고, 전역 핸들러가 VALIDATION_INVALID_FIELD(400)
+    ApiError로 변환하는지 실호출로 확인한다."""
+    _, headers = await _register_user(client)
+
+    response = await client.post(
+        "/portfolio/rebalance", json={"adjustments": []}, headers=headers
     )
 
     assert response.status_code == 400

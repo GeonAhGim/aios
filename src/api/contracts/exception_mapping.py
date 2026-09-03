@@ -4,9 +4,9 @@ Spec: docs/specs/L4_platform_observability_tenancy_api_v1.0.md#§2.3, §3.3
 
 PLT-108(auth/users/admin) → PLT-17(auth/users/exchange_credentials) →
 PLT-18(marketplace/strategy_builder/suitability) → PLT-20(notifications/
-alerts/device_tokens/wallet)이 각자 쓰는 예외를 추가했다 — 다른
-라우터(executions/portfolio/reports/admin/foundation 등)가 쓰는 예외는
-각 라우터를 이관하는 후속 리프(PLT-19/21)에서 추가한다.
+alerts/device_tokens/wallet) → PLT-19(executions/portfolio/reports)이
+각자 쓰는 예외를 추가했다 — 다른 라우터(admin/foundation 등)가 쓰는
+예외는 각 라우터를 이관하는 후속 리프(PLT-21)에서 추가한다.
 
 PLT-20 decision(task-1017)은 "src/api/contracts/** 공용 파일 수정 금지"
 (PLT-18/19와의 병렬 실행 중 충돌 회피 목적)였지만, alert_service의
@@ -61,6 +61,7 @@ from src.services.account_deletion_service import AccountDeletionError
 from src.services.alert_service import AlertError, AlertNotFoundError
 from src.services.approval_settings_service import ApprovalSettingsError
 from src.services.auth_service import AuthError
+from src.services.capital_allocation import CapitalAllocationError
 from src.services.condition_compiler import ConditionCompileError
 from src.services.credential_resolver import CredentialNotFoundError
 from src.services.device_token_service import DeviceTokenError, DeviceTokenNotFoundError
@@ -70,8 +71,10 @@ from src.services.exchange_credential_service import (
     ExchangeCredentialError,
     ExchangeCredentialNotFoundError,
 )
+from src.services.execution_service import ExecutionControlError, ExecutionCreateError
 from src.services.listing_service import ListingError
 from src.services.mfa_service import MfaError, MfaReauthenticationRequiredError
+from src.services.portfolio_service import RebalanceError
 from src.services.purchase_service import InsufficientWalletBalanceError, PurchaseError
 from src.services.review_service import ReviewError
 from src.services.risk_profile_service import RiskProfileError, RiskProfileNotFoundError
@@ -136,6 +139,11 @@ EXCEPTION_MAP: list[tuple[type[Exception], ErrorCode]] = [
     (AlertError, ErrorCode.VALIDATION_INVALID_FIELD),
     (DeviceTokenNotFoundError, ErrorCode.RESOURCE_NOT_FOUND),
     (DeviceTokenError, ErrorCode.VALIDATION_INVALID_FIELD),
+    # PLT-19 — executions/portfolio/reports.
+    (ExecutionCreateError, ErrorCode.VALIDATION_INVALID_FIELD),
+    (ExecutionControlError, ErrorCode.VALIDATION_INVALID_FIELD),
+    (CapitalAllocationError, ErrorCode.VALIDATION_INVALID_FIELD),
+    (RebalanceError, ErrorCode.VALIDATION_INVALID_FIELD),
 ]
 
 # ErrorCode 하나당 상태코드 하나뿐인 HTTP_STATUS로 표현할 수 없는 개별

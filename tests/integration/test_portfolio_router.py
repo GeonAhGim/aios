@@ -93,7 +93,13 @@ async def client():
     async with app.router.lifespan_context(app):
         app.dependency_overrides[get_exchange_credential_service] = _override_credential_service
         app.dependency_overrides[get_credential_resolver] = _override_resolver
-        transport = ASGITransport(app=app)
+        # raise_app_exceptions=False — PLT-19가 portfolio.py의 raw
+        # HTTPException을 RebalanceError/CapitalAllocationError로 교체했다.
+        # 도메인 예외는 이제 전역 Exception 핸들러(ServerErrorMiddleware
+        # 승격)를 거치는데, Starlette가 정상 응답 뒤에도 예외를 재전파하기
+        # 때문에 필요하다(test_device_tokens_router.py client 픽스처와 동일
+        # 근거).
+        transport = ASGITransport(app=app, raise_app_exceptions=False)
         async with AsyncClient(transport=transport, base_url="http://test") as ac:
             yield ac
         app.dependency_overrides.pop(get_exchange_credential_service, None)
