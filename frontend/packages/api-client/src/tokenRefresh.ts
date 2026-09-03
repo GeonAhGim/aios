@@ -6,12 +6,27 @@
 // token도 무효 등)하면 false(즉시 로그아웃 대상)를 반환해야 한다.
 export type TokenRefreshHandler = () => Promise<boolean>;
 
+// task-1020(§3.4/§9 PLT-23): refresh 회전 재사용 감지·기타 401/403 실패는 서버가
+// 세션 전체를 revoke하므로, 클라이언트도 보관 중인 토큰 쌍을 전량 폐기해야
+// 한다(재시도 절대 금지 — 무한 401 루프 방지는 이미 handleAuthFailure가
+// `if (refreshed) return retry()`로 보장한다). 이 모듈은 tokenStore.ts를 직접
+// import하지 않는다(tokenStore.ts가 이미 이 모듈을 import하므로 역참조하면
+// 순환 의존이 된다) — tokenStore.ts가 자신의 clear()를 이 훅에 등록한다. 전역
+// 로그아웃 알림은 이미 http.ts(handleAuthFailure, task-386)가 notifyUnauthorized로
+// 처리하므로 여기서 새로 호출하지 않는다(중복 알림 방지, task-354 가드 재사용).
+export type TokenClearHandler = () => void;
+
 let refreshHandler: TokenRefreshHandler | null = null;
+let clearHandler: TokenClearHandler | null = null;
 let inFlightRefresh: Promise<boolean> | null = null;
 
 export function configureTokenRefreshHandler(handler: TokenRefreshHandler | null): void {
   refreshHandler = handler;
   inFlightRefresh = null;
+}
+
+export function configureTokenClearHandler(handler: TokenClearHandler | null): void {
+  clearHandler = handler;
 }
 
 // 화면 진입 시 병렬로 나가는 여러 요청이 동시에 AUTH_TOKEN_EXPIRED를 받아도
@@ -23,9 +38,14 @@ export function refreshAccessToken(): Promise<boolean> {
   if (!refreshHandler) return Promise.resolve(false);
   if (!inFlightRefresh) {
     const handler = refreshHandler;
-    inFlightRefresh = handler().finally(() => {
-      inFlightRefresh = null;
-    });
+    inFlightRefresh = handler()
+      .then((ok) => {
+        if (!ok) clearHandler?.();
+        return ok;
+      })
+      .finally(() => {
+        inFlightRefresh = null;
+      });
   }
   return inFlightRefresh;
 }

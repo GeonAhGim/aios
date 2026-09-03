@@ -26,9 +26,16 @@
 // 필요한데, 이는 이 leaf 범위를 벗어나 신설하지 않는다 — 서버가
 // TokenPairResponse를 반환하기 시작하면 이 모듈을 그대로 앱 부트스트랩에
 // 연결하면 된다.
+//
+// 배선(task-1020): createTokenStore()는 생성 시 자신의 clear()를
+// tokenRefresh.ts의 configureTokenClearHandler에 등록한다. refreshAccessToken()의
+// single-flight가 실패(회전 재사용 감지 등 401/403 포함)로 끝나면 대기 중이던
+// 모든 호출(선제 타이머·401 재인증 경로 모두)이 같은 실패를 공유하고, 그 실패
+// 시점에 등록된 clear()가 1회 호출되어 보관 중인 토큰 쌍을 전량 폐기한다 —
+// 재시도는 하지 않는다(호출부는 여전히 false만 받고 그대로 포기한다).
 
 import { parseTokenPair, shouldPreRefresh, type ParsedTokenPair } from "@aios/shared-types";
-import { refreshAccessToken } from "./tokenRefresh";
+import { configureTokenClearHandler, refreshAccessToken } from "./tokenRefresh";
 
 const REDACTED = "[REDACTED]";
 
@@ -106,6 +113,8 @@ export function createTokenStore(): TokenStore {
       sessionId,
     };
   }
+
+  configureTokenClearHandler(clear);
 
   return {
     setPair,

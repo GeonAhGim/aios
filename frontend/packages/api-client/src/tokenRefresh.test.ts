@@ -1,7 +1,8 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { AiosApiClient, ApiError } from "./client";
 import { configureUnauthorizedHandler } from "./http";
-import { configureTokenRefreshHandler, refreshAccessToken } from "./tokenRefresh";
+import { configureTokenClearHandler, configureTokenRefreshHandler, refreshAccessToken } from "./tokenRefresh";
+import { createTokenStore } from "./tokenStore";
 
 function jsonResponse(status: number, body: unknown): Response {
   return new Response(JSON.stringify(body), {
@@ -178,5 +179,78 @@ describe("401 AUTH_TOKEN_EXPIRED 자동 refresh + 원요청 1회 재시도", () 
     expect(results.every((r) => r.status === "fulfilled")).toBe(true);
     expect(refreshHandler).toHaveBeenCalledTimes(1);
     expect(unauthorizedHandler).not.toHaveBeenCalled();
+  });
+});
+
+// task-1020(§3.4/§9 PLT-23): refresh 회전 재사용 감지·기타 401/403 실패 시
+// tokenStore 전량 폐기. configureTokenClearHandler는 tokenStore.ts가 자신의
+// clear()를 등록하는 훅이다 — 여기서는 그 훅 자체와, 실제 createTokenStore()로
+// 만든 스토어가 등록·폐기되는 배선을 함께 검증한다.
+describe("refreshAccessToken 실패 시 등록된 clearHandler 호출(tokenStore 전량 폐기)", () => {
+  afterEach(() => {
+    configureTokenRefreshHandler(null);
+    configureTokenClearHandler(null);
+    vi.unstubAllGlobals();
+  });
+
+  it("refresh 실패 시 등록된 clearHandler를 1회 호출한다", async () => {
+    configureTokenRefreshHandler(vi.fn().mockResolvedValue(false));
+    const clearHandler = vi.fn();
+    configureTokenClearHandler(clearHandler);
+
+    await expect(refreshAccessToken()).resolves.toBe(false);
+
+    expect(clearHandler).toHaveBeenCalledTimes(1);
+  });
+
+  it("refresh 성공 시 clearHandler를 호출하지 않는다", async () => {
+    configureTokenRefreshHandler(vi.fn().mockResolvedValue(true));
+    const clearHandler = vi.fn();
+    configureTokenClearHandler(clearHandler);
+
+    await expect(refreshAccessToken()).resolves.toBe(true);
+
+    expect(clearHandler).not.toHaveBeenCalled();
+  });
+
+  it("동시에 대기 중인 모든 호출이 같은 실패로 끝나고 clearHandler는 1회만 호출된다(재시도 없음)", async () => {
+    let resolveHandler: (value: boolean) => void = () => {};
+    const refreshHandler = vi.fn(
+      () =>
+        new Promise<boolean>((resolve) => {
+          resolveHandler = resolve;
+        }),
+    );
+    configureTokenRefreshHandler(refreshHandler);
+    const clearHandler = vi.fn();
+    configureTokenClearHandler(clearHandler);
+
+    const waiters = [refreshAccessToken(), refreshAccessToken(), refreshAccessToken()];
+    resolveHandler(false);
+    const results = await Promise.all(waiters);
+
+    expect(results).toEqual([false, false, false]);
+    expect(refreshHandler).toHaveBeenCalledTimes(1);
+    expect(clearHandler).toHaveBeenCalledTimes(1);
+  });
+
+  it("createTokenStore()로 만든 실제 스토어는 refresh 실패 시 스스로 전량 폐기된다", async () => {
+    const store = createTokenStore();
+    store.setPair({
+      access_token: "access-1",
+      refresh_token: "refresh-1",
+      token_type: "bearer",
+      expires_in: 900,
+      session_id: "session-1",
+    });
+    expect(store.getAccess()).toBe("access-1");
+
+    configureTokenRefreshHandler(vi.fn().mockResolvedValue(false));
+
+    await expect(refreshAccessToken()).resolves.toBe(false);
+
+    expect(store.getAccess()).toBeNull();
+    expect(store.getRefresh()).toBeNull();
+    expect(store.peekSessionId()).toBeNull();
   });
 });
