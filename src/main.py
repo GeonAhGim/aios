@@ -147,6 +147,7 @@ def create_app() -> FastAPI:
     )
     from src.api.routers.foundation import connections as foundation_connections
     from src.api.routers.foundation import evidence as foundation_evidence
+    from src.api.routers.foundation import ledger_admin as foundation_ledger_admin
     from src.api.routers.foundation import mandates as foundation_mandates
     from src.api.routers.foundation import paper_control as foundation_paper_control
     from src.api.routers.foundation import performance as foundation_performance
@@ -168,6 +169,7 @@ def create_app() -> FastAPI:
     app.include_router(foundation_trust.router)
     app.include_router(foundation_mandates.router)
     app.include_router(foundation_evidence.router)
+    app.include_router(foundation_ledger_admin.router)
     app.include_router(foundation_connections.router)
     app.include_router(foundation_validation.router)
     app.include_router(foundation_risk_gate.router)
