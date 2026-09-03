@@ -1,0 +1,63 @@
+# 릴리스 게이트 정의 — PLT-39.
+#
+# 출처: docs/design/codex/103_enterprise_architecture_full_audit_and_remediation_brief_v1.0.md
+# §8 "Release Gate" 표. 각 stage의 `description`은 그 표의 "이동 조건" 열을
+# 그대로 옮긴 것이고, `required_evidence`는 그 조건을 파일 경로 존재 여부로
+# 정적 검사할 수 있게 옮긴 것이다 — 새 승인 정책을 여기서 만들지 않는다.
+#
+# `depends_on`으로 이전 stage를 가리키면 `scripts/check_release_gate.py`가
+# 그 stage의 required_evidence도 함께(누적) 검사한다.
+#
+# 주의(ADR-2026-08-29-E): limited_live/marketplace_commercialization 정의는
+# 판정 로직일 뿐이다 — 이 파일도, check_release_gate.py도 LIVE 런타임을
+# 활성화하는 스위치나 자격증명 접근을 열어주지 않는다.
+
+stages:
+  - name: internal_development
+    description: "P0 위험 등록부 생성, 격리 테스트 환경, 기본 계약 검증"
+    depends_on: []
+    required_evidence:
+      - description: "P0 위험 등록부(레드팀 발견사항 기록부) — P0-01"
+        path: docs/RED_TEAM_FINDINGS.md
+      - description: "격리 테스트 환경(세션별 테스트 DB 격리, PLT-36)"
+        path: tests/support/db.py
+      - description: "기본 계약 검증(zone manifest 정적 검사, PLT-38)"
+        path: scripts/check_zone_manifest.py
+
+  - name: internal_paper
+    description: "P0-01~05 완료, staging red-team campaign 및 reconciliation evidence"
+    depends_on: [internal_development]
+    required_evidence:
+      - description: "P0-01 완료 조건: risk_id/severity/owner/evidence URI 등을 갖춘 구조화 위험 등록부(verified-closed 또는 accepted-risk 상태)"
+        path: docs/risk_register.md
+      - description: "P0-02~04 staging red-team campaign 종료 보고서"
+        path: docs/campaigns/staging_red_team_campaign_report.md
+      - description: "P0-04 reconciliation evidence(정산 최종성 재현 기록)"
+        path: docs/evidence/reconciliation_finality.md
+
+  - name: user_facing_paper
+    description: "RTC-01~04 및 RTC-06 통과, 고객보호/지원/incident 운영 승인"
+    depends_on: [internal_paper]
+    required_evidence:
+      - description: "RTC-01~04, RTC-06 통과 증거"
+        path: docs/evidence/rtc_01_04_06_passed.md
+      - description: "고객보호/지원/incident 운영 승인 기록"
+        path: docs/evidence/customer_protection_ops_approval.md
+
+  - name: limited_live
+    description: "Paper 운영 증거, legal/compliance/provider 승인, LIVE 물리 격리와 independent security evidence"
+    depends_on: [user_facing_paper]
+    required_evidence:
+      - description: "Paper 운영 증거"
+        path: docs/evidence/paper_operations_evidence.md
+      - description: "legal/compliance/provider 승인"
+        path: docs/evidence/legal_compliance_provider_approval.md
+      - description: "LIVE 물리 격리 independent security evidence"
+        path: docs/evidence/live_isolation_independent_security_review.md
+
+  - name: marketplace_commercialization
+    description: "RTC-05~10, 성과·적합성·판매자·분쟁·법적 책임 게이트 전부 통과"
+    depends_on: [limited_live]
+    required_evidence:
+      - description: "RTC-05~10 전부 통과 증거"
+        path: docs/evidence/rtc_05_10_passed.md

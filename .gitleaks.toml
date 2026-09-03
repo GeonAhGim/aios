@@ -7,11 +7,35 @@ title = "AIOS gitleaks config"
 [extend]
 useDefault = true
 
+# PLT-39(2026-09-03): 기본 규칙셋은 일반 API key/hex 패턴만 잡는다. AIOS
+# 고유 자격증명 형식(64자 hex 대칭키, 거래소 key:secret 환경변수)은 별도
+# 규칙으로 명시해야 실수 커밋을 잡는다. 근거: src/core/security/key_ring.py
+# (`CREDENTIAL_ENCRYPTION_KEYS_{PAPER,LIVE}` = `kid:hex64` 콤마 목록,
+# 32바이트=hex 64자 강제)와 .env.example의 거래소 자격증명 변수명.
+[[rules]]
+id = "aios-credential-encryption-keys"
+description = "AIOS CREDENTIAL_ENCRYPTION_KEYS_{PAPER,LIVE} — kid:64자리 hex AES-256 키"
+regex = '''CREDENTIAL_ENCRYPTION_KEYS_(PAPER|LIVE)\s*=\s*[A-Za-z0-9_-]+:[0-9a-fA-F]{64}'''
+tags = ["credential", "aios"]
+
+[[rules]]
+id = "aios-exchange-credentials"
+description = "AIOS 거래소 API key/secret 환경변수(BITGET/KIS/NH)"
+regex = '''(BITGET_API|KIS_APP|NH_APP)_(KEY|SECRET)\s*=\s*[A-Za-z0-9+/=_.-]{16,}'''
+tags = ["credential", "exchange", "aios"]
+
 [allowlist]
-description = "알려진 오탐 — 실제 자격증명이 아닌 테스트 픽스처"
+description = "알려진 오탐 — 실제 자격증명이 아닌 테스트 픽스처·참조 문자열·빈 값"
 paths = [
   # AES 라운드트립 자체의 정확성만 검증하는 테스트라 key/iv가 알파벳
   # 나열 placeholder다("abcdefghijklmnop1234567890ABCDEF") — 실제
   # KIS 서버와 통신하지 않는다(파일 docstring 참조).
   '''tests/unit/exchanges/test_kis_ws_messages\.py''',
+]
+regexes = [
+  # src/core/logging/redaction.py의 secret 참조 문자열 — 실제 비밀은
+  # KeyRing/vault 뒤에 있고 로그·설정에는 이 참조만 남는다.
+  '''secref://[A-Za-z0-9_./-]+''',
+  # .env.example은 변수명만 나열하고 값은 비워 둔다(실제 키 없음).
+  '''(CREDENTIAL_ENCRYPTION_KEY|CREDENTIAL_ENCRYPTION_KEYS_(PAPER|LIVE)|BITGET_API_(KEY|SECRET)|KIS_APP_(KEY|SECRET)|NH_APP_(KEY|SECRET))\s*=\s*(#.*)?$''',
 ]
