@@ -4,9 +4,9 @@
 // 막을 수 있으면 왕복·과금·재시도 낭비를 줄인다).
 //
 // 범위 제한(task-427 decision): 키 생성·재사용·만료는 task-151
-// createIdempotencyKeyManager, 자동 부착은 task-216 postIdempotent, 409 사후
-// 처리는 task-383 소관 — 이 모듈은 순수 선검증 계층만 제공하고 http.ts는
-// 건드리지 않는다. 배선은 후속 리프에서 한다.
+// createIdempotencyKeyManager, 409 사후 처리는 task-383 소관 — 이 모듈은
+// 순수 선검증 계층만 제공한다. 공통 경로 배선(task-1024)은
+// httpIdempotent.ts의 postIdempotent/postEnvelopeIdempotent에 있다.
 
 import { canonicalJson, sha256Hex } from "@aios/shared-types";
 

@@ -1,6 +1,5 @@
 import { resolvePath, type ApiRouteName } from "../apiPaths";
 import type { AnyConstructor } from "../http";
-import { checkDigest, createIdempotencyDigestStore, type IdempotencyDigestStore } from "../idempotencyDigest";
 
 // spec §9 PLT-15 / §3.7 적용 대상: `POST /v1/foundation/paper-control/*`(5개)와
 // `POST /v1/foundation/trust/consents`. 실제 마운트 경로는 문서상 라벨
@@ -21,27 +20,6 @@ const IDEMPOTENCY_KEY_PATTERN = /^[A-Za-z0-9_-]{16,128}$/;
 function requireIdempotencyKey(key: string): void {
   if (!IDEMPOTENCY_KEY_PATTERN.test(key)) {
     throw new Error("Idempotency-Key는 16~128자의 [A-Za-z0-9_-] 문자열이어야 합니다.");
-  }
-}
-
-// task-427 checkDigest 재사용 — 같은 키로 다른 body를 보내는 호출을 서버
-// 왕복 전에 막는다. 라우트별로 store를 분리해, 같은 UUID가 서로 다른
-// 라우트(예: :start와 :pause)에 우연히 재사용돼도 서버 스코프
-// (`{route}:{tenant_id}:{subject_id}:{header}`)와 동일하게 별개로 취급한다.
-const paperDeploymentDigests = createIdempotencyDigestStore();
-const trustConsentDigests = createIdempotencyDigestStore();
-
-async function guardIdempotentBody(
-  store: IdempotencyDigestStore,
-  routeLabel: string,
-  idempotencyKey: string,
-  body: unknown,
-): Promise<void> {
-  const result = await checkDigest(`${routeLabel}:${idempotencyKey}`, body, store);
-  if (result === "mismatch") {
-    throw new Error(
-      `Idempotency-Key(${idempotencyKey})가 ${routeLabel}에서 이전과 다른 요청 본문으로 재사용되었습니다.`,
-    );
   }
 }
 
@@ -116,7 +94,6 @@ export function withFoundation<TBase extends AnyConstructor>(Base: TBase) {
     ): Promise<PaperDeploymentView> {
       requireIdempotencyKey(idempotencyKey);
       const outgoing = { ...body, idempotencyKey };
-      await guardIdempotentBody(paperDeploymentDigests, "request", idempotencyKey, outgoing);
       return this.postIdempotent(resolvePath("foundation.paperDeployments.request"), outgoing, idempotencyKey);
     }
 
@@ -145,7 +122,6 @@ export function withFoundation<TBase extends AnyConstructor>(Base: TBase) {
       // DeploymentCommandRequest(body)는 idempotency_key 단일 필드뿐이다 —
       // 헤더 값과 alias 관계이므로 body 자체가 곧 alias다.
       const outgoing = { idempotencyKey };
-      await guardIdempotentBody(paperDeploymentDigests, command, idempotencyKey, outgoing);
       const path = resolvePath(PAPER_DEPLOYMENT_COMMAND_ROUTES[command]).replace(":deploymentId", deploymentId);
       return this.postIdempotent(path, outgoing, idempotencyKey);
     }
@@ -155,7 +131,6 @@ export function withFoundation<TBase extends AnyConstructor>(Base: TBase) {
     // 있는 paper-control 5개에만 적용).
     async acceptTrustConsent(body: AcceptTrustConsentBody, idempotencyKey: string): Promise<ConsentDecision> {
       requireIdempotencyKey(idempotencyKey);
-      await guardIdempotentBody(trustConsentDigests, "accept", idempotencyKey, body);
       return this.postIdempotent(resolvePath("foundation.trustConsents.accept"), body, idempotencyKey);
     }
   };
