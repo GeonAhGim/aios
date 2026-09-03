@@ -12,6 +12,7 @@ export * from "./admin";
 export * from "./wallet";
 export * from "./alert";
 export * from "./apiError";
+export * from "./errorRouting";
 export * from "./fieldErrors";
 export * from "./reasonCodes";
 export * from "./retryable";
