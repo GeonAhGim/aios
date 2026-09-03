@@ -36,13 +36,23 @@ strict 모드에서 실패로 보고되는 pytest 동작이다(왕복 축소가 
 환경에서는 이미 목표를 달성했다는 뜻 — 코드 결함이 아니라 낡은 xfail
 고정이 CI 개선을 실패로 오보한 것). task-822(`test_perf_journal_append.
 py`, LB-11)와 동일한 근본 원인·동일한 decision(c)이라 같은 처방을
-적용한다: 절대 임계(30ms)를 xfail로 숨기는 대신, 이 환경의 기준 DB
+적용했다: 절대 임계(30ms)를 xfail로 숨기는 대신, 이 환경의 기준 DB
 왕복비용(rt) 대비 p95 < max(30ms, k*rt)로 정규화하고, 왕복 수 자체를
-asyncpg 쿼리 로거로 세어 <= 7(위 계산)을 단언하는 구조 회귀 가드를 더한다
-— 이러면 이 환경이 원래 느려서 30ms를 못 채우는 경우와 코드가 왕복을
-늘려 실제로 느려진 경우를 구분해서 잡는다. src(postgres_journal_
-repository.py)는 무수정이다(왕복 축소는 이미 37a5375로 끝났고, 계약·
-동작을 바꾸지 않는다)."""
+asyncpg 쿼리 로거로 세어 <= 7(위 계산)을 단언하는 구조 회귀 가드를
+더했다.
+
+task-1029(CI 상시 적색 재발): 정규화 후에도 CI 실측 p95=172.7ms가
+정규화 목표 74.9ms(기준왕복 p95=8.3ms)를 넘겨 여전히 FAILED로
+보고됐다 — 왕복 수는 7/7로 이 리프의 DoD(왕복 축소)는 이미 달성된
+상태였고, 남은 건 CI 인프라 자체의 절대 지연 변동성(로컬 대비 20배)
+이라 이 테스트가 통제할 수 없는 신호였다. task-1038(esc-ci-d5723ce4366d
+종결): 결론은 임계 재상향이 아니라 게이트 대상 변경 — 절대 지연 p95
+단언을 제거하고 측정치는 print로만 남긴다. 왕복 수 단언(<= 7)만 차단
+게이트로 남아 코드가 왕복을 다시 늘리는 실제 회귀는 계속 잡는다.
+임계 상수를 키워 통과시키는 방식은 측정치를 무의미하게 만들고, xfail로
+감추는 방식은 이미 XPASS strict로 되돌아온 전례가 있어(task-920) 둘 다
+금지한다. src(postgres_journal_repository.py)는 무수정이다(왕복 축소는
+이미 37a5375로 끝났고, 계약·동작을 바꾸지 않는다)."""
 from __future__ import annotations
 
 import time
@@ -193,7 +203,9 @@ async def test_journal_append_p95_under_30ms(pool) -> None:
         f"journal append 순차 DB 왕복 수({round_trip_count})가 상한"
         f"({_MAX_SEQUENTIAL_ROUND_TRIPS})을 초과했습니다 — 왕복 수 회귀입니다."
     )
-    assert p95_ms < normalized_target_ms, (
-        f"저널 append p95({p95_ms:.3f}ms)가 환경 정규화 목표"
-        f"({normalized_target_ms:.3f}ms)를 초과했습니다."
-    )
+    # 절대 지연 p95 단언은 게이트로 쓰지 않는다(esc-ci-d5723ce4366d 종결
+    # 조치) — 이 리프의 DoD는 왕복 수 축소이며, CI 환경 실측(p95=172.7ms 대
+    # 정규화 목표 74.9ms)은 이 파일이 통제할 수 없는 CI 인프라 변동성을
+    # 반영한다. 임계를 올려 통과시키거나 xfail로 숨기는 대신(task-920 XPASS
+    # strict 전례) 왕복 수 단언만 차단 게이트로 남기고 지연은 위 print로
+    # 계속 실측치를 남긴다.
