@@ -32,6 +32,7 @@ from src.core.notifications.gateway import NotificationGateway
 from src.core.observability.loop_health import loop_health
 from src.core.observability.metrics_registry import get_registry
 from src.core.safety.metrics_collector import ApiCallTracker
+from src.core.security.key_ring import KeyRing
 from src.exchanges.common.instrumented_adapter import instrumented_adapter_factory
 from src.exchanges.factory import build_adapter
 from src.foundation.evidence.adapters.postgres_repository import PostgresAuditEventRepository
@@ -95,9 +96,10 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # 레드팀 감사(#02) — CredentialResolver는 5분 TTL 캐싱을 설계했지만
     # 요청마다 새로 만들면 _cache가 매번 비어 시작해 캐시가 작동한 적이
     # 없었다 — pool/event_bus와 동일하게 시작 시 한 번만 만들어 둔다.
-    credential_service = ExchangeCredentialService(
-        pool, encryption_key=secrets.credential_encryption_key.get_secret_value()
+    credential_key_ring = KeyRing.from_legacy_hex(
+        secrets.credential_encryption_key.get_secret_value()
     )
+    credential_service = ExchangeCredentialService(pool, key_ring=credential_key_ring)
     # PM 배정 ⑤ 2단계 — CircuitBreakerMetrics가 소비할 어댑터 호출 성공/실패를
     # InstrumentedAdapter에서만 계측한다. background_loops의 safety 루프와 공유.
     api_tracker = ApiCallTracker()

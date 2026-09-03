@@ -11,6 +11,11 @@ TTL로 캐싱한다(FD-12.2 원문 Draft). TTL은 time.monotonic() 기반 실제
 완료조건(FD-12.2): 서로 다른 두 사용자가 동시에 각자의 키로 조회해도
 섞이지 않아야 한다 — 캐시 키를 (user_id, exchange) 튜플로 둬 사용자별로
 완전히 분리한다.
+
+PLT-33: `ExchangeCredentialService.get_decrypted`가 항상 `scope="PAPER"`
+행만 조회하도록 이관됐으므로(§10-8) 이 리졸버는 변경 없이 계속 PAPER
+자격증명만 해석한다 — LIVE 행이 DB에 있어도 이 경로로는 절대 노출되지
+않는다(`tests/integration/exchange/test_secret_scope_isolation.py`).
 """
 from __future__ import annotations
 

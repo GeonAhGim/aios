@@ -12,6 +12,7 @@ import asyncpg
 import pytest
 from dotenv import dotenv_values
 
+from src.core.security.key_ring import KeyRing
 from src.services.credential_resolver import CredentialNotFoundError, CredentialResolver
 from src.services.exchange_credential_service import ExchangeCredentialService
 from tests.integration.conftest import create_test_user
@@ -62,7 +63,8 @@ def factory():
 
 @pytest.fixture
 def credential_service(pool, factory):
-    return ExchangeCredentialService(pool, encryption_key=ENCRYPTION_KEY, adapter_factory=factory)
+    key_ring = KeyRing.from_legacy_hex(ENCRYPTION_KEY)
+    return ExchangeCredentialService(pool, key_ring=key_ring, adapter_factory=factory)
 
 
 @pytest.fixture

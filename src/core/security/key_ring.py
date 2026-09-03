@@ -79,6 +79,15 @@ class KeyRing:
 
         return cls(keys, active_kid)
 
+    @classmethod
+    def from_legacy_hex(cls, hex_key: str) -> KeyRing:
+        """단일 레거시 키(`CREDENTIAL_ENCRYPTION_KEY`)만으로 구성한다(kid="legacy").
+
+        회전 인프라(`CREDENTIAL_ENCRYPTION_KEYS_*`)가 아직 `.env.example`에
+        배선되지 않은 소비자(PLT-33)가 기존 `SecretBundle.credential_encryption_key`
+        하나로도 KeyRing 계약(encrypt/decrypt)을 쓸 수 있게 한다."""
+        return cls({_LEGACY_KID: _decode_key(hex_key, _LEGACY_KID)}, active_kid=_LEGACY_KID)
+
 
 def _reject_live_keys_in_paper_runtime(source: Mapping[str, str]) -> None:
     """fail-closed: AIOS_RUNTIME_MODE가 정확히 'LIVE'(대소문자 무관)로 확인될 때만

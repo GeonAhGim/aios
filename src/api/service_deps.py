@@ -12,6 +12,7 @@ from fastapi import Depends, Request
 from src.core.event_bus.bus import EventBus
 from src.core.loader.risk_policy_loader import RiskPolicy, load_risk_policy
 from src.core.safety.circuit_breaker import CircuitBreakerService
+from src.core.security.key_ring import KeyRing
 from src.services.account_deletion_service import AccountDeletionService
 from src.services.alert_service import AlertService
 from src.services.approval_settings_service import ApprovalSettingsService
@@ -65,9 +66,8 @@ def get_exchange_credential_service(
     request: Request, pool: asyncpg.Pool = Depends(get_pool)
 ) -> ExchangeCredentialService:
     secrets = request.app.state.secrets
-    return ExchangeCredentialService(
-        pool, encryption_key=secrets.credential_encryption_key.get_secret_value()
-    )
+    key_ring = KeyRing.from_legacy_hex(secrets.credential_encryption_key.get_secret_value())
+    return ExchangeCredentialService(pool, key_ring=key_ring)
 
 
 def get_wallet_service(pool: asyncpg.Pool = Depends(get_pool)) -> WalletService:

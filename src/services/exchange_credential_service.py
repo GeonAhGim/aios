@@ -1,11 +1,20 @@
 """12.2/12.3 — 거래소 자격증명 등록/해지 (ExchangeCredentialService).
 
-Spec: 기능설계문서_v1.20.md#FD-13.3(개발명세서), 13_multi_tenancy_auth_v1.4.md#§13.3
+Spec: 기능설계문서_v1.20.md#FD-13.3(개발명세서), 13_multi_tenancy_auth_v1.4.md#§13.3,
+docs/specs/L4_platform_observability_tenancy_api_v1.0.md#§9 PLT-33(+ §10-8)
 
 등록 직후 FD-3.2(잔고조회) 1회 테스트 호출로 키 유효성을 검증하고, 유효
-하지 않으면 저장하지 않는다. api_key/api_secret/extra는 각각 AES-256-GCM
-암호화(src/core/security/encryption.py, 07번 §7.3 키 재사용) 후 BYTEA로
-저장 — 평문은 검증 호출이 끝나는 즉시 폐기된다.
+하지 않으면 저장하지 않는다. api_key/api_secret/extra는 각각
+`src/core/security/encryption.py`의 kid 버전 포맷(PLT-31, `KeyRing` 재사용)
+으로 암호화 후 BYTEA로 저장 — 평문은 검증 호출이 끝나는 즉시 폐기된다.
+접두 없는 기존 암호문(`legacy_encrypt`로 생성)도 `decrypt()`가 kid="legacy"
+로 그대로 복호한다(무중단 전환).
+
+PLT-33(§10-8): `exchange_credentials` UNIQUE가 (user_id, exchange, scope)로
+바뀌어 스코프별로 자격증명을 따로 가질 수 있지만, 프론트가 아직 scope를
+보내지 않으므로(ADR-2026-08-29-E) 이 서비스는 항상 `scope="PAPER"`만
+읽고 쓴다 — LIVE 행이 존재해도 이 서비스로는 절대 조회/복호되지 않는다
+(`tests/integration/exchange/test_secret_scope_isolation.py`).
 
 출금 권한 조회: 02번 문서 원칙(이 Adapter의 어떤 메서드도 출금 기능을
 포함하지 않음)에 따라 BitgetAdapter/KISAdapter 둘 다 권한범위 조회
@@ -24,9 +33,14 @@ import asyncpg
 from pydantic import BaseModel
 
 from src.core.logging.audit_log import record_audit_log
-from src.core.security.encryption import legacy_decrypt, legacy_encrypt
+from src.core.security.encryption import decrypt, encrypt
+from src.core.security.key_ring import KeyRing, SecretScope
 from src.exchanges.common.adapter import ExchangeAdapter
 from src.exchanges.factory import UnsupportedExchangeError, build_adapter
+
+# PLT-33 decision — 프론트가 scope를 아직 모르는 동안은 PAPER 고정
+# (ADR-2026-08-29-E). LIVE는 이 서비스가 열지 않는다.
+_SCOPE: SecretScope = "PAPER"
 
 
 class AdapterFactory(Protocol):
@@ -57,6 +71,17 @@ class ExchangeCredentialNotFoundError(ExchangeCredentialError):
     같은 클래스면 상태코드를 하나로만 고를 수 있다)."""
 
 
+class ExchangeCredentialDecryptionError(ExchangeCredentialError):
+    """저장된 암호문을 복호하지 못함(예: 회전으로 kid가 KeyRing에서 사라짐).
+
+    task-904 redaction 원칙 — 원인 예외(`cryptography`/`KeyRing`)의 문자열을
+    그대로 실으면 우연히 kid 이상의 정보가 새는 경로를 열어둘 수 있으므로,
+    메시지는 항상 이 고정 문구만 담고 원인은 `__cause__`로만 연결한다."""
+
+    def __init__(self) -> None:
+        super().__init__("저장된 자격증명을 복호할 수 없습니다.")
+
+
 class CredentialSummary(BaseModel):
     id: int
     exchange: str
@@ -70,12 +95,12 @@ class ExchangeCredentialService:
         self,
         pool: asyncpg.Pool,
         *,
-        encryption_key: str,
+        key_ring: KeyRing,
         adapter_factory: AdapterFactory = build_adapter,
         demo_mode: bool = True,
     ) -> None:
         self._pool = pool
-        self._encryption_key = encryption_key
+        self._key_ring = key_ring
         self._adapter_factory = adapter_factory
         self._demo_mode = demo_mode
 
@@ -105,20 +130,20 @@ class ExchangeCredentialService:
             if aclose is not None:
                 await aclose()
 
-        encrypted_key = legacy_encrypt(api_key, self._encryption_key).encode("ascii")
-        encrypted_secret = legacy_encrypt(api_secret, self._encryption_key).encode("ascii")
-        encrypted_extra = legacy_encrypt(
-            json.dumps(extra or {}), self._encryption_key
-        ).encode("ascii")
+        encrypted_key = encrypt(api_key, self._key_ring).encode("ascii")
+        encrypted_secret = encrypt(api_secret, self._key_ring).encode("ascii")
+        encrypted_extra = encrypt(json.dumps(extra or {}), self._key_ring).encode("ascii")
 
         async with self._pool.acquire() as conn:
             row = await conn.fetchrow(
                 """
                 INSERT INTO exchange_credentials
-                    (user_id, exchange, api_key_encrypted, api_secret_encrypted, extra_encrypted)
-                VALUES ($1, $2, $3, $4, $5)
-                ON CONFLICT (user_id, exchange) DO UPDATE
-                    SET api_key_encrypted = EXCLUDED.api_key_encrypted,
+                    (user_id, exchange, scope, key_version,
+                     api_key_encrypted, api_secret_encrypted, extra_encrypted)
+                VALUES ($1, $2, $3, $4, $5, $6, $7)
+                ON CONFLICT (user_id, exchange, scope) DO UPDATE
+                    SET key_version = EXCLUDED.key_version,
+                        api_key_encrypted = EXCLUDED.api_key_encrypted,
                         api_secret_encrypted = EXCLUDED.api_secret_encrypted,
                         extra_encrypted = EXCLUDED.extra_encrypted,
                         is_active = true,
@@ -128,6 +153,8 @@ class ExchangeCredentialService:
                 """,
                 user_id,
                 exchange,
+                _SCOPE,
+                self._key_ring.active_kid,
                 encrypted_key,
                 encrypted_secret,
                 encrypted_extra,
@@ -136,7 +163,7 @@ class ExchangeCredentialService:
             # 거래소에 등록했는지와 결과만.
             await record_audit_log(
                 conn, actor_agent=str(user_id), action_type="exchange_credential.registered",
-                user_id=user_id, decision_data={"exchange": exchange},
+                user_id=user_id, decision_data={"exchange": exchange, "scope": _SCOPE},
             )
         return CredentialSummary(
             id=row["id"],
@@ -151,9 +178,10 @@ class ExchangeCredentialService:
         async with self._pool.acquire() as conn:
             result = await conn.execute(
                 "UPDATE exchange_credentials SET is_active = false, revoked_at = now() "
-                "WHERE user_id = $1 AND exchange = $2 AND is_active = true",
+                "WHERE user_id = $1 AND exchange = $2 AND scope = $3 AND is_active = true",
                 user_id,
                 exchange,
+                _SCOPE,
             )
             if result == "UPDATE 0":
                 raise ExchangeCredentialNotFoundError(
@@ -161,15 +189,16 @@ class ExchangeCredentialService:
                 )
             await record_audit_log(
                 conn, actor_agent=str(user_id), action_type="exchange_credential.revoked",
-                user_id=user_id, decision_data={"exchange": exchange},
+                user_id=user_id, decision_data={"exchange": exchange, "scope": _SCOPE},
             )
 
     async def list_for_user(self, user_id: UUID) -> list[CredentialSummary]:
         async with self._pool.acquire() as conn:
             rows = await conn.fetch(
                 "SELECT id, exchange, is_active, linked_at FROM exchange_credentials "
-                "WHERE user_id = $1 ORDER BY linked_at DESC",
+                "WHERE user_id = $1 AND scope = $2 ORDER BY linked_at DESC",
                 user_id,
+                _SCOPE,
             )
         return [
             CredentialSummary(
@@ -190,21 +219,23 @@ class ExchangeCredentialService:
             row = await conn.fetchrow(
                 "SELECT api_key_encrypted, api_secret_encrypted, extra_encrypted "
                 "FROM exchange_credentials "
-                "WHERE user_id = $1 AND exchange = $2 AND is_active = true",
+                "WHERE user_id = $1 AND exchange = $2 AND scope = $3 AND is_active = true",
                 user_id,
                 exchange,
+                _SCOPE,
             )
         if row is None:
             return None
 
-        api_key = legacy_decrypt(row["api_key_encrypted"].decode("ascii"), self._encryption_key)
-        api_secret = legacy_decrypt(
-            row["api_secret_encrypted"].decode("ascii"), self._encryption_key
-        )
-        extra_raw = row["extra_encrypted"]
-        extra = (
-            json.loads(legacy_decrypt(extra_raw.decode("ascii"), self._encryption_key))
-            if extra_raw is not None
-            else {}
-        )
+        try:
+            api_key = decrypt(row["api_key_encrypted"].decode("ascii"), self._key_ring)
+            api_secret = decrypt(row["api_secret_encrypted"].decode("ascii"), self._key_ring)
+            extra_raw = row["extra_encrypted"]
+            extra = (
+                json.loads(decrypt(extra_raw.decode("ascii"), self._key_ring))
+                if extra_raw is not None
+                else {}
+            )
+        except Exception as exc:
+            raise ExchangeCredentialDecryptionError from exc
         return api_key, api_secret, extra

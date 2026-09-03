@@ -16,6 +16,7 @@ from httpx import ASGITransport, AsyncClient
 
 from src.api.deps import get_pool
 from src.api.service_deps import get_credential_resolver, get_exchange_credential_service
+from src.core.security.key_ring import KeyRing
 from src.exchanges.common.types import ExchangeCapability
 from src.main import app
 from src.services.credential_resolver import CredentialResolver
@@ -23,6 +24,7 @@ from src.services.exchange_credential_service import ExchangeCredentialService
 
 STRONG_PASSWORD = "Str0ng!Passw0rd"
 ENCRYPTION_KEY = "44" * 32
+KEY_RING = KeyRing.from_legacy_hex(ENCRYPTION_KEY)
 
 
 def _asyncpg_dsn() -> str:
@@ -76,15 +78,11 @@ def _fake_factory(exchange, api_key, api_secret, extra, *, demo_mode=True):
 
 
 async def _override_credential_service(pool=Depends(get_pool)):
-    return ExchangeCredentialService(
-        pool, encryption_key=ENCRYPTION_KEY, adapter_factory=_fake_factory
-    )
+    return ExchangeCredentialService(pool, key_ring=KEY_RING, adapter_factory=_fake_factory)
 
 
 async def _override_resolver(pool=Depends(get_pool)):
-    service = ExchangeCredentialService(
-        pool, encryption_key=ENCRYPTION_KEY, adapter_factory=_fake_factory
-    )
+    service = ExchangeCredentialService(pool, key_ring=KEY_RING, adapter_factory=_fake_factory)
     return CredentialResolver(service, adapter_factory=_fake_factory)
 
 

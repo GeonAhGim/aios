@@ -10,6 +10,7 @@ import asyncpg
 import pytest
 from dotenv import dotenv_values
 
+from src.core.security.key_ring import KeyRing
 from src.services.exchange_credential_service import (
     ExchangeCredentialError,
     ExchangeCredentialService,
@@ -64,8 +65,9 @@ def created_adapters():
 @pytest.fixture
 def service(pool, created_adapters):
     valid = {("good-key", "good-secret")}
+    key_ring = KeyRing.from_legacy_hex(ENCRYPTION_KEY)
     return ExchangeCredentialService(
-        pool, encryption_key=ENCRYPTION_KEY, adapter_factory=_factory(valid, created_adapters)
+        pool, key_ring=key_ring, adapter_factory=_factory(valid, created_adapters)
     )
 
 
@@ -176,3 +178,26 @@ async def test_get_decrypted_returns_none_for_revoked_credential(service, pool):
     result = await service.get_decrypted(user_id, "bitget")
 
     assert result is None
+
+
+async def test_get_decrypted_reads_legacy_kid_rows(service, pool):
+    """PLT-33 §9 DoD — 마이그레이션 이전에 `legacy_encrypt`(접두 없는 포맷)로
+    쓰인 행이 새 `key_ring=`/`scope` 배선에서도 그대로 복호돼야 무중단 전환이다."""
+    from src.core.security.encryption import legacy_encrypt
+
+    user_id = await create_test_user(pool)
+    async with pool.acquire() as conn:
+        await conn.execute(
+            "INSERT INTO exchange_credentials "
+            "(user_id, exchange, scope, key_version, "
+            " api_key_encrypted, api_secret_encrypted, extra_encrypted) "
+            "VALUES ($1, 'bitget', 'PAPER', 'legacy', $2, $3, $4)",
+            user_id,
+            legacy_encrypt("good-key", ENCRYPTION_KEY).encode("ascii"),
+            legacy_encrypt("good-secret", ENCRYPTION_KEY).encode("ascii"),
+            legacy_encrypt("{}", ENCRYPTION_KEY).encode("ascii"),
+        )
+
+    result = await service.get_decrypted(user_id, "bitget")
+
+    assert result == ("good-key", "good-secret", {})
