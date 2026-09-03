@@ -16,6 +16,7 @@ import { useState } from "react";
 import { AppShell } from "../../components/layout/AppShell";
 import { DataFreshness } from "../../components/DataFreshness";
 import { DuplicateSubmitError, useIdempotentSubmit } from "../../hooks/useIdempotentSubmit";
+import { PortfolioPositionsSection } from "./PortfolioPositionsSection";
 
 export function PortfolioPage() {
   const { data: portfolio, isLoading, dataUpdatedAt } = usePortfolio();
@@ -128,6 +129,10 @@ export function PortfolioPage() {
                 <EmptyState>배분된 실행이 없습니다.</EmptyState>
               )}
             </Card>
+
+            {/* spec §3.2 (B) 포지션/PnL 분해/NAV — 서버 라우트가 아직 없어(task-628
+                decision) 실 데이터 연결 전까지 빈 상태로 배선만 해둔다. */}
+            <PortfolioPositionsSection positions={[]} />
           </>
         ) : null}
       </div>
