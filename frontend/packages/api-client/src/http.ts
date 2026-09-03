@@ -12,6 +12,10 @@ export class ApiError extends Error {
   traceId?: string;
   errorCode?: string;
   retryAfterSec?: number;
+  // spec §3.3: POLICY_*/RISK_* 봉투의 error.details(reason_codes 등) 원본. task-388 QA가
+  // 발견한 결함 — 이 필드가 없어서 shared-types/reasonCodes.ts의 extractReasonCodes가
+  // 실제 ApiError 인스턴스에서 항상 빈 배열을 반환했다(DenialReasons가 절대 렌더되지 않음).
+  details?: Record<string, unknown>;
 
   constructor(
     statusCode: number,
@@ -19,12 +23,21 @@ export class ApiError extends Error {
     traceId?: string,
     errorCode?: string,
     retryAfterSec?: number,
+    details?: Record<string, unknown>,
   ) {
     super(message);
     this.statusCode = statusCode;
     this.traceId = traceId;
     this.errorCode = errorCode;
     this.retryAfterSec = retryAfterSec;
+    this.details = details;
+  }
+
+  // reasonCodes.ts(extractReasonCodes)는 순환 의존을 피하려고 ApiError 클래스가 아닌
+  // 서버 봉투 그대로의 snake_case(error_code)를 덕타이핑으로 검사한다 — 그 계약을
+  // 바꾸지 않고, 여기서 기존 camelCase errorCode의 별칭만 얹어 접근 가능하게 한다.
+  get error_code(): string | undefined {
+    return this.errorCode;
   }
 }
 
@@ -122,8 +135,9 @@ function notifyUnauthorized(errorCode: string): void {
 // 429(RATE_LIMIT_EXCEEDED)는 미들웨어가 봉투 미적용 라우트에도 §2.3 봉투로
 // 응답하므로(spec §9 PLT-25), 봉투/레거시 두 형태를 여기서 함께 처리한다.
 // 순수 함수 — 401 처리(재로그인 유도 vs refresh 후 재시도)는 호출부인
-// handleAuthFailure가 비동기로 담당한다(task-386).
-function buildApiError(
+// handleAuthFailure가 비동기로 담당한다(task-386). export하는 이유: 호출부(테스트)가
+// mock 객체가 아니라 이 함수로 만든 진짜 ApiError 인스턴스로 배선을 검증할 수 있게 한다.
+export function buildApiError(
   status: number,
   body: unknown,
   traceId: string | undefined,
@@ -138,6 +152,7 @@ function buildApiError(
     resolveTraceId(envelopeError?.trace_id, traceId),
     envelopeError?.error_code,
     retryAfterSec,
+    envelopeError?.details,
   );
 }
 

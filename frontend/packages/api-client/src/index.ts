@@ -1,4 +1,4 @@
-export { AiosApiClient, ApiError } from "./client";
+export { AiosApiClient, ApiError, buildApiError } from "./client";
 export { keysToCamel, keysToSnake } from "./caseConvert";
 export { unwrap, EnvelopeFormatError, deriveFreshness } from "./envelope";
 export { configureUnauthorizedHandler, resetUnauthorizedGuard, configureTenantHeadersProvider } from "./http";

@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { isValidRequestId } from "./requestId";
-import { ApiClientBase, configureTenantHeadersProvider } from "./http";
+import { ApiClientBase, buildApiError, configureTenantHeadersProvider } from "./http";
 
 class TestClient extends ApiClientBase {
   get<T>(path: string, init?: RequestInit): Promise<T> {
@@ -94,5 +94,51 @@ describe("ApiClientBase — 헤더 배선", () => {
     await makeClient().get("/ping");
 
     expect(headersOf(fetchMock).has("X-Tenant-Id")).toBe(false);
+  });
+});
+
+// task-388 QA 결함: ApiError가 봉투 error.details를 노출하지 않아서 DenialReasons가
+// 실제 ApiError 인스턴스로는 절대 렌더되지 않았다. 이 배선을 buildApiError가 만든
+// 진짜 ApiError 인스턴스로 직접 검증한다(mock 객체 아님).
+describe("buildApiError — details/error_code 배선(task-388)", () => {
+  it("봉투 error.details를 ApiError.details로 그대로 노출한다", () => {
+    const err = buildApiError(
+      403,
+      {
+        error_code: "POLICY_LIVE_BLOCKED",
+        message: "실거래 모드에서는 허용되지 않는 작업입니다.",
+        details: { reason_codes: ["POLICY_LIVE_BLOCKED"] },
+        trace_id: "trace-1",
+        retry_after_seconds: null,
+      },
+      undefined,
+      undefined,
+    );
+
+    expect(err.details).toEqual({ reason_codes: ["POLICY_LIVE_BLOCKED"] });
+  });
+
+  it("error_code(snake)로도 errorCode(camel)와 동일한 값에 접근할 수 있다", () => {
+    const err = buildApiError(
+      403,
+      {
+        error_code: "POLICY_LIVE_BLOCKED",
+        message: "m",
+        details: {},
+        trace_id: "t",
+        retry_after_seconds: null,
+      },
+      undefined,
+      undefined,
+    );
+
+    expect(err.error_code).toBe("POLICY_LIVE_BLOCKED");
+    expect(err.errorCode).toBe("POLICY_LIVE_BLOCKED");
+  });
+
+  it("details가 없는 레거시(비봉투) 에러 응답은 details가 undefined다", () => {
+    const err = buildApiError(400, { detail: "bad request" }, undefined, undefined);
+
+    expect(err.details).toBeUndefined();
   });
 });

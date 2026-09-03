@@ -1,4 +1,5 @@
 import "@testing-library/jest-dom/vitest";
+import { buildApiError } from "@aios/api-client";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ForbiddenNotice } from "./ForbiddenNotice";
@@ -28,18 +29,31 @@ describe("ForbiddenNotice", () => {
     expect(screen.queryByRole("button")).not.toBeInTheDocument();
   });
 
-  it("POLICY_*(403): 정책 거부 안내 + DenialReasons 사유 목록을 함께 보여준다", () => {
-    render(
-      <ForbiddenNotice
-        error={{
-          statusCode: 403,
-          errorCode: "POLICY_LIVE_BLOCKED",
-          details: { reason_codes: ["POLICY_LIVE_BLOCKED"] },
-        }}
-      />,
+  it("POLICY_*(403): 정책 거부 안내 + DenialReasons 사유 목록을 함께 보여준다(task-388: 진짜 ApiError 배선)", () => {
+    // mock 객체가 아니라 buildApiError로 만든 실제 ApiError 인스턴스를 넘겨서, http.ts가
+    // 봉투 error.details를 실제로 전달하고 DenialReasons(extractReasonCodes)가 그 details를
+    // 읽어 렌더까지 이어지는지를 검증한다.
+    const error = buildApiError(
+      403,
+      {
+        error_code: "POLICY_LIVE_BLOCKED",
+        message: "실거래 모드에서는 허용되지 않는 작업입니다.",
+        details: { reason_codes: ["POLICY_LIVE_BLOCKED", "RISK_MAX_DRAWDOWN_EXCEEDED"] },
+        trace_id: "trace-1",
+        retry_after_seconds: null,
+      },
+      undefined,
+      undefined,
     );
 
-    expect(screen.getAllByText("실거래 모드에서는 허용되지 않는 작업입니다.").length).toBeGreaterThan(0);
+    render(<ForbiddenNotice error={error} />);
+
+    // 배너 <p>와 DenialReasons <li> 둘 다 같은 문구를 렌더하므로(EXACT_MESSAGES와
+    // REASON_CODE_MESSAGES가 같은 코드에 같은 문장을 매핑) getByText는 쓸 수 없다 —
+    // 목록 안에서 사유별 문구를 각각 단언해 실제로 reason_codes가 파싱됐는지 확인한다.
+    const denialReasonsList = screen.getByRole("list");
+    expect(denialReasonsList).toHaveTextContent("실거래 모드에서는 허용되지 않는 작업입니다.");
+    expect(denialReasonsList).toHaveTextContent("최대 손실 한도를 초과하여 거부되었습니다.");
     expect(screen.queryByRole("button")).not.toBeInTheDocument();
   });
 

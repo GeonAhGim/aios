@@ -31,4 +31,4 @@ export class AiosApiClient extends ComposedApiClient {
   }
 }
 
-export { ApiError } from "./http";
+export { ApiError, buildApiError } from "./http";
