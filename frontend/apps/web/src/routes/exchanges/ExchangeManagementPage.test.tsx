@@ -122,6 +122,46 @@ describe("ExchangeManagementPage 에러 표시", () => {
     );
     expect(screen.queryByText("raw detail")).not.toBeInTheDocument();
   });
+
+  // task-943: classifyBadRequest가 VALIDATION_INVALID_FIELD를 "field"로 분류해
+  // BadRequestNotice가 스스로 null을 렌더한다(task-364) — 지금까지 이 경로는
+  // 완전히 조용했다. 서버가 요청 바디를 snake_case(keysToSnake)로 받으므로
+  // details.fields도 api_key/api_secret처럼 snake_case로 온다.
+  it("VALIDATION_INVALID_FIELD(400): details.fields[]를 해당 입력 옆에 인라인 오류로 보여준다", async () => {
+    mutateAsync.mockRejectedValue(
+      new ApiError(400, "요청 값이 올바르지 않습니다.", undefined, "VALIDATION_INVALID_FIELD", undefined, {
+        fields: ["body.api_key", "body.api_secret"],
+      }),
+    );
+    const { container } = renderPage();
+
+    submitRegisterForm(container);
+
+    await waitFor(() =>
+      expect(screen.getAllByText("요청 값이 올바르지 않습니다.")).toHaveLength(2),
+    );
+  });
+
+  it("필드를 수정하면 clearField로 그 필드 오류만 사라지고 나머지는 유지된다", async () => {
+    mutateAsync.mockRejectedValue(
+      new ApiError(400, "요청 값이 올바르지 않습니다.", undefined, "VALIDATION_INVALID_FIELD", undefined, {
+        fields: ["body.api_key", "body.api_secret"],
+      }),
+    );
+    const { container } = renderPage();
+
+    submitRegisterForm(container);
+    await waitFor(() =>
+      expect(screen.getAllByText("요청 값이 올바르지 않습니다.")).toHaveLength(2),
+    );
+
+    const [apiKey] = passwordInputs(container);
+    fireEvent.change(apiKey, { target: { value: "key-2" } });
+
+    await waitFor(() =>
+      expect(screen.getAllByText("요청 값이 올바르지 않습니다.")).toHaveLength(1),
+    );
+  });
 });
 
 // task-473 §3.6: 클라이언트는 비밀을 저장·복호하지 않으므로 폼 상태는 제출 성공/실패

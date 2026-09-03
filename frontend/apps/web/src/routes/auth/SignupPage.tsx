@@ -7,6 +7,7 @@ import { Link, useNavigate } from "react-router-dom";
 import { BadRequestNotice } from "../../components/BadRequestNotice";
 import { ErrorMessage } from "../../components/ErrorMessage";
 import { ForbiddenNotice } from "../../components/ForbiddenNotice";
+import { useFieldErrors } from "../../hooks/useFieldErrors";
 import { AuthLayout } from "./AuthLayout";
 
 // spec §3.3 에러 taxonomy: 회원가입 실패는 err.message를 직접 노출하지 않고
@@ -14,7 +15,13 @@ import { AuthLayout } from "./AuthLayout";
 // ForbiddenNotice/ErrorMessage 경로로만 보여준다(task-902). 423
 // AUTH_ACCOUNT_LOCKED은 LoginPage(task-387)와 동일하게 deriveLockout으로
 // 잠금 카운트다운을 재사용한다 — 새 분류기는 만들지 않는다.
-function SignupError({ error }: { error: unknown }) {
+//
+// task-943: VALIDATION_INVALID_FIELD는 classifyBadRequest가 "field"로 분류해
+// BadRequestNotice가 자체적으로 null을 렌더한다(task-364 설계) — 그래서 지금까지
+// 이 경로는 배너도 인라인도 없이 완전히 조용했다. fieldErrors를 ErrorMessage에
+// 넘겨 계약(비어있지 않으면 배너 생략)을 지키고, 실제 표시는 아래 입력 옆
+// Field.error로 한다.
+function SignupError({ error, fieldErrors }: { error: unknown; fieldErrors: Record<string, string> }) {
   if (classifyBadRequest(error)) return <BadRequestNotice error={error} />;
   if (classifyForbidden(error)) return <ForbiddenNotice error={error} />;
   const routed = routeApiError(error);
@@ -24,6 +31,7 @@ function SignupError({ error }: { error: unknown }) {
       message={error instanceof Error ? error.message : undefined}
       traceId={error instanceof ApiError ? error.traceId : undefined}
       retryAfterSec={routed.kind === "backoff_retry" ? routed.afterSec : undefined}
+      fieldErrors={fieldErrors}
     />
   );
 }
@@ -33,6 +41,7 @@ export function SignupPage() {
   const [password, setPassword] = useState("");
   const [error, setError] = useState<unknown>(null);
   const [lockoutRemainingSec, setLockoutRemainingSec] = useState(0);
+  const { fieldErrors, setFromError, clearField } = useFieldErrors();
   const signup = useSignup();
   const navigate = useNavigate();
   const locked = lockoutRemainingSec > 0;
@@ -47,11 +56,13 @@ export function SignupPage() {
     e.preventDefault();
     if (locked) return;
     setError(null);
+    setFromError(null);
     try {
       await signup.mutateAsync({ email, password });
       navigate("/onboarding/mfa-setup");
     } catch (err) {
       setError(err instanceof ApiError ? err : new Error("회원가입에 실패했습니다."));
+      setFromError(err);
       setLockoutRemainingSec(deriveLockout(err).retryAfterSec);
     }
   }
@@ -59,7 +70,7 @@ export function SignupPage() {
   return (
     <AuthLayout title="AIOS 회원가입" subtitle="자동매매를 시작하기 위한 첫 단계입니다">
       <form onSubmit={handleSubmit} className="space-y-4">
-        <Field label="이메일" htmlFor="email">
+        <Field label="이메일" htmlFor="email" error={fieldErrors.email}>
           <Input
             id="email"
             type="email"
@@ -67,10 +78,13 @@ export function SignupPage() {
             autoComplete="email"
             value={email}
             disabled={locked}
-            onChange={(e) => setEmail(e.target.value)}
+            onChange={(e) => {
+              setEmail(e.target.value);
+              clearField("email");
+            }}
           />
         </Field>
-        <Field label="비밀번호" htmlFor="password" hint="12자 이상">
+        <Field label="비밀번호" htmlFor="password" hint="12자 이상" error={fieldErrors.password}>
           <Input
             id="password"
             type="password"
@@ -79,10 +93,13 @@ export function SignupPage() {
             autoComplete="new-password"
             value={password}
             disabled={locked}
-            onChange={(e) => setPassword(e.target.value)}
+            onChange={(e) => {
+              setPassword(e.target.value);
+              clearField("password");
+            }}
           />
         </Field>
-        {error !== null && <SignupError error={error} />}
+        {error !== null && <SignupError error={error} fieldErrors={fieldErrors} />}
         {locked && (
           <p role="status" className="text-sm text-fg-muted">
             {lockoutRemainingSec}초 후 다시 시도할 수 있습니다.

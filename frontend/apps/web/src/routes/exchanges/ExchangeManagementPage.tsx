@@ -32,6 +32,7 @@ import { BadRequestNotice } from "../../components/BadRequestNotice";
 import { ErrorMessage } from "../../components/ErrorMessage";
 import { ForbiddenNotice } from "../../components/ForbiddenNotice";
 import { useConflictRetry } from "../../hooks/useConflictRetry";
+import { useFieldErrors } from "../../hooks/useFieldErrors";
 import { exchangeLabel } from "../../lib/exchangeLabels";
 
 const EXCHANGES = ["bitget", "kis"];
@@ -61,7 +62,21 @@ function credentialScope(secretRef: string | undefined) {
 // 때만 고정 한국어 문구(EXACT_MESSAGES)를 쓰므로 비밀 반향 위험이 없다 — "unknown"
 // (미지 코드 또는 코드 없음)만 계속 redactSecret 경로로 보낸다.
 // classifyServerError(task-937)가 재시도 가능(5xx)으로 판정할 때만 onRetry를 넘긴다.
-function RegisterCredentialError({ error, onRetry }: { error: unknown; onRetry: () => void }) {
+//
+// task-943: VALIDATION_INVALID_FIELD는 classifyBadRequest가 "field"로 분류해
+// badRequestKind !== "unknown"에 걸려 BadRequestNotice로 가는데, 그 컴포넌트는
+// field 갈래에서 null을 렌더한다(task-364 설계) — 지금까지 이 경로는 완전히
+// 조용했다. fieldErrors를 ErrorMessage에 넘겨 계약을 지키고, 실제 표시는 아래
+// 입력 옆 Field.error로 한다.
+function RegisterCredentialError({
+  error,
+  onRetry,
+  fieldErrors,
+}: {
+  error: unknown;
+  onRetry: () => void;
+  fieldErrors: Record<string, string>;
+}) {
   if (classifyForbidden(error)) return <ForbiddenNotice error={error} />;
   const badRequestKind = classifyBadRequest(error);
   if (badRequestKind && badRequestKind !== "unknown") return <BadRequestNotice error={error} />;
@@ -74,6 +89,7 @@ function RegisterCredentialError({ error, onRetry }: { error: unknown; onRetry: 
       traceId={error instanceof ApiError ? error.traceId : null}
       retryAfterSec={routed.kind === "backoff_retry" ? routed.afterSec : undefined}
       onRetry={serverError.kind === "retryable" ? onRetry : undefined}
+      fieldErrors={fieldErrors}
     />
   );
 }
@@ -107,6 +123,7 @@ export function ExchangeManagementPage() {
   const [revokeError, setRevokeError] = useState<unknown>(null);
   const [selectedExchange, setSelectedExchange] = useState<string | null>(null);
   const { data: balances } = useExchangeBalance(selectedExchange);
+  const { fieldErrors, setFromError, clearField } = useFieldErrors();
 
   // §3.3 409 STATE_CONCURRENCY_CONFLICT → useConflictRetry(task-937)가 refetch 후 1회
   // 재시도한다. 해지 대상은 행마다 달라 ref로 넘긴다(mutate는 인자를 받지 않는다).
@@ -143,6 +160,7 @@ export function ExchangeManagementPage() {
 
   async function submitRegistration() {
     setError(null);
+    setFromError(null);
     try {
       await registerWithRetry();
       setApiKey("");
@@ -152,6 +170,7 @@ export function ExchangeManagementPage() {
       setApiSecret("");
       setApiPassphrase("");
       setError(err instanceof ApiError ? err : new Error("등록에 실패했습니다."));
+      setFromError(err);
     }
   }
 
@@ -251,8 +270,14 @@ export function ExchangeManagementPage() {
         <Card className="max-w-lg">
           <CardTitle>새 거래소 연동</CardTitle>
           <form onSubmit={handleSubmit} className="space-y-3">
-            <Field label="거래소">
-              <Select value={exchange} onChange={(e) => setExchange(e.target.value)}>
+            <Field label="거래소" error={fieldErrors.exchange}>
+              <Select
+                value={exchange}
+                onChange={(e) => {
+                  setExchange(e.target.value);
+                  clearField("exchange");
+                }}
+              >
                 {EXCHANGES.map((ex) => (
                   <option key={ex} value={ex}>
                     {exchangeLabel(ex)}
@@ -260,34 +285,47 @@ export function ExchangeManagementPage() {
                 ))}
               </Select>
             </Field>
-            <Field label="API Key">
+            <Field label="API Key" error={fieldErrors.api_key}>
               <Input
                 type="password"
                 required
                 value={apiKey}
-                onChange={(e) => setApiKey(e.target.value)}
+                onChange={(e) => {
+                  setApiKey(e.target.value);
+                  clearField("api_key");
+                }}
               />
             </Field>
-            <Field label="API Secret">
+            <Field label="API Secret" error={fieldErrors.api_secret}>
               <Input
                 type="password"
                 required
                 value={apiSecret}
-                onChange={(e) => setApiSecret(e.target.value)}
+                onChange={(e) => {
+                  setApiSecret(e.target.value);
+                  clearField("api_secret");
+                }}
               />
             </Field>
             {exchange === "bitget" && (
-              <Field label="API Passphrase">
+              <Field label="API Passphrase" error={fieldErrors.api_passphrase}>
                 <Input
                   type="password"
                   required
                   value={apiPassphrase}
-                  onChange={(e) => setApiPassphrase(e.target.value)}
+                  onChange={(e) => {
+                    setApiPassphrase(e.target.value);
+                    clearField("api_passphrase");
+                  }}
                 />
               </Field>
             )}
             {error !== null && (
-              <RegisterCredentialError error={error} onRetry={() => void submitRegistration()} />
+              <RegisterCredentialError
+                error={error}
+                onRetry={() => void submitRegistration()}
+                fieldErrors={fieldErrors}
+              />
             )}
             <Button type="submit" loading={register.isPending} className="w-full">
               등록
