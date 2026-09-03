@@ -125,3 +125,111 @@ describe("apiPaths — clients 배선(task-840) 회귀 가드", () => {
     expect(resolvePath("reports.generate")).toBe("/reports");
   });
 });
+
+// task-942: account.ts·admin.ts·auth.ts·exchange.ts·foundation.ts·
+// notifications.ts·strategyBuilder.ts도 resolvePath(route)를 경유하도록 바뀌었다
+// (platform.ts의 "/readyz"는 API_ROUTES 미등록이라 이 리프에서 제외 — needs_decision).
+// task-840과 동일한 이유로 이 라우트들의 legacyPath가 하드코딩 시절과 동일한 URL을
+// 여전히 만들어내는지 고정한다.
+describe("apiPaths — clients 배선(task-942) 회귀 가드", () => {
+  it("account.ts가 참조하는 라우트의 legacyPath가 하드코딩 시절과 동일하다", () => {
+    expect(resolvePath("account.riskAssessment")).toBe("/users/me/risk-assessment");
+    expect(resolvePath("account.riskProfile")).toBe("/users/me/risk-profile");
+    expect(resolvePath("account.riskProfileHistory")).toBe("/users/me/risk-profile/history");
+    expect(resolvePath("account.approvalSettings")).toBe("/users/me/approval-settings");
+    expect(resolvePath("account.whitelist")).toBe("/users/me/withdrawal-whitelist");
+    expect(resolvePath("account.deletion")).toBe("/users/me/delete");
+    expect(resolvePath("account.approvalRequests.list")).toBe("/users/me/approval-requests");
+    expect(resolvePath("account.approvalRequests.approve").replace(":requestId", "5")).toBe(
+      "/users/me/approval-requests/5/approve",
+    );
+    expect(resolvePath("account.approvalRequests.reject").replace(":requestId", "5")).toBe(
+      "/users/me/approval-requests/5/reject",
+    );
+  });
+
+  it("admin.ts가 참조하는 라우트의 legacyPath가 하드코딩 시절과 동일하다", () => {
+    expect(resolvePath("admin.verificationQueue")).toBe("/admin/verification-queue");
+    expect(resolvePath("admin.disputes.list")).toBe("/admin/disputes");
+    expect(resolvePath("admin.disputes.get").replace(":disputeId", "9")).toBe("/admin/disputes/9");
+    expect(resolvePath("admin.disputes.resolve").replace(":disputeId", "9")).toBe("/admin/disputes/9/resolve");
+    expect(resolvePath("admin.users.list")).toBe("/admin/users");
+    expect(resolvePath("admin.users.status").replace(":userId", "u1")).toBe("/admin/users/u1/status");
+    expect(resolvePath("admin.users.suspendSeller").replace(":userId", "u1")).toBe(
+      "/admin/users/u1/suspend-seller",
+    );
+    expect(resolvePath("admin.wallet.topupsPending")).toBe("/admin/wallet/topups/pending");
+    expect(resolvePath("admin.wallet.topupConfirm").replace(":topupId", "4")).toBe(
+      "/admin/wallet/topups/4/confirm",
+    );
+    expect(resolvePath("admin.marketplace.platformListings")).toBe("/admin/marketplace/platform-listings");
+    expect(resolvePath("admin.approvalRequests.approve").replace(":requestId", "6")).toBe(
+      "/admin/approval-requests/6/approve",
+    );
+    expect(resolvePath("admin.approvalRequests.reject").replace(":requestId", "6")).toBe(
+      "/admin/approval-requests/6/reject",
+    );
+    expect(resolvePath("admin.approvalRequests.pending")).toBe("/admin/approval-requests/pending");
+  });
+
+  it("auth.ts가 참조하는 라우트의 legacyPath가 하드코딩 시절과 동일하다", () => {
+    expect(resolvePath("auth.register")).toBe("/auth/register");
+    expect(resolvePath("auth.login")).toBe("/auth/login");
+    expect(resolvePath("auth.logout")).toBe("/auth/logout");
+    expect(resolvePath("auth.mfaSetup")).toBe("/auth/mfa/setup");
+    expect(resolvePath("auth.mfaVerify")).toBe("/auth/mfa/verify");
+    expect(resolvePath("auth.me")).toBe("/users/me");
+  });
+
+  it("exchange.ts가 참조하는 라우트의 legacyPath가 하드코딩 시절과 동일하다", () => {
+    expect(resolvePath("exchange.credentials.base")).toBe("/exchange-credentials");
+    expect(resolvePath("exchange.credentials.item").replace(":exchange", "binance")).toBe(
+      "/exchange-credentials/binance",
+    );
+    expect(resolvePath("exchange.credentials.balance").replace(":exchange", "binance")).toBe(
+      "/exchange-credentials/binance/balance",
+    );
+    expect(resolvePath("exchange.credentials.capabilities").replace(":exchange", "binance")).toBe(
+      "/exchange-credentials/binance/capabilities",
+    );
+  });
+
+  it("notifications.ts가 참조하는 라우트의 legacyPath가 하드코딩 시절과 동일하다", () => {
+    expect(resolvePath("notifications.history")).toBe("/notifications/history");
+    expect(resolvePath("notifications.preferences")).toBe("/notifications/preferences");
+    expect(resolvePath("deviceTokens.register")).toBe("/device-tokens");
+    expect(resolvePath("deviceTokens.deactivate").replace(":deviceId", "3")).toBe("/device-tokens/3");
+  });
+
+  it("strategyBuilder.ts가 참조하는 라우트의 legacyPath가 하드코딩 시절과 동일하다", () => {
+    expect(resolvePath("strategyBuilder.indicators.list")).toBe("/strategy-builder/indicators");
+    expect(resolvePath("strategyBuilder.strategies.base")).toBe("/strategy-builder/strategies");
+    expect(resolvePath("strategyBuilder.candles")).toBe("/strategy-builder/candles");
+    expect(resolvePath("strategyBuilder.indicators.compute").replace(":name", "rsi")).toBe(
+      "/strategy-builder/indicators/rsi/compute",
+    );
+    expect(
+      resolvePath("strategyBuilder.strategies.get").replace(":strategyId", "abc").replace(":version", "2"),
+    ).toBe("/strategy-builder/strategies/abc/2");
+    expect(resolvePath("strategyBuilder.preview")).toBe("/strategy-builder/preview");
+    expect(resolvePath("strategyBuilder.wizard")).toBe("/strategy-builder/wizard");
+    expect(resolvePath("strategyBuilder.generateFromPrompt")).toBe("/strategy-builder/generate-from-prompt");
+  });
+
+  it("foundation.ts가 참조하는 라우트의 legacyPath가 하드코딩 시절과 동일하다", () => {
+    expect(resolvePath("foundation.paperDeployments.request")).toBe("/v1/foundation/paper-deployments");
+    expect(resolvePath("foundation.paperDeployments.start").replace(":deploymentId", "d1")).toBe(
+      "/v1/foundation/paper-deployments/d1:start",
+    );
+    expect(resolvePath("foundation.paperDeployments.resume").replace(":deploymentId", "d1")).toBe(
+      "/v1/foundation/paper-deployments/d1:resume",
+    );
+    expect(resolvePath("foundation.paperDeployments.pause").replace(":deploymentId", "d1")).toBe(
+      "/v1/foundation/paper-deployments/d1:pause",
+    );
+    expect(resolvePath("foundation.paperDeployments.stop").replace(":deploymentId", "d1")).toBe(
+      "/v1/foundation/paper-deployments/d1:stop",
+    );
+    expect(resolvePath("foundation.trustConsents.accept")).toBe("/v1/foundation/trust/consents");
+  });
+});

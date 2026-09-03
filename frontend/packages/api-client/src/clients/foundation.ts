@@ -1,3 +1,4 @@
+import { resolvePath, type ApiRouteName } from "../apiPaths";
 import type { AnyConstructor } from "../http";
 import { checkDigest, createIdempotencyDigestStore, type IdempotencyDigestStore } from "../idempotencyDigest";
 
@@ -7,8 +8,10 @@ import { checkDigest, createIdempotencyDigestStore, type IdempotencyDigestStore 
 // (src/api/routers/foundation/paper_control.py 확인, 라우터 파일명이 곧
 // 모듈명 "paper_control" — REST 리소스명은 "paper-deployments") — 추측 대신
 // 원본 라우터를 읽고 확정했다.
-const PAPER_DEPLOYMENTS_PATH = "/v1/foundation/paper-deployments";
-const TRUST_CONSENTS_PATH = "/v1/foundation/trust/consents";
+// 경로 문자열은 apiPaths.ts(task-605) 레지스트리에만 있다(marketplace.ts와 동일 관용).
+// PLT-16(versioning.py) 미구현이라 이 라우트들의 v1Path는 비어 있고
+// resolvePath는 항상 legacyPath로 폴백한다 — task-942 decision: v1Path를
+// 추측해 채우지 않는다.
 
 // spec §3.7 IdempotencyScope.header_key 패턴 — http.ts의 postIdempotent는 값이
 // 없을 때만 자동 생성하고 형식 자체는 검증하지 않으므로, 타입(필수 인자)에
@@ -93,6 +96,13 @@ export interface AcceptTrustConsentBody {
 
 type PaperDeploymentCommand = "start" | "resume" | "pause" | "stop";
 
+const PAPER_DEPLOYMENT_COMMAND_ROUTES: Record<PaperDeploymentCommand, ApiRouteName> = {
+  start: "foundation.paperDeployments.start",
+  resume: "foundation.paperDeployments.resume",
+  pause: "foundation.paperDeployments.pause",
+  stop: "foundation.paperDeployments.stop",
+};
+
 // PLT-15 잔여 라우트(§3.7 적용 대상 목록) 멱등 클라이언트. ADR-2026-08-29-E:
 // paper-control은 PAPER 하드가드 경로라 이 클라이언트는 LIVE 전환 파라미터를
 // 노출하지 않는다(endpointClassification은 SANDBOX 기본값을 서버가 강제).
@@ -107,7 +117,7 @@ export function withFoundation<TBase extends AnyConstructor>(Base: TBase) {
       requireIdempotencyKey(idempotencyKey);
       const outgoing = { ...body, idempotencyKey };
       await guardIdempotentBody(paperDeploymentDigests, "request", idempotencyKey, outgoing);
-      return this.postIdempotent(PAPER_DEPLOYMENTS_PATH, outgoing, idempotencyKey);
+      return this.postIdempotent(resolvePath("foundation.paperDeployments.request"), outgoing, idempotencyKey);
     }
 
     async startPaperDeployment(deploymentId: string, idempotencyKey: string): Promise<PaperDeploymentView> {
@@ -136,11 +146,8 @@ export function withFoundation<TBase extends AnyConstructor>(Base: TBase) {
       // 헤더 값과 alias 관계이므로 body 자체가 곧 alias다.
       const outgoing = { idempotencyKey };
       await guardIdempotentBody(paperDeploymentDigests, command, idempotencyKey, outgoing);
-      return this.postIdempotent(
-        `${PAPER_DEPLOYMENTS_PATH}/${deploymentId}:${command}`,
-        outgoing,
-        idempotencyKey,
-      );
+      const path = resolvePath(PAPER_DEPLOYMENT_COMMAND_ROUTES[command]).replace(":deploymentId", deploymentId);
+      return this.postIdempotent(path, outgoing, idempotencyKey);
     }
 
     // AcceptDisclosureRequest(body)에는 idempotency 필드가 원래 없었으므로
@@ -149,7 +156,7 @@ export function withFoundation<TBase extends AnyConstructor>(Base: TBase) {
     async acceptTrustConsent(body: AcceptTrustConsentBody, idempotencyKey: string): Promise<ConsentDecision> {
       requireIdempotencyKey(idempotencyKey);
       await guardIdempotentBody(trustConsentDigests, "accept", idempotencyKey, body);
-      return this.postIdempotent(TRUST_CONSENTS_PATH, body, idempotencyKey);
+      return this.postIdempotent(resolvePath("foundation.trustConsents.accept"), body, idempotencyKey);
     }
   };
 }

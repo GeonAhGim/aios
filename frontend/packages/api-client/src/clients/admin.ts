@@ -14,49 +14,56 @@ import type {
   WalletTopupConfirmResult,
   WalletTopupPage,
 } from "@aios/shared-types";
+import { resolvePath } from "../apiPaths";
 import type { AnyConstructor } from "../http";
 
 // FD-18 관리자 도구 / FD-10.1 승인요청. task-112(28cf21b)로 admin.py 라우터
 // 전체가 ApiResponse 봉투를 적용해 requestEnvelope 계열을 쓴다.
+// 경로 문자열은 apiPaths.ts(task-605) 레지스트리에만 있다(marketplace.ts와 동일 관용).
 export function withAdmin<TBase extends AnyConstructor>(Base: TBase) {
   return class extends Base {
     async getVerificationQueue(): Promise<QueuedListing[]> {
-      return this.requestEnvelope("/admin/verification-queue");
+      return this.requestEnvelope(resolvePath("admin.verificationQueue"));
     }
 
     async listAdminDisputes(disputeStatus?: string): Promise<DisputeSummary[]> {
-      return this.requestEnvelope(this.withQuery("/admin/disputes", { dispute_status: disputeStatus }));
+      return this.requestEnvelope(
+        this.withQuery(resolvePath("admin.disputes.list"), { dispute_status: disputeStatus }),
+      );
     }
 
     async getAdminDispute(disputeId: number): Promise<DisputeDetail> {
-      return this.requestEnvelope(`/admin/disputes/${disputeId}`);
+      return this.requestEnvelope(resolvePath("admin.disputes.get").replace(":disputeId", String(disputeId)));
     }
 
     async resolveDispute(
       disputeId: number,
       body: DisputeResolveRequest,
     ): Promise<DisputeResolutionResult> {
-      return this.postEnvelope(`/admin/disputes/${disputeId}/resolve`, body);
+      return this.postEnvelope(
+        resolvePath("admin.disputes.resolve").replace(":disputeId", String(disputeId)),
+        body,
+      );
     }
 
     async listAdminUsers(emailSearch?: string): Promise<UserSummary[]> {
-      return this.requestEnvelope(this.withQuery("/admin/users", { email_search: emailSearch }));
+      return this.requestEnvelope(this.withQuery(resolvePath("admin.users.list"), { email_search: emailSearch }));
     }
 
     async changeUserStatus(userId: string, status: string): Promise<UserStatusChangeResult> {
-      return this.patchEnvelope(`/admin/users/${userId}/status`, { status });
+      return this.patchEnvelope(resolvePath("admin.users.status").replace(":userId", userId), { status });
     }
 
     async suspendSeller(
       userId: string,
       body: SuspendSellerRequest,
     ): Promise<SellerSuspensionResult> {
-      return this.postEnvelope(`/admin/users/${userId}/suspend-seller`, body);
+      return this.postEnvelope(resolvePath("admin.users.suspendSeller").replace(":userId", userId), body);
     }
 
     async listPendingTopups(page = 1, pageSize = 20): Promise<WalletTopupPage> {
       return this.requestEnvelope(
-        this.withQuery("/admin/wallet/topups/pending", { page, page_size: pageSize }),
+        this.withQuery(resolvePath("admin.wallet.topupsPending"), { page, page_size: pageSize }),
       );
     }
 
@@ -64,23 +71,31 @@ export function withAdmin<TBase extends AnyConstructor>(Base: TBase) {
       topupId: number,
       idempotencyKey?: string,
     ): Promise<WalletTopupConfirmResult> {
-      return this.postEnvelopeIdempotent(`/admin/wallet/topups/${topupId}/confirm`, undefined, idempotencyKey);
+      return this.postEnvelopeIdempotent(
+        resolvePath("admin.wallet.topupConfirm").replace(":topupId", String(topupId)),
+        undefined,
+        idempotencyKey,
+      );
     }
 
     async createPlatformListing(body: PlatformListingCreateRequest): Promise<ListingResponse> {
-      return this.postEnvelope("/admin/marketplace/platform-listings", body);
+      return this.postEnvelope(resolvePath("admin.marketplace.platformListings"), body);
     }
 
     async approveRequest(requestId: number): Promise<ApprovalRequest> {
-      return this.postEnvelope(`/admin/approval-requests/${requestId}/approve`);
+      return this.postEnvelope(
+        resolvePath("admin.approvalRequests.approve").replace(":requestId", String(requestId)),
+      );
     }
 
     async rejectRequest(requestId: number): Promise<ApprovalRequest> {
-      return this.postEnvelope(`/admin/approval-requests/${requestId}/reject`);
+      return this.postEnvelope(
+        resolvePath("admin.approvalRequests.reject").replace(":requestId", String(requestId)),
+      );
     }
 
     async listPendingApprovalRequests(scope?: "USER" | "PLATFORM"): Promise<ApprovalRequest[]> {
-      return this.requestEnvelope(this.withQuery("/admin/approval-requests/pending", { scope }));
+      return this.requestEnvelope(this.withQuery(resolvePath("admin.approvalRequests.pending"), { scope }));
     }
   };
 }
