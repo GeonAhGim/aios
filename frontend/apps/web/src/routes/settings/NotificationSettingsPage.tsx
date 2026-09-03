@@ -3,13 +3,46 @@ import {
   useNotificationPreferences,
   useUpdateNotificationPreferences,
 } from "@aios/shared-hooks";
+import { ApiError } from "@aios/api-client";
+import { classifyForbidden, routeApiError } from "@aios/shared-types";
 import { Card, CardTitle, EmptyState, LoadingState, PageHeader, StatusBadge } from "@aios/ui-web";
 import { AppShell } from "../../components/layout/AppShell";
+import { ErrorMessage } from "../../components/ErrorMessage";
+import { ForbiddenNotice } from "../../components/ForbiddenNotice";
+
+// spec §3.3 에러 taxonomy: 조회·변경 실패는 err.message를 직접 노출하지 않고
+// routeApiError(task-483)로 판정해 403/그 외를 각각 ForbiddenNotice/ErrorMessage
+// 경로로만 보여준다(task-1155).
+function NotificationError({ error, onRetry }: { error: unknown; onRetry?: () => void }) {
+  if (classifyForbidden(error)) return <ForbiddenNotice error={error} />;
+  const routed = routeApiError(error);
+  const canRetry = Boolean(onRetry) && (routed.kind === "refetch_retry" || routed.kind === "backoff_retry");
+  return (
+    <ErrorMessage
+      errorCode={error instanceof ApiError ? error.errorCode : undefined}
+      message={error instanceof Error ? error.message : undefined}
+      traceId={error instanceof ApiError ? error.traceId : undefined}
+      retryAfterSec={routed.kind === "backoff_retry" ? routed.afterSec : undefined}
+      onRetry={canRetry ? onRetry : undefined}
+    />
+  );
+}
 
 export function NotificationSettingsPage() {
-  const { data: preferences, isLoading } = useNotificationPreferences();
+  const {
+    data: preferences,
+    isLoading,
+    isError: preferencesIsError,
+    error: preferencesError,
+    refetch: refetchPreferences,
+  } = useNotificationPreferences();
   const update = useUpdateNotificationPreferences();
-  const { data: history } = useNotificationHistory();
+  const {
+    data: history,
+    isError: historyIsError,
+    error: historyError,
+    refetch: refetchHistory,
+  } = useNotificationHistory();
 
   return (
     <AppShell>
@@ -18,7 +51,9 @@ export function NotificationSettingsPage() {
 
         <Card>
           <CardTitle>수신 설정</CardTitle>
-          {isLoading ? (
+          {preferencesIsError ? (
+            <NotificationError error={preferencesError} onRetry={() => refetchPreferences()} />
+          ) : isLoading ? (
             <LoadingState />
           ) : preferences ? (
             <div className="space-y-3">
@@ -33,6 +68,7 @@ export function NotificationSettingsPage() {
                   />
                 </label>
               ))}
+              {update.isError && <NotificationError error={update.error} />}
               <p className="text-xs text-fg-muted">
                 강제 알림(승인요청, 안전장치 경고 등)은 여기서 끌 수 없습니다.
               </p>
@@ -42,7 +78,9 @@ export function NotificationSettingsPage() {
 
         <Card>
           <CardTitle>알림 이력</CardTitle>
-          {history && history.length > 0 ? (
+          {historyIsError ? (
+            <NotificationError error={historyError} onRetry={() => refetchHistory()} />
+          ) : history && history.length > 0 ? (
             <ul className="divide-y divide-border text-sm">
               {history.map((h, i) => (
                 <li key={i} className="flex items-center justify-between py-2">

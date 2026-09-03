@@ -15,6 +15,9 @@ const SECTIONS = [
   { to: "/admin/approval-requests", label: "승인 요청 처리", desc: "FD-10.1/9.4b" },
 ];
 
+// task-1155: 이 화면 자체는 조회·변경 API 호출이 없는 정적 내비게이션 허브라
+// 표면화할 에러 경로가 없다 — 진입 시 실제로 실패할 수 있는 지점은 이 라우트를
+// 감싸는 AdminRoute(useMe())뿐이며, 그 isError 분기를 여기서 함께 고쳤다.
 export function AdminHomePage() {
   return (
     <AppShell>

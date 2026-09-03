@@ -1,7 +1,11 @@
 import { useReport } from "@aios/shared-hooks";
+import { ApiError } from "@aios/api-client";
+import { classifyForbidden, routeApiError } from "@aios/shared-types";
 import { Card, CardTitle, EmptyState, Input, LoadingState, PageHeader, PnlChart, Stat } from "@aios/ui-web";
 import { useState } from "react";
 import { AppShell } from "../../components/layout/AppShell";
+import { ErrorMessage } from "../../components/ErrorMessage";
+import { ForbiddenNotice } from "../../components/ForbiddenNotice";
 
 function isoDaysAgo(days: number): string {
   const d = new Date();
@@ -9,10 +13,28 @@ function isoDaysAgo(days: number): string {
   return d.toISOString().slice(0, 10);
 }
 
+// spec §3.3 에러 taxonomy: 보고서 조회 실패는 err.message를 직접 노출하지 않고
+// routeApiError(task-483)로 판정해 403/그 외를 각각 ForbiddenNotice/ErrorMessage
+// 경로로만 보여준다(task-1155).
+function ReportError({ error, onRetry }: { error: unknown; onRetry: () => void }) {
+  if (classifyForbidden(error)) return <ForbiddenNotice error={error} />;
+  const routed = routeApiError(error);
+  const canRetry = routed.kind === "refetch_retry" || routed.kind === "backoff_retry";
+  return (
+    <ErrorMessage
+      errorCode={error instanceof ApiError ? error.errorCode : undefined}
+      message={error instanceof Error ? error.message : undefined}
+      traceId={error instanceof ApiError ? error.traceId : undefined}
+      retryAfterSec={routed.kind === "backoff_retry" ? routed.afterSec : undefined}
+      onRetry={canRetry ? onRetry : undefined}
+    />
+  );
+}
+
 export function ReportsPage() {
   const [periodStart, setPeriodStart] = useState(isoDaysAgo(30));
   const [periodEnd, setPeriodEnd] = useState(isoDaysAgo(0));
-  const { data: report, isLoading } = useReport(periodStart, periodEnd);
+  const { data: report, isLoading, isError, error, refetch } = useReport(periodStart, periodEnd);
 
   return (
     <AppShell>
@@ -30,7 +52,9 @@ export function ReportsPage() {
           </label>
         </div>
 
-        {isLoading ? (
+        {isError ? (
+          <ReportError error={error} onRetry={() => refetch()} />
+        ) : isLoading ? (
           <LoadingState />
         ) : report ? (
           <>
