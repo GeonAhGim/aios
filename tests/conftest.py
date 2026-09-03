@@ -131,6 +131,18 @@ def lifespan_context_with_retry(app):
     return _RetryingLifespanContext(app)
 
 
+def pytest_collection_modifyitems(items: list[pytest.Item]) -> None:
+    """task-645(esc-ci-532f4f0f5388): `pyproject.toml`의 전역 per-test
+    타임아웃(120s)은 행(hang) 하나가 CI 2400s 상한을 통째로 잡아먹지 않도록
+    막는 가드다. `perf` 마커 테스트(task-489/LB-18)는 100회 실 DB 왕복을
+    반복하는 게 의도된 설계라 이 로컬 공유 Postgres 환경에서는 120s를
+    넘기기도 한다 — 행이 아니라 알려진 느림이므로 여기서만 넉넉하게
+    재정의한다(테스트 파일 자체는 이 리프 범위 밖이라 마커로만 구분)."""
+    for item in items:
+        if item.get_closest_marker("perf") is not None:
+            item.add_marker(pytest.mark.timeout(600))
+
+
 @pytest.fixture(autouse=True)
 def _reset_metrics_singleton():
     """`set_metrics`는 프로세스 전역 싱글턴이라, 한 테스트가 대체 구현체로

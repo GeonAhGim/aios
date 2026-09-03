@@ -29,6 +29,7 @@ test = [
     "pytest-asyncio>=0.24",
     "pytest-benchmark>=4.0",
     "pytest-cov>=5.0",
+    "pytest-timeout>=2.3",
 ]
 dev = [
     "ruff>=0.16",
@@ -39,6 +40,16 @@ dev = [
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
+# task-645(esc-ci-532f4f0f5388): 전체 스위트가 CI 2400s 상한에 걸려 행(hang)
+# 지점을 알 수 없이 타임아웃됐다 — 테스트 하나가 무한 대기해도 pytest 프로세스
+# 자체는 살아있으므로, per-test 타임아웃을 걸어 그 하나만 실패시키고 스택
+# 트레이스를 남긴다("signal" 방식은 SIGALRM이 없는 Windows에서 못 쓰므로
+# "thread" 고정 — CI(ubuntu)·로컬(Windows) 동일 동작). 값(120s)은 tests/conftest.py
+# retry_too_many_connections 최악 백오프(~31s)와 이 리포의 로컬 공유 Postgres
+# 지연 배율을 감안한 여유치이고, perf 마커 테스트는 의도적으로 더 크게 재정의한다
+# (아래 tests/conftest.py pytest_collection_modifyitems 참고).
+timeout = 120
+timeout_method = "thread"
 markers = [
     "perf: 실측 지연시간 단언 — 동시성 부하 테스트와 같은 실행에서 경합하지 않도록 분리 실행한다(task-489/LB-18).",
 ]
