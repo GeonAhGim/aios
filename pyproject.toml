@@ -58,7 +58,7 @@ markers = [
 line-length = 100
 
 [tool.ruff.lint]
-select = ["E", "F", "I", "UP", "B", "TID251"]
+select = ["E", "F", "I", "UP", "B", "TID251", "S", "BLE", "ARG", "PGH", "T20"]
 
 [tool.ruff.lint.flake8-bugbear]
 # FastAPI의 Depends()/Query() 등은 인자 기본값에 호출하는 것이 표준 관용구다
@@ -102,8 +102,114 @@ extend-immutable-calls = ["fastapi.Depends", "fastapi.Query", "fastapi.Path", "f
 "src/services/oms/ports/**" = ["TID251"]
 "src/services/safety/**" = ["TID251"]
 "src/watchdog_process.py" = ["TID251"]
-"tests/**" = ["TID251"]
-"scripts/**" = ["TID251"]
+
+# PLT-41 — tests/**: pytest는 assert를 조립(rewrite)해 실패 진단을 만드는
+# 프레임워크 관용구이므로 S101(assert 금지)은 대상이 아니다. fixture/mock/
+# 콜백은 인터페이스 시그니처를 맞추려고 일부 인자를 쓰지 않는 게 정상이라
+# ARG001/002/005도 테스트 존에서는 신호가 아니다. S105/S106/S311은 테스트
+# 데이터(더미 자격증명·비암호 난수)이지 실제 비밀/보안 난수가 아니다.
+# T201/S603/S607은 통합테스트·perf 벤치마크가 stdout에 결과를 찍거나
+# git/psql 등 신뢰된 로컬 커맨드를 실행하는 정상 경로다.
+"tests/**" = ["TID251", "S101", "ARG001", "ARG002", "ARG005", "S105", "S106", "S311", "T201", "S603", "S607"]
+
+# PLT-41 — scripts/**: CI/운영 CLI 스크립트는 stdout 출력이 본래 기능이라
+# T201(print 금지)의 대상이 아니다. S603/S607은 git/alembic 등 스크립트
+# 내부에서 신뢰된 인자로 여는 서브프로세스이고, S314는 pytest-cov가 로컬에
+# 생성한 coverage.xml(신뢰된 입력)을 읽는 coverage_ratchet.py 하나뿐이다.
+"scripts/**" = ["TID251", "T201", "S603", "S607", "S314"]
+
+# PLT-41 — 아래는 S,BLE,ARG,PGH,T20 확장으로 새로 걸린 위반 중 로직 변경
+# 없이는 정리할 수 없는 항목만 파일 단위로 유예한다(동작을 바꾸는 정리는
+# task-1092 decision에 따라 금지). 근거는 규칙별로 아래와 같다.
+#   S101 — 도메인/어댑터의 방어적 invariant assert. AssertionError를 명시적
+#     예외로 바꾸려면 콜사이트마다 예외 타입·메시지·상위 계약을 다시
+#     설계해야 해 동작 변경이다.
+#   ARG001/ARG002 — FastAPI Depends 인자(인증 게이트 목적으로만 주입되고
+#     본문에서는 안 씀)와 Protocol/ABC 구현체가 인터페이스 시그니처를
+#     맞추려 안 쓰는 인자. 인자명을 바꾸면 DI/키워드 호출 호환성이 깨질
+#     위험이 있어 콜사이트별 검토가 필요하다.
+#   S105 — hardcoded-password 휴리스틱 오탐. "PASS"/"SECRET_REFERENCE"/
+#     "AUTH_TOKEN_EXPIRED" 등은 실제 자격증명이 아니라 enum·상수 리터럴
+#     이름이다(값 자체가 상수 문자열).
+#   S608 — SQL 문자열 조합. 실제 인젝션 벡터인지(바인드 파라미터 유무 등)
+#     콜사이트마다 확인해야 하고, task-1092 decision이 S608을 정리 금지
+#     예시로 명시했다.
+#   BLE001 — 광범위 except Exception. task-1092 decision이 정리 금지
+#     예시로 명시했다(삼킬지/재던질지는 로직 결정).
+#   S110 — try/except/pass. 두 사례 모두 바로 위 줄에 이미 원래 예외를
+#     가리지 않기 위한 의도적 삼킴이라는 근거 주석(# noqa: BLE001)이 있어
+#     로깅 추가 여부도 그 계약을 다시 따져야 하는 로직 결정이다.
+"src/api/contracts/error_codes.py" = ["S105"]
+"src/api/contracts/handlers.py" = ["ARG001"]
+"src/api/marketplace_deps.py" = ["ARG001"]
+"src/api/middleware/request_context.py" = ["S101"]
+"src/api/routers/admin.py" = ["ARG001"]
+"src/api/routers/foundation/evidence.py" = ["ARG001"]
+"src/api/routers/health.py" = ["BLE001"]
+"src/api/routers/strategy_builder.py" = ["ARG001"]
+"src/api/schemas/auth.py" = ["S105"]
+"src/core/approval/service.py" = ["ARG001", "S608"]
+"src/core/event_bus/in_process.py" = ["ARG002"]
+"src/core/logging/redaction.py" = ["S105"]
+"src/core/notifications/history.py" = ["S608"]
+"src/core/notifications/preferences.py" = ["S608"]
+"src/core/observability/metric_names.py" = ["S105"]
+"src/core/observability/metrics.py" = ["ARG002"]
+"src/core/rate_limit/limiter.py" = ["ARG002"]
+"src/core/safety/data_distrust.py" = ["S101"]
+"src/core/security/secret_handle.py" = ["S101"]
+"src/db/migrations/versions/4a1d0c0de001_db_roles_and_worm_helper.py" = ["S608"]
+"src/db/migrations/versions/4a1d0c0de005_ledger_core.py" = ["S608"]
+"src/db/migrations/versions/e7f8a9b0c1d2_wallet_ledger.py" = ["S608"]
+"src/exchanges/bitget/adapter.py" = ["S110"]
+"src/exchanges/common/circuit_breaker.py" = ["S101"]
+"src/exchanges/kis/account_mixin.py" = ["ARG002"]
+"src/exchanges/nh/account_mixin.py" = ["ARG002"]
+"src/foundation/connections/adapters/fake_provider.py" = ["ARG002"]
+"src/foundation/connections/adapters/live_provider.py" = ["ARG002"]
+"src/foundation/connections/application/sync_snapshot.py" = ["S101"]
+"src/foundation/evidence/application/append_audit_event.py" = ["S101"]
+"src/foundation/evidence/contracts/v1.py" = ["S105"]
+"src/foundation/evidence/domain/models.py" = ["S105"]
+"src/foundation/ledger/adapters/postgres_hold_repository.py" = ["S608"]
+"src/foundation/ledger/adapters/postgres_journal_repository.py" = ["S101"]
+"src/foundation/ledger/adapters/postgres_payout_repository.py" = ["ARG002", "S101", "S608"]
+"src/foundation/ledger/application/post_entry.py" = ["ARG001"]
+"src/foundation/ledger/application/purchase_flow.py" = ["ARG001", "S101"]
+"src/foundation/ledger/application/scheduler.py" = ["S101"]
+"src/foundation/ledger/domain/chart_of_accounts.py" = ["S101"]
+"src/foundation/mandates/adapters/postgres_repository.py" = ["S101"]
+"src/foundation/mandates/application/evaluate_policy.py" = ["S101"]
+"src/foundation/market_data/application/scheduler.py" = ["S101"]
+"src/foundation/paper_control/adapters/fake_paper_adapter.py" = ["ARG002"]
+"src/foundation/paper_control/adapters/postgres_repository.py" = ["S101"]
+"src/foundation/paper_control/application/pause_deployment.py" = ["S101"]
+"src/foundation/paper_control/application/start_deployment.py" = ["S101"]
+"src/foundation/paper_control/application/submit_paper_intent.py" = ["S110"]
+"src/foundation/performance/adapters/postgres_repository.py" = ["S101"]
+"src/foundation/positions/adapters/postgres_journal_repository.py" = ["S101"]
+"src/foundation/positions/application/record_fill.py" = ["S101"]
+"src/foundation/positions/application/record_funding_fee.py" = ["S101"]
+"src/foundation/positions/application/scheduler.py" = ["BLE001", "S101"]
+"src/foundation/positions/domain/cost_basis/weighted.py" = ["S101"]
+"src/foundation/positions/domain/snapshot_builder.py" = ["S101"]
+"src/foundation/risk_gate/adapters/postgres_repository.py" = ["S608"]
+"src/foundation/trust/adapters/postgres_membership_repository.py" = ["S608"]
+"src/foundation/validation/application/start_validation.py" = ["S101"]
+"src/foundation/validation/contracts/v1.py" = ["S105"]
+"src/foundation/validation/domain/models.py" = ["S105"]
+"src/services/audit_log_read_service.py" = ["S608"]
+"src/services/auth/lockout.py" = ["ARG001"]
+"src/services/auth/session_repository.py" = ["S101"]
+"src/services/auth/tokens.py" = ["S105"]
+"src/services/execution_loop/scheduler.py" = ["S101"]
+"src/services/listing_search_service.py" = ["S608"]
+"src/services/oms/domain/algo_slicer.py" = ["ARG001"]
+"src/services/purchase_service.py" = ["ARG001", "S101"]
+"src/services/report_service.py" = ["S608"]
+"src/services/safety/reference_quotes.py" = ["BLE001"]
+"src/services/strategy_prompt_service.py" = ["ARG002"]
+"src/services/wallet_service.py" = ["S101"]
 
 [tool.mypy]
 strict = true
