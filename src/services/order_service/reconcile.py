@@ -13,6 +13,8 @@ from uuid import UUID
 
 import asyncpg
 
+from src.core.observability.metric_names import ORDER_UNKNOWN_STATE_GAUGE
+from src.core.observability.metrics import MetricsPort, NullMetrics
 from src.data.models.trading import Order, OrderStatus
 from src.exchanges.common.adapter import ExchangeAdapter
 from src.services.order_service import repository
@@ -33,7 +35,9 @@ async def resolve_unknown(
     pool: asyncpg.Pool,
     publish: PublishFn | None = None,
     sleep: SleepFn = asyncio.sleep,
+    metrics: MetricsPort | None = None,
 ) -> Order:
+    metrics = metrics if metrics is not None else NullMetrics()
     async with pool.acquire() as conn:
         order = await repository.get_by_order_id(conn, order_id)
     if order is None:
@@ -55,6 +59,7 @@ async def resolve_unknown(
                 persisted = await repository.update_from_exchange(
                     conn, updated, expected_status=current.status
                 )
+            metrics.gauge(ORDER_UNKNOWN_STATE_GAUGE, 0.0, labels={"exchange": order.exchange})
             if publish is not None:
                 await publish(
                     "order.status.changed",
@@ -70,6 +75,7 @@ async def resolve_unknown(
         if attempt < MAX_ATTEMPTS:
             await sleep(RETRY_INTERVAL_SECONDS)
 
+    metrics.gauge(ORDER_UNKNOWN_STATE_GAUGE, 1.0, labels={"exchange": order.exchange})
     logger.critical(
         "FD-4.5: 주문 상태 UNKNOWN 자동 해소 실패(order_id=%s, %d회 재조회 후에도 미확정) — "
         "Human 개입 필요",

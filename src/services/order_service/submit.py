@@ -8,16 +8,27 @@ Spec: 기능설계문서_v1.21.md#FD-4.2
 """
 from __future__ import annotations
 
+import time
 from collections.abc import Awaitable, Callable
 from typing import Any
 from uuid import UUID
 
 import asyncpg
 
+from src.core.observability.metric_names import (
+    ORDER_SUBMIT_COUNT_TOTAL,
+    ORDER_SUBMIT_DURATION_SECONDS,
+)
+from src.core.observability.metrics import MetricsPort, NullMetrics
 from src.data.models.trading import Order, OrderStatus
 from src.exchanges.common.adapter import ExchangeAdapter
 from src.services.order_service import repository
-from src.services.order_service.gate import GateOutcome, OrderContext, PreSubmitGate
+from src.services.order_service.gate import (
+    GateOutcome,
+    OrderContext,
+    PreSubmitGate,
+    record_gate_decision,
+)
 from src.services.order_service.position_ledger import record_fill_in_position_ledger
 
 PublishFn = Callable[[str, dict[str, Any]], Awaitable[None]]
@@ -47,13 +58,31 @@ async def submit_order(
     publish: PublishFn | None = None,
     pre_submit_gate: PreSubmitGate | None = None,
     mandate_revision_id: UUID | None = None,
+    metrics: MetricsPort | None = None,
 ) -> Order:
+    # PLT-10 — 기본값 NullMetrics: 호출부가 미설정이면(기존 실행 전부) 무영향.
+    metrics = metrics if metrics is not None else NullMetrics()
+    mode = "paper" if adapter.is_paper_trading else "live"
+    submit_started = time.monotonic()
+
+    def _record_submit_outcome(outcome: str) -> None:
+        metrics.counter(
+            ORDER_SUBMIT_COUNT_TOTAL,
+            labels={"exchange": order.exchange, "mode": mode, "outcome": outcome},
+        )
+        metrics.observe(
+            ORDER_SUBMIT_DURATION_SECONDS,
+            time.monotonic() - submit_started,
+            labels={"exchange": order.exchange},
+        )
+
     # 전수감사 §6 / FND-06 배선 — 클레임(아래 a)보다 먼저 검사한다. 거부된
     # 시도는 애초에 orders 테이블에 흔적을 남기지 않는다(클레임 후 거부하면
     # "제출 안 됐지만 claim 행은 남은" 상태를 별도로 청소해야 함).
     # `pre_submit_gate`가 없으면(기본값) 기존 동작과 완전히 동일 — 이미
     # 존재하는 실행 전부에 대한 회귀 없음(마감 게이트 없이 그대로 통과).
     if pre_submit_gate is not None:
+        gate_started = time.monotonic()
         decision = await pre_submit_gate(
             OrderContext(
                 user_id=user_id,
@@ -62,7 +91,9 @@ async def submit_order(
                 mandate_revision_id=mandate_revision_id,
             )
         )
+        record_gate_decision(metrics, decision, duration_seconds=time.monotonic() - gate_started)
         if decision.outcome != GateOutcome.ALLOW:
+            _record_submit_outcome("denied")
             raise OrderDeniedByRiskGateError(decision.reason_codes)
 
     # FD-4.2-a 멱등성 — 레드팀 #2026-09-02-19 — "먼저 SELECT로 없음을
@@ -95,6 +126,7 @@ async def submit_order(
     except Exception:
         async with pool.acquire() as conn:
             await repository.delete(conn, claimed.order_id)
+        _record_submit_outcome("error")
         raise
 
     # FD-4.2-c DB 영속화 — claimed 행을 실제 거래소 응답으로 갱신한다.
@@ -108,7 +140,9 @@ async def submit_order(
     # 즉시 FILLED를 돌려주는 동기체결 케이스. apply_fill()을 거치지 않고
     # 여기서 바로 확정되므로, positions 기록도 이 지점에서 해야 놓치지
     # 않는다(position_ledger.py 참조 — 다른 호출부는 apply_fill 쪽).
-    await record_fill_in_position_ledger(pool, persisted)
+    await record_fill_in_position_ledger(pool, persisted, metrics=metrics)
+
+    _record_submit_outcome("rejected" if persisted.status == OrderStatus.REJECTED else "accepted")
 
     # FD-4.2-d 이벤트 발행(FD-6.1 재사용).
     if publish is not None:
@@ -133,10 +167,12 @@ async def apply_fill(
     average_fill_price: Any,
     pool: asyncpg.Pool,
     publish: PublishFn | None = None,
+    metrics: MetricsPort | None = None,
 ) -> Order:
     """제출 직후(동기 체결) 또는 이후 폴링(FD-3.4)으로 체결이 확인됐을 때
     상태를 FILLED로 갱신한다 — Executor.execute()와 실행 루프(오케스트레이터)
     양쪽이 공유하는 갱신 경로(FD-8.4 처리단계 5의 전제)."""
+    metrics = metrics if metrics is not None else NullMetrics()
     updated = order.model_copy(
         update={
             "exchange_order_id": exchange_order_id,
@@ -151,7 +187,7 @@ async def apply_fill(
         )
 
     # PM 배정(agent-platform-12, 2026-09-02) — position_ledger.py 참조.
-    await record_fill_in_position_ledger(pool, persisted)
+    await record_fill_in_position_ledger(pool, persisted, metrics=metrics)
 
     if publish is not None:
         await publish(

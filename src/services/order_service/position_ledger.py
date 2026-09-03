@@ -15,6 +15,8 @@ from uuid import uuid4
 
 import asyncpg
 
+from src.core.observability.metric_names import ORDER_FILL_COUNT_TOTAL
+from src.core.observability.metrics import MetricsPort, NullMetrics
 from src.data.models.base import Currency, Money
 from src.data.models.trading import Order, OrderStatus
 from src.foundation.evidence.adapters.postgres_repository import PostgresAuditEventRepository
@@ -33,10 +35,19 @@ from src.foundation.positions.domain.position_key import PositionKey
 logger = logging.getLogger(__name__)
 
 
-async def record_fill_in_position_ledger(pool: asyncpg.Pool, order: Order) -> None:
+async def record_fill_in_position_ledger(
+    pool: asyncpg.Pool, order: Order, *, metrics: MetricsPort | None = None
+) -> None:
     """FILLED가 아니거나 실행 컨텍스트가 없으면 아무것도 하지 않는다."""
     if order.status != OrderStatus.FILLED or order.execution_id is None:
         return
+    metrics = metrics if metrics is not None else NullMetrics()
+    # PLT-10 §7.2 `aios.order.fill.count_total` — submit_order()의 동기체결
+    # 경로와 apply_fill() 경로가 둘 다 이 함수를 거치므로(§FD-4.2-c 주석),
+    # 여기 한 곳에서만 계측하면 두 호출부 모두 커버된다.
+    metrics.counter(
+        ORDER_FILL_COUNT_TOTAL, labels={"exchange": order.exchange, "status": order.status.value}
+    )
     async with pool.acquire() as conn:
         user_id = await conn.fetchval(
             "SELECT user_id FROM strategy_executions WHERE id = $1", order.execution_id

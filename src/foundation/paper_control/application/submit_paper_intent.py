@@ -22,10 +22,18 @@ from __future__ import annotations
 
 from uuid import UUID, uuid4
 
+from src.core.observability.metric_names import (
+    FOUNDATION_PAPER_CONTROL_ORDER_INTENT_COUNT_TOTAL,
+)
+from src.core.observability.metrics import MetricsPort, NullMetrics
 from src.foundation.connections.ports.repository import ConnectionRepository
 from src.foundation.mandates.ports.repository import MandateRepository
 from src.foundation.paper_control.application.start_deployment import RiskGateDeniedError
-from src.foundation.paper_control.domain.models import DeploymentState, PaperOrderIntent
+from src.foundation.paper_control.domain.models import (
+    CredentialClass,
+    DeploymentState,
+    PaperOrderIntent,
+)
 from src.foundation.paper_control.ports.paper_adapter import (
     PaperExecutionAdapter,
     PaperExecutionContext,
@@ -77,7 +85,9 @@ async def submit_paper_intent(
     deployment_id: UUID,
     expected_fence_token: int,
     sequence: int,
+    metrics: MetricsPort | None = None,
 ) -> PaperOrderIntent:
+    metrics = metrics if metrics is not None else NullMetrics()
     deployment = await repo.get_deployment(deployment_id)
     if deployment is None:
         raise DeploymentNotFoundError(str(deployment_id))
@@ -139,6 +149,14 @@ async def submit_paper_intent(
             f"deployment.id={deployment_id}: adapter 응답 도착 전에 fence가 superseded됐습니다 "
             "— 즉시 취소했습니다."
         )
+
+    # PLT-10 §7.2 `aios.foundation_paper_control.order_intent.count_total` —
+    # A4 알림(§7.4)이 mode="live_blocked" 발생 자체를 critical로 취급하므로,
+    # credential_class가 PAPER가 아닌 경우를 여기서 구조적으로 구분해둔다
+    # (지금은 CredentialClass에 PAPER만 존재해 항상 "paper"다).
+    is_paper = deployment.provenance.credential_class == CredentialClass.PAPER
+    mode = "paper" if is_paper else "live_blocked"
+    metrics.counter(FOUNDATION_PAPER_CONTROL_ORDER_INTENT_COUNT_TOTAL, labels={"mode": mode})
 
     return await repo.insert_order_intent(
         PaperOrderIntent(

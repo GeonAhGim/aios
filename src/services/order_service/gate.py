@@ -14,6 +14,12 @@ from dataclasses import dataclass, field
 from enum import Enum
 from uuid import UUID
 
+from src.core.observability.metric_names import (
+    RISK_DECISION_COUNT_TOTAL,
+    RISK_EVALUATION_DURATION_SECONDS,
+)
+from src.core.observability.metrics import MetricsPort
+
 
 class GateOutcome(str, Enum):
     ALLOW = "ALLOW"
@@ -35,3 +41,24 @@ class GateDecision:
 
 
 PreSubmitGate = Callable[[OrderContext], Awaitable[GateDecision]]
+
+
+def record_gate_decision(
+    metrics: MetricsPort,
+    decision: GateDecision,
+    *,
+    duration_seconds: float,
+    engine: str = "core",
+) -> None:
+    """§7.2 `aios.risk.decision.count_total`/`aios.risk.evaluation.duration_seconds`.
+
+    이 모듈은 foundation을 모르는 순수 타입 모듈이라는 원칙(위 docstring) 때문에
+    게이트 실행 자체가 아니라 그 결과를 소비하는 호출부(`submit.py`)가 이
+    함수로 계측한다.
+    """
+    reason_code = decision.reason_codes[0] if decision.reason_codes else "none"
+    metrics.counter(
+        RISK_DECISION_COUNT_TOTAL,
+        labels={"engine": engine, "effect": decision.outcome.value, "reason_code": reason_code},
+    )
+    metrics.observe(RISK_EVALUATION_DURATION_SECONDS, duration_seconds, labels={"engine": engine})
