@@ -12,13 +12,15 @@ import type {
   StrategyDefinition,
   VerificationDecisionRequest,
 } from "@aios/shared-types";
+import { resolvePath } from "../apiPaths";
 import type { AnyConstructor } from "../http";
 
 // FD-13 마켓플레이스 — marketplace 라우터는 봉투 미적용, 기존 경로 유지.
+// 경로 문자열은 apiPaths.ts(task-605) 레지스트리에만 있다(marketData.ts와 동일 관용).
 export function withMarketplace<TBase extends AnyConstructor>(Base: TBase) {
   return class extends Base {
     async createListing(body: ListingCreateRequest): Promise<ListingResponse> {
-      return this.post("/marketplace/listings", body);
+      return this.post(resolvePath("marketplace.listings.base"), body);
     }
 
     async searchListings(params: {
@@ -30,7 +32,7 @@ export function withMarketplace<TBase extends AnyConstructor>(Base: TBase) {
       pageSize?: number;
     }): Promise<ListingSearchResponse> {
       return this.request(
-        this.withQuery("/marketplace/listings", {
+        this.withQuery(resolvePath("marketplace.listings.base"), {
           asset_class: params.assetClass,
           exchange: params.exchange,
           max_price: params.maxPrice,
@@ -42,14 +44,19 @@ export function withMarketplace<TBase extends AnyConstructor>(Base: TBase) {
     }
 
     async submitForVerification(listingId: number): Promise<ListingResponse> {
-      return this.post(`/marketplace/listings/${listingId}/submit-verification`);
+      const path = resolvePath("marketplace.listings.submitVerification").replace(
+        ":listingId",
+        String(listingId),
+      );
+      return this.post(path);
     }
 
     async verifyListing(
       listingId: number,
       body: VerificationDecisionRequest,
     ): Promise<{ listingId: number; status: string; rejectionReason: string | null }> {
-      return this.post(`/marketplace/listings/${listingId}/verify`, body);
+      const path = resolvePath("marketplace.listings.verify").replace(":listingId", String(listingId));
+      return this.post(path, body);
     }
 
     async purchaseListing(
@@ -57,23 +64,28 @@ export function withMarketplace<TBase extends AnyConstructor>(Base: TBase) {
       body: PurchaseCreateRequest,
       idempotencyKey?: string,
     ): Promise<PurchaseResponse> {
-      return this.postIdempotent(`/marketplace/listings/${listingId}/purchase`, body, idempotencyKey);
+      const path = resolvePath("marketplace.listings.purchase").replace(":listingId", String(listingId));
+      return this.postIdempotent(path, body, idempotencyKey);
     }
 
     async getStrategyDefinition(strategyId: string, version: string): Promise<StrategyDefinition> {
-      return this.request(`/marketplace/strategies/${strategyId}/${version}`);
+      const path = resolvePath("marketplace.strategies.get")
+        .replace(":strategyId", strategyId)
+        .replace(":version", version);
+      return this.request(path);
     }
 
     async createReview(listingId: number, body: ReviewCreateRequest): Promise<ReviewResponse> {
-      return this.post(`/marketplace/listings/${listingId}/reviews`, body);
+      const path = resolvePath("marketplace.listings.reviews").replace(":listingId", String(listingId));
+      return this.post(path, body);
     }
 
     async listReviews(listingId: number): Promise<ReviewListResponse> {
-      return this.request(`/marketplace/listings/${listingId}/reviews`);
+      return this.request(resolvePath("marketplace.listings.reviews").replace(":listingId", String(listingId)));
     }
 
     async submitDispute(body: DisputeCreateRequest): Promise<DisputeResponse> {
-      return this.post("/marketplace/disputes", body);
+      return this.post(resolvePath("marketplace.disputes.create"), body);
     }
   };
 }
