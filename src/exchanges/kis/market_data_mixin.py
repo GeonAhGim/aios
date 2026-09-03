@@ -15,9 +15,11 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 from decimal import Decimal
+from typing import Protocol
 
 from src.core.exceptions import FatalExchangeError
 from src.data.models.market_data import Candle, OrderBook, OrderBookLevel, Ticker
+from src.exchanges.common.http_client import KISHTTPClient
 from src.foundation.market_data.contracts.v1 import Venue
 from src.foundation.market_data.domain.reference.symbol_normalizer import (
     to_canonical as _to_canonical_symbol,
@@ -26,8 +28,16 @@ from src.foundation.market_data.domain.reference.symbol_normalizer import (
 _MARKET_CODE = "J"  # KRX
 
 
+class _IntradayCandleClient(KISHTTPClient, Protocol):
+    """get_ohlcv()가 같은 클래스의 _get_intraday_candles()를 호출하지만,
+    self가 KISHTTPClient로 좁혀진 메서드 안에서는 그 사실이 보이지 않으므로
+    명시적으로 계약에 포함한다(bitget _OrderReadingClient와 동일 패턴)."""
+
+    async def _get_intraday_candles(self, symbol: str, *, limit: int = 100) -> list[Candle]: ...
+
+
 class KISMarketDataMixin:
-    async def get_ticker(self, symbol: str) -> Ticker:
+    async def get_ticker(self: KISHTTPClient, symbol: str) -> Ticker:
         """현재가(inquire-price)와 호가(inquire-asking-price-exp-ccn) 두
         엔드포인트를 조합한다 — KIS는 Bitget과 달리 단일 응답에 가격과
         최우선호가를 함께 주지 않는다.
@@ -37,13 +47,13 @@ class KISMarketDataMixin:
         거래소로 그대로 전달된다. `symbol_normalizer`(LA-7)에 검증을
         위임해 fail-closed로 만든다."""
         symbol = _to_canonical_symbol(Venue.KIS_KRX, symbol)
-        price_raw = await self._request(  # type: ignore[attr-defined]
+        price_raw = await self._request(
             "GET",
             "/uapi/domestic-stock/v1/quotations/inquire-price",
             "FHKST01010100",
             params={"FID_COND_MRKT_DIV_CODE": _MARKET_CODE, "FID_INPUT_ISCD": symbol},
         )
-        book_raw = await self._request(  # type: ignore[attr-defined]
+        book_raw = await self._request(
             "GET",
             "/uapi/domestic-stock/v1/quotations/inquire-asking-price-exp-ccn",
             "FHKST01010200",
@@ -65,9 +75,9 @@ class KISMarketDataMixin:
         except KeyError as exc:
             raise FatalExchangeError(f"KIS ticker 응답에 예상 필드 없음: {exc}") from exc
 
-    async def get_orderbook(self, symbol: str, depth: int = 20) -> OrderBook:
+    async def get_orderbook(self: KISHTTPClient, symbol: str, depth: int = 20) -> OrderBook:
         symbol = _to_canonical_symbol(Venue.KIS_KRX, symbol)
-        raw = await self._request(  # type: ignore[attr-defined]
+        raw = await self._request(
             "GET",
             "/uapi/domestic-stock/v1/quotations/inquire-asking-price-exp-ccn",
             "FHKST01010200",
@@ -102,7 +112,9 @@ class KISMarketDataMixin:
             timestamp=datetime.now(timezone.utc),
         )
 
-    async def get_ohlcv(self, symbol: str, timeframe: str, limit: int = 100) -> list[Candle]:
+    async def get_ohlcv(
+        self: _IntradayCandleClient, symbol: str, timeframe: str, limit: int = 100
+    ) -> list[Candle]:
         symbol = _to_canonical_symbol(Venue.KIS_KRX, symbol)
         if timeframe == "1m":
             return await self._get_intraday_candles(symbol, limit=limit)
@@ -114,7 +126,7 @@ class KISMarketDataMixin:
                 "1분봉을 리샘플링해야 한다(02d 스펙 §2, 어댑터 스콥 밖)."
             )
         today = datetime.now(timezone.utc).strftime("%Y%m%d")
-        raw = await self._request(  # type: ignore[attr-defined]
+        raw = await self._request(
             "GET",
             "/uapi/domestic-stock/v1/quotations/inquire-daily-itemchartprice",
             "FHKST03010100",
@@ -148,14 +160,16 @@ class KISMarketDataMixin:
             )
         return candles
 
-    async def _get_intraday_candles(self, symbol: str, *, limit: int = 100) -> list[Candle]:
+    async def _get_intraday_candles(
+        self: KISHTTPClient, symbol: str, *, limit: int = 100
+    ) -> list[Candle]:
         """02d 스펙 §2(P0) — 분봉 조회. 공식 예제(inquire_time_itemchartprice)
         기준 최선 추정치, 라이브 검증 필요. 현재 시각부터 과거 방향으로
         최대 30건까지 한 번에 내려주는 것으로 알려져 있음(문서 관례) —
         `limit`은 응답을 자르는 용도일 뿐 요청 파라미터로 직접 전달되지
         않는다."""
         now = datetime.now(timezone.utc)
-        raw = await self._request(  # type: ignore[attr-defined]
+        raw = await self._request(
             "GET",
             "/uapi/domestic-stock/v1/quotations/inquire-time-itemchartprice",
             "FHKST03010200",
@@ -189,11 +203,11 @@ class KISMarketDataMixin:
             )
         return candles
 
-    async def is_market_holiday(self, date: str) -> bool:
+    async def is_market_holiday(self: KISHTTPClient, date: str) -> bool:
         """02d 스펙 §2(P0) — `date`는 "YYYYMMDD". MarketHours 정확도
         보강용(현재 get_capabilities()의 고정 스케줄은 공휴일을 모른다).
         공식 예제(chk_holiday) 기준 최선 추정치, 라이브 검증 필요."""
-        raw = await self._request(  # type: ignore[attr-defined]
+        raw = await self._request(
             "GET",
             "/uapi/domestic-stock/v1/quotations/chk-holiday",
             "CTCA0903R",

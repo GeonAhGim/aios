@@ -19,12 +19,13 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
-from typing import Any
+from typing import Any, Protocol
 from uuid import uuid4
 
 from src.core.exceptions import FatalExchangeError
 from src.data.models.base import AssetClass
-from src.data.models.trading import Order, OrderSide, OrderStatus, OrderType
+from src.data.models.trading import AccountBalance, Order, OrderSide, OrderStatus, OrderType
+from src.exchanges.common.http_client import KISHTTPClient
 
 _EXCHANGE_ID = "KRX"  # Phase 1 대상(06번 §6.1)
 
@@ -42,11 +43,31 @@ def _split_exchange_order_id(exchange_order_id: str) -> tuple[str, str]:
     return orgno, odno
 
 
+class _BalanceCheckingClient(KISHTTPClient, Protocol):
+    """health_check()가 같은 어댑터에 조립되는 KISAccountMixin.get_balance()를
+    호출하지만, self가 KISHTTPClient로 좁혀진 메서드 안에서는 그 사실이
+    보이지 않으므로 명시적으로 계약에 포함한다(bitget _OrderReadingClient와
+    동일 패턴)."""
+
+    async def get_balance(self, asset: str | None = None) -> list[AccountBalance]: ...
+
+
+class _OrderMutatingClient(KISHTTPClient, Protocol):
+    """cancel_order()/modify_order()가 같은 클래스의 _rvsecncl()/get_order()를
+    호출한다 — 위와 동일 이유로 명시적으로 계약에 포함한다."""
+
+    async def _rvsecncl(
+        self, order_id: str, *, decision: str, quantity: Decimal | None
+    ) -> dict[str, Any]: ...
+
+    async def get_order(self, order_id: str) -> Order: ...
+
+
 class KISTradingMixin:
-    async def place_order(self, order: Order) -> Order:
+    async def place_order(self: KISHTTPClient, order: Order) -> Order:
         body: dict[str, Any] = {
-            "CANO": self._cano,  # type: ignore[attr-defined]
-            "ACNT_PRDT_CD": self._acnt_prdt_cd,  # type: ignore[attr-defined]
+            "CANO": self._cano,
+            "ACNT_PRDT_CD": self._acnt_prdt_cd,
             "PDNO": order.symbol,
             "ORD_DVSN": _order_division(order.order_type),
             "ORD_QTY": str(order.quantity),
@@ -56,7 +77,7 @@ class KISTradingMixin:
             "CNDT_PRIC": "",
         }
         tr_id = "TTTC0012U" if order.side == OrderSide.BUY else "TTTC0011U"
-        raw = await self._request(  # type: ignore[attr-defined]
+        raw = await self._request(
             "POST", "/uapi/domestic-stock/v1/trading/order-cash", tr_id, body=body
         )
         # 레드팀 감사(docs/RED_TEAM_FINDINGS.md #18b) 반영 — market_data_mixin과
@@ -72,12 +93,12 @@ class KISTradingMixin:
         )
 
     async def _rvsecncl(
-        self, order_id: str, *, decision: str, quantity: Decimal | None
+        self: KISHTTPClient, order_id: str, *, decision: str, quantity: Decimal | None
     ) -> dict[str, Any]:
         orgno, odno = _split_exchange_order_id(order_id)
         body: dict[str, Any] = {
-            "CANO": self._cano,  # type: ignore[attr-defined]
-            "ACNT_PRDT_CD": self._acnt_prdt_cd,  # type: ignore[attr-defined]
+            "CANO": self._cano,
+            "ACNT_PRDT_CD": self._acnt_prdt_cd,
             "KRX_FWDG_ORD_ORGNO": orgno,
             "ORGN_ODNO": odno,
             "ORD_DVSN": "00",
@@ -87,32 +108,32 @@ class KISTradingMixin:
             "QTY_ALL_ORD_YN": "N" if quantity is not None else "Y",
             "EXCG_ID_DVSN_CD": _EXCHANGE_ID,
         }
-        return await self._request(  # type: ignore[attr-defined,no-any-return]
+        return await self._request(
             "POST", "/uapi/domestic-stock/v1/trading/order-rvsecncl", "TTTC0013U", body=body
         )
 
-    async def cancel_order(self, order_id: str) -> bool:
+    async def cancel_order(self: _OrderMutatingClient, order_id: str) -> bool:
         raw = await self._rvsecncl(order_id, decision="02", quantity=None)
         return bool(raw.get("rt_cd") == "0")
 
-    async def modify_order(self, order_id: str, **kwargs: Any) -> Order:
+    async def modify_order(self: _OrderMutatingClient, order_id: str, **kwargs: Any) -> Order:
         quantity = kwargs.get("quantity")
         await self._rvsecncl(order_id, decision="01", quantity=quantity)
         return await self.get_order(order_id)
 
-    async def get_order(self, order_id: str) -> Order:
+    async def get_order(self: KISHTTPClient, order_id: str) -> Order:
         """편차: BitgetAdapter.get_order()와 동일 이유로 AIOS 전용 필드
         (strategy_id 등)는 자리표시자 — 호출부가 DB 행과 병합해야 한다."""
         _, odno = _split_exchange_order_id(order_id)
         today = datetime.now(timezone.utc)
         start = (today - timedelta(days=7)).strftime("%Y%m%d")
-        raw = await self._request(  # type: ignore[attr-defined]
+        raw = await self._request(
             "GET",
             "/uapi/domestic-stock/v1/trading/inquire-daily-ccld",
             "TTTC0081R",
             params={
-                "CANO": self._cano,  # type: ignore[attr-defined]
-                "ACNT_PRDT_CD": self._acnt_prdt_cd,  # type: ignore[attr-defined]
+                "CANO": self._cano,
+                "ACNT_PRDT_CD": self._acnt_prdt_cd,
                 "INQR_STRT_DT": start,
                 "INQR_END_DT": today.strftime("%Y%m%d"),
                 "SLL_BUY_DVSN_CD": "00",
@@ -160,18 +181,20 @@ class KISTradingMixin:
             asset_class=AssetClass.KR_EQUITY,
         )
 
-    async def get_buyable_amount(self, symbol: str, price: Decimal) -> dict[str, Any]:
+    async def get_buyable_amount(
+        self: KISHTTPClient, symbol: str, price: Decimal
+    ) -> dict[str, Any]:
         """02d 스펙 §2(P0) — FD-4.1 사전검증(주문가능금액/수량). 공식
         예제(inquire_psbl_order) 기준 최선 추정치, 라이브 검증 필요.
         raw dict 반환 — 현금/신용/증거금 등 여러 금액 필드가 함께
         내려와(§2 모델 재사용 원칙) 아직 모델화하지 않는다."""
-        raw = await self._request(  # type: ignore[attr-defined]
+        raw = await self._request(
             "GET",
             "/uapi/domestic-stock/v1/trading/inquire-psbl-order",
             "TTTC8908R",
             params={
-                "CANO": self._cano,  # type: ignore[attr-defined]
-                "ACNT_PRDT_CD": self._acnt_prdt_cd,  # type: ignore[attr-defined]
+                "CANO": self._cano,
+                "ACNT_PRDT_CD": self._acnt_prdt_cd,
                 "PDNO": symbol,
                 "ORD_UNPR": str(price),
                 "ORD_DVSN": "00",
@@ -181,34 +204,34 @@ class KISTradingMixin:
         )
         return dict(raw.get("output", {}))
 
-    async def get_sellable_quantity(self, symbol: str) -> Decimal:
+    async def get_sellable_quantity(self: KISHTTPClient, symbol: str) -> Decimal:
         """02d 스펙 §2(P0). 공식 예제(inquire_psbl_sell) 기준 최선
         추정치, 라이브 검증 필요."""
-        raw = await self._request(  # type: ignore[attr-defined]
+        raw = await self._request(
             "GET",
             "/uapi/domestic-stock/v1/trading/inquire-psbl-sell",
             "TTTC8408R",
             params={
-                "CANO": self._cano,  # type: ignore[attr-defined]
-                "ACNT_PRDT_CD": self._acnt_prdt_cd,  # type: ignore[attr-defined]
+                "CANO": self._cano,
+                "ACNT_PRDT_CD": self._acnt_prdt_cd,
                 "PDNO": symbol,
             },
         )
         output = raw.get("output", {})
         return Decimal(output.get("ord_psbl_qty", "0"))
 
-    async def get_cancelable_orders(self) -> list[dict[str, Any]]:
+    async def get_cancelable_orders(self: KISHTTPClient) -> list[dict[str, Any]]:
         """02d 스펙 §2(P0) — FD-4.4 정정 전 검증. 공식 예제
         (inquire_psbl_rvsecncl) 기준 최선 추정치, 라이브 검증 필요. raw
         dict 리스트 반환(정정취소 가능수량 등 KIS 전용 필드 위주라
         Order 모델과 형태가 다름)."""
-        raw = await self._request(  # type: ignore[attr-defined]
+        raw = await self._request(
             "GET",
             "/uapi/domestic-stock/v1/trading/inquire-psbl-rvsecncl",
             "TTTC0084R",
             params={
-                "CANO": self._cano,  # type: ignore[attr-defined]
-                "ACNT_PRDT_CD": self._acnt_prdt_cd,  # type: ignore[attr-defined]
+                "CANO": self._cano,
+                "ACNT_PRDT_CD": self._acnt_prdt_cd,
                 "CTX_AREA_FK100": "",
                 "CTX_AREA_NK100": "",
                 "INQR_DVSN_1": "0",
@@ -218,19 +241,19 @@ class KISTradingMixin:
         return list(raw.get("output", []))
 
     async def get_realized_pnl(
-        self, *, start_date: str | None = None, end_date: str | None = None
+        self: KISHTTPClient, *, start_date: str | None = None, end_date: str | None = None
     ) -> list[dict[str, Any]]:
         """02d 스펙 §2(P0) — FD-20(운용보고서) 보강용. 공식 예제
         (inquire_balance_rlz_pl) 기준 최선 추정치, 라이브 검증 필요.
         `start_date`/`end_date`는 "YYYYMMDD", 생략 시 당일."""
         today = datetime.now(timezone.utc).strftime("%Y%m%d")
-        raw = await self._request(  # type: ignore[attr-defined]
+        raw = await self._request(
             "GET",
             "/uapi/domestic-stock/v1/trading/inquire-balance-rlz-pl",
             "TTTC8494R",
             params={
-                "CANO": self._cano,  # type: ignore[attr-defined]
-                "ACNT_PRDT_CD": self._acnt_prdt_cd,  # type: ignore[attr-defined]
+                "CANO": self._cano,
+                "ACNT_PRDT_CD": self._acnt_prdt_cd,
                 "INQR_STRT_DT": start_date or today,
                 "INQR_END_DT": end_date or today,
                 "PDNO": "",
@@ -241,9 +264,9 @@ class KISTradingMixin:
         )
         return list(raw.get("output1", []))
 
-    async def health_check(self) -> bool:
+    async def health_check(self: _BalanceCheckingClient) -> bool:
         try:
-            await self.get_balance()  # type: ignore[attr-defined]
+            await self.get_balance()
             return True
         except Exception:  # noqa: BLE001 — 헬스체크는 어떤 예외든 False로 수렴
             return False

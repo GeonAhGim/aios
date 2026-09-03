@@ -24,6 +24,7 @@ from typing import Any, NamedTuple
 
 from src.data.models.market_data import Ticker
 from src.data.models.trading import AccountBalance, Order, OrderSide, OrderStatus
+from src.exchanges.common.http_client import KISHTTPClient
 
 
 class _MarketCodes(NamedTuple):
@@ -56,9 +57,9 @@ def _market_codes(market: str) -> _MarketCodes:
 
 
 class KISOverseasStockMixin:
-    async def get_overseas_ticker(self, symbol: str, market: str) -> Ticker:
+    async def get_overseas_ticker(self: KISHTTPClient, symbol: str, market: str) -> Ticker:
         codes = _market_codes(market)
-        raw = await self._request(  # type: ignore[attr-defined]
+        raw = await self._request(
             "GET",
             "/uapi/overseas-price/v1/quotations/price",
             "HHDFS00000300",
@@ -77,12 +78,12 @@ class KISOverseasStockMixin:
             source_type="primary",
         )
 
-    async def place_overseas_order(self, order: Order, market: str) -> Order:
+    async def place_overseas_order(self: KISHTTPClient, order: Order, market: str) -> Order:
         codes = _market_codes(market)
         tr_id = codes.buy_tr_id if order.side == OrderSide.BUY else codes.sell_tr_id
         body: dict[str, Any] = {
-            "CANO": self._cano,  # type: ignore[attr-defined]
-            "ACNT_PRDT_CD": self._acnt_prdt_cd,  # type: ignore[attr-defined]
+            "CANO": self._cano,
+            "ACNT_PRDT_CD": self._acnt_prdt_cd,
             "OVRS_EXCG_CD": codes.order_excg_cd,
             "PDNO": order.symbol,
             "ORD_QTY": str(order.quantity),
@@ -93,7 +94,7 @@ class KISOverseasStockMixin:
             "ORD_SVR_DVSN_CD": "0",
             "ORD_DVSN": "00",
         }
-        raw = await self._request(  # type: ignore[attr-defined]
+        raw = await self._request(
             "POST", "/uapi/overseas-stock/v1/trading/order", tr_id, body=body
         )
         output = raw.get("output", {})
@@ -103,7 +104,12 @@ class KISOverseasStockMixin:
         )
 
     async def cancel_overseas_order(
-        self, order_id: str, symbol: str, market: str, *, original_quantity: Decimal
+        self: KISHTTPClient,
+        order_id: str,
+        symbol: str,
+        market: str,
+        *,
+        original_quantity: Decimal,
     ) -> bool:
         """미국 시장 기준으로 확인된 tr_id(TTTT1004U)만 신뢰도가 있다 —
         다른 시장의 정정취소 tr_id는 이번 조사에서 확인하지 못해 US와
@@ -113,8 +119,8 @@ class KISOverseasStockMixin:
         codes = _market_codes(market)
         orgno, odno = order_id.split(":", 1)
         body: dict[str, Any] = {
-            "CANO": self._cano,  # type: ignore[attr-defined]
-            "ACNT_PRDT_CD": self._acnt_prdt_cd,  # type: ignore[attr-defined]
+            "CANO": self._cano,
+            "ACNT_PRDT_CD": self._acnt_prdt_cd,
             "OVRS_EXCG_CD": codes.order_excg_cd,
             "PDNO": symbol,
             "ORGN_ODNO": odno,
@@ -124,20 +130,22 @@ class KISOverseasStockMixin:
             "MGCO_APTM_ODNO": "",
             "ORD_SVR_DVSN_CD": "0",
         }
-        raw = await self._request(  # type: ignore[attr-defined]
+        raw = await self._request(
             "POST", "/uapi/overseas-stock/v1/trading/order-rvsecncl", "TTTT1004U", body=body
         )
         return bool(raw.get("rt_cd") == "0")
 
-    async def get_overseas_balance(self, market: str) -> list[AccountBalance]:
+    async def get_overseas_balance(
+        self: KISHTTPClient, market: str
+    ) -> list[AccountBalance]:
         codes = _market_codes(market)
-        raw = await self._request(  # type: ignore[attr-defined]
+        raw = await self._request(
             "GET",
             "/uapi/overseas-stock/v1/trading/inquire-balance",
             "TTTS3012R",
             params={
-                "CANO": self._cano,  # type: ignore[attr-defined]
-                "ACNT_PRDT_CD": self._acnt_prdt_cd,  # type: ignore[attr-defined]
+                "CANO": self._cano,
+                "ACNT_PRDT_CD": self._acnt_prdt_cd,
                 "OVRS_EXCG_CD": codes.order_excg_cd,
                 "TR_CRCY_CD": "USD" if market.upper() == "US" else "",
                 "CTX_AREA_FK200": "",

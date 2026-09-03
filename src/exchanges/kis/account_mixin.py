@@ -12,6 +12,7 @@ from __future__ import annotations
 from decimal import Decimal
 
 from src.data.models.trading import AccountBalance, Position
+from src.exchanges.common.http_client import KISHTTPClient
 
 _BALANCE_PARAMS = {
     "AFHR_FLPR_YN": "N",
@@ -27,14 +28,14 @@ _BALANCE_PARAMS = {
 
 
 class KISAccountMixin:
-    async def get_balance(self, asset: str | None = None) -> list[AccountBalance]:
-        raw = await self._request(  # type: ignore[attr-defined]
+    async def get_balance(self: KISHTTPClient, asset: str | None = None) -> list[AccountBalance]:
+        raw = await self._request(
             "GET",
             "/uapi/domestic-stock/v1/trading/inquire-balance",
             "TTTC8434R",
             params={
-                "CANO": self._cano,  # type: ignore[attr-defined]
-                "ACNT_PRDT_CD": self._acnt_prdt_cd,  # type: ignore[attr-defined]
+                "CANO": self._cano,
+                "ACNT_PRDT_CD": self._acnt_prdt_cd,
                 **_BALANCE_PARAMS,
             },
         )

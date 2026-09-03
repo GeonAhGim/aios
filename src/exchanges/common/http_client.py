@@ -38,3 +38,28 @@ class SignedRequestClient(Protocol):
     ) -> dict[str, Any]: ...
 
     def get_capabilities(self) -> ExchangeCapability: ...
+
+
+@runtime_checkable
+class KISHTTPClient(Protocol):
+    """PLT-40b — KIS 믹스인이 요구하는 최소 HTTP 계약.
+
+    `SignedRequestClient`를 상속하지 않고 별개로 선언한다: KIS `_request`는
+    `tr_id`(거래ID)를 세 번째 위치 인자로 필수 요구해 bitget의
+    `_request(method, path, *, params=, body=)`와 시그니처가 근본적으로
+    다르다 — 상속해 오버라이드하면 mypy가 호환되지 않는 오버라이드로
+    새 오류를 낸다. 계좌 필수 파라미터(CANO/ACNT_PRDT_CD)도 KIS 전용이다.
+    """
+
+    _cano: str
+    _acnt_prdt_cd: str
+
+    async def _request(
+        self,
+        method: str,
+        path: str,
+        tr_id: str,
+        *,
+        params: dict[str, Any] | None = None,
+        body: dict[str, Any] | None = None,
+    ) -> dict[str, Any]: ...
