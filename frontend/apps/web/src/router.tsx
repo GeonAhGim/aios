@@ -29,6 +29,7 @@ import { ReportsPage } from "./routes/reports/ReportsPage";
 import { WriteReviewPage } from "./routes/reviews/WriteReviewPage";
 import { AccountDeletionPage } from "./routes/settings/AccountDeletionPage";
 import { ApprovalSettingsPage } from "./routes/settings/ApprovalSettingsPage";
+import { MembersPage } from "./routes/settings/MembersPage";
 import { NotificationSettingsPage } from "./routes/settings/NotificationSettingsPage";
 import { SessionsPage } from "./routes/settings/SessionsPage";
 import { StrategyBuilderPage } from "./routes/strategy-builder/StrategyBuilderPage";
@@ -75,6 +76,7 @@ export const router = createBrowserRouter([
   { path: "/settings/notifications", element: protect(<NotificationSettingsPage />) },
   { path: "/settings/account", element: protect(<AccountDeletionPage />) },
   { path: "/settings/sessions", element: protect(<SessionsPage />) },
+  { path: "/settings/members", element: protect(<MembersPage />) },
   { path: "/reviews/write/:purchaseId", element: protect(<WriteReviewPage />) },
   { path: "/disputes/submit", element: protect(<DisputeSubmitPage />) },
   { path: "/admin", element: protectAdmin(<AdminHomePage />) },
