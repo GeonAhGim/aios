@@ -22,19 +22,19 @@ position_key를 재사용하면 `_acquire_position_lock`의 advisory lock이 반
 Postgres 경합 자체의 해소는 PLT-36/task-460의 xdist worker별 DB 격리 범위,
 이 테스트 전용 리프에서 임계값을 낮추거나 DB 환경을 바꾸지 않는다).
 
-실결함(task-489/LB-18 발견, needs_decision — `test_journal_append_p95_under_30ms`
-(LC-17, task-614)와 같은 근본원인의 재발): 다른 동시 부하 없이 이 파일만
-단독 실행해도(위 마커로 이미 분리됨) 이 환경(aios_test_backend_3, localhost)의
-p95는 11회 반복 실측 중 10회가 목표(30ms)를 초과했다(범위 23~113ms, 대부분
-50~110ms — 1/11만 우연히 통과). `record_fill()` 한 번이 순차 DB 왕복을
-~11회 만든다(position lock 1 + snapshot 조회 1 + 멱등 사전조회(`list_for`) 1
-+ `journal.append`의 락 재진입·멱등 조회·snapshot 조회·last-entry 조회·INSERT
-5 + snapshot upsert 1 + 감사 `append_event_in`의 락·prev 조회·INSERT 3,
-LC-17 docstring의 "왕복 축소는 코드 변경이라 테스트 전용 리프 범위 밖"과
-같은 이유로 여기서 왕복을 줄이지 않는다) — 왕복 지연에 민감한 구조라
-로컬 공유 Postgres 인스턴스에서는 목표를 안정적으로 만족시키지 못한다.
-아래 단언은 스펙이 요구하는 목표(30ms)를 그대로 걸고, `xfail(strict=True)`로
-고정해 조용히 넘기지 않는다."""
+task-653(LB-18 후속)에서 `record_fill()` 호출당 순차 DB 왕복을 ~11회에서
+~9회로 줄였다: 멱등 사전조회를 `journal.list_for`(O(n))에서 `idempotency_key`
+UNIQUE 인덱스 EXISTS(O(1))로 바꾸고, `journal.append` 내부의 멱등 조회·
+snapshot 소유자 조회·last-entry 조회 3왕복을 LEFT JOIN 통합 SELECT 1회로
+합쳤다(advisory lock은 단독 왕복으로 유지 — PG가 FROM절을 lock 함수보다
+먼저 평가해 같은 SELECT에 lock을 얹으면 20-way 동시 append가 실제로
+깨진다, `postgres_journal_repository.py` 주석 참고). 정합성(락 범위·
+sequence_no 연속성·감사 1:1)은 약화하지 않았다 — `test_postgres_journal_repository.py`
+전체와 20-way 동시성 테스트가 그대로 통과함으로 확인했다. 아래 단언은
+스펙이 요구하는 목표(30ms)를 그대로 건다 — 로컬 공유 머신의 동시 부하로
+인한 실패는 이 단언을 약화(xfail/marker 분리/임계 완화)할 사유가 아니다
+(§8.4 계약, task-653 decision). 최종 판정 환경은 이 파일이 아니라
+local_ci(전용 worktree, 직렬 실행)다."""
 from __future__ import annotations
 
 import time
@@ -80,16 +80,6 @@ def _key() -> str:
 
 
 @pytest.mark.perf
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "실결함(task-489/LB-18 발견, needs_decision — LC-17/task-614와 같은 근본원인): "
-        "record_fill()이 호출당 ~11회 순차 DB 왕복을 만들어 이 환경(aios_test_backend_3, "
-        "localhost)에서 p95가 대부분 목표(30ms)를 초과한다(11회 실측 23~113ms, 1/11만 통과). "
-        "모듈 docstring 참고 — 왕복 축소는 프로덕션 코드 변경이라 이 테스트 전용 리프 "
-        "범위 밖."
-    ),
-)
 async def test_record_fill_journal_append_p95_under_30ms(pool) -> None:
     journal = PostgresJournalRepository(pool)
     snapshots = PostgresSnapshotRepository(pool)

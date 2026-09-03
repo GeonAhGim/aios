@@ -12,8 +12,8 @@ lock을 선점해 두는 이유는 원가법(FIFO/WEIGHTED) 계산이 "잠금 �
 경쟁상태가 생긴다. `journal.append`가 다시 같은 lock을 요청하는 것은
 같은 트랜잭션 안에서는 즉시 반환되므로(재진입) 안전하다.
 
-멱등 재입력은 `journal.list_for`로 같은 `idempotency_key`가 이미 있는지
-먼저 살펴 원가법 계산 자체를 건너뛴다 — 이미 소진된 로트 위에 같은 체결을
+멱등 재입력은 `pos_journal.idempotency_key`에 이미 같은 키가 있는지(EXISTS,
+UNIQUE 인덱스라 O(1)) 먼저 살펴 원가법 계산 자체를 건너뛴다 — 이미 소진된 로트 위에 같은 체결을
 또 적용하면 (진짜로는 멱등인데도) `NegativeQuantityError`가 잘못 튀어나올
 수 있기 때문이다(재전송은 성공해야 한다). 그래도 최종 판단은 `journal.append`
 가 돌려주는 `sequence_no`로 한다 — `sequence_no <= snapshot.last_journal_seq`
@@ -170,8 +170,16 @@ async def record_fill(
         raise UnknownPositionError(command.position_key)
 
     idempotency_key = f"fill:{command.order_id}:{command.fill_seq}"
-    existing_entries = await journal.list_for(conn, command.position_key)
-    is_replay_candidate = any(e.idempotency_key == idempotency_key for e in existing_entries)
+    # `journal.list_for`(position_key의 전체 저널을 O(n) 조회)를 여기서만
+    # 쓰려고 부르면 원가법 재계산 스킵 여부만 판단하는 데 과하다 —
+    # `idempotency_key`는 `pos_journal`에 UNIQUE 인덱스가 있으므로 EXISTS로
+    # O(1) 판정한다(§8.4 왕복 축소, task-653). 최종 신규/REPLAY 판정은 여전히
+    # `journal.append`가 돌려주는 `sequence_no`로 한다(아래) — 이 EXISTS는
+    # "원가법을 다시 계산해도 되는가"만 결정한다.
+    is_replay_candidate = await conn.fetchval(
+        "SELECT EXISTS(SELECT 1 FROM pos_journal WHERE idempotency_key = $1)",
+        idempotency_key,
+    )
 
     if is_replay_candidate:
         realized_pnl_base = Decimal("0")

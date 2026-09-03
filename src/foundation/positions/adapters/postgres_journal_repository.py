@@ -28,6 +28,7 @@ from __future__ import annotations
 import hashlib
 import json
 from decimal import Decimal
+from typing import Any
 
 import asyncpg
 from pydantic import AwareDatetime
@@ -82,7 +83,7 @@ def _entry_hash(
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 
-def _row_to_view(row: asyncpg.Record) -> PositionJournalEntryView:
+def _row_to_view(row: asyncpg.Record | dict[str, Any]) -> PositionJournalEntryView:
     price = (
         None
         if row["price"] is None
@@ -133,6 +134,11 @@ class PostgresJournalRepository:
         idempotency_key: str,
         occurred_at: AwareDatetime,
     ) -> PositionJournalEntryView:
+        # lock은 항상 단독 왕복으로 남긴다. 아래 통합 SELECT의 FROM/JOIN 절에
+        # 얹어 왕복 하나를 더 줄이는 시도는 PG가 FROM절을 lock 함수보다 먼저
+        # 평가해(잠금 선점 전에 last_entry를 읽어버림) 20-way 동시 append에서
+        # (position_key, sequence_no) UNIQUE 위반을 실제로 재현시켰다(task-653
+        # 실측) — 되돌리지 말 것.
         await conn.execute(
             "SELECT pg_advisory_xact_lock(hashtext($1), hashtext($2))",
             _LOCK_NAMESPACE,
@@ -140,28 +146,77 @@ class PostgresJournalRepository:
         )
 
         new_digest = _digest(qty_delta, price, fee, occurred_at)
-        existing = await conn.fetchrow(
-            "SELECT * FROM pos_journal WHERE idempotency_key = $1", idempotency_key
-        )
-        if existing is not None:
-            if existing["digest"] != new_digest:
-                raise IdempotencyDigestMismatchError(idempotency_key)
-            return _row_to_view(existing)
 
-        snapshot_row = await conn.fetchrow(
-            "SELECT tenant_id, account_id FROM pos_snapshot WHERE position_key = $1",
+        # 멱등 조회 + 스냅샷 소유자(tenant/account) 조회 + 직전 행(sequence_no·
+        # entry_hash) 조회를 LEFT JOIN 하나로 묶어 3왕복을 1왕복으로 줄인다.
+        # snapshot이 없어도(신규 position_key) last_entry는 항상 빈 결과라
+        # 로직에 영향이 없다.
+        combined = await conn.fetchrow(
+            "SELECT "
+            " snap.tenant_id AS snap_tenant_id, snap.account_id AS snap_account_id, "
+            " last_entry.sequence_no AS last_sequence_no, "
+            " last_entry.entry_hash AS last_entry_hash, "
+            " existing.id AS existing_id, existing.position_key AS existing_position_key, "
+            " existing.sequence_no AS existing_sequence_no, "
+            " existing.entry_type AS existing_entry_type, "
+            " existing.qty_delta AS existing_qty_delta, existing.price AS existing_price, "
+            " existing.price_ccy AS existing_price_ccy, existing.fee AS existing_fee, "
+            " existing.fee_ccy AS existing_fee_ccy, "
+            " existing.realized_pnl_base AS existing_realized_pnl_base, "
+            " existing.fx_rate AS existing_fx_rate, existing.fx_source AS existing_fx_source, "
+            " existing.source_event_type AS existing_source_event_type, "
+            " existing.source_event_id AS existing_source_event_id, "
+            " existing.idempotency_key AS existing_idempotency_key, "
+            " existing.digest AS existing_digest, existing.prev_hash AS existing_prev_hash, "
+            " existing.entry_hash AS existing_entry_hash, "
+            " existing.occurred_at AS existing_occurred_at, "
+            " existing.recorded_at AS existing_recorded_at "
+            "FROM (SELECT $2::varchar AS position_key) AS target "
+            "LEFT JOIN pos_snapshot snap ON snap.position_key = target.position_key "
+            "LEFT JOIN LATERAL ("
+            "  SELECT sequence_no, entry_hash FROM pos_journal "
+            "  WHERE position_key = target.position_key "
+            "  ORDER BY sequence_no DESC LIMIT 1"
+            ") last_entry ON true "
+            "LEFT JOIN pos_journal existing ON existing.idempotency_key = $1",
+            idempotency_key,
             position_key,
         )
-        if snapshot_row is None:
+        assert combined is not None
+
+        if combined["existing_id"] is not None:
+            if combined["existing_digest"] != new_digest:
+                raise IdempotencyDigestMismatchError(idempotency_key)
+            return _row_to_view(
+                {
+                    "id": combined["existing_id"],
+                    "position_key": combined["existing_position_key"],
+                    "sequence_no": combined["existing_sequence_no"],
+                    "entry_type": combined["existing_entry_type"],
+                    "qty_delta": combined["existing_qty_delta"],
+                    "price": combined["existing_price"],
+                    "price_ccy": combined["existing_price_ccy"],
+                    "fee": combined["existing_fee"],
+                    "fee_ccy": combined["existing_fee_ccy"],
+                    "realized_pnl_base": combined["existing_realized_pnl_base"],
+                    "fx_rate": combined["existing_fx_rate"],
+                    "fx_source": combined["existing_fx_source"],
+                    "source_event_type": combined["existing_source_event_type"],
+                    "source_event_id": combined["existing_source_event_id"],
+                    "idempotency_key": combined["existing_idempotency_key"],
+                    "prev_hash": combined["existing_prev_hash"],
+                    "entry_hash": combined["existing_entry_hash"],
+                    "occurred_at": combined["existing_occurred_at"],
+                    "recorded_at": combined["existing_recorded_at"],
+                }
+            )
+
+        if combined["snap_tenant_id"] is None:
             raise UnknownPositionError(position_key)
 
-        last_row = await conn.fetchrow(
-            "SELECT sequence_no, entry_hash FROM pos_journal "
-            "WHERE position_key = $1 ORDER BY sequence_no DESC LIMIT 1",
-            position_key,
-        )
-        next_seq = 1 if last_row is None else last_row["sequence_no"] + 1
-        prev_hash: str | None = None if last_row is None else last_row["entry_hash"]
+        last_sequence_no = combined["last_sequence_no"]
+        next_seq = 1 if last_sequence_no is None else last_sequence_no + 1
+        prev_hash: str | None = combined["last_entry_hash"]
         new_hash = _entry_hash(
             prev_hash, position_key, next_seq, entry_type, new_digest, occurred_at
         )
@@ -174,8 +229,8 @@ class PostgresJournalRepository:
             " entry_hash, occurred_at) "
             "VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20) "
             "RETURNING *",
-            snapshot_row["tenant_id"],
-            snapshot_row["account_id"],
+            combined["snap_tenant_id"],
+            combined["snap_account_id"],
             position_key,
             next_seq,
             entry_type.value,
