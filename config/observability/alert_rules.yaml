@@ -1,0 +1,89 @@
+# Spec: docs/specs/L4_platform_observability_tenancy_api_v1.0.md §7.4 (알림 규칙 A1~A11)
+#
+# 메트릭 이름은 src/core/observability/metric_names.py의 상수를 Prometheus 노출 형식
+# (`.` -> `_`, `to_prom()`)으로 그대로 참조한다 — 새 이름을 여기서 지어내지 않는다.
+# tests/platform/unit/test_alert_rules_reference_known_metrics.py가 각 규칙 `expr`
+# 안의 `aios_*` 토큰 전부를 metric_names.py의 ALL_METRIC_NAMES와 대조한다.
+#
+# `runbook` 라벨은 docs/runbooks/RB-NN.md 파일명과 정확히 일치해야 한다(같은 테스트가 대조).
+groups:
+  - name: aios-platform
+    interval: 1m
+    rules:
+      # A1: 105번 §2 "동시성 충돌"은 Prometheus 메트릭이 아니라 108 §4 표준 로그 이벤트
+      # `<aggregate>_concurrency_conflict`다(도메인마다 다른 카운터를 등록하지 않고 로그
+      # 어휘로 통일 — 108_structured_logging_and_observability_field_standard_v1.0.md §5-1).
+      # 따라서 `source: logs`이며 expr은 로그 집계 백엔드(LogQL 등)에서 평가한다 — expr 안에
+      # `aios_*` 메트릭 토큰이 없으므로 metric_names.py 대조 대상이 아니다.
+      - alert: A1_ConcurrencyConflictSpike
+        source: logs
+        expr: 'sum(rate({event=~".*_concurrency_conflict"}[5m])) > 3 * sum(rate({event=~".*_concurrency_conflict"}[1h]))'
+        for: 0m
+        labels: {severity: warn, runbook: RB-08}
+        annotations: {summary: "동시성 충돌 이벤트 비율이 1시간 평균 대비 3배 이상 급증(105 §1 재발 패턴 의심)"}
+
+      - alert: A2_EventBusQueueDepthHigh
+        expr: aios_event_bus_queue_depth_gauge > 800
+        for: 5m
+        labels: {severity: warn, runbook: RB-01}
+        annotations: {summary: "{{ $labels.topic }} 이벤트 버스 큐 깊이가 800(최대 1000의 80%)을 5분 이상 초과"}
+
+      # A3: 미검증 — aios.loop.interval.seconds 메트릭이 아직 없다(loop_health.py는 §2.1
+      # 표에 등록된 신규 파일이지만 이 리프의 범위 밖 — 아직 구현되지 않음). 정확한
+      # `last_success_age > 3×interval`을 표현할 수 없어, 대표 tick 간격(5분) 기준
+      # 3배인 900초를 정적 임계값으로 근사한다. loop_health가 interval을 메트릭으로
+      # 노출하면 `aios_loop_last_success_age_seconds > 3 * aios_loop_interval_seconds`로
+      # 교체해야 한다.
+      - alert: A3_LoopStale
+        expr: aios_loop_last_success_age_seconds > 900
+        for: 2m
+        labels: {severity: critical, runbook: RB-01}
+        annotations: {summary: "{{ $labels.loop }} 루프가 {{ $value }}초 동안 성공하지 못함"}
+
+      - alert: A4_LiveBlockedInPaper
+        expr: increase(aios_foundation_paper_control_order_intent_count_total{mode="live_blocked"}[5m]) > 0
+        for: 0m
+        labels: {severity: critical, runbook: RB-03}
+        annotations: {summary: "PAPER 런타임에서 LIVE 주문 시도가 차단됨 — 설정 오류 또는 공격 시도"}
+
+      - alert: A5_TenantMismatchOnTrace
+        expr: increase(aios_auth_tenant_mismatch_count_total[5m]) > 0
+        for: 0m
+        labels: {severity: critical, runbook: RB-04}
+        annotations: {summary: "같은 trace_id에 둘 이상의 tenant_id 관측(108 §5-4)"}
+
+      - alert: A6_AuthAbuseSurge
+        expr: increase(aios_auth_lockout_count_total[10m]) > 10 or increase(aios_auth_rate_limited_count_total{policy="auth_login"}[10m]) > 20
+        for: 0m
+        labels: {severity: warn, runbook: RB-07}
+        annotations: {summary: "계정 잠금 또는 로그인 rate limit 초과가 10분 내 급증 — 인증 남용 의심"}
+
+      - alert: A7_AuditAppendFailed
+        expr: increase(aios_audit_append_count_total{outcome="error"}[5m]) > 0
+        for: 0m
+        labels: {severity: critical, runbook: RB-02}
+        annotations: {summary: "감사 로그 append 실패 발생 — RB-02 기준에 따라 신규 배포 시작 금지"}
+
+      - alert: A8_BreakGlassUsed
+        expr: increase(aios_security_break_glass_count_total{phase="used"}[1h]) > 0
+        for: 0m
+        labels: {severity: critical, runbook: RB-06}
+        annotations: {summary: "break-glass 권한이 사용됨 — 정보성이지만 반드시 사람이 사후 확인"}
+
+      - alert: A9_AdapterFatalRatioHigh
+        expr: (sum by (exchange) (rate(aios_adapter_request_count_total{outcome="fatal"}[5m])) / sum by (exchange) (rate(aios_adapter_request_count_total[5m]))) > 0.05
+        for: 5m
+        labels: {severity: warn, runbook: RB-05}
+        annotations: {summary: "{{ $labels.exchange }} 어댑터 fatal 응답 비율이 5분간 5%를 초과 — 자격증명 점검"}
+
+      - alert: A10_ReadinessDown
+        expr: aios_readiness_check_status == 0
+        for: 1m
+        labels: {severity: critical, runbook: RB-01}
+        annotations: {summary: "{{ $labels.check }} readiness 체크 실패"}
+
+      - alert: A11_LiveSecretDecryptInPaper
+        expr: increase(aios_security_secret_decrypt_count_total{scope="LIVE", runtime_mode="PAPER"}[5m]) > 0
+        for: 0m
+        labels: {severity: critical, runbook: RB-03}
+        annotations: {summary: "PAPER 런타임에서 LIVE 비밀 복호 시도 관측 — 즉시 조사"}
