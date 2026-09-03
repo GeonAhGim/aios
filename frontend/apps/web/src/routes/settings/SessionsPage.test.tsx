@@ -136,6 +136,19 @@ describe("SessionsPage", () => {
     expect(screen.queryByText("LOGIN_PAGE")).not.toBeInTheDocument();
   });
 
+  it("negative: 목록 조회가 403(AUTHZ_FORBIDDEN)으로 거부되면 ForbiddenNotice의 매핑 문구를 보여준다", async () => {
+    renderPage({
+      fetchSessions: async () => {
+        throw new ApiError(403, "raw server detail", "trace-forbidden-1", "AUTHZ_FORBIDDEN");
+      },
+    });
+
+    await waitFor(() =>
+      expect(screen.getByText("이 작업을 수행할 권한이 없습니다.")).toBeInTheDocument(),
+    );
+    expect(screen.queryByText("raw server detail")).not.toBeInTheDocument();
+  });
+
   it("파싱 실패 항목 5종을 조용히 숨기지 않고 노출한다", async () => {
     const missingSessionId = rawSession();
     delete (missingSessionId as Record<string, unknown>).sessionId;
