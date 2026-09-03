@@ -63,7 +63,24 @@ async def _setup(pool):
 
 async def test_get_returns_none_when_absent(pool, repo):
     async with pool.acquire() as conn, conn.transaction():
-        assert await repo.get(conn, f"missing:{uuid.uuid4().hex}") is None
+        assert await repo.get(conn, uuid.uuid4(), f"missing:{uuid.uuid4().hex}") is None
+
+
+async def test_get_returns_none_for_wrong_tenant(pool, repo):
+    """task-489/LB-18: `position_key`는 실재해도 소유 `tenant_id`가 다르면
+    조회 자체가 `None` — 없는 것과 구분하지 않는다(존재 비노출)."""
+    tenant_id, account_id = await _setup(pool)
+    position_key = f"pos:{uuid.uuid4().hex}"
+    snapshot = _snapshot(
+        tenant_id=tenant_id, account_id=account_id, position_key=position_key,
+        quantity=Decimal("0"), last_journal_seq=0,
+    )
+    async with pool.acquire() as conn, conn.transaction():
+        await repo.upsert(conn, snapshot, expected_seq=0)
+
+    attacker_id = uuid.uuid4()
+    async with pool.acquire() as conn, conn.transaction():
+        assert await repo.get(conn, attacker_id, position_key) is None
 
 
 async def test_upsert_creates_row_on_first_call_with_expected_seq_zero(pool, repo):
@@ -82,7 +99,7 @@ async def test_upsert_creates_row_on_first_call_with_expected_seq_zero(pool, rep
     assert created.quantity == Decimal("0")
 
     async with pool.acquire() as conn, conn.transaction():
-        fetched = await repo.get(conn, position_key)
+        fetched = await repo.get(conn, tenant_id, position_key)
     assert fetched is not None
     assert fetched.last_journal_seq == 0
 
@@ -135,7 +152,7 @@ async def test_upsert_with_stale_expected_seq_raises_and_does_not_overwrite(pool
             await repo.upsert(conn, stale_update, expected_seq=0)
 
     async with pool.acquire() as conn, conn.transaction():
-        current = await repo.get(conn, position_key)
+        current = await repo.get(conn, tenant_id, position_key)
     assert current is not None
     assert current.quantity == Decimal("5"), "오래된 upsert가 최신 스냅샷을 덮어썼습니다"
     assert current.last_journal_seq == 1

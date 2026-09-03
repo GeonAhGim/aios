@@ -123,9 +123,11 @@ async def _funding(pool, ports, *, tenant_id, account_id, position_key, amount, 
 
 
 async def test_unknown_position_rejected(pool, ports):
+    tenant_id = await create_test_user(pool)
     with pytest.raises(UnknownPositionError):
         await rebuild_snapshot(
             _key(),
+            tenant_id=tenant_id,
             asset_class=AssetClass.CRYPTO,
             journal=ports.journal,
             snapshots=ports.snapshots,
@@ -154,6 +156,7 @@ async def test_healthy_snapshot_has_no_drift(pool, ports):
 
     report = await rebuild_snapshot(
         position_key,
+        tenant_id=tenant_id,
         asset_class=AssetClass.CRYPTO,
         journal=ports.journal,
         snapshots=ports.snapshots,
@@ -185,6 +188,7 @@ async def test_dry_run_reports_drift_without_writing(pool, ports):
 
     report = await rebuild_snapshot(
         position_key,
+        tenant_id=tenant_id,
         asset_class=AssetClass.CRYPTO,
         journal=ports.journal,
         snapshots=ports.snapshots,
@@ -231,6 +235,7 @@ async def test_apply_fixes_drift_without_touching_journal(pool, ports):
 
     report = await rebuild_snapshot(
         position_key,
+        tenant_id=tenant_id,
         asset_class=AssetClass.CRYPTO,
         journal=ports.journal,
         snapshots=ports.snapshots,
@@ -276,6 +281,7 @@ async def test_apply_with_no_drift_is_noop(pool, ports):
 
     report = await rebuild_snapshot(
         position_key,
+        tenant_id=tenant_id,
         asset_class=AssetClass.CRYPTO,
         journal=ports.journal,
         snapshots=ports.snapshots,

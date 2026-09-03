@@ -53,7 +53,7 @@ async def record_fill_in_position_ledger(pool: asyncpg.Pool, order: Order) -> No
         price = fill_price.amount if fill_price else Decimal("0")
         async with conn.transaction():
             snapshots = PostgresSnapshotRepository(pool)
-            existing = await snapshots.get(conn, position_key)
+            existing = await snapshots.get(conn, user_id, position_key)
             if existing is not None:
                 account_id = existing.account_id
             else:

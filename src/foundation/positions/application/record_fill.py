@@ -84,7 +84,14 @@ _LOCK_NAMESPACE = "pos_journal"
 class UnknownPositionError(Exception):
     """`POS_ACCOUNT_UNKNOWN` — `position_key`에 대응하는 `pos_snapshot` 행이
     없다. 저널 append 전에 (LB-11 밖의 어떤 경로가) 포지션을 열어 둬야
-    한다는 LB-9 전제를 이 함수도 그대로 따른다 — 재시도 불가."""
+    한다는 LB-9 전제를 이 함수도 그대로 따른다 — 재시도 불가.
+
+    `command.tenant_id`/`account_id`가 실제 소유자와 다를 때도 이 예외를
+    그대로 재사용한다(task-489/LB-18 cross_tenant 적대적 테스트가 드러낸
+    실결함의 수정 — 신규 에러코드를 만들지 않는다). "존재하지만 남의 것"과
+    "아예 없음"을 호출자가 구분할 수 있게 하면 남의 position_key 존재
+    여부를 흘리는 오라클이 되므로, 두 경우를 의도적으로 같은 예외 하나로
+    합친다."""
 
     def __init__(self, position_key: str) -> None:
         super().__init__(f"알 수 없는 position_key(스냅샷 없음): {position_key!r}")
@@ -158,8 +165,8 @@ async def record_fill(
 ) -> PositionSnapshotView:
     await _acquire_position_lock(conn, command.position_key)
 
-    snapshot = await snapshots.get(conn, command.position_key)
-    if snapshot is None:
+    snapshot = await snapshots.get(conn, command.tenant_id, command.position_key)
+    if snapshot is None or snapshot.account_id != command.account_id:
         raise UnknownPositionError(command.position_key)
 
     idempotency_key = f"fill:{command.order_id}:{command.fill_seq}"

@@ -33,6 +33,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from datetime import datetime
 from decimal import Decimal
+from uuid import UUID
 
 import asyncpg
 
@@ -51,7 +52,11 @@ class UnknownPositionError(Exception):
     """`POS_ACCOUNT_UNKNOWN` — `position_key`에 대응하는 `pos_snapshot` 행이
     없다. 저널만으로는 `tenant_id`/`account_id`/`instrument_id`/`base_currency`
     같은 계좌 정적 컨텍스트를 복원할 수 없으므로([[snapshot_builder.
-    SnapshotFold]] docstring) 재빌드도 기존 스냅샷 행을 전제한다."""
+    SnapshotFold]] docstring) 재빌드도 기존 스냅샷 행을 전제한다. 호출자가
+    넘긴 `tenant_id`가 실제 소유자와 다를 때도 이 예외를 재사용한다
+    ([[record_fill.UnknownPositionError]]와 같은 이유, task-489/LB-18 —
+    `SnapshotRepository.get`이 tenant-scoped로 바뀌며 이 운영 도구도 호출자가
+    `tenant_id`를 알고 있어야 한다는 전제가 새로 생겼다)."""
 
     def __init__(self, position_key: str) -> None:
         super().__init__(f"알 수 없는 position_key(스냅샷 없음): {position_key!r}")
@@ -82,6 +87,7 @@ def _drift(
 async def rebuild_snapshot(
     position_key: str,
     *,
+    tenant_id: UUID,
     asset_class: AssetClass,
     journal: PositionJournalRepository,
     snapshots: SnapshotRepository,
@@ -92,7 +98,7 @@ async def rebuild_snapshot(
     async with pool.acquire() as conn, conn.transaction():
         await _acquire_position_lock(conn, position_key)
 
-        snapshot = await snapshots.get(conn, position_key)
+        snapshot = await snapshots.get(conn, tenant_id, position_key)
         if snapshot is None:
             raise UnknownPositionError(position_key)
 

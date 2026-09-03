@@ -89,9 +89,11 @@ class PostgresSnapshotRepository:
         self._pool = pool
 
     async def get(
-        self, conn: asyncpg.Connection, position_key: str
+        self, conn: asyncpg.Connection, tenant_id: UUID, position_key: str
     ) -> PositionSnapshotView | None:
-        row = await conn.fetchrow(_SELECT + "WHERE ps.position_key = $1", position_key)
+        row = await conn.fetchrow(
+            _SELECT + "WHERE ps.tenant_id = $1 AND ps.position_key = $2", tenant_id, position_key
+        )
         return None if row is None else _row_to_view(row, Currency(row["base_currency"]))
 
     async def upsert(

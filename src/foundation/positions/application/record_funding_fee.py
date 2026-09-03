@@ -54,7 +54,9 @@ _LOCK_NAMESPACE = "pos_journal"
 class UnknownPositionError(Exception):
     """`POS_ACCOUNT_UNKNOWN` — `position_key`에 대응하는 `pos_snapshot` 행이
     없다([[record_fill.UnknownPositionError]]와 같은 전제·재선언). 재시도
-    불가."""
+    불가. `command.tenant_id`/`account_id`가 실제 소유자와 다를 때도
+    [[record_fill.UnknownPositionError]]와 같은 이유로 이 예외를 재사용한다
+    (task-489/LB-18)."""
 
     def __init__(self, position_key: str) -> None:
         super().__init__(f"알 수 없는 position_key(스냅샷 없음): {position_key!r}")
@@ -115,8 +117,8 @@ async def record_funding_fee(
 ) -> PositionSnapshotView:
     await _acquire_position_lock(conn, command.position_key)
 
-    snapshot = await snapshots.get(conn, command.position_key)
-    if snapshot is None:
+    snapshot = await snapshots.get(conn, command.tenant_id, command.position_key)
+    if snapshot is None or snapshot.account_id != command.account_id:
         raise UnknownPositionError(command.position_key)
 
     multiplier, fx_source = _fx_multiplier(command.amount, snapshot.base_currency, fx_rate)
