@@ -19,8 +19,10 @@ from collections.abc import Awaitable, Callable
 from typing import Any
 
 from src.core.event_bus.bus import EventBus, EventHandler
+from src.core.event_bus.envelope import EventEnvelope, unwrap, wrap
 from src.core.event_bus.policy import HandlerCriticality
 from src.core.exceptions import EventHandlerError
+from src.core.observability.context import bind
 
 logger = logging.getLogger(__name__)
 
@@ -78,11 +80,14 @@ class InProcessEventBus(EventBus):
             self._ensure_worker(topic)
 
     async def publish(self, topic: str, payload: Any) -> None:
+        """PLT-06 — publish 시점의 PLT-01 컨텍스트를 봉투(`EventEnvelope`)에
+        실어 큐에 넣는다. 워커는 이 봉투로 핸들러 실행 중 컨텍스트를 복원한다."""
         queue = self._get_or_create_queue(topic)
         if self._running:
             self._ensure_worker(topic)
+        envelope = wrap(topic, payload)
         try:
-            queue.put_nowait(payload)
+            queue.put_nowait(envelope)
         except asyncio.QueueFull:
             await self._handle_backpressure(topic)
             return
@@ -120,14 +125,17 @@ class InProcessEventBus(EventBus):
     async def _worker_loop(self, topic: str, queue: asyncio.Queue[Any]) -> None:
         while True:
             try:
-                payload = await asyncio.wait_for(queue.get(), timeout=0.5)
+                item = await asyncio.wait_for(queue.get(), timeout=0.5)
             except asyncio.TimeoutError:
                 if not self._running:
                     return
                 continue
+            envelope, payload = unwrap(item)
+            if envelope is None:  # 전환기 호환 — 봉투 없이 큐에 들어온 값
+                envelope = wrap(topic, payload)
             try:
                 for handler, criticality in list(self._subscribers.get(topic, [])):
-                    await self._dispatch(topic, handler, criticality, payload)
+                    await self._dispatch(topic, handler, criticality, envelope, payload)
             except Exception:  # noqa: BLE001 — #15 심층 방어: _dispatch가 이미 handler/
                 # audit_sink 예외를 흡수하지만, 예기치 못한 예외까지 이 워커
                 # 태스크를 죽이는 일은 절대 없어야 한다(그 순간부터 이 토픽의
@@ -143,15 +151,24 @@ class InProcessEventBus(EventBus):
         topic: str,
         handler: EventHandler,
         criticality: HandlerCriticality,
+        envelope: EventEnvelope,
         payload: Any,
     ) -> None:
-        try:
-            await handler(payload)
-        except Exception as exc:  # noqa: BLE001 — 의도적으로 모든 handler 예외를 포착
-            if criticality == HandlerCriticality.SAFE:
-                await self._handle_safe_error(topic, handler, payload, exc)
-            else:
-                await self._handle_critical_error(topic, handler, payload, exc)
+        """PLT-06 — 봉투의 trace_id/tenant_id/actor_subject_id를 핸들러(재시도
+        포함) 실행 동안만 바인딩한다. `bind()`는 컨텍스트 매니저 종료 시 항상
+        이전 값으로 원복하므로, 핸들러가 예외를 던져도 컨텍스트가 새지 않는다."""
+        with bind(
+            trace_id=envelope.trace_id,
+            tenant_id=envelope.tenant_id,
+            actor_subject_id=envelope.actor_subject_id,
+        ):
+            try:
+                await handler(payload)
+            except Exception as exc:  # noqa: BLE001 — 의도적으로 모든 handler 예외를 포착
+                if criticality == HandlerCriticality.SAFE:
+                    await self._handle_safe_error(topic, handler, payload, exc)
+                else:
+                    await self._handle_critical_error(topic, handler, payload, exc)
 
     async def _handle_safe_error(
         self, topic: str, handler: EventHandler, payload: Any, exc: Exception
