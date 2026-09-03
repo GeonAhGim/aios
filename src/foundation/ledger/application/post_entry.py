@@ -4,7 +4,8 @@ Spec: docs/specs/L4_market_data_positions_ledger_v1.0.md#§5, §6, §9 LC-9.
 
 §6(실패 모드) "C 감사 append 실패 → 포스팅 전체 롤백"과 §5 "한 커넥션,
 한 트랜잭션"을 그대로 코드화한다. 순서: `ledger_control` 동결 확인
-(fail-closed) → 멱등 lookup(REPLAY/DIGEST_MISMATCH) → `lines_for`(LC-4,
+(fail-closed) → `event.extra` 안전성 확인(LC-17 결함 A, secret류 키·
+비화이트리스트 키 거부) → 멱등 lookup(REPLAY/DIGEST_MISMATCH) → `lines_for`(LC-4,
 내부에서 `check_balanced` 재확인) → 잔액 `FOR UPDATE` → 델타 적용을
 `balance_rules.apply`(순수 검증)로 사전 검증 → 저널 append(DB write) →
 잔액 실제 갱신(DB write) → `append_event_in`(같은 `conn`, DB write). 이
@@ -44,8 +45,18 @@ from uuid import UUID
 import asyncpg
 
 from src.foundation.evidence.domain.models import AuditEvent, Classification, Outcome
-from src.foundation.evidence.domain.rules import assert_safe_payload, compute_payload_hash
-from src.foundation.ledger.contracts.v1 import AccountType, JournalEntryView, LedgerEvent, Side
+from src.foundation.evidence.domain.rules import (
+    UnsafePayloadError,
+    assert_safe_payload,
+    compute_payload_hash,
+)
+from src.foundation.ledger.contracts.v1 import (
+    EXTRA_ALLOWED_KEYS,
+    AccountType,
+    JournalEntryView,
+    LedgerEvent,
+    Side,
+)
 from src.foundation.ledger.domain import balance_rules, posting_rules
 from src.foundation.ledger.domain.balance_rules import Balance
 from src.foundation.ledger.domain.chart_of_accounts import account_type, allows_negative
@@ -62,6 +73,17 @@ _DEBIT_NORMAL_TYPES = frozenset({AccountType.ASSET, AccountType.EXPENSE})
 class LedgerWriteFrozenError(Exception):
     """`ledger_control.write_frozen = true` — 무결성 위반 감지 후 원장 쓰기
     전면 차단(fail-closed, §4.4). 관리자 2인 승인 해동 전까지 재시도 불가."""
+
+
+class LedgerEventExtraRejectedError(ValueError):
+    """`event.extra`에 secret류 키(§8.3 LC-17 결함 A) 또는 이 사건 타입의
+    화이트리스트(`contracts.v1.EXTRA_ALLOWED_KEYS`)에 없는 키가 있어
+    포스팅 전체를 거부했다. 예외 삼킴 없이 던져지며, 던지기 전에 DENIED
+    감사 이벤트가 남는다(`_deny_unsafe_extra`)."""
+
+    def __init__(self, detail: str) -> None:
+        super().__init__(detail)
+        self.detail = detail
 
 
 class AuditAppender(Protocol):
@@ -96,6 +118,59 @@ async def _assert_not_frozen(conn: asyncpg.Connection) -> None:
     frozen = await conn.fetchval("SELECT write_frozen FROM ledger_control WHERE id = 1 FOR SHARE")
     if frozen:
         raise LedgerWriteFrozenError("ledger_control.write_frozen=true — 원장 쓰기가 동결됐습니다.")
+
+
+async def _deny_unsafe_extra(
+    conn: asyncpg.Connection,
+    audit: AuditAppender,
+    event: LedgerEvent,
+    *,
+    detail: str,
+) -> None:
+    payload: dict[str, object] = {
+        "event_ref": event.event_ref,
+        "rejected_extra_keys": sorted(event.extra.keys()),
+        "reason": detail,
+    }
+    assert_safe_payload(payload)
+    await audit.append_event_in(
+        conn,
+        tenant_id=event.tenant_id,
+        aggregate_type="ledger_event_extra",
+        aggregate_id=event.trace_id,
+        aggregate_revision=None,
+        action=event.event_type.value,
+        outcome=Outcome.DENIED,
+        actor_subject_id=event.actor_subject_id,
+        trace_id=event.trace_id,
+        payload_hash=compute_payload_hash(payload),
+        payload=payload,
+        classification=Classification.INTERNAL,
+    )
+
+
+async def _assert_extra_safe(
+    conn: asyncpg.Connection, audit: AuditAppender, event: LedgerEvent
+) -> None:
+    """LC-17 결함 A 수정. §8.3 DoD: `event.extra`에 secret류 키나 이 사건
+    타입이 실제로 읽지 않는(비화이트리스트) 키가 실리면 저장 전에 거부한다.
+    `event.extra`가 아직 journal entry로 이어지기 전이라 `aggregate_id`로
+    삼을 entry_id가 없으므로 요청과 1:1인 `trace_id`를 대신 쓴다."""
+    try:
+        assert_safe_payload(event.extra)
+    except UnsafePayloadError as exc:
+        await _deny_unsafe_extra(conn, audit, event, detail=str(exc))
+        raise LedgerEventExtraRejectedError(str(exc)) from exc
+
+    allowed = EXTRA_ALLOWED_KEYS.get(event.event_type, frozenset())
+    disallowed = sorted(set(event.extra) - allowed)
+    if disallowed:
+        detail = (
+            f"{event.event_type.value}: extra에 허용되지 않은 키 {disallowed!r} "
+            f"(허용: {sorted(allowed)!r})"
+        )
+        await _deny_unsafe_extra(conn, audit, event, detail=detail)
+        raise LedgerEventExtraRejectedError(detail)
 
 
 async def _deny_digest_mismatch(
@@ -141,6 +216,7 @@ async def post_entry(
     clock: Clock,
 ) -> JournalEntryView:
     await _assert_not_frozen(conn)
+    await _assert_extra_safe(conn, audit, event)
 
     key = idempotency_key(event)
     lines = posting_rules.lines_for(event)

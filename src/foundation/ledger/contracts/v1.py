@@ -83,6 +83,34 @@ class LedgerEvent(BaseModel):
     schema_version: Literal["v1"] = SCHEMA_VERSION
 
 
+EXTRA_ALLOWED_KEYS: dict[LedgerEventType, frozenset[str]] = {
+    LedgerEventType.TOPUP_CONFIRMED: frozenset(),
+    LedgerEventType.HOLD_PLACED: frozenset(),
+    LedgerEventType.HOLD_CAPTURED: frozenset({"commission_rate"}),
+    LedgerEventType.HOLD_RELEASED: frozenset(),
+    LedgerEventType.REFUND: frozenset(
+        {"commission_rate", "refund_case", "seller_available_amount"}
+    ),
+    LedgerEventType.CHARGEBACK: frozenset({"user_available_amount"}),
+    LedgerEventType.PAYOUT_RELEASE: frozenset(),
+    LedgerEventType.PAYOUT_PAID: frozenset({"external_ref"}),
+    LedgerEventType.MANUAL_ADJUSTMENT: frozenset(
+        {"debit_account", "credit_account", "debit_currency", "credit_currency"}
+    ),
+}
+"""`extra`에 실제로 실릴 수 있는 키의 사건별 화이트리스트(LC-17 결함 A 수정,
+task-626). 각 항목은 `domain/posting_rules.py`의 해당 핸들러가 실제로
+읽는 키와 정확히 일치해야 한다(그 파일이 근거 — 이 표는 값을 여기서
+새로 정의하지 않고 그대로 옮긴 것): `_hold_captured`→commission_rate,
+`_refund`→commission_rate/refund_case/seller_available_amount,
+`_chargeback`→user_available_amount, `_payout_paid`→external_ref,
+`_manual_adjustment`→debit_account/credit_account(+선택
+debit_currency/credit_currency). 나머지 4종은 `extra`를 읽지 않으므로
+빈 집합. 계약 계층은 이 표를 데이터로만 들고 강제하지 않는다(모듈
+docstring 원칙과 동일) — 실제 거부는 `application/post_entry.py`(LC-9)가
+한다."""
+
+
 class PostingLine(BaseModel):
     """분개 행 하나. `amount`는 항상 양수 — 방향은 `side`가 표현한다
     (§3.3 원장 금액 NUMERIC(20,2) KRW quantize)."""

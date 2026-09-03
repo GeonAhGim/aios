@@ -5,20 +5,15 @@ Spec: docs/specs/L4_market_data_positions_ledger_v1.0.md#§8.3 LC-17.
 
 세 케이스 중 앞의 둘은 기존 방어가 실제로 작동하는지 확인한다
 (`LedgerEvent.amount`의 `Field(gt=0)`, `listing_service._validate_price`).
-세 번째(`extra`의 `api_key` 키)는 §8.3 DoD가 "거부"를 요구하지만, 코드를
-읽어 보면 그런 방어가 없다 — `LedgerEvent.extra: dict[str, Decimal | str]`
-필드에는 키 이름 검증이 전혀 없고(`contracts/v1.py`), `posting_rules.py`의
-각 이벤트 핸들러는 자신이 아는 화이트리스트 키만 골라 읽을 뿐 나머지
-키는 조용히 무시한다(`_extra_decimal`/`_extra_str`가 존재하는 키만
-본다). `evidence.domain.rules.assert_safe_payload`(secret/token/password/
-api_key류 키를 거부하는 바로 그 도구)는 `post_entry.py`·
-`postgres_journal_repository.py`가 자신들이 직접 조립한 고정 payload
-dict에만 적용하고, `event.extra`에는 한 번도 적용하지 않는다 — 즉
-`extra={"api_key": "..."}`를 실어 실제 포스팅 경로(`post_entry`)를 타면
-현재 코드는 조용히 성공시킨다. 이건 task-614(LC-17)가 발견한 실결함이라
-(코드 수정은 이 리프 범위 밖 — task 지침 "프로덕션 코드 수정 금지") 아래
-테스트는 스펙이 요구하는 동작을 그대로 단언하되 `xfail(strict=True)`로
-"현재는 실패한다"는 사실 자체를 고정한다 — 조용히 통과시키지 않는다.
+세 번째(`extra`의 `api_key` 키)는 task-614(LC-17)가 실증한 결함 A였다 —
+`LedgerEvent.extra: dict[str, Decimal | str]`에는 키 이름 검증이 없었고,
+`evidence.domain.rules.assert_safe_payload`(secret/token/password/api_key류
+키를 거부하는 도구)는 `post_entry.py`가 직접 조립한 고정 payload dict에만
+적용되고 `event.extra`에는 적용되지 않았다. task-626에서
+`post_entry._assert_extra_safe`가 `assert_safe_payload`를 `event.extra`에
+재사용하고, `contracts.v1.EXTRA_ALLOWED_KEYS`(사건 타입별로
+`posting_rules.py` 핸들러가 실제로 읽는 키만 담은 화이트리스트)로
+비화이트리스트 키도 거부하도록 고쳤다 — 아래 테스트는 이제 통과한다.
 """
 from __future__ import annotations
 
@@ -93,17 +88,6 @@ async def test_listing_service_rejects_negative_price(pool) -> None:
     assert count == 0  # 거부됐다면 리스팅 행 자체가 생기지 않아야 한다.
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "실결함(task-614/LC-17 발견, needs_decision): LedgerEvent.extra에 "
-        "'api_key'류 키를 실어 post_entry를 태워도 현재 코드는 거부하지 않는다 — "
-        "posting_rules.py의 MANUAL_ADJUSTMENT 핸들러가 debit_account/credit_account만 "
-        "읽고 나머지 extra 키는 무시하며, assert_safe_payload는 event.extra 자체에 "
-        "적용되지 않는다. §8.3 DoD는 거부를 요구하므로 이 테스트는 그 요구를 그대로 "
-        "단언하고, 실패 자체를 강제 고정해(strict) 조용한 회귀·조용한 방치를 막는다."
-    ),
-)
 async def test_extra_with_api_key_shaped_key_is_rejected_by_post_entry(pool) -> None:
     journal = PostgresJournalRepository(pool)
     balances = PostgresBalanceRepository(pool)
