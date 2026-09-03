@@ -30,6 +30,7 @@ import { ApprovalSettingsPage } from "./routes/settings/ApprovalSettingsPage";
 import { NotificationSettingsPage } from "./routes/settings/NotificationSettingsPage";
 import { StrategyBuilderPage } from "./routes/strategy-builder/StrategyBuilderPage";
 import { SystemStatusPage } from "./routes/system/SystemStatusPage";
+import { LedgerHistoryPage } from "./routes/wallet/LedgerHistoryPage";
 import { WalletPage } from "./routes/wallet/WalletPage";
 
 function protect(element: ReactNode) {
@@ -60,6 +61,7 @@ export const router = createBrowserRouter([
   { path: "/portfolio", element: protect(<PortfolioPage />) },
   { path: "/reports", element: protect(<ReportsPage />) },
   { path: "/wallet", element: protect(<WalletPage />) },
+  { path: "/wallet/ledger", element: protect(<LedgerHistoryPage />) },
   { path: "/alerts", element: protect(<AlertsPage />) },
   { path: "/approval-requests", element: protect(<MyApprovalRequestsPage />) },
   { path: "/settings/approval", element: protect(<ApprovalSettingsPage />) },
