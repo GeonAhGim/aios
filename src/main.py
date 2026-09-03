@@ -267,12 +267,10 @@ def create_app() -> FastAPI:
     app.include_router(auth.router, prefix="/auth", tags=["auth"])
     app.include_router(users.router, prefix="/users", tags=["users"])
     app.include_router(
-        exchange_credentials.router, prefix="/exchange-credentials", tags=["exchanges"]
-    )
+        exchange_credentials.router, prefix="/exchange-credentials", tags=["exchanges"])
     app.include_router(marketplace.router, prefix="/marketplace", tags=["marketplace"])
     app.include_router(
-        strategy_builder.router, prefix="/strategy-builder", tags=["strategy-builder"]
-    )
+        strategy_builder.router, prefix="/strategy-builder", tags=["strategy-builder"])
     app.include_router(suitability.router)
     app.include_router(foundation_trust.router)
     app.include_router(foundation_mandates.router)
