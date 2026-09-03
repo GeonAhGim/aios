@@ -1,9 +1,37 @@
 import { useSubmitRiskAssessment } from "@aios/shared-hooks";
 import { ApiError } from "@aios/api-client";
-import type { InvestmentGoal, LiquidityNeed } from "@aios/shared-types";
-import { Alert, Button, Field, Input, Select } from "@aios/ui-web";
+import {
+  classifyBadRequest,
+  classifyForbidden,
+  routeApiError,
+  type InvestmentGoal,
+  type LiquidityNeed,
+} from "@aios/shared-types";
+import { Button, Field, Input, Select } from "@aios/ui-web";
 import { useState, type FormEvent } from "react";
 import { useNavigate } from "react-router-dom";
+import { BadRequestNotice } from "../../components/BadRequestNotice";
+import { ErrorMessage } from "../../components/ErrorMessage";
+import { ForbiddenNotice } from "../../components/ForbiddenNotice";
+
+// spec §3.3/§3.4: 제출 실패는 err.message를 직접 노출하지 않고
+// routeApiError(task-483)로 판정한다. 이 화면은 FD-15.1 필수 게이트라 작성
+// 시간이 길어지기 쉬워, 그 사이 액세스 토큰이 만료되면 401
+// AUTH_TOKEN_EXPIRED로 거부될 수 있다 — isSessionExpiredErrorCode(task-354)가
+// 이미 잡는 갈래를 ErrorMessage(errorCode 매핑)로 그대로 보여준다(task-902).
+function SubmitError({ error }: { error: unknown }) {
+  if (classifyBadRequest(error)) return <BadRequestNotice error={error} />;
+  if (classifyForbidden(error)) return <ForbiddenNotice error={error} />;
+  const routed = routeApiError(error);
+  return (
+    <ErrorMessage
+      errorCode={error instanceof ApiError ? error.errorCode : undefined}
+      message={error instanceof Error ? error.message : undefined}
+      traceId={error instanceof ApiError ? error.traceId : undefined}
+      retryAfterSec={routed.kind === "backoff_retry" ? routed.afterSec : undefined}
+    />
+  );
+}
 
 // FD-15.1 필수 게이트 — 회원가입 직후(MFA 완료 후) 스킵 불가.
 export function RiskAssessmentPage() {
@@ -12,7 +40,7 @@ export function RiskAssessmentPage() {
   const [lossTolerancePct, setLossTolerancePct] = useState(10);
   const [investmentGoal, setInvestmentGoal] = useState<InvestmentGoal>("LONG_TERM_GROWTH");
   const [liquidityNeed, setLiquidityNeed] = useState<LiquidityNeed>("WITHIN_1_YEAR");
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<unknown>(null);
   const submit = useSubmitRiskAssessment();
   const navigate = useNavigate();
 
@@ -29,7 +57,7 @@ export function RiskAssessmentPage() {
       });
       navigate("/dashboard");
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : "평가 제출에 실패했습니다.");
+      setError(err instanceof ApiError ? err : new Error("평가 제출에 실패했습니다."));
     }
   }
 
@@ -101,7 +129,7 @@ export function RiskAssessmentPage() {
             </Select>
           </Field>
 
-          {error && <Alert>{error}</Alert>}
+          {error !== null && <SubmitError error={error} />}
           <Button type="submit" loading={submit.isPending} className="w-full">
             제출하기
           </Button>
