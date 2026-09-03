@@ -12,7 +12,7 @@
 
 ## 0. 문서 메타
 
-- **status**: Proposed (연구 산출물, 미승인)
+- **status**: Approved (2026-09-04, Chief Architect — ADR-2026-09-04-C. P0 안전 결함 F-01/F-02/F-03 해소 리프로 최우선 배정)
 - **owner role**: Fable(내부 아키텍처 감사) 작성 → Chief Architect/PM 검토 대기
 - **supersedes**: 없음(신규)
 - **depends on**: [`AIOS_Target_Architecture_Freeze_v0.1`](../../../brainstorm/AIOS_Target_Architecture_Freeze_v0.1_2026-09-03.md) §4(우선순위 1·2위:
