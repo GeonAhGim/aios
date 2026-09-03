@@ -264,6 +264,12 @@ async def post_entry(
         )
 
     entry_view = await journal.append(conn, event, lines)
+    if entry_view.replayed:
+        # 사전체크는 최적화일 뿐이다 — 두 요청이 그 체크를 모두 통과한 뒤
+        # `get_for_update`(행 잠금)에서 직렬화되면, 나중 트랜잭션은 이미
+        # 최신 잔액으로 사전검증을 통과해버린다. 적용 스킵의 유일한 근거는
+        # `journal.append`가 advisory lock 하에서 내린 이 판정뿐이다(LC-9).
+        return entry_view
 
     for code, delta in deltas.items():
         await balances.apply(conn, code, delta, Decimal("0"), current[code].last_entry_seq)

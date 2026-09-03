@@ -79,6 +79,29 @@ class _BoomAuditAppender:
         raise RuntimeError("injected audit failure")
 
 
+class _NoPrecheckJournal:
+    """`find_by_idempotency_key` 사전체크가 항상 "없음"이라고 답하는 래퍼 —
+    동시 재시도 두 건이 락 없는 사전체크를 모두 통과한 뒤 `append`(advisory
+    lock)에서 처음 직렬화되는 레이스 창을, 순차 호출만으로 재현한다(LC-9
+    회귀). `append` 자체는 실제 저장소에 그대로 위임하므로 두 번째 호출은
+    `append` 내부 판정에 의해 `replayed=True`를 받는다."""
+
+    def __init__(self, real: PostgresJournalRepository) -> None:
+        self._real = real
+
+    async def append(self, conn, entry, lines):
+        return await self._real.append(conn, entry, lines)
+
+    async def find_by_idempotency_key(self, conn, key):
+        return None
+
+    async def list_since(self, conn, seq):
+        return await self._real.list_since(conn, seq)
+
+    async def last(self, conn):
+        return await self._real.last(conn)
+
+
 @pytest.fixture
 def ports(pool):
     return _RealPorts(pool)
@@ -140,6 +163,60 @@ async def test_post_entry_replays_without_duplicate_journal_or_audit(pool, ports
     assert entry_count == 1
     # 2 = journal.append의 FK 링크용 감사(LC-8b) + post_entry 자신의 커맨드 단위
     # 감사(LC-9) — 둘 다 첫 호출에서만 생기고, replay는 어느 쪽도 추가하지 않는다.
+    assert audit_count == 2
+    assert balance == Decimal("10.00")
+
+
+async def test_post_entry_race_after_precheck_applies_balance_once(pool, ports):
+    """LC-9 결함 수정 회귀: 사전체크(`find_by_idempotency_key`)를 우회해 두 요청
+    모두 `append`에 진입시킨다. 잔액 적용·SUCCESS 감사 스킵 여부의 유일한
+    근거는 `journal.append` 반환값의 `replayed`여야 한다 — 그렇지 않으면
+    (수정 전처럼) 두 번째 요청도 `balances.apply`를 실행해 잔액이 두 번
+    적용된다."""
+    user_id = uuid4()
+    user_code = await _create_user_available_account(pool, user_id)
+    event_ref = f"topup:{uuid4().hex}"
+    event = _topup_event(event_ref=event_ref, user_id=user_id, amount=Decimal("10.00"))
+    racy_journal = _NoPrecheckJournal(ports.journal)
+
+    async with pool.acquire() as conn, conn.transaction():
+        first = await post_entry(
+            conn, event, journal=racy_journal, balances=ports.balances,
+            audit=ports.audit, clock=_clock,
+        )
+    async with pool.acquire() as conn, conn.transaction():
+        second = await post_entry(
+            conn, event, journal=racy_journal, balances=ports.balances,
+            audit=ports.audit, clock=_clock,
+        )
+
+    assert first.replayed is False
+    assert second.replayed is True
+    assert second.entry_id == first.entry_id
+
+    async with pool.acquire() as conn:
+        entry_count = await conn.fetchval(
+            "SELECT count(*) FROM ledger_journal_entry WHERE idempotency_key = $1",
+            first.idempotency_key,
+        )
+        line_count = await conn.fetchval(
+            "SELECT count(*) FROM ledger_posting_line WHERE entry_id = $1",
+            first.entry_id,
+        )
+        audit_count = await conn.fetchval(
+            "SELECT count(*) FROM foundation_audit_event WHERE aggregate_id = $1",
+            first.entry_id,
+        )
+        balance = await conn.fetchval(
+            "SELECT lb.balance FROM ledger_balance lb JOIN ledger_account la "
+            "ON la.account_id = lb.account_id WHERE la.account_code = $1",
+            user_code,
+        )
+    assert entry_count == 1
+    assert line_count == len(first.lines)
+    # 1 = journal.append의 FK 링크용 감사(LC-8b) + 1 = post_entry 자신의
+    # 커맨드 단위 SUCCESS 감사(LC-9, 첫 호출에서만) — replay된 두 번째
+    # 호출은 어느 쪽도 추가하지 않는다.
     assert audit_count == 2
     assert balance == Decimal("10.00")
 
