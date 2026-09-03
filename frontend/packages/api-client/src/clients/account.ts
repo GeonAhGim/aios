@@ -17,6 +17,9 @@ import { ApiError, type AnyConstructor } from "../http";
 // FD-11.3/11.5/11.6/10.1 계정 설정 — users.py 라우터는 task-112(28cf21b)로
 // 봉투가 적용돼 requestEnvelope 계열을 쓴다.
 // 경로 문자열은 apiPaths.ts(task-605) 레지스트리에만 있다(marketplace.ts와 동일 관용).
+// task-1159: 경로 치환·쿼리가 없는 단순 조회(GET) 5건은 http.ts의 requestByRoute로
+// 옮겨 request/requestEnvelope 분기를 apiPaths.ts 레지스트리(envelope 값) 단일
+// 출처로 이관했다 — 분기 결과 자체는 바꾸지 않는다(§3.3, PLT-17~21).
 export function withAccount<TBase extends AnyConstructor>(Base: TBase) {
   return class extends Base {
     async submitRiskAssessment(body: SuitabilityAnswers): Promise<RiskProfileResponse> {
@@ -25,7 +28,7 @@ export function withAccount<TBase extends AnyConstructor>(Base: TBase) {
 
     async getRiskProfile(): Promise<RiskProfileResponse | null> {
       try {
-        return await this.request(resolvePath("account.riskProfile"));
+        return await this.requestByRoute("account.riskProfile");
       } catch (e) {
         if (e instanceof ApiError && e.statusCode === 404) return null;
         throw e;
@@ -33,11 +36,11 @@ export function withAccount<TBase extends AnyConstructor>(Base: TBase) {
     }
 
     async getRiskProfileHistory(): Promise<RiskProfileHistoryEntry[]> {
-      return this.request(resolvePath("account.riskProfileHistory"));
+      return this.requestByRoute("account.riskProfileHistory");
     }
 
     async getApprovalSettings(): Promise<ApprovalSettingsResponse> {
-      return this.requestEnvelope(resolvePath("account.approvalSettings"));
+      return this.requestByRoute("account.approvalSettings");
     }
 
     async updateApprovalSettings(body: ApprovalSettingsRequest): Promise<ApprovalSettingsResponse> {
@@ -45,7 +48,7 @@ export function withAccount<TBase extends AnyConstructor>(Base: TBase) {
     }
 
     async listWhitelistEntries(): Promise<WhitelistEntryResponse[]> {
-      return this.requestEnvelope(resolvePath("account.whitelist"));
+      return this.requestByRoute("account.whitelist");
     }
 
     async registerWhitelistEntry(body: WhitelistEntryRequest): Promise<WhitelistEntryResponse> {
@@ -57,7 +60,7 @@ export function withAccount<TBase extends AnyConstructor>(Base: TBase) {
     }
 
     async listMyApprovalRequests(): Promise<ApprovalRequest[]> {
-      return this.requestEnvelope(resolvePath("account.approvalRequests.list"));
+      return this.requestByRoute("account.approvalRequests.list");
     }
 
     async approveMyRequest(requestId: number): Promise<ApprovalRequest> {
