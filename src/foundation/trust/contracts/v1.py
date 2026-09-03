@@ -46,6 +46,11 @@ class TenantContext(BaseModel):
     role: str = "OWNER"
     mfa_verified: bool
     schema_version: str = SCHEMA_VERSION
+    # PLT-28(107번 §3.2 MINOR) — household/organization tenant는 membership
+    # 행으로 role을 얻으므로, 그 행을 역참조할 수 있게 optional로 붙인다.
+    # personal tenant(membership 상태 머신 없음, 위 참조)는 계속 None.
+    # 기존 필드는 그대로이므로 이 계약을 소비하던 v1 fixture는 무수정 통과한다.
+    membership_id: UUID | None = None
 
 
 class ConsentDecision(BaseModel):

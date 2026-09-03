@@ -90,6 +90,11 @@ extend-immutable-calls = ["fastapi.Depends", "fastapi.Query", "fastapi.Path", "f
 "src/foundation/market_data/application/**" = ["TID251"]
 "src/foundation/market_data/ports/**" = ["TID251"]
 "src/foundation/trust/ports/**" = ["TID251"]
+# PLT-28 — MembershipRepository(PLT-27)는 트랜잭션 경계를 호출부가 쥐도록
+# 커넥션을 인자로 받는다(ports/membership_repository.py docstring). trust
+# domain/**는 여전히 순수하다(test_zone_purity.py가 domain/**만 검사) —
+# application/**만 ledger/positions/market_data와 동일하게 예외.
+"src/foundation/trust/application/**" = ["TID251"]
 "src/main.py" = ["TID251"]
 "src/services/*.py" = ["TID251"]
 "src/services/execution_loop/**" = ["TID251"]

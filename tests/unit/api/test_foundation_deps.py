@@ -9,7 +9,7 @@ from __future__ import annotations
 from datetime import datetime, timedelta, timezone
 from uuid import uuid4
 
-from src.api.foundation_deps import MFA_STEP_UP_WINDOW, get_tenant_context
+from src.api.foundation_deps import MFA_STEP_UP_WINDOW, _compute_mfa_verified
 from src.services.auth_service import User
 
 
@@ -28,24 +28,24 @@ def _user(*, mfa_enabled: bool, mfa_verified_at: datetime | None) -> User:
 
 def test_recent_totp_within_window_is_verified():
     user = _user(mfa_enabled=True, mfa_verified_at=datetime.now(timezone.utc))
-    assert get_tenant_context(user).mfa_verified is True
+    assert _compute_mfa_verified(user) is True
 
 
 def test_totp_older_than_step_up_window_is_not_verified():
     stale_at = datetime.now(timezone.utc) - MFA_STEP_UP_WINDOW - timedelta(seconds=1)
     user = _user(mfa_enabled=True, mfa_verified_at=stale_at)
-    assert get_tenant_context(user).mfa_verified is False
+    assert _compute_mfa_verified(user) is False
 
 
 def test_mfa_enabled_but_never_verified_is_not_verified():
     """마이그레이션 이전 계정(cdd905e63ffe) — mfa_enabled=True인데
     mfa_verified_at이 아직 NULL. fail-closed."""
     user = _user(mfa_enabled=True, mfa_verified_at=None)
-    assert get_tenant_context(user).mfa_verified is False
+    assert _compute_mfa_verified(user) is False
 
 
 def test_mfa_disabled_is_never_verified_even_with_a_recent_timestamp():
     """mfa_enabled=False면 애초에 검증할 대상이 없다 — timestamp가 있어도
     (예: 과거에 MFA를 껐다 켰다 한 흔적) 무시한다."""
     user = _user(mfa_enabled=False, mfa_verified_at=datetime.now(timezone.utc))
-    assert get_tenant_context(user).mfa_verified is False
+    assert _compute_mfa_verified(user) is False

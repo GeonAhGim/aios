@@ -7,8 +7,10 @@ from uuid import UUID
 import asyncpg
 from fastapi import Depends, HTTPException, Request, status
 
+from src.api.contracts.error_codes import ErrorCode
 from src.api.deps import get_current_user, get_pool
 from src.api.service_deps import get_credential_resolver
+from src.core.observability.tenant_binding import rebind_tenant
 from src.exchanges.factory import SUPPORTED_EXCHANGES
 from src.foundation.connections.adapters.live_provider import LiveReadonlyAccountProvider
 from src.foundation.connections.adapters.postgres_repository import PostgresConnectionRepository
@@ -33,8 +35,16 @@ from src.foundation.reconciliation.adapters.postgres_repository import (
 from src.foundation.reconciliation.ports.repository import ReconciliationRepository
 from src.foundation.risk_gate.adapters.postgres_repository import PostgresRiskGateRepository
 from src.foundation.risk_gate.ports.repository import RiskGateRepository
+from src.foundation.trust.adapters.postgres_membership_repository import (
+    PostgresMembershipRepository,
+)
 from src.foundation.trust.adapters.postgres_repository import PostgresTrustRepository
+from src.foundation.trust.application.resolve_tenant_context import (
+    TenantMismatchError,
+    resolve_tenant_context,
+)
 from src.foundation.trust.contracts.v1 import TenantContext
+from src.foundation.trust.ports.membership_repository import MembershipRepository
 from src.foundation.trust.ports.repository import TrustRepository
 from src.foundation.validation.adapters.postgres_repository import PostgresValidationRepository
 from src.foundation.validation.ports.repository import ValidationRepository
@@ -44,6 +54,12 @@ from src.services.credential_resolver import CredentialResolver
 
 def get_trust_repository(pool: asyncpg.Pool = Depends(get_pool)) -> TrustRepository:
     return PostgresTrustRepository(pool)
+
+
+def get_membership_repository(
+    pool: asyncpg.Pool = Depends(get_pool),
+) -> MembershipRepository:
+    return PostgresMembershipRepository(pool)
 
 
 def get_mandate_repository(pool: asyncpg.Pool = Depends(get_pool)) -> MandateRepository:
@@ -141,27 +157,67 @@ def get_credential_encryption_key(request: Request) -> str:
 MFA_STEP_UP_WINDOW = timedelta(minutes=15)
 
 
-def get_tenant_context(user: User = Depends(get_current_user)) -> TenantContext:
-    """71번 §4 "API body에서 생성 금지" — 게이트웨이 인증(get_current_user)에서만
-    발급한다. P0 스콥은 tenant_id == subject_id == user_id다(84b7d0faf14f 마이그레이션
-    편차 설명 참조 — organization/household tenant는 아직 없음).
-
-    전수감사(agent-platform-12, docs/FULL_AUDIT_2026-09-02.md §2-B) 발견 반영 —
+def _compute_mfa_verified(user: User) -> bool:
+    """전수감사(agent-platform-12, docs/FULL_AUDIT_2026-09-02.md §2-B) 발견 반영 —
     예전에는 `mfa_verified = user.mfa_enabled`로, "계정에 MFA가 켜져 있다"(계정
     설정)와 "이 세션이 최근 실제로 TOTP를 통과했다"(세션 사실)를 구분하지
     못했다. `auth_service.py`의 `mfa_verified_at`(TOTP 통과 시각, 마이그레이션
     cdd905e63ffe)을 기준으로 `MFA_STEP_UP_WINDOW` 안에 있을 때만 True다 —
     로그인 후 오래 켜둔 세션은 다시 step-up하지 않는 한 "MFA 검증됨"으로
     보지 않는다. mfa_enabled=False인 계정은 여전히 항상 False(애초에 검증할
-    대상이 없다)."""
-    mfa_verified = (
+    대상이 없다). PLT-28 — `get_tenant_context`가 async I/O(헤더/DB)를 갖게
+    되면서, 순수 계산만 하던 기존 단위테스트(`test_foundation_deps.py`)가
+    계속 동기적으로 부를 수 있게 이 부분만 별도 함수로 뺐다(시그니처 안정)."""
+    return bool(
         user.mfa_enabled
         and user.mfa_verified_at is not None
         and (datetime.now(timezone.utc) - user.mfa_verified_at) <= MFA_STEP_UP_WINDOW
     )
-    return TenantContext(
-        tenant_id=user.user_id,
-        subject_id=user.user_id,
-        role="OWNER",
-        mfa_verified=mfa_verified,
-    )
+
+
+async def get_tenant_context(
+    request: Request,
+    user: User = Depends(get_current_user),
+    pool: asyncpg.Pool = Depends(get_pool),
+    membership_repo: MembershipRepository = Depends(get_membership_repository),
+) -> TenantContext:
+    """71번 §4 "API body에서 생성 금지" — 게이트웨이 인증(get_current_user)에서만
+    발급한다. `X-Tenant-Id` 헤더가 없으면 personal tenant(id == user_id)로
+    발급하고(P0 스콥, 84b7d0faf14f 마이그레이션 편차 설명 참조), 있으면
+    PLT-28 `resolve_tenant_context`가 그 tenant에 대한 활성 멤버십을 확인한다
+    — 없으면(비회원) 403 `AUTH_TENANT_MISMATCH`. 성공하면 `rebind_tenant()`로
+    관측성 컨텍스트의 tenant_id/actor_subject_id를 이 값으로 재바인딩한다
+    (§2.1(A), tenant_binding.py)."""
+    mfa_verified = _compute_mfa_verified(user)
+    header_value = request.headers.get("X-Tenant-Id")
+    try:
+        requested_tenant_id = UUID(header_value) if header_value else None
+    except ValueError as exc:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            {
+                "error_code": ErrorCode.VALIDATION_INVALID_FIELD.value,
+                "message": "X-Tenant-Id 헤더 형식이 올바르지 않습니다.",
+            },
+        ) from exc
+
+    async with pool.acquire() as conn:
+        try:
+            context = await resolve_tenant_context(
+                membership_repo,
+                conn,
+                user=user,
+                requested_tenant_id=requested_tenant_id,
+                mfa_verified=mfa_verified,
+            )
+        except TenantMismatchError as exc:
+            raise HTTPException(
+                status.HTTP_403_FORBIDDEN,
+                {
+                    "error_code": ErrorCode.AUTH_TENANT_MISMATCH.value,
+                    "message": str(exc),
+                },
+            ) from exc
+
+    rebind_tenant(context)
+    return context
