@@ -32,3 +32,5 @@ AIOS_Codex_Fable_CrossReview_Research_Direction_Record_2026-09-03.md`)의 "내�
 | 문서 | 범위 | 근거 | status |
 |---|---|---|---|
 | `L4_execution_ownership_and_safety_gate_wiring_v1.0.md` | 실행 리스/펜싱(P0-R1), kill switch·DataDistrust 게이트 배선(P0-R2/R3) | `../../brainstorm/AIOS_OSS_DeepDive_v2_CodeLevel_CrossVerification_2026-09-03.md`, `../../brainstorm/AIOS_Registers_v1_Assumption_Contradiction_Invariant_Failure_2026-09-03.md` | Proposed |
+
+- `L4_analytics_authoring_backtest_marketplace_v1.0.md` — 데이터 커버리지(DC)·차트(CH)·지표(IND)·AIOS Script(DSL)·백테스트 현실성(BT)·마켓플레이스(MP)·신호 유입(SIG). ADR-2026-09-04-B.
