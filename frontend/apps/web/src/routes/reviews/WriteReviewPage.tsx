@@ -1,9 +1,31 @@
 import { useCreateReview } from "@aios/shared-hooks";
 import { ApiError } from "@aios/api-client";
+import { classifyBadRequest, classifyForbidden, routeApiError } from "@aios/shared-types";
 import { Alert, Button, Field, PageHeader, Textarea } from "@aios/ui-web";
 import { useState, type FormEvent } from "react";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { AppShell } from "../../components/layout/AppShell";
+import { BadRequestNotice } from "../../components/BadRequestNotice";
+import { ErrorMessage } from "../../components/ErrorMessage";
+import { ForbiddenNotice } from "../../components/ForbiddenNotice";
+
+// spec §3.3 에러 taxonomy: 리뷰 작성 실패는 err.message를 직접 노출하지 않고
+// routeApiError(task-483)로 판정해 400/403/그 외를 각각 BadRequestNotice/
+// ForbiddenNotice/ErrorMessage 경로로만 보여준다(task-901 패턴). listingId 누락
+// 등 클라이언트 자체 검증 실패는 ApiError가 아니므로 계속 문자열 그대로 둔다.
+function CreateReviewError({ error }: { error: unknown }) {
+  if (classifyBadRequest(error)) return <BadRequestNotice error={error} />;
+  if (classifyForbidden(error)) return <ForbiddenNotice error={error} />;
+  const routed = routeApiError(error);
+  return (
+    <ErrorMessage
+      errorCode={error instanceof ApiError ? error.errorCode : undefined}
+      message={error instanceof Error ? error.message : undefined}
+      traceId={error instanceof ApiError ? error.traceId : undefined}
+      retryAfterSec={routed.kind === "backoff_retry" ? routed.afterSec : undefined}
+    />
+  );
+}
 
 export function WriteReviewPage() {
   const { purchaseId } = useParams<{ purchaseId: string }>();
@@ -11,22 +33,24 @@ export function WriteReviewPage() {
   const listingId = Number(searchParams.get("listingId") ?? 0);
   const [rating, setRating] = useState(5);
   const [comment, setComment] = useState("");
-  const [error, setError] = useState<string | null>(null);
+  const [clientError, setClientError] = useState<string | null>(null);
+  const [error, setError] = useState<unknown>(null);
   const createReview = useCreateReview();
   const navigate = useNavigate();
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
+    setClientError(null);
     setError(null);
     if (!listingId) {
-      setError("리스팅 정보가 없습니다 — 마켓플레이스 상세 화면에서 다시 시도해주세요.");
+      setClientError("리스팅 정보가 없습니다 — 마켓플레이스 상세 화면에서 다시 시도해주세요.");
       return;
     }
     try {
       await createReview.mutateAsync({ listingId, body: { rating, comment: comment || undefined } });
       navigate(`/marketplace/${listingId}`);
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : "리뷰 작성에 실패했습니다.");
+      setError(err instanceof ApiError ? err : new Error("리뷰 작성에 실패했습니다."));
     }
   }
 
@@ -48,7 +72,8 @@ export function WriteReviewPage() {
           <Field label="코멘트 (선택)">
             <Textarea value={comment} onChange={(e) => setComment(e.target.value)} rows={4} />
           </Field>
-          {error && <Alert>{error}</Alert>}
+          {clientError && <Alert>{clientError}</Alert>}
+          {error !== null && <CreateReviewError error={error} />}
           <Button type="submit" loading={createReview.isPending} className="w-full">
             리뷰 제출
           </Button>

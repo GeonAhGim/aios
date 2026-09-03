@@ -102,6 +102,24 @@ describe("ExchangeManagementPage 에러 표시", () => {
 
     await waitFor(() => expect(screen.getByText("지원코드: trace-exchange-1")).toBeInTheDocument());
   });
+
+  // task-910 §3.3: routeApiError 경유 BadRequestNotice 경로 — 알려진 400 코드는
+  // raw server detail 대신 고정 매핑 문구를 보여준다.
+  it("negative: VALIDATION_IDEMPOTENCY_KEY_REQUIRED(400)는 BadRequestNotice 경로로 새로고침 안내를 보여준다", async () => {
+    mutateAsync.mockRejectedValue(
+      new ApiError(400, "raw detail", undefined, "VALIDATION_IDEMPOTENCY_KEY_REQUIRED"),
+    );
+    const { container } = renderPage();
+
+    submitRegisterForm(container);
+
+    await waitFor(() =>
+      expect(
+        screen.getByText("요청이 올바르지 않습니다. 새로고침 후 다시 시도해주세요."),
+      ).toBeInTheDocument(),
+    );
+    expect(screen.queryByText("raw detail")).not.toBeInTheDocument();
+  });
 });
 
 // task-473 §3.6: 클라이언트는 비밀을 저장·복호하지 않으므로 폼 상태는 제출 성공/실패

@@ -5,7 +5,14 @@ import {
   useRevokeExchangeCredential,
 } from "@aios/shared-hooks";
 import { ApiError } from "@aios/api-client";
-import { classifyForbidden, getApiErrorMessage, parseSecretRef, redactSecret } from "@aios/shared-types";
+import {
+  classifyBadRequest,
+  classifyForbidden,
+  getApiErrorMessage,
+  parseSecretRef,
+  redactSecret,
+  routeApiError,
+} from "@aios/shared-types";
 import {
   Badge,
   Button,
@@ -20,6 +27,7 @@ import {
 } from "@aios/ui-web";
 import { useState, type FormEvent } from "react";
 import { AppShell } from "../../components/layout/AppShell";
+import { BadRequestNotice } from "../../components/BadRequestNotice";
 import { ErrorMessage } from "../../components/ErrorMessage";
 import { ForbiddenNotice } from "../../components/ForbiddenNotice";
 import { exchangeLabel } from "../../lib/exchangeLabels";
@@ -43,6 +51,43 @@ function credentialScope(secretRef: string | undefined) {
     : { label: "PAPER", tone: "success" as const, isLive: false };
 }
 
+// spec §3.3 에러 taxonomy: err.message를 직접 노출하지 않고 routeApiError(task-483)
+// 경유 BadRequestNotice/ForbiddenNotice/ErrorMessage로만 보여준다(task-901/910 패턴).
+// task-473 §3.6: 등록 폼은 서버가 에러 메시지에 apiKey/apiSecret 원문을 반향할 수
+// 있어(예: "invalid field api_secret=...") ErrorMessage의 fallbackMessage 경로에는
+// redactSecret을 통과시킨다. BadRequestNotice/ForbiddenNotice는 알려진 error_code일
+// 때만 고정 한국어 문구(EXACT_MESSAGES)를 쓰므로 비밀 반향 위험이 없다 — "unknown"
+// (미지 코드 또는 코드 없음)만 계속 redactSecret 경로로 보낸다.
+function RegisterCredentialError({ error }: { error: unknown }) {
+  if (classifyForbidden(error)) return <ForbiddenNotice error={error} />;
+  const badRequestKind = classifyBadRequest(error);
+  if (badRequestKind && badRequestKind !== "unknown") return <BadRequestNotice error={error} />;
+  const routed = routeApiError(error);
+  return (
+    <ErrorMessage
+      errorCode={error instanceof ApiError ? error.errorCode : null}
+      message={error instanceof Error ? redactSecret(error.message) : null}
+      traceId={error instanceof ApiError ? error.traceId : null}
+      retryAfterSec={routed.kind === "backoff_retry" ? routed.afterSec : undefined}
+    />
+  );
+}
+
+function RevokeCredentialError({ error }: { error: unknown }) {
+  if (classifyForbidden(error)) return <ForbiddenNotice error={error} />;
+  const badRequestKind = classifyBadRequest(error);
+  if (badRequestKind && badRequestKind !== "unknown") return <BadRequestNotice error={error} />;
+  const routed = routeApiError(error);
+  return (
+    <ErrorMessage
+      errorCode={error instanceof ApiError ? error.errorCode : null}
+      message={error instanceof Error ? redactSecret(error.message) : null}
+      traceId={error instanceof ApiError ? error.traceId : null}
+      retryAfterSec={routed.kind === "backoff_retry" ? routed.afterSec : undefined}
+    />
+  );
+}
+
 export function ExchangeManagementPage() {
   const { data: credentials, isLoading } = useExchangeCredentials();
   const register = useRegisterExchangeCredential();
@@ -51,8 +96,8 @@ export function ExchangeManagementPage() {
   const [apiKey, setApiKey] = useState("");
   const [apiSecret, setApiSecret] = useState("");
   const [apiPassphrase, setApiPassphrase] = useState("");
-  const [error, setError] = useState<ApiError | Error | null>(null);
-  const [revokeError, setRevokeError] = useState<ApiError | Error | null>(null);
+  const [error, setError] = useState<unknown>(null);
+  const [revokeError, setRevokeError] = useState<unknown>(null);
   const [selectedExchange, setSelectedExchange] = useState<string | null>(null);
   const { data: balances } = useExchangeBalance(selectedExchange);
 
@@ -141,20 +186,11 @@ export function ExchangeManagementPage() {
             <EmptyState>연동된 거래소가 없습니다.</EmptyState>
           )}
 
-          {revokeError &&
-            (classifyForbidden(revokeError) ? (
-              <div className="mt-4">
-                <ForbiddenNotice error={revokeError} />
-              </div>
-            ) : (
-              <div className="mt-4">
-                <ErrorMessage
-                  errorCode={revokeError instanceof ApiError ? revokeError.errorCode : null}
-                  message={redactSecret(revokeError.message)}
-                  traceId={revokeError instanceof ApiError ? revokeError.traceId : null}
-                />
-              </div>
-            ))}
+          {revokeError !== null && (
+            <div className="mt-4">
+              <RevokeCredentialError error={revokeError} />
+            </div>
+          )}
 
           {selectedExchange && balances && (
             <div className="mt-4 rounded-md border border-border bg-surface-hover p-4">
@@ -212,13 +248,7 @@ export function ExchangeManagementPage() {
                 />
               </Field>
             )}
-            {error && (
-              <ErrorMessage
-                errorCode={error instanceof ApiError ? error.errorCode : null}
-                message={redactSecret(error.message)}
-                traceId={error instanceof ApiError ? error.traceId : null}
-              />
-            )}
+            {error !== null && <RegisterCredentialError error={error} />}
             <Button type="submit" loading={register.isPending} className="w-full">
               등록
             </Button>
