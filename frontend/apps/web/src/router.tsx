@@ -17,6 +17,7 @@ import { DashboardPage } from "./routes/dashboard/DashboardPage";
 import { DisputeSubmitPage } from "./routes/disputes/DisputeSubmitPage";
 import { ExchangeManagementPage } from "./routes/exchanges/ExchangeManagementPage";
 import { ExecutionControlPage } from "./routes/executions/ExecutionControlPage";
+import { CandlesPage } from "./routes/market/CandlesPage";
 import { ListingDetailPage } from "./routes/marketplace/ListingDetailPage";
 import { MarketplaceBrowsePage } from "./routes/marketplace/MarketplaceBrowsePage";
 import { SellStrategyPage } from "./routes/marketplace/SellStrategyPage";
@@ -56,6 +57,7 @@ export const router = createBrowserRouter([
   { path: "/dashboard", element: protect(<DashboardPage />) },
   { path: "/exchanges", element: protect(<ExchangeManagementPage />) },
   { path: "/strategy-builder", element: protect(<StrategyBuilderPage />) },
+  { path: "/market/candles", element: protect(<CandlesPage />) },
   { path: "/marketplace", element: protect(<MarketplaceBrowsePage />) },
   { path: "/marketplace/sell", element: protect(<SellStrategyPage />) },
   { path: "/marketplace/:listingId", element: protect(<ListingDetailPage />) },
