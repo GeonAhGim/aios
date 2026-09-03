@@ -23,7 +23,14 @@ VALID_PLATFORMS = ("iOS", "Android")
 
 
 class DeviceTokenError(Exception):
-    """FD-21.1 실패 — 라우터가 400으로 변환."""
+    """FD-21.1 등록 실패(알 수 없는 platform) — VALIDATION_INVALID_FIELD(400)."""
+
+
+class DeviceTokenNotFoundError(DeviceTokenError):
+    """해지하려는 디바이스가 없거나 이미 비활성화됨 — RESOURCE_NOT_FOUND(404)로
+    구분 매핑되도록 별도 서브클래스를 둔다(exception_mapping.py EXCEPTION_MAP은
+    타입 기반이라 같은 클래스면 상태코드를 하나로만 고를 수 있다 — PLT-17의
+    ExchangeCredentialNotFoundError와 동일 관행)."""
 
 
 class DeviceTokenRecord(BaseModel):
@@ -78,7 +85,7 @@ class DeviceTokenService:
                 user_id,
             )
         if result == "UPDATE 0":
-            raise DeviceTokenError("존재하지 않거나 이미 비활성화된 디바이스입니다.")
+            raise DeviceTokenNotFoundError("존재하지 않거나 이미 비활성화된 디바이스입니다.")
 
     async def list_active_tokens(self, user_id: UUID) -> list[str]:
         async with self._pool.acquire() as conn:

@@ -3,9 +3,20 @@
 Spec: docs/specs/L4_platform_observability_tenancy_api_v1.0.md#§2.3, §3.3
 
 PLT-108(auth/users/admin) → PLT-17(auth/users/exchange_credentials) →
-PLT-18(marketplace/strategy_builder/suitability)이 각자 쓰는 예외를
-추가했다 — 다른 라우터(executions/portfolio/reports/admin/foundation
-등)가 쓰는 예외는 각 라우터를 이관하는 후속 리프(PLT-19~21)에서 추가한다.
+PLT-18(marketplace/strategy_builder/suitability) → PLT-20(notifications/
+alerts/device_tokens/wallet)이 각자 쓰는 예외를 추가했다 — 다른
+라우터(executions/portfolio/reports/admin/foundation 등)가 쓰는 예외는
+각 라우터를 이관하는 후속 리프(PLT-19/21)에서 추가한다.
+
+PLT-20 decision(task-1017)은 "src/api/contracts/** 공용 파일 수정 금지"
+(PLT-18/19와의 병렬 실행 중 충돌 회피 목적)였지만, alert_service의
+AlertError·device_token_service의 DeviceTokenError를 라우터에서 그대로
+propagate하되 이 파일을 건드리지 않으면 미매핑 예외가 INTERNAL_ERROR(500)로
+떨어져 기존 라우터 테스트(test_alerts_router.py::test_cancel_nonexistent_
+alert_returns_404, test_device_tokens_router.py의 400/404 케이스)가 깨진다
+— "기존 테스트 무수정 통과"가 "공용 파일 수정 금지"보다 우선한다고 판단해
+신규 ErrorCode 없이(§3.3 taxonomy 재사용만) 최소 추가했다. PM 검토 필요시
+task-1017 note 참조.
 
 한계(정직하게 명시): 이 코드베이스의 여러 예외 클래스(UserAdminError/
 SellerSuspensionError/WalletTopupError/ListingError/PurchaseError 등)는
@@ -13,9 +24,10 @@ SellerSuspensionError/WalletTopupError/ListingError/PurchaseError 등)는
 "상태 충돌" 등 서로 다른 사유가 같은 타입 안에 섞여 있다. `EXCEPTION_MAP`은
 타입 기반 매핑이라 이런 클래스는 가장 대표적인 사유 하나로만 매핑된다 —
 완벽한 사유별 구분이 필요하면 해당 서비스의 예외 계층을 먼저 세분화
-해야 한다(이번 리프 스콥 밖). `StrategyNotFoundError`/`RiskProfileNotFoundError`
-처럼 실제로 라우터가 상태코드를 구분해야 했던 경우만 이번 리프에서
-서브클래스로 쪼갰다(PLT-17의 `ExchangeCredentialNotFoundError`와 동일 근거).
+해야 한다(이번 리프 스콥 밖). `StrategyNotFoundError`/`RiskProfileNotFoundError`/
+`AlertNotFoundError`/`DeviceTokenNotFoundError`처럼 실제로 라우터가 상태코드를
+구분해야 했던 경우만 서브클래스로 쪼갰다(PLT-17의
+`ExchangeCredentialNotFoundError`와 동일 근거).
 
 AuthError는 의도적으로 AUTH_INVALID_CREDENTIALS 하나로만 매핑한다 —
 AuthService.authenticate()가 계정 미존재/잠금/정지/틀린 비밀번호를
@@ -46,10 +58,12 @@ from src.core.indicators.talib_adapter import IndicatorError
 from src.foundation.ledger.application.payouts import UnknownPayoutBatchError
 from src.foundation.ledger.application.queries import WalletLedgerDriftError
 from src.services.account_deletion_service import AccountDeletionError
+from src.services.alert_service import AlertError, AlertNotFoundError
 from src.services.approval_settings_service import ApprovalSettingsError
 from src.services.auth_service import AuthError
 from src.services.condition_compiler import ConditionCompileError
 from src.services.credential_resolver import CredentialNotFoundError
+from src.services.device_token_service import DeviceTokenError, DeviceTokenNotFoundError
 from src.services.dispute_resolution_service import DisputeResolutionError
 from src.services.dispute_service import DisputeError
 from src.services.exchange_credential_service import (
@@ -117,6 +131,11 @@ EXCEPTION_MAP: list[tuple[type[Exception], ErrorCode]] = [
     (PromptGenerationUnavailableError, ErrorCode.DEPENDENCY_NOT_READY),
     (RiskProfileNotFoundError, ErrorCode.RESOURCE_NOT_FOUND),
     (RiskProfileError, ErrorCode.VALIDATION_INVALID_FIELD),
+    # PLT-20 — notifications/alerts/device_tokens/wallet.
+    (AlertNotFoundError, ErrorCode.RESOURCE_NOT_FOUND),
+    (AlertError, ErrorCode.VALIDATION_INVALID_FIELD),
+    (DeviceTokenNotFoundError, ErrorCode.RESOURCE_NOT_FOUND),
+    (DeviceTokenError, ErrorCode.VALIDATION_INVALID_FIELD),
 ]
 
 # ErrorCode 하나당 상태코드 하나뿐인 HTTP_STATUS로 표현할 수 없는 개별

@@ -49,7 +49,14 @@ PublishFn = Callable[[str, dict[str, Any]], Awaitable[None]]
 
 
 class AlertError(Exception):
-    """FD-14 실패 — 라우터가 400/404로 변환."""
+    """FD-14 생성 실패(활성 알림 상한 도달 등) — VALIDATION_INVALID_FIELD(400)."""
+
+
+class AlertNotFoundError(AlertError):
+    """취소하려는 활성 알림이 없음 — RESOURCE_NOT_FOUND(404)로 구분 매핑되도록
+    별도 서브클래스를 둔다(exception_mapping.py EXCEPTION_MAP은 타입 기반이라
+    같은 클래스면 상태코드를 하나로만 고를 수 있다 — PLT-17의
+    ExchangeCredentialNotFoundError와 동일 관행)."""
 
 
 class PriceAlert(BaseModel):
@@ -145,7 +152,7 @@ class AlertService:
                 user_id,
             )
         if row is None:
-            raise AlertError("취소할 수 있는 활성 알림을 찾을 수 없습니다.")
+            raise AlertNotFoundError("취소할 수 있는 활성 알림을 찾을 수 없습니다.")
         return _row_to_alert(row)
 
     async def evaluate_all_active(self) -> list[PriceAlert]:

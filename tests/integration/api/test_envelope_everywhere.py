@@ -1,6 +1,6 @@
-"""PLT-17/PLT-18 — auth/users 응답이 실제로 `ApiResponse` 봉투(`{"data": ...,
-"meta": {"trace_id", "as_of"}}`)인지, 이관된 라우터 전부의 에러 응답이
-§15.3 ApiError 포맷인지 실제 FastAPI 앱 + 실제 dev DB로 왕복 확인한다.
+"""PLT-17/PLT-18/PLT-20 — auth/users 응답이 실제로 `ApiResponse` 봉투(`{"data": ...,
+"meta": {"trace_id", "as_of"}}`)인지, 이관된 라우터 전부의 에러 응답이 §15.3
+ApiError 포맷인지 실제 FastAPI 앱 + 실제 dev DB로 왕복 확인한다.
 
 Spec: docs/specs/L4_platform_observability_tenancy_api_v1.0.md#§9 PLT-17~21,
 src/api/contracts/envelope.py
@@ -8,15 +8,16 @@ src/api/contracts/envelope.py
 mock으로 ApiResponse를 직접 만들어 검증하는 동어반복을 피하기 위해 실제
 HTTP 요청(httpx ASGITransport)으로 앱을 왕복한다.
 
-exchange_credentials/marketplace/strategy_builder/suitability의 성공 응답
-봉투화는 이 리프들에서 보류했다(task-1002/task-1009 PM 선반영 decision
-참조) — spec §2.3(line 307)이 이 변경을 MAJOR로 규정하고 `/api/v1` 경로에만
-적용하라고 명시하는데, 그 경로를 여는 `mount_v1` 배선(PLT-16,
-src/api/versioning.py)이 아직 `src/main.py`에 없어 legacy 단일 경로만
-존재하는 지금 감싸면 `contracts/openapi/v1.json` 베이스라인 대비 MAJOR
-위반이 난다. 그래서 이 파일은 해당 라우터들에 대해 "에러 응답은 이미
-ApiError 포맷"이라는, 이번 변경 전후로 항상 참인 사실만 검증한다 —
-성공 응답이 봉투라고 거짓 주장하지 않는다.
+exchange_credentials/marketplace/strategy_builder/suitability/notifications/
+alerts/device_tokens/wallet의 성공 응답 봉투화는 보류했다(task-1002 PLT-17
+needs_decision → task-1009 PLT-18, task-1017 PLT-20 PM 선반영으로 확정, 각
+라우터 모듈 docstring 참조) — spec §2.3(line 307)이 이 변경을 MAJOR로
+규정하고 `/api/v1` 경로에만 적용하라고 명시하는데, 그 경로를 여는 `mount_v1`
+배선(PLT-16, src/api/versioning.py)이 아직 `src/main.py`에 없어 legacy 단일
+경로만 존재하는 지금 감싸면 `contracts/openapi/v1.json` 베이스라인 대비
+MAJOR 위반이 난다. 그래서 이 파일은 이 라우터들에 대해 "에러 응답은 이미
+ApiError 포맷"이라는, 이번 변경 전후로 항상 참인 사실만 검증한다 — 성공
+응답이 봉투라고 거짓 주장하지 않는다.
 """
 from __future__ import annotations
 
@@ -193,3 +194,65 @@ async def test_suitability_risk_profile_missing_is_the_apierror_envelope(client)
     body = response.json()
     _assert_error_envelope(body)
     assert body["error_code"] == "RESOURCE_NOT_FOUND"
+
+
+async def test_alerts_cancel_not_found_error_response_is_the_apierror_envelope(client):
+    """alerts.py PLT-20 — AlertNotFoundError가 전역 핸들러를 거쳐
+    RESOURCE_NOT_FOUND ApiError로 변환되는지 실호출로 확인한다."""
+    _, headers = await _register_user(client)
+
+    response = await client.post("/alerts/999999999/cancel", headers=headers)
+
+    assert response.status_code == 404
+    body = response.json()
+    _assert_error_envelope(body)
+    assert body["error_code"] == "RESOURCE_NOT_FOUND"
+
+
+async def test_device_tokens_register_validation_error_response_is_the_apierror_envelope(client):
+    """device_tokens.py PLT-20 — DeviceTokenError(알 수 없는 platform)가
+    전역 핸들러를 거쳐 VALIDATION_INVALID_FIELD ApiError로 변환되는지
+    실호출로 확인한다."""
+    _, headers = await _register_user(client)
+
+    response = await client.post(
+        "/device-tokens",
+        json={"device_token": "token-abc", "platform": "WindowsPhone"},
+        headers=headers,
+    )
+
+    assert response.status_code == 400
+    body = response.json()
+    _assert_error_envelope(body)
+    assert body["error_code"] == "VALIDATION_INVALID_FIELD"
+
+
+async def test_device_tokens_deactivate_not_found_error_response_is_the_apierror_envelope(client):
+    """device_tokens.py PLT-20 — DeviceTokenNotFoundError가 전역 핸들러를
+    거쳐 RESOURCE_NOT_FOUND ApiError로 변환되는지 실호출로 확인한다."""
+    _, headers = await _register_user(client)
+
+    response = await client.delete("/device-tokens/999999999", headers=headers)
+
+    assert response.status_code == 404
+    body = response.json()
+    _assert_error_envelope(body)
+    assert body["error_code"] == "RESOURCE_NOT_FOUND"
+
+
+async def test_wallet_topup_validation_error_response_is_the_apierror_envelope(client):
+    """wallet.py PLT-20 — WalletTopupError(0보다 크지 않은 금액)가 전역
+    핸들러를 거쳐 VALIDATION_INVALID_FIELD ApiError로 변환되는지 실호출로
+    확인한다. WalletTopupError는 PLT-108부터 이미 EXCEPTION_MAP에 있었으므로
+    이 테스트는 라우터가 더 이상 자체 HTTPException으로 가로채지 않는다는
+    것만 새로 고정한다."""
+    _, headers = await _register_user(client)
+
+    response = await client.post(
+        "/wallet/topup-requests", json={"amount": "0"}, headers=headers
+    )
+
+    assert response.status_code == 400
+    body = response.json()
+    _assert_error_envelope(body)
+    assert body["error_code"] == "VALIDATION_INVALID_FIELD"

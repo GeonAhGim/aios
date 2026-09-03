@@ -1,12 +1,17 @@
-"""FD-14(신설) — 가격/지표 알림 API 라우터."""
+"""FD-14(신설) — 가격/지표 알림 API 라우터.
+
+PLT-20 — raw HTTPException 제거. AlertError/AlertNotFoundError는 이제
+전역 핸들러(src/api/contracts/handlers.py)가 EXCEPTION_MAP을 통해
+상태코드·error_code·trace_id를 채운다(§9 PLT-17~21).
+"""
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, status
 
 from src.api.deps import get_current_user
 from src.api.schemas.alerts import AlertCreateRequest
 from src.api.service_deps import get_alert_service
-from src.services.alert_service import AlertError, AlertService, PriceAlert
+from src.services.alert_service import AlertService, PriceAlert
 from src.services.auth_service import User
 
 router = APIRouter()
@@ -44,7 +49,4 @@ async def cancel_alert(
     user: User = Depends(get_current_user),
     service: AlertService = Depends(get_alert_service),
 ) -> PriceAlert:
-    try:
-        return await service.cancel_alert(user.user_id, alert_id)
-    except AlertError as exc:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, str(exc)) from exc
+    return await service.cancel_alert(user.user_id, alert_id)
