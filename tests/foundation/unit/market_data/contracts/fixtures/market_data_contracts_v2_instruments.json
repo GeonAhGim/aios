@@ -1,0 +1,211 @@
+{
+  "Instrument": {
+    "$defs": {
+      "AssetClass": {
+        "description": "AIOS가 표현할 수 있는 전체 자산군 상위집합. 개별 거래소가 이 중 무엇을\n실제로 지원하는지는 ExchangeCapability.supported_asset_classes가\n선언한다 — 이 enum에 있다고 모든 거래소에서 거래 가능하다는 뜻이 아니다.",
+        "enum": [
+          "CRYPTO",
+          "KR_EQUITY",
+          "KR_ETF",
+          "KR_ETN",
+          "KR_FUTURES",
+          "KR_OPTION",
+          "US_EQUITY",
+          "US_ETF",
+          "US_ETN",
+          "OVERSEAS_FUTURES",
+          "OVERSEAS_OPTION"
+        ],
+        "title": "AssetClass",
+        "type": "string"
+      },
+      "InstrumentLifecycle": {
+        "description": "§4.2 심볼 생애주기 전이표의 상태. 전이 규칙 자체는 DC-3\n(`domain/instruments/lifecycle.py`)의 책임이며, 이 계약은 상태 값만\n정의한다.",
+        "enum": [
+          "PENDING",
+          "ACTIVE",
+          "HALTED",
+          "DELISTED"
+        ],
+        "title": "InstrumentLifecycle",
+        "type": "string"
+      }
+    },
+    "description": "벤처 독립적인 심볼 마스터 레코드. `instrument_id`는 불변(§4.1) —\n재상장은 같은 id를 재사용하지 않고 새 `Instrument`를 발급한다(§4.2\ndelisted→relisted: \"새 instrument 생성(구 id 유지 금지)\").",
+    "properties": {
+      "asset_class": {
+        "$ref": "#/$defs/AssetClass"
+      },
+      "base": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "title": "Base"
+      },
+      "calendar_id": {
+        "title": "Calendar Id",
+        "type": "string"
+      },
+      "created_at": {
+        "format": "date-time",
+        "title": "Created At",
+        "type": "string"
+      },
+      "figi": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "title": "Figi"
+      },
+      "instrument_id": {
+        "title": "Instrument Id",
+        "type": "string"
+      },
+      "isin": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "title": "Isin"
+      },
+      "lifecycle_state": {
+        "$ref": "#/$defs/InstrumentLifecycle"
+      },
+      "lot_size": {
+        "anyOf": [
+          {
+            "type": "number"
+          },
+          {
+            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+            "type": "string"
+          }
+        ],
+        "title": "Lot Size"
+      },
+      "quote": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "title": "Quote"
+      },
+      "schema_version": {
+        "const": "instruments-v2",
+        "default": "instruments-v2",
+        "title": "Schema Version",
+        "type": "string"
+      },
+      "tick_size": {
+        "anyOf": [
+          {
+            "type": "number"
+          },
+          {
+            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+            "type": "string"
+          }
+        ],
+        "title": "Tick Size"
+      }
+    },
+    "required": [
+      "instrument_id",
+      "asset_class",
+      "base",
+      "quote",
+      "isin",
+      "figi",
+      "tick_size",
+      "lot_size",
+      "calendar_id",
+      "lifecycle_state",
+      "created_at"
+    ],
+    "title": "Instrument",
+    "type": "object"
+  },
+  "VenueListing": {
+    "$defs": {
+      "Venue": {
+        "description": "세션 규칙(A3) 조회 키. KIS는 시장별로 캘린더가 달라 KRX/US를 분리한다.",
+        "enum": [
+          "BITGET",
+          "KIS_KRX",
+          "KIS_US"
+        ],
+        "title": "Venue",
+        "type": "string"
+      }
+    },
+    "description": "벤처별 심볼 매핑. `(venue, venue_symbol, listed_at)`는 유일해야\n한다(§3.2) — 이 유일성은 DC-4 마이그레이션의 DB 제약(EXCLUDE)이 실제로\n강제하고, 이 DTO는 그 계약 형태만 표현한다. 심볼 변경은 구 listing에\n`delisted_at`을 채우고 새 listing을 등록하는 방식으로 표현한다\n(`instrument_id`는 그대로).",
+    "properties": {
+      "delisted_at": {
+        "anyOf": [
+          {
+            "format": "date-time",
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "title": "Delisted At"
+      },
+      "instrument_id": {
+        "title": "Instrument Id",
+        "type": "string"
+      },
+      "is_primary": {
+        "title": "Is Primary",
+        "type": "boolean"
+      },
+      "listed_at": {
+        "format": "date-time",
+        "title": "Listed At",
+        "type": "string"
+      },
+      "schema_version": {
+        "const": "instruments-v2",
+        "default": "instruments-v2",
+        "title": "Schema Version",
+        "type": "string"
+      },
+      "venue": {
+        "$ref": "#/$defs/Venue"
+      },
+      "venue_symbol": {
+        "title": "Venue Symbol",
+        "type": "string"
+      }
+    },
+    "required": [
+      "instrument_id",
+      "venue",
+      "venue_symbol",
+      "listed_at",
+      "delisted_at",
+      "is_primary"
+    ],
+    "title": "VenueListing",
+    "type": "object"
+  }
+}
