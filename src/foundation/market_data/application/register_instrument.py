@@ -154,16 +154,19 @@ async def apply_lifecycle_event(
             if cmd.event == "RENAME":
                 if not cmd.new_venue_symbol:
                     raise RenameSymbolInUseError("RENAME에는 new_venue_symbol이 필요합니다")
-                new_canonical = to_canonical(current.venue, cmd.new_venue_symbol)
+                # 형식 검증만(SymbolNormalizationError) — 조회·저장은 원시 심볼을 그대로 쓴다.
+                to_canonical(current.venue, cmd.new_venue_symbol)
                 clash = await refs.get_instrument(
-                    conn, current.venue, new_canonical, cmd.effective_at
+                    conn, current.venue, cmd.new_venue_symbol, cmd.effective_at
                 )
                 if clash is not None:
                     raise RenameSymbolInUseError(
                         f"new_venue_symbol 사용 중: venue={current.venue.value} "
                         f"symbol={cmd.new_venue_symbol!r}"
                     )
-                await refs.add_alias(conn, current.instrument_id, current.venue, new_canonical)
+                await refs.add_alias(
+                    conn, current.instrument_id, current.venue, cmd.new_venue_symbol
+                )
         except (LifecycleTransitionError, RenameSymbolInUseError) as exc:
             denial = exc
 
