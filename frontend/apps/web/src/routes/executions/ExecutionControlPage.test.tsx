@@ -2,7 +2,8 @@ import "@testing-library/jest-dom/vitest";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { MemoryRouter } from "react-router-dom";
-import { ApiError } from "@aios/api-client";
+import { AiosApiClient, ApiError } from "@aios/api-client";
+import type { ExecutionCreateRequest } from "@aios/shared-types";
 import { ExecutionControlPage } from "./ExecutionControlPage";
 
 const mutateAsync = vi.fn();
@@ -21,7 +22,49 @@ afterEach(() => {
   mutateAsync.mockReset();
   refetch.mockReset();
   executionsData = [];
+  vi.unstubAllGlobals();
 });
+
+// task-1049 §3.7/§9 PLT-15: mutateAsync를 단순 spy로 두면 컴포넌트가 어떤 문자열을
+// 넘겼는지만 확인하는 동어반복이 된다 — 아래 describe는 mutateAsync가 실제
+// AiosApiClient(멱등 헤더 조립 포함)에 위임하도록 해 fetch로 나간 진짜
+// Idempotency-Key 헤더값을 단언한다.
+const IDEMPOTENCY_KEY_RE = /^[A-Za-z0-9_-]{16,128}$/;
+const realClient = new AiosApiClient("https://api.example.test", () => null);
+
+function jsonResponse(status: number, body: unknown): Response {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { "Content-Type": "application/json" },
+  });
+}
+
+function stubFetch(body: unknown, status = 200): ReturnType<typeof vi.fn> {
+  const fetchMock = vi.fn().mockResolvedValue(jsonResponse(status, body));
+  vi.stubGlobal("fetch", fetchMock);
+  return fetchMock;
+}
+
+function stubFetchSequence(...responses: Array<{ body: unknown; status?: number }>): ReturnType<typeof vi.fn> {
+  const fetchMock = vi.fn();
+  for (const { body, status = 200 } of responses) {
+    fetchMock.mockResolvedValueOnce(jsonResponse(status, body));
+  }
+  vi.stubGlobal("fetch", fetchMock);
+  return fetchMock;
+}
+
+function idempotencyKeyOf(fetchMock: ReturnType<typeof vi.fn>, call = 0): string | null {
+  const [, init] = fetchMock.mock.calls[call] as [string, RequestInit];
+  return new Headers(init.headers).get("Idempotency-Key");
+}
+
+function delegateToRealClient() {
+  mutateAsync.mockImplementation(
+    (vars: { body: ExecutionCreateRequest; idempotencyKey?: string }) =>
+      realClient.createExecution(vars.body, vars.idempotencyKey),
+  );
+}
 
 function renderPage() {
   return render(
@@ -115,5 +158,77 @@ describe("ExecutionControlPage 5xx·409 재시도 배선", () => {
     expect(firstKey).toBeTruthy();
     expect(secondKey).toBeTruthy();
     expect(secondKey).not.toBe(firstKey);
+  });
+});
+
+describe("ExecutionControlPage 실행 생성 Idempotency-Key(§3.7) 실제 헤더 검증", () => {
+  it("실행 생성 시 실제 요청 헤더에 규격(16~128자, [A-Za-z0-9_-])을 만족하는 Idempotency-Key를 싣는다", async () => {
+    const fetchMock = stubFetch({ id: 1, status: "PENDING" });
+    delegateToRealClient();
+    const { container } = renderPage();
+
+    submitCreateForm(container);
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+    expect(idempotencyKeyOf(fetchMock)).toMatch(IDEMPOTENCY_KEY_RE);
+  });
+
+  it("negative: 409 STATE_CONCURRENCY_CONFLICT는 refetch 후 자동 재제출하며, 두 요청 모두 서로 다른 실제 Idempotency-Key를 싣는다", async () => {
+    const fetchMock = stubFetchSequence(
+      {
+        body: {
+          error_code: "STATE_CONCURRENCY_CONFLICT",
+          message: "충돌",
+          details: {},
+          trace_id: "t-exec-409",
+          retry_after_seconds: null,
+        },
+        status: 409,
+      },
+      { body: { id: 2, status: "PENDING" } },
+    );
+    delegateToRealClient();
+    const { container } = renderPage();
+
+    submitCreateForm(container);
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+    expect(refetch).toHaveBeenCalledTimes(1);
+    expect(screen.queryByText(/다른 요청과 충돌했습니다/)).not.toBeInTheDocument();
+
+    const firstKey = idempotencyKeyOf(fetchMock, 0);
+    const secondKey = idempotencyKeyOf(fetchMock, 1);
+    expect(firstKey).toMatch(IDEMPOTENCY_KEY_RE);
+    expect(secondKey).toMatch(IDEMPOTENCY_KEY_RE);
+    expect(secondKey).not.toBe(firstKey);
+  });
+
+  it("negative: 429 RATE_LIMIT_EXCEEDED는 매핑 문구를 보여주고 서버 원문은 노출하지 않으며, 재제출은 새 Idempotency-Key로 나간다", async () => {
+    const firstFetch = stubFetch(
+      {
+        error_code: "RATE_LIMIT_EXCEEDED",
+        message: "raw rate limit detail",
+        details: {},
+        trace_id: "t-exec-429",
+        retry_after_seconds: 1,
+      },
+      429,
+    );
+    delegateToRealClient();
+    const { container } = renderPage();
+
+    submitCreateForm(container);
+    await waitFor(() =>
+      expect(
+        screen.getByText("요청이 너무 많습니다. 잠시 후 다시 시도해주세요."),
+      ).toBeInTheDocument(),
+    );
+    expect(screen.queryByText("raw rate limit detail")).not.toBeInTheDocument();
+    const firstKey = idempotencyKeyOf(firstFetch);
+
+    const secondFetch = stubFetch({ id: 3, status: "PENDING" });
+    submitCreateForm(container);
+    await waitFor(() => expect(secondFetch).toHaveBeenCalledTimes(1));
+    expect(idempotencyKeyOf(secondFetch)).not.toBe(firstKey);
   });
 });

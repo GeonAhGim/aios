@@ -2,7 +2,8 @@ import "@testing-library/jest-dom/vitest";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
-import { ApiError } from "@aios/api-client";
+import { AiosApiClient, ApiError } from "@aios/api-client";
+import type { PurchaseCreateRequest } from "@aios/shared-types";
 import { ListingDetailPage } from "./ListingDetailPage";
 
 const purchaseMutateAsync = vi.fn();
@@ -23,7 +24,40 @@ afterEach(() => {
   cleanup();
   purchaseMutateAsync.mockReset();
   reviewsResult = { data: { reviews: [], reviewCount: 0, averageRating: null }, error: null };
+  vi.unstubAllGlobals();
 });
+
+// task-1049 §3.7/§9 PLT-15: purchaseMutateAsync를 단순 spy로 두면 컴포넌트가 어떤
+// 문자열을 넘겼는지만 확인하는 동어반복이 된다 — 아래 describe는 mutateAsync가
+// 실제 AiosApiClient(멱등 헤더 조립 포함)에 위임하도록 해 fetch로 나간 진짜
+// Idempotency-Key 헤더값을 단언한다.
+const IDEMPOTENCY_KEY_RE = /^[A-Za-z0-9_-]{16,128}$/;
+const realClient = new AiosApiClient("https://api.example.test", () => null);
+
+function jsonResponse(status: number, body: unknown): Response {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { "Content-Type": "application/json" },
+  });
+}
+
+function stubFetch(body: unknown, status = 200): ReturnType<typeof vi.fn> {
+  const fetchMock = vi.fn().mockResolvedValue(jsonResponse(status, body));
+  vi.stubGlobal("fetch", fetchMock);
+  return fetchMock;
+}
+
+function idempotencyKeyOf(fetchMock: ReturnType<typeof vi.fn>): string | null {
+  const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+  return new Headers(init.headers).get("Idempotency-Key");
+}
+
+function delegateToRealClient() {
+  purchaseMutateAsync.mockImplementation(
+    (vars: { listingId: number; body: PurchaseCreateRequest; idempotencyKey: string }) =>
+      realClient.purchaseListing(vars.listingId, vars.body, vars.idempotencyKey),
+  );
+}
 
 function renderPage() {
   return render(
@@ -89,5 +123,91 @@ describe("ListingDetailPage 리뷰 목록 404", () => {
     renderPage();
 
     expect(screen.getByText("리스팅을 찾을 수 없습니다")).toBeInTheDocument();
+  });
+});
+
+describe("ListingDetailPage 구매 Idempotency-Key(§3.7) 실제 헤더 검증", () => {
+  it("구매하면 실제 요청 헤더에 규격(16~128자, [A-Za-z0-9_-])을 만족하는 Idempotency-Key를 싣는다", async () => {
+    const fetchMock = stubFetch({
+      purchase_id: 1,
+      status: "PENDING",
+      risk_warning: false,
+      risk_warning_reason: null,
+    });
+    delegateToRealClient();
+    renderPage();
+
+    fireEvent.click(screen.getByRole("button", { name: "구매하기" }));
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+    expect(idempotencyKeyOf(fetchMock)).toMatch(IDEMPOTENCY_KEY_RE);
+  });
+
+  it("negative: 409 STATE_CONCURRENCY_CONFLICT 후 재구매하면 새 Idempotency-Key로 다시 보낸다", async () => {
+    const firstFetch = stubFetch(
+      {
+        error_code: "STATE_CONCURRENCY_CONFLICT",
+        message: "충돌",
+        details: {},
+        trace_id: "t-listing-409",
+        retry_after_seconds: null,
+      },
+      409,
+    );
+    delegateToRealClient();
+    renderPage();
+
+    fireEvent.click(screen.getByRole("button", { name: "구매하기" }));
+    await waitFor(() =>
+      expect(
+        screen.getByText("다른 요청과 충돌했습니다. 새로고침 후 다시 시도해주세요."),
+      ).toBeInTheDocument(),
+    );
+    const firstKey = idempotencyKeyOf(firstFetch);
+    expect(firstKey).toMatch(IDEMPOTENCY_KEY_RE);
+
+    const secondFetch = stubFetch({
+      purchase_id: 2,
+      status: "PENDING",
+      risk_warning: false,
+      risk_warning_reason: null,
+    });
+    fireEvent.click(screen.getByRole("button", { name: "구매하기" }));
+    await waitFor(() => expect(secondFetch).toHaveBeenCalledTimes(1));
+    expect(idempotencyKeyOf(secondFetch)).not.toBe(firstKey);
+  });
+
+  it("negative: 429 RATE_LIMIT_EXCEEDED는 매핑 문구를 보여주고 서버 원문은 노출하지 않으며, 재구매는 새 Idempotency-Key로 나간다", async () => {
+    const firstFetch = stubFetch(
+      {
+        error_code: "RATE_LIMIT_EXCEEDED",
+        message: "raw rate limit detail",
+        details: {},
+        trace_id: "t-listing-429",
+        retry_after_seconds: 1,
+      },
+      429,
+    );
+    delegateToRealClient();
+    renderPage();
+
+    fireEvent.click(screen.getByRole("button", { name: "구매하기" }));
+    await waitFor(() =>
+      expect(
+        screen.getByText("요청이 너무 많습니다. 잠시 후 다시 시도해주세요."),
+      ).toBeInTheDocument(),
+    );
+    expect(screen.queryByText("raw rate limit detail")).not.toBeInTheDocument();
+    const firstKey = idempotencyKeyOf(firstFetch);
+
+    const secondFetch = stubFetch({
+      purchase_id: 3,
+      status: "PENDING",
+      risk_warning: false,
+      risk_warning_reason: null,
+    });
+    fireEvent.click(screen.getByRole("button", { name: "구매하기" }));
+    await waitFor(() => expect(secondFetch).toHaveBeenCalledTimes(1));
+    expect(idempotencyKeyOf(secondFetch)).not.toBe(firstKey);
   });
 });
