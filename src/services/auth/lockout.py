@@ -23,7 +23,7 @@ activate 경합과 같은 결함 유형). 여기서는 단일 `UPDATE ... RETURN
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
+from datetime import datetime
 from uuid import UUID
 
 import asyncpg
@@ -60,34 +60,42 @@ async def register_failed_attempt(
     Python이 미리 읽어둔 카운트를 쓰지 않는다 — 동시 호출 N개가 모두
     이 함수를 호출해도 UPDATE 문 자체가 행 잠금으로 직렬화되므로 최종
     카운트는 정확히 N이 된다(경합 손실 0).
+
+    `now` 인자는 호출부(auth_service.authenticate)와의 시그니처 호환을
+    위해서만 남아 있고 시각 계산에는 쓰지 않는다 — 그 값은 비밀번호 해시
+    검증처럼 느린 작업 이전에 캡처되므로, DB에는 나중에 도착했지만
+    Python `now`는 더 이른 호출이 "이미 잠근 호출보다 이른 now"로
+    retry_after를 계산해 상한(LOCKOUT_MINUTES*60)을 넘겨버릴 수 있다
+    (동시 10건 경합에서 902초 오버슈트로 재현됨). 잠금 판정과 잔여 시간은
+    DB 서버시각(`clock_timestamp()`)만 기준으로 삼는다 — 동시 UPDATE는
+    행 잠금으로 직렬화되므로 서버시각 호출 순서는 항상 실제 커밋 순서와
+    일치하지만, 컨텍스트 스위칭에 노출된 Python 시각은 그렇지 않다.
     """
-    now = now if now is not None else datetime.now(timezone.utc)
-    candidate_locked_until = now + timedelta(minutes=LOCKOUT_MINUTES)
     row = await conn.fetchrow(
         """
         UPDATE users
         SET failed_login_attempts = failed_login_attempts + 1,
             locked_until = CASE
                 WHEN failed_login_attempts + 1 >= $2
-                     AND (locked_until IS NULL OR locked_until <= $3)
-                THEN $4
+                     AND (locked_until IS NULL OR locked_until <= clock_timestamp())
+                THEN clock_timestamp() + make_interval(mins => $3)
                 ELSE locked_until
             END
         WHERE user_id = $1
-        RETURNING failed_login_attempts, locked_until
+        RETURNING failed_login_attempts, locked_until, clock_timestamp() AS server_now
         """,
         user_id,
         MAX_FAILED_ATTEMPTS,
-        now,
-        candidate_locked_until,
+        LOCKOUT_MINUTES,
     )
     if row is None:
         raise ValueError(f"lockout 대상 user_id가 존재하지 않습니다: {user_id}")
 
     attempts: int = row["failed_login_attempts"]
     locked_until: datetime | None = row["locked_until"]
+    server_now: datetime = row["server_now"]
     return LockoutState(
         failed_attempts=attempts,
-        locked=locked_until is not None and locked_until > now,
-        retry_after_seconds=retry_after_seconds(locked_until, now),
+        locked=locked_until is not None and locked_until > server_now,
+        retry_after_seconds=retry_after_seconds(locked_until, server_now),
     )
