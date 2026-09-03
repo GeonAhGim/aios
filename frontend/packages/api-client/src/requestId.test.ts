@@ -27,6 +27,12 @@ describe("newRequestId", () => {
     const b = newRequestId(1_700_000_000_000);
     expect(a.slice(10)).not.toBe(b.slice(10));
   });
+
+  it("소수 ms(now 주입 훅에 비정수가 들어와도)도 26자 유효 ULID를 만든다", () => {
+    const id = newRequestId(1_700_000_000_000.7);
+    expect(id).toHaveLength(26);
+    expect(isValidRequestId(id)).toBe(true);
+  });
 });
 
 describe("isValidRequestId", () => {

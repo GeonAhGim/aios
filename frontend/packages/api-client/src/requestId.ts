@@ -19,7 +19,7 @@ const ULID_PATTERN = new RegExp(`^[${CROCKFORD_ALPHABET}]{${ULID_LEN}}$`);
 // 48비트 타임스탬프(ms)를 Crockford base32 10자로 인코딩한다. 앞자리부터
 // 채우므로 사전순 정렬이 시간순 정렬과 같아진다(ULID 스펙의 핵심 성질).
 function encodeTime(time: number): string {
-  let remaining = time;
+  let remaining = Math.floor(time);
   const chars = new Array<string>(TIME_LEN);
   for (let i = TIME_LEN - 1; i >= 0; i--) {
     chars[i] = CROCKFORD_ALPHABET[remaining % 32];
