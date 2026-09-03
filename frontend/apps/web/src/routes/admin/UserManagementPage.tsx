@@ -14,7 +14,7 @@ const STATUSES = ["ACTIVE", "SUSPENDED"];
 // ForbiddenNotice/ErrorMessage 경로로만 보여준다(task-483/1072 패턴). 지금까지 두
 // mutate 호출 모두 콜백 없이 실행돼 실패를 완전히 조용히 삼켰다 — 에러 상태
 // 자체가 없었다.
-function UserActionError({ error }: { error: unknown }) {
+function UserActionError({ error, onRetry }: { error: unknown; onRetry?: () => void }) {
   if (classifyForbidden(error)) return <ForbiddenNotice error={error} />;
   const routed = routeApiError(error);
   return (
@@ -23,13 +23,20 @@ function UserActionError({ error }: { error: unknown }) {
       message={error instanceof Error ? error.message : undefined}
       traceId={error instanceof ApiError ? error.traceId : undefined}
       retryAfterSec={routed.kind === "backoff_retry" ? routed.afterSec : undefined}
+      onRetry={onRetry}
     />
   );
 }
 
 export function UserManagementPage() {
   const [emailSearch, setEmailSearch] = useState("");
-  const { data: users, isLoading } = useAdminUsers(emailSearch || undefined);
+  const {
+    data: users,
+    isLoading,
+    isError: usersIsError,
+    error: usersError,
+    refetch: refetchUsers,
+  } = useAdminUsers(emailSearch || undefined);
   const changeStatus = useChangeUserStatus();
   const suspendSeller = useSuspendSeller();
   const [suspendReasons, setSuspendReasons] = useState<Record<string, string>>({});
@@ -62,7 +69,9 @@ export function UserManagementPage() {
           onChange={(e) => setEmailSearch(e.target.value)}
           className="max-w-sm"
         />
-        {isLoading ? (
+        {usersIsError ? (
+          <UserActionError error={usersError} onRetry={() => refetchUsers()} />
+        ) : isLoading ? (
           <LoadingState />
         ) : users && users.length > 0 ? (
           <ul className="space-y-3">

@@ -12,7 +12,7 @@ import { ForbiddenNotice } from "../../components/ForbiddenNotice";
 // 않고 routeApiError로 판정해 403/그 외를 각각 ForbiddenNotice/ErrorMessage
 // 경로로만 보여준다(task-483/1072 패턴). 지금까지 verify.mutate가 콜백 없이
 // 호출돼 실패를 완전히 조용히 삼켰다 — 에러 상태 자체가 없었다.
-function VerifyActionError({ error }: { error: unknown }) {
+function VerifyActionError({ error, onRetry }: { error: unknown; onRetry?: () => void }) {
   if (classifyForbidden(error)) return <ForbiddenNotice error={error} />;
   const routed = routeApiError(error);
   return (
@@ -21,12 +21,19 @@ function VerifyActionError({ error }: { error: unknown }) {
       message={error instanceof Error ? error.message : undefined}
       traceId={error instanceof ApiError ? error.traceId : undefined}
       retryAfterSec={routed.kind === "backoff_retry" ? routed.afterSec : undefined}
+      onRetry={onRetry}
     />
   );
 }
 
 export function VerificationQueuePage() {
-  const { data: queue, isLoading } = useVerificationQueue();
+  const {
+    data: queue,
+    isLoading,
+    isError: queueIsError,
+    error: queueError,
+    refetch: refetchQueue,
+  } = useVerificationQueue();
   const verify = useVerifyListing();
   const [rejectReasons, setRejectReasons] = useState<Record<number, string>>({});
   const [actionError, setActionError] = useState<{ listingId: number; error: unknown } | null>(
@@ -45,7 +52,9 @@ export function VerificationQueuePage() {
     <AppShell>
       <div className="space-y-6">
         <PageHeader title="전략 검수 대기열" />
-        {isLoading ? (
+        {queueIsError ? (
+          <VerifyActionError error={queueError} onRetry={() => refetchQueue()} />
+        ) : isLoading ? (
           <LoadingState />
         ) : queue && queue.length > 0 ? (
           <ul className="space-y-3">

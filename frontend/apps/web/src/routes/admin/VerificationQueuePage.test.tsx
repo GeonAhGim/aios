@@ -6,6 +6,7 @@ import { ApiError } from "@aios/api-client";
 import { VerificationQueuePage } from "./VerificationQueuePage";
 
 const verifyMutate = vi.fn();
+const refetchQueue = vi.fn();
 
 const LISTING = {
   listingId: 7,
@@ -16,8 +17,22 @@ const LISTING = {
   submittedAt: "2026-09-01T00:00:00Z",
 };
 
+let queueResult: {
+  data: unknown;
+  isLoading: boolean;
+  isError: boolean;
+  error: unknown;
+  refetch: () => void;
+} = {
+  data: [LISTING],
+  isLoading: false,
+  isError: false,
+  error: null,
+  refetch: refetchQueue,
+};
+
 vi.mock("@aios/shared-hooks", () => ({
-  useVerificationQueue: () => ({ data: [LISTING], isLoading: false }),
+  useVerificationQueue: () => queueResult,
   useVerifyListing: () => ({ mutate: verifyMutate }),
   useMe: () => ({ data: { email: "admin@example.com", isPlatformAdmin: true } }),
   useLogout: () => vi.fn(),
@@ -26,6 +41,14 @@ vi.mock("@aios/shared-hooks", () => ({
 afterEach(() => {
   cleanup();
   verifyMutate.mockReset();
+  refetchQueue.mockReset();
+  queueResult = {
+    data: [LISTING],
+    isLoading: false,
+    isError: false,
+    error: null,
+    refetch: refetchQueue,
+  };
 });
 
 function renderPage() {
@@ -47,6 +70,48 @@ function clickReject() {
 // task-1156 §3.3: 지금까지 verify.mutate가 콜백 없이 호출돼 실패를 완전히
 // 조용히 삼켰다 — 에러 상태 자체가 없었다. 이 화면에서 실제 가능한 코드
 // (403/404/409)를 각각 ForbiddenNotice/ErrorMessage 경로로 표면화한다.
+describe("VerificationQueuePage 목록 조회 실패/빈 상태 표시", () => {
+  it("negative: 대기열 조회가 500으로 실패하면 빈 상태가 아니라 ErrorMessage를 보여준다", async () => {
+    queueResult = {
+      data: undefined,
+      isLoading: false,
+      isError: true,
+      error: new ApiError(500, "일시적인 오류입니다.", "trace-queue-1"),
+      refetch: refetchQueue,
+    };
+    renderPage();
+
+    await waitFor(() => expect(screen.getByText("일시적인 오류입니다.")).toBeInTheDocument());
+    expect(screen.queryByText("대기 중인 검수 건이 없습니다.")).not.toBeInTheDocument();
+  });
+
+  it("negative: 대기열 조회가 403(AUTHZ_FORBIDDEN)으로 실패하면 ForbiddenNotice 문구를 보여준다", async () => {
+    queueResult = {
+      data: undefined,
+      isLoading: false,
+      isError: true,
+      error: new ApiError(403, "raw forbidden list detail", "trace-queue-2", "AUTHZ_FORBIDDEN"),
+      refetch: refetchQueue,
+    };
+    renderPage();
+
+    await waitFor(() =>
+      expect(screen.getByText("이 작업을 수행할 권한이 없습니다.")).toBeInTheDocument(),
+    );
+    expect(screen.queryByText("raw forbidden list detail")).not.toBeInTheDocument();
+    expect(screen.queryByText("대기 중인 검수 건이 없습니다.")).not.toBeInTheDocument();
+  });
+
+  it("positive: 대기열이 실제로 비어 있으면(에러 없이 data=[]) 빈 상태를 보여준다", async () => {
+    queueResult = { data: [], isLoading: false, isError: false, error: null, refetch: refetchQueue };
+    renderPage();
+
+    await waitFor(() =>
+      expect(screen.getByText("대기 중인 검수 건이 없습니다.")).toBeInTheDocument(),
+    );
+  });
+});
+
 describe("VerificationQueuePage 검수 판정 실패 표시", () => {
   it("negative: POLICY_LIVE_BLOCKED(403) 승인 실패는 정책 거부 안내를 보여준다", async () => {
     verifyMutate.mockImplementation((_vars, opts) => {

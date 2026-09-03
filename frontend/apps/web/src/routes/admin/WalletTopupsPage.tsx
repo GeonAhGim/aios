@@ -13,7 +13,7 @@ import { ForbiddenNotice } from "../../components/ForbiddenNotice";
 // 콜백 없이 호출돼 실패를 완전히 조용히 삼켰다 — 에러 상태 자체가 없었다.
 // idempotencyKey는 매 클릭마다 새로 발급하는 기존 동작을 그대로 둔다 — 금전
 // 라우트라 멱등 키 수명주기는 여기서 건드리지 않는다.
-function TopupActionError({ error }: { error: unknown }) {
+function TopupActionError({ error, onRetry }: { error: unknown; onRetry?: () => void }) {
   if (classifyForbidden(error)) return <ForbiddenNotice error={error} />;
   const routed = routeApiError(error);
   return (
@@ -22,12 +22,19 @@ function TopupActionError({ error }: { error: unknown }) {
       message={error instanceof Error ? error.message : undefined}
       traceId={error instanceof ApiError ? error.traceId : undefined}
       retryAfterSec={routed.kind === "backoff_retry" ? routed.afterSec : undefined}
+      onRetry={onRetry}
     />
   );
 }
 
 export function WalletTopupsPage() {
-  const { data, isLoading } = usePendingTopups();
+  const {
+    data,
+    isLoading,
+    isError: topupsIsError,
+    error: topupsError,
+    refetch: refetchTopups,
+  } = usePendingTopups();
   const confirm = useConfirmTopup();
   const [actionError, setActionError] = useState<{ topupId: number; error: unknown } | null>(
     null,
@@ -45,7 +52,9 @@ export function WalletTopupsPage() {
     <AppShell>
       <div className="space-y-6">
         <PageHeader title="충전 요청 대기 목록" />
-        {isLoading ? (
+        {topupsIsError ? (
+          <TopupActionError error={topupsError} onRetry={() => refetchTopups()} />
+        ) : isLoading ? (
           <LoadingState />
         ) : data && data.items.length > 0 ? (
           <ul className="space-y-3">
