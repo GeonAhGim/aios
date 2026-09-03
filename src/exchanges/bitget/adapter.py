@@ -16,7 +16,6 @@ import base64
 import hashlib
 import hmac
 import json
-import time
 from collections.abc import Awaitable, Callable
 from decimal import Decimal
 from typing import Any
@@ -30,6 +29,7 @@ from src.exchanges.bitget.broker_mixin import BitgetBrokerMixin
 from src.exchanges.bitget.convert_mixin import BitgetConvertMixin
 from src.exchanges.bitget.copy_trading_mixin import BitgetCopyTradingMixin
 from src.exchanges.bitget.earn_mixin import BitgetEarnMixin
+from src.exchanges.bitget.error_codes import SUCCESS_CODE, classify_body_code
 from src.exchanges.bitget.futures_account_mixin import BitgetFuturesAccountMixin
 from src.exchanges.bitget.futures_market_mixin import BitgetFuturesMarketMixin
 from src.exchanges.bitget.futures_trading_mixin import BitgetFuturesTradingMixin
@@ -44,19 +44,21 @@ from src.exchanges.bitget.subaccount_mixin import BitgetSubaccountMixin
 from src.exchanges.bitget.tax_mixin import BitgetTaxMixin
 from src.exchanges.bitget.trading_mixin import BitgetTradingMixin
 from src.exchanges.common.adapter import ExchangeAdapter
+from src.exchanges.common.error_taxonomy import ExchangeError, ExchangeErrorKind
+from src.exchanges.common.http_policy import RetryPolicy
+from src.exchanges.common.transport import ResilientTransport
 from src.exchanges.common.types import ExchangeCapability
 
 BASE_URL = "https://api.bitget.com"
 
-# 인증 실패로 간주해 재시도하지 않을 에러코드(문서상 확인된 것만 — 나머지는
-# 안전한 기본값으로 재시도 가능 취급, RetryableExchangeError). 실제 Demo API
-# 키 확보 후 라이브 검증하며 목록을 넓혀야 한다.
-_FATAL_ERROR_CODES = {"40012", "40037"}  # 서명 오류 / API 키 없음(문서 조사 기준)
-
 # FULL_AUDIT_2026-09-02.md §2-B ① — 429/5xx는 일시적 장애로 보고 재시도,
 # 그 외 4xx는 재시도해도 성공할 가능성이 없어(잘못된 요청/인증) 즉시 Fatal.
-_MAX_RETRIES = 3
-_MAX_BACKOFF_SECONDS = 30.0
+# L4-12 — 이전엔 이 파일이 직접 backoff 루프를 돌렸다(수동 attempt 카운터 +
+# 지수 백오프). 이제 ResilientTransport(L4-11 5모듈 조립, task-1015)가 같은
+# 정책을 수행한다 — max_attempts=4(최초 1회 + 재시도 3회), base=1.0/cap=30.0로
+# 이전 상수(_MAX_RETRIES=3, _MAX_BACKOFF_SECONDS=30.0)와 동일한 지연을
+# 재현한다. rng를 상수 1.0으로 고정하는 이유는 아래 생성자 참고.
+_RETRY_POLICY = RetryPolicy(max_attempts=4, base=1.0, cap=30.0)
 
 
 class _BitgetHTTPClient:
@@ -77,43 +79,56 @@ class _BitgetHTTPClient:
         self._api_passphrase = api_passphrase
         self._demo_mode = demo_mode
         self._client = http_client or httpx.AsyncClient(base_url=BASE_URL, timeout=10.0)
-        self._sleep_fn = sleep_fn or asyncio.sleep
-        # FULL_AUDIT §2-B ① 서버시간 오프셋 — 기본 0(로컬 시계 그대로 사용),
-        # sync_server_time()을 명시적으로 호출해야 갱신된다. 매 요청마다
-        # 자동으로 동기화하면 기존 MockTransport 테스트 전부(14개 파일)가
-        # 추가 요청 하나를 더 받게 돼 깨진다 — 그 정도로 매 요청 지연을
-        # 감수할 가치도 없다(클럭 드리프트는 보통 안정적이라 1회 동기화로
-        # 충분). Executor 시작 시 또는 서명 오류가 반복될 때 호출부가
-        # 명시적으로 부르는 옵션 메서드로 둔다(정책은 호출부 책임 원칙,
-        # borrow_margin() 등 기존 확장 메서드 docstring과 동일 판단).
-        self._time_offset_ms = 0
+        # L4-12(task-1015) — 재시도/백오프/서버시간 보정을 직접 구현하지
+        # 않고 ResilientTransport(L4-11 5모듈 조립)에 위임한다. rng를 상수
+        # 1.0으로 고정하는 이유: http_policy.backoff_delay의 full-jitter는
+        # `[0, ceiling)`을 rng()로 균일 샘플링하는데, rng() == 1.0이면
+        # 매번 ceiling 값 그대로(=1.0, 2.0, 4.0, ... 지수 백오프)가 나와
+        # 기존 test_bitget_adapter.py의 결정론적 sleep 값 검증(예: 429
+        # 재시도 시 [1.0, 2.0])과 정확히 일치한다 — 실제 지터가 필요해지면
+        # ADR 없이 여기 rng만 `random.random`으로 바꾸면 된다(호출부 교체
+        # 지점이 이 한 줄로 국소화돼 있음).
+        self._transport = ResilientTransport(
+            venue="bitget",
+            retry_policy=_RETRY_POLICY,
+            rng=lambda: 1.0,
+            sleep=sleep_fn or asyncio.sleep,
+        )
+
+    @property
+    def _time_offset_ms(self) -> float:
+        """하위호환 프로퍼티 — 실제 상태는 `self._transport.clock`(ServerClock,
+        L4-11)이 갖고 있다. 기존 테스트(test_bitget_adapter.py)가 이 속성을
+        직접 읽으므로 이름은 유지한다."""
+        return self._transport.clock.offset_ms
 
     def _sign(self, timestamp: str, method: str, request_path: str, body: str = "") -> str:
         prehash = timestamp + method.upper() + request_path + body
         mac = hmac.new(self._api_secret.encode("utf-8"), prehash.encode("utf-8"), hashlib.sha256)
         return base64.b64encode(mac.digest()).decode("utf-8")
 
+    async def _fetch_server_time_ms(self) -> int:
+        response = await self._client.get("/api/v2/public/time")
+        data = response.json()
+        return int(data["data"]["serverTime"])
+
     async def sync_server_time(self) -> None:
         """FULL_AUDIT §2-B ① — Bitget 서버시간과의 오프셋을 측정해 이후
-        요청의 ACCESS-TIMESTAMP에 반영한다. 왕복지연 절반만큼 보정
-        (요청 전송 직전/직후 로컬시각의 평균을 서버 응답 시각과 비교하는
-        일반적인 NTP류 관례) — 완벽하지 않지만 클럭 드리프트로 인한
-        서명 타임스탬프 거부(40012류)를 크게 줄인다. 실패해도 예외를
-        올리지 않고 오프셋 0으로 안전하게 유지한다(8.3 원칙 — 시간 동기화
-        실패가 거래 자체를 막으면 안 됨)."""
+        요청의 ACCESS-TIMESTAMP에 반영한다. 실제 계산은 `ServerClock.sync()`
+        (L4-11, clock_sync.py)가 왕복지연 절반 보정으로 수행한다. 실패해도
+        예외를 올리지 않는다(8.3 원칙 — 시간 동기화 실패가 거래 자체를
+        막으면 안 됨; instrumented_adapter.py가 이 보장에 의존한다) — 네트워크
+        /파싱 실패는 오프셋 갱신 이전 상태(보통 0)로 남고, skew 초과
+        (`ExchangeError(CLOCK_SKEW)`)는 이미 갱신된 오프셋을 진단용으로
+        남긴 채 여기서 삼킨다(ADR-2026-08-29-E — 이 리프는 demo/paper
+        경로만 열고, LIVE 서명 경로는 별도 가드가 차단한다)."""
         try:
-            local_before = time.time()
-            response = await self._client.get("/api/v2/public/time")
-            local_after = time.time()
-            data = response.json()
-            server_time_ms = int(data["data"]["serverTime"])
-            local_mid_ms = (local_before + local_after) / 2 * 1000
-            self._time_offset_ms = int(server_time_ms - local_mid_ms)
-        except Exception:  # noqa: BLE001 — 동기화 실패는 오프셋 0 유지로 안전하게 수렴
-            self._time_offset_ms = 0
+            await self._transport.clock.sync(self._fetch_server_time_ms)
+        except Exception:  # noqa: BLE001 — 위 docstring 참고, 삼키는 게 계약
+            pass
 
     def _headers(self, method: str, request_path: str, body: str = "") -> dict[str, str]:
-        timestamp = str(int(time.time() * 1000) + self._time_offset_ms)
+        timestamp = str(self._transport.clock.now_ms())
         headers = {
             "ACCESS-KEY": self._api_key,
             "ACCESS-SIGN": self._sign(timestamp, method, request_path, body),
@@ -125,6 +140,36 @@ class _BitgetHTTPClient:
         if self._demo_mode:
             headers["paptrading"] = "1"
         return headers
+
+    def _classify_body(self, response: httpx.Response) -> ExchangeError | None:
+        try:
+            data: dict[str, Any] = response.json()
+        except ValueError:
+            # error_taxonomy 기본값(UNKNOWN_RESPONSE → retryable=False)을
+            # 여기서는 `retryable=True`로 명시 override한다 — 이 리프 이전부터
+            # 비JSON 응답을 일시적 장애로 보고 RetryableExchangeError를
+            # 던져온 기존 계약(test_bitget_adapter.py::
+            # test_request_raises_retryable_on_non_json_response, 무수정
+            # 유지 대상)을 깨지 않기 위함이다. `_classify_body`는
+            # ResilientTransport에서 단발 평가만 되므로(재시도 루프에 안
+            # 태움) 이 override가 실제로 재시도 폭주를 일으키지 않는다.
+            return ExchangeError(
+                ExchangeErrorKind.UNKNOWN_RESPONSE,
+                retryable=True,
+                venue="bitget",
+                http_status=response.status_code,
+                message=f"Bitget 응답이 JSON이 아님: {response.text}",
+            )
+        code = data.get("code")
+        if code == SUCCESS_CODE:
+            return None
+        return ExchangeError(
+            classify_body_code(code),
+            venue="bitget",
+            http_status=response.status_code,
+            venue_code=code,
+            message=f"Bitget API 오류: {data}",
+        )
 
     async def _request(
         self,
@@ -145,53 +190,23 @@ class _BitgetHTTPClient:
         body_str = json.dumps(body) if body else ""
         request_path = path + query_string
 
-        backoff = 1.0
-        for attempt in range(_MAX_RETRIES + 1):
+        async def send_once() -> httpx.Response:
+            # 시도마다 새로 호출된다 — ACCESS-TIMESTAMP/ACCESS-SIGN이 매
+            # 시도마다 갱신돼야 하므로 헤더를 캡처하지 않고 매번 새로 만든다.
             headers = self._headers(method, request_path, body_str)
-            try:
-                response = await self._client.request(
-                    method, request_path, content=body_str or None, headers=headers
-                )
-            except httpx.TransportError as exc:
-                raise RetryableExchangeError(f"Bitget 요청 전송 실패: {exc}") from exc
+            return await self._client.request(
+                method, request_path, content=body_str or None, headers=headers
+            )
 
-            # FULL_AUDIT §2-B ① — 이전에는 HTTP 상태코드를 전혀 보지 않고
-            # 바로 response.json()으로 넘어갔다. 429(rate limit)/5xx(서버
-            # 장애)는 일시적이라 지수 백오프로 재시도, Retry-After 헤더가
-            # 있으면 그 값을 우선한다.
-            if response.status_code == 429 or response.status_code >= 500:
-                if attempt == _MAX_RETRIES:
-                    raise RetryableExchangeError(
-                        f"Bitget HTTP {response.status_code} 재시도 소진: {response.text}"
-                    )
-                retry_after = response.headers.get("Retry-After")
-                wait = float(retry_after) if retry_after else backoff
-                await self._sleep_fn(wait)
-                backoff = min(backoff * 2, _MAX_BACKOFF_SECONDS)
-                continue
+        try:
+            response = await self._transport.request(send_once, classify_body=self._classify_body)
+        except ExchangeError as exc:
+            if exc.retryable:
+                raise RetryableExchangeError(str(exc)) from exc
+            raise FatalExchangeError(str(exc)) from exc
 
-            # 그 외 4xx는 재시도해도 성공할 가능성이 없다(잘못된 요청/
-            # 인증 오류) — 즉시 Fatal.
-            if response.status_code >= 400:
-                raise FatalExchangeError(
-                    f"Bitget HTTP {response.status_code}: {response.text}"
-                )
-
-            try:
-                data: dict[str, Any] = response.json()
-            except ValueError as exc:
-                raise RetryableExchangeError(
-                    f"Bitget 응답이 JSON이 아님: {response.text}"
-                ) from exc
-
-            code = data.get("code")
-            if code != "00000":
-                if code in _FATAL_ERROR_CODES:
-                    raise FatalExchangeError(f"Bitget 인증/서명 오류: {data}")
-                raise RetryableExchangeError(f"Bitget API 오류: {data}")
-            return data
-
-        raise RetryableExchangeError("Bitget 요청 재시도 루프 종료(도달 불가 경로)")
+        data: dict[str, Any] = response.json()
+        return data
 
     async def aclose(self) -> None:
         await self._client.aclose()
