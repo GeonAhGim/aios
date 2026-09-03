@@ -57,6 +57,9 @@ class VarPolicy(BaseModel):
     confidence: float = Field(gt=0, lt=1)
     horizon_days: int = Field(gt=0)
     max_pct: float = _PCT
+    # §3.3/R-11 rules/var_es.py가 소비 — ES 별도 상한과 최소 표본 수(미달=결손).
+    es_max_pct: float = _PCT
+    min_bars: int = Field(gt=0)
 
 
 class CorrelationRiskPolicy(BaseModel):
@@ -66,6 +69,8 @@ class CorrelationRiskPolicy(BaseModel):
 
 class TradeFrequencyPolicy(BaseModel):
     anomaly_multiplier: float = Field(gt=0)
+    # §3.3/R-12 rules/trade_frequency.py가 소비 — 배수 상한과 절대 상한 중 큰 값.
+    max_trades_per_hour: int = Field(gt=0)
 
 
 class CircuitBreakerWarning(BaseModel):

@@ -35,6 +35,8 @@ var:
   confidence: 0.95
   horizon_days: 1
   max_pct: 5.0
+  es_max_pct: 7.0 # task-1177 R-11 var_es.py — VaR max_pct와 별도 ES 상한
+  min_bars: 60 # 미달 시 결손(DENY) 취급
 
 correlation_risk:
   threshold: 0.7
@@ -42,6 +44,7 @@ correlation_risk:
 
 trade_frequency:
   anomaly_multiplier: 3.0 # 직전 24시간 대비
+  max_trades_per_hour: 60 # task-1177 R-12 trade_frequency.py — 배수 상한과의 max()
 
 # 8.6 Circuit Breaker 단계 임계치
 circuit_breaker:

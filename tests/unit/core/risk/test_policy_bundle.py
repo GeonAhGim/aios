@@ -55,6 +55,8 @@ var:
   confidence: 0.95
   horizon_days: 1
   max_pct: 5.0
+  es_max_pct: 7.0
+  min_bars: 60
 
 correlation_risk:
   threshold: 0.7
@@ -62,6 +64,7 @@ correlation_risk:
 
 trade_frequency:
   anomaly_multiplier: 3.0
+  max_trades_per_hour: 60
 
 circuit_breaker:
   warning:
@@ -122,6 +125,7 @@ circuit_breaker:
 
 trade_frequency:
   anomaly_multiplier: 3.0  # 24시간 대비 배수
+  max_trades_per_hour: 60
 
 correlation_risk:
   aggregate_exposure_max_pct: 30.0
@@ -131,6 +135,8 @@ var:
   max_pct: 5.0
   horizon_days: 1
   confidence: 0.95
+  es_max_pct: 7.0
+  min_bars: 60
 
 strategy_allocation:
   certified_level4_max_pct: 25.0
