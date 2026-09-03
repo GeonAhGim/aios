@@ -1,4 +1,5 @@
 import { classifyForbidden, classifyServerError, isSessionExpiredErrorCode } from "@aios/shared-types";
+import { resolveEnvelope, resolvePath, type ApiRouteName, type ResolvePathOptions } from "./apiPaths";
 import { keysToCamel, keysToSnake } from "./caseConvert";
 import type { ApiErrorBody } from "./envelope";
 import { resolveRetryAfterSec, resolveTraceId, unwrap } from "./envelope";
@@ -374,6 +375,15 @@ export class ApiClientBase {
       headers: { "Idempotency-Key": idempotencyKey ?? generateIdempotencyKey() },
       body: body !== undefined ? JSON.stringify(keysToSnake(body)) : undefined,
     });
+  }
+
+  // task-605 준비: apiPaths.ts 레지스트리로 경로/봉투 여부를 함께 해석해 request와
+  // requestEnvelope 중 하나로 분기만 한다 — 파서를 새로 만들지 않고 둘 다 그대로
+  // 재사용한다. clients/*.ts는 아직 이 메서드를 쓰지 않는다(레지스트리·스위치만
+  // 준비하는 단계 — 실제 배선은 PLT-17~21 순서를 따르는 후속 리프의 몫).
+  protected requestByRoute<T>(route: ApiRouteName, init?: RequestInit, options?: ResolvePathOptions): Promise<T> {
+    const path = resolvePath(route, options);
+    return resolveEnvelope(route, options) ? this.requestEnvelope<T>(path, init) : this.request<T>(path, init);
   }
 }
 

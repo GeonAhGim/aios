@@ -44,3 +44,8 @@ export type {
   ConsentDecision,
   AcceptTrustConsentBody,
 } from "./clients/foundation";
+// task-605: §3.3 API 경로 레지스트리 — clients/*.ts에 흩어진 문자열 경로의
+// 단일 출처 + legacy/v1 전환 스위치. 기본값은 legacy이며 아직 어떤
+// clients/*.ts도 이 스위치를 쓰지 않는다(레지스트리 준비 단계).
+export { API_ROUTES, resolvePath, resolveEnvelope } from "./apiPaths";
+export type { ApiRouteDefinition, ApiRouteName, ResolvePathOptions } from "./apiPaths";
