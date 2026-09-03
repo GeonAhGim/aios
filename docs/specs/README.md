@@ -19,3 +19,16 @@
 - 마이그레이션은 PM이 체인을 직렬화한다(`docs/FULL_AUDIT_2026-09-02.md` §2-B).
 - 세션 배정은 §2-B 표가 진실. 명세의 "타 세션, 미커밋" 표기는 작성 시점 스냅샷이다.
 - 미확정(§10) 항목은 구현 전에 공식 문서로 확인하거나 "미검증"으로 코드에 남긴다.
+
+## 연구 산출물 대기열 (미승인 — 작업지시서 아님)
+
+아래 문서는 위 표와 지위가 다르다. Codex-Fable 교차검토 체계(`../../brainstorm/
+AIOS_Codex_Fable_CrossReview_Research_Direction_Record_2026-09-03.md`)의 "내부 아키텍처
+감사/red-team" 역할이 오픈소스 교차검증·코드 감사로 도출한 **제안 설계**이며, 이 역할은
+`aios` 프로덕션 코드를 직접 수정하지 않는다. Chief Architect/PM이 검토해 `status: Approved`로
+바꾸고 §9 리프를 `pm/tasks/*.json`으로 실제 배정하기 전까지, 어떤 워커도 이 문서만 보고
+착수하지 않는다.
+
+| 문서 | 범위 | 근거 | status |
+|---|---|---|---|
+| `L4_execution_ownership_and_safety_gate_wiring_v1.0.md` | 실행 리스/펜싱(P0-R1), kill switch·DataDistrust 게이트 배선(P0-R2/R3) | `../../brainstorm/AIOS_OSS_DeepDive_v2_CodeLevel_CrossVerification_2026-09-03.md`, `../../brainstorm/AIOS_Registers_v1_Assumption_Contradiction_Invariant_Failure_2026-09-03.md` | Proposed |
