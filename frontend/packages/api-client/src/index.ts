@@ -55,3 +55,8 @@ export type { ApiRouteDefinition, ApiRouteName, ResolvePathOptions } from "./api
 // (client.ts)에는 아직 배선되지 않았다(PLT-29 서버 라우터 미구현) — 후속 리프 소관.
 export { createMembershipsClient, MembershipParseError } from "./memberships";
 export type { MembershipsClient, GrantMembershipBody } from "./memberships";
+// task-719: §3.1 (A) market_data 조회 클라이언트(get_candles/replay_candles).
+// AiosApiClient 합성(client.ts)에는 아직 배선되지 않았다(서버 라우터 미마운트) —
+// 후속 리프 소관.
+export { createMarketDataClient } from "./clients/marketData";
+export type { MarketDataClient, CandleQueryParams, ReplayQueryParams, CandleQueryResult } from "./clients/marketData";

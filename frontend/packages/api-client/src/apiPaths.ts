@@ -125,6 +125,14 @@ export const API_ROUTES = defineApiRoutes({
   "foundation.paperDeployments.pause": route("/v1/foundation/paper-deployments/:deploymentId:pause", false, null),
   "foundation.paperDeployments.stop": route("/v1/foundation/paper-deployments/:deploymentId:stop", false, null),
   "foundation.trustConsents.accept": route("/v1/foundation/trust/consents", false, null),
+
+  // task-719: LA-17(task-624, 7ad6d15) application/get_candles·replay_candles의 조회
+  // 클라이언트. src/api/routers에는 아직 market_data 라우터가 없다(PLT-16 mount_v1
+  // 미도달 + 이 이름의 라우터 자체가 아직 없음, foundation.* 이관 전과 동일 상황) —
+  // 그래서 foundation.* 항목과 동일하게 v1Path=null로 legacy만 등록한다. 실제 마운트
+  // 경로가 확정되면(라우터 파일 확인 후) 이 값만 고친다.
+  "marketData.candles.get": route("/v1/foundation/market-data/candles", false, null),
+  "marketData.candles.replay": route("/v1/foundation/market-data/candles/replay", false, null),
 });
 
 export type ApiRouteName = keyof typeof API_ROUTES;
