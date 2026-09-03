@@ -1,7 +1,8 @@
-import { classifyServerError, isSessionExpiredErrorCode } from "@aios/shared-types";
+import { classifyForbidden, classifyServerError, isSessionExpiredErrorCode } from "@aios/shared-types";
 import { keysToCamel, keysToSnake } from "./caseConvert";
 import type { ApiErrorBody } from "./envelope";
 import { resolveRetryAfterSec, resolveTraceId, unwrap } from "./envelope";
+import { requestMfaStepUp } from "./mfaStepUp";
 import { requestIdHeaders } from "./requestId";
 import { refreshAccessToken } from "./tokenRefresh";
 
@@ -181,6 +182,18 @@ export class ApiClientBase {
     return { status: response.status, body, traceId, retryAfterHeader };
   }
 
+  // task-481 decision: 401 refresh·403 step-up 재시도는 서버 관점에서 같은
+  // 논리 요청이므로 X-Request-Id를 원 요청과 동일하게 유지해야 한다.
+  // fetchJson은 매 호출마다 init.headers를 복사해 새 Headers를 만들 뿐
+  // init 자체를 변형하지 않으므로, 재시도 시 같은 init 객체를 그대로
+  // 넘겨도 헤더에 값이 없으면 매번 새 ID가 생성된다 — 이를 막기 위해
+  // performRequest(Envelope) 진입 시 1회만 ID를 확정해 init에 고정한다.
+  private withStableRequestId(init?: RequestInit): RequestInit {
+    const headers = new Headers(init?.headers);
+    headers.set("X-Request-Id", requestIdHeaders(headers.get("X-Request-Id") ?? undefined)["X-Request-Id"]);
+    return { ...init, headers };
+  }
+
   // spec §9 PLT-25/§3.3: GET 계열만 자동 재시도한다 — POST 등은 멱등키 규약과
   // 충돌하므로 절대 재시도하지 않는다. 간격은 nextRetryDelaySec이 결정한다.
   private async withGetRetry<T>(method: string, exec: () => Promise<T>): Promise<T> {
@@ -202,14 +215,17 @@ export class ApiClientBase {
     return this.withGetRetry(method, () => this.performRequest<T>(path, init));
   }
 
-  // task-386: AUTH_TOKEN_EXPIRED 1회만 refresh 후 원요청 재시도. 재시도(두
-  // 번째 executeRequest 호출)는 handleAuthFailure를 다시 거치지 않으므로
-  // refresh가 무한 반복될 수 없다 — 실패하면 그 자리에서 그대로 던진다.
+  // task-386/task-481: AUTH_TOKEN_EXPIRED(401)는 refresh 후, AUTH_MFA_REQUIRED
+  // (403)는 step-up 재인증 후 원요청을 각각 최대 1회만 재시도한다. 재시도(두
+  // 번째 executeRequest 호출)는 handleRequestFailure를 다시 거치지 않으므로
+  // refresh↔step-up이 서로를 무한히 중첩 호출할 수 없다 — 실패하면 그 자리에서
+  // 그대로 던진다.
   private async performRequest<T>(path: string, init?: RequestInit): Promise<T> {
+    const stableInit = this.withStableRequestId(init);
     try {
-      return await this.executeRequest<T>(path, init);
+      return await this.executeRequest<T>(path, stableInit);
     } catch (err) {
-      return this.handleAuthFailure(err, () => this.executeRequest<T>(path, init));
+      return this.handleRequestFailure(err, () => this.executeRequest<T>(path, stableInit));
     }
   }
 
@@ -222,6 +238,16 @@ export class ApiClientBase {
     }
 
     return keysToCamel<T>(body);
+  }
+
+  // 401/403 실패 분기점. 403 AUTH_MFA_REQUIRED만 step-up 대상이고(task-393
+  // classifyForbidden 재사용 — 새 403 분류기를 만들지 않는다), 그 외는 기존
+  // handleAuthFailure(401 전용) 그대로다.
+  private async handleRequestFailure<T>(err: unknown, retry: () => Promise<T>): Promise<T> {
+    if (err instanceof ApiError && classifyForbidden(err) === "mfa_required") {
+      return this.handleMfaStepUp(err, retry);
+    }
+    return this.handleAuthFailure(err, retry);
   }
 
   // AUTH_TOKEN_EXPIRED만 refresh 대상(spec §3.3: "재시도: expired만
@@ -239,6 +265,16 @@ export class ApiClientBase {
     if (isSessionExpiredErrorCode(err.errorCode)) {
       notifyUnauthorized(err.errorCode!);
     }
+    throw err;
+  }
+
+  // task-481: mfaStepUp.ts의 single-flight 훅으로 TOTP 재인증을 기다린다.
+  // 성공하면 원요청을 1회 재시도하고, 사용자가 취소했거나 재인증 자체가
+  // AUTH_MFA_INVALID로 실패했으면(handler가 false 반환) 재시도 없이 원래의
+  // 403 ApiError를 그대로 던진다.
+  private async handleMfaStepUp<T>(err: ApiError, retry: () => Promise<T>): Promise<T> {
+    const verified = await requestMfaStepUp();
+    if (verified) return retry();
     throw err;
   }
 
@@ -282,10 +318,11 @@ export class ApiClientBase {
   }
 
   private async performRequestEnvelope<T>(path: string, init?: RequestInit): Promise<T> {
+    const stableInit = this.withStableRequestId(init);
     try {
-      return await this.executeRequestEnvelope<T>(path, init);
+      return await this.executeRequestEnvelope<T>(path, stableInit);
     } catch (err) {
-      return this.handleAuthFailure(err, () => this.executeRequestEnvelope<T>(path, init));
+      return this.handleRequestFailure(err, () => this.executeRequestEnvelope<T>(path, stableInit));
     }
   }
 

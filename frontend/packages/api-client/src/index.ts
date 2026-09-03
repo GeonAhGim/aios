@@ -5,6 +5,8 @@ export { configureUnauthorizedHandler, resetUnauthorizedGuard, configureTenantHe
 export type { UnauthorizedHandler, TenantHeadersProvider } from "./http";
 export { configureTokenRefreshHandler, refreshAccessToken } from "./tokenRefresh";
 export type { TokenRefreshHandler } from "./tokenRefresh";
+export { configureMfaStepUpHandler, requestMfaStepUp } from "./mfaStepUp";
+export type { MfaStepUpHandler } from "./mfaStepUp";
 export { createLogoutClient } from "./logout";
 export type { LogoutClient, LogoutClientOptions, LogoutTokenStore } from "./logout";
 export { createTenantStore, isValidTenantId } from "./tenantContext";
