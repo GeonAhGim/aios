@@ -99,13 +99,29 @@ export class ApiClientBaseCore {
 
     if (err.errorCode === "AUTH_TOKEN_EXPIRED") {
       const refreshed = await refreshAccessToken();
-      if (refreshed) return retry();
+      if (refreshed) return this.notifyIfSessionExpired(retry);
     }
 
     if (isSessionExpiredErrorCode(err.errorCode)) {
       notifyUnauthorized(err.errorCode!);
     }
     throw err;
+  }
+
+  // task-1166(sessionLifecycle.test.ts 시나리오 2)에서 발견: refresh 성공 후
+  // 재시도한 원요청이 또다시 세션 만료 계열 401을 받으면(재시도는 handleRequestFailure를
+  // 다시 거치지 않아, task-386의 무한루프 방지 그대로 유지) 이전에는 notifyUnauthorized
+  // 없이 에러만 던지고 끝나 로그아웃·리다이렉트 훅이 배선상 끊긴 채로 통과했다.
+  // 재시도 횟수는 늘리지 않고(retry 1회 그대로) 그 실패에도 알림만 보정한다.
+  private async notifyIfSessionExpired<T>(retry: () => Promise<T>): Promise<T> {
+    try {
+      return await retry();
+    } catch (retryErr) {
+      if (retryErr instanceof ApiError && isSessionExpiredErrorCode(retryErr.errorCode)) {
+        notifyUnauthorized(retryErr.errorCode!);
+      }
+      throw retryErr;
+    }
   }
 
   // task-481: mfaStepUp.ts의 single-flight 훅으로 TOTP 재인증을 기다린다.
