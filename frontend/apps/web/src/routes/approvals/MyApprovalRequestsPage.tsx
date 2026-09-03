@@ -15,18 +15,22 @@ import { ForbiddenNotice } from "../../components/ForbiddenNotice";
 // DUAL 두 번째 서명자는 아직 신원 해석 로직이 없어(계정 연결 안 됨)
 // 이 화면 대상이 아니다 — 관리자 경로로만 처리 가능(알려진 제약).
 //
-// spec §3.3 에러 taxonomy: 처리 실패는 err.message를 직접 노출하지 않고
-// routeApiError(task-483)로 판정해 403/그 외를 각각 ForbiddenNotice/
-// ErrorMessage 경로로만 보여준다(task-911).
-function RequestActionError({ error }: { error: unknown }) {
+// spec §3.3 에러 taxonomy: 목록 조회 실패(task-1161)와 승인/거부 처리 실패(task-911)
+// 모두 err.message를 직접 노출하지 않고 routeApiError(task-483)로 판정해 403/그 외를
+// 각각 ForbiddenNotice/ErrorMessage 경로로만 보여준다. 재조회 가능한 kind(refetch_retry/
+// backoff_retry)일 때만 onRetry를 노출한다 — 409(STATE_INVALID_TRANSITION, 이미 처리된
+// 요청)는 자동 재시도 대상이 아니므로 재시도 버튼을 붙이지 않는다.
+function RequestActionError({ error, onRetry }: { error: unknown; onRetry?: () => void }) {
   if (classifyForbidden(error)) return <ForbiddenNotice error={error} />;
   const routed = routeApiError(error);
+  const canRetry = routed.kind === "refetch_retry" || routed.kind === "backoff_retry";
   return (
     <ErrorMessage
       errorCode={error instanceof ApiError ? error.errorCode : undefined}
       message={error instanceof Error ? error.message : undefined}
       traceId={error instanceof ApiError ? error.traceId : undefined}
       retryAfterSec={routed.kind === "backoff_retry" ? routed.afterSec : undefined}
+      onRetry={canRetry ? onRetry : undefined}
     />
   );
 }
@@ -95,7 +99,7 @@ function RequestCard({ request }: { request: ApprovalRequest }) {
 }
 
 export function MyApprovalRequestsPage() {
-  const { data: requests, isLoading } = useMyApprovalRequests();
+  const { data: requests, isLoading, isError, error, refetch } = useMyApprovalRequests();
 
   return (
     <AppShell>
@@ -105,7 +109,9 @@ export function MyApprovalRequestsPage() {
           FD-10.1 — LIVE 실행 전환 등 리스크가 큰 조작은 강제 대기시간 이후 본인이
           직접 승인해야 진행됩니다.
         </p>
-        {isLoading ? (
+        {isError ? (
+          <RequestActionError error={error} onRetry={() => refetch()} />
+        ) : isLoading ? (
           <LoadingState />
         ) : requests && requests.length > 0 ? (
           <ul className="space-y-3">
