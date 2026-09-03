@@ -6,6 +6,7 @@ import type { AnyConstructor } from "../http";
 export function withPlatform<TBase extends AnyConstructor>(Base: TBase) {
   return class extends Base {
     async getReadiness(): Promise<unknown> {
+      // 인프라 프로브 — 버저닝 대상 아님, apiPaths 제외(task-942 decision, apiPaths.test.ts의 INFRA_PATHS 참고)
       return this.fetchRaw("/readyz");
     }
   };

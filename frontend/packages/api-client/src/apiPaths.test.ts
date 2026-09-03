@@ -128,7 +128,8 @@ describe("apiPaths — clients 배선(task-840) 회귀 가드", () => {
 
 // task-942: account.ts·admin.ts·auth.ts·exchange.ts·foundation.ts·
 // notifications.ts·strategyBuilder.ts도 resolvePath(route)를 경유하도록 바뀌었다
-// (platform.ts의 "/readyz"는 API_ROUTES 미등록이라 이 리프에서 제외 — needs_decision).
+// (platform.ts의 "/readyz"는 아래 INFRA_PATHS 예외로 API_ROUTES 등록 대상에서
+// 영구 제외 — decision 확정, needs_decision 아님).
 // task-840과 동일한 이유로 이 라우트들의 legacyPath가 하드코딩 시절과 동일한 URL을
 // 여전히 만들어내는지 고정한다.
 describe("apiPaths — clients 배선(task-942) 회귀 가드", () => {
@@ -231,5 +232,21 @@ describe("apiPaths — clients 배선(task-942) 회귀 가드", () => {
       "/v1/foundation/paper-deployments/d1:stop",
     );
     expect(resolvePath("foundation.trustConsents.accept")).toBe("/v1/foundation/trust/consents");
+  });
+});
+
+// task-942 decision: "/readyz"·"/livez"·"/metrics"는 spec §3.2/§9 PLT-09가 정의하는
+// 인프라 프로브다 — 봉투 미적용이고 /api/v1 버저닝 대상도 아니라서(API_ROUTES는
+// 버저닝 이관용 70경로 레지스트리) platform.ts는 이 경로들을 resolvePath 없이
+// 직접 호출한다. 이는 누락이 아니라 의도이므로, 이 목록이 API_ROUTES에 실수로
+// 등록되지 않는지를 여기서 고정해 둔다.
+const INFRA_PATHS = ["/readyz", "/livez", "/metrics"];
+
+describe("apiPaths — 인프라 프로브 제외(task-942 decision)", () => {
+  it("INFRA_PATHS는 API_ROUTES에 등록되지 않는다(버저닝 대상 아님)", () => {
+    const legacyPaths = new Set(Object.values(API_ROUTES).map((def) => def.legacyPath));
+    for (const path of INFRA_PATHS) {
+      expect(legacyPaths.has(path)).toBe(false);
+    }
   });
 });
