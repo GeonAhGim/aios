@@ -17,6 +17,7 @@ from src.core.loader.risk_policy_loader import load_risk_policy
 from src.services.account_deletion_service import AccountDeletionError, AccountDeletionService
 from src.services.auth_service import AuthService
 from src.services.execution_service import ExecutionService
+from src.services.order_service.foundation_gate import make_foundation_pre_submit_gate
 
 JWT_SECRET = "test-secret-key-not-for-production"
 STRONG_PASSWORD = "Str0ng!Passw0rd"
@@ -82,7 +83,9 @@ async def _create_running_execution(pool, user_id):
             user_id,
             b"dummy",
         )
-    execution_service = ExecutionService(pool, load_risk_policy())
+    execution_service = ExecutionService(
+        pool, load_risk_policy(), pre_start_gate=make_foundation_pre_submit_gate(pool)
+    )
     created = await execution_service.create_execution(
         user_id,
         strategy_id,

@@ -194,7 +194,12 @@ async def start_background_loops(
     # 루프와 동일 패턴(main.py가 유일한 백그라운드 스케줄러 지점).
     risk_guard_service = RiskGuardService(
         pool,
-        ExecutionService(pool, policy, publish=event_bus.publish),
+        ExecutionService(
+            pool,
+            policy,
+            pre_start_gate=make_foundation_pre_submit_gate(pool),
+            publish=event_bus.publish,
+        ),
         publish=event_bus.publish,
     )
 

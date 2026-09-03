@@ -73,8 +73,8 @@ class ExecutionService:
         pool: asyncpg.Pool,
         risk_policy: RiskPolicy,
         *,
+        pre_start_gate: PreSubmitGate,
         publish: approval.PublishFn | None = None,
-        pre_start_gate: PreSubmitGate | None = None,
     ) -> None:
         self._pool = pool
         self._risk_policy = risk_policy
@@ -83,7 +83,8 @@ class ExecutionService:
         # (이름은 "주문"이지만 모양(tenant/execution/exchange/mandate 하나
         # 평가해 ALLOW/DENY)이 완전히 같다 — order_service.foundation_gate.
         # make_foundation_pre_submit_gate()가 만든 콜러블을 여기 그대로
-        # 주입해도 동작한다. 새 타입을 또 만들지 않는다).
+        # 주입해도 동작한다. 새 타입을 또 만들지 않는다). EO-05(I-01) —
+        # 기본값을 없애 컴파일/타입체크 시점에 게이트 누락을 막는다.
         self._pre_start_gate = pre_start_gate
 
     async def create_execution(
@@ -212,20 +213,20 @@ class ExecutionService:
 
             # 전수감사 §6 — DEPLOYMENT 게이트(48번 §3 게이트 1). RUNNING으로
             # 실제 전이하기 *전에* 검사해, 거부되면 UPDATE 자체를 안 하고
-            # 상태를 그대로 둔다(order_service의 FSM-불변 원칙과 동일).
-            if self._pre_start_gate is not None:
-                decision = await self._pre_start_gate(
-                    OrderContext(
-                        user_id=user_id,
-                        execution_id=execution_id,
-                        exchange=execution["exchange"],
-                        mandate_revision_id=None,  # 컬럼 없음 — 마이그레이션 대기
-                    )
+            # 상태를 그대로 둔다(order_service의 FSM-불변 원칙과 동일). EO-05
+            # — 게이트가 필수 인자가 됐으므로 None 분기 없이 항상 평가한다.
+            decision = await self._pre_start_gate(
+                OrderContext(
+                    user_id=user_id,
+                    execution_id=execution_id,
+                    exchange=execution["exchange"],
+                    mandate_revision_id=None,  # 컬럼 없음 — 마이그레이션 대기
                 )
-                if decision.outcome != GateOutcome.ALLOW:
-                    raise ExecutionControlError(
-                        f"위험 게이트가 시작을 거부했습니다: {decision.reason_codes}"
-                    )
+            )
+            if decision.outcome != GateOutcome.ALLOW:
+                raise ExecutionControlError(
+                    f"위험 게이트가 시작을 거부했습니다: {decision.reason_codes}"
+                )
 
             row = await conn.fetchrow(
                 "UPDATE strategy_executions "

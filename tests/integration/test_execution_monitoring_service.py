@@ -11,6 +11,7 @@ from dotenv import dotenv_values
 from src.core.loader.risk_policy_loader import load_risk_policy
 from src.services.execution_monitoring_service import ExecutionMonitoringService
 from src.services.execution_service import ExecutionService
+from src.services.order_service.foundation_gate import make_foundation_pre_submit_gate
 from tests.integration.conftest import create_test_user
 
 
@@ -30,7 +31,9 @@ async def pool():
 
 @pytest.fixture
 def execution_service(pool):
-    return ExecutionService(pool, load_risk_policy())
+    return ExecutionService(
+        pool, load_risk_policy(), pre_start_gate=make_foundation_pre_submit_gate(pool)
+    )
 
 
 @pytest.fixture

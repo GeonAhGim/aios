@@ -2,9 +2,13 @@
 
 order_service.foundation_gate.make_foundation_pre_submit_gate()를 그대로
 재사용한다(타입이 동일해 새 foundation 코드를 만들지 않음) — 여기서는
-그 재사용이 실제로 동작하는지만 확인한다. tests/integration/
-test_execution_control.py의 기존 테스트(pre_start_gate 미지정)는 이
-변경으로 전혀 건드리지 않는다."""
+그 재사용이 실제로 동작하는지만 확인한다. EO-05 — `pre_start_gate`는
+더 이상 Optional이 아니다(I-01, 생성 자체가 게이트 없이는 불가능). 이전
+버전의 이 파일에 있던 `test_gate_none_by_default_matches_existing_behavior`
+(게이트 미지정 시 기본 통과를 검증하던 테스트)는 그 자체가 지금은 존재할
+수 없는 상태라 제거했다 — `tests/integration/test_execution_control.py`를
+포함한 다른 모든 ExecutionService 생성부도 이 리프에서 실제 게이트를
+주입하도록 함께 바뀌었다."""
 from __future__ import annotations
 
 import json
@@ -176,14 +180,3 @@ async def test_mandate_linked_start_denied_when_mandate_paused(
     )
     assert decision.outcome == GateOutcome.DENY
     assert "STATE_MANDATE_PAUSED" in decision.reason_codes
-
-
-async def test_gate_none_by_default_matches_existing_behavior(pool):
-    """기본값(pre_start_gate=None)에서는 기존 test_execution_control.py의
-    12개 테스트와 완전히 동일 — 게이트 자체가 호출되지 않는다."""
-    service = ExecutionService(pool, load_risk_policy())
-    user_id = await create_test_user(pool)
-    created = await _create_execution(service, pool, user_id)
-
-    result = await service.start(created.id, user_id)
-    assert result.status == "RUNNING"

@@ -11,6 +11,7 @@ from dotenv import dotenv_values
 from src.core.loader.risk_policy_loader import load_risk_policy
 from src.services.capital_allocation import CapitalAllocationError
 from src.services.execution_service import ExecutionCreateError, ExecutionService
+from src.services.order_service.foundation_gate import make_foundation_pre_submit_gate
 from tests.integration.conftest import create_test_user
 
 
@@ -30,7 +31,9 @@ async def pool():
 
 @pytest.fixture
 def service(pool):
-    return ExecutionService(pool, load_risk_policy())
+    return ExecutionService(
+        pool, load_risk_policy(), pre_start_gate=make_foundation_pre_submit_gate(pool)
+    )
 
 
 async def _create_approved_strategy(pool, owner_user_id, *, certified_badge=False):
