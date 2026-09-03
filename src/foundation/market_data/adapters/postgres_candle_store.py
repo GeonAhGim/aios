@@ -30,8 +30,11 @@ from src.foundation.market_data.contracts.v1 import (
     Timeframe,
     Venue,
 )
+from src.foundation.market_data.domain.candle_columns import CandleColumns
 
 __all__ = ["PostgresCandleStore"]
+
+_COLUMNAR_FIELDS = ("open_time", "open", "high", "low", "close", "volume", "quote_volume")
 
 _CANDLE_COLUMNS = (
     "venue",
@@ -191,3 +194,34 @@ class PostgresCandleStore:
             key.timeframe.value,
         )
         return cast("AwareDatetime | None", value)
+
+    async def read_candles_columnar(
+        self,
+        conn: asyncpg.Connection,
+        key: SeriesKey,
+        start: AwareDatetime,
+        end: AwareDatetime,
+        as_of: AwareDatetime | None,
+    ) -> CandleColumns:
+        rows = await conn.fetch(
+            f"SELECT {', '.join(_COLUMNAR_FIELDS)} FROM md_candle "  # noqa: S608
+            "WHERE venue = $1 AND instrument_id = $2 AND timeframe = $3 "
+            "AND open_time >= $4 AND open_time < $5 "
+            "AND ($6::timestamptz IS NULL OR created_at <= $6) "
+            "ORDER BY open_time ASC",
+            key.venue.value,
+            key.instrument_id,
+            key.timeframe.value,
+            start,
+            end,
+            as_of,
+        )
+        return CandleColumns(
+            ts=[row["open_time"] for row in rows],
+            open=[row["open"] for row in rows],
+            high=[row["high"] for row in rows],
+            low=[row["low"] for row in rows],
+            close=[row["close"] for row in rows],
+            volume=[row["volume"] for row in rows],
+            quote_volume=[row["quote_volume"] for row in rows],
+        )

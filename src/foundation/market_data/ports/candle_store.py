@@ -15,6 +15,7 @@ import asyncpg
 from pydantic import AwareDatetime
 
 from src.foundation.market_data.contracts.v1 import CandleRecord, QualityIssue, SeriesKey
+from src.foundation.market_data.domain.candle_columns import CandleColumns
 
 
 @runtime_checkable
@@ -54,4 +55,20 @@ class CandleStore(Protocol):
         self, conn: asyncpg.Connection, key: SeriesKey
     ) -> AwareDatetime | None:
         """저장된 캔들이 없으면 `None`(스케줄러가 첫 백필 범위 판단에 사용)."""
+        ...
+
+    async def read_candles_columnar(
+        self,
+        conn: asyncpg.Connection,
+        key: SeriesKey,
+        start: AwareDatetime,
+        end: AwareDatetime,
+        as_of: AwareDatetime | None,
+    ) -> CandleColumns:
+        """LA-23b(ADR-2026-09-04-A #1) — `query()`와 같은 필터(`as_of` 스냅샷
+        포함)로 `open_time ASC` 정렬된 컬럼 배열을 돌려준다. 대량 소비자
+        (리플레이·`get_candles.load_series`)가 레코드별 pydantic 검증
+        없이(`domain/candle_columns.to_candle_records`) 순회하기 위한 내부
+        전용 경로 — `query()`를 대체하지 않는다(소량 조회는 여전히
+        `query()`가 더 단순하다, 예: positions 컨텍스트의 mark price 조회)."""
         ...
