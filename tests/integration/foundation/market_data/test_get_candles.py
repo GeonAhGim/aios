@@ -26,6 +26,7 @@ from src.foundation.market_data.adapters.postgres_reference_repository import (
     PostgresReferenceRepository,
 )
 from src.foundation.market_data.application.get_candles import (
+    AsOfInFutureError,
     QuarantinedViewUnsupportedError,
     UnknownSeriesError,
     get_candles,
@@ -216,6 +217,20 @@ async def test_get_candles_unknown_series_raises(pool, candle_store, reference_r
     t0 = datetime.now(timezone.utc).replace(second=0, microsecond=0)
     query = CandleQuery(key=key, start=t0, end=t0 + timedelta(minutes=1))
     with pytest.raises(UnknownSeriesError):
+        await get_candles(query, store=candle_store, refs=reference_repo, cal=calendar_repo,
+                           pool=pool)
+
+
+async def test_get_candles_as_of_in_future_raises(
+    pool, candle_store, reference_repo, calendar_repo
+):
+    """negative: `as_of`가 현재보다 미래면 조회 전에 즉시 거부한다(스토어를
+    건드리지 않으므로 미등록 instrument여도 무방)."""
+    key = SeriesKey(venue=Venue.BITGET, instrument_id=uuid.uuid4(), timeframe=Timeframe.M1)
+    t0 = datetime.now(timezone.utc).replace(second=0, microsecond=0)
+    future_as_of = t0 + timedelta(days=1)
+    query = CandleQuery(key=key, start=t0, end=t0 + timedelta(minutes=1), as_of=future_as_of)
+    with pytest.raises(AsOfInFutureError):
         await get_candles(query, store=candle_store, refs=reference_repo, cal=calendar_repo,
                            pool=pool)
 
