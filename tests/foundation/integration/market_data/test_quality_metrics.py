@@ -224,6 +224,37 @@ async def test_export_quality_metrics_computes_gap_and_reject_ratio(deps):
     assert mine.reject_ratio_24h == Decimal(1) / Decimal(6)
 
 
+async def test_export_quality_metrics_skips_series_with_no_stored_candles(deps):
+    """REJECT 비율 > 20%면 배치 전체가 QUARANTINE되어 `md_ingest_batch`는
+    생기지만 `md_candle`은 비어 있다(§4.1 "부분 저장 금지") — `_active_series`는
+    이 시계열을 활성으로 보지만 `last_open_time`이 None이라 스킵해야 하고,
+    이 스킵이 다른 시계열 처리를 막지 않아야 한다."""
+    quarantined_instrument = await _listed_instrument(deps)
+    healthy_instrument = await _listed_instrument(deps)
+    t0 = datetime.now(timezone.utc).replace(second=0, microsecond=0)
+    all_bad = [
+        _candle(t0 + timedelta(minutes=i), "100", "90", "80", "85", "10")  # high<open → REJECT
+        for i in range(3)
+    ]
+    good = [_candle(t0, "100", "110", "90", "105", "10")]
+    await _ingest(
+        deps, quarantined_instrument, all_bad, start=t0, end=t0 + timedelta(minutes=3), at=t0
+    )
+    await _ingest(deps, healthy_instrument, good, start=t0, end=t0 + timedelta(minutes=1), at=t0)
+
+    registry = MetricsRegistry()
+    results = await export_quality_metrics(
+        batches=deps.batches, store=deps.store, cal=deps.cal, pool=deps.pool,
+        registry=registry, clock=_clock(t0 + timedelta(minutes=10)),
+    )
+
+    result_ids = {m.key.instrument_id for m in results}
+    assert quarantined_instrument.instrument_id not in result_ids, (
+        "저장된 캔들이 없는 시계열(전량 QUARANTINE)은 결과에서 빠진다"
+    )
+    assert healthy_instrument.instrument_id in result_ids, "나머지 시계열은 계속 처리된다"
+
+
 async def test_scheduler_run_once_isolates_ingest_failure_and_exports_metrics(deps):
     instrument = await _listed_instrument(deps)
     t0 = datetime.now(timezone.utc).replace(second=0, microsecond=0)
