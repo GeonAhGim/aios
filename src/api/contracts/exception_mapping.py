@@ -27,6 +27,7 @@ from src.api.contracts.error_codes import ErrorCode
 from src.core.approval.service import ApprovalError
 from src.core.db.conditional_write import ConcurrencyConflictError
 from src.foundation.ledger.application.payouts import UnknownPayoutBatchError
+from src.foundation.ledger.application.queries import WalletLedgerDriftError
 from src.services.account_deletion_service import AccountDeletionError
 from src.services.approval_settings_service import ApprovalSettingsError
 from src.services.auth_service import AuthError
@@ -54,6 +55,7 @@ EXCEPTION_MAP: list[tuple[type[Exception], ErrorCode]] = [
     (WalletTopupError, ErrorCode.VALIDATION_INVALID_FIELD),
     (ListingError, ErrorCode.VALIDATION_INVALID_FIELD),
     (UnknownPayoutBatchError, ErrorCode.RESOURCE_NOT_FOUND),
+    (WalletLedgerDriftError, ErrorCode.INTEGRITY_WALLET_BALANCE_DRIFT),
     (ConcurrencyConflictError, ErrorCode.STATE_CONCURRENCY_CONFLICT),
 ]
 

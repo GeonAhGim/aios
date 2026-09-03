@@ -8,6 +8,8 @@ Spec: 16_backend_signatures.md, ADR-2026-08-10-B
 """
 from __future__ import annotations
 
+import asyncio
+import contextlib
 import logging
 import os
 from collections.abc import AsyncIterator
@@ -26,10 +28,16 @@ from src.core.loader.secret_loader import load_env_secrets
 from src.core.logging.audit_log import record_audit_log
 from src.core.logging.schema import configure_logging
 from src.core.notifications.gateway import NotificationGateway
+from src.core.observability.metrics_registry import get_registry
 from src.core.safety.metrics_collector import ApiCallTracker
 from src.exchanges.common.instrumented_adapter import instrumented_adapter_factory
 from src.exchanges.factory import build_adapter
-from src.services.background_loops import start_background_loops
+from src.foundation.evidence.adapters.postgres_repository import PostgresAuditEventRepository
+from src.foundation.ledger.adapters.postgres_balance_repository import PostgresBalanceRepository
+from src.foundation.ledger.adapters.postgres_journal_repository import PostgresJournalRepository
+from src.foundation.ledger.adapters.postgres_payout_repository import PostgresPayoutRepository
+from src.foundation.ledger.application.scheduler import LedgerIntegrityScheduler
+from src.services.background_loops import flag_enabled, start_background_loops
 from src.services.credential_resolver import CredentialResolver
 from src.services.exchange_credential_service import ExchangeCredentialService
 
@@ -94,14 +102,45 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         api_tracker=api_tracker,
     )
 
+    # LC-10/LC-16 — 원장 무결성 검증(5분 주기)·정산 배치(일 1회 00:10 KST)
+    # 백그라운드 루프. LC-10에서는 스케줄러 클래스만 만들고 이 배선을 후속
+    # 리프로 남겼다(그 모듈 docstring 참조) — 위 `loops`(execution_loop 등)와
+    # 같은 패턴(한 주기 실패가 루프를 죽이지 않음)이라 별도 플래그로 끌 수
+    # 있게 한다(테스트가 lifespan을 통째로 띄울 때 공유 DB에 원치 않는
+    # write_frozen을 세우지 않도록, `AIOS_EXECUTION_LOOP_ENABLED`와 동일 관례).
+    ledger_scheduler = LedgerIntegrityScheduler(
+        pool,
+        journal=PostgresJournalRepository(pool),
+        balances=PostgresBalanceRepository(pool),
+        audit=PostgresAuditEventRepository(pool),
+        registry=get_registry(),
+        payouts=PostgresPayoutRepository(pool),
+    )
+    ledger_tasks: list[asyncio.Task[None]] = []
+    if flag_enabled("AIOS_LEDGER_SCHEDULER_ENABLED"):
+        ledger_tasks = [
+            asyncio.create_task(ledger_scheduler.run_forever()),
+            asyncio.create_task(ledger_scheduler.run_payout_forever()),
+        ]
+    else:
+        logger.warning(
+            "ledger_scheduler: AIOS_LEDGER_SCHEDULER_ENABLED=0 — 원장 스케줄러를 띄우지 않습니다."
+        )
+
     app.state.pool = pool
     app.state.secrets = secrets
     app.state.event_bus = event_bus
     app.state.credential_resolver = credential_resolver
     app.state.execution_scheduler = loops.execution_scheduler
+    app.state.ledger_scheduler = ledger_scheduler
     try:
         yield
     finally:
+        for task in ledger_tasks:
+            task.cancel()
+        for task in ledger_tasks:
+            with contextlib.suppress(asyncio.CancelledError):
+                await task
         await loops.stop()
         await event_bus.stop()
         await pool.close()
