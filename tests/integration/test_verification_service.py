@@ -57,6 +57,35 @@ async def _pending_listing(pool, seller):
     return await listing_service.submit_for_verification(listing.id, seller)
 
 
+async def _seed_failed_backtest_validation(pool, strategy_id: str, version: str) -> None:
+    """F-04/F-05 — `evaluate_validation_policy`가 실제로 만들어낼 수 있게 된
+    FAIL 결과를 DB에 직접 심는다(여기서는 그 정책 함수 자체가 아니라
+    "VerificationService가 이미 있는 FAIL을 조회해 승인을 막는가"만
+    검증하면 되므로, 결과 계산 경로를 다시 거치지 않고 최종 상태를 바로
+    구성한다)."""
+    async with pool.acquire() as conn:
+        run_id = await conn.fetchval(
+            "INSERT INTO strategy_validation_run "
+            "(strategy_id, strategy_version, check_type, input_snapshot_hash, cost_model, "
+            " warmup_bars, periods_per_year, initial_equity, state, completed_at) "
+            "VALUES ($1, $2, 'backtest', $3, '{}'::jsonb, 0, 252, 10000, 'SUCCEEDED', now()) "
+            "RETURNING id",
+            strategy_id,
+            version,
+            uuid4().hex,
+        )
+        await conn.execute(
+            "INSERT INTO strategy_validation_result "
+            "(id, run_id, outcome, metrics, warnings, hard_fail_reasons, obligations, "
+            " result_hash) "
+            "VALUES ($1, $2, 'FAIL', '{}'::jsonb, $3, $3, '{}', $4)",
+            uuid4(),
+            run_id,
+            ["bar 3: PortfolioEngine 예외 — 로직 오류"],
+            uuid4().hex,
+        )
+
+
 @pytest.fixture
 def service(pool):
     return VerificationService(pool)
@@ -199,6 +228,24 @@ async def test_unknown_decision_value_is_rejected(service, pool):
 
     with pytest.raises(VerificationError):
         await service.decide(listing.id, verifier, "MAYBE")
+
+
+async def test_approve_rejected_when_backtest_validation_failed(service, pool):
+    """ADR-2026-09-04-C F-05 부분 — 자동 검증 파이프라인이 FAIL로 판정한
+    전략은 수동 검증담당자가 승인해도 LISTED로 넘어가면 안 된다."""
+    seller = await create_test_user(pool)
+    listing = await _pending_listing(pool, seller)
+    await _seed_failed_backtest_validation(pool, listing.strategy_id, listing.strategy_version)
+    verifier = await create_test_user(pool)
+
+    with pytest.raises(VerificationError, match="FAIL"):
+        await service.decide(listing.id, verifier, "APPROVE")
+
+    async with pool.acquire() as conn:
+        status = await conn.fetchval(
+            "SELECT status FROM strategy_listings WHERE id = $1", listing.id
+        )
+    assert status == "PENDING_VERIFICATION"
 
 
 async def test_verifier_cannot_decide_own_listing(service, pool):

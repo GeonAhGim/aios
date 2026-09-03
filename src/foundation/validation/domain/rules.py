@@ -63,13 +63,43 @@ def compute_result_hash(metrics: dict[str, Any]) -> str:
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 
-def evaluate_validation_policy(warnings: list[str]) -> tuple[Outcome, list[str]]:
+_HARD_FAIL_MARKERS: tuple[str, ...] = (
+    # 76번 §3 R5/point-in-time — 재생 도중 FD-8.1/8.2 상태 불일치(로직
+    # 버그)가 실제로 발생한 경우. run_backtest()가 예외를 삼키고 경고로
+    # 남기므로(BacktestRunError처럼 즉시 죽지 않음) 여기서 반드시 잡는다.
+    "PortfolioEngine 예외",
+    # 76번 §3 robustness 행 — L34(overfitting.py)가 계산을 시작하면 이
+    # 문구를 포함한 경고를 내도록 만든다(ofit-v1). 아직 계산기가 없어
+    # 지금은 도달하지 않지만, 규칙표를 미리 열어둬 나중에 배선만 하면
+    # 된다(107번 계약 안정성 원칙과 동일하게 "조용한 우회"를 막는다).
+    "DSR",
+    "PBO",
+    # 76번 §3 point-in-time 행 — look-ahead/survivorship 데이터 누수.
+    "LOOKAHEAD",
+    "데이터 누수",
+)
+
+
+def _is_hard_fail(warning: str) -> bool:
+    upper = warning.upper()
+    return any(marker.upper() in upper for marker in _HARD_FAIL_MARKERS)
+
+
+def evaluate_validation_policy(
+    warnings: list[str],
+) -> tuple[Outcome, list[str], list[str]]:
     """76번 §3 "only explicit obligations may be carried to package state" —
-    엔진(FND-10)이 낸 경고를 조용히 버리지 않고 전부 obligation으로
-    승격한다. 이 체크(check_type='backtest')는 하드페일 조건이 없다 —
-    `run_backtest()` 자체가 실패하면(warmup 부족 등) 그건 정책 판정 이전에
-    실행 자체가 실패한 것이라 이 함수에 도달하지 않는다(application 계층이
-    별도 FAILED로 처리)."""
-    if warnings:
-        return Outcome.PASS_WITH_OBLIGATIONS, list(warnings)
-    return Outcome.PASS, []
+    엔진(FND-10)이 낸 경고 중 `_HARD_FAIL_MARKERS`에 해당하지 않는 것만
+    obligation으로 승격하고, 나머지(백테스트 오류·DSR/PBO 임계 미달·데이터
+    누수 등)는 hard_fail_reasons로 분류해 FAIL을 반환한다 — I-07 "검증/
+    승인 게이트의 hard-fail 조건은 도메인 코드가 계산하고 실제로 FAIL을
+    반환할 수 있어야 한다"의 최소 구현. `run_backtest()` 자체가 실패하면
+    (warmup 부족 등) 그건 정책 판정 이전에 실행 자체가 실패한 것이라 이
+    함수에 도달하지 않는다(application 계층이 별도 FAILED로 처리)."""
+    hard_fail_reasons = [w for w in warnings if _is_hard_fail(w)]
+    obligations = [w for w in warnings if not _is_hard_fail(w)]
+    if hard_fail_reasons:
+        return Outcome.FAIL, obligations, hard_fail_reasons
+    if obligations:
+        return Outcome.PASS_WITH_OBLIGATIONS, obligations, []
+    return Outcome.PASS, [], []

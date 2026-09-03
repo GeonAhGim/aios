@@ -70,6 +70,42 @@ class _FakePriceIndicatorService:
         return _FakeIndicatorResult(values=[float(candles[-1].close)])
 
 
+def _re_entry_bug_fsm_config() -> FSMStrategyConfig:
+    """F-04 회귀 — 의도적으로 버그가 있는 FSM: HOLDING에서 항상 참인
+    조건으로 다시 BUY_ORDER_PENDING(진입 방향)으로 나가는 전이를 둔다.
+    체결 후 HOLDING인데 또 BUY 신호가 나와 PortfolioEngine이
+    PortfolioEngineError를 던지고, run_backtest()가 그걸 경고로 캐치한다
+    (application 계층 raise가 아님 — 그래서 지금까지 hard_fail_reasons가
+    항상 빈 튜플이어도 아무도 못 알아챘다)."""
+    return FSMStrategyConfig(
+        strategy_id="test-strategy",
+        version="v1",
+        target_asset="BTC/USDT",
+        market="crypto",
+        exchange="bitget",
+        initial_state=FSMState.IDLE,
+        states=[FSMState.IDLE, FSMState.BUY_ORDER_PENDING, FSMState.HOLDING],
+        transitions=[
+            FSMTransition(
+                from_state=FSMState.IDLE,
+                to_state=FSMState.BUY_ORDER_PENDING,
+                condition="PRICE > 0",
+            ),
+            FSMTransition(
+                from_state=FSMState.BUY_ORDER_PENDING,
+                to_state=FSMState.HOLDING,
+                condition="ORDER_FILLED",
+            ),
+            FSMTransition(
+                from_state=FSMState.HOLDING,
+                to_state=FSMState.BUY_ORDER_PENDING,
+                condition="PRICE > 0",
+            ),
+        ],
+        author_agent="test",
+    )
+
+
 def _never_fires_fsm_config() -> FSMStrategyConfig:
     """PRICE > 10000 조건은 아래 테스트 bar들에서 절대 참이 되지 않는다 —
     거래 없이 evaluate()만 반복 호출되는 경로를 검증한다."""
@@ -110,12 +146,14 @@ def _bars(count: int = 5) -> list[Candle]:
     ]
 
 
-async def _strategy_in_backtesting(pool, strategy_service) -> tuple[UUID, str, str]:
+async def _strategy_in_backtesting(
+    pool, strategy_service, fsm_config: FSMStrategyConfig | None = None
+) -> tuple[UUID, str, str]:
     """소유자를 만들고, GENERATED로 전략을 저장한 뒤 BACKTESTING까지 한 칸
     전이시킨다(9.9 절대원칙 순서 그대로, 지름길 없음)."""
     owner_id = await create_test_user(pool)
     strategy_id = f"test-strategy-{uuid4().hex[:8]}"
-    fsm_definition = _never_fires_fsm_config().model_dump(mode="json")
+    fsm_definition = (fsm_config or _never_fires_fsm_config()).model_dump(mode="json")
     await strategy_service.save_strategy(
         owner_id,
         strategy_id,
@@ -283,3 +321,33 @@ async def test_concurrent_identical_requests_only_one_computes_the_rest_attach(
             "SELECT count(*) FROM strategy_validation_run WHERE strategy_id = $1", strategy_id
         )
     assert count == 1
+
+
+async def test_backtest_engine_error_fails_validation_and_blocks_lifecycle(
+    pool, validation_repo, strategy_service
+):
+    """F-04 적대적 테스트 — 임계 미달(여기서는 실제 백테스트 재생 오류)
+    입력이면 outcome이 FAIL이고 hard_fail_reasons가 비어있지 않아야
+    한다. 고쳐지기 전에는 evaluate_validation_policy가 항상
+    hard_fail_reasons=()를 만들어 이 상태에 절대 도달할 수 없었다.
+    PASS/PASS_WITH_OBLIGATIONS만 VALIDATING으로 전이시키는 기존 가드
+    (start_validation.py) 덕분에 FAIL이면 전략은 BACKTESTING에 그대로
+    남아야 한다."""
+    owner_id, strategy_id, version = await _strategy_in_backtesting(
+        pool, strategy_service, fsm_config=_re_entry_bug_fsm_config()
+    )
+
+    view = await start_validation(
+        validation_repo,
+        strategy_service,
+        owner_user_id=owner_id,
+        command=_command(strategy_id, version),
+        bars=_bars(count=4),
+        indicator_service=_FakePriceIndicatorService(),
+    )
+
+    assert view.outcome == Outcome.FAIL
+    assert view.hard_fail_reasons != []
+
+    detail = await strategy_service.get_strategy(owner_id, strategy_id, version)
+    assert detail.lifecycle_status == "BACKTESTING"

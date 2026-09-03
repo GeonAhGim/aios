@@ -72,12 +72,56 @@ def test_result_hash_is_order_independent_over_dict_keys():
 
 
 def test_no_warnings_passes_cleanly():
-    outcome, obligations = evaluate_validation_policy([])
+    outcome, obligations, hard_fail_reasons = evaluate_validation_policy([])
     assert outcome == Outcome.PASS
     assert obligations == []
+    assert hard_fail_reasons == []
 
 
 def test_warnings_become_explicit_obligations_not_silently_dropped():
-    outcome, obligations = evaluate_validation_policy(["zero-cost model used"])
+    outcome, obligations, hard_fail_reasons = evaluate_validation_policy(
+        ["zero-cost model used"]
+    )
     assert outcome == Outcome.PASS_WITH_OBLIGATIONS
     assert obligations == ["zero-cost model used"]
+    assert hard_fail_reasons == []
+
+
+def test_backtest_engine_error_is_a_hard_fail_not_an_obligation():
+    """F-04 — `hard_fail_reasons=()` 상수 결함의 핵심 회귀: 백테스트 재생
+    도중 실제 로직 오류(PortfolioEngine 예외)가 나면 FAIL이어야 하고,
+    hard_fail_reasons가 비어있으면 안 된다."""
+    warning = "bar 3: PortfolioEngine 예외 — 이미 보유 포지션이 있는 상태에서 진입(BUY) 신호"
+    outcome, obligations, hard_fail_reasons = evaluate_validation_policy([warning])
+    assert outcome == Outcome.FAIL
+    assert hard_fail_reasons == [warning]
+    assert obligations == []
+
+
+def test_dsr_and_pbo_threshold_breaches_are_hard_fail():
+    outcome, obligations, hard_fail_reasons = evaluate_validation_policy(
+        ["DSR 0.80 < min_dsr 0.95", "PBO 0.62 > max_pbo 0.5"]
+    )
+    assert outcome == Outcome.FAIL
+    assert hard_fail_reasons == ["DSR 0.80 < min_dsr 0.95", "PBO 0.62 > max_pbo 0.5"]
+    assert obligations == []
+
+
+def test_data_leakage_warning_is_hard_fail():
+    outcome, obligations, hard_fail_reasons = evaluate_validation_policy(
+        ["look-ahead 데이터 누수 감지: bar 12"]
+    )
+    assert outcome == Outcome.FAIL
+    assert hard_fail_reasons == ["look-ahead 데이터 누수 감지: bar 12"]
+    assert obligations == []
+
+
+def test_hard_fail_and_soft_warning_are_classified_independently():
+    """하드페일 하나만 있어도 FAIL — 나머지 소프트 경고는 obligation으로
+    같이 보존된다(하나가 다른 하나를 가리지 않는다)."""
+    hard = "bar 1: PortfolioEngine 예외 — 로직 오류"
+    soft = "zero-cost model used"
+    outcome, obligations, hard_fail_reasons = evaluate_validation_policy([hard, soft])
+    assert outcome == Outcome.FAIL
+    assert hard_fail_reasons == [hard]
+    assert obligations == [soft]

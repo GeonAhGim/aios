@@ -48,6 +48,30 @@ class VerificationService:
         self._pool = pool
         self._publish = publish
 
+    async def _reject_if_backtest_failed(
+        self, conn: asyncpg.pool.PoolConnectionProxy, listing_id: int
+    ) -> None:
+        """ADR-2026-09-04-C F-04/F-05, INVARIANTS.md I-07 — 자동 검증
+        파이프라인(FND-04, `strategy_validation_result`)이 이미 FAIL로
+        판정한 전략은 사람이 수동으로 승인할 수 없다. 이 게이트가 없으면
+        `hard_fail_reasons`를 실제로 채우게 만든 F-04 수정(FAIL 판정 자체를
+        가능하게 함)이 아무것도 강제하지 않는 장식으로 남는다."""
+        row = await conn.fetchrow(
+            "SELECT r.outcome, r.hard_fail_reasons "
+            "FROM strategy_listings l "
+            "JOIN strategy_validation_run run "
+            "  ON run.strategy_id = l.strategy_id AND run.strategy_version = l.strategy_version "
+            "JOIN strategy_validation_result r ON r.run_id = run.id "
+            "WHERE l.id = $1 AND run.check_type = 'backtest' "
+            "ORDER BY run.completed_at DESC NULLS LAST LIMIT 1",
+            listing_id,
+        )
+        if row is not None and row["outcome"] == "FAIL":
+            raise VerificationError(
+                "이 전략의 자동 검증(backtest)이 FAIL입니다"
+                f"(hard_fail_reasons={list(row['hard_fail_reasons'])}) — 승인할 수 없습니다."
+            )
+
     async def decide(
         self,
         listing_id: int,
@@ -84,6 +108,9 @@ class VerificationService:
             # 대기열 필터만으로는 listing_id를 직접 지정한 호출을 막지 못한다).
             if pre_check["seller_user_id"] == verifier_id:
                 raise VerificationError("본인이 판매하는 리스팅은 검증할 수 없습니다(이해상충).")
+
+            if decision == "APPROVE":
+                await self._reject_if_backtest_failed(conn, listing_id)
 
             new_status = "LISTED" if decision == "APPROVE" else "DRAFT"
             if decision == "APPROVE":

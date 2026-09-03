@@ -169,7 +169,9 @@ async def start_validation(
         await validation_repo.mark_failed(run.id)
         raise
 
-    outcome, obligations = evaluate_validation_policy(backtest_result.warnings)
+    outcome, obligations, hard_fail_reasons = evaluate_validation_policy(
+        backtest_result.warnings
+    )
     metrics = backtest_result.metrics.model_dump(mode="json")
     result = ValidationResult(
         id=uuid4(),
@@ -177,7 +179,7 @@ async def start_validation(
         outcome=DomainOutcome(outcome.value),
         metrics=metrics,
         warnings=tuple(backtest_result.warnings),
-        hard_fail_reasons=(),
+        hard_fail_reasons=tuple(hard_fail_reasons),
         obligations=tuple(obligations),
         result_hash=compute_result_hash(metrics),
         created_at=datetime.now(timezone.utc),
