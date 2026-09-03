@@ -20,28 +20,36 @@ from __future__ import annotations
 from decimal import Decimal
 from typing import Any
 
+from src.exchanges.common.http_client import SignedRequestClient
 from src.exchanges.common.live_guard import require_paper_sandbox
 
 
 class BitgetLoanMixin:
-    async def get_loan_coin_info(self, *, coin: str | None = None) -> list[dict[str, Any]]:
+    async def get_loan_coin_info(
+        self: SignedRequestClient,
+        *,
+        coin: str | None = None,
+    ) -> list[dict[str, Any]]:
         params: dict[str, Any] = {}
         if coin is not None:
             params["coin"] = coin.upper()
-        raw = await self._request(  # type: ignore[attr-defined]
+        raw = await self._request(
             "GET", "/api/v2/loan/coin-info", params=params or None
         )
         return list(raw["data"])
 
-    async def get_loan_hourly_interest_rate(self, coin: str) -> list[dict[str, Any]]:
-        raw = await self._request(  # type: ignore[attr-defined]
+    async def get_loan_hourly_interest_rate(
+        self: SignedRequestClient,
+        coin: str,
+    ) -> list[dict[str, Any]]:
+        raw = await self._request(
             "GET", "/api/v2/loan/hourly-interest-rate", params={"coin": coin.upper()}
         )
         return list(raw["data"])
 
     @require_paper_sandbox
     async def borrow_loan(
-        self, loan_coin: str, pledge_coin: str, pledge_amount: Decimal
+        self: SignedRequestClient, loan_coin: str, pledge_coin: str, pledge_amount: Decimal
     ) -> dict[str, Any]:
         """담보(pledge)를 맡기고 다른 코인을 빌린다 — margin_mixin.py의
         거래용 대출(borrow_margin)과 다른 상품(§1.5 모듈 docstring).
@@ -52,7 +60,7 @@ class BitgetLoanMixin:
         강제하지 않는다(API 연동 레이어, 정책 적용은 호출부 책임)."""
         if pledge_amount <= 0:
             raise ValueError("pledge_amount는 0보다 커야 합니다.")
-        raw = await self._request(  # type: ignore[attr-defined]
+        raw = await self._request(
             "POST",
             "/api/v2/loan/borrow",
             body={
@@ -64,56 +72,64 @@ class BitgetLoanMixin:
         return dict(raw["data"])
 
     @require_paper_sandbox
-    async def repay_loan(self, order_id: str, amount: Decimal) -> dict[str, Any]:
+    async def repay_loan(
+        self: SignedRequestClient,
+        order_id: str,
+        amount: Decimal,
+    ) -> dict[str, Any]:
         if amount <= 0:
             raise ValueError("amount는 0보다 커야 합니다.")
-        raw = await self._request(  # type: ignore[attr-defined]
+        raw = await self._request(
             "POST", "/api/v2/loan/repay", body={"orderId": order_id, "amount": str(amount)}
         )
         return dict(raw["data"])
 
     @require_paper_sandbox
     async def revise_loan_pledge(
-        self, order_id: str, amount: Decimal, *, reverse_type: str = "IN"
+        self: SignedRequestClient, order_id: str, amount: Decimal, *, reverse_type: str = "IN"
     ) -> dict[str, Any]:
         """담보 추가(`reverse_type="IN"`)/감액(`"OUT"`, 문서 관례).
         레드팀 #2026-09-02-32/33 참조."""
         if amount <= 0:
             raise ValueError("amount는 0보다 커야 합니다.")
-        raw = await self._request(  # type: ignore[attr-defined]
+        raw = await self._request(
             "POST",
             "/api/v2/loan/revise-pledge",
             body={"orderId": order_id, "amount": str(amount), "reviseType": reverse_type},
         )
         return dict(raw["data"])
 
-    async def get_ongoing_loans(self, *, order_id: str | None = None) -> list[dict[str, Any]]:
+    async def get_ongoing_loans(
+        self: SignedRequestClient,
+        *,
+        order_id: str | None = None,
+    ) -> list[dict[str, Any]]:
         params: dict[str, Any] = {}
         if order_id is not None:
             params["orderId"] = order_id
-        raw = await self._request(  # type: ignore[attr-defined]
+        raw = await self._request(
             "GET", "/api/v2/loan/ongoing-orders", params=params or None
         )
         return list(raw["data"])
 
     async def get_loan_repay_history(
-        self, *, order_id: str | None = None, limit: int = 100
+        self: SignedRequestClient, *, order_id: str | None = None, limit: int = 100
     ) -> list[dict[str, Any]]:
         params: dict[str, Any] = {"limit": str(limit)}
         if order_id is not None:
             params["orderId"] = order_id
-        raw = await self._request(  # type: ignore[attr-defined]
+        raw = await self._request(
             "GET", "/api/v2/loan/repay-history", params=params
         )
         return list(raw["data"])
 
     async def get_loan_liquidation_records(
-        self, *, limit: int = 100
+        self: SignedRequestClient, *, limit: int = 100
     ) -> list[dict[str, Any]]:
         """FD-9.6(Reconciliation) 입력값 후보(margin_mixin.py의
         get_margin_liquidation_orders와 동일 목적, 별도 신용상품이라
         별도 엔드포인트)."""
-        raw = await self._request(  # type: ignore[attr-defined]
+        raw = await self._request(
             "GET", "/api/v2/loan/liquidation-records", params={"limit": str(limit)}
         )
         return list(raw["data"])

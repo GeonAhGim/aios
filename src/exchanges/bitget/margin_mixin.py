@@ -25,6 +25,7 @@ from uuid import uuid4
 from src.data.models.base import AssetClass
 from src.data.models.trading import MarginAccountAsset, Order, OrderSide, OrderStatus, OrderType
 from src.exchanges.bitget.symbols import to_bitget_symbol as _to_bitget_symbol
+from src.exchanges.common.http_client import SignedRequestClient
 from src.exchanges.common.live_guard import require_paper_sandbox
 
 CROSSED = "crossed"
@@ -69,13 +70,13 @@ def _row_to_margin_order(item: dict[str, Any]) -> Order:
 
 class BitgetMarginMixin:
     async def get_margin_account_assets(
-        self, margin_type: str, *, symbol: str | None = None
+        self: SignedRequestClient, margin_type: str, *, symbol: str | None = None
     ) -> list[MarginAccountAsset]:
         _validate_margin_type(margin_type)
         params: dict[str, Any] = {}
         if symbol is not None:
             params["symbol"] = _to_bitget_symbol(symbol)
-        raw = await self._request(  # type: ignore[attr-defined]
+        raw = await self._request(
             "GET", f"/api/v2/margin/{margin_type}/account/assets", params=params or None
         )
         return [
@@ -96,7 +97,7 @@ class BitgetMarginMixin:
         ]
 
     async def get_margin_risk_rate(
-        self, margin_type: str, *, symbol: str | None = None
+        self: SignedRequestClient, margin_type: str, *, symbol: str | None = None
     ) -> Decimal:
         """FD-8.3 청산위험 판단 입력값 후보(02b §4) — 단일 스칼라로 축약해
         반환한다(cross는 계좌 전체 하나, isolated는 symbol별 하나)."""
@@ -104,14 +105,18 @@ class BitgetMarginMixin:
         params: dict[str, Any] = {}
         if symbol is not None:
             params["symbol"] = _to_bitget_symbol(symbol)
-        raw = await self._request(  # type: ignore[attr-defined]
+        raw = await self._request(
             "GET", f"/api/v2/margin/{margin_type}/account/risk-rate", params=params or None
         )
         data = raw["data"][0] if isinstance(raw["data"], list) else raw["data"]
         return Decimal(data["riskRate"])
 
     @require_paper_sandbox
-    async def place_margin_order(self, margin_type: str, order: Order) -> Order:
+    async def place_margin_order(
+        self: SignedRequestClient,
+        margin_type: str,
+        order: Order,
+    ) -> Order:
         """레드팀 #2026-09-02-32/33 — Executor를 거치지 않으므로 최소
         방어선(LIVE adapter 차단 + 수량 sanity check)을 이 메서드 자체에
         건다."""
@@ -129,7 +134,7 @@ class BitgetMarginMixin:
         if order.price is not None:
             body["price"] = str(order.price.amount)
 
-        raw = await self._request(  # type: ignore[attr-defined]
+        raw = await self._request(
             "POST", f"/api/v2/margin/{margin_type}/place-order", body=body
         )
         data = raw["data"]
@@ -137,22 +142,31 @@ class BitgetMarginMixin:
             update={"exchange_order_id": data["orderId"], "status": OrderStatus.SUBMITTED}
         )
 
-    async def cancel_margin_order(self, margin_type: str, order_id: str) -> bool:
+    async def cancel_margin_order(
+        self: SignedRequestClient,
+        margin_type: str,
+        order_id: str,
+    ) -> bool:
         _validate_margin_type(margin_type)
-        raw = await self._request(  # type: ignore[attr-defined]
+        raw = await self._request(
             "POST", f"/api/v2/margin/{margin_type}/cancel-order", body={"orderId": order_id}
         )
         return bool(raw.get("code") == "00000")
 
-    async def get_margin_currencies(self) -> list[dict[str, Any]]:
+    async def get_margin_currencies(self: SignedRequestClient) -> list[dict[str, Any]]:
         """02b 스펙 §4(P1) — 마진 거래 지원 통화 목록. 아직 소비하는
         호출부가 없어 raw dict 그대로 반환한다(§2 모델 재사용 원칙)."""
-        raw = await self._request("GET", "/api/v2/margin/currencies")  # type: ignore[attr-defined]
+        raw = await self._request("GET", "/api/v2/margin/currencies")
         return list(raw["data"])
 
     @require_paper_sandbox
     async def borrow_margin(
-        self, margin_type: str, coin: str, amount: Decimal, *, symbol: str | None = None
+        self: SignedRequestClient,
+        margin_type: str,
+        coin: str,
+        amount: Decimal,
+        *,
+        symbol: str | None = None,
     ) -> dict[str, Any]:
         """02b 스펙 §4(P1) — **8.2-A 주의**: 이 호출은 FD-8.3 RiskEngine
         승인 이후에만, 레버리지 정책(risk_policy.yaml leverage 섹션)
@@ -167,14 +181,19 @@ class BitgetMarginMixin:
         body: dict[str, Any] = {"coin": coin.upper(), "borrowAmount": str(amount)}
         if symbol is not None:
             body["symbol"] = _to_bitget_symbol(symbol)
-        raw = await self._request(  # type: ignore[attr-defined]
+        raw = await self._request(
             "POST", f"/api/v2/margin/{margin_type}/account/borrow", body=body
         )
         return dict(raw["data"])
 
     @require_paper_sandbox
     async def repay_margin(
-        self, margin_type: str, coin: str, amount: Decimal, *, symbol: str | None = None
+        self: SignedRequestClient,
+        margin_type: str,
+        coin: str,
+        amount: Decimal,
+        *,
+        symbol: str | None = None,
     ) -> dict[str, Any]:
         """02b 스펙 §4(P1). 레드팀 #2026-09-02-32/33 참조."""
         _validate_margin_type(margin_type)
@@ -183,34 +202,34 @@ class BitgetMarginMixin:
         body: dict[str, Any] = {"coin": coin.upper(), "repayAmount": str(amount)}
         if symbol is not None:
             body["symbol"] = _to_bitget_symbol(symbol)
-        raw = await self._request(  # type: ignore[attr-defined]
+        raw = await self._request(
             "POST", f"/api/v2/margin/{margin_type}/account/repay", body=body
         )
         return dict(raw["data"])
 
     async def get_max_borrowable_amount(
-        self, margin_type: str, coin: str, *, symbol: str | None = None
+        self: SignedRequestClient, margin_type: str, coin: str, *, symbol: str | None = None
     ) -> Decimal:
         """02b 스펙 §4(P1)."""
         _validate_margin_type(margin_type)
         params: dict[str, Any] = {"coin": coin.upper()}
         if symbol is not None:
             params["symbol"] = _to_bitget_symbol(symbol)
-        raw = await self._request(  # type: ignore[attr-defined]
+        raw = await self._request(
             "GET", f"/api/v2/margin/{margin_type}/account/max-borrowable-amount", params=params
         )
         data = raw["data"][0] if isinstance(raw["data"], list) else raw["data"]
         return Decimal(data["maxBorrowableAmount"])
 
     async def get_margin_interest_rate_and_limit(
-        self, margin_type: str, *, coin: str | None = None
+        self: SignedRequestClient, margin_type: str, *, coin: str | None = None
     ) -> list[dict[str, Any]]:
         """02b 스펙 §4(P1)."""
         _validate_margin_type(margin_type)
         params: dict[str, Any] = {}
         if coin is not None:
             params["coin"] = coin.upper()
-        raw = await self._request(  # type: ignore[attr-defined]
+        raw = await self._request(
             "GET",
             f"/api/v2/margin/{margin_type}/interest-rate-and-limit",
             params=params or None,
@@ -218,20 +237,24 @@ class BitgetMarginMixin:
         return list(raw["data"])
 
     async def get_margin_order_history(
-        self, margin_type: str, *, symbol: str | None = None, limit: int = 100
+        self: SignedRequestClient, margin_type: str, *, symbol: str | None = None, limit: int = 100
     ) -> list[Order]:
         """02b 스펙 §4(P1)."""
         _validate_margin_type(margin_type)
         params: dict[str, Any] = {"limit": str(limit)}
         if symbol is not None:
             params["symbol"] = _to_bitget_symbol(symbol)
-        raw = await self._request(  # type: ignore[attr-defined]
+        raw = await self._request(
             "GET", f"/api/v2/margin/{margin_type}/history-orders", params=params
         )
         return [_row_to_margin_order(item) for item in raw["data"]]
 
     async def get_margin_fills(
-        self, margin_type: str, *, symbol: str | None = None, order_id: str | None = None
+        self: SignedRequestClient,
+        margin_type: str,
+        *,
+        symbol: str | None = None,
+        order_id: str | None = None,
     ) -> list[dict[str, Any]]:
         """02b 스펙 §4(P1) — `get_fills()`와 동일하게 raw dict 반환."""
         _validate_margin_type(margin_type)
@@ -240,13 +263,13 @@ class BitgetMarginMixin:
             params["symbol"] = _to_bitget_symbol(symbol)
         if order_id is not None:
             params["orderId"] = order_id
-        raw = await self._request(  # type: ignore[attr-defined]
+        raw = await self._request(
             "GET", f"/api/v2/margin/{margin_type}/fills", params=params or None
         )
         return list(raw["data"])
 
     async def get_margin_liquidation_orders(
-        self, margin_type: str, *, symbol: str | None = None
+        self: SignedRequestClient, margin_type: str, *, symbol: str | None = None
     ) -> list[dict[str, Any]]:
         """02b 스펙 §4(P1) — FD-9.6(Reconciliation) 입력값 후보. raw dict
         반환(강제청산 이력은 소비부가 생기기 전까지 모델화 보류)."""
@@ -254,19 +277,19 @@ class BitgetMarginMixin:
         params: dict[str, Any] = {}
         if symbol is not None:
             params["symbol"] = _to_bitget_symbol(symbol)
-        raw = await self._request(  # type: ignore[attr-defined]
+        raw = await self._request(
             "GET", f"/api/v2/margin/{margin_type}/liquidation-order", params=params or None
         )
         return list(raw["data"])
 
     async def get_margin_open_orders(
-        self, margin_type: str, *, symbol: str | None = None
+        self: SignedRequestClient, margin_type: str, *, symbol: str | None = None
     ) -> list[Order]:
         _validate_margin_type(margin_type)
         params: dict[str, Any] = {}
         if symbol is not None:
             params["symbol"] = _to_bitget_symbol(symbol)
-        raw = await self._request(  # type: ignore[attr-defined]
+        raw = await self._request(
             "GET", f"/api/v2/margin/{margin_type}/open-orders", params=params or None
         )
         return [_row_to_margin_order(item) for item in raw["data"]]

@@ -23,20 +23,29 @@ from __future__ import annotations
 from decimal import Decimal
 from typing import Any
 
+from src.exchanges.common.http_client import SignedRequestClient
+
 
 class BitgetBrokerMixin:
-    async def get_broker_info(self) -> dict[str, Any]:
-        raw = await self._request("GET", "/api/v2/broker/info")  # type: ignore[attr-defined]
+    async def get_broker_info(self: SignedRequestClient) -> dict[str, Any]:
+        raw = await self._request("GET", "/api/v2/broker/info")
         return dict(raw["data"])
 
-    async def get_broker_subaccounts(self, *, limit: int = 100) -> list[dict[str, Any]]:
-        raw = await self._request(  # type: ignore[attr-defined]
+    async def get_broker_subaccounts(
+        self: SignedRequestClient,
+        *,
+        limit: int = 100,
+    ) -> list[dict[str, Any]]:
+        raw = await self._request(
             "GET", "/api/v2/broker/account/subaccount-list", params={"limit": str(limit)}
         )
         return list(raw["data"].get("subAccountList", raw["data"]))
 
-    async def create_broker_subaccount(self, subaccount_name: str) -> dict[str, Any]:
-        raw = await self._request(  # type: ignore[attr-defined]
+    async def create_broker_subaccount(
+        self: SignedRequestClient,
+        subaccount_name: str,
+    ) -> dict[str, Any]:
+        raw = await self._request(
             "POST",
             "/api/v2/broker/account/create-subaccount",
             body={"subAccountName": subaccount_name},
@@ -44,18 +53,25 @@ class BitgetBrokerMixin:
         return dict(raw["data"])
 
     async def create_broker_subaccount_apikey(
-        self, subaccount_uid: str, passphrase: str, *, permissions: list[str] | None = None
+        self: SignedRequestClient,
+        subaccount_uid: str,
+        passphrase: str,
+        *,
+        permissions: list[str] | None = None,
     ) -> dict[str, Any]:
         body: dict[str, Any] = {"subAccountUid": subaccount_uid, "passphrase": passphrase}
         if permissions is not None:
             body["permType"] = ",".join(permissions)
-        raw = await self._request(  # type: ignore[attr-defined]
+        raw = await self._request(
             "POST", "/api/v2/broker/account/create-subaccount-apikey", body=body
         )
         return dict(raw["data"])
 
-    async def get_broker_subaccount_assets(self, subaccount_uid: str) -> list[dict[str, Any]]:
-        raw = await self._request(  # type: ignore[attr-defined]
+    async def get_broker_subaccount_assets(
+        self: SignedRequestClient,
+        subaccount_uid: str,
+    ) -> list[dict[str, Any]]:
+        raw = await self._request(
             "GET",
             "/api/v2/broker/account/subaccount-assets",
             params={"subAccountUid": subaccount_uid},
@@ -63,7 +79,7 @@ class BitgetBrokerMixin:
         return list(raw["data"])
 
     async def transfer_broker_subaccount(
-        self,
+        self: SignedRequestClient,
         subaccount_uid: str,
         coin: str,
         amount: Decimal,
@@ -73,7 +89,7 @@ class BitgetBrokerMixin:
     ) -> bool:
         """브로커 계정↔하위 서브계정 내부 이체 — 7.9 원칙 무관(외부 출금
         아님, subaccount_mixin.py::transfer_to_subaccount와 동일 판단)."""
-        raw = await self._request(  # type: ignore[attr-defined]
+        raw = await self._request(
             "POST",
             "/api/v2/broker/account/subaccount-transfer",
             body={
@@ -86,10 +102,14 @@ class BitgetBrokerMixin:
         )
         return bool(raw.get("code") == "00000")
 
-    async def get_broker_rebate_records(self, *, limit: int = 100) -> list[dict[str, Any]]:
+    async def get_broker_rebate_records(
+        self: SignedRequestClient,
+        *,
+        limit: int = 100,
+    ) -> list[dict[str, Any]]:
         """수수료 환급(리베이트) 조회 — 정확한 엔드포인트 경로는 공식
         문서로 라이브 검증 전까지 미확정(모듈 docstring 참조)."""
-        raw = await self._request(  # type: ignore[attr-defined]
+        raw = await self._request(
             "GET", "/api/v2/broker/account/subaccount-deposit", params={"limit": str(limit)}
         )
         return list(raw["data"])

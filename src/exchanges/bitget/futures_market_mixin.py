@@ -25,6 +25,7 @@ from src.data.models.market_data import Candle, FundingRate, OrderBook, OrderBoo
 from src.data.models.trading import FuturesContractInfo
 from src.exchanges.bitget.symbols import to_bitget_symbol as _to_bitget_symbol
 from src.exchanges.bitget.symbols import to_canonical_symbol as _to_canonical_symbol
+from src.exchanges.common.http_client import SignedRequestClient
 
 DEFAULT_PRODUCT_TYPE = "USDT-FUTURES"
 
@@ -69,9 +70,9 @@ def _rows_to_candles(rows: list[list[str]], symbol: str, timeframe: str) -> list
 
 class BitgetFuturesMarketMixin:
     async def get_futures_contracts(
-        self, *, product_type: str = DEFAULT_PRODUCT_TYPE
+        self: SignedRequestClient, *, product_type: str = DEFAULT_PRODUCT_TYPE
     ) -> list[FuturesContractInfo]:
-        raw = await self._request(  # type: ignore[attr-defined]
+        raw = await self._request(
             "GET", "/api/v2/mix/market/contracts", params={"productType": product_type}
         )
         return [
@@ -89,9 +90,9 @@ class BitgetFuturesMarketMixin:
         ]
 
     async def get_futures_ticker(
-        self, symbol: str, *, product_type: str = DEFAULT_PRODUCT_TYPE
+        self: SignedRequestClient, symbol: str, *, product_type: str = DEFAULT_PRODUCT_TYPE
     ) -> Ticker:
-        raw = await self._request(  # type: ignore[attr-defined]
+        raw = await self._request(
             "GET",
             "/api/v2/mix/market/ticker",
             params={"symbol": _to_bitget_symbol(symbol), "productType": product_type},
@@ -109,11 +110,11 @@ class BitgetFuturesMarketMixin:
         )
 
     async def get_futures_tickers(
-        self, *, product_type: str = DEFAULT_PRODUCT_TYPE
+        self: SignedRequestClient, *, product_type: str = DEFAULT_PRODUCT_TYPE
     ) -> list[Ticker]:
         """02b 스펙 §5.1(P0) — 전체 심볼 현재가. get_futures_ticker()의
         단일 심볼 조회와 짝을 이루는 전체 조회(문서상 별도 엔드포인트)."""
-        raw = await self._request(  # type: ignore[attr-defined]
+        raw = await self._request(
             "GET", "/api/v2/mix/market/tickers", params={"productType": product_type}
         )
         return [
@@ -131,9 +132,13 @@ class BitgetFuturesMarketMixin:
         ]
 
     async def get_futures_orderbook(
-        self, symbol: str, *, depth: int = 20, product_type: str = DEFAULT_PRODUCT_TYPE
+        self: SignedRequestClient,
+        symbol: str,
+        *,
+        depth: int = 20,
+        product_type: str = DEFAULT_PRODUCT_TYPE,
     ) -> OrderBook:
-        raw = await self._request(  # type: ignore[attr-defined]
+        raw = await self._request(
             "GET",
             "/api/v2/mix/market/merge-depth",
             params={
@@ -152,7 +157,7 @@ class BitgetFuturesMarketMixin:
         )
 
     async def get_futures_candles(
-        self,
+        self: SignedRequestClient,
         symbol: str,
         timeframe: str,
         *,
@@ -162,7 +167,7 @@ class BitgetFuturesMarketMixin:
         granularity = _GRANULARITY_MAP.get(timeframe)
         if granularity is None:
             raise ValueError(f"지원하지 않는 timeframe: {timeframe}")
-        raw = await self._request(  # type: ignore[attr-defined]
+        raw = await self._request(
             "GET",
             "/api/v2/mix/market/candles",
             params={
@@ -175,7 +180,7 @@ class BitgetFuturesMarketMixin:
         return _rows_to_candles(raw["data"], symbol, timeframe)
 
     async def get_futures_history_candles(
-        self,
+        self: SignedRequestClient,
         symbol: str,
         timeframe: str,
         *,
@@ -197,16 +202,20 @@ class BitgetFuturesMarketMixin:
         }
         if end_time is not None:
             params["endTime"] = end_time
-        raw = await self._request(  # type: ignore[attr-defined]
+        raw = await self._request(
             "GET", "/api/v2/mix/market/history-candles", params=params
         )
         return _rows_to_candles(raw["data"], symbol, timeframe)
 
     async def get_futures_history_funding_rate(
-        self, symbol: str, *, limit: int = 100, product_type: str = DEFAULT_PRODUCT_TYPE
+        self: SignedRequestClient,
+        symbol: str,
+        *,
+        limit: int = 100,
+        product_type: str = DEFAULT_PRODUCT_TYPE,
     ) -> list[FundingRate]:
         """02b 스펙 §5.1(P1)."""
-        raw = await self._request(  # type: ignore[attr-defined]
+        raw = await self._request(
             "GET",
             "/api/v2/mix/market/history-fund-rate",
             params={
@@ -229,10 +238,10 @@ class BitgetFuturesMarketMixin:
         ]
 
     async def get_futures_funding_time(
-        self, symbol: str, *, product_type: str = DEFAULT_PRODUCT_TYPE
+        self: SignedRequestClient, symbol: str, *, product_type: str = DEFAULT_PRODUCT_TYPE
     ) -> datetime:
         """02b 스펙 §5.1(P1) — 다음 펀딩 정산 시각 단독 조회."""
-        raw = await self._request(  # type: ignore[attr-defined]
+        raw = await self._request(
             "GET",
             "/api/v2/mix/market/funding-time",
             params={"symbol": _to_bitget_symbol(symbol), "productType": product_type},
@@ -241,10 +250,10 @@ class BitgetFuturesMarketMixin:
         return datetime.fromtimestamp(int(data["nextFundingTime"]) / 1000, tz=timezone.utc)
 
     async def get_futures_open_interest(
-        self, symbol: str, *, product_type: str = DEFAULT_PRODUCT_TYPE
+        self: SignedRequestClient, symbol: str, *, product_type: str = DEFAULT_PRODUCT_TYPE
     ) -> Decimal:
         """02b 스펙 §5.1(P1) — FD-2.6류 시장 전체 신호 보강."""
-        raw = await self._request(  # type: ignore[attr-defined]
+        raw = await self._request(
             "GET",
             "/api/v2/mix/market/open-interest",
             params={"symbol": _to_bitget_symbol(symbol), "productType": product_type},
@@ -255,12 +264,12 @@ class BitgetFuturesMarketMixin:
         return Decimal(row["size"])
 
     async def get_futures_position_lever_tiers(
-        self, symbol: str, *, product_type: str = DEFAULT_PRODUCT_TYPE
+        self: SignedRequestClient, symbol: str, *, product_type: str = DEFAULT_PRODUCT_TYPE
     ) -> list[dict[str, Any]]:
         """02b 스펙 §5.1(P1) — 심볼별 레버리지 구간표. 구간별 필드가
         제각각이라(최대레버리지/최대포지션/유지증거금율 등) 아직 모델화
         하지 않는다(raw dict, get_fills와 동일 판단)."""
-        raw = await self._request(  # type: ignore[attr-defined]
+        raw = await self._request(
             "GET",
             "/api/v2/mix/market/query-position-lever",
             params={"symbol": _to_bitget_symbol(symbol), "productType": product_type},
@@ -268,9 +277,9 @@ class BitgetFuturesMarketMixin:
         return list(raw["data"])
 
     async def get_futures_current_funding_rate(
-        self, symbol: str, *, product_type: str = DEFAULT_PRODUCT_TYPE
+        self: SignedRequestClient, symbol: str, *, product_type: str = DEFAULT_PRODUCT_TYPE
     ) -> FundingRate:
-        raw = await self._request(  # type: ignore[attr-defined]
+        raw = await self._request(
             "GET",
             "/api/v2/mix/market/current-fund-rate",
             params={"symbol": _to_bitget_symbol(symbol), "productType": product_type},

@@ -18,6 +18,7 @@ from __future__ import annotations
 from decimal import Decimal
 from typing import Any
 
+from src.exchanges.common.http_client import SignedRequestClient
 from src.exchanges.common.live_guard import require_paper_sandbox
 
 # 레드팀 #2026-09-02-34 — permissions를 생략하면 Bitget이 어떤 기본 권한을
@@ -28,14 +29,18 @@ _DEFAULT_SUBACCOUNT_PERMISSIONS = ["read"]
 
 
 class BitgetSubaccountMixin:
-    async def get_subaccounts(self, *, limit: int = 100) -> list[dict[str, Any]]:
-        raw = await self._request(  # type: ignore[attr-defined]
+    async def get_subaccounts(
+        self: SignedRequestClient,
+        *,
+        limit: int = 100,
+    ) -> list[dict[str, Any]]:
+        raw = await self._request(
             "GET", "/api/v2/user/virtual-subaccount-list", params={"limit": str(limit)}
         )
         return list(raw["data"].get("subAccountList", raw["data"]))
 
-    async def create_subaccount(self, subaccount_name: str) -> dict[str, Any]:
-        raw = await self._request(  # type: ignore[attr-defined]
+    async def create_subaccount(self: SignedRequestClient, subaccount_name: str) -> dict[str, Any]:
+        raw = await self._request(
             "POST",
             "/api/v2/user/create-virtual-subaccount",
             body={"subAccountName": subaccount_name},
@@ -44,7 +49,7 @@ class BitgetSubaccountMixin:
 
     @require_paper_sandbox
     async def create_subaccount_apikey(
-        self,
+        self: SignedRequestClient,
         subaccount_uid: str,
         passphrase: str,
         *,
@@ -61,28 +66,34 @@ class BitgetSubaccountMixin:
             "passphrase": passphrase,
             "permType": ",".join(resolved_permissions),
         }
-        raw = await self._request(  # type: ignore[attr-defined]
+        raw = await self._request(
             "POST", "/api/v2/user/create-virtual-subaccount-apikey", body=body
         )
         return dict(raw["data"])
 
-    async def get_subaccount_apikeys(self, subaccount_uid: str) -> list[dict[str, Any]]:
-        raw = await self._request(  # type: ignore[attr-defined]
+    async def get_subaccount_apikeys(
+        self: SignedRequestClient,
+        subaccount_uid: str,
+    ) -> list[dict[str, Any]]:
+        raw = await self._request(
             "GET",
             "/api/v2/user/virtual-subaccount-apikey-list",
             params={"subAccountUid": subaccount_uid},
         )
         return list(raw["data"])
 
-    async def get_subaccount_assets(self, subaccount_uid: str) -> list[dict[str, Any]]:
-        raw = await self._request(  # type: ignore[attr-defined]
+    async def get_subaccount_assets(
+        self: SignedRequestClient,
+        subaccount_uid: str,
+    ) -> list[dict[str, Any]]:
+        raw = await self._request(
             "GET", "/api/v2/account/sub-account-assets", params={"subUid": subaccount_uid}
         )
         return list(raw["data"])
 
     @require_paper_sandbox
     async def transfer_to_subaccount(
-        self,
+        self: SignedRequestClient,
         subaccount_uid: str,
         coin: str,
         amount: Decimal,
@@ -95,7 +106,7 @@ class BitgetSubaccountMixin:
         레드팀 #2026-09-02-32/33 참조."""
         if amount <= 0:
             raise ValueError("amount는 0보다 커야 합니다.")
-        raw = await self._request(  # type: ignore[attr-defined]
+        raw = await self._request(
             "POST",
             "/api/v2/spot/wallet/subaccount-transfer",
             body={

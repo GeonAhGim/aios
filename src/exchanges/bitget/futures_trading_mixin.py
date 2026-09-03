@@ -19,13 +19,14 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 from decimal import Decimal
-from typing import Any
+from typing import Any, Protocol
 from uuid import uuid4
 
 from src.data.models.base import AssetClass
 from src.data.models.trading import Order, OrderSide, OrderStatus, OrderType
 from src.exchanges.bitget.futures_market_mixin import DEFAULT_PRODUCT_TYPE
 from src.exchanges.bitget.symbols import to_bitget_symbol as _to_bitget_symbol
+from src.exchanges.common.http_client import SignedRequestClient
 from src.exchanges.common.live_guard import require_paper_sandbox
 
 _STATUS_MAP = {
@@ -63,10 +64,20 @@ def _row_to_futures_order(data: dict[str, Any]) -> Order:
     )
 
 
+class _FuturesOrderReadingClient(SignedRequestClient, Protocol):
+    """modify_futures_order()가 같은 클래스의 get_futures_order()를
+    호출하지만, self가 이 파일 안에서 SignedRequestClient로 좁혀진
+    메서드 안에서는 그 사실이 보이지 않으므로 명시적으로 계약에 포함한다."""
+
+    async def get_futures_order(
+        self, order_id: str, *, symbol: str, product_type: str = ...
+    ) -> Order: ...
+
+
 class BitgetFuturesTradingMixin:
     @require_paper_sandbox
     async def place_futures_order(
-        self,
+        self: SignedRequestClient,
         order: Order,
         *,
         margin_coin: str = "USDT",
@@ -91,7 +102,7 @@ class BitgetFuturesTradingMixin:
         if order.price is not None:
             body["price"] = str(order.price.amount)
 
-        raw = await self._request(  # type: ignore[attr-defined]
+        raw = await self._request(
             "POST", "/api/v2/mix/order/place-order", body=body
         )
         data = raw["data"]
@@ -100,7 +111,7 @@ class BitgetFuturesTradingMixin:
         )
 
     async def modify_futures_order(
-        self,
+        self: _FuturesOrderReadingClient,
         order_id: str,
         *,
         symbol: str,
@@ -119,16 +130,20 @@ class BitgetFuturesTradingMixin:
         if "size" in kwargs:
             body["newSize"] = str(kwargs["size"])
 
-        raw = await self._request(  # type: ignore[attr-defined]
+        raw = await self._request(
             "POST", "/api/v2/mix/order/modify-order", body=body
         )
         data = raw["data"]
         return await self.get_futures_order(data["orderId"], symbol=symbol)
 
     async def cancel_futures_order(
-        self, order_id: str, *, symbol: str, product_type: str = DEFAULT_PRODUCT_TYPE
+        self: SignedRequestClient,
+        order_id: str,
+        *,
+        symbol: str,
+        product_type: str = DEFAULT_PRODUCT_TYPE,
     ) -> bool:
-        raw = await self._request(  # type: ignore[attr-defined]
+        raw = await self._request(
             "POST",
             "/api/v2/mix/order/cancel-order",
             body={
@@ -140,7 +155,7 @@ class BitgetFuturesTradingMixin:
         return bool(raw.get("code") == "00000")
 
     async def close_futures_position(
-        self,
+        self: SignedRequestClient,
         symbol: str,
         *,
         margin_coin: str = "USDT",
@@ -149,7 +164,7 @@ class BitgetFuturesTradingMixin:
         """FD-9.2(Watchdog LIQUIDATE 판정) 실제 집행 경로 후보(02b §5.4) —
         지금은 이 메서드를 호출하는 안전장치 배선이 없다(Phase 1 크립토
         현물 전용, Futures 강제청산 연동은 파생상품 확장 시 별도 leaf)."""
-        raw = await self._request(  # type: ignore[attr-defined]
+        raw = await self._request(
             "POST",
             "/api/v2/mix/order/close-positions",
             body={
@@ -161,22 +176,29 @@ class BitgetFuturesTradingMixin:
         return bool(raw.get("code") == "00000")
 
     async def cancel_all_futures_orders(
-        self, *, symbol: str | None = None, product_type: str = DEFAULT_PRODUCT_TYPE
+        self: SignedRequestClient,
+        *,
+        symbol: str | None = None,
+        product_type: str = DEFAULT_PRODUCT_TYPE,
     ) -> bool:
         """02b 스펙 §5.4(P1) — FD-9.2 강제청산 시 유용(심볼별 또는 전체
         일괄 취소)."""
         body: dict[str, Any] = {"productType": product_type}
         if symbol is not None:
             body["symbol"] = _to_bitget_symbol(symbol)
-        raw = await self._request(  # type: ignore[attr-defined]
+        raw = await self._request(
             "POST", "/api/v2/mix/order/cancel-all-orders", body=body
         )
         return bool(raw.get("code") == "00000")
 
     async def get_futures_order(
-        self, order_id: str, *, symbol: str, product_type: str = DEFAULT_PRODUCT_TYPE
+        self: SignedRequestClient,
+        order_id: str,
+        *,
+        symbol: str,
+        product_type: str = DEFAULT_PRODUCT_TYPE,
     ) -> Order:
-        raw = await self._request(  # type: ignore[attr-defined]
+        raw = await self._request(
             "GET",
             "/api/v2/mix/order/detail",
             params={
@@ -189,29 +211,38 @@ class BitgetFuturesTradingMixin:
         return _row_to_futures_order(data)
 
     async def get_futures_open_orders(
-        self, *, symbol: str | None = None, product_type: str = DEFAULT_PRODUCT_TYPE
+        self: SignedRequestClient,
+        *,
+        symbol: str | None = None,
+        product_type: str = DEFAULT_PRODUCT_TYPE,
     ) -> list[Order]:
         params: dict[str, Any] = {"productType": product_type}
         if symbol is not None:
             params["symbol"] = _to_bitget_symbol(symbol)
-        raw = await self._request(  # type: ignore[attr-defined]
+        raw = await self._request(
             "GET", "/api/v2/mix/order/orders-pending", params=params
         )
         return [_row_to_futures_order(row) for row in raw["data"].get("entrustedList") or []]
 
     async def get_futures_order_history(
-        self, *, symbol: str | None = None, product_type: str = DEFAULT_PRODUCT_TYPE
+        self: SignedRequestClient,
+        *,
+        symbol: str | None = None,
+        product_type: str = DEFAULT_PRODUCT_TYPE,
     ) -> list[Order]:
         params: dict[str, Any] = {"productType": product_type}
         if symbol is not None:
             params["symbol"] = _to_bitget_symbol(symbol)
-        raw = await self._request(  # type: ignore[attr-defined]
+        raw = await self._request(
             "GET", "/api/v2/mix/order/orders-history", params=params
         )
         return [_row_to_futures_order(row) for row in raw["data"].get("entrustedList") or []]
 
     async def get_futures_fills(
-        self, *, symbol: str | None = None, product_type: str = DEFAULT_PRODUCT_TYPE
+        self: SignedRequestClient,
+        *,
+        symbol: str | None = None,
+        product_type: str = DEFAULT_PRODUCT_TYPE,
     ) -> list[dict[str, Any]]:
         """02b §2 모델 재사용 원칙 — 이 데이터를 소비하는 호출부가 생기기
         전까지 raw dict를 그대로 반환한다(trading_mixin.py::get_fills와
@@ -219,7 +250,7 @@ class BitgetFuturesTradingMixin:
         params: dict[str, Any] = {"productType": product_type}
         if symbol is not None:
             params["symbol"] = _to_bitget_symbol(symbol)
-        raw = await self._request(  # type: ignore[attr-defined]
+        raw = await self._request(
             "GET", "/api/v2/mix/order/fills", params=params
         )
         return list(raw["data"].get("fillList") or [])

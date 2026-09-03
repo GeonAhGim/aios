@@ -20,6 +20,7 @@ from decimal import Decimal
 from typing import Any
 
 from src.exchanges.bitget.symbols import to_bitget_symbol as _to_bitget_symbol
+from src.exchanges.common.http_client import SignedRequestClient
 from src.exchanges.common.live_guard import require_paper_sandbox
 
 
@@ -41,7 +42,7 @@ def _validate_grid_params(
 class BitgetGridMixin:
     @require_paper_sandbox
     async def place_spot_grid(
-        self,
+        self: SignedRequestClient,
         symbol: str,
         lower_price: Decimal,
         upper_price: Decimal,
@@ -57,7 +58,7 @@ class BitgetGridMixin:
             grid_count=grid_count,
             investment=investment,
         )
-        raw = await self._request(  # type: ignore[attr-defined]
+        raw = await self._request(
             "POST",
             "/api/v2/spot/grid/place-grid",
             body={
@@ -73,7 +74,7 @@ class BitgetGridMixin:
 
     @require_paper_sandbox
     async def place_futures_grid(
-        self,
+        self: SignedRequestClient,
         symbol: str,
         lower_price: Decimal,
         upper_price: Decimal,
@@ -89,7 +90,7 @@ class BitgetGridMixin:
             grid_count=grid_count,
             investment=investment,
         )
-        raw = await self._request(  # type: ignore[attr-defined]
+        raw = await self._request(
             "POST",
             "/api/v2/mix/grid/place-grid",
             body={
@@ -104,32 +105,40 @@ class BitgetGridMixin:
         )
         return dict(raw["data"])
 
-    async def close_grid(self, grid_id: str) -> bool:
-        raw = await self._request(  # type: ignore[attr-defined]
+    async def close_grid(self: SignedRequestClient, grid_id: str) -> bool:
+        raw = await self._request(
             "POST", "/api/v2/spot/grid/close-grid", body={"gridId": grid_id}
         )
         return bool(raw.get("code") == "00000")
 
-    async def get_current_grids(self, *, symbol: str | None = None) -> list[dict[str, Any]]:
+    async def get_current_grids(
+        self: SignedRequestClient,
+        *,
+        symbol: str | None = None,
+    ) -> list[dict[str, Any]]:
         params: dict[str, Any] = {}
         if symbol is not None:
             params["symbol"] = _to_bitget_symbol(symbol)
-        raw = await self._request(  # type: ignore[attr-defined]
+        raw = await self._request(
             "GET", "/api/v2/spot/grid/current-grid", params=params or None
         )
         return list(raw["data"])
 
-    async def get_grid_history(self, *, symbol: str | None = None) -> list[dict[str, Any]]:
+    async def get_grid_history(
+        self: SignedRequestClient,
+        *,
+        symbol: str | None = None,
+    ) -> list[dict[str, Any]]:
         params: dict[str, Any] = {}
         if symbol is not None:
             params["symbol"] = _to_bitget_symbol(symbol)
-        raw = await self._request(  # type: ignore[attr-defined]
+        raw = await self._request(
             "GET", "/api/v2/spot/grid/grid-history", params=params or None
         )
         return list(raw["data"])
 
-    async def get_grid_profit(self, grid_id: str) -> dict[str, Any]:
-        raw = await self._request(  # type: ignore[attr-defined]
+    async def get_grid_profit(self: SignedRequestClient, grid_id: str) -> dict[str, Any]:
+        raw = await self._request(
             "GET", "/api/v2/spot/grid/grid-profit", params={"gridId": grid_id}
         )
         data = raw["data"][0] if isinstance(raw["data"], list) else raw["data"]

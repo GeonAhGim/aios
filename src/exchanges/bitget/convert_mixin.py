@@ -16,22 +16,23 @@ from __future__ import annotations
 from decimal import Decimal
 from typing import Any
 
+from src.exchanges.common.http_client import SignedRequestClient
 from src.exchanges.common.live_guard import require_paper_sandbox
 
 
 class BitgetConvertMixin:
-    async def get_convert_currencies(self) -> list[dict[str, Any]]:
+    async def get_convert_currencies(self: SignedRequestClient) -> list[dict[str, Any]]:
         """지원 코인쌍 목록 — raw dict 반환(§2 모델 재사용 원칙, 소비하는
         호출부가 생기기 전까지 모델화 보류)."""
-        raw = await self._request("GET", "/api/v2/convert/currencies")  # type: ignore[attr-defined]
+        raw = await self._request("GET", "/api/v2/convert/currencies")
         return list(raw["data"])
 
     async def get_convert_quote(
-        self, from_coin: str, to_coin: str, from_amount: Decimal
+        self: SignedRequestClient, from_coin: str, to_coin: str, from_amount: Decimal
     ) -> dict[str, Any]:
         """환전 실행 전 필수 — 응답의 `traceId`를 `execute_convert()`에
         그대로 전달해야 한다(견적-실행 2단계 흐름, 문서 관례)."""
-        raw = await self._request(  # type: ignore[attr-defined]
+        raw = await self._request(
             "GET",
             "/api/v2/convert/quoted-price",
             params={
@@ -44,7 +45,7 @@ class BitgetConvertMixin:
 
     @require_paper_sandbox
     async def execute_convert(
-        self,
+        self: SignedRequestClient,
         trace_id: str,
         from_coin: str,
         to_coin: str,
@@ -59,7 +60,7 @@ class BitgetConvertMixin:
         건다."""
         if from_amount <= 0 or to_amount <= 0:
             raise ValueError("from_amount/to_amount는 0보다 커야 합니다.")
-        raw = await self._request(  # type: ignore[attr-defined]
+        raw = await self._request(
             "POST",
             "/api/v2/convert/trade",
             body={
@@ -72,8 +73,12 @@ class BitgetConvertMixin:
         )
         return dict(raw["data"])
 
-    async def get_convert_history(self, *, limit: int = 100) -> list[dict[str, Any]]:
-        raw = await self._request(  # type: ignore[attr-defined]
+    async def get_convert_history(
+        self: SignedRequestClient,
+        *,
+        limit: int = 100,
+    ) -> list[dict[str, Any]]:
+        raw = await self._request(
             "GET", "/api/v2/convert/convert-record", params={"limit": str(limit)}
         )
         return list(raw["data"])

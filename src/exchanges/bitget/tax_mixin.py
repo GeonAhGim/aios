@@ -15,56 +15,74 @@ from __future__ import annotations
 
 from typing import Any
 
+from src.exchanges.common.http_client import SignedRequestClient
+
 
 class BitgetTaxMixin:
     async def get_spot_tax_records(
-        self, *, start_time: str | None = None, end_time: str | None = None, limit: int = 100
+        self: SignedRequestClient,
+        *,
+        start_time: str | None = None,
+        end_time: str | None = None,
+        limit: int = 100,
     ) -> list[dict[str, Any]]:
         params: dict[str, Any] = {"limit": str(limit)}
         if start_time is not None:
             params["startTime"] = start_time
         if end_time is not None:
             params["endTime"] = end_time
-        raw = await self._request(  # type: ignore[attr-defined]
+        raw = await self._request(
             "GET", "/api/v2/tax/spot-record", params=params
         )
         return list(raw["data"])
 
     async def get_futures_tax_records(
-        self, *, start_time: str | None = None, end_time: str | None = None, limit: int = 100
+        self: SignedRequestClient,
+        *,
+        start_time: str | None = None,
+        end_time: str | None = None,
+        limit: int = 100,
     ) -> list[dict[str, Any]]:
         params: dict[str, Any] = {"limit": str(limit)}
         if start_time is not None:
             params["startTime"] = start_time
         if end_time is not None:
             params["endTime"] = end_time
-        raw = await self._request(  # type: ignore[attr-defined]
+        raw = await self._request(
             "GET", "/api/v2/tax/future-record", params=params
         )
         return list(raw["data"])
 
     async def get_margin_tax_records(
-        self, *, start_time: str | None = None, end_time: str | None = None, limit: int = 100
+        self: SignedRequestClient,
+        *,
+        start_time: str | None = None,
+        end_time: str | None = None,
+        limit: int = 100,
     ) -> list[dict[str, Any]]:
         params: dict[str, Any] = {"limit": str(limit)}
         if start_time is not None:
             params["startTime"] = start_time
         if end_time is not None:
             params["endTime"] = end_time
-        raw = await self._request(  # type: ignore[attr-defined]
+        raw = await self._request(
             "GET", "/api/v2/tax/margin-record", params=params
         )
         return list(raw["data"])
 
     async def get_p2p_tax_records(
-        self, *, start_time: str | None = None, end_time: str | None = None, limit: int = 100
+        self: SignedRequestClient,
+        *,
+        start_time: str | None = None,
+        end_time: str | None = None,
+        limit: int = 100,
     ) -> list[dict[str, Any]]:
         params: dict[str, Any] = {"limit": str(limit)}
         if start_time is not None:
             params["startTime"] = start_time
         if end_time is not None:
             params["endTime"] = end_time
-        raw = await self._request(  # type: ignore[attr-defined]
+        raw = await self._request(
             "GET", "/api/v2/tax/p2p-record", params=params
         )
         return list(raw["data"])

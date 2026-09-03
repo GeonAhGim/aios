@@ -14,38 +14,48 @@ from __future__ import annotations
 
 from typing import Any
 
+from src.exchanges.common.http_client import SignedRequestClient
+
 
 class BitgetP2PMixin:
-    async def get_p2p_ads(self, *, coin: str | None = None) -> list[dict[str, Any]]:
+    async def get_p2p_ads(
+        self: SignedRequestClient,
+        *,
+        coin: str | None = None,
+    ) -> list[dict[str, Any]]:
         """내가 올린 P2P 광고(주문) 목록."""
         params: dict[str, Any] = {}
         if coin is not None:
             params["coin"] = coin.upper()
-        raw = await self._request(  # type: ignore[attr-defined]
+        raw = await self._request(
             "GET", "/api/v2/p2p/advList", params=params or None
         )
         return list(raw["data"])
 
-    async def get_p2p_merchant_info(self) -> dict[str, Any]:
-        raw = await self._request("GET", "/api/v2/p2p/merchantInfo")  # type: ignore[attr-defined]
+    async def get_p2p_merchant_info(self: SignedRequestClient) -> dict[str, Any]:
+        raw = await self._request("GET", "/api/v2/p2p/merchantInfo")
         return dict(raw["data"])
 
     async def get_p2p_orders(
-        self, *, status: str | None = None, limit: int = 100
+        self: SignedRequestClient, *, status: str | None = None, limit: int = 100
     ) -> list[dict[str, Any]]:
         params: dict[str, Any] = {"limit": str(limit)}
         if status is not None:
             params["status"] = status
-        raw = await self._request(  # type: ignore[attr-defined]
+        raw = await self._request(
             "GET", "/api/v2/p2p/orderList", params=params
         )
         return list(raw["data"])
 
-    async def get_p2p_merchants(self, *, coin: str | None = None) -> list[dict[str, Any]]:
+    async def get_p2p_merchants(
+        self: SignedRequestClient,
+        *,
+        coin: str | None = None,
+    ) -> list[dict[str, Any]]:
         params: dict[str, Any] = {}
         if coin is not None:
             params["coin"] = coin.upper()
-        raw = await self._request(  # type: ignore[attr-defined]
+        raw = await self._request(
             "GET", "/api/v2/p2p/merchantList", params=params or None
         )
         return list(raw["data"])

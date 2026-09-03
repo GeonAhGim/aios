@@ -48,6 +48,7 @@ from src.exchanges.bitget.market_ws_parsing import (  # noqa: F401 — 기존 �
     parse_ticker_ws_message,
 )
 from src.exchanges.bitget.symbols import to_bitget_symbol as _to_bitget_symbol
+from src.exchanges.common.http_client import SignedRequestClient
 
 # AIOS 표준 timeframe -> Bitget REST candles granularity 파라미터
 _GRANULARITY_MAP = {
@@ -86,25 +87,30 @@ def _build_login_message(api_key: str, api_secret: str, api_passphrase: str) -> 
 
 
 class BitgetMarketDataMixin:
-    async def get_ticker(self, symbol: str) -> Ticker:
-        raw = await self._request(  # type: ignore[attr-defined]
+    async def get_ticker(self: SignedRequestClient, symbol: str) -> Ticker:
+        raw = await self._request(
             "GET", "/api/v2/spot/market/tickers", params={"symbol": _to_bitget_symbol(symbol)}
         )
         return parse_ticker(raw["data"][0], "bitget")
 
-    async def get_orderbook(self, symbol: str, depth: int = 20) -> OrderBook:
-        raw = await self._request(  # type: ignore[attr-defined]
+    async def get_orderbook(self: SignedRequestClient, symbol: str, depth: int = 20) -> OrderBook:
+        raw = await self._request(
             "GET",
             "/api/v2/spot/market/orderbook",
             params={"symbol": _to_bitget_symbol(symbol), "limit": str(depth)},
         )
         return parse_orderbook(raw["data"], "bitget", symbol)
 
-    async def get_ohlcv(self, symbol: str, timeframe: str, limit: int = 100) -> list[Candle]:
+    async def get_ohlcv(
+        self: SignedRequestClient,
+        symbol: str,
+        timeframe: str,
+        limit: int = 100,
+    ) -> list[Candle]:
         granularity = _GRANULARITY_MAP.get(timeframe)
         if granularity is None:
             raise ValueError(f"지원하지 않는 timeframe: {timeframe}")
-        raw = await self._request(  # type: ignore[attr-defined]
+        raw = await self._request(
             "GET",
             "/api/v2/spot/market/candles",
             params={
@@ -116,7 +122,12 @@ class BitgetMarketDataMixin:
         return parse_candles(raw["data"], "bitget", symbol, timeframe)
 
     async def get_history_candles(
-        self, symbol: str, timeframe: str, *, limit: int = 100, end_time: str | None = None
+        self: SignedRequestClient,
+        symbol: str,
+        timeframe: str,
+        *,
+        limit: int = 100,
+        end_time: str | None = None,
     ) -> list[Candle]:
         """02b 스펙 §3.1(P1) — FD-2.3 백테스트 데이터 확장용. `end_time`은
         Bitget 밀리초 타임스탬프 문자열(그 시점 이전 데이터 조회, 페이지네이션
@@ -131,18 +142,21 @@ class BitgetMarketDataMixin:
         }
         if end_time is not None:
             params["endTime"] = end_time
-        raw = await self._request(  # type: ignore[attr-defined]
+        raw = await self._request(
             "GET", "/api/v2/spot/market/history-candles", params=params
         )
         return parse_candles(raw["data"], "bitget", symbol, timeframe)
 
-    async def get_symbol_info(self, symbol: str | None = None) -> list[SpotSymbolInfo]:
+    async def get_symbol_info(
+        self: SignedRequestClient,
+        symbol: str | None = None,
+    ) -> list[SpotSymbolInfo]:
         """02b 스펙 §3.1(P1)/§8 — FD-4.1(사전검증)이 필요로 하는 심볼
         규격. `symbol` 생략 시 전체 심볼 목록."""
         params: dict[str, Any] = {}
         if symbol is not None:
             params["symbol"] = _to_bitget_symbol(symbol)
-        raw = await self._request(  # type: ignore[attr-defined]
+        raw = await self._request(
             "GET", "/api/v2/spot/public/symbols", params=params or None
         )
         result = []
@@ -163,16 +177,21 @@ class BitgetMarketDataMixin:
             )
         return result
 
-    async def get_server_time(self) -> datetime:
+    async def get_server_time(self: SignedRequestClient) -> datetime:
         """02b 스펙 §7(P1) — 타임스탬프 서명 오차 디버깅에 유용."""
-        raw = await self._request("GET", "/api/v2/public/time")  # type: ignore[attr-defined]
+        raw = await self._request("GET", "/api/v2/public/time")
         data = raw["data"]
         return datetime.fromtimestamp(int(data["serverTime"]) / 1000, tz=timezone.utc)
 
-    async def get_public_trades(self, symbol: str, *, limit: int = 100) -> list[PublicTrade]:
+    async def get_public_trades(
+        self: SignedRequestClient,
+        symbol: str,
+        *,
+        limit: int = 100,
+    ) -> list[PublicTrade]:
         """02b 스펙 §3.1(P1) — 시장 전체 체결 스트림(FD-2.6 데이터 신뢰도
         교차검증 보강용, 내 주문이 아닌 그 심볼의 전체 체결)."""
-        raw = await self._request(  # type: ignore[attr-defined]
+        raw = await self._request(
             "GET",
             "/api/v2/spot/market/fills",
             params={"symbol": _to_bitget_symbol(symbol), "limit": str(limit)},

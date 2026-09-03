@@ -17,13 +17,14 @@ from decimal import Decimal
 from typing import Any
 
 from src.exchanges.bitget.symbols import to_bitget_symbol as _to_bitget_symbol
+from src.exchanges.common.http_client import SignedRequestClient
 from src.exchanges.common.live_guard import require_paper_sandbox
 
 
 class BitgetStrategyMixin:
     @require_paper_sandbox
     async def place_strategy_order(
-        self,
+        self: SignedRequestClient,
         symbol: str,
         side: str,
         strategy_type: str,
@@ -54,13 +55,18 @@ class BitgetStrategyMixin:
             body["price"] = str(price)
         if duration_seconds is not None:
             body["duration"] = str(duration_seconds)
-        raw = await self._request(  # type: ignore[attr-defined]
+        raw = await self._request(
             "POST", "/api/v2/trace/strategy/place-order", body=body
         )
         return dict(raw["data"])
 
-    async def cancel_strategy_order(self, order_id: str, *, symbol: str) -> bool:
-        raw = await self._request(  # type: ignore[attr-defined]
+    async def cancel_strategy_order(
+        self: SignedRequestClient,
+        order_id: str,
+        *,
+        symbol: str,
+    ) -> bool:
+        raw = await self._request(
             "POST",
             "/api/v2/trace/strategy/cancel-order",
             body={"orderId": order_id, "symbol": _to_bitget_symbol(symbol)},
@@ -68,23 +74,23 @@ class BitgetStrategyMixin:
         return bool(raw.get("code") == "00000")
 
     async def get_current_strategy_orders(
-        self, *, symbol: str | None = None
+        self: SignedRequestClient, *, symbol: str | None = None
     ) -> list[dict[str, Any]]:
         params: dict[str, Any] = {}
         if symbol is not None:
             params["symbol"] = _to_bitget_symbol(symbol)
-        raw = await self._request(  # type: ignore[attr-defined]
+        raw = await self._request(
             "GET", "/api/v2/trace/strategy/current-order", params=params or None
         )
         return list(raw["data"])
 
     async def get_strategy_order_history(
-        self, *, symbol: str | None = None, limit: int = 100
+        self: SignedRequestClient, *, symbol: str | None = None, limit: int = 100
     ) -> list[dict[str, Any]]:
         params: dict[str, Any] = {"limit": str(limit)}
         if symbol is not None:
             params["symbol"] = _to_bitget_symbol(symbol)
-        raw = await self._request(  # type: ignore[attr-defined]
+        raw = await self._request(
             "GET", "/api/v2/trace/strategy/history-order", params=params
         )
         return list(raw["data"])

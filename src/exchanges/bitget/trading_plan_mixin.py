@@ -17,15 +17,23 @@ line_cap 초과)에서 순수 이동(동작 변경 0).
 from __future__ import annotations
 
 from decimal import Decimal
-from typing import Any
+from typing import Any, Protocol
 
-from src.data.models.trading import OrderSide, OrderType
+from src.data.models.trading import AccountBalance, OrderSide, OrderType
 from src.exchanges.bitget.symbols import to_bitget_symbol as _to_bitget_symbol
+from src.exchanges.common.http_client import SignedRequestClient
+
+
+class _BalanceReadingClient(SignedRequestClient, Protocol):
+    """health_check()가 account_mixin의 get_balance()를 교차 호출하므로
+    필요한 계약(공통 http_client.py는 이 스팟-전용 조합을 모른다)."""
+
+    async def get_balance(self, asset: str | None = None) -> list[AccountBalance]: ...
 
 
 class BitgetTradingPlanMixin:
     async def place_plan_order(
-        self,
+        self: SignedRequestClient,
         symbol: str,
         side: OrderSide,
         size: Decimal,
@@ -51,32 +59,34 @@ class BitgetTradingPlanMixin:
         }
         if order_price is not None:
             body["executePrice"] = str(order_price)
-        raw = await self._request(  # type: ignore[attr-defined]
+        raw = await self._request(
             "POST", "/api/v2/spot/trade/place-plan-order", body=body
         )
         return dict(raw["data"])
 
-    async def cancel_plan_order(self, order_id: str) -> bool:
+    async def cancel_plan_order(self: SignedRequestClient, order_id: str) -> bool:
         """02b 스펙 §3.2(P1)."""
-        raw = await self._request(  # type: ignore[attr-defined]
+        raw = await self._request(
             "POST", "/api/v2/spot/trade/cancel-plan-order", body={"orderId": order_id}
         )
         return bool(raw.get("code") == "00000")
 
-    async def get_current_plan_orders(self, symbol: str | None = None) -> list[dict[str, Any]]:
+    async def get_current_plan_orders(
+        self: SignedRequestClient, symbol: str | None = None
+    ) -> list[dict[str, Any]]:
         """02b 스펙 §3.2(P1)."""
         params: dict[str, Any] = {}
         if symbol is not None:
             params["symbol"] = _to_bitget_symbol(symbol)
-        raw = await self._request(  # type: ignore[attr-defined]
+        raw = await self._request(
             "GET", "/api/v2/spot/trade/current-plan-order", params=params or None
         )
         return list(raw["data"])
 
-    async def health_check(self) -> bool:
+    async def health_check(self: _BalanceReadingClient) -> bool:
         """Watchdog이 State DB와 무관하게 호출하는 경량 응답성 확인."""
         try:
-            await self.get_balance()  # type: ignore[attr-defined]
+            await self.get_balance()
             return True
         except Exception:  # noqa: BLE001 — 헬스체크는 어떤 예외든 False로 수렴
             return False

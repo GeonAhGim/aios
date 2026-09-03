@@ -20,13 +20,14 @@ from typing import Any
 from src.data.models.trading import Order
 from src.exchanges.bitget.futures_market_mixin import DEFAULT_PRODUCT_TYPE
 from src.exchanges.bitget.symbols import to_bitget_symbol as _to_bitget_symbol
+from src.exchanges.common.http_client import SignedRequestClient
 from src.exchanges.common.live_guard import require_paper_sandbox
 
 
 class BitgetFuturesPlanMixin:
     @require_paper_sandbox
     async def place_futures_tpsl_order(
-        self,
+        self: SignedRequestClient,
         symbol: str,
         plan_type: str,
         trigger_price: Decimal,
@@ -57,14 +58,14 @@ class BitgetFuturesPlanMixin:
             body["size"] = str(size)
         if hold_side is not None:
             body["holdSide"] = hold_side
-        raw = await self._request(  # type: ignore[attr-defined]
+        raw = await self._request(
             "POST", "/api/v2/mix/order/place-tpsl-order", body=body
         )
         return dict(raw["data"])
 
     @require_paper_sandbox
     async def place_futures_position_tpsl(
-        self,
+        self: SignedRequestClient,
         symbol: str,
         *,
         take_profit_trigger: Decimal | None = None,
@@ -93,14 +94,14 @@ class BitgetFuturesPlanMixin:
             body["stopLossTriggerPrice"] = str(stop_loss_trigger)
         if hold_side is not None:
             body["holdSide"] = hold_side
-        raw = await self._request(  # type: ignore[attr-defined]
+        raw = await self._request(
             "POST", "/api/v2/mix/order/place-pos-tpsl", body=body
         )
         return dict(raw["data"])
 
     @require_paper_sandbox
     async def place_futures_plan_order(
-        self,
+        self: SignedRequestClient,
         order: Order,
         trigger_price: Decimal,
         *,
@@ -127,16 +128,20 @@ class BitgetFuturesPlanMixin:
         }
         if order.price is not None:
             body["executePrice"] = str(order.price.amount)
-        raw = await self._request(  # type: ignore[attr-defined]
+        raw = await self._request(
             "POST", "/api/v2/mix/order/place-plan-order", body=body
         )
         return dict(raw["data"])
 
     async def cancel_futures_plan_order(
-        self, order_id: str, *, symbol: str, product_type: str = DEFAULT_PRODUCT_TYPE
+        self: SignedRequestClient,
+        order_id: str,
+        *,
+        symbol: str,
+        product_type: str = DEFAULT_PRODUCT_TYPE,
     ) -> bool:
         """02b 스펙 §5.4(P1)."""
-        raw = await self._request(  # type: ignore[attr-defined]
+        raw = await self._request(
             "POST",
             "/api/v2/mix/order/cancel-plan-order",
             body={
@@ -148,13 +153,16 @@ class BitgetFuturesPlanMixin:
         return bool(raw.get("code") == "00000")
 
     async def get_futures_current_plan_orders(
-        self, *, symbol: str | None = None, product_type: str = DEFAULT_PRODUCT_TYPE
+        self: SignedRequestClient,
+        *,
+        symbol: str | None = None,
+        product_type: str = DEFAULT_PRODUCT_TYPE,
     ) -> list[dict[str, Any]]:
         """02b 스펙 §5.4(P1)."""
         params: dict[str, Any] = {"productType": product_type}
         if symbol is not None:
             params["symbol"] = _to_bitget_symbol(symbol)
-        raw = await self._request(  # type: ignore[attr-defined]
+        raw = await self._request(
             "GET", "/api/v2/mix/order/orders-plan-pending", params=params
         )
         return list(raw["data"].get("entrustedList") or [])

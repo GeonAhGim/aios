@@ -19,28 +19,38 @@ from __future__ import annotations
 
 from typing import Any
 
+from src.exchanges.common.http_client import SignedRequestClient
+
 
 class BitgetInstLoanMixin:
-    async def get_inst_loan_products(self) -> list[dict[str, Any]]:
-        raw = await self._request("GET", "/api/v2/ins-loan/product-infos")  # type: ignore[attr-defined]
+    async def get_inst_loan_products(self: SignedRequestClient) -> list[dict[str, Any]]:
+        raw = await self._request("GET", "/api/v2/ins-loan/product-infos")
         return list(raw["data"])
 
-    async def get_inst_loan_ensure_coins(self) -> list[dict[str, Any]]:
+    async def get_inst_loan_ensure_coins(self: SignedRequestClient) -> list[dict[str, Any]]:
         """담보 코인 목록 및 환산율 조회."""
-        raw = await self._request(  # type: ignore[attr-defined]
+        raw = await self._request(
             "GET", "/api/v2/ins-loan/ensure-coins-convert"
         )
         return list(raw["data"])
 
-    async def get_inst_loan_orders(self, *, limit: int = 100) -> list[dict[str, Any]]:
+    async def get_inst_loan_orders(
+        self: SignedRequestClient,
+        *,
+        limit: int = 100,
+    ) -> list[dict[str, Any]]:
         """진행중 대출(LTV 포함) 조회."""
-        raw = await self._request(  # type: ignore[attr-defined]
+        raw = await self._request(
             "GET", "/api/v2/ins-loan/loan-order", params={"limit": str(limit)}
         )
         return list(raw["data"])
 
-    async def get_inst_loan_repaid_history(self, *, limit: int = 100) -> list[dict[str, Any]]:
-        raw = await self._request(  # type: ignore[attr-defined]
+    async def get_inst_loan_repaid_history(
+        self: SignedRequestClient,
+        *,
+        limit: int = 100,
+    ) -> list[dict[str, Any]]:
+        raw = await self._request(
             "GET", "/api/v2/ins-loan/repaid-history", params={"limit": str(limit)}
         )
         return list(raw["data"])

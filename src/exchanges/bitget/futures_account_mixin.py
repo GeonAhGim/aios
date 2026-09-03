@@ -21,11 +21,12 @@ from src.data.models.base import AssetClass, Currency, Money
 from src.data.models.trading import AccountBalance, Position
 from src.exchanges.bitget.futures_market_mixin import DEFAULT_PRODUCT_TYPE
 from src.exchanges.bitget.symbols import to_bitget_symbol as _to_bitget_symbol
+from src.exchanges.common.http_client import SignedRequestClient
 
 
 class BitgetFuturesAccountMixin:
     async def get_futures_account(
-        self,
+        self: SignedRequestClient,
         symbol: str,
         *,
         margin_coin: str = "USDT",
@@ -33,7 +34,7 @@ class BitgetFuturesAccountMixin:
     ) -> AccountBalance:
         """02b 스펙 §5.2(P0) — 단일 마진코인 계좌 조회. `get_futures_accounts()`
         (전체 조회)와 짝을 이루는 단건 조회(문서상 별도 엔드포인트)."""
-        raw = await self._request(  # type: ignore[attr-defined]
+        raw = await self._request(
             "GET",
             "/api/v2/mix/account/account",
             params={
@@ -54,9 +55,9 @@ class BitgetFuturesAccountMixin:
         )
 
     async def get_futures_accounts(
-        self, *, product_type: str = DEFAULT_PRODUCT_TYPE
+        self: SignedRequestClient, *, product_type: str = DEFAULT_PRODUCT_TYPE
     ) -> list[AccountBalance]:
-        raw = await self._request(  # type: ignore[attr-defined]
+        raw = await self._request(
             "GET", "/api/v2/mix/account/accounts", params={"productType": product_type}
         )
         balances = []
@@ -75,7 +76,7 @@ class BitgetFuturesAccountMixin:
         return balances
 
     async def set_futures_leverage(
-        self,
+        self: SignedRequestClient,
         symbol: str,
         leverage: Decimal,
         *,
@@ -88,7 +89,7 @@ class BitgetFuturesAccountMixin:
         레버리지를 항상 1.0으로 고정, src/core/risk/engine.py 참조).
         다자산군/파생상품 확장 시 FD-8.3 leverage 지표 재설계 후에만
         실제 호출부가 이 메서드를 쓰게 배선한다."""
-        await self._request(  # type: ignore[attr-defined]
+        await self._request(
             "POST",
             "/api/v2/mix/account/set-leverage",
             body={
@@ -100,7 +101,7 @@ class BitgetFuturesAccountMixin:
         )
 
     async def set_futures_margin_mode(
-        self,
+        self: SignedRequestClient,
         symbol: str,
         margin_mode: str,
         *,
@@ -109,7 +110,7 @@ class BitgetFuturesAccountMixin:
     ) -> None:
         if margin_mode not in ("crossed", "isolated"):
             raise ValueError(f"알 수 없는 margin_mode입니다: {margin_mode!r}")
-        await self._request(  # type: ignore[attr-defined]
+        await self._request(
             "POST",
             "/api/v2/mix/account/set-margin-mode",
             body={
@@ -121,18 +122,18 @@ class BitgetFuturesAccountMixin:
         )
 
     async def set_futures_position_mode(
-        self, position_mode: str, *, product_type: str = DEFAULT_PRODUCT_TYPE
+        self: SignedRequestClient, position_mode: str, *, product_type: str = DEFAULT_PRODUCT_TYPE
     ) -> None:
         if position_mode not in ("one_way_mode", "hedge_mode"):
             raise ValueError(f"알 수 없는 position_mode입니다: {position_mode!r}")
-        await self._request(  # type: ignore[attr-defined]
+        await self._request(
             "POST",
             "/api/v2/mix/account/set-position-mode",
             body={"productType": product_type, "posMode": position_mode},
         )
 
     async def get_futures_liquidation_price(
-        self,
+        self: SignedRequestClient,
         symbol: str,
         *,
         margin_coin: str = "USDT",
@@ -141,7 +142,7 @@ class BitgetFuturesAccountMixin:
         """FD-8.3(MDD/청산 위험) 계산 입력값 후보(02b §5.2) — 지금은 이
         값을 소비하는 RiskEngine 호출부가 없다(Phase 1 크립토 현물 전용,
         17.9-A). API 자체만 우선 연결."""
-        raw = await self._request(  # type: ignore[attr-defined]
+        raw = await self._request(
             "GET",
             "/api/v2/mix/account/liq-price",
             params={
@@ -154,7 +155,7 @@ class BitgetFuturesAccountMixin:
         return Decimal(data["liqPx"])
 
     async def set_futures_margin(
-        self,
+        self: SignedRequestClient,
         symbol: str,
         amount: Decimal,
         *,
@@ -173,19 +174,19 @@ class BitgetFuturesAccountMixin:
         }
         if hold_side is not None:
             body["holdSide"] = hold_side
-        await self._request(  # type: ignore[attr-defined]
+        await self._request(
             "POST", "/api/v2/mix/account/set-margin", body=body
         )
 
     async def get_futures_max_open_amount(
-        self,
+        self: SignedRequestClient,
         symbol: str,
         *,
         margin_coin: str = "USDT",
         product_type: str = DEFAULT_PRODUCT_TYPE,
     ) -> Decimal:
         """02b 스펙 §5.2(P1) — 현재 레버리지/잔고 기준 최대 개설가능수량."""
-        raw = await self._request(  # type: ignore[attr-defined]
+        raw = await self._request(
             "GET",
             "/api/v2/mix/account/max-open",
             params={
@@ -198,11 +199,11 @@ class BitgetFuturesAccountMixin:
         return Decimal(data["maxOpenAvailable"])
 
     async def get_futures_account_bills(
-        self, *, product_type: str = DEFAULT_PRODUCT_TYPE, limit: int = 100
+        self: SignedRequestClient, *, product_type: str = DEFAULT_PRODUCT_TYPE, limit: int = 100
     ) -> list[dict[str, Any]]:
         """02b 스펙 §5.2(P1) — FD-20 보강용. raw dict 반환(get_fills와
         동일 판단, 거래유형별로 필드가 달라 모델화 보류)."""
-        raw = await self._request(  # type: ignore[attr-defined]
+        raw = await self._request(
             "GET",
             "/api/v2/mix/account/bill",
             params={"productType": product_type, "pageSize": str(limit)},
@@ -210,7 +211,10 @@ class BitgetFuturesAccountMixin:
         return list(raw["data"])
 
     async def get_futures_position_history(
-        self, *, symbol: str | None = None, product_type: str = DEFAULT_PRODUCT_TYPE
+        self: SignedRequestClient,
+        *,
+        symbol: str | None = None,
+        product_type: str = DEFAULT_PRODUCT_TYPE,
     ) -> list[dict[str, Any]]:
         """02b 스펙 §5.3(P1) — 청산/전량청산된 과거 포지션. 현재 열려있는
         포지션(get_futures_position(s))과 달리 종료 시점 손익 요약 필드
@@ -218,15 +222,19 @@ class BitgetFuturesAccountMixin:
         params: dict[str, Any] = {"productType": product_type}
         if symbol is not None:
             params["symbol"] = _to_bitget_symbol(symbol)
-        raw = await self._request(  # type: ignore[attr-defined]
+        raw = await self._request(
             "GET", "/api/v2/mix/position/history-position", params=params
         )
         return list(raw["data"])
 
     async def get_futures_position(
-        self, symbol: str, *, margin_coin: str = "USDT", product_type: str = DEFAULT_PRODUCT_TYPE
+        self: SignedRequestClient,
+        symbol: str,
+        *,
+        margin_coin: str = "USDT",
+        product_type: str = DEFAULT_PRODUCT_TYPE,
     ) -> Position | None:
-        raw = await self._request(  # type: ignore[attr-defined]
+        raw = await self._request(
             "GET",
             "/api/v2/mix/position/single-position",
             params={
@@ -241,9 +249,9 @@ class BitgetFuturesAccountMixin:
         return _row_to_position(rows[0], symbol)
 
     async def get_futures_positions(
-        self, *, product_type: str = DEFAULT_PRODUCT_TYPE
+        self: SignedRequestClient, *, product_type: str = DEFAULT_PRODUCT_TYPE
     ) -> list[Position]:
-        raw = await self._request(  # type: ignore[attr-defined]
+        raw = await self._request(
             "GET", "/api/v2/mix/position/all-position", params={"productType": product_type}
         )
         return [_row_to_position(row, row.get("symbol", "")) for row in raw["data"]]

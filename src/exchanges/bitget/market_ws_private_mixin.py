@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Awaitable, Callable
-from typing import Any
+from typing import Any, Protocol
 
 from src.data.models.trading import AccountBalance, Order, Position
 from src.exchanges.bitget.market_data_mixin import _build_login_message
@@ -29,6 +29,7 @@ from src.exchanges.bitget.market_ws_parsing import (
     parse_order_ws_message,
     parse_position_ws_message,
 )
+from src.exchanges.common.http_client import SignedRequestClient
 
 logger = logging.getLogger(__name__)
 
@@ -39,9 +40,26 @@ AccountCallback = Callable[[AccountBalance], Awaitable[None]]
 PositionCallback = Callable[[Position], Awaitable[None]]
 
 
+class _PrivateWsClient(SignedRequestClient, Protocol):
+    """Private WS 구독(order/account/positions)이 로그인 서명에 쓰는 API
+    키 3종과, 재연결 후 재동기화에 쓰는 다른 믹스인(trading/account/
+    futures_account)의 REST 메서드를 교차 호출하므로 필요한 계약(공통
+    http_client.py는 이 스팟-전용 조합을 모른다)."""
+
+    _api_key: str
+    _api_secret: str
+    _api_passphrase: str
+
+    async def get_open_orders(self, symbol: str | None = None) -> list[Order]: ...
+    async def get_balance(self, asset: str | None = None) -> list[AccountBalance]: ...
+    async def get_futures_positions(
+        self, *, product_type: str = ...
+    ) -> list[Position]: ...
+
+
 class BitgetMarketDataWsPrivateMixin:
     async def subscribe_order_stream(
-        self,
+        self: _PrivateWsClient,
         callback: OrderCallback,
         *,
         inst_type: str = "SPOT",
@@ -59,9 +77,9 @@ class BitgetMarketDataWsPrivateMixin:
         def _login() -> list[dict[str, Any]]:
             return [
                 _build_login_message(
-                    self._api_key,  # type: ignore[attr-defined]
-                    self._api_secret,  # type: ignore[attr-defined]
-                    self._api_passphrase,  # type: ignore[attr-defined]
+                    self._api_key,
+                    self._api_secret,
+                    self._api_passphrase,
                 )
             ]
 
@@ -76,7 +94,7 @@ class BitgetMarketDataWsPrivateMixin:
             필요한 순간이다 — 끊긴 동안 체결/거부됐을 미체결 주문을
             REST get_open_orders()로 재확인한다."""
             try:
-                for order in await self.get_open_orders():  # type: ignore[attr-defined]
+                for order in await self.get_open_orders():
                     await callback(order)
             except Exception:  # noqa: BLE001 — 재동기화 실패로 재연결 자체를 막지 않음
                 logger.warning("Bitget WS 재연결 후 미체결 주문 재동기화 실패")
@@ -98,7 +116,7 @@ class BitgetMarketDataWsPrivateMixin:
         )
 
     async def subscribe_account_stream(
-        self,
+        self: _PrivateWsClient,
         callback: AccountCallback,
         *,
         inst_type: str = "SPOT",
@@ -114,9 +132,9 @@ class BitgetMarketDataWsPrivateMixin:
         def _login() -> list[dict[str, Any]]:
             return [
                 _build_login_message(
-                    self._api_key,  # type: ignore[attr-defined]
-                    self._api_secret,  # type: ignore[attr-defined]
-                    self._api_passphrase,  # type: ignore[attr-defined]
+                    self._api_key,
+                    self._api_secret,
+                    self._api_passphrase,
                 )
             ]
 
@@ -129,7 +147,7 @@ class BitgetMarketDataWsPrivateMixin:
             """FULL_AUDIT §2-B ② — 재연결 후 REST get_balance()로 잔고
             재동기화(subscribe_ticker_stream과 동일 판단)."""
             try:
-                for balance in await self.get_balance():  # type: ignore[attr-defined]
+                for balance in await self.get_balance():
                     await callback(balance)
             except Exception:  # noqa: BLE001 — 재동기화 실패로 재연결 자체를 막지 않음
                 logger.warning("Bitget WS 재연결 후 잔고 재동기화 실패")
@@ -151,7 +169,7 @@ class BitgetMarketDataWsPrivateMixin:
         )
 
     async def subscribe_positions_stream(
-        self,
+        self: _PrivateWsClient,
         callback: PositionCallback,
         *,
         inst_type: str = "USDT-FUTURES",
@@ -165,9 +183,9 @@ class BitgetMarketDataWsPrivateMixin:
         def _login() -> list[dict[str, Any]]:
             return [
                 _build_login_message(
-                    self._api_key,  # type: ignore[attr-defined]
-                    self._api_secret,  # type: ignore[attr-defined]
-                    self._api_passphrase,  # type: ignore[attr-defined]
+                    self._api_key,
+                    self._api_secret,
+                    self._api_passphrase,
                 )
             ]
 
@@ -180,7 +198,7 @@ class BitgetMarketDataWsPrivateMixin:
             """FULL_AUDIT §2-B ② — 재연결 후 REST get_futures_positions()로
             포지션 재동기화(subscribe_ticker_stream과 동일 판단)."""
             try:
-                for position in await self.get_futures_positions():  # type: ignore[attr-defined]
+                for position in await self.get_futures_positions():
                     await callback(position)
             except Exception:  # noqa: BLE001 — 재동기화 실패로 재연결 자체를 막지 않음
                 logger.warning("Bitget WS 재연결 후 포지션 재동기화 실패")

@@ -10,20 +10,34 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 from decimal import Decimal
-from typing import Any
+from typing import Any, Protocol
 
 from src.core.exceptions import ExchangeAPIError
 from src.data.models.base import AssetClass, Currency, Money
+from src.data.models.market_data import Ticker
 from src.data.models.trading import AccountBalance, Position
 from src.exchanges.bitget.symbols import to_bitget_symbol as _to_bitget_symbol
+from src.exchanges.common.http_client import SignedRequestClient
 
 _QUOTE_CURRENCIES = ("USDT",)  # Phase 1 스콥(06번 §6.1) — USDT 마켓만
 
 
+class _TickerReadingClient(SignedRequestClient, Protocol):
+    """get_positions()가 market_data_mixin의 get_ticker()를 교차 호출하고,
+    같은 클래스의 get_balance()도 self가 이 좁혀진 타입인 채로 호출하므로
+    둘 다 계약에 포함한다(공통 http_client.py는 이 스팟-전용 조합을 모른다)."""
+
+    async def get_ticker(self, symbol: str) -> Ticker: ...
+    async def get_balance(self, asset: str | None = None) -> list[AccountBalance]: ...
+
+
 class BitgetAccountMixin:
-    async def get_balance(self, asset: str | None = None) -> list[AccountBalance]:
+    async def get_balance(
+        self: SignedRequestClient,
+        asset: str | None = None,
+    ) -> list[AccountBalance]:
         params: dict[str, Any] | None = {"coin": asset} if asset else None
-        raw = await self._request(  # type: ignore[attr-defined]
+        raw = await self._request(
             "GET", "/api/v2/spot/account/assets", params=params
         )
         balances = []
@@ -42,7 +56,9 @@ class BitgetAccountMixin:
             )
         return balances
 
-    async def get_positions(self, symbol: str | None = None) -> list[Position]:
+    async def get_positions(
+        self: _TickerReadingClient, symbol: str | None = None
+    ) -> list[Position]:
         """FULL_AUDIT_2026-09-02.md §2-B ④ — 이전엔 "스팟은 네이티브
         포지션이 없다"는 이유로 항상 빈 리스트였다. 하지만 그 이유는
         get_balance()를 진실 소스로 쓰는 이유는 되어도 get_positions()를
@@ -69,7 +85,7 @@ class BitgetAccountMixin:
                 continue
             pair_symbol = f"{balance.asset}/USDT"
             try:
-                ticker = await self.get_ticker(pair_symbol)  # type: ignore[attr-defined]
+                ticker = await self.get_ticker(pair_symbol)
             except ExchangeAPIError:
                 continue
             current_price = Money(amount=ticker.price, currency=Currency.USDT)
@@ -90,26 +106,28 @@ class BitgetAccountMixin:
             )
         return positions
 
-    async def get_trade_rate(self, symbol: str, *, business_type: str = "spot") -> dict[str, Any]:
+    async def get_trade_rate(
+        self: SignedRequestClient, symbol: str, *, business_type: str = "spot"
+    ) -> dict[str, Any]:
         """02b 스펙 §7(P1) — FD-8.2 수수료 미반영 Draft를 벗어날 때 필요.
         VIP 등급별 수수료율은 계정마다 달라(인증 필요) raw dict를 그대로
         반환한다(§2 모델 재사용 원칙, 소비하는 FD-8 호출부가 생기기 전까지
         모델화 보류)."""
-        raw = await self._request(  # type: ignore[attr-defined]
+        raw = await self._request(
             "GET",
             "/api/v2/common/trade-rate",
             params={"symbol": _to_bitget_symbol(symbol), "businessType": business_type},
         )
         return dict(raw["data"])
 
-    async def get_account_info(self) -> dict[str, Any]:
+    async def get_account_info(self: SignedRequestClient) -> dict[str, Any]:
         """02b 스펙 §3.3(P1) — UID·권한(authorities) 확인용. 아직 소비하는
         호출부가 없어(§2 모델 재사용 원칙) raw dict 그대로 반환한다."""
-        raw = await self._request("GET", "/api/v2/spot/account/info")  # type: ignore[attr-defined]
+        raw = await self._request("GET", "/api/v2/spot/account/info")
         return dict(raw["data"])
 
     async def get_account_bills(
-        self, coin: str | None = None, *, limit: int = 100
+        self: SignedRequestClient, coin: str | None = None, *, limit: int = 100
     ) -> list[dict[str, Any]]:
         """02b 스펙 §3.3(P1) — FD-20(운용보고서) 원천 데이터. 청구서 행
         구조는 거래유형별로 필드가 달라(입금/출금/체결/이체 등) 아직
@@ -117,13 +135,13 @@ class BitgetAccountMixin:
         params: dict[str, Any] = {"limit": str(limit)}
         if coin is not None:
             params["coin"] = coin.upper()
-        raw = await self._request(  # type: ignore[attr-defined]
+        raw = await self._request(
             "GET", "/api/v2/spot/account/bills", params=params
         )
         return list(raw["data"])
 
     async def transfer(
-        self,
+        self: SignedRequestClient,
         from_type: str,
         to_type: str,
         amount: Decimal,
@@ -146,7 +164,7 @@ class BitgetAccountMixin:
         }
         if symbol is not None:
             body["symbol"] = _to_bitget_symbol(symbol)
-        raw = await self._request(  # type: ignore[attr-defined]
+        raw = await self._request(
             "POST", "/api/v2/spot/wallet/transfer", body=body
         )
         return bool(raw.get("code") == "00000")

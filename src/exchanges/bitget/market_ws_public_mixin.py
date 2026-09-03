@@ -13,9 +13,9 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Awaitable, Callable
-from typing import Any
+from typing import Any, Protocol
 
-from src.data.models.market_data import Candle, OrderBook
+from src.data.models.market_data import Candle, OrderBook, Ticker
 from src.exchanges.bitget.market_ws_connection import (
     ConnectFn,
     ReconnectHook,
@@ -28,6 +28,7 @@ from src.exchanges.bitget.market_ws_parsing import (
     parse_ticker_ws_message,
 )
 from src.exchanges.bitget.symbols import to_bitget_symbol as _to_bitget_symbol
+from src.exchanges.common.http_client import SignedRequestClient
 from src.exchanges.common.types import TickerCallback
 
 logger = logging.getLogger(__name__)
@@ -50,9 +51,25 @@ CandleCallback = Callable[[Candle], Awaitable[None]]
 OrderBookCallback = Callable[[OrderBook], Awaitable[None]]
 
 
+class _TickerReadingClient(SignedRequestClient, Protocol):
+    """subscribe_ticker_stream()의 재연결 후 재동기화가 같은 클래스의
+    get_ticker()를 호출하지만, self가 이 좁혀진 타입인 채로는 그 사실이
+    보이지 않으므로 명시적으로 계약에 포함한다."""
+
+    async def get_ticker(self, symbol: str) -> Ticker: ...
+
+
+class _OrderbookReadingClient(SignedRequestClient, Protocol):
+    """subscribe_orderbook_stream()의 재연결 후 재동기화가 같은 클래스의
+    get_orderbook()을 호출하지만, self가 이 좁혀진 타입인 채로는 그 사실이
+    보이지 않으므로 명시적으로 계약에 포함한다."""
+
+    async def get_orderbook(self, symbol: str, depth: int = 20) -> OrderBook: ...
+
+
 class BitgetMarketDataWsPublicMixin:
     async def subscribe_ticker_stream(
-        self,
+        self: _TickerReadingClient,
         symbol: str,
         callback: TickerCallback,
         *,
@@ -77,7 +94,7 @@ class BitgetMarketDataWsPublicMixin:
 
         async def resync_then_notify() -> None:
             try:
-                ticker = await self.get_ticker(symbol)  # type: ignore[attr-defined]
+                ticker = await self.get_ticker(symbol)
                 await callback(ticker)
             except Exception:  # noqa: BLE001 — 재동기화 실패로 재연결 자체를 막지 않음
                 logger.warning("Bitget WS 재연결 후 REST 재동기화 실패(symbol=%s)", symbol)
@@ -134,7 +151,7 @@ class BitgetMarketDataWsPublicMixin:
         )
 
     async def subscribe_orderbook_stream(
-        self,
+        self: _OrderbookReadingClient,
         symbol: str,
         callback: OrderBookCallback,
         *,
@@ -155,7 +172,7 @@ class BitgetMarketDataWsPublicMixin:
             """FULL_AUDIT §2-B ② — 재연결 후 REST get_orderbook()으로 한
             번 재동기화(subscribe_ticker_stream과 동일 판단)."""
             try:
-                book = await self.get_orderbook(symbol)  # type: ignore[attr-defined]
+                book = await self.get_orderbook(symbol)
                 await callback(book)
             except Exception:  # noqa: BLE001 — 재동기화 실패로 재연결 자체를 막지 않음
                 logger.warning("Bitget WS 재연결 후 REST 재동기화 실패(symbol=%s)", symbol)
