@@ -28,6 +28,7 @@ import { WriteReviewPage } from "./routes/reviews/WriteReviewPage";
 import { AccountDeletionPage } from "./routes/settings/AccountDeletionPage";
 import { ApprovalSettingsPage } from "./routes/settings/ApprovalSettingsPage";
 import { NotificationSettingsPage } from "./routes/settings/NotificationSettingsPage";
+import { SessionsPage } from "./routes/settings/SessionsPage";
 import { StrategyBuilderPage } from "./routes/strategy-builder/StrategyBuilderPage";
 import { SystemStatusPage } from "./routes/system/SystemStatusPage";
 import { LedgerHistoryPage } from "./routes/wallet/LedgerHistoryPage";
@@ -67,6 +68,7 @@ export const router = createBrowserRouter([
   { path: "/settings/approval", element: protect(<ApprovalSettingsPage />) },
   { path: "/settings/notifications", element: protect(<NotificationSettingsPage />) },
   { path: "/settings/account", element: protect(<AccountDeletionPage />) },
+  { path: "/settings/sessions", element: protect(<SessionsPage />) },
   { path: "/reviews/write/:purchaseId", element: protect(<WriteReviewPage />) },
   { path: "/disputes/submit", element: protect(<DisputeSubmitPage />) },
   { path: "/admin", element: protectAdmin(<AdminHomePage />) },
