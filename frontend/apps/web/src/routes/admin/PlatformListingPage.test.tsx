@@ -54,6 +54,26 @@ describe("PlatformListingPage 등록 에러 표시", () => {
     expect(screen.queryByText("raw server detail")).not.toBeInTheDocument();
   });
 
+  // task-1072 §3.3: POLICY_*/RISK_* 403의 details.reason_codes 봉투는 ForbiddenNotice가
+  // 위임하는 DenialReasons가 사유별 문장 목록으로 보여줘야 한다 — 지금까지 이 화면
+  // 테스트는 errorCode 하나만 봤고 details.reason_codes가 실제로 파싱되는지는
+  // 검증하지 않았다.
+  it("negative: POLICY_*(403) + details.reason_codes 봉투: DenialReasons가 사유 목록을 보여준다", async () => {
+    mutateAsync.mockRejectedValue(
+      new ApiError(403, "실거래 모드에서는 허용되지 않는 작업입니다.", "trace-1", "POLICY_LIVE_BLOCKED", undefined, {
+        reason_codes: ["POLICY_LIVE_BLOCKED", "RISK_MAX_DRAWDOWN_EXCEEDED"],
+      }),
+    );
+    const { container } = renderPage();
+
+    submitPlatformListingForm(container);
+
+    await waitFor(() => expect(screen.getByRole("list")).toBeInTheDocument());
+    const denialList = screen.getByRole("list");
+    expect(denialList).toHaveTextContent("실거래 모드에서는 허용되지 않는 작업입니다.");
+    expect(denialList).toHaveTextContent("최대 손실 한도를 초과하여 거부되었습니다.");
+  });
+
   it("negative: ApiError가 아닌 실패는 raw message 대신 안전한 fallback 문구를 보여준다", async () => {
     mutateAsync.mockRejectedValue(new Error("ECONNRESET"));
     const { container } = renderPage();
