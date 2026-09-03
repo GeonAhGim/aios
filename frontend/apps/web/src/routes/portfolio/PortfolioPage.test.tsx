@@ -1,14 +1,18 @@
 import "@testing-library/jest-dom/vitest";
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { MemoryRouter } from "react-router-dom";
+import { ApiError } from "@aios/api-client";
 import { PortfolioPage } from "./PortfolioPage";
 import { PortfolioPositionsSection } from "./PortfolioPositionsSection";
+
+let allocations: unknown[] = [];
+const mutateAsync = vi.fn();
 
 vi.mock("@aios/shared-hooks", () => ({
   usePortfolio: () => ({
     data: {
-      allocations: [],
+      allocations,
       unallocatedCash: "1000.00",
       unallocatedCashWeightPct: "100",
       totalPortfolioValue: "1000.00",
@@ -16,12 +20,16 @@ vi.mock("@aios/shared-hooks", () => ({
     isLoading: false,
     dataUpdatedAt: Date.parse("2026-09-03T00:00:00Z"),
   }),
-  useRebalancePortfolio: () => ({ mutateAsync: vi.fn(), isPending: false, data: undefined }),
+  useRebalancePortfolio: () => ({ mutateAsync, isPending: false, data: undefined }),
   useMe: () => ({ data: { email: "a@example.com", isPlatformAdmin: false } }),
   useLogout: () => vi.fn(),
 }));
 
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  allocations = [];
+  mutateAsync.mockReset();
+});
 
 function renderPage() {
   render(
@@ -120,5 +128,50 @@ describe("PortfolioPositionsSection", () => {
 
     expect(screen.getByTestId("nav-snapshot-error")).toBeInTheDocument();
     expect(screen.getByTestId("pnl-breakdown-error")).toBeInTheDocument();
+  });
+});
+
+function allocation(overrides: Record<string, unknown> = {}) {
+  return {
+    executionId: 1,
+    strategyId: "strat-1",
+    weightPct: "50",
+    totalPnl: "10.00",
+    allocatedCapital: "500.00",
+    ...overrides,
+  };
+}
+
+// task-901 §3.3: 재조정 실패는 err.message를 직접 노출하지 않고 routeApiError로
+// 판정해 BadRequestNotice/ForbiddenNotice/ErrorMessage 경로로만 보여준다.
+describe("PortfolioPage 재조정 에러 표시", () => {
+  it("negative: VALIDATION_*(400) 실패는 err.message 대신 BadRequestNotice의 매핑 문구를 보여준다", async () => {
+    allocations = [allocation()];
+    mutateAsync.mockRejectedValue(
+      new ApiError(400, "raw server detail", undefined, "VALIDATION_IDEMPOTENCY_KEY_REQUIRED"),
+    );
+    renderPage();
+
+    fireEvent.change(screen.getByPlaceholderText("500.00"), { target: { value: "600" } });
+    fireEvent.click(screen.getByRole("button", { name: "재조정 적용" }));
+
+    await waitFor(() =>
+      expect(
+        screen.getByText("요청이 올바르지 않습니다. 새로고침 후 다시 시도해주세요."),
+      ).toBeInTheDocument(),
+    );
+    expect(screen.queryByText("raw server detail")).not.toBeInTheDocument();
+  });
+
+  it("ApiError가 아닌 실패는 raw message 대신 안전한 fallback 문구를 보여준다", async () => {
+    allocations = [allocation()];
+    mutateAsync.mockRejectedValue(new Error("ECONNRESET"));
+    renderPage();
+
+    fireEvent.change(screen.getByPlaceholderText("500.00"), { target: { value: "600" } });
+    fireEvent.click(screen.getByRole("button", { name: "재조정 적용" }));
+
+    await waitFor(() => expect(screen.getByText("재조정에 실패했습니다.")).toBeInTheDocument());
+    expect(screen.queryByText("ECONNRESET")).not.toBeInTheDocument();
   });
 });

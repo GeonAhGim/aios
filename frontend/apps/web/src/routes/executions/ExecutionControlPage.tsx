@@ -1,5 +1,6 @@
 import { useCreateExecution, useExecutions } from "@aios/shared-hooks";
 import { ApiError } from "@aios/api-client";
+import { classifyBadRequest, classifyForbidden, routeApiError } from "@aios/shared-types";
 import {
   Alert,
   Button,
@@ -14,8 +15,28 @@ import {
 } from "@aios/ui-web";
 import { useState, type FormEvent } from "react";
 import { AppShell } from "../../components/layout/AppShell";
+import { BadRequestNotice } from "../../components/BadRequestNotice";
+import { ErrorMessage } from "../../components/ErrorMessage";
+import { ForbiddenNotice } from "../../components/ForbiddenNotice";
 import { DuplicateSubmitError, useIdempotentSubmit } from "../../hooks/useIdempotentSubmit";
 import { ExecutionCard } from "./components/ExecutionCard";
+
+// spec §3.3 에러 taxonomy: 실행 생성 실패는 err.message를 직접 노출하지 않고
+// routeApiError(task-483)로 판정해 400/403/그 외를 각각 BadRequestNotice/
+// ForbiddenNotice/ErrorMessage 경로로만 보여준다(task-901).
+function CreateExecutionError({ error }: { error: unknown }) {
+  if (classifyBadRequest(error)) return <BadRequestNotice error={error} />;
+  if (classifyForbidden(error)) return <ForbiddenNotice error={error} />;
+  const routed = routeApiError(error);
+  return (
+    <ErrorMessage
+      errorCode={error instanceof ApiError ? error.errorCode : undefined}
+      message={error instanceof Error ? error.message : undefined}
+      traceId={error instanceof ApiError ? error.traceId : undefined}
+      retryAfterSec={routed.kind === "backoff_retry" ? routed.afterSec : undefined}
+    />
+  );
+}
 
 export function ExecutionControlPage() {
   const { data: executions, isLoading } = useExecutions();
@@ -26,7 +47,7 @@ export function ExecutionControlPage() {
   const [allocatedCapital, setAllocatedCapital] = useState("100");
   const [exchange, setExchange] = useState("bitget");
   const [mode, setMode] = useState<"PAPER" | "LIVE">("PAPER");
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<unknown>(null);
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
@@ -48,7 +69,7 @@ export function ExecutionControlPage() {
       setStrategyId("");
     } catch (err) {
       if (err instanceof DuplicateSubmitError) return;
-      setError(err instanceof ApiError ? err.message : "실행 생성에 실패했습니다.");
+      setError(err instanceof ApiError ? err : new Error("실행 생성에 실패했습니다."));
     }
   }
 
@@ -95,7 +116,11 @@ export function ExecutionControlPage() {
               </Button>
             </div>
           </form>
-          {error && <div className="mt-3"><Alert>{error}</Alert></div>}
+          {error !== null && (
+            <div className="mt-3">
+              <CreateExecutionError error={error} />
+            </div>
+          )}
           {createExecution.data?.approvalRequestId && (
             <div className="mt-3">
               <Alert tone="warning">

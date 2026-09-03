@@ -1,7 +1,7 @@
 import { usePortfolio, useRebalancePortfolio } from "@aios/shared-hooks";
 import { ApiError } from "@aios/api-client";
+import { classifyBadRequest, classifyForbidden, routeApiError } from "@aios/shared-types";
 import {
-  Alert,
   AllocationBarChart,
   Button,
   Card,
@@ -14,16 +14,36 @@ import {
 } from "@aios/ui-web";
 import { useState } from "react";
 import { AppShell } from "../../components/layout/AppShell";
+import { BadRequestNotice } from "../../components/BadRequestNotice";
 import { DataFreshness } from "../../components/DataFreshness";
+import { ErrorMessage } from "../../components/ErrorMessage";
+import { ForbiddenNotice } from "../../components/ForbiddenNotice";
 import { DuplicateSubmitError, useIdempotentSubmit } from "../../hooks/useIdempotentSubmit";
 import { PortfolioPositionsSection } from "./PortfolioPositionsSection";
+
+// spec §3.3 에러 taxonomy: 재조정 실패는 err.message를 직접 노출하지 않고
+// routeApiError(task-483)로 판정해 400/403/그 외를 각각 BadRequestNotice/
+// ForbiddenNotice/ErrorMessage 경로로만 보여준다(task-901).
+function RebalanceError({ error }: { error: unknown }) {
+  if (classifyBadRequest(error)) return <BadRequestNotice error={error} />;
+  if (classifyForbidden(error)) return <ForbiddenNotice error={error} />;
+  const routed = routeApiError(error);
+  return (
+    <ErrorMessage
+      errorCode={error instanceof ApiError ? error.errorCode : undefined}
+      message={error instanceof Error ? error.message : undefined}
+      traceId={error instanceof ApiError ? error.traceId : undefined}
+      retryAfterSec={routed.kind === "backoff_retry" ? routed.afterSec : undefined}
+    />
+  );
+}
 
 export function PortfolioPage() {
   const { data: portfolio, isLoading, dataUpdatedAt } = usePortfolio();
   const rebalance = useRebalancePortfolio();
   const { submit } = useIdempotentSubmit("portfolio.rebalance");
   const [drafts, setDrafts] = useState<Record<number, string>>({});
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<unknown>(null);
 
   async function handleRebalance() {
     setError(null);
@@ -41,7 +61,7 @@ export function PortfolioPage() {
       setDrafts({});
     } catch (err) {
       if (err instanceof DuplicateSubmitError) return;
-      setError(err instanceof ApiError ? err.message : "재조정에 실패했습니다.");
+      setError(err instanceof ApiError ? err : new Error("재조정에 실패했습니다."));
     }
   }
 
@@ -115,7 +135,7 @@ export function PortfolioPage() {
                       </tbody>
                     </table>
                   </div>
-                  {error && <Alert>{error}</Alert>}
+                  {error !== null && <RebalanceError error={error} />}
                   <Button type="button" onClick={handleRebalance} loading={rebalance.isPending}>
                     재조정 적용
                   </Button>
