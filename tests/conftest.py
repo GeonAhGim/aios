@@ -17,6 +17,7 @@ import dotenv
 import pytest
 
 from src.core.observability.metrics import NullMetrics, set_metrics
+from src.core.rate_limit.limiter import UnlimitedRateLimiter, set_limiter
 from tests.support.db import ensure_worker_database
 from tests.support.db import tx_conn as tx_conn  # noqa: F401 -- re-exported fixture
 
@@ -152,3 +153,16 @@ def _reset_metrics_singleton():
     set_metrics(NullMetrics())
     yield
     set_metrics(NullMetrics())
+
+
+@pytest.fixture(autouse=True)
+def _reset_rate_limiter_singleton():
+    """PLT-25 — `set_limiter`도 위 메트릭과 같은 프로세스 전역 싱글턴이다.
+    `RateLimitMiddleware`가 모든 요청(라우터 통합테스트 전부 포함)에 걸리므로,
+    실제 `InMemoryTokenBucket`을 기본값으로 두면 같은 IP/subject 키를 반복
+    사용하는 기존 테스트들이 서로의 버킷을 갉아먹어 무관한 429가 나기
+    시작한다. `test_rate_limit_storm.py`만 명시적으로 `InMemoryTokenBucket`을
+    다시 꽂아 자기 시나리오를 검증하고, 그 외 전부는 무제한 대역을 본다."""
+    set_limiter(UnlimitedRateLimiter())
+    yield
+    set_limiter(UnlimitedRateLimiter())

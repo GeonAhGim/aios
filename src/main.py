@@ -21,6 +21,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from src.api.contracts.handlers import install_exception_handlers
+from src.api.middleware.rate_limit import RateLimitMiddleware
 from src.api.middleware.request_context import RequestContextMiddleware
 from src.core.event_bus.in_process import InProcessEventBus
 from src.core.loader.risk_policy_loader import load_risk_policy
@@ -226,9 +227,11 @@ def create_app() -> FastAPI:
     )
     # PLT-05 — RequestContextMiddleware가 RequestIdMiddleware(task-107)를 상속해
     # X-Request-ID 계약은 유지하면서 trace_id·구조화 로그·메트릭을 더한다. 부모를
-    # 별도로 또 등록하지 않는다(L4_platform_observability... §2.1(A) 표). CORS보다
-    # 나중에 등록해 요청 스택 가장 바깥을 감싼다.
+    # 별도로 또 등록하지 않는다(L4_platform_observability... §2.1(A) 표).
     app.add_middleware(RequestContextMiddleware)
+    # PLT-25 — §9 표 순서 "RateLimit → RequestContext → CORS"(바깥→안). 나중에
+    # 등록할수록 바깥이라(Starlette) 폭주 요청을 로깅 비용 전에 거절한다.
+    app.add_middleware(RateLimitMiddleware)
 
     from src.api.routers import (
         admin,
