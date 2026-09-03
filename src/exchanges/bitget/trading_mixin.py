@@ -33,6 +33,7 @@ from src.data.models.base import AssetClass, Currency, Money
 from src.data.models.trading import Order, OrderSide, OrderStatus, OrderType
 from src.exchanges.bitget.symbols import to_bitget_symbol as _to_bitget_symbol
 from src.exchanges.common.http_client import SignedRequestClient
+from src.exchanges.common.live_guard import require_paper_sandbox
 
 # 확인된 값(라이브/문서 조사) + 미확인 값은 UNKNOWN으로 안전하게 폴백
 # (8.3 원칙 — 모르는 상태를 실패로 단정하지 않는다).
@@ -112,6 +113,7 @@ class _OrderReadingClient(SignedRequestClient, Protocol):
 
 
 class BitgetTradingMixin:
+    @require_paper_sandbox
     async def place_order(self: SignedRequestClient, order: Order) -> Order:
         body: dict[str, Any] = {
             "symbol": _to_bitget_symbol(order.symbol),
@@ -132,12 +134,14 @@ class BitgetTradingMixin:
             update={"exchange_order_id": data["orderId"], "status": OrderStatus.SUBMITTED}
         )
 
+    @require_paper_sandbox
     async def cancel_order(self: SignedRequestClient, order_id: str) -> bool:
         raw = await self._request(
             "POST", "/api/v2/spot/trade/cancel-order", body={"orderId": order_id}
         )
         return bool(raw.get("code") == "00000")
 
+    @require_paper_sandbox
     async def modify_order(
         self: _OrderReadingClient, order_id: str, **kwargs: Any
     ) -> Order:
