@@ -8,6 +8,7 @@ import { ApiError } from "@aios/api-client";
 import {
   classifyBadRequest,
   classifyForbidden,
+  classifyServerError,
   getApiErrorMessage,
   parseSecretRef,
   redactSecret,
@@ -25,11 +26,12 @@ import {
   PageHeader,
   Select,
 } from "@aios/ui-web";
-import { useState, type FormEvent } from "react";
+import { useRef, useState, type FormEvent } from "react";
 import { AppShell } from "../../components/layout/AppShell";
 import { BadRequestNotice } from "../../components/BadRequestNotice";
 import { ErrorMessage } from "../../components/ErrorMessage";
 import { ForbiddenNotice } from "../../components/ForbiddenNotice";
+import { useConflictRetry } from "../../hooks/useConflictRetry";
 import { exchangeLabel } from "../../lib/exchangeLabels";
 
 const EXCHANGES = ["bitget", "kis"];
@@ -58,38 +60,43 @@ function credentialScope(secretRef: string | undefined) {
 // redactSecret을 통과시킨다. BadRequestNotice/ForbiddenNotice는 알려진 error_code일
 // 때만 고정 한국어 문구(EXACT_MESSAGES)를 쓰므로 비밀 반향 위험이 없다 — "unknown"
 // (미지 코드 또는 코드 없음)만 계속 redactSecret 경로로 보낸다.
-function RegisterCredentialError({ error }: { error: unknown }) {
+// classifyServerError(task-937)가 재시도 가능(5xx)으로 판정할 때만 onRetry를 넘긴다.
+function RegisterCredentialError({ error, onRetry }: { error: unknown; onRetry: () => void }) {
   if (classifyForbidden(error)) return <ForbiddenNotice error={error} />;
   const badRequestKind = classifyBadRequest(error);
   if (badRequestKind && badRequestKind !== "unknown") return <BadRequestNotice error={error} />;
   const routed = routeApiError(error);
+  const serverError = classifyServerError(error);
   return (
     <ErrorMessage
       errorCode={error instanceof ApiError ? error.errorCode : null}
       message={error instanceof Error ? redactSecret(error.message) : null}
       traceId={error instanceof ApiError ? error.traceId : null}
       retryAfterSec={routed.kind === "backoff_retry" ? routed.afterSec : undefined}
+      onRetry={serverError.kind === "retryable" ? onRetry : undefined}
     />
   );
 }
 
-function RevokeCredentialError({ error }: { error: unknown }) {
+function RevokeCredentialError({ error, onRetry }: { error: unknown; onRetry: () => void }) {
   if (classifyForbidden(error)) return <ForbiddenNotice error={error} />;
   const badRequestKind = classifyBadRequest(error);
   if (badRequestKind && badRequestKind !== "unknown") return <BadRequestNotice error={error} />;
   const routed = routeApiError(error);
+  const serverError = classifyServerError(error);
   return (
     <ErrorMessage
       errorCode={error instanceof ApiError ? error.errorCode : null}
       message={error instanceof Error ? redactSecret(error.message) : null}
       traceId={error instanceof ApiError ? error.traceId : null}
       retryAfterSec={routed.kind === "backoff_retry" ? routed.afterSec : undefined}
+      onRetry={serverError.kind === "retryable" ? onRetry : undefined}
     />
   );
 }
 
 export function ExchangeManagementPage() {
-  const { data: credentials, isLoading } = useExchangeCredentials();
+  const { data: credentials, isLoading, refetch } = useExchangeCredentials();
   const register = useRegisterExchangeCredential();
   const revoke = useRevokeExchangeCredential();
   const [exchange, setExchange] = useState("bitget");
@@ -101,23 +108,43 @@ export function ExchangeManagementPage() {
   const [selectedExchange, setSelectedExchange] = useState<string | null>(null);
   const { data: balances } = useExchangeBalance(selectedExchange);
 
-  function handleRevoke(exchange: string) {
-    setRevokeError(null);
-    revoke.mutate(exchange, {
-      onError: (err) => setRevokeError(err instanceof ApiError ? err : new Error("해지에 실패했습니다.")),
+  // §3.3 409 STATE_CONCURRENCY_CONFLICT → useConflictRetry(task-937)가 refetch 후 1회
+  // 재시도한다. 해지 대상은 행마다 달라 ref로 넘긴다(mutate는 인자를 받지 않는다).
+  const revokeExchangeRef = useRef("");
+  const { run: revokeWithRetry } = useConflictRetry(
+    () => revoke.mutateAsync(revokeExchangeRef.current),
+    refetch,
+  );
+
+  function performRevoke() {
+    revokeWithRetry().catch((err: unknown) => {
+      setRevokeError(err instanceof ApiError ? err : new Error("해지에 실패했습니다."));
     });
   }
 
-  async function handleSubmit(e: FormEvent) {
-    e.preventDefault();
-    setError(null);
-    try {
-      await register.mutateAsync({
+  function handleRevoke(exchangeToRevoke: string) {
+    setRevokeError(null);
+    revokeExchangeRef.current = exchangeToRevoke;
+    performRevoke();
+  }
+
+  // 409는 위와 동일하게 useConflictRetry가 처리한다. idempotencyKey를 넘기지 않으므로
+  // (postIdempotent가 매 호출마다 자동 생성) 재제출은 항상 새 Idempotency-Key로 나간다.
+  const { run: registerWithRetry } = useConflictRetry(
+    () =>
+      register.mutateAsync({
         exchange,
         apiKey,
         apiSecret,
         apiPassphrase: exchange === "bitget" ? apiPassphrase : undefined,
-      });
+      }),
+    refetch,
+  );
+
+  async function submitRegistration() {
+    setError(null);
+    try {
+      await registerWithRetry();
       setApiKey("");
       setApiSecret("");
       setApiPassphrase("");
@@ -126,6 +153,11 @@ export function ExchangeManagementPage() {
       setApiPassphrase("");
       setError(err instanceof ApiError ? err : new Error("등록에 실패했습니다."));
     }
+  }
+
+  function handleSubmit(e: FormEvent) {
+    e.preventDefault();
+    void submitRegistration();
   }
 
   return (
@@ -188,7 +220,13 @@ export function ExchangeManagementPage() {
 
           {revokeError !== null && (
             <div className="mt-4">
-              <RevokeCredentialError error={revokeError} />
+              <RevokeCredentialError
+                error={revokeError}
+                onRetry={() => {
+                  setRevokeError(null);
+                  performRevoke();
+                }}
+              />
             </div>
           )}
 
@@ -248,7 +286,9 @@ export function ExchangeManagementPage() {
                 />
               </Field>
             )}
-            {error !== null && <RegisterCredentialError error={error} />}
+            {error !== null && (
+              <RegisterCredentialError error={error} onRetry={() => void submitRegistration()} />
+            )}
             <Button type="submit" loading={register.isPending} className="w-full">
               등록
             </Button>

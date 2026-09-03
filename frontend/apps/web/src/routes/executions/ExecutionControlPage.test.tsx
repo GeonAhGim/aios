@@ -6,10 +6,11 @@ import { ApiError } from "@aios/api-client";
 import { ExecutionControlPage } from "./ExecutionControlPage";
 
 const mutateAsync = vi.fn();
+const refetch = vi.fn();
 let executionsData: unknown[] = [];
 
 vi.mock("@aios/shared-hooks", () => ({
-  useExecutions: () => ({ data: executionsData, isLoading: false }),
+  useExecutions: () => ({ data: executionsData, isLoading: false, refetch }),
   useCreateExecution: () => ({ mutateAsync, isPending: false, data: undefined }),
   useMe: () => ({ data: { email: "a@example.com", isPlatformAdmin: false } }),
   useLogout: () => vi.fn(),
@@ -18,6 +19,7 @@ vi.mock("@aios/shared-hooks", () => ({
 afterEach(() => {
   cleanup();
   mutateAsync.mockReset();
+  refetch.mockReset();
   executionsData = [];
 });
 
@@ -76,5 +78,42 @@ describe("ExecutionControlPage 실행 생성 에러 표시", () => {
       ).toBeInTheDocument(),
     );
     expect(screen.queryByText("raw detail")).not.toBeInTheDocument();
+  });
+});
+
+// task-937 §3.3: 5xx는 classifyServerError, 409 STATE_CONCURRENCY_CONFLICT는
+// useConflictRetry로 처리한다.
+describe("ExecutionControlPage 5xx·409 재시도 배선", () => {
+  it("negative: EXCHANGE_UNAVAILABLE(503)은 재시도 안내와 함께 다시 시도 버튼을 보여준다", async () => {
+    mutateAsync.mockRejectedValue(new ApiError(503, "raw", undefined, "EXCHANGE_UNAVAILABLE"));
+    const { container } = renderPage();
+
+    submitCreateForm(container);
+
+    await waitFor(() =>
+      expect(
+        screen.getByText("거래소 연결이 원활하지 않습니다. 잠시 후 다시 시도해주세요."),
+      ).toBeInTheDocument(),
+    );
+    expect(screen.getByRole("button", { name: "다시 시도" })).toBeEnabled();
+  });
+
+  it("negative: STATE_CONCURRENCY_CONFLICT(409)는 목록을 refetch한 뒤 새 Idempotency-Key로 자동 재제출해 성공한다", async () => {
+    mutateAsync
+      .mockRejectedValueOnce(new ApiError(409, "충돌", undefined, "STATE_CONCURRENCY_CONFLICT"))
+      .mockResolvedValueOnce({ executionId: 1 });
+    const { container } = renderPage();
+
+    submitCreateForm(container);
+
+    await waitFor(() => expect(mutateAsync).toHaveBeenCalledTimes(2));
+    expect(refetch).toHaveBeenCalledTimes(1);
+    expect(screen.queryByText(/다른 요청과 충돌했습니다/)).not.toBeInTheDocument();
+
+    const firstKey = mutateAsync.mock.calls[0][0].idempotencyKey;
+    const secondKey = mutateAsync.mock.calls[1][0].idempotencyKey;
+    expect(firstKey).toBeTruthy();
+    expect(secondKey).toBeTruthy();
+    expect(secondKey).not.toBe(firstKey);
   });
 });

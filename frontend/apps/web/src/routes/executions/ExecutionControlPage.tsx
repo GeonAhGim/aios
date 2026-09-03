@@ -1,6 +1,11 @@
 import { useCreateExecution, useExecutions } from "@aios/shared-hooks";
 import { ApiError } from "@aios/api-client";
-import { classifyBadRequest, classifyForbidden, routeApiError } from "@aios/shared-types";
+import {
+  classifyBadRequest,
+  classifyForbidden,
+  classifyServerError,
+  routeApiError,
+} from "@aios/shared-types";
 import {
   Alert,
   Button,
@@ -19,27 +24,33 @@ import { BadRequestNotice } from "../../components/BadRequestNotice";
 import { ErrorMessage } from "../../components/ErrorMessage";
 import { ForbiddenNotice } from "../../components/ForbiddenNotice";
 import { DuplicateSubmitError, useIdempotentSubmit } from "../../hooks/useIdempotentSubmit";
+import { useConflictRetry } from "../../hooks/useConflictRetry";
 import { ExecutionCard } from "./components/ExecutionCard";
 
 // spec §3.3 에러 taxonomy: 실행 생성 실패는 err.message를 직접 노출하지 않고
 // routeApiError(task-483)로 판정해 400/403/그 외를 각각 BadRequestNotice/
-// ForbiddenNotice/ErrorMessage 경로로만 보여준다(task-901).
-function CreateExecutionError({ error }: { error: unknown }) {
+// ForbiddenNotice/ErrorMessage 경로로만 보여준다(task-901). classifyServerError
+// (task-937)가 EXCHANGE_UNAVAILABLE/DEPENDENCY_NOT_READY(재시도 가능)로 판정할 때만
+// onRetry를 넘겨 "다시 시도" 버튼을 보여준다 — EXCHANGE_FATAL/INTERNAL_ERROR(재시도
+// 불가)는 onRetry가 없어도 ErrorMessage 자체가 classifyRetry로 버튼을 숨긴다.
+function CreateExecutionError({ error, onRetry }: { error: unknown; onRetry: () => void }) {
   if (classifyBadRequest(error)) return <BadRequestNotice error={error} />;
   if (classifyForbidden(error)) return <ForbiddenNotice error={error} />;
   const routed = routeApiError(error);
+  const serverError = classifyServerError(error);
   return (
     <ErrorMessage
       errorCode={error instanceof ApiError ? error.errorCode : undefined}
       message={error instanceof Error ? error.message : undefined}
       traceId={error instanceof ApiError ? error.traceId : undefined}
       retryAfterSec={routed.kind === "backoff_retry" ? routed.afterSec : undefined}
+      onRetry={serverError.kind === "retryable" ? onRetry : undefined}
     />
   );
 }
 
 export function ExecutionControlPage() {
-  const { data: executions, isLoading } = useExecutions();
+  const { data: executions, isLoading, refetch } = useExecutions();
   const createExecution = useCreateExecution();
   const { submit } = useIdempotentSubmit("executions.create");
   const [strategyId, setStrategyId] = useState("");
@@ -49,11 +60,13 @@ export function ExecutionControlPage() {
   const [mode, setMode] = useState<"PAPER" | "LIVE">("PAPER");
   const [error, setError] = useState<unknown>(null);
 
-  async function handleSubmit(e: FormEvent) {
-    e.preventDefault();
-    setError(null);
-    try {
-      await submit((idempotencyKey) =>
+  // §3.3 STATE_CONCURRENCY_CONFLICT(409)는 useConflictRetry(task-937)로 실행 목록을
+  // 재조회한 뒤 1회 재제출한다. submit()을 다시 호출하므로(useIdempotentSubmit이 409를
+  // 4xx로 보고 이전 키를 이미 폐기해둔 뒤) 재제출은 새 Idempotency-Key로 나간다
+  // (task-383 classifyIdempotencyFailure 규칙).
+  const { run: createExecutionWithRetry } = useConflictRetry(
+    () =>
+      submit((idempotencyKey) =>
         createExecution.mutateAsync({
           body: {
             strategyId,
@@ -65,12 +78,24 @@ export function ExecutionControlPage() {
           },
           idempotencyKey,
         }),
-      );
+      ),
+    refetch,
+  );
+
+  async function submitExecution() {
+    setError(null);
+    try {
+      await createExecutionWithRetry();
       setStrategyId("");
     } catch (err) {
       if (err instanceof DuplicateSubmitError) return;
       setError(err instanceof ApiError ? err : new Error("실행 생성에 실패했습니다."));
     }
+  }
+
+  function handleSubmit(e: FormEvent) {
+    e.preventDefault();
+    void submitExecution();
   }
 
   return (
@@ -118,7 +143,7 @@ export function ExecutionControlPage() {
           </form>
           {error !== null && (
             <div className="mt-3">
-              <CreateExecutionError error={error} />
+              <CreateExecutionError error={error} onRetry={() => void submitExecution()} />
             </div>
           )}
           {createExecution.data?.approvalRequestId && (

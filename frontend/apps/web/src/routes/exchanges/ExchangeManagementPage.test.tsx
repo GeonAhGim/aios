@@ -6,12 +6,13 @@ import { ApiError } from "@aios/api-client";
 import { ExchangeManagementPage } from "./ExchangeManagementPage";
 
 const mutateAsync = vi.fn();
+const refetch = vi.fn();
 let credentialsData: unknown[] = [];
-let revokeMutate = vi.fn();
+let revokeMutateAsync = vi.fn().mockResolvedValue(undefined);
 vi.mock("@aios/shared-hooks", () => ({
-  useExchangeCredentials: () => ({ data: credentialsData, isLoading: false }),
+  useExchangeCredentials: () => ({ data: credentialsData, isLoading: false, refetch }),
   useRegisterExchangeCredential: () => ({ mutateAsync, isPending: false }),
-  useRevokeExchangeCredential: () => ({ mutate: revokeMutate }),
+  useRevokeExchangeCredential: () => ({ mutateAsync: revokeMutateAsync }),
   useExchangeBalance: () => ({ data: undefined }),
   useMe: () => ({ data: { email: "a@example.com" } }),
   useLogout: () => vi.fn(),
@@ -20,8 +21,9 @@ vi.mock("@aios/shared-hooks", () => ({
 afterEach(() => {
   cleanup();
   mutateAsync.mockReset();
+  refetch.mockReset();
   credentialsData = [];
-  revokeMutate = vi.fn();
+  revokeMutateAsync = vi.fn().mockResolvedValue(undefined);
 });
 
 function renderPage() {
@@ -236,9 +238,9 @@ describe("ExchangeManagementPage 등록 폼 scope 상한", () => {
 describe("ExchangeManagementPage 해지 403 POLICY_LIVE_BLOCKED", () => {
   it("ForbiddenNotice를 통해 정책 거부 안내를 보여준다", async () => {
     credentialsData = [credential()];
-    revokeMutate = vi.fn((_exchange: string, opts?: { onError?: (err: unknown) => void }) => {
-      opts?.onError?.(new ApiError(403, "blocked", undefined, "POLICY_LIVE_BLOCKED"));
-    });
+    revokeMutateAsync = vi
+      .fn()
+      .mockRejectedValue(new ApiError(403, "blocked", undefined, "POLICY_LIVE_BLOCKED"));
     renderPage();
 
     fireEvent.click(screen.getByRole("button", { name: "해지" }));
@@ -246,5 +248,36 @@ describe("ExchangeManagementPage 해지 403 POLICY_LIVE_BLOCKED", () => {
     await waitFor(() =>
       expect(screen.getByText("실거래 모드에서는 허용되지 않는 작업입니다.")).toBeInTheDocument(),
     );
+  });
+});
+
+// task-937 §3.3: 5xx는 classifyServerError, 409 STATE_CONCURRENCY_CONFLICT는
+// useConflictRetry로 처리한다.
+describe("ExchangeManagementPage 5xx·409 재시도 배선", () => {
+  it("negative: EXCHANGE_UNAVAILABLE(503)은 재시도 안내와 함께 다시 시도 버튼을 보여준다", async () => {
+    mutateAsync.mockRejectedValue(new ApiError(503, "raw", undefined, "EXCHANGE_UNAVAILABLE"));
+    const { container } = renderPage();
+
+    submitRegisterForm(container);
+
+    await waitFor(() =>
+      expect(
+        screen.getByText("거래소 연결이 원활하지 않습니다. 잠시 후 다시 시도해주세요."),
+      ).toBeInTheDocument(),
+    );
+    expect(screen.getByRole("button", { name: "다시 시도" })).toBeEnabled();
+  });
+
+  it("negative: STATE_CONCURRENCY_CONFLICT(409)는 연동 목록을 refetch한 뒤 새 Idempotency-Key로 자동 재제출해 성공한다", async () => {
+    mutateAsync
+      .mockRejectedValueOnce(new ApiError(409, "충돌", undefined, "STATE_CONCURRENCY_CONFLICT"))
+      .mockResolvedValueOnce(undefined);
+    const { container } = renderPage();
+
+    submitRegisterForm(container);
+
+    await waitFor(() => expect(mutateAsync).toHaveBeenCalledTimes(2));
+    expect(refetch).toHaveBeenCalledTimes(1);
+    expect(screen.queryByText(/다른 요청과 충돌했습니다/)).not.toBeInTheDocument();
   });
 });
