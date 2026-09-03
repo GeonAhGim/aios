@@ -32,17 +32,21 @@ from src.exchanges.bitget.earn_mixin import BitgetEarnMixin
 from src.exchanges.bitget.error_codes import SUCCESS_CODE, classify_body_code
 from src.exchanges.bitget.futures_account_mixin import BitgetFuturesAccountMixin
 from src.exchanges.bitget.futures_market_mixin import BitgetFuturesMarketMixin
+from src.exchanges.bitget.futures_plan_mixin import BitgetFuturesPlanMixin
 from src.exchanges.bitget.futures_trading_mixin import BitgetFuturesTradingMixin
 from src.exchanges.bitget.grid_mixin import BitgetGridMixin
 from src.exchanges.bitget.inst_loan_mixin import BitgetInstLoanMixin
 from src.exchanges.bitget.loan_mixin import BitgetLoanMixin
 from src.exchanges.bitget.margin_mixin import BitgetMarginMixin
 from src.exchanges.bitget.market_data_mixin import BitgetMarketDataMixin
+from src.exchanges.bitget.market_ws_private_mixin import BitgetMarketDataWsPrivateMixin
+from src.exchanges.bitget.market_ws_public_mixin import BitgetMarketDataWsPublicMixin
 from src.exchanges.bitget.p2p_mixin import BitgetP2PMixin
 from src.exchanges.bitget.strategy_mixin import BitgetStrategyMixin
 from src.exchanges.bitget.subaccount_mixin import BitgetSubaccountMixin
 from src.exchanges.bitget.tax_mixin import BitgetTaxMixin
 from src.exchanges.bitget.trading_mixin import BitgetTradingMixin
+from src.exchanges.bitget.trading_plan_mixin import BitgetTradingPlanMixin
 from src.exchanges.common.adapter import ExchangeAdapter
 from src.exchanges.common.error_taxonomy import ExchangeError, ExchangeErrorKind
 from src.exchanges.common.http_policy import RetryPolicy
@@ -215,12 +219,16 @@ class _BitgetHTTPClient:
 class BitgetAdapter(
     _BitgetHTTPClient,
     BitgetMarketDataMixin,
+    BitgetMarketDataWsPublicMixin,
+    BitgetMarketDataWsPrivateMixin,
     BitgetAccountMixin,
     BitgetTradingMixin,
+    BitgetTradingPlanMixin,
     BitgetMarginMixin,
     BitgetFuturesMarketMixin,
     BitgetFuturesAccountMixin,
     BitgetFuturesTradingMixin,
+    BitgetFuturesPlanMixin,
     BitgetConvertMixin,
     BitgetSubaccountMixin,
     BitgetTaxMixin,

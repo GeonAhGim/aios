@@ -1,60 +1,53 @@
-"""6.4 / 6.5 — BitgetAdapter Market Data 메서드군 + WebSocket 구독/재연결.
+"""6.4 — BitgetAdapter Market Data(REST) 메서드군 + Private WS 로그인 서명.
 
 Spec: 02_exchange_adapter_v1.3.md#§2.1, 02b_bitget_api_v2_full_spec_v1.md#§6
 
 엔드포인트(2026-08-28 라이브 확인, GET /api/v2/spot/market/{tickers,
-orderbook,candles}) 및 공개 WebSocket(wss://ws.bitget.com/v2/ws/public,
-공식 문서 기준 — 실제 채널 스키마는 라이브 검증 전까지 최선 추정치).
+orderbook,candles}).
 
-2026-09-02 리팩터링(02b 스펙 §9 작업 분해 4번, WebSocket P0) — 기존
-`subscribe_ticker_stream()`은 연결관리(재연결·백오프)와 메시지 파싱이
-한 함수 안에 뒤섞여 있어 실소켓 없이는 전혀 테스트할 수 없었다(이
-세션에서 확인 — 커밋 이력에 이 메서드의 테스트가 한 번도 없었음).
-`_run_ws_subscription()`(연결관리 공통 루프)과 `_parse_*_message()`
-(순수 파싱 함수, JSON 디코드된 dict만 받음)로 분리해 파싱 로직만이라도
-실제 네트워크 없이 단위테스트 가능하게 만든다 — 연결관리 루프 자체는
-`connect_fn`을 주입 가능하게 열어둬(기본값은 실제 websockets.connect)
-가짜 연결로 재연결/백오프 동작까지 결정적으로 재현할 수 있다.
+2026-09-03 task-1032(PLT-40a 선행, §9 PLT-40) — 이 파일은 원래 735줄로
+P6.line_cap을 초과해 REST 메서드군 + WebSocket 연결관리/파싱/구독을 전부
+갖고 있었다. 순수 이동만으로(동작 변경 0) 아래처럼 분할했다:
+- `market_ws_parsing.py` — WS 메시지 순수 파싱 함수
+- `market_ws_connection.py` — 연결관리 공통 루프(`_run_ws_subscription` 등)
+- `market_ws_public_mixin.py` — 공개 채널 구독(ticker/candle/orderbook)
+- `market_ws_private_mixin.py` — Private 채널 구독(orders/account/positions)
+이 파일에는 REST Market Data 메서드군(`BitgetMarketDataMixin`)과, Private
+채널 로그인 서명(`_build_login_message`, WS 로그인 전용 prehash — REST와
+서명 대상이 다름)만 남긴다. 기존 테스트(`tests/unit/exchanges/
+test_bitget_ws_messages.py`, `tests/integration/test_bitget_websocket.py`)가
+`market_data_mixin` 모듈 경로로 직접 import하는 이름들
+(`_build_login_message`/`parse_*_ws_message`/`_run_ws_subscription`/
+`_send_periodic_pings`)은 무수정으로 계속 통과하도록 이 모듈에서 그대로
+재-import해 노출한다(재-import는 동일 함수 객체를 가리키므로 동작 변화 없음).
 """
 from __future__ import annotations
 
-import asyncio
 import base64
 import hashlib
 import hmac
-import json
-import logging
 import time
-from collections.abc import AsyncIterator, Awaitable, Callable
-from contextlib import AbstractAsyncContextManager
 from datetime import datetime, timezone
 from decimal import Decimal
-from typing import Any, Protocol
-
-from websockets.asyncio.client import connect as _default_connect
-from websockets.exceptions import ConnectionClosed
+from typing import Any
 
 from src.core.parser.candle_parser import parse_candles
 from src.core.parser.orderbook_parser import parse_orderbook
 from src.core.parser.ticker_parser import parse_ticker
-from src.data.models.market_data import (
-    Candle,
-    OrderBook,
-    OrderBookLevel,
-    PublicTrade,
-    SpotSymbolInfo,
-    Ticker,
+from src.data.models.market_data import Candle, OrderBook, PublicTrade, SpotSymbolInfo, Ticker
+from src.exchanges.bitget.market_ws_connection import (  # noqa: F401 — 기존 테스트 import 경로 유지
+    _run_ws_subscription,
+    _send_periodic_pings,
 )
-from src.data.models.trading import AccountBalance, Order, Position
-from src.exchanges.bitget.futures_account_mixin import _row_to_position
+from src.exchanges.bitget.market_ws_parsing import (  # noqa: F401 — 기존 테스트 import 경로 유지
+    parse_account_ws_message,
+    parse_candle_ws_message,
+    parse_order_ws_message,
+    parse_orderbook_ws_message,
+    parse_position_ws_message,
+    parse_ticker_ws_message,
+)
 from src.exchanges.bitget.symbols import to_bitget_symbol as _to_bitget_symbol
-from src.exchanges.bitget.trading_mixin import _row_to_order
-from src.exchanges.common.types import TickerCallback
-
-logger = logging.getLogger(__name__)
-
-WS_PUBLIC_URL = "wss://ws.bitget.com/v2/ws/public"
-WS_PRIVATE_URL = "wss://ws.bitget.com/v2/ws/private"
 
 # AIOS 표준 timeframe -> Bitget REST candles granularity 파라미터
 _GRANULARITY_MAP = {
@@ -66,46 +59,6 @@ _GRANULARITY_MAP = {
     "4h": "4h",
     "1d": "1day",
 }
-
-# AIOS 표준 timeframe -> Bitget WebSocket candle 채널명(라이브 검증 필요 —
-# 공식 문서상 관례적 표기, REST granularity 문자열과 형식이 다름).
-_WS_CANDLE_CHANNEL_MAP = {
-    "1m": "candle1m",
-    "5m": "candle5m",
-    "15m": "candle15m",
-    "30m": "candle30m",
-    "1h": "candle1H",
-    "4h": "candle4H",
-    "1d": "candle1D",
-}
-
-ReconnectHook = Callable[[], Awaitable[None]]
-CandleCallback = Callable[[Candle], Awaitable[None]]
-OrderBookCallback = Callable[[OrderBook], Awaitable[None]]
-OrderCallback = Callable[[Order], Awaitable[None]]
-AccountCallback = Callable[[AccountBalance], Awaitable[None]]
-PositionCallback = Callable[[Position], Awaitable[None]]
-MessageHandler = Callable[[dict[str, Any]], Awaitable[None]]
-
-
-class WsConnection(Protocol):
-    async def send(self, message: str) -> None: ...
-    def __aiter__(self) -> AsyncIterator[str]: ...
-
-
-ConnectFn = Callable[[str], AbstractAsyncContextManager[WsConnection]]
-
-
-def _connect(url: str) -> AbstractAsyncContextManager[WsConnection]:
-    """`websockets.asyncio.client.connect`는 실제로는 URL 하나만으로도
-    호출 가능한 비동기 컨텍스트 매니저를 반환하지만, 클래스 자체의 타입
-    시그니처는 그보다 훨씬 넓다(헤더/ping 설정 등) — 테스트가 주입하는
-    가짜 `connect_fn`과 정확히 같은 좁은 타입으로 맞추기 위한 얇은 래퍼."""
-    return _default_connect(url)  # type: ignore[return-value]
-
-
-def _is_control_message(message: dict[str, Any]) -> bool:
-    return message.get("event") in ("subscribe", "error", "login")
 
 
 def _build_login_message(api_key: str, api_secret: str, api_passphrase: str) -> dict[str, Any]:
@@ -130,217 +83,6 @@ def _build_login_message(api_key: str, api_secret: str, api_passphrase: str) -> 
             }
         ],
     }
-
-
-def parse_order_ws_message(message: dict[str, Any]) -> list[Order]:
-    """Private `orders` 채널 메시지 파싱 — REST orderInfo/unfilled-orders와
-    행 형태를 공유한다고 가정(trading_mixin.py의 `_row_to_order()` 재사용,
-    라이브 검증 필요)."""
-    if _is_control_message(message):
-        return []
-    return [_row_to_order(row) for row in message.get("data", [])]
-
-
-def parse_account_ws_message(message: dict[str, Any]) -> list[AccountBalance]:
-    """Private `account` 채널 메시지 파싱 — REST get_balance()와 동일
-    available/frozen/locked 필드 구조를 가정(라이브 검증 필요)."""
-    if _is_control_message(message):
-        return []
-    balances = []
-    for item in message.get("data", []):
-        available = Decimal(item.get("available", "0"))
-        frozen = Decimal(item.get("frozen", "0"))
-        locked = Decimal(item.get("locked", "0"))
-        balances.append(
-            AccountBalance(
-                exchange="bitget",
-                asset=item.get("coin", "").upper(),
-                total=available + frozen + locked,
-                available=available,
-                used_margin=frozen + locked,
-            )
-        )
-    return balances
-
-
-def parse_position_ws_message(message: dict[str, Any]) -> list[Position]:
-    """Private `positions` 채널(선물 전용) 메시지 파싱 —
-    futures_account_mixin.py의 `_row_to_position()` 재사용(라이브 검증
-    필요)."""
-    if _is_control_message(message):
-        return []
-    return [
-        _row_to_position(item, item.get("symbol", item.get("instId", "")))
-        for item in message.get("data", [])
-    ]
-
-
-def parse_ticker_ws_message(message: dict[str, Any]) -> list[Ticker]:
-    """공개 ticker 채널 메시지 파싱 — REST parse_ticker()를 그대로 재사용
-    (Bitget WS/REST가 동일 필드 이름을 씀, market_data_mixin.py 기존
-    가정과 동일)."""
-    if _is_control_message(message):
-        return []
-    return [parse_ticker(item, "bitget") for item in message.get("data", [])]
-
-
-def parse_candle_ws_message(
-    message: dict[str, Any], *, symbol: str, timeframe: str
-) -> list[Candle]:
-    """공개 candle 채널 메시지 파싱 — REST parse_candles()와 동일 행 형태
-    ([ts, open, high, low, close, volume, ...])라고 가정(라이브 검증
-    필요, 공통 관례)."""
-    if _is_control_message(message):
-        return []
-    rows = message.get("data", [])
-    if not rows:
-        return []
-    return parse_candles(rows, "bitget", symbol, timeframe)
-
-
-def parse_orderbook_ws_message(message: dict[str, Any], *, symbol: str) -> OrderBook | None:
-    """공개 books 채널 메시지 파싱 — snapshot/update 구분 없이 매 메시지를
-    그 시점의 전체 호가창 스냅샷으로 취급한다(Phase 1 Draft — 델타 병합은
-    필요해지면 별도 leaf, 지금은 매 메시지가 self-contained라고 가정)."""
-    if _is_control_message(message):
-        return None
-    rows = message.get("data", [])
-    if not rows:
-        return None
-    raw = rows[0]
-    now = datetime.now(timezone.utc)
-    bids = [OrderBookLevel(price=Decimal(p), quantity=Decimal(q)) for p, q in raw.get("bids", [])]
-    asks = [OrderBookLevel(price=Decimal(p), quantity=Decimal(q)) for p, q in raw.get("asks", [])]
-    return OrderBook(symbol=symbol, exchange="bitget", bids=bids, asks=asks, timestamp=now)
-
-
-_PING_INTERVAL_SECONDS = 30.0
-_PING_MESSAGE = "ping"
-_PONG_MESSAGE = "pong"
-
-
-async def _send_periodic_pings(
-    ws: WsConnection,
-    interval: float,
-    ping_sleep_fn: Callable[[float], Awaitable[None]],
-) -> None:
-    """FULL_AUDIT_2026-09-02.md §2-B ② — Bitget 공식 문서 관례: 30초
-    이상 아무 메시지도 오가지 않으면 서버가 연결을 끊는다. 클라이언트가
-    주기적으로 평문 "ping"(JSON 아님 — 다른 메시지들과 다른 프로토콜)을
-    보내고 "pong"을 돌려받아야 유지된다. `_run_ws_subscription()`이
-    메시지 수신 루프와 나란히 백그라운드 태스크로 돌린다."""
-    while True:
-        await ping_sleep_fn(interval)
-        await ws.send(_PING_MESSAGE)
-
-
-async def _run_ws_subscription(
-    url: str,
-    subscribe_msg: dict[str, Any],
-    on_message: MessageHandler,
-    *,
-    pre_messages_factory: Callable[[], list[dict[str, Any]]] | None = None,
-    connect_fn: ConnectFn = _connect,
-    on_reconnecting: ReconnectHook | None = None,
-    on_reconnected: ReconnectHook | None = None,
-    max_backoff_seconds: float = 30.0,
-    sleep_fn: Callable[[float], Awaitable[None]] = asyncio.sleep,
-    ping_interval_seconds: float = _PING_INTERVAL_SECONDS,
-    ping_sleep_fn: Callable[[float], Awaitable[None]] = asyncio.sleep,
-) -> None:
-    """연결·구독·재연결(지수 백오프)을 전담하는 공통 루프 — 메시지
-    자체의 의미는 모른다(on_message에 그대로 위임). 채널이 몇 개든
-    이 루프 하나를 재사용한다(§2.1 재연결 책임 원칙, 로직 중복 방지).
-    `pre_messages_factory`(예: Private 채널의 login)는 매 연결(최초 포함,
-    재연결 포함) *시작될 때마다 새로 호출돼* subscribe_msg보다 먼저
-    순서대로 전송된다.
-
-    레드팀 #2026-09-02-31 — 이전엔 고정 `list[dict]`를 받아 재연결마다
-    같은(오래된 타임스탬프로 서명된) 메시지를 재전송했다 — Bitget의 WS
-    로그인 서명은 REST처럼 타임스탬프가 일정 범위 안이어야 유효하므로,
-    최초 연결 이후 재연결부터는 반드시 실패한다. 팩토리로 바꿔 매
-    시도마다 새로 서명하게 한다.
-
-    `ping_sleep_fn`은 `sleep_fn`(재연결 백오프 대기)과 고의로 분리했다 —
-    같은 걸 썼다면 백오프 테스트가 주입하는 가짜 즉시-완료 sleep이
-    ping 루프도 즉시 무한 반복시켜 테스트를 오염시킨다(핑 간격은 실제
-    시간 기준이 맞다 — 백오프와는 별개 개념)."""
-    backoff = 1.0
-    first_attempt = True
-
-    while True:
-        if not first_attempt and on_reconnecting is not None:
-            await on_reconnecting()
-        first_attempt = False
-        try:
-            async with connect_fn(url) as ws:
-                for pre_message in (pre_messages_factory() if pre_messages_factory else []):
-                    await ws.send(json.dumps(pre_message))
-                await ws.send(json.dumps(subscribe_msg))
-                if backoff > 1.0 and on_reconnected is not None:
-                    await on_reconnected()
-                backoff = 1.0
-                ping_task = asyncio.ensure_future(
-                    _send_periodic_pings(ws, ping_interval_seconds, ping_sleep_fn)
-                )
-                try:
-                    async for raw_message in ws:
-                        # FULL_AUDIT §2-B ② — 이전엔 모든 수신 메시지를
-                        # 무조건 json.loads()로 파싱했다. Bitget이 우리
-                        # ping에 대한 응답으로 평문 "pong"을 보내면(공식
-                        # 문서 관례) JSON이 아니라서 예외가 나 연결
-                        # 전체가 죽었을 것이다.
-                        if raw_message == _PONG_MESSAGE:
-                            continue
-                        message = json.loads(raw_message)
-                        event = message.get("event")
-                        if event == "login":
-                            # 레드팀 #2026-09-02-31 — 이전엔 로그인 성공/실패를
-                            # 전혀 구분하지 않고 각 parse_*_ws_message가 조용히
-                            # 버려서(_is_control_message), 재연결 후 인증이
-                            # 깨져도 로그 한 줄 안 남았다.
-                            if str(message.get("code", "0")) in ("0", "None"):
-                                logger.info(
-                                    "Bitget WS 로그인 성공(channel=%s)", subscribe_msg.get("args")
-                                )
-                            else:
-                                logger.warning(
-                                    "Bitget WS 로그인 실패(channel=%s): %s — private 채널 "
-                                    "데이터를 받지 못하고 있을 수 있습니다.",
-                                    subscribe_msg.get("args"),
-                                    message,
-                                )
-                            continue
-                        if event == "subscribe":
-                            # FULL_AUDIT §2-B ② — 구독 ack도 로그인처럼
-                            # 성공/실패 구분 없이 조용히 버려지고 있었다.
-                            logger.info(
-                                "Bitget WS 구독 성공(channel=%s)", message.get("arg")
-                            )
-                            continue
-                        if event == "error":
-                            logger.warning(
-                                "Bitget WS 오류 이벤트(channel=%s): %s",
-                                subscribe_msg.get("args"),
-                                message,
-                            )
-                            continue
-                        await on_message(message)
-                finally:
-                    ping_task.cancel()
-                    try:
-                        await ping_task
-                    except asyncio.CancelledError:
-                        pass
-        except (ConnectionClosed, OSError) as exc:
-            logger.warning(
-                "Bitget WS 연결 끊김(channel=%s): %s — %.1f초 후 재연결",
-                subscribe_msg.get("args"),
-                exc,
-                backoff,
-            )
-            await sleep_fn(backoff)
-            backoff = min(backoff * 2, max_backoff_seconds)
 
 
 class BitgetMarketDataMixin:
@@ -447,289 +189,3 @@ class BitgetMarketDataMixin:
             )
             for item in raw["data"]
         ]
-
-    async def subscribe_ticker_stream(
-        self,
-        symbol: str,
-        callback: TickerCallback,
-        *,
-        on_reconnecting: ReconnectHook | None = None,
-        on_reconnected: ReconnectHook | None = None,
-        connect_fn: ConnectFn = _connect,
-    ) -> None:
-        """재연결은 이 메서드가 자체적으로 처리한다(지수 백오프, 최대 30초).
-        on_reconnecting/on_reconnected는 상위 계층이 market.distrust.entered/
-        exited를 발행할 수 있도록 하는 훅(§2.1 재연결 책임 원칙) — EventBus에
-        직접 결합하지 않고 콜백으로 주입받는다(recovery.py와 동일 DI 패턴).
-
-        FULL_AUDIT §2-B ② — 재연결 성공 시 REST get_ticker()로 한 번
-        재동기화한 뒤(끊긴 동안 놓쳤을 수 있는 갱신을 메꿈) callback을
-        호출한다 — 그다음 호출부가 넘긴 on_reconnected도 실행(이벤트
-        발행 등은 여전히 호출부 책임)."""
-        bitget_symbol = _to_bitget_symbol(symbol)
-        subscribe_msg = {
-            "op": "subscribe",
-            "args": [{"instType": "SPOT", "channel": "ticker", "instId": bitget_symbol}],
-        }
-
-        async def resync_then_notify() -> None:
-            try:
-                ticker = await self.get_ticker(symbol)
-                await callback(ticker)
-            except Exception:  # noqa: BLE001 — 재동기화 실패로 재연결 자체를 막지 않음
-                logger.warning("Bitget WS 재연결 후 REST 재동기화 실패(symbol=%s)", symbol)
-            if on_reconnected is not None:
-                await on_reconnected()
-
-        async def on_message(message: dict[str, Any]) -> None:
-            for ticker in parse_ticker_ws_message(message):
-                await callback(ticker)
-
-        await _run_ws_subscription(
-            WS_PUBLIC_URL,
-            subscribe_msg,
-            on_message,
-            connect_fn=connect_fn,
-            on_reconnecting=on_reconnecting,
-            on_reconnected=resync_then_notify,
-        )
-
-    async def subscribe_candle_stream(
-        self,
-        symbol: str,
-        timeframe: str,
-        callback: CandleCallback,
-        *,
-        on_reconnecting: ReconnectHook | None = None,
-        on_reconnected: ReconnectHook | None = None,
-        connect_fn: ConnectFn = _connect,
-    ) -> None:
-        """02b 스펙 §6(FD-2.2 실시간 캔들 — 현재는 REST 폴링만이던 것의
-        실시간 대체). `ExchangeAdapter` ABC에는 아직 없음(trading_mixin.py
-        확장 메서드들과 동일 원칙 — 소비하는 FD-2 호출부가 생기기 전까지
-        Bitget 전용)."""
-        channel = _WS_CANDLE_CHANNEL_MAP.get(timeframe)
-        if channel is None:
-            raise ValueError(f"지원하지 않는 timeframe: {timeframe}")
-        bitget_symbol = _to_bitget_symbol(symbol)
-        subscribe_msg = {
-            "op": "subscribe",
-            "args": [{"instType": "SPOT", "channel": channel, "instId": bitget_symbol}],
-        }
-
-        async def on_message(message: dict[str, Any]) -> None:
-            for candle in parse_candle_ws_message(message, symbol=symbol, timeframe=timeframe):
-                await callback(candle)
-
-        await _run_ws_subscription(
-            WS_PUBLIC_URL,
-            subscribe_msg,
-            on_message,
-            connect_fn=connect_fn,
-            on_reconnecting=on_reconnecting,
-            on_reconnected=on_reconnected,
-        )
-
-    async def subscribe_order_stream(
-        self,
-        callback: OrderCallback,
-        *,
-        inst_type: str = "SPOT",
-        on_reconnecting: ReconnectHook | None = None,
-        on_reconnected: ReconnectHook | None = None,
-        connect_fn: ConnectFn = _connect,
-    ) -> None:
-        """02b 스펙 §6/§9 작업분해 4 — Private `orders` 채널(P0). FD-4.5
-        (UNKNOWN 재조회)를 폴링 대신 실시간 이벤트로 대체하는 근본
-        해결책 — 이 채널이 붙으면 기존 3회 폴링 재시도 로직은 "최후의
-        폴백"으로 격하되고 정상 경로는 실시간 확인이 된다(호출부 연결은
-        별도 leaf). 로그인 메커니즘은 `_build_login_message()` docstring
-        참조 — 라이브 검증 전까지 최선 추정치. `ExchangeAdapter` ABC에는
-        아직 없음(다른 확장 메서드들과 동일 원칙, 모듈 docstring 참조)."""
-        def _login() -> list[dict[str, Any]]:
-            return [
-                _build_login_message(
-                    self._api_key,  # type: ignore[attr-defined]
-                    self._api_secret,  # type: ignore[attr-defined]
-                    self._api_passphrase,  # type: ignore[attr-defined]
-                )
-            ]
-
-        subscribe_msg = {
-            "op": "subscribe",
-            "args": [{"instType": inst_type, "channel": "orders", "instId": "default"}],
-        }
-
-        async def resync_then_notify() -> None:
-            """FULL_AUDIT §2-B ② — 이 채널이 대체하려는 게 바로 FD-4.5
-            폴링이므로(모듈독스트링 참조), 재연결 직후는 그 폴링이 가장
-            필요한 순간이다 — 끊긴 동안 체결/거부됐을 미체결 주문을
-            REST get_open_orders()로 재확인한다."""
-            try:
-                for order in await self.get_open_orders():  # type: ignore[attr-defined]
-                    await callback(order)
-            except Exception:  # noqa: BLE001 — 재동기화 실패로 재연결 자체를 막지 않음
-                logger.warning("Bitget WS 재연결 후 미체결 주문 재동기화 실패")
-            if on_reconnected is not None:
-                await on_reconnected()
-
-        async def on_message(message: dict[str, Any]) -> None:
-            for order in parse_order_ws_message(message):
-                await callback(order)
-
-        await _run_ws_subscription(
-            WS_PRIVATE_URL,
-            subscribe_msg,
-            on_message,
-            pre_messages_factory=_login,
-            connect_fn=connect_fn,
-            on_reconnecting=on_reconnecting,
-            on_reconnected=resync_then_notify,
-        )
-
-    async def subscribe_account_stream(
-        self,
-        callback: AccountCallback,
-        *,
-        inst_type: str = "SPOT",
-        on_reconnecting: ReconnectHook | None = None,
-        on_reconnected: ReconnectHook | None = None,
-        connect_fn: ConnectFn = _connect,
-    ) -> None:
-        """02b 스펙 §6(P1) — Private `account` 채널. FD-16.4(실행
-        모니터링)이 현재 폴링 기반인 잔고 확인을 실시간으로 보강할 수
-        있는 후보(호출부 연결은 별도 leaf). 로그인은
-        `subscribe_order_stream`과 동일 메커니즘(§6 "Private 채널 로그인"
-        절) — 라이브 검증 전까지 최선 추정치."""
-        def _login() -> list[dict[str, Any]]:
-            return [
-                _build_login_message(
-                    self._api_key,  # type: ignore[attr-defined]
-                    self._api_secret,  # type: ignore[attr-defined]
-                    self._api_passphrase,  # type: ignore[attr-defined]
-                )
-            ]
-
-        subscribe_msg = {
-            "op": "subscribe",
-            "args": [{"instType": inst_type, "channel": "account", "instId": "default"}],
-        }
-
-        async def resync_then_notify() -> None:
-            """FULL_AUDIT §2-B ② — 재연결 후 REST get_balance()로 잔고
-            재동기화(subscribe_ticker_stream과 동일 판단)."""
-            try:
-                for balance in await self.get_balance():  # type: ignore[attr-defined]
-                    await callback(balance)
-            except Exception:  # noqa: BLE001 — 재동기화 실패로 재연결 자체를 막지 않음
-                logger.warning("Bitget WS 재연결 후 잔고 재동기화 실패")
-            if on_reconnected is not None:
-                await on_reconnected()
-
-        async def on_message(message: dict[str, Any]) -> None:
-            for balance in parse_account_ws_message(message):
-                await callback(balance)
-
-        await _run_ws_subscription(
-            WS_PRIVATE_URL,
-            subscribe_msg,
-            on_message,
-            pre_messages_factory=_login,
-            connect_fn=connect_fn,
-            on_reconnecting=on_reconnecting,
-            on_reconnected=resync_then_notify,
-        )
-
-    async def subscribe_positions_stream(
-        self,
-        callback: PositionCallback,
-        *,
-        inst_type: str = "USDT-FUTURES",
-        on_reconnecting: ReconnectHook | None = None,
-        on_reconnected: ReconnectHook | None = None,
-        connect_fn: ConnectFn = _connect,
-    ) -> None:
-        """02b 스펙 §6(P1) — Private `positions` 채널(선물 전용). Phase 1은
-        크립토 현물 전용(06번 §6.1)이라 아직 소비하는 호출부가 없다 —
-        API 연동만 우선 완료해둔다(다른 확장 메서드와 동일 원칙)."""
-        def _login() -> list[dict[str, Any]]:
-            return [
-                _build_login_message(
-                    self._api_key,  # type: ignore[attr-defined]
-                    self._api_secret,  # type: ignore[attr-defined]
-                    self._api_passphrase,  # type: ignore[attr-defined]
-                )
-            ]
-
-        subscribe_msg = {
-            "op": "subscribe",
-            "args": [{"instType": inst_type, "channel": "positions", "instId": "default"}],
-        }
-
-        async def resync_then_notify() -> None:
-            """FULL_AUDIT §2-B ② — 재연결 후 REST get_futures_positions()로
-            포지션 재동기화(subscribe_ticker_stream과 동일 판단)."""
-            try:
-                for position in await self.get_futures_positions():  # type: ignore[attr-defined]
-                    await callback(position)
-            except Exception:  # noqa: BLE001 — 재동기화 실패로 재연결 자체를 막지 않음
-                logger.warning("Bitget WS 재연결 후 포지션 재동기화 실패")
-            if on_reconnected is not None:
-                await on_reconnected()
-
-        async def on_message(message: dict[str, Any]) -> None:
-            for position in parse_position_ws_message(message):
-                await callback(position)
-
-        await _run_ws_subscription(
-            WS_PRIVATE_URL,
-            subscribe_msg,
-            on_message,
-            pre_messages_factory=_login,
-            connect_fn=connect_fn,
-            on_reconnecting=on_reconnecting,
-            on_reconnected=resync_then_notify,
-        )
-
-    async def subscribe_orderbook_stream(
-        self,
-        symbol: str,
-        callback: OrderBookCallback,
-        *,
-        depth_channel: str = "books",
-        on_reconnecting: ReconnectHook | None = None,
-        on_reconnected: ReconnectHook | None = None,
-        connect_fn: ConnectFn = _connect,
-    ) -> None:
-        """02b 스펙 §6 — 실시간 호가창. `depth_channel`은 "books"(전체)/
-        "books5"/"books15"(병합 깊이) 중 선택(라이브 검증 필요)."""
-        bitget_symbol = _to_bitget_symbol(symbol)
-        subscribe_msg = {
-            "op": "subscribe",
-            "args": [{"instType": "SPOT", "channel": depth_channel, "instId": bitget_symbol}],
-        }
-
-        async def resync_then_notify() -> None:
-            """FULL_AUDIT §2-B ② — 재연결 후 REST get_orderbook()으로 한
-            번 재동기화(subscribe_ticker_stream과 동일 판단)."""
-            try:
-                book = await self.get_orderbook(symbol)
-                await callback(book)
-            except Exception:  # noqa: BLE001 — 재동기화 실패로 재연결 자체를 막지 않음
-                logger.warning("Bitget WS 재연결 후 REST 재동기화 실패(symbol=%s)", symbol)
-            if on_reconnected is not None:
-                await on_reconnected()
-
-        async def on_message(message: dict[str, Any]) -> None:
-            book = parse_orderbook_ws_message(message, symbol=symbol)
-            if book is not None:
-                await callback(book)
-
-        await _run_ws_subscription(
-            WS_PUBLIC_URL,
-            subscribe_msg,
-            on_message,
-            connect_fn=connect_fn,
-            on_reconnecting=on_reconnecting,
-            on_reconnected=resync_then_notify,
-        )

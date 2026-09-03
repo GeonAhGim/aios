@@ -18,6 +18,9 @@ Spec: 02_exchange_adapter_v1.3.md#§2.1, 02b_bitget_api_v2_full_spec_v1.md#§3.2
 소비하지 않음, 17.9-A 과잉설계 방지). 실제로 소비하는 호출부가 생기면
 그때 ABC로 승격하고 KISAdapter에도 동일 계약을 요구한다 — 지금은
 BitgetAdapter 전용 확장 메서드로만 존재한다.
+
+2026-09-03 task-1032(PLT-40a 선행) — Plan 주문 메서드군 + health_check()는
+`trading_plan_mixin.py`로 분리(P6 line_cap 준수, 순수 이동만, 동작 변경 0).
 """
 from __future__ import annotations
 
@@ -256,59 +259,3 @@ class BitgetTradingMixin:
         )
         return bool(raw.get("code") == "00000")
 
-    async def place_plan_order(
-        self,
-        symbol: str,
-        side: OrderSide,
-        size: Decimal,
-        trigger_price: Decimal,
-        *,
-        order_price: Decimal | None = None,
-        order_type: OrderType = OrderType.LIMIT,
-        plan_type: str = "normal_plan",
-    ) -> dict[str, Any]:
-        """02b 스펙 §3.2(P1) — FD-8.1 stop_loss/take_profit을 폴링 대신
-        거래소 네이티브 트리거로 이관할 후보. `Order` 모델에는 트리거가격
-        개념이 없다(§2 모델 재사용 원칙 — 실제 소비하는 FD-8 호출부가
-        생기기 전까지 새 필드 추가를 보류) — `get_fills()`와 동일하게 raw
-        dict를 반환한다."""
-        body: dict[str, Any] = {
-            "symbol": _to_bitget_symbol(symbol),
-            "side": side.value.lower(),
-            "orderType": order_type.value.lower(),
-            "size": str(size),
-            "triggerPrice": str(trigger_price),
-            "planType": plan_type,
-            "force": "gtc",
-        }
-        if order_price is not None:
-            body["executePrice"] = str(order_price)
-        raw = await self._request(  # type: ignore[attr-defined]
-            "POST", "/api/v2/spot/trade/place-plan-order", body=body
-        )
-        return dict(raw["data"])
-
-    async def cancel_plan_order(self, order_id: str) -> bool:
-        """02b 스펙 §3.2(P1)."""
-        raw = await self._request(  # type: ignore[attr-defined]
-            "POST", "/api/v2/spot/trade/cancel-plan-order", body={"orderId": order_id}
-        )
-        return bool(raw.get("code") == "00000")
-
-    async def get_current_plan_orders(self, symbol: str | None = None) -> list[dict[str, Any]]:
-        """02b 스펙 §3.2(P1)."""
-        params: dict[str, Any] = {}
-        if symbol is not None:
-            params["symbol"] = _to_bitget_symbol(symbol)
-        raw = await self._request(  # type: ignore[attr-defined]
-            "GET", "/api/v2/spot/trade/current-plan-order", params=params or None
-        )
-        return list(raw["data"])
-
-    async def health_check(self) -> bool:
-        """Watchdog이 State DB와 무관하게 호출하는 경량 응답성 확인."""
-        try:
-            await self.get_balance()  # type: ignore[attr-defined]
-            return True
-        except Exception:  # noqa: BLE001 — 헬스체크는 어떤 예외든 False로 수렴
-            return False
