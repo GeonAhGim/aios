@@ -29,6 +29,7 @@ from src.core.loader.secret_loader import load_env_secrets
 from src.core.logging.audit_log import record_audit_log
 from src.core.logging.schema import configure_logging
 from src.core.notifications.gateway import NotificationGateway
+from src.core.observability.loop_health import loop_health
 from src.core.observability.metrics_registry import get_registry
 from src.core.safety.metrics_collector import ApiCallTracker
 from src.exchanges.common.instrumented_adapter import instrumented_adapter_factory
@@ -51,7 +52,7 @@ from src.foundation.positions.adapters.postgres_snapshot_repository import (
     PostgresSnapshotRepository,
 )
 from src.foundation.positions.application.scheduler import PositionsScheduler
-from src.services.background_loops import flag_enabled, start_background_loops
+from src.services.background_loops import flag_enabled, run_periodic_loop, start_background_loops
 from src.services.credential_resolver import CredentialResolver
 from src.services.exchange_credential_service import ExchangeCredentialService
 
@@ -105,9 +106,9 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         adapter_factory=instrumented_adapter_factory(api_tracker, build_adapter),
     )
 
-    # FD-8/FD-9/FD-14 — heartbeat/alert/risk_guard/execution_loop/safety
-    # 재가동 루프 생성·재시작 복구는 src/services/background_loops.py로 분리했다
-    # (P6 — main.py 300줄 초과 금지). lifespan은 시작·정지만 담당한다.
+    # FD-8/FD-9/FD-14 — heartbeat/alert/risk_guard/execution_loop/safety 재가동
+    # 루프 생성·재시작 복구는 background_loops.py로 분리했다(P6). lifespan은
+    # 시작·정지만 담당한다.
     loops = await start_background_loops(
         pool=pool,
         policy=policy,
@@ -116,12 +117,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         api_tracker=api_tracker,
     )
 
-    # LC-10/LC-16 — 원장 무결성 검증(5분 주기)·정산 배치(일 1회 00:10 KST)
-    # 백그라운드 루프. LC-10에서는 스케줄러 클래스만 만들고 이 배선을 후속
-    # 리프로 남겼다(그 모듈 docstring 참조) — 위 `loops`(execution_loop 등)와
-    # 같은 패턴(한 주기 실패가 루프를 죽이지 않음)이라 별도 플래그로 끌 수
-    # 있게 한다(테스트가 lifespan을 통째로 띄울 때 공유 DB에 원치 않는
-    # write_frozen을 세우지 않도록, `AIOS_EXECUTION_LOOP_ENABLED`와 동일 관례).
+    # LC-10/LC-16 — 원장 무결성(5분 주기)·정산 배치(일 1회 00:10 KST) 루프.
+    # execution_loop과 같은 패턴·같은 플래그 관례(`AIOS_EXECUTION_LOOP_ENABLED`).
     ledger_scheduler = LedgerIntegrityScheduler(
         pool,
         journal=PostgresJournalRepository(pool),
@@ -130,10 +127,22 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         registry=get_registry(),
         payouts=PostgresPayoutRepository(pool),
     )
+    # PLT-08 — run_forever() 대신 run_periodic_loop로 LoopHealth를 계측한다
+    # (scheduler.py 시그니처 불변). 정산 루프는 ~24h 간격이라 "3×interval
+    # stale" 판정에 맞지 않아 계측 대상에서 뺀다.
+    async def _ledger_integrity_loop() -> None:
+        await run_periodic_loop(
+            "ledger_integrity",
+            ledger_scheduler.interval_seconds,
+            ledger_scheduler.run_once,
+            health=loop_health(),
+            on_error="ledger_integrity: 이번 주기 전체 실패 — 다음 주기에 재시도",
+        )
+
     ledger_tasks: list[asyncio.Task[None]] = []
     if flag_enabled("AIOS_LEDGER_SCHEDULER_ENABLED"):
         ledger_tasks = [
-            asyncio.create_task(ledger_scheduler.run_forever()),
+            asyncio.create_task(_ledger_integrity_loop()),
             asyncio.create_task(ledger_scheduler.run_payout_forever()),
         ]
     else:
@@ -141,11 +150,9 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             "ledger_scheduler: AIOS_LEDGER_SCHEDULER_ENABLED=0 — 원장 스케줄러를 띄우지 않습니다."
         )
 
-    # LA-18 — 시장데이터 품질 게이지(스테일·갭·거부 비율) 주기 export. 위
-    # ledger_scheduler와 같은 패턴·같은 플래그 관례. `watched`(주기 재수집
-    # 대상)는 아직 운영 심볼 목록·자격증명 배선이 없어(§10 미확정, 이
-    # 리프 범위 밖) 비워 둔다 — 이 스케줄러는 지금은 이미 저장된 배치를
-    # 훑어 게이지만 갱신한다(quality_metrics.py 모듈 docstring 참조).
+    # LA-18 — 시장데이터 품질 게이지 주기 export. ledger_scheduler와 같은
+    # 패턴·플래그 관례. `watched`는 운영 심볼 배선 미확정(§10)이라 비워 둔다
+    # — 지금은 이미 저장된 배치만 훑어 게이지를 갱신한다(quality_metrics.py 참조).
     market_data_scheduler = MarketDataQualityScheduler(
         pool,
         store=PostgresCandleStore(pool),
@@ -163,12 +170,9 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             "시장데이터 품질 스케줄러를 띄우지 않습니다."
         )
 
-    # LB-17 — positions 마크·대사·NAV 주기 실행. 위 두 스케줄러와 같은
-    # 패턴·같은 플래그 관례. `tracked`(계좌 목록)는 아직 운영 계좌 등록·
-    # 현금잔고 어댑터가 없어(§10 미확정, 이 리프 범위 밖) 비워 둔다 —
-    # `marks`/`fx`/`nav_repo`/`cash`/`provider`/`recon`이 전부 선택
-    # 인자라 `tracked=()`에서는 실제 어댑터 없이도 배선이 끝난다
-    # (`positions/application/scheduler.py` 모듈독스트링 참조).
+    # LB-17 — positions 마크·대사·NAV 주기 실행. 위 두 스케줄러와 같은 패턴·
+    # 플래그 관례. `tracked`는 운영 계좌·현금잔고 어댑터 미확정(§10)이라 비워
+    # 둔다 — 나머지 인자가 전부 선택이라 `tracked=()`로도 배선이 끝난다.
     positions_scheduler = PositionsScheduler(
         pool, snapshots=PostgresSnapshotRepository(pool), registry=get_registry()
     )
@@ -210,9 +214,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 def create_app() -> FastAPI:
     app = FastAPI(title="AIOS API", lifespan=lifespan)
 
-    # L4 §2.3(C) — 전역 예외 핸들러. 레거시 라우터 대부분이 자체적으로 예외를
-    # 잡아 HTTPException으로 변환하므로 아직 개입은 적지만(규칙 안전망 —
-    # 새어나간 도메인 예외를 봉투 형식으로 응답), §9 PLT-2x 이관이 늘수록 커진다.
+    # L4 §2.3(C) — 전역 예외 핸들러(규칙 안전망 — 새어나간 도메인 예외를 봉투
+    # 형식으로 응답). §9 PLT-2x 이관이 늘수록 개입 범위가 커진다.
     install_exception_handlers(app)
 
     # FD-17 프론트엔드(apps/web, Vite 5173)가 별도 오리진이라 CORS가 필요 —
@@ -225,9 +228,8 @@ def create_app() -> FastAPI:
         allow_methods=["*"],
         allow_headers=["*"],
     )
-    # PLT-05 — RequestContextMiddleware가 RequestIdMiddleware(task-107)를 상속해
-    # X-Request-ID 계약은 유지하면서 trace_id·구조화 로그·메트릭을 더한다. 부모를
-    # 별도로 또 등록하지 않는다(L4_platform_observability... §2.1(A) 표).
+    # PLT-05 — RequestIdMiddleware(task-107)를 상속해 X-Request-ID 계약을
+    # 유지하며 trace_id·구조화 로그·메트릭을 더한다(부모는 별도 등록 안 함).
     app.add_middleware(RequestContextMiddleware)
     # PLT-25 — §9 표 순서 "RateLimit → RequestContext → CORS"(바깥→안). 나중에
     # 등록할수록 바깥이라(Starlette) 폭주 요청을 로깅 비용 전에 거절한다.
@@ -286,9 +288,7 @@ def create_app() -> FastAPI:
     app.include_router(admin.router, tags=["admin"])
     app.include_router(portfolio.router, prefix="/portfolio", tags=["portfolio"])
     app.include_router(reports.router, prefix="/reports", tags=["reports"])
-    app.include_router(
-        device_tokens.router, prefix="/device-tokens", tags=["device-tokens"]
-    )
+    app.include_router(device_tokens.router, prefix="/device-tokens", tags=["device-tokens"])
     app.include_router(wallet.router, prefix="/wallet", tags=["wallet"])
     app.include_router(alerts.router, prefix="/alerts", tags=["alerts"])
     app.include_router(metrics.router)

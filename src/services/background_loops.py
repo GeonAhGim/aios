@@ -12,6 +12,13 @@ main.py는 pool/event_bus/credential_resolver 등 앱 전역 객체를 조립한
 모듈의 :func:`start_background_loops`에 넘겨 루프를 띄우고, shutdown 시
 반환된 :class:`BackgroundLoops`의 :meth:`~BackgroundLoops.stop`만 호출한다.
 동작은 분리 이전과 동일 — 이 모듈은 main.py에 있던 코드를 그대로 옮긴 것이다.
+
+§9 PLT-08 — heartbeat/alert/risk_guard/safety_reactivation 4개 루프는
+`LoopHealth.record_tick`으로 계측된다(`_run_instrumented` 공용 래퍼). tick마다
+`bind_system(f"loop.{name}")`으로 시스템 컨텍스트를 새로 바인딩한다(부모 요청
+컨텍스트 누수 방지, `context.py` 모듈독스트링 참조). execution_loop은
+`ExecutionLoopScheduler`가 별도 스케줄러라 이 리프 범위 밖이다(선행 리프에서
+계측 예정).
 """
 from __future__ import annotations
 
@@ -19,12 +26,17 @@ import asyncio
 import contextlib
 import logging
 import os
+import time
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
+from typing import Any
 
 import asyncpg
 
 from src.core.event_bus.bus import EventBus
 from src.core.loader.risk_policy_loader import RiskPolicy
+from src.core.observability.context import bind_system
+from src.core.observability.loop_health import LoopHealth, loop_health
 from src.core.safety.circuit_breaker import CircuitBreakerService
 from src.core.safety.heartbeat import DEFAULT_HEARTBEAT_PATH, write_heartbeat
 from src.core.safety.metrics_collector import ApiCallTracker, collect_circuit_breaker_metrics
@@ -65,6 +77,44 @@ class BackgroundLoops:
                 await task
 
 
+async def _run_instrumented(
+    name: str,
+    interval_sec: float,
+    tick: Callable[[], Awaitable[Any]],
+    *,
+    health: LoopHealth,
+    on_error: str,
+) -> None:
+    """PLT-08 공용 계측 래퍼 — `bind_system` + `LoopHealth.record_tick`. 예외는
+    여기서 삼키고(로그만 남김) 루프 자체는 죽지 않는다(각 루프 원래 동작과 동일)."""
+    start = time.monotonic()
+    ok = True
+    try:
+        with bind_system(f"loop.{name}"):
+            await tick()
+    except Exception:
+        ok = False
+        logger.exception(on_error)
+    finally:
+        health.record_tick(name, ok, time.monotonic() - start, interval_sec=interval_sec)
+
+
+async def run_periodic_loop(
+    name: str,
+    interval_sec: float,
+    tick: Callable[[], Awaitable[Any]],
+    *,
+    health: LoopHealth,
+    on_error: str,
+) -> None:
+    """`sleep(interval_sec)` → 계측된 tick 1회, 무한 반복. alert/risk_guard/
+    safety_reactivation과 main.py의 LedgerIntegrityScheduler 무결성 루프가
+    공유하는 공용 루프 본체(export — main.py가 직접 가져다 쓴다)."""
+    while True:
+        await asyncio.sleep(interval_sec)
+        await _run_instrumented(name, interval_sec, tick, health=health, on_error=on_error)
+
+
 async def start_background_loops(
     *,
     pool: asyncpg.Pool,
@@ -72,13 +122,34 @@ async def start_background_loops(
     event_bus: EventBus,
     credential_resolver: CredentialResolver,
     api_tracker: ApiCallTracker,
+    health: LoopHealth | None = None,
 ) -> BackgroundLoops:
+    health = health if health is not None else loop_health()
+
     async def _heartbeat_loop() -> None:
         """FD-9.1 — watchdog_process.py(별도 OS 프로세스)가 이 메인 프로세스의
         생사를 판정하는 유일한 신호. 프로세스 메모리를 공유하지 않으므로
-        파일 타임스탬프로만 통신한다(core/safety/heartbeat.py)."""
+        파일 타임스탬프로만 통신한다(core/safety/heartbeat.py).
+
+        예외를 삼키지 않는다(다른 3개 루프와 달리) — heartbeat 실패는 watchdog이
+        프로세스 사망으로 오판하길 원하는 신호이므로, 원래 동작대로 전파해
+        태스크를 죽인다. `LoopHealth`에는 실패로 기록한 뒤 다시 던진다."""
         while True:
-            write_heartbeat(DEFAULT_HEARTBEAT_PATH)
+            start = time.monotonic()
+            ok = True
+            try:
+                with bind_system("loop.heartbeat"):
+                    write_heartbeat(DEFAULT_HEARTBEAT_PATH)
+            except Exception:
+                ok = False
+                raise
+            finally:
+                health.record_tick(
+                    "heartbeat",
+                    ok,
+                    time.monotonic() - start,
+                    interval_sec=HEARTBEAT_INTERVAL_SECONDS,
+                )
             await asyncio.sleep(HEARTBEAT_INTERVAL_SECONDS)
 
     heartbeat_task = asyncio.create_task(_heartbeat_loop())
@@ -91,22 +162,19 @@ async def start_background_loops(
         pool, credential_resolver=credential_resolver, publish=event_bus.publish
     )
 
-    async def _alert_evaluation_loop() -> None:
-        while True:
-            await asyncio.sleep(ALERT_EVALUATION_INTERVAL_SECONDS)
-            # 레드팀 #2026-09-02-21 — evaluate_all_active()는 개별 알림 실패를
-            # 내부에서 이미 건너뛰지만, 이 호출 자체(또는 그 안에서 예상 못한
-            # 예외)가 이 루프를 빠져나가면 alert_task 코루틴이 영구히 죽어
-            # 재시작 전까지 아무 사용자의 알림도 평가되지 않는다 — 두 번째
-            # 방어선으로 여기서도 잡아 다음 주기에 계속 시도한다.
-            try:
-                await alert_service.evaluate_all_active()
-            except Exception:
-                logger.exception(
-                    "alert_evaluation_loop: 이번 주기 평가 실패 — 다음 주기에 재시도합니다."
-                )
-
-    alert_task = asyncio.create_task(_alert_evaluation_loop())
+    # 레드팀 #2026-09-02-21 — evaluate_all_active()는 개별 알림 실패를 내부에서
+    # 이미 건너뛰지만, 이 호출 자체(또는 그 안에서 예상 못한 예외)가 이 루프를
+    # 빠져나가면 alert_task 코루틴이 영구히 죽어 재시작 전까지 아무 사용자의
+    # 알림도 평가되지 않는다 — 두 번째 방어선으로 `run_periodic_loop`가 잡는다.
+    alert_task = asyncio.create_task(
+        run_periodic_loop(
+            "alert_evaluation",
+            ALERT_EVALUATION_INTERVAL_SECONDS,
+            alert_service.evaluate_all_active,
+            health=health,
+            on_error="alert_evaluation_loop: 이번 주기 평가 실패 — 다음 주기에 재시도합니다.",
+        )
+    )
 
     # ZuluTrade식 "위험 관리" — 실행별 손실 한도(%) 자동 정지 루프. 위 두
     # 루프와 동일 패턴(main.py가 유일한 백그라운드 스케줄러 지점).
@@ -116,19 +184,17 @@ async def start_background_loops(
         publish=event_bus.publish,
     )
 
-    async def _risk_guard_loop() -> None:
-        while True:
-            await asyncio.sleep(RISK_GUARD_INTERVAL_SECONDS)
-            # 레드팀 #25 / 전수감사 §2 P1 — alert 루프와 같은 방어선. 이 호출이
-            # 예외를 내면 손실 한도 자동정지가 재시작 전까지 영구히 죽는다.
-            try:
-                await risk_guard_service.evaluate_all_running()
-            except Exception:
-                logger.exception(
-                    "risk_guard_loop: 이번 주기 평가 실패 — 다음 주기에 재시도합니다."
-                )
-
-    risk_guard_task = asyncio.create_task(_risk_guard_loop())
+    # 레드팀 #25 / 전수감사 §2 P1 — alert 루프와 같은 방어선. 이 호출이 예외를
+    # 내면 손실 한도 자동정지가 재시작 전까지 영구히 죽는다.
+    risk_guard_task = asyncio.create_task(
+        run_periodic_loop(
+            "risk_guard",
+            RISK_GUARD_INTERVAL_SECONDS,
+            risk_guard_service.evaluate_all_running,
+            health=health,
+            on_error="risk_guard_loop: 이번 주기 평가 실패 — 다음 주기에 재시도합니다.",
+        )
+    )
 
     # 05번 §5.6 — 재시작 복구. 백그라운드 루프를 띄우기 전에 1회. 거래소가
     # 응답하지 않아도 앱 기동 자체는 막지 않는다(복구는 다음 틱이 이어받는다).
@@ -164,17 +230,20 @@ async def start_background_loops(
     # 반영한 뒤 check_reactivation()으로 승인 결과까지 마저 반영한다.
     circuit_breaker = CircuitBreakerService(pool, policy.circuit_breaker, publish=event_bus.publish)
 
-    async def _safety_reactivation_loop() -> None:
-        while True:
-            await asyncio.sleep(SAFETY_REACTIVATION_INTERVAL_SECONDS)
-            try:
-                metrics = await collect_circuit_breaker_metrics(pool, api_tracker)
-                await circuit_breaker.evaluate(metrics)
-                await circuit_breaker.check_reactivation()
-            except Exception:
-                logger.exception("safety_reactivation_loop: 이번 주기 실패 — 다음 주기에 재시도")
+    async def _safety_tick() -> None:
+        cb_metrics = await collect_circuit_breaker_metrics(pool, api_tracker)
+        await circuit_breaker.evaluate(cb_metrics)
+        await circuit_breaker.check_reactivation()
 
-    safety_task = asyncio.create_task(_safety_reactivation_loop())
+    safety_task = asyncio.create_task(
+        run_periodic_loop(
+            "safety_reactivation",
+            SAFETY_REACTIVATION_INTERVAL_SECONDS,
+            _safety_tick,
+            health=health,
+            on_error="safety_reactivation_loop: 이번 주기 실패 — 다음 주기에 재시도",
+        )
+    )
 
     tasks = [heartbeat_task, alert_task, risk_guard_task, safety_task]
     if execution_loop_task is not None:
