@@ -106,4 +106,12 @@ describe("NotificationSettingsPage 조회·변경 에러 표시", () => {
     expect(updateMutate).toHaveBeenCalledWith({ execution_alert: false });
     await waitFor(() => expect(screen.getByText("일시적인 오류입니다.")).toBeInTheDocument());
   });
+
+  it("정상 응답이지만 알림 이력이 없으면 에러가 아닌 빈 상태 안내를 보여준다", async () => {
+    historyResult = { data: [], isError: false, error: null, refetch: vi.fn() };
+    renderPage();
+
+    await waitFor(() => expect(screen.getByText("알림 이력이 없습니다.")).toBeInTheDocument());
+    expect(screen.getByText("execution_alert")).toBeInTheDocument();
+  });
 });

@@ -89,6 +89,22 @@ describe("MyApprovalRequestsPage 목록 조회 에러 표시", () => {
     expect(screen.queryByText("raw server detail")).not.toBeInTheDocument();
     expect(screen.queryByText("대기 중인 승인 요청이 없습니다.")).not.toBeInTheDocument();
   });
+
+  it("정상 응답이지만 대기 중인 요청이 없으면 에러가 아닌 빈 상태 안내를 보여준다", async () => {
+    useMyApprovalRequestsResult = {
+      data: [],
+      isLoading: false,
+      isError: false,
+      error: null,
+      refetch: vi.fn(),
+    };
+    renderPage();
+
+    await waitFor(() =>
+      expect(screen.getByText("대기 중인 승인 요청이 없습니다.")).toBeInTheDocument(),
+    );
+    expect(screen.queryByText("이 작업을 수행할 권한이 없습니다.")).not.toBeInTheDocument();
+  });
 });
 
 // task-1161: 승인/거부는 이미 err instanceof ApiError로만 분기해 err.message를 노출하지

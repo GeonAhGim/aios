@@ -84,4 +84,27 @@ describe("ReportsPage 조회 에러 표시", () => {
 
     await waitFor(() => expect(screen.getByText("ECONNRESET")).toBeInTheDocument());
   });
+
+  it("정상 응답이지만 해당 기간 거래 내역이 없으면 에러가 아닌 빈 상태 안내를 보여준다", async () => {
+    useReportResult = {
+      data: {
+        totalReturn: "5.5",
+        winRate: "N/A",
+        maxDrawdown: "2.2",
+        tradeCount: 0,
+        dailyPnl: [],
+        strategyContributions: [],
+      },
+      isLoading: false,
+      isError: false,
+      error: null,
+      refetch: vi.fn(),
+    };
+    renderPage();
+
+    await waitFor(() =>
+      expect(screen.getByText("해당 기간 거래 내역이 없습니다.")).toBeInTheDocument(),
+    );
+    expect(screen.getByText("5.5%")).toBeInTheDocument();
+  });
 });
