@@ -34,6 +34,11 @@ class BatchRepository(Protocol):
         아무것도 쓰지 않는다."""
         ...
 
-    async def get(self, conn: asyncpg.Connection, batch_id: UUID) -> IngestBatchResult | None:
-        """없으면 `None`."""
+    async def get(
+        self, conn: asyncpg.Connection, batch_id: UUID, tenant_id: UUID | None
+    ) -> IngestBatchResult | None:
+        """`tenant_id`가 배치 소유자와 다르면(비교 대상 없는 플랫폼 공용
+        배치 포함) 존재 자체를 숨기고 `None`을 반환한다(§8.3 LA-21
+        "404 동형") — 없어서 `None`인지 남의 tenant 것이라 `None`인지
+        호출부가 구분할 수 없어야 한다."""
         ...

@@ -157,8 +157,19 @@ class PostgresBatchRepository:
             ],
         )
 
-    async def get(self, conn: asyncpg.Connection, batch_id: UUID) -> IngestBatchResult | None:
-        row = await conn.fetchrow("SELECT * FROM md_ingest_batch WHERE id = $1", batch_id)
+    async def get(
+        self, conn: asyncpg.Connection, batch_id: UUID, tenant_id: UUID | None
+    ) -> IngestBatchResult | None:
+        # `IS NOT DISTINCT FROM`은 `tenant_id`가 NULL(플랫폼 공용 배치)인
+        # 경우도 동등 비교로 다뤄야 해서다 — `=`는 NULL과 절대 같지 않다고
+        # 평가되므로(SQL 삼치논리) 공용 배치를 자기 것으로 조회하려는
+        # 정당한 호출(tenant_id=None)까지 걸러버린다. tenant 불일치와
+        # "행 자체가 없음"을 같은 `None` 반환으로 합쳐 존재를 숨긴다.
+        row = await conn.fetchrow(
+            "SELECT * FROM md_ingest_batch WHERE id = $1 AND tenant_id IS NOT DISTINCT FROM $2",
+            batch_id,
+            tenant_id,
+        )
         if row is None:
             return None
 

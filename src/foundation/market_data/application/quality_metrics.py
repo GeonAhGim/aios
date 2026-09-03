@@ -99,18 +99,25 @@ async def _active_series(
     ]
 
 
-async def _latest_batch_id(
+async def _latest_batch(
     conn: asyncpg.Connection, key: SeriesKey, window_start: datetime
-) -> UUID | None:
-    value = await conn.fetchval(
-        "SELECT id FROM md_ingest_batch WHERE venue = $1 AND instrument_id = $2 "
+) -> tuple[UUID, UUID | None] | None:
+    """`(batch_id, tenant_id)` — 스케줄러는 전 tenant를 훑는 내부 잡이라
+    이 조회 자체는 tenant로 좁히지 않는다(§4.1 편차 2). 뒤이은
+    `batches.get()` 호출에 넘길 소유자 `tenant_id`를 같이 반환한다 —
+    LA-22가 `get()`에 tenant 필터를 추가한 뒤로는 아무 tenant_id나 넘기면
+    "존재 비노출"에 걸려 자기 배치도 못 읽으므로."""
+    row = await conn.fetchrow(
+        "SELECT id, tenant_id FROM md_ingest_batch WHERE venue = $1 AND instrument_id = $2 "
         "AND timeframe = $3 AND created_at >= $4 ORDER BY created_at DESC LIMIT 1",
         key.venue.value,
         key.instrument_id,
         key.timeframe.value,
         window_start,
     )
-    return cast("UUID | None", value)
+    if row is None:
+        return None
+    return cast("UUID", row["id"]), cast("UUID | None", row["tenant_id"])
 
 
 def _ratio(numerator: int, denominator: int) -> Decimal:
@@ -140,12 +147,14 @@ async def _export_one(
         )
         return None
 
-    last_batch_id = await _latest_batch_id(conn, key, window_start)
+    latest = await _latest_batch(conn, key, window_start)
+    last_batch_id = latest[0] if latest is not None else None
     gap_count = 0
     reject_count = 0
     record_count = 0
-    if last_batch_id is not None:
-        batch = await batches.get(conn, last_batch_id)
+    if latest is not None:
+        batch_id, batch_tenant_id = latest
+        batch = await batches.get(conn, batch_id, batch_tenant_id)
         if batch is not None:
             verdict = batch.verdict
             record_count = verdict.accepted + verdict.quarantined + verdict.rejected

@@ -273,7 +273,7 @@ async def test_batch_create_then_get_reconstructs_verdict_from_stored_candles(
         key = SeriesKey(venue=Venue.BITGET, instrument_id=instrument_id, timeframe=Timeframe.M1)
         candle = _candle(key, t0, 100, 110, 90, 105, 10)
         await candle_store.upsert_batch(conn, batch.batch_id, [candle])
-        fetched = await batch_repo.get(conn, batch.batch_id)
+        fetched = await batch_repo.get(conn, batch.batch_id, None)
     assert fetched is not None
     assert fetched.verdict.accepted == 1
     assert fetched.verdict.quarantined == 0
