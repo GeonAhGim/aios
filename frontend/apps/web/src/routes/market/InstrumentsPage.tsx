@@ -5,6 +5,7 @@ import { useAuthStore } from "@aios/shared-hooks";
 import { Button, Card, EmptyState, LoadingState, PageHeader, Select } from "@aios/ui-web";
 import { useQuery } from "@tanstack/react-query";
 import { useMemo, useState } from "react";
+import { Link } from "react-router-dom";
 import { AppShell } from "../../components/layout/AppShell";
 import { ErrorBanner, InstrumentDetailPanel } from "../../components/InstrumentDetailPanel";
 import { InstrumentLifecycleBadge } from "../../components/InstrumentLifecycleBadge";
@@ -17,6 +18,10 @@ import { useCursorPage } from "../../hooks/useCursorPage";
 // 새로 추가한 최소 메서드다(apiPaths.ts 레지스트리 규칙, LA-9 포트에는 아직
 // 목록·별칭 조회가 없어 legacy-only 경로로 등록했다). 행 클릭 상세(별칭·생애주기
 // 이력)는 InstrumentDetailPanel.tsx로 분리했다(300줄 규율).
+//
+// task-1088: 행의 "캔들 보기" 링크가 CandlesPage(/market/candles)로
+// instrument_id를 쿼리스트링으로 인계한다(SeriesKey.instrument_id §3.1 SSOT).
+// CandlesPage는 이 값을 그대로 받을 뿐 새 파서를 쓰지 않는다.
 const VENUE_OPTIONS: readonly Venue[] = ["BITGET", "KIS_KRX", "KIS_US"];
 const STATUS_OPTIONS: readonly SymbolStatus[] = ["PENDING", "LISTED", "SUSPENDED", "DELISTED"];
 
@@ -36,16 +41,23 @@ function InstrumentRow({ parsed, now, onSelect }: InstrumentRowProps) {
   }
   const { instrument_id: instrumentId, asset_class: assetClass } = parsed.value;
   return (
-    <li className="py-3">
+    <li className="flex flex-wrap items-center justify-between gap-2 py-3">
       <button
         type="button"
         data-testid={`instrument-row-${instrumentId}`}
         onClick={onSelect}
-        className="flex w-full flex-wrap items-center justify-between gap-2 text-left"
+        className="flex flex-1 flex-wrap items-center gap-2 text-left"
       >
         <InstrumentLifecycleBadge instrument={parsed} now={now} />
         <span className="text-xs text-fg-muted">{assetClass}</span>
       </button>
+      <Link
+        to={`/market/candles?instrument_id=${encodeURIComponent(instrumentId)}`}
+        data-testid={`instrument-candles-link-${instrumentId}`}
+        className="text-xs underline"
+      >
+        캔들 보기
+      </Link>
     </li>
   );
 }

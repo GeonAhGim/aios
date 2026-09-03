@@ -59,11 +59,12 @@ function okResult(overrides: { candles?: typeof CANDLE[]; gaps?: [string, string
   };
 }
 
-function renderPage(fetchCandles: FetchCandles, now?: Date) {
+function renderPage(fetchCandles: FetchCandles, now?: Date, instrumentId: string | null = "BTCUSDT") {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  const entry = instrumentId === null ? "/market/candles" : `/market/candles?instrument_id=${instrumentId}`;
   render(
     <QueryClientProvider client={queryClient}>
-      <MemoryRouter>
+      <MemoryRouter initialEntries={[entry]}>
         <CandlesPage fetchCandles={fetchCandles} now={now} />
       </MemoryRouter>
     </QueryClientProvider>,
@@ -151,5 +152,25 @@ describe("CandlesPage", () => {
     );
     expect(screen.queryByText("raw server detail")).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "다시 시도" })).not.toBeInTheDocument();
+  });
+
+  // task-1088: instrument_id 없이 직접 진입하면 자유입력으로 폴백하지 않고
+  // InstrumentsPage로 가는 안내만 보여준다(task-837 결함의 정식 해소).
+  it("negative: instrument_id 없이 진입하면 자유입력 없이 심볼 선택 안내만 보여준다", async () => {
+    const fetchCandles = vi.fn(async () => okResult());
+    renderPage(fetchCandles, undefined, null);
+
+    expect(await screen.findByText(/심볼을 먼저 선택하세요/)).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "심볼 목록으로 이동" })).toHaveAttribute("href", "/market/instruments");
+    expect(screen.queryByRole("textbox")).not.toBeInTheDocument();
+    expect(fetchCandles).not.toHaveBeenCalled();
+  });
+
+  it("instrument_id는 쿼리스트링에서 읽어 읽기 전용으로 보여주고 자유입력 필드는 없다", async () => {
+    const fetchCandles = vi.fn(async () => okResult());
+    renderPage(fetchCandles);
+
+    await waitFor(() => expect(screen.getByTestId("candles-instrument-id")).toHaveTextContent("BTCUSDT"));
+    expect(screen.queryByRole("textbox")).not.toBeInTheDocument();
   });
 });
