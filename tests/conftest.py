@@ -14,6 +14,11 @@ from pathlib import Path
 
 import asyncpg
 import dotenv
+import pytest
+
+from src.core.observability.metrics import NullMetrics, set_metrics
+from tests.support.db import ensure_worker_database
+from tests.support.db import tx_conn as tx_conn  # noqa: F401 -- re-exported fixture
 
 _PROJECT_ROOT = Path(__file__).resolve().parents[1]
 _ROOT_ENV_PATH = (_PROJECT_ROOT / ".env").resolve()
@@ -23,6 +28,17 @@ if not _TEST_DATABASE_URL:
     raise RuntimeError(
         "TEST_DATABASE_URL이 필요합니다. 테스트는 development/production DB에 연결할 수 없습니다."
     )
+
+# PLT-36: pytest-xdist로 `-n`(병렬 워커) 실행 시, 모든 워커가 같은
+# TEST_DATABASE_URL을 공유하면 원장 append 시퀀스·시드 계정이 워커 간에
+# 서로 오염된다(esc-ci-b120c35c318c). xdist는 워커 서브프로세스마다
+# PYTEST_XDIST_WORKER("gw0", "gw1", ...)를 환경변수로 심어 두므로, 픽스처가
+# 아니라 이 모듈 임포트 시점(=워커 프로세스 시작 직후, 아직 아무 DB 커넥션도
+# 열리기 전)에 워커 전용 DB로 바꿔 낀다. `-n` 없이 실행하면(worker_id="master")
+# 아무 것도 복제하지 않고 기존과 동일하게 TEST_DATABASE_URL을 그대로 쓴다.
+_WORKER_ID = os.environ.get("PYTEST_XDIST_WORKER", "master")
+if _WORKER_ID != "master":
+    _TEST_DATABASE_URL = asyncio.run(ensure_worker_database(_TEST_DATABASE_URL, _WORKER_ID))
 
 # Do not use an operator's credentials even if their shell or local .env has
 # them. External exchange calls in tests are mocked; these values exist only so
@@ -113,3 +129,14 @@ def lifespan_context_with_retry(app):
     `app.router.lifespan_context(app)` 대체 — 동일하게 동작하되 진입 시
     `TooManyConnectionsError`를 재시도한다."""
     return _RetryingLifespanContext(app)
+
+
+@pytest.fixture(autouse=True)
+def _reset_metrics_singleton():
+    """`set_metrics`는 프로세스 전역 싱글턴이라, 한 테스트가 대체 구현체로
+    바꾸고 복원하지 않으면 같은 워커에서 뒤이어 실행되는 무관한 테스트까지
+    그 구현체를 보게 된다. 매 테스트 전후로 `NullMetrics`로 되돌려 순서
+    의존성을 없앤다."""
+    set_metrics(NullMetrics())
+    yield
+    set_metrics(NullMetrics())

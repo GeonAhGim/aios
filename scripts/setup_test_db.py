@@ -16,6 +16,14 @@ uuid 접미사로만 격리해 왔고, 마이그레이션 적용 시점이 세�
 서버 접속 정보는 DATABASE_URL(환경변수 → .env 순)에서 host/port/user/password만
 빌려 쓰고 DB 이름만 바꾼다. 이름은 `aios_test_` 접두어가 강제된다 —
 `aios_dev`·운영 DB를 실수로 지우는 일이 없도록.
+
+    python scripts/setup_test_db.py --template   # aios_test_template 생성 + 마이그레이션
+
+PLT-36: `--template`은 이름 고정 `aios_test_template` DB를 만들고 마이그레이션한다.
+이 DB 자체는 테스트가 직접 쓰지 않는다 — `tests/support/db.py`의
+`ensure_worker_database`가 pytest-xdist 워커별 DB를 여기서
+`CREATE DATABASE ... TEMPLATE`로 복제해, 워커마다 마이그레이션을 재실행하지
+않고도(각 ~1초) 격리된 DB를 준다.
 """
 from __future__ import annotations
 
@@ -86,14 +94,26 @@ def main() -> int:
     parser = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
     )
-    parser.add_argument("name", help="세션 이름 — DB는 aios_test_<name>")
+    parser.add_argument("name", nargs="?", help="세션 이름 — DB는 aios_test_<name>")
     parser.add_argument("--reset", action="store_true", help="이미 있으면 DROP 후 재생성")
     parser.add_argument("--print-env", action="store_true", help="URL 한 줄만 출력(스크립트용)")
+    parser.add_argument(
+        "--template",
+        action="store_true",
+        help="이름 고정 aios_test_template DB를 생성·마이그레이션(PLT-36 워커별 복제 원본)",
+    )
     args = parser.parse_args()
 
-    if not _NAME_RE.match(args.name):
+    if args.template:
+        name = "template"
+    elif args.name:
+        name = args.name
+    else:
+        parser.error("name 또는 --template 중 하나가 필요합니다.")
+
+    if not _NAME_RE.match(name):
         raise SystemExit("이름은 소문자·숫자·밑줄 40자 이내여야 합니다.")
-    database = PREFIX + args.name
+    database = PREFIX + name
     server_url = _server_url()
     test_url = _with_database(server_url, database)
 

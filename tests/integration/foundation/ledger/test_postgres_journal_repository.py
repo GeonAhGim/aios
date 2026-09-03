@@ -156,6 +156,11 @@ async def test_concurrent_appends_produce_contiguous_sequence_with_no_duplicates
     전역 advisory lock(`pg_advisory_xact_lock(hashtext('ledger_journal'))`)이
     append를 직렬화하지 못하면 sequence_no가 중복되거나 UNIQUE 제약 위반으로
     일부 작성자가 예외 없이 죽는 대신 터진다 — 둘 다 이 테스트가 잡아낸다.
+
+    이 단언(baseline+1..baseline+50 연속)은 테스트 실행 동안 이 DB에 다른 작성자가
+    없다는 전제에 의존한다 — pytest-xdist로 `-n` 병렬 실행 시 워커마다 격리된 DB를
+    쓰는 것은 이 테스트 파일이 아니라 `tests/conftest.py`(PLT-36,
+    `ensure_worker_database`)의 책임이다.
     """
     async with pool.acquire() as conn, conn.transaction():
         before = await repo.last(conn)
