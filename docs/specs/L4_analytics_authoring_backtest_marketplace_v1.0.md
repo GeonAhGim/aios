@@ -250,7 +250,7 @@ received → authenticated → normalized → gated(리스크) → accepted|reje
 ## 9. 리프 목록 (구현 순서)
 DoD 공통: `ruff` · `mypy --strict` · `scripts/check_zone_manifest.py` 통과, 명시 테스트 통과, negative test ≥1, 파일 ≤300줄. 프론트는 `npm run build --workspace=apps/web` + vitest.
 
-### 9.1 (SIG) 신호 유입 — 즉시 가치, 선행 최소
+### 9.1 (SIG) 신호 유입 — 선택 백로그(맨 마지막). 외부 신호 수신은 부가 기능이며 제품 독립성과 무관
 | 리프 | 파일 | 선행 | DoD | 크기 |
 |---|---|---|---|---|
 | SIG-1 | `signals/contracts/v1.py` + 스키마 테스트 | — | 스냅샷, naive datetime 거부 | 200 |
@@ -349,8 +349,10 @@ DoD 공통: `ruff` · `mypy --strict` · `scripts/check_zone_manifest.py` 통과
 | MP-10 | 프론트 `MarketplaceBrowse`·`ListingDetail`·`SellStrategy` 확장(가시성·구독·평판·재현 키) | MP-9 | 화면·negative | 900 |
 
 ### 9.8 우선순위와 병행 규칙
-SIG-1~6 즉시 → DC-1~18(R/L4 잔여보다 먼저, 4 worker 중 2 고정) → DSL-1~13 ∥ BT-1~9 → IND ∥ CH → MP.
+**원칙: AIOS는 TradingView에 연결해 쓰는 제품이 아니라 그 없이 독립적으로 같은 수준을 제공하는 제품이다.**
+DC-1~18(R/L4 잔여보다 먼저, backend 4 중 2 고정) → CH-1~10 ∥ IND-1~8 → DSL-1~13 → BT-1~13 → MP-1~10 → SIG-1~6(선택 백로그, 외부 신호를 받고 싶은 사용자를 위한 부가 기능·맨 마지막).
 프론트 리프(CH·DSL-13·BT-13·MP-10·SIG-6)는 frontend 풀, 나머지는 backend 풀. 각 영역 첫 리프는 QA에서 명세 §3 계약 스냅샷을 반드시 남긴다.
+`lightweight-charts`는 TradingView 서비스가 아니라 자체 호스팅하는 Apache-2.0 오픈소스 렌더링 라이브러리다(외부 계정·API·네트워크 의존 없음). 렌더링 코어를 자체 개발하는 안은 ADR-B Rejected.
 
 ## 10. 미확정·리스크
 - 데이터 벤더 선택·라이선스(Polygon, Databento, EODHD, Kiwoom 등)는 **미확인·사람 결정**. 명세는 SPI 형태만 고정.
