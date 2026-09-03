@@ -531,7 +531,7 @@ A(ingest) → B(mark) → B(recon) → B(NAV) 순서 의존이 있으나 결합�
 | A 스테일 | 1m: < 180s 세션 중 | 스케줄러 | `md_staleness_seconds{venue,symbol,timeframe}` gauge |
 | A 갭 비율(24h) | < 0.5% 세션 내 | `quality_metrics` | `md_gap_ratio_24h{...}` gauge |
 | A 품질 이슈 | — | verdict | `md_quality_issues_total{type,severity}` counter, `md_ingest_batches_total{verdict}` |
-| A 리플레이 | 1년 1m(≈525k) < 5s, 메모리 < 512MB(스트리밍 커서) | `replay` | `md_replay_seconds` |
+| A 리플레이 | 1일(1,440) ≤ 0.5s / 1개월(43,200) ≤ 5s / 1년(525,600) ≤ 30s(P95, 단일 노드, ADR-2026-09-04-A §8.4) | `replay` | `md_replay_seconds` |
 | B 저널 append(락 포함) | p95 < 30ms | `record_fill` | `pos_journal_append_ms` |
 | B 재빌드 | 10k 저널행 < 1s | `rebuild_snapshot` | `pos_snapshot_rebuild_seconds` |
 | B 브레이크 표면화 | 감지 → 알림 < 2분 (대사 주기 60s + 처리) | `reconcile_provider` | `pos_recon_break_open_count`, `pos_recon_break_age_seconds_max`, `pos_recon_runs_total{classification}` |
@@ -622,7 +622,7 @@ A(ingest) → B(mark) → B(recon) → B(NAV) 순서 의존이 있으나 결합�
 ### 8.4 계약·성능
 
 - `tests/foundation/unit/{market_data,positions,ledger}/test_contracts_schema.py`: `model_json_schema()` 스냅샷을 `tests/contracts/snapshots/*.json`과 비교(107번 — 필드 제거 시 실패).
-- `tests/foundation/integration/**/test_perf_*.py`(`pytest-benchmark`, 단언 포함 — 감사 §9 "벤치마크에 단언 없음" 반복 금지): 리플레이 525k행 < 5s, 저널 append p95 < 30ms(100회), 포스팅 p95 < 50ms(200회), 무결성 검증 10k 분개 < 3s.
+- `tests/foundation/integration/**/test_perf_*.py`(`pytest-benchmark`, 단언 포함 — 감사 §9 "벤치마크에 단언 없음" 반복 금지): 리플레이는 규모별 계약(단일 노드, P95 — ADR-2026-09-04-A, esc-826-perf-contract): **1일(1,440행) ≤ 0.5s, 1개월(43,200행) ≤ 5s, 1년(525,600행) ≤ 30s**. 1일 규모는 CI에서 매번 강제한다. 1년 규모는 `@pytest.mark.nightly`로 분리해 nightly 성능 잡에서만 돈다(CI 전체 pytest가 연단위 리플레이 때문에 타임아웃까지 행(hang)하는 것을 막기 위함, esc-ci-d6f71c240915). 그 외: 저널 append p95 < 30ms(100회), 포스팅 p95 < 50ms(200회), 무결성 검증 10k 분개 < 3s.
 - `tests/unit/test_zone_purity.py`: `src/foundation/*/domain/**`가 `asyncpg|httpx|sqlalchemy`를 import하지 않음(AST 검사).
 
 ---
