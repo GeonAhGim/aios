@@ -2,6 +2,10 @@
 
 ## Status
 Accepted (2026-09-04, Chief Architect). 사용자 지시 "1차 MVP는 최소 T3 수준으로 만들어".
+**Amended 2026-09-04 (같은 날, 사용자 지시 "1차 MVP에 post-MVP까지 붙여라. 실자금 개통은 1차 MVP 후")**: 아래 표의 "제외(post-MVP)" 열은
+**전부 MVP-1에 포함**된다. 유일한 제외는 (a) L04·L05·L09·L11(DSL이 대체), (b) L4-30(Bitget 데모 키 확보 후), (c) 실자금(LIVE) 개통이다.
+MVP-1 총 리프 = 208(미착수 204 + 진행 7 − 대체 4 + F-04 1). 순서는 그대로이되 post-MVP였던 리프는 같은 축의 뒤에 이어 붙인다:
+MP·SIG는 맨 마지막. LIVE 개통은 MVP-1 종료 기준 10항 통과 후 별도 ADR(하드 가드 ADR-2026-08-29-E 해제는 Guard P2 대상 — 사람이 meta PR을 승인)로만 연다.
 
 ## Context
 동종 등급표(T1 기관 OMS/EMS ~ T5 개인 스크립트)에서 T3는 NautilusTrader·LEAN·Freqtrade급 —
