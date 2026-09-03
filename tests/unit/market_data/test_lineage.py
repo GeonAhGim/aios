@@ -1,17 +1,29 @@
-"""LA-8 — market_data/domain/lineage.py 순수 규칙 테스트.
+"""LA-8/LA-23b — market_data/domain/lineage.py 순수 규칙 테스트.
 
 Spec: docs/specs/L4_market_data_positions_ledger_v1.0.md#§2.2 LA-8, §9.2 LA-8,
 `unit/market_data/test_lineage.py` 표(§9행 570): 순서 다른 같은 레코드 → 같은
 해시, 한 값 변경 → 다른 해시.
+
+`test_batch_hash_streaming_matches_reference_property`는
+ADR-2026-09-04-A #2(연단위 리플레이 성능) 요구사항 — 스트리밍 재구현
+`batch_hash`가 옛 구현 `_batch_hash_reference`와 무작위 배치 200건 이상에서
+바이트 단위로 동일한 다이제스트를 내는지 증명한다(저장된 해시 재계산·
+backfill 없이 P3 WORM을 지키기 위한 필수 증거, `domain/lineage.py` 모듈
+docstring 참고).
 """
 from __future__ import annotations
 
-from datetime import datetime, timezone
+import random
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from uuid import uuid4
 
 from src.foundation.market_data.contracts.v1 import CandleRecord, SeriesKey, Timeframe, Venue
-from src.foundation.market_data.domain.lineage import batch_hash, request_fingerprint
+from src.foundation.market_data.domain.lineage import (
+    _batch_hash_reference,
+    batch_hash,
+    request_fingerprint,
+)
 
 
 def _candle(open_time: datetime, close: str) -> CandleRecord:
@@ -59,3 +71,48 @@ def test_request_fingerprint_changes_when_param_value_changes() -> None:
     fp2 = request_fingerprint("kis", {"symbol": "000660"})
 
     assert fp1 != fp2
+
+
+def _random_candle(rng: random.Random, base: datetime) -> CandleRecord:
+    key = SeriesKey(venue=Venue.BITGET, instrument_id=uuid4(), timeframe=Timeframe.M1)
+    open_time = base + timedelta(minutes=rng.randint(0, 10_000))
+    open_ = Decimal(rng.randint(1, 100_000)) / Decimal(100)
+    spread = Decimal(rng.randint(0, 500)) / Decimal(100)
+    return CandleRecord(
+        key=key,
+        open_time=open_time,
+        close_time=open_time + timedelta(minutes=1),
+        open=open_,
+        high=open_ + spread,
+        low=open_ - spread,
+        close=open_ + Decimal(rng.randint(-500, 500)) / Decimal(100),
+        volume=Decimal(rng.randint(0, 1_000_000)) / Decimal(1000),
+        quote_volume=None if rng.random() < 0.5 else Decimal(rng.randint(0, 1_000_000)),
+    )
+
+
+def test_batch_hash_streaming_matches_reference_property() -> None:
+    """ADR-2026-09-04-A #2: 무작위 배치 200건 이상에서 새 스트리밍
+    `batch_hash`가 옛 `_batch_hash_reference`와 바이트 단위로 동일하다 —
+    저장된 해시를 재계산하지 않고도(P3 WORM) 안전하게 교체할 수 있다는
+    증거."""
+    rng = random.Random(20260904)
+    base = datetime(2026, 1, 1, tzinfo=timezone.utc)
+
+    for _ in range(200):
+        size = rng.randint(0, 30)
+        records = [_random_candle(rng, base) for _ in range(size)]
+        rng.shuffle(records)
+
+        assert batch_hash(records) == _batch_hash_reference(records)
+
+
+def test_batch_hash_streaming_matches_reference_for_empty_and_singleton() -> None:
+    """경계값(음성 테스트 성격): 빈 배치·단일 레코드도 옛 구현과 동일해야
+    한다 — property 테스트의 `randint(0, 30)`이 0을 뽑을 확률이 낮아 별도로
+    고정한다."""
+    assert batch_hash([]) == _batch_hash_reference([])
+
+    rng = random.Random(1)
+    solo = [_random_candle(rng, datetime(2026, 1, 1, tzinfo=timezone.utc))]
+    assert batch_hash(solo) == _batch_hash_reference(solo)
