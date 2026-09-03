@@ -57,6 +57,11 @@ POSITIONS_RECONCILIATION_MISMATCH_COUNT_TOTAL = (
     "aios.positions.reconciliation.mismatch_count_total"
 )
 
+POSITIONS_SCHEDULER_CYCLE_FAILURE_COUNT_TOTAL = (
+    "aios.positions.scheduler.cycle_failure_count_total"
+)
+POSITIONS_SCHEDULER_CYCLE_SUCCESS_GAUGE = "aios.positions.scheduler_cycle_success.gauge"
+
 ALL_METRIC_NAMES: frozenset[str] = frozenset(
     {
         API_REQUEST_COUNT_TOTAL,
@@ -86,6 +91,8 @@ ALL_METRIC_NAMES: frozenset[str] = frozenset(
         SECURITY_KEY_ROTATION_COUNT_TOTAL,
         READINESS_CHECK_STATUS,
         POSITIONS_RECONCILIATION_MISMATCH_COUNT_TOTAL,
+        POSITIONS_SCHEDULER_CYCLE_FAILURE_COUNT_TOTAL,
+        POSITIONS_SCHEDULER_CYCLE_SUCCESS_GAUGE,
     }
 )
 

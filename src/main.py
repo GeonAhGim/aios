@@ -46,6 +46,10 @@ from src.foundation.market_data.adapters.postgres_reference_repository import (
     PostgresReferenceRepository,
 )
 from src.foundation.market_data.application.scheduler import MarketDataQualityScheduler
+from src.foundation.positions.adapters.postgres_snapshot_repository import (
+    PostgresSnapshotRepository,
+)
+from src.foundation.positions.application.scheduler import PositionsScheduler
 from src.services.background_loops import flag_enabled, start_background_loops
 from src.services.credential_resolver import CredentialResolver
 from src.services.exchange_credential_service import ExchangeCredentialService
@@ -158,6 +162,28 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             "시장데이터 품질 스케줄러를 띄우지 않습니다."
         )
 
+    # LB-17 — positions 마크·대사·NAV 주기 실행. 위 두 스케줄러와 같은
+    # 패턴·같은 플래그 관례. `tracked`(계좌 목록)는 아직 운영 계좌 등록·
+    # 현금잔고 어댑터가 없어(§10 미확정, 이 리프 범위 밖) 비워 둔다 —
+    # `marks`/`fx`/`nav_repo`/`cash`/`provider`/`recon`이 전부 선택
+    # 인자라 `tracked=()`에서는 실제 어댑터 없이도 배선이 끝난다
+    # (`positions/application/scheduler.py` 모듈독스트링 참조).
+    positions_scheduler = PositionsScheduler(
+        pool, snapshots=PostgresSnapshotRepository(pool), registry=get_registry()
+    )
+    positions_tasks: list[asyncio.Task[None]] = []
+    if flag_enabled("AIOS_POSITIONS_SCHEDULER_ENABLED"):
+        positions_tasks = [
+            asyncio.create_task(positions_scheduler.run_mark_forever()),
+            asyncio.create_task(positions_scheduler.run_reconcile_forever()),
+            asyncio.create_task(positions_scheduler.run_nav_forever()),
+        ]
+    else:
+        logger.warning(
+            "positions_scheduler: AIOS_POSITIONS_SCHEDULER_ENABLED=0 — "
+            "positions 스케줄러를 띄우지 않습니다."
+        )
+
     app.state.pool = pool
     app.state.secrets = secrets
     app.state.event_bus = event_bus
@@ -165,12 +191,14 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.execution_scheduler = loops.execution_scheduler
     app.state.ledger_scheduler = ledger_scheduler
     app.state.market_data_scheduler = market_data_scheduler
+    app.state.positions_scheduler = positions_scheduler
     try:
         yield
     finally:
-        for task in [*ledger_tasks, *market_data_tasks]:
+        all_scheduler_tasks = [*ledger_tasks, *market_data_tasks, *positions_tasks]
+        for task in all_scheduler_tasks:
             task.cancel()
-        for task in [*ledger_tasks, *market_data_tasks]:
+        for task in all_scheduler_tasks:
             with contextlib.suppress(asyncio.CancelledError):
                 await task
         await loops.stop()
