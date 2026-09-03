@@ -51,3 +51,7 @@ export type {
 // clients/*.ts도 이 스위치를 쓰지 않는다(레지스트리 준비 단계).
 export { API_ROUTES, resolvePath, resolveEnvelope } from "./apiPaths";
 export type { ApiRouteDefinition, ApiRouteName, ResolvePathOptions } from "./apiPaths";
+// task-617: §3.5 멤버십 관리 클라이언트(grant/suspend/revoke). AiosApiClient 합성
+// (client.ts)에는 아직 배선되지 않았다(PLT-29 서버 라우터 미구현) — 후속 리프 소관.
+export { createMembershipsClient, MembershipParseError } from "./memberships";
+export type { MembershipsClient, GrantMembershipBody } from "./memberships";
