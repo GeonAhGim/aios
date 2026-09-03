@@ -783,12 +783,11 @@
     "$defs": {
       "QualityIssue": {
         "properties": {
-          "detail": {
-            "additionalProperties": {
-              "type": "string"
-            },
-            "title": "Detail",
-            "type": "object"
+          "type": {
+            "$ref": "#/$defs/QualityIssueType"
+          },
+          "severity": {
+            "$ref": "#/$defs/Severity"
           },
           "open_time": {
             "anyOf": [
@@ -802,17 +801,18 @@
             ],
             "title": "Open Time"
           },
+          "detail": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "title": "Detail",
+            "type": "object"
+          },
           "schema_version": {
             "const": "v1",
             "default": "v1",
             "title": "Schema Version",
             "type": "string"
-          },
-          "severity": {
-            "$ref": "#/$defs/Severity"
-          },
-          "type": {
-            "$ref": "#/$defs/QualityIssueType"
           }
         },
         "required": [
@@ -842,16 +842,12 @@
       },
       "QualityVerdict": {
         "properties": {
+          "verdict": {
+            "$ref": "#/$defs/Verdict"
+          },
           "accepted": {
             "title": "Accepted",
             "type": "integer"
-          },
-          "issues": {
-            "items": {
-              "$ref": "#/$defs/QualityIssue"
-            },
-            "title": "Issues",
-            "type": "array"
           },
           "quarantined": {
             "title": "Quarantined",
@@ -861,14 +857,18 @@
             "title": "Rejected",
             "type": "integer"
           },
+          "issues": {
+            "items": {
+              "$ref": "#/$defs/QualityIssue"
+            },
+            "title": "Issues",
+            "type": "array"
+          },
           "schema_version": {
             "const": "v1",
             "default": "v1",
             "title": "Schema Version",
             "type": "string"
-          },
-          "verdict": {
-            "$ref": "#/$defs/Verdict"
           }
         },
         "required": [
@@ -890,6 +890,29 @@
         "title": "Severity",
         "type": "string"
       },
+      "Timeframe": {
+        "enum": [
+          "1m",
+          "5m",
+          "15m",
+          "30m",
+          "1h",
+          "4h",
+          "1d"
+        ],
+        "title": "Timeframe",
+        "type": "string"
+      },
+      "Venue": {
+        "description": "세션 규칙(A3) 조회 키. KIS는 시장별로 캘린더가 달라 KRX/US를 분리한다.",
+        "enum": [
+          "BITGET",
+          "KIS_KRX",
+          "KIS_US"
+        ],
+        "title": "Venue",
+        "type": "string"
+      },
       "Verdict": {
         "enum": [
           "ACCEPT",
@@ -901,7 +924,62 @@
         "type": "string"
       }
     },
+    "description": "LA-9 `BatchRepository.create()`가 `md_ingest_batch`에 그대로 옮겨 적는\n배치 기록 표현(LA-13, task-615 note). LA-11이 실제로 만든\n`md_ingest_batch`는 `venue`/`instrument_id`/`timeframe`/`range_start`/\n`range_end`/`source`/`request_fingerprint`가 전부 NOT NULL이라, 이\n필드들이 없던 원래 정의로는 그 테이블에 쓸 수 없었다 — LA-9 포트\n시그니처(`create(conn, batch: IngestBatchResult)`)는 그대로 두고(task\nnote: 포트는 새로 만들지 않는다) 이 DTO에 추가했다. 107번 §8 \"필드 추가는\nminor\" 규칙에 따라 fixture(`test_contracts_schema.py`)도 함께 갱신했다.",
     "properties": {
+      "batch_id": {
+        "format": "uuid",
+        "title": "Batch Id",
+        "type": "string"
+      },
+      "tenant_id": {
+        "anyOf": [
+          {
+            "format": "uuid",
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Tenant Id"
+      },
+      "source": {
+        "title": "Source",
+        "type": "string"
+      },
+      "venue": {
+        "$ref": "#/$defs/Venue"
+      },
+      "instrument_id": {
+        "format": "uuid",
+        "title": "Instrument Id",
+        "type": "string"
+      },
+      "timeframe": {
+        "$ref": "#/$defs/Timeframe"
+      },
+      "range_start": {
+        "format": "date-time",
+        "title": "Range Start",
+        "type": "string"
+      },
+      "range_end": {
+        "format": "date-time",
+        "title": "Range End",
+        "type": "string"
+      },
+      "request_fingerprint": {
+        "title": "Request Fingerprint",
+        "type": "string"
+      },
+      "verdict": {
+        "$ref": "#/$defs/QualityVerdict"
+      },
+      "batch_hash": {
+        "title": "Batch Hash",
+        "type": "string"
+      },
       "audit_event_id": {
         "anyOf": [
           {
@@ -913,21 +991,6 @@
           }
         ],
         "title": "Audit Event Id"
-      },
-      "batch_hash": {
-        "title": "Batch Hash",
-        "type": "string"
-      },
-      "batch_id": {
-        "format": "uuid",
-        "title": "Batch Id",
-        "type": "string"
-      },
-      "schema_version": {
-        "const": "v1",
-        "default": "v1",
-        "title": "Schema Version",
-        "type": "string"
       },
       "stored_range": {
         "anyOf": [
@@ -952,12 +1015,22 @@
         ],
         "title": "Stored Range"
       },
-      "verdict": {
-        "$ref": "#/$defs/QualityVerdict"
+      "schema_version": {
+        "const": "v1",
+        "default": "v1",
+        "title": "Schema Version",
+        "type": "string"
       }
     },
     "required": [
       "batch_id",
+      "source",
+      "venue",
+      "instrument_id",
+      "timeframe",
+      "range_start",
+      "range_end",
+      "request_fingerprint",
       "verdict",
       "batch_hash",
       "audit_event_id",

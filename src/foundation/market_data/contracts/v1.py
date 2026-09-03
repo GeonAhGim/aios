@@ -149,7 +149,24 @@ class IngestCandlesCommand(BaseModel):
 
 
 class IngestBatchResult(BaseModel):
+    """LA-9 `BatchRepository.create()`가 `md_ingest_batch`에 그대로 옮겨 적는
+    배치 기록 표현(LA-13, task-615 note). LA-11이 실제로 만든
+    `md_ingest_batch`는 `venue`/`instrument_id`/`timeframe`/`range_start`/
+    `range_end`/`source`/`request_fingerprint`가 전부 NOT NULL이라, 이
+    필드들이 없던 원래 정의로는 그 테이블에 쓸 수 없었다 — LA-9 포트
+    시그니처(`create(conn, batch: IngestBatchResult)`)는 그대로 두고(task
+    note: 포트는 새로 만들지 않는다) 이 DTO에 추가했다. 107번 §8 "필드 추가는
+    minor" 규칙에 따라 fixture(`test_contracts_schema.py`)도 함께 갱신했다."""
+
     batch_id: UUID
+    tenant_id: UUID | None = None
+    source: str
+    venue: Venue
+    instrument_id: UUID
+    timeframe: Timeframe
+    range_start: AwareDatetime
+    range_end: AwareDatetime
+    request_fingerprint: str
     verdict: QualityVerdict
     batch_hash: str
     audit_event_id: UUID | None
