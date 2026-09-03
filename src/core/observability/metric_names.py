@@ -53,6 +53,10 @@ SECURITY_KEY_ROTATION_COUNT_TOTAL = "aios.security.key_rotation.count_total"
 
 READINESS_CHECK_STATUS = "aios.readiness.check.status"
 
+POSITIONS_RECONCILIATION_MISMATCH_COUNT_TOTAL = (
+    "aios.positions.reconciliation.mismatch_count_total"
+)
+
 ALL_METRIC_NAMES: frozenset[str] = frozenset(
     {
         API_REQUEST_COUNT_TOTAL,
@@ -81,6 +85,7 @@ ALL_METRIC_NAMES: frozenset[str] = frozenset(
         SECURITY_BREAK_GLASS_COUNT_TOTAL,
         SECURITY_KEY_ROTATION_COUNT_TOTAL,
         READINESS_CHECK_STATUS,
+        POSITIONS_RECONCILIATION_MISMATCH_COUNT_TOTAL,
     }
 )
 
