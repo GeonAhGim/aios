@@ -2,7 +2,8 @@
 `/metrics` 통합 테스트.
 
 Spec: docs/specs/L4_market_data_positions_ledger_v1.0.md §9 L0-5
-DoD: 역할 존재, `aios_app`으로 `audit_log` UPDATE 실패, `/metrics` 200.
+DoD: 역할 존재, `aios_app`으로 `audit_log` UPDATE 실패, `/metrics`는 토큰이
+있으면 200(task-939/PLT-09부터 토큰 필수 — 미토큰 403은 별도 파일에서 검증).
 
 역할 전환은 `SET ROLE`을 쓴다 — 슈퍼유저(TEST_DATABASE_URL 접속 계정)는
 비밀번호 없이도 어떤 역할로나 `SET ROLE`할 수 있고, 트랜잭션 안에서
@@ -154,11 +155,16 @@ async def test_worm_trigger_blocks_table_owner_on_audit_log(conn):
             )
 
 
-async def test_metrics_endpoint_returns_200():
+async def test_metrics_endpoint_returns_200_with_token(monkeypatch: pytest.MonkeyPatch) -> None:
+    """task-939(PLT-09) — `/metrics`는 `AIOS_METRICS_TOKEN` 없이는 403(별도
+    tests/integration/api/test_health_endpoints.py에서 검증). 이 파일의 DoD는
+    "토큰이 있으면 여전히 200"만 확인한다."""
+    monkeypatch.setenv("AIOS_METRICS_TOKEN", "test-suite-token")
+
     async with app.router.lifespan_context(app):
         transport = ASGITransport(app=app)
         async with AsyncClient(transport=transport, base_url="http://test") as ac:
-            response = await ac.get("/metrics")
+            response = await ac.get("/metrics", headers={"X-Metrics-Token": "test-suite-token"})
 
     assert response.status_code == 200
     assert response.headers["content-type"].startswith("text/plain")
