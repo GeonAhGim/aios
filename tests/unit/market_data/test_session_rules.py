@@ -90,6 +90,22 @@ def test_crypto_next_open_equals_at() -> None:
     assert cal.is_open(at) is True
 
 
+def test_crypto_sessions_for_spans_full_day() -> None:
+    cal = _calendar(Venue.BITGET)
+    day = date(2026, 9, 4)
+    windows = cal.sessions_for(day)
+    assert len(windows) == 1
+    assert windows[0].kind == "CONTINUOUS"
+    assert windows[0].open_at == datetime(2026, 9, 4, tzinfo=timezone.utc)
+    assert windows[0].close_at == datetime(2026, 9, 5, tzinfo=timezone.utc)
+
+
+def test_next_open_returns_at_when_already_in_session() -> None:
+    cal = _calendar(Venue.KIS_KRX)
+    at = datetime(2026, 9, 4, 10, 0, tzinfo=ZoneInfo("Asia/Seoul"))
+    assert cal.next_open(at) == at
+
+
 def test_next_open_skips_weekend_to_monday() -> None:
     cal = _calendar(Venue.KIS_KRX)
     saturday = datetime(2026, 9, 5, 10, 0, tzinfo=ZoneInfo("Asia/Seoul"))
