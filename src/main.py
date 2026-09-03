@@ -21,7 +21,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from src.api.contracts.handlers import install_exception_handlers
-from src.api.middleware.request_id import RequestIdMiddleware
+from src.api.middleware.request_context import RequestContextMiddleware
 from src.core.event_bus.in_process import InProcessEventBus
 from src.core.loader.risk_policy_loader import load_risk_policy
 from src.core.loader.secret_loader import load_env_secrets
@@ -224,8 +224,11 @@ def create_app() -> FastAPI:
         allow_methods=["*"],
         allow_headers=["*"],
     )
-    # request_id 미들웨어는 CORS보다 나중에 등록해 요청 스택 가장 바깥을 감싼다.
-    app.add_middleware(RequestIdMiddleware)
+    # PLT-05 — RequestContextMiddleware가 RequestIdMiddleware(task-107)를 상속해
+    # X-Request-ID 계약은 유지하면서 trace_id·구조화 로그·메트릭을 더한다. 부모를
+    # 별도로 또 등록하지 않는다(L4_platform_observability... §2.1(A) 표). CORS보다
+    # 나중에 등록해 요청 스택 가장 바깥을 감싼다.
+    app.add_middleware(RequestContextMiddleware)
 
     from src.api.routers import (
         admin,
