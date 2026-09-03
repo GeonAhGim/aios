@@ -34,3 +34,4 @@ export * from "./positionView";
 export * from "./candleSeries";
 export * from "./ledgerView";
 export * from "./instrumentView";
+export * from "./holdPayoutView";
