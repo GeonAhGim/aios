@@ -29,6 +29,7 @@ import { AccountDeletionPage } from "./routes/settings/AccountDeletionPage";
 import { ApprovalSettingsPage } from "./routes/settings/ApprovalSettingsPage";
 import { NotificationSettingsPage } from "./routes/settings/NotificationSettingsPage";
 import { StrategyBuilderPage } from "./routes/strategy-builder/StrategyBuilderPage";
+import { SystemStatusPage } from "./routes/system/SystemStatusPage";
 import { WalletPage } from "./routes/wallet/WalletPage";
 
 function protect(element: ReactNode) {
@@ -67,6 +68,7 @@ export const router = createBrowserRouter([
   { path: "/reviews/write/:purchaseId", element: protect(<WriteReviewPage />) },
   { path: "/disputes/submit", element: protect(<DisputeSubmitPage />) },
   { path: "/admin", element: protectAdmin(<AdminHomePage />) },
+  { path: "/admin/system-status", element: protectAdmin(<SystemStatusPage />) },
   { path: "/admin/verification-queue", element: protectAdmin(<VerificationQueuePage />) },
   { path: "/admin/disputes", element: protectAdmin(<DisputeManagementPage />) },
   { path: "/admin/users", element: protectAdmin(<UserManagementPage />) },

@@ -313,6 +313,17 @@ export class ApiClientBase {
     return qs ? `${path}?${qs}` : path;
   }
 
+  // spec §3.2: /readyz는 성공(200)·저하(503) 모두 몸체가 ReadinessReport다 —
+  // request()처럼 비2xx를 실패로 던지면 정작 저하 원인(body)을 잃는다. 이
+  // 메서드는 HTTP 상태를 판정하지 않고 몸체를 그대로(camelCase 변환 없이,
+  // 서버가 as_of·db_pool 같은 snake_case 키를 쓰므로) 반환한다 — 판정은
+  // parseReadiness(readiness.ts)가 한다. 네트워크/JSON 파싱 실패는 그대로
+  // 던져 호출부가 "확인 불가"로 처리하게 둔다. 재시도는 하지 않는다(1회성 진단 조회).
+  protected async fetchRaw<T>(path: string): Promise<T> {
+    const { body } = await this.fetchJson(path, this.withStableRequestId());
+    return body as T;
+  }
+
   protected async requestEnvelope<T>(path: string, init?: RequestInit): Promise<T> {
     const method = (init?.method ?? "GET").toUpperCase();
     return this.withGetRetry(method, () => this.performRequestEnvelope<T>(path, init));
