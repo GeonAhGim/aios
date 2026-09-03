@@ -72,7 +72,9 @@ async def _table_exists(pool: asyncpg.Pool, table_name: str) -> bool:
 async def test_downgrade_then_upgrade_backfills_personal_tenant(pool):
     user_id = await create_test_user(pool)
 
-    _run_alembic("downgrade", "-1")
+    _run_alembic("downgrade", "94124c286c10")  # PLT-26의 down_revision — 이후 PLT-23(§9)이
+    # head 위에 새 리비전을 쌓았으므로 상대 이동("-1")은 더 이상 tenant/
+    # tenant_membership을 벗기지 못한다(그 대신 자기 자신의 새 head만 벗김).
     assert not await _table_exists(pool, "tenant")
     assert not await _table_exists(pool, "tenant_membership")
 
