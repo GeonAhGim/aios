@@ -9,6 +9,8 @@ export { configureMfaStepUpHandler, requestMfaStepUp } from "./mfaStepUp";
 export type { MfaStepUpHandler } from "./mfaStepUp";
 export { createLogoutClient } from "./logout";
 export type { LogoutClient, LogoutClientOptions, LogoutTokenStore } from "./logout";
+export { createSessionsClient } from "./sessions";
+export type { SessionsClient, SessionsClientOptions } from "./sessions";
 export { createTenantStore, isValidTenantId } from "./tenantContext";
 export type { TenantStore, TenantMismatchFallback, TenantKind, MembershipRole } from "./tenantContext";
 export { parseReadiness, summarizeReadiness } from "./readiness";
