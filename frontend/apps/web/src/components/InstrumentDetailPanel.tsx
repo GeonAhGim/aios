@@ -1,5 +1,6 @@
 import { ApiError } from "@aios/api-client";
 import {
+  isResourceNotFound,
   routeApiError,
   type InstrumentView,
   type ParsedSymbolAlias,
@@ -8,6 +9,7 @@ import {
 import { Alert, Card, EmptyState, LoadingState } from "@aios/ui-web";
 import type { UseQueryResult } from "@tanstack/react-query";
 import { ErrorMessage } from "./ErrorMessage";
+import { NotFoundState } from "./NotFoundState";
 
 // InstrumentsPage(task-824)의 행 클릭 상세 패널. "생애주기 전이 이력"은 서버에
 // 별도 이벤트 로그 테이블이 없다(LA-10 마이그레이션 목록에 md_instrument/
@@ -73,7 +75,14 @@ export function InstrumentDetailPanel({ instrument, aliasQuery }: InstrumentDeta
         {aliasQuery.isLoading ? (
           <LoadingState />
         ) : aliasQuery.isError ? (
-          <ErrorBanner error={aliasQuery.error} onRetry={() => aliasQuery.refetch()} />
+          isResourceNotFound(aliasQuery.error) ? (
+            <NotFoundState
+              title="별칭 정보를 찾을 수 없습니다"
+              description="삭제되었거나 존재하지 않는 심볼입니다."
+            />
+          ) : (
+            <ErrorBanner error={aliasQuery.error} onRetry={() => aliasQuery.refetch()} />
+          )
         ) : (aliasQuery.data ?? []).length === 0 ? (
           <EmptyState>등록된 별칭이 없습니다.</EmptyState>
         ) : (

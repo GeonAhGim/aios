@@ -147,7 +147,7 @@ describe("InstrumentsPage", () => {
     await waitFor(() => expect(screen.getByTestId("status-badge")).toHaveTextContent("상장폐지"));
   });
 
-  it("negative: 별칭 조회가 404면 상세 패널에 에러를 노출하고 조용히 숨기지 않는다", async () => {
+  it("negative: 별칭 조회가 RESOURCE_NOT_FOUND(404)면 재시도 배너 대신 NotFoundState를 보여준다", async () => {
     const listInstruments = vi.fn(async () => ({ items: [ok({ instrument_id: "i-1" })], nextCursor: null }));
     const listInstrumentAliases = vi.fn(async () => {
       throw new ApiError(404, "찾을 수 없습니다", undefined, "RESOURCE_NOT_FOUND");
@@ -158,6 +158,24 @@ describe("InstrumentsPage", () => {
     await waitFor(() => expect(screen.getByTestId("instrument-row-i-1")).toBeInTheDocument());
     fireEvent.click(screen.getByTestId("instrument-row-i-1"));
 
-    await waitFor(() => expect(screen.getByText("요청한 항목을 찾을 수 없습니다.")).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText("별칭 정보를 찾을 수 없습니다")).toBeInTheDocument());
+    expect(screen.queryByText("요청한 항목을 찾을 수 없습니다.")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "다시 시도" })).not.toBeInTheDocument();
+  });
+
+  it("negative: 별칭 조회가 RESOURCE_NOT_FOUND가 아닌 에러면 재시도 배너를 그대로 보여준다", async () => {
+    const listInstruments = vi.fn(async () => ({ items: [ok({ instrument_id: "i-1" })], nextCursor: null }));
+    const listInstrumentAliases = vi.fn(async () => {
+      throw new ApiError(500, "internal error", undefined, "INTERNAL_ERROR");
+    });
+    const client = makeClient({ listInstruments, listInstrumentAliases });
+    renderPage(client);
+
+    await waitFor(() => expect(screen.getByTestId("instrument-row-i-1")).toBeInTheDocument());
+    fireEvent.click(screen.getByTestId("instrument-row-i-1"));
+
+    await waitFor(() =>
+      expect(screen.getByText("일시적인 오류가 발생했습니다. 문제가 계속되면 문의해주세요.")).toBeInTheDocument(),
+    );
   });
 });
