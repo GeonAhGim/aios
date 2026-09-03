@@ -14,6 +14,7 @@ from src.foundation.evidence.adapters.postgres_repository import PostgresAuditEv
 from src.foundation.evidence.application.append_audit_event import append_audit_event
 from src.foundation.evidence.contracts.v1 import Outcome, RecordAuditEventCommand
 from src.main import app
+from tests.conftest import lifespan_context_with_retry, retry_too_many_connections
 
 STRONG_PASSWORD = "Str0ng!Passw0rd"
 
@@ -27,14 +28,16 @@ def _asyncpg_dsn() -> str:
 
 @pytest.fixture
 async def pool():
-    p = await asyncpg.create_pool(_asyncpg_dsn(), min_size=1, max_size=2)
+    p = await retry_too_many_connections(
+        lambda: asyncpg.create_pool(_asyncpg_dsn(), min_size=1, max_size=2)
+    )
     yield p
     await p.close()
 
 
 @pytest.fixture
 async def client():
-    async with app.router.lifespan_context(app):
+    async with lifespan_context_with_retry(app):
         transport = ASGITransport(app=app)
         async with AsyncClient(transport=transport, base_url="http://test") as ac:
             yield ac

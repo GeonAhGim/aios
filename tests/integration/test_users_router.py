@@ -12,6 +12,7 @@ from httpx import ASGITransport, AsyncClient
 from src.api.deps import get_event_bus
 from src.core.approval.service import create_request
 from src.main import app
+from tests.conftest import lifespan_context_with_retry, retry_too_many_connections
 from tests.integration.conftest import NoopEventBus
 from tests.integration.mfa_clock import mfa_clock_shifted, totp_at
 
@@ -34,14 +35,14 @@ def event_bus():
 async def client(event_bus):
     # 화이트리스트 등록이 system_safety_state(공유 싱글톤 행)의 circuit_breaker
     # 상태를 확인한다 — 다른 테스트 파일이 남긴 상태에 좌우되지 않도록 리셋.
-    conn = await asyncpg.connect(_asyncpg_dsn())
+    conn = await retry_too_many_connections(lambda: asyncpg.connect(_asyncpg_dsn()))
     await conn.execute(
         "UPDATE system_safety_state SET circuit_breaker_level = 'normal', "
         "reactivation_approval_id = NULL WHERE id = 1"
     )
     await conn.close()
 
-    async with app.router.lifespan_context(app):
+    async with lifespan_context_with_retry(app):
         app.dependency_overrides[get_event_bus] = lambda: event_bus
         # raise_app_exceptions=False — 이유는 test_auth_router.py의 client
         # 픽스처 주석 참조(도메인 예외가 전역 Exception 핸들러를 거쳐도
@@ -54,7 +55,9 @@ async def client(event_bus):
 
 @pytest.fixture
 async def pool():
-    p = await asyncpg.create_pool(_asyncpg_dsn(), min_size=1, max_size=2)
+    p = await retry_too_many_connections(
+        lambda: asyncpg.create_pool(_asyncpg_dsn(), min_size=1, max_size=2)
+    )
     yield p
     await p.close()
 

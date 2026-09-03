@@ -237,9 +237,14 @@ async def test_ledger_platform_and_house_accounts_seeded(db_conn):
 
 
 async def test_ledger_balance_seeded_for_platform_and_house_accounts(db_conn):
+    """balance/held/pending_payout는 시드 시점엔 0이지만, 같은 TEST_DATABASE_URL을
+    공유하는 test_post_entry.py/test_backfill.py 등이 이 플랫폼 계정으로 실제
+    커밋되는 분개를 내며 값을 바꾼다(전체 스위트 실행 순서에 따라 값이 달라짐) —
+    그래서 여기서는 행 존재와 시드 이후 절대 갱신되지 않는 allow_negative만
+    순서 독립적으로 확인한다."""
     result = await db_conn.execute(
         text(
-            "SELECT b.balance, b.held, b.pending_payout, b.allow_negative "
+            "SELECT b.allow_negative "
             "FROM ledger_balance b JOIN ledger_account a ON a.account_id = b.account_id "
             "WHERE a.account_code = ANY(:codes)"
         ),
@@ -256,9 +261,6 @@ async def test_ledger_balance_seeded_for_platform_and_house_accounts(db_conn):
     rows = list(result)
     assert len(rows) == 5
     for row in rows:
-        assert row.balance == 0
-        assert row.held == 0
-        assert row.pending_payout == 0
         assert row.allow_negative is False
 
 

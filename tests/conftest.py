@@ -8,9 +8,11 @@ before those modules and supplies one deterministic test-only view instead.
 
 from __future__ import annotations
 
+import asyncio
 import os
 from pathlib import Path
 
+import asyncpg
 import dotenv
 
 _PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -62,3 +64,52 @@ dotenv.dotenv_values = _test_dotenv_values
 # 직접 호출해 검증한다.
 os.environ.setdefault("AIOS_EXECUTION_LOOP_ENABLED", "0")
 os.environ.setdefault("AIOS_STARTUP_RECOVERY_ENABLED", "0")
+
+
+async def retry_too_many_connections(factory, *, attempts: int = 6, base_delay: float = 0.5):
+    """TEST_DATABASE_URL이 가리키는 Postgres 인스턴스는 이 worktree 전용이 아니라
+    다른 worker 프로세스와 `max_connections`를 나눠 쓴다 — 다른 worker의 통합
+    테스트가 동시에 몰리면 이쪽 커넥션 시도가 일시적으로
+    `asyncpg.exceptions.TooManyConnectionsError`로 거절될 수 있다(esc-ci-de7f42dfb173,
+    test_foundation_evidence_router.py/test_users_router.py의 fixture ERROR).
+    지수 백오프로 재시도하고, 진짜 커넥션 누수·설정 오류라면 attempts 소진 후
+    마지막 예외를 그대로 전파한다."""
+    last_exc: asyncpg.exceptions.TooManyConnectionsError | None = None
+    for attempt in range(attempts):
+        try:
+            return await factory()
+        except asyncpg.exceptions.TooManyConnectionsError as exc:
+            last_exc = exc
+            await asyncio.sleep(base_delay * (2**attempt))
+    assert last_exc is not None
+    raise last_exc
+
+
+class _RetryingLifespanContext:
+    """`app.router.lifespan_context(app)` 진입(내부 asyncpg pool 생성)만
+    `retry_too_many_connections`로 감싼다 — 이미 열린 뒤의 동작은 원본
+    context manager에 그대로 위임한다."""
+
+    def __init__(self, app) -> None:
+        self._app = app
+        self._ctx = None
+
+    async def __aenter__(self):
+        async def _enter():
+            ctx = self._app.router.lifespan_context(self._app)
+            await ctx.__aenter__()
+            return ctx
+
+        self._ctx = await retry_too_many_connections(_enter)
+        return self._ctx
+
+    async def __aexit__(self, *exc_info):
+        assert self._ctx is not None
+        return await self._ctx.__aexit__(*exc_info)
+
+
+def lifespan_context_with_retry(app):
+    """라우터 통합테스트의 `client` 픽스처가 쓰는
+    `app.router.lifespan_context(app)` 대체 — 동일하게 동작하되 진입 시
+    `TooManyConnectionsError`를 재시도한다."""
+    return _RetryingLifespanContext(app)
