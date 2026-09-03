@@ -24,12 +24,12 @@ from src.api.contracts.idempotency import (
     require_idempotency_key,
     run_idempotent,
 )
-from src.api.deps import get_current_user
+from src.api.deps import get_current_user, get_pool
 from src.services.auth_service import User
 
 
 def _asyncpg_dsn() -> str:
-    url = os.environ["TEST_DATABASE_URL"]
+    url = os.environ["DATABASE_URL"]
     return url.replace("postgresql+asyncpg://", "postgresql://")
 
 
@@ -57,6 +57,7 @@ def _make_app(pool: asyncpg.Pool, calls: list[int], user: User) -> FastAPI:
     app = FastAPI()
     install_exception_handlers(app)
     app.dependency_overrides[get_current_user] = lambda: user
+    app.dependency_overrides[get_pool] = lambda: pool
 
     @app.post("/purchase")
     async def purchase(
