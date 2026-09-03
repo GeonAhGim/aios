@@ -1,9 +1,31 @@
 import { useAdminUsers, useChangeUserStatus, useSuspendSeller } from "@aios/shared-hooks";
+import { ApiError } from "@aios/api-client";
+import { classifyForbidden, routeApiError } from "@aios/shared-types";
 import { Button, EmptyState, Input, LoadingState, PageHeader, Select, StatusBadge } from "@aios/ui-web";
 import { useState } from "react";
 import { AppShell } from "../../components/layout/AppShell";
+import { ErrorMessage } from "../../components/ErrorMessage";
+import { ForbiddenNotice } from "../../components/ForbiddenNotice";
 
 const STATUSES = ["ACTIVE", "SUSPENDED"];
+
+// spec §3.3 에러 taxonomy: 상태변경(changeStatus)/판매정지(suspendSeller) 실패는
+// err.message를 직접 노출하지 않고 routeApiError로 판정해 403/그 외를 각각
+// ForbiddenNotice/ErrorMessage 경로로만 보여준다(task-483/1072 패턴). 지금까지 두
+// mutate 호출 모두 콜백 없이 실행돼 실패를 완전히 조용히 삼켰다 — 에러 상태
+// 자체가 없었다.
+function UserActionError({ error }: { error: unknown }) {
+  if (classifyForbidden(error)) return <ForbiddenNotice error={error} />;
+  const routed = routeApiError(error);
+  return (
+    <ErrorMessage
+      errorCode={error instanceof ApiError ? error.errorCode : undefined}
+      message={error instanceof Error ? error.message : undefined}
+      traceId={error instanceof ApiError ? error.traceId : undefined}
+      retryAfterSec={routed.kind === "backoff_retry" ? routed.afterSec : undefined}
+    />
+  );
+}
 
 export function UserManagementPage() {
   const [emailSearch, setEmailSearch] = useState("");
@@ -11,6 +33,23 @@ export function UserManagementPage() {
   const changeStatus = useChangeUserStatus();
   const suspendSeller = useSuspendSeller();
   const [suspendReasons, setSuspendReasons] = useState<Record<string, string>>({});
+  const [actionError, setActionError] = useState<{ userId: string; error: unknown } | null>(null);
+
+  function handleChangeStatus(userId: string, status: string) {
+    setActionError(null);
+    changeStatus.mutate(
+      { userId, status },
+      { onError: (err) => setActionError({ userId, error: err }) },
+    );
+  }
+
+  function handleSuspendSeller(userId: string) {
+    setActionError(null);
+    suspendSeller.mutate(
+      { userId, body: { reason: suspendReasons[userId] || "정책 위반" } },
+      { onError: (err) => setActionError({ userId, error: err }) },
+    );
+  }
 
   return (
     <AppShell>
@@ -42,7 +81,7 @@ export function UserManagementPage() {
                   <div className="flex items-center gap-2">
                     <Select
                       value={u.status}
-                      onChange={(e) => changeStatus.mutate({ userId: u.userId, status: e.target.value })}
+                      onChange={(e) => handleChangeStatus(u.userId, e.target.value)}
                       className="w-32"
                     >
                       {STATUSES.map((s) => (
@@ -64,17 +103,17 @@ export function UserManagementPage() {
                       type="button"
                       variant="danger"
                       size="sm"
-                      onClick={() =>
-                        suspendSeller.mutate({
-                          userId: u.userId,
-                          body: { reason: suspendReasons[u.userId] || "정책 위반" },
-                        })
-                      }
+                      onClick={() => handleSuspendSeller(u.userId)}
                     >
                       판매정지
                     </Button>
                   </div>
                 </div>
+                {actionError?.userId === u.userId && (
+                  <div className="mt-3">
+                    <UserActionError error={actionError.error} />
+                  </div>
+                )}
               </li>
             ))}
           </ul>
