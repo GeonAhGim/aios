@@ -79,20 +79,45 @@ class PostgresJournalRepository:
     ) -> JournalEntryView:
         key = idempotency_key(entry)
         new_digest = lines_digest(lines)
+        codes = {line.account_code for line in lines}
 
         await conn.execute("SELECT pg_advisory_xact_lock(hashtext($1))", _LOCK_KEY)
 
-        existing = await self.find_by_idempotency_key(conn, key)
-        if existing is not None:
+        # 왕복 축소(LC-17 결함 B): 멱등 조회·마지막 행 조회·계좌 해석을
+        # 순차 3회 대신 CTE/LATERAL 1회로 묶는다. `seed`가 항상 정확히
+        # 1행이라 세 LEFT JOIN 모두 "없음"일 때도 NULL로 채워진 1행을
+        # 보장한다(그중 하나라도 0행이면 결과 자체가 사라지는 일반 JOIN의
+        # 함정을 피한다).
+        ctx = await conn.fetchrow(
+            "SELECT e.entry_id, e.sequence_no, e.event_type, e.event_ref, "
+            " e.idempotency_key, e.lines_digest, e.prev_hash, e.entry_hash, "
+            " e.audit_event_id, e.posted_at, "
+            " lr.sequence_no AS last_sequence_no, lr.entry_hash AS last_entry_hash, "
+            " acc.account_ids, acc.account_codes "
+            "FROM (SELECT 1 AS one) seed "
+            "LEFT JOIN ledger_journal_entry e ON e.idempotency_key = $1 "
+            "LEFT JOIN LATERAL ("
+            "  SELECT sequence_no, entry_hash FROM ledger_journal_entry "
+            "  ORDER BY sequence_no DESC LIMIT 1"
+            ") lr ON true "
+            "LEFT JOIN LATERAL ("
+            "  SELECT array_agg(account_id) AS account_ids, "
+            "         array_agg(account_code) AS account_codes "
+            "  FROM ledger_account WHERE account_code = ANY($2::text[])"
+            ") acc ON true",
+            key,
+            list(codes),
+        )
+        assert ctx is not None  # `seed`가 항상 1행이라 결과도 항상 1행이다.
+
+        if ctx["entry_id"] is not None:
+            existing_lines = await self._fetch_lines(conn, ctx["entry_id"])
+            existing = _row_to_view(ctx, existing_lines, replayed=False)
             assert_same_digest(key, existing.lines_digest, new_digest)
             return existing.model_copy(update={"replayed": True})
 
-        last_row = await conn.fetchrow(
-            "SELECT sequence_no, entry_hash FROM ledger_journal_entry "
-            "ORDER BY sequence_no DESC LIMIT 1"
-        )
-        next_seq = 1 if last_row is None else last_row["sequence_no"] + 1
-        prev_hash: str | None = None if last_row is None else last_row["entry_hash"]
+        next_seq = 1 if ctx["last_sequence_no"] is None else ctx["last_sequence_no"] + 1
+        prev_hash: str | None = ctx["last_entry_hash"]
 
         posted_at = datetime.now(timezone.utc)
         new_hash = entry_hash(
@@ -100,7 +125,12 @@ class PostgresJournalRepository:
         )
 
         entry_id = uuid4()
-        account_ids = await self._resolve_account_ids(conn, {line.account_code for line in lines})
+        found_ids = ctx["account_ids"] or []
+        found_codes = ctx["account_codes"] or []
+        account_ids = dict(zip(found_codes, found_ids, strict=True))
+        missing = codes - account_ids.keys()
+        if missing:
+            raise UnknownAccountError(sorted(missing))
 
         payload: dict[str, object] = {
             "event_ref": entry.event_ref,
@@ -143,18 +173,32 @@ class PostgresJournalRepository:
             posted_at,
         )
 
-        for line in lines:
-            await conn.execute(
-                "INSERT INTO ledger_posting_line "
-                "(entry_id, line_no, account_id, side, amount, currency) "
-                "VALUES ($1, $2, $3, $4, $5, $6)",
-                entry_id,
-                line.line_no,
-                account_ids[line.account_code],
-                line.side.value,
-                line.amount,
-                line.currency.value,
+        # 왕복 축소(LC-17 결함 B): 행마다 INSERT하는 대신 멀티행 VALUES
+        # 하나로 묶는다. `entry_id`는 모든 행이 공유하므로 $1 하나만 쓰고,
+        # 행별 컬럼은 그 뒤로 5개씩 이어붙인다.
+        placeholders = []
+        params: list[object] = []
+        for i, line in enumerate(lines):
+            base = 1 + i * 5
+            placeholders.append(
+                f"($1, ${base + 1}, ${base + 2}, ${base + 3}, ${base + 4}, ${base + 5})"
             )
+            params.extend(
+                [
+                    line.line_no,
+                    account_ids[line.account_code],
+                    line.side.value,
+                    line.amount,
+                    line.currency.value,
+                ]
+            )
+        await conn.execute(
+            "INSERT INTO ledger_posting_line "
+            "(entry_id, line_no, account_id, side, amount, currency) "
+            "VALUES " + ", ".join(placeholders),
+            entry_id,
+            *params,
+        )
 
         return _row_to_view(row, lines, replayed=False)
 
@@ -208,17 +252,3 @@ class PostgresJournalRepository:
             )
             for row in rows
         ]
-
-    async def _resolve_account_ids(
-        self, conn: asyncpg.Connection, codes: set[str]
-    ) -> dict[str, UUID]:
-        rows = await conn.fetch(
-            "SELECT account_id, account_code FROM ledger_account "
-            "WHERE account_code = ANY($1::text[])",
-            list(codes),
-        )
-        found = {row["account_code"]: row["account_id"] for row in rows}
-        missing = codes - found.keys()
-        if missing:
-            raise UnknownAccountError(sorted(missing))
-        return found
