@@ -48,7 +48,13 @@ _WITHDRAWAL_PERMISSION_WARNING = (
 
 
 class ExchangeCredentialError(Exception):
-    """FD-13.3 등록/해지 실패 — 라우터가 400으로 변환."""
+    """FD-13.3 등록 실패(미지원 거래소·유효하지 않은 키) — VALIDATION_INVALID_FIELD(400)."""
+
+
+class ExchangeCredentialNotFoundError(ExchangeCredentialError):
+    """해지하려는 활성 자격증명이 없음 — RESOURCE_NOT_FOUND(404)로 구분 매핑되도록
+    별도 서브클래스를 둔다(exception_mapping.py EXCEPTION_MAP은 타입 기반이라
+    같은 클래스면 상태코드를 하나로만 고를 수 있다)."""
 
 
 class CredentialSummary(BaseModel):
@@ -150,7 +156,9 @@ class ExchangeCredentialService:
                 exchange,
             )
             if result == "UPDATE 0":
-                raise ExchangeCredentialError(f"활성 상태인 {exchange} 자격증명이 없습니다.")
+                raise ExchangeCredentialNotFoundError(
+                    f"활성 상태인 {exchange} 자격증명이 없습니다."
+                )
             await record_audit_log(
                 conn, actor_agent=str(user_id), action_type="exchange_credential.revoked",
                 user_id=user_id, decision_data={"exchange": exchange},

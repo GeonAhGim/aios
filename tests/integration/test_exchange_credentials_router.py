@@ -71,7 +71,12 @@ async def client():
     async with app.router.lifespan_context(app):
         app.dependency_overrides[get_exchange_credential_service] = _override_credential_service
         app.dependency_overrides[get_credential_resolver] = _override_resolver
-        transport = ASGITransport(app=app)
+        # raise_app_exceptions=False — ExchangeCredentialError/CredentialNotFoundError는
+        # 이제 전역 Exception 핸들러(src/api/contracts/handlers.py)를 거친다.
+        # test_auth_router.py client 픽스처 주석과 동일 근거(Starlette가 그
+        # 핸들러를 ServerErrorMiddleware로 승격시켜 정상 응답 뒤에도 예외를
+        # 재전파한다).
+        transport = ASGITransport(app=app, raise_app_exceptions=False)
         async with AsyncClient(transport=transport, base_url="http://test") as ac:
             yield ac
         app.dependency_overrides.pop(get_exchange_credential_service, None)

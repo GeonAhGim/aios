@@ -10,10 +10,10 @@ AuthService.authenticate()를 그대로 재사용한다(로그인 가능 = 재�
 from __future__ import annotations
 
 import asyncpg
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, status
 
 from src.api.contracts.envelope import ApiResponse, ok
-from src.api.contracts.error_codes import ErrorCode
+from src.api.contracts.exception_mapping import ApprovalOwnershipError
 from src.api.deps import get_auth_service, get_current_user, get_pool, reauthenticate
 from src.api.schemas.account import (
     ApprovalSettingsRequest,
@@ -122,13 +122,7 @@ async def _require_own_request(pool: asyncpg.Pool, request_id: int, user: User) 
     본인이라 다른 계정으로는 이 목록에 잡히지 않는다)."""
     own_pending = await list_pending(pool, user_id=user.user_id)
     if not any(r.id == request_id for r in own_pending):
-        raise HTTPException(
-            status.HTTP_403_FORBIDDEN,
-            {
-                "error_code": ErrorCode.AUTHZ_FORBIDDEN.value,
-                "message": "본인의 승인 요청만 처리할 수 있습니다.",
-            },
-        )
+        raise ApprovalOwnershipError("본인의 승인 요청만 처리할 수 있습니다.")
 
 
 @router.post("/me/approval-requests/{request_id}/approve")

@@ -7,10 +7,9 @@ Spec: 기능설계문서_v1.20.md#FD-11.1/FD-11.2, 16_backend_signatures.md
 """
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, status
 
 from src.api.contracts.envelope import ApiResponse, ok
-from src.api.contracts.error_codes import ErrorCode
 from src.api.deps import get_auth_service, get_current_user, get_mfa_service, reauthenticate
 from src.api.schemas.auth import (
     LoginRequest,
@@ -20,7 +19,7 @@ from src.api.schemas.auth import (
     TokenResponse,
 )
 from src.services.auth_service import AuthService, User
-from src.services.mfa_service import MfaService, MfaSetupResult
+from src.services.mfa_service import MfaReauthenticationRequiredError, MfaService, MfaSetupResult
 
 router = APIRouter()
 
@@ -64,12 +63,8 @@ async def setup_mfa(
         # 최초 설정(mfa_enabled=false)은 로그인 자체가 이미 증명이라
         # 재인증을 요구하지 않는다.
         if not body.password:
-            raise HTTPException(
-                status.HTTP_403_FORBIDDEN,
-                {
-                    "error_code": ErrorCode.AUTH_MFA_REQUIRED.value,
-                    "message": "이미 활성화된 MFA를 재설정하려면 비밀번호 재인증이 필요합니다.",
-                },
+            raise MfaReauthenticationRequiredError(
+                "이미 활성화된 MFA를 재설정하려면 비밀번호 재인증이 필요합니다."
             )
         await reauthenticate(auth, user, body.password, body.totp_code)
     result = await mfa.setup(user.user_id, user.email)

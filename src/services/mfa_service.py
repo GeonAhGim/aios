@@ -37,6 +37,12 @@ class MfaError(Exception):
     """FD-11.2 실패 — 검증 코드 불일치 등. 라우터가 400으로 변환."""
 
 
+class MfaReauthenticationRequiredError(Exception):
+    """이미 활성화된 MFA를 비밀번호 재인증 없이 재설정하려는 시도(레드팀 감사
+    #11) — AUTH_MFA_REQUIRED(403)로 매핑. MfaError와 사유가 달라(코드
+    불일치가 아니라 재인증 누락) 독립 클래스로 둔다."""
+
+
 class MfaSetupResult(BaseModel):
     secret: str
     provisioning_uri: str
