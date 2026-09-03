@@ -57,6 +57,20 @@ from src.core.db.conditional_write import ConcurrencyConflictError
 from src.core.indicators.talib_adapter import IndicatorError
 from src.foundation.ledger.application.payouts import UnknownPayoutBatchError
 from src.foundation.ledger.application.queries import WalletLedgerDriftError
+from src.foundation.trust.application.grant_membership import (
+    GrantAuthorizationError,
+    MembershipMfaRequiredError,
+)
+from src.foundation.trust.application.revoke_membership import (
+    RevokeAuthorizationError,
+    RevokeLastOwnerError,
+    RevokeTargetNotFoundError,
+)
+from src.foundation.trust.application.suspend_membership import (
+    SuspendAuthorizationError,
+    SuspendLastOwnerError,
+    SuspendTargetNotFoundError,
+)
 from src.services.account_deletion_service import AccountDeletionError
 from src.services.alert_service import AlertError, AlertNotFoundError
 from src.services.approval_settings_service import ApprovalSettingsError
@@ -167,6 +181,18 @@ EXCEPTION_MAP: list[tuple[type[Exception], ErrorCode]] = [
     (ExecutionControlError, ErrorCode.VALIDATION_INVALID_FIELD),
     (CapitalAllocationError, ErrorCode.VALIDATION_INVALID_FIELD),
     (RebalanceError, ErrorCode.VALIDATION_INVALID_FIELD),
+    # PLT-29 — trust_memberships(grant/suspend/revoke). 새 ErrorCode를 만들지
+    # 않고 기존 taxonomy만 재사용한다(decision, task-1103). 73번 §4.1
+    # STATE_DUPLICATE_COMMAND/STATE_LAST_OWNER는 존재하지 않아 각각
+    # ConcurrencyConflictError(이미 등록됨)/STATE_INVALID_TRANSITION으로 접는다.
+    (MembershipMfaRequiredError, ErrorCode.AUTH_MFA_REQUIRED),
+    (GrantAuthorizationError, ErrorCode.AUTHZ_FORBIDDEN),
+    (SuspendTargetNotFoundError, ErrorCode.RESOURCE_NOT_FOUND),
+    (SuspendAuthorizationError, ErrorCode.AUTHZ_FORBIDDEN),
+    (SuspendLastOwnerError, ErrorCode.STATE_INVALID_TRANSITION),
+    (RevokeTargetNotFoundError, ErrorCode.RESOURCE_NOT_FOUND),
+    (RevokeAuthorizationError, ErrorCode.AUTHZ_FORBIDDEN),
+    (RevokeLastOwnerError, ErrorCode.STATE_INVALID_TRANSITION),
 ]
 
 # ErrorCode 하나당 상태코드 하나뿐인 HTTP_STATUS로 표현할 수 없는 개별
