@@ -37,6 +37,15 @@ from src.foundation.ledger.adapters.postgres_balance_repository import PostgresB
 from src.foundation.ledger.adapters.postgres_journal_repository import PostgresJournalRepository
 from src.foundation.ledger.adapters.postgres_payout_repository import PostgresPayoutRepository
 from src.foundation.ledger.application.scheduler import LedgerIntegrityScheduler
+from src.foundation.market_data.adapters.postgres_batch_repository import PostgresBatchRepository
+from src.foundation.market_data.adapters.postgres_calendar_repository import (
+    PostgresCalendarRepository,
+)
+from src.foundation.market_data.adapters.postgres_candle_store import PostgresCandleStore
+from src.foundation.market_data.adapters.postgres_reference_repository import (
+    PostgresReferenceRepository,
+)
+from src.foundation.market_data.application.scheduler import MarketDataQualityScheduler
 from src.services.background_loops import flag_enabled, start_background_loops
 from src.services.credential_resolver import CredentialResolver
 from src.services.exchange_credential_service import ExchangeCredentialService
@@ -127,18 +136,41 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             "ledger_scheduler: AIOS_LEDGER_SCHEDULER_ENABLED=0 — 원장 스케줄러를 띄우지 않습니다."
         )
 
+    # LA-18 — 시장데이터 품질 게이지(스테일·갭·거부 비율) 주기 export. 위
+    # ledger_scheduler와 같은 패턴·같은 플래그 관례. `watched`(주기 재수집
+    # 대상)는 아직 운영 심볼 목록·자격증명 배선이 없어(§10 미확정, 이
+    # 리프 범위 밖) 비워 둔다 — 이 스케줄러는 지금은 이미 저장된 배치를
+    # 훑어 게이지만 갱신한다(quality_metrics.py 모듈 docstring 참조).
+    market_data_scheduler = MarketDataQualityScheduler(
+        pool,
+        store=PostgresCandleStore(pool),
+        refs=PostgresReferenceRepository(pool),
+        cal=PostgresCalendarRepository(pool),
+        batches=PostgresBatchRepository(pool),
+        registry=get_registry(),
+    )
+    market_data_tasks: list[asyncio.Task[None]] = []
+    if flag_enabled("AIOS_MARKET_DATA_SCHEDULER_ENABLED"):
+        market_data_tasks = [asyncio.create_task(market_data_scheduler.run_forever())]
+    else:
+        logger.warning(
+            "market_data_scheduler: AIOS_MARKET_DATA_SCHEDULER_ENABLED=0 — "
+            "시장데이터 품질 스케줄러를 띄우지 않습니다."
+        )
+
     app.state.pool = pool
     app.state.secrets = secrets
     app.state.event_bus = event_bus
     app.state.credential_resolver = credential_resolver
     app.state.execution_scheduler = loops.execution_scheduler
     app.state.ledger_scheduler = ledger_scheduler
+    app.state.market_data_scheduler = market_data_scheduler
     try:
         yield
     finally:
-        for task in ledger_tasks:
+        for task in [*ledger_tasks, *market_data_tasks]:
             task.cancel()
-        for task in ledger_tasks:
+        for task in [*ledger_tasks, *market_data_tasks]:
             with contextlib.suppress(asyncio.CancelledError):
                 await task
         await loops.stop()
