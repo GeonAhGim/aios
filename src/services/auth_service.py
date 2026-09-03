@@ -21,6 +21,12 @@ WatchdogService.compute_equity/SurgeDetector.verify_provenance 등과 동일).
 성공하면 탈퇴가 자동 취소된다(ACTIVE로 복귀, deletion_requested_at
 초기화) — FD-11.4 원문 "유예기간 중 재로그인 시 탈퇴 취소 가능"의
 실제 강제 지점.
+
+PLT-22 연동 — 로그인 실패 카운터 증가는 `src/services/auth/lockout.py`의
+원자 UPDATE에 위임한다(TOCTOU 제거, task-852). 잠금 판정을 받으면
+`AccountLockedError`(§3.3 AUTH_ACCOUNT_LOCKED·423 계약, retry_after_seconds
+보유)를 던진다 — 라우터가 아직 이관되지 않아(§9 PLT-24) 지금은 AuthError
+서브클래스로 기존 401 매핑을 그대로 탄다.
 """
 from __future__ import annotations
 
@@ -36,9 +42,8 @@ from argon2.exceptions import VerifyMismatchError
 from pydantic import BaseModel
 
 from src.core.logging.audit_log import record_audit_log
+from src.services.auth import lockout
 
-MAX_FAILED_ATTEMPTS = 5
-LOCKOUT_MINUTES = 15
 MIN_PASSWORD_LENGTH = 12
 
 _GENERIC_AUTH_ERROR = "이메일 또는 비밀번호가 올바르지 않습니다."
@@ -64,6 +69,20 @@ def _consume_verify_timing(password: str) -> None:
 
 class AuthError(Exception):
     """FD-11.1 인증/가입 실패 — 라우터가 적절한 HTTP 상태코드로 변환."""
+
+
+class AccountLockedError(AuthError):
+    """PLT-22 — 잠금 상태 로그인 시도. §3.3 AUTH_ACCOUNT_LOCKED(423) 계약대로
+    `error_code`/`retry_after_seconds` 이름을 고정한다(프론트 deriveLockout,
+    task-387이 이 이름으로 읽는다). AuthError를 상속해 라우터 이관 전까지는
+    기존 계정열거 방지 매핑(모든 AuthError → 401)을 그대로 탄다."""
+
+    error_code = "AUTH_ACCOUNT_LOCKED"
+    http_status = 423
+
+    def __init__(self, retry_after_seconds: int | None) -> None:
+        super().__init__(_GENERIC_AUTH_ERROR)
+        self.retry_after_seconds = retry_after_seconds
 
 
 class User(BaseModel):
@@ -179,7 +198,7 @@ class AuthService:
                     conn, actor_agent=str(row["user_id"]), action_type="auth.login_failed",
                     user_id=row["user_id"], decision_data={"reason": "account_locked"},
                 )
-                raise AuthError(_GENERIC_AUTH_ERROR)
+                raise AccountLockedError(lockout.retry_after_seconds(row["locked_until"], now))
 
             try:
                 _hasher.verify(row["password_hash"], password)
@@ -188,10 +207,7 @@ class AuthService:
                     conn, actor_agent=str(row["user_id"]), action_type="auth.login_failed",
                     user_id=row["user_id"], decision_data={"reason": "wrong_password"},
                 )
-                await self._register_failed_attempt(
-                    conn, row["user_id"], row["failed_login_attempts"]
-                )
-                raise AuthError(_GENERIC_AUTH_ERROR) from None
+                raise await self._fail_login(conn, row["user_id"], now) from None
 
             totp_verified_now = False
             if row["mfa_enabled"]:
@@ -205,10 +221,7 @@ class AuthService:
                         conn, actor_agent=str(row["user_id"]), action_type="auth.login_failed",
                         user_id=row["user_id"], decision_data={"reason": "mfa_failed"},
                     )
-                    await self._register_failed_attempt(
-                        conn, row["user_id"], row["failed_login_attempts"]
-                    )
-                    raise AuthError(_GENERIC_AUTH_ERROR)
+                    raise await self._fail_login(conn, row["user_id"], now)
                 totp_verified_now = True
 
             await record_audit_log(
@@ -248,27 +261,25 @@ class AuthService:
         }
         return jwt.encode(payload, self._jwt_secret_key, algorithm=self._jwt_algorithm)
 
-    async def _register_failed_attempt(
-        self, conn: asyncpg.Connection, user_id: UUID, current_attempts: int
-    ) -> None:
-        attempts = current_attempts + 1
-        newly_locked = attempts >= MAX_FAILED_ATTEMPTS
-        locked_until = (
-            datetime.now(timezone.utc) + timedelta(minutes=LOCKOUT_MINUTES)
-            if newly_locked
-            else None
-        )
-        await conn.execute(
-            "UPDATE users SET failed_login_attempts = $2, locked_until = $3 WHERE user_id = $1",
-            user_id,
-            attempts,
-            locked_until,
-        )
-        if newly_locked:
+    async def _fail_login(
+        self, conn: asyncpg.Connection, user_id: UUID, now: datetime
+    ) -> AuthError:
+        """실패 카운터를 원자적으로 증가시키고, 반환된 예외를 호출자가
+        `raise`한다(예외를 직접 던지지 않는 이유: 호출부의 `except ... from
+        None` 체이닝을 그대로 유지하기 위해). lockout.register_failed_attempt가
+        단일 UPDATE ... RETURNING이라 이 메서드 자체는 TOCTOU 없이 정확한
+        최신 카운트를 기준으로 잠금 여부를 판정한다."""
+        state = await lockout.register_failed_attempt(conn, user_id, now=now)
+        if state.locked:
             # 실패 시도 자체와는 별개의 이벤트 — 잠금이 "지금 막 걸렸다"는
             # 사실 자체가 운영자에게 알림/모니터링 대상이 되는 신호다.
             await record_audit_log(
                 conn, actor_agent=str(user_id), action_type="auth.account_locked",
                 user_id=user_id,
-                decision_data={"failed_attempts": attempts, "locked_minutes": LOCKOUT_MINUTES},
+                decision_data={
+                    "failed_attempts": state.failed_attempts,
+                    "locked_minutes": lockout.LOCKOUT_MINUTES,
+                },
             )
+            return AccountLockedError(state.retry_after_seconds)
+        return AuthError(_GENERIC_AUTH_ERROR)
