@@ -11,11 +11,9 @@
 // deriveCapabilities(ACTIVE+OWNER만 canManageMembers=true)로 판정하고, 못 찾으면
 // TenantSwitcher의 UNKNOWN_CAPABILITIES와 동일하게 최소권한(false)으로 둔다.
 //
-// grant/suspend/revoke 실패는 err.message를 노출하지 않는다 — 403은
-// classifyForbidden으로 걸러 ForbiddenNotice/DenialReasons가, 나머지(§3.3 표가
-// STATE_INVALID_TRANSITION 409로도 last-owner 거부를 보낼 수 있어
-// classifyMembershipError가 두 표현 모두 흡수)는 describeMembershipError의 고정
-// 문구만 보여준다(membershipMutation.ts, task-483 routeApiError 경유).
+// grant/suspend/revoke 실패는 err.message를 노출하지 않는다 — last-owner 거부(409 또는
+// 403 POLICY_LAST_OWNER/RISK_LAST_OWNER, classifyMembershipError가 두 표현 다 흡수)는
+// describeMembershipError 고정 문구로, 그 외 403은 ForbiddenNotice로 보여준다.
 import { ApiError, createMembershipsClient, type MembershipsClient } from "@aios/api-client";
 import {
   classifyForbidden,
@@ -97,8 +95,10 @@ function ListErrorBanner({ error, onRetry }: { error: unknown; onRetry?: () => v
 }
 
 function MutationErrorBanner({ error }: { error: unknown }) {
+  const reason = classifyMembershipError(error);
+  if (reason === "last_owner_denied") return <ErrorMessage message={describeMembershipError(reason)} />;
   if (classifyForbidden(error)) return <ForbiddenNotice error={error} />;
-  return <ErrorMessage message={describeMembershipError(classifyMembershipError(error))} />;
+  return <ErrorMessage message={describeMembershipError(reason)} />;
 }
 
 interface MemberRowProps {

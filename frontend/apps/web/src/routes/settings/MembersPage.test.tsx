@@ -155,6 +155,28 @@ describe("MembersPage", () => {
     vi.restoreAllMocks();
   });
 
+  it("negative: last-owner suspend 거부(403 POLICY_LAST_OWNER)도 같은 고정 문구를 노출한다(ForbiddenNotice 제네릭 문구·원본 코드 노출 금지)", async () => {
+    activateTenant(TENANT_A);
+    const suspend = vi
+      .fn()
+      .mockRejectedValue(new ApiError(403, "raw server detail should not leak", "trace-3", "POLICY_LAST_OWNER"));
+
+    renderPage({
+      currentUserId: "me-1",
+      fetchMembers: async () => [rawMember({ membership_id: "m-1", subject_id: "me-1", role: "OWNER" })],
+      membershipsClient: { grant: vi.fn(), suspend, revoke: vi.fn() },
+    });
+
+    await waitFor(() => expect(screen.getByRole("button", { name: "정지" })).not.toBeDisabled());
+    fireEvent.click(screen.getByRole("button", { name: "정지" }));
+
+    await waitFor(() =>
+      expect(screen.getByText("테넌트에는 활성 소유자(OWNER)가 최소 1명 있어야 합니다.")).toBeInTheDocument(),
+    );
+    expect(screen.queryByText("POLICY_LAST_OWNER")).not.toBeInTheDocument();
+    expect(screen.queryByText("raw server detail should not leak")).not.toBeInTheDocument();
+  });
+
   it("negative: cross-tenant 403(AUTH_TENANT_MISMATCH)을 ForbiddenNotice로 노출한다", async () => {
     activateTenant(TENANT_A);
     const suspend = vi
