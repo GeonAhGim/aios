@@ -44,11 +44,17 @@ def retry_after_seconds(locked_until: datetime | None, now: datetime) -> int | N
 
     프론트 deriveLockout(task-387, accountLockout.ts)이 0 이하 값을 기본
     60초로 클램프하므로, 여기서는 "막 잠긴 순간" 반올림 오차로 0이 나가는
-    것을 막기 위해 최소 1초를 보장한다.
+    것을 막기 위해 최소 1초를 보장한다. 상한도 마찬가지로 계약의 일부다
+    — `locked_until` 산출 시각과 `now` 산출 시각이 서로 다른 두 번의
+    `clock_timestamp()` 호출에서 나올 수 있어(예: register_failed_attempt의
+    UPDATE...RETURNING), 초 단위로 절삭하기 전 부동소수 오차가 1초를 넘겨
+    LOCKOUT_MINUTES*60을 초과할 수 있다 — 그 값도 카운트다운 계약이므로
+    상한을 여기서 고정한다(esc-ci-401c16dd420e).
     """
     if locked_until is None or locked_until <= now:
         return None
-    return max(1, int((locked_until - now).total_seconds()))
+    seconds = int((locked_until - now).total_seconds())
+    return max(1, min(seconds, LOCKOUT_MINUTES * 60))
 
 
 async def register_failed_attempt(
