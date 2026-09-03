@@ -8,9 +8,8 @@ Spec: docs/specs/L4_market_data_positions_ledger_v1.0.md#§3.1 (A), §9.2 LA-1,
 (71번 §4, FND-03·LB-1·LC-1과 동일 원칙). 필드 추가는 minor(107번, 기본값
 필수) — 제거·의미 변경은 `v2` 모듈 신설.
 
-모든 `datetime` 필드는 `AwareDatetime`으로 naive 값을 거부한다(tz-naive는
-거래소 응답을 잘못 해석했다는 신호이지 정상 입력이 아니다). 가격·수량은
-`Decimal`(NUMERIC(30,10)과 동일 정밀도, float 금지).
+모든 `datetime` 필드는 `AwareDatetime`으로 naive 값을 거부하고, 가격·수량은
+`Decimal`(NUMERIC(30,10)과 동일 정밀도, float 금지)이다.
 """
 from __future__ import annotations
 
@@ -171,6 +170,21 @@ class IngestBatchResult(BaseModel):
     batch_hash: str
     audit_event_id: UUID | None
     stored_range: tuple[AwareDatetime, AwareDatetime] | None
+    schema_version: Literal["v1"] = SCHEMA_VERSION
+
+
+class TickIngestBatchResult(BaseModel):  # LA-16a: timeframe 없음, md_ingest_batch_tick 저장
+    batch_id: UUID
+    tenant_id: UUID | None = None
+    source: str
+    venue: Venue
+    instrument_id: UUID
+    range_start: AwareDatetime
+    range_end: AwareDatetime
+    request_fingerprint: str
+    verdict: QualityVerdict
+    batch_hash: str
+    audit_event_id: UUID | None
     schema_version: Literal["v1"] = SCHEMA_VERSION
 
 

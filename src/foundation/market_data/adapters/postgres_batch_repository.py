@@ -34,6 +34,7 @@ from src.foundation.market_data.contracts.v1 import (
     QualityIssueType,
     QualityVerdict,
     Severity,
+    TickIngestBatchResult,
     Timeframe,
     Venue,
     Verdict,
@@ -190,4 +191,81 @@ class PostgresBatchRepository:
             batch_hash=row["batch_hash"],
             audit_event_id=row["audit_event_id"],
             stored_range=stored_range,
+        )
+
+    async def create_tick_batch(
+        self, conn: asyncpg.Connection, batch: TickIngestBatchResult
+    ) -> TickIngestBatchResult:
+        if batch.audit_event_id is None:
+            raise ValueError(
+                "md_ingest_batch_tick.audit_event_id는 NOT NULL이다(§4.1 fail-closed) — "
+                "감사 이벤트 없이 배치를 기록할 수 없다"
+            )
+
+        try:
+            await conn.execute(
+                "INSERT INTO md_ingest_batch_tick "
+                "(id, tenant_id, source, venue, instrument_id, range_start, range_end, "
+                " request_fingerprint, batch_hash, accepted_count, quarantined_count, "
+                " rejected_count, verdict, issues, audit_event_id) "
+                "VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14::jsonb,$15)",
+                batch.batch_id,
+                batch.tenant_id,
+                batch.source,
+                batch.venue.value,
+                batch.instrument_id,
+                batch.range_start,
+                batch.range_end,
+                batch.request_fingerprint,
+                batch.batch_hash,
+                batch.verdict.accepted,
+                batch.verdict.quarantined,
+                batch.verdict.rejected,
+                batch.verdict.verdict.value,
+                json.dumps(
+                    [issue.model_dump(mode="json") for issue in batch.verdict.issues]
+                ),
+                batch.audit_event_id,
+            )
+        except asyncpg.exceptions.UniqueViolationError as exc:
+            raise DuplicateBatchError(f"이미 존재하는 batch_id: {batch.batch_id}") from exc
+
+        return batch
+
+    async def get_tick_batch(
+        self, conn: asyncpg.Connection, batch_id: UUID, tenant_id: UUID | None
+    ) -> TickIngestBatchResult | None:
+        # get()과 동일한 `IS NOT DISTINCT FROM` tenant 격리 이유.
+        row = await conn.fetchrow(
+            "SELECT * FROM md_ingest_batch_tick "
+            "WHERE id = $1 AND tenant_id IS NOT DISTINCT FROM $2",
+            batch_id,
+            tenant_id,
+        )
+        if row is None:
+            return None
+
+        issues = [
+            QualityIssue.model_validate(issue) for issue in json.loads(row["issues"])
+        ]
+        verdict = QualityVerdict(
+            verdict=Verdict(row["verdict"]),
+            accepted=row["accepted_count"],
+            quarantined=row["quarantined_count"],
+            rejected=row["rejected_count"],
+            issues=issues,
+        )
+
+        return TickIngestBatchResult(
+            batch_id=row["id"],
+            tenant_id=row["tenant_id"],
+            source=row["source"],
+            venue=Venue(row["venue"]),
+            instrument_id=row["instrument_id"],
+            range_start=row["range_start"],
+            range_end=row["range_end"],
+            request_fingerprint=row["request_fingerprint"],
+            verdict=verdict,
+            batch_hash=row["batch_hash"],
+            audit_event_id=row["audit_event_id"],
         )

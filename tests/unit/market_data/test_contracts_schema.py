@@ -29,6 +29,7 @@ _MODELS = (
     v1.QualityVerdict,
     v1.IngestCandlesCommand,
     v1.IngestBatchResult,
+    v1.TickIngestBatchResult,
     v1.CandleQuery,
     v1.CandleSeries,
     v1.ReplayRequest,
