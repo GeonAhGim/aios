@@ -70,4 +70,42 @@ describe("WriteReviewPage 작성 에러 표시", () => {
     );
     expect(screen.queryByText("raw detail")).not.toBeInTheDocument();
   });
+
+  // task-954: classifyBadRequest가 VALIDATION_INVALID_FIELD를 "field"로 분류해
+  // BadRequestNotice가 스스로 null을 렌더한다(task-364) — useFieldErrors가
+  // details.fields[]를 읽어 입력 옆에 인라인 오류를 보여준다.
+  it("VALIDATION_INVALID_FIELD(400): details.fields[]를 해당 입력 옆에 인라인 오류로 보여준다", async () => {
+    mutateAsync.mockRejectedValue(
+      new ApiError(400, "요청 값이 올바르지 않습니다.", undefined, "VALIDATION_INVALID_FIELD", undefined, {
+        fields: ["body.rating", "body.comment"],
+      }),
+    );
+    renderPage();
+
+    fireEvent.click(screen.getByRole("button", { name: "리뷰 제출" }));
+
+    await waitFor(() =>
+      expect(screen.getAllByText("요청 값이 올바르지 않습니다.")).toHaveLength(2),
+    );
+  });
+
+  it("필드를 수정하면 clearField로 그 필드 오류만 사라지고 나머지는 유지된다", async () => {
+    mutateAsync.mockRejectedValue(
+      new ApiError(400, "요청 값이 올바르지 않습니다.", undefined, "VALIDATION_INVALID_FIELD", undefined, {
+        fields: ["body.rating", "body.comment"],
+      }),
+    );
+    renderPage();
+
+    fireEvent.click(screen.getByRole("button", { name: "리뷰 제출" }));
+    await waitFor(() =>
+      expect(screen.getAllByText("요청 값이 올바르지 않습니다.")).toHaveLength(2),
+    );
+
+    fireEvent.change(screen.getByRole("slider"), { target: { value: "3" } });
+
+    await waitFor(() =>
+      expect(screen.getAllByText("요청 값이 올바르지 않습니다.")).toHaveLength(1),
+    );
+  });
 });
