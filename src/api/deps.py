@@ -5,29 +5,55 @@ lifespan)가 채워둔 것을 재사용하며, 각 서비스 생성자가 요구
 asyncpg.Pool 타입 그대로 넘긴다(SQLAlchemy 세션이 아님 — main.py 상단
 편차 설명 참조).
 
-get_current_user()는 Authorization: Bearer <JWT> 헤더를 검증해 사용자를
-반환한다. get_current_verifier/get_current_admin은 15번 문서 §15.6
-RBAC(is_verifier/is_platform_admin 플래그)를 그대로 강제한다.
+get_current_user()는 Authorization: Bearer <JWT> 헤더를 PLT-23
+`TokenVerifier`(kid별 키, alg 고정 HS256)로 검증하고, 그 `sid`가
+가리키는 `auth_session`이 아직 활성인지(`revoked_at IS NULL`)까지
+확인한다(§3.4 "매 요청 revoked_at 확인") — 서명·claims만 맞으면 통과하던
+이전 레거시 JWT 검증과 달리, 로그아웃·재사용 탐지로 세션이 revoke된
+직후에는 만료 전 access 토큰도 즉시 거부된다. get_current_verifier/
+get_current_admin은 15번 문서 §15.6 RBAC(is_verifier/is_platform_admin
+플래그)를 그대로 강제한다.
 """
 from __future__ import annotations
 
 from uuid import UUID
 
 import asyncpg
-import jwt
 from fastapi import Depends, HTTPException, Request, status
 from fastapi.security import OAuth2PasswordBearer
 
+from src.api.contracts.exception_mapping import SessionRevokedError
 from src.core.event_bus.bus import EventBus
+from src.services.auth import session_repository
+from src.services.auth.tokens import AuthLevel, TokenIssuer, TokenVerifier
 from src.services.auth_service import AuthError, AuthService, User, get_user_by_id
 from src.services.mfa_service import MfaService
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/auth/login", auto_error=False)
 
 
+class AuthenticatedUser(User):
+    """PLT-24 — `get_current_user()`가 실제로 반환하는 타입. `User`의
+    서브클래스라 `user: User = Depends(get_current_user)`로 선언된 기존
+    15개 이상의 라우터는 그대로 동작한다(추가 필드는 그냥 무시됨) —
+    `session_id`/`auth_level`이 필요한 새 라우터(`/auth/logout`)만 이
+    타입으로 선언해 꺼내 쓰면 된다."""
+
+    session_id: UUID
+    auth_level: AuthLevel
+
+
 async def get_pool(request: Request) -> asyncpg.Pool:
     pool: asyncpg.Pool = request.app.state.pool
     return pool
+
+
+def get_token_issuer() -> TokenIssuer:
+    return TokenIssuer.from_env()
+
+
+def get_token_verifier() -> TokenVerifier:
+    return TokenVerifier.from_env()
 
 
 async def get_event_bus(request: Request) -> EventBus:
@@ -40,32 +66,37 @@ async def get_event_bus(request: Request) -> EventBus:
 
 
 async def get_current_user(
-    request: Request,
     token: str | None = Depends(oauth2_scheme),
     pool: asyncpg.Pool = Depends(get_pool),
-) -> User:
+    verifier: TokenVerifier = Depends(get_token_verifier),
+) -> AuthenticatedUser:
     if token is None:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "인증이 필요합니다.")
 
-    secrets = request.app.state.secrets
-    try:
-        payload = jwt.decode(
-            token, secrets.jwt_secret_key.get_secret_value(), algorithms=[secrets.jwt_algorithm]
-        )
-    except jwt.PyJWTError as exc:
-        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "유효하지 않은 토큰입니다.") from exc
+    # TokenInvalidError/TokenExpiredError(tokens.py)는 그대로 전파한다 —
+    # exception_mapping.py가 401 AUTH_TOKEN_INVALID/AUTH_TOKEN_EXPIRED로
+    # 매핑하므로 여기서 raw HTTPException으로 새로 감쌀 필요가 없다.
+    claims = verifier.verify(token)
 
-    user = await get_user_by_id(pool, UUID(payload["sub"]))
+    user = await get_user_by_id(pool, claims.sub)
     if user is None:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "존재하지 않는 사용자입니다.")
     if user.status in ("SUSPENDED", "DELETED"):
         # AuthService.authenticate()는 로그인 시점에 SUSPENDED/DELETED를
-        # 거부하지만, 발급된 JWT는 만료 전까지(기본 60분) 그 자체로 유효해
-        # 매 요청마다 이 검사가 없으면 정지 이후에도 기존 토큰으로 계속
-        # API를 쓸 수 있었다(라우터 조립 중 발견, 로그인 시점 검사만으로는
-        # 충분하지 않다는 것을 실증).
+        # 거부하지만, 발급된 JWT는 만료 전까지 그 자체로 유효해 매 요청마다
+        # 이 검사가 없으면 정지 이후에도 기존 토큰으로 계속 API를 쓸 수
+        # 있었다(라우터 조립 중 발견, 로그인 시점 검사만으로는 충분하지
+        # 않다는 것을 실증).
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "정지되었거나 삭제된 계정입니다.")
-    return user
+
+    async with pool.acquire() as conn:
+        session = await session_repository.get_active(conn, claims.sid)
+    if session is None:
+        raise SessionRevokedError(f"session_id={claims.sid}: 세션이 폐기되었습니다")
+
+    return AuthenticatedUser(
+        **user.model_dump(), session_id=claims.sid, auth_level=claims.auth_level
+    )
 
 
 async def reauthenticate(

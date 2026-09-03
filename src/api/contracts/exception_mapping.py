@@ -60,7 +60,11 @@ from src.foundation.ledger.application.queries import WalletLedgerDriftError
 from src.services.account_deletion_service import AccountDeletionError
 from src.services.alert_service import AlertError, AlertNotFoundError
 from src.services.approval_settings_service import ApprovalSettingsError
-from src.services.auth_service import AuthError
+from src.services.auth.logout import LogoutSessionMismatchError
+from src.services.auth.refresh import RefreshSessionNotFoundError, RefreshTokenExpiredError
+from src.services.auth.session_repository import RefreshReuseDetected
+from src.services.auth.tokens import TokenExpiredError, TokenInvalidError
+from src.services.auth_service import AccountLockedError, AuthError
 from src.services.capital_allocation import CapitalAllocationError
 from src.services.condition_compiler import ConditionCompileError
 from src.services.credential_resolver import CredentialNotFoundError
@@ -96,11 +100,30 @@ class ApprovalOwnershipError(Exception):
     라우터 계층의 소유권 검사이기 때문이다(P6 300줄 상한도 고려)."""
 
 
+class SessionRevokedError(Exception):
+    """PLT-24 — `src/api/deps.py`의 `get_current_user()`가 access JWT의
+    서명·claims는 유효하지만 그 `sid`의 `auth_session`이 이미 revoke된
+    경우 던진다(로그아웃·재사용 탐지·admin suspend 등). `ApprovalOwnershipError`
+    와 동일한 이유로 API 계층 소유 예외를 여기 둔다 — 401
+    `AUTH_SESSION_REVOKED`로 매핑."""
+
+
 # 선언 순서 = 우선순위(서브클래스 먼저) — 지금은 전부 최상위 Exception의
 # 직접 서브클래스라 순서가 결과에 영향을 주지 않지만, 나중에 서브클래싱이
 # 생기면 이 순서 규칙을 지켜야 한다.
 EXCEPTION_MAP: list[tuple[type[Exception], ErrorCode]] = [
+    # PLT-24 — AccountLockedError는 AuthError 서브클래스라 반드시 그
+    # 앞에 온다(선언 순서 = 우선순위). TokenExpiredError도 TokenInvalidError
+    # 서브클래스라 마찬가지다(tokens.py).
+    (AccountLockedError, ErrorCode.AUTH_ACCOUNT_LOCKED),
     (AuthError, ErrorCode.AUTH_INVALID_CREDENTIALS),
+    (TokenExpiredError, ErrorCode.AUTH_TOKEN_EXPIRED),
+    (TokenInvalidError, ErrorCode.AUTH_TOKEN_INVALID),
+    (RefreshReuseDetected, ErrorCode.AUTH_SESSION_REVOKED),
+    (RefreshSessionNotFoundError, ErrorCode.AUTH_SESSION_REVOKED),
+    (RefreshTokenExpiredError, ErrorCode.AUTH_TOKEN_EXPIRED),
+    (LogoutSessionMismatchError, ErrorCode.AUTHZ_FORBIDDEN),
+    (SessionRevokedError, ErrorCode.AUTH_SESSION_REVOKED),
     (MfaReauthenticationRequiredError, ErrorCode.AUTH_MFA_REQUIRED),
     (MfaError, ErrorCode.AUTH_MFA_INVALID),
     (ApprovalSettingsError, ErrorCode.VALIDATION_INVALID_FIELD),

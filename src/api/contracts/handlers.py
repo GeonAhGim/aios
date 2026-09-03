@@ -47,6 +47,7 @@ def _error_response(
     details: dict[str, Any] | None = None,
     *,
     status_code: int | None = None,
+    retry_after_seconds: int | None = None,
 ) -> JSONResponse:
     trace_id = current_trace_id()
     error = ApiError(
@@ -54,7 +55,7 @@ def _error_response(
         message=message,
         details=details or {},
         trace_id=trace_id,
-        retry_after_seconds=None,
+        retry_after_seconds=retry_after_seconds,
     )
     body = error.model_dump(mode="json")
     return JSONResponse(
@@ -92,6 +93,10 @@ def install_exception_handlers(app: FastAPI) -> None:
     @app.exception_handler(Exception)
     async def _handle_domain_or_unknown_exception(request: Request, exc: Exception) -> JSONResponse:
         code, message, details = map_exception(exc)
+        # PLT-24 — AccountLockedError(423) 등 재시도 대기시간을 갖는 예외는
+        # `retry_after_seconds` 속성을 스스로 들고 있다(§3.3 계약, 프론트
+        # deriveLockout이 읽는 이름과 고정 일치) — 봉투에 그대로 실어 보낸다.
+        retry_after_seconds = getattr(exc, "retry_after_seconds", None)
         if code == ErrorCode.INTERNAL_ERROR:
             # 원인은 error 로그에만 — 클라이언트에게는 고정 메시지 + trace_id.
             logger.error(
@@ -104,7 +109,14 @@ def install_exception_handlers(app: FastAPI) -> None:
             )
             message = "일시적인 오류가 발생했습니다. 계속되면 trace_id와 함께 문의해주세요."
             details = {}
-        return _error_response(code, message, details, status_code=override_status(exc))
+            retry_after_seconds = None
+        return _error_response(
+            code,
+            message,
+            details,
+            status_code=override_status(exc),
+            retry_after_seconds=retry_after_seconds,
+        )
 
 
 __all__ = ["install_exception_handlers"]

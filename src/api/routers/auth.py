@@ -1,51 +1,121 @@
-"""11.2/11.3 — 인증 API 라우터.
+"""11.2/11.3 + PLT-24 — 인증 API 라우터.
 
-Spec: 기능설계문서_v1.20.md#FD-11.1/FD-11.2, 16_backend_signatures.md
+Spec: 기능설계문서_v1.20.md#FD-11.1/FD-11.2, 16_backend_signatures.md,
+docs/specs/L4_platform_observability_tenancy_api_v1.0.md#§3.4, §9 PLT-24
 
-앱 조립 단계 — 이미 구현된 AuthService(11.2)/MfaService(11.3) 서비스
-계층을 실제 HTTP로 노출한다. 로직은 여기서 새로 만들지 않는다.
+앱 조립 단계 — 이미 구현된 AuthService(11.2)/MfaService(11.3)와
+`src/services/auth/{login,refresh,logout}.py`(PLT-24) 유스케이스를
+실제 HTTP로 노출한다. 로직은 여기서 새로 만들지 않는다 — 실패 경로도
+도메인 예외를 그대로 raise해 `exception_mapping.py`가 매핑하게 둔다
+(§3.3 "신규 코드에서 raw HTTPException 금지", `test_no_raw_http_exception.py`
+가 이 파일을 이미 검사 대상으로 강제한다).
+
+`/register`도 `login.issue_token_pair()`를 재사용해 세션+토큰 쌍을
+발급한다 — 가입 직후에도 `get_current_user()`(PLT-23 TokenVerifier +
+세션 활성 확인 기반)로 인증되는 토큰이어야 하므로, 레거시
+`AuthService.issue_token()`(단일 비회전 JWT)로는 더 이상 로그인 상태를
+유지할 수 없다.
 """
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, status
+import asyncpg
+from fastapi import APIRouter, Depends, Request, status
 
 from src.api.contracts.envelope import ApiResponse, ok
-from src.api.deps import get_auth_service, get_current_user, get_mfa_service, reauthenticate
+from src.api.deps import (
+    AuthenticatedUser,
+    get_auth_service,
+    get_current_user,
+    get_mfa_service,
+    get_pool,
+    get_token_issuer,
+    reauthenticate,
+)
 from src.api.schemas.auth import (
     LoginRequest,
     MfaSetupRequest,
     MfaVerifyRequest,
+    RefreshRequest,
     SignupRequest,
-    TokenResponse,
 )
+from src.services.auth import login as login_usecase
+from src.services.auth import logout as logout_usecase
+from src.services.auth import refresh as refresh_usecase
+from src.services.auth.tokens import ClientInfo, TokenIssuer, TokenPairResponse
 from src.services.auth_service import AuthService, User
 from src.services.mfa_service import MfaReauthenticationRequiredError, MfaService, MfaSetupResult
 
 router = APIRouter()
 
 
+def _client_info(request: Request) -> ClientInfo:
+    return ClientInfo(
+        ip=request.client.host if request.client else None,
+        user_agent=request.headers.get("user-agent"),
+    )
+
+
 @router.post("/register", status_code=status.HTTP_201_CREATED)
 async def register(
-    body: SignupRequest, auth: AuthService = Depends(get_auth_service)
-) -> ApiResponse[TokenResponse]:
+    body: SignupRequest,
+    request: Request,
+    auth: AuthService = Depends(get_auth_service),
+    pool: asyncpg.Pool = Depends(get_pool),
+    issuer: TokenIssuer = Depends(get_token_issuer),
+) -> ApiResponse[TokenPairResponse]:
     user = await auth.signup(body.email, body.password)
-    return ok(TokenResponse(access_token=auth.issue_token(user)))
+    pair = await login_usecase.issue_token_pair(pool, issuer, user, client=_client_info(request))
+    return ok(pair)
 
 
 @router.post("/login")
 async def login(
-    body: LoginRequest, auth: AuthService = Depends(get_auth_service)
-) -> ApiResponse[TokenResponse]:
-    user = await auth.authenticate(body.email, body.password, totp_code=body.totp_code)
-    return ok(TokenResponse(access_token=auth.issue_token(user)))
+    body: LoginRequest,
+    request: Request,
+    auth: AuthService = Depends(get_auth_service),
+    pool: asyncpg.Pool = Depends(get_pool),
+    issuer: TokenIssuer = Depends(get_token_issuer),
+) -> ApiResponse[TokenPairResponse]:
+    pair = await login_usecase.login(
+        pool,
+        auth,
+        issuer,
+        email=body.email,
+        password=body.password,
+        totp_code=body.totp_code,
+        client=_client_info(request),
+    )
+    return ok(pair)
+
+
+@router.post("/refresh")
+async def refresh(
+    body: RefreshRequest,
+    pool: asyncpg.Pool = Depends(get_pool),
+    issuer: TokenIssuer = Depends(get_token_issuer),
+) -> ApiResponse[TokenPairResponse]:
+    pair = await refresh_usecase.refresh(
+        pool, issuer, session_id=body.session_id, refresh_token=body.refresh_token
+    )
+    return ok(pair)
 
 
 @router.post("/logout")
-async def logout(user: User = Depends(get_current_user)) -> ApiResponse[dict[str, str]]:
-    """Draft — stateless JWT라 서버측 무효화 메커니즘은 착수 시 확정 필요
-    (16_backend_signatures.md 원문 그대로, 지금은 클라이언트가 토큰을
-    버리는 것으로 충분하다고 가정)."""
+async def logout(
+    user: AuthenticatedUser = Depends(get_current_user),
+    pool: asyncpg.Pool = Depends(get_pool),
+) -> ApiResponse[dict[str, str]]:
+    await logout_usecase.logout(pool, session_id=user.session_id, user_id=user.user_id)
     return ok({"status": "logged_out"})
+
+
+@router.post("/logout-all")
+async def logout_all(
+    user: AuthenticatedUser = Depends(get_current_user),
+    pool: asyncpg.Pool = Depends(get_pool),
+) -> ApiResponse[dict[str, int]]:
+    revoked_count = await logout_usecase.logout_all(pool, user_id=user.user_id)
+    return ok({"revoked_count": revoked_count})
 
 
 @router.post("/mfa/setup")
