@@ -32,3 +32,15 @@ export type {
   FreshnessUnavailable,
   DeriveFreshnessOptions,
 } from "./envelope";
+// task-493: §3.7 PLT-15 잔여 라우트(paper-deployments 5개 + trust/consents)
+// 멱등 클라이언트. AiosApiClient 합성(client.ts)에는 아직 배선되지 않았다 —
+// 후속 리프가 withFoundation을 composed client에 얹는다.
+export { withFoundation } from "./clients/foundation";
+export type {
+  PaperDeploymentState,
+  PaperDeploymentView,
+  RequestPaperDeploymentBody,
+  ConsentState,
+  ConsentDecision,
+  AcceptTrustConsentBody,
+} from "./clients/foundation";
