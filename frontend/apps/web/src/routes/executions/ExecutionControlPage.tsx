@@ -4,6 +4,7 @@ import {
   classifyBadRequest,
   classifyForbidden,
   classifyServerError,
+  isResourceNotFound,
   routeApiError,
 } from "@aios/shared-types";
 import {
@@ -23,6 +24,7 @@ import { AppShell } from "../../components/layout/AppShell";
 import { BadRequestNotice } from "../../components/BadRequestNotice";
 import { ErrorMessage } from "../../components/ErrorMessage";
 import { ForbiddenNotice } from "../../components/ForbiddenNotice";
+import { NotFoundState } from "../../components/NotFoundState";
 import { DuplicateSubmitError, useIdempotentSubmit } from "../../hooks/useIdempotentSubmit";
 import { useConflictRetry } from "../../hooks/useConflictRetry";
 import { ExecutionCard } from "./components/ExecutionCard";
@@ -49,8 +51,39 @@ function CreateExecutionError({ error, onRetry }: { error: unknown; onRetry: () 
   );
 }
 
+// spec §3.3 RESOURCE_NOT_FOUND(404)는 재시도 배너가 아니라 NotFoundState로 렌더한다
+// (task-1056/ListingDetailPage와 동일 패턴). 그 외 에러는 classifyServerError로
+// 재시도 가능 여부를 판정해 ErrorMessage에 onRetry를 넘긴다.
+function ExecutionsListError({ error, onRetry }: { error: unknown; onRetry: () => void }) {
+  if (isResourceNotFound(error)) {
+    return (
+      <NotFoundState
+        title="실행 목록을 찾을 수 없습니다"
+        description="삭제되었거나 존재하지 않는 데이터입니다."
+      />
+    );
+  }
+  const routed = routeApiError(error);
+  const serverError = classifyServerError(error);
+  return (
+    <ErrorMessage
+      errorCode={error instanceof ApiError ? error.errorCode : undefined}
+      message={error instanceof Error ? error.message : undefined}
+      traceId={error instanceof ApiError ? error.traceId : undefined}
+      retryAfterSec={routed.kind === "backoff_retry" ? routed.afterSec : undefined}
+      onRetry={serverError.kind === "retryable" ? onRetry : undefined}
+    />
+  );
+}
+
 export function ExecutionControlPage() {
-  const { data: executions, isLoading, refetch } = useExecutions();
+  const {
+    data: executions,
+    isLoading,
+    refetch,
+    error: executionsError,
+    isError: executionsIsError,
+  } = useExecutions();
   const createExecution = useCreateExecution();
   const { submit } = useIdempotentSubmit("executions.create");
   const [strategyId, setStrategyId] = useState("");
@@ -158,7 +191,9 @@ export function ExecutionControlPage() {
 
         <section className="space-y-4">
           <h2 className="text-lg font-medium text-fg">실행 목록</h2>
-          {isLoading ? (
+          {executionsIsError ? (
+            <ExecutionsListError error={executionsError} onRetry={() => void refetch()} />
+          ) : isLoading ? (
             <LoadingState />
           ) : executions && executions.length > 0 ? (
             <div className="grid grid-cols-2 gap-4">

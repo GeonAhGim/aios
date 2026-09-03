@@ -9,9 +9,16 @@ import { ExecutionControlPage } from "./ExecutionControlPage";
 const mutateAsync = vi.fn();
 const refetch = vi.fn();
 let executionsData: unknown[] = [];
+let executionsError: unknown = null;
 
 vi.mock("@aios/shared-hooks", () => ({
-  useExecutions: () => ({ data: executionsData, isLoading: false, refetch }),
+  useExecutions: () => ({
+    data: executionsData,
+    isLoading: false,
+    refetch,
+    error: executionsError,
+    isError: executionsError !== null,
+  }),
   useCreateExecution: () => ({ mutateAsync, isPending: false, data: undefined }),
   useMe: () => ({ data: { email: "a@example.com", isPlatformAdmin: false } }),
   useLogout: () => vi.fn(),
@@ -22,6 +29,7 @@ afterEach(() => {
   mutateAsync.mockReset();
   refetch.mockReset();
   executionsData = [];
+  executionsError = null;
   vi.unstubAllGlobals();
 });
 
@@ -121,6 +129,27 @@ describe("ExecutionControlPage 실행 생성 에러 표시", () => {
       ).toBeInTheDocument(),
     );
     expect(screen.queryByText("raw detail")).not.toBeInTheDocument();
+  });
+});
+
+// spec §3.3 RESOURCE_NOT_FOUND(404)는 재시도 배너가 아니라 NotFoundState로 렌더한다
+// (task-1056/ListingDetailPage와 동일 패턴, task-1089 배치2).
+describe("ExecutionControlPage 실행 목록 404", () => {
+  it("negative: 실행 목록 조회가 RESOURCE_NOT_FOUND(404)면 NotFoundState를 보여준다", () => {
+    executionsError = new ApiError(404, "not found", undefined, "RESOURCE_NOT_FOUND");
+    renderPage();
+
+    expect(screen.getByText("실행 목록을 찾을 수 없습니다")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "다시 시도" })).not.toBeInTheDocument();
+  });
+
+  it("negative: 실행 목록 조회가 RESOURCE_NOT_FOUND가 아닌 에러면 재시도 배너를 보여준다", () => {
+    executionsError = new ApiError(500, "internal error", undefined, "INTERNAL_ERROR");
+    renderPage();
+
+    expect(
+      screen.getByText("일시적인 오류가 발생했습니다. 문제가 계속되면 문의해주세요."),
+    ).toBeInTheDocument();
   });
 });
 
