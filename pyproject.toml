@@ -75,6 +75,7 @@ extend-immutable-calls = ["fastapi.Depends", "fastapi.Query", "fastapi.Path", "f
 "src/foundation/ledger/application/**" = ["TID251"]
 "src/foundation/positions/application/**" = ["TID251"]
 "src/foundation/positions/ports/**" = ["TID251"]
+"src/foundation/market_data/application/**" = ["TID251"]
 "src/foundation/market_data/ports/**" = ["TID251"]
 "src/main.py" = ["TID251"]
 "src/services/*.py" = ["TID251"]
