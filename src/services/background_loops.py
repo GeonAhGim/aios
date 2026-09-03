@@ -26,10 +26,12 @@ import asyncio
 import contextlib
 import logging
 import os
+import socket
 import time
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from typing import Any
+from uuid import uuid4
 
 import asyncpg
 
@@ -38,13 +40,18 @@ from src.core.loader.risk_policy_loader import RiskPolicy
 from src.core.observability.context import bind_system
 from src.core.observability.loop_health import LoopHealth, loop_health
 from src.core.safety.circuit_breaker import CircuitBreakerService
+from src.core.safety.data_distrust import DataDistrustMonitor
 from src.core.safety.heartbeat import DEFAULT_HEARTBEAT_PATH, write_heartbeat
 from src.core.safety.metrics_collector import ApiCallTracker, collect_circuit_breaker_metrics
+from src.foundation.execution_ownership.adapters.postgres_repository import (
+    PostgresExecutionLeaseRepository,
+)
 from src.services.alert_service import AlertService
 from src.services.credential_resolver import CredentialResolver
 from src.services.execution_loop.recovery_wiring import recover_orders_on_startup
 from src.services.execution_loop.scheduler import ExecutionLoopScheduler
 from src.services.execution_service import ExecutionService
+from src.services.order_service.foundation_gate import make_foundation_pre_submit_gate
 from src.services.risk_guard_service import RiskGuardService
 
 logger = logging.getLogger(__name__)
@@ -209,11 +216,21 @@ async def start_background_loops(
     # FD-8 실행 루프 — 전수감사 §3에서 확인된 최대 배선 결함. run_execution_tick은
     # 완전했지만 호출자가 테스트뿐이었다. 주기는 risk_policy.yaml
     # execution_loop.interval_sec(판단 계층 설정의 단일 출처)에서 읽는다.
+    # EO-03 최소 배선 — 리스 갱신 주기·kill switch 해제 시점의 release_all
+    # 연결·적대적(중복 tick 방지) 테스트는 EO-04 범위(§9)로 남긴다. 여기서는
+    # 신규 필수 인자 없이는 컴파일조차 되지 않는 시그니처(I-01)를 기존
+    # 컴포넌트(foundation_gate.py/data_distrust.py/postgres_repository.py,
+    # 전부 이미 완성)로만 채운다 — 새 구현은 만들지 않는다.
+    owner_id = f"{socket.gethostname()}:{os.getpid()}:{uuid4()}"
     execution_scheduler = ExecutionLoopScheduler(
         pool,
         resolve_adapter=credential_resolver.get_adapter,
         policy=policy,
         publish=event_bus.publish,
+        pre_submit_gate=make_foundation_pre_submit_gate(pool),
+        distrust_monitor=DataDistrustMonitor(publish=event_bus.publish),
+        lease_repo=PostgresExecutionLeaseRepository(pool),
+        owner_id=owner_id,
     )
     execution_loop_task: asyncio.Task[None] | None = None
     if flag_enabled("AIOS_EXECUTION_LOOP_ENABLED"):

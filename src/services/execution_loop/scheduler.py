@@ -1,7 +1,8 @@
 """FD-8 실행 루프 스케줄러 — RUNNING 상태의 PAPER 실행 전부를 주기적으로 tick.
 
 Spec: 03_core_modules_v1.1.md(v1.2 서문 "실행 루프"), config/risk_policy.yaml
-`execution_loop.interval_sec`, docs/FULL_AUDIT_2026-09-02.md §3·§11 3단계.
+`execution_loop.interval_sec`, docs/FULL_AUDIT_2026-09-02.md §3·§11 3단계,
+docs/specs/L4_execution_ownership_and_safety_gate_wiring_v1.0.md §9 EO-03.
 
 전수감사에서 확인된 가장 큰 배선 결함을 닫는다 — `run_execution_tick`은
 완전히 구현돼 있었지만 운영 앱(`src/main.py`) 어디에서도 호출되지 않아
@@ -18,6 +19,12 @@ main.py의 다른 백그라운드 루프(heartbeat/alert/risk_guard)와 같은 �
 - LIVE 실행은 조회 대상에서 제외한다 — Executor가 어차피 하드 차단하지만
   매 틱마다 예외를 만들어 로그를 오염시킬 이유가 없다(ADR-2026-08-29-E).
 - 동시 tick 수는 세마포어로 제한한다(거래소 rate limit·DB 풀 보호).
+- EO-03: `pre_submit_gate`/`distrust_monitor`는 기본값이 없다(I-01) —
+  이 클래스를 생성하려면 컴파일/타입체크 시점에 게이트를 빠뜨릴 수 없다.
+  `list_candidates()`는 RUNNING PAPER 실행 중 이 프로세스(`owner_id`)가
+  리스를 획득/갱신한 것만 tick 대상으로 돌려준다(I-02, §4.1) — 다른
+  프로세스가 만료 전 리스를 쥐고 있으면 그 execution_id는 이번 주기에
+  조용히 건너뛴다(예외를 던지지 않는다).
 """
 from __future__ import annotations
 
@@ -33,8 +40,10 @@ from src.core.executor.executor import Executor
 from src.core.loader.risk_policy_loader import RiskPolicy
 from src.core.portfolio.engine import PortfolioEngine
 from src.core.risk.engine import RiskEngine
+from src.core.safety.data_distrust import DataDistrustMonitor
 from src.core.strategy.engine import StrategyEngine
 from src.exchanges.common.adapter import ExchangeAdapter
+from src.foundation.execution_ownership.ports.repository import ExecutionLeaseRepository
 from src.services.credential_resolver import CredentialNotFoundError
 from src.services.execution_loop.equity_tracker import ExecutionEquityTracker
 from src.services.execution_loop.tick import run_execution_tick
@@ -46,6 +55,7 @@ logger = logging.getLogger(__name__)
 AdapterResolver = Callable[[UUID, str], Awaitable[ExchangeAdapter]]
 
 DEFAULT_MAX_CONCURRENT_TICKS = 4
+_LEASE_TTL_INTERVAL_MULTIPLIER = 5  # §5.2 Draft — interval_sec의 5배
 
 
 @dataclass
@@ -62,16 +72,28 @@ class ExecutionLoopScheduler:
         *,
         resolve_adapter: AdapterResolver,
         policy: RiskPolicy,
+        pre_submit_gate: PreSubmitGate,
+        distrust_monitor: DataDistrustMonitor,
+        lease_repo: ExecutionLeaseRepository,
+        owner_id: str,
         publish: PublishFn | None = None,
         max_concurrent_ticks: int = DEFAULT_MAX_CONCURRENT_TICKS,
         equity_tracker: ExecutionEquityTracker | None = None,
-        pre_submit_gate: PreSubmitGate | None = None,
+        lease_ttl_seconds: float | None = None,
     ) -> None:
         self._pool = pool
         self._resolve_adapter = resolve_adapter
         self._policy = policy
         self._publish = publish
         self._pre_submit_gate = pre_submit_gate
+        self._distrust_monitor = distrust_monitor
+        self._lease_repo = lease_repo
+        self._owner_id = owner_id
+        self._lease_ttl_seconds = (
+            lease_ttl_seconds
+            if lease_ttl_seconds is not None
+            else policy.execution_loop.interval_sec * _LEASE_TTL_INTERVAL_MULTIPLIER
+        )
         self._semaphore = asyncio.Semaphore(max_concurrent_ticks)
         self._strategy_engine = StrategyEngine()
         self._portfolio_engine = PortfolioEngine()
@@ -83,18 +105,29 @@ class ExecutionLoopScheduler:
     def interval_seconds(self) -> float:
         return self._policy.execution_loop.interval_sec
 
-    async def list_runnable(self) -> list[dict[str, object]]:
+    async def list_candidates(self) -> list[dict[str, object]]:
+        """RUNNING PAPER 실행 중 이 프로세스가 리스를 획득/갱신한 것만
+        반환한다(§4.1). 다른 프로세스가 만료 전 리스를 쥐고 있는
+        execution_id는 `acquire_or_renew_many`가 반환하지 않으므로 예외
+        없이 결과에서 빠진다 — 이번 주기 건너뜀."""
         async with self._pool.acquire() as conn:
             rows = await conn.fetch(
                 "SELECT id, user_id, exchange FROM strategy_executions "
                 "WHERE status = 'RUNNING' AND mode = 'PAPER' ORDER BY id"
             )
-        return [dict(row) for row in rows]
+        if not rows:
+            return []
+        leased = await self._lease_repo.acquire_or_renew_many(
+            [int(row["id"]) for row in rows],
+            owner_id=self._owner_id,
+            ttl_seconds=self._lease_ttl_seconds,
+        )
+        return [dict(row) for row in rows if int(row["id"]) in leased]
 
     async def tick_all_running(self) -> TickReport:
         report = TickReport()
-        runnable = await self.list_runnable()
-        await asyncio.gather(*(self._tick_one(row, report) for row in runnable))
+        candidates = await self.list_candidates()
+        await asyncio.gather(*(self._tick_one(row, report) for row in candidates))
         return report
 
     async def _tick_one(self, row: dict[str, object], report: TickReport) -> None:
@@ -124,6 +157,7 @@ class ExecutionLoopScheduler:
                     policy=self._policy,
                     publish=self._publish,
                     pre_submit_gate=self._pre_submit_gate,
+                    distrust_monitor=self._distrust_monitor,
                 )
             except Exception as exc:
                 report.failed[execution_id] = f"{type(exc).__name__}: {exc}"
