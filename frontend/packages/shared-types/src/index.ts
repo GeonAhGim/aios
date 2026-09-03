@@ -31,3 +31,4 @@ export * from "./membershipMutation";
 export * from "./secretRef";
 export * from "./session";
 export * from "./positionView";
+export * from "./candleSeries";
