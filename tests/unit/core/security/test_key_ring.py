@@ -152,6 +152,69 @@ def test_from_env_rejects_live_keys_when_runtime_mode_unset_defaults_paper() -> 
         )
 
 
+def test_from_env_bad_format_error_message_does_not_leak_key_material() -> None:
+    """리뷰 발견 ①: 예외 메시지에 kid:hex 원문(64자 키)이 그대로 노출되면 안 된다."""
+    with pytest.raises(KeyRingConfigError) as exc_info:
+        KeyRing.from_env(
+            "PAPER",
+            env={"CREDENTIAL_ENCRYPTION_KEYS_PAPER": f"nocolonhere{KEY_V1}"},
+        )
+    assert KEY_V1 not in str(exc_info.value)
+
+
+def test_from_env_empty_kid_error_message_does_not_leak_key_material() -> None:
+    with pytest.raises(KeyRingConfigError) as exc_info:
+        KeyRing.from_env(
+            "PAPER",
+            env={
+                "CREDENTIAL_ENCRYPTION_KEYS_PAPER": f":{KEY_V1}",
+                "CREDENTIAL_ENCRYPTION_ACTIVE_KID_PAPER": "v1",
+            },
+        )
+    assert KEY_V1 not in str(exc_info.value)
+
+
+def test_from_env_rejects_live_keys_when_runtime_mode_is_lowercase_paper_typo() -> None:
+    """리뷰 발견 ②: 'paper'(소문자)처럼 완전일치가 아닌 값도 fail-closed로 검사돼야 한다."""
+    with pytest.raises(FrozenZoneLiveModeBlockedError):
+        KeyRing.from_env(
+            "PAPER",
+            env={
+                "AIOS_RUNTIME_MODE": "paper",
+                "CREDENTIAL_ENCRYPTION_KEYS_PAPER": f"v1:{KEY_V1}",
+                "CREDENTIAL_ENCRYPTION_ACTIVE_KID_PAPER": "v1",
+                "CREDENTIAL_ENCRYPTION_KEYS_LIVE": f"v1:{KEY_V2}",
+                "CREDENTIAL_ENCRYPTION_ACTIVE_KID_LIVE": "v1",
+            },
+        )
+
+
+def test_from_env_rejects_live_keys_when_runtime_mode_is_misspelled() -> None:
+    with pytest.raises(FrozenZoneLiveModeBlockedError):
+        KeyRing.from_env(
+            "PAPER",
+            env={
+                "AIOS_RUNTIME_MODE": "PAPR",
+                "CREDENTIAL_ENCRYPTION_KEYS_PAPER": f"v1:{KEY_V1}",
+                "CREDENTIAL_ENCRYPTION_ACTIVE_KID_PAPER": "v1",
+                "CREDENTIAL_ENCRYPTION_KEYS_LIVE": f"v1:{KEY_V2}",
+                "CREDENTIAL_ENCRYPTION_ACTIVE_KID_LIVE": "v1",
+            },
+        )
+
+
+def test_from_env_allows_live_keys_when_runtime_mode_is_lowercase_live() -> None:
+    ring = KeyRing.from_env(
+        "LIVE",
+        env={
+            "AIOS_RUNTIME_MODE": "live",
+            "CREDENTIAL_ENCRYPTION_KEYS_LIVE": f"v1:{KEY_V2}",
+            "CREDENTIAL_ENCRYPTION_ACTIVE_KID_LIVE": "v1",
+        },
+    )
+    assert ring.active_kid == "v1"
+
+
 def test_from_env_allows_live_keys_in_live_runtime() -> None:
     ring = KeyRing.from_env(
         "LIVE",

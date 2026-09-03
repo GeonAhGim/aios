@@ -81,17 +81,29 @@ class KeyRing:
 
 
 def _reject_live_keys_in_paper_runtime(source: Mapping[str, str]) -> None:
-    runtime_mode = source.get("AIOS_RUNTIME_MODE", "PAPER")
-    if runtime_mode != "PAPER":
+    """fail-closed: AIOS_RUNTIME_MODE가 정확히 'LIVE'(대소문자 무관)로 확인될 때만
+    가드를 건너뛴다. 그 외(미설정·오탈자·대소문자 변형 등 애매한 값)는 전부
+    PAPER로 취급해 LIVE 키 존재 여부를 검사한다 — I7이 조용히 우회되지 않도록."""
+    runtime_mode = source.get("AIOS_RUNTIME_MODE", "PAPER").strip().upper()
+    if runtime_mode == "LIVE":
         return
     if source.get("CREDENTIAL_ENCRYPTION_KEYS_LIVE") or source.get(
         "CREDENTIAL_ENCRYPTION_ACTIVE_KID_LIVE"
     ):
         raise FrozenZoneLiveModeBlockedError(
-            "PAPER 런타임(AIOS_RUNTIME_MODE=PAPER)에는 LIVE 암호화 키가 존재해서는 "
+            "PAPER 런타임(AIOS_RUNTIME_MODE!=LIVE)에는 LIVE 암호화 키가 존재해서는 "
             "안 됩니다(I7, ADR-2026-08-29-E) — CREDENTIAL_ENCRYPTION_KEYS_LIVE/"
             "CREDENTIAL_ENCRYPTION_ACTIVE_KID_LIVE를 제거하세요."
         )
+
+
+def _redact_entry(entry: str) -> str:
+    """kid:hex 원본 항목을 예외 메시지에 그대로 남기지 않는다(로그·에러트래커
+    시크릿 유출 방지). kid는 식별에 필요하므로 보존하고 값은 길이만 남긴다."""
+    if ":" in entry:
+        kid_part, _, value_part = entry.partition(":")
+        return f"{kid_part.strip()!r}:<REDACTED len={len(value_part.strip())}>"
+    return f"<REDACTED len={len(entry)}>"
 
 
 def _parse_kid_pairs(raw: str, var_name: str) -> list[tuple[str, str]]:
@@ -104,11 +116,15 @@ def _parse_kid_pairs(raw: str, var_name: str) -> list[tuple[str, str]]:
         if not entry:
             continue
         if ":" not in entry:
-            raise KeyRingConfigError(f"{var_name} 형식 오류(kid:hex64 아님): {entry!r}")
+            raise KeyRingConfigError(
+                f"{var_name} 형식 오류(kid:hex64 아님): {_redact_entry(entry)}"
+            )
         kid, hex_key = entry.split(":", 1)
         kid = kid.strip()
         if not kid:
-            raise KeyRingConfigError(f"{var_name}에 빈 kid가 있습니다: {entry!r}")
+            raise KeyRingConfigError(
+                f"{var_name}에 빈 kid가 있습니다: {_redact_entry(entry)}"
+            )
         if kid == _LEGACY_KID:
             raise KeyRingConfigError(f"{var_name}: kid={_LEGACY_KID!r}는 예약어입니다.")
         if kid in seen:
