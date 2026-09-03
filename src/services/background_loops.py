@@ -46,6 +46,7 @@ from src.core.safety.metrics_collector import ApiCallTracker, collect_circuit_br
 from src.foundation.execution_ownership.adapters.postgres_repository import (
     PostgresExecutionLeaseRepository,
 )
+from src.foundation.execution_ownership.ports.repository import ExecutionLeaseRepository
 from src.services.alert_service import AlertService
 from src.services.credential_resolver import CredentialResolver
 from src.services.execution_loop.recovery_wiring import recover_orders_on_startup
@@ -74,6 +75,8 @@ class BackgroundLoops:
     """lifespan이 시작·정지시키는 백그라운드 태스크 묶음."""
 
     execution_scheduler: ExecutionLoopScheduler
+    lease_repo: ExecutionLeaseRepository
+    owner_id: str
     tasks: list[asyncio.Task[None]] = field(default_factory=list)
 
     async def stop(self) -> None:
@@ -82,6 +85,10 @@ class BackgroundLoops:
         for task in self.tasks:
             with contextlib.suppress(asyncio.CancelledError):
                 await task
+        # §6 — 정상 종료는 만료(TTL)를 기다리지 않고 즉시 리스를 넘긴다.
+        # 위에서 execution_loop_task를 먼저 취소했으므로 release 이후
+        # 이 owner_id가 새 리스를 다시 획득하는 레이스는 없다.
+        await self.lease_repo.release_all(self.owner_id)
 
 
 async def _run_instrumented(
@@ -222,6 +229,7 @@ async def start_background_loops(
     # 컴포넌트(foundation_gate.py/data_distrust.py/postgres_repository.py,
     # 전부 이미 완성)로만 채운다 — 새 구현은 만들지 않는다.
     owner_id = f"{socket.gethostname()}:{os.getpid()}:{uuid4()}"
+    lease_repo = PostgresExecutionLeaseRepository(pool)
     execution_scheduler = ExecutionLoopScheduler(
         pool,
         resolve_adapter=credential_resolver.get_adapter,
@@ -229,7 +237,7 @@ async def start_background_loops(
         publish=event_bus.publish,
         pre_submit_gate=make_foundation_pre_submit_gate(pool),
         distrust_monitor=DataDistrustMonitor(publish=event_bus.publish),
-        lease_repo=PostgresExecutionLeaseRepository(pool),
+        lease_repo=lease_repo,
         owner_id=owner_id,
     )
     execution_loop_task: asyncio.Task[None] | None = None
@@ -266,4 +274,9 @@ async def start_background_loops(
     if execution_loop_task is not None:
         tasks.append(execution_loop_task)
 
-    return BackgroundLoops(execution_scheduler=execution_scheduler, tasks=tasks)
+    return BackgroundLoops(
+        execution_scheduler=execution_scheduler,
+        lease_repo=lease_repo,
+        owner_id=owner_id,
+        tasks=tasks,
+    )
