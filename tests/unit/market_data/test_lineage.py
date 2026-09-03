@@ -14,6 +14,7 @@ docstring 참고).
 from __future__ import annotations
 
 import random
+import time
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from uuid import uuid4
@@ -116,3 +117,31 @@ def test_batch_hash_streaming_matches_reference_for_empty_and_singleton() -> Non
     rng = random.Random(1)
     solo = [_random_candle(rng, datetime(2026, 1, 1, tzinfo=timezone.utc))]
     assert batch_hash(solo) == _batch_hash_reference(solo)
+
+
+def test_batch_hash_large_batch_stays_order_independent() -> None:
+    """task-1111(esc-ci-8e93e475afa9 후속) 실측: DB 없이 순수 함수만으로도
+    `batch_hash` 대량 배치 비용을 관측 가능하게 남긴다. 실측 결과 지배적
+    비용은 `_canonical_json`의 레코드별 `model_dump(mode="json")` +
+    `json.dumps`이고(`domain/lineage.py` 모듈 docstring,
+    `test_perf_replay.py` 모듈 docstring과 동일 결론), 이 규모까지도
+    순서무관 불변식은 그대로 유지된다 — 성능 단언은 걸지 않는다(CI 상시
+    적색 방지 정책, 3ea1fc1/9bdcd21 선례). 해시 값 자체를 바꾸는 최적화
+    (예: `model_dump_json()`)는 시도하지 않았다 — canonical JSON의
+    `sort_keys=True` 출력과 바이트가 달라 `hash_version=2` 없이는 저장된
+    해시(P3 WORM)와 어긋난다(task-1081 note와 동일 결론)."""
+    rng = random.Random(20260904)
+    base = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    records = [_random_candle(rng, base) for _ in range(20_000)]
+
+    started = time.perf_counter()
+    forward = batch_hash(records)
+    elapsed = time.perf_counter() - started
+    print(
+        f"\nbatch_hash latency (n=20000, no DB): {elapsed:.4f}s "
+        f"({elapsed / len(records) * 1e6:.2f}us/record)"
+    )
+
+    shuffled = list(records)
+    rng.shuffle(shuffled)
+    assert batch_hash(shuffled) == forward
