@@ -250,3 +250,37 @@ describe("apiPaths — 인프라 프로브 제외(task-942 decision)", () => {
     }
   });
 });
+
+// task-1107: executions.py/portfolio.py/notifications.py/alerts.py/wallet.py/
+// reports.py/device_tokens.py 실코드(각 @router 핸들러 반환 타입)를 직접 읽어
+// 확인한 결과, 전부 도메인 모델을 그대로 반환할 뿐 ApiResponse 봉투를 쓰지
+// 않는다 — executions.py·portfolio.py 모듈 docstring은 "성공 응답 봉투화는
+// PLT-17 decision과 동일 사유로 보류"라고 명시하고, wallet.py 모듈 docstring은
+// "mount_v1(PLT-16) 배선 이후 별도 리프에서 /api/v1 경로에만 적용"이라고
+// 명시한다. executions.ts/portfolio.ts/notifications.ts 클라이언트는 이미
+// 이 사실을 정확히 주석에 반영해 두었으므로(코드 변경 없음), apiPaths.ts
+// 레지스트리가 실수로 envelope:true로 바뀌는 회귀만 여기서 고정한다
+// (marketplace.test.ts의 task-1106 패턴과 동일).
+describe("apiPaths — task-1107 봉투 미적용 상태 고정(executions/portfolio/notifications)", () => {
+  it.each([
+    "executions.base",
+    "executions.start",
+    "executions.pause",
+    "executions.retire",
+    "executions.convertToLive",
+    "executions.riskGuard",
+    "portfolio.get",
+    "portfolio.rebalance",
+    "wallet.balance",
+    "wallet.topupRequests",
+    "alerts.base",
+    "alerts.cancel",
+    "reports.generate",
+    "notifications.history",
+    "notifications.preferences",
+    "deviceTokens.register",
+    "deviceTokens.deactivate",
+  ] as const)("%s: envelope=false", (routeName) => {
+    expect(API_ROUTES[routeName].envelope).toBe(false);
+  });
+});
