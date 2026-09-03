@@ -126,12 +126,9 @@ async def test_register_instrument_writes_exactly_one_audit_event(pool, refs, au
     assert await _event_count(pool, instrument.instrument_id) == 1
 
 
-async def test_register_instrument_duplicate_venue_symbol_rejected_no_extra_audit(
-    pool, refs, audit
-):
+async def test_register_instrument_duplicate_venue_symbol_rejected(pool, refs, audit):
     cmd = _register_cmd(venue_symbol=_krx_symbol(), listed_at=datetime.now(timezone.utc))
     instrument = await register_instrument(pool, cmd, refs=refs, audit=audit)
-
     with pytest.raises(DuplicateInstrumentError):
         await register_instrument(pool, cmd, refs=refs, audit=audit)
 
@@ -217,9 +214,7 @@ async def test_delisted_symbol_reregistration_rejected(pool, refs, audit):
         )
 
 
-async def test_record_corporate_action_writes_one_audit_event_and_replay_writes_none(
-    pool, refs, audit
-):
+async def test_record_corporate_action_replay_writes_no_extra_audit(pool, refs, audit):
     instrument = await _registered(pool, refs, audit, days_ago=30)
     action = CorporateAction(
         action_type="SPLIT",
@@ -265,8 +260,13 @@ async def test_record_corporate_action_conflict_denied_and_audited(pool, refs, a
     assert await _event_count(pool, instrument.instrument_id) == 3  # registered + action + denied
 
 
+def _far_future_year() -> int:
+    """고정 연도는 결정론적 calendar_aggregate_id에 재실행마다 이벤트가 쌓이므로 피한다."""
+    return 2200 + uuid.uuid4().int % 700
+
+
 async def test_sync_calendar_writes_one_audit_event_per_call(pool, cal, audit):
-    year = 2151
+    year = _far_future_year()
     days = [
         CalendarDay(
             venue=Venue.KIS_US, trade_date=date(year, 1, 1), is_trading_day=False,
@@ -283,7 +283,7 @@ async def test_sync_calendar_writes_one_audit_event_per_call(pool, cal, audit):
 
 
 async def test_sync_calendar_rejects_venue_mismatch_without_writing(pool, cal, audit):
-    year = 2152
+    year = _far_future_year()
     mismatched = [
         CalendarDay(
             venue=Venue.KIS_US, trade_date=date(year, 1, 1), is_trading_day=False,
