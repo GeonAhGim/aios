@@ -6,10 +6,12 @@ import { ApiError } from "@aios/api-client";
 import { ExchangeManagementPage } from "./ExchangeManagementPage";
 
 const mutateAsync = vi.fn();
+let credentialsData: unknown[] = [];
+let revokeMutate = vi.fn();
 vi.mock("@aios/shared-hooks", () => ({
-  useExchangeCredentials: () => ({ data: [], isLoading: false }),
+  useExchangeCredentials: () => ({ data: credentialsData, isLoading: false }),
   useRegisterExchangeCredential: () => ({ mutateAsync, isPending: false }),
-  useRevokeExchangeCredential: () => ({ mutate: vi.fn() }),
+  useRevokeExchangeCredential: () => ({ mutate: revokeMutate }),
   useExchangeBalance: () => ({ data: undefined }),
   useMe: () => ({ data: { email: "a@example.com" } }),
   useLogout: () => vi.fn(),
@@ -18,6 +20,8 @@ vi.mock("@aios/shared-hooks", () => ({
 afterEach(() => {
   cleanup();
   mutateAsync.mockReset();
+  credentialsData = [];
+  revokeMutate = vi.fn();
 });
 
 function renderPage() {
@@ -26,6 +30,17 @@ function renderPage() {
       <ExchangeManagementPage />
     </MemoryRouter>,
   );
+}
+
+function credential(overrides: Record<string, unknown> = {}) {
+  return {
+    id: 1,
+    exchange: "bitget",
+    isActive: true,
+    linkedAt: "2026-01-01T00:00:00Z",
+    withdrawalPermissionWarning: null,
+    ...overrides,
+  };
 }
 
 // Field가 htmlFor 없이 label만 렌더링하므로(기존 화면 상태, 이 QA 범위 밖)
@@ -135,5 +150,83 @@ describe("ExchangeManagementPage 비밀 폐기·리댁션", () => {
 
     const [, apiSecret] = passwordInputs(container);
     expect(apiSecret.value).toBe("");
+  });
+});
+
+// task-482 §3.6: 목록의 각 항목은 task-473 parseSecretRef 결과로 scope 배지를
+// 표시한다. 파싱 실패는 scope를 추측하지 않고 "알 수 없음"으로 둔다.
+describe("ExchangeManagementPage scope 배지", () => {
+  it("secretRef가 secref://paper/... 면 PAPER 배지를 보여준다", () => {
+    credentialsData = [
+      credential({ secretRef: "secref://paper/exchange_credential/1@v1" }),
+    ];
+    renderPage();
+
+    expect(screen.getByText("PAPER")).toBeInTheDocument();
+  });
+
+  it("secretRef가 secref://live/... 면 LIVE 배지 + POLICY_LIVE_BLOCKED 안내문을 보여주고 해지 버튼을 비활성화한다", () => {
+    credentialsData = [
+      credential({ secretRef: "secref://live/exchange_credential/1@v1" }),
+    ];
+    renderPage();
+
+    expect(screen.getByText("LIVE")).toBeInTheDocument();
+    expect(screen.getByText("실거래 모드에서는 허용되지 않는 작업입니다.")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "해지" })).toBeDisabled();
+  });
+
+  it("negative: secretRef가 없거나 형식이 깨졌으면 scope를 추측하지 않고 '알 수 없음'을 보여준다", () => {
+    credentialsData = [
+      credential({ id: 1, secretRef: undefined }),
+      credential({ id: 2, secretRef: "not-a-secret-ref" }),
+    ];
+    renderPage();
+
+    const unknownBadges = screen.getAllByText("알 수 없음");
+    expect(unknownBadges).toHaveLength(2);
+    expect(screen.queryByText("LIVE")).not.toBeInTheDocument();
+    expect(screen.queryByText("PAPER")).not.toBeInTheDocument();
+    for (const button of screen.getAllByRole("button", { name: "해지" })) {
+      expect(button).not.toBeDisabled();
+    }
+  });
+});
+
+// task-482 ADR-2026-08-29-E: 등록 폼은 PAPER scope로만 제출되고, LIVE 제출 경로가
+// 코드상 존재하지 않는다(스코프 선택 UI 자체가 없다).
+describe("ExchangeManagementPage 등록 폼 scope 상한", () => {
+  it("등록 요청 payload에 scope 필드가 없다 — PAPER 기본값 외 제출 경로가 없다", async () => {
+    mutateAsync.mockResolvedValue(undefined);
+    const { container } = renderPage();
+
+    submitRegisterForm(container);
+    await waitFor(() => expect(mutateAsync).toHaveBeenCalled());
+
+    const payload = mutateAsync.mock.calls[0][0];
+    expect(Object.keys(payload)).not.toContain("scope");
+  });
+
+  it("negative: 등록 폼에는 LIVE/scope를 선택할 수 있는 컨트롤이 없다", () => {
+    renderPage();
+    expect(screen.queryByText(/LIVE/i)).not.toBeInTheDocument();
+  });
+});
+
+// task-482 §3.3: 해지 요청이 403 POLICY_LIVE_BLOCKED로 거부되면 task-382의
+// extractReasonCodes 경로(ForbiddenNotice)로 표시한다 — 새 안내 컴포넌트를 만들지 않는다.
+describe("ExchangeManagementPage 해지 403 POLICY_LIVE_BLOCKED", () => {
+  it("ForbiddenNotice를 통해 정책 거부 안내를 보여준다", async () => {
+    credentialsData = [credential()];
+    revokeMutate = vi.fn((_exchange: string, opts?: { onError?: (err: unknown) => void }) => {
+      opts?.onError?.(new ApiError(403, "blocked", undefined, "POLICY_LIVE_BLOCKED"));
+    });
+    renderPage();
+
+    fireEvent.click(screen.getByRole("button", { name: "해지" }));
+
+    await waitFor(() =>
+      expect(screen.getByText("실거래 모드에서는 허용되지 않는 작업입니다.")).toBeInTheDocument(),
+    );
   });
 });

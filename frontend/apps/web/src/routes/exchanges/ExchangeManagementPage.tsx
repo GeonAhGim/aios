@@ -5,7 +5,7 @@ import {
   useRevokeExchangeCredential,
 } from "@aios/shared-hooks";
 import { ApiError } from "@aios/api-client";
-import { redactSecret } from "@aios/shared-types";
+import { classifyForbidden, getApiErrorMessage, parseSecretRef, redactSecret } from "@aios/shared-types";
 import {
   Badge,
   Button,
@@ -21,9 +21,27 @@ import {
 import { useState, type FormEvent } from "react";
 import { AppShell } from "../../components/layout/AppShell";
 import { ErrorMessage } from "../../components/ErrorMessage";
+import { ForbiddenNotice } from "../../components/ForbiddenNotice";
 import { exchangeLabel } from "../../lib/exchangeLabels";
 
 const EXCHANGES = ["bitget", "kis"];
+
+// §3.6: 백엔드가 SecretRef 문자열을 아직 안 내려줄 수 있어 이 필드는 선택이다
+// (PLT-33 이전). 목록 응답 타입(CredentialResponse)을 건드리지 않기 위해 여기서만
+// 확장한다 — 값이 없거나 파싱 실패하면 scope를 추측하지 않고 "알 수 없음"으로 둔다.
+interface CredentialWithSecretRef {
+  secretRef?: string;
+}
+
+const LIVE_BLOCKED_NOTICE = getApiErrorMessage("POLICY_LIVE_BLOCKED");
+
+function credentialScope(secretRef: string | undefined) {
+  const parsed = secretRef ? parseSecretRef(secretRef) : null;
+  if (!parsed) return { label: "알 수 없음", tone: "neutral" as const, isLive: false };
+  return parsed.scope === "live"
+    ? { label: "LIVE", tone: "danger" as const, isLive: true }
+    : { label: "PAPER", tone: "success" as const, isLive: false };
+}
 
 export function ExchangeManagementPage() {
   const { data: credentials, isLoading } = useExchangeCredentials();
@@ -34,8 +52,16 @@ export function ExchangeManagementPage() {
   const [apiSecret, setApiSecret] = useState("");
   const [apiPassphrase, setApiPassphrase] = useState("");
   const [error, setError] = useState<ApiError | Error | null>(null);
+  const [revokeError, setRevokeError] = useState<ApiError | Error | null>(null);
   const [selectedExchange, setSelectedExchange] = useState<string | null>(null);
   const { data: balances } = useExchangeBalance(selectedExchange);
+
+  function handleRevoke(exchange: string) {
+    setRevokeError(null);
+    revoke.mutate(exchange, {
+      onError: (err) => setRevokeError(err instanceof ApiError ? err : new Error("해지에 실패했습니다.")),
+    });
+  }
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
@@ -68,46 +94,67 @@ export function ExchangeManagementPage() {
             <LoadingState />
           ) : credentials && credentials.length > 0 ? (
             <ul className="divide-y divide-border">
-              {credentials.map((c) => (
-                <li key={c.id} className="flex items-center justify-between py-3">
-                  <div>
-                    <div className="flex items-center gap-2">
-                      <p className="font-medium text-fg">{exchangeLabel(c.exchange)}</p>
-                      <Badge tone={c.isActive ? "success" : "neutral"}>
-                        {c.isActive ? "활성" : "비활성"}
-                      </Badge>
+              {credentials.map((c) => {
+                const scope = credentialScope((c as CredentialWithSecretRef).secretRef);
+                return (
+                  <li key={c.id} className="flex items-center justify-between py-3">
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <p className="font-medium text-fg">{exchangeLabel(c.exchange)}</p>
+                        <Badge tone={c.isActive ? "success" : "neutral"}>
+                          {c.isActive ? "활성" : "비활성"}
+                        </Badge>
+                        <Badge tone={scope.tone}>{scope.label}</Badge>
+                      </div>
+                      <p className="text-sm text-fg-muted">
+                        연동일 {new Date(c.linkedAt).toLocaleDateString()}
+                      </p>
+                      {c.withdrawalPermissionWarning && (
+                        <p className="mt-1 text-sm text-warning">⚠ {c.withdrawalPermissionWarning}</p>
+                      )}
+                      {scope.isLive && <p className="mt-1 text-sm text-danger">{LIVE_BLOCKED_NOTICE}</p>}
                     </div>
-                    <p className="text-sm text-fg-muted">
-                      연동일 {new Date(c.linkedAt).toLocaleDateString()}
-                    </p>
-                    {c.withdrawalPermissionWarning && (
-                      <p className="mt-1 text-sm text-warning">⚠ {c.withdrawalPermissionWarning}</p>
-                    )}
-                  </div>
-                  <div className="flex gap-2">
-                    <Button
-                      type="button"
-                      variant="secondary"
-                      size="sm"
-                      onClick={() => setSelectedExchange(c.exchange)}
-                    >
-                      잔고 조회
-                    </Button>
-                    <Button
-                      type="button"
-                      variant="danger"
-                      size="sm"
-                      onClick={() => revoke.mutate(c.exchange)}
-                    >
-                      해지
-                    </Button>
-                  </div>
-                </li>
-              ))}
+                    <div className="flex gap-2">
+                      <Button
+                        type="button"
+                        variant="secondary"
+                        size="sm"
+                        onClick={() => setSelectedExchange(c.exchange)}
+                      >
+                        잔고 조회
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="danger"
+                        size="sm"
+                        disabled={scope.isLive}
+                        onClick={() => handleRevoke(c.exchange)}
+                      >
+                        해지
+                      </Button>
+                    </div>
+                  </li>
+                );
+              })}
             </ul>
           ) : (
             <EmptyState>연동된 거래소가 없습니다.</EmptyState>
           )}
+
+          {revokeError &&
+            (classifyForbidden(revokeError) ? (
+              <div className="mt-4">
+                <ForbiddenNotice error={revokeError} />
+              </div>
+            ) : (
+              <div className="mt-4">
+                <ErrorMessage
+                  errorCode={revokeError instanceof ApiError ? revokeError.errorCode : null}
+                  message={redactSecret(revokeError.message)}
+                  traceId={revokeError instanceof ApiError ? revokeError.traceId : null}
+                />
+              </div>
+            ))}
 
           {selectedExchange && balances && (
             <div className="mt-4 rounded-md border border-border bg-surface-hover p-4">
