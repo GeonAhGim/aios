@@ -17,6 +17,15 @@ Spec: docs/specs/L4_market_data_positions_ledger_v1.0.md#§2.4, §4.4, §9 LC-16
 가 이를 `INTEGRITY_WALLET_BALANCE_DRIFT`(409)로 매핑해 500(INTERNAL_ERROR)과
 구분되는 신호를 호출자에게 준다.
 
+(task-951, LC-16 결함 수정) `get_balance`는 레거시 잔액과 세 원장 계정을
+**단일 SQL 왕복**(`LEFT JOIN`, `get_balance` 본문 참조)으로 읽는다 — 네 번의
+개별 SELECT로 나누면 각 문장이 자기만의 MVCC 스냅샷을 얻어, 조회 도중
+다른 트랜잭션이 커밋하면 legacy와 ledger가 "실제로는 드리프트가 없는데도"
+서로 다른 시점의 값을 비교해 위양성 409를 던질 수 있었다(task-944 리뷰
+REJECT). 한 문장으로 합치면 Postgres가 문장 시작 시점의 스냅샷 하나로
+모든 서브 결과를 평가하므로 이 레이스가 구조적으로 사라진다 — 드리프트
+감지 자체(fail-closed 409)는 그대로 유지한다.
+
 `HELD`/`PENDING_PAYOUT` 계정은 활동이 없으면 아직 `ledger_account`에 행이
 없을 수 있다(지연 생성 — `purchase_flow.ensure_account` 등, LC-8b
 `UnknownAccountError` fail-closed 계약) — 이 모듈은 그 경우를 조용히 0으로
@@ -31,7 +40,6 @@ from uuid import UUID
 import asyncpg
 from pydantic import BaseModel
 
-from src.foundation.ledger.adapters.postgres_balance_repository import UnknownAccountError
 from src.foundation.ledger.contracts.v1 import UserSub
 from src.foundation.ledger.domain.chart_of_accounts import user_account as ua
 from src.foundation.ledger.ports.balance_repository import BalanceRepository
@@ -68,14 +76,14 @@ class WalletBalanceView(BaseModel):
     pending_payout: Decimal
 
 
-async def _account_balance(
-    conn: asyncpg.Connection, balances: BalanceRepository, account_code: str
-) -> Decimal:
-    try:
-        found = await balances.get_for_update(conn, [account_code])
-    except UnknownAccountError:
-        return Decimal("0")
-    return found[account_code].balance
+_BALANCE_SNAPSHOT_SQL = (
+    "SELECT codes.account_code, lb.balance AS ledger_balance, "
+    "uw.balance AS legacy_balance "
+    "FROM unnest($2::text[]) AS codes(account_code) "
+    "LEFT JOIN ledger_account la ON la.account_code = codes.account_code "
+    "LEFT JOIN ledger_balance lb ON lb.account_id = la.account_id "
+    "LEFT JOIN user_wallets uw ON uw.user_id = $1"
+)
 
 
 async def get_balance(
@@ -83,23 +91,35 @@ async def get_balance(
 ) -> WalletBalanceView:
     """§9 LC-16 DoD: `balance`는 `user_wallets`(레거시 투영) 그대로,
     `available`/`held`/`pending_payout`은 원장(LC-8b/13/15가 만든 계정)에서
-    읽는다. 네 조회를 하나의 트랜잭션으로 묶지 않는다 — 각각 단일 SELECT라
-    `FOR UPDATE`도 그 문장 안에서만 유효하고(묵시적 단일문 트랜잭션), 이
-    응답이 여러 값의 강일관 스냅샷이어야 한다는 불변조건이 없다(포스팅
-    도중에 값이 섞여도 다음 GET이 다시 맞는 값을 준다 — 71번 §6 read 경로는
-    강한 일관성을 약속하지 않는다). 잔액 부족(402) 같은 쓰기 검증은 여기서
+    읽는다. 네 값을 한 SQL 왕복(`_BALANCE_SNAPSHOT_SQL`, `LEFT JOIN` — 계정이
+    아직 지연 생성되지 않았으면 `ledger_balance`가 NULL이고 이를 0으로
+    취급한다)으로 묶어 Postgres 문장 시작 시점의 단일 스냅샷에서 읽는다.
+    `BalanceRepository.get_for_update`(§5 C, 쓰기 경로의 행 잠금)는 read-only
+    조회에 불필요한 잠금이라 여기서는 쓰지 않는다 — `balances` 인자는
+    라우터(`src/api/routers/wallet.py`)와의 시그니처 호환을 위해 유지하되
+    본문에서는 참조하지 않는다. 잔액 부족(402) 같은 쓰기 검증은 여기서
     하지 않는다 — 이 함수는 절대 쓰지 않는다."""
+    del balances
+    available_code = ua(user_id, UserSub.AVAILABLE)
+    held_code = ua(user_id, UserSub.HELD)
+    pending_payout_code = ua(user_id, UserSub.PENDING_PAYOUT)
     async with pool.acquire() as conn:
-        legacy_balance = await conn.fetchval(
-            "SELECT balance FROM user_wallets WHERE user_id = $1", user_id
+        rows = await conn.fetch(
+            _BALANCE_SNAPSHOT_SQL,
+            user_id,
+            [available_code, held_code, pending_payout_code],
         )
-        legacy_balance = legacy_balance if legacy_balance is not None else Decimal("0")
 
-        available = await _account_balance(conn, balances, ua(user_id, UserSub.AVAILABLE))
-        held = await _account_balance(conn, balances, ua(user_id, UserSub.HELD))
-        pending_payout = await _account_balance(
-            conn, balances, ua(user_id, UserSub.PENDING_PAYOUT)
-        )
+    by_code = {row["account_code"]: row["ledger_balance"] for row in rows}
+    legacy_raw = rows[0]["legacy_balance"]
+    legacy_balance = legacy_raw if legacy_raw is not None else Decimal("0")
+    available = by_code[available_code] if by_code[available_code] is not None else Decimal("0")
+    held = by_code[held_code] if by_code[held_code] is not None else Decimal("0")
+    pending_payout = (
+        by_code[pending_payout_code]
+        if by_code[pending_payout_code] is not None
+        else Decimal("0")
+    )
 
     if legacy_balance != available:
         raise WalletLedgerDriftError(

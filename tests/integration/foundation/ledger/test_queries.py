@@ -8,6 +8,7 @@ DoD: "프론트 무변경으로 기존 지갑 테스트 전부 통과" — `get_
 """
 from __future__ import annotations
 
+import asyncio
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from uuid import uuid4
@@ -144,3 +145,47 @@ async def test_get_balance_raises_explicit_drift_error_instead_of_generic_failur
     assert exc_info.value.user_id == user
     assert exc_info.value.legacy_balance == Decimal("1049.00")
     assert exc_info.value.ledger_available == Decimal("50.00")
+
+
+async def test_get_balance_no_false_positive_drift_under_concurrent_commits(pool, ports):
+    """task-951 결함 수정 검증: 조회 도중 다른 트랜잭션이 bridge_credit/
+    place_hold를 커밋해도 위양성 `WalletLedgerDriftError`가 나면 안 된다.
+    수정 전(4개의 개별 SELECT)에서는 legacy/ledger 읽기 사이에 커밋이
+    끼어들면 서로 다른 시점의 값을 비교해 위양성 409를 던질 수 있었다 —
+    이 테스트는 다량의 동시 커밋과 동시 조회를 경합시켜, `get_balance` 중
+    하나라도 `WalletLedgerDriftError`를 던지면 `asyncio.gather`가 그대로
+    전파해 테스트를 실패시킨다."""
+    buyer = await create_test_user(pool)
+    async with pool.acquire() as conn, conn.transaction():
+        await bridge_credit(conn, buyer, Decimal("1000.00"), "TOPUP")
+
+    async def credit_writer() -> None:
+        async with pool.acquire() as conn, conn.transaction():
+            await bridge_credit(conn, buyer, Decimal("1.00"), "TOPUP")
+
+    async def hold_writer() -> None:
+        reference = f"test-queries-concurrent:{uuid4()}"
+        async with pool.acquire() as conn, conn.transaction():
+            await place_hold(
+                conn, buyer_id=buyer, amount=Decimal("1.00"), purpose=_TEST_PURPOSE,
+                reference=reference, expires_at=_clock() + timedelta(minutes=15),
+                actor_subject_id=buyer, trace_id=uuid4(),
+                journal=ports.journal, balances=ports.balances, audit=ports.audit,
+                clock=ports.clock, holds=ports.holds,
+            )
+            await conn.execute(
+                "UPDATE user_wallets SET balance = balance - $2 WHERE user_id = $1",
+                buyer, Decimal("1.00"),
+            )
+
+    async def reader() -> None:
+        await get_balance(pool, buyer, balances=ports.balances)
+
+    writers = [credit_writer() for _ in range(15)] + [hold_writer() for _ in range(15)]
+    readers = [reader() for _ in range(60)]
+    await asyncio.gather(*writers, *readers)
+
+    final = await get_balance(pool, buyer, balances=ports.balances)
+    assert final.balance == final.available
+    assert final.balance == Decimal("1000.00") + Decimal("15.00") - Decimal("15.00")
+    assert final.held == Decimal("15.00")
