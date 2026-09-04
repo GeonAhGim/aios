@@ -30,11 +30,19 @@ const snapshotPathSet = new Set(snapshotPathList);
 // admin/alerts/auth/device_tokens/exchange_credentials/executions/foundation/health/
 // marketplace/metrics/notifications/portfolio/reports/strategy_builder/suitability/
 // users/wallet.py뿐).
+// task-1325: sessions.ts(task-606)가 실제로 호출하지만(GET /auth/sessions·DELETE
+// /auth/sessions/:id) src/api/routers에 세션 라우터 자체가 없다(auth.py는
+// register/login/refresh/logout/logout-all/mfa/setup/mfa/verify뿐) — marketData.*와
+// 같은 이유의 유령 경로다. apiPaths.ts의 auth.sessions.*는 implemented=false로도
+// 등록돼 있고(§D가 그 일치를 강제), sessions.ts는 그 플래그로 네트워크 호출 전에
+// typed 오류(SessionsRouteNotImplementedError)를 던진다.
 const GHOST_PATH_WHITELIST: ReadonlySet<ApiRouteName> = new Set<ApiRouteName>([
   "marketData.candles.get",
   "marketData.candles.replay",
   "marketData.instruments.list",
   "marketData.instruments.aliases",
+  "auth.sessions.list",
+  "auth.sessions.revoke",
 ]);
 
 // STALE_SNAPSHOT_WHITELIST: GHOST_PATH_WHITELIST와는 다른 사유 — "라우터가
@@ -233,5 +241,23 @@ describe("apiPaths ↔ contracts/openapi/v1.json — 스캐너 자체 검증(tas
       if (snapshotEnvelope !== def.envelope) drifted.push(name);
     }
     expect(drifted).toEqual(["fake.route"]);
+  });
+});
+
+describe("apiPaths ↔ GHOST_PATH_WHITELIST — implemented 플래그 정합(task-1325 §D)", () => {
+  it("GHOST_PATH_WHITELIST 항목은 전부 implemented=false로 등록돼 있다", () => {
+    const mismatched: string[] = [];
+    for (const name of GHOST_PATH_WHITELIST) {
+      if (API_ROUTES[name].implemented) mismatched.push(name);
+    }
+    expect(mismatched).toEqual([]);
+  });
+
+  it("GHOST_PATH_WHITELIST 밖의 모든 라우트는 implemented=true다(유령 경로가 몰래 추가되면 실패)", () => {
+    const mismatched: string[] = [];
+    for (const [name, def] of Object.entries(API_ROUTES) as Array<[ApiRouteName, ApiRouteDefinition]>) {
+      if (!GHOST_PATH_WHITELIST.has(name) && !def.implemented) mismatched.push(name);
+    }
+    expect(mismatched).toEqual([]);
   });
 });

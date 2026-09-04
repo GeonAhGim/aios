@@ -19,6 +19,15 @@ export interface ApiRouteDefinition {
   // v1Path로 실제 해석된 경우는 스펙상 항상 봉투이므로 resolveEnvelope가
   // 이 값 대신 true를 강제한다.
   envelope: boolean;
+  // task-1325: 서버에 이 엔드포인트(라우터) 자체가 아직 없는 유령 경로(§3.3)면
+  // false다. 생략하면(옵셔널 — apiPaths.test.ts의 defineApiRoutes fixture 리터럴처럼
+  // route() 헬퍼를 거치지 않는 경우가 있어 필수로 두지 않는다) isRouteImplemented가
+  // true로 취급한다. route() 헬퍼는 4번째 인자를 생략하면 true를 명시적으로 채운다.
+  // apiPaths.openapi.test.ts의 GHOST_PATH_WHITELIST와 반드시 일치해야 하고 §D 테스트가
+  // 그 일치를 기계적으로 강제한다 — 라우터가 생기면 이 값과 화이트리스트를 함께 고친다.
+  // sessions.ts처럼 실제 네트워크 호출 전에 typed 오류로 단락하려는 호출부가
+  // isRouteImplemented로 참조한다.
+  implemented?: boolean;
 }
 
 // 같은 경로를 여러 HTTP 메서드(GET/POST/PUT/...)가 공유하는 경우(예:
@@ -26,8 +35,13 @@ export interface ApiRouteDefinition {
 // legacyPath는 "리소스 경로"의 단일 출처이지 "연산"의 단일 출처가 아니다.
 // 이 레포의 실제 라우터는 같은 경로를 공유하는 메서드끼리 봉투 여부가 항상
 // 동일하므로(라우터 단위로 이관되기 때문) 이 축약이 안전하다.
-function route(legacyPath: string, envelope: boolean, v1Path: string | null = `/api/v1${legacyPath}`): ApiRouteDefinition {
-  return { legacyPath, envelope, v1Path: v1Path ?? undefined };
+function route(
+  legacyPath: string,
+  envelope: boolean,
+  v1Path: string | null = `/api/v1${legacyPath}`,
+  implemented: boolean = true,
+): ApiRouteDefinition {
+  return { legacyPath, envelope, v1Path: v1Path ?? undefined, implemented };
 }
 
 function defineApiRoutes<T extends Record<string, ApiRouteDefinition>>(routes: T): T {
@@ -57,6 +71,19 @@ export const API_ROUTES = defineApiRoutes({
   "auth.mfaSetup": route("/auth/mfa/setup", true),
   "auth.mfaVerify": route("/auth/mfa/verify", true),
   "auth.me": route("/users/me", true),
+
+  // task-1325: sessions.ts(task-606)가 GET /auth/sessions·DELETE /auth/sessions/:id를
+  // 실제로 호출하도록 구현돼 있었지만 이 표에 등록된 적이 없어 apiPaths↔OpenAPI 가드(§A)의
+  // 유령 경로 검사 대상에서 빠져 있었다(가드는 API_ROUTES에 등록된 것만 본다).
+  // src/api/routers 목록 재확인 — auth.py에는 register/login/refresh/logout/logout-all/
+  // mfa/setup/mfa/verify뿐이고 별도 sessions 라우터 파일이 없다(디렉터리 목록: admin/
+  // alerts/auth/device_tokens/exchange_credentials/executions/foundation/health/
+  // marketplace/metrics/notifications/portfolio/reports/strategy_builder/suitability/
+  // users/wallet.py) — marketData.*와 같은 이유의 유령 경로다. v1Path는 마운트 경로
+  // 확정 전이라 null, implemented=false로 sessions.ts가 네트워크 호출 전에 typed
+  // 오류로 단락하게 한다.
+  "auth.sessions.list": route("/auth/sessions", true, null, false),
+  "auth.sessions.revoke": route("/auth/sessions/:sessionId", true, null, false),
 
   "account.riskAssessment": route("/users/me/risk-assessment", false),
   "account.riskProfile": route("/users/me/risk-profile", false),
@@ -141,18 +168,19 @@ export const API_ROUTES = defineApiRoutes({
   // 미도달 + 이 이름의 라우터 자체가 아직 없음, foundation.* 이관 전과 동일 상황) —
   // 그래서 foundation.* 항목과 동일하게 v1Path=null로 legacy만 등록한다. 실제 마운트
   // 경로가 확정되면(라우터 파일 확인 후) 이 값만 고친다.
-  "marketData.candles.get": route("/v1/foundation/market-data/candles", false, null),
-  "marketData.candles.replay": route("/v1/foundation/market-data/candles/replay", false, null),
+  "marketData.candles.get": route("/v1/foundation/market-data/candles", false, null, false),
+  "marketData.candles.replay": route("/v1/foundation/market-data/candles/replay", false, null, false),
 
   // task-824: §3.1 InstrumentView 목록·별칭 조회. LA-9(ports/reference_repository.py)에는
   // get_instrument(단건)만 있고 목록·별칭 조회 메서드가 아직 없다 — marketData.candles.*와
   // 같은 이유(라우터 자체가 아직 없음)로 v1Path=null·legacy만 등록해둔다. 실제 라우터가
   // 생기면(LA-9 확장 후) 이 값만 고친다.
-  "marketData.instruments.list": route("/v1/foundation/market-data/instruments", false, null),
+  "marketData.instruments.list": route("/v1/foundation/market-data/instruments", false, null, false),
   "marketData.instruments.aliases": route(
     "/v1/foundation/market-data/instruments/:instrumentId/aliases",
     false,
     null,
+    false,
   ),
 });
 
@@ -184,6 +212,12 @@ export function resolveEnvelope(route: ApiRouteName, options: ResolvePathOptions
   const def = getRouteDefinition(route);
   if (options.useV1 && def.v1Path) return true;
   return def.envelope;
+}
+
+// task-1325: implemented=false(유령 경로)면 sessions.ts 같은 호출부가 네트워크 시도
+// 전에 typed 오류로 단락할 수 있게 한다.
+export function isRouteImplemented(route: ApiRouteName): boolean {
+  return getRouteDefinition(route).implemented ?? true;
 }
 
 // 테스트 전용 export — 실제 clients/*.ts는 API_ROUTES를 통해서만 등록한다.

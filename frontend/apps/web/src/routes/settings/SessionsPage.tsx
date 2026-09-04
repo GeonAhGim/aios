@@ -1,4 +1,10 @@
-import { ApiError, createLogoutClient, createSessionsClient, type SessionsClient } from "@aios/api-client";
+import {
+  ApiError,
+  createLogoutClient,
+  createSessionsClient,
+  SessionsRouteNotImplementedError,
+  type SessionsClient,
+} from "@aios/api-client";
 import {
   canRevoke,
   classifyForbidden,
@@ -21,9 +27,12 @@ import { ForbiddenNotice } from "../../components/ForbiddenNotice";
 // 새 파서·새 클라이언트를 만들지 않고 두 leaf의 산출물만 조합한다.
 //
 // 서버에 GET /auth/sessions·DELETE /auth/sessions/{id}가 아직 없다(spec §3.4 표 96행에
-// login/refresh/logout/logout-all만 명시) — task-709 선례대로 실 데이터 연결 전까지
-// fetchSessions 기본 구현은 표준 에러 경로(routeApiError+ErrorMessage)만 태우고,
-// 화면·파싱 로직 자체는 props 주입으로 완성해둔다.
+// login/refresh/logout/logout-all만 명시, task-1325가 apiPaths.ts 유령 경로 등록으로
+// 재확인) — task-709 선례대로 실 데이터 연결 전까지 fetchSessions 기본 구현은 표준
+// 에러 경로(routeApiError+ErrorMessage)만 태우고, 화면·파싱 로직 자체는 props 주입으로
+// 완성해둔다. task-1325: 이 기본 구현은 이제 일반 Error 대신 sessions.ts의
+// SessionsRouteNotImplementedError(typed)를 던진다 — sessionsClient(기본값)의
+// revoke()도 동일한 타입으로 실패하므로 두 경로가 같은 오류 타입으로 일관된다.
 //
 // sessionsClient.list()는 파싱에 실패한 항목을 조용히 걸러내도록 설계돼 있다(그 leaf의
 // decision) — 이 화면은 그 결정과 별개로 "파싱 실패를 숨기지 않는다"는 이 leaf의 DoD를
@@ -41,7 +50,7 @@ export interface SessionsPageProps {
 const baseUrl = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8000";
 
 const fetchSessionsDefault = (): Promise<unknown[]> =>
-  Promise.reject(new Error("세션 목록 조회 API가 아직 제공되지 않습니다."));
+  Promise.reject(new SessionsRouteNotImplementedError("auth.sessions.list"));
 
 const defaultGetCurrentSessionId = (): string | null => null;
 

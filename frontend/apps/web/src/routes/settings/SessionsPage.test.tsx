@@ -173,4 +173,20 @@ describe("SessionsPage", () => {
 
     await waitFor(() => expect(screen.getByText("세션 목록 조회 API가 아직 제공되지 않습니다.")).toBeInTheDocument());
   });
+
+  // task-1325: §3.3 유령 경로. sessionsClient를 주입하지 않으면(기본 createSessionsClient)
+  // revoke()도 apiPaths.ts의 실제 레지스트리 기준으로 typed 오류를 던진다 — 네트워크를
+  // 타지 않으므로 fetch를 목킹하지 않아도 되고, 실제로 폐기되지 않았으니 로그인 화면으로
+  // 리다이렉트되지도 않는다(이전이었다면 없는 라우트가 404 흡수로 "성공"처럼 보였을 상황).
+  it("sessionsClient를 주입하지 않으면 기본 클라이언트의 폐기도 typed 오류로 실패하고, 로그인 화면으로 넘어가지 않는다", async () => {
+    renderPage({
+      fetchSessions: async () => [rawSession()],
+    });
+
+    await waitFor(() => expect(screen.getByRole("button", { name: "폐기" })).toBeInTheDocument());
+    fireEvent.click(screen.getByRole("button", { name: "폐기" }));
+
+    await waitFor(() => expect(screen.getByText("세션 폐기 API가 아직 제공되지 않습니다.")).toBeInTheDocument());
+    expect(screen.queryByText("LOGIN_PAGE")).not.toBeInTheDocument();
+  });
 });

@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { createSessionsClient } from "./sessions";
+import { isRouteImplemented } from "./apiPaths";
+import { createSessionsClient, SessionsRouteNotImplementedError } from "./sessions";
 import { ApiError, configureUnauthorizedHandler } from "./http";
 
 function jsonResponse(status: number, body?: unknown): Response {
@@ -44,6 +45,12 @@ function makeClient(overrides: Partial<Parameters<typeof createSessionsClient>[0
     getCurrentSessionId: () => null,
     store,
     logoutClient: { logoutAll },
+    // task-1325: /auth/sessions·/auth/sessions/{id}는 실제 apiPaths 레지스트리에서
+    // implemented=false(유령 경로)다. 이 파일의 기존 테스트들은 "라우터가 배선되면
+    // 이렇게 동작해야 한다"를 검증하는 것이므로 여기서 true로 가정한다 — 유령 경로
+    // 게이트 자체는 아래 별도 describe("게이트: ...")가 이 override 없이(실제
+    // 레지스트리 그대로) 검증한다.
+    isRouteImplemented: () => true,
     ...overrides,
   });
   return { client, store, logoutAll };
@@ -172,6 +179,49 @@ describe("createSessionsClient", () => {
   describe("revokeAll", () => {
     it("task-454 logoutClient.logoutAll을 그대로 위임한다(중복 구현 금지)", async () => {
       const { client, logoutAll } = makeClient();
+
+      await client.revokeAll();
+
+      expect(logoutAll).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  // task-1325: §3.3 유령 경로 게이트. isRouteImplemented override 없이(실제
+  // apiPaths 레지스트리 그대로) 클라이언트를 만들어, 오늘의 실제 상태(라우터 없음)를
+  // 검증한다.
+  describe("게이트: /auth/sessions·/auth/sessions/{id}는 유령 경로다(task-1325, §3.3)", () => {
+    it("negative: apiPaths.ts의 실제 등록값도 두 라우트 모두 미구현이다(위 테스트들의 override 전제가 여전히 유효한지 확인)", () => {
+      expect(isRouteImplemented("auth.sessions.list")).toBe(false);
+      expect(isRouteImplemented("auth.sessions.revoke")).toBe(false);
+    });
+
+    it("list()는 fetch를 시도하지 않고 SessionsRouteNotImplementedError로 즉시 실패한다", async () => {
+      const fetchMock = vi.fn();
+      vi.stubGlobal("fetch", fetchMock);
+      const { client } = makeClient({ isRouteImplemented: undefined });
+
+      const err = await client.list().catch((e: unknown) => e);
+
+      expect(err).toBeInstanceOf(SessionsRouteNotImplementedError);
+      expect((err as SessionsRouteNotImplementedError).route).toBe("auth.sessions.list");
+      expect(fetchMock).not.toHaveBeenCalled();
+    });
+
+    it("revoke()는 fetch를 시도하지 않고 SessionsRouteNotImplementedError로 즉시 실패하며, 현재 세션이어도 로컬 토큰을 정리하지 않는다(실제로 폐기되지 않았으므로)", async () => {
+      const fetchMock = vi.fn();
+      vi.stubGlobal("fetch", fetchMock);
+      const { client, store } = makeClient({
+        isRouteImplemented: undefined,
+        getCurrentSessionId: () => "session-1",
+      });
+
+      await expect(client.revoke("session-1")).rejects.toBeInstanceOf(SessionsRouteNotImplementedError);
+      expect(fetchMock).not.toHaveBeenCalled();
+      expect(store.clear).not.toHaveBeenCalled();
+    });
+
+    it("revokeAll()은 게이트와 무관하게(auth/logout-all은 실제 라우트) 그대로 동작한다", async () => {
+      const { client, logoutAll } = makeClient({ isRouteImplemented: undefined });
 
       await client.revokeAll();
 
