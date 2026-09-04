@@ -15,6 +15,7 @@ import numpy as np
 import pytest
 import talib
 
+from src.core.indicators.registry import IndicatorError, IndicatorRegistry
 from src.core.indicators.spec import REGISTRY_VERSION, IndicatorSpec, ParamSpec
 from src.core.indicators.specs_talib import TALIB_SPECS
 
@@ -92,3 +93,88 @@ def test_param_spec_is_frozen() -> None:
     spec = ParamSpec(name="timeperiod", min=2, max=500, default=20)
     with pytest.raises(AttributeError):
         spec.default = 30  # type: ignore[misc]
+
+
+# --- L02 registry.py: 조회·검증·lookback·registry_hash ---------------------
+
+
+def test_registry_get_returns_known_spec() -> None:
+    registry = IndicatorRegistry()
+    assert registry.get("SMA") is TALIB_SPECS["SMA"]
+
+
+def test_registry_get_unknown_indicator_raises() -> None:
+    registry = IndicatorRegistry()
+    with pytest.raises(IndicatorError) as excinfo:
+        registry.get("ICHIMOKU")
+    assert excinfo.value.code == "STRATEGY_INDICATOR_UNKNOWN"
+
+
+def test_registry_validate_params_fills_defaults() -> None:
+    registry = IndicatorRegistry()
+    assert registry.validate_params("SMA", {}) == {"timeperiod": 20}
+
+
+def test_registry_validate_params_accepts_in_range_override() -> None:
+    registry = IndicatorRegistry()
+    assert registry.validate_params("SMA", {"timeperiod": 100}) == {"timeperiod": 100}
+
+
+@pytest.mark.parametrize("timeperiod", [1, 0, -5, 501, 10_000])
+def test_registry_validate_params_out_of_range_raises(timeperiod: int) -> None:
+    registry = IndicatorRegistry()
+    with pytest.raises(IndicatorError) as excinfo:
+        registry.validate_params("SMA", {"timeperiod": timeperiod})
+    assert excinfo.value.code == "STRATEGY_PARAM_OUT_OF_RANGE"
+
+
+def test_registry_validate_params_rejects_non_int_value() -> None:
+    registry = IndicatorRegistry()
+    with pytest.raises(IndicatorError) as excinfo:
+        registry.validate_params("SMA", {"timeperiod": 20.5})  # type: ignore[dict-item]
+    assert excinfo.value.code == "STRATEGY_PARAM_OUT_OF_RANGE"
+
+
+def test_registry_validate_params_unknown_indicator_raises() -> None:
+    registry = IndicatorRegistry()
+    with pytest.raises(IndicatorError) as excinfo:
+        registry.validate_params("ICHIMOKU", {})
+    assert excinfo.value.code == "STRATEGY_INDICATOR_UNKNOWN"
+
+
+def test_registry_lookback_delegates_to_spec_with_resolved_params() -> None:
+    registry = IndicatorRegistry()
+    assert registry.lookback("SMA", {"timeperiod": 20}) == 19
+    assert registry.lookback("MACD", {}) == 26 + 9 - 2
+
+
+def test_registry_hash_is_stable_across_calls_and_instances() -> None:
+    first = IndicatorRegistry()
+    second = IndicatorRegistry()
+    assert first.registry_hash() == first.registry_hash()
+    assert first.registry_hash() == second.registry_hash()
+
+
+def test_registry_hash_changes_when_a_spec_changes() -> None:
+    baseline = IndicatorRegistry().registry_hash()
+
+    mutated_specs = dict(TALIB_SPECS)
+    original_sma = mutated_specs["SMA"]
+    mutated_specs["SMA"] = IndicatorSpec(
+        name=original_sma.name,
+        inputs=original_sma.inputs,
+        params=(ParamSpec(name="timeperiod", min=2, max=999, default=20),),
+        outputs=original_sma.outputs,
+        lookback=original_sma.lookback,
+        causal=original_sma.causal,
+    )
+
+    mutated_hash = IndicatorRegistry(mutated_specs).registry_hash()
+    assert mutated_hash != baseline
+
+
+def test_registry_hash_unaffected_by_dict_construction_order() -> None:
+    forward = IndicatorRegistry(dict(TALIB_SPECS))
+    reversed_specs = dict(reversed(list(TALIB_SPECS.items())))
+    backward = IndicatorRegistry(reversed_specs)
+    assert forward.registry_hash() == backward.registry_hash()
