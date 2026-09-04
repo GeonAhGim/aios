@@ -234,6 +234,76 @@ describe("refreshAccessToken 실패 시 등록된 clearHandler 호출(tokenStore
     expect(clearHandler).toHaveBeenCalledTimes(1);
   });
 
+  // task-1380(§3.4/§9 PLT-23, task-1373 REJECT 후속): 주입된 핸들러가 계약을
+  // 어기고 reject/throw해도(예: catch 없이 전파된 네트워크 예외) clearHandler는
+  // 반드시 호출되어야 하고, refreshAccessToken() 자체는 절대 reject하면 안
+  // 된다 — tokenStore.ts의 `void refreshAccessToken()`(선제 갱신) 같은
+  // catch-없는 호출부에서 unhandled rejection이 나면 안 되기 때문이다.
+  it("refresh 핸들러가 reject하면 clearHandler를 호출하고 false로 resolve한다(reject 우회 금지)", async () => {
+    configureTokenRefreshHandler(vi.fn().mockRejectedValue(new Error("network down")));
+    const clearHandler = vi.fn();
+    configureTokenClearHandler(clearHandler);
+
+    await expect(refreshAccessToken()).resolves.toBe(false);
+
+    expect(clearHandler).toHaveBeenCalledTimes(1);
+  });
+
+  it("refresh 핸들러가 동기적으로 throw해도 clearHandler를 호출하고 false로 resolve한다", async () => {
+    configureTokenRefreshHandler(
+      vi.fn(() => {
+        throw new Error("sync boom");
+      }),
+    );
+    const clearHandler = vi.fn();
+    configureTokenClearHandler(clearHandler);
+
+    await expect(refreshAccessToken()).resolves.toBe(false);
+
+    expect(clearHandler).toHaveBeenCalledTimes(1);
+  });
+
+  it("동시에 대기 중인 모든 호출이 reject 실패를 공유해도 clearHandler는 1회만 호출된다", async () => {
+    let rejectHandler: (err: unknown) => void = () => {};
+    const refreshHandler = vi.fn(
+      () =>
+        new Promise<boolean>((_resolve, reject) => {
+          rejectHandler = reject;
+        }),
+    );
+    configureTokenRefreshHandler(refreshHandler);
+    const clearHandler = vi.fn();
+    configureTokenClearHandler(clearHandler);
+
+    const waiters = [refreshAccessToken(), refreshAccessToken(), refreshAccessToken()];
+    rejectHandler(new Error("session revoked"));
+    const results = await Promise.all(waiters);
+
+    expect(results).toEqual([false, false, false]);
+    expect(refreshHandler).toHaveBeenCalledTimes(1);
+    expect(clearHandler).toHaveBeenCalledTimes(1);
+  });
+
+  it("createTokenStore()로 만든 실제 스토어는 refresh 핸들러가 reject해도 스스로 전량 폐기된다", async () => {
+    const store = createTokenStore();
+    store.setPair({
+      access_token: "access-1",
+      refresh_token: "refresh-1",
+      token_type: "bearer",
+      expires_in: 900,
+      session_id: "session-1",
+    });
+    expect(store.getAccess()).toBe("access-1");
+
+    configureTokenRefreshHandler(vi.fn().mockRejectedValue(new Error("network down")));
+
+    await expect(refreshAccessToken()).resolves.toBe(false);
+
+    expect(store.getAccess()).toBeNull();
+    expect(store.getRefresh()).toBeNull();
+    expect(store.peekSessionId()).toBeNull();
+  });
+
   it("createTokenStore()로 만든 실제 스토어는 refresh 실패 시 스스로 전량 폐기된다", async () => {
     const store = createTokenStore();
     store.setPair({
