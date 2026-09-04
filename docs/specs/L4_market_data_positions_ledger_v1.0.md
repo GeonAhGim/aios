@@ -666,6 +666,7 @@ DoD 공통: `ruff check . && mypy --strict <paths>` 통과, 명시된 pytest 명
 | LA-19 | `src/exchanges/{bitget,kis}/market_data_mixin.py` 심볼 변환 → normalizer 위임 + 기존 테스트 통과 | LA-7 | `get_positions` 심볼이 canonical(감사 §7 해소) | +30 |
 | LA-20 | `adapters/kis_ingest_source.py` + test(MockTransport) | LA-15 | KRX 세션 갭 판정 통합 | 120 |
 | LA-21 | adversarial 2파일 + perf 리플레이 | LA-17 | §8.3/8.4 | 200 |
+| LA-24 | `src/api/routers/market_data.py` + `src/api/schemas/market_data.py` + `tests/integration/api/test_market_data_router.py` — **HTTP 읽기 API(CA 결정 ADR-2026-09-04-C 후속, esc-marketdata-http-api-gap)**: `GET /market-data/candles`(페이지네이션 cursor·tf·span, contracts/v1 CandleRecord 응답), `GET /market-data/candles/replay`(LA-17 replay 위임), `GET /market-data/instruments`, `GET /market-data/instruments/{symbol}/aliases`. 심볼 파라미터는 지금은 벤처 심볼, DC-2 완료 후 `instrument_id`도 수용(둘 다 허용, 응답에 둘 다 표기). **권한은 `ports/entitlement.py`(`allowed(subject, feed) -> Entitlement`) 포트를 이 리프에서 정의**하고 기본 구현은 "자기 테넌트가 등록한 벤처만, PAPER는 delayed=0"; DC-9가 같은 포트의 정책 구현으로 교체한다(이중 정의 금지). 에러 봉투·테넌시(PLT §3) 준수, 타 테넌트 404 동형 | LA-17, PLT-28 | 4 엔드포인트 통합 테스트 + 교차 테넌트 404 + 커버리지 밖 span → `DATA_COVERAGE_MISSING` 409 | 300 |
 
 ### 9.3 (B) 포지션 & PnL
 
@@ -689,6 +690,7 @@ DoD 공통: `ruff check . && mypy --strict <paths>` 통과, 명시된 pytest 명
 | LB-16 | `adapters/exchange_balance_source.py`, `application/reconcile_provider.py` + test(FakeAdapter, FND-08 실호출) | LB-14, FND-08 | MATERIAL → 메트릭, 예외 전파 | 230 |
 | LB-17 | `application/queries.py`, `scheduler.py` + `main.py` 배선 + test | LB-14~16 | 스케줄 1주기 | 280 |
 | LB-18 | adversarial 2파일 + perf | LB-11 | §8.3 | 180 |
+| LB-19 | `src/api/routers/positions.py` + `src/api/schemas/positions.py` + `tests/integration/api/test_positions_router.py` — **HTTP 읽기 API(CA 결정)**: `GET /positions`(계정·instrument 필터, PositionView 목록), `GET /positions/{id}/journal`(커서 페이지네이션), `GET /positions/nav`(일별 NAV 체인). LB-17 queries 위임, 쓰기 없음. 타 테넌트 404 동형, 에러 봉투 준수 | LB-17, PLT-28 | 3 엔드포인트 통합 테스트 + 교차 테넌트 404 | 260 |
 
 ### 9.4 (C) 머니 원장
 
