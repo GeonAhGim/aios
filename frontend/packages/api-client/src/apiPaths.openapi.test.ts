@@ -37,6 +37,22 @@ const GHOST_PATH_WHITELIST: ReadonlySet<ApiRouteName> = new Set<ApiRouteName>([
   "marketData.instruments.aliases",
 ]);
 
+// STALE_SNAPSHOT_WHITELIST: GHOST_PATH_WHITELIST와는 다른 사유 — "라우터가
+// 없다"가 아니라 "라우터는 있는데 스냅샷이 낡았다"다. task-1324: origin/main
+// 0a68f86의 src/api/routers/auth.py 원문을 직접 읽어 확인한 결과 POST
+// /auth/refresh·POST /auth/logout-all이 실재하고(PLT-24, task-1075, e0eb498
+// 병합) 각각 ApiResponse[TokenPairResponse]·ApiResponse[dict[str,int]]를
+// 반환한다. 그런데 contracts/openapi/v1.json은 task-905(f800c1a) 시점 이후
+// 재생성된 적이 없어(PLT-17~21 foundation.* envelope 이관 등 이 leaf와 무관한
+// 드리프트가 250건+ 함께 쌓여 있다 — 로컬 재생성은 그 무관한 변경까지 한
+// 커밋에 섞어 "백엔드 diff 0" 원칙을 어기게 되므로 이 leaf 범위 밖이다) 이
+// 두 경로가 아직 없다. 스냅샷이 갱신되면(별도 PLT 리프) 이 화이트리스트가
+// 거짓이 되므로 아래 "화이트리스트 부패 방지" 테스트가 잡는다.
+const STALE_SNAPSHOT_WHITELIST: ReadonlySet<ApiRouteName> = new Set<ApiRouteName>([
+  "auth.refresh",
+  "auth.logoutAll",
+]);
+
 // KNOWN_ENVELOPE_DRIFT: task-1165 시점 전수 대조 결과, apiPaths.ts에 등록된 envelope
 // 값과 스냅샷이 실제로 말하는 봉투 여부 사이에 불일치가 0건이었다(GHOST_PATH_WHITELIST
 // 4건 제외 70건 전부 일치, account.riskProfile 포함 — task-1160 decision이 "드리프트
@@ -96,7 +112,7 @@ export function computeEnvelopeFromOpenApi(pathItem: Record<string, unknown>): b
 
 function nonGhostRouteEntries(): Array<[ApiRouteName, ApiRouteDefinition]> {
   return (Object.entries(API_ROUTES) as Array<[ApiRouteName, ApiRouteDefinition]>).filter(
-    ([name]) => !GHOST_PATH_WHITELIST.has(name),
+    ([name]) => !GHOST_PATH_WHITELIST.has(name) && !STALE_SNAPSHOT_WHITELIST.has(name),
   );
 }
 
@@ -114,6 +130,17 @@ describe("apiPaths ↔ contracts/openapi/v1.json — 경로 정합성(task-1165 
   it("GHOST_PATH_WHITELIST 항목은 실제로 스냅샷에 없다(화이트리스트 부패 방지)", () => {
     const nowPresent: string[] = [];
     for (const name of GHOST_PATH_WHITELIST) {
+      const def = API_ROUTES[name];
+      if (resolveInOpenApi(def.legacyPath, snapshotPathList) !== null) {
+        nowPresent.push(`${name} (${def.legacyPath})`);
+      }
+    }
+    expect(nowPresent).toEqual([]);
+  });
+
+  it("STALE_SNAPSHOT_WHITELIST 항목은 실제로 스냅샷에 없다(화이트리스트 부패 방지)", () => {
+    const nowPresent: string[] = [];
+    for (const name of STALE_SNAPSHOT_WHITELIST) {
       const def = API_ROUTES[name];
       if (resolveInOpenApi(def.legacyPath, snapshotPathList) !== null) {
         nowPresent.push(`${name} (${def.legacyPath})`);

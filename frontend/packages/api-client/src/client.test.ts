@@ -18,10 +18,20 @@ describe("AiosApiClient", () => {
     vi.unstubAllGlobals();
   });
 
-  it("task-112 봉투가 적용된 엔드포인트(auth)는 data를 unwrap하고 camelCase로 변환한다", async () => {
+  // task-1324: PLT-24(task-1075, e0eb498) 병합으로 /auth/login이
+  // ApiResponse[TokenPairResponse](access_token/refresh_token/token_type/
+  // expires_in/session_id)를 반환한다 — 예전 단일 비회전 TokenResponse가
+  // 아니다.
+  it("task-112/1324 봉투가 적용된 엔드포인트(auth)는 data를 unwrap하고 §3.4 TokenPairResponse로 파싱한다", async () => {
     const fetchMock = vi.fn().mockResolvedValue(
       jsonResponse(200, {
-        data: { access_token: "t-1", token_type: "bearer" },
+        data: {
+          access_token: "t-1",
+          refresh_token: "r-1",
+          token_type: "bearer",
+          expires_in: 900,
+          session_id: "s-1",
+        },
         meta: { trace_id: "trace-1", as_of: "2026-09-03T00:00:00Z", page: null },
       }),
     );
@@ -29,7 +39,7 @@ describe("AiosApiClient", () => {
 
     const result = await makeClient().login({ email: "a@example.com", password: "pw" });
 
-    expect(result).toEqual({ accessToken: "t-1", tokenType: "bearer" });
+    expect(result).toEqual({ accessToken: "t-1", refreshToken: "r-1", expiresIn: 900, sessionId: "s-1" });
     const [url] = fetchMock.mock.calls[0] as [string, RequestInit];
     expect(url).toBe("https://api.example.test/auth/login");
   });

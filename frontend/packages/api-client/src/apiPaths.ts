@@ -48,7 +48,12 @@ function defineApiRoutes<T extends Record<string, ApiRouteDefinition>>(routes: T
 export const API_ROUTES = defineApiRoutes({
   "auth.register": route("/auth/register", true),
   "auth.login": route("/auth/login", true),
+  // task-1324: origin/main 0a68f86에서 확인 — PLT-24(task-1075, e0eb498) 병합으로
+  // src/api/routers/auth.py에 실재하는 두 라우트. 둘 다 ApiResponse 봉투를 쓴다
+  // (refresh: ApiResponse[TokenPairResponse], logout-all: ApiResponse[dict[str,int]]).
+  "auth.refresh": route("/auth/refresh", true),
   "auth.logout": route("/auth/logout", true),
+  "auth.logoutAll": route("/auth/logout-all", true),
   "auth.mfaSetup": route("/auth/mfa/setup", true),
   "auth.mfaVerify": route("/auth/mfa/verify", true),
   "auth.me": route("/users/me", true),

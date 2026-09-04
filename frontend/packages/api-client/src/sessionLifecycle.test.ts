@@ -8,27 +8,22 @@
 // 호출 횟수·헤더 실값을 단언한다 — 핸들러가 불렸다는 사실만 보는 동어반복 금지.
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { AiosApiClient, ApiError } from "./client";
+import { createAuthTokenRefreshHandler } from "./clients/auth";
 import { configureUnauthorizedHandler, resetUnauthorizedGuard } from "./http";
-import {
-  configureTokenClearHandler,
-  configureTokenRefreshHandler,
-  type TokenRefreshHandler,
-} from "./tokenRefresh";
+import { configureTokenClearHandler, configureTokenRefreshHandler } from "./tokenRefresh";
 import { createTokenStore, type TokenStore } from "./tokenStore";
 import { createLogoutClient } from "./logout";
 import { resolvePath } from "./apiPaths";
 
 const BASE_URL = "https://api.example.test";
-// apiPaths.ts에는 아직 auth.refresh 라우트가 없다(tokenStore.ts 주석: 서버가
-// §3.4 TokenPairResponse를 반환하기 전까지 앱 부트스트랩이 이 저장소를 아직
-// 인스턴스화하지 않는다 — task-955 decision). 이 테스트는 그 부트스트랩이
-// TokenRefreshHandler 계약(성공 시 true+저장, 실패 시 false)대로 §3.4 스펙
-// 경로("/auth/refresh")를 호출할 미래 배선을 시뮬레이트한다.
-const REFRESH_PATH = "/auth/refresh";
+// task-1324: apiPaths.ts에 auth.refresh가 등록되고 clients/auth.ts가 실제
+// TokenRefreshHandler(createAuthTokenRefreshHandler)를 제공하므로, 더 이상
+// 이 테스트만의 시뮬레이션 핸들러를 손으로 만들지 않는다 — 실제 프로덕션
+// 배선을 그대로 조합한다(파일 상단 docstring의 "실제 공개 API만 조합" 원칙).
 const PORTFOLIO_URL = `${BASE_URL}${resolvePath("portfolio.get")}`;
 const ME_URL = `${BASE_URL}${resolvePath("auth.me")}`;
 const WALLET_URL = `${BASE_URL}${resolvePath("wallet.balance")}`;
-const REFRESH_URL = `${BASE_URL}${REFRESH_PATH}`;
+const REFRESH_URL = `${BASE_URL}${resolvePath("auth.refresh")}`;
 
 function jsonResponse(status: number, body: unknown): Response {
   return new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
@@ -53,13 +48,19 @@ function meEnvelopeBody() {
   };
 }
 
+// POST /auth/refresh는 다른 라우터와 동일하게 ApiResponse 봉투를 쓴다(src/api/
+// routers/auth.py::refresh가 ok(pair)를 반환) — data/meta 없이 필드를 최상위에
+// 두면 unwrap()이 EnvelopeFormatError로 거부한다.
 function newPairBody() {
   return {
-    access_token: "access-1",
-    refresh_token: "refresh-1",
-    token_type: "bearer",
-    expires_in: 900,
-    session_id: "session-0",
+    data: {
+      access_token: "access-1",
+      refresh_token: "refresh-1",
+      token_type: "bearer",
+      expires_in: 900,
+      session_id: "session-0",
+    },
+    meta: { trace_id: "trace-refresh", as_of: "2026-09-04T00:00:00Z", page: null },
   };
 }
 
@@ -75,21 +76,8 @@ async function flushMicrotasks(times = 20): Promise<void> {
   for (let i = 0; i < times; i++) await Promise.resolve();
 }
 
-// §3.4 계약대로 시뮬레이트한 refresh 경계: /auth/refresh가 200이면 응답을
-// store.setPair로 회전 저장하고 true, 그 외(401 AUTH_SESSION_REVOKED 포함)는
-// false — 이 판단 자체가 AUTH_TOKEN_EXPIRED(갱신 가능)와 AUTH_SESSION_REVOKED
-// (갱신 불가·전량 폐기)를 갈라놓는 지점이다.
-function makeRefreshHandler(store: TokenStore): TokenRefreshHandler {
-  return async () => {
-    const res = await fetch(REFRESH_URL, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ refresh_token: store.getRefresh() }),
-    });
-    if (res.status !== 200) return false;
-    const body: unknown = await res.json();
-    return store.setPair(body) !== null;
-  };
+function makeRefreshHandler(store: TokenStore) {
+  return createAuthTokenRefreshHandler({ baseUrl: BASE_URL, store });
 }
 
 describe("§3.4 세션 수명주기 교차모듈 통합 회귀", () => {

@@ -15,17 +15,15 @@
 // TokenRefreshHandler(상위 계층이 configureTokenRefreshHandler로 주입) 소관이다
 // — 이 모듈은 결과를 기다리지 않는다.
 //
-// 범위 제한(task-955 decision): 서버(src/api/routers/auth.py)는 아직 §3.4
-// TokenPairResponse(PLT-23/24)를 반환하지 않고 TokenResponse{access_token,
-// token_type}만 준다 — refresh_token/expires_in/session_id가 없어 setPair는
-// 항상 null을 반환한다. 그래서 LoginPage.tsx/useLogout.ts 등 앱 계층은 여전히
-// useAuthStore(access-token 전용, task-354)로 로그인 상태를 관리하고 이
-// createTokenStore()는 아직 어디서도 인스턴스화되지 않는다. 앱을 이 저장소로
-// 옮기려면 로그인 성공 시 원본(snake_case) 응답을 setPair에 먹이고 앱
-// 부트스트랩이 configureTokenRefreshHandler를 등록하는 전역 provider 도입이
-// 필요한데, 이는 이 leaf 범위를 벗어나 신설하지 않는다 — 서버가
-// TokenPairResponse를 반환하기 시작하면 이 모듈을 그대로 앱 부트스트랩에
-// 연결하면 된다.
+// 범위 제한(task-1324로 전제 갱신): 서버(src/api/routers/auth.py, PLT-24 —
+// task-1075, e0eb498 병합)는 이제 login/refresh 모두 §3.4 TokenPairResponse를
+// 반환한다(task-955 시점의 "아직 TokenResponse만 준다"는 전제는 더 이상 참이
+// 아니다) — clients/auth.ts의 createAuthTokenRefreshHandler가 이 모듈의
+// setPair·getRefresh·peekSessionId를 실제로 소비한다. 다만 LoginPage.tsx/
+// useLogout.ts 등 앱 계층을 이 저장소로 옮기는 작업(useAuthStore 대체 + 앱
+// 부트스트랩이 configureTokenRefreshHandler를 등록하는 전역 provider 도입)은
+// 여전히 이 leaf 범위 밖이다 — createTokenStore()는 아직 앱 부트스트랩에서
+// 인스턴스화되지 않는다.
 //
 // 배선(task-1020): createTokenStore()는 생성 시 자신의 clear()를
 // tokenRefresh.ts의 configureTokenClearHandler에 등록한다. refreshAccessToken()의
