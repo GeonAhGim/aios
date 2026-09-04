@@ -140,13 +140,23 @@ class CircuitBreakerService:
         if computed_sev >= current_sev:
             if current.reactivation_approval_id is not None:
                 # 재가동 대기 중이던 상태가 재악화 — 요청 자동 취소(8.6-B 예외상황).
-                await approval.cancel(self._pool, current.reactivation_approval_id)
+                cancelled_request_id = current.reactivation_approval_id
+                await approval.cancel(self._pool, cancelled_request_id)
                 await self._set_level(
                     current.level,
                     reactivation_approval_id=None,
                     expected=current,
                 )
                 current = CircuitBreakerState(level=current.level, reactivation_approval_id=None)
+                if self._publish is not None:
+                    await self._publish(
+                        "risk.circuit_breaker.reactivation_cancelled",
+                        {
+                            "event_type": "risk.circuit_breaker.reactivation_cancelled",
+                            "approval_request_id": cancelled_request_id,
+                            "level": current.level.value,
+                        },
+                    )
             if computed_sev > current_sev:
                 await self._set_level(computed, reactivation_approval_id=None, expected=current)
                 await self._publish_level_changed(current.level, computed)
@@ -212,6 +222,15 @@ class CircuitBreakerService:
                 CircuitBreakerLevel.NORMAL, reactivation_approval_id=None, expected=current
             )
             await self._publish_level_changed(current.level, CircuitBreakerLevel.NORMAL)
+            if self._publish is not None:
+                await self._publish(
+                    "risk.circuit_breaker.reactivated",
+                    {
+                        "event_type": "risk.circuit_breaker.reactivated",
+                        "approval_request_id": request.id,
+                        "old_level": current.level.value,
+                    },
+                )
         elif request.status in ("REJECTED", "EXPIRED", "CANCELLED"):
             await self._set_level(current.level, reactivation_approval_id=None, expected=current)
         return await self.get_state()

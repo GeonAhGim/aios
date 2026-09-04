@@ -12,6 +12,7 @@ import asyncio
 import contextlib
 import logging
 import os
+from collections import deque
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from typing import Any
@@ -56,6 +57,7 @@ from src.foundation.positions.application.scheduler import PositionsScheduler
 from src.services.background_loops import flag_enabled, run_periodic_loop, start_background_loops
 from src.services.credential_resolver import CredentialResolver
 from src.services.exchange_credential_service import ExchangeCredentialService
+from src.services.safety.circuit_breaker_loop import cooldown_ticks
 
 logger = logging.getLogger(__name__)
 
@@ -86,20 +88,17 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
                 decision_data=record["decision_data"],
             )
 
-    # FD-17.1 — 실제 이메일/푸시 발송기(SMTP·FCM/APNs)는 미확정(Draft)이라
-    # senders 없이 등록한다. "발송 실패"로 정직하게 기록되며(§17.1 — 성공
-    # 위장 금지) EventBus CRITICAL 재시도(§5.5)를 거쳐 audit_log에 남는다.
+    # FD-17.1 — 실제 이메일/푸시 발송기(SMTP·FCM/APNs)는 미확정(Draft)이라 senders
+    # 없이 등록한다. "발송 실패"로 정직하게 기록되며 EventBus CRITICAL 재시도(§5.5).
     event_bus = InProcessEventBus(audit_sink=_event_bus_audit_sink)
     NotificationGateway(pool).register(event_bus)
     await event_bus.start()
 
-    # 레드팀 감사(#02) — CredentialResolver는 5분 TTL 캐싱을 설계했지만
-    # 요청마다 새로 만들면 _cache가 매번 비어 시작해 캐시가 작동한 적이
-    # 없었다 — pool/event_bus와 동일하게 시작 시 한 번만 만들어 둔다.
+    # 레드팀 감사(#02) — 요청마다 새로 만들면 CredentialResolver의 5분 TTL
+    # _cache가 매번 비어 시작한다 — pool/event_bus와 동일하게 한 번만 만든다.
     credential_ring = KeyRing.from_legacy_hex(secrets.credential_encryption_key.get_secret_value())
     credential_service = ExchangeCredentialService(pool, key_ring=credential_ring)
-    # PM 배정 ⑤ 2단계 — CircuitBreakerMetrics가 소비할 어댑터 호출 성공/실패를
-    # InstrumentedAdapter에서만 계측한다. background_loops의 safety 루프와 공유.
+    # PM 배정 ⑤ 2단계 — 어댑터 호출 성공/실패 계측(background_loops와 공유).
     api_tracker = ApiCallTracker()
     credential_resolver = CredentialResolver(
         credential_service,
@@ -115,6 +114,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         event_bus=event_bus,
         credential_resolver=credential_resolver,
         api_tracker=api_tracker,
+        reactivation_history=deque(maxlen=cooldown_ticks(policy)),  # R-45
     )
 
     # LC-10/LC-16 — 원장 무결성(5분 주기)·정산 배치(일 1회 00:10 KST) 루프.

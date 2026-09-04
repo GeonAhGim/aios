@@ -28,6 +28,7 @@ import logging
 import os
 import socket
 import time
+from collections import deque
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from typing import Any
@@ -41,8 +42,9 @@ from src.core.observability.context import bind_system
 from src.core.observability.loop_health import LoopHealth, loop_health
 from src.core.safety.circuit_breaker import CircuitBreakerService
 from src.core.safety.data_distrust import DataDistrustMonitor
+from src.core.safety.data_freshness import DataFreshnessTracker
 from src.core.safety.heartbeat import DEFAULT_HEARTBEAT_PATH, write_heartbeat
-from src.core.safety.metrics_collector import ApiCallTracker, collect_circuit_breaker_metrics
+from src.core.safety.metrics_collector import ApiCallTracker
 from src.foundation.execution_ownership.adapters.postgres_repository import (
     PostgresExecutionLeaseRepository,
 )
@@ -54,6 +56,11 @@ from src.services.execution_loop.scheduler import ExecutionLoopScheduler
 from src.services.execution_service import ExecutionService
 from src.services.order_service.foundation_gate import make_foundation_pre_submit_gate
 from src.services.risk_guard_service import RiskGuardService
+from src.services.safety.circuit_breaker_loop import (
+    MetricsHistory,
+    cooldown_ticks,
+    run_circuit_breaker_tick,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -136,6 +143,8 @@ async def start_background_loops(
     event_bus: EventBus,
     credential_resolver: CredentialResolver,
     api_tracker: ApiCallTracker,
+    freshness_tracker: DataFreshnessTracker | None = None,
+    reactivation_history: MetricsHistory | None = None,
     health: LoopHealth | None = None,
 ) -> BackgroundLoops:
     health = health if health is not None else loop_health()
@@ -253,17 +262,20 @@ async def start_background_loops(
             "execution_loop: AIOS_EXECUTION_LOOP_ENABLED=0 — 실행 루프를 띄우지 않습니다."
         )
 
-    # FD-9.4b — Circuit Breaker 재가동 승인 반영 + 지표 기반 격상/완화 평가.
-    # check_reactivation()만으로는 승인 나간 재가동만 반영될 뿐, 실제
-    # 지표(API 오류율·주문 거부율·일손실)가 다시 악화되는 것을 잡지
-    # 못한다 — 같은 주기에 evaluate(metrics)를 먼저 돌려 최신 상태를
-    # 반영한 뒤 check_reactivation()으로 승인 결과까지 마저 반영한다.
+    # R-45 — circuit_breaker_loop.run_circuit_breaker_tick(수집→evaluate→
+    # recovery_gate→check_reactivation)을 그대로 돌린다. `history`는 프로세스
+    # 수명 동안 유지되는 이력 버퍼 — main.py가 안 넘기면 여기서 만든다.
     circuit_breaker = CircuitBreakerService(pool, policy.circuit_breaker, publish=event_bus.publish)
+    history = (
+        reactivation_history
+        if reactivation_history is not None
+        else deque(maxlen=cooldown_ticks(policy))
+    )
 
     async def _safety_tick() -> None:
-        cb_metrics = await collect_circuit_breaker_metrics(pool, api_tracker)
-        await circuit_breaker.evaluate(cb_metrics)
-        await circuit_breaker.check_reactivation()
+        await run_circuit_breaker_tick(
+            pool, circuit_breaker, api_tracker, freshness_tracker, policy, history=history
+        )
 
     safety_task = asyncio.create_task(
         run_periodic_loop(
