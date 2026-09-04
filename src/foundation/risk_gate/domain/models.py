@@ -7,6 +7,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from datetime import datetime
+from decimal import Decimal
 from enum import Enum
 from uuid import UUID
 
@@ -111,3 +112,57 @@ class FenceSnapshot:
     책임) — 그래야 `is_stale`이 "관측 안 됨"과 "0"을 같은 값으로 비교한다."""
 
     tokens: Mapping[tuple[SafetyScope, str], int]
+
+
+class LimitScope(str, Enum):
+    """R-26 78번 §2.6 노출 한도 스코프 — `SafetyScope`와 이름이 겹치는 항목이
+    있어도(TENANT/ACCOUNT/PROVIDER) 별개 enum이다. 이쪽은 "어떤 대상에 한도가
+    걸리는가"이고 `SafetyScope`는 "킬스위치가 어디를 멈추는가"라 의미가 다르고,
+    이 enum에만 있는 STRATEGY/SYMBOL/ASSET_CLASS도 있어 재사용하면 둘 다
+    왜곡된다."""
+
+    TENANT = "TENANT"
+    ACCOUNT = "ACCOUNT"
+    STRATEGY = "STRATEGY"
+    SYMBOL = "SYMBOL"
+    ASSET_CLASS = "ASSET_CLASS"
+    PROVIDER = "PROVIDER"
+
+
+class LimitMetric(str, Enum):
+    GROSS_NOTIONAL_PCT = "GROSS_NOTIONAL_PCT"
+    NET_NOTIONAL_PCT = "NET_NOTIONAL_PCT"
+    MAX_ORDER_NOTIONAL = "MAX_ORDER_NOTIONAL"
+    MAX_OPEN_POSITIONS = "MAX_OPEN_POSITIONS"
+    MAX_TRADES_PER_HOUR = "MAX_TRADES_PER_HOUR"
+    MAX_LEVERAGE = "MAX_LEVERAGE"
+
+
+class LimitBreachSeverity(str, Enum):
+    WARN = "WARN"
+    CRITICAL = "CRITICAL"
+
+
+@dataclass(frozen=True)
+class RiskLimit:
+    """`risk_limit` 1행 — 78번 §2.6 표 그대로. `tenant_id=None`은 플랫폼
+    기본값(모든 tenant에 적용, tenant별 한도가 따로 있으면 그쪽이 우선한다는
+    뜻은 이 모델이 아니라 `list_effective` 조회 로직의 책임).
+
+    `updated_at`은 이중 역할이다 — 저장소에 넘길 때는 호출자가 마지막으로
+    읽은 낙관적 잠금 기대값(신규 생성이면 `None`), 저장소가 돌려줄 때는 DB가
+    실제로 기록한 새 타임스탬프. `upsert_risk_limit.py`/
+    `postgres_limit_repository.upsert()` docstring 참고."""
+
+    id: UUID
+    tenant_id: UUID | None
+    scope: LimitScope
+    scope_ref: str
+    metric: LimitMetric
+    limit_value: Decimal
+    hard: bool = True
+    effective_from: datetime | None = None
+    effective_to: datetime | None = None
+    created_by: UUID | None = None
+    approval_ref: str | None = None
+    updated_at: datetime | None = None

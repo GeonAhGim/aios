@@ -2,12 +2,15 @@
 (adapters/)은 모른다(71번 §4)."""
 from __future__ import annotations
 
+from datetime import datetime
+from decimal import Decimal
 from typing import Protocol
 from uuid import UUID
 
 from src.foundation.risk_gate.domain.models import (
     FenceSnapshot,
     RiskEvaluation,
+    RiskLimit,
     SafetyControl,
     SafetyScope,
 )
@@ -82,3 +85,36 @@ class RiskGateRepository(Protocol):
         전체 tenant(GLOBAL/PROVIDER 범위처럼 시스템 전역에 영향을 주는
         control)의 캐시를 지운다."""
         ...
+
+
+class RiskLimitRepository(Protocol):
+    """R-26 — `risk_limit`/`risk_limit_breach` 저장소 포트."""
+
+    async def list_effective(
+        self,
+        tenant_id: UUID,
+        *,
+        provider_code: str | None = None,
+        strategy_id: str | None = None,
+        symbols: tuple[str, ...] | None = None,
+    ) -> tuple[RiskLimit, ...]:
+        """이 tenant 소유 행 또는 플랫폼 기본값(`tenant_id IS NULL`)만
+        반환한다 — 다른 tenant의 한도는 절대 섞이지 않는다(구현체 책임)."""
+        ...
+
+    async def upsert(self, limit: RiskLimit) -> RiskLimit:
+        """§6 표 낙관적 잠금 upsert. `limit.updated_at`은 호출자가 마지막으로
+        읽은 기대값(신규 생성이면 `None`) — 실제와 다르면
+        `ConcurrencyConflictError`(구현체 책임, 무조건 성공 위장 금지)."""
+        ...
+
+    async def record_breach(
+        self,
+        *,
+        limit_id: UUID,
+        decision_id: UUID,
+        observed: Decimal,
+        limit_value: Decimal,
+        severity: str,
+        occurred_at: datetime,
+    ) -> int: ...
