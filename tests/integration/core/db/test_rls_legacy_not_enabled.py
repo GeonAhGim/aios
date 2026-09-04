@@ -21,6 +21,13 @@ from tests.integration.conftest import create_test_user
 from tests.integration.core.db.conftest import AppRoleTx
 
 _PROJECT_ROOT = Path(__file__).resolve().parents[4]
+# b3c7f19ad2e6(rls_policies_foundation, PLT-30 M5)의 down_revision. 이 리프
+# 작성 시점엔 head와 인접해 "downgrade -1"로 되돌릴 수 있었지만, 그 뒤 두
+# 마이그레이션(execution_leases EO-02, DC-4)이 head 위에 더 쌓이면서
+# "-1"이 더 이상 이 리비전을 가리키지 않게 됐다(esc-ci-cbb8b9c62497) — 위치
+# 대신 리비전 id를 직접 지정해 head가 계속 자라도 이 왕복 테스트가 항상
+# b3c7f19ad2e6 자체를 되돌리도록 고정한다.
+_PRE_RLS_REVISION = "5a0aedee0af0"
 _LEGACY_TABLES = ("orders", "positions", "strategy_executions")
 _FOUNDATION_TABLES = (
     "consent_record",
@@ -111,7 +118,7 @@ def _run_alembic(*args: str) -> None:
 
 async def test_upgrade_downgrade_round_trip(pool):
     try:
-        _run_alembic("downgrade", "-1")
+        _run_alembic("downgrade", _PRE_RLS_REVISION)
         for table in _FOUNDATION_TABLES:
             assert await _relrowsecurity(pool, table) is False
             assert not await _policy_exists(pool, table)

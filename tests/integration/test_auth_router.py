@@ -5,6 +5,7 @@ app.router.lifespan_context로 main.py의 lifespan(asyncpg pool 생성)을
 그대로 태운다.
 """
 import uuid
+from datetime import datetime, timezone
 from pathlib import Path
 
 import asyncpg
@@ -13,7 +14,7 @@ from dotenv import dotenv_values
 from httpx import ASGITransport, AsyncClient
 
 from src.main import app
-from tests.integration.mfa_clock import mfa_clock_shifted, totp_at
+from tests.integration.mfa_clock import mfa_clock_frozen, mfa_clock_shifted, totp_at
 
 STRONG_PASSWORD = "Str0ng!Passw0rd"
 
@@ -191,9 +192,14 @@ async def test_mfa_setup_and_verify_round_trip(client):
 
 async def test_mfa_resetup_without_password_rejected_when_already_enabled(client):
     """레드팀 감사 #11 후속 — 이미 켜진 MFA를 탈취한 Bearer 토큰만으로
-    (비밀번호 없이) 재설정해 secret을 갈아치울 수 있으면 안 된다."""
-    import pyotp
+    (비밀번호 없이) 재설정해 secret을 갈아치울 수 있으면 안 된다.
 
+    실시간 TOTP(`pyotp...now()`)로 코드를 만들면, 코드 생성(클라이언트)과
+    `/auth/mfa/verify` 처리(서버) 사이에 우연히 30초 구간 경계를 넘어 같은
+    코드가 무효 처리되는 드문 레이스가 있었다(esc-ci-cbb8b9c62497 — 전체
+    스위트 실행 중 드물게만 재현). `mfa_clock_frozen`으로 시계를 고정해
+    실서비스 경로(라우터→MfaService.setup/verify)는 그대로 태우되 "몇
+    시인지"만 결정론적으로 만든다."""
     email = _unique_email()
     register_response = await client.post(
         "/auth/register", json={"email": email, "password": STRONG_PASSWORD}
@@ -201,12 +207,15 @@ async def test_mfa_resetup_without_password_rejected_when_already_enabled(client
     token = register_response.json()["data"]["access_token"]
     headers = {"Authorization": f"Bearer {token}"}
 
-    setup_response = await client.post("/auth/mfa/setup", headers=headers)
-    secret = setup_response.json()["data"]["secret"]
-    code = pyotp.totp.TOTP(secret).now()
-    await client.post("/auth/mfa/verify", json={"totp_code": code}, headers=headers)
+    frozen_now = datetime.now(timezone.utc)
+    with mfa_clock_frozen(app, frozen_now):
+        setup_response = await client.post("/auth/mfa/setup", headers=headers)
+        secret = setup_response.json()["data"]["secret"]
+        code = totp_at(secret, frozen_now)
+        await client.post("/auth/mfa/verify", json={"totp_code": code}, headers=headers)
 
-    resetup_response = await client.post("/auth/mfa/setup", headers=headers)
+        resetup_response = await client.post("/auth/mfa/setup", headers=headers)
+
     assert resetup_response.status_code == 403
 
 

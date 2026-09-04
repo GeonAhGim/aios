@@ -53,3 +53,34 @@ def mfa_clock_shifted(app: FastAPI, seconds: int) -> Iterator[Now]:
 
 def totp_at(secret: str, when: datetime) -> str:
     return pyotp.totp.TOTP(secret).at(when)
+
+
+@contextmanager
+def mfa_clock_frozen(app: FastAPI, when: datetime) -> Iterator[None]:
+    """앱의 MfaService 시계를 `when` 한 값으로 고정한다.
+
+    `mfa_clock_shifted`는 매 호출마다 실시간을 다시 읽어 오프셋만 더하므로
+    "코드 생성"과 "서버 검증" 사이에 실제 30초 TOTP 구간 경계를 넘으면
+    (esc-ci-cbb8b9c62497) 같은 코드가 우연히 무효 처리될 수 있다 — 이
+    헬퍼는 실시간을 아예 참조하지 않아 그 레이스를 구조적으로 없앤다.
+    """
+
+    async def _frozen_mfa_service(
+        request: Request, pool: asyncpg.Pool = Depends(get_pool)
+    ) -> MfaService:
+        secrets = request.app.state.secrets
+        return MfaService(
+            pool,
+            encryption_key=secrets.credential_encryption_key.get_secret_value(),
+            now=lambda: when,
+        )
+
+    previous = app.dependency_overrides.get(get_mfa_service)
+    app.dependency_overrides[get_mfa_service] = _frozen_mfa_service
+    try:
+        yield
+    finally:
+        if previous is None:
+            app.dependency_overrides.pop(get_mfa_service, None)
+        else:
+            app.dependency_overrides[get_mfa_service] = previous

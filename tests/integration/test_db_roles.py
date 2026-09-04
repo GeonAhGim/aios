@@ -98,6 +98,15 @@ async def test_aios_app_cannot_delete_audit_log(conn):
 
 
 async def test_aios_app_cannot_update_foundation_audit_event(conn):
+    """PLT-30 M5(8c9fe01)가 `foundation_audit_event`에 `tenant_isolation`
+    RLS를 ENABLE한 뒤로는, `app.tenant_id`/`app.role`을 바인딩하지 않은 채
+    UPDATE하면 RLS 정책이 먼저 모든 행을 걸러내 0행 UPDATE로 조용히
+    끝난다(WORM 트리거·REVOKE에 도달하지 못해 예외가 사라짐 — esc-ci-
+    cbb8b9c62497). 이 행은 `tenant_id IS NULL`(system 이벤트)로 넣었으므로
+    `app.role='system'`을 함께 바인딩해([[src/core/db/tenant_scope.py]]
+    `system_transaction`과 동일한 GUC) RLS 정책을 통과시켜 UPDATE가 실제로
+    행에 도달하게 만들고, 그 다음에야 WORM 가드가 독립적으로 막는지 검증한다.
+    """
     row = await conn.fetchrow(
         "INSERT INTO foundation_audit_event "
         "(sequence_no, aggregate_type, aggregate_id, action, outcome, trace_id, "
@@ -111,6 +120,7 @@ async def test_aios_app_cannot_update_foundation_audit_event(conn):
     with pytest.raises((asyncpg.InsufficientPrivilegeError, asyncpg.RaiseError)) as exc_info:
         async with conn.transaction():
             await conn.execute("SET ROLE aios_app")
+            await conn.execute("SELECT set_config('app.role', 'system', true)")
             await conn.execute(
                 "UPDATE foundation_audit_event SET outcome = 'DENIED' WHERE id = $1", event_id
             )
