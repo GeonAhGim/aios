@@ -28,6 +28,9 @@ export interface ContractFieldSpec {
 const POSITIONS_V1 = "src/foundation/positions/contracts/v1.py";
 const MARKET_DATA_V1 = "src/foundation/market_data/contracts/v1.py";
 const LEDGER_V1 = "src/foundation/ledger/contracts/v1.py";
+const HEALTH_ROUTER = "src/api/routers/health.py";
+const AUTH_TOKENS = "src/services/auth/tokens.py";
+const SECRET_REF = "src/core/security/secret_ref.py";
 
 export const CONTRACT_FIELD_SPECS: readonly ContractFieldSpec[] = [
   // ---- positionView.ts (§3.2 B) ----
@@ -194,4 +197,48 @@ export const CONTRACT_FIELD_SPECS: readonly ContractFieldSpec[] = [
       "delisted_at",
     ],
   },
+
+  // ---- readiness.ts (§3.2 헬스·메트릭, task-1332 배치2) ----
+  {
+    file: HEALTH_ROUTER,
+    className: "ReadinessReport",
+    parser: "parseReadiness / isReadinessReport",
+    fields: ["status", "checks", "as_of"],
+  },
+  {
+    file: HEALTH_ROUTER,
+    className: "CheckResult",
+    parser: "isCheckResult",
+    fields: ["ok", "detail", "observed", "threshold"],
+  },
+
+  // ---- tokenPair.ts (§3.4 인증 토큰, task-1332 배치2) ----
+  {
+    file: AUTH_TOKENS,
+    className: "TokenPairResponse",
+    parser: "parseTokenPair",
+    fields: ["access_token", "refresh_token", "token_type", "expires_in", "session_id"],
+  },
+
+  // ---- secretRef.ts (§3.6 비밀 계약, task-1332 배치2) ----
+  {
+    file: SECRET_REF,
+    className: "SecretRef",
+    parser: "parseSecretRef / formatSecretRef",
+    fields: ["scope", "kind", "id", "kid"],
+  },
 ];
+
+// task-1332 배치2 note — 이 리프에서 함께 다루지 않은 것:
+// §3.4 SessionView(frontend/packages/shared-types/src/session.ts)와 §3.5
+// MembershipView(spec 379-390행)는 백엔드에 대응하는 pydantic SSOT 클래스가
+// 아직 없다. TenantContext에는 membership_id 필드만 추가돼 있고(PLT-28),
+// MembershipView/TenantKind/MembershipRole/MembershipState는
+// src/foundation/trust/contracts/v1.py에 전혀 없다(grep 확인, 2026-09-04).
+// session_id/created_at/last_seen_at/user_agent/ip/revoked_at을 반환하는
+// 세션 목록 API도 아직 없다(tokenPair.ts 주석 "서버 PLT-23/24는 아직 미구현"
+// 참고). 존재하지 않는 백엔드 클래스를 겨냥한 스펙은
+// contractDrift.test.ts의 `expect(actual).not.toBeNull()`에 항상 걸려
+// 드리프트가 아니라 "클래스가 없다"는 이유로 상시 FAIL한다 — 이는 드리프트
+// 가드가 아니라 백엔드 구현을 기다리는 표식일 뿐이므로 여기 등재하지
+// 않는다. 백엔드가 두 계약을 구현하면 후속 리프에서 채운다.
