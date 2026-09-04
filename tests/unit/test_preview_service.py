@@ -90,12 +90,14 @@ def test_insufficient_candles_propagates_message():
 
 
 def test_crosses_above_detects_transition():
+    # registry(L01/L02)의 timeperiod 최소값이 2라 SMA(1)은 더 이상 유효하지
+    # 않다 — SMA(2)로 바꾸면 lookback 1만큼 밀려 교차 지점이 index4가 된다.
     prices = [10, 10, 10, 20, 20]
     condition = PreviewCondition(
-        indicator="SMA", params={"timeperiod": 1}, operator="crosses_above", threshold=15
+        indicator="SMA", params={"timeperiod": 2}, operator="crosses_above", threshold=15
     )
 
     result = PreviewCalculator().preview(_candles(prices), [condition])
 
-    assert 3 in result.signal_indices
-    assert 4 not in result.signal_indices
+    assert 4 in result.signal_indices
+    assert 3 not in result.signal_indices

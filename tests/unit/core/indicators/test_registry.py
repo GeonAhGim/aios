@@ -11,13 +11,20 @@ registry.py(조회·검증 단일 진입점)는 L02 몫이라 아직 없다 — 
 """
 from __future__ import annotations
 
+import inspect
+from datetime import datetime, timedelta, timezone
+from decimal import Decimal
+
 import numpy as np
 import pytest
 import talib
 
+from src.core.indicators import talib_adapter
 from src.core.indicators.registry import IndicatorError, IndicatorRegistry
 from src.core.indicators.spec import REGISTRY_VERSION, IndicatorSpec, ParamSpec
 from src.core.indicators.specs_talib import TALIB_SPECS
+from src.core.indicators.talib_adapter import IndicatorService
+from src.data.models.market_data import Candle
 
 EXPECTED_INDICATORS = frozenset(
     {"SMA", "EMA", "RSI", "ATR", "CCI", "WILLR", "MFI", "MACD", "BBANDS", "STOCH", "OBV"}
@@ -178,3 +185,67 @@ def test_registry_hash_unaffected_by_dict_construction_order() -> None:
     reversed_specs = dict(reversed(list(TALIB_SPECS.items())))
     backward = IndicatorRegistry(reversed_specs)
     assert forward.registry_hash() == backward.registry_hash()
+
+
+# --- L03 talib_adapter.py: registry 위임 ------------------------------------
+
+
+def _candles(n: int, *, base: float = 100.0) -> list[Candle]:
+    now = datetime.now(timezone.utc)
+    out = []
+    for i in range(n):
+        price = base + i
+        out.append(
+            Candle(
+                symbol="BTC/USDT",
+                exchange="bitget",
+                timeframe="1h",
+                open=Decimal(str(price)),
+                high=Decimal(str(price + 1)),
+                low=Decimal(str(price - 1)),
+                close=Decimal(str(price)),
+                volume=Decimal("1000"),
+                open_time=now + timedelta(hours=i),
+                close_time=now + timedelta(hours=i + 1),
+            )
+        )
+    return out
+
+
+def test_talib_adapter_has_no_leftover_specs_or_period_param_name() -> None:
+    source = inspect.getsource(talib_adapter)
+    assert "_SPECS" not in source
+    assert "period_param_name" not in source
+
+
+@pytest.mark.parametrize("timeperiod", [0, -1, -5, 501])
+def test_calculate_rejects_out_of_range_param_via_registry(timeperiod: int) -> None:
+    with pytest.raises(IndicatorError) as excinfo:
+        IndicatorService().calculate("SMA", _candles(30), timeperiod=timeperiod)
+    assert excinfo.value.code == "STRATEGY_PARAM_OUT_OF_RANGE"
+
+
+def test_calculate_rejects_unknown_indicator_via_registry() -> None:
+    with pytest.raises(IndicatorError) as excinfo:
+        IndicatorService().calculate("ICHIMOKU", _candles(30))
+    assert excinfo.value.code == "STRATEGY_INDICATOR_UNKNOWN"
+
+
+def test_indicator_result_registry_version_matches_registry() -> None:
+    result = IndicatorService().calculate("SMA", _candles(30), timeperiod=5)
+    assert result.registry_version == REGISTRY_VERSION
+    assert result.registry_version == "ind-v1"
+
+
+@pytest.mark.parametrize("name", ["MACD", "BBANDS", "STOCH"])
+def test_calculate_min_required_bars_matches_registry_lookback(name: str) -> None:
+    registry = IndicatorRegistry()
+    spec = TALIB_SPECS[name]
+    default_params = {p.name: p.default for p in spec.params}
+    lookback = registry.lookback(name, default_params)
+
+    too_few = IndicatorService().calculate(name, _candles(lookback))
+    assert too_few.values == []
+
+    just_enough = IndicatorService().calculate(name, _candles(lookback + 1))
+    assert just_enough.values != []

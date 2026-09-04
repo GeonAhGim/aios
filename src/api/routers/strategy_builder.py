@@ -51,11 +51,8 @@ from src.api.schemas.strategy_builder import (
 )
 from src.api.service_deps import get_credential_resolver
 from src.api.strategy_builder_deps import get_indicator_service, get_strategy_builder_service
-from src.core.indicators.talib_adapter import (
-    SUPPORTED_INDICATORS,
-    IndicatorService,
-    period_param_name,
-)
+from src.core.indicators.registry import DEFAULT_REGISTRY
+from src.core.indicators.talib_adapter import SUPPORTED_INDICATORS, IndicatorService
 from src.services.auth_service import User
 from src.services.condition_compiler import ConditionCompiler
 from src.services.credential_resolver import CredentialResolver
@@ -84,7 +81,8 @@ async def compute_indicator(
     resolver: CredentialResolver = Depends(get_credential_resolver),
     indicator_service: IndicatorService = Depends(get_indicator_service),
 ) -> IndicatorComputeResponse:
-    param_name = period_param_name(name)
+    spec = DEFAULT_REGISTRY.get(name)
+    param_name = spec.params[0].name if spec.params else None
     adapter = await resolver.get_adapter(user.user_id, exchange)
 
     candles = await adapter.get_ohlcv(symbol, timeframe, limit=limit)
