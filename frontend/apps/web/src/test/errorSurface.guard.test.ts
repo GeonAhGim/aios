@@ -12,8 +12,14 @@ const ROUTES_DIR = join(dirname(fileURLToPath(import.meta.url)), "..", "routes")
 
 // 파일별로 예외가 필요해지면 "상대경로:매치문자열" 형태로 이유 한 줄과 함께 여기 추가한다.
 // 위반이 나왔다고 이 목록을 넓혀 무마하지 말 것 — ErrorMessage로 교체하는 게 기본값이다.
-// 현재는 스캔 대상 0건이라 비어 있다.
-const ALLOWED_DIRECT_RENDERS = new Set<string>();
+//
+// marketplace/ListingDetailPage.tsx: FD-15.3 위험등급 불일치 경고(RiskWarningModal의
+// reason prop)는 서버가 error_code/reason_codes 없이 PurchaseError(HTTPException 400,
+// str(exc)) 원문으로만 판별점을 보낸다(task-1207 발견, 새 error_code 신설은 범위 밖 —
+// task-1215 decision). getApiErrorMessage로 먼저 매핑하면 VALIDATION_INVALID_FIELD의
+// EXACT_MESSAGES 고정 문구가 원문을 가려 이 분기가 죽은 코드가 된다(task-1207/1215).
+// 이 경로는 일반 에러 배너가 아니라 FD-15.3 전용 모달의 지정된 payload이므로 예외다.
+const ALLOWED_DIRECT_RENDERS = new Set<string>(["marketplace/ListingDetailPage.tsx:err.message"]);
 
 function stripComments(source: string): string {
   return source.replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/.*$/gm, "");

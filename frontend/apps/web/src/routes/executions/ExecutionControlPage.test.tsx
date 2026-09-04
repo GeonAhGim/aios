@@ -130,6 +130,31 @@ describe("ExecutionControlPage 실행 생성 에러 표시", () => {
     );
     expect(screen.queryByText("raw detail")).not.toBeInTheDocument();
   });
+
+  // task-1215 회귀: PLT-18/19 이후 ExecutionCreateError는 VALIDATION_INVALID_FIELD(400)
+  // + details.fields=[]로 온다(task-1207 발견 1) — 필드별 인라인이 뜰 자리가 없어
+  // 예전엔 실행 생성 실패가 화면에 아무 안내 없이 사라졌다. task-1214가 BadRequestNotice에
+  // 배너 폴백을 고쳤으므로, 이 화면의 실행 생성 실패 경로가 실제로 거기까지 이어지는지
+  // 잠근다(프로덕션 소스 무수정, 테스트만 — task-1215 decision).
+  it("negative: VALIDATION_INVALID_FIELD(400) + 빈 details.fields는 서버 message 배너로 폴백한다(P0 무응답 회귀 방지)", async () => {
+    mutateAsync.mockRejectedValue(
+      new ApiError(
+        400,
+        "배분 자본이 최소 한도 미만입니다.",
+        undefined,
+        "VALIDATION_INVALID_FIELD",
+        undefined,
+        { fields: [] },
+      ),
+    );
+    const { container } = renderPage();
+
+    submitCreateForm(container);
+
+    await waitFor(() =>
+      expect(screen.getByText("배분 자본이 최소 한도 미만입니다.")).toBeInTheDocument(),
+    );
+  });
 });
 
 // spec §3.3 RESOURCE_NOT_FOUND(404)는 재시도 배너가 아니라 NotFoundState로 렌더한다

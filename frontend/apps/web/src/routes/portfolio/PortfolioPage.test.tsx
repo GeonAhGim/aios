@@ -185,4 +185,31 @@ describe("PortfolioPage 재조정 에러 표시", () => {
     await waitFor(() => expect(screen.getByText("재조정에 실패했습니다.")).toBeInTheDocument());
     expect(screen.queryByText("ECONNRESET")).not.toBeInTheDocument();
   });
+
+  // task-1215 회귀: PLT-18/19 이후 RebalanceError는 VALIDATION_INVALID_FIELD(400)
+  // + details.fields=[]로 온다(task-1207 발견 1) — 필드별 인라인이 뜰 자리가 없어
+  // 예전엔 재조정 실패(금전 화면)가 화면에 아무 안내 없이 사라졌다. task-1214가
+  // BadRequestNotice에 배너 폴백을 고쳤으므로, 이 화면의 재조정 실패 경로가 실제로
+  // 거기까지 이어지는지 잠근다(프로덕션 소스 무수정, 테스트만 — task-1215 decision).
+  it("negative: VALIDATION_INVALID_FIELD(400) + 빈 details.fields는 서버 message 배너로 폴백한다(P0 무응답 회귀 방지)", async () => {
+    allocations = [allocation()];
+    mutateAsync.mockRejectedValue(
+      new ApiError(
+        400,
+        "재조정 후 배분 비중 합이 100%를 초과합니다.",
+        undefined,
+        "VALIDATION_INVALID_FIELD",
+        undefined,
+        { fields: [] },
+      ),
+    );
+    renderPage();
+
+    fireEvent.change(screen.getByPlaceholderText("500.00"), { target: { value: "600" } });
+    fireEvent.click(screen.getByRole("button", { name: "재조정 적용" }));
+
+    await waitFor(() =>
+      expect(screen.getByText("재조정 후 배분 비중 합이 100%를 초과합니다.")).toBeInTheDocument(),
+    );
+  });
 });

@@ -96,9 +96,21 @@ describe("ListingDetailPage 구매 에러 표시", () => {
     expect(screen.queryByText("ECONNRESET")).not.toBeInTheDocument();
   });
 
-  it("위험등급 불일치(400)는 배너가 아니라 RiskWarningModal로 사유를 보여준다", async () => {
+  // task-1215: PLT-18/19 이후 실제 백엔드는 이 400을 항상 error_code=
+  // VALIDATION_INVALID_FIELD(details.fields=[])로 봉투에 담아 보낸다(map_exception,
+  // task-1207 발견). 이전 테스트는 errorCode를 비워둬 getApiErrorMessage가
+  // err.message를 그대로 반환하는 비현실적 경로만 통과시켰다 — 실제로는 errorCode가
+  // EXACT_MESSAGES를 먼저 맞혀 원문을 가리는 바람에 이 모달이 죽은 코드였다.
+  it("위험등급 불일치(400, 실제 서버 봉투 VALIDATION_INVALID_FIELD)는 배너가 아니라 RiskWarningModal로 사유를 보여준다", async () => {
     purchaseMutateAsync.mockRejectedValue(
-      new ApiError(400, "회원님의 위험등급(안정형)보다 위험도가 높은 대상입니다.", undefined),
+      new ApiError(
+        400,
+        "회원님의 위험등급(안정형)보다 위험도가 높은 대상입니다.",
+        undefined,
+        "VALIDATION_INVALID_FIELD",
+        undefined,
+        { fields: [] },
+      ),
     );
     renderPage();
 
@@ -110,6 +122,34 @@ describe("ListingDetailPage 구매 에러 표시", () => {
     expect(
       screen.getByText("회원님의 위험등급(안정형)보다 위험도가 높은 대상입니다."),
     ).toBeInTheDocument();
+  });
+
+  // task-1215 회귀: 위험등급 문구를 포함하지 않는 그 외 PurchaseError(예: 리스팅 상태
+  // 불일치)는 VALIDATION_INVALID_FIELD(400) + details.fields=[]로 와도 인라인 폼이
+  // 뜰 자리가 없어 예전엔 화면이 통째로 무응답이었다(task-1207 발견 1, task-1214가
+  // BadRequestNotice에서 고침) — 이 화면의 구매 실패 경로가 실제로 그 폴백까지
+  // 이어지는지 잠근다.
+  it("negative: 위험등급 문구가 없는 VALIDATION_INVALID_FIELD(400) + 빈 details.fields는 서버 message 배너로 폴백한다(P0 무응답 회귀 방지)", async () => {
+    purchaseMutateAsync.mockRejectedValue(
+      new ApiError(
+        400,
+        "구매할 수 없는 리스팅 상태입니다(현재: SUSPENDED).",
+        undefined,
+        "VALIDATION_INVALID_FIELD",
+        undefined,
+        { fields: [] },
+      ),
+    );
+    renderPage();
+
+    fireEvent.click(screen.getByRole("button", { name: "구매하기" }));
+
+    await waitFor(() =>
+      expect(
+        screen.getByText("구매할 수 없는 리스팅 상태입니다(현재: SUSPENDED)."),
+      ).toBeInTheDocument(),
+    );
+    expect(screen.queryByText("위험등급 불일치 경고")).not.toBeInTheDocument();
   });
 });
 

@@ -3,7 +3,6 @@ import { ApiError } from "@aios/api-client";
 import {
   classifyBadRequest,
   classifyForbidden,
-  getApiErrorMessage,
   isResourceNotFound,
   routeApiError,
   type ListingSummary,
@@ -77,14 +76,16 @@ export function ListingDetailPage() {
     } catch (err) {
       if (err instanceof DuplicateSubmitError) return;
       if (err instanceof ApiError) {
-        // 마켓플레이스 구매 실패(PurchaseError)는 아직 §3.3 ApiError 봉투를 쓰지 않아
-        // (backend HTTPException(400, str(exc)) 그대로) error_code가 없다 — 위험등급
-        // 불일치 경고만 유일하게 서버가 문구로 구분해 보내므로, getApiErrorMessage로
-        // 매핑한 결과(폴백 시 서버 message와 동일)를 판별에 쓴다. 새 error_code를
-        // 만들지 않는다(task-901 DoD).
-        const mapped = getApiErrorMessage(err.errorCode, err.message);
-        if (!acknowledged && mapped.includes("위험등급")) {
-          setRiskWarningReason(mapped);
+        // 마켓플레이스 구매 실패(PurchaseError)는 §3.3 taxonomy 세분화 없이
+        // PLT-18/19 이후 전부 VALIDATION_INVALID_FIELD(details.fields=[])로
+        // 뭉뚱그려 온다(task-1207 발견) — 위험등급 불일치 경고만 유일하게 서버가
+        // 원문 message(purchase_service.py의 PurchaseError(warning))로 구분해
+        // 보내므로, 그 원문 err.message로 판별해야 한다. getApiErrorMessage로
+        // errorCode를 먼저 매핑하면 VALIDATION_INVALID_FIELD의 EXACT_MESSAGES
+        // 고정 문구("입력값을 확인해주세요.")가 원문을 가려 이 분기가 죽은
+        // 코드가 된다(task-1215) — 새 error_code를 만들지 않는다(task-901 DoD).
+        if (!acknowledged && err.message.includes("위험등급")) {
+          setRiskWarningReason(err.message);
           return;
         }
         setError(err);
