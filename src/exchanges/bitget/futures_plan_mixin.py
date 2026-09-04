@@ -133,6 +133,7 @@ class BitgetFuturesPlanMixin:
         )
         return dict(raw["data"])
 
+    @require_paper_sandbox
     async def cancel_futures_plan_order(
         self: SignedRequestClient,
         order_id: str,

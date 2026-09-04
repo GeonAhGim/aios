@@ -110,6 +110,7 @@ class BitgetFuturesTradingMixin:
             update={"exchange_order_id": data["orderId"], "status": OrderStatus.SUBMITTED}
         )
 
+    @require_paper_sandbox
     async def modify_futures_order(
         self: _FuturesOrderReadingClient,
         order_id: str,
@@ -136,6 +137,7 @@ class BitgetFuturesTradingMixin:
         data = raw["data"]
         return await self.get_futures_order(data["orderId"], symbol=symbol)
 
+    @require_paper_sandbox
     async def cancel_futures_order(
         self: SignedRequestClient,
         order_id: str,
@@ -154,6 +156,7 @@ class BitgetFuturesTradingMixin:
         )
         return bool(raw.get("code") == "00000")
 
+    @require_paper_sandbox
     async def close_futures_position(
         self: SignedRequestClient,
         symbol: str,
@@ -175,6 +178,7 @@ class BitgetFuturesTradingMixin:
         )
         return bool(raw.get("code") == "00000")
 
+    @require_paper_sandbox
     async def cancel_all_futures_orders(
         self: SignedRequestClient,
         *,

@@ -22,6 +22,7 @@ from typing import Any, Protocol
 from src.data.models.trading import AccountBalance, OrderSide, OrderType
 from src.exchanges.bitget.symbols import to_bitget_symbol as _to_bitget_symbol
 from src.exchanges.common.http_client import SignedRequestClient
+from src.exchanges.common.live_guard import require_paper_sandbox
 
 
 class _BalanceReadingClient(SignedRequestClient, Protocol):
@@ -32,6 +33,7 @@ class _BalanceReadingClient(SignedRequestClient, Protocol):
 
 
 class BitgetTradingPlanMixin:
+    @require_paper_sandbox
     async def place_plan_order(
         self: SignedRequestClient,
         symbol: str,
@@ -64,6 +66,7 @@ class BitgetTradingPlanMixin:
         )
         return dict(raw["data"])
 
+    @require_paper_sandbox
     async def cancel_plan_order(self: SignedRequestClient, order_id: str) -> bool:
         """02b 스펙 §3.2(P1)."""
         raw = await self._request(

@@ -218,6 +218,7 @@ class BitgetTradingMixin:
         )
         return list(raw["data"])
 
+    @require_paper_sandbox
     async def place_batch_orders(
         self: SignedRequestClient, orders: list[Order]
     ) -> list[Order]:
@@ -268,6 +269,7 @@ class BitgetTradingMixin:
                 result.append(order)
         return result
 
+    @require_paper_sandbox
     async def cancel_batch_orders(
         self: SignedRequestClient, order_ids: list[str], *, symbol: str | None = None
     ) -> bool:

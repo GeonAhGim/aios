@@ -33,6 +33,27 @@ def _make_adapter(handler, *, is_paper_trading: bool = True) -> NHAdapter:
     )
 
 
+# task-1356(esc-1082 후속) — place/cancel/modify_order에 @require_paper_sandbox가
+# 붙었고, NHAdapter.is_paper_trading/is_sandboxed는 생성자 인자와 무관하게
+# 항상 False다(모듈 상단 test_is_paper_trading_and_sandboxed_are_always_false
+# 참조) — 즉 이 3개 메서드를 "PAPER로 구성된 adapter"에서 호출하는 방법이
+# 구조적으로 없다. 가드 자체가 항상 막는다는 것은
+# test_live_guard_coverage.py::test_nh_*_rejects_adapter가 이미 검증하므로,
+# 아래 업무 로직(엔드포인트/필드/에러매핑) 테스트는 데코레이터가 감싸기 전의
+# 원본 함수(`__wrapped__`, functools.wraps가 자동으로 남긴다)를 직접 호출해
+# 검증한다 — 소스의 가드를 우회하도록 고치는 게 아니라 테스트에서만 우회한다.
+async def _unguarded_place_order(adapter: NHAdapter, order: Order) -> Order:
+    return await NHAdapter.place_order.__wrapped__(adapter, order)  # type: ignore[attr-defined]
+
+
+async def _unguarded_cancel_order(adapter: NHAdapter, order_id: str) -> bool:
+    return await NHAdapter.cancel_order.__wrapped__(adapter, order_id)  # type: ignore[attr-defined]
+
+
+async def _unguarded_modify_order(adapter: NHAdapter, order_id: str, **kwargs) -> Order:
+    return await NHAdapter.modify_order.__wrapped__(adapter, order_id, **kwargs)  # type: ignore[attr-defined]
+
+
 def _route(request: httpx.Request, routes: dict) -> httpx.Response:
     if request.url.path == "/oauth2/token":
         return httpx.Response(200, json=TOKEN_RESPONSE)
@@ -318,7 +339,7 @@ async def test_place_order_buy_uses_cash_buy_endpoint():
     )
     order = _order()
 
-    result = await adapter.place_order(order)
+    result = await _unguarded_place_order(adapter, order)
 
     assert result.exchange_order_id == "005930:999"
     assert result.status == OrderStatus.SUBMITTED
@@ -334,7 +355,7 @@ async def test_place_order_sell_uses_cash_sell_endpoint():
     )
     order = _order(side=OrderSide.SELL)
 
-    await adapter.place_order(order)
+    await _unguarded_place_order(adapter, order)
 
 
 async def test_place_order_market_type_uses_market_division_code():
@@ -348,7 +369,7 @@ async def test_place_order_market_type_uses_market_division_code():
     )
     order = _order(order_type=OrderType.MARKET, price=None)
 
-    await adapter.place_order(order)
+    await _unguarded_place_order(adapter, order)
 
 
 async def test_place_order_raises_fatal_when_field_missing():
@@ -359,7 +380,7 @@ async def test_place_order_raises_fatal_when_field_missing():
         lambda request: _route(request, {"/krstock/order/v1/cashBuy": handler})
     )
     with pytest.raises(FatalExchangeError):
-        await adapter.place_order(_order())
+        await _unguarded_place_order(adapter, _order())
 
 
 # ---------- trading: cancel_order ----------
@@ -377,7 +398,7 @@ async def test_cancel_order_sends_confirmed_cancel_endpoint():
     adapter = _make_adapter(
         lambda request: _route(request, {"/krstock/order/v1/cancel": handler})
     )
-    assert await adapter.cancel_order("005930:999") is True
+    assert await _unguarded_cancel_order(adapter, "005930:999") is True
 
 
 async def test_cancel_order_returns_true_on_alternate_success_code():
@@ -392,7 +413,7 @@ async def test_cancel_order_returns_true_on_alternate_success_code():
     adapter = _make_adapter(
         lambda request: _route(request, {"/krstock/order/v1/cancel": handler})
     )
-    assert await adapter.cancel_order("005930:999") is True
+    assert await _unguarded_cancel_order(adapter, "005930:999") is True
 
 
 async def test_cancel_order_raises_retryable_on_business_failure():
@@ -403,19 +424,19 @@ async def test_cancel_order_raises_retryable_on_business_failure():
         lambda request: _route(request, {"/krstock/order/v1/cancel": handler})
     )
     with pytest.raises(RetryableExchangeError):
-        await adapter.cancel_order("005930:999")
+        await _unguarded_cancel_order(adapter, "005930:999")
 
 
 async def test_cancel_order_raises_fatal_on_malformed_order_id():
     adapter = _make_adapter(lambda request: httpx.Response(200, json=TOKEN_RESPONSE))
     with pytest.raises(FatalExchangeError):
-        await adapter.cancel_order("no-separator")
+        await _unguarded_cancel_order(adapter, "no-separator")
 
 
 async def test_cancel_order_raises_fatal_on_non_numeric_mkt_orr_no():
     adapter = _make_adapter(lambda request: httpx.Response(200, json=TOKEN_RESPONSE))
     with pytest.raises(FatalExchangeError):
-        await adapter.cancel_order("005930:not-a-number")
+        await _unguarded_cancel_order(adapter, "005930:not-a-number")
 
 
 # ---------- trading: modify_order ----------
@@ -434,7 +455,9 @@ async def test_modify_order_sends_confirmed_modify_endpoint():
     adapter = _make_adapter(
         lambda request: _route(request, {"/krstock/order/v1/modify": handler})
     )
-    order = await adapter.modify_order("005930:999", price=Decimal("71000"), size=Decimal("5"))
+    order = await _unguarded_modify_order(
+        adapter, "005930:999", price=Decimal("71000"), size=Decimal("5")
+    )
 
     assert order.exchange_order_id == "005930:1000"
     assert order.status == OrderStatus.ACKNOWLEDGED
@@ -447,8 +470,8 @@ async def test_modify_order_accepts_quantity_kwarg_for_backward_compat():
     adapter = _make_adapter(
         lambda request: _route(request, {"/krstock/order/v1/modify": handler})
     )
-    order = await adapter.modify_order(
-        "005930:999", price=Decimal("71000"), quantity=Decimal("5")
+    order = await _unguarded_modify_order(
+        adapter, "005930:999", price=Decimal("71000"), quantity=Decimal("5")
     )
     assert order.quantity == Decimal("5")
 
@@ -456,13 +479,13 @@ async def test_modify_order_accepts_quantity_kwarg_for_backward_compat():
 async def test_modify_order_raises_fatal_when_price_missing():
     adapter = _make_adapter(lambda request: httpx.Response(200, json=TOKEN_RESPONSE))
     with pytest.raises(FatalExchangeError):
-        await adapter.modify_order("005930:999", size=Decimal("5"))
+        await _unguarded_modify_order(adapter, "005930:999", size=Decimal("5"))
 
 
 async def test_modify_order_raises_fatal_when_size_missing():
     adapter = _make_adapter(lambda request: httpx.Response(200, json=TOKEN_RESPONSE))
     with pytest.raises(FatalExchangeError):
-        await adapter.modify_order("005930:999", price=Decimal("71000"))
+        await _unguarded_modify_order(adapter, "005930:999", price=Decimal("71000"))
 
 
 async def test_modify_order_raises_retryable_on_business_failure():
@@ -473,7 +496,9 @@ async def test_modify_order_raises_retryable_on_business_failure():
         lambda request: _route(request, {"/krstock/order/v1/modify": handler})
     )
     with pytest.raises(RetryableExchangeError):
-        await adapter.modify_order("005930:999", price=Decimal("71000"), size=Decimal("5"))
+        await _unguarded_modify_order(
+            adapter, "005930:999", price=Decimal("71000"), size=Decimal("5")
+        )
 
 
 async def test_modify_order_raises_fatal_when_response_field_missing():
@@ -484,7 +509,9 @@ async def test_modify_order_raises_fatal_when_response_field_missing():
         lambda request: _route(request, {"/krstock/order/v1/modify": handler})
     )
     with pytest.raises(FatalExchangeError):
-        await adapter.modify_order("005930:999", price=Decimal("71000"), size=Decimal("5"))
+        await _unguarded_modify_order(
+            adapter, "005930:999", price=Decimal("71000"), size=Decimal("5")
+        )
 
 
 # ---------- trading: get_order (confirmed structurally blocked) ----------

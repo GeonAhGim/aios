@@ -25,6 +25,7 @@ from typing import Any, NamedTuple
 from src.data.models.market_data import Ticker
 from src.data.models.trading import AccountBalance, Order, OrderSide, OrderStatus
 from src.exchanges.common.http_client import KISHTTPClient
+from src.exchanges.common.live_guard import require_paper_sandbox
 
 
 class _MarketCodes(NamedTuple):
@@ -78,6 +79,7 @@ class KISOverseasStockMixin:
             source_type="primary",
         )
 
+    @require_paper_sandbox
     async def place_overseas_order(self: KISHTTPClient, order: Order, market: str) -> Order:
         codes = _market_codes(market)
         tr_id = codes.buy_tr_id if order.side == OrderSide.BUY else codes.sell_tr_id
@@ -103,6 +105,7 @@ class KISOverseasStockMixin:
             update={"exchange_order_id": exchange_order_id, "status": OrderStatus.SUBMITTED}
         )
 
+    @require_paper_sandbox
     async def cancel_overseas_order(
         self: KISHTTPClient,
         order_id: str,

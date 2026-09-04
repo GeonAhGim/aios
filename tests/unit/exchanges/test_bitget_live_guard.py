@@ -61,3 +61,13 @@ async def test_modify_order_rejects_live_adapter():
 
     with pytest.raises(FrozenZonePaperAdapterBlockedError):
         await live_adapter.modify_order("order-1", price="100")
+
+
+async def test_place_batch_orders_rejects_live_adapter():
+    """task-1356(esc-1082 후속) — BitgetTradingMixin.place_batch_orders는
+    이전 리프에서 가드가 누락돼 있었다(레드팀 #2026-09-02-32와 동일 결함
+    클래스, test_live_guard_coverage.py가 구조적으로 재발을 막는다)."""
+    live_adapter = _make_live_adapter()
+
+    with pytest.raises(FrozenZonePaperAdapterBlockedError):
+        await live_adapter.place_batch_orders([_order()])

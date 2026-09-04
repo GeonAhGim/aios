@@ -142,6 +142,7 @@ class BitgetMarginMixin:
             update={"exchange_order_id": data["orderId"], "status": OrderStatus.SUBMITTED}
         )
 
+    @require_paper_sandbox
     async def cancel_margin_order(
         self: SignedRequestClient,
         margin_type: str,

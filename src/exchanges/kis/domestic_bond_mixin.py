@@ -20,6 +20,7 @@ from typing import Any
 
 from src.data.models.market_data import Ticker
 from src.data.models.trading import AccountBalance, Order, OrderSide, OrderStatus
+from src.exchanges.common.live_guard import require_paper_sandbox
 
 _MARKET_CODE = "B"  # 채권시장(공식 예제 확인)
 
@@ -45,6 +46,7 @@ class KISDomesticBondMixin:
             source_type="primary",
         )
 
+    @require_paper_sandbox
     async def place_bond_order(self, order: Order) -> Order:
         """`ORD_QTY2`(채권 전용 수량 필드명 — 주식의 `ORD_QTY`와 다름,
         공식 예제 확인)와 `BOND_ORD_UNPR`(채권 단가)을 쓴다."""

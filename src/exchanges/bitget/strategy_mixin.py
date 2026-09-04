@@ -60,6 +60,7 @@ class BitgetStrategyMixin:
         )
         return dict(raw["data"])
 
+    @require_paper_sandbox
     async def cancel_strategy_order(
         self: SignedRequestClient,
         order_id: str,

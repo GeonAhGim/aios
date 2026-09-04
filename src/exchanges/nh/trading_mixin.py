@@ -51,6 +51,7 @@ from src.core.exceptions import FatalExchangeError
 from src.data.models.base import AssetClass
 from src.data.models.trading import AccountBalance, Order, OrderSide, OrderStatus, OrderType
 from src.exchanges.common.http_client import NHHTTPClient
+from src.exchanges.common.live_guard import require_paper_sandbox
 
 _MARKET_CODE = "KRX"
 
@@ -90,6 +91,7 @@ def _parse_mkt_orr_no(mkt_orr_no: str) -> int:
 
 
 class NHTradingMixin:
+    @require_paper_sandbox
     async def place_order(self: NHHTTPClient, order: Order) -> Order:
         path = "/krstock/order/v1/cashBuy" if order.side == OrderSide.BUY else (
             "/krstock/order/v1/cashSell"
@@ -119,6 +121,7 @@ class NHTradingMixin:
             update={"exchange_order_id": exchange_order_id, "status": OrderStatus.SUBMITTED}
         )
 
+    @require_paper_sandbox
     async def cancel_order(self: NHHTTPClient, order_id: str) -> bool:
         """`POST /krstock/order/v1/cancel`(공식 openapi.json 확인, 모듈
         docstring 참조). `_request()`가 이미 rsp_cd 실패를 예외로 올리므로
@@ -136,6 +139,7 @@ class NHTradingMixin:
         await self._request("POST", "/krstock/order/v1/cancel", body=body)
         return True
 
+    @require_paper_sandbox
     async def modify_order(self: NHHTTPClient, order_id: str, **kwargs: Any) -> Order:
         """`POST /krstock/order/v1/modify`(공식 openapi.json 확인, 모듈
         docstring 참조). `cor_qty`/`cor_pr`가 필수 필드라 가격/수량을 모두
