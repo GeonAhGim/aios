@@ -81,7 +81,7 @@ async def pool():
 
 def _filled_adapter() -> FakeExchangeAdapter:
     return FakeExchangeAdapter(
-        closes=[Decimal("50")] * 30,
+        closes=[Decimal("50")] * 65,
         place_order_result_status=OrderStatus.FILLED,
         usdt_balance=AccountBalance(
             exchange="bitget", asset="USDT", total=Decimal("10000"), available=Decimal("10000")

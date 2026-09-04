@@ -15,13 +15,13 @@ import asyncpg
 
 from src.core.loader.risk_policy_loader import RiskPolicy
 from src.data.models.market_data import Candle
-from src.services.execution_loop.correlation import aggregate_correlated_exposure_pct
+from src.services.execution_loop.correlation_service import correlated_exposure
 from src.services.execution_loop.equity_tracker import (
     ExecutionEquityTracker,
     record_and_persist_equity,
 )
 from src.services.execution_loop.position import compute_user_positions
-from src.services.execution_loop.var_estimator import estimate_var_pct
+from src.services.execution_loop.var_estimator import estimate_portfolio_var_es
 from src.services.order_service.repository import count_recent_trades
 
 
@@ -49,19 +49,36 @@ async def assemble_account_state(
         pool, equity_tracker, execution_id, total_equity
     )
 
-    var_pct = estimate_var_pct(
-        candles, confidence=policy.var.confidence, horizon_days=policy.var.horizon_days
+    # R-29 — histories는 R-28 candle_history.py 캐시에서 받는 것이 목표
+    # 설계다(§9 R-29). tick.py는 아직 이 심볼의(전략 신호용 1분봉) candles만
+    # 넘기고 R-31/R-32(risk_inputs_assembler·tick_risk_phase 배선)가 다른
+    # 보유 종목의 일봉 히스토리까지 채워 넣기 전까지는, 여기서도 이 심볼
+    # 하나만 담은 히스토리로 제한된다 — 여러 종목 포트폴리오 VaR·타 심볼
+    # 상관은 그 리프가 완성돼야 실제 값을 낸다(그 전까지는 fail-closed로
+    # None을 반환해 조용히 통과시키지 않는다).
+    histories = {symbol: candles} if candles else {}
+
+    var_result = estimate_portfolio_var_es(
+        histories, {symbol: Decimal("1")} if candles else {}, policy.var
     )
+    var_pct = var_result.var_pct if var_result is not None else None
 
     current_price = candles[-1].close if candles else None
     current_prices = {symbol: current_price} if current_price is not None else {}
     positions = await compute_user_positions(pool, user_id, current_prices=current_prices)
-    correlated_exposure_pct = aggregate_correlated_exposure_pct(
+    raw_correlated_exposure, _max_correlation = correlated_exposure(
+        histories,
+        positions,
         symbol,
         threshold=policy.correlation_risk.threshold,
-        positions=positions,
-        total_equity=total_equity,
+        min_overlap=policy.correlation_risk.min_overlap,
     )
+    if raw_correlated_exposure is None:
+        correlated_exposure_pct: Decimal | None = None
+    elif total_equity <= 0:
+        correlated_exposure_pct = Decimal("0")
+    else:
+        correlated_exposure_pct = (raw_correlated_exposure / total_equity) * Decimal("100")
 
     async with pool.acquire() as conn:
         recent_trade_count_1h = await count_recent_trades(

@@ -127,7 +127,7 @@ async def test_entry_signal_submits_and_fills_order_advances_to_holding(pool):
     # SMA(close=50, 5기간) = 50 < 100 → 진입 조건 항상 충족.
     execution_id = await _create_execution(pool, user_id, entry_threshold=100.0)
     adapter = FakeExchangeAdapter(
-        closes=[Decimal("50")] * 30,
+        closes=[Decimal("50")] * 65,
         place_order_result_status=OrderStatus.FILLED,
         usdt_balance=AccountBalance(
             exchange="bitget", asset="USDT", total=Decimal("10000"), available=Decimal("10000")
@@ -155,7 +155,7 @@ async def test_no_signal_tick_does_nothing(pool):
     user_id = await create_test_user(pool)
     # SMA(50) < -1 은 항상 거짓 — 진입 조건 미충족.
     execution_id = await _create_execution(pool, user_id, entry_threshold=-1.0)
-    adapter = FakeExchangeAdapter(closes=[Decimal("50")] * 30)
+    adapter = FakeExchangeAdapter(closes=[Decimal("50")] * 65)
 
     await run_execution_tick(pool, adapter, execution_id, **_engines())
 
@@ -183,7 +183,7 @@ async def test_distrusted_blocks_new_entry_signal(pool, monkeypatch):
 
     user_id = await create_test_user(pool)
     execution_id = await _create_execution(pool, user_id, entry_threshold=100.0)
-    adapter = FakeExchangeAdapter(closes=[Decimal("50")] * 30)
+    adapter = FakeExchangeAdapter(closes=[Decimal("50")] * 65)
 
     await run_execution_tick(
         pool, adapter, execution_id, **_engines(), distrust_monitor=DataDistrustMonitor()
@@ -211,7 +211,7 @@ async def test_suspicious_blocks_new_entry_signal(pool, monkeypatch):
 
     user_id = await create_test_user(pool)
     execution_id = await _create_execution(pool, user_id, entry_threshold=100.0)
-    adapter = FakeExchangeAdapter(closes=[Decimal("50")] * 30)
+    adapter = FakeExchangeAdapter(closes=[Decimal("50")] * 65)
 
     await run_execution_tick(
         pool, adapter, execution_id, **_engines(), distrust_monitor=DataDistrustMonitor()
@@ -236,7 +236,7 @@ async def test_degraded_single_source_does_not_block_entry(pool, monkeypatch):
     user_id = await create_test_user(pool)
     execution_id = await _create_execution(pool, user_id, entry_threshold=100.0)
     adapter = FakeExchangeAdapter(
-        closes=[Decimal("50")] * 30,
+        closes=[Decimal("50")] * 65,
         place_order_result_status=OrderStatus.FILLED,
         usdt_balance=AccountBalance(
             exchange="bitget", asset="USDT", total=Decimal("10000"), available=Decimal("10000")
@@ -258,7 +258,7 @@ async def test_risk_rejection_leaves_fsm_state_idle_for_retry(pool):
         pool, user_id, entry_threshold=100.0, allocated_capital=Decimal("5000")
     )
     adapter = FakeExchangeAdapter(
-        closes=[Decimal("50")] * 30,
+        closes=[Decimal("50")] * 65,
         usdt_balance=AccountBalance(
             exchange="bitget", asset="USDT", total=Decimal("10000"), available=Decimal("10000")
         ),
@@ -283,7 +283,7 @@ async def test_paused_execution_is_skipped(pool):
             "WHERE id = $1",
             execution_id,
         )
-    adapter = FakeExchangeAdapter(closes=[Decimal("50")] * 30)
+    adapter = FakeExchangeAdapter(closes=[Decimal("50")] * 65)
 
     await run_execution_tick(pool, adapter, execution_id, **_engines())
 
@@ -310,7 +310,7 @@ async def test_safety_pause_mid_tick_blocks_order_submission(pool):
             return await super().get_balance(asset)
 
     adapter = _PausingAdapter(
-        closes=[Decimal("50")] * 30,
+        closes=[Decimal("50")] * 65,
         usdt_balance=AccountBalance(
             exchange="bitget", asset="USDT", total=Decimal("10000"), available=Decimal("10000")
         ),
@@ -335,7 +335,7 @@ async def test_paused_execution_still_checks_pending_order_fill(pool):
 
     # 1틱: 주문 제출 직후 아직 미체결(SUBMITTED) → fsm_state=BUY_ORDER_PENDING.
     submit_adapter = FakeExchangeAdapter(
-        closes=[Decimal("50")] * 30,
+        closes=[Decimal("50")] * 65,
         place_order_result_status=OrderStatus.SUBMITTED,
         usdt_balance=AccountBalance(
             exchange="bitget", asset="USDT", total=Decimal("10000"), available=Decimal("10000")
@@ -416,7 +416,7 @@ async def test_concurrent_tick_race_only_submits_one_order(pool):
             return await super().get_balance(asset)
 
     adapter = _RacingAdapter(
-        closes=[Decimal("50")] * 30,
+        closes=[Decimal("50")] * 65,
         usdt_balance=AccountBalance(
             exchange="bitget", asset="USDT", total=Decimal("10000"), available=Decimal("10000")
         ),
@@ -467,7 +467,7 @@ async def test_cancelled_order_reverts_fsm_state_instead_of_getting_stuck(pool):
             execution_id,
         )
 
-    adapter = FakeExchangeAdapter(closes=[Decimal("50")] * 30)
+    adapter = FakeExchangeAdapter(closes=[Decimal("50")] * 65)
     await run_execution_tick(pool, adapter, execution_id, **_engines())
 
     async with pool.acquire() as conn:
@@ -490,7 +490,7 @@ async def test_equity_baseline_persists_and_survives_simulated_restart(pool):
         pool, user_id, entry_threshold=100.0, allocated_capital=Decimal("5000")
     )
     first_tick_adapter = FakeExchangeAdapter(
-        closes=[Decimal("50")] * 30,
+        closes=[Decimal("50")] * 65,
         usdt_balance=AccountBalance(
             exchange="bitget", asset="USDT", total=Decimal("10000"), available=Decimal("10000")
         ),
@@ -515,7 +515,7 @@ async def test_equity_baseline_persists_and_survives_simulated_restart(pool):
     # 그대로 이어받는다 — 그래야 오늘 이미 나던 손실이 재시작으로
     # 사라지지 않는다.
     second_tick_adapter = FakeExchangeAdapter(
-        closes=[Decimal("50")] * 30,
+        closes=[Decimal("50")] * 65,
         usdt_balance=AccountBalance(
             exchange="bitget", asset="USDT", total=Decimal("9000"), available=Decimal("9000")
         ),
