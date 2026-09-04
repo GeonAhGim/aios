@@ -14,6 +14,7 @@ import asyncpg
 from fastapi import APIRouter, Depends, status
 from pydantic import BaseModel
 
+from src.api.contracts.envelope import ApiResponse, ok
 from src.api.deps import get_pool
 from src.api.foundation_deps import get_membership_repository, get_tenant_context
 from src.foundation.trust.application.grant_membership import grant_membership
@@ -57,11 +58,11 @@ async def post_grant_membership(
     context: TenantContext = Depends(get_tenant_context),
     membership_repo: MembershipRepository = Depends(get_membership_repository),
     pool: asyncpg.Pool = Depends(get_pool),
-) -> MembershipResponse:
+) -> ApiResponse[MembershipResponse]:
     membership = await grant_membership(
         membership_repo, pool, context, subject_id=body.subject_id, role=body.role
     )
-    return _to_response(membership)
+    return ok(_to_response(membership))
 
 
 @router.post("/memberships/{subject_id}:suspend")
@@ -70,9 +71,9 @@ async def post_suspend_membership(
     context: TenantContext = Depends(get_tenant_context),
     membership_repo: MembershipRepository = Depends(get_membership_repository),
     pool: asyncpg.Pool = Depends(get_pool),
-) -> MembershipResponse:
+) -> ApiResponse[MembershipResponse]:
     membership = await suspend_membership(membership_repo, pool, context, subject_id=subject_id)
-    return _to_response(membership)
+    return ok(_to_response(membership))
 
 
 @router.post("/memberships/{subject_id}:revoke")
@@ -81,6 +82,6 @@ async def post_revoke_membership(
     context: TenantContext = Depends(get_tenant_context),
     membership_repo: MembershipRepository = Depends(get_membership_repository),
     pool: asyncpg.Pool = Depends(get_pool),
-) -> MembershipResponse:
+) -> ApiResponse[MembershipResponse]:
     membership = await revoke_membership(membership_repo, pool, context, subject_id=subject_id)
-    return _to_response(membership)
+    return ok(_to_response(membership))
