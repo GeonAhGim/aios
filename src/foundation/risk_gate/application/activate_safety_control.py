@@ -19,11 +19,30 @@ GLOBAL/PROVIDER/TENANT는 운영자 권한이 필요하고, ACCOUNT(자기 자�
 `c7d4e1a9f052_foundation_risk_gate.py` 마이그레이션 주석 참조) —
 기존 실행-레벨 킬스위치(레드팀 #08 대상, execution_loop 쪽)와는 별개
 시스템이다.
+
+R-40(task-1353) — `trace_id`와 `on_activated` 훅 추가. `trace_id`는 키워드
+전용 옵션(기본 `None`)이라 기존 호출부(라우터, reconciliation,
+test_risk_gate_lifecycle.py 등 trace_id를 모르는 곳)는 그대로 동작한다 —
+값을 주지 않으면 이전과 동일하게 `record_command_event`가 앰비언트
+`current_request_context()`에서 trace_id를 가져간다. 값을 주면(주로
+백그라운드 워커처럼 HTTP 요청 컨텍스트가 없는 호출자) 그 값으로 컨텍스트를
+잠깐 덮어써 이 커맨드가 만드는 감사 이벤트가 호출자가 지정한 trace_id를
+갖게 한다.
+
+`on_activated`는 (control+fence+audit) 트랜잭션이 전부 끝난 뒤 호출되는
+fan-out 훅이다(§5 "트랜잭션 경계") — 이 모듈은 `services/safety/` 계층을
+import하지 않는다(응용 계층 → 서비스 계층 역방향 의존 금지, 71번 §4와 동일
+원칙). 실제 fan-out(legacy pause/paper_control/sweeper) 오케스트레이션은
+`KillSwitchService`(services/safety/kill_switch_service.py)가 이 훅을 통해
+주입한다.
 """
 from __future__ import annotations
 
+from collections.abc import Awaitable, Callable
+from contextlib import nullcontext
 from uuid import UUID
 
+from src.core.observability.context import bind
 from src.foundation.evidence.application.record_command_event import record_command_event
 from src.foundation.evidence.contracts.v1 import Classification as AuditClassification
 from src.foundation.evidence.ports.repository import AuditEventRepository
@@ -79,7 +98,9 @@ async def activate_safety_control(
     scope: SafetyScope,
     scope_ref: str | None,
     reason: str,
+    trace_id: UUID | None = None,
     audit_repo: AuditEventRepository | None = None,
+    on_activated: Callable[[SafetyControlView], Awaitable[None]] | None = None,
 ) -> SafetyControlView:
     if scope == SafetyScope.GLOBAL:
         resolved_ref = GLOBAL_SCOPE_REF
@@ -102,35 +123,41 @@ async def activate_safety_control(
                 "본인 계좌 외의 범위는 지정할 수 없습니다."
             )
 
-    control = await repo.insert_safety_control(
-        scope=scope, scope_ref=resolved_ref, reason=reason, actor_subject_id=actor_subject_id
-    )
-
-    # 레드팀 #2026-09-02-26 — 캐시 TTL(10초) 만료를 기다리지 않고 이 통제가
-    # 즉시 반영되도록 무효화한다.
-    if scope in SYSTEM_WIDE_SCOPES:
-        await repo.invalidate_evaluations(tenant_id=None)
-    elif scope in (SafetyScope.TENANT, SafetyScope.ACCOUNT):
-        await repo.invalidate_evaluations(tenant_id=UUID(resolved_ref))
-    # STRATEGY_DEPLOYMENT: 이 범위를 조회하는 평가 경로 자체가 아직 없어
-    # (#2026-09-02-28) 무효화할 캐시도 없다 — 의도적으로 건너뜀.
-
-    if audit_repo is not None:
-        # GLOBAL/PROVIDER/STRATEGY_DEPLOYMENT는 특정 tenant 하나에 귀속되지
-        # 않는다(79번 §1 "tenant_id가 None이면 system 이벤트") — TENANT/
-        # ACCOUNT만 resolved_ref 자체가 대상 tenant_id다.
-        event_tenant_id = (
-            UUID(resolved_ref) if scope in (SafetyScope.TENANT, SafetyScope.ACCOUNT) else None
-        )
-        await record_command_event(
-            audit_repo,
-            tenant_id=event_tenant_id,
-            aggregate_type="safety_control",
-            aggregate_id=control.id,
-            action="safety_control_activated",
-            actor_subject_id=actor_subject_id,
-            classification=AuditClassification.CONFIDENTIAL,
-            payload={"scope": scope.value, "scope_ref": resolved_ref, "reason": reason},
+    with bind(trace_id=trace_id) if trace_id is not None else nullcontext():
+        control = await repo.insert_safety_control(
+            scope=scope, scope_ref=resolved_ref, reason=reason, actor_subject_id=actor_subject_id
         )
 
-    return control_to_view(control)
+        # 레드팀 #2026-09-02-26 — 캐시 TTL(10초) 만료를 기다리지 않고 이 통제가
+        # 즉시 반영되도록 무효화한다.
+        if scope in SYSTEM_WIDE_SCOPES:
+            await repo.invalidate_evaluations(tenant_id=None)
+        elif scope in (SafetyScope.TENANT, SafetyScope.ACCOUNT):
+            await repo.invalidate_evaluations(tenant_id=UUID(resolved_ref))
+        # STRATEGY_DEPLOYMENT: 이 범위를 조회하는 평가 경로 자체가 아직 없어
+        # (#2026-09-02-28) 무효화할 캐시도 없다 — 의도적으로 건너뜀.
+
+        if audit_repo is not None:
+            # GLOBAL/PROVIDER/STRATEGY_DEPLOYMENT는 특정 tenant 하나에 귀속되지
+            # 않는다(79번 §1 "tenant_id가 None이면 system 이벤트") — TENANT/
+            # ACCOUNT만 resolved_ref 자체가 대상 tenant_id다.
+            event_tenant_id = (
+                UUID(resolved_ref) if scope in (SafetyScope.TENANT, SafetyScope.ACCOUNT) else None
+            )
+            await record_command_event(
+                audit_repo,
+                tenant_id=event_tenant_id,
+                aggregate_type="safety_control",
+                aggregate_id=control.id,
+                action="safety_control_activated",
+                actor_subject_id=actor_subject_id,
+                classification=AuditClassification.CONFIDENTIAL,
+                payload={"scope": scope.value, "scope_ref": resolved_ref, "reason": reason},
+            )
+
+        view = control_to_view(control)
+
+    if on_activated is not None:
+        await on_activated(view)
+
+    return view
