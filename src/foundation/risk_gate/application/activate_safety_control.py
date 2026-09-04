@@ -66,6 +66,7 @@ def control_to_view(control: SafetyControl) -> SafetyControlView:
         fence_token=control.fence_token,
         created_at=control.created_at,
         deactivated_at=control.deactivated_at,
+        idempotency_digest=control.idempotency_digest,
     )
 
 

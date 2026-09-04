@@ -28,8 +28,14 @@ class RiskOutcome(str, Enum):
 
 
 class GateKind(str, Enum):
+    """L4_risk_and_safety_v1.0.md §3.1/§6(`f4b9d6e5a7c8`) 6종 그대로."""
+
     DEPLOYMENT = "DEPLOYMENT"
     PRE_INTENT = "PRE_INTENT"
+    PRE_TRADE = "PRE_TRADE"
+    PRE_SUBMIT = "PRE_SUBMIT"
+    INTRADAY = "INTRADAY"
+    RECOVERY = "RECOVERY"
 
 
 class SafetyScope(str, Enum):
@@ -60,6 +66,7 @@ class RiskEvaluationView(BaseModel):
     rule_version: str
     evaluated_at: datetime
     expires_at: datetime | None
+    trace_id: UUID | None = None
     schema_version: str = SCHEMA_VERSION
 
 
@@ -78,4 +85,5 @@ class SafetyControlView(BaseModel):
     fence_token: int
     created_at: datetime | None
     deactivated_at: datetime | None
+    idempotency_digest: str | None = None
     schema_version: str = SCHEMA_VERSION

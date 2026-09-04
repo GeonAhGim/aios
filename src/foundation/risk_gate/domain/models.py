@@ -21,13 +21,19 @@ class RiskOutcome(str, Enum):
 
 
 class GateKind(str, Enum):
-    """48번 §3 5개 게이트 중 이 리프가 구현하는 두 개(71번 FND-06 최소
-    산출물 "deployment/pre-intent checks"). pre-submit/intraday/recovery
-    게이트는 실제 주문 제출 경로(FND-07/order adapter, 아직 없음)가 있어야
-    의미가 있어 이 리프 스콥 밖이다."""
+    """L4_risk_and_safety_v1.0.md §3.1/§3.8/§6(`f4b9d6e5a7c8`) 6종 그대로 —
+    임의 추가·개명 금지. `evaluate_risk_gate.py`(이 리프)는 여전히
+    DEPLOYMENT/PRE_INTENT만 실제로 평가한다(71번 FND-06 최소 산출물).
+    PRE_TRADE/PRE_SUBMIT/INTRADAY/RECOVERY는 후속 리프(R-32/R-35/R-38/R-39)가
+    같은 `risk_evaluation.gate_kind` CHECK·이 enum을 재사용할 자리만
+    미리 넓혀둔 것이다."""
 
     DEPLOYMENT = "DEPLOYMENT"
     PRE_INTENT = "PRE_INTENT"
+    PRE_TRADE = "PRE_TRADE"
+    PRE_SUBMIT = "PRE_SUBMIT"
+    INTRADAY = "INTRADAY"
+    RECOVERY = "RECOVERY"
 
 
 class SafetyScope(str, Enum):
@@ -66,6 +72,10 @@ class SafetyControl:
     fence_token: int
     created_at: datetime | None = None
     deactivated_at: datetime | None = None
+    idempotency_digest: str | None = None
+    """§5 요청 `Idempotency-Key` → `sha256(scope,ref,reason,actor)` 24h 자리
+    (`f4b9d6e5a7c8`). 계산·조회는 이 리프 스콥 밖 — 채우는 호출자가 아직
+    없어 항상 `None`이다."""
 
 
 @dataclass(frozen=True)
@@ -80,6 +90,9 @@ class RiskEvaluation:
     rule_version: str
     evaluated_at: datetime
     expires_at: datetime | None
+    trace_id: UUID | None = None
+    """PLT-01 관측 컨텍스트의 trace_id(`f4b9d6e5a7c8`). 기존 행은 NULL —
+    `evaluate_risk_gate.py`가 만드는 신규 행은 항상 채운다."""
 
 
 @dataclass(frozen=True)

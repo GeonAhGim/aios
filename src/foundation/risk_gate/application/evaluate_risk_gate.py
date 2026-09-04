@@ -13,6 +13,7 @@ from __future__ import annotations
 from datetime import datetime, timedelta, timezone
 from uuid import UUID, uuid4
 
+from src.core.observability.context import current as current_request_context
 from src.foundation.connections.ports.repository import ConnectionRepository
 from src.foundation.mandates.application.evaluate_policy import NoActiveMandateError
 from src.foundation.mandates.application.evaluate_policy import evaluate as evaluate_mandate_policy
@@ -52,6 +53,7 @@ def _evaluation_to_view(evaluation: RiskEvaluation) -> RiskEvaluationView:
         rule_version=evaluation.rule_version,
         evaluated_at=evaluation.evaluated_at,
         expires_at=evaluation.expires_at,
+        trace_id=evaluation.trace_id,
     )
 
 
@@ -115,6 +117,11 @@ async def evaluate_risk_gate(
     )
 
     now = datetime.now(timezone.utc)
+    # PLT-01 §3.1 — 신규 평가 행은 항상 현재 요청/시스템 컨텍스트의 trace_id를
+    # 찍는다(f4b9d6e5a7c8, §3.8 추적). 컨텍스트가 바인딩된 적 없어도
+    # `current()`는 fail-open 폴백값을 반환하므로 여기서 None으로 뭉개지
+    # 않는다 — fail-closed 판단(입력 결손 시 DENY 등)은 이미 위에서 끝났다.
+    trace_id = current_request_context().trace_id
     evaluation = await repo.insert_evaluation(
         RiskEvaluation(
             id=uuid4(),
@@ -127,6 +134,7 @@ async def evaluate_risk_gate(
             rule_version=RULE_VERSION,
             evaluated_at=now,
             expires_at=now + timedelta(seconds=EVALUATION_CACHE_TTL_SECONDS),
+            trace_id=trace_id,
         )
     )
     return _evaluation_to_view(evaluation)

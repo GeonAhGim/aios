@@ -38,6 +38,7 @@ def _row_to_control(row: asyncpg.Record) -> SafetyControl:
         fence_token=row["fence_token"],
         created_at=row["created_at"],
         deactivated_at=row["deactivated_at"],
+        idempotency_digest=row["idempotency_digest"],
     )
 
 
@@ -53,6 +54,7 @@ def _row_to_evaluation(row: asyncpg.Record) -> RiskEvaluation:
         rule_version=row["rule_version"],
         evaluated_at=row["evaluated_at"],
         expires_at=row["expires_at"],
+        trace_id=row["trace_id"],
     )
 
 
@@ -154,8 +156,8 @@ class PostgresRiskGateRepository:
             row = await conn.fetchrow(
                 "INSERT INTO risk_evaluation "
                 "(tenant_id, gate_kind, subject_fingerprint, outcome, reason_codes, "
-                " obligations, rule_version, expires_at) "
-                "VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING *",
+                " obligations, rule_version, expires_at, trace_id) "
+                "VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING *",
                 evaluation.tenant_id,
                 evaluation.gate_kind.value,
                 evaluation.subject_fingerprint,
@@ -164,6 +166,7 @@ class PostgresRiskGateRepository:
                 list(evaluation.obligations),
                 evaluation.rule_version,
                 evaluation.expires_at,
+                evaluation.trace_id,
             )
         return _row_to_evaluation(row)
 
