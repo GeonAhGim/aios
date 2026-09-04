@@ -6,11 +6,48 @@ import { BadRequestNotice } from "./BadRequestNotice";
 afterEach(() => cleanup());
 
 describe("BadRequestNotice", () => {
-  it("VALIDATION_INVALID_FIELD(400): 폼 인라인이 담당하므로 배너를 렌더링하지 않는다", () => {
+  it("VALIDATION_INVALID_FIELD(400) + details.fields 1건 이상: 폼 인라인이 담당하므로 배너를 렌더링하지 않는다", () => {
     const { container } = render(
-      <BadRequestNotice error={{ statusCode: 400, errorCode: "VALIDATION_INVALID_FIELD" }} />,
+      <BadRequestNotice
+        error={{
+          statusCode: 400,
+          errorCode: "VALIDATION_INVALID_FIELD",
+          error_code: "VALIDATION_INVALID_FIELD",
+          details: { fields: ["body.email"] },
+          message: "입력값을 확인해주세요.",
+        }}
+      />,
     );
     expect(container).toBeEmptyDOMElement();
+  });
+
+  it("VALIDATION_INVALID_FIELD(400) + details.fields 비어있음 + message 있음: 서버 message를 배너로 보여준다(P0 무응답 회귀 방지)", () => {
+    render(
+      <BadRequestNotice
+        error={{
+          statusCode: 400,
+          errorCode: "VALIDATION_INVALID_FIELD",
+          error_code: "VALIDATION_INVALID_FIELD",
+          details: { fields: [] },
+          message: "잔고가 부족합니다.",
+        }}
+      />,
+    );
+    expect(screen.getByText("잔고가 부족합니다.")).toBeInTheDocument();
+  });
+
+  it("VALIDATION_INVALID_FIELD(400) + details.fields 비어있음 + message 없음: taxonomy 기본 문구로 폴백한다", () => {
+    render(
+      <BadRequestNotice
+        error={{
+          statusCode: 400,
+          errorCode: "VALIDATION_INVALID_FIELD",
+          error_code: "VALIDATION_INVALID_FIELD",
+          details: {},
+        }}
+      />,
+    );
+    expect(screen.getByText("입력값을 확인해주세요.")).toBeInTheDocument();
   });
 
   it("VALIDATION_IDEMPOTENCY_KEY_REQUIRED(400): 안내만 보여주고 액션 버튼은 없다", () => {
