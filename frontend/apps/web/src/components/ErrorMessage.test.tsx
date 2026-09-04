@@ -71,6 +71,15 @@ describe("ErrorMessage", () => {
     expect(screen.getByText("입력값을 확인해주세요.")).toBeInTheDocument();
   });
 
+  it("담당 에러코드인데 message/traceId/fieldErrors가 모두 비어 있어도 배너 자체는 렌더된다(무응답 아님, task-1231)", () => {
+    const { container } = render(
+      <ErrorMessage errorCode="AUTH_TOKEN_EXPIRED" fieldErrors={{}} />,
+    );
+
+    expect(container).not.toBeEmptyDOMElement();
+    expect(screen.getByText("세션이 만료되었습니다. 다시 로그인해주세요.")).toBeInTheDocument();
+  });
+
   it("RATE_LIMIT_EXCEEDED이고 retryAfterSec이 있으면 카운트다운 후 재시도 버튼이 활성화된다", () => {
     vi.useFakeTimers();
     try {

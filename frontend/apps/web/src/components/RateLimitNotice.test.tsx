@@ -111,6 +111,44 @@ describe("RateLimitNotice", () => {
     expect(screen.queryByText(/자동으로 다시 시도합니다/)).not.toBeInTheDocument();
   });
 
+  it("담당 에러(429)인데 서버 message/details가 비어 있어도 고정 안내 문구를 그대로 보여준다(무응답 아님, task-1231)", async () => {
+    vi.useFakeTimers();
+    const onSettled = vi.fn();
+
+    function EmptyPayloadHarness() {
+      const { run } = useRetryableAction<string>();
+      const calls = useRef(0);
+
+      return (
+        <>
+          <RateLimitNotice />
+          <button
+            onClick={() => {
+              void run(async () => {
+                calls.current += 1;
+                if (calls.current === 1) {
+                  throw new ApiError(429, "", undefined, "RATE_LIMIT_EXCEEDED", 3);
+                }
+                onSettled(calls.current);
+                return "ok";
+              });
+            }}
+          >
+            실행
+          </button>
+        </>
+      );
+    }
+
+    render(<EmptyPayloadHarness />);
+    fireEvent.click(screen.getByRole("button", { name: "실행" }));
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0);
+    });
+
+    expect(screen.getByText("요청이 너무 많습니다. 잠시 후 다시 시도해주세요.")).toBeInTheDocument();
+  });
+
   it("429가 백오프 상한(3회)까지 반복되면 배너가 사라지고 재시도가 실패로 끝난다", async () => {
     vi.useFakeTimers();
     const onRejected = vi.fn();

@@ -48,6 +48,19 @@ describe("DenialReasons", () => {
     expect(screen.queryByRole("list")).not.toBeInTheDocument();
   });
 
+  it("negative: 담당 접두(POLICY_/RISK_/AUTHZ_)인데 details.reason_codes가 빈 배열이면 아무것도 렌더링하지 않는다(task-1231: ForbiddenNotice가 메인 문구를 이미 담당하므로 by-design)", () => {
+    render(
+      <DenialReasons
+        error={{
+          error_code: "POLICY_LIVE_BLOCKED",
+          details: { reason_codes: [] },
+        }}
+      />,
+    );
+
+    expect(screen.queryByRole("list")).not.toBeInTheDocument();
+  });
+
   it("negative: POLICY_/RISK_/AUTHZ_ 접두가 아닌 error_code는 아무것도 렌더링하지 않는다", () => {
     render(
       <DenialReasons

@@ -48,6 +48,13 @@ describe("NotFoundState", () => {
     expect(container.querySelectorAll("button, a").length).toBe(0);
   });
 
+  it("title이 빈 문자열이어도(error 객체를 직접 받지 않으므로 자체 분류로 삼키지 않는다) 컨테이너는 렌더된다(무응답 아님, task-1231)", () => {
+    const { container } = render(<NotFoundState title="" />);
+
+    expect(container).not.toBeEmptyDOMElement();
+    expect(container.querySelector("p")).toBeInTheDocument();
+  });
+
   it("재시도 버튼을 두지 않는다 (§3.3 RESOURCE_NOT_FOUND는 재시도 아니오)", () => {
     render(<NotFoundState title="찾을 수 없습니다" action={<button type="button">뒤로가기</button>} />);
 

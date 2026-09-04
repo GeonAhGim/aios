@@ -64,6 +64,25 @@ describe("ForbiddenNotice", () => {
     expect(screen.queryByRole("button")).not.toBeInTheDocument();
   });
 
+  it("담당 에러(403)인데 errorCode/message가 모두 없어도 기본 안내 문구로 폴백한다(무응답 아님, task-1231)", () => {
+    render(<ForbiddenNotice error={{ statusCode: 403 }} />);
+
+    expect(
+      screen.getByText("요청을 처리할 수 없습니다. 잠시 후 다시 시도해주세요."),
+    ).toBeInTheDocument();
+  });
+
+  it("POLICY_*인데 details.reason_codes가 비어있어도 DenialReasons만 비고 메인 배너 문구는 그대로 보여준다(무응답 아님, task-1231)", () => {
+    render(
+      <ForbiddenNotice
+        error={{ statusCode: 403, errorCode: "POLICY_LIVE_BLOCKED", details: { reason_codes: [] } }}
+      />,
+    );
+
+    expect(screen.getByText("실거래 모드에서는 허용되지 않는 작업입니다.")).toBeInTheDocument();
+    expect(screen.queryByRole("list")).not.toBeInTheDocument();
+  });
+
   it("negative: 401/404 등 403이 아니면 아무것도 렌더링하지 않는다", () => {
     const { container: unauthorized } = render(
       <ForbiddenNotice error={{ statusCode: 401, errorCode: "AUTH_REQUIRED" }} />,
