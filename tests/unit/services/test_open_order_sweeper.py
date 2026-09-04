@@ -146,7 +146,11 @@ async def test_global_scope_requests_cancel_across_tenants(pool):
     )
 
     assert set(report.cancel_requested) >= {order_a, order_b}
-    assert report.adapter_failed == ()
+    # GLOBAL scope는 조건이 TRUE라 공유 테스트 DB의 다른 테스트/이전 실행이
+    # 남긴 미매핑 거래소 주문까지 함께 쓸어간다(재현 확인됨) — 이 리프가
+    # 통제하지 못하는 전역 상태를 단언하지 않고, 이 테스트가 만든 두 주문만
+    # 실패하지 않았는지 확인한다.
+    assert not {order_a, order_b} & set(report.adapter_failed)
     assert await _status_of(pool, order_a) == "CANCEL_REQUESTED"
     assert await _status_of(pool, order_b) == "CANCEL_REQUESTED"
 

@@ -158,7 +158,10 @@ async def test_fields_filled_or_none_not_defaulted(pool):
     관측할 수 없는 필드는 0/False로 뭉개지 않고 명시적 None을 반환한다."""
     user_id = await create_test_user(pool)
     execution_id = await _create_execution(pool, user_id)
-    symbol = "BTC/USDT"
+    # 유일 심볼 — 공유 테스트 DB에서 실제 check_and_persist_distrust를 타는
+    # test_execution_tick.py가 bitget+BTC/USDT에 진짜 data_distrust_state
+    # 행을 남기면 아래 None 단언이 실행 순서에 따라 깨진다(재현 확인됨).
+    symbol = f"FIELDS-{uuid.uuid4().hex[:8]}/USDT"
     caches = _caches()
     balances = [AccountBalance(exchange="bitget", asset="USDT", total=Decimal("1000"),
                                 available=Decimal("900"))]
