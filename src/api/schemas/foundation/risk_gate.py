@@ -19,6 +19,7 @@ from src.foundation.risk_gate.contracts.v1 import (
 
 __all__ = [
     "ActivateSafetyControlRequest",
+    "ApproveRuleBundleRequest",
     "EvaluateRiskGateRequest",
     "GateKind",
     "RiskEvaluationView",
@@ -33,3 +34,7 @@ __all__ = [
 class SafetyControlListResponse(BaseModel):
     controls: list[SafetyControlView]
     as_of: datetime
+
+
+class ApproveRuleBundleRequest(BaseModel):
+    approval_ref: str

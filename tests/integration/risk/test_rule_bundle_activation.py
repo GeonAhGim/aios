@@ -1,16 +1,18 @@
-"""R-22 `risk_rule_bundle` 통합테스트 — partial unique·WORM 컬럼·conditional
-전이. 실 DB(`TEST_DATABASE_URL`) 대상.
+"""R-22/R-23 `risk_rule_bundle` 통합테스트 — partial unique·WORM 컬럼·
+conditional 전이(R-22) + 승인/활성화 커맨드(R-23). 실 DB(`TEST_DATABASE_URL`)
+대상.
 
-Spec: docs/specs/L4_risk_and_safety_v1.0.md §9 R-22.
-DoD: scope당 ACTIVE 2개는 partial unique로 거부(동시 activate 경합으로
+Spec: docs/specs/L4_risk_and_safety_v1.0.md §9 R-22/R-23.
+DoD(R-22): scope당 ACTIVE 2개는 partial unique로 거부(동시 activate 경합으로
 실증), rule_hash/policy_snapshot WORM(소유자 우회 포함), transition()의
 expected_state 불일치는 실패로 드러남, 교차 scope 조회는 0건.
+DoD(R-23): 승인자=작성자 거부, approval_ref 필수, 감사 이벤트.
 """
 from __future__ import annotations
 
 import asyncio
 from pathlib import Path
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import asyncpg
 import pytest
@@ -18,8 +20,17 @@ from dotenv import dotenv_values
 
 from src.core.db.conditional_write import ConcurrencyConflictError
 from src.core.risk.policy_bundle import BundleState, RiskRuleBundle
+from src.foundation.evidence.adapters.postgres_repository import PostgresAuditEventRepository
 from src.foundation.risk_gate.adapters.postgres_bundle_repository import (
     PostgresBundleRepository,
+)
+from src.foundation.risk_gate.application.activate_rule_bundle import (
+    MissingApprovalRefError,
+    RuleBundleNotFoundError,
+    SelfApprovalError,
+    UnauthorizedRuleBundleActorError,
+    activate_rule_bundle,
+    approve_rule_bundle,
 )
 
 
@@ -40,6 +51,11 @@ async def pool():
 @pytest.fixture
 def repo(pool):
     return PostgresBundleRepository(pool)
+
+
+@pytest.fixture
+def audit_repo(pool):
+    return PostgresAuditEventRepository(pool)
 
 
 def _scope(prefix: str = "S") -> str:
@@ -208,3 +224,175 @@ async def test_worm_trigger_allows_state_transition_unrelated_columns(repo, pool
     )
     assert activated.state == BundleState.ACTIVE
     assert activated.rule_hash == draft.rule_hash
+
+
+# --- R-23 approve_rule_bundle / activate_rule_bundle ---
+
+
+async def _count_audit_rows(pool, aggregate_id: UUID) -> int:
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            "SELECT COUNT(*) AS n FROM foundation_audit_event WHERE aggregate_id = $1",
+            aggregate_id,
+        )
+    return int(row["n"])
+
+
+async def test_approve_rule_bundle_rejects_non_risk_officer(repo, audit_repo):
+    draft = await repo.insert_draft(_draft(scope=_scope(), version="v1"))
+    with pytest.raises(UnauthorizedRuleBundleActorError):
+        await approve_rule_bundle(
+            repo,
+            audit_repo,
+            bundle_id=draft.id,
+            approver_subject_id=uuid4(),
+            approval_ref="adr-1",
+            actor_is_risk_officer=False,
+        )
+    assert await _count_audit_rows(repo._pool, draft.id) == 0
+    unchanged = await repo.get_by_id(draft.id)
+    assert unchanged.state == BundleState.DRAFT
+
+
+async def test_approve_rule_bundle_rejects_missing_approval_ref(repo, audit_repo):
+    draft = await repo.insert_draft(_draft(scope=_scope(), version="v1"))
+    with pytest.raises(MissingApprovalRefError):
+        await approve_rule_bundle(
+            repo,
+            audit_repo,
+            bundle_id=draft.id,
+            approver_subject_id=uuid4(),
+            approval_ref="",
+            actor_is_risk_officer=True,
+        )
+    assert await _count_audit_rows(repo._pool, draft.id) == 0
+
+
+async def test_approve_rule_bundle_rejects_self_approval(repo, audit_repo):
+    """4-eyes 원칙 — 작성자 본인은 자기 번들을 승인할 수 없다."""
+    draft = await repo.insert_draft(_draft(scope=_scope(), version="v1"))
+    with pytest.raises(SelfApprovalError):
+        await approve_rule_bundle(
+            repo,
+            audit_repo,
+            bundle_id=draft.id,
+            approver_subject_id=draft.created_by,
+            approval_ref="adr-1",
+            actor_is_risk_officer=True,
+        )
+    unchanged = await repo.get_by_id(draft.id)
+    assert unchanged.state == BundleState.DRAFT
+    assert await _count_audit_rows(repo._pool, draft.id) == 0
+
+
+async def test_approve_rule_bundle_raises_not_found(repo, audit_repo):
+    with pytest.raises(RuleBundleNotFoundError):
+        await approve_rule_bundle(
+            repo,
+            audit_repo,
+            bundle_id=uuid4(),
+            approver_subject_id=uuid4(),
+            approval_ref="adr-1",
+            actor_is_risk_officer=True,
+        )
+
+
+async def test_approve_rule_bundle_success_transitions_and_audits_once(repo, audit_repo):
+    draft = await repo.insert_draft(_draft(scope=_scope(), version="v1"))
+    approver = uuid4()
+    approved = await approve_rule_bundle(
+        repo,
+        audit_repo,
+        bundle_id=draft.id,
+        approver_subject_id=approver,
+        approval_ref="adr-42",
+        actor_is_risk_officer=True,
+    )
+    assert approved.state == BundleState.APPROVED
+    assert approved.approved_by == approver
+    assert approved.approval_ref == "adr-42"
+    assert await _count_audit_rows(repo._pool, draft.id) == 1
+
+
+async def test_approve_rule_bundle_wrong_expected_state_raises_concurrency_conflict(
+    repo, audit_repo
+):
+    draft = await repo.insert_draft(_draft(scope=_scope(), version="v1"))
+    await approve_rule_bundle(
+        repo,
+        audit_repo,
+        bundle_id=draft.id,
+        approver_subject_id=uuid4(),
+        approval_ref="adr-1",
+        actor_is_risk_officer=True,
+    )
+    # 이미 APPROVED — 다시 approve하면 expected_state=DRAFT 불일치로 거부된다.
+    with pytest.raises(ConcurrencyConflictError):
+        await approve_rule_bundle(
+            repo,
+            audit_repo,
+            bundle_id=draft.id,
+            approver_subject_id=uuid4(),
+            approval_ref="adr-2",
+            actor_is_risk_officer=True,
+        )
+
+
+async def test_activate_rule_bundle_rejects_non_risk_officer(repo, audit_repo):
+    draft = await repo.insert_draft(_draft(scope=_scope(), version="v1"))
+    approved = await approve_rule_bundle(
+        repo,
+        audit_repo,
+        bundle_id=draft.id,
+        approver_subject_id=uuid4(),
+        approval_ref="adr-1",
+        actor_is_risk_officer=True,
+    )
+    with pytest.raises(UnauthorizedRuleBundleActorError):
+        await activate_rule_bundle(
+            repo,
+            audit_repo,
+            bundle_id=approved.id,
+            actor_subject_id=uuid4(),
+            actor_is_risk_officer=False,
+        )
+    unchanged = await repo.get_by_id(approved.id)
+    assert unchanged.state == BundleState.APPROVED
+
+
+async def test_activate_rule_bundle_success_sets_active_and_audits(repo, audit_repo):
+    scope = _scope()
+    draft = await repo.insert_draft(_draft(scope=scope, version="v1"))
+    approved = await approve_rule_bundle(
+        repo,
+        audit_repo,
+        bundle_id=draft.id,
+        approver_subject_id=uuid4(),
+        approval_ref="adr-1",
+        actor_is_risk_officer=True,
+    )
+    activated = await activate_rule_bundle(
+        repo,
+        audit_repo,
+        bundle_id=approved.id,
+        actor_subject_id=uuid4(),
+        actor_is_risk_officer=True,
+    )
+    assert activated.state == BundleState.ACTIVE
+    assert activated.activated_at is not None
+    assert activated.effective_from is not None
+    # approve 1건 + activate 1건.
+    assert await _count_audit_rows(repo._pool, draft.id) == 2
+    assert (await repo.get_active(scope)).id == draft.id
+
+
+async def test_activate_rule_bundle_from_draft_raises_concurrency_conflict(repo, audit_repo):
+    draft = await repo.insert_draft(_draft(scope=_scope(), version="v1"))
+    with pytest.raises(ConcurrencyConflictError):
+        await activate_rule_bundle(
+            repo,
+            audit_repo,
+            bundle_id=draft.id,
+            actor_subject_id=uuid4(),
+            actor_is_risk_officer=True,
+        )

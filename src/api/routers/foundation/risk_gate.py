@@ -22,14 +22,17 @@ from src.api.foundation_deps import (
     get_mandate_repository,
     get_paper_control_repository,
     get_risk_gate_repository,
+    get_rule_bundle_repository,
 )
 from src.api.schemas.foundation.risk_gate import (
     ActivateSafetyControlRequest,
+    ApproveRuleBundleRequest,
     EvaluateRiskGateRequest,
     RiskEvaluationView,
     SafetyControlListResponse,
     SafetyControlView,
 )
+from src.core.risk.policy_bundle import RiskRuleBundle
 from src.foundation.connections.ports.repository import ConnectionRepository
 from src.foundation.evidence.ports.repository import AuditEventRepository
 from src.foundation.mandates.ports.repository import MandateRepository
@@ -37,13 +40,17 @@ from src.foundation.paper_control.application.apply_safety_control import (
     apply_safety_control_to_deployments,
 )
 from src.foundation.paper_control.ports.repository import PaperControlRepository
+from src.foundation.risk_gate.application.activate_rule_bundle import (
+    activate_rule_bundle,
+    approve_rule_bundle,
+)
 from src.foundation.risk_gate.application.activate_safety_control import activate_safety_control
 from src.foundation.risk_gate.application.deactivate_safety_control import (
     deactivate_safety_control,
 )
 from src.foundation.risk_gate.application.evaluate_risk_gate import evaluate_risk_gate
 from src.foundation.risk_gate.domain.models import GateKind, SafetyScope
-from src.foundation.risk_gate.ports.repository import RiskGateRepository
+from src.foundation.risk_gate.ports.repository import RiskGateRepository, RuleBundleRepository
 from src.foundation.risk_gate.projections import build_safety_control_list_view
 from src.services.auth_service import User
 
@@ -160,3 +167,42 @@ async def post_admin_activate_safety_control(
         reason=body.reason,
     )
     return ok(control)
+
+
+# R-23 — DRAFT→APPROVED→ACTIVE. `actor_is_risk_officer`는 `get_current_admin`
+# 근사(activate_rule_bundle.py 모듈 docstring "미검증" 참조) — 전용 role이
+# 생기기 전까지 운영자만 rule bundle을 승인·활성화할 수 있다.
+@router.post("/rule-bundles/{bundle_id}:approve")
+async def post_approve_rule_bundle(
+    bundle_id: UUID,
+    body: ApproveRuleBundleRequest,
+    admin: User = Depends(get_current_admin),
+    repo: RuleBundleRepository = Depends(get_rule_bundle_repository),
+    audit_repo: AuditEventRepository = Depends(get_audit_event_repository),
+) -> ApiResponse[RiskRuleBundle]:
+    bundle = await approve_rule_bundle(
+        repo,
+        audit_repo,
+        bundle_id=bundle_id,
+        approver_subject_id=admin.user_id,
+        approval_ref=body.approval_ref,
+        actor_is_risk_officer=True,
+    )
+    return ok(bundle)
+
+
+@router.post("/rule-bundles/{bundle_id}:activate")
+async def post_activate_rule_bundle(
+    bundle_id: UUID,
+    admin: User = Depends(get_current_admin),
+    repo: RuleBundleRepository = Depends(get_rule_bundle_repository),
+    audit_repo: AuditEventRepository = Depends(get_audit_event_repository),
+) -> ApiResponse[RiskRuleBundle]:
+    bundle = await activate_rule_bundle(
+        repo,
+        audit_repo,
+        bundle_id=bundle_id,
+        actor_subject_id=admin.user_id,
+        actor_is_risk_officer=True,
+    )
+    return ok(bundle)

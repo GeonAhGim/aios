@@ -33,8 +33,11 @@ from src.foundation.reconciliation.adapters.postgres_repository import (
     PostgresReconciliationRepository,
 )
 from src.foundation.reconciliation.ports.repository import ReconciliationRepository
+from src.foundation.risk_gate.adapters.postgres_bundle_repository import (
+    PostgresBundleRepository,
+)
 from src.foundation.risk_gate.adapters.postgres_repository import PostgresRiskGateRepository
-from src.foundation.risk_gate.ports.repository import RiskGateRepository
+from src.foundation.risk_gate.ports.repository import RiskGateRepository, RuleBundleRepository
 from src.foundation.trust.adapters.postgres_membership_repository import (
     PostgresMembershipRepository,
 )
@@ -84,6 +87,12 @@ def get_validation_repository(
 
 def get_risk_gate_repository(pool: asyncpg.Pool = Depends(get_pool)) -> RiskGateRepository:
     return PostgresRiskGateRepository(pool)
+
+
+def get_rule_bundle_repository(
+    pool: asyncpg.Pool = Depends(get_pool),
+) -> RuleBundleRepository:
+    return PostgresBundleRepository(pool)
 
 
 def get_paper_control_repository(

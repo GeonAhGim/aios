@@ -84,6 +84,12 @@ from src.foundation.reconciliation.application.resolve_reconciliation import (
     NotResolvableError,
     ReconciliationStateNotFoundError,
 )
+from src.foundation.risk_gate.application.activate_rule_bundle import (
+    MissingApprovalRefError,
+    RuleBundleNotFoundError,
+    SelfApprovalError,
+    UnauthorizedRuleBundleActorError,
+)
 from src.foundation.risk_gate.application.activate_safety_control import (
     MissingScopeRefError,
     UnauthorizedSafetyControlScopeError,
@@ -198,6 +204,11 @@ EXCEPTION_MAP_FOUNDATION: list[tuple[type[Exception], ErrorCode]] = [
     (StrategyNotEligibleForValidationError, ErrorCode.STATE_INVALID_TRANSITION),
     (ValidationAlreadyInProgressError, ErrorCode.STATE_INVALID_TRANSITION),
     (BacktestRunError, ErrorCode.VALIDATION_INVALID_FIELD),
+    # R-23 — foundation/risk_gate rule-bundles(activate_rule_bundle.py).
+    (UnauthorizedRuleBundleActorError, ErrorCode.AUTHZ_FORBIDDEN),
+    (RuleBundleNotFoundError, ErrorCode.RESOURCE_NOT_FOUND),
+    (SelfApprovalError, ErrorCode.AUTHZ_FORBIDDEN),
+    (MissingApprovalRefError, ErrorCode.VALIDATION_INVALID_FIELD),
 ]
 
 STATUS_OVERRIDE_FOUNDATION: list[tuple[type[Exception], int]] = [

@@ -4,9 +4,10 @@ from __future__ import annotations
 
 from datetime import datetime
 from decimal import Decimal
-from typing import Protocol
+from typing import Any, Protocol
 from uuid import UUID
 
+from src.core.risk.policy_bundle import BundleState, RiskRuleBundle
 from src.foundation.risk_gate.domain.models import (
     FenceSnapshot,
     RiskEvaluation,
@@ -118,3 +119,22 @@ class RiskLimitRepository(Protocol):
         severity: str,
         occurred_at: datetime,
     ) -> int: ...
+
+
+class RuleBundleRepository(Protocol):
+    """R-22/R-23 — `risk_rule_bundle` 저장소 포트(`adapters/postgres_bundle_repository.py`)."""
+
+    async def get_active(self, scope: str) -> RiskRuleBundle | None: ...
+
+    async def get_by_id(self, bundle_id: UUID) -> RiskRuleBundle | None: ...
+
+    async def insert_draft(self, bundle: RiskRuleBundle) -> RiskRuleBundle: ...
+
+    async def transition(
+        self,
+        bundle_id: UUID,
+        *,
+        expected_state: BundleState,
+        new_state: BundleState,
+        **audit: Any,
+    ) -> RiskRuleBundle: ...
