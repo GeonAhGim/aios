@@ -23,6 +23,13 @@ CredentialResolver.get_adapter()는 동기 `adapter_factory(...)` 호출이라
 done-callback에서 경고 로그만 남긴다(어댑터 자체 sync_server_time()은
 이미 내부에서 예외를 삼키므로 대부분 이 콜백까지 오지 않음 — 향후
 다른 거래소 구현이 다르게 동작할 경우의 안전망).
+
+R-42(2026-09-04) — `freshness` 옵션 인자(기본 None, 하위호환). 값이
+주어지면 `get_ohlcv` 호출이 성공할 때마다 반환된 캔들 목록의 마지막
+원소에서 (exchange, symbol, close_time)을 읽어 `DataFreshnessTracker`에
+기록한다. `Candle`(src/data/models/market_data.py)이 이미 두 필드를
+갖고 있어 별도로 어댑터의 거래소 이름을 조회할 필요가 없다. 빈 목록은
+아무것도 기록하지 않는다(관측 0건은 트래커가 이미 `None`으로 구분).
 """
 from __future__ import annotations
 
@@ -31,6 +38,7 @@ import inspect
 import logging
 from typing import Any
 
+from src.core.safety.data_freshness import DataFreshnessTracker
 from src.core.safety.metrics_collector import ApiCallTracker
 from src.exchanges.common.adapter import ExchangeAdapter
 
@@ -38,9 +46,16 @@ logger = logging.getLogger(__name__)
 
 
 class InstrumentedAdapter:
-    def __init__(self, wrapped: ExchangeAdapter, tracker: ApiCallTracker) -> None:
+    def __init__(
+        self,
+        wrapped: ExchangeAdapter,
+        tracker: ApiCallTracker,
+        *,
+        freshness: DataFreshnessTracker | None = None,
+    ) -> None:
         self._wrapped = wrapped
         self._tracker = tracker
+        self._freshness = freshness
 
     def __getattr__(self, name: str) -> Any:
         attr = getattr(self._wrapped, name)
@@ -54,6 +69,11 @@ class InstrumentedAdapter:
                 self._tracker.record_failure()
                 raise
             self._tracker.record_success()
+            if name == "get_ohlcv" and self._freshness is not None and result:
+                last_candle = result[-1]
+                self._freshness.record(
+                    last_candle.exchange, last_candle.symbol, last_candle.close_time
+                )
             return result
 
         return wrapper
