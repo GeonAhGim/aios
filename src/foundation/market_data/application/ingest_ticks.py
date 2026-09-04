@@ -76,16 +76,31 @@ def _parse_trade_id(trade_id: str) -> int | None:
 async def _last_stored(
     conn: asyncpg.Connection, venue: Venue, instrument_id: UUID
 ) -> tuple[int | None, datetime | None]:
-    row = await conn.fetchrow(
-        "SELECT trade_id, traded_at FROM md_tick "
-        "WHERE venue = $1 AND instrument_id = $2 "
-        "ORDER BY traded_at DESC, created_at DESC LIMIT 1",
+    """최댓값 `traded_at`과 그 시각에 동시 체결된 모든 trade_id 중 최댓값을
+    baseline으로 삼는다. 같은 트랜잭션에서 저장된 동시 체결 틱은 `created_at`도
+    동일해(Postgres `now()`는 트랜잭션 시작 시각으로 고정) `traded_at DESC,
+    created_at DESC LIMIT 1`로는 어느 행이 뽑힐지 비결정적이라 더 작은
+    trade_id가 baseline이 될 수 있다 — 그러면 실제로는 역행인 배치가
+    통과된다(QA 발견, task-1004)."""
+    max_traded_at = await conn.fetchval(
+        "SELECT MAX(traded_at) FROM md_tick WHERE venue = $1 AND instrument_id = $2",
         venue.value,
         instrument_id,
     )
-    if row is None:
+    if max_traded_at is None:
         return None, None
-    return _parse_trade_id(row["trade_id"]), row["traded_at"]
+    rows = await conn.fetch(
+        "SELECT trade_id FROM md_tick WHERE venue = $1 AND instrument_id = $2 AND traded_at = $3",
+        venue.value,
+        instrument_id,
+        max_traded_at,
+    )
+    max_trade_id: int | None = None
+    for row in rows:
+        parsed = _parse_trade_id(row["trade_id"])
+        if parsed is not None and (max_trade_id is None or parsed > max_trade_id):
+            max_trade_id = parsed
+    return max_trade_id, max_traded_at
 
 
 async def _known_trade_ids(

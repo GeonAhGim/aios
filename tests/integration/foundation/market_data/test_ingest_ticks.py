@@ -149,6 +149,31 @@ async def test_ingest_reingest_is_idempotent_and_creates_new_batch_row(pool, dep
     assert batch_count == 2, "배치 기록 자체는 호출마다 새로 남는다(INSERT only)"
 
 
+async def test_ingest_rejects_regression_hidden_by_same_timestamp_tie(pool, deps):
+    """동시 체결(같은 traded_at)로 저장된 두 trade_id 중 baseline이 더 작은
+    쪽으로 뽑히더라도(같은 트랜잭션은 created_at도 동일해 단순 LIMIT 1
+    tie-break로는 구분 불가) 그 사이 값 재수집은 여전히 역행으로 잡혀야
+    한다(QA 발견, task-1004)."""
+    async with pool.acquire() as conn:
+        instrument_id = await _instrument_id(conn)
+    t0 = datetime.now(timezone.utc).replace(microsecond=0)
+
+    first = [_tick(instrument_id, "5", t0), _tick(instrument_id, "9", t0)]
+    r1 = await _run(deps, first)
+    assert r1.verdict.verdict == Verdict.ACCEPT
+
+    second = [_tick(instrument_id, "7", t0)]
+    r2 = await _run(deps, second)
+
+    assert r2.verdict.verdict == Verdict.REJECT
+    async with pool.acquire() as conn:
+        stored = await conn.fetchval(
+            "SELECT COUNT(*) FROM md_tick WHERE instrument_id = $1 AND trade_id = '7'",
+            instrument_id,
+        )
+    assert stored == 0
+
+
 async def test_ingest_rolls_back_md_tick_on_audit_failure(pool, deps):
     async with pool.acquire() as conn:
         instrument_id = await _instrument_id(conn)
