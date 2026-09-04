@@ -531,7 +531,8 @@ async def test_gate_kind_check_accepts_all_six_values(pool):
             async with pool.acquire() as conn:
                 row = await conn.fetchrow(
                     "INSERT INTO risk_evaluation "
-                    "(tenant_id, gate_kind, subject_fingerprint, outcome, rule_version, expires_at) "
+                    "(tenant_id, gate_kind, subject_fingerprint, outcome, rule_version, "
+                    "expires_at) "
                     "VALUES ($1, $2, $3, 'ALLOW', 'v1', now()) RETURNING id",
                     tenant_id,
                     gate_kind,
