@@ -57,14 +57,43 @@ var:
   max_pct: 5.0
   es_max_pct: 7.0
   min_bars: 60
+  method: "cornish_fisher"
+  timeframe: "1d"
+  lookback_bars: 250
 
 correlation_risk:
   threshold: 0.7
   aggregate_exposure_max_pct: 30.0
+  lookback_bars: 90
+  min_overlap: 30
+  ewma_lambda: null
 
 trade_frequency:
   anomaly_multiplier: 3.0
   max_trades_per_hour: 60
+
+decision_ttl:
+  pre_trade_sec: 1.0
+  pre_submit_sec: 2.0
+  deployment_sec: 10.0
+
+reactivation:
+  cooldown_sec: 300
+  approval_ttl_sec: 1800
+  evidence_required: true
+
+liquidation:
+  max_participation_pct: 10.0
+  slice_count_min: 3
+  slice_count_max: 20
+  size_jitter_pct: 30.0
+  interval_min_sec: 2
+  interval_max_sec: 15
+  max_slice_notional: 5000
+  limit_tolerance_bps: 15
+  slice_ttl_sec: 5
+  adverse_move_abort_pct: 1.0
+  total_deadline_sec: 300
 
 circuit_breaker:
   warning:
@@ -88,6 +117,8 @@ data_distrust:
   enter_threshold_pct: 1.5
   exit_threshold_pct: 0.75
   exit_sustain_sec: 60
+  min_sources: 3
+  quote_timeout_sec: 2
 
 execution_loop:
   interval_sec: 1.0
@@ -101,6 +132,8 @@ execution_loop:
   interval_sec: 1.0  # 실행 루프 폴링 주기, 리스크 수치 아님
 
 data_distrust:
+  quote_timeout_sec: 2
+  min_sources: 3
   exit_sustain_sec: 60
   enter_threshold_pct: 1.5
   exit_threshold_pct: 0.75
@@ -127,11 +160,40 @@ trade_frequency:
   anomaly_multiplier: 3.0  # 24시간 대비 배수
   max_trades_per_hour: 60
 
+liquidation:
+  total_deadline_sec: 300
+  adverse_move_abort_pct: 1.0
+  slice_ttl_sec: 5
+  limit_tolerance_bps: 15
+  max_slice_notional: 5000
+  interval_max_sec: 15
+  interval_min_sec: 2
+  size_jitter_pct: 30.0
+  slice_count_max: 20
+  slice_count_min: 3
+  max_participation_pct: 10.0
+
+reactivation:
+  evidence_required: true
+  approval_ttl_sec: 1800
+  cooldown_sec: 300
+
+decision_ttl:
+  deployment_sec: 10.0
+  pre_submit_sec: 2.0
+  pre_trade_sec: 1.0
+
 correlation_risk:
+  ewma_lambda: null
+  min_overlap: 30
+  lookback_bars: 90
   aggregate_exposure_max_pct: 30.0
   threshold: 0.7
 
 var:
+  lookback_bars: 250
+  timeframe: "1d"
+  method: "cornish_fisher"
   max_pct: 5.0
   horizon_days: 1
   confidence: 0.95

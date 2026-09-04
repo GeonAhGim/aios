@@ -37,14 +37,48 @@ var:
   max_pct: 5.0
   es_max_pct: 7.0 # task-1177 R-11 var_es.py — VaR max_pct와 별도 ES 상한
   min_bars: 60 # 미달 시 결손(DENY) 취급
+  # task-1194 R-21 §3.3 확장
+  method: "cornish_fisher"
+  timeframe: "1d"
+  lookback_bars: 250
 
 correlation_risk:
   threshold: 0.7
   aggregate_exposure_max_pct: 30.0
+  # task-1194 R-21 §3.3 확장
+  lookback_bars: 90
+  min_overlap: 30
+  ewma_lambda: null
 
 trade_frequency:
   anomaly_multiplier: 3.0 # 직전 24시간 대비
   max_trades_per_hour: 60 # task-1177 R-12 trade_frequency.py — 배수 상한과의 max()
+
+# task-1194 R-21 §3.3 확장 — PRE_TRADE/PRE_SUBMIT/배포 결정의 TTL
+decision_ttl:
+  pre_trade_sec: 1.0
+  pre_submit_sec: 2.0
+  deployment_sec: 10.0
+
+# task-1194 R-21 §3.3 확장 — halted/emergency 하향(재가동) 절차
+reactivation:
+  cooldown_sec: 300
+  approval_ttl_sec: 1800
+  evidence_required: true
+
+# task-1194 R-21 §3.3 확장 — 8.6-A-1 강제청산 분할·지터·참여율 상한
+liquidation:
+  max_participation_pct: 10.0
+  slice_count_min: 3
+  slice_count_max: 20
+  size_jitter_pct: 30.0
+  interval_min_sec: 2
+  interval_max_sec: 15
+  max_slice_notional: 5000
+  limit_tolerance_bps: 15
+  slice_ttl_sec: 5
+  adverse_move_abort_pct: 1.0
+  total_deadline_sec: 300
 
 # 8.6 Circuit Breaker 단계 임계치
 circuit_breaker:
@@ -71,6 +105,9 @@ data_distrust:
   enter_threshold_pct: 1.5
   exit_threshold_pct: 0.75
   exit_sustain_sec: 60
+  # task-1194 R-21 §3.3 확장
+  min_sources: 3
+  quote_timeout_sec: 2
 
 # FD-8.1(기능설계문서 v1.21) — 실행 루프 폴링 주기. 리스크 수치가 아니라
 # 스케줄 설정이지만 이 파일이 "판단 계층의 결정론적 설정" 단일 출처이므로
