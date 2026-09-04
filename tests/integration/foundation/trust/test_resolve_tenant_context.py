@@ -12,7 +12,9 @@ from uuid import uuid4
 
 import asyncpg
 import pytest
+from fastapi import HTTPException
 
+from src.api.foundation_deps import get_tenant_context
 from src.foundation.trust.adapters.postgres_membership_repository import (
     PostgresMembershipRepository,
 )
@@ -114,6 +116,29 @@ async def test_requested_tenant_without_membership_raises_tenant_mismatch(pool, 
                 requested_tenant_id=other_tenant_id,
                 mfa_verified=False,
             )
+
+
+class _FakeRequest:
+    def __init__(self, headers: dict[str, str]) -> None:
+        self.headers = headers
+
+
+async def test_malformed_tenant_header_raises_400_validation_error(pool, repo):
+    """negative: `X-Tenant-Id`가 UUID 형식이 아니면 `resolve_tenant_context`
+    (DB 조회)에 도달하기 전에 호출부(`foundation_deps.get_tenant_context`)가
+    400 VALIDATION_INVALID_FIELD로 거부한다."""
+    user_id = await create_test_user(pool)
+
+    with pytest.raises(HTTPException) as excinfo:
+        await get_tenant_context(
+            _FakeRequest({"X-Tenant-Id": "not-a-uuid"}),  # type: ignore[arg-type]
+            user=_user(user_id),
+            pool=pool,
+            membership_repo=repo,
+        )
+
+    assert excinfo.value.status_code == 400
+    assert excinfo.value.detail["error_code"] == "VALIDATION_INVALID_FIELD"
 
 
 def test_existing_v1_fixture_parsing_unmodified() -> None:
