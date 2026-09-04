@@ -44,9 +44,14 @@ describe("apiPaths — resolveEnvelope", () => {
     expect(resolveEnvelope("executions.base", { useV1: true })).toBe(true);
 
     // v1Path가 아직 없는 라우트는 useV1=true를 줘도 legacy로 폴백하므로
-    // envelope도 그 라우트의 legacy 값(false) 그대로다.
-    expect(API_ROUTES["foundation.trustConsents.accept"].v1Path).toBeUndefined();
-    expect(resolveEnvelope("foundation.trustConsents.accept", { useV1: true })).toBe(false);
+    // envelope도 그 라우트의 legacy 값(false) 그대로다. task-1309: 이전엔
+    // 이 예시로 foundation.trustConsents.accept(당시 envelope=false)를 썼으나,
+    // trust.py가 처음부터 ApiResponse[T]로 응답한다는 사실이 확인되어 그
+    // 라우트의 등록값이 true로 바뀌었다 — 이 테스트가 검증하려는 "v1Path 없으면
+    // legacy 값 그대로 폴백"이라는 성질 자체와는 무관하므로, v1Path가 여전히
+    // 없고 envelope=false인 marketData 라우트로 예시만 교체한다.
+    expect(API_ROUTES["marketData.candles.get"].v1Path).toBeUndefined();
+    expect(resolveEnvelope("marketData.candles.get", { useV1: true })).toBe(false);
   });
 
   it("미등록 route를 요청하면 throw한다", () => {

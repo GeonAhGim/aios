@@ -54,6 +54,15 @@ const consentView = {
   schema_version: "v1",
 };
 
+// task-1309: paper_control.py/trust.py 원본 확인 — 두 라우터 모두 처음부터
+// `-> ApiResponse[T]`(ok())로만 응답한다. 이 테스트 파일의 fetch 스텁도 실제
+// 서버가 보내는 {data, meta} 봉투 모양으로 맞춘다(이전엔 data를 그대로 top-level에
+// 둬 응답 파싱 자체를 검증하지 못했다 — postIdempotent였다면 통과했겠지만
+// postEnvelopeIdempotent로는 unwrap이 실패해 이 어긋남이 바로 드러난다).
+function envelope<T>(data: T): { data: T; meta: { trace_id: string; as_of: string; page: null } } {
+  return { data, meta: { trace_id: "trace-1", as_of: "2026-09-04T00:00:00Z", page: null } };
+}
+
 // spec §3.7 적용 대상: POST /v1/foundation/paper-control/*(5개, 실제 마운트
 // 경로는 /v1/foundation/paper-deployments — src/api/routers 원본 확인)와
 // POST /v1/foundation/trust/consents.
@@ -62,8 +71,31 @@ describe("withFoundation: paper-deployments 5개 + trust/consents", () => {
     vi.unstubAllGlobals();
   });
 
-  it("requestPaperDeployment: postIdempotent로 헤더를 싣고, 전환기 규칙대로 body에도 idempotencyKey를 alias한다", async () => {
-    const fetchMock = stubFetch(deploymentView, 201);
+  it("listPaperDeployments: GET으로 조회하고 봉투(data.deployments/asOf)를 풀어 camelCase로 반환한다", async () => {
+    const asOf = "2026-09-04T00:00:00Z";
+    stubFetch(envelope({ deployments: [deploymentView], as_of: asOf }));
+
+    const result = await makeClient().listPaperDeployments();
+
+    expect(result).toEqual({
+      deployments: [
+        {
+          id: "d1",
+          packageRef: "pkg-1",
+          connectionId: null,
+          state: "REQUESTED",
+          fenceToken: 1,
+          createdAt: null,
+          updatedAt: null,
+          schemaVersion: "v1",
+        },
+      ],
+      asOf,
+    });
+  });
+
+  it("requestPaperDeployment: postEnvelopeIdempotent로 헤더를 싣고, 전환기 규칙대로 body에도 idempotencyKey를 alias한다", async () => {
+    const fetchMock = stubFetch(envelope(deploymentView), 201);
 
     await makeClient().requestPaperDeployment(
       {
@@ -88,7 +120,7 @@ describe("withFoundation: paper-deployments 5개 + trust/consents", () => {
     ["pausePaperDeployment", "pause"],
     ["stopPaperDeployment", "stop"],
   ] as const)("%s: :%s 경로로 헤더+body(alias)를 함께 싣는다", async (method, action) => {
-    const fetchMock = stubFetch(deploymentView);
+    const fetchMock = stubFetch(envelope(deploymentView));
 
     const client = makeClient() as unknown as Record<string, (...args: unknown[]) => Promise<unknown>>;
     await client[method]("dep-1", `caller-supplied-key-${action}`);
@@ -100,8 +132,8 @@ describe("withFoundation: paper-deployments 5개 + trust/consents", () => {
     expect(body.idempotency_key).toBe(`caller-supplied-key-${action}`);
   });
 
-  it("acceptTrustConsent: postIdempotent로 헤더만 싣는다(body에는 alias할 기존 idempotency 필드가 없음)", async () => {
-    const fetchMock = stubFetch(consentView, 201);
+  it("acceptTrustConsent: postEnvelopeIdempotent로 헤더만 싣는다(body에는 alias할 기존 idempotency 필드가 없음)", async () => {
+    const fetchMock = stubFetch(envelope(consentView), 201);
 
     await makeClient().acceptTrustConsent(
       { purpose: "trading", disclosureRevision: 1 },
@@ -116,7 +148,7 @@ describe("withFoundation: paper-deployments 5개 + trust/consents", () => {
   });
 
   it("키 없이 호출하면 런타임에서 거부한다(타입은 idempotencyKey를 필수 인자로 강제 — 컴파일 타임 방어)", async () => {
-    stubFetch(deploymentView);
+    stubFetch(envelope(deploymentView));
     const client = makeClient();
 
     // @ts-expect-error idempotencyKey는 필수 인자다 — 누락 시 타입 에러.
@@ -124,7 +156,7 @@ describe("withFoundation: paper-deployments 5개 + trust/consents", () => {
   });
 
   it("빈 문자열 키는 형식 검증에서 런타임 거부된다(서버 왕복 없음)", async () => {
-    const fetchMock = stubFetch(deploymentView);
+    const fetchMock = stubFetch(envelope(deploymentView));
     const client = makeClient();
 
     await expect(
@@ -138,7 +170,7 @@ describe("withFoundation: paper-deployments 5개 + trust/consents", () => {
 
   it("같은 키·다른 body면 서버 왕복 전에 차단한다(task-427 checkDigest 재사용)", async () => {
     const key = "same-key-mismatch-test-01";
-    const first = stubFetch(deploymentView, 201);
+    const first = stubFetch(envelope(deploymentView), 201);
     const client = makeClient();
 
     await client.requestPaperDeployment(
@@ -147,7 +179,7 @@ describe("withFoundation: paper-deployments 5개 + trust/consents", () => {
     );
     expect(first).toHaveBeenCalledTimes(1);
 
-    const second = stubFetch(deploymentView, 201);
+    const second = stubFetch(envelope(deploymentView), 201);
     await expect(
       client.requestPaperDeployment(
         { packageRef: "pkg-b", adapterType: "bitget-sandbox", providerSandboxAccountRef: "acct-1" },
@@ -162,10 +194,10 @@ describe("withFoundation: paper-deployments 5개 + trust/consents", () => {
     const client = makeClient();
     const body = { packageRef: "pkg-a", adapterType: "bitget-sandbox", providerSandboxAccountRef: "acct-1" };
 
-    stubFetch(deploymentView, 201);
+    stubFetch(envelope(deploymentView), 201);
     await client.requestPaperDeployment(body, key);
 
-    const second = stubFetch(deploymentView, 201);
+    const second = stubFetch(envelope(deploymentView), 201);
     await expect(client.requestPaperDeployment(body, key)).resolves.toBeDefined();
     expect(second).toHaveBeenCalledTimes(1);
   });
@@ -174,10 +206,10 @@ describe("withFoundation: paper-deployments 5개 + trust/consents", () => {
     const key = "trust-consent-mismatch-test-01";
     const client = makeClient();
 
-    stubFetch(consentView, 201);
+    stubFetch(envelope(consentView), 201);
     await client.acceptTrustConsent({ purpose: "trading", disclosureRevision: 1 }, key);
 
-    const second = stubFetch(consentView, 201);
+    const second = stubFetch(envelope(consentView), 201);
     await expect(
       client.acceptTrustConsent({ purpose: "trading", disclosureRevision: 2 }, key),
     ).rejects.toThrow(/이전과 다른 요청 본문/);
@@ -188,13 +220,13 @@ describe("withFoundation: paper-deployments 5개 + trust/consents", () => {
     const key = "cross-route-shared-key-0001-abcdefgh";
     const client = makeClient();
 
-    stubFetch(deploymentView, 201);
+    stubFetch(envelope(deploymentView), 201);
     await client.requestPaperDeployment(
       { packageRef: "pkg-a", adapterType: "bitget-sandbox", providerSandboxAccountRef: "acct-1" },
       key,
     );
 
-    const second = stubFetch(consentView, 201);
+    const second = stubFetch(envelope(consentView), 201);
     await expect(client.acceptTrustConsent({ purpose: "trading", disclosureRevision: 1 }, key)).resolves.toBeDefined();
     expect(second).toHaveBeenCalledTimes(1);
   });

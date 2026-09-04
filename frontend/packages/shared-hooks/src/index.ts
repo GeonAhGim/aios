@@ -74,3 +74,11 @@ export {
   useRejectMyRequest,
 } from "./useApprovals";
 export { usePlatformReadiness } from "./usePlatformStatus";
+export {
+  usePaperDeployments,
+  useRequestPaperDeployment,
+  useStartPaperDeployment,
+  useResumePaperDeployment,
+  usePausePaperDeployment,
+  useStopPaperDeployment,
+} from "./usePaperControl";

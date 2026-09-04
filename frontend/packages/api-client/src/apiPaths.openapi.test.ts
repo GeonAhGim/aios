@@ -59,7 +59,28 @@ const STALE_SNAPSHOT_WHITELIST: ReadonlySet<ApiRouteName> = new Set<ApiRouteName
 // 아님"이라고 손으로 확인한 것과 동일 결론을 여기서 기계적으로 재확인한다). 새 드리프트가
 // 생기면 여기 추가하지 말고 route명/등록값/스냅샷 JSON 포인터/실제 라우터 파일:라인을
 // 근거로 needs_decision으로 올려라 — 이 리프는 봉투 값을 고치는 리프가 아니다.
-const KNOWN_ENVELOPE_DRIFT: ReadonlySet<ApiRouteName> = new Set<ApiRouteName>([]);
+//
+// task-1309가 추가한 6건은 그 원칙의 예외가 아니라 시간순으로 검증된 사실이다.
+// 커밋 시각: f800c1a(task-905, 이 스냅샷 생성) 2026-09-03 18:45 → e4c9bd6
+// (task-1217 PLT-21b-2, "foundation 라우터 봉투·예외 이관") 2026-09-04 10:21 —
+// paper_control.py/trust.py가 스냅샷 생성 "이후" ApiResponse[T]로 이관됐다.
+// 스냅샷 포인터: paths["/v1/foundation/paper-deployments"].post.responses.201
+// .content["application/json"].schema.$ref === "#/components/schemas/
+// PaperDeploymentView"(ApiResponse_* 아님 — 이관 전 스냅샷). 실제 라우터 원본
+// (src/api/routers/foundation/paper_control.py, 현재 HEAD 기준)은 6개 엔드포인트
+// 전부 `-> ApiResponse[...]` + `return ok(...)`이고, trust.py의 post_accept_disclosure도
+// 동일(`-> ApiResponse[ConsentDecision]`) — apiPaths.ts의 true가 "지금" 맞는 값이고
+// 스냅샷(f800c1a)이 낡았다. 스냅샷 재생성은 이 leaf 범위 밖(무관한 변경까지 섞여
+// "백엔드 diff 0" 원칙 위반, STALE_SNAPSHOT_WHITELIST 주석과 동일 사유)이라
+// 별도 PLT 리프가 export_openapi를 재실행할 때까지 이 6건은 여기 남는다.
+const KNOWN_ENVELOPE_DRIFT: ReadonlySet<ApiRouteName> = new Set<ApiRouteName>([
+  "foundation.paperDeployments.request",
+  "foundation.paperDeployments.start",
+  "foundation.paperDeployments.resume",
+  "foundation.paperDeployments.pause",
+  "foundation.paperDeployments.stop",
+  "foundation.trustConsents.accept",
+]);
 
 // legacyPath의 ":param" / ":param:literal"(예: ":deploymentId:start") 세그먼트를
 // 스냅샷의 "{param}" 세그먼트와 비교 가능한 와일드카드 템플릿으로 바꾼다.

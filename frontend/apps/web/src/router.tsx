@@ -33,6 +33,7 @@ import { MembersPage } from "./routes/settings/MembersPage";
 import { NotificationSettingsPage } from "./routes/settings/NotificationSettingsPage";
 import { SessionsPage } from "./routes/settings/SessionsPage";
 import { StrategyBuilderPage } from "./routes/strategy-builder/StrategyBuilderPage";
+import { PaperDeploymentsPage } from "./routes/system/PaperDeploymentsPage";
 import { SystemStatusPage } from "./routes/system/SystemStatusPage";
 import { LedgerHistoryPage } from "./routes/wallet/LedgerHistoryPage";
 import { PayoutsPage } from "./routes/wallet/PayoutsPage";
@@ -71,6 +72,7 @@ export const router = createBrowserRouter([
   { path: "/wallet/ledger", element: protect(<LedgerHistoryPage />) },
   { path: "/wallet/payouts", element: protect(<PayoutsPage />) },
   { path: "/alerts", element: protect(<AlertsPage />) },
+  { path: "/system/paper-deployments", element: protect(<PaperDeploymentsPage />) },
   { path: "/approval-requests", element: protect(<MyApprovalRequestsPage />) },
   { path: "/settings/approval", element: protect(<ApprovalSettingsPage />) },
   { path: "/settings/notifications", element: protect(<NotificationSettingsPage />) },

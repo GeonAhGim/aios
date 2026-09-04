@@ -124,12 +124,17 @@ export const API_ROUTES = defineApiRoutes({
   "strategyBuilder.wizard": route("/strategy-builder/wizard", false),
   "strategyBuilder.generateFromPrompt": route("/strategy-builder/generate-from-prompt", false),
 
-  "foundation.paperDeployments.request": route("/v1/foundation/paper-deployments", false, null),
-  "foundation.paperDeployments.start": route("/v1/foundation/paper-deployments/:deploymentId:start", false, null),
-  "foundation.paperDeployments.resume": route("/v1/foundation/paper-deployments/:deploymentId:resume", false, null),
-  "foundation.paperDeployments.pause": route("/v1/foundation/paper-deployments/:deploymentId:pause", false, null),
-  "foundation.paperDeployments.stop": route("/v1/foundation/paper-deployments/:deploymentId:stop", false, null),
-  "foundation.trustConsents.accept": route("/v1/foundation/trust/consents", false, null),
+  // task-1309: paper_control.py/trust.py 원본 확인 — mount_v1 미배선(PLT-16
+  // 미도달)이라 v1Path는 여전히 null이지만, 두 라우터 모두 처음부터 모든
+  // 엔드포인트가 `-> ApiResponse[T]`(ok())로 응답한다(legacy/v1 이관과 무관하게
+  // "지금" 이미 봉투). GET(list, POST와 경로 공유)도 동일 라우터 소속이라
+  // envelope=true다.
+  "foundation.paperDeployments.request": route("/v1/foundation/paper-deployments", true, null),
+  "foundation.paperDeployments.start": route("/v1/foundation/paper-deployments/:deploymentId:start", true, null),
+  "foundation.paperDeployments.resume": route("/v1/foundation/paper-deployments/:deploymentId:resume", true, null),
+  "foundation.paperDeployments.pause": route("/v1/foundation/paper-deployments/:deploymentId:pause", true, null),
+  "foundation.paperDeployments.stop": route("/v1/foundation/paper-deployments/:deploymentId:stop", true, null),
+  "foundation.trustConsents.accept": route("/v1/foundation/trust/consents", true, null),
 
   // task-719: LA-17(task-624, 7ad6d15) application/get_candles·replay_candles의 조회
   // 클라이언트. src/api/routers에는 아직 market_data 라우터가 없다(PLT-16 mount_v1

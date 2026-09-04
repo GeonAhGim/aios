@@ -52,6 +52,11 @@ export interface RequestPaperDeploymentBody {
   endpointClassification?: string;
 }
 
+export interface PaperDeploymentListResponse {
+  deployments: PaperDeploymentView[];
+  asOf: string;
+}
+
 export type ConsentState = "NONE" | "ACTIVE" | "REVOKED";
 
 export interface ConsentDecision {
@@ -86,15 +91,25 @@ const PAPER_DEPLOYMENT_COMMAND_ROUTES: Record<PaperDeploymentCommand, ApiRouteNa
 // 노출하지 않는다(endpointClassification은 SANDBOX 기본값을 서버가 강제).
 export function withFoundation<TBase extends AnyConstructor>(Base: TBase) {
   return class extends Base {
+    // task-1309: paper_control.py 원본 확인 — 5개 명령 라우트와 동일한
+    // "/v1/foundation/paper-deployments" 경로를 GET(list)/POST(request)가 공유한다
+    // (apiPaths.ts route() 축약 관용, task-1159 admin.ts 선례와 동일).
+    async listPaperDeployments(): Promise<PaperDeploymentListResponse> {
+      return this.requestByRoute("foundation.paperDeployments.request");
+    }
+
     // 전환기 규칙(spec §3.7): 멱등 키는 헤더로 보내되, 서버가 아직 읽는 body의
-    // 기존 `idempotency_key` 필드도 alias로 함께 싣는다.
+    // 기존 `idempotency_key` 필드도 alias로 함께 싣는다. task-1309: 라우터가
+    // 처음부터 ApiResponse[PaperDeploymentView]로 응답하므로 postEnvelopeIdempotent를
+    // 쓴다(이전 리프가 postIdempotent를 잘못 골라 응답 봉투를 그대로 반환하던
+    // 버그 수정 — origin/main paper_control.py 원본 재확인으로 검증).
     async requestPaperDeployment(
       body: RequestPaperDeploymentBody,
       idempotencyKey: string,
     ): Promise<PaperDeploymentView> {
       requireIdempotencyKey(idempotencyKey);
       const outgoing = { ...body, idempotencyKey };
-      return this.postIdempotent(resolvePath("foundation.paperDeployments.request"), outgoing, idempotencyKey);
+      return this.postEnvelopeIdempotent(resolvePath("foundation.paperDeployments.request"), outgoing, idempotencyKey);
     }
 
     async startPaperDeployment(deploymentId: string, idempotencyKey: string): Promise<PaperDeploymentView> {
@@ -123,15 +138,16 @@ export function withFoundation<TBase extends AnyConstructor>(Base: TBase) {
       // 헤더 값과 alias 관계이므로 body 자체가 곧 alias다.
       const outgoing = { idempotencyKey };
       const path = resolvePath(PAPER_DEPLOYMENT_COMMAND_ROUTES[command]).replace(":deploymentId", deploymentId);
-      return this.postIdempotent(path, outgoing, idempotencyKey);
+      return this.postEnvelopeIdempotent(path, outgoing, idempotencyKey);
     }
 
     // AcceptDisclosureRequest(body)에는 idempotency 필드가 원래 없었으므로
     // alias할 기존 필드가 없다 — 헤더만 싣는다(전환기 규칙은 기존 body 필드가
-    // 있는 paper-control 5개에만 적용).
+    // 있는 paper-control 5개에만 적용). trust.py도 처음부터 ApiResponse[ConsentDecision]
+    // 이므로 postEnvelopeIdempotent를 쓴다(task-1309).
     async acceptTrustConsent(body: AcceptTrustConsentBody, idempotencyKey: string): Promise<ConsentDecision> {
       requireIdempotencyKey(idempotencyKey);
-      return this.postIdempotent(resolvePath("foundation.trustConsents.accept"), body, idempotencyKey);
+      return this.postEnvelopeIdempotent(resolvePath("foundation.trustConsents.accept"), body, idempotencyKey);
     }
   };
 }
