@@ -14,6 +14,12 @@
   - 응답 enum 값 제거                                        → FAIL
   - property·enum 값 "추가"는 전부 MINOR → 통과
 
+PLT-16 정규화(비교 전 전처리): pydantic `Optional[X]`는 OpenAPI 3.1에서
+`{"anyOf": [{...X}, {"type": "null"}]}`로 나타나 type·nullable 변경이 anyOf
+안에 숨는다. `_normalize_node`가 이 패턴을 `(type=X, nullable=True)` 한
+쌍으로 접어 기존 type/format/nullable/enum 규칙에 태운다. `$ref`·배열
+`items` 안에 중첩된 anyOf도 재귀적으로 접는다(anyOf 항목 순서는 무시).
+
 사용: `python scripts/check_openapi_compat.py [--baseline PATH] [--current PATH]`.
 종료코드 0=통과, 1=MAJOR 위반.
 """
@@ -57,34 +63,86 @@ def _content_schema(
     return _resolve(media.get("schema", {}), components)
 
 
+def _normalize_node(node: dict[str, Any], components: dict[str, Any]) -> dict[str, Any]:
+    """pydantic `Optional[X]`의 OpenAPI 3.1 표현(`anyOf: [X, {type: null}]`)을
+    `(type=X..., nullable=True)` 한 쌍으로 접는다. `$ref`는 1단계 해석하고,
+    배열 `items`·`$ref` 안에 중첩된 anyOf도 재귀적으로 접는다."""
+    if not isinstance(node, dict):
+        return node
+    resolved = _resolve(node, components)
+    any_of = resolved.get("anyOf")
+    if isinstance(any_of, list):
+        branches = [_normalize_node(b, components) for b in any_of]
+        null_branches = [b for b in branches if isinstance(b, dict) and b.get("type") == "null"]
+        other_branches = [
+            b for b in branches if not (isinstance(b, dict) and b.get("type") == "null")
+        ]
+        if null_branches and len(other_branches) == 1:
+            collapsed = dict(other_branches[0])
+            collapsed["nullable"] = True
+            return collapsed
+        return resolved  # Optional 패턴이 아닌 anyOf(예: 3항 이상)는 그대로 둔다 — 범위 밖
+    if resolved.get("type") == "array" and isinstance(resolved.get("items"), dict):
+        result = dict(resolved)
+        result["items"] = _normalize_node(resolved["items"], components)
+        return result
+    return resolved
+
+
+def _leaf_violations(
+    old_leaf: dict[str, Any], new_leaf: dict[str, Any], *, where: str, label: str
+) -> list[str]:
+    violations: list[str] = []
+    old_type = old_leaf.get("type")
+    if old_type is not None and old_type != new_leaf.get("type"):
+        violations.append(
+            f"{where} property type 변경: {label} ({old_type} -> {new_leaf.get('type')})"
+        )
+    old_format = old_leaf.get("format")
+    if old_format is not None and old_format != new_leaf.get("format"):
+        violations.append(f"{where} property format 변경: {label}")
+    if old_leaf.get("nullable") is True and new_leaf.get("nullable") is not True:
+        violations.append(f"{where} property nullable 축소: {label}")
+    removed_enum = set(old_leaf.get("enum") or []) - set(new_leaf.get("enum") or [])
+    if removed_enum:
+        violations.append(f"{where} enum 값 제거: {label} {sorted(removed_enum, key=str)}")
+
+    if old_type == "array" and isinstance(old_leaf.get("items"), dict):
+        new_items = new_leaf.get("items")
+        violations.extend(
+            _leaf_violations(
+                old_leaf["items"],
+                new_items if isinstance(new_items, dict) else {},
+                where=where,
+                label=f"{label}[]",
+            )
+        )
+    return violations
+
+
 def _property_violations(
-    old: dict[str, Any], new: dict[str, Any], *, where: str, label: str
+    old: dict[str, Any],
+    new: dict[str, Any],
+    *,
+    where: str,
+    label: str,
+    components_old: dict[str, Any],
+    components_new: dict[str, Any],
 ) -> list[str]:
     violations: list[str] = []
     old_props: dict[str, Any] = old.get("properties", {})
     new_props: dict[str, Any] = new.get("properties", {})
 
-    for name, old_prop in old_props.items():
-        new_prop = new_props.get(name)
-        if new_prop is None:
+    for name, old_prop_raw in old_props.items():
+        new_prop_raw = new_props.get(name)
+        if new_prop_raw is None:
             violations.append(f"{where} property 제거: {label} .{name}")
             continue
-        old_type = old_prop.get("type")
-        if old_type is not None and old_type != new_prop.get("type"):
-            violations.append(
-                f"{where} property type 변경: {label} .{name} "
-                f"({old_type} -> {new_prop.get('type')})"
-            )
-        old_format = old_prop.get("format")
-        if old_format is not None and old_format != new_prop.get("format"):
-            violations.append(f"{where} property format 변경: {label} .{name}")
-        if old_prop.get("nullable") is True and new_prop.get("nullable") is not True:
-            violations.append(f"{where} property nullable 축소: {label} .{name}")
-        removed_enum = set(old_prop.get("enum") or []) - set(new_prop.get("enum") or [])
-        if removed_enum:
-            violations.append(
-                f"{where} enum 값 제거: {label} .{name} {sorted(removed_enum, key=str)}"
-            )
+        old_leaf = _normalize_node(old_prop_raw, components_old)
+        new_leaf = _normalize_node(new_prop_raw, components_new)
+        violations.extend(
+            _leaf_violations(old_leaf, new_leaf, where=where, label=f"{label} .{name}")
+        )
 
     if where == "request":
         added_required = set(new.get("required") or []) - set(old.get("required") or [])
@@ -131,6 +189,8 @@ def find_violations(baseline: dict[str, Any], current: dict[str, Any]) -> list[s
                             new_request,
                             where="request",
                             label=f"{method.upper()} {path} request",
+                            components_old=components_old,
+                            components_new=components_new,
                         )
                     )
 
@@ -156,6 +216,8 @@ def find_violations(baseline: dict[str, Any], current: dict[str, Any]) -> list[s
                         new_schema,
                         where="response",
                         label=f"{method.upper()} {path} {status} response",
+                        components_old=components_old,
+                        components_new=components_new,
                     )
                 )
     return violations
