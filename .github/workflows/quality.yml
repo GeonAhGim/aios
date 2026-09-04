@@ -138,6 +138,13 @@ jobs:
       - run: npm ci --workspaces --include-workspace-root
       - run: npm run lint --workspace=apps/web
       - run: npm run build --workspace=apps/web
-      - name: Unit tests (vitest, 있을 때)
+      - name: Unit tests + coverage (vitest, 있을 때)
         run: |
-          if grep -q '"vitest"' apps/web/package.json; then npx vitest run --workspace=apps/web; else echo "vitest 미도입 — task-119에서 도입"; fi
+          if grep -q '"vitest"' apps/web/package.json; then npx vitest run --coverage --workspace=apps/web; else echo "vitest 미도입 — task-119에서 도입"; fi
+
+      # PLT-37 프론트 축 — 백엔드 scripts/coverage_ratchet.py와 동일한 정책(절대
+      # 임계치 없음, baseline 대비 하락 시에만 FAIL, 상승 시 baseline 갱신)을
+      # coverage-summary.json(vitest --coverage)에 적용한다.
+      - name: Coverage ratchet (frontend)
+        run: |
+          if [ -f apps/web/coverage/coverage-summary.json ]; then node ../scripts/frontend_coverage_ratchet.mjs; else echo "coverage-summary.json 없음 — vitest 미도입"; fi

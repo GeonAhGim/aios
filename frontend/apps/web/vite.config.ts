@@ -11,5 +11,10 @@ export default defineConfig({
   test: {
     environment: "jsdom",
     passWithNoTests: true,
+    coverage: {
+      provider: "v8",
+      reporter: ["text", "json-summary"],
+      reportsDirectory: "coverage",
+    },
   },
 });
