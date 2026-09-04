@@ -29,7 +29,10 @@ async def pool():
 @pytest.fixture
 async def client():
     async with app.router.lifespan_context(app):
-        transport = ASGITransport(app=app)
+        # raise_app_exceptions=False — task-1218이 trust.py의 raw HTTPException을
+        # 도메인 예외로 교체했다(이유는 tests/integration/test_auth_router.py의
+        # client 픽스처와 동일).
+        transport = ASGITransport(app=app, raise_app_exceptions=False)
         async with AsyncClient(transport=transport, base_url="http://test") as ac:
             yield ac
 
@@ -70,7 +73,7 @@ async def test_get_trust_status_starts_empty(client):
     headers = await _register(client)
     response = await client.get("/v1/foundation/trust/status", headers=headers)
     assert response.status_code == 200
-    assert response.json()["consents"] == []
+    assert response.json()["data"]["consents"] == []
 
 
 async def test_accept_disclosure_then_appears_in_status(client, pool):
@@ -84,20 +87,20 @@ async def test_accept_disclosure_then_appears_in_status(client, pool):
         headers=headers,
     )
     assert accept_response.status_code == 201
-    consent_id = accept_response.json()["consent_id"]
+    consent_id = accept_response.json()["data"]["consent_id"]
 
     status_response = await client.get("/v1/foundation/trust/status", headers=headers)
-    purposes = [c["purpose"] for c in status_response.json()["consents"]]
+    purposes = [c["purpose"] for c in status_response.json()["data"]["consents"]]
     assert purpose in purposes
 
     revoke_response = await client.post(
         f"/v1/foundation/trust/consents/{consent_id}:revoke", headers=headers
     )
     assert revoke_response.status_code == 200
-    assert revoke_response.json()["state"] == "REVOKED"
+    assert revoke_response.json()["data"]["state"] == "REVOKED"
 
     status_after = await client.get("/v1/foundation/trust/status", headers=headers)
-    purposes_after = [c["purpose"] for c in status_after.json()["consents"]]
+    purposes_after = [c["purpose"] for c in status_after.json()["data"]["consents"]]
     assert purpose not in purposes_after
 
 
@@ -122,7 +125,7 @@ async def test_cannot_revoke_another_users_consent_via_api(client, pool):
         json={"purpose": purpose, "disclosure_revision": 1},
         headers=owner_headers,
     )
-    consent_id = accept_response.json()["consent_id"]
+    consent_id = accept_response.json()["data"]["consent_id"]
 
     attack_response = await client.post(
         f"/v1/foundation/trust/consents/{consent_id}:revoke", headers=attacker_headers

@@ -133,7 +133,7 @@ async def test_pause_invalidates_risk_gate_cache_via_api(client):
         "/v1/foundation/risk-gate/evaluate", json={"gate_kind": "DEPLOYMENT"}, headers=headers
     )
     assert warm_response.status_code == 200
-    assert warm_response.json()["outcome"] == "ALLOW"
+    assert warm_response.json()["data"]["outcome"] == "ALLOW"
 
     await client.post("/v1/foundation/mandates/mandate:pause", json={}, headers=headers)
 
@@ -141,7 +141,7 @@ async def test_pause_invalidates_risk_gate_cache_via_api(client):
         "/v1/foundation/risk-gate/evaluate", json={"gate_kind": "DEPLOYMENT"}, headers=headers
     )
     assert after_pause_response.status_code == 200
-    assert after_pause_response.json()["outcome"] != "ALLOW"
+    assert after_pause_response.json()["data"]["outcome"] != "ALLOW"
 
 
 async def test_material_amendment_via_api_requires_password_reauth(client):

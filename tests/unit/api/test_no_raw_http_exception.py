@@ -9,10 +9,9 @@ Spec: docs/specs/L4_platform_observability_tenancy_api_v1.0.md#§9 PLT-17~21
   화이트리스트에 없다(있으면 이 파일의 목적 자체가 무의미해진다).
 - `foundation/connections.py`·`foundation/mandates.py`·`foundation/
   evidence.py`는 task-1108이, `foundation/paper_control.py`·`foundation/
-  performance.py`·`foundation/reconciliation.py`는 task-1217이 raw
-  HTTPException을 전부 제거해 화이트리스트에서 뺐다. 나머지 `foundation/
-  *.py` 3개는 후속 직렬 리프(task-1218, exception_mapping.py 동시 수정
-  충돌을 피하려고 depends_on으로 직렬화됨)가 뺄 때까지 남겨 둔다.
+  performance.py`·`foundation/reconciliation.py`는 task-1217이,
+  `foundation/risk_gate.py`·`foundation/trust.py`·`foundation/validation.py`는
+  task-1218이 raw HTTPException을 전부 제거해 화이트리스트에서 뺐다.
 - `metrics.py`는 애초에 spec §9 PLT-17~21의 "레거시 라우터 15개" 목록 밖
   (PLT-09가 만든 fail-closed 토큰 체크)이라 이 이관 시리즈의 스콥이 아니다
   — 영구 화이트리스트.
@@ -26,9 +25,6 @@ ROUTERS_ROOT = Path(__file__).resolve().parents[3] / "src" / "api" / "routers"
 
 WHITELIST = {
     "metrics.py",
-    "foundation/risk_gate.py",
-    "foundation/trust.py",
-    "foundation/validation.py",
 }
 
 

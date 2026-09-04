@@ -78,7 +78,10 @@ async def _override_resolver(pool=Depends(get_pool)):
 async def client():
     async with app.router.lifespan_context(app):
         app.dependency_overrides[get_credential_resolver] = _override_resolver
-        transport = ASGITransport(app=app)
+        # raise_app_exceptions=False — task-1218이 validation.py의 raw
+        # HTTPException을 도메인 예외로 교체했다(이유는 tests/integration/
+        # test_auth_router.py의 client 픽스처와 동일).
+        transport = ASGITransport(app=app, raise_app_exceptions=False)
         async with AsyncClient(transport=transport, base_url="http://test") as ac:
             yield ac
         app.dependency_overrides.pop(get_credential_resolver, None)
@@ -186,7 +189,7 @@ async def test_start_validation_succeeds_and_advances_lifecycle(client, pool):
         headers=headers,
     )
     assert response.status_code == 200
-    body = response.json()
+    body = response.json()["data"]
     assert body["state"] == "SUCCEEDED"
     assert body["outcome"] in ("PASS", "PASS_WITH_OBLIGATIONS")
 
