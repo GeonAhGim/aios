@@ -61,8 +61,13 @@ async def test_register_returns_access_token(client):
     body = response.json()
     assert "trace_id" in body["meta"]
     data = body["data"]
+    # PLT-24 — 프론트 tokenStore(task-955)의 TokenPairResponse 파서 계약
+    # (access_token/refresh_token/token_type/expires_in) 그대로.
     assert "access_token" in data
+    assert "refresh_token" in data
     assert data["token_type"] == "bearer"
+    assert data["expires_in"] == 15 * 60
+    assert "session_id" in data
 
 
 async def test_register_rejects_weak_password(client):
@@ -252,3 +257,91 @@ async def test_logout_requires_authentication(client):
     response = await client.post("/auth/logout")
 
     assert response.status_code == 401
+
+
+async def test_refresh_endpoint_rotates_token_pair(client):
+    """PLT-24 — spec §9 DoD "기존 test_auth_router.py는 토큰 쌍 응답으로
+    갱신"의 /auth/refresh 왕복 부분. 서비스 계층은
+    tests/integration/services/auth/test_login_refresh_logout.py가 이미
+    검증하지만, 라우터 배선(RefreshRequest 바인딩·ok() 봉투)은 여기서만
+    실제 HTTP로 확인된다."""
+    email = _unique_email()
+    register_response = await client.post(
+        "/auth/register", json={"email": email, "password": STRONG_PASSWORD}
+    )
+    pair = register_response.json()["data"]
+
+    response = await client.post(
+        "/auth/refresh",
+        json={"session_id": pair["session_id"], "refresh_token": pair["refresh_token"]},
+    )
+
+    assert response.status_code == 200
+    rotated = response.json()["data"]
+    assert rotated["session_id"] == pair["session_id"]
+    assert rotated["refresh_token"] != pair["refresh_token"]
+    assert rotated["access_token"] != pair["access_token"]
+
+
+async def test_refresh_endpoint_rejects_reused_refresh_token(client):
+    """핵심 DoD — 옛 refresh_token 재사용은 라우터 계층에서도 401
+    AUTH_SESSION_REVOKED로 거부된다(RefreshReuseDetected 전파 확인)."""
+    email = _unique_email()
+    register_response = await client.post(
+        "/auth/register", json={"email": email, "password": STRONG_PASSWORD}
+    )
+    pair = register_response.json()["data"]
+    refresh_body = {"session_id": pair["session_id"], "refresh_token": pair["refresh_token"]}
+    await client.post("/auth/refresh", json=refresh_body)
+
+    response = await client.post("/auth/refresh", json=refresh_body)
+
+    assert response.status_code == 401
+    assert response.json()["error_code"] == "AUTH_SESSION_REVOKED"
+
+
+async def test_logout_endpoint_revokes_session(client):
+    email = _unique_email()
+    register_response = await client.post(
+        "/auth/register", json={"email": email, "password": STRONG_PASSWORD}
+    )
+    pair = register_response.json()["data"]
+    headers = {"Authorization": f"Bearer {pair['access_token']}"}
+
+    response = await client.post("/auth/logout", headers=headers)
+    assert response.status_code == 200
+
+    refresh_after_logout = await client.post(
+        "/auth/refresh",
+        json={"session_id": pair["session_id"], "refresh_token": pair["refresh_token"]},
+    )
+    assert refresh_after_logout.status_code == 401
+
+
+async def test_logout_all_endpoint_revokes_every_session(client):
+    email = _unique_email()
+    first = (
+        await client.post(
+            "/auth/register", json={"email": email, "password": STRONG_PASSWORD}
+        )
+    ).json()["data"]
+    second = (
+        await client.post("/auth/login", json={"email": email, "password": STRONG_PASSWORD})
+    ).json()["data"]
+
+    response = await client.post(
+        "/auth/logout-all", headers={"Authorization": f"Bearer {first['access_token']}"}
+    )
+
+    assert response.status_code == 200
+    assert response.json()["data"]["revoked_count"] == 2
+    refresh_first = await client.post(
+        "/auth/refresh",
+        json={"session_id": first["session_id"], "refresh_token": first["refresh_token"]},
+    )
+    refresh_second = await client.post(
+        "/auth/refresh",
+        json={"session_id": second["session_id"], "refresh_token": second["refresh_token"]},
+    )
+    assert refresh_first.status_code == 401
+    assert refresh_second.status_code == 401
