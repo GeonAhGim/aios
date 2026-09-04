@@ -58,4 +58,41 @@ describe("useConflictRetry", () => {
     expect(refetch).not.toHaveBeenCalled();
     expect(mutate).toHaveBeenCalledTimes(1);
   });
+
+  // task-1308: run(...args)이 재시도에도 원호출과 같은 인자를 넘겨야 한다 — 호출부가
+  // 클로저로 대상을 캡처해 공유 ref 우회를 없앨 수 있는 근거.
+  it("run(arg)은 재시도 mutate에도 같은 arg를 넘긴다", async () => {
+    const refetch = vi.fn().mockResolvedValue(undefined);
+    let calls = 0;
+    const mutate = vi.fn(async (target: string) => {
+      calls += 1;
+      if (calls === 1) throw new ApiError(409, "충돌", undefined, "STATE_CONCURRENCY_CONFLICT");
+      return target;
+    });
+    const { result } = renderHook(() => useConflictRetry(mutate, refetch));
+
+    await expect(result.current.run("A")).resolves.toBe("A");
+    expect(mutate).toHaveBeenNthCalledWith(1, "A");
+    expect(mutate).toHaveBeenNthCalledWith(2, "A");
+  });
+
+  it("동시에 다른 인자로 run을 두 번 호출해도 각 호출은 자신의 인자로만 재시도한다", async () => {
+    const refetch = vi.fn().mockResolvedValue(undefined);
+    const attempts: Record<string, number> = {};
+    const mutate = vi.fn(async (target: string) => {
+      attempts[target] = (attempts[target] ?? 0) + 1;
+      if (target === "A" && attempts[target] === 1) {
+        throw new ApiError(409, "충돌", undefined, "STATE_CONCURRENCY_CONFLICT");
+      }
+      return target;
+    });
+    const { result } = renderHook(() => useConflictRetry(mutate, refetch));
+
+    const runA = result.current.run("A");
+    const runB = result.current.run("B");
+
+    await expect(runA).resolves.toBe("A");
+    await expect(runB).resolves.toBe("B");
+    expect(mutate.mock.calls.map((c) => c[0])).toEqual(["A", "B", "A"]);
+  });
 });

@@ -321,3 +321,86 @@ describe("ExchangeManagementPage 5xx·409 재시도 배선", () => {
     expect(screen.queryByText(/다른 요청과 충돌했습니다/)).not.toBeInTheDocument();
   });
 });
+
+// task-1308 P0: revokeExchangeRef(useRef)로 해지 대상을 넘기면, A의 409 재시도가
+// 대기하는 동안 사용자가 B를 클릭해 ref 값이 바뀌어 A의 재시도가 B를 해지해버렸다.
+// useConflictRetry.run(exchangeToRevoke)로 클로저 캡처해 고친다.
+describe("ExchangeManagementPage 해지 409 재시도 동시성(task-1308)", () => {
+  it("negative: A 해지가 409로 재시도 대기 중 B를 해지해도 A의 재시도는 A를 해지한다(mutateAsync 인자 직접 단언)", async () => {
+    credentialsData = [
+      credential({ id: 1, exchange: "bitget" }),
+      credential({ id: 2, exchange: "kis" }),
+    ];
+    let bitgetCalls = 0;
+    revokeMutateAsync = vi.fn(async (target: string) => {
+      if (target === "bitget") {
+        bitgetCalls += 1;
+        if (bitgetCalls === 1) {
+          throw new ApiError(409, "충돌", undefined, "STATE_CONCURRENCY_CONFLICT");
+        }
+      }
+      return undefined;
+    });
+    renderPage();
+
+    const [revokeA, revokeB] = screen.getAllByRole("button", { name: "해지" });
+    fireEvent.click(revokeA);
+    // A의 해지 요청이 이미 나간 뒤(동기 호출) B를 클릭한다 — 공유 ref였다면 이 시점에
+    // 재시도 대상이 "kis"로 덮어써진다.
+    fireEvent.click(revokeB);
+
+    await waitFor(() => expect(revokeMutateAsync).toHaveBeenCalledTimes(3));
+    expect(revokeMutateAsync.mock.calls.map((c) => c[0])).toEqual(["bitget", "kis", "bitget"]);
+    expect(refetch).toHaveBeenCalledTimes(1);
+    await waitFor(() => expect(revokeA).not.toBeDisabled());
+    expect(revokeB).not.toBeDisabled();
+  });
+
+  it("negative: 재시도 후에도 409면 재시도는 1회로 멈추고 refetch → mutate 순서를 지킨다", async () => {
+    credentialsData = [credential({ id: 1, exchange: "bitget" })];
+    const callOrder: string[] = [];
+    revokeMutateAsync = vi.fn(async (target: string) => {
+      callOrder.push(`mutate:${target}`);
+      throw new ApiError(409, "충돌", undefined, "STATE_CONCURRENCY_CONFLICT");
+    });
+    refetch.mockImplementation(async () => {
+      callOrder.push("refetch");
+    });
+    renderPage();
+
+    fireEvent.click(screen.getByRole("button", { name: "해지" }));
+
+    await waitFor(() => expect(revokeMutateAsync).toHaveBeenCalledTimes(2));
+    expect(refetch).toHaveBeenCalledTimes(1);
+    expect(callOrder).toEqual(["mutate:bitget", "refetch", "mutate:bitget"]);
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "해지" })).not.toBeDisabled(),
+    );
+  });
+
+  it("해지 pending 중에는 해당 행 버튼만 disable된다(중복 제출 차단)", async () => {
+    credentialsData = [
+      credential({ id: 1, exchange: "bitget" }),
+      credential({ id: 2, exchange: "kis" }),
+    ];
+    let resolveBitget: (() => void) | undefined;
+    revokeMutateAsync = vi.fn((target: string) => {
+      if (target === "bitget") {
+        return new Promise<void>((resolve) => {
+          resolveBitget = resolve;
+        });
+      }
+      return Promise.resolve(undefined);
+    });
+    renderPage();
+
+    const [revokeA, revokeB] = screen.getAllByRole("button", { name: "해지" });
+    fireEvent.click(revokeA);
+
+    expect(revokeA).toBeDisabled();
+    expect(revokeB).not.toBeDisabled();
+
+    resolveBitget?.();
+    await waitFor(() => expect(revokeA).not.toBeDisabled());
+  });
+});

@@ -26,7 +26,7 @@ import {
   PageHeader,
   Select,
 } from "@aios/ui-web";
-import { useRef, useState, type FormEvent } from "react";
+import { useState, type FormEvent } from "react";
 import { AppShell } from "../../components/layout/AppShell";
 import { BadRequestNotice } from "../../components/BadRequestNotice";
 import { ErrorMessage } from "../../components/ErrorMessage";
@@ -120,29 +120,38 @@ export function ExchangeManagementPage() {
   const [apiSecret, setApiSecret] = useState("");
   const [apiPassphrase, setApiPassphrase] = useState("");
   const [error, setError] = useState<unknown>(null);
-  const [revokeError, setRevokeError] = useState<unknown>(null);
+  const [revokeError, setRevokeError] = useState<{ exchange: string; error: unknown } | null>(
+    null,
+  );
+  const [revokingExchange, setRevokingExchange] = useState<string | null>(null);
   const [selectedExchange, setSelectedExchange] = useState<string | null>(null);
   const { data: balances } = useExchangeBalance(selectedExchange);
   const { fieldErrors, setFromError, clearField } = useFieldErrors();
 
   // §3.3 409 STATE_CONCURRENCY_CONFLICT → useConflictRetry(task-937)가 refetch 후 1회
-  // 재시도한다. 해지 대상은 행마다 달라 ref로 넘긴다(mutate는 인자를 받지 않는다).
-  const revokeExchangeRef = useRef("");
+  // 재시도한다. 해지 대상은 클릭 시점에 run(exchangeToRevoke)의 인자로 캡처해 원호출과
+  // 재시도가 같은 값을 쓴다(task-1308: 공유 ref는 재시도 시점에 다른 행 클릭으로 값이
+  // 바뀔 수 있어 엉뚱한 거래소를 해지할 수 있었다).
   const { run: revokeWithRetry } = useConflictRetry(
-    () => revoke.mutateAsync(revokeExchangeRef.current),
+    (exchangeToRevoke: string) => revoke.mutateAsync(exchangeToRevoke),
     refetch,
   );
 
-  function performRevoke() {
-    revokeWithRetry().catch((err: unknown) => {
-      setRevokeError(err instanceof ApiError ? err : new Error("해지에 실패했습니다."));
-    });
+  function performRevoke(exchangeToRevoke: string) {
+    setRevokingExchange(exchangeToRevoke);
+    revokeWithRetry(exchangeToRevoke)
+      .catch((err: unknown) => {
+        setRevokeError({
+          exchange: exchangeToRevoke,
+          error: err instanceof ApiError ? err : new Error("해지에 실패했습니다."),
+        });
+      })
+      .finally(() => setRevokingExchange(null));
   }
 
   function handleRevoke(exchangeToRevoke: string) {
     setRevokeError(null);
-    revokeExchangeRef.current = exchangeToRevoke;
-    performRevoke();
+    performRevoke(exchangeToRevoke);
   }
 
   // 409는 위와 동일하게 useConflictRetry가 처리한다. idempotencyKey를 넘기지 않으므로
@@ -223,7 +232,7 @@ export function ExchangeManagementPage() {
                         type="button"
                         variant="danger"
                         size="sm"
-                        disabled={scope.isLive}
+                        disabled={scope.isLive || revokingExchange === c.exchange}
                         onClick={() => handleRevoke(c.exchange)}
                       >
                         해지
@@ -240,10 +249,11 @@ export function ExchangeManagementPage() {
           {revokeError !== null && (
             <div className="mt-4">
               <RevokeCredentialError
-                error={revokeError}
+                error={revokeError.error}
                 onRetry={() => {
+                  const exchangeToRevoke = revokeError.exchange;
                   setRevokeError(null);
-                  performRevoke();
+                  performRevoke(exchangeToRevoke);
                 }}
               />
             </div>
