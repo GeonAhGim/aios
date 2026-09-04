@@ -17,6 +17,7 @@ import asyncpg
 
 from src.core.db.conditional_write import ConcurrencyConflictError
 from src.foundation.risk_gate.domain.models import (
+    FenceSnapshot,
     GateKind,
     RiskEvaluation,
     RiskOutcome,
@@ -178,6 +179,30 @@ class PostgresRiskGateRepository:
                 fingerprint,
             )
         return _row_to_evaluation(row) if row is not None else None
+
+    async def read_fences(
+        self, pairs: tuple[tuple[SafetyScope, str], ...]
+    ) -> FenceSnapshot:
+        # 78번 §3.6 — row-constructor IN 리스트는 스칼라 파라미터만 바인딩
+        # 하므로(배열 타입이 아니다) asyncpg의 튜플-리스트 바인딩 제약을
+        # 피하면서도 단일 쿼리(1 round trip)로 여러 쌍을 조회할 수 있다.
+        row_values = ", ".join(f"(${i * 2 + 1}, ${i * 2 + 2})" for i in range(len(pairs)))
+        flat_params: list[object] = []
+        for scope, scope_ref in pairs:
+            flat_params.extend([scope.value, scope_ref])
+
+        async with self._pool.acquire() as conn:
+            rows = await conn.fetch(
+                "SELECT scope, scope_ref, current_token FROM safety_fence "
+                f"WHERE (scope, scope_ref) IN ({row_values})",
+                *flat_params,
+            )
+        found = {
+            (SafetyScope(row["scope"]), row["scope_ref"]): row["current_token"] for row in rows
+        }
+        # 한 번도 activate된 적 없는 (scope, scope_ref)는 행이 없다 — 토큰
+        # 0(기준선)으로 채운다.
+        return FenceSnapshot(tokens={pair: found.get(pair, 0) for pair in pairs})
 
     async def invalidate_evaluations(self, *, tenant_id: UUID | None) -> None:
         async with self._pool.acquire() as conn:

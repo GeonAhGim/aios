@@ -5,7 +5,12 @@ from __future__ import annotations
 from typing import Protocol
 from uuid import UUID
 
-from src.foundation.risk_gate.domain.models import RiskEvaluation, SafetyControl, SafetyScope
+from src.foundation.risk_gate.domain.models import (
+    FenceSnapshot,
+    RiskEvaluation,
+    SafetyControl,
+    SafetyScope,
+)
 
 
 class RiskGateRepository(Protocol):
@@ -58,6 +63,16 @@ class RiskGateRepository(Protocol):
         self, tenant_id: UUID, fingerprint: str
     ) -> RiskEvaluation | None:
         """75번 mandates의 get_cached_decision과 동일 원칙 — 짧은 TTL 캐시."""
+        ...
+
+    async def read_fences(
+        self, pairs: tuple[tuple[SafetyScope, str], ...]
+    ) -> FenceSnapshot:
+        """78번 §3.6 — 지정된 (scope, scope_ref) 쌍들의 현재 fence 토큰을
+        `WHERE (scope,scope_ref) IN (...)` 단일 쿼리로 조회한다(쌍마다 왕복
+        하지 않는다). 아직 한 번도 activate되지 않아 행이 없는 쌍은 토큰
+        0으로 채워 반환한다(구현체 책임 — `FenceSnapshot.tokens`는 요청한
+        모든 pairs를 키로 갖는다)."""
         ...
 
     async def invalidate_evaluations(self, *, tenant_id: UUID | None) -> None:

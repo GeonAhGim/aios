@@ -4,6 +4,7 @@ Spec: AIOSproject 78_risk_safety_l3_build_and_operational_specification_v1.0.md 
 """
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
@@ -100,3 +101,13 @@ class RiskEvaluationInput:
     """None이면 이 게이트에 connection freshness가 해당 없음(예: connection이
     아직 없는 최초 mandate 평가)."""
     active_controls: tuple[SafetyControl, ...] = field(default_factory=tuple)
+
+
+@dataclass(frozen=True)
+class FenceSnapshot:
+    """78번 §3.6 fence 관통 제출 시퀀스의 F0/F1/F2 — (scope, scope_ref)별
+    단조증가 토큰의 한 시점 관측. 행이 아직 없는 (scope, scope_ref)는 토큰
+    0(한 번도 activate된 적 없음)으로 채워져 들어온다(read_fences 어댑터
+    책임) — 그래야 `is_stale`이 "관측 안 됨"과 "0"을 같은 값으로 비교한다."""
+
+    tokens: Mapping[tuple[SafetyScope, str], int]
