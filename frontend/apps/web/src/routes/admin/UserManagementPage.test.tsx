@@ -155,3 +155,56 @@ describe("UserManagementPage 사용자 조치 실패 표시", () => {
     expect(screen.queryByText("raw transition detail")).not.toBeInTheDocument();
   });
 });
+
+// useSuspendSeller/useChangeUserStatus는 성공 시 실제로 ["adminUsers"] 쿼리를
+// invalidate해 목록을 재조회한다(packages/shared-hooks/src/useAdmin.ts) — 여기서는
+// 그 재조회 결과가 실제로 반영되면 화면이 갱신되는지를 실제 DOM으로 확인한다.
+describe("UserManagementPage 조치 성공 시 목록 갱신", () => {
+  it("판매정지 성공 후 재조회 결과가 반영되면 상태 배지가 SUSPENDED로 갱신된다", async () => {
+    const { rerender } = renderPage();
+
+    clickSuspend();
+
+    usersResult = {
+      data: [{ ...USER, status: "SUSPENDED" }],
+      isLoading: false,
+      isError: false,
+      error: null,
+      refetch: refetchUsers,
+    };
+    rerender(
+      <MemoryRouter>
+        <UserManagementPage />
+      </MemoryRouter>,
+    );
+
+    await waitFor(() =>
+      expect(screen.getByText("SUSPENDED", { selector: "span" })).toBeInTheDocument(),
+    );
+    expect(screen.queryByText("ACTIVE", { selector: "span" })).not.toBeInTheDocument();
+  });
+
+  it("상태변경 성공 후 재조회 결과가 반영되면 상태 배지가 SUSPENDED로 갱신된다", async () => {
+    const { rerender } = renderPage();
+
+    fireEvent.change(screen.getByRole("combobox"), { target: { value: "SUSPENDED" } });
+
+    usersResult = {
+      data: [{ ...USER, status: "SUSPENDED" }],
+      isLoading: false,
+      isError: false,
+      error: null,
+      refetch: refetchUsers,
+    };
+    rerender(
+      <MemoryRouter>
+        <UserManagementPage />
+      </MemoryRouter>,
+    );
+
+    await waitFor(() =>
+      expect(screen.getByText("SUSPENDED", { selector: "span" })).toBeInTheDocument(),
+    );
+    expect(screen.queryByText("ACTIVE", { selector: "span" })).not.toBeInTheDocument();
+  });
+});

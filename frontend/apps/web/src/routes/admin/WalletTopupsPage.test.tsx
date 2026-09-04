@@ -182,3 +182,32 @@ describe("WalletTopupsPage 입금확인 실패 표시", () => {
     );
   });
 });
+
+// useConfirmTopup은 성공 시 실제로 ["pendingTopups"] 쿼리를 invalidate해 대기
+// 목록을 재조회한다(packages/shared-hooks/src/useAdmin.ts) — 여기서는 그 재조회
+// 결과가 실제로 반영되면 확인된 건이 목록에서 사라지는지를 확인한다.
+describe("WalletTopupsPage 입금확인 성공 시 목록 갱신", () => {
+  it("입금 확인 성공 후 재조회 결과가 반영되면 목록에서 사라지고 빈 상태가 표시된다", async () => {
+    const { rerender } = renderPage();
+
+    clickConfirm();
+
+    topupsResult = {
+      data: { items: [], total: 0, page: 1, pageSize: 20 },
+      isLoading: false,
+      isError: false,
+      error: null,
+      refetch: refetchTopups,
+    };
+    rerender(
+      <MemoryRouter>
+        <WalletTopupsPage />
+      </MemoryRouter>,
+    );
+
+    await waitFor(() =>
+      expect(screen.getByText("대기 중인 충전 요청이 없습니다.")).toBeInTheDocument(),
+    );
+    expect(screen.queryByText("충전요청 #4")).not.toBeInTheDocument();
+  });
+});

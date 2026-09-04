@@ -165,3 +165,32 @@ describe("VerificationQueuePage 검수 판정 실패 표시", () => {
     expect(screen.queryByText("raw transition detail")).not.toBeInTheDocument();
   });
 });
+
+// useVerifyListing은 성공 시 실제로 ["verificationQueue"] 쿼리를 invalidate해
+// 대기열을 재조회한다(packages/shared-hooks/src/useMarketplace.ts) — 여기서는 그
+// 재조회 결과가 실제로 반영되면 처리된 건이 목록에서 사라지는지를 확인한다.
+describe("VerificationQueuePage 판정 성공 시 목록 갱신", () => {
+  it("승인 성공 후 재조회 결과가 반영되면 대기열에서 사라지고 빈 상태가 표시된다", async () => {
+    const { rerender } = renderPage();
+
+    clickApprove();
+
+    queueResult = {
+      data: [],
+      isLoading: false,
+      isError: false,
+      error: null,
+      refetch: refetchQueue,
+    };
+    rerender(
+      <MemoryRouter>
+        <VerificationQueuePage />
+      </MemoryRouter>,
+    );
+
+    await waitFor(() =>
+      expect(screen.getByText("대기 중인 검수 건이 없습니다.")).toBeInTheDocument(),
+    );
+    expect(screen.queryByText("strat-1@1")).not.toBeInTheDocument();
+  });
+});
