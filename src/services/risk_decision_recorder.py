@@ -18,11 +18,11 @@ from datetime import timedelta
 from typing import Any, Protocol
 
 import asyncpg
+from pydantic import BaseModel
 
 from src.core.event_bus.bus import EventBus
 from src.core.logging.audit_log import record_audit_log
 from src.core.risk.decision import RiskDecision, RiskOutcome
-from src.core.risk.inputs import RiskInputs
 
 logger = logging.getLogger(__name__)
 
@@ -95,7 +95,12 @@ class RiskDecisionRecorder:
         self._decision_repo = decision_repo
         self._event_bus = event_bus
 
-    async def record(self, decision: RiskDecision, inputs: RiskInputs, *, actor: str) -> None:
+    async def record(self, decision: RiskDecision, inputs: BaseModel, *, actor: str) -> None:
+        """`inputs`는 `RiskInputs`(PRE_TRADE류)로 좁히지 않는다 — R-35
+        PRE_SUBMIT처럼 주문 세부사항(OrderIntent) 없이 안전 상태만 평가하는
+        게이트는 그 필드를 채울 근거가 없어 자신만의 좁은 스냅샷 모델을
+        쓴다(구체적 스키마는 게이트별 자유, `model_dump(mode="json")`만
+        요구)."""
         effective = await self._apply_clock_skew_guard(decision)
         inputs_snapshot = inputs.model_dump(mode="json")  # 재해시 안 함 — mode="python" 불필요
 

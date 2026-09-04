@@ -87,6 +87,26 @@ class RiskGateRepository(Protocol):
         control)의 캐시를 지운다."""
         ...
 
+    async def read_fence_and_controls(
+        self, pairs: tuple[tuple[SafetyScope, str], ...]
+    ) -> tuple[FenceSnapshot, tuple[SafetyControl, ...]]:
+        """R-35 PRE_SUBMIT 게이트 전용 — `pairs`에 걸친 fence 토큰과 그
+        pairs에 매치되는 ACTIVE control을 같은 트랜잭션(REPEATABLE READ)에서
+        함께 읽는다. 두 값을 별도 왕복(각자 새 연결)으로 읽으면 그 사이에
+        control이 새로 활성화될 때 "이 결정은 어떤 control 상태를 보고
+        내려졌는가"와 "F0가 어떤 순간의 fence인가"가 어긋날 수 있다 —
+        반환된 F0는 control 조회와 같은 스냅샷에서 읽힌 값이어야 이후
+        fenced_submit의 stale 비교가 이 결정의 근거와 정확히 대응한다."""
+        ...
+
+    async def read_safety_state(
+        self, *, provider_code: str, symbol: str
+    ) -> tuple[str | None, str | None]:
+        """(circuit_breaker_level, data_distrust_level) 단일 왕복. §3.5 SQL
+        조각 중 안전 상태 두 열만 떼어낸 것 — exposure 집계가 필요 없는
+        PRE_SUBMIT류 게이트가 쓴다."""
+        ...
+
 
 class RiskLimitRepository(Protocol):
     """R-26 — `risk_limit`/`risk_limit_breach` 저장소 포트."""
