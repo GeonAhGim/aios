@@ -18,18 +18,25 @@ AST로 `src/services/execution_loop/**`, `src/services/order_service/**`,
 - 타입 애너테이션이 `Optional[...]` 또는 `... | None`
 - 기본값이 리터럴 `None`
 
-현재 코드에는 위반이 1건 있다 — `ExecutionLoopScheduler.__init__`의
-`pre_submit_gate: PreSubmitGate | None = None`(`src/services/execution_loop/
-scheduler.py`) — 이것이 정확히 이 스펙 문서 §1이 지적하는 P0-R2 배선 결함의
-원인이다(`background_loops.py`가 이 기본값에 기대 게이트를 안 넘겨도 조용히
-통과한다). EO-03이 이 시그니처를 필수 인자로 바꾸면 이 위반은 사라진다.
+도입 시점(task-1115)에는 위반이 1건 있었다 — `ExecutionLoopScheduler.__init__`의
+`pre_submit_gate: PreSubmitGate | None = None`. task-1118(EO-03)이 이 인자를
+필수로 바꾸면서 그 위반은 사라졌지만, 같은 커밋이 신설한
+`lease_ttl_seconds: float | None = None`(`src/services/execution_loop/
+scheduler.py`, "지정 없으면 `interval_sec`의 배수로 기본값 계산"이라는
+정상적인 "옵션 오버라이드" 패턴)이 파라미터명에 `lease`가 들어간다는 이유로
+새로 걸린다 — 이 스캐너는 안전 게이트/모니터/리스 *객체* 참조와, 이름에
+우연히 `lease`가 포함된 숫자형 설정값(TTL)을 구분하지 못하는 알려진 오탐이다.
+`_scan_violations()`를 다시 돌려 무엇이 걸리는지 항상 최신 상태로 확인할 것 —
+이 docstring의 예시가 아니라 실행 결과를 신뢰한다.
 
 **strict 전환 조건**: 이 테스트는 지금 `xfail(strict=False)`로 도입한다(현재
-알려진 결함을 곧바로 CI 빨간불로 만들지 않기 위해서다 — EO-03/EO-04가 아직
-배정되지 않은 시점에 이 테스트만 추가하는 리프이기 때문). EO-04(`background_
-loops.py` 조립부 수정)가 완료되어 `_scan_violations()`가 빈 리스트를 반환하는
-것을 이 파일을 다시 실행해 확인하면, `xfail` 마커를 제거하고(또는
-`strict=True`로 바꾸고) `test_no_optional_safety_gate_constructor_params`를
+알려진 결함/오탐을 곧바로 CI 빨간불로 만들지 않기 위해서다). strict 전환은
+`_scan_violations()`가 빈 리스트를 반환할 때만 가능한데, 그러려면 (a) EO-04가
+실제 배선 결함을 마저 고치는 것과, (b) `lease_ttl_seconds`류 오탐을 없애는
+것(스캐너의 `lease` 마커를 게이트 객체 참조로 좁히거나, 해당 파라미터명을
+바꾸는 것 — 둘 중 어느 쪽이 맞는지는 이 리프의 범위 밖이라 결정하지 않는다)
+둘 다 필요하다. 그 상태를 이 파일을 다시 실행해 확인하면, `xfail` 마커를
+제거하고(또는 `strict=True`로 바꾸고) `test_no_optional_safety_gate_constructor_params`를
 일반 통과 테스트로 전환한다 — 그래야 이후 누군가 같은 패턴의 결함(Optional
 안전 게이트 기본값)을 재도입하면 이 테스트가 진짜로 CI를 막는다.
 """
@@ -229,10 +236,9 @@ def test_scanner_ignores_non_constructor_non_factory_functions():
 @pytest.mark.xfail(
     strict=False,
     reason=(
-        "EO-06 도입 시점(task-1115) 기준 알려진 위반 1건: "
-        "src/services/execution_loop/scheduler.py:ExecutionLoopScheduler.__init__"
-        "(pre_submit_gate) — EO-03/EO-04가 고칠 대상. strict 전환 조건은 이 "
-        "파일 모듈 docstring 참조."
+        "task-1115 도입 시점 위반(pre_submit_gate)은 task-1118(EO-03)이 해소했으나 "
+        "같은 커밋이 신설한 lease_ttl_seconds(스캐너 오탐 — 게이트 객체가 아닌 "
+        "TTL 설정값)가 새로 걸림. strict 전환 조건은 이 파일 모듈 docstring 참조."
     ),
 )
 def test_no_optional_safety_gate_constructor_params():
