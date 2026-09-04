@@ -4,6 +4,7 @@
 """
 import json
 import uuid
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from pathlib import Path
 
@@ -11,6 +12,7 @@ import asyncpg
 import pytest
 from dotenv import dotenv_values
 
+from src.core.safety.data_freshness import DataFreshnessTracker
 from src.core.safety.metrics_collector import (
     ApiCallTracker,
     _order_reject_rate_pct,
@@ -162,4 +164,23 @@ async def test_collect_circuit_breaker_metrics_uses_tracker_for_api_fields(pool)
     metrics = await collect_circuit_breaker_metrics(pool, tracker)
 
     assert metrics.api_error_rate_pct == Decimal("50")
-    assert metrics.data_delay_sec == Decimal("0")
+    # freshness_tracker 미배선 호출부는 data_delay_sec=None("모름")을 받는다
+    # (R-43) — 상수 0으로 뭉개면 CB가 stale 데이터에서도 트립하지 않는다.
+    assert metrics.data_delay_sec is None
+
+
+async def test_collect_circuit_breaker_metrics_reads_data_delay_from_freshness_tracker(pool):
+    freshness = DataFreshnessTracker()
+    close_time = datetime.now(timezone.utc) - timedelta(seconds=30)
+    freshness.record("bitget", "BTC/USDT", close_time)
+
+    metrics = await collect_circuit_breaker_metrics(pool, ApiCallTracker(), freshness)
+
+    assert metrics.data_delay_sec is not None
+    assert metrics.data_delay_sec >= Decimal("30")
+
+
+async def test_collect_circuit_breaker_metrics_data_delay_none_when_freshness_tracker_empty(pool):
+    metrics = await collect_circuit_breaker_metrics(pool, ApiCallTracker(), DataFreshnessTracker())
+
+    assert metrics.data_delay_sec is None

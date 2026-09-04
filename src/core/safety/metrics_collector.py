@@ -1,28 +1,31 @@
 """9.4 evaluate(metrics) 실배선 — CircuitBreakerMetrics 수집기.
 
 Spec: 정책문서 8.6-B, config/risk_policy.yaml circuit_breaker 섹션.
-PM 배정 ⑤(agent-platform-12, 2026-09-03).
+PM 배정 ⑤(agent-platform-12, 2026-09-03) + R-43(2026-09-04).
 
 `CircuitBreakerService.evaluate()`가 소비하는 5개 지표 중, DB만으로
 정직하게 계산 가능한 2개(order_reject_rate_pct, daily_loss_pct)는 이
 모듈이 직접 쿼리한다. 나머지 3개(api_error_rate_pct, api_disconnect_sec,
-data_delay_sec)는 실시간 관측이 필요해 이 모듈 스스로 "만들지" 않는다
-— `ApiCallTracker`는 호출부(실제로 어댑터를 부르는 지점)가
-`record_success()`/`record_failure()`로 보고한 결과를 누적할 뿐이다.
-`data_delay_sec`는 아직 그 관측 지점 자체가 없어(정직한 축소, watchdog_
-process.py 모듈 docstring과 동일 원칙) 항상 0을 반환한다 — 실계산이
-필요해지면 최근 캔들 close_time을 어딘가에 남기는 leaf가 먼저 필요하다.
+data_delay_sec)는 실시간 관측이 필요해 이 모듈 스스로 "만들지" 않는다 —
+`ApiCallTracker`는 호출부(실제로 어댑터를 부르는 지점)가
+`record_success()`/`record_failure()`로 보고한 결과를 누적할 뿐이고,
+`data_delay_sec`는 R-42가 만든 `DataFreshnessTracker`(주입받는 옵션
+인자)의 `max_delay_sec(now)`를 그대로 읽는다 — 트래커가 없거나 아직
+관측이 0건이면 `None`을 그대로 돌려준다("모름"을 "지연 0초"로 뭉개지
+않는다, fail-closed는 circuit_breaker.compute_level의 몫).
 """
 from __future__ import annotations
 
 import time
 from collections import deque
 from collections.abc import Callable
+from datetime import datetime, timezone
 from decimal import Decimal
 
 import asyncpg
 
 from src.core.safety.circuit_breaker import CircuitBreakerMetrics
+from src.core.safety.data_freshness import DataFreshnessTracker
 
 _ORDER_REJECT_WINDOW_MINUTES = 60
 
@@ -116,12 +119,24 @@ async def _daily_loss_pct(pool: asyncpg.Pool) -> Decimal:
 
 
 async def collect_circuit_breaker_metrics(
-    pool: asyncpg.Pool, api_tracker: ApiCallTracker
+    pool: asyncpg.Pool,
+    api_tracker: ApiCallTracker,
+    freshness_tracker: DataFreshnessTracker | None = None,
 ) -> CircuitBreakerMetrics:
+    """`freshness_tracker`는 기존 호출부 무회귀를 위한 옵션 인자(기본 None) —
+    아직 배선되지 않은 호출부는 `data_delay_sec=None`("모름")을 받는다. 이를
+    `Decimal("0")`("지연 없음")으로 대체하지 않는다 — 두 상태는 의미가 다르고,
+    None을 0으로 뭉개면 CB가 stale 데이터에서도 절대 트립하지 않는 fail-open
+    결함(§9 R-43 원문)이 재발한다."""
+    data_delay_sec = (
+        freshness_tracker.max_delay_sec(datetime.now(timezone.utc))
+        if freshness_tracker is not None
+        else None
+    )
     return CircuitBreakerMetrics(
         api_error_rate_pct=api_tracker.error_rate_pct(),
         api_disconnect_sec=api_tracker.seconds_since_last_success(),
-        data_delay_sec=Decimal("0"),  # 정직한 축소 — §모듈 docstring 참조
+        data_delay_sec=data_delay_sec,
         order_reject_rate_pct=await _order_reject_rate_pct(pool),
         daily_loss_pct=await _daily_loss_pct(pool),
     )

@@ -56,7 +56,12 @@ def _deny(reason_code: str) -> RecoveryDecision:
 
 
 def _is_baseline(metrics: CircuitBreakerMetrics) -> bool:
-    return all(getattr(metrics, field) <= _ZERO for field in _METRIC_FIELDS)
+    # data_delay_sec가 None("모름", R-43)이면 baseline이 아니다 — 지연을
+    # 관측하지 못한 상태를 "지연 없음"으로 읽으면 재가동 판정이 fail-open된다.
+    return all(
+        (value := getattr(metrics, field)) is not None and value <= _ZERO
+        for field in _METRIC_FIELDS
+    )
 
 
 def can_reactivate(

@@ -28,6 +28,7 @@ import asyncpg
 from pydantic import BaseModel
 
 from src.core.approval import service as approval
+from src.core.db.conditional_write import ConcurrencyConflictError
 from src.core.loader.risk_policy_loader import CircuitBreakerPolicy
 
 logger = logging.getLogger(__name__)
@@ -57,7 +58,12 @@ _AUTO_DOWNGRADABLE = {CircuitBreakerLevel.WARNING, CircuitBreakerLevel.RESTRICTE
 
 class CircuitBreakerMetrics(BaseModel):
     api_error_rate_pct: Decimal = Decimal("0")
-    data_delay_sec: Decimal = Decimal("0")
+    # None = 관측 0건("모름"), Decimal("0") = 관측됐고 지연 없음("앎"). 두 상태를
+    # 섞지 않는다 — compute_level의 _exceeds_or_unknown()이 None을 항상 임계
+    # 초과(fail-closed)로 취급한다. 기본값은 0(명시적으로 지연 없음)으로 남긴다 —
+    # 이 필드를 신경 쓰지 않는 기존 호출부(다른 지표를 테스트하는 코드)가
+    # 실측 배선 여부와 무관하게 이전과 같은 NORMAL 판정을 받도록 하기 위함이다.
+    data_delay_sec: Decimal | None = Decimal("0")
     order_reject_rate_pct: Decimal = Decimal("0")
     daily_loss_pct: Decimal = Decimal("0")
     api_disconnect_sec: Decimal = Decimal("0")
@@ -66,6 +72,14 @@ class CircuitBreakerMetrics(BaseModel):
 class CircuitBreakerState(BaseModel):
     level: CircuitBreakerLevel
     reactivation_approval_id: int | None
+
+
+def _exceeds_or_unknown(value: Decimal | None, threshold: float) -> bool:
+    """`value`가 None이면 관측 0건("모름")이다 — 모름을 "임계 미만이라 안전"으로
+    읽으면 fail-open이 된다(R3/R7 결함 원문). 미상은 항상 임계 초과로 취급한다."""
+    if value is None:
+        return True
+    return value >= threshold
 
 
 def compute_level(
@@ -80,16 +94,15 @@ def compute_level(
         or metrics.api_disconnect_sec >= policy.emergency.api_disconnect_sec
     ):
         candidates.append(CircuitBreakerLevel.EMERGENCY)
-    if metrics.data_delay_sec >= policy.halted.data_delay_sec:
+    if _exceeds_or_unknown(metrics.data_delay_sec, policy.halted.data_delay_sec):
         candidates.append(CircuitBreakerLevel.HALTED)
     if (
         metrics.api_error_rate_pct >= policy.restricted.api_error_rate_pct
         or metrics.order_reject_rate_pct >= policy.restricted.order_reject_rate_pct
     ):
         candidates.append(CircuitBreakerLevel.RESTRICTED)
-    if (
-        metrics.api_error_rate_pct >= policy.warning.api_error_rate_pct
-        or metrics.data_delay_sec >= policy.warning.data_delay_sec
+    if metrics.api_error_rate_pct >= policy.warning.api_error_rate_pct or _exceeds_or_unknown(
+        metrics.data_delay_sec, policy.warning.data_delay_sec
     ):
         candidates.append(CircuitBreakerLevel.WARNING)
 
@@ -128,15 +141,20 @@ class CircuitBreakerService:
             if current.reactivation_approval_id is not None:
                 # 재가동 대기 중이던 상태가 재악화 — 요청 자동 취소(8.6-B 예외상황).
                 await approval.cancel(self._pool, current.reactivation_approval_id)
-                await self._set_level(current.level, reactivation_approval_id=None)
+                await self._set_level(
+                    current.level,
+                    reactivation_approval_id=None,
+                    expected=current,
+                )
+                current = CircuitBreakerState(level=current.level, reactivation_approval_id=None)
             if computed_sev > current_sev:
-                await self._set_level(computed, reactivation_approval_id=None)
+                await self._set_level(computed, reactivation_approval_id=None, expected=current)
                 await self._publish_level_changed(current.level, computed)
             return await self.get_state()
 
         # computed_sev < current_sev — 조건 완화
         if current.level in _AUTO_DOWNGRADABLE:
-            await self._set_level(computed, reactivation_approval_id=None)
+            await self._set_level(computed, reactivation_approval_id=None, expected=current)
             await self._publish_level_changed(current.level, computed)
         elif current.reactivation_approval_id is None:
             request = await approval.create_request(
@@ -147,7 +165,9 @@ class CircuitBreakerService:
                 context={"current_level": current.level.value, "computed_level": computed.value},
                 approval_mode="SOLO",
             )
-            await self._set_level(current.level, reactivation_approval_id=request.id)
+            await self._set_level(
+                current.level, reactivation_approval_id=request.id, expected=current
+            )
             if self._publish is not None:
                 await self._publish(
                     "risk.circuit_breaker.reactivation_requested",
@@ -170,7 +190,7 @@ class CircuitBreakerService:
         if _SEVERITY[min_level] > _SEVERITY[current.level]:
             if current.reactivation_approval_id is not None:
                 await approval.cancel(self._pool, current.reactivation_approval_id)
-            await self._set_level(min_level, reactivation_approval_id=None)
+            await self._set_level(min_level, reactivation_approval_id=None, expected=current)
             await self._publish_level_changed(current.level, min_level)
             logger.critical(
                 "Circuit Breaker 강제 격상: %s -> %s (%s)",
@@ -188,22 +208,41 @@ class CircuitBreakerService:
 
         request = await approval.get_request(self._pool, current.reactivation_approval_id)
         if request.status == "APPROVED":
-            await self._set_level(CircuitBreakerLevel.NORMAL, reactivation_approval_id=None)
+            await self._set_level(
+                CircuitBreakerLevel.NORMAL, reactivation_approval_id=None, expected=current
+            )
             await self._publish_level_changed(current.level, CircuitBreakerLevel.NORMAL)
         elif request.status in ("REJECTED", "EXPIRED", "CANCELLED"):
-            await self._set_level(current.level, reactivation_approval_id=None)
+            await self._set_level(current.level, reactivation_approval_id=None, expected=current)
         return await self.get_state()
 
     async def _set_level(
-        self, level: CircuitBreakerLevel, *, reactivation_approval_id: int | None
+        self,
+        level: CircuitBreakerLevel,
+        *,
+        reactivation_approval_id: int | None,
+        expected: CircuitBreakerState,
     ) -> None:
+        """105번 §4.2 형태 B — `expected`(직전 `get_state()`가 읽은 값)를 WHERE
+        조건으로 고정하는 CAS. 갱신 0행(다른 트랜잭션이 그 사이 먼저 썼음)이면
+        조용히 성공한 것처럼 흘려보내지 않고 ConcurrencyConflictError를 던져
+        호출자가 재조회 후 재판정하게 한다 — 무조건 UPDATE는 105 위반이다."""
         async with self._pool.acquire() as conn:
-            await conn.execute(
+            row = await conn.fetchrow(
                 "UPDATE system_safety_state "
                 "SET circuit_breaker_level = $1, reactivation_approval_id = $2, updated_at = now() "
-                "WHERE id = 1",
+                "WHERE id = 1 AND circuit_breaker_level = $3 "
+                "AND reactivation_approval_id IS NOT DISTINCT FROM $4 "
+                "RETURNING id",
                 level.value,
                 reactivation_approval_id,
+                expected.level.value,
+                expected.reactivation_approval_id,
+            )
+        if row is None:
+            raise ConcurrencyConflictError(
+                "system_safety_state: 다른 요청이 먼저 circuit breaker 상태를 "
+                "바꿨습니다(동시 처리 충돌) — 다시 조회 후 재판정하세요."
             )
 
     async def _publish_level_changed(

@@ -65,6 +65,18 @@ def test_cooldown_not_met_by_degraded_sample_denies() -> None:
     assert decision.reason_code == "RECOVERY_COOLDOWN_NOT_MET"
 
 
+def test_cooldown_not_met_by_unknown_data_delay_denies() -> None:
+    """R-43 — data_delay_sec=None("모름")은 baseline이 아니다. 관측이 없는
+    표본을 "지연 없음"으로 읽으면 재가동 판정이 fail-open된다."""
+    kwargs = _base_kwargs()
+    history = _clean_history()
+    history[-1] = CircuitBreakerMetrics(data_delay_sec=None)
+    kwargs["metrics_history"] = history
+    decision = can_reactivate(**kwargs)
+    assert decision.outcome == RiskOutcome.DENY
+    assert decision.reason_code == "RECOVERY_COOLDOWN_NOT_MET"
+
+
 def test_cooldown_sec_not_positive_denies() -> None:
     kwargs = _base_kwargs()
     kwargs["cooldown_sec"] = 0

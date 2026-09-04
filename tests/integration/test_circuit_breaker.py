@@ -3,6 +3,7 @@
 각 테스트 시작 전 normal/재가동없음으로 리셋해 전역 싱글톤 행 상태를
 격리한다.
 """
+import asyncio
 from decimal import Decimal
 from pathlib import Path
 
@@ -11,6 +12,7 @@ import pytest
 from dotenv import dotenv_values
 
 from src.core.approval import service as approval
+from src.core.db.conditional_write import ConcurrencyConflictError
 from src.core.loader.risk_policy_loader import load_risk_policy
 from src.core.safety.circuit_breaker import (
     CircuitBreakerLevel,
@@ -18,6 +20,7 @@ from src.core.safety.circuit_breaker import (
     CircuitBreakerService,
     compute_level,
 )
+from src.core.safety.data_freshness import DataFreshnessTracker
 from src.core.safety.metrics_collector import ApiCallTracker, collect_circuit_breaker_metrics
 
 _LEVEL_SEVERITY = {
@@ -160,3 +163,49 @@ async def test_escalation_from_halted_to_emergency_allowed_even_while_pending(po
         CircuitBreakerMetrics(daily_loss_pct=Decimal("6"))  # emergency 임계(5) 초과
     )
     assert emergency.level == CircuitBreakerLevel.EMERGENCY
+
+
+async def test_unknown_data_delay_does_not_read_as_normal(pool, policy):
+    """R-43 negative — freshness_tracker에 관측이 0건이면
+    collect_circuit_breaker_metrics()는 data_delay_sec=None("모름")을 돌려준다.
+    None을 "지연 없음"으로 읽으면 CB가 stale 데이터에서도 절대 트립하지 않는
+    fail-open이 된다(§9 R-43 원문 결함) — evaluate()가 NORMAL을 내면 안 된다."""
+    service = CircuitBreakerService(pool, policy)
+    metrics = await collect_circuit_breaker_metrics(
+        pool, ApiCallTracker(), DataFreshnessTracker()
+    )
+    assert metrics.data_delay_sec is None
+
+    result = await service.evaluate(metrics)
+
+    assert result.level != CircuitBreakerLevel.NORMAL
+    assert _LEVEL_SEVERITY[result.level] >= _LEVEL_SEVERITY[CircuitBreakerLevel.HALTED]
+
+
+async def test_concurrent_set_level_only_one_writer_wins(pool, policy):
+    """105번 §4.1 형태 A — 같은 stale `expected`(둘 다 NORMAL을 읽었다고 가정)에서
+    두 코루틴이 서로 다른 레벨로 동시에 `_set_level` CAS UPDATE를 시도하면,
+    Postgres 행 잠금이 둘을 직렬화한다 — 먼저 커밋한 쪽만 성공하고, 나중 쪽은
+    조용히 덮어쓰지 못하고 ConcurrencyConflictError를 받는다(105 위반이면
+    `WHERE` 조건이 없어 둘 다 성공 - 조용한 lost update)."""
+    service = CircuitBreakerService(pool, policy)
+    stale = await service.get_state()
+    assert stale.level == CircuitBreakerLevel.NORMAL
+
+    results = await asyncio.gather(
+        service._set_level(
+            CircuitBreakerLevel.WARNING, reactivation_approval_id=None, expected=stale
+        ),
+        service._set_level(
+            CircuitBreakerLevel.RESTRICTED, reactivation_approval_id=None, expected=stale
+        ),
+        return_exceptions=True,
+    )
+
+    successes = [r for r in results if r is None]
+    failures = [r for r in results if isinstance(r, ConcurrencyConflictError)]
+    assert len(successes) == 1
+    assert len(failures) == 1
+
+    final = await service.get_state()
+    assert final.level in (CircuitBreakerLevel.WARNING, CircuitBreakerLevel.RESTRICTED)
