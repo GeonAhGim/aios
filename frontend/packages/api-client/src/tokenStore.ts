@@ -34,15 +34,20 @@
 // 시점에 등록된 clear()가 1회 호출되어 보관 중인 토큰 쌍을 전량 폐기한다 —
 // 재시도는 하지 않는다(호출부는 여전히 false만 받고 그대로 포기한다).
 
-import { parseTokenPair, shouldPreRefresh, type ParsedTokenPair } from "@aios/shared-types";
+import {
+  DEFAULT_SKEW_SEC,
+  parseTokenPair,
+  shouldPreRefresh,
+  type ParsedTokenPair,
+} from "@aios/shared-types";
 import { configureTokenClearHandler, refreshAccessToken } from "./tokenRefresh";
 
 const REDACTED = "[REDACTED]";
 
-// tokenPair.ts의 shouldPreRefresh 기본 skewSec(60)과 반드시 같아야 한다 — 여기서는
-// "언제 확인 타이머를 걸지"의 지연 시간 계산에, shouldPreRefresh 자체는 그
-// 타이머가 쏘는 시점에 재확인 가드로 각각 쓰인다.
-const PRE_REFRESH_SKEW_MS = 60_000;
+// tokenPair.ts의 shouldPreRefresh 기본 skewSec과 같은 출처(DEFAULT_SKEW_SEC)를
+// 쓴다 — 여기서는 "언제 확인 타이머를 걸지"의 지연 시간 계산에, shouldPreRefresh
+// 자체는 그 타이머가 쏘는 시점에 재확인 가드로 각각 쓰인다.
+const PRE_REFRESH_SKEW_MS = DEFAULT_SKEW_SEC * 1_000;
 
 export interface TokenStore {
   /** data를 §3.4 TokenPairResponse로 파싱해 저장한다. 이전 refresh_token은 즉시 폐기된다. */

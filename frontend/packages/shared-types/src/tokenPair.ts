@@ -53,7 +53,9 @@ export interface ShouldPreRefreshOptions {
   skewSec?: number;
 }
 
-const DEFAULT_SKEW_SEC = 60;
+// api-client/tokenStore.ts가 "언제 확인 타이머를 걸지" 지연 계산에 그대로
+// 재사용한다 — 매직넘버 중복 대신 이 값을 단일 출처로 import한다.
+export const DEFAULT_SKEW_SEC = 60;
 
 // §3.4: access TTL이 60분 → 15분으로 짧아지므로 만료 skewSec(기본 60초) 전부터
 // 선제 갱신 대상이다. 이미 만료된 경우도 true(회수 실패로 재시도 대상에서
