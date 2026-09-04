@@ -4,9 +4,11 @@ Spec: docs/specs/L4_platform_observability_tenancy_api_v1.0.md#§2.3, §3.3
 
 PLT-108(auth/users/admin) → PLT-17(auth/users/exchange_credentials) →
 PLT-18(marketplace/strategy_builder/suitability) → PLT-20(notifications/
-alerts/device_tokens/wallet) → PLT-19(executions/portfolio/reports)이
-각자 쓰는 예외를 추가했다 — 다른 라우터(admin/foundation 등)가 쓰는
-예외는 각 라우터를 이관하는 후속 리프(PLT-21)에서 추가한다.
+alerts/device_tokens/wallet) → PLT-19(executions/portfolio/reports) →
+PLT-29(trust_memberships) → task-1108(foundation/connections·mandates·
+evidence)이 각자 쓰는 예외를 추가했다 — 나머지 foundation 라우터(paper_
+control/performance/reconciliation/risk_gate/trust/validation)는 후속
+직렬 리프(task-1217·1218)에서 추가한다.
 
 PLT-20 decision(task-1017)은 "src/api/contracts/** 공용 파일 수정 금지"
 (PLT-18/19와의 병렬 실행 중 충돌 회피 목적)였지만, alert_service의
@@ -55,8 +57,37 @@ from src.api.contracts.error_codes import ErrorCode
 from src.core.approval.service import ApprovalError
 from src.core.db.conditional_write import ConcurrencyConflictError
 from src.core.indicators.talib_adapter import IndicatorError
+from src.foundation.connections.application.begin_connection import (
+    ConsentRequiredError,
+    MfaRequiredError,
+)
+from src.foundation.connections.application.confirm_connection import (
+    ScopeVerificationFailedError,
+)
+from src.foundation.connections.application.errors import (
+    ConnectionNotFoundError,
+    CrossTenantConnectionAccessError,
+)
+from src.foundation.connections.application.revoke_connection import ConnectionNotRevocableError
+from src.foundation.connections.application.sync_snapshot import (
+    ConnectionNotSyncableError,
+    ConnectionRevokedDuringSyncError,
+    ProviderUnavailableError,
+)
+from src.foundation.connections.domain.rules import ForbiddenCapabilityScopeError
+from src.foundation.evidence.domain.rules import ChainIntegrityError
 from src.foundation.ledger.application.payouts import UnknownPayoutBatchError
 from src.foundation.ledger.application.queries import WalletLedgerDriftError
+from src.foundation.mandates.application.activate_revision import (
+    CoolingOffNotElapsedError,
+    CrossTenantMandateAccessError,
+    InvalidRevisionStateError,
+    MaterialChangeRequiresFreshConsentError,
+    MaterialChangeRequiresReauthError,
+    RevisionNotFoundError,
+)
+from src.foundation.mandates.application.create_draft_mandate import MandateAlreadyExistsError
+from src.foundation.mandates.application.evaluate_policy import NoActiveMandateError
 from src.foundation.trust.application.grant_membership import (
     GrantAuthorizationError,
     MembershipMfaRequiredError,
@@ -193,6 +224,33 @@ EXCEPTION_MAP: list[tuple[type[Exception], ErrorCode]] = [
     (RevokeTargetNotFoundError, ErrorCode.RESOURCE_NOT_FOUND),
     (RevokeAuthorizationError, ErrorCode.AUTHZ_FORBIDDEN),
     (RevokeLastOwnerError, ErrorCode.STATE_INVALID_TRANSITION),
+    # PLT-21(task-1108) — foundation/connections·mandates·evidence. 기존
+    # taxonomy만 재사용한다(decision, 새 ErrorCode 신설 금지) — 각 항목의
+    # 상태코드는 이관 전 라우터가 쓰던 값과 그대로 일치해 STATUS_OVERRIDE가
+    # 필요 없다.
+    (MfaRequiredError, ErrorCode.AUTH_MFA_REQUIRED),
+    (ConsentRequiredError, ErrorCode.POLICY_DENIED),
+    (ForbiddenCapabilityScopeError, ErrorCode.VALIDATION_INVALID_FIELD),
+    (ConnectionNotFoundError, ErrorCode.RESOURCE_NOT_FOUND),
+    (CrossTenantConnectionAccessError, ErrorCode.RESOURCE_NOT_FOUND),
+    (ScopeVerificationFailedError, ErrorCode.EXCHANGE_FATAL),
+    (ConnectionNotSyncableError, ErrorCode.STATE_INVALID_TRANSITION),
+    (ConnectionRevokedDuringSyncError, ErrorCode.STATE_INVALID_TRANSITION),
+    (ProviderUnavailableError, ErrorCode.EXCHANGE_FATAL),
+    (ConnectionNotRevocableError, ErrorCode.STATE_INVALID_TRANSITION),
+    (MandateAlreadyExistsError, ErrorCode.STATE_INVALID_TRANSITION),
+    (NoActiveMandateError, ErrorCode.RESOURCE_NOT_FOUND),
+    (RevisionNotFoundError, ErrorCode.RESOURCE_NOT_FOUND),
+    (CrossTenantMandateAccessError, ErrorCode.RESOURCE_NOT_FOUND),
+    (InvalidRevisionStateError, ErrorCode.STATE_INVALID_TRANSITION),
+    (MaterialChangeRequiresReauthError, ErrorCode.AUTH_MFA_REQUIRED),
+    (MaterialChangeRequiresFreshConsentError, ErrorCode.POLICY_DENIED),
+    (CoolingOffNotElapsedError, ErrorCode.STATE_INVALID_TRANSITION),
+    # evidence.py 체인 무결성 위반 — 79번 §4가 원래 쓰던
+    # `INTEGRITY_AUDIT_CHAIN_BROKEN`은 taxonomy에 없어(신규 코드 신설 금지)
+    # 기존 409 conflict 버킷(STATE_INVALID_TRANSITION)에 접는다 — PLT-20의
+    # AccountDeletionError/ApprovalError와 동일 근거(상태코드는 그대로 409).
+    (ChainIntegrityError, ErrorCode.STATE_INVALID_TRANSITION),
 ]
 
 # ErrorCode 하나당 상태코드 하나뿐인 HTTP_STATUS로 표현할 수 없는 개별

@@ -38,7 +38,12 @@ DEFAULT_RULES = {
 @pytest.fixture
 async def client():
     async with app.router.lifespan_context(app):
-        transport = ASGITransport(app=app)
+        # raise_app_exceptions=False — task-1108이 mandates 라우터(이 파일이
+        # _activate_mandate로 호출)의 raw HTTPException을 도메인 예외로
+        # 교체했다. 도메인 예외는 이제 전역 Exception 핸들러(ServerErrorMiddleware
+        # 승격)를 거치는데, Starlette가 정상 응답 뒤에도 예외를 재전파하기
+        # 때문에 필요하다(test_auth_router.py client 픽스처와 동일 근거).
+        transport = ASGITransport(app=app, raise_app_exceptions=False)
         async with AsyncClient(transport=transport, base_url="http://test") as ac:
             yield ac
 
@@ -63,7 +68,7 @@ async def _register(client) -> tuple[dict, str]:
 async def _activate_mandate(client, headers) -> None:
     draft = (
         await client.post("/v1/foundation/mandates/drafts", json=DEFAULT_RULES, headers=headers)
-    ).json()
+    ).json()["data"]
     await client.post(
         f"/v1/foundation/mandates/revisions/{draft['id']}:activate", json={}, headers=headers
     )

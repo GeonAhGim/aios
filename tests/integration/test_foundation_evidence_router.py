@@ -38,7 +38,12 @@ async def pool():
 @pytest.fixture
 async def client():
     async with lifespan_context_with_retry(app):
-        transport = ASGITransport(app=app)
+        # raise_app_exceptions=False — task-1108이 evidence 라우터의 raw
+        # HTTPException을 도메인 예외로 교체했다. 도메인 예외는 이제 전역
+        # Exception 핸들러(ServerErrorMiddleware 승격)를 거치는데, Starlette가
+        # 정상 응답 뒤에도 예외를 재전파하기 때문에 필요하다(test_auth_router.py
+        # client 픽스처와 동일 근거).
+        transport = ASGITransport(app=app, raise_app_exceptions=False)
         async with AsyncClient(transport=transport, base_url="http://test") as ac:
             yield ac
 
@@ -67,7 +72,7 @@ async def test_timeline_starts_empty(client):
     headers, _ = await _register(client)
     response = await client.get("/v1/foundation/evidence/timeline", headers=headers)
     assert response.status_code == 200
-    assert response.json()["items"] == []
+    assert response.json()["data"]["items"] == []
 
 
 async def test_timeline_shows_own_events_only(client, pool):
@@ -91,7 +96,7 @@ async def test_timeline_shows_own_events_only(client, pool):
     del attacker_id
 
     response = await client.get("/v1/foundation/evidence/timeline", headers=owner_headers)
-    items = response.json()["items"]
+    items = response.json()["data"]["items"]
     assert len(items) == 1
     assert items[0]["action"] == "mandate_activated"
 
@@ -130,4 +135,4 @@ async def test_verify_chain_succeeds_for_admin_with_intact_chain(client, pool):
         headers=headers,
     )
     assert response.status_code == 200
-    assert response.json() == {"verified": True}
+    assert response.json()["data"] == {"verified": True}

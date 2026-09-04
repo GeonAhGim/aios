@@ -39,7 +39,12 @@ async def pool():
 @pytest.fixture
 async def client():
     async with app.router.lifespan_context(app):
-        transport = ASGITransport(app=app)
+        # raise_app_exceptions=False — task-1108이 mandates 라우터의 raw
+        # HTTPException을 도메인 예외로 교체했다. 도메인 예외는 이제 전역
+        # Exception 핸들러(ServerErrorMiddleware 승격)를 거치는데, Starlette가
+        # 정상 응답 뒤에도 예외를 재전파하기 때문에 필요하다(test_auth_router.py
+        # client 픽스처와 동일 근거).
+        transport = ASGITransport(app=app, raise_app_exceptions=False)
         async with AsyncClient(transport=transport, base_url="http://test") as ac:
             yield ac
 
@@ -66,7 +71,7 @@ async def test_mandate_status_starts_empty(client):
     headers = await _register(client)
     response = await client.get("/v1/foundation/mandates/status", headers=headers)
     assert response.status_code == 200
-    assert response.json()["active_revision"] is None
+    assert response.json()["data"]["active_revision"] is None
 
 
 async def test_create_draft_then_activate_then_evaluate(client):
@@ -76,7 +81,7 @@ async def test_create_draft_then_activate_then_evaluate(client):
         "/v1/foundation/mandates/drafts", json=DEFAULT_RULES, headers=headers
     )
     assert draft_response.status_code == 201
-    draft = draft_response.json()
+    draft = draft_response.json()["data"]
     assert draft["state"] == "DRAFT"
 
     activate_response = await client.post(
@@ -85,10 +90,10 @@ async def test_create_draft_then_activate_then_evaluate(client):
         headers=headers,
     )
     assert activate_response.status_code == 200
-    assert activate_response.json()["state"] == "ACTIVE"
+    assert activate_response.json()["data"]["state"] == "ACTIVE"
 
     status_response = await client.get("/v1/foundation/mandates/status", headers=headers)
-    assert status_response.json()["active_revision"]["id"] == draft["id"]
+    assert status_response.json()["data"]["active_revision"]["id"] == draft["id"]
 
     evaluate_response = await client.post(
         "/v1/foundation/mandates/policy:evaluate",
@@ -96,8 +101,8 @@ async def test_create_draft_then_activate_then_evaluate(client):
         headers=headers,
     )
     assert evaluate_response.status_code == 200
-    assert evaluate_response.json()["outcome"] == "DENY"
-    assert "POLICY_FORBIDDEN_ASSET" in evaluate_response.json()["reason_codes"]
+    assert evaluate_response.json()["data"]["outcome"] == "DENY"
+    assert "POLICY_FORBIDDEN_ASSET" in evaluate_response.json()["data"]["reason_codes"]
 
 
 async def test_evaluate_policy_without_mandate_is_404(client):
@@ -119,7 +124,7 @@ async def test_pause_invalidates_risk_gate_cache_via_api(client):
     headers = await _register(client)
     draft = (
         await client.post("/v1/foundation/mandates/drafts", json=DEFAULT_RULES, headers=headers)
-    ).json()
+    ).json()["data"]
     await client.post(
         f"/v1/foundation/mandates/revisions/{draft['id']}:activate", json={}, headers=headers
     )
@@ -143,7 +148,7 @@ async def test_material_amendment_via_api_requires_password_reauth(client):
     headers = await _register(client)
     draft = (
         await client.post("/v1/foundation/mandates/drafts", json=DEFAULT_RULES, headers=headers)
-    ).json()
+    ).json()["data"]
     await client.post(
         f"/v1/foundation/mandates/revisions/{draft['id']}:activate", json={}, headers=headers
     )
@@ -154,7 +159,7 @@ async def test_material_amendment_via_api_requires_password_reauth(client):
             json={**DEFAULT_RULES, "max_total_exposure_pct": 95.0},
             headers=headers,
         )
-    ).json()
+    ).json()["data"]
     assert amended["cooling_off_started_at"] is not None
 
     no_reauth_response = await client.post(
@@ -176,7 +181,7 @@ async def test_material_amendment_full_gate_flow_via_api(client, pool):
     headers = await _register(client)
     draft = (
         await client.post("/v1/foundation/mandates/drafts", json=DEFAULT_RULES, headers=headers)
-    ).json()
+    ).json()["data"]
     await client.post(
         f"/v1/foundation/mandates/revisions/{draft['id']}:activate", json={}, headers=headers
     )
@@ -187,7 +192,7 @@ async def test_material_amendment_full_gate_flow_via_api(client, pool):
             json={**DEFAULT_RULES, "max_total_exposure_pct": 95.0},
             headers=headers,
         )
-    ).json()
+    ).json()["data"]
 
     # 재인증은 통과하지만 아직 Trust Core 동의가 없어 403이어야 한다.
     reauth_only_response = await client.post(
@@ -234,4 +239,4 @@ async def test_material_amendment_full_gate_flow_via_api(client, pool):
         headers=headers,
     )
     assert final_response.status_code == 200
-    assert final_response.json()["state"] == "ACTIVE"
+    assert final_response.json()["data"]["state"] == "ACTIVE"
