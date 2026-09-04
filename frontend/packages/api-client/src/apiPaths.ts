@@ -28,6 +28,13 @@ export interface ApiRouteDefinition {
   // sessions.ts처럼 실제 네트워크 호출 전에 typed 오류로 단락하려는 호출부가
   // isRouteImplemented로 참조한다.
   implemented?: boolean;
+  // task-1333: §3.7 IdempotencyScope · §9 PLT-15 "금전(멱등 필수)" 표식의 단일
+  // 출처. true인 라우트는 idempotencyScan.test.ts가 packages/api-client/src/**를
+  // 소스 스캔해 postIdempotent/postEnvelopeIdempotent(httpIdempotent.ts) 경유로만
+  // 호출되는지 양방향으로 대조한다 — 일반 post/patch/put/request 계열로 호출되면
+  // FAIL, 반대로 그 두 메서드로 호출되는 라우트에 이 표식이 없어도 FAIL.
+  // 미지정 시 false(금전 아님)다.
+  idempotencyRequired?: boolean;
 }
 
 // 같은 경로를 여러 HTTP 메서드(GET/POST/PUT/...)가 공유하는 경우(예:
@@ -35,13 +42,20 @@ export interface ApiRouteDefinition {
 // legacyPath는 "리소스 경로"의 단일 출처이지 "연산"의 단일 출처가 아니다.
 // 이 레포의 실제 라우터는 같은 경로를 공유하는 메서드끼리 봉투 여부가 항상
 // 동일하므로(라우터 단위로 이관되기 때문) 이 축약이 안전하다.
+// task-1333: idempotencyRequired는 하위호환 추가(5번째) 파라미터다 — 기존
+// 호출부(4개 인자까지, task-1325의 implemented 포함)는 한 글자도 바뀌지 않고
+// 그대로 컴파일된다. v1Path·implemented를 생략하고 idempotencyRequired만
+// 넘기고 싶으면 그 두 자리에 undefined를 명시해 각각의 default 표현식이 그대로
+// 적용되게 한다(legacyPath/v1Path 값 자체는 이 리프에서 한 글자도 바꾸지
+// 않는다는 decision을 지킨다).
 function route(
   legacyPath: string,
   envelope: boolean,
   v1Path: string | null = `/api/v1${legacyPath}`,
   implemented: boolean = true,
+  idempotencyRequired = false,
 ): ApiRouteDefinition {
-  return { legacyPath, envelope, v1Path: v1Path ?? undefined, implemented };
+  return { legacyPath, envelope, v1Path: v1Path ?? undefined, implemented, idempotencyRequired };
 }
 
 function defineApiRoutes<T extends Record<string, ApiRouteDefinition>>(routes: T): T {
@@ -103,28 +117,39 @@ export const API_ROUTES = defineApiRoutes({
   "admin.users.status": route("/admin/users/:userId/status", true),
   "admin.users.suspendSeller": route("/admin/users/:userId/suspend-seller", true),
   "admin.wallet.topupsPending": route("/admin/wallet/topups/pending", true),
-  "admin.wallet.topupConfirm": route("/admin/wallet/topups/:topupId/confirm", true),
+  // task-1333: §9 PLT-15 금전 라우트 — idempotencyRequired=true.
+  "admin.wallet.topupConfirm": route("/admin/wallet/topups/:topupId/confirm", true, undefined, undefined, true),
   "admin.marketplace.platformListings": route("/admin/marketplace/platform-listings", true),
   "admin.approvalRequests.approve": route("/admin/approval-requests/:requestId/approve", true),
   "admin.approvalRequests.reject": route("/admin/approval-requests/:requestId/reject", true),
   "admin.approvalRequests.pending": route("/admin/approval-requests/pending", true),
 
-  "exchange.credentials.base": route("/exchange-credentials", false),
+  // task-1333: §9 PLT-15 금전 라우트 — idempotencyRequired=true.
+  "exchange.credentials.base": route("/exchange-credentials", false, undefined, undefined, true),
   "exchange.credentials.item": route("/exchange-credentials/:exchange", false),
   "exchange.credentials.balance": route("/exchange-credentials/:exchange/balance", false),
   "exchange.credentials.capabilities": route("/exchange-credentials/:exchange/capabilities", false),
 
-  "executions.base": route("/executions", false),
-  "executions.start": route("/executions/:executionId/start", false),
+  // task-1333: §9 PLT-15 금전 라우트(create/start/convertToLive) — idempotencyRequired=true.
+  // pause/retire/riskGuard는 PLT-15 대상이 아니다(spec §9 표 참조) — 표식 없음.
+  "executions.base": route("/executions", false, undefined, undefined, true),
+  "executions.start": route("/executions/:executionId/start", false, undefined, undefined, true),
   "executions.pause": route("/executions/:executionId/pause", false),
   "executions.retire": route("/executions/:executionId/retire", false),
-  "executions.convertToLive": route("/executions/:executionId/convert-to-live", false),
+  "executions.convertToLive": route("/executions/:executionId/convert-to-live", false, undefined, undefined, true),
   "executions.riskGuard": route("/executions/:executionId/risk-guard", false),
 
   "marketplace.listings.base": route("/marketplace/listings", false),
   "marketplace.listings.submitVerification": route("/marketplace/listings/:listingId/submit-verification", false),
   "marketplace.listings.verify": route("/marketplace/listings/:listingId/verify", false),
-  "marketplace.listings.purchase": route("/marketplace/listings/:listingId/purchase", false),
+  // task-1333: §9 PLT-15 금전 라우트 — idempotencyRequired=true.
+  "marketplace.listings.purchase": route(
+    "/marketplace/listings/:listingId/purchase",
+    false,
+    undefined,
+    undefined,
+    true,
+  ),
   "marketplace.strategies.get": route("/marketplace/strategies/:strategyId/:version", false),
   "marketplace.listings.reviews": route("/marketplace/listings/:listingId/reviews", false),
   "marketplace.disputes.create": route("/marketplace/disputes", false),
@@ -135,9 +160,10 @@ export const API_ROUTES = defineApiRoutes({
   "deviceTokens.deactivate": route("/device-tokens/:deviceId", false),
 
   "portfolio.get": route("/portfolio", false),
-  "portfolio.rebalance": route("/portfolio/rebalance", false),
+  // task-1333: §9 PLT-15 금전 라우트 — idempotencyRequired=true.
+  "portfolio.rebalance": route("/portfolio/rebalance", false, undefined, undefined, true),
   "wallet.balance": route("/wallet/balance", false),
-  "wallet.topupRequests": route("/wallet/topup-requests", false),
+  "wallet.topupRequests": route("/wallet/topup-requests", false, undefined, undefined, true),
   "alerts.base": route("/alerts", false),
   "alerts.cancel": route("/alerts/:alertId/cancel", false),
   "reports.generate": route("/reports", false),
@@ -156,12 +182,38 @@ export const API_ROUTES = defineApiRoutes({
   // 엔드포인트가 `-> ApiResponse[T]`(ok())로 응답한다(legacy/v1 이관과 무관하게
   // "지금" 이미 봉투). GET(list, POST와 경로 공유)도 동일 라우터 소속이라
   // envelope=true다.
-  "foundation.paperDeployments.request": route("/v1/foundation/paper-deployments", true, null),
-  "foundation.paperDeployments.start": route("/v1/foundation/paper-deployments/:deploymentId:start", true, null),
-  "foundation.paperDeployments.resume": route("/v1/foundation/paper-deployments/:deploymentId:resume", true, null),
-  "foundation.paperDeployments.pause": route("/v1/foundation/paper-deployments/:deploymentId:pause", true, null),
-  "foundation.paperDeployments.stop": route("/v1/foundation/paper-deployments/:deploymentId:stop", true, null),
-  "foundation.trustConsents.accept": route("/v1/foundation/trust/consents", true, null),
+  // task-1333: §9 PLT-15 금전 라우트(paper-control 5개 + trust/consents) —
+  // idempotencyRequired=true.
+  "foundation.paperDeployments.request": route("/v1/foundation/paper-deployments", true, null, undefined, true),
+  "foundation.paperDeployments.start": route(
+    "/v1/foundation/paper-deployments/:deploymentId:start",
+    true,
+    null,
+    undefined,
+    true,
+  ),
+  "foundation.paperDeployments.resume": route(
+    "/v1/foundation/paper-deployments/:deploymentId:resume",
+    true,
+    null,
+    undefined,
+    true,
+  ),
+  "foundation.paperDeployments.pause": route(
+    "/v1/foundation/paper-deployments/:deploymentId:pause",
+    true,
+    null,
+    undefined,
+    true,
+  ),
+  "foundation.paperDeployments.stop": route(
+    "/v1/foundation/paper-deployments/:deploymentId:stop",
+    true,
+    null,
+    undefined,
+    true,
+  ),
+  "foundation.trustConsents.accept": route("/v1/foundation/trust/consents", true, null, undefined, true),
 
   // task-719: LA-17(task-624, 7ad6d15) application/get_candles·replay_candles의 조회
   // 클라이언트. src/api/routers에는 아직 market_data 라우터가 없다(PLT-16 mount_v1
