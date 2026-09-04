@@ -71,11 +71,14 @@ jobs:
       - name: Zone manifest
         run: python scripts/check_zone_manifest.py
 
-      # 커버리지는 우선 "측정"만 한다 — 전수감사 §9: 이 프로젝트의 품질 근거가
-      # "N passed" 하나뿐이었다. 임계치 게이트(--cov-fail-under)는 첫 측정치를
-      # 본 뒤 별도 결정.
       - name: Test
         run: pytest -q --cov=src --cov-report=term --cov-report=xml
+
+      # PLT-37 — 절대 임계치(--cov-fail-under) 대신 coverage.xml 대비 직전
+      # baseline에서 하락(허용 오차 0.5%p)했을 때만 FAIL한다. coverage.xml만
+      # 읽는 순수 파서라 별도 DB·네트워크 접근이 없다(scripts/coverage_ratchet.py).
+      - name: Coverage ratchet
+        run: python scripts/coverage_ratchet.py
 
       - name: Upload coverage report
         if: always()
