@@ -128,6 +128,22 @@ describe("InstrumentsPage", () => {
     expect(timeline).toHaveTextContent("별칭 변경(RENAME) → XBTUSDT");
   });
 
+  // task-1088: 행의 "캔들 보기" 링크가 CandlesPage로 instrument_id를 쿼리스트링으로
+  // 인계하는지, 기존 행 클릭(선택→상세 패널) 동작과 분리되어 있는지 고정한다.
+  it("행의 '캔들 보기' 링크가 instrument_id를 쿼리스트링으로 CandlesPage에 인계한다", async () => {
+    const client = makeClient({
+      listInstruments: vi.fn(async () => ({ items: [ok({ instrument_id: "i-1" })], nextCursor: null })),
+    });
+    renderPage(client);
+
+    const link = await screen.findByTestId("instrument-candles-link-i-1");
+    expect(link).toHaveAttribute("href", "/market/candles?instrument_id=i-1");
+    expect(link).toHaveTextContent("캔들 보기");
+
+    fireEvent.click(link);
+    expect(screen.queryByTestId("alias-list")).not.toBeInTheDocument();
+  });
+
   it("negative: 빈 목록이면 EmptyState를 보여준다", async () => {
     const client = makeClient({ listInstruments: vi.fn(async () => ({ items: [], nextCursor: null })) });
     renderPage(client);
