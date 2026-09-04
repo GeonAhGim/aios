@@ -45,15 +45,17 @@ from src.core.safety.data_distrust import DataDistrustMonitor
 from src.core.safety.data_freshness import DataFreshnessTracker
 from src.core.safety.heartbeat import DEFAULT_HEARTBEAT_PATH, write_heartbeat
 from src.core.safety.metrics_collector import ApiCallTracker
+from src.foundation.evidence.adapters.postgres_repository import PostgresAuditEventRepository
 from src.foundation.execution_ownership.adapters.postgres_repository import (
     PostgresExecutionLeaseRepository,
 )
 from src.foundation.execution_ownership.ports.repository import ExecutionLeaseRepository
+from src.foundation.paper_control.adapters.postgres_repository import PostgresPaperControlRepository
+from src.foundation.risk_gate.adapters.postgres_repository import PostgresRiskGateRepository
 from src.services.alert_service import AlertService
 from src.services.credential_resolver import CredentialResolver
 from src.services.execution_loop.recovery_wiring import recover_orders_on_startup
 from src.services.execution_loop.scheduler import ExecutionLoopScheduler
-from src.services.execution_service import ExecutionService
 from src.services.order_service.foundation_gate import make_foundation_pre_submit_gate
 from src.services.risk_guard_service import RiskGuardService
 from src.services.safety.circuit_breaker_loop import (
@@ -61,6 +63,7 @@ from src.services.safety.circuit_breaker_loop import (
     cooldown_ticks,
     run_circuit_breaker_tick,
 )
+from src.services.safety.kill_switch_service import KillSwitchService
 
 logger = logging.getLogger(__name__)
 
@@ -199,18 +202,15 @@ async def start_background_loops(
         )
     )
 
-    # ZuluTrade식 "위험 관리" — 실행별 손실 한도(%) 자동 정지 루프. 위 두
-    # 루프와 동일 패턴(main.py가 유일한 백그라운드 스케줄러 지점).
-    risk_guard_service = RiskGuardService(
-        pool,
-        ExecutionService(
-            pool,
-            policy,
-            pre_start_gate=make_foundation_pre_submit_gate(pool),
-            publish=event_bus.publish,
-        ),
-        publish=event_bus.publish,
+    # ZuluTrade식 "위험 관리" 손실 한도(%) 자동 정지 루프. R-41 — 실제 정지는
+    # KillSwitchService(R-40)에 위임한다. 시스템 전역 자격증명이 없어
+    # exchange_adapters는 빈 매핑(sweeper fan-out 실패는 비치명적 clean-up).
+    kill_switch_service = KillSwitchService(
+        risk_gate_repo=PostgresRiskGateRepository(pool), pg_pool=pool,
+        paper_control_repo=PostgresPaperControlRepository(pool),
+        exchange_adapters={}, audit_repo=PostgresAuditEventRepository(pool),
     )
+    risk_guard_service = RiskGuardService(pool, kill_switch_service, publish=event_bus.publish)
 
     # 레드팀 #25 / 전수감사 §2 P1 — alert 루프와 같은 방어선. 이 호출이 예외를
     # 내면 손실 한도 자동정지가 재시작 전까지 영구히 죽는다.

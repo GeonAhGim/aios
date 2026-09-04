@@ -1,17 +1,10 @@
-"""FD-16(신설) — 실행별 손실 한도 자동 정지 (RiskGuardService, ZuluGuard식).
+"""FD-16 — 실행별 손실 한도 자동 정지(RiskGuardService, ZuluGuard식).
 
-Spec: 사용자 요청(2026-09-01) — ZuluTrade의 위험 관리(손실 한도 도달 시
-자동 정지) 기능. execution_service.py::pause()가 이미 paused_by=
-'SAFETY_LAYER'를 1급 값으로 지원하도록 설계돼 있었다(사람이 아닌 안전
-장치가 실행을 멈추는 경로가 이미 있었음) — 이 서비스가 그 안전장치의
-실제 판정 로직이다.
-
-evaluate_all_running()은 main.py의 다른 백그라운드 루프(heartbeat_loop,
-alert_service.py::evaluate_all_active)와 동일한 패턴으로 주기 실행된다.
-손실률 = -(실현손익+미실현손익)/배분자본 × 100 — 양수면 손실. 배분자본이
-0 이하인 실행(설계상 있을 수 없지만 방어적으로)은 0으로 나누지 않도록
-건너뛴다. 이미 다른 경로가 상태를 바꿔 pause()가 실패해도(동시성 경쟁)
-그 실행만 건너뛰고 다음 주기에 재평가한다.
+Spec: docs/specs/L4_risk_and_safety_v1.0.md §2 135행·§9 R-41 — pause() 대신
+KillSwitchService.activate(STRATEGY_DEPLOYMENT, "exec:<id>")로 통일한다(DoD
+"pause 직접 호출 0건", I3(§8) 유일한 진입점). 실제 정지(control 생성→
+fence++→legacy 정지→fan-out)는 전부 그쪽에 위임하고(R-40 배선 비복제),
+이미 ACTIVE인 control이 있는 실행은 재호출하지 않는다(멱등은 이 계층 책임).
 """
 from __future__ import annotations
 
@@ -21,7 +14,9 @@ from typing import Any
 
 import asyncpg
 
-from src.services.execution_service import ExecutionControlError, ExecutionService
+from src.core.observability.context import current
+from src.foundation.risk_gate.domain.models import SafetyScope
+from src.services.safety.kill_switch_service import KillSwitchService
 
 PublishFn = Callable[[str, dict[str, Any]], Awaitable[None]]
 
@@ -30,12 +25,12 @@ class RiskGuardService:
     def __init__(
         self,
         pool: asyncpg.Pool,
-        execution_service: ExecutionService,
+        kill_switch: KillSwitchService,
         *,
         publish: PublishFn | None = None,
     ) -> None:
         self._pool = pool
-        self._executions = execution_service
+        self._kill_switch = kill_switch
         self._publish = publish
 
     async def evaluate_all_running(self) -> list[int]:
@@ -51,8 +46,7 @@ class RiskGuardService:
                 GROUP BY e.id
                 """
             )
-
-        paused: list[int] = []
+        triggered: list[int] = []
         for row in rows:
             allocated = row["allocated_capital"]
             if allocated is None or allocated <= 0:
@@ -61,24 +55,33 @@ class RiskGuardService:
             drawdown_pct = (-pnl / allocated) * Decimal(100)
             if drawdown_pct < row["max_drawdown_pct"]:
                 continue
-
-            try:
-                await self._executions.pause(row["execution_id"], paused_by="SAFETY_LAYER")
-            except ExecutionControlError:
+            scope_ref = f"exec:{row['execution_id']}"
+            async with self._pool.acquire() as conn:
+                active = await conn.fetchval(
+                    "SELECT 1 FROM safety_control WHERE scope = 'STRATEGY_DEPLOYMENT' "
+                    "AND scope_ref = $1 AND state = 'ACTIVE'",
+                    scope_ref,
+                )
+            if active is not None:
                 continue
-
-            paused.append(row["execution_id"])
+            view = await self._kill_switch.activate(
+                scope=SafetyScope.STRATEGY_DEPLOYMENT,
+                scope_ref=scope_ref,
+                reason="MAX_DRAWDOWN_EXCEEDED",
+                actor_subject_id=row["user_id"],
+                actor_is_admin=True,
+                trace_id=current().trace_id,
+            )
+            triggered.append(row["execution_id"])
             if self._publish is not None:
                 await self._publish(
                     "execution.safety_block.applied",
                     {
-                        "event_type": "execution.safety_block.applied",
                         "user_id": str(row["user_id"]),
                         "execution_id": row["execution_id"],
                         "reason": "MAX_DRAWDOWN_EXCEEDED",
                         "drawdown_pct": str(drawdown_pct),
-                        "max_drawdown_pct": str(row["max_drawdown_pct"]),
+                        "safety_control_id": str(view.id),
                     },
                 )
-
-        return paused
+        return triggered
