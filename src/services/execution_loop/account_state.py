@@ -1,12 +1,7 @@
-"""FD-8.3 RiskEngine.check()가 소비하는 `account_state` 딕셔너리 조립.
-
-RiskEngine 자체는 순수 임계치 비교만 한다(src/core/risk/engine.py 참조) —
-이 함수가 실제 DB·거래소 조회를 전부 맡아 그 값을 채운다. 8.2-A 원칙상
-RiskEngine의 판단 로직 자체는 이 조립 과정과 분리돼 있어야 감사 가능성이
-유지된다.
-"""
+"""R-31 §9 — 레거시 dict 어댑터, to_legacy_dict() 위임만(§2 표 121행)."""
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from decimal import Decimal
 from typing import Any
 from uuid import UUID
@@ -14,115 +9,38 @@ from uuid import UUID
 import asyncpg
 
 from src.core.loader.risk_policy_loader import RiskPolicy
+from src.core.risk.inputs import OrderIntent
 from src.data.models.market_data import Candle
-from src.services.execution_loop.correlation_service import correlated_exposure
-from src.services.execution_loop.equity_tracker import (
-    ExecutionEquityTracker,
-    record_and_persist_equity,
+from src.data.models.trading import AccountBalance
+from src.services.execution_loop.equity_tracker import ExecutionEquityTracker as EqTracker
+from src.services.execution_loop.risk_inputs_assembler import (
+    RiskInputCaches,
+    assemble_risk_inputs,
+    to_legacy_dict,
 )
-from src.services.execution_loop.position import compute_user_positions
-from src.services.execution_loop.var_estimator import estimate_portfolio_var_es
-from src.services.order_service.repository import count_recent_trades
 
 
 async def assemble_account_state(
-    pool: asyncpg.Pool,
-    *,
-    execution_id: int,
-    user_id: UUID,
-    symbol: str,
-    position_quantity: Decimal,
-    total_equity: Decimal,
-    available_balance: Decimal,
-    allocated_capital: Decimal,
-    certified_badge: bool,
-    candles: list[Candle],
-    equity_tracker: ExecutionEquityTracker,
-    policy: RiskPolicy,
+    pool: asyncpg.Pool, *, execution_id: int, user_id: UUID, symbol: str, total_equity: Decimal,
+    position_quantity: Decimal, available_balance: Decimal, allocated_capital: Decimal,
+    certified_badge: bool, candles: list[Candle], equity_tracker: EqTracker, policy: RiskPolicy,
 ) -> dict[str, Any]:
-    # PM 배정 ③(agent-platform-12, 2026-09-02) — 일손실/MDD 기준점을
-    # strategy_executions(equity_day_start_date/value, equity_peak_value —
-    # 마이그레이션 4747bb11f733)에 write-through로 영속화. 재시작 후에도
-    # seed()로 복구되므로 "재시작 직후엔 오늘 손실이 0으로 보임" 문제가
-    # 사라진다(equity_tracker.py 참조).
-    daily_pnl_pct, drawdown_pct = await record_and_persist_equity(
-        pool, equity_tracker, execution_id, total_equity
+    intent = OrderIntent(
+        symbol=symbol, asset_class="CRYPTO_SPOT", side="BUY", quantity=position_quantity,
+        ref_price=candles[-1].close if candles else Decimal("0"), notional=Decimal("0"),
+        reduce_only=position_quantity != 0, strategy_id="", strategy_version="unknown",
+        capital_pct=Decimal("0"),
     )
-
-    # R-29 — histories는 R-28 candle_history.py 캐시에서 받는 것이 목표
-    # 설계다(§9 R-29). tick.py는 아직 이 심볼의(전략 신호용 1분봉) candles만
-    # 넘기고 R-31/R-32(risk_inputs_assembler·tick_risk_phase 배선)가 다른
-    # 보유 종목의 일봉 히스토리까지 채워 넣기 전까지는, 여기서도 이 심볼
-    # 하나만 담은 히스토리로 제한된다 — 여러 종목 포트폴리오 VaR·타 심볼
-    # 상관은 그 리프가 완성돼야 실제 값을 낸다(그 전까지는 fail-closed로
-    # None을 반환해 조용히 통과시키지 않는다).
-    histories = {symbol: candles} if candles else {}
-
-    var_result = estimate_portfolio_var_es(
-        histories, {symbol: Decimal("1")} if candles else {}, policy.var
+    balances = [AccountBalance(
+        exchange=candles[0].exchange if candles else "", asset="USDT",
+        total=total_equity, available=available_balance,
+    )]
+    inputs = await assemble_risk_inputs(
+        pool, RiskInputCaches(equity_tracker=equity_tracker), execution_id=execution_id,
+        user_id=user_id, intent=intent, balances=balances, candles=candles,
+        policy=policy, now=datetime.now(timezone.utc),
     )
-    var_pct = var_result.var_pct if var_result is not None else None
-
-    current_price = candles[-1].close if candles else None
-    current_prices = {symbol: current_price} if current_price is not None else {}
-    positions = await compute_user_positions(pool, user_id, current_prices=current_prices)
-    raw_correlated_exposure, _max_correlation = correlated_exposure(
-        histories,
-        positions,
-        symbol,
-        threshold=policy.correlation_risk.threshold,
-        min_overlap=policy.correlation_risk.min_overlap,
-    )
-    if raw_correlated_exposure is None:
-        correlated_exposure_pct: Decimal | None = None
-    elif total_equity <= 0:
-        correlated_exposure_pct = Decimal("0")
-    else:
-        correlated_exposure_pct = (raw_correlated_exposure / total_equity) * Decimal("100")
-
-    async with pool.acquire() as conn:
-        recent_trade_count_1h = await count_recent_trades(
-            conn, execution_id, since_hours=Decimal("1")
-        )
-        trade_count_24h = await count_recent_trades(
-            conn, execution_id, since_hours=Decimal("24")
-        )
-        safety_row = await conn.fetchrow(
-            "SELECT circuit_breaker_level FROM system_safety_state WHERE id = 1"
-        )
-        execution_row = await conn.fetchrow(
-            "SELECT paused_by FROM strategy_executions WHERE id = $1", execution_id
-        )
-        # 사용자 승인(2026-09-02) FROZEN 존 수정 — RiskEngine의 "leverage"
-        # 검사가 실제로 비교할 값이 없어 이름뿐인 checked 항목이었다.
-        # positions.leverage(스키마 기본값 1, c8ead41fd624)는 이미 존재하는
-        # 컬럼이라 여기서 읽기만 하면 된다 — 열린 포지션이 없으면(신규
-        # 진입) 아직 아무 레버리지도 안 쓴 상태이므로 1.0.
-        open_position_leverage = await conn.fetchval(
-            "SELECT leverage FROM positions WHERE execution_id = $1 AND closed_at IS NULL "
-            "AND quantity <> 0 ORDER BY entry_time DESC LIMIT 1",
-            execution_id,
-        )
-
-    circuit_breaker_level = safety_row["circuit_breaker_level"] if safety_row else None
-    execution_paused_by_safety = (
-        execution_row is not None and execution_row["paused_by"] == "SAFETY_LAYER"
-    )
-    leverage = open_position_leverage if open_position_leverage is not None else Decimal("1")
-
-    return {
-        "daily_pnl_pct": daily_pnl_pct,
-        "drawdown_pct": drawdown_pct,
-        "position_quantity": position_quantity,
-        "total_equity": total_equity,
-        "certified_badge": certified_badge,
-        "allocated_capital": allocated_capital,
-        "available_balance": available_balance,
-        "var_pct": var_pct,
-        "correlated_exposure_pct": correlated_exposure_pct,
-        "recent_trade_count_1h": recent_trade_count_1h,
-        "avg_trade_count_24h": trade_count_24h / 24.0,
-        "circuit_breaker_level": circuit_breaker_level,
-        "execution_paused_by_safety": execution_paused_by_safety,
-        "leverage": leverage,
-    }
+    legacy = to_legacy_dict(inputs)
+    legacy.update(certified_badge=certified_badge, allocated_capital=allocated_capital,
+                  position_quantity=position_quantity)
+    return legacy
