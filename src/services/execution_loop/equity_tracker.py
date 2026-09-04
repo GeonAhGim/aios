@@ -9,11 +9,18 @@ PM 배정 ③(agent-platform-12, 2026-09-02) — 이전엔 프로세스 메모�
 새 프로세스는 "오늘 시작"으로 착각). `seed()`로 DB에서 읽은 기존
 기준점을 최초 1회만 주입하고, `load_baseline`/`save_baseline`(아래)이
 strategy_executions의 equity_day_start_date/equity_day_start_value/
-equity_peak_value 컬럼에 매 record() 후 write-through한다."""
+equity_peak_value 컬럼에 매 record() 후 write-through한다.
+
+R-30(task-1220) — 일경계는 서버 로컬 시간대와 무관하게 UTC 자정 고정
+(`date.today()`는 OS 로컬 tz를 따라 서버 배치 지역에 따라 일경계가
+흔들린다). `save_equity_baseline`은
+read-modify-write 대신 §5 표의 단일 조건부 UPDATE(GREATEST + day 변경
+여부에 따른 CASE)로 peak 역행·day_start 덮어쓰기 lost update를 DB
+트랜잭션 안에서 원천 차단한다."""
 from __future__ import annotations
 
 from collections.abc import Callable
-from datetime import date
+from datetime import date, datetime, timezone
 from decimal import Decimal
 
 import asyncpg
@@ -21,8 +28,12 @@ import asyncpg
 Clock = Callable[[], date]
 
 
+def _utc_today() -> date:
+    return datetime.now(timezone.utc).date()
+
+
 class ExecutionEquityTracker:
-    def __init__(self, *, today: Clock = date.today) -> None:
+    def __init__(self, *, today: Clock = _utc_today) -> None:
         self._today = today
         self._day_start_equity: dict[int, tuple[date, Decimal]] = {}
         self._peak_equity: dict[int, Decimal] = {}
@@ -105,15 +116,28 @@ async def save_equity_baseline(
     day_start_value: Decimal,
     peak_value: Decimal,
 ) -> None:
+    """§5 표(105번 조건부 UPDATE, 형태 B)의 단일 UPDATE — peak는
+    `GREATEST`로 단조 강제, day_start_value는 DB에 이미 저장된
+    `equity_day_start_date`가 이번 호출의 날짜와 다를 때만(=실제 일경계
+    전환) 갱신한다. 동시에 여러 tick이 같은 날짜로 경합해도 먼저 커밋된
+    day_start_value가 이후 호출의 read-modify-write로 덮이지 않는다."""
     async with pool.acquire() as conn:
-        await conn.execute(
-            "UPDATE strategy_executions SET equity_day_start_date = $2, "
-            "equity_day_start_value = $3, equity_peak_value = $4 WHERE id = $1",
+        row = await conn.fetchrow(
+            "UPDATE strategy_executions SET "
+            "equity_peak_value = GREATEST(equity_peak_value, $4), "
+            "equity_day_start_date = $2, "
+            "equity_day_start_value = CASE "
+            "WHEN equity_day_start_date IS DISTINCT FROM $2 THEN $3 "
+            "ELSE equity_day_start_value END "
+            "WHERE id = $1 "
+            "RETURNING id",
             execution_id,
             day_start_date,
             day_start_value,
             peak_value,
         )
+    if row is None:
+        raise LookupError(f"strategy_executions id={execution_id} not found")
 
 
 async def record_and_persist_equity(
