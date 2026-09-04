@@ -50,8 +50,11 @@ def _resolver_for(adapters: dict[UUID, ExchangeAdapter]):
 
 
 def _filled_adapter() -> FakeExchangeAdapter:
+    # min_bars(config/risk_policy.yaml var.min_bars=60) 미달이면 R-11
+    # var_es 룰이 결손(DENY) 취급한다 — RiskEngine 통과에 필요한 최소치보다
+    # 넉넉히 준다(tests/integration/test_execution_tick.py와 동일한 65).
     return FakeExchangeAdapter(
-        closes=[Decimal("50")] * 30,
+        closes=[Decimal("50")] * 65,
         place_order_result_status=OrderStatus.FILLED,
         usdt_balance=AccountBalance(
             exchange="bitget", asset="USDT", total=Decimal("10000"), available=Decimal("10000")
