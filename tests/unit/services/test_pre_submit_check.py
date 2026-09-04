@@ -49,3 +49,22 @@ async def test_gate_receives_correct_order_context():
     assert seen[0].execution_id == 42
     assert seen[0].exchange == "kis"
     assert seen[0].mandate_revision_id is None
+    assert seen[0].observed_fence is None
+
+
+async def test_gate_receives_observed_fence_when_provided():
+    seen: list[OrderContext] = []
+
+    async def gate(context: OrderContext) -> GateDecision:
+        seen.append(context)
+        return GateDecision(outcome=GateOutcome.ALLOW)
+
+    await is_submission_allowed(
+        gate,
+        user_id=uuid4(),
+        execution_id=1,
+        exchange="bitget",
+        observed_fence={"GLOBAL:": 1},
+    )
+
+    assert seen[0].observed_fence == {"GLOBAL:": 1}

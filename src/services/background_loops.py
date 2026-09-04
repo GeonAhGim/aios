@@ -249,7 +249,7 @@ async def start_background_loops(
         resolve_adapter=credential_resolver.get_adapter,
         policy=policy,
         publish=event_bus.publish,
-        pre_submit_gate=make_foundation_pre_submit_gate(pool),
+        pre_submit_gate=make_foundation_pre_submit_gate(pool, require_mandate=False),
         distrust_monitor=DataDistrustMonitor(publish=event_bus.publish),
         lease_repo=lease_repo,
         owner_id=owner_id,

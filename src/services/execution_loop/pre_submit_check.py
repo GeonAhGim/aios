@@ -14,6 +14,7 @@ pre_submit_gate를 그 안까지 관통시키지 않는다 — 이 tick.py 레�
 from __future__ import annotations
 
 import logging
+from collections.abc import Mapping
 from uuid import UUID
 
 from src.services.order_service.gate import GateOutcome, OrderContext, PreSubmitGate
@@ -28,11 +29,17 @@ async def is_submission_allowed(
     execution_id: int,
     exchange: str,
     mandate_revision_id: UUID | None = None,
+    observed_fence: Mapping[str, int] | None = None,
 ) -> bool:
     """`mandate_revision_id`는 strategy_executions에 그 컬럼이 아직 없어
     (마이그레이션 대기) 항상 None으로 호출된다 — 컬럼이 생기고
     `_load_execution_context()`의 SELECT 목록에 추가되면 호출부에서
-    `execution["mandate_revision_id"]`를 그대로 넘기기만 하면 된다."""
+    `execution["mandate_revision_id"]`를 그대로 넘기기만 하면 된다.
+
+    `observed_fence`(R-36) — PRE_TRADE 등 이전 단계가 관측한 F0가 있으면
+    그대로 넘겨 stale이면 거부되게 한다. 이 호출부는 아직 그런 이전 단계를
+    연결하지 않아 항상 None(신선도 비교 생략)이다 — mandate_revision_id와
+    같은 마이그레이션 대기 상태."""
     if pre_submit_gate is None:
         return True
 
@@ -42,6 +49,7 @@ async def is_submission_allowed(
             execution_id=execution_id,
             exchange=exchange,
             mandate_revision_id=mandate_revision_id,
+            observed_fence=observed_fence,
         )
     )
     if decision.outcome != GateOutcome.ALLOW:

@@ -25,7 +25,7 @@ def get_execution_service(
     return ExecutionService(
         pool,
         policy,
-        pre_start_gate=make_foundation_pre_submit_gate(pool),
+        pre_start_gate=make_foundation_pre_submit_gate(pool, require_mandate=False),
         publish=event_bus.publish,
     )
 

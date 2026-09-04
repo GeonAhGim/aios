@@ -32,7 +32,9 @@ async def pool():
 @pytest.fixture
 def service(pool):
     return ExecutionService(
-        pool, load_risk_policy(), pre_start_gate=make_foundation_pre_submit_gate(pool)
+        pool,
+        load_risk_policy(),
+        pre_start_gate=make_foundation_pre_submit_gate(pool, require_mandate=False),
     )
 
 

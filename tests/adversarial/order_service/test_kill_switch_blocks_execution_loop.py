@@ -83,7 +83,9 @@ async def test_active_kill_switch_blocks_execution_loop_new_order_submission(
         pool,
         resolve_adapter=_resolver_for(adapter, user_id),
         policy=load_risk_policy(),
-        pre_submit_gate=make_foundation_pre_submit_gate(pool),
+        # background_loops.py의 실제 프로덕션 값(require_mandate=False)과
+        # 그대로 맞춘다 — 이 테스트는 "프로덕션 조립 경로 그대로"가 목적.
+        pre_submit_gate=make_foundation_pre_submit_gate(pool, require_mandate=False),
         distrust_monitor=DataDistrustMonitor(),
         lease_repo=PostgresExecutionLeaseRepository(pool),
         owner_id=f"kill-switch-test-{uuid.uuid4().hex[:8]}",

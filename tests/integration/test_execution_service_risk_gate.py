@@ -66,7 +66,9 @@ def trust_repo(pool):
 @pytest.fixture
 def gated_service(pool):
     return ExecutionService(
-        pool, load_risk_policy(), pre_start_gate=make_foundation_pre_submit_gate(pool)
+        pool,
+        load_risk_policy(),
+        pre_start_gate=make_foundation_pre_submit_gate(pool, require_mandate=False),
     )
 
 
@@ -169,7 +171,7 @@ async def test_mandate_linked_start_denied_when_mandate_paused(
     await pause_mandate(mandate_repo, tenant_id=user_id)
     mandate = await mandate_repo.get_mandate(user_id)
 
-    gate = make_foundation_pre_submit_gate(pool)
+    gate = make_foundation_pre_submit_gate(pool, require_mandate=False)
     decision = await gate(
         OrderContext(
             user_id=user_id,
