@@ -1,0 +1,7 @@
+Pending — this package will fork KLineChart (Apache License 2.0); see
+docs/design/CHART_ENGINE_FORK_EVAL.md for the license evaluation that selected it.
+
+The vendor source and its original LICENSE text are brought in by CH-1b
+(task-1501), per the CH-1 scope split recorded in task-1375's decision. This
+placeholder exists so the package layout is complete before that leaf lands;
+do not treat it as the operative license text until CH-1b replaces it.
