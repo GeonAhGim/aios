@@ -15,7 +15,7 @@ from src.foundation.risk_gate.adapters.postgres_repository import PostgresRiskGa
 from src.foundation.risk_gate.application.activate_safety_control import activate_safety_control
 from src.foundation.risk_gate.application.read_fence import read_fence_snapshot
 from src.foundation.risk_gate.domain.fence import fence_pairs_for, is_stale
-from src.foundation.risk_gate.domain.models import GLOBAL_SCOPE_REF, SafetyScope
+from src.foundation.risk_gate.domain.models import SafetyScope
 from tests.integration.conftest import create_test_user
 
 
@@ -43,17 +43,27 @@ async def _tenant(pool):
 
 
 async def test_read_fences_defaults_never_activated_pairs_to_zero(pool, repo):
+    """GLOBAL(scope_ref="")은 이 공유 테스트 DB에서 다른 테스트가 이미
+    activate했을 수 있는 단조증가 카운터라 절대값 0을 보장할 수 없다
+    (test_risk_gate_lifecycle.py 참조) — TENANT/ACCOUNT/PROVIDER/
+    STRATEGY_DEPLOYMENT는 이 테스트가 새로 생성한 고유 참조라 0이 보장된다."""
     tenant_id = await _tenant(pool)
-    pairs = fence_pairs_for(tenant_id, "never-activated-provider", str(uuid4()))
+    unique_provider = f"never-activated-{uuid4().hex}"
+    pairs = fence_pairs_for(tenant_id, unique_provider, str(uuid4()))
 
     snapshot = await repo.read_fences(pairs)
 
     assert set(snapshot.tokens.keys()) == set(pairs)
-    assert all(token == 0 for token in snapshot.tokens.values())
+    non_global = [p for p in pairs if p[0] != SafetyScope.GLOBAL]
+    assert all(snapshot.tokens[pair] == 0 for pair in non_global)
 
 
 async def test_read_fences_reflects_only_the_activated_scope(pool, repo):
     tenant_id = await _tenant(pool)
+    unique_provider = f"provider-{uuid4().hex}"
+    pairs = fence_pairs_for(tenant_id, unique_provider, str(uuid4()))
+    baseline = await repo.read_fences(pairs)
+
     control = await activate_safety_control(
         repo,
         tenant_id=tenant_id,
@@ -64,12 +74,13 @@ async def test_read_fences_reflects_only_the_activated_scope(pool, repo):
         reason="fence 조회 테스트",
     )
 
-    pairs = fence_pairs_for(tenant_id, "binance", str(uuid4()))
     snapshot = await repo.read_fences(pairs)
 
-    assert snapshot.tokens[(SafetyScope.ACCOUNT, str(tenant_id))] == control.fence_token
-    assert snapshot.tokens[(SafetyScope.GLOBAL, GLOBAL_SCOPE_REF)] == 0
-    assert snapshot.tokens[(SafetyScope.PROVIDER, "binance")] == 0
+    account_pair = (SafetyScope.ACCOUNT, str(tenant_id))
+    assert snapshot.tokens[account_pair] == control.fence_token
+    for pair in pairs:
+        if pair != account_pair:
+            assert snapshot.tokens[pair] == baseline.tokens[pair]
 
 
 async def test_read_fences_is_a_single_round_trip(pool, repo, monkeypatch):
