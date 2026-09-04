@@ -17,9 +17,12 @@ decision). `IngestSource`에 틱 조회 메서드가 없고 이 리프도 추가
 "직전 저장분 이하 trade_id는 REJECT"(§9)를 같음까지 포함해 그대로
 적용하면 재실행 멱등(같은 배치 재수집 시 `md_tick` ON CONFLICT DO
 NOTHING으로 조용히 성공, LA-15 캔들 재수집과 같은 원칙)이 깨진다 —
-배치 안에서 이미 `md_tick`에 있는 trade_id는 "재수집"으로 보고 역행
-검사에서 제외하고, 아직 없는 trade_id만 지금까지 본 최댓값(직전
-저장분 포함)보다 작으면 역행으로 REJECT한다.
+배치 안에서 이미 `md_tick`에 UNIQUE 제약과 동일한 (trade_id, traded_at)
+복합키로 존재하는 틱만 "재수집"으로 보고 역행 검사에서 제외하고, 그
+복합키로도 아직 없는 틱만 지금까지 본 최댓값(직전 저장분 포함)보다
+작으면 역행으로 REJECT한다 — trade_id만으로 "이미 안다"고 판정하면
+같은 trade_id·다른 traded_at 재수집이 역행검사를 우회한다(리뷰 REJECT,
+task-1302).
 
 트랜잭션 경계는 LA-15와 동일하게 저장·배치 기록·감사 이벤트를 하나로
 묶어 감사 실패 시 전부 롤백한다. 같은 (venue, instrument_id) 동시 호출이
@@ -103,17 +106,22 @@ async def _last_stored(
     return max_trade_id, max_traded_at
 
 
-async def _known_trade_ids(
+async def _known_ticks(
     conn: asyncpg.Connection, venue: Venue, instrument_id: UUID, ticks: list[TickRecord]
-) -> set[str]:
+) -> set[tuple[str, datetime]]:
+    """`md_tick` UNIQUE(venue, instrument_id, trade_id, traded_at)와 동일한
+    복합키로 "이미 저장됨"을 판정한다. trade_id만으로 판정하면 같은
+    trade_id를 다른 traded_at으로 재수집할 때 재수집으로 오판해 역행검사
+    에서 빠지고, 그 경로로 역행 배치가 REJECT를 우회해 통과한다(리뷰
+    REJECT, task-1302)."""
     rows = await conn.fetch(
-        "SELECT trade_id FROM md_tick WHERE venue = $1 AND instrument_id = $2 "
+        "SELECT trade_id, traded_at FROM md_tick WHERE venue = $1 AND instrument_id = $2 "
         "AND trade_id = ANY($3::text[])",
         venue.value,
         instrument_id,
         [t.trade_id for t in ticks],
     )
-    return {row["trade_id"] for row in rows}
+    return {(row["trade_id"], row["traded_at"]) for row in rows}
 
 
 def _first_regression(
@@ -192,8 +200,8 @@ async def ingest_ticks(
         await conn.execute(
             "SELECT pg_advisory_xact_lock(hashtext($1))", f"{venue.value}:{instrument_id}"
         )
-        known = await _known_trade_ids(conn, venue, instrument_id, cmd.ticks)
-        new_ticks = [t for t in cmd.ticks if t.trade_id not in known]
+        known = await _known_ticks(conn, venue, instrument_id, cmd.ticks)
+        new_ticks = [t for t in cmd.ticks if (t.trade_id, t.traded_at) not in known]
         baseline_trade_id, baseline_traded_at = await _last_stored(conn, venue, instrument_id)
         regression = _first_regression(new_ticks, baseline_trade_id, baseline_traded_at)
         is_stored = regression is None

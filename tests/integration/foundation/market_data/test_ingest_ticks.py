@@ -174,6 +174,39 @@ async def test_ingest_rejects_regression_hidden_by_same_timestamp_tie(pool, deps
     assert stored == 0
 
 
+async def test_ingest_rejects_regression_when_same_trade_id_reused_at_earlier_time(pool, deps):
+    """같은 trade_id를 다른(더 이른) traded_at으로 재수집하면 `md_tick`
+    UNIQUE(venue, instrument_id, trade_id, traded_at)와 다른 복합키라
+    "재수집"이 아니라 신규 행이다 — trade_id만으로 "이미 안다"고 판정하면
+    이 배치가 역행검사를 건너뛰고 통과해버린다(리뷰 REJECT, task-1302).
+    올바른 구현은 traded_at 역행으로 배치 전체를 REJECT하고 새 행을
+    남기지 않아야 한다."""
+    async with pool.acquire() as conn:
+        instrument_id = await _instrument_id(conn)
+    t0 = datetime.now(timezone.utc).replace(microsecond=0)
+
+    first = [_tick(instrument_id, "1", t0), _tick(instrument_id, "5", t0 + timedelta(seconds=5))]
+    r1 = await _run(deps, first)
+    assert r1.verdict.verdict == Verdict.ACCEPT
+
+    regressive = [_tick(instrument_id, "5", t0 + timedelta(seconds=2))]
+    result = await _run(deps, regressive)
+
+    assert result.verdict.verdict == Verdict.REJECT
+    assert result.verdict.rejected == 1
+    assert result.verdict.accepted == 0
+    async with pool.acquire() as conn:
+        row_count = await conn.fetchval(
+            "SELECT COUNT(*) FROM md_tick WHERE instrument_id = $1 AND trade_id = '5'",
+            instrument_id,
+        )
+        outcome = await conn.fetchval(
+            "SELECT outcome FROM foundation_audit_event WHERE aggregate_id = $1", result.batch_id
+        )
+    assert row_count == 1, "역행 배치는 새 행을 남기지 않아야 한다(기존 1행만 존재)"
+    assert outcome == "DENIED"
+
+
 async def test_ingest_rolls_back_md_tick_on_audit_failure(pool, deps):
     async with pool.acquire() as conn:
         instrument_id = await _instrument_id(conn)
