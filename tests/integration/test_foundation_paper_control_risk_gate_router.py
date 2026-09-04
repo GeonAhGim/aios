@@ -12,7 +12,10 @@
   pause_deployment.py가 이름은 같지만 서로 다른 InvalidDeploymentStateError
   클래스를 정의해, 라우터가 한쪽만 잡으면 나머지 절반이 500으로 새던 실제
   버그의 회귀 테스트.
-"""
+
+task-1217이 paper_control.py를 `ApiResponse[...]` 봉투로 이관하면서
+이 파일의 응답 파싱을 data 키 기준으로 갱신했다(task-1108이 mandates
+쪽에서 했던 것과 동일 근거)."""
 from __future__ import annotations
 
 import uuid
@@ -89,14 +92,14 @@ async def _request_and_start_deployment(client, headers) -> str:
             headers=headers,
         )
     ).json()
-    deployment_id = requested["id"]
+    deployment_id = requested["data"]["id"]
     started_response = await client.post(
         f"/v1/foundation/paper-deployments/{deployment_id}:start",
         json={"idempotency_key": f"start-{key}"},
         headers=headers,
     )
     assert started_response.status_code == 200, started_response.text
-    assert started_response.json()["state"] == "RUNNING"
+    assert started_response.json()["data"]["state"] == "RUNNING"
     return deployment_id
 
 
@@ -132,7 +135,7 @@ async def test_self_service_kill_switch_pauses_running_deployment(client):
 
     listed = (
         await client.get("/v1/foundation/paper-deployments", headers=headers)
-    ).json()["deployments"]
+    ).json()["data"]["deployments"]
     matching = [d for d in listed if d["id"] == deployment_id]
     assert len(matching) == 1
     assert matching[0]["state"] == "PAUSED"
