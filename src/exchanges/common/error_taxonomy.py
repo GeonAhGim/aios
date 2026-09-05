@@ -93,3 +93,26 @@ class ExchangeError(ExchangeAPIError):
         super().__init__(
             message or f"거래소 오류: kind={kind.value} venue={venue} status={http_status}"
         )
+
+
+class SentUnknownError(ExchangeError):
+    """`EXCH_SENT_UNKNOWN`(§3.4) — 주문이 전송된 뒤 응답을 신뢰할 수 없다
+    (타임아웃·비JSON·전송 후 5xx, §6 F3/F17). 재시도 불가: 같은 명령을 다시
+    보내면 중복 주문이므로 호출부(outbox_dispatcher)는 주문을 `UNKNOWN`으로
+    남기고 outbox 행을 `DONE`으로 닫는다(재전송 금지). 해소는 `unknown_resolver`
+    (역조회)만 한다. `kind`는 항상 `UNKNOWN_RESPONSE`, `retryable=False`."""
+
+    def __init__(
+        self,
+        *,
+        venue: str | None = None,
+        http_status: int | None = None,
+        message: str | None = None,
+    ) -> None:
+        super().__init__(
+            ExchangeErrorKind.UNKNOWN_RESPONSE,
+            retryable=False,
+            venue=venue,
+            http_status=http_status,
+            message=message or f"주문 전송 후 응답 유실: venue={venue} status={http_status}",
+        )

@@ -107,6 +107,10 @@ extend-immutable-calls = ["fastapi.Depends", "fastapi.Query", "fastapi.Path", "f
 "src/services/execution_loop/**" = ["TID251"]
 "src/services/order_service/**" = ["TID251"]
 "src/services/oms/ports/**" = ["TID251"]
+# L4-14 — OMS 애플리케이션 계층(outbox_dispatcher 등)은 트랜잭션 경계를 직접
+# 쥔다(§5.3: 거래소 호출은 어떤 tx도 열지 않은 상태에서). ledger/positions/
+# trust application/**과 동일 예외. oms/domain/**은 여전히 순수하다.
+"src/services/oms/application/**" = ["TID251"]
 "src/services/safety/**" = ["TID251"]
 "src/watchdog_process.py" = ["TID251"]
 
