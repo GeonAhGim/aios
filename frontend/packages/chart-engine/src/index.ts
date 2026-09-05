@@ -119,3 +119,15 @@ export { createKlinechartsBackend, createKlinechartsChartEngine } from "./core/k
 export type { VendorChart } from "./core/klinecharts";
 export { KLINECHARTS_VENDOR_VERSION } from "./core/klinecharts";
 export { AIOS_HISTOGRAM_INDICATOR, AIOS_LINE_INDICATOR } from "./core/klinechartsSeries";
+
+export type {
+  CreateReplayControllerOptions,
+  ReplayCause,
+  ReplayClock,
+  ReplayController,
+  ReplayFrame,
+  ReplayState,
+  ReplayStatus,
+  ReplayTimer,
+} from "./replay/replayController";
+export { createReplayController } from "./replay/replayController";
