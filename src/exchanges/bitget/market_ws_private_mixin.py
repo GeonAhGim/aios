@@ -8,7 +8,14 @@ Private WebSocket(wss://ws.bitget.com/v2/ws/private, 공식 문서 기준 —
 
 2026-09-03 task-1032(PLT-40a 선행) — `market_data_mixin.py`(735줄, P6
 line_cap 초과)에서 순수 이동(동작 변경 0). 연결관리는
-`market_ws_connection.py`, 메시지 파싱은 `market_ws_parsing.py` 참조.
+`market_ws_connection.py`(→ 공용 `exchanges/common/ws_session.py`), 메시지
+파싱은 `ws_parsers.py` 참조.
+
+2026-09-06 task-1551(L4-19) — 재연결 후 REST 재동기화(task-105)를
+`on_reconnected` 안에 끼워 넣던 것을 `on_resync` 훅으로 분리 — 세션이
+재연결 직후와 seq 갭 감지 시 같은 경로로 호출한다(F10·F11).
+로그인 실패(`event=login`, code≠0)·error 이벤트는 이제 `WsAckError`로
+표면화된다(이전엔 경고 로그 후 계속).
 """
 from __future__ import annotations
 
@@ -24,7 +31,7 @@ from src.exchanges.bitget.market_ws_connection import (
     _connect,
     _run_ws_subscription,
 )
-from src.exchanges.bitget.market_ws_parsing import (
+from src.exchanges.bitget.ws_parsers import (
     parse_account_ws_message,
     parse_order_ws_message,
     parse_position_ws_message,
@@ -88,7 +95,7 @@ class BitgetMarketDataWsPrivateMixin:
             "args": [{"instType": inst_type, "channel": "orders", "instId": "default"}],
         }
 
-        async def resync_then_notify() -> None:
+        async def resync() -> None:
             """FULL_AUDIT §2-B ② — 이 채널이 대체하려는 게 바로 FD-4.5
             폴링이므로(모듈독스트링 참조), 재연결 직후는 그 폴링이 가장
             필요한 순간이다 — 끊긴 동안 체결/거부됐을 미체결 주문을
@@ -98,8 +105,6 @@ class BitgetMarketDataWsPrivateMixin:
                     await callback(order)
             except Exception:  # noqa: BLE001 — 재동기화 실패로 재연결 자체를 막지 않음
                 logger.warning("Bitget WS 재연결 후 미체결 주문 재동기화 실패")
-            if on_reconnected is not None:
-                await on_reconnected()
 
         async def on_message(message: dict[str, Any]) -> None:
             for order in parse_order_ws_message(message):
@@ -112,7 +117,8 @@ class BitgetMarketDataWsPrivateMixin:
             pre_messages_factory=_login,
             connect_fn=connect_fn,
             on_reconnecting=on_reconnecting,
-            on_reconnected=resync_then_notify,
+            on_reconnected=on_reconnected,
+            on_resync=resync,
         )
 
     async def subscribe_account_stream(
@@ -143,7 +149,7 @@ class BitgetMarketDataWsPrivateMixin:
             "args": [{"instType": inst_type, "channel": "account", "instId": "default"}],
         }
 
-        async def resync_then_notify() -> None:
+        async def resync() -> None:
             """FULL_AUDIT §2-B ② — 재연결 후 REST get_balance()로 잔고
             재동기화(subscribe_ticker_stream과 동일 판단)."""
             try:
@@ -151,8 +157,6 @@ class BitgetMarketDataWsPrivateMixin:
                     await callback(balance)
             except Exception:  # noqa: BLE001 — 재동기화 실패로 재연결 자체를 막지 않음
                 logger.warning("Bitget WS 재연결 후 잔고 재동기화 실패")
-            if on_reconnected is not None:
-                await on_reconnected()
 
         async def on_message(message: dict[str, Any]) -> None:
             for balance in parse_account_ws_message(message):
@@ -165,7 +169,8 @@ class BitgetMarketDataWsPrivateMixin:
             pre_messages_factory=_login,
             connect_fn=connect_fn,
             on_reconnecting=on_reconnecting,
-            on_reconnected=resync_then_notify,
+            on_reconnected=on_reconnected,
+            on_resync=resync,
         )
 
     async def subscribe_positions_stream(
@@ -194,7 +199,7 @@ class BitgetMarketDataWsPrivateMixin:
             "args": [{"instType": inst_type, "channel": "positions", "instId": "default"}],
         }
 
-        async def resync_then_notify() -> None:
+        async def resync() -> None:
             """FULL_AUDIT §2-B ② — 재연결 후 REST get_futures_positions()로
             포지션 재동기화(subscribe_ticker_stream과 동일 판단)."""
             try:
@@ -202,8 +207,6 @@ class BitgetMarketDataWsPrivateMixin:
                     await callback(position)
             except Exception:  # noqa: BLE001 — 재동기화 실패로 재연결 자체를 막지 않음
                 logger.warning("Bitget WS 재연결 후 포지션 재동기화 실패")
-            if on_reconnected is not None:
-                await on_reconnected()
 
         async def on_message(message: dict[str, Any]) -> None:
             for position in parse_position_ws_message(message):
@@ -216,5 +219,6 @@ class BitgetMarketDataWsPrivateMixin:
             pre_messages_factory=_login,
             connect_fn=connect_fn,
             on_reconnecting=on_reconnecting,
-            on_reconnected=resync_then_notify,
+            on_reconnected=on_reconnected,
+            on_resync=resync,
         )

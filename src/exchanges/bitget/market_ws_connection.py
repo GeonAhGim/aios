@@ -1,55 +1,54 @@
-"""02b_bitget_api_v2_full_spec_v1.md §6 — Bitget WebSocket 연결관리 공통 루프.
+"""02b_bitget_api_v2_full_spec_v1.md §6 / L4-19 — Bitget WebSocket 연결 조립.
 
-2026-09-02 리팩터링(02b 스펙 §9 작업 분해 4번, WebSocket P0) — 기존
-`subscribe_ticker_stream()`은 연결관리(재연결·백오프)와 메시지 파싱이
-한 함수 안에 뒤섞여 있어 실소켓 없이는 전혀 테스트할 수 없었다. 연결관리
-공통 루프(`_run_ws_subscription()`)만 이 모듈에 모아, `connect_fn`을
-주입 가능하게 열어둬(기본값은 실제 websockets.connect) 가짜 연결로
-재연결/백오프 동작까지 결정적으로 재현할 수 있다. 메시지 파싱은
-`market_ws_parsing.py` 참조.
+Spec: docs/specs/L4_execution_oms_and_exchange_v1.0.md#§2-E, §9 L4-19
 
-2026-09-03 task-1032(PLT-40a 선행) — `market_data_mixin.py`(735줄, P6
-line_cap 초과)에서 순수 이동(동작 변경 0). 기존 테스트가 참조하는 모듈
-경로(`market_data_mixin`)는 그 파일에서 이 모듈의 이름들을 재-import해
-그대로 유지한다.
+2026-09-02 리팩터링 — 연결관리(재연결·백오프)를 파싱과 분리해 `connect_fn`
+주입으로 실소켓 없이 테스트 가능하게 했다. 2026-09-03 task-105(f3799ba)가
+ping/pong·ack 처리·재연결 후 REST 재동기화를 여기에 넣었다.
+
+2026-09-06 task-1551(L4-19) — 그 로직을 거래소 공통 `exchanges/common/
+ws_session.py::WsSession`으로 끌어올렸다(재구현 아님). 이 모듈에는 Bitget
+고유 조립만 남는다: 하트비트 규약(`BITGET_HEARTBEAT`), ack 분류
+(`classify_bitget_ack`), venue/channel 라벨, 그리고 기존 호출부·테스트가 쓰는
+`_run_ws_subscription()` 시그니처의 얇은 래퍼. 동작 변화(스펙 §2-D 규칙):
+- pong 미수신 → 재연결(이전엔 ping만 보내고 pong을 감시하지 않았다).
+- subscribe/login 실패·error 이벤트 → `WsAckError` 표면화(이전엔 경고 로그 후 계속).
+- 로그에 raw payload를 남기지 않는다.
 """
 from __future__ import annotations
 
 import asyncio
-import json
 import logging
-from collections.abc import AsyncIterator, Awaitable, Callable
-from contextlib import AbstractAsyncContextManager
-from typing import Any, Protocol
+from collections.abc import Awaitable, Callable
+from typing import Any
 
-from websockets.asyncio.client import connect as _default_connect
-from websockets.exceptions import ConnectionClosed
+from src.exchanges.bitget.ws_parsers import BITGET_HEARTBEAT, classify_bitget_ack
+from src.exchanges.common.ws_session import (
+    ConnectFn,
+    HeartbeatSpec,
+    MessageHandler,
+    ResyncHook,
+    SeqExtractor,
+    WsConnection,
+    WsSession,
+    default_connect,
+    send_periodic_pings,
+)
+
+__all__ = [
+    "ConnectFn",
+    "MessageHandler",
+    "ReconnectHook",
+    "WsConnection",
+    "_connect",
+    "_run_ws_subscription",
+    "_send_periodic_pings",
+]
 
 logger = logging.getLogger(__name__)
 
 ReconnectHook = Callable[[], Awaitable[None]]
-MessageHandler = Callable[[dict[str, Any]], Awaitable[None]]
-
-
-class WsConnection(Protocol):
-    async def send(self, message: str) -> None: ...
-    def __aiter__(self) -> AsyncIterator[str]: ...
-
-
-ConnectFn = Callable[[str], AbstractAsyncContextManager[WsConnection]]
-
-
-def _connect(url: str) -> AbstractAsyncContextManager[WsConnection]:
-    """`websockets.asyncio.client.connect`는 실제로는 URL 하나만으로도
-    호출 가능한 비동기 컨텍스트 매니저를 반환하지만, 클래스 자체의 타입
-    시그니처는 그보다 훨씬 넓다(헤더/ping 설정 등) — 테스트가 주입하는
-    가짜 `connect_fn`과 정확히 같은 좁은 타입으로 맞추기 위한 얇은 래퍼."""
-    return _default_connect(url)  # type: ignore[return-value]
-
-
-_PING_INTERVAL_SECONDS = 30.0
-_PING_MESSAGE = "ping"
-_PONG_MESSAGE = "pong"
+_connect = default_connect
 
 
 async def _send_periodic_pings(
@@ -57,14 +56,18 @@ async def _send_periodic_pings(
     interval: float,
     ping_sleep_fn: Callable[[float], Awaitable[None]],
 ) -> None:
-    """FULL_AUDIT_2026-09-02.md §2-B ② — Bitget 공식 문서 관례: 30초
-    이상 아무 메시지도 오가지 않으면 서버가 연결을 끊는다. 클라이언트가
-    주기적으로 평문 "ping"(JSON 아님 — 다른 메시지들과 다른 프로토콜)을
-    보내고 "pong"을 돌려받아야 유지된다. `_run_ws_subscription()`이
-    메시지 수신 루프와 나란히 백그라운드 태스크로 돌린다."""
-    while True:
-        await ping_sleep_fn(interval)
-        await ws.send(_PING_MESSAGE)
+    """task-105 호환 — pong 감시 없는 순수 ping 루프(`monitor=None`).
+    `WsSession`은 monitor를 붙인 `send_periodic_pings`를 직접 쓴다."""
+    await send_periodic_pings(
+        ws, HeartbeatSpec(interval_sec=interval, ping_message=BITGET_HEARTBEAT.ping_message,
+                          pong_message=BITGET_HEARTBEAT.pong_message), ping_sleep_fn,
+    )
+
+
+def _channel_label(subscribe_msg: dict[str, Any]) -> str:
+    args = subscribe_msg.get("args") or []
+    first = args[0] if args and isinstance(args[0], dict) else {}
+    return str(first.get("channel", "unknown"))
 
 
 async def _run_ws_subscription(
@@ -76,101 +79,47 @@ async def _run_ws_subscription(
     connect_fn: ConnectFn = _connect,
     on_reconnecting: ReconnectHook | None = None,
     on_reconnected: ReconnectHook | None = None,
+    on_resync: ResyncHook | None = None,
+    seq_extractor: SeqExtractor | None = None,
     max_backoff_seconds: float = 30.0,
     sleep_fn: Callable[[float], Awaitable[None]] = asyncio.sleep,
-    ping_interval_seconds: float = _PING_INTERVAL_SECONDS,
+    ping_interval_seconds: float = BITGET_HEARTBEAT.interval_sec,
     ping_sleep_fn: Callable[[float], Awaitable[None]] = asyncio.sleep,
 ) -> None:
-    """연결·구독·재연결(지수 백오프)을 전담하는 공통 루프 — 메시지
-    자체의 의미는 모른다(on_message에 그대로 위임). 채널이 몇 개든
-    이 루프 하나를 재사용한다(§2.1 재연결 책임 원칙, 로직 중복 방지).
-    `pre_messages_factory`(예: Private 채널의 login)는 매 연결(최초 포함,
-    재연결 포함) *시작될 때마다 새로 호출돼* subscribe_msg보다 먼저
-    순서대로 전송된다.
+    """Bitget 채널 하나를 `WsSession`으로 돌린다.
 
-    레드팀 #2026-09-02-31 — 이전엔 고정 `list[dict]`를 받아 재연결마다
-    같은(오래된 타임스탬프로 서명된) 메시지를 재전송했다 — Bitget의 WS
-    로그인 서명은 REST처럼 타임스탬프가 일정 범위 안이어야 유효하므로,
-    최초 연결 이후 재연결부터는 반드시 실패한다. 팩토리로 바꿔 매
-    시도마다 새로 서명하게 한다.
+    훅 매핑(§2.1 재연결 책임 원칙 — EventBus에 직접 결합하지 않고 콜백 주입):
+    - `on_reconnecting` ← `on_distrust(True)`: 끊김 감지 시 1회(연속 실패 중 반복 없음).
+    - `on_resync`: 재연결 성공 직후(재로그인·재구독 뒤)와 seq 갭 감지 시 — 호출부가
+      REST 스냅샷(get_ticker/get_open_orders 등)을 콜백으로 흘려보내는 자리.
+    - `on_reconnected` ← `on_distrust(False)`: `on_resync` 완료 뒤.
+    `pre_messages_factory`(Private 로그인)는 매 연결마다 새로 호출된다.
+    `seq_extractor`는 기본 None(`ws_parsers.extract_bitget_seq` docstring — 미검증 opt-in).
+    """
 
-    `ping_sleep_fn`은 `sleep_fn`(재연결 백오프 대기)과 고의로 분리했다 —
-    같은 걸 썼다면 백오프 테스트가 주입하는 가짜 즉시-완료 sleep이
-    ping 루프도 즉시 무한 반복시켜 테스트를 오염시킨다(핑 간격은 실제
-    시간 기준이 맞다 — 백오프와는 별개 개념)."""
-    backoff = 1.0
-    first_attempt = True
-
-    while True:
-        if not first_attempt and on_reconnecting is not None:
+    async def on_distrust(entered: bool) -> None:
+        if entered and on_reconnecting is not None:
             await on_reconnecting()
-        first_attempt = False
-        try:
-            async with connect_fn(url) as ws:
-                for pre_message in (pre_messages_factory() if pre_messages_factory else []):
-                    await ws.send(json.dumps(pre_message))
-                await ws.send(json.dumps(subscribe_msg))
-                if backoff > 1.0 and on_reconnected is not None:
-                    await on_reconnected()
-                backoff = 1.0
-                ping_task = asyncio.ensure_future(
-                    _send_periodic_pings(ws, ping_interval_seconds, ping_sleep_fn)
-                )
-                try:
-                    async for raw_message in ws:
-                        # FULL_AUDIT §2-B ② — 이전엔 모든 수신 메시지를
-                        # 무조건 json.loads()로 파싱했다. Bitget이 우리
-                        # ping에 대한 응답으로 평문 "pong"을 보내면(공식
-                        # 문서 관례) JSON이 아니라서 예외가 나 연결
-                        # 전체가 죽었을 것이다.
-                        if raw_message == _PONG_MESSAGE:
-                            continue
-                        message = json.loads(raw_message)
-                        event = message.get("event")
-                        if event == "login":
-                            # 레드팀 #2026-09-02-31 — 이전엔 로그인 성공/실패를
-                            # 전혀 구분하지 않고 각 parse_*_ws_message가 조용히
-                            # 버려서(_is_control_message), 재연결 후 인증이
-                            # 깨져도 로그 한 줄 안 남았다.
-                            if str(message.get("code", "0")) in ("0", "None"):
-                                logger.info(
-                                    "Bitget WS 로그인 성공(channel=%s)", subscribe_msg.get("args")
-                                )
-                            else:
-                                logger.warning(
-                                    "Bitget WS 로그인 실패(channel=%s): %s — private 채널 "
-                                    "데이터를 받지 못하고 있을 수 있습니다.",
-                                    subscribe_msg.get("args"),
-                                    message,
-                                )
-                            continue
-                        if event == "subscribe":
-                            # FULL_AUDIT §2-B ② — 구독 ack도 로그인처럼
-                            # 성공/실패 구분 없이 조용히 버려지고 있었다.
-                            logger.info(
-                                "Bitget WS 구독 성공(channel=%s)", message.get("arg")
-                            )
-                            continue
-                        if event == "error":
-                            logger.warning(
-                                "Bitget WS 오류 이벤트(channel=%s): %s",
-                                subscribe_msg.get("args"),
-                                message,
-                            )
-                            continue
-                        await on_message(message)
-                finally:
-                    ping_task.cancel()
-                    try:
-                        await ping_task
-                    except asyncio.CancelledError:
-                        pass
-        except (ConnectionClosed, OSError) as exc:
-            logger.warning(
-                "Bitget WS 연결 끊김(channel=%s): %s — %.1f초 후 재연결",
-                subscribe_msg.get("args"),
-                exc,
-                backoff,
-            )
-            await sleep_fn(backoff)
-            backoff = min(backoff * 2, max_backoff_seconds)
+        if not entered and on_reconnected is not None:
+            await on_reconnected()
+
+    session = WsSession(
+        url,
+        venue="bitget",
+        channel=_channel_label(subscribe_msg),
+        ack_validator=classify_bitget_ack,
+        connect_fn=connect_fn,
+        heartbeat=HeartbeatSpec(
+            interval_sec=ping_interval_seconds,
+            ping_message=BITGET_HEARTBEAT.ping_message,
+            pong_message=BITGET_HEARTBEAT.pong_message,
+        ),
+        seq_extractor=seq_extractor,
+        on_resync=on_resync,
+        on_distrust=on_distrust,
+        pre_messages_factory=pre_messages_factory,
+        max_backoff_seconds=max_backoff_seconds,
+        sleep_fn=sleep_fn,
+        ping_sleep_fn=ping_sleep_fn,
+    )
+    await session.run([subscribe_msg], on_message)

@@ -9,6 +9,7 @@ from websockets.exceptions import ConnectionClosed
 
 from src.exchanges.bitget.adapter import BitgetAdapter
 from src.exchanges.bitget.market_data_mixin import _run_ws_subscription
+from src.exchanges.common.ws_session import WsAckError
 
 
 class _StopTest(Exception):
@@ -316,7 +317,11 @@ async def test_run_ws_subscription_logs_subscribe_ack_and_does_not_forward_it(ca
     assert any("구독 성공" in record.message for record in caplog.records)
 
 
-async def test_run_ws_subscription_logs_error_event_and_does_not_forward_it(caplog):
+async def test_run_ws_subscription_raises_on_error_event_and_does_not_forward_it():
+    """L4-19(task-1551) — L4 스펙 §2-D "subscribe ack 실패 코드면 예외":
+    task-105는 error 이벤트를 경고 로그만 남기고 계속 진행했지만, 구독
+    거부·인증 오류는 재연결로 해결되지 않으므로 이제 `WsAckError`로
+    호출부에 표면화된다(재연결 시도 없음 — connect_fn 1회)."""
     connection = _FakeConnection(
         ['{"event":"error","code":"30001","msg":"channel does not exist"}'],
         raise_after=ConnectionClosed(None, None),
@@ -334,14 +339,13 @@ async def test_run_ws_subscription_logs_error_event_and_does_not_forward_it(capl
     async def on_message(message: dict) -> None:
         received.append(message)
 
-    with caplog.at_level("WARNING"):
-        with pytest.raises(_StopTest):
-            await _run_ws_subscription(
-                "wss://fake", {"op": "subscribe", "args": []}, on_message, connect_fn=connect_fn
-            )
+    with pytest.raises(WsAckError, match="30001"):
+        await _run_ws_subscription(
+            "wss://fake", {"op": "subscribe", "args": []}, on_message, connect_fn=connect_fn
+        )
 
     assert received == []
-    assert any("오류 이벤트" in record.message for record in caplog.records)
+    assert call_count["n"] == 1
 
 
 async def test_subscribe_ticker_stream_resyncs_via_rest_after_reconnect():

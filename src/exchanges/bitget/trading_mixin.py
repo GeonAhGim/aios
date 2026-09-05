@@ -16,7 +16,7 @@ Spec: 02_exchange_adapter_v1.3.md#§2.1, 02b_bitget_api_v2_full_spec_v1.md#§3.2
 get_order_history/get_fills + 신규 find_order_by_client_id)과 행 파서
 `_row_to_order`는 `trading_query_mixin.py`로 분리. 이 클래스가 그 믹스인을
 상속하므로 `BitgetAdapter`의 베이스 목록·MRO상 메서드 해석은 그대로다.
-`_row_to_order`는 `market_ws_parsing.py`가 이 모듈 경로로 import하므로
+`_row_to_order`는 `ws_parsers.py`가 이 모듈 경로로 import하므로
 재수출한다(하위호환).
 
 이 파일의 모든 메서드는 자금을 움직이므로 예외 없이

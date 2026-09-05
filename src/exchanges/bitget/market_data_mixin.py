@@ -8,8 +8,12 @@ orderbook,candles}).
 2026-09-03 task-1032(PLT-40a 선행, §9 PLT-40) — 이 파일은 원래 735줄로
 P6.line_cap을 초과해 REST 메서드군 + WebSocket 연결관리/파싱/구독을 전부
 갖고 있었다. 순수 이동만으로(동작 변경 0) 아래처럼 분할했다:
-- `market_ws_parsing.py` — WS 메시지 순수 파싱 함수
-- `market_ws_connection.py` — 연결관리 공통 루프(`_run_ws_subscription` 등)
+- `ws_parsers.py` — WS 프레임 해석(데이터 파서 6개 + ack 분류·seq 추출;
+  task-1551 L4-19 전까지 `market_ws_parsing.py`)
+- `market_ws_connection.py` — Bitget 연결 조립. task-1551(L4-19)부터
+  연결·하트비트·ack·seq 갭·재연결 재동기화는 거래소 공통
+  `exchanges/common/ws_session.py::WsSession`이 맡고, `_run_ws_subscription`은
+  그 얇은 래퍼다(pong 미수신 재연결·ack 실패 예외 표면화 포함)
 - `market_ws_public_mixin.py` — 공개 채널 구독(ticker/candle/orderbook)
 - `market_ws_private_mixin.py` — Private 채널 구독(orders/account/positions)
 이 파일에는 REST Market Data 메서드군(`BitgetMarketDataMixin`)과, Private
@@ -39,7 +43,8 @@ from src.exchanges.bitget.market_ws_connection import (  # noqa: F401 — 기존
     _run_ws_subscription,
     _send_periodic_pings,
 )
-from src.exchanges.bitget.market_ws_parsing import (  # noqa: F401 — 기존 테스트 import 경로 유지
+from src.exchanges.bitget.symbols import to_bitget_symbol as _to_bitget_symbol
+from src.exchanges.bitget.ws_parsers import (  # noqa: F401 — 기존 테스트 import 경로 유지
     parse_account_ws_message,
     parse_candle_ws_message,
     parse_order_ws_message,
@@ -47,7 +52,6 @@ from src.exchanges.bitget.market_ws_parsing import (  # noqa: F401 — 기존 �
     parse_position_ws_message,
     parse_ticker_ws_message,
 )
-from src.exchanges.bitget.symbols import to_bitget_symbol as _to_bitget_symbol
 from src.exchanges.common.http_client import SignedRequestClient
 
 # AIOS 표준 timeframe -> Bitget REST candles granularity 파라미터

@@ -7,7 +7,12 @@ Spec: 02_exchange_adapter_v1.3.md#§2.1, 02b_bitget_api_v2_full_spec_v1.md#§6
 
 2026-09-03 task-1032(PLT-40a 선행) — `market_data_mixin.py`(735줄, P6
 line_cap 초과)에서 순수 이동(동작 변경 0). 연결관리는
-`market_ws_connection.py`, 메시지 파싱은 `market_ws_parsing.py` 참조.
+`market_ws_connection.py`(→ 공용 `exchanges/common/ws_session.py`), 메시지
+파싱은 `ws_parsers.py` 참조.
+
+2026-09-06 task-1551(L4-19) — 재연결 후 REST 재동기화(task-105)를
+`on_reconnected` 안에 끼워 넣던 것을 `on_resync` 훅으로 분리 — 세션이
+재연결 직후와 seq 갭 감지 시 같은 경로로 호출한다(F10·F11).
 """
 from __future__ import annotations
 
@@ -22,12 +27,12 @@ from src.exchanges.bitget.market_ws_connection import (
     _connect,
     _run_ws_subscription,
 )
-from src.exchanges.bitget.market_ws_parsing import (
+from src.exchanges.bitget.symbols import to_bitget_symbol as _to_bitget_symbol
+from src.exchanges.bitget.ws_parsers import (
     parse_candle_ws_message,
     parse_orderbook_ws_message,
     parse_ticker_ws_message,
 )
-from src.exchanges.bitget.symbols import to_bitget_symbol as _to_bitget_symbol
 from src.exchanges.common.http_client import SignedRequestClient
 from src.exchanges.common.types import TickerCallback
 
@@ -84,22 +89,20 @@ class BitgetMarketDataWsPublicMixin:
 
         FULL_AUDIT §2-B ② — 재연결 성공 시 REST get_ticker()로 한 번
         재동기화한 뒤(끊긴 동안 놓쳤을 수 있는 갱신을 메꿈) callback을
-        호출한다 — 그다음 호출부가 넘긴 on_reconnected도 실행(이벤트
-        발행 등은 여전히 호출부 책임)."""
+        호출한다(`on_resync`) — 그다음 호출부가 넘긴 on_reconnected가
+        실행된다(이벤트 발행 등은 여전히 호출부 책임)."""
         bitget_symbol = _to_bitget_symbol(symbol)
         subscribe_msg = {
             "op": "subscribe",
             "args": [{"instType": "SPOT", "channel": "ticker", "instId": bitget_symbol}],
         }
 
-        async def resync_then_notify() -> None:
+        async def resync() -> None:
             try:
                 ticker = await self.get_ticker(symbol)
                 await callback(ticker)
             except Exception:  # noqa: BLE001 — 재동기화 실패로 재연결 자체를 막지 않음
                 logger.warning("Bitget WS 재연결 후 REST 재동기화 실패(symbol=%s)", symbol)
-            if on_reconnected is not None:
-                await on_reconnected()
 
         async def on_message(message: dict[str, Any]) -> None:
             for ticker in parse_ticker_ws_message(message):
@@ -111,7 +114,8 @@ class BitgetMarketDataWsPublicMixin:
             on_message,
             connect_fn=connect_fn,
             on_reconnecting=on_reconnecting,
-            on_reconnected=resync_then_notify,
+            on_reconnected=on_reconnected,
+            on_resync=resync,
         )
 
     async def subscribe_candle_stream(
@@ -168,7 +172,7 @@ class BitgetMarketDataWsPublicMixin:
             "args": [{"instType": "SPOT", "channel": depth_channel, "instId": bitget_symbol}],
         }
 
-        async def resync_then_notify() -> None:
+        async def resync() -> None:
             """FULL_AUDIT §2-B ② — 재연결 후 REST get_orderbook()으로 한
             번 재동기화(subscribe_ticker_stream과 동일 판단)."""
             try:
@@ -176,8 +180,6 @@ class BitgetMarketDataWsPublicMixin:
                 await callback(book)
             except Exception:  # noqa: BLE001 — 재동기화 실패로 재연결 자체를 막지 않음
                 logger.warning("Bitget WS 재연결 후 REST 재동기화 실패(symbol=%s)", symbol)
-            if on_reconnected is not None:
-                await on_reconnected()
 
         async def on_message(message: dict[str, Any]) -> None:
             book = parse_orderbook_ws_message(message, symbol=symbol)
@@ -190,5 +192,6 @@ class BitgetMarketDataWsPublicMixin:
             on_message,
             connect_fn=connect_fn,
             on_reconnecting=on_reconnecting,
-            on_reconnected=resync_then_notify,
+            on_reconnected=on_reconnected,
+            on_resync=resync,
         )
