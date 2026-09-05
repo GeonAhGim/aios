@@ -20,6 +20,30 @@ from src.foundation.evidence.adapters.postgres_repository import PostgresAuditEv
 from src.foundation.evidence.ports.repository import AuditEventRepository
 from src.foundation.mandates.adapters.postgres_repository import PostgresMandateRepository
 from src.foundation.mandates.ports.repository import MandateRepository
+from src.foundation.market_data.adapters.postgres_calendar_repository import (
+    PostgresCalendarRepository,
+)
+from src.foundation.market_data.adapters.postgres_candle_store import PostgresCandleStore
+from src.foundation.market_data.adapters.postgres_reference_reader import (
+    PostgresReferenceReader,
+)
+from src.foundation.market_data.adapters.postgres_reference_repository import (
+    PostgresReferenceRepository,
+)
+from src.foundation.market_data.adapters.postgres_tenant_venues import (
+    PostgresTenantVenueSource,
+)
+from src.foundation.market_data.ports.calendar_repository import CalendarRepository
+from src.foundation.market_data.ports.candle_store import CandleStore
+from src.foundation.market_data.ports.entitlement import (
+    EntitlementPort,
+    PaperTenantVenueEntitlement,
+    VenueRegistrySource,
+)
+from src.foundation.market_data.ports.reference_repository import (
+    ReferenceReadRepository,
+    ReferenceRepository,
+)
 from src.foundation.paper_control.adapters.postgres_repository import (
     PostgresPaperControlRepository,
 )
@@ -117,6 +141,41 @@ def get_paper_statement_input_adapter(
     pool: asyncpg.Pool = Depends(get_pool),
 ) -> StatementInputPort:
     return PaperStatementInputAdapter(pool)
+
+
+# LA-24(task-1376) — market_data 읽기 API. 어댑터는 main.py lifespan의
+# MarketDataQualityScheduler가 쓰는 것과 같은 클래스(단일출처). 이용권 포트는
+# 여기서만 구현이 결정된다 — DC-9 정책 구현으로 교체할 때 이 한 함수만 바꾼다.
+def get_candle_store(pool: asyncpg.Pool = Depends(get_pool)) -> CandleStore:
+    return PostgresCandleStore(pool)
+
+
+def get_market_reference_repository(
+    pool: asyncpg.Pool = Depends(get_pool),
+) -> ReferenceRepository:
+    return PostgresReferenceRepository(pool)
+
+
+def get_market_reference_reader(
+    pool: asyncpg.Pool = Depends(get_pool),
+) -> ReferenceReadRepository:
+    return PostgresReferenceReader(pool)
+
+
+def get_market_calendar_repository(
+    pool: asyncpg.Pool = Depends(get_pool),
+) -> CalendarRepository:
+    return PostgresCalendarRepository(pool)
+
+
+def get_venue_registry_source(pool: asyncpg.Pool = Depends(get_pool)) -> VenueRegistrySource:
+    return PostgresTenantVenueSource(pool)
+
+
+def get_entitlement_port(
+    source: VenueRegistrySource = Depends(get_venue_registry_source),
+) -> EntitlementPort:
+    return PaperTenantVenueEntitlement(source)
 
 
 # 전수감사(agent-platform-12, docs/FULL_AUDIT_2026-09-02.md §6) 발견 반영 —

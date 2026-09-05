@@ -8,6 +8,9 @@ _ALLOWED_PREFIXES = (
     # 목록보다 우선한다고 보고 여기 추가했다(스펙 문서 자체의 불일치,
     # PM 확인 필요하면 note로 남김).
     "RESOURCE_",
+    # LA-24(task-1376): 시장데이터 스펙 §9.2 LA-24 DoD가 `DATA_COVERAGE_MISSING`
+    # 409를 명시한다 — RESOURCE_와 같은 근거(구체 계약이 산문 규칙보다 우선).
+    "DATA_",
 )
 
 

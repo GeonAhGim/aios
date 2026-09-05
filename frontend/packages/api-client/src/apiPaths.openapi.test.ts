@@ -36,11 +36,11 @@ const snapshotPathSet = new Set(snapshotPathList);
 // 같은 이유의 유령 경로다. apiPaths.ts의 auth.sessions.*는 implemented=false로도
 // 등록돼 있고(§D가 그 일치를 강제), sessions.ts는 그 플래그로 네트워크 호출 전에
 // typed 오류(SessionsRouteNotImplementedError)를 던진다.
+// task-1376(LA-24): marketData.* 4건은 src/api/routers/market_data.py가 실재하게
+// 되어(GET /v1/foundation/market-data/candles·candles/replay·instruments·
+// instruments/{symbol}/aliases, main.py include_router) 더 이상 유령 경로가
+// 아니다 — 아래 STALE_SNAPSHOT_WHITELIST로 옮겼다(스냅샷 재생성 전).
 const GHOST_PATH_WHITELIST: ReadonlySet<ApiRouteName> = new Set<ApiRouteName>([
-  "marketData.candles.get",
-  "marketData.candles.replay",
-  "marketData.instruments.list",
-  "marketData.instruments.aliases",
   "auth.sessions.list",
   "auth.sessions.revoke",
 ]);
@@ -56,9 +56,17 @@ const GHOST_PATH_WHITELIST: ReadonlySet<ApiRouteName> = new Set<ApiRouteName>([
 // 커밋에 섞어 "백엔드 diff 0" 원칙을 어기게 되므로 이 leaf 범위 밖이다) 이
 // 두 경로가 아직 없다. 스냅샷이 갱신되면(별도 PLT 리프) 이 화이트리스트가
 // 거짓이 되므로 아래 "화이트리스트 부패 방지" 테스트가 잡는다.
+//
+// task-1376(LA-24): marketData.* 4건 — 라우터는 src/api/routers/market_data.py에
+// 실재하지만 스냅샷은 여전히 f800c1a 시점이라 경로가 없다(auth.refresh와 같은
+// 사유). 스냅샷이 재생성되면 아래 "부패 방지" 테스트가 잡는다.
 const STALE_SNAPSHOT_WHITELIST: ReadonlySet<ApiRouteName> = new Set<ApiRouteName>([
   "auth.refresh",
   "auth.logoutAll",
+  "marketData.candles.get",
+  "marketData.candles.replay",
+  "marketData.instruments.list",
+  "marketData.instruments.aliases",
 ]);
 
 // KNOWN_ENVELOPE_DRIFT: task-1165 시점 전수 대조 결과, apiPaths.ts에 등록된 envelope

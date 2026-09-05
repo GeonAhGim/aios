@@ -56,6 +56,12 @@ class ErrorCode(str, enum.Enum):
 
     DEPENDENCY_NOT_READY = "DEPENDENCY_NOT_READY"
 
+    # LA-24(market_data 읽기 API) — 요청 구간이 저장 커버리지 밖. 0/NaN 채움
+    # 금지(§4.1)라 200 빈 배열이 아니라 409로 거부한다. 재시도 불가(수집 후
+    # 재요청). 코드명은 시장데이터 스펙 §9.2 LA-24·`ports/provider.py`
+    # DataProviderErrorCode와 동일 문자열을 쓴다(단일출처).
+    DATA_COVERAGE_MISSING = "DATA_COVERAGE_MISSING"
+
     INTERNAL_ERROR = "INTERNAL_ERROR"
 
 
@@ -86,6 +92,7 @@ HTTP_STATUS: dict[ErrorCode, int] = {
     ErrorCode.EXCHANGE_UNAVAILABLE: status.HTTP_503_SERVICE_UNAVAILABLE,
     ErrorCode.EXCHANGE_FATAL: status.HTTP_502_BAD_GATEWAY,
     ErrorCode.DEPENDENCY_NOT_READY: status.HTTP_503_SERVICE_UNAVAILABLE,
+    ErrorCode.DATA_COVERAGE_MISSING: status.HTTP_409_CONFLICT,
     ErrorCode.INTERNAL_ERROR: status.HTTP_500_INTERNAL_SERVER_ERROR,
 }
 

@@ -220,19 +220,23 @@ export const API_ROUTES = defineApiRoutes({
   // 미도달 + 이 이름의 라우터 자체가 아직 없음, foundation.* 이관 전과 동일 상황) —
   // 그래서 foundation.* 항목과 동일하게 v1Path=null로 legacy만 등록한다. 실제 마운트
   // 경로가 확정되면(라우터 파일 확인 후) 이 값만 고친다.
-  "marketData.candles.get": route("/v1/foundation/market-data/candles", false, null, false),
-  "marketData.candles.replay": route("/v1/foundation/market-data/candles/replay", false, null, false),
+  // task-1376(LA-24): 라우터 실재(src/api/routers/market_data.py) → implemented=true.
+  // 응답은 다른 foundation 라우터와 같은 ApiResponse 봉투이지만, envelope 플래그
+  // 전환은 clients/marketData.test.ts의 봉투 없는 fixture(2~4번 케이스)와 함께
+  // 바꿔야 하므로 별도 리프로 남긴다(parseCandleSeries는 봉투 유무 모두 판별).
+  "marketData.candles.get": route("/v1/foundation/market-data/candles", false, null, true),
+  "marketData.candles.replay": route("/v1/foundation/market-data/candles/replay", false, null, true),
 
   // task-824: §3.1 InstrumentView 목록·별칭 조회. LA-9(ports/reference_repository.py)에는
   // get_instrument(단건)만 있고 목록·별칭 조회 메서드가 아직 없다 — marketData.candles.*와
   // 같은 이유(라우터 자체가 아직 없음)로 v1Path=null·legacy만 등록해둔다. 실제 라우터가
   // 생기면(LA-9 확장 후) 이 값만 고친다.
-  "marketData.instruments.list": route("/v1/foundation/market-data/instruments", false, null, false),
+  "marketData.instruments.list": route("/v1/foundation/market-data/instruments", false, null, true),
   "marketData.instruments.aliases": route(
     "/v1/foundation/market-data/instruments/:instrumentId/aliases",
     false,
     null,
-    false,
+    true,
   ),
 });
 

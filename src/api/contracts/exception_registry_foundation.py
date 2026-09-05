@@ -44,6 +44,17 @@ from src.foundation.mandates.application.activate_revision import (
 )
 from src.foundation.mandates.application.create_draft_mandate import MandateAlreadyExistsError
 from src.foundation.mandates.application.evaluate_policy import NoActiveMandateError
+from src.foundation.market_data.application.get_candles import (
+    AsOfInFutureError,
+    QuarantinedViewUnsupportedError,
+    UnknownSeriesError,
+)
+from src.foundation.market_data.application.read_api import (
+    DataCoverageMissingError,
+    MarketDataNotFoundError,
+    MarketDataQueryError,
+)
+from src.foundation.market_data.application.replay_candles import ReplayIncompleteError
 from src.foundation.paper_control.application.pause_deployment import (
     CrossTenantDeploymentAccessError as PauseCrossTenantDeploymentAccessError,
 )
@@ -220,6 +231,16 @@ EXCEPTION_MAP_FOUNDATION: list[tuple[type[Exception], ErrorCode]] = [
     (RuleBundleNotFoundError, ErrorCode.RESOURCE_NOT_FOUND),
     (SelfApprovalError, ErrorCode.AUTHZ_FORBIDDEN),
     (MissingApprovalRefError, ErrorCode.VALIDATION_INVALID_FIELD),
+    # LA-24(task-1376) — market_data 읽기 API(application/read_api.py 예외 3종 +
+    # LA-17 예외). AsOfInFutureError는 ValueError 파생이지만 builtin 전역 매핑이
+    # 없으므로 여기 명시 등록이 유일한 경로다.
+    (MarketDataNotFoundError, ErrorCode.RESOURCE_NOT_FOUND),
+    (UnknownSeriesError, ErrorCode.RESOURCE_NOT_FOUND),
+    (DataCoverageMissingError, ErrorCode.DATA_COVERAGE_MISSING),
+    (ReplayIncompleteError, ErrorCode.DATA_COVERAGE_MISSING),
+    (MarketDataQueryError, ErrorCode.VALIDATION_INVALID_FIELD),
+    (AsOfInFutureError, ErrorCode.VALIDATION_INVALID_FIELD),
+    (QuarantinedViewUnsupportedError, ErrorCode.VALIDATION_INVALID_FIELD),
 ]
 
 STATUS_OVERRIDE_FOUNDATION: list[tuple[type[Exception], int]] = [
