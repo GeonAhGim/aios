@@ -64,15 +64,25 @@ async def get_by_order_id(conn: asyncpg.Connection, order_id: UUID) -> Order | N
     return None if row is None else _row_to_order(row)
 
 
-async def insert(conn: asyncpg.Connection, order: Order, *, user_id: UUID) -> Order:
+async def insert(
+    conn: asyncpg.Connection,
+    order: Order,
+    *,
+    user_id: UUID,
+    risk_decision_id: UUID | None = None,
+) -> Order:
+    """R-37 — `risk_decision_id`는 `93c0e7f6b8d9` 트리거가 검증하는 I1
+    참조다(같은 tenant·ALLOW/REDUCE·만료 전). None 허용은 cutover 비무장
+    기간의 legacy 호출부(`submit.py`)를 위한 것이고, 무장 뒤에는 DB가
+    NULL INSERT를 거부한다(코드가 아니라 트리거가 최종 권위)."""
     row = await conn.fetchrow(
         """
         INSERT INTO orders (
             order_id, user_id, client_order_id, exchange_order_id, strategy_id,
             strategy_version, execution_id, symbol, exchange, side, order_type,
             quantity, price, status, filled_quantity, average_fill_price,
-            is_liquidation, asset_class
-        ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18)
+            is_liquidation, asset_class, risk_decision_id
+        ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19)
         RETURNING *
         """,
         order.order_id,
@@ -93,6 +103,7 @@ async def insert(conn: asyncpg.Connection, order: Order, *, user_id: UUID) -> Or
         order.average_fill_price.amount if order.average_fill_price is not None else None,
         order.is_liquidation,
         order.asset_class.value,
+        risk_decision_id,
     )
     return _row_to_order(row)
 

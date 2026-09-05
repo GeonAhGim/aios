@@ -48,6 +48,13 @@ class GateDecision:
     # 매 평가마다 함께 읽는다) — 다음 단계(R-37 fenced_submit)가 실제 쓰기
     # 직전 재조회한 값과 비교해 stale이면 거부할 수 있게 그대로 넘겨준다.
     fence_snapshot: Mapping[str, int] = field(default_factory=dict)
+    # R-37 — 이 결정을 낳은 `risk_decision.decision_id`(§2.5 `GateDecision +=
+    # decision_id`). `fenced_submit.submit_with_fence`는 이 값이 None이면
+    # 주문 claim 자체를 거부한다(I1 Master Authority, fail-closed) — 현재
+    # `foundation_gate.py`는 `risk_decision` 행을 만들지 않으므로(evaluate_
+    # pre_submit 위임 전, 그 파일 docstring) 아직 None을 채운다. 값을 채우는
+    # 호출자는 R-32/evaluate_pre_submit 위임 리프에서 생긴다.
+    decision_id: UUID | None = None
 
 
 PreSubmitGate = Callable[[OrderContext], Awaitable[GateDecision]]

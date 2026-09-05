@@ -25,6 +25,9 @@ ORDER_UNKNOWN_STATE_GAUGE = "aios.order.unknown_state.gauge"
 RISK_DECISION_COUNT_TOTAL = "aios.risk.decision.count_total"
 RISK_EVALUATION_DURATION_SECONDS = "aios.risk.evaluation.duration_seconds"
 
+# L4 risk_and_safety §7 "post-fence 부작용 — 목표 0 — fenced_submit" 행 원문.
+SAFETY_POST_FENCE_SIDE_EFFECT_COUNT_TOTAL = "aios.safety.post_fence_side_effect.count_total"
+
 FOUNDATION_PAPER_CONTROL_ORDER_INTENT_COUNT_TOTAL = (
     "aios.foundation_paper_control.order_intent.count_total"
 )
@@ -72,6 +75,7 @@ ALL_METRIC_NAMES: frozenset[str] = frozenset(
         ORDER_UNKNOWN_STATE_GAUGE,
         RISK_DECISION_COUNT_TOTAL,
         RISK_EVALUATION_DURATION_SECONDS,
+        SAFETY_POST_FENCE_SIDE_EFFECT_COUNT_TOTAL,
         FOUNDATION_PAPER_CONTROL_ORDER_INTENT_COUNT_TOTAL,
         LOOP_TICK_COUNT_TOTAL,
         LOOP_TICK_DURATION_SECONDS,
