@@ -15,14 +15,15 @@ from __future__ import annotations
 
 import json
 import logging
-from collections.abc import Awaitable, Callable, Sequence
+from collections.abc import Sequence
+from datetime import datetime, timezone
 from decimal import Decimal
 from typing import Any
 
 import asyncpg
 
-from src.core.db.conditional_write import ConcurrencyConflictError, conditional_update
-from src.core.executor.executor import Executor, next_fsm_state_after_fill
+from src.core.db.conditional_write import ConcurrencyConflictError
+from src.core.executor.executor import Executor
 from src.core.loader.risk_policy_loader import RiskPolicy
 from src.core.portfolio.engine import PortfolioEngine
 from src.core.risk.engine import RiskEngine
@@ -30,15 +31,21 @@ from src.core.safety.data_distrust import DataDistrustLevel, DataDistrustMonitor
 from src.core.strategy.engine import StrategyEngine
 from src.data.models.strategy_fsm import FSMState, FSMStrategyConfig
 from src.exchanges.common.adapter import ExchangeAdapter
-from src.services.condition_compiler import ORDER_FILLED
-from src.services.execution_loop.account_state import assemble_account_state
+from src.services.execution_loop.candle_history import CandleHistoryCache
 from src.services.execution_loop.equity_tracker import ExecutionEquityTracker
+from src.services.execution_loop.fsm_writer import _make_fsm_state_writer
 from src.services.execution_loop.market_state import build_market_state
+from src.services.execution_loop.pending_fill import handle_pending_fill_check
 from src.services.execution_loop.position import compute_position_quantity
 from src.services.execution_loop.pre_submit_check import is_submission_allowed
-from src.services.order_service import repository
+from src.services.execution_loop.risk_inputs_assembler import RiskInputCaches
+from src.services.execution_loop.tick_risk_phase import (
+    default_recorder,
+    run_pre_trade_risk_phase,
+)
 from src.services.order_service.gate import PreSubmitGate
-from src.services.order_service.submit import PublishFn, apply_fill
+from src.services.order_service.submit import PublishFn
+from src.services.risk_decision_recorder import RiskDecisionRecorder
 from src.services.safety.distrust_wiring import check_and_persist_distrust
 from src.services.safety.reference_quotes import ReferenceQuoteProvider
 
@@ -47,10 +54,6 @@ _ENTRY_DENYING_LEVELS = frozenset({DataDistrustLevel.SUSPICIOUS, DataDistrustLev
 logger = logging.getLogger(__name__)
 
 _PENDING_STATES = (FSMState.BUY_ORDER_PENDING, FSMState.SELL_ORDER_PENDING, FSMState.STOP_LOSS)
-_FINAL_ORDER_STATUSES = frozenset({"FILLED", "REJECTED", "CANCELLED", "EXPIRED", "FAILED"})
-# PM 배정(agent-platform-12, 2026-09-02) — 체결 없이 끝난 종결 상태. FILLED는
-# 별도 분기(_handle_pending_fill_check 참조)라 여기 포함하지 않는다.
-_FAILURE_TERMINAL_STATUSES = frozenset({"REJECTED", "CANCELLED", "EXPIRED", "FAILED"})
 
 
 async def _load_execution_context(
@@ -81,105 +84,6 @@ async def _load_execution_context(
     return dict(execution), fsm_config, strategy["certified_badge"]
 
 
-FsmStateWriter = Callable[[int, FSMState, FSMState], Awaitable[None]]
-
-
-async def _make_fsm_state_writer(pool: asyncpg.Pool) -> FsmStateWriter:
-    async def writer(execution_id: int, expected_state: FSMState, new_state: FSMState) -> None:
-        """레드팀 #2026-09-02-22 — 이전엔 조건없이 덮어써서, 같은 execution_id에
-        대한 두 tick이 동시에 IDLE을 읽고 둘 다 PENDING으로 쓰면 나중 것이
-        조용히 이겨 fsm_state 자체는 하나로 수렴하지만, 그 사이 두 tick 모두
-        이미 실제 주문 제출(Executor.execute) 단계까지 진행해버릴 수 있었다.
-        지금은 `expected_state`(이 tick이 애초에 읽은 값)를 조건으로 걸어,
-        두 tick 중 나중에 도착한 쪽은 여기서 ConcurrencyConflictError를
-        맞고 그 뒤의 Executor.execute() 호출까지 가지 못하고 멈춘다."""
-        async with pool.acquire() as conn:
-            await conditional_update(
-                conn,
-                table="strategy_executions",
-                id_column="id",
-                id_value=execution_id,
-                expected_state_column="fsm_state",
-                expected_state_value=expected_state.value,
-                set_values={"fsm_state": new_state.value},
-            )
-
-    return writer
-
-
-def _previous_fsm_state(fsm_config: FSMStrategyConfig, pending_state: FSMState) -> FSMState:
-    """`pending_state`로 들어오는 신호평가 전이(ORDER_FILLED가 아닌 것)의
-    from_state를 찾는다 — 주문이 체결 없이 종결됐을 때 되돌아갈 상태.
-    컴파일러가 만드는 고정 FSM 모양(IDLE→BUY_ORDER_PENDING, HOLDING→
-    SELL_ORDER_PENDING/STOP_LOSS)에서는 항상 정확히 하나 존재한다."""
-    for transition in fsm_config.transitions:
-        if transition.to_state == pending_state and transition.condition != ORDER_FILLED:
-            return transition.from_state
-    raise ValueError(f"{pending_state}로 들어오는 전이가 FSM에 없습니다 — FSM 정의 오류")
-
-
-async def _handle_pending_fill_check(
-    pool: asyncpg.Pool,
-    adapter: ExchangeAdapter,
-    execution_id: int,
-    fsm_config: FSMStrategyConfig,
-    pending_state: FSMState,
-    publish: PublishFn | None,
-) -> None:
-    """PENDING 상태 실행은 새 신호를 평가하지 않는다 — 이전에 제출한
-    주문의 체결 여부만 재확인한다(FD-3.4 재사용, 여러 틱에 걸쳐 반복
-    가능)."""
-    async with pool.acquire() as conn:
-        order = await conn.fetchrow(
-            "SELECT order_id, exchange_order_id, client_order_id, execution_id, status "
-            "FROM orders WHERE execution_id = $1 ORDER BY created_at DESC LIMIT 1",
-            execution_id,
-        )
-    if order is None or order["exchange_order_id"] is None:
-        return
-
-    if order["status"] in _FAILURE_TERMINAL_STATUSES:
-        # PM 배정(agent-platform-12, 2026-09-02) — 이전엔 이 경우 아무것도
-        # 안 하고 return해, fsm_state가 PENDING에 영원히 갇혀 이후 어떤
-        # 신호도 다시 평가되지 않았다(cancel.py에도 이 되돌림 로직이
-        # 없음). 신호평가로 이 PENDING에 들어왔던 이전 상태로 되돌린다.
-        previous_state = _previous_fsm_state(fsm_config, pending_state)
-        writer = await _make_fsm_state_writer(pool)
-        try:
-            await writer(execution_id, pending_state, previous_state)
-        except ConcurrencyConflictError:
-            logger.info(
-                "_handle_pending_fill_check(execution_id=%s): fsm_state 복귀 중 "
-                "동시성 충돌 — 다음 tick에서 재시도됩니다.",
-                execution_id,
-            )
-        return
-
-    if order["status"] in _FINAL_ORDER_STATUSES:
-        return  # FILLED 등 — 이미 이전 틱에서 처리됐어야 정상(방어적 no-op)
-
-    reconfirmed = await adapter.get_order(order["exchange_order_id"])
-    if reconfirmed.status.value != "FILLED":
-        return
-
-    async with pool.acquire() as conn:
-        current = await repository.get_by_order_id(conn, order["order_id"])
-    if current is None:
-        return
-
-    await apply_fill(
-        current,
-        exchange_order_id=order["exchange_order_id"],
-        filled_quantity=reconfirmed.filled_quantity,
-        average_fill_price=reconfirmed.average_fill_price,
-        pool=pool,
-        publish=publish,
-    )
-    next_state = next_fsm_state_after_fill(fsm_config, pending_state)
-    writer = await _make_fsm_state_writer(pool)
-    await writer(execution_id, pending_state, next_state)
-
-
 async def run_execution_tick(
     pool: asyncpg.Pool,
     adapter: ExchangeAdapter,
@@ -195,6 +99,8 @@ async def run_execution_tick(
     pre_submit_gate: PreSubmitGate | None = None,
     distrust_monitor: DataDistrustMonitor | None = None,
     distrust_providers: Sequence[ReferenceQuoteProvider] = (),
+    recorder: RiskDecisionRecorder | None = None,
+    candle_cache: CandleHistoryCache | None = None,
 ) -> None:
     execution, fsm_config, certified_badge = await _load_execution_context(pool, execution_id)
     current_fsm_state = FSMState(execution["fsm_state"])
@@ -205,7 +111,7 @@ async def run_execution_tick(
         # 그렇지 않으면 주문 제출 직후 일시정지된 실행은 그 주문이 실제로
         # 체결됐는지 다시는 확인되지 않고, fsm_state가 실제 거래소 상태와
         # 영구히 어긋난 채로 남는다.
-        await _handle_pending_fill_check(
+        await handle_pending_fill_check(
             pool, adapter, execution_id, fsm_config, current_fsm_state, publish
         )
         return
@@ -262,7 +168,6 @@ async def run_execution_tick(
     # compute_equity 콜백 편차와 동일 원칙).
     usdt_balance = next((b for b in balances if b.asset == "USDT"), None)
     total_equity = usdt_balance.total if usdt_balance is not None else Decimal("0")
-    available_balance = usdt_balance.available if usdt_balance is not None else Decimal("0")
 
     allocation = portfolio_engine.allocate(
         signal,
@@ -273,31 +178,33 @@ async def run_execution_tick(
             "total_equity": total_equity,
         },
     )
-    if allocation is None:
+    if allocation is None or not candles:
         return  # 현재가 조회 실패 등 — 다음 틱 재시도(FD-8.2 예외상황)
 
-    account_state = await assemble_account_state(
+    # R-32 §3.9 t0~t6 — tick_risk_phase.py. 거부·허용 모두 recorder가 WORM 기록한
+    # 뒤, 실행 불가면 FSM을 건드리지 않고 return(다음 틱 재평가). recorder 미주입
+    # 시에도 기록은 생략되지 않는다(default_recorder, I-10).
+    phase = await run_pre_trade_risk_phase(
         pool,
+        adapter,
         execution_id=execution_id,
         user_id=execution["user_id"],
-        symbol=symbol,
-        position_quantity=position_quantity,
-        total_equity=total_equity,
-        available_balance=available_balance,
-        allocated_capital=execution["allocated_capital"],
         certified_badge=certified_badge,
+        allocated_capital=execution["allocated_capital"],
+        signal=signal,
+        allocation=allocation,
         candles=candles,
-        equity_tracker=equity_tracker,
+        balances=balances,
+        position_quantity=position_quantity,
+        distrust_level=distrust_level.value,
+        risk_engine=risk_engine,
+        recorder=recorder if recorder is not None else default_recorder(pool),
+        caches=RiskInputCaches(equity_tracker=equity_tracker),
+        candle_cache=candle_cache if candle_cache is not None else CandleHistoryCache(),
         policy=policy,
+        now=datetime.now(timezone.utc),
     )
-    risk_result = risk_engine.check(allocation, account_state)
-    if not risk_result.approved:
-        logger.info(
-            "RiskEngine 거부(execution_id=%s): %s (checked=%s)",
-            execution_id,
-            risk_result.rejection_reason,
-            risk_result.checked_rules,
-        )
+    if phase is None:
         return  # 다음 틱 재평가 — fsm_state는 IDLE/HOLDING 그대로
 
     # 레드팀 #23-a — 신호 평가·PortfolioEngine·RiskEngine을 거치는 동안
@@ -328,6 +235,7 @@ async def run_execution_tick(
         user_id=execution["user_id"],
         execution_id=execution_id,
         exchange=adapter.get_capabilities().exchange_name,
+        observed_fence=phase.fence_snapshot,  # R-36 — PRE_TRADE가 관측한 F0 관통
     )
     if not allowed:
         return
@@ -346,8 +254,8 @@ async def run_execution_tick(
         return
 
     await executor.execute(
-        allocation,
-        risk_result,
+        phase.allocation,
+        phase.risk_result,  # decision_id 실림 — submit_order까지 관통(§3.9 끝문단)
         adapter,
         execution_id=execution_id,
         user_id=execution["user_id"],
