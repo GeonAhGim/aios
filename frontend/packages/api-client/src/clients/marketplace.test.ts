@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { API_ROUTES } from "../apiPaths";
 import { ApiClientBase } from "../http";
+import { ApiError } from "../httpErrors";
 import { withMarketplace } from "./marketplace";
 
 class MarketplaceTestClient extends withMarketplace(ApiClientBase) {}
@@ -128,14 +129,16 @@ describe("withMarketplace", () => {
     expect(result).toEqual({ listingId: 7, status: "VERIFIED", rejectionReason: null });
   });
 
-  it("listReviews: 경로는 apiPaths.ts 레지스트리에만 정의되어 있다(하드코딩 금지)", async () => {
-    stubFetch({ reviews: [], review_count: 0, average_rating: null });
+  it("listReviews: 경로는 apiPaths.ts 레지스트리에만 정의되어 있고(하드코딩 금지) 실제 요청 URL도 그 값에서 치환된다", async () => {
+    const fetchMock = stubFetch({ reviews: [], review_count: 0, average_rating: null });
 
     await makeClient().listReviews(3);
 
     expect(API_ROUTES["marketplace.listings.reviews"].legacyPath).toBe(
       "/marketplace/listings/:listingId/reviews",
     );
+    // task-1145 QA: 레지스트리 상수만 보던 검증을 실제 fetch URL까지 대조하도록 보강.
+    expect(requestOf(fetchMock).url).toBe("https://api.example.test/marketplace/listings/3/reviews");
   });
 
   it("submitDispute: POST /marketplace/disputes로 body를 snake_case로 보낸다", async () => {
@@ -146,5 +149,51 @@ describe("withMarketplace", () => {
     const { url, init } = requestOf(fetchMock);
     expect(url).toBe("https://api.example.test/marketplace/disputes");
     expect(JSON.parse(init.body as string)).toEqual({ purchase_id: 42, reason: "환불 요청" });
+  });
+});
+
+// task-1145 QA negative: 봉투 미적용 라우트라도 에러 응답은 전역 핸들러(handlers.py,
+// PLT-18)가 §3.3 ApiError 형태로 내려보낸다. request()/postIdempotent()가 이를
+// buildApiError로 ApiError 인스턴스에 실어 던지는지, 그리고 POST는 절대 자동
+// 재시도하지 않는지(§9 PLT-25) 고정한다 — 성공 경로만 있던 위 스위트의 공백.
+describe("withMarketplace — 에러 응답(negative)", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("purchaseListing 402(InsufficientWalletBalanceError→POLICY_DENIED): ApiError로 거부되고 재시도하지 않는다", async () => {
+    const fetchMock = stubFetch(
+      {
+        error_code: "POLICY_DENIED",
+        message: "지갑 잔액이 부족합니다.",
+        details: { reason_codes: ["INSUFFICIENT_WALLET_BALANCE"] },
+        trace_id: "trace-402",
+        retry_after_seconds: null,
+      },
+      402,
+    );
+
+    const promise = makeClient().purchaseListing(42, { riskWarningAcknowledged: true }, "caller-supplied-key-0002");
+
+    await expect(promise).rejects.toBeInstanceOf(ApiError);
+    const err = await promise.catch((e: unknown) => e as ApiError);
+    expect(err.statusCode).toBe(402);
+    expect(err.errorCode).toBe("POLICY_DENIED");
+    expect(err.traceId).toBe("trace-402");
+    expect(err.details).toEqual({ reason_codes: ["INSUFFICIENT_WALLET_BALANCE"] });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("verifyListing 403 legacy detail 본문(봉투 없음): message만 detail에서 취하고 errorCode는 undefined다", async () => {
+    stubFetch({ detail: "검증자 권한이 없습니다." }, 403);
+
+    const err = await makeClient()
+      .verifyListing(7, { decision: "APPROVE" })
+      .catch((e: unknown) => e as ApiError);
+
+    expect(err).toBeInstanceOf(ApiError);
+    expect(err.statusCode).toBe(403);
+    expect(err.message).toBe("검증자 권한이 없습니다.");
+    expect(err.errorCode).toBeUndefined();
   });
 });
