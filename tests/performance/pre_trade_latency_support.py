@@ -210,7 +210,11 @@ async def count_pre_submit_round_trips(
     pool, tenant_id: UUID, *,
     repo_cls: type[PostgresRiskGateRepository] = PostgresRiskGateRepository,
 ) -> int:
-    """`evaluate_pre_submit` 1회(ALLOW 경로)가 소비하는 순차 DB 왕복 수."""
+    """`evaluate_pre_submit` 1회(ALLOW 경로)가 소비하는 순차 DB 왕복 수.
+
+    task-1532(ae2a452)가 추가한 `side`·`quantity`는 WORM `inputs_snapshot`에만
+    실리는 결속 키다 — 게이트 본체에 왕복을 더하지 않는다(WORM 재조회
+    `get_for_tenant`는 `fenced_submit` 경로이며 이 계수 범위 밖)."""
     queries: list[str] = []
     log = _query_logger(queries)
     symbol = await seed_normal_distrust_symbol(pool)
@@ -226,6 +230,7 @@ async def count_pre_submit_round_trips(
             return await evaluate_pre_submit(
                 risk_repo, connection_repo, recorder, tenant_id=tenant_id,  # type: ignore[arg-type]
                 execution_ref="exec:perf", provider_code=PROVIDER, symbol=symbol,
+                side="BUY", quantity=Decimal("20"),  # task-1532 I10 결속 키(WORM 스냅샷 전용, DB 0)
                 trace_id=uuid4(),
             )
 

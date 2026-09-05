@@ -32,7 +32,9 @@ PRE_TRADE 정상 상태 예산(`_PRE_TRADE_ROUND_TRIPS` = 7) 구성:
 PRE_SUBMIT 예산(`_PRE_SUBMIT_ROUND_TRIPS` = 8) 구성:
   `read_fence_and_controls` — BEGIN + fence SELECT + control SELECT + COMMIT = 4
   (§3.6 같은 트랜잭션 스냅샷) · `read_safety_state` 1 · connection freshness는
-  connections 컨텍스트(R-35 테스트와 같은 fake, DB 0) · recorder 3
+  connections 컨텍스트(R-35 테스트와 같은 fake, DB 0) · recorder 3.
+  task-1532(ae2a452) 의도 결속 키(`side`·`quantity`)는 WORM 스냅샷 필드만 늘리고
+  왕복은 0 — 재실측 8 유지(task-1550). WORM 재조회는 `fenced_submit` 범위.
 
 negative test 2개(I-10 — 게이트가 "있다"가 아니라 "작동함"): 왕복을 하나 더
 내는 recorder/저장소를 끼우면 계수가 예산과 정확히 1 어긋나 실제로 실패한다.
