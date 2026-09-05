@@ -67,7 +67,7 @@ export interface CreateChartEngineOptions {
   seriesBackendFactory?: SeriesBackendFactory;
 }
 
-function sortedInsertOrReplace(data: readonly CandlePoint[], point: CandlePoint): CandlePoint[] {
+export function sortedInsertOrReplace(data: readonly CandlePoint[], point: CandlePoint): CandlePoint[] {
   const idx = data.findIndex((p) => p.time === point.time);
   if (idx >= 0) {
     const next = data.slice();

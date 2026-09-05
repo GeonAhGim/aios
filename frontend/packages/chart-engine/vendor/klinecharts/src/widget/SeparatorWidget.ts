@@ -1,0 +1,201 @@
+/**
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+
+ * http://www.apache.org/licenses/LICENSE-2.0
+
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+import type Bounding from '../common/Bounding'
+import type { MouseTouchEvent } from '../common/EventHandler'
+import type Nullable from '../common/Nullable'
+import { UpdateLevel } from '../common/Updater'
+import { createDom } from '../common/utils/dom'
+import { throttle } from '../common/utils/performance'
+import { isValid } from '../common/utils/typeChecks'
+import type DrawPane from '../pane/DrawPane'
+import type SeparatorPane from '../pane/SeparatorPane'
+import { PaneIdConstants } from '../pane/types'
+import { REAL_SEPARATOR_HEIGHT, WidgetNameConstants } from './types'
+import Widget from './Widget'
+
+export default class SeparatorWidget extends Widget<SeparatorPane> {
+  private _dragFlag = false
+  private _dragStartY = 0
+
+  private _topPaneHeight = 0
+  private _bottomPaneHeight = 0
+
+  private _topPane: Nullable<DrawPane> = null
+  private _bottomPane: Nullable<DrawPane> = null
+
+  constructor(rootContainer: HTMLElement, pane: SeparatorPane) {
+    super(rootContainer, pane)
+    this.registerEvent('touchStartEvent', this._mouseDownEvent.bind(this))
+      // @ts-ignore
+      .registerEvent('touchMoveEvent', this._pressedMouseMoveEvent.bind(this))
+      .registerEvent('touchEndEvent', this._mouseUpEvent.bind(this))
+      .registerEvent('mouseDownEvent', this._mouseDownEvent.bind(this))
+      .registerEvent('mouseUpEvent', this._mouseUpEvent.bind(this))
+      // @ts-ignore
+      .registerEvent('pressedMouseMoveEvent', this._pressedMouseMoveEvent.bind(this))
+      .registerEvent('mouseEnterEvent', this._mouseEnterEvent.bind(this))
+      .registerEvent('mouseLeaveEvent', this._mouseLeaveEvent.bind(this))
+  }
+
+  override getName(): string {
+    return WidgetNameConstants.SEPARATOR
+  }
+
+  private _dragEnabled(topPane: DrawPane, bottomPane: DrawPane): boolean {
+    return topPane.getOptions().state === 'normal' && bottomPane.getOptions().state === 'normal' && bottomPane.getOptions().dragEnabled
+  }
+
+  private _findAdjustablePane(startIndex: number, step: number): Nullable<DrawPane> {
+    const drawPanes = this.getPane().getChart().getDrawPanes()
+    for (let i = startIndex; i >= 0 && i < drawPanes.length; i += step) {
+      const pane = drawPanes[i]
+      if (pane.getId() !== PaneIdConstants.X_AXIS && pane.getOptions().state === 'normal') {
+        return pane
+      }
+    }
+    return null
+  }
+
+  private _findDragPanes(): Nullable<{ topPane: DrawPane; bottomPane: DrawPane }> {
+    const currentPane = this.getPane()
+    const drawPanes = currentPane.getChart().getDrawPanes()
+    const topPaneIndex = drawPanes.indexOf(currentPane.getTopPane())
+    const bottomPaneIndex = drawPanes.indexOf(currentPane.getBottomPane())
+    if (topPaneIndex === -1 || bottomPaneIndex === -1) {
+      return null
+    }
+    const topPane = this._findAdjustablePane(topPaneIndex, -1)
+    const bottomPane = this._findAdjustablePane(bottomPaneIndex, 1)
+    if (isValid(topPane) && isValid(bottomPane) && this._dragEnabled(topPane, bottomPane)) {
+      return { topPane, bottomPane }
+    }
+    return null
+  }
+
+  private _mouseDownEvent(event: MouseTouchEvent): boolean {
+    const dragPanes = this._findDragPanes()
+    if (!isValid(dragPanes)) {
+      this._topPane = null
+      this._bottomPane = null
+      return false
+    }
+    this._topPane = dragPanes.topPane
+    this._bottomPane = dragPanes.bottomPane
+    this._dragFlag = true
+    this._dragStartY = event.pageY
+    this._topPaneHeight = this._topPane.getBounding().height
+    this._bottomPaneHeight = this._bottomPane.getBounding().height
+    return true
+  }
+
+  private _mouseUpEvent(): boolean {
+    this._dragFlag = false
+    this._topPane = null
+    this._bottomPane = null
+    this._topPaneHeight = 0
+    this._bottomPaneHeight = 0
+    return this._mouseLeaveEvent()
+  }
+
+  private readonly _pressedMouseMoveEvent = throttle(this._pressedTouchMouseMoveEvent, 20)
+
+  private _pressedTouchMouseMoveEvent(event: MouseTouchEvent): boolean {
+    const dragDistance = event.pageY - this._dragStartY
+
+    const isUpDrag = dragDistance < 0
+    if (isValid(this._topPane) && isValid(this._bottomPane)) {
+      if (this._dragEnabled(this._topPane, this._bottomPane)) {
+        let reducedPane: Nullable<DrawPane> = null
+        let increasedPane: Nullable<DrawPane> = null
+        let startDragReducedPaneHeight = 0
+        let startDragIncreasedPaneHeight = 0
+        if (isUpDrag) {
+          reducedPane = this._topPane
+          increasedPane = this._bottomPane
+          startDragReducedPaneHeight = this._topPaneHeight
+          startDragIncreasedPaneHeight = this._bottomPaneHeight
+        } else {
+          reducedPane = this._bottomPane
+          increasedPane = this._topPane
+          startDragReducedPaneHeight = this._bottomPaneHeight
+          startDragIncreasedPaneHeight = this._topPaneHeight
+        }
+        const reducedPaneMinHeight = reducedPane.getOptions().minHeight
+        if (startDragReducedPaneHeight > reducedPaneMinHeight) {
+          const reducedPaneHeight = Math.max(startDragReducedPaneHeight - Math.abs(dragDistance), reducedPaneMinHeight)
+          const diffHeight = startDragReducedPaneHeight - reducedPaneHeight
+          reducedPane.setBounding({ height: reducedPaneHeight })
+          const increasedPaneHeight = startDragIncreasedPaneHeight + diffHeight
+          increasedPane.setBounding({ height: increasedPaneHeight })
+          reducedPane.setOptions({ height: reducedPaneHeight })
+          increasedPane.setOptions({ height: increasedPaneHeight })
+          const currentPane = this.getPane()
+          const chart = currentPane.getChart()
+          chart.getChartStore().executeAction('onPaneDrag', { paneId: currentPane.getId() })
+          chart.layout({
+            measureHeight: true,
+            measureWidth: true,
+            update: true,
+            buildYAxisTick: true,
+            forceBuildYAxisTick: true
+          })
+        }
+      }
+    }
+
+    return true
+  }
+
+  private _mouseEnterEvent(): boolean {
+    const dragPanes = this._findDragPanes()
+    if (isValid(dragPanes)) {
+      const chart = this.getPane().getChart()
+      const styles = chart.getStyles().separator
+      this.getContainer().style.background = styles.activeBackgroundColor
+      return true
+    }
+    return false
+  }
+
+  private _mouseLeaveEvent(): boolean {
+    if (!this._dragFlag) {
+      this.getContainer().style.background = 'transparent'
+      return true
+    }
+    return false
+  }
+
+  override createContainer(): HTMLElement {
+    return createDom('div', {
+      width: '100%',
+      height: `${REAL_SEPARATOR_HEIGHT}px`,
+      margin: '0',
+      padding: '0',
+      position: 'absolute',
+      top: '-3px',
+      zIndex: '20',
+      boxSizing: 'border-box',
+      cursor: 'ns-resize'
+    })
+  }
+
+  override updateImp(container: HTMLElement, _bounding: Bounding, level: UpdateLevel): void {
+    if (level === UpdateLevel.All || level === UpdateLevel.Separator) {
+      const styles = this.getPane().getChart().getStyles().separator
+      container.style.top = `${-Math.floor((REAL_SEPARATOR_HEIGHT - styles.size) / 2)}px`
+      container.style.height = `${REAL_SEPARATOR_HEIGHT}px`
+    }
+  }
+}

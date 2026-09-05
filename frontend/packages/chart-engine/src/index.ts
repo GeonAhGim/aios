@@ -106,3 +106,16 @@ export type {
   StreamCandle,
 } from "./data/candleStream";
 export { createCandleStream } from "./data/candleStream";
+
+export type { TimeScaleBackend } from "./core/timeScale";
+export type { PriceScaleBackend } from "./core/priceScale";
+
+export type {
+  CreateKlinechartsChartEngineOptions,
+  KlinechartsBackend,
+  KlinechartsChartEngine,
+} from "./core/klinechartsBackend";
+export { createKlinechartsBackend, createKlinechartsChartEngine } from "./core/klinechartsBackend";
+export type { VendorChart } from "./core/klinecharts";
+export { KLINECHARTS_VENDOR_VERSION } from "./core/klinecharts";
+export { AIOS_HISTOGRAM_INDICATOR, AIOS_LINE_INDICATOR } from "./core/klinechartsSeries";
