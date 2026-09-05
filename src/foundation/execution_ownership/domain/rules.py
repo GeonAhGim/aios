@@ -20,11 +20,12 @@ def is_lease_available(
 ) -> bool:
     """리스가 없거나, 만료됐거나, 이미 요청자 본인이 쥐고 있으면 True.
     다른 소유자가 만료 전 리스를 쥐고 있으면 False(§4.1 "유효한 리스를
-    가진 프로세스 하나에서만 동시에 tick된다")."""
+    가진 프로세스 하나에서만 동시에 tick된다"). 만료 경계는 §5.1 SQL
+    `expires_at < now()`와 동일하게 strict — `expires_at == now`는 아직 유효."""
     if now.tzinfo is None:
         raise ValueError("naive datetime은 허용하지 않는다 — tz-aware UTC만 사용한다")
     if existing is None:
         return True
     if existing.owner_id == requesting_owner:
         return True
-    return existing.expires_at <= now
+    return existing.expires_at < now

@@ -45,6 +45,13 @@ def test_is_lease_available_other_owner_not_expired():
     assert is_lease_available(existing, now=_NOW, requesting_owner="worker-a") is False
 
 
+def test_is_lease_available_other_owner_expires_exactly_now_is_still_held():
+    # §5.1 SQL은 `expires_at < now()`(strict)로 만료를 판정한다 — 경계값에서
+    # 순수 규칙이 DB와 다르게 "획득 가능"이라 답하면 안 된다.
+    existing = _lease("worker-b", expires_at=_NOW)
+    assert is_lease_available(existing, now=_NOW, requesting_owner="worker-a") is False
+
+
 def test_is_lease_available_rejects_naive_now():
     existing = _lease("worker-b", expires_at=_NOW + timedelta(seconds=30))
     with pytest.raises(ValueError):
