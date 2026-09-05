@@ -9,6 +9,15 @@ Spec: docs/specs/L4_execution_ownership_and_safety_gate_wiring_v1.0.md
 않았다. 배치 1왕복 단언은
 `tests/integration/foundation/execution_ownership/test_postgres_lease_repository.py`
 가 `conn.fetch` 호출 횟수를 세어 증명한다.
+
+execution_ids에 같은 id가 두 번 들어오면 Postgres는 한 문장 안에서 같은
+행을 두 번 갱신할 수 없어 `CardinalityViolationError`("ON CONFLICT DO
+UPDATE command cannot affect row a second time")로 **배치 전체**를 실패
+시킨다 — 그러면 그 주기의 모든 execution이 tick되지 못한다. 그래서
+바인딩 전에 순서를 유지한 채 중복을 제거한다(QA task-1143에서 실DB로
+재현). 존재하지 않는 execution_id(FK 위반)는 의도적으로 걸러내지 않는다
+— §5.1 SQL을 그대로 쓰고, 호출자(EO-03 `list_candidates`)가
+`strategy_executions`에서 읽은 id만 넘기는 것이 계약이다.
 """
 from __future__ import annotations
 
@@ -22,7 +31,8 @@ class PostgresExecutionLeaseRepository:
     async def acquire_or_renew_many(
         self, execution_ids: list[int], *, owner_id: str, ttl_seconds: float
     ) -> set[int]:
-        if not execution_ids:
+        unique_ids = list(dict.fromkeys(execution_ids))
+        if not unique_ids:
             return set()
         async with self._pool.acquire() as conn:
             rows = await conn.fetch(
@@ -44,7 +54,7 @@ class PostgresExecutionLeaseRepository:
                    OR execution_leases.expires_at < now()
                 RETURNING execution_id
                 """,
-                execution_ids,
+                unique_ids,
                 owner_id,
                 ttl_seconds,
             )

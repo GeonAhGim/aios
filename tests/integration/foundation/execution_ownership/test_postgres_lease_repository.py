@@ -11,6 +11,7 @@ import uuid
 from unittest import mock
 
 import asyncpg
+import pytest
 
 from src.foundation.execution_ownership.adapters.postgres_repository import (
     PostgresExecutionLeaseRepository,
@@ -127,3 +128,47 @@ async def test_release_all_deletes_only_owned_leases(pool, execution_id):
 
     assert await _fetch_lease(pool, execution_id) is None
     assert await _fetch_lease(pool, other_execution_id) is not None
+
+
+async def test_duplicate_execution_ids_in_one_batch_do_not_abort_batch(pool):
+    # 같은 id가 두 번 들어오면 Postgres가 "cannot affect row a second time"
+    # (CardinalityViolationError)로 배치 전체를 거부한다 — 어댑터가 바인딩 전
+    # 중복을 제거해 다른 execution까지 tick 못 하는 사고를 막아야 한다.
+    user_id = await create_test_user(pool)
+    exec_a = await create_execution(pool, user_id)
+    exec_b = await create_execution(pool, user_id)
+    repo = PostgresExecutionLeaseRepository(pool)
+
+    acquired = await repo.acquire_or_renew_many(
+        [exec_a, exec_a, exec_b, exec_a], owner_id=_owner_id(), ttl_seconds=30
+    )
+
+    assert acquired == {exec_a, exec_b}
+    assert (await _fetch_lease(pool, exec_a))["fencing_token"] == 0
+
+
+async def test_mixed_batch_returns_only_acquirable_ids(pool):
+    # 배치 일부가 타 소유자 점유 중이면 예외 없이 그 id만 반환 집합에서 빠진다
+    # (§3.2 "갱신 실패는 반환 집합에서 빠지는 형태로만 신호").
+    user_id = await create_test_user(pool)
+    held = await create_execution(pool, user_id)
+    free = await create_execution(pool, user_id)
+    repo = PostgresExecutionLeaseRepository(pool)
+    owner_a, owner_b = _owner_id(), _owner_id()
+    assert await repo.acquire_or_renew_many([held], owner_id=owner_a, ttl_seconds=30) == {held}
+
+    acquired = await repo.acquire_or_renew_many([held, free], owner_id=owner_b, ttl_seconds=30)
+
+    assert acquired == {free}
+    assert (await _fetch_lease(pool, held))["owner_id"] == owner_a
+
+
+async def test_unknown_execution_id_raises_fk_violation_for_whole_batch(pool, execution_id):
+    # 계약 경계 기록: FK 위반은 걸러내지 않는다(§5.1 SQL 그대로). 호출자(EO-03)는
+    # strategy_executions에서 읽은 id만 넘겨야 하며, 그렇지 않으면 배치 전체가 실패한다.
+    repo = PostgresExecutionLeaseRepository(pool)
+    with pytest.raises(asyncpg.ForeignKeyViolationError):
+        await repo.acquire_or_renew_many(
+            [execution_id, 10**12], owner_id=_owner_id(), ttl_seconds=30
+        )
+    assert await _fetch_lease(pool, execution_id) is None
