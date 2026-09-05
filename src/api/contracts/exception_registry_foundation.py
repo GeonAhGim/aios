@@ -11,6 +11,7 @@ from __future__ import annotations
 from starlette import status
 
 from src.api.contracts.error_codes import ErrorCode
+from src.api.schemas.positions import InvalidCursorError
 from src.foundation.backtest.application.run_backtest import BacktestRunError
 from src.foundation.connections.application.begin_connection import (
     ConsentRequiredError,
@@ -78,6 +79,11 @@ from src.foundation.performance.application.correct_statement import (
 from src.foundation.performance.application.get_statement import (
     CrossTenantStatementAccessError,
     StatementNotFoundError,
+)
+from src.foundation.positions.application.queries import (
+    NavRangeInvalidError,
+    PositionAccountNotFoundError,
+    PositionNotFoundError,
 )
 from src.foundation.reconciliation.application.resolve_reconciliation import (
     CrossTenantReconciliationAccessError,
@@ -204,6 +210,11 @@ EXCEPTION_MAP_FOUNDATION: list[tuple[type[Exception], ErrorCode]] = [
     (StrategyNotEligibleForValidationError, ErrorCode.STATE_INVALID_TRANSITION),
     (ValidationAlreadyInProgressError, ErrorCode.STATE_INVALID_TRANSITION),
     (BacktestRunError, ErrorCode.VALIDATION_INVALID_FIELD),
+    # LB-19(task-1377) — positions 읽기 API(queries.py). 타 테넌트·미존재 동형 404.
+    (PositionNotFoundError, ErrorCode.RESOURCE_NOT_FOUND),
+    (PositionAccountNotFoundError, ErrorCode.RESOURCE_NOT_FOUND),
+    (NavRangeInvalidError, ErrorCode.VALIDATION_INVALID_FIELD),
+    (InvalidCursorError, ErrorCode.VALIDATION_INVALID_FIELD),
     # R-23 — foundation/risk_gate rule-bundles(activate_rule_bundle.py).
     (UnauthorizedRuleBundleActorError, ErrorCode.AUTHZ_FORBIDDEN),
     (RuleBundleNotFoundError, ErrorCode.RESOURCE_NOT_FOUND),

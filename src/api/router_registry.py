@@ -27,6 +27,7 @@ def register_routers(app: FastAPI) -> None:
         metrics,
         notifications,
         portfolio,
+        positions,
         reports,
         strategy_builder,
         suitability,
@@ -62,6 +63,7 @@ def register_routers(app: FastAPI) -> None:
     app.include_router(foundation_paper_control.router)
     app.include_router(foundation_reconciliation.router)
     app.include_router(foundation_performance.router)
+    app.include_router(positions.router)
     app.include_router(executions.router, prefix="/executions", tags=["executions"])
     app.include_router(notifications.router, prefix="/notifications", tags=["notifications"])
     app.include_router(admin.router, tags=["admin"])
