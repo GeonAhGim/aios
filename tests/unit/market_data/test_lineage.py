@@ -10,6 +10,12 @@ ADR-2026-09-04-A #2(연단위 리플레이 성능) 요구사항 — 스트리밍
 바이트 단위로 동일한 다이제스트를 내는지 증명한다(저장된 해시 재계산·
 backfill 없이 P3 WORM을 지키기 위한 필수 증거, `domain/lineage.py` 모듈
 docstring 참고).
+
+task-1136(QA): `_canonical_json`이 재사용 `JSONEncoder`로 바뀐 뒤에도
+(1) `json.dumps` 직접 호출(`_canonical_json_reference`)과 문자열이 같고,
+(2) 고정 벡터의 다이제스트 값 자체가 변하지 않음(golden)을 고정한다 —
+해시 규칙은 `hash_chain`과 공유하는 계약이라 값이 바뀌면 저장된 해시
+(P3 WORM)와 어긋나므로, 어떤 "최적화"가 바이트를 바꾸면 여기서 실패해야 한다.
 """
 from __future__ import annotations
 
@@ -17,11 +23,13 @@ import random
 import time
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 from src.foundation.market_data.contracts.v1 import CandleRecord, SeriesKey, Timeframe, Venue
 from src.foundation.market_data.domain.lineage import (
     _batch_hash_reference,
+    _canonical_json,
+    _canonical_json_reference,
     batch_hash,
     request_fingerprint,
 )
@@ -145,3 +153,59 @@ def test_batch_hash_large_batch_stays_order_independent() -> None:
     shuffled = list(records)
     rng.shuffle(shuffled)
     assert batch_hash(shuffled) == forward
+    # task-1136: 이 규모에서도 옛 구현(json.dumps 직접 호출 + join)과 바이트 동일.
+    assert _batch_hash_reference(records) == forward
+
+
+def _fixed_candle(day: int, close: str) -> CandleRecord:
+    key = SeriesKey(
+        venue=Venue.KIS_KRX,
+        instrument_id=UUID("00000000-0000-0000-0000-000000000001"),
+        timeframe=Timeframe.D1,
+    )
+    at = datetime(2026, 1, day, tzinfo=timezone.utc)
+    return CandleRecord(
+        key=key, open_time=at, close_time=at, open=Decimal(close), high=Decimal(close),
+        low=Decimal(close), close=Decimal(close), volume=Decimal("1"),
+    )
+
+
+def test_batch_hash_golden_vector_is_pinned() -> None:
+    """golden(task-1136): 고정 입력의 다이제스트 값을 그대로 고정한다. 값은
+    encoder 재사용 이전 구현(commit 9dcb231)으로 계산했다 — canonical JSON
+    규칙(정렬 키·`", "`/`": "` 구분자·`default=str`·ensure_ascii)이나
+    `CandleRecord`의 직렬화 필드가 하나라도 바뀌면 실패한다(계약 변경 감지)."""
+    a, b = _fixed_candle(1, "100.5"), _fixed_candle(2, "200")
+
+    assert _canonical_json(a) == (
+        '{"close": "100.5", "close_time": "2026-01-01T00:00:00Z", "high": "100.5", '
+        '"key": {"instrument_id": "00000000-0000-0000-0000-000000000001", '
+        '"schema_version": "v1", "timeframe": "1d", "venue": "KIS_KRX"}, '
+        '"low": "100.5", "open": "100.5", "open_time": "2026-01-01T00:00:00Z", '
+        '"quote_volume": null, "schema_version": "v1", "volume": "1"}'
+    )
+    assert batch_hash([a, b]) == (
+        "694bd724f4e50219ac6ead1b7e1c2d42e125f8b9e8a120727731787edfa42b06"
+    )
+    assert request_fingerprint("kis", {"symbol": "005930", "venue": "KRX"}) == (
+        "13ac4875197839f40af5e67f4174ed266c13f86f090dee57194c913c0ff19c7b"
+    )
+
+
+def test_canonical_json_matches_json_dumps_reference() -> None:
+    """task-1136: 재사용 encoder 경로가 `json.dumps(..., sort_keys=True,
+    default=str)` 직접 호출과 문자열 단위로 같다 — 모델뿐 아니라
+    `request_fingerprint`가 넘기는 평범한 dict(중첩·Decimal·None·datetime·UUID·
+    비ASCII 키·키 정렬)도 포함한다."""
+    rng = random.Random(1136)
+    base = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    for _ in range(100):
+        record = _random_candle(rng, base)
+        assert _canonical_json(record) == _canonical_json_reference(record)
+
+    plain = {
+        "z": Decimal("1.50"), "a": None, "m": {"y": [1, 2.5, "x"], "b": base},
+        "한글": "값", "id": uuid4(), "nested": {"d": Decimal("-0.001")},
+    }
+    assert _canonical_json(plain) == _canonical_json_reference(plain)
+    assert _canonical_json([]) == _canonical_json_reference([]) == "[]"

@@ -24,6 +24,22 @@ sha256(Merkle–Damgård 계열)은 연속된 `update()` 호출과 이어붙인 
 비교 전용으로 보존)와의 동일성은
 `tests/unit/market_data/test_lineage.py`의 property 테스트(무작위 배치
 200건 이상)가 증명한다.
+
+**task-1136(esc-ci-8e93e475afa9 QA) 직렬화 비용 노트**: 대량 배치에서
+`batch_hash`의 지배 비용은 정렬이 아니라 레코드별 canonical JSON 문자열
+생성이다(실측 2만~10만 건: `model_dump(mode="json")`과 `json.dumps`가 대략
+반씩).
+해시 값을 바꾸지 않고 줄일 수 있는 부분은 `json.dumps`가 호출마다 새로
+만드는 `JSONEncoder` 생성·인자 검사 오버헤드뿐이라, 동일 인자
+(`sort_keys=True, default=str`, 나머지 기본값)의 encoder 하나를 모듈 수준에
+두고 재사용한다 — `json.dumps(obj, sort_keys=True, default=str)`는 표준
+라이브러리 구현상 정확히 `JSONEncoder(sort_keys=True, default=str).encode(obj)`
+이므로 출력 바이트가 같다(`_batch_hash_reference`는 이 가정에 기대지 않도록
+`json.dumps`를 직접 호출한 채로 두고, 고정 벡터 golden 테스트가 다이제스트
+값 자체를 고정한다). `model_dump_json()`·`TypeAdapter(list[T])` 일괄 직렬화
+같은 더 큰 절감은 바이트가 달라지거나(전자) 서브클래스 인스턴스를 선언
+타입으로 직렬화해 `model_dump()`와 어긋날 수 있어(후자) `hash_version=2`
+없이는 쓰지 않는다(P3 WORM).
 """
 from __future__ import annotations
 
@@ -36,8 +52,21 @@ from pydantic import BaseModel
 
 __all__ = ["batch_hash", "request_fingerprint"]
 
+# `json.dumps(value, sort_keys=True, default=str)`와 동일한 encoder(모듈 docstring
+# task-1136 노트). 상태가 없어(순환 검사용 markers는 encode 호출마다 새로 만든다)
+# 재사용·동시 호출이 안전하다.
+_CANONICAL_ENCODER = json.JSONEncoder(sort_keys=True, default=str)
+
 
 def _canonical_json(value: Any) -> str:
+    if isinstance(value, BaseModel):
+        value = value.model_dump(mode="json")
+    return _CANONICAL_ENCODER.encode(value)
+
+
+def _canonical_json_reference(value: Any) -> str:
+    """옛 구현 — 삭제 금지. `_canonical_json`이 재사용 encoder로 바꾼 뒤에도
+    `json.dumps` 직접 호출과 바이트 단위로 같은지 대조하는 기준선."""
     if isinstance(value, BaseModel):
         value = value.model_dump(mode="json")
     return json.dumps(value, sort_keys=True, default=str)
@@ -45,8 +74,10 @@ def _canonical_json(value: Any) -> str:
 
 def _batch_hash_reference(records: Sequence[Any]) -> str:
     """옛 구현 — 삭제 금지. `batch_hash`가 계속 이 함수와 바이트 단위로
-    동일한 값을 내는지 property 테스트가 대조하는 기준선이다(모듈 docstring)."""
-    canonical_rows = sorted(_canonical_json(record) for record in records)
+    동일한 값을 내는지 property 테스트가 대조하는 기준선이다(모듈 docstring).
+    직렬화·정렬·집계 모두 옛 경로(`_canonical_json_reference` + `"\\n".join`)라
+    새 구현의 어느 단계가 바뀌어도 잡는다."""
+    canonical_rows = sorted(_canonical_json_reference(record) for record in records)
     payload = "\n".join(canonical_rows)
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
