@@ -92,3 +92,17 @@ export {
   serializeDrawings,
   toDrawingsDocument,
 } from "./drawings/serialize";
+
+export type {
+  ApplyResult,
+  CandleStream,
+  CandleStreamRejection,
+  CandleStreamRejectionCode,
+  CandleStreamSnapshot,
+  CreateCandleStreamOptions,
+  GapMarker,
+  RealtimeCandleSource,
+  RealtimeCandleUpdate,
+  StreamCandle,
+} from "./data/candleStream";
+export { createCandleStream } from "./data/candleStream";
