@@ -3,7 +3,11 @@
 제출 직전(fenced_submit이 바로 이어 쓴다) 안전 상태 4가지만 재확인하는
 얕고 빠른 게이트다: 활성 kill-switch control·circuit breaker level·data
 distrust level·connection freshness. 거래 규칙(노출 한도·VaR·상관 등)은
-이미 PRE_TRADE에서 평가됐으므로 시그니처에 `OrderIntent`가 없다.
+이미 PRE_TRADE에서 평가됐으므로 시그니처에 `OrderIntent`가 없다 — 대신
+intent 식별자 셋(`symbol`·`side`·`quantity`)만 받아 WORM `inputs_snapshot`에
+기록한다(task-1532, I10). 이 셋은 규칙 평가에 쓰이지 않고 오직
+`fenced_submit`이 "이 ALLOW가 바로 이 주문에 대한 것"임을 대조할 결속
+키다 — 없으면 fenced_submit이 결정을 거부한다(fail-closed).
 
 `RiskDecision`(§3.1)을 반환하지만 `RiskRuleBundle`은 쓰지 않는다 — 4개
 고정 규칙이라 번들 승인 절차가 불필요하다.
@@ -22,6 +26,7 @@ from __future__ import annotations
 
 import time
 from datetime import datetime, timedelta, timezone
+from decimal import Decimal
 from typing import Literal
 from uuid import UUID, uuid5
 
@@ -59,6 +64,10 @@ class _PreSubmitInputs(BaseModel, frozen=True):
     execution_ref: str
     provider_code: str
     symbol: str
+    # task-1532 I10 결속 키(계약 v1에 optional로 추가 — 기존 WORM 행은 없다).
+    # `fenced_submit`은 둘 다 기록돼 있고 주문과 같을 때만 결정을 받아들인다.
+    side: str | None = None
+    quantity: Decimal | None = None
     circuit_breaker_level: str | None
     data_distrust_level: str | None
     connection_fresh: bool | None
@@ -151,6 +160,8 @@ async def evaluate_pre_submit(
     execution_ref: str,
     provider_code: str,
     symbol: str,
+    side: str,
+    quantity: Decimal,
     trace_id: UUID,
 ) -> tuple[RiskDecision, FenceSnapshot]:
     start_ns = time.perf_counter_ns()
@@ -176,6 +187,8 @@ async def evaluate_pre_submit(
         execution_ref=execution_ref,
         provider_code=provider_code,
         symbol=symbol,
+        side=side,
+        quantity=quantity,
         circuit_breaker_level=cb_level,
         data_distrust_level=distrust_level,
         connection_fresh=connection_fresh,

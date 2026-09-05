@@ -14,6 +14,17 @@ Spec: docs/specs/L4_risk_and_safety_v1.0.md §2.5 `order_service/fenced_submit.p
   3  `gate_decision.decision_id`가 None이면 `RiskDecisionMissingError` —
      I1 fail-closed. DB 트리거(`93c0e7f6b8d9`)가 tenant·outcome·만료를
      한 번 더 검사하므로 코드가 결정을 위조해도 INSERT에서 막힌다.
+  3' (task-1532, I4·I10) `decision_reader.get_for_tenant(decision_id, user_id)`
+     로 WORM `risk_decision` 행을 재조회해 `decision_binding.verify_decision_
+     binding`으로 execution_ref·intent(symbol·side·quantity)·F0를 주문·호출자
+     값과 대조한다. 행이 없거나(타 tenant 포함) 하나라도 다르면 claim 전에
+     감사 `risk_decision_integrity_rejected`(reason
+     INTEGRITY_RISK_FINGERPRINT_MISMATCH, §3.4 재사용) + `RiskDecisionIntegrity
+     Error`. 이후 F0는 **호출자 값이 아니라 WORM 값**이다 — 호출자
+     `fence_snapshot`은 WORM과 같아야 하고 다르면 거부(무시 아님).
+     `decision_reader`는 `read_fences`처럼 조립부가 주입한다(foundation 비
+     import 원칙). 기본값 없음(I-01) — 우회 경로가 되지 않도록 시그니처
+     테스트가 고정한다.
   4  INSERT orders(status=CREATED, risk_decision_id=...)  # claim, 멱등
   5  F1 := read_fences()                                   # 부작용 직전 재조회
   6  F1이 F0보다 증가했으면 claim 행을 FAILED로(조건부 UPDATE) + 감사
@@ -48,6 +59,7 @@ from src.services.order_service import repository
 from src.services.order_service.gate import GateDecision, GateOutcome
 from src.services.order_service.position_ledger import record_fill_in_position_ledger
 from src.services.order_service.submit import OrderDeniedByRiskGateError
+from src.services.order_service.worm_decision_check import DecisionReader, bind_to_worm_decision
 
 FenceReader = Callable[[], Awaitable[Mapping[str, int]]]
 
@@ -87,6 +99,7 @@ async def submit_with_fence(
     user_id: UUID,
     gate_decision: GateDecision,
     read_fences: FenceReader,
+    decision_reader: DecisionReader,
     metrics: MetricsPort | None = None,
     trace_id: UUID | None = None,
 ) -> Order:
@@ -98,7 +111,12 @@ async def submit_with_fence(
         raise RiskDecisionMissingError(
             f"주문 {order.client_order_id}: gate 결정에 risk_decision_id가 없다 — I1, 제출 거부"
         )
-    f0 = gate_decision.fence_snapshot
+
+    # 3' — WORM 재조회·결속 대조. F0의 출처는 여기서부터 WORM 행이다.
+    f0 = await bind_to_worm_decision(
+        pool, order, user_id=user_id, actor=_ACTOR, gate_decision=gate_decision,
+        decision_reader=decision_reader, trace_id=trace_id,
+    )
 
     # 4 — claim(멱등). submit.py FD-4.2-a와 동일한 UNIQUE 선점.
     async with pool.acquire() as conn:

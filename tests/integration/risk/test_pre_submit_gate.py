@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import os
 from datetime import datetime, timedelta, timezone
+from decimal import Decimal
 from uuid import UUID, uuid4
 
 import asyncpg
@@ -34,6 +35,8 @@ from tests.integration.conftest import NoopEventBus, create_test_user
 
 _PROVIDER = "bitget"
 _SYMBOL = "BTC/USDT"
+_SIDE = "BUY"
+_QTY = Decimal("0.01")
 
 
 class _FakeConnectionRepo:
@@ -148,6 +151,8 @@ async def test_baseline_allow_and_ttl_is_exactly_two_seconds(pool, risk_repo, re
         execution_ref=execution_ref,
         provider_code=_PROVIDER,
         symbol=_SYMBOL,
+        side=_SIDE,
+        quantity=_QTY,
         trace_id=uuid4(),
     )
 
@@ -178,6 +183,8 @@ async def test_active_control_alone_denies_and_fence_matches_same_snapshot(
         execution_ref=f"exec:{uuid4().hex[:8]}",
         provider_code=_PROVIDER,
         symbol=_SYMBOL,
+        side=_SIDE,
+        quantity=_QTY,
         trace_id=uuid4(),
     )
 
@@ -200,6 +207,8 @@ async def test_circuit_breaker_alone_denies(pool, risk_repo, recorder):
         execution_ref=f"exec:{uuid4().hex[:8]}",
         provider_code=_PROVIDER,
         symbol=_SYMBOL,
+        side=_SIDE,
+        quantity=_QTY,
         trace_id=uuid4(),
     )
 
@@ -219,6 +228,8 @@ async def test_data_distrust_alone_denies(pool, risk_repo, recorder):
         execution_ref=f"exec:{uuid4().hex[:8]}",
         provider_code=_PROVIDER,
         symbol=_SYMBOL,
+        side=_SIDE,
+        quantity=_QTY,
         trace_id=uuid4(),
     )
 
@@ -240,6 +251,8 @@ async def test_connection_stale_alone_pauses(pool, risk_repo, recorder):
         execution_ref=f"exec:{uuid4().hex[:8]}",
         provider_code=_PROVIDER,
         symbol=_SYMBOL,
+        side=_SIDE,
+        quantity=_QTY,
         trace_id=uuid4(),
     )
 
@@ -260,6 +273,8 @@ async def test_missing_circuit_breaker_level_is_fail_closed_deny(pool, risk_repo
         execution_ref=f"exec:{uuid4().hex[:8]}",
         provider_code=_PROVIDER,
         symbol=_SYMBOL,
+        side=_SIDE,
+        quantity=_QTY,
         trace_id=uuid4(),
     )
 
@@ -280,6 +295,8 @@ async def test_missing_connection_is_fail_closed_deny(pool, risk_repo, recorder)
         execution_ref=f"exec:{uuid4().hex[:8]}",
         provider_code=_PROVIDER,
         symbol=_SYMBOL,
+        side=_SIDE,
+        quantity=_QTY,
         trace_id=uuid4(),
     )
 
@@ -307,6 +324,8 @@ async def test_other_tenants_control_does_not_leak_into_this_tenants_decision(
         execution_ref=f"exec:{uuid4().hex[:8]}",
         provider_code=_PROVIDER,
         symbol=_SYMBOL,
+        side=_SIDE,
+        quantity=_QTY,
         trace_id=uuid4(),
     )
 
@@ -326,6 +345,8 @@ async def test_denied_decision_is_recorded_in_worm_table(pool, risk_repo, record
         execution_ref=f"exec:{uuid4().hex[:8]}",
         provider_code=_PROVIDER,
         symbol=_SYMBOL,
+        side=_SIDE,
+        quantity=_QTY,
         trace_id=uuid4(),
     )
     assert decision.outcome == RiskOutcome.DENY
@@ -336,6 +357,11 @@ async def test_denied_decision_is_recorded_in_worm_table(pool, risk_repo, record
     assert stored_decision.outcome == RiskOutcome.DENY
     assert stored_decision.gate_kind == GateKind.PRE_SUBMIT
     assert inputs_snapshot["circuit_breaker_level"] == "emergency"
+    # task-1532 I10 binding keys are recorded next to the fence (fenced_submit compares them)
+    assert (inputs_snapshot["symbol"], inputs_snapshot["side"]) == (_SYMBOL, _SIDE)
+    assert Decimal(inputs_snapshot["quantity"]) == _QTY
+    pairs = fence_pairs_for(tenant_id, _PROVIDER, decision.execution_ref)
+    assert set(inputs_snapshot["fence_snapshot"]) == {f"{s.value}:{ref}" for s, ref in pairs}
 
 
 async def test_fence_snapshot_covers_exactly_the_five_pairs(pool, risk_repo, recorder):
@@ -351,6 +377,8 @@ async def test_fence_snapshot_covers_exactly_the_five_pairs(pool, risk_repo, rec
         execution_ref=execution_ref,
         provider_code=_PROVIDER,
         symbol=_SYMBOL,
+        side=_SIDE,
+        quantity=_QTY,
         trace_id=uuid4(),
     )
 

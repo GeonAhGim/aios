@@ -124,6 +124,21 @@ class PostgresDecisionRepository:
             )
         return _row_to_decision(row) if row is not None else None
 
+    async def get_for_tenant(
+        self, decision_id: UUID, tenant_id: UUID
+    ) -> tuple[RiskDecision, dict[str, Any]] | None:
+        """I8 tenant 스코프 조회 — `fenced_submit`이 호출자 `GateDecision`을
+        믿지 않고 F0·execution_ref·intent를 WORM에서 재조회할 때 쓴다
+        (task-1532). 다른 tenant의 결정은 존재해도 `None`이다(존재 여부조차
+        새지 않는다)."""
+        async with self._pool.acquire() as conn:
+            row = await conn.fetchrow(
+                "SELECT * FROM risk_decision WHERE decision_id = $1 AND tenant_id = $2",
+                decision_id,
+                tenant_id,
+            )
+        return _row_to_decision(row) if row is not None else None
+
     async def list_recent(self, tenant_id: UUID, limit: int) -> tuple[RiskDecision, ...]:
         async with self._pool.acquire() as conn:
             rows = await conn.fetch(

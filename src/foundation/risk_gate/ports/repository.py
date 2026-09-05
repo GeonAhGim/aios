@@ -7,6 +7,7 @@ from decimal import Decimal
 from typing import Any, Protocol
 from uuid import UUID
 
+from src.core.risk.decision import RiskDecision
 from src.core.risk.policy_bundle import BundleState, RiskRuleBundle
 from src.foundation.risk_gate.domain.models import (
     FenceSnapshot,
@@ -139,6 +140,22 @@ class RiskLimitRepository(Protocol):
         severity: str,
         occurred_at: datetime,
     ) -> int: ...
+
+
+class DecisionRepository(Protocol):
+    """R-24 — `risk_decision` WORM 저장소 포트(`adapters/postgres_decision_repository.py`).
+    C·R만 있다(U/D는 WORM이라 없음). `get_for_tenant`는 I8 tenant 스코프 —
+    `fenced_submit`이 결정 결속(F0·execution_ref·intent)을 WORM에서 재조회하는
+    유일한 읽기 경로다(task-1532)."""
+
+    async def insert(self, decision: RiskDecision, inputs_snapshot: dict[str, Any]) -> None: ...
+
+    async def get_for_tenant(
+        self, decision_id: UUID, tenant_id: UUID
+    ) -> tuple[RiskDecision, dict[str, Any]] | None:
+        """다른 tenant의 결정은 존재해도 `None`(구현체 책임 — 존재 여부조차
+        새지 않는다)."""
+        ...
 
 
 class RuleBundleRepository(Protocol):

@@ -32,6 +32,7 @@ from src.foundation.risk_gate.adapters.postgres_decision_repository import (
 )
 from src.services.order_service.fenced_submit import RiskDecisionMissingError, submit_with_fence
 from src.services.order_service.gate import GateDecision, GateOutcome
+from src.services.order_service.worm_decision_check import RiskDecisionIntegrityError
 from tests.adversarial.risk.conftest import (
     RecordingAdapter,
     fence_reader,
@@ -94,6 +95,7 @@ async def _attack(
         await submit_with_fence(
             pool, adapter, make_order(victim.execution_id), user_id=victim.user_id,
             gate_decision=gate, read_fences=fence_reader(pool, victim.user_id, victim.execution_id),
+            decision_reader=PostgresDecisionRepository(pool),
         )
     assert adapter.place_order_call_count == 0, "위조 결정으로 거래소에 도달했다(I1 위반)"
     assert adapter.cancelled_exchange_order_ids == []
@@ -107,11 +109,15 @@ async def test_rsk006_missing_decision_id_is_refused_before_claim(pool, victim):
 
 async def test_rsk006_invented_decision_id_matches_no_worm_row(pool, victim, decision_repo):
     """WORM에 기록되지 않은 decision_id = 어떤 fingerprint/inputs_hash와도
-    대응하지 않는 결정. 트리거가 'does not exist'로 거부한다."""
+    대응하지 않는 결정. task-1532부터는 claim 전 WORM 재조회가 먼저 거부한다
+    (트리거 'does not exist'는 그 뒤의 2차 방어)."""
     invented = uuid4()
     assert await _snapshot(decision_repo, invented) is None
-    error = await _attack(pool, victim, _forged_gate(invented, victim.f0), _TRIGGER_ERRORS)
-    assert "does not exist" in str(error) or isinstance(error, asyncpg.ForeignKeyViolationError)
+    error = await _attack(
+        pool, victim, _forged_gate(invented, victim.f0), (RiskDecisionIntegrityError,)
+    )
+    assert "INTEGRITY_RISK_FINGERPRINT_MISMATCH" in str(error)
+    assert error.mismatches == ("decision_missing",)
 
 
 async def test_rsk006_other_tenants_allow_decision_is_rejected(pool, victim, decision_repo):
@@ -119,9 +125,12 @@ async def test_rsk006_other_tenants_allow_decision_is_rejected(pool, victim, dec
     stolen = await insert_decision(pool, other_tenant, execution_ref=f"exec:{victim.execution_id}")
     before = await _snapshot(decision_repo, stolen.decision_id)
 
-    error = await _attack(pool, victim, _forged_gate(stolen.decision_id, victim.f0))
+    error = await _attack(
+        pool, victim, _forged_gate(stolen.decision_id, victim.f0), (RiskDecisionIntegrityError,)
+    )
 
     assert "INTEGRITY_RISK_FINGERPRINT_MISMATCH" in str(error)
+    assert error.mismatches == ("decision_missing",)  # 타 tenant 행은 존재 여부조차 새지 않는다
     assert await _snapshot(decision_repo, stolen.decision_id) == before  # 피해 tenant 행 불변
 
 
@@ -149,13 +158,17 @@ async def test_rsk006_expired_allow_decision_is_rejected(pool, victim):
 
 
 async def test_rsk006_forged_fence_snapshot_cannot_revive_denied_decision(pool, victim):
-    """fence 스냅샷을 아무리 유리하게 위조해도(토큰 ∞) 결정 자체가 DENY면
-    트리거에서 끝난다 — fence 비교(§3.6 5~6)는 결정 검증(2~4) 뒤에 온다."""
+    """fence 스냅샷을 아무리 유리하게 위조해도(토큰 ∞) 통과 못 한다 —
+    task-1532부터 호출자 F0는 WORM F0와 같아야 하며(I4) 다르면 결정 outcome을
+    보기도 전에 claim 전 거부된다. 결정 자체가 DENY인 것은 트리거가 2차로 막는다."""
     denied = await insert_decision(
         pool, victim.user_id, outcome=RiskOutcome.DENY, execution_ref=f"exec:{victim.execution_id}"
     )
     inflated = {pair: 2**40 for pair in victim.f0}
-    await _attack(pool, victim, _forged_gate(denied.decision_id, inflated), _TRIGGER_ERRORS)
+    error = await _attack(
+        pool, victim, _forged_gate(denied.decision_id, inflated), (RiskDecisionIntegrityError,)
+    )
+    assert error.mismatches == ("fence_snapshot",)
 
 
 # --- WORM 우회: 결정을 주문에 맞게 고쳐 쓰기 -------------------------------
@@ -200,7 +213,10 @@ async def test_rsk006_worm_rejects_rewriting_decision_then_submit_still_fails(
     await _tamper(pool, sql, *args)
 
     assert await _snapshot(decision_repo, target.decision_id) == before  # WORM 행 불변
-    await _attack(pool, victim, _forged_gate(target.decision_id, victim.f0))
+    # 타 tenant 행은 claim 전 WORM 재조회(tenant 스코프)가 먼저 거부하고, 같은
+    # tenant의 DENY/만료 행은 결속(ref·intent·F0)이 맞으므로 트리거가 거부한다.
+    expected = (RiskDecisionIntegrityError,) if setup == "other_tenant" else _TRIGGER_ERRORS
+    await _attack(pool, victim, _forged_gate(target.decision_id, victim.f0), expected)
 
 
 # --- 대조군: 진짜 ALLOW는 같은 경로로 통과한다 ------------------------------
@@ -215,6 +231,7 @@ async def test_control_genuine_allow_passes_the_same_path(pool, victim, decision
         pool, adapter, make_order(victim.execution_id), user_id=victim.user_id,
         gate_decision=_forged_gate(genuine.decision_id, victim.f0),
         read_fences=fence_reader(pool, victim.user_id, victim.execution_id),
+        decision_reader=PostgresDecisionRepository(pool),
     )
     assert adapter.place_order_call_count == 1
     async with pool.acquire() as conn:

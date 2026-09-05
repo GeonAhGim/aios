@@ -15,6 +15,9 @@ import pytest
 from src.core.observability.metric_names import SAFETY_POST_FENCE_SIDE_EFFECT_COUNT_TOTAL
 from src.core.risk.decision import RiskOutcome
 from src.data.models.trading import Order, OrderStatus
+from src.foundation.risk_gate.adapters.postgres_decision_repository import (
+    PostgresDecisionRepository,
+)
 from src.foundation.risk_gate.adapters.postgres_repository import PostgresRiskGateRepository
 from src.foundation.risk_gate.application.activate_safety_control import activate_safety_control
 from src.foundation.risk_gate.domain.models import SafetyScope
@@ -91,7 +94,8 @@ async def _count_by_client_id(pool, client_order_id: str) -> int:
 async def _submit(pool, ctx, adapter, order, *, gate=None, read=None, metrics=None) -> Order:
     return await submit_with_fence(
         pool, adapter, order, user_id=ctx["user_id"], gate_decision=gate or ctx["gate"],
-        read_fences=read or ctx["read"], metrics=metrics,
+        read_fences=read or ctx["read"], decision_reader=PostgresDecisionRepository(pool),
+        metrics=metrics,
     )
 
 
@@ -127,7 +131,9 @@ async def test_missing_decision_id_is_fail_closed(pool, ctx):
 
 async def test_forged_allow_with_non_actionable_decision_rejected_by_trigger(pool, ctx):
     """negative — 코드가 DENY 결정 id로 ALLOW를 위조해도 DB 트리거가 claim을 막는다."""
-    deny = await insert_decision(pool, ctx["user_id"], outcome=RiskOutcome.DENY)
+    deny = await insert_decision(
+        pool, ctx["user_id"], outcome=RiskOutcome.DENY, execution_ref=f"exec:{ctx['execution_id']}"
+    )
     adapter = RecordingAdapter()
     order = make_order(ctx["execution_id"])
     with pytest.raises(asyncpg.CheckViolationError):
@@ -205,7 +211,10 @@ async def test_adapter_error_deletes_claim(pool, ctx):
 
 async def test_expired_decision_reference_rejected_at_claim(pool, ctx):
     """negative — 만료된 결정으로는 claim 불가(트리거 `created_at < expires_at`)."""
-    expired = await insert_decision(pool, ctx["user_id"], ttl=timedelta(seconds=-1))
+    expired = await insert_decision(
+        pool, ctx["user_id"], ttl=timedelta(seconds=-1),
+        execution_ref=f"exec:{ctx['execution_id']}",
+    )
     adapter = RecordingAdapter()
     gate = _allow(ctx, expired.decision_id)
     with pytest.raises(asyncpg.CheckViolationError, match="RISK_DECISION_EXPIRED"):

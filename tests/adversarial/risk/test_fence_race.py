@@ -26,6 +26,9 @@ import pytest
 from src.core.observability.metric_names import SAFETY_POST_FENCE_SIDE_EFFECT_COUNT_TOTAL
 from src.core.risk.decision import RiskDecision, RiskOutcome
 from src.data.models.trading import Order, OrderStatus
+from src.foundation.risk_gate.adapters.postgres_decision_repository import (
+    PostgresDecisionRepository,
+)
 from src.foundation.risk_gate.adapters.postgres_repository import PostgresRiskGateRepository
 from src.foundation.risk_gate.application.activate_safety_control import activate_safety_control
 from src.foundation.risk_gate.domain.models import SafetyScope
@@ -111,7 +114,8 @@ async def test_staged_gather_kill_switch_vs_submits_post_fence_zero(pool, ctx):
         try:
             return await submit_with_fence(
                 pool, adapter, make_order(ctx.execution_id), user_id=ctx.user_id,
-                gate_decision=ctx.gate(), read_fences=ctx.read, metrics=metrics,
+                gate_decision=ctx.gate(), read_fences=ctx.read,
+                decision_reader=PostgresDecisionRepository(pool), metrics=metrics,
             )
         finally:
             finished += 1
@@ -135,7 +139,8 @@ async def test_staged_gather_kill_switch_vs_submits_post_fence_zero(pool, ctx):
 
         return await submit_with_fence(
             pool, adapter, make_order(ctx.execution_id), user_id=ctx.user_id,
-            gate_decision=ctx.gate(), read_fences=gated_read, metrics=metrics,
+            gate_decision=ctx.gate(), read_fences=gated_read,
+            decision_reader=PostgresDecisionRepository(pool), metrics=metrics,
         )
 
     results = await asyncio.gather(
@@ -167,7 +172,8 @@ async def test_unstaged_gather_every_post_fence_effect_is_detected_and_reversed(
     async def submit() -> Order:
         return await submit_with_fence(
             pool, adapter, make_order(ctx.execution_id), user_id=ctx.user_id,
-            gate_decision=ctx.gate(), read_fences=ctx.read, metrics=metrics,
+            gate_decision=ctx.gate(), read_fences=ctx.read,
+            decision_reader=PostgresDecisionRepository(pool), metrics=metrics,
         )
 
     results = await asyncio.gather(

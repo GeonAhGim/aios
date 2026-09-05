@@ -12,6 +12,7 @@ import uuid
 from collections.abc import Mapping
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
+from typing import Any
 from uuid import UUID, uuid4
 
 import asyncpg
@@ -97,6 +98,36 @@ async def seed_execution(pool: asyncpg.Pool, user_id: UUID, *, exchange: str = "
     return row["id"]
 
 
+async def recorded_inputs(
+    pool: asyncpg.Pool,
+    tenant_id: UUID,
+    *,
+    execution_ref: str,
+    exchange: str = "bitget",
+    symbol: str = "BTC/USDT",
+    side: str = "BUY",
+    quantity: Decimal = Decimal("0.01"),
+) -> dict[str, Any]:
+    """R-35 `_PreSubmitInputs.model_dump(mode="json")`과 같은 형태의 WORM
+    `inputs_snapshot` — fence는 지금 DB 값(`fence_pairs_for` 5쌍)을 읽어
+    넣는다. 기본 intent는 `make_order` 기본값과 일치한다(대조군이 통과해야
+    negative 테스트가 의미를 가진다)."""
+    repo = PostgresRiskGateRepository(pool)
+    snapshot = await repo.read_fences(fence_pairs_for(tenant_id, exchange, execution_ref))
+    return {
+        "schema_version": "v1",
+        "tenant_id": str(tenant_id),
+        "execution_ref": execution_ref,
+        "provider_code": exchange,
+        "symbol": symbol,
+        "side": side,
+        "quantity": str(quantity),
+        "fence_snapshot": {
+            f"{scope.value}:{ref}": token for (scope, ref), token in snapshot.tokens.items()
+        },
+    }
+
+
 async def insert_decision(
     pool: asyncpg.Pool,
     tenant_id: UUID,
@@ -104,7 +135,12 @@ async def insert_decision(
     outcome: RiskOutcome = RiskOutcome.ALLOW,
     ttl: timedelta = timedelta(minutes=5),
     execution_ref: str = "exec:1",
+    inputs_snapshot: dict[str, Any] | None = None,
 ) -> RiskDecision:
+    """`inputs_snapshot=None`이면 `recorded_inputs()`(정직한 스냅샷). negative
+    테스트는 결손·변조된 스냅샷을 직접 넘긴다."""
+    if inputs_snapshot is None:
+        inputs_snapshot = await recorded_inputs(pool, tenant_id, execution_ref=execution_ref)
     now = datetime.now(timezone.utc)
     decision = RiskDecision(
         decision_id=uuid4(),
@@ -127,7 +163,7 @@ async def insert_decision(
         evidence_ref=None,
         latency_us=10,
     )
-    await PostgresDecisionRepository(pool).insert(decision, {})
+    await PostgresDecisionRepository(pool).insert(decision, inputs_snapshot)
     return decision
 
 
