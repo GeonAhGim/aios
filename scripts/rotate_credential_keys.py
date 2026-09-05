@@ -30,9 +30,9 @@ from src.core.logging.audit_log import record_audit_log
 from src.core.observability.metric_names import SECURITY_KEY_ROTATION_COUNT_TOTAL
 from src.core.observability.metrics import metrics
 from src.core.security.encryption import decrypt, encrypt
-from src.core.security.key_ring import KeyRing
+from src.core.security.key_ring import KeyRing, SecretScope
 
-_SCOPE = "PAPER"
+_SCOPE: SecretScope = "PAPER"
 _ACTOR = "system:rotate_credential_keys"
 
 
@@ -84,6 +84,9 @@ async def _rotate_row(
                 encrypt(extra_plain, key_ring).encode("ascii") if extra_plain is not None else None
             )
         except Exception as exc:
+            metrics().counter(
+                SECURITY_KEY_ROTATION_COUNT_TOTAL, {"scope": _SCOPE, "outcome": "failure"}
+            )
             raise CredentialRotationError(
                 f"id={row_id} 복호/재암호화 실패(kid={old_kid!r})"
             ) from exc
@@ -141,10 +144,29 @@ async def rotate_paper_credentials(
     return total
 
 
-async def _run(*, batch_size: int, max_rows: int | None) -> int:
+async def count_pending_paper_credentials(pool: asyncpg.Pool, key_ring: KeyRing) -> int:
+    """`--dry-run`(§2.2 계약): 회전 대상(PAPER, key_version <> active_kid) 행 수만
+    센다. 아무것도 쓰지 않는다."""
+    async with pool.acquire() as conn:
+        count: int = await conn.fetchval(
+            "SELECT count(*) FROM exchange_credentials WHERE scope = $1 AND key_version <> $2",
+            _SCOPE,
+            key_ring.active_kid,
+        )
+    return count
+
+
+async def _run(*, batch_size: int, max_rows: int | None, dry_run: bool = False) -> int:
     key_ring = KeyRing.from_env(_SCOPE)
     pool = await asyncpg.create_pool(_asyncpg_dsn(), min_size=1, max_size=4)
     try:
+        if dry_run:
+            pending = await count_pending_paper_credentials(pool, key_ring)
+            print(
+                f"dry-run: 회전 대상 {pending}건(scope={_SCOPE}, "
+                f"active_kid={key_ring.active_kid}). 아무것도 변경하지 않았습니다."
+            )
+            return 0
         total = await rotate_paper_credentials(
             pool, key_ring, batch_size=batch_size, max_rows=max_rows
         )
@@ -154,12 +176,32 @@ async def _run(*, batch_size: int, max_rows: int | None) -> int:
         await pool.close()
 
 
-def main() -> int:
+def _positive_int(raw: str) -> int:
+    value = int(raw)
+    if value < 1:
+        raise argparse.ArgumentTypeError(f"1 이상의 정수여야 합니다: {raw}")
+    return value
+
+
+def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--batch-size", type=int, default=100, help="배치당 조회 행 수")
-    parser.add_argument("--max-rows", type=int, default=None, help="이번 실행 최대 처리 행 수")
-    args = parser.parse_args()
-    return asyncio.run(_run(batch_size=args.batch_size, max_rows=args.max_rows))
+    parser.add_argument(
+        "--batch-size", type=_positive_int, default=100, help="배치당 조회 행 수(1 이상)"
+    )
+    parser.add_argument(
+        "--max-rows", type=_positive_int, default=None, help="이번 실행 최대 처리 행 수(1 이상)"
+    )
+    parser.add_argument(
+        "--dry-run", action="store_true", help="회전 대상 행 수만 출력하고 아무것도 쓰지 않는다"
+    )
+    return parser
+
+
+def main(argv: list[str] | None = None) -> int:
+    args = build_parser().parse_args(argv)
+    return asyncio.run(
+        _run(batch_size=args.batch_size, max_rows=args.max_rows, dry_run=args.dry_run)
+    )
 
 
 if __name__ == "__main__":
