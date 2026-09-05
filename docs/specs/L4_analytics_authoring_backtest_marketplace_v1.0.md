@@ -11,7 +11,7 @@
   `src/foundation/marketplace/**`(신규 컨텍스트, 기존 `services/listing_service.py` 등은 파사드로 유지),
   `src/foundation/signals/**`(신규), `frontend/apps/web/src/chart/**`, `frontend/packages/chart-engine/**`
 - verification evidence: 각 리프 DoD의 테스트 경로(§9)
-- 리프 접두: **DC**(데이터 커버리지) **CH**(차트) **IND**(지표) **DSL**(AIOS Script) **BT**(백테스트) **MP**(마켓) **SIG**(신호 유입)
+- 리프 접두: **DC**(데이터 커버리지) **CH**(차트) **IND**(지표) **DSL**(AIOS Script) **BT**(백테스트) **MP**(마켓) **SIG**(신호 유입). §9.9 확장(ADR-2026-09-05-A): IND-9~14, BT-14~18, DSL-14~16, CH-11~13
 
 ## 1. 기관급 요구 (왜 기초 수준으로는 부족한가)
 
@@ -356,6 +356,28 @@ DoD 공통: `ruff` · `mypy --strict` · `scripts/check_zone_manifest.py` 통과
 DC-1~18(R/L4 잔여보다 먼저, backend 4 중 2 고정) → CH-1~10 ∥ IND-1~8 → DSL-1~13 → BT-1~13 → MP-1~10 → SIG-1~6(선택 백로그, 외부 신호를 받고 싶은 사용자를 위한 부가 기능·맨 마지막).
 프론트 리프(CH·DSL-13·BT-13·MP-10·SIG-6)는 frontend 풀, 나머지는 backend 풀. 각 영역 첫 리프는 QA에서 명세 §3 계약 스냅샷을 반드시 남긴다.
 차트 렌더링 코어는 AIOS 소유 코드(`chart-engine`)다. OSS를 포크해 시작하되 점진 재작성으로 완전히 소유한다(ADR-B D2). 외부 서비스·계정·API 의존 없음.
+
+
+### 9.9 확장 리프 (ADR-2026-09-05-A — 지표 3층·벡터화 백테스트·Pine 가져오기·차트 플러그인)
+| 리프 | 파일 | 선행 | DoD | 크기 |
+|---|---|---|---|---|
+| IND-9 | `docs/design/INDICATOR_OSS_EVAL.md` — TA-Lib·pandas-ta·`ta` 라이선스 원문·종수·품질(참조 벡터 가용) 평가, GPL/LGPL(tulip·backtrader·Nautilus) 제외 근거 | — | CH-0 형식 채점표 | 200 |
+| IND-10 | `src/core/indicators/adapters/talib_bridge.py`(레지스트리 어댑터: 스펙 자동 생성·파라미터 범위·lookback) + 참조 벡터 검증 | IND-9, IND-1 | ≥150종 등록, 증분=일괄 동일성 샘플 20종 | 280 |
+| IND-11 | `adapters/pandas_ta_bridge.py` + 검증 | IND-9, IND-1 | ≥100종 등록, 중복 지표는 코어 우선 규칙 | 280 |
+| IND-12 | `catalog/registry_tiers.py`(코어/OSS/스크립트 3층, 이름 충돌·버전·해시 규칙) + `GET /indicators` API(검색·카테고리·페이지네이션) | IND-10 | 목록 API p95 200ms | 300 |
+| IND-13 | 참조 벡터 대량 검증 잡(`reference/verify_all.py`, nightly) + CI 샘플링 | IND-12 | nightly 전수, CI 30종 | 200 |
+| IND-14 | 프론트 IndicatorPicker 확장(3층 탐색·검색·즐겨찾기·스크립트 지표 즉시 미리보기) | IND-12, CH-6 | 화면·negative | 300 |
+| BT-14 | `docs/design/BACKTEST_VECTOR_EVAL.md` — vectorbt OSS(Apache-2.0)·zipline-reloaded 설계 참조 범위·라이선스 확인(코드 차용 여부 결정) | — | CH-0 형식 | 200 |
+| BT-15 | `backtest/vector/{arrays,signals,fills}.py` — numpy/numba 벡터화 엔진 코어(체결 모델 BT-2~6의 벡터 구현) | BT-14, BT-6 | 이벤트 엔진과 단일 조합 결과 동등성 테스트 | 800 |
+| BT-16 | `backtest/vector/{grid,walk_forward,monte_carlo}.py` — 파라미터 그리드·워크포워드·Monte Carlo 대량 실행 + 실험 원장 기록 | BT-15, AI-10 | 1,000 조합 ≤60s(1개월 M1) | 600 |
+| BT-17 | `backtest/vector/universe.py` — 다종목 유니버스 스윕(컬럼 경로·메모리 상한) | BT-15, DC-13 | 100종목×1년 D1 ≤30s | 260 |
+| BT-18 | 프론트 `SweepResultsPage.tsx`(히트맵·안정성 표면·재현 키) | BT-16 | 화면·negative | 300 |
+| DSL-14 | `script/import/pine/{lexer,parser}.py` — Pine Script v5 부분 문법(입력·시리즈 연산·ta.* 매핑·plot·strategy.entry/exit) | DSL-3 | 지원/미지원 구문 표, 미지원은 위치 포함 거부 | 560 |
+| DSL-15 | `script/import/pine/transpile.py` — Pine AST → AIOS Script 변환 + 컴파일·검증 왕복 테스트(공개 예제 30개) | DSL-14, DSL-12 | 변환 후 컴파일 통과율 보고, 의미 차이 명시 | 300 |
+| DSL-16 | `script/library/{imports,registry}.py` — 스크립트 라이브러리 import(`import lib.name@version`, 해시 고정) + 마켓 연동 | DSL-12, MP-3 | 순환·버전 불일치 거부 | 300 |
+| CH-11 | `chart-engine/src/plugins/indicatorPlugin.ts` — 지표 플러그인 API(오버레이/페인/스타일 스키마, 3층 레지스트리 소비) | CH-3, IND-12 | 플러그인 등록·해제·스타일 왕복 | 280 |
+| CH-12 | `chart-engine/src/plugins/scriptPreview.ts` + 편집기 연동 — 스크립트 지표/전략 즉시 미리보기(컴파일→계산→오버레이) | CH-11, DSL-13 | 300ms 컴파일 + 오버레이 갱신 | 260 |
+| CH-13 | 멀티 심볼 비교·오버레이(정규화 가격, 스프레드) + 페인 레이아웃 저장 | CH-8 | 화면·negative | 300 |
 
 ## 10. 미확정·리스크
 - 데이터 벤더 선택·라이선스(Polygon, Databento, EODHD, Kiwoom 등)는 **미확인·사람 결정**. 명세는 SPI 형태만 고정.
