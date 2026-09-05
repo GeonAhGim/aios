@@ -215,26 +215,29 @@ export const API_ROUTES = defineApiRoutes({
   ),
   "foundation.trustConsents.accept": route("/v1/foundation/trust/consents", true, null, undefined, true),
 
-  // task-719: LA-17(task-624, 7ad6d15) application/get_candles·replay_candles의 조회
-  // 클라이언트. src/api/routers에는 아직 market_data 라우터가 없다(PLT-16 mount_v1
-  // 미도달 + 이 이름의 라우터 자체가 아직 없음, foundation.* 이관 전과 동일 상황) —
-  // 그래서 foundation.* 항목과 동일하게 v1Path=null로 legacy만 등록한다. 실제 마운트
-  // 경로가 확정되면(라우터 파일 확인 후) 이 값만 고친다.
+  // task-719/824: LA-17(task-624, 7ad6d15) 조회 클라이언트 경로. 등록 당시엔
+  // src/api/routers에 market_data 라우터가 없어 v1Path=null·envelope=false로 두었다.
   // task-1376(LA-24): 라우터 실재(src/api/routers/market_data.py) → implemented=true.
-  // 응답은 다른 foundation 라우터와 같은 ApiResponse 봉투이지만, envelope 플래그
-  // 전환은 clients/marketData.test.ts의 봉투 없는 fixture(2~4번 케이스)와 함께
-  // 바꿔야 하므로 별도 리프로 남긴다(parseCandleSeries는 봉투 유무 모두 판별).
-  "marketData.candles.get": route("/v1/foundation/market-data/candles", false, null, true),
-  "marketData.candles.replay": route("/v1/foundation/market-data/candles/replay", false, null, true),
-
-  // task-824: §3.1 InstrumentView 목록·별칭 조회. LA-9(ports/reference_repository.py)에는
-  // get_instrument(단건)만 있고 목록·별칭 조회 메서드가 아직 없다 — marketData.candles.*와
-  // 같은 이유(라우터 자체가 아직 없음)로 v1Path=null·legacy만 등록해둔다. 실제 라우터가
-  // 생기면(LA-9 확장 후) 이 값만 고친다.
-  "marketData.instruments.list": route("/v1/foundation/market-data/instruments", false, null, true),
+  // task-1525: src/api/routers/market_data.py 원문 확인 — `APIRouter(prefix=
+  // "/v1/foundation/market-data")`(market_data.py:75), router_registry.py:68
+  // `include_router(market_data.router)`(추가 prefix 없음, mount_v1 미경유라 v1Path는
+  // 여전히 null). 네 엔드포인트 전부 `-> ApiResponse[...]` + `ok(...)`라 envelope=true:
+  //   GET /candles                      :89  → ApiResponse[CandleSeriesView]   :108, ok(view, page=) :136
+  //   GET /candles/replay               :139 → ApiResponse[ReplaySeriesView]   :156, ok(view)        :181
+  //   GET /instruments                  :184 → ApiResponse[InstrumentListView] :194, ok(view, page=) :208
+  //   GET /instruments/{symbol}/aliases :211 → ApiResponse[list[SymbolAliasRef]] :220, ok(aliases)  :236
+  // 쿼리(candles): venue·timeframe·start·end 필수, symbol|instrument_id 택1, as_of·
+  // adjustment(RAW)·cursor·limit(≤1000). replay는 as_of 필수·cursor/limit 없음.
+  // instruments: venue·status·cursor(UUID keyset)·limit(≤200). aliases 경로 세그먼트는
+  // UUID(instrument_id) 또는 벤처 심볼(이때 venue 필수) — 프론트는 UUID를 보낸다.
+  // 커버리지 밖 span → 409 DATA_COVERAGE_MISSING(error_codes.py:63·:95, market_data.py:125
+  // 및 replay의 ReplayIncompleteError → exception_registry_foundation.py:239-240).
+  "marketData.candles.get": route("/v1/foundation/market-data/candles", true, null, true),
+  "marketData.candles.replay": route("/v1/foundation/market-data/candles/replay", true, null, true),
+  "marketData.instruments.list": route("/v1/foundation/market-data/instruments", true, null, true),
   "marketData.instruments.aliases": route(
     "/v1/foundation/market-data/instruments/:instrumentId/aliases",
-    false,
+    true,
     null,
     true,
   ),

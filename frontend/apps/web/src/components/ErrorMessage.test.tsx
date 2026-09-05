@@ -13,6 +13,15 @@ describe("ErrorMessage", () => {
     expect(screen.queryByText("raw server message")).not.toBeInTheDocument();
   });
 
+  it("DATA_COVERAGE_MISSING(LA-24, task-1525)은 접두 폴백이 아니라 고정된 미커버 안내로 보여준다", () => {
+    render(<ErrorMessage errorCode="DATA_COVERAGE_MISSING" message="raw coverage detail" />);
+
+    expect(
+      screen.getByText("요청한 구간의 시장 데이터가 아직 수집되지 않았습니다(미커버 구간)."),
+    ).toBeInTheDocument();
+    expect(screen.queryByText("raw coverage detail")).not.toBeInTheDocument();
+  });
+
   it("표에 없는 코드는 접두(prefix) 계열 안내로 대체한다", () => {
     render(<ErrorMessage errorCode="RISK_MAX_DRAWDOWN_EXCEEDED" />);
 

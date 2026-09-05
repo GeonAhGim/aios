@@ -154,6 +154,27 @@ describe("CandlesPage", () => {
     expect(screen.queryByRole("button", { name: "다시 시도" })).not.toBeInTheDocument();
   });
 
+  // task-1525(LA-24): 커버리지 밖 span은 200 빈 배열이 아니라 409 DATA_COVERAGE_MISSING
+  // (market_data.py:125, error_codes.py:95)이다. routeApiError(errorRouting.ts
+  // data_coverage_missing 갈래)+ErrorMessage(apiError.ts 매핑) 경로로만 "미커버" 안내를
+  // 보여주고, 화면 분기·서버 원문 노출·재시도 버튼은 없어야 한다(재시도로 해소 불가).
+  it("negative: 409 DATA_COVERAGE_MISSING이면 미커버 안내만 보여주고 원문·재시도 버튼은 노출하지 않는다", async () => {
+    const fetchCandles = vi.fn(async () => {
+      throw new ApiError(409, "요청 구간 [..)에 저장된 캔들이 없습니다.", "trace-409", "DATA_COVERAGE_MISSING");
+    });
+    renderPage(fetchCandles);
+
+    await waitFor(() =>
+      expect(
+        screen.getByText("요청한 구간의 시장 데이터가 아직 수집되지 않았습니다(미커버 구간)."),
+      ).toBeInTheDocument(),
+    );
+    expect(screen.queryByText(/저장된 캔들이 없습니다/)).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "다시 시도" })).not.toBeInTheDocument();
+    expect(screen.queryByText("표시할 캔들이 없습니다.")).not.toBeInTheDocument();
+    expect(screen.getByText("지원코드: trace-409")).toBeInTheDocument();
+  });
+
   // task-1088: instrument_id 없이 직접 진입하면 자유입력으로 폴백하지 않고
   // InstrumentsPage로 가는 안내만 보여준다(task-837 결함의 정식 해소).
   it("negative: instrument_id 없이 진입하면 자유입력 없이 심볼 선택 안내만 보여준다", async () => {

@@ -36,7 +36,7 @@ import { isResourceNotFound } from "./notFound";
 import { extractFieldErrors } from "./fieldErrors";
 import { extractReasonCodes } from "./reasonCodes";
 import { deriveLockout } from "./accountLockout";
-import { isSessionExpiredErrorCode } from "./apiError";
+import { isSessionExpiredErrorCode, type ApiErrorCode } from "./apiError";
 
 export type RoutedApiError =
   | { kind: "field_errors"; fieldErrors: Record<string, string> }
@@ -53,11 +53,19 @@ export type RoutedApiError =
   | { kind: "not_found" }
   | { kind: "refetch_retry" }
   | { kind: "invalid_transition" }
+  // task-1525: LA-24 DATA_COVERAGE_MISSING(409, error_codes.py:63·:95). 아래
+  // classifyStateConflict는 미지 409를 "invalid_transition"으로 폴백하므로(stateConflict.ts)
+  // 그보다 먼저 이 코드만 집어낸다 — 분류기를 새로 만들지 않고 이 진입점 한 곳에서만
+  // 갈래를 추가한다(decision). 재시도 없음(수집 후 재요청), 화면은 "미커버" 안내만.
+  | { kind: "data_coverage_missing" }
   | { kind: "backoff_retry"; afterSec?: number }
   | { kind: "server_fatal"; traceId?: string }
   | { kind: "unknown" };
 
 export type RoutedApiErrorKind = RoutedApiError["kind"];
+
+// apiError.ts ApiErrorCode 유니온의 값과 동일 문자열(단일출처는 error_codes.py:63).
+const DATA_COVERAGE_MISSING_ERROR_CODE: ApiErrorCode = "DATA_COVERAGE_MISSING";
 
 interface ErrorCodeLike {
   errorCode?: string | null;
@@ -86,6 +94,10 @@ export function routeApiError(err: unknown): RoutedApiError {
   if (forbidden === "tenant_mismatch") return { kind: "tenant_mismatch" };
   if (forbidden === "policy") return { kind: "policy_denied", reasonCodes: extractReasonCodes(err) };
   if (forbidden === "forbidden") return { kind: "forbidden", reasonCodes: extractReasonCodes(err) };
+
+  if (isErrorCodeLike(err) && err.errorCode === DATA_COVERAGE_MISSING_ERROR_CODE) {
+    return { kind: "data_coverage_missing" };
+  }
 
   const stateConflict = classifyStateConflict(err);
   if (stateConflict === "refetch_retry") return { kind: "refetch_retry" };

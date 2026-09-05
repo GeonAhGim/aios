@@ -47,6 +47,9 @@ const CASES: Record<ApiErrorCode, RoutingCase> = {
   EXCHANGE_UNAVAILABLE: { statusCode: 503, expectedKind: "backoff_retry" },
   EXCHANGE_FATAL: { statusCode: 502, expectedKind: "server_fatal", extra: { traceId: "trace-fatal" } },
   DEPENDENCY_NOT_READY: { statusCode: 503, expectedKind: "backoff_retry" },
+  // task-1525: LA-24 409 — classifyStateConflict의 미지 409 폴백(invalid_transition)에
+  // 걸리기 전에 전용 갈래로 빠져야 한다(아래 "우선순위" 블록이 그 순서를 고정).
+  DATA_COVERAGE_MISSING: { statusCode: 409, expectedKind: "data_coverage_missing" },
   INTERNAL_ERROR: { statusCode: 500, expectedKind: "server_fatal", extra: { traceId: "trace-internal" } },
 };
 
@@ -75,6 +78,12 @@ describe("routeApiError — 우선순위 규칙(task-483)", () => {
     const err = { statusCode: 400, errorCode: "VALIDATION_IDEMPOTENCY_KEY_REQUIRED" };
     expect(classifyBadRequest(err)).toBe("idempotency_key_required");
     expect(routeApiError(err)).toEqual({ kind: "idempotency_missing_header" });
+  });
+
+  it("DATA_COVERAGE_MISSING(409)는 classifyStateConflict가 미지 409로 invalid_transition 폴백하지만, routeApiError는 data_coverage_missing으로 확정한다(task-1525)", () => {
+    const err = { statusCode: 409, errorCode: "DATA_COVERAGE_MISSING" };
+    expect(classifyStateConflict(err)).toBe("invalid_transition");
+    expect(routeApiError(err)).toEqual({ kind: "data_coverage_missing" });
   });
 });
 

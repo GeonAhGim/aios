@@ -28,6 +28,10 @@ export type ApiErrorCode =
   | "EXCHANGE_UNAVAILABLE"
   | "EXCHANGE_FATAL"
   | "DEPENDENCY_NOT_READY"
+  // task-1525: LA-24(src/api/contracts/error_codes.py:63, HTTP 409 :95) — 요청 구간이
+  // 저장 커버리지 밖. 시장데이터 스펙 §4.1(0/NaN 채움 금지)에 따라 빈 200이 아니라
+  // 409로 거부되며, 재시도로 해소되지 않는다(수집 후 재요청).
+  | "DATA_COVERAGE_MISSING"
   | "INTERNAL_ERROR";
 
 export const DEFAULT_API_ERROR_MESSAGE =
@@ -61,6 +65,7 @@ const EXACT_MESSAGES: Partial<Record<ApiErrorCode, string>> = {
   EXCHANGE_UNAVAILABLE: "거래소 연결이 원활하지 않습니다. 잠시 후 다시 시도해주세요.",
   EXCHANGE_FATAL: "거래소 자격증명을 확인해주세요.",
   DEPENDENCY_NOT_READY: "서비스가 준비 중입니다. 잠시 후 다시 시도해주세요.",
+  DATA_COVERAGE_MISSING: "요청한 구간의 시장 데이터가 아직 수집되지 않았습니다(미커버 구간).",
   INTERNAL_ERROR: "일시적인 오류가 발생했습니다. 문제가 계속되면 문의해주세요.",
 };
 

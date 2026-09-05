@@ -60,6 +60,13 @@ const GHOST_PATH_WHITELIST: ReadonlySet<ApiRouteName> = new Set<ApiRouteName>([
 // task-1376(LA-24): marketData.* 4건 — 라우터는 src/api/routers/market_data.py에
 // 실재하지만 스냅샷은 여전히 f800c1a 시점이라 경로가 없다(auth.refresh와 같은
 // 사유). 스냅샷이 재생성되면 아래 "부패 방지" 테스트가 잡는다.
+// task-1525: 재대조 — contracts/openapi/v1.json에 "/v1/foundation/market-data" 경로
+// 0건(grep) vs 실라우터 market_data.py:75 `APIRouter(prefix="/v1/foundation/market-
+// data")`, GET /candles :89 · /candles/replay :139 · /instruments :184 ·
+// /instruments/{symbol}/aliases :211, router_registry.py:68 include_router. 네 건 전부
+// `-> ApiResponse[...]`(:108·:156·:194·:220)라 apiPaths.ts는 envelope=true로 전환했다.
+// 스냅샷 재생성은 백엔드 소유(decision)라 이 4건은 이 목록에 그대로 남는다 — 재생성
+// 되면 "부패 방지"가 FAIL하고, 그때 §B 래칫이 envelope=true를 스냅샷과 기계 대조한다.
 //
 // task-1524(LB-19): positions.* 3건 — 라우터는 src/api/routers/positions.py에 실재
 // (task-1377 d83d79c: `APIRouter(prefix="/v1/positions")` positions.py:54, GET ""

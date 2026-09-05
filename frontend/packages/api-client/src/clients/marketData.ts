@@ -72,7 +72,9 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 // candleSeries.ts의 unwrapEnvelope와 같은 관용(ApiResponse 봉투가 있으면 그
 // 안을, 없으면 raw 자체를 본다)을 여기서는 `quality` 서브필드를 꺼내는
 // 용도로만 별도로 쓴다 — parseCandleSeries/parseQualityVerdict 자체의 판별
-// 로직은 재구현하지 않는다.
+// 로직은 재구현하지 않는다. task-1525부터 fetchCandles는 requestEnvelope로
+// 이미 data만 받으므로 실제로는 "없으면 raw" 갈래만 타지만, 봉투 유무를 이
+// 파일이 단정하지 않는 관용은 그대로 둔다.
 function unwrapDataEnvelope(raw: unknown): unknown {
   return isRecord(raw) && "data" in raw ? raw.data : raw;
 }
@@ -108,10 +110,10 @@ function toQuery(params: CandleQueryParams): Record<string, string> {
 }
 
 // task-824: §3.1 InstrumentView 목록·§4.2 별칭 조회. 목록 응답 형태(items/next_cursor)와
-// 항목별 schema_version 포함 여부는 아직 없는 라우터를 위해 이 leaf가 정하는 최소 계약이다
-// — parseInstrumentView(task-708)를 항목마다 그대로 재사용할 수 있도록 각 항목이 단건
-// InstrumentView 응답과 동일한 모양(schema_version 포함)이라고 가정한다. 새 파서는
-// 만들지 않는다.
+// 항목별 schema_version 포함 여부는 당시 없던 라우터를 위해 이 leaf가 정한 최소 계약이었고,
+// task-1376(LA-24) 실라우터가 그대로 채택했다(schemas/market_data.py InstrumentListView,
+// items 항목은 contracts/v1.py InstrumentRef — schema_version 포함). parseInstrumentView
+// (task-708)를 항목마다 그대로 재사용한다. 새 파서는 만들지 않는다.
 export interface InstrumentListParams {
   venue?: Venue;
   status?: SymbolStatus;
@@ -157,10 +159,12 @@ class MarketDataApiClient extends ApiClientBase {
     return this.fetchCandles("marketData.candles.replay", toQuery(params));
   }
 
-  // task-1160: 이전에는 request()만 무조건 호출했다(marketData.instruments.*는
-  // 현재 envelope=false라 결과는 같았지만, fetchCandles와 달리 레지스트리를
-  // 참조하지 않는 하드코딩이었다) — fetchCandles와 동일한 resolveEnvelope 분기로
-  // 맞춰 단일 출처화한다.
+  // task-1160: 이전에는 request()만 무조건 호출했다(당시 marketData.instruments.*는
+  // envelope=false라 결과는 같았지만, fetchCandles와 달리 레지스트리를 참조하지
+  // 않는 하드코딩이었다) — fetchCandles와 동일한 resolveEnvelope 분기로 맞춰
+  // 단일 출처화한다. task-1525(LA-24 실라우터 정합): 4경로 전부 envelope=true로
+  // 전환됐다 — 분기는 레지스트리가 결정하므로 이 파일은 바뀌지 않는다.
+  // 응답 data는 schemas/market_data.py InstrumentListView{items, next_cursor}.
   async listInstruments(params: InstrumentListParams = {}): Promise<InstrumentListResult> {
     const query: Record<string, string> = {};
     if (params.venue !== undefined) query.venue = params.venue;
