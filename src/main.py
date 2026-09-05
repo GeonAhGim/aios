@@ -24,6 +24,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from src.api.contracts.handlers import install_exception_handlers
 from src.api.middleware.rate_limit import RateLimitMiddleware
 from src.api.middleware.request_context import RequestContextMiddleware
+from src.api.router_registry import register_routers
 from src.core.event_bus.in_process import InProcessEventBus
 from src.core.loader.risk_policy_loader import load_risk_policy
 from src.core.loader.secret_loader import load_env_secrets
@@ -235,63 +236,7 @@ def create_app() -> FastAPI:
     # 등록할수록 바깥이라(Starlette) 폭주 요청을 로깅 비용 전에 거절한다.
     app.add_middleware(RateLimitMiddleware)
 
-    from src.api.routers import (
-        admin,
-        alerts,
-        auth,
-        device_tokens,
-        exchange_credentials,
-        executions,
-        health,
-        marketplace,
-        metrics,
-        notifications,
-        portfolio,
-        reports,
-        strategy_builder,
-        suitability,
-        users,
-        wallet,
-    )
-    from src.api.routers.foundation import connections as foundation_connections
-    from src.api.routers.foundation import evidence as foundation_evidence
-    from src.api.routers.foundation import ledger_admin as foundation_ledger_admin
-    from src.api.routers.foundation import mandates as foundation_mandates
-    from src.api.routers.foundation import paper_control as foundation_paper_control
-    from src.api.routers.foundation import performance as foundation_performance
-    from src.api.routers.foundation import reconciliation as foundation_reconciliation
-    from src.api.routers.foundation import risk_gate as foundation_risk_gate
-    from src.api.routers.foundation import trust as foundation_trust
-    from src.api.routers.foundation import validation as foundation_validation
-
-    app.include_router(auth.router, prefix="/auth", tags=["auth"])
-    app.include_router(users.router, prefix="/users", tags=["users"])
-    app.include_router(
-        exchange_credentials.router, prefix="/exchange-credentials", tags=["exchanges"])
-    app.include_router(marketplace.router, prefix="/marketplace", tags=["marketplace"])
-    app.include_router(
-        strategy_builder.router, prefix="/strategy-builder", tags=["strategy-builder"])
-    app.include_router(suitability.router)
-    app.include_router(foundation_trust.router)
-    app.include_router(foundation_mandates.router)
-    app.include_router(foundation_evidence.router)
-    app.include_router(foundation_ledger_admin.router)
-    app.include_router(foundation_connections.router)
-    app.include_router(foundation_validation.router)
-    app.include_router(foundation_risk_gate.router)
-    app.include_router(foundation_paper_control.router)
-    app.include_router(foundation_reconciliation.router)
-    app.include_router(foundation_performance.router)
-    app.include_router(executions.router, prefix="/executions", tags=["executions"])
-    app.include_router(notifications.router, prefix="/notifications", tags=["notifications"])
-    app.include_router(admin.router, tags=["admin"])
-    app.include_router(portfolio.router, prefix="/portfolio", tags=["portfolio"])
-    app.include_router(reports.router, prefix="/reports", tags=["reports"])
-    app.include_router(device_tokens.router, prefix="/device-tokens", tags=["device-tokens"])
-    app.include_router(wallet.router, prefix="/wallet", tags=["wallet"])
-    app.include_router(alerts.router, prefix="/alerts", tags=["alerts"])
-    app.include_router(metrics.router)
-    app.include_router(health.router)
+    register_routers(app)
 
     return app
 
