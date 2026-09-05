@@ -258,9 +258,15 @@ async def test_trigger_rejects_order_without_decision_once_cutover_armed(pool, c
             await tr.rollback()
 
 
-@pytest.mark.parametrize("case", ["other_tenant", "deny", "expired", "unknown"])
+@pytest.mark.parametrize(
+    "case", ["other_tenant", "deny", "expired", "unknown", "other_execution"]
+)
 async def test_trigger_rejects_invalid_decision_reference_even_when_disarmed(pool, ctx, case):
-    if case == "other_tenant":
+    if case == "other_execution":  # a7c3d9e1f2b4 — 같은 tenant·ALLOW·유효지만 다른 execution
+        ref = f"exec:{await seed_execution(pool, ctx.user_id)}"
+        other = await insert_decision(pool, ctx.user_id, execution_ref=ref)
+        decision_id = other.decision_id
+    elif case == "other_tenant":
         decision_id = (await insert_decision(pool, await create_test_user(pool))).decision_id
     elif case == "deny":
         deny = await insert_decision(pool, ctx.user_id, outcome=RiskOutcome.DENY)
