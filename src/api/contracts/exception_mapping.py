@@ -60,13 +60,21 @@ STATUS_OVERRIDE: list[tuple[type[Exception], int]] = (
 )
 
 
+def _structured_details(exc: Exception) -> dict[str, object]:
+    """예외가 스스로 `details` dict를 들고 있으면(DSL-12 `ScriptCompileError`의
+    code/line/col처럼 §3.3 구조화 사유) 그대로 봉투에 싣는다. 매핑 표에 없는
+    예외(INTERNAL_ERROR 경로)는 호출자가 details를 비우므로 여기서 새지 않는다."""
+    details = getattr(exc, "details", None)
+    return dict(details) if isinstance(details, dict) else {}
+
+
 def map_exception(exc: Exception) -> tuple[ErrorCode, str, dict[str, object]]:
-    """(ErrorCode, message, details) — details는 지금은 항상 빈 dict다
-    (§3.3 details.fields/reason_codes 채우기는 검증기·정책엔진 쪽에
-    구조화된 사유가 생기는 후속 리프에서)."""
+    """(ErrorCode, message, details) — details는 예외가 `details` dict 속성을
+    가진 경우(task-1535 DSL-12부터)에만 채워지고, 그 외는 빈 dict다(§3.3
+    details.fields/reason_codes는 검증기·정책엔진 쪽 후속 리프에서)."""
     for exc_type, code in EXCEPTION_MAP:
         if isinstance(exc, exc_type):
-            return code, str(exc), {}
+            return code, str(exc), _structured_details(exc)
     return ErrorCode.INTERNAL_ERROR, str(exc), {}
 
 

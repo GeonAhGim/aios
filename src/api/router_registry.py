@@ -30,6 +30,7 @@ def register_routers(app: FastAPI) -> None:
         portfolio,
         positions,
         reports,
+        scripts,
         strategy_builder,
         suitability,
         users,
@@ -65,6 +66,7 @@ def register_routers(app: FastAPI) -> None:
     app.include_router(foundation_reconciliation.router)
     app.include_router(foundation_performance.router)
     app.include_router(market_data.router)  # LA-24(task-1376) /v1/foundation/market-data
+    app.include_router(scripts.router)  # DSL-12(task-1535) /v1/scripts/compile
     app.include_router(positions.router)
     app.include_router(executions.router, prefix="/executions", tags=["executions"])
     app.include_router(notifications.router, prefix="/notifications", tags=["notifications"])

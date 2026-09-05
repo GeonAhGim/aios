@@ -14,6 +14,7 @@ from src.api.contracts.error_codes import ErrorCode
 from src.core.approval.service import ApprovalError
 from src.core.db.conditional_write import ConcurrencyConflictError
 from src.core.indicators.talib_adapter import IndicatorError
+from src.core.script.artifact.compile import ScriptCompileError
 from src.services.account_deletion_service import AccountDeletionError
 from src.services.alert_service import AlertError, AlertNotFoundError
 from src.services.approval_settings_service import ApprovalSettingsError
@@ -94,6 +95,9 @@ EXCEPTION_MAP_SERVICES: list[tuple[type[Exception], ErrorCode]] = [
     (DisputeError, ErrorCode.VALIDATION_INVALID_FIELD),
     (IndicatorError, ErrorCode.VALIDATION_INVALID_FIELD),
     (ConditionCompileError, ErrorCode.VALIDATION_INVALID_FIELD),
+    # DSL-12(task-1535) — §3.3 SCRIPT_* 4종은 새 최상위 코드 없이 400 하나로
+    # 매핑하고 구분은 `details.code/line/col`(ScriptCompileError.details)로 한다.
+    (ScriptCompileError, ErrorCode.VALIDATION_INVALID_FIELD),
     (StrategyNotFoundError, ErrorCode.RESOURCE_NOT_FOUND),
     (StrategyLifecycleError, ErrorCode.VALIDATION_INVALID_FIELD),
     (WizardError, ErrorCode.VALIDATION_INVALID_FIELD),
