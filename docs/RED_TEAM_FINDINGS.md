@@ -17,6 +17,171 @@ AIOS 구현을 맡은 세션이 이 문서를 보고 판단해서 고치는 용�
 
 ---
 
+## 2026-09-05-R-58 · L4 리스크·안전 명세 §1 감사(R3/R7/R8) 파생 항목 (#42~#48)
+
+`docs/specs/L4_risk_and_safety_v1.0.md` §1 "현 구현 대비 격차" 표(R3 fail-closed
+· R7 Circuit Breaker · R8 강제청산)가 기존 코드에서 찾은 fail-open·무조건
+UPDATE 7건을 §9 R-58 리프(task-1521)로 이 장부에 등재한다. 명세 §1이 원본이고
+여기는 번호 부여·수정 커밋·잔여 추적용이다. 스펙 표기 RTF-01~07은 장부 번호
+#42~#48의 별칭이다. 상태는 이 리프가 현재 origin/main 코드·테스트를 직접
+확인한 것이다(자체 보고 아님).
+
+| RTF | # | 항목 | 발견 | 수정 리프·커밋 | 증명 테스트 | 상태 / 잔여 |
+|---|---|---|---|---|---|---|
+| RTF-01 | #42 | `correlation_with()` 미지 페어 0.0 fail-open | 명세 §1 R3 | R-11 `900704b` · R-29 `e8d4160` · R-31 `d6f48be` | `tests/unit/core/risk/test_correlation.py` missing_pairs DENY 3건 | ✅ FIXED — 잔여: 타 심볼 보유 시 과잉거부(#42) |
+| RTF-02 | #43 | `metrics_collector.data_delay_sec` 상수 0 | 명세 §1 R3/R7 | R-42 `a0652c9` · R-43 `bb513af` | `tests/integration/test_circuit_breaker.py::test_unknown_data_delay_does_not_read_as_normal` | ✅ FIXED — 잔여: 운영 조립부 tracker 미주입 → 상시 HALTED(#43) |
+| RTF-03 | #44 | watchdog `market_wide_correlated=None` 고정 → LIQUIDATE 영구 미발동 | 명세 §1 R3 | R-49 · R-51 (미착수) | — | ⏳ OPEN |
+| RTF-04 | #45 | `foundation_gate` mandate 우회 env 플래그 | 명세 §1 R3 | R-36 `a2e2646` | `tests/integration/test_order_service_risk_gate.py` unmandated DENY 2건 | ✅ FIXED(플래그 제거) — 잔여: 조립부 2곳 `require_mandate=False`(#45) |
+| RTF-05 | #46 | `watchdog_process._apply_decision` 무조건 UPDATE | 명세 §1 R8 | R-51 (미착수) | — | ⏳ OPEN |
+| RTF-06 | #47 | `circuit_breaker._set_level` 무조건 UPDATE | 명세 §1 R7 | R-43 `bb513af` | `tests/integration/test_circuit_breaker.py::test_concurrent_set_level_only_one_writer_wins` | ✅ FIXED |
+| RTF-07 | #48 | `strategy_allocation` 분모 available_balance | 명세 §2.1 | R-09 `e8ae0c7` · R-17 `35ec47a` | `tests/unit/core/risk/test_strategy_allocation.py::test_denominator_is_total_equity_not_available_balance` | ✅ FIXED — 잔여: total_equity USDT 근사(명세 §10) |
+
+---
+
+## 2026-09-05-42 · [risk] `correlation_with()`가 미지 심볼 페어를 상관 0.0으로 돌려 상관위험 규칙이 암묵 통과 — 심각도 높음 (RTF-01)
+
+**상태**: ✅ FIXED (R-11 `900704b` task-1177 · R-29 `e8d4160` task-1318 · R-31 `d6f48be` task-1360)
+
+**발견**: 명세 §1 R3. 레거시 `src/services/execution_loop/correlation.py`의
+하드코딩 5심볼 표 `correlation_with()`가 표에 없는 페어를 0.0(무상관)으로
+반환해, 새 심볼은 언제나 상관노출 한도를 통과했다 — 결손을 "안전"으로 읽는
+fail-open(78번 §1 I2 위반).
+
+**수정**: R-11 `rules/correlation.py`는 `stats.missing_pairs`가 비어 있지 않으면
+다른 지표와 무관하게 DENY, `correlated_exposure_pct`/`max_correlation`이 None이면
+`missing()` DENY. R-29가 `correlation.py`를 삭제하고(`correlation_with` 참조
+0건) `correlation_service.correlated_exposure()`가 겹침 부족 페어를 `None`으로
+돌려준다. R-31 `risk_inputs_assembler`는 계산 불가 페어를 0.0으로 치환하지 않고
+`missing_pairs`에 채운다.
+
+**증명**: `tests/unit/core/risk/test_correlation.py::test_denies_unconditionally_when_missing_pairs_present_even_if_metrics_look_safe`,
+`::test_denies_as_missing_when_correlated_exposure_pct_is_none`,
+`::test_denies_as_missing_when_max_correlation_is_none`.
+
+**잔여**: R-31의 2왕복 예산 안에서는 `ExposureSnapshot`(R-27)이 심볼별 원자료를
+노출하지 않아 타 심볼 보유 시(`gross_tenant != gross_symbol`) 상관을 계산할 수
+없고 `exposure:other_symbols_unresolved`로 DENY한다. fail-closed 과잉거부이지
+우회는 아니다 — 심볼별 노출을 스냅샷에 추가하는 후속 리프에서 해소.
+
+---
+
+## 2026-09-05-43 · [safety] `metrics_collector.data_delay_sec`가 상수 0이라 Circuit Breaker가 stale 데이터에서 절대 트립하지 않음 — 심각도 높음 (RTF-02)
+
+**상태**: ✅ FIXED (R-42 `a0652c9` task-1330 · R-43 `bb513af` task-1350) — 운영 배선 잔여 있음(아래)
+
+**발견**: 명세 §1 R3/R7. `collect_circuit_breaker_metrics()`가 `data_delay_sec=0`을
+상수로 채워 `halted.data_delay_sec` 임계가 영원히 닿지 않았다.
+
+**수정**: R-42 `core/safety/data_freshness.py` `DataFreshnessTracker` +
+`InstrumentedAdapter` freshness 옵션. R-43은 collector가 tracker에서 `max_delay_sec`를
+읽고, tracker 미주입이면 `None`("모름")을 넘기며 `CircuitBreakerMetrics.data_delay_sec`
+를 `Decimal | None`으로 바꿨다. `compute_level._exceeds_or_unknown()`은 None을
+항상 임계 초과(HALTED 후보)로 취급한다 — 모름을 0으로 뭉개지 않는다.
+
+**증명**: `tests/integration/test_circuit_breaker.py::test_unknown_data_delay_does_not_read_as_normal`.
+
+**잔여(운영 배선)**: `src/main.py → start_background_loops(...)`가 `freshness_tracker`를
+넘기지 않아(기본 `None`) 운영 안전 tick(`run_circuit_breaker_tick`)의
+`data_delay_sec`는 항상 "모름"이고, 따라서 compute_level은 매 사이클 HALTED
+후보를 낸다. fail-closed라 우회는 아니지만 실측 없이 CB가 HALTED에 고정되는
+상태다. 해소: tick 어댑터에 `InstrumentedAdapter(freshness=...)`를 붙이고 같은
+tracker를 main에서 주입(R-45 `58b3c16` 이후 남은 배선 항목, PM 판단).
+
+---
+
+## 2026-09-05-44 · [safety] watchdog가 `market_wide_correlated=None`을 고정으로 넘겨 LIQUIDATE가 영구 미발동 — 심각도 중간 (RTF-03)
+
+**상태**: ⏳ OPEN — 수정 리프 R-49(`core/safety/market_correlation.py` + `watchdog.decide` 확장)·R-51(`watchdog_process.py`) 미착수
+
+**발견**: 명세 §1 R3. `src/watchdog_process.py:151`
+`decide(snapshot, market_wide_correlated=None)` — `core/safety/watchdog.py`의
+LIQUIDATE 분기는 `market_wide_correlated is True`일 때만 열리므로 시장 전체
+급변 판정이 없는 한 강제청산은 구조적으로 도달 불가. HALT 경로는 동작한다.
+`src/core/safety/market_correlation.py`는 아직 없다(2026-09-05 origin/main).
+
+**해소 조건**: R-49 `is_market_wide_move(basket_returns, ...)`(basket<3=None→HALT
+강등) 배선 + R-51 LIQUIDATE→`liquidation_request` INSERT.
+
+---
+
+## 2026-09-05-45 · [order_service] `foundation_gate`가 env 플래그(`AIOS_REQUIRE_MANDATE_FOR_SUBMIT`)로 mandate 검사를 조용히 끌 수 있음 — 심각도 높음 (RTF-04)
+
+**상태**: ✅ FIXED(플래그 제거) (R-36 `a2e2646` task-1403) — 조립부 스위치 잔여(아래)
+
+**발견**: 명세 §1 R3. mandate가 없으면 통과하는 동작이 배포 시점 env var로
+결정돼 코드 리뷰 없이 뒤집을 수 있었다(I-01/I-11 취지 위반).
+
+**수정**: `src/services/order_service/foundation_gate.py` — env var 삭제,
+`require_mandate`를 기본값 없는 필수 인자로(I-01: 안전 게이트 인자에 Optional
+기본값 금지). 활성 control이 있으면 mandate 유무와 무관하게 DENY(1층),
+`require_mandate=True`면 mandate 미연결 `RISK_MANDATE_REQUIRED` DENY. fence_snapshot
+관통.
+
+**증명**: `tests/integration/test_order_service_risk_gate.py::test_unmandated_submit_denied`,
+`::test_active_kill_switch_denies_unmandated_legacy_submit`.
+
+**잔여**: 프로덕션 조립부 2곳(`background_loops.py` pre_submit_gate ·
+`execution_deps.py` pre_start_gate)이 `require_mandate=False` — execution 생성
+UI가 `mandate_revision_id`를 연결하지 않아 지금 켜면 legacy 실행 전체가 막힌다.
+값이 코드에 드러나므로 env 우회는 불가하며, mandate 연결 UI 이후 두 곳을
+`True`로 전환(별도 리프).
+
+---
+
+## 2026-09-05-46 · [watchdog] `watchdog_process._apply_decision`이 범위 무관 전체 RUNNING을 무조건 PAUSED로 UPDATE — 심각도 높음 (RTF-05)
+
+**상태**: ⏳ OPEN — 수정 리프 R-51(마이그레이션 `e5a8c5d4f6b7` + `watchdog_process.py`) 미착수
+
+**발견**: 명세 §1 R8. `src/watchdog_process.py:92~96`
+`UPDATE strategy_executions SET status='PAUSED', paused_by='SAFETY_LAYER' WHERE
+status='RUNNING'` — 105번 형태 B(expected 상태·fence)가 아니고 GLOBAL/ACCOUNT
+범위 구분 없이 전부 정지시키며 `safety_control`·fence를 만들지 않는다.
+R-41 `807d748`이 `risk_guard_service`는 `KillSwitchService` 단일 경로로 옮겼지만
+watchdog 프로세스는 그대로다(watchdog은 DB만 쓰는 별도 프로세스라 R-40
+서비스를 직접 import하지 않는 설계 — 명세 §3.9/§10 ADR 항목).
+
+**해소 조건**: R-51 — LIQUIDATE→control(GLOBAL/ACCOUNT)+`liquidation_request`
+INSERT, HALT→control, "무조건 UPDATE 0건"(DoD).
+
+---
+
+## 2026-09-05-47 · [safety] `circuit_breaker._set_level`이 무조건 UPDATE라 동시 재판정이 서로 덮어씀 — 심각도 높음 (RTF-06)
+
+**상태**: ✅ FIXED (R-43 `bb513af` task-1350)
+
+**발견**: 명세 §1 R7. `_set_level`이 직전에 읽은 상태를 WHERE에 걸지 않아
+두 루프(평가 tick·재가동 승인)가 교차하면 늦게 쓴 쪽이 조용히 이긴다 — #05/#08과
+같은 "읽고→별도로 쓰기" 클래스.
+
+**수정**: `src/core/safety/circuit_breaker.py::_set_level(level, *, reactivation_approval_id, expected)`
+— 105번 §4.2 형태 B, `expected`(직전 `get_state()`)를 WHERE에 걸고 0행이면
+`ConcurrencyConflictError`로 호출자가 재조회·재판정.
+
+**증명**: `tests/integration/test_circuit_breaker.py::test_concurrent_set_level_only_one_writer_wins`.
+
+---
+
+## 2026-09-05-48 · [risk] strategy_allocation 규칙 분모가 available_balance라 같은 배분이 시점마다 다르게 판정됨 — 심각도 중간 (RTF-07)
+
+**상태**: ✅ FIXED (R-09 `e8ae0c7` task-1176 · R-17 `35ec47a` task-1209)
+
+**발견**: 명세 §2.1. 레거시 `engine.py`가 `allocated_capital / available_balance`로
+나눠(FD-16.1 원문) 미체결 주문·락업으로 분모가 줄면 같은 배분이 갑자기 상한
+초과가 되고, 반대로 분모가 크면 한도를 넘는 배분이 통과했다.
+
+**수정**: `src/core/risk/rules/strategy_allocation.py` — `allocated_capital /
+total_equity ≤ cap(certified)`, total_equity None·≤0이면 `missing()` DENY. R-17
+facade가 `evaluator.evaluate()`를 경유하므로 `engine.py`에 `available_balance`
+참조 0건.
+
+**증명**: `tests/unit/core/risk/test_strategy_allocation.py::test_denominator_is_total_equity_not_available_balance`,
+`::test_missing_allocated_capital_denies`.
+
+**잔여**: `total_equity`는 USDT 잔고 근사(명세 §10 "포트폴리오 VaR 분모" — 11번
+FX 계층 리프). 다통화 계좌에서 과소평가 가능, 명세에 등재된 알려진 경계.
+
+---
+
 ## 2026-09-02-전수감사 · 설계문서 대 코드 전수 점검 파생 항목 (#35~#41)
 
 `docs/FULL_AUDIT_2026-09-02.md`(PM 세션 agent-platform-12)가 설계문서
