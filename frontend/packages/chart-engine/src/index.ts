@@ -18,3 +18,20 @@ export type {
   SeriesType,
 } from "./core/series";
 export { createChartEngine, createNullSeriesBackendFactory } from "./core/series";
+
+export type {
+  OverlayDefinition,
+  OverlayEntry,
+  OverlayOutput,
+  OverlayPlacement,
+  OverlayRegistry,
+  OverlayRegistryErrorCode,
+} from "./indicators/overlayRegistry";
+export {
+  DEFAULT_OVERLAY_DEFINITIONS,
+  INDICATOR_REGISTRY_VERSION,
+  MAIN_PANE_INDEX,
+  OverlayRegistryError,
+  createDefaultOverlayRegistry,
+  createOverlayRegistry,
+} from "./indicators/overlayRegistry";
