@@ -19,7 +19,10 @@ DSL-4가 `close[1]`의 정적 타입을 원소 타입 `float`로 정했지만 �
 빌트인(`ns.ident(...)`)은 호스트가 주입하는 레지스트리(`BuiltinRegistry`)로만
 디스패치한다. 본체(`ta.*`/`math.*`/`strategy.*`)는 DSL-9 소유라 여기엔 스텁도
 기본값도 없다 — 미등록 호출은 예외다. 빌트인 반환값도 주석·봉 수와 대조한다
-(외부 코드의 산출물을 신뢰하지 않는다).
+(외부 코드의 산출물을 신뢰하지 않는다). DSL-9a 내장 표는
+`builtins_ta.default_builtins()`(`builtins_math.MATH_BUILTINS` + `TaBuiltins.table`)가
+만들어 호스트가 주입한다 — 이 모듈은 지표 레지스트리를 임포트하지 않고(I/O·외부
+의존 없음 정적 검사 유지) `execute(builtins=None)`은 여전히 빈 레지스트리다.
 
 의미 미정의 피연산자(`Order.side/qty_expr/opts`, `Plot.style`)는 IR이 AST 원형으로
 운반한 그대로 결과에 실어 보낸다 — 평가하지 않는다. 의미 확정은 DSL-11.
