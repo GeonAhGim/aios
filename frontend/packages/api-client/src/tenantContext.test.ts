@@ -1,4 +1,6 @@
-import { describe, expect, it } from "vitest";
+import { classifyForbidden } from "@aios/shared-types";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { ApiClientBase, ApiError, configureTenantHeadersProvider } from "./http";
 import { createTenantStore, isValidTenantId } from "./tenantContext";
 
 const VALID_TENANT_ID = "3fa85f64-5717-4562-b3fc-2c963f66afa6";
@@ -93,5 +95,118 @@ describe("handleForbidden", () => {
 
     expect(fallback).toEqual({ previousTenantId: null });
     expect(store.getActiveTenant()).toBeNull();
+  });
+});
+
+// task-1158 §3.5 실배선 회귀 가드. 스토어 단위 동작(위)만으로는 "헤더가 실제
+// 요청에 실리는가"를 증명하지 못한다(I-10: 배선·우회불가·증명). 여기서는
+// 스토어의 tenantHeaders를 configureTenantHeadersProvider로 주입한 뒤 진짜
+// ApiClientBase.fetchJson이 만드는 Headers를 검사한다 — 새 분류기·새 스토어 없음.
+class TestClient extends ApiClientBase {
+  get<T>(path: string): Promise<T> {
+    return this.request<T>(path);
+  }
+}
+
+// fetch mock은 호출마다 새 Response를 만드는 factory여야 한다 — 공유 Response를
+// 재사용하면 두 번째 호출에서 'Body has already been read'로 깨진다.
+function jsonResponse(status: number, body: unknown): Response {
+  return new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
+}
+
+function stubFetch(): ReturnType<typeof vi.fn> {
+  const fetchMock = vi.fn().mockImplementation(() => Promise.resolve(jsonResponse(200, { ok: true })));
+  vi.stubGlobal("fetch", fetchMock);
+  return fetchMock;
+}
+
+function sentHeaders(fetchMock: ReturnType<typeof vi.fn>, callIndex = 0): Headers {
+  const [, init] = fetchMock.mock.calls[callIndex] as [string, RequestInit];
+  return new Headers(init.headers);
+}
+
+const MISMATCH_BODY = {
+  error_code: "AUTH_TENANT_MISMATCH",
+  message: "tenant mismatch",
+  trace_id: "trace-1158",
+};
+
+describe("§3.5 실배선 회귀 가드 — tenantHeaders → ApiClientBase 요청 헤더", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    configureTenantHeadersProvider(null);
+  });
+
+  it("personal(활성 테넌트 없음)이면 X-Tenant-Id 키 자체를 만들지 않는다(빈 문자열 부착 금지)", async () => {
+    const store = createTenantStore();
+    configureTenantHeadersProvider(store.tenantHeaders);
+    const fetchMock = stubFetch();
+
+    expect("X-Tenant-Id" in store.tenantHeaders()).toBe(false);
+    await new TestClient("https://api.example.test", () => null).get("/ping");
+
+    expect(sentHeaders(fetchMock).has("X-Tenant-Id")).toBe(false);
+  });
+
+  it("빈 문자열 tenantId는 거부되어(false) 요청에 X-Tenant-Id: '' 가 실리지 않는다", async () => {
+    const store = createTenantStore();
+    configureTenantHeadersProvider(store.tenantHeaders);
+    const fetchMock = stubFetch();
+
+    expect(store.setActiveTenant("")).toBe(false);
+    await new TestClient("https://api.example.test", () => null).get("/ping");
+
+    expect(sentHeaders(fetchMock).has("X-Tenant-Id")).toBe(false);
+  });
+
+  it("활성 테넌트를 설정하면 이후 요청마다 X-Tenant-Id가 실린다", async () => {
+    const store = createTenantStore();
+    configureTenantHeadersProvider(store.tenantHeaders);
+    const fetchMock = stubFetch();
+    const client = new TestClient("https://api.example.test", () => null);
+
+    store.setActiveTenant(VALID_TENANT_ID);
+    await client.get("/first");
+    await client.get("/second");
+
+    expect(sentHeaders(fetchMock, 0).get("X-Tenant-Id")).toBe(VALID_TENANT_ID);
+    expect(sentHeaders(fetchMock, 1).get("X-Tenant-Id")).toBe(VALID_TENANT_ID);
+  });
+
+  it("실 403 AUTH_TENANT_MISMATCH ApiError는 classifyForbidden 경로로 tenant_mismatch가 되고, handleForbidden 뒤 다음 요청은 personal(헤더 없음)이다", async () => {
+    const store = createTenantStore();
+    configureTenantHeadersProvider(store.tenantHeaders);
+    const fetchMock = stubFetch().mockImplementationOnce(() => Promise.resolve(jsonResponse(403, MISMATCH_BODY)));
+    const client = new TestClient("https://api.example.test", () => null);
+    store.setActiveTenant(VALID_TENANT_ID);
+
+    const err = await client.get("/scoped").catch((e: unknown) => e);
+
+    expect(err).toBeInstanceOf(ApiError);
+    expect(classifyForbidden(err)).toBe("tenant_mismatch");
+    // 403은 GET 자동 재시도 대상이 아니다 — 서버 왕복 1회로 고정.
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(sentHeaders(fetchMock, 0).get("X-Tenant-Id")).toBe(VALID_TENANT_ID);
+
+    expect(store.handleForbidden(err)).toEqual({ previousTenantId: VALID_TENANT_ID });
+    await client.get("/after-fallback");
+    expect(sentHeaders(fetchMock, 1).has("X-Tenant-Id")).toBe(false);
+  });
+
+  it("negative: 실 403 AUTHZ_FORBIDDEN은 폴백하지 않아 다음 요청에도 X-Tenant-Id가 유지된다", async () => {
+    const store = createTenantStore();
+    configureTenantHeadersProvider(store.tenantHeaders);
+    const fetchMock = stubFetch().mockImplementationOnce(() =>
+      Promise.resolve(jsonResponse(403, { ...MISMATCH_BODY, error_code: "AUTHZ_FORBIDDEN" })),
+    );
+    const client = new TestClient("https://api.example.test", () => null);
+    store.setActiveTenant(VALID_TENANT_ID);
+
+    const err = await client.get("/scoped").catch((e: unknown) => e);
+
+    expect(classifyForbidden(err)).toBe("forbidden");
+    expect(store.handleForbidden(err)).toBeNull();
+    await client.get("/still-scoped");
+    expect(sentHeaders(fetchMock, 1).get("X-Tenant-Id")).toBe(VALID_TENANT_ID);
   });
 });

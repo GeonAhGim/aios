@@ -1,10 +1,12 @@
 import "@testing-library/jest-dom/vitest";
-import type { MembershipCapabilities, MembershipView } from "@aios/shared-types";
+import { AiosApiClient } from "@aios/api-client";
+import { classifyForbidden, type MembershipCapabilities, type MembershipView } from "@aios/shared-types";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, cleanup, fireEvent, render, renderHook, screen } from "@testing-library/react";
 import { createElement, type ReactNode } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { useTenant } from "../hooks/useTenant";
+import { ForbiddenNotice } from "./ForbiddenNotice";
 import { TenantSwitcher } from "./TenantSwitcher";
 
 const TENANT_A = "3fa85f64-5717-4562-b3fc-2c963f66afa6";
@@ -48,11 +50,31 @@ function selectTenant(tenantId: string) {
 // 되돌려 격리한다 — useTenant.test.ts와 동일한 패턴.
 afterEach(() => {
   cleanup();
+  vi.unstubAllGlobals();
   const { result } = renderHook(() => useTenant());
   act(() => {
     result.current.setActiveTenant(null);
   });
 });
+
+// task-1158 §3.5 실배선 회귀 가드용 fetch 스텁 — 호출마다 새 Response를 만드는
+// factory(공유 Response 재사용 시 Body has already been read). 기본 200 봉투.
+function jsonResponse(status: number, body: unknown): Response {
+  return new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
+}
+
+function stubFetch(): ReturnType<typeof vi.fn> {
+  const fetchMock = vi
+    .fn()
+    .mockImplementation(() => Promise.resolve(jsonResponse(200, { data: { id: "u-1" }, meta: {} })));
+  vi.stubGlobal("fetch", fetchMock);
+  return fetchMock;
+}
+
+function sentHeaders(fetchMock: ReturnType<typeof vi.fn>, callIndex = 0): Headers {
+  const [, init] = fetchMock.mock.calls[callIndex] as [string, RequestInit];
+  return new Headers(init.headers);
+}
 
 describe("TenantSwitcher", () => {
   it("memberships가 비어 있어도 PERSONAL은 항상 선택 가능하고 기본값이다", () => {
@@ -166,5 +188,73 @@ describe("TenantSwitcher", () => {
       canManageMembers: false,
     });
     expect(screen.getByText("알 수 없음")).toBeInTheDocument();
+  });
+});
+
+describe("TenantSwitcher — §3.5 실배선 회귀 가드(task-1158)", () => {
+  it("전환하면 실 AiosApiClient 요청에 X-Tenant-Id가 붙고, PERSONAL로 되돌리면 헤더가 빠진다", async () => {
+    const fetchMock = stubFetch();
+    const client = new AiosApiClient("https://api.example.test", () => "token");
+    renderSwitcher([membership({ tenantId: TENANT_A })], new QueryClient());
+
+    await client.getMe();
+    expect(sentHeaders(fetchMock, 0).has("X-Tenant-Id")).toBe(false);
+
+    selectTenant(TENANT_A);
+    await client.getMe();
+    expect(sentHeaders(fetchMock, 1).get("X-Tenant-Id")).toBe(TENANT_A);
+
+    selectTenant("PERSONAL");
+    await client.getMe();
+    expect(sentHeaders(fetchMock, 2).has("X-Tenant-Id")).toBe(false);
+  });
+
+  it("실 403 AUTH_TENANT_MISMATCH → handleForbidden 폴백 → 선택기는 PERSONAL, 화면은 ForbiddenNotice(step-up 버튼 없음)", async () => {
+    stubFetch().mockImplementationOnce(() =>
+      Promise.resolve(
+        jsonResponse(403, { error_code: "AUTH_TENANT_MISMATCH", message: "mismatch", trace_id: "t-1158" }),
+      ),
+    );
+    const client = new AiosApiClient("https://api.example.test", () => "token");
+    const { rerender } = renderSwitcher([membership({ tenantId: TENANT_A })], new QueryClient());
+    selectTenant(TENANT_A);
+
+    const err = await client.getMe().catch((e: unknown) => e);
+    expect(classifyForbidden(err)).toBe("tenant_mismatch");
+
+    const { result } = renderHook(() => useTenant());
+    act(() => {
+      expect(result.current.handleForbidden(err)).toEqual({ previousTenantId: TENANT_A });
+    });
+
+    expect((screen.getByLabelText("활성 테넌트") as HTMLSelectElement).value).toBe("PERSONAL");
+    expect(screen.getByText("개인")).toBeInTheDocument();
+
+    rerender(<ForbiddenNotice error={err} />);
+    expect(screen.getByText("이 리소스에 접근할 권한이 없습니다.")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "step-up 인증" })).not.toBeInTheDocument();
+  });
+
+  it("PERSONAL로 되돌릴 때도 캐시를 무효화한다(테넌트 경계를 넘는 잔존 방지, task-475 고정)", () => {
+    const queryClient = new QueryClient();
+    renderSwitcher([membership({ tenantId: TENANT_A })], queryClient);
+    selectTenant(TENANT_A);
+    queryClient.setQueryData(["portfolio"], { balance: 1 });
+    expect(queryClient.getQueryState(["portfolio"])?.isInvalidated).toBe(false);
+
+    selectTenant("PERSONAL");
+
+    expect(queryClient.getQueryState(["portfolio"])?.isInvalidated).toBe(true);
+  });
+
+  it("negative: 같은 테넌트를 다시 선택하면 캐시를 무효화하지 않는다", () => {
+    const queryClient = new QueryClient();
+    renderSwitcher([membership({ tenantId: TENANT_A })], queryClient);
+    selectTenant(TENANT_A);
+    queryClient.setQueryData(["portfolio"], { balance: 1 });
+
+    selectTenant(TENANT_A);
+
+    expect(queryClient.getQueryState(["portfolio"])?.isInvalidated).toBe(false);
   });
 });

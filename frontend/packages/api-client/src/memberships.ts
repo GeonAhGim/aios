@@ -1,9 +1,11 @@
 // L4_platform_observability_tenancy_api_v1.0.md §3.5 테넌트 계약 + §9 PLT-29.
 // createMembershipsClient(grant/suspend/revoke)는 ApiClientBase(http.ts)만 거친다 —
 // fetch를 직접 호출하지 않고, X-Tenant-Id 헤더도 새로 만들지 않는다.
-// ApiClientBase.fetchJson이 이미 모든 요청에 configureTenantHeadersProvider로 주입된
+// ApiClientBase.fetchJson이 모든 요청에 configureTenantHeadersProvider로 주입된
 // tenantContext.ts(task-455 createTenantStore)의 tenantHeaders()를 얹으므로(http.ts
 // fetchJson), 이 클라이언트는 그 배선을 그대로 상속만 한다 — 중복 구현 금지.
+// 주입 자체는 apps/web/src/hooks/useTenant.ts 모듈 스코프가 1회 수행한다(task-1158
+// QA가 이 등록이 실제로는 없었음을 발견해 배선 — 그 전까지 이 주석은 사실이 아니었다).
 //
 // MembershipView 파싱은 task-474(5cda851) parseMembershipView(shared-types/membership.ts)를
 // 그대로 재사용한다(새 파서 금지). 다만 parseMembershipView는 서버 원본(snake_case)을

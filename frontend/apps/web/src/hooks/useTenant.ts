@@ -3,16 +3,21 @@
 // 이 훅은 그 위에 React 반응성(zustand)만 배선한다 — useAuthStore.ts와
 // 동일한 분리 원칙(단방향 의존: 훅이 api-client를 알고, 그 반대는 아님).
 //
-// 범위 제한(task-455 decision): http.ts에는 아직 연결하지 않는다(실제 요청에
-// X-Tenant-Id를 자동으로 싣는 배선은 후속 리프에서 한 번에 한다). 이 훅은
-// 활성 테넌트 상태 읽기/쓰기와 403 수신 시 폴백 처리만 제공한다.
+// 실배선(task-1158 QA 발견·수정): task-455 당시 "http.ts 연결은 후속 리프"로
+// 미뤄 둔 X-Tenant-Id 공급자 등록이 어디에서도 이뤄지지 않아 헤더가 실제 요청에
+// 붙지 않았다. useAuthStore.ts가 configureUnauthorizedHandler를 모듈 스코프에서
+// 1회 등록하는 선례와 동일하게, 이 모듈이 로드될 때 스토어의 tenantHeaders를
+// api-client에 1회 주입한다 — personal(활성 테넌트 없음)이면 빈 객체라 헤더가
+// 아예 실리지 않는다(빈 문자열 부착 금지, 서버가 헤더 부재=personal로 해석).
 import {
+  configureTenantHeadersProvider,
   createTenantStore,
   type TenantMismatchFallback,
 } from "@aios/api-client";
 import { create } from "zustand";
 
 const tenantContext = createTenantStore();
+configureTenantHeadersProvider(() => tenantContext.tenantHeaders());
 
 interface TenantState {
   activeTenantId: string | null;
