@@ -19,7 +19,8 @@ import { DataFreshness } from "../../components/DataFreshness";
 import { ErrorMessage } from "../../components/ErrorMessage";
 import { ForbiddenNotice } from "../../components/ForbiddenNotice";
 import { DuplicateSubmitError, useIdempotentSubmit } from "../../hooks/useIdempotentSubmit";
-import { PortfolioPositionsSection } from "./PortfolioPositionsSection";
+import { PortfolioPositionsLive } from "./PortfolioPositionsLive";
+import type { PositionsClientLike } from "../../hooks/usePositions";
 
 // spec §3.3 에러 taxonomy: 재조정 실패는 err.message를 직접 노출하지 않고
 // routeApiError(task-483)로 판정해 400/403/그 외를 각각 BadRequestNotice/
@@ -38,7 +39,14 @@ function RebalanceError({ error }: { error: unknown }) {
   );
 }
 
-export function PortfolioPage() {
+// task-1524: positionsClient/now는 테스트 주입용(InstrumentsPage.marketDataClient 관용).
+// 미지정이면 PortfolioPositionsLive가 createPositionsClient로 실 클라이언트를 만든다.
+export interface PortfolioPageProps {
+  positionsClient?: PositionsClientLike;
+  now?: Date;
+}
+
+export function PortfolioPage({ positionsClient, now }: PortfolioPageProps = {}) {
   const { data: portfolio, isLoading, isError, error: portfolioError, refetch } = usePortfolio();
   const rebalance = useRebalancePortfolio();
   const { submit } = useIdempotentSubmit("portfolio.rebalance");
@@ -171,9 +179,9 @@ export function PortfolioPage() {
               )}
             </Card>
 
-            {/* spec §3.2 (B) 포지션/PnL 분해/NAV — 서버 라우트가 아직 없어(task-628
-                decision) 실 데이터 연결 전까지 빈 상태로 배선만 해둔다. */}
-            <PortfolioPositionsSection positions={[]} />
+            {/* spec §3.2 (B) 포지션/NAV — task-1524(LB-19)부터 GET /v1/positions·/nav·
+                /{key}/journal 실데이터(usePositions). PnL 분해는 라우트가 없어 미연결. */}
+            <PortfolioPositionsLive client={positionsClient} now={now} />
           </>
         ) : null}
       </div>

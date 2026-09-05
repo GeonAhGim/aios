@@ -22,6 +22,7 @@ export type {
   ReadinessSummary,
 } from "./readiness";
 export { newRequestId, isValidRequestId, requestIdHeaders } from "./requestId";
+export type { EnvelopeWithMeta } from "./http";
 export type {
   ApiResponsePageMeta,
   ApiResponseMeta,
@@ -68,3 +69,16 @@ export type {
   InstrumentListParams,
   InstrumentListResult,
 } from "./clients/marketData";
+// task-1524(LB-19): §3.2 (B) positions 조회 클라이언트(list/journal/nav). 서버 라우터
+// src/api/routers/positions.py 실재 — AiosApiClient 합성에는 얹지 않고(marketData와
+// 동일) 화면이 createPositionsClient로 직접 만든다(테스트 주입 가능).
+export { createPositionsClient } from "./clients/positions";
+export type {
+  PositionsClient,
+  PositionListParams,
+  PositionListResult,
+  PositionJournalParams,
+  PositionJournalResult,
+  NavSeriesParams,
+  NavSeriesResult,
+} from "./clients/positions";

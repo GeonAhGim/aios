@@ -1,41 +1,50 @@
 import { deriveFreshness } from "@aios/api-client";
-import { parseNavSnapshot, parsePnLBreakdown, parsePositionSnapshot } from "@aios/shared-types";
+import type {
+  ParsedNavSnapshot,
+  ParsedPnLBreakdown,
+  ParsedPositionSnapshot,
+  PositionSnapshotView,
+} from "@aios/shared-types";
 import { Alert, Card, CardTitle, EmptyState, Stat } from "@aios/ui-web";
+import type { ReactNode } from "react";
 import { PositionPnLCard } from "../../components/PositionPnLCard";
 
-// spec §3.2 (B) 포지션 스냅샷·PnL 분해·NAV를 포트폴리오 화면에 배선한다. 서버
-// 라우트가 아직 없으므로(task-628 decision, PositionPnLCard와 동일 원칙)
-// fetch는 하지 않고 이미 받아온 raw 데이터를 props로 받아 파싱만 담당한다.
-// PortfolioPage는 실 데이터 연결 전까지 빈 배열/undefined로 이 섹션을
-// 렌더링해 파싱·표시 경로만 미리 배선해둔다 — 낙관적 갱신은 하지 않는다
-// (포지션·PnL의 SSOT는 서버, task-709 decision).
+// spec §3.2 (B) 포지션 스냅샷·PnL 분해·NAV를 포트폴리오 화면에 그리는 표시 전용
+// 섹션. task-1524(LB-19)부터 fetch·파싱은 PortfolioPositionsLive(usePositions +
+// api-client positions.ts, parsePositionSnapshot/parseNavSnapshot 재사용)가 맡고, 이
+// 컴포넌트는 이미 판별된 결과(Parsed*)만 받아 성공/실패 갈래를 그린다 — 여기서
+// 파서를 재구현하지 않는다. 낙관적 갱신은 하지 않는다(SSOT=서버, task-709 decision).
+// PnL 분해(PnLBreakdown)는 LB-19에 조회 라우트가 없어 pnl prop을 넘기는 호출부가
+// 아직 없다 — 라우트가 생기면 같은 prop으로 연결한다.
 const STALE_AFTER_SEC = 300;
 
 interface PortfolioPositionsSectionProps {
-  positions: unknown[];
-  pnl?: unknown;
-  nav?: unknown;
+  positions: ParsedPositionSnapshot[];
+  pnl?: ParsedPnLBreakdown;
+  nav?: ParsedNavSnapshot;
+  /** 봉투 meta.as_of. 없으면 신선도 판정 불가(배너 없음) — Date.now() 대입 금지(task-936). */
   asOf?: string | null;
   now?: Date;
+  /** 정상 파싱된 포지션 카드 아래에 붙일 부가 영역(저널 패널 등). */
+  renderPositionExtra?: (snapshot: PositionSnapshotView) => ReactNode;
 }
 
-function NavCard({ nav }: { nav: unknown }) {
-  const parsed = parseNavSnapshot(nav);
-  if (parsed.kind === "unsupported_schema_version") {
+function NavCard({ nav }: { nav: ParsedNavSnapshot }) {
+  if (nav.kind === "unsupported_schema_version") {
     return (
       <Card data-testid="nav-snapshot-error">
-        <Alert tone="danger">지원하지 않는 schema_version입니다 ({String(parsed.received)}).</Alert>
+        <Alert tone="danger">지원하지 않는 schema_version입니다 ({String(nav.received)}).</Alert>
       </Card>
     );
   }
-  if (parsed.kind !== "ok") {
+  if (nav.kind !== "ok") {
     return (
       <Card data-testid="nav-snapshot-error">
         <Alert tone="danger">NAV 데이터를 해석할 수 없습니다.</Alert>
       </Card>
     );
   }
-  const snapshot = parsed.value;
+  const snapshot = nav.value;
   return (
     <Card data-testid="nav-snapshot-card">
       <CardTitle>NAV · {snapshot.nav_date}</CardTitle>
@@ -49,23 +58,22 @@ function NavCard({ nav }: { nav: unknown }) {
   );
 }
 
-function PnLBreakdownCard({ pnl }: { pnl: unknown }) {
-  const parsed = parsePnLBreakdown(pnl);
-  if (parsed.kind === "unsupported_schema_version") {
+function PnLBreakdownCard({ pnl }: { pnl: ParsedPnLBreakdown }) {
+  if (pnl.kind === "unsupported_schema_version") {
     return (
       <Card data-testid="pnl-breakdown-error">
-        <Alert tone="danger">지원하지 않는 schema_version입니다 ({String(parsed.received)}).</Alert>
+        <Alert tone="danger">지원하지 않는 schema_version입니다 ({String(pnl.received)}).</Alert>
       </Card>
     );
   }
-  if (parsed.kind !== "ok") {
+  if (pnl.kind !== "ok") {
     return (
       <Card data-testid="pnl-breakdown-error">
         <Alert tone="danger">PnL 분해 데이터를 해석할 수 없습니다.</Alert>
       </Card>
     );
   }
-  const { realized, unrealized, fees, funding, total, base_currency } = parsed.value;
+  const { realized, unrealized, fees, funding, total, base_currency } = pnl.value;
   return (
     <Card data-testid="pnl-breakdown-card">
       <CardTitle>PnL 분해</CardTitle>
@@ -86,6 +94,7 @@ export function PortfolioPositionsSection({
   nav,
   asOf = null,
   now,
+  renderPositionExtra,
 }: PortfolioPositionsSectionProps) {
   const freshness = deriveFreshness(asOf, now ?? new Date(), { staleAfterSec: STALE_AFTER_SEC });
   const isStale = freshness.kind === "ok" && freshness.isStale;
@@ -109,10 +118,14 @@ export function PortfolioPositionsSection({
           <EmptyState>포지션 스냅샷이 없습니다.</EmptyState>
         ) : (
           <div className="space-y-3">
-            {positions.map((raw, index) => {
-              const parsed = parsePositionSnapshot(raw);
+            {positions.map((parsed, index) => {
               const key = parsed.kind === "ok" ? parsed.value.position_key : `invalid-${index}`;
-              return <PositionPnLCard key={key} snapshot={parsed} />;
+              return (
+                <div key={key} className="space-y-2">
+                  <PositionPnLCard snapshot={parsed} />
+                  {parsed.kind === "ok" && renderPositionExtra?.(parsed.value)}
+                </div>
+              );
             })}
           </div>
         )}

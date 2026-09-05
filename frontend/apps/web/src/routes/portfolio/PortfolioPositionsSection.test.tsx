@@ -1,5 +1,6 @@
 import "@testing-library/jest-dom/vitest";
 import { cleanup, render, screen } from "@testing-library/react";
+import { parseNavSnapshot, parsePnLBreakdown, parsePositionSnapshot } from "@aios/shared-types";
 import { afterEach, describe, expect, it } from "vitest";
 import { PortfolioPositionsSection } from "./PortfolioPositionsSection";
 
@@ -55,9 +56,11 @@ const PNL = {
   fx_rates_used: [],
 };
 
-// spec §3.2 (B): PortfolioPositionsSection은 positionView.ts 파서(parsePositionSnapshot/
-// parsePnLBreakdown/parseNavSnapshot, task-628 decision)만 사용해 서버가 준 raw 데이터를
-// 렌더한다 — 컴포넌트 안에서 파서를 재구현하지 않는다.
+// 이 섹션은 파서를 재구현하지 않고 이미 판별된 Parsed* 결과를 받는다(task-1524부터 fetch·
+// 파싱은 PortfolioPositionsLive/api-client positions.ts). fixture는 shared-types 파서
+// (positionView.ts, task-628 decision)로 판별해 넘긴다.
+const positions = (...raws: unknown[]) => raws.map((raw) => parsePositionSnapshot(raw));
+
 describe("PortfolioPositionsSection 포지션 스냅샷", () => {
   it("포지션이 없으면 빈 상태 문구를 보여준다", () => {
     render(<PortfolioPositionsSection positions={[]} />);
@@ -67,22 +70,45 @@ describe("PortfolioPositionsSection 포지션 스냅샷", () => {
 
   it("정상 스냅샷 여러 건은 각 position_key로 카드를 렌더링한다", () => {
     const other = { ...SNAPSHOT, position_key: "upbit:ETH-KRW:strat-1:exec-1" };
-    render(<PortfolioPositionsSection positions={[SNAPSHOT, other]} />);
+    render(<PortfolioPositionsSection positions={positions(SNAPSHOT, other)} />);
 
     expect(screen.getByText("upbit:BTC-KRW:strat-1:exec-1")).toBeInTheDocument();
     expect(screen.getByText("upbit:ETH-KRW:strat-1:exec-1")).toBeInTheDocument();
+    expect(screen.getAllByText("2500.00")).toHaveLength(2);
+  });
+
+  it("mark price가 없으면 미실현 손익을 0으로 채우지 않고 '평가 불가'로 표기한다", () => {
+    const noMark = { ...SNAPSHOT, mark_price: null, mark_at: null, unrealized_pnl_base: null };
+    render(<PortfolioPositionsSection positions={positions(noMark)} />);
+
+    expect(screen.getByText("평가 불가")).toBeInTheDocument();
+    expect(screen.queryByText("2500.00")).not.toBeInTheDocument();
+    expect(screen.getByTestId("mark-stale-badge")).toBeInTheDocument();
+  });
+
+  it("renderPositionExtra는 정상 파싱된 포지션에만 붙는다", () => {
+    const invalid = { schema_version: "v1", not_a_snapshot: true };
+    render(
+      <PortfolioPositionsSection
+        positions={positions(SNAPSHOT, invalid)}
+        renderPositionExtra={(s) => <span data-testid={`extra-${s.position_key}`}>extra</span>}
+      />,
+    );
+
+    expect(screen.getAllByText("extra")).toHaveLength(1);
+    expect(screen.getByTestId("extra-upbit:BTC-KRW:strat-1:exec-1")).toBeInTheDocument();
   });
 
   it("negative: schema_version이 잘못된 스냅샷은 예외 없이 danger 안내로 렌더링한다", () => {
     const badSchema = { ...SNAPSHOT, schema_version: "v2" };
-    expect(() => render(<PortfolioPositionsSection positions={[badSchema]} />)).not.toThrow();
+    expect(() => render(<PortfolioPositionsSection positions={positions(badSchema)} />)).not.toThrow();
     expect(screen.getByText(/지원하지 않는 schema_version/)).toBeInTheDocument();
   });
 
   it("negative: 구조가 다른 항목은 예외 없이 danger 안내로 렌더링하고 index 기반 key로 구분한다", () => {
     const invalid = { schema_version: "v1", not_a_snapshot: true };
     expect(() =>
-      render(<PortfolioPositionsSection positions={[SNAPSHOT, invalid]} />),
+      render(<PortfolioPositionsSection positions={positions(SNAPSHOT, invalid)} />),
     ).not.toThrow();
     expect(screen.getByText("upbit:BTC-KRW:strat-1:exec-1")).toBeInTheDocument();
     expect(screen.getByText("포지션 데이터를 해석할 수 없습니다.")).toBeInTheDocument();
@@ -91,7 +117,7 @@ describe("PortfolioPositionsSection 포지션 스냅샷", () => {
 
 describe("PortfolioPositionsSection NAV 카드", () => {
   it("nav prop이 주어지면 NAV 스냅샷 카드를 보여준다", () => {
-    render(<PortfolioPositionsSection positions={[]} nav={NAV} />);
+    render(<PortfolioPositionsSection positions={[]} nav={parseNavSnapshot(NAV)} />);
 
     expect(screen.getByTestId("nav-snapshot-card")).toHaveTextContent("NAV · 2026-09-03");
     expect(screen.getByText("100000.00 KRW")).toBeInTheDocument();
@@ -107,15 +133,21 @@ describe("PortfolioPositionsSection NAV 카드", () => {
 
   it("negative: NAV schema_version 불일치는 예외 없이 danger 안내로 렌더링한다", () => {
     expect(() =>
-      render(<PortfolioPositionsSection positions={[]} nav={{ schema_version: "v2" }} />),
+      render(<PortfolioPositionsSection positions={[]} nav={parseNavSnapshot({ schema_version: "v2" })} />),
     ).not.toThrow();
     expect(screen.getByTestId("nav-snapshot-error")).toBeInTheDocument();
+  });
+
+  it("negative: NAV 구조 불일치도 예외 없이 danger 안내로 렌더링한다", () => {
+    render(<PortfolioPositionsSection positions={[]} nav={parseNavSnapshot({ schema_version: "v1" })} />);
+
+    expect(screen.getByText("NAV 데이터를 해석할 수 없습니다.")).toBeInTheDocument();
   });
 });
 
 describe("PortfolioPositionsSection PnL 분해 카드", () => {
   it("pnl prop이 주어지면 실현·미실현·수수료·펀딩·합계를 보여준다", () => {
-    render(<PortfolioPositionsSection positions={[]} pnl={PNL} />);
+    render(<PortfolioPositionsSection positions={[]} pnl={parsePnLBreakdown(PNL)} />);
 
     const card = screen.getByTestId("pnl-breakdown-card");
     expect(card).toHaveTextContent("1000.00 KRW");
@@ -132,7 +164,7 @@ describe("PortfolioPositionsSection PnL 분해 카드", () => {
 
   it("negative: PnL 분해 구조가 잘못되면 예외 없이 danger 안내로 렌더링한다", () => {
     expect(() =>
-      render(<PortfolioPositionsSection positions={[]} pnl={{ schema_version: "v1" }} />),
+      render(<PortfolioPositionsSection positions={[]} pnl={parsePnLBreakdown({ schema_version: "v1" })} />),
     ).not.toThrow();
     expect(screen.getByTestId("pnl-breakdown-error")).toBeInTheDocument();
   });
@@ -144,7 +176,7 @@ describe("PortfolioPositionsSection 데이터 신선도 배너", () => {
   it("as_of가 STALE_AFTER_SEC(300초)보다 오래되면 지연 배너를 보여준다", () => {
     render(
       <PortfolioPositionsSection
-        positions={[SNAPSHOT]}
+        positions={positions(SNAPSHOT)}
         asOf="2026-09-03T00:00:00Z"
         now={new Date("2026-09-03T00:20:00Z")}
       />,
@@ -156,7 +188,7 @@ describe("PortfolioPositionsSection 데이터 신선도 배너", () => {
   it("as_of가 신선하면 지연 배너를 보여주지 않는다", () => {
     render(
       <PortfolioPositionsSection
-        positions={[SNAPSHOT]}
+        positions={positions(SNAPSHOT)}
         asOf="2026-09-03T00:00:00Z"
         now={new Date("2026-09-03T00:01:00Z")}
       />,
@@ -166,7 +198,7 @@ describe("PortfolioPositionsSection 데이터 신선도 배너", () => {
   });
 
   it("asOf가 없으면 신선도를 판정할 수 없어 지연 배너를 보여주지 않는다", () => {
-    render(<PortfolioPositionsSection positions={[SNAPSHOT]} />);
+    render(<PortfolioPositionsSection positions={positions(SNAPSHOT)} />);
 
     expect(screen.queryByTestId("positions-stale-banner")).not.toBeInTheDocument();
   });

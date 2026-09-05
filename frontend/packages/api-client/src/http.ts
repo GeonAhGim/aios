@@ -6,7 +6,7 @@ import { ApiError, buildApiError, withGetRetry } from "./httpErrors";
 import { withIdempotent } from "./httpIdempotent";
 import { requestMfaStepUp } from "./mfaStepUp";
 import { refreshAccessToken } from "./tokenRefresh";
-import { unwrap } from "./envelope";
+import { unwrap, type ApiResponseMeta } from "./envelope";
 
 // task-801: http.ts(401줄, P6 300줄 규율 초과) 분할 — 헤더 조립(+401 알림)은
 // httpHeaders.ts, ApiError 빌드·GET 재시도 정책은 httpErrors.ts, 멱등 계열은
@@ -23,6 +23,12 @@ export { generateIdempotencyKey } from "./httpIdempotent";
 // task-112(28cf21b)로 ApiResponse 봉투가 적용된 라우터(auth/users/admin)만
 // requestEnvelope 계열을 쓴다. 나머지 라우터는 아직 body를 그대로 반환하므로
 // request/post/put/patch/del 계열(봉투 미적용)을 그대로 쓴다.
+// 봉투의 data(camelCase 변환 후)와 meta(원형). 204는 meta가 없어 null이다.
+export interface EnvelopeWithMeta<T> {
+  data: T;
+  meta: ApiResponseMeta | null;
+}
+
 export class ApiClientBaseCore {
   protected baseUrl: string;
   protected getToken: () => string | null;
@@ -180,11 +186,19 @@ export class ApiClientBaseCore {
   }
 
   protected async requestEnvelope<T>(path: string, init?: RequestInit): Promise<T> {
+    return (await this.requestEnvelopeWithMeta<T>(path, init)).data;
+  }
+
+  // task-1524(LB-19): 봉투 meta(§3.3 as_of·page.next_cursor)까지 필요한 호출부
+  // (positions.ts journal 커서 페이지네이션·DataFreshness)용. requestEnvelope는 이
+  // 메서드의 data만 돌려주는 얇은 껍데기라 401 refresh/403 step-up/GET 재시도 경로는
+  // 한 곳에만 있다 — 봉투 파서는 그대로 unwrap(envelope.ts)이고 새로 만들지 않는다.
+  protected async requestEnvelopeWithMeta<T>(path: string, init?: RequestInit): Promise<EnvelopeWithMeta<T>> {
     const method = (init?.method ?? "GET").toUpperCase();
     return withGetRetry(method, () => this.performRequestEnvelope<T>(path, init));
   }
 
-  private async performRequestEnvelope<T>(path: string, init?: RequestInit): Promise<T> {
+  private async performRequestEnvelope<T>(path: string, init?: RequestInit): Promise<EnvelopeWithMeta<T>> {
     const stableInit = withStableRequestId(init);
     try {
       return await this.executeRequestEnvelope<T>(path, stableInit);
@@ -193,15 +207,17 @@ export class ApiClientBaseCore {
     }
   }
 
-  private async executeRequestEnvelope<T>(path: string, init?: RequestInit): Promise<T> {
+  private async executeRequestEnvelope<T>(path: string, init?: RequestInit): Promise<EnvelopeWithMeta<T>> {
     const { status, body, traceId, retryAfterHeader } = await this.fetchJson(path, init);
-    if (status === 204) return undefined as T;
+    if (status === 204) return { data: undefined as T, meta: null };
 
     const result = unwrap<unknown>(body);
     if (!result.ok) {
       throw buildApiError(status, body, traceId, retryAfterHeader);
     }
-    return keysToCamel<T>(result.data);
+    // data만 camelCase로 바꾼다 — meta는 §3.3 계약 그대로(as_of·next_cursor snake_case)
+    // 둬서 useCursorPage(CursorNavigatorMeta.next_cursor)에 바로 넘길 수 있게 한다.
+    return { data: keysToCamel<T>(result.data), meta: result.meta };
   }
 
   protected postEnvelope<T>(path: string, body?: unknown): Promise<T> {

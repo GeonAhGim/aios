@@ -238,6 +238,19 @@ export const API_ROUTES = defineApiRoutes({
     null,
     true,
   ),
+
+  // task-1524(LB-19): src/api/routers/positions.py 원문 확인 — `APIRouter(prefix=
+  // "/v1/positions")`(positions.py:54), router_registry.py:68 `include_router(positions.
+  // router)`(추가 prefix 없음). 세 엔드포인트 전부 `-> ApiResponse[...]` + `ok(...)`라
+  // envelope=true. GET ""(list, positions.py:69) 쿼리는 account_id·instrument_id(둘 다
+  // 옵션 UUID); GET "/nav"(positions.py:87)는 account_id·start_date·end_date 필수;
+  // GET "/{position_key}/journal"(positions.py:122)은 cursor(옵션 문자열, 내용은
+  // sequence_no)·limit(1~200, 기본 50)이고 next_cursor는 봉투 meta.page에만 실린다.
+  // /api/v1 마운트(PLT-16)는 미도달이라 v1Path=null. 스냅샷(f800c1a)에는 아직
+  // 없으므로 apiPaths.openapi.test.ts STALE_SNAPSHOT_WHITELIST에 기록했다.
+  "positions.list": route("/v1/positions", true, null, true),
+  "positions.nav": route("/v1/positions/nav", true, null, true),
+  "positions.journal": route("/v1/positions/:positionKey/journal", true, null, true),
 });
 
 export type ApiRouteName = keyof typeof API_ROUTES;

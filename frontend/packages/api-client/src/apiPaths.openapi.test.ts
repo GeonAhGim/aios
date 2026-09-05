@@ -60,6 +60,12 @@ const GHOST_PATH_WHITELIST: ReadonlySet<ApiRouteName> = new Set<ApiRouteName>([
 // task-1376(LA-24): marketData.* 4건 — 라우터는 src/api/routers/market_data.py에
 // 실재하지만 스냅샷은 여전히 f800c1a 시점이라 경로가 없다(auth.refresh와 같은
 // 사유). 스냅샷이 재생성되면 아래 "부패 방지" 테스트가 잡는다.
+//
+// task-1524(LB-19): positions.* 3건 — 라우터는 src/api/routers/positions.py에 실재
+// (task-1377 d83d79c: `APIRouter(prefix="/v1/positions")` positions.py:54, GET ""
+// :69 / GET "/nav" :87 / GET "/{position_key}/journal" :122, router_registry.py:68
+// include_router)하지만 스냅샷은 여전히 f800c1a 시점이라 `/v1/positions` 경로가
+// 0건이다(marketData.*와 같은 사유). 스냅샷이 재생성되면 아래 "부패 방지"가 잡는다.
 const STALE_SNAPSHOT_WHITELIST: ReadonlySet<ApiRouteName> = new Set<ApiRouteName>([
   "auth.refresh",
   "auth.logoutAll",
@@ -67,6 +73,9 @@ const STALE_SNAPSHOT_WHITELIST: ReadonlySet<ApiRouteName> = new Set<ApiRouteName
   "marketData.candles.replay",
   "marketData.instruments.list",
   "marketData.instruments.aliases",
+  "positions.list",
+  "positions.nav",
+  "positions.journal",
 ]);
 
 // KNOWN_ENVELOPE_DRIFT: task-1165 시점 전수 대조 결과, apiPaths.ts에 등록된 envelope
