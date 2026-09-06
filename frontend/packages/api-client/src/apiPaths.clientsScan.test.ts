@@ -60,20 +60,47 @@ describe("apiPaths — clients/*.ts 하드코딩 경로 소스 스캔 회귀 가
 // task-1160: 배치1(task-1159)이 account/admin/auth/exchange를 requestByRoute·
 // resolveEnvelope(route) 관용으로 옮긴 뒤, 배치2가 남은 clients/*.ts(executions/
 // marketplace/notifications/portfolio/strategyBuilder/marketData)도 같은 관용으로
-// 옮겨 놓은 상태를 굳히는 회귀 가드다. resolvePath(...)로 만든 경로를 request()/
-// requestEnvelope()에 곧바로 넘기면 그 호출부가 봉투 여부를 스스로 고르는
-// 것이므로(레지스트리 우회), apiPaths.ts registry(resolveEnvelope)를 거치지 않는
-// 이 직접 호출 형태가 다시 생기지 않는지를 잡는다. requestByRoute(route) 또는
+// 옮겨 놓은 상태를 굳히는 회귀 가드다. this.request()/this.requestEnvelope()를
+// 직접 호출하면서 apiPaths.ts registry(resolveEnvelope)를 거치지 않는 형태가 다시
+// 생기지 않는지를 잡는다 — resolvePath(...)를 곧바로 인라인으로 넘기는 형태
+// (`this.request(resolvePath(...))`)뿐 아니라, marketData.ts의 실제 이전 버그처럼
+// 경로를 변수에 먼저 담아(`const path = resolvePath(...)`) 그 변수를 등록값과 무관하게
+// 무조건 request()/requestEnvelope() 한쪽에만 넘기는 형태도 하드코딩이다 — 두 형태
+// 모두 "이 라우트는 항상 봉투(또는 항상 legacy)"라고 호출부가 스스로 단정하는
+// 것이므로 레지스트리 값이 바뀌어도 반영되지 않는다. requestByRoute(route) 또는
 // `resolveEnvelope(route) ? requestEnvelope(path) : request(path)`(경로 치환·쿼리가
-// 있어 requestByRoute를 못 쓰는 경우)는 위반이 아니다 — 둘 다 최종 분기가 레지스트리
-// 값을 거친다.
+// 있어 requestByRoute를 못 쓰는 경우) 삼항만 위반이 아니다 — 최종 분기가 레지스트리
+// 값을 거치는 유일한 두 형태다. 삼항 안에서 호출되는 request/requestEnvelope는
+// "커버된 범위"로 표시해 두고, 그 범위 밖에서 발견되는 모든 this.request(/
+// this.requestEnvelope( 호출을 위반으로 잡는다(제네릭 인자 `<T>`, await, 개행 허용).
+const GATED_TERNARY_PATTERN =
+  /resolveEnvelope\([^)]*\)\s*\?\s*(?:await\s+)?this\.requestEnvelope(?:<[^>]*>)?\([^)]*\)\s*:\s*(?:await\s+)?this\.request(?:<[^>]*>)?\([^)]*\)/g;
+// positions.ts(task-1377/1524)의 fetchByRoute처럼 삼항 대신 if(resolveEnvelope) {
+// ...requestEnvelopeWithMeta...return...} return ...this.request(...) 형태(조기
+// return)로 분기하는 관용도 있다 — 이 파일이 다루는 clients/*.ts 전체를 스캔하므로
+// task-1160 대상 6개 파일 밖의 이 기존 관용까지 오탐하지 않게 함께 인정한다.
+const GATED_IF_FALLTHROUGH_PATTERN =
+  /if\s*\(\s*resolveEnvelope\([^)]*\)\s*\)\s*\{[\s\S]*?this\.requestEnvelope(?:WithMeta)?(?:<[^>]*>)?\([^)]*\)[\s\S]*?\}\s*return[\s\S]*?this\.request(?:<[^>]*>)?\([^)]*\)/g;
+const ENVELOPE_CALL_PATTERN = /this\.(?:requestEnvelope(?:WithMeta)?|request)(?:<[^>]*>)?\(/g;
+
 function findHardcodedEnvelopeBranches(source: string): string[] {
-  const pattern = /this\.(?:request|requestEnvelope)\(\s*resolvePath\(/g;
-  const found: string[] = [];
-  let match: RegExpExecArray | null;
   const stripped = stripComments(source);
-  while ((match = pattern.exec(stripped)) !== null) {
-    found.push(match[0].replace(/\s+/g, " "));
+  const gatedRanges: Array<[number, number]> = [];
+  let ternaryMatch: RegExpExecArray | null;
+  while ((ternaryMatch = GATED_TERNARY_PATTERN.exec(stripped)) !== null) {
+    gatedRanges.push([ternaryMatch.index, ternaryMatch.index + ternaryMatch[0].length]);
+  }
+  let ifMatch: RegExpExecArray | null;
+  while ((ifMatch = GATED_IF_FALLTHROUGH_PATTERN.exec(stripped)) !== null) {
+    gatedRanges.push([ifMatch.index, ifMatch.index + ifMatch[0].length]);
+  }
+  const found: string[] = [];
+  let callMatch: RegExpExecArray | null;
+  while ((callMatch = ENVELOPE_CALL_PATTERN.exec(stripped)) !== null) {
+    const isGated = gatedRanges.some(([start, end]) => callMatch!.index >= start && callMatch!.index < end);
+    if (!isGated) {
+      found.push(callMatch[0]);
+    }
   }
   return found;
 }
@@ -90,12 +117,35 @@ describe("apiPaths — clients/*.ts 봉투 분기 하드코딩 소스 스캔 회
     expect(findHardcodedEnvelopeBranches('// return this.request(resolvePath("x.y"));')).toHaveLength(0);
   });
 
+  it("marketData.ts의 실제 이전 버그(변수에 담은 경로를 무조건 한쪽에만 넘기는 형태)도 잡아낸다", () => {
+    expect(
+      findHardcodedEnvelopeBranches(
+        'const path = this.withQuery(resolvePath("marketData.instruments.list"), query);\n' +
+          "const raw = keysToSnake(await this.request<unknown>(path));",
+      ),
+    ).toHaveLength(1);
+  });
+
   it("requestByRoute·resolveEnvelope 삼항 관용은 위반이 아니다", () => {
     expect(findHardcodedEnvelopeBranches('return this.requestByRoute("x.y");')).toHaveLength(0);
     expect(
       findHardcodedEnvelopeBranches(
         'const path = resolvePath("x.y").replace(":a", "1");\n' +
           "return resolveEnvelope(\"x.y\") ? this.requestEnvelope(path) : this.request(path);",
+      ),
+    ).toHaveLength(0);
+    expect(
+      findHardcodedEnvelopeBranches(
+        'const raw = resolveEnvelope(route)\n' +
+          "  ? await this.requestEnvelope<unknown>(path)\n" +
+          "  : await this.request<unknown>(path);",
+      ),
+    ).toHaveLength(0);
+    expect(
+      findHardcodedEnvelopeBranches(
+        "return resolveEnvelope(\"strategyBuilder.indicators.compute\")\n" +
+          "  ? this.requestEnvelope(path)\n" +
+          "  : this.request(path);",
       ),
     ).toHaveLength(0);
   });
