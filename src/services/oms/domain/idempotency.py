@@ -77,6 +77,10 @@ def command_digest(cmd: SubmitOrderCommand) -> str:
             str(cmd.parent_order_id) if cmd.parent_order_id is not None else "",
             str(cmd.algo_run_id) if cmd.algo_run_id is not None else "",
             str(cmd.is_liquidation),
+            # EM-19 — 포함하지 않으면 트리거가만 다른 두 스톱 주문이 같은
+            # scope에서 "재시도"로 오인되어 digest 불일치를 놓친다.
+            str(cmd.trigger_price) if cmd.trigger_price is not None else "",
+            str(cmd.trailing_offset) if cmd.trailing_offset is not None else "",
         ]
     )
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()

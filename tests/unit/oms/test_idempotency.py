@@ -113,3 +113,19 @@ def test_command_digest_differs_when_quantity_differs() -> None:
     cmd_a = _command(quantity=Decimal("0.01"))
     cmd_b = _command(quantity=Decimal("0.02"))
     assert command_digest(cmd_a) != command_digest(cmd_b)
+
+
+def test_command_digest_differs_when_trigger_price_differs() -> None:
+    """EM-19 — 트리거가만 다른 두 스톱 주문은 같은 scope라도 다른
+    명령으로 취급돼야 한다(재시도 오인 방지)."""
+    cmd_a = _command(trigger_price=Decimal("100"))
+    cmd_b = _command(trigger_price=Decimal("101"))
+    assert command_digest(cmd_a) != command_digest(cmd_b)
+    cmd_none = _command(trigger_price=None)
+    assert command_digest(cmd_none) != command_digest(cmd_a)
+
+
+def test_command_digest_differs_when_trailing_offset_differs() -> None:
+    cmd_a = _command(trigger_price=Decimal("100"), trailing_offset=Decimal("1"))
+    cmd_b = _command(trigger_price=Decimal("100"), trailing_offset=Decimal("2"))
+    assert command_digest(cmd_a) != command_digest(cmd_b)
