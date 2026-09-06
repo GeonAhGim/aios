@@ -85,6 +85,10 @@
 | [신규] `src/services/oms/application/submit_order.py` | 제출 명령 핸들러(tx 1개: 멱등 선점→orders INSERT(CREATED)→VALIDATED 전이→outbox enqueue→commit) | `async def submit_order(cmd: SubmitOrderCommand, *, pool, profile: VenueCapabilityProfile, registry: SymbolRegistry, pre_submit_gate: PreSubmitGate \| None, clock: Clock) -> OrderView` | repo 포트, `order_service.gate` | 240 | SCAFFOLD |
 | [기존] `src/services/order_service/submit.py` | 얇은 호환 래퍼로 축소 — `submit_order(order, ...)`는 `oms.application.submit_order` 호출 후 outbox 디스패치를 **동기로 1회 즉시 시도**(기존 호출부 계약 유지: 반환 시점에 SUBMITTED/REJECTED/UNKNOWN 중 하나) | 기존 시그니처 유지, `apply_fill`은 `inbox_processor`로 위임 | — | 160 | SCAFFOLD |
 | [신규] `src/services/oms/application/outbox_dispatcher.py` | outbox → 어댑터 호출 → 전이 | `class OutboxDispatcher`; `async def dispatch_once(self, *, limit=50) -> DispatchReport`; `async def run_forever(self)`; 내부: `_send_submit`, `_send_cancel`, `_send_modify` | `ExchangeAdapter`, `ResilientTransport` 예외 taxonomy, repo 포트 | 280 | SCAFFOLD |
+| [신규, L4-31 소급 행] `src/services/oms/application/dispatch_outcome.py` | outbox 디스패처의 거래소 응답/예외 → 결과 분류(순수, I/O 없음). §4.4 outbox 상태기계 상호참조 | `class OutcomeKind(str, Enum)`; `@dataclass(frozen=True) SendOutcome`; `def classify_submit_response/classify_submit_failure/classify_lookup_failure/classify_idempotent_failure` | `exchanges.common.error_taxonomy` | 180 | SCAFFOLD |
+| [신규, L4-31 소급 행] `src/services/oms/application/outbox_writes.py` | 디스패처 공용 쓰기 프리미티브 — outbox 펜스 + 주문 전이 + payload 복원. §4.4/§5.1 outbox 상태기계 상호참조 | `class OutboxWrites`(`done`,`dead`,`defer`,`retry_or_dead`,`transition`); `def adopt`, `order_from_payload`, `payload_hash` | `ports/repository.py`(OutboxRepoPort, OrderRepoPort), `exchanges.common.http_policy` | 220 | SCAFFOLD |
+| [신규, L4-31 소급 행] `src/services/oms/application/outbox_submit.py` | outbox SUBMIT의 거래소 호출 판정(`_send_submit` 본체). §4.4 outbox 상태기계 상호참조 | `async def call_submit(adapter, venue_order, verify_first) -> SendOutcome` | `dispatch_outcome`, `outbox_writes.adopt` | 90 | SCAFFOLD |
+| [신규, L4-31 소급 행] `src/services/oms/application/outbox_commands.py` | outbox CANCEL/MODIFY 명령 전송(`_send_cancel`/`_send_modify` 본체). §4.2/§4.4 outbox 상태기계 상호참조 | `class CommandCounters`; `async def finalize_command/send_cancel/send_modify` | `dispatch_outcome`, `outbox_writes`, `ports/repository.py` | 200 | SCAFFOLD |
 | [신규] `src/services/oms/application/inbox_processor.py` | inbox 이벤트 → fills/전이 | `class InboxProcessor`; `async def process_once(self, limit=100) -> int`; `async def ingest(self, ev: ProviderOrderEvent) -> bool`(WS/폴링 양쪽이 호출) | repo 포트, `fill_normalizer`, `position_ledger` | 260 | SCAFFOLD |
 | [신규] `src/services/oms/application/cancel_order.py` | 취소 명령(전이 CANCEL_REQUESTED + outbox) | `async def cancel_order(cmd: CancelOrderCommand, *, pool, clock) -> OrderView` | repo 포트 | 140 | SCAFFOLD |
 | [기존] `src/services/order_service/cancel.py` | 호환 래퍼(위 호출 + 동기 1회 디스패치) | 기존 시그니처 | — | 80 | SCAFFOLD |
@@ -155,6 +159,18 @@
 
 `down_revision`은 착수 시 `alembic heads`가 **단일**임을 확인한 값(감사 §2-B의
 직렬화 규칙: `b3f7e0c1a4d5` 이후 PM이 지정). 다중 head면 먼저 merge revision.
+
+### 2-H. 소급 등재(L4-31) — 이 명세 Zone 밖 교차참조 파일
+
+ADR-2026-09-06-G §10 "그래프·문서 정합성" — 아래 파일은 저장소에 이미
+구현돼 있었으나 어느 명세에도 행이 없어 소유자·DoD·크기 상한이 없었다.
+`core/safety/reconciliation.py`는 이 리프 배정 시점 이전에 task-1722(커밋
+`dcd2dda`)가 레거시로 이미 삭제했으므로(`foundation/reconciliation`의
+`run_reconciliation`이 대체) 등재 대상에서 제외한다.
+
+| 파일 경로 | 단일 책임 | 공개 계약 | 상한 | Zone | 실소유 명세 |
+|---|---|---|---|---|---|
+| [기존, L4-31 소급 행] `src/core/safety/watchdog_simulator.py` | Watchdog(`core/safety/watchdog.py`) 오탐/누락률 측정용 과거 시세 재생 시뮬레이터 | `async def run_simulation(scenarios, *, heartbeat_dir) -> SimulationReport`; `def default_scenarios() -> list[SimulationScenario]` | 260 | OPEN | `L4_risk_and_safety_v1.0.md`(watchdog.py 연동) — 이 리프는 소급 등재·크기 상한만 지정하고, 구현 책임은 그대로 안전 명세가 진다 |
 
 ---
 
@@ -602,10 +618,12 @@ login 확인 → 결과로 `BITGET_SPOT_PROFILE.verified="LIVE_VERIFIED"` 갱신
 | L4-28 | `tests/perf/oms/*` 4개(단언 포함) | 27 | p99 ≤ 50 ms 등 §7.1 수치 단언 | 300 |
 | L4-29 | `tests/adversarial/oms/test_live_mode_bypass_attempts.py`, `test_tampered_provider_event.py` | 23,15 | 3경로 100% 차단 | 200 |
 | L4-30 | `tests/e2e/bitget_demo/*`(키 확보 후), 프로파일 `verified` 갱신, 이 문서 §10 갱신 | 20 | Demo 왕복 1회, `paptrading` 스팟 유효성 확정 | 200 |
+| L4-31 | `application/{dispatch_outcome,outbox_commands,outbox_submit,outbox_writes}.py`(§2-C 소급 행), `core/safety/watchdog_simulator.py`(§2-H 소급 행, 실소유는 `L4_risk_and_safety_v1.0.md`) | 14 | 5파일 전부 ≤300줄(`wc -l`); oms 4파일 docstring이 `L4-14`(원 구현 리프)와 `L4-31`(이 소급 행)을 함께 명시 + §4.2/§4.4 outbox 상태기계 표를 상호참조; `watchdog_simulator.py`는 §2-H 소급 행을 명시; 관련 기존 테스트 무수정 통과(`pytest tests/unit/oms/test_outbox_dispatcher.py tests/integration/test_watchdog_simulator.py`) | 0(신규 코드 없음 — 문서 정합성만) |
 
 리프 순서 근거: 감사 §11 "넓히지 말고 잇고, 이은 것을 증명하라" — 도메인·DB
 강제(01~08) → 제출 경로 교체(09~10) → 어댑터 내구성(11~13) → 워커(14~18) →
-WS(19~20) → 타 거래소·시뮬레이터(21~23) → 대사·알고(24~25) → 관측·증명(26~30).
+WS(19~20) → 타 거래소·시뮬레이터(21~23) → 대사·알고(24~25) → 관측·증명(26~30)
+→ 문서 정합성 소급 등재(31, ADR-2026-09-06-G §10).
 
 ---
 

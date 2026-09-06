@@ -1,7 +1,11 @@
-"""L4-14 — 디스패처 공용 쓰기 프리미티브: outbox 펜스 + 주문 전이 + payload 복원.
+"""L4-14/L4-31 — 디스패처 공용 쓰기 프리미티브: outbox 펜스 + 주문 전이 + payload 복원.
 
 Spec: docs/specs/L4_execution_oms_and_exchange_v1.0.md §5.1(outbox done/retry/dead
-펜스), §5.4(백오프·max_attempts), §7.3(payload_hash — raw 저장 금지).
+펜스), §4.4(outbox 상태기계 표 — `done`/`dead`/`defer`/`retry_or_dead`가 각각
+§4.4의 `DONE`/`DEAD`/`RETRY`(`not_before` 연기 포함) 전이를 구현한다), §5.4
+(백오프·max_attempts), §7.3(payload_hash — raw 저장 금지). §2-C/§9 L4-31: 이
+파일은 `outbox_dispatcher.py`(L4-14)에서 분리된 모듈로, 명세에 행이 없던
+것을 소급 등재했다(ADR-2026-09-06-G §10).
 
 `outbox_dispatcher.py`와 `outbox_commands.py`가 공유한다. 모든 쓰기는 호출자가
 연 트랜잭션 안에서 실행되고, outbox 펜스(`expected_worker`)가 0행이면 어댑터

@@ -1,6 +1,10 @@
-"""L4-14 — outbox 디스패처의 거래소 응답/예외 → 결과 분류(순수, I/O 없음).
+"""L4-14/L4-31 — outbox 디스패처의 거래소 응답/예외 → 결과 분류(순수, I/O 없음).
 
-Spec: docs/specs/L4_execution_oms_and_exchange_v1.0.md §3.4, §5.4, §6 F3/F4/F14.
+Spec: docs/specs/L4_execution_oms_and_exchange_v1.0.md §3.4, §5.4, §6 F3/F4/F14,
+§4.2/§4.4(outbox 상태기계 표 — 이 모듈의 `OutcomeKind`가 §4.4 outbox 행 상태
+전이와 §4.2 주문 상태 전이의 트리거를 함께 판정한다). §2-C/§9 L4-31: 이 파일은
+`outbox_dispatcher.py`(L4-14)에서 분리된 순수 판정 모듈로, 명세에 행이 없던
+것을 소급 등재했다(ADR-2026-09-06-G §10).
 
 `outbox_dispatcher.py`가 "거래소가 무엇을 돌려줬는가"를 판정하는 규칙만 여기
 모은다 — DB·네트워크를 모르므로 단위 테스트가 예외 종류별 분기를 전수로

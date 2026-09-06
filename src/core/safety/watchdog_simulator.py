@@ -1,7 +1,11 @@
-"""9.7 — Watchdog 오탐 검증 시뮬레이터.
+"""9.7/L4-31 — Watchdog 오탐 검증 시뮬레이터.
 
 Spec: 정책문서 8.6-A-1-1, 06_mvp_scope_v1.3.md#§6.3 Definition of Done,
-10_implementation_task_tree_v1.9.md 9.7/9.8
+10_implementation_task_tree_v1.9.md 9.7/9.8. 소유·구현 책임 명세는 계속
+`docs/specs/L4_risk_and_safety_v1.0.md`(`watchdog.py` 연동)이다 — 이 파일은
+어느 명세에도 파일 단위 행이 없어 소유자·크기 상한이 없었으므로,
+`docs/specs/L4_execution_oms_and_exchange_v1.0.md` §2-H/§9 L4-31이 소급으로
+행(300줄 상한)을 등재했다(ADR-2026-09-06-G §10 "그래프·문서 정합성").
 
 과거 Flash Crash 데이터를 재생해 FD-9.2 판정 로직(decide())의 오탐(정상인데
 HALT/LIQUIDATE) / 누락(실제 위험인데 NORMAL)률을 측정한다. §6.3 DoD의
