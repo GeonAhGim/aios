@@ -36,8 +36,11 @@ class OrderContext:
     # R-36 — R-33 fence(F0)를 PRE_TRADE 등 이전 평가 시점에 관측했다면 여기
     # 담아 넘긴다. 키는 `"{SafetyScope.value}:{scope_ref}"`(foundation_gate.py가
     # 채운다 — 이 모듈은 foundation을 몰라 SafetyScope를 직접 쓰지 않는다).
-    # None(기본값)이면 신선도 비교를 건너뛴다 — 지금까지 이 값을 관측해 둔
-    # 호출부가 없다(마이그레이션 대기, mandate_revision_id와 동급 상태).
+    # None(기본값)이면 신선도 비교를 건너뛴다 — task-1361부터 tick.py가
+    # PRE_TRADE에서 관측한 F0를 실제로 채워 넘긴다(observed_fence=phase.
+    # fence_snapshot). mandate_revision_id는 task-1806부터 마찬가지로 실값을
+    # 관통시킨다(컬럼 자체는 있지만 execution 시작 시 채우는 UI 경로는 아직
+    # 없어 None일 수도 있다).
     observed_fence: Mapping[str, int] | None = None
     # task-1717 P0-D — 주문 intent 결속 키(I10). `fenced_submit`이 WORM
     # `inputs_snapshot`과 실제 주문을 대조할 때 쓴다(decision_binding.py).

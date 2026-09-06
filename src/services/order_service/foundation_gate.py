@@ -40,8 +40,11 @@ onboarding 이관과 함께 다뤄야 한다(미검증 스코프 밖, 이 파일
      — mandate-연결 UI가 나오면 그때 두 조립부를 `True`로 뒤집는다
      (R-36은 그 스위치를 만들고 증명하는 리프이지, 오늘 당장 켜는
      리프가 아니다).
-   mandate가 있으면 두 역할 모두 `mandates.evaluate_policy()`로 정식
-   평가한다.
+   mandate가 있으면(있다고 주장하면), 먼저 `context.mandate_revision_id`가
+   지금 tenant의 active revision과 같은지부터 대조한다(task-1806, fence와
+   같은 관측-vs-현재 패턴) — amendment로 revision이 바뀌었는데 호출부가
+   여전히 옛 revision id를 들고 있으면 `RISK_MANDATE_REVISION_STALE` DENY.
+   일치해야 비로소 `mandates.evaluate_policy()`로 정식 평가한다.
 
 task-1717 P0-D — 전수감사가 지적한 결함은 "이 함수가 내리는 실제 결정이
 `risk_decision` WORM 테이블에 전혀 기록되지 않아 `GateDecision.decision_id`가
@@ -233,6 +236,25 @@ def make_foundation_pre_submit_gate(pool: asyncpg.Pool, *, require_mandate: bool
             )
             return GateDecision(
                 outcome=GateOutcome.ALLOW, fence_snapshot=fence, decision_id=decision_id,
+            )
+
+        # task-1806 — R-36과 같은 관측-vs-현재 패턴을 mandate revision에도
+        # 적용한다: `context.mandate_revision_id`는 이 실행이 마지막으로
+        # 바인딩된(관측한) revision이다. 그 사이 amendment로 새 revision이
+        # activate되면(이전 revision은 SUPERSEDED) `evaluate_mandate_policy`는
+        # 항상 "현재" active revision을 기준으로 평가하므로, 대조 없이 그냥
+        # 통과시키면 실행이 자신이 동의한 적 없는(더 느슨하거나 더 엄격한)
+        # 규칙으로 조용히 재평가된다 — fence stale과 동일한 클래스의 결함.
+        # 불일치면 재바인딩을 요구하며 거부한다.
+        mandate = await mandate_repo.get_mandate(context.user_id)
+        if mandate is None or mandate.active_revision_id != context.mandate_revision_id:
+            decision_id = await _record_decision(
+                recorder, context=context, outcome=GateOutcome.DENY,
+                reason_codes=("RISK_MANDATE_REVISION_STALE",), fence=fence,
+            )
+            return GateDecision(
+                outcome=GateOutcome.DENY, reason_codes=("RISK_MANDATE_REVISION_STALE",),
+                fence_snapshot=fence, decision_id=decision_id,
             )
 
         try:

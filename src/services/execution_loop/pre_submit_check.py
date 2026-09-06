@@ -77,10 +77,10 @@ async def is_submission_allowed(
     mandate_revision_id: UUID | None = None,
     observed_fence: Mapping[str, int] | None = None,
 ) -> bool:
-    """`mandate_revision_id`는 strategy_executions에 그 컬럼이 아직 없어
-    (마이그레이션 대기) 항상 None으로 호출된다 — 컬럼이 생기고
-    `_load_execution_context()`의 SELECT 목록에 추가되면 호출부에서
-    `execution["mandate_revision_id"]`를 그대로 넘기기만 하면 된다.
+    """`mandate_revision_id` — task-1806부터 `_load_execution_context()`의
+    SELECT 목록에 `strategy_executions.mandate_revision_id`(b3f7e0c1a4d5)가
+    포함돼 tick.py 호출부가 실값을 그대로 넘긴다(바인딩 안 된 실행은 여전히
+    None — foundation_gate가 "unmandated" 경로로 처리한다).
 
     `observed_fence`(R-36) — PRE_TRADE 등 이전 단계가 관측한 F0가 있으면
     그대로 넘겨 stale이면 거부되게 한다.
