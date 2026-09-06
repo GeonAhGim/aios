@@ -26,7 +26,7 @@ from src.core.validator.order_validator import validate_order_params
 from src.data.models.base import AssetClass
 from src.data.models.trading import Order, OrderSide, OrderType
 from src.exchanges.kis.adapter import KISAdapter
-from src.services.oms.contracts.v1_commands import IdempotencyScope, SubmitOrderCommand
+from src.services.oms.contracts.v1_commands import OrderIdempotencyScope, SubmitOrderCommand
 from src.services.oms.domain.errors import OrderValidationError
 from src.services.oms.domain.venue_profile import (
     TimeoutBudget,
@@ -221,7 +221,7 @@ def _submit_command(asset_class: AssetClass, symbol: str) -> SubmitOrderCommand:
     return SubmitOrderCommand(
         command_id=uuid4(),
         trace_id=uuid4(),
-        scope=IdempotencyScope(
+        scope=OrderIdempotencyScope(
             tenant_id=uuid4(),
             account_ref="acct-1",
             provider="kis",
