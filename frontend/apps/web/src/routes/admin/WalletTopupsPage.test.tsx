@@ -66,9 +66,16 @@ function clickConfirm() {
 
 // task-1156 §3.3: 지금까지 confirm.mutate가 콜백 없이 호출돼 실패를 완전히
 // 조용히 삼켰다 — 금전 라우트(admin confirm-payment)인데도 에러 상태 자체가
-// 없었다. 이 화면에서 실제 가능한 코드(403/404/409/429)를 각각
+// 없었다. 이 화면에서 나올 수 있는 코드(403/409/429)를 각각
 // ForbiddenNotice/ErrorMessage 경로로 표면화한다. idempotencyKey 발급
 // 자체는(crypto.randomUUID() 매 클릭) 건드리지 않았다는 것도 함께 고정한다.
+// 실경로 여부(QA task-1163 재검증, task-1583 이후 기준): 403은 admin
+// 미들웨어發, 429는 rate-limit 미들웨어發로 둘 다 실경로다. confirm_topup의
+// idempotency_key 인자는 서비스에서 미사용(DB 상태가 멱등 근거, ARG002) —
+// 아래 409 테스트가 쓰는 INTEGRITY_IDEMPOTENCY_CONFLICT는 confirm_topup이
+// 실제로 던지는 코드가 아니다(실제 409는 WalletTopupInvalidTransitionError→
+// STATE_INVALID_TRANSITION, task-1583). 방어적 커버로 그대로 남겨둔다(§3.3
+// taxonomy 전체 커버 목적, 실제 가능한 코드라는 주장은 부정확했다).
 describe("WalletTopupsPage 목록 조회 실패/빈 상태 표시", () => {
   it("negative: 대기 목록 조회가 500으로 실패하면 빈 상태가 아니라 ErrorMessage를 보여준다", async () => {
     topupsResult = {
@@ -132,7 +139,7 @@ describe("WalletTopupsPage 입금확인 실패 표시", () => {
     expect(screen.queryByText("raw forbidden detail")).not.toBeInTheDocument();
   });
 
-  it("negative: INTEGRITY_IDEMPOTENCY_CONFLICT(409) 입금확인 실패는 err.message 대신 매핑 문구를 보여준다", async () => {
+  it("negative(방어적 커버 — confirm_topup은 idempotency_key를 안 쓰고 실제 409는 STATE_INVALID_TRANSITION이다): INTEGRITY_IDEMPOTENCY_CONFLICT(409) 입금확인 실패는 err.message 대신 매핑 문구를 보여준다", async () => {
     confirmMutate.mockImplementation((_vars, opts) => {
       opts?.onError?.(
         new ApiError(409, "raw idempotency detail", "trace-2", "INTEGRITY_IDEMPOTENCY_CONFLICT"),

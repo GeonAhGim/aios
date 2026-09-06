@@ -66,8 +66,13 @@ function clickSuspend() {
 
 // task-1156 §3.3: 지금까지 changeStatus.mutate/suspendSeller.mutate가 콜백 없이
 // 호출돼 실패를 완전히 조용히 삼켰다 — 에러 상태 자체가 없었다. 이 화면에서
-// 실제 가능한 코드(403/404/409)를 각각 ForbiddenNotice/ErrorMessage 경로로
-// 표면화한다.
+// 나올 수 있는 코드(403/404/409)를 각각 ForbiddenNotice/ErrorMessage 경로로
+// 표면화한다. 실경로 여부(QA task-1163 재검증, task-1583 이후 기준):
+// 403/404는 실경로(403은 admin 미들웨어, 404는 suspendSeller의
+// SellerSuspensionError와 changeStatus의 UserAdminNotFoundError 둘 다 실제로
+// 던져진다 — task-1583). changeStatus의 409는 change_status()에 상태전이
+// 충돌 검사 자체가 없어 현재 코드로는 발생하지 않는 방어적 커버다(§3.3
+// taxonomy 전체 커버 목적, 실제 가능한 코드라는 주장은 부정확했다).
 describe("UserManagementPage 목록 조회 실패/빈 상태 표시", () => {
   it("negative: 목록 조회가 500으로 실패하면 빈 상태가 아니라 ErrorMessage를 보여준다", async () => {
     usersResult = {
@@ -137,7 +142,7 @@ describe("UserManagementPage 사용자 조치 실패 표시", () => {
     expect(screen.queryByText("raw not found detail")).not.toBeInTheDocument();
   });
 
-  it("negative: STATE_INVALID_TRANSITION(409) 상태변경 실패는 err.message 대신 매핑 문구를 보여준다", async () => {
+  it("negative(방어적 커버 — change_status()에는 이 코드를 발생시키는 실경로가 없다): STATE_INVALID_TRANSITION(409) 상태변경 실패는 err.message 대신 매핑 문구를 보여준다", async () => {
     changeStatusMutate.mockImplementation((_vars, opts) => {
       opts?.onError?.(
         new ApiError(409, "raw transition detail", "trace-3", "STATE_INVALID_TRANSITION"),

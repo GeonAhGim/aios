@@ -68,8 +68,14 @@ function clickReject() {
 }
 
 // task-1156 §3.3: 지금까지 verify.mutate가 콜백 없이 호출돼 실패를 완전히
-// 조용히 삼켰다 — 에러 상태 자체가 없었다. 이 화면에서 실제 가능한 코드
+// 조용히 삼켰다 — 에러 상태 자체가 없었다. 이 화면에서 나올 수 있는 코드
 // (403/404/409)를 각각 ForbiddenNotice/ErrorMessage 경로로 표면화한다.
+// 실경로 여부(QA task-1163 재검증, task-1583 이후 기준): 404/409는
+// VerificationService.decide()가 실제로 던진다(VerificationNotFoundError/
+// VerificationInvalidTransitionError — task-1583, 사전조회 시점·동시처리
+// 충돌 둘 다 후자). 403 POLICY_LIVE_BLOCKED는 코드베이스 어디에도 실거래
+// 모드 차단 검사가 없어 현재는 발생하지 않는 방어적 커버다(§3.3 taxonomy
+// 전체 커버 목적, 실제 가능한 코드라는 주장은 부정확했다).
 describe("VerificationQueuePage 목록 조회 실패/빈 상태 표시", () => {
   it("negative: 대기열 조회가 500으로 실패하면 빈 상태가 아니라 ErrorMessage를 보여준다", async () => {
     queueResult = {
@@ -113,7 +119,7 @@ describe("VerificationQueuePage 목록 조회 실패/빈 상태 표시", () => {
 });
 
 describe("VerificationQueuePage 검수 판정 실패 표시", () => {
-  it("negative: POLICY_LIVE_BLOCKED(403) 승인 실패는 정책 거부 안내를 보여준다", async () => {
+  it("negative(방어적 커버 — 코드베이스에 이 코드를 발생시키는 실거래모드 차단 검사가 없다): POLICY_LIVE_BLOCKED(403) 승인 실패는 정책 거부 안내를 보여준다", async () => {
     verifyMutate.mockImplementation((_vars, opts) => {
       opts?.onError?.(
         new ApiError(403, "raw policy detail", "trace-1", "POLICY_LIVE_BLOCKED"),
@@ -131,7 +137,7 @@ describe("VerificationQueuePage 검수 판정 실패 표시", () => {
     expect(screen.queryByText("raw policy detail")).not.toBeInTheDocument();
   });
 
-  it("negative: RESOURCE_NOT_FOUND(404) 반려 실패는 항목 없음 안내를 보여준다", async () => {
+  it("negative(실경로 — VerificationNotFoundError, task-1583): RESOURCE_NOT_FOUND(404) 반려 실패는 항목 없음 안내를 보여준다", async () => {
     verifyMutate.mockImplementation((_vars, opts) => {
       opts?.onError?.(
         new ApiError(404, "raw not found detail", "trace-2", "RESOURCE_NOT_FOUND"),
@@ -147,7 +153,7 @@ describe("VerificationQueuePage 검수 판정 실패 표시", () => {
     expect(screen.queryByText("raw not found detail")).not.toBeInTheDocument();
   });
 
-  it("negative: STATE_INVALID_TRANSITION(409) 승인 실패는 err.message 대신 매핑 문구를 보여준다(이미 처리된 건)", async () => {
+  it("negative(실경로 — VerificationInvalidTransitionError, task-1583): STATE_INVALID_TRANSITION(409) 승인 실패는 err.message 대신 매핑 문구를 보여준다(이미 처리된 건)", async () => {
     verifyMutate.mockImplementation((_vars, opts) => {
       opts?.onError?.(
         new ApiError(409, "raw transition detail", "trace-3", "STATE_INVALID_TRANSITION"),
