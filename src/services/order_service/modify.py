@@ -1,23 +1,35 @@
 """FD-4.4 — 주문 정정(지정가만, 시장가는 정정 불가).
 
-트리거: FD-8.4(FROZEN-PAPER-ONLY)가 기존 지정가 주문의 가격을 재산정해야
-한다고 판단할 때.
-"""
+task-1603(L4-17) 편차 — cancel.py와 동일 이유(모듈 상단 참조)로
+`oms.application.modify_order`에 위임한다. `venue_profile`은 어댑터의 L4-13
+조회 계약(`ExchangeAdapter.venue_profile()`)으로 얻는다 — 아직 구체 어댑터가
+그 메서드를 구현하지 않았다면(현재 Bitget/KIS/NH 전부 기본 구현) 그 자체가
+`UnsupportedCapabilityError`이고, 이 래퍼는 그것도 `OrderModifyError`로
+통일해 던진다(호출자 시그니처 유지 — 이 함수가 던지는 예외 표면은 항상
+`OrderModifyError` 하나뿐이었다)."""
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from decimal import Decimal
-from uuid import UUID
+from uuid import UUID, uuid4
 
 import asyncpg
 
-from src.data.models.base import Currency, Money
-from src.data.models.trading import Order, OrderType
-from src.exchanges.common.adapter import ExchangeAdapter
+from src.data.models.trading import Order
+from src.exchanges.common.adapter import ExchangeAdapter, UnsupportedCapabilityError
+from src.services.oms.adapters.order_repository import OrderNotFoundError
+from src.services.oms.application.modify_order import modify_order as _oms_modify_order
+from src.services.oms.contracts.v1_commands import ModifyOrderCommand
+from src.services.oms.domain.errors import OmsError
 from src.services.order_service import repository
 
 
 class OrderModifyError(Exception):
-    """대상 주문이 없거나 시장가 주문 정정 시도 등 — 400/404로 변환."""
+    """대상 주문이 없거나 정정 불가능한 상태·venue capability 등 — 400/404로 변환."""
+
+
+def _utcnow() -> datetime:
+    return datetime.now(timezone.utc)
 
 
 async def modify_order(
@@ -28,32 +40,34 @@ async def modify_order(
     adapter: ExchangeAdapter,
     pool: asyncpg.Pool,
 ) -> Order:
+    try:
+        profile = adapter.venue_profile()
+    except UnsupportedCapabilityError as exc:
+        raise OrderModifyError(str(exc)) from exc
+
     async with pool.acquire() as conn:
-        order = await repository.get_by_order_id(conn, order_id)
-    if order is None:
+        user_id = await conn.fetchval("SELECT user_id FROM orders WHERE order_id = $1", order_id)
+    if user_id is None:
         raise OrderModifyError(f"존재하지 않는 주문입니다: {order_id}")
 
-    if order.order_type != OrderType.LIMIT:
-        # FD-4.1 사전 검증 — 거래소까지 안 가고 즉시 거부.
-        raise OrderModifyError("시장가 주문은 정정할 수 없습니다.")
-    if order.exchange_order_id is None:
-        raise OrderModifyError("거래소에 아직 접수되지 않은 주문은 정정할 수 없습니다.")
+    cmd = ModifyOrderCommand(
+        command_id=uuid4(),
+        trace_id=uuid4(),
+        order_id=order_id,
+        tenant_id=user_id,
+        reason="ORDER_SERVICE_MODIFY",
+        actor_subject_id="system",
+        issued_at=_utcnow(),
+        new_price=new_price,
+        new_quantity=new_quantity,
+    )
+    try:
+        await _oms_modify_order(cmd, pool=pool, profile=profile)
+    except (OmsError, OrderNotFoundError, UnsupportedCapabilityError) as exc:
+        raise OrderModifyError(str(exc)) from exc
 
-    modified = await adapter.modify_order(
-        order.exchange_order_id, price=str(new_price), size=str(new_quantity)
-    )
-    # 거래소 응답(modified)에는 이 시스템 전용 식별자(client_order_id 등)가
-    # 없을 수 있다(Bitget.get_order()와 동일 원칙) — 원본 order를 기준으로
-    # 거래소가 실제로 확인해준 값(상태·거래소 주문ID)만 덮어쓴다.
-    updated = order.model_copy(
-        update={
-            "exchange_order_id": modified.exchange_order_id,
-            "price": Money(amount=new_price, currency=Currency.USDT),
-            "quantity": new_quantity,
-            "status": modified.status,
-        }
-    )
     async with pool.acquire() as conn:
-        return await repository.update_after_modify(
-            conn, updated, expected_status=order.status
-        )
+        persisted = await repository.get_by_order_id(conn, order_id)
+    if persisted is None:
+        raise OrderModifyError(f"정정 처리 후 재조회에 실패했습니다: {order_id}")
+    return persisted

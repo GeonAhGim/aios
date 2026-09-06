@@ -13,6 +13,7 @@ from src.core.db.conditional_write import ConcurrencyConflictError
 from src.core.exceptions import RetryableExchangeError
 from src.data.models.base import AssetClass, Currency, Money
 from src.data.models.trading import Order, OrderSide, OrderStatus, OrderType
+from src.services.oms.domain.venue_profile import TimeoutBudget, VenueCapabilityProfile
 from src.services.order_service import (
     OrderCancelError,
     OrderModifyError,
@@ -226,16 +227,27 @@ async def test_update_from_exchange_raises_on_status_mismatch(pool):
     assert row["status"] == "CANCELLED"  # 충돌한 쓰기는 반영되지 않았어야 함
 
 
-async def test_cancel_order_updates_status(pool):
+async def test_cancel_order_acknowledged_enqueues_cancel_command(pool):
+    """task-1603(L4-17) 편차 — `cancel_order`는 더 이상 거래소를 동기 호출하지
+    않는다(`oms.application.cancel_order`에 위임, 모듈 docstring 참조). ACK된
+    주문의 취소는 자기루프 전이 + outbox `CANCEL` enqueue로 끝나고, 실제
+    CANCELLED 확정은 `outbox_dispatcher`(L4-14)/inbox(L4-15)가 비동기로 한다."""
     user_id = await create_test_user(pool)
     execution_id = await _create_running_execution(pool, user_id)
-    adapter = FakeExchangeAdapter()
+    adapter = FakeExchangeAdapter(place_order_result_status=OrderStatus.ACKNOWLEDGED)
     order = _market_order(execution_id)
     submitted = await submit_order(order, user_id=user_id, adapter=adapter, pool=pool)
 
     cancelled = await cancel_order(submitted.order_id, adapter=adapter, pool=pool)
 
-    assert cancelled.status == OrderStatus.CANCELLED
+    assert cancelled.status == OrderStatus.ACKNOWLEDGED  # 자기루프 — 상태 불변
+    async with pool.acquire() as conn:
+        outbox_row = await conn.fetchrow(
+            "SELECT command_type FROM order_command_outbox WHERE order_id = $1",
+            submitted.order_id,
+        )
+    assert outbox_row is not None
+    assert outbox_row["command_type"] == "CANCEL"
 
 
 async def test_cancel_nonexistent_order_raises(pool):
@@ -244,25 +256,59 @@ async def test_cancel_nonexistent_order_raises(pool):
         await cancel_order(uuid.uuid4(), adapter=adapter, pool=pool)
 
 
-async def test_cancel_already_filled_order_returns_unchanged_not_error(pool):
-    """FD-4.3 예외상황 — 이미 체결된 주문의 취소 시도는 오류가 아니라
-    상태 재조회로 전환(여기서는 취소 실패를 그대로 알려주는 것까지만
-    확인 — FD-3.4 재조회 자체는 별도 호출부 책임)."""
+async def test_cancel_already_filled_order_raises(pool):
+    """FD-4.3 편차(task-1603/L4-17) — 이미 체결된 주문의 취소는 이제 조용한
+    상태 재조회가 아니라 명시적 거부다(§4.2 전이표 밖, `oms.application.
+    cancel_order`가 fail-closed로 `InvalidOrderTransitionError`를 던지고
+    `OrderCancelError`로 감싸 전파한다)."""
     user_id = await create_test_user(pool)
     execution_id = await _create_running_execution(pool, user_id)
-    adapter = FakeExchangeAdapter(cancel_result=False)
+    adapter = FakeExchangeAdapter(place_order_result_status=OrderStatus.FILLED)
     order = _market_order(execution_id)
     submitted = await submit_order(order, user_id=user_id, adapter=adapter, pool=pool)
+    assert submitted.status == OrderStatus.FILLED
 
-    result = await cancel_order(submitted.order_id, adapter=adapter, pool=pool)
+    with pytest.raises(OrderCancelError):
+        await cancel_order(submitted.order_id, adapter=adapter, pool=pool)
 
-    assert result.status == submitted.status  # 취소 실패 — 상태 그대로
+
+class _ModifiableFakeAdapter(FakeExchangeAdapter):
+    """`FakeExchangeAdapter`는 L4-13 `venue_profile()` 기본 구현(미지원 예외,
+    `exchanges/common/adapter.py` 참조)을 아직 오버라이드하지 않는다 — 이
+    테스트 파일 전용으로만 `supports_modify=True` 프로파일을 얹어, MARKET
+    주문 거부 검증(oms.application.modify_order)이 capability 단계가 아니라
+    실제로 의도한 order_type 검증에서 걸리도록 한다."""
+
+    def venue_profile(self) -> VenueCapabilityProfile:
+        return VenueCapabilityProfile(
+            venue="bitget",
+            asset_classes=[AssetClass.CRYPTO],
+            order_types={OrderType.MARKET, OrderType.LIMIT},
+            time_in_force={"GTC", "IOC"},
+            supports_client_order_id=True,
+            client_order_id_max_len=40,
+            client_order_id_charset="ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789",
+            id_policy="STABLE",
+            supports_modify=True,
+            supports_cancel="YES",
+            supports_ws_orders=True,
+            supports_batch=False,
+            price_tick={},
+            qty_lot={},
+            min_notional={},
+            rate_limits={},
+            submit_timeout=TimeoutBudget(),
+            query_timeout=TimeoutBudget(),
+            market_hours=None,
+            max_open_orders_per_symbol=20,
+            verified="DOC_ONLY",
+        )
 
 
 async def test_modify_market_order_rejected_before_exchange_call(pool):
     user_id = await create_test_user(pool)
     execution_id = await _create_running_execution(pool, user_id)
-    adapter = FakeExchangeAdapter()
+    adapter = _ModifiableFakeAdapter(place_order_result_status=OrderStatus.ACKNOWLEDGED)
     order = _market_order(execution_id)
     submitted = await submit_order(order, user_id=user_id, adapter=adapter, pool=pool)
 
