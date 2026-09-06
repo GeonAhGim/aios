@@ -59,9 +59,12 @@ export function ScriptEditorPage({ compileScript = apiClient.compileScript.bind(
       ? mutation.error.details
       : null;
 
-  const marker: ScriptEditorMarker | null = compileErrorDetails
-    ? { line: compileErrorDetails.line, col: compileErrorDetails.col, message: compileErrorDetails.code }
-    : null;
+  // DSL-12 컴파일러는 첫 오류에서 멈추므로(compile.py) 항상 0~1개다 — 배열은
+  // ScriptEditor의 다중 마커 인터페이스에 맞춘 것이지 서버가 여러 개를 준다는
+  // 뜻이 아니다.
+  const markers: ScriptEditorMarker[] = compileErrorDetails
+    ? [{ line: compileErrorDetails.line, col: compileErrorDetails.col, message: compileErrorDetails.code }]
+    : [];
 
   const showGenericError = mutation.isError && !compileErrorDetails;
 
@@ -75,7 +78,7 @@ export function ScriptEditorPage({ compileScript = apiClient.compileScript.bind(
       <div className="max-w-3xl space-y-4">
         <PageHeader title="스크립트 편집기" />
 
-        <ScriptEditor value={source} onChange={handleSourceChange} marker={marker} disabled={mutation.isPending} />
+        <ScriptEditor value={source} onChange={handleSourceChange} markers={markers} disabled={mutation.isPending} />
 
         <Button onClick={() => mutation.mutate(source)} disabled={mutation.isPending || source.trim().length === 0}>
           {mutation.isPending ? "컴파일 중..." : "컴파일"}

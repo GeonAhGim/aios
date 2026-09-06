@@ -60,7 +60,9 @@ describe("ScriptEditorPage", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "컴파일" }));
 
-    await waitFor(() => expect(screen.getByTestId("script-editor-marker")).toHaveTextContent("1행 12열: SCRIPT_SYNTAX"));
+    await waitFor(() =>
+      expect(screen.getByTestId("script-editor-marker-0")).toHaveTextContent("1행 12열: SCRIPT_SYNTAX"),
+    );
     expect(screen.queryByText("입력값을 확인해주세요.")).not.toBeInTheDocument();
   });
 
@@ -73,7 +75,7 @@ describe("ScriptEditorPage", () => {
     fireEvent.click(screen.getByRole("button", { name: "컴파일" }));
 
     await waitFor(() => expect(screen.getByText("추가 인증이 필요합니다.")).toBeInTheDocument());
-    expect(screen.queryByTestId("script-editor-marker")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("script-editor-markers")).not.toBeInTheDocument();
     expect(screen.queryByText("raw server detail")).not.toBeInTheDocument();
   });
 
@@ -88,10 +90,10 @@ describe("ScriptEditorPage", () => {
     renderPage(compileScript);
 
     fireEvent.click(screen.getByRole("button", { name: "컴파일" }));
-    await waitFor(() => expect(screen.getByTestId("script-editor-marker")).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByTestId("script-editor-marker-0")).toBeInTheDocument());
 
     fireEvent.change(screen.getByTestId("script-editor-textarea"), { target: { value: "plot(close, 1)\n" } });
 
-    expect(screen.queryByTestId("script-editor-marker")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("script-editor-markers")).not.toBeInTheDocument();
   });
 });
