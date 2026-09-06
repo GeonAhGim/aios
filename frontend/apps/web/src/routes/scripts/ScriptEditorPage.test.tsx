@@ -96,4 +96,44 @@ describe("ScriptEditorPage", () => {
 
     expect(screen.queryByTestId("script-editor-markers")).not.toBeInTheDocument();
   });
+
+  it("CH-12: 컴파일 성공 시 plot 개수만큼 미리보기 서브패널을 보여준다", async () => {
+    const compileScript = vi.fn(async () => ({ ...COMPILE_RESULT, resources: { ...COMPILE_RESULT.resources, plotCount: 2 } }));
+    renderPage(compileScript);
+
+    fireEvent.click(screen.getByRole("button", { name: "컴파일" }));
+
+    await waitFor(() => expect(screen.getByTestId("script-preview-panes")).toBeInTheDocument());
+    expect(screen.getByTestId("script-preview-pane-0")).toBeInTheDocument();
+    expect(screen.getByTestId("script-preview-pane-1")).toBeInTheDocument();
+    expect(screen.queryByTestId("script-preview-pane-2")).not.toBeInTheDocument();
+  });
+
+  it("CH-12: 소스를 편집하면 미리보기 서브패널이 사라진다", async () => {
+    const compileScript = vi.fn(async () => COMPILE_RESULT);
+    renderPage(compileScript);
+
+    fireEvent.click(screen.getByRole("button", { name: "컴파일" }));
+    await waitFor(() => expect(screen.getByTestId("script-preview-panes")).toBeInTheDocument());
+
+    fireEvent.change(screen.getByTestId("script-editor-textarea"), { target: { value: "plot(close, 1)\n" } });
+
+    expect(screen.queryByTestId("script-preview-panes")).not.toBeInTheDocument();
+  });
+
+  it("CH-12: 다시 컴파일하면 이전 서브패널 대신 새 개수로 교체된다", async () => {
+    const compileScript = vi
+      .fn()
+      .mockResolvedValueOnce({ ...COMPILE_RESULT, scriptHash: "a".repeat(64), resources: { ...COMPILE_RESULT.resources, plotCount: 2 } })
+      .mockResolvedValueOnce({ ...COMPILE_RESULT, scriptHash: "b".repeat(64), resources: { ...COMPILE_RESULT.resources, plotCount: 1 } });
+    renderPage(compileScript);
+
+    fireEvent.click(screen.getByRole("button", { name: "컴파일" }));
+    await waitFor(() => expect(screen.getByTestId("script-preview-pane-1")).toBeInTheDocument());
+
+    fireEvent.click(screen.getByRole("button", { name: "컴파일" }));
+
+    await waitFor(() => expect(screen.queryByTestId("script-preview-pane-1")).not.toBeInTheDocument());
+    expect(screen.getByTestId("script-preview-pane-0")).toBeInTheDocument();
+  });
 });
