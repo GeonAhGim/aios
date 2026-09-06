@@ -75,6 +75,18 @@ class IndicatorRegistry:
                 "outputs": list(spec.outputs),
                 "causal": spec.causal,
                 "lookback": spec.lookback.__name__,
+                "plots": [
+                    {
+                        "kind": plot.kind,
+                        "scale": plot.scale,
+                        "default_pane": plot.default_pane,
+                        "fill_between": plot.fill_between,
+                        "color_rule": plot.color_rule,
+                        "precision": plot.precision,
+                        "legend_format": plot.legend_format,
+                    }
+                    for plot in spec.plots
+                ],
             }
             for name, spec in sorted(self._specs.items())
         ]

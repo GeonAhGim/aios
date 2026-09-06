@@ -173,6 +173,7 @@ def test_registry_hash_changes_when_a_spec_changes() -> None:
         params=(ParamSpec(name="timeperiod", min=2, max=999, default=20),),
         outputs=original_sma.outputs,
         lookback=original_sma.lookback,
+        plots=original_sma.plots,
         causal=original_sma.causal,
     )
 
