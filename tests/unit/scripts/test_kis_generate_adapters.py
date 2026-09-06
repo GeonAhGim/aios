@@ -262,3 +262,29 @@ def test_real_generated_files_all_within_line_cap() -> None:
     for path in gen.GENERATED_DIR.glob("*.py"):
         line_count = path.read_text(encoding="utf-8").count("\n") + 1
         assert line_count <= gen._FILE_LINE_CAP, f"{path.name}: {line_count}줄"
+
+
+# ---------------------------------------------------------------------------
+# 언어 정책 회귀 방지(task-1990, ADR-2026-09-07-A) — 생성기 템플릿이 다시
+# `src/`에 한글 주석·독스트링을 찍으면 즉시 잡는다(check_code_language.py와
+# 동일한 판정 로직 재사용).
+# ---------------------------------------------------------------------------
+
+_LANG_CHECK_MODULE = _load_module("check_code_language", SCRIPTS_DIR / "check_code_language.py")
+
+
+def test_generated_output_has_zero_hangul_comment_or_docstring_lines(tmp_path: Path) -> None:
+    reference = _COVERAGE_MODULE.load_reference(gen.REFERENCE_PATH)
+    handwritten_source = gen.scan_handwritten_source(gen.ADAPTER_DIR)
+    files = gen.generate_files(reference, handwritten_source)
+
+    total = 0
+    offenders: list[str] = []
+    for relpath, content in files.items():
+        path = tmp_path / relpath
+        path.write_text(content, encoding="utf-8")
+        n = _LANG_CHECK_MODULE.count_file(path)
+        if n:
+            offenders.append(f"{relpath}: {n}줄")
+        total += n
+    assert total == 0, "생성기가 한글 주석/독스트링을 다시 찍음:\n" + "\n".join(offenders)
