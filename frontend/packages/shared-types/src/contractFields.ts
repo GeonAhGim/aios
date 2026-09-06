@@ -31,6 +31,7 @@ const LEDGER_V1 = "src/foundation/ledger/contracts/v1.py";
 const HEALTH_ROUTER = "src/api/routers/health.py";
 const AUTH_TOKENS = "src/services/auth/tokens.py";
 const SECRET_REF = "src/core/security/secret_ref.py";
+const INDICATOR_SPEC = "src/core/indicators/spec.py";
 
 export const CONTRACT_FIELD_SPECS: readonly ContractFieldSpec[] = [
   // ---- positionView.ts (§3.2 B) ----
@@ -226,6 +227,16 @@ export const CONTRACT_FIELD_SPECS: readonly ContractFieldSpec[] = [
     className: "SecretRef",
     parser: "parseSecretRef / formatSecretRef",
     fields: ["scope", "kind", "id", "kid"],
+  },
+
+  // ---- chart-engine render/plotRenderers.ts (CH-15, task-1732) ----
+  // PlotSpec is a `@dataclass(frozen=True)`, not a pydantic BaseModel — see
+  // the `[:(]` note in contractDrift.test.ts's extractPydanticFields.
+  {
+    file: INDICATOR_SPEC,
+    className: "PlotSpec",
+    parser: "decodePlotSpec",
+    fields: ["kind", "scale", "default_pane", "fill_between", "color_rule", "precision", "legend_format"],
   },
 ];
 

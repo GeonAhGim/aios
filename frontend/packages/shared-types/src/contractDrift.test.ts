@@ -29,7 +29,11 @@ function readRepoFile(repoRelativePath: string): string {
  */
 export function extractPydanticFields(source: string, className: string): string[] | null {
   const lines = source.split(/\r?\n/);
-  const classHeaderRe = new RegExp(`^class\\s+${className}\\s*\\(`);
+  // `[:(]` also matches a bare `class Name:` header (no explicit base class) —
+  // task-1732's PlotSpec is a `@dataclass(frozen=True)` with no inherited
+  // base, so it never has the trailing `(` every prior pydantic BaseModel
+  // entry here does.
+  const classHeaderRe = new RegExp(`^class\\s+${className}\\s*[:(]`);
   const classStart = lines.findIndex((line) => classHeaderRe.test(line));
   if (classStart === -1) return null;
 
