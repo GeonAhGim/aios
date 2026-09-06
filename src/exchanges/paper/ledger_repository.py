@@ -1,7 +1,4 @@
-"""paper_sim 잔고·주문 원장의 asyncpg CRUD(L4 명세 §2-F, §9 L4-23).
-
-Spec: docs/specs/L4_execution_oms_and_exchange_v1.0.md §2-F
-`ledger_repository.py` 행, §5.1("paper_sim 잔고" 조건부 UPDATE 행).
+"""paper_sim 잔고·주문 원장의 asyncpg CRUD(L4 명세 §2-F §5.1, §9 L4-23).
 
 순수 CRUD만 한다 — 체결가·수수료·지연 계산은 `fill_model`/`fee_model`/
 `latency_model`(L4-22)이, 적용 순서는 `simulator_adapter`가 결정한다.
@@ -117,12 +114,12 @@ class PaperLedgerRepository:
             amount,
         )
 
-    async def withdraw(
+    async def debit(
         self, conn: asyncpg.Connection, account_id: UUID, asset: str, amount: Decimal
     ) -> None:
         """총액·가용액 동시 차감. 가용잔고 부족이면 fail-closed(§5.1)."""
         if amount <= 0:
-            raise ValueError("withdraw: amount는 양수여야 합니다.")
+            raise ValueError("debit: amount는 양수여야 합니다.")
         row = await conn.fetchrow(
             "UPDATE paper_sim_accounts SET available = available - $3, total = total - $3, "
             "updated_at = now() WHERE account_id = $1 AND asset = $2 AND available >= $3 "
@@ -227,7 +224,7 @@ class PaperLedgerRepository:
         venue_ts: datetime,
     ) -> PaperOrderRow:
         """체결 1건 반영 — 평균단가 재계산, `fills` JSONB append, `version`
-        CAS. 잔고 이동은 호출부가 이 결과를 보고 `deposit`/`withdraw`로 한다."""
+        CAS. 잔고 이동은 호출부가 이 결과를 보고 `deposit`/`debit`로 한다."""
         current = await conn.fetchrow(
             "SELECT * FROM paper_sim_orders WHERE order_id = $1 AND account_id = $2 FOR UPDATE",
             order_id,

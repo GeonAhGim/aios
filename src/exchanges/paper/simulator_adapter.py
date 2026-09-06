@@ -235,12 +235,12 @@ class PaperSimulatorAdapter(ExchangeAdapter):
         base_asset, quote_asset = order.symbol.split("/")
         notional = sim_fill.price * sim_fill.quantity
         if order.side == OrderSide.BUY:
-            await self._ledger.withdraw(conn, self._account_id, quote_asset, notional)
+            await self._ledger.debit(conn, self._account_id, quote_asset, notional)
             await self._ledger.deposit(conn, self._account_id, base_asset, sim_fill.quantity)
         else:
-            await self._ledger.withdraw(conn, self._account_id, base_asset, sim_fill.quantity)
+            await self._ledger.debit(conn, self._account_id, base_asset, sim_fill.quantity)
             await self._ledger.deposit(conn, self._account_id, quote_asset, notional)
-        await self._ledger.withdraw(conn, self._account_id, fee.currency.value, fee.amount)
+        await self._ledger.debit(conn, self._account_id, fee.currency.value, fee.amount)
         return await self._ledger.apply_fill(
             conn,
             account_id=self._account_id,
