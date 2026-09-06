@@ -35,10 +35,20 @@ class InstrumentRepository(Protocol):
         ...
 
     async def update_lifecycle_state(
-        self, conn: asyncpg.Connection, instrument_id: str, state: InstrumentLifecycle
+        self,
+        conn: asyncpg.Connection,
+        instrument_id: str,
+        *,
+        expected_state: InstrumentLifecycle,
+        state: InstrumentLifecycle,
     ) -> Instrument:
         """§4.2 전이표를 이미 통과한 결과만 여기로 온다 — 전이 자체의 검증은
-        DC-3(`domain/instruments/lifecycle.py`) 소관, 이 메서드는 저장만."""
+        DC-3(`domain/instruments/lifecycle.py`) 소관, 이 메서드는 저장만.
+
+        `expected_state`는 호출자가 전이 판정 직전에 읽은 현재 상태 그대로
+        전달해야 한다(105번 동시성 표준) — 어댑터는 이를 UPDATE의 WHERE 조건으로
+        걸어, 판정과 쓰기 사이에 다른 트랜잭션이 먼저 상태를 바꾼 경우
+        `ConcurrencyConflictError`로 fail-closed 거부한다."""
         ...
 
     async def get_listing(

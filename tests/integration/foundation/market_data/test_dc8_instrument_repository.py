@@ -14,6 +14,7 @@ from decimal import Decimal
 
 import pytest
 
+from src.core.db.conditional_write import ConcurrencyConflictError
 from src.data.models.base import AssetClass
 from src.foundation.market_data.adapters.postgres_instrument_repository import (
     DuplicateInstrumentIdError,
@@ -97,7 +98,10 @@ async def test_update_lifecycle_state_changes_state(pool, repo):
 
     async with pool.acquire() as conn, conn.transaction():
         updated = await repo.update_lifecycle_state(
-            conn, instrument.instrument_id, InstrumentLifecycle.HALTED
+            conn,
+            instrument.instrument_id,
+            expected_state=InstrumentLifecycle.ACTIVE,
+            state=InstrumentLifecycle.HALTED,
         )
     assert updated.lifecycle_state == InstrumentLifecycle.HALTED
 
@@ -107,7 +111,39 @@ async def test_update_lifecycle_state_unknown_instrument_raises(pool, repo):
     않고 fail-closed로 예외를 던져야 한다."""
     with pytest.raises(InstrumentNotFoundError):
         async with pool.acquire() as conn, conn.transaction():
-            await repo.update_lifecycle_state(conn, _fake_ulid(), InstrumentLifecycle.HALTED)
+            await repo.update_lifecycle_state(
+                conn,
+                _fake_ulid(),
+                expected_state=InstrumentLifecycle.ACTIVE,
+                state=InstrumentLifecycle.HALTED,
+            )
+
+
+async def test_update_lifecycle_state_rejects_stale_expected_state(pool, repo):
+    """negative/동시성(105번 표준): 호출자가 읽은 `expected_state`가 그 사이
+    다른 트랜잭션이 이미 바꿔놓은 실제 DB 상태와 다르면, 조용히 덮어쓰지 않고
+    `ConcurrencyConflictError`로 거부해야 한다 — 형태 B(선행 변경을 직접
+    주입해 stale read를 재현), 105번 §4.2."""
+    instrument = _instrument()
+    async with pool.acquire() as conn, conn.transaction():
+        await repo.create(conn, instrument)
+
+    async with pool.acquire() as conn, conn.transaction():
+        await repo.update_lifecycle_state(
+            conn,
+            instrument.instrument_id,
+            expected_state=InstrumentLifecycle.ACTIVE,
+            state=InstrumentLifecycle.HALTED,
+        )
+
+    with pytest.raises(ConcurrencyConflictError):
+        async with pool.acquire() as conn, conn.transaction():
+            await repo.update_lifecycle_state(
+                conn,
+                instrument.instrument_id,
+                expected_state=InstrumentLifecycle.ACTIVE,
+                state=InstrumentLifecycle.DELISTED,
+            )
 
 
 async def test_add_listing_then_get_listing_at_valid_time(pool, repo):
