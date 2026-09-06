@@ -11,6 +11,7 @@ Spec: docs/specs/L4_execution_oms_and_exchange_v1.0.md §2-C, §5.1.
 """
 from __future__ import annotations
 
+from collections.abc import Sequence
 from datetime import datetime, timedelta
 from typing import Any, Literal, Protocol, runtime_checkable
 from uuid import UUID
@@ -155,3 +156,32 @@ class IdempotencyRepoPort(Protocol):
         order_id: UUID,
         ttl: timedelta,
     ) -> ClaimResult: ...
+
+
+@runtime_checkable
+class OrderQueryPort(Protocol):
+    """읽기 전용 조회 계약(§9 L4-26). 위 5개와 달리 `conn`이 아니라
+    `pool`을 받는다 — 호출자가 트랜잭션을 열 필요 없는 단발 SELECT라서다.
+    구현은 별도 어댑터 클래스가 아니라 `application/order_query.py`의
+    module-level 함수 3개가 그대로 갖는다(decision: 새 저장소 어댑터
+    금지 — `runtime_checkable` Protocol의 `isinstance`는 클래스 인스턴스뿐
+    아니라 이 속성들을 가진 모듈에도 그대로 성립한다)."""
+
+    async def get_order(
+        self, pool: asyncpg.Pool, order_id: UUID, *, tenant_id: UUID
+    ) -> OrderView | None: ...
+
+    async def list_orders(
+        self,
+        pool: asyncpg.Pool,
+        *,
+        tenant_id: UUID,
+        execution_id: int | None,
+        statuses: Sequence[OrderStatus] | None,
+        cursor: str | None,
+        limit: int,
+    ) -> tuple[list[OrderView], str | None]: ...
+
+    async def list_order_events(
+        self, pool: asyncpg.Pool, order_id: UUID, *, tenant_id: UUID
+    ) -> list[OrderTransitionEvent] | None: ...
