@@ -13,9 +13,19 @@ export {
   registerIndicator,
 } from "../../vendor/klinecharts/src/index";
 export type { Chart as VendorChart } from "../../vendor/klinecharts/src/index";
-export type { KLineData } from "../../vendor/klinecharts/src/common/Data";
+export type { KLineData, NeighborData } from "../../vendor/klinecharts/src/common/Data";
+export type { default as DeepPartial } from "../../vendor/klinecharts/src/common/DeepPartial";
 export type { DataLoader } from "../../vendor/klinecharts/src/common/DataLoader";
 export type { Indicator, IndicatorTemplate } from "../../vendor/klinecharts/src/component/Indicator";
+export type { Overlay } from "../../vendor/klinecharts/src/component/Overlay";
+export type {
+  CandleStyle,
+  CandleTooltipStyle,
+  CrosshairStyle,
+  IndicatorLastValueMarkStyle,
+  IndicatorTooltipStyle,
+  TooltipLegend,
+} from "../../vendor/klinecharts/src/common/Styles";
 export { PaneIdConstants } from "../../vendor/klinecharts/src/pane/types";
 
 /**

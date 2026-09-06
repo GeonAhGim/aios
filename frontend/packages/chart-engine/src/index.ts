@@ -199,3 +199,41 @@ export { PaneLayoutError, computePaneRects, createPaneScaleSet } from "./panes/p
 
 export type { CrosshairMove, CrosshairSync, CrosshairSyncState } from "./panes/crosshairSync";
 export { createCrosshairSync } from "./panes/crosshairSync";
+
+export type { CrosshairValueOptions, StatusLineOptions } from "./legend/statusLine";
+export { buildStatusLineLegends, createCrosshairValueStyle, createStatusLineTooltipStyle } from "./legend/statusLine";
+
+export type {
+  DataWindowErrorCode,
+  DataWindowOptions,
+  DataWindowRow,
+  IndicatorFigureSource,
+  IndicatorSeriesSnapshot,
+} from "./legend/dataWindow";
+export {
+  DataWindowError,
+  computeDataWindowRows,
+  createIndicatorLastValueMarkStyle,
+  createIndicatorTooltipStyle,
+} from "./legend/dataWindow";
+
+export type {
+  IndicatorSource,
+  ObjectKind,
+  ObjectTreeEntry,
+  ObjectTreeErrorCode,
+  ObjectTreeSource,
+  ObjectTreeState,
+  ObjectTreeStateErrorCode,
+  OverlaySource,
+} from "./legend/objectTree";
+export {
+  ObjectTreeError,
+  ObjectTreeStateError,
+  applyObjectTreeState,
+  buildObjectTree,
+  encodeObjectTreeState,
+  moveEntry,
+  setEntryLocked,
+  setEntryVisible,
+} from "./legend/objectTree";
