@@ -15,11 +15,12 @@ ETF/ETN은 별도 주문 엔드포인트가 없다(etf_mixin.py 참조 — KRX �
 """
 from __future__ import annotations
 
-from typing import Protocol
+from typing import Protocol, cast
 
 from src.core.exceptions import FatalExchangeError
 from src.data.models.base import AssetClass
 from src.data.models.trading import Order
+from src.exchanges.common.http_client import KISHTTPClient
 from src.exchanges.kis.trading_mixin import KISTradingMixin
 
 _DOMESTIC_CASH_ASSET_CLASSES = frozenset(
@@ -69,7 +70,9 @@ class _DispatchableAdapter(Protocol):
 
 async def dispatch_place_order(adapter: _DispatchableAdapter, order: Order) -> Order:
     if order.asset_class in _DOMESTIC_CASH_ASSET_CLASSES:
-        return await KISTradingMixin.place_order(adapter, order)  # type: ignore[arg-type]
+        # Unbound call is deliberate: it pins the mixin implementation regardless of
+        # subclass overrides. `cast` states the nominal type the Protocol cannot express.
+        return await KISTradingMixin.place_order(cast(KISHTTPClient, adapter), order)
     if order.asset_class in _DOMESTIC_DERIVATIVE_ASSET_CLASSES:
         return await adapter.place_futureoption_order(order)
     if order.asset_class in _OVERSEAS_DERIVATIVE_ASSET_CLASSES:

@@ -28,7 +28,7 @@ def _make_adapter(handler) -> NHAdapter:
 
 def test_nh_adapter_uses_monotonic_token_cache() -> None:
     adapter = _make_adapter(lambda request: httpx.Response(200, json=TOKEN_RESPONSE))
-    assert isinstance(adapter._token_cache, MonotonicTokenCache)  # type: ignore[attr-defined]
+    assert isinstance(adapter._token_cache, MonotonicTokenCache)
 
 
 async def test_nh_request_transport_error_is_retryable() -> None:

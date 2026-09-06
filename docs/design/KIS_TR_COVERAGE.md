@@ -11,7 +11,7 @@ BR-1(ADR-2026-09-06-I D2). 생성: `python scripts/kis_tr_coverage.py`(오프라
 
 | 구현됨 | 실전계좌필요 | 범위밖 | 미착수 | 합계 | 구현률 |
 |---|---|---|---|---|---|
-| 52 | 22 | 0 | 301 | 375 | 13.87% |
+| 64 | 22 | 0 | 289 | 375 | 17.07% |
 
 완료 정의(ADR D2): `미착수` 0건. `실전계좌필요`·`범위밖`은 남을 수 있으나 각각 사유가 있다.
 
@@ -20,12 +20,12 @@ BR-1(ADR-2026-09-06-I D2). 생성: `python scripts/kis_tr_coverage.py`(오프라
 | 도메인 | 구현됨 | 전체 | 구현률 |
 |---|---|---|---|
 | domestic_bond | 4 | 18 | 22.22% |
-| domestic_futureoption | 0 | 50 | 0.00% |
+| domestic_futureoption | 5 | 50 | 10.00% |
 | domestic_stock | 32 | 167 | 19.16% |
 | elw | 0 | 24 | 0.00% |
 | etfetn | 1 | 6 | 16.67% |
-| overseas_futureoption | 0 | 35 | 0.00% |
-| overseas_stock | 15 | 75 | 20.00% |
+| overseas_futureoption | 5 | 35 | 14.29% |
+| overseas_stock | 17 | 75 | 22.67% |
 
 ## 전체 TR 매트릭스
 
@@ -35,7 +35,7 @@ BR-1(ADR-2026-09-06-I D2). 생성: `python scripts/kis_tr_coverage.py`(오프라
 | CTFN7107R | domestic_futureoption | 미착수 | [국내선물옵션] 주문/계좌 > (야간)선물옵션 증거금 상세 [국내선물-024] | `examples_llm/domestic_futureoption/ngt_margin_detail/ngt_margin_detail.py` |
 | CTFO5139R | domestic_futureoption | 미착수 | [국내선물옵션] 주문/계좌 > 선물옵션 기준일체결내역[v1_국내선물-016] | `examples_llm/domestic_futureoption/inquire_ccnl_bstime/inquire_ccnl_bstime.py` |
 | CTFO6117R | domestic_futureoption | 미착수 | [국내선물옵션] 주문/계좌 > 선물옵션 잔고정산손익내역[v1_국내선물-013] | `examples_llm/domestic_futureoption/inquire_balance_settlement_pl/inquire_balance_settlement_pl.py` |
-| CTFO6118R | domestic_futureoption | 미착수 | [국내선물옵션] 주문/계좌 > 선물옵션 잔고현황[v1_국내선물-004] | `examples_llm/domestic_futureoption/inquire_balance/inquire_balance.py` |
+| CTFO6118R | domestic_futureoption | 구현됨 | [국내선물옵션] 주문/계좌 > 선물옵션 잔고현황[v1_국내선물-004] | `examples_llm/domestic_futureoption/inquire_balance/inquire_balance.py` |
 | CTFO6119R | domestic_futureoption | 미착수 | [국내선물옵션] 주문/계좌 > 선물옵션기간약정수수료일별[v1_국내선물-017] | `examples_llm/domestic_futureoption/inquire_daily_amount_fee/inquire_daily_amount_fee.py` |
 | CTFO6159R | domestic_futureoption | 미착수 | [국내선물옵션] 주문/계좌 > 선물옵션 잔고평가손익내역[v1_국내선물-015] | `examples_llm/domestic_futureoption/inquire_balance_valuation_pl/inquire_balance_valuation_pl.py` |
 | CTLN4050R | overseas_stock | 미착수 | [해외주식] 시세분석 > 당사 해외주식담보대출 가능 종목 [해외주식-051] | `examples_llm/overseas_stock/colable_by_company/colable_by_company.py` |
@@ -113,7 +113,7 @@ BR-1(ADR-2026-09-06-I D2). 생성: `python scripts/kis_tr_coverage.py`(오프라
 | FHKUP03500100 | domestic_stock | 미착수 | [국내주식] 업종/기타 - 국내주식업종기간별시세(일/주/월/년) | `examples_llm/domestic_stock/inquire_daily_indexchartprice/inquire_daily_indexchartprice.py` |
 | FHKUP03500200 | domestic_stock | 미착수 | [국내주식] 업종/기타 - 업종 분봉조회 | `examples_llm/domestic_stock/inquire_time_indexchartprice/inquire_time_indexchartprice.py` |
 | FHKUP11750000 | domestic_stock | 미착수 | [국내주식] 업종/기타 > 국내주식 예상체결 전체지수[국내주식-122] | `examples_llm/domestic_stock/exp_total_index/exp_total_index.py` |
-| FHMIF10000000 | domestic_futureoption | 미착수 | [국내선물옵션] 기본시세 > 선물옵션 시세[v1_국내선물-006] | `examples_llm/domestic_futureoption/inquire_price/inquire_price.py` |
+| FHMIF10000000 | domestic_futureoption | 구현됨 | [국내선물옵션] 기본시세 > 선물옵션 시세[v1_국내선물-006] | `examples_llm/domestic_futureoption/inquire_price/inquire_price.py` |
 | FHMIF10010000 | domestic_futureoption | 미착수 | [국내선물옵션] 기본시세 > 선물옵션 시세호가[v1_국내선물-007] | `examples_llm/domestic_futureoption/inquire_asking_price/inquire_asking_price.py` |
 | FHPEW02740100 | elw | 미착수 | [국내주식] ELW시세 - ELW 투자지표추이(체결)[국내주식-172] | `examples_llm/elw/indicator_trend_ccnl/indicator_trend_ccnl.py` |
 | FHPEW02740200 | elw | 미착수 | [국내주식] ELW시세 - ELW 투자지표추이(일별)[국내주식-173] | `examples_llm/elw/indicator_trend_daily/indicator_trend_daily.py` |
@@ -245,11 +245,11 @@ BR-1(ADR-2026-09-06-I D2). 생성: `python scripts/kis_tr_coverage.py`(오프라
 | HDFFF020 | overseas_futureoption | 미착수 | [해외선물옵션]실시간시세 > 해외선물옵션 실시간체결가[실시간-017] | `examples_llm/overseas_futureoption/ccnl/ccnl.py` |
 | HDFFF1C0 | overseas_futureoption | 미착수 | [해외선물옵션]실시간시세 > 해외선물옵션 실시간주문내역통보[실시간-019] | `examples_llm/overseas_futureoption/order_notice/order_notice.py` |
 | HDFFF2C0 | overseas_futureoption | 미착수 | [해외선물옵션]실시간시세 > 해외선물옵션 실시간체결내역통보[실시간-020] | `examples_llm/overseas_futureoption/ccnl_notice/ccnl_notice.py` |
-| HDFSASP0 | overseas_stock | 미착수 | [해외주식] 실시간시세 > 해외주식 실시간호가[실시간-021] | `examples_llm/overseas_stock/asking_price/asking_price.py` |
+| HDFSASP0 | overseas_stock | 구현됨 | [해외주식] 실시간시세 > 해외주식 실시간호가[실시간-021] | `examples_llm/overseas_stock/asking_price/asking_price.py` |
 | HDFSASP1 | overseas_stock | 미착수 | [해외주식] 실시간시세 > 해외주식 지연호가(아시아)[실시간-008] | `examples_llm/overseas_stock/delayed_asking_price_asia/delayed_asking_price_asia.py` |
-| HDFSCNT0 | overseas_stock | 미착수 | [해외주식] 실시간시세 > 해외주식 실시간지연체결가[실시간-007] | `examples_llm/overseas_stock/delayed_ccnl/delayed_ccnl.py` |
+| HDFSCNT0 | overseas_stock | 구현됨 | [해외주식] 실시간시세 > 해외주식 실시간지연체결가[실시간-007] | `examples_llm/overseas_stock/delayed_ccnl/delayed_ccnl.py` |
 | HHDDB95030000 | overseas_futureoption | 미착수 | [해외선물옵션] 기본시세 > 해외선물 미결제추이 [해외선물-029] | `examples_llm/overseas_futureoption/investor_unpd_trend/investor_unpd_trend.py` |
-| HHDFC55010000 | overseas_futureoption | 미착수 | [해외선물옵션] 기본시세 > 해외선물종목현재가 [v1_해외선물-009] | `examples_llm/overseas_futureoption/inquire_price/inquire_price.py` |
+| HHDFC55010000 | overseas_futureoption | 구현됨 | [해외선물옵션] 기본시세 > 해외선물종목현재가 [v1_해외선물-009] | `examples_llm/overseas_futureoption/inquire_price/inquire_price.py` |
 | HHDFC55010100 | overseas_futureoption | 미착수 | [해외선물옵션] 기본시세 > 해외선물종목상세[v1_해외선물-008] | `examples_llm/overseas_futureoption/stock_detail/stock_detail.py` |
 | HHDFC55020000 | overseas_futureoption | 미착수 | [해외선물옵션] 기본시세 > 해외선물 체결추이(주간)[해외선물-017] | `examples_llm/overseas_futureoption/weekly_ccnl/weekly_ccnl.py` |
 | HHDFC55020100 | overseas_futureoption | 미착수 | [해외선물옵션] 기본시세 > 해외선물 체결추이(일간) [해외선물-018] | `examples_llm/overseas_futureoption/daily_ccnl/daily_ccnl.py` |
@@ -258,7 +258,7 @@ BR-1(ADR-2026-09-06-I D2). 생성: `python scripts/kis_tr_coverage.py`(오프라
 | HHDFC55020400 | overseas_futureoption | 미착수 | [해외선물옵션] 기본시세 > 해외선물 분봉조회[해외선물-016] | `examples_llm/overseas_futureoption/inquire_time_futurechartprice/inquire_time_futurechartprice.py` |
 | HHDFC55200000 | overseas_futureoption | 미착수 | [해외선물옵션] 기본시세 > 해외선물 상품기본정보[해외선물-023] | `examples_llm/overseas_futureoption/search_contract_detail/search_contract_detail.py` |
 | HHDFC86000000 | overseas_futureoption | 미착수 | [해외선물옵션] 기본시세 > 해외선물 호가 [해외선물-031] | `examples_llm/overseas_futureoption/inquire_asking_price/inquire_asking_price.py` |
-| HHDFO55010000 | overseas_futureoption | 미착수 | [해외선물옵션] 기본시세 > 해외옵션종목현재가 [해외선물-035] | `examples_llm/overseas_futureoption/opt_price/opt_price.py` |
+| HHDFO55010000 | overseas_futureoption | 구현됨 | [해외선물옵션] 기본시세 > 해외옵션종목현재가 [해외선물-035] | `examples_llm/overseas_futureoption/opt_price/opt_price.py` |
 | HHDFO55010100 | overseas_futureoption | 미착수 | [해외선물옵션] 기본시세 > 해외옵션종목상세 [해외선물-034] | `examples_llm/overseas_futureoption/opt_detail/opt_detail.py` |
 | HHDFO55020000 | overseas_futureoption | 미착수 | [해외선물옵션] 기본시세 > 해외옵션 체결추이(주간) [해외선물-036] | `examples_llm/overseas_futureoption/opt_weekly_ccnl/opt_weekly_ccnl.py` |
 | HHDFO55020100 | overseas_futureoption | 미착수 | [해외선물옵션] 기본시세 > 해외옵션 분봉조회 [해외선물-040] | `examples_llm/overseas_futureoption/inquire_time_optchartprice/inquire_time_optchartprice.py` |
@@ -311,11 +311,11 @@ BR-1(ADR-2026-09-06-I D2). 생성: `python scripts/kis_tr_coverage.py`(오프라
 | HHPSTH60100C1 | overseas_stock | 미착수 | [해외주식] 시세분석 > 해외뉴스종합(제목) [해외주식-053] | `examples_llm/overseas_stock/news_title/news_title.py` |
 | HHPTJ04160200 | domestic_stock | 구현됨 | [국내주식] 시세분석 > 종목별 외인기관 추정가집계[v1_국내주식-046] | `examples_llm/domestic_stock/investor_trend_estimate/investor_trend_estimate.py` |
 | OTFM1411R | overseas_futureoption | 미착수 | [해외선물옵션] 주문/계좌 > 해외선물옵션 예수금현황 [해외선물-012] | `examples_llm/overseas_futureoption/inquire_deposit/inquire_deposit.py` |
-| OTFM1412R | overseas_futureoption | 미착수 | [해외선물옵션] 주문/계좌 > 해외선물옵션 미결제내역조회(잔고) [v1_해외선물-005] | `examples_llm/overseas_futureoption/inquire_unpd/inquire_unpd.py` |
+| OTFM1412R | overseas_futureoption | 구현됨 | [해외선물옵션] 주문/계좌 > 해외선물옵션 미결제내역조회(잔고) [v1_해외선물-005] | `examples_llm/overseas_futureoption/inquire_unpd/inquire_unpd.py` |
 | OTFM2229R | overseas_futureoption | 미착수 | [해외선물옵션] 기본시세 > 해외선물옵션 장운영시간 [해외선물-030] | `examples_llm/overseas_futureoption/market_time/market_time.py` |
-| OTFM3001U | overseas_futureoption | 미착수 | [해외선물옵션] 주문/계좌 > 해외선물옵션 주문[v1_해외선물-001] | `examples_llm/overseas_futureoption/order/order.py` |
+| OTFM3001U | overseas_futureoption | 구현됨 | [해외선물옵션] 주문/계좌 > 해외선물옵션 주문[v1_해외선물-001] | `examples_llm/overseas_futureoption/order/order.py` |
 | OTFM3002U | overseas_futureoption | 미착수 | [해외선물옵션] 주문/계좌 > 해외선물옵션 정정취소주문[v1_해외선물-002, 003] | `examples_llm/overseas_futureoption/order_rvsecncl/order_rvsecncl.py` |
-| OTFM3003U | overseas_futureoption | 미착수 | [해외선물옵션] 주문/계좌 > 해외선물옵션 정정취소주문[v1_해외선물-002, 003] | `examples_llm/overseas_futureoption/order_rvsecncl/order_rvsecncl.py` |
+| OTFM3003U | overseas_futureoption | 구현됨 | [해외선물옵션] 주문/계좌 > 해외선물옵션 정정취소주문[v1_해외선물-002, 003] | `examples_llm/overseas_futureoption/order_rvsecncl/order_rvsecncl.py` |
 | OTFM3114R | overseas_futureoption | 미착수 | [해외선물옵션] 주문/계좌 > 해외선물옵션 기간계좌거래내역 [해외선물-014] | `examples_llm/overseas_futureoption/inquire_period_trans/inquire_period_trans.py` |
 | OTFM3115R | overseas_futureoption | 미착수 | [해외선물옵션] 주문/계좌 > 해외선물옵션 증거금상세 [해외선물-032] | `examples_llm/overseas_futureoption/margin_detail/margin_detail.py` |
 | OTFM3116R | overseas_futureoption | 미착수 | [해외선물옵션] 주문/계좌 > 해외선물옵션 당일주문내역조회 [v1_해외선물-004] | `examples_llm/overseas_futureoption/inquire_ccld/inquire_ccld.py` |
@@ -352,8 +352,8 @@ BR-1(ADR-2026-09-06-I D2). 생성: `python scripts/kis_tr_coverage.py`(오프라
 | TTTC8909R | domestic_stock | 실전계좌필요 | [국내주식] 주문/계좌 > 신용매수가능조회[v1_국내주식-042] | `examples_llm/domestic_stock/inquire_credit_psamount/inquire_credit_psamount.py` |
 | TTTC8910R | domestic_bond | 실전계좌필요 | [장내채권] 주문/계좌 - 장내채권 매수가능조회 | `examples_llm/domestic_bond/inquire_psbl_order/inquire_psbl_order.py` |
 | TTTN1103U | domestic_futureoption | 실전계좌필요 | [국내선물옵션] 주문/계좌 > 선물옵션 정정취소주문[v1_국내선물-002] | `examples_llm/domestic_futureoption/order_rvsecncl/order_rvsecncl.py` |
-| TTTO1101U | domestic_futureoption | 미착수 | [국내선물옵션] 주문/계좌 > 선물옵션 주문[v1_국내선물-001] | `examples_llm/domestic_futureoption/order/order.py` |
-| TTTO1103U | domestic_futureoption | 미착수 | [국내선물옵션] 주문/계좌 > 선물옵션 정정취소주문[v1_국내선물-002] | `examples_llm/domestic_futureoption/order_rvsecncl/order_rvsecncl.py` |
+| TTTO1101U | domestic_futureoption | 구현됨 | [국내선물옵션] 주문/계좌 > 선물옵션 주문[v1_국내선물-001] | `examples_llm/domestic_futureoption/order/order.py` |
+| TTTO1103U | domestic_futureoption | 구현됨 | [국내선물옵션] 주문/계좌 > 선물옵션 정정취소주문[v1_국내선물-002] | `examples_llm/domestic_futureoption/order_rvsecncl/order_rvsecncl.py` |
 | TTTO5105R | domestic_futureoption | 미착수 | [국내선물옵션] 주문/계좌 > 선물옵션 주문가능[v1_국내선물-005] | `examples_llm/domestic_futureoption/inquire_psbl_order/inquire_psbl_order.py` |
 | TTTO5201R | domestic_futureoption | 미착수 | [국내선물옵션] 주문/계좌 > 선물옵션 주문체결내역조회[v1_국내선물-003] | `examples_llm/domestic_futureoption/inquire_ccnl/inquire_ccnl.py` |
 | TTTS0202U | overseas_stock | 구현됨 | [해외주식] 주문/계좌 > 해외주식 주문 [v1_해외주식-001] | `examples_llm/overseas_stock/order/order.py` |
@@ -385,7 +385,7 @@ BR-1(ADR-2026-09-06-I D2). 생성: `python scripts/kis_tr_coverage.py`(오프라
 | TTTT3016U | overseas_stock | 미착수 | [해외주식] 주문/계좌 > 해외주식 예약주문접수[v1_해외주식-002] | `examples_llm/overseas_stock/order_resv/order_resv.py` |
 | TTTT3017U | overseas_stock | 미착수 | [해외주식] 주문/계좌 > 해외주식 예약주문접수취소[v1_해외주식-004] | `examples_llm/overseas_stock/order_resv_ccnl/order_resv_ccnl.py` |
 | TTTT3039R | overseas_stock | 실전계좌필요 | [해외주식] 주문/계좌 > 해외주식 예약주문조회[v1_해외주식-013] | `examples_llm/overseas_stock/order_resv_list/order_resv_list.py` |
-| VTFO6118R | domestic_futureoption | 미착수 | [국내선물옵션] 주문/계좌 > 선물옵션 잔고현황[v1_국내선물-004] | `examples_llm/domestic_futureoption/inquire_balance/inquire_balance.py` |
+| VTFO6118R | domestic_futureoption | 구현됨 | [국내선물옵션] 주문/계좌 > 선물옵션 잔고현황[v1_국내선물-004] | `examples_llm/domestic_futureoption/inquire_balance/inquire_balance.py` |
 | VTRP6504R | overseas_stock | 미착수 | [해외주식] 주문/계좌 > 해외주식 체결기준현재잔고 [v1_해외주식-008] | `examples_llm/overseas_stock/inquire_present_balance/inquire_present_balance.py` |
 | VTSC9215R | domestic_stock | 미착수 | [국내주식] 주문/계좌 > 주식일별주문체결조회[v1_국내주식-005] | `examples_llm/domestic_stock/inquire_daily_ccld/inquire_daily_ccld.py` |
 | VTTC0011U | domestic_stock | 미착수 | [국내주식] 주문/계좌 > 주식주문(현금)[v1_국내주식-001] | `examples_llm/domestic_stock/order_cash/order_cash.py` |
