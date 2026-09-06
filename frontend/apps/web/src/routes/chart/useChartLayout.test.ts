@@ -34,14 +34,23 @@ function layoutRecord(model: ChartLayoutModel, overrides: Partial<ChartingLayout
   };
 }
 
-const BASE_VIEW: ChartViewSnapshot = { instrumentId: "BTCUSDT", venue: "BITGET", timeframe: "1h", indicatorIds: [] };
+const BASE_VIEW: ChartViewSnapshot = {
+  instrumentId: "BTCUSDT",
+  venue: "BITGET",
+  timeframe: "1h",
+  indicatorIds: [],
+  compareSymbolIds: [],
+};
 
 function savedModelFor(view: ChartViewSnapshot): ChartLayoutModel {
   const panel = {
     id: "server-panel",
     instrument: { instrumentId: view.instrumentId, venue: view.venue, symbol: view.instrumentId },
     timeframe: view.timeframe,
-    indicators: view.indicatorIds.map((id) => ({ id })),
+    indicators: [
+      ...view.indicatorIds.map((id) => ({ id })),
+      ...view.compareSymbolIds.map((id) => ({ id: `compare:${id}` })),
+    ],
     drawingSetId: "server-panel",
   };
   return { ...createEmptyLayoutModel(), panels: [panel], activePanelId: panel.id };
@@ -65,7 +74,13 @@ describe("복원", () => {
   });
 
   it("저장된 레이아웃이 있으면 그 활성 패널을 화면에 적용한다", async () => {
-    const remoteView: ChartViewSnapshot = { instrumentId: "ETHUSDT", venue: "BITGET", timeframe: "4h", indicatorIds: ["SMA"] };
+    const remoteView: ChartViewSnapshot = {
+      instrumentId: "ETHUSDT",
+      venue: "BITGET",
+      timeframe: "4h",
+      indicatorIds: ["SMA"],
+      compareSymbolIds: ["BITGET:ETHUSDT"],
+    };
     const record = layoutRecord(savedModelFor(remoteView));
     const onApplyView = vi.fn();
     const port = fakePort({ listLayouts: vi.fn(async () => [record]) });

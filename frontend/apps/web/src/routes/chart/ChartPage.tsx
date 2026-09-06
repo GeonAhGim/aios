@@ -33,6 +33,7 @@ import { Link, useSearchParams } from "react-router-dom";
 import { AppShell } from "../../components/layout/AppShell";
 import { ErrorMessage } from "../../components/ErrorMessage";
 import { ChartToolbar } from "./ChartToolbar";
+import { CompareSymbols, type CompareSymbolRef } from "./CompareSymbols";
 import { IndicatorPicker } from "./IndicatorPicker";
 import { StrategyMarkers } from "./StrategyMarkers";
 import { useChartLayout, type ChartViewSnapshot } from "./useChartLayout";
@@ -52,11 +53,25 @@ const chartingClient = createChartingClient(baseUrl, () => useAuthStore.getState
 
 export type FetchCandles = (params: CandleQueryParams) => Promise<CandleQueryResult>;
 
-interface ChartPageProps {
+export interface ChartPageProps {
   fetchCandles?: FetchCandles;
   // CH-6b: CH-8 레이아웃 CRUD 포트 — 테스트에서 서버 왕복 없이 주입한다(fetchCandles와 동일 관용).
   chartingPort?: ChartingPort;
+  // CH-13b: CompareSymbols의 InstrumentView 목록 조회 포트 — 같은 관용으로 주입 가능하게 둔다.
+  listInstruments?: typeof marketDataClient.listInstruments;
   now?: Date;
+}
+
+// CH-13b: compareSymbolIds(useChartLayout.ts)와 동일한 "VENUE:instrumentId" 인코딩을
+// 이 화면 경계에서만 구조체로 풀고 다시 만든다 — 훅은 문자열만 안다(파일 범위 제한).
+function encodeCompareSymbol(ref: CompareSymbolRef): string {
+  return `${ref.venue}:${ref.instrumentId}`;
+}
+
+function decodeCompareSymbol(id: string): CompareSymbolRef | null {
+  const sep = id.indexOf(":");
+  if (sep < 0) return null;
+  return { venue: id.slice(0, sep) as Venue, instrumentId: id.slice(sep + 1) };
 }
 
 function toChartPoints(candles: readonly StreamCandle[]): CandlestickPoint[] {
@@ -134,6 +149,7 @@ const IDLE_REPLAY_STATE: ReplayState = {
 export function ChartPage({
   fetchCandles = marketDataClient.getCandles,
   chartingPort = chartingClient,
+  listInstruments = marketDataClient.listInstruments,
   now,
 }: ChartPageProps) {
   const [searchParams, setSearchParams] = useSearchParams();
@@ -154,11 +170,21 @@ export function ChartPage({
   const [selectedIndicatorIds, setSelectedIndicatorIds] = useState<string[]>([]);
   const overlayEntries: readonly OverlayEntry[] = useMemo(() => createDefaultOverlayRegistry().list(), []);
 
-  // CH-6b: 현재 화면(venue/timeframe/instrumentId/지표)을 CH-8 레이아웃의 활성 패널과
-  // 양방향으로 거울처럼 맞춘다 — 실제 복원·저장·충돌 판정은 useChartLayout 소관.
+  // CH-13b: 비교 심볼도 CH-8 레이아웃(useChartLayout)을 통해서만 저장·복원한다 —
+  // 이 화면은 구조체로, 훅은 "VENUE:instrumentId" 문자열로 다룬다(encode/decode 경계).
+  const [compareSymbols, setCompareSymbols] = useState<CompareSymbolRef[]>([]);
+
+  // CH-6b: 현재 화면(venue/timeframe/instrumentId/지표/비교 심볼)을 CH-8 레이아웃의
+  // 활성 패널과 양방향으로 거울처럼 맞춘다 — 실제 복원·저장·충돌 판정은 useChartLayout 소관.
   const layoutView: ChartViewSnapshot = useMemo(
-    () => ({ instrumentId: instrumentId ?? "", venue, timeframe, indicatorIds: selectedIndicatorIds }),
-    [instrumentId, venue, timeframe, selectedIndicatorIds],
+    () => ({
+      instrumentId: instrumentId ?? "",
+      venue,
+      timeframe,
+      indicatorIds: selectedIndicatorIds,
+      compareSymbolIds: compareSymbols.map(encodeCompareSymbol),
+    }),
+    [instrumentId, venue, timeframe, selectedIndicatorIds, compareSymbols],
   );
   const layout = useChartLayout({
     port: chartingPort,
@@ -167,6 +193,7 @@ export function ChartPage({
     onApplyView: (v) => {
       setTimeframe(v.timeframe as Timeframe);
       setSelectedIndicatorIds([...v.indicatorIds]);
+      setCompareSymbols(v.compareSymbolIds.map(decodeCompareSymbol).filter((r): r is CompareSymbolRef => r !== null));
       if (v.instrumentId && v.instrumentId !== instrumentId) setSearchParams({ instrument_id: v.instrumentId });
       if (v.venue !== venue) setVenue(v.venue as Venue);
     },
@@ -234,6 +261,10 @@ export function ChartPage({
 
   const routed = query.error ? routeApiError(query.error) : null;
   const canRetry = routed?.kind === "refetch_retry" || routed?.kind === "backoff_retry";
+  // CH-13b: CompareSymbols는 CH-2 candleStream(재생용 파생 상태)이 아니라 이 조회
+  // 응답의 원본 캔들을 기준 시리즈로 쓴다(align/normalize/spread 입력 계약과 동일).
+  const baseSeries = query.data?.series;
+  const baseCandles = baseSeries?.kind === "ok" ? baseSeries.value.candles : [];
 
   function handleAddDrawing(): void {
     if (!drawingTool) return;
@@ -350,6 +381,22 @@ export function ChartPage({
         )}
 
         <StrategyMarkers instrumentId={instrumentId} points={points} />
+
+        <CompareSymbols
+          baseVenue={venue}
+          baseInstrumentId={instrumentId}
+          baseCandles={baseCandles}
+          timeframe={timeframe}
+          start={start}
+          end={end}
+          compareSymbols={compareSymbols}
+          onAdd={(ref) => setCompareSymbols((prev) => [...prev, ref])}
+          onRemove={(ref) =>
+            setCompareSymbols((prev) => prev.filter((s) => !(s.venue === ref.venue && s.instrumentId === ref.instrumentId)))
+          }
+          fetchCandles={fetchCandles}
+          listInstruments={listInstruments}
+        />
 
         <section aria-label="그리기 목록" className="space-y-1.5">
           <h2 className="text-sm font-medium text-fg-secondary">그리기 ({drawings.length})</h2>

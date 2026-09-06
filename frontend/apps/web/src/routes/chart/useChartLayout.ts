@@ -1,14 +1,9 @@
 // CH-6b — 서버 저장·복원 배선. CH-8(task-1593) layout/persistence.ts + layoutModel.ts만
-// 소비한다(화면에서 fetch 직접 호출 금지, decision). ChartPage.tsx는 이 훅을 통해서만
-// 레이아웃 상태를 다루고, 렌더링에 필요한 값과 사용자 액션만 돌려받는다 — ChartPage를
-// ≤300줄로 유지하기 위한 훅 추출이 이 파일의 존재 이유다.
-//
-// "뷰"(현재 화면에 보이는 심볼·타임프레임·지표)는 ChartPage가 소유한 로컬 state
-// (venue/timeframe/instrumentId/selectedIndicatorIds, 전부 6a 원본)를 그대로 두고,
-// 이 훅은 `view`로 매 렌더 전달받아 활성 패널에 거울처럼 반영한다(모델→뷰 방향은
-// onApplyView 콜백으로 역전파). 두 방향 동기화가 서로를 되먹임하지 않도록
-// appliedTokenRef 하나로 순서를 고정한다: 복원/새로고침 직후엔 먼저 모델→뷰를
-// 적용하고, 그 적용이 끝난 뒤에야 뷰→모델 거울 effect가 움직인다.
+// 소비한다(화면에서 fetch 직접 호출 금지, decision). "뷰"(심볼·타임프레임·지표·CH-13b
+// 비교 심볼)는 ChartPage가 소유한 로컬 state를 그대로 두고, 이 훅은 `view`로 매 렌더
+// 전달받아 활성 패널에 거울처럼 반영한다(모델→뷰는 onApplyView로 역전파).
+// appliedTokenRef로 순서를 고정한다: 복원/새로고침 직후엔 모델→뷰가 먼저, 그 뒤에야
+// 뷰→모델 거울 effect가 움직인다.
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   createEmptyLayoutModel,
@@ -35,7 +30,11 @@ export interface ChartViewSnapshot {
   readonly venue: string;
   readonly timeframe: string;
   readonly indicatorIds: readonly string[];
+  /** CH-13b 비교 심볼("VENUE:instrumentId"). layoutModel.ts 스키마는 그대로 두고 panel.indicators에 접두어를 붙여 함께 저장한다. */
+  readonly compareSymbolIds: readonly string[];
 }
+
+const COMPARE_SYMBOL_PREFIX = "compare:";
 
 export interface UseChartLayoutOptions {
   readonly port: ChartingPort;
@@ -72,16 +71,21 @@ function panelViewFields(view: ChartViewSnapshot): Pick<ChartPanel, "instrument"
   return {
     instrument: { instrumentId: view.instrumentId, venue: view.venue, symbol: view.instrumentId },
     timeframe: view.timeframe,
-    indicators: view.indicatorIds.map((id): IndicatorRef => ({ id })),
+    indicators: [
+      ...view.indicatorIds.map((id): IndicatorRef => ({ id })),
+      ...view.compareSymbolIds.map((id): IndicatorRef => ({ id: `${COMPARE_SYMBOL_PREFIX}${id}` })),
+    ],
   };
 }
 
 function panelToView(panel: ChartPanel): ChartViewSnapshot {
+  const ids = panel.indicators.map((i) => i.id);
   return {
     instrumentId: panel.instrument.instrumentId,
     venue: panel.instrument.venue,
     timeframe: panel.timeframe,
-    indicatorIds: panel.indicators.map((i) => i.id),
+    indicatorIds: ids.filter((id) => !id.startsWith(COMPARE_SYMBOL_PREFIX)),
+    compareSymbolIds: ids.filter((id) => id.startsWith(COMPARE_SYMBOL_PREFIX)).map((id) => id.slice(COMPARE_SYMBOL_PREFIX.length)),
   };
 }
 
@@ -91,8 +95,8 @@ function sameView(panel: ChartPanel, view: ChartViewSnapshot): boolean {
     v.instrumentId === view.instrumentId &&
     v.venue === view.venue &&
     v.timeframe === view.timeframe &&
-    v.indicatorIds.length === view.indicatorIds.length &&
-    v.indicatorIds.every((id, i) => id === view.indicatorIds[i])
+    v.indicatorIds.join(",") === view.indicatorIds.join(",") &&
+    v.compareSymbolIds.join(",") === view.compareSymbolIds.join(",")
   );
 }
 
@@ -171,7 +175,7 @@ export function useChartLayout({ port, enabled, view, onApplyView }: UseChartLay
     if (active) onApplyViewRef.current(panelToView(active));
   }, [status, syncToken, model]);
 
-  // 그 뒤로는 반대 방향: 화면(뷰)이 바뀌면(타임프레임·지표 선택 등) 활성 패널에 거울처럼 반영한다.
+  // 그 뒤로는 반대 방향: 화면(뷰)이 바뀌면(타임프레임·지표·비교 심볼 선택 등) 활성 패널에 거울처럼 반영한다.
   useEffect(() => {
     if (!enabled || status !== "ready" || appliedTokenRef.current !== syncToken) return;
     setModel((prev) => {
@@ -182,7 +186,7 @@ export function useChartLayout({ port, enabled, view, onApplyView }: UseChartLay
       return { ...prev, panels: prev.panels.map((p) => (p.id === active.id ? { ...p, ...panelViewFields(view) } : p)) };
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [enabled, status, syncToken, view.instrumentId, view.venue, view.timeframe, view.indicatorIds.join(",")]);
+  }, [enabled, status, syncToken, view.instrumentId, view.venue, view.timeframe, view.indicatorIds.join(","), view.compareSymbolIds.join(",")]);
 
   const save = useCallback(async () => {
     setSaveStatus("saving");
