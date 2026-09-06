@@ -27,7 +27,18 @@ Spec: docs/specs/L4_market_data_positions_ledger_v1.0.md#§4.4 CHARGEBACK, §9 L
 안정 키)다. 같은 차지백을 두 번 요청해도 `post_entry`가 REPLAY(그 사이
 잔액이 바뀌지 않았다면) 또는 DIGEST_MISMATCH(409, 잔액이 바뀌어 분할이
 달라졌다면)로 거부한다 — 이 함수는 재시도 루프를 두지 않는다(호출자
-책임, refund.py와 동일 계약)."""
+책임, refund.py와 동일 계약).
+
+전수감사 2026-09-06 P1-C(task-1722) — 이 함수는 아직 어떤 라우터/서비스도
+호출하지 않는다(src 임포터 0). 의도한 진입점은
+`src/api/routers/admin.py::confirm_topup`(L171)의 형제 엔드포인트
+`POST /admin/wallet/topups/{topup_id}/chargeback` +
+`src/services/wallet_service.py::WalletService.confirm_topup`(L203)과 같은
+조건부 UPDATE 패턴의 새 메서드다. 배선을 보류한 이유는 `wallet_topup_requests
+.status` CHECK 제약(`src/db/migrations/versions/e7f8a9b0c1d2_wallet_ledger.py`
+L78-79)이 `('PENDING','CONFIRMED')`만 허용해 `CHARGED_BACK` 상태를 추가하려면
+새 마이그레이션이 필요하기 때문이다 — PM 승인(parent revision) 없이 이
+리프에서 마이그레이션을 만들지 않는다(헤드리스 워커 프로토콜)."""
 from __future__ import annotations
 
 from decimal import Decimal

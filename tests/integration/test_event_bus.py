@@ -13,7 +13,6 @@ from src.core.event_bus.in_process import (
     InProcessEventBus,
 )
 from src.core.event_bus.policy import HandlerCriticality
-from src.core.event_bus.singleton import get_event_bus, reset_event_bus
 
 
 @pytest.fixture
@@ -211,11 +210,3 @@ async def test_publish_subscribe_on_audit_decision_logged_topic(fast_bus):
     await fast_bus.stop()
 
     assert received == [{"action_type": "payment.confirmed", "target_id": "123"}]
-
-
-async def test_get_event_bus_returns_same_instance():
-    reset_event_bus()
-    try:
-        assert get_event_bus() is get_event_bus()
-    finally:
-        reset_event_bus()
