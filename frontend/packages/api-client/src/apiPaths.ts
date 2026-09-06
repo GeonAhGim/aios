@@ -261,6 +261,19 @@ export const API_ROUTES = defineApiRoutes({
   // prefix 없음). mount_v1(PLT-16)은 미도달이라 v1Path=null, positions.*·marketData.*와
   // 동일 사유. envelope=true.
   "scripts.compile": route("/v1/scripts/compile", true, null, true),
+
+  // task-1593(CH-8): src/api/routers/charting.py 원문 확인(CH-5, task-1557 06e5560) —
+  // `APIRouter(prefix="/v1/foundation/charting")`(charting.py:37), router_registry.py
+  // include_router(추가 prefix 없음). 7개 엔드포인트 전부 `-> ApiResponse[...]` + `ok(...)`
+  // (POST/GET "/layouts" :40·:56, GET/PATCH "/layouts/{id}" :65·:75, DELETE
+  // "/layouts/{id}"(204, 봉투 없음이지만 http.ts가 204를 별도 처리하므로 무관) :93,
+  // GET/PUT "/layouts/{id}/drawings" :102·:112) — envelope=true. foundation.* 관용과
+  // 동일하게 mount_v1(PLT-16) 미도달이라 v1Path=null. 같은 경로를 공유하는 메서드는
+  // 항목 하나로 묶는다(위 주석 "메서드별로 별도 항목을 만들지 않는다"): layouts.base
+  // (POST+GET), layouts.item(GET+PATCH+DELETE), layouts.drawings(GET+PUT).
+  "charting.layouts.base": route("/v1/foundation/charting/layouts", true, null, true),
+  "charting.layouts.item": route("/v1/foundation/charting/layouts/:layoutId", true, null, true),
+  "charting.layouts.drawings": route("/v1/foundation/charting/layouts/:layoutId/drawings", true, null, true),
 });
 
 export type ApiRouteName = keyof typeof API_ROUTES;
