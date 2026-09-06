@@ -570,6 +570,22 @@
         "title": "ApiResponse[DrawingsDocumentView]",
         "type": "object"
       },
+      "ApiResponse_IndicatorListView_": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/IndicatorListView"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/Meta"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "title": "ApiResponse[IndicatorListView]",
+        "type": "object"
+      },
       "ApiResponse_InstrumentListView_": {
         "properties": {
           "data": {
@@ -632,6 +648,22 @@
           "meta"
         ],
         "title": "ApiResponse[MandateStatusResponse]",
+        "type": "object"
+      },
+      "ApiResponse_MembershipResponse_": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/MembershipResponse"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/Meta"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "title": "ApiResponse[MembershipResponse]",
         "type": "object"
       },
       "ApiResponse_MfaSetupResult_": {
@@ -3637,6 +3669,24 @@
         "title": "GeneratedConditions",
         "type": "object"
       },
+      "GrantMembershipRequest": {
+        "properties": {
+          "role": {
+            "$ref": "#/components/schemas/MembershipRole"
+          },
+          "subject_id": {
+            "format": "uuid",
+            "title": "Subject Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "subject_id",
+          "role"
+        ],
+        "title": "GrantMembershipRequest",
+        "type": "object"
+      },
       "HTTPValidationError": {
         "properties": {
           "detail": {
@@ -3721,6 +3771,54 @@
         "title": "IndicatorComputeResponse",
         "type": "object"
       },
+      "IndicatorListItemView": {
+        "properties": {
+          "category": {
+            "title": "Category",
+            "type": "string"
+          },
+          "hash": {
+            "title": "Hash",
+            "type": "string"
+          },
+          "inputs": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Inputs",
+            "type": "array"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "outputs": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Outputs",
+            "type": "array"
+          },
+          "tier": {
+            "$ref": "#/components/schemas/Tier"
+          },
+          "version": {
+            "title": "Version",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "tier",
+          "category",
+          "version",
+          "hash",
+          "inputs",
+          "outputs"
+        ],
+        "title": "IndicatorListItemView",
+        "type": "object"
+      },
       "IndicatorListResponse": {
         "properties": {
           "indicators": {
@@ -3735,6 +3833,22 @@
           "indicators"
         ],
         "title": "IndicatorListResponse",
+        "type": "object"
+      },
+      "IndicatorListView": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/IndicatorListItemView"
+            },
+            "title": "Items",
+            "type": "array"
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "title": "IndicatorListView",
         "type": "object"
       },
       "InstrumentListView": {
@@ -4391,6 +4505,65 @@
         ],
         "title": "MarketHours",
         "type": "object"
+      },
+      "MembershipResponse": {
+        "properties": {
+          "membership_id": {
+            "format": "uuid",
+            "title": "Membership Id",
+            "type": "string"
+          },
+          "revision": {
+            "title": "Revision",
+            "type": "integer"
+          },
+          "role": {
+            "$ref": "#/components/schemas/MembershipRole"
+          },
+          "state": {
+            "$ref": "#/components/schemas/MembershipState"
+          },
+          "subject_id": {
+            "format": "uuid",
+            "title": "Subject Id",
+            "type": "string"
+          },
+          "tenant_id": {
+            "format": "uuid",
+            "title": "Tenant Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "membership_id",
+          "tenant_id",
+          "subject_id",
+          "role",
+          "state",
+          "revision"
+        ],
+        "title": "MembershipResponse",
+        "type": "object"
+      },
+      "MembershipRole": {
+        "enum": [
+          "OWNER",
+          "ADMIN",
+          "MEMBER",
+          "AUDITOR",
+          "SERVICE"
+        ],
+        "title": "MembershipRole",
+        "type": "string"
+      },
+      "MembershipState": {
+        "enum": [
+          "ACTIVE",
+          "SUSPENDED",
+          "REVOKED"
+        ],
+        "title": "MembershipState",
+        "type": "string"
       },
       "Meta": {
         "properties": {
@@ -8199,6 +8372,16 @@
         "title": "SymbolStatus",
         "type": "string"
       },
+      "Tier": {
+        "description": "카탈로그 우선순위(선언 순서 = 이름 충돌 해소 순서, CORE가 최상위).",
+        "enum": [
+          "core",
+          "oss",
+          "script"
+        ],
+        "title": "Tier",
+        "type": "string"
+      },
       "Timeframe": {
         "enum": [
           "1m",
@@ -9838,6 +10021,7 @@
     },
     "/admin/wallet/topups/{topup_id}/confirm": {
       "post": {
+        "description": "전수감사(2026-09-06 P0-F, task-1719) 반영 — 예전에는 원시\n`Idempotency-Key` 헤더 문자열을 그대로 `confirm_topup`에 넘길 뿐, I-03\n4중 스코프·digest 대조를 강제하지 않았다(DB `status='PENDING'` 조건부\nUPDATE만이 실질적 중복방지였다). 이제 marketplace 구매 라우터와 같은\n`require_idempotency_key`/`run_idempotent` 경로를 강제한다.",
         "operationId": "confirm_topup_admin_wallet_topups__topup_id__confirm_post",
         "parameters": [
           {
@@ -9847,15 +10031,6 @@
             "schema": {
               "title": "Topup Id",
               "type": "integer"
-            }
-          },
-          {
-            "in": "header",
-            "name": "Idempotency-Key",
-            "required": true,
-            "schema": {
-              "title": "Idempotency-Key",
-              "type": "string"
             }
           }
         ],
@@ -11239,15 +11414,6 @@
             "schema": {
               "title": "Listing Id",
               "type": "integer"
-            }
-          },
-          {
-            "in": "header",
-            "name": "Idempotency-Key",
-            "required": true,
-            "schema": {
-              "title": "Idempotency-Key",
-              "type": "string"
             }
           }
         ],
@@ -15364,6 +15530,148 @@
         ]
       }
     },
+    "/v1/foundation/trust/memberships": {
+      "post": {
+        "operationId": "post_grant_membership_v1_foundation_trust_memberships_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GrantMembershipRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiResponse_MembershipResponse_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Post Grant Membership",
+        "tags": [
+          "foundation:trust-memberships"
+        ]
+      }
+    },
+    "/v1/foundation/trust/memberships/{subject_id}:revoke": {
+      "post": {
+        "operationId": "post_revoke_membership_v1_foundation_trust_memberships__subject_id__revoke_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "subject_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Subject Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiResponse_MembershipResponse_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Post Revoke Membership",
+        "tags": [
+          "foundation:trust-memberships"
+        ]
+      }
+    },
+    "/v1/foundation/trust/memberships/{subject_id}:suspend": {
+      "post": {
+        "operationId": "post_suspend_membership_v1_foundation_trust_memberships__subject_id__suspend_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "subject_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Subject Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiResponse_MembershipResponse_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Post Suspend Membership",
+        "tags": [
+          "foundation:trust-memberships"
+        ]
+      }
+    },
     "/v1/foundation/trust/status": {
       "get": {
         "operationId": "get_trust_status_v1_foundation_trust_status_get",
@@ -15453,6 +15761,106 @@
         "summary": "Post Start Validation",
         "tags": [
           "foundation:validation"
+        ]
+      }
+    },
+    "/v1/indicators": {
+      "get": {
+        "operationId": "list_indicators_v1_indicators_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "q",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 100,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Q"
+            }
+          },
+          {
+            "in": "query",
+            "name": "category",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 100,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Category"
+            }
+          },
+          {
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Cursor"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "maximum": 200,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiResponse_IndicatorListView_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "List Indicators",
+        "tags": [
+          "indicators"
         ]
       }
     },
