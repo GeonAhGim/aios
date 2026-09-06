@@ -275,7 +275,7 @@ NH `supports_modify=False`, `supports_cancel="UNVERIFIED"`(02e §3 추정 엔드
 | `OMS_ALGO_NOT_ENABLED` | `UnsupportedVenueFeatureError` | 아니오 | 400 (Phase 1: TWAP 외) |
 | `EXCH_TRANSIENT_NETWORK` / `EXCH_RATE_LIMITED` / `EXCH_SERVER_ERROR` | `ExchangeError(retryable=True)` | 예(백오프, 조회 계열만 transport 내부; 주문은 outbox) | outbox `mark_retry` |
 | `EXCH_SENT_UNKNOWN` | `SentUnknownError(ExchangeError)` | **아니오** | 주문 → `UNKNOWN`, `unknown_resolver` 큐 |
-| `EXCH_AUTH` / `EXCH_CLOCK_SKEW` | `ExchangeError(retryable=False)` | CLOCK_SKEW는 재동기화 후 1회 | 회로 OPEN + 운영 알림. 주문 → `FAILED(reason=AUTH)` |
+| `EXCH_AUTH` / `EXCH_CLOCK_SKEW` | `ExchangeError(retryable=False)` | CLOCK_SKEW는 재동기화 후 1회 | 회로 OPEN + 운영 알림. 주문 → `REJECTED(reason=AUTH)`(CA 2026-09-06: 어댑터 호출 직전에 이미 SUBMITTED이므로 §4.2 `VENUE_REJECTED` 경로를 쓴다. `FAILED` 직행은 전이표 밖) |
 | `EXCH_INSUFFICIENT_FUNDS` / `EXCH_INVALID_ORDER` / `EXCH_DUPLICATE_CLIENT_ID` / `EXCH_MARKET_CLOSED` | `ExchangeError(retryable=False)` | 아니오 | 주문 → `REJECTED(reason)`. `DUPLICATE_CLIENT_ID`는 → `find_order_by_client_id`로 기존 주문 채택(중복 방지 성공 케이스) |
 | `EXCH_ORDER_NOT_FOUND` | `ExchangeError(retryable=False)` | 아니오 | UNKNOWN 해소 시 "거래소에 없음" 증거로 사용(단독으로 FAILED 확정 금지, §6 F5) |
 | `EXCH_UNKNOWN_RESPONSE` | `ExchangeError(retryable=False)` | 아니오 | 조회: 오류 전파. 주문: `SentUnknownError`로 승격 |
@@ -317,6 +317,7 @@ NH `supports_modify=False`, `supports_cancel="UNVERIFIED"`(02e §3 추정 엔드
 | CREATED | `VALIDATED` | tick/lot/notional/profile 통과 | VALIDATED | outbox `SUBMIT` enqueue | `order_validated` |
 | CREATED | `VALIDATION_FAILED` | — | FAILED | reason_code | `order_failed` |
 | VALIDATED | `SENT` | outbox 행 SENDING 선점 후 어댑터 호출 직전 | SUBMITTED | `sent_at` | `order_submitted` |
+| VALIDATED | `SEND_ABANDONED` | outbox `DEAD`(max_attempts 소진) **이며 어댑터 호출 0회**(전송 전 실패만) | FAILED | `reason_code=SEND_ABANDONED` | `order_failed` |
 | SUBMITTED | `ACK` | 응답에 `exchange_order_id` | ACKNOWLEDGED | `exchange_order_id` 저장 | `order_acknowledged` |
 | SUBMITTED | `VENUE_REJECTED` | 응답 REJECTED/INSUFFICIENT_FUNDS/INVALID_ORDER | REJECTED | reason | `order_rejected` |
 | SUBMITTED | `RESPONSE_LOST` | `SentUnknownError` | UNKNOWN | `unknown_since=now`, resolver enqueue | `order_unknown` |
@@ -398,7 +399,7 @@ is_sandboxed` 이중 확인, `@require_paper_sandbox`는 그대로. 이 명세�
 |---|---|---|
 | `ResilientTransport` | 조회·취소(멱등) 계열만, `RetryPolicy` | 안전 |
 | 주문 제출 | transport `max_attempts=1` | 응답 유실 시 재시도는 중복 주문 |
-| outbox | `RETRY` 상태 재클레임(backoff = `backoff_delay`), `max_attempts=6` 후 `DEAD` + `FAILED` | 재시도 전 반드시 `find_order_by_client_id`/역조회(FD-4.2-b "재시도 전 FD-4.2-a") |
+| outbox | `RETRY` 상태 재클레임(backoff = `backoff_delay`), `max_attempts=6` 후 `DEAD`. **전송 전 DEAD → 주문 `FAILED`(§4.2 `SEND_ABANDONED`); 전송 후 DEAD(`SentUnknownError` 등) → 주문은 `UNKNOWN` 유지, `FAILED` 금지**(자금이 움직였을 수 있어 resolver가 소유) | 재시도 전 반드시 `find_order_by_client_id`/역조회(FD-4.2-b "재시도 전 FD-4.2-a") |
 
 ---
 
@@ -512,7 +513,7 @@ is_sandboxed` 이중 확인, `@require_paper_sandbox`는 그대로. 이 명세�
 |---|---|
 | `test_submit_order_tx.py` | 정상: orders+order_events+outbox 1tx; gate DENY 시 어떤 행도 없음; 검증 실패 → FAILED 행 + 이벤트 |
 | `test_db_transition_trigger.py` | 손 UPDATE `FILLED→SUBMITTED` RAISE; `order_events` 없이 status UPDATE RAISE; filled 감소 RAISE; version 자동 증가 |
-| `test_outbox_dispatcher.py` | PENDING→DONE(SUBMITTED→ACK); `SentUnknownError` → UNKNOWN & 재전송 없음(어댑터 호출 1회 단언); 회로 OPEN → not_before 연기; DEAD 후 FAILED |
+| `test_outbox_dispatcher.py` | PENDING→DONE(SUBMITTED→ACK); `SentUnknownError` → UNKNOWN & 재전송 없음(어댑터 호출 1회 단언); 회로 OPEN → not_before 연기; 전송 전 DEAD → `FAILED(SEND_ABANDONED)`, 전송 후 DEAD → UNKNOWN 유지 |
 | `test_inbox_processor.py` | 부분→전량 체결; 중복 이벤트 무시(fills 1행); CANCELLED with filled>0; 매칭 없는 이벤트 IGNORED |
 | `test_unknown_resolver.py` | 역조회 ACK 채택; NOT_FOUND 2회+120s → FAILED; 상한 초과 → safety control ACTIVE + 이후 submit DENY |
 | `test_restart_recovery.py` | lease 만료 SENDING → UNKNOWN → 해소; 복구 중 submit 거부; 기존 recovery_wiring 규칙(FILLED는 tick 위임) 유지 |
