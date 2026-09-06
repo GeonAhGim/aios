@@ -297,3 +297,26 @@ export { ScaleBindingError, bindScale } from "./render/scaleBinding";
 
 export type { ScriptCompilePreviewResult, ScriptPreviewSyncResult } from "./plugins/scriptPreview";
 export { SCRIPT_PREVIEW_PLOT_SPEC, clearScriptPreview, syncScriptPreview } from "./plugins/scriptPreview";
+
+export type { VerifiedKernelPin } from "./compute/verifiedIndicators";
+export { VERIFIED_KERNEL_PINS, isVerifiedIndicator, resolveVerifiedIndicators } from "./compute/verifiedIndicators";
+
+export type {
+  Bar,
+  ClientEngineErrorCode,
+  ComputeIndicatorSeriesArgs,
+  IncrementalIndicator,
+  IndicatorOutputs,
+  IndicatorParams,
+  IndicatorSeriesResult,
+} from "./compute/clientEngine";
+export {
+  CLIENT_ENGINE_COMPUTE_TASK,
+  ClientEngineError,
+  KERNEL_FACTORIES,
+  computeIndicatorSeries,
+  createClientIncrementalIndicator,
+} from "./compute/clientEngine";
+
+export type { WorkerPool, WorkerPoolBackend, WorkerPoolErrorCode, WorkerPoolHandler } from "./compute/workerPool";
+export { WorkerPoolError, createInlineWorkerPoolBackend, createWorkerPool } from "./compute/workerPool";
