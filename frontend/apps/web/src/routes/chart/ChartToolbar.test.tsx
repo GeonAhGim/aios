@@ -15,6 +15,24 @@ afterEach(() => {
   createAlertMutateAsync.mockReset();
 });
 
+function baseLayout() {
+  return {
+    name: "기본 레이아웃",
+    onNameChange: vi.fn(),
+    onSave: vi.fn(),
+    onDelete: vi.fn(),
+    saveStatus: "idle" as const,
+    onReload: vi.fn(),
+    panels: [{ id: "panel-1", label: "BTCUSDT · 1h" }],
+    activePanelId: "panel-1",
+    onSelectPanel: vi.fn(),
+    onAddPanel: vi.fn(),
+    onRemovePanel: vi.fn(),
+    isWatchlisted: false,
+    onToggleWatchlist: vi.fn(),
+  };
+}
+
 function baseProps() {
   return {
     venue: "BITGET" as const,
@@ -35,6 +53,7 @@ function baseProps() {
     instrumentId: "BTCUSDT",
     currentClose: 50200,
     selectedIndicatorIds: [] as readonly string[],
+    layout: baseLayout(),
   };
 }
 

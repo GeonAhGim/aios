@@ -21,8 +21,9 @@ import {
   type ReplayFrame,
   type ReplayState,
 } from "@aios/chart-engine/src/replay/replayController";
+import type { ChartingPort } from "@aios/chart-engine/src/layout/persistence";
 import type { CandleQueryParams, CandleQueryResult } from "@aios/api-client";
-import { ApiError, createMarketDataClient } from "@aios/api-client";
+import { ApiError, createChartingClient, createMarketDataClient } from "@aios/api-client";
 import { useAuthStore } from "@aios/shared-hooks";
 import { routeApiError, type SeriesKey, type Timeframe, type Venue } from "@aios/shared-types";
 import { CandlestickChart, type CandlestickPoint, EmptyState, LoadingState, PageHeader } from "@aios/ui-web";
@@ -34,6 +35,7 @@ import { ErrorMessage } from "../../components/ErrorMessage";
 import { ChartToolbar } from "./ChartToolbar";
 import { IndicatorPicker } from "./IndicatorPicker";
 import { StrategyMarkers } from "./StrategyMarkers";
+import { useChartLayout, type ChartViewSnapshot } from "./useChartLayout";
 
 // CH-6a — 화면 조립 리프: chart-engine의 CH-2(candleStream)·CH-3(overlayRegistry)
 // ·CH-4(drawings)·CH-7(replayController) 공개 API를 이 화면에서만 소비한다.
@@ -46,11 +48,14 @@ const DEFAULT_TIMEFRAME: Timeframe = "1h";
 
 const baseUrl = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8000";
 const marketDataClient = createMarketDataClient(baseUrl, () => useAuthStore.getState().token);
+const chartingClient = createChartingClient(baseUrl, () => useAuthStore.getState().token);
 
 export type FetchCandles = (params: CandleQueryParams) => Promise<CandleQueryResult>;
 
 interface ChartPageProps {
   fetchCandles?: FetchCandles;
+  // CH-6b: CH-8 레이아웃 CRUD 포트 — 테스트에서 서버 왕복 없이 주입한다(fetchCandles와 동일 관용).
+  chartingPort?: ChartingPort;
   now?: Date;
 }
 
@@ -126,8 +131,12 @@ const IDLE_REPLAY_STATE: ReplayState = {
   atEnd: true,
 };
 
-export function ChartPage({ fetchCandles = marketDataClient.getCandles, now }: ChartPageProps) {
-  const [searchParams] = useSearchParams();
+export function ChartPage({
+  fetchCandles = marketDataClient.getCandles,
+  chartingPort = chartingClient,
+  now,
+}: ChartPageProps) {
+  const [searchParams, setSearchParams] = useSearchParams();
   const instrumentId = searchParams.get("instrument_id");
   const [venue, setVenue] = useState<Venue>(DEFAULT_VENUE);
   const [timeframe, setTimeframe] = useState<Timeframe>(DEFAULT_TIMEFRAME);
@@ -144,6 +153,24 @@ export function ChartPage({ fetchCandles = marketDataClient.getCandles, now }: C
 
   const [selectedIndicatorIds, setSelectedIndicatorIds] = useState<string[]>([]);
   const overlayEntries: readonly OverlayEntry[] = useMemo(() => createDefaultOverlayRegistry().list(), []);
+
+  // CH-6b: 현재 화면(venue/timeframe/instrumentId/지표)을 CH-8 레이아웃의 활성 패널과
+  // 양방향으로 거울처럼 맞춘다 — 실제 복원·저장·충돌 판정은 useChartLayout 소관.
+  const layoutView: ChartViewSnapshot = useMemo(
+    () => ({ instrumentId: instrumentId ?? "", venue, timeframe, indicatorIds: selectedIndicatorIds }),
+    [instrumentId, venue, timeframe, selectedIndicatorIds],
+  );
+  const layout = useChartLayout({
+    port: chartingPort,
+    enabled: instrumentId !== null,
+    view: layoutView,
+    onApplyView: (v) => {
+      setTimeframe(v.timeframe as Timeframe);
+      setSelectedIndicatorIds([...v.indicatorIds]);
+      if (v.instrumentId && v.instrumentId !== instrumentId) setSearchParams({ instrument_id: v.instrumentId });
+      if (v.venue !== venue) setVenue(v.venue as Venue);
+    },
+  });
 
   const end = anchor.toISOString();
   const TIMEFRAME_MS: Record<Timeframe, number> = {
@@ -227,6 +254,9 @@ export function ChartPage({ fetchCandles = marketDataClient.getCandles, now }: C
     setSelectedIndicatorIds((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
   }
 
+  const restoreRouted = layout.restoreError ? routeApiError(layout.restoreError) : null;
+  const saveRouted = layout.saveStatus === "error" ? routeApiError(layout.saveError) : null;
+
   return (
     <AppShell>
       <div className="max-w-5xl space-y-4">
@@ -237,6 +267,29 @@ export function ChartPage({ fetchCandles = marketDataClient.getCandles, now }: C
             {instrumentId}
           </p>
         </div>
+
+        {layout.status === "restore_failed" && (
+          <ErrorMessage
+            errorCode={layout.restoreError instanceof ApiError ? layout.restoreError.errorCode : undefined}
+            message={layout.restoreError instanceof Error ? layout.restoreError.message : undefined}
+            traceId={layout.restoreError instanceof ApiError ? layout.restoreError.traceId : undefined}
+            retryAfterSec={restoreRouted?.kind === "backoff_retry" ? restoreRouted.afterSec : undefined}
+            onRetry={
+              restoreRouted?.kind === "refetch_retry" || restoreRouted?.kind === "backoff_retry"
+                ? layout.retryRestore
+                : undefined
+            }
+          />
+        )}
+        {saveRouted && (
+          <ErrorMessage
+            errorCode={layout.saveError instanceof ApiError ? layout.saveError.errorCode : undefined}
+            message={layout.saveError instanceof Error ? layout.saveError.message : undefined}
+            traceId={layout.saveError instanceof ApiError ? layout.saveError.traceId : undefined}
+            retryAfterSec={saveRouted.kind === "backoff_retry" ? saveRouted.afterSec : undefined}
+            onRetry={saveRouted.kind === "refetch_retry" || saveRouted.kind === "backoff_retry" ? layout.save : undefined}
+          />
+        )}
 
         <ChartToolbar
           venue={venue}
@@ -257,6 +310,25 @@ export function ChartPage({ fetchCandles = marketDataClient.getCandles, now }: C
           instrumentId={instrumentId}
           selectedIndicatorIds={selectedIndicatorIds}
           currentClose={points.length > 0 ? points[points.length - 1]!.close : null}
+          layout={{
+            name: layout.layoutName,
+            onNameChange: layout.rename,
+            onSave: () => void layout.save(),
+            onDelete: () => void layout.remove(),
+            saveStatus: layout.saveStatus,
+            onReload: () => void layout.reload(),
+            panels: layout.model.panels.map((p) => ({ id: p.id, label: `${p.instrument.instrumentId} · ${p.timeframe}` })),
+            activePanelId: layout.model.activePanelId,
+            onSelectPanel: layout.setActivePanel,
+            onAddPanel: layout.addPanel,
+            onRemovePanel: () => {
+              if (layout.model.activePanelId) layout.removePanel(layout.model.activePanelId);
+            },
+            isWatchlisted: layout.model.watchlists.some((w) =>
+              w.entries.some((e) => e.instrumentId === instrumentId && e.venue === venue),
+            ),
+            onToggleWatchlist: () => layout.toggleWatchlistEntry({ instrumentId, venue, symbol: instrumentId }),
+          }}
         />
 
         <IndicatorPicker available={overlayEntries} selectedIds={selectedIndicatorIds} onToggle={toggleIndicator} />

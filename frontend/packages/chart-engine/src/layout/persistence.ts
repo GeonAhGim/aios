@@ -23,7 +23,8 @@
  */
 
 import { routeApiError } from "@aios/shared-types";
-import { type DrawingCollection, fromDrawingsDocument, toDrawingsDocument } from "../drawings/serialize";
+import type { DrawingCollection } from "../drawings/model";
+import { fromDrawingsDocument, toDrawingsDocument } from "../drawings/serialize";
 import { type ChartLayoutModel, decodeLayoutModel, encodeLayoutModel } from "./layoutModel";
 
 export interface LayoutMeta {
@@ -131,9 +132,12 @@ export async function createLayout(
   return { meta: toLayoutMeta(record), model: decodeLayoutModel(record.layoutState) };
 }
 
+// GET에는 낙관적 잠금이 없어 classify()가 "conflict"를 반환할 일이 없다 —
+// deleteLayout과 동일하게 LoadResult(ok|not_found)로 명시적으로 좁힌다.
 export async function loadLayout(port: ChartingPort, layoutId: string): Promise<LoadResult<SavedLayout>> {
   const outcome = await classify(() => port.getLayout(layoutId));
-  if (outcome.kind !== "ok") return outcome;
+  if (outcome.kind === "not_found") return outcome;
+  if (outcome.kind === "conflict") throw new Error("unexpected conflict classification on getLayout");
   const record = outcome.value;
   return { kind: "ok", value: { meta: toLayoutMeta(record), model: decodeLayoutModel(record.layoutState) } };
 }
@@ -179,7 +183,8 @@ export interface SavedDrawings {
 
 export async function loadDrawings(port: ChartingPort, layoutId: string): Promise<LoadResult<SavedDrawings>> {
   const outcome = await classify(() => port.getDrawings(layoutId));
-  if (outcome.kind !== "ok") return outcome;
+  if (outcome.kind === "not_found") return outcome;
+  if (outcome.kind === "conflict") throw new Error("unexpected conflict classification on getDrawings");
   const record = outcome.value;
   return { kind: "ok", value: { meta: toDrawingsMeta(record), drawings: fromDrawingsDocument(record.document) } };
 }

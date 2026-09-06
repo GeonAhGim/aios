@@ -6,10 +6,15 @@
 import { DRAWING_KINDS, type DrawingKind } from "@aios/chart-engine/src/drawings/model";
 import type { ReplayStatus } from "@aios/chart-engine/src/replay/replayController";
 import type { Timeframe, Venue } from "@aios/shared-types";
-import { Button, Field, Select } from "@aios/ui-web";
+import { Alert, Button, Field, Input, Select } from "@aios/ui-web";
 import type { KeyboardEvent } from "react";
 import { useRef, useState } from "react";
 import { AlertFromChart } from "./AlertFromChart";
+import type { ChartLayoutSaveStatus } from "./useChartLayout";
+
+// CH-6b: CH-8(task-1593) 레이아웃 CRUD의 화면 배선. 실제 복원·저장·충돌 판정은
+// useChartLayout이 전담하고, 여기서는 그 결과(panels/activePanelId/saveStatus 등)를
+// 받아 버튼·탭으로만 노출한다 — fetch를 이 파일에서 직접 부르지 않는다(decision).
 
 // CH-6a: 조립 화면의 툴바. 실제 렌더링·값 계산 없이 로컬 상태만 위아래로
 // 오간다 — venue/timeframe은 ChartPage의 fetch 키를, 그리기 도구·재생
@@ -31,6 +36,27 @@ const DRAWING_LABELS: Record<DrawingKind, string> = {
 interface ButtonSpec {
   readonly id: string;
   readonly disabled: boolean;
+}
+
+export interface ChartLayoutPanelTab {
+  readonly id: string;
+  readonly label: string;
+}
+
+export interface ChartLayoutControls {
+  readonly name: string;
+  readonly onNameChange: (name: string) => void;
+  readonly onSave: () => void;
+  readonly onDelete: () => void;
+  readonly saveStatus: ChartLayoutSaveStatus;
+  readonly onReload: () => void;
+  readonly panels: readonly ChartLayoutPanelTab[];
+  readonly activePanelId: string | null;
+  readonly onSelectPanel: (id: string) => void;
+  readonly onAddPanel: () => void;
+  readonly onRemovePanel: () => void;
+  readonly isWatchlisted: boolean;
+  readonly onToggleWatchlist: () => void;
 }
 
 interface ChartToolbarProps {
@@ -55,6 +81,8 @@ interface ChartToolbarProps {
   instrumentId: string;
   currentClose: number | null;
   selectedIndicatorIds: readonly string[];
+  // CH-6b/CH-8: 서버 저장·복원 배선(레이아웃 이름·저장·삭제·패널 탭·관심목록·충돌 안내).
+  layout: ChartLayoutControls;
 }
 
 /** WAI-ARIA toolbar 패턴: 그룹 내 버튼은 하나만 tabIndex=0(roving), 화살표로 이동한다. */
@@ -111,6 +139,7 @@ export function ChartToolbar({
   instrumentId,
   currentClose,
   selectedIndicatorIds,
+  layout,
 }: ChartToolbarProps) {
   const [alertDialogOpen, setAlertDialogOpen] = useState(false);
   const buttons: ButtonSpec[] = [
@@ -121,6 +150,19 @@ export function ChartToolbar({
     { id: "replay-step-forward", disabled: replayDisabled },
   ];
   const { groupRef, tabIndexFor, onFocusButton, onKeyDown } = useRovingToolbar(buttons);
+  const panelButtons: ButtonSpec[] = layout.panels.map((p) => ({ id: `panel-${p.id}`, disabled: false }));
+  const {
+    groupRef: panelGroupRef,
+    tabIndexFor: panelTabIndexFor,
+    onFocusButton: onFocusPanel,
+    onKeyDown: onPanelKeyDown,
+  } = useRovingToolbar(panelButtons);
+  const conflictMessage =
+    layout.saveStatus === "conflict"
+      ? "다른 세션이 먼저 저장했습니다. 자동으로 덮어쓰지 않습니다 — 최신 내용을 다시 불러온 뒤 다시 시도하세요."
+      : layout.saveStatus === "not_found"
+        ? "이 레이아웃은 다른 곳에서 삭제되었습니다."
+        : null;
 
   function toggleTool(kind: DrawingKind): void {
     onDrawingToolChange(drawingTool === kind ? null : kind);
@@ -252,6 +294,76 @@ export function ChartToolbar({
         currentClose={currentClose}
         selectedIndicatorIds={selectedIndicatorIds}
       />
+
+      <Field label="레이아웃 이름">
+        <Input
+          aria-label="레이아웃 이름"
+          value={layout.name}
+          onChange={(e) => layout.onNameChange(e.target.value)}
+        />
+      </Field>
+      <Button type="button" variant="secondary" size="sm" disabled={layout.saveStatus === "saving"} onClick={layout.onSave}>
+        레이아웃 저장
+      </Button>
+      <Button type="button" variant="ghost" size="sm" onClick={layout.onDelete}>
+        레이아웃 삭제
+      </Button>
+      <Button type="button" variant="ghost" size="sm" aria-pressed={layout.isWatchlisted} onClick={layout.onToggleWatchlist}>
+        {layout.isWatchlisted ? "관심목록 제거" : "관심목록 추가"}
+      </Button>
+
+      <div
+        ref={panelGroupRef}
+        role="tablist"
+        aria-label="차트 패널"
+        className="flex items-center gap-1"
+        onKeyDown={onPanelKeyDown}
+      >
+        {layout.panels.map((p) => {
+          const id = `panel-${p.id}`;
+          return (
+            <button
+              key={p.id}
+              id={id}
+              type="button"
+              role="tab"
+              aria-selected={p.id === layout.activePanelId}
+              tabIndex={panelTabIndexFor(id)}
+              className={
+                p.id === layout.activePanelId
+                  ? "rounded bg-surface-hover px-2 py-1 text-xs font-medium text-fg"
+                  : "rounded px-2 py-1 text-xs text-fg-secondary"
+              }
+              onFocus={() => onFocusPanel(id)}
+              onClick={() => layout.onSelectPanel(p.id)}
+            >
+              {p.label}
+            </button>
+          );
+        })}
+        <Button type="button" variant="ghost" size="sm" aria-label="패널 추가" onClick={layout.onAddPanel}>
+          ＋
+        </Button>
+        <Button
+          type="button"
+          variant="ghost"
+          size="sm"
+          aria-label="패널 제거"
+          disabled={layout.panels.length <= 1}
+          onClick={layout.onRemovePanel}
+        >
+          －
+        </Button>
+      </div>
+
+      {conflictMessage && (
+        <Alert tone="warning">
+          <p>{conflictMessage}</p>
+          <Button type="button" variant="secondary" size="sm" onClick={layout.onReload}>
+            다시 불러오기
+          </Button>
+        </Alert>
+      )}
     </div>
   );
 }
