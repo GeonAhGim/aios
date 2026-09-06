@@ -46,9 +46,10 @@ from src.exchanges.common.adapter import ExchangeAdapter
 from src.foundation.execution_ownership.ports.repository import ExecutionLeaseRepository
 from src.services.credential_resolver import CredentialNotFoundError
 from src.services.execution_loop.equity_tracker import ExecutionEquityTracker
-from src.services.execution_loop.tick import run_execution_tick
+from src.services.execution_loop.tick import FenceReaderFactory, run_execution_tick
 from src.services.order_service.gate import PreSubmitGate
 from src.services.order_service.submit import PublishFn
+from src.services.order_service.worm_decision_check import DecisionReader
 
 logger = logging.getLogger(__name__)
 
@@ -80,6 +81,8 @@ class ExecutionLoopScheduler:
         max_concurrent_ticks: int = DEFAULT_MAX_CONCURRENT_TICKS,
         equity_tracker: ExecutionEquityTracker | None = None,
         ttl_override_seconds: float | None = None,
+        fence_reader_factory: FenceReaderFactory | None = None,
+        decision_reader: DecisionReader | None = None,
     ) -> None:
         self._pool = pool
         self._resolve_adapter = resolve_adapter
@@ -89,6 +92,8 @@ class ExecutionLoopScheduler:
         self._distrust_monitor = distrust_monitor
         self._lease_repo = lease_repo
         self._owner_id = owner_id
+        self._fence_reader_factory = fence_reader_factory
+        self._decision_reader = decision_reader
         self._lease_ttl_seconds = (
             ttl_override_seconds
             if ttl_override_seconds is not None
@@ -158,6 +163,8 @@ class ExecutionLoopScheduler:
                     publish=self._publish,
                     pre_submit_gate=self._pre_submit_gate,
                     distrust_monitor=self._distrust_monitor,
+                    fence_reader_factory=self._fence_reader_factory,
+                    decision_reader=self._decision_reader,
                 )
             except Exception as exc:
                 report.failed[execution_id] = f"{type(exc).__name__}: {exc}"

@@ -11,6 +11,7 @@ from __future__ import annotations
 
 from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass, field
+from decimal import Decimal
 from enum import Enum
 from uuid import UUID
 
@@ -38,6 +39,14 @@ class OrderContext:
     # None(기본값)이면 신선도 비교를 건너뛴다 — 지금까지 이 값을 관측해 둔
     # 호출부가 없다(마이그레이션 대기, mandate_revision_id와 동급 상태).
     observed_fence: Mapping[str, int] | None = None
+    # task-1717 P0-D — 주문 intent 결속 키(I10). `fenced_submit`이 WORM
+    # `inputs_snapshot`과 실제 주문을 대조할 때 쓴다(decision_binding.py).
+    # None인 채로 두면(예: `ExecutionService.start()`의 실행-시작 게이트처럼
+    # 특정 주문이 아직 없는 호출부) 이 컨텍스트로 만든 결정은 fenced_submit
+    # 결속 검증을 통과할 수 없다 — 실제 주문 단위 호출부만 채운다.
+    symbol: str | None = None
+    side: str | None = None
+    quantity: Decimal | None = None
 
 
 @dataclass(frozen=True)
@@ -55,6 +64,12 @@ class GateDecision:
     # pre_submit 위임 전, 그 파일 docstring) 아직 None을 채운다. 값을 채우는
     # 호출자는 R-32/evaluate_pre_submit 위임 리프에서 생긴다.
     decision_id: UUID | None = None
+    # task-1717 P0-D — mandate 자체 정책 결정의 id(`mandates` bounded
+    # context의 `PolicyDecisionView.id`, risk_gate WORM `risk_decision`과는
+    # 별개 테이블/스키마). mandate가 연결되지 않았거나 평가되지 않았으면
+    # None — `decision_id`(risk_gate)와 달리 fail-closed 강제 대상이
+    # 아니다(감사·조회용 참조).
+    policy_decision_id: UUID | None = None
 
 
 PreSubmitGate = Callable[[OrderContext], Awaitable[GateDecision]]

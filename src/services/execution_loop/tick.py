@@ -15,10 +15,11 @@ from __future__ import annotations
 
 import json
 import logging
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from datetime import datetime, timezone
 from decimal import Decimal
 from typing import Any
+from uuid import UUID
 
 import asyncpg
 
@@ -37,17 +38,21 @@ from src.services.execution_loop.fsm_writer import _make_fsm_state_writer
 from src.services.execution_loop.market_state import build_market_state
 from src.services.execution_loop.pending_fill import handle_pending_fill_check
 from src.services.execution_loop.position import compute_position_quantity
-from src.services.execution_loop.pre_submit_check import is_submission_allowed
+from src.services.execution_loop.pre_submit_check import evaluate_submission_gate
 from src.services.execution_loop.risk_inputs_assembler import RiskInputCaches
 from src.services.execution_loop.tick_risk_phase import (
     default_recorder,
     run_pre_trade_risk_phase,
 )
-from src.services.order_service.gate import PreSubmitGate
+from src.services.order_service.fenced_submit import FenceReader
+from src.services.order_service.gate import GateOutcome, PreSubmitGate
 from src.services.order_service.submit import PublishFn
+from src.services.order_service.worm_decision_check import DecisionReader
 from src.services.risk_decision_recorder import RiskDecisionRecorder
 from src.services.safety.distrust_wiring import check_and_persist_distrust
 from src.services.safety.reference_quotes import ReferenceQuoteProvider
+
+FenceReaderFactory = Callable[[UUID, str, str], FenceReader]
 
 _ENTRY_DENYING_LEVELS = frozenset({DataDistrustLevel.SUSPICIOUS, DataDistrustLevel.DISTRUSTED})
 
@@ -101,6 +106,8 @@ async def run_execution_tick(
     distrust_providers: Sequence[ReferenceQuoteProvider] = (),
     recorder: RiskDecisionRecorder | None = None,
     candle_cache: CandleHistoryCache | None = None,
+    fence_reader_factory: FenceReaderFactory | None = None,
+    decision_reader: DecisionReader | None = None,
 ) -> None:
     execution, fsm_config, certified_badge = await _load_execution_context(pool, execution_id)
     current_fsm_state = FSMState(execution["fsm_state"])
@@ -230,15 +237,26 @@ async def run_execution_tick(
     # 관통시키지 않는다 — 여기서 거부하면 executor.execute()를 아예 안 부르므로
     # 동일한 안전효과를 얻으면서 FSM은 전혀 건드리지 않는다(전이 이후에
     # 거부하면 PENDING류에 영구히 갇히는 #2026-09-02-39류 결함을 재현하게 됨).
-    allowed = await is_submission_allowed(
-        pre_submit_gate,
-        user_id=execution["user_id"],
-        execution_id=execution_id,
-        exchange=adapter.get_capabilities().exchange_name,
-        observed_fence=phase.fence_snapshot,  # R-36 — PRE_TRADE가 관측한 F0 관통
-    )
-    if not allowed:
-        return
+    exchange_name = adapter.get_capabilities().exchange_name
+    gate_decision = None
+    if pre_submit_gate is not None:
+        gate_decision = await evaluate_submission_gate(
+            pre_submit_gate,
+            user_id=execution["user_id"],
+            execution_id=execution_id,
+            exchange=exchange_name,
+            observed_fence=phase.fence_snapshot,  # R-36 — PRE_TRADE가 관측한 F0 관통
+            # task-1717 P0-D — I10 결속 키. fenced_submit이 이 값들과 실제 주문을
+            # 대조하므로 Executor가 만들 Order와 반드시 같은 값이어야 한다 —
+            # `phase.allocation`(REDUCE로 축소됐을 수 있는 사본, t6)을 써야
+            # 한다, 이 시점의 `allocation`(축소 전)이 아니다. 아래
+            # executor.execute()도 `phase.allocation`을 그대로 넘긴다.
+            symbol=phase.allocation.symbol,
+            side=signal.direction.value,
+            quantity=phase.allocation.approved_quantity,
+        )
+        if gate_decision.outcome != GateOutcome.ALLOW:
+            return
 
     writer = await _make_fsm_state_writer(pool)
     try:
@@ -253,6 +271,11 @@ async def run_execution_tick(
         )
         return
 
+    read_fences = (
+        fence_reader_factory(execution["user_id"], exchange_name, f"exec:{execution_id}")
+        if fence_reader_factory is not None
+        else None
+    )
     await executor.execute(
         phase.allocation,
         phase.risk_result,  # decision_id 실림 — submit_order까지 관통(§3.9 끝문단)
@@ -267,4 +290,7 @@ async def run_execution_tick(
         fsm_state_writer=writer,
         publish=publish,
         pool=pool,
+        gate_decision=gate_decision,
+        read_fences=read_fences,
+        decision_reader=decision_reader,
     )
