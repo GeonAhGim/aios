@@ -11,12 +11,10 @@ UPDATE해 트리거 자체가 살아있음을 증명" 재현을 `risk_decision`�
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
-from pathlib import Path
 from uuid import uuid4
 
 import asyncpg
 import pytest
-from dotenv import dotenv_values
 from pydantic import ValidationError
 
 from src.core.risk.decision import GateKind, RiskDecision, RiskOutcome
@@ -25,19 +23,12 @@ from src.foundation.risk_gate.adapters.postgres_decision_repository import (
 )
 from tests.integration.conftest import create_test_user
 
-
-def _asyncpg_dsn() -> str:
-    env = dotenv_values(Path(__file__).resolve().parents[3] / ".env")
-    url = env.get("DATABASE_URL")
-    assert url, ".env에 DATABASE_URL이 없습니다"
-    return url.replace("postgresql+asyncpg://", "postgresql://")
-
-
-@pytest.fixture
-async def pool():
-    p = await asyncpg.create_pool(_asyncpg_dsn(), min_size=1, max_size=4)
-    yield p
-    await p.close()
+# `pool` 픽스처는 tests/adversarial/risk/conftest.py가 제공한다
+# (os.environ["DATABASE_URL"] 사용 — tests/conftest.py가 TEST_DATABASE_URL을
+# 여기로 옮겨 둔다). 이전에는 여기서 .env 파일을 직접 읽는 별도 픽스처를 뒀는데,
+# 그러면 TEST_DATABASE_URL 오버라이드를 건너뛰고 개발 DB(aios_dev)에 그대로
+# 연결돼 conftest.py가 막으려는 "테스트가 dev/prod DB에 연결"이 실제로
+# 벌어졌다(QA에서 발견·수정).
 
 
 @pytest.fixture
