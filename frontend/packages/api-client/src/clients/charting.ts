@@ -59,6 +59,26 @@ export interface PutDrawingsInput {
   readonly drawings: readonly unknown[];
 }
 
+// task-1905(CH-17c): CH-17b(task-1904) indicator-templates CRUD. `template`은
+// layoutState와 동일 원칙 — CH-17a templateModel.ts의 encodeTemplate() 출력을
+// 그대로 실어보내는 불투명 데이터로 취급하고, 여기서는 내부 스키마를 재검증하지
+// 않는다(decodeTemplate()이 화면 쪽 소관).
+export interface ChartIndicatorTemplateRecord {
+  readonly id: string;
+  readonly tenantId: string;
+  readonly ownerSubjectId: string;
+  readonly name: string;
+  readonly template: Record<string, unknown>;
+  readonly revision: number;
+  readonly createdAt: string;
+  readonly updatedAt: string;
+}
+
+export interface CreateChartIndicatorTemplateInput {
+  readonly name: string;
+  readonly template: Record<string, unknown>;
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
@@ -96,6 +116,20 @@ function toLayoutRecord(raw: unknown): ChartLayoutRecord {
   };
 }
 
+function toIndicatorTemplateRecord(raw: unknown): ChartIndicatorTemplateRecord {
+  if (!isRecord(raw)) throw new Error("charting client: indicator template response is not an object");
+  return {
+    id: requireString(raw, "id"),
+    tenantId: requireString(raw, "tenantId"),
+    ownerSubjectId: requireString(raw, "ownerSubjectId"),
+    name: requireString(raw, "name"),
+    template: requireRecord(raw, "template"),
+    revision: requireNumber(raw, "revision"),
+    createdAt: requireString(raw, "createdAt"),
+    updatedAt: requireString(raw, "updatedAt"),
+  };
+}
+
 // schema_version만 복원한다 — drawings[].lineWidth 등은 애초에 camelCase라
 // keysToSnake(전송)→keysToCamel(수신) 왕복으로 원형 그대로다.
 function toDrawingsRecord(raw: unknown): DrawingsDocumentRecord {
@@ -123,6 +157,10 @@ class ChartingApiClient extends ApiClientBase {
 
   private drawingsPath(layoutId: string): string {
     return resolvePath("charting.layouts.drawings").replace(":layoutId", encodeURIComponent(layoutId));
+  }
+
+  private templateItemPath(templateId: string): string {
+    return resolvePath("charting.indicatorTemplates.item").replace(":templateId", encodeURIComponent(templateId));
   }
 
   async createLayout(input: CreateChartLayoutInput): Promise<ChartLayoutRecord> {
@@ -175,6 +213,25 @@ class ChartingApiClient extends ApiClientBase {
     });
     return toDrawingsRecord(data);
   }
+
+  async createIndicatorTemplate(input: CreateChartIndicatorTemplateInput): Promise<ChartIndicatorTemplateRecord> {
+    const data = await this.requestByRoute<unknown>("charting.indicatorTemplates.base", {
+      method: "POST",
+      body: JSON.stringify(keysToSnake({ name: input.name, template: input.template })),
+    });
+    return toIndicatorTemplateRecord(data);
+  }
+
+  async listIndicatorTemplates(): Promise<readonly ChartIndicatorTemplateRecord[]> {
+    const data = await this.requestByRoute<unknown[]>("charting.indicatorTemplates.base");
+    return data.map(toIndicatorTemplateRecord);
+  }
+
+  async deleteIndicatorTemplate(templateId: string): Promise<void> {
+    await this.requestItem<void>("charting.indicatorTemplates.item", this.templateItemPath(templateId), {
+      method: "DELETE",
+    });
+  }
 }
 
 export interface ChartingClient {
@@ -185,6 +242,9 @@ export interface ChartingClient {
   deleteLayout(layoutId: string): Promise<void>;
   getDrawings(layoutId: string): Promise<DrawingsDocumentRecord>;
   putDrawings(layoutId: string, input: PutDrawingsInput): Promise<DrawingsDocumentRecord>;
+  createIndicatorTemplate(input: CreateChartIndicatorTemplateInput): Promise<ChartIndicatorTemplateRecord>;
+  listIndicatorTemplates(): Promise<readonly ChartIndicatorTemplateRecord[]>;
+  deleteIndicatorTemplate(templateId: string): Promise<void>;
 }
 
 export function createChartingClient(baseUrl: string, getToken: () => string | null): ChartingClient {
@@ -197,5 +257,8 @@ export function createChartingClient(baseUrl: string, getToken: () => string | n
     deleteLayout: (layoutId) => client.deleteLayout(layoutId),
     getDrawings: (layoutId) => client.getDrawings(layoutId),
     putDrawings: (layoutId, input) => client.putDrawings(layoutId, input),
+    createIndicatorTemplate: (input) => client.createIndicatorTemplate(input),
+    listIndicatorTemplates: () => client.listIndicatorTemplates(),
+    deleteIndicatorTemplate: (templateId) => client.deleteIndicatorTemplate(templateId),
   };
 }

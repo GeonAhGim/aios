@@ -283,6 +283,16 @@ export const API_ROUTES = defineApiRoutes({
   "charting.layouts.item": route("/v1/foundation/charting/layouts/:layoutId", true, null, true),
   "charting.layouts.drawings": route("/v1/foundation/charting/layouts/:layoutId/drawings", true, null, true),
 
+  // task-1904(CH-17b): 같은 charting.py 라우터에 얹은 지표 템플릿 CRUD(src/api/routers/
+  // charting.py post_create_indicator_template :146·get_list_indicator_templates :161·
+  // get_indicator_template_by_id :170·delete_indicator_template_by_id :181) — 전부
+  // `-> ApiResponse[...]` + `ok(...)`(DELETE는 204, http.ts가 별도 처리)라 envelope=true.
+  // charting.layouts.*와 동일 사유로 mount_v1(PLT-16) 미도달, v1Path=null. 같은 경로
+  // 공유 관용대로 base(POST+GET), item(GET+DELETE, PATCH 없음 — 템플릿은 UNIQUE(tenant_id,
+  // name) 제약 위에 생성·삭제만 있고 갱신 엔드포인트가 없다)로 묶는다.
+  "charting.indicatorTemplates.base": route("/v1/foundation/charting/indicator-templates", true, null, true),
+  "charting.indicatorTemplates.item": route("/v1/foundation/charting/indicator-templates/:templateId", true, null, true),
+
   // task-1731(CH-11): src/api/routers/indicators.py 원문 확인(IND-12, task-1730
   // 934b8d1) — `APIRouter(prefix="/v1/indicators")`(indicators.py:37), `GET ""`
   // (:54) `-> ApiResponse[IndicatorListView]` + `ok(...)`(:71), router_registry.py

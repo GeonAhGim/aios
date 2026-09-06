@@ -33,6 +33,7 @@ const AUTH_TOKENS = "src/services/auth/tokens.py";
 const SECRET_REF = "src/core/security/secret_ref.py";
 const INDICATOR_SPEC = "src/core/indicators/spec.py";
 const INDICATORS_SCHEMA = "src/api/schemas/indicators.py";
+const CHARTING_V1 = "src/foundation/charting/contracts/v1.py";
 
 export const CONTRACT_FIELD_SPECS: readonly ContractFieldSpec[] = [
   // ---- positionView.ts (§3.2 B) ----
@@ -246,6 +247,14 @@ export const CONTRACT_FIELD_SPECS: readonly ContractFieldSpec[] = [
     className: "IndicatorListItemView",
     parser: "toCatalogItem",
     fields: ["name", "tier", "category", "version", "hash", "inputs", "outputs"],
+  },
+
+  // ---- charting.ts toIndicatorTemplateRecord (CH-17c, task-1905) ----
+  {
+    file: CHARTING_V1,
+    className: "ChartIndicatorTemplateView",
+    parser: "toIndicatorTemplateRecord",
+    fields: ["id", "tenant_id", "owner_subject_id", "name", "template", "revision", "created_at", "updated_at"],
   },
 ];
 

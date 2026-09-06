@@ -36,6 +36,7 @@ import { BacktestPanel, type RunQuickBacktest } from "./BacktestPanel";
 import { ChartPanes } from "./ChartPanes";
 import { ChartToolbar } from "./ChartToolbar";
 import { CompareSymbols, type CompareSymbolRef } from "./CompareSymbols";
+import { ChartTemplates, type ChartTemplatesPort, type TemplateApplyResult } from "./ChartTemplates";
 import { IndicatorPicker } from "./IndicatorPicker";
 import { StrategyMarkers } from "./StrategyMarkers";
 import { useChartLayout, type ChartViewSnapshot } from "./useChartLayout";
@@ -60,6 +61,8 @@ export interface ChartPageProps {
   fetchCandles?: FetchCandles;
   // CH-6b: CH-8 레이아웃 CRUD 포트 — 테스트에서 서버 왕복 없이 주입한다(fetchCandles와 동일 관용).
   chartingPort?: ChartingPort;
+  // CH-17c: CH-17b 지표 템플릿 CRUD 포트 — 같은 관용으로 주입 가능하게 둔다.
+  templatesPort?: ChartTemplatesPort;
   // CH-13b: CompareSymbols의 InstrumentView 목록 조회 포트 — 같은 관용으로 주입 가능하게 둔다.
   listInstruments?: typeof marketDataClient.listInstruments;
   // BT-13: 즉시 백테스트 실행 포트 — 같은 관용으로 서버 왕복 없이 주입 가능하게 둔다.
@@ -154,6 +157,7 @@ const IDLE_REPLAY_STATE: ReplayState = {
 export function ChartPage({
   fetchCandles = marketDataClient.getCandles,
   chartingPort = chartingClient,
+  templatesPort = chartingClient,
   listInstruments = marketDataClient.listInstruments,
   runQuickBacktest = backtestsClient.runQuickBacktest,
   now,
@@ -175,6 +179,14 @@ export function ChartPage({
 
   const [selectedIndicatorIds, setSelectedIndicatorIds] = useState<string[]>([]);
   const overlayEntries: readonly OverlayEntry[] = useMemo(() => createDefaultOverlayRegistry().list(), []);
+  const knownIndicatorIds = useMemo(() => new Set(overlayEntries.map((e) => e.id)), [overlayEntries]);
+  // CH-17c: 템플릿 적용 시 CH-14 페인 배치를 재현한다 — ChartPanes.tsx의
+  // restoredHeightRatios는 최초 마운트 때만 적용되므로(파일 상단 주석), key를
+  // 올려 다시 마운트시켜야 실제로 반영된다.
+  const [appliedPaneHeightRatios, setAppliedPaneHeightRatios] = useState<Readonly<Record<string, number>> | undefined>(
+    undefined,
+  );
+  const [paneRemountKey, setPaneRemountKey] = useState(0);
   // CH-14 화면 배선: 서브패널 존재 여부는 이미 CH-8로 저장되는 selectedIndicatorIds에서
   // 파생한다(ChartPanes.tsx 상단 주석 — 새 저장 경로를 만들지 않는다).
   const selectedOverlayEntries = useMemo(
@@ -305,6 +317,12 @@ export function ChartPage({
     setSelectedIndicatorIds((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
   }
 
+  function handleTemplateApplied(result: TemplateApplyResult): void {
+    setSelectedIndicatorIds([...result.indicatorIds]);
+    setAppliedPaneHeightRatios({ ...result.paneHeightRatios });
+    setPaneRemountKey((prev) => prev + 1);
+  }
+
   const restoreRouted = layout.restoreError ? routeApiError(layout.restoreError) : null;
   const saveRouted = layout.saveStatus === "error" ? routeApiError(layout.saveError) : null;
 
@@ -382,7 +400,16 @@ export function ChartPage({
           }}
         />
 
-        <IndicatorPicker available={overlayEntries} selectedIds={selectedIndicatorIds} onToggle={toggleIndicator} />
+        <div className="flex items-start gap-2">
+          <IndicatorPicker available={overlayEntries} selectedIds={selectedIndicatorIds} onToggle={toggleIndicator} />
+          <ChartTemplates
+            port={templatesPort}
+            mainIndicatorIds={mainOverlayEntries.map((e) => e.id)}
+            subIndicatorIds={subOverlayEntries.map((e) => e.id)}
+            knownIndicatorIds={knownIndicatorIds}
+            onApplied={handleTemplateApplied}
+          />
+        </div>
 
         {query.isError ? (
           <ErrorMessage
@@ -398,11 +425,13 @@ export function ChartPage({
           <EmptyState>표시할 캔들이 없습니다.</EmptyState>
         ) : (
           <ChartPanes
+            key={paneRemountKey}
             candles={displayCandles}
             mainOverlays={mainOverlayEntries}
             subOverlays={subOverlayEntries}
             drawings={drawings}
             onRemoveSubOverlay={toggleIndicator}
+            restoredHeightRatios={appliedPaneHeightRatios}
           >
             <CandlestickChart data={points} />
           </ChartPanes>

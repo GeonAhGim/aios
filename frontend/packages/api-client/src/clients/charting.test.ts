@@ -42,20 +42,44 @@ const drawingsView = {
   updated_at: "2026-09-06T00:00:00Z",
 };
 
+const indicatorTemplateView = {
+  id: "template-1",
+  tenant_id: "tenant-1",
+  owner_subject_id: "owner-1",
+  name: "My template",
+  template: { schema_version: 1, panes: [], indicators: [] },
+  revision: 0,
+  created_at: "2026-09-07T00:00:00Z",
+  updated_at: "2026-09-07T00:00:00Z",
+  schema_version: "v1",
+};
+
 describe("charting apiPaths 레지스트리: envelope=true, v1Path 미배선", () => {
-  it.each(["charting.layouts.base", "charting.layouts.item", "charting.layouts.drawings"] as const)(
-    "%s",
-    (route) => {
-      expect(API_ROUTES[route].envelope).toBe(true);
-      expect(API_ROUTES[route].v1Path).toBeUndefined();
-    },
-  );
+  it.each([
+    "charting.layouts.base",
+    "charting.layouts.item",
+    "charting.layouts.drawings",
+    "charting.indicatorTemplates.base",
+    "charting.indicatorTemplates.item",
+  ] as const)("%s", (route) => {
+    expect(API_ROUTES[route].envelope).toBe(true);
+    expect(API_ROUTES[route].v1Path).toBeUndefined();
+  });
 
   it("legacyPath는 charting.py 원문(§9.6 CH-5)과 1:1이다", () => {
     expect(API_ROUTES["charting.layouts.base"].legacyPath).toBe("/v1/foundation/charting/layouts");
     expect(API_ROUTES["charting.layouts.item"].legacyPath).toBe("/v1/foundation/charting/layouts/:layoutId");
     expect(API_ROUTES["charting.layouts.drawings"].legacyPath).toBe(
       "/v1/foundation/charting/layouts/:layoutId/drawings",
+    );
+  });
+
+  it("legacyPath는 charting.py 원문(CH-17b, task-1904)과 1:1이다", () => {
+    expect(API_ROUTES["charting.indicatorTemplates.base"].legacyPath).toBe(
+      "/v1/foundation/charting/indicator-templates",
+    );
+    expect(API_ROUTES["charting.indicatorTemplates.item"].legacyPath).toBe(
+      "/v1/foundation/charting/indicator-templates/:templateId",
     );
   });
 });
@@ -183,5 +207,63 @@ describe("createChartingClient", () => {
   it("negative: 응답에 필수 필드가 없으면 폴백하지 않고 throw한다(미지 필드 폴백 금지)", async () => {
     stubFetch({ data: { ...layoutView, revision: undefined }, meta: { trace_id: "t-1", as_of: null } });
     await expect(makeClient().getLayout("layout-1")).rejects.toThrow(/revision/);
+  });
+
+  // CH-17c(task-1905): CH-17b(task-1904) indicator-templates CRUD.
+  it("createIndicatorTemplate: POST /indicator-templates, body가 snake_case로 나가고 응답은 camelCase로 돌아온다", async () => {
+    const fetchMock = stubFetch(
+      { data: indicatorTemplateView, meta: { trace_id: "t-1", as_of: "2026-09-07T00:00:00Z" } },
+      201,
+    );
+
+    const result = await makeClient().createIndicatorTemplate({
+      name: "My template",
+      template: { schemaVersion: 1, panes: [], indicators: [] },
+    });
+
+    const [url, init] = requestOf(fetchMock);
+    expect(url).toBe("https://api.example.test/v1/foundation/charting/indicator-templates");
+    expect(init.method).toBe("POST");
+    expect(JSON.parse(init.body as string)).toEqual({
+      name: "My template",
+      template: { schema_version: 1, panes: [], indicators: [] },
+    });
+    expect(result).toEqual({
+      id: "template-1",
+      tenantId: "tenant-1",
+      ownerSubjectId: "owner-1",
+      name: "My template",
+      template: { schemaVersion: 1, panes: [], indicators: [] },
+      revision: 0,
+      createdAt: "2026-09-07T00:00:00Z",
+      updatedAt: "2026-09-07T00:00:00Z",
+    });
+  });
+
+  it("listIndicatorTemplates: GET /indicator-templates, 배열 그대로 매핑한다", async () => {
+    const fetchMock = stubFetch({
+      data: [indicatorTemplateView],
+      meta: { trace_id: "t-1", as_of: "2026-09-07T00:00:00Z" },
+    });
+    const result = await makeClient().listIndicatorTemplates();
+    expect(requestOf(fetchMock)[0]).toBe("https://api.example.test/v1/foundation/charting/indicator-templates");
+    expect(result).toHaveLength(1);
+    expect(result[0]?.id).toBe("template-1");
+  });
+
+  it("deleteIndicatorTemplate: DELETE /indicator-templates/:id, 204는 몸체 없이 성공한다", async () => {
+    const fetchMock = stubFetch(undefined, 204);
+    await expect(makeClient().deleteIndicatorTemplate("template-1")).resolves.toBeUndefined();
+    const [url, init] = requestOf(fetchMock);
+    expect(url).toBe("https://api.example.test/v1/foundation/charting/indicator-templates/template-1");
+    expect(init.method).toBe("DELETE");
+  });
+
+  it("negative: 템플릿 응답에 필수 필드가 없으면 폴백하지 않고 throw한다(미지 필드 폴백 금지)", async () => {
+    stubFetch({
+      data: [{ ...indicatorTemplateView, template: undefined }],
+      meta: { trace_id: "t-1", as_of: "2026-09-07T00:00:00Z" },
+    });
+    await expect(makeClient().listIndicatorTemplates()).rejects.toThrow(/template/);
   });
 });
