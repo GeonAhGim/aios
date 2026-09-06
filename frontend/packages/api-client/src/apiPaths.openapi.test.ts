@@ -83,6 +83,11 @@ const GHOST_PATH_WHITELIST: ReadonlySet<ApiRouteName> = new Set<ApiRouteName>([
 // router_registry.py include_router)하지만 스냅샷(f800c1a)은 그보다 앞서 생성돼
 // "/v1/foundation/charting" 경로가 0건이다(scripts.compile과 같은 사유). 스냅샷
 // 재생성은 백엔드 소유(decision)라 여기 남는다.
+// task-1607(BT-13): backtests.quick — 라우터는 src/api/routers/backtests.py에
+// 실재(BT-10c, task-1619 9ccb238: `APIRouter(prefix="/v1/backtests")`,
+// router_registry.py include_router)하지만 스냅샷(f800c1a)은 그보다 앞서 생성돼
+// "/v1/backtests" 경로가 0건이다(scripts.compile과 같은 사유). 스냅샷 재생성은
+// 백엔드 소유(decision)라 여기 남는다.
 const STALE_SNAPSHOT_WHITELIST: ReadonlySet<ApiRouteName> = new Set<ApiRouteName>([
   "auth.refresh",
   "auth.logoutAll",
@@ -97,6 +102,7 @@ const STALE_SNAPSHOT_WHITELIST: ReadonlySet<ApiRouteName> = new Set<ApiRouteName
   "charting.layouts.base",
   "charting.layouts.item",
   "charting.layouts.drawings",
+  "backtests.quick",
 ]);
 
 // KNOWN_ENVELOPE_DRIFT: task-1165 시점 전수 대조 결과, apiPaths.ts에 등록된 envelope

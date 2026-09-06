@@ -93,3 +93,15 @@ export type {
   UpdateChartLayoutInput,
   PutDrawingsInput,
 } from "./clients/charting";
+// task-1607(BT-13): §9.5 BT-10 quick_backtest 클라이언트(charting.ts와 동일 관용 —
+// AiosApiClient 합성에는 얹지 않고 화면이 createBacktestsClient로 직접 만든다).
+export { createBacktestsClient } from "./clients/backtests";
+export type {
+  BacktestsClient,
+  BacktestSlippageModel,
+  BacktestCommissionInput,
+  BacktestConfigV2Input,
+  QuickBacktestRequestInput,
+  BacktestFillView,
+  QuickBacktestResultView,
+} from "./clients/backtests";

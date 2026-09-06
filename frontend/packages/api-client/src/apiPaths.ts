@@ -262,6 +262,14 @@ export const API_ROUTES = defineApiRoutes({
   // 동일 사유. envelope=true.
   "scripts.compile": route("/v1/scripts/compile", true, null, true),
 
+  // task-1607(BT-13): src/api/routers/backtests.py 원문 확인(BT-10c, task-1619
+  // 9ccb238) — `APIRouter(prefix="/v1/backtests")`(backtests.py:62),
+  // router_registry.py include_router(추가 prefix 없음). `POST /quick`(:71)
+  // `-> ApiResponse[QuickBacktestResultView]` + `ok(...)`(:113) — envelope=true.
+  // scripts.*·positions.*와 동일 사유로 mount_v1(PLT-16) 미도달, v1Path=null.
+  // 동기 실행·무저장(라우터 docstring decision)이라 idempotencyRequired 없음(false).
+  "backtests.quick": route("/v1/backtests/quick", true, null, true),
+
   // task-1593(CH-8): src/api/routers/charting.py 원문 확인(CH-5, task-1557 06e5560) —
   // `APIRouter(prefix="/v1/foundation/charting")`(charting.py:37), router_registry.py
   // include_router(추가 prefix 없음). 7개 엔드포인트 전부 `-> ApiResponse[...]` + `ok(...)`

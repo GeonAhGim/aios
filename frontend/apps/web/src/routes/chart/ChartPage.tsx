@@ -23,7 +23,7 @@ import {
 } from "@aios/chart-engine/src/replay/replayController";
 import type { ChartingPort } from "@aios/chart-engine/src/layout/persistence";
 import type { CandleQueryParams, CandleQueryResult } from "@aios/api-client";
-import { ApiError, createChartingClient, createMarketDataClient } from "@aios/api-client";
+import { ApiError, createBacktestsClient, createChartingClient, createMarketDataClient } from "@aios/api-client";
 import { useAuthStore } from "@aios/shared-hooks";
 import { routeApiError, type SeriesKey, type Timeframe, type Venue } from "@aios/shared-types";
 import { CandlestickChart, type CandlestickPoint, EmptyState, LoadingState, PageHeader } from "@aios/ui-web";
@@ -32,6 +32,7 @@ import { useQuery } from "@tanstack/react-query";
 import { Link, useSearchParams } from "react-router-dom";
 import { AppShell } from "../../components/layout/AppShell";
 import { ErrorMessage } from "../../components/ErrorMessage";
+import { BacktestPanel, type RunQuickBacktest } from "./BacktestPanel";
 import { ChartToolbar } from "./ChartToolbar";
 import { CompareSymbols, type CompareSymbolRef } from "./CompareSymbols";
 import { IndicatorPicker } from "./IndicatorPicker";
@@ -50,6 +51,7 @@ const DEFAULT_TIMEFRAME: Timeframe = "1h";
 const baseUrl = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8000";
 const marketDataClient = createMarketDataClient(baseUrl, () => useAuthStore.getState().token);
 const chartingClient = createChartingClient(baseUrl, () => useAuthStore.getState().token);
+const backtestsClient = createBacktestsClient(baseUrl, () => useAuthStore.getState().token);
 
 export type FetchCandles = (params: CandleQueryParams) => Promise<CandleQueryResult>;
 
@@ -59,6 +61,8 @@ export interface ChartPageProps {
   chartingPort?: ChartingPort;
   // CH-13b: CompareSymbols의 InstrumentView 목록 조회 포트 — 같은 관용으로 주입 가능하게 둔다.
   listInstruments?: typeof marketDataClient.listInstruments;
+  // BT-13: 즉시 백테스트 실행 포트 — 같은 관용으로 서버 왕복 없이 주입 가능하게 둔다.
+  runQuickBacktest?: RunQuickBacktest;
   now?: Date;
 }
 
@@ -150,6 +154,7 @@ export function ChartPage({
   fetchCandles = marketDataClient.getCandles,
   chartingPort = chartingClient,
   listInstruments = marketDataClient.listInstruments,
+  runQuickBacktest = backtestsClient.runQuickBacktest,
   now,
 }: ChartPageProps) {
   const [searchParams, setSearchParams] = useSearchParams();
@@ -381,6 +386,16 @@ export function ChartPage({
         )}
 
         <StrategyMarkers instrumentId={instrumentId} points={points} />
+
+        <BacktestPanel
+          venue={venue}
+          instrumentId={instrumentId}
+          timeframe={timeframe}
+          start={start}
+          end={end}
+          points={points}
+          runQuickBacktest={runQuickBacktest}
+        />
 
         <CompareSymbols
           baseVenue={venue}
