@@ -7,6 +7,10 @@
 - implemented by: `src/foundation/entities/**`, `src/foundation/ledger/**`(확장), `src/foundation/positions/**`(확장),
   `src/core/eventstore/**`, `src/db/migrations/**`, `scripts/replay_verify.py`
 - 리프 접두: **FA**
+- **용어 주의(CA 2026-09-06 재검토)**: 저장소에 "account"가 이미 세 뜻으로 쓰인다 — (a) `ledger_account`는 복식부기 **계정과목**
+  (`src/db/migrations/versions/4a1d0c0de005_ledger_core.py`), (b) 거래소 계좌는 `portfolio.venue_account_ref`, (c) 이 명세의
+  `sub_account`는 **배분 단위**다. 세 개를 섞지 말 것. 기존 `src/core/portfolio/engine.py`는 단일 포트폴리오 전제이므로 FA-6에서
+  `portfolio_id` 스코프를 받도록 확장한다(신규 컨텍스트를 만들지 않는다).
 - **성격**: 이 명세의 FA-1~8은 **기존 완료 리프에 대한 소급 구조 변경**이다. 지금 하지 않으면 나중에 제품을 세우고 재구축해야 한다.
 
 ## 1. 기관급 요구
