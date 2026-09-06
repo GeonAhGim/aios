@@ -31,6 +31,19 @@ from pydantic import BaseModel
 SCHEMA_VERSION: Literal["v1"] = "v1"
 
 
+def round_to_quantum(value: Decimal, quantum: Decimal) -> Decimal:
+    """`value`를 `quantum`의 최근접 배수로 반올림한다(`ROUND_HALF_EVEN`).
+
+    [[QA 발견]] `Decimal.quantize(quantum)`은 `quantum`의 배수로 반올림하는
+    것이 아니라 `quantum`과 같은 지수(소수 자릿수)로 맞출 뿐이다 — 정수
+    리터럴은 전부 지수 0이라 `quantum=1`이든 `10`이든 `100`이든 똑같이
+    "정수로 반올림"이 된다(우연히 맞는 값은 `1`과 `0.1`·`0.01`류의 순수
+    소수뿐). 몫을 정수로 반올림한 뒤 quantum을 곱해야 실제 배수가 된다.
+    """
+    units = (value / quantum).quantize(Decimal("1"), rounding=ROUND_HALF_EVEN)
+    return units * quantum
+
+
 class AllocationErrorCode(str, Enum):
     """§3 에러 taxonomy 중 이 리프(FA-7)가 정의하는 배분 관련 코드."""
 
@@ -166,7 +179,7 @@ def _allocate_by_weight(
     weight_sum = sum((t.weight for t in targets), Decimal("0"))
 
     quantized = [
-        (t, (total_quantity * t.weight / weight_sum).quantize(quantum, rounding=ROUND_HALF_EVEN))
+        (t, round_to_quantum(total_quantity * t.weight / weight_sum, quantum))
         for t in targets
     ]
     allocated_sum = sum((q for _, q in quantized), Decimal("0"))

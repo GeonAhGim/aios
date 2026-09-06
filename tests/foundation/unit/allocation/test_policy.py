@@ -97,6 +97,21 @@ def test_pro_rata_rejects_negative_weight_target():
         allocate_pro_rata(Decimal("10"), targets, Decimal("1"))
 
 
+def test_pro_rata_rounds_to_actual_multiple_of_non_decimal_quantum():
+    # quantum=5(예: KRW 호가단위)는 10의 거듭제곱이 아니다 — 각 배분이
+    # 정수가 아니라 실제로 quantum의 배수여야 한다(Decimal.quantize는
+    # 지수만 맞추므로 여기서 별도 보정이 없으면 33/33/34처럼 5의 배수가
+    # 아닌 값이 나온다).
+    a, b, c = uuid4(), uuid4(), uuid4()
+    targets = _equal_weights(a, b, c)
+    lines = allocate_pro_rata(Decimal("100"), targets, Decimal("5"))
+    assert _sum(lines) == Decimal("100")
+    for line in lines:
+        assert line.quantity % Decimal("5") == 0
+    quantities = sorted((line.quantity for line in lines), reverse=True)
+    assert quantities == [Decimal("35"), Decimal("35"), Decimal("30")]
+
+
 def test_pro_rata_rejects_total_finer_than_quantum():
     # 체결 수량(10.005)이 quantum(0.01)보다 더 세밀한 정밀도를 가지면
     # 반올림 잔여(0.005)가 quantum의 배수가 될 수 없다.

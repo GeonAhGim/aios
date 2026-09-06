@@ -30,6 +30,19 @@ def test_blended_average_price_weighted_by_quantity():
     assert price == Decimal("10.40")
 
 
+def test_blended_average_price_rounds_to_actual_multiple_of_non_decimal_quantum():
+    # price_quantum=5(예: KRW 호가단위)도 10의 거듭제곱이 아니다 — 결과가
+    # 정수가 아니라 실제로 quantum의 배수여야 한다.
+    fills = [
+        PartialFill(quantity=Decimal("60"), price=Decimal("10")),
+        PartialFill(quantity=Decimal("40"), price=Decimal("11")),
+    ]
+    # (60*10 + 40*11) / 100 = 10.40 -> 5원 단위로 반올림하면 10.
+    price = blended_average_price(fills, Decimal("5"))
+    assert price % Decimal("5") == 0
+    assert price == Decimal("10")
+
+
 def test_blended_average_price_rejects_empty_fills():
     with pytest.raises(AllocationResidualError):
         blended_average_price([], Decimal("0.01"))

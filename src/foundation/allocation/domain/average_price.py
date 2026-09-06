@@ -19,13 +19,17 @@ FA-A3 "평균단가 가중합 오차 ≤ 1 최소단위"는 `apply_average_price
 from __future__ import annotations
 
 from collections.abc import Sequence
-from decimal import ROUND_HALF_EVEN, Decimal
+from decimal import Decimal
 from typing import Literal
 from uuid import UUID
 
 from pydantic import BaseModel
 
-from src.foundation.allocation.domain.policy import AllocationLine, AllocationResidualError
+from src.foundation.allocation.domain.policy import (
+    AllocationLine,
+    AllocationResidualError,
+    round_to_quantum,
+)
 
 SCHEMA_VERSION: Literal["v1"] = "v1"
 
@@ -62,7 +66,7 @@ def blended_average_price(fills: Sequence[PartialFill], price_quantum: Decimal) 
             raise AllocationResidualError(f"price는 0보다 커야 함: {f.price}")
     total_quantity = sum((f.quantity for f in fills), Decimal("0"))
     total_notional = sum((f.quantity * f.price for f in fills), Decimal("0"))
-    return (total_notional / total_quantity).quantize(price_quantum, rounding=ROUND_HALF_EVEN)
+    return round_to_quantum(total_notional / total_quantity, price_quantum)
 
 
 def apply_average_price(
