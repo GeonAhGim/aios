@@ -4,60 +4,47 @@ allocation + ledger linkage.
 Spec: docs/specs/L4_ibor_fund_accounting_and_resilience_v1.0.md#FA-8
 (table in §9, allocation row in §2.1).
 
-This use case adds only I/O orchestration ("look up fills -> compute
-allocation -> post a ledger entry per sub_account -> persist the allocation
-record") on top of FA-7's pure domain (`domain/policy.allocate`,
-`domain/average_price.blended_average_price`/`apply_average_price`) - the
-allocation policy and weighted-average math themselves are not
-reimplemented here (PM decision, task-1796).
+I/O orchestration only ("fills -> compute allocation -> one ledger entry
+per sub_account -> persist the allocation record") on top of FA-7's pure
+domain (`domain/policy.allocate`, `domain/average_price.
+blended_average_price`/`apply_average_price`) - the allocation policy and
+weighted-average math are not reimplemented (PM decision, task-1796).
 
-Ledger linkage reuses LC-4 `posting_rules`/LC-9 `post_entry` as-is. No new
-event type is added to the 9 `posting_rules` already knows; instead each
-sub_account allocation gets its own entry via the existing
-`MANUAL_ADJUSTMENT` event (an arbitrary debit/credit account pair + a
-single amount). Expressing an N-way allocation as one entry would need a
-new LC-4 event type, which is exactly what "no new posting rules" forbids
-- so this repeats a 2-line entry once per sub_account instead. Each entry
-is independently balanced (debit == credit), so it satisfies
-`balance_rules.check_balanced` (inside post_entry) unchanged.
+Ledger linkage reuses LC-4 `posting_rules`/LC-9 `post_entry` as-is: no new
+event type is added to the 9 `posting_rules` already knows. Each
+sub_account allocation gets its own `MANUAL_ADJUSTMENT` entry (arbitrary
+debit/credit account pair + single amount) instead of one N-way entry,
+because an N-way entry would need a new LC-4 event type ("no new posting
+rules" forbids that). Each entry is independently balanced, so
+`balance_rules.check_balanced` (inside post_entry) needs no change.
 
-The account code is built from `SubAccount.owner_ref` (FK to
-`users.user_id`, FA-2 migration - so it lives in the same identifier space
-as the existing `USER:*` wallet accounts): `USER:{owner_ref}:AVAILABLE`,
-the real owner's wallet. The other leg is the existing
-`PLATFORM:CASH_CLEARING` (LC-2, already used by topup/purchase_flow): a
-buy flows from the wallet to the clearing account, a sell flows the other
-way (the debit/credit sign convention in §4.4 - assets/expenses increase
-on debit, liabilities/revenue increase on credit - is decided by
-`chart_of_accounts.account_type`, not reimplemented here). If the
-`ledger_account`/`ledger_balance` rows for `owner_ref` do not exist yet,
-they are created once, following the same pattern as
-`topup.py::_reconcile_ledger_with_projection` (account provisioning is
-outside posting_rules/post_entry's contract - LC-9's contract is "reject
-an unknown account fail-closed", so this file owns that responsibility).
+Account code: `USER:{owner_ref}:AVAILABLE` from `SubAccount.owner_ref`
+(FK to `users.user_id`, FA-2 - same identifier space as the existing
+`USER:*` wallet accounts), paired with the existing
+`PLATFORM:CASH_CLEARING` (LC-2, already used by topup/purchase_flow). Buy
+flows wallet -> clearing, sell the other way (the debit/credit sign
+convention is `chart_of_accounts.account_type`'s call, not reimplemented
+here). Missing `ledger_account`/`ledger_balance` rows for `owner_ref` are
+created once, mirroring `topup.py::_reconcile_ledger_with_projection`
+(account provisioning sits outside posting_rules/post_entry's contract -
+LC-9 rejects an unknown account fail-closed, so this file owns it).
 
-Idempotency: each sub_account's entry pins `event_ref` to
-`f"fill_allocation:{order_id}:{sub_account_id}"` so LC-3 (the
-`idempotency_key` `post_entry` uses) absorbs retries as-is. PLT-14 (I-03's
-four-fold scope) is the `Idempotency-Key` header scope
-(route+tenant_id+subject_id+header_key) for HTTP POST entry points; that
-scope does not apply to this internal orchestration function (not an HTTP
-endpoint) - instead the same "deterministic key + conditional insert"
-principle is applied with this function's own natural key
-(order_id, sub_account_id). `fill_allocation`'s
-`UNIQUE(order_id, sub_account_id)` is likewise not a bespoke dedup table
-but an integrity constraint on the allocation fact itself (see the
-migration's docstring).
+Idempotency: each entry's `event_ref` is pinned to
+`f"fill_allocation:{order_id}:{sub_account_id}"` so LC-3's
+`idempotency_key` (used inside `post_entry`) absorbs retries. PLT-14
+(I-03's four-fold scope) is the `Idempotency-Key` header scope for HTTP
+POST entry points and does not apply to this internal, non-HTTP function;
+the same "deterministic key + conditional insert" principle is applied
+via this function's own natural key instead. `fill_allocation`'s
+`UNIQUE(order_id, sub_account_id)` is an integrity constraint on the
+allocation fact, not a bespoke dedup table (see the migration docstring).
 
-FA-A3 (allocation total == fill quantity, error <= 1 minimum unit) is
-already enforced by `policy.allocate`/`average_price.apply_average_price`,
-so this file does not re-check it. The entry amount (`LedgerEvent.amount`)
-is the raw notional (quantity * average_price, lossless) rounded once to
-0.01 (reusing `policy.round_to_quantum`) to satisfy `PostingLine.amount`'s
-contract (`decimal_places=2`) and `ledger_posting_line.amount
-NUMERIC(20,2)` (LC-1 §3.3) - `fill_allocation.quantity`/`average_price`
-keep the original precision (NUMERIC(30,10)) that never reaches the
-ledger.
+FA-A3 (allocation total == fill quantity) is already enforced by
+`policy.allocate`/`average_price.apply_average_price` and not re-checked
+here. The entry amount is the raw notional (quantity * average_price)
+rounded once to 0.01 (`policy.round_to_quantum`) to satisfy
+`PostingLine.amount`'s `decimal_places=2` contract; `fill_allocation.
+quantity`/`average_price` keep the original NUMERIC(30,10) precision.
 """
 from __future__ import annotations
 
