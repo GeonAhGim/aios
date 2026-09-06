@@ -36,3 +36,6 @@ AIOS_Codex_Fable_CrossReview_Research_Direction_Record_2026-09-03.md`)의 "내�
 - `L4_analytics_authoring_backtest_marketplace_v1.0.md` — 데이터 커버리지(DC)·차트(CH)·지표(IND)·AIOS Script(DSL)·백테스트 현실성(BT)·마켓플레이스(MP)·신호 유입(SIG). ADR-2026-09-04-B.
 - `L4_ai_research_strategy_factory_v1.0.md` — Agent Gateway(MCP·스코프 토큰)·모델 공급자(Claude/OpenAI·Codex/Gemini/로컬)·Strategy Factory·Experiment Ledger·ML Signals. ADR-2026-09-05-A.
 - `L4_research_data_and_market_ecosystem_v1.0.md` — 리서치 데이터 플레인(공시·뉴스·거시·대안). 포트 먼저·소스는 어댑터. ADR-2026-09-06-A.
+- `L4_ibor_fund_accounting_and_resilience_v1.0.md` — 엔티티 계층(법인·펀드·포트폴리오·배분)·양시간축 장부(IBOR/ABOR)·이벤트 재현·HA/DR·KMS. ADR-2026-09-06-B.
+- `L4_compliance_and_regulatory_v1.0.md` — 리스크와 분리된 컴플라이언스 권위(사전·사후), 위임장, 규칙 번들 거버넌스, 규제 보고. ADR-2026-09-06-B.
+- `L4_ems_routing_algos_and_tca_v1.0.md` — 부모-자식 주문·벤처 라우팅·집행 알고리즘(TWAP/VWAP/POV/IS)·거래비용분석·FIX 포트. ADR-2026-09-06-B.
