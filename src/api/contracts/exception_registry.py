@@ -45,9 +45,17 @@ from src.services.strategy_access_service import StrategyAccessError
 from src.services.strategy_builder_service import StrategyLifecycleError, StrategyNotFoundError
 from src.services.strategy_prompt_service import PromptGenerationUnavailableError
 from src.services.strategy_wizard_service import WizardError
-from src.services.user_admin_service import UserAdminError
-from src.services.verification_service import VerificationError
-from src.services.wallet_service import WalletTopupError
+from src.services.user_admin_service import UserAdminError, UserAdminNotFoundError
+from src.services.verification_service import (
+    VerificationError,
+    VerificationInvalidTransitionError,
+    VerificationNotFoundError,
+)
+from src.services.wallet_service import (
+    WalletTopupError,
+    WalletTopupInvalidTransitionError,
+    WalletTopupNotFoundError,
+)
 from src.services.withdrawal_whitelist_service import WithdrawalWhitelistError
 
 
@@ -77,9 +85,14 @@ EXCEPTION_MAP_SERVICES: list[tuple[type[Exception], ErrorCode]] = [
     (AccountDeletionError, ErrorCode.STATE_INVALID_TRANSITION),
     (ApprovalOwnershipError, ErrorCode.AUTHZ_FORBIDDEN),
     (ApprovalError, ErrorCode.STATE_INVALID_TRANSITION),
+    # QA task-1163 — 서브클래스를 부모(UserAdminError/VerificationError/
+    # WalletTopupError)보다 먼저 등록해 404/409가 400으로 뭉개지지 않게 한다.
+    (UserAdminNotFoundError, ErrorCode.RESOURCE_NOT_FOUND),
     (UserAdminError, ErrorCode.VALIDATION_INVALID_FIELD),
     (DisputeResolutionError, ErrorCode.STATE_INVALID_TRANSITION),
     (SellerSuspensionError, ErrorCode.RESOURCE_NOT_FOUND),
+    (WalletTopupNotFoundError, ErrorCode.RESOURCE_NOT_FOUND),
+    (WalletTopupInvalidTransitionError, ErrorCode.STATE_INVALID_TRANSITION),
     (WalletTopupError, ErrorCode.VALIDATION_INVALID_FIELD),
     (ListingError, ErrorCode.VALIDATION_INVALID_FIELD),
     (ConcurrencyConflictError, ErrorCode.STATE_CONCURRENCY_CONFLICT),
@@ -89,6 +102,8 @@ EXCEPTION_MAP_SERVICES: list[tuple[type[Exception], ErrorCode]] = [
     # PLT-18 — marketplace/strategy_builder/suitability.
     (InsufficientWalletBalanceError, ErrorCode.POLICY_DENIED),
     (PurchaseError, ErrorCode.VALIDATION_INVALID_FIELD),
+    (VerificationNotFoundError, ErrorCode.RESOURCE_NOT_FOUND),
+    (VerificationInvalidTransitionError, ErrorCode.STATE_INVALID_TRANSITION),
     (VerificationError, ErrorCode.VALIDATION_INVALID_FIELD),
     (StrategyAccessError, ErrorCode.AUTHZ_FORBIDDEN),
     (ReviewError, ErrorCode.VALIDATION_INVALID_FIELD),

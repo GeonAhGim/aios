@@ -23,6 +23,11 @@ class UserAdminError(Exception):
     """FD-18.3 실패 — 라우터가 400/404로 변환."""
 
 
+class UserAdminNotFoundError(UserAdminError):
+    """QA task-1163 — 존재하지 않는 대상 사용자. RESOURCE_NOT_FOUND(404)로
+    구분해야 프런트가 400(잘못된 값)과 구별할 수 있다."""
+
+
 class UserSummary(BaseModel):
     user_id: UUID
     email: str
@@ -71,7 +76,7 @@ class UserAdminService:
                 new_status,
             )
             if row is None:
-                raise UserAdminError("존재하지 않는 사용자입니다.")
+                raise UserAdminNotFoundError("존재하지 않는 사용자입니다.")
             # actor_agent는 대상 본인이 아니라 이 변경을 실행한 운영자다 —
             # dispute_resolution_service.resolve()와 동일한 원칙.
             await record_audit_log(

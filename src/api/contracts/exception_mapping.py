@@ -10,9 +10,12 @@ PLT-20 decision(task-1017)의 "공용 파일 수정 금지"보다 "기존 테스
 통과"를 우선해(신규 ErrorCode 없이) alert/device_token 예외를 등록했다
 (상세는 task-1017 note 참조).
 
-한계(정직하게 명시): 서비스당 예외 클래스 하나로 묶인 타입(UserAdminError
-등)은 대표 사유 하나로만 매핑된다 — 라우터가 실제로 상태코드를 구분해야
-했던 경우만(StrategyNotFoundError 등) 서브클래스로 쪼갰다.
+한계(정직하게 명시): 서비스당 예외 클래스 하나로 묶인 타입은 대표 사유
+하나로만 매핑된다 — 라우터가 실제로 상태코드를 구분해야 했던 경우만
+(StrategyNotFoundError, QA task-1163의 UserAdminNotFoundError/
+VerificationNotFoundError·VerificationInvalidTransitionError/
+WalletTopupNotFoundError·WalletTopupInvalidTransitionError 등) 서브클래스로
+쪼갰다.
 
 AuthError는 AUTH_INVALID_CREDENTIALS 하나로만 매핑한다 — 계정 미존재/잠금/
 정지/틀린 비밀번호를 상태코드로 구분하면 계정열거 사이드채널이 된다

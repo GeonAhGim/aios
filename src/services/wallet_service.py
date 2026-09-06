@@ -78,6 +78,15 @@ class WalletTopupError(Exception):
     """충전 요청 처리 실패 — 라우터가 400/404로 변환."""
 
 
+class WalletTopupNotFoundError(WalletTopupError):
+    """QA task-1163 — 존재하지 않는 충전 요청. RESOURCE_NOT_FOUND(404)."""
+
+
+class WalletTopupInvalidTransitionError(WalletTopupError):
+    """QA task-1163 — 이미 CONFIRMED로 전이된(또는 동시에 전이 중인) 요청에
+    대한 재확인 시도. STATE_INVALID_TRANSITION(409)."""
+
+
 class WalletBalance(BaseModel):
     user_id: UUID
     balance: Decimal
@@ -205,7 +214,7 @@ class WalletService:
                 topup_id,
             )
             if current is None:
-                raise WalletTopupError("존재하지 않는 충전 요청입니다.")
+                raise WalletTopupNotFoundError("존재하지 않는 충전 요청입니다.")
 
             if current["status"] == "CONFIRMED":
                 return WalletTopupConfirmResult(
@@ -219,7 +228,9 @@ class WalletService:
                 topup_id, admin_user_id,
             )
             if updated is None:
-                raise WalletTopupError("이미 다른 관리자가 처리했습니다(동시 처리 충돌).")
+                raise WalletTopupInvalidTransitionError(
+                    "이미 다른 관리자가 처리했습니다(동시 처리 충돌)."
+                )
 
             balance_after = await post_topup(
                 conn, topup_id, current["user_id"], current["requested_amount"], admin_user_id,

@@ -37,6 +37,16 @@ class VerificationError(Exception):
     """FD-13.2 실패 — 라우터가 400/404로 변환."""
 
 
+class VerificationNotFoundError(VerificationError):
+    """QA task-1163 — 존재하지 않는 리스팅. RESOURCE_NOT_FOUND(404)."""
+
+
+class VerificationInvalidTransitionError(VerificationError):
+    """QA task-1163 — PENDING_VERIFICATION이 아닌 상태에서의 결정 시도
+    (사전조회 시점이든 UPDATE 시점의 동시처리 충돌이든 동일하게 "현재
+    상태가 이 조작을 허용하지 않는다"는 의미다). STATE_INVALID_TRANSITION(409)."""
+
+
 class VerificationResult(BaseModel):
     listing_id: int
     status: str
@@ -96,9 +106,9 @@ class VerificationService:
                 "SELECT status, seller_user_id FROM strategy_listings WHERE id = $1", listing_id
             )
             if pre_check is None:
-                raise VerificationError("존재하지 않는 리스팅입니다.")
+                raise VerificationNotFoundError("존재하지 않는 리스팅입니다.")
             if pre_check["status"] != "PENDING_VERIFICATION":
-                raise VerificationError(
+                raise VerificationInvalidTransitionError(
                     f"PENDING_VERIFICATION 상태에서만 검증할 수 있습니다"
                     f"(현재: {pre_check['status']})."
                 )
@@ -134,7 +144,7 @@ class VerificationService:
                     rejection_reason,
                 )
             if row is None:
-                raise VerificationError(
+                raise VerificationInvalidTransitionError(
                     "이미 다른 검증담당자가 처리했습니다(동시 처리 충돌)."
                 )
 
