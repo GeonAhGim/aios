@@ -39,6 +39,30 @@ SendOnce = Callable[[], Awaitable[httpx.Response]]
 ClassifyBody = Callable[[httpx.Response], ExchangeError | None]
 
 
+class RateLimitWaitObserver:
+    """`TokenBucket`이 실제로 대기했다는 사실만 세는 카운터(BR-2,
+    ADR-2026-09-06-I D4) — `ApiCallTracker`와 같은 프로세스 메모리 롤업
+    패턴(src/core/safety/metrics_collector.py). 호출부(예: 거래소별
+    rate_profile.py)가 `TokenBucket(..., sleep=...)`에 얇은 래퍼를 넣어
+    `record_wait()`를 호출하게 배선한다 — `TokenBucket` 자체 시그니처는
+    바꾸지 않는다(L4-11 완성 컴포넌트, 신설/수정 금지).
+
+    "429 대신 클라이언트가 대기·재시도로 흡수했다"는 사실을 값으로
+    남기는 것이 목적이라 카운터만 있으면 충분하다 — 외부 모니터링
+    연동(Prometheus 등)은 아직 이 코드베이스에 없고(호출부 책임), 이
+    관측값을 그대로 노출만 한다."""
+
+    def __init__(self) -> None:
+        self._waits = 0
+
+    def record_wait(self) -> None:
+        self._waits += 1
+
+    @property
+    def waits(self) -> int:
+        return self._waits
+
+
 def _retry_after_seconds(response: httpx.Response) -> float | None:
     raw = response.headers.get("Retry-After")
     if raw is None:
