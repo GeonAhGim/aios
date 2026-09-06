@@ -35,7 +35,9 @@
 | 프론트 `ExecutionAlgoPage.tsx`, `TcaPage.tsx` | 알고리즘 주문 생성·진행률, TCA 리포트 |
 
 ## 3. 계약 (요지)
-- `AlgoSpec{kind: twap\|vwap\|pov\|is, start, end, max_participation_pct, slice_interval_sec, urgency, limit_price\|None}`.
+- `AlgoSpec{kind: twap\|vwap\|pov\|is\|iceberg, start, end, max_participation_pct, slice_interval_sec, urgency, limit_price\|None, seed}`.
+  **OMS §3.1 `AlgoRequest`를 대체한다**(감사 2026-09-06): enum은 여기 정의가 정본이고 ICEBERG를 흡수한다. `AlgoRequest`의 `size_jitter_pct`/`time_jitter_pct`는 EM-A3(결정론)와 충돌하므로 **`seed`를 계약에 포함한 의사난수로만** 허용한다(같은 seed → 같은 계획).
+- `SubmitOrderCommand`의 기존 `parent_order_id`/`algo_run_id`를 그대로 쓴다 — `parent_orders`/`child_orders`는 그 필드의 저장소이지 별도 식별자 체계가 아니다.
 - **자식 주문은 예외 없이 `submit_order`를 통과한다** — 리스크·컴플라이언스 판정 ID를 각각 갖는다. 알고리즘이 직접 어댑터를 부르는 경로는 없다.
 - 라우팅 결정은 `reason_codes`(예: `BEST_FEE`, `DEEPEST_BOOK`, `ONLY_VENUE`)와 점수 스냅샷을 저장해 최선집행 보고(CM-14)의 입력이 된다.
 - TCA 벤치마크 기준시각은 부모 주문 `arrival_ts`(도착)와 자식 체결 구간으로 고정.
@@ -70,13 +72,13 @@
 | 리프 | 파일 | 선행 | DoD | 크기 |
 |---|---|---|---|---|
 | EM-1 | `contracts/v1.py` + 스냅샷 | FA-1 | 스키마 | 300 |
-| EM-2 | `domain/parent_child.py` + test | EM-1 | 집계·전파 규칙, 초과 거부 | 300 |
-| EM-3 | 마이그레이션(`parent_orders`·`child_orders`) + 어댑터 + **자식 주문이 submit_order 경유임을 정적 증명** | EM-2, L4-09, CM-8 | EM-A2 적대적 통과 | 560 |
+| EM-2 | `domain/parent_child.py` + test — **감사 2026-09-06: 이미 구현된 부분이 있다.** `orders.parent_order_id`·`algo_run_id` 컬럼과 `src/services/oms/domain/algo_slicer.py`(TWAP/VWAP/POV/iceberg 슬라이스 계획)가 존재하므로 **신설이 아니라 집계·전파 규칙 보강**이다 | EM-1 | 집계·전파 규칙, 초과 거부 | 200 |
+| EM-3 | **기존 `orders.parent_order_id`/`algo_run_id`를 정본으로 쓰고 별도 `parent_orders`/`child_orders` 테이블은 만들지 않는다**(감사 2026-09-06). 부족한 집계 컬럼만 추가 + **자식 주문이 submit_order 경유임을 정적 증명** | EM-2, L4-09, CM-8 | EM-A2 적대적 통과 | 560 |
 | EM-4 | `domain/route/fee_model.py` + `liquidity_model.py` + test | EM-1 | 수수료 티어·깊이 점수 | 400 |
 | EM-5 | `domain/route/venue_scoring.py` + test | EM-4 | 결정론 점수·타이브레이크 | 260 |
 | EM-6 | `application/route_order.py` + `route_decisions` 저장 + 통합 | EM-5 | 근거 저장, 단일 벤처 폴백 | 300 |
 | EM-7 | `domain/algo/guard.py` + test | EM-1 | 참여율·간격·잔여 규칙 | 240 |
-| EM-8 | `domain/algo/twap.py` + test | EM-7 | 스케줄 스냅샷·결정론 | 240 |
+| EM-8 | `domain/algo/twap.py` — 기존 `oms/domain/algo_slicer.py`를 EMS 포트로 승격(재작성 금지) + test | EM-7 | 스케줄 스냅샷·결정론 | 240 |
 | EM-9 | `domain/algo/vwap.py` + test | EM-7, DC-22 | 거래량 프로파일 기반 | 280 |
 | EM-10 | `domain/algo/pov.py` + test | EM-7 | 실시간 참여율 추종 | 260 |
 | EM-11 | `domain/algo/is_shortfall.py` + test | EM-7 | 긴급도-비용 트레이드오프 | 280 |

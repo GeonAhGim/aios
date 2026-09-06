@@ -3,7 +3,8 @@
 ## 0. 문서 메타
 - status: Accepted (2026-09-04) — ADR-2026-09-04-B의 실행 명세
 - owner role: Chief Architect(원칙·★ 승인), PM(리프 배정)
-- supersedes: 없음. `L4_strategy_portfolio_backtest_v1.0.md` §2.2(지표 레지스트리)·§2.4(백테스트)·§3.1(cond-v2)을
+- **supersedes(감사 2026-09-06 확정)**: `L4_market_data_positions_ledger_v1.0.md` §3.1 `InstrumentRef`·§4.2 심볼 생애주기·`domain/reference/{symbol_normalizer,lifecycle}.py`(LA-7). LA-10 `md_instrument`/`md_symbol_alias`는 DC-4 `instruments`/`venue_listings`로 이관하고 LA-* 어댑터는 파사드로 남긴다(DC-4에 백필 포함). 캔들 저장(`md_candle`, LA-11)은 LA가 계속 소유한다.
+  또한 `L4_strategy_portfolio_backtest_v1.0.md` §2.2(지표 레지스트리)·§2.4(백테스트)·§3.1(cond-v2)을
   **확장**한다(대체 아님). `L4_market_data_positions_ledger_v1.0.md` (A) 시장데이터 위에 얹는다.
 - depends on: LA-1~21(시장데이터 계약·품질·저장), ADR-2026-09-04-A(컬럼지향 읽기 경로), L0-1~5, PLT §3(에러 봉투·테넌시)
 - implemented by: `src/foundation/market_data/coverage/**`, `src/foundation/market_data/providers/**`,
@@ -148,7 +149,7 @@ class MarketDataProvider(Protocol):
 - 에러: `DATA_PROVIDER_RATE_LIMITED`(재시도 가능, retry_after), `DATA_PROVIDER_UNAVAILABLE`(재시도), `DATA_ENTITLEMENT_DENIED`(불가, 403), `DATA_COVERAGE_MISSING`(불가, 409 — 조용한 0 채움 금지).
 
 ### 3.2 심볼 마스터 (`contracts/v2/instruments.py`)
-- `Instrument{instrument_id: ULID, asset_class, base, quote, isin|None, figi|None, tick_size: Decimal, lot_size: Decimal, calendar_id, lifecycle_state, created_at}`
+- `Instrument{instrument_id: UUID(ULID로 생성하되 UUID 컬럼·UUID 파이썬 타입 — LA-1/LB-1과 동일 타입, 감사 2026-09-06), asset_class, base, quote, isin|None, figi|None, tick_size: Decimal, lot_size: Decimal, calendar_id, lifecycle_state, created_at}`
 - `VenueListing{instrument_id, venue, venue_symbol, listed_at, delisted_at|None, is_primary}` — (venue, venue_symbol, listed_at) 유일.
 - 심볼 변경은 새 `VenueListing`(구 listing delisted_at 설정), `instrument_id` 불변. 재상장은 새 instrument.
 
@@ -175,7 +176,7 @@ type      := "int" | "float" | "bool" | "series<float>" | "series<bool>"
 - `slippage: Fixed{bps} | Percent{pct} | VolumeImpact{k, participation_cap}`; `commission: VenueTier{venue, maker_bps, taker_bps, min_fee}`
 - `latency_ms`, `partial_fill: {max_participation_pct}`, `order_types: {limit, stop, oco, trailing}`, `magnifier_tf: Timeframe|None`
 - `costs: {funding: bool, borrow_apr: Decimal|None}`, `adjustments: {splits, dividends}`, `calendar: session|24x7`
-- 재현 키 `reproducibility_key = sha256(script_hash ‖ data_lineage_hash ‖ rollup_version ‖ config_hash)`; 같은 키 = 같은 결과(바이트 동일한 체결 로그)여야 한다.
+- 재현 키 `reproducibility_key = sha256(script_hash ‖ data_lineage_hash ‖ rollup_version ‖ config_hash ‖ model_hash)`(`model_hash` 기본값 `sha256("")` — AI-11 재현 동일성 DoD를 만족시키기 위함, 감사 2026-09-06). **이 계약이 strategy §3.3-A `BacktestConfig`(bt-v2)를 대체한다 — L25 `CostModel` → `BacktestConfigV2` 어댑터를 BT-1에 포함한다.** strategy §3.0의 `snapshot_hash`는 `data_lineage_hash`의 입력 하나이지 경쟁 키가 아니다; 같은 키 = 같은 결과(바이트 동일한 체결 로그)여야 한다.
 
 ### 3.5 마켓플레이스 계약 (`marketplace/contracts/v1.py`)
 - `Visibility = public|protected|invite|private`; protected는 소스 비공개·서버 실행만·재현 키 공개.
@@ -273,7 +274,7 @@ DoD 공통: `ruff` · `mypy --strict` · `scripts/check_zone_manifest.py` 통과
 | DC-6 | `domain/coverage/registry.py` + test | DC-1 | 병합·질의, 겹침 병합 정확 | 220 |
 | DC-7 | `domain/coverage/gaps.py` + test | DC-6 | fail-closed 판정, LA-5 재사용 | 160 |
 | DC-8 | 마이그레이션 coverage_spans(EXCLUDE)/entitlements + 어댑터 + 통합 | DC-4,6 | | 260 |
-| DC-9 | `domain/entitlement/policy.py` + test | DC-1 | 테넌트/사용자/지연 판정, 거부 403 | 180 |
+| DC-9 | `domain/entitlement/policy.py` + test — **LA-24 `ports/entitlement.py` Protocol을 구현만 한다(재정의 금지, 감사 2026-09-06)** | DC-1, LA-24 | 테넌트/사용자/지연 판정, 거부 403 | 180 |
 | DC-10 | `domain/aggregation/timeframe_rollup.py` + test | ADR-A, LA-2/3 | M1→5m/1h/1d 결정론, 세션 경계·휴장, rollup_version | 240 |
 | DC-11 | `adapters/providers/base_adapter.py` + test | DC-5 | 토큰버킷·재시도·정규화 훅 | 240 |
 | DC-12 | `adapters/providers/bitget_provider.py`, `kis_provider.py` + 계약 테스트 | DC-11 | capabilities 정확, 기존 exchanges 경로 무변경 | 400 |
@@ -387,7 +388,7 @@ DC-1~18(R/L4 잔여보다 먼저, backend 4 중 2 고정) → CH-1~10 ∥ IND-1~
 |---|---|---|---|---|
 | DC-19 | `contracts/v2/microstructure.py` — `TradeTick`·`QuoteL1`·`BookL2`(ts_event/ts_recv 나노초 정수, aggressor, seq) + 스냅샷 테스트 | DC-1 | 스키마 스냅샷, naive/초단위 타임스탬프 거부, 캔들↔틱 파생 관계 문서화 | 280 |
 | DC-20 | `contracts/v2/instruments.py` 확장 — `kind(spot\|future\|perp\|option\|bond\|fund\|index)`·`underlying_id`·`expiry`·`strike`·`option_right`·`contract_multiplier`·`settlement`·`currency`·`country`·`mic` (전부 optional, v1 불변) | DC-1 | 옵션·선물 인스턴스 생성, 현물 기존 케이스 무변경, `underlying_id+expiry` 체인 질의 | 280 |
-| DC-21 | `domain/point_in_time.py` + 참조 데이터 `known_at` 규칙 + 마이그레이션(`instrument_attributes` append-only) | DC-4 | 재작성은 새 행, `known_at<=as_of` 조회만 반환(적대적 테스트) | 400 |
+| DC-21 | `domain/point_in_time.py`(**FA-9 `core/bitemporal.py` 위임, 재구현 금지**) + 참조 데이터 `known_at` 규칙 + 마이그레이션(`instrument_attributes` append-only) | DC-4, FA-9 | 재작성은 새 행, `known_at<=as_of` 조회만 반환(적대적 테스트) | 400 |
 | DC-22 | `domain/aggregation/tick_to_candle.py` — 틱/호가 → 캔들 결정론 생성 + `source_kind` 계보 기록 | DC-19, DC-10 | 같은 틱 입력 → 바이트 동일 캔들, 갭·중복·역순 처리 | 260 |
 | DC-23 | `adapters/storage/tick_parquet.py` — 틱·호가 warm 저장(일자×종목 파티션, 컬럼지향 직접 로드) | DC-19, DC-14 | 1일치 100만 틱 왕복, 메모리 상한 | 300 |
 | DC-24 | `ports/provider.py` 확장 — `fetch_trades`/`fetch_quotes`/`subscribe_book`(선택 capability, 미지원 벤더는 명시적 미지원) | DC-5, DC-19 | capability 미지원 시 명시적 오류(무음 폴백 금지) | 200 |

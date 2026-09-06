@@ -6,6 +6,12 @@
 - depends on: FA-1~6(엔티티 계층), R-01~45(리스크 권위), L4-09(주문 제출), EO-03~05(게이트 배선), L0-3(WORM)
 - implemented by: `src/foundation/compliance/**`, `src/api/routers/compliance.py`, `frontend/apps/web/src/compliance/**`
 - 리프 접두: **CM**
+- **감사 2026-09-06 재정의 — 신설이 아니라 확장이다.** 저장소에 이미 있다: `src/foundation/mandates/`(위임장 개정 상태기계·냉각기간·
+  개정 해시·`evaluate_policy`), `policy_bundle`·`policy_decision` 테이블(`d8e8e4ba2365`, outcome·expires_at·command_fingerprint),
+  그리고 `src/services/order_service/foundation_gate.py::make_foundation_pre_submit_gate`가 **이미 리스크 fence/control과 mandate 정책을
+  함께 평가**한다. 따라서 `src/foundation/compliance/` 신설 대신 **mandates 확장 + GateDecision에 `policy_decision_id` 추가 +
+  세 조립 지점의 `require_mandate=True` 전환**으로 구현한다. 새 규칙(금지종목·집중도·유동성·공매도·자전거래·시장질서)은 mandates의
+  규칙 집합에 파일 단위로 추가하고, "규칙 번들 거버넌스"는 mandate revision 승인 흐름을 그대로 쓴다.
 - **권위 원칙**: 리스크와 컴플라이언스는 **분리된 두 권위**다. 주문은 `Risk.ALLOW ∧ Compliance.ALLOW`일 때만 나간다.
   둘의 규칙·승인 주체·감사 경로가 다르므로 코드에서도 합치지 않는다.
 
@@ -83,11 +89,11 @@
 ## 9. 리프 목록
 | 리프 | 파일 | 선행 | DoD | 크기 |
 |---|---|---|---|---|
-| CM-1 | `contracts/v1.py` + 스냅샷 | FA-1 | 스키마 | 260 |
-| CM-2 | `contracts/mandate.py` + `domain/rules/exclusion.py` + test | CM-1 | 제약 7종 표현, 경계값 | 460 |
+| CM-1 | 기존 `mandates/contracts/v1.py` 확장(`ComplianceDecision`은 기존 `policy_decision`에 매핑, 신규 테이블 금지) + 스냅샷 | FA-1 | 스키마, 기존 계약 호환 | 260 |
+| CM-2 | 기존 `MandateRuleInput`에 제약 확장(자산군·국가·통화·유동성·ESG 배제) + `mandates/domain/rules/exclusion.py` + test | CM-1 | 제약 7종 표현, 경계값 | 460 |
 | CM-3 | `domain/rule_bundle.py` + `domain/evaluator.py` + test | CM-1 | 순서 무관·최악 판정, 번들 해시 | 460 |
-| CM-4 | 마이그레이션(결정 WORM·번들·위임장) + 저장 어댑터 + 통합 | CM-3 | append-only 증명 | 560 |
-| CM-5 | `application/{activate_bundle,approve_mandate}.py` + 승인 워크플로 연동 | CM-4 | 작성자≠승인자 강제 | 400 |
+| CM-4 | 기존 `policy_bundle`·`policy_decision`에 부족분만 추가(WORM 트리거 확인 포함) + 어댑터 확장 + 통합 | CM-3 | append-only 증명 | 560 |
+| CM-5 | 기존 `mandates/application/{activate_revision,propose_amendment}`를 규칙 번들 거버넌스로 승격(작성자≠승인자 강제 추가) | CM-4 | 작성자≠승인자 강제 | 400 |
 | CM-6 | `domain/rules/{restricted_list,concentration}.py` + test | CM-3 | 정확값·경계 | 400 |
 | CM-7 | `domain/rules/{leverage,liquidity,position_limit}.py` + test | CM-3 | 정확값·경계 | 460 |
 | CM-8 | `application/evaluate_pre_trade.py` + **주문 경로 배선**(`submit_order` 시그니처 확장) + 적대적(우회 0) | CM-6, CM-7, L4-09 | CM-A1·A5 증명 | 460 |

@@ -287,6 +287,15 @@ NH `supports_modify=False`, `supports_cancel="UNVERIFIED"`(02e §3 추정 엔드
 
 ---
 
+### 3.1-a `SubmitOrderCommand` 확장 필드 (감사 2026-09-06 — 다섯 리프가 같은 시그니처를 만진다)
+```python
+risk_decision_id: UUID | None = None        # R-37 이후 필수(트리거 강제)
+compliance_decision_id: UUID | None = None  # CM-8 이후 필수
+fund_id: UUID | None = None                 # FA-3 이후 NOT NULL
+portfolio_id: UUID | None = None            # FA-3 이후 NOT NULL
+```
+기본값이 있으므로 L4-09는 그대로 유효(MINOR 변경). **L4-09·R-36·CM-8·FA-5·EM-3은 같은 시그니처를 만진다 — PM은 직렬화한다.**
+
 ## 4. 불변조건·상태기계
 
 ### 4.1 불변조건 (위반 시 전부 fail-closed)
@@ -587,7 +596,7 @@ login 확인 → 결과로 `BITGET_SPOT_PROFILE.verified="LIVE_VERIFIED"` 갱신
 | L4-22 | `exchanges/paper/{fill_model,fee_model,latency_model,venue_profile}.py`, 단위 테스트 | 04 | 슬리피지 부호·부분체결 극단 | 400 |
 | L4-23 | 마이그레이션 `<rev3>`, `exchanges/paper/{ledger_repository,simulator_adapter}.py`, `test_paper_simulator_adapter.py` | 13,22 | DROP 주입 → UNKNOWN 종단; 재시작 후 잔고 보존; `is_sandboxed=True` 상수 | 550 |
 | L4-24 | `application/three_way_reconciler.py`, `application/reconcile_scheduler.py`, `wiring.py`, `test_three_way_reconciler.py` | 05,13,15 | REC-001/002/003/006; MATERIAL → 이후 submit DENY | 550 |
-| L4-25 | 마이그레이션 `<rev2>`, `domain/algo_slicer.py`, `application/algo_executor.py`(TWAP만), `test_algo_slicer.py`, `test_algo_executor_twap.py` | 09,24 | Σ=total 정확; kill switch → PAUSED; VWAP 거부 | 650 |
+| ~~L4-25~~ **(superseded by EM-2/7/8/15, 배정 금지 — 감사 2026-09-06)** | 마이그레이션 `<rev2>`, `domain/algo_slicer.py`, `application/algo_executor.py`(TWAP만), `test_algo_slicer.py`, `test_algo_executor_twap.py` | 09,24 | Σ=total 정확; kill switch → PAUSED; VWAP 거부 | 650 |
 | L4-26 | `application/order_query.py`, 라우터는 별도 L4(API 명세) — 여기서는 서비스 함수까지 | 07 | tenant 격리 테스트(`test_cross_tenant_isolation.py`) | 250 |
 | L4-27 | 관측성: 메트릭 헬퍼 호출 삽입(§7.2 전부), 로그 필드(§7.3), `tests/unit/oms/test_metrics_names.py`(네이밍 규칙 정규식) | 14~25 | 메트릭명 전부 `aios.<ctx>.<subject>.<verb>` 매칭 | 300 |
 | L4-28 | `tests/perf/oms/*` 4개(단언 포함) | 27 | p99 ≤ 50 ms 등 §7.1 수치 단언 | 300 |

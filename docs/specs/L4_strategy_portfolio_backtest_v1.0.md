@@ -615,14 +615,14 @@ DoD 공통: `ruff` · `mypy --strict` · `scripts/check_zone_manifest.py` 통과
 | L01 | `src/core/indicators/spec.py`, `specs_talib.py` | — | `pytest tests/unit/core/indicators/test_registry.py -k specs` — 11개 스펙 lookback이 TA-Lib NaN 수와 일치 | 230 |
 | L02 | `src/core/indicators/registry.py` | L01 | `-k registry` — 범위 밖 파라미터 거부, `registry_hash` 안정 | 120 |
 | L03 | `src/core/indicators/talib_adapter.py` | L02 | 기존 `tests/unit/test_indicator_service.py` 전부 통과 + `registry_version` 필드 | 150 |
-| L04 ★ | `src/core/strategy/condition_ast.py` | — | AST 직렬화 왕복, discriminator 검증 실패 케이스 | 150 |
-| L05 ★ | `src/core/strategy/condition_parser.py` | L04 | `test_condition_parser.py` — v1 전 케이스 왕복 동일, 문법 오류 코드 | 250 |
+| ~~L04~~ **(superseded by DSL-1, 배정 금지 — ADR-2026-09-04-D)** | `src/core/strategy/condition_ast.py` | — | AST 직렬화 왕복, discriminator 검증 실패 케이스 | 150 |
+| ~~L05~~ **(superseded by DSL-2/3, 배정 금지)** | `src/core/strategy/condition_parser.py` | L04 | `test_condition_parser.py` — v1 전 케이스 왕복 동일, 문법 오류 코드 | 250 |
 | L06 ★ | `src/core/strategy/indicator_key.py` | — | tf 유무·다중출력 파싱, 잘못된 tf 거부; `market_state.py:_KEY_RE` 사용처 교체 | 120 |
 | L07 | `src/core/indicators/lookback.py` | L02, L06 | tf별 required_bars 정확값, 미지 지표 오류 | 80 |
 | L08 ★ | `src/core/strategy/state_memory.py`, `market_state.py` | L06 | advance 불변성, `assert_no_future` 위반 검출 | 200 |
-| L09 ★ | `src/core/strategy/tree_evaluator.py` | L04, L08 | 진리표·누락·stale crossover 케이스 | 200 |
+| ~~L09~~ **(superseded by DSL-8, 배정 금지)** | `src/core/strategy/tree_evaluator.py` | L04, L08 | 진리표·누락·stale crossover 케이스 | 200 |
 | L10 ★ | `src/core/strategy/confidence.py`, `risk_params.py` | L09 | 산식 정확값, 음수/범위 거부 | 200 |
-| L11 ★ | `src/core/strategy/models.py`, `condition_evaluator.py`(파사드) | L05, L09 | 기존 `tests/unit/core/strategy/*` 회귀 전부 통과 | 180 |
+| ~~L11~~ **(superseded by DSL-11, 배정 금지)** | `src/core/strategy/models.py`, `condition_evaluator.py`(파사드) | L05, L09 | 기존 `tests/unit/core/strategy/*` 회귀 전부 통과 | 180 |
 | L12 ★ | `src/core/strategy/engine.py` | L08–L11 | `test_engine_v2.py` + 기존 FD-8.1 테스트 회귀, 프로세스 캐시 제거 확인(`_prev_tick_cache` grep 0) | 200 |
 | L13 | 마이그레이션 M1 + `src/services/execution_loop/strategy_state_store.py` | L08 | `alembic upgrade head` 공유 DB 적용 + PM 공지; 경합 테스트 1승 1충돌 | 100+60 |
 | L14 | `src/services/execution_loop/market_state.py` | L07, L08 | 다중 tf 조립, 부분 실패 시 예외 전파 | 150 |
@@ -647,6 +647,7 @@ DoD 공통: `ruff` · `mypy --strict` · `scripts/check_zone_manifest.py` 통과
 | L33 | `src/foundation/backtest/domain/splits.py`, `param_stability.py` | — | 겹침 0, 고립 검출 | 240 |
 | L34 | `src/foundation/backtest/domain/overfitting.py` | — | DSR/PBO 픽스처 값(§10 대조 후 확정) | 200 |
 | L35 | `src/foundation/backtest/application/param_sweep.py`, `walk_forward.py`, `stress.py` | L31, L33 | 결정론 순서, 선택 규칙, 필수 시나리오 | 470(3파일) |
+| L36-a (F-04) | `src/foundation/validation/application/start_validation.py` 수정 — `hard_fail_reasons=()` 상수 제거, `domain/rules.evaluate_bundle` 결과 전달 + `tests/adversarial/validation/test_hard_fail_reachable.py` | L42 | 임계 미달 픽스처가 실제로 `outcome=FAIL` 반환(I-07), 상수 반환 경로 grep 0건 | 120 |
 | L36 | `src/foundation/validation/domain/policy.py`, `check_result.py`, `artifact.py` | L05, L02 | 정책 해시, 변조 감지 | 280 |
 | L37 | 마이그레이션 M3 + `domain/models.py`, `contracts/v1.py`, `ports/repository.py`, `adapters/postgres_repository.py` | L36 | 기존 `test_start_validation.py` 회귀, 계약 테스트 | 640(5파일, 어댑터 300 초과 시 분리) |
 | L38 | `checks/context.py`, `checks/point_in_time.py`, `checks/backtest.py` | L31, L36 | PASS 1 + hard fail 1 each | 300 |

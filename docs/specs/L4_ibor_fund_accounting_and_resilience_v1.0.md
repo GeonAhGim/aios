@@ -52,7 +52,7 @@
 | 파일 | 책임 |
 |---|---|
 | `contracts/v1.py` | `DomainEvent{stream_id, seq, type, payload, occurred_at, recorded_at, causation_id, correlation_id, hash, prev_hash}` |
-| `append.py` | 조건부 append(`WHERE seq = expected`), 해시 체인 연결 |
+| `append.py` | 조건부 append(`WHERE seq = expected`) + **기존 해시체인 승격**: `core/db/append_only.py`(L0-3)와 `ledger/domain/hash_chain.py`(LC-3)를 재사용한다 — 새 체인 구현 금지(ADR-2026-09-06-B D3 "새로 만드는 것이 아니라 규칙으로 승격") |
 | `replay.py` | 스트림 재생 → 투영 재구축(순수 함수 조합) |
 | `projections/{orders,positions,ledger}.py` | 투영 정의(현재 테이블과 동일 결과) |
 | `scripts/replay_verify.py` | 임의 날짜 재생 후 투영 == 저장 상태 바이트 비교(야간 CI) |
@@ -72,9 +72,9 @@
 | `entities/domain/region.py` | 테넌트·법인 리전 태그, 저장 위치 정책 판정 |
 
 ## 3. 계약 (요지)
-- **필수 컬럼**: `orders`·`fills`·`positions`·`journal_entries`·`journal_lines`·`risk_decisions`·`performance_*`에
+- **필수 컬럼**(실제 테이블명 — 감사 2026-09-06 정정): `orders`·`fills`·`pos_snapshot`·`pos_journal`·`pos_account`·`ledger_journal_entry`·`ledger_posting_line`·`ledger_account`·`risk_decisions`·`performance_*`에
   `fund_id`(NOT NULL)·`portfolio_id`(NOT NULL) 추가. 기존 행은 기본 펀드/포트폴리오로 백필.
-- **양시간축**: 위 테이블 중 상태성 테이블에 `valid_from`·`valid_to`·`tx_from`·`tx_to`(TSTZRANGE 권장) 추가, 현재 행은 `tx_to = 'infinity'`.
+- **양시간축(감사 2026-09-06 범위 축소)**: WORM 트리거가 이미 걸린 append-only 테이블(`order_events`·`fills`·`pos_journal`·`ledger_journal_entry`·`ledger_posting_line`·`risk_decision`)은 물리적으로 UPDATE가 불가하므로 `tx_from`/`tx_to`를 추가하지 않는다(불필요한 의식). 양시간축은 **투영 테이블에만** 적용한다: `pos_snapshot`·`ledger_balance`·레거시 `positions`. 선행 사례로 `md_symbol_alias`(`4a1d0c0de007:91`)가 이미 `valid_from`/`valid_to` + EXCLUDE를 쓰되 **UPDATE로 구간을 닫으므로**(SCD-2) FA-10에서 append-only로 전환할지 SCD-2를 예외로 인정할지 결정한다.
 - **이벤트**: 모든 상태 전이는 이벤트 append 후 투영 갱신을 **같은 트랜잭션**에서 수행한다(outbox 패턴과 병존).
 - 에러: `FA_HIERARCHY_VIOLATION`(400), `FA_ALLOCATION_RESIDUAL`(409, 배분 잔여 불일치), `FA_BITEMPORAL_OVERLAP`(409),
   `FA_REPLAY_MISMATCH`(500, CI 전용), `FA_TXN_TOO_LONG`(500), `FA_REGION_DENIED`(403).
@@ -107,20 +107,24 @@
 ## 9. 리프 목록 (구현 순서 — **FA-1~8은 최우선, 다른 축보다 먼저**)
 | 리프 | 파일 | 선행 | DoD | 크기 |
 |---|---|---|---|---|
+| **FA-0a** | **소급 정정: `tenant_id` FK 재지정** — 19개 테이블이 `tenant_id UUID REFERENCES users(user_id)`로 선언돼 있다(감사 2026-09-06: `4a1d0c0de004`·`4a1d0c0de005`·`b8d5f2a1c3e4`·`c7d4e1a9f052`·`c7e6a3b2d4f5`·`d8e8e4ba2365`·`6e5baa1c7a55`·`f2b8e5d1a734`·`a1f3c9d6b8e2`·`84b7d0faf14f`·`e91a4c2b7d63`·`4453afe74725`·`4a1d0c0de008`·`4a1d0c0de009`). 실제 `tenant` 테이블(`f4a6b8c0d2e4`)로 재지정하고, `a7c3d9e1f2b4` 트리거의 `v_tenant <> NEW.user_id` 비교도 함께 고친다. 지금은 `tenant.id = users.user_id` 시딩 때문에만 동작하며, ORGANIZATION 테넌트가 생기는 순간 전부 깨진다 | — | 19 FK 재지정 + 트리거 수정, 조직 테넌트 픽스처로 통합 테스트 | 460 |
+| **FA-0b** | **소급 정정: 단일 포트폴리오 전제 제거** — `portfolio_mandate UNIQUE (tenant_id)`(`d8e8e4ba2365:45`) 드롭, `(tenant_id, portfolio_id)`로 교체. `src/foundation/mandates/ports/repository.py:20`의 같은 전제도 수정 | FA-0a | 한 테넌트에 포트폴리오 2개 생성 통합 테스트 | 300 |
+| **FA-0c** | **키 문법 정정 A: `ledger_account.account_code`** — 현재 `"USER:{uuid}:{sub}" | "PLATFORM:{NAME}"` 문자열에 계층이 인코딩돼 있고 UNIQUE다(`4a1d0c0de005:81`, `domain/chart_of_accounts.py`). 문자열 문법 대신 `(entity_id, fund_id, portfolio_id, account_type)` 컬럼으로 계층을 옮기고 `account_code`는 표시용 파생값으로 강등. **이 항목이 소급 작업 중 가장 비싸며, 하지 않으면 포트폴리오 2개가 같은 sub-account 유형을 쓸 때 UNIQUE 충돌** | FA-0a, FA-2 | 기존 코드 파싱 회귀 통과, 2포트폴리오 동일 유형 계정 생성 성공 | 500 |
+| **FA-0d** | **키 문법 정정 B: `pos_snapshot.position_key`** — `VARCHAR(200) PRIMARY KEY`이며 중앙 생성자가 없고 호출자가 문자열을 만든다(`record_fill.py`·`rebuild_snapshot.py`·`record_funding_fee.py`). `domain/position_key.py` 중앙 생성자를 만들고 `portfolio_id`를 키 구성요소로 편입, `pos_journal UNIQUE (position_key, sequence_no)`도 함께 검토 | FA-0a | 교차 포트폴리오 키 충돌 적대적 테스트, 호출자 전부 중앙 생성자 경유 정적 검사 | 460 |
 | FA-1 | `entities/contracts/v1.py` + `domain/hierarchy.py` + `domain/defaults.py` + test | — | 계층 불변조건, 기본 엔티티 자동 생성 | 560 |
 | FA-2 | 마이그레이션(4테이블) + `adapters/postgres_repository.py` + 통합 | FA-1 | FK·유일성, 교차 테넌트 404 | 500 |
-| FA-3 | **소급 마이그레이션 A**: `orders`·`fills`에 `fund_id`/`portfolio_id` NOT NULL + 기본값 백필 + FK | FA-2 | 기존 행 백필 검증, 누락 쓰기 거부 | 400 |
-| FA-4 | **소급 마이그레이션 B**: `positions`·`position_journal`·`journal_entries`·`journal_lines`에 동일 컬럼 + 백필 | FA-3 | 원장 대차 불변 유지 | 400 |
+| FA-3 | **소급 마이그레이션 A**: `orders`·`fills`에 `fund_id`/`portfolio_id` NOT NULL + 기본값 백필 + FK. OMS 5개 테이블(`order_events`·`fills`·`order_command_outbox`·`order_idempotency`·`provider_event_inbox`)은 `tenant_id`가 없고 `orders`로 간접 격리되므로 **조인 유지 여부를 이 리프에서 결정**한다 | FA-2, FA-0c, FA-0d | 기존 행 백필 검증, 누락 쓰기 거부 | 400 |
+| FA-4 | **소급 마이그레이션 B**: `pos_snapshot`·`pos_journal`·`pos_account`(LB-8)·`ledger_journal_entry`·`ledger_posting_line`(LC-6)에 동일 컬럼 + 백필 | FA-3, LB-8, LC-6 | 원장 대차 불변 유지 | 400 |
 | FA-5 | `application/resolve_context.py` + 기존 유스케이스 시그니처 확장(주문·포지션·원장 진입점) | FA-3 | 컨텍스트 없는 쓰기 정적 검사 0건 | 400 |
 | FA-6 | 리스크·성과·API 응답에 펀드/포트폴리오 스코프 반영 + 회귀 | FA-5 | 기존 단일계좌 응답 무변경 | 400 |
 | FA-7 | `allocation/domain/{policy,average_price}.py` + test | FA-1 | 3정책 정확값, 라운딩 잔여 0 | 440 |
 | FA-8 | `allocation/application/allocate_fills.py` + 마이그레이션 + 통합 | FA-7, FA-4 | 배분 합계 == 체결, 원장 연결 | 400 |
 | FA-9 | `core/bitemporal.py` + 4종 질의 + test | — | 질의 스냅샷, 겹침 거부 | 300 |
-| FA-10 | 소급 마이그레이션 C: 상태성 테이블 양시간축 컬럼 + UPDATE 금지 트리거 | FA-9, FA-4 | UPDATE 시도 실패, 현재 뷰 동일 | 400 |
+| FA-10 | 소급 마이그레이션 C: **투영 테이블만**(`pos_snapshot`·`ledger_balance`·`positions`) 양시간축 컬럼 + UPDATE 금지 트리거. `md_symbol_alias` SCD-2 처리 결정 포함 | FA-9, FA-4 | UPDATE 시도 실패, 현재 뷰 동일 | 400 |
 | FA-11 | `ledger/domain/correction.py` + `positions/domain/restatement.py` + test | FA-10 | 역분개+재기표, 소급 체결 반영 | 460 |
 | FA-12 | `application/{ibor_view,abor_snapshot}.py` + 통합 | FA-11 | 마감 스냅샷 불변, 정정 표시 | 400 |
-| FA-13 | `core/eventstore/contracts/v1.py` + `append.py`(해시체인·조건부) + test | — | 시퀀스 충돌 거부, 체인 검증 | 400 |
-| FA-14 | `projections/{orders,positions,ledger}.py` — 기존 상태를 투영으로 정의 | FA-13 | 투영 == 현재 테이블 | 600 |
+| FA-13 | `core/eventstore/contracts/v1.py` + `append.py`(해시체인·조건부) + test. **감사 2026-09-06: 도메인 테이블은 이미 append-only 해시체인이다 — 진짜 공백은 `src/core/event_bus/`가 아무것도 영속화하지 않는 것**이므로 이벤트 버스 durability를 이 리프에 포함한다 | — | 시퀀스 충돌 거부, 체인 검증 | 400 |
+| FA-14 | `projections/{orders,positions,ledger}.py` — 기존 `order_events`(OMS)·`pos_journal`(LB-5)·`ledger_journal_entry`(LC)를 이벤트 원천으로 삼아 투영 정의(새 이벤트 테이블 신설 금지) | FA-13, LC-3, LB-5 | 투영 == 현재 테이블 | 600 |
 | FA-15 | `replay.py` + `scripts/replay_verify.py` + 야간 CI 훅 | FA-14 | 1일 재생 바이트 동일 | 400 |
 | FA-16 | 기존 쓰기 경로에 이벤트 append 삽입(같은 트랜잭션) + 적대적(이벤트 없는 상태 변경 탐지) | FA-14 | 무이벤트 상태 변경 0건 | 500 |
 | FA-17 | `db/session_policy.py`(2초 상한) + 위반 탐지 테스트 | — | 장기 트랜잭션 예외 | 240 |

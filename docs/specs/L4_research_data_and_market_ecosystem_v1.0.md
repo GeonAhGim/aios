@@ -94,7 +94,7 @@
 | 리프 | 파일 | 선행 | DoD | 크기 |
 |---|---|---|---|---|
 | RD-1 | `docs/design/RESEARCH_DATA_SOURCE_EVAL.md` — 계층 A 8개 소스의 **이용약관·라이선스 원문 인용** + 커버리지·정정 정책·rate limit 실측 채점표(CH-0 형식) | — | 소스별 `redistribution` 판정 근거 명시. 미확인 소스는 반입 금지 | 260 |
-| RD-2 | `contracts/v1.py` + `domain/known_at.py` + test | — | 스키마 스냅샷, `known_at` 없는 항목 거부, PIT 판정 | 500 |
+| RD-2 | `contracts/v1.py` + `domain/known_at.py`(**FA-9 `core/bitemporal.py`에 위임 — `known_at` ≡ `tx_from`, 재구현 금지**) + test | FA-9 | 스키마 스냅샷, `known_at` 없는 항목 거부, PIT 판정 | 500 |
 | RD-3 | `domain/redistribution.py` + `domain/revision.py` + test | RD-2 | link_only 본문 강제 None, 정정 체인 | 400 |
 | RD-4 | 마이그레이션(`research_items` WORM·`research_sources`·매핑 테이블) + `adapters/postgres_repository.py` + 통합 | RD-2 | append-only 증명, 멱등 유일키 | 560 |
 | RD-5 | `domain/entity_link.py` + `application/link_entities.py` + test | RD-2 | 확정 키만 매핑, 추측 거부 | 400 |

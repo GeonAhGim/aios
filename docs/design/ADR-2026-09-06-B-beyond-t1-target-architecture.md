@@ -76,3 +76,20 @@ Accepted (2026-09-06, Chief Architect). 사용자 지시: "최대한 리팩터�
 - 단일 계좌 전제 유지 후 나중에 다펀드 확장: 재구축 비용이 지금 비용의 10배 이상.
 - 컴플라이언스를 리스크 엔진 안에 합치는 안: 권위가 섞이면 "왜 막혔는가"를 규제기관에 설명할 수 없고, 규칙 승인 주체가 다르다.
 - 이벤트 소싱 전면 도입을 위한 기존 코드 재작성: 기존 이벤트·감사·분개 구조를 규칙으로 승격하는 방식이 같은 결과를 훨씬 싸게 낸다.
+
+## 감사 정정 (2026-09-06, 코드 대조 후)
+전면 재검토에서 이 ADR의 비용 모델이 세 군데 틀렸음이 확인됐다. 결정 자체는 유지하되 범위를 정정한다.
+
+1. **D5(부모-자식 주문)는 이미 구현돼 있다.** `orders.parent_order_id`·`algo_run_id` 컬럼과 `oms/domain/algo_slicer.py`가 존재한다.
+   EM-2/EM-3은 신설이 아니라 보강이며, 새 `parent_orders`/`child_orders` 테이블은 만들지 않는다. OMS `L4-25`는 EM으로 흡수해 폐기한다.
+2. **D4(컴플라이언스)의 전제가 틀렸다.** "주문 경로에 훅을 나중에 끼우면 실행 코어 재작업"이라고 했으나, `foundation_gate.py`가 이미
+   리스크와 mandate 정책을 함께 평가하고 `policy_decision`이 지문·만료를 갖춘 결정 레코드로 존재한다. 별도 Compliance 컨텍스트 신설은
+   `foundation/mandates` 중복이므로 **mandates 확장 + `GateDecision.policy_decision_id` + `require_mandate=True`**로 바꾼다.
+3. **D2(양시간축)의 범위가 과도했다.** WORM 트리거가 걸린 append-only 테이블은 물리적으로 UPDATE가 불가하므로 트랜잭션 시간축이 무의미하다.
+   양시간축은 **투영 테이블**(`pos_snapshot`·`ledger_balance`·`positions`)에만 적용한다.
+4. **ADR이 놓친 진짜 비용 세 가지를 선행 리프로 신설했다(FA-0a~0d).** (a) `tenant_id`가 `users`를 FK하는 19개 테이블 — 조직 테넌트가
+   생기면 전부 깨진다, (b) `portfolio_mandate UNIQUE(tenant_id)`가 테넌트당 포트폴리오 1개를 강제, (c) `ledger_account.account_code`
+   문자열 문법과 `pos_snapshot.position_key`에 계층이 이미 인코딩돼 있어 컬럼 추가만으로는 두 진실이 공존한다. **이 넷을 먼저 하지 않고
+   `fund_id`만 추가하면 ADR이 피하려던 재구축 비용을 그대로 치른다.**
+5. **D3의 실제 공백은 도메인 테이블이 아니라 이벤트 버스다.** `order_events`·`pos_journal`·`ledger_journal_entry`는 이미 해시체인
+   append-only이고 `pos_snapshot`·`ledger_balance`는 이미 재구축 가능한 투영이다. `src/core/event_bus/`가 아무것도 영속화하지 않는 것이 공백이다.

@@ -12,9 +12,9 @@
 | I-04 | 전략 아티팩트는 버전 부여 시 콘텐츠 해시로 주소화·불변, DB 권한/트리거로 강제 | L4 strategy §3.0, MP-3 |
 | I-05 | 백테스트와 라이브는 같은 컴파일 산출물·같은 도메인 로직(주문/포지션/비용)을 공유 | DSL-11, BT-1~9, ADR-B D4 |
 | I-06 | 외부 AI/에이전트 capability는 인간 세션과 분리된 닫힌 스코프 enum·서버측 즉시 revoke 토큰으로만, 자기 권한 API 도달 불가 | (Agent Gateway 명세 시) |
-| I-07 | 검증/승인 게이트의 hard-fail 조건은 도메인 코드가 계산하고 실제로 FAIL을 반환할 수 있어야 한다 | F-04 수정 리프, 검증 파이프라인 |
+| I-07 | 검증/승인 게이트의 hard-fail 조건은 도메인 코드가 계산하고 실제로 FAIL을 반환할 수 있어야 한다 | L36-a(F-04), L42 |
 | I-08 | MCP/도구 서버는 REST/도메인 계층 이상의 인가·비즈니스 로직을 갖지 않는다 | (Agent Gateway 명세 시) |
-| I-09 | 리스크 최종 ALLOW/DENY는 하나의 합성 지점(mandate ∩ RiskEngine, min)을 거치고 조회 증거를 남긴다 | R 리프(Policy 합성), Master Authority |
+| I-09 | 주문 최종 ALLOW/DENY는 **두 개의 독립 권위**(RiskEngine 합성점 ∩ Compliance 번들 평가)를 모두 통과해야 하며, 각각 조회 증거(`risk_decision_id`·`compliance_decision_id`)를 남긴다 (2026-09-06 ADR-B D4 반영 — 이전 "mandate ∩ RiskEngine 단일 합성점" 표현은 폐기) | R-16/R-35/R-36(리스크 합성), CM-3/CM-8(컴플라이언스), OMS §3.1-a submit_order 배선 |
 | I-10 | "구현됨 ≠ 작동함": 안전/정책 컴포넌트는 배선 증명 테스트(정적 검사 또는 적대적 통합)가 있어야 완료 | 모든 리프 DoD, QA 프롬프트 |
 | I-11 | 확인이 필요한 작업은 1회성 서버측 토큰으로 미리보기와 실행을 연결한다(클라이언트 플래그만으로 불가) | 승인 워크플로·Agent Gateway |
 
