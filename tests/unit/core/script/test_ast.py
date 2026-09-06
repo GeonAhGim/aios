@@ -123,6 +123,19 @@ def test_identifier_rejects_invalid_name() -> None:
         Identifier(name="1bad-name")
 
 
+@pytest.mark.parametrize("bad_value", [True, False])
+def test_number_literal_rejects_bool_despite_int_subclass(bad_value: bool) -> None:
+    """`bool`은 `int`의 서브클래스라 승격에 노출되기 쉽다 — §3.3 `primary`에
+    원시 bool 리터럴이 없다는 불변식은 값 수준에서도 강제되어야 한다."""
+    with pytest.raises(ValidationError):
+        NumberLiteral(value=bad_value)
+
+
+def test_postfix_index_rejects_bool_despite_int_subclass() -> None:
+    with pytest.raises(ValidationError):
+        PostfixExpr(base=Identifier(name="close"), index=True)
+
+
 def test_program_rejects_unknown_field() -> None:
     data = to_dict(_sample_program())
     data["unexpected"] = True

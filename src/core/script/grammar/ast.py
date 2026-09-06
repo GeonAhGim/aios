@@ -33,6 +33,15 @@ def _validate_ident(value: str) -> str:
     return value
 
 
+def _reject_bool(value: Any) -> Any:
+    """`bool`은 `int`의 서브클래스라 pydantic이 조용히 `int`로 승격한다 —
+    §3.3 `primary`에 원시 bool 리터럴이 없다는 불변식을 값 수준에서도
+    강제하려면 명시적으로 거부해야 한다."""
+    if isinstance(value, bool):
+        raise ValueError("bool 값은 허용되지 않음")
+    return value
+
+
 class ScriptNode(BaseModel):
     """모든 AST 노드의 공통 베이스 — 불변(frozen)·미지 필드 거부(extra=forbid).
 
@@ -60,6 +69,11 @@ class TypeNode(ScriptNode):
 class NumberLiteral(ScriptNode):
     kind: Literal["number"] = "number"
     value: int | float
+
+    @field_validator("value", mode="before")
+    @classmethod
+    def _check_value(cls, value: Any) -> Any:
+        return _reject_bool(value)
 
 
 class Identifier(ScriptNode):
@@ -104,6 +118,11 @@ class PostfixExpr(ScriptNode):
     kind: Literal["postfix"] = "postfix"
     base: Expr
     index: int | None = Field(default=None, ge=0)
+
+    @field_validator("index", mode="before")
+    @classmethod
+    def _check_index(cls, value: Any) -> Any:
+        return _reject_bool(value)
 
 
 # ---- not_expr := "not" not_expr | cmp ----
