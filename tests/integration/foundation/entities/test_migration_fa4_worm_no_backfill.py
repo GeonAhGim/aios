@@ -40,11 +40,16 @@ import pytest
 
 from src.data.models.base import Currency
 from src.foundation.evidence.adapters.postgres_repository import PostgresAuditEventRepository
+from src.foundation.evidence.domain.models import Classification, Outcome
+from src.foundation.evidence.domain.rules import assert_safe_payload, compute_payload_hash
 from src.foundation.ledger.adapters.postgres_balance_repository import PostgresBalanceRepository
 from src.foundation.ledger.adapters.postgres_journal_repository import PostgresJournalRepository
 from src.foundation.ledger.application.post_entry import post_entry
 from src.foundation.ledger.contracts.v1 import AccountType, LedgerEvent, LedgerEventType, UserSub
-from src.foundation.ledger.domain.chart_of_accounts import user_account
+from src.foundation.ledger.domain import posting_rules
+from src.foundation.ledger.domain.chart_of_accounts import PLATFORM_CASH_CLEARING, user_account
+from src.foundation.ledger.domain.hash_chain import entry_hash, lines_digest
+from src.foundation.ledger.domain.idempotency import idempotency_key
 from tests.integration.conftest import create_test_tenant
 
 _PROJECT_ROOT = Path(__file__).resolve().parents[4]
@@ -188,36 +193,112 @@ async def _post_topup(pool: asyncpg.Pool, ports: _RealPorts, event_ref: str):
         )
 
 
-async def test_ledger_journal_entry_and_posting_line_never_backfilled(pool):
-    ports = _RealPorts(pool)
+async def _insert_pre_fa4_ledger_entry(pool: asyncpg.Pool, event_ref: str, user_id: UUID) -> UUID:
+    """FA-4 이전 스키마(`fund_id`/`portfolio_id` 컬럼 없음)에서 `post_entry`
+    (LC-9)가 만들었을 행과 정확히 같은 모양을 손으로 재현한다.
 
+    FA-8(task-1796)부터 `journal.append`(LC-8b)의 INSERT가 `fund_id`/
+    `portfolio_id`를 무조건 함께 쓰므로, 그 함수는 이제 이 컬럼이 있는
+    스키마(FA-4 이후)에서만 실행 가능하다 — 다운그레이드된(FA-4 이전)
+    스키마에서 `post_entry`를 직접 호출할 수 없게 된 것은 회귀가 아니라
+    FA-8이 의도한 배선이다. 그래도 "그 시절 코드가 만들었을 행"은 여전히
+    재현해야 하므로, `post_entry`가 내부에서 쓰는 것과 같은 순수 함수
+    (`posting_rules.lines_for`/`hash_chain.lines_digest`/`entry_hash`)로
+    체인이 유효한 값을 계산해 직접 INSERT한다 — 모듈 docstring이 경고하는
+    "손으로 만든 placeholder digest/hash로 해시체인을 오염시키는" 위험을
+    피하면서도 FA-4 이전 스키마(컬럼 자체가 없음)를 그대로 흉내낸다."""
+    code = await _create_user_available_account(pool, user_id)
+    event = _topup_event(event_ref=event_ref, user_id=user_id)
+    lines = posting_rules.lines_for(event)
+    digest = lines_digest(lines)
+    key = idempotency_key(event)
+    entry_id = uuid4()
+    posted_at = datetime.now(timezone.utc)
+
+    async with pool.acquire() as conn, conn.transaction():
+        last = await conn.fetchrow(
+            "SELECT sequence_no, entry_hash FROM ledger_journal_entry "
+            "ORDER BY sequence_no DESC LIMIT 1"
+        )
+        next_seq = 1 if last is None else last["sequence_no"] + 1
+        prev_hash = None if last is None else last["entry_hash"]
+        new_hash = entry_hash(
+            prev_hash, next_seq, event.event_type, event.event_ref, digest, posted_at
+        )
+
+        payload: dict[str, object] = {"event_ref": event.event_ref, "line_count": len(lines)}
+        assert_safe_payload(payload)
+        audit = await PostgresAuditEventRepository(pool).append_event_in(
+            conn,
+            tenant_id=event.tenant_id,
+            aggregate_type="ledger_journal_entry",
+            aggregate_id=entry_id,
+            aggregate_revision=None,
+            action=event.event_type.value,
+            outcome=Outcome.SUCCESS,
+            actor_subject_id=event.actor_subject_id,
+            trace_id=event.trace_id,
+            payload_hash=compute_payload_hash(payload),
+            payload=payload,
+            classification=Classification.INTERNAL,
+        )
+        await conn.execute(
+            "INSERT INTO ledger_journal_entry "
+            "(entry_id, sequence_no, event_type, event_ref, idempotency_key, "
+            " lines_digest, prev_hash, entry_hash, audit_event_id, posted_by, posted_at) "
+            "VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)",
+            entry_id, next_seq, event.event_type.value, event.event_ref, key,
+            digest, prev_hash, new_hash, audit.id, event.actor_subject_id, posted_at,
+        )
+        account_ids = {
+            row["account_code"]: row["account_id"]
+            for row in await conn.fetch(
+                "SELECT account_code, account_id FROM ledger_account "
+                "WHERE account_code = ANY($1::text[])",
+                [code, PLATFORM_CASH_CLEARING],
+            )
+        }
+        for line in lines:
+            await conn.execute(
+                "INSERT INTO ledger_posting_line "
+                "(entry_id, line_no, account_id, side, amount, currency) "
+                "VALUES ($1, $2, $3, $4, $5, $6)",
+                entry_id, line.line_no, account_ids[line.account_code],
+                line.side.value, line.amount, line.currency.value,
+            )
+    return entry_id
+
+
+async def test_ledger_journal_entry_and_posting_line_never_backfilled(pool):
     _run_alembic("downgrade", _DOWN_REVISION)
-    view = await _post_topup(pool, ports, f"fa4-worm-test:{uuid4().hex}")
+    entry_id = await _insert_pre_fa4_ledger_entry(
+        pool, f"fa4-worm-test:{uuid4().hex}", uuid4()
+    )
 
     _run_alembic("upgrade", "head")
 
     async with pool.acquire() as conn:
         entry_row = await conn.fetchrow(
             "SELECT fund_id, portfolio_id FROM ledger_journal_entry WHERE entry_id = $1",
-            view.entry_id,
+            entry_id,
         )
         line_rows = await conn.fetch(
             "SELECT fund_id, portfolio_id FROM ledger_posting_line WHERE entry_id = $1",
-            view.entry_id,
+            entry_id,
         )
         entry_backfilled = await conn.fetchval(
             "SELECT count(*) FROM ledger_journal_entry "
             "WHERE entry_id = $1 AND fund_id IS NOT NULL",
-            view.entry_id,
+            entry_id,
         )
         line_backfilled = await conn.fetchval(
             "SELECT count(*) FROM ledger_posting_line "
             "WHERE entry_id = $1 AND fund_id IS NOT NULL",
-            view.entry_id,
+            entry_id,
         )
         line_null = await conn.fetchval(
             "SELECT count(*) FROM ledger_posting_line WHERE entry_id = $1 AND fund_id IS NULL",
-            view.entry_id,
+            entry_id,
         )
 
     assert entry_row["fund_id"] is None

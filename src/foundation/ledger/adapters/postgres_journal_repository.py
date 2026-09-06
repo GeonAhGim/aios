@@ -157,8 +157,9 @@ class PostgresJournalRepository:
         row = await conn.fetchrow(
             "INSERT INTO ledger_journal_entry "
             "(entry_id, sequence_no, event_type, event_ref, idempotency_key, "
-            " lines_digest, prev_hash, entry_hash, audit_event_id, posted_by, posted_at) "
-            "VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11) "
+            " lines_digest, prev_hash, entry_hash, audit_event_id, posted_by, posted_at, "
+            " fund_id, portfolio_id) "
+            "VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13) "
             "RETURNING *",
             entry_id,
             next_seq,
@@ -171,17 +172,19 @@ class PostgresJournalRepository:
             audit_event.id,
             entry.actor_subject_id,
             posted_at,
+            entry.fund_id,
+            entry.portfolio_id,
         )
 
         # 왕복 축소(LC-17 결함 B): 행마다 INSERT하는 대신 멀티행 VALUES
-        # 하나로 묶는다. `entry_id`는 모든 행이 공유하므로 $1 하나만 쓰고,
-        # 행별 컬럼은 그 뒤로 5개씩 이어붙인다.
+        # 하나로 묶는다. `entry_id`·`fund_id`·`portfolio_id`는 모든 행이
+        # 공유하므로 $1~$3 세 개만 쓰고, 행별 컬럼은 그 뒤로 5개씩 이어붙인다.
         placeholders = []
         params: list[object] = []
         for i, line in enumerate(lines):
-            base = 1 + i * 5
+            base = 3 + i * 5
             placeholders.append(
-                f"($1, ${base + 1}, ${base + 2}, ${base + 3}, ${base + 4}, ${base + 5})"
+                f"($1, ${base + 1}, ${base + 2}, ${base + 3}, ${base + 4}, ${base + 5}, $2, $3)"
             )
             params.extend(
                 [
@@ -194,9 +197,11 @@ class PostgresJournalRepository:
             )
         await conn.execute(
             "INSERT INTO ledger_posting_line "
-            "(entry_id, line_no, account_id, side, amount, currency) "
+            "(entry_id, line_no, account_id, side, amount, currency, fund_id, portfolio_id) "
             "VALUES " + ", ".join(placeholders),
             entry_id,
+            entry.fund_id,
+            entry.portfolio_id,
             *params,
         )
 
