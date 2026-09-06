@@ -31,7 +31,7 @@ UPDATE 7건을 §9 R-58 리프(task-1521)로 이 장부에 등재한다. 명세 
 | RTF-01 | #42 | `correlation_with()` 미지 페어 0.0 fail-open | 명세 §1 R3 | R-11 `900704b` · R-29 `e8d4160` · R-31 `d6f48be` | `tests/unit/core/risk/test_correlation.py` missing_pairs DENY 3건 | ✅ FIXED — 잔여: 타 심볼 보유 시 과잉거부(#42) |
 | RTF-02 | #43 | `metrics_collector.data_delay_sec` 상수 0 | 명세 §1 R3/R7 | R-42 `a0652c9` · R-43 `bb513af` | `tests/integration/test_circuit_breaker.py::test_unknown_data_delay_does_not_read_as_normal` | ✅ FIXED — 잔여: 운영 조립부 tracker 미주입 → 상시 HALTED(#43) |
 | RTF-03 | #44 | watchdog `market_wide_correlated=None` 고정 → LIQUIDATE 영구 미발동 | 명세 §1 R3 | R-49 · R-51 (미착수) | — | ⏳ OPEN |
-| RTF-04 | #45 | `foundation_gate` mandate 우회 env 플래그 | 명세 §1 R3 | R-36 `a2e2646` | `tests/integration/test_order_service_risk_gate.py` unmandated DENY 2건 | ✅ FIXED(플래그 제거) — 잔여: 조립부 2곳 `require_mandate=False`(#45) |
+| RTF-04 | #45 | `foundation_gate` mandate 우회 env 플래그 | 명세 §1 R3 | R-36 `a2e2646` | `tests/integration/test_order_service_risk_gate.py` unmandated DENY 2건 | ✅ FIXED(플래그 제거) — 잔여: 조립부 3곳 `require_mandate=False`(#45, task-1568 재대조로 1곳 추가 확인) |
 | RTF-05 | #46 | `watchdog_process._apply_decision` 무조건 UPDATE | 명세 §1 R8 | R-51 (미착수) | — | ⏳ OPEN |
 | RTF-06 | #47 | `circuit_breaker._set_level` 무조건 UPDATE | 명세 §1 R7 | R-43 `bb513af` | `tests/integration/test_circuit_breaker.py::test_concurrent_set_level_only_one_writer_wins` | ✅ FIXED |
 | RTF-07 | #48 | `strategy_allocation` 분모 available_balance | 명세 §2.1 | R-09 `e8ae0c7` · R-17 `35ec47a` | `tests/unit/core/risk/test_strategy_allocation.py::test_denominator_is_total_equity_not_available_balance` | ✅ FIXED — 잔여: total_equity USDT 근사(명세 §10) |
@@ -120,11 +120,12 @@ LIQUIDATE 분기는 `market_wide_correlated is True`일 때만 열리므로 시�
 **증명**: `tests/integration/test_order_service_risk_gate.py::test_unmandated_submit_denied`,
 `::test_active_kill_switch_denies_unmandated_legacy_submit`.
 
-**잔여**: 프로덕션 조립부 2곳(`background_loops.py` pre_submit_gate ·
-`execution_deps.py` pre_start_gate)이 `require_mandate=False` — execution 생성
-UI가 `mandate_revision_id`를 연결하지 않아 지금 켜면 legacy 실행 전체가 막힌다.
-값이 코드에 드러나므로 env 우회는 불가하며, mandate 연결 UI 이후 두 곳을
-`True`로 전환(별도 리프).
+**잔여(2026-09-06 task-1568 재대조 갱신)**: 프로덕션 조립부 3곳(`background_loops.py`
+pre_submit_gate · `execution_deps.py` pre_start_gate · task-1538로 신설된
+`src/services/oms/application/wiring.py::build_outbox_dispatcher` pre_send_gate)이
+`require_mandate=False` — execution 생성 UI가 `mandate_revision_id`를 연결하지
+않아 지금 켜면 legacy 실행 전체가 막힌다. 값이 코드에 드러나므로 env 우회는
+불가하며, mandate 연결 UI 이후 세 곳을 `True`로 전환(별도 리프).
 
 ---
 
