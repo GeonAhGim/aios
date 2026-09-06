@@ -19,7 +19,6 @@ import argparse
 import json
 import re
 import sys
-from collections.abc import Callable
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -69,13 +68,13 @@ def _py(*rel: str) -> list[Path]:
 
 def check_optional_safety_gate() -> Finding | None:
     """I-01 — 안전 게이트 인자가 Optional이면 넘기지 않아도 통과한다(P0-B 양식)."""
-    hits = _hits(
-        r"(pre_submit_gate|pre_send_gate|pre_start_gate)\s*:\s*[^=\n]*\|\s*None",
-        _py("src/services/order_service", "src/services/oms", "src/services/execution_loop"),
-    )
+    hits = _hits(r"(pre_submit_gate|pre_send_gate|pre_start_gate)\s*:\s*[^=\n]*\|\s*None",
+                 _py("src/services/order_service", "src/services/oms",
+                     "src/services/execution_loop"))
     if hits:
-        detail = "안전 게이트 인자가 Optional로 선언돼 있다 — 넘기지 않아도 통과한다(I-01 위반)."
-        return Finding("optional_safety_gate", detail, hits)
+        return Finding(
+            "optional_safety_gate",
+        "안전 게이트 인자가 Optional이다 — 안 넘겨도 통과한다(I-01 위반).", hits)
     return None
 
 
@@ -84,11 +83,9 @@ def check_require_mandate_false() -> Finding | None:
     hits = _hits(r"require_mandate\s*=\s*False", _py("src/api", "src/services"))
     hits = [h for h in hits if "wiring.py:14" not in h]  # docstring 설명 줄은 제외
     if hits:
-        detail = (
-            "운영 조립 지점이 require_mandate=False로 게이트를 만든다 — "
-            "컴플라이언스 판정이 무력하다."
-        )
-        return Finding("require_mandate_false", detail, hits)
+        return Finding(
+            "require_mandate_false",
+        "운영 조립이 require_mandate=False다 — 컴플라이언스 판정이 무력하다.", hits)
     return None
 
 
@@ -109,27 +106,24 @@ def check_freshness_tracker() -> Finding | None:
     """P0-A — 미주입 시 data_delay=None으로 서킷브레이커가 영구 HALTED가 된다."""
     body = _read(ROOT / "src/main.py")
     if body and "freshness_tracker" not in body:
-        detail = (
-            "main.py가 DataFreshnessTracker를 만들지 않는다 — "
-            "서킷브레이커가 기동 직후 영구 HALTED가 된다."
-        )
-        return Finding("freshness_tracker_unwired", detail, ["src/main.py"])
+        return Finding(
+            "freshness_tracker_unwired",
+        "main.py가 DataFreshnessTracker를 안 만든다 — 기동 직후 영구 HALTED.",
+                       ["src/main.py"])
     return None
-
-
-def _line_at(loc: str) -> str:
-    """`상대경로:줄번호` 형식 위치에서 실제 줄 텍스트를 돌려준다."""
-    rel, lineno = loc.split(":")
-    return _read(ROOT / rel).splitlines()[int(lineno) - 1]
 
 
 def check_xfail_in_gate_tests() -> Finding | None:
     """검사가 자기 자신을 무력화하는 형태(P0-C)."""
     hits = _hits(r"xfail", _py("tests/unit/test_gate_params_required.py"))
-    hits = [h for h in hits if "xfail 없음" not in _line_at(h)]
+    def _is_real(h: str) -> bool:
+        path, num = h.split(":")[0], int(h.split(":")[1])
+        return "xfail 없음" not in _read(ROOT / path).splitlines()[num - 1]
+
+    hits = [h for h in hits if _is_real(h)]
     if hits:
-        detail = "I-01 정적 검사에 xfail이 있다 — 위반이 있어도 CI가 녹색이 된다."
-        return Finding("xfail_in_gate_tests", detail, hits)
+        return Finding("xfail_in_gate_tests",
+                       "I-01 정적 검사에 xfail이 있다 — 위반이 있어도 CI가 녹색이 된다.", hits)
     return None
 
 
@@ -146,11 +140,9 @@ def check_tenant_fk_to_users() -> Finding | None:
             if re.search(r"tenant_id[^,\n]*REFERENCES\s+users\s*\(", line, re.I):
                 hits.append(f"{p.relative_to(ROOT).as_posix()}:{i}")
     if hits:
-        detail = (
-            "tenant_id가 users(user_id)를 FK한다 — "
-            "실제 테넌트 테이블은 `tenant`다(ADR-2026-09-06-G D0)."
-        )
-        return Finding("tenant_fk_to_users", detail, hits)
+        return Finding(
+            "tenant_fk_to_users",
+        "tenant_id가 users를 FK한다 — 실제 테넌트 테이블은 tenant다(ADR-G D0).", hits)
     return None
 
 
@@ -170,12 +162,10 @@ def check_rls_enable_without_force() -> Finding | None:
             forced.add("__loop__")
     missing = sorted(t for t in enabled if t not in forced and t != "__loop__")
     if missing and "__loop__" not in forced:
-        joined = ", ".join(missing)
-        detail = (
-            f"RLS를 ENABLE만 하고 FORCE하지 않은 테이블: {joined} — "
-            "소유자 연결이 정책을 우회한다."
-        )
-        return Finding("rls_enable_without_force", detail, missing)
+        return Finding(
+            "rls_enable_without_force",
+        f"RLS ENABLE만 하고 FORCE 안 함: {', '.join(missing)} — 소유자가 우회한다.",
+                       missing)
     return None
 
 
@@ -188,11 +178,9 @@ def check_duplicate_type_names() -> Finding | None:
         if len(hits) > 1:
             out.extend(f"{name} @ {h}" for h in hits)
     if out:
-        detail = (
-            "같은 이름의 계약 타입이 둘 이상 정의돼 있다 — "
-            "잘못된 쪽을 임포트해도 타입검사를 통과한다."
-        )
-        return Finding("duplicate_type_names", detail, out)
+        return Finding(
+            "duplicate_type_names",
+        "동명이의 계약 타입이 있다 — 잘못 임포트해도 타입검사를 통과한다.", out)
     return None
 
 
@@ -210,34 +198,13 @@ CHECKS = [
 
 # --------------------------------------------------------------------------- 실행
 
-class _CheckerFailure(Exception):
-    """검사 함수 내부 예외를 감싼다 — 바깥 루프가 구체 타입으로 잡도록.
-
-    BLE001은 재raise만 있는 except 블록은 블라인드로 보지 않는다.
-    """
-
-    def __init__(self, checker_name: str, cause: BaseException) -> None:
-        super().__init__(checker_name)
-        self.checker_name = checker_name
-        self.cause = cause
-
-
-def _invoke(fn: Callable[[], Finding | None]) -> Finding | None:
-    try:
-        return fn()
-    except Exception as exc:
-        raise _CheckerFailure(fn.__name__, exc) from exc
-
-
 def run() -> list[Finding]:
     out: list[Finding] = []
     for fn in CHECKS:
         try:
-            f = _invoke(fn)
-        except _CheckerFailure as err:  # 검사 하나가 죽어도 나머지는 돈다
-            code = f"checker_error_{err.checker_name}"
-            detail = f"검사 자체가 실패했다: {err.cause!r}"
-            f = Finding(code, detail, [])
+            f = fn()
+        except Exception as exc:  # noqa: BLE001 - 검사 하나가 죽어도 나머지는 돌아야 한다
+            f = Finding(f"checker_error_{fn.__name__}", f"검사 자체가 실패했다: {exc!r}", [])
         if f is not None:
             out.append(f)
     return out
