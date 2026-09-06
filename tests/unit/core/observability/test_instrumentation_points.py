@@ -11,6 +11,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from decimal import Decimal
+from types import SimpleNamespace
 from uuid import uuid4
 
 import pytest
@@ -37,6 +38,7 @@ from src.foundation.paper_control.domain.models import (
     PaperDeployment,
 )
 from src.foundation.risk_gate.contracts.v1 import GateKind, RiskEvaluationView, RiskOutcome
+from src.services.order_service import reconcile as reconcile_module
 from src.services.order_service import repository as repository_module
 from src.services.order_service.gate import GateDecision, GateOutcome, record_gate_decision
 from src.services.order_service.position_ledger import record_fill_in_position_ledger
@@ -209,23 +211,30 @@ async def test_position_ledger_skips_metric_when_not_filled() -> None:
 
 
 # ---- reconcile.py: aios.order.unknown_state.gauge ----
+#
+# task-1604(L4-16) — `resolve_unknown`의 실제 판정은
+# `oms.application.unknown_resolver.resolve_unknown`(실DB 트랜잭션)로
+# 위임됐다(tests/integration/oms/test_unknown_resolver.py가 그 판정 로직
+# 자체를 실DB로 증명). 이 두 테스트는 계측 지점(래퍼가 위임 결과를 보고
+# 게이지를 올바르게 기록하는지)만 좁게 확인하므로, 위임 호출 자체를
+# monkeypatch로 대역해 실DB 없이 유지한다(모듈 docstring "실제 DB/거래소
+# 왕복 없이" 원칙 그대로).
 
 
 async def test_reconcile_gauge_zero_when_resolved(monkeypatch: pytest.MonkeyPatch) -> None:
-    pending = _order(status=OrderStatus.UNKNOWN, execution_id=1).model_copy(
+    pending = _order(status=OrderStatus.FILLED, execution_id=1).model_copy(
         update={"exchange_order_id": "ex-1"}
     )
+    resolved_view = SimpleNamespace(status=OrderStatus.FILLED, exchange="bitget")
+
+    async def fake_resolve_unknown(order_id: object, **kwargs: object) -> object:
+        return resolved_view
 
     async def fake_get_by_order_id(conn: object, order_id: object) -> Order:
         return pending
 
-    async def fake_update_from_exchange(
-        conn: object, order: Order, *, expected_status: object
-    ) -> Order:
-        return order
-
+    monkeypatch.setattr(reconcile_module.unknown_resolver, "resolve_unknown", fake_resolve_unknown)
     monkeypatch.setattr(repository_module, "get_by_order_id", fake_get_by_order_id)
-    monkeypatch.setattr(repository_module, "update_from_exchange", fake_update_from_exchange)
 
     adapter = FakeExchangeAdapter(get_order_status=OrderStatus.FILLED)
     spy = _SpyMetrics()
@@ -242,6 +251,10 @@ async def test_reconcile_gauge_one_when_never_resolved(monkeypatch: pytest.Monke
     pending = _order(status=OrderStatus.UNKNOWN, execution_id=1).model_copy(
         update={"exchange_order_id": "ex-1"}
     )
+    unresolved_view = SimpleNamespace(status=OrderStatus.UNKNOWN, exchange="bitget")
+
+    async def fake_resolve_unknown(order_id: object, **kwargs: object) -> object:
+        return unresolved_view
 
     async def fake_get_by_order_id(conn: object, order_id: object) -> Order:
         return pending
@@ -249,6 +262,7 @@ async def test_reconcile_gauge_one_when_never_resolved(monkeypatch: pytest.Monke
     async def fake_sleep(seconds: float) -> None:
         return None
 
+    monkeypatch.setattr(reconcile_module.unknown_resolver, "resolve_unknown", fake_resolve_unknown)
     monkeypatch.setattr(repository_module, "get_by_order_id", fake_get_by_order_id)
 
     adapter = FakeExchangeAdapter(get_order_status=OrderStatus.UNKNOWN)
