@@ -48,6 +48,10 @@ import asyncpg
 
 from src.core.approval._shared import ApprovalError, ApprovalRequest, _fetch, _row_to_model
 from src.data.models.serialization import DecimalSafeEncoder
+from src.foundation.trust.domain.rules.segregation_of_duty import (
+    SegregationOfDutyViolation,
+    assert_actor_not_counterparty,
+)
 
 __all__ = [
     "ApprovalError",
@@ -216,8 +220,14 @@ async def approve(pool: asyncpg.Pool, request_id: int, approver_id: UUID) -> App
             raise ApprovalError("이미 다른 사용자가 먼저 서명했습니다(동시 요청 충돌).")
         return _row_to_model(row)
 
-    if request.first_approver_id == approver_id:
-        raise ApprovalError("DUAL 모드는 서로 다른 계정의 순차 서명이 필요합니다.")
+    try:
+        assert_actor_not_counterparty(
+            approver_id,
+            request.first_approver_id,
+            action="approval_request.dual_second_sign",
+        )
+    except SegregationOfDutyViolation as exc:
+        raise ApprovalError("DUAL 모드는 서로 다른 계정의 순차 서명이 필요합니다.") from exc
 
     async with pool.acquire() as conn:
         row = await conn.fetchrow(
