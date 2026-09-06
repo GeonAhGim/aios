@@ -21,6 +21,27 @@ from src.services.oms.ports.repository import OutboxRepoPort
 from tests.integration.oms.conftest import create_test_user, insert_order
 
 
+@pytest.fixture
+async def pool(pool):
+    """conftest의 `pool`을 오버라이드해 이 파일의 테스트 앞에 정리를 끼워 넣는다.
+
+    이 파일의 모든 테스트는 `claim_batch(limit=...)`가 자신이 방금 넣은 행만
+    본다고 가정한다(예: `claimed = [r for r in rows if r.id == row_id]`,
+    `assert state == "SENDING"`). 그런데 `order_command_outbox`는 이 스위트
+    전체가 공유하는 테이블이고, dispatcher가 꺼져 있어(tests/conftest.py의
+    `AIOS_OMS_DISPATCHER_ENABLED=0`) 앞서 실행된 파일(cancel_order/modify_order
+    등)이 남긴 PENDING 행이 정리되지 않은 채 쌓인다. 전체 스위트를 CI와 같은
+    순서로 돌리면 그 leftover 행이 `ORDER BY created_at LIMIT 10`을 먼저
+    채워 이 파일이 방금 넣은 행이 클레임되지 못하고 PENDING으로 남는다
+    (`test_stale_worker_mark_done_rejected`가 이 형태로 실패하는 걸 재현
+    확인함). 다른 테이블에는 `order_command_outbox`를 참조하는 FK가 없으므로
+    이 파일의 각 테스트 시작 전에 비워도 안전하다.
+    """
+    async with pool.acquire() as conn:
+        await conn.execute("DELETE FROM order_command_outbox")
+    return pool
+
+
 def test_outbox_repository_satisfies_port():
     """I-10 배선 증명 — 정적 타입뿐 아니라 런타임에도 포트를 만족한다."""
     assert isinstance(OutboxRepository(), OutboxRepoPort)
