@@ -15,3 +15,11 @@ class ChartLayoutNotFoundError(Exception):
 
 class CrossTenantChartLayoutAccessError(Exception):
     pass
+
+
+class ChartIndicatorTemplateNotFoundError(Exception):
+    pass
+
+
+class CrossTenantChartIndicatorTemplateAccessError(Exception):
+    pass

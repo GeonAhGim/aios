@@ -9,11 +9,21 @@ from __future__ import annotations
 from uuid import UUID
 
 from src.foundation.charting.application.errors import (
+    ChartIndicatorTemplateNotFoundError,
     ChartLayoutNotFoundError,
+    CrossTenantChartIndicatorTemplateAccessError,
     CrossTenantChartLayoutAccessError,
 )
-from src.foundation.charting.contracts.v1 import ChartLayoutView, DrawingsDocumentView
-from src.foundation.charting.domain.models import ChartDrawingSet, ChartLayout
+from src.foundation.charting.contracts.v1 import (
+    ChartIndicatorTemplateView,
+    ChartLayoutView,
+    DrawingsDocumentView,
+)
+from src.foundation.charting.domain.models import (
+    ChartDrawingSet,
+    ChartIndicatorTemplate,
+    ChartLayout,
+)
 from src.foundation.charting.ports.repository import ChartingRepository
 
 
@@ -48,4 +58,30 @@ def drawing_set_to_view(drawing_set: ChartDrawingSet) -> DrawingsDocumentView:
         drawings=list(drawing_set.drawings),
         revision=drawing_set.revision,
         updated_at=drawing_set.updated_at,
+    )
+
+
+async def load_owned_indicator_template(
+    repo: ChartingRepository, *, tenant_id: UUID, template_id: UUID
+) -> ChartIndicatorTemplate:
+    """`load_owned_layout()`과 동일 원칙 — 미존재/타 테넌트 소유를 같은
+    예외 형태로 구분 없이 취급한다(둘 다 404)."""
+    template = await repo.get_indicator_template(template_id)
+    if template is None:
+        raise ChartIndicatorTemplateNotFoundError(str(template_id))
+    if template.tenant_id != tenant_id:
+        raise CrossTenantChartIndicatorTemplateAccessError(str(template_id))
+    return template
+
+
+def indicator_template_to_view(template: ChartIndicatorTemplate) -> ChartIndicatorTemplateView:
+    return ChartIndicatorTemplateView(
+        id=template.id,
+        tenant_id=template.tenant_id,
+        owner_subject_id=template.owner_subject_id,
+        name=template.name,
+        template=template.template,
+        revision=template.revision,
+        created_at=template.created_at,
+        updated_at=template.updated_at,
     )

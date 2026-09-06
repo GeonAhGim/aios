@@ -42,6 +42,26 @@ class ChartLayout:
 
 
 @dataclass(frozen=True, slots=True)
+class ChartIndicatorTemplate:
+    """지표 템플릿(CH-17) — `template`은 CH-17a `templateModel.ts`의
+    `Template`(schemaVersion/panes/indicators) JSON을 그대로 실어보내는
+    불투명 데이터다(`ChartLayout.layout_state`와 동일 원칙 — 이 파일도
+    `adapters/`도 그 내부 스키마를 검증하지 않는다, 검증은 프론트
+    `decodeTemplate()`가 프론트-소유 계약으로 담당). `(tenant_id, name)`
+    유니크 — 같은 이름 재저장은 새 UPDATE API가 아니라 삭제 후 재생성이다
+    (이 리프 스콥에 update는 없다)."""
+
+    id: UUID
+    tenant_id: UUID
+    owner_subject_id: UUID
+    name: str
+    template: dict[str, Any]
+    revision: int
+    created_at: datetime
+    updated_at: datetime
+
+
+@dataclass(frozen=True, slots=True)
 class ChartDrawingSet:
     """레이아웃 1개당 정확히 하나 — `chart_layout` 생성과 같은 트랜잭션으로
     빈 문서(revision=0)가 함께 생성된다(application/create_layout.py), 그래서

@@ -12,7 +12,9 @@ from pydantic import BaseModel, ValidationError
 
 from src.foundation.charting.contracts.v1 import (
     SCHEMA_VERSION,
+    ChartIndicatorTemplateView,
     ChartLayoutView,
+    CreateChartIndicatorTemplateRequest,
     CreateChartLayoutRequest,
     DrawingsDocumentView,
     PutDrawingsRequest,
@@ -35,6 +37,18 @@ _REQUIRED_FIELDS: dict[type[BaseModel], set[str]] = {
     UpdateChartLayoutRequest: {"expected_revision", "name", "layout_state"},
     DrawingsDocumentView: {"layout_id", "schema_version", "drawings", "revision", "updated_at"},
     PutDrawingsRequest: {"expected_revision", "schema_version", "drawings"},
+    ChartIndicatorTemplateView: {
+        "id",
+        "tenant_id",
+        "owner_subject_id",
+        "name",
+        "template",
+        "revision",
+        "created_at",
+        "updated_at",
+        "schema_version",
+    },
+    CreateChartIndicatorTemplateRequest: {"name", "template"},
 }
 
 

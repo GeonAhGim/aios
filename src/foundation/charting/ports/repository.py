@@ -5,7 +5,11 @@ from __future__ import annotations
 from typing import Any, Protocol
 from uuid import UUID
 
-from src.foundation.charting.domain.models import ChartDrawingSet, ChartLayout
+from src.foundation.charting.domain.models import (
+    ChartDrawingSet,
+    ChartIndicatorTemplate,
+    ChartLayout,
+)
 
 
 class ChartingRepository(Protocol):
@@ -57,3 +61,23 @@ class ChartingRepository(Protocol):
         `ConcurrencyConflictError`(409). `create_layout()`이 항상 먼저
         빈 문서를 만들어 두므로 이 메서드는 INSERT를 하지 않는다."""
         ...
+
+    async def create_indicator_template(
+        self,
+        *,
+        tenant_id: UUID,
+        owner_subject_id: UUID,
+        name: str,
+        template: dict[str, Any],
+    ) -> ChartIndicatorTemplate:
+        """`(tenant_id, name)` UNIQUE 위반은 `ConcurrencyConflictError`(409,
+        CH-5 chart_layout 경로와 동일하게 새 taxonomy 없이 재사용)."""
+        ...
+
+    async def get_indicator_template(self, template_id: UUID) -> ChartIndicatorTemplate | None: ...
+
+    async def list_indicator_templates(
+        self, tenant_id: UUID
+    ) -> tuple[ChartIndicatorTemplate, ...]: ...
+
+    async def delete_indicator_template(self, template_id: UUID) -> None: ...

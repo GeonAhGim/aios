@@ -40,6 +40,27 @@ class CreateChartLayoutRequest(BaseModel):
     layout_state: dict[str, Any] = Field(default_factory=dict)
 
 
+class ChartIndicatorTemplateView(BaseModel):
+    """`template`은 CH-17a `templateModel.ts` `Template`(`encodeTemplate()`
+    출력) 그대로 — 이 계약도 그 내부를 재모델링하지 않는다(`layout_state`와
+    동일 원칙, 파일 상단 docstring 참조)."""
+
+    id: UUID
+    tenant_id: UUID
+    owner_subject_id: UUID
+    name: str
+    template: dict[str, Any]
+    revision: int
+    created_at: datetime
+    updated_at: datetime
+    schema_version: str = SCHEMA_VERSION
+
+
+class CreateChartIndicatorTemplateRequest(BaseModel):
+    name: str = Field(min_length=1, max_length=120)
+    template: dict[str, Any]
+
+
 class UpdateChartLayoutRequest(BaseModel):
     """부분 갱신 — `name`/`layout_state` 중 최소 하나는 있어야 한다."""
 

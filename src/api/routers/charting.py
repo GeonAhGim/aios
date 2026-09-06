@@ -17,15 +17,27 @@ from fastapi import APIRouter, Depends, status
 
 from src.api.contracts.envelope import ApiResponse, ok
 from src.api.foundation_deps import get_charting_repository, get_tenant_context
+from src.foundation.charting.application.create_indicator_template import (
+    create_indicator_template,
+)
 from src.foundation.charting.application.create_layout import create_layout
+from src.foundation.charting.application.delete_indicator_template import (
+    delete_indicator_template,
+)
 from src.foundation.charting.application.delete_layout import delete_layout
 from src.foundation.charting.application.get_drawings import get_drawings
+from src.foundation.charting.application.get_indicator_template import get_indicator_template
 from src.foundation.charting.application.get_layout import get_layout
+from src.foundation.charting.application.list_indicator_templates import (
+    list_indicator_templates,
+)
 from src.foundation.charting.application.list_layouts import list_layouts
 from src.foundation.charting.application.put_drawings import put_drawings
 from src.foundation.charting.application.update_layout import update_layout
 from src.foundation.charting.contracts.v1 import (
+    ChartIndicatorTemplateView,
     ChartLayoutView,
+    CreateChartIndicatorTemplateRequest,
     CreateChartLayoutRequest,
     DrawingsDocumentView,
     PutDrawingsRequest,
@@ -125,3 +137,49 @@ async def put_layout_drawings(
         drawings=body.drawings,
     )
     return ok(result)
+
+
+@router.post("/indicator-templates", status_code=status.HTTP_201_CREATED)
+async def post_create_indicator_template(
+    body: CreateChartIndicatorTemplateRequest,
+    context: TenantContext = Depends(get_tenant_context),
+    repo: ChartingRepository = Depends(get_charting_repository),
+) -> ApiResponse[ChartIndicatorTemplateView]:
+    result = await create_indicator_template(
+        repo,
+        tenant_id=context.tenant_id,
+        owner_subject_id=context.subject_id,
+        name=body.name,
+        template=body.template,
+    )
+    return ok(result)
+
+
+@router.get("/indicator-templates")
+async def get_list_indicator_templates(
+    context: TenantContext = Depends(get_tenant_context),
+    repo: ChartingRepository = Depends(get_charting_repository),
+) -> ApiResponse[list[ChartIndicatorTemplateView]]:
+    result = await list_indicator_templates(repo, tenant_id=context.tenant_id)
+    return ok(result)
+
+
+@router.get("/indicator-templates/{template_id}")
+async def get_indicator_template_by_id(
+    template_id: UUID,
+    context: TenantContext = Depends(get_tenant_context),
+    repo: ChartingRepository = Depends(get_charting_repository),
+) -> ApiResponse[ChartIndicatorTemplateView]:
+    result = await get_indicator_template(
+        repo, tenant_id=context.tenant_id, template_id=template_id
+    )
+    return ok(result)
+
+
+@router.delete("/indicator-templates/{template_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_indicator_template_by_id(
+    template_id: UUID,
+    context: TenantContext = Depends(get_tenant_context),
+    repo: ChartingRepository = Depends(get_charting_repository),
+) -> None:
+    await delete_indicator_template(repo, tenant_id=context.tenant_id, template_id=template_id)

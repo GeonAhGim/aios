@@ -13,7 +13,11 @@ from uuid import UUID
 import asyncpg
 
 from src.core.db.conditional_write import ConcurrencyConflictError
-from src.foundation.charting.domain.models import ChartDrawingSet, ChartLayout
+from src.foundation.charting.domain.models import (
+    ChartDrawingSet,
+    ChartIndicatorTemplate,
+    ChartLayout,
+)
 
 
 def _row_to_layout(row: asyncpg.Record) -> ChartLayout:
@@ -35,6 +39,19 @@ def _row_to_drawing_set(row: asyncpg.Record) -> ChartDrawingSet:
         schema_version=row["schema_version"],
         drawings=tuple(json.loads(row["drawings"])),
         revision=row["revision"],
+        updated_at=row["updated_at"],
+    )
+
+
+def _row_to_indicator_template(row: asyncpg.Record) -> ChartIndicatorTemplate:
+    return ChartIndicatorTemplate(
+        id=row["id"],
+        tenant_id=row["tenant_id"],
+        owner_subject_id=row["owner_subject_id"],
+        name=row["name"],
+        template=json.loads(row["template"]),
+        revision=row["revision"],
+        created_at=row["created_at"],
         updated_at=row["updated_at"],
     )
 
@@ -152,3 +169,55 @@ class PostgresChartingRepository:
                 "더 이상 최신이 아닙니다 — 다시 조회 후 시도하세요."
             )
         return _row_to_drawing_set(row)
+
+    async def create_indicator_template(
+        self,
+        *,
+        tenant_id: UUID,
+        owner_subject_id: UUID,
+        name: str,
+        template: dict[str, Any],
+    ) -> ChartIndicatorTemplate:
+        async with self._pool.acquire() as conn:
+            try:
+                row = await conn.fetchrow(
+                    "INSERT INTO chart_indicator_template "
+                    "(tenant_id, owner_subject_id, name, template) "
+                    "VALUES ($1, $2, $3, $4::jsonb) RETURNING *",
+                    tenant_id,
+                    owner_subject_id,
+                    name,
+                    json.dumps(template),
+                )
+            except asyncpg.UniqueViolationError as exc:
+                # uq_chart_indicator_template_tenant_name 위반 — 이 tenant에
+                # 같은 이름의 템플릿이 이미 존재한다.
+                raise ConcurrencyConflictError(
+                    f"chart_indicator_template: tenant_id={tenant_id} name={name!r} "
+                    "템플릿이 이미 존재합니다."
+                ) from exc
+        return _row_to_indicator_template(row)
+
+    async def get_indicator_template(self, template_id: UUID) -> ChartIndicatorTemplate | None:
+        async with self._pool.acquire() as conn:
+            row = await conn.fetchrow(
+                "SELECT * FROM chart_indicator_template WHERE id = $1", template_id
+            )
+        return _row_to_indicator_template(row) if row is not None else None
+
+    async def list_indicator_templates(
+        self, tenant_id: UUID
+    ) -> tuple[ChartIndicatorTemplate, ...]:
+        async with self._pool.acquire() as conn:
+            rows = await conn.fetch(
+                "SELECT * FROM chart_indicator_template WHERE tenant_id = $1 "
+                "ORDER BY created_at",
+                tenant_id,
+            )
+        return tuple(_row_to_indicator_template(row) for row in rows)
+
+    async def delete_indicator_template(self, template_id: UUID) -> None:
+        async with self._pool.acquire() as conn:
+            await conn.execute(
+                "DELETE FROM chart_indicator_template WHERE id = $1", template_id
+            )
