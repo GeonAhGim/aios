@@ -11,7 +11,7 @@
   `src/foundation/marketplace/**`(신규 컨텍스트, 기존 `services/listing_service.py` 등은 파사드로 유지),
   `src/foundation/signals/**`(신규), `frontend/apps/web/src/chart/**`, `frontend/packages/chart-engine/**`
 - verification evidence: 각 리프 DoD의 테스트 경로(§9)
-- 리프 접두: **DC**(데이터 커버리지) **CH**(차트) **IND**(지표) **DSL**(AIOS Script) **BT**(백테스트) **MP**(마켓) **SIG**(신호 유입). §9.9 확장(ADR-2026-09-05-A): IND-9~14, BT-14~18, DSL-14~16, CH-11~13
+- 리프 접두: **DC**(데이터 커버리지) **CH**(차트) **IND**(지표) **DSL**(AIOS Script) **BT**(백테스트) **MP**(마켓) **SIG**(신호 유입). §9.9 확장(ADR-2026-09-05-A): IND-9~14, BT-14~18, DSL-14~16, CH-11~13. §9.10 T1 선반영(ADR-2026-09-06-A): DC-19~26
 
 ## 1. 기관급 요구 (왜 기초 수준으로는 부족한가)
 
@@ -378,6 +378,21 @@ DC-1~18(R/L4 잔여보다 먼저, backend 4 중 2 고정) → CH-1~10 ∥ IND-1~
 | CH-11 | `chart-engine/src/plugins/indicatorPlugin.ts` — 지표 플러그인 API(오버레이/페인/스타일 스키마, 3층 레지스트리 소비) | CH-3, IND-12 | 플러그인 등록·해제·스타일 왕복 | 280 |
 | CH-12 | `chart-engine/src/plugins/scriptPreview.ts` + 편집기 연동 — 스크립트 지표/전략 즉시 미리보기(컴파일→계산→오버레이) | CH-11, DSL-13 | 300ms 컴파일 + 오버레이 갱신 | 260 |
 | CH-13 | 멀티 심볼 비교·오버레이(정규화 가격, 스프레드) + 페인 레이아웃 저장 | CH-8 | 화면·negative | 300 |
+
+
+### 9.10 T1 확장 선반영 리프 (ADR-2026-09-06-A — 마이크로구조·파생 심볼·point-in-time)
+지금 넣지 않으면 나중에 전면 재적재가 되는 축만 앞당긴다. 유료 벤더 계약 전에도 계약·스키마·검증은 완성해 둔다.
+
+| 리프 | 파일 | 선행 | DoD | 크기 |
+|---|---|---|---|---|
+| DC-19 | `contracts/v2/microstructure.py` — `TradeTick`·`QuoteL1`·`BookL2`(ts_event/ts_recv 나노초 정수, aggressor, seq) + 스냅샷 테스트 | DC-1 | 스키마 스냅샷, naive/초단위 타임스탬프 거부, 캔들↔틱 파생 관계 문서화 | 280 |
+| DC-20 | `contracts/v2/instruments.py` 확장 — `kind(spot\|future\|perp\|option\|bond\|fund\|index)`·`underlying_id`·`expiry`·`strike`·`option_right`·`contract_multiplier`·`settlement`·`currency`·`country`·`mic` (전부 optional, v1 불변) | DC-1 | 옵션·선물 인스턴스 생성, 현물 기존 케이스 무변경, `underlying_id+expiry` 체인 질의 | 280 |
+| DC-21 | `domain/point_in_time.py` + 참조 데이터 `known_at` 규칙 + 마이그레이션(`instrument_attributes` append-only) | DC-4 | 재작성은 새 행, `known_at<=as_of` 조회만 반환(적대적 테스트) | 400 |
+| DC-22 | `domain/aggregation/tick_to_candle.py` — 틱/호가 → 캔들 결정론 생성 + `source_kind` 계보 기록 | DC-19, DC-10 | 같은 틱 입력 → 바이트 동일 캔들, 갭·중복·역순 처리 | 260 |
+| DC-23 | `adapters/storage/tick_parquet.py` — 틱·호가 warm 저장(일자×종목 파티션, 컬럼지향 직접 로드) | DC-19, DC-14 | 1일치 100만 틱 왕복, 메모리 상한 | 300 |
+| DC-24 | `ports/provider.py` 확장 — `fetch_trades`/`fetch_quotes`/`subscribe_book`(선택 capability, 미지원 벤더는 명시적 미지원) | DC-5, DC-19 | capability 미지원 시 명시적 오류(무음 폴백 금지) | 200 |
+| DC-25 | 파생상품 캘린더·만기 롤 규칙(`domain/instruments/roll.py`) + 연속선물 시리즈 생성 | DC-20, LA-3 | 롤 날짜·조정 방식(비율/차분) 결정론 | 280 |
+| DC-26 | 옵션 체인 조회 API(`GET /market-data/options/chain`) + 그리스 계산은 지표(IND)로 위임하는 경계 문서화 | DC-20, LA-24 | 체인 조회 p95 300ms, 교차 테넌트 404 | 260 |
 
 ## 10. 미확정·리스크
 - 데이터 벤더 선택·라이선스(Polygon, Databento, EODHD, Kiwoom 등)는 **미확인·사람 결정**. 명세는 SPI 형태만 고정.

@@ -35,3 +35,4 @@ AIOS_Codex_Fable_CrossReview_Research_Direction_Record_2026-09-03.md`)의 "내�
 
 - `L4_analytics_authoring_backtest_marketplace_v1.0.md` — 데이터 커버리지(DC)·차트(CH)·지표(IND)·AIOS Script(DSL)·백테스트 현실성(BT)·마켓플레이스(MP)·신호 유입(SIG). ADR-2026-09-04-B.
 - `L4_ai_research_strategy_factory_v1.0.md` — Agent Gateway(MCP·스코프 토큰)·모델 공급자(Claude/OpenAI·Codex/Gemini/로컬)·Strategy Factory·Experiment Ledger·ML Signals. ADR-2026-09-05-A.
+- `L4_research_data_and_market_ecosystem_v1.0.md` — 리서치 데이터 플레인(공시·뉴스·거시·대안). 포트 먼저·소스는 어댑터. ADR-2026-09-06-A.
