@@ -498,6 +498,19 @@
         "title": "Extra",
         "type": "object"
       },
+      "fund_id": {
+        "anyOf": [
+          {
+            "format": "uuid",
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Fund Id"
+      },
       "parties": {
         "additionalProperties": {
           "format": "uuid",
@@ -505,6 +518,19 @@
         },
         "title": "Parties",
         "type": "object"
+      },
+      "portfolio_id": {
+        "anyOf": [
+          {
+            "format": "uuid",
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Portfolio Id"
       },
       "schema_version": {
         "const": "v1",
