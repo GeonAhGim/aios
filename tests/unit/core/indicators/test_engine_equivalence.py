@@ -30,7 +30,10 @@ from src.core.indicators.registry import DEFAULT_REGISTRY, IndicatorError
 from src.core.indicators.spec import IndicatorSpec
 from src.core.indicators.specs_talib import TALIB_SPECS
 
-NAMES = sorted(TALIB_SPECS)
+# IND-10(task-1729)이 TALIB_SPECS를 161종으로 넓혔지만 이 엔진(IND-1)은 여전히
+# 11개 지표만 `_KERNELS`/`_STATES`에 손으로 구현돼 있다 — 나머지 150종의 증분=
+# 일괄 동일성 커널 구현은 이 leaf 밖(향후 IND-1 확장 또는 IND-7g)이다.
+NAMES = sorted(set(TALIB_SPECS) & set(vectorized._KERNELS))
 SEEDS = list(range(6))
 SCALES = (1.0, 100.0, 1e5)
 

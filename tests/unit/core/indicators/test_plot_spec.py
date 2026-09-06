@@ -51,7 +51,7 @@ def test_every_talib_spec_has_one_plot_per_output() -> None:
         assert all(isinstance(plot, PlotSpec) for plot in spec.plots)
 
 
-@pytest.mark.parametrize("name", sorted(TALIB_SPECS))
+@pytest.mark.parametrize("name", sorted(_EXPECTED_KINDS))
 def test_snapshot_plot_kind_and_fill_between_match_output_flags(name: str) -> None:
     spec = TALIB_SPECS[name]
     assert tuple(plot.kind for plot in spec.plots) == _EXPECTED_KINDS[name]

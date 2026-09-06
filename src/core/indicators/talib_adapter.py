@@ -1,6 +1,7 @@
 """14.1 — 기술적 지표 라이브러리 연동 (IndicatorService).
 
-Spec: docs/specs/L4_strategy_portfolio_backtest_v1.0.md#§9 L03
+Spec: docs/specs/L4_strategy_portfolio_backtest_v1.0.md#§9 L03,
+docs/specs/L4_analytics_authoring_backtest_marketplace_v1.0.md §9.9 IND-10
 
 TA-Lib를 캔들 데이터(FD-2 파이프라인 산출물, Candle 모델)에 적용해
 시계열 지표값을 계산하는 순수 계산 계층 — FD-8(FROZEN, 실제 매매판단)의
@@ -10,13 +11,23 @@ TA-Lib를 캔들 데이터(FD-2 파이프라인 산출물, Candle 모델)에 적
 period 파라미터 하나뿐이라 MACD/BBANDS/STOCH의 실제 필요 bar 수와
 불일치했다)을 여기서 재구현하지 않고 `DEFAULT_REGISTRY`로 대체해 고친다.
 
+IND-10(161종 자동 생성) 이후 `SUPPORTED_INDICATORS`는 손으로 나열한 11개가
+아니라 `TALIB_SPECS`(자동 생성 150 + 수기 오버라이드 11) 전체를 반영한다.
+`INDICATOR_GROUPS`는 TA-Lib 자체 10개 그룹(`TALIB_GROUPS`)으로 묶은 조회용
+뷰다 — 예전의 TREND/MOMENTUM/VOLATILITY/VOLUME 4분류는 161종을 설명하기엔
+너무 성겼다(예: Momentum Indicators만 31종).
+
 범위 축소: Ichimoku/Keltner Channel/VWAP/Fibonacci Retracement/Pivot
 Points는 TA-Lib 표준 함수 집합에 아예 없다(자체 공식이 필요한 별도
 구현 대상) — 완료조건이 요구하는 "TA-Lib 참조값과 일치" 자체를 검증할
-수 없는 지표라 이번 leaf에서는 다루지 않는다.
+수 없는 지표라 이번 leaf에서는 다루지 않는다. `MAVP`는 TA-Lib 표준
+함수지만 두 번째 입력이 캔들 필드가 아니라 가변 주기 배열(`periods`)이라
+`Candle` 기반 어댑터가 공급할 수 없다 — 레지스트리에는 등록되지만
+`calculate()` 호출 시 `STRATEGY_INDICATOR_INPUT_UNSUPPORTED`로 거부한다.
 """
 from __future__ import annotations
 
+from collections import defaultdict
 from collections.abc import Sequence
 from typing import Any
 
@@ -26,26 +37,27 @@ from pydantic import BaseModel
 
 from src.core.indicators.registry import DEFAULT_REGISTRY, IndicatorError
 from src.core.indicators.spec import REGISTRY_VERSION
+from src.core.indicators.specs_talib import TALIB_GROUPS, TALIB_SPECS
 from src.data.models.market_data import Candle
 
-TREND_INDICATORS = ("SMA", "EMA", "MACD")
-MOMENTUM_INDICATORS = ("RSI", "STOCH", "CCI", "WILLR")
-VOLATILITY_INDICATORS = ("BBANDS", "ATR")
-VOLUME_INDICATORS = ("OBV", "MFI")
+SUPPORTED_INDICATORS = tuple(sorted(TALIB_SPECS))
 
-SUPPORTED_INDICATORS = (
-    TREND_INDICATORS + MOMENTUM_INDICATORS + VOLATILITY_INDICATORS + VOLUME_INDICATORS
-)
+
+def _group_indicators() -> dict[str, tuple[str, ...]]:
+    by_group: dict[str, list[str]] = defaultdict(list)
+    for name in SUPPORTED_INDICATORS:
+        by_group[TALIB_GROUPS[name]].append(name)
+    return {group: tuple(sorted(names)) for group, names in by_group.items()}
+
+
+INDICATOR_GROUPS = _group_indicators()
 
 __all__ = [
+    "INDICATOR_GROUPS",
+    "SUPPORTED_INDICATORS",
     "IndicatorError",
     "IndicatorResult",
     "IndicatorService",
-    "MOMENTUM_INDICATORS",
-    "SUPPORTED_INDICATORS",
-    "TREND_INDICATORS",
-    "VOLATILITY_INDICATORS",
-    "VOLUME_INDICATORS",
 ]
 
 
@@ -69,7 +81,14 @@ def _candle_arrays(candles: Sequence[Candle]) -> dict[str, np.ndarray[Any, Any]]
 
 
 def _clean(arr: np.ndarray[Any, Any]) -> list[float | None]:
-    return [None if np.isnan(v) else float(v) for v in arr]
+    """TA-Lib 출력을 None(결측)/float 리스트로 정리한다.
+
+    캔들 패턴(CDL*) 61종은 int32 배열을 반환하는데 `np.isnan`은 정수 dtype에
+    쓸 수 없다(TypeError) — float64로 캐스팅 후 처리한다(정수 배열은 애초에
+    NaN을 가질 수 없으므로 값 손실 없음).
+    """
+    floats = arr.astype(np.float64, copy=False)
+    return [None if np.isnan(v) else float(v) for v in floats]
 
 
 class IndicatorService:
@@ -92,6 +111,9 @@ class IndicatorService:
             )
 
         arrays = _candle_arrays(candles)
+        missing_inputs = [name for name in spec.inputs if name not in arrays]
+        if missing_inputs:
+            raise IndicatorError("STRATEGY_INDICATOR_INPUT_UNSUPPORTED")
         inputs = [arrays[name] for name in spec.inputs]
         talib_func = getattr(talib, indicator)
         raw_output = talib_func(*inputs, **resolved_params)

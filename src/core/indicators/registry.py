@@ -19,6 +19,40 @@ from src.core.indicators.spec import IndicatorSpec
 from src.core.indicators.specs_talib import TALIB_SPECS
 
 
+def canonical_spec_dict(name: str, spec: IndicatorSpec) -> dict[str, object]:
+    """스펙 하나를 JSON 직렬화 가능한 정준 형태로 만든다(`registry_hash` 및
+    IND-10 생성 결정론 테스트 공용 — `lookback` 콜러블 자체는 해시에 못 넣으므로
+    `__name__`으로 대신한다)."""
+    return {
+        "name": name,
+        "inputs": list(spec.inputs),
+        "params": [
+            {
+                "name": param_spec.name,
+                "min": param_spec.min,
+                "max": param_spec.max,
+                "default": param_spec.default,
+            }
+            for param_spec in spec.params
+        ],
+        "outputs": list(spec.outputs),
+        "causal": spec.causal,
+        "lookback": spec.lookback.__name__,
+        "plots": [
+            {
+                "kind": plot.kind,
+                "scale": plot.scale,
+                "default_pane": plot.default_pane,
+                "fill_between": plot.fill_between,
+                "color_rule": plot.color_rule,
+                "precision": plot.precision,
+                "legend_format": plot.legend_format,
+            }
+            for plot in spec.plots
+        ],
+    }
+
+
 class IndicatorError(Exception):
     """레지스트리 조회/검증 실패. `code`는 API 계층이 400 매핑에 쓴다."""
 
@@ -59,37 +93,7 @@ class IndicatorRegistry:
         return spec.lookback(resolved)
 
     def registry_hash(self) -> str:
-        canonical = [
-            {
-                "name": name,
-                "inputs": list(spec.inputs),
-                "params": [
-                    {
-                        "name": param_spec.name,
-                        "min": param_spec.min,
-                        "max": param_spec.max,
-                        "default": param_spec.default,
-                    }
-                    for param_spec in spec.params
-                ],
-                "outputs": list(spec.outputs),
-                "causal": spec.causal,
-                "lookback": spec.lookback.__name__,
-                "plots": [
-                    {
-                        "kind": plot.kind,
-                        "scale": plot.scale,
-                        "default_pane": plot.default_pane,
-                        "fill_between": plot.fill_between,
-                        "color_rule": plot.color_rule,
-                        "precision": plot.precision,
-                        "legend_format": plot.legend_format,
-                    }
-                    for plot in spec.plots
-                ],
-            }
-            for name, spec in sorted(self._specs.items())
-        ]
+        canonical = [canonical_spec_dict(name, spec) for name, spec in sorted(self._specs.items())]
         payload = json.dumps(canonical, sort_keys=True, separators=(",", ":"))
         return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 

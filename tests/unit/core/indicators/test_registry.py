@@ -53,9 +53,11 @@ def test_specs_registry_version_is_ind_v1() -> None:
     assert REGISTRY_VERSION == "ind-v1"
 
 
-def test_specs_cover_exactly_eleven_talib_indicators() -> None:
-    assert set(TALIB_SPECS) == EXPECTED_INDICATORS
-    assert len(TALIB_SPECS) == 11
+def test_specs_cover_all_161_talib_indicators_including_the_eleven_overrides() -> None:
+    """IND-10(task-1729)이 161종 자동 생성으로 확장했다 — 수기 오버라이드 11개는
+    부분집합으로 여전히 남아 있어야 한다(정밀도·색상 등 표시 세부 보존)."""
+    assert len(TALIB_SPECS) == 161
+    assert EXPECTED_INDICATORS.issubset(set(TALIB_SPECS))
 
 
 @pytest.mark.parametrize("name", sorted(EXPECTED_INDICATORS))
@@ -214,8 +216,10 @@ def _candles(n: int, *, base: float = 100.0) -> list[Candle]:
 
 
 def test_talib_adapter_has_no_leftover_specs_or_period_param_name() -> None:
+    """옛 지표별 딕셔너리(`_SPECS`) 잔재 검사 — IND-10 이후 정식 이름
+    `TALIB_SPECS`(레지스트리 카탈로그) 언급은 이 검사 대상이 아니다."""
     source = inspect.getsource(talib_adapter)
-    assert "_SPECS" not in source
+    assert "_SPECS" not in source.replace("TALIB_SPECS", "")
     assert "period_param_name" not in source
 
 
