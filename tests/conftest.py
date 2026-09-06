@@ -86,6 +86,12 @@ dotenv.dotenv_values = _test_dotenv_values
 # 직접 호출해 검증한다.
 os.environ.setdefault("AIOS_EXECUTION_LOOP_ENABLED", "0")
 os.environ.setdefault("AIOS_STARTUP_RECOVERY_ENABLED", "0")
+# task-1720(P1-A) — OMS outbox 디스패처도 같은 이유로 기본 차단한다: 공유
+# TEST_DATABASE_URL에 다른 테스트가 남긴 PENDING outbox 행을 lifespan 통합
+# 테스트가 자기도 모르게 실전송(스텁 어댑터 없이)하지 않도록. 디스패처
+# 자체는 tests/integration/oms/test_background_loops_wiring.py가 플래그를
+# 켜고 직접 호출해 검증한다.
+os.environ.setdefault("AIOS_OMS_DISPATCHER_ENABLED", "0")
 
 
 async def retry_too_many_connections(factory, *, attempts: int = 6, base_delay: float = 0.5):

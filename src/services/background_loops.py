@@ -56,6 +56,7 @@ from src.services.alert_service import AlertService
 from src.services.credential_resolver import CredentialResolver
 from src.services.execution_loop.recovery_wiring import recover_orders_on_startup
 from src.services.execution_loop.scheduler import ExecutionLoopScheduler
+from src.services.oms.application.wiring import start_outbox_dispatcher_task
 from src.services.order_service.foundation_gate import make_foundation_pre_submit_gate
 from src.services.risk_guard_service import RiskGuardService
 from src.services.safety.circuit_breaker_loop import (
@@ -261,7 +262,7 @@ async def start_background_loops(
         logger.warning(
             "execution_loop: AIOS_EXECUTION_LOOP_ENABLED=0 — 실행 루프를 띄우지 않습니다."
         )
-
+    oms_dispatcher_task = start_outbox_dispatcher_task(pool, credential_resolver.get_adapter)
     # R-45 — circuit_breaker_loop.run_circuit_breaker_tick(수집→evaluate→
     # recovery_gate→check_reactivation)을 그대로 돌린다. `history`는 프로세스
     # 수명 동안 유지되는 이력 버퍼 — main.py가 안 넘기면 여기서 만든다.
@@ -288,8 +289,7 @@ async def start_background_loops(
     )
 
     tasks = [heartbeat_task, alert_task, risk_guard_task, safety_task]
-    if execution_loop_task is not None:
-        tasks.append(execution_loop_task)
+    tasks.extend(t for t in (execution_loop_task, oms_dispatcher_task) if t is not None)
 
     return BackgroundLoops(
         execution_scheduler=execution_scheduler,

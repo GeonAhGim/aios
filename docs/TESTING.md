@@ -40,6 +40,13 @@ export TEST_DATABASE_URL=postgresql+asyncpg://user:password@localhost:5432/aios_
 |---|---|---|
 | `AIOS_EXECUTION_LOOP_ENABLED` | 1 | 0 |
 | `AIOS_STARTUP_RECOVERY_ENABLED` | 1 | 0 |
+| `AIOS_OMS_DISPATCHER_ENABLED` | 1 | 0 |
+
+`AIOS_OMS_DISPATCHER_ENABLED`(task-1720)도 같은 이유로 끈다 — 공유
+TEST_DATABASE_URL에 다른 테스트가 남긴 PENDING outbox 행을 lifespan
+통합테스트가 스텁 어댑터 없이 실제로 전송 시도하지 않게 한다. 디스패처
+배선 자체는 `tests/integration/oms/test_background_loops_wiring.py`가
+플래그를 켜고 직접 검증한다.
 
 ## 게이트 (CI와 동일)
 
