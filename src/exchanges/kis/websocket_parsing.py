@@ -6,6 +6,13 @@ task-1723 P1-D: websocket_mixin.py(422줄, P6 300줄 초과)의 순수 파싱 �
 분리. 공개 심볼은 websocket_mixin.py가 그대로 재수출(테스트가 그 경로로
 직접 import — tests/unit/exchanges/test_kis_ws_messages.py,
 tests/integration/test_kis_websocket.py).
+
+task-1783 BR-5(ADR-2026-09-06-I D2): 해외주식 실시간(지연)체결가(HDFSCNT0)·
+실시간호가(HDFSASP0) 파서 추가. 필드 순서는 공식 예제(WebFetch,
+github.com/koreainvestment/open-trading-api/examples_llm/overseas_stock/
+{delayed_ccnl,asking_price}/*.py, 2026-09-07)로 확인한 `columns` 리스트
+그대로 — 새 파서 계층을 만들지 않고 기존 `_split_ws_frame`/`_split_records`
+그대로 재사용한다.
 """
 from __future__ import annotations
 
@@ -56,6 +63,26 @@ def _build_orderbook_fields() -> list[str]:
 
 
 _ORDERBOOK_FIELDS = _build_orderbook_fields()
+
+# 해외주식 실시간(지연)체결가(HDFSCNT0) 필드 순서 — 공식 예제
+# (examples_llm/overseas_stock/delayed_ccnl/delayed_ccnl.py::delayed_ccnl())
+# 그대로. 라벨상 미국 외 시장은 지연 시세("실시간지연체결가"), 미국만
+# 무료 실시간이라는 것이 공식 docstring 취지로 보이나 시장별 지연폭
+# 차이는 라이브 검증 필요(미검증).
+_OVERSEAS_PRICE_FIELDS = [
+    "SYMB", "ZDIV", "TYMD", "XYMD", "XHMS", "KYMD", "KHMS", "OPEN",
+    "HIGH", "LOW", "LAST", "SIGN", "DIFF", "RATE", "PBID", "PASK",
+    "VBID", "VASK", "EVOL", "TVOL", "TAMT", "BIVL", "ASVL", "STRN", "MTYP",
+]  # fmt: skip
+
+# 해외주식 실시간호가(HDFSASP0, 1호가만) 필드 순서 — 공식 예제
+# (examples_llm/overseas_stock/asking_price/asking_price.py::asking_price())
+# 그대로. docstring: "미국시세 실시간 1호가(매수/매도) 시세가 무료로
+# 제공됩니다" — 국내 10호가와 달리 1호가만 제공.
+_OVERSEAS_ORDERBOOK_FIELDS = [
+    "symb", "zdiv", "xymd", "xhms", "kymd", "khms", "bvol", "avol",
+    "bdvl", "advl", "pbid1", "pask1", "vbid1", "vask1", "dbid1", "dask1",
+]  # fmt: skip
 
 # 체결통보(H0STCNI0/H0STCNI9) 필드 순서 — 공식 예제(ccnl_notice()) 그대로.
 _ORDER_NOTICE_FIELDS = [
@@ -137,6 +164,60 @@ def parse_realtime_orderbook_message(raw: str) -> OrderBook | None:
     ]
     return OrderBook(
         symbol=row["MKSC_SHRN_ISCD"],
+        exchange="kis",
+        bids=bids,
+        asks=asks,
+        timestamp=datetime.now(timezone.utc),
+    )
+
+
+def parse_realtime_overseas_price_message(raw: str) -> list[Ticker]:
+    frame = _split_ws_frame(raw)
+    if frame is None:
+        return []
+    _encrypt_flag, tr_id, _count, body = frame
+    if tr_id != "HDFSCNT0":
+        return []
+    tickers = []
+    for row in _split_records(body, _OVERSEAS_PRICE_FIELDS):
+        tickers.append(
+            Ticker(
+                symbol=row["SYMB"],
+                exchange="kis",
+                price=Decimal(row["LAST"]),
+                bid=Decimal(row["PBID"]),
+                ask=Decimal(row["PASK"]),
+                volume_24h=Decimal(row["TVOL"]),
+                timestamp=datetime.now(timezone.utc),
+                source_type="primary",
+            )
+        )
+    return tickers
+
+
+def parse_realtime_overseas_orderbook_message(raw: str) -> OrderBook | None:
+    frame = _split_ws_frame(raw)
+    if frame is None:
+        return None
+    _encrypt_flag, tr_id, _count, body = frame
+    if tr_id != "HDFSASP0":
+        return None
+    records = _split_records(body, _OVERSEAS_ORDERBOOK_FIELDS)
+    if not records:
+        return None
+    row = records[0]
+    bids = (
+        [OrderBookLevel(price=Decimal(row["pbid1"]), quantity=Decimal(row["vbid1"]))]
+        if row.get("pbid1")
+        else []
+    )
+    asks = (
+        [OrderBookLevel(price=Decimal(row["pask1"]), quantity=Decimal(row["vask1"]))]
+        if row.get("pask1")
+        else []
+    )
+    return OrderBook(
+        symbol=row["symb"],
         exchange="kis",
         bids=bids,
         asks=asks,
