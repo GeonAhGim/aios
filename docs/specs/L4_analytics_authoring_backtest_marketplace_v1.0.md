@@ -332,7 +332,7 @@ DoD 공통: `ruff` · `mypy --strict` · `scripts/check_zone_manifest.py` 통과
 | CH-1 | `packages/chart-engine` 골격 + `vendor/`에 포크 반입(NOTICE·LICENSE) + `src/core/*.ts` 래퍼 + 테스트 | CH-0 | 시리즈 생성·업데이트·리사이즈, 라이선스 고지 파일 존재, 빌드 통과 | 600 |
 | CH-2 | `data/candleStream.ts` + 테스트 | CH-1, DC-18 | 페이지네이션+실시간 병합, 중복/역순/갭 | 240 |
 | CH-3 | `indicators/overlayRegistry.ts` + 테스트 | CH-1 | 페인/오버레이 매핑 | 200 |
-| CH-4 | `drawings/{model,tools,serialize}.ts` + 테스트 | CH-1 | 5종 도구, 직렬화 왕복 | 780 |
+| CH-4 | `drawings/{model,tools,serialize}.ts` — **벤더 오버레이 위임 어댑터**. KLineChart `extension/overlay/`가 이미 17종(피보나치·브러시·가격채널·평행선·레이·수평/수직선·가격선·주석·태그)을 제공하므로 `tools.ts`는 `chart.createOverlay()`/`registerOverlay()` 호출부여야 하고 `serialize.ts`는 벤더 오버레이 서술자를 왕복시킨다. **병행 모델 신설 금지**(피보나치 구현이 둘로 갈라진다) | CH-1 | 벤더 17종 전부 노출, 직렬화 왕복, 자체 기하 계산 코드 0줄 | 300 |
 | CH-5 | backend charting 컨텍스트(계약·저장·API) + 통합·교차테넌트 테스트 | PLT-28 | 낙관적 잠금 409, 타 테넌트 404 | 780 |
 | CH-6 | `ChartPage.tsx` + `ChartToolbar.tsx` + `IndicatorPicker.tsx` | CH-2~5 | 화면 조립·키보드 접근성 | 900 |
 | CH-7 | `replay/replayController.ts` + 데이터 동일성 테스트 | CH-2, BT-10 | 리플레이=백테스트 봉 시퀀스 동일 | 220 |
@@ -365,7 +365,7 @@ DC-1~18(R/L4 잔여보다 먼저, backend 4 중 2 고정) → CH-1~10 ∥ IND-1~
 | 리프 | 파일 | 선행 | DoD | 크기 |
 |---|---|---|---|---|
 | IND-9 | `docs/design/INDICATOR_OSS_EVAL.md` — TA-Lib·pandas-ta·`ta` 라이선스 원문·종수·품질(참조 벡터 가용) 평가, GPL/LGPL(tulip·backtrader·Nautilus) 제외 근거 | — | CH-0 형식 채점표 | 200 |
-| IND-10 | `src/core/indicators/adapters/talib_bridge.py`(레지스트리 어댑터: 스펙 자동 생성·파라미터 범위·lookback) + 참조 벡터 검증 | IND-9, IND-1 | ≥150종 등록, 증분=일괄 동일성 샘플 20종 | 280 |
+| ~~IND-10~~ | **폐기 — IND-2g와 같은 생성기다**(둘 다 `talib.get_functions() × abstract.Function(n).info`로 161종을 만든다). IND-11·IND-7g의 선행도 이미 IND-2g다. 얇은 재노출이 필요하면 IND-2g 안에서 한다 | — | — | 0 |
 | IND-11 | `adapters/pandas_ta_bridge.py` + 검증 — **TA-Lib과 겹치는 지표는 제외하고 순증분만 등록**(ADR-2026-09-06-F, 우선순위 하향) | IND-9, IND-2g | 순증분 종수 보고, 중복 0 | 280 |
 | IND-12 | `catalog/registry_tiers.py`(코어/OSS/스크립트 3층, 이름 충돌·버전·해시 규칙) + `GET /indicators` API(검색·카테고리·페이지네이션) | IND-10 | 목록 API p95 200ms | 300 |
 | IND-13 | 참조 벡터 대량 검증 잡(`reference/verify_all.py`, nightly) + CI 샘플링 | IND-12 | nightly 전수, CI 30종 | 200 |
@@ -378,7 +378,7 @@ DC-1~18(R/L4 잔여보다 먼저, backend 4 중 2 고정) → CH-1~10 ∥ IND-1~
 | DSL-14 | `script/import/pine/{lexer,parser}.py` — Pine Script v5 부분 문법(입력·시리즈 연산·ta.* 매핑·plot·strategy.entry/exit) | DSL-3 | 지원/미지원 구문 표, 미지원은 위치 포함 거부 | 560 |
 | DSL-15 | `script/import/pine/transpile.py` — Pine AST → AIOS Script 변환 + 컴파일·검증 왕복 테스트(공개 예제 30개) | DSL-14, DSL-12 | 변환 후 컴파일 통과율 보고, 의미 차이 명시 | 300 |
 | DSL-16 | `script/library/{imports,registry}.py` — 스크립트 라이브러리 import(`import lib.name@version`, 해시 고정) + 마켓 연동 | DSL-12, MP-3 | 순환·버전 불일치 거부 | 300 |
-| CH-11 | `chart-engine/src/plugins/indicatorPlugin.ts` — 지표 플러그인 API(오버레이/페인/스타일 스키마, 3층 레지스트리 소비) | CH-3, IND-12 | 플러그인 등록·해제·스타일 왕복 | 280 |
+| CH-11 | `chart-engine/src/plugins/indicatorPlugin.ts` — **벤더 `registerIndicator`/`IndicatorTemplate` 위 타입 파사드**. 렌더링 스택 신설 금지 | CH-3, IND-12 | 플러그인 등록·해제·스타일 왕복, 벤더 지표 27종이 같은 API로 조회됨 | 180 |
 | CH-12 | `chart-engine/src/plugins/scriptPreview.ts` + 편집기 연동 — 스크립트 지표/전략 즉시 미리보기(컴파일→계산→오버레이) | CH-11, DSL-13 | 300ms 컴파일 + 오버레이 갱신 | 260 |
 | CH-13 | 멀티 심볼 비교·오버레이(정규화 가격, 스프레드) + 페인 레이아웃 저장 | CH-8 | 화면·negative | 300 |
 
@@ -405,7 +405,7 @@ DC-1~18(R/L4 잔여보다 먼저, backend 4 중 2 고정) → CH-1~10 ∥ IND-1~
 | IND-16 | 지표 입력 소스로 **다른 지표 출력** 허용(indicator-on-indicator) — 레지스트리 의존 그래프·순환 탐지·lookback 합성 | IND-1, IND-12 | RSI(SMA(close,20)) 계산 정확, 순환 거부 | 280 |
 | CH-14 | `chart-engine/src/panes/{paneModel,paneLayout,crosshairSync}.ts` — **KLineChart 내장 멀티페인을 `ChartEngine` 인터페이스로 노출하는 어댑터**(자체 구현 금지, ADR-2026-09-06-F D3). 벤더가 없는 부분만 보강 | CH-1, CH-3 | 페인 5개 추가/삭제/리사이즈 왕복, 동기화 | 300 |
 | CH-15 | `chart-engine/src/render/{plotRenderers,scaleBinding,fillBetween}.ts` — PlotSpec 6종 렌더러. **벤더 `createIndicator`/`registerFigure`에 위임하고 부족분만 자체 구현** | IND-15, CH-11 | 지표 추가 시 화면 코드 무변경(스펙 주도) | 360 |
-| CH-16 | `chart-engine/src/legend/{statusLine,dataWindow,objectTree}.ts` — 크로스헤어 값 표시·데이터 윈도우·지표 트리(표시/숨김/순서/잠금) | CH-14 | 지표 30종 값 동시 표시, 순서 변경 저장 | 560 |
+| CH-16 | `chart-engine/src/legend/{statusLine,dataWindow,objectTree}.ts` — `statusLine`·`dataWindow`는 벤더 `CandleTooltipView`·`IndicatorTooltipView`·`IndicatorLastValueView`·`CrosshairFeatureView`에 대한 **스타일 바인딩**이고, 신규 구현은 `objectTree.ts`(`getOverlays()`/`getIndicators()` 인벤토리)뿐이다 | CH-14 | 지표 30종 값 동시 표시, 순서 변경 저장, 툴팁 자체 구현 0줄 | 220 |
 | CH-17 | 지표 템플릿(세트+설정+페인 배치) 저장·적용·공유 — backend `charting` 컨텍스트 확장 + 마켓 연동(MP 규칙 재사용) | CH-5, CH-16 | 템플릿 적용 후 동일 화면 재현, 교차 테넌트 404 | 460 |
 | CH-18 | `chart-engine/src/compute/{workerPool,clientEngine,parityCheck}.ts` — Web Worker 증분 계산. **1순위: 서버와 같은 C 코드를 쓰는 TA-Lib WASM 빌드**(동일성 구조적 보장), 불가 시 `technicalindicators`(MIT). 참조 벡터 통과 지표만 클라이언트 계산, 불일치는 서버 폴백(무음 금지) | IND-7g, CH-15 | 참조 벡터 통과 지표만 클라이언트 계산, 불일치 시 폴백 로그 | 600 |
 | CH-19 | 렌더 성능: 레이어 분리·뷰포트 밖 계산 생략·LOD 다운샘플링(극값 보존)·오프스크린 캔버스 + **밀도 벤치**(CH-0 스크립트 확장, CI 회귀) | CH-15, CH-18 | 지표 30종 × 10만 봉 팬/줌 p95 ≤ 16.7ms, 지표 추가 ≤ 100ms, 틱 갱신 ≤ 8ms | 560 |
