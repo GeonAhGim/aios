@@ -351,3 +351,83 @@ async def test_get_realized_pnl_returns_raw_rows():
     pnl = await adapter.get_realized_pnl()
 
     assert pnl == [{"pdno": "005930", "rlzt_pfls": "5000"}]
+
+
+async def test_get_period_trade_profit_returns_items_and_summary():
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.headers["tr_id"] == "VTTC8715R"  # 모의투자 치환 확인
+        assert request.url.params["INQR_STRT_DT"] == "20260101"
+        return httpx.Response(
+            200,
+            json={
+                "rt_cd": "0",
+                "msg1": "ok",
+                "output1": [{"pdno": "005930", "rlzt_pfls": "1000"}],
+                "output2": {"tot_rlzt_pfls": "1000"},
+            },
+        )
+
+    adapter = _make_adapter(
+        lambda request: _route(
+            request, {"/uapi/domestic-stock/v1/trading/inquire-period-trade-profit": handler}
+        )
+    )
+    result = await adapter.get_period_trade_profit(start_date="20260101", end_date="20260901")
+
+    assert result == {
+        "items": [{"pdno": "005930", "rlzt_pfls": "1000"}],
+        "summary": {"tot_rlzt_pfls": "1000"},
+    }
+
+
+async def test_get_period_trade_profit_missing_output2_raises():
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={"rt_cd": "0", "msg1": "ok", "output1": []})
+
+    adapter = _make_adapter(
+        lambda request: _route(
+            request, {"/uapi/domestic-stock/v1/trading/inquire-period-trade-profit": handler}
+        )
+    )
+    with pytest.raises(FatalExchangeError):
+        await adapter.get_period_trade_profit(start_date="20260101", end_date="20260901")
+
+
+async def test_get_period_profit_returns_items_and_summary():
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.headers["tr_id"] == "VTTC8708R"  # 모의투자 치환 확인
+        assert request.url.params["INQR_DVSN"] == "00"
+        return httpx.Response(
+            200,
+            json={
+                "rt_cd": "0",
+                "msg1": "ok",
+                "output1": [{"trad_dt": "20260901", "pfls_amt": "500"}],
+                "output2": {"tot_pfls_amt": "500"},
+            },
+        )
+
+    adapter = _make_adapter(
+        lambda request: _route(
+            request, {"/uapi/domestic-stock/v1/trading/inquire-period-profit": handler}
+        )
+    )
+    result = await adapter.get_period_profit(start_date="20260101", end_date="20260901")
+
+    assert result == {
+        "items": [{"trad_dt": "20260901", "pfls_amt": "500"}],
+        "summary": {"tot_pfls_amt": "500"},
+    }
+
+
+async def test_get_period_profit_missing_output1_raises():
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={"rt_cd": "0", "msg1": "ok", "output2": {}})
+
+    adapter = _make_adapter(
+        lambda request: _route(
+            request, {"/uapi/domestic-stock/v1/trading/inquire-period-profit": handler}
+        )
+    )
+    with pytest.raises(FatalExchangeError):
+        await adapter.get_period_profit(start_date="20260101", end_date="20260901")

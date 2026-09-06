@@ -3,7 +3,9 @@
 httpx.MockTransport 기반 검증(test_kis_adapter.py와 동일 원칙).
 """
 import httpx
+import pytest
 
+from src.core.exceptions import FatalExchangeError
 from src.exchanges.kis.adapter import KISAdapter
 
 TOKEN_RESPONSE = {"access_token": "tok-1", "access_token_token_expired": "2099-01-01 00:00:00"}
@@ -111,3 +113,181 @@ async def test_get_program_trade_daily_returns_raw_rows():
     result = await adapter.get_program_trade_daily("K")
 
     assert result == [{"bass_dt": "20260901"}]
+
+
+async def test_get_credit_balance_ranking_returns_both_outputs():
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.headers["tr_id"] == "FHKST17010000"
+        assert request.url.params["FID_RANK_SORT_CLS_CODE"] == "0"
+        return httpx.Response(
+            200,
+            json={
+                "rt_cd": "0",
+                "msg1": "ok",
+                "output1": [{"mksc_shrn_iscd": "005930"}],
+                "output2": [{"mksc_shrn_iscd": "000660"}],
+            },
+        )
+
+    adapter = _make_adapter(
+        lambda request: _route(
+            request, {"/uapi/domestic-stock/v1/ranking/credit-balance": handler}
+        )
+    )
+    result = await adapter.get_credit_balance_ranking()
+
+    assert result == {
+        "output1": [{"mksc_shrn_iscd": "005930"}],
+        "output2": [{"mksc_shrn_iscd": "000660"}],
+    }
+
+
+async def test_get_credit_balance_ranking_missing_output2_raises():
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200, json={"rt_cd": "0", "msg1": "ok", "output1": []}
+        )
+
+    adapter = _make_adapter(
+        lambda request: _route(
+            request, {"/uapi/domestic-stock/v1/ranking/credit-balance": handler}
+        )
+    )
+    with pytest.raises(FatalExchangeError):
+        await adapter.get_credit_balance_ranking()
+
+
+async def test_get_daily_credit_balance_returns_raw_rows():
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.headers["tr_id"] == "FHPST04760000"
+        assert request.url.params["FID_INPUT_ISCD"] == "005930"
+        assert request.url.params["FID_INPUT_DATE_1"] == "20260901"
+        return httpx.Response(
+            200, json={"rt_cd": "0", "msg1": "ok", "output": [{"crdt_rmnd_qty": "10"}]}
+        )
+
+    adapter = _make_adapter(
+        lambda request: _route(
+            request, {"/uapi/domestic-stock/v1/quotations/daily-credit-balance": handler}
+        )
+    )
+    result = await adapter.get_daily_credit_balance("005930", settle_date="20260901")
+
+    assert result == [{"crdt_rmnd_qty": "10"}]
+
+
+async def test_get_daily_credit_balance_missing_output_raises():
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={"rt_cd": "0", "msg1": "ok"})
+
+    adapter = _make_adapter(
+        lambda request: _route(
+            request, {"/uapi/domestic-stock/v1/quotations/daily-credit-balance": handler}
+        )
+    )
+    with pytest.raises(FatalExchangeError):
+        await adapter.get_daily_credit_balance("005930", settle_date="20260901")
+
+
+async def test_get_lendable_by_company_returns_both_outputs():
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.headers["tr_id"] == "VTSC2702R"  # 모의투자 치환 확인
+        assert request.url.params["THCO_STLN_PSBL_YN"] == "Y"
+        return httpx.Response(
+            200,
+            json={
+                "rt_cd": "0",
+                "msg1": "ok",
+                "output1": {"pdno": "005930"},
+                "output2": [],
+            },
+        )
+
+    adapter = _make_adapter(
+        lambda request: _route(
+            request, {"/uapi/domestic-stock/v1/quotations/lendable-by-company": handler}
+        )
+    )
+    result = await adapter.get_lendable_by_company()
+
+    assert result == {"output1": [{"pdno": "005930"}], "output2": []}
+
+
+async def test_get_credit_by_company_returns_raw_rows():
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.headers["tr_id"] == "FHPST04770000"
+        assert request.url.params["fid_slct_yn"] == "0"
+        return httpx.Response(
+            200, json={"rt_cd": "0", "msg1": "ok", "output": [{"pdno": "005930"}]}
+        )
+
+    adapter = _make_adapter(
+        lambda request: _route(
+            request, {"/uapi/domestic-stock/v1/quotations/credit-by-company": handler}
+        )
+    )
+    result = await adapter.get_credit_by_company()
+
+    assert result == [{"pdno": "005930"}]
+
+
+async def test_get_credit_by_company_missing_output_raises():
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={"rt_cd": "0", "msg1": "ok"})
+
+    adapter = _make_adapter(
+        lambda request: _route(
+            request, {"/uapi/domestic-stock/v1/quotations/credit-by-company": handler}
+        )
+    )
+    with pytest.raises(FatalExchangeError):
+        await adapter.get_credit_by_company()
+
+
+async def test_get_financial_balance_sheet_returns_raw_rows():
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.headers["tr_id"] == "FHKST66430100"
+        assert request.url.params["fid_input_iscd"] == "000660"
+        return httpx.Response(
+            200, json={"rt_cd": "0", "msg1": "ok", "output": [{"total_aset": "1000"}]}
+        )
+
+    adapter = _make_adapter(
+        lambda request: _route(
+            request, {"/uapi/domestic-stock/v1/finance/balance-sheet": handler}
+        )
+    )
+    result = await adapter.get_financial_balance_sheet("000660")
+
+    assert result == [{"total_aset": "1000"}]
+
+
+async def test_get_income_statement_returns_raw_rows():
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.headers["tr_id"] == "FHKST66430200"
+        assert request.url.params["FID_DIV_CLS_CODE"] == "1"
+        return httpx.Response(
+            200, json={"rt_cd": "0", "msg1": "ok", "output": [{"sale_account": "500"}]}
+        )
+
+    adapter = _make_adapter(
+        lambda request: _route(
+            request, {"/uapi/domestic-stock/v1/finance/income-statement": handler}
+        )
+    )
+    result = await adapter.get_income_statement("005930", period_div_code="1")
+
+    assert result == [{"sale_account": "500"}]
+
+
+async def test_get_income_statement_missing_output_raises():
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={"rt_cd": "0", "msg1": "ok"})
+
+    adapter = _make_adapter(
+        lambda request: _route(
+            request, {"/uapi/domestic-stock/v1/finance/income-statement": handler}
+        )
+    )
+    with pytest.raises(FatalExchangeError):
+        await adapter.get_income_statement("005930")

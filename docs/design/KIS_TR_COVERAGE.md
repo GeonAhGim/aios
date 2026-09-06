@@ -11,7 +11,7 @@ BR-1(ADR-2026-09-06-I D2). 생성: `python scripts/kis_tr_coverage.py`(오프라
 
 | 구현됨 | 실전계좌필요 | 범위밖 | 미착수 | 합계 | 구현률 |
 |---|---|---|---|---|---|
-| 44 | 24 | 0 | 307 | 375 | 11.73% |
+| 52 | 22 | 0 | 301 | 375 | 13.87% |
 
 완료 정의(ADR D2): `미착수` 0건. `실전계좌필요`·`범위밖`은 남을 수 있으나 각각 사유가 있다.
 
@@ -21,7 +21,7 @@ BR-1(ADR-2026-09-06-I D2). 생성: `python scripts/kis_tr_coverage.py`(오프라
 |---|---|---|---|
 | domestic_bond | 4 | 18 | 22.22% |
 | domestic_futureoption | 0 | 50 | 0.00% |
-| domestic_stock | 24 | 167 | 14.37% |
+| domestic_stock | 32 | 167 | 19.16% |
 | elw | 0 | 24 | 0.00% |
 | etfetn | 1 | 6 | 16.67% |
 | overseas_futureoption | 0 | 35 | 0.00% |
@@ -57,7 +57,7 @@ BR-1(ADR-2026-09-06-I D2). 생성: `python scripts/kis_tr_coverage.py`(오프라
 | CTSC0008U | domestic_stock | 미착수 | [국내주식] 주문/계좌 > 주식예약주문[v1_국내주식-017] | `examples_llm/domestic_stock/order_resv/order_resv.py` |
 | CTSC0009U | domestic_stock | 미착수 | [국내주식] 주문/계좌 > 주식예약주문정정취소[v1_국내주식-018,019] | `examples_llm/domestic_stock/order_resv_rvsecncl/order_resv_rvsecncl.py` |
 | CTSC0013U | domestic_stock | 미착수 | [국내주식] 주문/계좌 > 주식예약주문정정취소[v1_국내주식-018,019] | `examples_llm/domestic_stock/order_resv_rvsecncl/order_resv_rvsecncl.py` |
-| CTSC2702R | domestic_stock | 미착수 | [국내주식] 종목정보 - 당사 대주가능 종목 | `examples_llm/domestic_stock/lendable_by_company/lendable_by_company.py` |
+| CTSC2702R | domestic_stock | 구현됨 | [국내주식] 종목정보 - 당사 대주가능 종목 | `examples_llm/domestic_stock/lendable_by_company/lendable_by_company.py` |
 | CTSC8013R | domestic_bond | 미착수 | [장내채권] 주문/계좌 - 장내채권 주문체결내역 | `examples_llm/domestic_bond/inquire_daily_ccld/inquire_daily_ccld.py` |
 | CTSC8035R | domestic_bond | 미착수 | [장내채권] 주문/계좌 - 채권정정취소가능주문조회 | `examples_llm/domestic_bond/inquire_psbl_rvsecncl/inquire_psbl_rvsecncl.py` |
 | CTSC8407R | domestic_bond | 구현됨 | [장내채권] 주문/계좌 - 장내채권 잔고조회 | `examples_llm/domestic_bond/inquire_balance/inquire_balance.py` |
@@ -96,15 +96,15 @@ BR-1(ADR-2026-09-06-I D2). 생성: `python scripts/kis_tr_coverage.py`(오프라
 | FHKST11860000 | domestic_stock | 미착수 | [국내주식] 시세분석 > 국내주식 시간외예상체결등락률 [국내주식-140] | `examples_llm/domestic_stock/overtime_exp_trans_fluct/overtime_exp_trans_fluct.py` |
 | FHKST121600C0 | etfetn | 미착수 | [국내주식] 기본시세 > ETF 구성종목시세[국내주식-073] | `examples_llm/etfetn/inquire_component_stock_price/inquire_component_stock_price.py` |
 | FHKST130000C0 | domestic_stock | 미착수 | [국내주식] 시세분석 > 국내주식 상하한가 포착 [국내주식-190] | `examples_llm/domestic_stock/capture_uplowprice/capture_uplowprice.py` |
-| FHKST17010000 | domestic_stock | 미착수 | [국내주식] 순위분석 > 국내주식 신용잔고 상위 [국내주식-109] | `examples_llm/domestic_stock/credit_balance/credit_balance.py` |
+| FHKST17010000 | domestic_stock | 구현됨 | [국내주식] 순위분석 > 국내주식 신용잔고 상위 [국내주식-109] | `examples_llm/domestic_stock/credit_balance/credit_balance.py` |
 | FHKST190900C0 | domestic_stock | 미착수 | [국내주식] 순위분석 > 국내주식 대량체결건수 상위[국내주식-107] | `examples_llm/domestic_stock/bulk_trans_num/bulk_trans_num.py` |
 | FHKST644100C0 | domestic_stock | 미착수 | [국내주식] 시세분석 > 외국계 매매종목 가집계 [국내주식-161] | `examples_llm/domestic_stock/frgnmem_trade_estimate/frgnmem_trade_estimate.py` |
 | FHKST644400C0 | domestic_stock | 미착수 | [국내주식] 시세분석 > 종목별 외국계 순매수추이 [국내주식-164] | `examples_llm/domestic_stock/frgnmem_pchs_trend/frgnmem_pchs_trend.py` |
 | FHKST649100C0 | domestic_stock | 미착수 | [국내주식] 시세분석 > 국내 증시자금 종합 [국내주식-193] | `examples_llm/domestic_stock/mktfunds/mktfunds.py` |
 | FHKST663300C0 | domestic_stock | 미착수 | [국내주식] 종목정보 - 국내주식 종목투자의견 | `examples_llm/domestic_stock/invest_opinion/invest_opinion.py` |
 | FHKST663400C0 | domestic_stock | 미착수 | [국내주식] 종목정보 - 국내주식 증권사별 투자의견 | `examples_llm/domestic_stock/invest_opbysec/invest_opbysec.py` |
-| FHKST66430100 | domestic_stock | 미착수 | [국내주식] 종목정보 > 국내주식 대차대조표 [v1_국내주식-078] | `examples_llm/domestic_stock/finance_balance_sheet/finance_balance_sheet.py` |
-| FHKST66430200 | domestic_stock | 미착수 | [국내주식] 종목정보 > 국내주식 손익계산서 [v1_국내주식-079] | `examples_llm/domestic_stock/finance_income_statement/finance_income_statement.py` |
+| FHKST66430100 | domestic_stock | 구현됨 | [국내주식] 종목정보 > 국내주식 대차대조표 [v1_국내주식-078] | `examples_llm/domestic_stock/finance_balance_sheet/finance_balance_sheet.py` |
+| FHKST66430200 | domestic_stock | 구현됨 | [국내주식] 종목정보 > 국내주식 손익계산서 [v1_국내주식-079] | `examples_llm/domestic_stock/finance_income_statement/finance_income_statement.py` |
 | FHKST66430300 | domestic_stock | 구현됨 | [국내주식] 종목정보 > 국내주식 재무비율 [v1_국내주식-080] | `examples_llm/domestic_stock/finance_financial_ratio/finance_financial_ratio.py` |
 | FHKST66430400 | domestic_stock | 미착수 | [국내주식] 종목정보 - 국내주식 수익성비율 | `examples_llm/domestic_stock/finance_profit_ratio/finance_profit_ratio.py` |
 | FHKST66430500 | domestic_stock | 미착수 | [국내주식] 종목정보 > 국내주식 기타주요비율[v1_국내주식-082] | `examples_llm/domestic_stock/finance_other_major_ratios/finance_other_major_ratios.py` |
@@ -172,8 +172,8 @@ BR-1(ADR-2026-09-06-I D2). 생성: `python scripts/kis_tr_coverage.py`(오프라
 | FHPST02440200 | etfetn | 미착수 | [국내주식] 기본시세 > NAV 비교추이(일)[v1_국내주식-071] | `examples_llm/etfetn/nav_comparison_daily_trend/nav_comparison_daily_trend.py` |
 | FHPST04320000 | domestic_stock | 미착수 | [국내주식] 기본시세 > 회원사 실 시간 매매동향(틱)[국내주식-163] | `examples_llm/domestic_stock/frgnmem_trade_trend/frgnmem_trade_trend.py` |
 | FHPST04540000 | domestic_stock | 미착수 | [국내주식] 시세분석 > 주식현재가 회원사 종목매매동향 [국내주식-197] | `examples_llm/domestic_stock/inquire_member_daily/inquire_member_daily.py` |
-| FHPST04760000 | domestic_stock | 미착수 | [국내주식] 시세분석 > 국내주식 신용잔고 일별추이[국내주식-110] | `examples_llm/domestic_stock/daily_credit_balance/daily_credit_balance.py` |
-| FHPST04770000 | domestic_stock | 미착수 | [국내주식] 종목정보 > 국내주식 당사 신용가능종목[국내주식-111] | `examples_llm/domestic_stock/credit_by_company/credit_by_company.py` |
+| FHPST04760000 | domestic_stock | 구현됨 | [국내주식] 시세분석 > 국내주식 신용잔고 일별추이[국내주식-110] | `examples_llm/domestic_stock/daily_credit_balance/daily_credit_balance.py` |
+| FHPST04770000 | domestic_stock | 구현됨 | [국내주식] 종목정보 > 국내주식 당사 신용가능종목[국내주식-111] | `examples_llm/domestic_stock/credit_by_company/credit_by_company.py` |
 | FHPST04820000 | domestic_stock | 미착수 | [국내주식] 순위분석 > 국내주식 공매도 상위종목[국내주식-133] | `examples_llm/domestic_stock/short_sale/short_sale.py` |
 | FHPST04830000 | domestic_stock | 미착수 | [국내주식] 시세분석 > 국내주식 공매도 일별추이[국내주식-134] | `examples_llm/domestic_stock/daily_short_sale/daily_short_sale.py` |
 | FHPST07020000 | domestic_stock | 미착수 | [국내주식] 업종/기타 > 금리 종합(국내채권_금리)[국내주식-155] | `examples_llm/domestic_stock/comp_interest/comp_interest.py` |
@@ -346,8 +346,8 @@ BR-1(ADR-2026-09-06-I D2). 생성: `python scripts/kis_tr_coverage.py`(오프라
 | TTTC8408R | domestic_stock | 구현됨 | [국내주식] 주문/계좌 - 매도가능수량조회 | `examples_llm/domestic_stock/inquire_psbl_sell/inquire_psbl_sell.py` |
 | TTTC8434R | domestic_stock | 구현됨 | [국내주식] 주문/계좌 > 주식잔고조회[v1_국내주식-006] | `examples_llm/domestic_stock/inquire_balance/inquire_balance.py` |
 | TTTC8494R | domestic_stock | 구현됨 | [국내주식] 주문/계좌 > 주식잔고조회_실현손익[v1_국내주식-041] | `examples_llm/domestic_stock/inquire_balance_rlz_pl/inquire_balance_rlz_pl.py` |
-| TTTC8708R | domestic_stock | 실전계좌필요 | [국내주식] 주문/계좌 > 기간별손익일별합산조회[v1_국내주식-052] | `examples_llm/domestic_stock/inquire_period_profit/inquire_period_profit.py` |
-| TTTC8715R | domestic_stock | 실전계좌필요 | [국내주식] 주문/계좌 > 기간별매매손익현황조회[v1_국내주식-060] | `examples_llm/domestic_stock/inquire_period_trade_profit/inquire_period_trade_profit.py` |
+| TTTC8708R | domestic_stock | 구현됨 | [국내주식] 주문/계좌 > 기간별손익일별합산조회[v1_국내주식-052] | `examples_llm/domestic_stock/inquire_period_profit/inquire_period_profit.py` |
+| TTTC8715R | domestic_stock | 구현됨 | [국내주식] 주문/계좌 > 기간별매매손익현황조회[v1_국내주식-060] | `examples_llm/domestic_stock/inquire_period_trade_profit/inquire_period_trade_profit.py` |
 | TTTC8908R | domestic_stock | 구현됨 | [국내주식] 주문/계좌 > 매수가능조회[v1_국내주식-007] | `examples_llm/domestic_stock/inquire_psbl_order/inquire_psbl_order.py` |
 | TTTC8909R | domestic_stock | 실전계좌필요 | [국내주식] 주문/계좌 > 신용매수가능조회[v1_국내주식-042] | `examples_llm/domestic_stock/inquire_credit_psamount/inquire_credit_psamount.py` |
 | TTTC8910R | domestic_bond | 실전계좌필요 | [장내채권] 주문/계좌 - 장내채권 매수가능조회 | `examples_llm/domestic_bond/inquire_psbl_order/inquire_psbl_order.py` |
