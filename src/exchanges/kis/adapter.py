@@ -29,7 +29,9 @@ import httpx
 
 from src.core.exceptions import FatalExchangeError, RetryableExchangeError
 from src.data.models.base import AssetClass
+from src.data.models.trading import Order
 from src.exchanges.common.adapter import ExchangeAdapter
+from src.exchanges.common.live_guard import require_paper_sandbox
 from src.exchanges.common.types import ExchangeCapability, MarketHours
 from src.exchanges.kis.account_mixin import KISAccountMixin
 from src.exchanges.kis.domestic_bond_mixin import KISDomesticBondMixin
@@ -38,6 +40,7 @@ from src.exchanges.kis.domestic_stock_extra_mixin import KISDomesticStockExtraMi
 from src.exchanges.kis.elw_mixin import KISElwMixin
 from src.exchanges.kis.etf_mixin import KISEtfMixin
 from src.exchanges.kis.market_data_mixin import KISMarketDataMixin
+from src.exchanges.kis.order_dispatch import dispatch_place_order
 from src.exchanges.kis.overseas_futureoption_mixin import KISOverseasFutureoptionMixin
 from src.exchanges.kis.overseas_stock_mixin import KISOverseasStockMixin
 from src.exchanges.kis.trading_mixin import KISTradingMixin
@@ -176,14 +179,49 @@ class KISAdapter(
         return self._is_paper_trading
 
     def get_capabilities(self) -> ExchangeCapability:
-        """v1.4(ADR-2026-08-28) — 06번 §6.1-A: Phase 1은 KR_EQUITY만 확정,
-        해외주식·선물옵션 등 KIS의 나머지 지원 범위는 Draft(공식 문서
-        재확인 전까지 선언하지 않음 — capability-gated 원칙, §2.0-A)."""
+        """BR-8(ADR-2026-09-06-I D2, ADR-H D7) — v1.4(ADR-2026-08-28)는
+        Phase 1 스콥 논리로 KR_EQUITY만 선언했으나, 그 뒤 BR-3~7이 국내주식
+        조회 전수·해외주식 거래소 전수·해외 실시간 웹소켓·국내/해외
+        선물옵션을 이미 구현했다 — capabilities가 갱신되지 않아 Validator
+        (`validate_order_params`)와 OMS(`assert_supported`)가 전부 "미지원"
+        으로 거부하는 결함이 있었다(§10 BR). 실제 구현 상태와 선언을 여기서
+        일치시킨다 — 아래 매트릭스는 각 자산군을 처리하는 코드 위치다:
+          - KR_EQUITY/KR_ETF/KR_ETN: trading_mixin.place_order (도메스틱
+            order-cash, ETF/ETN도 KRX 종목코드라 같은 엔드포인트 재사용)
+          - KR_FUTURES/KR_OPTION: domestic_futureoption_mixin(BR-6)
+          - US_EQUITY/US_ETF/US_ETN: overseas_stock_mixin(BR-4, 9개 거래소)
+          - OVERSEAS_FUTURES/OVERSEAS_OPTION: overseas_futureoption_mixin(BR-7)
+        이 클래스의 `place_order()`가 위 매핑대로 실제 분기한다(아래 참조) —
+        capabilities만 넓히고 분기를 빼먹으면 다른 자산군 주문이 조용히
+        domestic_stock 엔드포인트로 잘못 나갈 뻔했던 결함이 이 리프의 핵심
+        수정이다.
+
+        범위 밖(AssetClass enum 미존재) — domestic_bond_mixin(채권)과
+        elw_mixin(ELW)도 실제로 구현돼 있지만 `AssetClass`에 대응 값이
+        없어(src/data/models/base.py) `Order.asset_class`로 표현할 방법이
+        구조적으로 없다 — enum 확장은 이 리프의 파일 스콥(trading.py/
+        base.py 제외) 밖이라 후속 리프가 필요하다. CRYPTO는 KIS가 다루지
+        않는 자산군이라 제외한다."""
         return ExchangeCapability(
             exchange_name="kis",
-            supported_asset_classes=[AssetClass.KR_EQUITY],
+            supported_asset_classes=[
+                AssetClass.KR_EQUITY,
+                AssetClass.KR_ETF,
+                AssetClass.KR_ETN,
+                AssetClass.KR_FUTURES,
+                AssetClass.KR_OPTION,
+                AssetClass.US_EQUITY,
+                AssetClass.US_ETF,
+                AssetClass.US_ETN,
+                AssetClass.OVERSEAS_FUTURES,
+                AssetClass.OVERSEAS_OPTION,
+            ],
             supports_spot=True,
-            supports_futures=False,
+            supports_futures=True,
+            supports_options=True,
+            # 증거금 레버리지 배율은 미검증(실계좌 확보 전까지 조사 못함) —
+            # 과장 대신 보수적 기본값을 유지한다(8.3 원칙). 이 값을 소비하는
+            # 다운스트림 리스크 로직은 현재 없음(grep 확인, 2026-09-07).
             supports_leverage=False,
             # 02d 스펙 §6 — 승인키 인증 확인 후 실시간 체결가/호가/체결통보
             # 구현됨(websocket_mixin.py). 체결통보 채널(암호화)은 다른 두
@@ -193,6 +231,9 @@ class KISAdapter(
             max_leverage=Decimal("1"),
             reference_feed_coverage="high",
             has_official_sandbox=True,
+            # 국내 정규장 기준 대표값 — 이 필드는 거래소당 1개라 해외 심볼
+            # (US_EQUITY 등)의 실제 개장시간은 여기 표현되지 않는다(심볼별
+            # 캘린더는 foundation/market_data/domain/calendar 몫, 스콥 밖).
             market_hours=MarketHours(
                 timezone="Asia/Seoul",
                 open_time="09:00",
@@ -200,3 +241,20 @@ class KISAdapter(
                 trading_days=["MON", "TUE", "WED", "THU", "FRI"],
             ),
         )
+
+    @require_paper_sandbox
+    async def place_order(self, order: Order) -> Order:
+        """BR-8 계약 승격 — `order.asset_class`로 실제 KIS 엔드포인트를
+        분기한다(order_dispatch.py). 이전에는 `KISTradingMixin.place_order`
+        (domestic_stock 전용)가 그대로 ABC 계약을 채워, get_capabilities()
+        만 넓히면 해외주식·선물옵션 Order가 조용히 국내주식 파라미터로
+        잘못된 시장에 나갈 뻔했다 — 이 리프의 핵심 수정.
+
+        cancel_order/modify_order/get_order는 이 리프에서 확장하지 않는다 —
+        `order_id: str` 하나만 받는 ABC 시그니처로는 asset_class를 알 수
+        없고(주문 시점의 Order와 달리 opaque id뿐), 선물옵션 취소는
+        quantity가 필수 키워드라(cancel_futureoption_order) 시그니처
+        자체가 다르다 — 비-도메스틱 자산군의 취소/정정/조회는 당분간 각
+        mixin의 전용 메서드(cancel_futureoption_order 등)를 호출부가
+        직접 써야 한다."""
+        return await dispatch_place_order(self, order)

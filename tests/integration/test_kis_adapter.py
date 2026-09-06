@@ -70,11 +70,16 @@ async def test_get_ticker_combines_price_and_orderbook_endpoints():
     assert ticker.exchange == "kis"
 
 
-async def test_capabilities_declare_kr_equity_only():
+async def test_capabilities_declare_full_implemented_matrix():
+    """BR-8(task-1786) — v1.4 시절 KR_EQUITY 단일 선언은 BR-3~7이 국내주식
+    조회 전수·해외주식·국내외 선물옵션을 구현한 뒤로는 결함이었다(구현과
+    선언 불일치). 전체 매트릭스 일치 검증은
+    tests/integration/exchanges/test_kis_capability_matrix.py 참조."""
     adapter = _make_adapter(lambda request: httpx.Response(200, json=TOKEN_RESPONSE))
     caps = adapter.get_capabilities()
 
-    assert caps.supported_asset_classes == [AssetClass.KR_EQUITY]
+    assert AssetClass.KR_EQUITY in caps.supported_asset_classes
+    assert AssetClass.CRYPTO not in caps.supported_asset_classes
     # 02d 스펙 §6 — 승인키 인증 확인 후 실시간 구독 구현됨
     # (tests/integration/test_kis_websocket.py 참조).
     assert caps.supports_websocket is True
