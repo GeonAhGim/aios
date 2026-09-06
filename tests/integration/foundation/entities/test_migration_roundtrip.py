@@ -68,3 +68,31 @@ async def test_upgrade_downgrade_upgrade_round_trip_recreates_all_four_tables(po
     _run_alembic("upgrade", "head")
     for table in ("legal_entity", "fund", "portfolio", "sub_account"):
         assert await _table_exists(pool, table)
+
+
+async def _legal_entity_tenant_fk_target(pool: asyncpg.Pool) -> str:
+    async with pool.acquire() as conn:
+        target = await conn.fetchval(
+            """
+            SELECT confrelid::regclass::text
+            FROM pg_constraint
+            WHERE conrelid = 'legal_entity'::regclass
+              AND contype = 'f'
+              AND conname = 'legal_entity_tenant_id_fkey'
+            """
+        )
+    assert target is not None, "legal_entity_tenant_id_fkey가 존재하지 않는다"
+    return str(target)
+
+
+async def test_legal_entity_tenant_id_fk_targets_tenant_not_users(pool):
+    # FA-2a(a0e7e1454b60) DoD — 교정 후 users를 FK하는 tenant_id가 0건.
+    assert await _legal_entity_tenant_fk_target(pool) == "tenant"
+
+
+async def test_fa2a_downgrade_restores_users_fk_then_upgrade_restores_tenant_fk(pool):
+    _run_alembic("downgrade", "e6b1d94a7c3f")
+    assert await _legal_entity_tenant_fk_target(pool) == "users"
+
+    _run_alembic("upgrade", "head")
+    assert await _legal_entity_tenant_fk_target(pool) == "tenant"

@@ -22,6 +22,21 @@ async def create_test_user(pool: asyncpg.Pool) -> UUID:
     return user_id
 
 
+async def create_test_tenant(pool: asyncpg.Pool) -> UUID:
+    """`users` 행 + 그 PERSONAL `tenant` 행(id == user_id)을 함께 만든다.
+
+    `f4a6b8c0d2e4`가 기존 사용자에 대해서만 PERSONAL tenant를 백필하므로,
+    테스트에서 새로 만든 사용자는 이 헬퍼 없이는 대응하는 `tenant` 행이
+    없다 — `tenant(id)`를 FK하는 테이블(예: `legal_entity`)에 행을
+    넣으려면 이 헬퍼로 만든 id를 써야 한다."""
+    user_id = await create_test_user(pool)
+    async with pool.acquire() as conn:
+        await conn.execute(
+            "INSERT INTO tenant (id, kind) VALUES ($1, 'PERSONAL')", user_id
+        )
+    return user_id
+
+
 class NoopEventBus:
     """FastAPI 라우터 통합테스트 전용 EventBus 대역 — publish를 즉시 무시한다.
 

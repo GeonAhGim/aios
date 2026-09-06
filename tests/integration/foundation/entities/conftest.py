@@ -17,7 +17,7 @@ import pytest
 from src.data.models.base import Currency
 from src.foundation.entities.adapters.postgres_repository import PostgresEntityRepository
 from src.foundation.entities.contracts.v1 import Fund, LegalEntity, Portfolio, SubAccount
-from tests.integration.conftest import create_test_user
+from tests.integration.conftest import create_test_tenant
 
 
 def _asyncpg_dsn() -> str:
@@ -49,7 +49,7 @@ class SeededHierarchy:
 async def build_hierarchy(
     pool: asyncpg.Pool, repo: PostgresEntityRepository, *, tenant_id: UUID | None = None
 ) -> SeededHierarchy:
-    tenant_id = tenant_id if tenant_id is not None else await create_test_user(pool)
+    tenant_id = tenant_id if tenant_id is not None else await create_test_tenant(pool)
     entity = await repo.create_legal_entity(
         LegalEntity(
             entity_id=uuid4(),
