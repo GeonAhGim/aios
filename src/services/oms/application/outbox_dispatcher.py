@@ -40,28 +40,21 @@ from datetime import datetime
 import asyncpg
 
 from src.core.db.conditional_write import ConcurrencyConflictError
-from src.data.models.trading import Order, OrderStatus
-from src.exchanges.common.adapter import ExchangeAdapter, UnsupportedCapabilityError
+from src.data.models.trading import OrderStatus
 from src.exchanges.common.http_policy import RetryPolicy
-from src.services.oms.application.dispatch_outcome import (
-    OutcomeKind,
-    SendOutcome,
-    classify_lookup_failure,
-    classify_submit_failure,
-    classify_submit_response,
-)
+from src.services.oms.application.dispatch_outcome import OutcomeKind, SendOutcome
 from src.services.oms.application.outbox_commands import (
     AdapterResolver,
     CommandCounters,
     send_cancel,
     send_modify,
 )
+from src.services.oms.application.outbox_submit import call_submit
 from src.services.oms.application.outbox_writes import (
     DEFAULT_MAX_ATTEMPTS,
     NOT_SENT_PREFIX,
     OUTBOX_RETRY_POLICY,
     OutboxWrites,
-    adopt,
     order_from_payload,
     utcnow,
 )
@@ -191,7 +184,7 @@ class OutboxDispatcher:
                     {"sent_at": self._writes.clock()},
                 )
         adapter = await self._resolve_adapter(order.tenant_id, order.exchange)
-        outcome = await self._call_submit(adapter, venue_order, verify_first)
+        outcome = await call_submit(adapter, venue_order, verify_first)
         async with self._pool.acquire() as conn, conn.transaction():
             await self._finalize_submit(conn, row, order, outcome, report)
 
@@ -226,35 +219,6 @@ class OutboxDispatcher:
                            order.order_id, decision.reason_codes)
             return False
         return True
-
-    async def _call_submit(
-        self, adapter: ExchangeAdapter, venue_order: Order, verify_first: bool
-    ) -> SendOutcome:
-        if verify_first:  # §5.4 재시도 전 반드시 역조회
-            try:
-                existing = await adapter.find_order_by_client_id(venue_order.client_order_id)
-            except UnsupportedCapabilityError:
-                return SendOutcome(OutcomeKind.UNKNOWN, "RESEND_UNVERIFIABLE")
-            except Exception as exc:  # noqa: BLE001 — 분류는 dispatch_outcome 책임
-                return classify_lookup_failure(exc)
-            if existing is not None:
-                return adopt(existing, "RESEND_ADOPTED")
-        try:
-            submitted = await adapter.place_order(venue_order)
-        except Exception as exc:  # noqa: BLE001 — 분류는 dispatch_outcome 책임
-            outcome = classify_submit_failure(exc)
-            if outcome.kind is not OutcomeKind.ADOPT:
-                return outcome
-        else:
-            return classify_submit_response(submitted)
-        # §6 F14 — DUPLICATE_CLIENT_ID: 기존 주문 채택, 못 찾으면 UNKNOWN(resolver).
-        try:
-            existing = await adapter.find_order_by_client_id(venue_order.client_order_id)
-        except Exception:  # noqa: BLE001
-            return SendOutcome(OutcomeKind.UNKNOWN, "DUPLICATE_CLIENT_ID_LOOKUP_FAILED")
-        if existing is None:
-            return SendOutcome(OutcomeKind.UNKNOWN, "DUPLICATE_CLIENT_ID_NOT_FOUND")
-        return adopt(existing, "DUPLICATE_ADOPTED")
 
     async def _finalize_submit(
         self,
