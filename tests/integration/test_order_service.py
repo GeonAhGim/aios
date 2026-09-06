@@ -85,6 +85,22 @@ def _market_order(execution_id: int, *, client_order_id: str | None = None) -> O
     )
 
 
+def _limit_order(execution_id: int, *, client_order_id: str | None = None) -> Order:
+    return Order(
+        client_order_id=client_order_id or f"test-{uuid.uuid4().hex}",
+        strategy_id="strat-1",
+        strategy_version="1.0.0",
+        execution_id=execution_id,
+        symbol="BTC/USDT",
+        exchange="bitget",
+        side=OrderSide.BUY,
+        order_type=OrderType.LIMIT,
+        quantity=Decimal("0.01"),
+        price=Money(amount=Decimal("40000"), currency=Currency.USDT),
+        asset_class=AssetClass.CRYPTO,
+    )
+
+
 async def test_submit_order_persists_and_publishes(pool):
     user_id = await create_test_user(pool)
     execution_id = await _create_running_execution(pool, user_id)
@@ -316,6 +332,29 @@ async def test_modify_market_order_rejected_before_exchange_call(pool):
         await modify_order(
             submitted.order_id,
             new_price=Decimal("50000"),
+            new_quantity=Decimal("0.02"),
+            adapter=adapter,
+            pool=pool,
+        )
+
+
+async def test_modify_already_filled_order_raises(pool):
+    """DoD(task-1761) — 이미 체결된(FILLED) 지정가 주문의 정정 요청은
+    `MARKET_NOT_MODIFIABLE`이 아니라 `next_status`의 표 밖 전이
+    (`InvalidOrderTransitionError`)로 거부되고, `OrderModifyError`로
+    감싸 전파돼야 한다(cancel.py 동일 편차의 modify 대응, 모듈 docstring
+    참조)."""
+    user_id = await create_test_user(pool)
+    execution_id = await _create_running_execution(pool, user_id)
+    adapter = _ModifiableFakeAdapter(place_order_result_status=OrderStatus.FILLED)
+    order = _limit_order(execution_id)
+    submitted = await submit_order(order, user_id=user_id, adapter=adapter, pool=pool)
+    assert submitted.status == OrderStatus.FILLED
+
+    with pytest.raises(OrderModifyError):
+        await modify_order(
+            submitted.order_id,
+            new_price=Decimal("41000"),
             new_quantity=Decimal("0.02"),
             adapter=adapter,
             pool=pool,

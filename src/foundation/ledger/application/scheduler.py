@@ -145,18 +145,27 @@ class LedgerIntegrityScheduler:
         self, conn: asyncpg.Connection
     ) -> list[CaptureRecord]:
         """`ledger_payout_item`에 아직 없는 `HOLD_CAPTURED` 캡처를 후보로
-        모은다. 딱 하나 더 걸러낸다 — `purchase_service.py::_settle`(Phase 1
-        "판매대금 즉시 정산", §10 R2 ADR 개정 전 임시)은 캡처 직후 같은
-        트랜잭션에서 `payouts.py`를 거치지 않고 직접 `PAYOUT_RELEASE`를
-        포스팅해 `ledger_payout_item`을 전혀 남기지 않는다 — 그래서 그
-        경로로 이미 정산된 캡처가 위 `NOT EXISTS`만으로는 여전히 "미배치"로
-        보인다. 그대로 두면 이 스케줄러가 이미 0으로 빠진
-        `USER:*:PENDING_PAYOUT`을 매일 밤 다시 차감하려다
-        `InsufficientAvailableError`로 배치 전체가 롤백된다. `ledger_hold.
-        reference`(=`f"purchase:{purchase_id}"`)와 `settled_entry_id`(=이
-        캡처의 entry_id)를 이용해 `purchase_service.py`가 쓰는 event_ref
-        규약(`f"{reference}:release"`)으로 이미 정산됐는지 직접 확인해
-        제외한다. R2 ADR이 즉시정산을 없애면 이 특례도 함께 제거될 것."""
+        모은다. 두 가지를 더 걸러낸다 — 둘 다 "캡처가 `payouts.py`를 거치지
+        않고 직접 `PAYOUT_RELEASE`로 이미 정산됨"이 위 `NOT EXISTS`(=
+        `ledger_payout_item` 없음)만으로는 여전히 "미배치"로 보이는 경우다.
+        그대로 두면 이 스케줄러가 이미 0으로 빠진 `USER:*:PENDING_PAYOUT`을
+        매일 밤 다시 차감하려다 `InsufficientAvailableError`로 배치 전체가
+        롤백된다.
+
+        (1) `purchase_service.py::_settle`(Phase 1 "판매대금 즉시 정산", §10
+        R2 ADR 개정 전 임시) — `ledger_hold.reference`(=
+        `f"purchase:{purchase_id}"`)와 `settled_entry_id`(=이 캡처의
+        entry_id)를 이용해 그 모듈이 쓰는 event_ref 규약
+        (`f"{reference}:release"`)으로 이미 정산됐는지 직접 확인한다.
+
+        (2) `backfill.py::_purchase_events`(LC-11 소급 적재) — 이 경로는
+        `ledger_hold` 행을 아예 만들지 않고(레거시 즉시정산 이력을 그대로
+        재현), `HOLD_CAPTURED`·`PAYOUT_RELEASE`에 **같은** `event_ref`
+        (`f"backfill:purchase:{purchase_id}"`)를 쓴다 — (1)의 `ledger_hold`
+        조인으로는 절대 걸리지 않으므로, 캡처와 같은 event_ref를 가진
+        `PAYOUT_RELEASE`가 있는지 직접 확인해 별도로 제외한다.
+
+        R2 ADR이 즉시정산을 없애면 이 특례들도 함께 제거될 것."""
         rows = await conn.fetch(
             "SELECT je.entry_id, la.account_code, pl.amount, la.currency, je.posted_at "
             "FROM ledger_journal_entry je "
@@ -173,6 +182,11 @@ class LedgerIntegrityScheduler:
             "    ON release_je.event_ref = lh.reference || ':release' "
             "    AND release_je.event_type = 'PAYOUT_RELEASE' "
             "  WHERE lh.settled_entry_id = je.entry_id"
+            ") "
+            "AND NOT EXISTS ("
+            "  SELECT 1 FROM ledger_journal_entry same_ref_release "
+            "  WHERE same_ref_release.event_ref = je.event_ref "
+            "  AND same_ref_release.event_type = 'PAYOUT_RELEASE'"
             ") "
             "ORDER BY je.posted_at"
         )
