@@ -51,6 +51,11 @@ def test_validated_sent_to_submitted() -> None:
     assert next_status(OrderStatus.VALIDATED, OrderEvent.SENT) == OrderStatus.SUBMITTED
 
 
+def test_validated_send_abandoned_to_failed() -> None:
+    """CA 2026-09-06 — outbox DEAD(어댑터 호출 0회)의 전송 전 실패 경로(§4.2)."""
+    assert next_status(OrderStatus.VALIDATED, OrderEvent.SEND_ABANDONED) == OrderStatus.FAILED
+
+
 def test_submitted_ack_to_acknowledged() -> None:
     assert next_status(OrderStatus.SUBMITTED, OrderEvent.ACK) == OrderStatus.ACKNOWLEDGED
 

@@ -38,9 +38,9 @@ class OutcomeKind(str, Enum):
     DEAD = "DEAD"  # CANCEL/MODIFY: 재시도 불가 확정 오류 → outbox DEAD
 
 
-# 주문 → REJECTED(reason=kind)로 확정할 수 있는 분류(§3.4). AUTH는 명세상
-# FAILED이지만 L4-02 전이표에 SUBMITTED→FAILED가 없어 REJECTED(reason=AUTH)로
-# 기록한다(거래소가 요청 자체를 거부한 사실은 동일).
+# 주문 → REJECTED(reason=kind)로 확정할 수 있는 분류(§3.4). AUTH는 CA
+# 2026-09-06 결정으로 REJECTED(reason=AUTH) 확정 — 어댑터 호출 직전에 이미
+# SUBMITTED이므로 §4.2 VENUE_REJECTED 경로를 쓴다(FAILED 직행은 전이표 밖).
 _VENUE_REJECT_KINDS = frozenset(
     {
         ExchangeErrorKind.INSUFFICIENT_FUNDS,

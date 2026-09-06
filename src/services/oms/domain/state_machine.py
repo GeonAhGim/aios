@@ -35,6 +35,7 @@ class OrderEvent(str, Enum):
     VALIDATED = "VALIDATED"
     VALIDATION_FAILED = "VALIDATION_FAILED"
     SENT = "SENT"
+    SEND_ABANDONED = "SEND_ABANDONED"
     ACK = "ACK"
     VENUE_REJECTED = "VENUE_REJECTED"
     RESPONSE_LOST = "RESPONSE_LOST"
@@ -67,7 +68,7 @@ _TERMINAL_STATES = frozenset(
 
 ALLOWED: Mapping[OrderStatus, frozenset[OrderStatus]] = {
     OrderStatus.CREATED: frozenset({OrderStatus.VALIDATED, OrderStatus.FAILED}),
-    OrderStatus.VALIDATED: frozenset({OrderStatus.SUBMITTED}),
+    OrderStatus.VALIDATED: frozenset({OrderStatus.SUBMITTED, OrderStatus.FAILED}),
     OrderStatus.SUBMITTED: frozenset(
         {
             OrderStatus.ACKNOWLEDGED,
@@ -118,6 +119,7 @@ _SIMPLE_TRANSITIONS: Mapping[tuple[OrderStatus, OrderEvent], OrderStatus] = {
     (OrderStatus.CREATED, OrderEvent.VALIDATED): OrderStatus.VALIDATED,
     (OrderStatus.CREATED, OrderEvent.VALIDATION_FAILED): OrderStatus.FAILED,
     (OrderStatus.VALIDATED, OrderEvent.SENT): OrderStatus.SUBMITTED,
+    (OrderStatus.VALIDATED, OrderEvent.SEND_ABANDONED): OrderStatus.FAILED,
     (OrderStatus.SUBMITTED, OrderEvent.ACK): OrderStatus.ACKNOWLEDGED,
     (OrderStatus.SUBMITTED, OrderEvent.VENUE_REJECTED): OrderStatus.REJECTED,
     (OrderStatus.SUBMITTED, OrderEvent.RESPONSE_LOST): OrderStatus.UNKNOWN,

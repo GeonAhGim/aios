@@ -4,8 +4,10 @@ Spec: docs/specs/L4_execution_oms_and_exchange_v1.0.md §8.2, §9 L4-14 DoD.
 
 케이스: PENDING→DONE(SUBMITTED→ACK); `SentUnknownError` → UNKNOWN & 재전송 없음
 (어댑터 호출 1회); 회로 OPEN → not_before 연기(attempt 불변); 재시도 상한 → DEAD;
-게이트 거부 시 거래소 미호출(I-01/I-10); payload 불일치 fail-closed; F14 채택;
-CANCEL/MODIFY; run_forever 생존; wiring이 foundation 게이트를 쓰는지(I-10).
+게이트 거부 시 거래소 미호출(I-01/I-10); payload 불일치 fail-closed; 전송 전
+DEAD(어댑터 호출 0회) → `FAILED(SEND_ABANDONED)`, 전송 후 DEAD → `UNKNOWN` 유지
+(CA 2026-09-06); F14 채택; CANCEL/MODIFY; run_forever 생존; wiring이 foundation
+게이트를 쓰는지(I-10).
 """
 from __future__ import annotations
 
@@ -261,6 +263,7 @@ async def test_duplicate_client_id_adopts_existing_order(outbox, orders, clock):
 
 # ---- 게이트 / payload (negative, I-01·I-10) -------------------------------------------
 async def test_gate_deny_blocks_send_and_deads_row(outbox, orders, clock):
+    """CA 2026-09-06 — 전송 전 DEAD(어댑터 호출 0회) → SEND_ABANDONED로 FAILED."""
     view = orders.add(make_order_view())
     row_id = await enqueue(outbox, view)
     adapter = ScriptedAdapter()
@@ -269,9 +272,25 @@ async def test_gate_deny_blocks_send_and_deads_row(outbox, orders, clock):
     assert report.gate_denied == 1 and adapter.calls == []
     row = outbox.rows[row_id]
     assert (row.state, row.last_error) == ("DEAD", "SEND_GATE_DENIED")
-    unchanged = orders.orders[view.order_id]
-    assert (unchanged.status, unchanged.version) == (OrderStatus.VALIDATED, 1)
-    assert orders.events == []
+    abandoned = orders.orders[view.order_id]
+    assert (abandoned.status, abandoned.version) == (OrderStatus.FAILED, 2)
+    assert [e.event for e in orders.events] == ["SEND_ABANDONED"]
+    assert orders.events[-1].reason_code == "SEND_GATE_DENIED"
+
+
+async def test_gate_deny_after_resend_leaves_order_unknown(outbox, orders, clock):
+    """게이트 거부 시점에 주문이 이미 SUBMITTED(재클레임)면 어댑터 호출 이력이
+    불확실하므로 FAILED로 확정하지 않고 UNKNOWN(역조회 대상)으로 남긴다."""
+    view = orders.add(make_order_view(status=OrderStatus.SUBMITTED))
+    row_id = await enqueue(outbox, view)
+    adapter = ScriptedAdapter()
+    report = await _run(outbox, orders, adapter, clock, gate=deny_gate)
+
+    assert report.gate_denied == 1 and adapter.calls == []
+    assert outbox.rows[row_id].last_error == "SEND_GATE_DENIED"
+    final = orders.orders[view.order_id]
+    assert final.status is OrderStatus.UNKNOWN and final.unknown_since == clock.now
+    assert orders.events[-1].event == "RESPONSE_LOST"
 
 
 async def test_gate_is_required_and_none_is_rejected(outbox, orders):
@@ -287,6 +306,7 @@ async def test_gate_is_required_and_none_is_rejected(outbox, orders):
 
 
 async def test_payload_for_other_order_is_dead_without_send(outbox, orders, clock):
+    """CA 2026-09-06 — payload fail-closed도 전송 전 DEAD → SEND_ABANDONED/FAILED."""
     view = orders.add(make_order_view())
     payload = submit_payload(view, client_order_id="a-other")
     row_id = await enqueue(outbox, view, payload=payload)
@@ -294,7 +314,9 @@ async def test_payload_for_other_order_is_dead_without_send(outbox, orders, cloc
     report = await _run(outbox, orders, adapter, clock)
     assert report.dead == 1 and adapter.calls == []
     assert outbox.rows[row_id].last_error == "PAYLOAD_INVALID"
-    assert orders.orders[view.order_id].status is OrderStatus.VALIDATED
+    final = orders.orders[view.order_id]
+    assert final.status is OrderStatus.FAILED and final.version == 2
+    assert orders.events[-1].reason_code == "PAYLOAD_INVALID"
 
 
 async def test_progressed_order_consumes_command_without_send(outbox, orders, clock):

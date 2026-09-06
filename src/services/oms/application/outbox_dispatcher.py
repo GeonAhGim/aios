@@ -20,10 +20,13 @@ expected_status/version 불일치 시 동일. payload 계약(L4-09/17): SUBMIT
 있으면 채택, 없으면 재전송, 미지원 venue면 UNKNOWN. `last_error`가 `NOT_SENT:`
 (회로 OPEN·역조회 단계 실패)면 거래소에 닿지 않았음이 확정이라 역조회 생략.
 
-명세 갭(PM 판단): §5.4 "DEAD 후 FAILED"·§3.4 "AUTH → FAILED"는 L4-02 전이표
-(VALIDATED→SUBMITTED만)와 충돌 → 전이표(I2, DB 트리거와 동일) 준수: 전송 후
-DEAD는 UNKNOWN(resolver가 ABSENT면 FAILED), 전송 전 DEAD(게이트 거부·payload
-불량)는 주문 VALIDATED 유지 + outbox 행만 DEAD.
+전송 전/후 DEAD 구분(CA 2026-09-06, §4.2 `SEND_ABANDONED` 신설로 명세 정합):
+outbox DEAD 시점에 주문이 아직 `VALIDATED`면(어댑터 호출 0회 확정) `SEND_ABANDONED`
+전이로 `FAILED` 확정. 이미 `SUBMITTED`면(재클레임 중 과거 시도가 어댑터를 불렀을
+가능성) 확정할 수 없으니 `UNKNOWN`(resolver 대상)으로 남긴다 — 자금이 움직였을
+수 있는 주문을 FAILED로 성급히 닫지 않는다(§5.4). `EXCH_AUTH`는 §3.4 REJECTED
+(reason=AUTH) 그대로 — 어댑터 호출 후(이미 SUBMITTED)라 `_finalize_submit`의
+`VENUE_REJECTED` 경로를 쓴다(`dispatch_outcome._VENUE_REJECT_KINDS` 참조).
 """
 from __future__ import annotations
 
@@ -171,15 +174,12 @@ class OutboxDispatcher:
             venue_order = order_from_payload(row, order)
             if venue_order is None:
                 await self._writes.dead(conn, row, "PAYLOAD_INVALID")
+                await self._abandon_pre_send(conn, row, order, "PAYLOAD_INVALID")
                 report.dead += 1
                 return
             if not await self._gate_allows(order):
                 await self._writes.dead(conn, row, "SEND_GATE_DENIED")
-                if order.status is OrderStatus.SUBMITTED:  # 이미 전송됐을 수 있다 → 역조회 대상
-                    await self._writes.transition(
-                        conn, row, order, OrderStatus.UNKNOWN, OrderEvent.RESPONSE_LOST,
-                        "SEND_GATE_DENIED", {"unknown_since": self._writes.clock()},
-                    )
+                await self._abandon_pre_send(conn, row, order, "SEND_GATE_DENIED")
                 report.gate_denied += 1
                 return
             verify_first = order.status is OrderStatus.SUBMITTED and not (
@@ -194,6 +194,23 @@ class OutboxDispatcher:
         outcome = await self._call_submit(adapter, venue_order, verify_first)
         async with self._pool.acquire() as conn, conn.transaction():
             await self._finalize_submit(conn, row, order, outcome, report)
+
+    async def _abandon_pre_send(
+        self, conn: asyncpg.Connection, row: OutboxRow, order: OrderView, reason: str
+    ) -> None:
+        """outbox DEAD(펜스는 호출부가 먼저 씀) 뒤 주문 쪽 확정 — CA 2026-09-06.
+        `VALIDATED`는 어댑터 호출 0회가 확정이라 `SEND_ABANDONED`로 `FAILED`.
+        `SUBMITTED`는 재클레임 중 과거 시도가 어댑터를 이미 불렀을 수 있어
+        확정 불가 → `UNKNOWN`(resolver 대상)."""
+        if order.status is OrderStatus.VALIDATED:
+            await self._writes.transition(
+                conn, row, order, OrderStatus.FAILED, OrderEvent.SEND_ABANDONED, reason, {},
+            )
+        else:
+            await self._writes.transition(
+                conn, row, order, OrderStatus.UNKNOWN, OrderEvent.RESPONSE_LOST, reason,
+                {"unknown_since": self._writes.clock()},
+            )
 
     async def _gate_allows(self, order: OrderView) -> bool:
         decision = await self._gate(
