@@ -79,7 +79,7 @@ class ExecutionLoopScheduler:
         publish: PublishFn | None = None,
         max_concurrent_ticks: int = DEFAULT_MAX_CONCURRENT_TICKS,
         equity_tracker: ExecutionEquityTracker | None = None,
-        lease_ttl_seconds: float | None = None,
+        ttl_override_seconds: float | None = None,
     ) -> None:
         self._pool = pool
         self._resolve_adapter = resolve_adapter
@@ -90,8 +90,8 @@ class ExecutionLoopScheduler:
         self._lease_repo = lease_repo
         self._owner_id = owner_id
         self._lease_ttl_seconds = (
-            lease_ttl_seconds
-            if lease_ttl_seconds is not None
+            ttl_override_seconds
+            if ttl_override_seconds is not None
             else policy.execution_loop.interval_sec * _LEASE_TTL_INTERVAL_MULTIPLIER
         )
         self._semaphore = asyncio.Semaphore(max_concurrent_ticks)

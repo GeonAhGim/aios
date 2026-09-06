@@ -175,7 +175,7 @@ async def test_list_candidates_returns_only_leased_and_forwards_owner_and_defaul
 async def test_lease_ttl_override_is_passed_through() -> None:
     repo = _RecordingLeaseRepo({1})
     scheduler = ExecutionLoopScheduler(
-        _FakePool(_rows(1)), lease_ttl_seconds=12.5, **_required_kwargs(repo)
+        _FakePool(_rows(1)), ttl_override_seconds=12.5, **_required_kwargs(repo)
     )
 
     await scheduler.list_candidates()
