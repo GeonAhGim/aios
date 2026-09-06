@@ -22,6 +22,7 @@ import {
   type ReplayState,
 } from "@aios/chart-engine/src/replay/replayController";
 import type { ChartingPort } from "@aios/chart-engine/src/layout/persistence";
+import type { IndicatorCatalogEntry } from "@aios/chart-engine/src/plugins/indicatorPlugin";
 import type { CandleQueryParams, CandleQueryResult } from "@aios/api-client";
 import { ApiError, createBacktestsClient, createChartingClient, createMarketDataClient } from "@aios/api-client";
 import { useAuthStore } from "@aios/shared-hooks";
@@ -37,6 +38,7 @@ import { ChartPanes } from "./ChartPanes";
 import { ChartToolbar } from "./ChartToolbar";
 import { CompareSymbols, type CompareSymbolRef } from "./CompareSymbols";
 import { ChartTemplates, type ChartTemplatesPort, type TemplateApplyResult } from "./ChartTemplates";
+import { IndicatorParityPanel, type ServerIndicatorSeriesPort } from "./IndicatorParityPanel";
 import { IndicatorPicker } from "./IndicatorPicker";
 import { StrategyMarkers } from "./StrategyMarkers";
 import { useChartLayout, type ChartViewSnapshot } from "./useChartLayout";
@@ -67,6 +69,13 @@ export interface ChartPageProps {
   listInstruments?: typeof marketDataClient.listInstruments;
   // BT-13: 즉시 백테스트 실행 포트 — 같은 관용으로 서버 왕복 없이 주입 가능하게 둔다.
   runQuickBacktest?: RunQuickBacktest;
+  // CH-18b: IndicatorParityPanel의 화이트리스트 판정 입력(IND-12 카탈로그). 실
+  // 배선(라이브 fetch)이 아직 없다 — 기본값 []는 "아무 지표도 검증 대상 아님"을
+  // 정직하게 반영한다(fail-closed, IndicatorParityPanel.tsx 상단 주석 참고).
+  indicatorCatalog?: readonly IndicatorCatalogEntry[];
+  // CH-18b: 서버 참조 지표 시리즈 포트. 실 IND-1 계산 엔드포인트가 아직 없어
+  // 기본값은 IndicatorParityPanel의 자체 기본값(항상 null)을 그대로 쓴다.
+  resolveServerIndicatorSeries?: ServerIndicatorSeriesPort;
   now?: Date;
 }
 
@@ -160,6 +169,8 @@ export function ChartPage({
   templatesPort = chartingClient,
   listInstruments = marketDataClient.listInstruments,
   runQuickBacktest = backtestsClient.runQuickBacktest,
+  indicatorCatalog = [],
+  resolveServerIndicatorSeries,
   now,
 }: ChartPageProps) {
   const [searchParams, setSearchParams] = useSearchParams();
@@ -436,6 +447,13 @@ export function ChartPage({
             <CandlestickChart data={points} />
           </ChartPanes>
         )}
+
+        <IndicatorParityPanel
+          candles={displayCandles}
+          overlays={selectedOverlayEntries}
+          catalog={indicatorCatalog}
+          resolveServerSeries={resolveServerIndicatorSeries}
+        />
 
         <StrategyMarkers instrumentId={instrumentId} points={points} />
 
