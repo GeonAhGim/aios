@@ -61,7 +61,7 @@ async def test_get_overseas_ticker_uses_quote_exchange_code():
     adapter = _make_adapter(
         lambda request: _route(request, {"/uapi/overseas-price/v1/quotations/price": handler})
     )
-    ticker = await adapter.get_overseas_ticker("AAPL", "US")
+    ticker = await adapter.get_overseas_ticker("AAPL", "NASD")
 
     assert ticker.price == Decimal("225.50")
 
@@ -92,7 +92,7 @@ async def test_place_overseas_order_uses_order_exchange_code_and_buy_tr_id():
     )
     order = _order()
 
-    result = await adapter.place_overseas_order(order, "US")
+    result = await adapter.place_overseas_order(order, "NASD")
 
     assert result.exchange_order_id == "1234:999"
     assert result.status == OrderStatus.SUBMITTED
@@ -115,7 +115,7 @@ async def test_place_overseas_order_sell_uses_sell_tr_id():
     )
     order = _order(side=OrderSide.SELL)
 
-    await adapter.place_overseas_order(order, "US")
+    await adapter.place_overseas_order(order, "NASD")
 
 
 async def test_cancel_overseas_order_returns_true_on_success():
@@ -131,7 +131,7 @@ async def test_cancel_overseas_order_returns_true_on_success():
         )
     )
     result = await adapter.cancel_overseas_order(
-        "1234:999", "AAPL", "US", original_quantity=Decimal("1")
+        "1234:999", "AAPL", "NASD", original_quantity=Decimal("1")
     )
 
     assert result is True
@@ -157,7 +157,7 @@ async def test_get_overseas_balance_maps_holdings():
             request, {"/uapi/overseas-stock/v1/trading/inquire-balance": handler}
         )
     )
-    balances = await adapter.get_overseas_balance("US")
+    balances = await adapter.get_overseas_balance("NASD")
 
     assert balances[0].asset == "AAPL"
     assert balances[0].total == Decimal("10")
