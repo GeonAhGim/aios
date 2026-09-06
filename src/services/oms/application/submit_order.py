@@ -3,42 +3,36 @@ outbox enqueue, 단일 tx.
 
 Spec: docs/specs/L4_execution_oms_and_exchange_v1.0.md §2-C 표
 `submit_order(cmd, *, pool, profile, registry, pre_submit_gate, clock)->OrderView`,
-§5.2(scope_hash/digest/client_order_id, idempotency.py L4-03 재사용),
-§5.3("전송 전 실패=FAILED, 전송 후 유실=UNKNOWN, 거래소 호출은 DB tx 밖"), §9 L4-09.
+§5.2(idempotency.py L4-03 재사용), §5.3(전송 전 실패=FAILED, 유실=UNKNOWN), §9.
 
-FA-5(L4_ibor_fund_accounting_and_resilience_v1.0.md#FA-5)가 `entity_context:
-EntityContext` 필수 인자를 추가했다 — `resolve_context()`(같은 리프)로 해석한
-값을 그대로 넘긴다. `pre_submit_gate`와 같은 관례로 `None` 명시 전달도 막는다
-(fail-closed). `orders.fund_id`/`portfolio_id`(FA-3, 아직 nullable)를 이
-INSERT부터 채운다 — NOT NULL 승격은 범위 밖(후속 리프).
+FA-5(L4_ibor_fund_accounting_and_resilience_v1.0.md#FA-5)가 `entity_context: EntityContext`
+필수 인자를 추가했다 — `resolve_context()`(같은 리프) 산출값을 그대로 넘긴다.
+`orders.fund_id`/`portfolio_id`(FA-3, 아직 nullable)를 이 INSERT부터 채운다(NOT NULL
+승격은 범위 밖). task-1925(리뷰 REJECT 후속) — 호출자 직접 생성 `entity_context`는 위조
+가능해(같은 tenant_id + 타 테넌트 fund_id) `entity_repo` 필수 인자로 INSERT 직전
+`verify_entity_context()`를 호출해 실소유권을 재확인한다.
 
-실제 거래소 호출은 이 함수가 하지 않는다 — `outbox_dispatcher.py`(L4-14, 이미
-배선됨)가 `order_command_outbox`의 SUBMIT 행을 비동기로 소비해 tx 밖에서
-호출한다(§5.3). 이 함수는 그 행을 만드는 것까지만 책임진다.
+실제 거래소 호출은 이 함수가 하지 않는다 — `outbox_dispatcher.py`(L4-14)가
+`order_command_outbox`의 SUBMIT 행을 비동기 소비해 호출한다(§5.3, 이 함수는 그 행을
+만드는 것까지만 책임진다).
 
-INSERT-먼저(claim이 그 다음) 순서: `order_idempotency.order_id`는 `orders`를
-참조하는 NOT DEFERRABLE FK(073beca589d5)라 claim이 참조할 행이 먼저 있어야
-한다 — §2-C 표의 "멱등 선점→orders INSERT" 프로즈 순서와 다르지만(그 문구는
-개념 순서), 이 리프의 실제 SQL은 FK 제약이 강제하는 순서를 따른다. 경합에서
-진 시도는 자신이 방금 넣은 CREATED 행까지 포함해 tx 전체를 롤백하므로("ok"
-플래그로 커밋/롤백을 명시 제어) 최종적으로 남는 행은 항상 승자 하나뿐이다
-(DoD "동시 50 submit → 1행").
+INSERT-먼저(claim이 그 다음) 순서: `order_idempotency.order_id`는 `orders`를 참조하는
+NOT DEFERRABLE FK(073beca589d5)라 claim이 참조할 행이 먼저 있어야 한다 — §2-C 표의
+"멱등 선점→orders INSERT"는 개념 순서고, 실제 SQL은 FK 제약이 강제하는 순서를 따른다.
+경합에서 진 시도는 방금 넣은 CREATED 행까지 포함해 tx 전체를 롤백하므로("ok" 플래그로
+커밋/롤백 명시 제어) 최종적으로 남는 행은 항상 승자 하나뿐이다(DoD "동시 50 submit → 1행").
 
-`client_order_id`는 `scope`의 결정론적 함수(domain/idempotency.py L4-03)라
-같은 의도의 동시 요청은 모두 같은 값을 계산한다 — `orders.client_order_id`
-UNIQUE 제약(210cc26533c7)이 진짜 동시성 관문이고, `order_idempotency.
-scope_hash` 선점은 그 뒤를 잇는 digest 비교용이다(client_order_id 충돌
-없이 scope_hash만 충돌하는 경로는 없다, 둘 다 같은 `scope`의 함수이므로).
-패자는 `UniqueViolationError`를 받는데, Postgres UNIQUE는 충돌 행이
-**커밋된 뒤에만** 확정 에러를 내므로(그 전엔 잠기고 대기) 이 예외를 보는
-시점엔 승자의 tx(orders·order_idempotency·outbox 전부)가 이미 커밋
-완료돼 있다 — 패자는 자기 tx를 롤백하고 새 tx로 승자 행을 조회해 반환한다.
+`client_order_id`는 `scope`의 결정론적 함수(domain/idempotency.py L4-03)라 같은 의도의
+동시 요청은 모두 같은 값을 계산한다 — `orders.client_order_id` UNIQUE 제약(210cc26533c7)이
+진짜 동시성 관문이고, `order_idempotency.scope_hash` 선점은 digest 비교용이다(둘 다 같은
+`scope`의 함수라 client_order_id 충돌 없이 scope_hash만 충돌하는 경로는 없다). 패자는
+`UniqueViolationError`를 받는데, Postgres UNIQUE는 충돌 행이 **커밋된 뒤에만** 확정
+에러를 내므로 이 시점엔 승자 tx가 이미 커밋 완료돼 있다 — 패자는 자기 tx를 롤백하고
+새 tx로 승자 행을 조회해 반환한다.
 
-게이트는 claim이 NEW를 반환했을 때만(§2-C "EXISTING이면 기존 OrderView
-반환" — 재실행은 게이트를 다시 타지 않는다) INSERT 직후·VALIDATED 전이 직전에
-평가한다(§2-C 프로즈 순서 그대로). DENY면 커밋하지 않고 tx를 롤백한다(0행) —
-`outbox_dispatcher._send_submit`이 이미 같은 패턴(conn을 쥔 채 게이트 호출)을
-쓰고 있어(L4-14, 병합됨) 이 리프도 그 관례를 따른다.
+게이트는 claim이 NEW를 반환했을 때만(§2-C "EXISTING이면 기존 OrderView 반환") INSERT
+직후·VALIDATED 전이 직전에 평가한다. DENY면 커밋하지 않고 tx를 롤백한다(0행) —
+`outbox_dispatcher._send_submit`과 같은 패턴(L4-14).
 """
 from __future__ import annotations
 
@@ -52,7 +46,11 @@ import asyncpg
 
 from src.data.models.base import Currency, Money
 from src.data.models.trading import Order, OrderStatus
-from src.foundation.entities.application.resolve_context import EntityContextResolutionError
+from src.foundation.entities.application.resolve_context import (
+    EntityContextResolutionError,
+    EntityRepository,
+    verify_entity_context,
+)
 from src.foundation.entities.contracts.v1 import EntityContext
 from src.services.oms.adapters.idempotency_repository import IdempotencyRepository
 from src.services.oms.adapters.order_repository import PostgresOrderRepository
@@ -102,10 +100,9 @@ class OrderSubmitDeniedError(Exception):
 
 
 def _venue_order(cmd: SubmitOrderCommand, *, order_id: UUID, client_id: str, venue: str) -> Order:
-    """outbox SUBMIT payload(§2-C "order" 키) — `outbox_writes.order_from_payload`가
-    `order_id`/`client_order_id` 일치만 검증하므로 나머지 필드는 어댑터 호출용
-    실값이면 된다. 통화는 Phase 1 관례대로 USDT 고정(order_service/repository.py
-    동일 편차)."""
+    """outbox SUBMIT payload(§2-C "order" 키) — `order_from_payload`가 order_id/
+    client_order_id 일치만 검증하므로 나머지 필드는 어댑터 호출용 실값이면 된다.
+    통화는 Phase 1 관례대로 USDT 고정(order_service/repository.py 동일 편차)."""
     price = Money(amount=cmd.price, currency=Currency.USDT) if cmd.price is not None else None
     return Order(
         order_id=order_id,
@@ -140,6 +137,7 @@ async def submit_order(
     registry: SymbolRegistry,
     pre_submit_gate: PreSubmitGate,
     entity_context: EntityContext,
+    entity_repo: EntityRepository,
     clock: Clock = utcnow,
 ) -> OrderView:
     if entity_context is None:  # 정적 검사 우회(런타임 None 주입) 방어, FA-5
@@ -153,6 +151,9 @@ async def submit_order(
         )
     if pre_submit_gate is None:  # 정적 검사 우회(런타임 None 주입) 방어, I-01
         raise TypeError("pre_submit_gate는 필수입니다(I-01) — None을 명시적으로 넘길 수 없습니다.")
+    if entity_repo is None:  # 정적 검사 우회 방어, task-1925
+        raise EntityContextResolutionError("entity_repo는 필수입니다(task-1925).")
+    await verify_entity_context(entity_repo, entity_context)  # task-1925: 위조 EntityContext 방어
     assert_supported(profile, cmd)
     venue_symbol = registry.to_venue(cmd.symbol, profile.venue)
     client_id = derive_client_order_id(
@@ -205,9 +206,8 @@ async def submit_order(
                     ttl=DEFAULT_IDEMPOTENCY_TTL,
                 )
                 if claim.kind == "EXISTING":
-                    # 방어적 분기 — client_order_id가 결정론적으로 scope의 함수라 이
-                    # 시점에 도달하려면 이미 위 INSERT에서 UniqueViolationError로
-                    # 걸러졌어야 한다(정상 운영에서는 도달 불가).
+                    # 방어적 분기 — client_order_id가 scope의 결정론 함수라 여기 도달하려면
+                    # 이미 위 INSERT에서 UniqueViolationError로 걸러졌어야 한다(정상 도달 불가).
                     result = await _orders.find_by_scope_hash(conn, scope_hash_val)
                     if result is None:
                         raise RuntimeError(

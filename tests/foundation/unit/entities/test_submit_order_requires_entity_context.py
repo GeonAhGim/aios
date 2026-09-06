@@ -68,6 +68,7 @@ async def test_submit_order_rejects_missing_entity_context_without_touching_adap
             registry=None,  # type: ignore[arg-type]
             pre_submit_gate=_allow_gate,
             entity_context=None,  # type: ignore[arg-type]
+            entity_repo=None,  # type: ignore[arg-type]
         )
 
     assert pool.acquire_calls == 0

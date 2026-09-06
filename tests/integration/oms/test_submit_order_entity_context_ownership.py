@@ -1,47 +1,33 @@
-"""L4-09 적대적 테스트 — `application/submit_order.py`.
+"""task-1925(FA-5 리뷰 REJECT 후속) `application/submit_order.py` 실소유권
+재검증 통합테스트 — 실 TEST_DATABASE_URL.
 
-Spec: docs/specs/L4_execution_oms_and_exchange_v1.0.md §9 L4-09 DoD
-"동시 50 submit → 1행(adversarial)". 절대 지연(sleep 시간) 단언은 하지
-않는다 — 구조(행 수) 단언과 print만(TESTING.md 관례).
+리뷰어가 실DB로 재현한 결함: `entity_context.tenant_id`만 `cmd.scope.tenant_id`와
+비교하고 fund_id 등의 실소유권은 확인하지 않아, 같은 tenant_id에 타 테넌트
+fund_id를 담은 위조 `EntityContext`를 넘기면 orders 1행이 그 fund_id로 실제
+생성됐다. `verify_entity_context()`(resolve_context.py) 배선 이후 DoD:
+(a) 위조 EntityContext(같은 tenant_id + 타 테넌트 fund_id) 거부 + orders 0행,
+(b) 폐쇄된 fund를 담은 컨텍스트도 같은 예외로 거부,
+(c) 정상 경로에서 orders.fund_id/portfolio_id == entity_context 산출값.
 """
 from __future__ import annotations
 
-import asyncio
 import json
-import os
 import uuid
 from datetime import datetime, timezone
 from decimal import Decimal
 
-import asyncpg
 import pytest
 
 from src.data.models.base import AssetClass
 from src.data.models.trading import OrderSide, OrderType
 from src.foundation.entities.adapters.postgres_repository import PostgresEntityRepository
-from src.services.oms.application.submit_order import OrderSubmitDeniedError, submit_order
+from src.foundation.entities.application.resolve_context import EntityContextResolutionError
+from src.services.oms.application.submit_order import submit_order
 from src.services.oms.contracts.v1_commands import OrderIdempotencyScope, SubmitOrderCommand
 from src.services.oms.domain.symbol_registry import SymbolRegistry
 from src.services.oms.domain.venue_profile import TimeoutBudget, VenueCapabilityProfile
 from src.services.order_service.gate import GateDecision, GateOutcome, OrderContext
 from tests.integration.oms.conftest import create_test_tenant, seed_entity_context
-
-_CONCURRENCY = 50
-
-
-def _asyncpg_dsn() -> str:
-    return os.environ["DATABASE_URL"].replace("postgresql+asyncpg://", "postgresql://")
-
-
-@pytest.fixture
-async def pool():
-    # I-01/50동시 시나리오는 승자 1명만 게이트를 위해 2번째 커넥션을 잠깐
-    # 더 쥔다(submit_order.py 모듈 docstring) — 나머지 49는 EXISTING이라
-    # 커넥션 1개만 쓴다. 여유있게 min/max를 잡아 풀 경합 자체가 결과를
-    # 흔들지 않게 한다.
-    p = await asyncpg.create_pool(_asyncpg_dsn(), min_size=4, max_size=_CONCURRENCY + 10)
-    yield p
-    await p.close()
 
 
 def _profile(**overrides: object) -> VenueCapabilityProfile:
@@ -81,8 +67,8 @@ def _registry() -> SymbolRegistry:
     return reg
 
 
-async def _create_running_execution(pool: asyncpg.Pool, user_id: uuid.UUID) -> int:
-    strategy_id = f"oms-adv-test-{uuid.uuid4().hex[:8]}"
+async def _create_running_execution(pool, user_id: uuid.UUID) -> int:
+    strategy_id = f"oms-ownership-test-{uuid.uuid4().hex[:8]}"
     async with pool.acquire() as conn:
         await conn.execute(
             """
@@ -125,80 +111,74 @@ async def _allow_gate(context: OrderContext) -> GateDecision:
     return GateDecision(outcome=GateOutcome.ALLOW)
 
 
-async def _kill_switch_gate(context: OrderContext) -> GateDecision:
-    return GateDecision(outcome=GateOutcome.DENY, reason_codes=("RISK_KILL_SWITCH_ACTIVE_GLOBAL",))
+async def test_submit_order_rejects_forged_entity_context_cross_tenant_fund(pool):
+    """DoD(a) — 같은 tenant_id에 타 테넌트 소유 fund_id를 담은 위조
+    EntityContext는 거부되고, 그 fund_id로 orders 행이 생기지 않는다. 이
+    단언이 `verify_entity_context()` 호출 배선을 지운 회귀에서 FAIL한다."""
+    tenant_a = await create_test_tenant(pool)
+    execution_id = await _create_running_execution(pool, tenant_a)
+    cmd = _command(tenant_a, execution_id)
+    context_a = await seed_entity_context(pool, tenant_a)
 
+    tenant_b = await create_test_tenant(pool)
+    context_b = await seed_entity_context(pool, tenant_b)
 
-async def test_50_concurrent_same_intent_submits_produce_exactly_one_row(pool):
-    """DoD — 같은 의도(scope_hash)로 50개 동시 submit → orders 1행·outbox 1행."""
-    user_id = await create_test_tenant(pool)
-    execution_id = await _create_running_execution(pool, user_id)
-    cmd = _command(user_id, execution_id)
-    entity_context = await seed_entity_context(pool, user_id)
-
+    forged = context_a.model_copy(update={"fund_id": context_b.fund_id})
     entity_repo = PostgresEntityRepository(pool)
-    results = await asyncio.gather(
-        *[
-            submit_order(
-                cmd, pool=pool, profile=_profile(), registry=_registry(),
-                pre_submit_gate=_allow_gate, entity_context=entity_context,
-                entity_repo=entity_repo,
-            )
-            for _ in range(_CONCURRENCY)
-        ]
+
+    with pytest.raises(EntityContextResolutionError):
+        await submit_order(
+            cmd, pool=pool, profile=_profile(), registry=_registry(),
+            pre_submit_gate=_allow_gate, entity_context=forged, entity_repo=entity_repo,
+        )
+
+    async with pool.acquire() as conn:
+        order_count = await conn.fetchval(
+            "SELECT count(*) FROM orders WHERE fund_id = $1", context_b.fund_id
+        )
+    assert order_count == 0
+
+
+async def test_submit_order_rejects_closed_fund_in_entity_context(pool):
+    """DoD(b) — entity_context가 가리키는 fund가 폐쇄됐으면(자기 테넌트
+    소유라도) 같은 예외로 거부된다."""
+    tenant_id = await create_test_tenant(pool)
+    execution_id = await _create_running_execution(pool, tenant_id)
+    cmd = _command(tenant_id, execution_id)
+    context = await seed_entity_context(pool, tenant_id)
+    entity_repo = PostgresEntityRepository(pool)
+    await entity_repo.close_fund(tenant_id, context.fund_id, closed_at=datetime.now(timezone.utc))
+
+    with pytest.raises(EntityContextResolutionError):
+        await submit_order(
+            cmd, pool=pool, profile=_profile(), registry=_registry(),
+            pre_submit_gate=_allow_gate, entity_context=context, entity_repo=entity_repo,
+        )
+
+    async with pool.acquire() as conn:
+        order_count = await conn.fetchval(
+            "SELECT count(*) FROM orders WHERE execution_id = $1", execution_id
+        )
+    assert order_count == 0
+
+
+async def test_submit_order_persists_entity_context_fund_and_portfolio_ids(pool):
+    """DoD(c) — 정상 경로에서 orders.fund_id/portfolio_id가 entity_context
+    산출값과 정확히 같다."""
+    tenant_id = await create_test_tenant(pool)
+    execution_id = await _create_running_execution(pool, tenant_id)
+    cmd = _command(tenant_id, execution_id)
+    context = await seed_entity_context(pool, tenant_id)
+    entity_repo = PostgresEntityRepository(pool)
+
+    result = await submit_order(
+        cmd, pool=pool, profile=_profile(), registry=_registry(),
+        pre_submit_gate=_allow_gate, entity_context=context, entity_repo=entity_repo,
     )
 
-    order_ids = {r.order_id for r in results}
-    print(f"submit_order concurrent={_CONCURRENCY} distinct_order_ids={len(order_ids)}")
-    assert len(order_ids) == 1
     async with pool.acquire() as conn:
-        order_count = await conn.fetchval(
-            "SELECT count(*) FROM orders WHERE execution_id = $1", execution_id
+        order_row = await conn.fetchrow(
+            "SELECT fund_id, portfolio_id FROM orders WHERE order_id = $1", result.order_id
         )
-        outbox_count = await conn.fetchval(
-            "SELECT count(*) FROM order_command_outbox WHERE order_id = $1", order_ids.pop()
-        )
-    assert order_count == 1
-    assert outbox_count == 1
-
-
-async def test_gate_none_is_fail_closed_type_error(pool):
-    """I-01 — `pre_submit_gate=None`을 명시적으로 넘기면 TypeError, 0행."""
-    user_id = await create_test_tenant(pool)
-    execution_id = await _create_running_execution(pool, user_id)
-    cmd = _command(user_id, execution_id)
-    entity_context = await seed_entity_context(pool, user_id)
-
-    with pytest.raises(TypeError):
-        await submit_order(
-            cmd, pool=pool, profile=_profile(), registry=_registry(),
-            pre_submit_gate=None,  # type: ignore[arg-type]
-            entity_context=entity_context, entity_repo=PostgresEntityRepository(pool),
-        )
-
-    async with pool.acquire() as conn:
-        order_count = await conn.fetchval(
-            "SELECT count(*) FROM orders WHERE execution_id = $1", execution_id
-        )
-    assert order_count == 0
-
-
-async def test_kill_switch_active_denies_with_zero_rows(pool):
-    """I-02 — kill switch(항상 DENY하는 게이트) 활성 시 0행."""
-    user_id = await create_test_tenant(pool)
-    execution_id = await _create_running_execution(pool, user_id)
-    cmd = _command(user_id, execution_id)
-    entity_context = await seed_entity_context(pool, user_id)
-
-    with pytest.raises(OrderSubmitDeniedError):
-        await submit_order(
-            cmd, pool=pool, profile=_profile(), registry=_registry(),
-            pre_submit_gate=_kill_switch_gate, entity_context=entity_context,
-            entity_repo=PostgresEntityRepository(pool),
-        )
-
-    async with pool.acquire() as conn:
-        order_count = await conn.fetchval(
-            "SELECT count(*) FROM orders WHERE execution_id = $1", execution_id
-        )
-    assert order_count == 0
+    assert order_row["fund_id"] == context.fund_id
+    assert order_row["portfolio_id"] == context.portfolio_id

@@ -15,6 +15,7 @@ import pytest
 
 from src.data.models.base import AssetClass
 from src.data.models.trading import OrderSide, OrderStatus, OrderType
+from src.foundation.entities.adapters.postgres_repository import PostgresEntityRepository
 from src.services.oms.application.submit_order import OrderSubmitDeniedError, submit_order
 from src.services.oms.contracts.v1_commands import OrderIdempotencyScope, SubmitOrderCommand
 from src.services.oms.domain.errors import IdempotencyDigestMismatchError, UnknownSymbolError
@@ -125,7 +126,7 @@ async def test_submit_order_new_creates_validated_row_and_enqueues_outbox(pool):
 
     result = await submit_order(
         cmd, pool=pool, profile=_profile(), registry=_registry(), pre_submit_gate=_allow_gate,
-        entity_context=entity_context,
+        entity_context=entity_context, entity_repo=PostgresEntityRepository(pool),
     )
 
     assert result.status == OrderStatus.VALIDATED
@@ -156,11 +157,11 @@ async def test_submit_order_existing_replay_returns_same_order_no_extra_row(pool
 
     first = await submit_order(
         cmd, pool=pool, profile=_profile(), registry=_registry(), pre_submit_gate=_allow_gate,
-        entity_context=entity_context,
+        entity_context=entity_context, entity_repo=PostgresEntityRepository(pool),
     )
     second = await submit_order(
         cmd, pool=pool, profile=_profile(), registry=_registry(), pre_submit_gate=_allow_gate,
-        entity_context=entity_context,
+        entity_context=entity_context, entity_repo=PostgresEntityRepository(pool),
     )
 
     assert first.order_id == second.order_id
@@ -186,7 +187,7 @@ async def test_submit_order_gate_deny_leaves_zero_rows(pool):
     with pytest.raises(OrderSubmitDeniedError):
         await submit_order(
             cmd, pool=pool, profile=_profile(), registry=_registry(), pre_submit_gate=_deny_gate,
-            entity_context=entity_context,
+            entity_context=entity_context, entity_repo=PostgresEntityRepository(pool),
         )
 
     async with pool.acquire() as conn:
@@ -211,14 +212,14 @@ async def test_submit_order_digest_mismatch_raises_and_rolls_back(pool):
     entity_context = await seed_entity_context(pool, user_id)
     await submit_order(
         cmd1, pool=pool, profile=_profile(), registry=_registry(), pre_submit_gate=_allow_gate,
-        entity_context=entity_context,
+        entity_context=entity_context, entity_repo=PostgresEntityRepository(pool),
     )
     cmd2 = cmd1.model_copy(update={"command_id": uuid.uuid4(), "quantity": Decimal("0.02")})
 
     with pytest.raises(IdempotencyDigestMismatchError):
         await submit_order(
             cmd2, pool=pool, profile=_profile(), registry=_registry(), pre_submit_gate=_allow_gate,
-            entity_context=entity_context,
+            entity_context=entity_context, entity_repo=PostgresEntityRepository(pool),
         )
 
     async with pool.acquire() as conn:
@@ -239,7 +240,7 @@ async def test_submit_order_unknown_symbol_writes_nothing(pool):
     with pytest.raises(UnknownSymbolError):
         await submit_order(
             cmd, pool=pool, profile=_profile(), registry=_registry(), pre_submit_gate=_allow_gate,
-            entity_context=entity_context,
+            entity_context=entity_context, entity_repo=PostgresEntityRepository(pool),
         )
 
     async with pool.acquire() as conn:
