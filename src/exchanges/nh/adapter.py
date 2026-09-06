@@ -23,7 +23,6 @@ KIS와 마찬가지로 모든 계좌 관련 API가 `act_no`(계좌번호)를 요
 """
 from __future__ import annotations
 
-import time
 from decimal import Decimal
 from typing import Any
 
@@ -32,6 +31,7 @@ import httpx
 from src.core.exceptions import FatalExchangeError, RetryableExchangeError
 from src.data.models.base import AssetClass
 from src.exchanges.common.adapter import ExchangeAdapter
+from src.exchanges.common.oauth_http import MonotonicTokenCache, send_or_raise_retryable
 from src.exchanges.common.types import ExchangeCapability, MarketHours
 from src.exchanges.nh.account_mixin import NHAccountMixin
 from src.exchanges.nh.market_data_mixin import NHMarketDataMixin
@@ -65,12 +65,12 @@ class _NHHTTPClient:
         self._is_paper_trading = is_paper_trading
         base_url = PAPER_BASE_URL if is_paper_trading else REAL_BASE_URL
         self._client = http_client or httpx.AsyncClient(base_url=base_url, timeout=10.0)
-        self._access_token: str | None = None
-        self._token_expires_at: float = 0.0
+        self._token_cache = MonotonicTokenCache()
 
     async def _ensure_token(self) -> str:
-        if self._access_token is not None and time.monotonic() < self._token_expires_at:
-            return self._access_token
+        cached = self._token_cache.get()
+        if cached is not None:
+            return cached
 
         response = await self._client.post(
             "/oauth2/token",
@@ -86,11 +86,11 @@ class _NHHTTPClient:
             raise FatalExchangeError(f"NH 토큰 발급 실패: {response.status_code} {response.text}")
 
         data = response.json()
-        self._access_token = data["access_token"]
+        token: str = data["access_token"]
         expires_in = int(data.get("expires_in", 86400))
         # 만료 직전 재사용을 피하려 60초 여유를 둔다(문서화된 안전 마진).
-        self._token_expires_at = time.monotonic() + max(expires_in - 60, 0)
-        return self._access_token
+        self._token_cache.set(token, max(expires_in - 60, 0))
+        return token
 
     async def _headers(self) -> dict[str, str]:
         token = await self._ensure_token()
@@ -110,12 +110,9 @@ class _NHHTTPClient:
         body: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         headers = await self._headers()
-        try:
-            response = await self._client.request(
-                method, path, params=params, json=body, headers=headers
-            )
-        except httpx.TransportError as exc:
-            raise RetryableExchangeError(f"NH 요청 전송 실패: {exc}") from exc
+        response = await send_or_raise_retryable(
+            self._client, method, path, venue="NH", params=params, body=body, headers=headers
+        )
 
         try:
             data: dict[str, Any] = response.json()
