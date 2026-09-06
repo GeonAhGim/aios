@@ -5,7 +5,7 @@ app.router.lifespan_context로 main.py의 lifespan(asyncpg pool 생성)을
 그대로 태운다.
 """
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import asyncpg
@@ -225,8 +225,12 @@ async def test_mfa_resetup_without_password_rejected_when_already_enabled(client
 
 
 async def test_mfa_resetup_with_correct_password_succeeds(client):
-    import pyotp
-
+    """esc-ci-67bd83edb539 — 옛 코드는 초기 setup/verify 코드를
+    `pyotp...now()`(실시간)로 만들어 서버 실시간과 비교했다.
+    test_mfa_resetup_without_password_rejected_when_already_enabled에서
+    이미 잡은 것과 같은 30초 구간 경계 레이스(esc-ci-cbb8b9c62497)가 이
+    테스트에는 반영되지 않아 드물게 재현됐다 — mfa_clock_frozen으로 두
+    구간 모두 결정론화한다."""
     email = _unique_email()
     register_response = await client.post(
         "/auth/register", json={"email": email, "password": STRONG_PASSWORD}
@@ -234,15 +238,18 @@ async def test_mfa_resetup_with_correct_password_succeeds(client):
     token = register_response.json()["data"]["access_token"]
     headers = {"Authorization": f"Bearer {token}"}
 
-    setup_response = await client.post("/auth/mfa/setup", headers=headers)
-    old_secret = setup_response.json()["data"]["secret"]
-    code = pyotp.totp.TOTP(old_secret).now()
-    await client.post("/auth/mfa/verify", json={"totp_code": code}, headers=headers)
+    frozen_now = datetime.now(timezone.utc)
+    with mfa_clock_frozen(app, frozen_now):
+        setup_response = await client.post("/auth/mfa/setup", headers=headers)
+        old_secret = setup_response.json()["data"]["secret"]
+        code = totp_at(old_secret, frozen_now)
+        await client.post("/auth/mfa/verify", json={"totp_code": code}, headers=headers)
 
     # docs/RED_TEAM_FINDINGS.md #13 반영 — 위 verify()가 이미 이 구간의
     # 코드를 소비했으므로 재인증용 코드는 다음 구간에서 새로 받아야 한다.
-    with mfa_clock_shifted(app, 31) as shifted_now:
-        reauth_code = totp_at(old_secret, shifted_now())
+    reauth_now = frozen_now + timedelta(seconds=31)
+    with mfa_clock_frozen(app, reauth_now):
+        reauth_code = totp_at(old_secret, reauth_now)
         resetup_response = await client.post(
             "/auth/mfa/setup",
             json={"password": STRONG_PASSWORD, "totp_code": reauth_code},
