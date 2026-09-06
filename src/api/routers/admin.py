@@ -15,7 +15,7 @@ from __future__ import annotations
 from uuid import UUID
 
 import asyncpg
-from fastapi import APIRouter, Depends, Header, status
+from fastapi import APIRouter, Depends, status
 
 from src.api.admin_deps import (
     get_audit_log_read_service,
@@ -25,6 +25,7 @@ from src.api.admin_deps import (
     get_verification_queue_service,
 )
 from src.api.contracts.envelope import ApiResponse, ok
+from src.api.contracts.idempotency import IdempotencyScope, require_idempotency_key, run_idempotent
 from src.api.deps import get_current_admin, get_current_verifier, get_pool
 from src.api.marketplace_deps import get_listing_service
 from src.api.schemas.admin import (
@@ -41,6 +42,7 @@ from src.api.schemas.marketplace import (
 )
 from src.api.service_deps import get_wallet_service
 from src.core.approval.service import ApprovalRequest, approve, list_pending, reject
+from src.core.db.conditional_write import ConcurrencyConflictError
 from src.services.audit_log_read_service import AuditLogPage, AuditLogReadService
 from src.services.auth_service import User
 from src.services.dispute_resolution_service import (
@@ -169,12 +171,29 @@ async def list_pending_topups(
 @router.post("/wallet/topups/{topup_id}/confirm")
 async def confirm_topup(
     topup_id: int,
-    idempotency_key: str = Header(..., alias="Idempotency-Key"),
+    scope: IdempotencyScope = Depends(require_idempotency_key),
     admin: User = Depends(get_current_admin),
+    pool: asyncpg.Pool = Depends(get_pool),
     service: WalletService = Depends(get_wallet_service),
 ) -> ApiResponse[WalletTopupConfirmResult]:
-    result = await service.confirm_topup(topup_id, admin.user_id, idempotency_key=idempotency_key)
-    return ok(result)
+    """전수감사(2026-09-06 P0-F, task-1719) 반영 — 예전에는 원시
+    `Idempotency-Key` 헤더 문자열을 그대로 `confirm_topup`에 넘길 뿐, I-03
+    4중 스코프·digest 대조를 강제하지 않았다(DB `status='PENDING'` 조건부
+    UPDATE만이 실질적 중복방지였다). 이제 marketplace 구매 라우터와 같은
+    `require_idempotency_key`/`run_idempotent` 경로를 강제한다."""
+
+    async def compute() -> tuple[int, dict[str, object]]:
+        result = await service.confirm_topup(
+            topup_id, admin.user_id, idempotency_key=scope.header_key
+        )
+        return status.HTTP_200_OK, result.model_dump(mode="json")
+
+    status_code, response_body = await run_idempotent(pool, scope, compute)
+    if status_code != status.HTTP_200_OK:
+        raise ConcurrencyConflictError(
+            str(response_body.get("detail", "동시 처리 충돌이 발생했습니다."))
+        )
+    return ok(WalletTopupConfirmResult(**response_body))
 
 
 @router.post("/marketplace/platform-listings", status_code=status.HTTP_201_CREATED)

@@ -408,3 +408,32 @@ async def test_failed_purchase_is_not_cached_under_idempotency_key(client, pool)
     assert replayed.status_code == 201
     assert replayed.json()["purchase_id"] == retried.json()["purchase_id"]
     assert await _wallet_balance(pool, buyer_id) == Decimal("0")
+
+
+async def test_purchase_same_key_different_body_returns_409(client, pool):
+    """P0-F(I-03, task-1719) DoD — 같은 Idempotency-Key로 다른 요청 본문이
+    재전송되면 두 번째는 처리되지 않고 409 INTEGRITY_IDEMPOTENCY_CONFLICT다
+    (src/api/contracts/idempotency.py의 digest 대조, require_idempotency_key
+    /run_idempotent 경로로 이관된 뒤의 회귀 방지)."""
+    _, seller_headers, seller_id = await _register(client)
+    _, buyer_headers, buyer_id = await _register(client)
+    await _set_risk_profile(pool, buyer_id)
+    await _fund_wallet(pool, buyer_id, Decimal("10.00"))
+    listing_id = await _listed_listing_via_api(client, pool, seller_headers, seller_id)
+
+    key = f"conflict-{uuid.uuid4().hex}"
+    headers = {**buyer_headers, "Idempotency-Key": key}
+    url = f"/marketplace/listings/{listing_id}/purchase"
+
+    first = await client.post(url, json={"risk_warning_acknowledged": False}, headers=headers)
+    second = await client.post(url, json={"risk_warning_acknowledged": True}, headers=headers)
+
+    assert first.status_code == 201
+    assert second.status_code == 409
+    assert second.json()["error_code"] == "INTEGRITY_IDEMPOTENCY_CONFLICT"
+    async with pool.acquire() as conn:
+        count = await conn.fetchval(
+            "SELECT COUNT(*) FROM strategy_purchases WHERE buyer_user_id = $1",
+            uuid.UUID(buyer_id),
+        )
+    assert count == 1

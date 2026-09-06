@@ -35,6 +35,7 @@ from zoneinfo import ZoneInfo
 
 import asyncpg
 
+from src.core.idempotency import purge_expired
 from src.core.observability.metrics_registry import MetricsRegistry
 from src.data.models.base import Currency
 from src.foundation.ledger.application.payouts import DEFAULT_SETTLEMENT_WINDOW, schedule_payouts
@@ -99,7 +100,20 @@ class LedgerIntegrityScheduler:
 
     async def run_once(self) -> IntegrityReport:
         """검증 한 주기. 위반이면 CRITICAL 로그 — 실제 동결·감사는
-        `verify_ledger_integrity` 자신이 같은 트랜잭션에서 이미 처리했다."""
+        `verify_ledger_integrity` 자신이 같은 트랜잭션에서 이미 처리했다.
+
+        전수감사(2026-09-06 P0-F I-03, task-1719) 반영 — `idempotency_keys`
+        만료 행 정리(`purge_expired`, core/idempotency.py)를 운영에서 호출하는
+        곳이 없어 무한 증가했다. 이미 5분 주기로 도는 이 루프에 얹는다.
+        정리 실패가 무결성 검증 자체를 막지 않도록 별도로 감싼다(이 루프의
+        "한 주기 실패가 루프를 죽이지 않는다" 설계와 같은 이유)."""
+        try:
+            purged = await purge_expired(self._pool)
+            if purged:
+                logger.info("idempotency_keys: 만료된 %d건 정리 완료", purged)
+        except Exception:
+            logger.exception("idempotency_keys: 만료 정리 실패 — 다음 주기에 재시도")
+
         report = await verify_ledger_integrity(
             journal=self._journal,
             balances=self._balances,

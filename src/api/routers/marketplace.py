@@ -3,8 +3,10 @@
 Spec: 기능설계문서_v1.20.md#FD-13.1~FD-13.10, 16_backend_signatures.md
 
 구매(purchase)는 15번 §15.1 Idempotency-Key 원칙 적용 대상(금전 관련
-POST) — src/core/idempotency.py로 동일 키 재요청 시 중복 구매를
-만들지 않는다.
+POST) — I-03 4중 스코프(route+tenant_id+subject_id+header_key) +
+digest 대조를 강제하는 src/api/contracts/idempotency.py
+(require_idempotency_key/run_idempotent)로 동일 키 재요청 시 중복
+구매를 만들지 않는다(전수감사 2026-09-06 P0-F, task-1719).
 
 PLT-18 — raw `HTTPException` raise를 전부 도메인 예외로 이관했다(§9
 PLT-17~21). 도메인 예외 → ErrorCode 매핑은 src/api/contracts/
@@ -24,8 +26,9 @@ from __future__ import annotations
 from decimal import Decimal
 
 import asyncpg
-from fastapi import APIRouter, Depends, Header, status
+from fastapi import APIRouter, Depends, status
 
+from src.api.contracts.idempotency import IdempotencyScope, require_idempotency_key, run_idempotent
 from src.api.deps import get_current_user, get_current_verifier, get_pool
 from src.api.marketplace_deps import (
     get_dispute_service,
@@ -53,7 +56,6 @@ from src.api.schemas.marketplace import (
     to_review_response,
 )
 from src.core.db.conditional_write import ConcurrencyConflictError
-from src.core.idempotency import with_idempotency
 from src.services.auth_service import User
 from src.services.dispute_service import DisputeService
 from src.services.listing_search_service import ListingSearchService
@@ -135,17 +137,17 @@ async def verify_listing(
 async def purchase_listing(
     listing_id: int,
     body: PurchaseCreateRequest,
-    idempotency_key: str = Header(..., alias="Idempotency-Key"),
+    scope: IdempotencyScope = Depends(require_idempotency_key),
     user: User = Depends(get_current_user),
     pool: asyncpg.Pool = Depends(get_pool),
     service: PurchaseService = Depends(get_purchase_service),
 ) -> PurchaseResponse:
     async def compute() -> tuple[int, dict[str, object]]:
         # PurchaseError/InsufficientWalletBalanceError는 여기서 잡지 않고
-        # 그대로 던진다 — with_idempotency는 compute()가 예외를 던지면
-        # 선점 행을 지우고(캐시하지 않음) 그대로 재전파하므로(core/idempotency.py
-        # docstring), 전역 핸들러가 도메인 예외를 봉투로 변환하는 경로와
-        # 자연히 합쳐진다.
+        # 그대로 던진다 — run_idempotent(→with_idempotency)는 compute()가
+        # 예외를 던지면 선점 행을 지우고(캐시하지 않음) 그대로 재전파하므로
+        # (core/idempotency.py docstring), 전역 핸들러가 도메인 예외를
+        # 봉투로 변환하는 경로와 자연히 합쳐진다.
         result = await service.purchase(
             user.user_id,
             listing_id,
@@ -153,12 +155,10 @@ async def purchase_listing(
         )
         return status.HTTP_201_CREATED, to_purchase_response(result).model_dump(mode="json")
 
-    # 전수감사(docs/FULL_AUDIT_2026-09-02.md §2) 반영 — 키에 사용자 ID를 넣어
-    # 스코프를 사용자 단위로 고정한다. 헤더값만으로 키를 만들면 다른 사용자가
-    # 같은 값을 보냈을 때 남의 구매 응답(purchase_id·정산액)을 그대로 돌려받는다.
-    status_code, response_body = await with_idempotency(
-        pool, f"purchase:{user.user_id}:{idempotency_key}", compute
-    )
+    # I-03 4중 스코프(route+tenant_id+subject_id+header_key) + digest 대조는
+    # scope(require_idempotency_key)가 이미 다 계산해 왔다 — 여기서는
+    # storage_key를 다시 조립하지 않는다(전수감사 2026-09-06 P0-F).
+    status_code, response_body = await run_idempotent(pool, scope, compute)
     if status_code != status.HTTP_201_CREATED:
         # compute()는 이제 성공(201) 외에는 예외로만 실패하므로, 여기 남는
         # 유일한 경로는 with_idempotency 자체가 만드는 409(동시 처리 중) —

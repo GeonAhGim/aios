@@ -397,6 +397,32 @@ async def test_admin_can_view_and_confirm_pending_wallet_topup(client, pool):
     assert Decimal(str(confirm_body["balance_after"])) == Decimal("30000")
 
 
+async def test_confirm_topup_same_key_different_body_returns_409(client, pool):
+    """P0-F(I-03, task-1719) DoD — /admin/wallet/topups/{id}/confirm도
+    marketplace 구매와 동일하게 require_idempotency_key/run_idempotent로
+    이관됐다 — 같은 Idempotency-Key로 다른 요청 본문이 재전송되면 409
+    INTEGRITY_IDEMPOTENCY_CONFLICT다."""
+    admin_headers, admin_id = await _register(client)
+    await _make_admin(pool, admin_id)
+    user_headers, _ = await _register(client)
+
+    topup_response = await client.post(
+        "/wallet/topup-requests", json={"amount": "30000"}, headers=user_headers
+    )
+    topup_id = topup_response.json()["id"]
+
+    key = f"conflict-{uuid.uuid4().hex}"
+    headers = {**admin_headers, "Idempotency-Key": key}
+    url = f"/admin/wallet/topups/{topup_id}/confirm"
+
+    first = await client.post(url, json={}, headers=headers)
+    second = await client.post(url, json={"note": "different-body"}, headers=headers)
+
+    assert first.status_code == 200
+    assert second.status_code == 409
+    assert second.json()["error_code"] == "INTEGRITY_IDEMPOTENCY_CONFLICT"
+
+
 async def test_admin_can_create_platform_listing(client, pool):
     admin_headers, admin_id = await _register(client)
     await _make_admin(pool, admin_id)
