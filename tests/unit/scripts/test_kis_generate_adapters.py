@@ -128,6 +128,38 @@ def test_render_rest_method_post_uses_body_kwarg() -> None:
     assert "params=params or {}" not in text
 
 
+def test_is_order_method_true_for_post_false_for_get_and_ws() -> None:
+    """review:1971 REJECT 후속(task-1975) — 주문성 판정은 method=POST 하나로
+    충분하다(이 기준 목록의 POST 48건은 예외 없이 매수/매도/정정/취소/예약주문)."""
+    assert gen.is_order_method(_row("TTTC0952U", method="POST", path="/uapi/x"))
+    assert not gen.is_order_method(_row("FHKST01010100", method="GET"))
+    assert not gen.is_order_method(_row("H0STCNT0", method="WS", path=None, params=[]))
+
+
+def test_render_rest_method_post_gets_paper_sandbox_guard() -> None:
+    """negative(BR-12 19건 무방비의 회귀 방지) — POST로 생성되는 메서드는
+    반드시 `@require_paper_sandbox`를 방출해야 한다."""
+    lines = gen.render_rest_method(_row("TTTC0952U", method="POST", path="/uapi/x"))
+    assert "    @require_paper_sandbox" in lines
+
+
+def test_render_rest_method_get_has_no_guard_decorator() -> None:
+    lines = gen.render_rest_method(_row("FHKST01010100", method="GET"))
+    assert "    @require_paper_sandbox" not in lines
+
+
+def test_render_chunk_file_imports_guard_only_when_order_present() -> None:
+    with_order = gen.render_chunk_file(
+        "domestic_stock", 1, [_row("TTTC0952U", method="POST", path="/uapi/x")]
+    )
+    assert "from src.exchanges.common.live_guard import require_paper_sandbox" in with_order
+
+    without_order = gen.render_chunk_file(
+        "domestic_stock", 1, [_row("FHKST01010100", method="GET")]
+    )
+    assert "from src.exchanges.common.live_guard import require_paper_sandbox" not in without_order
+
+
 def test_render_ws_method_embeds_tr_id_in_subscribe_call() -> None:
     row = _row("H0STCNT0", method="WS", path=None, params=[])
     lines = gen.render_ws_method(row)

@@ -20,6 +20,14 @@ BR-11(`kis_tr_reference.json`)에서 `kis_tr_coverage.classify()` 기준 "미착
 결정론: 같은 `kis_tr_reference.json` + 같은 수기 파일 집합이면 바이트 동일 출력.
 tr_id 오름차순 정렬, 고정 폭 텍스트랩(textwrap), 라인 예산 기반 청크 분할.
 
+주문성 하드가드(review:1971 REJECT 후속, 레드팀 #2026-09-02-32와 동일 결함
+클래스): `is_order_method()`가 `method == "POST"`인 행을 주문성으로 판정해
+`@require_paper_sandbox`를 자동 방출한다. 손으로 쓴 `trading_mixin.py`가 가진
+가드를 생성기가 재현하지 못해 19건이 무방비였던 결함(task-1975)을 이름 규칙이
+아니라 TR 메타데이터로 고쳤다 — 이 기준 목록의 POST 48건은 예외 없이
+매수/매도/정정/취소/예약주문이라(레이블에 "주문" 포함, 코드 리뷰로 확인) 이
+저장소 안에서는 method 하나로 충분하다.
+
 사용: `python scripts/kis_generate_adapters.py` (저장소 루트에서). 종료코드
 0=생성 완료, 1=입력 오류(기준 목록 없음/형식 오류/미지원 메서드).
 """
@@ -169,12 +177,16 @@ def render_rest_method(row: dict[str, Any]) -> list[str]:
         raise KisGenerateError(f"{row['tr_id']}: 지원하지 않는 HTTP 메서드 {row['method']!r}")
     name = _method_name(row)
     arg_name = "params" if row["method"] == "GET" else "body"
-    lines = [
-        "",
-        f"    async def {name}(",
-        "        self, params: dict[str, Any] | None = None",
-        "    ) -> dict[str, Any]:",
-    ]
+    lines = [""]
+    if is_order_method(row):
+        lines.append("    @require_paper_sandbox")
+    lines.extend(
+        [
+            f"    async def {name}(",
+            "        self, params: dict[str, Any] | None = None",
+            "    ) -> dict[str, Any]:",
+        ]
+    )
     lines.extend(_docstring_lines(row, "        "))
     lines.extend(
         [
@@ -230,6 +242,17 @@ def render_ws_method(row: dict[str, Any]) -> list[str]:
     return lines
 
 
+def is_order_method(row: dict[str, Any]) -> bool:
+    """BR-12 리프(review:1971 REJECT 후속) -- 주문성 TR 판정.
+
+    KIS TR 기준 목록 안 POST 메서드 48건은 예외 없이 매수/매도/정정/취소/예약주문
+    (레이블에 "주문" 포함)이다. 이 저장소 안에서는 method == "POST"가 곧
+    주문성이라는 뜻이라 이름 규칙에 기대지 않는다(fail-closed 원칙 -- 분류가
+    모호하면 가드를 붙이는 쪽이 안전하다, decision 참조). GET/WS는 조회·구독뿐이라
+    대상에서 뺀다."""
+    return row["method"] == "POST"
+
+
 def render_method(row: dict[str, Any]) -> list[str]:
     return render_ws_method(row) if row["method"] == "WS" else render_rest_method(row)
 
@@ -255,6 +278,7 @@ def _chunk_rows(rows: list[dict[str, Any]]) -> list[list[dict[str, Any]]]:
 def render_chunk_file(domain: str, idx: int, rows: list[dict[str, Any]]) -> str:
     has_rest = any(r["method"] != "WS" for r in rows)
     has_ws = any(r["method"] == "WS" for r in rows)
+    has_order = any(is_order_method(r) for r in rows)
     protocol_bases = sorted(
         name for name, flag in (("_KISRestHost", has_rest), ("_KISWsHost", has_ws)) if flag
     )
@@ -273,9 +297,12 @@ def render_chunk_file(domain: str, idx: int, rows: list[dict[str, Any]]) -> str:
     ]
     if has_rest:
         lines += ["from typing import Any", ""]
-    first_party: list[str] = [
+    first_party: list[str] = []
+    if has_order:
+        first_party.append("from src.exchanges.common.live_guard import require_paper_sandbox")
+    first_party.append(
         f"from src.exchanges.kis.generated._protocols import {', '.join(protocol_bases)}"
-    ]
+    )
     if has_ws:
         first_party.append(
             "from src.exchanges.kis.websocket_connection import (\n"

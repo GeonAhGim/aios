@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from src.exchanges.common.live_guard import require_paper_sandbox
 from src.exchanges.kis.generated._protocols import _KISRestHost, _KISWsHost
 from src.exchanges.kis.websocket_connection import (
     ConnectFn,
@@ -66,6 +67,7 @@ class KISGeneratedDomesticFutureoption05Mixin(_KISRestHost, _KISWsHost):
             on_reconnected=on_reconnected,
         )
 
+    @require_paper_sandbox
     async def order_sttn1101u(
         self, params: dict[str, Any] | None = None
     ) -> dict[str, Any]:
@@ -149,6 +151,7 @@ class KISGeneratedDomesticFutureoption05Mixin(_KISRestHost, _KISWsHost):
             params=params or {},
         )
 
+    @require_paper_sandbox
     async def order_vtto1101u(
         self, params: dict[str, Any] | None = None
     ) -> dict[str, Any]:
@@ -166,6 +169,7 @@ class KISGeneratedDomesticFutureoption05Mixin(_KISRestHost, _KISWsHost):
             body=params or {},
         )
 
+    @require_paper_sandbox
     async def order_rvsecncl_vtto1103u(
         self, params: dict[str, Any] | None = None
     ) -> dict[str, Any]:

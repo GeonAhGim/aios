@@ -9,11 +9,13 @@ from __future__ import annotations
 
 from typing import Any
 
+from src.exchanges.common.live_guard import require_paper_sandbox
 from src.exchanges.kis.generated._protocols import _KISRestHost
 
 
 class KISGeneratedDomesticStock11Mixin(_KISRestHost):
 
+    @require_paper_sandbox
     async def order_cash_vttc0012u(
         self, params: dict[str, Any] | None = None
     ) -> dict[str, Any]:
@@ -30,6 +32,7 @@ class KISGeneratedDomesticStock11Mixin(_KISRestHost):
             body=params or {},
         )
 
+    @require_paper_sandbox
     async def order_rvsecncl_vttc0013u(
         self, params: dict[str, Any] | None = None
     ) -> dict[str, Any]:

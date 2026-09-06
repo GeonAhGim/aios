@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from src.exchanges.common.live_guard import require_paper_sandbox
 from src.exchanges.kis.generated._protocols import _KISRestHost
 
 
@@ -110,6 +111,7 @@ class KISGeneratedOverseasStock03Mixin(_KISRestHost):
             params=params or {},
         )
 
+    @require_paper_sandbox
     async def order_resv_ttts3013u(
         self, params: dict[str, Any] | None = None
     ) -> dict[str, Any]:
@@ -142,6 +144,7 @@ class KISGeneratedOverseasStock03Mixin(_KISRestHost):
             params=params or {},
         )
 
+    @require_paper_sandbox
     async def order_resv_tttt3014u(
         self, params: dict[str, Any] | None = None
     ) -> dict[str, Any]:
@@ -157,6 +160,7 @@ class KISGeneratedOverseasStock03Mixin(_KISRestHost):
             body=params or {},
         )
 
+    @require_paper_sandbox
     async def order_resv_tttt3016u(
         self, params: dict[str, Any] | None = None
     ) -> dict[str, Any]:
@@ -172,6 +176,7 @@ class KISGeneratedOverseasStock03Mixin(_KISRestHost):
             body=params or {},
         )
 
+    @require_paper_sandbox
     async def order_resv_ccnl_tttt3017u(
         self, params: dict[str, Any] | None = None
     ) -> dict[str, Any]:
@@ -234,6 +239,7 @@ class KISGeneratedOverseasStock03Mixin(_KISRestHost):
             params=params or {},
         )
 
+    @require_paper_sandbox
     async def order_resv_vtts3013u(
         self, params: dict[str, Any] | None = None
     ) -> dict[str, Any]:

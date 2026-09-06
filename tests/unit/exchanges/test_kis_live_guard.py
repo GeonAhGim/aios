@@ -143,3 +143,17 @@ async def test_cancel_overseas_futureoption_order_rejects_live_adapter():
 
     with pytest.raises(FrozenZonePaperAdapterBlockedError):
         await live_adapter.cancel_overseas_futureoption_order("ORG:1", quantity=Decimal("1"))
+
+
+async def test_generated_order_cash_method_rejects_live_adapter():
+    """review:1971 REJECT 후속(task-1975) — BR-12 생성기가 만든 주문성
+    메서드 19건 전부에 `@require_paper_sandbox`가 없었다(CTSC0008U류는
+    is_paper_trading일 때만 V로 치환되고, STTN1101U류는 애초에 치환
+    대상이 아니라 LIVE로 구성된 adapter에서 실주문이 나갈 수 있었다).
+    `order_cash_vttc0011u`가 대표로 배선을 증명한다 — 나머지 18건은
+    test_live_guard_coverage.py의 TR 메타데이터 스캐너가 구조적으로
+    막는다."""
+    live_adapter = _make_live_adapter()
+
+    with pytest.raises(FrozenZonePaperAdapterBlockedError):
+        await live_adapter.order_cash_vttc0011u()
