@@ -10,7 +10,7 @@ import pytest
 
 from src.data.models.base import AssetClass
 from src.data.models.trading import OrderSide, OrderType
-from src.services.oms.contracts.v1_commands import IdempotencyScope, SubmitOrderCommand
+from src.services.oms.contracts.v1_commands import OrderIdempotencyScope, SubmitOrderCommand
 from src.services.oms.domain.idempotency import (
     build_scope,
     client_order_id,
@@ -19,7 +19,7 @@ from src.services.oms.domain.idempotency import (
 )
 
 
-def _scope(**overrides: Any) -> IdempotencyScope:
+def _scope(**overrides: Any) -> OrderIdempotencyScope:
     defaults: dict[str, Any] = {
         "tenant_id": uuid4(),
         "account_ref": "acct-1",

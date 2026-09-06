@@ -12,7 +12,7 @@ import hashlib
 from datetime import datetime
 from uuid import UUID
 
-from src.services.oms.contracts.v1_commands import IdempotencyScope, SubmitOrderCommand
+from src.services.oms.contracts.v1_commands import OrderIdempotencyScope, SubmitOrderCommand
 
 
 def build_scope(
@@ -25,8 +25,8 @@ def build_scope(
     execution_id: int,
     intent_seq: int,
     window_start: datetime,
-) -> IdempotencyScope:
-    return IdempotencyScope(
+) -> OrderIdempotencyScope:
+    return OrderIdempotencyScope(
         tenant_id=tenant_id,
         account_ref=account_ref,
         provider=provider,
@@ -38,7 +38,7 @@ def build_scope(
     )
 
 
-def scope_hash(scope: IdempotencyScope) -> str:
+def scope_hash(scope: OrderIdempotencyScope) -> str:
     """sha256 hex(64자) — `order_idempotency.scope_hash` UNIQUE 제약의
     실제 값(R4). 필드 순서를 명시적으로 고정해 pydantic 내부 표현 변경에
     영향받지 않는다."""
@@ -82,7 +82,7 @@ def command_digest(cmd: SubmitOrderCommand) -> str:
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 
-def client_order_id(scope: IdempotencyScope, *, max_len: int, charset: str) -> str:
+def client_order_id(scope: OrderIdempotencyScope, *, max_len: int, charset: str) -> str:
     """결정론적 client id — 같은 scope는 항상 같은 id를 낸다(R1 "재시도마다
     새 키가 생기던" 결함의 근본 수정). `charset`으로 제한된 문자만 쓰고
     `max_len`을 넘지 않는다(venue별 제약, §3.2 `client_order_id_max_len`/

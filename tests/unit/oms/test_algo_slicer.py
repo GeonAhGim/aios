@@ -9,12 +9,12 @@ from uuid import uuid4
 import pytest
 
 from src.data.models.trading import OrderSide
-from src.services.oms.contracts.v1_commands import AlgoRequest, IdempotencyScope
+from src.services.oms.contracts.v1_commands import AlgoRequest, OrderIdempotencyScope
 from src.services.oms.domain.algo_slicer import plan_slices
 
 
-def _scope() -> IdempotencyScope:
-    return IdempotencyScope(
+def _scope() -> OrderIdempotencyScope:
+    return OrderIdempotencyScope(
         tenant_id=uuid4(),
         account_ref="acct-1",
         provider="bitget",

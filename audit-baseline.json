@@ -17,10 +17,6 @@
     "tenant_fk_to_users": {
       "task": 1814,
       "note": "FA-0a. tenant_id가 users(user_id)를 FK하는 테이블 19개. 조직 테넌트 도입 시 전부 깨진다. 2026-09-06에 같은 결함이 legal_entity에 재생산돼 FA-2a로 따로 교정했다."
-    },
-    "duplicate_type_names": {
-      "task": 1815,
-      "note": "PLT-45. IdempotencyScope가 API 계약과 OMS 계약에 각각 다른 필드로 존재한다. OMS 쪽을 OrderIdempotencyScope로 개명한다."
     }
   }
 }

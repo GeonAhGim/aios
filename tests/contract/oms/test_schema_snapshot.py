@@ -24,8 +24,8 @@ from src.services.oms.contracts.v1_commands import (
     SCHEMA_VERSION,
     AlgoRequest,
     CancelOrderCommand,
-    IdempotencyScope,
     ModifyOrderCommand,
+    OrderIdempotencyScope,
     SubmitOrderCommand,
 )
 from src.services.oms.contracts.v1_events import (
@@ -51,7 +51,7 @@ from src.services.oms.domain.errors import (
 )
 
 _REQUIRED_FIELDS: dict[type[BaseModel], set[str]] = {
-    IdempotencyScope: {
+    OrderIdempotencyScope: {
         "tenant_id",
         "account_ref",
         "provider",
@@ -175,7 +175,7 @@ def test_submit_order_command_rejects_live_mode() -> None:
     payload = SubmitOrderCommand(
         command_id=uuid4(),
         trace_id=uuid4(),
-        scope=IdempotencyScope(
+        scope=OrderIdempotencyScope(
             tenant_id=uuid4(),
             account_ref="acct-1",
             provider="bitget",
@@ -203,7 +203,7 @@ def test_submit_order_command_quantity_must_be_positive() -> None:
         SubmitOrderCommand(
             command_id=uuid4(),
             trace_id=uuid4(),
-            scope=IdempotencyScope(
+            scope=OrderIdempotencyScope(
                 tenant_id=uuid4(),
                 account_ref="acct-1",
                 provider="bitget",

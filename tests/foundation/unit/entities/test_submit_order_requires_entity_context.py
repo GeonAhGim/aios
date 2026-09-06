@@ -18,13 +18,13 @@ from src.data.models.base import AssetClass
 from src.data.models.trading import OrderSide, OrderType
 from src.foundation.entities.application.resolve_context import EntityContextResolutionError
 from src.services.oms.application.submit_order import submit_order
-from src.services.oms.contracts.v1_commands import IdempotencyScope, SubmitOrderCommand
+from src.services.oms.contracts.v1_commands import OrderIdempotencyScope, SubmitOrderCommand
 from src.services.order_service.gate import GateDecision, GateOutcome, OrderContext
 
 
 def _command() -> SubmitOrderCommand:
     user_id = uuid4()
-    scope = IdempotencyScope(
+    scope = OrderIdempotencyScope(
         tenant_id=user_id, account_ref="acct-1", provider="bitget", strategy_id="s1",
         strategy_version="1.0.0", execution_id=1, intent_seq=1,
         window_start=datetime.now(timezone.utc),

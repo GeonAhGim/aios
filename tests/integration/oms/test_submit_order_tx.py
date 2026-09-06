@@ -16,7 +16,7 @@ import pytest
 from src.data.models.base import AssetClass
 from src.data.models.trading import OrderSide, OrderStatus, OrderType
 from src.services.oms.application.submit_order import OrderSubmitDeniedError, submit_order
-from src.services.oms.contracts.v1_commands import IdempotencyScope, SubmitOrderCommand
+from src.services.oms.contracts.v1_commands import OrderIdempotencyScope, SubmitOrderCommand
 from src.services.oms.domain.errors import IdempotencyDigestMismatchError, UnknownSymbolError
 from src.services.oms.domain.symbol_registry import SymbolRegistry
 from src.services.oms.domain.venue_profile import TimeoutBudget, VenueCapabilityProfile
@@ -88,7 +88,7 @@ async def _create_running_execution(pool, user_id: uuid.UUID) -> int:
 
 
 def _command(user_id: uuid.UUID, execution_id: int, **overrides: object) -> SubmitOrderCommand:
-    scope = IdempotencyScope(
+    scope = OrderIdempotencyScope(
         tenant_id=user_id, account_ref="acct-1", provider="bitget", strategy_id="s1",
         strategy_version="1.0.0", execution_id=execution_id, intent_seq=1,
         window_start=datetime.now(timezone.utc),

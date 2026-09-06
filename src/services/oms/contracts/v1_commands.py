@@ -21,7 +21,7 @@ from src.data.models.trading import OrderSide, OrderType
 SCHEMA_VERSION: Literal["v1"] = "v1"
 
 
-class IdempotencyScope(BaseModel):
+class OrderIdempotencyScope(BaseModel):
     tenant_id: UUID
     account_ref: str
     provider: str  # "bitget" | "kis" | "nh" | "paper_sim"
@@ -36,7 +36,7 @@ class IdempotencyScope(BaseModel):
 class SubmitOrderCommand(BaseModel):
     command_id: UUID
     trace_id: UUID
-    scope: IdempotencyScope
+    scope: OrderIdempotencyScope
     symbol: str  # 정규 "BTC/USDT" / "005930"
     side: OrderSide
     order_type: OrderType  # MARKET|LIMIT (TWAP 등은 AlgoRequest)
@@ -70,7 +70,7 @@ class ModifyOrderCommand(CancelOrderCommand):
 class AlgoRequest(BaseModel):
     algo_run_id: UUID
     trace_id: UUID
-    scope: IdempotencyScope
+    scope: OrderIdempotencyScope
     algo: Literal["TWAP", "VWAP", "POV", "ICEBERG"]
     symbol: str
     side: OrderSide

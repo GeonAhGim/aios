@@ -9,7 +9,7 @@ import pytest
 
 from src.data.models.base import AssetClass
 from src.data.models.trading import OrderSide, OrderType
-from src.services.oms.contracts.v1_commands import IdempotencyScope, SubmitOrderCommand
+from src.services.oms.contracts.v1_commands import OrderIdempotencyScope, SubmitOrderCommand
 from src.services.oms.domain.errors import OrderValidationError
 from src.services.oms.domain.venue_profile import (
     TimeoutBudget,
@@ -50,7 +50,7 @@ def _command(**overrides: object) -> SubmitOrderCommand:
     defaults: dict[str, object] = {
         "command_id": uuid4(),
         "trace_id": uuid4(),
-        "scope": IdempotencyScope(
+        "scope": OrderIdempotencyScope(
             tenant_id=uuid4(),
             account_ref="acct-1",
             provider="bitget",
