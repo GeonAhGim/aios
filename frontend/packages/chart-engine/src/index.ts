@@ -200,6 +200,33 @@ export { PaneLayoutError, computePaneRects, createPaneScaleSet } from "./panes/p
 export type { CrosshairMove, CrosshairSync, CrosshairSyncState } from "./panes/crosshairSync";
 export { createCrosshairSync } from "./panes/crosshairSync";
 
+export type {
+  IndicatorCatalogEntry,
+  IndicatorCatalogLoadResult,
+  IndicatorCatalogPage,
+  IndicatorCatalogPort,
+  IndicatorCatalogQuery,
+  IndicatorPluginDefinition,
+  IndicatorPluginEntry,
+  IndicatorPluginErrorCode,
+  IndicatorPluginParams,
+  IndicatorPluginRegistration,
+  IndicatorPluginRegistry,
+  IndicatorStyle,
+  IndicatorStyleOutput,
+  IndicatorTier,
+} from "./plugins/indicatorPlugin";
+export {
+  IndicatorPluginError,
+  createIndicatorPluginRegistry,
+  decodeIndicatorStyle,
+  encodeIndicatorStyle,
+  loadIndicatorCatalog,
+  registerIndicatorPlugin,
+  setIndicatorPluginStyle,
+  unregisterIndicatorPlugin,
+} from "./plugins/indicatorPlugin";
+
 export type { CrosshairValueOptions, StatusLineOptions } from "./legend/statusLine";
 export { buildStatusLineLegends, createCrosshairValueStyle, createStatusLineTooltipStyle } from "./legend/statusLine";
 

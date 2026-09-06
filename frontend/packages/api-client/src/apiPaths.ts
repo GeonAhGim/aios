@@ -282,6 +282,17 @@ export const API_ROUTES = defineApiRoutes({
   "charting.layouts.base": route("/v1/foundation/charting/layouts", true, null, true),
   "charting.layouts.item": route("/v1/foundation/charting/layouts/:layoutId", true, null, true),
   "charting.layouts.drawings": route("/v1/foundation/charting/layouts/:layoutId/drawings", true, null, true),
+
+  // task-1731(CH-11): src/api/routers/indicators.py 원문 확인(IND-12, task-1730
+  // 934b8d1) — `APIRouter(prefix="/v1/indicators")`(indicators.py:37), `GET ""`
+  // (:54) `-> ApiResponse[IndicatorListView]` + `ok(...)`(:71), router_registry.py
+  // include_router(추가 prefix 없음). scripts.*·backtests.*와 동일 사유로
+  // mount_v1(PLT-16) 미도달이라 v1Path=null. envelope=true. 스냅샷
+  // (contracts/openapi/v1.json)에 "/v1/indicators"가 이미 있고
+  // ApiResponse_IndicatorListView_를 참조한다 — task-1730이 이 leaf보다 먼저
+  // 머지돼 스냅샷이 이미 갱신돼 있으므로(scripts.compile 등과 달리)
+  // STALE_SNAPSHOT_WHITELIST 대상이 아니다.
+  "indicators.list": route("/v1/indicators", true, null, true),
 });
 
 export type ApiRouteName = keyof typeof API_ROUTES;

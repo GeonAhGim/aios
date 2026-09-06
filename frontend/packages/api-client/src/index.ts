@@ -105,3 +105,8 @@ export type {
   BacktestFillView,
   QuickBacktestResultView,
 } from "./clients/backtests";
+// task-1731(CH-11): §9.11 IND-12 지표 카탈로그 조회 클라이언트(positions.ts와 동일
+// 관용 — AiosApiClient 합성에는 얹지 않고 chart-engine plugins/indicatorPlugin.ts의
+// IndicatorCatalogPort로 화면이 직접 주입한다).
+export { createIndicatorsClient } from "./clients/indicators";
+export type { IndicatorCatalogItem, IndicatorsClient, IndicatorTier, ListIndicatorsParams, ListIndicatorsResult } from "./clients/indicators";
