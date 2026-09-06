@@ -13,6 +13,11 @@ from starlette import status
 from src.api.contracts.error_codes import ErrorCode
 from src.api.schemas.positions import InvalidCursorError
 from src.foundation.backtest.application.run_backtest import BacktestRunError
+from src.foundation.charting.application.errors import (
+    ChartLayoutNotFoundError,
+    CrossTenantChartLayoutAccessError,
+)
+from src.foundation.charting.domain.rules import DrawingValidationError
 from src.foundation.connections.application.begin_connection import (
     ConsentRequiredError,
     MfaRequiredError,
@@ -241,6 +246,12 @@ EXCEPTION_MAP_FOUNDATION: list[tuple[type[Exception], ErrorCode]] = [
     (MarketDataQueryError, ErrorCode.VALIDATION_INVALID_FIELD),
     (AsOfInFutureError, ErrorCode.VALIDATION_INVALID_FIELD),
     (QuarantinedViewUnsupportedError, ErrorCode.VALIDATION_INVALID_FIELD),
+    # CH-5(task-1557) — foundation/charting. 타 테넌트도 미존재와 동형 404
+    # (§9.6 DoD "타 테넌트 404") — ConcurrencyConflictError(409)는 이미
+    # exception_registry.py에 전역 등록돼 있어 여기 새로 추가하지 않는다.
+    (ChartLayoutNotFoundError, ErrorCode.RESOURCE_NOT_FOUND),
+    (CrossTenantChartLayoutAccessError, ErrorCode.RESOURCE_NOT_FOUND),
+    (DrawingValidationError, ErrorCode.VALIDATION_INVALID_FIELD),
 ]
 
 STATUS_OVERRIDE_FOUNDATION: list[tuple[type[Exception], int]] = [

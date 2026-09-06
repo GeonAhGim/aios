@@ -19,6 +19,7 @@ def register_routers(app: FastAPI) -> None:
         admin,
         alerts,
         auth,
+        charting,
         device_tokens,
         exchange_credentials,
         executions,
@@ -65,6 +66,7 @@ def register_routers(app: FastAPI) -> None:
     app.include_router(foundation_paper_control.router)
     app.include_router(foundation_reconciliation.router)
     app.include_router(foundation_performance.router)
+    app.include_router(charting.router)  # CH-5(task-1557) /v1/foundation/charting
     app.include_router(market_data.router)  # LA-24(task-1376) /v1/foundation/market-data
     app.include_router(scripts.router)  # DSL-12(task-1535) /v1/scripts/compile
     app.include_router(positions.router)

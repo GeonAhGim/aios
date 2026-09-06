@@ -12,6 +12,8 @@ from src.api.deps import get_current_user, get_pool
 from src.api.service_deps import get_credential_resolver
 from src.core.observability.tenant_binding import rebind_tenant
 from src.exchanges.factory import SUPPORTED_EXCHANGES
+from src.foundation.charting.adapters.postgres_repository import PostgresChartingRepository
+from src.foundation.charting.ports.repository import ChartingRepository
 from src.foundation.connections.adapters.live_provider import LiveReadonlyAccountProvider
 from src.foundation.connections.adapters.postgres_repository import PostgresConnectionRepository
 from src.foundation.connections.ports.provider import ReadonlyAccountProvider
@@ -101,6 +103,10 @@ def get_audit_event_repository(
 
 def get_connection_repository(pool: asyncpg.Pool = Depends(get_pool)) -> ConnectionRepository:
     return PostgresConnectionRepository(pool)
+
+
+def get_charting_repository(pool: asyncpg.Pool = Depends(get_pool)) -> ChartingRepository:
+    return PostgresChartingRepository(pool)
 
 
 def get_validation_repository(
