@@ -232,6 +232,33 @@
         "title": "ActivateSafetyControlRequest",
         "type": "object"
       },
+      "Adjustment": {
+        "enum": [
+          "RAW",
+          "ADJUSTED"
+        ],
+        "title": "Adjustment",
+        "type": "string"
+      },
+      "AdjustmentsConfig": {
+        "description": "분할·배당 조정을 각각 켜고 끈다(§3.4 `adjustments{splits, dividends}`).",
+        "properties": {
+          "dividends": {
+            "title": "Dividends",
+            "type": "boolean"
+          },
+          "splits": {
+            "title": "Splits",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "splits",
+          "dividends"
+        ],
+        "title": "AdjustmentsConfig",
+        "type": "object"
+      },
       "AlertCreateRequest": {
         "properties": {
           "exchange": {
@@ -287,6 +314,38 @@
         "title": "AlertCreateRequest",
         "type": "object"
       },
+      "ApiResponse_AccountConnectionView_": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/AccountConnectionView"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/Meta"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "title": "ApiResponse[AccountConnectionView]",
+        "type": "object"
+      },
+      "ApiResponse_AccountSnapshotView_": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/AccountSnapshotView"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/Meta"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "title": "ApiResponse[AccountSnapshotView]",
+        "type": "object"
+      },
       "ApiResponse_ApprovalRequest_": {
         "properties": {
           "data": {
@@ -335,6 +394,102 @@
         "title": "ApiResponse[AuditLogPage]",
         "type": "object"
       },
+      "ApiResponse_AuditTimelinePage_": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/AuditTimelinePage"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/Meta"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "title": "ApiResponse[AuditTimelinePage]",
+        "type": "object"
+      },
+      "ApiResponse_CandleSeriesView_": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/CandleSeriesView"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/Meta"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "title": "ApiResponse[CandleSeriesView]",
+        "type": "object"
+      },
+      "ApiResponse_ChartLayoutView_": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/ChartLayoutView"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/Meta"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "title": "ApiResponse[ChartLayoutView]",
+        "type": "object"
+      },
+      "ApiResponse_CompileScriptView_": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/CompileScriptView"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/Meta"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "title": "ApiResponse[CompileScriptView]",
+        "type": "object"
+      },
+      "ApiResponse_ConnectionListResponse_": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/ConnectionListResponse"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/Meta"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "title": "ApiResponse[ConnectionListResponse]",
+        "type": "object"
+      },
+      "ApiResponse_ConsentDecision_": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/ConsentDecision"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/Meta"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "title": "ApiResponse[ConsentDecision]",
+        "type": "object"
+      },
       "ApiResponse_DeletionResponse_": {
         "properties": {
           "data": {
@@ -349,6 +504,22 @@
           "meta"
         ],
         "title": "ApiResponse[DeletionResponse]",
+        "type": "object"
+      },
+      "ApiResponse_DeploymentListResponse_": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/DeploymentListResponse"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/Meta"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "title": "ApiResponse[DeploymentListResponse]",
         "type": "object"
       },
       "ApiResponse_DisputeDetail_": {
@@ -383,6 +554,38 @@
         "title": "ApiResponse[DisputeResolutionResult]",
         "type": "object"
       },
+      "ApiResponse_DrawingsDocumentView_": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/DrawingsDocumentView"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/Meta"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "title": "ApiResponse[DrawingsDocumentView]",
+        "type": "object"
+      },
+      "ApiResponse_InstrumentListView_": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/InstrumentListView"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/Meta"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "title": "ApiResponse[InstrumentListView]",
+        "type": "object"
+      },
       "ApiResponse_ListingResponse_": {
         "properties": {
           "data": {
@@ -397,6 +600,38 @@
           "meta"
         ],
         "title": "ApiResponse[ListingResponse]",
+        "type": "object"
+      },
+      "ApiResponse_MandateRevisionView_": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/MandateRevisionView"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/Meta"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "title": "ApiResponse[MandateRevisionView]",
+        "type": "object"
+      },
+      "ApiResponse_MandateStatusResponse_": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/MandateStatusResponse"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/Meta"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "title": "ApiResponse[MandateStatusResponse]",
         "type": "object"
       },
       "ApiResponse_MfaSetupResult_": {
@@ -415,6 +650,38 @@
         "title": "ApiResponse[MfaSetupResult]",
         "type": "object"
       },
+      "ApiResponse_NavSeriesResponse_": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/NavSeriesResponse"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/Meta"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "title": "ApiResponse[NavSeriesResponse]",
+        "type": "object"
+      },
+      "ApiResponse_PaperDeploymentView_": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/PaperDeploymentView"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/Meta"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "title": "ApiResponse[PaperDeploymentView]",
+        "type": "object"
+      },
       "ApiResponse_PayoutBatchView_": {
         "properties": {
           "data": {
@@ -429,6 +696,230 @@
           "meta"
         ],
         "title": "ApiResponse[PayoutBatchView]",
+        "type": "object"
+      },
+      "ApiResponse_PerformanceStatementListResponse_": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/PerformanceStatementListResponse"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/Meta"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "title": "ApiResponse[PerformanceStatementListResponse]",
+        "type": "object"
+      },
+      "ApiResponse_PerformanceStatementView_": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/PerformanceStatementView"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/Meta"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "title": "ApiResponse[PerformanceStatementView]",
+        "type": "object"
+      },
+      "ApiResponse_PolicyDecisionView_": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/PolicyDecisionView"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/Meta"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "title": "ApiResponse[PolicyDecisionView]",
+        "type": "object"
+      },
+      "ApiResponse_PositionJournalResponse_": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/PositionJournalResponse"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/Meta"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "title": "ApiResponse[PositionJournalResponse]",
+        "type": "object"
+      },
+      "ApiResponse_PositionListResponse_": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/PositionListResponse"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/Meta"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "title": "ApiResponse[PositionListResponse]",
+        "type": "object"
+      },
+      "ApiResponse_QuickBacktestResultView_": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/QuickBacktestResultView"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/Meta"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "title": "ApiResponse[QuickBacktestResultView]",
+        "type": "object"
+      },
+      "ApiResponse_ReconciliationRunView_": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/ReconciliationRunView"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/Meta"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "title": "ApiResponse[ReconciliationRunView]",
+        "type": "object"
+      },
+      "ApiResponse_ReconciliationStateListResponse_": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/ReconciliationStateListResponse"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/Meta"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "title": "ApiResponse[ReconciliationStateListResponse]",
+        "type": "object"
+      },
+      "ApiResponse_ReconciliationStateView_": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/ReconciliationStateView"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/Meta"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "title": "ApiResponse[ReconciliationStateView]",
+        "type": "object"
+      },
+      "ApiResponse_ReplaySeriesView_": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/ReplaySeriesView"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/Meta"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "title": "ApiResponse[ReplaySeriesView]",
+        "type": "object"
+      },
+      "ApiResponse_RiskEvaluationView_": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/RiskEvaluationView"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/Meta"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "title": "ApiResponse[RiskEvaluationView]",
+        "type": "object"
+      },
+      "ApiResponse_RiskRuleBundle_": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/RiskRuleBundle"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/Meta"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "title": "ApiResponse[RiskRuleBundle]",
+        "type": "object"
+      },
+      "ApiResponse_SafetyControlListResponse_": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/SafetyControlListResponse"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/Meta"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "title": "ApiResponse[SafetyControlListResponse]",
+        "type": "object"
+      },
+      "ApiResponse_SafetyControlView_": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/SafetyControlView"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/Meta"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "title": "ApiResponse[SafetyControlView]",
         "type": "object"
       },
       "ApiResponse_SellerSuspensionResult_": {
@@ -447,10 +938,10 @@
         "title": "ApiResponse[SellerSuspensionResult]",
         "type": "object"
       },
-      "ApiResponse_TokenResponse_": {
+      "ApiResponse_TokenPairResponse_": {
         "properties": {
           "data": {
-            "$ref": "#/components/schemas/TokenResponse"
+            "$ref": "#/components/schemas/TokenPairResponse"
           },
           "meta": {
             "$ref": "#/components/schemas/Meta"
@@ -460,7 +951,23 @@
           "data",
           "meta"
         ],
-        "title": "ApiResponse[TokenResponse]",
+        "title": "ApiResponse[TokenPairResponse]",
+        "type": "object"
+      },
+      "ApiResponse_TrustStatusResponse_": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/TrustStatusResponse"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/Meta"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "title": "ApiResponse[TrustStatusResponse]",
         "type": "object"
       },
       "ApiResponse_UserResponse_": {
@@ -493,6 +1000,22 @@
           "meta"
         ],
         "title": "ApiResponse[UserStatusChangeResult]",
+        "type": "object"
+      },
+      "ApiResponse_ValidationResultView_": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/ValidationResultView"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/Meta"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "title": "ApiResponse[ValidationResultView]",
         "type": "object"
       },
       "ApiResponse_WalletTopupConfirmResult_": {
@@ -563,6 +1086,26 @@
         "title": "ApiResponse[dict[str, bool]]",
         "type": "object"
       },
+      "ApiResponse_dict_str__int__": {
+        "properties": {
+          "data": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "title": "Data",
+            "type": "object"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/Meta"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "title": "ApiResponse[dict[str, int]]",
+        "type": "object"
+      },
       "ApiResponse_dict_str__str__": {
         "properties": {
           "data": {
@@ -603,6 +1146,26 @@
         "title": "ApiResponse[list[ApprovalRequest]]",
         "type": "object"
       },
+      "ApiResponse_list_ChartLayoutView__": {
+        "properties": {
+          "data": {
+            "items": {
+              "$ref": "#/components/schemas/ChartLayoutView"
+            },
+            "title": "Data",
+            "type": "array"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/Meta"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "title": "ApiResponse[list[ChartLayoutView]]",
+        "type": "object"
+      },
       "ApiResponse_list_DisputeSummary__": {
         "properties": {
           "data": {
@@ -641,6 +1204,26 @@
           "meta"
         ],
         "title": "ApiResponse[list[QueuedListing]]",
+        "type": "object"
+      },
+      "ApiResponse_list_SymbolAliasRef__": {
+        "properties": {
+          "data": {
+            "items": {
+              "$ref": "#/components/schemas/SymbolAliasRef"
+            },
+            "title": "Data",
+            "type": "array"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/Meta"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "title": "ApiResponse[list[SymbolAliasRef]]",
         "type": "object"
       },
       "ApiResponse_list_UserSummary__": {
@@ -876,6 +1459,19 @@
           "mandatory_wait_seconds"
         ],
         "title": "ApprovalSettingsResponse",
+        "type": "object"
+      },
+      "ApproveRuleBundleRequest": {
+        "properties": {
+          "approval_ref": {
+            "title": "Approval Ref",
+            "type": "string"
+          }
+        },
+        "required": [
+          "approval_ref"
+        ],
+        "title": "ApproveRuleBundleRequest",
         "type": "object"
       },
       "AssetClass": {
@@ -1182,6 +1778,90 @@
         "title": "Autonomy",
         "type": "string"
       },
+      "BacktestConfigV2": {
+        "description": "§3.4 백테스트 현실성 계약. 재생 1회 실행에 필요한 체결 현실성\n입력 전체를 고정(pin)한다 — 실행 도중 값을 바꾸지 않는다(105번 원칙).",
+        "properties": {
+          "adjustments": {
+            "$ref": "#/components/schemas/AdjustmentsConfig"
+          },
+          "calendar": {
+            "enum": [
+              "session",
+              "24x7"
+            ],
+            "title": "Calendar",
+            "type": "string"
+          },
+          "commission": {
+            "$ref": "#/components/schemas/VenueTierCommission"
+          },
+          "costs": {
+            "$ref": "#/components/schemas/CostsConfig"
+          },
+          "latency_ms": {
+            "minimum": 0.0,
+            "title": "Latency Ms",
+            "type": "integer"
+          },
+          "magnifier_tf": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Timeframe"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "order_types": {
+            "$ref": "#/components/schemas/OrderTypesConfig"
+          },
+          "partial_fill": {
+            "$ref": "#/components/schemas/PartialFillConfig"
+          },
+          "schema_version": {
+            "const": "backtest-v2",
+            "default": "backtest-v2",
+            "title": "Schema Version",
+            "type": "string"
+          },
+          "slippage": {
+            "discriminator": {
+              "mapping": {
+                "fixed": "#/components/schemas/FixedSlippage",
+                "percent": "#/components/schemas/PercentSlippage",
+                "volume_impact": "#/components/schemas/VolumeImpactSlippage"
+              },
+              "propertyName": "kind"
+            },
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/FixedSlippage"
+              },
+              {
+                "$ref": "#/components/schemas/PercentSlippage"
+              },
+              {
+                "$ref": "#/components/schemas/VolumeImpactSlippage"
+              }
+            ],
+            "title": "Slippage"
+          }
+        },
+        "required": [
+          "slippage",
+          "commission",
+          "latency_ms",
+          "partial_fill",
+          "order_types",
+          "magnifier_tf",
+          "costs",
+          "adjustments",
+          "calendar"
+        ],
+        "title": "BacktestConfigV2",
+        "type": "object"
+      },
       "BeginConnectionRequest": {
         "properties": {
           "opaque_account_ref": {
@@ -1206,6 +1886,89 @@
           "requested_capability_profile"
         ],
         "title": "BeginConnectionRequest",
+        "type": "object"
+      },
+      "BundleState": {
+        "enum": [
+          "DRAFT",
+          "APPROVED",
+          "ACTIVE",
+          "RETIRED"
+        ],
+        "title": "BundleState",
+        "type": "string"
+      },
+      "CandleRecord": {
+        "description": "가격·수량은 NUMERIC(30,10) 저장과 동일 정밀도로 Decimal 유지.",
+        "properties": {
+          "close": {
+            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+            "title": "Close",
+            "type": "string"
+          },
+          "close_time": {
+            "format": "date-time",
+            "title": "Close Time",
+            "type": "string"
+          },
+          "high": {
+            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+            "title": "High",
+            "type": "string"
+          },
+          "key": {
+            "$ref": "#/components/schemas/SeriesKey"
+          },
+          "low": {
+            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+            "title": "Low",
+            "type": "string"
+          },
+          "open": {
+            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+            "title": "Open",
+            "type": "string"
+          },
+          "open_time": {
+            "format": "date-time",
+            "title": "Open Time",
+            "type": "string"
+          },
+          "quote_volume": {
+            "anyOf": [
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Quote Volume"
+          },
+          "schema_version": {
+            "const": "v1",
+            "default": "v1",
+            "title": "Schema Version",
+            "type": "string"
+          },
+          "volume": {
+            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+            "title": "Volume",
+            "type": "string"
+          }
+        },
+        "required": [
+          "key",
+          "open_time",
+          "close_time",
+          "open",
+          "high",
+          "low",
+          "close",
+          "volume"
+        ],
+        "title": "CandleRecord",
         "type": "object"
       },
       "CandleResponse": {
@@ -1252,6 +2015,87 @@
         "title": "CandleResponse",
         "type": "object"
       },
+      "CandleSeriesView": {
+        "properties": {
+          "adjustment": {
+            "$ref": "#/components/schemas/Adjustment"
+          },
+          "as_of": {
+            "format": "date-time",
+            "title": "As Of",
+            "type": "string"
+          },
+          "candles": {
+            "items": {
+              "$ref": "#/components/schemas/CandleRecord"
+            },
+            "title": "Candles",
+            "type": "array"
+          },
+          "canonical_symbol": {
+            "title": "Canonical Symbol",
+            "type": "string"
+          },
+          "entitlement": {
+            "$ref": "#/components/schemas/EntitlementView"
+          },
+          "gaps": {
+            "items": {
+              "maxItems": 2,
+              "minItems": 2,
+              "prefixItems": [
+                {
+                  "format": "date-time",
+                  "type": "string"
+                },
+                {
+                  "format": "date-time",
+                  "type": "string"
+                }
+              ],
+              "type": "array"
+            },
+            "title": "Gaps",
+            "type": "array"
+          },
+          "instrument_id": {
+            "format": "uuid",
+            "title": "Instrument Id",
+            "type": "string"
+          },
+          "key": {
+            "$ref": "#/components/schemas/SeriesKey"
+          },
+          "schema_version": {
+            "const": "v1",
+            "default": "v1",
+            "title": "Schema Version",
+            "type": "string"
+          },
+          "series_hash": {
+            "title": "Series Hash",
+            "type": "string"
+          },
+          "symbol": {
+            "title": "Symbol",
+            "type": "string"
+          }
+        },
+        "required": [
+          "instrument_id",
+          "symbol",
+          "canonical_symbol",
+          "entitlement",
+          "key",
+          "candles",
+          "gaps",
+          "adjustment",
+          "as_of",
+          "series_hash"
+        ],
+        "title": "CandleSeriesView",
+        "type": "object"
+      },
       "CapabilityScope": {
         "enum": [
           "READ_BALANCE",
@@ -1260,6 +2104,127 @@
         ],
         "title": "CapabilityScope",
         "type": "string"
+      },
+      "ChartLayoutView": {
+        "properties": {
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "layout_state": {
+            "additionalProperties": true,
+            "title": "Layout State",
+            "type": "object"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "owner_subject_id": {
+            "format": "uuid",
+            "title": "Owner Subject Id",
+            "type": "string"
+          },
+          "revision": {
+            "title": "Revision",
+            "type": "integer"
+          },
+          "schema_version": {
+            "default": "v1",
+            "title": "Schema Version",
+            "type": "string"
+          },
+          "tenant_id": {
+            "format": "uuid",
+            "title": "Tenant Id",
+            "type": "string"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "title": "Updated At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "tenant_id",
+          "owner_subject_id",
+          "name",
+          "layout_state",
+          "revision",
+          "created_at",
+          "updated_at"
+        ],
+        "title": "ChartLayoutView",
+        "type": "object"
+      },
+      "CompileScriptRequest": {
+        "properties": {
+          "source": {
+            "maxLength": 64000,
+            "minLength": 1,
+            "title": "Source",
+            "type": "string"
+          }
+        },
+        "required": [
+          "source"
+        ],
+        "title": "CompileScriptRequest",
+        "type": "object"
+      },
+      "CompileScriptView": {
+        "properties": {
+          "elapsed_ms": {
+            "title": "Elapsed Ms",
+            "type": "integer"
+          },
+          "grammar_version": {
+            "title": "Grammar Version",
+            "type": "string"
+          },
+          "instr_count": {
+            "title": "Instr Count",
+            "type": "integer"
+          },
+          "ir_sha256": {
+            "title": "Ir Sha256",
+            "type": "string"
+          },
+          "ir_version": {
+            "title": "Ir Version",
+            "type": "string"
+          },
+          "registry_version": {
+            "title": "Registry Version",
+            "type": "string"
+          },
+          "resources": {
+            "$ref": "#/components/schemas/ResourceEstimateView"
+          },
+          "script_hash": {
+            "title": "Script Hash",
+            "type": "string"
+          }
+        },
+        "required": [
+          "script_hash",
+          "grammar_version",
+          "ir_version",
+          "registry_version",
+          "ir_sha256",
+          "instr_count",
+          "resources",
+          "elapsed_ms"
+        ],
+        "title": "CompileScriptView",
+        "type": "object"
       },
       "ComponentBreakdown": {
         "description": "§3.4 회계 항등식(domain/identity.py)의 입력이자 출력 —\n`gross_pnl - fees - slippage - funding ± fx - estimated_tax = net_pnl`.",
@@ -1507,6 +2472,64 @@
           "reason"
         ],
         "title": "CorrectStatementRequest",
+        "type": "object"
+      },
+      "CostMethod": {
+        "enum": [
+          "FIFO",
+          "WEIGHTED"
+        ],
+        "title": "CostMethod",
+        "type": "string"
+      },
+      "CostsConfig": {
+        "description": "`borrow_apr`은 공매도 등 차입 포지션에만 적용되므로 무차입 전략은\n`None`(적용 안 함)을 명시적으로 남긴다 — 0%로 조용히 채우지 않는다.",
+        "properties": {
+          "borrow_apr": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Borrow Apr"
+          },
+          "funding": {
+            "title": "Funding",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "funding"
+        ],
+        "title": "CostsConfig",
+        "type": "object"
+      },
+      "CreateChartLayoutRequest": {
+        "properties": {
+          "layout_state": {
+            "additionalProperties": true,
+            "title": "Layout State",
+            "type": "object"
+          },
+          "name": {
+            "maxLength": 120,
+            "minLength": 1,
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "title": "CreateChartLayoutRequest",
         "type": "object"
       },
       "CredentialRequest": {
@@ -2010,6 +3033,69 @@
         "title": "DisputeSummary",
         "type": "object"
       },
+      "DrawingsDocumentView": {
+        "description": "CH-4 `DrawingsDocument`와 1:1 — `schema_version`(int, 드로잉 문서 자체의\n버전, 이 계약 파일의 `SCHEMA_VERSION`(str)과 별개 개념) + `drawings`.\n`revision`은 낙관적 잠금용 부가 필드(CH-4에는 없음, MINOR 확장).",
+        "properties": {
+          "drawings": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Drawings",
+            "type": "array"
+          },
+          "layout_id": {
+            "format": "uuid",
+            "title": "Layout Id",
+            "type": "string"
+          },
+          "revision": {
+            "title": "Revision",
+            "type": "integer"
+          },
+          "schema_version": {
+            "title": "Schema Version",
+            "type": "integer"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "title": "Updated At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "layout_id",
+          "schema_version",
+          "drawings",
+          "revision",
+          "updated_at"
+        ],
+        "title": "DrawingsDocumentView",
+        "type": "object"
+      },
+      "EntitlementView": {
+        "description": "`Entitlement`(DC-9)의 허용 결과만 노출한다 — 거부는 응답이 아니라\n404로 끝나므로(타 테넌트 동형) 여기 도달하지 않는다.",
+        "properties": {
+          "delayed_seconds": {
+            "title": "Delayed Seconds",
+            "type": "integer"
+          },
+          "mode": {
+            "enum": [
+              "realtime",
+              "delayed"
+            ],
+            "title": "Mode",
+            "type": "string"
+          }
+        },
+        "required": [
+          "mode",
+          "delayed_seconds"
+        ],
+        "title": "EntitlementView",
+        "type": "object"
+      },
       "EntitySnapshot": {
         "description": "80번 §1 \"typed snapshots\" — entity_key(예: \"USDT_BALANCE\",\n\"BTCUSDT_POSITION\")별 내부/provider 값 한 쌍. provider_value가 없으면\n(None) provider가 그 항목을 아예 반환하지 않은 것 — 0으로 해석하지\n않는다(§2).",
         "properties": {
@@ -2354,10 +3440,135 @@
         "title": "ExecutionResponse",
         "type": "object"
       },
+      "FXRate": {
+        "description": "환율 스냅샷. 8.1-A 다중소스 교차검증과 동일한 원칙 적용 대상.",
+        "properties": {
+          "base": {
+            "$ref": "#/components/schemas/Currency"
+          },
+          "quote": {
+            "$ref": "#/components/schemas/Currency"
+          },
+          "rate": {
+            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+            "title": "Rate",
+            "type": "string"
+          },
+          "source": {
+            "title": "Source",
+            "type": "string"
+          },
+          "timestamp": {
+            "format": "date-time",
+            "title": "Timestamp",
+            "type": "string"
+          }
+        },
+        "required": [
+          "base",
+          "quote",
+          "rate",
+          "timestamp",
+          "source"
+        ],
+        "title": "FXRate",
+        "type": "object"
+      },
+      "FillView": {
+        "properties": {
+          "bar_index": {
+            "title": "Bar Index",
+            "type": "integer"
+          },
+          "commission": {
+            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+            "title": "Commission",
+            "type": "string"
+          },
+          "open_time": {
+            "format": "date-time",
+            "title": "Open Time",
+            "type": "string"
+          },
+          "order_type": {
+            "enum": [
+              "market",
+              "limit",
+              "stop"
+            ],
+            "title": "Order Type",
+            "type": "string"
+          },
+          "price": {
+            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+            "title": "Price",
+            "type": "string"
+          },
+          "quantity": {
+            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+            "title": "Quantity",
+            "type": "string"
+          },
+          "remaining_quantity": {
+            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+            "title": "Remaining Quantity",
+            "type": "string"
+          },
+          "side": {
+            "$ref": "#/components/schemas/OrderSide"
+          }
+        },
+        "required": [
+          "bar_index",
+          "open_time",
+          "side",
+          "order_type",
+          "quantity",
+          "price",
+          "commission",
+          "remaining_quantity"
+        ],
+        "title": "FillView",
+        "type": "object"
+      },
+      "FixedSlippage": {
+        "description": "봉마다 고정 bps만큼 불리한 체결가를 가정한다.",
+        "properties": {
+          "bps": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                "type": "string"
+              }
+            ],
+            "title": "Bps"
+          },
+          "kind": {
+            "const": "fixed",
+            "default": "fixed",
+            "title": "Kind",
+            "type": "string"
+          }
+        },
+        "required": [
+          "bps"
+        ],
+        "title": "FixedSlippage",
+        "type": "object"
+      },
       "GateKind": {
+        "description": "L4_risk_and_safety_v1.0.md §3.1/§6(`f4b9d6e5a7c8`) 6종 그대로.",
         "enum": [
           "DEPLOYMENT",
-          "PRE_INTENT"
+          "PRE_INTENT",
+          "PRE_TRADE",
+          "PRE_SUBMIT",
+          "INTRADAY",
+          "RECOVERY"
         ],
         "title": "GateKind",
         "type": "string"
@@ -2526,12 +3737,149 @@
         "title": "IndicatorListResponse",
         "type": "object"
       },
+      "InstrumentListView": {
+        "description": "프론트 `toInstrumentListResult`(clients/marketData.ts)가 `items`/\n`next_cursor`를 data 안에서 읽는다 — `meta.page.next_cursor`에도 같은\n값을 싣지만 data 쪽 필드가 그 클라이언트의 계약이다.",
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/InstrumentRef"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Cursor"
+          }
+        },
+        "required": [
+          "items",
+          "next_cursor"
+        ],
+        "title": "InstrumentListView",
+        "type": "object"
+      },
+      "InstrumentRef": {
+        "properties": {
+          "asset_class": {
+            "$ref": "#/components/schemas/AssetClass"
+          },
+          "base": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Base"
+          },
+          "canonical_symbol": {
+            "title": "Canonical Symbol",
+            "type": "string"
+          },
+          "delisted_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Delisted At"
+          },
+          "instrument_id": {
+            "format": "uuid",
+            "title": "Instrument Id",
+            "type": "string"
+          },
+          "listed_at": {
+            "format": "date-time",
+            "title": "Listed At",
+            "type": "string"
+          },
+          "lot_size": {
+            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+            "title": "Lot Size",
+            "type": "string"
+          },
+          "quote": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Quote"
+          },
+          "schema_version": {
+            "const": "v1",
+            "default": "v1",
+            "title": "Schema Version",
+            "type": "string"
+          },
+          "status": {
+            "$ref": "#/components/schemas/SymbolStatus"
+          },
+          "tick_size": {
+            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+            "title": "Tick Size",
+            "type": "string"
+          },
+          "venue": {
+            "$ref": "#/components/schemas/Venue"
+          },
+          "venue_symbol": {
+            "title": "Venue Symbol",
+            "type": "string"
+          }
+        },
+        "required": [
+          "instrument_id",
+          "venue",
+          "canonical_symbol",
+          "venue_symbol",
+          "asset_class",
+          "base",
+          "quote",
+          "tick_size",
+          "lot_size",
+          "status",
+          "listed_at",
+          "delisted_at"
+        ],
+        "title": "InstrumentRef",
+        "type": "object"
+      },
       "InvestmentGoal": {
         "enum": [
           "SHORT_TERM_PROFIT",
           "LONG_TERM_GROWTH"
         ],
         "title": "InvestmentGoal",
+        "type": "string"
+      },
+      "JournalEntryType": {
+        "enum": [
+          "FILL",
+          "FUNDING",
+          "FEE",
+          "ADJUSTMENT",
+          "CORP_ACTION"
+        ],
+        "title": "JournalEntryType",
         "type": "string"
       },
       "LiquidityNeed": {
@@ -2766,6 +4114,39 @@
           "password"
         ],
         "title": "LoginRequest",
+        "type": "object"
+      },
+      "Lot": {
+        "description": "원가법 로트 하나(FIFO/WEIGHTED 공통 표현, LB-2/LB-3 소비).",
+        "properties": {
+          "opened_at": {
+            "format": "date-time",
+            "title": "Opened At",
+            "type": "string"
+          },
+          "quantity": {
+            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+            "title": "Quantity",
+            "type": "string"
+          },
+          "schema_version": {
+            "const": "v1",
+            "default": "v1",
+            "title": "Schema Version",
+            "type": "string"
+          },
+          "unit_cost": {
+            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+            "title": "Unit Cost",
+            "type": "string"
+          }
+        },
+        "required": [
+          "quantity",
+          "unit_cost",
+          "opened_at"
+        ],
+        "title": "Lot",
         "type": "object"
       },
       "MandateRevisionState": {
@@ -3167,6 +4548,148 @@
         "title": "MoneyValue",
         "type": "object"
       },
+      "NAVSnapshot": {
+        "description": "일별 NAV 체인 한 행(§4.3 \"전일 NAV + 손익 + 자금흐름 = 당일 NAV\",\nDB `CHECK(closing_nav = cash + positions_mv)`).",
+        "properties": {
+          "account_id": {
+            "format": "uuid",
+            "title": "Account Id",
+            "type": "string"
+          },
+          "base_currency": {
+            "$ref": "#/components/schemas/Currency"
+          },
+          "cash": {
+            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+            "title": "Cash",
+            "type": "string"
+          },
+          "closing_nav": {
+            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+            "title": "Closing Nav",
+            "type": "string"
+          },
+          "fees": {
+            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+            "title": "Fees",
+            "type": "string"
+          },
+          "flows": {
+            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+            "title": "Flows",
+            "type": "string"
+          },
+          "funding": {
+            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+            "title": "Funding",
+            "type": "string"
+          },
+          "fx_rates": {
+            "items": {
+              "$ref": "#/components/schemas/FXRate"
+            },
+            "title": "Fx Rates",
+            "type": "array"
+          },
+          "nav_date": {
+            "format": "date",
+            "title": "Nav Date",
+            "type": "string"
+          },
+          "opening_nav": {
+            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+            "title": "Opening Nav",
+            "type": "string"
+          },
+          "positions_mv": {
+            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+            "title": "Positions Mv",
+            "type": "string"
+          },
+          "realized": {
+            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+            "title": "Realized",
+            "type": "string"
+          },
+          "schema_version": {
+            "const": "v1",
+            "default": "v1",
+            "title": "Schema Version",
+            "type": "string"
+          },
+          "source_hash": {
+            "title": "Source Hash",
+            "type": "string"
+          },
+          "unrealized_delta": {
+            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+            "title": "Unrealized Delta",
+            "type": "string"
+          }
+        },
+        "required": [
+          "account_id",
+          "nav_date",
+          "base_currency",
+          "opening_nav",
+          "cash",
+          "positions_mv",
+          "realized",
+          "unrealized_delta",
+          "funding",
+          "fees",
+          "flows",
+          "closing_nav",
+          "fx_rates",
+          "source_hash"
+        ],
+        "title": "NAVSnapshot",
+        "type": "object"
+      },
+      "NavSeriesResponse": {
+        "description": "`missing_dates`는 범위 안에서 아직 NAV가 산출되지 않은 날 — 0으로\n채우지 않고 빠졌다는 사실을 그대로 드러낸다(FD-3.3 \"never assume zero\").",
+        "properties": {
+          "account_id": {
+            "format": "uuid",
+            "title": "Account Id",
+            "type": "string"
+          },
+          "end_date": {
+            "format": "date",
+            "title": "End Date",
+            "type": "string"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/NAVSnapshot"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "missing_dates": {
+            "items": {
+              "format": "date",
+              "type": "string"
+            },
+            "title": "Missing Dates",
+            "type": "array"
+          },
+          "start_date": {
+            "format": "date",
+            "title": "Start Date",
+            "type": "string"
+          }
+        },
+        "required": [
+          "account_id",
+          "start_date",
+          "end_date",
+          "items",
+          "missing_dates"
+        ],
+        "title": "NavSeriesResponse",
+        "type": "object"
+      },
       "NotificationHistoryEntry": {
         "properties": {
           "channel": {
@@ -3203,6 +4726,43 @@
         ],
         "title": "OptionType",
         "type": "string"
+      },
+      "OrderSide": {
+        "enum": [
+          "BUY",
+          "SELL"
+        ],
+        "title": "OrderSide",
+        "type": "string"
+      },
+      "OrderTypesConfig": {
+        "description": "엔진이 허용하는 주문유형 스위치. 꺼진 유형으로 들어온 주문은 체결\n모델(BT-6)이 거부한다.",
+        "properties": {
+          "limit": {
+            "title": "Limit",
+            "type": "boolean"
+          },
+          "oco": {
+            "title": "Oco",
+            "type": "boolean"
+          },
+          "stop": {
+            "title": "Stop",
+            "type": "boolean"
+          },
+          "trailing": {
+            "title": "Trailing",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "limit",
+          "stop",
+          "oco",
+          "trailing"
+        ],
+        "title": "OrderTypesConfig",
+        "type": "object"
       },
       "PageMeta": {
         "properties": {
@@ -3322,6 +4882,30 @@
         "title": "PaperDeploymentView",
         "type": "object"
       },
+      "PartialFillConfig": {
+        "description": "한 봉에서 채울 수 있는 최대 참여율(0 초과 1 이하) — 초과 주문은\n체결 모델(BT-5)이 부분체결로 처리한다.",
+        "properties": {
+          "max_participation_pct": {
+            "anyOf": [
+              {
+                "exclusiveMinimum": 0.0,
+                "maximum": 1.0,
+                "type": "number"
+              },
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                "type": "string"
+              }
+            ],
+            "title": "Max Participation Pct"
+          }
+        },
+        "required": [
+          "max_participation_pct"
+        ],
+        "title": "PartialFillConfig",
+        "type": "object"
+      },
       "PayoutBatchView": {
         "properties": {
           "amount": {
@@ -3410,6 +4994,35 @@
           "paid_entry_id"
         ],
         "title": "PayoutBatchView",
+        "type": "object"
+      },
+      "PercentSlippage": {
+        "description": "체결가 대비 고정 비율(%)만큼 불리한 체결가를 가정한다.",
+        "properties": {
+          "kind": {
+            "const": "percent",
+            "default": "percent",
+            "title": "Kind",
+            "type": "string"
+          },
+          "pct": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                "type": "string"
+              }
+            ],
+            "title": "Pct"
+          }
+        },
+        "required": [
+          "pct"
+        ],
+        "title": "PercentSlippage",
         "type": "object"
       },
       "PerformanceStatementListResponse": {
@@ -4056,6 +5669,310 @@
         "title": "Position",
         "type": "object"
       },
+      "PositionJournalEntryView": {
+        "description": "append-only `pos_journal` 행 하나의 뷰(§4.3 저널 불변조건).",
+        "properties": {
+          "entry_hash": {
+            "title": "Entry Hash",
+            "type": "string"
+          },
+          "entry_type": {
+            "$ref": "#/components/schemas/JournalEntryType"
+          },
+          "fee": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Money"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "fx_rate": {
+            "anyOf": [
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Fx Rate"
+          },
+          "fx_source": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Fx Source"
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "idempotency_key": {
+            "title": "Idempotency Key",
+            "type": "string"
+          },
+          "occurred_at": {
+            "format": "date-time",
+            "title": "Occurred At",
+            "type": "string"
+          },
+          "position_key": {
+            "title": "Position Key",
+            "type": "string"
+          },
+          "prev_hash": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Prev Hash"
+          },
+          "price": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Money"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "qty_delta": {
+            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+            "title": "Qty Delta",
+            "type": "string"
+          },
+          "realized_pnl_base": {
+            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+            "title": "Realized Pnl Base",
+            "type": "string"
+          },
+          "recorded_at": {
+            "format": "date-time",
+            "title": "Recorded At",
+            "type": "string"
+          },
+          "schema_version": {
+            "const": "v1",
+            "default": "v1",
+            "title": "Schema Version",
+            "type": "string"
+          },
+          "sequence_no": {
+            "title": "Sequence No",
+            "type": "integer"
+          },
+          "source_event_id": {
+            "title": "Source Event Id",
+            "type": "string"
+          },
+          "source_event_type": {
+            "title": "Source Event Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "position_key",
+          "sequence_no",
+          "entry_type",
+          "qty_delta",
+          "price",
+          "fee",
+          "realized_pnl_base",
+          "fx_rate",
+          "fx_source",
+          "source_event_type",
+          "source_event_id",
+          "idempotency_key",
+          "prev_hash",
+          "entry_hash",
+          "occurred_at",
+          "recorded_at"
+        ],
+        "title": "PositionJournalEntryView",
+        "type": "object"
+      },
+      "PositionJournalResponse": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/PositionJournalEntryView"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "position_key": {
+            "title": "Position Key",
+            "type": "string"
+          }
+        },
+        "required": [
+          "position_key",
+          "items"
+        ],
+        "title": "PositionJournalResponse",
+        "type": "object"
+      },
+      "PositionListResponse": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/PositionSnapshotView"
+            },
+            "title": "Items",
+            "type": "array"
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "title": "PositionListResponse",
+        "type": "object"
+      },
+      "PositionSnapshotView": {
+        "description": "저널의 fold 결과(§4.3 \"스냅샷 = fold(저널)\"). 미실현 PnL은 마크\n없으면 `None`(0 아님).",
+        "properties": {
+          "account_id": {
+            "format": "uuid",
+            "title": "Account Id",
+            "type": "string"
+          },
+          "avg_cost": {
+            "$ref": "#/components/schemas/Money"
+          },
+          "base_currency": {
+            "$ref": "#/components/schemas/Currency"
+          },
+          "cost_method": {
+            "$ref": "#/components/schemas/CostMethod"
+          },
+          "fees_base": {
+            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+            "title": "Fees Base",
+            "type": "string"
+          },
+          "funding_base": {
+            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+            "title": "Funding Base",
+            "type": "string"
+          },
+          "instrument_id": {
+            "format": "uuid",
+            "title": "Instrument Id",
+            "type": "string"
+          },
+          "last_journal_seq": {
+            "title": "Last Journal Seq",
+            "type": "integer"
+          },
+          "lots": {
+            "items": {
+              "$ref": "#/components/schemas/Lot"
+            },
+            "title": "Lots",
+            "type": "array"
+          },
+          "mark_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Mark At"
+          },
+          "mark_price": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Money"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "position_key": {
+            "title": "Position Key",
+            "type": "string"
+          },
+          "quantity": {
+            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+            "title": "Quantity",
+            "type": "string"
+          },
+          "realized_pnl_base": {
+            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+            "title": "Realized Pnl Base",
+            "type": "string"
+          },
+          "schema_version": {
+            "const": "v1",
+            "default": "v1",
+            "title": "Schema Version",
+            "type": "string"
+          },
+          "tenant_id": {
+            "format": "uuid",
+            "title": "Tenant Id",
+            "type": "string"
+          },
+          "unrealized_pnl_base": {
+            "anyOf": [
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Unrealized Pnl Base"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "title": "Updated At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "position_key",
+          "tenant_id",
+          "account_id",
+          "instrument_id",
+          "quantity",
+          "avg_cost",
+          "cost_method",
+          "lots",
+          "realized_pnl_base",
+          "unrealized_pnl_base",
+          "fees_base",
+          "funding_base",
+          "mark_price",
+          "mark_at",
+          "base_currency",
+          "last_journal_seq",
+          "updated_at"
+        ],
+        "title": "PositionSnapshotView",
+        "type": "object"
+      },
       "PreferenceUpdateResult": {
         "properties": {
           "applied": {
@@ -4380,6 +6297,33 @@
         "title": "PurchaseResponse",
         "type": "object"
       },
+      "PutDrawingsRequest": {
+        "properties": {
+          "drawings": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Drawings",
+            "type": "array"
+          },
+          "expected_revision": {
+            "title": "Expected Revision",
+            "type": "integer"
+          },
+          "schema_version": {
+            "title": "Schema Version",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "expected_revision",
+          "schema_version",
+          "drawings"
+        ],
+        "title": "PutDrawingsRequest",
+        "type": "object"
+      },
       "QueuedListing": {
         "properties": {
           "listing_id": {
@@ -4426,6 +6370,182 @@
           "submitted_at"
         ],
         "title": "QueuedListing",
+        "type": "object"
+      },
+      "QuickBacktestRequest": {
+        "properties": {
+          "as_of": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "As Of"
+          },
+          "config": {
+            "$ref": "#/components/schemas/BacktestConfigV2"
+          },
+          "end": {
+            "format": "date-time",
+            "title": "End",
+            "type": "string"
+          },
+          "funding_rate": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Funding Rate"
+          },
+          "initial_cash": {
+            "anyOf": [
+              {
+                "exclusiveMinimum": 0.0,
+                "type": "number"
+              },
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                "type": "string"
+              }
+            ],
+            "title": "Initial Cash"
+          },
+          "instrument_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Instrument Id"
+          },
+          "script_source": {
+            "maxLength": 64000,
+            "minLength": 1,
+            "title": "Script Source",
+            "type": "string"
+          },
+          "start": {
+            "format": "date-time",
+            "title": "Start",
+            "type": "string"
+          },
+          "symbol": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Symbol"
+          },
+          "timeframe": {
+            "$ref": "#/components/schemas/Timeframe"
+          },
+          "venue": {
+            "$ref": "#/components/schemas/Venue"
+          }
+        },
+        "required": [
+          "venue",
+          "timeframe",
+          "start",
+          "end",
+          "initial_cash",
+          "config",
+          "script_source"
+        ],
+        "title": "QuickBacktestRequest",
+        "type": "object"
+      },
+      "QuickBacktestResultView": {
+        "properties": {
+          "bars": {
+            "title": "Bars",
+            "type": "integer"
+          },
+          "borrow_cost": {
+            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+            "title": "Borrow Cost",
+            "type": "string"
+          },
+          "cash": {
+            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+            "title": "Cash",
+            "type": "string"
+          },
+          "equity_curve": {
+            "items": {
+              "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+              "type": "string"
+            },
+            "title": "Equity Curve",
+            "type": "array"
+          },
+          "expired_orders": {
+            "title": "Expired Orders",
+            "type": "integer"
+          },
+          "fills": {
+            "items": {
+              "$ref": "#/components/schemas/FillView"
+            },
+            "title": "Fills",
+            "type": "array"
+          },
+          "final_equity": {
+            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+            "title": "Final Equity",
+            "type": "string"
+          },
+          "funding_cost": {
+            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+            "title": "Funding Cost",
+            "type": "string"
+          },
+          "position_quantity": {
+            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+            "title": "Position Quantity",
+            "type": "string"
+          },
+          "warnings": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Warnings",
+            "type": "array"
+          }
+        },
+        "required": [
+          "fills",
+          "equity_curve",
+          "final_equity",
+          "cash",
+          "position_quantity",
+          "funding_cost",
+          "borrow_cost",
+          "bars",
+          "expired_orders",
+          "warnings"
+        ],
+        "title": "QuickBacktestResultView",
         "type": "object"
       },
       "RebalanceAdjustmentRequest": {
@@ -4678,6 +6798,117 @@
         "title": "ReconciliationStateView",
         "type": "object"
       },
+      "RefreshRequest": {
+        "description": "PLT-24 — `session_id`를 함께 보내야 하는 이유는\n`src/services/auth/refresh.py` 모듈 docstring 참조: refresh_hash만으로는\n회전된 옛 토큰을 역참조할 수 없다.",
+        "properties": {
+          "refresh_token": {
+            "title": "Refresh Token",
+            "type": "string"
+          },
+          "session_id": {
+            "format": "uuid",
+            "title": "Session Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "session_id",
+          "refresh_token"
+        ],
+        "title": "RefreshRequest",
+        "type": "object"
+      },
+      "ReplaySeriesView": {
+        "properties": {
+          "adjustment": {
+            "$ref": "#/components/schemas/Adjustment"
+          },
+          "as_of": {
+            "format": "date-time",
+            "title": "As Of",
+            "type": "string"
+          },
+          "candles": {
+            "items": {
+              "$ref": "#/components/schemas/CandleRecord"
+            },
+            "title": "Candles",
+            "type": "array"
+          },
+          "canonical_symbol": {
+            "title": "Canonical Symbol",
+            "type": "string"
+          },
+          "entitlement": {
+            "$ref": "#/components/schemas/EntitlementView"
+          },
+          "expected_count": {
+            "title": "Expected Count",
+            "type": "integer"
+          },
+          "gaps": {
+            "items": {
+              "maxItems": 2,
+              "minItems": 2,
+              "prefixItems": [
+                {
+                  "format": "date-time",
+                  "type": "string"
+                },
+                {
+                  "format": "date-time",
+                  "type": "string"
+                }
+              ],
+              "type": "array"
+            },
+            "title": "Gaps",
+            "type": "array"
+          },
+          "instrument_id": {
+            "format": "uuid",
+            "title": "Instrument Id",
+            "type": "string"
+          },
+          "key": {
+            "$ref": "#/components/schemas/SeriesKey"
+          },
+          "missing_count": {
+            "title": "Missing Count",
+            "type": "integer"
+          },
+          "schema_version": {
+            "const": "v1",
+            "default": "v1",
+            "title": "Schema Version",
+            "type": "string"
+          },
+          "series_hash": {
+            "title": "Series Hash",
+            "type": "string"
+          },
+          "symbol": {
+            "title": "Symbol",
+            "type": "string"
+          }
+        },
+        "required": [
+          "instrument_id",
+          "symbol",
+          "canonical_symbol",
+          "entitlement",
+          "key",
+          "candles",
+          "gaps",
+          "adjustment",
+          "as_of",
+          "series_hash",
+          "expected_count",
+          "missing_count"
+        ],
+        "title": "ReplaySeriesView",
+        "type": "object"
+      },
       "ReportSummary": {
         "properties": {
           "daily_pnl": {
@@ -4800,6 +7031,44 @@
           "reason"
         ],
         "title": "ResolveReconciliationRequest",
+        "type": "object"
+      },
+      "ResourceEstimateView": {
+        "properties": {
+          "call_count": {
+            "title": "Call Count",
+            "type": "integer"
+          },
+          "call_depth": {
+            "title": "Call Depth",
+            "type": "integer"
+          },
+          "lookback_total": {
+            "title": "Lookback Total",
+            "type": "integer"
+          },
+          "op_count": {
+            "title": "Op Count",
+            "type": "integer"
+          },
+          "plot_count": {
+            "title": "Plot Count",
+            "type": "integer"
+          },
+          "series_count": {
+            "title": "Series Count",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "series_count",
+          "lookback_total",
+          "op_count",
+          "call_count",
+          "call_depth",
+          "plot_count"
+        ],
+        "title": "ResourceEstimateView",
         "type": "object"
       },
       "RetireRequest": {
@@ -4998,6 +7267,18 @@
             "default": "v1",
             "title": "Schema Version",
             "type": "string"
+          },
+          "trace_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Trace Id"
           }
         },
         "required": [
@@ -5077,6 +7358,140 @@
           "next_reassessment_due"
         ],
         "title": "RiskProfileResponse",
+        "type": "object"
+      },
+      "RiskRuleBundle": {
+        "description": "78번 §1 `risk_rule_bundle` 테이블 1:1 순수 값 객체.",
+        "properties": {
+          "activated_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Activated At"
+          },
+          "approval_ref": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Approval Ref"
+          },
+          "approved_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Approved At"
+          },
+          "approved_by": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Approved By"
+          },
+          "created_by": {
+            "format": "uuid",
+            "title": "Created By",
+            "type": "string"
+          },
+          "effective_from": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Effective From"
+          },
+          "effective_to": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Effective To"
+          },
+          "engine_version": {
+            "title": "Engine Version",
+            "type": "string"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "policy_snapshot": {
+            "additionalProperties": true,
+            "title": "Policy Snapshot",
+            "type": "object"
+          },
+          "retired_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Retired At"
+          },
+          "rule_hash": {
+            "title": "Rule Hash",
+            "type": "string"
+          },
+          "scope": {
+            "default": "GLOBAL",
+            "title": "Scope",
+            "type": "string"
+          },
+          "state": {
+            "$ref": "#/components/schemas/BundleState"
+          },
+          "version": {
+            "title": "Version",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "version",
+          "rule_hash",
+          "engine_version",
+          "policy_snapshot",
+          "state",
+          "created_by"
+        ],
+        "title": "RiskRuleBundle",
         "type": "object"
       },
       "RunReconciliationRequest": {
@@ -5194,6 +7609,17 @@
             "title": "Id",
             "type": "string"
           },
+          "idempotency_digest": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Idempotency Digest"
+          },
           "reason": {
             "title": "Reason",
             "type": "string"
@@ -5261,6 +7687,35 @@
           "suspended_at"
         ],
         "title": "SellerSuspensionResult",
+        "type": "object"
+      },
+      "SeriesKey": {
+        "description": "캔들/틱 시계열 식별자(venue, instrument, timeframe).",
+        "properties": {
+          "instrument_id": {
+            "format": "uuid",
+            "title": "Instrument Id",
+            "type": "string"
+          },
+          "schema_version": {
+            "const": "v1",
+            "default": "v1",
+            "title": "Schema Version",
+            "type": "string"
+          },
+          "timeframe": {
+            "$ref": "#/components/schemas/Timeframe"
+          },
+          "venue": {
+            "$ref": "#/components/schemas/Venue"
+          }
+        },
+        "required": [
+          "venue",
+          "instrument_id",
+          "timeframe"
+        ],
+        "title": "SeriesKey",
         "type": "object"
       },
       "SetMaxDrawdownRequest": {
@@ -5685,22 +8140,111 @@
         "title": "SuspendSellerRequest",
         "type": "object"
       },
-      "TokenResponse": {
+      "SymbolAliasRef": {
+        "description": "LA-24 — `md_symbol_alias` 1행의 읽기 표현. `contracts/v1.py`가 이미\n300줄 상한(P6.line_cap)에 닿아 있어 `ports/coverage_repository.CoverageSpan`\n과 같은 방식으로 포트가 읽기 계약을 직접 정의한다.",
+        "properties": {
+          "alias_id": {
+            "format": "uuid",
+            "title": "Alias Id",
+            "type": "string"
+          },
+          "alias_symbol": {
+            "title": "Alias Symbol",
+            "type": "string"
+          },
+          "instrument_id": {
+            "format": "uuid",
+            "title": "Instrument Id",
+            "type": "string"
+          },
+          "valid_from": {
+            "format": "date-time",
+            "title": "Valid From",
+            "type": "string"
+          },
+          "valid_to": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Valid To"
+          },
+          "venue": {
+            "$ref": "#/components/schemas/Venue"
+          }
+        },
+        "required": [
+          "alias_id",
+          "instrument_id",
+          "venue",
+          "alias_symbol",
+          "valid_from",
+          "valid_to"
+        ],
+        "title": "SymbolAliasRef",
+        "type": "object"
+      },
+      "SymbolStatus": {
+        "enum": [
+          "PENDING",
+          "LISTED",
+          "SUSPENDED",
+          "DELISTED"
+        ],
+        "title": "SymbolStatus",
+        "type": "string"
+      },
+      "Timeframe": {
+        "enum": [
+          "1m",
+          "5m",
+          "15m",
+          "30m",
+          "1h",
+          "4h",
+          "1d"
+        ],
+        "title": "Timeframe",
+        "type": "string"
+      },
+      "TokenPairResponse": {
         "properties": {
           "access_token": {
             "title": "Access Token",
             "type": "string"
           },
+          "expires_in": {
+            "title": "Expires In",
+            "type": "integer"
+          },
+          "refresh_token": {
+            "title": "Refresh Token",
+            "type": "string"
+          },
+          "session_id": {
+            "format": "uuid",
+            "title": "Session Id",
+            "type": "string"
+          },
           "token_type": {
+            "const": "bearer",
             "default": "bearer",
             "title": "Token Type",
             "type": "string"
           }
         },
         "required": [
-          "access_token"
+          "access_token",
+          "refresh_token",
+          "expires_in",
+          "session_id"
         ],
-        "title": "TokenResponse",
+        "title": "TokenPairResponse",
         "type": "object"
       },
       "TopupRequestBody": {
@@ -5751,6 +8295,45 @@
           "as_of"
         ],
         "title": "TrustStatusResponse",
+        "type": "object"
+      },
+      "UpdateChartLayoutRequest": {
+        "description": "부분 갱신 — `name`/`layout_state` 중 최소 하나는 있어야 한다.",
+        "properties": {
+          "expected_revision": {
+            "title": "Expected Revision",
+            "type": "integer"
+          },
+          "layout_state": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Layout State"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "maxLength": 120,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          }
+        },
+        "required": [
+          "expected_revision"
+        ],
+        "title": "UpdateChartLayoutRequest",
         "type": "object"
       },
       "UserResponse": {
@@ -6015,6 +8598,72 @@
         "title": "ValidationResultView",
         "type": "object"
       },
+      "Venue": {
+        "description": "세션 규칙(A3) 조회 키. KIS는 시장별로 캘린더가 달라 KRX/US를 분리한다.",
+        "enum": [
+          "BITGET",
+          "KIS_KRX",
+          "KIS_US"
+        ],
+        "title": "Venue",
+        "type": "string"
+      },
+      "VenueTierCommission": {
+        "description": "거래소·등급별 메이커/테이커 수수료 + 최소 수수료(정액).",
+        "properties": {
+          "maker_bps": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                "type": "string"
+              }
+            ],
+            "title": "Maker Bps"
+          },
+          "min_fee": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                "type": "string"
+              }
+            ],
+            "title": "Min Fee"
+          },
+          "taker_bps": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                "type": "string"
+              }
+            ],
+            "title": "Taker Bps"
+          },
+          "venue": {
+            "title": "Venue",
+            "type": "string"
+          }
+        },
+        "required": [
+          "venue",
+          "maker_bps",
+          "taker_bps",
+          "min_fee"
+        ],
+        "title": "VenueTierCommission",
+        "type": "object"
+      },
       "VerificationDecisionRequest": {
         "properties": {
           "decision": {
@@ -6037,6 +8686,50 @@
           "decision"
         ],
         "title": "VerificationDecisionRequest",
+        "type": "object"
+      },
+      "VolumeImpactSlippage": {
+        "description": "주문량이 봉 거래량에서 차지하는 참여율(participation)에 비례해\n시장충격을 가한다. `participation_cap`은 한 봉에서 소화 가능한 최대\n참여율(0 초과 1 이하) — 초과분 이월 처리는 체결 모델(BT-2~7)의 책임.",
+        "properties": {
+          "k": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                "type": "string"
+              }
+            ],
+            "title": "K"
+          },
+          "kind": {
+            "const": "volume_impact",
+            "default": "volume_impact",
+            "title": "Kind",
+            "type": "string"
+          },
+          "participation_cap": {
+            "anyOf": [
+              {
+                "exclusiveMinimum": 0.0,
+                "maximum": 1.0,
+                "type": "number"
+              },
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                "type": "string"
+              }
+            ],
+            "title": "Participation Cap"
+          }
+        },
+        "required": [
+          "k",
+          "participation_cap"
+        ],
+        "title": "VolumeImpactSlippage",
         "type": "object"
       },
       "WalletBalanceView": {
@@ -7338,7 +10031,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ApiResponse_TokenResponse_"
+                  "$ref": "#/components/schemas/ApiResponse_TokenPairResponse_"
                 }
               }
             },
@@ -7363,7 +10056,6 @@
     },
     "/auth/logout": {
       "post": {
-        "description": "Draft — stateless JWT라 서버측 무효화 메커니즘은 착수 시 확정 필요\n(16_backend_signatures.md 원문 그대로, 지금은 클라이언트가 토큰을\n버리는 것으로 충분하다고 가정).",
         "operationId": "logout_auth_logout_post",
         "responses": {
           "200": {
@@ -7383,6 +10075,32 @@
           }
         ],
         "summary": "Logout",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/auth/logout-all": {
+      "post": {
+        "operationId": "logout_all_auth_logout_all_post",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiResponse_dict_str__int__"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Logout All",
         "tags": [
           "auth"
         ]
@@ -7487,6 +10205,47 @@
         ]
       }
     },
+    "/auth/refresh": {
+      "post": {
+        "operationId": "refresh_auth_refresh_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RefreshRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiResponse_TokenPairResponse_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Refresh",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
     "/auth/register": {
       "post": {
         "operationId": "register_auth_register_post",
@@ -7505,7 +10264,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ApiResponse_TokenResponse_"
+                  "$ref": "#/components/schemas/ApiResponse_TokenPairResponse_"
                 }
               }
             },
@@ -8238,6 +10997,32 @@
         ]
       }
     },
+    "/livez": {
+      "get": {
+        "description": "DB 미접촉 liveness — 프로세스가 요청에 응답할 수 있는지만 확인한다.",
+        "operationId": "livez_livez_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": {
+                    "type": "string"
+                  },
+                  "title": "Response Livez Livez Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Livez",
+        "tags": [
+          "health"
+        ]
+      }
+    },
     "/marketplace/disputes": {
       "post": {
         "operationId": "submit_dispute_marketplace_disputes_post",
@@ -8788,6 +11573,24 @@
     "/metrics": {
       "get": {
         "operationId": "get_metrics_metrics_get",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "X-Metrics-Token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Metrics-Token"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "content": {
@@ -8796,6 +11599,16 @@
               }
             },
             "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
           }
         },
         "summary": "Get Metrics",
@@ -9043,6 +11856,25 @@
         "summary": "Rebalance",
         "tags": [
           "portfolio"
+        ]
+      }
+    },
+    "/readyz": {
+      "get": {
+        "operationId": "readyz_readyz_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Readyz",
+        "tags": [
+          "health"
         ]
       }
     },
@@ -10025,6 +12857,369 @@
         ]
       }
     },
+    "/v1/backtests/quick": {
+      "post": {
+        "operationId": "quick_backtest_endpoint_v1_backtests_quick_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/QuickBacktestRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiResponse_QuickBacktestResultView_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Quick Backtest Endpoint",
+        "tags": [
+          "backtests"
+        ]
+      }
+    },
+    "/v1/foundation/charting/layouts": {
+      "get": {
+        "operationId": "get_list_layouts_v1_foundation_charting_layouts_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiResponse_list_ChartLayoutView__"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Get List Layouts",
+        "tags": [
+          "foundation:charting"
+        ]
+      },
+      "post": {
+        "operationId": "post_create_layout_v1_foundation_charting_layouts_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateChartLayoutRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiResponse_ChartLayoutView_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Post Create Layout",
+        "tags": [
+          "foundation:charting"
+        ]
+      }
+    },
+    "/v1/foundation/charting/layouts/{layout_id}": {
+      "delete": {
+        "operationId": "delete_layout_by_id_v1_foundation_charting_layouts__layout_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "layout_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Layout Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Delete Layout By Id",
+        "tags": [
+          "foundation:charting"
+        ]
+      },
+      "get": {
+        "operationId": "get_layout_by_id_v1_foundation_charting_layouts__layout_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "layout_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Layout Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiResponse_ChartLayoutView_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Get Layout By Id",
+        "tags": [
+          "foundation:charting"
+        ]
+      },
+      "patch": {
+        "operationId": "patch_update_layout_v1_foundation_charting_layouts__layout_id__patch",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "layout_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Layout Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateChartLayoutRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiResponse_ChartLayoutView_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Patch Update Layout",
+        "tags": [
+          "foundation:charting"
+        ]
+      }
+    },
+    "/v1/foundation/charting/layouts/{layout_id}/drawings": {
+      "get": {
+        "operationId": "get_layout_drawings_v1_foundation_charting_layouts__layout_id__drawings_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "layout_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Layout Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiResponse_DrawingsDocumentView_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Get Layout Drawings",
+        "tags": [
+          "foundation:charting"
+        ]
+      },
+      "put": {
+        "operationId": "put_layout_drawings_v1_foundation_charting_layouts__layout_id__drawings_put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "layout_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Layout Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PutDrawingsRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiResponse_DrawingsDocumentView_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Put Layout Drawings",
+        "tags": [
+          "foundation:charting"
+        ]
+      }
+    },
     "/v1/foundation/connections": {
       "get": {
         "operationId": "list_connections_v1_foundation_connections_get",
@@ -10033,7 +13228,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ConnectionListResponse"
+                  "$ref": "#/components/schemas/ApiResponse_ConnectionListResponse_"
                 }
               }
             },
@@ -10067,7 +13262,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/AccountConnectionView"
+                  "$ref": "#/components/schemas/ApiResponse_AccountConnectionView_"
                 }
               }
             },
@@ -10115,7 +13310,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/AccountConnectionView"
+                  "$ref": "#/components/schemas/ApiResponse_AccountConnectionView_"
                 }
               }
             },
@@ -10163,7 +13358,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/AccountConnectionView"
+                  "$ref": "#/components/schemas/ApiResponse_AccountConnectionView_"
                 }
               }
             },
@@ -10211,7 +13406,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/AccountSnapshotView"
+                  "$ref": "#/components/schemas/ApiResponse_AccountSnapshotView_"
                 }
               }
             },
@@ -10267,11 +13462,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": {
-                    "type": "boolean"
-                  },
-                  "title": "Response Post Verify Chain V1 Foundation Evidence Chain Verify Post",
-                  "type": "object"
+                  "$ref": "#/components/schemas/ApiResponse_dict_str__bool__"
                 }
               }
             },
@@ -10369,7 +13560,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/AuditTimelinePage"
+                  "$ref": "#/components/schemas/ApiResponse_AuditTimelinePage_"
                 }
               }
             },
@@ -10415,7 +13606,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/MandateRevisionView"
+                  "$ref": "#/components/schemas/ApiResponse_MandateRevisionView_"
                 }
               }
             },
@@ -10461,7 +13652,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/MandateRevisionView"
+                  "$ref": "#/components/schemas/ApiResponse_MandateRevisionView_"
                 }
               }
             },
@@ -10497,7 +13688,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/MandateRevisionView"
+                  "$ref": "#/components/schemas/ApiResponse_MandateRevisionView_"
                 }
               }
             },
@@ -10523,7 +13714,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/MandateRevisionView"
+                  "$ref": "#/components/schemas/ApiResponse_MandateRevisionView_"
                 }
               }
             },
@@ -10559,7 +13750,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/PolicyDecisionView"
+                  "$ref": "#/components/schemas/ApiResponse_PolicyDecisionView_"
                 }
               }
             },
@@ -10617,7 +13808,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/MandateRevisionView"
+                  "$ref": "#/components/schemas/ApiResponse_MandateRevisionView_"
                 }
               }
             },
@@ -10653,7 +13844,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/MandateStatusResponse"
+                  "$ref": "#/components/schemas/ApiResponse_MandateStatusResponse_"
                 }
               }
             },
@@ -10671,6 +13862,459 @@
         ]
       }
     },
+    "/v1/foundation/market-data/candles": {
+      "get": {
+        "operationId": "get_candles_endpoint_v1_foundation_market_data_candles_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "venue",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/Venue"
+            }
+          },
+          {
+            "in": "query",
+            "name": "timeframe",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/Timeframe"
+            }
+          },
+          {
+            "in": "query",
+            "name": "start",
+            "required": true,
+            "schema": {
+              "format": "date-time",
+              "title": "Start",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "end",
+            "required": true,
+            "schema": {
+              "format": "date-time",
+              "title": "End",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "symbol",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Symbol"
+            }
+          },
+          {
+            "in": "query",
+            "name": "instrument_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Instrument Id"
+            }
+          },
+          {
+            "in": "query",
+            "name": "as_of",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "date-time",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "As Of"
+            }
+          },
+          {
+            "in": "query",
+            "name": "adjustment",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/Adjustment",
+              "default": "RAW"
+            }
+          },
+          {
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "date-time",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Cursor"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 500,
+              "maximum": 1000,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiResponse_CandleSeriesView_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Get Candles Endpoint",
+        "tags": [
+          "foundation:market-data"
+        ]
+      }
+    },
+    "/v1/foundation/market-data/candles/replay": {
+      "get": {
+        "description": "LA-17 `replay` 위임 — 결측이 하나라도 있으면 `ReplayIncompleteError`가\n409 `DATA_COVERAGE_MISSING`으로 번역된다(strict). 페이지네이션 없음(A5\n\"같은 as_of+같은 범위 → 같은 바이트\").",
+        "operationId": "replay_candles_endpoint_v1_foundation_market_data_candles_replay_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "venue",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/Venue"
+            }
+          },
+          {
+            "in": "query",
+            "name": "timeframe",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/Timeframe"
+            }
+          },
+          {
+            "in": "query",
+            "name": "start",
+            "required": true,
+            "schema": {
+              "format": "date-time",
+              "title": "Start",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "end",
+            "required": true,
+            "schema": {
+              "format": "date-time",
+              "title": "End",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "as_of",
+            "required": true,
+            "schema": {
+              "format": "date-time",
+              "title": "As Of",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "symbol",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Symbol"
+            }
+          },
+          {
+            "in": "query",
+            "name": "instrument_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Instrument Id"
+            }
+          },
+          {
+            "in": "query",
+            "name": "adjustment",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/Adjustment",
+              "default": "RAW"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiResponse_ReplaySeriesView_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Replay Candles Endpoint",
+        "tags": [
+          "foundation:market-data"
+        ]
+      }
+    },
+    "/v1/foundation/market-data/instruments": {
+      "get": {
+        "description": "자기 테넌트가 등록한 벤처의 인스트루먼트만. 등록 벤처가 없으면 빈\n목록(200) — 목록은 존재 누설 문제가 없어 404가 아니다. `cursor`는 직전\n페이지 마지막 `instrument_id`(keyset).",
+        "operationId": "list_instruments_endpoint_v1_foundation_market_data_instruments_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "venue",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/Venue"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Venue"
+            }
+          },
+          {
+            "in": "query",
+            "name": "status",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/SymbolStatus"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Status"
+            }
+          },
+          {
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Cursor"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "maximum": 200,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiResponse_InstrumentListView_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "List Instruments Endpoint",
+        "tags": [
+          "foundation:market-data"
+        ]
+      }
+    },
+    "/v1/foundation/market-data/instruments/{symbol}/aliases": {
+      "get": {
+        "description": "경로 세그먼트는 벤처 심볼(이때 `venue` 쿼리 필수) 또는 md_instrument\nUUID 둘 다 받는다(프론트 `listInstrumentAliases(instrumentId)`는 UUID를\n보낸다). UUID 형식이면 id 조회, 아니면 심볼 조회.",
+        "operationId": "list_aliases_endpoint_v1_foundation_market_data_instruments__symbol__aliases_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "symbol",
+            "required": true,
+            "schema": {
+              "title": "Symbol",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "venue",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/Venue"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Venue"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiResponse_list_SymbolAliasRef__"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "List Aliases Endpoint",
+        "tags": [
+          "foundation:market-data"
+        ]
+      }
+    },
     "/v1/foundation/paper-deployments": {
       "get": {
         "operationId": "list_deployments_v1_foundation_paper_deployments_get",
@@ -10679,7 +14323,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/DeploymentListResponse"
+                  "$ref": "#/components/schemas/ApiResponse_DeploymentListResponse_"
                 }
               }
             },
@@ -10713,7 +14357,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/PaperDeploymentView"
+                  "$ref": "#/components/schemas/ApiResponse_PaperDeploymentView_"
                 }
               }
             },
@@ -10771,7 +14415,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/PaperDeploymentView"
+                  "$ref": "#/components/schemas/ApiResponse_PaperDeploymentView_"
                 }
               }
             },
@@ -10829,7 +14473,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/PaperDeploymentView"
+                  "$ref": "#/components/schemas/ApiResponse_PaperDeploymentView_"
                 }
               }
             },
@@ -10887,7 +14531,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/PaperDeploymentView"
+                  "$ref": "#/components/schemas/ApiResponse_PaperDeploymentView_"
                 }
               }
             },
@@ -10945,7 +14589,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/PaperDeploymentView"
+                  "$ref": "#/components/schemas/ApiResponse_PaperDeploymentView_"
                 }
               }
             },
@@ -10999,7 +14643,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/PerformanceStatementListResponse"
+                  "$ref": "#/components/schemas/ApiResponse_PerformanceStatementListResponse_"
                 }
               }
             },
@@ -11047,7 +14691,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/PerformanceStatementView"
+                  "$ref": "#/components/schemas/ApiResponse_PerformanceStatementView_"
                 }
               }
             },
@@ -11105,7 +14749,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/PerformanceStatementView"
+                  "$ref": "#/components/schemas/ApiResponse_PerformanceStatementView_"
                 }
               }
             },
@@ -11151,7 +14795,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/PerformanceStatementView"
+                  "$ref": "#/components/schemas/ApiResponse_PerformanceStatementView_"
                 }
               }
             },
@@ -11187,7 +14831,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ReconciliationStateListResponse"
+                  "$ref": "#/components/schemas/ApiResponse_ReconciliationStateListResponse_"
                 }
               }
             },
@@ -11223,7 +14867,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ReconciliationRunView"
+                  "$ref": "#/components/schemas/ApiResponse_ReconciliationRunView_"
                 }
               }
             },
@@ -11281,7 +14925,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ReconciliationStateView"
+                  "$ref": "#/components/schemas/ApiResponse_ReconciliationStateView_"
                 }
               }
             },
@@ -11328,7 +14972,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/SafetyControlView"
+                  "$ref": "#/components/schemas/ApiResponse_SafetyControlView_"
                 }
               }
             },
@@ -11374,7 +15018,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/RiskEvaluationView"
+                  "$ref": "#/components/schemas/ApiResponse_RiskEvaluationView_"
                 }
               }
             },
@@ -11402,6 +15046,112 @@
         ]
       }
     },
+    "/v1/foundation/risk-gate/rule-bundles/{bundle_id}:activate": {
+      "post": {
+        "operationId": "post_activate_rule_bundle_v1_foundation_risk_gate_rule_bundles__bundle_id__activate_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "bundle_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Bundle Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiResponse_RiskRuleBundle_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Post Activate Rule Bundle",
+        "tags": [
+          "foundation:risk-gate"
+        ]
+      }
+    },
+    "/v1/foundation/risk-gate/rule-bundles/{bundle_id}:approve": {
+      "post": {
+        "operationId": "post_approve_rule_bundle_v1_foundation_risk_gate_rule_bundles__bundle_id__approve_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "bundle_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Bundle Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ApproveRuleBundleRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiResponse_RiskRuleBundle_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Post Approve Rule Bundle",
+        "tags": [
+          "foundation:risk-gate"
+        ]
+      }
+    },
     "/v1/foundation/risk-gate/safety-controls": {
       "get": {
         "operationId": "get_safety_controls_v1_foundation_risk_gate_safety_controls_get",
@@ -11410,7 +15160,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/SafetyControlListResponse"
+                  "$ref": "#/components/schemas/ApiResponse_SafetyControlListResponse_"
                 }
               }
             },
@@ -11444,7 +15194,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/SafetyControlView"
+                  "$ref": "#/components/schemas/ApiResponse_SafetyControlView_"
                 }
               }
             },
@@ -11492,7 +15242,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/SafetyControlView"
+                  "$ref": "#/components/schemas/ApiResponse_SafetyControlView_"
                 }
               }
             },
@@ -11538,7 +15288,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ConsentDecision"
+                  "$ref": "#/components/schemas/ApiResponse_ConsentDecision_"
                 }
               }
             },
@@ -11586,7 +15336,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ConsentDecision"
+                  "$ref": "#/components/schemas/ApiResponse_ConsentDecision_"
                 }
               }
             },
@@ -11622,7 +15372,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/TrustStatusResponse"
+                  "$ref": "#/components/schemas/ApiResponse_TrustStatusResponse_"
                 }
               }
             },
@@ -11678,7 +15428,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ValidationResultView"
+                  "$ref": "#/components/schemas/ApiResponse_ValidationResultView_"
                 }
               }
             },
@@ -11703,6 +15453,267 @@
         "summary": "Post Start Validation",
         "tags": [
           "foundation:validation"
+        ]
+      }
+    },
+    "/v1/positions": {
+      "get": {
+        "operationId": "get_positions_v1_positions_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "account_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Account Id"
+            }
+          },
+          {
+            "in": "query",
+            "name": "instrument_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Instrument Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiResponse_PositionListResponse_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Get Positions",
+        "tags": [
+          "positions"
+        ]
+      }
+    },
+    "/v1/positions/nav": {
+      "get": {
+        "operationId": "get_nav_series_v1_positions_nav_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "account_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Account Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "start_date",
+            "required": true,
+            "schema": {
+              "format": "date",
+              "title": "Start Date",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "end_date",
+            "required": true,
+            "schema": {
+              "format": "date",
+              "title": "End Date",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiResponse_NavSeriesResponse_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Get Nav Series",
+        "tags": [
+          "positions"
+        ]
+      }
+    },
+    "/v1/positions/{position_key}/journal": {
+      "get": {
+        "operationId": "get_position_journal_v1_positions__position_key__journal_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "position_key",
+            "required": true,
+            "schema": {
+              "title": "Position Key",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Cursor"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "maximum": 200,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiResponse_PositionJournalResponse_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Get Position Journal",
+        "tags": [
+          "positions"
+        ]
+      }
+    },
+    "/v1/scripts/compile": {
+      "post": {
+        "operationId": "compile_script_v1_scripts_compile_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CompileScriptRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiResponse_CompileScriptView_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Compile Script",
+        "tags": [
+          "scripts"
         ]
       }
     },
