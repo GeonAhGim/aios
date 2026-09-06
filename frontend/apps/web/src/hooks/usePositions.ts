@@ -38,13 +38,20 @@ export const positionsQueryKeys = {
     ["positions", "nav", params.accountId, params.startDate, params.endDate] as const,
 };
 
+export interface UsePositionListOptions {
+  /** false면 요청하지 않는다(예: StrategyMarkers가 실행을 아직 선택하지 않았을 때). */
+  enabled?: boolean;
+}
+
 export function usePositionList(
   client: Pick<PositionsClientLike, "listPositions">,
   params: PositionListParams = {},
+  { enabled = true }: UsePositionListOptions = {},
 ): UseQueryResult<PositionListResult> {
   return useQuery({
     queryKey: positionsQueryKeys.list(params),
     queryFn: () => client.listPositions(params),
+    enabled,
   });
 }
 

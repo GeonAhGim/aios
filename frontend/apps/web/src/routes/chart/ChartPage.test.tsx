@@ -10,6 +10,9 @@ vi.mock("@aios/shared-hooks", () => ({
   useMe: () => ({ data: { email: "a@example.com", isPlatformAdmin: false } }),
   useLogout: () => vi.fn(),
   useAuthStore: { getState: () => ({ token: null }) },
+  // StrategyMarkers(task-1569)의 실행 선택 전에는 positions.list를 요청하지 않으므로
+  // 이 화면 테스트에서는 실행 목록이 비어 있어도 무방하다.
+  useExecutions: () => ({ data: [] }),
 }));
 
 // CandlesPage.test.tsx와 동일한 관용: lightweight-charts는 jsdom에서 canvas를

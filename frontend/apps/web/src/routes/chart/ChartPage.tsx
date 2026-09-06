@@ -33,6 +33,7 @@ import { AppShell } from "../../components/layout/AppShell";
 import { ErrorMessage } from "../../components/ErrorMessage";
 import { ChartToolbar } from "./ChartToolbar";
 import { IndicatorPicker } from "./IndicatorPicker";
+import { StrategyMarkers } from "./StrategyMarkers";
 
 // CH-6a — 화면 조립 리프: chart-engine의 CH-2(candleStream)·CH-3(overlayRegistry)
 // ·CH-4(drawings)·CH-7(replayController) 공개 API를 이 화면에서만 소비한다.
@@ -272,6 +273,8 @@ export function ChartPage({ fetchCandles = marketDataClient.getCandles, now }: C
         ) : (
           <CandlestickChart data={points} />
         )}
+
+        <StrategyMarkers instrumentId={instrumentId} points={points} />
 
         <section aria-label="그리기 목록" className="space-y-1.5">
           <h2 className="text-sm font-medium text-fg-secondary">그리기 ({drawings.length})</h2>
