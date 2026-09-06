@@ -38,7 +38,7 @@ const COMPILE_RESULT = {
 
 describe("ScriptEditorPage", () => {
   it("컴파일 성공 시 소스를 그대로 넘기고 해시·산정치 미리보기를 보여준다", async () => {
-    const compileScript = vi.fn(async () => COMPILE_RESULT);
+    const compileScript = vi.fn(async (_source: string) => COMPILE_RESULT);
     renderPage(compileScript);
 
     fireEvent.click(screen.getByRole("button", { name: "컴파일" }));
