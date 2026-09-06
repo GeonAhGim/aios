@@ -95,6 +95,53 @@ async def test_concurrent_conditional_updates_only_one_succeeds(pool):
     assert len(failures) == 1
 
 
+async def test_extra_conditions_matching_updates_and_returns_row(pool):
+    """L4-07 — `extra_conditions`가 주 조건에 더해 걸리고, 값이 실제와 일치하면
+    정상적으로 UPDATE된다(105번 §2.1 확장, orders.version 낙관적 락의 모델)."""
+    user_id = await create_test_user(pool)
+
+    async with pool.acquire() as conn:
+        row = await conditional_update(
+            conn,
+            table="users",
+            id_column="user_id",
+            id_value=user_id,
+            expected_state_column="status",
+            expected_state_value="ACTIVE",
+            extra_conditions={"failed_login_attempts": 0},
+            set_values={"status": "SUSPENDED"},
+            returning="status",
+        )
+
+    assert row["status"] == "SUSPENDED"
+    async with pool.acquire() as conn:
+        status = await conn.fetchval("SELECT status FROM users WHERE user_id = $1", user_id)
+    assert status == "SUSPENDED"
+
+
+async def test_extra_conditions_mismatch_raises_and_does_not_write(pool):
+    """`extra_conditions`가 실제 값과 다르면(예: version 경합) 주 조건이
+    맞아도 RETURNING 0행 → ConcurrencyConflictError, 아무것도 쓰지 않는다."""
+    user_id = await create_test_user(pool)
+
+    async with pool.acquire() as conn:
+        with pytest.raises(ConcurrencyConflictError):
+            await conditional_update(
+                conn,
+                table="users",
+                id_column="user_id",
+                id_value=user_id,
+                expected_state_column="status",
+                expected_state_value="ACTIVE",  # 이건 일치
+                extra_conditions={"failed_login_attempts": 99},  # 이건 불일치(실제 0)
+                set_values={"status": "SUSPENDED"},
+            )
+
+    async with pool.acquire() as conn:
+        status = await conn.fetchval("SELECT status FROM users WHERE user_id = $1", user_id)
+    assert status == "ACTIVE"
+
+
 async def test_set_values_column_order_does_not_affect_binding(pool):
     """set_values 딕셔너리의 키 순서가 바뀌어도 값이 컬럼과 올바르게
     매칭되는지 확인 — $N 번호를 호출자가 손으로 세지 않는다는 게 이

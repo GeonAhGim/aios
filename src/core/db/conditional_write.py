@@ -34,6 +34,7 @@ async def conditional_update(
     expected_state_value: Any,
     set_values: dict[str, Any],
     returning: str = "*",
+    extra_conditions: dict[str, Any] | None = None,
 ) -> asyncpg.Record:
     """`WHERE <id_column> = $1 AND <expected_state_column> IS NOT DISTINCT FROM $2`로
     조건부 UPDATE하고 RETURNING이 빈 결과면 ConcurrencyConflictError를 던진다.
@@ -45,19 +46,34 @@ async def conditional_update(
     `IS NOT DISTINCT FROM`은 NULL과 non-NULL 양쪽에서 직관대로 동작해 그 우회를
     막는다.
 
-    `table`/`id_column`/`expected_state_column`/`returning`과 `set_values`의
-    **키**(컬럼명)는 호출자 코드에 상수로 박혀 있어야 한다(사용자 입력을 그대로
-    받지 않는다). 값은 이 함수가 전부 위치 매개변수로 바인딩하므로 호출자가
-    `$N` 번호를 직접 셀 필요가 없다 — 컬럼 순서를 잘못 세는 실수를 원천 차단한다.
+    `table`/`id_column`/`expected_state_column`/`returning`과 `set_values`/
+    `extra_conditions`의 **키**(컬럼명)는 호출자 코드에 상수로 박혀 있어야 한다
+    (사용자 입력을 그대로 받지 않는다). 값은 이 함수가 전부 위치 매개변수로
+    바인딩하므로 호출자가 `$N` 번호를 직접 셀 필요가 없다 — 컬럼 순서를 잘못
+    세는 실수를 원천 차단한다.
+
+    `extra_conditions`(기본값 없음=None, 기존 호출부는 전부 영향 없음) — 주
+    조건(`expected_state_column`) 외에 추가로 WHERE에 걸 (컬럼→기대값) 쌍.
+    L4-07 `orders` 전이가 `status` 일치에 더해 `version = $expected_version`
+    (낙관적 락, I5)까지 같은 UPDATE 문 하나로 걸 때 쓴다 — 별도 SELECT 없이
+    RETURNING 0행이면 상태·버전 둘 중 하나라도 어긋났다는 뜻이 된다.
     """
+    extra_items = list((extra_conditions or {}).items())
+    base_params = [id_value, expected_state_value, *(v for _, v in extra_items)]
+    extra_clause = "".join(
+        f" AND {col} IS NOT DISTINCT FROM ${i + 3}" for i, (col, _) in enumerate(extra_items)
+    )
+
     set_columns = list(set_values.keys())
-    set_clause = ", ".join(f"{col} = ${i + 3}" for i, col in enumerate(set_columns))
+    set_start = len(base_params) + 1
+    set_clause = ", ".join(f"{col} = ${set_start + i}" for i, col in enumerate(set_columns))
     sql = (
         f"UPDATE {table} SET {set_clause} "  # noqa: S608 — 컬럼명은 호출자 상수(위 docstring)
-        f"WHERE {id_column} = $1 AND {expected_state_column} IS NOT DISTINCT FROM $2 "
+        f"WHERE {id_column} = $1 AND {expected_state_column} IS NOT DISTINCT FROM $2"
+        f"{extra_clause} "
         f"RETURNING {returning}"
     )
-    params = [id_value, expected_state_value, *(set_values[col] for col in set_columns)]
+    params = [*base_params, *(set_values[col] for col in set_columns)]
     row = await conn.fetchrow(sql, *params)
     if row is None:
         raise ConcurrencyConflictError(
