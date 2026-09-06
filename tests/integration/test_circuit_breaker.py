@@ -252,6 +252,41 @@ async def test_instrumented_adapter_get_ohlcv_feeds_freshness_into_circuit_break
     assert result.level != CircuitBreakerLevel.HALTED
 
 
+async def test_lifespan_wires_one_freshness_tracker_to_both_call_sites(monkeypatch) -> None:
+    """배선증명 — 리뷰 REJECT(task-1742) 해소. 위의 두 테스트는 트래커를
+    손수 만들어 넘겨서 collect/evaluate 경로만 검증한다 — main.py의
+    `lifespan`이 실제로 `DataFreshnessTracker`를 "하나만" 만들어
+    `instrumented_adapter_factory(freshness=...)`와
+    `start_background_loops(freshness_tracker=...)` 양쪽에 "같은 인스턴스"로
+    주입하는지는 증명하지 못한다(둘이 각자 새 트래커를 만들어도 이 테스트들은
+    통과한다). 여기서는 실제 `src.main.app`의 lifespan을 기동하고,
+    `src.main` 모듈 전역의 두 호출 지점을 감시(spy)해 인자로 들어온
+    `freshness_tracker`가 `is` 동일 객체인지 직접 확인한다."""
+    import src.main as main_module
+
+    captured: dict[str, object] = {}
+    real_adapter_factory = main_module.instrumented_adapter_factory
+    real_start_background_loops = main_module.start_background_loops
+
+    def spy_adapter_factory(tracker, base_factory, *, freshness=None):
+        captured["adapter_factory_freshness"] = freshness
+        return real_adapter_factory(tracker, base_factory, freshness=freshness)
+
+    async def spy_start_background_loops(**kwargs):
+        captured["background_loops_freshness"] = kwargs.get("freshness_tracker")
+        return await real_start_background_loops(**kwargs)
+
+    monkeypatch.setattr(main_module, "instrumented_adapter_factory", spy_adapter_factory)
+    monkeypatch.setattr(main_module, "start_background_loops", spy_start_background_loops)
+
+    async with main_module.app.router.lifespan_context(main_module.app):
+        pass
+
+    assert captured.get("adapter_factory_freshness") is not None
+    assert captured.get("background_loops_freshness") is not None
+    assert captured["adapter_factory_freshness"] is captured["background_loops_freshness"]
+
+
 async def test_concurrent_set_level_only_one_writer_wins(pool, policy):
     """105번 §4.1 형태 A — 같은 stale `expected`(둘 다 NORMAL을 읽었다고 가정)에서
     두 코루틴이 서로 다른 레벨로 동시에 `_set_level` CAS UPDATE를 시도하면,
