@@ -290,7 +290,6 @@ describe("apiPaths ↔ GHOST_PATH_WHITELIST — implemented 플래그 정합(tas
     }
     expect(mismatched).toEqual([]);
   });
-
   it("GHOST_PATH_WHITELIST 밖의 모든 라우트는 implemented=true다(유령 경로가 몰래 추가되면 실패)", () => {
     const mismatched: string[] = [];
     for (const [name, def] of Object.entries(API_ROUTES) as Array<[ApiRouteName, ApiRouteDefinition]>) {
