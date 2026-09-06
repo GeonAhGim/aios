@@ -23,10 +23,11 @@ from src.data.models.trading import Order, OrderSide, OrderStatus, OrderType
 from src.exchanges.kis.adapter import KISAdapter
 from src.exchanges.kis.overseas_futureoption_mixin import OverseasContractExpiredError
 
-_QUOTE_PATH = "/uapi/overseas-futureoption/v1/quotations/inquire-price"
+_QUOTE_FUTURES_PATH = "/uapi/overseas-futureoption/v1/quotations/inquire-price"
+_QUOTE_OPTION_PATH = "/uapi/overseas-futureoption/v1/quotations/opt-price"
 _ORDER_PATH = "/uapi/overseas-futureoption/v1/trading/order"
 _CANCEL_PATH = "/uapi/overseas-futureoption/v1/trading/order-rvsecncl"
-_BALANCE_PATH = "/uapi/overseas-futureoption/v1/trading/inquire-balance"
+_BALANCE_PATH = "/uapi/overseas-futureoption/v1/trading/inquire-unpd"
 
 _FAR_FUTURE_EXPIRY = date(2099, 12, 1)
 
@@ -42,7 +43,7 @@ def _make_paper_adapter(captured: list[httpx.Request]) -> KISAdapter:
         if path == "/oauth2/tokenP":
             return httpx.Response(200, json={"access_token": "t", "access_token_token_expired": ""})
         captured.append(request)
-        if path == _QUOTE_PATH:
+        if path in (_QUOTE_FUTURES_PATH, _QUOTE_OPTION_PATH):
             output = {"last": "4521.50", "tvol": "12345"}
         elif path in (_ORDER_PATH, _CANCEL_PATH):
             output = {"KRX_FWDG_ORD_ORGNO": "ORG", "ODNO": "1"}
@@ -88,6 +89,7 @@ async def test_round_trip_quote_order_cancel_balance():
     assert ticker.price == Decimal("4521.50")
     quote_request = captured[-1]
     assert quote_request.url.params["SYMB"] == "ESZ26"
+    assert quote_request.url.path == _QUOTE_FUTURES_PATH
     # 시세 tr_id(H접두)는 T/J/C가 아니므로 모의투자 치환 대상이 아니다.
     assert quote_request.headers["tr_id"] == "HHDFC55010000"
 
@@ -111,6 +113,7 @@ async def test_round_trip_quote_order_cancel_balance():
     assert balances == []
     balance_request = captured[-1]
     assert balance_request.headers["tr_id"] == "OTFM1412R"
+    assert balance_request.url.path == _BALANCE_PATH
 
 
 async def test_get_option_price_uses_option_tr_id():
@@ -121,6 +124,7 @@ async def test_get_option_price_uses_option_tr_id():
     await adapter.get_overseas_futureoption_price("ESZ26C4500", is_option=True)
 
     assert captured[-1].headers["tr_id"] == "HHDFO55010000"
+    assert captured[-1].url.path == _QUOTE_OPTION_PATH
 
 
 async def test_place_order_rejects_expired_contract():

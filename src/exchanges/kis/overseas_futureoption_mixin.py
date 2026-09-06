@@ -93,10 +93,19 @@ class KISOverseasFutureoptionMixin:
     async def get_overseas_futureoption_price(
         self, symbol: str, *, is_option: bool = False
     ) -> Ticker:
+        # Cross-checked against kis_tr_reference.json (review task-1978 REJECT
+        # follow-up, task-1983): HHDFC55010000 (futures) is inquire-price,
+        # HHDFO55010000 (option) is opt-price -- the two TRs use different
+        # paths (the old code sent both through the same path).
         tr_id = "HHDFO55010000" if is_option else "HHDFC55010000"
+        path = (
+            "/uapi/overseas-futureoption/v1/quotations/opt-price"
+            if is_option
+            else "/uapi/overseas-futureoption/v1/quotations/inquire-price"
+        )
         raw = await self._request(  # type: ignore[attr-defined]
             "GET",
-            "/uapi/overseas-futureoption/v1/quotations/inquire-price",
+            path,
             tr_id,
             params={"SYMB": symbol},
         )
@@ -161,9 +170,12 @@ class KISOverseasFutureoptionMixin:
         return bool(raw.get("rt_cd") == "0")
 
     async def get_overseas_futureoption_balance(self) -> list[AccountBalance]:
+        # kis_tr_reference.json: OTFM1412R's real path is inquire-unpd
+        # (review task-1978 REJECT follow-up, task-1983 -- inquire-balance
+        # was the wrong wiring).
         raw = await self._request(  # type: ignore[attr-defined]
             "GET",
-            "/uapi/overseas-futureoption/v1/trading/inquire-balance",
+            "/uapi/overseas-futureoption/v1/trading/inquire-unpd",
             "OTFM1412R",
             params={
                 "CANO": self._cano,  # type: ignore[attr-defined]

@@ -45,6 +45,22 @@ def _order() -> Order:
     )
 
 
+def _overseas_futureoption_order() -> Order:
+    return Order(
+        client_order_id="c-1",
+        strategy_id="s-1",
+        strategy_version="v1",
+        symbol="ESZ26",
+        exchange="kis",
+        side=OrderSide.BUY,
+        order_type=OrderType.MARKET,
+        quantity=Decimal("1"),
+        asset_class=AssetClass.OVERSEAS_FUTURES,
+        contract_multiplier=Decimal("50"),
+        underlying_symbol="ES",
+    )
+
+
 async def test_place_order_rejects_live_adapter():
     live_adapter = _make_live_adapter()
 
@@ -108,3 +124,22 @@ async def test_cancel_futureoption_order_rejects_live_adapter():
 
     with pytest.raises(FrozenZonePaperAdapterBlockedError):
         await live_adapter.cancel_futureoption_order("ORG:1", quantity=Decimal("1"))
+
+
+async def test_place_overseas_futureoption_order_rejects_live_adapter():
+    """task-1983(BR-7 결함 수정, review task-1978 REJECT 후속) — 해외선물옵션도
+    Executor를 거치지 않는 확장 메서드라 동일한 방어선이 필요하다.
+    `_make_live_adapter()`의 handler는 요청이 실제로 나가면 AssertionError를
+    던지므로, 이 테스트는 가드 예외뿐 아니라 httpx 요청이 0건임도 함께
+    증명한다(AST 정적검사로는 대체할 수 없는 행위 검증)."""
+    live_adapter = _make_live_adapter()
+
+    with pytest.raises(FrozenZonePaperAdapterBlockedError):
+        await live_adapter.place_overseas_futureoption_order(_overseas_futureoption_order())
+
+
+async def test_cancel_overseas_futureoption_order_rejects_live_adapter():
+    live_adapter = _make_live_adapter()
+
+    with pytest.raises(FrozenZonePaperAdapterBlockedError):
+        await live_adapter.cancel_overseas_futureoption_order("ORG:1", quantity=Decimal("1"))
