@@ -104,7 +104,7 @@ async def _create_strategy(pool, owner_user_id: UUID) -> tuple[str, str]:
     return strategy_id, version
 
 
-async def _always_eligible(strategy_id: str, version: str) -> bool:
+async def _always_eligible(strategy_id: str, version: str, seller_user_id: object = None) -> bool:
     return True
 
 

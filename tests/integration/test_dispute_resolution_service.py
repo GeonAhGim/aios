@@ -60,7 +60,7 @@ def service(pool):
     return DisputeResolutionService(pool)
 
 
-async def _always_eligible(strategy_id, version):
+async def _always_eligible(strategy_id, version, seller_user_id=None):
     return True
 
 

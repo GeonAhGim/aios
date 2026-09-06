@@ -42,7 +42,7 @@ def _clock() -> datetime:
     return datetime.now(timezone.utc)
 
 
-async def _always_eligible(strategy_id: str, version: str) -> bool:
+async def _always_eligible(strategy_id: str, version: str, seller_user_id: object = None) -> bool:
     return True
 
 

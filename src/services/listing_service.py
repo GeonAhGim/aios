@@ -33,7 +33,7 @@ from pydantic import BaseModel
 
 from src.services.wallet_service import PLATFORM_HOUSE_USER_ID
 
-VerifyEligibilityFn = Callable[[str, str], Awaitable[bool]]
+VerifyEligibilityFn = Callable[[str, str, UUID], Awaitable[bool]]
 
 
 class ListingError(Exception):
@@ -146,7 +146,7 @@ class ListingService:
                 raise ListingError(f"DRAFT 상태에서만 제출할 수 있습니다(현재: {row['status']}).")
 
             eligible = await self._verify_eligibility(
-                row["strategy_id"], row["strategy_version"]
+                row["strategy_id"], row["strategy_version"], seller_user_id
             )
             if not eligible:
                 raise ListingError("3개월 이상의 Paper Trading 이력이 필요합니다.")
