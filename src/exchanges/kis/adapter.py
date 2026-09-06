@@ -33,6 +33,7 @@ from src.exchanges.common.adapter import ExchangeAdapter
 from src.exchanges.common.types import ExchangeCapability, MarketHours
 from src.exchanges.kis.account_mixin import KISAccountMixin
 from src.exchanges.kis.domestic_bond_mixin import KISDomesticBondMixin
+from src.exchanges.kis.domestic_futureoption_mixin import KISDomesticFutureoptionMixin
 from src.exchanges.kis.domestic_stock_extra_mixin import KISDomesticStockExtraMixin
 from src.exchanges.kis.elw_mixin import KISElwMixin
 from src.exchanges.kis.etf_mixin import KISEtfMixin
@@ -149,6 +150,7 @@ class KISAdapter(
     KISDomesticStockExtraMixin,
     KISOverseasStockMixin,
     KISDomesticBondMixin,
+    KISDomesticFutureoptionMixin,
     KISElwMixin,
     KISEtfMixin,
     KISWebSocketMixin,
