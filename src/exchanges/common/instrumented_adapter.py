@@ -90,10 +90,16 @@ def _warn_on_sync_server_time_failure(task: asyncio.Task[Any]) -> None:
 def instrumented_adapter_factory(
     tracker: ApiCallTracker,
     base_factory: Any,
+    *,
+    freshness: DataFreshnessTracker | None = None,
 ) -> Any:
     """`CredentialResolver(adapter_factory=...)`에 그대로 넣을 수 있는
     래퍼 — `base_factory`(보통 `src.exchanges.factory.build_adapter`)가
-    만든 실제 adapter를 `InstrumentedAdapter`로 한 번 더 감싼다."""
+    만든 실제 adapter를 `InstrumentedAdapter`로 한 번 더 감싼다.
+
+    `freshness`(기본 None, 하위호환)를 주면 `InstrumentedAdapter`에 그대로
+    전달돼 `get_ohlcv` 성공 시마다 R-42 관측점에 기록된다 — main.py가 이
+    인자 없이 호출하면 배선 전과 동일하게 아무것도 기록되지 않는다."""
 
     def factory(
         exchange: str,
@@ -104,7 +110,7 @@ def instrumented_adapter_factory(
         demo_mode: bool = True,
     ) -> InstrumentedAdapter:
         real_adapter = base_factory(exchange, api_key, api_secret, extra, demo_mode=demo_mode)
-        wrapped = InstrumentedAdapter(real_adapter, tracker)
+        wrapped = InstrumentedAdapter(real_adapter, tracker, freshness=freshness)
         sync_time = getattr(wrapped, "sync_server_time", None)
         if sync_time is not None:
             task = asyncio.ensure_future(sync_time())

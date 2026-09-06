@@ -4,6 +4,7 @@
 격리한다.
 """
 import asyncio
+from datetime import datetime, timezone
 from decimal import Decimal
 from pathlib import Path
 
@@ -22,6 +23,8 @@ from src.core.safety.circuit_breaker import (
 )
 from src.core.safety.data_freshness import DataFreshnessTracker
 from src.core.safety.metrics_collector import ApiCallTracker, collect_circuit_breaker_metrics
+from src.data.models.market_data import Candle
+from src.exchanges.common.instrumented_adapter import instrumented_adapter_factory
 
 _LEVEL_SEVERITY = {
     CircuitBreakerLevel.NORMAL: 0,
@@ -180,6 +183,73 @@ async def test_unknown_data_delay_does_not_read_as_normal(pool, policy):
 
     assert result.level != CircuitBreakerLevel.NORMAL
     assert _LEVEL_SEVERITY[result.level] >= _LEVEL_SEVERITY[CircuitBreakerLevel.HALTED]
+
+
+async def test_operational_metrics_with_fresh_observation_avoids_permanent_halt(pool, policy):
+    """P0 배선 검증 — 전수감사 2026-09-06. main.py가 배선하기 전에는
+    freshness_tracker가 항상 None이라 data_delay_sec=None("모름")이 되고,
+    compute_level이 fail-closed로 매 tick HALTED를 채택해 영구 고착됐다
+    (재가동 승인이 떠도 다음 tick이 다시 halted로 되돌린다). 실제 운영에서
+    처럼 최근 관측 하나만 있어도 그 고착이 사라짐을 확인한다."""
+    freshness = DataFreshnessTracker()
+    freshness.record("bitget", "BTC/USDT", datetime.now(timezone.utc))
+    tracker = ApiCallTracker()
+    tracker.record_success()
+
+    metrics = await collect_circuit_breaker_metrics(pool, tracker, freshness)
+    assert metrics.data_delay_sec is not None
+    assert metrics.data_delay_sec < policy.halted.data_delay_sec
+
+    level = compute_level(metrics, policy)
+    assert level != CircuitBreakerLevel.HALTED
+
+    service = CircuitBreakerService(pool, policy)
+    result = await service.evaluate(metrics)
+    assert result.level != CircuitBreakerLevel.HALTED
+
+
+async def test_instrumented_adapter_get_ohlcv_feeds_freshness_into_circuit_breaker(pool, policy):
+    """P0 배선 검증 — main.py가 하나의 DataFreshnessTracker를
+    instrumented_adapter_factory(freshness=...)와
+    start_background_loops(freshness_tracker=...) 양쪽에 같은 인스턴스로
+    주입한다(R-42/R-43). 실제 어댑터 호출(get_ohlcv) 한 번이 그 공유
+    트래커를 갱신하고, 그 값이 collect_circuit_breaker_metrics/evaluate로
+    이어져 compute_level이 HALTED로 고착되지 않는지 끝까지(어댑터→트래커→
+    수집기→서비스) 확인한다."""
+
+    class _FakeAdapter:
+        async def get_ohlcv(self, symbol: str, timeframe: str) -> list[Candle]:
+            now = datetime.now(timezone.utc)
+            return [
+                Candle(
+                    symbol=symbol,
+                    exchange="bitget",
+                    timeframe=timeframe,
+                    open=Decimal("1"),
+                    high=Decimal("1"),
+                    low=Decimal("1"),
+                    close=Decimal("1"),
+                    volume=Decimal("1"),
+                    open_time=now,
+                    close_time=now,
+                )
+            ]
+
+    freshness = DataFreshnessTracker()
+    tracker = ApiCallTracker()
+    factory = instrumented_adapter_factory(
+        tracker, lambda *a, **kw: _FakeAdapter(), freshness=freshness
+    )
+    adapter = factory("bitget", "key", "secret", None, demo_mode=True)
+
+    await adapter.get_ohlcv("BTC/USDT", "1m")
+
+    metrics = await collect_circuit_breaker_metrics(pool, tracker, freshness)
+    assert metrics.data_delay_sec is not None
+
+    service = CircuitBreakerService(pool, policy)
+    result = await service.evaluate(metrics)
+    assert result.level != CircuitBreakerLevel.HALTED
 
 
 async def test_concurrent_set_level_only_one_writer_wins(pool, policy):

@@ -33,6 +33,7 @@ from src.core.logging.schema import configure_logging
 from src.core.notifications.gateway import NotificationGateway
 from src.core.observability.loop_health import loop_health
 from src.core.observability.metrics_registry import get_registry
+from src.core.safety.data_freshness import DataFreshnessTracker
 from src.core.safety.metrics_collector import ApiCallTracker
 from src.core.security.key_ring import KeyRing
 from src.exchanges.common.instrumented_adapter import instrumented_adapter_factory
@@ -101,9 +102,17 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     credential_service = ExchangeCredentialService(pool, key_ring=credential_ring)
     # PM 배정 ⑤ 2단계 — 어댑터 호출 성공/실패 계측(background_loops와 공유).
     api_tracker = ApiCallTracker()
+    # 전수감사 2026-09-06 P0 — R-42 DataFreshnessTracker를 실제로 만들어 양쪽에
+    # 주입한다: instrumented_adapter_factory(get_ohlcv 성공 시 갱신)와
+    # start_background_loops(safety_reactivation tick이 읽음). 이전에는 이
+    # 트래커가 테스트에서만 생성돼 data_delay_sec이 항상 None("모름")으로
+    # 평가되고, compute_level이 fail-closed로 영구 HALTED를 채택했다.
+    freshness_tracker = DataFreshnessTracker()
     credential_resolver = CredentialResolver(
         credential_service,
-        adapter_factory=instrumented_adapter_factory(api_tracker, build_adapter),
+        adapter_factory=instrumented_adapter_factory(
+            api_tracker, build_adapter, freshness=freshness_tracker
+        ),
     )
 
     # FD-8/FD-9/FD-14 — heartbeat/alert/risk_guard/execution_loop/safety 재가동
@@ -115,6 +124,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         event_bus=event_bus,
         credential_resolver=credential_resolver,
         api_tracker=api_tracker,
+        freshness_tracker=freshness_tracker,
         reactivation_history=deque(maxlen=cooldown_ticks(policy)),  # R-45
     )
 
