@@ -13,12 +13,29 @@ from __future__ import annotations
 
 from datetime import datetime
 from decimal import Decimal
+from typing import Literal
 
 from src.foundation.performance.contracts import v1
 from src.foundation.performance.domain.models import ComponentBreakdown, PerformanceStatement
 
 STATEMENT_CURRENCY = "KRW"
 STATEMENT_PRECISION = 2
+
+
+def _return_basis(value: str) -> Literal["GROSS", "NET"]:
+    if value == "GROSS":
+        return "GROSS"
+    if value == "NET":
+        return "NET"
+    raise ValueError(f"invalid return basis: {value!r}")
+
+
+def _return_method(value: str) -> Literal["TWR", "MWR"]:
+    if value == "TWR":
+        return "TWR"
+    if value == "MWR":
+        return "MWR"
+    raise ValueError(f"invalid return method: {value!r}")
 
 _BREAKDOWN_FIELDS = (
     "gross_pnl",
@@ -67,8 +84,8 @@ def statement_to_view(s: PerformanceStatement) -> v1.PerformanceStatementView:
         returns=[
             v1.ReturnValue(
                 value_pct=r.value_pct,
-                basis=r.basis,  # type: ignore[arg-type]
-                method=r.method,  # type: ignore[arg-type]
+                basis=_return_basis(r.basis),
+                method=_return_method(r.method),
                 period_start=r.period_start,
                 period_end=r.period_end,
                 annualized=r.annualized,

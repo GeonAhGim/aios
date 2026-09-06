@@ -37,6 +37,14 @@ def _signed(cf: Cashflow) -> Decimal:
     return cf.amount if cf.kind == CashflowKind.DEPOSIT else -cf.amount
 
 
+def _require(value: Decimal | None, field: str) -> Decimal:
+    """pending 필드 검사 이후에도 `None`이면 호출자의 불변식 위반 —
+    조용히 0으로 대체하지 않고 예외로 드러낸다."""
+    if value is None:
+        raise ValueError(f"{field}가 None (pending_fields 검사를 통과했어야 함)")
+    return value
+
+
 def check_identity(
     b: ComponentBreakdown,
     *,
@@ -50,11 +58,19 @@ def check_identity(
     if pending:
         return IdentityResult(ok=False, residual=None, pending_fields=pending)
 
-    computed_net = b.gross_pnl - b.fees - b.slippage - b.funding + b.fx - b.estimated_tax  # type: ignore[operator]
-    breakdown_residual = computed_net - b.net_pnl  # type: ignore[operator]
+    gross_pnl = _require(b.gross_pnl, "gross_pnl")
+    fees = _require(b.fees, "fees")
+    slippage = _require(b.slippage, "slippage")
+    funding = _require(b.funding, "funding")
+    fx = _require(b.fx, "fx")
+    estimated_tax = _require(b.estimated_tax, "estimated_tax")
+    net_pnl = _require(b.net_pnl, "net_pnl")
+
+    computed_net = gross_pnl - fees - slippage - funding + fx - estimated_tax
+    breakdown_residual = computed_net - net_pnl
 
     cashflow_net = sum((_signed(cf) for cf in cashflows), Decimal(0))
-    expected_end = start_value + b.net_pnl + cashflow_net  # type: ignore[operator]
+    expected_end = start_value + net_pnl + cashflow_net
     valuation_residual = expected_end - end_value
 
     ok = breakdown_residual == 0 and valuation_residual == 0

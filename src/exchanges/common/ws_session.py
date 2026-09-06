@@ -261,9 +261,14 @@ class WsSession:
         raise _StreamEnded("서버가 스트림을 종료")
 
     def _decode(self, raw: object) -> dict[str, Any]:
+        if not isinstance(raw, (str, bytes, bytearray)):
+            raise WsProtocolError(
+                f"JSON 아닌 프레임(venue={self._venue} channel={self._channel}, "
+                f"type={type(raw).__name__})"
+            )
         try:
-            message = json.loads(raw)  # type: ignore[arg-type]
-        except (TypeError, ValueError) as exc:
+            message = json.loads(raw)
+        except ValueError as exc:
             raise WsProtocolError(
                 f"JSON 아닌 프레임(venue={self._venue} channel={self._channel}, "
                 f"type={type(raw).__name__})"
