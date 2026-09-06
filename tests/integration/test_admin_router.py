@@ -129,6 +129,22 @@ async def _create_strategy(pool, owner_user_id):
             uuid.UUID(owner_user_id),
             json.dumps({}),
         )
+        # task-1721 P1-B — submit-verification이 paper_trading_eligibility.
+        # check_paper_trading_eligibility로 strategy_executions를 실제
+        # 조회하므로, 이 라우터 테스트들이 검증 게이트를 통과하려면 3개월
+        # 이상 된 PAPER 실행 이력을 미리 심어둬야 한다(게이트 자체를 검증
+        # 하는 테스트는 tests/adversarial/marketplace/에 따로 있다).
+        await conn.execute(
+            """
+            INSERT INTO strategy_executions
+                (strategy_id, strategy_version, user_id, exchange, mode,
+                 allocated_capital, started_at)
+            VALUES ($1, $2, $3, 'bitget', 'PAPER', 1000, now() - interval '4 months')
+            """,
+            strategy_id,
+            version,
+            uuid.UUID(owner_user_id),
+        )
     return strategy_id, version
 
 
