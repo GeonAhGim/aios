@@ -1,5 +1,6 @@
 """Connected Asset adversarial 테스트 — 74번 §6 CON-007 "tenant A cannot
 access, label, revoke, or reference tenant B connection"."""
+from datetime import datetime, timezone
 from pathlib import Path
 from uuid import uuid4
 
@@ -7,6 +8,7 @@ import asyncpg
 import pytest
 from dotenv import dotenv_values
 
+from src.core.db.conditional_write import ConcurrencyConflictError
 from src.foundation.connections.adapters.fake_provider import FakeReadonlyAccountProvider
 from src.foundation.connections.adapters.postgres_repository import PostgresConnectionRepository
 from src.foundation.connections.application.begin_connection import begin_connection
@@ -17,6 +19,11 @@ from src.foundation.connections.application.errors import (
 )
 from src.foundation.connections.application.revoke_connection import revoke_connection
 from src.foundation.connections.application.sync_snapshot import sync_snapshot
+from src.foundation.connections.domain.models import (
+    AccountSnapshot,
+    ConnectionHealth,
+    HealthState,
+)
 from src.foundation.connections.projections import build_connection_list_view
 from src.foundation.trust.adapters.postgres_repository import PostgresTrustRepository
 from tests.foundation.integration.connections.conftest import grant_account_read_consent
@@ -142,3 +149,66 @@ async def test_connection_list_view_never_includes_another_tenants_connection(
     view_b = await build_connection_list_view(repo, tenant_b)
 
     assert view_b.connections == []
+
+
+async def test_transition_connection_state_rejects_mismatched_tenant_at_repo_layer(
+    pool, repo, trust_repo
+):
+    """task-1718 P0-E — 애플리케이션 계층의 tenant 검사를 우회해 리포지토리
+    공개 메서드를 직접(attacker의 tenant_id로) 호출해도, 그 자체가
+    독립적으로 거부돼야 한다(테스트 전용 헬퍼가 아니라 운영 경로 증명)."""
+    owner_id = await create_test_user(pool)
+    attacker_id = await create_test_user(pool)
+    owned = await _owned_connection(pool, repo, trust_repo, owner_id)
+
+    with pytest.raises(ConcurrencyConflictError):
+        await repo.transition_connection_state(
+            owned.id,
+            tenant_id=attacker_id,
+            expected_state="PENDING_CONSENT",
+            new_state="CONNECTING",
+        )
+
+    still_pending = await repo.get_connection(owned.id)
+    assert still_pending.state.value == "PENDING_CONSENT"
+
+
+async def test_persist_snapshot_if_syncable_rejects_mismatched_tenant_at_repo_layer(
+    pool, repo, trust_repo
+):
+    owner_id = await create_test_user(pool)
+    attacker_id = await create_test_user(pool)
+    owned = await _owned_connection(pool, repo, trust_repo, owner_id)
+    provider = FakeReadonlyAccountProvider()
+    await confirm_connection(
+        repo, provider, tenant_id=owner_id, connection_id=owned.id, encryption_key=ENCRYPTION_KEY
+    )
+    now = datetime.now(timezone.utc)
+
+    with pytest.raises(ConcurrencyConflictError):
+        await repo.persist_snapshot_if_syncable(
+            owned.id,
+            attacker_id,
+            AccountSnapshot(
+                id=uuid4(),
+                connection_id=owned.id,
+                captured_at=now,
+                provider_as_of=now,
+                freshness="PROVIDER_CONFIRMED",
+                currency="USD",
+                source_evidence_ref="attacker-attempt",
+            ),
+            ConnectionHealth(connection_id=owned.id, evaluated_at=now, state=HealthState.HEALTHY),
+        )
+
+    assert await repo.get_latest_snapshot(owned.id) is None
+
+
+async def test_transition_connection_state_requires_explicit_tenant_context(pool, repo):
+    """PLT-30 DoD — 컨텍스트 없는 접근은 무음 0행이 아니라 예외여야 한다.
+    `tenant_id`가 키워드 전용 필수 인자라, 호출부가 tenant 컨텍스트 없이
+    호출하는 것 자체가 (조용히 통과하는 대신) 즉시 TypeError로 막힌다."""
+    with pytest.raises(TypeError):
+        await repo.transition_connection_state(
+            uuid4(), expected_state="PENDING_CONSENT", new_state="CONNECTING"
+        )

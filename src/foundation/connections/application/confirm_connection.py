@@ -58,7 +58,10 @@ async def confirm_connection(
     # PENDING_CONSENT -> CONNECTING. ConcurrencyConflictError는 상태가 기대와
     # 다르면(이미 CONNECTING 이상으로 진행됨 등) 그대로 호출부로 전파한다.
     await repo.transition_connection_state(
-        connection_id, expected_state="PENDING_CONSENT", new_state="CONNECTING"
+        connection_id,
+        tenant_id=tenant_id,
+        expected_state="PENDING_CONSENT",
+        new_state="CONNECTING",
     )
 
     try:
@@ -87,6 +90,9 @@ async def confirm_connection(
     )
 
     activated = await repo.transition_connection_state(
-        connection_id, expected_state="CONNECTING", new_state="ACTIVE_READONLY"
+        connection_id,
+        tenant_id=tenant_id,
+        expected_state="CONNECTING",
+        new_state="ACTIVE_READONLY",
     )
     return connection_to_view(activated, binding)

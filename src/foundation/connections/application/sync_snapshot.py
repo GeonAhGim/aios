@@ -107,7 +107,10 @@ async def sync_snapshot(
         )
         if connection.state == ConnectionState.ACTIVE_READONLY:
             await repo.transition_connection_state(
-                connection_id, expected_state="ACTIVE_READONLY", new_state="DEGRADED"
+                connection_id,
+                tenant_id=tenant_id,
+                expected_state="ACTIVE_READONLY",
+                new_state="DEGRADED",
             )
         raise ProviderUnavailableError("DEPENDENCY_PROVIDER_UNAVAILABLE") from exc
 
@@ -153,6 +156,7 @@ async def sync_snapshot(
     try:
         snapshot = await repo.persist_snapshot_if_syncable(
             connection_id,
+            tenant_id,
             AccountSnapshot(
                 id=uuid4(),
                 connection_id=connection_id,

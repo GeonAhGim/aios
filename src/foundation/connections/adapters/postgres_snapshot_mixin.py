@@ -12,6 +12,14 @@ row lock(`SELECT ... FOR UPDATE`)으로 묶는다. 처음엔 `get_connection()`�
 왕복 사이에 revoke가 커밋될 수 있는 진짜 TOCTOU 틈이 있었다(리뷰 중 발견,
 2026-09-02) — 재확인과 쓰기가 같은 트랜잭션에 있어야만 그 틈이 없어진다는
 걸 확인하고 이 메서드로 합쳤다.
+
+task-1718 P0-E — `persist_snapshot_if_syncable()`은 이제 `tenant_id`를
+필수로 받아 `tenant_transaction()`(PLT-30)으로 연결을 연다. 재확인 SELECT에
+`AND tenant_id = $2`도 명시로 남겼다 — 이 환경의 DATABASE_URL 롤이
+슈퍼유저(rolbypassrls=true)라 RLS 단독으론 아무것도 못 막기 때문에, 이
+WHERE 조건이 지금 당장의 실질 방어선이고 tenant_transaction()은 운영 DSN이
+비슈퍼유저로 바뀐 뒤를 대비한 두 번째 방어선이다(postgres_repository.py의
+`transition_connection_state`와 동일 근거).
 """
 from __future__ import annotations
 
@@ -20,6 +28,7 @@ from uuid import UUID
 import asyncpg
 
 from src.core.db.conditional_write import ConcurrencyConflictError
+from src.core.db.tenant_scope import tenant_transaction
 from src.foundation.connections.domain.models import (
     AccountSnapshot,
     ConnectionHealth,
@@ -63,16 +72,20 @@ class _SnapshotHealthMixin:
     async def persist_snapshot_if_syncable(
         self,
         connection_id: UUID,
+        tenant_id: UUID,
         snapshot: AccountSnapshot,
         health: ConnectionHealth,
     ) -> AccountSnapshot:
-        async with self._pool.acquire() as conn, conn.transaction():
+        async with tenant_transaction(self._pool, tenant_id) as conn:
             # CON-004 진짜 방어 지점 — 이 SELECT가 행을 잠가서, 이 트랜잭션이
             # 커밋될 때까지 같은 connection에 대한 revoke_connection()의
             # transition_connection_state() UPDATE는 블록된다(같은 행을 대상으로
             # 하므로). 재확인과 쓰기 사이에 별도 왕복이 없어 TOCTOU 틈이 없다.
             row = await conn.fetchrow(
-                "SELECT state FROM account_connection WHERE id = $1 FOR UPDATE", connection_id
+                "SELECT state FROM account_connection WHERE id = $1 AND tenant_id = $2 "
+                "FOR UPDATE",
+                connection_id,
+                tenant_id,
             )
             if row is None or row["state"] in (
                 ConnectionState.REVOKED.value,

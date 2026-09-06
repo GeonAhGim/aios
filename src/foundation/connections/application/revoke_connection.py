@@ -45,7 +45,10 @@ async def revoke_connection(
         )
 
     revoked = await repo.transition_connection_state(
-        connection_id, expected_state=connection.state.value, new_state="REVOKED"
+        connection_id,
+        tenant_id=tenant_id,
+        expected_state=connection.state.value,
+        new_state="REVOKED",
     )
     await repo.revoke_credential_binding(connection_id)
     return connection_to_view(revoked)

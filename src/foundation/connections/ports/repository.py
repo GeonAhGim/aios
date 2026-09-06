@@ -27,13 +27,17 @@ class ConnectionRepository(Protocol):
         self,
         connection_id: UUID,
         *,
+        tenant_id: UUID,
         expected_state: str,
         new_state: str,
     ) -> AccountConnection:
         """105번 표준의 conditional_update로 상태 전이(revoke/disconnect 등
         단발 전이용). sync 경로의 CON-004 방어는 이 메서드가 아니라 아래
         `persist_snapshot_if_syncable()`이 담당한다 — 재확인과 저장 사이에
-        또 다른 왕복이 끼면 이 메서드 하나만으로는 그 틈을 못 막는다."""
+        또 다른 왕복이 끼면 이 메서드 하나만으로는 그 틈을 못 막는다.
+        task-1718 P0-E — `tenant_id`는 `tenant_transaction()`을 열고 WHERE
+        조건에도 명시로 들어간다(adapters/postgres_repository.py 참조):
+        호출부의 tenant 검증이 뚫려도 이 메서드가 0행으로 막는다."""
         ...
 
     async def insert_consent_link(self, link: ConnectionConsent) -> ConnectionConsent: ...
@@ -52,6 +56,7 @@ class ConnectionRepository(Protocol):
     async def persist_snapshot_if_syncable(
         self,
         connection_id: UUID,
+        tenant_id: UUID,
         snapshot: AccountSnapshot,
         health: ConnectionHealth,
     ) -> AccountSnapshot:
@@ -61,7 +66,9 @@ class ConnectionRepository(Protocol):
         으로 먼저 읽고 나중에 `insert_snapshot()`을 따로 호출하는 두 번의 왕복
         사이에는 revoke가 끼어들 진짜 틈(TOCTOU)이 남는다 — 이 메서드는 그 틈을
         구조적으로 없앤다. 그 사이 revoke/disconnect가 커밋됐으면
-        ConcurrencyConflictError(105번 표준)."""
+        ConcurrencyConflictError(105번 표준). task-1718 P0-E — `tenant_id`는
+        `tenant_transaction()`을 열고, 재확인 SELECT의 WHERE 조건에도
+        명시로 들어간다."""
         ...
 
     async def get_latest_snapshot(self, connection_id: UUID) -> AccountSnapshot | None: ...
