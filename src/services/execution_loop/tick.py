@@ -242,11 +242,8 @@ async def run_execution_tick(
         user_id=execution["user_id"],
         execution_id=execution_id,
         exchange=exchange_name,
-        # task-1806 — strategy_executions.mandate_revision_id(b3f7e0c1a4d5)가
-        # 채워져 있으면 그대로 관통한다. foundation_gate.gate()가 이 값을
-        # 현재 활성 revision과 대조해(§3.6과 동일한 관측-vs-현재 패턴)
-        # 어긋나면 거부한다 — 예전엔 이 인자가 호출부에서 아예 넘어오지
-        # 않아(항상 기본값 None) 그 비교 자체가 죽은 코드였다.
+        # task-1806 — strategy_executions.mandate_revision_id(b3f7e0c1a4d5) 관통.
+        # 예전엔 항상 None이라 foundation_gate의 revision 대조가 죽은 코드였다.
         mandate_revision_id=execution["mandate_revision_id"],
         observed_fence=phase.fence_snapshot,  # R-36 — PRE_TRADE가 관측한 F0 관통
         # task-1717 P0-D — I10 결속 키. fenced_submit이 이 값들과 실제 주문을
