@@ -295,6 +295,12 @@ export { FillBetweenError, computeFillSegments } from "./render/fillBetween";
 export type { PlotProjection, ScaleBindingContext, ScaleBindingErrorCode } from "./render/scaleBinding";
 export { ScaleBindingError, bindScale } from "./render/scaleBinding";
 
+export type { LodCandle, LodErrorCode } from "./render/lod";
+export { LodError, downsampleLOD } from "./render/lod";
+
+export type { ViewportCullResult, ViewportErrorCode, ViewportRange } from "./render/viewport";
+export { ViewportError, cullToViewport } from "./render/viewport";
+
 export type { ScriptCompilePreviewResult, ScriptPreviewSyncResult } from "./plugins/scriptPreview";
 export { SCRIPT_PREVIEW_PLOT_SPEC, clearScriptPreview, syncScriptPreview } from "./plugins/scriptPreview";
 
