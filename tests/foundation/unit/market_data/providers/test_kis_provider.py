@@ -85,7 +85,11 @@ def test_capabilities_matches_real_kis_adapter_declaration() -> None:
     caps = KISProvider(_FakeKISAdapter({})).capabilities()
 
     assert caps.provider_id == "kis"
-    assert caps.asset_classes == frozenset(exchange_capability.supported_asset_classes)
+    # BR-8(task-1786)로 거래 능력(supported_asset_classes)은 옵션·선물·해외주식까지
+    # 넓어졌지만, 시장데이터 조회(KISMarketDataMixin.get_ohlcv)는 여전히 국내주식만
+    # 지원한다 — 거래 능력과 데이터 능력은 별개 축(kis_provider.py 모듈 docstring)이라
+    # 완전 일치가 아니라 "데이터 능력이 거래 능력 범위를 넘어서지 않음"만 검증한다.
+    assert caps.asset_classes <= frozenset(exchange_capability.supported_asset_classes)
     assert caps.realtime is exchange_capability.supports_websocket
     # KISMarketDataMixin.get_ohlcv는 일봉/분봉만 지원(02d 스펙 §2) — 그 이상을
     # 미리 선언하지 않는다(capability-gated 원칙).
