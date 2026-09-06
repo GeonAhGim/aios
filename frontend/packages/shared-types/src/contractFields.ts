@@ -32,6 +32,7 @@ const HEALTH_ROUTER = "src/api/routers/health.py";
 const AUTH_TOKENS = "src/services/auth/tokens.py";
 const SECRET_REF = "src/core/security/secret_ref.py";
 const INDICATOR_SPEC = "src/core/indicators/spec.py";
+const INDICATORS_SCHEMA = "src/api/schemas/indicators.py";
 
 export const CONTRACT_FIELD_SPECS: readonly ContractFieldSpec[] = [
   // ---- positionView.ts (§3.2 B) ----
@@ -237,6 +238,14 @@ export const CONTRACT_FIELD_SPECS: readonly ContractFieldSpec[] = [
     className: "PlotSpec",
     parser: "decodePlotSpec",
     fields: ["kind", "scale", "default_pane", "fill_between", "color_rule", "precision", "legend_format"],
+  },
+
+  // ---- indicators.ts toCatalogItem (IND-14, task-1915) ----
+  {
+    file: INDICATORS_SCHEMA,
+    className: "IndicatorListItemView",
+    parser: "toCatalogItem",
+    fields: ["name", "tier", "category", "version", "hash", "inputs", "outputs"],
   },
 ];
 

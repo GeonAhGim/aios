@@ -70,6 +70,32 @@ vi.mock("@aios/ui-web", async () => {
   };
 });
 
+// IND-14(task-1915): IndicatorPicker 기본값은 createIndicatorsClient가 만드는 실제
+// fetch 클라이언트다 — 이 화면 테스트가 "지표 선택" 버튼을 열 때 실제 네트워크를
+// 타지 않도록 listIndicators만 스텁으로 바꾼다(ApiError 등 나머지 export는 실제 그대로).
+vi.mock("@aios/api-client", async () => {
+  const actual = await vi.importActual<typeof import("@aios/api-client")>("@aios/api-client");
+  return {
+    ...actual,
+    createIndicatorsClient: () => ({
+      listIndicators: vi.fn(async () => ({
+        items: [
+          {
+            name: "SMA",
+            tier: "core" as const,
+            category: "Overlap Studies",
+            version: "1",
+            hash: "h",
+            inputs: ["close"],
+            outputs: ["value"],
+          },
+        ],
+        nextCursor: null,
+      })),
+    }),
+  };
+});
+
 afterEach(cleanup);
 
 const KEY = { venue: "BITGET" as const, instrument_id: "BTCUSDT", timeframe: "1h" as const };
@@ -190,7 +216,7 @@ describe("ChartPage", () => {
     await waitFor(() => expect(screen.getByTestId("candlestick-chart")).toHaveTextContent("캔들 3개"));
 
     fireEvent.click(screen.getByRole("button", { name: /지표 선택/ }));
-    fireEvent.click(screen.getByRole("option", { name: /^SMA/ }));
+    fireEvent.click(await screen.findByRole("option", { name: /^SMA/ }));
 
     expect(await screen.findByRole("button", { name: "SMA ✕" })).toBeInTheDocument();
   });
