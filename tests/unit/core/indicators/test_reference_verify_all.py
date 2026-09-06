@@ -12,6 +12,7 @@ BBANDS의 분산 계산(`E[X^2]-E[X]^2` 방식)이 표본이 2개뿐일 때 우�
 """
 from __future__ import annotations
 
+from collections.abc import Mapping
 from pathlib import Path
 
 import numpy as np
@@ -19,6 +20,8 @@ import pytest
 
 from src.core.indicators.engine import incremental, vectorized
 from src.core.indicators.reference import verify_all
+from src.core.indicators.reference.verify_all import FloatArray
+from src.core.indicators.spec import IndicatorSpec
 from src.core.indicators.specs_talib import TALIB_SPECS
 
 
@@ -96,7 +99,7 @@ def test_injected_engine_drift_is_caught_not_silently_passed(
     """벡터 커널을 일부러 어긋나게 만들면 verify_indicator가 놓치지 않고 잡는다."""
     original = vectorized._KERNELS["SMA"]
 
-    def drifted(c: dict[str, np.ndarray], p: dict[str, int]) -> tuple[np.ndarray, ...]:
+    def drifted(c: dict[str, FloatArray], p: dict[str, int]) -> tuple[FloatArray, ...]:
         (out,) = original(c, p)
         return (out * (1.0 + 1e-6),)
 
@@ -111,8 +114,13 @@ def test_injected_nan_prefix_disagreement_is_caught(monkeypatch: pytest.MonkeyPa
     이 분기는 TA-Lib 직접 호출 쪽 NaN 패턴이 달라지는 경우를 흉내 내 확인한다."""
     original = verify_all._talib_direct
 
-    def broken(name: str, spec: object, columns: object, params: dict[str, int]) -> dict:
-        result = original(name, spec, columns, params)  # type: ignore[arg-type]
+    def broken(
+        name: str,
+        spec: IndicatorSpec,
+        columns: Mapping[str, FloatArray],
+        params: dict[str, int],
+    ) -> dict[str, FloatArray]:
+        result = original(name, spec, columns, params)
         if name != "OBV":
             return result
         tampered = {k: v.copy() for k, v in result.items()}

@@ -5,7 +5,7 @@ from __future__ import annotations
 
 import threading
 
-from src.services.oms.domain.order_types.oco import OcoGroup, OcoOutcome, resolve_oco
+from src.services.oms.domain.order_types.oco import OcoGroup, OcoLeg, OcoOutcome, resolve_oco
 
 
 def test_resolve_oco_triggers_leg_a_only() -> None:
@@ -55,8 +55,8 @@ def test_oco_group_atomic_under_1000_adversarial_concurrent_triggers() -> None:
     outcomes: dict[str, list[OcoOutcome]] = {"a": [], "b": []}
     lock = threading.Lock()
 
-    def _attempt(leg: str) -> None:
-        outcome = group.try_trigger(leg)  # type: ignore[arg-type]
+    def _attempt(leg: OcoLeg) -> None:
+        outcome = group.try_trigger(leg)
         with lock:
             outcomes[leg].append(outcome)
 

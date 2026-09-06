@@ -55,7 +55,7 @@ def _profile(**overrides: object) -> VenueCapabilityProfile:
         "verified": "DOC_ONLY",
     }
     defaults.update(overrides)
-    return VenueCapabilityProfile(**defaults)  # type: ignore[arg-type]
+    return VenueCapabilityProfile.model_validate(defaults)
 
 
 def _registry() -> SymbolRegistry:
