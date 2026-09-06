@@ -3,21 +3,18 @@
 Spec: docs/specs/L4_analytics_authoring_backtest_marketplace_v1.0.md
 §2.1 DC-7(선행 DC-6), §9.2 DC-7.
 
-갭 탐지 알고리즘을 새로 짜지 않는다 — 캔들 결측 탐지는
-`domain/quality/gap_detector.detect_gaps`(LA-5)에, 세션·휴장 판정은
-`VenueCalendar`(LA-3)에, 타임프레임 정렬은 `domain/timeframe`(LA-2)에
-위임한다(LA-19 위임 원칙). DC-6 `registry.merge_spans`도 재사용한다 —
-이 파일은 그 위에 "커버리지 선언 대비 실제 캔들" 대조 판정만 얹는다.
+갭 탐지는 `domain/quality/gap_detector.detect_gaps`(LA-5), 세션·휴장은
+`VenueCalendar`(LA-3), 타임프레임 정렬은 `domain/timeframe`(LA-2)에
+위임한다(LA-19). DC-6 `registry.merge_spans`도 재사용 — 이 파일은 그
+위에 "커버리지 선언 대비 실제 캔들" 대조 판정만 얹는다.
 
-세 갈래 판정: (1) 세션 밖(휴장·마감 후)은 애초에 기대 집합에 없으므로
-갭이 아니다(LA-5와 동일 의미론). (2) 세션 안인데 커버리지 선언이 없으면
-`GapReason.NOT_COVERED`. (3) 세션 안이고 선언도 있는데 실제 캔들이
-없으면 `GapReason.MISSING_CANDLES`(LA-5 결과 그대로).
+세 갈래 판정: (1) 세션 밖(휴장·마감 후)은 갭이 아니다(LA-5와 동일
+의미론). (2) 세션 안인데 커버리지 선언이 없으면 `NOT_COVERED`.
+(3) 선언은 있는데 실제 캔들이 없으면 `MISSING_CANDLES`(LA-5 그대로).
 
-판정 전제(요청 timeframe과 다른 축 span 혼입, 서로 다른 instrument span
-혼입, naive 시각, 역전된 구간)가 깨지면 "갭 없음"(빈 리스트)을 반환하지
-않는다 — 커버리지가 충분하다는 오판으로 이어질 수 있으므로
-`IndeterminateCoverageError`로 fail-closed 표면화한다.
+판정 전제(요청 timeframe·axis 혼입, naive 시각, 역전 구간)가 깨지면
+"갭 없음"을 반환하지 않는다 — `IndeterminateCoverageError`로
+fail-closed 표면화한다.
 """
 from __future__ import annotations
 
@@ -54,18 +51,22 @@ class CoverageGap:
     reason: GapReason
 
 
-def _validate_axis(spans: Sequence[CoverageSpan], tf: Timeframe) -> None:
-    mismatched_tf = [s for s in spans if s.timeframe != tf]
-    if mismatched_tf:
+def _validate_axis(spans: Sequence[CoverageSpan], tf: Timeframe, calendar: VenueCalendar) -> None:
+    """단일 (instrument_id, venue, asset_class, quality_grade, tf) 축이고
+    venue가 `calendar`와 일치하는지 검증한다(fail-closed)."""
+    if any(s.timeframe != tf for s in spans):
         raise IndeterminateCoverageError(
-            f"{len(mismatched_tf)}개 span의 timeframe이 요청한 {tf.value}와 다르다 — "
-            "축이 섞인 입력은 커버리지 판정을 신뢰할 수 없다(fail-closed)."
+            f"spans에 요청 timeframe({tf.value})과 다른 timeframe이 섞였다(fail-closed)."
         )
-    instrument_ids = {s.instrument_id for s in spans}
-    if len(instrument_ids) > 1:
+    if any(s.venue.value != calendar.venue for s in spans):
         raise IndeterminateCoverageError(
-            f"spans에 서로 다른 instrument_id가 섞여 있다: {sorted(instrument_ids)} — "
-            "단일 instrument 축만 판정 가능하다(fail-closed)."
+            f"spans에 calendar venue({calendar.venue})와 다른 venue가 섞였다(fail-closed)."
+        )
+    axes = {(s.instrument_id, s.asset_class, s.quality_grade) for s in spans}
+    if len(axes) > 1:
+        raise IndeterminateCoverageError(
+            f"spans에 서로 다른 (instrument_id, asset_class, quality_grade) 축: "
+            f"{sorted(axes)}(fail-closed)."
         )
 
 
@@ -128,8 +129,8 @@ def plan_fetch(
     range_start: datetime,
     range_end: datetime,
 ) -> list[CoverageGap]:
-    """`spans`(DC-6 `coverage_for` 결과 등, 단일 instrument×tf 축)와 `candles`
-    실측을 `[range_start, range_end)`에서 대조해, 항상 `start_at` 기준
+    """`spans`(DC-6 `coverage_for` 결과 등, 단일 축)와 `candles` 실측을
+    `[range_start, range_end)`에서 대조해, 항상 `start_at` 기준
     결정론적으로 정렬된 갭 목록을 반환한다(입력 순서 무관)."""
     if range_start.tzinfo is None or range_end.tzinfo is None:
         raise IndeterminateCoverageError(
@@ -139,7 +140,7 @@ def plan_fetch(
         raise IndeterminateCoverageError(
             f"range_start > range_end: {range_start!r} > {range_end!r}(fail-closed 구간 역전)."
         )
-    _validate_axis(spans, tf)
+    _validate_axis(spans, tf, calendar)
     sessions = _sessions_in_range(calendar, range_start, range_end)
     if not sessions:
         return []

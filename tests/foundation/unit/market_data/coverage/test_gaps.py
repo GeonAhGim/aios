@@ -168,6 +168,21 @@ def test_mismatched_instrument_id_spans_raise() -> None:
         )
 
 
+def test_span_venue_mismatched_with_calendar_raises() -> None:
+    """DC-6 `coverage_for`는 venue로 필터링하지 않는다 — 다른 venue의 선언이
+    섞여 들어와도 "충분히 커버됨"으로 오판하지 않고 fail-closed해야 한다."""
+    foreign_venue_span = _span(venue=Venue.KIS_KRX, start_at=_dt(0), end_at=_dt(4))
+    with pytest.raises(IndeterminateCoverageError):
+        plan_fetch(
+            spans=[foreign_venue_span],
+            candles=[],
+            tf=Timeframe.H1,
+            calendar=_calendar(Venue.BITGET),
+            range_start=_dt(0),
+            range_end=_dt(4),
+        )
+
+
 def test_naive_datetime_range_raises() -> None:
     with pytest.raises(IndeterminateCoverageError):
         plan_fetch(
