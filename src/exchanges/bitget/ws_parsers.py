@@ -19,11 +19,10 @@ from datetime import datetime, timezone
 from decimal import Decimal
 from typing import Any
 
-from src.core.parser.candle_parser import parse_candles
-from src.core.parser.ticker_parser import parse_ticker
 from src.data.models.market_data import Candle, OrderBook, OrderBookLevel, Ticker
 from src.data.models.trading import AccountBalance, Order, Position
 from src.exchanges.bitget.futures_account_mixin import _row_to_position
+from src.exchanges.bitget.parsers import parse_candles, parse_ticker
 from src.exchanges.bitget.trading_mixin import _row_to_order
 from src.exchanges.common.ws_session import NOT_ACK, AckResult, HeartbeatSpec
 
@@ -136,7 +135,7 @@ def parse_ticker_ws_message(message: dict[str, Any]) -> list[Ticker]:
     가정과 동일)."""
     if _is_control_message(message):
         return []
-    return [parse_ticker(item, "bitget") for item in message.get("data", [])]
+    return [parse_ticker(item) for item in message.get("data", [])]
 
 
 def parse_candle_ws_message(
@@ -150,7 +149,7 @@ def parse_candle_ws_message(
     rows = message.get("data", [])
     if not rows:
         return []
-    return parse_candles(rows, "bitget", symbol, timeframe)
+    return parse_candles(rows, symbol, timeframe)
 
 
 def parse_orderbook_ws_message(message: dict[str, Any], *, symbol: str) -> OrderBook | None:

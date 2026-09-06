@@ -20,6 +20,14 @@ ADR로만 가능하다.
 `paper_sim`(L4-23) — 여기서는 등록 훅만 둔다. 훅이 등록되기 전에
 `build_adapter("paper_sim", ...)`를 호출하면 명시적
 `PaperSimAdapterUnavailableError`(≠ 무음 폴백)로 실패한다.
+
+BR-9(task-1787, ADR-2026-09-06-I D5) — `register_exchange_adapter_factory()`는
+`paper_sim` 전용이 아닌 일반 확장점이다. 세 번째 이후 거래소(업비트·빗썸
+등)는 이 함수로 등록하면 이 파일의 `if exchange == ...` 분기를 늘리지
+않고도 `build_adapter()`가 그 거래소를 생성한다 — `SUPPORTED_EXCHANGES`에
+정적으로 없는 거래소도 이 경로로 열 수 있다(런타임 등록이므로).
+`tests/unit/exchanges/test_factory_spi_extension.py`가 더미 어댑터로
+증명한다.
 """
 from __future__ import annotations
 
@@ -43,6 +51,14 @@ _LIVE_ADAPTER_ENV_ALLOW_VALUE = "1"
 PaperSimFactory = Callable[[str, str, dict[str, str]], ExchangeAdapter]
 _paper_sim_factory: PaperSimFactory | None = None
 
+# BR-9 일반 SPI 확장점(D5) — exchange 이름 -> (api_key, api_secret, extra,
+# demo_mode) 어댑터 생성 함수. `demo_mode`를 받는 이유는 paper_sim과 달리
+# 새 거래소는 실계정/모의계정을 구분해야 할 수 있어서다(LIVE 가드는
+# `build_adapter`가 이 함수 호출 전에 이미 통과시켰다는 뜻이라 여기선
+# 재검증하지 않는다).
+RegisteredAdapterFactory = Callable[[str, str, dict[str, str], bool], ExchangeAdapter]
+_registered_adapter_factories: dict[str, RegisteredAdapterFactory] = {}
+
 
 class UnsupportedExchangeError(Exception):
     """알 수 없는 exchange 값 또는 extra에 필요한 필드가 누락된 경우."""
@@ -63,6 +79,18 @@ def reset_paper_sim_factory() -> None:
     """테스트 격리용 — 운영 코드는 호출하지 않는다."""
     global _paper_sim_factory
     _paper_sim_factory = None
+
+
+def register_exchange_adapter_factory(exchange: str, factory: RegisteredAdapterFactory) -> None:
+    """D5 일반 확장점 — `exchange`가 아래 하드코딩된 분기(bitget/kis/nh/
+    paper_sim)와 겹치면 그 분기가 항상 먼저 이긴다(기존 거래소 재정의
+    금지, 새 거래소 전용). 재등록은 마지막 등록이 이긴다."""
+    _registered_adapter_factories[exchange] = factory
+
+
+def reset_exchange_adapter_factories() -> None:
+    """테스트 격리용 — 운영 코드는 호출하지 않는다."""
+    _registered_adapter_factories.clear()
 
 
 def live_adapter_allowed() -> bool:
@@ -131,5 +159,8 @@ def build_adapter(
                 "register_paper_sim_factory()로 배선하기 전에는 생성할 수 없습니다."
             )
         return _paper_sim_factory(api_key, api_secret, extra)
+
+    if exchange in _registered_adapter_factories:
+        return _registered_adapter_factories[exchange](api_key, api_secret, extra, demo_mode)
 
     raise UnsupportedExchangeError(f"지원하지 않는 거래소입니다: {exchange}")

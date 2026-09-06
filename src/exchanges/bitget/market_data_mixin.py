@@ -35,14 +35,12 @@ from datetime import datetime, timezone
 from decimal import Decimal
 from typing import Any
 
-from src.core.parser.candle_parser import parse_candles
-from src.core.parser.orderbook_parser import parse_orderbook
-from src.core.parser.ticker_parser import parse_ticker
 from src.data.models.market_data import Candle, OrderBook, PublicTrade, SpotSymbolInfo, Ticker
 from src.exchanges.bitget.market_ws_connection import (  # noqa: F401 — 기존 테스트 import 경로 유지
     _run_ws_subscription,
     _send_periodic_pings,
 )
+from src.exchanges.bitget.parsers import parse_candles, parse_orderbook, parse_ticker
 from src.exchanges.bitget.symbols import to_bitget_symbol as _to_bitget_symbol
 from src.exchanges.bitget.ws_parsers import (  # noqa: F401 — 기존 테스트 import 경로 유지
     parse_account_ws_message,
@@ -95,7 +93,7 @@ class BitgetMarketDataMixin:
         raw = await self._request(
             "GET", "/api/v2/spot/market/tickers", params={"symbol": _to_bitget_symbol(symbol)}
         )
-        return parse_ticker(raw["data"][0], "bitget")
+        return parse_ticker(raw["data"][0])
 
     async def get_orderbook(self: SignedRequestClient, symbol: str, depth: int = 20) -> OrderBook:
         raw = await self._request(
@@ -103,7 +101,7 @@ class BitgetMarketDataMixin:
             "/api/v2/spot/market/orderbook",
             params={"symbol": _to_bitget_symbol(symbol), "limit": str(depth)},
         )
-        return parse_orderbook(raw["data"], "bitget", symbol)
+        return parse_orderbook(raw["data"], symbol)
 
     async def get_ohlcv(
         self: SignedRequestClient,
@@ -123,7 +121,7 @@ class BitgetMarketDataMixin:
                 "limit": str(limit),
             },
         )
-        return parse_candles(raw["data"], "bitget", symbol, timeframe)
+        return parse_candles(raw["data"], symbol, timeframe)
 
     async def get_history_candles(
         self: SignedRequestClient,
@@ -149,7 +147,7 @@ class BitgetMarketDataMixin:
         raw = await self._request(
             "GET", "/api/v2/spot/market/history-candles", params=params
         )
-        return parse_candles(raw["data"], "bitget", symbol, timeframe)
+        return parse_candles(raw["data"], symbol, timeframe)
 
     async def get_symbol_info(
         self: SignedRequestClient,
