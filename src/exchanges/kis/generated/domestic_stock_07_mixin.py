@@ -1,0 +1,262 @@
+"""BR-12 자동 생성(ADR-2026-09-06-I D7) -- domestic_stock 미착수 TR 청크 07.
+
+`scripts/kis_generate_adapters.py`가 `docs/design/kis_tr_reference.json`(BR-11)
+에서 그대로 생성했다 -- 손으로 수정하지 말 것(재생성 시 덮어쓴다). 요청 조립만
+예제에서 기계 추출한 값 그대로 하고, 응답은 파싱 없이 원본을 돌려준다 -- 필드
+단위 타입 매핑은 실계좌 확보 후 검수 리프(BR-13~15)의 몫이다.
+"""
+from __future__ import annotations
+
+from src.exchanges.kis.generated._protocols import _KISWsHost
+from src.exchanges.kis.websocket_connection import (
+    ConnectFn,
+    MessageHandler,
+    ReconnectHook,
+    _connect,
+    _run_kis_ws_subscription,
+)
+from src.exchanges.kis.websocket_mixin import (
+    WS_PAPER_URL,
+    WS_REAL_URL,
+)
+from src.exchanges.kis.websocket_parsing import _build_subscribe_message
+
+
+class KISGeneratedDomesticStock07Mixin(_KISWsHost):
+
+    async def exp_ccnl_krx_h0stanc0(
+        self,
+        tr_key: str,
+        callback: MessageHandler,
+        *,
+        on_reconnecting: ReconnectHook | None = None,
+        on_reconnected: ReconnectHook | None = None,
+        connect_fn: ConnectFn = _connect,
+    ) -> None:
+        """BR-12 생성(ADR-2026-09-06-I D7). 미검증: 실계좌 왕복 미확인.
+        [국내주식] 실시간시세 > 국내주식 실시간예상체결 (KRX) [실시간-041] -- WS tr_id=H0STANC0.
+        필수 파라미터: tr_key. 응답 필드: mksc_shrn_iscd, stck_cntg_hour, stck_prpr,
+        prdy_vrss_sign, prdy_vrss, prdy_ctrt, wghn_avrg_stck_prc, stck_oprc, stck_hgpr,
+        stck_lwpr, askp1, bidp1, cntg_vol, acml_vol, acml_tr_pbmn, seln_cntg_csnu,
+        shnu_cntg_csnu, ntby_cntg_csnu, cttr, seln_cntg_smtn, shnu_cntg_smtn, cntg_cls_code,
+        shnu_rate, prdy_vol_vrss_acml_vol_rate, oprc_hour, oprc_vrss_prpr_sign, oprc_vrss_prpr,
+        hgpr_hour, hgpr_vrss_prpr_sign, hgpr_vrss_prpr, lwpr_hour, lwpr_vrss_prpr_sign,
+        lwpr_vrss_prpr, bsop_date, new_mkop_cls_code, trht_yn, askp_rsqn1, bidp_rsqn1,
+        total_askp_rsqn, total_bidp_rsqn, vol_tnrt, prdy_smns_hour_acml_vol,
+        prdy_smns_hour_acml_vol_rate, hour_cls_code, mrkt_trtm_cls_code.
+        """
+        approval_key = await self.get_ws_approval_key()
+        url = WS_PAPER_URL if self._is_paper_trading else WS_REAL_URL
+        subscribe_msg = _build_subscribe_message(
+            approval_key, "H0STANC0", tr_key
+        )
+
+        async def _on_frame(raw: str) -> None:
+            await callback(raw)
+
+        await _run_kis_ws_subscription(
+            url,
+            subscribe_msg,
+            _on_frame,
+            connect_fn=connect_fn,
+            on_reconnecting=on_reconnecting,
+            on_reconnected=on_reconnected,
+        )
+
+    async def member_krx_h0stmbc0(
+        self,
+        tr_key: str,
+        callback: MessageHandler,
+        *,
+        on_reconnecting: ReconnectHook | None = None,
+        on_reconnected: ReconnectHook | None = None,
+        connect_fn: ConnectFn = _connect,
+    ) -> None:
+        """BR-12 생성(ADR-2026-09-06-I D7). 미검증: 실계좌 왕복 미확인.
+        [국내주식] 실시간시세 > 국내주식 실시간회원사 (KRX) [실시간-047] -- WS tr_id=H0STMBC0.
+        필수 파라미터: tr_key. 응답 필드: mksc_shrn_iscd, seln2_mbcr_name1, seln2_mbcr_name2,
+        seln2_mbcr_name3, seln2_mbcr_name4, seln2_mbcr_name5, byov_mbcr_name1, byov_mbcr_name2,
+        byov_mbcr_name3, byov_mbcr_name4, byov_mbcr_name5, total_seln_qty1, total_seln_qty2,
+        total_seln_qty3, total_seln_qty4, total_seln_qty5, total_shnu_qty1, total_shnu_qty2,
+        total_shnu_qty3, total_shnu_qty4, total_shnu_qty5, seln_mbcr_glob_yn_1,
+        seln_mbcr_glob_yn_2, seln_mbcr_glob_yn_3, seln_mbcr_glob_yn_4, seln_mbcr_glob_yn_5,
+        shnu_mbcr_glob_yn_1, shnu_mbcr_glob_yn_2, shnu_mbcr_glob_yn_3, shnu_mbcr_glob_yn_4,
+        shnu_mbcr_glob_yn_5, seln_mbcr_no1, seln_mbcr_no2, seln_mbcr_no3, seln_mbcr_no4,
+        seln_mbcr_no5, shnu_mbcr_no1, shnu_mbcr_no2, shnu_mbcr_no3, shnu_mbcr_no4,
+        shnu_mbcr_no5, seln_mbcr_rlim1, seln_mbcr_rlim2, seln_mbcr_rlim3, seln_mbcr_rlim4,
+        seln_mbcr_rlim5, shnu_mbcr_rlim1, shnu_mbcr_rlim2, shnu_mbcr_rlim3, shnu_mbcr_rlim4,
+        shnu_mbcr_rlim5, seln_qty_icdc1, seln_qty_icdc2, seln_qty_icdc3, seln_qty_icdc4,
+        seln_qty_icdc5, shnu_qty_icdc1, shnu_qty_icdc2, shnu_qty_icdc3, shnu_qty_icdc4,
+        shnu_qty_icdc5, glob_total_seln_qty, glob_total_shnu_qty, glob_total_seln_qty_icdc,
+        glob_total_shnu_qty_icdc, glob_ntby_qty, glob_seln_rlim, glob_shnu_rlim,
+        seln2_mbcr_eng_name1, seln2_mbcr_eng_name2, seln2_mbcr_eng_name3, seln2_mbcr_eng_name4,
+        seln2_mbcr_eng_name5, byov_mbcr_eng_name1, byov_mbcr_eng_name2, byov_mbcr_eng_name3,
+        byov_mbcr_eng_name4, byov_mbcr_eng_name5.
+        """
+        approval_key = await self.get_ws_approval_key()
+        url = WS_PAPER_URL if self._is_paper_trading else WS_REAL_URL
+        subscribe_msg = _build_subscribe_message(
+            approval_key, "H0STMBC0", tr_key
+        )
+
+        async def _on_frame(raw: str) -> None:
+            await callback(raw)
+
+        await _run_kis_ws_subscription(
+            url,
+            subscribe_msg,
+            _on_frame,
+            connect_fn=connect_fn,
+            on_reconnecting=on_reconnecting,
+            on_reconnected=on_reconnected,
+        )
+
+    async def market_status_krx_h0stmko0(
+        self,
+        tr_key: str,
+        callback: MessageHandler,
+        *,
+        on_reconnecting: ReconnectHook | None = None,
+        on_reconnected: ReconnectHook | None = None,
+        connect_fn: ConnectFn = _connect,
+    ) -> None:
+        """BR-12 생성(ADR-2026-09-06-I D7). 미검증: 실계좌 왕복 미확인.
+        [국내주식] 실시간시세 > 국내주식 장운영정보 (KRX) [실시간-049] -- WS tr_id=H0STMKO0.
+        필수 파라미터: tr_key. 응답 필드: mksc_shrn_iscd, trht_yn, tr_susp_reas_cntt,
+        mkop_cls_code, antc_mkop_cls_code, mrkt_trtm_cls_code, divi_app_cls_code,
+        iscd_stat_cls_code, vi_cls_code, ovtm_vi_cls_code, EXCH_CLS_CODE.
+        """
+        approval_key = await self.get_ws_approval_key()
+        url = WS_PAPER_URL if self._is_paper_trading else WS_REAL_URL
+        subscribe_msg = _build_subscribe_message(
+            approval_key, "H0STMKO0", tr_key
+        )
+
+        async def _on_frame(raw: str) -> None:
+            await callback(raw)
+
+        await _run_kis_ws_subscription(
+            url,
+            subscribe_msg,
+            _on_frame,
+            connect_fn=connect_fn,
+            on_reconnecting=on_reconnecting,
+            on_reconnected=on_reconnected,
+        )
+
+    async def overtime_asking_price_krx_h0stoaa0(
+        self,
+        tr_key: str,
+        callback: MessageHandler,
+        *,
+        on_reconnecting: ReconnectHook | None = None,
+        on_reconnected: ReconnectHook | None = None,
+        connect_fn: ConnectFn = _connect,
+    ) -> None:
+        """BR-12 생성(ADR-2026-09-06-I D7). 미검증: 실계좌 왕복 미확인.
+        [국내주식] 실시간시세 > 국내주식 시간외 실시간호가 (KRX) [실시간-025] -- WS
+        tr_id=H0STOAA0. 필수 파라미터: tr_key. 응답 필드: mksc_shrn_iscd, bsop_hour,
+        hour_cls_code, askp1, askp2, askp3, askp4, askp5, askp6, askp7, askp8, askp9, bidp1,
+        bidp2, bidp3, bidp4, bidp5, bidp6, bidp7, bidp8, bidp9, askp_rsqn1, askp_rsqn2,
+        askp_rsqn3, askp_rsqn4, askp_rsqn5, askp_rsqn6, askp_rsqn7, askp_rsqn8, askp_rsqn9,
+        bidp_rsqn1, bidp_rsqn2, bidp_rsqn3, bidp_rsqn4, bidp_rsqn5, bidp_rsqn6, bidp_rsqn7,
+        bidp_rsqn8, bidp_rsqn9, total_askp_rsqn, total_bidp_rsqn, ovtm_total_askp_rsqn,
+        ovtm_total_bidp_rsqn, antc_cnpr, antc_cnqn, antc_vol, antc_cntg_vrss,
+        antc_cntg_vrss_sign, antc_cntg_prdy_ctrt, acml_vol, total_askp_rsqn_icdc,
+        total_bidp_rsqn_icdc, ovtm_total_askp_icdc, ovtm_total_bidp_icdc.
+        """
+        approval_key = await self.get_ws_approval_key()
+        url = WS_PAPER_URL if self._is_paper_trading else WS_REAL_URL
+        subscribe_msg = _build_subscribe_message(
+            approval_key, "H0STOAA0", tr_key
+        )
+
+        async def _on_frame(raw: str) -> None:
+            await callback(raw)
+
+        await _run_kis_ws_subscription(
+            url,
+            subscribe_msg,
+            _on_frame,
+            connect_fn=connect_fn,
+            on_reconnecting=on_reconnecting,
+            on_reconnected=on_reconnected,
+        )
+
+    async def overtime_exp_ccnl_krx_h0stoac0(
+        self,
+        tr_key: str,
+        callback: MessageHandler,
+        *,
+        on_reconnecting: ReconnectHook | None = None,
+        on_reconnected: ReconnectHook | None = None,
+        connect_fn: ConnectFn = _connect,
+    ) -> None:
+        """BR-12 생성(ADR-2026-09-06-I D7). 미검증: 실계좌 왕복 미확인.
+        [국내주식] 실시간시세 > 국내주식 시간외 실시간예상체결 (KRX) [실시간-024] -- WS
+        tr_id=H0STOAC0. 필수 파라미터: tr_key. 응답 필드: mksc_shrn_iscd, stck_cntg_hour,
+        stck_prpr, prdy_vrss_sign, prdy_vrss, prdy_ctrt, wghn_avrg_stck_prc, stck_oprc,
+        stck_hgpr, stck_lwpr, askp1, bidp1, cntg_vol, acml_vol, acml_tr_pbmn, seln_cntg_csnu,
+        shnu_cntg_csnu, ntby_cntg_csnu, cttr, seln_cntg_smtn, shnu_cntg_smtn, cntg_cls_code,
+        shnu_rate, prdy_vol_vrss_acml_vol_rate, oprc_hour, oprc_vrss_prpr_sign, oprc_vrss_prpr,
+        hgpr_hour, hgpr_vrss_prpr_sign, hgpr_vrss_prpr, lwpr_hour, lwpr_vrss_prpr_sign,
+        lwpr_vrss_prpr, bsop_date, new_mkop_cls_code, trht_yn, askp_rsqn1, bidp_rsqn1,
+        total_askp_rsqn, total_bidp_rsqn, vol_tnrt, prdy_smns_hour_acml_vol,
+        prdy_smns_hour_acml_vol_rate.
+        """
+        approval_key = await self.get_ws_approval_key()
+        url = WS_PAPER_URL if self._is_paper_trading else WS_REAL_URL
+        subscribe_msg = _build_subscribe_message(
+            approval_key, "H0STOAC0", tr_key
+        )
+
+        async def _on_frame(raw: str) -> None:
+            await callback(raw)
+
+        await _run_kis_ws_subscription(
+            url,
+            subscribe_msg,
+            _on_frame,
+            connect_fn=connect_fn,
+            on_reconnecting=on_reconnecting,
+            on_reconnected=on_reconnected,
+        )
+
+    async def overtime_ccnl_krx_h0stoup0(
+        self,
+        tr_key: str,
+        callback: MessageHandler,
+        *,
+        on_reconnecting: ReconnectHook | None = None,
+        on_reconnected: ReconnectHook | None = None,
+        connect_fn: ConnectFn = _connect,
+    ) -> None:
+        """BR-12 생성(ADR-2026-09-06-I D7). 미검증: 실계좌 왕복 미확인.
+        [국내주식] 실시간시세 > 국내주식 시간외 실시간체결가 (KRX) [실시간-042] -- WS
+        tr_id=H0STOUP0. 필수 파라미터: tr_key. 응답 필드: mksc_shrn_iscd, stck_cntg_hour,
+        stck_prpr, prdy_vrss_sign, prdy_vrss, prdy_ctrt, wghn_avrg_stck_prc, stck_oprc,
+        stck_hgpr, stck_lwpr, askp1, bidp1, cntg_vol, acml_vol, acml_tr_pbmn, seln_cntg_csnu,
+        shnu_cntg_csnu, ntby_cntg_csnu, cttr, seln_cntg_smtn, shnu_cntg_smtn, cntg_cls_code,
+        shnu_rate, prdy_vol_vrss_acml_vol_rate, oprc_hour, oprc_vrss_prpr_sign, oprc_vrss_prpr,
+        hgpr_hour, hgpr_vrss_prpr_sign, hgpr_vrss_prpr, lwpr_hour, lwpr_vrss_prpr_sign,
+        lwpr_vrss_prpr, bsop_date, new_mkop_cls_code, trht_yn, askp_rsqn1, bidp_rsqn1,
+        total_askp_rsqn, total_bidp_rsqn, vol_tnrt, prdy_smns_hour_acml_vol,
+        prdy_smns_hour_acml_vol_rate.
+        """
+        approval_key = await self.get_ws_approval_key()
+        url = WS_PAPER_URL if self._is_paper_trading else WS_REAL_URL
+        subscribe_msg = _build_subscribe_message(
+            approval_key, "H0STOUP0", tr_key
+        )
+
+        async def _on_frame(raw: str) -> None:
+            await callback(raw)
+
+        await _run_kis_ws_subscription(
+            url,
+            subscribe_msg,
+            _on_frame,
+            connect_fn=connect_fn,
+            on_reconnecting=on_reconnecting,
+            on_reconnected=on_reconnected,
+        )

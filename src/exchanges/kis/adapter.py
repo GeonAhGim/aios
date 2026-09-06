@@ -39,6 +39,7 @@ from src.exchanges.kis.domestic_futureoption_mixin import KISDomesticFutureoptio
 from src.exchanges.kis.domestic_stock_extra_mixin import KISDomesticStockExtraMixin
 from src.exchanges.kis.elw_mixin import KISElwMixin
 from src.exchanges.kis.etf_mixin import KISEtfMixin
+from src.exchanges.kis.generated import KISGeneratedMixin
 from src.exchanges.kis.market_data_mixin import KISMarketDataMixin
 from src.exchanges.kis.order_dispatch import dispatch_place_order
 from src.exchanges.kis.overseas_futureoption_mixin import KISOverseasFutureoptionMixin
@@ -159,9 +160,16 @@ class KISAdapter(
     KISElwMixin,
     KISEtfMixin,
     KISWebSocketMixin,
+    KISGeneratedMixin,
     ExchangeAdapter,
 ):
     """한국투자증권(KIS) — 국내 REST+WebSocket 공식 API, OAuth 2.0 인증.
+
+    `KISGeneratedMixin`(BR-12, ADR-2026-09-06-I D7) — 289개 미착수 TR을
+    `scripts/kis_generate_adapters.py`가 기준 목록(BR-11)에서 기계 생성한
+    메서드 묶음. 요청 조립(method/path/tr_id/params)만 보증하고 응답은
+    파싱하지 않은 원본을 돌려준다 — 위 mixin들처럼 도메인 타입으로
+    변환하는 손질은 실계좌 확보 후 검수 리프(BR-13~15)의 몫이다.
 
     ⚠️ 검증 필요 가정(09번 §9.1 #8과 동일 원칙) — Order.client_order_id를
     영속적 멱등성 키로 가정한 01번 설계와 달리, KIS는 주문 시 자체 채번한
