@@ -1,4 +1,5 @@
 """FD-8.4 통합테스트 — Executor의 LIVE 하드가드 + PAPER 제출 + FSM 전이."""
+
 import json
 import uuid
 from decimal import ROUND_HALF_EVEN, Decimal
@@ -16,10 +17,18 @@ from src.data.models.base import AssetClass, Currency, Money
 from src.data.models.strategy_fsm import FSMState
 from src.data.models.trading import Order, OrderSide, OrderStatus, OrderType
 from src.services.condition_compiler import ConditionCompiler
+from src.services.order_service.gate import GateDecision, GateOutcome
 from src.services.order_service.position_ledger import record_fill_in_position_ledger
 from src.services.preview_service import PreviewCondition
 from tests.integration.conftest import create_test_user
 from tests.integration.fake_exchange_adapter import FakeExchangeAdapter
+
+
+async def _allow_gate(context: object) -> GateDecision:
+    """이 파일은 LIVE 하드가드·FSM 전이 등 Executor 자체 로직을 검증한다 —
+    실제 게이트 배선은 tests/adversarial/risk/test_executor_requires_gate.py
+    (task-1715/P0-B)가 맡는다."""
+    return GateDecision(outcome=GateOutcome.ALLOW)
 
 
 def _asyncpg_dsn() -> str:
@@ -130,6 +139,7 @@ async def test_live_mode_is_hard_blocked_before_any_order_is_placed(pool):
             fsm_config=_fsm_config(),
             fsm_state_writer=writer,
             pool=pool,
+            pre_submit_gate=_allow_gate,
         )
 
     assert adapter.place_order_call_count == 0
@@ -160,6 +170,7 @@ async def test_paper_mode_with_non_sandboxed_adapter_is_hard_blocked(pool):
             fsm_config=_fsm_config(),
             fsm_state_writer=writer,
             pool=pool,
+            pre_submit_gate=_allow_gate,
         )
 
     assert adapter.place_order_call_count == 0
@@ -186,6 +197,7 @@ async def test_paper_mode_rejects_a_live_configured_adapter_before_order_submiss
             fsm_config=_fsm_config(),
             fsm_state_writer=writer,
             pool=pool,
+            pre_submit_gate=_allow_gate,
         )
 
     assert adapter.place_order_call_count == 0
@@ -214,6 +226,7 @@ async def test_risk_not_approved_raises_before_any_order_is_placed(pool):
             fsm_config=_fsm_config(),
             fsm_state_writer=writer,
             pool=pool,
+            pre_submit_gate=_allow_gate,
         )
 
     assert adapter.place_order_call_count == 0
@@ -239,6 +252,7 @@ async def test_paper_mode_synchronous_fill_advances_fsm_state(pool):
         fsm_config=_fsm_config(),
         fsm_state_writer=writer,
         pool=pool,
+        pre_submit_gate=_allow_gate,
     )
 
     assert result.status == OrderStatus.FILLED
@@ -274,6 +288,7 @@ async def test_paper_mode_pending_fill_does_not_advance_fsm_state(pool):
         fsm_config=_fsm_config(),
         fsm_state_writer=writer,
         pool=pool,
+        pre_submit_gate=_allow_gate,
     )
 
     assert result.status == OrderStatus.SUBMITTED
@@ -364,6 +379,7 @@ async def test_submission_failure_does_not_roll_back_fsm_state(pool):
             fsm_config=_fsm_config(),
             fsm_state_writer=writer,
             pool=pool,
+            pre_submit_gate=_allow_gate,
         )
 
     assert calls == []

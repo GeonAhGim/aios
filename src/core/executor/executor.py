@@ -18,7 +18,13 @@ foundation을 여기서 직접 import하지 않는다) `submit_order` 대신
 I10)을 거쳐 `orders.risk_decision_id`가 채워진다. 셋 중 하나라도 없으면
 (기존 호출부·단위테스트 호환) 예전과 동일하게 `submit_order`로 폴백한다
 — 이 폴백 자체가 회귀는 아니다: 그 경로엔 애초에 채울 decision_id가 없다.
+
+task-1715(P0-B) — `pre_submit_gate`는 두 경로 모두에 필수 인자다(I-01).
+FROZEN_PAPER_ONLY 승인(감사 2026-09-06 P0)으로 이 시그니처를 바꿨다 —
+게이트 없이는 `execute()` 자체를 호출할 수 없다(정적으로 걸림, 런타임
+None 주입도 `submit_order`/`is_submission_allowed`가 다시 막는다).
 """
+
 from __future__ import annotations
 
 import logging
@@ -39,7 +45,7 @@ from src.exchanges.common.adapter import ExchangeAdapter
 from src.services.condition_compiler import ORDER_FILLED
 from src.services.order_service import OrderSubmissionError, submit_order
 from src.services.order_service.fenced_submit import FenceReader, submit_with_fence
-from src.services.order_service.gate import GateDecision, GateOutcome
+from src.services.order_service.gate import GateDecision, GateOutcome, PreSubmitGate
 from src.services.order_service.submit import OrderDeniedByRiskGateError, PublishFn
 from src.services.order_service.worm_decision_check import DecisionReader
 
@@ -75,6 +81,7 @@ class Executor:
         fsm_state_writer: FsmStateWriter,
         publish: PublishFn | None = None,
         pool: asyncpg.Pool,
+        pre_submit_gate: PreSubmitGate,
         gate_decision: GateDecision | None = None,
         read_fences: FenceReader | None = None,
         decision_reader: DecisionReader | None = None,
@@ -136,8 +143,13 @@ class Executor:
                 and decision_reader is not None
             ):
                 submitted = await submit_with_fence(
-                    pool, adapter, order, user_id=user_id, gate_decision=gate_decision,
-                    read_fences=read_fences, decision_reader=decision_reader,
+                    pool,
+                    adapter,
+                    order,
+                    user_id=user_id,
+                    gate_decision=gate_decision,
+                    read_fences=read_fences,
+                    decision_reader=decision_reader,
                 )
                 # `submit_with_fence`(fenced_submit.py)는 submit.py와 달리
                 # `publish`를 모른다(foundation 비의존 원칙과 무관 — 그냥
@@ -158,7 +170,12 @@ class Executor:
                     )
             else:
                 submitted = await submit_order(
-                    order, user_id=user_id, adapter=adapter, pool=pool, publish=publish
+                    order,
+                    user_id=user_id,
+                    adapter=adapter,
+                    pool=pool,
+                    publish=publish,
+                    pre_submit_gate=pre_submit_gate,
                 )
         except Exception:
             logger.critical(

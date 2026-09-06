@@ -2,17 +2,9 @@
   "_설명": "scripts/check_audit_regressions.py의 래칫 기준선. 지금 열려 있음이 알려진 감사 결함과 담당 task. 여기 없는 결함이 새로 나타나면 CI 실패, 여기 있는데 실제로는 사라졌으면 지우라는 뜻으로 CI 실패. 한 번 닫힌 항목은 조용히 다시 열릴 수 없다.",
   "_근거": "ADR-2026-09-06-E(P0 배선 결함), ADR-2026-09-06-G(2차 감사)",
   "open": {
-    "optional_safety_gate": {
-      "task": 1715,
-      "note": "P0-B. submit_order·pre_submit_check·tick의 게이트 인자가 Optional이다. 비Optional로 바꾸고 호출부를 전부 통과시켜야 닫힌다."
-    },
     "require_mandate_false": {
       "task": 1750,
       "note": "R-59. 운영 조립 4곳이 require_mandate=False다. 컴플라이언스 판정이 감사로그 전용 no-op이므로 I-09 이중 권위가 절반만 산다."
-    },
-    "executor_gate_missing": {
-      "task": 1715,
-      "note": "P0-B 본체. Executor가 submit_order를 부르며 pre_submit_gate를 넘기지 않는다."
     },
     "tenant_fk_to_users": {
       "task": 1814,

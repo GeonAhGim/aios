@@ -7,18 +7,19 @@ FSM 상태 전이(run_execution_tick의 writer 호출)보다 반드시 먼저 �
 FSM은 아예 건드리지 않은 채로 이번 tick을 조용히 포기한다(다음 tick이
 같은 신호를 다시 평가).
 
-`src/core/executor/executor.py`는 FROZEN_PAPER_ONLY라 시그니처를 바꿔
-pre_submit_gate를 그 안까지 관통시키지 않는다 — 이 tick.py 레벨 검사
-하나로 "거부되면 애초에 executor.execute()를 부르지 않는다"는 동일한
-안전효과를 얻는다.
+이 tick.py 레벨 검사가 "거부되면 애초에 executor.execute()를 부르지
+않는다"는 안전효과를 준다. task-1715(P0-B)부터는 `Executor.execute()`
+자신도 `pre_submit_gate`를 필수로 받는다(FROZEN_PAPER_ONLY 승인) — 이
+검사는 그와 별개로 FSM 전이 이전 시점에 한 번 더 평가해 PENDING류 고착을
+막는 용도다.
 
 task-1717 P0-D — `evaluate_submission_gate()`가 `GateDecision` 전체(특히
 `decision_id`)를 돌려준다. `Executor.execute()`가 `submit_with_fence`
 경유로 전환되면서 이 결정을 그대로 전달받아야 `orders.risk_decision_id`가
-채워진다(§3.6). 이 함수 자체는 `pre_submit_gate`를 필수로 받는다(I-01,
-`test_gate_params_required.py`) — "게이트가 없을 수도 있다"는 분기는
-호출부(`run_execution_tick`/`is_submission_allowed`, 둘 다 이미 이 분기를
-갖고 있던 기존 코드)에만 남기고 새 함수에서 중복하지 않는다."""
+채워진다(§3.6). 이 함수와 `run_execution_tick`/`is_submission_allowed`
+모두 `pre_submit_gate`를 필수로 받는다(I-01, `test_gate_params_required.py`)
+— "게이트가 없을 수도 있다"는 fail-open 분기는 어디에도 남기지 않는다."""
+
 from __future__ import annotations
 
 import logging
@@ -68,7 +69,7 @@ async def evaluate_submission_gate(
 
 
 async def is_submission_allowed(
-    pre_submit_gate: PreSubmitGate | None,
+    pre_submit_gate: PreSubmitGate,
     *,
     user_id: UUID,
     execution_id: int,
@@ -82,9 +83,10 @@ async def is_submission_allowed(
     `execution["mandate_revision_id"]`를 그대로 넘기기만 하면 된다.
 
     `observed_fence`(R-36) — PRE_TRADE 등 이전 단계가 관측한 F0가 있으면
-    그대로 넘겨 stale이면 거부되게 한다."""
-    if pre_submit_gate is None:
-        return True
+    그대로 넘겨 stale이면 거부되게 한다.
+
+    task-1715(P0-B) — `pre_submit_gate`는 필수 인자다(I-01). 예전엔 None이면
+    무조건 허용했다(fail-open) — 그 분기를 제거했다."""
     decision = await evaluate_submission_gate(
         pre_submit_gate,
         user_id=user_id,

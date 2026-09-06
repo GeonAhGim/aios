@@ -11,6 +11,7 @@ risk_decision_id" 행. 감사(전수감사 2026-09-06 P0-D): `foundation_gate.py
 전체를 실제 조립부와 같은 방식으로 엮어 orders 행의 risk_decision_id가
 그 결정의 decision_id와 일치함을 확인한다.
 """
+
 from __future__ import annotations
 
 import os
@@ -107,6 +108,7 @@ async def test_executor_via_submit_with_fence_fills_orders_risk_decision_id(pool
         fsm_config=_fsm_config(),
         fsm_state_writer=_noop_writer,
         pool=pool,
+        pre_submit_gate=gate,
         gate_decision=gate_decision,
         read_fences=read_fences,
         decision_reader=decision_reader,
@@ -135,6 +137,7 @@ async def test_executor_falls_back_to_plain_submit_without_fence_wiring(pool: as
         capital_pct=Decimal("10"),
     )
     adapter = RecordingAdapter()
+    gate = make_foundation_pre_submit_gate(pool, require_mandate=False)
 
     submitted = await Executor().execute(
         allocation,
@@ -149,6 +152,7 @@ async def test_executor_falls_back_to_plain_submit_without_fence_wiring(pool: as
         fsm_config=_fsm_config(),
         fsm_state_writer=_noop_writer,
         pool=pool,
+        pre_submit_gate=gate,
     )
 
     assert submitted.status == OrderStatus.SUBMITTED

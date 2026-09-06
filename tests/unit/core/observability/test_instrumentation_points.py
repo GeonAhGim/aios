@@ -6,6 +6,7 @@ Spec: docs/specs/L4_platform_observability_tenancy_api_v1.0.md §7.2, §9 PLT-10
 `NullMetrics`이므로(§9 decision) 여기서는 스파이를 명시적으로 주입해 호출을
 관측한다 — 실제 DB/거래소 왕복 없이 repository 함수를 monkeypatch로 대역한다.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass, field
@@ -88,6 +89,10 @@ class _ExplodingPool:
         raise AssertionError("메트릭 기록 전에 DB에 접근했다")
 
 
+async def _allow_gate(context: object) -> GateDecision:
+    return GateDecision(outcome=GateOutcome.ALLOW)
+
+
 def _order(**overrides: object) -> Order:
     fields: dict[str, object] = dict(
         client_order_id=f"c-{uuid4().hex}",
@@ -147,15 +152,24 @@ async def test_submit_order_accepted_records_submit_metrics(
     spy = _SpyMetrics()
 
     result = await submit_order(
-        order, user_id=uuid4(), adapter=adapter, pool=_FakePool(), metrics=spy
+        order,
+        user_id=uuid4(),
+        adapter=adapter,
+        pool=_FakePool(),
+        metrics=spy,
+        pre_submit_gate=_allow_gate,
     )
 
     assert result.status == OrderStatus.SUBMITTED
+    # task-1715(P0-B) — pre_submit_gate가 필수 인자가 된 뒤로는 항상 평가되므로
+    # gate 자체의 계측(RISK_DECISION_COUNT_TOTAL)도 함께 기록된다.
     assert spy.counters == [
-        (ORDER_SUBMIT_COUNT_TOTAL, {"exchange": "bitget", "mode": "paper", "outcome": "accepted"})
+        (RISK_DECISION_COUNT_TOTAL, {"engine": "core", "effect": "ALLOW", "reason_code": "none"}),
+        (ORDER_SUBMIT_COUNT_TOTAL, {"exchange": "bitget", "mode": "paper", "outcome": "accepted"}),
     ]
-    assert len(spy.observations) == 1
-    assert spy.observations[0][0] == ORDER_SUBMIT_DURATION_SECONDS
+    assert len(spy.observations) == 2
+    assert spy.observations[0][0] == RISK_EVALUATION_DURATION_SECONDS
+    assert spy.observations[1][0] == ORDER_SUBMIT_DURATION_SECONDS
 
 
 async def test_submit_order_denied_records_gate_and_denied_metrics(
@@ -239,9 +253,7 @@ async def test_reconcile_gauge_zero_when_resolved(monkeypatch: pytest.MonkeyPatc
     adapter = FakeExchangeAdapter(get_order_status=OrderStatus.FILLED)
     spy = _SpyMetrics()
 
-    result = await resolve_unknown(
-        pending.order_id, adapter=adapter, pool=_FakePool(), metrics=spy
-    )
+    result = await resolve_unknown(pending.order_id, adapter=adapter, pool=_FakePool(), metrics=spy)
 
     assert result.status == OrderStatus.FILLED
     assert (ORDER_UNKNOWN_STATE_GAUGE, 0.0, {"exchange": "bitget"}) in spy.gauges

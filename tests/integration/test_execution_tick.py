@@ -1,6 +1,7 @@
 """FD-8.1~8.4 실행 루프 통합테스트 — StrategyEngine→PortfolioEngine→
 RiskEngine→Executor 전체 파이프라인 왕복(거래소는 FakeExchangeAdapter 대역).
 """
+
 import json
 import uuid
 from decimal import Decimal
@@ -17,6 +18,7 @@ from src.core.loader.risk_policy_loader import load_risk_policy
 from src.core.portfolio.engine import PortfolioEngine
 from src.core.risk.decision import RiskOutcome
 from src.core.risk.engine import RiskEngine
+from src.core.safety.data_distrust import DataDistrustMonitor
 from src.core.strategy.engine import StrategyEngine
 from src.data.models.strategy_fsm import FSMState
 from src.data.models.trading import AccountBalance, OrderStatus
@@ -26,10 +28,19 @@ from src.foundation.risk_gate.adapters.postgres_decision_repository import (
 from src.services.condition_compiler import ConditionCompiler
 from src.services.execution_loop.equity_tracker import ExecutionEquityTracker
 from src.services.execution_loop.tick import _make_fsm_state_writer, run_execution_tick
+from src.services.order_service.gate import GateDecision, GateOutcome
 from src.services.preview_service import PreviewCondition
 from src.services.risk_decision_recorder import RiskDecisionRecorder
 from tests.integration.conftest import create_test_user
 from tests.integration.fake_exchange_adapter import FakeExchangeAdapter
+
+
+async def _allow_gate(context: object) -> GateDecision:
+    """이 파일은 FD-8 파이프라인(신호→배분→리스크→실행)을 검증한다 —
+    게이트 배선 자체는 tests/adversarial/risk/가 맡는다(task-1715/P0-B가
+    `run_execution_tick`의 `pre_submit_gate`를 필수 인자로 바꾼 뒤에도 이
+    파일의 기존 시나리오가 우회 없이 그대로 통과하게 하는 대역)."""
+    return GateDecision(outcome=GateOutcome.ALLOW)
 
 
 def _asyncpg_dsn() -> str:
@@ -73,9 +84,7 @@ def _fsm_definition(*, entry_threshold: float) -> dict:
             )
         ],
         stop_loss_conditions=[
-            PreviewCondition(
-                indicator="SMA", params={"timeperiod": 5}, operator="<", threshold=0.0
-            )
+            PreviewCondition(indicator="SMA", params={"timeperiod": 5}, operator="<", threshold=0.0)
         ],
     )
     return json.loads(compiled.model_dump_json())
@@ -125,6 +134,8 @@ def _engines():
         "executor": Executor(),
         "equity_tracker": ExecutionEquityTracker(),
         "policy": load_risk_policy(),
+        "pre_submit_gate": _allow_gate,
+        "distrust_monitor": DataDistrustMonitor(),
     }
 
 
@@ -178,7 +189,7 @@ async def test_distrusted_blocks_new_entry_signal(pool, monkeypatch):
     그대로, 다음 틱 재평가). data_distrust_state 마이그레이션이 아직
     origin/main에 없어(task-103 참조) 실제 DB 영속 대신
     check_and_persist_distrust를 monkeypatch로 대체한다."""
-    from src.core.safety.data_distrust import DataDistrustLevel, DataDistrustMonitor
+    from src.core.safety.data_distrust import DataDistrustLevel
 
     async def _fake_check_and_persist(*args, **kwargs):
         return DataDistrustLevel.DISTRUSTED
@@ -191,9 +202,7 @@ async def test_distrusted_blocks_new_entry_signal(pool, monkeypatch):
     execution_id = await _create_execution(pool, user_id, entry_threshold=100.0)
     adapter = FakeExchangeAdapter(closes=[Decimal("50")] * 65)
 
-    await run_execution_tick(
-        pool, adapter, execution_id, **_engines(), distrust_monitor=DataDistrustMonitor()
-    )
+    await run_execution_tick(pool, adapter, execution_id, **_engines())
 
     assert adapter.place_order_call_count == 0
     async with pool.acquire() as conn:
@@ -206,7 +215,7 @@ async def test_distrusted_blocks_new_entry_signal(pool, monkeypatch):
 async def test_suspicious_blocks_new_entry_signal(pool, monkeypatch):
     """R-48 — SUSPICIOUS도 신규 진입은 막는다(DISTRUSTED와 동일하게
     IDLE -> BUY_ORDER_PENDING 경로가 차단된다)."""
-    from src.core.safety.data_distrust import DataDistrustLevel, DataDistrustMonitor
+    from src.core.safety.data_distrust import DataDistrustLevel
 
     async def _fake_check_and_persist(*args, **kwargs):
         return DataDistrustLevel.SUSPICIOUS
@@ -219,9 +228,7 @@ async def test_suspicious_blocks_new_entry_signal(pool, monkeypatch):
     execution_id = await _create_execution(pool, user_id, entry_threshold=100.0)
     adapter = FakeExchangeAdapter(closes=[Decimal("50")] * 65)
 
-    await run_execution_tick(
-        pool, adapter, execution_id, **_engines(), distrust_monitor=DataDistrustMonitor()
-    )
+    await run_execution_tick(pool, adapter, execution_id, **_engines())
 
     assert adapter.place_order_call_count == 0
 
@@ -230,7 +237,7 @@ async def test_degraded_single_source_does_not_block_entry(pool, monkeypatch):
     """R-48 — DEGRADED_SINGLE_SOURCE(참조 소스 없음)는 관측만, 신규 진입을
     막지 않는다 — quorum 미달로 영구 고착됐던 예전 SUSPICIOUS 동작과의
     핵심 차이."""
-    from src.core.safety.data_distrust import DataDistrustLevel, DataDistrustMonitor
+    from src.core.safety.data_distrust import DataDistrustLevel
 
     async def _fake_check_and_persist(*args, **kwargs):
         return DataDistrustLevel.DEGRADED_SINGLE_SOURCE
@@ -249,9 +256,7 @@ async def test_degraded_single_source_does_not_block_entry(pool, monkeypatch):
         ),
     )
 
-    await run_execution_tick(
-        pool, adapter, execution_id, **_engines(), distrust_monitor=DataDistrustMonitor()
-    )
+    await run_execution_tick(pool, adapter, execution_id, **_engines())
 
     assert adapter.place_order_call_count == 1
 
@@ -415,8 +420,7 @@ async def test_concurrent_tick_race_only_submits_one_order(pool):
         async def get_balance(self, asset: str | None = None):  # noqa: ANN001
             async with pool.acquire() as conn:
                 await conn.execute(
-                    "UPDATE strategy_executions SET fsm_state = 'BUY_ORDER_PENDING' "
-                    "WHERE id = $1",
+                    "UPDATE strategy_executions SET fsm_state = 'BUY_ORDER_PENDING' WHERE id = $1",
                     execution_id,
                 )
             return await super().get_balance(asset)

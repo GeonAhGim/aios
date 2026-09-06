@@ -1,4 +1,5 @@
 """FD-4 통합테스트 — 실제 dev/test DB 대상, 거래소는 FakeExchangeAdapter로 대역."""
+
 import asyncio
 import json
 import uuid
@@ -23,8 +24,17 @@ from src.services.order_service import (
     submit_order,
 )
 from src.services.order_service import repository as order_repository
+from src.services.order_service.gate import GateDecision, GateOutcome
 from tests.integration.conftest import create_test_user
 from tests.integration.fake_exchange_adapter import FakeExchangeAdapter
+
+
+async def _allow_gate(context: object) -> GateDecision:
+    """이 파일은 게이트 배선 자체가 아니라 FD-4.2(제출·멱등성·영속화)를
+    검증한다 — 실제 risk_gate는 `test_order_service_risk_gate.py`가 맡는다
+    (task-1715/P0-B가 `pre_submit_gate`를 필수 인자로 바꾼 뒤에도 이 파일의
+    기존 시나리오가 게이트 자체를 우회 없이 그대로 통과하게 하는 대역)."""
+    return GateDecision(outcome=GateOutcome.ALLOW)
 
 
 def _asyncpg_dsn() -> str:
@@ -111,7 +121,14 @@ async def test_submit_order_persists_and_publishes(pool):
         published.append((topic, payload))
 
     order = _market_order(execution_id)
-    result = await submit_order(order, user_id=user_id, adapter=adapter, pool=pool, publish=publish)
+    result = await submit_order(
+        order,
+        user_id=user_id,
+        adapter=adapter,
+        pool=pool,
+        publish=publish,
+        pre_submit_gate=_allow_gate,
+    )
 
     assert result.status == OrderStatus.SUBMITTED
     assert result.exchange_order_id is not None
@@ -132,8 +149,12 @@ async def test_submit_order_idempotent_on_same_client_order_id(pool):
     adapter = FakeExchangeAdapter()
 
     order = _market_order(execution_id, client_order_id=f"idempotent-key-{uuid.uuid4().hex}")
-    first = await submit_order(order, user_id=user_id, adapter=adapter, pool=pool)
-    second = await submit_order(order, user_id=user_id, adapter=adapter, pool=pool)
+    first = await submit_order(
+        order, user_id=user_id, adapter=adapter, pool=pool, pre_submit_gate=_allow_gate
+    )
+    second = await submit_order(
+        order, user_id=user_id, adapter=adapter, pool=pool, pre_submit_gate=_allow_gate
+    )
 
     assert adapter.place_order_call_count == 1
     assert first.order_id == second.order_id
@@ -162,8 +183,12 @@ async def test_submit_order_concurrent_calls_only_send_to_exchange_once(pool):
     order_b = _market_order(execution_id, client_order_id=client_order_id)
 
     results = await asyncio.gather(
-        submit_order(order_a, user_id=user_id, adapter=adapter, pool=pool),
-        submit_order(order_b, user_id=user_id, adapter=adapter, pool=pool),
+        submit_order(
+            order_a, user_id=user_id, adapter=adapter, pool=pool, pre_submit_gate=_allow_gate
+        ),
+        submit_order(
+            order_b, user_id=user_id, adapter=adapter, pool=pool, pre_submit_gate=_allow_gate
+        ),
     )
 
     assert adapter.place_order_call_count == 1
@@ -178,7 +203,9 @@ async def test_submit_order_rejected_is_not_an_exception(pool):
     adapter = FakeExchangeAdapter(place_order_result_status=OrderStatus.REJECTED)
 
     order = _market_order(execution_id)
-    result = await submit_order(order, user_id=user_id, adapter=adapter, pool=pool)
+    result = await submit_order(
+        order, user_id=user_id, adapter=adapter, pool=pool, pre_submit_gate=_allow_gate
+    )
 
     assert result.status == OrderStatus.REJECTED
 
@@ -201,7 +228,9 @@ async def test_submit_order_network_error_propagates(pool):
     order = _market_order(execution_id)
 
     with pytest.raises(RetryableExchangeError):
-        await submit_order(order, user_id=user_id, adapter=adapter, pool=pool)
+        await submit_order(
+            order, user_id=user_id, adapter=adapter, pool=pool, pre_submit_gate=_allow_gate
+        )
 
     async with pool.acquire() as conn:
         row = await conn.fetchrow(
@@ -219,7 +248,9 @@ async def test_update_from_exchange_raises_on_status_mismatch(pool):
     execution_id = await _create_running_execution(pool, user_id)
     adapter = FakeExchangeAdapter()
     order = _market_order(execution_id)
-    submitted = await submit_order(order, user_id=user_id, adapter=adapter, pool=pool)
+    submitted = await submit_order(
+        order, user_id=user_id, adapter=adapter, pool=pool, pre_submit_gate=_allow_gate
+    )
     assert submitted.status == OrderStatus.SUBMITTED
 
     # 다른 경로가 먼저 CANCELLED로 바꿨다고 가정 — 이 시점에 apply_fill이
@@ -252,7 +283,9 @@ async def test_cancel_order_acknowledged_enqueues_cancel_command(pool):
     execution_id = await _create_running_execution(pool, user_id)
     adapter = FakeExchangeAdapter(place_order_result_status=OrderStatus.ACKNOWLEDGED)
     order = _market_order(execution_id)
-    submitted = await submit_order(order, user_id=user_id, adapter=adapter, pool=pool)
+    submitted = await submit_order(
+        order, user_id=user_id, adapter=adapter, pool=pool, pre_submit_gate=_allow_gate
+    )
 
     cancelled = await cancel_order(submitted.order_id, adapter=adapter, pool=pool)
 
@@ -281,7 +314,9 @@ async def test_cancel_already_filled_order_raises(pool):
     execution_id = await _create_running_execution(pool, user_id)
     adapter = FakeExchangeAdapter(place_order_result_status=OrderStatus.FILLED)
     order = _market_order(execution_id)
-    submitted = await submit_order(order, user_id=user_id, adapter=adapter, pool=pool)
+    submitted = await submit_order(
+        order, user_id=user_id, adapter=adapter, pool=pool, pre_submit_gate=_allow_gate
+    )
     assert submitted.status == OrderStatus.FILLED
 
     with pytest.raises(OrderCancelError):
@@ -326,7 +361,9 @@ async def test_modify_market_order_rejected_before_exchange_call(pool):
     execution_id = await _create_running_execution(pool, user_id)
     adapter = _ModifiableFakeAdapter(place_order_result_status=OrderStatus.ACKNOWLEDGED)
     order = _market_order(execution_id)
-    submitted = await submit_order(order, user_id=user_id, adapter=adapter, pool=pool)
+    submitted = await submit_order(
+        order, user_id=user_id, adapter=adapter, pool=pool, pre_submit_gate=_allow_gate
+    )
 
     with pytest.raises(OrderModifyError):
         await modify_order(
@@ -348,7 +385,9 @@ async def test_modify_already_filled_order_raises(pool):
     execution_id = await _create_running_execution(pool, user_id)
     adapter = _ModifiableFakeAdapter(place_order_result_status=OrderStatus.FILLED)
     order = _limit_order(execution_id)
-    submitted = await submit_order(order, user_id=user_id, adapter=adapter, pool=pool)
+    submitted = await submit_order(
+        order, user_id=user_id, adapter=adapter, pool=pool, pre_submit_gate=_allow_gate
+    )
     assert submitted.status == OrderStatus.FILLED
 
     with pytest.raises(OrderModifyError):
@@ -370,7 +409,9 @@ async def test_resolve_unknown_confirms_status_within_max_attempts(pool):
     execution_id = await _create_running_execution(pool, user_id)
     adapter = FakeExchangeAdapter(get_order_status=OrderStatus.FILLED)
     order = _market_order(execution_id)
-    submitted = await submit_order(order, user_id=user_id, adapter=adapter, pool=pool)
+    submitted = await submit_order(
+        order, user_id=user_id, adapter=adapter, pool=pool, pre_submit_gate=_allow_gate
+    )
     async with pool.acquire() as conn:
         await conn.execute(
             "UPDATE orders SET status = 'UNKNOWN', unknown_since = now() WHERE order_id = $1",
@@ -398,7 +439,9 @@ async def test_resolve_unknown_gives_up_after_max_attempts(pool):
     execution_id = await _create_running_execution(pool, user_id)
     adapter = FakeExchangeAdapter(get_order_status=OrderStatus.UNKNOWN)
     order = _market_order(execution_id)
-    submitted = await submit_order(order, user_id=user_id, adapter=adapter, pool=pool)
+    submitted = await submit_order(
+        order, user_id=user_id, adapter=adapter, pool=pool, pre_submit_gate=_allow_gate
+    )
     # FD-4.5는 "주문 상태가 UNKNOWN으로 관측될 때"(예: FD-3.4 폴링 자체가
     # 실패) 트리거된다 — 여기서는 그 관측이 이미 일어나 DB에 UNKNOWN으로
     # 반영된 상태를 직접 시뮬레이션한다.
@@ -445,7 +488,9 @@ async def test_synchronous_fill_round_trip_opens_and_closes_position(pool):
 
     buy_adapter = FakeExchangeAdapter(on_place_order=_fill_at("50000"))
     buy_order = _market_order(execution_id)
-    await submit_order(buy_order, user_id=user_id, adapter=buy_adapter, pool=pool)
+    await submit_order(
+        buy_order, user_id=user_id, adapter=buy_adapter, pool=pool, pre_submit_gate=_allow_gate
+    )
 
     async with pool.acquire() as conn:
         opened = await conn.fetchrow(
@@ -460,12 +505,12 @@ async def test_synchronous_fill_round_trip_opens_and_closes_position(pool):
     sell_order = _market_order(execution_id).model_copy(
         update={"side": OrderSide.SELL, "client_order_id": f"sell-{uuid.uuid4().hex}"}
     )
-    await submit_order(sell_order, user_id=user_id, adapter=sell_adapter, pool=pool)
+    await submit_order(
+        sell_order, user_id=user_id, adapter=sell_adapter, pool=pool, pre_submit_gate=_allow_gate
+    )
 
     async with pool.acquire() as conn:
-        closed = await conn.fetchrow(
-            "SELECT * FROM positions WHERE id = $1", opened["id"]
-        )
+        closed = await conn.fetchrow("SELECT * FROM positions WHERE id = $1", opened["id"])
     assert closed["quantity"] == Decimal("0")
     assert closed["closed_at"] is not None
     # (55000 - 50000) * 0.01 = 50

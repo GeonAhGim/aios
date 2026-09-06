@@ -6,6 +6,7 @@ Spec: 기능설계문서_v1.21.md#FD-4.2
 얼마나)은 FD-8의 책임이고, 이 함수는 "이미 승인된 주문을 어떻게 안전하게
 전송·추적하는가"만 다룬다(8.2-A 경계선).
 """
+
 from __future__ import annotations
 
 import hashlib
@@ -98,7 +99,7 @@ async def submit_order(
     adapter: ExchangeAdapter,
     pool: asyncpg.Pool,
     publish: PublishFn | None = None,
-    pre_submit_gate: PreSubmitGate | None = None,
+    pre_submit_gate: PreSubmitGate,
     mandate_revision_id: UUID | None = None,
     metrics: MetricsPort | None = None,
 ) -> Order:
@@ -121,22 +122,22 @@ async def submit_order(
     # 전수감사 §6 / FND-06 배선 — 클레임(아래 a)보다 먼저 검사한다. 거부된
     # 시도는 애초에 orders 테이블에 흔적을 남기지 않는다(클레임 후 거부하면
     # "제출 안 됐지만 claim 행은 남은" 상태를 별도로 청소해야 함).
-    # `pre_submit_gate`가 없으면(기본값) 기존 동작과 완전히 동일 — 이미
-    # 존재하는 실행 전부에 대한 회귀 없음(마감 게이트 없이 그대로 통과).
-    if pre_submit_gate is not None:
-        gate_started = time.monotonic()
-        decision = await pre_submit_gate(
-            OrderContext(
-                user_id=user_id,
-                execution_id=order.execution_id,
-                exchange=order.exchange,
-                mandate_revision_id=mandate_revision_id,
-            )
+    # task-1715(P0-B) — `pre_submit_gate`는 필수 인자다(I-01). None 분기로
+    # 통과시키던 기존 fail-open 배선(감사 2026-09-06 P0)을 제거했다 — 게이트를
+    # 넘기지 않고는 이 함수를 호출할 수 없다.
+    gate_started = time.monotonic()
+    decision = await pre_submit_gate(
+        OrderContext(
+            user_id=user_id,
+            execution_id=order.execution_id,
+            exchange=order.exchange,
+            mandate_revision_id=mandate_revision_id,
         )
-        record_gate_decision(metrics, decision, duration_seconds=time.monotonic() - gate_started)
-        if decision.outcome != GateOutcome.ALLOW:
-            _record_submit_outcome("denied")
-            raise OrderDeniedByRiskGateError(decision.reason_codes)
+    )
+    record_gate_decision(metrics, decision, duration_seconds=time.monotonic() - gate_started)
+    if decision.outcome != GateOutcome.ALLOW:
+        _record_submit_outcome("denied")
+        raise OrderDeniedByRiskGateError(decision.reason_codes)
 
     # FD-4.2-a 멱등성 — 레드팀 #2026-09-02-19 — "먼저 SELECT로 없음을
     # 확인하고, 거래소 전송 후에야 INSERT한다"는 TOCTOU였다: 동시에 같은

@@ -11,6 +11,7 @@ fsm_state가 PENDING에 갇히지 않고 다음 틱에 안전하게 재평가된
 자신의 예외상황 문서("전송 실패 시 fsm_state를 되돌리지 않는다")는 바로 이
 직전에 이미 PENDING으로 바뀐 상태를 그대로 둔다는 뜻과 정합한다.
 """
+
 from __future__ import annotations
 
 import json
@@ -101,8 +102,8 @@ async def run_execution_tick(
     equity_tracker: ExecutionEquityTracker,
     policy: RiskPolicy,
     publish: PublishFn | None = None,
-    pre_submit_gate: PreSubmitGate | None = None,
-    distrust_monitor: DataDistrustMonitor | None = None,
+    pre_submit_gate: PreSubmitGate,
+    distrust_monitor: DataDistrustMonitor,
     distrust_providers: Sequence[ReferenceQuoteProvider] = (),
     recorder: RiskDecisionRecorder | None = None,
     candle_cache: CandleHistoryCache | None = None,
@@ -134,18 +135,16 @@ async def run_execution_tick(
     # 없어도 상태는 계속 최신으로 유지해야 관측 공백이 없다). 실제 주문
     # 거부 여부는 신호가 나온 뒤, 이게 신규 진입인지 청산/축소인지 알 수
     # 있는 시점에 판단한다(아래 distrust_level 사용부 참조).
-    distrust_level = DataDistrustLevel.NORMAL
-    if distrust_monitor is not None:
-        primary_ticker = await adapter.get_ticker(symbol)
-        distrust_level = await check_and_persist_distrust(
-            pool,
-            distrust_monitor,
-            distrust_providers,
-            exchange=adapter.get_capabilities().exchange_name,
-            symbol=symbol,
-            primary=primary_ticker,
-            candles=candles,
-        )
+    primary_ticker = await adapter.get_ticker(symbol)
+    distrust_level = await check_and_persist_distrust(
+        pool,
+        distrust_monitor,
+        distrust_providers,
+        exchange=adapter.get_capabilities().exchange_name,
+        symbol=symbol,
+        primary=primary_ticker,
+        candles=candles,
+    )
 
     signal = strategy_engine.evaluate(
         fsm_config, market_state, execution_id=execution_id, fsm_state=current_fsm_state
@@ -233,30 +232,28 @@ async def run_execution_tick(
         return
 
     # 전수감사 §6 / FND-06 배선 — FSM을 PENDING류로 전이하기 *전에* 검사한다.
-    # executor.py는 FROZEN_PAPER_ONLY라 시그니처를 바꿔 게이트를 그 안까지
-    # 관통시키지 않는다 — 여기서 거부하면 executor.execute()를 아예 안 부르므로
-    # 동일한 안전효과를 얻으면서 FSM은 전혀 건드리지 않는다(전이 이후에
-    # 거부하면 PENDING류에 영구히 갇히는 #2026-09-02-39류 결함을 재현하게 됨).
+    # 거부되면 executor.execute()를 아예 안 부르므로 FSM은 전혀 건드리지
+    # 않는다(전이 이후에 거부하면 PENDING류에 영구히 갇히는 #2026-09-02-39류
+    # 결함을 재현하게 됨). task-1715(P0-B)부터 `pre_submit_gate`가 필수
+    # 인자라 이 평가는 항상 실행된다(None 분기로 건너뛸 수 없다).
     exchange_name = adapter.get_capabilities().exchange_name
-    gate_decision = None
-    if pre_submit_gate is not None:
-        gate_decision = await evaluate_submission_gate(
-            pre_submit_gate,
-            user_id=execution["user_id"],
-            execution_id=execution_id,
-            exchange=exchange_name,
-            observed_fence=phase.fence_snapshot,  # R-36 — PRE_TRADE가 관측한 F0 관통
-            # task-1717 P0-D — I10 결속 키. fenced_submit이 이 값들과 실제 주문을
-            # 대조하므로 Executor가 만들 Order와 반드시 같은 값이어야 한다 —
-            # `phase.allocation`(REDUCE로 축소됐을 수 있는 사본, t6)을 써야
-            # 한다, 이 시점의 `allocation`(축소 전)이 아니다. 아래
-            # executor.execute()도 `phase.allocation`을 그대로 넘긴다.
-            symbol=phase.allocation.symbol,
-            side=signal.direction.value,
-            quantity=phase.allocation.approved_quantity,
-        )
-        if gate_decision.outcome != GateOutcome.ALLOW:
-            return
+    gate_decision = await evaluate_submission_gate(
+        pre_submit_gate,
+        user_id=execution["user_id"],
+        execution_id=execution_id,
+        exchange=exchange_name,
+        observed_fence=phase.fence_snapshot,  # R-36 — PRE_TRADE가 관측한 F0 관통
+        # task-1717 P0-D — I10 결속 키. fenced_submit이 이 값들과 실제 주문을
+        # 대조하므로 Executor가 만들 Order와 반드시 같은 값이어야 한다 —
+        # `phase.allocation`(REDUCE로 축소됐을 수 있는 사본, t6)을 써야
+        # 한다, 이 시점의 `allocation`(축소 전)이 아니다. 아래
+        # executor.execute()도 `phase.allocation`을 그대로 넘긴다.
+        symbol=phase.allocation.symbol,
+        side=signal.direction.value,
+        quantity=phase.allocation.approved_quantity,
+    )
+    if gate_decision.outcome != GateOutcome.ALLOW:
+        return
 
     writer = await _make_fsm_state_writer(pool)
     try:
@@ -290,6 +287,7 @@ async def run_execution_tick(
         fsm_state_writer=writer,
         publish=publish,
         pool=pool,
+        pre_submit_gate=pre_submit_gate,
         gate_decision=gate_decision,
         read_fences=read_fences,
         decision_reader=decision_reader,
