@@ -13,6 +13,7 @@
   },
   "dependencies": {
     "@aios/api-client": "*",
+    "@aios/chart-engine": "*",
     "@aios/shared-hooks": "*",
     "@aios/shared-types": "*",
     "@aios/ui-web": "*",
