@@ -1,28 +1,31 @@
-"""FA-8 — `fill_allocation` 테이블: 체결 → sub_account 배분 결과 영속화.
+"""FA-8 - `fill_allocation` table: persists fills -> sub_account allocation results.
 
 Revision ID: 4102098cbd0f
 Revises: 963d5f3cfb1b
 Create Date: 2026-09-07 00:00:00.000000
 
 Spec: docs/specs/L4_ibor_fund_accounting_and_resilience_v1.0.md#FA-8
-(§9 표·§2.1 allocation 행·§4 FA-A3).
+(table in §9, allocation row in §2.1, FA-A3 in §4).
 
-이 테이블은 "체결 → sub_account 배분"의 실제 사실(quantity·average_price)을
-담는 실체 기록이다 — decision(task-1796)이 금지한 "자체 중복 검사 테이블"이
-아니다(그건 멱등 lookup 전용 보조 테이블을 뜻하고, 멱등은 여기서 LC-3
-`post_entry`의 `idempotency_key`를 그대로 재사용한다 — `application/
-allocate_fills.py` 참고). `UNIQUE(order_id, sub_account_id)`는 이 실체
-기록 자체의 무결성 제약(같은 주문의 같은 sub_account는 한 번만 배분)이지,
-별도 중복 검사용 테이블이 아니다.
+This table holds the actual fact ("fills -> sub_account allocation":
+quantity, average_price) - it is not the "bespoke duplicate-check table"
+the decision (task-1796) forbids (that would mean an auxiliary table whose
+sole purpose is an idempotency lookup; idempotency here reuses LC-3's
+`post_entry` `idempotency_key` as-is - see `application/allocate_fills.py`).
+`UNIQUE(order_id, sub_account_id)` is an integrity constraint on this fact
+record itself (the same sub_account of the same order is allocated at
+most once), not a separate dedup table.
 
-`fills`·`pos_journal`·`ledger_journal_entry`와 같은 이유로 append-only —
-배분은 사실이 확정된 뒤의 기록이라 정정은 새 행(FA-11 역분개 패턴)으로
-하고 기존 행을 UPDATE하지 않는다(`core/db/append_only.worm_sql` 재사용,
-새 WORM 구현 금지).
+Append-only for the same reason as `fills`/`pos_journal`/
+`ledger_journal_entry`: an allocation is recorded after the fact is
+settled, so corrections use a new row (FA-11's reversal pattern) rather
+than an UPDATE of the existing one (`core/db/append_only.worm_sql` is
+reused; no new WORM implementation).
 
-RLS 미도입: `order_id`(→`orders`)·`sub_account_id`(→`sub_account`) 양쪽
-FK로 이미 간접 격리된다(789c138f13fe·963d5f3cfb1b과 동일 원칙 — 부모로
-간접 격리되는 자식 테이블은 RLS 제외).
+No RLS: both `order_id` (-> `orders`) and `sub_account_id` (->
+`sub_account`) already isolate this table indirectly via FK (same
+principle as 789c138f13fe/963d5f3cfb1b - a child table indirectly isolated
+through its parent is exempt from RLS).
 """
 from collections.abc import Sequence
 

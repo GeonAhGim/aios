@@ -176,9 +176,10 @@ class PostgresJournalRepository:
             entry.portfolio_id,
         )
 
-        # 왕복 축소(LC-17 결함 B): 행마다 INSERT하는 대신 멀티행 VALUES
-        # 하나로 묶는다. `entry_id`·`fund_id`·`portfolio_id`는 모든 행이
-        # 공유하므로 $1~$3 세 개만 쓰고, 행별 컬럼은 그 뒤로 5개씩 이어붙인다.
+        # Round-trip reduction (LC-17 defect B): one multi-row VALUES insert
+        # instead of one INSERT per line. `entry_id`/`fund_id`/`portfolio_id`
+        # are shared by every row, so only $1-$3 carry them; each line's own
+        # columns are appended in groups of 5 after that.
         placeholders = []
         params: list[object] = []
         for i, line in enumerate(lines):

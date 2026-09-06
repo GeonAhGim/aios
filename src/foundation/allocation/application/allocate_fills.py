@@ -1,54 +1,63 @@
-"""FA-8 — allocation/application/allocate_fills.py: 체결 → sub_account 배분
-+ 원장 연결.
+"""FA-8 - allocation/application/allocate_fills.py: fills -> sub_account
+allocation + ledger linkage.
 
 Spec: docs/specs/L4_ibor_fund_accounting_and_resilience_v1.0.md#FA-8
-(§9 표·§2.1 allocation 행).
+(table in §9, allocation row in §2.1).
 
-이 유스케이스는 FA-7의 순수 도메인(`domain/policy.allocate`,
-`domain/average_price.blended_average_price`/`apply_average_price`)에
-"체결 조회 → 배분 계산 → sub_account별 원장 분개 → 배분 기록 저장"이라는
-I/O 오케스트레이션만 얹는다 — 배분 정책·가중평균 계산 자체를
-재구현하지 않는다(PM decision, task-1796).
+This use case adds only I/O orchestration ("look up fills -> compute
+allocation -> post a ledger entry per sub_account -> persist the allocation
+record") on top of FA-7's pure domain (`domain/policy.allocate`,
+`domain/average_price.blended_average_price`/`apply_average_price`) - the
+allocation policy and weighted-average math themselves are not
+reimplemented here (PM decision, task-1796).
 
-원장 연결은 LC-4 `posting_rules`/LC-9 `post_entry`를 그대로 재사용한다.
-`posting_rules`가 아는 9종 사건에 새 사건을 추가하지 않고, 기존
-`MANUAL_ADJUSTMENT`(임의 차변/대변 계정 쌍 + 단일 금액)로 sub_account별
-배분 1건마다 분개 1건을 만든다 — N-way 배분을 한 분개로 표현하려면
-LC-4에 새 사건 타입이 필요한데 그건 "새 분개 규칙 신설 금지"에
-어긋나므로, 대신 sub_account 수만큼 2-line 분개를 반복한다. 각 분개는
-독립적으로 균형(차변=대변)이라 `balance_rules.check_balanced`
-(post_entry 내부)를 그대로 만족한다.
+Ledger linkage reuses LC-4 `posting_rules`/LC-9 `post_entry` as-is. No new
+event type is added to the 9 `posting_rules` already knows; instead each
+sub_account allocation gets its own entry via the existing
+`MANUAL_ADJUSTMENT` event (an arbitrary debit/credit account pair + a
+single amount). Expressing an N-way allocation as one entry would need a
+new LC-4 event type, which is exactly what "no new posting rules" forbids
+- so this repeats a 2-line entry once per sub_account instead. Each entry
+is independently balanced (debit == credit), so it satisfies
+`balance_rules.check_balanced` (inside post_entry) unchanged.
 
-계정 코드는 `SubAccount.owner_ref`(FK `users.user_id`, FA-2 마이그레이션 —
-그래서 기존 `USER:*` 지갑 계정과 같은 식별자 공간이다)로 만든
-`USER:{owner_ref}:AVAILABLE` — 이 배분 대상의 실소유자 지갑이다. 반대쪽은
-기존 `PLATFORM:CASH_CLEARING`(LC-2, topup/purchase_flow가 이미 쓰는 정산
-청산 계정): 매수는 지갑에서 청산 계정으로, 매도는 반대 방향으로 흐른다
-(§4.4 자산·비용 차변 증가/부채·수익 대변 증가 부호 규약은
-`chart_of_accounts.account_type`이 최종 결정하므로 여기서 재구현하지
-않는다). `owner_ref`용 `ledger_account`/`ledger_balance` 행이 없으면
-`topup.py::_reconcile_ledger_with_projection`과 같은 패턴으로 최초 1회
-만든다(계정 프로비저닝은 posting_rules/post_entry의 계약 밖이다 — LC-9는
-"미지 계정은 fail-closed로 거부"이므로 이 파일이 맡는다).
+The account code is built from `SubAccount.owner_ref` (FK to
+`users.user_id`, FA-2 migration - so it lives in the same identifier space
+as the existing `USER:*` wallet accounts): `USER:{owner_ref}:AVAILABLE`,
+the real owner's wallet. The other leg is the existing
+`PLATFORM:CASH_CLEARING` (LC-2, already used by topup/purchase_flow): a
+buy flows from the wallet to the clearing account, a sell flows the other
+way (the debit/credit sign convention in §4.4 - assets/expenses increase
+on debit, liabilities/revenue increase on credit - is decided by
+`chart_of_accounts.account_type`, not reimplemented here). If the
+`ledger_account`/`ledger_balance` rows for `owner_ref` do not exist yet,
+they are created once, following the same pattern as
+`topup.py::_reconcile_ledger_with_projection` (account provisioning is
+outside posting_rules/post_entry's contract - LC-9's contract is "reject
+an unknown account fail-closed", so this file owns that responsibility).
 
-멱등: sub_account별 분개의 `event_ref`를 `f"fill_allocation:{order_id}:
-{sub_account_id}"`로 고정해 LC-3(`post_entry`가 쓰는 `idempotency_key`)가
-재시도를 그대로 흡수한다. PLT-14(I-03 4중 스코프)는 HTTP POST
-진입점의 `Idempotency-Key` 헤더 스코프(route+tenant_id+subject_id+
-header_key)라 이 내부 오케스트레이션 함수(HTTP 엔드포인트가 아니다)에는 그 스코프 자체가
-성립하지 않는다 — 대신 같은 "결정론적 키 + 조건부 삽입" 원칙을 이 함수의
-자연키(order_id, sub_account_id)로 적용한다. `fill_allocation` 테이블의
-`UNIQUE(order_id, sub_account_id)`도 자체 중복검사 테이블이 아니라 배분
-사실 자체의 무결성 제약이다(마이그레이션 docstring 참고).
+Idempotency: each sub_account's entry pins `event_ref` to
+`f"fill_allocation:{order_id}:{sub_account_id}"` so LC-3 (the
+`idempotency_key` `post_entry` uses) absorbs retries as-is. PLT-14 (I-03's
+four-fold scope) is the `Idempotency-Key` header scope
+(route+tenant_id+subject_id+header_key) for HTTP POST entry points; that
+scope does not apply to this internal orchestration function (not an HTTP
+endpoint) - instead the same "deterministic key + conditional insert"
+principle is applied with this function's own natural key
+(order_id, sub_account_id). `fill_allocation`'s
+`UNIQUE(order_id, sub_account_id)` is likewise not a bespoke dedup table
+but an integrity constraint on the allocation fact itself (see the
+migration's docstring).
 
-FA-A3(배분 합계 == 체결, 오차 ≤ 1 최소단위)는 `policy.allocate`/
-`average_price.apply_average_price`가 이미 강제하므로 이 파일은
-재검증하지 않는다. 분개 금액(`LedgerEvent.amount`)은 `PostingLine.amount`
-(계약, `decimal_places=2`)·`ledger_posting_line.amount NUMERIC(20,2)`
-(LC-1 §3.3) 제약에 맞춰 raw notional(quantity × average_price, 무손실)을
-0.01 단위로 1회 반올림(`policy.round_to_quantum` 재사용)한 값이다 —
-`fill_allocation.quantity`/`average_price`는 원장에 싣지 않은 원본
-정밀도(NUMERIC(30,10))를 그대로 보존한다.
+FA-A3 (allocation total == fill quantity, error <= 1 minimum unit) is
+already enforced by `policy.allocate`/`average_price.apply_average_price`,
+so this file does not re-check it. The entry amount (`LedgerEvent.amount`)
+is the raw notional (quantity * average_price, lossless) rounded once to
+0.01 (reusing `policy.round_to_quantum`) to satisfy `PostingLine.amount`'s
+contract (`decimal_places=2`) and `ledger_posting_line.amount
+NUMERIC(20,2)` (LC-1 §3.3) - `fill_allocation.quantity`/`average_price`
+keep the original precision (NUMERIC(30,10)) that never reaches the
+ledger.
 """
 from __future__ import annotations
 
@@ -90,16 +99,16 @@ _NOTIONAL_QUANTUM = Decimal("0.01")
 
 
 class NoFillsError(ValueError):
-    """`order_id`에 대한 체결이 하나도 없어 배분할 대상이 없다."""
+    """`order_id` has no fills, so there is nothing to allocate."""
 
 
 class AllocationTargetError(ValueError):
-    """배분 대상 sub_account/portfolio/fund가 없거나 폐쇄됐다(fail-closed)."""
+    """The target sub_account/portfolio/fund is missing or closed (fail-closed)."""
 
 
 @dataclass(frozen=True)
 class FillAllocationResult:
-    """sub_account 하나에 대한 배분 + 원장 분개 결과."""
+    """Allocation + ledger entry result for one sub_account."""
 
     sub_account_id: UUID
     quantity: Decimal
@@ -121,18 +130,18 @@ class _ResolvedTarget:
 async def _resolve_target(
     entities: EntityRepository, tenant_id: UUID, sub_account_id: UUID
 ) -> _ResolvedTarget:
-    """`sub_account_id` → (owner_ref, portfolio_id, fund_id, base_currency).
-    계층 중 하나라도 없거나 폐쇄됐으면 값을 추측하지 않고 거부한다(FA-5
-    `resolve_context`와 같은 fail-closed 원칙)."""
+    """`sub_account_id` -> (owner_ref, portfolio_id, fund_id, base_currency).
+    If any level of the hierarchy is missing or closed, reject rather than
+    guessing (same fail-closed principle as FA-5's `resolve_context`)."""
     sub_account = await entities.get_sub_account(tenant_id, sub_account_id)
     if sub_account is None or sub_account.closed_at is not None:
-        raise AllocationTargetError(f"sub_account {sub_account_id}가 없거나 폐쇄됨")
+        raise AllocationTargetError(f"sub_account {sub_account_id} missing or closed")
     portfolio = await entities.get_portfolio(tenant_id, sub_account.portfolio_id)
     if portfolio is None or portfolio.closed_at is not None:
-        raise AllocationTargetError(f"portfolio {sub_account.portfolio_id}가 없거나 폐쇄됨")
+        raise AllocationTargetError(f"portfolio {sub_account.portfolio_id} missing or closed")
     fund = await entities.get_fund(tenant_id, portfolio.fund_id)
     if fund is None or fund.closed_at is not None:
-        raise AllocationTargetError(f"fund {portfolio.fund_id}가 없거나 폐쇄됨")
+        raise AllocationTargetError(f"fund {portfolio.fund_id} missing or closed")
     return _ResolvedTarget(
         owner_ref=sub_account.owner_ref,
         portfolio_id=portfolio.portfolio_id,
@@ -142,9 +151,11 @@ async def _resolve_target(
 
 
 async def _ensure_user_account(conn: asyncpg.Connection, code: str, currency: Currency) -> None:
-    """`topup.py::_reconcile_ledger_with_projection`과 같은 프로비저닝
-    패턴 — `ledger_account`/`ledger_balance` 행이 없으면 만든다(LC-9는
-    미지 계정을 조용히 만들지 않으므로 이 책임은 호출자가 진다)."""
+    """Same provisioning pattern as
+    `topup.py::_reconcile_ledger_with_projection` - create the
+    `ledger_account`/`ledger_balance` rows if they do not exist yet (LC-9
+    never creates an unknown account silently, so this file carries that
+    responsibility for its caller)."""
     negative_ok = allows_negative(code)
     await conn.execute(
         "INSERT INTO ledger_account (account_code, account_type, currency, allow_negative) "
@@ -247,19 +258,20 @@ async def allocate_order_fills(
     trace_id: UUID,
     actor_subject_id: UUID | None = None,
 ) -> tuple[FillAllocationResult, ...]:
-    """`order_id`의 체결 전부를 조회해 `policy`로 sub_account별 수량을
-    나누고, 부분체결 가중평균 단가를 부여한 뒤 sub_account마다 원장 분개
-    + `fill_allocation` 기록을 남긴다. 호출자가 이미 연 `conn`/트랜잭션을
-    그대로 쓴다(post_entry와 같은 계약 — 이 함수는 커밋/롤백을 결정하지
-    않는다)."""
+    """Look up every fill for `order_id`, split the quantity across
+    sub_accounts with `policy`, assign the blended average price across
+    the partial fills, then post a ledger entry + `fill_allocation` record
+    per sub_account. Reuses the caller's already-open `conn`/transaction
+    (same contract as post_entry - this function does not decide
+    commit/rollback)."""
     fill_rows = await conn.fetch(
         "SELECT quantity, price FROM fills WHERE order_id = $1", order_id
     )
     if not fill_rows:
-        raise NoFillsError(f"order_id={order_id}: 배분할 체결이 없음")
+        raise NoFillsError(f"order_id={order_id}: no fills to allocate")
     side = await conn.fetchval("SELECT side FROM orders WHERE order_id = $1", order_id)
     if side is None:
-        raise NoFillsError(f"order_id={order_id}: 주문을 찾을 수 없음")
+        raise NoFillsError(f"order_id={order_id}: order not found")
 
     partial_fills = [PartialFill(quantity=r["quantity"], price=r["price"]) for r in fill_rows]
     total_quantity = sum((f.quantity for f in partial_fills), Decimal("0"))

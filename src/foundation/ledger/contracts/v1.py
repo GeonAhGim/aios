@@ -81,9 +81,10 @@ class LedgerEvent(BaseModel):
     parties: dict[str, UUID]
     extra: dict[str, Decimal | str] = {}
     fund_id: UUID | None = None
-    """FA-4가 `ledger_journal_entry`/`ledger_posting_line`에 추가한 태그
-    컬럼(신규 쓰기부터 채움, FA-8이 최초 채움 경로). 기존 사건(TOPUP 등)은
-    생략하면 `None`으로 남는다 — minor 필드 추가(모듈 docstring)."""
+    """Tag column FA-4 added to `ledger_journal_entry`/`ledger_posting_line`
+    (populated from new writes onward; FA-8 is the first path that fills
+    it). Existing event types (TOPUP, etc.) omit it and it stays `None` -
+    a minor field addition (see module docstring)."""
     portfolio_id: UUID | None = None
     schema_version: Literal["v1"] = SCHEMA_VERSION
 
