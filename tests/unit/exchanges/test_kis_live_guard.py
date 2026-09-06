@@ -75,3 +75,36 @@ async def test_place_bond_order_rejects_live_adapter():
 
     with pytest.raises(FrozenZonePaperAdapterBlockedError):
         await live_adapter.place_bond_order(bond_order)
+
+
+def _futureoption_order() -> Order:
+    """task-1981(BR-6 리뷰 task-1977 REJECT 3번) — 이전까지 domestic_stock/
+    bond만 behavioral negative 테스트가 있었고 선물옵션은 AST 정적검사
+    (test_live_guard_coverage.py)만 커버했다. 정적검사는 데코레이터가
+    "붙어 있는지"만 보므로, 데코레이터가 실제로 예외를 던지는지는 별도로
+    단언해야 DoD(c)를 충족한다."""
+    return Order(
+        client_order_id="c-1",
+        strategy_id="s-1",
+        strategy_version="v1",
+        symbol="101W09",
+        exchange="kis",
+        side=OrderSide.BUY,
+        order_type=OrderType.MARKET,
+        quantity=Decimal("1"),
+        asset_class=AssetClass.KR_FUTURES,
+    )
+
+
+async def test_place_futureoption_order_rejects_live_adapter():
+    live_adapter = _make_live_adapter()
+
+    with pytest.raises(FrozenZonePaperAdapterBlockedError):
+        await live_adapter.place_futureoption_order(_futureoption_order())
+
+
+async def test_cancel_futureoption_order_rejects_live_adapter():
+    live_adapter = _make_live_adapter()
+
+    with pytest.raises(FrozenZonePaperAdapterBlockedError):
+        await live_adapter.cancel_futureoption_order("ORG:1", quantity=Decimal("1"))

@@ -37,7 +37,7 @@ from zoneinfo import ZoneInfo
 from src.core.exceptions import FatalExchangeError
 from src.data.models.base import AssetClass
 from src.data.models.market_data import Ticker
-from src.data.models.trading import AccountBalance, Order, OrderSide, OrderStatus
+from src.data.models.trading import AccountBalance, Order, OrderSide, OrderStatus, OrderType
 from src.exchanges.common.live_guard import require_paper_sandbox
 
 _MARKET_CODE_FUTURES = "JF"  # 국내지수선물 등 선물류(미검증 — §4 시장코드 명명 관례 연장)
@@ -75,6 +75,14 @@ def _reject_if_expired(expiry_date: date | None, *, now: datetime | None = None)
             f"만기 지난 선물옵션 종목은 주문할 수 없습니다: "
             f"expiry_date={expiry_date}, today(KST)={today}"
         )
+
+
+def _order_division(order_type: OrderType) -> str:
+    """ORD_DVSN_CD 값 추정 — `trading_mixin._order_division`(국내주식 ORD_DVSN)과
+    동일한 00=지정가/01=시장가 관례를 그대로 연장한다(모듈 docstring §미검증
+    원칙). `kis_tr_reference.json`은 tr_id별 필수 파라미터명만 확인해 주고
+    실제 코드값은 담지 않으므로, 이 값도 라이브 검증 전까지 확정 아니다."""
+    return "01" if order_type == OrderType.MARKET else "00"
 
 
 def calculate_settlement_pnl(
@@ -129,6 +137,7 @@ class KISDomesticFutureoptionMixin:
             "UNIT_PRICE": str(order.price.amount) if order.price is not None else "0",
             "NMPR_TYPE_CD": "01",
             "KRX_NMPR_CNDT_CD": "0",
+            "ORD_DVSN_CD": _order_division(order.order_type),
             "CTAC_TLNO": "",
         }
         raw = await self._request(  # type: ignore[attr-defined]
@@ -157,6 +166,11 @@ class KISDomesticFutureoptionMixin:
             "UNIT_PRICE": "0",
             "NMPR_TYPE_CD": "01",
             "KRX_NMPR_CNDT_CD": "0",
+            # "N" — 이 메서드 시그니처는 quantity를 필수로 받아 항상 명시
+            # 수량으로 취소하므로("잔량 전부" 자동취소가 아님), 국내주식
+            # QTY_ALL_ORD_YN 관례(trading_mixin._rvsecncl)와 같은 판단 기준을
+            # 그대로 적용한 미검증 최선 추정치다.
+            "RMN_QTY_YN": "N",
             "ORD_DVSN_CD": "02",
         }
         raw = await self._request(  # type: ignore[attr-defined]
