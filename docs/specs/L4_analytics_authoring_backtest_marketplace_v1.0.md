@@ -289,8 +289,10 @@ DoD 공통: `ruff` · `mypy --strict` · `scripts/check_zone_manifest.py` 통과
 | 리프 | 파일 | 선행 | DoD | 크기 |
 |---|---|---|---|---|
 | IND-1 | `engine/incremental.py` + `engine/vectorized.py` 동일성 property 테스트 | L01~L03 | 증분=일괄 결과 동일(1e-9) | 520 |
-| IND-2~6 | `catalog/{trend,momentum,volatility,volume,price_levels}.py` + 참조 벡터 | IND-1 | 카테고리당 ≥20종, 벡터 대조 통과 | 각 280 |
-| IND-7 | `reference/verify.py` + 벡터 파일 | IND-2 | CI에서 벡터 검증 | 200 |
+| ~~IND-2~6~~ **(폐기 — ADR-2026-09-06-F, 수기 작성 대신 자동 생성)** | — | — | — | — |
+| **IND-2g** | `src/core/indicators/catalog/generate_from_talib.py` + 생성 결과 `catalog/talib_generated.py` — `talib.get_functions()`(161종) × `abstract.Function(n).info`에서 `group`·`input_names`·`parameters`(기본값)·`output_names`·`output_flags`를 읽어 `IndicatorSpec`을 생성하고 `lookback`은 `.lookback` 실측값 사용. **`PlotSpec` 기본값은 `output_flags`에서 자동 도출**(Line→line, Dashed Line→line(dashed), Histogram→histogram, upper/lower limit 쌍→band+fill_between). 파라미터 범위는 기본값 기반 규칙(정수 주기 1~2000, 편차 0.1~10) | IND-1, IND-15 | 161종 등록, 그룹 10종 분류, 캔들 패턴 61종 포함, 생성 스크립트 재실행 시 동일 산출(결정론) | 300 |
+| **IND-7g** | `reference/verify_all.py` — **3자 교차검증**: TA-Lib C 결과 ↔ 증분 엔진 ↔ 벡터 엔진을 같은 입력으로 비교해 일치할 때만 참조 벡터로 스냅샷 고정, 불일치 지표는 등록 제외(fail-closed) + nightly CI | IND-2g, IND-1 | 3자 일치 지표만 레지스트리 노출, 불일치 목록 보고 | 260 |
+| ~~IND-7~~ **(IND-7g로 대체 — ADR-2026-09-06-F)** | — | — | — | — |
 | IND-8 | `custom/dsl_indicator.py` + test | DSL-9 | 사용자 지표 등록·버전·해시 | 220 |
 
 ### 9.4 (DSL) AIOS Script
@@ -364,7 +366,7 @@ DC-1~18(R/L4 잔여보다 먼저, backend 4 중 2 고정) → CH-1~10 ∥ IND-1~
 |---|---|---|---|---|
 | IND-9 | `docs/design/INDICATOR_OSS_EVAL.md` — TA-Lib·pandas-ta·`ta` 라이선스 원문·종수·품질(참조 벡터 가용) 평가, GPL/LGPL(tulip·backtrader·Nautilus) 제외 근거 | — | CH-0 형식 채점표 | 200 |
 | IND-10 | `src/core/indicators/adapters/talib_bridge.py`(레지스트리 어댑터: 스펙 자동 생성·파라미터 범위·lookback) + 참조 벡터 검증 | IND-9, IND-1 | ≥150종 등록, 증분=일괄 동일성 샘플 20종 | 280 |
-| IND-11 | `adapters/pandas_ta_bridge.py` + 검증 | IND-9, IND-1 | ≥100종 등록, 중복 지표는 코어 우선 규칙 | 280 |
+| IND-11 | `adapters/pandas_ta_bridge.py` + 검증 — **TA-Lib과 겹치는 지표는 제외하고 순증분만 등록**(ADR-2026-09-06-F, 우선순위 하향) | IND-9, IND-2g | 순증분 종수 보고, 중복 0 | 280 |
 | IND-12 | `catalog/registry_tiers.py`(코어/OSS/스크립트 3층, 이름 충돌·버전·해시 규칙) + `GET /indicators` API(검색·카테고리·페이지네이션) | IND-10 | 목록 API p95 200ms | 300 |
 | IND-13 | 참조 벡터 대량 검증 잡(`reference/verify_all.py`, nightly) + CI 샘플링 | IND-12 | nightly 전수, CI 30종 | 200 |
 | IND-14 | 프론트 IndicatorPicker 확장(3층 탐색·검색·즐겨찾기·스크립트 지표 즉시 미리보기) | IND-12, CH-6 | 화면·negative | 300 |
@@ -401,11 +403,11 @@ DC-1~18(R/L4 잔여보다 먼저, backend 4 중 2 고정) → CH-1~10 ∥ IND-1~
 |---|---|---|---|---|
 | IND-15 | `core/indicators/spec.py` 확장 — `PlotSpec{kind: line\|histogram\|area\|band\|cloud\|marker, scale: own\|overlay\|percent\|log\|inverted, fill_between, color_rule, precision, legend_format, default_pane}`를 지표 스펙 1급 필드로 + 코어 100종 스펙 채우기 | IND-1 | 스냅샷, 일목구름·볼린저 채움이 스펙만으로 표현됨 | 300 |
 | IND-16 | 지표 입력 소스로 **다른 지표 출력** 허용(indicator-on-indicator) — 레지스트리 의존 그래프·순환 탐지·lookback 합성 | IND-1, IND-12 | RSI(SMA(close,20)) 계산 정확, 순환 거부 | 280 |
-| CH-14 | `chart-engine/src/panes/{paneModel,paneLayout,crosshairSync}.ts` — 페인 CRUD·높이 비율·페인별 스케일·크로스헤어 동기화 | CH-1, CH-3 | 페인 5개 추가/삭제/리사이즈 왕복, 동기화 | 560 |
-| CH-15 | `chart-engine/src/render/{plotRenderers,scaleBinding,fillBetween}.ts` — PlotSpec 6종 렌더러·스케일 바인딩·시리즈 간 채움 | IND-15, CH-11 | 지표 추가 시 화면 코드 무변경(스펙 주도) | 600 |
+| CH-14 | `chart-engine/src/panes/{paneModel,paneLayout,crosshairSync}.ts` — **KLineChart 내장 멀티페인을 `ChartEngine` 인터페이스로 노출하는 어댑터**(자체 구현 금지, ADR-2026-09-06-F D3). 벤더가 없는 부분만 보강 | CH-1, CH-3 | 페인 5개 추가/삭제/리사이즈 왕복, 동기화 | 300 |
+| CH-15 | `chart-engine/src/render/{plotRenderers,scaleBinding,fillBetween}.ts` — PlotSpec 6종 렌더러. **벤더 `createIndicator`/`registerFigure`에 위임하고 부족분만 자체 구현** | IND-15, CH-11 | 지표 추가 시 화면 코드 무변경(스펙 주도) | 360 |
 | CH-16 | `chart-engine/src/legend/{statusLine,dataWindow,objectTree}.ts` — 크로스헤어 값 표시·데이터 윈도우·지표 트리(표시/숨김/순서/잠금) | CH-14 | 지표 30종 값 동시 표시, 순서 변경 저장 | 560 |
 | CH-17 | 지표 템플릿(세트+설정+페인 배치) 저장·적용·공유 — backend `charting` 컨텍스트 확장 + 마켓 연동(MP 규칙 재사용) | CH-5, CH-16 | 템플릿 적용 후 동일 화면 재현, 교차 테넌트 404 | 460 |
-| CH-18 | `chart-engine/src/compute/{workerPool,clientEngine,parityCheck}.ts` — Web Worker 증분 계산 + **서버 참조 벡터 동일성 검증**, 불일치 지표는 서버 폴백(무음 금지) | IND-13, CH-15 | 참조 벡터 통과 지표만 클라이언트 계산, 불일치 시 폴백 로그 | 600 |
+| CH-18 | `chart-engine/src/compute/{workerPool,clientEngine,parityCheck}.ts` — Web Worker 증분 계산. **1순위: 서버와 같은 C 코드를 쓰는 TA-Lib WASM 빌드**(동일성 구조적 보장), 불가 시 `technicalindicators`(MIT). 참조 벡터 통과 지표만 클라이언트 계산, 불일치는 서버 폴백(무음 금지) | IND-7g, CH-15 | 참조 벡터 통과 지표만 클라이언트 계산, 불일치 시 폴백 로그 | 600 |
 | CH-19 | 렌더 성능: 레이어 분리·뷰포트 밖 계산 생략·LOD 다운샘플링(극값 보존)·오프스크린 캔버스 + **밀도 벤치**(CH-0 스크립트 확장, CI 회귀) | CH-15, CH-18 | 지표 30종 × 10만 봉 팬/줌 p95 ≤ 16.7ms, 지표 추가 ≤ 100ms, 틱 갱신 ≤ 8ms | 560 |
 
 ## 10. 미확정·리스크
