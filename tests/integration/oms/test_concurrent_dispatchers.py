@@ -13,19 +13,25 @@ from __future__ import annotations
 
 import asyncio
 from collections import Counter
+from datetime import datetime, timezone
 from uuid import UUID
 
 from src.data.models.trading import Order, OrderStatus
 from src.exchanges.common.error_taxonomy import SentUnknownError
+from src.services.oms.adapters.order_repository import PostgresOrderRepository
+from src.services.oms.adapters.outbox_repository import OutboxRepository
 from src.services.oms.application.outbox_dispatcher import DispatchReport, OutboxDispatcher
+from tests.integration.oms.conftest import create_test_user, insert_order
 from tests.support.oms_outbox_fakes import (
     FixedClock,
     InMemoryOrderRepo,
     InMemoryOutboxRepo,
     ScriptedAdapter,
+    allow_gate,
     enqueue,
     make_dispatcher,
     make_order_view,
+    submit_payload,
 )
 
 WORKERS = ("w1", "w2", "w3")
@@ -126,3 +132,86 @@ async def test_worker_never_finalizes_a_row_it_did_not_claim():
     report = await first
     assert report.acknowledged == 3 and len(adapter.calls) == 3
     assert {r.worker_id for r in outbox.rows.values()} == {"w1"}
+
+
+# ---- 실DB(task-1567 L4-14b) ---------------------------------------------------
+# 위 테스트들은 포트 대역(§5.1 SQL 의미론의 모델) 위에서 증명한다. 여기서는
+# 같은 "3워커 정확히 1회" 케이스를 실제 `order_command_outbox`/`orders`
+# (073beca589d5 L4-06 + OutboxRepository/PostgresOrderRepository L4-08)에
+# 대고 반복해 SKIP LOCKED·조건부 UPDATE 배선 자체를 증명한다(모듈 docstring
+# 예고 그대로). 워커 간 분배 비율은 스케줄링에 달려 있어 단언하지 않는다
+# (tests/integration/oms/test_outbox_repository.py와 동일 관례) — "정확히
+# 1회"의 구조적 보장(중복 전송 0, 전부 DONE)만 확인한다.
+async def _setup_real_orders(
+    pool, n: int
+) -> tuple[PostgresOrderRepository, OutboxRepository, list[UUID], set[str]]:
+    order_repo, outbox_repo = PostgresOrderRepository(), OutboxRepository()
+    user_id = await create_test_user(pool)
+    order_ids: list[UUID] = []
+    client_order_ids: set[str] = set()
+    async with pool.acquire() as conn:
+        for _ in range(n):
+            order_id = await insert_order(conn, user_id, status="VALIDATED")
+            view = await order_repo.get_for_update(conn, order_id)
+            await outbox_repo.enqueue(
+                conn,
+                order_id=order_id,
+                command_type="SUBMIT",
+                payload=submit_payload(view),
+                not_before=datetime.now(timezone.utc),
+            )
+            order_ids.append(order_id)
+            client_order_ids.add(view.client_order_id)
+    return order_repo, outbox_repo, order_ids, client_order_ids
+
+
+async def _drain_real(dispatchers: list[OutboxDispatcher], pool, order_ids: list[UUID]) -> None:
+    for _ in range(20):
+        remaining = await pool.fetchval(
+            "SELECT count(*) FROM order_command_outbox "
+            "WHERE order_id = ANY($1::uuid[]) AND state = 'PENDING'",
+            order_ids,
+        )
+        if remaining == 0:
+            return
+        await asyncio.gather(*(d.dispatch_once(limit=5) for d in dispatchers))
+    raise AssertionError("실DB 드레인이 라운드 상한 안에 끝나지 않았다")
+
+
+async def test_three_workers_send_each_row_exactly_once_real_db(pool):
+    order_repo, outbox_repo, order_ids, client_order_ids = await _setup_real_orders(pool, 15)
+    adapter = ScriptedAdapter()
+
+    async def resolve(tenant_id: UUID, exchange: str) -> ScriptedAdapter:
+        return adapter
+
+    dispatchers = [
+        OutboxDispatcher(
+            pool, outbox_repo=outbox_repo, order_repo=order_repo, resolve_adapter=resolve,
+            pre_send_gate=allow_gate, worker_id=w,
+        )
+        for w in WORKERS
+    ]
+
+    await _drain_real(dispatchers, pool, order_ids)
+
+    outbox_rows = await pool.fetch(
+        "SELECT state, worker_id FROM order_command_outbox WHERE order_id = ANY($1::uuid[])",
+        order_ids,
+    )
+    order_rows = await pool.fetch(
+        "SELECT status, version, exchange_order_id FROM orders WHERE order_id = ANY($1::uuid[])",
+        order_ids,
+    )
+    # claim_batch는 전역 큐라(설계상 order_id로 필터링하지 않는다) 공유
+    # TEST_DATABASE_URL에 다른 테스트가 남겨둔(디스패처 없이 enqueue만 한)
+    # PENDING SUBMIT 행도 같은 라운드에 같이 클레임될 수 있다 — 어댑터 호출
+    # 집계는 이 테스트가 만든 client_order_id로만 좁혀서 본다.
+    call_counts = Counter(c for c in adapter.calls if c in client_order_ids)
+    assert set(call_counts) == client_order_ids  # 전부 최소 1회
+    assert set(call_counts.values()) == {1}  # 행당 어댑터 호출 정확히 1회
+    assert {r["state"] for r in outbox_rows} == {"DONE"}
+    assert {r["worker_id"] for r in outbox_rows} <= set(WORKERS)
+    assert {r["status"] for r in order_rows} == {"ACKNOWLEDGED"}
+    assert {r["version"] for r in order_rows} == {2}  # VALIDATED->SUBMITTED->ACKNOWLEDGED
+    assert all(r["exchange_order_id"] is not None for r in order_rows)

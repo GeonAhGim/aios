@@ -39,6 +39,14 @@ from tests.integration.fake_exchange_adapter import FakeExchangeAdapter
 
 Undo = Callable[[], None]
 
+# `transition()` patch가 실제 쓰는 `orders` 컬럼 전체 — `OrderView.model_fields`
+# 만으로는 부족하다: `sent_at`은 outbox_dispatcher._send_submit()이 SENT 전이에
+# 쓰는 실컬럼(073beca589d5 이후 c1f4a9e7b3d6, task-1567)인데 OrderView는 노출하지
+# 않는다(스펙 §2-C 79번 행에 없음). 예전엔 model_fields에 없는 키를 조용히
+# 버려(dict comprehension 필터) 이 스키마 갭을 이 대역이 숨겼다(task-1567 note) —
+# 지금은 목록 밖 키는 오타/미지 컬럼으로 간주해 fail-closed(예외)한다.
+_PATCHABLE_COLUMNS = frozenset(OrderView.model_fields) | {"sent_at"}
+
 
 def utcnow() -> datetime:
     return datetime.now(timezone.utc)
@@ -251,6 +259,9 @@ class InMemoryOrderRepo:
             )
         if new_status not in ALLOWED[current.status]:
             raise InvalidOrderTransitionError(f"{current.status.value} -> {new_status.value}")
+        unknown = set(patch) - _PATCHABLE_COLUMNS
+        if unknown:
+            raise KeyError(f"patch에 미지 컬럼 {sorted(unknown)} — orders 실컬럼과 맞지 않는다")
         fields = {k: v for k, v in patch.items() if k in OrderView.model_fields}
         new = current.model_copy(
             update={**fields, "status": new_status, "version": current.version + 1}
