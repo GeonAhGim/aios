@@ -11,7 +11,7 @@
   `src/foundation/marketplace/**`(신규 컨텍스트, 기존 `services/listing_service.py` 등은 파사드로 유지),
   `src/foundation/signals/**`(신규), `frontend/apps/web/src/chart/**`, `frontend/packages/chart-engine/**`
 - verification evidence: 각 리프 DoD의 테스트 경로(§9)
-- 리프 접두: **DC**(데이터 커버리지) **CH**(차트) **IND**(지표) **DSL**(AIOS Script) **BT**(백테스트) **MP**(마켓) **SIG**(신호 유입). §9.9 확장(ADR-2026-09-05-A): IND-9~14, BT-14~18, DSL-14~16, CH-11~13. §9.10 T1 선반영(ADR-2026-09-06-A): DC-19~26
+- 리프 접두: **DC**(데이터 커버리지) **CH**(차트) **IND**(지표) **DSL**(AIOS Script) **BT**(백테스트) **MP**(마켓) **SIG**(신호 유입). §9.9 확장(ADR-2026-09-05-A): IND-9~14, BT-14~18, DSL-14~16, CH-11~13. §9.10 T1 선반영(ADR-2026-09-06-A): DC-19~26. §9.11 고밀도 차트(ADR-2026-09-06-C): CH-14~19, IND-15~16
 
 ## 1. 기관급 요구 (왜 기초 수준으로는 부족한가)
 
@@ -394,6 +394,19 @@ DC-1~18(R/L4 잔여보다 먼저, backend 4 중 2 고정) → CH-1~10 ∥ IND-1~
 | DC-25 | 파생상품 캘린더·만기 롤 규칙(`domain/instruments/roll.py`) + 연속선물 시리즈 생성 | DC-20, LA-3 | 롤 날짜·조정 방식(비율/차분) 결정론 | 280 |
 | DC-26 | 옵션 체인 조회 API(`GET /market-data/options/chain`) + 그리스 계산은 지표(IND)로 위임하는 경계 문서화 | DC-20, LA-24 | 체인 조회 p95 300ms, 교차 테넌트 404 | 260 |
 
+
+### 9.11 고밀도 차트 리프 (ADR-2026-09-06-C — 한 차트에 수십 지표)
+| 리프 | 파일 | 선행 | DoD | 크기 |
+|---|---|---|---|---|
+| IND-15 | `core/indicators/spec.py` 확장 — `PlotSpec{kind: line\|histogram\|area\|band\|cloud\|marker, scale: own\|overlay\|percent\|log\|inverted, fill_between, color_rule, precision, legend_format, default_pane}`를 지표 스펙 1급 필드로 + 코어 100종 스펙 채우기 | IND-1 | 스냅샷, 일목구름·볼린저 채움이 스펙만으로 표현됨 | 300 |
+| IND-16 | 지표 입력 소스로 **다른 지표 출력** 허용(indicator-on-indicator) — 레지스트리 의존 그래프·순환 탐지·lookback 합성 | IND-1, IND-12 | RSI(SMA(close,20)) 계산 정확, 순환 거부 | 280 |
+| CH-14 | `chart-engine/src/panes/{paneModel,paneLayout,crosshairSync}.ts` — 페인 CRUD·높이 비율·페인별 스케일·크로스헤어 동기화 | CH-1, CH-3 | 페인 5개 추가/삭제/리사이즈 왕복, 동기화 | 560 |
+| CH-15 | `chart-engine/src/render/{plotRenderers,scaleBinding,fillBetween}.ts` — PlotSpec 6종 렌더러·스케일 바인딩·시리즈 간 채움 | IND-15, CH-11 | 지표 추가 시 화면 코드 무변경(스펙 주도) | 600 |
+| CH-16 | `chart-engine/src/legend/{statusLine,dataWindow,objectTree}.ts` — 크로스헤어 값 표시·데이터 윈도우·지표 트리(표시/숨김/순서/잠금) | CH-14 | 지표 30종 값 동시 표시, 순서 변경 저장 | 560 |
+| CH-17 | 지표 템플릿(세트+설정+페인 배치) 저장·적용·공유 — backend `charting` 컨텍스트 확장 + 마켓 연동(MP 규칙 재사용) | CH-5, CH-16 | 템플릿 적용 후 동일 화면 재현, 교차 테넌트 404 | 460 |
+| CH-18 | `chart-engine/src/compute/{workerPool,clientEngine,parityCheck}.ts` — Web Worker 증분 계산 + **서버 참조 벡터 동일성 검증**, 불일치 지표는 서버 폴백(무음 금지) | IND-13, CH-15 | 참조 벡터 통과 지표만 클라이언트 계산, 불일치 시 폴백 로그 | 600 |
+| CH-19 | 렌더 성능: 레이어 분리·뷰포트 밖 계산 생략·LOD 다운샘플링(극값 보존)·오프스크린 캔버스 + **밀도 벤치**(CH-0 스크립트 확장, CI 회귀) | CH-15, CH-18 | 지표 30종 × 10만 봉 팬/줌 p95 ≤ 16.7ms, 지표 추가 ≤ 100ms, 틱 갱신 ≤ 8ms | 560 |
+
 ## 10. 미확정·리스크
 - 데이터 벤더 선택·라이선스(Polygon, Databento, EODHD, Kiwoom 등)는 **미확인·사람 결정**. 명세는 SPI 형태만 고정.
 - 포크 후보의 라이선스·고지 의무(KLineChart, Lightweight Charts, NightVision, react-financial-charts)는 CH-0에서 원문 확인. 확인 전에는 어느 것도 반입하지 않는다.
@@ -401,3 +414,4 @@ DC-1~18(R/L4 잔여보다 먼저, backend 4 중 2 고정) → CH-1~10 ∥ IND-1~
 - IND 100종 목록은 IND-2에서 카테고리별 확정(TA-Lib 전 종 + VWAP/anchored VWAP/Ichimoku/Volume Profile/Pivot/Supertrend 등).
 - Pine Script 가져오기 변환기는 범위 밖(ADR-B Rejected). 요청이 많으면 별도 ADR.
 - 딥 백테스트의 warm 계층 처리량 목표(10년 D1 + M1 magnifier ≤10분)는 DC-14 실측 후 조정 가능.
+- 클라이언트 증분 계산 라이브러리(`technicalindicators` MIT·TA-Lib WASM·uPlot MIT 등)의 라이선스 원문 확인은 IND-9 평가 리프 범위에 포함한다. 확인 전 반입 금지.
