@@ -323,11 +323,20 @@ async def test_modify_market_order_rejected_before_exchange_call(pool):
 
 
 async def test_resolve_unknown_confirms_status_within_max_attempts(pool):
+    """FD-4.5/F5-a — `find_order_by_client_id`가 첫 시도에 매칭 주문을
+    돌려주면 재시도 대기 없이 바로 RESOLVED_AS 전이한다. 그 경로를 타려면
+    먼저 주문이 실제로 UNKNOWN이어야 한다(그렇지 않으면 `resolve_unknown`은
+    이미 해소된 것으로 보고 조회 없이 즉시 반환한다)."""
     user_id = await create_test_user(pool)
     execution_id = await _create_running_execution(pool, user_id)
     adapter = FakeExchangeAdapter(get_order_status=OrderStatus.FILLED)
     order = _market_order(execution_id)
     submitted = await submit_order(order, user_id=user_id, adapter=adapter, pool=pool)
+    async with pool.acquire() as conn:
+        await conn.execute(
+            "UPDATE orders SET status = 'UNKNOWN', unknown_since = now() WHERE order_id = $1",
+            submitted.order_id,
+        )
 
     sleep_calls = []
 
@@ -343,8 +352,9 @@ async def test_resolve_unknown_confirms_status_within_max_attempts(pool):
 
 
 async def test_resolve_unknown_gives_up_after_max_attempts(pool):
-    """FD-4.5 완료조건 — 강제 UNKNOWN 시뮬레이션 시 정확히 3회 재조회 후
-    UNKNOWN을 유지하고 CRITICAL 로그를 남긴다(예외를 던지지 않음)."""
+    """FD-4.5 완료조건 — 강제 UNKNOWN 시뮬레이션 시 정확히 5회(기본
+    max_attempts, task-1604 unknown_resolver 위임 이후 §9 L4-16 계약) 재조회
+    후 UNKNOWN을 유지하고 CRITICAL 로그를 남긴다(예외를 던지지 않음)."""
     user_id = await create_test_user(pool)
     execution_id = await _create_running_execution(pool, user_id)
     adapter = FakeExchangeAdapter(get_order_status=OrderStatus.UNKNOWN)
@@ -355,7 +365,8 @@ async def test_resolve_unknown_gives_up_after_max_attempts(pool):
     # 반영된 상태를 직접 시뮬레이션한다.
     async with pool.acquire() as conn:
         await conn.execute(
-            "UPDATE orders SET status = 'UNKNOWN' WHERE order_id = $1", submitted.order_id
+            "UPDATE orders SET status = 'UNKNOWN', unknown_since = now() WHERE order_id = $1",
+            submitted.order_id,
         )
 
     sleep_calls = []
@@ -368,7 +379,8 @@ async def test_resolve_unknown_gives_up_after_max_attempts(pool):
     )
 
     assert resolved.status == OrderStatus.UNKNOWN
-    assert sleep_calls == [2.0, 2.0]  # 3회 시도 중 마지막을 제외한 2회만 대기
+    # 5회 시도 중 마지막을 제외한 4회만 대기(DEFAULT_BACKOFF)
+    assert sleep_calls == [1.0, 2.0, 4.0, 8.0]
 
 
 async def test_synchronous_fill_round_trip_opens_and_closes_position(pool):

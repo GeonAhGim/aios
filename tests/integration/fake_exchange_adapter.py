@@ -152,6 +152,31 @@ class FakeExchangeAdapter(ExchangeAdapter):
             asset_class=AssetClass.CRYPTO,
         )
 
+    async def find_order_by_client_id(self, client_order_id: str) -> Order | None:
+        """FD-4.5/F5-a(`unknown_resolver`) 역조회 대역 — `get_order_status=
+        UNKNOWN`은 거래소가 이 client id를 아직 모른다는 뜻으로 취급해(테스트
+        시나리오) None을 돌려준다. 그 외에는 마지막 제출분을 `_get_order_status`
+        상태로 매칭해 돌려준다."""
+        if self._get_order_status == OrderStatus.UNKNOWN:
+            return None
+        match = next(
+            (o for o in self.placed_orders if o.client_order_id == client_order_id), None
+        )
+        if match is None:
+            return None
+        is_filled = self._get_order_status == OrderStatus.FILLED
+        return match.model_copy(
+            update={
+                "exchange_order_id": f"ex-{uuid4()}",
+                "status": self._get_order_status,
+                "filled_quantity": match.quantity if is_filled else Decimal("0"),
+                "average_fill_price": self._fill_price(match) if is_filled else None,
+            }
+        )
+
+    async def get_open_orders(self, symbol: str | None = None) -> list[Order]:
+        return []
+
     async def place_order(self, order: Order) -> Order:
         self.place_order_call_count += 1
         self.placed_orders.append(order)
