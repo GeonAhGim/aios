@@ -27,6 +27,14 @@ DUAL=서로 다른 두 계정 순차 서명)인데도 HTTP 노출은 admin.py의
 연락처 문자열일 뿐 user_id로 해석하는 로직이 없음) — 검증 없이 아무나
 "두 번째 서명자"를 자처하게 둘 수 없으므로, 그 경로는 여전히 관리자
 전용 엔드포인트로만 남긴다(신원 해석 설계가 생기기 전까지 정직한 축소).
+
+task-1723 P1-D: 원래 303줄(P6 300줄 초과)이던 이 모듈을 순수 이동으로
+분할했다 — ApprovalRequest 모델/공용 조회 헬퍼(ApprovalError, _row_to_model,
+_fetch)는 _shared.py로 이동. 승인/거절 로직은 테스트가 `_fetch`를
+모듈 속성으로 monkeypatch한다(tests/integration/test_approval_service.py의
+동시성 레이스 재현) — 그 몽키패치가 이 모듈의 전역 `_fetch` 바인딩을
+대상으로 하므로, approve/reject 등은 그 몽키패치가 보이는 이 모듈에
+그대로 남긴다.
 """
 from __future__ import annotations
 
@@ -37,53 +45,27 @@ from typing import Any
 from uuid import UUID
 
 import asyncpg
-from pydantic import BaseModel
 
+from src.core.approval._shared import ApprovalError, ApprovalRequest, _fetch, _row_to_model
 from src.data.models.serialization import DecimalSafeEncoder
+
+__all__ = [
+    "ApprovalError",
+    "ApprovalRequest",
+    "approve",
+    "cancel",
+    "create_request",
+    "expire_pending",
+    "get_request",
+    "list_pending",
+    "reject",
+]
 
 USER_WAIT_SECONDS = 60
 PLATFORM_WAIT_SECONDS = 180
 RESPONSE_WINDOW_SECONDS = 300  # Draft — 위 docstring 편차 설명 참조
 
 PublishFn = Callable[[str, dict[str, Any]], Awaitable[None]]
-
-
-class ApprovalError(Exception):
-    """이 모듈이 던지는 비즈니스 규칙 위반 — 호출부가 사용자에게 사유를 보여줄 수 있다."""
-
-
-class ApprovalRequest(BaseModel):
-    id: int
-    scope: str
-    user_id: UUID | None
-    trigger_source: str
-    provenance: str | None
-    context: dict[str, Any]
-    requested_action: str
-    approval_mode: str
-    status: str
-    mandatory_wait_seconds: int
-    first_approver_id: UUID | None
-    second_approver_id: UUID | None
-    created_at: datetime
-    expires_at: datetime
-    resolved_at: datetime | None
-
-
-def _row_to_model(row: asyncpg.Record) -> ApprovalRequest:
-    data = dict(row)
-    data["context"] = json.loads(data["context"])
-    return ApprovalRequest(**data)
-
-
-async def _fetch(pool: asyncpg.Pool, request_id: int) -> ApprovalRequest:
-    async with pool.acquire() as conn:
-        row = await conn.fetchrow(
-            "SELECT * FROM approval_requests WHERE id = $1", request_id
-        )
-    if row is None:
-        raise ApprovalError(f"승인 요청을 찾을 수 없음: id={request_id}")
-    return _row_to_model(row)
 
 
 async def get_request(pool: asyncpg.Pool, request_id: int) -> ApprovalRequest:
