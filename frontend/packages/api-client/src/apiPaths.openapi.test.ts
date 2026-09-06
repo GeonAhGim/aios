@@ -73,6 +73,11 @@ const GHOST_PATH_WHITELIST: ReadonlySet<ApiRouteName> = new Set<ApiRouteName>([
 // :69 / GET "/nav" :87 / GET "/{position_key}/journal" :122, router_registry.py:68
 // include_router)하지만 스냅샷은 여전히 f800c1a 시점이라 `/v1/positions` 경로가
 // 0건이다(marketData.*와 같은 사유). 스냅샷이 재생성되면 아래 "부패 방지"가 잡는다.
+// task-1558(DSL-13a): scripts.compile — 라우터는 src/api/routers/scripts.py에
+// 실재(`APIRouter(prefix="/v1/scripts")`, POST /compile -> ApiResponse[CompileScriptView],
+// router_registry.py:69 include_router)하지만 스냅샷(f800c1a)에는 "/v1/scripts" 경로가
+// 0건이다(marketData.*·positions.*와 같은 사유 — 스냅샷 생성 이후 추가된 라우터).
+// 스냅샷 재생성은 백엔드 소유(decision)라 여기 남는다 — 재생성되면 "부패 방지" 테스트가 잡는다.
 const STALE_SNAPSHOT_WHITELIST: ReadonlySet<ApiRouteName> = new Set<ApiRouteName>([
   "auth.refresh",
   "auth.logoutAll",
@@ -83,6 +88,7 @@ const STALE_SNAPSHOT_WHITELIST: ReadonlySet<ApiRouteName> = new Set<ApiRouteName
   "positions.list",
   "positions.nav",
   "positions.journal",
+  "scripts.compile",
 ]);
 
 // KNOWN_ENVELOPE_DRIFT: task-1165 시점 전수 대조 결과, apiPaths.ts에 등록된 envelope

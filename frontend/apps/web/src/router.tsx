@@ -27,6 +27,7 @@ import { RiskAssessmentPage } from "./routes/onboarding/RiskAssessmentPage";
 import { PortfolioPage } from "./routes/portfolio/PortfolioPage";
 import { ReportsPage } from "./routes/reports/ReportsPage";
 import { WriteReviewPage } from "./routes/reviews/WriteReviewPage";
+import { ScriptEditorPage } from "./routes/scripts/ScriptEditorPage";
 import { AccountDeletionPage } from "./routes/settings/AccountDeletionPage";
 import { ApprovalSettingsPage } from "./routes/settings/ApprovalSettingsPage";
 import { MembersPage } from "./routes/settings/MembersPage";
@@ -61,6 +62,7 @@ export const router = createBrowserRouter([
   { path: "/exchanges", element: protect(<ExchangeManagementPage />) },
   { path: "/market/instruments", element: protect(<InstrumentsPage />) },
   { path: "/strategy-builder", element: protect(<StrategyBuilderPage />) },
+  { path: "/scripts/editor", element: protect(<ScriptEditorPage />) },
   { path: "/market/candles", element: protect(<CandlesPage />) },
   { path: "/marketplace", element: protect(<MarketplaceBrowsePage />) },
   { path: "/marketplace/sell", element: protect(<SellStrategyPage />) },

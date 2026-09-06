@@ -9,6 +9,7 @@ import { withMarketplace } from "./clients/marketplace";
 import { withNotifications } from "./clients/notifications";
 import { withPlatform } from "./clients/platform";
 import { withPortfolio } from "./clients/portfolio";
+import { withScripts } from "./clients/scripts";
 import { withStrategyBuilder } from "./clients/strategyBuilder";
 
 // 도메인별 메서드는 clients/*.ts의 믹스인으로 분리되어 있다(파일당 ≤300줄
@@ -18,9 +19,11 @@ const ComposedApiClient = withPlatform(
   withAdmin(
     withNotifications(
       withMarketplace(
-        withStrategyBuilder(
-          withFoundation(
-            withExchange(withExecutions(withPortfolio(withAccount(withAuth(ApiClientBase))))),
+        withScripts(
+          withStrategyBuilder(
+            withFoundation(
+              withExchange(withExecutions(withPortfolio(withAccount(withAuth(ApiClientBase))))),
+            ),
           ),
         ),
       ),

@@ -35,3 +35,4 @@ export * from "./candleSeries";
 export * from "./ledgerView";
 export * from "./instrumentView";
 export * from "./holdPayoutView";
+export * from "./script";

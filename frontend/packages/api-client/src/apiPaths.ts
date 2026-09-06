@@ -254,6 +254,13 @@ export const API_ROUTES = defineApiRoutes({
   "positions.list": route("/v1/positions", true, null, true),
   "positions.nav": route("/v1/positions/nav", true, null, true),
   "positions.journal": route("/v1/positions/:positionKey/journal", true, null, true),
+
+  // task-1558(DSL-13a): src/api/routers/scripts.py 원문 확인 — `APIRouter(prefix=
+  // "/v1/scripts")`(scripts.py:38), `POST /compile`(:46) `-> ApiResponse[CompileScriptView]`
+  // + `ok(...)`(:64), router_registry.py:69 `include_router(scripts.router)`(추가
+  // prefix 없음). mount_v1(PLT-16)은 미도달이라 v1Path=null, positions.*·marketData.*와
+  // 동일 사유. envelope=true.
+  "scripts.compile": route("/v1/scripts/compile", true, null, true),
 });
 
 export type ApiRouteName = keyof typeof API_ROUTES;
