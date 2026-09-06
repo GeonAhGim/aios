@@ -254,6 +254,9 @@ export function ChartPage({ fetchCandles = marketDataClient.getCandles, now }: C
           onPause={() => replayRef.current?.pause()}
           onStep={(delta) => replayRef.current?.step(delta)}
           onSpeedChange={(speed) => replayRef.current?.setSpeed(speed)}
+          instrumentId={instrumentId}
+          selectedIndicatorIds={selectedIndicatorIds}
+          currentClose={points.length > 0 ? points[points.length - 1]!.close : null}
         />
 
         <IndicatorPicker available={overlayEntries} selectedIds={selectedIndicatorIds} onToggle={toggleIndicator} />

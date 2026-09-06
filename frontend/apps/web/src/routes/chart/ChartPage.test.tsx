@@ -13,6 +13,9 @@ vi.mock("@aios/shared-hooks", () => ({
   // StrategyMarkers(task-1569)의 실행 선택 전에는 positions.list를 요청하지 않으므로
   // 이 화면 테스트에서는 실행 목록이 비어 있어도 무방하다.
   useExecutions: () => ({ data: [] }),
+  // CH-9: ChartToolbar가 마운트하는 AlertFromChart가 필요로 한다 — 이 스위트는
+  // 알림 다이얼로그 자체를 검증하지 않으므로(ChartToolbar.test.tsx 몫) 최소 스텁만 준다.
+  useCreateAlert: () => ({ mutateAsync: vi.fn(), isPending: false }),
 }));
 
 // CandlesPage.test.tsx와 동일한 관용: lightweight-charts는 jsdom에서 canvas를

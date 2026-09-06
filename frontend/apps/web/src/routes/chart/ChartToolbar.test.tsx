@@ -1,9 +1,19 @@
 import "@testing-library/jest-dom/vitest";
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { MemoryRouter } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ChartToolbar } from "./ChartToolbar";
 
-afterEach(cleanup);
+const createAlertMutateAsync = vi.fn();
+
+vi.mock("@aios/shared-hooks", () => ({
+  useCreateAlert: () => ({ mutateAsync: createAlertMutateAsync, isPending: false }),
+}));
+
+afterEach(() => {
+  cleanup();
+  createAlertMutateAsync.mockReset();
+});
 
 function baseProps() {
   return {
@@ -22,6 +32,9 @@ function baseProps() {
     onPause: vi.fn(),
     onStep: vi.fn(),
     onSpeedChange: vi.fn(),
+    instrumentId: "BTCUSDT",
+    currentClose: 50200,
+    selectedIndicatorIds: [] as readonly string[],
   };
 }
 
@@ -101,5 +114,65 @@ describe("ChartToolbar", () => {
 
     fireEvent.change(speedSelect!, { target: { value: "4" } });
     expect(onSpeedChange).toHaveBeenCalledWith(4);
+  });
+});
+
+// CH-9/I-10: AlertFromChart는 ChartToolbar가 직접 마운트한다(ChartPage를 거치지 않음) —
+// 이 배선이 실제로 작동함을 이 테스트가 증명한다. mock은 useCreateAlert 하나뿐이라
+// AlertFromChart 자체 로직(에러 판정 등)은 재구현하지 않고 실제 코드를 그대로 태운다.
+describe("ChartToolbar — CH-9 알림 다이얼로그 배선", () => {
+  it("'알림' 버튼을 누르면 다이얼로그가 열리고 차트 컨텍스트(심볼·현재가)가 프리필된다", () => {
+    render(
+      <MemoryRouter>
+        <ChartToolbar {...baseProps()} instrumentId="BTCUSDT" currentClose={50200} />
+      </MemoryRouter>,
+    );
+
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "알림" }));
+
+    const dialog = screen.getByRole("dialog");
+    expect(dialog).toHaveAttribute("aria-modal", "true");
+    expect(dialog).toHaveTextContent("BTCUSDT");
+    expect(dialog).toHaveTextContent("50200");
+    expect(screen.getByLabelText("임계값")).toHaveValue(50200);
+  });
+
+  it("negative: Esc를 누르면 다이얼로그가 닫힌다", () => {
+    render(
+      <MemoryRouter>
+        <ChartToolbar {...baseProps()} />
+      </MemoryRouter>,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "알림" }));
+    expect(screen.getByRole("dialog")).toBeInTheDocument();
+
+    fireEvent.keyDown(document, { key: "Escape" });
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  });
+
+  it("제출하면 서버 계약 필드명 그대로 AlertsPage와 같은 useCreateAlert를 호출한다", async () => {
+    createAlertMutateAsync.mockResolvedValue({ id: 7 });
+    render(
+      <MemoryRouter>
+        <ChartToolbar {...baseProps()} instrumentId="BTCUSDT" currentClose={50200} />
+      </MemoryRouter>,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "알림" }));
+    fireEvent.click(screen.getByRole("button", { name: "알림 등록" }));
+
+    await waitFor(() =>
+      expect(createAlertMutateAsync).toHaveBeenCalledWith({
+        exchange: "bitget",
+        symbol: "BTCUSDT",
+        timeframe: "1h",
+        indicator: "SMA",
+        params: { timeperiod: 1 },
+        operator: ">",
+        threshold: 50200,
+      }),
+    );
+    expect(await screen.findByText(/알림 목록에서 확인/)).toBeInTheDocument();
   });
 });

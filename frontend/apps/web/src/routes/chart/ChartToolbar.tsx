@@ -9,6 +9,7 @@ import type { Timeframe, Venue } from "@aios/shared-types";
 import { Button, Field, Select } from "@aios/ui-web";
 import type { KeyboardEvent } from "react";
 import { useRef, useState } from "react";
+import { AlertFromChart } from "./AlertFromChart";
 
 // CH-6a: 조립 화면의 툴바. 실제 렌더링·값 계산 없이 로컬 상태만 위아래로
 // 오간다 — venue/timeframe은 ChartPage의 fetch 키를, 그리기 도구·재생
@@ -48,6 +49,12 @@ interface ChartToolbarProps {
   onPause: () => void;
   onStep: (delta: 1 | -1) => void;
   onSpeedChange: (speed: number) => void;
+  // CH-9: AlertFromChart(가격/지표 알림 생성 다이얼로그)의 차트 컨텍스트 — 이
+  // 다이얼로그를 여기서 직접 마운트해 "구현됨=작동함"을 이 컴포넌트의 테스트만으로
+  // 증명한다(I-10, ChartPage를 거치지 않는 배선 증명).
+  instrumentId: string;
+  currentClose: number | null;
+  selectedIndicatorIds: readonly string[];
 }
 
 /** WAI-ARIA toolbar 패턴: 그룹 내 버튼은 하나만 tabIndex=0(roving), 화살표로 이동한다. */
@@ -101,7 +108,11 @@ export function ChartToolbar({
   onPause,
   onStep,
   onSpeedChange,
+  instrumentId,
+  currentClose,
+  selectedIndicatorIds,
 }: ChartToolbarProps) {
+  const [alertDialogOpen, setAlertDialogOpen] = useState(false);
   const buttons: ButtonSpec[] = [
     ...DRAWING_KINDS.map((kind) => ({ id: `tool-${kind}`, disabled: false })),
     { id: "add-drawing", disabled: addDrawingDisabled },
@@ -228,6 +239,19 @@ export function ChartToolbar({
           ))}
         </Select>
       </Field>
+
+      <Button type="button" variant="secondary" size="sm" onClick={() => setAlertDialogOpen(true)}>
+        알림
+      </Button>
+      <AlertFromChart
+        isOpen={alertDialogOpen}
+        onClose={() => setAlertDialogOpen(false)}
+        venue={venue}
+        instrumentId={instrumentId}
+        timeframe={timeframe}
+        currentClose={currentClose}
+        selectedIndicatorIds={selectedIndicatorIds}
+      />
     </div>
   );
 }
