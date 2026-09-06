@@ -33,6 +33,7 @@ import { Link, useSearchParams } from "react-router-dom";
 import { AppShell } from "../../components/layout/AppShell";
 import { ErrorMessage } from "../../components/ErrorMessage";
 import { BacktestPanel, type RunQuickBacktest } from "./BacktestPanel";
+import { ChartPanes } from "./ChartPanes";
 import { ChartToolbar } from "./ChartToolbar";
 import { CompareSymbols, type CompareSymbolRef } from "./CompareSymbols";
 import { IndicatorPicker } from "./IndicatorPicker";
@@ -174,6 +175,20 @@ export function ChartPage({
 
   const [selectedIndicatorIds, setSelectedIndicatorIds] = useState<string[]>([]);
   const overlayEntries: readonly OverlayEntry[] = useMemo(() => createDefaultOverlayRegistry().list(), []);
+  // CH-14 화면 배선: 서브패널 존재 여부는 이미 CH-8로 저장되는 selectedIndicatorIds에서
+  // 파생한다(ChartPanes.tsx 상단 주석 — 새 저장 경로를 만들지 않는다).
+  const selectedOverlayEntries = useMemo(
+    () => overlayEntries.filter((e) => selectedIndicatorIds.includes(e.id)),
+    [overlayEntries, selectedIndicatorIds],
+  );
+  const mainOverlayEntries = useMemo(
+    () => selectedOverlayEntries.filter((e) => e.placement === "main-overlay"),
+    [selectedOverlayEntries],
+  );
+  const subOverlayEntries = useMemo(
+    () => selectedOverlayEntries.filter((e) => e.placement === "sub-pane"),
+    [selectedOverlayEntries],
+  );
 
   // CH-13b: 비교 심볼도 CH-8 레이아웃(useChartLayout)을 통해서만 저장·복원한다 —
   // 이 화면은 구조체로, 훅은 "VENUE:instrumentId" 문자열로 다룬다(encode/decode 경계).
@@ -382,7 +397,15 @@ export function ChartPage({
         ) : points.length === 0 ? (
           <EmptyState>표시할 캔들이 없습니다.</EmptyState>
         ) : (
-          <CandlestickChart data={points} />
+          <ChartPanes
+            candles={displayCandles}
+            mainOverlays={mainOverlayEntries}
+            subOverlays={subOverlayEntries}
+            drawings={drawings}
+            onRemoveSubOverlay={toggleIndicator}
+          >
+            <CandlestickChart data={points} />
+          </ChartPanes>
         )}
 
         <StrategyMarkers instrumentId={instrumentId} points={points} />
