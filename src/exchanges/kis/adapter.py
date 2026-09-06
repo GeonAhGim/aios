@@ -38,6 +38,7 @@ from src.exchanges.kis.domestic_stock_extra_mixin import KISDomesticStockExtraMi
 from src.exchanges.kis.elw_mixin import KISElwMixin
 from src.exchanges.kis.etf_mixin import KISEtfMixin
 from src.exchanges.kis.market_data_mixin import KISMarketDataMixin
+from src.exchanges.kis.overseas_futureoption_mixin import KISOverseasFutureoptionMixin
 from src.exchanges.kis.overseas_stock_mixin import KISOverseasStockMixin
 from src.exchanges.kis.trading_mixin import KISTradingMixin
 from src.exchanges.kis.websocket_mixin import KISWebSocketMixin
@@ -151,6 +152,7 @@ class KISAdapter(
     KISOverseasStockMixin,
     KISDomesticBondMixin,
     KISDomesticFutureoptionMixin,
+    KISOverseasFutureoptionMixin,
     KISElwMixin,
     KISEtfMixin,
     KISWebSocketMixin,
