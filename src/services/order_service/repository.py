@@ -164,13 +164,6 @@ async def update_after_modify(
     return _row_to_order(row)
 
 
-async def delete(conn: asyncpg.Connection, order_id: UUID) -> None:
-    """#2026-09-02-19 — claim-then-send 순서에서 거래소 전송 자체가 실패했을
-    때 claim 행을 정리한다. "전송 실패는 DB에 아무 흔적도 남기지 않는다"는
-    기존 불변조건(test_submit_order_network_error_propagates)을 유지한다."""
-    await conn.execute("DELETE FROM orders WHERE order_id = $1", order_id)
-
-
 async def count_recent_trades(
     conn: asyncpg.Connection, execution_id: int, *, since_hours: Decimal
 ) -> int:

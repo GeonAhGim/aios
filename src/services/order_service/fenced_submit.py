@@ -58,7 +58,7 @@ from src.exchanges.common.adapter import ExchangeAdapter
 from src.services.order_service import repository
 from src.services.order_service.gate import GateDecision, GateOutcome
 from src.services.order_service.position_ledger import record_fill_in_position_ledger
-from src.services.order_service.submit import OrderDeniedByRiskGateError
+from src.services.order_service.submit import OrderDeniedByRiskGateError, _mark_claim_failed
 from src.services.order_service.worm_decision_check import DecisionReader, bind_to_worm_decision
 
 FenceReader = Callable[[], Awaitable[Mapping[str, int]]]
@@ -165,12 +165,13 @@ async def submit_with_fence(
             )
         raise FenceStaleError(stale, order_id=claimed.order_id)
 
-    # 7 — 유일한 부작용.
+    # 7 — 유일한 부작용. task-1566(L4-09) 편차 — submit.py와 동일하게 claim
+    # 행을 지우지 않고 CREATED→FAILED로 확정한다(주석은 submit.py 참조).
     try:
         submitted = await adapter.place_order(claimed)
     except Exception:
-        async with pool.acquire() as conn:
-            await repository.delete(conn, claimed.order_id)
+        async with pool.acquire() as conn, conn.transaction():
+            await _mark_claim_failed(conn, claimed, user_id=user_id, reason="EXCHANGE_SEND_ERROR")
         raise
 
     # 8 — 호출 후 재조회.

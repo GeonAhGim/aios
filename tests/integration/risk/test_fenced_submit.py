@@ -198,7 +198,9 @@ async def test_duplicate_client_order_id_returns_existing_without_second_place(p
     assert await _count_by_client_id(pool, order.client_order_id) == 1
 
 
-async def test_adapter_error_deletes_claim(pool, ctx):
+async def test_adapter_error_marks_claim_failed(pool, ctx):
+    """task-1566(L4-09) 편차 — claim 행을 지우던 이전 동작을 CREATED→FAILED
+    확정으로 교체(submit.py `_mark_claim_failed`와 동일 패턴, 감사 흔적 보존)."""
     async def boom(order: Order) -> Order:
         raise RuntimeError("network")
 
@@ -206,7 +208,12 @@ async def test_adapter_error_deletes_claim(pool, ctx):
     order = make_order(ctx["execution_id"])
     with pytest.raises(RuntimeError):
         await _submit(pool, ctx, adapter, order)
-    assert await _count_by_client_id(pool, order.client_order_id) == 0
+    assert await _count_by_client_id(pool, order.client_order_id) == 1
+    async with pool.acquire() as conn:
+        status = await conn.fetchval(
+            "SELECT status FROM orders WHERE client_order_id = $1", order.client_order_id
+        )
+    assert status == "FAILED"
 
 
 async def test_expired_decision_reference_rejected_at_claim(pool, ctx):

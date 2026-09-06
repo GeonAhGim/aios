@@ -169,7 +169,11 @@ async def test_submit_order_rejected_is_not_an_exception(pool):
 async def test_submit_order_network_error_propagates(pool):
     """FD-4.2-b 예외상황 — 네트워크 오류는 RetryableExchangeError로 전파,
     이 함수 내부에서 자체 재시도하지 않는다(재시도 전 반드시 멱등성
-    확인부터 다시 거쳐야 하므로)."""
+    확인부터 다시 거쳐야 하므로).
+
+    task-1566(L4-09) 편차 — 이전엔 claim 행을 지워 DB에 흔적을 남기지
+    않았다. 지금은 oms `order_repository.transition()`으로 CREATED→FAILED
+    확정만 하고 행은 남긴다(감사 흔적 보존, order_events WORM에도 남음)."""
     user_id = await create_test_user(pool)
     execution_id = await _create_running_execution(pool, user_id)
 
@@ -186,7 +190,8 @@ async def test_submit_order_network_error_propagates(pool):
         row = await conn.fetchrow(
             "SELECT * FROM orders WHERE client_order_id = $1", order.client_order_id
         )
-    assert row is None  # 전송 실패 — DB에 남지 않아야 함(반쯤 걸친 상태 방지)
+    assert row is not None  # 행은 남는다 — 삭제 대신 상태로 실패를 표현
+    assert row["status"] in ("UNKNOWN", "FAILED")
 
 
 async def test_update_from_exchange_raises_on_status_mismatch(pool):

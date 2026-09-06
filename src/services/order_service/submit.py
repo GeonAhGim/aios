@@ -8,10 +8,12 @@ Spec: 기능설계문서_v1.21.md#FD-4.2
 """
 from __future__ import annotations
 
+import hashlib
 import time
 from collections.abc import Awaitable, Callable
+from datetime import datetime, timezone
 from typing import Any
-from uuid import UUID
+from uuid import UUID, uuid4
 
 import asyncpg
 
@@ -22,6 +24,9 @@ from src.core.observability.metric_names import (
 from src.core.observability.metrics import MetricsPort, NullMetrics
 from src.data.models.trading import Order, OrderStatus
 from src.exchanges.common.adapter import ExchangeAdapter
+from src.services.oms.adapters.order_repository import PostgresOrderRepository
+from src.services.oms.contracts.v1_events import OrderTransitionEvent
+from src.services.oms.domain.state_machine import OrderEvent
 from src.services.order_service import repository
 from src.services.order_service.gate import (
     GateOutcome,
@@ -30,6 +35,8 @@ from src.services.order_service.gate import (
     record_gate_decision,
 )
 from src.services.order_service.position_ledger import record_fill_in_position_ledger
+
+_oms_orders = PostgresOrderRepository()
 
 PublishFn = Callable[[str, dict[str, Any]], Awaitable[None]]
 
@@ -47,6 +54,39 @@ class OrderDeniedByRiskGateError(Exception):
     def __init__(self, reason_codes: tuple[str, ...]) -> None:
         self.reason_codes = reason_codes
         super().__init__(f"주문이 위험 게이트에 의해 거부됐습니다: {reason_codes}")
+
+
+async def _mark_claim_failed(
+    conn: asyncpg.Connection, claimed: Order, *, user_id: UUID, reason: str
+) -> None:
+    """전송 자체가 실패한 claim 행을 CREATED→FAILED로 확정한다(oms의
+    `order_repository.transition()` 재사용 — order_events WORM·audit_bridge까지
+    같은 tx에서 함께 남는다, task-1566 note 참조). `expected_version=0`은
+    claim 직후(다른 전이가 끼어들 수 없는 이 함수 내부 흐름)라 항상 참이다
+    — `orders.version` DDL DEFAULT가 0이고(073beca589d5) `repository.insert()`가
+    이 컬럼을 건드리지 않는다."""
+    event = OrderTransitionEvent(
+        order_id=claimed.order_id,
+        from_status=OrderStatus.CREATED,
+        to_status=OrderStatus.FAILED,
+        event=OrderEvent.VALIDATION_FAILED.value,
+        reason_code=reason,
+        actor_subject_id=user_id,
+        trace_id=uuid4(),
+        command_id=None,
+        provider_event_id=None,
+        occurred_at=datetime.now(timezone.utc),
+        payload_hash=hashlib.sha256(f"{claimed.order_id}:{reason}".encode()).hexdigest(),
+    )
+    await _oms_orders.transition(
+        conn,
+        order_id=claimed.order_id,
+        expected_status=OrderStatus.CREATED,
+        expected_version=0,
+        new_status=OrderStatus.FAILED,
+        patch={},
+        event=event,
+    )
 
 
 async def submit_order(
@@ -117,15 +157,22 @@ async def submit_order(
 
     # FD-4.2-b 거래소 전송 — REJECTED는 예외가 아니라 정상 흐름(place_order가
     # status=REJECTED로 반환, 아래에서 그대로 영속화). 네트워크 오류
-    # (RetryableExchangeError) 등 실제 예외가 나면, "전송 실패는 DB에 아무
-    # 흔적도 남기지 않는다"는 기존 불변조건을 지키기 위해 claim 행을 지우고
-    # 그대로 전파한다 — 재시도는 같은(또는 새) client_order_id로 이 함수를
-    # 처음부터 다시 거쳐야 한다(이 함수 내부에서 자체 재시도하지 않는다).
+    # (RetryableExchangeError) 등 실제 예외가 나면, 재시도는 같은(또는 새)
+    # client_order_id로 이 함수를 처음부터 다시 거쳐야 한다(이 함수 내부에서
+    # 자체 재시도하지 않는다) — 그대로 전파한다.
+    #
+    # task-1566(L4-09) 편차 — 예전엔 "전송 실패는 DB에 아무 흔적도 남기지
+    # 않는다"며 claim 행을 지웠다(레드팀 #2026-09-02-19). 지금은 oms의
+    # order_repository.transition()으로 CREATED→FAILED 확정만 하고 행은
+    # 남긴다 — 지우면 "제출을 시도했다는 사실 자체"가 감사 흔적 없이
+    # 사라지고, L4-09 cutover 이후 이 경로가 OMS의 유일한 전이 경로가
+    # 되려면 삭제가 아니라 상태기계 전이로 실패를 표현해야 한다
+    # (order_events WORM에 VALIDATION_FAILED로 남는다).
     try:
         submitted = await adapter.place_order(claimed)
     except Exception:
-        async with pool.acquire() as conn:
-            await repository.delete(conn, claimed.order_id)
+        async with pool.acquire() as conn, conn.transaction():
+            await _mark_claim_failed(conn, claimed, user_id=user_id, reason="EXCHANGE_SEND_ERROR")
         _record_submit_outcome("error")
         raise
 
