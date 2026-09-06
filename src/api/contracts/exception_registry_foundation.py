@@ -12,6 +12,11 @@ from starlette import status
 
 from src.api.contracts.error_codes import ErrorCode
 from src.api.schemas.positions import InvalidCursorError
+from src.core.script.runtime.series import ScriptRuntimeError
+from src.foundation.backtest.application.quick_backtest import (
+    QuickBacktestInputError,
+    TooManyBarsError,
+)
 from src.foundation.backtest.application.run_backtest import BacktestRunError
 from src.foundation.charting.application.errors import (
     ChartLayoutNotFoundError,
@@ -226,6 +231,13 @@ EXCEPTION_MAP_FOUNDATION: list[tuple[type[Exception], ErrorCode]] = [
     (StrategyNotEligibleForValidationError, ErrorCode.STATE_INVALID_TRANSITION),
     (ValidationAlreadyInProgressError, ErrorCode.STATE_INVALID_TRANSITION),
     (BacktestRunError, ErrorCode.VALIDATION_INVALID_FIELD),
+    # BT-10c(task-1619) — backtests.py `/v1/backtests/quick`. TooManyBarsError는
+    # QuickBacktestInputError의 서브클래스라 먼저 온다(details.bars/max는
+    # 라우터가 얹는다). ScriptRuntimeError는 DSL-8 실행 실패 — BT-10b
+    # `ScriptSignalSourceError`도 그 서브클래스라 이 등록 하나로 같이 잡힌다.
+    (TooManyBarsError, ErrorCode.VALIDATION_INVALID_FIELD),
+    (QuickBacktestInputError, ErrorCode.VALIDATION_INVALID_FIELD),
+    (ScriptRuntimeError, ErrorCode.VALIDATION_INVALID_FIELD),
     # LB-19(task-1377) — positions 읽기 API(queries.py). 타 테넌트·미존재 동형 404.
     (PositionNotFoundError, ErrorCode.RESOURCE_NOT_FOUND),
     (PositionAccountNotFoundError, ErrorCode.RESOURCE_NOT_FOUND),
