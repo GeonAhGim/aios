@@ -23,7 +23,7 @@ from src.services.oms.contracts.v1_commands import IdempotencyScope, SubmitOrder
 from src.services.oms.domain.symbol_registry import SymbolRegistry
 from src.services.oms.domain.venue_profile import TimeoutBudget, VenueCapabilityProfile
 from src.services.order_service.gate import GateDecision, GateOutcome, OrderContext
-from tests.integration.oms.conftest import create_test_user
+from tests.integration.oms.conftest import create_test_tenant, seed_entity_context
 
 _CONCURRENCY = 50
 
@@ -130,15 +130,16 @@ async def _kill_switch_gate(context: OrderContext) -> GateDecision:
 
 async def test_50_concurrent_same_intent_submits_produce_exactly_one_row(pool):
     """DoD — 같은 의도(scope_hash)로 50개 동시 submit → orders 1행·outbox 1행."""
-    user_id = await create_test_user(pool)
+    user_id = await create_test_tenant(pool)
     execution_id = await _create_running_execution(pool, user_id)
     cmd = _command(user_id, execution_id)
+    entity_context = await seed_entity_context(pool, user_id)
 
     results = await asyncio.gather(
         *[
             submit_order(
                 cmd, pool=pool, profile=_profile(), registry=_registry(),
-                pre_submit_gate=_allow_gate,
+                pre_submit_gate=_allow_gate, entity_context=entity_context,
             )
             for _ in range(_CONCURRENCY)
         ]
@@ -160,14 +161,16 @@ async def test_50_concurrent_same_intent_submits_produce_exactly_one_row(pool):
 
 async def test_gate_none_is_fail_closed_type_error(pool):
     """I-01 — `pre_submit_gate=None`을 명시적으로 넘기면 TypeError, 0행."""
-    user_id = await create_test_user(pool)
+    user_id = await create_test_tenant(pool)
     execution_id = await _create_running_execution(pool, user_id)
     cmd = _command(user_id, execution_id)
+    entity_context = await seed_entity_context(pool, user_id)
 
     with pytest.raises(TypeError):
         await submit_order(
             cmd, pool=pool, profile=_profile(), registry=_registry(),
             pre_submit_gate=None,  # type: ignore[arg-type]
+            entity_context=entity_context,
         )
 
     async with pool.acquire() as conn:
@@ -179,14 +182,15 @@ async def test_gate_none_is_fail_closed_type_error(pool):
 
 async def test_kill_switch_active_denies_with_zero_rows(pool):
     """I-02 — kill switch(항상 DENY하는 게이트) 활성 시 0행."""
-    user_id = await create_test_user(pool)
+    user_id = await create_test_tenant(pool)
     execution_id = await _create_running_execution(pool, user_id)
     cmd = _command(user_id, execution_id)
+    entity_context = await seed_entity_context(pool, user_id)
 
     with pytest.raises(OrderSubmitDeniedError):
         await submit_order(
             cmd, pool=pool, profile=_profile(), registry=_registry(),
-            pre_submit_gate=_kill_switch_gate,
+            pre_submit_gate=_kill_switch_gate, entity_context=entity_context,
         )
 
     async with pool.acquire() as conn:

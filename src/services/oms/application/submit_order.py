@@ -6,6 +6,12 @@ Spec: docs/specs/L4_execution_oms_and_exchange_v1.0.md §2-C 표
 §5.2(scope_hash/digest/client_order_id, idempotency.py L4-03 재사용),
 §5.3("전송 전 실패=FAILED, 전송 후 유실=UNKNOWN, 거래소 호출은 DB tx 밖"), §9 L4-09.
 
+FA-5(L4_ibor_fund_accounting_and_resilience_v1.0.md#FA-5)가 `entity_context:
+EntityContext` 필수 인자를 추가했다 — `resolve_context()`(같은 리프)로 해석한
+값을 그대로 넘긴다. `pre_submit_gate`와 같은 관례로 `None` 명시 전달도 막는다
+(fail-closed). `orders.fund_id`/`portfolio_id`(FA-3, 아직 nullable)를 이
+INSERT부터 채운다 — NOT NULL 승격은 범위 밖(후속 리프).
+
 실제 거래소 호출은 이 함수가 하지 않는다 — `outbox_dispatcher.py`(L4-14, 이미
 배선됨)가 `order_command_outbox`의 SUBMIT 행을 비동기로 소비해 tx 밖에서
 호출한다(§5.3). 이 함수는 그 행을 만드는 것까지만 책임진다.
@@ -46,6 +52,8 @@ import asyncpg
 
 from src.data.models.base import Currency, Money
 from src.data.models.trading import Order, OrderStatus
+from src.foundation.entities.application.resolve_context import EntityContextResolutionError
+from src.foundation.entities.contracts.v1 import EntityContext
 from src.services.oms.adapters.idempotency_repository import IdempotencyRepository
 from src.services.oms.adapters.order_repository import PostgresOrderRepository
 from src.services.oms.adapters.outbox_repository import OutboxRepository
@@ -72,10 +80,11 @@ _INSERT_ORDER_SQL = """
 INSERT INTO orders (
     order_id, user_id, client_order_id, strategy_id, strategy_version, execution_id,
     symbol, venue_symbol, exchange, side, order_type, time_in_force, quantity, price,
-    status, filled_quantity, is_liquidation, asset_class, parent_order_id, algo_run_id
+    status, filled_quantity, is_liquidation, asset_class, parent_order_id, algo_run_id,
+    fund_id, portfolio_id
 ) VALUES (
     $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14,
-    'CREATED', 0, $15, $16, $17, $18
+    'CREATED', 0, $15, $16, $17, $18, $19, $20
 )
 """
 
@@ -130,8 +139,18 @@ async def submit_order(
     profile: VenueCapabilityProfile,
     registry: SymbolRegistry,
     pre_submit_gate: PreSubmitGate,
+    entity_context: EntityContext,
     clock: Clock = utcnow,
 ) -> OrderView:
+    if entity_context is None:  # 정적 검사 우회(런타임 None 주입) 방어, FA-5
+        raise EntityContextResolutionError(
+            "entity_context는 필수입니다(FA-5) — None을 명시적으로 넘길 수 없습니다."
+        )
+    if entity_context.tenant_id != cmd.scope.tenant_id:
+        raise EntityContextResolutionError(
+            f"entity_context.tenant_id({entity_context.tenant_id})가 "
+            f"cmd.scope.tenant_id({cmd.scope.tenant_id})와 다릅니다 — 교차 테넌트 쓰기 거부."
+        )
     if pre_submit_gate is None:  # 정적 검사 우회(런타임 None 주입) 방어, I-01
         raise TypeError("pre_submit_gate는 필수입니다(I-01) — None을 명시적으로 넘길 수 없습니다.")
     assert_supported(profile, cmd)
@@ -172,6 +191,8 @@ async def submit_order(
                     cmd.asset_class.value,
                     cmd.parent_order_id,
                     cmd.algo_run_id,
+                    entity_context.fund_id,
+                    entity_context.portfolio_id,
                 )
             except asyncpg.UniqueViolationError:
                 collided = True

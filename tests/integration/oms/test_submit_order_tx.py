@@ -21,7 +21,7 @@ from src.services.oms.domain.errors import IdempotencyDigestMismatchError, Unkno
 from src.services.oms.domain.symbol_registry import SymbolRegistry
 from src.services.oms.domain.venue_profile import TimeoutBudget, VenueCapabilityProfile
 from src.services.order_service.gate import GateDecision, GateOutcome, OrderContext
-from tests.integration.oms.conftest import create_test_user
+from tests.integration.oms.conftest import create_test_tenant, seed_entity_context
 
 
 def _profile(**overrides: object) -> VenueCapabilityProfile:
@@ -118,12 +118,14 @@ async def _deny_gate(context: OrderContext) -> GateDecision:
 
 
 async def test_submit_order_new_creates_validated_row_and_enqueues_outbox(pool):
-    user_id = await create_test_user(pool)
+    user_id = await create_test_tenant(pool)
     execution_id = await _create_running_execution(pool, user_id)
     cmd = _command(user_id, execution_id)
+    entity_context = await seed_entity_context(pool, user_id)
 
     result = await submit_order(
         cmd, pool=pool, profile=_profile(), registry=_registry(), pre_submit_gate=_allow_gate,
+        entity_context=entity_context,
     )
 
     assert result.status == OrderStatus.VALIDATED
@@ -147,15 +149,18 @@ async def test_submit_order_new_creates_validated_row_and_enqueues_outbox(pool):
 
 
 async def test_submit_order_existing_replay_returns_same_order_no_extra_row(pool):
-    user_id = await create_test_user(pool)
+    user_id = await create_test_tenant(pool)
     execution_id = await _create_running_execution(pool, user_id)
     cmd = _command(user_id, execution_id)
+    entity_context = await seed_entity_context(pool, user_id)
 
     first = await submit_order(
         cmd, pool=pool, profile=_profile(), registry=_registry(), pre_submit_gate=_allow_gate,
+        entity_context=entity_context,
     )
     second = await submit_order(
         cmd, pool=pool, profile=_profile(), registry=_registry(), pre_submit_gate=_allow_gate,
+        entity_context=entity_context,
     )
 
     assert first.order_id == second.order_id
@@ -173,13 +178,15 @@ async def test_submit_order_existing_replay_returns_same_order_no_extra_row(pool
 async def test_submit_order_gate_deny_leaves_zero_rows(pool):
     """negative — DoD "gate DENY 시 0행": claim이 먼저 INSERT한 임시 CREATED
     행까지 tx 전체가 롤백된다(FK 순서상 orders가 먼저 생기지만 최종 0행)."""
-    user_id = await create_test_user(pool)
+    user_id = await create_test_tenant(pool)
     execution_id = await _create_running_execution(pool, user_id)
     cmd = _command(user_id, execution_id)
+    entity_context = await seed_entity_context(pool, user_id)
 
     with pytest.raises(OrderSubmitDeniedError):
         await submit_order(
             cmd, pool=pool, profile=_profile(), registry=_registry(), pre_submit_gate=_deny_gate,
+            entity_context=entity_context,
         )
 
     async with pool.acquire() as conn:
@@ -198,17 +205,20 @@ async def test_submit_order_gate_deny_leaves_zero_rows(pool):
 async def test_submit_order_digest_mismatch_raises_and_rolls_back(pool):
     """negative — 같은 scope, 다른 내용(quantity)의 재시도는 상위 버그 신호로
     거부되고, 실패한 시도의 임시 CREATED 행은 남지 않는다."""
-    user_id = await create_test_user(pool)
+    user_id = await create_test_tenant(pool)
     execution_id = await _create_running_execution(pool, user_id)
     cmd1 = _command(user_id, execution_id, quantity=Decimal("0.01"))
+    entity_context = await seed_entity_context(pool, user_id)
     await submit_order(
         cmd1, pool=pool, profile=_profile(), registry=_registry(), pre_submit_gate=_allow_gate,
+        entity_context=entity_context,
     )
     cmd2 = cmd1.model_copy(update={"command_id": uuid.uuid4(), "quantity": Decimal("0.02")})
 
     with pytest.raises(IdempotencyDigestMismatchError):
         await submit_order(
             cmd2, pool=pool, profile=_profile(), registry=_registry(), pre_submit_gate=_allow_gate,
+            entity_context=entity_context,
         )
 
     async with pool.acquire() as conn:
@@ -221,13 +231,15 @@ async def test_submit_order_digest_mismatch_raises_and_rolls_back(pool):
 async def test_submit_order_unknown_symbol_writes_nothing(pool):
     """negative — 미등록 심볼은 registry가 fail-closed로 거부, DB 쓰기 이전에
     걸러진다(어떤 행도 남지 않음)."""
-    user_id = await create_test_user(pool)
+    user_id = await create_test_tenant(pool)
     execution_id = await _create_running_execution(pool, user_id)
     cmd = _command(user_id, execution_id, symbol="ETH/USDT")
+    entity_context = await seed_entity_context(pool, user_id)
 
     with pytest.raises(UnknownSymbolError):
         await submit_order(
             cmd, pool=pool, profile=_profile(), registry=_registry(), pre_submit_gate=_allow_gate,
+            entity_context=entity_context,
         )
 
     async with pool.acquire() as conn:

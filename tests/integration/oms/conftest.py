@@ -16,9 +16,36 @@ from uuid import UUID, uuid4
 import asyncpg
 import pytest
 
-from tests.integration.conftest import create_test_user
+from src.foundation.entities.adapters.postgres_repository import PostgresEntityRepository
+from src.foundation.entities.contracts.v1 import EntityContext
+from tests.integration.conftest import create_test_tenant, create_test_user
+from tests.integration.foundation.entities.conftest import build_hierarchy
 
-__all__ = ["create_test_user", "insert_order", "insert_event", "arm_cutover_sql"]
+__all__ = [
+    "create_test_user",
+    "create_test_tenant",
+    "insert_order",
+    "insert_event",
+    "arm_cutover_sql",
+    "seed_entity_context",
+]
+
+
+async def seed_entity_context(pool: asyncpg.Pool, tenant_id: UUID) -> EntityContext:
+    """FA-5 — `submit_order`가 요구하는 `entity_context`를 실제 4단 계층을
+    영속화해 만든다(FA-2 `build_hierarchy` 재사용, 새 시딩 규칙 없음).
+    `tenant_id`는 `create_test_tenant()`로 만든 id를 넘겨야 한다 — `legal_entity.
+    tenant_id`가 `tenant(id)`를 FK하므로 `create_test_user()`만으로 만든
+    id(대응 `tenant` 행 없음)를 넘기면 FK 위반으로 실패한다."""
+    repo = PostgresEntityRepository(pool)
+    hierarchy = await build_hierarchy(pool, repo, tenant_id=tenant_id)
+    return EntityContext(
+        tenant_id=tenant_id,
+        legal_entity_id=hierarchy.legal_entity.entity_id,
+        fund_id=hierarchy.fund.fund_id,
+        portfolio_id=hierarchy.portfolio.portfolio_id,
+        sub_account_id=hierarchy.sub_account.sub_account_id,
+    )
 
 
 def _asyncpg_dsn() -> str:

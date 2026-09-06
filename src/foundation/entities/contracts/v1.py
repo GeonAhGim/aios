@@ -91,3 +91,18 @@ class SubAccount(BaseModel):
     owner_ref: UUID
     closed_at: AwareDatetime | None = None
     schema_version: Literal["v1"] = SCHEMA_VERSION
+
+
+class EntityContext(BaseModel):
+    """FA-5: `application/resolve_context.py`의 유일한 반환 타입 — 주문·
+    포지션·원장 쓰기 진입점이 공유하는 "해석된" 컨텍스트다. 다섯 필드
+    전부 필수다(부분 해석 상태는 존재하지 않는다) — 하나라도 해석하지
+    못하면 이 타입을 만들지 않고 `EntityContextResolutionError`를 던진다
+    (fail-closed, 값 추측·기본값 폴백 금지)."""
+
+    tenant_id: UUID
+    legal_entity_id: UUID
+    fund_id: UUID
+    portfolio_id: UUID
+    sub_account_id: UUID
+    schema_version: Literal["v1"] = SCHEMA_VERSION
