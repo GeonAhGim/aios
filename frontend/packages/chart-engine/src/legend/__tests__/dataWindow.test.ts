@@ -1,11 +1,5 @@
 import { describe, expect, it } from "vitest";
-import {
-  DataWindowError,
-  type IndicatorSeriesSnapshot,
-  computeDataWindowRows,
-  createIndicatorLastValueMarkStyle,
-  createIndicatorTooltipStyle,
-} from "../dataWindow";
+import { DataWindowError, type IndicatorSeriesSnapshot, computeDataWindowRows } from "../dataWindow";
 
 function expectDataWindowError(fn: () => unknown, code: string): void {
   try {
@@ -71,18 +65,5 @@ describe("computeDataWindowRows", () => {
       () => computeDataWindowRows([smaLike("SMA", [1]), smaLike("SMA", [2])], 0),
       "CHART_DATA_WINDOW_DUPLICATE_INDICATOR",
     );
-  });
-});
-
-describe("style bindings", () => {
-  it("createIndicatorTooltipStyle always shows and forwards defaultValue", () => {
-    const style = createIndicatorTooltipStyle({ defaultValue: "n/a" });
-    expect(style.showRule).toBe("always");
-    expect(style.legend?.defaultValue).toBe("n/a");
-  });
-
-  it("createIndicatorLastValueMarkStyle defaults to shown and can be disabled", () => {
-    expect(createIndicatorLastValueMarkStyle().show).toBe(true);
-    expect(createIndicatorLastValueMarkStyle(false).show).toBe(false);
   });
 });

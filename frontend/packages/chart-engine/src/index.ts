@@ -237,12 +237,12 @@ export type {
   IndicatorFigureSource,
   IndicatorSeriesSnapshot,
 } from "./legend/dataWindow";
-export {
-  DataWindowError,
-  computeDataWindowRows,
-  createIndicatorLastValueMarkStyle,
-  createIndicatorTooltipStyle,
-} from "./legend/dataWindow";
+export { DataWindowError, computeDataWindowRows } from "./legend/dataWindow";
+
+// dataWindowStyle.ts (vendor-typed) is deliberately not re-exported here —
+// this barrel is imported by apps/web, and that file's vendor types break
+// apps/web's tsc -b (see dataWindowStyle.ts docstring). Import it directly
+// from chart-engine-internal code only.
 
 export type {
   IndicatorSource,

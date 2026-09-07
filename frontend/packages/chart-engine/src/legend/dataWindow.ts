@@ -1,21 +1,27 @@
 /**
- * CH-16 — dataWindow: style binding onto vendor `IndicatorTooltipView` +
- * `IndicatorLastValueView` (§9.11 CH-16 table), plus `computeDataWindowRows`
- * — the one piece of real logic here, since the vendor draws its own
- * indicator tooltip from `indicator.result[dataIndex]` internally and this
- * module does not re-draw that. What a "data window" needs beyond the
- * on-chart tooltip is a *simultaneous, all-indicators* row list (DoD:
- * "지표 30종 값 동시 표시") that a non-canvas panel (later leaf) can render —
- * `computeDataWindowRows` is that pure projection, decoupled from any
- * vendor `Indicator` instance so it is testable without a live chart.
+ * CH-16 — dataWindow: `computeDataWindowRows`, the one piece of real logic
+ * needed beyond the vendor's own on-chart indicator tooltip (which draws
+ * `indicator.result[dataIndex]` for a single indicator at a time internally
+ * — see `dataWindowStyle.ts` for the style binding onto that vendor view).
+ * What a "data window" needs beyond the on-chart tooltip is a *simultaneous,
+ * all-indicators* row list (DoD: "지표 30종 값 동시 표시") that a non-canvas
+ * panel can render — `computeDataWindowRows` is that pure projection,
+ * decoupled from any vendor `Indicator` instance so it is testable without a
+ * live chart.
+ *
+ * No vendor import here on purpose (type boundary, see `dataWindowStyle.ts`
+ * docstring): this file is the half of CH-16 dataWindow that apps/web's
+ * screen (`DataWindowPanel.tsx`) actually consumes, and apps/web's
+ * verbatimModuleSyntax/erasableSyntaxOnly tsconfig breaks `tsc -b` the
+ * moment a file it reaches types anything out of `vendor/klinecharts` (the
+ * vendor source isn't authored against those flags). Keeping this module
+ * vendor-free is what lets apps/web import it at all.
  *
  * Fail-closed: two indicator snapshots sharing an id is a caller bug (the
  * backend `IndicatorRegistry` — CH-3 `overlayRegistry.ts` — guarantees
  * unique ids), so it is rejected via `DataWindowError` rather than silently
  * keeping the last one and dropping the other's values.
  */
-
-import type { DeepPartial, IndicatorLastValueMarkStyle, IndicatorTooltipStyle } from "../core/klinecharts";
 
 export interface IndicatorFigureSource {
   readonly key: string;
@@ -105,17 +111,4 @@ export function computeDataWindowRows(
     }
   }
   return rows;
-}
-
-/** Binds the "always show, never suppress on 30 indicators" rule into `chart.setStyles({ indicator: { tooltip: ... } })`. */
-export function createIndicatorTooltipStyle(options: DataWindowOptions = {}): DeepPartial<IndicatorTooltipStyle> {
-  return {
-    showRule: "always",
-    legend: { defaultValue: options.defaultValue ?? DEFAULT_VALUE },
-  };
-}
-
-/** Binds the Y-axis last-value marks (`IndicatorLastValueView`) that accompany the data window. */
-export function createIndicatorLastValueMarkStyle(show = true): DeepPartial<IndicatorLastValueMarkStyle> {
-  return { show };
 }

@@ -3,17 +3,21 @@
 // 서브패널 CRUD·높이 비율·크로스헤어 동기화를 그대로 쓰고, CH-16
 // legend/objectTree.ts 값을 ChartLegend에 그대로 넘긴다.
 //
-// legend/statusLine.ts·legend/dataWindow.ts는 여기서 재사용하지 않는다 —
-// ChartLegend.tsx 상단 주석 참고(둘 다 "../core/klinecharts" 타입 임포트가 vendor를
-// 값으로 재수출해 apps/web tsconfig에서 tsc -b가 깨진다). DoD의 "전 페인 statusLine
-// 동일 timeMs" 요구는 crosshairSync.ts의 공유 시각만으로 충족한다.
+// legend/statusLine.ts는 여기서 재사용하지 않는다(ChartLegend.tsx 상단 주석 참고 —
+// "../core/klinecharts" 타입 임포트가 vendor 배럴을 통해 vendor 전체를 apps/web
+// tsconfig 아래로 끌어들여 tsc -b가 깨진다); DoD의 "전 페인 statusLine 동일 timeMs"
+// 요구는 crosshairSync.ts의 공유 시각만으로 충족한다. legend/dataWindow.ts는
+// task-2044로 타입 경계가 갈렸다: vendor 타입 절반은 dataWindowStyle.ts로 옮겨
+// apps/web이 절대 임포트하지 않고, 여기 쓰는 건 vendor-free한 dataWindow.ts의
+// computeDataWindowRows뿐이다(소비자: DataWindowPanel.tsx). statusLine.ts를 같은
+// 식으로 쪼개는 일은 이 리프 범위 밖이지만(legend/statusLine, unwired-modules-
+// baseline.json) 이 분리 패턴은 재사용 가능하다.
 //
 // 페인 배치 영속화(decision): 서브패널 존재 여부는 이미 CH-8로 저장되는
-// selectedIndicatorIds에서 파생한다(sub-pane 배치 지표 하나당 서브패널 하나) —
-// 새 저장 경로를 만들지 않는다. heightRatio 자체는 이 리프에서 서버 왕복을
-// 새로 만들지 않고, `restoredHeightRatios`로 주입 가능한 훅만 열어 둔다:
-// paneModel.setHeightRatios가 합계 불일치를 fail-closed로 거부하는 계약을
-// 화면이 무음 폴백 없이 그대로 드러낸다(DoD 3).
+// selectedIndicatorIds에서 파생한다 — 새 저장 경로를 만들지 않는다. heightRatio
+// 자체는 서버 왕복을 새로 만들지 않고 `restoredHeightRatios` 훅만 열어 둔다:
+// paneModel.setHeightRatios가 합계 불일치를 fail-closed로 거부하는 계약을 화면이
+// 무음 폴백 없이 그대로 드러낸다(DoD 3).
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import type { StreamCandle } from "@aios/chart-engine/src/data/candleStream";
 import type { DrawingCollection } from "@aios/chart-engine/src/drawings/model";
@@ -34,6 +38,7 @@ import { createPriceScale, type PriceScale } from "@aios/chart-engine/src/core/p
 import { createTimeScale } from "@aios/chart-engine/src/core/timeScale";
 import { Alert } from "@aios/ui-web";
 import { ChartLegend } from "./ChartLegend";
+import { DataWindowPanel } from "./DataWindowPanel";
 import {
   PLOT_ERROR_REASONS,
   buildPlotLayer,
@@ -129,8 +134,7 @@ export function ChartPanes({
     }
   });
 
-  // 초기 마운트 이후 서브패널 구성(지표 선택)이 바뀔 때만 반영한다 — 복원 시도는
-  // 최초 1회뿐이라 여기서 restoredHeightRatios를 다시 적용하지 않는다.
+  // 초기 마운트 이후 서브패널 구성이 바뀔 때만 반영한다 — restoredHeightRatios는 최초 1회뿐이라 여기서 다시 적용하지 않는다.
   useEffect(() => {
     setState((prev) => {
       let next = prev.paneModel;
@@ -154,6 +158,7 @@ export function ChartPanes({
   useEffect(() => crosshair.subscribe(setCrosshairState), [crosshair]);
   const crosshairTimeMs = crosshairState.kind === "visible" ? crosshairState.timeMs : null;
 
+  const allOverlays = useMemo(() => [...mainOverlays, ...subOverlays], [mainOverlays, subOverlays]);
   const [hiddenIds, setHiddenIds] = useState<ReadonlySet<string>>(new Set());
   const objectTreeSource: ObjectTreeSource = useMemo(
     () => ({
@@ -184,16 +189,11 @@ export function ChartPanes({
   const rects = computePaneRects(paneModel.panes, totalHeight);
   const paneById = useMemo(() => new Map(paneModel.panes.map((p) => [p.id, p] as const)), [paneModel]);
 
-  // CH-19c: cap the candle count reaching the render path at the surface's own
-  // pixel budget (render/lod·render/viewport dispatch: useVisibleCandles.ts).
+  // CH-19c: cap the candle count reaching the render path at the surface's own pixel budget (render/lod·render/viewport: useVisibleCandles.ts).
   const candleViewport = { startTime: candles[0]?.openTimeMs ?? 0, endTime: candles[candles.length - 1]?.openTimeMs ?? 0 };
   const mainContent = useWiredCandleRenderer(children, candles, { viewport: candleViewport, targetPixelWidth: SURFACE_WIDTH_PX });
 
-  // CH-15b: one time scale (candle domain) and one price scale per pane
-  // (candle range for main, that pane's own series range for sub-panes) —
-  // both are CH-1b `core/priceScale.ts`/`timeScale.ts` with no backend, i.e.
-  // their documented linear-fallback mode (scaleBinding.ts docstring), not a
-  // new scale concept.
+  // CH-15b: one time scale (candle domain), one price scale per pane — CH-1b core/priceScale.ts·timeScale.ts's linear-fallback mode, not a new scale concept.
   const heightOf = (paneId: string): number => rects.find((r) => r.id === paneId)?.height ?? totalHeight;
   const timeScale = createTimeScale({ range: timeRangeFromCandles(candles), width: SURFACE_WIDTH_PX });
   const mainScale = createPriceScale({ range: priceRangeFromCandles(candles), height: heightOf(MAIN_PANE_ID) });
@@ -221,9 +221,7 @@ export function ChartPanes({
           const isMain = pane.kind === "main";
           const paneOverlays = isMain ? mainOverlays : subOverlays.filter((o) => subPaneId(o.id) === pane.id);
           const ownScale = isMain ? mainScale : (subScales.get(pane.id) ?? mainScale);
-          // CH-15b: the actual PlotSpec-driven dispatch — see ChartPlotLayer.tsx.
-          // A new indicator's plot renders here purely from `paneOverlays`/
-          // `overlaySeries`, with zero changes to this file (DoD).
+          // CH-15b: the actual PlotSpec-driven dispatch (ChartPlotLayer.tsx) — a new indicator's plot renders here with zero changes to this file (DoD).
           const plotLayer = buildPlotLayer({ overlays: paneOverlays, overlaySeries, overlayPlotSpecs, mainScale, ownScale, timeScale });
           return (
             <div
@@ -295,6 +293,8 @@ export function ChartPanes({
           })
         }
       />
+
+      <DataWindowPanel overlays={allOverlays} overlaySeries={overlaySeries} candles={candles} crosshairTimeMs={crosshairTimeMs} />
     </div>
   );
 }

@@ -192,6 +192,26 @@ function denseCandles(count: number): StreamCandle[] {
   return Array.from({ length: count }, (_, i) => candle(i));
 }
 
+describe("ChartPanes — CH-16d dataWindow 배선 (task-2044)", () => {
+  it("mounts DataWindowPanel fed by the same overlays/overlaySeries/candles props (wiring proof: revert the mount and this fails)", () => {
+    const overlays = Array.from({ length: 30 }, (_, i) => overlay(`IND_${i}`));
+    const overlaySeries = new Map<string, OverlaySeriesByOutput>(
+      overlays.map((o, i) => [o.id, new Map([["value", overlaySeriesPoints([i + 0.5, i + 0.5, i + 0.5, i + 0.5])]])] as const),
+    );
+
+    render(<Harness initialSub={overlays} overlaySeries={overlaySeries} />);
+
+    expect(screen.getByTestId("data-window-panel")).toBeInTheDocument();
+    expect(screen.getAllByTestId("data-window-row")).toHaveLength(30);
+  });
+
+  // Duplicate-indicator-id rejection (DataWindowError, not a silent empty panel)
+  // is covered directly in DataWindowPanel.test.tsx: at this integration level a
+  // duplicate id across main/sub overlays is already rejected one layer up by
+  // legend/objectTree.ts's own uniqueness invariant (CHART_OBJECT_TREE_DUPLICATE_ID),
+  // so it never reaches computeDataWindowRows here.
+});
+
 describe("ChartPanes — CH-19c render/lod·render/viewport wiring", () => {
   it("the mounted CandlestickChart receives a downsampled series, not the full 5,000-candle input", () => {
     const dense = denseCandles(5000);
