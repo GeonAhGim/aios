@@ -5,17 +5,13 @@ Revises: b8ac30eb4fe0, ddbd3a33bf30
 Create Date: 2026-09-07 13:01:55.569752
 
 """
-from typing import Sequence, Union
-
-from alembic import op
-import sqlalchemy as sa
-
+from collections.abc import Sequence
 
 # revision identifiers, used by Alembic.
 revision: str = '3819cf8a5373'
-down_revision: Union[str, Sequence[str], None] = ('b8ac30eb4fe0', 'ddbd3a33bf30')
-branch_labels: Union[str, Sequence[str], None] = None
-depends_on: Union[str, Sequence[str], None] = None
+down_revision: str | Sequence[str] | None = ('b8ac30eb4fe0', 'ddbd3a33bf30')
+branch_labels: str | Sequence[str] | None = None
+depends_on: str | Sequence[str] | None = None
 
 
 def upgrade() -> None:
