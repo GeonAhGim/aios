@@ -15,81 +15,33 @@ from __future__ import annotations
 
 from datetime import date
 from decimal import Decimal
-from enum import Enum
 from typing import Literal
 from uuid import UUID
 
 from pydantic import AwareDatetime, BaseModel
 
 from src.data.models.base import AssetClass
+from src.foundation.market_data.contracts.v1_enums import (
+    Adjustment,
+    QualityIssueType,
+    Severity,
+    SymbolStatus,
+    Timeframe,
+    Venue,
+    Verdict,
+)
+
+__all__ = [
+    "SCHEMA_VERSION", "Timeframe", "Venue", "Adjustment", "SymbolStatus",
+    "QualityIssueType", "Severity", "Verdict", "SeriesKey", "CandleRecord",
+    "TickRecord", "QualityIssue", "QualityVerdict", "IngestCandlesCommand",
+    "IngestBatchResult", "TickIngestBatchResult", "CandleQuery", "CandleSeries",
+    "ReplayRequest", "ReplaySeries", "SessionWindow", "CalendarDay",
+    "InstrumentRef", "RegisterInstrumentCommand", "LifecycleEventCommand",
+    "CorporateAction", "DataQualityMetrics",
+]
 
 SCHEMA_VERSION: Literal["v1"] = "v1"
-
-
-class Timeframe(str, Enum):
-    M1 = "1m"
-    M5 = "5m"
-    M15 = "15m"
-    M30 = "30m"
-    H1 = "1h"
-    H4 = "4h"
-    D1 = "1d"
-    # RD-19(ADR-2026-09-06-H D3) — 캔들 바가 아니라 원시 L2 호가창 이벤트
-    # 스트림 커버리지 표식. domain/timeframe.duration()/align_open()은 이
-    # 값을 등록하지 않는다(OHLC 정렬 개념이 없다) — coverage_spans에 수집
-    # 온라인 구간을 [start_at, end_at)으로 직접 기록하는 용도로만 쓴다.
-    L2 = "L2"
-
-
-class Venue(str, Enum):
-    """세션 규칙(A3) 조회 키. KIS는 시장별로 캘린더가 달라 KRX/US를 분리한다."""
-
-    BITGET = "BITGET"
-    KIS_KRX = "KIS_KRX"
-    KIS_US = "KIS_US"
-    # RD-19(ADR-2026-09-06-H D3) — 암호화폐 L2 자체 수집기 대상 4개 거래소.
-    BINANCE = "BINANCE"
-    BYBIT = "BYBIT"
-    OKX = "OKX"
-    UPBIT = "UPBIT"
-
-
-class Adjustment(str, Enum):
-    RAW = "RAW"
-    ADJUSTED = "ADJUSTED"
-
-
-class SymbolStatus(str, Enum):
-    PENDING = "PENDING"
-    LISTED = "LISTED"
-    SUSPENDED = "SUSPENDED"
-    DELISTED = "DELISTED"
-
-
-class QualityIssueType(str, Enum):
-    OHLC_INCONSISTENT = "OHLC_INCONSISTENT"
-    NEGATIVE_VOLUME = "NEGATIVE_VOLUME"
-    TIME_MISALIGNED = "TIME_MISALIGNED"
-    NAIVE_DATETIME = "NAIVE_DATETIME"
-    GAP = "GAP"
-    STALE = "STALE"
-    SPIKE = "SPIKE"
-    DUPLICATE_IDENTICAL = "DUPLICATE_IDENTICAL"
-    DUPLICATE_CONFLICT = "DUPLICATE_CONFLICT"
-    OUT_OF_SESSION = "OUT_OF_SESSION"
-
-
-class Severity(str, Enum):
-    INFO = "INFO"
-    WARN = "WARN"
-    REJECT = "REJECT"
-
-
-class Verdict(str, Enum):
-    ACCEPT = "ACCEPT"
-    PARTIAL = "PARTIAL"
-    QUARANTINE = "QUARANTINE"
-    REJECT = "REJECT"
 
 
 class SeriesKey(BaseModel):
