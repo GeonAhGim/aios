@@ -27,6 +27,7 @@ from typing import Any
 import httpx
 import pytest
 
+from src.core.exceptions import FrozenZonePaperAdapterBlockedError
 from src.exchanges.kis.adapter import REAL_BASE_URL, KISAdapter
 from tests.fixtures.kis.generated_cases import (
     GeneratedCase,
@@ -52,10 +53,23 @@ def _case_id(case: GeneratedCase) -> str:
 def _make_real_adapter(handler: Any) -> KISAdapter:
     transport = httpx.MockTransport(handler)
     client = httpx.AsyncClient(base_url=REAL_BASE_URL, transport=transport)
-    # is_paper_trading=False -- 모의투자 tr_id 치환(T/J/C -> V)은 이 테스트의
-    # 관심사가 아니다(별도로 tests/unit/exchanges/test_kis_live_guard.py 등이
-    # 다룸). 여기서는 생성 코드가 스스로 조립한 tr_id/path가 그대로 실리는지만
-    # 본다.
+    # is_paper_trading=True -- task-1975(BR-12 주문성 생성 메서드에
+    # @require_paper_sandbox 부착, ADR-2026-08-29-E)가 걸린 뒤로 이 하드가드를
+    # 통과하려면 계약 테스트 adapter도 PAPER/sandbox 구성이어야 한다(task-2018).
+    # 모의투자 tr_id 치환(T/J/C -> V)은 여전히 이 테스트의 관심사가 아니다
+    # (별도로 tests/unit/exchanges/test_kis_live_guard.py 등이 다룸) -- 그래서
+    # 인스턴스 단위로 치환을 무력화해, 생성 코드가 스스로 조립한 tr_id/path가
+    # 그대로 실리는지만(BR-11 문자 그대로 일치) 계속 검증한다.
+    adapter = KISAdapter(
+        "app", "secret", "12345678", "01", is_paper_trading=True, http_client=client
+    )
+    adapter._resolve_tr_id = lambda tr_id: tr_id  # type: ignore[method-assign]
+    return adapter
+
+
+def _make_live_adapter(handler: Any) -> KISAdapter:
+    transport = httpx.MockTransport(handler)
+    client = httpx.AsyncClient(base_url=REAL_BASE_URL, transport=transport)
     return KISAdapter("app", "secret", "12345678", "01", is_paper_trading=False, http_client=client)
 
 
@@ -168,6 +182,31 @@ async def test_contract_helper_detects_mismatched_path() -> None:
     mutated = replace(case, path=case.path + "-broken")
     with pytest.raises(AssertionError):
         await _assert_rest_contract(mutated)
+
+
+async def test_rest_case_rejected_when_adapter_is_live() -> None:
+    """DoD(task-2018) -- 하드가드가 실제로 살아 있다는 증거. task-1975가
+    STTN1101U(주문성 생성 메서드)에 붙인 `@require_paper_sandbox`는
+    LIVE로 구성된(is_paper_trading=False) adapter의 호출을 반드시 막아야
+    한다(ADR-2026-08-29-E) -- 이 negative 테스트가 없으면 위 픽스처가
+    PAPER로 바뀐 것이 가드를 우회한 결과인지, 가드를 실제로 통과한
+    결과인지 구별할 수 없다."""
+    case = next(c for c in _REST_CASES if c.tr_id == "STTN1101U")
+    row = _REFERENCE[case.tr_id]
+    sample_params = {p["name"]: f"V_{p['name']}" for p in row["params"]}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/oauth2/tokenP":
+            return httpx.Response(200, json=_TOKEN_RESPONSE)
+        return httpx.Response(200, json={"rt_cd": "0", "msg1": "OK"})
+
+    adapter = _make_live_adapter(handler)
+    try:
+        method = getattr(adapter, case.method_name)
+        with pytest.raises(FrozenZonePaperAdapterBlockedError):
+            await method(sample_params)
+    finally:
+        await adapter.aclose()
 
 
 async def test_contract_helper_detects_response_tampering(monkeypatch: pytest.MonkeyPatch) -> None:
