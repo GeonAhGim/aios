@@ -1,7 +1,15 @@
 import { describe, expect, it } from "vitest";
 import type { OverlayOutput } from "../../indicators/overlayRegistry";
 import type { IndicatorStyleOutput } from "../../plugins/indicatorPlugin";
-import { PlotRenderError, type PlotRenderTarget, type PlotSpec, decodePlotSpec, deriveOverlayPlotSpec, renderPlot } from "../plotRenderers";
+import {
+  PlotRenderError,
+  type HistogramBar,
+  type PlotRenderTarget,
+  type PlotSpec,
+  decodePlotSpec,
+  deriveOverlayPlotSpec,
+  renderPlot,
+} from "../plotRenderers";
 import type { PlotProjection } from "../scaleBinding";
 
 const IDENTITY_PROJECTION: PlotProjection = { timeToX: (t) => t, priceToY: (v) => v };
@@ -38,6 +46,25 @@ const POINTS = [
   { time: 1, value: 10 },
   { time: 2, value: 12 },
 ];
+
+/** Unlike `recordingTarget`, captures the actual `style` object per call so a test can compare
+ * arguments structurally (color A != color B) instead of asserting a hardcoded color literal. */
+function spyTarget(): PlotRenderTarget & {
+  histogramCalls: { bars: readonly HistogramBar[]; style: IndicatorStyleOutput }[];
+  polygonCalls: { style: IndicatorStyleOutput }[];
+} {
+  const histogramCalls: { bars: readonly HistogramBar[]; style: IndicatorStyleOutput }[] = [];
+  const polygonCalls: { style: IndicatorStyleOutput }[] = [];
+  return {
+    histogramCalls,
+    polygonCalls,
+    drawLine: () => {},
+    drawHistogram: (bars, style) => histogramCalls.push({ bars, style }),
+    drawArea: () => {},
+    drawPolygon: (_points, style) => polygonCalls.push({ style }),
+    drawMarker: () => {},
+  };
+}
 
 describe("decodePlotSpec", () => {
   it("decodes a full backend-shaped PlotSpec verbatim (snake_case fields)", () => {
@@ -83,6 +110,25 @@ describe("decodePlotSpec", () => {
     expect(() =>
       decodePlotSpec({ kind: "line", scale: "own", default_pane: "separate", made_up_field: 1 }),
     ).toThrow(/unknown field/);
+  });
+
+  it("accepts color_rule=null (current single-color behavior, regression)", () => {
+    expect(decodePlotSpec({ kind: "line", scale: "own", default_pane: "separate", color_rule: null }).color_rule).toBeNull();
+  });
+
+  it("accepts the only color_rule value the backend actually emits (specs_talib.py hist output)", () => {
+    expect(decodePlotSpec({ kind: "histogram", scale: "own", default_pane: "separate", color_rule: "sign" }).color_rule).toBe("sign");
+  });
+
+  it("rejects a color_rule the backend never emits (negative, fail-closed — no silent single-color fallback)", () => {
+    expect(() =>
+      decodePlotSpec({ kind: "histogram", scale: "own", default_pane: "separate", color_rule: "rainbow" }),
+    ).toThrow(PlotRenderError);
+    try {
+      decodePlotSpec({ kind: "histogram", scale: "own", default_pane: "separate", color_rule: "rainbow" });
+    } catch (err) {
+      expect((err as PlotRenderError).code).toBe("PLOT_RENDER_INVALID_SPEC");
+    }
   });
 });
 
@@ -149,6 +195,74 @@ describe("renderPlot: kind dispatch", () => {
     expect(() =>
       renderPlot(spec({ kind: "band", fill_between: "lowerband" }), "upperband", series, IDENTITY_PROJECTION, VISIBLE_STYLE, target),
     ).toThrow(/PLOT_RENDER_FILL_TARGET_MISSING/);
+  });
+});
+
+describe("renderPlot: color_rule=sign consumption (histogram)", () => {
+  const SIGN_STYLE: IndicatorStyleOutput = { output: "hist", color: "#888", lineWidth: 1, visible: true, upColor: "#0f0", downColor: "#f00" };
+  const SIGNED_POINTS = [
+    { time: 1, value: 1 },
+    { time: 2, value: -1 },
+  ];
+
+  it("colors a positive bar and a negative bar differently (spy on the actual draw args, not a hardcoded color literal)", () => {
+    const target = spyTarget();
+    renderPlot(spec({ kind: "histogram", color_rule: "sign" }), "hist", new Map([["hist", SIGNED_POINTS]]), IDENTITY_PROJECTION, SIGN_STYLE, target);
+
+    expect(target.histogramCalls).toHaveLength(2);
+    const [firstCall, secondCall] = target.histogramCalls;
+    expect(firstCall!.style.color).not.toBe(secondCall!.style.color);
+    expect(firstCall!.bars).toHaveLength(1);
+    expect(secondCall!.bars).toHaveLength(1);
+  });
+
+  it("color_rule=null keeps the current single-call, single-color behavior (regression)", () => {
+    const target = spyTarget();
+    renderPlot(spec({ kind: "histogram", color_rule: null }), "hist", new Map([["hist", SIGNED_POINTS]]), IDENTITY_PROJECTION, SIGN_STYLE, target);
+
+    expect(target.histogramCalls).toHaveLength(1);
+    expect(target.histogramCalls[0]!.bars).toHaveLength(2);
+    expect(target.histogramCalls[0]!.style.color).toBe(SIGN_STYLE.color);
+  });
+});
+
+describe("renderPlot: fill_between direction consumption (band/cloud)", () => {
+  const DIRECTION_STYLE: IndicatorStyleOutput = { output: "upper", color: "#888", lineWidth: 1, visible: true, aboveColor: "#0f0", belowColor: "#f00" };
+
+  it("above and below segments are passed to drawPolygon with different colors (currently the same style)", () => {
+    const target = spyTarget();
+    const series = new Map([
+      ["upper", [
+        { time: 1, value: 100 },
+        { time: 2, value: 120 },
+        { time: 3, value: 90 },
+      ]],
+      ["lower", [
+        { time: 1, value: 110 },
+        { time: 2, value: 110 },
+        { time: 3, value: 110 },
+      ]],
+    ]);
+    renderPlot(spec({ kind: "band", fill_between: "lower" }), "upper", series, IDENTITY_PROJECTION, DIRECTION_STYLE, target);
+
+    expect(target.polygonCalls.length).toBeGreaterThanOrEqual(2);
+    const colors = new Set(target.polygonCalls.map((c) => c.style.color));
+    expect(colors.size).toBeGreaterThan(1);
+  });
+
+  it("a segment with direction=equal is skipped (not drawn), fixed by this test", () => {
+    const target = spyTarget();
+    const flat = [
+      { time: 1, value: 100 },
+      { time: 2, value: 100 },
+    ];
+    const series = new Map([
+      ["upper", flat],
+      ["lower", flat],
+    ]);
+    renderPlot(spec({ kind: "cloud", fill_between: "lower" }), "upper", series, IDENTITY_PROJECTION, DIRECTION_STYLE, target);
+
+    expect(target.polygonCalls).toHaveLength(0);
   });
 });
 

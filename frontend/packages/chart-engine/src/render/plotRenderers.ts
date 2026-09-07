@@ -28,6 +28,8 @@ export type DefaultPane = "price" | "separate";
 const PLOT_KINDS: ReadonlySet<string> = new Set<PlotKind>(["line", "histogram", "area", "band", "cloud", "marker"]);
 const SCALE_HINTS: ReadonlySet<string> = new Set<ScaleHint>(["own", "overlay", "percent", "log", "inverted"]);
 const DEFAULT_PANES: ReadonlySet<string> = new Set<DefaultPane>(["price", "separate"]);
+/** Only value backend `specs_talib.py`/`generate_specs.py` actually emit today — the frontend never invents a new rule. */
+const COLOR_RULES: ReadonlySet<string> = new Set<string>(["sign"]);
 
 /** Mirrors backend `PlotSpec` (`src/core/indicators/spec.py`) field-for-field. */
 export interface PlotSpec {
@@ -101,12 +103,16 @@ export function decodePlotSpec(raw: unknown): PlotSpec {
   if (precisionRaw !== null && precisionRaw !== undefined && (typeof precisionRaw !== "number" || precisionRaw < 0)) {
     throw new PlotRenderError("PLOT_RENDER_INVALID_SPEC", "precision must be a non-negative number or null");
   }
+  const colorRule = decodeNullableString(raw.color_rule, "color_rule");
+  if (colorRule !== null && !COLOR_RULES.has(colorRule)) {
+    throw new PlotRenderError("PLOT_RENDER_INVALID_SPEC", `unknown PlotSpec.color_rule: ${JSON.stringify(colorRule)}`);
+  }
   return {
     kind: kind as PlotKind,
     scale: scale as ScaleHint,
     default_pane: defaultPane as DefaultPane,
     fill_between: decodeNullableString(raw.fill_between, "fill_between"),
-    color_rule: decodeNullableString(raw.color_rule, "color_rule"),
+    color_rule: colorRule,
     precision: precisionRaw === undefined ? null : (precisionRaw as number | null),
     legend_format: decodeNullableString(raw.legend_format, "legend_format"),
   };
@@ -197,7 +203,13 @@ function drawFill(
     );
   }
   const segments = computeFillSegments(points, targetSeries);
-  for (const segment of segments) target.drawPolygon(projectSegment(segment, projection), style);
+  for (const segment of segments) {
+    // An "equal" stretch is a zero-width crossing sliver, not a real fill region — skip it rather
+    // than drawing a degenerate polygon (fixed by test, ADR-2026-09-07-A).
+    if (segment.direction === "equal") continue;
+    const color = segment.direction === "above" ? (style.aboveColor ?? style.color) : (style.belowColor ?? style.color);
+    target.drawPolygon(projectSegment(segment, projection), { ...style, color });
+  }
 }
 
 /**
@@ -229,12 +241,19 @@ export function renderPlot(
     case "area":
       target.drawArea(pixelPoints, projection.priceToY(0), style);
       return;
-    case "histogram":
-      target.drawHistogram(
-        pixelPoints.map((p) => ({ x: p.x, y: p.y, baselineY: projection.priceToY(0) })),
-        style,
-      );
+    case "histogram": {
+      const bars = pixelPoints.map((p) => ({ x: p.x, y: p.y, baselineY: projection.priceToY(0) }));
+      if (spec.color_rule === "sign") {
+        const upBars: HistogramBar[] = [];
+        const downBars: HistogramBar[] = [];
+        points.forEach((point, i) => (point.value < 0 ? downBars : upBars).push(bars[i]!));
+        if (upBars.length > 0) target.drawHistogram(upBars, { ...style, color: style.upColor ?? style.color });
+        if (downBars.length > 0) target.drawHistogram(downBars, { ...style, color: style.downColor ?? style.color });
+      } else {
+        target.drawHistogram(bars, style);
+      }
       return;
+    }
     case "marker":
       target.drawMarker(pixelPoints, style);
       return;

@@ -86,6 +86,19 @@ export interface IndicatorStyleOutput {
   readonly color: string;
   readonly lineWidth: number;
   readonly visible: boolean;
+  /**
+   * Direction/sign color overrides consumed by `render/plotRenderers.ts` (CH-15,
+   * task-2028) — chart-engine-owned, not part of backend `PlotSpec` (spec.py
+   * has no color fields, ADR-2026-09-06-C D2). Unspecified falls back to
+   * `color`, so existing callers that only set `color` are unaffected.
+   */
+  readonly upColor?: string;
+  /** `PlotSpec.color_rule === "sign"` histogram bar color when the value is negative. */
+  readonly downColor?: string;
+  /** `fill_between` polygon color for a segment where this output's series sits above its partner. */
+  readonly aboveColor?: string;
+  /** `fill_between` polygon color for a segment where this output's series sits below its partner. */
+  readonly belowColor?: string;
 }
 
 export interface IndicatorStyle {
@@ -257,8 +270,26 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
 /** Plain-JSON-safe encoding for persistence (CH-8 `layout/persistence.ts` layoutState payloads). */
 export function encodeIndicatorStyle(style: IndicatorStyle): Record<string, unknown> {
   return {
-    outputs: style.outputs.map((o) => ({ output: o.output, color: o.color, lineWidth: o.lineWidth, visible: o.visible })),
+    outputs: style.outputs.map((o) => ({
+      output: o.output,
+      color: o.color,
+      lineWidth: o.lineWidth,
+      visible: o.visible,
+      ...(o.upColor !== undefined ? { upColor: o.upColor } : {}),
+      ...(o.downColor !== undefined ? { downColor: o.downColor } : {}),
+      ...(o.aboveColor !== undefined ? { aboveColor: o.aboveColor } : {}),
+      ...(o.belowColor !== undefined ? { belowColor: o.belowColor } : {}),
+    })),
   };
+}
+
+function decodeOptionalColor(item: Record<string, unknown>, field: string, index: number): string | undefined {
+  const value = item[field];
+  if (value === undefined) return undefined;
+  if (typeof value !== "string") {
+    throw new IndicatorPluginError("INDICATOR_PLUGIN_INVALID", "(style)", `malformed style output at index ${index}: "${field}" must be a string`);
+  }
+  return value;
 }
 
 // Fail-closed, no silent fallback (matches OverlayRegistryError/PaneModelError
@@ -278,7 +309,16 @@ export function decodeIndicatorStyle(raw: unknown): IndicatorStyle {
     ) {
       throw new IndicatorPluginError("INDICATOR_PLUGIN_INVALID", "(style)", `malformed style output at index ${index}`);
     }
-    return { output: item.output, color: item.color, lineWidth: item.lineWidth, visible: item.visible };
+    return {
+      output: item.output,
+      color: item.color,
+      lineWidth: item.lineWidth,
+      visible: item.visible,
+      upColor: decodeOptionalColor(item, "upColor", index),
+      downColor: decodeOptionalColor(item, "downColor", index),
+      aboveColor: decodeOptionalColor(item, "aboveColor", index),
+      belowColor: decodeOptionalColor(item, "belowColor", index),
+    };
   });
   return { outputs };
 }
