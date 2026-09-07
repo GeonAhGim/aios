@@ -43,6 +43,7 @@ import {
   type OverlayPlotSpecOverrides,
   type OverlaySeriesByOutput,
 } from "./ChartPlotLayer";
+import { useWiredCandleRenderer } from "./useVisibleCandles";
 
 const MAIN_PANE_ID = "main";
 const SURFACE_WIDTH_PX = 600;
@@ -183,6 +184,11 @@ export function ChartPanes({
   const rects = computePaneRects(paneModel.panes, totalHeight);
   const paneById = useMemo(() => new Map(paneModel.panes.map((p) => [p.id, p] as const)), [paneModel]);
 
+  // CH-19c: cap the candle count reaching the render path at the surface's own
+  // pixel budget (render/lod·render/viewport dispatch: useVisibleCandles.ts).
+  const candleViewport = { startTime: candles[0]?.openTimeMs ?? 0, endTime: candles[candles.length - 1]?.openTimeMs ?? 0 };
+  const mainContent = useWiredCandleRenderer(children, candles, { viewport: candleViewport, targetPixelWidth: SURFACE_WIDTH_PX });
+
   // CH-15b: one time scale (candle domain) and one price scale per pane
   // (candle range for main, that pane's own series range for sub-panes) —
   // both are CH-1b `core/priceScale.ts`/`timeScale.ts` with no backend, i.e.
@@ -234,7 +240,7 @@ export function ChartPanes({
                 }
                 onMouseLeave={() => crosshair.hide()}
               >
-                {isMain ? children : (
+                {isMain ? mainContent : (
                   <p className="p-2 text-xs text-fg-muted">서브패널 · {overlayIdFromSubPaneId(pane.id)}</p>
                 )}
               </div>

@@ -2,11 +2,23 @@ import "@testing-library/jest-dom/vitest";
 import type { StreamCandle } from "@aios/chart-engine/src/data/candleStream";
 import type { OverlayEntry } from "@aios/chart-engine/src/indicators/overlayRegistry";
 import type { PlotSeriesPoint } from "@aios/chart-engine/src/render/plotRenderers";
+import { CandlestickChart } from "@aios/ui-web";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { useState } from "react";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { ChartPanes } from "./ChartPanes";
 import type { OverlayPlotSpecOverrides, OverlaySeriesByOutput } from "./ChartPlotLayer";
+
+// CandlesPage.test.tsx/ChartPage.test.tsx의 관용과 동일 — lightweight-charts는
+// jsdom에서 canvas를 요구하므로 실 렌더러 대신 전달받은 data.length만 노출하는
+// 스텁으로 바꾼다. CH-19c 배선 증명 테스트가 이 스텁이 실제로 받는 데이터를 읽는다.
+vi.mock("@aios/ui-web", async () => {
+  const actual = await vi.importActual<typeof import("@aios/ui-web")>("@aios/ui-web");
+  return {
+    ...actual,
+    CandlestickChart: ({ data }: { data: unknown[] }) => <div data-testid="candlestick-chart">캔들 {data.length}개</div>,
+  };
+});
 
 afterEach(cleanup);
 
@@ -173,5 +185,26 @@ describe("ChartPanes — CH-15b: PlotSpec-driven dispatch, no screen-code change
     const banner = screen.getByTestId("chart-pane-plot-error-sub-WEIRD");
     expect(banner).toHaveTextContent("PLOT_RENDER_UNKNOWN_KIND");
     expect(screen.getByTestId("chart-pane-plot-sub-WEIRD").querySelector("polyline")).toBeNull();
+  });
+});
+
+function denseCandles(count: number): StreamCandle[] {
+  return Array.from({ length: count }, (_, i) => candle(i));
+}
+
+describe("ChartPanes — CH-19c render/lod·render/viewport wiring", () => {
+  it("the mounted CandlestickChart receives a downsampled series, not the full 5,000-candle input", () => {
+    const dense = denseCandles(5000);
+    const placeholderData = new Array(5000).fill(0);
+
+    render(
+      <ChartPanes candles={dense} mainOverlays={[]} subOverlays={[]} drawings={[]} onRemoveSubOverlay={() => {}}>
+        <CandlestickChart data={placeholderData as never} />
+      </ChartPanes>,
+    );
+
+    const shown = Number(screen.getByTestId("candlestick-chart").textContent?.match(/\d+/)?.[0]);
+    expect(shown).toBeGreaterThan(0);
+    expect(shown).toBeLessThan(5000);
   });
 });
