@@ -203,6 +203,7 @@ extend-immutable-calls = ["fastapi.Depends", "fastapi.Query", "fastapi.Path", "f
 "src/foundation/ledger/application/purchase_flow.py" = ["ARG001", "S101"]
 "src/foundation/ledger/application/scheduler.py" = ["S101"]
 "src/foundation/ledger/domain/chart_of_accounts.py" = ["S101"]
+"src/foundation/mandates/adapters/postgres_policy_repository.py" = ["S101"]
 "src/foundation/mandates/adapters/postgres_repository.py" = ["S101"]
 "src/foundation/mandates/application/evaluate_policy.py" = ["S101"]
 "src/foundation/market_data/application/scheduler.py" = ["S101"]

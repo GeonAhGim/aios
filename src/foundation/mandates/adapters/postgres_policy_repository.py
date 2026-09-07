@@ -48,17 +48,28 @@ class PostgresPolicyRepositoryMixin:
     _pool: asyncpg.Pool
 
     async def insert_policy_bundle(self, bundle: PolicyBundle) -> PolicyBundle:
+        """`policy_bundle`은 이제 전체 행 WORM이다(`c6a3d8f14b92`) — 동시 삽입
+        경쟁에서 진 쪽을 위한 upsert도 그 행에 UPDATE를 실행할 수 없다.
+        `DO NOTHING`으로 충돌을 흡수하고(트리거를 아예 건드리지 않음), 승자의
+        행을 `RETURNING`이 아니라 별도 SELECT로 다시 읽는다 — 105번 §2.2
+        "UNIQUE 제약이 단일 소유자를 보장" 패턴과 동일하게, 진 쪽은 항상
+        승자가 쓴 행을 그대로 읽는다."""
         async with self._pool.acquire() as conn:
             row = await conn.fetchrow(
                 "INSERT INTO policy_bundle (mandate_revision_id, compiler_version, rule_hash) "
                 "VALUES ($1, $2, $3) "
-                "ON CONFLICT (mandate_revision_id) DO UPDATE SET mandate_revision_id = "
-                "EXCLUDED.mandate_revision_id "
+                "ON CONFLICT (mandate_revision_id) DO NOTHING "
                 "RETURNING *",
                 bundle.mandate_revision_id,
                 bundle.compiler_version,
                 bundle.rule_hash,
             )
+            if row is None:
+                row = await conn.fetchrow(
+                    "SELECT * FROM policy_bundle WHERE mandate_revision_id = $1",
+                    bundle.mandate_revision_id,
+                )
+                assert row is not None
         return _row_to_bundle(row)
 
     async def get_bundle_for_revision(self, revision_id: UUID) -> PolicyBundle | None:
