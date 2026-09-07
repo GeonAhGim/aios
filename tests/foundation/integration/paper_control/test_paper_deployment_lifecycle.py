@@ -43,7 +43,7 @@ from src.foundation.paper_control.domain.rules import InvalidProvenanceError
 from src.foundation.risk_gate.adapters.postgres_repository import PostgresRiskGateRepository
 from src.foundation.trust.adapters.postgres_repository import PostgresTrustRepository
 from tests.foundation.integration.risk_gate.conftest import activate_mandate_with_defaults
-from tests.integration.conftest import create_test_user
+from tests.integration.conftest import create_test_tenant
 
 
 def _asyncpg_dsn() -> str:
@@ -86,7 +86,7 @@ def risk_repo(pool):
 
 
 async def _tenant_with_mandate(pool, mandate_repo, trust_repo):
-    tenant_id = await create_test_user(pool)
+    tenant_id = await create_test_tenant(pool)
     await activate_mandate_with_defaults(mandate_repo, trust_repo, tenant_id=tenant_id)
     return tenant_id
 
@@ -111,7 +111,7 @@ async def _request(repo, mandate_repo, tenant_id, *, key_suffix="", **overrides)
 
 
 async def test_request_without_active_mandate_raises(pool, repo, mandate_repo):
-    tenant_id = await create_test_user(pool)
+    tenant_id = await create_test_tenant(pool)
     with pytest.raises(NoActiveMandateError):
         await _request(repo, mandate_repo, tenant_id)
 

@@ -27,7 +27,7 @@ from src.foundation.reconciliation.domain.models import (
     RunState,
 )
 from src.foundation.reconciliation.projections import build_reconciliation_state_list_view
-from tests.integration.conftest import create_test_user
+from tests.integration.conftest import create_test_tenant
 
 
 def _asyncpg_dsn() -> str:
@@ -87,8 +87,8 @@ async def _seed_material_mismatch(repo, tenant_id):
 
 
 async def test_cannot_resolve_another_tenants_reconciliation_state(pool, repo):
-    owner_id = await create_test_user(pool)
-    attacker_id = await create_test_user(pool)
+    owner_id = await create_test_tenant(pool)
+    attacker_id = await create_test_tenant(pool)
     await _seed_material_mismatch(repo, owner_id)
 
     with pytest.raises(CrossTenantReconciliationAccessError):
@@ -105,8 +105,8 @@ async def test_cannot_resolve_another_tenants_reconciliation_state(pool, repo):
 
 
 async def test_state_list_view_never_includes_another_tenants_state(pool, repo):
-    tenant_a = await create_test_user(pool)
-    tenant_b = await create_test_user(pool)
+    tenant_a = await create_test_tenant(pool)
+    tenant_b = await create_test_tenant(pool)
     await _seed_material_mismatch(repo, tenant_a)
 
     view_b = await build_reconciliation_state_list_view(repo, tenant_b)

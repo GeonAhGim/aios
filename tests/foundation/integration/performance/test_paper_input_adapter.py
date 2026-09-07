@@ -20,7 +20,7 @@ from tests.foundation.integration.performance.conftest import (
     insert_position,
     set_reconciliation_state,
 )
-from tests.integration.conftest import create_test_user
+from tests.integration.conftest import create_test_tenant
 
 _NOW = datetime.now(timezone.utc)
 _PERIOD_START = _NOW - timedelta(days=1)
@@ -32,7 +32,7 @@ def adapter(pool):
 
 
 async def test_load_reconciled_snapshots_raises_when_never_reconciled(pool, adapter):
-    user_id = await create_test_user(pool)
+    user_id = await create_test_tenant(pool)
 
     with pytest.raises(UnreconciledInputError) as exc_info:
         await adapter.load_reconciled_snapshots(
@@ -42,7 +42,7 @@ async def test_load_reconciled_snapshots_raises_when_never_reconciled(pool, adap
 
 
 async def test_load_reconciled_snapshots_raises_when_material_mismatch(pool, adapter):
-    user_id = await create_test_user(pool)
+    user_id = await create_test_tenant(pool)
     await set_reconciliation_state(pool, user_id, aggregate_status="MATERIAL_MISMATCH")
 
     with pytest.raises(UnreconciledInputError):
@@ -52,7 +52,7 @@ async def test_load_reconciled_snapshots_raises_when_material_mismatch(pool, ada
 
 
 async def test_load_reconciled_snapshots_returns_snapshot_when_healthy(pool, adapter):
-    user_id = await create_test_user(pool)
+    user_id = await create_test_tenant(pool)
     await set_reconciliation_state(pool, user_id, aggregate_status="HEALTHY")
     execution_id = await create_paper_execution(
         pool, user_id, allocated_capital=Decimal("1000")
@@ -84,7 +84,7 @@ async def test_load_reconciled_snapshots_returns_snapshot_when_healthy(pool, ada
 
 
 async def test_load_reconciled_snapshots_resolved_status_is_trusted(pool, adapter):
-    user_id = await create_test_user(pool)
+    user_id = await create_test_tenant(pool)
     await set_reconciliation_state(pool, user_id, aggregate_status="RESOLVED")
 
     snapshots = await adapter.load_reconciled_snapshots(
@@ -94,7 +94,7 @@ async def test_load_reconciled_snapshots_resolved_status_is_trusted(pool, adapte
 
 
 async def test_load_fills_returns_only_filled_paper_orders(pool, adapter):
-    user_id = await create_test_user(pool)
+    user_id = await create_test_tenant(pool)
     execution_id = await create_paper_execution(pool, user_id)
     await insert_filled_order(
         pool, user_id, execution_id, average_fill_price=Decimal("123.45"),
@@ -113,7 +113,7 @@ async def test_load_fills_returns_only_filled_paper_orders(pool, adapter):
 
 
 async def test_load_cashflows_returns_allocated_capital_as_deposit(pool, adapter):
-    user_id = await create_test_user(pool)
+    user_id = await create_test_tenant(pool)
     started_at = _NOW - timedelta(hours=2)
     await create_paper_execution(
         pool, user_id, allocated_capital=Decimal("500"), started_at=started_at

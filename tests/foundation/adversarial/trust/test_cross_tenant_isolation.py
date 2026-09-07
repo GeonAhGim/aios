@@ -19,7 +19,7 @@ from src.foundation.trust.application.revoke_consent import (
 from src.foundation.trust.contracts.v1 import TenantContext
 from src.foundation.trust.projections import build_trust_status_view
 from tests.foundation.integration.trust.conftest import create_disclosure, unique_purpose
-from tests.integration.conftest import create_test_user
+from tests.integration.conftest import create_test_tenant
 
 
 def _asyncpg_dsn() -> str:
@@ -42,7 +42,7 @@ def repo(pool):
 
 
 async def _context_for(pool) -> TenantContext:
-    user_id = await create_test_user(pool)
+    user_id = await create_test_tenant(pool)
     return TenantContext(tenant_id=user_id, subject_id=user_id, role="OWNER", mfa_verified=False)
 
 

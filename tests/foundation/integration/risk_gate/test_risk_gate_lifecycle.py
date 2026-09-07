@@ -40,7 +40,7 @@ from src.foundation.risk_gate.application.evaluate_risk_gate import evaluate_ris
 from src.foundation.risk_gate.domain.models import GateKind, SafetyScope
 from src.foundation.trust.adapters.postgres_repository import PostgresTrustRepository
 from tests.foundation.integration.risk_gate.conftest import activate_mandate_with_defaults
-from tests.integration.conftest import create_test_user
+from tests.integration.conftest import create_test_tenant
 
 
 class _FakeHealthyConnectionRepo:
@@ -115,7 +115,7 @@ def audit_repo(pool):
 
 
 async def _tenant(pool):
-    return await create_test_user(pool)
+    return await create_test_tenant(pool)
 
 
 async def test_evaluate_denies_when_no_active_mandate(pool, repo, mandate_repo, connection_repo):

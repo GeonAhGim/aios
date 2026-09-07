@@ -47,7 +47,7 @@ from src.foundation.connections.ports.provider import (
 )
 from src.foundation.trust.adapters.postgres_repository import PostgresTrustRepository
 from tests.foundation.integration.connections.conftest import grant_account_read_consent
-from tests.integration.conftest import create_test_user
+from tests.integration.conftest import create_test_tenant
 
 ENCRYPTION_KEY = "22" * 32
 
@@ -77,7 +77,7 @@ def trust_repo(pool):
 
 
 async def _tenant(pool):
-    return await create_test_user(pool)
+    return await create_test_tenant(pool)
 
 
 async def _begin(pool, repo, trust_repo, tenant_id, *, scopes=None):

@@ -11,7 +11,7 @@ from dotenv import dotenv_values
 from src.foundation.evidence.adapters.postgres_repository import PostgresAuditEventRepository
 from src.foundation.evidence.domain.models import Classification, Outcome
 from src.foundation.evidence.domain.rules import compute_payload_hash
-from tests.integration.conftest import create_test_user
+from tests.integration.conftest import create_test_tenant
 
 
 def _asyncpg_dsn() -> str:
@@ -53,7 +53,7 @@ async def _append_in(repo, conn, tenant_id, **overrides):
 
 
 async def test_event_visible_after_external_transaction_commits(pool, repo):
-    tenant_id = await create_test_user(pool)
+    tenant_id = await create_test_tenant(pool)
     async with pool.acquire() as conn, conn.transaction():
         event = await _append_in(repo, conn, tenant_id)
 
@@ -66,7 +66,7 @@ async def test_event_visible_after_external_transaction_commits(pool, repo):
 async def test_event_disappears_when_external_transaction_rolls_back(pool, repo):
     """DoD: "외부 트랜잭션 롤백 시 이벤트도 사라짐" — append_event_in이 자체
     커넥션·트랜잭션을 열어 몰래 커밋해버리면 이 테스트가 실패한다."""
-    tenant_id = await create_test_user(pool)
+    tenant_id = await create_test_tenant(pool)
 
     class _BoomError(Exception):
         pass
@@ -81,7 +81,7 @@ async def test_event_disappears_when_external_transaction_rolls_back(pool, repo)
 
 
 async def test_second_event_in_same_external_transaction_links_to_first(pool, repo):
-    tenant_id = await create_test_user(pool)
+    tenant_id = await create_test_tenant(pool)
     async with pool.acquire() as conn, conn.transaction():
         first = await _append_in(repo, conn, tenant_id)
         second = await _append_in(repo, conn, tenant_id)
@@ -93,7 +93,7 @@ async def test_second_event_in_same_external_transaction_links_to_first(pool, re
 async def test_append_event_still_works_standalone_after_refactor(pool, repo):
     """append_event()가 append_event_in()을 내부에서 호출하도록 바뀐 뒤에도
     기존 공개 계약(자체 트랜잭션으로 즉시 커밋)이 유지되는지 확인한다."""
-    tenant_id = await create_test_user(pool)
+    tenant_id = await create_test_tenant(pool)
     payload = {"k": "v"}
     event = await repo.append_event(
         tenant_id=tenant_id,

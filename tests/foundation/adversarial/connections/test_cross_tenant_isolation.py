@@ -27,7 +27,7 @@ from src.foundation.connections.domain.models import (
 from src.foundation.connections.projections import build_connection_list_view
 from src.foundation.trust.adapters.postgres_repository import PostgresTrustRepository
 from tests.foundation.integration.connections.conftest import grant_account_read_consent
-from tests.integration.conftest import create_test_user
+from tests.integration.conftest import create_test_tenant
 
 ENCRYPTION_KEY = "22" * 32
 
@@ -74,8 +74,8 @@ async def _owned_connection(pool, repo, trust_repo, owner_id):
 
 
 async def test_cannot_confirm_another_tenants_connection(pool, repo, trust_repo):
-    owner_id = await create_test_user(pool)
-    attacker_id = await create_test_user(pool)
+    owner_id = await create_test_tenant(pool)
+    attacker_id = await create_test_tenant(pool)
     owned = await _owned_connection(pool, repo, trust_repo, owner_id)
 
     provider = FakeReadonlyAccountProvider()
@@ -93,8 +93,8 @@ async def test_cannot_confirm_another_tenants_connection(pool, repo, trust_repo)
 
 
 async def test_cannot_revoke_another_tenants_connection(pool, repo, trust_repo):
-    owner_id = await create_test_user(pool)
-    attacker_id = await create_test_user(pool)
+    owner_id = await create_test_tenant(pool)
+    attacker_id = await create_test_tenant(pool)
     owned = await _owned_connection(pool, repo, trust_repo, owner_id)
     provider = FakeReadonlyAccountProvider()
     await confirm_connection(
@@ -109,8 +109,8 @@ async def test_cannot_revoke_another_tenants_connection(pool, repo, trust_repo):
 
 
 async def test_cannot_sync_another_tenants_connection(pool, repo, trust_repo):
-    owner_id = await create_test_user(pool)
-    attacker_id = await create_test_user(pool)
+    owner_id = await create_test_tenant(pool)
+    attacker_id = await create_test_tenant(pool)
     owned = await _owned_connection(pool, repo, trust_repo, owner_id)
     provider = FakeReadonlyAccountProvider()
     await confirm_connection(
@@ -127,7 +127,7 @@ async def test_nonexistent_connection_raises_not_found_not_cross_tenant(pool, re
     """존재하지 않는 connection과 "다른 tenant 소유" connection은 라우터
     레벨에서 둘 다 404로 통일되지만, 서비스 레벨에서는 구분된다(존재 자체를
     흘리지 않는 것과, 아예 없는 것을 섞지 않기 위함)."""
-    tenant_id = await create_test_user(pool)
+    tenant_id = await create_test_tenant(pool)
     provider = FakeReadonlyAccountProvider()
     with pytest.raises(ConnectionNotFoundError):
         await confirm_connection(
@@ -142,8 +142,8 @@ async def test_nonexistent_connection_raises_not_found_not_cross_tenant(pool, re
 async def test_connection_list_view_never_includes_another_tenants_connection(
     pool, repo, trust_repo
 ):
-    tenant_a = await create_test_user(pool)
-    tenant_b = await create_test_user(pool)
+    tenant_a = await create_test_tenant(pool)
+    tenant_b = await create_test_tenant(pool)
     await _owned_connection(pool, repo, trust_repo, tenant_a)
 
     view_b = await build_connection_list_view(repo, tenant_b)
@@ -157,8 +157,8 @@ async def test_transition_connection_state_rejects_mismatched_tenant_at_repo_lay
     """task-1718 P0-E — 애플리케이션 계층의 tenant 검사를 우회해 리포지토리
     공개 메서드를 직접(attacker의 tenant_id로) 호출해도, 그 자체가
     독립적으로 거부돼야 한다(테스트 전용 헬퍼가 아니라 운영 경로 증명)."""
-    owner_id = await create_test_user(pool)
-    attacker_id = await create_test_user(pool)
+    owner_id = await create_test_tenant(pool)
+    attacker_id = await create_test_tenant(pool)
     owned = await _owned_connection(pool, repo, trust_repo, owner_id)
 
     with pytest.raises(ConcurrencyConflictError):
@@ -176,8 +176,8 @@ async def test_transition_connection_state_rejects_mismatched_tenant_at_repo_lay
 async def test_persist_snapshot_if_syncable_rejects_mismatched_tenant_at_repo_layer(
     pool, repo, trust_repo
 ):
-    owner_id = await create_test_user(pool)
-    attacker_id = await create_test_user(pool)
+    owner_id = await create_test_tenant(pool)
+    attacker_id = await create_test_tenant(pool)
     owned = await _owned_connection(pool, repo, trust_repo, owner_id)
     provider = FakeReadonlyAccountProvider()
     await confirm_connection(

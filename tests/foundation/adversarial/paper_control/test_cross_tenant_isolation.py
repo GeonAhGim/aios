@@ -20,7 +20,7 @@ from src.foundation.paper_control.application.request_deployment import request_
 from src.foundation.paper_control.projections import build_deployment_list_view
 from src.foundation.trust.adapters.postgres_repository import PostgresTrustRepository
 from tests.foundation.integration.risk_gate.conftest import activate_mandate_with_defaults
-from tests.integration.conftest import create_test_user
+from tests.integration.conftest import create_test_tenant
 
 
 def _asyncpg_dsn() -> str:
@@ -69,8 +69,8 @@ async def _owned_deployment(pool, repo, mandate_repo, trust_repo, owner_id):
 
 
 async def test_cannot_pause_another_tenants_deployment(pool, repo, mandate_repo, trust_repo):
-    owner_id = await create_test_user(pool)
-    attacker_id = await create_test_user(pool)
+    owner_id = await create_test_tenant(pool)
+    attacker_id = await create_test_tenant(pool)
     deployment = await _owned_deployment(pool, repo, mandate_repo, trust_repo, owner_id)
 
     with pytest.raises(CrossTenantDeploymentAccessError):
@@ -89,8 +89,8 @@ async def test_cannot_pause_another_tenants_deployment(pool, repo, mandate_repo,
 async def test_deployment_list_view_never_includes_another_tenants_deployment(
     pool, repo, mandate_repo, trust_repo
 ):
-    tenant_a = await create_test_user(pool)
-    tenant_b = await create_test_user(pool)
+    tenant_a = await create_test_tenant(pool)
+    tenant_b = await create_test_tenant(pool)
     await _owned_deployment(pool, repo, mandate_repo, trust_repo, tenant_a)
 
     view_b = await build_deployment_list_view(repo, tenant_b)
@@ -99,7 +99,7 @@ async def test_deployment_list_view_never_includes_another_tenants_deployment(
 
 
 async def test_pausing_nonexistent_deployment_raises_not_found(pool, repo):
-    tenant_id = await create_test_user(pool)
+    tenant_id = await create_test_tenant(pool)
     with pytest.raises(DeploymentNotFoundError):
         await pause_deployment(
             repo,

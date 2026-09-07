@@ -526,6 +526,9 @@ async def test_pos_account_duplicate_with_same_connection_rejected(raw_conn):
     """LB-8 DoD — UNIQUE(tenant_id, venue, connection_id) negative(실값):
     같은 (tenant_id, venue, connection_id) 삼중값은 거부되어야 한다."""
     tenant_id = await _insert_test_user(raw_conn)
+    # account_connection.tenant_id는 FA-0a batch A(ccfb229d760d) 이후 tenant(id)를
+    # FK한다 — users 행만으로는 부족하고 대응하는 tenant 행이 필요하다.
+    await raw_conn.execute("INSERT INTO tenant (id, kind) VALUES ($1, 'PERSONAL')", tenant_id)
     connection_id = await raw_conn.fetchval(
         "INSERT INTO account_connection "
         "(tenant_id, owner_subject_id, provider_code, opaque_account_ref, capability_profile) "

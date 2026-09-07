@@ -9,6 +9,12 @@ Spec: docs/specs/L4_platform_observability_tenancy_api_v1.0.md §2 M5,
 tenant_id 예외를 갖는 유일한 테이블)를 검증한다 — 나머지 6개는 같은 M5
 정책 생성 함수로 만들어진 동일한 형태의 정책이라 회귀 위험이 이 두 케이스와
 다르지 않다.
+
+FA-0a batch A(task-1814, ccfb229d760d)가 두 테이블의 tenant_id FK를
+`users(user_id)`에서 `tenant(id)`로 옮긴 뒤로는, `create_test_user`가
+만든 사용자에는 대응하는 `tenant` 행이 없어(PLT-26 백필은 그 리비전
+시점에 이미 있던 사용자만 대상) FK 위반이 난다 — 실제 INSERT가 필요한
+테스트는 `create_test_tenant`로 시드한다.
 """
 
 from __future__ import annotations
@@ -20,7 +26,7 @@ import pytest
 
 from src.core.db.tenant_scope import system_transaction, tenant_transaction
 from tests.foundation.integration.trust.conftest import create_disclosure, unique_purpose
-from tests.integration.conftest import create_test_user
+from tests.integration.conftest import create_test_tenant, create_test_user
 from tests.integration.core.db.conftest import AppRoleTx
 
 
@@ -79,8 +85,8 @@ async def test_system_transaction_binds_role_system(pool):
 
 
 async def test_select_without_where_returns_only_bound_tenant(pool):
-    tenant_a = await create_test_user(pool)
-    tenant_b = await create_test_user(pool)
+    tenant_a = await create_test_tenant(pool)
+    tenant_b = await create_test_tenant(pool)
     await _seed_consent(pool, tenant_a)
     await _seed_consent(pool, tenant_b)
 
@@ -92,7 +98,7 @@ async def test_select_without_where_returns_only_bound_tenant(pool):
 
 
 async def test_unbound_transaction_returns_nothing(pool):
-    tenant_a = await create_test_user(pool)
+    tenant_a = await create_test_tenant(pool)
     await _seed_consent(pool, tenant_a)
 
     async with pool.acquire() as conn, AppRoleTx(conn):
@@ -118,7 +124,7 @@ async def test_insert_for_other_tenant_is_rejected(pool):
 
 
 async def test_system_role_reads_null_tenant_audit_event_only(pool):
-    tenant_a = await create_test_user(pool)
+    tenant_a = await create_test_tenant(pool)
     await _seed_audit_event(pool, tenant_a, _sequence_no())
     await _seed_audit_event(pool, None, _sequence_no())
 
@@ -130,7 +136,7 @@ async def test_system_role_reads_null_tenant_audit_event_only(pool):
 
 
 async def test_ordinary_tenant_binding_excludes_null_tenant_audit_event(pool):
-    tenant_a = await create_test_user(pool)
+    tenant_a = await create_test_tenant(pool)
     await _seed_audit_event(pool, tenant_a, _sequence_no())
     await _seed_audit_event(pool, None, _sequence_no())
 

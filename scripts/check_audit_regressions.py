@@ -127,17 +127,52 @@ def check_xfail_in_gate_tests() -> Finding | None:
     return None
 
 
+_TENANT_FK_FIX_RE = re.compile(
+    # 인접 문자열 리터럴 이어붙이기(예: `"... " "FOREIGN KEY ..."`)가 소스 텍스트에는
+    # 따옴표·줄바꿈으로 나뉘어 있으므로 구분자에 공백 외에 따옴표도 허용한다.
+    r"ALTER TABLE\s+(\w+)\s+ADD CONSTRAINT\s+\S+[\s\"']+FOREIGN KEY\s*\(\s*tenant_id\s*\)[\s\"']*"
+    r"REFERENCES\s+tenant\s*\(",
+    re.I,
+)
+
+
+def _tables_fixed_by_fk_fix_migrations(paths: list[Path]) -> set[str]:
+    """`_fk_fix` 교정 마이그레이션이 tenant_id를 tenant(id)로 재연결한 테이블 이름 집합.
+
+    원본 CREATE TABLE 정의는 파일 텍스트를 소급 편집하지 않는 한 옛 문자열
+    (`REFERENCES users(...)`)을 영원히 담고 있으므로(a0e7e1454b60이 고친
+    e6b1d94a7c3f의 `legal_entity`가 실제로 그렇다), 교정된 테이블은 원본
+    파일 쪽에서 제외해야 이 검사가 "지금 실제로 열려 있는" 결함만 센다.
+    """
+    fixed: set[str] = set()
+    for p in paths:
+        if "_fk_fix" not in p.name:
+            continue
+        text = _read(p)
+        fixed.update(m.group(1) for m in _TENANT_FK_FIX_RE.finditer(text))
+    return fixed
+
+
 def check_tenant_fk_to_users() -> Finding | None:
     """FA-0a 양식 — tenant_id가 users를 FK하면 조직 테넌트 도입 시 전부 깨진다."""
     mig = ROOT / "src/db/migrations/versions"
+    paths = sorted(mig.glob("*.py"))
+    fixed_tables = _tables_fixed_by_fk_fix_migrations(paths)
+
     hits: list[str] = []
-    for p in sorted(mig.glob("*.py")):
-        text = _read(p)
+    for p in paths:
         # 교정 마이그레이션은 DROP/재생성 과정에서 옛 정의를 문자열로 담는다 — 파일명으로 제외한다.
         if "_fk_fix" in p.name:
             continue
+        text = _read(p)
+        current_table: str | None = None
         for i, line in enumerate(text.splitlines(), 1):
+            m = re.search(r"CREATE TABLE\s+(?:IF NOT EXISTS\s+)?(\w+)\s*\(", line, re.I)
+            if m:
+                current_table = m.group(1)
             if re.search(r"tenant_id[^,\n]*REFERENCES\s+users\s*\(", line, re.I):
+                if current_table is not None and current_table in fixed_tables:
+                    continue
                 hits.append(f"{p.relative_to(ROOT).as_posix()}:{i}")
     if hits:
         return Finding(

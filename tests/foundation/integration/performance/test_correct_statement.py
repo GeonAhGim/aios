@@ -28,7 +28,7 @@ from src.foundation.performance.application.get_statement import get_statement, 
 from src.foundation.performance.contracts.v1 import ComputeStatementCommand, StatementScope
 from src.foundation.performance.domain.models import StatementState
 from tests.foundation.integration.performance.conftest import set_reconciliation_state
-from tests.integration.conftest import create_test_user
+from tests.integration.conftest import create_test_tenant
 
 _NOW = datetime.now(timezone.utc)
 _PERIOD_START = _NOW - timedelta(days=1)
@@ -69,7 +69,7 @@ async def _compute(pool, repo, inputs, evidence_repo, user_id):
 async def test_correct_statement_creates_successor_and_preserves_original(
     pool, repo, inputs, evidence_repo
 ):
-    user_id = await create_test_user(pool)
+    user_id = await create_test_tenant(pool)
     original = await _compute(pool, repo, inputs, evidence_repo, user_id)
 
     corrected = await correct_statement(
@@ -106,8 +106,8 @@ async def test_correct_statement_not_found(repo, evidence_repo):
 
 
 async def test_correct_statement_cross_tenant_denied(pool, repo, inputs, evidence_repo):
-    owner_id = await create_test_user(pool)
-    other_id = await create_test_user(pool)
+    owner_id = await create_test_tenant(pool)
+    other_id = await create_test_tenant(pool)
     original = await _compute(pool, repo, inputs, evidence_repo, owner_id)
 
     with pytest.raises(CrossTenantStatementAccessError):
@@ -122,8 +122,8 @@ async def test_correct_statement_cross_tenant_denied(pool, repo, inputs, evidenc
 
 
 async def test_get_statement_cross_tenant_denied(pool, repo, inputs, evidence_repo):
-    owner_id = await create_test_user(pool)
-    other_id = await create_test_user(pool)
+    owner_id = await create_test_tenant(pool)
+    other_id = await create_test_tenant(pool)
     original = await _compute(pool, repo, inputs, evidence_repo, owner_id)
 
     with pytest.raises(GetCrossTenantError):
@@ -131,8 +131,8 @@ async def test_get_statement_cross_tenant_denied(pool, repo, inputs, evidence_re
 
 
 async def test_list_statements_scoped_to_tenant(pool, repo, inputs, evidence_repo):
-    owner_id = await create_test_user(pool)
-    other_id = await create_test_user(pool)
+    owner_id = await create_test_tenant(pool)
+    other_id = await create_test_tenant(pool)
     await _compute(pool, repo, inputs, evidence_repo, owner_id)
 
     others_view = await list_statements(repo, tenant_id=other_id)

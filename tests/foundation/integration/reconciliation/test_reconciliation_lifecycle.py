@@ -23,7 +23,7 @@ from src.foundation.reconciliation.application.resolve_reconciliation import (
 from src.foundation.reconciliation.application.run_reconciliation import run_reconciliation
 from src.foundation.reconciliation.contracts.v1 import EntitySnapshot
 from src.foundation.risk_gate.adapters.postgres_repository import PostgresRiskGateRepository
-from tests.integration.conftest import create_test_user
+from tests.integration.conftest import create_test_tenant
 
 
 def _asyncpg_dsn() -> str:
@@ -56,7 +56,7 @@ def risk_repo(pool):
 
 
 async def _tenant(pool):
-    return await create_test_user(pool)
+    return await create_test_tenant(pool)
 
 
 def _matching_entities() -> list[EntitySnapshot]:

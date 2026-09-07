@@ -14,7 +14,7 @@ from src.foundation.evidence.application.get_audit_timeline import get_audit_tim
 from src.foundation.evidence.application.verify_audit_chain import verify_audit_chain
 from src.foundation.evidence.contracts.v1 import Classification, Outcome, RecordAuditEventCommand
 from src.foundation.evidence.domain.rules import UnsafePayloadError
-from tests.integration.conftest import create_test_user
+from tests.integration.conftest import create_test_tenant
 
 
 def _asyncpg_dsn() -> str:
@@ -54,7 +54,7 @@ def _command(tenant_id, **overrides) -> RecordAuditEventCommand:
 
 
 async def test_first_event_has_no_previous_hash(pool, repo):
-    tenant_id = await create_test_user(pool)
+    tenant_id = await create_test_tenant(pool)
     view = await append_audit_event(repo, _command(tenant_id))
     assert view.sequence_no == 1
     assert view.previous_hash is None
@@ -62,7 +62,7 @@ async def test_first_event_has_no_previous_hash(pool, repo):
 
 
 async def test_second_event_links_to_first(pool, repo):
-    tenant_id = await create_test_user(pool)
+    tenant_id = await create_test_tenant(pool)
     first = await append_audit_event(repo, _command(tenant_id))
     second = await append_audit_event(repo, _command(tenant_id))
     assert second.sequence_no == 2
@@ -70,8 +70,8 @@ async def test_second_event_links_to_first(pool, repo):
 
 
 async def test_different_tenants_have_independent_chains(pool, repo):
-    tenant_a = await create_test_user(pool)
-    tenant_b = await create_test_user(pool)
+    tenant_a = await create_test_tenant(pool)
+    tenant_b = await create_test_tenant(pool)
     view_a = await append_audit_event(repo, _command(tenant_a))
     view_b = await append_audit_event(repo, _command(tenant_b))
     assert view_a.sequence_no == 1
@@ -79,7 +79,7 @@ async def test_different_tenants_have_independent_chains(pool, repo):
 
 
 async def test_unsafe_payload_key_is_rejected_end_to_end(pool, repo):
-    tenant_id = await create_test_user(pool)
+    tenant_id = await create_test_tenant(pool)
     with pytest.raises(UnsafePayloadError):
         await append_audit_event(
             repo, _command(tenant_id, payload={"password": "should-not-be-here"})
@@ -90,7 +90,7 @@ async def test_concurrent_appends_for_same_tenant_form_one_unbroken_chain(pool, 
     """AUD-003과 직결 — advisory lock이 없으면 동시 append가 같은
     previous_hash를 보고 분기(fork)할 수 있다. N개를 동시에 보내고 나서
     체인 전체가 검증 가능해야 한다(구멍도 분기도 없이 sequence_no 1..N)."""
-    tenant_id = await create_test_user(pool)
+    tenant_id = await create_test_tenant(pool)
     concurrency = 10
 
     await asyncio.gather(
@@ -103,14 +103,14 @@ async def test_concurrent_appends_for_same_tenant_form_one_unbroken_chain(pool, 
 
 
 async def test_verify_chain_passes_for_untampered_history(pool, repo):
-    tenant_id = await create_test_user(pool)
+    tenant_id = await create_test_tenant(pool)
     for _ in range(3):
         await append_audit_event(repo, _command(tenant_id))
     await verify_audit_chain(repo, tenant_id)
 
 
 async def test_timeline_pagination_and_filters(pool, repo):
-    tenant_id = await create_test_user(pool)
+    tenant_id = await create_test_tenant(pool)
     await append_audit_event(repo, _command(tenant_id, action="a"))
     await append_audit_event(repo, _command(tenant_id, action="b"))
     await append_audit_event(repo, _command(tenant_id, action="a"))

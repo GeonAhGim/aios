@@ -11,7 +11,7 @@ from src.foundation.evidence.adapters.postgres_repository import PostgresAuditEv
 from src.foundation.evidence.application.append_audit_event import append_audit_event
 from src.foundation.evidence.application.get_audit_timeline import get_audit_timeline
 from src.foundation.evidence.contracts.v1 import Outcome, RecordAuditEventCommand
-from tests.integration.conftest import create_test_user
+from tests.integration.conftest import create_test_tenant
 
 
 def _asyncpg_dsn() -> str:
@@ -34,8 +34,8 @@ def repo(pool):
 
 
 async def test_tenant_timeline_never_includes_another_tenants_events(pool, repo):
-    tenant_a = await create_test_user(pool)
-    tenant_b = await create_test_user(pool)
+    tenant_a = await create_test_tenant(pool)
+    tenant_b = await create_test_tenant(pool)
 
     await append_audit_event(
         repo,
@@ -59,7 +59,7 @@ async def test_tenant_timeline_never_includes_another_tenants_events(pool, repo)
 async def test_system_events_are_not_visible_in_any_tenant_timeline(pool, repo):
     """tenant_id=None(system) 체인은 어떤 사용자의 timeline에도 섞이지
     않는다 — 79번 §1 "system 이벤트"와 사용자 timeline은 서로 다른 체인."""
-    tenant_id = await create_test_user(pool)
+    tenant_id = await create_test_tenant(pool)
     await append_audit_event(
         repo,
         RecordAuditEventCommand(

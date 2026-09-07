@@ -24,7 +24,7 @@ from src.foundation.performance.domain.models import (
     ReturnFigure,
     StatementState,
 )
-from tests.integration.conftest import create_test_user
+from tests.integration.conftest import create_test_tenant
 
 _NOW = datetime.now(timezone.utc)
 
@@ -101,7 +101,7 @@ async def _statement(tenant_id, **overrides) -> PerformanceStatement:
 
 
 async def test_insert_and_get_statement_round_trips_decimal_precision(pool, repo):
-    tenant_id = await create_test_user(pool)
+    tenant_id = await create_test_tenant(pool)
     await repo.insert_methodology(DEFAULT_METHODOLOGY)
     statement = await _statement(tenant_id)
 
@@ -118,8 +118,8 @@ async def test_insert_and_get_statement_round_trips_decimal_precision(pool, repo
 
 
 async def test_list_statements_scoped_to_tenant(pool, repo):
-    tenant_a = await create_test_user(pool)
-    tenant_b = await create_test_user(pool)
+    tenant_a = await create_test_tenant(pool)
+    tenant_b = await create_test_tenant(pool)
     await repo.insert_methodology(DEFAULT_METHODOLOGY)
     await repo.insert_statement(await _statement(tenant_a))
 
@@ -129,7 +129,7 @@ async def test_list_statements_scoped_to_tenant(pool, repo):
 
 
 async def test_get_latest_statement_returns_highest_revision(pool, repo):
-    tenant_id = await create_test_user(pool)
+    tenant_id = await create_test_tenant(pool)
     await repo.insert_methodology(DEFAULT_METHODOLOGY)
     first_inserted = await repo.insert_statement(await _statement(tenant_id, revision_no=1))
     second = await _statement(
@@ -172,7 +172,7 @@ async def test_public_role_has_no_update_or_delete_grant_on_statement(pool):
 
 
 async def test_attribution_slices_persist_and_list_by_statement(pool, repo):
-    tenant_id = await create_test_user(pool)
+    tenant_id = await create_test_tenant(pool)
     await repo.insert_methodology(DEFAULT_METHODOLOGY)
     statement = await repo.insert_statement(await _statement(tenant_id))
 

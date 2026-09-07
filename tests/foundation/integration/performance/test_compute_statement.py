@@ -27,7 +27,7 @@ from tests.foundation.integration.performance.conftest import (
     insert_position,
     set_reconciliation_state,
 )
-from tests.integration.conftest import create_test_user
+from tests.integration.conftest import create_test_tenant
 
 _NOW = datetime.now(timezone.utc)
 _PERIOD_START = _NOW - timedelta(days=1)
@@ -60,7 +60,7 @@ def _cmd(scope_ref: str) -> ComputeStatementCommand:
 async def test_compute_statement_raises_when_unreconciled(pool, repo, inputs, evidence_repo):
     """PRF-002 계열 — 미리컨실 입력은 계산을 거부한다(라우터가 이 예외를 409로
     매핑한다)."""
-    user_id = await create_test_user(pool)
+    user_id = await create_test_tenant(pool)
 
     with pytest.raises(UnreconciledInputError):
         await compute_statement(
@@ -78,7 +78,7 @@ async def test_compute_statement_marks_missing_components_pending_not_zero(
 ):
     """PRF-002 — fee/slippage/funding/fx/estimated_tax는 원장에 없어 항상
     None(PENDING)이어야 한다. 0으로 대체하지 않는다."""
-    user_id = await create_test_user(pool)
+    user_id = await create_test_tenant(pool)
     await set_reconciliation_state(pool, user_id, aggregate_status="HEALTHY")
     execution_id = await create_paper_execution(pool, user_id, allocated_capital=Decimal("1000"))
     await insert_position(
@@ -110,7 +110,7 @@ async def test_compute_statement_marks_missing_components_pending_not_zero(
 async def test_compute_statement_second_call_increments_revision(
     pool, repo, inputs, evidence_repo
 ):
-    user_id = await create_test_user(pool)
+    user_id = await create_test_tenant(pool)
     await set_reconciliation_state(pool, user_id, aggregate_status="HEALTHY")
 
     first = await compute_statement(
@@ -126,7 +126,7 @@ async def test_compute_statement_second_call_increments_revision(
 
 
 async def test_compute_statement_persists_estimated_state(pool, repo, inputs, evidence_repo):
-    user_id = await create_test_user(pool)
+    user_id = await create_test_tenant(pool)
     await set_reconciliation_state(pool, user_id, aggregate_status="HEALTHY")
 
     view = await compute_statement(
