@@ -38,7 +38,7 @@ from src.foundation.trust.application.accept_disclosure import accept_disclosure
 from src.foundation.trust.contracts.v1 import TenantContext as TrustTenantContext
 from tests.foundation.integration.mandates.conftest import backdate_cooling_off, default_rules
 from tests.foundation.integration.trust.conftest import create_disclosure
-from tests.integration.conftest import create_test_user
+from tests.integration.conftest import create_test_tenant
 
 
 def _asyncpg_dsn() -> str:
@@ -71,7 +71,10 @@ def audit_repo(pool):
 
 
 async def _tenant(pool):
-    return await create_test_user(pool)
+    # task-2020 회귀 — FA-0a가 tenant_id FK를 users -> tenant로 옮긴 뒤,
+    # 이 파일의 activate_revision/pause_resume 경로가 쓰는
+    # consent_record/foundation_audit_event는 실제 tenant 행을 요구한다.
+    return await create_test_tenant(pool)
 
 
 _material_change_disclosure_revision_counter = int(time.time())

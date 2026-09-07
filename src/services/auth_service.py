@@ -33,7 +33,7 @@ from __future__ import annotations
 import re
 from collections.abc import Awaitable, Callable
 from datetime import datetime, timedelta, timezone
-from uuid import UUID
+from uuid import UUID, uuid4
 
 import asyncpg
 import jwt
@@ -42,6 +42,10 @@ from argon2.exceptions import VerifyMismatchError
 from pydantic import BaseModel
 
 from src.core.logging.audit_log import record_audit_log
+from src.foundation.trust.adapters.postgres_membership_repository import (
+    PostgresMembershipRepository,
+)
+from src.foundation.trust.domain.models import TenantKind
 from src.services.auth import lockout
 
 MIN_PASSWORD_LENGTH = 12
@@ -150,17 +154,26 @@ class AuthService:
                 "비밀번호는 최소 12자 이상이어야 하며 대소문자·숫자·특수문자를 포함해야 합니다."
             )
 
-        async with self._pool.acquire() as conn:
+        membership_repo = PostgresMembershipRepository(self._pool)
+        user_id = uuid4()
+        async with self._pool.acquire() as conn, conn.transaction():
             existing = await conn.fetchval("SELECT 1 FROM users WHERE email = $1", email)
             if existing is not None:
                 raise AuthError("이미 등록된 이메일입니다.")
 
             password_hash = _hasher.hash(password)
             row = await conn.fetchrow(
-                "INSERT INTO users (email, password_hash) VALUES ($1, $2) RETURNING *",
+                "INSERT INTO users (user_id, email, password_hash) VALUES ($1, $2, $3) "
+                "RETURNING *",
+                user_id,
                 email,
                 password_hash,
             )
+            # PLT-26/PLT-28 배선 — users 행과 그 PERSONAL tenant(id == user_id)를
+            # 같은 트랜잭션에 묶는다. 이게 없으면 로그인 이후 첫 foundation
+            # 쓰기(consent_record/foundation_audit_event/portfolio_mandate 등,
+            # 전부 tenant_id를 tenant(id)에 FK)가 즉시 ForeignKeyViolation난다.
+            await membership_repo.insert_tenant(conn, tenant_id=user_id, kind=TenantKind.PERSONAL)
         return _row_to_user(row)
 
     async def authenticate(
