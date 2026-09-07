@@ -1,4 +1,6 @@
-"""MandateRepository의 asyncpg 구현.
+"""MandateRepository의 asyncpg 구현 — portfolio_mandate/mandate_revision 절반.
+policy_bundle/policy_decision 절반은 `postgres_policy_repository.py`(P6 300줄
+상한으로 분리, PostgresPolicyRepositoryMixin)에 있다.
 
 Spec: AIOSproject 75번 §2/§4, 105번(동시성 표준).
 
@@ -21,13 +23,13 @@ import asyncpg
 
 from src.core.db.conditional_write import ConcurrencyConflictError, conditional_update
 from src.foundation.entities.domain.defaults import default_portfolio_id
+from src.foundation.mandates.adapters.postgres_policy_repository import (
+    PostgresPolicyRepositoryMixin,
+)
 from src.foundation.mandates.domain.models import (
     Autonomy,
     MandateRevision,
     MandateRevisionState,
-    PolicyBundle,
-    PolicyDecision,
-    PolicyOutcome,
     PortfolioMandate,
 )
 
@@ -62,32 +64,7 @@ def _row_to_revision(row: asyncpg.Record) -> MandateRevision:
     )
 
 
-def _row_to_bundle(row: asyncpg.Record) -> PolicyBundle:
-    return PolicyBundle(
-        id=row["id"],
-        mandate_revision_id=row["mandate_revision_id"],
-        compiler_version=row["compiler_version"],
-        rule_hash=row["rule_hash"],
-        created_at=row["created_at"],
-    )
-
-
-def _row_to_decision(row: asyncpg.Record) -> PolicyDecision:
-    return PolicyDecision(
-        id=row["id"],
-        tenant_id=row["tenant_id"],
-        bundle_id=row["bundle_id"],
-        command_type=row["command_type"],
-        command_fingerprint=row["command_fingerprint"],
-        outcome=PolicyOutcome(row["outcome"]),
-        reason_codes=tuple(row["reason_codes"]),
-        obligations=tuple(row["obligations"]),
-        evaluated_at=row["evaluated_at"],
-        expires_at=row["expires_at"],
-    )
-
-
-class PostgresMandateRepository:
+class PostgresMandateRepository(PostgresPolicyRepositoryMixin):
     def __init__(self, pool: asyncpg.Pool) -> None:
         self._pool = pool
 
@@ -256,58 +233,6 @@ class PostgresMandateRepository:
                     "activate할 수 없습니다."
                 )
         return _row_to_revision(activated_row)
-
-    async def insert_policy_bundle(self, bundle: PolicyBundle) -> PolicyBundle:
-        async with self._pool.acquire() as conn:
-            row = await conn.fetchrow(
-                "INSERT INTO policy_bundle (mandate_revision_id, compiler_version, rule_hash) "
-                "VALUES ($1, $2, $3) "
-                "ON CONFLICT (mandate_revision_id) DO UPDATE SET mandate_revision_id = "
-                "EXCLUDED.mandate_revision_id "
-                "RETURNING *",
-                bundle.mandate_revision_id,
-                bundle.compiler_version,
-                bundle.rule_hash,
-            )
-        return _row_to_bundle(row)
-
-    async def get_bundle_for_revision(self, revision_id: UUID) -> PolicyBundle | None:
-        async with self._pool.acquire() as conn:
-            row = await conn.fetchrow(
-                "SELECT * FROM policy_bundle WHERE mandate_revision_id = $1", revision_id
-            )
-        return _row_to_bundle(row) if row is not None else None
-
-    async def insert_policy_decision(self, decision: PolicyDecision) -> PolicyDecision:
-        async with self._pool.acquire() as conn:
-            row = await conn.fetchrow(
-                "INSERT INTO policy_decision "
-                "(tenant_id, bundle_id, command_type, command_fingerprint, outcome, "
-                " reason_codes, obligations, expires_at) "
-                "VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING *",
-                decision.tenant_id,
-                decision.bundle_id,
-                decision.command_type,
-                decision.command_fingerprint,
-                decision.outcome.value,
-                list(decision.reason_codes),
-                list(decision.obligations),
-                decision.expires_at,
-            )
-        return _row_to_decision(row)
-
-    async def get_cached_decision(
-        self, tenant_id: UUID, command_fingerprint: str
-    ) -> PolicyDecision | None:
-        async with self._pool.acquire() as conn:
-            row = await conn.fetchrow(
-                "SELECT * FROM policy_decision WHERE tenant_id = $1 AND command_fingerprint = $2 "
-                "AND (expires_at IS NULL OR expires_at > now()) "
-                "ORDER BY evaluated_at DESC LIMIT 1",
-                tenant_id,
-                command_fingerprint,
-            )
-        return _row_to_decision(row) if row is not None else None
 
 
 __all__ = ["PostgresMandateRepository", "ConcurrencyConflictError"]
