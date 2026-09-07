@@ -26,7 +26,7 @@ from uuid import UUID, uuid4
 from src.data.models.trading import OrderSide
 from src.services.oms.application.inbox_processor import InboxProcessor
 from src.services.oms.contracts.v1_events import FillEvent, ProviderOrderEvent
-from tests.integration.oms.conftest import create_test_user
+from tests.integration.oms.conftest import create_test_tenant
 
 _STORM_SIZE = 1000
 _WORKERS = 3
@@ -123,7 +123,7 @@ def _full_fill_event(
 
 
 async def test_1000_duplicate_deliveries_across_3_workers_produce_exactly_one_fill(pool):
-    user_id = await create_test_user(pool)
+    user_id = await create_test_tenant(pool)
     execution_id = await _seed_execution(pool, user_id)
     quantity = Decimal("5")
     exchange_order_id = f"ex-storm-{uuid4().hex}"

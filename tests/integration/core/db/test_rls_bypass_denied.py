@@ -22,7 +22,7 @@ import pytest
 
 from src.core.db.tenant_scope import tenant_transaction
 from tests.foundation.integration.trust.conftest import create_disclosure, unique_purpose
-from tests.integration.conftest import create_test_user
+from tests.integration.conftest import create_test_tenant, create_test_user
 from tests.integration.core.db.conftest import AppRoleTx
 
 
@@ -63,7 +63,7 @@ async def test_aios_app_cannot_create_permissive_bypass_policy(pool):
 
 
 async def test_tenant_transaction_guc_does_not_leak_to_next_transaction(pool):
-    tenant_a = await create_test_user(pool)
+    tenant_a = await create_test_tenant(pool)
     await _seed_consent(pool, tenant_a)
 
     async with tenant_transaction(pool, tenant_a) as conn:

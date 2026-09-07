@@ -30,7 +30,7 @@ from src.services.background_loops import BackgroundLoops
 from src.services.credential_resolver import CredentialNotFoundError
 from src.services.execution_loop.scheduler import ExecutionLoopScheduler
 from src.services.order_service.gate import GateDecision, GateOutcome, OrderContext
-from tests.integration.conftest import create_test_user
+from tests.integration.conftest import create_test_tenant
 from tests.integration.fake_exchange_adapter import FakeExchangeAdapter
 from tests.integration.test_execution_tick import _create_execution
 
@@ -77,7 +77,7 @@ def _scheduler(
 
 
 async def test_two_schedulers_ticking_same_execution_place_order_exactly_once(pool):
-    user_id = await create_test_user(pool)
+    user_id = await create_test_tenant(pool)
     execution_id = await _create_execution(pool, user_id, entry_threshold=100.0)
     # 같은 어댑터 인스턴스를 두 스케줄러 모두에 물려, 둘 중 정확히 한쪽만
     # 실제로 place_order를 호출했는지 하나의 카운터로 셀 수 있게 한다.
@@ -103,7 +103,7 @@ async def test_two_schedulers_ticking_same_execution_place_order_exactly_once(po
 async def test_background_loops_stop_releases_lease_for_immediate_reacquisition(pool):
     """§6 — `BackgroundLoops.stop()`은 TTL 만료를 기다리지 않고 즉시 리스를
     해제해, 다른 프로세스(owner_id)가 곧바로 인계받을 수 있어야 한다."""
-    user_id = await create_test_user(pool)
+    user_id = await create_test_tenant(pool)
     execution_id = await _create_execution(pool, user_id, entry_threshold=100.0)
     owner_id = f"stop-owner-{uuid.uuid4().hex[:8]}"
     lease_repo = PostgresExecutionLeaseRepository(pool)
