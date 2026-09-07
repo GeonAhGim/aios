@@ -1,0 +1,313 @@
+{
+  "TradeTick": {
+    "$defs": {
+      "Aggressor": {
+        "description": "Which side initiated the trade (crossed the spread). `UNKNOWN` covers\nvenues that do not disclose aggressor side on their public tick feed.",
+        "enum": [
+          "BUY",
+          "SELL",
+          "UNKNOWN"
+        ],
+        "title": "Aggressor",
+        "type": "string"
+      },
+      "Venue": {
+        "description": "세션 규칙(A3) 조회 키. KIS는 시장별로 캘린더가 달라 KRX/US를 분리한다.",
+        "enum": [
+          "BITGET",
+          "KIS_KRX",
+          "KIS_US",
+          "BINANCE",
+          "BYBIT",
+          "OKX",
+          "UPBIT"
+        ],
+        "title": "Venue",
+        "type": "string"
+      }
+    },
+    "description": "A single executed trade print.",
+    "properties": {
+      "instrument_id": {
+        "title": "Instrument Id",
+        "type": "string"
+      },
+      "venue": {
+        "$ref": "#/$defs/Venue"
+      },
+      "ts_event": {
+        "title": "Ts Event",
+        "type": "integer"
+      },
+      "ts_recv": {
+        "title": "Ts Recv",
+        "type": "integer"
+      },
+      "seq": {
+        "minimum": 0,
+        "title": "Seq",
+        "type": "integer"
+      },
+      "price": {
+        "anyOf": [
+          {
+            "type": "number"
+          },
+          {
+            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+            "type": "string"
+          }
+        ],
+        "title": "Price"
+      },
+      "size": {
+        "anyOf": [
+          {
+            "type": "number"
+          },
+          {
+            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+            "type": "string"
+          }
+        ],
+        "title": "Size"
+      },
+      "aggressor": {
+        "$ref": "#/$defs/Aggressor"
+      },
+      "schema_version": {
+        "const": "microstructure-v2",
+        "default": "microstructure-v2",
+        "title": "Schema Version",
+        "type": "string"
+      }
+    },
+    "required": [
+      "instrument_id",
+      "venue",
+      "ts_event",
+      "ts_recv",
+      "seq",
+      "price",
+      "size",
+      "aggressor"
+    ],
+    "title": "TradeTick",
+    "type": "object"
+  },
+  "QuoteL1": {
+    "$defs": {
+      "Venue": {
+        "description": "세션 규칙(A3) 조회 키. KIS는 시장별로 캘린더가 달라 KRX/US를 분리한다.",
+        "enum": [
+          "BITGET",
+          "KIS_KRX",
+          "KIS_US",
+          "BINANCE",
+          "BYBIT",
+          "OKX",
+          "UPBIT"
+        ],
+        "title": "Venue",
+        "type": "string"
+      }
+    },
+    "description": "Top-of-book (best bid/offer) snapshot.",
+    "properties": {
+      "instrument_id": {
+        "title": "Instrument Id",
+        "type": "string"
+      },
+      "venue": {
+        "$ref": "#/$defs/Venue"
+      },
+      "ts_event": {
+        "title": "Ts Event",
+        "type": "integer"
+      },
+      "ts_recv": {
+        "title": "Ts Recv",
+        "type": "integer"
+      },
+      "seq": {
+        "minimum": 0,
+        "title": "Seq",
+        "type": "integer"
+      },
+      "bid_price": {
+        "anyOf": [
+          {
+            "type": "number"
+          },
+          {
+            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+            "type": "string"
+          }
+        ],
+        "title": "Bid Price"
+      },
+      "bid_size": {
+        "anyOf": [
+          {
+            "type": "number"
+          },
+          {
+            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+            "type": "string"
+          }
+        ],
+        "title": "Bid Size"
+      },
+      "ask_price": {
+        "anyOf": [
+          {
+            "type": "number"
+          },
+          {
+            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+            "type": "string"
+          }
+        ],
+        "title": "Ask Price"
+      },
+      "ask_size": {
+        "anyOf": [
+          {
+            "type": "number"
+          },
+          {
+            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+            "type": "string"
+          }
+        ],
+        "title": "Ask Size"
+      },
+      "schema_version": {
+        "const": "microstructure-v2",
+        "default": "microstructure-v2",
+        "title": "Schema Version",
+        "type": "string"
+      }
+    },
+    "required": [
+      "instrument_id",
+      "venue",
+      "ts_event",
+      "ts_recv",
+      "seq",
+      "bid_price",
+      "bid_size",
+      "ask_price",
+      "ask_size"
+    ],
+    "title": "QuoteL1",
+    "type": "object"
+  },
+  "BookL2": {
+    "$defs": {
+      "BookLevel": {
+        "description": "One price level of a `BookL2` side.",
+        "properties": {
+          "price": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                "type": "string"
+              }
+            ],
+            "title": "Price"
+          },
+          "size": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                "type": "string"
+              }
+            ],
+            "title": "Size"
+          }
+        },
+        "required": [
+          "price",
+          "size"
+        ],
+        "title": "BookLevel",
+        "type": "object"
+      },
+      "Venue": {
+        "description": "세션 규칙(A3) 조회 키. KIS는 시장별로 캘린더가 달라 KRX/US를 분리한다.",
+        "enum": [
+          "BITGET",
+          "KIS_KRX",
+          "KIS_US",
+          "BINANCE",
+          "BYBIT",
+          "OKX",
+          "UPBIT"
+        ],
+        "title": "Venue",
+        "type": "string"
+      }
+    },
+    "description": "Level-2 order book snapshot. `bids` must be sorted best-first\n(descending price) and `asks` must be sorted best-first (ascending\nprice) — a book with levels out of price order is malformed and is\nrejected rather than silently re-sorted, since a wrong order upstream\nusually signals a feed-parsing bug worth surfacing, not papering over.",
+    "properties": {
+      "instrument_id": {
+        "title": "Instrument Id",
+        "type": "string"
+      },
+      "venue": {
+        "$ref": "#/$defs/Venue"
+      },
+      "ts_event": {
+        "title": "Ts Event",
+        "type": "integer"
+      },
+      "ts_recv": {
+        "title": "Ts Recv",
+        "type": "integer"
+      },
+      "seq": {
+        "minimum": 0,
+        "title": "Seq",
+        "type": "integer"
+      },
+      "bids": {
+        "items": {
+          "$ref": "#/$defs/BookLevel"
+        },
+        "title": "Bids",
+        "type": "array"
+      },
+      "asks": {
+        "items": {
+          "$ref": "#/$defs/BookLevel"
+        },
+        "title": "Asks",
+        "type": "array"
+      },
+      "schema_version": {
+        "const": "microstructure-v2",
+        "default": "microstructure-v2",
+        "title": "Schema Version",
+        "type": "string"
+      }
+    },
+    "required": [
+      "instrument_id",
+      "venue",
+      "ts_event",
+      "ts_recv",
+      "seq",
+      "bids",
+      "asks"
+    ],
+    "title": "BookL2",
+    "type": "object"
+  }
+}
