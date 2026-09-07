@@ -7,7 +7,7 @@
     "apps/web/src/routes/chart/ChartToolbar.tsx": 369,
     "apps/web/src/routes/exchanges/ExchangeManagementPage.tsx": 348,
     "packages/api-client/src/apiPaths.ts": 345,
-    "packages/chart-engine/src/index.ts": 328,
+    "packages/chart-engine/src/index.ts": 340,
     "apps/web/src/routes/chart/useChartLayout.ts": 318
   }
 }

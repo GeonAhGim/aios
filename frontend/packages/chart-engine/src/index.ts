@@ -324,5 +324,17 @@ export {
   createClientIncrementalIndicator,
 } from "./compute/clientEngine";
 
-export type { WorkerPool, WorkerPoolBackend, WorkerPoolErrorCode, WorkerPoolHandler } from "./compute/workerPool";
-export { WorkerPoolError, createInlineWorkerPoolBackend, createWorkerPool } from "./compute/workerPool";
+export type {
+  IndicatorWorkerMessage,
+  IndicatorWorkerResponse,
+  WorkerPool,
+  WorkerPoolBackend,
+  WorkerPoolErrorCode,
+  WorkerPoolHandler,
+} from "./compute/workerPool";
+export {
+  WorkerPoolError,
+  createBrowserWorkerPoolBackend,
+  createInlineWorkerPoolBackend,
+  createWorkerPool,
+} from "./compute/workerPool";
