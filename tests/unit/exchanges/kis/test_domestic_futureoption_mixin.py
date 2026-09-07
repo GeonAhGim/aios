@@ -111,6 +111,34 @@ async def test_round_trip_quote_order_cancel_balance():
     assert balance_request.headers["tr_id"] == "VTFO6118R"
 
 
+async def test_place_order_wire_body_omits_ord_dvsn_cd_fails():
+    """DoD(b)(task-2005 REJECT 근거) — ORD_DVSN_CD가 실제 HTTP 요청 바디에
+    배선됐음을 증명한다. 이 필드가 코드에서 제거되면 이 assertion이 실패해야
+    negative test로 유효하다(리뷰가 지적한 결함: 기존 테스트는 필드 제거해도
+    전부 통과했다)."""
+    captured: list[httpx.Request] = []
+    adapter = _make_paper_adapter(captured)
+
+    await adapter.place_futureoption_order(_futures_order())
+
+    order_body = json.loads(captured[-1].content)
+    assert "ORD_DVSN_CD" in order_body
+    assert order_body["ORD_DVSN_CD"] == "01"  # MARKET 주문 → _order_division("01")
+
+
+async def test_cancel_order_wire_body_omits_rmn_qty_yn_fails():
+    """DoD(b) — RMN_QTY_YN이 실제 취소 요청 바디에 배선됐음을 증명한다.
+    ORD_DVSN_CD와 동일한 근거로, 필드 제거 시 실패해야 하는 negative test다."""
+    captured: list[httpx.Request] = []
+    adapter = _make_paper_adapter(captured)
+
+    await adapter.cancel_futureoption_order("ORG:1", quantity=Decimal("1"))
+
+    cancel_body = json.loads(captured[-1].content)
+    assert "RMN_QTY_YN" in cancel_body
+    assert cancel_body["RMN_QTY_YN"] == "N"
+
+
 async def test_place_order_rejects_expired_contract():
     """DoD 2 — 만기 지난 종목 주문은 거래소에 보내지 않고 거부한다."""
     captured: list[httpx.Request] = []
