@@ -241,7 +241,13 @@ class LifecycleEventCommand(BaseModel):
 
 
 class CorporateAction(BaseModel):
-    """`ratio`: 2:1 분할이면 2. 배당은 ratio=1, `cash_amount`에 별도 기록."""
+    """`ratio`: 2:1 분할이면 2. 배당은 ratio=1, `cash_amount`에 별도 기록.
+
+    `known_at`(RD-20): 이 사실을 우리가 안 시각(공시 접수 시각) — `ex_date`
+    (효력 발생일)와 분리된다. 정정 공시는 같은 `(instrument_id, action_type,
+    ex_date)`에 `known_at`이 다른 새 행으로 쌓인다(UPDATE 금지). 기존
+    LA-12/LA-14 경로(장부 기록)는 이 필드를 채우지 않고 `None`으로 둔다 —
+    107번 규칙대로 기본값 있는 필드 추가라 하위 호환된다."""
 
     action_type: Literal["SPLIT", "REVERSE_SPLIT", "CASH_DIVIDEND", "MERGER"]
     instrument_id: UUID
@@ -249,6 +255,7 @@ class CorporateAction(BaseModel):
     ratio: Decimal
     cash_amount: Decimal | None = None
     source_ref: str
+    known_at: AwareDatetime | None = None
     schema_version: Literal["v1"] = SCHEMA_VERSION
 
 

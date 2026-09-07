@@ -611,7 +611,7 @@
     "type": "object"
   },
   "CorporateAction": {
-    "description": "`ratio`: 2:1 분할이면 2. 배당은 ratio=1, `cash_amount`에 별도 기록.",
+    "description": "`ratio`: 2:1 분할이면 2. 배당은 ratio=1, `cash_amount`에 별도 기록.\n\n`known_at`(RD-20): 이 사실을 우리가 안 시각(공시 접수 시각) — `ex_date`\n(효력 발생일)와 분리된다. 정정 공시는 같은 `(instrument_id, action_type,\nex_date)`에 `known_at`이 다른 새 행으로 쌓인다(UPDATE 금지). 기존\nLA-12/LA-14 경로(장부 기록)는 이 필드를 채우지 않고 `None`으로 둔다 —\n107번 규칙대로 기본값 있는 필드 추가라 하위 호환된다.",
     "properties": {
       "action_type": {
         "enum": [
@@ -648,6 +648,19 @@
         "format": "uuid",
         "title": "Instrument Id",
         "type": "string"
+      },
+      "known_at": {
+        "anyOf": [
+          {
+            "format": "date-time",
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Known At"
       },
       "ratio": {
         "anyOf": [
