@@ -297,3 +297,147 @@ def test_identical_v1_snapshot_has_zero_violations():
         return  # 스냅샷이 없는 환경에서는 스킵
     snapshot = json.loads(baseline_path.read_text(encoding="utf-8"))
     assert find_violations(snapshot, snapshot) == []
+
+
+# --- PLT-16 후속: $ref 봉투/배열 items 안쪽 프로퍼티 변경 --------------------
+# task-1305 QA 발견 실측 재현: AccountConnectionView.created_at/status를
+# ApiResponse_AccountConnectionView_.data 경유($ref, anyOf 아님)로 삭제해도
+# 수정 전에는 exit 0였다.
+
+
+def _envelope_bundle(inner_props: dict) -> dict:
+    """`ApiResponse_Inner_.data`가 평범한 `$ref`로 `Inner`를 가리키는 봉투."""
+    path = {
+        "get": {
+            "responses": {
+                "200": {
+                    "content": {
+                        "application/json": {
+                            "schema": {"$ref": "#/components/schemas/Envelope"}
+                        }
+                    }
+                }
+            }
+        }
+    }
+    return _schema(
+        paths={"/items": path},
+        schemas={
+            "Envelope": {
+                "type": "object",
+                "properties": {"data": {"$ref": "#/components/schemas/Inner"}},
+                "required": ["data"],
+            },
+            "Inner": {"type": "object", "properties": inner_props},
+        },
+    )
+
+
+def test_ref_envelope_nested_property_removed_fails():
+    baseline = _envelope_bundle({"id": _STR, "status": {"type": "string", "enum": ["A", "B"]}})
+    current = _envelope_bundle({"id": _STR})
+
+    violations = find_violations(baseline, current)
+
+    assert any("response property 제거" in v and ".data .status" in v for v in violations)
+
+
+def test_ref_envelope_nested_property_type_change_fails():
+    baseline = _envelope_bundle({"id": _STR})
+    current = _envelope_bundle({"id": _INT})
+
+    violations = find_violations(baseline, current)
+
+    assert any(_TYPE_CHANGE in v and ".data .id" in v for v in violations)
+
+
+def test_ref_envelope_nested_enum_narrowed_fails():
+    baseline = _envelope_bundle({"status": {"type": "string", "enum": ["A", "B"]}})
+    current = _envelope_bundle({"status": {"type": "string", "enum": ["A"]}})
+
+    violations = find_violations(baseline, current)
+
+    assert any("enum 값 제거" in v and ".data .status" in v and "B" in v for v in violations)
+
+
+def test_ref_envelope_nested_property_added_is_minor_and_passes():
+    baseline = _envelope_bundle({"id": _STR})
+    current = _envelope_bundle({"id": _STR, "note": _STR})
+
+    assert find_violations(baseline, current) == []
+
+
+def _array_ref_bundle(item_props: dict) -> dict:
+    """응답 프로퍼티가 `$ref` 객체 배열(items가 `$ref`)인 경우."""
+    path = {
+        "get": {
+            "responses": {
+                "200": {
+                    "content": {
+                        "application/json": {"schema": {"$ref": "#/components/schemas/Page"}}
+                    }
+                }
+            }
+        }
+    }
+    return _schema(
+        paths={"/items": path},
+        schemas={
+            "Page": {
+                "type": "object",
+                "properties": {
+                    "results": {
+                        "type": "array",
+                        "items": {"$ref": "#/components/schemas/Row"},
+                    }
+                },
+            },
+            "Row": {"type": "object", "properties": item_props},
+        },
+    )
+
+
+def test_array_items_ref_nested_property_removed_fails():
+    baseline = _array_ref_bundle({"id": _STR, "label": _STR})
+    current = _array_ref_bundle({"id": _STR})
+
+    violations = find_violations(baseline, current)
+
+    assert any(
+        "response property 제거" in v and ".results[] .label" in v for v in violations
+    )
+
+
+def test_array_items_ref_nested_property_type_change_fails():
+    baseline = _array_ref_bundle({"id": _STR})
+    current = _array_ref_bundle({"id": _INT})
+
+    violations = find_violations(baseline, current)
+
+    assert any(_TYPE_CHANGE in v and ".results[] .id" in v for v in violations)
+
+
+def test_self_referential_ref_cycle_terminates_without_error():
+    """`$ref` 순환참조(Node.children -> Node)에서 무한재귀하지 않고 종료해야 한다."""
+    path = {
+        "get": {
+            "responses": {
+                "200": {
+                    "content": {
+                        "application/json": {"schema": {"$ref": "#/components/schemas/Node"}}
+                    }
+                }
+            }
+        }
+    }
+    node_schema = {
+        "type": "object",
+        "properties": {
+            "id": _STR,
+            "children": {"type": "array", "items": {"$ref": "#/components/schemas/Node"}},
+        },
+    }
+    baseline = _schema(paths={"/tree": path}, schemas={"Node": node_schema})
+    current = json.loads(json.dumps(baseline))
+
+    assert find_violations(baseline, current) == []

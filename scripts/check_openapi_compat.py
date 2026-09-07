@@ -20,6 +20,14 @@ PLT-16 정규화(비교 전 전처리): pydantic `Optional[X]`는 OpenAPI 3.1에
 쌍으로 접어 기존 type/format/nullable/enum 규칙에 태운다. `$ref`·배열
 `items` 안에 중첩된 anyOf도 재귀적으로 접는다(anyOf 항목 순서는 무시).
 
+PLT-16 후속(`$ref`/배열 items 재귀): 프로퍼티가 평범한 `$ref`로 다른 객체
+스키마를 가리키는 경우(예: `ApiResponse_X_.data` 봉투) `_property_violations`
+는 원래 그 안쪽 프로퍼티를 보지 않았다. `_nested_object_violations`가
+`$ref`·(`$ref`를 가리키는) 배열 items를 한 단계씩 더 해석해 안쪽 프로퍼티도
+재귀 비교한다. `$ref` 순환참조는 방문한 컴포넌트 이름 집합(`visited`)으로
+막는다 — 컴포넌트 이름 수는 유한하므로 같은 이름을 두 번 방문하기 전에
+재귀가 끝난다.
+
 사용: `python scripts/check_openapi_compat.py [--baseline PATH] [--current PATH]`.
 종료코드 0=통과, 1=MAJOR 위반.
 """
@@ -120,6 +128,69 @@ def _leaf_violations(
     return violations
 
 
+def _ref_target(
+    node: Any, components: dict[str, Any]
+) -> tuple[str | None, dict[str, Any]]:
+    """`$ref` 1단계 해석 + Optional(anyOf) 벗기기를 마친 노드를 반환한다.
+
+    반환된 `ref_name`은 `$ref`가 직접 가리킨 컴포넌트 이름(순환 가드용 방문집합
+    키)이다. anyOf(Optional) 안에 `$ref`가 있는 경우도 벗겨서 찾는다.
+    """
+    if not isinstance(node, dict):
+        return None, {}
+    ref = node.get("$ref")
+    ref_name = ref.rsplit("/", 1)[-1] if isinstance(ref, str) else None
+    resolved = _resolve(node, components)
+    any_of = resolved.get("anyOf")
+    if isinstance(any_of, list):
+        others = [b for b in any_of if not (isinstance(b, dict) and b.get("type") == "null")]
+        if len(others) == 1:
+            return _ref_target(others[0], components)
+        return None, {}
+    return ref_name, resolved
+
+
+def _nested_object_violations(
+    old_prop_raw: Any,
+    new_prop_raw: Any,
+    *,
+    where: str,
+    label: str,
+    components_old: dict[str, Any],
+    components_new: dict[str, Any],
+    visited: frozenset[str],
+) -> list[str]:
+    """PLT-16 후속: 프로퍼티가 (배열의) `$ref`로 다른 객체 스키마를 가리키면
+    그 안쪽 프로퍼티까지 재귀 비교한다. `$ref` 순환참조는 방문집합으로 막는다
+    (컴포넌트 이름은 유한하므로 방문집합만으로 종료가 보장된다)."""
+    old_ref, old_target = _ref_target(old_prop_raw, components_old)
+    _, new_target = _ref_target(new_prop_raw, components_new)
+
+    if old_target.get("type") == "array" and isinstance(old_target.get("items"), dict):
+        old_ref, old_target = _ref_target(old_target["items"], components_old)
+        new_items = new_target.get("items")
+        new_items = new_items if isinstance(new_items, dict) else {}
+        _, new_target = _ref_target(new_items, components_new)
+        label = f"{label}[]"
+
+    if not isinstance(old_target.get("properties"), dict):
+        return []
+    if old_ref is not None:
+        if old_ref in visited:
+            return []
+        visited = visited | {old_ref}
+
+    return _property_violations(
+        old_target,
+        new_target,
+        where=where,
+        label=label,
+        components_old=components_old,
+        components_new=components_new,
+        visited=visited,
+    )
+
+
 def _property_violations(
     old: dict[str, Any],
     new: dict[str, Any],
@@ -128,6 +199,7 @@ def _property_violations(
     label: str,
     components_old: dict[str, Any],
     components_new: dict[str, Any],
+    visited: frozenset[str] = frozenset(),
 ) -> list[str]:
     violations: list[str] = []
     old_props: dict[str, Any] = old.get("properties", {})
@@ -142,6 +214,17 @@ def _property_violations(
         new_leaf = _normalize_node(new_prop_raw, components_new)
         violations.extend(
             _leaf_violations(old_leaf, new_leaf, where=where, label=f"{label} .{name}")
+        )
+        violations.extend(
+            _nested_object_violations(
+                old_prop_raw,
+                new_prop_raw,
+                where=where,
+                label=f"{label} .{name}",
+                components_old=components_old,
+                components_new=components_new,
+                visited=visited,
+            )
         )
 
     if where == "request":
