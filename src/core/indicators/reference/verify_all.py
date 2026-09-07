@@ -1,40 +1,34 @@
-"""IND-7g — three-way cross-verification of TA-Lib C <-> incremental engine
-<-> vectorized engine.
+"""IND-7g — three-way cross-verification: TA-Lib C vs incremental engine
+vs vectorized engine.
 
 Spec: docs/specs/L4_analytics_authoring_backtest_marketplace_v1.0.md §9.3 IND-7g,
 docs/design/ADR-2026-09-06-F-adopt-dont-rewrite.md D2.
 
-Instead of writing expected values by hand, this runs three implementations
-(direct TA-Lib C call, `engine.incremental`, `engine.vectorized`) on the same
-input and compares them against each other. If the three values agree within
-`REFERENCE_TOLERANCE` (1e-9, scale-relative error), the result is snapshotted
-as a reference vector; if any one deviates, that indicator is excluded from
-the verified list (subject to registry exposure) (fail-closed) —
-`VerificationReport.mismatches` always carries the detail so nothing passes
-silently.
+Instead of hand-written expected values, runs three implementations (direct
+TA-Lib C, `engine.incremental`, `engine.vectorized`) on the same input and
+diffs them. Agreement within `REFERENCE_TOLERANCE` (1e-9, scale-relative)
+snapshots the result as a reference vector; any deviation excludes that
+indicator from the verified list (fail-closed) — `VerificationReport.
+mismatches` always carries the detail so nothing passes silently.
 
-Verification targets are limited to indicators that have a kernel in both
+Verification is limited to indicators with a kernel in both
 `engine.incremental` and `engine.vectorized` (IND-1, currently 11) — the
-three-way comparison itself presupposes both engines exist. The remaining
-150 (TA-Lib auto-generated, IND-2g) are out of scope for this leaf.
+three-way comparison presupposes both engines exist. The remaining 150
+(TA-Lib auto-generated, IND-2g) are out of scope here.
 
-There are two dataset branches:
-- `synthetic:<seed>` — a seeded normal-distribution random walk (same
-  formula as `test_engine_equivalence.py`), varying scale by order of
-  magnitude to shake out floating-point precision boundaries.
-- `real_sample_proxy` — a second fixed-seed dataset mixing a
-  trend->range->volatility-spike regime transition. **Unverified**: this
-  worker environment has no external network access to fetch real exchange
-  data, so this is not actual exchange data — it is used only as a
-  substitute that approximates real data's statistical characteristics such
-  as volatility clustering. Once a real data file is obtained, only this
-  one function needs to change.
+Two dataset branches:
+- `synthetic:<seed>` — seeded normal-distribution random walk (same formula
+  as `test_engine_equivalence.py`), scale varied by order of magnitude to
+  probe floating-point precision boundaries.
+- `real_sample_proxy` — second fixed-seed dataset mixing a
+  trend->range->volatility-spike regime. **Unverified**: this worker has no
+  external network access, so it is not real exchange data — only a
+  substitute approximating real data's statistical traits (e.g. volatility
+  clustering). Swap in a real data file by changing only this function.
 
-CI/nightly split: `sample_names()` draws a subset with a fixed seed — since
-the catalog currently has only 11 indicators, requesting a sample of 30 ends
-up equal to the full set, but the sampling path is opened up in advance so
-the same function keeps working once IND-13 (the bulk verification job)
-grows the catalog.
+CI/nightly split: `sample_names()` draws a fixed-seed subset — with only 11
+indicators today, a sample of 30 equals the full set, but the sampling path
+is opened up in advance for when IND-13 grows the catalog.
 """
 from __future__ import annotations
 
@@ -90,8 +84,7 @@ class Dataset:
 
 @dataclass(frozen=True)
 class Mismatch:
-    """One mismatch detail — kept in the report as-is to prevent a silent
-    pass."""
+    """One mismatch detail — kept as-is in the report to prevent a silent pass."""
 
     name: str
     dataset: str
@@ -126,8 +119,7 @@ def _synthetic_ohlcv(seed: int, n: int, scale: float) -> dict[str, FloatArray]:
 
 def _real_sample_proxy_ohlcv(seed: int, n: int) -> dict[str, FloatArray]:
     """Unverified: not real exchange data — a substitute fixed-seed dataset
-    that mimics a regime transition (trend->range->volatility spike) (see
-    module docstring)."""
+    mimicking a regime transition (trend->range->volatility spike) (see module docstring)."""
     rng = np.random.default_rng(seed)
     segment = max(1, n // 3)
     drift = np.concatenate(
@@ -162,8 +154,8 @@ def default_datasets() -> list[Dataset]:
 
 
 def _param_variants(spec: IndicatorSpec) -> list[dict[str, int]]:
-    """Default + minimum boundary values (only when they differ) — also
-    exercises numerical error near the window boundary."""
+    """Default + minimum boundary values (only when they differ) — also exercises
+    numerical error near the window boundary."""
     default = {p.name: p.default for p in spec.params}
     minimal = {p.name: p.min for p in spec.params}
     if spec.name == "MACD" and minimal["fastperiod"] >= minimal["slowperiod"]:
@@ -182,8 +174,7 @@ def _talib_direct(
 
 
 def verify_indicator(name: str, datasets: Sequence[Dataset]) -> list[Mismatch]:
-    """Runs the three-way comparison for one indicator across every dataset
-    x parameter combination."""
+    """Three-way comparison for one indicator across every dataset x parameter combo."""
     spec = TALIB_SPECS[name]
     mismatches: list[Mismatch] = []
     for dataset in datasets:
