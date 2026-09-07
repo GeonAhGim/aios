@@ -6,7 +6,11 @@
         "enum": [
           "BITGET",
           "KIS_KRX",
-          "KIS_US"
+          "KIS_US",
+          "BINANCE",
+          "BYBIT",
+          "OKX",
+          "UPBIT"
         ],
         "title": "Venue",
         "type": "string"
@@ -123,7 +127,8 @@
           "30m",
           "1h",
           "4h",
-          "1d"
+          "1d",
+          "L2"
         ],
         "title": "Timeframe",
         "type": "string"
@@ -133,7 +138,11 @@
         "enum": [
           "BITGET",
           "KIS_KRX",
-          "KIS_US"
+          "KIS_US",
+          "BINANCE",
+          "BYBIT",
+          "OKX",
+          "UPBIT"
         ],
         "title": "Venue",
         "type": "string"
@@ -229,7 +238,8 @@
           "30m",
           "1h",
           "4h",
-          "1d"
+          "1d",
+          "L2"
         ],
         "title": "Timeframe",
         "type": "string"
@@ -239,7 +249,11 @@
         "enum": [
           "BITGET",
           "KIS_KRX",
-          "KIS_US"
+          "KIS_US",
+          "BINANCE",
+          "BYBIT",
+          "OKX",
+          "UPBIT"
         ],
         "title": "Venue",
         "type": "string"
@@ -515,7 +529,8 @@
           "30m",
           "1h",
           "4h",
-          "1d"
+          "1d",
+          "L2"
         ],
         "title": "Timeframe",
         "type": "string"
@@ -525,7 +540,11 @@
         "enum": [
           "BITGET",
           "KIS_KRX",
-          "KIS_US"
+          "KIS_US",
+          "BINANCE",
+          "BYBIT",
+          "OKX",
+          "UPBIT"
         ],
         "title": "Venue",
         "type": "string"
@@ -702,7 +721,8 @@
           "30m",
           "1h",
           "4h",
-          "1d"
+          "1d",
+          "L2"
         ],
         "title": "Timeframe",
         "type": "string"
@@ -712,7 +732,11 @@
         "enum": [
           "BITGET",
           "KIS_KRX",
-          "KIS_US"
+          "KIS_US",
+          "BINANCE",
+          "BYBIT",
+          "OKX",
+          "UPBIT"
         ],
         "title": "Venue",
         "type": "string"
@@ -898,7 +922,8 @@
           "30m",
           "1h",
           "4h",
-          "1d"
+          "1d",
+          "L2"
         ],
         "title": "Timeframe",
         "type": "string"
@@ -908,7 +933,11 @@
         "enum": [
           "BITGET",
           "KIS_KRX",
-          "KIS_US"
+          "KIS_US",
+          "BINANCE",
+          "BYBIT",
+          "OKX",
+          "UPBIT"
         ],
         "title": "Venue",
         "type": "string"
@@ -1049,7 +1078,8 @@
           "30m",
           "1h",
           "4h",
-          "1d"
+          "1d",
+          "L2"
         ],
         "title": "Timeframe",
         "type": "string"
@@ -1059,7 +1089,11 @@
         "enum": [
           "BITGET",
           "KIS_KRX",
-          "KIS_US"
+          "KIS_US",
+          "BINANCE",
+          "BYBIT",
+          "OKX",
+          "UPBIT"
         ],
         "title": "Venue",
         "type": "string"
@@ -1158,7 +1192,11 @@
         "enum": [
           "BITGET",
           "KIS_KRX",
-          "KIS_US"
+          "KIS_US",
+          "BINANCE",
+          "BYBIT",
+          "OKX",
+          "UPBIT"
         ],
         "title": "Venue",
         "type": "string"
@@ -1557,7 +1595,11 @@
         "enum": [
           "BITGET",
           "KIS_KRX",
-          "KIS_US"
+          "KIS_US",
+          "BINANCE",
+          "BYBIT",
+          "OKX",
+          "UPBIT"
         ],
         "title": "Venue",
         "type": "string"
@@ -1680,7 +1722,8 @@
           "30m",
           "1h",
           "4h",
-          "1d"
+          "1d",
+          "L2"
         ],
         "title": "Timeframe",
         "type": "string"
@@ -1690,7 +1733,11 @@
         "enum": [
           "BITGET",
           "KIS_KRX",
-          "KIS_US"
+          "KIS_US",
+          "BINANCE",
+          "BYBIT",
+          "OKX",
+          "UPBIT"
         ],
         "title": "Venue",
         "type": "string"
@@ -1901,7 +1948,8 @@
           "30m",
           "1h",
           "4h",
-          "1d"
+          "1d",
+          "L2"
         ],
         "title": "Timeframe",
         "type": "string"
@@ -1911,7 +1959,11 @@
         "enum": [
           "BITGET",
           "KIS_KRX",
-          "KIS_US"
+          "KIS_US",
+          "BINANCE",
+          "BYBIT",
+          "OKX",
+          "UPBIT"
         ],
         "title": "Venue",
         "type": "string"
@@ -1997,7 +2049,8 @@
           "30m",
           "1h",
           "4h",
-          "1d"
+          "1d",
+          "L2"
         ],
         "title": "Timeframe",
         "type": "string"
@@ -2007,7 +2060,11 @@
         "enum": [
           "BITGET",
           "KIS_KRX",
-          "KIS_US"
+          "KIS_US",
+          "BINANCE",
+          "BYBIT",
+          "OKX",
+          "UPBIT"
         ],
         "title": "Venue",
         "type": "string"
@@ -2193,7 +2250,11 @@
         "enum": [
           "BITGET",
           "KIS_KRX",
-          "KIS_US"
+          "KIS_US",
+          "BINANCE",
+          "BYBIT",
+          "OKX",
+          "UPBIT"
         ],
         "title": "Venue",
         "type": "string"
@@ -2302,7 +2363,11 @@
         "enum": [
           "BITGET",
           "KIS_KRX",
-          "KIS_US"
+          "KIS_US",
+          "BINANCE",
+          "BYBIT",
+          "OKX",
+          "UPBIT"
         ],
         "title": "Venue",
         "type": "string"

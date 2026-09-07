@@ -34,6 +34,11 @@ class Timeframe(str, Enum):
     H1 = "1h"
     H4 = "4h"
     D1 = "1d"
+    # RD-19(ADR-2026-09-06-H D3) — 캔들 바가 아니라 원시 L2 호가창 이벤트
+    # 스트림 커버리지 표식. domain/timeframe.duration()/align_open()은 이
+    # 값을 등록하지 않는다(OHLC 정렬 개념이 없다) — coverage_spans에 수집
+    # 온라인 구간을 [start_at, end_at)으로 직접 기록하는 용도로만 쓴다.
+    L2 = "L2"
 
 
 class Venue(str, Enum):
@@ -42,6 +47,11 @@ class Venue(str, Enum):
     BITGET = "BITGET"
     KIS_KRX = "KIS_KRX"
     KIS_US = "KIS_US"
+    # RD-19(ADR-2026-09-06-H D3) — 암호화폐 L2 자체 수집기 대상 4개 거래소.
+    BINANCE = "BINANCE"
+    BYBIT = "BYBIT"
+    OKX = "OKX"
+    UPBIT = "UPBIT"
 
 
 class Adjustment(str, Enum):

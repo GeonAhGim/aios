@@ -150,7 +150,11 @@
         "enum": [
           "BITGET",
           "KIS_KRX",
-          "KIS_US"
+          "KIS_US",
+          "BINANCE",
+          "BYBIT",
+          "OKX",
+          "UPBIT"
         ],
         "title": "Venue",
         "type": "string"
