@@ -14,6 +14,7 @@ from src.foundation.backtest.domain.magnifier import (
     HigherBar,
     IncompatibleMagnifierTimeframeError,
     LookAheadError,
+    UnsortedLowerBarsError,
     magnify,
     validate_magnifier_config,
 )
@@ -199,6 +200,50 @@ def test_magnify_rejects_lower_bar_before_window_start() -> None:
             magnifier_tf=Timeframe.M1,
             lower_bars=_m1_columns(rows),
         )
+
+
+# --------------------------------------------------------------------------
+# 정렬 전제 재검증 — CandleColumns는 정렬을 보장하지 않는다(어댑터 전제일 뿐)
+# --------------------------------------------------------------------------
+
+
+def test_magnify_rejects_unsorted_lower_bars_even_when_all_within_window() -> None:
+    """뒤섞인 `lower_bars`는 모든 행이 시간창 안에 있어도(LookAheadError로는
+    걸러지지 않음) 거부해야 한다 — 아니면 체결 순서가 실제 시간순과
+    조용히 어긋난다."""
+    rows = [
+        (
+            _T0 + timedelta(minutes=3),
+            Decimal("103"), Decimal("106"), Decimal("102"), Decimal("104"),
+        ),
+        (
+            _T0 + timedelta(minutes=1),
+            Decimal("100"), Decimal("102"), Decimal("99"), Decimal("101"),
+        ),
+    ]
+    with pytest.raises(UnsortedLowerBarsError):
+        magnify(
+            _UP_BAR,
+            higher_tf=Timeframe.M5,
+            magnifier_tf=Timeframe.M1,
+            lower_bars=_m1_columns(rows),
+        )
+
+
+def test_magnify_accepts_two_lower_bars_with_equal_timestamps() -> None:
+    """동일 open_time이 연속되어도(오름차순의 경계 케이스) 정렬 위반이
+    아니다 — `>` 비교만 거부한다."""
+    rows = [
+        (_T0, Decimal("100"), Decimal("102"), Decimal("99"), Decimal("101")),
+        (_T0, Decimal("101"), Decimal("103"), Decimal("100"), Decimal("102")),
+    ]
+    order = magnify(
+        _UP_BAR, higher_tf=Timeframe.M5, magnifier_tf=Timeframe.M1, lower_bars=_m1_columns(rows)
+    )
+    assert order == (
+        Decimal("100"), Decimal("99"), Decimal("102"), Decimal("101"),
+        Decimal("101"), Decimal("100"), Decimal("103"), Decimal("102"),
+    )
 
 
 # --------------------------------------------------------------------------

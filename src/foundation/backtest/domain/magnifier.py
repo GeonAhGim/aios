@@ -32,6 +32,15 @@ Spec: docs/specs/L4_analytics_authoring_backtest_marketplace_v1.0.md
 검증만 한다 — 포트/저장소 접근이 전혀 없으므로 이 모듈 스스로 미래를
 조회할 방법이 없다.
 
+정렬 전제 재검증: `CandleColumns`는 타입 자체로 정렬을 보장하지 않는다
+(어댑터의 `ORDER BY`에 기대는 전제일 뿐 — `candle_columns.py` 참고).
+호출자가 이 전제를 어기고 뒤섞인 `lower_bars`를 넘기면, 시간창 검증만으로는
+걸러지지 않는다(모든 행이 창 안에 있어도 순서가 틀릴 수 있다) — 그대로
+이어붙이면 "체결 순서"가 조용히 실제 시간순과 어긋난다. DC-10
+`timeframe_rollup.rollup`이 같은 전제를 `UnsortedCandlesError`로 재검증하는
+것과 동일한 이유로, 여기서도 `ts` 오름차순을 재검증해 `UnsortedLowerBarsError`로
+fail-closed 한다.
+
 Timeframe 길이는 LA-2(`domain.timeframe.duration`)를 그대로 쓰고
 재구현하지 않는다. 하위 봉 컨테이너는 DC-10 rollup의 산출 타입
 (`CandleColumns`)을 그대로 재사용한다 — rollup 결과를 변환 없이 바로
@@ -55,6 +64,7 @@ __all__ = [
     "HigherBar",
     "LookAheadError",
     "IncompatibleMagnifierTimeframeError",
+    "UnsortedLowerBarsError",
     "validate_magnifier_config",
     "magnify",
 ]
@@ -79,6 +89,12 @@ class LookAheadError(ValueError):
 class IncompatibleMagnifierTimeframeError(ValueError):
     """`BT_MAGNIFIER_TF_INCOMPATIBLE` — `magnifier_tf`가 상위 TF보다 크거나
     같거나, 상위 TF 길이를 정수배로 나누지 못한다."""
+
+
+class UnsortedLowerBarsError(ValueError):
+    """`BT_MAGNIFIER_UNSORTED_LOWER_BARS` — `lower_bars.ts`가 오름차순이
+    아니다. 모든 행이 상위 봉 시간창 안에 있어도(`LookAheadError`로는
+    걸러지지 않음) 순서가 뒤섞이면 체결 순서가 실제 시간순과 어긋난다."""
 
 
 def validate_magnifier_config(*, higher_tf: Timeframe, magnifier_tf: Timeframe | None) -> None:
@@ -128,6 +144,13 @@ def magnify(
         return _expand_single_bar(
             higher_bar.open, higher_bar.high, higher_bar.low, higher_bar.close
         )
+
+    for i in range(len(lower_bars) - 1):
+        if lower_bars.ts[i] > lower_bars.ts[i + 1]:
+            raise UnsortedLowerBarsError(
+                f"index {i}의 open_time({lower_bars.ts[i]!r})이 index {i + 1}"
+                f"({lower_bars.ts[i + 1]!r})보다 늦습니다"
+            )
 
     window_start = higher_bar.open_time
     window_end = higher_bar.open_time + duration(higher_tf)
