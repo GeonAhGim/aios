@@ -29,7 +29,7 @@ from src.foundation.risk_gate.application.upsert_risk_limit import (
     upsert_risk_limit,
 )
 from src.foundation.risk_gate.domain.models import LimitMetric, LimitScope, RiskLimit
-from tests.integration.conftest import create_test_user
+from tests.integration.conftest import create_test_tenant
 
 
 def _asyncpg_dsn() -> str:
@@ -58,12 +58,15 @@ def audit_repo(pool):
 
 @pytest.fixture
 async def tenant_a(pool) -> UUID:
-    return await create_test_user(pool)
+    """`create_test_user`(users 행만)가 아니라 `create_test_tenant`을 쓴다 —
+    `upsert_risk_limit`이 남기는 `foundation_audit_event.tenant_id`는
+    `tenant(id)`를 참조해(FA-0a) users 행만으로는 FK 위반이 난다."""
+    return await create_test_tenant(pool)
 
 
 @pytest.fixture
 async def tenant_b(pool) -> UUID:
-    return await create_test_user(pool)
+    return await create_test_tenant(pool)
 
 
 def _scope_ref(prefix: str = "SYM") -> str:
