@@ -16,6 +16,7 @@
  * purely off `spec.kind`, never off indicator identity.
  */
 
+import type { OverlayOutput, OverlayPlacement } from "../indicators/overlayRegistry";
 import type { IndicatorStyleOutput } from "../plugins/indicatorPlugin";
 import { type FillSegment, computeFillSegments } from "./fillBetween";
 import type { PlotProjection } from "./scaleBinding";
@@ -109,6 +110,35 @@ export function decodePlotSpec(raw: unknown): PlotSpec {
     precision: precisionRaw === undefined ? null : (precisionRaw as number | null),
     legend_format: decodeNullableString(raw.legend_format, "legend_format"),
   };
+}
+
+/**
+ * Derives a default `PlotSpec` for one `OverlayEntry` output when the
+ * backend catalog (IND-12, `IndicatorListItemView`) does not carry a `plots`
+ * field yet — mirrors backend `specs_talib.py`'s output_flags-derived
+ * defaults (ADR-2026-09-06-F D1: plain output -> line, histogram output ->
+ * histogram, an upperband/lowerband pair -> band + fill_between) so
+ * screen/registry code never special-cases an indicator by name. A new
+ * `DEFAULT_OVERLAY_DEFINITIONS` entry (indicators/overlayRegistry.ts) picks
+ * up a correct `PlotSpec` from this function with zero changes anywhere
+ * else — this is the DoD-required "add an indicator, screen code doesn't
+ * change" path for the still-server-value-less CORE tier.
+ */
+export function deriveOverlayPlotSpec(placement: OverlayPlacement, outputs: readonly OverlayOutput[], output: OverlayOutput): PlotSpec {
+  const scale: ScaleHint = placement === "main-overlay" ? "overlay" : "own";
+  const default_pane: DefaultPane = placement === "main-overlay" ? "price" : "separate";
+  const base = { scale, default_pane, color_rule: null, precision: null, legend_format: null };
+
+  if (output.series === "histogram") {
+    return { ...base, kind: "histogram", fill_between: null };
+  }
+  if (output.name === "upperband" && outputs.some((o) => o.name === "lowerband")) {
+    return { ...base, kind: "band", fill_between: "lowerband" };
+  }
+  if (output.name === "lowerband" && outputs.some((o) => o.name === "upperband")) {
+    return { ...base, kind: "band", fill_between: null };
+  }
+  return { ...base, kind: "line", fill_between: null };
 }
 
 export interface PlotSeriesPoint {

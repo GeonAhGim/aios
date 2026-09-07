@@ -287,7 +287,7 @@ export type {
   PlotSpec,
   ScaleHint,
 } from "./render/plotRenderers";
-export { PlotRenderError, decodePlotSpec, renderPlot } from "./render/plotRenderers";
+export { PlotRenderError, decodePlotSpec, deriveOverlayPlotSpec, renderPlot } from "./render/plotRenderers";
 
 export type { FillBetweenErrorCode, FillDirection, FillSegment, FillSegmentPoint, FillSeriesPoint } from "./render/fillBetween";
 export { FillBetweenError, computeFillSegments } from "./render/fillBetween";

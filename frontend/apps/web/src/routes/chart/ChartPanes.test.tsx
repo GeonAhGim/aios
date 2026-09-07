@@ -1,15 +1,17 @@
 import "@testing-library/jest-dom/vitest";
 import type { StreamCandle } from "@aios/chart-engine/src/data/candleStream";
 import type { OverlayEntry } from "@aios/chart-engine/src/indicators/overlayRegistry";
+import type { PlotSeriesPoint } from "@aios/chart-engine/src/render/plotRenderers";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { useState } from "react";
 import { afterEach, describe, expect, it } from "vitest";
 import { ChartPanes } from "./ChartPanes";
+import type { OverlayPlotSpecOverrides, OverlaySeriesByOutput } from "./ChartPlotLayer";
 
 afterEach(cleanup);
 
-function overlay(id: string, placement: OverlayEntry["placement"] = "sub-pane"): OverlayEntry {
-  return { id, placement, params: [], outputs: [{ name: "value", series: "line" }], paneIndex: 1 };
+function overlay(id: string, placement: OverlayEntry["placement"] = "sub-pane", outputs: OverlayEntry["outputs"] = [{ name: "value", series: "line" }]): OverlayEntry {
+  return { id, placement, params: [], outputs, paneIndex: 1 };
 }
 
 function candle(hourOffset: number): StreamCandle {
@@ -40,16 +42,30 @@ function ratiosOf(paneIds: readonly string[]): number[] {
 
 // 부모(ChartPage)가 selectedIndicatorIds를 소유하는 실제 관용을 그대로 흉내낸다 —
 // ChartPanes는 subOverlays를 controlled prop으로만 받는다(decision: 새 상태 신설 금지).
-function Harness({ initialSub, restoredHeightRatios }: { initialSub: OverlayEntry[]; restoredHeightRatios?: Record<string, number> }) {
+function Harness({
+  initialSub,
+  mainOverlays = [],
+  restoredHeightRatios,
+  overlaySeries,
+  overlayPlotSpecs,
+}: {
+  initialSub: OverlayEntry[];
+  mainOverlays?: OverlayEntry[];
+  restoredHeightRatios?: Record<string, number>;
+  overlaySeries?: ReadonlyMap<string, OverlaySeriesByOutput>;
+  overlayPlotSpecs?: ReadonlyMap<string, OverlayPlotSpecOverrides>;
+}) {
   const [sub, setSub] = useState(initialSub);
   return (
     <ChartPanes
       candles={CANDLES}
-      mainOverlays={[]}
+      mainOverlays={mainOverlays}
       subOverlays={sub}
       drawings={[]}
       onRemoveSubOverlay={(id) => setSub((prev) => prev.filter((o) => o.id !== id))}
       restoredHeightRatios={restoredHeightRatios}
+      overlaySeries={overlaySeries}
+      overlayPlotSpecs={overlayPlotSpecs}
     >
       <div data-testid="main-content">캔들</div>
     </ChartPanes>
@@ -106,5 +122,56 @@ describe("ChartPanes — negative: 저장된 페인 레이아웃 높이 합 불�
     const ratios = ratiosOf(["main", "sub-MFI"]);
     expect(ratios).not.toEqual([0.5, 0.4]);
     expect(ratios.reduce((a, b) => a + b, 0)).toBeCloseTo(1, 4);
+  });
+});
+
+function overlaySeriesPoints(values: readonly number[]): readonly PlotSeriesPoint[] {
+  return CANDLES.slice(0, values.length).map((c, i) => ({ time: c.openTimeMs, value: values[i]! }));
+}
+
+describe("ChartPanes — CH-15b: PlotSpec-driven dispatch, no screen-code change per new indicator", () => {
+  it("DoD: two brand-new indicators with different PlotSpec kinds (line, band/fill_between) both render", () => {
+    const newLine = overlay("BRAND_NEW_LINE", "sub-pane", [{ name: "value", series: "line" }]);
+    const newBand = overlay("BRAND_NEW_BAND", "main-overlay", [
+      { name: "upperband", series: "line" },
+      { name: "lowerband", series: "line" },
+    ]);
+    const overlaySeries = new Map<string, OverlaySeriesByOutput>([
+      ["BRAND_NEW_LINE", new Map([["value", overlaySeriesPoints([1, 2, 3, 4])]])],
+      [
+        "BRAND_NEW_BAND",
+        new Map([
+          ["upperband", overlaySeriesPoints([55, 56, 57, 58])],
+          ["lowerband", overlaySeriesPoints([45, 46, 47, 48])],
+        ]),
+      ],
+    ]);
+
+    render(<Harness initialSub={[newLine]} mainOverlays={[newBand]} overlaySeries={overlaySeries} />);
+
+    expect(screen.getByTestId("chart-pane-plot-sub-BRAND_NEW_LINE").querySelector("polyline")).not.toBeNull();
+    expect(screen.getByTestId("chart-pane-plot-main").querySelector("polygon")).not.toBeNull();
+  });
+
+  it("negative: an unknown PlotSpec.kind is rejected explicitly on screen, not silently skipped", () => {
+    const weird = overlay("WEIRD", "sub-pane", [{ name: "value", series: "line" }]);
+    const overlaySeries = new Map<string, OverlaySeriesByOutput>([["WEIRD", new Map([["value", overlaySeriesPoints([1, 2])]])]]);
+    const overlayPlotSpecs = new Map<string, OverlayPlotSpecOverrides>([
+      [
+        "WEIRD",
+        new Map<string, unknown>([
+          [
+            "value",
+            { kind: "__unknown__", scale: "own", default_pane: "separate", fill_between: null, color_rule: null, precision: null, legend_format: null },
+          ],
+        ]),
+      ],
+    ]);
+
+    render(<Harness initialSub={[weird]} overlaySeries={overlaySeries} overlayPlotSpecs={overlayPlotSpecs} />);
+
+    const banner = screen.getByTestId("chart-pane-plot-error-sub-WEIRD");
+    expect(banner).toHaveTextContent("PLOT_RENDER_UNKNOWN_KIND");
+    expect(screen.getByTestId("chart-pane-plot-sub-WEIRD").querySelector("polyline")).toBeNull();
   });
 });

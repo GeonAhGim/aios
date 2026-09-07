@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
+import type { OverlayOutput } from "../../indicators/overlayRegistry";
 import type { IndicatorStyleOutput } from "../../plugins/indicatorPlugin";
-import { PlotRenderError, type PlotRenderTarget, type PlotSpec, decodePlotSpec, renderPlot } from "../plotRenderers";
+import { PlotRenderError, type PlotRenderTarget, type PlotSpec, decodePlotSpec, deriveOverlayPlotSpec, renderPlot } from "../plotRenderers";
 import type { PlotProjection } from "../scaleBinding";
 
 const IDENTITY_PROJECTION: PlotProjection = { timeToX: (t) => t, priceToY: (v) => v };
@@ -148,6 +149,51 @@ describe("renderPlot: kind dispatch", () => {
     expect(() =>
       renderPlot(spec({ kind: "band", fill_between: "lowerband" }), "upperband", series, IDENTITY_PROJECTION, VISIBLE_STYLE, target),
     ).toThrow(/PLOT_RENDER_FILL_TARGET_MISSING/);
+  });
+});
+
+describe("deriveOverlayPlotSpec", () => {
+  const value: OverlayOutput = { name: "value", series: "line" };
+  const hist: OverlayOutput = { name: "hist", series: "histogram" };
+  const upperband: OverlayOutput = { name: "upperband", series: "line" };
+  const middleband: OverlayOutput = { name: "middleband", series: "line" };
+  const lowerband: OverlayOutput = { name: "lowerband", series: "line" };
+
+  it("main-overlay line output gets scale=overlay/default_pane=price", () => {
+    expect(deriveOverlayPlotSpec("main-overlay", [value], value)).toEqual(
+      spec({ kind: "line", scale: "overlay", default_pane: "price" }),
+    );
+  });
+
+  it("sub-pane line output gets scale=own/default_pane=separate", () => {
+    expect(deriveOverlayPlotSpec("sub-pane", [value], value)).toEqual(
+      spec({ kind: "line", scale: "own", default_pane: "separate" }),
+    );
+  });
+
+  it("a histogram-series output derives kind=histogram", () => {
+    expect(deriveOverlayPlotSpec("sub-pane", [hist], hist)).toEqual(
+      spec({ kind: "histogram", scale: "own", default_pane: "separate" }),
+    );
+  });
+
+  it("an upperband/lowerband pair derives kind=band with fill_between only on upperband (BBANDS-shaped)", () => {
+    const outputs = [upperband, middleband, lowerband];
+    expect(deriveOverlayPlotSpec("main-overlay", outputs, upperband)).toEqual(
+      spec({ kind: "band", scale: "overlay", default_pane: "price", fill_between: "lowerband" }),
+    );
+    expect(deriveOverlayPlotSpec("main-overlay", outputs, lowerband)).toEqual(
+      spec({ kind: "band", scale: "overlay", default_pane: "price", fill_between: null }),
+    );
+    expect(deriveOverlayPlotSpec("main-overlay", outputs, middleband)).toEqual(
+      spec({ kind: "line", scale: "overlay", default_pane: "price" }),
+    );
+  });
+
+  it("every derived spec decodes cleanly through decodePlotSpec (shape stays valid)", () => {
+    for (const output of [value, hist, upperband, lowerband]) {
+      expect(() => decodePlotSpec(deriveOverlayPlotSpec("sub-pane", [output], output))).not.toThrow();
+    }
   });
 });
 
