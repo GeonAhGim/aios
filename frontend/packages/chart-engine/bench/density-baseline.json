@@ -1,0 +1,10 @@
+{
+  "candleCount": 100000,
+  "indicatorInstanceCount": 30,
+  "metrics": {
+    "panZoomFrameMsP95": 10,
+    "indicatorAddMs": 60,
+    "tickUpdateMsP95": 0.05
+  },
+  "updated_at": "2026-09-07T00:07:00.000Z"
+}
