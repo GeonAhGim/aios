@@ -6,6 +6,11 @@ DoD(task-451): "yaml 캘린더가 md_venue_calendar_day로 멱등 적재(같은 
 계약대로, 적재되지 않은 venue/year 조회는 `None`이 아니라
 `CalendarNotLoadedError`를 던진다(§4.1 fail-closed, 포트 파일은 이
 리프에서 수정하지 않는다 — decision, task-451).
+
+task-1768: `KRX_2026.yaml`의 `source`는 더 이상 `UNVERIFIED` placeholder가
+아니라 KRX 공식 출처 URL + 수집 시각이다(ADR-2026-09-06-H D3). 아래
+멱등성 테스트는 그 실제 값을 그대로 재사용해 문자열을 이중 관리하지
+않는다.
 """
 from __future__ import annotations
 
@@ -109,23 +114,25 @@ async def test_upsert_days_rejects_mismatched_venue(pool, repo):
             await repo.upsert_days(conn, Venue.KIS_KRX, [day])
 
 
-def test_load_calendar_parses_unverified_krx_yaml():
+def test_load_calendar_parses_krx_yaml_with_verified_source():
     days = load_calendar(_KRX_2026_YAML)
     assert days, "KRX_2026.yaml에 최소 1개 휴장일이 있어야 한다"
     assert all(day.venue == Venue.KIS_KRX for day in days)
-    assert all(day.source == "UNVERIFIED" for day in days)
+    assert all(day.source != "UNVERIFIED" for day in days)
+    assert all("collected_at=" in day.source for day in days)
 
 
 async def test_yaml_calendar_loaded_twice_keeps_row_count_stable(pool, repo):
     """DoD 핵심: 같은 yaml 파일을 2회 적재해도 md_venue_calendar_day 행 수가
     바뀌지 않는다(멱등 적재)."""
     days = load_calendar(_KRX_2026_YAML)
+    source = days[0].source
 
     async def _count(conn) -> int:
         return await conn.fetchval(
             "SELECT count(*) FROM md_venue_calendar_day WHERE venue = $1 AND source = $2",
             Venue.KIS_KRX.value,
-            "UNVERIFIED",
+            source,
         )
 
     async with pool.acquire() as conn, conn.transaction():

@@ -1,0 +1,28 @@
+# config/market_calendars/US_2027.yaml
+#
+# source: NYSE(뉴욕증권거래소) 공식 휴장일·조기폐장 캘린더 —
+# https://www.nyse.com/markets/hours-calendars (task-1768, decision,
+# ADR-2026-09-06-H D3). NASDAQ도 동일 캘린더를 따르므로(KNOWN_SESSIONS의
+# KIS_US 세션 스펙 주석 참고) `Venue.KIS_US` 하나로 등재한다.
+#
+# Spec: docs/specs/L4_market_data_positions_ledger_v1.0.md#§9.2 LA-12, §10 R4.
+
+source: https://www.nyse.com/markets/hours-calendars
+collected_at: 2026-09-07
+venue: KIS_US
+
+holidays:
+  - 2027-01-01  # New Year's Day
+  - 2027-01-18  # Martin Luther King, Jr. Day
+  - 2027-02-15  # Washington's Birthday
+  - 2027-03-26  # Good Friday
+  - 2027-05-31  # Memorial Day
+  - 2027-06-18  # Juneteenth National Independence Day(observed, 6/19가 토요일)
+  - 2027-07-05  # Independence Day(observed, 7/4가 일요일)
+  - 2027-09-06  # Labor Day
+  - 2027-11-25  # Thanksgiving Day
+  - 2027-12-24  # Christmas Day(observed, 12/25가 토요일)
+
+early_closes:
+  - date: 2027-11-26  # 추수감사절 다음날
+    close_time: "13:00"

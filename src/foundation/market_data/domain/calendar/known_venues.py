@@ -4,6 +4,14 @@ Spec: docs/specs/L4_market_data_positions_ledger_v1.0.md#§2.2, §9.2 LA-3.
 개장·마감 시각은 각 거래소 정규시장 공지 기준 표준 사실이다(휴장일 목록은
 여기 포함하지 않는다 — 그 목록은 R4 미확인 대상이며 LA-12 yaml 로더가 별도
 공급한다). NYSE·NASDAQ은 정규장 시간이 같아 `KIS_US` 하나로 취급한다.
+
+KIS_KRX의 `close_time=15:30`은 연속경쟁매매(09:00~15:20)와 그 뒤에 이어지는
+종가단일가매매(15:20~15:30, 당일 종가를 단일가로 결정하는 호가 집중 구간)를
+모두 포함한 정규장 마감 시각이다 — 유가증권시장 업무규정(한국거래소)상
+정규시장은 이 종가단일가매매 구간까지가 하나의 정규 세션이므로, 개장·폐장
+여부 판정(`VenueCalendar.is_open`)에는 별도 세션 구간으로 쪼개지 않는다.
+(참고: https://easylaw.go.kr/CSP/CnpClsMain.laf?csmSeq=1701 — "매매거래일·
+거래시간 및 거래 원칙 등")
 """
 from __future__ import annotations
 
