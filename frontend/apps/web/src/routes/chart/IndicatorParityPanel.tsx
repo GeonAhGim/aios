@@ -23,8 +23,7 @@ import {
   type IndicatorParams,
   type IndicatorSeriesResult,
 } from "@aios/chart-engine/src/compute/clientEngine";
-import { resolveVerifiedIndicators } from "@aios/chart-engine/src/compute/verifiedIndicators";
-import { resolveIndicatorSeries, type IndicatorSeriesSource, type ParityVerdict } from "@aios/chart-engine/src/compute/parityCheck";
+import { resolveIndicatorSeries, type IndicatorSeriesSource } from "@aios/chart-engine/src/compute/parityCheck";
 
 export type ServerIndicatorSeriesPort = (args: {
   readonly name: string;
@@ -67,7 +66,17 @@ interface IndicatorParityRow {
   readonly id: string;
   readonly source: IndicatorSeriesSource;
   readonly value: number | null;
-  readonly verdict: ParityVerdict | null;
+  /**
+   * Human-readable fallback reason, set whenever the rendered value is NOT
+   * the client-computed one the user would otherwise expect: either a
+   * client/server value mismatch (`ParityVerdict`), or the client engine
+   * refusing this indicator outright (e.g. BBANDS — not in
+   * `verifiedIndicators.ts`'s whitelist for ANY catalog, per
+   * `clientEngine.ts`'s module docstring). `null` only when the client value
+   * was used as-is or nothing could be verified at all (DoD: a fallback must
+   * always surface, but "nothing to fall back to" is not a fallback).
+   */
+  readonly fallbackReason: string | null;
 }
 
 function buildRow(
@@ -82,10 +91,20 @@ function buildRow(
   try {
     client = computeIndicatorSeries({ name: overlay.id, params, bars, catalog });
   } catch (err) {
-    if (err instanceof ClientEngineError) {
-      return { id: overlay.id, source: "unverified", value: null, verdict: null };
+    if (!(err instanceof ClientEngineError)) throw err;
+    const server = resolveServerSeries({ name: overlay.id, params, bars });
+    if (server === null) {
+      return { id: overlay.id, source: "unverified", value: null, fallbackReason: null };
     }
-    throw err;
+    // eslint-disable-next-line no-console -- DoD: an indicator the client engine refuses must still
+    // fall back to the server observably, never silently (same rule as the parity-mismatch branch below).
+    console.warn(`CH-18c indicator not client-verified, falling back to server: ${overlay.id} (${err.code})`);
+    return {
+      id: overlay.id,
+      source: "server",
+      value: lastNonNull(server[primaryOutput]),
+      fallbackReason: `클라이언트 미검증: ${err.code}`,
+    };
   }
   const server = resolveServerSeries({ name: overlay.id, params, bars });
   const resolved = resolveIndicatorSeries({
@@ -101,7 +120,8 @@ function buildRow(
     id: overlay.id,
     source: resolved.source,
     value: lastNonNull(resolved.series?.[primaryOutput]),
-    verdict: resolved.verdict,
+    fallbackReason:
+      resolved.verdict && !resolved.verdict.ok ? `최대오차 ${resolved.verdict.maxAbsError.toExponential(3)}` : null,
   };
 }
 
@@ -123,11 +143,13 @@ export function IndicatorParityPanel({
   resolveServerSeries = NO_SERVER_SERIES,
 }: IndicatorParityPanelProps) {
   const bars = useMemo(() => candles.map(toBar), [candles]);
-  const verified = useMemo(() => resolveVerifiedIndicators(catalog), [catalog]);
 
-  const rows = overlays
-    .filter((overlay) => verified.has(overlay.id))
-    .map((overlay) => buildRow(overlay, overlay.outputs[0]!.name, bars, catalog, resolveServerSeries));
+  // Every selected overlay gets a row, whitelisted or not — a rejected
+  // indicator (BBANDS, or any name the live catalog no longer pins) must
+  // still surface as unverified/server-fallback, never disappear silently
+  // (see buildRow; this used to pre-filter on the whitelist and dropped the
+  // overlay before it ever got a chance to fall back — CH-18c).
+  const rows = overlays.map((overlay) => buildRow(overlay, overlay.outputs[0]!.name, bars, catalog, resolveServerSeries));
 
   if (rows.length === 0) return null;
 
@@ -138,10 +160,10 @@ export function IndicatorParityPanel({
           <span>{row.id}: </span>
           <span data-testid={`indicator-parity-value-${row.id}`}>{row.value !== null ? row.value.toFixed(6) : "--"}</span>
           <span data-testid={`indicator-parity-source-${row.id}`}> ({row.source})</span>
-          {row.verdict && !row.verdict.ok && (
+          {row.fallbackReason && (
             <span data-testid={`indicator-parity-fallback-${row.id}`}>
               {" "}
-              — 서버 값으로 대체됨(최대오차 {row.verdict.maxAbsError.toExponential(3)})
+              — 서버 값으로 대체됨({row.fallbackReason})
             </span>
           )}
         </p>
