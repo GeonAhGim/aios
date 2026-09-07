@@ -171,6 +171,7 @@ export function IndicatorPicker({
         role="listbox"
         aria-multiselectable="true"
         aria-label="지표 목록"
+        aria-activedescendant={visibleItems[activeIndex] ? `indicator-option-${visibleItems[activeIndex].name}` : undefined}
         tabIndex={0}
         className="max-h-64 overflow-auto"
         onKeyDown={onListKeyDown}
