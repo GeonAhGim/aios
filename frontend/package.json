@@ -9,6 +9,8 @@
     "dev:web": "npm run dev --workspace=apps/web",
     "build:web": "npm run build --workspace=apps/web",
     "test": "npm run test --workspaces --if-present",
-    "check:filesize": "node scripts/check_frontend_file_size.mjs"
+    "check:filesize": "node scripts/check_frontend_file_size.mjs",
+    "check:unwired-modules": "node scripts/check_unwired_modules.mjs",
+    "test:unwired-modules": "node --test scripts/check_unwired_modules.test.mjs"
   }
 }

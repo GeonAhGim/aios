@@ -1,0 +1,21 @@
+{
+  "note": "task-2027 unwired-module ratchet floor. Modules chart-engine/src/index.ts exports that apps/web/src never imports (production code only, deep-import convention — see check_unwired_modules.mjs). Growth past this list fails; a module getting wired is reported as improvable but never auto-removed here — a human commits the smaller list once its wiring task lands. core/renderer, core/series, core/klinechartsBackend, core/klinecharts, core/klinechartsSeries: apps/web talks to the vendor klinecharts fork directly instead of chart-engine's abstract renderer/series backend (see ChartToolbar.tsx/ChartPage.tsx header comments) — spec CH-14 (§9.11) predecessor surface. render/plotRenderers, render/scaleBinding, render/fillBetween: CH-15/CH-15b (task-2002, in_progress). render/lod, render/viewport: CH-19 density/perf surface, not yet consumed by a route. legend/statusLine, legend/dataWindow: CH-16 (task-2013 covers the sibling objectTree persistence gap; statusLine/dataWindow are the untouched half — see ChartLegend.tsx/ChartPanes.tsx header comments). compute/workerPool: CH-18/CH-18c (task-2001, done — clientEngine itself is wired, the worker-pool backend is not). compute/verifiedIndicators: IndicatorParityPanel.tsx only mentions verifiedIndicators.ts in comments, never imports VERIFIED_KERNEL_PINS/isVerifiedIndicator/resolveVerifiedIndicators from production code (test-only today) — CH-18 residual. drawings/serialize: ChartPage.tsx wires drawings/tools+drawings/model but never serializeDrawings/deserializeDrawings — CH-4b (task-2012, assigned) needs this to talk to the drawings persistence API.",
+  "generated_at": "2026-09-07T00:00:00+00:00",
+  "modules": [
+    "compute/verifiedIndicators",
+    "compute/workerPool",
+    "core/klinechartsBackend",
+    "core/klinecharts",
+    "core/klinechartsSeries",
+    "core/renderer",
+    "core/series",
+    "drawings/serialize",
+    "legend/dataWindow",
+    "legend/statusLine",
+    "render/fillBetween",
+    "render/lod",
+    "render/plotRenderers",
+    "render/scaleBinding",
+    "render/viewport"
+  ]
+}
