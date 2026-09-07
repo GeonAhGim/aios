@@ -1,6 +1,10 @@
 """75번 §2/§3 규칙의 단위테스트 — DB 없이 순수 함수만 검증한다."""
+from dataclasses import replace
 from datetime import datetime, timezone
-from uuid import uuid4
+from typing import TypedDict
+from uuid import UUID, uuid4
+
+from typing_extensions import Unpack
 
 from src.foundation.mandates.domain.models import (
     Autonomy,
@@ -17,22 +21,35 @@ from src.foundation.mandates.domain.rules import (
 
 NOW = datetime(2026, 9, 2, tzinfo=timezone.utc)
 
+_DEFAULT_REVISION = MandateRevision(
+    id=uuid4(),
+    mandate_id=uuid4(),
+    revision_no=1,
+    state=MandateRevisionState.ACTIVE,
+    max_total_exposure_pct=80.0,
+    max_single_instrument_pct=20.0,
+    min_cash_buffer_pct=5.0,
+    max_daily_loss_pct=3.0,
+    allowed_autonomy=Autonomy.PAPER,
+    forbidden_assets=("XYZ",),
+)
 
-def _revision(**overrides: object) -> MandateRevision:
-    defaults: dict[str, object] = dict(
-        id=uuid4(),
-        mandate_id=uuid4(),
-        revision_no=1,
-        state=MandateRevisionState.ACTIVE,
-        max_total_exposure_pct=80.0,
-        max_single_instrument_pct=20.0,
-        min_cash_buffer_pct=5.0,
-        max_daily_loss_pct=3.0,
-        allowed_autonomy=Autonomy.PAPER,
-        forbidden_assets=("XYZ",),
-    )
-    defaults.update(overrides)
-    return MandateRevision(**defaults)  # type: ignore[arg-type]
+
+class _RevisionOverrides(TypedDict, total=False):
+    id: UUID
+    mandate_id: UUID
+    revision_no: int
+    state: MandateRevisionState
+    max_total_exposure_pct: float
+    max_single_instrument_pct: float
+    min_cash_buffer_pct: float
+    max_daily_loss_pct: float
+    allowed_autonomy: Autonomy
+    forbidden_assets: tuple[str, ...]
+
+
+def _revision(**overrides: Unpack[_RevisionOverrides]) -> MandateRevision:
+    return replace(_DEFAULT_REVISION, **overrides)
 
 
 def test_revision_hash_is_stable_for_same_rule_content():
@@ -150,3 +167,4 @@ def test_detect_material_change_is_empty_when_strictly_more_conservative():
         forbidden_assets=("XYZ", "ABC"),  # 확대(더 제한적)
     )
     assert detect_material_change(current, proposed) == []
+

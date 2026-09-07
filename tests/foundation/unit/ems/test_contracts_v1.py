@@ -36,7 +36,7 @@ def _algo_spec(**overrides: object) -> AlgoSpec:
         "seed": 42,
     }
     fields.update(overrides)
-    return AlgoSpec(**fields)  # type: ignore[arg-type]
+    return AlgoSpec.model_validate(fields)
 
 
 def test_algo_spec_accepts_known_kind() -> None:

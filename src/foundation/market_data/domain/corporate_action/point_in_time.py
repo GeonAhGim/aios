@@ -28,11 +28,13 @@ def resolve_as_of(actions: Sequence[CorporateAction], as_of: datetime) -> list[C
 
     by_key: dict[tuple[UUID, str, date], CorporateAction] = {}
     for action in actions:
-        if action.known_at is None or action.known_at > as_of:
+        known_at = action.known_at
+        if known_at is None or known_at > as_of:
             continue
         key = (action.instrument_id, action.action_type, action.ex_date)
         current = by_key.get(key)
-        if current is None or action.known_at > current.known_at:  # type: ignore[operator]
+        current_known_at = current.known_at if current is not None else None
+        if current_known_at is None or known_at > current_known_at:
             by_key[key] = action
 
     return sorted(by_key.values(), key=lambda a: (str(a.instrument_id), a.ex_date))

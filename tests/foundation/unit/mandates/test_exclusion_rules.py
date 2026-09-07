@@ -1,10 +1,13 @@
 """CM-2 단위테스트 — 7종 제약(자산군·국가·통화·유동성·집중도·레버리지·ESG)이
 전부 domain/exclusion.py로 표현 가능함을 증명한다. DB/HTTP 없이 순수 함수만
 검증한다(I-01~I-11)."""
+from dataclasses import replace
 from datetime import datetime, timezone
-from uuid import uuid4
+from typing import TypedDict
+from uuid import UUID, uuid4
 
 import pytest
+from typing_extensions import Unpack
 
 from src.foundation.mandates.domain.exclusion import (
     evaluate_exclusion_lists,
@@ -21,34 +24,68 @@ from src.foundation.mandates.domain.models import (
 
 NOW = datetime(2026, 9, 7, tzinfo=timezone.utc)
 
+_DEFAULT_REVISION = MandateRevision(
+    id=uuid4(),
+    mandate_id=uuid4(),
+    revision_no=1,
+    state=MandateRevisionState.ACTIVE,
+    max_total_exposure_pct=80.0,
+    max_single_instrument_pct=20.0,
+    min_cash_buffer_pct=5.0,
+    max_daily_loss_pct=3.0,
+    allowed_autonomy=Autonomy.PAPER,
+    forbidden_assets=(),
+    excluded_asset_classes=("DERIVATIVES",),
+    excluded_countries=("KP",),
+    excluded_currencies=("RUB",),
+    min_liquidity_score=10.0,
+    esg_excluded_symbols=("COAL_CO",),
+    max_leverage_ratio=2.0,
+)
 
-def _revision(**overrides: object) -> MandateRevision:
-    defaults: dict[str, object] = dict(
-        id=uuid4(),
-        mandate_id=uuid4(),
-        revision_no=1,
-        state=MandateRevisionState.ACTIVE,
-        max_total_exposure_pct=80.0,
-        max_single_instrument_pct=20.0,
-        min_cash_buffer_pct=5.0,
-        max_daily_loss_pct=3.0,
-        allowed_autonomy=Autonomy.PAPER,
-        forbidden_assets=(),
-        excluded_asset_classes=("DERIVATIVES",),
-        excluded_countries=("KP",),
-        excluded_currencies=("RUB",),
-        min_liquidity_score=10.0,
-        esg_excluded_symbols=("COAL_CO",),
-        max_leverage_ratio=2.0,
-    )
-    defaults.update(overrides)
-    return MandateRevision(**defaults)  # type: ignore[arg-type]
+_DEFAULT_SUBJECT = PolicyEvaluationSubject(command_type="paper_deployment")
 
 
-def _subject(**overrides: object) -> PolicyEvaluationSubject:
-    defaults: dict[str, object] = dict(command_type="paper_deployment")
-    defaults.update(overrides)
-    return PolicyEvaluationSubject(**defaults)  # type: ignore[arg-type]
+class _RevisionOverrides(TypedDict, total=False):
+    id: UUID
+    mandate_id: UUID
+    revision_no: int
+    state: MandateRevisionState
+    max_total_exposure_pct: float
+    max_single_instrument_pct: float
+    min_cash_buffer_pct: float
+    max_daily_loss_pct: float
+    allowed_autonomy: Autonomy
+    forbidden_assets: tuple[str, ...]
+    excluded_asset_classes: tuple[str, ...]
+    excluded_countries: tuple[str, ...]
+    excluded_currencies: tuple[str, ...]
+    min_liquidity_score: float | None
+    esg_excluded_symbols: tuple[str, ...]
+    max_leverage_ratio: float | None
+
+
+class _SubjectOverrides(TypedDict, total=False):
+    command_type: str
+    instrument_exposure_pct: float | None
+    total_exposure_pct: float | None
+    cash_buffer_pct: float | None
+    projected_daily_loss_pct: float | None
+    requested_autonomy: Autonomy | None
+    asset: str | None
+    asset_class: str | None
+    country: str | None
+    currency: str | None
+    liquidity_score: float | None
+    leverage_ratio: float | None
+
+
+def _revision(**overrides: Unpack[_RevisionOverrides]) -> MandateRevision:
+    return replace(_DEFAULT_REVISION, **overrides)
+
+
+def _subject(**overrides: Unpack[_SubjectOverrides]) -> PolicyEvaluationSubject:
+    return replace(_DEFAULT_SUBJECT, **overrides)
 
 
 # --- ESG negative test (DoD 1) --------------------------------------------
@@ -125,8 +162,8 @@ CONSTRAINT_CASES = [
 
 @pytest.mark.parametrize("revision_overrides,subject_overrides,expected_reason", CONSTRAINT_CASES)
 def test_each_of_the_seven_constraints_is_expressible(
-    revision_overrides: dict[str, object],
-    subject_overrides: dict[str, object],
+    revision_overrides: _RevisionOverrides,
+    subject_overrides: _SubjectOverrides,
     expected_reason: str,
 ) -> None:
     revision = _revision(**revision_overrides)

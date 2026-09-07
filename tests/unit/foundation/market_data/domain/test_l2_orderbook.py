@@ -6,10 +6,14 @@ D3. 스냅샷 적용·증분 적용(upsert/삭제)·음수 수량 거부(negativ
 """
 from __future__ import annotations
 
+from collections.abc import Mapping
+from dataclasses import replace
 from datetime import datetime, timezone
 from decimal import Decimal
+from typing import TypedDict
 
 import pytest
+from typing_extensions import Unpack
 
 from src.foundation.market_data.domain.l2_orderbook import (
     L2Diff,
@@ -21,16 +25,23 @@ from src.foundation.market_data.domain.l2_orderbook import (
 _T0 = datetime(2026, 1, 1, tzinfo=timezone.utc)
 _T1 = datetime(2026, 1, 1, 0, 0, 1, tzinfo=timezone.utc)
 
+_DEFAULT_SNAPSHOT = L2Snapshot(
+    sequence=100,
+    as_of=_T0,
+    bids={Decimal("10.0"): Decimal("1"), Decimal("9.5"): Decimal("2")},
+    asks={Decimal("10.5"): Decimal("1"), Decimal("11.0"): Decimal("2")},
+)
 
-def _snapshot(**overrides: object) -> L2Snapshot:
-    fields: dict[str, object] = {
-        "sequence": 100,
-        "as_of": _T0,
-        "bids": {Decimal("10.0"): Decimal("1"), Decimal("9.5"): Decimal("2")},
-        "asks": {Decimal("10.5"): Decimal("1"), Decimal("11.0"): Decimal("2")},
-    }
-    fields.update(overrides)
-    return L2Snapshot(**fields)  # type: ignore[arg-type]
+
+class _SnapshotOverrides(TypedDict, total=False):
+    sequence: int
+    as_of: datetime
+    bids: Mapping[Decimal, Decimal]
+    asks: Mapping[Decimal, Decimal]
+
+
+def _snapshot(**overrides: Unpack[_SnapshotOverrides]) -> L2Snapshot:
+    return replace(_DEFAULT_SNAPSHOT, **overrides)
 
 
 def test_from_snapshot_copies_levels():

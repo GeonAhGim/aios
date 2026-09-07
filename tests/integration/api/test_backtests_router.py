@@ -19,6 +19,7 @@ DC-28(ADR-2026-09-06-H D2) — `source_contract`의 `source_id` PK를 실DB에
 from __future__ import annotations
 
 import uuid
+from collections.abc import AsyncIterator
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 
@@ -114,7 +115,7 @@ class _CountingCandleStore:
 
 
 @pytest.fixture
-async def client():
+async def _app_client() -> AsyncIterator[tuple[AsyncClient, _CountingCandleStore]]:
     async with app.router.lifespan_context(app):
         counting = _CountingCandleStore(PostgresCandleStore(app.state.pool))
         app.dependency_overrides[get_candle_store] = lambda: counting
@@ -123,10 +124,22 @@ async def client():
         )
         transport = ASGITransport(app=app, raise_app_exceptions=False)
         async with AsyncClient(transport=transport, base_url="http://test") as ac:
-            ac.candle_store = counting  # type: ignore[attr-defined]
-            yield ac
+            yield ac, counting
         app.dependency_overrides.pop(get_candle_store, None)
         app.dependency_overrides.pop(get_source_contract_repository, None)
+
+
+@pytest.fixture
+def client(_app_client: tuple[AsyncClient, _CountingCandleStore]) -> AsyncClient:
+    return _app_client[0]
+
+
+@pytest.fixture
+def candle_store(_app_client: tuple[AsyncClient, _CountingCandleStore]) -> _CountingCandleStore:
+    """`client` fixture가 배선한 `_CountingCandleStore`를 공유한다 — `read_calls`
+    왕복 증명은 `AsyncClient`의 타입에 없는 속성을 monkeypatch로 얹는 대신
+    이 별도 fixture로 노출한다."""
+    return _app_client[1]
 
 
 async def _register(client: AsyncClient) -> tuple[dict, uuid.UUID]:
@@ -245,7 +258,7 @@ def test_router_has_zero_raw_http_exception() -> None:
 
 
 async def test_quick_backtest_success_envelope_and_single_candle_round_trip(
-    client: AsyncClient, seeded: dict
+    client: AsyncClient, seeded: dict, candle_store: _CountingCandleStore
 ) -> None:
     response = await client.post(PATH, json=_body(seeded), headers=seeded["a"])
     assert response.status_code == 200, response.text
@@ -258,7 +271,7 @@ async def test_quick_backtest_success_envelope_and_single_candle_round_trip(
         assert isinstance(fill["quantity"], str) and isinstance(fill["price"], str)
     # 결정론 순서: bar_index가 증가한다.
     assert [f["bar_index"] for f in data["fills"]] == sorted(f["bar_index"] for f in data["fills"])
-    assert client.candle_store.read_calls == 1  # type: ignore[attr-defined]
+    assert candle_store.read_calls == 1
 
 
 # ---- negative 4종 ----
@@ -328,7 +341,9 @@ async def test_internal_scope_source_still_permits_backtest(
     assert response.status_code == 200, response.text
 
 
-async def test_none_scope_source_denies_backtest(client: AsyncClient, seeded: dict) -> None:
+async def test_none_scope_source_denies_backtest(
+    client: AsyncClient, seeded: dict, candle_store: _CountingCandleStore
+) -> None:
     """DC-28 DoD — 재배포 스코프가 없는(NONE) 소스는 백테스트(내부 계산)
     경로에서도 캔들을 못 읽는다. `read_candles_columnar`가 호출되기 전에
     거부되므로 왕복 1회 증명(`read_calls`)도 0에서 멈춘다."""
@@ -338,4 +353,4 @@ async def test_none_scope_source_denies_backtest(client: AsyncClient, seeded: di
     response = await client.post(PATH, json=_body(seeded), headers=seeded["a"])
     assert response.status_code == 404, response.text
     assert response.json()["error_code"] == "RESOURCE_NOT_FOUND"
-    assert client.candle_store.read_calls == 0  # type: ignore[attr-defined]
+    assert candle_store.read_calls == 0
