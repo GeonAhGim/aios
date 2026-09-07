@@ -3,15 +3,12 @@
 // 서브패널 CRUD·높이 비율·크로스헤어 동기화를 그대로 쓰고, CH-16
 // legend/objectTree.ts 값을 ChartLegend에 그대로 넘긴다.
 //
-// legend/statusLine.ts는 여기서 재사용하지 않는다(ChartLegend.tsx 상단 주석 참고 —
-// "../core/klinecharts" 타입 임포트가 vendor 배럴을 통해 vendor 전체를 apps/web
-// tsconfig 아래로 끌어들여 tsc -b가 깨진다); DoD의 "전 페인 statusLine 동일 timeMs"
-// 요구는 crosshairSync.ts의 공유 시각만으로 충족한다. legend/dataWindow.ts는
-// task-2044로 타입 경계가 갈렸다: vendor 타입 절반은 dataWindowStyle.ts로 옮겨
-// apps/web이 절대 임포트하지 않고, 여기 쓰는 건 vendor-free한 dataWindow.ts의
-// computeDataWindowRows뿐이다(소비자: DataWindowPanel.tsx). statusLine.ts를 같은
-// 식으로 쪼개는 일은 이 리프 범위 밖이지만(legend/statusLine, unwired-modules-
-// baseline.json) 이 분리 패턴은 재사용 가능하다.
+// legend/dataWindow.ts(task-2044)·legend/statusLine.ts(task-2045)는 같은 타입
+// 경계 패턴을 쓴다: vendor 타입 절반(dataWindowStyle.ts/statusLineStyle.ts)은
+// apps/web이 절대 임포트하지 않고, vendor-free한 절반(computeDataWindowRows/
+// buildStatusLineLegends)만 각각 DataWindowPanel.tsx/StatusLine.tsx가 소비한다.
+// "전 페인 statusLine 동일 timeMs" 요구는 crosshairSync.ts의 공유 시각만으로
+// 충족한다 — StatusLine은 메인 페인 캔들의 OHLCV를 추가로 보여줄 뿐이다.
 //
 // 페인 배치 영속화(decision): 서브패널 존재 여부는 이미 CH-8로 저장되는
 // selectedIndicatorIds에서 파생한다 — 새 저장 경로를 만들지 않는다. heightRatio
@@ -39,6 +36,7 @@ import { createTimeScale } from "@aios/chart-engine/src/core/timeScale";
 import { Alert } from "@aios/ui-web";
 import { ChartLegend } from "./ChartLegend";
 import { DataWindowPanel } from "./DataWindowPanel";
+import { StatusLine } from "./StatusLine";
 import {
   PLOT_ERROR_REASONS,
   buildPlotLayer,
@@ -281,6 +279,8 @@ export function ChartPanes({
           );
         })}
       </div>
+
+      <StatusLine candles={candles} crosshairTimeMs={crosshairTimeMs} />
 
       <ChartLegend
         objectTree={objectTree}

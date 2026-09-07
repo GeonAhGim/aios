@@ -1,26 +1,25 @@
 import { describe, expect, it } from "vitest";
-import type { KLineData, NeighborData, TooltipLegend } from "../../core/klinecharts";
-import { buildStatusLineLegends, createCrosshairValueStyle, createStatusLineTooltipStyle } from "../statusLine";
+import { buildStatusLineLegends, type StatusLineCandle, type StatusLineLegend, type StatusLineNeighbor } from "../statusLine";
 
-function neighbor(current: KLineData | null, prev: KLineData | null = null): NeighborData<KLineData | null> {
+function neighbor(current: StatusLineCandle | null, prev: StatusLineCandle | null = null): StatusLineNeighbor<StatusLineCandle | null> {
   return { prev, current, next: null };
 }
 
-function legendValueText(legend: TooltipLegend): string {
+function legendValueText(legend: StatusLineLegend): string {
   return typeof legend.value === "string" ? legend.value : legend.value.text;
 }
 
-function findLegend(legends: readonly TooltipLegend[], title: string): TooltipLegend {
+function findLegend(legends: readonly StatusLineLegend[], title: string): StatusLineLegend {
   const legend = legends.find((l) => l.title === title);
   if (!legend) throw new Error(`no legend titled "${title}"`);
   return legend;
 }
 
 describe("buildStatusLineLegends", () => {
-  const candle: KLineData = { timestamp: 1_700_000_000_000, open: 100, high: 110, low: 95, close: 105, volume: 1234 };
+  const candle: StatusLineCandle = { timestamp: 1_700_000_000_000, open: 100, high: 110, low: 95, close: 105, volume: 1234 };
 
   it("formats OHLCV plus signed change/change% against the previous close", () => {
-    const prev: KLineData = { timestamp: 1_699_999_940_000, open: 90, high: 100, low: 88, close: 100 };
+    const prev: StatusLineCandle = { timestamp: 1_699_999_940_000, open: 90, high: 100, low: 88, close: 100 };
     const legends = buildStatusLineLegends(neighbor(candle, prev));
 
     expect(legendValueText(findLegend(legends, "O"))).toBe("100.00");
@@ -44,7 +43,7 @@ describe("buildStatusLineLegends", () => {
   });
 
   it("uses downColor for a negative change", () => {
-    const prev: KLineData = { timestamp: 0, open: 0, high: 0, low: 0, close: 200 };
+    const prev: StatusLineCandle = { timestamp: 0, open: 0, high: 0, low: 0, close: 200 };
     const legends = buildStatusLineLegends(neighbor(candle, prev));
     expect((findLegend(legends, "C").value as { color: string }).color).toBe("#F92855");
   });
@@ -61,24 +60,5 @@ describe("buildStatusLineLegends", () => {
 
     const precise = buildStatusLineLegends(neighbor(candle), { pricePrecision: 4 });
     expect(legendValueText(findLegend(precise, "O"))).toBe("100.0000");
-  });
-});
-
-describe("createStatusLineTooltipStyle", () => {
-  it("always shows the status line and wires the template to buildStatusLineLegends", () => {
-    const style = createStatusLineTooltipStyle({ defaultValue: "n/a" });
-    expect(style.showRule).toBe("always");
-    expect(style.legend?.defaultValue).toBe("n/a");
-
-    const template = style.legend!.template as (data: NeighborData<KLineData | null>) => TooltipLegend[];
-    const rendered = template(neighbor(null));
-    expect(legendValueText(findLegend(rendered, "O"))).toBe("n/a");
-  });
-});
-
-describe("createCrosshairValueStyle", () => {
-  it("shows axis value labels by default and can be turned off", () => {
-    expect(createCrosshairValueStyle().horizontal?.text?.show).toBe(true);
-    expect(createCrosshairValueStyle({ showAxisLabel: false }).vertical?.text?.show).toBe(false);
   });
 });

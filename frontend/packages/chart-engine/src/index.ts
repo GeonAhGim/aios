@@ -227,8 +227,8 @@ export {
   unregisterIndicatorPlugin,
 } from "./plugins/indicatorPlugin";
 
-export type { CrosshairValueOptions, StatusLineOptions } from "./legend/statusLine";
-export { buildStatusLineLegends, createCrosshairValueStyle, createStatusLineTooltipStyle } from "./legend/statusLine";
+export type { StatusLineCandle, StatusLineLegend, StatusLineNeighbor, StatusLineOptions } from "./legend/statusLine";
+export { buildStatusLineLegends } from "./legend/statusLine"; // statusLineStyle.ts (vendor-typed) deliberately not re-exported — see dataWindowStyle.ts note below.
 
 export type {
   DataWindowErrorCode,

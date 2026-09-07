@@ -60,17 +60,19 @@ function Harness({
   restoredHeightRatios,
   overlaySeries,
   overlayPlotSpecs,
+  candles = CANDLES,
 }: {
   initialSub: OverlayEntry[];
   mainOverlays?: OverlayEntry[];
   restoredHeightRatios?: Record<string, number>;
   overlaySeries?: ReadonlyMap<string, OverlaySeriesByOutput>;
   overlayPlotSpecs?: ReadonlyMap<string, OverlayPlotSpecOverrides>;
+  candles?: readonly StreamCandle[];
 }) {
   const [sub, setSub] = useState(initialSub);
   return (
     <ChartPanes
-      candles={CANDLES}
+      candles={candles}
       mainOverlays={mainOverlays}
       subOverlays={sub}
       drawings={[]}
@@ -210,6 +212,61 @@ describe("ChartPanes — CH-16d dataWindow 배선 (task-2044)", () => {
   // duplicate id across main/sub overlays is already rejected one layer up by
   // legend/objectTree.ts's own uniqueness invariant (CHART_OBJECT_TREE_DUPLICATE_ID),
   // so it never reaches computeDataWindowRows here.
+});
+
+function ohlcvCandle(hourOffset: number, v: { open: number; high: number; low: number; close: number; volume: number }): StreamCandle {
+  const open = new Date(Date.UTC(2026, 8, 3, hourOffset, 0, 0));
+  const close = new Date(Date.UTC(2026, 8, 3, hourOffset + 1, 0, 0));
+  return {
+    openTimeMs: open.getTime(),
+    confirmed: true,
+    record: {
+      key: { venue: "BITGET", instrument_id: "BTCUSDT", timeframe: "1h" },
+      open_time: open.toISOString(),
+      close_time: close.toISOString(),
+      open: v.open.toFixed(2),
+      high: v.high.toFixed(2),
+      low: v.low.toFixed(2),
+      close: v.close.toFixed(2),
+      volume: v.volume.toFixed(2),
+      quote_volume: "0",
+    },
+  };
+}
+
+// Three bars with distinct OHLCV each (unlike CANDLES, which repeats the same
+// values) so an off-by-one bar lookup is actually detectable.
+const OHLCV_BARS = [
+  ohlcvCandle(0, { open: 100, high: 110, low: 90, close: 105, volume: 50 }),
+  ohlcvCandle(1, { open: 200, high: 220, low: 190, close: 210, volume: 75 }),
+  ohlcvCandle(2, { open: 300, high: 330, low: 290, close: 310, volume: 60 }),
+];
+
+function statusLineValue(title: string): string | null {
+  return screen.getByTestId(`chart-status-line-${title}`).textContent?.replace(title, "").trim() ?? null;
+}
+
+describe("ChartPanes — CH-16e statusLine 실배선 (task-2045)", () => {
+  it("crosshair를 바 1(가운데)에 두면 상태줄 O/H/L/C/V가 그 바의 값과 정밀도까지 일치한다 (wiring proof: revert the <StatusLine> mount and this fails)", () => {
+    render(<Harness initialSub={[]} candles={OHLCV_BARS} />);
+
+    // Surface spans bar0..bar2 (2h); clientX at the midpoint lands exactly on bar1's timestamp.
+    fireEvent.mouseMove(screen.getByTestId("chart-pane-surface-main"), { clientX: 300 });
+
+    expect(statusLineValue("O")).toBe("200.00");
+    expect(statusLineValue("H")).toBe("220.00");
+    expect(statusLineValue("L")).toBe("190.00");
+    expect(statusLineValue("C")).toBe("210.00");
+    expect(statusLineValue("Vol")).toBe("75");
+  });
+
+  it("negative: 캔들이 없으면(크로스헤어가 가리킬 바가 없으면) 상태줄 전 필드가 defaultValue('--')로 렌더링된다", () => {
+    render(<Harness initialSub={[]} candles={[]} />);
+
+    for (const title of ["O", "H", "L", "C", "Vol", "Chg", "Chg%"]) {
+      expect(statusLineValue(title)).toBe("--");
+    }
+  });
 });
 
 describe("ChartPanes — CH-19c render/lod·render/viewport wiring", () => {

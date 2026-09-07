@@ -1,12 +1,15 @@
 /**
- * CH-16 — statusLine: style binding onto vendor `CandleTooltipView` +
- * `CrosshairFeatureView` (§9.11 CH-16 table). Per the spec, this file has no
- * tooltip drawing of its own — the vendor canvas view still draws every
- * pixel. What this module owns is the OHLCV row's *value selection and
- * formatting* (`buildStatusLineLegends`), handed to the vendor as the
- * `candle.tooltip.legend.template` callback, plus the small style overrides
- * (`showRule: "always"`) that make the row a persistent "status line" driven
- * by the crosshair's resolved bar rather than only appearing on hover.
+ * CH-16 — statusLine: the vendor-free half of the OHLCV "status line" split
+ * (task-2045, reusing task-2044's dataWindow.ts/dataWindowStyle.ts type
+ * boundary — see that file's docstring). `buildStatusLineLegends` is the pure
+ * value-selection-and-formatting logic meant to be handed to the vendor's
+ * `candle.tooltip.legend.template` callback (§9.11 CH-16 table); the style
+ * binding that actually references vendor `CandleTooltipStyle`/`CrosshairStyle`
+ * types lives in `statusLineStyle.ts` instead, because typing anything out of
+ * `../core/klinecharts` — even type-only — drags the whole `vendor/klinecharts`
+ * source tree into any tsc program that reaches it, and that vendor source
+ * isn't authored against apps/web's verbatimModuleSyntax/erasableSyntaxOnly
+ * flags. Keeping this module vendor-free is what lets apps/web import it.
  *
  * Fail-closed by construction, not by exception: a missing candle (no data
  * yet, or a crosshair resolved past the edge of the series) has no numbers
@@ -15,7 +18,28 @@
  * one showing placeholders.
  */
 
-import type { CandleStyle, CandleTooltipStyle, CrosshairStyle, DeepPartial, KLineData, NeighborData, TooltipLegend } from "../core/klinecharts";
+/** Structurally identical to vendor `KLineData` (`../core/klinecharts`), redeclared to stay vendor-free. */
+export interface StatusLineCandle {
+  readonly timestamp: number;
+  readonly open: number;
+  readonly high: number;
+  readonly low: number;
+  readonly close: number;
+  readonly volume?: number;
+}
+
+/** Structurally identical to vendor `NeighborData<T>` (`../core/klinecharts`), redeclared to stay vendor-free. */
+export interface StatusLineNeighbor<T> {
+  readonly prev: T;
+  readonly current: T;
+  readonly next: T;
+}
+
+/** Structurally identical to vendor `TooltipLegend` (`../core/klinecharts`), redeclared to stay vendor-free. */
+export interface StatusLineLegend {
+  readonly title: string;
+  readonly value: string | { readonly text: string; readonly color: string };
+}
 
 export interface StatusLineOptions {
   readonly pricePrecision?: number;
@@ -57,15 +81,13 @@ function changeColor(change: number | undefined, resolved: Required<StatusLineOp
 /**
  * Pure OHLCV row builder — the actual "crosshair value display" logic.
  * `data.current === null` covers both "no candles loaded yet" and "crosshair
- * resolved to an index outside the series", since the vendor passes `null`
- * for both (CH-14 `crosshairSync.ts` only tracks `timeMs`; resolving that to
- * a candle, and clamping out-of-range indexes to `null`, is the vendor's
- * `NeighborData` contract this binds to).
+ * resolved to an index outside the series", matching the vendor's own
+ * `NeighborData` contract this is designed to bind onto (`statusLineStyle.ts`).
  */
 export function buildStatusLineLegends(
-  data: NeighborData<KLineData | null>,
+  data: StatusLineNeighbor<StatusLineCandle | null>,
   options: StatusLineOptions = {},
-): TooltipLegend[] {
+): StatusLineLegend[] {
   const resolved = resolveOptions(options);
   const candle = data.current;
   if (candle === null) {
@@ -86,33 +108,4 @@ export function buildStatusLineLegends(
     { title: "Chg", value: { text: formatSigned(changeAbs, resolved.pricePrecision, resolved.defaultValue), color } },
     { title: "Chg%", value: { text: formatSigned(changePct, 2, resolved.defaultValue, "%"), color } },
   ];
-}
-
-/** Binds `buildStatusLineLegends` into the vendor style shape for `chart.setStyles({ candle: { tooltip: ... } })`. */
-export function createStatusLineTooltipStyle(options: StatusLineOptions = {}): DeepPartial<CandleTooltipStyle> {
-  return {
-    showRule: "always",
-    legend: {
-      defaultValue: resolveOptions(options).defaultValue,
-      template: (data: NeighborData<KLineData | null>, _styles: CandleStyle) => buildStatusLineLegends(data, options),
-    },
-  };
-}
-
-export interface CrosshairValueOptions {
-  readonly showAxisLabel?: boolean;
-}
-
-/**
- * `CrosshairFeatureView` and the axis price/time labels it sits alongside
- * both read `styles.crosshair` — this is the "값 표시" (value display) half
- * of that shared config; icon buttons (features) are left at vendor
- * defaults since CH-16's DoD is about values, not click actions.
- */
-export function createCrosshairValueStyle(options: CrosshairValueOptions = {}): DeepPartial<CrosshairStyle> {
-  const show = options.showAxisLabel ?? true;
-  return {
-    horizontal: { text: { show } },
-    vertical: { text: { show } },
-  };
 }
