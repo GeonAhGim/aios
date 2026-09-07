@@ -91,7 +91,9 @@ async def run_pre_trade_risk_phase(
     intent = build_order_intent(  # t0
         allocation, signal, ref_price=candles[-1].close, reduce_only=position_quantity != 0
     )
-    history = await candle_cache.get(adapter, intent.symbol, bars=policy.var.lookback_bars + 1)
+    history = await candle_cache.get(
+        adapter, intent.symbol, bars=policy.var.lookback_bars + 1, owner_id=user_id
+    )
     inputs = await assemble_risk_inputs(  # t2 — t1 실패(None)는 VaR 결손 → I2 DENY
         pool, caches, execution_id=execution_id, user_id=user_id, intent=intent,
         balances=balances, candles=history if history is not None else [], policy=policy, now=now,
