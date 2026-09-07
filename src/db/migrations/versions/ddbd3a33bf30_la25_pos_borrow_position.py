@@ -1,33 +1,37 @@
-"""LA-25 — pos_borrow_position(공매도 차입·마진 영속화) 신설.
+"""LA-25 — create pos_borrow_position (short-sale borrow/margin
+persistence).
 
 Revision ID: ddbd3a33bf30
 Revises: 47ec4b178f54
 Create Date: 2026-09-07 01:00:00.000000
 
 Spec: docs/specs/L4_market_data_positions_ledger_v1.0.md §9 LA-25,
-ADR-2026-09-06-G §9. `src/foundation/positions/domain/borrow.py`
-(task-1752 1차 리프, e31a63b)의 `BorrowPosition` 값 객체를 영속화하는
-테이블. 그 리프의 docstring이 예고한 대로 이 리프는 물리 스키마만
-만든다 — 리포지토리 어댑터·주문 경로 locate 게이트 배선은 후속 리프다.
+ADR-2026-09-06-G §9. The table that persists the `BorrowPosition` value
+object from `src/foundation/positions/domain/borrow.py` (task-1752's first
+leaf, e31a63b). As that leaf's docstring foretold, this leaf builds only
+the physical schema — wiring the repository adapter and the order-path
+locate gate is a later leaf.
 
-parent 결정(task-1752 decision): 착수 시점 `alembic heads`가 단일
-(`47ec4b178f54`)임을 확인하고 그대로 `down_revision`으로 쓴다. FA-0a
-배치 B(task-1987, positions 계열 tenant_id FK를 users에서 tenant로
-전환)는 아직 진행 중이라 `pos_account`/`pos_snapshot`은 여전히
-`tenant_id UUID REFERENCES users(user_id)`다 — 이 테이블은 그 레거시를
-잇지 않고 신설 테이블답게 처음부터 정확한 대상인 `tenant(id)`를
-참조한다(레거시 교정은 이 리프의 몫이 아니다). `position_key`는
-`pos_snapshot(position_key)`를 FK로 걸지 않는다 — 배치 B가 아직
-진행 중인 상태에서 두 테이블의 tenant 개념을 결합하면 배치 B 완료
-순서에 이 테이블이 결합돼 버리므로, 결합은 리포지토리 어댑터 리프에서
-애플리케이션 레벨로 검증한다.
+Parent decision (task-1752 decision): confirmed at start of work that
+`alembic heads` was single (`47ec4b178f54`) and used it as `down_revision`
+as-is. FA-0a batch B (task-1987, converting the positions family's
+tenant_id FK from users to tenant) is still in progress, so
+`pos_account`/`pos_snapshot` still have
+`tenant_id UUID REFERENCES users(user_id)` — this table does not carry that
+legacy forward and, being a brand-new table, references the correct target
+`tenant(id)` from the start (correcting the legacy is not this leaf's job).
+`position_key` does not FK `pos_snapshot(position_key)` — combining the two
+tables' tenant concepts while batch B is still in progress would couple
+this table to batch B's completion order, so the linkage is instead
+verified at the application level in the repository adapter leaf.
 
-`tenant_id`/`portfolio_id` 컬럼 구성은 FA-4(963d5f3cfb1b)가
-`pos_account`/`pos_snapshot`에 `portfolio_id`를 추가한 방식과 동일하게
-`portfolio_id`는 nullable로 둔다(부트스트랩 데이터가 사용자 전원에게
-없음, 같은 이유). RLS는 PLT-30 M5(b3c7f19ad2e6)의 `tenant_isolation`
-정책 형태를 그대로 쓴다 — 신설 테이블이라 레거시 테이블처럼 ENABLE을
-보류할 이유가 없어 바로 ENABLE한다(CH-5 e1d9b5ed8d7d와 동일 판단).
+The `tenant_id`/`portfolio_id` column layout keeps `portfolio_id` nullable,
+the same way FA-4 (963d5f3cfb1b) added `portfolio_id` to
+`pos_account`/`pos_snapshot` (bootstrap data does not exist for every user,
+same reason). RLS reuses the same `tenant_isolation` policy shape as PLT-30
+M5 (b3c7f19ad2e6) — being a brand-new table there is no reason to defer
+ENABLE the way legacy tables did, so it is enabled immediately (same
+judgment as CH-5 e1d9b5ed8d7d).
 """
 
 from collections.abc import Sequence
