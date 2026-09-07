@@ -11,6 +11,7 @@
     "test": "npm run test --workspaces --if-present",
     "check:filesize": "node scripts/check_frontend_file_size.mjs",
     "check:unwired-modules": "node scripts/check_unwired_modules.mjs",
-    "test:unwired-modules": "node --test scripts/check_unwired_modules.test.mjs"
+    "test:unwired-modules": "node --test scripts/check_unwired_modules.test.mjs",
+    "bench:density": "npm run bench:density --workspace=packages/chart-engine"
   }
 }
