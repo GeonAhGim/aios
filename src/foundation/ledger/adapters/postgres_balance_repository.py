@@ -15,27 +15,32 @@ Spec: docs/specs/L4_market_data_positions_ledger_v1.0.md#§2.4, §5, §9 LC-8.
 건드릴 때마다 전진한다"는 뜻으로 해석 — `get_for_update`로 이미 잠근
 행이라 정상 경로에서는 절대 충돌하지 않는다는 포트 docstring과 일치).
 
-FA-10(`docs/specs/L4_ibor_fund_accounting_and_resilience_v1.0.md#FA-10`)이
-`ledger_balance`에 UPDATE 금지 트리거를 걸었으므로, `apply()`는 더 이상
-literal `UPDATE`를 쓰지 않는다 — `target`(계정 코드로 찾은 치환 전 상태를
-MATERIALIZED CTE로 고정) → `prior`(기대 seq와 일치할 때만 그 행을 DELETE)
-→ `target`에서 읽은 값으로 새 잔액 행을 INSERT, 세 단계를 한 문장으로
-묶는다. `target`이 비어 있으면(미지 계정) INSERT도 그냥 0행이라 기존과
-동일하게 `row is None` 분기(아래)가 `UnknownAccountError`/
-`ConcurrencyConflictError`를 가른다.
+FA-10(`docs/specs/L4_ibor_fund_accounting_and_resilience_v1.0.md#FA-10`) put
+a no-UPDATE trigger on `ledger_balance`, so `apply()` no longer issues a
+literal `UPDATE` -- it does `target` (pre-write state found by account
+code, pinned via a MATERIALIZED CTE) -> `prior` (DELETE that row only if
+its seq matches the expectation) -> INSERT a new balance row computed from
+`target`, all three steps in one statement. If `target` is empty (unknown
+account), the INSERT is a no-op too, so the existing `row is None` branch
+below still tells `UnknownAccountError` and `ConcurrencyConflictError`
+apart exactly as before.
 
-`get_for_update`가 쓰던 `SELECT ... FOR UPDATE OF lb`는 DELETE+INSERT와
-호환되지 않는다 — Postgres는 행 잠금을 "업데이트 체인"(같은 물리 행의
-새 버전)에 대해서만 따라가고, 무관한 DELETE 다음의 새 INSERT는 그 체인이
-아니므로, 잠그고 있던 행이 다른 트랜잭션에서 DELETE+INSERT되면 blocked
-리더가 깨어났을 때 "행이 사라졌다"고 판단해 결과에서 빠뜨린다(실측:
-`test_get_balance_no_false_positive_drift_under_concurrent_commits`가
-`UnknownAccountError`로 재현). 그래서 물리 행 잠금 대신
-`pg_advisory_xact_lock(hashtextextended(account_code, 0))`으로 계정
-코드 자체를 키로 잠근다 — 트랜잭션이 끝나면 자동 해제되고, 물리 행이
-바뀌어도(DELETE+INSERT) 같은 계정 코드는 항상 같은 잠금 키로 직렬화된다.
-정렬 순서(`account_code` 오름차순)로 잠그는 것은 기존 `ORDER BY
-la.account_code`와 동일하게 교착 방지용이다.
+The `SELECT ... FOR UPDATE OF lb` that `get_for_update` used to issue is
+incompatible with DELETE+INSERT -- Postgres only follows a row lock across
+an "update chain" (a new version of the *same* physical row); an unrelated
+DELETE followed by a fresh INSERT is not part of that chain, so if the
+locked row gets DELETE+INSERT'd by another transaction, a blocked reader
+that wakes up concludes the row is simply gone and drops it from the
+result (reproduced in practice:
+`test_get_balance_no_false_positive_drift_under_concurrent_commits` failed
+with `UnknownAccountError`). So instead of a physical row lock, this locks
+the account code itself as a key via
+`pg_advisory_xact_lock(hashtextextended(account_code, 0))` -- released
+automatically at end of transaction, and unaffected by the physical row
+changing under DELETE+INSERT since the same account code always hashes to
+the same lock key. Locking in sorted (`account_code` ascending) order is
+the same deadlock-avoidance discipline the old `ORDER BY la.account_code`
+provided.
 """
 from __future__ import annotations
 

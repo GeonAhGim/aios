@@ -22,12 +22,12 @@ _IDENTIFIER_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]{0,62}$")
 
 
 class InvalidIdentifierError(ValueError):
-    """테이블명이 안전한 SQL 식별자 형식이 아니다(인젝션 방지)."""
+    """Table name is not a safe SQL identifier (injection guard)."""
 
 
 def _validate_table(table: str) -> None:
     if not _IDENTIFIER_RE.match(table):
-        raise InvalidIdentifierError(f"테이블 이름이 안전한 식별자가 아닙니다: {table!r}")
+        raise InvalidIdentifierError(f"table name is not a safe identifier: {table!r}")
 
 
 def _guard_function_name(table: str) -> str:
@@ -39,9 +39,10 @@ def _guard_trigger_name(table: str) -> str:
 
 
 def no_update_guard_sql(table: str) -> list[str]:
-    """`table`에 대한 UPDATE를 물리적으로 불가능하게 만드는 DDL 문 목록.
+    """DDL statements that make UPDATE on `table` physically impossible.
 
-    순서: REVOKE(방어 심화) -> 가드 함수 생성 -> 가드 트리거 부착.
+    Order: REVOKE (defense in depth) -> create guard function -> attach
+    guard trigger.
     """
     _validate_table(table)
     guard_fn = _guard_function_name(table)
@@ -65,7 +66,7 @@ def no_update_guard_sql(table: str) -> list[str]:
 
 
 def no_update_guard_drop_sql(table: str) -> list[str]:
-    """`no_update_guard_sql(table)`이 만든 강제를 역순으로 해제한다."""
+    """Reverses, in order, whatever `no_update_guard_sql(table)` applied."""
     _validate_table(table)
     guard_fn = _guard_function_name(table)
     trigger = _guard_trigger_name(table)

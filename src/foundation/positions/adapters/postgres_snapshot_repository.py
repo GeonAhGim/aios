@@ -8,18 +8,20 @@ Spec: docs/specs/L4_market_data_positions_ledger_v1.0.md#§4.3, §5, §9 LB-8/LB
 base_currency`를 호출자가 이미 알고 있으므로 조인 없이 그 값을 그대로
 재사용한다(쓰기 경로에서 불필요한 조회 한 번을 아낀다).
 
-`upsert`는 §5 표의 `conditional_update(pos_snapshot, id=position_key,
-expected last_journal_seq)`와 같은 낙관적 잠금 의미론을, FA-10
-(`docs/specs/L4_ibor_fund_accounting_and_resilience_v1.0.md#FA-10`)이
-`pos_snapshot`에 건 UPDATE 금지 트리거 아래에서 구현한다 — 더 이상
-`INSERT ... ON CONFLICT DO UPDATE`(내부적으로 UPDATE)를 쓸 수 없으므로,
-한 문장 안에서 `existing`(치환 전 상태를 MATERIALIZED CTE로 고정) →
-`prior`(기대 seq와 일치할 때만 이전 행을 DELETE, `legacy_position_id`는
-RETURNING으로 이어받음) → 그 결과로 INSERT(새 버전)까지 원자적으로
-수행한다. 최초 생성(`expected_seq=0`, 포트 docstring)은 `existing`이
-비어 있으므로 `NOT EXISTS(existing)` 분기로 그냥 INSERT되고, 이후 갱신은
-`prior`가 `existing`과 같은 시점의 행을 조건부로 지웠을 때만 새 행이
-들어간다 — 두 동시 쓰기 사이의 경쟁 창은 없다(하나의 SQL 왕복)."""
+`upsert` implements the same optimistic-locking semantics as §5's
+`conditional_update(pos_snapshot, id=position_key, expected
+last_journal_seq)`, but under the no-UPDATE trigger FA-10
+(`docs/specs/L4_ibor_fund_accounting_and_resilience_v1.0.md#FA-10`) put on
+`pos_snapshot` -- `INSERT ... ON CONFLICT DO UPDATE` (an UPDATE under the
+hood) is no longer available, so this does `existing` (pre-write state,
+pinned via a MATERIALIZED CTE) -> `prior` (DELETE the old row only if its
+seq matches, carrying `legacy_position_id` forward via RETURNING) -> INSERT
+(the new version), all atomically in one statement. First creation
+(`expected_seq=0`, per the port's docstring) hits the `NOT EXISTS(existing)`
+branch and just inserts, since `existing` is empty; later writes only
+insert a new row if `prior` deleted a row matching the same snapshot
+`existing` just read -- there is no race window between two concurrent
+writers (one SQL round trip)."""
 from __future__ import annotations
 
 import json

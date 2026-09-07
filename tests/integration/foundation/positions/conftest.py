@@ -93,10 +93,10 @@ async def open_position(
 async def force_row_replace(
     pool: asyncpg.Pool, *, table: str, id_column: str, id_value: object, **overrides: object
 ) -> None:
-    """테스트 전용: FA-10이 `table`에 건 UPDATE 금지 트리거 아래에서 일부
-    컬럼만 강제로 바꾼다(정상 시나리오가 아니라 드리프트/이력 조작
-    시나리오를 만드는 테스트 셋업 용도) — DELETE + INSERT로 나머지 컬럼은
-    그대로 보존한 채 `overrides`만 덮어쓴다."""
+    """Test-only: force a subset of columns to new values under the FA-10
+    no-UPDATE trigger on `table` (this is for test setup that simulates
+    drift/tampering, not a normal write path) -- DELETE + INSERT, keeping
+    every column untouched except the ones passed in `overrides`."""
     async with pool.acquire() as conn:
         columns = [
             r["column_name"]
@@ -114,8 +114,8 @@ async def force_row_replace(
                 select_cols.append(f"${len(params)}")
             else:
                 select_cols.append(col)
-        # noqa: S608 -- table/id_column/columns는 전부 호출자 상수·카탈로그 조회 결과
         sql = (
+            # noqa: S608 -- table/id_column/columns all come from caller constants or catalog lookup
             f"WITH prior AS (DELETE FROM {table} WHERE {id_column} = $1 RETURNING *) "  # noqa: S608
             f"INSERT INTO {table} ({', '.join(columns)}) "
             f"SELECT {', '.join(select_cols)} FROM prior"

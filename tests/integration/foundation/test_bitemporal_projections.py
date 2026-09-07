@@ -1,11 +1,13 @@
-"""FA-10 통합테스트 -- pos_snapshot·ledger_balance·positions 양시간축 + UPDATE 금지.
+"""FA-10 integration tests -- bitemporal columns + no-UPDATE trigger on
+pos_snapshot, ledger_balance, positions.
 
 Spec: docs/specs/L4_ibor_fund_accounting_and_resilience_v1.0.md#FA-10.
-DoD(task-2051): (1) `aios_app` 롤로 세 테이블 각각 UPDATE를 시도하면
-예외가 난다. (3) `_current` 뷰(`tx_to IS NULL` 필터)가 실제 쓰기 뒤에도
-기존 데이터와 행 수·값 단위로 동일하다. (4) 쓰기 경로(포지션 스냅샷
-fold·잔액 갱신)가 UPDATE 대신 DELETE+INSERT로 바뀌었지만 자연키당 정확히
-1행만 남는다 -- 실제 UPDATE와 관측 가능한 차이가 없다.
+DoD(task-2051): (1) an UPDATE attempt against any of the three tables from
+the `aios_app` role raises. (3) the `_current` view (`tx_to IS NULL`
+filter) matches the underlying data row-for-row and value-for-value after a
+real write. (4) the write paths (position snapshot fold, balance apply)
+switched from UPDATE to DELETE+INSERT but still leave exactly one row per
+natural key -- no observable difference from a real UPDATE.
 """
 from __future__ import annotations
 
@@ -41,8 +43,9 @@ async def pool():
 
 
 def _assert_no_update_violation(exc_info: pytest.ExceptionInfo) -> None:
-    """no-update 방어는 REVOKE·트리거 두 층이다(`tests/integration/test_db_roles.py`와
-    동일 근거) -- 트리거가 실제로 발동한 경우에 한해 메시지를 확인한다."""
+    """The no-update defense is two layers deep (REVOKE + trigger), same
+    rationale as `tests/integration/test_db_roles.py` -- only assert the
+    message when the trigger is the one that actually fired."""
     if isinstance(exc_info.value, asyncpg.RaiseError):
         assert "no-update violation" in str(exc_info.value)
 

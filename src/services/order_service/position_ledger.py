@@ -114,8 +114,8 @@ async def record_fill_in_position_ledger(
                     order.execution_id, snapshot.quantity, snapshot.avg_cost.amount,
                     snapshot.realized_pnl_base, closed_at, order.asset_class.value,
                 )
-                # FA-10: pos_snapshot은 UPDATE 금지 — DELETE(이전 행) + INSERT(같은
-                # position_key, legacy_position_id만 갈아끼운 새 버전)로 대체한다.
+                # FA-10: pos_snapshot forbids UPDATE -- replace via DELETE(old row) +
+                # INSERT(new version, same position_key, only legacy_position_id changes).
                 await conn.execute(
                     "WITH prior AS ("
                     " DELETE FROM pos_snapshot WHERE position_key = $2 RETURNING *"
@@ -133,9 +133,9 @@ async def record_fill_in_position_ledger(
                     legacy_id, position_key,
                 )
             else:
-                # FA-10: positions도 UPDATE 금지 — 같은 id로 DELETE + INSERT해
-                # 대체한다(legacy_position_id FK가 이 id를 참조하므로 DEFERRABLE
-                # INITIALLY DEFERRED로 걸어 뒀다, a2c4f9e1b3d5).
+                # FA-10: positions also forbids UPDATE -- replace via DELETE + INSERT of
+                # the same id (legacy_position_id FKs to this id, so it was made
+                # DEFERRABLE INITIALLY DEFERRED in a2c4f9e1b3d5).
                 await conn.execute(
                     "WITH prior AS ("
                     " DELETE FROM positions WHERE id = $1 RETURNING *"
