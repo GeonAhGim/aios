@@ -54,11 +54,18 @@ export interface UseChartLayoutResult {
   readonly removePanel: (panelId: string) => void;
   readonly setActivePanel: (panelId: string) => void;
   readonly toggleWatchlistEntry: (entry: InstrumentRef) => void;
+  /** CH-16b: active panel's persisted legend/object-tree order (`legend/objectTree.ts` ids) — `[]` until reordered once. */
+  readonly objectTreeOrder: readonly string[];
+  /** CH-16b: active panel's persisted locked indicator ids — `[]` until locked once. */
+  readonly lockedIndicatorIds: readonly string[];
+  readonly setObjectTreeOrder: (order: readonly string[]) => void;
+  readonly setLockedIndicatorIds: (ids: readonly string[]) => void;
 }
 
 const DEFAULT_LAYOUT_NAME = "기본 레이아웃";
 const DEFAULT_WATCHLIST_ID = "default";
 const DEFAULT_WATCHLIST_NAME = "기본";
+const EMPTY_STRING_ARRAY: readonly string[] = [];
 
 export function useChartLayout({ port, enabled, view, onApplyView }: UseChartLayoutOptions): UseChartLayoutResult {
   const idSeq = useRef(0);
@@ -257,6 +264,31 @@ export function useChartLayout({ port, enabled, view, onApplyView }: UseChartLay
     setIsDirty(true);
   }, []);
 
+  // CH-16b: legend/objectTree.ts order/lock are panel-owned, mutated the same
+  // way toggleWatchlistEntry mutates watchlists — never fetched/derived here,
+  // ChartPanes.tsx (via legend/objectTree.ts) owns computing the next value.
+  const activePanel = model.panels.find((p) => p.id === model.activePanelId);
+  const objectTreeOrder = activePanel?.objectTreeOrder ?? EMPTY_STRING_ARRAY;
+  const lockedIndicatorIds = activePanel?.lockedIndicatorIds ?? EMPTY_STRING_ARRAY;
+
+  const setObjectTreeOrder = useCallback((order: readonly string[]) => {
+    setModel((prev) => {
+      const activeId = prev.activePanelId;
+      if (activeId === null) return prev;
+      return { ...prev, panels: prev.panels.map((p) => (p.id === activeId ? { ...p, objectTreeOrder: order } : p)) };
+    });
+    setIsDirty(true);
+  }, []);
+
+  const setLockedIndicatorIds = useCallback((ids: readonly string[]) => {
+    setModel((prev) => {
+      const activeId = prev.activePanelId;
+      if (activeId === null) return prev;
+      return { ...prev, panels: prev.panels.map((p) => (p.id === activeId ? { ...p, lockedIndicatorIds: ids } : p)) };
+    });
+    setIsDirty(true);
+  }, []);
+
   return {
     status,
     restoreError,
@@ -275,5 +307,9 @@ export function useChartLayout({ port, enabled, view, onApplyView }: UseChartLay
     removePanel,
     setActivePanel,
     toggleWatchlistEntry,
+    objectTreeOrder,
+    lockedIndicatorIds,
+    setObjectTreeOrder,
+    setLockedIndicatorIds,
   };
 }

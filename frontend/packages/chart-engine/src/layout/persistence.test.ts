@@ -32,6 +32,8 @@ const sampleModel: ChartLayoutModel = {
       timeframe: "1h",
       indicators: [],
       drawingSetId: "p1-drawings",
+      objectTreeOrder: [],
+      lockedIndicatorIds: [],
     },
   ],
   activePanelId: "p1",

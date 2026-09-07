@@ -210,3 +210,30 @@ export function applyObjectTreeState(
     return { ...entry, visible: !hidden.has(id), locked: locked.has(id) };
   });
 }
+
+/**
+ * CH-16b — best-effort display reorder for a persisted `order` (e.g.
+ * `ChartPanel.objectTreeOrder`, saved via `encodeObjectTreeState(...).order`
+ * after a `moveEntry` call). Unlike `applyObjectTreeState`, this never throws
+ * on a coverage mismatch: entries the saved order doesn't cover — a new
+ * indicator selected since the order was last saved, one whose drawing was
+ * deleted — are perfectly ordinary here (indicators/drawings come and go far
+ * more often than whole saved layouts), so they simply keep `entries`'
+ * natural (`buildObjectTree` zLevel) relative order and sort after every
+ * entry the saved order does cover.
+ */
+export function sortByPersistedOrder(
+  entries: readonly ObjectTreeEntry[],
+  order: readonly string[],
+): readonly ObjectTreeEntry[] {
+  const rank = new Map(order.map((id, index) => [id, index] as const));
+  return entries
+    .map((entry, naturalIndex) => ({ entry, naturalIndex, rank: rank.get(entry.id) }))
+    .sort((a, b) => {
+      if (a.rank !== undefined && b.rank !== undefined) return a.rank - b.rank;
+      if (a.rank !== undefined) return -1;
+      if (b.rank !== undefined) return 1;
+      return a.naturalIndex - b.naturalIndex;
+    })
+    .map(({ entry }) => entry);
+}

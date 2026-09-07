@@ -29,6 +29,8 @@ const sample: ChartLayoutModel = {
       timeframe: "1h",
       indicators: [{ id: "SMA", params: { period: 20 } }, { id: "RSI" }],
       drawingSetId: "p1-drawings",
+      objectTreeOrder: ["RSI", "SMA"],
+      lockedIndicatorIds: ["SMA"],
     },
     {
       id: "p2",
@@ -36,6 +38,8 @@ const sample: ChartLayoutModel = {
       timeframe: "1d",
       indicators: [],
       drawingSetId: "p2-drawings",
+      objectTreeOrder: [],
+      lockedIndicatorIds: [],
     },
   ],
   activePanelId: "p1",
@@ -146,6 +150,28 @@ describe("negative: empty/malformed layout", () => {
           ...createEmptyLayoutModel(),
           panels: [{ ...basePanel, indicators: [{ id: "SMA", params: { period: Number.NaN } }] }],
         }),
+      "CHART_LAYOUT_FIELD_INVALID",
+    );
+  });
+});
+
+describe("CH-16b: objectTreeOrder/lockedIndicatorIds", () => {
+  it("a panel saved before this leaf (missing both fields) decodes with [] defaults, not an error", () => {
+    const basePanel = sample.panels[0]!;
+    const { objectTreeOrder: _order, lockedIndicatorIds: _locked, ...withoutObjectTreeFields } = basePanel;
+    const decoded = decodeLayoutModel({ ...createEmptyLayoutModel(), panels: [withoutObjectTreeFields] });
+    expect(decoded.panels[0]!.objectTreeOrder).toEqual([]);
+    expect(decoded.panels[0]!.lockedIndicatorIds).toEqual([]);
+  });
+
+  it("negative: rejects a non-array or non-string-element objectTreeOrder/lockedIndicatorIds", () => {
+    const basePanel = sample.panels[0]!;
+    expectLayoutError(
+      () => decodeLayoutModel({ ...createEmptyLayoutModel(), panels: [{ ...basePanel, objectTreeOrder: "SMA" }] }),
+      "CHART_LAYOUT_FIELD_INVALID",
+    );
+    expectLayoutError(
+      () => decodeLayoutModel({ ...createEmptyLayoutModel(), panels: [{ ...basePanel, lockedIndicatorIds: [1] }] }),
       "CHART_LAYOUT_FIELD_INVALID",
     );
   });

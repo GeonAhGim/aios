@@ -10,6 +10,7 @@ import {
   moveEntry,
   setEntryLocked,
   setEntryVisible,
+  sortByPersistedOrder,
 } from "../objectTree";
 
 function expectObjectTreeError(fn: () => unknown, code: string): void {
@@ -112,5 +113,31 @@ describe("encode/apply round trip", () => {
       expect(err).toBeInstanceOf(ObjectTreeStateError);
       expect((err as ObjectTreeStateError).code).toBe("CHART_OBJECT_TREE_STATE_COVERAGE_MISMATCH");
     }
+  });
+});
+
+describe("sortByPersistedOrder (CH-16b)", () => {
+  it("reorders entries covered by the persisted order, by that order", () => {
+    const tree = buildObjectTree(fakeSource()); // natural order: trend-1, SMA, RSI
+    const sorted = sortByPersistedOrder(tree, ["RSI", "trend-1", "SMA"]);
+    expect(sorted.map((e) => e.id)).toEqual(["RSI", "trend-1", "SMA"]);
+  });
+
+  it("negative: ids the persisted order doesn't cover keep their natural relative order and sort after covered ids", () => {
+    const tree = buildObjectTree(fakeSource()); // natural order: trend-1, SMA, RSI
+    // Persisted order only knows about "RSI" (e.g. saved before SMA/trend-1 existed).
+    const sorted = sortByPersistedOrder(tree, ["RSI"]);
+    expect(sorted.map((e) => e.id)).toEqual(["RSI", "trend-1", "SMA"]);
+  });
+
+  it("negative: an empty persisted order is a no-op (natural order preserved)", () => {
+    const tree = buildObjectTree(fakeSource());
+    expect(sortByPersistedOrder(tree, []).map((e) => e.id)).toEqual(tree.map((e) => e.id));
+  });
+
+  it("negative: a stale id in the persisted order that no longer exists is silently ignored (never throws)", () => {
+    const tree = buildObjectTree(fakeSource());
+    expect(() => sortByPersistedOrder(tree, ["ghost", "RSI"])).not.toThrow();
+    expect(sortByPersistedOrder(tree, ["ghost", "RSI"]).map((e) => e.id)).toEqual(["RSI", "trend-1", "SMA"]);
   });
 });

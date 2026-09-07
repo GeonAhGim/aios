@@ -247,6 +247,10 @@ export function ChartPage({
             drawings={drawings}
             onRemoveSubOverlay={toggleIndicator}
             restoredHeightRatios={appliedPaneHeightRatios}
+            objectTreeOrder={layout.objectTreeOrder}
+            lockedIndicatorIds={layout.lockedIndicatorIds}
+            onObjectTreeOrderChange={layout.setObjectTreeOrder}
+            onLockedIndicatorIdsChange={layout.setLockedIndicatorIds}
           >
             <CandlestickChart data={points} />
           </ChartPanes>

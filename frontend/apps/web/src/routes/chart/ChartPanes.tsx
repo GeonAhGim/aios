@@ -19,7 +19,14 @@ import { useEffect, useMemo, useState, type ReactNode } from "react";
 import type { StreamCandle } from "@aios/chart-engine/src/data/candleStream";
 import type { DrawingCollection } from "@aios/chart-engine/src/drawings/model";
 import type { OverlayEntry } from "@aios/chart-engine/src/indicators/overlayRegistry";
-import { buildObjectTree, type ObjectTreeSource } from "@aios/chart-engine/src/legend/objectTree";
+import {
+  buildObjectTree,
+  encodeObjectTreeState,
+  moveEntry,
+  setEntryLocked,
+  sortByPersistedOrder,
+  type ObjectTreeSource,
+} from "@aios/chart-engine/src/legend/objectTree";
 import {
   addPane,
   createPaneModel,
@@ -84,6 +91,7 @@ function buildInitialModel(subOverlayIds: readonly string[]): PaneModel {
 
 const EMPTY_OVERLAY_SERIES: ReadonlyMap<string, OverlaySeriesByOutput> = new Map();
 const EMPTY_OVERLAY_PLOT_SPECS: ReadonlyMap<string, OverlayPlotSpecOverrides> = new Map();
+const EMPTY_STRING_ARRAY: readonly string[] = [];
 
 export interface ChartPanesProps {
   /** 메인 페인 시계열 — 크로스헤어 시간 도메인 계산에 쓰인다. */
@@ -100,6 +108,14 @@ export interface ChartPanesProps {
   readonly overlaySeries?: ReadonlyMap<string, OverlaySeriesByOutput>;
   /** CH-15b: overlay id -> output name -> raw PlotSpec override, decoded fail-closed (ChartPlotLayer.tsx). Absent falls back to `deriveOverlayPlotSpec`. */
   readonly overlayPlotSpecs?: ReadonlyMap<string, OverlayPlotSpecOverrides>;
+  /** CH-16b: persisted legend/object-tree order (useChartLayout.ts `objectTreeOrder`) — absent/`[]` means natural (source) order. */
+  readonly objectTreeOrder?: readonly string[];
+  /** CH-16b: persisted locked indicator ids (useChartLayout.ts `lockedIndicatorIds`). */
+  readonly lockedIndicatorIds?: readonly string[];
+  /** CH-16b: called with the next `objectTreeOrder` after a legend reorder — the caller (ChartPage) persists it via useChartLayout.ts. */
+  readonly onObjectTreeOrderChange?: (order: readonly string[]) => void;
+  /** CH-16b: called with the next `lockedIndicatorIds` after a legend lock toggle. */
+  readonly onLockedIndicatorIdsChange?: (ids: readonly string[]) => void;
   /** 메인 페인에 그려질 실제 캔들 렌더러(CandlestickChart) — 새 렌더 스택을 만들지 않는다. */
   readonly children: ReactNode;
 }
@@ -114,6 +130,10 @@ export function ChartPanes({
   restoredHeightRatios,
   overlaySeries = EMPTY_OVERLAY_SERIES,
   overlayPlotSpecs = EMPTY_OVERLAY_PLOT_SPECS,
+  objectTreeOrder = EMPTY_STRING_ARRAY,
+  lockedIndicatorIds = EMPTY_STRING_ARRAY,
+  onObjectTreeOrderChange,
+  onLockedIndicatorIdsChange,
   children,
 }: ChartPanesProps) {
   const subOverlayIds = useMemo(() => subOverlays.map((o) => o.id), [subOverlays]);
@@ -182,7 +202,28 @@ export function ChartPanes({
     }),
     [mainOverlays, subOverlays, drawings, hiddenIds],
   );
-  const objectTree = useMemo(() => buildObjectTree(objectTreeSource), [objectTreeSource]);
+  const lockedIndicatorIdSet = useMemo(() => new Set(lockedIndicatorIds), [lockedIndicatorIds]);
+  const objectTree = useMemo(
+    () => sortByPersistedOrder(buildObjectTree(objectTreeSource, lockedIndicatorIdSet), objectTreeOrder),
+    [objectTreeSource, lockedIndicatorIdSet, objectTreeOrder],
+  );
+
+  // CH-16b: legend/objectTree.ts owns the pure order/lock transitions — this
+  // handler only translates a legend interaction into the next persisted
+  // `objectTreeOrder`/`lockedIndicatorIds` and hands it to the caller
+  // (ChartPage → useChartLayout.ts). Only indicators are lockable here:
+  // overlays/drawings already carry their own native `locked` field (CH-4
+  // drawings/model.ts) which `objectTreeSource.getOverlays()` above still
+  // reports as a fixed `false` — CH-4's own lock UI is a separate leaf.
+  const handleMoveEntry = (id: string, toIndex: number) => {
+    onObjectTreeOrderChange?.(encodeObjectTreeState(moveEntry(objectTree, id, toIndex)).order);
+  };
+  const handleToggleLocked = (id: string) => {
+    const entry = objectTree.find((e) => e.id === id);
+    if (!entry || entry.kind !== "indicator") return;
+    const next = setEntryLocked(objectTree, id, !entry.locked);
+    onLockedIndicatorIdsChange?.(encodeObjectTreeState(next).locked);
+  };
 
   const rects = computePaneRects(paneModel.panes, totalHeight);
   const paneById = useMemo(() => new Map(paneModel.panes.map((p) => [p.id, p] as const)), [paneModel]);
@@ -292,6 +333,8 @@ export function ChartPanes({
             return next;
           })
         }
+        onMoveEntry={handleMoveEntry}
+        onToggleLocked={handleToggleLocked}
       />
 
       <DataWindowPanel overlays={allOverlays} overlaySeries={overlaySeries} candles={candles} crosshairTimeMs={crosshairTimeMs} />

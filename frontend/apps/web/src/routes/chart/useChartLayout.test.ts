@@ -243,6 +243,43 @@ describe("패널 추가·제거·전환", () => {
   });
 });
 
+describe("CH-16b: 오브젝트 트리 순서·잠금", () => {
+  it("setObjectTreeOrder/setLockedIndicatorIds는 활성 패널에 반영되고 dirty가 된다", async () => {
+    const port = fakePort();
+    const { result } = setup(port);
+    await waitFor(() => expect(result.current.status).toBe("ready"));
+    expect(result.current.objectTreeOrder).toEqual([]);
+    expect(result.current.lockedIndicatorIds).toEqual([]);
+
+    act(() => result.current.setObjectTreeOrder(["RSI", "SMA"]));
+    expect(result.current.objectTreeOrder).toEqual(["RSI", "SMA"]);
+    expect(result.current.isDirty).toBe(true);
+
+    act(() => result.current.setLockedIndicatorIds(["SMA"]));
+    expect(result.current.lockedIndicatorIds).toEqual(["SMA"]);
+
+    const activeId = result.current.model.activePanelId;
+    const active = result.current.model.panels.find((p) => p.id === activeId);
+    expect(active?.objectTreeOrder).toEqual(["RSI", "SMA"]);
+    expect(active?.lockedIndicatorIds).toEqual(["SMA"]);
+  });
+
+  it("복원된 레이아웃의 objectTreeOrder/lockedIndicatorIds를 그대로 노출한다", async () => {
+    const model = savedModelFor(BASE_VIEW);
+    const withObjectTree: ChartLayoutModel = {
+      ...model,
+      panels: model.panels.map((p) => ({ ...p, objectTreeOrder: ["SMA"], lockedIndicatorIds: ["SMA"] })),
+    };
+    const record = layoutRecord(withObjectTree);
+    const port = fakePort({ listLayouts: vi.fn(async () => [record]) });
+    const { result } = setup(port);
+
+    await waitFor(() => expect(result.current.status).toBe("ready"));
+    expect(result.current.objectTreeOrder).toEqual(["SMA"]);
+    expect(result.current.lockedIndicatorIds).toEqual(["SMA"]);
+  });
+});
+
 describe("워치리스트 변경", () => {
   it("toggleWatchlistEntry를 두 번 호출하면 추가 후 제거된다", async () => {
     const port = fakePort();

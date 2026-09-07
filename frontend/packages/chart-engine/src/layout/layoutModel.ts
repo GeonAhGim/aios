@@ -38,6 +38,22 @@ export interface ChartPanel {
   readonly indicators: readonly IndicatorRef[];
   /** Reference to the layout's CH-4 drawing set — never embedded here. */
   readonly drawingSetId: string;
+  /**
+   * CH-16b — persisted display order for this panel's legend/object tree
+   * (`legend/objectTree.ts` `ObjectTreeEntry.id`s, indicators and drawings
+   * mixed). Applied leniently via `sortByPersistedOrder`, never required to
+   * cover every current object 1:1 (missing/optional — absent means "natural
+   * order", not an error). Not the same axis as `indicators`' own array
+   * order, which only ever reflects selection order.
+   */
+  readonly objectTreeOrder?: readonly string[];
+  /**
+   * CH-16b — indicator ids locked via the legend (`legend/objectTree.ts`
+   * `lockedIndicatorIds` parameter). Drawings/overlays already carry their
+   * own native `locked` field (CH-4 `drawings/model.ts`) and are not
+   * duplicated here.
+   */
+  readonly lockedIndicatorIds?: readonly string[];
 }
 
 export type WatchlistEntry = InstrumentRef;
@@ -111,6 +127,11 @@ function decodeNonEmptyString(value: unknown, field: string): string {
   return value;
 }
 
+function decodeStringArray(value: unknown, field: string): readonly string[] {
+  if (!Array.isArray(value)) throw invalid(field, "must be an array");
+  return value.map((v, i) => decodeNonEmptyString(v, `${field}[${i}]`));
+}
+
 const INSTRUMENT_FIELDS: readonly string[] = ["instrumentId", "venue", "symbol"];
 
 function encodeInstrument(ref: InstrumentRef): Json {
@@ -152,7 +173,15 @@ function decodeIndicator(value: unknown, scope: string): IndicatorRef {
   return { id, params };
 }
 
-const PANEL_FIELDS: readonly string[] = ["id", "instrument", "timeframe", "indicators", "drawingSetId"];
+const PANEL_FIELDS: readonly string[] = [
+  "id",
+  "instrument",
+  "timeframe",
+  "indicators",
+  "drawingSetId",
+  "objectTreeOrder",
+  "lockedIndicatorIds",
+];
 
 function encodePanel(panel: ChartPanel): Json {
   return {
@@ -161,6 +190,8 @@ function encodePanel(panel: ChartPanel): Json {
     timeframe: panel.timeframe,
     indicators: panel.indicators.map(encodeIndicator),
     drawingSetId: panel.drawingSetId,
+    objectTreeOrder: panel.objectTreeOrder ? [...panel.objectTreeOrder] : [],
+    lockedIndicatorIds: panel.lockedIndicatorIds ? [...panel.lockedIndicatorIds] : [],
   };
 }
 
@@ -178,7 +209,15 @@ function decodePanel(value: unknown, index: number): ChartPanel {
     requireField(value, "drawingSetId", `${scope}.`),
     `${scope}.drawingSetId`,
   );
-  return { id, instrument, timeframe, indicators, drawingSetId };
+  // CH-16b: additive fields — a layout saved before this leaf lacks them entirely; that
+  // means "no persisted order/locks yet", not a malformed document, so default to [].
+  const objectTreeOrder = Object.hasOwn(value, "objectTreeOrder")
+    ? decodeStringArray(value.objectTreeOrder, `${scope}.objectTreeOrder`)
+    : [];
+  const lockedIndicatorIds = Object.hasOwn(value, "lockedIndicatorIds")
+    ? decodeStringArray(value.lockedIndicatorIds, `${scope}.lockedIndicatorIds`)
+    : [];
+  return { id, instrument, timeframe, indicators, drawingSetId, objectTreeOrder, lockedIndicatorIds };
 }
 
 const WATCHLIST_FIELDS: readonly string[] = ["id", "name", "entries"];
