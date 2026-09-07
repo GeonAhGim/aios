@@ -4,15 +4,24 @@ import type { Venue } from "@aios/shared-types";
 import type { ChartLayoutControls } from "./ChartToolbar";
 import type { UseChartLayoutResult } from "./useChartLayout";
 
+// CH-4b (task-2012): drawings persistence rides the same "레이아웃 저장" button —
+// a layoutId (server-assigned) must exist before its drawing set can be PUT, and
+// "저장" is the one place both are known to have just settled together.
 export function buildChartLayoutControls(
   layout: UseChartLayoutResult,
   instrumentId: string,
   venue: Venue,
+  persistDrawings: (layoutId: string) => Promise<void>,
 ): ChartLayoutControls {
   return {
     name: layout.layoutName,
     onNameChange: layout.rename,
-    onSave: () => void layout.save(),
+    onSave: () => {
+      void (async () => {
+        const layoutId = await layout.save();
+        if (layoutId !== null) await persistDrawings(layoutId);
+      })();
+    },
     onDelete: () => void layout.remove(),
     saveStatus: layout.saveStatus,
     onReload: () => void layout.reload(),

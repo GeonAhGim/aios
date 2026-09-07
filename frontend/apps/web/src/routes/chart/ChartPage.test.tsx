@@ -444,3 +444,102 @@ describe("ChartPage — CH-8 409 충돌 안내", () => {
     );
   });
 });
+
+// CH-4b(task-2012): 그리기 서버 영속화 실배선. useChartLayout과 동일하게 "레이아웃
+// 저장" 버튼이 layoutId를 확보한 뒤 곧바로 그 도형 세트를 PUT한다(chartToolbarLayoutProps.ts).
+describe("ChartPage — CH-4b 그리기 저장·복원", () => {
+  function drawingsDocRecord(layoutId: string, schemaVersion: number, drawings: readonly unknown[]) {
+    return { layoutId, document: { schema_version: schemaVersion, drawings }, revision: 1, updatedAt: "t1" };
+  }
+
+  it("도형 3종(추세선·수평선·피보나치)을 그리고 저장하면 putDrawings가 실제로 호출되고(실배선), 컴포넌트를 재마운트하면 그 페이로드 그대로 좌표·스타일까지 동일하게 복원된다", async () => {
+    const fetchCandles = vi.fn(async () => okResult());
+    let stored: { schemaVersion: number; drawings: unknown[] } | undefined;
+    const chartingPort = fakeChartingPort({
+      createLayout: vi.fn(async (input) => ({
+        id: "layout-1",
+        name: input.name,
+        layoutState: input.layoutState,
+        revision: 0,
+        updatedAt: "t0",
+      })),
+      putDrawings: vi.fn(async (layoutId, input) => {
+        stored = { schemaVersion: input.schemaVersion, drawings: [...input.drawings] };
+        return drawingsDocRecord(layoutId, input.schemaVersion, input.drawings);
+      }),
+    });
+    renderPage(fetchCandles, "BTCUSDT", chartingPort);
+    await waitFor(() => expect(screen.getByTestId("candlestick-chart")).toHaveTextContent("캔들 3개"));
+
+    fireEvent.click(screen.getByRole("button", { name: "추세선" }));
+    fireEvent.click(screen.getByRole("button", { name: "그리기 추가" }));
+    fireEvent.click(screen.getByRole("button", { name: "수평선" }));
+    fireEvent.click(screen.getByRole("button", { name: "그리기 추가" }));
+    fireEvent.click(screen.getByRole("button", { name: "피보나치" }));
+    fireEvent.click(screen.getByRole("button", { name: "그리기 추가" }));
+    expect(screen.getByText("그리기 (3)")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "레이아웃 저장" }));
+    await waitFor(() => expect(chartingPort.putDrawings).toHaveBeenCalledTimes(1));
+    expect(chartingPort.putDrawings).toHaveBeenCalledWith(
+      "layout-1",
+      expect.objectContaining({ expectedRevision: 0 }),
+    );
+    expect(stored?.drawings).toHaveLength(3);
+
+    cleanup();
+
+    // 재마운트: 방금 putDrawings가 실제로 받은 페이로드(수기 값이 아니다 — 동어반복
+    // 목 금지)를 getDrawings 응답으로 그대로 되돌린다.
+    const remountPort = fakeChartingPort({
+      listLayouts: vi.fn(async () => [layoutRecordFor("BTCUSDT", { id: "layout-1", revision: 0 })]),
+      getDrawings: vi.fn(async () => drawingsDocRecord("layout-1", stored!.schemaVersion, stored!.drawings)),
+    });
+    renderPage(fetchCandles, "BTCUSDT", remountPort);
+    await waitFor(() => expect(screen.getByTestId("candlestick-chart")).toHaveTextContent("캔들 3개"));
+    await waitFor(() => expect(screen.getByText("그리기 (3)")).toBeInTheDocument());
+    expect(screen.getByText(/^추세선 \(/)).toBeInTheDocument();
+    expect(screen.getByText(/^수평선 @/)).toBeInTheDocument();
+    expect(screen.getByText(/^피보나치 \(/)).toBeInTheDocument();
+  });
+
+  it("negative: 저장이 409로 충돌해도 로컬 도형을 지우지 않고 배너로 안내한다", async () => {
+    const fetchCandles = vi.fn(async () => okResult());
+    const chartingPort = fakeChartingPort({
+      createLayout: vi.fn(async (input) => ({
+        id: "layout-1",
+        name: input.name,
+        layoutState: input.layoutState,
+        revision: 0,
+        updatedAt: "t0",
+      })),
+      putDrawings: vi.fn().mockRejectedValue(apiErrorLike(409, "STATE_CONCURRENCY_CONFLICT")),
+    });
+    renderPage(fetchCandles, "BTCUSDT", chartingPort);
+    await waitFor(() => expect(screen.getByTestId("candlestick-chart")).toHaveTextContent("캔들 3개"));
+
+    fireEvent.click(screen.getByRole("button", { name: "수평선" }));
+    fireEvent.click(screen.getByRole("button", { name: "그리기 추가" }));
+    expect(screen.getByText("그리기 (1)")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "레이아웃 저장" }));
+    await waitFor(() => expect(chartingPort.putDrawings).toHaveBeenCalledTimes(1));
+
+    expect(await screen.findByText(/다른 요청과 충돌했습니다/)).toBeInTheDocument();
+    // negative: 조용히 삼키거나 로컬 상태를 비우지 않는다.
+    expect(screen.getByText("그리기 (1)")).toBeInTheDocument();
+  });
+
+  it("negative: 교차 테넌트·미존재 layout_id(404)는 빈 도형 목록으로 뭉개지 않고 배너로 표면화한다", async () => {
+    const fetchCandles = vi.fn(async () => okResult());
+    const record = layoutRecordFor("BTCUSDT");
+    const chartingPort = fakeChartingPort({
+      listLayouts: vi.fn(async () => [record]),
+      getDrawings: vi.fn().mockRejectedValue(apiErrorLike(404, "RESOURCE_NOT_FOUND")),
+    });
+    renderPage(fetchCandles, "BTCUSDT", chartingPort);
+    await waitFor(() => expect(screen.getByTestId("candlestick-chart")).toHaveTextContent("캔들 3개"));
+
+    expect(await screen.findByText(/요청한 항목을 찾을 수 없습니다/)).toBeInTheDocument();
+  });
+});

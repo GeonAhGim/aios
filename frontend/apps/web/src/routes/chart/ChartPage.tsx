@@ -20,8 +20,9 @@ import { ChartToolbar } from "./ChartToolbar";
 import { CompareSymbols, type CompareSymbolRef } from "./CompareSymbols";
 import { ChartTemplates, type ChartTemplatesPort } from "./ChartTemplates";
 import { ChartLayoutErrorBanners } from "./ChartLayoutErrorBanners";
+import { ChartDrawingsErrorBanners } from "./ChartDrawingsErrorBanners";
 import { buildChartLayoutControls } from "./chartToolbarLayoutProps";
-import { decodeCompareSymbol, encodeCompareSymbol, NoInstrumentSelected } from "./chartPageHelpers";
+import { decodeCompareSymbol, encodeCompareSymbol, NoInstrumentSelected, TIMEFRAME_MS } from "./chartPageHelpers";
 import { DrawingsList } from "./DrawingsList";
 import { IndicatorParityPanel, type ServerIndicatorSeriesPort } from "./IndicatorParityPanel";
 import { IndicatorPicker } from "./IndicatorPicker";
@@ -33,8 +34,10 @@ import { useIndicatorSelection } from "./useIndicatorSelection";
 
 // CH-6a — 화면 조립 리프: chart-engine의 CH-2(candleStream)·CH-3(overlayRegistry)
 // ·CH-4(drawings)·CH-7(replayController) 공개 API를 이 화면에서만 소비한다.
-// 서버 저장·복원(indicator 선택·drawings 영속화)은 CH-5 backend가 아직 없어
-// task-1557 이후 6b 몫이다 — 여기서는 전부 로컬 state로만 관리한다.
+// 서버 저장·복원: CH-5 backend(task-1557 06e5560)가 GET/PUT
+// /v1/foundation/charting/layouts/{id}/drawings를 이미 제공한다 — useChartLayout
+// (레이아웃)에 이어 useChartDrawings(도형)도 이제 그 경로를 실제로 호출한다
+// (task-2012, CH-4b): 로컬 state만으로 관리하던 그리기가 새로고침에도 남는다.
 // task-2011: 상태 소유 단위(그리기/레전드·오브젝트 트리/리플레이)는 각각
 // useChartDrawings/useIndicatorSelection/useChartReplaySession으로, 순수 함수는
 // chartPageHelpers.tsx로 옮겼다 — 이 파일은 화면 조립만 남긴다(순수 이동).
@@ -86,12 +89,6 @@ export function ChartPage({
   const [timeframe, setTimeframe] = useState<Timeframe>(DEFAULT_TIMEFRAME);
   const [anchor] = useState(() => now ?? new Date());
 
-  const { drawingTool, setDrawingTool, drawings, handleAddDrawing: addDrawingAt, handleRemoveDrawing } = useChartDrawings(
-    venue,
-    instrumentId,
-    timeframe,
-  );
-
   const {
     selectedIndicatorIds,
     setSelectedIndicatorIds,
@@ -135,16 +132,23 @@ export function ChartPage({
     },
   });
 
+  // CH-4b: drawings는 layout이 확보한 layoutId(서버에 최소 1회 저장된 레이아웃에만
+  // 존재)에 종속된다 — useChartLayout 다음에 호출해야 그 시점의 layoutId/status를 넘길 수 있다.
+  const chartDrawings = useChartDrawings(venue, instrumentId, timeframe, {
+    port: chartingPort,
+    layoutId: layout.layoutId,
+    layoutStatus: layout.status,
+  });
+  const {
+    drawingTool,
+    setDrawingTool,
+    drawings,
+    handleAddDrawing: addDrawingAt,
+    handleRemoveDrawing,
+    persist: persistDrawings,
+  } = chartDrawings;
+
   const end = anchor.toISOString();
-  const TIMEFRAME_MS: Record<Timeframe, number> = {
-    "1m": 60_000,
-    "5m": 5 * 60_000,
-    "15m": 15 * 60_000,
-    "30m": 30 * 60_000,
-    "1h": 60 * 60_000,
-    "4h": 4 * 60 * 60_000,
-    "1d": 24 * 60 * 60_000,
-  };
   const start = new Date(anchor.getTime() - VISIBLE_CANDLE_COUNT * TIMEFRAME_MS[timeframe]).toISOString();
 
   const query = useQuery({
@@ -187,6 +191,7 @@ export function ChartPage({
         </div>
 
         <ChartLayoutErrorBanners layout={layout} />
+        <ChartDrawingsErrorBanners drawings={chartDrawings} />
 
         <ChartToolbar
           venue={venue}
@@ -207,7 +212,7 @@ export function ChartPage({
           instrumentId={instrumentId}
           selectedIndicatorIds={selectedIndicatorIds}
           currentClose={points.length > 0 ? points[points.length - 1]!.close : null}
-          layout={buildChartLayoutControls(layout, instrumentId, venue)}
+          layout={buildChartLayoutControls(layout, instrumentId, venue, persistDrawings)}
         />
 
         <div className="flex items-start gap-2">

@@ -10,7 +10,7 @@ import {
 import type { Drawing, DrawingKind } from "@aios/chart-engine/src/drawings/model";
 import type { StreamCandle } from "@aios/chart-engine/src/data/candleStream";
 import type { ReplayClock, ReplayState } from "@aios/chart-engine/src/replay/replayController";
-import type { Venue } from "@aios/shared-types";
+import type { Timeframe, Venue } from "@aios/shared-types";
 import { type CandlestickPoint, EmptyState, PageHeader } from "@aios/ui-web";
 import { Link } from "react-router-dom";
 import { AppShell } from "../../components/layout/AppShell";
@@ -27,6 +27,16 @@ export function decodeCompareSymbol(id: string): CompareSymbolRef | null {
   if (sep < 0) return null;
   return { venue: id.slice(0, sep) as Venue, instrumentId: id.slice(sep + 1) };
 }
+
+export const TIMEFRAME_MS: Record<Timeframe, number> = {
+  "1m": 60_000,
+  "5m": 5 * 60_000,
+  "15m": 15 * 60_000,
+  "30m": 30 * 60_000,
+  "1h": 60 * 60_000,
+  "4h": 4 * 60 * 60_000,
+  "1d": 24 * 60 * 60_000,
+};
 
 export function toChartPoints(candles: readonly StreamCandle[]): CandlestickPoint[] {
   return candles.map((c) => ({

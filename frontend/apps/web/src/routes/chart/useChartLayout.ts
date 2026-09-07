@@ -39,11 +39,14 @@ export interface UseChartLayoutResult {
   readonly restoreError: unknown;
   readonly retryRestore: () => void;
   readonly model: ChartLayoutModel;
+  /** Server-assigned id once saved at least once — `null` for the unsaved default layout. CH-4b (task-2012) keys drawings persistence off this. */
+  readonly layoutId: string | null;
   readonly layoutName: string;
   readonly isDirty: boolean;
   readonly saveStatus: ChartLayoutSaveStatus;
   readonly saveError: unknown;
-  readonly save: () => Promise<void>;
+  /** Resolves to the saved layout's id, or `null` if the save didn't succeed (conflict/not_found/error). */
+  readonly save: () => Promise<string | null>;
   readonly reload: () => Promise<void>;
   readonly rename: (name: string) => void;
   readonly remove: () => Promise<void>;
@@ -145,20 +148,24 @@ export function useChartLayout({ port, enabled, view, onApplyView }: UseChartLay
     setSaveStatus("saving");
     setSaveError(null);
     try {
+      let saved: SavedLayout;
       if (layoutId === null) {
-        applySaved(await createLayoutRecord(port, layoutName, model));
+        saved = await createLayoutRecord(port, layoutName, model);
       } else {
         const result = await saveLayout(port, layoutId, revision ?? 0, { name: layoutName, model });
-        if (result.kind === "ok") applySaved(result.value);
-        else {
+        if (result.kind !== "ok") {
           setSaveStatus(result.kind);
-          return;
+          return null;
         }
+        saved = result.value;
       }
+      applySaved(saved);
       setSaveStatus("idle");
+      return saved.meta.id;
     } catch (err) {
       setSaveError(err);
       setSaveStatus("error");
+      return null;
     }
   }, [port, layoutId, layoutName, model, revision, applySaved]);
 
@@ -255,6 +262,7 @@ export function useChartLayout({ port, enabled, view, onApplyView }: UseChartLay
     restoreError,
     retryRestore: () => void restore(),
     model,
+    layoutId,
     layoutName,
     isDirty,
     saveStatus,
