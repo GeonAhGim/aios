@@ -169,10 +169,11 @@ class AuthService:
                 email,
                 password_hash,
             )
-            # PLT-26/PLT-28 배선 — users 행과 그 PERSONAL tenant(id == user_id)를
-            # 같은 트랜잭션에 묶는다. 이게 없으면 로그인 이후 첫 foundation
-            # 쓰기(consent_record/foundation_audit_event/portfolio_mandate 등,
-            # 전부 tenant_id를 tenant(id)에 FK)가 즉시 ForeignKeyViolation난다.
+            # PLT-26/PLT-28 wiring: the users row and its PERSONAL tenant
+            # (id == user_id) go in the same transaction. Without this, the
+            # first foundation write after signup (consent_record,
+            # foundation_audit_event, portfolio_mandate, etc. -- all FK
+            # tenant_id -> tenant(id)) raises ForeignKeyViolation immediately.
             await membership_repo.insert_tenant(conn, tenant_id=user_id, kind=TenantKind.PERSONAL)
         return _row_to_user(row)
 
