@@ -19,7 +19,7 @@ from src.foundation.positions.adapters.postgres_nav_repository import (
     PostgresNavRepository,
 )
 from src.foundation.positions.contracts.v1 import NAVSnapshot
-from tests.integration.conftest import create_test_user
+from tests.integration.conftest import create_test_tenant
 from tests.integration.foundation.positions.conftest import create_pos_account
 
 _DAY_COUNTER = date(2026, 1, 1)
@@ -53,7 +53,7 @@ def _nav(*, account_id, nav_date, closing_nav="1000", source_hash: str | None = 
 
 
 async def _setup(pool):
-    tenant_id = await create_test_user(pool)
+    tenant_id = await create_test_tenant(pool)
     account_id = await create_pos_account(pool, tenant_id)
     return account_id
 

@@ -26,7 +26,7 @@ from src.foundation.market_data.contracts.v1 import (
     Venue,
     Verdict,
 )
-from tests.integration.conftest import create_test_user
+from tests.integration.conftest import create_test_tenant
 
 
 @pytest.fixture
@@ -148,8 +148,8 @@ async def test_get_tick_batch_cross_tenant_lookup_returns_none(pool, batch_repo)
     """negative: 다른 tenant의 batch_id로 조회하면 존재 자체를 숨기고 None을
     반환해야 한다(§8.3 LA-21 "404 동형") — 없어서 None인지 남의 tenant
     것이라 None인지 호출부가 구분할 수 없어야 한다."""
-    owner_tenant = await create_test_user(pool)
-    other_tenant = await create_test_user(pool)
+    owner_tenant = await create_test_tenant(pool)
+    other_tenant = await create_test_tenant(pool)
     t0 = datetime.now(timezone.utc).replace(microsecond=0)
     async with pool.acquire() as conn, conn.transaction():
         instrument_id = await _instrument_id(conn)

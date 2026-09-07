@@ -30,7 +30,7 @@ from src.foundation.positions.adapters.postgres_snapshot_repository import (
 from src.foundation.positions.application.scheduler import PositionsScheduler, TrackedAccount
 from src.foundation.positions.contracts.v1 import CostMethod, PositionSnapshotView
 from src.foundation.positions.domain.position_key import PositionKey
-from tests.integration.conftest import create_test_user
+from tests.integration.conftest import create_test_tenant
 from tests.integration.foundation.positions.conftest import create_pos_account
 
 _NOW = datetime(2026, 9, 3, 12, 0, tzinfo=timezone.utc)
@@ -102,7 +102,7 @@ async def _open_position(
 
 
 async def _setup_account(pool) -> tuple:
-    tenant_id = await create_test_user(pool)
+    tenant_id = await create_test_tenant(pool)
     account_id = await create_pos_account(
         pool, tenant_id, venue="bitget", base_currency=Currency.USDT
     )

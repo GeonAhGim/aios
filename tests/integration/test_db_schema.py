@@ -507,11 +507,19 @@ async def test_positions_journal_tables_exist(db_conn):
 
 
 async def _insert_test_user(conn: asyncpg.Connection) -> object:
-    return await conn.fetchval(
+    """Create a `users` row plus its PERSONAL `tenant` row (id == user_id).
+
+    `account_connection`/`pos_account`/... all FK `tenant_id` to `tenant(id)`
+    (FA-0a) rather than `users(user_id)`, so a bare `users` row is not enough
+    for any INSERT that carries a real (non-NULL) `tenant_id`.
+    """
+    user_id = await conn.fetchval(
         "INSERT INTO users (email, password_hash) VALUES ($1, $2) RETURNING user_id",
         f"test-{uuid4().hex}@example.com",
         "test-hash",
     )
+    await conn.execute("INSERT INTO tenant (id, kind) VALUES ($1, 'PERSONAL')", user_id)
+    return user_id
 
 
 async def _insert_pos_account(conn: asyncpg.Connection, *, tenant_id) -> object:
@@ -526,9 +534,6 @@ async def test_pos_account_duplicate_with_same_connection_rejected(raw_conn):
     """LB-8 DoD — UNIQUE(tenant_id, venue, connection_id) negative(실값):
     같은 (tenant_id, venue, connection_id) 삼중값은 거부되어야 한다."""
     tenant_id = await _insert_test_user(raw_conn)
-    # account_connection.tenant_id는 FA-0a batch A(ccfb229d760d) 이후 tenant(id)를
-    # FK한다 — users 행만으로는 부족하고 대응하는 tenant 행이 필요하다.
-    await raw_conn.execute("INSERT INTO tenant (id, kind) VALUES ($1, 'PERSONAL')", tenant_id)
     connection_id = await raw_conn.fetchval(
         "INSERT INTO account_connection "
         "(tenant_id, owner_subject_id, provider_code, opaque_account_ref, capability_profile) "

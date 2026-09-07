@@ -33,7 +33,7 @@ from src.foundation.positions.adapters.postgres_snapshot_repository import (
 from src.foundation.positions.application.mark_positions import mark_positions
 from src.foundation.positions.contracts.v1 import CostMethod, PositionSnapshotView
 from src.foundation.positions.domain.position_key import PositionKey
-from tests.integration.conftest import create_test_user
+from tests.integration.conftest import create_test_tenant
 from tests.integration.foundation.positions.conftest import create_pos_account
 
 _NOW = datetime(2026, 9, 3, 12, 0, tzinfo=timezone.utc)
@@ -249,7 +249,7 @@ def cal() -> FakeCalendarRepository:
 
 
 async def test_fresh_mark_updates_unrealized_same_currency(pool, refs, store, cal):
-    tenant_id = await create_test_user(pool)
+    tenant_id = await create_test_tenant(pool)
     account_id = await create_pos_account(
         pool, tenant_id, venue="bitget", base_currency=Currency.USDT
     )
@@ -286,7 +286,7 @@ async def test_fresh_mark_updates_unrealized_same_currency(pool, refs, store, ca
 async def test_stale_candle_clears_previous_mark_instead_of_keeping_it(pool, refs, store, cal):
     """task-654 decision: 스테일 마크는 직전값을 그대로 두지 않고 None으로
     덮어써야 한다 — 조용한 오평가 방지가 핵심 DoD다."""
-    tenant_id = await create_test_user(pool)
+    tenant_id = await create_test_tenant(pool)
     account_id = await create_pos_account(
         pool, tenant_id, venue="bitget", base_currency=Currency.USDT
     )
@@ -331,7 +331,7 @@ async def test_stale_candle_clears_previous_mark_instead_of_keeping_it(pool, ref
 
 
 async def test_unknown_instrument_yields_none_mark(pool, refs, store, cal):
-    tenant_id = await create_test_user(pool)
+    tenant_id = await create_test_tenant(pool)
     account_id = await create_pos_account(
         pool, tenant_id, venue="bitget", base_currency=Currency.USDT
     )
@@ -432,7 +432,7 @@ async def test_unknown_venue_position_key_yields_none_mark(pool, refs, store, ca
     """positions 도메인은 `TESTVENUE` 같은 market_data 밖 venue 문자열도
     허용한다(다른 통합테스트 픽스처 관례) — 캔들 소스가 없을 뿐 오류는
     아니다."""
-    tenant_id = await create_test_user(pool)
+    tenant_id = await create_test_tenant(pool)
     account_id = await create_pos_account(
         pool, tenant_id, venue="TESTVENUE", base_currency=Currency.USDT
     )

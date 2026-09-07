@@ -93,7 +93,7 @@ from src.foundation.positions.adapters.postgres_snapshot_repository import (
 from src.foundation.positions.application.record_fill import record_fill
 from src.foundation.positions.contracts.v1 import RecordFillCommand
 from src.foundation.positions.domain.position_key import PositionKey
-from tests.integration.conftest import create_test_user
+from tests.integration.conftest import create_test_tenant
 from tests.integration.foundation.positions.conftest import create_pos_account, open_position
 
 _SAMPLE_COUNT = 100
@@ -146,7 +146,7 @@ async def _count_record_fill_round_trips(
     audit: PostgresAuditEventRepository,
 ) -> int:
     """record_fill() 1회가 소비하는 순차 DB 왕복 수(구조 회귀 가드)."""
-    tenant_id = await create_test_user(pool)
+    tenant_id = await create_test_tenant(pool)
     account_id = await create_pos_account(pool, tenant_id)
     position_key = _key()
     await open_position(pool, tenant_id=tenant_id, account_id=account_id, position_key=position_key)
@@ -202,7 +202,7 @@ async def test_record_fill_journal_append_p95_under_30ms(pool) -> None:
 
     commands: list[RecordFillCommand] = []
     for _ in range(_SAMPLE_COUNT):
-        tenant_id = await create_test_user(pool)
+        tenant_id = await create_test_tenant(pool)
         account_id = await create_pos_account(pool, tenant_id)
         position_key = _key()
         await open_position(

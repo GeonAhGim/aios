@@ -34,7 +34,7 @@ from src.foundation.reconciliation.adapters.postgres_repository import (
 from src.foundation.reconciliation.application.run_reconciliation import run_reconciliation
 from src.foundation.reconciliation.contracts.v1 import Classification
 from src.foundation.risk_gate.adapters.postgres_repository import PostgresRiskGateRepository
-from tests.integration.conftest import create_test_user
+from tests.integration.conftest import create_test_tenant
 from tests.integration.foundation.positions.conftest import create_pos_account
 
 
@@ -99,7 +99,7 @@ async def _open_position(
 
 async def test_material_mismatch_bumps_metric(pool):
     registry = MetricsRegistry()
-    tenant_id = await create_test_user(pool)
+    tenant_id = await create_test_tenant(pool)
     account_id = await create_pos_account(pool, tenant_id, venue="bitget")
     asset = f"COIN{uuid4().hex[:8]}"
     await _open_position(
@@ -127,7 +127,7 @@ async def test_material_mismatch_bumps_metric(pool):
 
 async def test_matching_balance_does_not_bump_metric(pool):
     registry = MetricsRegistry()
-    tenant_id = await create_test_user(pool)
+    tenant_id = await create_test_tenant(pool)
     account_id = await create_pos_account(pool, tenant_id, venue="bitget")
     asset = f"COIN{uuid4().hex[:8]}"
     await _open_position(
@@ -155,7 +155,7 @@ async def test_matching_balance_does_not_bump_metric(pool):
 
 async def test_adapter_exception_propagates(pool):
     registry = MetricsRegistry()
-    tenant_id = await create_test_user(pool)
+    tenant_id = await create_test_tenant(pool)
     account_id = await create_pos_account(pool, tenant_id, venue="bitget")
     connection_id = uuid4()
     provider = ExchangeBalanceSource({connection_id: FakeAdapter(error=ConnectionError("boom"))})
@@ -177,7 +177,7 @@ async def test_one_account_failure_does_not_block_another_accounts_reconciliatio
     """DoD #5 negative test — 한 계좌의 잔고 조회 실패가 다른 계좌 대사를
     막지 않는다(공유 상태 없음을 증명)."""
     registry = MetricsRegistry()
-    tenant_id = await create_test_user(pool)
+    tenant_id = await create_test_tenant(pool)
 
     failing_account = await create_pos_account(pool, tenant_id, venue="bitget")
     failing_connection = uuid4()

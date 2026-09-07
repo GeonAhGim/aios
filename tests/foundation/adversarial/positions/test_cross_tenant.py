@@ -36,7 +36,7 @@ from src.foundation.positions.adapters.postgres_snapshot_repository import (
 from src.foundation.positions.application.record_fill import UnknownPositionError, record_fill
 from src.foundation.positions.contracts.v1 import RecordFillCommand
 from src.foundation.positions.domain.position_key import PositionKey
-from tests.integration.conftest import create_test_user
+from tests.integration.conftest import create_test_tenant
 from tests.integration.foundation.positions.conftest import create_pos_account, open_position
 
 _OCCURRED_AT = datetime(2026, 1, 1, tzinfo=timezone.utc)
@@ -88,14 +88,14 @@ async def _attack_command(*, tenant_id, account_id, position_key) -> RecordFillC
 
 
 async def test_cross_tenant_position_key_rejected(pool):
-    owner_id = await create_test_user(pool)
+    owner_id = await create_test_tenant(pool)
     owner_account_id = await create_pos_account(pool, owner_id)
     position_key = _key()
     await open_position(
         pool, tenant_id=owner_id, account_id=owner_account_id, position_key=position_key
     )
 
-    attacker_id = await create_test_user(pool)
+    attacker_id = await create_test_tenant(pool)
     attacker_account_id = await create_pos_account(pool, attacker_id)
     journal = PostgresJournalRepository(pool)
     snapshots = PostgresSnapshotRepository(pool)
@@ -137,7 +137,7 @@ async def test_same_tenant_different_account_position_key_rejected(pool):
     """같은 tenant 안에서도 `account_id`가 다르면 거부돼야 한다 — `position_key`가
     `tenant_id`만으로는 계정을 구분하지 못하므로(§4.3, 계좌는 tenant 아래
     복수 개일 수 있다) tenant 스코프만으로는 이 경계를 못 막는다."""
-    owner_id = await create_test_user(pool)
+    owner_id = await create_test_tenant(pool)
     owner_account_id = await create_pos_account(pool, owner_id)
     position_key = _key()
     await open_position(

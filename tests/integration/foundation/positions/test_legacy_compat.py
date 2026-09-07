@@ -19,7 +19,7 @@ import pytest
 from src.foundation.positions.adapters.legacy_positions_projection import (
     LegacyPositionsProjection,
 )
-from tests.integration.conftest import create_test_user
+from tests.integration.conftest import create_test_tenant
 from tests.integration.foundation.positions.conftest import create_pos_account
 
 _EXCHANGE = "TESTEX"
@@ -92,7 +92,7 @@ async def _direct_legacy_query(
 
 
 async def _setup_account(pool: asyncpg.Pool) -> tuple[UUID, UUID]:
-    tenant_id = await create_test_user(pool)
+    tenant_id = await create_test_tenant(pool)
     account_id = await create_pos_account(pool, tenant_id)
     return tenant_id, account_id
 

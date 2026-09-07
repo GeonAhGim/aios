@@ -32,7 +32,7 @@ from src.foundation.positions.application.record_fill import record_fill
 from src.foundation.positions.application.record_funding_fee import record_funding_fee
 from src.foundation.positions.contracts.v1 import RecordFillCommand, RecordFundingCommand
 from src.foundation.positions.domain.position_key import PositionKey
-from tests.integration.conftest import create_test_user
+from tests.integration.conftest import create_test_tenant
 from tests.integration.foundation.positions.conftest import create_pos_account, open_position
 
 _OCCURRED_AT = datetime(2026, 1, 1, tzinfo=timezone.utc)
@@ -66,7 +66,7 @@ def ports(pool):
 
 
 async def _open(pool):
-    tenant_id = await create_test_user(pool)
+    tenant_id = await create_test_tenant(pool)
     account_id = await create_pos_account(pool, tenant_id)
     position_key = _key()
     await open_position(pool, tenant_id=tenant_id, account_id=account_id, position_key=position_key)
@@ -123,7 +123,7 @@ async def _funding(pool, ports, *, tenant_id, account_id, position_key, amount, 
 
 
 async def test_unknown_position_rejected(pool, ports):
-    tenant_id = await create_test_user(pool)
+    tenant_id = await create_test_tenant(pool)
     with pytest.raises(UnknownPositionError):
         await rebuild_snapshot(
             _key(),
