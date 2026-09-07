@@ -43,10 +43,14 @@ from src.api.schemas.market_data import (
     ReplaySeriesView,
     SymbolAliasRef,
 )
+from src.foundation.market_data.adapters.postgres_source_contract import (
+    PostgresSourceContractRepository,
+)
 from src.foundation.market_data.application.get_candles import get_candles
 from src.foundation.market_data.application.read_api import (
     DataCoverageMissingError,
     authorize_feed,
+    authorize_redistribution,
     authorize_venue,
     paginate_candles,
     resolve_instrument,
@@ -63,6 +67,7 @@ from src.foundation.market_data.contracts.v1 import (
     Venue,
 )
 from src.foundation.market_data.domain.entitlement.policy import Entitlement
+from src.foundation.market_data.domain.entitlement.source_contract import DataUse
 from src.foundation.market_data.ports.calendar_repository import CalendarRepository
 from src.foundation.market_data.ports.candle_store import CandleStore
 from src.foundation.market_data.ports.entitlement import EntitlementPort, VenueRegistrySource
@@ -70,12 +75,19 @@ from src.foundation.market_data.ports.reference_repository import (
     ReferenceReadRepository,
     ReferenceRepository,
 )
+from src.foundation.market_data.ports.source_contract_repository import SourceContractRepository
 from src.foundation.trust.contracts.v1 import TenantContext
 
 router = APIRouter(prefix="/v1/foundation/market-data", tags=["foundation:market-data"])
 
 _CANDLE_PAGE_MAX = 1000
 _INSTRUMENT_PAGE_MAX = 200
+
+
+def get_source_contract_repository() -> SourceContractRepository:
+    """DC-28 — `source_contract`는 상태가 없다(`source_id` 조회만), pool 주입이
+    필요 없다. 어댑터 승격은 이 함수 하나만 바꾸면 된다(DC-27 D1과 동일 원칙)."""
+    return PostgresSourceContractRepository()
 
 
 def _entitlement_view(decision: Entitlement) -> EntitlementView:
@@ -105,6 +117,7 @@ async def get_candles_endpoint(
     reader: ReferenceReadRepository = Depends(get_market_reference_reader),
     cal: CalendarRepository = Depends(get_market_calendar_repository),
     entitlement: EntitlementPort = Depends(get_entitlement_port),
+    source_contracts: SourceContractRepository = Depends(get_source_contract_repository),
 ) -> ApiResponse[CandleSeriesView]:
     validate_span(start, end, ("as_of", as_of), ("cursor", cursor))
     now = datetime.now(timezone.utc)
@@ -112,6 +125,10 @@ async def get_candles_endpoint(
         inst = await resolve_instrument(
             conn, refs=refs, reader=reader, venue=venue, symbol=symbol,
             instrument_id=instrument_id, now=now,
+        )
+        await authorize_redistribution(
+            conn, inst.venue.value, repo=source_contracts, clock=lambda: now,
+            use=DataUse.SHARED_DISPLAY,
         )
     decision = await authorize_feed(
         entitlement, tenant_id=context.tenant_id, subject_id=context.subject_id,
@@ -153,6 +170,7 @@ async def replay_candles_endpoint(
     reader: ReferenceReadRepository = Depends(get_market_reference_reader),
     cal: CalendarRepository = Depends(get_market_calendar_repository),
     entitlement: EntitlementPort = Depends(get_entitlement_port),
+    source_contracts: SourceContractRepository = Depends(get_source_contract_repository),
 ) -> ApiResponse[ReplaySeriesView]:
     """LA-17 `replay` 위임 — 결측이 하나라도 있으면 `ReplayIncompleteError`가
     409 `DATA_COVERAGE_MISSING`으로 번역된다(strict). 페이지네이션 없음(A5
@@ -162,6 +180,12 @@ async def replay_candles_endpoint(
         inst = await resolve_instrument(
             conn, refs=refs, reader=reader, venue=venue, symbol=symbol,
             instrument_id=instrument_id, now=as_of,
+        )
+        # 재배포 스코프는 리플레이 대상 시각(as_of)이 아니라 "지금 이 호출이
+        # 허용되는가"를 묻는다 — 계약 유효기간은 실제 현재 시각 기준이다.
+        await authorize_redistribution(
+            conn, inst.venue.value, repo=source_contracts,
+            clock=lambda: datetime.now(timezone.utc), use=DataUse.SHARED_DISPLAY,
         )
     decision = await authorize_feed(
         entitlement, tenant_id=context.tenant_id, subject_id=context.subject_id,

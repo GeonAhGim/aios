@@ -9,6 +9,14 @@ LA-13 어댑터로 배치·캔들 저장)에 `md_symbol_alias`(심볼 해석 경
 `entitlements`(테넌트 A의 BITGET 등록)를 더한다. 테넌트 B는 아무 등록도
 없다 — 같은 인스트루먼트가 B에게는 "없는 것"이어야 한다.
 BITGET(연속 세션)만 쓴다 — 캘린더 시드가 필요 없다(LA-17 테스트와 동일 근거).
+
+DC-28(ADR-2026-09-06-H D2) — `source_contract`는 `source_id`가 PK인 전역
+테이블이라 실DB에 `BITGET` 행을 심으면 이 파일의 다른 테스트와 공유돼
+버린다(순서 의존 오염). 그래서 `get_source_contract_repository` 의존성을
+`_FakeSourceContractRepository`로 덮어써 각 테스트가 자기만의 스코프를
+갖는다(test_backtests_router.py가 `get_candle_store`를 덮어쓰는 것과 동일
+패턴) — 기본은 DISPLAY(기존 동작과 동치: 우리 사용자에게 표시는 하되
+재판매는 안 함), 재배포 거부 테스트만 개별적으로 재정의한다.
 """
 from __future__ import annotations
 
@@ -21,6 +29,7 @@ import jwt
 import pytest
 from httpx import ASGITransport, AsyncClient
 
+from src.api.routers.market_data import get_source_contract_repository
 from src.foundation.market_data.adapters.postgres_batch_repository import PostgresBatchRepository
 from src.foundation.market_data.adapters.postgres_candle_store import PostgresCandleStore
 from src.foundation.market_data.application.read_api import paginate_candles
@@ -33,18 +42,51 @@ from src.foundation.market_data.contracts.v1 import (
     Venue,
     Verdict,
 )
+from src.foundation.market_data.domain.entitlement.source_contract import (
+    RedistributionScope,
+    SourceCapability,
+    SourceContract,
+    SourceContractTier,
+)
 from src.main import app
 
 STRONG_PASSWORD = "Str0ng!Passw0rd"
 BASE = "/v1/foundation/market-data"
 
 
+def _source_contract(scope: RedistributionScope, *, source_id: str = "BITGET") -> SourceContract:
+    now = datetime.now(timezone.utc)
+    return SourceContract(
+        source_id=source_id, tier=SourceContractTier.ENTERPRISE, credential_ref="test:none",
+        redistribution_scope=scope, rate_limit=1000, quota=1_000_000,
+        valid_from=now - timedelta(days=365), valid_to=None,
+        capability=SourceCapability(
+            asset_classes=frozenset({"CRYPTO"}), resolutions=frozenset({"1m"}),
+        ),
+    )
+
+
+class _FakeSourceContractRepository:
+    """`SourceContractRepository`(포트) 페이크 — 실DB `source_contract` 행에
+    의존하지 않고 테스트마다 원하는 스코프를 즉석에서 준다."""
+
+    def __init__(self, contract: SourceContract | None) -> None:
+        self._contract = contract
+
+    async def get(self, conn: asyncpg.Connection, source_id: str) -> SourceContract | None:
+        return self._contract
+
+
 @pytest.fixture
 async def client():
     async with app.router.lifespan_context(app):
+        app.dependency_overrides[get_source_contract_repository] = lambda: (
+            _FakeSourceContractRepository(_source_contract(RedistributionScope.DISPLAY))
+        )
         transport = ASGITransport(app=app, raise_app_exceptions=False)
         async with AsyncClient(transport=transport, base_url="http://test") as ac:
             yield ac
+        app.dependency_overrides.pop(get_source_contract_repository, None)
 
 
 async def _register(client: AsyncClient) -> tuple[dict, uuid.UUID]:
@@ -199,6 +241,54 @@ async def test_cross_tenant_candles_is_404_isomorphic_with_unknown_symbol(client
     assert foreign_body["error_code"] == unknown_body["error_code"] == "RESOURCE_NOT_FOUND"
     assert foreign_body["message"] == unknown_body["message"]
     assert set(foreign_body) == set(unknown_body) and "data" not in foreign_body
+
+
+async def test_internal_scope_source_denies_candles_display(client, seeded):
+    """DC-28 DoD — INTERNAL 계약 소스는 차트(캔들) 응답에 포함되면 안
+    된다. 미등록 심볼과 동형인 404로 접힌다(재배포 스코프 거부도 존재
+    누설 문제이므로 authorize_feed 거부와 같은 취급, read_api.py 원칙)."""
+    app.dependency_overrides[get_source_contract_repository] = lambda: (
+        _FakeSourceContractRepository(_source_contract(RedistributionScope.INTERNAL))
+    )
+    response = await client.get(
+        f"{BASE}/candles",
+        params={"venue": "BITGET", "timeframe": "1m", "symbol": seeded["symbol"],
+                **_span(seeded["t0"], 0, 3)},
+        headers=seeded["a"],
+    )
+    assert response.status_code == 404, response.text
+    assert response.json()["error_code"] == "RESOURCE_NOT_FOUND"
+
+
+async def test_internal_scope_source_denies_replay(client, seeded):
+    app.dependency_overrides[get_source_contract_repository] = lambda: (
+        _FakeSourceContractRepository(_source_contract(RedistributionScope.INTERNAL))
+    )
+    as_of = datetime.now(timezone.utc).isoformat()
+    response = await client.get(
+        f"{BASE}/candles/replay",
+        params={"venue": "BITGET", "timeframe": "1m", "symbol": seeded["symbol"], "as_of": as_of,
+                **_span(seeded["t0"], 0, 3)},
+        headers=seeded["a"],
+    )
+    assert response.status_code == 404, response.text
+    assert response.json()["error_code"] == "RESOURCE_NOT_FOUND"
+
+
+async def test_unspecified_source_contract_denies_candles(client, seeded):
+    """D2 "미지정은 NONE으로 취급" — 계약 행 자체가 없으면(`NOT_FOUND`) 조용히
+    통과하지 않고 거부한다."""
+    app.dependency_overrides[get_source_contract_repository] = lambda: (
+        _FakeSourceContractRepository(None)
+    )
+    response = await client.get(
+        f"{BASE}/candles",
+        params={"venue": "BITGET", "timeframe": "1m", "symbol": seeded["symbol"],
+                **_span(seeded["t0"], 0, 3)},
+        headers=seeded["a"],
+    )
+    assert response.status_code == 404, response.text
+    assert response.json()["error_code"] == "RESOURCE_NOT_FOUND"
 
 
 async def test_span_outside_coverage_is_409_data_coverage_missing(client, seeded):

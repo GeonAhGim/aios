@@ -12,14 +12,27 @@ Spec: docs/specs/L4_market_data_positions_ledger_v1.0.md#§9.2 LA-24.
 UUID)가 있으면 우선하고 `venue`는 일치 검증만 한다; 없으면 `symbol`(벤처
 심볼)을 `md_symbol_alias` 유효기간으로 해석한다. 미등록·벤처 불일치·이용권
 거부는 **전부 같은** `MarketDataNotFoundError`다(타 테넌트 404 동형).
+
+DC-28(ADR-2026-09-06-H D2) — `authorize_redistribution()`은 이 파일이 이미
+쓰는 "이용권 거부는 존재 여부와 구분되지 않는다" 원칙을 재배포 스코프에도
+그대로 적용한다: 소스 계약이 없거나(D2 "미지정은 NONE으로 취급") 이 용도를
+허용하지 않으면 같은 `MarketDataNotFoundError`로 접는다. 순수 판정
+(`permits_use`)은 `domain/entitlement/source_contract.py`(DC-27) 소관이고,
+포트 호출(`authorize_source_access`)도 재구현하지 않는다 — 이 함수는 둘을
+조합해 강제 지점(읽기 API·차트·백테스트·내보내기)이 공유하는 게이트 하나만
+제공한다.
 """
 from __future__ import annotations
 
+from collections.abc import Callable
 from datetime import datetime
 from uuid import UUID
 
 import asyncpg
 
+from src.foundation.market_data.application.authorize_source_access import (
+    authorize_source_access,
+)
 from src.foundation.market_data.contracts.v1 import (
     CandleRecord,
     InstrumentRef,
@@ -31,17 +44,20 @@ from src.foundation.market_data.domain.entitlement.policy import (
     EntitlementSubject,
     FeedRequest,
 )
+from src.foundation.market_data.domain.entitlement.source_contract import DataUse, permits_use
 from src.foundation.market_data.ports.entitlement import EntitlementPort, VenueRegistrySource
 from src.foundation.market_data.ports.reference_repository import (
     ReferenceReadRepository,
     ReferenceRepository,
 )
+from src.foundation.market_data.ports.source_contract_repository import SourceContractRepository
 
 __all__ = [
     "DataCoverageMissingError",
     "MarketDataNotFoundError",
     "MarketDataQueryError",
     "authorize_feed",
+    "authorize_redistribution",
     "authorize_venue",
     "paginate_candles",
     "resolve_instrument",
@@ -145,4 +161,28 @@ async def authorize_venue(
 ) -> None:
     """참조데이터(목록·별칭)는 timeframe 축이 없어 벤처 단위 등록으로 판정한다."""
     if inst.venue not in await source.registered_venues(tenant_id):
+        raise MarketDataNotFoundError(_NOT_FOUND_MESSAGE)
+
+
+async def authorize_redistribution(
+    conn: asyncpg.Connection,
+    source_id: str,
+    *,
+    repo: SourceContractRepository,
+    clock: Callable[[], datetime],
+    use: DataUse,
+) -> None:
+    """D2 강제 지점(읽기 API·차트·백테스트·내보내기) 공통 게이트.
+
+    `source_id`는 벤처별 소스 계약 행을 가리킨다(market_data 벤더는
+    `Venue.value`가 곧 `source_contract.source_id`다 — 별도 매핑 테이블 없이
+    어댑터가 이미 아는 문자열을 그대로 쓴다). 계약이 없거나 만료됐거나
+    (`authorize_source_access`) 있어도 이 `use`를 허용하지 않으면(`permits_use`)
+    전부 같은 `MarketDataNotFoundError`다 — 어느 사유인지 상태코드로 구분하면
+    "이 소스는 계약이 있다/없다"·"이 등급으로는 안 된다"를 응답만으로 알 수
+    있게 돼 authorize_feed와 같은 존재-누설 문제가 생긴다."""
+    grant = await authorize_source_access(conn, source_id, repo=repo, clock=clock)
+    if not grant.allowed or grant.redistribution_scope is None:
+        raise MarketDataNotFoundError(_NOT_FOUND_MESSAGE)
+    if not permits_use(grant.redistribution_scope, use):
         raise MarketDataNotFoundError(_NOT_FOUND_MESSAGE)

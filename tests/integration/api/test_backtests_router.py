@@ -11,6 +11,10 @@ INSERT + LA-13 어댑터로 배치·캔들 저장)이다. "봉 상한 초과"는
 `backtests.MAX_QUICK_BARS`를 테스트에서 낮춰(monkeypatch) 같은 코드 경로를
 값싸게 재현한다 — `run_quick_backtest` 자체의 상한 검사(`_validate`)는
 바뀌지 않는다.
+
+DC-28(ADR-2026-09-06-H D2) — `source_contract`의 `source_id` PK를 실DB에
+심으면 test_market_data_router.py와 공유돼 오염된다(그 파일 모듈 docstring
+참조). 같은 이유로 `get_source_contract_repository`를 페이크로 덮어쓴다.
 """
 from __future__ import annotations
 
@@ -25,6 +29,7 @@ from httpx import ASGITransport, AsyncClient
 
 from src.api.foundation_deps import get_candle_store
 from src.api.routers import backtests as backtests_router
+from src.api.routers.backtests import get_source_contract_repository
 from src.foundation.market_data.adapters.postgres_batch_repository import PostgresBatchRepository
 from src.foundation.market_data.adapters.postgres_candle_store import PostgresCandleStore
 from src.foundation.market_data.contracts.v1 import (
@@ -36,7 +41,33 @@ from src.foundation.market_data.contracts.v1 import (
     Venue,
     Verdict,
 )
+from src.foundation.market_data.domain.entitlement.source_contract import (
+    RedistributionScope,
+    SourceCapability,
+    SourceContract,
+    SourceContractTier,
+)
 from src.main import app
+
+
+def _source_contract(scope: RedistributionScope, *, source_id: str = "BITGET") -> SourceContract:
+    now = datetime.now(timezone.utc)
+    return SourceContract(
+        source_id=source_id, tier=SourceContractTier.ENTERPRISE, credential_ref="test:none",
+        redistribution_scope=scope, rate_limit=1000, quota=1_000_000,
+        valid_from=now - timedelta(days=365), valid_to=None,
+        capability=SourceCapability(
+            asset_classes=frozenset({"CRYPTO"}), resolutions=frozenset({"1m"}),
+        ),
+    )
+
+
+class _FakeSourceContractRepository:
+    def __init__(self, contract: SourceContract | None) -> None:
+        self._contract = contract
+
+    async def get(self, conn: asyncpg.Connection, source_id: str) -> SourceContract | None:
+        return self._contract
 
 STRONG_PASSWORD = "Str0ng!Passw0rd"
 PATH = "/v1/backtests/quick"
@@ -87,11 +118,15 @@ async def client():
     async with app.router.lifespan_context(app):
         counting = _CountingCandleStore(PostgresCandleStore(app.state.pool))
         app.dependency_overrides[get_candle_store] = lambda: counting
+        app.dependency_overrides[get_source_contract_repository] = lambda: (
+            _FakeSourceContractRepository(_source_contract(RedistributionScope.DISPLAY))
+        )
         transport = ASGITransport(app=app, raise_app_exceptions=False)
         async with AsyncClient(transport=transport, base_url="http://test") as ac:
             ac.candle_store = counting  # type: ignore[attr-defined]
             yield ac
         app.dependency_overrides.pop(get_candle_store, None)
+        app.dependency_overrides.pop(get_source_contract_repository, None)
 
 
 async def _register(client: AsyncClient) -> tuple[dict, uuid.UUID]:
@@ -275,3 +310,32 @@ async def test_cross_tenant_header_is_403(client: AsyncClient, seeded: dict) -> 
     response = await client.post(PATH, json=_body(seeded), headers=headers)
     assert response.status_code == 403, response.text
     assert response.json()["error_code"] == "AUTH_TENANT_MISMATCH"
+
+
+# ---- DC-28 재배포 스코프 강제(차트·백테스트 경로) ----
+
+
+async def test_internal_scope_source_still_permits_backtest(
+    client: AsyncClient, seeded: dict
+) -> None:
+    """`INTERNAL_CALC`은 백테스트가 요구하는 가장 낮은 문턱이다 — INTERNAL
+    스코프 소스도 내부 계산(백테스트)에는 여전히 쓸 수 있다(D2, `permits_use`
+    매트릭스). 화면 표시(SHARED_DISPLAY)만 막힌다는 것과 대칭인 positive 케이스."""
+    app.dependency_overrides[get_source_contract_repository] = lambda: (
+        _FakeSourceContractRepository(_source_contract(RedistributionScope.INTERNAL))
+    )
+    response = await client.post(PATH, json=_body(seeded), headers=seeded["a"])
+    assert response.status_code == 200, response.text
+
+
+async def test_none_scope_source_denies_backtest(client: AsyncClient, seeded: dict) -> None:
+    """DC-28 DoD — 재배포 스코프가 없는(NONE) 소스는 백테스트(내부 계산)
+    경로에서도 캔들을 못 읽는다. `read_candles_columnar`가 호출되기 전에
+    거부되므로 왕복 1회 증명(`read_calls`)도 0에서 멈춘다."""
+    app.dependency_overrides[get_source_contract_repository] = lambda: (
+        _FakeSourceContractRepository(_source_contract(RedistributionScope.NONE))
+    )
+    response = await client.post(PATH, json=_body(seeded), headers=seeded["a"])
+    assert response.status_code == 404, response.text
+    assert response.json()["error_code"] == "RESOURCE_NOT_FOUND"
+    assert client.candle_store.read_calls == 0  # type: ignore[attr-defined]
