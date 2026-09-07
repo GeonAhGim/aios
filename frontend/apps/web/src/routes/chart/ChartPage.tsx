@@ -2,51 +2,42 @@
 // 대신 vendor klinecharts 포크에 의존하지 않는 서브모듈만 직접 불러온다
 // (배럴은 core/klinechartsBackend를 통해 vendor까지 재수출해 apps/web의
 // 엄격한 tsconfig에서 tsc -b가 깨진다).
-import { createCandleStream, type CandleStream, type CandleStreamSnapshot, type StreamCandle } from "@aios/chart-engine/src/data/candleStream";
-import {
-  addDrawing,
-  createFibonacci,
-  createHorizontalLine,
-  createRectangle,
-  createTrendLine,
-  createVerticalLine,
-  removeDrawing,
-} from "@aios/chart-engine/src/drawings/tools";
-import type { Drawing, DrawingCollection, DrawingKind } from "@aios/chart-engine/src/drawings/model";
-import { createDefaultOverlayRegistry, type OverlayEntry } from "@aios/chart-engine/src/indicators/overlayRegistry";
-import {
-  createReplayController,
-  type ReplayClock,
-  type ReplayController,
-  type ReplayFrame,
-  type ReplayState,
-} from "@aios/chart-engine/src/replay/replayController";
 import type { ChartingPort } from "@aios/chart-engine/src/layout/persistence";
 import type { IndicatorCatalogEntry } from "@aios/chart-engine/src/plugins/indicatorPlugin";
 import type { CandleQueryParams, CandleQueryResult } from "@aios/api-client";
 import { ApiError, createBacktestsClient, createChartingClient, createMarketDataClient } from "@aios/api-client";
 import { useAuthStore } from "@aios/shared-hooks";
-import { routeApiError, type SeriesKey, type Timeframe, type Venue } from "@aios/shared-types";
-import { CandlestickChart, type CandlestickPoint, EmptyState, LoadingState, PageHeader } from "@aios/ui-web";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { routeApiError, type Timeframe, type Venue } from "@aios/shared-types";
+import { CandlestickChart, EmptyState, LoadingState, PageHeader } from "@aios/ui-web";
+import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Link, useSearchParams } from "react-router-dom";
+import { useSearchParams } from "react-router-dom";
 import { AppShell } from "../../components/layout/AppShell";
 import { ErrorMessage } from "../../components/ErrorMessage";
 import { BacktestPanel, type RunQuickBacktest } from "./BacktestPanel";
 import { ChartPanes } from "./ChartPanes";
 import { ChartToolbar } from "./ChartToolbar";
 import { CompareSymbols, type CompareSymbolRef } from "./CompareSymbols";
-import { ChartTemplates, type ChartTemplatesPort, type TemplateApplyResult } from "./ChartTemplates";
+import { ChartTemplates, type ChartTemplatesPort } from "./ChartTemplates";
+import { ChartLayoutErrorBanners } from "./ChartLayoutErrorBanners";
+import { buildChartLayoutControls } from "./chartToolbarLayoutProps";
+import { decodeCompareSymbol, encodeCompareSymbol, NoInstrumentSelected } from "./chartPageHelpers";
+import { DrawingsList } from "./DrawingsList";
 import { IndicatorParityPanel, type ServerIndicatorSeriesPort } from "./IndicatorParityPanel";
 import { IndicatorPicker } from "./IndicatorPicker";
 import { StrategyMarkers } from "./StrategyMarkers";
+import { useChartDrawings } from "./useChartDrawings";
 import { useChartLayout, type ChartViewSnapshot } from "./useChartLayout";
+import { useChartReplaySession } from "./useChartReplaySession";
+import { useIndicatorSelection } from "./useIndicatorSelection";
 
 // CH-6a — 화면 조립 리프: chart-engine의 CH-2(candleStream)·CH-3(overlayRegistry)
 // ·CH-4(drawings)·CH-7(replayController) 공개 API를 이 화면에서만 소비한다.
 // 서버 저장·복원(indicator 선택·drawings 영속화)은 CH-5 backend가 아직 없어
 // task-1557 이후 6b 몫이다 — 여기서는 전부 로컬 state로만 관리한다.
+// task-2011: 상태 소유 단위(그리기/레전드·오브젝트 트리/리플레이)는 각각
+// useChartDrawings/useIndicatorSelection/useChartReplaySession으로, 순수 함수는
+// chartPageHelpers.tsx로 옮겼다 — 이 파일은 화면 조립만 남긴다(순수 이동).
 
 const VISIBLE_CANDLE_COUNT = 200;
 const DEFAULT_VENUE: Venue = "BITGET";
@@ -79,90 +70,6 @@ export interface ChartPageProps {
   now?: Date;
 }
 
-// CH-13b: compareSymbolIds(useChartLayout.ts)와 동일한 "VENUE:instrumentId" 인코딩을
-// 이 화면 경계에서만 구조체로 풀고 다시 만든다 — 훅은 문자열만 안다(파일 범위 제한).
-function encodeCompareSymbol(ref: CompareSymbolRef): string {
-  return `${ref.venue}:${ref.instrumentId}`;
-}
-
-function decodeCompareSymbol(id: string): CompareSymbolRef | null {
-  const sep = id.indexOf(":");
-  if (sep < 0) return null;
-  return { venue: id.slice(0, sep) as Venue, instrumentId: id.slice(sep + 1) };
-}
-
-function toChartPoints(candles: readonly StreamCandle[]): CandlestickPoint[] {
-  return candles.map((c) => ({
-    time: Math.floor(c.openTimeMs / 1000),
-    open: Number(c.record.open),
-    high: Number(c.record.high),
-    low: Number(c.record.low),
-    close: Number(c.record.close),
-  }));
-}
-
-function drawingLabel(d: Drawing): string {
-  switch (d.kind) {
-    case "trendline":
-      return `추세선 (${d.points[0].time}→${d.points[1].time})`;
-    case "horizontal-line":
-      return `수평선 @${d.price}`;
-    case "vertical-line":
-      return `수직선 @${d.time}`;
-    case "rectangle":
-      return `사각형 (${d.points[0].time}→${d.points[1].time})`;
-    case "fibonacci":
-      return `피보나치 (${d.points[0].time}→${d.points[1].time})`;
-  }
-}
-
-function createDrawing(id: string, kind: DrawingKind, time: number, price: number): Drawing {
-  switch (kind) {
-    case "horizontal-line":
-      return createHorizontalLine(id, price);
-    case "vertical-line":
-      return createVerticalLine(id, time);
-    case "trendline":
-      return createTrendLine(id, { time: time - 1, price }, { time, price });
-    case "rectangle":
-      return createRectangle(id, { time: time - 1, price: price * 0.99 }, { time, price: price * 1.01 });
-    case "fibonacci":
-      return createFibonacci(id, { time: time - 1, price: price * 0.99 }, { time, price });
-  }
-}
-
-function NoInstrumentSelected() {
-  return (
-    <AppShell>
-      <div className="max-w-5xl space-y-4">
-        <PageHeader title="차트" />
-        <EmptyState>
-          심볼을 먼저 선택하세요.{" "}
-          <Link to="/market/instruments" className="underline">
-            심볼 목록으로 이동
-          </Link>
-        </EmptyState>
-      </div>
-    </AppShell>
-  );
-}
-
-const REAL_CLOCK: ReplayClock = {
-  setTimeout: (cb, ms) => window.setTimeout(cb, ms),
-  clearTimeout: (t) => window.clearTimeout(t as number),
-};
-
-// replayController가 아직 한 번도 프레임을 내보내기 전(마운트 직후·스트림
-// 교체 직후)의 표시용 기본값 — ref.current를 렌더 중에 읽지 않기 위한 정적 값.
-const IDLE_REPLAY_STATE: ReplayState = {
-  status: "paused",
-  speed: 1,
-  cursorTs: null,
-  visibleCount: 0,
-  totalCount: 0,
-  atEnd: true,
-};
-
 export function ChartPage({
   fetchCandles = marketDataClient.getCandles,
   chartingPort = chartingClient,
@@ -179,39 +86,25 @@ export function ChartPage({
   const [timeframe, setTimeframe] = useState<Timeframe>(DEFAULT_TIMEFRAME);
   const [anchor] = useState(() => now ?? new Date());
 
-  const [snapshot, setSnapshot] = useState<CandleStreamSnapshot | null>(null);
-  const [replayFrame, setReplayFrame] = useState<ReplayFrame | null>(null);
-  const streamRef = useRef<CandleStream | null>(null);
-  const replayRef = useRef<ReplayController | null>(null);
+  const { drawingTool, setDrawingTool, drawings, handleAddDrawing: addDrawingAt, handleRemoveDrawing } = useChartDrawings(
+    venue,
+    instrumentId,
+    timeframe,
+  );
 
-  const [drawingTool, setDrawingTool] = useState<DrawingKind | null>(null);
-  const [drawings, setDrawings] = useState<DrawingCollection>([]);
-  const drawingSeq = useRef(0);
-
-  const [selectedIndicatorIds, setSelectedIndicatorIds] = useState<string[]>([]);
-  const overlayEntries: readonly OverlayEntry[] = useMemo(() => createDefaultOverlayRegistry().list(), []);
-  const knownIndicatorIds = useMemo(() => new Set(overlayEntries.map((e) => e.id)), [overlayEntries]);
-  // CH-17c: 템플릿 적용 시 CH-14 페인 배치를 재현한다 — ChartPanes.tsx의
-  // restoredHeightRatios는 최초 마운트 때만 적용되므로(파일 상단 주석), key를
-  // 올려 다시 마운트시켜야 실제로 반영된다.
-  const [appliedPaneHeightRatios, setAppliedPaneHeightRatios] = useState<Readonly<Record<string, number>> | undefined>(
-    undefined,
-  );
-  const [paneRemountKey, setPaneRemountKey] = useState(0);
-  // CH-14 화면 배선: 서브패널 존재 여부는 이미 CH-8로 저장되는 selectedIndicatorIds에서
-  // 파생한다(ChartPanes.tsx 상단 주석 — 새 저장 경로를 만들지 않는다).
-  const selectedOverlayEntries = useMemo(
-    () => overlayEntries.filter((e) => selectedIndicatorIds.includes(e.id)),
-    [overlayEntries, selectedIndicatorIds],
-  );
-  const mainOverlayEntries = useMemo(
-    () => selectedOverlayEntries.filter((e) => e.placement === "main-overlay"),
-    [selectedOverlayEntries],
-  );
-  const subOverlayEntries = useMemo(
-    () => selectedOverlayEntries.filter((e) => e.placement === "sub-pane"),
-    [selectedOverlayEntries],
-  );
+  const {
+    selectedIndicatorIds,
+    setSelectedIndicatorIds,
+    overlayEntries,
+    knownIndicatorIds,
+    selectedOverlayEntries,
+    mainOverlayEntries,
+    subOverlayEntries,
+    appliedPaneHeightRatios,
+    paneRemountKey,
+    toggleIndicator,
+    handleTemplateApplied,
+  } = useIndicatorSelection();
 
   // CH-13b: 비교 심볼도 CH-8 레이아웃(useChartLayout)을 통해서만 저장·복원한다 —
   // 이 화면은 구조체로, 훅은 "VENUE:instrumentId" 문자열로 다룬다(encode/decode 경계).
@@ -260,47 +153,16 @@ export function ChartPage({
     enabled: instrumentId !== null && instrumentId.trim().length > 0,
   });
 
-  // 심볼/거래소/타임프레임이 바뀔 때마다 CH-2 candleStream과 CH-7
-  // replayController를 새로 만든다 — 서로 다른 키의 봉을 한 스트림에
-  // 섞지 않는다(candleStream.ts key_mismatch 규약).
-  useEffect(() => {
-    if (!instrumentId) return undefined;
-    const key: SeriesKey = { venue, instrument_id: instrumentId, timeframe };
-    const stream = createCandleStream({ key });
-    const replay = createReplayController(stream, { clock: REAL_CLOCK });
-    streamRef.current = stream;
-    replayRef.current = replay;
-    setDrawings([]);
-    setSnapshot(stream.snapshot());
-    setReplayFrame(null);
-    const unsubStream = stream.subscribe(setSnapshot);
-    const unsubReplay = replay.subscribe(setReplayFrame);
-    return () => {
-      unsubStream();
-      unsubReplay();
-      replay.dispose();
-      stream.dispose();
-      streamRef.current = null;
-      replayRef.current = null;
-    };
-  }, [venue, instrumentId, timeframe]);
-
-  // 서버에서 새 페이지가 도착할 때마다 같은 스트림에 병합한다(applyPage가
-  // 중복·역행·gap 판정을 전담 — 여기서는 결과를 재정렬하지 않는다).
-  useEffect(() => {
-    const series = query.data?.series;
-    if (streamRef.current && series) streamRef.current.applyPage(series);
-  }, [query.data]);
+  const { replayRef, replayState, displayCandles, points, replayDisabled } = useChartReplaySession({
+    venue,
+    instrumentId,
+    timeframe,
+    queryData: query.data,
+  });
 
   if (!instrumentId) {
     return <NoInstrumentSelected />;
   }
-
-  const replayState = replayFrame?.state ?? IDLE_REPLAY_STATE;
-  const replayEngaged = replayState.status === "playing" || replayState.cursorTs !== null;
-  const displayCandles = replayEngaged ? (replayFrame?.visible ?? []) : (snapshot?.candles ?? []);
-  const points = toChartPoints(displayCandles);
-  const replayDisabled = (snapshot?.candles.length ?? 0) === 0;
 
   const routed = query.error ? routeApiError(query.error) : null;
   const canRetry = routed?.kind === "refetch_retry" || routed?.kind === "backoff_retry";
@@ -310,32 +172,8 @@ export function ChartPage({
   const baseCandles = baseSeries?.kind === "ok" ? baseSeries.value.candles : [];
 
   function handleAddDrawing(): void {
-    if (!drawingTool) return;
-    const last = displayCandles[displayCandles.length - 1];
-    if (!last) return;
-    const time = Math.floor(last.openTimeMs / 1000);
-    const price = Number(last.record.close);
-    drawingSeq.current += 1;
-    const drawing = createDrawing(`drawing-${drawingSeq.current}`, drawingTool, time, price);
-    setDrawings((prev) => addDrawing(prev, drawing));
+    addDrawingAt(displayCandles[displayCandles.length - 1]);
   }
-
-  function handleRemoveDrawing(id: string): void {
-    setDrawings((prev) => removeDrawing(prev, id));
-  }
-
-  function toggleIndicator(id: string): void {
-    setSelectedIndicatorIds((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
-  }
-
-  function handleTemplateApplied(result: TemplateApplyResult): void {
-    setSelectedIndicatorIds([...result.indicatorIds]);
-    setAppliedPaneHeightRatios({ ...result.paneHeightRatios });
-    setPaneRemountKey((prev) => prev + 1);
-  }
-
-  const restoreRouted = layout.restoreError ? routeApiError(layout.restoreError) : null;
-  const saveRouted = layout.saveStatus === "error" ? routeApiError(layout.saveError) : null;
 
   return (
     <AppShell>
@@ -348,28 +186,7 @@ export function ChartPage({
           </p>
         </div>
 
-        {layout.status === "restore_failed" && (
-          <ErrorMessage
-            errorCode={layout.restoreError instanceof ApiError ? layout.restoreError.errorCode : undefined}
-            message={layout.restoreError instanceof Error ? layout.restoreError.message : undefined}
-            traceId={layout.restoreError instanceof ApiError ? layout.restoreError.traceId : undefined}
-            retryAfterSec={restoreRouted?.kind === "backoff_retry" ? restoreRouted.afterSec : undefined}
-            onRetry={
-              restoreRouted?.kind === "refetch_retry" || restoreRouted?.kind === "backoff_retry"
-                ? layout.retryRestore
-                : undefined
-            }
-          />
-        )}
-        {saveRouted && (
-          <ErrorMessage
-            errorCode={layout.saveError instanceof ApiError ? layout.saveError.errorCode : undefined}
-            message={layout.saveError instanceof Error ? layout.saveError.message : undefined}
-            traceId={layout.saveError instanceof ApiError ? layout.saveError.traceId : undefined}
-            retryAfterSec={saveRouted.kind === "backoff_retry" ? saveRouted.afterSec : undefined}
-            onRetry={saveRouted.kind === "refetch_retry" || saveRouted.kind === "backoff_retry" ? layout.save : undefined}
-          />
-        )}
+        <ChartLayoutErrorBanners layout={layout} />
 
         <ChartToolbar
           venue={venue}
@@ -390,25 +207,7 @@ export function ChartPage({
           instrumentId={instrumentId}
           selectedIndicatorIds={selectedIndicatorIds}
           currentClose={points.length > 0 ? points[points.length - 1]!.close : null}
-          layout={{
-            name: layout.layoutName,
-            onNameChange: layout.rename,
-            onSave: () => void layout.save(),
-            onDelete: () => void layout.remove(),
-            saveStatus: layout.saveStatus,
-            onReload: () => void layout.reload(),
-            panels: layout.model.panels.map((p) => ({ id: p.id, label: `${p.instrument.instrumentId} · ${p.timeframe}` })),
-            activePanelId: layout.model.activePanelId,
-            onSelectPanel: layout.setActivePanel,
-            onAddPanel: layout.addPanel,
-            onRemovePanel: () => {
-              if (layout.model.activePanelId) layout.removePanel(layout.model.activePanelId);
-            },
-            isWatchlisted: layout.model.watchlists.some((w) =>
-              w.entries.some((e) => e.instrumentId === instrumentId && e.venue === venue),
-            ),
-            onToggleWatchlist: () => layout.toggleWatchlistEntry({ instrumentId, venue, symbol: instrumentId }),
-          }}
+          layout={buildChartLayoutControls(layout, instrumentId, venue)}
         />
 
         <div className="flex items-start gap-2">
@@ -483,25 +282,7 @@ export function ChartPage({
           listInstruments={listInstruments}
         />
 
-        <section aria-label="그리기 목록" className="space-y-1.5">
-          <h2 className="text-sm font-medium text-fg-secondary">그리기 ({drawings.length})</h2>
-          {drawings.length > 0 && (
-            <ul className="space-y-1">
-              {drawings.map((d) => (
-                <li key={d.id} className="flex items-center justify-between gap-2 text-sm text-fg">
-                  <span>{drawingLabel(d)}</span>
-                  <button
-                    type="button"
-                    className="text-xs text-danger underline"
-                    onClick={() => handleRemoveDrawing(d.id)}
-                  >
-                    삭제
-                  </button>
-                </li>
-              ))}
-            </ul>
-          )}
-        </section>
+        <DrawingsList drawings={drawings} onRemove={handleRemoveDrawing} />
       </div>
     </AppShell>
   );
