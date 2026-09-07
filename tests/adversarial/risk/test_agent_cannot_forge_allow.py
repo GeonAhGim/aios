@@ -40,7 +40,7 @@ from tests.adversarial.risk.conftest import (
     make_order,
     seed_execution,
 )
-from tests.integration.conftest import create_test_user
+from tests.integration.conftest import create_test_tenant
 
 _TRIGGER_ERRORS = (asyncpg.CheckViolationError, asyncpg.ForeignKeyViolationError)
 _WORM_ERRORS = (asyncpg.InsufficientPrivilegeError, asyncpg.RaiseError)
@@ -55,7 +55,7 @@ class _Victim:
 
 @pytest.fixture
 async def victim(pool: asyncpg.Pool) -> _Victim:
-    user_id = await create_test_user(pool)
+    user_id = await create_test_tenant(pool)
     execution_id = await seed_execution(pool, user_id)
     f0 = dict(await fence_reader(pool, user_id, execution_id)())
     return _Victim(user_id, execution_id, f0)
@@ -121,7 +121,7 @@ async def test_rsk006_invented_decision_id_matches_no_worm_row(pool, victim, dec
 
 
 async def test_rsk006_other_tenants_allow_decision_is_rejected(pool, victim, decision_repo):
-    other_tenant = await create_test_user(pool)
+    other_tenant = await create_test_tenant(pool)
     stolen = await insert_decision(pool, other_tenant, execution_ref=f"exec:{victim.execution_id}")
     before = await _snapshot(decision_repo, stolen.decision_id)
 
@@ -200,7 +200,7 @@ async def test_rsk006_worm_rejects_rewriting_decision_then_submit_still_fails(
     pool, victim, decision_repo, setup, sql
 ):
     ref = f"exec:{victim.execution_id}"
-    owner = victim.user_id if setup != "other_tenant" else await create_test_user(pool)
+    owner = victim.user_id if setup != "other_tenant" else await create_test_tenant(pool)
     outcome = RiskOutcome.DENY if setup == "deny" else RiskOutcome.ALLOW
     ttl = timedelta(seconds=-1) if setup == "expired" else timedelta(minutes=5)
     target = await insert_decision(pool, owner, outcome=outcome, ttl=ttl, execution_ref=ref)

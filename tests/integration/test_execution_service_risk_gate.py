@@ -31,7 +31,7 @@ from src.services.execution_service import ExecutionControlError, ExecutionServi
 from src.services.order_service.foundation_gate import make_foundation_pre_submit_gate
 from src.services.order_service.gate import GateOutcome, OrderContext
 from tests.foundation.integration.risk_gate.conftest import activate_mandate_with_defaults
-from tests.integration.conftest import create_test_user
+from tests.integration.conftest import create_test_tenant
 
 
 def _asyncpg_dsn() -> str:
@@ -121,7 +121,7 @@ async def _create_execution(service, pool, user_id):
 
 async def test_active_kill_switch_denies_unmandated_start(gated_service, pool, risk_repo):
     """1층 — mandate가 없어도 kill switch는 legacy 실행 시작을 막는다."""
-    user_id = await create_test_user(pool)
+    user_id = await create_test_tenant(pool)
     created = await _create_execution(gated_service, pool, user_id)
     await activate_safety_control(
         risk_repo,
@@ -146,7 +146,7 @@ async def test_active_kill_switch_denies_unmandated_start(gated_service, pool, r
 async def test_unmandated_start_passes_with_audit_event(gated_service, pool):
     """2층 — mandate_revision_id가 없으면(기존 실행 전부) DENY 대신
     audit_log만 남기고 통과한다."""
-    user_id = await create_test_user(pool)
+    user_id = await create_test_tenant(pool)
     created = await _create_execution(gated_service, pool, user_id)
 
     result = await gated_service.start(created.id, user_id)
@@ -166,7 +166,7 @@ async def test_mandate_linked_start_denied_when_mandate_paused(
 ):
     """mandate_revision_id가 연결된 실행은(컬럼이 생기기 전까지는 이
     테스트가 직접 게이트를 만들어 검증) 정식 정책평가를 거친다."""
-    user_id = await create_test_user(pool)
+    user_id = await create_test_tenant(pool)
     await activate_mandate_with_defaults(mandate_repo, trust_repo, tenant_id=user_id)
     await pause_mandate(mandate_repo, tenant_id=user_id)
     mandate = await mandate_repo.get_mandate(user_id)

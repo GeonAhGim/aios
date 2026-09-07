@@ -26,7 +26,7 @@ from src.services.order_service.foundation_gate import make_foundation_pre_submi
 from src.services.order_service.submit import OrderDeniedByRiskGateError
 from src.services.preview_service import PreviewCondition
 from tests.adversarial.risk.conftest import RecordingAdapter, seed_execution
-from tests.integration.conftest import create_test_user
+from tests.integration.conftest import create_test_tenant
 
 _PROVIDER = "bitget"
 
@@ -74,7 +74,7 @@ def _execute_kwargs(execution_id: int, user_id) -> dict[str, object]:
 async def test_executor_without_gate_fails_closed(pool: asyncpg.Pool) -> None:
     """(1) 게이트 없는 Executor 주문 실패 — `pre_submit_gate`는 필수 kwonly
     인자다(I-01). 넘기지 않으면 주문을 시도조차 하지 않고 즉시 TypeError."""
-    user_id = await create_test_user(pool)
+    user_id = await create_test_tenant(pool)
     execution_id = await seed_execution(pool, user_id, exchange=_PROVIDER)
     adapter = RecordingAdapter()
 
@@ -94,7 +94,7 @@ async def test_executor_denies_when_kill_switch_active(pool: asyncpg.Pool) -> No
     """(2) kill switch ACTIVE에서 Executor 경로 거부 — 실제 프로덕션 게이트
     구현체(`make_foundation_pre_submit_gate`)를 주입해도, ACCOUNT 범위
     safety_control이 켜져 있으면 거래소 호출 전에 거부돼야 한다."""
-    user_id = await create_test_user(pool)
+    user_id = await create_test_tenant(pool)
     execution_id = await seed_execution(pool, user_id, exchange=_PROVIDER)
     adapter = RecordingAdapter()
 
@@ -128,7 +128,7 @@ async def test_executor_denies_when_mandate_required_but_missing(pool: asyncpg.P
     """(3) mandate DENY에서 거부 — `require_mandate=True`인 게이트를 주입하면
     (이 실행에는 아직 mandate_revision_id가 연결돼 있지 않으므로) RSK-002가
     RISK_MANDATE_REQUIRED로 거부한다."""
-    user_id = await create_test_user(pool)
+    user_id = await create_test_tenant(pool)
     execution_id = await seed_execution(pool, user_id, exchange=_PROVIDER)
     adapter = RecordingAdapter()
 

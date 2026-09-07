@@ -51,7 +51,7 @@ from tests.adversarial.risk.conftest import (
     recorded_inputs,
     seed_execution,
 )
-from tests.integration.conftest import NoopEventBus, create_test_user
+from tests.integration.conftest import NoopEventBus, create_test_tenant
 from tests.integration.risk.test_pre_submit_gate import (
     _FakeConnectionRepo,
     _RiskRepoWithFixedSafetyState,
@@ -91,7 +91,7 @@ async def _reject(
 
 @pytest.fixture
 async def victim(pool: asyncpg.Pool) -> dict[str, Any]:
-    user_id = await create_test_user(pool)
+    user_id = await create_test_tenant(pool)
     execution_id = await seed_execution(pool, user_id)
     decision = await insert_decision(pool, user_id, execution_ref=f"exec:{execution_id}")
     read = fence_reader(pool, user_id, execution_id)
@@ -232,7 +232,7 @@ def test_i01_submit_with_fence_gate_inputs_have_no_defaults():
 async def test_i10_wiring_real_pre_submit_decision_binds_only_to_its_order(pool):
     """R-35 `evaluate_pre_submit`이 실제로 기록한 WORM 행 → `submit_with_fence`.
     같은 결정이 수량만 다른 주문엔 거부되고, 원래 주문엔 통과한다(TTL 2s 안)."""
-    user_id = await create_test_user(pool)
+    user_id = await create_test_tenant(pool)
     execution_id = await seed_execution(pool, user_id)
     order = make_order(execution_id)
     decision, fence = await evaluate_pre_submit(

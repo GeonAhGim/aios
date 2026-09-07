@@ -5,10 +5,6 @@
     "require_mandate_false": {
       "task": 1750,
       "note": "R-59. 운영 조립 4곳이 require_mandate=False다. 컴플라이언스 판정이 감사로그 전용 no-op이므로 I-09 이중 권위가 절반만 산다."
-    },
-    "tenant_fk_to_users": {
-      "task": 1814,
-      "note": "FA-0a. tenant_id가 users(user_id)를 FK하는 테이블 19개. 조직 테넌트 도입 시 전부 깨진다. 2026-09-06에 같은 결함이 legal_entity에 재생산돼 FA-2a로 따로 교정했다."
     }
   }
 }

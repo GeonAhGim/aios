@@ -19,7 +19,7 @@ from src.foundation.mandates.application.create_draft_mandate import create_draf
 from src.foundation.mandates.projections import build_mandate_status_view
 from src.foundation.trust.adapters.postgres_repository import PostgresTrustRepository
 from tests.foundation.integration.mandates.conftest import default_rules
-from tests.integration.conftest import create_test_user
+from tests.integration.conftest import create_test_tenant
 
 
 def _asyncpg_dsn() -> str:
@@ -47,8 +47,8 @@ def trust_repo(pool):
 
 
 async def test_cannot_activate_another_tenants_draft_revision(pool, repo, trust_repo):
-    owner_id = await create_test_user(pool)
-    attacker_id = await create_test_user(pool)
+    owner_id = await create_test_tenant(pool)
+    attacker_id = await create_test_tenant(pool)
     owned_draft = await create_draft_mandate(
         repo, tenant_id=owner_id, subject_id=owner_id, rules=default_rules()
     )
@@ -69,7 +69,7 @@ async def test_cannot_activate_another_tenants_draft_revision(pool, repo, trust_
 
 
 async def test_activating_nonexistent_revision_raises_lookup_error(pool, repo, trust_repo):
-    tenant_id = await create_test_user(pool)
+    tenant_id = await create_test_tenant(pool)
     with pytest.raises(RevisionNotFoundError):
         await activate_revision_command(
             repo,
@@ -82,8 +82,8 @@ async def test_activating_nonexistent_revision_raises_lookup_error(pool, repo, t
 
 
 async def test_tenant_status_view_never_includes_another_tenants_mandate(pool, repo):
-    tenant_a = await create_test_user(pool)
-    tenant_b = await create_test_user(pool)
+    tenant_a = await create_test_tenant(pool)
+    tenant_b = await create_test_tenant(pool)
     await create_draft_mandate(
         repo, tenant_id=tenant_a, subject_id=tenant_a, rules=default_rules()
     )

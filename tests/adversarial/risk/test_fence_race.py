@@ -49,7 +49,7 @@ from tests.adversarial.risk.conftest import (
     order_row,
     seed_execution,
 )
-from tests.integration.conftest import create_test_user
+from tests.integration.conftest import create_test_tenant
 
 _N_EARLY = 3
 _N_LATE = 3
@@ -72,7 +72,7 @@ class _Ctx:
 
 @pytest.fixture
 async def ctx(pool: asyncpg.Pool) -> _Ctx:
-    user_id = await create_test_user(pool)
+    user_id = await create_test_tenant(pool)
     execution_id = await seed_execution(pool, user_id)
     decision = await insert_decision(pool, user_id, execution_ref=f"exec:{execution_id}")
     read = fence_reader(pool, user_id, execution_id)
@@ -267,7 +267,7 @@ async def test_trigger_rejects_invalid_decision_reference_even_when_disarmed(poo
         other = await insert_decision(pool, ctx.user_id, execution_ref=ref)
         decision_id = other.decision_id
     elif case == "other_tenant":
-        decision_id = (await insert_decision(pool, await create_test_user(pool))).decision_id
+        decision_id = (await insert_decision(pool, await create_test_tenant(pool))).decision_id
     elif case == "deny":
         deny = await insert_decision(pool, ctx.user_id, outcome=RiskOutcome.DENY)
         decision_id = deny.decision_id

@@ -16,10 +16,10 @@ Parent decision (task-1752 decision): confirmed at start of work that
 `alembic heads` was single (`47ec4b178f54`) and used it as `down_revision`
 as-is. FA-0a batch B (task-1987, converting the positions family's
 tenant_id FK from users to tenant) is still in progress, so
-`pos_account`/`pos_snapshot` still have
-`tenant_id UUID REFERENCES users(user_id)` — this table does not carry that
-legacy forward and, being a brand-new table, references the correct target
-`tenant(id)` from the start (correcting the legacy is not this leaf's job).
+`pos_account`/`pos_snapshot` still carry the legacy `tenant_id` FK'd to
+`users(user_id)` -- this table does not carry that legacy forward and,
+being a brand-new table, references the correct target `tenant(id)` from
+the start (correcting the legacy is not this leaf's job).
 `position_key` does not FK `pos_snapshot(position_key)` — combining the two
 tables' tenant concepts while batch B is still in progress would couple
 this table to batch B's completion order, so the linkage is instead

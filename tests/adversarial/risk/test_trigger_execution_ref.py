@@ -26,7 +26,7 @@ from src.foundation.risk_gate.adapters.postgres_repository import PostgresRiskGa
 from src.foundation.risk_gate.application.evaluate_pre_submit import evaluate_pre_submit
 from src.services.risk_decision_recorder import RiskDecisionRecorder
 from tests.adversarial.risk.conftest import insert_decision, recorded_inputs, seed_execution
-from tests.integration.conftest import NoopEventBus, create_test_user
+from tests.integration.conftest import NoopEventBus, create_test_tenant
 from tests.integration.risk.test_pre_submit_gate import (
     _FakeConnectionRepo,
     _RiskRepoWithFixedSafetyState,
@@ -83,7 +83,7 @@ async def _tampered_decision(pool: asyncpg.Pool, victim: dict[str, Any], **chang
 
 @pytest.fixture
 async def victim(pool: asyncpg.Pool) -> dict[str, Any]:
-    user_id = await create_test_user(pool)
+    user_id = await create_test_tenant(pool)
     execution_id = await seed_execution(pool, user_id)
     decision = await insert_decision(pool, user_id, execution_ref=f"exec:{execution_id}")
     return {"user_id": user_id, "execution_id": execution_id, "decision_id": decision.decision_id}
@@ -235,7 +235,7 @@ async def test_update_of_binding_columns_after_valid_insert_is_rejected(
 
 async def test_prior_checks_still_fire_before_binding_checks(pool, victim):
     """tenant·outcome 거부는 그대로다(결속 검사가 앞선 검사를 대체하지 않았다)."""
-    other = await create_test_user(pool)
+    other = await create_test_tenant(pool)
     exec_other = await seed_execution(pool, other)
     foreign = await insert_decision(pool, other, execution_ref=f"exec:{exec_other}")
     deny = await insert_decision(
@@ -274,7 +274,7 @@ async def test_i10_wiring_real_pre_submit_snapshot_is_what_the_trigger_reads(poo
     """I-10 — R-35 `evaluate_pre_submit`이 실제로 기록한 WORM 행의 키 이름·표기가
     트리거가 읽는 것과 같다: 같은 결정으로 수량·방향만 다른 직접 INSERT는 트리거만으로
     거부되고, 결정의 subject 그대로는 통과한다(TTL 안)."""
-    user_id = await create_test_user(pool)
+    user_id = await create_test_tenant(pool)
     execution_id = await seed_execution(pool, user_id)
     decision, _fence = await evaluate_pre_submit(
         _RiskRepoWithFixedSafetyState(

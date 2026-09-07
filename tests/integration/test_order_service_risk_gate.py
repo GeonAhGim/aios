@@ -32,7 +32,7 @@ from src.services.order_service.foundation_gate import make_foundation_pre_submi
 from src.services.order_service.gate import OrderContext
 from src.services.order_service.submit import OrderDeniedByRiskGateError, submit_order
 from tests.foundation.integration.risk_gate.conftest import activate_mandate_with_defaults
-from tests.integration.conftest import create_test_user
+from tests.integration.conftest import create_test_tenant
 from tests.integration.fake_exchange_adapter import FakeExchangeAdapter
 
 
@@ -111,7 +111,7 @@ def _market_order(execution_id: int) -> Order:
 
 async def test_active_kill_switch_denies_unmandated_legacy_submit(pool, risk_repo):
     """1층 — mandate가 아예 없어도 kill switch는 legacy 주문을 막는다."""
-    user_id = await create_test_user(pool)
+    user_id = await create_test_tenant(pool)
     execution_id = await _create_running_execution(pool, user_id)
     await activate_safety_control(
         risk_repo,
@@ -139,7 +139,7 @@ async def test_unmandated_submit_denied(pool, risk_repo):
     """R-36 — mandate_revision_id가 없으면(기존 실행 전부) 더 이상 통과하지
     않는다(I-01 fail-closed). env var 우회 경로는 제거됐다 — 이 결과는
     조건 없이 항상 적용된다. 거부되기 전에도 감사 기록은 남긴다."""
-    user_id = await create_test_user(pool)
+    user_id = await create_test_tenant(pool)
     execution_id = await _create_running_execution(pool, user_id)
     gate = make_foundation_pre_submit_gate(pool, require_mandate=True)
 
@@ -171,7 +171,7 @@ async def test_mandated_submit_denied_when_policy_violated(
 ):
     """mandate가 연결된 실행은 정식 정책평가를 거친다 — 정책 위반이면
     DENY(예: 활성 mandate가 PAUSED 상태)."""
-    user_id = await create_test_user(pool)
+    user_id = await create_test_tenant(pool)
     execution_id = await _create_running_execution(pool, user_id)
     await activate_mandate_with_defaults(mandate_repo, trust_repo, tenant_id=user_id)
     await pause_mandate(mandate_repo, tenant_id=user_id)
@@ -192,7 +192,7 @@ async def test_mandated_submit_denied_when_policy_violated(
 
 
 async def test_mandated_submit_allowed_when_policy_clean(pool, risk_repo, mandate_repo, trust_repo):
-    user_id = await create_test_user(pool)
+    user_id = await create_test_tenant(pool)
     execution_id = await _create_running_execution(pool, user_id)
     await activate_mandate_with_defaults(mandate_repo, trust_repo, tenant_id=user_id)
     mandate = await mandate_repo.get_mandate(user_id)
@@ -212,7 +212,7 @@ async def test_mandated_submit_allowed_when_policy_clean(pool, risk_repo, mandat
 async def test_gate_decision_carries_fence_snapshot(pool, risk_repo, mandate_repo, trust_repo):
     """R-33 fence 관통 — ALLOW 결정에도 그 판단의 근거인 F0가 그대로
     실린다(R-37 fenced_submit이 다음 단계에서 재사용할 값)."""
-    user_id = await create_test_user(pool)
+    user_id = await create_test_tenant(pool)
     execution_id = await _create_running_execution(pool, user_id)
     await activate_mandate_with_defaults(mandate_repo, trust_repo, tenant_id=user_id)
     mandate = await mandate_repo.get_mandate(user_id)
@@ -236,7 +236,7 @@ async def test_stale_fence_denies_even_when_no_control_is_currently_active(
     """R-36 negative — 관측(F0) 이후 어떤 scope든 fence token이 증가했다면,
     지금 이 순간 활성 control이 하나도 없어도(비활성화까지 됐어도) DENY —
     단조증가 토큰이라 "이미 무언가 발동한 적 있음" 자체를 stale로 본다."""
-    user_id = await create_test_user(pool)
+    user_id = await create_test_tenant(pool)
     execution_id = await _create_running_execution(pool, user_id)
     await activate_mandate_with_defaults(mandate_repo, trust_repo, tenant_id=user_id)
     mandate = await mandate_repo.get_mandate(user_id)

@@ -15,7 +15,7 @@ from dotenv import dotenv_values
 
 from src.foundation.mandates.adapters.postgres_repository import PostgresMandateRepository
 from src.foundation.mandates.domain.models import Autonomy, MandateRevision, MandateRevisionState
-from tests.integration.conftest import create_test_user
+from tests.integration.conftest import create_test_tenant
 
 
 def _asyncpg_dsn() -> str:
@@ -72,7 +72,7 @@ def _draft_revision() -> MandateRevision:
 
 
 async def test_two_portfolios_per_tenant_each_get_independent_mandate(pool, repo):
-    tenant_id = await create_test_user(pool)
+    tenant_id = await create_test_tenant(pool)
     portfolio_a = uuid4()
     portfolio_b = uuid4()
 
@@ -92,7 +92,7 @@ async def test_two_portfolios_per_tenant_each_get_independent_mandate(pool, repo
 
 
 async def test_two_portfolios_per_tenant_each_activate_independently(pool, repo):
-    tenant_id = await create_test_user(pool)
+    tenant_id = await create_test_tenant(pool)
     portfolio_a = uuid4()
     portfolio_b = uuid4()
 
@@ -131,7 +131,7 @@ async def test_get_mandate_without_portfolio_id_resolves_default_portfolio(pool,
     FA-0b를 적용하기 위함)의 회귀 방지."""
     from src.foundation.entities.domain.defaults import default_portfolio_id
 
-    tenant_id = await create_test_user(pool)
+    tenant_id = await create_test_tenant(pool)
     mandate = await repo.get_or_create_mandate(tenant_id, tenant_id)
 
     assert mandate.portfolio_id == default_portfolio_id(tenant_id)

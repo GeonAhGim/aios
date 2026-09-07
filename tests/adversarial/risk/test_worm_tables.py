@@ -21,7 +21,7 @@ from src.core.risk.decision import GateKind, RiskDecision, RiskOutcome
 from src.foundation.risk_gate.adapters.postgres_decision_repository import (
     PostgresDecisionRepository,
 )
-from tests.integration.conftest import create_test_user
+from tests.integration.conftest import create_test_tenant
 
 # `pool` 픽스처는 tests/adversarial/risk/conftest.py가 제공한다
 # (os.environ["DATABASE_URL"] 사용 — tests/conftest.py가 TEST_DATABASE_URL을
@@ -68,7 +68,7 @@ def _decision(
 async def _insert(
     repo: PostgresDecisionRepository, pool: asyncpg.Pool, *, tenant_id: object = None
 ) -> RiskDecision:
-    tenant_id = tenant_id if tenant_id is not None else await create_test_user(pool)
+    tenant_id = tenant_id if tenant_id is not None else await create_test_tenant(pool)
     decision = _decision(tenant_id=tenant_id)
     await repo.insert(decision, {"balance": "10000"})
     return decision
@@ -86,7 +86,7 @@ async def test_naive_evaluated_at_rejected_before_insert(pool: asyncpg.Pool) -> 
     """`RiskDecision`(R-02)이 naive datetime을 거부하므로, 이 저장소로는
     naive datetime을 가진 결정을 애초에 만들 수조차 없다 — DB에 도달하기 전에
     막힌다."""
-    tenant_id = await create_test_user(pool)
+    tenant_id = await create_test_tenant(pool)
     with pytest.raises(ValidationError):
         _decision(tenant_id=tenant_id, evaluated_at=datetime(2026, 9, 4))
 
@@ -172,8 +172,8 @@ async def test_worm_trigger_blocks_table_owner_delete(
 async def test_list_recent_excludes_other_tenant(
     pool: asyncpg.Pool, repo: PostgresDecisionRepository
 ) -> None:
-    tenant_a = await create_test_user(pool)
-    tenant_b = await create_test_user(pool)
+    tenant_a = await create_test_tenant(pool)
+    tenant_b = await create_test_tenant(pool)
     await _insert(repo, pool, tenant_id=tenant_a)
 
     recent_b = await repo.list_recent(tenant_b, limit=50)
@@ -184,7 +184,7 @@ async def test_list_recent_excludes_other_tenant(
 async def test_list_recent_only_returns_own_tenant(
     pool: asyncpg.Pool, repo: PostgresDecisionRepository
 ) -> None:
-    tenant_a = await create_test_user(pool)
+    tenant_a = await create_test_tenant(pool)
     decision = await _insert(repo, pool, tenant_id=tenant_a)
 
     recent_a = await repo.list_recent(tenant_a, limit=50)

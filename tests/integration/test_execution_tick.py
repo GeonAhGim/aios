@@ -31,7 +31,7 @@ from src.services.execution_loop.tick import _make_fsm_state_writer, run_executi
 from src.services.order_service.gate import GateDecision, GateOutcome
 from src.services.preview_service import PreviewCondition
 from src.services.risk_decision_recorder import RiskDecisionRecorder
-from tests.integration.conftest import create_test_user
+from tests.integration.conftest import create_test_tenant
 from tests.integration.fake_exchange_adapter import FakeExchangeAdapter
 
 
@@ -140,7 +140,7 @@ def _engines():
 
 
 async def test_entry_signal_submits_and_fills_order_advances_to_holding(pool):
-    user_id = await create_test_user(pool)
+    user_id = await create_test_tenant(pool)
     # SMA(close=50, 5기간) = 50 < 100 → 진입 조건 항상 충족.
     execution_id = await _create_execution(pool, user_id, entry_threshold=100.0)
     adapter = FakeExchangeAdapter(
@@ -169,7 +169,7 @@ async def test_entry_signal_submits_and_fills_order_advances_to_holding(pool):
 
 
 async def test_no_signal_tick_does_nothing(pool):
-    user_id = await create_test_user(pool)
+    user_id = await create_test_tenant(pool)
     # SMA(50) < -1 은 항상 거짓 — 진입 조건 미충족.
     execution_id = await _create_execution(pool, user_id, entry_threshold=-1.0)
     adapter = FakeExchangeAdapter(closes=[Decimal("50")] * 65)
@@ -198,7 +198,7 @@ async def test_distrusted_blocks_new_entry_signal(pool, monkeypatch):
         "src.services.execution_loop.tick.check_and_persist_distrust", _fake_check_and_persist
     )
 
-    user_id = await create_test_user(pool)
+    user_id = await create_test_tenant(pool)
     execution_id = await _create_execution(pool, user_id, entry_threshold=100.0)
     adapter = FakeExchangeAdapter(closes=[Decimal("50")] * 65)
 
@@ -224,7 +224,7 @@ async def test_suspicious_blocks_new_entry_signal(pool, monkeypatch):
         "src.services.execution_loop.tick.check_and_persist_distrust", _fake_check_and_persist
     )
 
-    user_id = await create_test_user(pool)
+    user_id = await create_test_tenant(pool)
     execution_id = await _create_execution(pool, user_id, entry_threshold=100.0)
     adapter = FakeExchangeAdapter(closes=[Decimal("50")] * 65)
 
@@ -246,7 +246,7 @@ async def test_degraded_single_source_does_not_block_entry(pool, monkeypatch):
         "src.services.execution_loop.tick.check_and_persist_distrust", _fake_check_and_persist
     )
 
-    user_id = await create_test_user(pool)
+    user_id = await create_test_tenant(pool)
     execution_id = await _create_execution(pool, user_id, entry_threshold=100.0)
     adapter = FakeExchangeAdapter(
         closes=[Decimal("50")] * 65,
@@ -264,7 +264,7 @@ async def test_degraded_single_source_does_not_block_entry(pool, monkeypatch):
 async def test_risk_rejection_leaves_fsm_state_idle_for_retry(pool):
     """자본배분 상한 초과(미인증 전략 10%인데 50% 요청) — RiskEngine이
     거부하면 fsm_state는 IDLE 그대로 남아 다음 틱에 재평가돼야 한다."""
-    user_id = await create_test_user(pool)
+    user_id = await create_test_tenant(pool)
     execution_id = await _create_execution(
         pool, user_id, entry_threshold=100.0, allocated_capital=Decimal("5000")
     )
@@ -286,7 +286,7 @@ async def test_risk_rejection_leaves_fsm_state_idle_for_retry(pool):
 
 
 async def test_paused_execution_is_skipped(pool):
-    user_id = await create_test_user(pool)
+    user_id = await create_test_tenant(pool)
     execution_id = await _create_execution(pool, user_id, entry_threshold=100.0)
     async with pool.acquire() as conn:
         await conn.execute(
@@ -307,7 +307,7 @@ async def test_safety_pause_mid_tick_blocks_order_submission(pool):
     Watchdog가 안전정지를 걸면(get_balance() 호출 시점에 주입해 시뮬레이션)
     이번 tick은 주문을 제출하지 않아야 하고, fsm_state도 PENDING류에
     갇히지 않고 원래 상태(IDLE)를 유지해야 한다."""
-    user_id = await create_test_user(pool)
+    user_id = await create_test_tenant(pool)
     execution_id = await _create_execution(pool, user_id, entry_threshold=100.0)
 
     class _PausingAdapter(FakeExchangeAdapter):
@@ -341,7 +341,7 @@ async def test_paused_execution_still_checks_pending_order_fill(pool):
     """레드팀 #23-c 회귀 테스트 — 주문 제출 직후 일시정지된 실행이라도,
     이미 제출한 주문의 체결 여부는 계속 확인해야 한다. 정지 체크가
     PENDING-fill-check보다 먼저 실행되면 이 확인 자체가 영원히 스킵된다."""
-    user_id = await create_test_user(pool)
+    user_id = await create_test_tenant(pool)
     execution_id = await _create_execution(pool, user_id, entry_threshold=100.0)
 
     # 1틱: 주문 제출 직후 아직 미체결(SUBMITTED) → fsm_state=BUY_ORDER_PENDING.
@@ -387,7 +387,7 @@ async def test_fsm_state_writer_raises_on_concurrent_state_change(pool):
     """레드팀 #2026-09-02-22 회귀 테스트 — writer가 읽었던 expected_state와
     실제 DB 값이 다르면(다른 tick이 먼저 바꿈) ConcurrencyConflictError를
     던지고 아무것도 쓰지 않아야 한다."""
-    user_id = await create_test_user(pool)
+    user_id = await create_test_tenant(pool)
     execution_id = await _create_execution(pool, user_id)
     async with pool.acquire() as conn:
         await conn.execute(
@@ -413,7 +413,7 @@ async def test_concurrent_tick_race_only_submits_one_order(pool):
     (run_execution_tick이 IDLE을 읽은 *이후*, 자기 자신의 조건부 쓰기 *전*
     끼어든 상황을 시뮬레이션), 이 tick의 조건부 쓰기가 충돌해야 하고
     Executor.execute()까지 가서 실제 주문을 내면 안 된다."""
-    user_id = await create_test_user(pool)
+    user_id = await create_test_tenant(pool)
     execution_id = await _create_execution(pool, user_id, entry_threshold=100.0)
 
     class _RacingAdapter(FakeExchangeAdapter):
@@ -448,7 +448,7 @@ async def test_cancelled_order_reverts_fsm_state_instead_of_getting_stuck(pool):
     fsm_state가 영원히 PENDING에 갇혀 이후 어떤 신호도 재평가되지 않았다.
     지금은 신호평가로 그 PENDING에 들어오기 전 상태(IDLE)로 되돌아가야
     한다."""
-    user_id = await create_test_user(pool)
+    user_id = await create_test_tenant(pool)
     execution_id = await _create_execution(pool, user_id, entry_threshold=100.0)
     async with pool.acquire() as conn:
         execution = await conn.fetchrow(
@@ -495,7 +495,7 @@ async def test_equity_baseline_persists_and_survives_simulated_restart(pool):
     RiskEngine이 항상 거부하도록(자본배분 상한 초과, test_risk_rejection_
     leaves_fsm_state_idle_for_retry와 동일 설정) fsm_state를 IDLE에
     묶어둬 매 tick마다 assemble_account_state가 반복 호출되게 한다."""
-    user_id = await create_test_user(pool)
+    user_id = await create_test_tenant(pool)
     execution_id = await _create_execution(
         pool, user_id, entry_threshold=100.0, allocated_capital=Decimal("5000")
     )
@@ -562,7 +562,7 @@ async def test_deny_decision_is_recorded_before_return_and_fsm_untouched(pool):
     """R-32 §3.9 t4~t5 — 거부(DENY)도 recorder.record()로 WORM에 기록된 뒤,
     FSM은 건드리지 않고(IDLE 유지) executor도 부르지 않는다. 자본배분 상한
     초과(미인증 10% vs 요청 50%)로 DENY를 유도한다."""
-    user_id = await create_test_user(pool)
+    user_id = await create_test_tenant(pool)
     execution_id = await _create_execution(
         pool, user_id, entry_threshold=100.0, allocated_capital=Decimal("5000")
     )
@@ -596,7 +596,7 @@ async def test_reduce_decision_shrinks_approved_quantity_passed_to_executor(pool
     """R-32 §3.9 t6 — REDUCE 결정이면 approved_quantity를 obligation
     `REDUCE_QUANTITY_TO:<qty>` 값으로 축소해 executor에 전달한다. 실제
     엔진 결정(ALLOW, 수량 20)을 REDUCE·수량 5로 바꿔 끼운다."""
-    user_id = await create_test_user(pool)
+    user_id = await create_test_tenant(pool)
     execution_id = await _create_execution(pool, user_id, entry_threshold=100.0)
     adapter = FakeExchangeAdapter(
         closes=[Decimal("50")] * 65,

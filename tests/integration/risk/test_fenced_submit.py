@@ -42,7 +42,7 @@ from tests.adversarial.risk.conftest import (
     order_row,
     seed_execution,
 )
-from tests.integration.conftest import create_test_user
+from tests.integration.conftest import create_test_tenant
 
 pool = _fixtures.pool  # 픽스처 re-export(execution_ownership conftest 관례)
 
@@ -51,7 +51,7 @@ _METRIC = SAFETY_POST_FENCE_SIDE_EFFECT_COUNT_TOTAL
 
 @pytest.fixture
 async def ctx(pool):
-    user_id = await create_test_user(pool)
+    user_id = await create_test_tenant(pool)
     execution_id = await seed_execution(pool, user_id)
     decision = await insert_decision(pool, user_id, execution_ref=f"exec:{execution_id}")
     read = fence_reader(pool, user_id, execution_id)

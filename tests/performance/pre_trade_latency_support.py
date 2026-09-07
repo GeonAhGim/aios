@@ -44,7 +44,7 @@ from src.services.execution_loop.equity_tracker import ExecutionEquityTracker
 from src.services.execution_loop.risk_inputs_assembler import RiskInputCaches
 from src.services.execution_loop.tick_risk_phase import RiskPhaseOutcome, run_pre_trade_risk_phase
 from src.services.risk_decision_recorder import RiskDecisionRecorder
-from tests.integration.conftest import NoopEventBus, create_test_user
+from tests.integration.conftest import NoopEventBus, create_test_tenant
 from tests.integration.fake_exchange_adapter import FakeExchangeAdapter
 
 PROVIDER = "bitget"
@@ -153,7 +153,7 @@ class PreTradeScenario:
 
 
 async def new_scenario(pool) -> PreTradeScenario:
-    user_id = await create_test_user(pool)
+    user_id = await create_test_tenant(pool)
     execution_id, strategy_id = await _create_execution(
         pool, user_id, allocated_capital=Decimal("1000")
     )

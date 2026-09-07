@@ -37,7 +37,7 @@ from src.services.risk_decision_recorder import (
     TOPIC_LIMIT_BREACHED,
     RiskDecisionRecorder,
 )
-from tests.integration.conftest import NoopEventBus, create_test_user
+from tests.integration.conftest import NoopEventBus, create_test_tenant
 
 _DISTINCTIVE_BALANCE = "919283746.55"
 
@@ -149,7 +149,7 @@ async def test_record_writes_decision_and_audit_log_and_publishes_event(
     recorder: RiskDecisionRecorder,
     event_bus: NoopEventBus,
 ) -> None:
-    tenant_id = await create_test_user(pool)
+    tenant_id = await create_test_tenant(pool)
     now = await _server_now(pool)
     decision = _decision(tenant_id=tenant_id, evaluated_at=now)
 
@@ -177,7 +177,7 @@ async def test_clock_skew_beyond_tolerance_forces_deny_and_logs(
     recorder: RiskDecisionRecorder,
     caplog: pytest.LogCaptureFixture,
 ) -> None:
-    tenant_id = await create_test_user(pool)
+    tenant_id = await create_test_tenant(pool)
     now = await _server_now(pool)
     stale_decision = _decision(tenant_id=tenant_id, evaluated_at=now - timedelta(seconds=2.2))
 
@@ -196,7 +196,7 @@ async def test_clock_skew_within_tolerance_passes_through_unmodified(
     decision_repo: PostgresDecisionRepository,
     recorder: RiskDecisionRecorder,
 ) -> None:
-    tenant_id = await create_test_user(pool)
+    tenant_id = await create_test_tenant(pool)
     now = await _server_now(pool)
     fresh_decision = _decision(tenant_id=tenant_id, evaluated_at=now - timedelta(seconds=1.8))
 
@@ -213,7 +213,7 @@ async def test_duplicate_decision_id_propagates_without_retry_and_no_extra_event
     recorder: RiskDecisionRecorder,
     event_bus: NoopEventBus,
 ) -> None:
-    tenant_id = await create_test_user(pool)
+    tenant_id = await create_test_tenant(pool)
     now = await _server_now(pool)
     decision = _decision(tenant_id=tenant_id, evaluated_at=now)
     inputs = _inputs(tenant_id=tenant_id)
@@ -234,7 +234,7 @@ async def test_audit_log_excludes_raw_balance_and_inputs_snapshot(
     recorder: RiskDecisionRecorder,
     event_bus: NoopEventBus,
 ) -> None:
-    tenant_id = await create_test_user(pool)
+    tenant_id = await create_test_tenant(pool)
     now = await _server_now(pool)
     decision = _decision(tenant_id=tenant_id, evaluated_at=now)
 
@@ -259,7 +259,7 @@ async def test_limit_breach_reason_code_publishes_extra_event(
     recorder: RiskDecisionRecorder,
     event_bus: NoopEventBus,
 ) -> None:
-    tenant_id = await create_test_user(pool)
+    tenant_id = await create_test_tenant(pool)
     now = await _server_now(pool)
     decision = _decision(
         tenant_id=tenant_id,

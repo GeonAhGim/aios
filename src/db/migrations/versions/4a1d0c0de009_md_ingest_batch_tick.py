@@ -45,7 +45,7 @@ def _sql_enum_members(enum_cls: type[Enum]) -> str:
 def upgrade() -> None:
     op.execute(
         f"""
-        CREATE TABLE {_TABLE} (
+        CREATE TABLE md_ingest_batch_tick (
             id                   UUID PRIMARY KEY DEFAULT gen_random_uuid(),
             tenant_id            UUID REFERENCES users(user_id),
             source               VARCHAR(50) NOT NULL,

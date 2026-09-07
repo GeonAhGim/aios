@@ -56,7 +56,7 @@ from src.foundation.risk_gate.application.upsert_risk_limit import (
 from src.foundation.risk_gate.domain.fence import fence_pairs_for
 from src.foundation.risk_gate.domain.models import LimitMetric, LimitScope, RiskLimit, SafetyScope
 from tests.adversarial.risk.conftest import insert_decision
-from tests.integration.conftest import create_test_user
+from tests.integration.conftest import create_test_tenant
 
 _NOW = datetime(2026, 9, 5, tzinfo=timezone.utc)
 _PROVIDER = "bitget"
@@ -67,12 +67,12 @@ _EXEC_REF = "exec:1"
 
 @pytest.fixture
 async def tenant_a(pool: asyncpg.Pool) -> UUID:
-    return await create_test_user(pool)
+    return await create_test_tenant(pool)
 
 
 @pytest.fixture
 async def tenant_b(pool: asyncpg.Pool) -> UUID:
-    return await create_test_user(pool)
+    return await create_test_tenant(pool)
 
 
 @pytest.fixture

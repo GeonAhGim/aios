@@ -35,7 +35,7 @@ from src.services.order_service.foundation_gate import make_foundation_pre_submi
 from src.services.order_service.gate import GateOutcome
 from src.services.preview_service import PreviewCondition
 from tests.adversarial.risk.conftest import RecordingAdapter, seed_execution
-from tests.integration.conftest import create_test_user
+from tests.integration.conftest import create_test_tenant
 
 _PROVIDER = "bitget"
 
@@ -67,7 +67,7 @@ async def pool():
 
 
 async def test_executor_via_submit_with_fence_fills_orders_risk_decision_id(pool: asyncpg.Pool):
-    user_id = await create_test_user(pool)
+    user_id = await create_test_tenant(pool)
     execution_id = await seed_execution(pool, user_id, exchange=_PROVIDER)
 
     gate = make_foundation_pre_submit_gate(pool, require_mandate=False)
@@ -128,7 +128,7 @@ async def test_executor_falls_back_to_plain_submit_without_fence_wiring(pool: as
     """gate_decision은 있지만 read_fences/decision_reader가 없으면(기존
     호출부와의 호환) submit_order로 폴백한다 — risk_decision_id는 안 채워
     지지만 제출 자체는 회귀 없이 성공해야 한다."""
-    user_id = await create_test_user(pool)
+    user_id = await create_test_tenant(pool)
     execution_id = await seed_execution(pool, user_id, exchange=_PROVIDER)
     allocation = AllocationDecision(
         symbol="BTC/USDT",

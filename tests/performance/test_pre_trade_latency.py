@@ -54,7 +54,7 @@ from src.foundation.risk_gate.adapters.postgres_decision_repository import (
 )
 from src.foundation.risk_gate.adapters.postgres_repository import PostgresRiskGateRepository
 from src.services.risk_decision_recorder import RiskDecisionRecorder
-from tests.integration.conftest import NoopEventBus, create_test_user
+from tests.integration.conftest import NoopEventBus, create_test_tenant
 from tests.performance.pre_trade_latency_support import (
     count_pre_submit_round_trips,
     count_pre_trade_round_trips,
@@ -120,7 +120,7 @@ async def test_pre_trade_phase_p99_measured_and_round_trips_exact(pool):
 
 async def test_pre_submit_gate_round_trips_exact(pool):
     """R-35 PRE_SUBMIT(t7 직전) 순차 DB 왕복 수 정확 단언."""
-    tenant_id = await create_test_user(pool)
+    tenant_id = await create_test_tenant(pool)
     round_trips = await count_pre_submit_round_trips(pool, tenant_id)
     print(
         f"\npre_submit gate sequential DB round trips={round_trips} "
@@ -160,7 +160,7 @@ async def test_pre_trade_round_trip_gate_detects_extra_query(pool):
 
 async def test_pre_submit_round_trip_gate_detects_extra_query(pool):
     """negative(I-10): 저장소가 왕복을 하나 더 내면 계수가 예산과 정확히 1 어긋난다."""
-    tenant_id = await create_test_user(pool)
+    tenant_id = await create_test_tenant(pool)
     round_trips = await count_pre_submit_round_trips(pool, tenant_id, repo_cls=_ChattyRiskRepo)
     assert round_trips == _PRE_SUBMIT_ROUND_TRIPS + 1
     assert round_trips != _PRE_SUBMIT_ROUND_TRIPS

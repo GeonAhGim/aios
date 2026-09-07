@@ -31,7 +31,7 @@ from src.foundation.risk_gate.application.evaluate_pre_submit import evaluate_pr
 from src.foundation.risk_gate.domain.fence import fence_pairs_for
 from src.foundation.risk_gate.domain.models import SafetyScope
 from src.services.risk_decision_recorder import RiskDecisionRecorder
-from tests.integration.conftest import NoopEventBus, create_test_user
+from tests.integration.conftest import NoopEventBus, create_test_tenant
 
 _PROVIDER = "bitget"
 _SYMBOL = "BTC/USDT"
@@ -141,7 +141,7 @@ def _normal_risk_repo(risk_repo: PostgresRiskGateRepository) -> _RiskRepoWithFix
 
 
 async def test_baseline_allow_and_ttl_is_exactly_two_seconds(pool, risk_repo, recorder):
-    tenant_id = await create_test_user(pool)
+    tenant_id = await create_test_tenant(pool)
     execution_ref = f"exec:{uuid4().hex[:8]}"
     decision, fence = await evaluate_pre_submit(
         _normal_risk_repo(risk_repo),
@@ -167,7 +167,7 @@ async def test_baseline_allow_and_ttl_is_exactly_two_seconds(pool, risk_repo, re
 async def test_active_control_alone_denies_and_fence_matches_same_snapshot(
     pool, risk_repo, recorder
 ):
-    tenant_id = await create_test_user(pool)
+    tenant_id = await create_test_tenant(pool)
     control = await risk_repo.insert_safety_control(
         scope=SafetyScope.ACCOUNT,
         scope_ref=str(tenant_id),
@@ -196,7 +196,7 @@ async def test_active_control_alone_denies_and_fence_matches_same_snapshot(
 
 
 async def test_circuit_breaker_alone_denies(pool, risk_repo, recorder):
-    tenant_id = await create_test_user(pool)
+    tenant_id = await create_test_tenant(pool)
     repo = _RiskRepoWithFixedSafetyState(risk_repo, cb_level="halted", distrust_level="NORMAL")
 
     decision, _ = await evaluate_pre_submit(
@@ -217,7 +217,7 @@ async def test_circuit_breaker_alone_denies(pool, risk_repo, recorder):
 
 
 async def test_data_distrust_alone_denies(pool, risk_repo, recorder):
-    tenant_id = await create_test_user(pool)
+    tenant_id = await create_test_tenant(pool)
     repo = _RiskRepoWithFixedSafetyState(risk_repo, cb_level="normal", distrust_level="DISTRUSTED")
 
     decision, _ = await evaluate_pre_submit(
@@ -238,7 +238,7 @@ async def test_data_distrust_alone_denies(pool, risk_repo, recorder):
 
 
 async def test_connection_stale_alone_pauses(pool, risk_repo, recorder):
-    tenant_id = await create_test_user(pool)
+    tenant_id = await create_test_tenant(pool)
     stale_connection = _FakeConnectionRepo(
         tenant_id=tenant_id, provider_code=_PROVIDER, health=HealthState.DEGRADED
     )
@@ -262,7 +262,7 @@ async def test_connection_stale_alone_pauses(pool, risk_repo, recorder):
 
 async def test_missing_circuit_breaker_level_is_fail_closed_deny(pool, risk_repo, recorder):
     """I2 negative test — None을 '문제없음'으로 읽지 않는다."""
-    tenant_id = await create_test_user(pool)
+    tenant_id = await create_test_tenant(pool)
     repo = _RiskRepoWithFixedSafetyState(risk_repo, cb_level=None, distrust_level="NORMAL")
 
     decision, _ = await evaluate_pre_submit(
@@ -285,7 +285,7 @@ async def test_missing_circuit_breaker_level_is_fail_closed_deny(pool, risk_repo
 async def test_missing_connection_is_fail_closed_deny(pool, risk_repo, recorder):
     """I2 negative test — 이 provider에 connection 자체가 없으면 '건강함'이
     아니라 결손으로 취급해 DENY한다."""
-    tenant_id = await create_test_user(pool)
+    tenant_id = await create_test_tenant(pool)
 
     decision, _ = await evaluate_pre_submit(
         _normal_risk_repo(risk_repo),
@@ -307,8 +307,8 @@ async def test_missing_connection_is_fail_closed_deny(pool, risk_repo, recorder)
 async def test_other_tenants_control_does_not_leak_into_this_tenants_decision(
     pool, risk_repo, recorder
 ):
-    tenant_id = await create_test_user(pool)
-    other_tenant_id = await create_test_user(pool)
+    tenant_id = await create_test_tenant(pool)
+    other_tenant_id = await create_test_tenant(pool)
     await risk_repo.insert_safety_control(
         scope=SafetyScope.ACCOUNT,
         scope_ref=str(other_tenant_id),
@@ -334,7 +334,7 @@ async def test_other_tenants_control_does_not_leak_into_this_tenants_decision(
 
 async def test_denied_decision_is_recorded_in_worm_table(pool, risk_repo, recorder, decision_repo):
     """DoD(5) — 거부도 recorder(R-25)로 WORM 기록된다."""
-    tenant_id = await create_test_user(pool)
+    tenant_id = await create_test_tenant(pool)
     repo = _RiskRepoWithFixedSafetyState(risk_repo, cb_level="emergency", distrust_level="NORMAL")
 
     decision, _ = await evaluate_pre_submit(
@@ -366,7 +366,7 @@ async def test_denied_decision_is_recorded_in_worm_table(pool, risk_repo, record
 
 async def test_fence_snapshot_covers_exactly_the_five_pairs(pool, risk_repo, recorder):
     """DoD(3) — R-33 `fence_pairs_for`를 재구현하지 않고 그대로 5쌍 확인."""
-    tenant_id = await create_test_user(pool)
+    tenant_id = await create_test_tenant(pool)
     execution_ref = f"exec:{uuid4().hex[:8]}"
 
     _, fence = await evaluate_pre_submit(

@@ -32,7 +32,7 @@ from src.services.order_service.gate import GateOutcome
 from tests.adversarial.risk.conftest import fence_reader, seed_execution
 from tests.foundation.integration.mandates.conftest import default_rules
 from tests.foundation.integration.risk_gate.conftest import activate_mandate_with_defaults
-from tests.integration.conftest import create_test_user
+from tests.integration.conftest import create_test_tenant
 
 _SYMBOL = "BTC/USDT"
 _SIDE = "BUY"
@@ -53,7 +53,7 @@ async def _bind_execution_to_revision(pool, execution_id: int, revision_id) -> N
 
 @pytest.fixture
 async def setup(pool):
-    user_id = await create_test_user(pool)
+    user_id = await create_test_tenant(pool)
     execution_id = await seed_execution(pool, user_id)
     mandate_repo = PostgresMandateRepository(pool)
     trust_repo = PostgresTrustRepository(pool)
