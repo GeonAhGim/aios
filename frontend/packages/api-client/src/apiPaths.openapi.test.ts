@@ -46,67 +46,18 @@ const GHOST_PATH_WHITELIST: ReadonlySet<ApiRouteName> = new Set<ApiRouteName>([
 ]);
 
 // STALE_SNAPSHOT_WHITELIST: GHOST_PATH_WHITELIST와는 다른 사유 — "라우터가
-// 없다"가 아니라 "라우터는 있는데 스냅샷이 낡았다"다. task-1324: origin/main
-// 0a68f86의 src/api/routers/auth.py 원문을 직접 읽어 확인한 결과 POST
-// /auth/refresh·POST /auth/logout-all이 실재하고(PLT-24, task-1075, e0eb498
-// 병합) 각각 ApiResponse[TokenPairResponse]·ApiResponse[dict[str,int]]를
-// 반환한다. 그런데 contracts/openapi/v1.json은 task-905(f800c1a) 시점 이후
-// 재생성된 적이 없어(PLT-17~21 foundation.* envelope 이관 등 이 leaf와 무관한
-// 드리프트가 250건+ 함께 쌓여 있다 — 로컬 재생성은 그 무관한 변경까지 한
-// 커밋에 섞어 "백엔드 diff 0" 원칙을 어기게 되므로 이 leaf 범위 밖이다) 이
-// 두 경로가 아직 없다. 스냅샷이 갱신되면(별도 PLT 리프) 이 화이트리스트가
-// 거짓이 되므로 아래 "화이트리스트 부패 방지" 테스트가 잡는다.
-//
-// task-1376(LA-24): marketData.* 4건 — 라우터는 src/api/routers/market_data.py에
-// 실재하지만 스냅샷은 여전히 f800c1a 시점이라 경로가 없다(auth.refresh와 같은
-// 사유). 스냅샷이 재생성되면 아래 "부패 방지" 테스트가 잡는다.
-// task-1525: 재대조 — contracts/openapi/v1.json에 "/v1/foundation/market-data" 경로
-// 0건(grep) vs 실라우터 market_data.py:75 `APIRouter(prefix="/v1/foundation/market-
-// data")`, GET /candles :89 · /candles/replay :139 · /instruments :184 ·
-// /instruments/{symbol}/aliases :211, router_registry.py:68 include_router. 네 건 전부
-// `-> ApiResponse[...]`(:108·:156·:194·:220)라 apiPaths.ts는 envelope=true로 전환했다.
-// 스냅샷 재생성은 백엔드 소유(decision)라 이 4건은 이 목록에 그대로 남는다 — 재생성
-// 되면 "부패 방지"가 FAIL하고, 그때 §B 래칫이 envelope=true를 스냅샷과 기계 대조한다.
-//
-// task-1524(LB-19): positions.* 3건 — 라우터는 src/api/routers/positions.py에 실재
-// (task-1377 d83d79c: `APIRouter(prefix="/v1/positions")` positions.py:54, GET ""
-// :69 / GET "/nav" :87 / GET "/{position_key}/journal" :122, router_registry.py:68
-// include_router)하지만 스냅샷은 여전히 f800c1a 시점이라 `/v1/positions` 경로가
-// 0건이다(marketData.*와 같은 사유). 스냅샷이 재생성되면 아래 "부패 방지"가 잡는다.
-// task-1558(DSL-13a): scripts.compile — 라우터는 src/api/routers/scripts.py에
-// 실재(`APIRouter(prefix="/v1/scripts")`, POST /compile -> ApiResponse[CompileScriptView],
-// router_registry.py:69 include_router)하지만 스냅샷(f800c1a)에는 "/v1/scripts" 경로가
-// 0건이다(marketData.*·positions.*와 같은 사유 — 스냅샷 생성 이후 추가된 라우터).
-// 스냅샷 재생성은 백엔드 소유(decision)라 여기 남는다 — 재생성되면 "부패 방지" 테스트가 잡는다.
-// task-1593(CH-8): charting.layouts.* 3건 — 라우터는 src/api/routers/charting.py에
-// 실재(CH-5, task-1557 06e5560: `APIRouter(prefix="/v1/foundation/charting")`,
-// router_registry.py include_router)하지만 스냅샷(f800c1a)은 그보다 앞서 생성돼
-// "/v1/foundation/charting" 경로가 0건이다(scripts.compile과 같은 사유). 스냅샷
-// 재생성은 백엔드 소유(decision)라 여기 남는다.
-// task-1607(BT-13): backtests.quick — 라우터는 src/api/routers/backtests.py에
-// 실재(BT-10c, task-1619 9ccb238: `APIRouter(prefix="/v1/backtests")`,
-// router_registry.py include_router)하지만 스냅샷(f800c1a)은 그보다 앞서 생성돼
-// "/v1/backtests" 경로가 0건이다(scripts.compile과 같은 사유). 스냅샷 재생성은
-// 백엔드 소유(decision)라 여기 남는다.
-// task-1905(CH-17c): charting.indicatorTemplates.* 2건 — 라우터는 task-1904(CH-17b,
-// a639962)로 src/api/routers/charting.py에 실재하지만 스냅샷(f800c1a)은 그보다
-// 훨씬 앞서 생성돼 "/v1/foundation/charting/indicator-templates" 경로가 0건이다
-// (charting.layouts.*와 같은 사유). 스냅샷 재생성은 백엔드 소유(decision)라 여기 남는다.
+// 없다"가 아니라 "라우터는 있는데 스냅샷이 낡았다"다.
+// task-1344(QA, task-1324 검증): 60e0b8d7(chore(ci) OpenAPI 기준선 재생성)로
+// contracts/openapi/v1.json이 갱신되면서 이 목록이 부패했다 — auth.refresh·
+// auth.logoutAll(task-1324)·marketData.*(task-1376/1525)·positions.*
+// (task-1524)·scripts.compile(task-1558)·charting.layouts.*(task-1593)·
+// backtests.quick(task-1607) 14건은 이제 전부 스냅샷에 실재하고(python으로
+// contracts/openapi/v1.json paths 직접 대조 완료), envelope도 apiPaths.ts의
+// 등록값(전부 true)과 일치한다(§B 래칫 재계산 결과 drift 0) — "화이트리스트
+// 부패 방지" 테스트가 정확히 이 14건을 nowPresent로 잡아냈으므로 제거한다.
+// task-1905(CH-17c): charting.indicatorTemplates.* 2건은 60e0b8d7 재생성
+// 시점에도 여전히 스냅샷에 없다(router가 그 이후 머지) — 그대로 남긴다.
 const STALE_SNAPSHOT_WHITELIST: ReadonlySet<ApiRouteName> = new Set<ApiRouteName>([
-  "auth.refresh",
-  "auth.logoutAll",
-  "marketData.candles.get",
-  "marketData.candles.replay",
-  "marketData.instruments.list",
-  "marketData.instruments.aliases",
-  "positions.list",
-  "positions.nav",
-  "positions.journal",
-  "scripts.compile",
-  "charting.layouts.base",
-  "charting.layouts.item",
-  "charting.layouts.drawings",
-  "backtests.quick",
   "charting.indicatorTemplates.base",
   "charting.indicatorTemplates.item",
 ]);
@@ -118,27 +69,14 @@ const STALE_SNAPSHOT_WHITELIST: ReadonlySet<ApiRouteName> = new Set<ApiRouteName
 // 생기면 여기 추가하지 말고 route명/등록값/스냅샷 JSON 포인터/실제 라우터 파일:라인을
 // 근거로 needs_decision으로 올려라 — 이 리프는 봉투 값을 고치는 리프가 아니다.
 //
-// task-1309가 추가한 6건은 그 원칙의 예외가 아니라 시간순으로 검증된 사실이다.
-// 커밋 시각: f800c1a(task-905, 이 스냅샷 생성) 2026-09-03 18:45 → e4c9bd6
-// (task-1217 PLT-21b-2, "foundation 라우터 봉투·예외 이관") 2026-09-04 10:21 —
-// paper_control.py/trust.py가 스냅샷 생성 "이후" ApiResponse[T]로 이관됐다.
-// 스냅샷 포인터: paths["/v1/foundation/paper-deployments"].post.responses.201
-// .content["application/json"].schema.$ref === "#/components/schemas/
-// PaperDeploymentView"(ApiResponse_* 아님 — 이관 전 스냅샷). 실제 라우터 원본
-// (src/api/routers/foundation/paper_control.py, 현재 HEAD 기준)은 6개 엔드포인트
-// 전부 `-> ApiResponse[...]` + `return ok(...)`이고, trust.py의 post_accept_disclosure도
-// 동일(`-> ApiResponse[ConsentDecision]`) — apiPaths.ts의 true가 "지금" 맞는 값이고
-// 스냅샷(f800c1a)이 낡았다. 스냅샷 재생성은 이 leaf 범위 밖(무관한 변경까지 섞여
-// "백엔드 diff 0" 원칙 위반, STALE_SNAPSHOT_WHITELIST 주석과 동일 사유)이라
-// 별도 PLT 리프가 export_openapi를 재실행할 때까지 이 6건은 여기 남는다.
-const KNOWN_ENVELOPE_DRIFT: ReadonlySet<ApiRouteName> = new Set<ApiRouteName>([
-  "foundation.paperDeployments.request",
-  "foundation.paperDeployments.start",
-  "foundation.paperDeployments.resume",
-  "foundation.paperDeployments.pause",
-  "foundation.paperDeployments.stop",
-  "foundation.trustConsents.accept",
-]);
+// task-1309가 한때 여기 추가했던 foundation.paperDeployments.*(5건)·
+// foundation.trustConsents.accept(1건)는 task-1344(QA, task-1324 검증) 시점에
+// 제거됐다 — 60e0b8d7(OpenAPI 기준선 재생성)로 스냅샷이 갱신되면서 두 라우터의
+// PaperDeploymentView/ConsentDecision 직접 노출이 사라지고 실제로도
+// ApiResponse[...]를 참조한다(python으로 contracts/openapi/v1.json 재확인 —
+// paths["/v1/foundation/paper-deployments"] 등 7개 경로 전부 True). apiPaths.ts의
+// true와 다시 일치하므로 드리프트가 아니다.
+const KNOWN_ENVELOPE_DRIFT: ReadonlySet<ApiRouteName> = new Set<ApiRouteName>([]);
 
 // legacyPath의 ":param" / ":param:literal"(예: ":deploymentId:start") 세그먼트를
 // 스냅샷의 "{param}" 세그먼트와 비교 가능한 와일드카드 템플릿으로 바꾼다.
