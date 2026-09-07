@@ -2,11 +2,15 @@
 
 Spec: 02d_kis_api_full_spec_v1.md §4, §7(작업 분해 3번)
 ADR-2026-09-06-I D2 — BR-4: 거래소 전수(US를 NAS/NASD 하나로 뭉치지 않는다).
-
-06번 §6.1-A(자산군 확장 원칙) 재확인 — Phase 1 확정 스콥은 KR_EQUITY뿐
-(adapter.py::get_capabilities() 참조), 이 mixin은 사용자 요청("모든
-기능")에 따른 API 연동만 제공한다. `ExchangeAdapter` ABC에는 아직
-없음(FD-4/8 호출부가 해외주식을 소비하기 전까지 KIS 전용 확장).
+ADR-2026-09-06-H D7 — L4-32: 사용자 소유 증권사 연결로 미국 등 해외
+증시에 참여하는 경로. `KISAdapter.get_capabilities()`(BR-8, adapter.py)가
+이제 US_EQUITY/US_ETF/US_ETN을 선언하고 `place_order()`가 이 mixin으로
+실제 분기하므로(order_dispatch.py) `ExchangeAdapter` ABC 계약은 이미
+채워져 있다 — 이 리프가 남긴 것은 D7이 요구하는 마지막 조각, 이 경로로
+들어온 시세를 `USER_SCOPED`로 태깅하는 것뿐이다(`get_overseas_ticker`
+참조). 재배포 계약 없이 미국 실시간 시세를 화면에 그릴 수 있는 이유는
+사용자 본인 소유 연결이기 때문이며, 그 사실이 시세 자체에 표시돼야
+공유 캐시·스크리너로 새는 것을 구조로 막을 수 있다(D7 원칙).
 
 최초 조사(WebFetch, github.com/koreainvestment/open-trading-api/
 examples_llm/overseas_stock, 2026-09-02)로 실제 예제 코드의 tr_id/
@@ -97,6 +101,7 @@ class KISOverseasStockMixin:
             volume_24h=Decimal(output.get("tvol", "0")),
             timestamp=datetime.now(timezone.utc),
             source_type="primary",
+            redistribution_scope="USER_SCOPED",
         )
 
     @require_paper_sandbox
