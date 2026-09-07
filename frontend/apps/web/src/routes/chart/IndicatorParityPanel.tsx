@@ -24,6 +24,7 @@ import {
   type IndicatorSeriesResult,
 } from "@aios/chart-engine/src/compute/clientEngine";
 import { resolveIndicatorSeries, type IndicatorSeriesSource } from "@aios/chart-engine/src/compute/parityCheck";
+import { isVerifiedIndicator } from "@aios/chart-engine/src/compute/verifiedIndicators";
 
 export type ServerIndicatorSeriesPort = (args: {
   readonly name: string;
@@ -87,6 +88,24 @@ function buildRow(
   resolveServerSeries: ServerIndicatorSeriesPort,
 ): IndicatorParityRow {
   const params = DEFAULT_PARAMS[overlay.id] ?? {};
+  // CH-18d: check the whitelist gate before ever calling computeIndicatorSeries — an
+  // unverified name (or a pinned name whose live catalog entry drifted off its pin)
+  // must never reach the client compute path at all, not merely throw inside it.
+  if (!isVerifiedIndicator(overlay.id, catalog)) {
+    const server = resolveServerSeries({ name: overlay.id, params, bars });
+    if (server === null) {
+      return { id: overlay.id, source: "unverified", value: null, fallbackReason: null };
+    }
+    // eslint-disable-next-line no-console -- DoD: a whitelist-rejected indicator must
+    // still fall back to the server observably, never silently.
+    console.warn(`CH-18d indicator not in verified whitelist, falling back to server: ${overlay.id}`);
+    return {
+      id: overlay.id,
+      source: "server",
+      value: lastNonNull(server[primaryOutput]),
+      fallbackReason: "클라이언트 미검증: 화이트리스트 불일치",
+    };
+  }
   let client: IndicatorSeriesResult;
   try {
     client = computeIndicatorSeries({ name: overlay.id, params, bars, catalog });

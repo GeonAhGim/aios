@@ -2,6 +2,7 @@ import "@testing-library/jest-dom/vitest";
 import type { StreamCandle } from "@aios/chart-engine/src/data/candleStream";
 import { createDefaultOverlayRegistry } from "@aios/chart-engine/src/indicators/overlayRegistry";
 import type { IndicatorCatalogEntry } from "@aios/chart-engine/src/plugins/indicatorPlugin";
+import { computeIndicatorSeries } from "@aios/chart-engine/src/compute/clientEngine";
 import { VERIFIED_KERNEL_PINS } from "@aios/chart-engine/src/compute/verifiedIndicators";
 import { cleanup, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -14,7 +15,21 @@ import { IndicatorParityPanel, type ServerIndicatorSeriesPort } from "./Indicato
 // BBANDS-not-verified scenario is exercised directly against
 // IndicatorParityPanel's own props instead of through the live picker UI.
 
-afterEach(() => cleanup());
+// CH-18d — spy on the real `computeIndicatorSeries`, keeping its actual
+// implementation, so the tests below can assert it was never called for a
+// whitelist-rejected indicator instead of only asserting the rendered
+// outcome (the wiring gap this task closes is exactly "the gate exists but
+// nothing calls it before compute" — a screen-only assertion would not have
+// caught that).
+vi.mock("@aios/chart-engine/src/compute/clientEngine", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@aios/chart-engine/src/compute/clientEngine")>();
+  return { ...actual, computeIndicatorSeries: vi.fn(actual.computeIndicatorSeries) };
+});
+
+afterEach(() => {
+  cleanup();
+  vi.mocked(computeIndicatorSeries).mockClear();
+});
 
 const registry = createDefaultOverlayRegistry();
 const BBANDS = registry.resolve("BBANDS");
@@ -97,5 +112,70 @@ describe("IndicatorParityPanel — CH-18c BBANDS(영구 미검증 지표) 서버
     expect(screen.getByTestId("indicator-parity-value-SMA")).toHaveTextContent("50200.000000");
     expect(screen.getByTestId("indicator-parity-source-SMA")).toHaveTextContent("(client)");
     expect(screen.queryByTestId("indicator-parity-fallback-SMA")).not.toBeInTheDocument();
+  });
+});
+
+// CH-18d — verifiedIndicators.ts's whitelist gate must sit in front of
+// computeIndicatorSeries in this exact component, not merely exist somewhere
+// in chart-engine. Both tests below assert the compute spy's call count, not
+// just the rendered outcome — reverting the `isVerifiedIndicator` pre-check
+// in IndicatorParityPanel.tsx's `buildRow` makes both fail because
+// computeIndicatorSeries would then run once (and throw internally) instead
+// of never running at all.
+describe("IndicatorParityPanel — CH-18d verifiedIndicators 실배선", () => {
+  it("negative ①: verify_all.py가 검증하지 못한 지표(BBANDS)는 computeIndicatorSeries를 한 번도 호출하지 않는다", () => {
+    const resolveServerSeries: ServerIndicatorSeriesPort = vi.fn(({ name }) => {
+      if (name !== "BBANDS") return null;
+      return { upperband: [null, 51000], middleband: [null, 50000], lowerband: [null, 49000] };
+    });
+
+    render(
+      <IndicatorParityPanel
+        candles={manyCandles(2)}
+        overlays={[BBANDS]}
+        catalog={smaVerifiedCatalog()}
+        resolveServerSeries={resolveServerSeries}
+      />,
+    );
+
+    expect(computeIndicatorSeries).not.toHaveBeenCalled();
+    expect(screen.getByTestId("indicator-parity-source-BBANDS")).toHaveTextContent("(server)");
+    expect(screen.getByTestId("indicator-parity-fallback-BBANDS")).toBeInTheDocument();
+  });
+
+  it("negative ②: VERIFIED_KERNEL_PINS와 entry_hash가 다른(핀 드리프트) 카탈로그 항목은 computeIndicatorSeries를 호출하지 않고 서버로 폴백한다", () => {
+    const pin = VERIFIED_KERNEL_PINS.SMA!;
+    const driftedCatalog: IndicatorCatalogEntry[] = [
+      { name: "SMA", tier: pin.tier, category: "core", version: "ind-v1", hash: "0".repeat(64), inputs: ["close"], outputs: ["value"] },
+    ];
+    const resolveServerSeries: ServerIndicatorSeriesPort = vi.fn(() => ({ value: [50200] }));
+
+    render(
+      <IndicatorParityPanel
+        candles={manyCandles(25)}
+        overlays={[SMA]}
+        catalog={driftedCatalog}
+        resolveServerSeries={resolveServerSeries}
+      />,
+    );
+
+    expect(computeIndicatorSeries).not.toHaveBeenCalled();
+    expect(screen.getByTestId("indicator-parity-source-SMA")).toHaveTextContent("(server)");
+    expect(screen.getByTestId("indicator-parity-fallback-SMA")).toBeInTheDocument();
+    expect(resolveServerSeries).toHaveBeenCalledWith(expect.objectContaining({ name: "SMA" }));
+  });
+
+  it("회귀 방지: 화이트리스트를 통과하는 지표는 여전히 computeIndicatorSeries를 호출해 클라이언트 계산을 쓴다", () => {
+    render(
+      <IndicatorParityPanel
+        candles={manyCandles(25)}
+        overlays={[SMA]}
+        catalog={smaVerifiedCatalog()}
+        resolveServerSeries={() => ({ value: Array.from({ length: 25 }, (_, i) => (i < 19 ? null : 50200)) })}
+      />,
+    );
+
+    expect(computeIndicatorSeries).toHaveBeenCalledTimes(1);
+    expect(screen.getByTestId("indicator-parity-source-SMA")).toHaveTextContent("(client)");
   });
 });
