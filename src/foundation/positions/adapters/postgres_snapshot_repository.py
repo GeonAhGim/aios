@@ -9,13 +9,17 @@ base_currency`를 호출자가 이미 알고 있으므로 조인 없이 그 값�
 재사용한다(쓰기 경로에서 불필요한 조회 한 번을 아낀다).
 
 `upsert`는 §5 표의 `conditional_update(pos_snapshot, id=position_key,
-expected last_journal_seq)`를 단일 `INSERT ... ON CONFLICT (position_key)
-DO UPDATE ... WHERE pos_snapshot.last_journal_seq = $expected`문으로
-구현한다 — 최초 생성(`expected_seq=0`, 포트 docstring)은 행이 없으므로
-`ON CONFLICT`가 발동하지 않고 그냥 INSERT되고, 이후 갱신은 `WHERE`절이
-`src/core/db/conditional_write.py::conditional_update`와 동일한 낙관적
-잠금 조건을 검사한다. 두 단계(조회 후 UPDATE)로 나누지 않고 한 문장으로
-처리해 두 동시 쓰기 사이의 경쟁 창을 없앤다."""
+expected last_journal_seq)`와 같은 낙관적 잠금 의미론을, FA-10
+(`docs/specs/L4_ibor_fund_accounting_and_resilience_v1.0.md#FA-10`)이
+`pos_snapshot`에 건 UPDATE 금지 트리거 아래에서 구현한다 — 더 이상
+`INSERT ... ON CONFLICT DO UPDATE`(내부적으로 UPDATE)를 쓸 수 없으므로,
+한 문장 안에서 `existing`(치환 전 상태를 MATERIALIZED CTE로 고정) →
+`prior`(기대 seq와 일치할 때만 이전 행을 DELETE, `legacy_position_id`는
+RETURNING으로 이어받음) → 그 결과로 INSERT(새 버전)까지 원자적으로
+수행한다. 최초 생성(`expected_seq=0`, 포트 docstring)은 `existing`이
+비어 있으므로 `NOT EXISTS(existing)` 분기로 그냥 INSERT되고, 이후 갱신은
+`prior`가 `existing`과 같은 시점의 행을 조건부로 지웠을 때만 새 행이
+들어간다 — 두 동시 쓰기 사이의 경쟁 창은 없다(하나의 SQL 왕복)."""
 from __future__ import annotations
 
 import json
@@ -33,20 +37,21 @@ _SELECT = (
 )
 
 _UPSERT_SQL = (
+    "WITH existing AS MATERIALIZED ("
+    " SELECT legacy_position_id FROM pos_snapshot WHERE position_key = $1"
+    "), prior AS ("
+    " DELETE FROM pos_snapshot"
+    " WHERE position_key = $1 AND last_journal_seq IS NOT DISTINCT FROM $16"
+    " RETURNING legacy_position_id"
+    ") "
     "INSERT INTO pos_snapshot ("
     " position_key, tenant_id, account_id, instrument_id, quantity, avg_cost,"
     " cost_method, lots, realized_pnl_base, unrealized_pnl_base, fees_base,"
-    " funding_base, mark_price, mark_at, last_journal_seq, updated_at"
-    ") VALUES ($1,$2,$3,$4,$5,$6,$7,$8::jsonb,$9,$10,$11,$12,$13,$14,$15,now()) "
-    "ON CONFLICT (position_key) DO UPDATE SET "
-    " quantity = EXCLUDED.quantity, avg_cost = EXCLUDED.avg_cost,"
-    " cost_method = EXCLUDED.cost_method, lots = EXCLUDED.lots,"
-    " realized_pnl_base = EXCLUDED.realized_pnl_base,"
-    " unrealized_pnl_base = EXCLUDED.unrealized_pnl_base,"
-    " fees_base = EXCLUDED.fees_base, funding_base = EXCLUDED.funding_base,"
-    " mark_price = EXCLUDED.mark_price, mark_at = EXCLUDED.mark_at,"
-    " last_journal_seq = EXCLUDED.last_journal_seq, updated_at = now() "
-    "WHERE pos_snapshot.last_journal_seq = $16 "
+    " funding_base, mark_price, mark_at, last_journal_seq, legacy_position_id, updated_at"
+    ") "
+    "SELECT $1,$2,$3,$4,$5,$6,$7,$8::jsonb,$9,$10,$11,$12,$13,$14,$15,"
+    " (SELECT legacy_position_id FROM prior), now() "
+    "WHERE EXISTS (SELECT 1 FROM prior) OR NOT EXISTS (SELECT 1 FROM existing) "
     "RETURNING *"
 )
 

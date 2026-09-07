@@ -14,6 +14,28 @@ Spec: docs/specs/L4_market_data_positions_ledger_v1.0.md#§2.4, §5, §9 LC-8.
 (포트 docstring의 "새 분개의 sequence_no로 갱신"은 "새 분개가 이 행을
 건드릴 때마다 전진한다"는 뜻으로 해석 — `get_for_update`로 이미 잠근
 행이라 정상 경로에서는 절대 충돌하지 않는다는 포트 docstring과 일치).
+
+FA-10(`docs/specs/L4_ibor_fund_accounting_and_resilience_v1.0.md#FA-10`)이
+`ledger_balance`에 UPDATE 금지 트리거를 걸었으므로, `apply()`는 더 이상
+literal `UPDATE`를 쓰지 않는다 — `target`(계정 코드로 찾은 치환 전 상태를
+MATERIALIZED CTE로 고정) → `prior`(기대 seq와 일치할 때만 그 행을 DELETE)
+→ `target`에서 읽은 값으로 새 잔액 행을 INSERT, 세 단계를 한 문장으로
+묶는다. `target`이 비어 있으면(미지 계정) INSERT도 그냥 0행이라 기존과
+동일하게 `row is None` 분기(아래)가 `UnknownAccountError`/
+`ConcurrencyConflictError`를 가른다.
+
+`get_for_update`가 쓰던 `SELECT ... FOR UPDATE OF lb`는 DELETE+INSERT와
+호환되지 않는다 — Postgres는 행 잠금을 "업데이트 체인"(같은 물리 행의
+새 버전)에 대해서만 따라가고, 무관한 DELETE 다음의 새 INSERT는 그 체인이
+아니므로, 잠그고 있던 행이 다른 트랜잭션에서 DELETE+INSERT되면 blocked
+리더가 깨어났을 때 "행이 사라졌다"고 판단해 결과에서 빠뜨린다(실측:
+`test_get_balance_no_false_positive_drift_under_concurrent_commits`가
+`UnknownAccountError`로 재현). 그래서 물리 행 잠금 대신
+`pg_advisory_xact_lock(hashtextextended(account_code, 0))`으로 계정
+코드 자체를 키로 잠근다 — 트랜잭션이 끝나면 자동 해제되고, 물리 행이
+바뀌어도(DELETE+INSERT) 같은 계정 코드는 항상 같은 잠금 키로 직렬화된다.
+정렬 순서(`account_code` 오름차순)로 잠그는 것은 기존 `ORDER BY
+la.account_code`와 동일하게 교착 방지용이다.
 """
 from __future__ import annotations
 
@@ -60,14 +82,17 @@ class PostgresBalanceRepository:
     ) -> dict[str, BalanceView]:
         if not account_ids:
             return {}
+        for account_code in sorted(set(account_ids)):
+            await conn.execute(
+                "SELECT pg_advisory_xact_lock(hashtextextended($1, 0))", account_code
+            )
         rows = await conn.fetch(
             "SELECT la.account_code, la.currency, lb.balance, lb.held, "
             "lb.pending_payout, lb.last_entry_seq, lb.updated_at "
             "FROM ledger_balance lb "
             "JOIN ledger_account la ON la.account_id = lb.account_id "
             "WHERE la.account_code = ANY($1::text[]) "
-            "ORDER BY la.account_code "
-            "FOR UPDATE OF lb",
+            "ORDER BY la.account_code",
             list(account_ids),
         )
         found = {row["account_code"]: _row_to_balance(row) for row in rows}
@@ -85,17 +110,28 @@ class PostgresBalanceRepository:
         expected_seq: int,
     ) -> BalanceView:
         row = await conn.fetchrow(
-            "UPDATE ledger_balance AS lb SET "
-            "balance = lb.balance + $2, "
-            "held = lb.held + $3, "
-            "last_entry_seq = lb.last_entry_seq + 1, "
-            "updated_at = now() "
-            "FROM ledger_account AS la "
-            "WHERE la.account_id = lb.account_id "
-            "AND la.account_code = $1 "
-            "AND lb.last_entry_seq = $4 "
-            "RETURNING lb.balance, lb.held, lb.pending_payout, lb.last_entry_seq, "
-            "lb.updated_at, la.account_code, la.currency",
+            "WITH target AS MATERIALIZED ("
+            " SELECT lb.account_id, lb.balance, lb.held, lb.pending_payout,"
+            " lb.allow_negative, lb.last_entry_seq, la.account_code, la.currency"
+            " FROM ledger_balance lb JOIN ledger_account la ON la.account_id = lb.account_id"
+            " WHERE la.account_code = $1"
+            "), prior AS ("
+            " DELETE FROM ledger_balance"
+            " WHERE account_id = (SELECT account_id FROM target)"
+            " AND last_entry_seq = $4"
+            " RETURNING account_id"
+            ") "
+            "INSERT INTO ledger_balance ("
+            " account_id, balance, held, pending_payout, allow_negative,"
+            " last_entry_seq, updated_at"
+            ") "
+            "SELECT t.account_id, t.balance + $2, t.held + $3, t.pending_payout,"
+            " t.allow_negative, t.last_entry_seq + 1, now() "
+            "FROM target t "
+            "WHERE EXISTS (SELECT 1 FROM prior) "
+            "RETURNING account_id, balance, held, pending_payout, last_entry_seq, updated_at, "
+            "(SELECT account_code FROM target) AS account_code, "
+            "(SELECT currency FROM target) AS currency",
             account_id,
             delta_balance,
             delta_held,

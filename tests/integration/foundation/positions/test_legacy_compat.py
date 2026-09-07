@@ -20,7 +20,7 @@ from src.foundation.positions.adapters.legacy_positions_projection import (
     LegacyPositionsProjection,
 )
 from tests.integration.conftest import create_test_tenant
-from tests.integration.foundation.positions.conftest import create_pos_account
+from tests.integration.foundation.positions.conftest import create_pos_account, force_row_replace
 
 _EXCHANGE = "TESTEX"
 
@@ -136,16 +136,14 @@ async def test_partial_close_still_matches_legacy_query(pool, projection):
 
     # 부분청산: 10 중 4를 60에 매도 → 남은 수량 6, 실현손익 = 4*(60-50) = 40
     partial_quantity, partial_realized = Decimal("6"), Decimal("40")
-    async with pool.acquire() as conn:
-        await conn.execute(
-            "UPDATE positions SET quantity = $2, realized_pnl = $3 WHERE id = $1",
-            legacy_id, partial_quantity, partial_realized,
-        )
-        await conn.execute(
-            "UPDATE pos_snapshot SET quantity = $2, realized_pnl_base = $3, "
-            "last_journal_seq = 2 WHERE position_key = $1",
-            position_key, partial_quantity, partial_realized,
-        )
+    await force_row_replace(
+        pool, table="positions", id_column="id", id_value=legacy_id,
+        quantity=partial_quantity, realized_pnl=partial_realized,
+    )
+    await force_row_replace(
+        pool, table="pos_snapshot", id_column="position_key", id_value=position_key,
+        quantity=partial_quantity, realized_pnl_base=partial_realized, last_journal_seq=2,
+    )
 
     legacy_rows = await _direct_legacy_query(pool, user_id=tenant_id, symbol=symbol)
     projected = await _project(projection, pool, user_id=tenant_id, symbol=symbol)

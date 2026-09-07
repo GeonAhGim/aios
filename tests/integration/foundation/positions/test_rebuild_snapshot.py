@@ -33,7 +33,11 @@ from src.foundation.positions.application.record_funding_fee import record_fundi
 from src.foundation.positions.contracts.v1 import RecordFillCommand, RecordFundingCommand
 from src.foundation.positions.domain.position_key import PositionKey
 from tests.integration.conftest import create_test_tenant
-from tests.integration.foundation.positions.conftest import create_pos_account, open_position
+from tests.integration.foundation.positions.conftest import (
+    create_pos_account,
+    force_row_replace,
+    open_position,
+)
 
 _OCCURRED_AT = datetime(2026, 1, 1, tzinfo=timezone.utc)
 
@@ -179,12 +183,10 @@ async def test_dry_run_reports_drift_without_writing(pool, ports):
         fill_seq=1, order_id=order_id,
     )
 
-    async with pool.acquire() as conn:
-        await conn.execute(
-            "UPDATE pos_snapshot SET quantity = 999, realized_pnl_base = 42 "
-            "WHERE position_key = $1",
-            position_key,
-        )
+    await force_row_replace(
+        pool, table="pos_snapshot", id_column="position_key", id_value=position_key,
+        quantity=Decimal("999"), realized_pnl_base=Decimal("42"),
+    )
 
     report = await rebuild_snapshot(
         position_key,
@@ -228,10 +230,10 @@ async def test_apply_fixes_drift_without_touching_journal(pool, ports):
         journal_count_before = await conn.fetchval(
             "SELECT count(*) FROM pos_journal WHERE position_key = $1", position_key
         )
-        await conn.execute(
-            "UPDATE pos_snapshot SET quantity = 0, realized_pnl_base = 0 WHERE position_key = $1",
-            position_key,
-        )
+    await force_row_replace(
+        pool, table="pos_snapshot", id_column="position_key", id_value=position_key,
+        quantity=Decimal("0"), realized_pnl_base=Decimal("0"),
+    )
 
     report = await rebuild_snapshot(
         position_key,

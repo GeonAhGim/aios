@@ -88,3 +88,36 @@ async def open_position(
     repo = PostgresSnapshotRepository(pool)
     async with pool.acquire() as conn, conn.transaction():
         return await repo.upsert(conn, snapshot, expected_seq=0)
+
+
+async def force_row_replace(
+    pool: asyncpg.Pool, *, table: str, id_column: str, id_value: object, **overrides: object
+) -> None:
+    """테스트 전용: FA-10이 `table`에 건 UPDATE 금지 트리거 아래에서 일부
+    컬럼만 강제로 바꾼다(정상 시나리오가 아니라 드리프트/이력 조작
+    시나리오를 만드는 테스트 셋업 용도) — DELETE + INSERT로 나머지 컬럼은
+    그대로 보존한 채 `overrides`만 덮어쓴다."""
+    async with pool.acquire() as conn:
+        columns = [
+            r["column_name"]
+            for r in await conn.fetch(
+                "SELECT column_name FROM information_schema.columns "
+                "WHERE table_name = $1 ORDER BY ordinal_position",
+                table,
+            )
+        ]
+        params: list[object] = [id_value]
+        select_cols = []
+        for col in columns:
+            if col in overrides:
+                params.append(overrides[col])
+                select_cols.append(f"${len(params)}")
+            else:
+                select_cols.append(col)
+        # noqa: S608 -- table/id_column/columns는 전부 호출자 상수·카탈로그 조회 결과
+        sql = (
+            f"WITH prior AS (DELETE FROM {table} WHERE {id_column} = $1 RETURNING *) "  # noqa: S608
+            f"INSERT INTO {table} ({', '.join(columns)}) "
+            f"SELECT {', '.join(select_cols)} FROM prior"
+        )
+        await conn.execute(sql, *params)

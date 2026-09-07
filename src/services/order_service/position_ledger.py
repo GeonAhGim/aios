@@ -114,14 +114,43 @@ async def record_fill_in_position_ledger(
                     order.execution_id, snapshot.quantity, snapshot.avg_cost.amount,
                     snapshot.realized_pnl_base, closed_at, order.asset_class.value,
                 )
+                # FA-10: pos_snapshot은 UPDATE 금지 — DELETE(이전 행) + INSERT(같은
+                # position_key, legacy_position_id만 갈아끼운 새 버전)로 대체한다.
                 await conn.execute(
-                    "UPDATE pos_snapshot SET legacy_position_id = $1 WHERE position_key = $2",
+                    "WITH prior AS ("
+                    " DELETE FROM pos_snapshot WHERE position_key = $2 RETURNING *"
+                    ") "
+                    "INSERT INTO pos_snapshot ("
+                    " position_key, tenant_id, account_id, instrument_id, quantity, avg_cost,"
+                    " cost_method, lots, realized_pnl_base, unrealized_pnl_base, fees_base,"
+                    " funding_base, mark_price, mark_at, last_journal_seq, legacy_position_id,"
+                    " updated_at"
+                    ") "
+                    "SELECT position_key, tenant_id, account_id, instrument_id, quantity,"
+                    " avg_cost, cost_method, lots, realized_pnl_base, unrealized_pnl_base,"
+                    " fees_base, funding_base, mark_price, mark_at, last_journal_seq, $1, now()"
+                    " FROM prior",
                     legacy_id, position_key,
                 )
             else:
+                # FA-10: positions도 UPDATE 금지 — 같은 id로 DELETE + INSERT해
+                # 대체한다(legacy_position_id FK가 이 id를 참조하므로 DEFERRABLE
+                # INITIALLY DEFERRED로 걸어 뒀다, a2c4f9e1b3d5).
                 await conn.execute(
-                    "UPDATE positions SET quantity = $2, average_entry_price = $3, "
-                    "realized_pnl = $4, closed_at = $5, updated_at = now() WHERE id = $1",
+                    "WITH prior AS ("
+                    " DELETE FROM positions WHERE id = $1 RETURNING *"
+                    ") "
+                    "INSERT INTO positions ("
+                    " id, user_id, symbol, exchange, strategy_id, quantity,"
+                    " average_entry_price, unrealized_pnl, realized_pnl, leverage, margin,"
+                    " entry_time, closed_at, execution_id, asset_class, option_type,"
+                    " strike_price, expiry_date, contract_multiplier, underlying_symbol"
+                    ") "
+                    "SELECT id, user_id, symbol, exchange, strategy_id, $2, $3, unrealized_pnl,"
+                    " $4, leverage, margin, entry_time, $5, execution_id, asset_class,"
+                    " option_type, strike_price, expiry_date, contract_multiplier,"
+                    " underlying_symbol"
+                    " FROM prior",
                     legacy_id, snapshot.quantity, snapshot.avg_cost.amount,
                     snapshot.realized_pnl_base, closed_at,
                 )
