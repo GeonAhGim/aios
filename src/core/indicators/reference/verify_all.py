@@ -217,8 +217,7 @@ def verify_indicator(name: str, datasets: Sequence[Dataset]) -> list[Mismatch]:
 
 
 def reference_vector(name: str, dataset: Dataset) -> dict[str, list[float | None]]:
-    """Default-parameter result values for a verified indicator — the
-    `outputs` field of the snapshot payload."""
+    """Default-parameter output for a verified indicator — the snapshot's `outputs` field."""
     spec = TALIB_SPECS[name]
     params = {p.name: p.default for p in spec.params}
     values = compute(name, dataset.columns, params)
