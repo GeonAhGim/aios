@@ -14,12 +14,23 @@ from src.foundation.mandates.domain.models import (
 
 
 class MandateRepository(Protocol):
-    async def get_mandate(self, tenant_id: UUID) -> PortfolioMandate | None: ...
+    async def get_mandate(
+        self, tenant_id: UUID, portfolio_id: UUID | None = None
+    ) -> PortfolioMandate | None:
+        """`portfolio_id`가 None이면 FA-1 `domain/defaults.py`의
+        `default_portfolio_id(tenant_id)`(그 tenant의 단일 기본 포트폴리오)로
+        해석한다(FA-0b) — 기존 단일 포트폴리오 호출부는 인자를 바꾸지 않아도
+        전과 동일하게 동작하고, 포트폴리오를 둘 이상 가진 호출부만 명시적으로
+        골라 넘긴다."""
+        ...
 
-    async def get_or_create_mandate(self, tenant_id: UUID, subject_id: UUID) -> PortfolioMandate:
-        """75번 §1 "one active mandate per subject" — mandate 행 자체는 tenant당
-        하나뿐이라 최초 draft 생성 시 없으면 만든다(UNIQUE(tenant_id) 제약이
-        경합을 막음)."""
+    async def get_or_create_mandate(
+        self, tenant_id: UUID, subject_id: UUID, portfolio_id: UUID | None = None
+    ) -> PortfolioMandate:
+        """75번 §1 "one active mandate per subject" — mandate 행은 이제
+        (tenant_id, portfolio_id) 하나당 하나다(FA-0b, UNIQUE(tenant_id,
+        portfolio_id) 제약이 경합을 막음). `portfolio_id` 해석은 `get_mandate`와
+        동일."""
         ...
 
     async def get_revision(self, revision_id: UUID) -> MandateRevision | None: ...

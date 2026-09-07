@@ -20,6 +20,7 @@ from uuid import UUID
 import asyncpg
 
 from src.core.db.conditional_write import ConcurrencyConflictError, conditional_update
+from src.foundation.entities.domain.defaults import default_portfolio_id
 from src.foundation.mandates.domain.models import (
     Autonomy,
     MandateRevision,
@@ -36,6 +37,7 @@ def _row_to_mandate(row: asyncpg.Record) -> PortfolioMandate:
         id=row["id"],
         tenant_id=row["tenant_id"],
         subject_id=row["subject_id"],
+        portfolio_id=row["portfolio_id"],
         active_revision_id=row["active_revision_id"],
         created_at=row["created_at"],
     )
@@ -89,31 +91,43 @@ class PostgresMandateRepository:
     def __init__(self, pool: asyncpg.Pool) -> None:
         self._pool = pool
 
-    async def get_mandate(self, tenant_id: UUID) -> PortfolioMandate | None:
+    async def get_mandate(
+        self, tenant_id: UUID, portfolio_id: UUID | None = None
+    ) -> PortfolioMandate | None:
+        resolved_portfolio_id = portfolio_id or default_portfolio_id(tenant_id)
         async with self._pool.acquire() as conn:
             row = await conn.fetchrow(
-                "SELECT * FROM portfolio_mandate WHERE tenant_id = $1", tenant_id
+                "SELECT * FROM portfolio_mandate WHERE tenant_id = $1 AND portfolio_id = $2",
+                tenant_id,
+                resolved_portfolio_id,
             )
         return _row_to_mandate(row) if row is not None else None
 
-    async def get_or_create_mandate(self, tenant_id: UUID, subject_id: UUID) -> PortfolioMandate:
-        existing = await self.get_mandate(tenant_id)
+    async def get_or_create_mandate(
+        self, tenant_id: UUID, subject_id: UUID, portfolio_id: UUID | None = None
+    ) -> PortfolioMandate:
+        resolved_portfolio_id = portfolio_id or default_portfolio_id(tenant_id)
+        existing = await self.get_mandate(tenant_id, resolved_portfolio_id)
         if existing is not None:
             return existing
         async with self._pool.acquire() as conn:
             try:
                 row = await conn.fetchrow(
-                    "INSERT INTO portfolio_mandate (tenant_id, subject_id) "
-                    "VALUES ($1, $2) RETURNING *",
+                    "INSERT INTO portfolio_mandate (tenant_id, subject_id, portfolio_id) "
+                    "VALUES ($1, $2, $3) RETURNING *",
                     tenant_id,
                     subject_id,
+                    resolved_portfolio_id,
                 )
             except asyncpg.UniqueViolationError:
-                # UNIQUE(tenant_id) 위반 — 동시에 두 요청이 최초 draft를
-                # 만들려던 경합. 이긴 쪽이 만든 행을 그대로 반환한다(105번
-                # §2.2 "스키마 UNIQUE 제약이 단일 소유자를 보장"과 동일 패턴).
+                # UNIQUE(tenant_id, portfolio_id) 위반(FA-0b) — 동시에 두 요청이
+                # 같은 (tenant, portfolio)의 최초 draft를 만들려던 경합. 이긴
+                # 쪽이 만든 행을 그대로 반환한다(105번 §2.2 "스키마 UNIQUE
+                # 제약이 단일 소유자를 보장"과 동일 패턴).
                 row = await conn.fetchrow(
-                    "SELECT * FROM portfolio_mandate WHERE tenant_id = $1", tenant_id
+                    "SELECT * FROM portfolio_mandate WHERE tenant_id = $1 AND portfolio_id = $2",
+                    tenant_id,
+                    resolved_portfolio_id,
                 )
                 assert row is not None
         return _row_to_mandate(row)

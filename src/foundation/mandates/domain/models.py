@@ -57,6 +57,7 @@ class PortfolioMandate:
     id: UUID
     tenant_id: UUID
     subject_id: UUID
+    portfolio_id: UUID
     active_revision_id: UUID | None
     created_at: datetime
 
