@@ -1,19 +1,21 @@
-"""OCO(One-Cancels-Other) 형제 조정 — 원자적 트리거 판정(순수, 스레드
-세이프)(L4 명세 §9 EM-19).
+"""OCO (One-Cancels-Other) sibling coordination — atomic trigger
+determination (pure, thread-safe) (L4 spec §9 EM-19).
 
 Spec: docs/specs/L4_ems_routing_algos_and_tca_v1.0.md §9 EM-19.
 
-두 형태의 판정이 필요하다.
-- `resolve_oco`: 결정론적 리플레이(단일 스레드, 같은 틱에서 두 레그가
-  동시에 조건을 만족하는 모호한 경우)용 — 호출자가 `priority_leg`로
-  보수적 가정을 명시한다. 백테스트 쪽 BT-6 `resolve_oco`와 동형이다.
-- `OcoGroup`: 라이브 경로용 — 두 레그의 트리거 평가가 서로 다른
-  스레드/코루틴에서 실제로 동시에 도착할 수 있다(가격 틱과 시간 만료가
-  같은 순간 도착하는 등). `try_trigger`는 `threading.Lock`으로 "먼저
-  도착한 레그가 이긴다"를 원자적으로 강제한다 — 승자가 정해진 뒤에는
-  같은 레그를 몇 번 다시 불러도 같은 답을 낸다(멱등). DoD: 1000회 동시
-  호출에서 두 레그가 동시에 TRIGGERED가 되는 경우가 0이어야 한다
-  (이중 체결 방지).
+Two forms of determination are needed.
+- `resolve_oco`: for deterministic replay (single thread, the ambiguous
+  case where both legs satisfy their condition on the same tick) — the
+  caller states a conservative assumption via `priority_leg`. Isomorphic to
+  the backtest side's BT-6 `resolve_oco`.
+- `OcoGroup`: for the live path — trigger evaluation for the two legs can
+  actually arrive concurrently from different threads/coroutines (e.g. a
+  price tick and a time expiry arriving at the same instant).
+  `try_trigger` uses a `threading.Lock` to atomically enforce "whichever leg
+  arrives first wins" — once a winner is decided, calling the same leg
+  again any number of times returns the same answer (idempotent). DoD:
+  across 1000 concurrent calls, zero cases where both legs become TRIGGERED
+  at once (prevents double fills).
 """
 from __future__ import annotations
 
@@ -41,11 +43,12 @@ class OcoResolution:
 def resolve_oco(
     *, leg_a_triggered: bool, leg_b_triggered: bool, priority_leg: OcoLeg
 ) -> OcoResolution:
-    """한쪽이 트리거되면 반대편은 즉시 취소된다. 같은 틱 안에서 둘 다
-    조건을 만족하는 경우(예: 급격한 갭)는 이 정보만으로 어느 쪽이 실제로
-    먼저였는지 알 수 없다 — 이 모호함을 조용히 숨기지 않고, 호출자가
-    `priority_leg`로 보수적 가정(예: 손절 레그 우선)을 명시적으로
-    고르게 강제한다."""
+    """When one side triggers, the other is immediately cancelled. When both
+    satisfy their condition within the same tick (e.g. a sharp gap), this
+    information alone cannot tell which actually came first — instead of
+    silently hiding this ambiguity, the caller is forced to explicitly pick
+    a conservative assumption (e.g. stop-loss leg priority) via
+    `priority_leg`."""
     if leg_a_triggered and leg_b_triggered:
         if priority_leg == "a":
             return OcoResolution(triggered_leg="a", cancelled_leg="b")
@@ -63,11 +66,12 @@ class OcoGroup:
     _winner: OcoLeg | None = field(default=None, repr=False)
 
     def try_trigger(self, leg: OcoLeg) -> OcoOutcome:
-        """이 레그를 트리거로 확정 시도한다. 그룹이 아직 안 정해졌으면
-        이 레그가 승자가 되고 TRIGGERED를 반환한다. 이미 정해졌으면
-        승자와 같은 레그는 TRIGGERED(멱등 재확인), 다른 레그는 항상
-        CANCELLED를 반환한다 — lock 보유 구간이 read-modify-write 전체를
-        감싸므로 두 스레드가 동시에 들어와도 승자는 정확히 하나다."""
+        """Attempts to confirm this leg as the trigger. If the group is not
+        yet decided, this leg becomes the winner and TRIGGERED is returned.
+        If already decided, the leg matching the winner returns TRIGGERED
+        (idempotent re-confirmation), any other leg always returns
+        CANCELLED — the lock spans the entire read-modify-write, so even if
+        two threads enter concurrently, exactly one winner is chosen."""
         with self._lock:
             if self._winner is None:
                 self._winner = leg

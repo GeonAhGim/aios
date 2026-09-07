@@ -1,31 +1,37 @@
-"""LA-25 — 공매도 차입·마진 원시타입(borrow).
+"""LA-25 — short-sale borrow/margin primitives.
 
-Spec: ADR-2026-09-06-G §9 표("공매도·차입·마진 개념 자체가 없다(locate
-없음) — Aladdin/CRIMS는 locate 없는 공매도를 차단" → "LA-25
-`positions/domain/borrow.py` + `pos_borrow_position`"). 이 리프는 아직
-`docs/specs/L4_market_data_positions_ledger_v1.0.md` §9 표에 반영되지
-않았다(같은 문서 §10 R6은 "현물 공매도 금지"만 언급) — ADR-G 본문의
-한 줄 설명을 근거로 여기서 계약을 처음 정의한다. 영속화 테이블
-`pos_borrow_position`은 마이그레이션 parent(down_revision) 결정 대기 중
-(PM decision)이라 이 리프에서는 아직 만들지 않는다 — 아래는 순수
-도메인 규칙만이며, 리포지토리 어댑터는 후속 리프의 몫이다.
+Spec: ADR-2026-09-06-G §9 table ("no short-sale/borrow/margin concept at all
+(no locate) — Aladdin/CRIMS block short sales without a locate" → "LA-25
+`positions/domain/borrow.py` + `pos_borrow_position`"). This leaf is not yet
+reflected in `docs/specs/L4_market_data_positions_ledger_v1.0.md` §9 table
+(that doc's §10 R6 only mentions "cash short-sale prohibited") — the contract
+is defined here for the first time based on the one-line description in the
+ADR-G body. The persistence table `pos_borrow_position` is not created yet
+in this leaf because it is waiting on a migration parent (down_revision)
+decision (PM decision) — below is pure domain rules only; the repository
+adapter is a later leaf's job.
 
-세 가지 원시 개념(§DoD):
-1. **locate 게이트** — 공매도(순포지션을 더 숏으로 만드는 매도)는
-   사전에 확보한 소유권 확인서(locate) 수량을 넘을 수 없다
-   (`check_locate_gate`). 위반은 `LocateRequiredError`(불가, 호출자가
-   먼저 locate를 확보해야 함).
-2. **일별 차입 이자 적립** — 숏 수량 × 시가 × 공급 이율(연) / day-count.
-   day-count 관례(ACT/360 vs ACT/365)는 프라임 브로커 계약서 대조 전이라
-   **미검증**이다 — `DEFAULT_DAY_COUNT=360`은 가정값.
-3. **마진콜 판정** — 자기자본(담보 - 숏 시가평가액)이 유지증거금
-   요건(유지증거금률 × 숏 시가평가액) 아래로 떨어지면 `MarginCallEvent`를
-   낸다. 공매도 대금 재투자·이자 등 실제 프라임 브로커리지의 세부
-   증거금 계산(Reg T, 포트폴리오 마진)은 이 원시타입의 범위 밖이다 —
-   **미검증**, 실제 브로커 마진 규정과 교차검증 전.
+Three primitives (§DoD):
+1. **Locate gate** — a short sale (a sell that pushes net position further
+   short) cannot exceed the quantity of ownership confirmations (locates)
+   secured in advance (`check_locate_gate`). A violation raises
+   `LocateRequiredError` (non-retriable; the caller must secure a locate
+   first).
+2. **Daily borrow interest accrual** — short quantity x mark price x supply
+   rate (annual) / day-count. The day-count convention (ACT/360 vs ACT/365)
+   is **unverified** pending cross-checking against the prime broker
+   agreement — `DEFAULT_DAY_COUNT=360` is an assumption.
+3. **Margin call determination** — a `MarginCallEvent` is raised when equity
+   (collateral - short market value) falls below the maintenance margin
+   requirement (maintenance margin rate x short market value). Real prime
+   brokerage margin detail (Reg T, portfolio margin), including short-sale
+   proceeds reinvestment/interest, is out of scope for this primitive —
+   **unverified**, pending cross-checking against actual broker margin
+   rules.
 
-순수 함수·값 객체만 — I/O·시계 직접 호출 금지(호출자가 `as_of`를
-넘긴다). `Decimal`만 사용, float 금지(105번 표준과 동일 원칙).
+Pure functions and value objects only — no direct I/O or clock calls (the
+caller passes `as_of`). `Decimal` only, no `float` (same principle as
+standard 105).
 """
 from __future__ import annotations
 
@@ -37,16 +43,17 @@ from src.data.models.base import Currency, Money
 from src.data.models.trading import OrderSide
 
 DEFAULT_DAY_COUNT = 360
-"""연이율을 일할 계산할 때 나누는 일수. ACT/360 관례를 가정한다
-(미검증 — 실제 프라임 브로커 계약서 대조 전, docstring 서두 참고)."""
+"""Days divisor for pro-rating the annual rate. Assumes the ACT/360
+convention (unverified — pending cross-checking against the actual prime
+broker agreement, see docstring above)."""
 
 
 class NonPositiveQuantityError(ValueError):
-    """수량·이율 등 양수여야 하는 값이 0 이하다."""
+    """A value that must be positive (quantity, rate, ...) is <= 0."""
 
 
 class CurrencyMismatchError(ValueError):
-    """서로 다른 통화의 `Money`를 같은 계산에 섞으려 했다."""
+    """Tried to mix `Money` of different currencies in the same calculation."""
 
     def __init__(self, expected: Currency, actual: Currency) -> None:
         super().__init__(f"통화 불일치: 기대={expected.value}, 실제={actual.value}")
@@ -55,11 +62,12 @@ class CurrencyMismatchError(ValueError):
 
 
 class LocateRequiredError(Exception):
-    """공매도 주문이 확보된 locate 수량을 초과한다 — 주문 게이트 거부.
+    """A short-sale order exceeds the secured locate quantity — order gate
+    rejection.
 
-    불가(재시도 불가능): 호출자가 먼저 locate를 추가 확보한 뒤 다시
-    제출해야 한다. Aladdin/CRIMS가 locate 없는 공매도를 원천 차단하는
-    것과 동일한 게이트(ADR-2026-09-06-G §9)."""
+    Non-retriable: the caller must secure an additional locate before
+    resubmitting. The same gate Aladdin/CRIMS use to block short sales
+    without a locate at the source (ADR-2026-09-06-G §9)."""
 
     def __init__(self, *, requested: Decimal, available: Decimal) -> None:
         super().__init__(
@@ -72,7 +80,7 @@ class LocateRequiredError(Exception):
 
 @dataclass(frozen=True, slots=True)
 class Locate:
-    """공매도 전 확보한 소유권 확인서(locate) 한 건."""
+    """One ownership confirmation (locate) secured before a short sale."""
 
     locate_id: str
     quantity: Decimal
@@ -98,17 +106,18 @@ def check_locate_gate(
     locates: list[Locate],
     as_of: datetime,
 ) -> None:
-    """공매도 주문 게이트. 순수 판정 — 통과하면 `None`을 반환하고 조용히
-    끝난다, 위반이면 예외를 던진다(불가, 침묵 통과 금지).
+    """Short-sale order gate. Pure determination — returns `None` and ends
+    silently on pass; raises on violation (non-retriable, no silent pass).
 
-    `side == BUY`는 항상 통과한다(숏커버 또는 롱 진입은 locate가 필요
-    없다). `side == SELL`인 경우 체결 후 순포지션(`current_position_quantity
-    - quantity`, 음수=숏)이 이전보다 더 숏 방향으로 커진 만큼(=신규
-    공매도분)만 locate로 커버돼야 한다 — 기존 롱 보유분을 청산하는
-    매도는 공매도가 아니므로 locate가 필요 없다.
+    `side == BUY` always passes (a short cover or long entry needs no
+    locate). For `side == SELL`, only the amount by which the post-fill net
+    position (`current_position_quantity - quantity`, negative = short)
+    grows more short than before (= the newly created short) must be
+    covered by a locate — a sell that liquidates an existing long holding
+    is not a short sale and needs no locate.
 
-    `as_of` 시각에 활성(만료 전·도래 후)인 locate들의 수량 합만
-    유효하다고 본다.
+    Only the sum of locates active (past grant, before expiry) at `as_of`
+    counts as available.
     """
     if quantity <= 0:
         raise NonPositiveQuantityError(f"quantity는 0보다 커야 합니다: {quantity}")
@@ -120,7 +129,7 @@ def check_locate_gate(
     resulting_short = max(Decimal("0"), -resulting_quantity)
     new_short_quantity = resulting_short - previous_short
     if new_short_quantity <= 0:
-        return  # 기존 롱 청산 또는 숏 축소 — 공매도가 아니다.
+        return  # liquidating an existing long or reducing a short — not a short sale.
 
     available = sum((loc.quantity for loc in locates if loc.is_active(as_of=as_of)), Decimal("0"))
     if available < new_short_quantity:
@@ -129,9 +138,10 @@ def check_locate_gate(
 
 @dataclass(frozen=True, slots=True)
 class BorrowPosition:
-    """`pos_borrow_position`(영속화는 후속 리프) 한 행의 순수 뷰. 숏
-    수량은 항상 양수로 저장한다 — 부호는 이 값 객체 밖의
-    `PositionSnapshotView.quantity`(음수 숏)가 담당한다."""
+    """Pure view of one `pos_borrow_position` row (persistence is a later
+    leaf). Short quantity is always stored positive — sign is the
+    responsibility of `PositionSnapshotView.quantity` (negative for short)
+    outside this value object."""
 
     position_key: str
     short_quantity: Decimal
@@ -158,9 +168,10 @@ def accrue_daily_interest(
     mark_price: Money,
     day_count: int = DEFAULT_DAY_COUNT,
 ) -> Money:
-    """숏 포지션의 하루치 차입 이자 = `short_quantity × mark_price ×
-    supply_rate / day_count`(공급 이율로 적립, 항상 양수 — 차입자가
-    대주기관에 지불하는 비용). `day_count`는 0보다 커야 한다."""
+    """One day's borrow interest on the short position = `short_quantity x
+    mark_price x supply_rate / day_count` (accrued at the supply rate,
+    always positive — a cost the borrower pays to the lending institution).
+    `day_count` must be > 0."""
     if day_count <= 0:
         raise NonPositiveQuantityError(f"day_count는 0보다 커야 합니다: {day_count}")
     _require_currency(mark_price, position.currency)
@@ -174,8 +185,9 @@ def accrue_interest_over(
     daily_marks: list[Money],
     day_count: int = DEFAULT_DAY_COUNT,
 ) -> Money:
-    """여러 날에 걸친 일별 이자의 합(각 날의 시가로 재계산) — 덧셈은
-    교환·결합법칙이 성립하므로 순서 무관(fold)."""
+    """Sum of daily interest across multiple days (recomputed with each
+    day's mark price) — addition is commutative/associative, so order
+    doesn't matter (fold)."""
     total = Decimal("0")
     for mark in daily_marks:
         total += accrue_daily_interest(position, mark_price=mark, day_count=day_count).amount
@@ -184,7 +196,7 @@ def accrue_interest_over(
 
 @dataclass(frozen=True, slots=True)
 class MarginCallEvent:
-    """마진콜 알림 이벤트 — 유지증거금 요건 위반 1건."""
+    """Margin call notification event — one maintenance-margin violation."""
 
     position_key: str
     equity: Decimal
@@ -202,15 +214,16 @@ def evaluate_margin_call(
     maintenance_margin_rate: Decimal,
     as_of: datetime,
 ) -> MarginCallEvent | None:
-    """숏 포지션의 유지증거금 위반을 판정한다.
+    """Determine a maintenance-margin violation on a short position.
 
-    `equity = collateral - short_quantity × mark_price`(단순화 모델 —
-    공매도 대금 재투자·이자는 범위 밖, docstring 서두 참고).
-    `required_margin = maintenance_margin_rate × short_quantity ×
-    mark_price`. `equity < required_margin`이면 부족분(`deficit`,
-    항상 양수)과 함께 `MarginCallEvent`를 반환한다 — 경계값(`equity ==
-    required_margin`)은 위반이 아니다(정확히 요건을 충족). 위반이
-    아니면 `None`(알림 없음, 침묵 성공)이다.
+    `equity = collateral - short_quantity x mark_price` (simplified model —
+    short-sale proceeds reinvestment/interest is out of scope, see docstring
+    above). `required_margin = maintenance_margin_rate x short_quantity x
+    mark_price`. If `equity < required_margin`, returns a `MarginCallEvent`
+    with the shortfall (`deficit`, always positive) — the boundary
+    (`equity == required_margin`) is not a violation (requirement exactly
+    met). Returns `None` (no notification, silent success) if not a
+    violation.
     """
     if maintenance_margin_rate <= 0:
         raise NonPositiveQuantityError(

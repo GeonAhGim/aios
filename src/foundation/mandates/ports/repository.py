@@ -17,20 +17,21 @@ class MandateRepository(Protocol):
     async def get_mandate(
         self, tenant_id: UUID, portfolio_id: UUID | None = None
     ) -> PortfolioMandate | None:
-        """`portfolio_id`가 None이면 FA-1 `domain/defaults.py`의
-        `default_portfolio_id(tenant_id)`(그 tenant의 단일 기본 포트폴리오)로
-        해석한다(FA-0b) — 기존 단일 포트폴리오 호출부는 인자를 바꾸지 않아도
-        전과 동일하게 동작하고, 포트폴리오를 둘 이상 가진 호출부만 명시적으로
-        골라 넘긴다."""
+        """If `portfolio_id` is None, resolves it via FA-1
+        `domain/defaults.py`'s `default_portfolio_id(tenant_id)` (that
+        tenant's single default portfolio) (FA-0b) — existing single-
+        portfolio callers keep working the same without changing their
+        arguments, and only callers with more than one portfolio pass an
+        explicit choice."""
         ...
 
     async def get_or_create_mandate(
         self, tenant_id: UUID, subject_id: UUID, portfolio_id: UUID | None = None
     ) -> PortfolioMandate:
-        """75번 §1 "one active mandate per subject" — mandate 행은 이제
-        (tenant_id, portfolio_id) 하나당 하나다(FA-0b, UNIQUE(tenant_id,
-        portfolio_id) 제약이 경합을 막음). `portfolio_id` 해석은 `get_mandate`와
-        동일."""
+        """Spec 75 §1 "one active mandate per subject" — a mandate row is
+        now one per (tenant_id, portfolio_id) (FA-0b; the
+        UNIQUE(tenant_id, portfolio_id) constraint prevents races).
+        `portfolio_id` resolution is the same as `get_mandate`."""
         ...
 
     async def get_revision(self, revision_id: UUID) -> MandateRevision | None: ...

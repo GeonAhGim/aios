@@ -1,24 +1,26 @@
-"""DC-27 — source_contract(소스 계약 등급·재배포 스코프).
+"""DC-27 — source_contract (source contract tier / redistribution scope).
 
 Revision ID: ff56c0e3e1ea
 Revises: b5bf8da8e058
 Create Date: 2026-09-07
 
 Spec: docs/design/ADR-2026-09-06-H-data-sourcing-self-build-and-contract-tiers.md
-D1. `entitlements`(9049e2b6b0b7:100)와 나란히 두는 새 테이블이다 —
-`entitlements`는 "테넌트가 벤처를 볼 수 있는가"를, `source_contract`는
-"플랫폼이 이 소스를 어떤 등급·재배포 스코프로 맺었는가"를 답한다(서로
-다른 축이라 같은 테이블로 합치지 않는다, D1 "새 컨텍스트를 만들지
-않는다"는 도메인 코드 계층 얘기이지 테이블 병합을 요구하지 않는다).
+D1. A new table placed alongside `entitlements` (9049e2b6b0b7:100) —
+`entitlements` answers "can this tenant see this venue", while
+`source_contract` answers "at what tier and redistribution scope has the
+platform contracted for this source" (different axes, so they are not
+merged into one table; D1's "no new context" refers to the domain code
+layer, not a requirement to merge tables).
 
-`source_id`가 PK다 — D1 "등급 승격은 행 갱신이다": 개인 계약을 기업
-계약으로 바꿀 때 새 행이 아니라 이 행의 UPDATE 하나여야 어댑터 코드가
-전혀 바뀌지 않는다는 DoD가 성립한다. `credential_ref`는 키링 핸들
-문자열만 저장한다 — 원문 키는 이 테이블에 없다(D1 "실제 키는 여기
-없다").
+`source_id` is the PK — for D1's "tier upgrade is a row update" DoD to
+hold (switching a personal contract to a business contract must be a single
+UPDATE to this row, not a new row, so adapter code never changes).
+`credential_ref` stores only a keyring-handle string — the raw key is not
+in this table (D1 "the real key is not here").
 
-`capability`는 JSONB(자산군·해상도·기업행위 유무, D6) — 소스마다
-어휘가 달라 CHECK 제약으로 강제할 고정 열거값이 없다.
+`capability` is JSONB (asset class/resolution/whether corporate actions are
+covered, D6) — vocabularies differ per source, so there is no fixed
+enumeration to enforce via a CHECK constraint.
 """
 from collections.abc import Sequence
 from enum import Enum

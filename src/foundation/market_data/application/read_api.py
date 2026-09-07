@@ -13,14 +13,16 @@ UUID)가 있으면 우선하고 `venue`는 일치 검증만 한다; 없으면 `s
 심볼)을 `md_symbol_alias` 유효기간으로 해석한다. 미등록·벤처 불일치·이용권
 거부는 **전부 같은** `MarketDataNotFoundError`다(타 테넌트 404 동형).
 
-DC-28(ADR-2026-09-06-H D2) — `authorize_redistribution()`은 이 파일이 이미
-쓰는 "이용권 거부는 존재 여부와 구분되지 않는다" 원칙을 재배포 스코프에도
-그대로 적용한다: 소스 계약이 없거나(D2 "미지정은 NONE으로 취급") 이 용도를
-허용하지 않으면 같은 `MarketDataNotFoundError`로 접는다. 순수 판정
-(`permits_use`)은 `domain/entitlement/source_contract.py`(DC-27) 소관이고,
-포트 호출(`authorize_source_access`)도 재구현하지 않는다 — 이 함수는 둘을
-조합해 강제 지점(읽기 API·차트·백테스트·내보내기)이 공유하는 게이트 하나만
-제공한다.
+DC-28 (ADR-2026-09-06-H D2) — `authorize_redistribution()` applies the same
+principle this file already uses ("entitlement denial is indistinguishable
+from nonexistence") to redistribution scope as well: if the source contract
+is missing (D2 "unspecified is treated as NONE") or does not permit this
+use, it folds into the same `MarketDataNotFoundError`. The pure
+determination (`permits_use`) belongs to
+`domain/entitlement/source_contract.py` (DC-27), and the port call
+(`authorize_source_access`) is not reimplemented either — this function
+just combines the two into a single gate shared by the enforcement points
+(read API, chart, backtest, export).
 """
 from __future__ import annotations
 
@@ -172,15 +174,18 @@ async def authorize_redistribution(
     clock: Callable[[], datetime],
     use: DataUse,
 ) -> None:
-    """D2 강제 지점(읽기 API·차트·백테스트·내보내기) 공통 게이트.
+    """D2's common gate for enforcement points (read API, chart, backtest,
+    export).
 
-    `source_id`는 벤처별 소스 계약 행을 가리킨다(market_data 벤더는
-    `Venue.value`가 곧 `source_contract.source_id`다 — 별도 매핑 테이블 없이
-    어댑터가 이미 아는 문자열을 그대로 쓴다). 계약이 없거나 만료됐거나
-    (`authorize_source_access`) 있어도 이 `use`를 허용하지 않으면(`permits_use`)
-    전부 같은 `MarketDataNotFoundError`다 — 어느 사유인지 상태코드로 구분하면
-    "이 소스는 계약이 있다/없다"·"이 등급으로는 안 된다"를 응답만으로 알 수
-    있게 돼 authorize_feed와 같은 존재-누설 문제가 생긴다."""
+    `source_id` refers to a per-venue source contract row (for market_data
+    vendors, `Venue.value` is exactly `source_contract.source_id` — no
+    separate mapping table is needed, the string the adapter already knows
+    is used as-is). Whether the contract is missing or expired
+    (`authorize_source_access`), or present but does not permit this `use`
+    (`permits_use`), all cases fold into the same `MarketDataNotFoundError`
+    — distinguishing the reason by status code would let a response alone
+    reveal "this source does/doesn't have a contract" or "this tier isn't
+    enough", the same existence-leak problem as `authorize_feed`."""
     grant = await authorize_source_access(conn, source_id, repo=repo, clock=clock)
     if not grant.allowed or grant.redistribution_scope is None:
         raise MarketDataNotFoundError(_NOT_FOUND_MESSAGE)

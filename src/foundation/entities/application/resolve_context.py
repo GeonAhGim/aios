@@ -124,13 +124,15 @@ async def resolve_context(
 
 
 async def verify_entity_context(repo: EntityRepository, ctx: EntityContext) -> None:
-    """task-1925(FA-5 리뷰 REJECT 후속) — 호출자가 직접 넘긴 `EntityContext`는
-    위조 가능하다(같은 tenant_id에 타 테넌트 소유 fund_id 등을 담을 수 있음).
-    쓰기 진입점(예: `submit_order`)은 INSERT 직전에 이 함수로 `ctx`의 4개 id를
-    `ctx.tenant_id` 기준으로 다시 조회해야 한다 — 하나라도 없거나(교차 테넌트
-    포함, FA-2 조회가 404와 동형으로 접는다) 폐쇄면 값을 신뢰하지 않고
-    `EntityContextResolutionError`로 거부한다(fail-closed). `resolve_context()`와
-    같은 `_require_open` 조합 규칙을 재사용할 뿐 새 해석 규칙은 만들지 않는다."""
+    """task-1925 (follow-up to the FA-5 review REJECT) — an `EntityContext`
+    passed directly by the caller can be forged (e.g. a fund_id owned by
+    another tenant under the same tenant_id). A write entry point (e.g.
+    `submit_order`) must re-look-up `ctx`'s four ids by this function, keyed
+    on `ctx.tenant_id`, right before INSERT — if any is missing (including
+    cross-tenant; FA-2 lookups fold into 404-isomorphic) or closed, the
+    value is not trusted and is rejected with `EntityContextResolutionError`
+    (fail-closed). Reuses the same `_require_open` composition rule as
+    `resolve_context()` rather than inventing a new resolution rule."""
     entity = await repo.get_legal_entity(ctx.tenant_id, ctx.legal_entity_id)
     _require_open(entity, kind="LegalEntity", entity_id=ctx.legal_entity_id)
     fund = await repo.get_fund(ctx.tenant_id, ctx.fund_id)

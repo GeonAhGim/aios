@@ -1,16 +1,18 @@
-"""트레일링 스톱 — 단조 트리거 갱신(순수)(L4 명세 §9 EM-19).
+"""Trailing stop — monotonic trigger update (pure) (L4 spec §9 EM-19).
 
 Spec: docs/specs/L4_ems_routing_algos_and_tca_v1.0.md §9 EM-19.
 
-`side=SELL`(롱 포지션 청산용)은 체결가가 신고가를 갱신할 때마다 극값을
-올리고 트리거가를 `극값 - trailing_offset`으로 끌어올린다. `side=BUY`
-(숏 포지션 청산용)는 신저가를 따라 트리거가를 `극값 + trailing_offset`
-으로 끌어내린다. 두 경우 모두 트리거가는 불리한 방향으로 절대
-되돌리지 않는다(단조) — 시장이 반대로 되돌아가도 이미 확보한 보호
-수준을 잃지 않는다. 백테스트 쪽 동형 로직(BT-6 `update_trailing_stop`)은
-봉 고저·비율(trail_pct)로 갱신하지만, 여기는 라이브 틱·절대가 오프셋
-(trailing_offset)이 계약 필드(`SubmitOrderCommand.trailing_offset`)와
-바로 맞물리게 한다.
+`side=SELL` (for closing a long position) raises the extreme price every
+time the fill price sets a new high, and pulls the trigger price up to
+`extreme - trailing_offset`. `side=BUY` (for closing a short position)
+follows new lows, pulling the trigger price down to
+`extreme + trailing_offset`. In both cases the trigger price never moves in
+the adverse direction (monotonic) — even if the market reverses, the
+protection level already secured is never lost. The isomorphic logic on
+the backtest side (BT-6 `update_trailing_stop`) updates using bar high/low
+and a ratio (trail_pct), but here the live tick and absolute-price offset
+(trailing_offset) map directly onto the contract field
+(`SubmitOrderCommand.trailing_offset`).
 """
 from __future__ import annotations
 
@@ -60,8 +62,9 @@ def update_trailing_stop(
     last_price: Decimal,
     trailing_offset: Decimal,
 ) -> TrailingStopState:
-    """새 틱을 반영한 다음 상태를 반환한다 — 트리거가는 `max`/`min`으로
-    이전 값과 비교해 절대 불리한 방향으로 움직이지 않는다(단조 갱신)."""
+    """Returns the next state reflecting the new tick — the trigger price is
+    compared against the previous value via `max`/`min` and never moves in
+    the adverse direction (monotonic update)."""
     _reject_non_positive(last_price, "last_price")
     _reject_non_positive(trailing_offset, "trailing_offset")
     if side == OrderSide.SELL:

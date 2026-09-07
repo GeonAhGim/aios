@@ -78,10 +78,12 @@ def _reject_if_expired(expiry_date: date | None, *, now: datetime | None = None)
 
 
 def _order_division(order_type: OrderType) -> str:
-    """ORD_DVSN_CD 값 추정 — `trading_mixin._order_division`(국내주식 ORD_DVSN)과
-    동일한 00=지정가/01=시장가 관례를 그대로 연장한다(모듈 docstring §미검증
-    원칙). `kis_tr_reference.json`은 tr_id별 필수 파라미터명만 확인해 주고
-    실제 코드값은 담지 않으므로, 이 값도 라이브 검증 전까지 확정 아니다."""
+    """Estimated ORD_DVSN_CD value — extends the same 00=limit/01=market
+    convention as `trading_mixin._order_division` (domestic stock
+    ORD_DVSN) as-is (module docstring §unverified principle).
+    `kis_tr_reference.json` only confirms the required parameter names per
+    tr_id and does not carry the actual code values, so this value is not
+    confirmed either until verified live."""
     return "01" if order_type == OrderType.MARKET else "00"
 
 
@@ -166,10 +168,11 @@ class KISDomesticFutureoptionMixin:
             "UNIT_PRICE": "0",
             "NMPR_TYPE_CD": "01",
             "KRX_NMPR_CNDT_CD": "0",
-            # "N" — 이 메서드 시그니처는 quantity를 필수로 받아 항상 명시
-            # 수량으로 취소하므로("잔량 전부" 자동취소가 아님), 국내주식
-            # QTY_ALL_ORD_YN 관례(trading_mixin._rvsecncl)와 같은 판단 기준을
-            # 그대로 적용한 미검증 최선 추정치다.
+            # "N" — this method signature requires quantity and always
+            # cancels an explicit amount (never an automatic "cancel entire
+            # remainder"), so this is an unverified best estimate applying
+            # the same reasoning as the domestic-stock QTY_ALL_ORD_YN
+            # convention (trading_mixin._rvsecncl).
             "RMN_QTY_YN": "N",
             "ORD_DVSN_CD": "02",
         }

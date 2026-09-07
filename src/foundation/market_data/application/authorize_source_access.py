@@ -1,10 +1,11 @@
-"""DC-27 — source_id만 아는 어댑터 앞단 게이트.
+"""DC-27 — gate in front of adapters that know only source_id.
 
 Spec: docs/design/ADR-2026-09-06-H-data-sourcing-self-build-and-contract-tiers.md
-D1. 향후 유료 ingest_source 어댑터가 호출 전에 거치는 유일한 지점이다 —
-어댑터 함수 시그니처는 `source_id` 문자열만 받고, 이 게이트가
-`source_contract` 행을 읽어 등급·능력·재배포 스코프를 판정한다. 등급
-승격은 그 행의 UPDATE뿐이므로 이 함수도 어댑터 코드도 바뀌지 않는다
+D1. The sole point a future paid ingest_source adapter passes through before
+a call — the adapter function signature takes only the `source_id` string,
+and this gate reads the `source_contract` row to determine tier,
+capability, and redistribution scope. Since a tier upgrade is only an
+UPDATE to that row, neither this function nor adapter code changes
 (task-1764 DoD).
 """
 from __future__ import annotations
@@ -30,8 +31,9 @@ async def authorize_source_access(
     repo: SourceContractRepository,
     clock: Callable[[], datetime],
 ) -> SourceContractGrant:
-    """어댑터가 `source_id` 데이터를 실제로 가져오기 전에 호출한다. 반환된
-    `SourceContractGrant.allowed`가 `False`면 어댑터는 호출되지 않아야
-    한다 — 판정은 여기서 끝나고, 어댑터는 등급을 아예 전달받지 않는다."""
+    """Called before the adapter actually fetches `source_id` data. If the
+    returned `SourceContractGrant.allowed` is `False`, the adapter must not
+    be called — the determination ends here, and the adapter is never
+    handed a tier at all."""
     contract = await repo.get(conn, source_id)
     return authorize_source(contract, clock())

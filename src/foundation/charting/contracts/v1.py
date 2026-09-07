@@ -41,9 +41,10 @@ class CreateChartLayoutRequest(BaseModel):
 
 
 class ChartIndicatorTemplateView(BaseModel):
-    """`template`은 CH-17a `templateModel.ts` `Template`(`encodeTemplate()`
-    출력) 그대로 — 이 계약도 그 내부를 재모델링하지 않는다(`layout_state`와
-    동일 원칙, 파일 상단 docstring 참조)."""
+    """`template` is CH-17a `templateModel.ts`'s `Template`
+    (`encodeTemplate()` output) as-is — this contract does not remodel its
+    internals either (same principle as `layout_state`, see the file's
+    top-level docstring)."""
 
     id: UUID
     tenant_id: UUID

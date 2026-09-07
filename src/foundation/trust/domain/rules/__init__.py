@@ -1,4 +1,4 @@
-"""Trust Core 순수 규칙 함수 — DB/HTTP 없이 단위 테스트 가능해야 한다.
+"""Trust Core pure rule functions — must be unit-testable without DB/HTTP.
 
 Spec: AIOSproject 73_trust_core_l3_build_and_operational_specification_v1.0.md §6.
 """
@@ -17,7 +17,7 @@ from src.foundation.trust.domain.models import (
 
 
 def is_disclosure_acceptable(disclosure: Disclosure, *, now: datetime) -> bool:
-    """폐기된(retired) disclosure는 새 동의를 받을 수 없다(73번 §4
+    """A retired disclosure cannot accept new consent (spec 73 §4
     VALIDATION_DISCLOSURE_RETIRED)."""
     return disclosure.retired_at is None or disclosure.retired_at > now
 
@@ -28,9 +28,11 @@ def is_consent_fresh(
     required_disclosure: Disclosure,
     now: datetime,
 ) -> bool:
-    """73번 §6 규칙 3 — required consent는 purpose와 active disclosure revision을
-    모두 만족해야 fresh다. 이전 revision은(재동의 필요 정책이 있다면) 충분하지
-    않다. 만료된 동의는 백그라운드 만료 처리가 늦어도 즉시 무효다(73번 §3.2)."""
+    """Spec 73 §6 rule 3 — a required consent is fresh only if it satisfies
+    both the purpose and the active disclosure revision. A prior revision
+    is not sufficient (if a re-consent-required policy applies). An expired
+    consent is immediately void even if background expiry processing lags
+    (spec 73 §3.2)."""
     if consent is None:
         return False
     if consent.state != ConsentState.ACTIVE:
@@ -50,8 +52,8 @@ def freshness_denial_reason(
     required_disclosure: Disclosure,
     now: datetime,
 ) -> str | None:
-    """is_consent_fresh()가 False일 때 72번 §4 에러 taxonomy에 맞는 reason_code를
-    돌려준다. fresh하면 None."""
+    """Returns a reason_code matching the spec 72 §4 error taxonomy when
+    is_consent_fresh() is False. None if fresh."""
     if consent is None:
         return "POLICY_CONSENT_REQUIRED"
     if consent.state == ConsentState.REVOKED:
@@ -65,9 +67,10 @@ def freshness_denial_reason(
 
 _TransitionKey = tuple[MembershipState, MembershipState]
 _MEMBERSHIP_TRANSITIONS: dict[_TransitionKey, frozenset[MembershipRole]] = {
-    # 73번 §3.1 상태 머신. "admin/risk"의 risk(자동 위험관리 트리거)는
-    # 사람이 아니므로 SERVICE 역할로 매핑한다. REVOKED->ACTIVE의 MFA 요구는
-    # 이 순수 함수 밖(호출부)에서 검증한다 — 여기는 role만 판정한다.
+    # Spec 73 §3.1 state machine. "admin/risk"'s risk (automated risk-
+    # management trigger) is not a human, so it maps to the SERVICE role.
+    # The MFA requirement for REVOKED->ACTIVE is verified outside this pure
+    # function (by the caller) — here only role is determined.
     (MembershipState.ACTIVE, MembershipState.SUSPENDED): frozenset(
         {MembershipRole.ADMIN, MembershipRole.SERVICE}
     ),
@@ -84,7 +87,8 @@ _MEMBERSHIP_TRANSITIONS: dict[_TransitionKey, frozenset[MembershipRole]] = {
 def is_membership_transition_allowed(
     from_: MembershipState, to: MembershipState, *, actor_role: MembershipRole
 ) -> bool:
-    """73번 §3.1 전이표. 표에 없는 전이(같은 상태로의 전이 포함)는 전부 거부다."""
+    """Spec 73 §3.1 transition table. Any transition not in the table
+    (including a transition to the same state) is denied."""
     allowed_actors = _MEMBERSHIP_TRANSITIONS.get((from_, to))
     if allowed_actors is None:
         return False
@@ -92,8 +96,10 @@ def is_membership_transition_allowed(
 
 
 def would_remove_last_owner(active_owners: int, target_is_owner: bool, to: MembershipState) -> bool:
-    """73번 §3.1 "cannot remove last owner" 가드. `active_owners`는 대상 membership을
-    포함한, 전이 전 시점의 활성 OWNER 수(같은 트랜잭션의 `SELECT ... FOR UPDATE` 결과)."""
+    """Spec 73 §3.1 "cannot remove last owner" guard. `active_owners` is the
+    count of active OWNERs before the transition, including the target
+    membership (the result of `SELECT ... FOR UPDATE` in the same
+    transaction)."""
     if not target_is_owner:
         return False
     if to == MembershipState.ACTIVE:
@@ -102,8 +108,9 @@ def would_remove_last_owner(active_owners: int, target_is_owner: bool, to: Membe
 
 
 def role_can(role: MembershipRole, action: Literal["read", "mutate", "admin"]) -> bool:
-    """tenant 내 role의 기본 권한. AUDITOR는 이름 그대로 읽기 전용 — 감사 목적의
-    role에 쓰기 권한을 주면 73번 §8 "tenant-confidential" 경계가 무의미해진다."""
+    """A role's default permissions within a tenant. AUDITOR is read-only as
+    the name implies — granting write permission to an audit-purpose role
+    would render the spec 73 §8 "tenant-confidential" boundary meaningless."""
     if action == "read":
         return True
     if action == "mutate":

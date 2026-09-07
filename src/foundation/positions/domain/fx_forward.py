@@ -1,15 +1,16 @@
-"""LB-20 — 선물환·헤지 손익(fx_forward).
+"""LB-20 — forward FX / hedge P&L (fx_forward).
 
 Spec: docs/design/ADR-2026-09-06-G-second-audit-corrections.md §9
-("FX가 현물 환산뿐, 기관 고시환율·선물환·헤지 손익 없음"),
-docs/specs/L4_market_data_positions_ledger_v1.0.md §9.
+("FX is spot conversion only — no institutional quoted rates, forward FX,
+or hedge P&L"), docs/specs/L4_market_data_positions_ledger_v1.0.md §9.
 
-[[fx.convert]](LB-4)는 현물 환산만 한다. 이 모듈은 그 위에 (1) 선물환 계약의
-미실현 손익을 자산 자체의 미실현 FX 손익과 분리해 계산하고, (2) 미헤지
-잔여 익스포저를 산출하며, (3) 사용한 고시의 출처(`source`)와 확정 시각
-(`known_at`)을 결과에 동봉해 재현 가능하게 만든다. `fx.py`와 동일하게
-삼각환산·테너 불일치를 조용히 흡수하지 않는다. 순수 함수만 — I/O·시계
-직접 호출 금지.
+[[fx.convert]] (LB-4) only does spot conversion. On top of that, this module
+(1) computes a forward FX contract's unrealized P&L separately from the
+asset's own unrealized FX P&L, (2) derives the residual unhedged exposure,
+and (3) attaches the quote's source (`source`) and as-of timestamp
+(`known_at`) to the result so it is reproducible. Like `fx.py`, it does not
+silently absorb triangulation or tenor mismatches. Pure functions only — no
+direct I/O or clock calls.
 """
 from __future__ import annotations
 
@@ -22,9 +23,10 @@ from src.data.models.base import Currency, Money
 
 
 class ForwardRateMismatchError(Exception):
-    """요청한 (통화쌍, 결제일)과 다른 선물환 고시로 재평가하려 했다 —
-    다른 테너·통화쌍의 고시로 대체(보간)하지 않는다. `fx.py`의 삼각환산
-    금지 원칙과 동일한 결을 따른다."""
+    """Tried to revalue with a forward quote for a different (currency
+    pair, settlement date) than requested — no substitution/interpolation
+    with a quote for a different tenor or currency pair. Follows the same
+    principle as `fx.py`'s ban on triangulation."""
 
     def __init__(self, expected: tuple[Currency, Currency, date], got: ForwardQuote) -> None:
         exp_base, exp_quote, exp_settlement = expected
@@ -38,8 +40,8 @@ class ForwardRateMismatchError(Exception):
 
 
 class HedgeQuoteCurrencyMismatchError(Exception):
-    """헤지 손익을 자산 미실현 FX 손익과 합산하려는데 표시통화(quote)가
-    서로 다르다 — 암묵적 재환산 없이 거부한다."""
+    """Tried to sum hedge P&L with the asset's unrealized FX P&L but the
+    quote currencies differ — rejected without implicit reconversion."""
 
     def __init__(self, currencies: set[Currency]) -> None:
         super().__init__(f"단일 표시통화가 아닙니다: {sorted(c.value for c in currencies)}")
@@ -48,12 +50,13 @@ class HedgeQuoteCurrencyMismatchError(Exception):
 
 @dataclass(frozen=True, slots=True)
 class ForwardQuote:
-    """선물환 고시 한 건.
+    """One forward FX quote.
 
-    현물 `FXRate`(fx.py)와 달리 `settlement_date`(결제일)를 갖는다.
-    `known_at`은 이 고시가 확정·기록된 시각이다 — 감사 시 "그 시점에 어떤
-    환율을 근거로 계산했는가"를 재현하기 위해 별도 필드로 보관한다
-    (DoD: "환율 출처가 known_at과 함께 기록돼 재현 가능").
+    Unlike the spot `FXRate` (fx.py), it has a `settlement_date`. `known_at`
+    is when this quote was finalized/recorded — kept as a separate field so
+    an audit can reproduce "which rate was the calculation based on at that
+    point in time" (DoD: "rate source recorded together with known_at,
+    reproducible").
     """
 
     base: Currency
@@ -66,12 +69,13 @@ class ForwardQuote:
 
 @dataclass(frozen=True, slots=True)
 class FxHedgeContract:
-    """헤지용 선물환 계약 한 건.
+    """One forward FX contract used for hedging.
 
-    `notional`의 부호가 방향을 정한다: 양수는 `base` 통화 롱 익스포저를
-    상쇄하기 위한 선물 매도(결제일에 base 인도, quote 수령), 음수는 그
-    반대(선물 매수)다. 부호를 이렇게 통일하면 두 방향 모두
-    `unrealized = notional * (contract_rate - market_rate)`로 계산된다.
+    The sign of `notional` determines direction: positive is a forward sale
+    to offset a long `base`-currency exposure (deliver base, receive quote
+    at settlement); negative is the opposite (a forward buy). With this sign
+    convention, both directions compute as
+    `unrealized = notional * (contract_rate - market_rate)`.
     """
 
     contract_id: str
@@ -86,8 +90,8 @@ class FxHedgeContract:
 
 @dataclass(frozen=True, slots=True)
 class HedgePnl:
-    """[[hedge_unrealized_pnl]] 결과. `rate_source`·`rate_known_at`을
-    동봉해 어떤 고시로 계산했는지 재현 가능하게 한다."""
+    """Result of [[hedge_unrealized_pnl]]. Carries `rate_source` and
+    `rate_known_at` so which quote was used is reproducible."""
 
     contract_id: str
     unrealized: Money
@@ -96,11 +100,12 @@ class HedgePnl:
 
 
 def hedge_unrealized_pnl(contract: FxHedgeContract, market: ForwardQuote) -> HedgePnl:
-    """`contract`를 같은 결제일의 현재 시장 선물환(`market`)으로 재평가한다.
+    """Revalues `contract` against the current market forward (`market`) for
+    the same settlement date.
 
-    `market`의 `(base, quote, settlement_date)`가 `contract`와 정확히
-    일치해야 한다. 일치하지 않으면 `ForwardRateMismatchError`를 던진다 —
-    가장 가까운 테너로 대체하는 보간을 하지 않는다.
+    `market`'s `(base, quote, settlement_date)` must match `contract`
+    exactly. Raises `ForwardRateMismatchError` on mismatch — no
+    interpolation by substituting the nearest tenor.
     """
     expected = (contract.base, contract.quote, contract.settlement_date)
     got = (market.base, market.quote, market.settlement_date)
@@ -118,9 +123,10 @@ def hedge_unrealized_pnl(contract: FxHedgeContract, market: ForwardQuote) -> Hed
 
 @dataclass(frozen=True, slots=True)
 class FxPnlBreakdown:
-    """NAV 분해용 — 자산 자체의 미실현 FX 손익과 헤지 미실현 손익을 분리해
-    보관한다. 둘을 합친 `net`은 참고값일 뿐, NAV 표시 시 두 성분은 항상
-    구분해 노출해야 한다(DoD)."""
+    """For NAV decomposition — keeps the asset's own unrealized FX P&L
+    separate from hedge unrealized P&L. Their sum, `net`, is informational
+    only; both components must always be surfaced separately when NAV is
+    displayed (DoD)."""
 
     currency: Currency
     asset_unrealized_fx: Decimal
@@ -132,12 +138,13 @@ class FxPnlBreakdown:
 
 
 def decompose_fx_pnl(asset_unrealized_fx: Money, hedge_pnls: Sequence[HedgePnl]) -> FxPnlBreakdown:
-    """자산 자체의 미실현 FX 손익과 헤지 미실현 손익을 같은 표시통화
-    기준으로 분리 집계한다.
+    """Aggregates the asset's own unrealized FX P&L and hedge unrealized P&L
+    separately, on the same quote currency basis.
 
-    `hedge_pnls`의 표시통화가 서로 다르거나 `asset_unrealized_fx.currency`
-    와 다르면 `HedgeQuoteCurrencyMismatchError`를 던진다 — 암묵적
-    재환산 없이 거부한다.
+    Raises `HedgeQuoteCurrencyMismatchError` if `hedge_pnls` quote
+    currencies differ from each other or from
+    `asset_unrealized_fx.currency` — rejected without implicit
+    reconversion.
     """
     currencies = {p.unrealized.currency for p in hedge_pnls} | {asset_unrealized_fx.currency}
     if len(currencies) > 1:
@@ -159,12 +166,13 @@ def unhedged_exposure(
     quote: Currency,
     quantize_to: int | None = None,
 ) -> Decimal:
-    """`base`/`quote` 익스포저 중 헤지되지 않은 잔여분을 계산한다.
+    """Computes the unhedged residual of the `base`/`quote` exposure.
 
-    `hedges`는 `(base, quote)`가 정확히 일치하는 계약만 상쇄에 반영한다
-    — 다른 통화쌍의 계약이 섞여 있어도 조용히 무시할 뿐 합산하지 않는다.
-    `quantize_to`가 주어지면 소수 n자리로 반올림(ROUND_HALF_EVEN)하고,
-    생략하면 원 정밀도를 그대로 반환한다 — 암묵적 반올림 금지.
+    Only contracts in `hedges` whose `(base, quote)` matches exactly are
+    reflected in the offset — contracts for other currency pairs are simply
+    ignored (silently), never summed in. If `quantize_to` is given, rounds
+    to n decimal places (ROUND_HALF_EVEN); if omitted, returns the original
+    precision as-is — no implicit rounding.
     """
     hedged = sum(
         (h.notional for h in hedges if h.base == base and h.quote == quote),

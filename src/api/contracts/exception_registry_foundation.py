@@ -266,10 +266,11 @@ EXCEPTION_MAP_FOUNDATION: list[tuple[type[Exception], ErrorCode]] = [
     (ChartLayoutNotFoundError, ErrorCode.RESOURCE_NOT_FOUND),
     (CrossTenantChartLayoutAccessError, ErrorCode.RESOURCE_NOT_FOUND),
     (DrawingValidationError, ErrorCode.VALIDATION_INVALID_FIELD),
-    # CH-17b(task-1904) — foundation/charting 지표 템플릿. 타 테넌트도
-    # 미존재와 동형 404(CH-5와 동일 원칙). 중복 생성(409)은
-    # ConcurrencyConflictError(이미 exception_registry.py에 전역 등록)로
-    # 접으므로 여기 새로 추가하지 않는다.
+    # CH-17b (task-1904) — foundation/charting indicator template. Another
+    # tenant's access also folds into a 404 isomorphic to nonexistence
+    # (same principle as CH-5). Duplicate creation (409) folds into
+    # ConcurrencyConflictError (already registered globally in
+    # exception_registry.py), so it is not added here again.
     (ChartIndicatorTemplateNotFoundError, ErrorCode.RESOURCE_NOT_FOUND),
     (CrossTenantChartIndicatorTemplateAccessError, ErrorCode.RESOURCE_NOT_FOUND),
 ]

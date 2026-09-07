@@ -1,6 +1,7 @@
-"""GetChartIndicatorTemplate 쿼리 — 미존재/타 테넌트 소유 둘 다 404
+"""GetChartIndicatorTemplate query — both nonexistence and ownership by
+another tenant are 404
 (`ChartIndicatorTemplateNotFoundError`/`CrossTenantChartIndicatorTemplateAccessError`,
-둘 다 RESOURCE_NOT_FOUND로 매핑)."""
+both map to RESOURCE_NOT_FOUND)."""
 from __future__ import annotations
 
 from uuid import UUID

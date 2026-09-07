@@ -1,6 +1,7 @@
-"""MandateRepository의 asyncpg 구현 — portfolio_mandate/mandate_revision 절반.
-policy_bundle/policy_decision 절반은 `postgres_policy_repository.py`(P6 300줄
-상한으로 분리, PostgresPolicyRepositoryMixin)에 있다.
+"""asyncpg implementation of MandateRepository — the portfolio_mandate /
+mandate_revision half. The policy_bundle / policy_decision half is in
+`postgres_policy_repository.py` (split out for the P6 300-line cap,
+PostgresPolicyRepositoryMixin).
 
 Spec: AIOSproject 75번 §2/§4, 105번(동시성 표준).
 
@@ -97,10 +98,12 @@ class PostgresMandateRepository(PostgresPolicyRepositoryMixin):
                     resolved_portfolio_id,
                 )
             except asyncpg.UniqueViolationError:
-                # UNIQUE(tenant_id, portfolio_id) 위반(FA-0b) — 동시에 두 요청이
-                # 같은 (tenant, portfolio)의 최초 draft를 만들려던 경합. 이긴
-                # 쪽이 만든 행을 그대로 반환한다(105번 §2.2 "스키마 UNIQUE
-                # 제약이 단일 소유자를 보장"과 동일 패턴).
+                # UNIQUE(tenant_id, portfolio_id) violation (FA-0b) — a race
+                # where two requests concurrently tried to create the first
+                # draft for the same (tenant, portfolio). Returns the row
+                # created by the winner as-is (same pattern as standard 105
+                # §2.2 "a schema UNIQUE constraint guarantees a single
+                # owner").
                 row = await conn.fetchrow(
                     "SELECT * FROM portfolio_mandate WHERE tenant_id = $1 AND portfolio_id = $2",
                     tenant_id,

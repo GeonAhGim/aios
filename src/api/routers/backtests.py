@@ -77,10 +77,10 @@ def get_indicator_registry() -> IndicatorRegistry:
 
 
 def get_source_contract_repository() -> SourceContractRepository:
-    """DC-28 — `market_data.py` 라우터와 같은 정의(상태 없음, pool 불필요).
-    같은 이름의 함수를 두 라우터가 각자 갖는 것은 `foundation_deps.py`가
-    이미 300줄 상한에 닿아 있어(P6.line_cap) 공용 모듈로 옮기지 않은
-    의도적 선택이다."""
+    """DC-28 — same definition as the `market_data.py` router (stateless, no
+    pool needed). Having each router keep its own function of the same name
+    is a deliberate choice, since `foundation_deps.py` has already hit the
+    300-line cap (P6.line_cap) and was not moved to a shared module."""
     return PostgresSourceContractRepository()
 
 
@@ -101,9 +101,10 @@ async def quick_backtest_endpoint(
             conn, refs=refs, reader=reader, venue=body.venue, symbol=body.symbol,
             instrument_id=body.instrument_id, now=now,
         )
-        # DC-28(ADR-2026-09-06-H D2) — 백테스트는 원시 캔들을 화면에 그대로
-        # 띄우지 않고 내부 계산(체결·손익)에만 쓴다 — `INTERNAL_CALC`는
-        # `INTERNAL` 스코프까지도 허용하는 가장 낮은 문턱이다.
+        # DC-28 (ADR-2026-09-06-H D2) — a backtest never displays raw
+        # candles on screen as-is, only uses them for internal computation
+        # (fills/P&L) — `INTERNAL_CALC` is the lowest threshold, permitted
+        # even by `INTERNAL` scope.
         await authorize_redistribution(
             conn, inst.venue.value, repo=source_contracts, clock=lambda: now,
             use=DataUse.INTERNAL_CALC,

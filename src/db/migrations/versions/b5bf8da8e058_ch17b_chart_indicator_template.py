@@ -5,13 +5,14 @@ Revises: 4102098cbd0f
 Create Date: 2026-09-07 05:05:18.645584
 
 Spec: docs/specs/L4_analytics_authoring_backtest_marketplace_v1.0.md §2.2,
-§9.11 CH-17. `chart_indicator_template`은 CH-5 `chart_layout`(e1d9b5ed8d7d)
-과 동일한 tenant 최상위 테이블 패턴을 따른다 — 차이점 둘: (1) `tenant_id`가
-`tenant(id)`를 FK한다(ADR-2026-09-06-G §2 D0 — `users`를 잘못 FK하는 사고
-재발 방지, `chart_layout`에는 이 FK가 없어 여기서 새로 바로잡는다),
-(2) `UNIQUE(tenant_id, name)`으로 같은 테넌트 내 이름 중복을 스키마
-차원에서 막는다(애플리케이션 계층 중복 체크로 경합을 남기지 않는다,
-105번 §2.2와 동일 원칙).
+§9.11 CH-17. `chart_indicator_template` follows the same tenant top-level
+table pattern as CH-5's `chart_layout` (e1d9b5ed8d7d) — two differences:
+(1) `tenant_id` FKs `tenant(id)` (ADR-2026-09-06-G §2 D0 — prevents a
+repeat of the incident where `users` was FK'd by mistake; `chart_layout`
+lacks this FK, so it is corrected fresh here), (2) `UNIQUE(tenant_id, name)`
+blocks duplicate names within the same tenant at the schema level (leaves
+no race for an application-layer duplicate check, same principle as
+standard 105 §2.2).
 """
 
 from collections.abc import Sequence
@@ -51,7 +52,7 @@ def upgrade() -> None:
         f"GRANT SELECT, INSERT, UPDATE, DELETE ON chart_indicator_template TO {_APP_ROLE}"
     )
 
-    # PLT-30 M5(b3c7f19ad2e6)·CH-5(e1d9b5ed8d7d)와 동일한 tenant_isolation 정책.
+    # Same tenant_isolation policy as PLT-30 M5 (b3c7f19ad2e6) / CH-5 (e1d9b5ed8d7d).
     op.execute(
         "CREATE POLICY tenant_isolation ON chart_indicator_template "
         "USING (tenant_id::text = current_setting('app.tenant_id', true)) "

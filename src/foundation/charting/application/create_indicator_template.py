@@ -1,8 +1,10 @@
-"""CreateChartIndicatorTemplate 커맨드 — `(tenant_id, name)` 중복은 409.
+"""CreateChartIndicatorTemplate command — `(tenant_id, name)` duplicate is
+409.
 
-DB UNIQUE(tenant_id, name) 위반을 저장소가 `ConcurrencyConflictError`로
-번역한다(trust/postgres_membership_repository.py와 동일 패턴, 새 taxonomy
-발명 금지 — task-1904 decision)."""
+The repository translates a DB UNIQUE(tenant_id, name) violation into
+`ConcurrencyConflictError` (same pattern as
+trust/postgres_membership_repository.py; no new taxonomy — task-1904
+decision)."""
 from __future__ import annotations
 
 from typing import Any

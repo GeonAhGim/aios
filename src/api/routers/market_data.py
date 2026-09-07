@@ -85,8 +85,9 @@ _INSTRUMENT_PAGE_MAX = 200
 
 
 def get_source_contract_repository() -> SourceContractRepository:
-    """DC-28 — `source_contract`는 상태가 없다(`source_id` 조회만), pool 주입이
-    필요 없다. 어댑터 승격은 이 함수 하나만 바꾸면 된다(DC-27 D1과 동일 원칙)."""
+    """DC-28 — `source_contract` is stateless (only looks up `source_id`),
+    no pool injection needed. Upgrading the adapter only requires changing
+    this one function (same principle as DC-27 D1)."""
     return PostgresSourceContractRepository()
 
 
@@ -181,8 +182,9 @@ async def replay_candles_endpoint(
             conn, refs=refs, reader=reader, venue=venue, symbol=symbol,
             instrument_id=instrument_id, now=as_of,
         )
-        # 재배포 스코프는 리플레이 대상 시각(as_of)이 아니라 "지금 이 호출이
-        # 허용되는가"를 묻는다 — 계약 유효기간은 실제 현재 시각 기준이다.
+        # Redistribution scope asks "is this call allowed right now", not
+        # the replay target time (as_of) — contract validity is evaluated
+        # against the actual current time.
         await authorize_redistribution(
             conn, inst.venue.value, repo=source_contracts,
             clock=lambda: datetime.now(timezone.utc), use=DataUse.SHARED_DISPLAY,

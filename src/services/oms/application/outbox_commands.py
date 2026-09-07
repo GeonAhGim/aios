@@ -1,11 +1,12 @@
-"""L4-14/L4-31 — outbox CANCEL/MODIFY 명령 전송(`OutboxDispatcher._send_cancel/_send_modify`
-본체).
+"""L4-14/L4-31 — outbox CANCEL/MODIFY command submission
+(`OutboxDispatcher._send_cancel/_send_modify` body).
 
-Spec: docs/specs/L4_execution_oms_and_exchange_v1.0.md §4.2(CANCEL_REQUESTED·
-MODIFIED), §4.4(outbox 행 상태기계 상호참조 — 이 모듈이 `DONE`/`DEAD`/`RETRY`
-전이를 직접 쓴다), §5.4(멱등 계열 재시도), §6 F8. §2-C/§9 L4-31: 이 파일은
-`outbox_dispatcher.py`(L4-14)에서 분리된 모듈로, 명세에 행이 없던 것을
-소급 등재했다(ADR-2026-09-06-G §10).
+Spec: docs/specs/L4_execution_oms_and_exchange_v1.0.md §4.2
+(CANCEL_REQUESTED/MODIFIED), §4.4 (outbox row state-machine cross-reference
+— this module directly writes `DONE`/`DEAD`/`RETRY` transitions), §5.4
+(idempotent-family retry), §6 F8. §2-C/§9 L4-31: this file is a module
+split out of `outbox_dispatcher.py` (L4-14), retroactively registering a
+row the spec did not have (ADR-2026-09-06-G §10).
 
 SUBMIT과 달리 취소·정정은 멱등 계열이라 응답 유실 시 같은 명령을 다시 보내도
 안전하다(`classify_idempotent_failure`). 취소 결과 상태(`VENUE_CANCELLED`)는

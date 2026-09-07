@@ -43,13 +43,14 @@ class ChartLayout:
 
 @dataclass(frozen=True, slots=True)
 class ChartIndicatorTemplate:
-    """지표 템플릿(CH-17) — `template`은 CH-17a `templateModel.ts`의
-    `Template`(schemaVersion/panes/indicators) JSON을 그대로 실어보내는
-    불투명 데이터다(`ChartLayout.layout_state`와 동일 원칙 — 이 파일도
-    `adapters/`도 그 내부 스키마를 검증하지 않는다, 검증은 프론트
-    `decodeTemplate()`가 프론트-소유 계약으로 담당). `(tenant_id, name)`
-    유니크 — 같은 이름 재저장은 새 UPDATE API가 아니라 삭제 후 재생성이다
-    (이 리프 스콥에 update는 없다)."""
+    """Indicator template (CH-17) — `template` is opaque data carrying
+    CH-17a `templateModel.ts`'s `Template` (schemaVersion/panes/indicators)
+    JSON through as-is (same principle as `ChartLayout.layout_state` —
+    neither this file nor `adapters/` validate its internal schema;
+    validation is owned by the frontend's `decodeTemplate()` as a
+    frontend-owned contract). Unique on `(tenant_id, name)` — re-saving
+    under the same name is delete-then-recreate, not a new UPDATE API (this
+    leaf's scope has no update)."""
 
     id: UUID
     tenant_id: UUID

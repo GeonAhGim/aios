@@ -1,9 +1,11 @@
-"""MandateRepository의 policy_bundle/policy_decision 절반.
+"""The policy_bundle/policy_decision half of MandateRepository.
 
-`postgres_repository.py`가 300줄 상한(P6)을 넘겨 분리했다 — mandate/revision
-승인 흐름과 policy 컴파일 산출물·평가 캐시는 서로 다른 테이블·책임이라 믹스인
-경계로 나누기 자연스럽다. `PostgresMandateRepository`가 이 믹스인을 상속해
-`MandateRepository` Protocol 전체를 하나의 클래스로 구현한다.
+Split out because `postgres_repository.py` exceeded the 300-line cap (P6)
+— the mandate/revision approval flow and the policy-compile-artifact/
+evaluation cache are different tables with different responsibilities, so
+splitting along a mixin boundary is natural. `PostgresMandateRepository`
+inherits this mixin to implement the entire `MandateRepository` Protocol as
+one class.
 """
 from __future__ import annotations
 
@@ -40,7 +42,8 @@ def _row_to_decision(row: asyncpg.Record) -> PolicyDecision:
 
 
 class PostgresPolicyRepositoryMixin:
-    """`self._pool: asyncpg.Pool`을 가진 클래스에 믹스인된다(`PostgresMandateRepository`)."""
+    """Mixed into a class that has `self._pool: asyncpg.Pool`
+    (`PostgresMandateRepository`)."""
 
     _pool: asyncpg.Pool
 

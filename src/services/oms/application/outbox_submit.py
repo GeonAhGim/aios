@@ -1,10 +1,13 @@
-"""L4-14/L4-31 — outbox SUBMIT의 거래소 호출 판정(`OutboxDispatcher._send_submit` 본체).
+"""L4-14/L4-31 — outbox SUBMIT's exchange-call determination
+(`OutboxDispatcher._send_submit` body).
 
-Spec: docs/specs/L4_execution_oms_and_exchange_v1.0.md §5.4(재시도 전 역조회),
-§6 F14(DUPLICATE_CLIENT_ID), §4.4(outbox 상태기계 상호참조 — 이 함수의 반환값
-`SendOutcome.kind`가 §4.4 `SENDING → DONE|RETRY|DEAD` 전이를 결정한다).
-§2-C/§9 L4-31: 이 파일은 `outbox_dispatcher.py`(L4-14)에서 분리된 모듈로,
-명세에 행이 없던 것을 소급 등재했다(ADR-2026-09-06-G §10).
+Spec: docs/specs/L4_execution_oms_and_exchange_v1.0.md §5.4 (reverse lookup
+before retry), §6 F14 (DUPLICATE_CLIENT_ID), §4.4 (outbox state-machine
+cross-reference — this function's return value `SendOutcome.kind`
+determines the §4.4 `SENDING -> DONE|RETRY|DEAD` transition). §2-C/§9
+L4-31: this file is a module split out of `outbox_dispatcher.py` (L4-14),
+retroactively registering a row the spec did not have (ADR-2026-09-06-G
+§10).
 
 거래소 호출 자체(§5.1 tx 밖)만 여기서 한다 — 트랜잭션·outbox 펜스·주문 전이는
 `outbox_dispatcher.py`가 맡는다(I8 유일 호출 지점은 그대로 유지된다).

@@ -1,24 +1,29 @@
-"""DC-27 — source_contract: 소스 계약 등급·재배포 스코프(순수 판정).
+"""DC-27 — source_contract: source contract tier / redistribution scope
+(pure determination).
 
 Spec: docs/design/ADR-2026-09-06-H-data-sourcing-self-build-and-contract-tiers.md
-D1/D2/D7. `entitlements`(9049e2b6b0b7:100, `domain/entitlement/policy.py`
-DC-9)와 키링 핸들 패턴(`src/foundation/connections/domain/models.py`
-`CredentialBinding.vault_secret_ref`)을 확장한다 — 새 컨텍스트를 만들지
-않는다(D1 "신규 컨텍스트 아님").
+D1/D2/D7. Extends `entitlements` (9049e2b6b0b7:100,
+`domain/entitlement/policy.py` DC-9) and the keyring-handle pattern
+(`src/foundation/connections/domain/models.py`
+`CredentialBinding.vault_secret_ref`) — no new context is created (D1 "not
+a new context").
 
-`entitlements`가 "이 테넌트가 이 벤처를 볼 수 있는가"를 답한다면,
-`source_contract`는 "우리가 이 소스를 어떤 등급으로, 어디까지 보여줘도
-되는가"를 답한다 — 주체는 테넌트가 아니라 플랫폼이 맺은 소스별 계약
-1건이다(D1 "등급을 행으로 교체"). 어댑터(예: 향후 OPENDART/ECOS
-ingest_source, D6 "계약 전에는 등록하지 않는다")는 `source_id` 문자열만
-알고 이 행을 모른다 — `authorize_source()`가 호출 전 게이트가 읽는
-유일한 판정 함수다. 등급 승격은 이 행의 UPDATE 하나이고 어댑터 코드·
-환경변수는 바뀌지 않는다(task-1764 DoD, 테스트로 증명).
+Where `entitlements` answers "can this tenant see this venue", `source_
+contract` answers "at what tier, and how far, are we allowed to expose this
+source" — the subject is not the tenant but a single per-source contract
+the platform has entered into (D1 "replace tier with a row"). Adapters
+(e.g. a future OPENDART/ECOS ingest_source, D6 "not registered before a
+contract exists") only know the `source_id` string and know nothing about
+this row — `authorize_source()` is the sole determination function the
+pre-call gate reads. A tier upgrade is a single UPDATE to this row; adapter
+code and environment variables never change (task-1764 DoD, proven by
+tests).
 
-이 모듈은 I/O가 없는 순수 규칙이다 — 저장(`source_contract` 테이블)은
-`ports/source_contract_repository.py` + `adapters/postgres_source_contract.py`
-소관이고, `source_id`만 아는 어댑터 앞에 이 게이트를 붙이는 배선은
-`application/authorize_source_access.py` 소관이다.
+This module is a pure rule with no I/O — storage (the `source_contract`
+table) belongs to `ports/source_contract_repository.py` +
+`adapters/postgres_source_contract.py`, and wiring this gate in front of
+adapters that only know `source_id` belongs to
+`application/authorize_source_access.py`.
 """
 from __future__ import annotations
 
@@ -48,8 +53,8 @@ class SourceContractTier(str, Enum):
 
 
 class RedistributionScope(str, Enum):
-    """D2/D7. 미지정은 `NONE`으로 취급한다 — "기존 entitlement와 같은
-    fail-closed 규율"(D2)."""
+    """D2/D7. Unspecified is treated as `NONE` — "the same fail-closed
+    discipline as existing entitlements" (D2)."""
 
     NONE = "NONE"
     USER_SCOPED = "USER_SCOPED"
@@ -59,10 +64,11 @@ class RedistributionScope(str, Enum):
 
 
 class DataUse(str, Enum):
-    """D2가 못박은 강제 지점(읽기 API·차트/백테스트·내보내기) + D7의
-    "연결 소유자 본인 표시"를 판정 가능한 사용 목적으로 나눈 것.
-    `permits_use()`의 입력이며, 강제 지점 코드는 이 값 중 하나로 자신의
-    요청을 분류해 판정을 위임해야 한다(문자열 비교 재구현 금지)."""
+    """The enforcement points D2 pins down (read API/chart/backtest/export)
+    plus D7's "display to the connection owner themself", split into
+    determinable use purposes. Input to `permits_use()`; enforcement-point
+    code must classify its own request as one of these values and delegate
+    the determination (never reimplement string comparison)."""
 
     INTERNAL_CALC = "INTERNAL_CALC"
     USER_OWN_DISPLAY = "USER_OWN_DISPLAY"
@@ -89,16 +95,19 @@ _PERMITTED_USES: dict[RedistributionScope, frozenset[DataUse]] = {
 
 
 def permits_use(scope: RedistributionScope, use: DataUse) -> bool:
-    """D2 "선언이 아니라 구조로 막는다"의 순수 판정 절반. `USER_SCOPED`는
-    `USER_OWN_DISPLAY`만 허용한다 — 공유 캐시·스크리너·타 사용자 응답
-    조립(`SHARED_DISPLAY`)에는 절대 쓰이지 않는다(D7)."""
+    """The pure-determination half of D2 "block by structure, not
+    declaration". `USER_SCOPED` permits only `USER_OWN_DISPLAY` — it must
+    never be used for a shared cache, screener, or another user's response
+    assembly (`SHARED_DISPLAY`) (D7)."""
     return use in _PERMITTED_USES[scope]
 
 
 class SourceCapability(BaseModel, frozen=True):
-    """D6 "능력 기술(capability: 자산군·해상도·기업행위 유무)". 자산군·
-    해상도는 소스마다 어휘가 달라(예: ECOS는 매크로 지표, KRX는 자산군)
-    trading `AssetClass`/`Timeframe` enum으로 좁히지 않고 문자열로 둔다."""
+    """D6 "capability description (asset class/resolution/whether corporate
+    actions are covered)". Asset class and resolution vocabularies differ
+    per source (e.g. ECOS uses macro indicators, KRX uses asset classes),
+    so these are kept as strings rather than narrowed to the trading
+    `AssetClass`/`Timeframe` enums."""
 
     asset_classes: frozenset[str]
     resolutions: frozenset[str]
@@ -106,9 +115,10 @@ class SourceCapability(BaseModel, frozen=True):
 
 
 class SourceContract(BaseModel, frozen=True):
-    """D1 표를 그대로 옮긴 계약 1행의 순수 표현. `credential_ref`는 키링
-    핸들 문자열일 뿐(D1 "실제 키는 여기 없다") — 이 모델에는 원문 키가
-    담길 필드 자체가 없으므로 직렬화해도 새어나올 수 없다."""
+    """A pure representation of one contract row, carried over directly from
+    the D1 table. `credential_ref` is merely a keyring-handle string (D1
+    "the real key is not here") — this model has no field that could hold
+    the raw key, so it cannot leak even when serialized."""
 
     source_id: str
     tier: SourceContractTier
@@ -134,9 +144,9 @@ class SourceContractDenialReason(str, Enum):
 
 
 class SourceContractGrant(BaseModel, frozen=True):
-    """게이트 판정 결과. 허용/거부가 서로 배타적인 필드 조합만 만들 수
-    있게 강제한다(`domain/entitlement/policy.py`의 `Entitlement`와 동일
-    패턴)."""
+    """Gate determination result. Enforces that only mutually exclusive
+    allow/deny field combinations can be constructed (same pattern as
+    `domain/entitlement/policy.py`'s `Entitlement`)."""
 
     allowed: bool
     tier: SourceContractTier | None
@@ -179,14 +189,16 @@ def _deny(reason: SourceContractDenialReason) -> SourceContractGrant:
 
 
 def authorize_source(contract: SourceContract | None, as_of: datetime) -> SourceContractGrant:
-    """`source_id`로 조회한 행(없을 수 있음) → 접근 가능 여부.
+    """A row looked up by `source_id` (may be absent) -> whether access is
+    allowed.
 
-    fail-closed: 행이 없거나(`NOT_FOUND`), 아직 발효 전이거나
-    (`NOT_YET_VALID`), 만료됐으면(`EXPIRED`) 전부 거부다 — "정보 결손은
-    거부"(`domain/entitlement/policy.py`와 동일 원칙).
+    Fail-closed: denied in every case where the row is missing
+    (`NOT_FOUND`), not yet in effect (`NOT_YET_VALID`), or expired
+    (`EXPIRED`) — "missing information means deny" (same principle as
+    `domain/entitlement/policy.py`).
 
-    `as_of`는 호출자가 넘기는 결정론적 시계 입력이다(순수 함수는 현재
-    시각을 스스로 읽지 않는다).
+    `as_of` is the deterministic clock input the caller passes in (a pure
+    function never reads the current time itself).
     """
     if as_of.tzinfo is None:
         raise ValueError("as_of는 tz-aware datetime만 받는다")

@@ -1,28 +1,32 @@
-"""BT-19 — 백테스트=라이브 패리티 하네스(I-05 강제).
+"""BT-19 — backtest=live parity harness (enforces I-05).
 
 Spec: docs/specs/L4_analytics_authoring_backtest_marketplace_v1.0.md §9.5
-BT-19, ADR-2026-09-06-G §8, docs/design/INVARIANTS.md I-05("백테스트와
-라이브는 같은 컴파일 산출물·같은 도메인 로직을 공유").
+BT-19, ADR-2026-09-06-G §8, docs/design/INVARIANTS.md I-05 ("backtest and
+live share the same compiled artifact and the same domain logic").
 
-DSL-11(신호엔진 신구 비교)과 BT-9(같은 시드 재현성)는 "PAPER에서 실제로
-일어난 체결"과 "백테스트가 같은 아티팩트·구간을 재생해 낸 체결"을 대조하지
-않는다 — I-05를 실제로 검증하는 리프가 없었다. 이 모듈이 그 대조를
-맡는다: 호출자가 이미 확보한 두 시퀀스(PAPER 실행 추적의 `FillEvent`들,
-`run_backtest`가 같은 아티팩트·구간을 재생해 낸 `SimulatedFill`들)를
-받아, 타임스탬프를 제외한 필드로 순서대로 항목별 대조하고 첫 발산
-지점을 보고한다.
+Neither DSL-11 (old-vs-new signal engine comparison) nor BT-9 (same-seed
+reproducibility) diffs "fills that actually happened in PAPER" against
+"fills the backtest replayed from the same artifact and window" — no leaf
+actually verified I-05. This module owns that comparison: given two
+sequences the caller has already obtained (the `FillEvent`s from the PAPER
+execution trace, and the `SimulatedFill`s `run_backtest` replayed from the
+same artifact/window), it diffs them item-by-item in order on all fields
+except timestamp and reports the first point of divergence.
 
-순수 비교 로직 — I/O 없음. PAPER 추적을 어디서 가져오는지(`fills` 테이블
-조회 등, `src/services/oms/adapters/fills_repository.py`)와 재생 자체를
-어떻게 실행하는지(`run_backtest`)는 이 모듈의 책임이 아니다.
+Pure comparison logic — no I/O. Where the PAPER trace comes from (e.g. a
+`fills` table lookup, `src/services/oms/adapters/fills_repository.py`) and
+how the replay itself is run (`run_backtest`) are not this module's
+responsibility.
 
-값은 `Decimal` 동등성으로 비교한다(같은 값이면 지수 표현이 달라도
-동일로 본다) — 비교 대상 필드(symbol/side/quantity/price/fee) 자체가
-이미 정형 타입이라 원본 바이트 표현의 차이는 의미가 없다. 타임스탬프
-(PAPER의 `venue_ts`, 백테스트의 `timestamp`)만 비교에서 제외한다.
+Values are compared by `Decimal` equality (equal values are treated as
+identical even if their exponent representation differs) — the compared
+fields (symbol/side/quantity/price/fee) are already structured types, so
+differences in raw byte representation carry no meaning. Only the
+timestamps (PAPER's `venue_ts`, the backtest's `timestamp`) are excluded
+from comparison.
 
-Fail-closed: 길이가 다르면 더 짧은 쪽 길이를 발산 지점으로 즉시 보고한다
-(꼬리 쪽을 조용히 무시하지 않는다).
+Fail-closed: if the lengths differ, the shorter length is immediately
+reported as the divergence point (the tail is never silently ignored).
 """
 from __future__ import annotations
 
@@ -41,7 +45,8 @@ _LENGTH_MISMATCH_FIELD: Final = "__length__"
 
 @dataclass(frozen=True)
 class ComparableFill:
-    """패리티 비교에 쓰는 정준 체결 표현 — 타임스탬프를 제외한다."""
+    """Canonical fill representation used for parity comparison — excludes
+    timestamp."""
 
     symbol: str
     side: OrderSide
@@ -51,7 +56,8 @@ class ComparableFill:
 
 
 def paper_fill_to_comparable(fill: FillEvent) -> ComparableFill:
-    """PAPER 실행 추적의 `FillEvent` 1건 → 비교용 정준 표현."""
+    """One `FillEvent` from the PAPER execution trace -> canonical form for
+    comparison."""
     return ComparableFill(
         symbol=fill.symbol,
         side=fill.side,
@@ -62,7 +68,8 @@ def paper_fill_to_comparable(fill: FillEvent) -> ComparableFill:
 
 
 def backtest_fill_to_comparable(fill: SimulatedFill) -> ComparableFill:
-    """백테스트 리플레이의 `SimulatedFill` 1건 → 비교용 정준 표현."""
+    """One `SimulatedFill` from the backtest replay -> canonical form for
+    comparison."""
     return ComparableFill(
         symbol=fill.symbol,
         side=fill.side,
@@ -74,7 +81,8 @@ def backtest_fill_to_comparable(fill: SimulatedFill) -> ComparableFill:
 
 @dataclass(frozen=True)
 class Divergence:
-    """첫 발산 지점 — 리포트에 반드시 담아 어디서부터 어긋났는지 밝힌다."""
+    """First divergence point — always carried in the report to disclose
+    where things went wrong."""
 
     index: int
     field: str
@@ -90,7 +98,8 @@ class ParityReport:
     first_divergence: Divergence | None
 
     def raise_if_mismatch(self) -> None:
-        """하네스를 게이트로 쓸 때(CI 등) — 불일치면 즉시 예외로 실패시킨다."""
+        """For using the harness as a gate (CI, etc.) — fails immediately
+        with an exception on mismatch."""
         if not self.is_match:
             raise ParityMismatchError(self)
 
@@ -103,7 +112,7 @@ class ParityMismatchError(AssertionError):
 
 def _format_mismatch(report: ParityReport) -> str:
     d = report.first_divergence
-    if d is None:  # pragma: no cover — is_match=False면 항상 first_divergence가 있다
+    if d is None:  # pragma: no cover — first_divergence always set when is_match=False
         return "parity mismatch: 발산 지점 없이 불일치로 보고됨(호출자 오류)"
     if d.field == _LENGTH_MISMATCH_FIELD:
         return (
@@ -120,13 +129,15 @@ def check_parity(
     paper_trace: Sequence[FillEvent],
     backtest_fills: Sequence[SimulatedFill],
 ) -> ParityReport:
-    """PAPER 실행 추적과 백테스트 리플레이 체결을 순서대로 항목별 대조한다.
+    """Diffs the PAPER execution trace and the backtest replay fills item-
+    by-item in order.
 
-    두 시퀀스는 같은 아티팩트·같은 구간을 대상으로 한 것이라고 가정한다
-    (그 정렬 자체는 호출자 책임 — 이 함수는 순서를 신뢰하고 인덱스로만
-    비교한다). 공통 길이 구간에서 필드 하나라도 다르면 그 인덱스가 첫
-    발산 지점이고, 공통 구간이 전부 같은데 길이가 다르면 더 짧은 쪽
-    길이가 발산 지점이다.
+    Assumes both sequences target the same artifact and window (aligning
+    them is the caller's responsibility — this function trusts the order
+    and compares only by index). If any field differs within the common-
+    length range, that index is the first divergence point; if the common
+    range matches entirely but lengths differ, the shorter length is the
+    divergence point.
     """
     paper = [paper_fill_to_comparable(f) for f in paper_trace]
     backtest = [backtest_fill_to_comparable(f) for f in backtest_fills]

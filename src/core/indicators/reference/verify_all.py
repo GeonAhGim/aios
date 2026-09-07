@@ -1,30 +1,40 @@
-"""IND-7g — TA-Lib C ↔ 증분 엔진 ↔ 벡터 엔진 3자 교차검증.
+"""IND-7g — three-way cross-verification of TA-Lib C <-> incremental engine
+<-> vectorized engine.
 
 Spec: docs/specs/L4_analytics_authoring_backtest_marketplace_v1.0.md §9.3 IND-7g,
 docs/design/ADR-2026-09-06-F-adopt-dont-rewrite.md D2.
 
-손으로 기대값을 적는 대신 세 구현(TA-Lib C 직접 호출, `engine.incremental`,
-`engine.vectorized`)을 같은 입력에 돌려 서로 비교한다. 세 값이 `REFERENCE_TOLERANCE`
-(1e-9, 스케일 상대오차) 이내로 일치하면 그 결과를 참조 벡터로 스냅샷 고정하고,
-하나라도 벗어나면 그 지표는 검증 통과 목록(레지스트리 노출 대상)에서 제외한다
-(fail-closed) — `VerificationReport.mismatches`에 항상 상세를 남겨 무음 통과를
-막는다.
+Instead of writing expected values by hand, this runs three implementations
+(direct TA-Lib C call, `engine.incremental`, `engine.vectorized`) on the same
+input and compares them against each other. If the three values agree within
+`REFERENCE_TOLERANCE` (1e-9, scale-relative error), the result is snapshotted
+as a reference vector; if any one deviates, that indicator is excluded from
+the verified list (subject to registry exposure) (fail-closed) —
+`VerificationReport.mismatches` always carries the detail so nothing passes
+silently.
 
-검증 대상은 `engine.incremental`·`engine.vectorized` 양쪽에 커널이 있는 지표로
-한정한다(IND-1, 현재 11종) — 3자 비교 자체가 두 엔진의 존재를 전제한다. 나머지
-150종(TA-Lib 자동생성, IND-2g)은 이 leaf의 범위 밖이다.
+Verification targets are limited to indicators that have a kernel in both
+`engine.incremental` and `engine.vectorized` (IND-1, currently 11) — the
+three-way comparison itself presupposes both engines exist. The remaining
+150 (TA-Lib auto-generated, IND-2g) are out of scope for this leaf.
 
-데이터셋은 두 갈래다:
-- `synthetic:<seed>` — 시드 고정 정규분포 랜덤워크(`test_engine_equivalence.py`와
-  같은 산식), 스케일을 자릿수별로 바꿔 부동소수 정밀도 경계를 흔든다.
-- `real_sample_proxy` — 추세→횡보→변동성 급등 레짐 전환을 섞은 두 번째 고정 시드
-  데이터셋. **미검증**: 이 워커 환경은 외부 네트워크로 실거래소 데이터를 조달할
-  수 없어 실제 거래소 데이터는 아니다 — 변동성 군집 등 실데이터의 통계적 특징을
-  근사한 대체재로만 쓴다. 실데이터 파일을 확보하면 이 함수 하나만 바꾸면 된다.
+There are two dataset branches:
+- `synthetic:<seed>` — a seeded normal-distribution random walk (same
+  formula as `test_engine_equivalence.py`), varying scale by order of
+  magnitude to shake out floating-point precision boundaries.
+- `real_sample_proxy` — a second fixed-seed dataset mixing a
+  trend->range->volatility-spike regime transition. **Unverified**: this
+  worker environment has no external network access to fetch real exchange
+  data, so this is not actual exchange data — it is used only as a
+  substitute that approximates real data's statistical characteristics such
+  as volatility clustering. Once a real data file is obtained, only this
+  one function needs to change.
 
-CI/nightly 분리: `sample_names()`가 고정 시드로 부분집합을 뽑는다 — 카탈로그가
-지금은 11종뿐이라 표본 30종 요청은 전체와 같아지지만, IND-13(대량 검증 잡)이
-카탈로그를 키운 뒤에도 같은 함수를 그대로 쓸 수 있게 미리 표본 경로를 열어 둔다.
+CI/nightly split: `sample_names()` draws a subset with a fixed seed — since
+the catalog currently has only 11 indicators, requesting a sample of 30 ends
+up equal to the full set, but the sampling path is opened up in advance so
+the same function keeps working once IND-13 (the bulk verification job)
+grows the catalog.
 """
 from __future__ import annotations
 
@@ -80,7 +90,8 @@ class Dataset:
 
 @dataclass(frozen=True)
 class Mismatch:
-    """불일치 상세 하나 — 무음 통과 금지를 위해 리포트에 그대로 남는다."""
+    """One mismatch detail — kept in the report as-is to prevent a silent
+    pass."""
 
     name: str
     dataset: str
@@ -114,8 +125,9 @@ def _synthetic_ohlcv(seed: int, n: int, scale: float) -> dict[str, FloatArray]:
 
 
 def _real_sample_proxy_ohlcv(seed: int, n: int) -> dict[str, FloatArray]:
-    """미검증: 실거래소 데이터가 아니라 레짐 전환(추세→횡보→변동성 급등)을 흉내 낸
-    대체 고정 시드 데이터셋(모듈 docstring 참고)."""
+    """Unverified: not real exchange data — a substitute fixed-seed dataset
+    that mimics a regime transition (trend->range->volatility spike) (see
+    module docstring)."""
     rng = np.random.default_rng(seed)
     segment = max(1, n // 3)
     drift = np.concatenate(
@@ -150,7 +162,8 @@ def default_datasets() -> list[Dataset]:
 
 
 def _param_variants(spec: IndicatorSpec) -> list[dict[str, int]]:
-    """기본값 + 최소 경계값(둘 다 다를 때만) — 창 경계 근처 수치 오차를 함께 본다."""
+    """Default + minimum boundary values (only when they differ) — also
+    exercises numerical error near the window boundary."""
     default = {p.name: p.default for p in spec.params}
     minimal = {p.name: p.min for p in spec.params}
     if spec.name == "MACD" and minimal["fastperiod"] >= minimal["slowperiod"]:
@@ -169,7 +182,8 @@ def _talib_direct(
 
 
 def verify_indicator(name: str, datasets: Sequence[Dataset]) -> list[Mismatch]:
-    """지표 하나를 모든 데이터셋 × 파라미터 조합으로 3자 비교한다."""
+    """Runs the three-way comparison for one indicator across every dataset
+    x parameter combination."""
     spec = TALIB_SPECS[name]
     mismatches: list[Mismatch] = []
     for dataset in datasets:
@@ -212,7 +226,8 @@ def verify_indicator(name: str, datasets: Sequence[Dataset]) -> list[Mismatch]:
 
 
 def reference_vector(name: str, dataset: Dataset) -> dict[str, list[float | None]]:
-    """검증 통과 지표의 기본 파라미터 결과값 — 스냅샷 페이로드의 `outputs` 필드."""
+    """Default-parameter result values for a verified indicator — the
+    `outputs` field of the snapshot payload."""
     spec = TALIB_SPECS[name]
     params = {p.name: p.default for p in spec.params}
     values = compute(name, dataset.columns, params)
@@ -236,7 +251,8 @@ def write_snapshot(name: str, dataset: Dataset, *, vectors_dir: Path | None = No
 
 
 def sample_names(k: int, *, seed: int = 20260906) -> tuple[str, ...]:
-    """CI용 고정 시드 표본. 카탈로그가 `k`보다 작으면 전체를 돌려준다(현재 11종)."""
+    """Fixed-seed sample for CI. Returns the full set if the catalog is
+    smaller than `k` (currently 11)."""
     names = list(VERIFIABLE_NAMES)
     if k >= len(names):
         return tuple(names)

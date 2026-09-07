@@ -1,11 +1,12 @@
-"""DC-27 — `ports/source_contract_repository.py`의 asyncpg 구현.
+"""DC-27 — asyncpg implementation of `ports/source_contract_repository.py`.
 
 Spec: docs/design/ADR-2026-09-06-H-data-sourcing-self-build-and-contract-tiers.md
-D1. `source_contract` 테이블(마이그레이션 참조: 이 파일과 같은 리프에서
-신설)을 읽기만 한다 — 등급 승격(행 UPDATE)은 운영 도구/관리 라우터
-소관이고 이 어댑터는 아직 쓰기를 노출하지 않는다(계약 전 어댑터를
-선등록하지 않는다는 D6과 같은 이유로, 쓰기 경로는 실제 계약 등록
-운영절차가 정해지는 후속 리프에서 추가한다).
+D1. Only reads the `source_contract` table (migration created in the same
+leaf as this file) — tier upgrade (row UPDATE) belongs to ops tooling/admin
+routers, and this adapter does not yet expose writes (for the same reason as
+D6's "don't pre-register adapters before a contract exists": the write path
+is added in a later leaf once the actual contract-registration operational
+procedure is decided).
 """
 from __future__ import annotations
 

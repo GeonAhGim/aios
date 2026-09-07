@@ -1,26 +1,30 @@
-"""MP-11 — 마켓플레이스 리스팅 성과 독립 재현 검증.
+"""MP-11 — independent reproduction verification of marketplace listing
+performance.
 
 Spec: docs/specs/L4_analytics_authoring_backtest_marketplace_v1.0.md §3.5
-(`ReputationScore.reproduced_backtests`), §4.3(평판 산식이 `reproduced_
-backtests`를 소비), ADR-2026-09-06-G §9 MP-11.
+(`ReputationScore.reproduced_backtests`), §4.3 (reputation formula consumes
+`reproduced_backtests`), ADR-2026-09-06-G §9 MP-11.
 
-§4.3 평판 산식은 `reproduced_backtests`를 입력으로 소비하지만, 그 값을
-"검증된 재현"으로 만드는 리프가 지금까지 없었다 — 판매자가 리스팅에
-게시한 Sharpe·DSR 등 성과 주장을 플랫폼이 실제로 다시 돌려 확인하지
-않으면, 그 숫자는 자기 신고에 불과하다(현 상태는 TradingView보다 나쁘다
-— TradingView는 애초에 그런 주장을 하지 않는다).
+The §4.3 reputation formula consumes `reproduced_backtests` as an input, but
+until now no leaf turned that value into a "verified reproduction" — if the
+platform never actually reruns the Sharpe/DSR/etc. performance claims a
+seller posts on a listing, those numbers are nothing but self-reporting
+(worse than TradingView's current state — TradingView never makes such
+claims in the first place).
 
-이 모듈은 순수 비교 로직이다 — I/O 없음. "판매자가 어떤 해시를 주장했는가"
-(리스팅 저장소)와 "플랫폼이 어떻게 그 백테스트를 다시 돌렸는가"
-(`run_backtest`, BT-9 `reproducibility_key`로 같은 아티팩트·구간·설정임을
-이미 확인했다고 가정)는 호출자 책임이다. 이 모듈은 두 결과를 받아
-바이트 단위로 대조할 뿐이다 — BT-19 `parity_harness.py`와 같은 경계
-설계(비교만, 재생은 다른 리프).
+This module is pure comparison logic — no I/O. "What hash the seller
+claimed" (listing store) and "how the platform reran that backtest"
+(`run_backtest`, assumed to already be confirmed as the same artifact/
+window/config via BT-9's `reproducibility_key`) are the caller's
+responsibility. This module only takes the two results and diffs them
+byte-for-byte — the same boundary design as BT-19's `parity_harness.py`
+(comparison only; replay is a different leaf).
 
-Fail-closed: 주장 해시가 비어 있거나 재현 결과가 비어 있으면(빈
-`equity_curve`) 검증 통과로 위장하지 않고 즉시 `ValueError`로 거부한다.
-불일치 시 `MP_UNVERIFIED_RESULT`로 표시하고, `count_verified_backtests()`
-는 그 건을 평판 가산 대상에서 제외한다 — 의심되면 가산하지 않는다.
+Fail-closed: if the claimed hash is empty or the reproduced result is empty
+(empty `equity_curve`), it rejects immediately with `ValueError` rather than
+masquerading as a pass. On mismatch it is flagged `MP_UNVERIFIED_RESULT`,
+and `count_verified_backtests()` excludes that entry from the reputation
+tally — when in doubt, do not add it.
 """
 from __future__ import annotations
 
@@ -37,15 +41,19 @@ RESULT_HASH_SCHEMA: Final = "marketplace-listing-result-hash-1"
 
 
 def compute_result_hash(result: BacktestResult) -> str:
-    """`BacktestResult`(체결·자본곡선·지표) → sha256 hex(64자) 정준 해시.
+    """`BacktestResult` (fills/equity curve/metrics) -> canonical sha256 hex
+    (64 chars).
 
-    `config`와 `warnings`는 입력·진단 정보라 해시에서 뺀다 — 리스팅이
-    주장하는 것은 "이 설정으로 실행한 결과"이지 설정 자체가 아니고
-    (설정 동일성은 BT-9 `reproducibility_key`가 이미 별도로 보증한다),
-    경고 문구는 엔진 버전에 따라 문구가 바뀔 수 있어 성과 주장과 무관하다.
-    정준 직렬화 규칙(정렬된 키, 고정 구분자, `ensure_ascii=True`)은 BT-9
-    `domain/reproducibility.py`와 동일하다 — 재현 키 계열 해시가 리프마다
-    다른 정규화를 쓰면 "같은 입력=같은 해시" 계약의 강도가 흔들린다.
+    `config` and `warnings` are excluded from the hash because they are
+    input/diagnostic information — what a listing claims is "the result of
+    running with this config", not the config itself (config equality is
+    already separately guaranteed by BT-9's `reproducibility_key`), and
+    warning text can change with the engine version, unrelated to the
+    performance claim. The canonical serialization rules (sorted keys, fixed
+    separators, `ensure_ascii=True`) match BT-9's
+    `domain/reproducibility.py` — if reproducibility-key-family hashes use
+    different normalization per leaf, it weakens the "same input = same
+    hash" contract.
     """
     if not result.equity_curve:
         raise ValueError("compute_result_hash: 빈 equity_curve로는 해시를 낼 수 없습니다")
@@ -63,9 +71,10 @@ def compute_result_hash(result: BacktestResult) -> str:
 
 @dataclass(frozen=True)
 class ListingBacktestClaim:
-    """판매자가 리스팅에 게시한 성과 주장 — §3.5 `ScriptListing`의
-    `result_hash`에 해당(계약 자체는 MP-1이 아직 확정하지 않았으므로,
-    이 리프가 검증에 필요한 최소 필드만 정의한다)."""
+    """A performance claim the seller posted on a listing — corresponds to
+    §3.5 `ScriptListing`'s `result_hash` (MP-1 has not yet finalized the
+    contract itself, so this leaf defines only the minimum fields needed
+    for verification)."""
 
     listing_id: int
     claimed_result_hash: str
@@ -87,7 +96,8 @@ class VerificationOutcome:
     error_code: str | None
 
     def raise_if_unverified(self) -> None:
-        """게이트로 쓸 때(평판 가산 직전 등) — 불일치면 즉시 예외로 막는다."""
+        """For use as a gate (e.g. right before a reputation tally) — blocks
+        immediately with an exception on mismatch."""
         if not self.is_verified:
             raise ListingUnverifiedError(self)
 
@@ -106,13 +116,14 @@ def verify_listing_backtest(
     claim: ListingBacktestClaim,
     reproduced_result: BacktestResult,
 ) -> VerificationOutcome:
-    """판매자 주장 해시와 플랫폼이 독립 재현한 `BacktestResult`의 해시를
-    비트 단위(sha256 hex 전체 일치)로 대조한다.
+    """Diffs the seller's claimed hash against the hash of the
+    `BacktestResult` the platform independently reproduced, bit-for-bit
+    (full sha256 hex match).
 
-    일치 → `is_verified=True`, `error_code=None` — `reputation.
-    reproduced_backtests` 가산 허용. 불일치 → `is_verified=False`,
-    `error_code=MP_UNVERIFIED_RESULT` — 호출자는 이 건을 가산에 반영하면
-    안 된다(`count_verified_backtests()` 참고).
+    Match -> `is_verified=True`, `error_code=None` — counting toward
+    `reputation.reproduced_backtests` is allowed. Mismatch ->
+    `is_verified=False`, `error_code=MP_UNVERIFIED_RESULT` — the caller must
+    not reflect this entry in the tally (see `count_verified_backtests()`).
     """
     reproduced_hash = compute_result_hash(reproduced_result)
     is_verified = claim.claimed_result_hash == reproduced_hash
@@ -126,12 +137,14 @@ def verify_listing_backtest(
 
 
 def count_verified_backtests(outcomes: Sequence[VerificationOutcome]) -> int:
-    """§4.3 평판 산식의 `reproduced_backtests` 입력 — 검증 통과 건만 센다.
+    """The `reproduced_backtests` input to the §4.3 reputation formula —
+    counts only entries that passed verification.
 
-    `MP_UNVERIFIED_RESULT`로 판정된 건은 위조인지 단순 엔진 드리프트인지
-    가리지 않고 전부 제외한다(fail-closed) — 의심스러운 재현을 평판에
-    반영하면 이 리프가 막으려는 문제(자기 신고 성과의 무비판적 수용)를
-    그대로 재현한다.
+    Entries flagged `MP_UNVERIFIED_RESULT` are all excluded (fail-closed)
+    regardless of whether the cause is forgery or plain engine drift —
+    reflecting a suspicious reproduction in reputation would reproduce
+    exactly the problem this leaf exists to prevent (uncritical acceptance
+    of self-reported performance).
     """
     return sum(1 for outcome in outcomes if outcome.is_verified)
 

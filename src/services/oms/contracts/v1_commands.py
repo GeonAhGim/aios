@@ -42,17 +42,19 @@ class SubmitOrderCommand(BaseModel):
     order_type: OrderType  # MARKET|LIMIT (TWAP 등은 AlgoRequest)
     quantity: Decimal = Field(gt=0)
     price: Decimal | None = None
-    # EM-19 — 스톱·스톱리밋·트레일링의 트리거 조건. `order_type`은 여전히
-    # MARKET|LIMIT뿐이다(01번 공유접점 §2.3 동결 계약, 여기서 확장하지
-    # 않는다) — trigger_price가 있으면 "이 가격에 닿기 전까지 venue로
-    # 보내지 않는 조건부 주문"이라는 뜻이고, 실제 트리거 판정은
-    # `domain/order_types/{stop,stop_limit,trailing}.py`가 순수 함수로
-    # 담당한다. None이면 기존과 동일한 즉시 제출 주문(MINOR 추가, §3
-    # 107번 규칙 — schema_version 불변).
+    # EM-19 — trigger condition for stop/stop-limit/trailing. `order_type`
+    # remains MARKET|LIMIT only (standard 01 shared-contract §2.3 frozen
+    # contract, not extended here) — a present trigger_price means "a
+    # conditional order that is not sent to the venue until this price is
+    # reached", and the actual trigger determination is owned by
+    # `domain/order_types/{stop,stop_limit,trailing}.py` as pure functions.
+    # None means an immediate-submit order, same as before (MINOR addition,
+    # §3 standard 107 — schema_version unchanged).
     trigger_price: Decimal | None = None
-    # 트레일링 전용 — 트리거가를 시장을 따라 얼마만큼의 절대가 간격으로
-    # 갱신할지(`domain/order_types/trailing.py`). trigger_price 없이는
-    # 의미가 없다(애플리케이션 계층에서 검증, 이 계약은 형태만 정의).
+    # Trailing only — how large an absolute-price gap the trigger price
+    # trails the market by as it updates (`domain/order_types/trailing.py`).
+    # Meaningless without trigger_price (validated at the application
+    # layer; this contract only defines the shape).
     trailing_offset: Decimal | None = None
     time_in_force: Literal["GTC", "IOC", "FOK", "DAY"] = "GTC"
     asset_class: AssetClass
