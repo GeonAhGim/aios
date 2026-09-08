@@ -2,8 +2,13 @@ name: Quality Gate
 
 on:
   pull_request:
-  push:
-    branches: [main]
+  workflow_dispatch:
+  schedule:
+    # 2026-09-08: 워커 함대가 시간당 10건 이상 push하므로 push 트리거는 cancel-in-progress로
+    # 서로를 취소해 한 번도 완주하지 못했다(결제 해제 직후 5연속 cancelled 실측).
+    # 커밋 단위 검증은 로컬 CI(pm/local_ci.py)가 하고, Actions는 3시간마다 최신 main을
+    # 독립 환경(ubuntu)에서 재검증하는 2차 의견 역할만 맡는다.
+    - cron: '17 */3 * * *'
 
 permissions:
   contents: read
