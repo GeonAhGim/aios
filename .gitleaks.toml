@@ -33,6 +33,11 @@ paths = [
   '''tests/unit/exchanges/test_kis_ws_messages\.py''',
 ]
 regexes = [
+  # 2026-09-08(Actions 결제 해제 후 첫 완주에서 적발): 테스트 픽스처의 명백한 가짜 토큰.
+  # 값 자체에 fixture/dummy/fake/placeholder가 들어간 저엔트로피 문자열만 허용한다 —
+  # 경로 단위 허용은 tests/ 전체의 실수 커밋을 못 잡게 하므로 쓰지 않는다.
+  # 예: tests/contract/exchanges/kis/test_generated_contract.py `"access_token": "tok-br13-fixture"`
+  '''(tok|token|key|secret|sig)-[A-Za-z0-9-]*(fixture|dummy|fake|placeholder)''',
   # src/core/logging/redaction.py의 secret 참조 문자열 — 실제 비밀은
   # KeyRing/vault 뒤에 있고 로그·설정에는 이 참조만 남는다.
   '''secref://[A-Za-z0-9_./-]+''',
