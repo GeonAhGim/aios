@@ -12,21 +12,17 @@ failed_login_attempts/locked_until을 신설했다(문서 v1.4, 마이그레이�
 b2c3d4e5f6a7 참조).
 
 MFA(TOTP) 검증은 FD-11.2(작업트리 11.3)에서 별도 구현 예정 — 아직 없어
-verify_totp DI 콜백으로 주입받는다(이 세션에서 반복 적용한 패턴,
-WatchdogService.compute_equity/SurgeDetector.verify_provenance 등과 동일).
-콜백을 넘기지 않았는데 mfa_enabled=true인 계정이 로그인을 시도하면
-안전하게 실패 처리한다(fail-safe — 검증 불가를 통과로 취급하지 않음).
+verify_totp DI 콜백으로 주입받는다. 콜백을 넘기지 않았는데 mfa_enabled=true인
+계정이 로그인을 시도하면 안전하게 실패 처리한다(fail-safe).
 
 11.6 연동 — PENDING_DELETION(FD-11.4 탈퇴 유예기간) 상태에서 로그인에
-성공하면 탈퇴가 자동 취소된다(ACTIVE로 복귀, deletion_requested_at
-초기화) — FD-11.4 원문 "유예기간 중 재로그인 시 탈퇴 취소 가능"의
-실제 강제 지점.
+성공하면 탈퇴가 자동 취소된다(ACTIVE로 복귀, deletion_requested_at 초기화).
 
 PLT-22 연동 — 로그인 실패 카운터 증가는 `src/services/auth/lockout.py`의
 원자 UPDATE에 위임한다(TOCTOU 제거, task-852). 잠금 판정을 받으면
-`AccountLockedError`(§3.3 AUTH_ACCOUNT_LOCKED·423 계약, retry_after_seconds
-보유)를 던진다 — 라우터가 아직 이관되지 않아(§9 PLT-24) 지금은 AuthError
-서브클래스로 기존 401 매핑을 그대로 탄다.
+`AccountLockedError`(§3.3 AUTH_ACCOUNT_LOCKED·423 계약)를 던진다 — 라우터가
+아직 이관되지 않아(§9 PLT-24) 지금은 AuthError 서브클래스로 기존 401
+매핑을 그대로 탄다.
 """
 from __future__ import annotations
 
@@ -41,6 +37,7 @@ from argon2 import PasswordHasher
 from argon2.exceptions import VerifyMismatchError
 from pydantic import BaseModel
 
+from src.core.db.conditional_write import ConcurrencyConflictError
 from src.core.logging.audit_log import record_audit_log
 from src.foundation.trust.adapters.postgres_membership_repository import (
     PostgresMembershipRepository,
@@ -53,12 +50,10 @@ MIN_PASSWORD_LENGTH = 12
 _GENERIC_AUTH_ERROR = "이메일 또는 비밀번호가 올바르지 않습니다."
 
 _hasher = PasswordHasher()
-# 레드팀 감사(docs/RED_TEAM_FINDINGS.md #12) 반영 — 계정 미존재/정지/잠김
-# 경로가 실제 Argon2 verify()를 타지 않아 마지막(존재하는 계정+틀린
-# 비밀번호) 경로보다 훨씬 빨리 응답했다. 동일 메시지를 반환하면서도
-# 처리시간이 다르면 그 자체가 계정 존재 여부를 드러내는 타이밍
-# 사이드채널이 된다 — 모든 실패 경로에서 고정 더미 해시를 검증해
-# 처리시간을 실제 사용자 경로와 비슷하게 맞춘다.
+# 레드팀 감사(docs/RED_TEAM_FINDINGS.md #12) — 계정 미존재/정지/잠김 경로가
+# Argon2 verify()를 안 타 더 빨리 응답하면 그 처리시간 차이 자체가 계정
+# 존재 여부를 드러내는 타이밍 사이드채널이 된다. 모든 실패 경로에서 고정
+# 더미 해시를 검증해 처리시간을 맞춘다.
 _DUMMY_PASSWORD_HASH = _hasher.hash("timing-normalization-dummy-password")
 
 VerifyTotpFn = Callable[[UUID, str, str], Awaitable[bool]]
@@ -78,8 +73,7 @@ class AuthError(Exception):
 class AccountLockedError(AuthError):
     """PLT-22 — 잠금 상태 로그인 시도. §3.3 AUTH_ACCOUNT_LOCKED(423) 계약대로
     `error_code`/`retry_after_seconds` 이름을 고정한다(프론트 deriveLockout,
-    task-387이 이 이름으로 읽는다). AuthError를 상속해 라우터 이관 전까지는
-    기존 계정열거 방지 매핑(모든 AuthError → 401)을 그대로 탄다."""
+    task-387이 이 이름으로 읽는다)."""
 
     error_code = "AUTH_ACCOUNT_LOCKED"
     http_status = 423
@@ -162,18 +156,26 @@ class AuthService:
                 raise AuthError("이미 등록된 이메일입니다.")
 
             password_hash = _hasher.hash(password)
-            row = await conn.fetchrow(
-                "INSERT INTO users (user_id, email, password_hash) VALUES ($1, $2, $3) "
-                "RETURNING *",
-                user_id,
-                email,
-                password_hash,
-            )
+            try:
+                row = await conn.fetchrow(
+                    "INSERT INTO users (user_id, email, password_hash) VALUES ($1, $2, $3) "
+                    "RETURNING *",
+                    user_id,
+                    email,
+                    password_hash,
+                )
+            except asyncpg.UniqueViolationError as exc:
+                # TOCTOU (review task-2083 REJECT #1): SELECT above misses a
+                # concurrent signup that commits before this INSERT. Only
+                # remap the email conflict; re-raise anything else fail-closed.
+                if exc.constraint_name != "users_email_key":
+                    raise
+                raise ConcurrencyConflictError(
+                    f"email={email}: concurrent signup won the race."
+                ) from exc
             # PLT-26/PLT-28 wiring: the users row and its PERSONAL tenant
-            # (id == user_id) go in the same transaction. Without this, the
-            # first foundation write after signup (consent_record,
-            # foundation_audit_event, portfolio_mandate, etc. -- all FK
-            # tenant_id -> tenant(id)) raises ForeignKeyViolation immediately.
+            # (id == user_id) go in the same transaction -- foundation writes
+            # after signup FK tenant_id -> tenant(id) and need it to exist.
             await membership_repo.insert_tenant(conn, tenant_id=user_id, kind=TenantKind.PERSONAL)
         return _row_to_user(row)
 
@@ -278,11 +280,9 @@ class AuthService:
     async def _fail_login(
         self, conn: asyncpg.Connection, user_id: UUID, now: datetime
     ) -> AuthError:
-        """실패 카운터를 원자적으로 증가시키고, 반환된 예외를 호출자가
-        `raise`한다(예외를 직접 던지지 않는 이유: 호출부의 `except ... from
-        None` 체이닝을 그대로 유지하기 위해). lockout.register_failed_attempt가
-        단일 UPDATE ... RETURNING이라 이 메서드 자체는 TOCTOU 없이 정확한
-        최신 카운트를 기준으로 잠금 여부를 판정한다."""
+        """실패 카운터를 원자적으로 증가시키고, 반환된 예외를 호출자가 `raise`한다
+        (호출부의 `except ... from None` 체이닝 유지 목적). lockout의 단일
+        UPDATE ... RETURNING 덕에 TOCTOU 없이 최신 카운트로 잠금을 판정한다."""
         state = await lockout.register_failed_attempt(conn, user_id, now=now)
         if state.locked:
             # 실패 시도 자체와는 별개의 이벤트 — 잠금이 "지금 막 걸렸다"는
