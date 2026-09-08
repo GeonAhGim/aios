@@ -1,4 +1,4 @@
-// task-483: routeApiError가 apiError.ts의 ApiErrorCode 유니온 24개 전부를 정확히 한
+// task-483: routeApiError가 apiError.ts의 ApiErrorCode 유니온 28개 전부를 정확히 한
 // 갈래로 라우팅하는지 고정한다. CASES는 `Record<ApiErrorCode, ...>`로 선언했으므로 이후
 // apiError.ts에 error_code가 하나 추가되면 이 파일이 컴파일조차 되지 않는다(누락된 키가
 // 있으면 TS2741/TS2739) — 그래서 "코드 추가 시 갈래를 안 만들면 실패한다"를 컴파일
@@ -39,10 +39,17 @@ const CASES: Record<ApiErrorCode, RoutingCase> = {
   AUTHZ_FORBIDDEN: { statusCode: 403, expectedKind: "forbidden" },
   AUTHZ_ZONE_VIOLATION: { statusCode: 403, expectedKind: "forbidden" },
   POLICY_LIVE_BLOCKED: { statusCode: 403, expectedKind: "policy_denied" },
+  // task-2194: 서버 error_codes.py의 POLICY_*/RISK_* 범용 거부값. classifyForbidden의
+  // POLICY_/RISK_ 접두 매칭으로 policy_denied에 떨어진다.
+  POLICY_DENIED: { statusCode: 403, expectedKind: "policy_denied" },
+  RISK_DENIED: { statusCode: 403, expectedKind: "policy_denied" },
   RESOURCE_NOT_FOUND: { statusCode: 404, expectedKind: "not_found" },
   STATE_CONCURRENCY_CONFLICT: { statusCode: 409, expectedKind: "refetch_retry" },
   STATE_INVALID_TRANSITION: { statusCode: 409, expectedKind: "invalid_transition" },
   INTEGRITY_IDEMPOTENCY_CONFLICT: { statusCode: 409, expectedKind: "idempotency_new_key" },
+  // task-2194: DATA_COVERAGE_MISSING과 같은 자리에서 classifyStateConflict의 미지 409
+  // 폴백보다 먼저 집힌다(아래 "우선순위" 블록이 고정).
+  INTEGRITY_WALLET_BALANCE_DRIFT: { statusCode: 409, expectedKind: "wallet_balance_drift" },
   RATE_LIMIT_EXCEEDED: { statusCode: 429, expectedKind: "backoff_retry", extra: { retryAfterSec: 5 } },
   EXCHANGE_UNAVAILABLE: { statusCode: 503, expectedKind: "backoff_retry" },
   EXCHANGE_FATAL: { statusCode: 502, expectedKind: "server_fatal", extra: { traceId: "trace-fatal" } },
@@ -84,6 +91,12 @@ describe("routeApiError — 우선순위 규칙(task-483)", () => {
     const err = { statusCode: 409, errorCode: "DATA_COVERAGE_MISSING" };
     expect(classifyStateConflict(err)).toBe("invalid_transition");
     expect(routeApiError(err)).toEqual({ kind: "data_coverage_missing" });
+  });
+
+  it("INTEGRITY_WALLET_BALANCE_DRIFT(409)는 classifyStateConflict가 미지 409로 invalid_transition 폴백하지만, routeApiError는 wallet_balance_drift로 확정한다(task-2194)", () => {
+    const err = { statusCode: 409, errorCode: "INTEGRITY_WALLET_BALANCE_DRIFT" };
+    expect(classifyStateConflict(err)).toBe("invalid_transition");
+    expect(routeApiError(err)).toEqual({ kind: "wallet_balance_drift" });
   });
 });
 

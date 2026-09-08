@@ -58,6 +58,10 @@ export type RoutedApiError =
   // 그보다 먼저 이 코드만 집어낸다 — 분류기를 새로 만들지 않고 이 진입점 한 곳에서만
   // 갈래를 추가한다(decision). 재시도 없음(수집 후 재요청), 화면은 "미커버" 안내만.
   | { kind: "data_coverage_missing" }
+  // task-2194: INTEGRITY_WALLET_BALANCE_DRIFT(409, error_codes.py:50·:90). 아래
+  // classifyStateConflict는 미지 409를 "invalid_transition"으로 폴백하므로 DATA_COVERAGE_MISSING과
+  // 같은 자리에서 먼저 집어낸다 — 새 분류기를 만들지 않고 이 진입점에서만 갈래를 추가한다.
+  | { kind: "wallet_balance_drift" }
   | { kind: "backoff_retry"; afterSec?: number }
   | { kind: "server_fatal"; traceId?: string }
   | { kind: "unknown" };
@@ -66,6 +70,8 @@ export type RoutedApiErrorKind = RoutedApiError["kind"];
 
 // apiError.ts ApiErrorCode 유니온의 값과 동일 문자열(단일출처는 error_codes.py:63).
 const DATA_COVERAGE_MISSING_ERROR_CODE: ApiErrorCode = "DATA_COVERAGE_MISSING";
+// 단일출처는 error_codes.py:50.
+const WALLET_BALANCE_DRIFT_ERROR_CODE: ApiErrorCode = "INTEGRITY_WALLET_BALANCE_DRIFT";
 
 interface ErrorCodeLike {
   errorCode?: string | null;
@@ -97,6 +103,9 @@ export function routeApiError(err: unknown): RoutedApiError {
 
   if (isErrorCodeLike(err) && err.errorCode === DATA_COVERAGE_MISSING_ERROR_CODE) {
     return { kind: "data_coverage_missing" };
+  }
+  if (isErrorCodeLike(err) && err.errorCode === WALLET_BALANCE_DRIFT_ERROR_CODE) {
+    return { kind: "wallet_balance_drift" };
   }
 
   const stateConflict = classifyStateConflict(err);

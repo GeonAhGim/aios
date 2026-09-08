@@ -20,10 +20,18 @@ export type ApiErrorCode =
   | "AUTHZ_FORBIDDEN"
   | "AUTHZ_ZONE_VIOLATION"
   | "POLICY_LIVE_BLOCKED"
+  // task-2194: error_codes.py:38·:39(HTTP 403 :84·:85) — POLICY_*/RISK_* 계열의 범용
+  // 거부값. 접두(PREFIX_MESSAGES) 폴백으로도 대략 걸리지만, 정확 코드가 있으면 그쪽이
+  // 우선한다(errorCodeCatalog.test.ts가 이 우선순위를 고정한다).
+  | "POLICY_DENIED"
+  | "RISK_DENIED"
   | "RESOURCE_NOT_FOUND"
   | "STATE_CONCURRENCY_CONFLICT"
   | "STATE_INVALID_TRANSITION"
   | "INTEGRITY_IDEMPOTENCY_CONFLICT"
+  // task-2194: error_codes.py:50(HTTP 409 :90) — 지갑 레거시 투영과 원장 잔액이
+  // 어긋났을 때. 조회 경로가 스스로 봉합하지 않고 명시적으로 실패한다.
+  | "INTEGRITY_WALLET_BALANCE_DRIFT"
   | "RATE_LIMIT_EXCEEDED"
   | "EXCHANGE_UNAVAILABLE"
   | "EXCHANGE_FATAL"
@@ -41,7 +49,10 @@ export const DEFAULT_API_ERROR_MESSAGE =
 // 판단하는 단일 출처 — 문자열을 직접 비교하지 않도록 export한다.
 export const RATE_LIMIT_ERROR_CODE: ApiErrorCode = "RATE_LIMIT_EXCEEDED";
 
-const EXACT_MESSAGES: Partial<Record<ApiErrorCode, string>> = {
+// errorCodeCatalog.test.ts(task-2194)가 이 맵의 키 집합을 error_codes.py 원문과
+// 직접 대조하므로 export한다 — 서버 카탈로그가 늘어나는데 이 맵이 안 따라가면
+// 그 테스트가 실패한다(prefix 폴백이 있어도 "정확 매핑 누락"을 봐준다).
+export const EXACT_MESSAGES: Partial<Record<ApiErrorCode, string>> = {
   VALIDATION_INVALID_FIELD: "입력값을 확인해주세요.",
   VALIDATION_IDEMPOTENCY_KEY_REQUIRED: "요청이 올바르지 않습니다. 새로고침 후 다시 시도해주세요.",
   VALIDATION_DISCLOSURE_RETIRED: "내용이 갱신되었습니다. 최신 내용을 다시 불러와주세요.",
@@ -57,10 +68,13 @@ const EXACT_MESSAGES: Partial<Record<ApiErrorCode, string>> = {
   AUTHZ_FORBIDDEN: "이 작업을 수행할 권한이 없습니다.",
   AUTHZ_ZONE_VIOLATION: "허용되지 않은 영역에 대한 요청입니다.",
   POLICY_LIVE_BLOCKED: "실거래 모드에서는 허용되지 않는 작업입니다.",
+  POLICY_DENIED: "정책에 의해 거부된 요청입니다. 세부 사유를 확인해주세요.",
+  RISK_DENIED: "위험 관리 기준에 의해 거부된 요청입니다. 세부 사유를 확인해주세요.",
   RESOURCE_NOT_FOUND: "요청한 항목을 찾을 수 없습니다.",
   STATE_CONCURRENCY_CONFLICT: "다른 요청과 충돌했습니다. 새로고침 후 다시 시도해주세요.",
   STATE_INVALID_TRANSITION: "현재 상태에서는 수행할 수 없는 작업입니다.",
   INTEGRITY_IDEMPOTENCY_CONFLICT: "이미 처리된 요청입니다. 새로고침 후 다시 시도해주세요.",
+  INTEGRITY_WALLET_BALANCE_DRIFT: "지갑 잔액 정합성을 확인하고 있습니다. 잠시 후 다시 시도해주세요.",
   RATE_LIMIT_EXCEEDED: "요청이 너무 많습니다. 잠시 후 다시 시도해주세요.",
   EXCHANGE_UNAVAILABLE: "거래소 연결이 원활하지 않습니다. 잠시 후 다시 시도해주세요.",
   EXCHANGE_FATAL: "거래소 자격증명을 확인해주세요.",
