@@ -11,6 +11,8 @@ from __future__ import annotations
 
 import re
 
+from src.core.strategy.indicator_key import parse_key
+
 _ATOMIC_RE = re.compile(
     r"^(?P<key>\S+)\s+(?P<op>>=|<=|==|>|<|CROSSES_ABOVE|CROSSES_BELOW)\s+(?P<threshold>-?\d+(?:\.\d+)?)$"
 )
@@ -26,10 +28,11 @@ class IndicatorDataMissingError(Exception):
 
 
 def extract_indicator_keys(expression: str) -> list[str]:
-    """실행 루프(오케스트레이터)가 market_state를 채우기 전에 "이 조건식이
-    어떤 지표 키를 참조하는가"를 알아야 한다 — 컴파일러가 만든 키 형식을
-    거꾸로 훑는 이 함수가 그 단일 출처다(ConditionEvaluator와 동일 문법
-    가정)."""
+    """The execution loop needs to know which indicator keys an expression
+    references before it can fill in market_state. Scanning atomic clauses
+    stays this function's job, but validating that each extracted key is a
+    well-formed indicator key is delegated to the single source of truth,
+    `indicator_key.parse_key` (assumes the same grammar as ConditionEvaluator)."""
     if " AND " in expression:
         parts = expression.split(" AND ")
     elif " OR " in expression:
@@ -41,7 +44,9 @@ def extract_indicator_keys(expression: str) -> list[str]:
     for part in parts:
         match = _ATOMIC_RE.match(part.strip())
         if match is not None:
-            keys.append(match["key"])
+            key = match["key"]
+            parse_key(key)
+            keys.append(key)
     return keys
 
 

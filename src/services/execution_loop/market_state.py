@@ -1,21 +1,18 @@
-"""FD-8.1 실행 루프 — market_state 조립.
+"""FD-8.1 execution loop — market_state assembly.
 
-전략의 FSM 조건식이 실제로 참조하는 지표 키만 계산한다(ConditionCompiler가
-만든 키 형식 `"{INDICATOR}{_paramKey파라미터값}*"`을 거꾸로 파싱) — 필요
-없는 지표까지 매번 계산하지 않는다.
+Only calculates the indicator keys the strategy's FSM condition expressions
+actually reference (parses back the key format ConditionCompiler produces;
+the grammar's single source of truth is `src.core.strategy.indicator_key`) —
+never computes indicators that aren't needed.
 """
 from __future__ import annotations
 
-import re
-
 from src.core.indicators.talib_adapter import IndicatorService
 from src.core.strategy.condition_evaluator import extract_indicator_keys
+from src.core.strategy.indicator_key import IndicatorKeyError, parse_key
 from src.data.models.market_data import Candle
 from src.data.models.strategy_fsm import FSMStrategyConfig
 from src.services.condition_compiler import ORDER_FILLED
-
-_KEY_RE = re.compile(r"^(?P<indicator>[A-Z]+)(?P<params>(?:_[a-z]+\d+)*)$")
-_PARAM_RE = re.compile(r"_([a-z]+)(\d+)")
 
 
 class IndicatorKeyParseError(Exception):
@@ -23,11 +20,11 @@ class IndicatorKeyParseError(Exception):
 
 
 def parse_indicator_key(key: str) -> tuple[str, dict[str, int]]:
-    match = _KEY_RE.match(key)
-    if match is None:
-        raise IndicatorKeyParseError(f"지표 키를 해석할 수 없습니다: {key!r}")
-    params = {name: int(value) for name, value in _PARAM_RE.findall(match["params"])}
-    return match["indicator"], params
+    try:
+        parsed = parse_key(key)
+    except IndicatorKeyError as exc:
+        raise IndicatorKeyParseError(f"지표 키를 해석할 수 없습니다: {key!r}") from exc
+    return parsed.indicator, parsed.params
 
 
 def required_indicator_keys(fsm_config: FSMStrategyConfig) -> set[str]:
