@@ -6,7 +6,7 @@ only coordinates the provider, candle store, and coverage registry.
 """
 from __future__ import annotations
 
-from collections.abc import Awaitable, Callable, Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, Protocol
@@ -18,7 +18,7 @@ from src.foundation.market_data.contracts.v2.coverage import CoverageSpan, Quali
 from src.foundation.market_data.contracts.v2.instruments import VenueListing
 from src.foundation.market_data.domain.calendar.session_rules import VenueCalendar
 from src.foundation.market_data.domain.candle_columns import CandleColumns, to_candle_records
-from src.foundation.market_data.domain.coverage.gaps import CoverageGap, plan_fetch
+from src.foundation.market_data.domain.coverage.gaps import plan_fetch
 from src.foundation.market_data.domain.coverage.registry import merge_spans
 from src.foundation.market_data.ports.candle_store import CandleStore
 from src.foundation.market_data.ports.provider import MarketDataProvider, TimeSpan
@@ -73,6 +73,18 @@ async def _read_candles(
         result = await store.query(conn, key, start, end, None)
         return list(result)
     return list(fallback)
+
+
+async def _write_candles(
+    store: CandleStore,
+    *,
+    conn: object,
+    batch_id: UUID,
+    candles: list[CandleRecord],
+) -> int:
+    if hasattr(store, "upsert_batch"):
+        return await store.upsert_batch(conn, batch_id, candles)
+    return await store.write_batch(conn, batch_id, candles)  # type: ignore[attr-defined]
 
 
 async def _record_coverage(
@@ -163,7 +175,12 @@ async def run_backfill(
         fetched_candles = [
             candle for candle in fetched_candles if gap.start_at <= candle.open_time < gap.end_at
         ]
-        stored += await store.upsert_batch(conn, batch_id_factory(), fetched_candles)
+        stored += await _write_candles(
+            store,
+            conn=conn,
+            batch_id=batch_id_factory(),
+            candles=fetched_candles,
+        )
         stored_candles.extend(fetched_candles)
 
         template = next(
