@@ -124,6 +124,38 @@ test("a module only imported from a *.test.tsx file is still reported as unwired
   }
 });
 
+test("rejects an unwired module reachable only through an `export * from` sub-barrel (task-2034: index.ts stopped naming modules directly after the P6 300-line split)", () => {
+  const { root, webSrc, indexPath } = makeWorkspace();
+  try {
+    writeIndex(indexPath, 'export * from "./index/compute";\n');
+    mkdirSync(join(root, "index"), { recursive: true });
+    writeFileSync(join(root, "index", "compute.ts"), 'export { createOrphan } from "../compute/orphan";\n');
+    writeFileSync(join(webSrc, "Page.tsx"), 'export const x = 1;\n');
+    const baseline = writeBaseline(root, []);
+    const { status, stdout } = run(indexPath, webSrc, baseline);
+    assert.equal(status, 1);
+    assert.match(stdout, /FAIL: compute\/orphan/);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("a deep-path import wires a module exported only through an `export * from` sub-barrel", () => {
+  const { root, webSrc, indexPath } = makeWorkspace();
+  try {
+    writeIndex(indexPath, 'export * from "./index/compute";\n');
+    mkdirSync(join(root, "index"), { recursive: true });
+    writeFileSync(join(root, "index", "compute.ts"), 'export { createFoo } from "../core/foo";\n');
+    writeFileSync(join(webSrc, "Page.tsx"), 'import { createFoo } from "@aios/chart-engine/src/core/foo";\n');
+    const baseline = writeBaseline(root, []);
+    const { status, stdout } = run(indexPath, webSrc, baseline);
+    assert.equal(status, 0);
+    assert.match(stdout, /OK/);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("a baseline module that got wired is reported as improvable, not a failure", () => {
   const { root, webSrc, indexPath } = makeWorkspace();
   try {

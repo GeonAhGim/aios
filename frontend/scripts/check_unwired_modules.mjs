@@ -12,8 +12,8 @@
 // the baseline that shows up unwired is a new regression and fails the build.
 // Shrinking the baseline (a module got wired) is reported but never auto-applied —
 // a human commits the smaller baseline once the wiring task lands.
-import { readFileSync, readdirSync } from "node:fs";
-import { join, relative, resolve, sep } from "node:path";
+import { readFileSync, readdirSync, existsSync } from "node:fs";
+import { join, relative, resolve, sep, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const EXCLUDED_SEGMENTS = new Set(["vendor", "node_modules", "dist"]);
@@ -56,6 +56,61 @@ export function parseIndexExports(content) {
       if (!symbolToModule.has(symbol)) symbolToModule.set(symbol, modulePath);
     }
   }
+  return { modules, symbolToModule };
+}
+
+function resolveSpecifier(fromDir, specifier) {
+  const base = resolve(fromDir, specifier);
+  for (const candidate of [base, `${base}.ts`, `${base}.tsx`, join(base, "index.ts"), join(base, "index.tsx")]) {
+    if (existsSync(candidate)) return candidate;
+  }
+  return null;
+}
+
+/**
+ * chart-engine's index.ts re-exports grouped sub-barrels via `export * from
+ * "./index/<group>"` (P6 300-line ratchet split) instead of naming every module
+ * directly, so the exported-module set can't be read off index.ts's own text —
+ * `export *` has no symbol list to parse. This walks that re-export graph (index.ts
+ * -> ./index/<group>.ts -> ../core/<module>) and resolves every `export {...} from`
+ * it finds to a module id relative to indexPath's own directory, so ids match the
+ * "core/renderer" form used by baseline entries and by findWiredModules' deep-import
+ * scan regardless of how many barrel hops away the export statement actually lives.
+ */
+export function collectExportedModules(indexPath) {
+  const rootDir = dirname(resolve(indexPath));
+  const modules = new Set();
+  const symbolToModule = new Map();
+  const seen = new Set();
+
+  function visit(absPath) {
+    if (seen.has(absPath)) return;
+    seen.add(absPath);
+    const content = readFileSync(absPath, "utf-8");
+    const dir = dirname(absPath);
+
+    const starRe = /export\s+\*\s+from\s+["']([^"']+)["']/g;
+    let m;
+    while ((m = starRe.exec(content)) !== null) {
+      const target = resolveSpecifier(dir, m[1]);
+      if (target) visit(target);
+    }
+
+    // Unlike `export *` above, this doesn't require the target file to exist: the
+    // module id is derived from the specifier path alone (matches parseIndexExports'
+    // behavior of trusting the text), so a barrel can name a module that hasn't
+    // landed yet without the resolver silently dropping it from the exported set.
+    const namedRe = /export\s+(?:type\s+)?\{([\s\S]*?)\}\s+from\s+["']([^"']+)["']/g;
+    while ((m = namedRe.exec(content)) !== null) {
+      const moduleId = toPosix(relative(rootDir, resolve(dir, m[2]))).replace(/\.tsx?$/, "");
+      modules.add(moduleId);
+      for (const symbol of splitSymbols(m[1], "after")) {
+        if (!symbolToModule.has(symbol)) symbolToModule.set(symbol, moduleId);
+      }
+    }
+  }
+
+  visit(resolve(indexPath));
   return { modules, symbolToModule };
 }
 
@@ -107,8 +162,7 @@ function walk(dir, out) {
 }
 
 /** Returns every unwired module (exported by the barrel, never imported by any production file under `webSrc`). */
-export function findUnwiredModules(indexContent, webSrc) {
-  const { modules, symbolToModule } = parseIndexExports(indexContent);
+export function findUnwiredModulesFromExports(modules, symbolToModule, webSrc) {
   const wired = new Set();
   const files = [];
   walk(webSrc, files);
@@ -119,6 +173,12 @@ export function findUnwiredModules(indexContent, webSrc) {
     for (const mod of findWiredModules(content, symbolToModule)) wired.add(mod);
   }
   return [...modules].filter((mod) => !wired.has(mod)).sort();
+}
+
+/** Same as findUnwiredModulesFromExports, but parses a flat index.ts string directly (no `export *` resolution). */
+export function findUnwiredModules(indexContent, webSrc) {
+  const { modules, symbolToModule } = parseIndexExports(indexContent);
+  return findUnwiredModulesFromExports(modules, symbolToModule, webSrc);
 }
 
 /**
@@ -158,8 +218,8 @@ export function main(argv) {
   const webSrcPath = webSrc ? resolve(webSrc) : join(frontendRoot, "apps", "web", "src");
   const baselinePath = baseline ? resolve(baseline) : join(frontendRoot, "scripts", "unwired-modules-baseline.json");
 
-  const indexContent = readFileSync(indexPath, "utf-8");
-  const unwired = findUnwiredModules(indexContent, webSrcPath);
+  const { modules, symbolToModule } = collectExportedModules(indexPath);
+  const unwired = findUnwiredModulesFromExports(modules, symbolToModule, webSrcPath);
   const baselineModules = loadBaseline(baselinePath);
   const { violations, improvable } = checkRatchet(unwired, baselineModules);
 
