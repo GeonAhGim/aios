@@ -29,10 +29,21 @@ class CoverageRatchetError(ValueError):
     """coverage.xml 또는 baseline 파일 형식 오류."""
 
 
+class CoverageReportNotGeneratedError(CoverageRatchetError):
+    """coverage.xml is absent or 0 bytes — the report itself was never written,
+    which is a different failure than a parsed report missing baseline."""
+
+
 def read_current_coverage_percent(coverage_xml: Path) -> float:
     """Cobertura `coverage.xml`의 루트 `line-rate`(0..1)를 백분율로 반환한다."""
-    if not coverage_xml.exists():
-        raise CoverageRatchetError(f"coverage.xml 없음: {coverage_xml}")
+    if not coverage_xml.exists() or coverage_xml.stat().st_size == 0:
+        # A 0-byte file parses as ET.ParseError("no element found: line 1, column
+        # 0"), which reads like a corrupt-XML bug. It is actually the signature of
+        # an upstream step (pytest) that never wrote the report at all — report
+        # that distinction explicitly instead of surfacing the raw parser error.
+        raise CoverageReportNotGeneratedError(
+            f"커버리지 리포트가 생성되지 않았다(상류 pytest 확인): {coverage_xml}"
+        )
     try:
         root = ET.parse(coverage_xml).getroot()
     except ET.ParseError as exc:
@@ -89,7 +100,7 @@ def main(argv: list[str] | None = None) -> int:
     delta = current - baseline
     if delta < -args.tolerance:
         print(
-            f"FAIL: 커버리지 하락 {baseline:.2f}% -> {current:.2f}% "
+            f"FAIL: 기준선 미달 {baseline:.2f}% -> {current:.2f}% "
             f"({delta:+.2f}%p, 허용 오차 {args.tolerance:.2f}%p 초과)"
         )
         return 1

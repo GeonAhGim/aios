@@ -68,6 +68,16 @@ def test_read_current_coverage_percent_missing_line_rate_raises(tmp_path: Path) 
         coverage_ratchet.read_current_coverage_percent(path)
 
 
+def test_read_current_coverage_percent_zero_byte_file_raises_not_generated(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "coverage.xml"
+    path.write_bytes(b"")
+
+    with pytest.raises(coverage_ratchet.CoverageReportNotGeneratedError):
+        coverage_ratchet.read_current_coverage_percent(path)
+
+
 def test_read_baseline_percent_missing_file_returns_none(tmp_path: Path) -> None:
     assert coverage_ratchet.read_baseline_percent(tmp_path / "coverage-baseline.txt") is None
 
@@ -136,6 +146,60 @@ def test_risen_coverage_ratchets_baseline_up(tmp_path: Path) -> None:
 
     assert exit_code == 0
     assert baseline_path.read_text(encoding="utf-8").strip() == "85.00"
+
+
+def test_zero_byte_coverage_xml_fails_with_not_generated_message(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """DoD: a 0-byte coverage.xml must fail with a 'report not generated'
+    message, not the raw XML parse error, and must not read like a baseline
+    miss."""
+    xml_path = tmp_path / "coverage.xml"
+    xml_path.write_bytes(b"")
+    baseline_path = _write_baseline(tmp_path, 80.00)
+
+    exit_code = coverage_ratchet.main(
+        ["--coverage-xml", str(xml_path), "--baseline", str(baseline_path)]
+    )
+
+    assert exit_code == 1
+    out = capsys.readouterr().out
+    assert "생성되지 않았다" in out
+    assert "기준선 미달" not in out
+
+
+def test_missing_coverage_xml_fails_with_not_generated_message(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    xml_path = tmp_path / "does-not-exist.xml"
+    baseline_path = _write_baseline(tmp_path, 80.00)
+
+    exit_code = coverage_ratchet.main(
+        ["--coverage-xml", str(xml_path), "--baseline", str(baseline_path)]
+    )
+
+    assert exit_code == 1
+    out = capsys.readouterr().out
+    assert "생성되지 않았다" in out
+
+
+def test_baseline_miss_by_a_hair_fails_with_baseline_miss_message(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """DoD: a well-formed coverage.xml whose line-rate is even 0.01%p past
+    tolerance must fail with a 'baseline miss' message distinct from the
+    'report not generated' message used for empty/missing input."""
+    xml_path = _write_coverage_xml(tmp_path, 0.7949)  # 79.49, baseline 80.00 -> -0.51%p
+    baseline_path = _write_baseline(tmp_path, 80.00)
+
+    exit_code = coverage_ratchet.main(
+        ["--coverage-xml", str(xml_path), "--baseline", str(baseline_path)]
+    )
+
+    assert exit_code == 1
+    out = capsys.readouterr().out
+    assert "기준선 미달" in out
+    assert "생성되지 않았다" not in out
 
 
 def test_custom_tolerance_is_respected(tmp_path: Path) -> None:
