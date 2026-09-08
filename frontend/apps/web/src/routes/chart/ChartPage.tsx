@@ -4,7 +4,7 @@
 // 엄격한 tsconfig에서 tsc -b가 깨진다).
 import type { ChartingPort } from "@aios/chart-engine/src/layout/persistence";
 import type { IndicatorCatalogEntry } from "@aios/chart-engine/src/plugins/indicatorPlugin";
-import type { CandleQueryParams, CandleQueryResult } from "@aios/api-client";
+import type { CandleQueryParams, CandleQueryResult, CoverageQueryParams, CoverageSpanView } from "@aios/api-client";
 import { ApiError, createBacktestsClient, createChartingClient, createMarketDataClient } from "@aios/api-client";
 import { useAuthStore } from "@aios/shared-hooks";
 import { routeApiError, type Timeframe, type Venue } from "@aios/shared-types";
@@ -13,6 +13,7 @@ import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useSearchParams } from "react-router-dom";
 import { AppShell } from "../../components/layout/AppShell";
+import { CoverageBadge } from "../../components/CoverageBadge";
 import { ErrorMessage } from "../../components/ErrorMessage";
 import { BacktestPanel, type RunQuickBacktest } from "./BacktestPanel";
 import { ChartPanes } from "./ChartPanes";
@@ -52,9 +53,17 @@ const chartingClient = createChartingClient(baseUrl, () => useAuthStore.getState
 const backtestsClient = createBacktestsClient(baseUrl, () => useAuthStore.getState().token);
 
 export type FetchCandles = (params: CandleQueryParams) => Promise<CandleQueryResult>;
+// DC-18b: 캔들 조회 포트와 같은 관용(테스트에서 서버 왕복 없이 주입) — 캔들의
+// venue/timeframe만 넘기고, 축(현재 visible range)은 이 화면이 start/end로 이미
+// 갖고 있으므로 CoverageBadge가 그 값을 그대로 받는다.
+export type FetchCoverage = (params: CoverageQueryParams) => Promise<CoverageSpanView[]>;
 
 export interface ChartPageProps {
   fetchCandles?: FetchCandles;
+  // DC-18b: 미지정 시 실 서버 클라이언트(marketDataClient.getCoverage)를 쓴다 —
+  // listInstruments와 동일 관용. 이 화면 테스트는 renderPage가 항상 스텁을 넘긴다
+  // (실 네트워크 회피).
+  fetchCoverage?: FetchCoverage;
   // CH-6b: CH-8 레이아웃 CRUD 포트 — 테스트에서 서버 왕복 없이 주입한다(fetchCandles와 동일 관용).
   chartingPort?: ChartingPort;
   // CH-17c: CH-17b 지표 템플릿 CRUD 포트 — 같은 관용으로 주입 가능하게 둔다.
@@ -75,6 +84,7 @@ export interface ChartPageProps {
 
 export function ChartPage({
   fetchCandles = marketDataClient.getCandles,
+  fetchCoverage = marketDataClient.getCoverage,
   chartingPort = chartingClient,
   templatesPort = chartingClient,
   listInstruments = marketDataClient.listInstruments,
@@ -157,6 +167,15 @@ export function ChartPage({
     enabled: instrumentId !== null && instrumentId.trim().length > 0,
   });
 
+  // DC-18b: candles 조회와 같은 축(venue/instrumentId/timeframe)·같은 enabled 조건 —
+  // 서버가 no-coverage/no-entitlement를 200+[]로 접으므로(getCoverage) 이 조회는
+  // candles 조회 실패와 독립적으로 항상 시도한다.
+  const coverageQuery = useQuery({
+    queryKey: ["chart-coverage", venue, instrumentId, timeframe],
+    queryFn: () => fetchCoverage({ venue, instrumentId: instrumentId as string, timeframe }),
+    enabled: instrumentId !== null && instrumentId.trim().length > 0,
+  });
+
   const { replayRef, replayState, displayCandles, points, replayDisabled } = useChartReplaySession({
     venue,
     instrumentId,
@@ -188,6 +207,7 @@ export function ChartPage({
           <p className="px-3 py-2 text-sm text-fg" data-testid="chart-instrument-id">
             {instrumentId}
           </p>
+          <CoverageBadge spans={coverageQuery.data ?? []} rangeStart={start} rangeEnd={end} now={anchor} />
         </div>
 
         <ChartLayoutErrorBanners layout={layout} />

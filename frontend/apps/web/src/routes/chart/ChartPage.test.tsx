@@ -8,7 +8,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { ChartPage, type ChartPageProps, type FetchCandles } from "./ChartPage";
+import { ChartPage, type ChartPageProps, type FetchCandles, type FetchCoverage } from "./ChartPage";
 
 // ChartPage는 restore/save 에러를 ApiError instanceof로 판별해 errorCode/traceId를
 // 뽑는다(query.error와 동일 관용) — 던지는 값이 실제 ApiError 인스턴스여야 한다.
@@ -135,11 +135,17 @@ function okResult(): CandleQueryResult {
   };
 }
 
+// DC-18b: coverageQuery는 candles와 같은 enabled 조건(instrumentId 있으면 즉시)이라
+// fetchCandles와 동일하게 실 네트워크를 피하려면 이 스위트는 항상 스텁을 넘겨야
+// 한다 — 미지정 시 빈 배열(getCoverage의 no-coverage 응답과 같은 모양)을 준다.
+const defaultFetchCoverage: FetchCoverage = async () => [];
+
 function renderPage(
   fetchCandles: FetchCandles,
   instrumentId: string | null = "BTCUSDT",
   chartingPort: ChartingPort = fakeChartingPort(),
   listInstruments?: ChartPageProps["listInstruments"],
+  fetchCoverage: FetchCoverage = defaultFetchCoverage,
 ) {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   const entry = instrumentId === null ? "/chart" : `/chart?instrument_id=${instrumentId}`;
@@ -148,6 +154,7 @@ function renderPage(
       <MemoryRouter initialEntries={[entry]}>
         <ChartPage
           fetchCandles={fetchCandles}
+          fetchCoverage={fetchCoverage}
           chartingPort={chartingPort}
           listInstruments={listInstruments}
           now={new Date("2026-09-03T05:02:00Z")}
@@ -265,6 +272,7 @@ describe("ChartPage — CH-18b 클라이언트/서버 지표 패리티 폴백", 
         <MemoryRouter initialEntries={["/chart?instrument_id=BTCUSDT"]}>
           <ChartPage
             fetchCandles={fetchCandles}
+            fetchCoverage={defaultFetchCoverage}
             chartingPort={fakeChartingPort()}
             now={new Date("2026-09-04T05:02:00Z")}
             {...extraProps}

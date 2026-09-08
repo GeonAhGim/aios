@@ -62,9 +62,14 @@ const GHOST_PATH_WHITELIST: ReadonlySet<ApiRouteName> = new Set<ApiRouteName>([
 // 부패 방지" 테스트가 정확히 이 14건을 nowPresent로 잡아냈으므로 제거한다.
 // task-1905(CH-17c): charting.indicatorTemplates.* 2건은 60e0b8d7 재생성
 // 시점에도 여전히 스냅샷에 없다(router가 그 이후 머지) — 그대로 남긴다.
+// task-2196(DC-18b): marketData.coverage.get은 task-2195(DC-18a, ddacfca6)로
+// src/api/routers/market_data.py에 실재하게 됐지만(GET .../market-data/coverage),
+// 스냅샷은 그 병합 이후 재생성된 적이 없다 — charting.indicatorTemplates.*와
+// 동일 사유(라우터는 있는데 스냅샷이 낡음)라 STALE_SNAPSHOT_WHITELIST에 둔다.
 const STALE_SNAPSHOT_WHITELIST: ReadonlySet<ApiRouteName> = new Set<ApiRouteName>([
   "charting.indicatorTemplates.base",
   "charting.indicatorTemplates.item",
+  "marketData.coverage.get",
 ]);
 
 // KNOWN_ENVELOPE_DRIFT: task-1165 시점 전수 대조 결과, apiPaths.ts에 등록된 envelope

@@ -177,6 +177,12 @@ export const API_ROUTES = defineApiRoutes({
     null,
     true,
   ),
+  // task-2196(DC-18b): task-2195(DC-18a, ddacfca6)가 실제로 배선한
+  // GET /v1/foundation/market-data/coverage — kwargs(instrument_id·venue·
+  // timeframe) 필수, no-coverage/no-entitlement는 200+[]다(market_data.py:283-299).
+  // 스냅샷(contracts/openapi/v1.json)은 task-2195 병합 이후 재생성되지 않아 아직
+  // 이 경로가 없다 — apiPaths.openapi.test.ts의 STALE_SNAPSHOT_WHITELIST에 등재.
+  "marketData.coverage.get": route("/v1/foundation/market-data/coverage", true, null, true),
 
   // task-1524(LB-19): src/api/routers/positions.py 원문 확인 — `APIRouter(prefix=
   // "/v1/positions")`(positions.py:54), router_registry.py:68 `include_router(positions.

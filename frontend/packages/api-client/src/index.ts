@@ -68,6 +68,9 @@ export type {
   CandleQueryResult,
   InstrumentListParams,
   InstrumentListResult,
+  CoverageQueryParams,
+  CoverageSpanView,
+  CoverageQualityGrade,
 } from "./clients/marketData";
 // task-1524(LB-19): §3.2 (B) positions 조회 클라이언트(list/journal/nav). 서버 라우터
 // src/api/routers/positions.py 실재 — AiosApiClient 합성에는 얹지 않고(marketData와

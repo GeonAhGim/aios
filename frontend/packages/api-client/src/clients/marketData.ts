@@ -137,6 +137,78 @@ function toInstrumentListResult(raw: unknown): InstrumentListResult {
   };
 }
 
+// task-2196(DC-18b): DC-6 contracts/v2/coverage.py CoverageSpan(instrument_id·venue·
+// asset_class·timeframe·quality_grade·start_at·end_at) — get_coverage_endpoint
+// (market_data.py:283-299)가 그대로 반환한다. quality_grade는 도메인상 3단계이지만
+// task-2195 decision상 저장소에는 RAW/VALIDATED만 실제로 나타난다(GOLD는 저장
+// 계약에 없음) — 그렇다고 GOLD를 타입에서 빼면 계약이 3단계라는 사실과 어긋나므로
+// 그대로 셋 다 허용한다.
+export type CoverageQualityGrade = "RAW" | "VALIDATED" | "GOLD";
+
+export interface CoverageSpanView {
+  instrumentId: string;
+  venue: Venue;
+  assetClass: string;
+  timeframe: Timeframe;
+  qualityGrade: CoverageQualityGrade;
+  /** ISO datetime 문자열(UTC). candleSeries.ts와 동일 원칙 — Date 변환은 하지 않는다. */
+  startAt: string;
+  endAt: string;
+}
+
+export interface CoverageQueryParams {
+  instrumentId: string;
+  venue: Venue;
+  timeframe: Timeframe;
+}
+
+const KNOWN_QUALITY_GRADES: readonly CoverageQualityGrade[] = ["RAW", "VALIDATED", "GOLD"];
+
+function isKnownQualityGrade(value: unknown): value is CoverageQualityGrade {
+  return typeof value === "string" && (KNOWN_QUALITY_GRADES as readonly string[]).includes(value);
+}
+
+// 계약 밖 형태(필드 누락·타입 불일치)는 조용히 기본값을 채우지 않고 통째로 버린다
+// (§4.1 0/NaN 채움 금지와 동일 원칙 — 해석 불가한 span을 "커버리지 있음"으로
+// 잘못 셀 수 없다).
+function toCoverageSpanView(raw: unknown): CoverageSpanView | null {
+  if (!isRecord(raw)) return null;
+  const { instrument_id, venue, asset_class, timeframe, quality_grade, start_at, end_at } = raw;
+  if (
+    typeof instrument_id !== "string" ||
+    typeof venue !== "string" ||
+    typeof asset_class !== "string" ||
+    typeof timeframe !== "string" ||
+    !isKnownQualityGrade(quality_grade) ||
+    typeof start_at !== "string" ||
+    typeof end_at !== "string"
+  ) {
+    return null;
+  }
+  return {
+    instrumentId: instrument_id,
+    venue: venue as Venue,
+    assetClass: asset_class,
+    timeframe: timeframe as Timeframe,
+    qualityGrade: quality_grade,
+    startAt: start_at,
+    endAt: end_at,
+  };
+}
+
+function toCoverageSpanList(raw: unknown): CoverageSpanView[] {
+  if (!Array.isArray(raw)) return [];
+  return raw.map((item) => toCoverageSpanView(item)).filter((span): span is CoverageSpanView => span !== null);
+}
+
+function toCoverageQuery(params: CoverageQueryParams): Record<string, string> {
+  return {
+    instrument_id: params.instrumentId,
+    venue: params.venue,
+    timeframe: params.timeframe,
+  };
+}
+
 class MarketDataApiClient extends ApiClientBase {
   private async fetchCandles(route: ApiRouteName, query: Record<string, string>): Promise<CandleQueryResult> {
     const path = this.withQuery(resolvePath(route), query);
@@ -188,6 +260,20 @@ class MarketDataApiClient extends ApiClientBase {
     );
     return Array.isArray(raw) ? raw.map((item) => parseSymbolAlias(item)) : [];
   }
+
+  // task-2196(DC-18b): no-coverage/no-entitlement는 서버가 200+[]로 접는다
+  // (get_coverage.py) — 이 클라이언트도 그 형태를 그대로 빈 배열로 돌려주고
+  // throw하지 않는다(CoverageBadge가 "미커버"로 표시할 신호일 뿐 에러가 아니다).
+  async getCoverage(params: CoverageQueryParams): Promise<CoverageSpanView[]> {
+    requireKnownTimeframe(params.timeframe);
+    const path = this.withQuery(resolvePath("marketData.coverage.get"), toCoverageQuery(params));
+    const raw = keysToSnake(
+      resolveEnvelope("marketData.coverage.get")
+        ? await this.requestEnvelope<unknown>(path)
+        : await this.request<unknown>(path),
+    );
+    return toCoverageSpanList(raw);
+  }
 }
 
 export interface MarketDataClient {
@@ -195,6 +281,7 @@ export interface MarketDataClient {
   replayCandles(params: ReplayQueryParams): Promise<CandleQueryResult>;
   listInstruments(params?: InstrumentListParams): Promise<InstrumentListResult>;
   listInstrumentAliases(instrumentId: string): Promise<ParsedSymbolAlias[]>;
+  getCoverage(params: CoverageQueryParams): Promise<CoverageSpanView[]>;
 }
 
 export function createMarketDataClient(baseUrl: string, getToken: () => string | null): MarketDataClient {
@@ -204,5 +291,6 @@ export function createMarketDataClient(baseUrl: string, getToken: () => string |
     replayCandles: (params) => client.replayCandles(params),
     listInstruments: (params) => client.listInstruments(params),
     listInstrumentAliases: (instrumentId) => client.listInstrumentAliases(instrumentId),
+    getCoverage: (params) => client.getCoverage(params),
   };
 }
