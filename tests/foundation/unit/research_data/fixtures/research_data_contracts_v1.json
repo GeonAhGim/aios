@@ -1,0 +1,154 @@
+{
+  "ResearchItem": {
+    "description": "개별 리서치 항목(공시·뉴스·거시·대안데이터 공통 포락선).\n\n`known_at`은 그 사실을 시스템이 알 수 있었던 시각 — 백테스트·전략은\n`known_at <= bar_ts`만 읽는다(§1 시점 정합, RD-A1). 점검은\n`domain/known_at.assert_point_in_time`이 한다(이 파일은 계약만 정의).\n`revision_of`가 채워지면 이 항목은 그 `item_id`의 정정판이다(RD-3의\n입력, 이 리프에서는 체인 규칙을 강제하지 않는다).",
+    "properties": {
+      "item_id": {
+        "format": "uuid",
+        "title": "Item Id",
+        "type": "string"
+      },
+      "source_id": {
+        "title": "Source Id",
+        "type": "string"
+      },
+      "kind": {
+        "enum": [
+          "filing",
+          "news",
+          "macro",
+          "alt"
+        ],
+        "title": "Kind",
+        "type": "string"
+      },
+      "published_at": {
+        "format": "date-time",
+        "title": "Published At",
+        "type": "string"
+      },
+      "known_at": {
+        "format": "date-time",
+        "title": "Known At",
+        "type": "string"
+      },
+      "instruments": {
+        "items": {
+          "type": "string"
+        },
+        "title": "Instruments",
+        "type": "array"
+      },
+      "title": {
+        "title": "Title",
+        "type": "string"
+      },
+      "body_ref": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "title": "Body Ref"
+      },
+      "url": {
+        "title": "Url",
+        "type": "string"
+      },
+      "language": {
+        "title": "Language",
+        "type": "string"
+      },
+      "hash": {
+        "title": "Hash",
+        "type": "string"
+      },
+      "revision_of": {
+        "anyOf": [
+          {
+            "format": "uuid",
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "title": "Revision Of"
+      },
+      "schema_version": {
+        "const": "v1",
+        "default": "v1",
+        "title": "Schema Version",
+        "type": "string"
+      }
+    },
+    "required": [
+      "item_id",
+      "source_id",
+      "kind",
+      "published_at",
+      "known_at",
+      "instruments",
+      "title",
+      "body_ref",
+      "url",
+      "language",
+      "hash",
+      "revision_of"
+    ],
+    "title": "ResearchItem",
+    "type": "object"
+  },
+  "SourceMeta": {
+    "description": "소스별 메타 — 라이선스·수집 정책 강제 근거(RD-A3, RD-3의 입력).\n\n`rate_limit`은 분당 허용 요청 수(토큰버킷 파라미터 선언값, 실제 제한은\n수집 어댑터 소관 — `market_data/ports/provider.py`의 `RateLimitSpec`과\n동일 원칙). `coverage`는 사람이 읽는 커버리지 설명(예: \"2015-01-01~\npresent, 지연 5분\") — 구조화된 커버리지 판정은 DC-19~22의 몫이다.",
+    "properties": {
+      "source_id": {
+        "title": "Source Id",
+        "type": "string"
+      },
+      "publisher": {
+        "title": "Publisher",
+        "type": "string"
+      },
+      "redistribution": {
+        "enum": [
+          "store_full",
+          "store_excerpt",
+          "link_only"
+        ],
+        "title": "Redistribution",
+        "type": "string"
+      },
+      "license_ref": {
+        "title": "License Ref",
+        "type": "string"
+      },
+      "rate_limit": {
+        "title": "Rate Limit",
+        "type": "integer"
+      },
+      "coverage": {
+        "title": "Coverage",
+        "type": "string"
+      },
+      "schema_version": {
+        "const": "v1",
+        "default": "v1",
+        "title": "Schema Version",
+        "type": "string"
+      }
+    },
+    "required": [
+      "source_id",
+      "publisher",
+      "redistribution",
+      "license_ref",
+      "rate_limit",
+      "coverage"
+    ],
+    "title": "SourceMeta",
+    "type": "object"
+  }
+}
