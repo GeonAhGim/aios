@@ -101,6 +101,7 @@ extend-immutable-calls = ["fastapi.Depends", "fastapi.Query", "fastapi.Path", "f
 "src/db/**" = ["TID251"]
 "src/exchanges/**" = ["TID251"]
 "src/foundation/*/adapters/**" = ["TID251"]
+"src/foundation/backtest/ports/**" = ["TID251"]
 "src/foundation/ledger/ports/**" = ["TID251"]
 "src/foundation/ledger/application/**" = ["TID251"]
 "src/foundation/positions/application/**" = ["TID251"]
