@@ -14,6 +14,7 @@ from __future__ import annotations
 import hashlib
 import json
 from collections.abc import Mapping
+from dataclasses import dataclass
 
 from src.core.indicators.spec import IndicatorSpec
 from src.core.indicators.specs_talib import TALIB_SPECS
@@ -99,3 +100,105 @@ class IndicatorRegistry:
 
 
 DEFAULT_REGISTRY = IndicatorRegistry()
+
+
+# --- IND-16: indicator-on-indicator dependency graph ------------------------
+#
+# Spec: docs/specs/L4_analytics_authoring_backtest_marketplace_v1.0.md#§9.11 IND-16.
+# An input to one indicator may be another indicator's output instead of a raw
+# market-data column. This section only builds and validates the dependency
+# graph (cycle detection, depth cap, composite lookback) on top of the
+# `IndicatorRegistry` methods above — it does not compute anything itself;
+# `engine/__init__.py` delegates the actual math to `engine/vectorized.py` /
+# `engine/incremental.py` per node (no formula reimplementation, IND-1 SSOT).
+#
+# Error codes added here:
+# - `INDICATOR_CHAIN_CYCLE` — a node (transitively, or by self-reference)
+#   depends on its own output.
+# - `INDICATOR_CHAIN_TOO_DEEP` — chain depth exceeds `MAX_CHAIN_DEPTH`
+#   (fail-closed guard against unbounded recursion).
+# `INDICATOR_INPUT_INVALID` is reused for an unknown node reference, an input
+# name that doesn't match the indicator's declared `spec.inputs`, or an
+# `output` name that doesn't match the referenced node's `spec.outputs`.
+
+MAX_CHAIN_DEPTH = 8
+
+
+@dataclass(frozen=True)
+class ColumnSource:
+    """A chain node input backed by a raw base market-data column (e.g. "close")."""
+
+    column: str
+
+
+@dataclass(frozen=True)
+class NodeSource:
+    """A chain node input backed by another chain node's output."""
+
+    node: str
+    output: str
+
+
+ChainInput = ColumnSource | NodeSource
+
+
+@dataclass(frozen=True)
+class ChainNode:
+    """One node of a dependency graph: an indicator instance (`name`+`params`,
+    the L02 lookup key) plus a `ChainInput` for every name in that
+    indicator's declared `spec.inputs`."""
+
+    name: str
+    params: Mapping[str, int]
+    inputs: Mapping[str, ChainInput]
+
+
+ChainGraph = Mapping[str, ChainNode]
+
+
+def resolve_chain(
+    graph: ChainGraph, root: str, registry: IndicatorRegistry
+) -> tuple[list[str], int]:
+    """Validate `graph` fail-closed and return (`root`'s dependencies-first
+    compute order, composite lookback for `root`).
+
+    Composite lookback per node is its own lookback plus the *maximum* of its
+    parent nodes' composite lookbacks (parents share the same time axis, so
+    they don't stack additively) — for a single linear chain this maximum
+    degenerates to a sum, matching §9.11 DoD (c).
+    """
+    order: list[str] = []
+    visiting: set[str] = set()
+    visited: set[str] = set()
+    lookback_of: dict[str, int] = {}
+
+    def visit(node_id: str, depth: int) -> None:
+        if node_id in visited:
+            return
+        if node_id in visiting:
+            raise IndicatorError("INDICATOR_CHAIN_CYCLE")
+        if node_id not in graph:
+            raise IndicatorError("INDICATOR_INPUT_INVALID")
+        if depth > MAX_CHAIN_DEPTH:
+            raise IndicatorError("INDICATOR_CHAIN_TOO_DEEP")
+        node = graph[node_id]
+        spec = registry.get(node.name)
+        if set(node.inputs) != set(spec.inputs):
+            raise IndicatorError("INDICATOR_INPUT_INVALID")
+        visiting.add(node_id)
+        parent_lookbacks = [0]
+        for source in node.inputs.values():
+            if isinstance(source, ColumnSource):
+                continue
+            visit(source.node, depth + 1)
+            parent_spec = registry.get(graph[source.node].name)
+            if source.output not in parent_spec.outputs:
+                raise IndicatorError("INDICATOR_INPUT_INVALID")
+            parent_lookbacks.append(lookback_of[source.node])
+        visiting.discard(node_id)
+        visited.add(node_id)
+        order.append(node_id)
+        lookback_of[node_id] = registry.lookback(node.name, node.params) + max(parent_lookbacks)
+
+    visit(root, 1)
+    return order, lookback_of[root]

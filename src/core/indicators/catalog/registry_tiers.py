@@ -35,7 +35,13 @@ from typing import Protocol
 from uuid import UUID
 
 from src.core.indicators.generate_specs import TALIB_GROUPS
-from src.core.indicators.registry import canonical_spec_dict
+from src.core.indicators.registry import (
+    ChainGraph,
+    ColumnSource,
+    IndicatorRegistry,
+    canonical_spec_dict,
+    resolve_chain,
+)
 from src.core.indicators.spec import REGISTRY_VERSION, IndicatorSpec
 from src.core.indicators.specs_talib import TALIB_SPECS
 
@@ -46,6 +52,7 @@ __all__ = [
     "ScriptIndicatorSource",
     "Tier",
     "build_static_catalog",
+    "chain_entry_hash",
     "list_catalog",
     "merge_script_entries",
     "paginate_catalog",
@@ -198,3 +205,35 @@ def paginate_catalog(
 
 
 DEFAULT_STATIC_CATALOG: dict[str, CatalogEntry] = build_static_catalog(TALIB_SPECS, TALIB_GROUPS)
+
+
+def chain_entry_hash(root: str, graph: ChainGraph, registry: IndicatorRegistry) -> str:
+    """Content hash for an IND-16 chain-composed catalog entry.
+
+    Reuses the same `canonical_spec_dict`/sha256 recipe as `_spec_entry_hash`,
+    extended with the dependency graph's shape (node ids, params, input
+    wiring) — a chain's hash must change if any upstream node's definition
+    changes, even when the root indicator's own spec is untouched. Validates
+    `graph` first (`resolve_chain` raises `IndicatorError` fail-closed on an
+    unknown node, a cycle, or an over-deep chain) so this never hashes a
+    graph that couldn't actually be computed.
+    """
+    order, _ = resolve_chain(graph, root, registry)
+    canonical = [
+        {
+            "node": node_id,
+            "spec": canonical_spec_dict(graph[node_id].name, registry.get(graph[node_id].name)),
+            "params": dict(sorted(graph[node_id].params.items())),
+            "inputs": {
+                input_name: (
+                    {"column": source.column}
+                    if isinstance(source, ColumnSource)
+                    else {"node": source.node, "output": source.output}
+                )
+                for input_name, source in sorted(graph[node_id].inputs.items())
+            },
+        }
+        for node_id in order
+    ]
+    payload = json.dumps(canonical, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
