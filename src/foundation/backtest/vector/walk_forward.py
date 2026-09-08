@@ -1,24 +1,25 @@
-"""BT-16a (2/3) — `backtest/vector/walk_forward.py`: 롤링 훈련/검증 창 실행.
+"""BT-16a (2/3) — `backtest/vector/walk_forward.py`: rolling train/test window execution.
 
 Spec: docs/specs/L4_analytics_authoring_backtest_marketplace_v1.0.md §9.9
-BT-16. task-2371 decision — `grid.py` 모듈 docstring과 같은 분할(AI-10 실험
-원장 기록은 BT-16b로 미룸, 이 리프는 실행부만).
+BT-16. task-2371 decision -- same split as the `grid.py` module docstring (the AI-10
+experiment-ledger record is deferred to BT-16b, this leaf is execution-only).
 
-워크포워드는 데이터를 연속한 (훈련 구간, 검증 구간) 창으로 나눠, 각 창의
-훈련 구간에서 가장 좋은 조합을 고른 뒤 그 조합을 같은 창의 검증 구간(훈련이
-보지 못한 구간)에서만 채점한다 — 훈련 구간 성과로 조합을 고르는 로직 자체가
-이 리프의 핵심이다("실행부"이지 최적화 알고리즘 리프가 아니다: 조합 후보와
-그 신호는 여전히 호출자가 만들어 넘긴다). 선택 지표는
-`QuickBacktestResult.final_equity`(다른 지표(샤프 등)는 이 리프 범위 밖 —
-필요해지면 별도 리프에서 명시적으로 다룬다, 추측으로 지금 만들지 않는다).
+Walk-forward divides the data into consecutive (train window, test window) pairs; for
+each window it picks the best combo on the train window, then scores that combo only on
+the same window's test window (the portion training never saw) -- the logic that picks a
+combo from train-window performance is itself the core of this leaf ("execution part",
+not an optimization-algorithm leaf: the candidate combos and their signals are still
+built and handed in by the caller). The selection metric is
+`QuickBacktestResult.final_equity` (other metrics such as Sharpe are out of scope for
+this leaf -- if needed, a separate leaf will address them explicitly; not built now on
+speculation).
 
-체결 산식은 다시 구현하지 않는다(I-05) — `grid.py`처럼 매 창·매 조합마다
-BT-15b `run_vector_backtest`를 그대로 호출한다. 창을 나누는 절단은
-`CandleColumns`/`VectorSignal` 배열 슬라이스만 한다(BT-11
-`deep_backtest_job._prefix` 선례와 같은 방식 — 새 시계열 표현을 신설하지
-않는다).
+It does not reimplement the fill arithmetic (I-05) -- like `grid.py`, it calls BT-15b
+`run_vector_backtest` unchanged for every window/combo pair. Splitting into windows is
+just array slicing over `CandleColumns`/`VectorSignal` (same approach as the BT-11
+`deep_backtest_job._prefix` precedent -- no new time-series representation introduced).
 
-순수 모듈 — I/O 없음.
+Pure module -- no I/O.
 """
 from __future__ import annotations
 
@@ -43,15 +44,16 @@ __all__ = [
 
 
 class WalkForwardError(ValueError):
-    """`BT_VECTOR_WALK_FORWARD` — 조합 없음·창 크기가 데이터보다 큼 등
-    fail-closed 거부."""
+    """`BT_VECTOR_WALK_FORWARD` — fail-closed rejection for no combos, window size
+    larger than the data, and the like."""
 
 
 @dataclass(frozen=True, slots=True)
 class WalkForwardWindowSpec:
-    """`train_bars`개로 조합을 고르고, 바로 이어지는 `test_bars`개로 채점한다.
-    `step_bars`(생략 시 `test_bars`와 같음, 즉 검증 구간끼리 겹치지 않고
-    이어 붙는 기본값)만큼 다음 창의 훈련 시작점을 민다."""
+    """Picks the combo over `train_bars` bars, then scores it over the immediately
+    following `test_bars` bars. Advances the next window's train start by `step_bars`
+    (defaults to `test_bars` when omitted, i.e. test windows are back-to-back with no
+    overlap by default)."""
 
     train_bars: int
     test_bars: int
@@ -72,9 +74,9 @@ class WalkForwardWindowSpec:
 
 @dataclass(frozen=True, slots=True)
 class WalkForwardWindow:
-    """`[train_start, train_end)`가 조합 선택에 쓰인 훈련 구간,
-    `[test_start, test_end)`(항상 `test_start == train_end`)가 선택된
-    `selected_combo`를 채점한 검증 구간이다."""
+    """`[train_start, train_end)` is the training window used to select the combo;
+    `[test_start, test_end)` (always `test_start == train_end`) is the test window that
+    scored the selected `selected_combo`."""
 
     train_start: int
     train_end: int
@@ -100,14 +102,14 @@ def run_walk_forward(
     initial_cash: Decimal,
     funding_rate: Decimal | None = None,
 ) -> WalkForwardResult:
-    """`columns` 전체를 `window` 규격의 (훈련, 검증) 창으로 순차 분할하고,
-    창마다 `combos`를 전부 훈련 구간에서 실행해 `final_equity`가 가장 큰
-    조합을 골라 검증 구간에서 다시 실행한다.
+    """Splits all of `columns` sequentially into (train, test) windows per the `window`
+    spec; for each window, runs every combo in `combos` over the train segment, picks
+    the one with the largest `final_equity`, then runs it again over the test segment.
 
-    창을 하나도 만들 수 없으면(데이터가 `train_bars+test_bars`보다 짧으면)
-    빈 결과를 조용히 반환하지 않고 거부한다 — "창 0개짜리 워크포워드"는
-    호출자가 창 규격이나 데이터 범위를 잘못 짰다는 신호이지 정상적인
-    빈 결과가 아니다."""
+    If not a single window can be formed (the data is shorter than
+    `train_bars+test_bars`), this rejects rather than silently returning an empty
+    result -- a "zero-window walk-forward" signals that the caller misconfigured the
+    window spec or data range, not a normal empty result."""
     if not combos:
         raise WalkForwardError("combos가 비어 있다 — 훈련 구간에서 고를 조합이 없다")
 
@@ -153,8 +155,8 @@ def run_walk_forward(
 
 
 def _slice_columns(columns: CandleColumns, start: int, end: int) -> CandleColumns:
-    """BT-11 `deep_backtest_job._prefix`와 같은 필드별 수동 슬라이스 —
-    `CandleColumns`는 슬라이스 헬퍼가 없는 순수 데이터 홀더 dataclass다."""
+    """Manual per-field slicing, same approach as BT-11 `deep_backtest_job._prefix` --
+    `CandleColumns` is a pure data-holder dataclass with no slicing helper."""
     return CandleColumns(
         ts=columns.ts[start:end], open=columns.open[start:end], high=columns.high[start:end],
         low=columns.low[start:end], close=columns.close[start:end],

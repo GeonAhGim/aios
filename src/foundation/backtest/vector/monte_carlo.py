@@ -1,29 +1,32 @@
-"""BT-16a (3/3) — `backtest/vector/monte_carlo.py`: 봉별 수익률 재표본 몬테카를로.
+"""BT-16a (3/3) — `backtest/vector/monte_carlo.py`: per-bar-return resampling Monte Carlo.
 
 Spec: docs/specs/L4_analytics_authoring_backtest_marketplace_v1.0.md §9.9
-BT-16. task-2371 decision — `grid.py` 모듈 docstring과 같은 분할(AI-10 실험
-원장 기록은 BT-16b로 미룸, 이 리프는 실행부만).
+BT-16. task-2371 decision -- same split as the `grid.py` module docstring (the AI-10
+experiment-ledger record is deferred to BT-16b, this leaf is execution-only).
 
-`grid.py`/`walk_forward.py`는 조합·창마다 이벤트 엔진(`run_vector_backtest`)을
-다시 호출해 새 체결을 만든다. 이 모듈은 다르다 — BT-15b가 이미 낸 단일
-`QuickBacktestResult.equity_curve`(Decimal 튜플, 봉마다의 원장 자본)를
-진실로 삼아 체결·비용을 다시 계산하지 않는다(I-05, 이벤트 엔진 재호출
-없음). `equity_curve`에서 봉 사이 수익률을 뽑아 복원추출(bootstrap)로
-순서를 섞은 경로를 `iterations`개 만들어 "이 전략의 최종 성과가 실현된 봉
-순서에 얼마나 의존하는가"를 정량화한다 — 파라미터나 창을 바꾸는 게 아니라
-같은 수익률 표본을 재배열만 하므로 이벤트 루프 재실행 비용이 없다(BT-16
-DoD "1,000 조합 ≤60s"를 이 리프에서는 순수 numpy 벡터 연산으로 만족한다).
+`grid.py`/`walk_forward.py` call the event engine (`run_vector_backtest`) again for
+every combo/window to produce new fills. This module is different -- it treats the
+single `QuickBacktestResult.equity_curve` (a Decimal tuple, per-bar ledger equity)
+BT-15b already produced as ground truth and does not recompute fills or costs (I-05, no
+re-invocation of the event engine). It extracts bar-to-bar returns from `equity_curve`
+and builds `iterations` reorderings via bootstrap resampling to quantify "how much does
+this strategy's final performance depend on the realized bar order" -- since it's not
+changing parameters or the window, only reshuffling the same return sample, there's no
+cost to re-running the event loop (this leaf satisfies the BT-16 DoD "1,000 combos
+<=60s" with pure numpy vector operations).
 
-결정론: 난수는 `numpy.random.Generator`를 인자로 명시적으로 받는다 —
-전역 난수 상태(`np.random.seed` 등)에 의존하면 같은 호출이 실행마다 다른
-결과를 내 재현 키(BT-9)와 맞물릴 여지가 없어진다. 시드를 고정한 `Generator`를
-넘기면 이 함수는 항상 같은 결과를 낸다.
+Determinism: the random generator is taken explicitly as the `numpy.random.Generator`
+argument -- depending on global random state (e.g. `np.random.seed`) would make the same
+call produce different results across runs, leaving no way to tie it to a reproducibility
+key (BT-9). Passing a `Generator` with a fixed seed makes this function always return the
+same result.
 
-`Decimal` 왕복(`Decimal(str(float))`)은 `arrays.py` 모듈 docstring이 이미
-선언한 것과 같은 의도적 정밀도 손실이다 — 이 리프는 통계적 분포 요약이지
-회계 정확도가 필요한 체결 로그가 아니다.
+The `Decimal` round-trip (`Decimal(str(float))`) is the same deliberate precision
+trade-off already declared by the `arrays.py` module docstring -- this leaf is a
+statistical distribution summary, not a fill log that needs accounting precision.
 
-순수 모듈 — I/O 없음(난수는 인자로 주입되므로 숨은 부수효과가 아니다).
+Pure module -- no I/O (the random generator is injected as an argument, so this has no
+hidden side effect).
 """
 from __future__ import annotations
 
@@ -43,15 +46,15 @@ _DEFAULT_PERCENTILES = (5, 25, 50, 75, 95)
 
 
 class MonteCarloError(ValueError):
-    """`BT_VECTOR_MONTE_CARLO` — `iterations`<=0·`equity_curve` 길이 부족·
-    0 자본 구간·백분위 범위 밖 등 fail-closed 거부."""
+    """`BT_VECTOR_MONTE_CARLO` — fail-closed rejection for `iterations`<=0,
+    `equity_curve` too short, a zero-equity segment, an out-of-range percentile, etc."""
 
 
 @dataclass(frozen=True, slots=True)
 class MonteCarloResult:
-    """`final_equities[i]`는 `i`번째 재표본 경로의 최종 자본(입력 순서 =
-    반복 순서, 정렬 안 됨). `percentiles`는 호출자가 요청한 백분위(0~100
-    정수) -> 그 백분위에 해당하는 `final_equities` 값."""
+    """`final_equities[i]` is the final equity of the i-th resampled path (input order =
+    iteration order, not sorted). `percentiles` maps the caller-requested percentile
+    (an integer 0-100) to the corresponding `final_equities` value."""
 
     final_equities: tuple[Decimal, ...]
     percentiles: dict[int, Decimal]
@@ -64,10 +67,10 @@ def run_monte_carlo(
     rng: np.random.Generator,
     percentiles: tuple[int, ...] = _DEFAULT_PERCENTILES,
 ) -> MonteCarloResult:
-    """`base_result.equity_curve`의 봉별 수익률을 복원추출로 재배열한 경로
-    `iterations`개를 만들어 각 경로의 최종 자본을 모은다. 시작 자본은 항상
-    `equity_curve[0]`으로 고정한다 — 부트스트랩은 수익률의 순서만 섞지,
-    자본 규모 자체를 새로 만들지 않는다."""
+    """Builds `iterations` paths by bootstrap-reordering the per-bar returns of
+    `base_result.equity_curve`, and collects each path's final equity. The starting
+    equity is always fixed at `equity_curve[0]` -- the bootstrap only reshuffles the
+    order of returns, it never fabricates the equity scale itself."""
     if iterations <= 0:
         raise MonteCarloError(f"iterations는 양수여야 한다: {iterations}")
     for p in percentiles:
@@ -92,9 +95,9 @@ def run_monte_carlo(
 
 
 def _bar_returns(curve: tuple[Decimal, ...]) -> FloatArray:
-    """`curve[i]`가 0이면 그 구간부터의 수익률(`curve[i+1]/curve[i] - 1`)이
-    정의되지 않는다 — 자본이 0으로 소진된 경로를 조용히 건너뛰지 않고
-    즉시 거부한다(fail-closed)."""
+    """If `curve[i]` is 0, the return from that segment onward (`curve[i+1]/curve[i] -
+    1`) is undefined -- a path whose equity was exhausted to 0 is rejected immediately
+    rather than silently skipped (fail-closed)."""
     if len(curve) < 2:
         raise MonteCarloError(
             f"equity_curve 길이가 {len(curve)}다 — 봉 간 수익률을 뽑으려면 최소 2개가 필요하다"

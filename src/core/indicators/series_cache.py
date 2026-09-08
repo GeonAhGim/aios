@@ -1,18 +1,18 @@
-"""L28 — 백테스트 전구간 1회 계산 + point-in-time 조회(O(n^2) 제거).
+"""L28 — one-time whole-range backtest computation + point-in-time lookup (removes O(n^2)).
 
 Spec: docs/specs/L4_strategy_portfolio_backtest_v1.0.md §2.2 L28
 
-전략 리플레이가 매 bar마다 그때까지의 캔들 슬라이스로 지표를 처음부터
-다시 계산하면 O(n^2)이 된다(§1.2 격차 인용, `run_backtest.py`의
-`bars[:bar_index+1]` 재계산). TA-Lib 지표는 인덱스 i의 출력이 입력
-배열의 0..i만으로 정해지는 인과적(causal) 계산이므로, 전체 bar 배열에
-대해 딱 한 번 계산해도 매 bar 재계산과 값이 같다 — 이 성질을
-`build()`가 `causal=True` 지표만 받도록 강제해 코드로 못박는다.
+If strategy replay recomputes indicators from scratch on the candle slice up to each bar,
+every time, that's O(n^2) (see the §1.2 gap citation, `run_backtest.py`'s
+`bars[:bar_index+1]` recomputation). TA-Lib indicators are causal: index i's output is
+determined only by elements 0..i of the input array, so computing once over the whole
+bar array gives the same values as recomputing at every bar -- `build()` pins this
+property in code by only accepting `causal=True` indicators.
 
-`value_at`은 "지금까지의 슬라이스"가 아니라 정수 `bar_index` 하나만
-받는다 — bar_index보다 큰 인덱스를 조회할 API 자체가 없으므로 look-ahead
-경로가 구조적으로 없다(선언한 인덱스 범위 밖은 `SeriesCacheError`로
-fail-closed 거부).
+`value_at` takes a single integer `bar_index`, not "the slice so far" -- since there is no
+API at all to look up an index greater than bar_index, the look-ahead path is
+structurally absent (an out-of-declared-range index is rejected fail-closed with
+`SeriesCacheError`).
 """
 from __future__ import annotations
 
@@ -28,7 +28,7 @@ __all__ = ["IndicatorSeriesCache", "SeriesCacheError", "SeriesKey"]
 
 
 class SeriesCacheError(Exception):
-    """캐시 구축/조회 실패. `code`는 상위 계층 오류 매핑용."""
+    """Cache build/lookup failure. `code` is for mapping errors in the upper layer."""
 
     def __init__(self, code: str) -> None:
         super().__init__(code)
@@ -37,12 +37,12 @@ class SeriesCacheError(Exception):
 
 @dataclass(frozen=True, slots=True)
 class SeriesKey:
-    """캐시 조회 키 — 지표·파라미터·타임프레임·출력 라인을 특정한다.
+    """Cache lookup key — identifies the indicator, params, timeframe, and output line.
 
-    `params`는 dict가 아니라 정렬된 튜플이라 해시 가능(딕셔너리 캐시의 키로
-    쓰기 위함). 다중 출력 지표(MACD 등)는 `output`으로 라인을 고른다
-    (`IndicatorResult.series`의 키와 같은 이름) — 생략하면 주 출력선
-    (`IndicatorResult.values`)을 쓴다.
+    `params` is a sorted tuple, not a dict, so it's hashable (for use as a dict-cache
+    key). Multi-output indicators (e.g. MACD) select a line via `output` (same name as
+    the key in `IndicatorResult.series`) — omitting it uses the primary output line
+    (`IndicatorResult.values`).
     """
 
     indicator: str
@@ -69,7 +69,8 @@ class SeriesKey:
 
 @dataclass(frozen=True, slots=True)
 class IndicatorSeriesCache:
-    """`SeriesKey` -> 전구간 계산 결과(bar_index로 색인하는 `Decimal|None` 튜플)."""
+    """`SeriesKey` -> whole-range computation result (a `Decimal|None` tuple indexed
+    by bar_index)."""
 
     _series: Mapping[SeriesKey, tuple[Decimal | None, ...]]
 

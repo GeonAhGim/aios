@@ -235,11 +235,10 @@ async def start_background_loops(
         enabled=flag_enabled("AIOS_STARTUP_RECOVERY_ENABLED"),
     )
 
-    # FD-8 execution loop (full-audit §3's largest wiring gap — run_execution_tick was
-    # complete, but its only caller was tests). The interval comes from risk_policy.yaml's
-    # execution_loop.interval_sec. EO-03 minimal wiring (lease renewal / release_all /
-    # adversarial tests are left to EO-04); the newly required argument (I-01) is filled
-    # using only existing components.
+    # FD-8 execution loop (full-audit §3's largest wiring gap -- run_execution_tick was
+    # complete, but its only caller was tests). Interval from risk_policy.yaml's
+    # execution_loop.interval_sec. EO-03 minimal wiring (lease renewal/release_all/
+    # adversarial tests left to EO-04); the new required arg (I-01) uses only existing components.
     owner_id = f"{socket.gethostname()}:{os.getpid()}:{uuid4()}"
     lease_repo = PostgresExecutionLeaseRepository(pool)
     execution_scheduler = ExecutionLoopScheduler(
