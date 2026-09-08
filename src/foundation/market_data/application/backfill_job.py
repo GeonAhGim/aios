@@ -9,7 +9,7 @@ from __future__ import annotations
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Any, Protocol
+from typing import Any
 from uuid import UUID, uuid4
 
 from src.data.models.base import AssetClass
@@ -24,10 +24,6 @@ from src.foundation.market_data.ports.candle_store import CandleStore
 from src.foundation.market_data.ports.provider import MarketDataProvider, TimeSpan
 
 __all__ = ["BackfillReport", "run_backfill", "backfill"]
-
-
-class CoverageWriter(Protocol):
-    async def record_span(self, span: CoverageSpan) -> None: ...
 
 
 @dataclass(frozen=True)
