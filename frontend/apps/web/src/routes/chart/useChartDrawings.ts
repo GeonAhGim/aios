@@ -27,10 +27,23 @@ import { type Dispatch, type SetStateAction, useCallback, useEffect, useRef, use
 import { loadDrawings, saveDrawings, type ChartingPort } from "@aios/chart-engine/src/layout/persistence";
 import { addDrawing, removeDrawing } from "@aios/chart-engine/src/drawings/tools";
 import type { DrawingCollection, DrawingKind } from "@aios/chart-engine/src/drawings/model";
+import { serializeDrawings } from "@aios/chart-engine/src/drawings/serialize";
 import type { StreamCandle } from "@aios/chart-engine/src/data/candleStream";
 import type { Timeframe, Venue } from "@aios/shared-types";
 import type { ChartLayoutStatus } from "./useChartLayout";
 import { createDrawing } from "./chartPageHelpers";
+
+// CH-4c (task-2101): chartToolbarLayoutProps.ts chains persistDrawings(layoutId) onto
+// every single "레이아웃 저장" click (CH-4b, a4269edc) — even when the user only
+// changed a non-drawing setting (timeframe, indicators) and drew nothing. Without a
+// same-content check, that means a drawings PUT (and a drawings revision bump) fires
+// on every layout save, which both wastes a round trip and can spuriously invalidate
+// another open tab's `expectedRevision` for content that never actually changed.
+// `lastSyncedRef` holds the chart-engine `serializeDrawings` output for the drawing
+// set last known to match the server (set on successful restore/persist); `persist()`
+// compares against it and skips the network call when nothing to send actually
+// changed. This is the actual (not test-only) production use of CH-4's serializer —
+// see unwired-modules-baseline.json's now-removed "drawings/serialize" entry.
 
 export type ChartDrawingsRestoreStatus = "idle" | "loading" | "ready" | "not_found" | "restore_failed";
 export type ChartDrawingsSaveStatus = "idle" | "saving" | "conflict" | "not_found" | "error";
@@ -71,6 +84,8 @@ export function useChartDrawings(
   const drawingSeq = useRef(0);
   const revisionRef = useRef<number | null>(null);
   const restoredOnceRef = useRef(false);
+  // CH-4c: last drawing set known to match the server, encoded via serializeDrawings.
+  const lastSyncedRef = useRef<string | null>(null);
 
   const [restoreStatus, setRestoreStatus] = useState<ChartDrawingsRestoreStatus>("idle");
   const [restoreError, setRestoreError] = useState<unknown>(null);
@@ -96,6 +111,7 @@ export function useChartDrawings(
         }
         revisionRef.current = result.value.meta.revision;
         setDrawings(result.value.drawings);
+        lastSyncedRef.current = serializeDrawings(result.value.drawings);
         setRestoreStatus("ready");
       } catch (err) {
         setRestoreError(err);
@@ -123,6 +139,14 @@ export function useChartDrawings(
 
   const persist = useCallback(
     async (id: string) => {
+      // CH-4c: skip the PUT entirely when the encoded drawing set already matches
+      // what the server has — see the file-header comment for why this matters.
+      const encoded = serializeDrawings(drawings);
+      if (encoded === lastSyncedRef.current) {
+        setSaveStatus("idle");
+        setSaveError(null);
+        return;
+      }
       setSaveStatus("saving");
       setSaveError(null);
       try {
@@ -134,6 +158,7 @@ export function useChartDrawings(
         }
         revisionRef.current = result.value.meta.revision;
         setDrawings(result.value.drawings);
+        lastSyncedRef.current = serializeDrawings(result.value.drawings);
         setSaveStatus("idle");
       } catch (err) {
         setSaveError(err);

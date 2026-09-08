@@ -161,6 +161,50 @@ describe("그리기 → 저장 → (재마운트) 복원 왕복", () => {
   });
 });
 
+describe("CH-4c: 변경 없는 저장은 chart-engine 직렬화기로 생략한다", () => {
+  it("복원 직후(그리기 없음) persist를 호출해도 putDrawings를 부르지 않는다", async () => {
+    const port = fakePort();
+    const { result } = setup(port, { layoutId: "layout-1" });
+    await waitFor(() => expect(result.current.restoreStatus).toBe("ready"));
+
+    await act(async () => {
+      await result.current.persist("layout-1");
+    });
+
+    expect(port.putDrawings).not.toHaveBeenCalled();
+    expect(result.current.saveStatus).toBe("idle");
+  });
+
+  it("실측: 그린 뒤 저장하고, 아무것도 바꾸지 않은 채 '레이아웃 저장'을 다시 눌러도(persist 재호출) putDrawings는 처음 한 번만 나간다", async () => {
+    const port = fakePort({
+      putDrawings: vi.fn(async (layoutId: string, input) => ({
+        layoutId,
+        document: { schema_version: input.schemaVersion, drawings: input.drawings },
+        revision: 1,
+        updatedAt: "t1",
+      })),
+    });
+    const { result } = setup(port, { layoutId: "layout-1" });
+    await waitFor(() => expect(result.current.restoreStatus).toBe("ready"));
+
+    act(() => result.current.setDrawingTool("horizontal-line"));
+    act(() => result.current.handleAddDrawing(fakeCandle(0, "100")));
+
+    await act(async () => {
+      await result.current.persist("layout-1");
+    });
+    expect(port.putDrawings).toHaveBeenCalledTimes(1);
+
+    // chartToolbarLayoutProps.ts chains persist() onto every "레이아웃 저장" click,
+    // even ones that touched no drawing — this proves the second call is a real no-op.
+    await act(async () => {
+      await result.current.persist("layout-1");
+    });
+    expect(port.putDrawings).toHaveBeenCalledTimes(1);
+    expect(result.current.saveStatus).toBe("idle");
+  });
+});
+
 describe("409 충돌: 낙관적 잠금", () => {
   it("PUT이 409로 실패하면 로컬 도형을 지우지 않고 saveStatus를 conflict로 표면화한다", async () => {
     const port = fakePort({ putDrawings: vi.fn().mockRejectedValue(apiErrorLike(409, "STATE_CONCURRENCY_CONFLICT")) });
