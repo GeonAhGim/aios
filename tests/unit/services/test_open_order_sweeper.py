@@ -1,10 +1,13 @@
 """open_order_sweeper 통합테스트 — 실제 TEST_DATABASE_URL 대상.
 
 Spec: docs/specs/L4_risk_and_safety_v1.0.md §3.8, §5(105번), §9(R-39).
-5개 SafetyScope 매핑, 단일 조건부 UPDATE...RETURNING, 멱등성, 취소 불가
-주문 skip 보고, 어댑터 부분 실패를 실제 Postgres 행으로 검증한다."""
+FA-16(task-2406): docs/specs/ibor_fund_accounting_and_resilience.md#§9.
+5개 SafetyScope 매핑, 주문 단위 조건부 UPDATE(+동반 order_events), 멱등성,
+취소 불가 주문 skip 보고, TOCTOU/동시성 race 보고, 어댑터 부분 실패를 실제
+Postgres 행으로 검증한다."""
 from __future__ import annotations
 
+import asyncio
 import os
 import uuid
 from decimal import Decimal
@@ -303,6 +306,110 @@ async def test_missing_adapter_for_exchange_is_reported_as_failed_not_raised(poo
     assert report.cancel_requested == (order_id,)
     assert report.adapter_failed == (order_id,)
     assert await _status_of(pool, order_id) == "CANCEL_REQUESTED"
+
+
+async def test_each_transitioned_order_produces_exactly_one_order_event(pool):
+    """DoD(a)(b) — 전이된 각 주문은 정확히 1개의 order_events 행을 동반한다
+    (bulk UPDATE 시절에는 0건이었다 — FA-16 재현 대상). `to_status`는
+    `orders.status`에 실제로 쓰는 'CANCEL_REQUESTED' 리터럴이 아니라
+    `from_status`와 같은 자기루프다 — 그 리터럴은 L4-06 `OrderStatus`
+    동결 계약 밖이라 order_events에 그대로 넣으면 `PostgresOrderEventRepository.
+    timeline()`(replay_verify가 쓴다)이 `OrderStatus('CANCEL_REQUESTED')`에서
+    죽는다(모듈 docstring "known gap" 참조, OMS `cancel_order.py`의
+    ACKNOWLEDGED/PARTIALLY_FILLED 자기루프와 같은 관례)."""
+    user_id = await create_test_user(pool)
+    submitted = await _seed_order(pool, user_id, status="SUBMITTED")
+    partially_filled = await _seed_order(pool, user_id, status="PARTIALLY_FILLED")
+
+    report = await sweep_open_orders(
+        pool, _adapters("bitget"), control_id=uuid4(), scope=SafetyScope.TENANT,
+        scope_ref=str(user_id),
+    )
+
+    assert set(report.cancel_requested) == {submitted, partially_filled}
+    async with pool.acquire() as conn:
+        rows = await conn.fetch(
+            "SELECT order_id, from_status, to_status, event FROM order_events "
+            "WHERE order_id = ANY($1::uuid[])",
+            [submitted, partially_filled],
+        )
+    assert len(rows) == 2
+    by_order = {r["order_id"]: r for r in rows}
+    assert by_order[submitted]["from_status"] == by_order[submitted]["to_status"] == "SUBMITTED"
+    assert (
+        by_order[partially_filled]["from_status"]
+        == by_order[partially_filled]["to_status"]
+        == "PARTIALLY_FILLED"
+    )
+    for row in rows:
+        assert row["event"] == "CANCEL_REQUESTED"
+
+
+async def test_toctou_race_exposes_locked_order_in_raced(pool):
+    """DoD(d) — 후보 선별 뒤 실제 전이 사이에 그 행이 이미 다른 트랜잭션에
+    잠겨 있으면(SKIP LOCKED) 조용히 건너뛰고 raced에 노출한다(수치로 단언
+    가능). 이벤트도 상태 변경도 남지 않는다(원래부터 매치 안 한 게 아니라
+    경합으로 못 잡았다는 뜻)."""
+    user_id = await create_test_user(pool)
+    order_id = await _seed_order(pool, user_id)
+
+    locker_conn = await pool.acquire()
+    try:
+        tx = locker_conn.transaction()
+        await tx.start()
+        await locker_conn.fetchrow(
+            "SELECT status FROM orders WHERE order_id = $1 FOR UPDATE", order_id
+        )
+        try:
+            report = await sweep_open_orders(
+                pool, _adapters("bitget"), control_id=uuid4(), scope=SafetyScope.TENANT,
+                scope_ref=str(user_id),
+            )
+            assert report.cancel_requested == ()
+            assert report.raced == (order_id,)
+        finally:
+            await tx.rollback()
+    finally:
+        await pool.release(locker_conn)
+
+    assert await _status_of(pool, order_id) == "SUBMITTED"
+    async with pool.acquire() as conn:
+        event_count = await conn.fetchval(
+            "SELECT count(*) FROM order_events WHERE order_id = $1", order_id
+        )
+    assert event_count == 0
+
+
+async def test_concurrent_sweeps_do_not_double_cancel_same_order(pool):
+    """DoD(c) — 동시 2워커 sweep에서 같은 주문이 두 번 취소되지 않는다
+    (SKIP LOCKED 동시성 보존, 재구현 아님). 정확히 한 쪽만 성공하고, 이벤트도
+    정확히 1건만 남는다."""
+    user_id = await create_test_user(pool)
+    order_id = await _seed_order(pool, user_id)
+    adapter_a = _CountingCancelAdapter()
+    adapter_b = _CountingCancelAdapter()
+
+    report_a, report_b = await asyncio.gather(
+        sweep_open_orders(
+            pool, {"bitget": adapter_a}, control_id=uuid4(), scope=SafetyScope.TENANT,
+            scope_ref=str(user_id),
+        ),
+        sweep_open_orders(
+            pool, {"bitget": adapter_b}, control_id=uuid4(), scope=SafetyScope.TENANT,
+            scope_ref=str(user_id),
+        ),
+    )
+
+    combined_cancel_requested = report_a.cancel_requested + report_b.cancel_requested
+    assert combined_cancel_requested == (order_id,)
+    assert adapter_a.cancel_call_count + adapter_b.cancel_call_count == 1
+    assert await _status_of(pool, order_id) == "CANCEL_REQUESTED"
+
+    async with pool.acquire() as conn:
+        event_count = await conn.fetchval(
+            "SELECT count(*) FROM order_events WHERE order_id = $1", order_id
+        )
+    assert event_count == 1
 
 
 async def test_unmapped_scope_raises_instead_of_silently_matching_zero_rows(pool):
