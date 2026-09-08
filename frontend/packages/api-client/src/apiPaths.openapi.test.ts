@@ -3,6 +3,11 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { API_ROUTES, type ApiRouteDefinition, type ApiRouteName } from "./apiPaths";
+import {
+  computeEnvelopeFromOpenApi,
+  findUnregisteredSnapshotPaths,
+  resolveInOpenApi,
+} from "./apiPaths.openapi.scanner";
 
 // task-1165: apiPaths.ts(사람이 손으로 등록한 표)와 PLT-16(task-905, f800c1a)이 export한
 // contracts/openapi/v1.json(서버 라우터의 기계적 단일출처, 101경로) 사이에 대조가 한 번도
@@ -78,54 +83,56 @@ const STALE_SNAPSHOT_WHITELIST: ReadonlySet<ApiRouteName> = new Set<ApiRouteName
 // true와 다시 일치하므로 드리프트가 아니다.
 const KNOWN_ENVELOPE_DRIFT: ReadonlySet<ApiRouteName> = new Set<ApiRouteName>([]);
 
-// legacyPath의 ":param" / ":param:literal"(예: ":deploymentId:start") 세그먼트를
-// 스냅샷의 "{param}" 세그먼트와 비교 가능한 와일드카드 템플릿으로 바꾼다.
-function legacyPathToTemplate(legacyPath: string): string {
-  return legacyPath
-    .split("/")
-    .map((segment) => {
-      if (!segment.startsWith(":")) return segment;
-      const parts = segment.slice(1).split(":");
-      return parts.length === 1 ? "*" : `*:${parts.slice(1).join(":")}`;
-    })
-    .join("/");
-}
-
-function snapshotPathToTemplate(snapshotPath: string): string {
-  return snapshotPath.replace(/\{[^}]+\}/g, "*");
-}
-
-// 정확일치 우선, 실패 시 템플릿 매칭. 어느 쪽도 안 맞으면 null(호출부가 화이트리스트
-// 여부를 판단한다 — 이 함수는 화이트리스트를 모른다).
-export function resolveInOpenApi(legacyPath: string, paths: readonly string[]): string | null {
-  if (paths.includes(legacyPath)) return legacyPath;
-  const template = legacyPathToTemplate(legacyPath);
-  return paths.find((p) => snapshotPathToTemplate(p) === template) ?? null;
-}
-
-// 매칭된 스냅샷 경로의 methods 객체에서 2xx 응답 스키마가 ApiResponse_*를 참조하는지
-// 본다(§3.3 봉투 판정: FastAPI가 ApiResponse[T]를 감싼 라우터는 responses.200.content.
-// application/json.schema.$ref가 "#/components/schemas/ApiResponse_..."다). 메서드가
-// 여럿이면(GET+POST 등) 전부 같은 값이어야 하고, 판단할 데이터가 전혀 없으면 null.
-export function computeEnvelopeFromOpenApi(pathItem: Record<string, unknown>): boolean | null {
-  const values = new Set<boolean>();
-  for (const method of ["get", "post", "put", "patch", "delete"]) {
-    const op = pathItem[method] as { responses?: Record<string, unknown> } | undefined;
-    if (!op?.responses) continue;
-    for (const [code, resp] of Object.entries(op.responses)) {
-      if (!code.startsWith("2")) continue;
-      const schema = (resp as { content?: { ["application/json"]?: { schema?: Record<string, unknown> } } })
-        ?.content?.["application/json"]?.schema;
-      if (!schema) continue;
-      const ref =
-        (schema.$ref as string | undefined) ??
-        ((schema.items as Record<string, unknown> | undefined)?.$ref as string | undefined);
-      values.add(Boolean(ref?.split("/").pop()?.startsWith("ApiResponse")));
-    }
-  }
-  if (values.size !== 1) return values.size === 0 ? null : null;
-  return [...values][0];
-}
+// UNREGISTERED_ROUTE_WHITELIST(task-2168 §E, 역방향): v1.json에는 있지만 apiPaths.ts
+// API_ROUTES에는 등록되지 않은 서버 라우트. §A가 잡는 유령 경로(등록됐지만 스냅샷에
+// 없음)의 반대 방향 — 여기서는 "화면이 실제로 쓰는데 레지스트리를 우회한 하드코딩
+// 호출"이 없는지를 본다. 착수 시점(task-2168, 2026-09-08) 실측 38건 — apps/web/src/routes
+// 전체와 packages/api-client/src/clients/*.ts를 grep으로 대조(connections/evidence/
+// mandates/performance-statements/reconciliation/risk-gate/trust-memberships/
+// validation-runs/audit-log/ledger-payouts 키워드 매치 0건, PositionJournalPanel 등의
+// "positions" 매치는 이미 등록된 positions.* 클라이언트였다) — 화면이 호출해야 하는
+// 항목이 하나도 없어 이번 리프에서 apiPaths에 새로 등록할 라우트는 없다. 값은 "왜
+// 프론트가 안 쓰는지" 한 줄.
+const UNREGISTERED_ROUTE_WHITELIST: Readonly<Record<string, string>> = {
+  "/admin/audit-log": "관리자 감사 로그 화면이 없다(apps/web/src/routes/admin에 audit-log 라우트 없음)",
+  "/admin/ledger/payouts/{batch_id}/paid": "정산 배치 확정 액션 UI가 없다",
+  "/exchange-credentials/{exchange}/positions": "exchange.ts 클라이언트에 balance/capabilities만 있고 positions 조회는 없다",
+  "/livez": "인프라 헬스체크 프로브다(k8s liveness) — 앱 API 표면이 아니다",
+  "/metrics": "인프라 메트릭 엔드포인트다(모니터링 전용) — 앱 API 표면이 아니다",
+  "/readyz": "인프라 헬스체크 프로브다(k8s readiness) — 앱 API 표면이 아니다",
+  "/v1/foundation/connections": "계정 연동(connections) 관리 화면이 없다(apps/web/src/routes에 connections 없음)",
+  "/v1/foundation/connections/{connection_id}:confirm": "계정 연동 확인 액션 UI가 없다",
+  "/v1/foundation/connections/{connection_id}:revoke": "계정 연동 해제 액션 UI가 없다",
+  "/v1/foundation/connections/{connection_id}:sync": "계정 연동 동기화 액션 UI가 없다",
+  "/v1/foundation/evidence/chain:verify": "증빙 체인 검증 화면이 없다",
+  "/v1/foundation/evidence/timeline": "증빙 타임라인 뷰어 화면이 없다",
+  "/v1/foundation/mandates/amendments": "위임장(mandate) 관리 화면이 없다(apps/web/src/routes에 mandates 없음)",
+  "/v1/foundation/mandates/drafts": "위임장 관리 화면이 없다",
+  "/v1/foundation/mandates/mandate:pause": "위임장 관리 화면이 없다",
+  "/v1/foundation/mandates/mandate:resume": "위임장 관리 화면이 없다",
+  "/v1/foundation/mandates/policy:evaluate": "위임장 관리 화면이 없다",
+  "/v1/foundation/mandates/revisions/{revision_id}:activate": "위임장 관리 화면이 없다",
+  "/v1/foundation/mandates/status": "위임장 관리 화면이 없다",
+  "/v1/foundation/performance-statements": "실적 명세서 화면이 없다",
+  "/v1/foundation/performance-statements/{statement_id}": "실적 명세서 화면이 없다",
+  "/v1/foundation/performance-statements/{statement_id}:correct": "실적 명세서 정정 액션 UI가 없다",
+  "/v1/foundation/performance-statements:compute": "실적 명세서 계산 액션 UI가 없다",
+  "/v1/foundation/reconciliation": "정합성 대사(reconciliation) 화면이 없다",
+  "/v1/foundation/reconciliation/runs": "정합성 대사 실행 이력 화면이 없다",
+  "/v1/foundation/reconciliation/{target_ref}:resolve": "정합성 대사 해소 액션 UI가 없다",
+  "/v1/foundation/risk-gate/admin/safety-controls": "리스크 게이트 관리자 화면이 없다(apps/web/src/routes/admin에 risk-gate 없음)",
+  "/v1/foundation/risk-gate/evaluate": "리스크 게이트 평가 화면이 없다",
+  "/v1/foundation/risk-gate/rule-bundles/{bundle_id}:activate": "리스크 게이트 관리자 화면이 없다",
+  "/v1/foundation/risk-gate/rule-bundles/{bundle_id}:approve": "리스크 게이트 관리자 화면이 없다",
+  "/v1/foundation/risk-gate/safety-controls": "리스크 게이트 관리자 화면이 없다",
+  "/v1/foundation/risk-gate/safety-controls/{control_id}:deactivate": "리스크 게이트 관리자 화면이 없다",
+  "/v1/foundation/trust/consents/{consent_id}:revoke": "동의 철회 액션 UI가 없다(accept만 foundation.trustConsents.accept로 등록돼 있음)",
+  "/v1/foundation/trust/memberships": "신뢰 멤버십 관리 화면이 없다",
+  "/v1/foundation/trust/memberships/{subject_id}:revoke": "신뢰 멤버십 관리 화면이 없다",
+  "/v1/foundation/trust/memberships/{subject_id}:suspend": "신뢰 멤버십 관리 화면이 없다",
+  "/v1/foundation/trust/status": "신뢰 상태 조회 화면이 없다",
+  "/v1/foundation/validation-runs/{strategy_id}/{strategy_version}": "전략 검증 실행 결과 화면이 없다(strategy-builder 라우트에 validation-runs 없음)",
+};
 
 function nonGhostRouteEntries(): Array<[ApiRouteName, ApiRouteDefinition]> {
   return (Object.entries(API_ROUTES) as Array<[ApiRouteName, ApiRouteDefinition]>).filter(
@@ -246,5 +253,38 @@ describe("apiPaths ↔ GHOST_PATH_WHITELIST — implemented 플래그 정합(tas
       if (!GHOST_PATH_WHITELIST.has(name) && !def.implemented) mismatched.push(name);
     }
     expect(mismatched).toEqual([]);
+  });
+});
+
+describe("contracts/openapi/v1.json ↔ apiPaths — 역방향 정합성(task-2168 §E)", () => {
+  it("스냅샷에만 있고 apiPaths에 없는 경로 집합이 UNREGISTERED_ROUTE_WHITELIST와 정확히 일치한다", () => {
+    const legacyPaths = Object.values(API_ROUTES).map((def) => (def as ApiRouteDefinition).legacyPath);
+    const unregistered = findUnregisteredSnapshotPaths(snapshotPathList, legacyPaths);
+    expect([...unregistered].sort()).toEqual(Object.keys(UNREGISTERED_ROUTE_WHITELIST).sort());
+  });
+
+  it("UNREGISTERED_ROUTE_WHITELIST 항목은 실제로 스냅샷에 있고 apiPaths에는 등록돼 있지 않다(화이트리스트 부패 방지)", () => {
+    const legacyPaths = Object.values(API_ROUTES).map((def) => (def as ApiRouteDefinition).legacyPath);
+    const bad: string[] = [];
+    for (const path of Object.keys(UNREGISTERED_ROUTE_WHITELIST)) {
+      const inSnapshot = snapshotPathSet.has(path);
+      const stillUnregistered = findUnregisteredSnapshotPaths([path], legacyPaths).length === 1;
+      if (!inSnapshot || !stillUnregistered) bad.push(path);
+    }
+    expect(bad).toEqual([]);
+  });
+
+  it("이미 등록된 라우트(marketData.candles.get)를 apiPaths에서 지운 fixture를 주면 그 경로명을 지목한다(반증)", () => {
+    const candlesPath = API_ROUTES["marketData.candles.get"].legacyPath;
+    const legacyPathsWithoutCandles = Object.entries(API_ROUTES)
+      .filter(([name]) => name !== "marketData.candles.get")
+      .map(([, def]) => (def as ApiRouteDefinition).legacyPath);
+
+    const unregisteredWithout = findUnregisteredSnapshotPaths(snapshotPathList, legacyPathsWithoutCandles);
+    expect(unregisteredWithout).toContain(candlesPath);
+
+    const legacyPathsWithCandles = Object.values(API_ROUTES).map((def) => (def as ApiRouteDefinition).legacyPath);
+    const unregisteredWith = findUnregisteredSnapshotPaths(snapshotPathList, legacyPathsWithCandles);
+    expect(unregisteredWith).not.toContain(candlesPath);
   });
 });
