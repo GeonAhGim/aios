@@ -29,9 +29,12 @@ PM은 `role: copilot`으로 배정하고 명세에 "이 저장소의 CLAUDE.md·
 Copilot의 자체 판단을 신뢰하지 않는다. 머지 조건은 Actions Quality Gate(ruff·mypy·pytest·coverage·secret scan·guards) 전부 통과다.
 머지 후 로컬 CI가 main에서 한 번 더 돈다(게이트 16종). 가능하면 PR에 Copilot 코드 리뷰도 요청한다(가용성 확인 후).
 
-### D4. 헤드리스 Copilot CLI는 옵션으로 남긴다
-`@github/copilot` CLI를 설치하면 로컬 워커 엔진(`copilot -p`)으로도 쓸 수 있으나 설치는 사용자 확인 후 한다.
-GitHub 호스팅 레인이 먼저다 — RAM을 쓰지 않는다는 이점이 더 크다.
+### D4. 헤드리스 Copilot CLI도 로컬 엔진으로 쓴다 (2026-09-08 개정 — 사용자가 설치 완료)
+Copilot CLI 1.0.83이 설치됐다(`copilot -p <prompt> --allow-all -C <dir>`로 비대화식 실행 실측). 두 레인을 둔다.
+- **GitHub 호스팅 레인**(D1): RAM을 쓰지 않는다. 대량·기계적 리프의 1순위.
+- **로컬 Copilot 엔진**(`copilot-local` 풀, OPS-3): `claude -p` 자리에 `copilot -p`를 꽂는 두 번째 로컬 엔진. 한도는 분리되지만 RAM은 쓴다.
+  한도 감지는 출력 문구·exit code로 하고 `model_limits.json`의 `copilot` 항목으로 기존 fallback 체계에 편입한다.
+두 레인 모두 D2 기준과 D3 게이트를 그대로 적용한다. 안전 게이트·마이그레이션·통제면은 여전히 Claude 워커 몫이다.
 
 ## Consequences
 - Anthropic 한도와 무관한 병렬 실행력이 생기고, 로컬 RAM 상한과도 무관하다.
