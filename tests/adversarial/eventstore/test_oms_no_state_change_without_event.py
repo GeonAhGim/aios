@@ -79,7 +79,7 @@ def _profile(**overrides: object) -> VenueCapabilityProfile:
         "verified": "DOC_ONLY",
     }
     defaults.update(overrides)
-    return VenueCapabilityProfile(**defaults)  # type: ignore[arg-type]
+    return VenueCapabilityProfile.model_validate(defaults)
 
 
 def _registry() -> SymbolRegistry:
@@ -133,7 +133,7 @@ async def _submit_command(pool: asyncpg.Pool, user_id: UUID) -> SubmitOrderComma
         side=OrderSide.BUY, order_type=OrderType.MARKET, quantity=Decimal("0.01"),
         asset_class=AssetClass.CRYPTO, actor_subject_id=user_id,
         issued_at=datetime.now(timezone.utc),
-    )  # type: ignore[call-arg]
+    )
 
 
 async def _order_state(pool: asyncpg.Pool, order_id: UUID) -> tuple[str, int]:

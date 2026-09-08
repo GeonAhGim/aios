@@ -44,7 +44,7 @@ def _sample_trade_tick(**overrides: object) -> v2.TradeTick:
         aggressor=v2.Aggressor.BUY,
     )
     base.update(overrides)
-    return v2.TradeTick(**base)  # type: ignore[arg-type]
+    return v2.TradeTick.model_validate(base)
 
 
 def _sample_quote_l1(**overrides: object) -> v2.QuoteL1:
@@ -60,7 +60,7 @@ def _sample_quote_l1(**overrides: object) -> v2.QuoteL1:
         ask_size=Decimal("1.2"),
     )
     base.update(overrides)
-    return v2.QuoteL1(**base)  # type: ignore[arg-type]
+    return v2.QuoteL1.model_validate(base)
 
 
 def _sample_book_l2(**overrides: object) -> v2.BookL2:
@@ -80,7 +80,7 @@ def _sample_book_l2(**overrides: object) -> v2.BookL2:
         ),
     )
     base.update(overrides)
-    return v2.BookL2(**base)  # type: ignore[arg-type]
+    return v2.BookL2.model_validate(base)
 
 
 def test_schema_snapshot_matches_fixture() -> None:
@@ -155,16 +155,18 @@ def test_book_l2_sorted_levels_accepted() -> None:
 
 def test_quote_l1_missing_required_field_rejected() -> None:
     with pytest.raises(ValidationError):
-        v2.QuoteL1(  # type: ignore[call-arg]
-            instrument_id=_VALID_ULID,
-            venue=Venue.BITGET,
-            ts_event=_NS_EVENT,
-            ts_recv=_NS_RECV,
-            seq=1,
-            bid_price=Decimal("50000.0"),
-            bid_size=Decimal("1.0"),
-            ask_price=Decimal("50000.5"),
-            # ask_size 누락
+        v2.QuoteL1.model_validate(
+            {
+                "instrument_id": _VALID_ULID,
+                "venue": Venue.BITGET,
+                "ts_event": _NS_EVENT,
+                "ts_recv": _NS_RECV,
+                "seq": 1,
+                "bid_price": Decimal("50000.0"),
+                "bid_size": Decimal("1.0"),
+                "ask_price": Decimal("50000.5"),
+                # ask_size 누락
+            }
         )
 
 
