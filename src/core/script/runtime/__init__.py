@@ -9,6 +9,12 @@
 from __future__ import annotations
 
 from src.core.script.runtime.builtins_math import MATH_BUILTINS, BuiltinCallError
+from src.core.script.runtime.builtins_strategy import (
+    STRATEGY_KINDS,
+    StrategyBuiltins,
+    StrategyIntent,
+    intents_to_bytes,
+)
 from src.core.script.runtime.builtins_ta import TaBuiltins, TaCall, default_builtins
 from src.core.script.runtime.interpreter import (
     Builtin,
@@ -41,6 +47,7 @@ from src.core.script.runtime.values import check_value
 
 __all__ = [
     "MATH_BUILTINS",
+    "STRATEGY_KINDS",
     "ArithOp",
     "Builtin",
     "BuiltinCallError",
@@ -55,6 +62,8 @@ __all__ = [
     "Scalar",
     "ScriptRuntimeError",
     "Series",
+    "StrategyBuiltins",
+    "StrategyIntent",
     "TaBuiltins",
     "TaCall",
     "Value",
@@ -66,6 +75,7 @@ __all__ = [
     "default_builtins",
     "execute",
     "index",
+    "intents_to_bytes",
     "logical",
     "logical_not",
     "negate",
