@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+from uuid import UUID
 
 from pydantic import BaseModel
 
@@ -22,6 +23,8 @@ __all__ = [
     "ApproveRuleBundleRequest",
     "EvaluateRiskGateRequest",
     "GateKind",
+    "RecoverySafetyControlRequest",
+    "RecoveryDecisionView",
     "RiskEvaluationView",
     "RiskOutcome",
     "SafetyControlListResponse",
@@ -38,3 +41,21 @@ class SafetyControlListResponse(BaseModel):
 
 class ApproveRuleBundleRequest(BaseModel):
     approval_ref: str
+
+
+class RecoverySafetyControlRequest(BaseModel):
+    """R-53 — RECOVERY 게이트(§9). `evidence_ref=None`은 거부 사유
+    RSK-007로 이어진다(evaluate_recovery가 판정, 여기서는 필드만 옮긴다)."""
+
+    evidence_ref: str | None = None
+    approval_id: int
+
+
+class RecoveryDecisionView(BaseModel):
+    id: UUID
+    gate_kind: GateKind
+    outcome: RiskOutcome
+    reason_codes: list[str]
+    evaluated_at: datetime
+    expires_at: datetime
+    trace_id: UUID

@@ -10,12 +10,13 @@ approval" — /evaluate는 조회 트리거일 뿐 클라이언트가 outcome을
 task-1218)."""
 from __future__ import annotations
 
-from uuid import UUID
+from uuid import UUID, uuid4
 
+import asyncpg
 from fastapi import APIRouter, Depends, status
 
 from src.api.contracts.envelope import ApiResponse, ok
-from src.api.deps import get_current_admin, get_current_user
+from src.api.deps import get_current_admin, get_current_user, get_pool
 from src.api.foundation_deps import (
     get_audit_event_repository,
     get_connection_repository,
@@ -28,11 +29,20 @@ from src.api.schemas.foundation.risk_gate import (
     ActivateSafetyControlRequest,
     ApproveRuleBundleRequest,
     EvaluateRiskGateRequest,
+    RecoveryDecisionView,
+    RecoverySafetyControlRequest,
     RiskEvaluationView,
     SafetyControlListResponse,
     SafetyControlView,
 )
+from src.api.schemas.foundation.risk_gate import GateKind as GateKindSchema
+from src.api.schemas.foundation.risk_gate import RiskOutcome as RiskOutcomeSchema
+from src.api.service_deps import get_circuit_breaker_service, get_risk_policy
+from src.core.approval import service as approval
+from src.core.event_bus.in_process import InProcessEventBus
+from src.core.loader.risk_policy_loader import RiskPolicy
 from src.core.risk.policy_bundle import RiskRuleBundle
+from src.core.safety.circuit_breaker import CircuitBreakerService
 from src.foundation.connections.ports.repository import ConnectionRepository
 from src.foundation.evidence.ports.repository import AuditEventRepository
 from src.foundation.mandates.ports.repository import MandateRepository
@@ -40,6 +50,9 @@ from src.foundation.paper_control.application.apply_safety_control import (
     apply_safety_control_to_deployments,
 )
 from src.foundation.paper_control.ports.repository import PaperControlRepository
+from src.foundation.risk_gate.adapters.postgres_decision_repository import (
+    PostgresDecisionRepository,
+)
 from src.foundation.risk_gate.application.activate_rule_bundle import (
     activate_rule_bundle,
     approve_rule_bundle,
@@ -49,10 +62,15 @@ from src.foundation.risk_gate.application.deactivate_safety_control import (
     deactivate_safety_control,
 )
 from src.foundation.risk_gate.application.evaluate_risk_gate import evaluate_risk_gate
+from src.foundation.risk_gate.application.recovery_gate import (
+    RecoveryGateRepos,
+    evaluate_recovery,
+)
 from src.foundation.risk_gate.domain.models import GateKind, SafetyScope
 from src.foundation.risk_gate.ports.repository import RiskGateRepository, RuleBundleRepository
 from src.foundation.risk_gate.projections import build_safety_control_list_view
 from src.services.auth_service import User
+from src.services.risk_decision_recorder import RiskDecisionRecorder
 
 router = APIRouter(prefix="/v1/foundation/risk-gate", tags=["foundation:risk-gate"])
 
@@ -133,6 +151,52 @@ async def post_deactivate_safety_control(
         audit_repo=audit_repo,
     )
     return ok(result)
+
+
+# R-53 — RECOVERY 게이트. evidence·approval·cooldown·fresh 재평가를 전부
+# 통과해야 해제된다(§9 R-53, I5) — 운영자 전용(ApprovalService PLATFORM
+# scope와 같은 신뢰 경계, ADR-2026-08-10-D §③). DENY는 여기서 200을 만들지
+# 않는다 — evaluate_recovery가 RecoveryDeniedError를 던지고
+# EXCEPTION_MAP(RISK_DENIED→403)이 봉투를 만든다.
+@router.post("/safety-controls/{control_id}:evaluate-recovery")
+async def post_evaluate_recovery(
+    control_id: UUID,
+    body: RecoverySafetyControlRequest,
+    admin: User = Depends(get_current_admin),
+    repo: RiskGateRepository = Depends(get_risk_gate_repository),
+    pool: asyncpg.Pool = Depends(get_pool),
+    cb: CircuitBreakerService = Depends(get_circuit_breaker_service),
+    policy: RiskPolicy = Depends(get_risk_policy),
+) -> ApiResponse[RecoveryDecisionView]:
+    repos = RecoveryGateRepos(
+        risk_gate=repo,
+        circuit_breaker=cb,
+        get_approval_request=lambda approval_id: approval.get_request(pool, approval_id),
+        decision_recorder=RiskDecisionRecorder(
+            pool, PostgresDecisionRepository(pool), InProcessEventBus()
+        ),
+        cooldown_sec=policy.reactivation.cooldown_sec,
+        approval_ttl_sec=policy.reactivation.approval_ttl_sec,
+    )
+    decision = await evaluate_recovery(
+        repos,
+        tenant_id=admin.user_id,
+        control_id=control_id,
+        evidence_ref=body.evidence_ref,
+        approval_id=body.approval_id,
+        trace_id=uuid4(),
+    )
+    return ok(
+        RecoveryDecisionView(
+            id=decision.decision_id,
+            gate_kind=GateKindSchema(decision.gate_kind.value),
+            outcome=RiskOutcomeSchema(decision.outcome.value),
+            reason_codes=list(decision.reason_codes),
+            evaluated_at=decision.evaluated_at,
+            expires_at=decision.expires_at,
+            trace_id=decision.trace_id,
+        )
+    )
 
 
 @router.post("/admin/safety-controls", status_code=status.HTTP_201_CREATED)

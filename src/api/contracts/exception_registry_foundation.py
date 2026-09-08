@@ -130,6 +130,7 @@ from src.foundation.risk_gate.application.deactivate_safety_control import (
 from src.foundation.risk_gate.application.evaluate_risk_gate import (
     CrossTenantConnectionReferenceError,
 )
+from src.foundation.risk_gate.application.recovery_gate import RecoveryDeniedError
 from src.foundation.trust.application.accept_disclosure import (
     ConsentAlreadyActiveError,
     DisclosureNotFoundError,
@@ -228,6 +229,10 @@ EXCEPTION_MAP_FOUNDATION: list[tuple[type[Exception], ErrorCode]] = [
     (UnauthorizedSafetyControlScopeError, ErrorCode.AUTHZ_FORBIDDEN),
     (MissingScopeRefError, ErrorCode.VALIDATION_INVALID_FIELD),
     (SafetyControlNotFoundError, ErrorCode.RESOURCE_NOT_FOUND),
+    # R-53 — RECOVERY 게이트 DENY(evidence/approval/cooldown/fresh 중 하나라도
+    # 미달). RiskGateDeniedError(start_deployment.py)와 동일 관례로 RISK_DENIED
+    # (403)에 접는다 — reason_codes는 details에 실린다(RSK-007 포함).
+    (RecoveryDeniedError, ErrorCode.RISK_DENIED),
     (DisclosureNotFoundError, ErrorCode.RESOURCE_NOT_FOUND),
     (DisclosureRetiredError, ErrorCode.VALIDATION_DISCLOSURE_RETIRED),
     (ConsentAlreadyActiveError, ErrorCode.STATE_INVALID_TRANSITION),
