@@ -260,7 +260,7 @@ def is_order_method(row: dict[str, Any]) -> bool:
     주문성이라는 뜻이라 이름 규칙에 기대지 않는다(fail-closed 원칙 -- 분류가
     모호하면 가드를 붙이는 쪽이 안전하다, decision 참조). GET/WS는 조회·구독뿐이라
     대상에서 뺀다."""
-    return row["method"] == "POST"
+    return bool(row["method"] == "POST")
 
 
 def render_method(row: dict[str, Any]) -> list[str]:
