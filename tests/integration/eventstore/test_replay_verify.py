@@ -195,10 +195,27 @@ async def test_replay_detects_ledger_balance_tampered_outside_the_event_trail(po
     assert clean_run.returncode == 0, clean_run.stdout + clean_run.stderr
 
     async def _bump_balance(delta: int) -> None:
+        # FA-10 (a2c4f9e1b3d5) put a no-UPDATE trigger on `ledger_balance` --
+        # a literal UPDATE now raises "no-update violation" instead of
+        # mutating the row. Reproduce the tamper the same way the real
+        # write path (`PostgresBalanceRepository.apply`) is forced to:
+        # DELETE the current row, INSERT a replacement with the same key,
+        # skipping `post_entry`/the event trail entirely -- that omission
+        # (not the DELETE+INSERT mechanics) is what the test is exercising.
         async with pool.acquire() as conn:
             await conn.execute(
-                "UPDATE ledger_balance SET balance = balance + $1 WHERE account_id = "
-                "(SELECT account_id FROM ledger_account WHERE account_code = $2)",
+                "WITH removed AS ("
+                " DELETE FROM ledger_balance WHERE account_id = "
+                " (SELECT account_id FROM ledger_account WHERE account_code = $2)"
+                " RETURNING account_id, balance, held, pending_payout, allow_negative,"
+                " last_entry_seq, updated_at"
+                ") "
+                "INSERT INTO ledger_balance ("
+                " account_id, balance, held, pending_payout, allow_negative,"
+                " last_entry_seq, updated_at"
+                ") "
+                "SELECT account_id, balance + $1, held, pending_payout, allow_negative,"
+                " last_entry_seq, updated_at FROM removed",
                 delta,
                 debit_code,
             )
