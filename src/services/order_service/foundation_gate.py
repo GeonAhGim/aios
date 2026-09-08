@@ -131,18 +131,11 @@ def _is_stale(observed: Mapping[str, int], current: Mapping[str, int]) -> bool:
 
 
 async def _record_decision(
-    recorder: RiskDecisionRecorder,
-    *,
-    context: OrderContext,
-    outcome: GateOutcome,
-    reason_codes: tuple[str, ...],
-    fence: Mapping[str, int],
-    start_ns: int,
+    recorder: RiskDecisionRecorder, *, context: OrderContext, outcome: GateOutcome,
+    reason_codes: tuple[str, ...], fence: Mapping[str, int], start_ns: int,
 ) -> UUID:
     now = datetime.now(timezone.utc)
-    # task-2395 — measured wall time from gate() entry to this decision, same
-    # `max(1, ...)` convention as evaluator.py/recovery_gate.py/
-    # evaluate_pre_submit.py (never 0, never a fake constant).
+    # task-2395 — measured from gate() entry, same max(1, ...) convention as evaluator.py.
     latency_us = max(1, (time.perf_counter_ns() - start_ns) // 1000)
     execution_ref = f"exec:{context.execution_id}"
     inputs = _GateInputs(
