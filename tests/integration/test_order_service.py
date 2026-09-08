@@ -216,8 +216,19 @@ async def test_submit_order_network_error_propagates(pool):
     확인부터 다시 거쳐야 하므로).
 
     task-1566(L4-09) 편차 — 이전엔 claim 행을 지워 DB에 흔적을 남기지
-    않았다. 지금은 oms `order_repository.transition()`으로 CREATED→FAILED
-    확정만 하고 행은 남긴다(감사 흔적 보존, order_events WORM에도 남음)."""
+    않았다. 지금은 oms `order_repository.transition()`으로 CREATED→
+    {FAILED,UNKNOWN} 확정만 하고 행은 남긴다(감사 흔적 보존, order_events
+    WORM에도 남음).
+
+    task-2184(리뷰 task-2171 REJECT 수정) — `RetryableExchangeError`는 어댑터
+    호출 *이후*(전송 시도 후) 나는 예외라 "전송했는지 모른다" = 응답 유실이다
+    (I10). `dispatch_outcome.classify_submit_failure`의 미분류 레거시 예외
+    fallback이 이를 UNKNOWN으로 분류하므로 여기서도 정확히 UNKNOWN이어야
+    한다 — `in ("UNKNOWN","FAILED")` 같은 느슨한 단언은 두 경로 중 하나가
+    깨져도 그린으로 남아 이 결함(응답 유실이 FAILED로 잘못 확정되는 버그)을
+    가렸다(리뷰 task-2171 REJECT 지적). "미전송 확정" 케이스(FAILED로
+    남아야 함)는 `tests/adversarial/oms/test_lost_response_stays_unknown.py`
+    가 별도 테스트로 검증한다."""
     user_id = await create_test_tenant(pool)
     execution_id = await _create_running_execution(pool, user_id)
 
@@ -237,7 +248,7 @@ async def test_submit_order_network_error_propagates(pool):
             "SELECT * FROM orders WHERE client_order_id = $1", order.client_order_id
         )
     assert row is not None  # 행은 남는다 — 삭제 대신 상태로 실패를 표현
-    assert row["status"] in ("UNKNOWN", "FAILED")
+    assert row["status"] == "UNKNOWN"
 
 
 async def test_update_from_exchange_raises_on_status_mismatch(pool):

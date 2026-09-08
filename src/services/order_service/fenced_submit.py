@@ -34,7 +34,9 @@ Spec: docs/specs/L4_risk_and_safety_v1.0.md §2.5 `order_service/fenced_submit.p
      값을 추가하지 않고, 이미 허용된 CREATED→FAILED 전이를 쓰며 사유는
      감사 행 `reason_code=RISK_FENCE_STALE`로 남긴다(PM 결정 대기 — 추가
      승인 시 이 한 곳만 바꾸면 된다).
-  7  adapter.place_order — 유일한 부작용. 예외면 claim 삭제 후 전파(submit.py 동일)
+  7  adapter.place_order — 유일한 부작용. 예외면 claim을 CREATED→{FAILED,
+     UNKNOWN}으로 확정(`dispatch_outcome.classify_submit_failure` 재사용,
+     task-2184) 후 그대로 전파(submit.py `_mark_claim_send_outcome` 동일)
   8  F2 := read_fences()
   9  F2 > F1이면 진짜 post-fence 부작용: 메트릭 +1, best-effort cancel,
      감사 CRITICAL `post_fence_side_effect_detected`. SLO는 0이며 이 분기는
@@ -58,7 +60,10 @@ from src.exchanges.common.adapter import ExchangeAdapter
 from src.services.order_service import repository
 from src.services.order_service.gate import GateDecision, GateOutcome
 from src.services.order_service.position_ledger import record_fill_in_position_ledger
-from src.services.order_service.submit import OrderDeniedByRiskGateError, _mark_claim_failed
+from src.services.order_service.submit import (
+    OrderDeniedByRiskGateError,
+    _mark_claim_send_outcome,
+)
 from src.services.order_service.worm_decision_check import DecisionReader, bind_to_worm_decision
 
 FenceReader = Callable[[], Awaitable[Mapping[str, int]]]
@@ -166,12 +171,13 @@ async def submit_with_fence(
         raise FenceStaleError(stale, order_id=claimed.order_id)
 
     # 7 — 유일한 부작용. task-1566(L4-09) 편차 — submit.py와 동일하게 claim
-    # 행을 지우지 않고 CREATED→FAILED로 확정한다(주석은 submit.py 참조).
+    # 행을 지우지 않고 CREATED→{FAILED,UNKNOWN}으로 확정한다(task-2184,
+    # dispatch_outcome.classify_submit_failure 재사용 — 주석은 submit.py 참조).
     try:
         submitted = await adapter.place_order(claimed)
-    except Exception:
+    except Exception as exc:
         async with pool.acquire() as conn, conn.transaction():
-            await _mark_claim_failed(conn, claimed, user_id=user_id, reason="EXCHANGE_SEND_ERROR")
+            await _mark_claim_send_outcome(conn, claimed, user_id=user_id, exc=exc)
         raise
 
     # 8 — 호출 후 재조회.

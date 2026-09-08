@@ -327,7 +327,7 @@ portfolio_id: UUID | None = None            # FA-3 이후 NOT NULL
 | I7 | `order_events`, `fills`, `provider_event_inbox`는 append-only | `REVOKE UPDATE, DELETE ON ... FROM app_role`(마이그레이션) |
 | I8 | 거래소 호출은 outbox 행 `SENDING` 상태에서만 발생 | `outbox_dispatcher` 단일 호출 지점 + `Executor` 경유(기존 가드) |
 | I9 | `mode='LIVE'` 주문은 계약 레벨(`Literal["PAPER"]`)·Executor·factory 3중 차단 | 코드(ADR-E) |
-| I10 | 제출 응답을 못 받은 주문은 삭제하지 않고 `UNKNOWN`으로 남긴다 | 코드(`repository.delete` 제거) |
+| I10 | 제출 응답을 못 받은 주문은 삭제하지 않고 `UNKNOWN`으로 남긴다 | 코드(`repository.delete` 제거 + `order_service/submit.py`·`fenced_submit.py`가 `oms/application/dispatch_outcome.classify_submit_failure`를 재사용해 판정, task-2184) |
 | I11 | provider 값이 없을 때 대사는 0으로 해석하지 않는다(`PROVIDER_UNAVAILABLE`) | 코드(80번 §2) |
 | I12 | `MATERIAL_MISMATCH`/`PROVIDER_UNAVAILABLE` 집계 시 해당 account 스코프 safety control ACTIVE 전까지 새 SUBMIT enqueue 거부 | 코드(`submit_order`가 `pre_submit_gate` + reconciliation_state 확인) |
 | I13 | 심볼은 `SymbolRegistry` 등록분만 주문 가능 | 코드(`UnknownSymbolError`) |
@@ -341,6 +341,7 @@ portfolio_id: UUID | None = None            # FA-3 이후 NOT NULL
 | — | `SUBMIT_ACCEPTED` | 멱등 선점 NEW, gate ALLOW | CREATED | orders INSERT | `order_created` |
 | CREATED | `VALIDATED` | tick/lot/notional/profile 통과 | VALIDATED | outbox `SUBMIT` enqueue | `order_validated` |
 | CREATED | `VALIDATION_FAILED` | — | FAILED | reason_code | `order_failed` |
+| CREATED | `RESPONSE_LOST`(편차, task-2184) | `order_service/submit.py`·`fenced_submit.py`의 legacy 동기 클레임 경로 — VALIDATED/SUBMITTED를 별도 행으로 거치지 않고 CREATED에서 곧장 어댑터를 호출하므로, 그 호출이 응답 유실로 실패하면 이 표의 SUBMITTED→RESPONSE_LOST와 같은 사유로 CREATED에서 직접 전이한다(판정은 `dispatch_outcome.classify_submit_failure` 재사용, `SendOutcome.not_sent`가 거짓인 모든 경우) | UNKNOWN | `unknown_since=now`, resolver enqueue | `order_unknown` |
 | VALIDATED | `SENT` | outbox 행 SENDING 선점 후 어댑터 호출 직전 | SUBMITTED | `sent_at` | `order_submitted` |
 | VALIDATED | `SEND_ABANDONED` | outbox `DEAD`(max_attempts 소진) **이며 어댑터 호출 0회**(전송 전 실패만) | FAILED | `reason_code=SEND_ABANDONED` | `order_failed` |
 | SUBMITTED | `ACK` | 응답에 `exchange_order_id` | ACKNOWLEDGED | `exchange_order_id` 저장 | `order_acknowledged` |
@@ -412,9 +413,14 @@ is_sandboxed` 이중 확인, `@require_paper_sandbox`는 그대로. 이 명세�
 ### 5.3 트랜잭션 경계 변경(기존 대비)
 
 - **폐기**: "전송 실패는 DB에 흔적 없음"(`repository.delete`). **대체**: 전송 전
-  실패 = `FAILED(reason)`, 전송 후 응답 유실 = `UNKNOWN`. `tests/integration/
-  test_order_service.py::test_submit_order_network_error_propagates`는 "행이 남고
-  status=UNKNOWN 또는 FAILED"로 기대값 교체(리프 L4-12).
+  실패(미전송 확정) = `FAILED(reason)`, 전송 후 응답 유실 = `UNKNOWN`. `tests/
+  integration/test_order_service.py::test_submit_order_network_error_propagates`는
+  "행이 남고 status == 'UNKNOWN'"으로 기대값 교체(리프 L4-12; task-2184가
+  `in ("UNKNOWN","FAILED")`의 느슨한 단언을 정확한 값으로 좁혔다 — 리뷰
+  task-2171 REJECT: 느슨한 단언은 응답 유실이 FAILED로 잘못 확정되는 결함을
+  가렸다). "미전송 확정" 케이스는 `tests/adversarial/oms/
+  test_lost_response_stays_unknown.py::test_not_sent_failure_stays_failed`가
+  별도로 검증한다.
 - 거래소 호출은 어떤 DB 트랜잭션도 열지 않은 상태에서(커넥션 반납 후) 수행.
 - 이벤트 버스 발행은 commit 이후(기존 원칙 유지).
 

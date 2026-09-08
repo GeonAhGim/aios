@@ -198,9 +198,16 @@ async def test_duplicate_client_order_id_returns_existing_without_second_place(p
     assert await _count_by_client_id(pool, order.client_order_id) == 1
 
 
-async def test_adapter_error_marks_claim_failed(pool, ctx):
-    """task-1566(L4-09) 편차 — claim 행을 지우던 이전 동작을 CREATED→FAILED
-    확정으로 교체(submit.py `_mark_claim_failed`와 동일 패턴, 감사 흔적 보존)."""
+async def test_adapter_error_marks_claim_unknown(pool, ctx):
+    """task-1566(L4-09) 편차 — claim 행을 지우던 이전 동작을 CREATED→
+    {FAILED,UNKNOWN} 확정으로 교체(submit.py `_mark_claim_send_outcome`와
+    동일 패턴, 감사 흔적 보존).
+
+    task-2184(리뷰 task-2171 REJECT 수정) — 어댑터 호출 *이후* 난 미분류
+    예외(`RuntimeError`)는 "전송했는지 모른다" = 응답 유실(I10)이라 UNKNOWN
+    이어야 한다(이전엔 무조건 FAILED로 확정해 실제 체결이 있어도 복구 불가한
+    결함이었다). `dispatch_outcome.classify_submit_failure`가 fail-closed로
+    이렇게 분류한다."""
     async def boom(order: Order) -> Order:
         raise RuntimeError("network")
 
@@ -213,7 +220,7 @@ async def test_adapter_error_marks_claim_failed(pool, ctx):
         status = await conn.fetchval(
             "SELECT status FROM orders WHERE client_order_id = $1", order.client_order_id
         )
-    assert status == "FAILED"
+    assert status == "UNKNOWN"
 
 
 async def test_expired_decision_reference_rejected_at_claim(pool, ctx):
