@@ -51,6 +51,7 @@ from uuid import UUID, uuid4
 import asyncpg
 
 from src.core.db.conditional_write import conditional_update
+from src.core.observability.metric_names import OMS_INBOX_DUPLICATE_COUNT_TOTAL
 from src.core.observability.metrics import MetricsPort, NullMetrics
 from src.data.models.trading import OrderStatus
 from src.services.oms.adapters.fills_repository import FillsRepository
@@ -98,6 +99,17 @@ class InboxProcessor:
         async with self._pool.acquire() as conn, conn.transaction():
             inserted = await self._inbox.insert_if_absent(conn, ev)
             if not inserted:
+                self._metrics.counter(
+                    OMS_INBOX_DUPLICATE_COUNT_TOTAL, {"venue": ev.venue, "source": ev.source}
+                )
+                logger.info(
+                    "inbox_processor: 중복 이벤트 흡수 venue=%s event=%s",
+                    ev.venue, ev.provider_event_id,
+                    extra={
+                        "event": "oms.inbox.duplicate",
+                        "payload": {"provider_event_id": ev.provider_event_id, "venue": ev.venue},
+                    },
+                )
                 return False
             row_id = await conn.fetchval(
                 "SELECT id FROM provider_event_inbox WHERE venue = $1 AND provider_event_id = $2",
@@ -167,6 +179,13 @@ class InboxProcessor:
                 order_id,
                 order.exchange,
                 ev.venue,
+                extra={
+                    "event": "oms.inbox.venue_mismatch",
+                    "payload": {
+                        "order_id": str(order_id), "expected_venue": order.exchange,
+                        "got_venue": ev.venue, "provider_event_id": ev.provider_event_id,
+                    },
+                },
             )
             return None
 

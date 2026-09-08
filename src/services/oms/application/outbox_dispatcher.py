@@ -33,6 +33,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import random
+import time
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from datetime import datetime
@@ -40,6 +41,8 @@ from datetime import datetime
 import asyncpg
 
 from src.core.db.conditional_write import ConcurrencyConflictError
+from src.core.observability.metric_names import OMS_OUTBOX_DISPATCH_DURATION_SECONDS
+from src.core.observability.metrics import MetricsPort, NullMetrics
 from src.data.models.trading import OrderStatus
 from src.exchanges.common.http_policy import RetryPolicy
 from src.services.oms.application.dispatch_outcome import OutcomeKind, SendOutcome
@@ -69,6 +72,11 @@ DEFAULT_LEASE_SEC = 30
 DEFAULT_POLL_INTERVAL_SEC = 0.1  # §7.1 outbox 지연 p99 ≤ 200 ms
 
 
+def _dispatch_log_extra(event: str, row: OutboxRow, **fields: object) -> dict[str, object]:
+    base = {"order_id": str(row.order_id), "outbox_id": str(row.id), "attempt": row.attempt}
+    return {"event": event, "payload": {**base, **fields}}
+
+
 @dataclass
 class DispatchReport(CommandCounters):
     claimed: int = 0
@@ -96,6 +104,7 @@ class OutboxDispatcher:
         clock: Callable[[], datetime] = utcnow,
         rng: Callable[[], float] = random.random,
         sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
+        metrics: MetricsPort | None = None,
     ) -> None:
         if pre_send_gate is None:  # 정적 검사 우회(런타임 None 주입) 방어, I-01
             raise ValueError("pre_send_gate는 필수입니다(I-01)")
@@ -108,6 +117,7 @@ class OutboxDispatcher:
         self._lease_sec = lease_sec
         self._poll_interval_sec = poll_interval_sec
         self._sleep = sleep
+        self._metrics = metrics if metrics is not None else NullMetrics()
         self._writes = OutboxWrites(
             outbox_repo=outbox_repo,
             order_repo=order_repo,
@@ -138,12 +148,19 @@ class OutboxDispatcher:
             except ConcurrencyConflictError:
                 # 리스를 잃은 뒤의 늦은 쓰기 — 다른 워커/복구가 이미 처리했다.
                 report.conflicts += 1
-                logger.warning("outbox_dispatcher: 늦은 쓰기 거부 outbox_id=%s worker=%s",
-                               row.id, self._worker_id)
+                logger.warning(
+                    "outbox_dispatcher: 늦은 쓰기 거부 id=%s worker=%s", row.id, self._worker_id,
+                    extra=_dispatch_log_extra(
+                        "oms.outbox.late_write_rejected", row, worker_id=self._worker_id
+                    ),
+                )
             except Exception:
                 # 행은 SENDING+lease로 남는다 → lease 만료 시 복구(§6 F2)가 UNKNOWN 처리.
                 report.errors += 1
-                logger.exception("outbox_dispatcher: outbox_id=%s 처리 실패", row.id)
+                logger.exception(
+                    "outbox_dispatcher: outbox_id=%s 처리 실패", row.id,
+                    extra=_dispatch_log_extra("oms.outbox.dispatch_failed", row),
+                )
         return report
 
     async def run_forever(self) -> None:
@@ -158,6 +175,7 @@ class OutboxDispatcher:
             await self._sleep(0.0 if claimed else self._poll_interval_sec)
 
     async def _send_submit(self, row: OutboxRow, report: DispatchReport) -> None:
+        start = time.monotonic()
         async with self._pool.acquire() as conn, conn.transaction():
             order = await self._orders.get_for_update(conn, row.order_id)
             if order.status not in (OrderStatus.VALIDATED, OrderStatus.SUBMITTED):
@@ -187,6 +205,9 @@ class OutboxDispatcher:
         outcome = await call_submit(adapter, venue_order, verify_first)
         async with self._pool.acquire() as conn, conn.transaction():
             await self._finalize_submit(conn, row, order, outcome, report)
+        labels = {"venue": order.exchange, "command_type": row.command_type}
+        elapsed = time.monotonic() - start
+        self._metrics.observe(OMS_OUTBOX_DISPATCH_DURATION_SECONDS, elapsed, labels)
 
     async def _abandon_pre_send(
         self, conn: asyncpg.Connection, row: OutboxRow, order: OrderView, reason: str

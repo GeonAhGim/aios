@@ -73,6 +73,54 @@ MARKET_DATA_FANOUT_PUBLISHED_COUNT_TOTAL = "aios.market_data.fanout_publish.coun
 MARKET_DATA_FANOUT_DENIED_COUNT_TOTAL = "aios.market_data.fanout_deny.count_total"
 MARKET_DATA_FANOUT_DROPPED_COUNT_TOTAL = "aios.market_data.fanout_drop.count_total"
 
+# L4_execution_oms_and_exchange_v1.0.md §7.2 (§9 L4-27) — oms/exchange/paper_sim.
+OMS_ORDER_SUBMIT_COUNT_TOTAL = "aios.oms.order_submit.count_total"
+OMS_ORDER_SUBMIT_DURATION_SECONDS = "aios.oms.order_submit.duration_seconds"
+OMS_ORDER_TRANSITION_COUNT_TOTAL = "aios.oms.order_transition.count_total"
+OMS_OUTBOX_BACKLOG_GAUGE = "aios.oms.outbox.backlog"
+
+# 원문(§7.2): `aios.oms.outbox.dispatch.duration_seconds` — 4세그먼트라 §6 정규식
+# 위반. `outbox`+`dispatch`를 한 세그먼트로 병합해 정규화(PLT-04 선례 그대로).
+OMS_OUTBOX_DISPATCH_DURATION_SECONDS = "aios.oms.outbox_dispatch.duration_seconds"
+
+# 원문: `aios.oms.inbox.duplicate.count_total` — 4세그먼트. `inbox`+`duplicate` 병합.
+OMS_INBOX_DUPLICATE_COUNT_TOTAL = "aios.oms.inbox_duplicate.count_total"
+
+OMS_INBOX_LAG_SECONDS_GAUGE = "aios.oms.inbox.lag_seconds"
+
+# 원문: `aios.oms.unknown_orders` — 2세그먼트뿐이라 `.gauge` 세그먼트를 추가
+# (EVENT_BUS_QUEUE_DEPTH_GAUGE 선례와 동일 패턴).
+OMS_UNKNOWN_ORDERS_GAUGE = "aios.oms.unknown_orders.gauge"
+
+OMS_UNKNOWN_RESOLUTION_DURATION_SECONDS = "aios.oms.unknown_resolution.duration_seconds"
+
+# 원문: `aios.oms.reconcile.run.count_total` — 4세그먼트. `reconcile`+`run` 병합.
+OMS_RECONCILE_RUN_COUNT_TOTAL = "aios.oms.reconcile_run.count_total"
+
+OMS_RECONCILE_LAG_SINCE_HEALTHY_SECONDS_GAUGE = "aios.oms.reconcile.lag_since_healthy_seconds"
+
+# 원문: `aios.oms.algo.slice_submit.count_total` — 4세그먼트. `algo`+`slice_submit` 병합.
+OMS_ALGO_SLICE_SUBMIT_COUNT_TOTAL = "aios.oms.algo_slice_submit.count_total"
+
+EXCHANGE_HTTP_REQUEST_COUNT_TOTAL = "aios.exchange.http_request.count_total"
+EXCHANGE_HTTP_REQUEST_DURATION_SECONDS = "aios.exchange.http_request.duration_seconds"
+EXCHANGE_RATE_LIMIT_WAIT_SECONDS = "aios.exchange.rate_limit.wait_seconds"
+EXCHANGE_CIRCUIT_STATE_GAUGE = "aios.exchange.circuit.state"
+
+# 원문: `aios.exchange.clock_offset_ms` — 2세그먼트뿐이라 `.gauge` 세그먼트를 추가.
+EXCHANGE_CLOCK_OFFSET_MS_GAUGE = "aios.exchange.clock_offset_ms.gauge"
+
+# 원문: `aios.exchange.ws.reconnect.count_total` — 4세그먼트. `ws`+`reconnect` 병합.
+EXCHANGE_WS_RECONNECT_COUNT_TOTAL = "aios.exchange.ws_reconnect.count_total"
+# 원문: `aios.exchange.ws.sequence_gap.count_total` — 4세그먼트. `ws`+`sequence_gap` 병합.
+EXCHANGE_WS_SEQUENCE_GAP_COUNT_TOTAL = "aios.exchange.ws_sequence_gap.count_total"
+# 원문: `aios.exchange.ws.heartbeat_miss.count_total` — 4세그먼트. `ws`+`heartbeat_miss` 병합.
+EXCHANGE_WS_HEARTBEAT_MISS_COUNT_TOTAL = "aios.exchange.ws_heartbeat_miss.count_total"
+
+PAPER_SIM_FILL_COUNT_TOTAL = "aios.paper_sim.fill.count_total"
+# 원문: `aios.paper_sim.slippage_bps` — 2세그먼트뿐이라 `slippage`/`bps`로 분리.
+PAPER_SIM_SLIPPAGE_BPS = "aios.paper_sim.slippage.bps"
+
 ALL_METRIC_NAMES: frozenset[str] = frozenset(
     {
         API_REQUEST_COUNT_TOTAL,
@@ -109,6 +157,28 @@ ALL_METRIC_NAMES: frozenset[str] = frozenset(
         MARKET_DATA_FANOUT_PUBLISHED_COUNT_TOTAL,
         MARKET_DATA_FANOUT_DENIED_COUNT_TOTAL,
         MARKET_DATA_FANOUT_DROPPED_COUNT_TOTAL,
+        OMS_ORDER_SUBMIT_COUNT_TOTAL,
+        OMS_ORDER_SUBMIT_DURATION_SECONDS,
+        OMS_ORDER_TRANSITION_COUNT_TOTAL,
+        OMS_OUTBOX_BACKLOG_GAUGE,
+        OMS_OUTBOX_DISPATCH_DURATION_SECONDS,
+        OMS_INBOX_DUPLICATE_COUNT_TOTAL,
+        OMS_INBOX_LAG_SECONDS_GAUGE,
+        OMS_UNKNOWN_ORDERS_GAUGE,
+        OMS_UNKNOWN_RESOLUTION_DURATION_SECONDS,
+        OMS_RECONCILE_RUN_COUNT_TOTAL,
+        OMS_RECONCILE_LAG_SINCE_HEALTHY_SECONDS_GAUGE,
+        OMS_ALGO_SLICE_SUBMIT_COUNT_TOTAL,
+        EXCHANGE_HTTP_REQUEST_COUNT_TOTAL,
+        EXCHANGE_HTTP_REQUEST_DURATION_SECONDS,
+        EXCHANGE_RATE_LIMIT_WAIT_SECONDS,
+        EXCHANGE_CIRCUIT_STATE_GAUGE,
+        EXCHANGE_CLOCK_OFFSET_MS_GAUGE,
+        EXCHANGE_WS_RECONNECT_COUNT_TOTAL,
+        EXCHANGE_WS_SEQUENCE_GAP_COUNT_TOTAL,
+        EXCHANGE_WS_HEARTBEAT_MISS_COUNT_TOTAL,
+        PAPER_SIM_FILL_COUNT_TOTAL,
+        PAPER_SIM_SLIPPAGE_BPS,
     }
 )
 

@@ -1,8 +1,8 @@
-"""L4-16 — UNKNOWN 주문 해소(§4.2 F5-a, §6 F5-a).
+"""L4-16 — UNKNOWN 주문 해소(§4.2 F5-a, §6 F5-a) + L4-27 관측성 계측.
 
 Spec: docs/specs/L4_execution_oms_and_exchange_v1.0.md §2-C
 `application/unknown_resolver.py`, §4.2 UNKNOWN 행 3종
-(`RESOLVED_AS`/`RESOLVED_ABSENT`/`UNRESOLVED_LIMIT`), §6 F5-a, §9 L4-16.
+(`RESOLVED_AS`/`RESOLVED_ABSENT`/`UNRESOLVED_LIMIT`), §6 F5-a, §7.2, §9 L4-16/L4-27.
 
 이 리프는 F5-a(client id를 지원하는 venue — Bitget)만 다룬다. F5-b(KIS/NH,
 client id 미지원)는 `find_order_by_client_id`가 `UnsupportedCapabilityError`로
@@ -28,32 +28,36 @@ UnsupportedCapabilityError로 fail-closed").
 판정과 이벤트 `occurred_at`이 전부 이 값에서 나온다. `sleep`도 주입값이라
 테스트는 실시간 대기 없이 backoff 스텝 수만 단언한다(test_split_brain
 d3227c9 선례와 동일 원칙, 모듈 docstring이 아니라 여기 실제로 지킨다).
+
+확정 쓰기 3분기(`apply_resolved_as`/`apply_resolved_absent`/`escalate`)는
+`unknown_resolver_writes.py`로 분리됐다(300줄 한도, 모듈 docstring 참조).
+`aios.oms.unknown_resolution.duration_seconds{outcome}`는 해소 시도 1건당
+(재시도 루프 전체가 끝나는 시점에) 정확히 1회 관측한다 — outcome은 최종
+분기 이름(RESOLVED_AS/RESOLVED_ABSENT/UNRESOLVED_LIMIT) 그대로다.
 """
 from __future__ import annotations
 
 import asyncio
-import hashlib
-import json
-import logging
+import time
 from collections.abc import Awaitable, Callable
 from datetime import datetime
-from uuid import UUID, uuid4
+from uuid import UUID
 
 import asyncpg
 
-from src.data.models.trading import Order, OrderStatus
+from src.core.observability.metric_names import OMS_UNKNOWN_RESOLUTION_DURATION_SECONDS
+from src.core.observability.metrics import MetricsPort, NullMetrics
+from src.data.models.trading import OrderStatus
 from src.exchanges.common.adapter import ExchangeAdapter
-from src.foundation.risk_gate.application.activate_safety_control import activate_safety_control
-from src.foundation.risk_gate.domain.models import SafetyScope
 from src.foundation.risk_gate.ports.repository import RiskGateRepository
 from src.services.oms.adapters.order_repository import PostgresOrderRepository
-from src.services.oms.contracts.v1_events import OrderTransitionEvent
+from src.services.oms.application.unknown_resolver_writes import (
+    apply_resolved_absent,
+    apply_resolved_as,
+    escalate,
+)
 from src.services.oms.contracts.v1_views import OrderView
-from src.services.oms.domain.errors import InvalidOrderTransitionError
-from src.services.oms.domain.state_machine import ALLOWED, OrderEvent, next_status
 from src.services.oms.ports.repository import OrderRepoPort
-
-logger = logging.getLogger(__name__)
 
 Clock = Callable[[], datetime]
 SleepFn = Callable[[float], Awaitable[None]]
@@ -65,11 +69,6 @@ ABSENT_ELAPSED_SECONDS = 120.0
 _orders = PostgresOrderRepository()
 
 
-def _payload_hash(order_id: UUID, tag: str) -> str:
-    canonical = json.dumps({"order_id": str(order_id), "tag": tag}, sort_keys=True)
-    return hashlib.sha256(canonical.encode()).hexdigest()
-
-
 async def _is_still_open(adapter: ExchangeAdapter, order: OrderView) -> bool:
     open_orders = await adapter.get_open_orders(order.symbol)
     return any(
@@ -77,170 +76,6 @@ async def _is_still_open(adapter: ExchangeAdapter, order: OrderView) -> bool:
         or (order.exchange_order_id is not None and o.exchange_order_id == order.exchange_order_id)
         for o in open_orders
     )
-
-
-async def _apply_resolved_as(
-    pool: asyncpg.Pool, repo: OrderRepoPort, order_id: UUID, found: Order, *, clock: Clock
-) -> OrderView:
-    async with pool.acquire() as conn:
-        tx = conn.transaction()
-        await tx.start()
-        ok = False
-        try:
-            current = await repo.get_for_update(conn, order_id)
-            if current.status is not OrderStatus.UNKNOWN:
-                result = current  # 이미 다른 경로로 해소됨(경합) — 멱등 반환
-            else:
-                target = found.status
-                if target not in ALLOWED[OrderStatus.UNKNOWN]:
-                    raise InvalidOrderTransitionError(
-                        f"find_order_by_client_id가 돌려준 status={target.value}는 "
-                        "UNKNOWN에서 허용되는 목적지가 아닙니다 — 어댑터 계약 위반."
-                    )
-                event = OrderTransitionEvent(
-                    order_id=order_id,
-                    from_status=OrderStatus.UNKNOWN,
-                    to_status=target,
-                    event=OrderEvent.RESOLVED_AS.value,
-                    reason_code="PROVIDER_LOOKUP_MATCHED",
-                    actor_subject_id="system",
-                    trace_id=uuid4(),
-                    command_id=None,
-                    provider_event_id=None,
-                    occurred_at=clock(),
-                    payload_hash=_payload_hash(order_id, f"RESOLVED_AS:{target.value}"),
-                )
-                result = await repo.transition(
-                    conn,
-                    order_id=order_id,
-                    expected_status=OrderStatus.UNKNOWN,
-                    expected_version=current.version,
-                    new_status=target,
-                    patch={
-                        "filled_quantity": found.filled_quantity,
-                        "exchange_order_id": found.exchange_order_id,
-                    },
-                    event=event,
-                )
-            ok = True
-        finally:
-            if ok:
-                await tx.commit()
-            else:
-                await tx.rollback()
-    return result
-
-
-async def _apply_resolved_absent(
-    pool: asyncpg.Pool, repo: OrderRepoPort, order_id: UUID, *, clock: Clock
-) -> OrderView:
-    async with pool.acquire() as conn:
-        tx = conn.transaction()
-        await tx.start()
-        ok = False
-        try:
-            current = await repo.get_for_update(conn, order_id)
-            if current.status is not OrderStatus.UNKNOWN:
-                result = current
-            else:
-                target = next_status(current.status, OrderEvent.RESOLVED_ABSENT)
-                event = OrderTransitionEvent(
-                    order_id=order_id,
-                    from_status=OrderStatus.UNKNOWN,
-                    to_status=target,
-                    event=OrderEvent.RESOLVED_ABSENT.value,
-                    reason_code="NOT_AT_PROVIDER",
-                    actor_subject_id="system",
-                    trace_id=uuid4(),
-                    command_id=None,
-                    provider_event_id=None,
-                    occurred_at=clock(),
-                    payload_hash=_payload_hash(order_id, "RESOLVED_ABSENT"),
-                )
-                result = await repo.transition(
-                    conn,
-                    order_id=order_id,
-                    expected_status=OrderStatus.UNKNOWN,
-                    expected_version=current.version,
-                    new_status=target,
-                    patch={},
-                    event=event,
-                )
-            ok = True
-        finally:
-            if ok:
-                await tx.commit()
-            else:
-                await tx.rollback()
-    return result
-
-
-async def _escalate(
-    pool: asyncpg.Pool,
-    repo: OrderRepoPort,
-    risk_gate_repo: RiskGateRepository,
-    order_id: UUID,
-    *,
-    max_attempts: int,
-    clock: Clock,
-) -> OrderView:
-    async with pool.acquire() as conn:
-        tx = conn.transaction()
-        await tx.start()
-        ok = False
-        should_activate = False
-        try:
-            current = await repo.get_for_update(conn, order_id)
-            if current.status is not OrderStatus.UNKNOWN:
-                result = current  # 경합 중 이미 해소됨 — 안전통제를 걸 이유가 없다
-            else:
-                target = next_status(current.status, OrderEvent.UNRESOLVED_LIMIT)
-                event = OrderTransitionEvent(
-                    order_id=order_id,
-                    from_status=OrderStatus.UNKNOWN,
-                    to_status=target,
-                    event=OrderEvent.UNRESOLVED_LIMIT.value,
-                    reason_code="UNKNOWN_RESOLUTION_ATTEMPTS_EXHAUSTED",
-                    actor_subject_id="system",
-                    trace_id=uuid4(),
-                    command_id=None,
-                    provider_event_id=None,
-                    occurred_at=clock(),
-                    payload_hash=_payload_hash(order_id, "UNRESOLVED_LIMIT"),
-                )
-                result = await repo.transition(
-                    conn,
-                    order_id=order_id,
-                    expected_status=OrderStatus.UNKNOWN,
-                    expected_version=current.version,
-                    new_status=target,
-                    patch={},
-                    event=event,
-                )
-                should_activate = True
-            ok = True
-        finally:
-            if ok:
-                await tx.commit()
-            else:
-                await tx.rollback()
-
-    if should_activate:
-        await activate_safety_control(
-            risk_gate_repo,
-            tenant_id=result.tenant_id,
-            actor_subject_id=result.tenant_id,
-            actor_is_admin=True,
-            scope=SafetyScope.ACCOUNT,
-            scope_ref=str(result.tenant_id),
-            reason=f"OMS_UNKNOWN_ORDER_UNRESOLVED:{order_id}",
-        )
-        logger.critical(
-            "unknown_resolver: order_id=%s 상한(%d회) 초과 — ACCOUNT safety control ACTIVE",
-            order_id,
-            max_attempts,
-        )
-    return result
 
 
 async def resolve_unknown(
@@ -254,12 +89,14 @@ async def resolve_unknown(
     order_repo: OrderRepoPort | None = None,
     max_attempts: int = 5,
     backoff: tuple[float, ...] = DEFAULT_BACKOFF,
+    metrics: MetricsPort | None = None,
 ) -> OrderView:
     if risk_gate_repo is None:  # I-01 — 안전 게이트 인자는 None 기본값을 갖지 않는다
         raise TypeError(
             "risk_gate_repo는 필수입니다(I-01) — None을 명시적으로 넘길 수 없습니다."
         )
     repo = order_repo if order_repo is not None else _orders
+    m = metrics if metrics is not None else NullMetrics()
 
     async with pool.acquire() as conn:
         order = await repo.get_for_update(conn, order_id)
@@ -270,11 +107,14 @@ async def resolve_unknown(
             f"order_id={order_id}: UNKNOWN 상태인데 unknown_since가 없습니다 — 데이터 결함."
         )
 
+    start = time.monotonic()
     not_found_streak = 0
     for attempt in range(1, max_attempts + 1):
         found = await adapter.find_order_by_client_id(order.client_order_id)
         if found is not None:
-            return await _apply_resolved_as(pool, repo, order_id, found, clock=clock)
+            resolved = await apply_resolved_as(pool, repo, order_id, found, clock=clock)
+            _observe(m, start, "RESOLVED_AS")
+            return resolved
 
         not_found_streak += 1
         elapsed = (clock() - order.unknown_since).total_seconds()
@@ -284,11 +124,20 @@ async def resolve_unknown(
             and not_found_streak >= NOT_FOUND_STREAK_THRESHOLD
             and elapsed >= ABSENT_ELAPSED_SECONDS
         ):
-            return await _apply_resolved_absent(pool, repo, order_id, clock=clock)
+            resolved = await apply_resolved_absent(pool, repo, order_id, clock=clock)
+            _observe(m, start, "RESOLVED_ABSENT")
+            return resolved
 
         if attempt < max_attempts:
             await sleep(backoff[min(attempt - 1, len(backoff) - 1)])
 
-    return await _escalate(
+    escalated = await escalate(
         pool, repo, risk_gate_repo, order_id, max_attempts=max_attempts, clock=clock
     )
+    _observe(m, start, "UNRESOLVED_LIMIT")
+    return escalated
+
+
+def _observe(m: MetricsPort, start: float, outcome: str) -> None:
+    elapsed = time.monotonic() - start
+    m.observe(OMS_UNKNOWN_RESOLUTION_DURATION_SECONDS, elapsed, {"outcome": outcome})
