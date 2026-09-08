@@ -66,10 +66,14 @@ const GHOST_PATH_WHITELIST: ReadonlySet<ApiRouteName> = new Set<ApiRouteName>([
 // src/api/routers/market_data.py에 실재하게 됐지만(GET .../market-data/coverage),
 // 스냅샷은 그 병합 이후 재생성된 적이 없다 — charting.indicatorTemplates.*와
 // 동일 사유(라우터는 있는데 스냅샷이 낡음)라 STALE_SNAPSHOT_WHITELIST에 둔다.
+// task-2335(FE-OPS-1): riskGate.safetyControls.evaluateRecovery도 동일 사유 —
+// src/api/routers/foundation/risk_gate.py:161 post_evaluate_recovery는 실재하지만
+// contracts/openapi/v1.json에는 없다(grep 직접 확인, risk-gate 6경로 중 유일).
 const STALE_SNAPSHOT_WHITELIST: ReadonlySet<ApiRouteName> = new Set<ApiRouteName>([
   "charting.indicatorTemplates.base",
   "charting.indicatorTemplates.item",
   "marketData.coverage.get",
+  "riskGate.safetyControls.evaluateRecovery",
 ]);
 
 // KNOWN_ENVELOPE_DRIFT: task-1165 시점 전수 대조 결과, apiPaths.ts에 등록된 envelope
@@ -125,12 +129,14 @@ const UNREGISTERED_ROUTE_WHITELIST: Readonly<Record<string, string>> = {
   "/v1/foundation/reconciliation": "정합성 대사(reconciliation) 화면이 없다",
   "/v1/foundation/reconciliation/runs": "정합성 대사 실행 이력 화면이 없다",
   "/v1/foundation/reconciliation/{target_ref}:resolve": "정합성 대사 해소 액션 UI가 없다",
-  "/v1/foundation/risk-gate/admin/safety-controls": "리스크 게이트 관리자 화면이 없다(apps/web/src/routes/admin에 risk-gate 없음)",
-  "/v1/foundation/risk-gate/evaluate": "리스크 게이트 평가 화면이 없다",
-  "/v1/foundation/risk-gate/rule-bundles/{bundle_id}:activate": "리스크 게이트 관리자 화면이 없다",
-  "/v1/foundation/risk-gate/rule-bundles/{bundle_id}:approve": "리스크 게이트 관리자 화면이 없다",
-  "/v1/foundation/risk-gate/safety-controls": "리스크 게이트 관리자 화면이 없다",
-  "/v1/foundation/risk-gate/safety-controls/{control_id}:deactivate": "리스크 게이트 관리자 화면이 없다",
+  // task-2335(FE-OPS-1): SafetyControlsPage가 GET(list)/deactivate/evaluate-recovery
+  // 3건을 riskGate.safetyControls.*로 등록했다 — 아래 3건은 decision상 이 리프가
+  // 만들지 않는 개통(activate)·룰번들 승인/활성화·evaluate 트리거라 그대로 남긴다
+  // (후속 리프 2336~2338 소관).
+  "/v1/foundation/risk-gate/admin/safety-controls": "리스크 게이트 관리자 개통(activate) UI가 없다(decision: 이 리프는 읽기·해제만)",
+  "/v1/foundation/risk-gate/evaluate": "리스크 게이트 평가 트리거 화면이 없다",
+  "/v1/foundation/risk-gate/rule-bundles/{bundle_id}:activate": "룰번들 활성화 액션 UI가 없다",
+  "/v1/foundation/risk-gate/rule-bundles/{bundle_id}:approve": "룰번들 승인 액션 UI가 없다",
   "/v1/foundation/trust/consents/{consent_id}:revoke": "동의 철회 액션 UI가 없다(accept만 foundation.trustConsents.accept로 등록돼 있음)",
   "/v1/foundation/trust/memberships": "신뢰 멤버십 관리 화면이 없다",
   "/v1/foundation/trust/memberships/{subject_id}:revoke": "신뢰 멤버십 관리 화면이 없다",

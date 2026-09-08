@@ -245,4 +245,32 @@ export const API_ROUTES = defineApiRoutes({
   // 머지돼 스냅샷이 이미 갱신돼 있으므로(scripts.compile 등과 달리)
   // STALE_SNAPSHOT_WHITELIST 대상이 아니다.
   "indicators.list": route("/v1/indicators", true, null, true),
+
+  // task-2335(FE-OPS-1): src/api/routers/foundation/risk_gate.py 원문 확인 —
+  // `APIRouter(prefix="/v1/foundation/risk-gate")`(risk_gate.py:75), router_registry.py
+  // include_router(추가 prefix 없음). 이 리프는 안전 통제(safety control) 조회·해제
+  // (deactivate·evaluate-recovery)만 등록한다 — 개통(POST 자가/관리자 activate)·
+  // 룰번들 승인/활성화·evaluate 트리거는 decision상 UI가 없어 apiPaths.openapi.test.ts의
+  // UNREGISTERED_ROUTE_WHITELIST에 그대로 남는다(후속 리프 2336~2338 소관).
+  // GET/POST "/safety-controls"(:97·:106)는 같은 경로를 공유하므로(apiRouteTypes.ts
+  // 축약 관용) 한 항목으로 묶는다 — 이 화면은 GET(list)만 쓴다. 세 라우트 전부
+  // `-> ApiResponse[...]` + `ok(...)`(:94·:136·:189)라 envelope=true. mount_v1(PLT-16)
+  // 미도달이라 v1Path=null(foundation.*와 동일 사유).
+  "riskGate.safetyControls.list": route("/v1/foundation/risk-gate/safety-controls", true, null, true),
+  "riskGate.safetyControls.deactivate": route(
+    "/v1/foundation/risk-gate/safety-controls/:controlId:deactivate",
+    true,
+    null,
+    true,
+  ),
+  // evaluate-recovery(risk_gate.py:161)는 contracts/openapi/v1.json에 아직 없다(grep
+  // 직접 확인 — risk-gate 6경로 중 :evaluate-recovery만 스냅샷에 없음) — 라우터는
+  // 실재하므로 GHOST_PATH_WHITELIST(라우터 자체가 없음)가 아니라
+  // STALE_SNAPSHOT_WHITELIST(라우터는 있는데 스냅샷이 낡음, CH-17c 선례)로 뺀다.
+  "riskGate.safetyControls.evaluateRecovery": route(
+    "/v1/foundation/risk-gate/safety-controls/:controlId:evaluate-recovery",
+    true,
+    null,
+    true,
+  ),
 });

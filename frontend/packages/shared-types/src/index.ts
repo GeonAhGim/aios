@@ -9,6 +9,7 @@ export * from "./account";
 export * from "./notification";
 export * from "./deviceToken";
 export * from "./admin";
+export * from "./riskGate";
 export * from "./wallet";
 export * from "./walletBalance";
 export * from "./alert";

@@ -13,6 +13,7 @@ const SECTIONS = [
     desc: "하우스 계정 직접판매(B2C)",
   },
   { to: "/admin/approval-requests", label: "승인 요청 처리", desc: "FD-10.1/9.4b" },
+  { to: "/admin/safety-controls", label: "안전 통제(Safety Controls)", desc: "R-53 조회·해제" },
 ];
 
 // task-1155: 이 화면 자체는 조회·변경 API 호출이 없는 정적 내비게이션 허브라

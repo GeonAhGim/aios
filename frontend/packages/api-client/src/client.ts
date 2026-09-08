@@ -9,6 +9,7 @@ import { withMarketplace } from "./clients/marketplace";
 import { withNotifications } from "./clients/notifications";
 import { withPlatform } from "./clients/platform";
 import { withPortfolio } from "./clients/portfolio";
+import { withRiskGate } from "./clients/riskGate";
 import { withScripts } from "./clients/scripts";
 import { withStrategyBuilder } from "./clients/strategyBuilder";
 
@@ -22,7 +23,9 @@ const ComposedApiClient = withPlatform(
         withScripts(
           withStrategyBuilder(
             withFoundation(
-              withExchange(withExecutions(withPortfolio(withAccount(withAuth(ApiClientBase))))),
+              withRiskGate(
+                withExchange(withExecutions(withPortfolio(withAccount(withAuth(ApiClientBase))))),
+              ),
             ),
           ),
         ),

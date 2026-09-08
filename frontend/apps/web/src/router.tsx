@@ -7,6 +7,7 @@ import { MyApprovalRequestsPage } from "./routes/approvals/MyApprovalRequestsPag
 import { AdminHomePage } from "./routes/admin/AdminHomePage";
 import { DisputeManagementPage } from "./routes/admin/DisputeManagementPage";
 import { PlatformListingPage } from "./routes/admin/PlatformListingPage";
+import { SafetyControlsPage } from "./routes/admin/SafetyControlsPage";
 import { UserManagementPage } from "./routes/admin/UserManagementPage";
 import { VerificationQueuePage } from "./routes/admin/VerificationQueuePage";
 import { WalletTopupsPage } from "./routes/admin/WalletTopupsPage";
@@ -103,4 +104,5 @@ export const router = createBrowserRouter([
     path: "/admin/approval-requests/:requestId",
     element: protectAdmin(<AdminApprovalRequestPage />),
   },
+  { path: "/admin/safety-controls", element: protectAdmin(<SafetyControlsPage />) },
 ]);
