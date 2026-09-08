@@ -64,6 +64,7 @@ task-1717 P0-D — 전수감사가 지적한 결함은 "이 함수가 내리는 
 """
 from __future__ import annotations
 
+import time
 from collections.abc import Mapping
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
@@ -136,8 +137,13 @@ async def _record_decision(
     outcome: GateOutcome,
     reason_codes: tuple[str, ...],
     fence: Mapping[str, int],
+    start_ns: int,
 ) -> UUID:
     now = datetime.now(timezone.utc)
+    # task-2395 — measured wall time from gate() entry to this decision, same
+    # `max(1, ...)` convention as evaluator.py/recovery_gate.py/
+    # evaluate_pre_submit.py (never 0, never a fake constant).
+    latency_us = max(1, (time.perf_counter_ns() - start_ns) // 1000)
     execution_ref = f"exec:{context.execution_id}"
     inputs = _GateInputs(
         tenant_id=context.user_id,
@@ -173,7 +179,7 @@ async def _record_decision(
         expires_at=now + timedelta(seconds=_TTL_SECONDS),
         trace_id=uuid4(),
         evidence_ref=None,
-        latency_us=1,
+        latency_us=latency_us,
     )
     await recorder.record(decision, inputs, actor="order_service.foundation_gate")
     return decision_id
@@ -185,6 +191,7 @@ def make_foundation_pre_submit_gate(pool: asyncpg.Pool, *, require_mandate: bool
     recorder = RiskDecisionRecorder(pool, PostgresDecisionRepository(pool), InProcessEventBus())
 
     async def gate(context: OrderContext) -> GateDecision:
+        start_ns = time.perf_counter_ns()
         pairs = fence_pairs_for(context.user_id, context.exchange, f"exec:{context.execution_id}")
         fence_snapshot, active_controls = await risk_repo.read_fence_and_controls(pairs)
         fence = _flatten_fence(fence_snapshot)
@@ -192,7 +199,7 @@ def make_foundation_pre_submit_gate(pool: asyncpg.Pool, *, require_mandate: bool
         if context.observed_fence is not None and _is_stale(context.observed_fence, fence):
             decision_id = await _record_decision(
                 recorder, context=context, outcome=GateOutcome.DENY,
-                reason_codes=("RISK_FENCE_STALE",), fence=fence,
+                reason_codes=("RISK_FENCE_STALE",), fence=fence, start_ns=start_ns,
             )
             return GateDecision(
                 outcome=GateOutcome.DENY, reason_codes=("RISK_FENCE_STALE",),
@@ -205,7 +212,7 @@ def make_foundation_pre_submit_gate(pool: asyncpg.Pool, *, require_mandate: bool
             )
             decision_id = await _record_decision(
                 recorder, context=context, outcome=GateOutcome.DENY,
-                reason_codes=reason_codes, fence=fence,
+                reason_codes=reason_codes, fence=fence, start_ns=start_ns,
             )
             return GateDecision(
                 outcome=GateOutcome.DENY, reason_codes=reason_codes,
@@ -226,7 +233,7 @@ def make_foundation_pre_submit_gate(pool: asyncpg.Pool, *, require_mandate: bool
             if require_mandate:
                 decision_id = await _record_decision(
                     recorder, context=context, outcome=GateOutcome.DENY,
-                    reason_codes=("RISK_MANDATE_REQUIRED",), fence=fence,
+                    reason_codes=("RISK_MANDATE_REQUIRED",), fence=fence, start_ns=start_ns,
                 )
                 return GateDecision(
                     outcome=GateOutcome.DENY, reason_codes=("RISK_MANDATE_REQUIRED",),
@@ -234,7 +241,7 @@ def make_foundation_pre_submit_gate(pool: asyncpg.Pool, *, require_mandate: bool
                 )
             decision_id = await _record_decision(
                 recorder, context=context, outcome=GateOutcome.ALLOW,
-                reason_codes=(), fence=fence,
+                reason_codes=(), fence=fence, start_ns=start_ns,
             )
             return GateDecision(
                 outcome=GateOutcome.ALLOW, fence_snapshot=fence, decision_id=decision_id,
@@ -254,7 +261,7 @@ def make_foundation_pre_submit_gate(pool: asyncpg.Pool, *, require_mandate: bool
         if mandate is None or mandate.active_revision_id != context.mandate_revision_id:
             decision_id = await _record_decision(
                 recorder, context=context, outcome=GateOutcome.DENY,
-                reason_codes=("RISK_MANDATE_REVISION_STALE",), fence=fence,
+                reason_codes=("RISK_MANDATE_REVISION_STALE",), fence=fence, start_ns=start_ns,
             )
             return GateDecision(
                 outcome=GateOutcome.DENY, reason_codes=("RISK_MANDATE_REVISION_STALE",),
@@ -270,7 +277,7 @@ def make_foundation_pre_submit_gate(pool: asyncpg.Pool, *, require_mandate: bool
         except NoActiveMandateError:
             decision_id = await _record_decision(
                 recorder, context=context, outcome=GateOutcome.DENY,
-                reason_codes=("RISK_INPUT_MANDATE_MISSING",), fence=fence,
+                reason_codes=("RISK_INPUT_MANDATE_MISSING",), fence=fence, start_ns=start_ns,
             )
             return GateDecision(
                 outcome=GateOutcome.DENY, reason_codes=("RISK_INPUT_MANDATE_MISSING",),
@@ -281,7 +288,7 @@ def make_foundation_pre_submit_gate(pool: asyncpg.Pool, *, require_mandate: bool
             reason_codes = tuple(mandate_decision.reason_codes)
             decision_id = await _record_decision(
                 recorder, context=context, outcome=GateOutcome.DENY,
-                reason_codes=reason_codes, fence=fence,
+                reason_codes=reason_codes, fence=fence, start_ns=start_ns,
             )
             return GateDecision(
                 outcome=GateOutcome.DENY, reason_codes=reason_codes, fence_snapshot=fence,
@@ -289,6 +296,7 @@ def make_foundation_pre_submit_gate(pool: asyncpg.Pool, *, require_mandate: bool
             )
         decision_id = await _record_decision(
             recorder, context=context, outcome=GateOutcome.ALLOW, reason_codes=(), fence=fence,
+            start_ns=start_ns,
         )
         return GateDecision(
             outcome=GateOutcome.ALLOW, fence_snapshot=fence, decision_id=decision_id,

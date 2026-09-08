@@ -16,6 +16,13 @@ caller (`src/tools/risk_replay.py`) as an exit code via
 existing `PostgresDecisionRepository.get()`/
 `PostgresBundleRepository.get_by_rule_hash()` already satisfy it as-is (no
 separate adapter needed).
+
+task-2395 — `decision_repo.get()` may raise `DecisionCorruptError` (a stored
+row that fails the `RiskDecision` contract, e.g. NULL `latency_us`). This
+function does not catch it and lets it propagate to the caller
+(`src/tools/risk_replay.py`) unchanged — like `BundleNotFoundError`, "no
+matching bundle" and "corrupt row" are distinct failure modes, so each keeps
+its own exception type instead of being disguised as a diff.
 """
 from __future__ import annotations
 

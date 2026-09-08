@@ -15,6 +15,11 @@ silently skipped — it is counted as a failure alongside other decisions,
 producing exit 2, without killing the whole batch; the remaining
 decision_ids continue to be replayed. An irreproducible decision must not
 simply vanish from the audit log (task-2174).
+
+`DecisionCorruptError` (a stored row that fails the `RiskDecision` contract,
+e.g. NULL `latency_us`) is handled the same way — task-2395, CI 77871f678ce2
+observed a `pydantic.ValidationError` leaking through instead and killing the
+whole batch.
 """
 from __future__ import annotations
 
@@ -29,6 +34,7 @@ import asyncpg
 
 from src.foundation.risk_gate.adapters.postgres_bundle_repository import PostgresBundleRepository
 from src.foundation.risk_gate.adapters.postgres_decision_repository import (
+    DecisionCorruptError,
     PostgresDecisionRepository,
 )
 from src.foundation.risk_gate.application.replay_decision import BundleNotFoundError, replay
@@ -63,6 +69,13 @@ async def _run(*, decision_id: UUID | None, since: datetime | None) -> int:
                     f"risk_replay: BUNDLE_NOT_FOUND {current_id} rule_hash={exc}",
                     file=sys.stderr,
                 )
+                mismatches.append(current_id)
+                continue
+            except DecisionCorruptError as exc:
+                # task-2395 — a row that fails the RiskDecision contract (e.g.
+                # NULL latency_us) is reported as unreproducible, not silently
+                # skipped, and does not abort the rest of the batch.
+                print(f"risk_replay: DECISION_CORRUPT {current_id} detail={exc}", file=sys.stderr)
                 mismatches.append(current_id)
                 continue
             if result.match:

@@ -335,9 +335,16 @@ async def _insert_minimal_risk_decision(pool, *, tenant_id: UUID) -> UUID:
             "INSERT INTO risk_decision "
             "(decision_id, tenant_id, gate_kind, subject_fingerprint, outcome, "
             " rule_version, rule_hash, engine_version, inputs_hash, inputs_snapshot, "
-            " trace_id, evaluated_at, expires_at) "
+            " trace_id, evaluated_at, expires_at, latency_us) "
             "VALUES ($1, $2, 'PRE_TRADE', $3, 'DENY', 'v1', $4, 'engine-v1', $5, "
-            " '{}'::jsonb, $6, now(), now())",
+            # task-2395 — this raw INSERT bypasses the `RiskDecision` pydantic
+            # contract (only `insert()` in postgres_decision_repository.py
+            # normally writes this table). It used to omit `latency_us`
+            # entirely, leaving it NULL — the exact row shape that crashed
+            # `risk_replay` with a ValidationError in CI 77871f678ce2. This
+            # helper only needs an FK target for `record_breach`, so any
+            # non-null placeholder satisfies the contract.
+            " '{}'::jsonb, $6, now(), now(), 1)",
             decision_id,
             tenant_id,
             "f" * 64,

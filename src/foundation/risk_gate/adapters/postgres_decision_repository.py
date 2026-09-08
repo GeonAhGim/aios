@@ -13,6 +13,21 @@ Spec: docs/specs/L4_risk_and_safety_v1.0.md §2 102행, §9 R-24 (선행 R-02
 `risk_decision` 테이블에는 `evidence_ref` 컬럼이 없다(마이그레이션
 `b8d5f2a1c3e4` docstring 참고 — 사후에 채워지는 감사 참조라 WORM 원장에
 포함하지 않는다). `get()`은 항상 `evidence_ref=None`으로 복원한다.
+
+task-2395 — the `latency_us` column was created without `NOT NULL` in
+migration `b8d5f2a1c3e4`. `RiskDecision.latency_us: int` (§9 R-02 contract)
+is required, so NULL can never reach this table through the normal write
+path (`RiskDecisionRecorder.record` → this module's `insert()`) — pydantic
+already rejects it when `RiskDecision(...)` is constructed. The NULL row
+actually observed in CI came from a raw SQL INSERT that bypasses that
+contract (`tests/integration/risk/test_risk_limits_db.py::
+_insert_minimal_risk_decision`, a minimal FK-only seed that omitted
+`latency_us` from its column list entirely — fixed alongside this change).
+Adding `NOT NULL` to the schema is the real fix, but this leaf does not
+create a new migration (§C) — only the read path is made fail-loud, so a
+corrupt row like that makes `_row_to_decision` raise `DecisionCorruptError`
+for that one row instead of a `pydantic.ValidationError` killing the whole
+caller.
 """
 from __future__ import annotations
 
@@ -25,6 +40,18 @@ import asyncpg
 
 from src.core.risk.decision import GateKind, RiskDecision, RiskOutcome, RuleResult
 from src.data.models.serialization import DecimalSafeEncoder
+
+
+class DecisionCorruptError(ValueError):
+    """A stored `risk_decision` row fails the `RiskDecision` contract and
+    cannot be reconstructed (task-2395). The normal write path can never
+    produce this — only a raw SQL INSERT/UPDATE that bypasses the contract
+    can."""
+
+    def __init__(self, decision_id: object, field: str, reason: str) -> None:
+        self.decision_id = decision_id
+        self.field = field
+        super().__init__(f"risk_decision {decision_id}: {field} {reason}")
 
 
 def _rule_result_to_json(result: RuleResult) -> dict[str, Any]:
@@ -52,6 +79,12 @@ def _rule_result_from_json(data: dict[str, Any]) -> RuleResult:
 
 
 def _row_to_decision(row: asyncpg.Record) -> tuple[RiskDecision, dict[str, Any]]:
+    if row["latency_us"] is None:
+        # task-2395 — fail-loud instead of letting pydantic's ValidationError
+        # crash the whole caller (e.g. risk_replay batch) on one bad row.
+        raise DecisionCorruptError(
+            row["decision_id"], "latency_us", "is NULL, expected a required int (R-02 contract)"
+        )
     decision = RiskDecision(
         decision_id=row["decision_id"],
         gate_kind=GateKind(row["gate_kind"]),
@@ -150,4 +183,4 @@ class PostgresDecisionRepository:
         return tuple(_row_to_decision(row)[0] for row in rows)
 
 
-__all__ = ["PostgresDecisionRepository"]
+__all__ = ["DecisionCorruptError", "PostgresDecisionRepository"]

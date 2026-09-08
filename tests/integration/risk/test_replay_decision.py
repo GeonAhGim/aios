@@ -26,6 +26,7 @@ from src.foundation.risk_gate.adapters.postgres_bundle_repository import (
     PostgresBundleRepository,
 )
 from src.foundation.risk_gate.adapters.postgres_decision_repository import (
+    DecisionCorruptError,
     PostgresDecisionRepository,
 )
 from src.foundation.risk_gate.application.replay_decision import BundleNotFoundError, replay
@@ -103,6 +104,23 @@ async def _tamper_reason_codes(pool: asyncpg.Pool, decision_id) -> None:
             await conn.execute(
                 "UPDATE risk_decision SET reason_codes = ARRAY['TAMPERED'] "
                 "WHERE decision_id = $1",
+                decision_id,
+            )
+        finally:
+            await conn.execute(f"ALTER TABLE risk_decision ENABLE TRIGGER {_WORM_TRIGGER}")
+
+
+async def _null_out_latency(pool: asyncpg.Pool, decision_id) -> None:
+    """task-2395 — reproduces CI 77871f678ce2: sets `latency_us` to NULL. The
+    normal write path (`RiskDecisionRecorder`) can never produce this row
+    (pydantic already rejects it when `RiskDecision.latency_us: int` is
+    constructed), so this disables the WORM trigger briefly and updates the
+    row directly to simulate a contract-bypassing corrupt row."""
+    async with pool.acquire() as conn:
+        await conn.execute(f"ALTER TABLE risk_decision DISABLE TRIGGER {_WORM_TRIGGER}")
+        try:
+            await conn.execute(
+                "UPDATE risk_decision SET latency_us = NULL WHERE decision_id = $1",
                 decision_id,
             )
         finally:
@@ -187,6 +205,40 @@ async def test_cli_reports_bundle_not_found_and_still_checks_the_rest(
     assert f"MATCH {clean.decision_id}" in captured.out
     assert "BUNDLE_NOT_FOUND" in captured.err
     assert str(orphaned.decision_id) in captured.err
+
+
+async def test_replay_raises_decision_corrupt_for_null_latency_us(pool, decision_repo, bundle_repo):
+    """task-2395 — reproduces CI 77871f678ce2: for a row with NULL
+    `latency_us`, `replay()` raises `DecisionCorruptError`, not
+    `pydantic.ValidationError` (no disguised mismatch, no process crash)."""
+    tenant_id = await create_test_tenant(pool)
+    decision = await _seed_decision(pool, decision_repo, bundle_repo, tenant_id=tenant_id)
+    await _null_out_latency(pool, decision.decision_id)
+
+    with pytest.raises(DecisionCorruptError):
+        await replay(decision_repo, bundle_repo, decision_id=decision.decision_id)
+
+
+async def test_cli_reports_decision_corrupt_and_still_checks_the_rest(
+    pool, decision_repo, bundle_repo, capsys
+):
+    """task-2395 negative test — given a mix of one NULL row and one clean
+    row, (i) the process does not crash, (ii) the clean row still replays as
+    MATCH, and (iii) the exit code is non-zero (the NULL row is not silently
+    skipped, it shows up in the exit code)."""
+    tenant_id = await create_test_tenant(pool)
+    since = NOW.replace(year=NOW.year - 1)
+    clean = await _seed_decision(pool, decision_repo, bundle_repo, tenant_id=tenant_id)
+    corrupt = await _seed_decision(pool, decision_repo, bundle_repo, tenant_id=tenant_id)
+    await _null_out_latency(pool, corrupt.decision_id)
+
+    exit_code = await risk_replay._run(decision_id=None, since=since)
+
+    assert exit_code == 2
+    captured = capsys.readouterr()
+    assert f"MATCH {clean.decision_id}" in captured.out
+    assert "DECISION_CORRUPT" in captured.err
+    assert str(corrupt.decision_id) in captured.err
 
 
 def test_replay_decision_has_no_reimplemented_thresholds():

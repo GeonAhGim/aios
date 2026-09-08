@@ -106,6 +106,12 @@ class RiskDecisionRecorder:
 
         # append-only WORM — PK 충돌(decision_id 재사용)은 호출자 버그이니 재시도
         # 없이 전파한다. 이 줄이 실패하면 아래 audit_log·이벤트는 실행되지 않는다.
+        # task-2395 — `effective.latency_us` is already guaranteed non-null
+        # int at this point (`RiskDecision` is a frozen pydantic model, so
+        # this method has no way to turn that field into None). The NULL
+        # latency_us row observed in CI did not come through this path — it
+        # came from a raw SQL INSERT that bypassed the contract (see the
+        # `postgres_decision_repository.py` module docstring).
         await self._decision_repo.insert(effective, inputs_snapshot)
 
         async with self._pool.acquire() as conn:
