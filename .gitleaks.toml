@@ -21,7 +21,7 @@ tags = ["credential", "aios"]
 [[rules]]
 id = "aios-exchange-credentials"
 description = "AIOS 거래소 API key/secret 환경변수(BITGET/KIS/NH)"
-regex = '''(BITGET_API|KIS_APP|NH_APP)_(KEY|SECRET)\s*=\s*[A-Za-z0-9+/=_.-]{16,}'''
+regex = '''(BITGET_API|KIS_APP|NH_APP)_(KEY|SECRET)[ \t]*=[ \t]*[A-Za-z0-9+/_.-]{16,}'''
 tags = ["credential", "exchange", "aios"]
 
 [allowlist]
@@ -31,6 +31,13 @@ paths = [
   # 나열 placeholder다("abcdefghijklmnop1234567890ABCDEF") — 실제
   # KIS 서버와 통신하지 않는다(파일 docstring 참조).
   '''tests/unit/exchanges/test_kis_ws_messages\.py''',
+  # 2026-09-08 Actions 첫 완주 적발분. 아래 셋은 파일의 목적 자체가 시크릿 모양 문자열의
+  # 마스킹·참조 판별이라 실제 같은 픽스처가 불가피하다(JWT·sk_live_ 등).
+  '''tests/unit/core/logging/test_redaction\.py''',
+  '''tests/unit/core/security/test_secret_ref\.py''',
+  '''frontend/packages/shared-types/src/secretRef\.test\.ts''',
+  # 반입한 서드파티(KLineChart, Apache-2.0). 우리가 작성하지 않으며 hotkey 'keys:' 문자열이 오탐된다.
+  '''frontend/packages/chart-engine/vendor/''',
 ]
 regexes = [
   # 2026-09-08(Actions 결제 해제 후 첫 완주에서 적발): 테스트 픽스처의 명백한 가짜 토큰.
@@ -40,6 +47,9 @@ regexes = [
   '''\b(tok|token|key|secret|sig)-[A-Za-z0-9-]*(fixture|dummy|fake|placeholder)\b''',
   # src/core/logging/redaction.py의 secret 참조 문자열 — 실제 비밀은
   # KeyRing/vault 뒤에 있고 로그·설정에는 이 참조만 남는다.
+  # 회원가입 테스트의 비밀번호 픽스처 'pw' + 숫자 나열, 저널 테스트의 f-string 표현식 — 비밀일 수 없는 형태.
+  '''\bpw\d{8,}\b''',
+  '''\{uuid4\(\)\.hex\}''',
   '''secref://[A-Za-z0-9_./-]+''',
   # .env.example은 변수명만 나열하고 값은 비워 둔다(실제 키 없음).
   '''(CREDENTIAL_ENCRYPTION_KEY|CREDENTIAL_ENCRYPTION_KEYS_(PAPER|LIVE)|BITGET_API_(KEY|SECRET)|KIS_APP_(KEY|SECRET)|NH_APP_(KEY|SECRET))\s*=\s*(#.*)?$''',
