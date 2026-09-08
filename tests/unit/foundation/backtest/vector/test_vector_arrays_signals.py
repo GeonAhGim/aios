@@ -19,6 +19,7 @@ import numpy as np
 import pytest
 
 from src.core.script.runtime import series as scalar
+from src.core.script.runtime.series import LogicalOp
 from src.foundation.backtest.vector import arrays, signals
 from src.foundation.market_data.domain.candle_columns import (
     CandleColumns,
@@ -197,7 +198,7 @@ def test_cross_propagates_na_from_previous_bar() -> None:
 
 
 def test_kleene_and_or_matches_runtime_series() -> None:
-    cases: list[tuple[str, bool | None, bool | None, bool | None]] = [
+    cases: list[tuple[LogicalOp, bool | None, bool | None, bool | None]] = [
         ("and", False, None, False),
         ("and", True, None, None),
         ("and", True, True, True),
@@ -206,10 +207,10 @@ def test_kleene_and_or_matches_runtime_series() -> None:
         ("or", False, False, False),
     ]
     for op, lv, rv, expected in cases:
-        assert scalar.logical(op, lv, rv) == expected  # type: ignore[arg-type]
+        assert scalar.logical(op, lv, rv) == expected
         left = _b(lv)
         right = _b(rv)
-        out = signals.logical(op, left, right)  # type: ignore[arg-type]
+        out = signals.logical(op, left, right)
         if expected is None:
             assert out.na[0]
         else:

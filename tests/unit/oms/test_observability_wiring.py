@@ -24,6 +24,13 @@ from src.core.observability.metric_names import (
 )
 from src.data.models.base import AssetClass
 from src.data.models.trading import Order, OrderSide, OrderStatus, OrderType
+from src.foundation.risk_gate.domain.models import (
+    FenceSnapshot,
+    RiskEvaluation,
+    SafetyControl,
+    SafetyScope,
+)
+from src.foundation.risk_gate.ports.repository import RiskGateRepository
 from src.services.oms.application.inbox_processor import InboxProcessor
 from src.services.oms.application.unknown_resolver import resolve_unknown
 from src.services.oms.contracts.v1_events import ProviderOrderEvent
@@ -212,6 +219,55 @@ class _FoundAdapter:
         return self._found
 
 
+class _UnusedRiskGateRepo:
+    """`RiskGateRepository` 구조를 만족하는 스텁 — RESOLVED_AS 경로는 이
+    포트를 실제로 호출하지 않으므로 모든 메서드가 NotImplementedError를
+    던진다(호출되면 테스트가 그 자리에서 실패해 가정이 깨졌음을 드러낸다)."""
+
+    async def list_active_controls(
+        self, *, tenant_id: UUID, provider_code: str | None = None,
+        include_all_providers: bool = False,
+    ) -> tuple[SafetyControl, ...]:
+        raise NotImplementedError
+
+    async def insert_safety_control(
+        self, *, scope: SafetyScope, scope_ref: str, reason: str, actor_subject_id: UUID,
+    ) -> SafetyControl:
+        raise NotImplementedError
+
+    async def get_safety_control(self, control_id: UUID) -> SafetyControl | None:
+        raise NotImplementedError
+
+    async def deactivate_safety_control(self, control_id: UUID) -> SafetyControl:
+        raise NotImplementedError
+
+    async def insert_evaluation(self, evaluation: RiskEvaluation) -> RiskEvaluation:
+        raise NotImplementedError
+
+    async def get_cached_evaluation(
+        self, tenant_id: UUID, fingerprint: str
+    ) -> RiskEvaluation | None:
+        raise NotImplementedError
+
+    async def read_fences(
+        self, pairs: tuple[tuple[SafetyScope, str], ...]
+    ) -> FenceSnapshot:
+        raise NotImplementedError
+
+    async def invalidate_evaluations(self, *, tenant_id: UUID | None) -> None:
+        raise NotImplementedError
+
+    async def read_fence_and_controls(
+        self, pairs: tuple[tuple[SafetyScope, str], ...]
+    ) -> tuple[FenceSnapshot, tuple[SafetyControl, ...]]:
+        raise NotImplementedError
+
+    async def read_safety_state(
+        self, *, provider_code: str, symbol: str
+    ) -> tuple[str | None, str | None]:
+        raise NotImplementedError
+
+
 def _order_view() -> OrderView:
     now = datetime(2026, 1, 1, tzinfo=timezone.utc)
     return OrderView(
@@ -240,9 +296,10 @@ async def test_unknown_resolver_observes_resolution_duration_once() -> None:
     adapter = _FoundAdapter(_found_order())
     spy = _SpyMetrics()
 
+    risk_gate_repo: RiskGateRepository = _UnusedRiskGateRepo()
     result = await resolve_unknown(
         view.order_id, adapter=adapter, pool=_UnknownFakePool(),
-        risk_gate_repo=object(),  # type: ignore[arg-type]  # RESOLVED_AS 경로는 미사용
+        risk_gate_repo=risk_gate_repo,
         clock=lambda: datetime(2026, 1, 1, 0, 5, tzinfo=timezone.utc),
         order_repo=repo, metrics=spy,
     )
@@ -280,7 +337,7 @@ def test_redaction_filter_masks_forbidden_fields_in_oms_log_payload() -> None:
 
     assert RedactionFilter().filter(record) is True
 
-    payload = record.payload  # type: ignore[attr-defined]
+    payload = getattr(record, "payload", {})
     assert payload["order_id"] == "11111111-1111-1111-1111-111111111111"
     assert payload["outbox_id"] == "22222222-2222-2222-2222-222222222222"
     assert payload["attempt"] == 3

@@ -177,7 +177,7 @@ def test_verification_failure_keeps_hot_rows_intact(tmp_path: Path):
     hot = _FakeHot(by_year={2026: original})
 
     with pytest.raises(VerificationFailedError):
-        asyncio.run(promote_year(hot, tampering_warm, tmp_path, _KEY, 2026))  # type: ignore[arg-type]
+        asyncio.run(promote_year(hot, tampering_warm, tmp_path, _KEY, 2026))
 
     assert hot.delete_calls == []
     assert 2026 in hot.by_year
@@ -195,13 +195,13 @@ def test_crash_during_write_leaves_no_partial_completion_and_retry_rebuilds(tmp_
     hot = _FakeHot(by_year={2026: original})
 
     with pytest.raises(RuntimeError, match="simulated crash"):
-        asyncio.run(promote_year(hot, crash_warm, tmp_path, _KEY, 2026))  # type: ignore[arg-type]
+        asyncio.run(promote_year(hot, crash_warm, tmp_path, _KEY, 2026))
 
     assert hot.delete_calls == []
     assert len(hot.by_year[2026]) == 4
     assert read_lineage(tmp_path, _KEY) == []
 
-    outcome = asyncio.run(promote_year(hot, crash_warm, tmp_path, _KEY, 2026))  # type: ignore[arg-type]
+    outcome = asyncio.run(promote_year(hot, crash_warm, tmp_path, _KEY, 2026))
 
     assert outcome.promoted is True
     assert outcome.row_count == 4

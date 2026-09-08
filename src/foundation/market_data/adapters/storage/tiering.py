@@ -40,7 +40,6 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Protocol, runtime_checkable
 
-from src.foundation.market_data.adapters.storage.warm_parquet import WarmParquetStorage
 from src.foundation.market_data.contracts.v1 import SeriesKey
 from src.foundation.market_data.contracts.v2.candle_lineage import SourceKind
 from src.foundation.market_data.domain.candle_columns import CandleColumns
@@ -49,6 +48,7 @@ __all__ = [
     "HotYearSource",
     "PromotionOutcome",
     "VerificationFailedError",
+    "WarmYearStorage",
     "promote_year",
     "read_lineage",
 ]
@@ -73,6 +73,23 @@ class HotYearSource(Protocol):
 
     async def delete_year(self, key: SeriesKey, year: int) -> int:
         """`year` 전체를 지우고 지운 행 수를 반환한다."""
+        ...
+
+
+@runtime_checkable
+class WarmYearStorage(Protocol):
+    """Minimal surface tiering requires from the warm tier — implemented by
+    `WarmParquetStorage`, and structurally satisfied by test fakes that
+    inject verification failures or mid-write crashes."""
+
+    def write_year(self, key: SeriesKey, year: int, columns: CandleColumns) -> Path:
+        """Overwrites the full `year` and returns the written file path."""
+        ...
+
+    def read_columns(
+        self, key: SeriesKey, start: datetime, end: datetime
+    ) -> tuple[CandleColumns, tuple[tuple[datetime, datetime], ...]]:
+        """Reads `[start, end)` and returns (covered columns, missing ranges)."""
         ...
 
 
@@ -130,7 +147,7 @@ def _append_lineage(root: Path, key: SeriesKey, entry: dict[str, object]) -> Non
 
 
 async def promote_year(
-    hot: HotYearSource, warm: WarmParquetStorage, root: Path, key: SeriesKey, year: int
+    hot: HotYearSource, warm: WarmYearStorage, root: Path, key: SeriesKey, year: int
 ) -> PromotionOutcome:
     """`year`의 hot 파티션을 warm parquet로 승격하고, 검증 통과 후에만
     hot에서 지운 뒤 계보 한 줄을 남긴다. hot에 그 연도 행이 이미 없으면

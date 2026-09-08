@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
+from typing import Any
 from uuid import UUID, uuid4
 
 from src.core.event_bus.envelope import EventEnvelope
@@ -44,8 +45,8 @@ class _SpyMetrics:
         raise AssertionError("realtime_fanout은 gauge를 쓰지 않는다")
 
 
-def _feed(**overrides: object) -> FeedRequest:
-    fields: dict[str, object] = dict(
+def _feed(**overrides: Any) -> FeedRequest:
+    fields: dict[str, Any] = dict(
         venue=Venue.BITGET,
         asset_class=AssetClass.CRYPTO,
         instrument_id="BTC-USDT",
@@ -53,11 +54,11 @@ def _feed(**overrides: object) -> FeedRequest:
         want_realtime=True,
     )
     fields.update(overrides)
-    return FeedRequest(**fields)  # type: ignore[arg-type]
+    return FeedRequest(**fields)
 
 
-def _grant(**overrides: object) -> EntitlementGrant:
-    fields: dict[str, object] = dict(
+def _grant(**overrides: Any) -> EntitlementGrant:
+    fields: dict[str, Any] = dict(
         tenant_id=_TENANT,
         subject_id=_SUBJECT,
         venue=Venue.BITGET,
@@ -69,7 +70,7 @@ def _grant(**overrides: object) -> EntitlementGrant:
         expires_at=None,
     )
     fields.update(overrides)
-    return EntitlementGrant(**fields)  # type: ignore[arg-type]
+    return EntitlementGrant(**fields)
 
 
 def _subject(grants: tuple[EntitlementGrant, ...] = ()) -> EntitlementSubject:
