@@ -19,6 +19,20 @@
         "title": "AssetClass",
         "type": "string"
       },
+      "InstrumentKind": {
+        "description": "Coarse product taxonomy (DC-20, §9.10). Optional on `Instrument` and\n`None` for records written before this field existed or for callers\nthat don't need the distinction — existing spot use is unaffected.",
+        "enum": [
+          "SPOT",
+          "FUTURE",
+          "PERP",
+          "OPTION",
+          "BOND",
+          "FUND",
+          "INDEX"
+        ],
+        "title": "InstrumentKind",
+        "type": "string"
+      },
       "InstrumentLifecycle": {
         "description": "§4.2 심볼 생애주기 전이표의 상태. 전이 규칙 자체는 DC-3\n(`domain/instruments/lifecycle.py`)의 책임이며, 이 계약은 상태 값만\n정의한다.",
         "enum": [
@@ -29,10 +43,32 @@
         ],
         "title": "InstrumentLifecycle",
         "type": "string"
+      },
+      "OptionRight": {
+        "description": "`Instrument.option_right`, set only when `kind == OPTION`.",
+        "enum": [
+          "CALL",
+          "PUT"
+        ],
+        "title": "OptionRight",
+        "type": "string"
+      },
+      "SettlementType": {
+        "description": "`Instrument.settlement`, relevant for derivatives (`kind` in\n`{FUTURE, PERP, OPTION}`).",
+        "enum": [
+          "CASH",
+          "PHYSICAL"
+        ],
+        "title": "SettlementType",
+        "type": "string"
       }
     },
     "description": "벤처 독립적인 심볼 마스터 레코드. `instrument_id`는 불변(§4.1) —\n재상장은 같은 id를 재사용하지 않고 새 `Instrument`를 발급한다(§4.2\ndelisted→relisted: \"새 instrument 생성(구 id 유지 금지)\").",
     "properties": {
+      "instrument_id": {
+        "title": "Instrument Id",
+        "type": "string"
+      },
       "asset_class": {
         "$ref": "#/$defs/AssetClass"
       },
@@ -47,16 +83,7 @@
         ],
         "title": "Base"
       },
-      "calendar_id": {
-        "title": "Calendar Id",
-        "type": "string"
-      },
-      "created_at": {
-        "format": "date-time",
-        "title": "Created At",
-        "type": "string"
-      },
-      "figi": {
+      "quote": {
         "anyOf": [
           {
             "type": "string"
@@ -65,11 +92,7 @@
             "type": "null"
           }
         ],
-        "title": "Figi"
-      },
-      "instrument_id": {
-        "title": "Instrument Id",
-        "type": "string"
+        "title": "Quote"
       },
       "isin": {
         "anyOf": [
@@ -82,8 +105,28 @@
         ],
         "title": "Isin"
       },
-      "lifecycle_state": {
-        "$ref": "#/$defs/InstrumentLifecycle"
+      "figi": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "title": "Figi"
+      },
+      "tick_size": {
+        "anyOf": [
+          {
+            "type": "number"
+          },
+          {
+            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+            "type": "string"
+          }
+        ],
+        "title": "Tick Size"
       },
       "lot_size": {
         "anyOf": [
@@ -97,7 +140,30 @@
         ],
         "title": "Lot Size"
       },
-      "quote": {
+      "calendar_id": {
+        "title": "Calendar Id",
+        "type": "string"
+      },
+      "lifecycle_state": {
+        "$ref": "#/$defs/InstrumentLifecycle"
+      },
+      "created_at": {
+        "format": "date-time",
+        "title": "Created At",
+        "type": "string"
+      },
+      "kind": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/InstrumentKind"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null
+      },
+      "underlying_id": {
         "anyOf": [
           {
             "type": "string"
@@ -106,15 +172,23 @@
             "type": "null"
           }
         ],
-        "title": "Quote"
+        "default": null,
+        "title": "Underlying Id"
       },
-      "schema_version": {
-        "const": "instruments-v2",
-        "default": "instruments-v2",
-        "title": "Schema Version",
-        "type": "string"
+      "expiry": {
+        "anyOf": [
+          {
+            "format": "date-time",
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Expiry"
       },
-      "tick_size": {
+      "strike": {
         "anyOf": [
           {
             "type": "number"
@@ -122,9 +196,93 @@
           {
             "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
             "type": "string"
+          },
+          {
+            "type": "null"
           }
         ],
-        "title": "Tick Size"
+        "default": null,
+        "title": "Strike"
+      },
+      "option_right": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/OptionRight"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null
+      },
+      "contract_multiplier": {
+        "anyOf": [
+          {
+            "type": "number"
+          },
+          {
+            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Contract Multiplier"
+      },
+      "settlement": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/SettlementType"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null
+      },
+      "currency": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Currency"
+      },
+      "country": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Country"
+      },
+      "mic": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Mic"
+      },
+      "schema_version": {
+        "const": "instruments-v2",
+        "default": "instruments-v2",
+        "title": "Schema Version",
+        "type": "string"
       }
     },
     "required": [
@@ -162,6 +320,22 @@
     },
     "description": "벤처별 심볼 매핑. `(venue, venue_symbol, listed_at)`는 유일해야\n한다(§3.2) — 이 유일성은 DC-4 마이그레이션의 DB 제약(EXCLUDE)이 실제로\n강제하고, 이 DTO는 그 계약 형태만 표현한다. 심볼 변경은 구 listing에\n`delisted_at`을 채우고 새 listing을 등록하는 방식으로 표현한다\n(`instrument_id`는 그대로).",
     "properties": {
+      "instrument_id": {
+        "title": "Instrument Id",
+        "type": "string"
+      },
+      "venue": {
+        "$ref": "#/$defs/Venue"
+      },
+      "venue_symbol": {
+        "title": "Venue Symbol",
+        "type": "string"
+      },
+      "listed_at": {
+        "format": "date-time",
+        "title": "Listed At",
+        "type": "string"
+      },
       "delisted_at": {
         "anyOf": [
           {
@@ -174,30 +348,14 @@
         ],
         "title": "Delisted At"
       },
-      "instrument_id": {
-        "title": "Instrument Id",
-        "type": "string"
-      },
       "is_primary": {
         "title": "Is Primary",
         "type": "boolean"
-      },
-      "listed_at": {
-        "format": "date-time",
-        "title": "Listed At",
-        "type": "string"
       },
       "schema_version": {
         "const": "instruments-v2",
         "default": "instruments-v2",
         "title": "Schema Version",
-        "type": "string"
-      },
-      "venue": {
-        "$ref": "#/$defs/Venue"
-      },
-      "venue_symbol": {
-        "title": "Venue Symbol",
         "type": "string"
       }
     },

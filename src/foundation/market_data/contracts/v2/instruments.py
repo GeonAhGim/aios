@@ -16,6 +16,21 @@ DC-2(symbol_master)·DC-3(lifecycle)·DC-5(ports)·DC-6(coverage registry)가 �
 모든 `datetime` 필드는 `AwareDatetime`으로 naive 값을 거부하고, 가격 관련
 수치(`tick_size`, `lot_size`)는 `Decimal`(NUMERIC(30,10)과 동일 정밀도, float
 금지)이다.
+
+DC-20 (§9.10) extends `Instrument` with derivative-symbol fields (`kind`,
+`underlying_id`, `expiry`, `strike`, `option_right`, `contract_multiplier`,
+`settlement`, `currency`, `country`, `mic`). Every new field is optional
+with a `None` default, which is a MINOR change under 107 §3.2 ("new
+optional field, default or null allowed") — `schema_version` stays
+`"instruments-v2"`, no `v3` module. `underlying_id` reuses `ULID` (DC-1's
+own type, not a new validator) and points at the spot/base `Instrument`
+a derivative is written on; chaining `underlying_id` + `expiry` across a
+set of `Instrument` records (e.g. all options on one underlying, grouped
+by expiry) is a plain-field query left to callers — this leaf ships the
+DTO only, not a query module (roll/continuous-future logic is DC-25,
+option-chain API is DC-26). `currency`/`country`/`mic` are format-checked
+only (ISO 4217 3-letter, ISO 3166-1 alpha-2, ISO 10383 MIC 4-char) — no
+external code table is bundled or validated against.
 """
 from __future__ import annotations
 
@@ -47,6 +62,40 @@ def _validate_ulid(value: str) -> str:
 
 ULID = Annotated[str, AfterValidator(_validate_ulid)]
 
+# ISO 4217 currency (3 letters), ISO 3166-1 alpha-2 country, ISO 10383 MIC
+# (4 alphanumeric). Format only — no external code table is bundled, so an
+# unassigned-but-well-formed code (e.g. "ZZZ") passes; that cross-check is
+# out of scope for this contract (see module docstring, DC-20).
+_CURRENCY_PATTERN = re.compile(r"^[A-Z]{3}$")
+_COUNTRY_PATTERN = re.compile(r"^[A-Z]{2}$")
+_MIC_PATTERN = re.compile(r"^[A-Z0-9]{4}$")
+
+
+def _validate_currency(value: str) -> str:
+    normalized = value.upper()
+    if not _CURRENCY_PATTERN.fullmatch(normalized):
+        raise ValueError(f"invalid ISO 4217 currency code: {value!r}")
+    return normalized
+
+
+def _validate_country(value: str) -> str:
+    normalized = value.upper()
+    if not _COUNTRY_PATTERN.fullmatch(normalized):
+        raise ValueError(f"invalid ISO 3166-1 alpha-2 country code: {value!r}")
+    return normalized
+
+
+def _validate_mic(value: str) -> str:
+    normalized = value.upper()
+    if not _MIC_PATTERN.fullmatch(normalized):
+        raise ValueError(f"invalid ISO 10383 MIC: {value!r}")
+    return normalized
+
+
+CurrencyCode = Annotated[str, AfterValidator(_validate_currency)]
+CountryCode = Annotated[str, AfterValidator(_validate_country)]
+MIC = Annotated[str, AfterValidator(_validate_mic)]
+
 
 class InstrumentLifecycle(str, Enum):
     """§4.2 심볼 생애주기 전이표의 상태. 전이 규칙 자체는 DC-3
@@ -57,6 +106,35 @@ class InstrumentLifecycle(str, Enum):
     ACTIVE = "ACTIVE"
     HALTED = "HALTED"
     DELISTED = "DELISTED"
+
+
+class InstrumentKind(str, Enum):
+    """Coarse product taxonomy (DC-20, §9.10). Optional on `Instrument` and
+    `None` for records written before this field existed or for callers
+    that don't need the distinction — existing spot use is unaffected."""
+
+    SPOT = "SPOT"
+    FUTURE = "FUTURE"
+    PERP = "PERP"
+    OPTION = "OPTION"
+    BOND = "BOND"
+    FUND = "FUND"
+    INDEX = "INDEX"
+
+
+class OptionRight(str, Enum):
+    """`Instrument.option_right`, set only when `kind == OPTION`."""
+
+    CALL = "CALL"
+    PUT = "PUT"
+
+
+class SettlementType(str, Enum):
+    """`Instrument.settlement`, relevant for derivatives (`kind` in
+    `{FUTURE, PERP, OPTION}`)."""
+
+    CASH = "CASH"
+    PHYSICAL = "PHYSICAL"
 
 
 class Instrument(BaseModel):
@@ -75,6 +153,18 @@ class Instrument(BaseModel):
     calendar_id: str
     lifecycle_state: InstrumentLifecycle
     created_at: AwareDatetime
+    # DC-20 (§9.10): derivative-symbol fields, all optional/None-default
+    # (107 §3.2 MINOR) so every existing spot `Instrument` is unaffected.
+    kind: InstrumentKind | None = None
+    underlying_id: ULID | None = None
+    expiry: AwareDatetime | None = None
+    strike: Decimal | None = None
+    option_right: OptionRight | None = None
+    contract_multiplier: Decimal | None = None
+    settlement: SettlementType | None = None
+    currency: CurrencyCode | None = None
+    country: CountryCode | None = None
+    mic: MIC | None = None
     schema_version: Literal["instruments-v2"] = SCHEMA_VERSION
 
 

@@ -144,3 +144,135 @@ def test_venue_listing_is_primary_required() -> None:
             delisted_at=None,
             # is_primary 누락
         )
+
+
+# --- DC-20: derivative-symbol fields (kind/underlying_id/expiry/strike/
+# option_right/contract_multiplier/settlement/currency/country/mic) ---
+
+_UNDERLYING_ULID = "01ARZ3NDEKTSV4RRFFQ69G5FB0"
+
+
+def test_spot_instrument_unchanged_without_derivative_fields() -> None:
+    instrument = _sample_instrument()
+    assert instrument.kind is None
+    assert instrument.underlying_id is None
+    assert instrument.expiry is None
+    assert instrument.strike is None
+    assert instrument.option_right is None
+    assert instrument.contract_multiplier is None
+    assert instrument.settlement is None
+    assert instrument.currency is None
+    assert instrument.country is None
+    assert instrument.mic is None
+
+
+def test_option_instrument_creation() -> None:
+    expiry = datetime(2026, 12, 18, 8, 30, tzinfo=timezone.utc)
+    option = _sample_instrument(
+        instrument_id="01ARZ3NDEKTSV4RRFFQ69G5FB1",
+        kind=v2.InstrumentKind.OPTION,
+        underlying_id=_UNDERLYING_ULID,
+        expiry=expiry,
+        strike=Decimal("70000"),
+        option_right=v2.OptionRight.CALL,
+        contract_multiplier=Decimal("1"),
+        settlement=v2.SettlementType.CASH,
+        currency="USD",
+        country="US",
+        mic="XNAS",
+    )
+    assert option.kind == v2.InstrumentKind.OPTION
+    assert option.underlying_id == _UNDERLYING_ULID
+    assert option.expiry == expiry
+    assert option.strike == Decimal("70000")
+    assert option.option_right == v2.OptionRight.CALL
+    assert option.contract_multiplier == Decimal("1")
+    assert option.settlement == v2.SettlementType.CASH
+    assert option.currency == "USD"
+    assert option.country == "US"
+    assert option.mic == "XNAS"
+
+
+def test_future_instrument_creation() -> None:
+    expiry = datetime(2026, 9, 26, 8, 30, tzinfo=timezone.utc)
+    future = _sample_instrument(
+        instrument_id="01ARZ3NDEKTSV4RRFFQ69G5FB2",
+        kind=v2.InstrumentKind.FUTURE,
+        underlying_id=_UNDERLYING_ULID,
+        expiry=expiry,
+        contract_multiplier=Decimal("5"),
+        settlement=v2.SettlementType.PHYSICAL,
+        currency="KRW",
+        country="KR",
+        mic="XKRX",
+    )
+    assert future.kind == v2.InstrumentKind.FUTURE
+    assert future.underlying_id == _UNDERLYING_ULID
+    assert future.expiry == expiry
+    assert future.contract_multiplier == Decimal("5")
+    assert future.settlement == v2.SettlementType.PHYSICAL
+    # strike/option_right stay unset for a future (only meaningful for options)
+    assert future.strike is None
+    assert future.option_right is None
+
+
+def test_underlying_id_and_expiry_chain_query() -> None:
+    near_expiry = datetime(2026, 9, 26, 8, 30, tzinfo=timezone.utc)
+    far_expiry = datetime(2026, 12, 18, 8, 30, tzinfo=timezone.utc)
+    chain = [
+        _sample_instrument(
+            instrument_id="01ARZ3NDEKTSV4RRFFQ69G5FB3",
+            kind=v2.InstrumentKind.OPTION,
+            underlying_id=_UNDERLYING_ULID,
+            expiry=near_expiry,
+            strike=Decimal("65000"),
+            option_right=v2.OptionRight.CALL,
+        ),
+        _sample_instrument(
+            instrument_id="01ARZ3NDEKTSV4RRFFQ69G5FB4",
+            kind=v2.InstrumentKind.OPTION,
+            underlying_id=_UNDERLYING_ULID,
+            expiry=far_expiry,
+            strike=Decimal("70000"),
+            option_right=v2.OptionRight.CALL,
+        ),
+        # Different underlying — must not appear in the chain query below.
+        _sample_instrument(
+            instrument_id="01ARZ3NDEKTSV4RRFFQ69G5FB5",
+            kind=v2.InstrumentKind.OPTION,
+            underlying_id="01ARZ3NDEKTSV4RRFFQ69G5FB6",
+            expiry=near_expiry,
+            strike=Decimal("65000"),
+            option_right=v2.OptionRight.CALL,
+        ),
+    ]
+
+    matches = [
+        instrument
+        for instrument in chain
+        if instrument.underlying_id == _UNDERLYING_ULID and instrument.expiry == near_expiry
+    ]
+
+    assert [m.instrument_id for m in matches] == ["01ARZ3NDEKTSV4RRFFQ69G5FB3"]
+
+
+def test_instrument_invalid_currency_rejected() -> None:
+    with pytest.raises(ValidationError):
+        _sample_instrument(currency="US")
+
+
+def test_instrument_invalid_country_rejected() -> None:
+    with pytest.raises(ValidationError):
+        _sample_instrument(country="USA")
+
+
+def test_instrument_invalid_mic_rejected() -> None:
+    with pytest.raises(ValidationError):
+        _sample_instrument(mic="XN")
+
+
+def test_instrument_currency_country_mic_normalized_to_uppercase() -> None:
+    instrument = _sample_instrument(currency="usd", country="us", mic="xnas")
+    assert instrument.currency == "USD"
+    assert instrument.country == "US"
+    assert instrument.mic == "XNAS"
