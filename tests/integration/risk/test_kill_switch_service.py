@@ -23,7 +23,7 @@ from src.foundation.paper_control.adapters.postgres_repository import (
 from src.foundation.risk_gate.adapters.postgres_repository import PostgresRiskGateRepository
 from src.foundation.risk_gate.domain.models import SafetyScope
 from src.services.safety.kill_switch_service import KillSwitchService, MissingEvidenceRefError
-from tests.integration.conftest import create_test_user
+from tests.integration.conftest import create_test_tenant
 from tests.integration.fake_exchange_adapter import FakeExchangeAdapter
 
 
@@ -137,7 +137,7 @@ async def _order_status(pool: asyncpg.Pool, order_id: UUID) -> str:
 
 
 async def test_activate_returns_active_control_with_incremented_fence(pool, service):
-    tenant_id = await create_test_user(pool)
+    tenant_id = await create_test_tenant(pool)
 
     view = await service.activate(
         scope=SafetyScope.ACCOUNT,
@@ -156,7 +156,7 @@ async def test_activate_fans_out_legacy_pause_and_order_sweep_for_account_scope(
     """§4.3 412행 — activate 한 번으로 legacy 정지 + 미체결 정리가 모두
     일어나야 한다(현재 라우터는 open_order_sweeper를 전혀 안 부른다는
     격차를 이 서비스가 메운다)."""
-    tenant_id = await create_test_user(pool)
+    tenant_id = await create_test_tenant(pool)
     execution_id = await _seed_running_execution(pool, tenant_id, exchange="bitget")
     order_id = await _seed_order(pool, tenant_id, exchange="bitget")
 
@@ -175,8 +175,8 @@ async def test_activate_fans_out_legacy_pause_and_order_sweep_for_account_scope(
 
 async def test_activate_does_not_affect_other_tenants_execution_or_order(pool, service):
     """negative test — DoD "타 테넌트 미영향"."""
-    tenant_a = await create_test_user(pool)
-    tenant_b = await create_test_user(pool)
+    tenant_a = await create_test_tenant(pool)
+    tenant_b = await create_test_tenant(pool)
     execution_b = await _seed_running_execution(pool, tenant_b, exchange="bitget")
     order_b = await _seed_order(pool, tenant_b, exchange="bitget")
 
@@ -200,11 +200,11 @@ async def test_activate_global_scope_pauses_across_tenants(pool, service):
     수 없으므로, tenant 범위 audit 검증은 별도 테스트
     (`test_deactivate_marks_inactive_and_records_evidence_audit_event`)가
     맡는다."""
-    tenant_a = await create_test_user(pool)
-    tenant_b = await create_test_user(pool)
+    tenant_a = await create_test_tenant(pool)
+    tenant_b = await create_test_tenant(pool)
     execution_a = await _seed_running_execution(pool, tenant_a, exchange="bitget")
     execution_b = await _seed_running_execution(pool, tenant_b, exchange="binance")
-    admin_id = await create_test_user(pool)
+    admin_id = await create_test_tenant(pool)
 
     view = await service.activate(
         scope=SafetyScope.GLOBAL,
@@ -231,7 +231,7 @@ async def test_activate_global_scope_pauses_across_tenants(pool, service):
 
 async def test_deactivate_without_evidence_ref_is_rejected(pool, service):
     """negative test — §4.3 413행 guard "evidence_ref 필수"(fail-closed)."""
-    tenant_id = await create_test_user(pool)
+    tenant_id = await create_test_tenant(pool)
     view = await service.activate(
         scope=SafetyScope.ACCOUNT,
         scope_ref=str(tenant_id),
@@ -257,7 +257,7 @@ async def test_deactivate_without_evidence_ref_is_rejected(pool, service):
 
 
 async def test_deactivate_marks_inactive_and_records_evidence_audit_event(pool, service):
-    tenant_id = await create_test_user(pool)
+    tenant_id = await create_test_tenant(pool)
     view = await service.activate(
         scope=SafetyScope.ACCOUNT,
         scope_ref=str(tenant_id),

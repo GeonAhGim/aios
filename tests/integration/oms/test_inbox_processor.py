@@ -28,7 +28,7 @@ from src.services.oms.application.inbox_processor import InboxProcessor
 from src.services.oms.contracts.v1_events import FillEvent, ProviderOrderEvent
 from src.services.order_service import repository as legacy_order_repository
 from src.services.order_service.submit import apply_fill
-from tests.integration.oms.conftest import create_test_user
+from tests.integration.oms.conftest import create_test_tenant, create_test_user
 
 
 async def _seed_execution(pool, user_id: UUID) -> int:
@@ -139,7 +139,10 @@ def _fill_event(
 
 
 async def test_ingest_full_fill_transitions_to_filled_and_updates_position_once(pool):
-    user_id = await create_test_user(pool)
+    """position_ledger가 `strategy_executions.user_id`를 `pos_account.tenant_id`로
+    그대로 쓴다 — 대응 `tenant` 행이 있어야 하므로 `create_test_tenant()`가 필요하다
+    (다른 테스트는 execution_id를 안 넘겨 이 경로를 안 타 create_test_user()로 충분)."""
+    user_id = await create_test_tenant(pool)
     execution_id = await _seed_execution(pool, user_id)
     order_id, client_order_id, exchange_order_id = await _insert_order(
         pool, user_id, execution_id=execution_id, quantity=Decimal("2")
