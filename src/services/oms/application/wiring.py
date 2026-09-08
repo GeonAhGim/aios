@@ -39,8 +39,13 @@ from uuid import uuid4
 
 import asyncpg
 
+from src.exchanges.bitget.private_ws_mixin import (
+    PrivateWsInboxClient,
+    subscribe_bitget_orders_to_inbox,
+)
 from src.services.oms.adapters.order_repository import PostgresOrderRepository
 from src.services.oms.adapters.outbox_repository import OutboxRepository
+from src.services.oms.application.inbox_processor import InboxProcessor
 from src.services.oms.application.outbox_commands import AdapterResolver
 from src.services.oms.application.outbox_dispatcher import (
     DEFAULT_LEASE_SEC,
@@ -104,3 +109,16 @@ def start_outbox_dispatcher_task(
         )
         return None
     return asyncio.create_task(dispatcher.run_forever())
+
+
+def start_bitget_private_ws_inbox_task(
+    pool: asyncpg.Pool, adapter: PrivateWsInboxClient
+) -> asyncio.Task[None]:
+    """L4-20 — Bitget private `orders` 채널 구독 조립(태스크 등록만, 이
+    함수를 실제로 호출해 `background_loops.py`에 태우는 배선은 이 리프
+    범위 밖 — L4-14 dispatcher가 그랬듯 후속 리프가 담당한다, decision
+    "wiring.py 수정은 구독 등록 1블록으로 제한"). `adapter`는
+    `CredentialResolver.get_adapter(tenant_id, "bitget")`가 돌려주는
+    인스턴스를 그대로 넘기면 된다(factory의 LIVE 차단을 그대로 통과)."""
+    inbox = InboxProcessor(pool)
+    return asyncio.create_task(subscribe_bitget_orders_to_inbox(adapter, inbox))
