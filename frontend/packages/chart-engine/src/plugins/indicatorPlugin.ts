@@ -17,68 +17,29 @@
  * module keeps its own ordered, immutable `IndicatorPluginRegistry` rather
  * than mutating the overlay registry.
  *
- * Catalog fetch is dependency-injected (`IndicatorCatalogPort`, same shape
- * as CH-8 `layout/persistence.ts` `ChartingPort`) — this package has no
- * fetch/vendor dependency; the concrete port is `@aios/api-client`
- * `clients/indicators.ts`, which resolves the path via `apiPaths.ts`
- * `resolvePath("indicators.list")` (no hardcoded path). Any failure from
- * the port — network, HTTP, or the port's own response-parsing throw — is
- * surfaced through the single `routeApiError` entry point rather than
- * hidden: `loadIndicatorCatalog` never swallows an error, it classifies it.
+ * Catalog fetch (`IndicatorCatalogPort`/`loadIndicatorCatalog`) and the
+ * `IndicatorStyle` JSON codec (`encodeIndicatorStyle`/`decodeIndicatorStyle`)
+ * moved to `indicatorCatalog.ts`/`indicatorStyleCodec.ts` respectively (P6
+ * 300-line split, pure move) and are re-exported below so this module's
+ * public import path is unchanged. This file keeps the registry itself:
+ * register/unregister/setStyle plus placement/style validation.
  */
 
-import { routeApiError, type RoutedApiError } from "@aios/shared-types";
-import { type PaneModel, addPane, mainPane, removePane } from "../panes/paneModel";
+import type { PaneModel } from "../panes/paneModel";
+import { addPane, mainPane, removePane } from "../panes/paneModel";
 import type { OverlayPlacement, OverlayRegistry } from "../indicators/overlayRegistry";
+import type { IndicatorCatalogEntry } from "./indicatorCatalog";
 
-export type IndicatorTier = "core" | "oss" | "script";
-
-/** Mirrors `IndicatorListItemView` (`src/api/schemas/indicators.py`, IND-12). */
-export interface IndicatorCatalogEntry {
-  readonly name: string;
-  readonly tier: IndicatorTier;
-  readonly category: string;
-  readonly version: string;
-  readonly hash: string;
-  readonly inputs: readonly string[];
-  readonly outputs: readonly string[];
-}
-
-export interface IndicatorCatalogQuery {
-  readonly q?: string;
-  readonly category?: string;
-  readonly cursor?: string;
-  readonly limit?: number;
-}
-
-export interface IndicatorCatalogPage {
-  readonly items: readonly IndicatorCatalogEntry[];
-  readonly nextCursor: string | null;
-}
-
-/** Injected port — matches `@aios/api-client` `clients/indicators.ts` 1:1. */
-export interface IndicatorCatalogPort {
-  listIndicators(query?: IndicatorCatalogQuery): Promise<IndicatorCatalogPage>;
-}
-
-export type IndicatorCatalogLoadResult =
-  | { readonly kind: "ok"; readonly page: IndicatorCatalogPage }
-  | { readonly kind: "error"; readonly routed: RoutedApiError };
-
-// A list endpoint has no optimistic-locking states (unlike persistence.ts's
-// conflict/not_found) — every failure, network or parsing, collapses to one
-// classification via routeApiError. routeApiError never throws (falls back
-// to "unknown"), so this never re-hides a failure the caller didn't ask for.
-export async function loadIndicatorCatalog(
-  port: IndicatorCatalogPort,
-  query: IndicatorCatalogQuery = {},
-): Promise<IndicatorCatalogLoadResult> {
-  try {
-    return { kind: "ok", page: await port.listIndicators(query) };
-  } catch (err) {
-    return { kind: "error", routed: routeApiError(err) };
-  }
-}
+export {
+  loadIndicatorCatalog,
+  type IndicatorCatalogEntry,
+  type IndicatorCatalogLoadResult,
+  type IndicatorCatalogPage,
+  type IndicatorCatalogPort,
+  type IndicatorCatalogQuery,
+  type IndicatorTier,
+} from "./indicatorCatalog";
+export { decodeIndicatorStyle, encodeIndicatorStyle } from "./indicatorStyleCodec";
 
 export interface IndicatorStyleOutput {
   /** Must match one of `IndicatorCatalogEntry.outputs`. */
@@ -261,64 +222,4 @@ export function setIndicatorPluginStyle(
   if (!entry) throw new IndicatorPluginError("INDICATOR_PLUGIN_UNKNOWN", instanceId, "not registered");
   validateStyle(style, entry.catalogEntry, instanceId);
   return { entries: registry.entries.map((e) => (e.instanceId === instanceId ? { ...e, style } : e)) };
-}
-
-function isPlainObject(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
-/** Plain-JSON-safe encoding for persistence (CH-8 `layout/persistence.ts` layoutState payloads). */
-export function encodeIndicatorStyle(style: IndicatorStyle): Record<string, unknown> {
-  return {
-    outputs: style.outputs.map((o) => ({
-      output: o.output,
-      color: o.color,
-      lineWidth: o.lineWidth,
-      visible: o.visible,
-      ...(o.upColor !== undefined ? { upColor: o.upColor } : {}),
-      ...(o.downColor !== undefined ? { downColor: o.downColor } : {}),
-      ...(o.aboveColor !== undefined ? { aboveColor: o.aboveColor } : {}),
-      ...(o.belowColor !== undefined ? { belowColor: o.belowColor } : {}),
-    })),
-  };
-}
-
-function decodeOptionalColor(item: Record<string, unknown>, field: string, index: number): string | undefined {
-  const value = item[field];
-  if (value === undefined) return undefined;
-  if (typeof value !== "string") {
-    throw new IndicatorPluginError("INDICATOR_PLUGIN_INVALID", "(style)", `malformed style output at index ${index}: "${field}" must be a string`);
-  }
-  return value;
-}
-
-// Fail-closed, no silent fallback (matches OverlayRegistryError/PaneModelError
-// convention) — a malformed persisted style throws rather than rendering with
-// guessed defaults.
-export function decodeIndicatorStyle(raw: unknown): IndicatorStyle {
-  if (!isPlainObject(raw) || !Array.isArray(raw.outputs)) {
-    throw new IndicatorPluginError("INDICATOR_PLUGIN_INVALID", "(style)", "malformed style document: missing outputs array");
-  }
-  const outputs = raw.outputs.map((item, index) => {
-    if (
-      !isPlainObject(item) ||
-      typeof item.output !== "string" ||
-      typeof item.color !== "string" ||
-      typeof item.lineWidth !== "number" ||
-      typeof item.visible !== "boolean"
-    ) {
-      throw new IndicatorPluginError("INDICATOR_PLUGIN_INVALID", "(style)", `malformed style output at index ${index}`);
-    }
-    return {
-      output: item.output,
-      color: item.color,
-      lineWidth: item.lineWidth,
-      visible: item.visible,
-      upColor: decodeOptionalColor(item, "upColor", index),
-      downColor: decodeOptionalColor(item, "downColor", index),
-      aboveColor: decodeOptionalColor(item, "aboveColor", index),
-      belowColor: decodeOptionalColor(item, "belowColor", index),
-    };
-  });
-  return { outputs };
 }

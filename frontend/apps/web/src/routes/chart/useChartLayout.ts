@@ -4,27 +4,23 @@
 // 전달받아 활성 패널에 거울처럼 반영한다(모델→뷰는 onApplyView로 역전파).
 // appliedTokenRef로 순서를 고정한다: 복원/새로고침 직후엔 모델→뷰가 먼저, 그 뒤에야
 // 뷰→모델 거울 effect가 움직인다.
-import { useCallback, useEffect, useRef, useState } from "react";
+//
+// 복원/저장(useChartLayoutPersistence.ts)과 패널 CRUD(useChartLayoutPanels.ts)로
+// 쪼갰다(P6 300줄 분할, 순수 이동) — 이 파일은 둘을 조립해 하나의 훅 계약으로
+// 내보내는 배선만 남는다.
+import { useCallback, useRef } from "react";
+import type { ChartLayoutModel, InstrumentRef } from "@aios/chart-engine/src/layout/layoutModel";
+import type { ChartingPort } from "@aios/chart-engine/src/layout/persistence";
+import { useChartLayoutPanels } from "./useChartLayoutPanels";
 import {
-  createEmptyLayoutModel,
-  type ChartLayoutModel,
-  type ChartPanel,
-  type InstrumentRef,
-  type Watchlist,
-} from "@aios/chart-engine/src/layout/layoutModel";
-import {
-  createLayout as createLayoutRecord,
-  deleteLayout as deleteLayoutRecord,
-  listLayouts,
-  loadLayout,
-  saveLayout,
-  type ChartingPort,
-  type SavedLayout,
-} from "@aios/chart-engine/src/layout/persistence";
-import { panelToView, panelViewFields, sameInstrument, sameView, type ChartViewSnapshot } from "./chartLayoutView";
+  useChartLayoutPersistence,
+  type ChartLayoutSaveStatus,
+  type ChartLayoutStatus,
+} from "./useChartLayoutPersistence";
+import type { ChartViewSnapshot } from "./chartLayoutView";
+
+export type { ChartLayoutSaveStatus, ChartLayoutStatus } from "./useChartLayoutPersistence";
 export type { ChartViewSnapshot } from "./chartLayoutView";
-export type ChartLayoutStatus = "loading" | "ready" | "restore_failed";
-export type ChartLayoutSaveStatus = "idle" | "saving" | "conflict" | "not_found" | "error";
 
 export interface UseChartLayoutOptions {
   readonly port: ChartingPort;
@@ -62,11 +58,6 @@ export interface UseChartLayoutResult {
   readonly setLockedIndicatorIds: (ids: readonly string[]) => void;
 }
 
-const DEFAULT_LAYOUT_NAME = "기본 레이아웃";
-const DEFAULT_WATCHLIST_ID = "default";
-const DEFAULT_WATCHLIST_NAME = "기본";
-const EMPTY_STRING_ARRAY: readonly string[] = [];
-
 export function useChartLayout({ port, enabled, view, onApplyView }: UseChartLayoutOptions): UseChartLayoutResult {
   const idSeq = useRef(0);
   const genId = useCallback((prefix: string) => {
@@ -74,242 +65,40 @@ export function useChartLayout({ port, enabled, view, onApplyView }: UseChartLay
     return `${prefix}-${idSeq.current}`;
   }, []);
 
-  const [status, setStatus] = useState<ChartLayoutStatus>("loading");
-  const [restoreError, setRestoreError] = useState<unknown>(null);
-  const [layoutId, setLayoutId] = useState<string | null>(null);
-  const [layoutName, setLayoutName] = useState<string>(DEFAULT_LAYOUT_NAME);
-  const [revision, setRevision] = useState<number | null>(null);
-  const [model, setModel] = useState<ChartLayoutModel>(() => createEmptyLayoutModel());
-  const [isDirty, setIsDirty] = useState(false);
-  const [saveStatus, setSaveStatus] = useState<ChartLayoutSaveStatus>("idle");
-  const [saveError, setSaveError] = useState<unknown>(null);
-  const [syncToken, setSyncToken] = useState(0);
-
   const onApplyViewRef = useRef(onApplyView);
   onApplyViewRef.current = onApplyView;
-  const appliedTokenRef = useRef(0);
-  const restoredOnceRef = useRef(false);
 
-  const applyDefault = useCallback(() => {
-    const id = genId("panel");
-    const panel: ChartPanel = { id, ...panelViewFields(view), drawingSetId: id };
-    setLayoutId(null);
-    setRevision(null);
-    setLayoutName(DEFAULT_LAYOUT_NAME);
-    setModel({ ...createEmptyLayoutModel(), panels: [panel], activePanelId: id });
-    setIsDirty(false);
-  }, [view, genId]);
-
-  const applySaved = useCallback((saved: SavedLayout) => {
-    setLayoutId(saved.meta.id);
-    setRevision(saved.meta.revision);
-    setLayoutName(saved.meta.name);
-    setModel(saved.model);
-    setIsDirty(false);
-  }, []);
-
-  const restore = useCallback(async () => {
-    setStatus("loading");
-    setRestoreError(null);
-    try {
-      const saved = await listLayouts(port);
-      const newest = [...saved].sort((a, b) => b.meta.updatedAt.localeCompare(a.meta.updatedAt))[0];
-      if (newest) applySaved(newest);
-      else applyDefault();
-      setStatus("ready");
-      setSyncToken((t) => t + 1);
-    } catch (err) {
-      setRestoreError(err);
-      setStatus("restore_failed");
-    }
-  }, [port, applySaved, applyDefault]);
-
-  useEffect(() => {
-    if (!enabled || restoredOnceRef.current) return;
-    restoredOnceRef.current = true;
-    void restore();
-  }, [enabled, restore]);
-
-  // 복원/새로고침 직후 1회: 활성 패널을 화면(뷰)에 반영한다.
-  useEffect(() => {
-    if (status !== "ready" || appliedTokenRef.current === syncToken) return;
-    appliedTokenRef.current = syncToken;
-    const active = model.panels.find((p) => p.id === model.activePanelId) ?? model.panels[0];
-    if (active) onApplyViewRef.current(panelToView(active));
-  }, [status, syncToken, model]);
-
-  // 그 뒤로는 반대 방향: 화면(뷰)이 바뀌면(타임프레임·지표·비교 심볼 선택 등) 활성 패널에 거울처럼 반영한다.
-  useEffect(() => {
-    if (!enabled || status !== "ready" || appliedTokenRef.current !== syncToken) return;
-    setModel((prev) => {
-      const activeId = prev.activePanelId ?? prev.panels[0]?.id;
-      const active = prev.panels.find((p) => p.id === activeId);
-      if (!active || sameView(active, view)) return prev;
-      setIsDirty(true);
-      return { ...prev, panels: prev.panels.map((p) => (p.id === active.id ? { ...p, ...panelViewFields(view) } : p)) };
-    });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [enabled, status, syncToken, view.instrumentId, view.venue, view.timeframe, view.indicatorIds.join(","), view.compareSymbolIds.join(",")]);
-
-  const save = useCallback(async () => {
-    setSaveStatus("saving");
-    setSaveError(null);
-    try {
-      let saved: SavedLayout;
-      if (layoutId === null) {
-        saved = await createLayoutRecord(port, layoutName, model);
-      } else {
-        const result = await saveLayout(port, layoutId, revision ?? 0, { name: layoutName, model });
-        if (result.kind !== "ok") {
-          setSaveStatus(result.kind);
-          return null;
-        }
-        saved = result.value;
-      }
-      applySaved(saved);
-      setSaveStatus("idle");
-      return saved.meta.id;
-    } catch (err) {
-      setSaveError(err);
-      setSaveStatus("error");
-      return null;
-    }
-  }, [port, layoutId, layoutName, model, revision, applySaved]);
-
-  const reload = useCallback(async () => {
-    setSaveStatus("saving");
-    setSaveError(null);
-    try {
-      if (layoutId === null) {
-        await restore();
-      } else {
-        const result = await loadLayout(port, layoutId);
-        if (result.kind === "ok") applySaved(result.value);
-        else applyDefault();
-        setStatus("ready");
-        setSyncToken((t) => t + 1);
-      }
-      setSaveStatus("idle");
-    } catch (err) {
-      setSaveError(err);
-      setSaveStatus("error");
-    }
-  }, [port, layoutId, restore, applySaved, applyDefault]);
-
-  const rename = useCallback((name: string) => {
-    setLayoutName(name);
-    setIsDirty(true);
-  }, []);
-
-  const remove = useCallback(async () => {
-    if (layoutId === null) {
-      applyDefault();
-      return;
-    }
-    setSaveStatus("saving");
-    setSaveError(null);
-    try {
-      await deleteLayoutRecord(port, layoutId);
-      applyDefault();
-      setSaveStatus("idle");
-    } catch (err) {
-      setSaveError(err);
-      setSaveStatus("error");
-    }
-  }, [port, layoutId, applyDefault]);
-
-  const addPanel = useCallback(() => {
-    const id = genId("panel");
-    const panel: ChartPanel = { id, ...panelViewFields(view), drawingSetId: id };
-    setModel((prev) => ({ ...prev, panels: [...prev.panels, panel], activePanelId: id }));
-    setIsDirty(true);
-  }, [view, genId]);
-
-  const removePanel = useCallback((panelId: string) => {
-    setModel((prev) => {
-      const panels = prev.panels.filter((p) => p.id !== panelId);
-      const wasActive = prev.activePanelId === panelId;
-      const activePanelId = wasActive ? (panels[0]?.id ?? null) : prev.activePanelId;
-      if (wasActive) {
-        const nextActive = panels.find((p) => p.id === activePanelId);
-        if (nextActive) onApplyViewRef.current(panelToView(nextActive));
-      }
-      return { ...prev, panels, activePanelId };
-    });
-    setIsDirty(true);
-  }, []);
-
-  const setActivePanel = useCallback((panelId: string) => {
-    setModel((prev) => {
-      if (prev.activePanelId === panelId || !prev.panels.some((p) => p.id === panelId)) return prev;
-      const panel = prev.panels.find((p) => p.id === panelId);
-      if (panel) onApplyViewRef.current(panelToView(panel));
-      return { ...prev, activePanelId: panelId };
-    });
-    setIsDirty(true);
-  }, []);
-
-  const toggleWatchlistEntry = useCallback((entry: InstrumentRef) => {
-    setModel((prev) => {
-      const existing = prev.watchlists.find((w) => w.id === DEFAULT_WATCHLIST_ID);
-      if (!existing) {
-        const watchlist: Watchlist = { id: DEFAULT_WATCHLIST_ID, name: DEFAULT_WATCHLIST_NAME, entries: [entry] };
-        return { ...prev, watchlists: [...prev.watchlists, watchlist] };
-      }
-      const has = existing.entries.some((e) => sameInstrument(e, entry));
-      const entries = has ? existing.entries.filter((e) => !sameInstrument(e, entry)) : [...existing.entries, entry];
-      const next: Watchlist = { ...existing, entries };
-      return { ...prev, watchlists: prev.watchlists.map((w) => (w.id === DEFAULT_WATCHLIST_ID ? next : w)) };
-    });
-    setIsDirty(true);
-  }, []);
-
-  // CH-16b: legend/objectTree.ts order/lock are panel-owned, mutated the same
-  // way toggleWatchlistEntry mutates watchlists — never fetched/derived here,
-  // ChartPanes.tsx (via legend/objectTree.ts) owns computing the next value.
-  const activePanel = model.panels.find((p) => p.id === model.activePanelId);
-  const objectTreeOrder = activePanel?.objectTreeOrder ?? EMPTY_STRING_ARRAY;
-  const lockedIndicatorIds = activePanel?.lockedIndicatorIds ?? EMPTY_STRING_ARRAY;
-
-  const setObjectTreeOrder = useCallback((order: readonly string[]) => {
-    setModel((prev) => {
-      const activeId = prev.activePanelId;
-      if (activeId === null) return prev;
-      return { ...prev, panels: prev.panels.map((p) => (p.id === activeId ? { ...p, objectTreeOrder: order } : p)) };
-    });
-    setIsDirty(true);
-  }, []);
-
-  const setLockedIndicatorIds = useCallback((ids: readonly string[]) => {
-    setModel((prev) => {
-      const activeId = prev.activePanelId;
-      if (activeId === null) return prev;
-      return { ...prev, panels: prev.panels.map((p) => (p.id === activeId ? { ...p, lockedIndicatorIds: ids } : p)) };
-    });
-    setIsDirty(true);
-  }, []);
+  const persistence = useChartLayoutPersistence({ port, enabled, view, onApplyViewRef, genId });
+  const panels = useChartLayoutPanels({
+    view,
+    model: persistence.model,
+    setModel: persistence.setModel,
+    setIsDirty: persistence.setIsDirty,
+    onApplyViewRef,
+    genId,
+  });
 
   return {
-    status,
-    restoreError,
-    retryRestore: () => void restore(),
-    model,
-    layoutId,
-    layoutName,
-    isDirty,
-    saveStatus,
-    saveError,
-    save,
-    reload,
-    rename,
-    remove,
-    addPanel,
-    removePanel,
-    setActivePanel,
-    toggleWatchlistEntry,
-    objectTreeOrder,
-    lockedIndicatorIds,
-    setObjectTreeOrder,
-    setLockedIndicatorIds,
+    status: persistence.status,
+    restoreError: persistence.restoreError,
+    retryRestore: persistence.retryRestore,
+    model: persistence.model,
+    layoutId: persistence.layoutId,
+    layoutName: persistence.layoutName,
+    isDirty: persistence.isDirty,
+    saveStatus: persistence.saveStatus,
+    saveError: persistence.saveError,
+    save: persistence.save,
+    reload: persistence.reload,
+    rename: persistence.rename,
+    remove: persistence.remove,
+    addPanel: panels.addPanel,
+    removePanel: panels.removePanel,
+    setActivePanel: panels.setActivePanel,
+    toggleWatchlistEntry: panels.toggleWatchlistEntry,
+    objectTreeOrder: panels.objectTreeOrder,
+    lockedIndicatorIds: panels.lockedIndicatorIds,
+    setObjectTreeOrder: panels.setObjectTreeOrder,
+    setLockedIndicatorIds: panels.setLockedIndicatorIds,
   };
 }

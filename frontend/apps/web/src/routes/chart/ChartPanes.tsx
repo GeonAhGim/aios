@@ -15,21 +15,16 @@
 // 자체는 서버 왕복을 새로 만들지 않고 `restoredHeightRatios` 훅만 열어 둔다:
 // paneModel.setHeightRatios가 합계 불일치를 fail-closed로 거부하는 계약을 화면이
 // 무음 폴백 없이 그대로 드러낸다(DoD 3).
+//
+// 페인 한 칸의 DOM(서프페이스·SVG plot·statusLine 스트립)은 ChartPaneRow.tsx로,
+// 순수 헬퍼(페인 id 코덱·시간 환산·초기 모델)는 chartPanesModel.ts로, legend/
+// object-tree 조립은 useChartPanesObjectTree.ts로 옮겼다(P6 300줄 분할, 순수 이동).
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import type { StreamCandle } from "@aios/chart-engine/src/data/candleStream";
 import type { DrawingCollection } from "@aios/chart-engine/src/drawings/model";
 import type { OverlayEntry } from "@aios/chart-engine/src/indicators/overlayRegistry";
 import {
-  buildObjectTree,
-  encodeObjectTreeState,
-  moveEntry,
-  setEntryLocked,
-  sortByPersistedOrder,
-  type ObjectTreeSource,
-} from "@aios/chart-engine/src/legend/objectTree";
-import {
   addPane,
-  createPaneModel,
   PaneModelError,
   removePane,
   setHeightRatios,
@@ -42,10 +37,10 @@ import { createPriceScale, type PriceScale } from "@aios/chart-engine/src/core/p
 import { createTimeScale } from "@aios/chart-engine/src/core/timeScale";
 import { Alert } from "@aios/ui-web";
 import { ChartLegend } from "./ChartLegend";
+import { ChartPaneRow } from "./ChartPaneRow";
 import { DataWindowPanel } from "./DataWindowPanel";
 import { StatusLine } from "./StatusLine";
 import {
-  PLOT_ERROR_REASONS,
   buildPlotLayer,
   priceRangeFromCandles,
   priceRangeFromSeries,
@@ -53,45 +48,21 @@ import {
   type OverlayPlotSpecOverrides,
   type OverlaySeriesByOutput,
 } from "./ChartPlotLayer";
+import {
+  DEFAULT_TOTAL_HEIGHT,
+  EMPTY_OVERLAY_PLOT_SPECS,
+  EMPTY_OVERLAY_SERIES,
+  EMPTY_STRING_ARRAY,
+  MAIN_PANE_ID,
+  PANE_ERROR_REASONS,
+  SURFACE_WIDTH_PX,
+  buildInitialModel,
+  overlayIdFromSubPaneId,
+  resolveTimeMsFromClientX,
+  subPaneId,
+} from "./chartPanesModel";
+import { useChartPanesObjectTree } from "./useChartPanesObjectTree";
 import { useWiredCandleRenderer } from "./useVisibleCandles";
-
-const MAIN_PANE_ID = "main";
-const SURFACE_WIDTH_PX = 600;
-const DEFAULT_TOTAL_HEIGHT = 420;
-
-const PANE_ERROR_REASONS: Record<PaneModelErrorCode, string> = {
-  PANE_EMPTY_ID: "페인 id가 비어 있습니다.",
-  PANE_DUPLICATE_ID: "이미 존재하는 페인 id입니다.",
-  PANE_NOT_FOUND: "저장된 레이아웃이 현재 서브패널 구성과 맞지 않습니다.",
-  PANE_HEIGHT_INVALID: "저장된 레이아웃의 페인 높이 값이 올바르지 않습니다.",
-  PANE_HEIGHT_SUM_INVALID: "저장된 레이아웃의 높이 비율 합이 1이 아닙니다.",
-  PANE_LAST_MAIN_PANE: "메인 페인은 제거할 수 없습니다.",
-};
-
-function subPaneId(overlayId: string): string {
-  return `sub-${overlayId}`;
-}
-
-function overlayIdFromSubPaneId(paneId: string): string {
-  return paneId.slice("sub-".length);
-}
-
-function resolveTimeMsFromClientX(clientX: number, candles: readonly StreamCandle[]): number {
-  if (candles.length === 0) return Date.now();
-  const firstMs = candles[0]!.openTimeMs;
-  const lastMs = candles[candles.length - 1]!.openTimeMs;
-  const span = Math.max(lastMs - firstMs, 1);
-  const fraction = Math.min(Math.max(clientX / SURFACE_WIDTH_PX, 0), 1);
-  return firstMs + fraction * span;
-}
-
-function buildInitialModel(subOverlayIds: readonly string[]): PaneModel {
-  return subOverlayIds.reduce((model, id) => addPane(model, subPaneId(id)), createPaneModel(MAIN_PANE_ID));
-}
-
-const EMPTY_OVERLAY_SERIES: ReadonlyMap<string, OverlaySeriesByOutput> = new Map();
-const EMPTY_OVERLAY_PLOT_SPECS: ReadonlyMap<string, OverlayPlotSpecOverrides> = new Map();
-const EMPTY_STRING_ARRAY: readonly string[] = [];
 
 export interface ChartPanesProps {
   /** 메인 페인 시계열 — 크로스헤어 시간 도메인 계산에 쓰인다. */
@@ -177,53 +148,15 @@ export function ChartPanes({
   const crosshairTimeMs = crosshairState.kind === "visible" ? crosshairState.timeMs : null;
 
   const allOverlays = useMemo(() => [...mainOverlays, ...subOverlays], [mainOverlays, subOverlays]);
-  const [hiddenIds, setHiddenIds] = useState<ReadonlySet<string>>(new Set());
-  const objectTreeSource: ObjectTreeSource = useMemo(
-    () => ({
-      getIndicators: () => [
-        ...mainOverlays.map((o, i) => ({ id: o.id, paneId: MAIN_PANE_ID, name: o.id, visible: !hiddenIds.has(o.id), zLevel: i })),
-        ...subOverlays.map((o, i) => ({
-          id: o.id,
-          paneId: subPaneId(o.id),
-          name: o.id,
-          visible: !hiddenIds.has(o.id),
-          zLevel: mainOverlays.length + i,
-        })),
-      ],
-      getOverlays: () =>
-        drawings.map((d, i) => ({
-          id: d.id,
-          paneId: MAIN_PANE_ID,
-          name: `${d.kind}:${d.id}`,
-          visible: !hiddenIds.has(d.id),
-          zLevel: 1000 + i,
-          lock: false,
-        })),
-    }),
-    [mainOverlays, subOverlays, drawings, hiddenIds],
-  );
-  const lockedIndicatorIdSet = useMemo(() => new Set(lockedIndicatorIds), [lockedIndicatorIds]);
-  const objectTree = useMemo(
-    () => sortByPersistedOrder(buildObjectTree(objectTreeSource, lockedIndicatorIdSet), objectTreeOrder),
-    [objectTreeSource, lockedIndicatorIdSet, objectTreeOrder],
-  );
-
-  // CH-16b: legend/objectTree.ts owns the pure order/lock transitions — this
-  // handler only translates a legend interaction into the next persisted
-  // `objectTreeOrder`/`lockedIndicatorIds` and hands it to the caller
-  // (ChartPage → useChartLayout.ts). Only indicators are lockable here:
-  // overlays/drawings already carry their own native `locked` field (CH-4
-  // drawings/model.ts) which `objectTreeSource.getOverlays()` above still
-  // reports as a fixed `false` — CH-4's own lock UI is a separate leaf.
-  const handleMoveEntry = (id: string, toIndex: number) => {
-    onObjectTreeOrderChange?.(encodeObjectTreeState(moveEntry(objectTree, id, toIndex)).order);
-  };
-  const handleToggleLocked = (id: string) => {
-    const entry = objectTree.find((e) => e.id === id);
-    if (!entry || entry.kind !== "indicator") return;
-    const next = setEntryLocked(objectTree, id, !entry.locked);
-    onLockedIndicatorIdsChange?.(encodeObjectTreeState(next).locked);
-  };
+  const { objectTree, toggleHidden, handleMoveEntry, handleToggleLocked } = useChartPanesObjectTree({
+    mainOverlays,
+    subOverlays,
+    drawings,
+    objectTreeOrder,
+    lockedIndicatorIds,
+    onObjectTreeOrderChange,
+    onLockedIndicatorIdsChange,
+  });
 
   const rects = computePaneRects(paneModel.panes, totalHeight);
   const paneById = useMemo(() => new Map(paneModel.panes.map((p) => [p.id, p] as const)), [paneModel]);
@@ -263,60 +196,22 @@ export function ChartPanes({
           // CH-15b: the actual PlotSpec-driven dispatch (ChartPlotLayer.tsx) — a new indicator's plot renders here with zero changes to this file (DoD).
           const plotLayer = buildPlotLayer({ overlays: paneOverlays, overlaySeries, overlayPlotSpecs, mainScale, ownScale, timeScale });
           return (
-            <div
+            <ChartPaneRow
               key={pane.id}
-              data-testid={`chart-pane-${pane.id}`}
-              className="relative border-b border-border last:border-b-0"
-              style={{ height: rect.height }}
-            >
-              <div
-                data-testid={`chart-pane-surface-${pane.id}`}
-                className="h-full w-full"
-                onMouseMove={(e) =>
-                  crosshair.move({ sourcePaneId: pane.id, x: e.clientX, timeMs: resolveTimeMsFromClientX(e.clientX, candles) })
-                }
-                onMouseLeave={() => crosshair.hide()}
-              >
-                {isMain ? mainContent : (
-                  <p className="p-2 text-xs text-fg-muted">서브패널 · {overlayIdFromSubPaneId(pane.id)}</p>
-                )}
-              </div>
-              <svg
-                className="pointer-events-none absolute inset-0"
-                width={SURFACE_WIDTH_PX}
-                height={rect.height}
-                data-testid={`chart-pane-plot-${pane.id}`}
-              >
-                {plotLayer.nodes}
-              </svg>
-              {plotLayer.issues.length > 0 && (
-                <div data-testid={`chart-pane-plot-error-${pane.id}`}>
-                  <Alert tone="warning">
-                    {plotLayer.issues.map((issue) => (
-                      <p key={`${issue.overlayId}:${issue.output}`}>
-                        지표 표시 실패: {issue.overlayId}.{issue.output} — {PLOT_ERROR_REASONS[issue.code]} ({issue.code})
-                      </p>
-                    ))}
-                  </Alert>
-                </div>
-              )}
-              <div className="pointer-events-none absolute inset-x-0 top-0 flex items-center justify-between bg-surface/80 px-2 py-0.5 text-[11px] text-fg-secondary">
-                <span data-testid={`chart-pane-ratio-${pane.id}`}>{pane.heightRatio.toFixed(6)}</span>
-                <span data-testid={`chart-pane-statusline-${pane.id}`}>
-                  {crosshairTimeMs !== null ? new Date(crosshairTimeMs).toISOString() : "--"}
-                </span>
-                {!isMain && (
-                  <button
-                    type="button"
-                    className="pointer-events-auto"
-                    aria-label={`서브패널 제거 ${overlayIdFromSubPaneId(pane.id)}`}
-                    onClick={() => onRemoveSubOverlay(overlayIdFromSubPaneId(pane.id))}
-                  >
-                    ×
-                  </button>
-                )}
-              </div>
-            </div>
+              paneId={pane.id}
+              rectHeight={rect.height}
+              heightRatio={pane.heightRatio}
+              isMain={isMain}
+              mainContent={mainContent}
+              subLabel={overlayIdFromSubPaneId(pane.id)}
+              plotLayer={plotLayer}
+              crosshairTimeMs={crosshairTimeMs}
+              onMouseMove={(clientX) =>
+                crosshair.move({ sourcePaneId: pane.id, x: clientX, timeMs: resolveTimeMsFromClientX(clientX, candles) })
+              }
+              onMouseLeave={() => crosshair.hide()}
+              onRemoveSubOverlay={isMain ? undefined : () => onRemoveSubOverlay(overlayIdFromSubPaneId(pane.id))}
+            />
           );
         })}
       </div>
@@ -325,14 +220,7 @@ export function ChartPanes({
 
       <ChartLegend
         objectTree={objectTree}
-        onToggleVisible={(id) =>
-          setHiddenIds((prev) => {
-            const next = new Set(prev);
-            if (next.has(id)) next.delete(id);
-            else next.add(id);
-            return next;
-          })
-        }
+        onToggleVisible={toggleHidden}
         onMoveEntry={handleMoveEntry}
         onToggleLocked={handleToggleLocked}
       />
