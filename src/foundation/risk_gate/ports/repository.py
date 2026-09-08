@@ -13,6 +13,7 @@ from src.foundation.risk_gate.domain.models import (
     FenceSnapshot,
     RiskEvaluation,
     RiskLimit,
+    RiskSignal,
     SafetyControl,
     SafetyScope,
 )
@@ -180,3 +181,30 @@ class RuleBundleRepository(Protocol):
         new_state: BundleState,
         **audit: Any,
     ) -> RiskRuleBundle: ...
+
+
+class RiskSignalRepository(Protocol):
+    """R-46 -- `risk_signal` repository port (`adapters/postgres_signal_repository.py`)."""
+
+    async def insert_if_new(
+        self,
+        *,
+        signal_id: UUID,
+        dedupe_key: str,
+        tenant_id: UUID,
+        signal_type: str,
+        severity: str,
+        as_of: datetime,
+        source: str,
+        evidence_ref: str | None = None,
+        safety_control_id: UUID | None = None,
+    ) -> bool:
+        """§6 row 453 -- `ON CONFLICT (dedupe_key) DO NOTHING RETURNING id`.
+        A `False` return means the same signal was already recorded in the
+        same 5-minute window (RSK-008), not an error."""
+        ...
+
+    async def list_open(self, tenant_id: UUID) -> tuple[RiskSignal, ...]:
+        """Returns only this tenant's `state='OPEN'` rows -- zero rows for
+        any other tenant (implementation's responsibility)."""
+        ...

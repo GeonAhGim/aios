@@ -156,6 +156,47 @@ class LimitBreachSeverity(str, Enum):
     CRITICAL = "CRITICAL"
 
 
+class RiskSignalType(str, Enum):
+    """`risk_signal.type` CHECK, the same 5 values as `d6f7b4c3e5a6` (R-46)."""
+
+    DRAWDOWN = "DRAWDOWN"
+    STALE_DATA = "STALE_DATA"
+    PROVIDER_OUTAGE = "PROVIDER_OUTAGE"
+    RECON_MISMATCH = "RECON_MISMATCH"
+    DISTRUST = "DISTRUST"
+
+
+class RiskSignalSeverity(str, Enum):
+    WARN = "WARN"
+    CRITICAL = "CRITICAL"
+
+
+class RiskSignalState(str, Enum):
+    OPEN = "OPEN"
+    ACKED = "ACKED"
+    RESOLVED = "RESOLVED"
+
+
+@dataclass(frozen=True)
+class RiskSignal:
+    """One `risk_signal` row (R-46, `d6f7b4c3e5a6`). The §6 row-453 dedupe
+    rule (`f"{type}:{scope_ref}:{floor(as_of,5min)}"`) is not computed here
+    -- `adapters/postgres_signal_repository.dedupe_key_for` is the single
+    computation site (multiple call sites would risk drift at the
+    boundary)."""
+
+    id: UUID
+    tenant_id: UUID
+    type: RiskSignalType
+    severity: RiskSignalSeverity
+    dedupe_key: str
+    as_of: datetime
+    source: str
+    evidence_ref: str | None
+    state: RiskSignalState
+    safety_control_id: UUID | None = None
+
+
 @dataclass(frozen=True)
 class RiskLimit:
     """`risk_limit` 1행 — 78번 §2.6 표 그대로. `tenant_id=None`은 플랫폼
