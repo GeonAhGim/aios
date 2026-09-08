@@ -26,6 +26,9 @@ tags = ["credential", "exchange", "aios"]
 
 [allowlist]
 description = "알려진 오탐 — 실제 자격증명이 아닌 테스트 픽스처·참조 문자열·빈 값"
+# 2026-09-08: 허용 정규식을 잡힌 조각이 아니라 줄 전체에 대조한다. generic-api-key가
+# f"fill:{uuid4().hex}:{i}" 같은 f-string에서 잘라 낸 조각에는 위 정규식이 닿지 않았다.
+regexTarget = "line"
 paths = [
   # AES 라운드트립 자체의 정확성만 검증하는 테스트라 key/iv가 알파벳
   # 나열 placeholder다("abcdefghijklmnop1234567890ABCDEF") — 실제
