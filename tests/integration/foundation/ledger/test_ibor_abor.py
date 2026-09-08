@@ -19,6 +19,7 @@ from __future__ import annotations
 
 from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
+from typing import cast
 from uuid import UUID, uuid4
 
 import asyncpg
@@ -261,7 +262,7 @@ async def test_ibor_view_recomputes_deterministically_as_of_cutoff(
 async def test_ibor_view_rejects_naive_cutoff():
     with pytest.raises(NaiveCutoffError):
         await ibor_view.compute_ibor_view(
-            pool=None, fund_id=uuid4(), cutoff=datetime(2026, 1, 1)  # type: ignore[arg-type]
+            pool=cast(asyncpg.Pool, None), fund_id=uuid4(), cutoff=datetime(2026, 1, 1)
         )
 
 

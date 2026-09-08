@@ -12,6 +12,7 @@ import ast
 import inspect
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
+from typing import Any
 
 import pytest
 
@@ -53,8 +54,8 @@ def _columns(n: int) -> CandleColumns:
     )
 
 
-def _config(**overrides: object) -> BacktestConfigV2:
-    base: dict[str, object] = dict(
+def _config(**overrides: Any) -> BacktestConfigV2:
+    base: dict[str, Any] = dict(
         slippage=FixedSlippage(bps=_D("10")),
         commission=VenueTierCommission(
             venue="BITGET", maker_bps=_D("2"), taker_bps=_D("5"), min_fee=_D("0")
@@ -65,7 +66,7 @@ def _config(**overrides: object) -> BacktestConfigV2:
         adjustments=AdjustmentsConfig(splits=False, dividends=False), calendar="24x7",
     )
     base.update(overrides)
-    return BacktestConfigV2(**base)  # type: ignore[arg-type]
+    return BacktestConfigV2(**base)
 
 
 class _Scripted:

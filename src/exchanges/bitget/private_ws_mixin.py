@@ -42,7 +42,7 @@ import logging
 from collections.abc import Awaitable, Callable
 from datetime import datetime, timezone
 from decimal import Decimal, InvalidOperation
-from typing import Any, Protocol
+from typing import Any, Literal, Protocol
 
 from src.data.models.trading import OrderSide
 from src.exchanges.bitget.market_data_mixin import _build_login_message
@@ -56,7 +56,7 @@ logger = logging.getLogger(__name__)
 
 WS_PRIVATE_URL = "wss://ws.bitget.com/v2/ws/private"
 
-_LIQUIDITY_MAP = {"T": "TAKER", "M": "MAKER"}
+_LIQUIDITY_MAP: dict[str, Literal["TAKER", "MAKER"]] = {"T": "TAKER", "M": "MAKER"}
 
 
 class PrivateWsInboxClient(SignedRequestClient, Protocol):
@@ -101,7 +101,9 @@ def _extract_fill(row: dict[str, Any], *, exchange_order_id: str | None) -> Fill
     side_raw = str(row.get("side", "")).upper()
     known_sides = (OrderSide.BUY.value, OrderSide.SELL.value)
     side = OrderSide(side_raw) if side_raw in known_sides else OrderSide.BUY
-    liquidity = _LIQUIDITY_MAP.get(str(row.get("tradeScope", "")).upper(), "UNKNOWN")
+    liquidity: Literal["MAKER", "TAKER", "UNKNOWN"] = _LIQUIDITY_MAP.get(
+        str(row.get("tradeScope", "")).upper(), "UNKNOWN"
+    )
     return FillEvent(
         provider_fill_id=str(trade_id),
         venue="bitget",
@@ -113,7 +115,7 @@ def _extract_fill(row: dict[str, Any], *, exchange_order_id: str | None) -> Fill
         price=price,
         fee=fee,
         fee_currency=fee_currency,
-        liquidity=liquidity,  # type: ignore[arg-type]
+        liquidity=liquidity,
         venue_ts=_parse_bitget_timestamp(row.get("uTime") or row.get("cTime")),
     )
 
