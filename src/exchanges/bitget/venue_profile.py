@@ -25,11 +25,56 @@ docstring 참고). 두 DoD가 실제로 통과한 커밋에서만 `"LIVE_VERIFIE
 """
 from __future__ import annotations
 
+from datetime import date
 from decimal import Decimal
 
 from src.data.models.base import AssetClass
 from src.data.models.trading import OrderType
+from src.services.oms.domain.symbol_registry import SymbolRegistry, SymbolSnapshot
 from src.services.oms.domain.venue_profile import TimeoutBudget, VenueCapabilityProfile
+
+VENUE = "bitget"
+
+_SNAPSHOT_SOURCE = "https://www.bitget.com/api-doc/spot/market/Get-Symbols"
+_SNAPSHOT_DATE = date(2026, 9, 8)
+
+# L4-04 — per-symbol registry snapshot (distinct from `BITGET_SPOT_PROFILE`
+# below, which is capability/limit metadata for the whole venue). Values are
+# the same 2026-09-08 `GET /api/v2/spot/public/symbols` response the
+# docstring below cites for `price_tick`/`qty_lot`/`min_notional` —
+# `verified=True` here because those two symbols were read from that actual
+# response body, not estimated.
+BITGET_SYMBOL_SNAPSHOTS: dict[str, SymbolSnapshot] = {
+    "BTC/USDT": SymbolSnapshot(
+        venue_symbol="BTCUSDT",
+        tick=Decimal("0.01"),
+        lot=Decimal("0.000001"),
+        min_notional=Decimal("1"),
+        quote_ccy="USDT",
+        source_url=_SNAPSHOT_SOURCE,
+        fetched_at=_SNAPSHOT_DATE,
+        verified=True,
+    ),
+    "ETH/USDT": SymbolSnapshot(
+        venue_symbol="ETHUSDT",
+        tick=Decimal("0.01"),
+        lot=Decimal("0.0001"),
+        min_notional=Decimal("1"),
+        quote_ccy="USDT",
+        source_url=_SNAPSHOT_SOURCE,
+        fetched_at=_SNAPSHOT_DATE,
+        verified=True,
+    ),
+}
+
+
+def register_symbols(registry: SymbolRegistry) -> None:
+    """Only place `SymbolRegistry.register_snapshot` is called for Bitget —
+    production callers must go through this (L4-04 DoD a: eliminates the
+    previous 0-hit `SymbolRegistry()` production-instantiation gap)."""
+    for canonical, snapshot in BITGET_SYMBOL_SNAPSHOTS.items():
+        registry.register_snapshot(canonical, VENUE, snapshot)
+
 
 BITGET_SPOT_PROFILE = VenueCapabilityProfile(
     venue="bitget",

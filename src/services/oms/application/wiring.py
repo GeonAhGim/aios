@@ -39,10 +39,13 @@ from uuid import uuid4
 
 import asyncpg
 
+from src.exchanges.bitget import venue_profile as bitget_venue_profile
 from src.exchanges.bitget.private_ws_mixin import (
     PrivateWsInboxClient,
     subscribe_bitget_orders_to_inbox,
 )
+from src.exchanges.kis import venue_profile as kis_venue_profile
+from src.exchanges.nh import venue_profile as nh_venue_profile
 from src.services.oms.adapters.order_repository import PostgresOrderRepository
 from src.services.oms.adapters.outbox_repository import OutboxRepository
 from src.services.oms.application.inbox_processor import InboxProcessor
@@ -53,6 +56,7 @@ from src.services.oms.application.outbox_dispatcher import (
     OutboxDispatcher,
 )
 from src.services.oms.application.reconcile_scheduler import ReconcileScheduler, TargetProvider
+from src.services.oms.domain.symbol_registry import SymbolRegistry
 from src.services.oms.ports.repository import OrderRepoPort, OutboxRepoPort
 from src.services.order_service.foundation_gate import make_foundation_pre_submit_gate
 
@@ -125,6 +129,23 @@ def start_reconcile_scheduler_task(
     the factory's LIVE block unchanged, same as the dispatcher above)."""
     scheduler = ReconcileScheduler(pool, targets=targets)
     return asyncio.create_task(scheduler.run_forever())
+
+
+def build_production_symbol_registry() -> SymbolRegistry:
+    """L4-04 — assembles the one production `SymbolRegistry` from each
+    venue's verified snapshot fixtures (`exchanges/{bitget,kis,nh}/
+    venue_profile.py::register_symbols`). Before this, `SymbolRegistry()`
+    was instantiated only in tests (`rg -n "SymbolRegistry\\(" src --glob
+    '!tests'` was 0 hits) — `submit_order()`'s `registry` parameter had
+    nothing real to receive. Callers of `submit_order` should pass this
+    (or a request-scoped registry built the same way) rather than
+    constructing their own — a second registry with a different symbol set
+    would defeat the fail-closed guarantee (§9 L4-04 DoD)."""
+    registry = SymbolRegistry()
+    bitget_venue_profile.register_symbols(registry)
+    kis_venue_profile.register_symbols(registry)
+    nh_venue_profile.register_symbols(registry)
+    return registry
 
 
 def start_bitget_private_ws_inbox_task(

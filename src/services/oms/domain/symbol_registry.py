@@ -9,6 +9,7 @@ R8 — "주문 시 BTC/USDT, 조회 시 BTCUSDT"를 각 믹스인이 손으로
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import date
 from decimal import Decimal
 
 from src.services.oms.domain.errors import UnknownSymbolError
@@ -23,6 +24,28 @@ class SymbolSpec:
     lot: Decimal
     min_notional: Decimal
     quote_ccy: str
+    verified: bool = True
+    """False = the tick/lot/min_notional values below are a documented
+    estimate, not confirmed against a live exchange response (§9 L4-04 DoD
+    c). `rounding.require_verified()` refuses to use such a spec for
+    price/quantity decisions."""
+
+
+@dataclass(frozen=True)
+class SymbolSnapshot:
+    """One exchange-metadata snapshot backing a `SymbolSpec` registration
+    (L4-04 DoD c) — carries provenance so `verified=False` values can be
+    told apart from confirmed live responses instead of being used silently.
+    """
+
+    venue_symbol: str
+    tick: Decimal
+    lot: Decimal
+    min_notional: Decimal
+    quote_ccy: str
+    source_url: str
+    fetched_at: date
+    verified: bool
 
 
 class SymbolRegistry:
@@ -40,6 +63,7 @@ class SymbolRegistry:
         lot: Decimal,
         min_notional: Decimal,
         quote_ccy: str,
+        verified: bool = True,
     ) -> None:
         spec = SymbolSpec(
             canonical=canonical,
@@ -49,9 +73,24 @@ class SymbolRegistry:
             lot=lot,
             min_notional=min_notional,
             quote_ccy=quote_ccy,
+            verified=verified,
         )
         self._by_canonical[(canonical, venue)] = spec
         self._by_venue_symbol[(venue_symbol, venue)] = spec
+
+    def register_snapshot(self, canonical: str, venue: str, snapshot: SymbolSnapshot) -> None:
+        """Registers from a `SymbolSnapshot` fixture (exchanges/*/venue_profile.py) —
+        the only path production code uses to populate a `SymbolRegistry`."""
+        self.register(
+            canonical,
+            venue,
+            snapshot.venue_symbol,
+            tick=snapshot.tick,
+            lot=snapshot.lot,
+            min_notional=snapshot.min_notional,
+            quote_ccy=snapshot.quote_ccy,
+            verified=snapshot.verified,
+        )
 
     def spec(self, canonical: str, venue: str) -> SymbolSpec:
         found = self._by_canonical.get((canonical, venue))

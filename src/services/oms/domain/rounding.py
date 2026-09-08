@@ -8,6 +8,22 @@ from decimal import ROUND_DOWN, ROUND_UP, Decimal
 
 from src.data.models.trading import OrderSide
 from src.services.oms.domain.errors import OrderValidationError
+from src.services.oms.domain.symbol_registry import SymbolSpec
+
+
+def require_verified(spec: SymbolSpec) -> SymbolSpec:
+    """§9 L4-04 DoD c — refuses to feed an unverified snapshot's tick/lot/
+    min_notional into `round_price`/`round_qty`/`check_notional`. A
+    `verified=False` spec is a documented estimate, not a confirmed live
+    response — using it silently for rounding/min-notional decisions would
+    hide that uncertainty from the caller."""
+    if not spec.verified:
+        raise OrderValidationError(
+            "UNVERIFIED_SPEC",
+            f"{spec.canonical}@{spec.venue}: verified=False 스냅샷 값으로 "
+            "라운딩/최소주문 판정을 할 수 없습니다 — 실측 확인 후 재시도.",
+        )
+    return spec
 
 
 def round_price(price: Decimal, tick: Decimal, side: OrderSide) -> Decimal:
