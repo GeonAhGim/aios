@@ -43,10 +43,17 @@ from src.api.schemas.market_data import (
     ReplaySeriesView,
     SymbolAliasRef,
 )
+from src.foundation.market_data.adapters.postgres_coverage_repository import (
+    PostgresCoverageRepository,
+)
+from src.foundation.market_data.adapters.postgres_instrument_repository import (
+    PostgresInstrumentRepository,
+)
 from src.foundation.market_data.adapters.postgres_source_contract import (
     PostgresSourceContractRepository,
 )
 from src.foundation.market_data.application.get_candles import get_candles
+from src.foundation.market_data.application.get_coverage import get_coverage
 from src.foundation.market_data.application.read_api import (
     DataCoverageMissingError,
     authorize_feed,
@@ -66,11 +73,14 @@ from src.foundation.market_data.contracts.v1 import (
     Timeframe,
     Venue,
 )
+from src.foundation.market_data.contracts.v2.coverage import CoverageSpan
 from src.foundation.market_data.domain.entitlement.policy import Entitlement
 from src.foundation.market_data.domain.entitlement.source_contract import DataUse
 from src.foundation.market_data.ports.calendar_repository import CalendarRepository
 from src.foundation.market_data.ports.candle_store import CandleStore
+from src.foundation.market_data.ports.coverage_repository import CoverageRepository
 from src.foundation.market_data.ports.entitlement import EntitlementPort, VenueRegistrySource
+from src.foundation.market_data.ports.instrument_repository import InstrumentRepository
 from src.foundation.market_data.ports.reference_repository import (
     ReferenceReadRepository,
     ReferenceRepository,
@@ -89,6 +99,14 @@ def get_source_contract_repository() -> SourceContractRepository:
     no pool injection needed. Upgrading the adapter only requires changing
     this one function (same principle as DC-27 D1)."""
     return PostgresSourceContractRepository()
+
+
+def get_coverage_repository(pool: asyncpg.Pool = Depends(get_pool)) -> CoverageRepository:
+    return PostgresCoverageRepository(pool)
+
+
+def get_instrument_repository(pool: asyncpg.Pool = Depends(get_pool)) -> InstrumentRepository:
+    return PostgresInstrumentRepository(pool)
 
 
 def _entitlement_view(decision: Entitlement) -> EntitlementView:
@@ -260,3 +278,22 @@ async def list_aliases_endpoint(
         await authorize_venue(source, tenant_id=context.tenant_id, inst=inst)
         aliases = await reader.list_aliases(conn, inst.instrument_id)
     return ok(aliases)
+
+
+@router.get("/coverage")
+async def get_coverage_endpoint(
+    instrument_id: str, venue: Venue, timeframe: Timeframe,
+    context: TenantContext = Depends(get_tenant_context), pool: asyncpg.Pool = Depends(get_pool),
+    coverage_repo: CoverageRepository = Depends(get_coverage_repository),
+    instrument_repo: InstrumentRepository = Depends(get_instrument_repository),
+    venue_registry: VenueRegistrySource = Depends(get_venue_registry_source),
+) -> ApiResponse[list[CoverageSpan]]:
+    """DC-18a — merged `coverage_spans` (DC-1 ULID `instrument_id`, not the
+    `md_instrument` UUID above); no coverage / no entitlement -> 200 + `[]`."""
+    async with pool.acquire() as conn:
+        spans = await get_coverage(
+            conn, tenant_id=context.tenant_id, instrument_id=instrument_id,
+            venue=venue, timeframe=timeframe, coverage_repo=coverage_repo,
+            instrument_repo=instrument_repo, venue_registry=venue_registry,
+        )
+    return ok(spans)
