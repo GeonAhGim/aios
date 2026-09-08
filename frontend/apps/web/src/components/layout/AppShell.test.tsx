@@ -93,4 +93,27 @@ describe("AppShell — §3.5 권한 메뉴 fail-closed", () => {
 
     expect(screen.getByText("관리자")).toBeInTheDocument();
   });
+
+  // task-2380 FE-NAV-1 DoD(d): AdminRoute가 라우트를 막는 것과 nav가 링크를
+  // 숨기는 것은 별개다 — 실제 DOM 조회(getByRole)로 양쪽을 직접 단언한다.
+  it("비관리자 세션에서는 /admin 이하 링크가 DOM에 0건이다", () => {
+    render(tree());
+
+    const adminLinks = screen
+      .getAllByRole("link")
+      .filter((el) => el.getAttribute("href")?.startsWith("/admin"));
+
+    expect(adminLinks).toHaveLength(0);
+  });
+
+  it("관리자 세션에서는 /admin 이하 링크가 DOM에 존재한다", () => {
+    meData = { email: "admin@example.com", isPlatformAdmin: true };
+    render(tree());
+
+    const adminLinks = screen
+      .getAllByRole("link")
+      .filter((el) => el.getAttribute("href")?.startsWith("/admin"));
+
+    expect(adminLinks.length).toBeGreaterThan(0);
+  });
 });
