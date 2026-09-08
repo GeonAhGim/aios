@@ -3,13 +3,14 @@
 // 완화된 tsconfig(strictPropertyInitialization:false 등)에서만 통과하고
 // apps/web의 엄격한 tsconfig로는 tsc -b가 깨진다. CH-4가 실제로 필요한 건
 // vendor에 의존하지 않는 drawings/model뿐이라 그 서브모듈만 직접 불러온다.
-import { DRAWING_KINDS, type DrawingKind } from "@aios/chart-engine/src/drawings/model";
+import type { DrawingKind } from "@aios/chart-engine/src/drawings/model";
 import type { ReplayStatus } from "@aios/chart-engine/src/replay/replayController";
 import type { Timeframe, Venue } from "@aios/shared-types";
-import { Alert, Button, Field, Input, Select } from "@aios/ui-web";
-import type { KeyboardEvent } from "react";
-import { useRef, useState } from "react";
+import { Button, Field, Select } from "@aios/ui-web";
+import { useState } from "react";
 import { AlertFromChart } from "./AlertFromChart";
+import { DrawingReplayToolbar } from "./DrawingReplayToolbar";
+import { LayoutPanelControls } from "./LayoutPanelControls";
 import type { ChartLayoutSaveStatus } from "./useChartLayout";
 
 // CH-6b: CH-8(task-1593) 레이아웃 CRUD의 화면 배선. 실제 복원·저장·충돌 판정은
@@ -24,19 +25,6 @@ import type { ChartLayoutSaveStatus } from "./useChartLayout";
 const VENUES: readonly Venue[] = ["BITGET", "KIS_KRX", "KIS_US"];
 const TIMEFRAMES: readonly Timeframe[] = ["1m", "5m", "15m", "30m", "1h", "4h", "1d"];
 const SPEEDS: readonly number[] = [0.5, 1, 2, 4, 8];
-
-const DRAWING_LABELS: Record<DrawingKind, string> = {
-  trendline: "추세선",
-  "horizontal-line": "수평선",
-  "vertical-line": "수직선",
-  rectangle: "사각형",
-  fibonacci: "피보나치",
-};
-
-interface ButtonSpec {
-  readonly id: string;
-  readonly disabled: boolean;
-}
 
 export interface ChartLayoutPanelTab {
   readonly id: string;
@@ -85,41 +73,6 @@ interface ChartToolbarProps {
   layout: ChartLayoutControls;
 }
 
-/** WAI-ARIA toolbar 패턴: 그룹 내 버튼은 하나만 tabIndex=0(roving), 화살표로 이동한다. */
-function useRovingToolbar(buttons: readonly ButtonSpec[]) {
-  const enabledIds = buttons.filter((b) => !b.disabled).map((b) => b.id);
-  const [activeId, setActiveId] = useState<string>(enabledIds[0] ?? "");
-  const groupRef = useRef<HTMLDivElement>(null);
-
-  function tabIndexFor(id: string): 0 | -1 {
-    if (!enabledIds.includes(id)) return -1;
-    const active = enabledIds.includes(activeId) ? activeId : enabledIds[0];
-    return id === active ? 0 : -1;
-  }
-
-  function onFocusButton(id: string): void {
-    if (enabledIds.includes(id)) setActiveId(id);
-  }
-
-  function onKeyDown(event: KeyboardEvent<HTMLDivElement>): void {
-    const container = groupRef.current;
-    if (!container) return;
-    const focusable = Array.from(container.querySelectorAll<HTMLButtonElement>("button:not(:disabled)"));
-    if (focusable.length === 0) return;
-    const current = focusable.indexOf(document.activeElement as HTMLButtonElement);
-    let next = current;
-    if (event.key === "ArrowRight") next = (current + 1 + focusable.length) % focusable.length;
-    else if (event.key === "ArrowLeft") next = (current - 1 + focusable.length) % focusable.length;
-    else if (event.key === "Home") next = 0;
-    else if (event.key === "End") next = focusable.length - 1;
-    else return;
-    event.preventDefault();
-    focusable[next]?.focus();
-  }
-
-  return { groupRef, tabIndexFor, onFocusButton, onKeyDown };
-}
-
 export function ChartToolbar({
   venue,
   onVenueChange,
@@ -142,31 +95,6 @@ export function ChartToolbar({
   layout,
 }: ChartToolbarProps) {
   const [alertDialogOpen, setAlertDialogOpen] = useState(false);
-  const buttons: ButtonSpec[] = [
-    ...DRAWING_KINDS.map((kind) => ({ id: `tool-${kind}`, disabled: false })),
-    { id: "add-drawing", disabled: addDrawingDisabled },
-    { id: "replay-step-back", disabled: replayDisabled },
-    { id: "replay-toggle", disabled: replayDisabled },
-    { id: "replay-step-forward", disabled: replayDisabled },
-  ];
-  const { groupRef, tabIndexFor, onFocusButton, onKeyDown } = useRovingToolbar(buttons);
-  const panelButtons: ButtonSpec[] = layout.panels.map((p) => ({ id: `panel-${p.id}`, disabled: false }));
-  const {
-    groupRef: panelGroupRef,
-    tabIndexFor: panelTabIndexFor,
-    onFocusButton: onFocusPanel,
-    onKeyDown: onPanelKeyDown,
-  } = useRovingToolbar(panelButtons);
-  const conflictMessage =
-    layout.saveStatus === "conflict"
-      ? "다른 세션이 먼저 저장했습니다. 자동으로 덮어쓰지 않습니다 — 최신 내용을 다시 불러온 뒤 다시 시도하세요."
-      : layout.saveStatus === "not_found"
-        ? "이 레이아웃은 다른 곳에서 삭제되었습니다."
-        : null;
-
-  function toggleTool(kind: DrawingKind): void {
-    onDrawingToolChange(drawingTool === kind ? null : kind);
-  }
 
   return (
     <div className="flex flex-wrap items-end gap-3" data-testid="chart-toolbar">
@@ -189,84 +117,17 @@ export function ChartToolbar({
         </Select>
       </Field>
 
-      <div
-        ref={groupRef}
-        role="toolbar"
-        aria-label="그리기·재생 도구"
-        className="flex flex-wrap items-center gap-2"
-        onKeyDown={onKeyDown}
-      >
-        {DRAWING_KINDS.map((kind) => {
-          const id = `tool-${kind}`;
-          return (
-            <Button
-              key={kind}
-              id={id}
-              type="button"
-              variant={drawingTool === kind ? "primary" : "secondary"}
-              size="sm"
-              aria-pressed={drawingTool === kind}
-              tabIndex={tabIndexFor(id)}
-              onFocus={() => onFocusButton(id)}
-              onClick={() => toggleTool(kind)}
-            >
-              {DRAWING_LABELS[kind]}
-            </Button>
-          );
-        })}
-        <Button
-          id="add-drawing"
-          type="button"
-          variant="secondary"
-          size="sm"
-          disabled={addDrawingDisabled}
-          tabIndex={tabIndexFor("add-drawing")}
-          onFocus={() => onFocusButton("add-drawing")}
-          onClick={onAddDrawing}
-        >
-          그리기 추가
-        </Button>
-
-        <Button
-          id="replay-step-back"
-          type="button"
-          variant="ghost"
-          size="sm"
-          aria-label="이전 봉"
-          disabled={replayDisabled}
-          tabIndex={tabIndexFor("replay-step-back")}
-          onFocus={() => onFocusButton("replay-step-back")}
-          onClick={() => onStep(-1)}
-        >
-          ◀
-        </Button>
-        <Button
-          id="replay-toggle"
-          type="button"
-          variant="secondary"
-          size="sm"
-          aria-pressed={replayStatus === "playing"}
-          disabled={replayDisabled}
-          tabIndex={tabIndexFor("replay-toggle")}
-          onFocus={() => onFocusButton("replay-toggle")}
-          onClick={replayStatus === "playing" ? onPause : onPlay}
-        >
-          {replayStatus === "playing" ? "일시정지" : "재생"}
-        </Button>
-        <Button
-          id="replay-step-forward"
-          type="button"
-          variant="ghost"
-          size="sm"
-          aria-label="다음 봉"
-          disabled={replayDisabled}
-          tabIndex={tabIndexFor("replay-step-forward")}
-          onFocus={() => onFocusButton("replay-step-forward")}
-          onClick={() => onStep(1)}
-        >
-          ▶
-        </Button>
-      </div>
+      <DrawingReplayToolbar
+        drawingTool={drawingTool}
+        onDrawingToolChange={onDrawingToolChange}
+        onAddDrawing={onAddDrawing}
+        addDrawingDisabled={addDrawingDisabled}
+        replayStatus={replayStatus}
+        replayDisabled={replayDisabled}
+        onPlay={onPlay}
+        onPause={onPause}
+        onStep={onStep}
+      />
 
       <Field label="배속">
         <Select
@@ -295,75 +156,7 @@ export function ChartToolbar({
         selectedIndicatorIds={selectedIndicatorIds}
       />
 
-      <Field label="레이아웃 이름">
-        <Input
-          aria-label="레이아웃 이름"
-          value={layout.name}
-          onChange={(e) => layout.onNameChange(e.target.value)}
-        />
-      </Field>
-      <Button type="button" variant="secondary" size="sm" disabled={layout.saveStatus === "saving"} onClick={layout.onSave}>
-        레이아웃 저장
-      </Button>
-      <Button type="button" variant="ghost" size="sm" onClick={layout.onDelete}>
-        레이아웃 삭제
-      </Button>
-      <Button type="button" variant="ghost" size="sm" aria-pressed={layout.isWatchlisted} onClick={layout.onToggleWatchlist}>
-        {layout.isWatchlisted ? "관심목록 제거" : "관심목록 추가"}
-      </Button>
-
-      <div
-        ref={panelGroupRef}
-        role="tablist"
-        aria-label="차트 패널"
-        className="flex items-center gap-1"
-        onKeyDown={onPanelKeyDown}
-      >
-        {layout.panels.map((p) => {
-          const id = `panel-${p.id}`;
-          return (
-            <button
-              key={p.id}
-              id={id}
-              type="button"
-              role="tab"
-              aria-selected={p.id === layout.activePanelId}
-              tabIndex={panelTabIndexFor(id)}
-              className={
-                p.id === layout.activePanelId
-                  ? "rounded bg-surface-hover px-2 py-1 text-xs font-medium text-fg"
-                  : "rounded px-2 py-1 text-xs text-fg-secondary"
-              }
-              onFocus={() => onFocusPanel(id)}
-              onClick={() => layout.onSelectPanel(p.id)}
-            >
-              {p.label}
-            </button>
-          );
-        })}
-        <Button type="button" variant="ghost" size="sm" aria-label="패널 추가" onClick={layout.onAddPanel}>
-          ＋
-        </Button>
-        <Button
-          type="button"
-          variant="ghost"
-          size="sm"
-          aria-label="패널 제거"
-          disabled={layout.panels.length <= 1}
-          onClick={layout.onRemovePanel}
-        >
-          －
-        </Button>
-      </div>
-
-      {conflictMessage && (
-        <Alert tone="warning">
-          <p>{conflictMessage}</p>
-          <Button type="button" variant="secondary" size="sm" onClick={layout.onReload}>
-            다시 불러오기
-          </Button>
-        </Alert>
-      )}
+      <LayoutPanelControls layout={layout} />
     </div>
   );
 }
