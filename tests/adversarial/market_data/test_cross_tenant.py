@@ -31,7 +31,7 @@ from src.foundation.market_data.contracts.v1 import (
     Venue,
     Verdict,
 )
-from tests.integration.conftest import create_test_user
+from tests.integration.conftest import create_test_tenant
 
 
 @pytest.fixture
@@ -92,8 +92,8 @@ async def _seed_owner_batch(
 
 
 async def test_cross_tenant_batch_get_does_not_leak_existence(pool, batch_repo, candle_store):
-    owner_id = await create_test_user(pool)
-    attacker_id = await create_test_user(pool)
+    owner_id = await create_test_tenant(pool)
+    attacker_id = await create_test_tenant(pool)
     assert attacker_id != owner_id
 
     async with pool.acquire() as conn, conn.transaction():

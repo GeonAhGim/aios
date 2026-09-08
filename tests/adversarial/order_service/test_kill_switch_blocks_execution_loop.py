@@ -37,7 +37,7 @@ from src.foundation.risk_gate.domain.models import SafetyScope
 from src.services.credential_resolver import CredentialNotFoundError
 from src.services.execution_loop.scheduler import ExecutionLoopScheduler
 from src.services.order_service.foundation_gate import make_foundation_pre_submit_gate
-from tests.integration.conftest import create_test_user
+from tests.integration.conftest import create_test_tenant
 from tests.integration.fake_exchange_adapter import FakeExchangeAdapter
 from tests.integration.test_execution_tick import _create_execution
 
@@ -64,7 +64,7 @@ def _filled_adapter() -> FakeExchangeAdapter:
 async def test_active_kill_switch_blocks_execution_loop_new_order_submission(
     pool: asyncpg.Pool,
 ) -> None:
-    user_id = await create_test_user(pool)
+    user_id = await create_test_tenant(pool)
     execution_id = await _create_execution(pool, user_id, entry_threshold=100.0)
     adapter = _filled_adapter()
 
