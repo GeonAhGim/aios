@@ -35,11 +35,18 @@ from src.foundation.ledger.application.abor_snapshot import (
     SnapshotNotFoundError,
 )
 from src.foundation.ledger.application.ibor_view import NaiveCutoffError
-from src.foundation.ledger.contracts.v1 import AccountType, LedgerEventType, PostingLine, Side
+from src.foundation.ledger.contracts.v1 import (
+    AccountType,
+    LedgerEventType,
+    PostingLine,
+    Side,
+    UserSub,
+)
+from src.foundation.ledger.domain.chart_of_accounts import user_account
+from src.foundation.ledger.domain.hash_chain import entry_hash as compute_entry_hash
 from src.foundation.ledger.domain.hash_chain import lines_digest
 from tests.integration.conftest import create_test_tenant
 from tests.integration.foundation.entities.conftest import build_hierarchy
-from tests.integration.foundation.ledger.conftest import create_ledger_account
 
 
 async def _account_id(pool: asyncpg.Pool, account_code: str) -> UUID:
@@ -65,14 +72,29 @@ async def _insert_dated_entry(
     (advisory lock -> 감사 이벤트 -> 저널 -> 포스팅 행)를 그대로 밟되,
     `posted_at`만 테스트가 통제한다. 잔액 트리거(`ledger_entry_balanced_trg`,
     DEFERRABLE)가 커밋 시점에 균형을 검증하므로 `lines`는 항상 균형이어야
-    한다."""
+    한다.
+
+    FA-15a(esc-2115) 정리 중 발견: `prev_hash`/`entry_hash`를 placeholder
+    문자열로 심으면 `hash_chain.verify_chain`이 재계산한 값과 영원히
+    어긋난다 -- `ledger_journal_entry`는 WORM이라 한 번 이렇게 심으면 이
+    워커의 테스트 DB가 영구히 오염된다(`test_migration_fa4_worm_no_backfill.
+    py` 모듈 docstring이 경고하는 바로 그 사고). 실제 체인을 그대로
+    재현한다: 직전 sequence_no의 `entry_hash`를 `prev_hash`로 읽고,
+    `hash_chain.entry_hash`로 진짜 값을 계산한다."""
     audit_repo = PostgresAuditEventRepository(pool)
     entry_id = uuid4()
+    event_ref = f"test-fa12:{entry_id}"
     digest = lines_digest(lines)
     async with pool.acquire() as conn, conn.transaction():
         await conn.execute("SELECT pg_advisory_xact_lock(hashtext('ledger_journal'))")
         next_seq = await conn.fetchval(
             "SELECT COALESCE(MAX(sequence_no), 0) + 1 FROM ledger_journal_entry"
+        )
+        prev_hash = await conn.fetchval(
+            "SELECT entry_hash FROM ledger_journal_entry WHERE sequence_no = $1", next_seq - 1
+        )
+        new_hash = compute_entry_hash(
+            prev_hash, next_seq, LedgerEventType.MANUAL_ADJUSTMENT, event_ref, digest, posted_at
         )
         audit_event = await audit_repo.append_event_in(
             conn,
@@ -97,11 +119,11 @@ async def _insert_dated_entry(
             entry_id,
             next_seq,
             LedgerEventType.MANUAL_ADJUSTMENT.value,
-            f"test-fa12:{entry_id}",
+            event_ref,
             f"test-fa12-idem:{entry_id}",
             digest,
-            None,
-            f"test-fa12-hash:{entry_id}",
+            prev_hash,
+            new_hash,
             audit_event.id,
             posted_at,
             fund_id,
@@ -158,14 +180,42 @@ async def portfolio_id(pool: asyncpg.Pool, fund_id: UUID) -> UUID:
     return value
 
 
+async def _create_user_ledger_account(
+    pool: asyncpg.Pool, sub: UserSub, *, allow_negative: bool
+) -> str:
+    """FA-12 IBOR/ABOR 전용 계정 생성 — `PLATFORM:TEST_*`(다른 디렉터리의
+    `create_ledger_account`)는 `chart_of_accounts`가 모르는 이름이라,
+    `_insert_dated_entry`가 남긴 실제 `ledger_posting_line`을
+    `scripts/replay_verify.py`의 원장 프로젝션(`account_type()` 필요)이
+    되짚을 때 `InvalidAccountCodeError`로 죽는다(esc-2115와 같은 계열의
+    결함 — FA-15a 정리 과정에서 발견). `USER:*` 계정코드는 항상 인식되므로
+    이 값을 쓴다. `allow_negative`는 `ledger_balance` 행의 컬럼값이라
+    `chart_of_accounts.allows_negative()`(코드 레벨, RECEIVABLE만 True)와
+    무관하게 이 테스트가 원하는 대로 설정할 수 있다 — 이 파일은 `post_entry`/
+    `balance_rules.apply`를 거치지 않고 원장 행을 직접 읽고 쓰기 때문이다."""
+    code = user_account(uuid4(), sub)
+    async with pool.acquire() as conn:
+        account_id = await conn.fetchval(
+            "INSERT INTO ledger_account (account_code, account_type, currency, allow_negative) "
+            "VALUES ($1, $2, $3, $4) RETURNING account_id",
+            code,
+            (AccountType.ASSET if sub is UserSub.RECEIVABLE else AccountType.LIABILITY).value,
+            Currency.KRW.value,
+            allow_negative,
+        )
+        await conn.execute(
+            "INSERT INTO ledger_balance (account_id, allow_negative, last_entry_seq) "
+            "VALUES ($1, $2, 0)",
+            account_id,
+            allow_negative,
+        )
+    return code
+
+
 @pytest.fixture
 async def accounts(pool: asyncpg.Pool) -> tuple[str, str]:
-    debit_code = await create_ledger_account(
-        pool, account_type=AccountType.ASSET, allow_negative=True
-    )
-    credit_code = await create_ledger_account(
-        pool, account_type=AccountType.LIABILITY, allow_negative=True
-    )
+    debit_code = await _create_user_ledger_account(pool, UserSub.RECEIVABLE, allow_negative=True)
+    credit_code = await _create_user_ledger_account(pool, UserSub.AVAILABLE, allow_negative=True)
     return debit_code, credit_code
 
 

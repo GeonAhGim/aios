@@ -344,8 +344,8 @@ async def _create_ledger_test_account(
             code, kind.value, Currency.KRW.value, allow_negative,
         )
         await conn.execute(
-            "INSERT INTO ledger_balance (account_id, balance, allow_negative, last_entry_seq) "
-            "VALUES ($1, 0, $2, 0)",
+            "INSERT INTO ledger_balance (account_id, allow_negative, last_entry_seq) "
+            "VALUES ($1, $2, 0)",
             account_id, allow_negative,
         )
     return code

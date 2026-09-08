@@ -154,8 +154,8 @@ async def _create_user_available_account(pool: asyncpg.Pool, user_id: UUID) -> s
             Currency.KRW.value,
         )
         await conn.execute(
-            "INSERT INTO ledger_balance (account_id, balance, allow_negative, last_entry_seq) "
-            "VALUES ($1, 0, FALSE, 0)",
+            "INSERT INTO ledger_balance (account_id, allow_negative, last_entry_seq) "
+            "VALUES ($1, FALSE, 0)",
             account_id,
         )
     return code

@@ -32,6 +32,7 @@ from src.services.listing_service import ListingService
 from src.services.purchase_service import PurchaseService
 from src.services.verification_service import VerificationService
 from tests.integration.conftest import create_test_user
+from tests.support.ledger_seed import seed_user_available_balance
 
 _TEST_PURPOSE = "TEST_MARKETPLACE_PURCHASE"
 
@@ -56,28 +57,12 @@ def ports(pool):
 
 async def _seed_available(pool, user_id: UUID, amount: Decimal) -> None:
     """`user_wallets`와 `ledger_balance`를 처음부터 일치시켜 픽스처를 만든다
-    — `place_hold`의 drift 재동기화(레거시 픽스처의 직접 SQL 대비)가 동시
-    호출 사이에서 경합하지 않도록, 이 테스트 파일은 항상 드리프트 0에서
-    시작한다(동시성 테스트가 검증하려는 것은 `ledger_hold` UNIQUE 충돌이지
-    이 재동기화 자체가 아니다)."""
-    code = ua(user_id, UserSub.AVAILABLE)
-    async with pool.acquire() as conn:
-        await conn.execute(
-            "INSERT INTO ledger_account (account_code, account_type, currency, allow_negative) "
-            "VALUES ($1, 'LIABILITY', 'KRW', FALSE) ON CONFLICT (account_code) DO NOTHING",
-            code,
-        )
-        await conn.execute(
-            "INSERT INTO ledger_balance (account_id, balance, allow_negative, last_entry_seq) "
-            "SELECT account_id, $2, FALSE, 0 FROM ledger_account WHERE account_code = $1 "
-            "ON CONFLICT (account_id) DO UPDATE SET balance = $2",
-            code, amount,
-        )
-        await conn.execute(
-            "INSERT INTO user_wallets (user_id, balance) VALUES ($1, $2) "
-            "ON CONFLICT (user_id) DO UPDATE SET balance = $2",
-            user_id, amount,
-        )
+    — 매 호출이 fresh `user_id`를 쓰므로(동시성 테스트가 검증하려는 것은
+    `ledger_hold` UNIQUE 충돌이지 드리프트 재동기화 자체가 아니다) 항상
+    드리프트 0에서 시작한다. FA-15a(esc-2115): raw INSERT로 잔액을 직접
+    심지 않는다 — 실제 충전 진입점(`post_topup`)을 그대로 태우는
+    `seed_user_available_balance`로 TOPUP_CONFIRMED 분개를 남긴다."""
+    await seed_user_available_balance(pool, user_id, amount)
 
 
 async def _available(pool, user_id: UUID) -> Decimal:

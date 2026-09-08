@@ -64,7 +64,18 @@ async def create_ledger_account(
 ) -> str:
     """테스트 전용 고유 `account_code`로 `ledger_account`+`ledger_balance`
     행을 만든다 — LC-6 시드 계정(PLATFORM:*)을 공유하면 테스트 간 잔액
-    상태가 서로 오염되므로 매 호출마다 새 계정을 쓴다."""
+    상태가 서로 오염되므로 매 호출마다 새 계정을 쓴다.
+
+    FA-15a(esc-2115, ADR-2026-09-08-A D4): `initial_balance`/`initial_held`가
+    0이 아니어도 `post_entry` 분개로 시드하지 않는다 — 이 계정은
+    `PLATFORM:TEST_*`라 `chart_of_accounts.account_type()`이 모르는 이름이라
+    `post_entry`(MANUAL_ADJUSTMENT 포함)로 애초에 잔액을 올릴 방법이 없다.
+    실제로 이 값을 0이 아니게 쓰는 유일한 호출자
+    (`test_postgres_balance_repository.py`)는 `PostgresBalanceRepository`
+    자신을 화이트박스로 시험할 뿐 `ledger_journal_entry`/`ledger_posting_line`
+    행을 절대 만들지 않으므로, `scripts/replay_verify.py`의 "이 창에서
+    실제로 건드려진 계정" 스캔(`ledger_posting_line` JOIN)에 이 계정이 잡힐
+    일 자체가 없다 — 그래서 여기서만 raw 시드를 허용한다."""
     account_code = f"PLATFORM:TEST_{uuid.uuid4().hex[:16].upper()}"
     async with pool.acquire() as conn:
         account_id = await conn.fetchval(
@@ -75,6 +86,8 @@ async def create_ledger_account(
             currency.value,
             allow_negative,
         )
+        # audit-allow: ledger_balance_raw_seed -- 위 docstring 참고: 이 계정은
+        # 절대 journal에 posting_line을 남기지 않아 replay_verify 대상 밖이다.
         await conn.execute(
             "INSERT INTO ledger_balance "
             "(account_id, balance, held, allow_negative, last_entry_seq) "

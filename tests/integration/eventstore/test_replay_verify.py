@@ -101,8 +101,8 @@ async def _seed_ledger_account(pool, *, allow_negative: bool) -> str:
             allow_negative,
         )
         await conn.execute(
-            "INSERT INTO ledger_balance (account_id, balance, allow_negative, last_entry_seq) "
-            "VALUES ($1, 0, $2, 0)",
+            "INSERT INTO ledger_balance (account_id, allow_negative, last_entry_seq) "
+            "VALUES ($1, $2, 0)",
             account_id,
             allow_negative,
         )
@@ -202,6 +202,9 @@ async def test_replay_detects_ledger_balance_tampered_outside_the_event_trail(po
         # DELETE the current row, INSERT a replacement with the same key,
         # skipping `post_entry`/the event trail entirely -- that omission
         # (not the DELETE+INSERT mechanics) is what the test is exercising.
+        # audit-allow: ledger_balance_raw_seed -- FA-15a/esc-2115가 금지하는
+        # 것은 초기 잔액 raw 시드다. 이건 DoD(2) "이벤트 트레일 밖 변조"를
+        # 재현하는 adversarial tamper이지 시드가 아니다.
         async with pool.acquire() as conn:
             await conn.execute(
                 "WITH removed AS ("

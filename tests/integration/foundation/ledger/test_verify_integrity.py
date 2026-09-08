@@ -50,9 +50,10 @@ def _clock() -> datetime:
     return datetime.now(timezone.utc)
 
 
-async def _create_user_available_account(
-    pool, user_id: UUID, *, initial_balance: Decimal = Decimal("0")
-) -> str:
+async def _create_user_available_account(pool, user_id: UUID) -> str:
+    """잔액은 항상 0으로 시작한다(FA-15a/esc-2115: `ledger_balance`에 잔액을
+    raw로 심지 않는다 — 이 파일의 테스트가 실제로 필요로 하는 잔액은 전부
+    이후 `post_entry` 호출이 만든다)."""
     code = user_account(user_id, UserSub.AVAILABLE)
     async with pool.acquire() as conn:
         account_id = await conn.fetchval(
@@ -63,10 +64,9 @@ async def _create_user_available_account(
             Currency.KRW.value,
         )
         await conn.execute(
-            "INSERT INTO ledger_balance (account_id, balance, allow_negative, last_entry_seq) "
-            "VALUES ($1, $2, FALSE, 0)",
+            "INSERT INTO ledger_balance (account_id, allow_negative, last_entry_seq) "
+            "VALUES ($1, FALSE, 0)",
             account_id,
-            initial_balance,
         )
     return code
 

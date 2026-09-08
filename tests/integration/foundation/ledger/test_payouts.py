@@ -32,6 +32,7 @@ from src.foundation.ledger.domain.chart_of_accounts import PLATFORM_PAYOUT_CLEAR
 from src.foundation.ledger.domain.chart_of_accounts import user_account as ua
 from src.foundation.ledger.domain.payout_schedule import CaptureRecord
 from tests.integration.conftest import create_test_user
+from tests.support.ledger_seed import seed_user_available_balance
 
 _TEST_PURPOSE = "TEST_PAYOUT_SCHEDULE"
 _WINDOW = timedelta(days=7)
@@ -57,26 +58,10 @@ def ports(pool):
 
 
 async def _seed_available(pool, user_id, amount: Decimal) -> None:
-    code = ua(user_id, UserSub.AVAILABLE)
-    async with pool.acquire() as conn:
-        await conn.execute(
-            "INSERT INTO ledger_account (account_code, account_type, currency, allow_negative) "
-            "VALUES ($1, 'LIABILITY', 'KRW', FALSE) ON CONFLICT (account_code) DO NOTHING",
-            code,
-        )
-        await conn.execute(
-            "INSERT INTO ledger_balance (account_id, balance, allow_negative, last_entry_seq) "
-            "SELECT account_id, $2, FALSE, 0 FROM ledger_account WHERE account_code = $1 "
-            "ON CONFLICT (account_id) DO UPDATE SET balance = $2",
-            code,
-            amount,
-        )
-        await conn.execute(
-            "INSERT INTO user_wallets (user_id, balance) VALUES ($1, $2) "
-            "ON CONFLICT (user_id) DO UPDATE SET balance = $2",
-            user_id,
-            amount,
-        )
+    """FA-15a(esc-2115): raw INSERT로 잔액을 직접 심지 않는다 — 실제 충전
+    진입점(`post_topup`)을 그대로 태우는 `seed_user_available_balance`로
+    TOPUP_CONFIRMED 분개를 남긴다."""
+    await seed_user_available_balance(pool, user_id, amount)
 
 
 async def _balance(pool, account_code: str) -> Decimal:

@@ -29,6 +29,7 @@ from src.foundation.ledger.contracts.v1 import LedgerEvent, LedgerEventType, Use
 from src.foundation.ledger.domain.chart_of_accounts import user_account as ua
 from src.foundation.ledger.domain.rounding import split_commission
 from tests.integration.conftest import create_test_user
+from tests.support.ledger_seed import seed_user_available_balance
 
 _TEST_PURPOSE = "TEST_REFUND_PURCHASE"
 
@@ -58,27 +59,11 @@ def ports(pool):
 async def _seed_available(pool, user_id: UUID, amount: Decimal) -> None:
     """`user_wallets`(레거시 투영)와 `ledger_balance`를 처음부터 일치시킨다 —
     `place_hold`의 drift 재동기화(`purchase_flow._reconcile_available`)가
-    `PLATFORM:CASH_CLEARING`을 상대 계정으로 쓰므로, 둘 중 하나만 세팅하면
-    그 계정이 가짜로 마이너스가 된다(test_purchase_flow.py의 동명 헬퍼와
-    동일 이유)."""
-    code = ua(user_id, UserSub.AVAILABLE)
-    async with pool.acquire() as conn:
-        await conn.execute(
-            "INSERT INTO ledger_account (account_code, account_type, currency, allow_negative) "
-            "VALUES ($1, 'LIABILITY', 'KRW', FALSE) ON CONFLICT (account_code) DO NOTHING",
-            code,
-        )
-        await conn.execute(
-            "INSERT INTO ledger_balance (account_id, balance, allow_negative, last_entry_seq) "
-            "SELECT account_id, $2, FALSE, 0 FROM ledger_account WHERE account_code = $1 "
-            "ON CONFLICT (account_id) DO UPDATE SET balance = $2",
-            code, amount,
-        )
-        await conn.execute(
-            "INSERT INTO user_wallets (user_id, balance) VALUES ($1, $2) "
-            "ON CONFLICT (user_id) DO UPDATE SET balance = $2",
-            user_id, amount,
-        )
+    `PLATFORM:CASH_CLEARING`을 상대 계정으로 쓰므로, 둘 중 하나만 어긋나면
+    그 계정이 가짜로 마이너스가 된다. FA-15a(esc-2115): raw INSERT로 잔액을
+    직접 심지 않는다 — 실제 충전 진입점(`post_topup`)을 그대로 태우는
+    `seed_user_available_balance`로 TOPUP_CONFIRMED 분개를 남긴다."""
+    await seed_user_available_balance(pool, user_id, amount)
 
 
 async def _balance(pool, account_code: str) -> Decimal:

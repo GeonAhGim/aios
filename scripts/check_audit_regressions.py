@@ -219,6 +219,52 @@ def check_duplicate_type_names() -> Finding | None:
     return None
 
 
+_LEDGER_BALANCE_RAW_SEED_ALLOW = "audit-allow: ledger_balance_raw_seed"
+
+
+def check_ledger_balance_raw_seed() -> Finding | None:
+    """FA-15a(esc-2115, `docs/design/ADR-2026-09-08-A-governance-ratification-
+    and-ops-decisions.md` D4) — "모든 잔액은 분개(journal)를 거친다"를
+    테스트에도 강제한다. `ledger_balance`에 raw INSERT로 `balance` 컬럼을
+    직접 채우면 이벤트 없는 잔액이 생기고, 그 계정이 나중에 실제 사건으로
+    다시 건드려지면 `scripts/replay_verify.py`(순수 이벤트 재생)가 raw seed
+    floor를 몰라 재생 잔액과 실제 잔액이 어긋난다(esc-2115가 재현한 그
+    경로). 계정 생성은 운영 코드의 provisioning 관례(`application/topup.py`
+    등)처럼 `balance` 컬럼을 아예 나열하지 않아야 한다(DEFAULT 0) — 잔액은
+    반드시 `post_entry` 분개(예: TOPUP_CONFIRMED)로만 올린다.
+
+    정말 예외가 필요하면(예: 리포지터리 어댑터 자신을 화이트박스로 시험,
+    또는 이벤트 트레일 밖 변조를 재현하는 adversarial tamper — 둘 다
+    `ledger_posting_line`을 남기지 않거나 replay_verify DoD 자체가 요구하는
+    시나리오라 이 정책 위반이 아니다) 그 INSERT 앞 몇 줄에
+    `# audit-allow: ledger_balance_raw_seed` 주석과 근거를 남긴다."""
+    hits: list[str] = []
+    for p in _py("tests"):
+        if p.name == "test_check_audit_regressions.py":
+            continue  # 이 검사 자체의 단위테스트 — 위반 패턴을 문자열로 주입해 검사하므로 제외
+        lines = _read(p).splitlines()
+        for i, line in enumerate(lines):
+            if "INSERT INTO ledger_balance" not in line:
+                continue
+            # 컬럼 목록은 파이썬 문자열 리터럴 이어붙이기로 다음 줄까지
+            # 이어질 수 있다 — 그 범위 안에 balance 컬럼이 있는지 본다.
+            block = "\n".join(lines[i : i + 4])
+            if not re.search(r"\bbalance\b", block):
+                continue
+            context = "\n".join(lines[max(0, i - 12) : i])
+            if _LEDGER_BALANCE_RAW_SEED_ALLOW in context:
+                continue
+            hits.append(f"{p.relative_to(ROOT).as_posix()}:{i + 1}")
+    if hits:
+        return Finding(
+            "ledger_balance_raw_seed",
+            "테스트가 ledger_balance.balance를 raw INSERT로 심는다 — "
+            "post_entry 분개를 거치지 않아 replay_verify와 어긋난다(esc-2115).",
+            hits,
+        )
+    return None
+
+
 CHECKS = [
     check_optional_safety_gate,
     check_require_mandate_false,
@@ -228,6 +274,7 @@ CHECKS = [
     check_tenant_fk_to_users,
     check_rls_enable_without_force,
     check_duplicate_type_names,
+    check_ledger_balance_raw_seed,
 ]
 
 
