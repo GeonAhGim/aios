@@ -70,6 +70,19 @@ class PostgresBundleRepository:
             )
         return _row_to_bundle(row) if row is not None else None
 
+    async def get_by_rule_hash(self, rule_hash: str) -> RiskRuleBundle | None:
+        """R-54 replay 전용 — 결정이 실제로 사용한 번들을 상태(ACTIVE/RETIRED
+        무관)와 무관하게 정확히 되찾는다. `get_active`를 대신 쓰면 그 사이
+        정책이 개정된 결정은 재생 시점의 현재 ACTIVE 번들과 비교돼 정책
+        버전 차이를 변조로 오판한다(§9 R-54 "pinned" 요구). `rule_hash`는
+        policy_snapshot 내용의 해시라 여러 행이 같은 값을 가져도(동일 정책
+        재승인 등) 내용은 동일하므로 아무 한 행이나 반환해도 안전하다."""
+        async with self._pool.acquire() as conn:
+            row = await conn.fetchrow(
+                "SELECT * FROM risk_rule_bundle WHERE rule_hash = $1 LIMIT 1", rule_hash
+            )
+        return _row_to_bundle(row) if row is not None else None
+
     async def insert_draft(self, bundle: RiskRuleBundle) -> RiskRuleBundle:
         if bundle.state != BundleState.DRAFT:
             raise ValueError("insert_draft는 DRAFT 상태 번들만 받습니다")

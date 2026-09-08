@@ -165,6 +165,11 @@ class RuleBundleRepository(Protocol):
 
     async def get_by_id(self, bundle_id: UUID) -> RiskRuleBundle | None: ...
 
+    async def get_by_rule_hash(self, rule_hash: str) -> RiskRuleBundle | None:
+        """R-54 replay 전용 — 상태 무관, 그 `rule_hash`로 발행된 번들을
+        그대로 되찾는다(`get_active`는 정책 개정 후 재생에는 부적합)."""
+        ...
+
     async def insert_draft(self, bundle: RiskRuleBundle) -> RiskRuleBundle: ...
 
     async def transition(

@@ -141,6 +141,11 @@ extend-immutable-calls = ["fastapi.Depends", "fastapi.Query", "fastapi.Path", "f
 # 생성한 coverage.xml(신뢰된 입력)을 읽는 coverage_ratchet.py 하나뿐이다.
 "scripts/**" = ["TID251", "T201", "S603", "S607", "S314"]
 
+# R-54 — src/tools/**: scripts/**와 동일한 운영자 CLI 계층(`python -m
+# src.tools.<name>`)이다. asyncpg로 직접 접속하고 exit code로 결과를
+# 전달하는 게 본래 기능이라 scripts/**와 같은 예외를 그대로 준다.
+"src/tools/**" = ["TID251", "T201"]
+
 # PLT-41 — 아래는 S,BLE,ARG,PGH,T20 확장으로 새로 걸린 위반 중 로직 변경
 # 없이는 정리할 수 없는 항목만 파일 단위로 유예한다(동작을 바꾸는 정리는
 # task-1092 decision에 따라 금지). 근거는 규칙별로 아래와 같다.

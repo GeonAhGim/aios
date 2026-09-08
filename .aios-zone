@@ -30,6 +30,7 @@ zones:
     - "src/db/**"
     - "src/main.py"
     - "src/watchdog_process.py"
+    - "src/tools/**"                    # 운영자용 CLI(`python -m src.tools.<name>`), 판단 로직 없음
     - "frontend/**"                     # React 앱·패키지 — 백엔드 계약(docs/specs L4 platform §3)을 따른다
   OPEN:
     - "docs/**"

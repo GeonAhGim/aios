@@ -65,6 +65,9 @@ POSITIONS_SCHEDULER_CYCLE_FAILURE_COUNT_TOTAL = (
 )
 POSITIONS_SCHEDULER_CYCLE_SUCCESS_GAUGE = "aios.positions.scheduler_cycle_success.gauge"
 
+# L4_risk_and_safety §7 "재생 불일치 — 목표 0 — replay" 행 원문 (R-54).
+CORE_RISK_REPLAY_MISMATCH_COUNT_TOTAL = "aios.core_risk.replay_mismatch.count_total"
+
 ALL_METRIC_NAMES: frozenset[str] = frozenset(
     {
         API_REQUEST_COUNT_TOTAL,
@@ -97,6 +100,7 @@ ALL_METRIC_NAMES: frozenset[str] = frozenset(
         POSITIONS_RECONCILIATION_MISMATCH_COUNT_TOTAL,
         POSITIONS_SCHEDULER_CYCLE_FAILURE_COUNT_TOTAL,
         POSITIONS_SCHEDULER_CYCLE_SUCCESS_GAUGE,
+        CORE_RISK_REPLAY_MISMATCH_COUNT_TOTAL,
     }
 )
 
