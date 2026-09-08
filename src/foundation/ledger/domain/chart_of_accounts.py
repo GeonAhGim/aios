@@ -14,7 +14,18 @@ from dataclasses import dataclass
 from typing import Literal
 from uuid import UUID
 
+from src.foundation.entities.domain.defaults import (
+    default_entity_id,
+    default_fund_id,
+    default_portfolio_id,
+)
 from src.foundation.ledger.contracts.v1 import AccountType, UserSub
+
+# FA-0c: the "house" identity (`e7f8a9b0c1d2_wallet_ledger.py`,
+# `4a1d0c0de005_ledger_core.py:PLATFORM_HOUSE_USER_ID`) anchors the deterministic
+# default entity/fund/portfolio for PLATFORM:* accounts too, since they have no
+# user_id of their own to derive from. Must match that constant exactly.
+_PLATFORM_SCOPE_ANCHOR = UUID("00000000-0000-0000-0000-000000000001")
 
 PLATFORM_CASH_CLEARING = "PLATFORM:CASH_CLEARING"
 PLATFORM_COMMISSION_REVENUE = "PLATFORM:COMMISSION_REVENUE"
@@ -99,3 +110,42 @@ def allows_negative(account_code: str) -> bool:
     """`USER:*:RECEIVABLE`만 음수 잔액을 허용한다(§4.4 유일 예외)."""
     parsed = parse_account_code(account_code)
     return parsed.kind == "USER" and parsed.sub is UserSub.RECEIVABLE
+
+
+@dataclass(frozen=True)
+class AccountScope:
+    """FA-0c structural hierarchy scope for a `ledger_account` row."""
+
+    entity_id: UUID
+    fund_id: UUID
+    portfolio_id: UUID
+
+
+def default_scope(account_code: str) -> AccountScope:
+    """Reverse-derive the FA-0c (entity_id, fund_id, portfolio_id) scope for a
+    pre-FA-0c account_code, reusing `entities/domain/defaults.py`'s deterministic
+    UUIDv5 rules. USER codes anchor on their own user_id; PLATFORM codes anchor on
+    `_PLATFORM_SCOPE_ANCHOR` (the house identity) since they belong to no single
+    user. Raises `InvalidAccountCodeError` (via `parse_account_code`) instead of
+    guessing when `account_code` does not match the known grammar — migrations must
+    fail rather than silently default an unrecognized row."""
+    parsed = parse_account_code(account_code)
+    anchor = parsed.user_id if parsed.kind == "USER" else _PLATFORM_SCOPE_ANCHOR
+    assert anchor is not None
+    return AccountScope(
+        entity_id=default_entity_id(anchor),
+        fund_id=default_fund_id(anchor),
+        portfolio_id=default_portfolio_id(anchor),
+    )
+
+
+def portfolio_account(portfolio_id: UUID, acct_type: AccountType) -> str:
+    """Display-only `account_code` for a FA-0c portfolio-scoped ledger account.
+
+    Unlike `user_account`/PLATFORM_* codes, this string is never parsed back —
+    the real identity lives in the `(entity_id, fund_id, portfolio_id,
+    account_type)` columns (`ledger_account`). The string embeds `portfolio_id`
+    only so it stays compatible with the table's pre-existing `UNIQUE(account_code)`
+    constraint; application code must read the columns, not this string, to learn
+    an account's hierarchy scope."""
+    return f"PORTFOLIO:{portfolio_id}:{acct_type.value}"

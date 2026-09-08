@@ -118,3 +118,56 @@ def test_account_type_rejects_unknown_platform_name() -> None:
 def test_parse_rejects_empty_string() -> None:
     with pytest.raises(coa.InvalidAccountCodeError):
         coa.parse_account_code("")
+
+
+def test_default_scope_is_deterministic_for_user_account() -> None:
+    code = coa.user_account(_USER_ID, UserSub.AVAILABLE)
+
+    scope_a = coa.default_scope(code)
+    scope_b = coa.default_scope(code)
+
+    assert scope_a == scope_b
+
+
+def test_default_scope_differs_across_users() -> None:
+    code_a = coa.user_account(_USER_ID, UserSub.AVAILABLE)
+    code_b = coa.user_account(uuid4(), UserSub.AVAILABLE)
+
+    assert coa.default_scope(code_a) != coa.default_scope(code_b)
+
+
+def test_default_scope_same_for_every_sub_account_of_one_user() -> None:
+    """Different sub-accounts of the same user share one (entity, fund, portfolio)
+    triple — they are disambiguated by `account_type`, not by scope."""
+    available = coa.default_scope(coa.user_account(_USER_ID, UserSub.AVAILABLE))
+    held = coa.default_scope(coa.user_account(_USER_ID, UserSub.HELD))
+
+    assert available == held
+
+
+def test_default_scope_anchors_platform_accounts_on_house_identity() -> None:
+    house_user_code = coa.user_account(
+        UUID("00000000-0000-0000-0000-000000000001"), UserSub.AVAILABLE
+    )
+
+    assert coa.default_scope(coa.PLATFORM_CASH_CLEARING) == coa.default_scope(house_user_code)
+
+
+def test_default_scope_rejects_unparseable_account_code() -> None:
+    with pytest.raises(coa.InvalidAccountCodeError):
+        coa.default_scope("TENANT:acme:AVAILABLE")
+
+
+def test_portfolio_account_embeds_portfolio_id_and_type() -> None:
+    portfolio_id = uuid4()
+
+    code = coa.portfolio_account(portfolio_id, AccountType.ASSET)
+
+    assert code == f"PORTFOLIO:{portfolio_id}:ASSET"
+
+
+def test_portfolio_account_differs_across_portfolios_for_same_type() -> None:
+    code_a = coa.portfolio_account(uuid4(), AccountType.ASSET)
+    code_b = coa.portfolio_account(uuid4(), AccountType.ASSET)
+
+    assert code_a != code_b
