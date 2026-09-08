@@ -12,18 +12,18 @@ must route through here to reject an attempt by "the requester themself to
 approve/execute their own request" — no feature should reinvent
 `if a == b: raise ...` on its own.
 
-Unverified: as of 2026-09-07, this repository does not yet implement CM-5
-(the author != approver enforcement in `mandates/application/
-activate_revision.py` / `propose_amendment.py`) or PLT-35
-(`core/security/break_glass.py`) — both are still only spec-level plans
-that do not exist as leaves yet. The only place actually migrated and wired
-to this primitive today is the DUAL-mode second-signature check in
-`core/approval/service.py` (previously reinvented inline). The static scan
-in `tests/foundation/unit/trust/test_segregation_of_duty_static.py`
-reflects this fact and asserts only the truth as of today: "no code outside
-this primitive directly compares actor/counterparty equality" — if CM-5 or
-PLT-35 are later built and reinvent this inline instead of routing through
-this module, this static check catches it immediately.
+As of 2026-09-08, two call sites are wired to this primitive: the DUAL-mode
+second-signature check in `core/approval/service.py` (previously reinvented
+inline), and CM-5's author != approver enforcement in `mandates/
+application/activate_revision.py` (the proposer identity it compares
+against comes from the existing audit trail — see that module's docstring).
+
+Unverified: PLT-35 (`core/security/break_glass.py`) is still only a
+spec-level plan and does not exist as a leaf yet. The static scan in
+`tests/foundation/unit/trust/test_segregation_of_duty_static.py` asserts
+"no code outside this primitive directly compares actor/counterparty
+equality" — if PLT-35 is later built and reinvents this inline instead of
+routing through this module, this static check catches it immediately.
 """
 from __future__ import annotations
 

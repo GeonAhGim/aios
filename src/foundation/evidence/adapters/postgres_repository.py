@@ -204,6 +204,20 @@ class PostgresAuditEventRepository:
         next_cursor = str(page_rows[-1]["sequence_no"]) if has_more and page_rows else None
         return items, next_cursor
 
+    async def get_latest_event(
+        self, aggregate_type: str, aggregate_id: UUID, *, action: str
+    ) -> AuditEvent | None:
+        async with self._pool.acquire() as conn:
+            row = await conn.fetchrow(
+                "SELECT * FROM foundation_audit_event WHERE aggregate_type = $1 "
+                "AND aggregate_id = $2 AND action = $3 "
+                "ORDER BY sequence_no DESC LIMIT 1",
+                aggregate_type,
+                aggregate_id,
+                action,
+            )
+        return _row_to_event(row) if row is not None else None
+
     async def list_chain_for_verification(self, tenant_id: UUID | None) -> list[AuditEvent]:
         async with self._pool.acquire() as conn:
             if tenant_id is not None:

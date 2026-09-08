@@ -47,3 +47,14 @@ class AuditEventRepository(Protocol):
         """AUD-003 체인 검증용 — sequence_no 오름차순 전체. `tenant_id=None`이면
         system 체인."""
         ...
+
+    async def get_latest_event(
+        self, aggregate_type: str, aggregate_id: UUID, *, action: str
+    ) -> AuditEvent | None:
+        """Most recent event for one aggregate/action, or `None` if it has
+        never happened — used by CM-5 (`mandates/application/
+        activate_revision.py`) to recover "who proposed this revision"
+        (`actor_subject_id`) from the existing audit trail instead of a new
+        `mandate_revision.proposer_id` column (no schema change, §9 CM-5
+        decision note)."""
+        ...

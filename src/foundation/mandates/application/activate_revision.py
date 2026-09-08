@@ -12,6 +12,18 @@ material change 게이트(75번 §2)는 원래 별도 승인자(approval_binding
 요구하지만, FND-01 마이그레이션과 같은 이유로 이 코드베이스엔 그 대상이
 없다 — 대신 기존 `reauthenticate()`(비밀번호+MFA)와 FND-01 Trust Core의
 동의 신선도, 그리고 cooling-off 경과 시간 3중 게이트로 대체한다.
+
+CM-5(§9, CM-A3 "번들 활성화는 작성자와 다른 승인자를 요구한다"): when the
+revision being activated was created via `propose_amendment(...,
+proposer_id=..., audit_repo=...)`, the proposer's identity is on record in
+`foundation_audit_event` (see `PROPOSED_ACTION` there). This command looks
+that up and delegates the same-subject judgment to PLT-43's
+`segregation_of_duty.assert_actor_not_counterparty` — it does not
+reimplement that comparison inline (ADR-2026-09-06-G §3, §C duplicate-
+context ban). If no proposer was recorded (e.g. the first revision from
+`create_draft_mandate`, or `audit_repo` was not supplied), there is no
+counterparty to compare against and the check passes through, same as
+`assert_actor_not_counterparty`'s own `counterparty_id=None` semantics.
 """
 from __future__ import annotations
 
@@ -21,12 +33,17 @@ from uuid import UUID
 from src.foundation.evidence.application.record_command_event import record_command_event
 from src.foundation.evidence.ports.repository import AuditEventRepository
 from src.foundation.mandates.application.create_draft_mandate import revision_to_view
+from src.foundation.mandates.application.propose_amendment import PROPOSED_ACTION
 from src.foundation.mandates.contracts.v1 import MandateRevisionView
 from src.foundation.mandates.domain.models import MandateRevisionState
 from src.foundation.mandates.domain.rules import detect_material_change
 from src.foundation.mandates.ports.repository import MandateRepository
 from src.foundation.trust.application.evaluate_trust_freshness import evaluate_trust_freshness
 from src.foundation.trust.contracts.v1 import TenantContext as TrustTenantContext
+from src.foundation.trust.domain.rules.segregation_of_duty import (
+    SegregationOfDutyViolation,
+    assert_actor_not_counterparty,
+)
 from src.foundation.trust.ports.repository import TrustRepository
 
 MATERIAL_CHANGE_CONSENT_PURPOSE = "portfolio_mandate_material_change"
@@ -65,6 +82,23 @@ class CoolingOffNotElapsedError(Exception):
         self.remaining_seconds = remaining_seconds
 
 
+class SelfApprovalNotAllowedError(Exception):
+    """CM-5 / CM-A3 — the activating subject is the same subject who
+    proposed this revision. Translates PLT-43's
+    `SegregationOfDutyViolation` into this bounded context's own exception
+    taxonomy at the boundary (same reuse pattern CM-1 already established
+    for `policy_decision` — see `mandates/contracts/v1.py`), so callers of
+    `activate_revision` keep catching mandates-scoped exceptions only."""
+
+    def __init__(self, proposer_id: UUID | None, approver_id: UUID) -> None:
+        super().__init__(
+            f"proposer({proposer_id})와 approver({approver_id})가 동일합니다 — "
+            "작성자는 자신이 제안한 개정을 직접 활성화할 수 없습니다(CM-A3)."
+        )
+        self.proposer_id = proposer_id
+        self.approver_id = approver_id
+
+
 async def activate_revision(
     mandate_repo: MandateRepository,
     trust_repo: TrustRepository,
@@ -85,6 +119,19 @@ async def activate_revision(
 
     if revision.state not in (MandateRevisionState.DRAFT, MandateRevisionState.PROPOSED):
         raise InvalidRevisionStateError(f"{revision.state.value}는 activate할 수 없습니다.")
+
+    proposer_id: UUID | None = None
+    if audit_repo is not None:
+        proposal_event = await audit_repo.get_latest_event(
+            "mandate_revision", revision_id, action=PROPOSED_ACTION
+        )
+        proposer_id = proposal_event.actor_subject_id if proposal_event is not None else None
+    try:
+        assert_actor_not_counterparty(
+            subject_id, proposer_id, action="mandate_revision.activate"
+        )
+    except SegregationOfDutyViolation as exc:
+        raise SelfApprovalNotAllowedError(proposer_id, subject_id) from exc
 
     current_active = await mandate_repo.get_active_revision(mandate.id)
     if current_active is not None:
@@ -126,7 +173,11 @@ async def activate_revision(
             aggregate_id=revision_id,
             action="mandate_revision_activated",
             actor_subject_id=subject_id,
-            payload={"mandate_id": str(mandate.id)},
+            payload={
+                "mandate_id": str(mandate.id),
+                "approver_id": str(subject_id),
+                "proposer_id": str(proposer_id) if proposer_id is not None else None,
+            },
         )
 
     return revision_to_view(activated)

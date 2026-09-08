@@ -1,10 +1,45 @@
 from __future__ import annotations
 
+from pathlib import Path
 from uuid import UUID
 
 import asyncpg
+import pytest
+from dotenv import dotenv_values
 
+from src.foundation.evidence.adapters.postgres_repository import PostgresAuditEventRepository
+from src.foundation.mandates.adapters.postgres_repository import PostgresMandateRepository
 from src.foundation.mandates.contracts.v1 import Autonomy, MandateRuleInput
+from src.foundation.trust.adapters.postgres_repository import PostgresTrustRepository
+
+
+def _asyncpg_dsn() -> str:
+    env = dotenv_values(Path(__file__).resolve().parents[4] / ".env")
+    url = env.get("DATABASE_URL")
+    assert url
+    return url.replace("postgresql+asyncpg://", "postgresql://")
+
+
+@pytest.fixture
+async def pool():
+    p = await asyncpg.create_pool(_asyncpg_dsn(), min_size=1, max_size=4)
+    yield p
+    await p.close()
+
+
+@pytest.fixture
+def repo(pool):
+    return PostgresMandateRepository(pool)
+
+
+@pytest.fixture
+def trust_repo(pool):
+    return PostgresTrustRepository(pool)
+
+
+@pytest.fixture
+def audit_repo(pool):
+    return PostgresAuditEventRepository(pool)
 
 
 def default_rules(**overrides: object) -> MandateRuleInput:

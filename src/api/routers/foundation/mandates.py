@@ -76,6 +76,14 @@ async def post_propose_amendment(
     user: User = Depends(get_current_user),
     repo: MandateRepository = Depends(get_mandate_repository),
 ) -> ApiResponse[MandateRevisionView]:
+    # CM-5(task-2118) leaves `proposer_id`/`audit_repo` unset here: this
+    # single-actor MVP endpoint has one tenant member propose and activate
+    # their own mandate (same `user.user_id` for both), so wiring the new
+    # author != approver enforcement to this route would block the only
+    # activation path that exists today. The command itself already
+    # enforces CM-A3 whenever a caller supplies both — wiring this route to
+    # a real second approver is a separate, later leaf (multi-member
+    # mandate approval).
     result = await propose_amendment(repo, tenant_id=user.user_id, rules=body)
     return ok(result)
 

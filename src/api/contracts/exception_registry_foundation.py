@@ -53,6 +53,7 @@ from src.foundation.mandates.application.activate_revision import (
     MaterialChangeRequiresFreshConsentError,
     MaterialChangeRequiresReauthError,
     RevisionNotFoundError,
+    SelfApprovalNotAllowedError,
 )
 from src.foundation.mandates.application.create_draft_mandate import MandateAlreadyExistsError
 from src.foundation.mandates.application.evaluate_policy import NoActiveMandateError
@@ -196,6 +197,8 @@ EXCEPTION_MAP_FOUNDATION: list[tuple[type[Exception], ErrorCode]] = [
     (MaterialChangeRequiresReauthError, ErrorCode.AUTH_MFA_REQUIRED),
     (MaterialChangeRequiresFreshConsentError, ErrorCode.POLICY_DENIED),
     (CoolingOffNotElapsedError, ErrorCode.STATE_INVALID_TRANSITION),
+    # CM-5(task-2118) — 작성자≠승인자(CM-A3) 위반, 400 매핑(DoD 명시).
+    (SelfApprovalNotAllowedError, ErrorCode.VALIDATION_INVALID_FIELD),
     # evidence.py 체인 무결성 — 없는 코드라 409 conflict로 접는다.
     (ChainIntegrityError, ErrorCode.STATE_INVALID_TRANSITION),
     # PLT-21b(task-1217) — foundation/paper_control·performance·reconciliation.
