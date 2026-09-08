@@ -84,6 +84,7 @@ export {
   useRejectMyRequest,
 } from "./useApprovals";
 export { usePlatformReadiness } from "./usePlatformStatus";
+export { useStartValidation } from "./useValidation";
 export {
   usePaperDeployments,
   useRequestPaperDeployment,

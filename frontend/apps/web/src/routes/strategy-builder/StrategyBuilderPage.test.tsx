@@ -9,6 +9,7 @@ const previewMutateAsync = vi.fn();
 const saveMutateAsync = vi.fn();
 const generateWizardMutateAsync = vi.fn();
 const generateFromPromptMutateAsync = vi.fn();
+const startValidationMutateAsync = vi.fn();
 
 vi.mock("@aios/shared-hooks", () => ({
   useIndicators: () => ({ data: { indicators: ["RSI", "SMA", "EMA"] } }),
@@ -17,6 +18,7 @@ vi.mock("@aios/shared-hooks", () => ({
   usePreviewStrategy: () => ({ mutateAsync: previewMutateAsync, isPending: false, data: undefined }),
   useGenerateWizardStrategy: () => ({ mutateAsync: generateWizardMutateAsync, isPending: false }),
   useGenerateFromPrompt: () => ({ mutateAsync: generateFromPromptMutateAsync, isPending: false }),
+  useStartValidation: () => ({ mutateAsync: startValidationMutateAsync, isPending: false }),
   useMe: () => ({ data: { email: "a@example.com", isPlatformAdmin: false } }),
   useLogout: () => vi.fn(),
 }));
@@ -27,6 +29,7 @@ afterEach(() => {
   saveMutateAsync.mockReset();
   generateWizardMutateAsync.mockReset();
   generateFromPromptMutateAsync.mockReset();
+  startValidationMutateAsync.mockReset();
 });
 
 function renderPage() {

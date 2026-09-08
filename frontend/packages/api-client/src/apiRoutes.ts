@@ -292,4 +292,9 @@ export const API_ROUTES = defineApiRoutes({
   "mandates.mandate.pause": route("/v1/foundation/mandates/mandate:pause", true, null, true),
   "mandates.mandate.resume": route("/v1/foundation/mandates/mandate:resume", true, null, true),
   "mandates.policy.evaluate": route("/v1/foundation/mandates/policy:evaluate", true, null, true),
+
+  // task-2412(FE-OPS-8): src/api/routers/foundation/validation.py 원문 확인 — POST
+  // "/{strategy_id}/{strategy_version}" -> ApiResponse[ValidationResultView] + ok(...).
+  // envelope=true, mount_v1(PLT-16) 미도달이라 v1Path=null(foundation.*와 동일 사유).
+  "validation.start": route("/v1/foundation/validation-runs/:strategyId/:strategyVersion", true, null, true),
 });

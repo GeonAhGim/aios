@@ -15,6 +15,7 @@ import { ErrorMessage } from "../../components/ErrorMessage";
 import { ForbiddenNotice } from "../../components/ForbiddenNotice";
 import { ConditionGroup } from "./components/ConditionGroup";
 import { StrategyWizardPanel } from "./components/StrategyWizardPanel";
+import { ValidationRunPanel } from "./components/ValidationRunPanel";
 
 // spec §3.3 에러 taxonomy: 미리보기·저장 실패는 err.message를 직접 노출하지 않고
 // routeApiError(task-483)로 판정해 400/403/그 외를 각각 BadRequestNotice/
@@ -257,6 +258,13 @@ export function StrategyBuilderPage() {
             전략이 저장됐습니다 — {saved.strategyId}@{saved.version} ({saved.status})
           </Alert>
         )}
+
+        <ValidationRunPanel
+          strategyId={strategyId}
+          strategyVersion="1.0.0"
+          exchange={exchange}
+          symbol={targetAsset}
+        />
       </div>
     </AppShell>
   );

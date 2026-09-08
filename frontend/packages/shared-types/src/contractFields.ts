@@ -1,11 +1,9 @@
 // task-1239 — 프론트 파서(positionView/candleSeries/ledgerView/holdPayoutView/
 // instrumentView, 총 5개 파일)가 손으로 미러링한 필드 집합의 단일출처 선언.
-//
 // 각 항목은 "이 pydantic 클래스의 필드와 저 TS parser의 isXXXBody가 정확히
 // 같은 이름 집합을 요구한다"는 주장이다. contractDrift.test.ts가 file/className을
 // node:fs로 읽어 실제 pydantic 필드명을 추출하고, 여기 선언된 fields와 1:1
 // 대조한다 — 누락·오타·추가 전부 실패다.
-//
 // schema_version은 여기 선언하지 않는다: 5개 파서 모두 parseSchemaTagged가
 // "v1" 리터럴 여부를 필드 검증과 별도로 먼저 검사하고(positionView.ts 등
 // isXXXBody 함수들 참고), TS의 View 인터페이스 자체에도 schema_version이
@@ -13,6 +11,8 @@
 // v1.py에도 schema_version이 아예 없다(중첩 값 객체, 그 자체로 버전 태그가
 // 없음). contractDrift.test.ts는 추출한 실제 필드에서 schema_version을
 // 양쪽 다 제외하고 비교한다 — 즉 여기 목록에 schema_version을 넣지 않는다.
+
+import { VALIDATION_CONTRACT_FIELD_SPECS } from "./contractFieldsValidation";
 
 export interface ContractFieldSpec {
   /** 이 필드 집합의 SSOT인 pydantic 모듈의 저장소 상대 경로. */
@@ -267,6 +267,8 @@ export const CONTRACT_FIELD_SPECS: readonly ContractFieldSpec[] = [
     parser: "parseWalletBalance",
     fields: ["user_id", "balance", "available", "held", "pending_payout"],
   },
+
+  ...VALIDATION_CONTRACT_FIELD_SPECS, // validationView.ts (task-2412 FE-OPS-8)
 ];
 
 // task-2187 배치3 — CONTRACT_FIELD_SPECS에 등재하지 않는 파서 파일의 사유를

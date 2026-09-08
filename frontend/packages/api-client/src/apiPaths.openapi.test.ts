@@ -102,6 +102,9 @@ const KNOWN_ENVELOPE_DRIFT: ReadonlySet<ApiRouteName> = new Set<ApiRouteName>([]
 // "positions" 매치는 이미 등록된 positions.* 클라이언트였다) — 화면이 호출해야 하는
 // 항목이 하나도 없어 이번 리프에서 apiPaths에 새로 등록할 라우트는 없다. 값은 "왜
 // 프론트가 안 쓰는지" 한 줄.
+// task-2412(FE-OPS-8): validation-runs/{strategy_id}/{strategy_version}은 이제 화면이
+// 실제로 부른다(StrategyBuilderPage → ValidationRunPanel → validation.start,
+// apiRoutes.ts에 등록) — 여기 있던 항목을 제거한다.
 const UNREGISTERED_ROUTE_WHITELIST: Readonly<Record<string, string>> = {
   "/admin/audit-log": "관리자 감사 로그 화면이 없다(apps/web/src/routes/admin에 audit-log 라우트 없음)",
   "/admin/ledger/payouts/{batch_id}/paid": "정산 배치 확정 액션 UI가 없다",
@@ -138,7 +141,6 @@ const UNREGISTERED_ROUTE_WHITELIST: Readonly<Record<string, string>> = {
   "/v1/foundation/trust/memberships/{subject_id}:revoke": "신뢰 멤버십 관리 화면이 없다",
   "/v1/foundation/trust/memberships/{subject_id}:suspend": "신뢰 멤버십 관리 화면이 없다",
   "/v1/foundation/trust/status": "신뢰 상태 조회 화면이 없다",
-  "/v1/foundation/validation-runs/{strategy_id}/{strategy_version}": "전략 검증 실행 결과 화면이 없다(strategy-builder 라우트에 validation-runs 없음)",
 };
 
 function nonGhostRouteEntries(): Array<[ApiRouteName, ApiRouteDefinition]> {

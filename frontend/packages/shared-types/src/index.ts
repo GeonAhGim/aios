@@ -38,3 +38,4 @@ export * from "./ledgerView";
 export * from "./instrumentView";
 export * from "./holdPayoutView";
 export * from "./script";
+export * from "./validationView";

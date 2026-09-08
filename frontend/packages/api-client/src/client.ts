@@ -13,6 +13,7 @@ import { withPortfolio } from "./clients/portfolio";
 import { withRiskGate } from "./clients/riskGate";
 import { withScripts } from "./clients/scripts";
 import { withStrategyBuilder } from "./clients/strategyBuilder";
+import { withValidation } from "./clients/validation";
 
 // 도메인별 메서드는 clients/*.ts의 믹스인으로 분리되어 있다(파일당 ≤300줄
 // 유지 목적). AiosApiClient는 그 전부를 합성한 단일 클래스로, 공개
@@ -23,10 +24,12 @@ const ComposedApiClient = withPlatform(
       withMarketplace(
         withScripts(
           withStrategyBuilder(
-            withFoundation(
-              withMandates(
-                withRiskGate(
-                  withExchange(withExecutions(withPortfolio(withAccount(withAuth(ApiClientBase))))),
+            withValidation(
+              withFoundation(
+                withMandates(
+                  withRiskGate(
+                    withExchange(withExecutions(withPortfolio(withAccount(withAuth(ApiClientBase))))),
+                  ),
                 ),
               ),
             ),
