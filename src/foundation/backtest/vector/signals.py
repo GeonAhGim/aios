@@ -1,31 +1,38 @@
-"""BT-15a (2/2) — DSL `Series` 연산(DSL-8 `runtime/series.py`)의 numpy 벡터화.
+"""BT-15a (2/2) — numpy vectorization of DSL `Series` operations (DSL-8 `runtime/series.py`).
 
 Spec: docs/specs/L4_analytics_authoring_backtest_marketplace_v1.0.md §9.9
-BT-15(1/2). 선행: DSL-8 `runtime/series.py`(9fa72b5).
+BT-15(1/2). Prerequisite: DSL-8 `runtime/series.py`(9fa72b5).
 
-이 모듈은 `runtime/series.py`가 파이썬 튜플·루프로 정의한 원소별 연산(산술·
-비교·교차·3치 논리·시프트·nz/na)을 numpy 배열로 다시 구현한다. 새 신호
-의미론을 만드는 게 아니라 같은 의미론을 다른 실행 전략(원소마다 파이썬
-함수 호출 대신 배열 전체에 numpy 벡터 연산)으로 재현한다 — 두 구현은 봉마다
-같은 값을 내야 하고, 그 동등성("이벤트 경로와 원소 동일")이 이 리프의
-테스트가 `runtime.series`를 진실로 삼아 대조하는 대상이다.
+This module re-implements, as numpy arrays, the elementwise operations
+(arithmetic, comparison, cross, three-valued logic, shift, nz/na) that
+`runtime/series.py` defines with plain Python tuples and loops. It does not
+invent new signal semantics — it reproduces the same semantics under a
+different execution strategy (whole-array numpy vector operations instead of
+a Python function call per element). The two implementations must produce
+the same value per bar, and that equivalence ("identical event path and
+elements") is what this leaf's tests check against, treating `runtime.series`
+as ground truth.
 
-na 표현은 두 값 도메인에서 다르다:
-- 수치(`FloatArray`, float64)는 `engine/vectorized.py`(IND-1)와 같은 관례를
-  따른다 — `NaN`이 곧 na다. `Series.of_floats`가 애초에 비유한수 원소를
-  거부하므로 "진짜 NaN 데이터"와 "na"가 섞일 일이 없다.
-- bool은 numpy에 na를 표현할 dtype이 없어 `values`(dtype=bool, na 위치는
-  의미 없는 자리값 `False`) 옆에 `na`(dtype=bool) 마스크를 나란히 든
-  `BoolSignal`로 표현한다. masked array는 이 정도 연산에 오버헤드가 크고,
-  object 배열은 애초에 벡터화를 무효화하므로 채택하지 않는다.
+na representation differs across the two value domains:
+- For numeric values (`FloatArray`, float64), we follow the same convention
+  as `engine/vectorized.py` (IND-1) — `NaN` itself is na. Since
+  `Series.of_floats` already rejects non-finite elements, there is no way
+  for "genuine NaN data" and "na" to get mixed up.
+- bool has no numpy dtype that can express na, so it is represented as a
+  `BoolSignal` carrying `values` (dtype=bool, with a meaningless placeholder
+  `False` at na positions) alongside an `na` (dtype=bool) mask. A masked
+  array would add too much overhead for operations this small, and an
+  object array would defeat vectorization from the outset, so neither is
+  used.
 
-스코프: 이 리프는 float 도메인만 다룬다. DSL의 int 도메인
-(`runtime.series.arith(..., integer=True)`, 0-방향 절삭 나눗셈)은 배열
-전체가 정수인 시리즈에만 의미가 있고 지표·가격 신호는 대부분 float
-도메인이라 지금 필요하지 않다 — 필요해지면 새 리프에서 명시적으로 다룬다
-(추측으로 지금 만들지 않는다).
+Scope: this leaf covers only the float domain. The DSL's int domain
+(`runtime.series.arith(..., integer=True)`, truncating division toward
+zero) only matters for series whose entire array is integer, and indicator
+and price signals are mostly in the float domain, so it isn't needed right
+now — if it's ever needed, it will be handled explicitly in a new leaf
+(not built ahead of need on speculation).
 
-순수 모듈 — I/O 없음.
+Pure module — no I/O.
 """
 from __future__ import annotations
 
@@ -61,13 +68,15 @@ FloatArray = np.ndarray[Any, np.dtype[np.float64]]
 BoolArray = np.ndarray[Any, np.dtype[np.bool_]]
 
 class VectorSignalError(ValueError):
-    """`BT_VECTOR_SIGNAL` — 배열 길이 불일치·음수 시프트 오프셋 등 fail-closed 거부."""
+    """`BT_VECTOR_SIGNAL` — fail-closed rejection for array length mismatches, negative
+    shift offsets, and the like."""
 
 
 @dataclass(frozen=True, slots=True)
 class BoolSignal:
-    """bool 시리즈의 벡터 표현. `Series.of_bools`의 numpy 대응. `na=True`인
-    자리의 `values`는 정의되지 않은 자리값(`False`)이며 읽지 않아야 한다."""
+    """Vector representation of a bool series. The numpy counterpart of `Series.of_bools`.
+    At positions where `na=True`, `values` holds an undefined placeholder (`False`) and
+    must not be read."""
 
     values: BoolArray
     na: BoolArray
@@ -91,7 +100,7 @@ def _same_length(left: Any, right: Any) -> None:
         raise VectorSignalError(f"시리즈 길이 불일치: {len(left)} != {len(right)}")
 
 
-# ---- DSL Series <-> 벡터 표현 왕복(테스트·향후 BT-15b 브리지용) ----
+# ---- DSL Series <-> vector representation round-trip (for tests / future BT-15b bridge) ----
 
 
 def numeric_from_series(series: Series) -> FloatArray:
@@ -120,14 +129,15 @@ def bool_to_series(signal: BoolSignal) -> Series:
     )
 
 
-# ---- 산술·비교·교차 ----
+# ---- Arithmetic / comparison / cross ----
 
 
 def arith(op: ArithOp, left: FloatArray, right: FloatArray) -> FloatArray:
-    """`runtime.series.arith(op, left, right, integer=False)`의 원소 단위
-    동등물. `NaN`은 IEEE754 전파 규칙으로 이미 na 전파와 같은 결과를 내고,
-    0 나눗셈·비유한 결과는 `np.isfinite`로 걸러 `NaN`(na)으로 접는다
-    (`_float_arith`의 `_finite` 규칙과 동일)."""
+    """Elementwise equivalent of `runtime.series.arith(op, left, right, integer=False)`.
+    `NaN` already produces the same result as na propagation under IEEE754
+    propagation rules, and division-by-zero / non-finite results are filtered
+    with `np.isfinite` and collapsed to `NaN` (na) (the same rule as
+    `_float_arith`'s `_finite`)."""
     _same_length(left, right)
     with np.errstate(divide="ignore", invalid="ignore", over="ignore"):
         if op == "+":
@@ -144,9 +154,10 @@ def arith(op: ArithOp, left: FloatArray, right: FloatArray) -> FloatArray:
 
 
 def compare(op: CompareOp, left: FloatArray, right: FloatArray) -> BoolSignal:
-    """`runtime.series.compare`의 원소 단위 동등물. 피연산자 중 하나라도
-    `NaN`(na)이면 결과도 na다(numpy 비교의 `nan < x = False`는 na가 아니라
-    "거짓"을 뜻하므로 여기서 명시적으로 구분한다)."""
+    """Elementwise equivalent of `runtime.series.compare`. If either operand is
+    `NaN` (na), the result is also na (numpy's comparison rule `nan < x = False`
+    means "false", not na, so this is handled explicitly here to keep the
+    distinction)."""
     _same_length(left, right)
     na = np.isnan(left) | np.isnan(right)
     with np.errstate(invalid="ignore"):
@@ -166,9 +177,10 @@ def compare(op: CompareOp, left: FloatArray, right: FloatArray) -> BoolSignal:
 
 
 def cross(op: CrossOp, left: FloatArray, right: FloatArray) -> BoolSignal:
-    """`runtime.series.cross`의 원소 단위 동등물. `runtime.series.cross`와
-    달리 스칼라 브로드캐스트를 지원하지 않는다 — 이 모듈은 이미 봉 수만큼
-    물질화된 배열만 다룬다(모듈 docstring 스코프)."""
+    """Elementwise equivalent of `runtime.series.cross`. Unlike
+    `runtime.series.cross`, this does not support scalar broadcasting — this
+    module only deals with arrays already materialized to the bar count (see
+    the module docstring's scope)."""
     _same_length(left, right)
     n = len(left)
     if n == 0:
@@ -190,22 +202,24 @@ def cross(op: CrossOp, left: FloatArray, right: FloatArray) -> BoolSignal:
     return BoolSignal(values=np.where(na, False, raw), na=na)
 
 
-# ---- 논리(3치 Kleene) ----
+# ---- Logic (three-valued Kleene) ----
 
 
 def logical(op: LogicalOp, left: BoolSignal, right: BoolSignal) -> BoolSignal:
-    """`runtime.series.logical`의 원소 단위 동등물(Kleene 3치): `and`는 한쪽이
-    확정 `False`면 na 여부와 무관하게 `False`, 아니면 na가 하나라도 있으면
-    na, 둘 다 확정 `True`면 `True`. `or`는 대칭(한쪽이 확정 `True`면 `True`)."""
+    """Elementwise equivalent of `runtime.series.logical` (three-valued Kleene
+    logic): for `and`, if either side is definitely `False`, the result is
+    `False` regardless of na status; otherwise, if either side is na, the
+    result is na; if both are definitely `True`, the result is `True`. `or` is
+    symmetric (if either side is definitely `True`, the result is `True`)."""
     _same_length(left, right)
     ln, rn = left.na, right.na
     lv, rv = left.values, right.values
     if op == "and":
-        decided = (~ln & ~lv) | (~rn & ~rv)  # 한쪽이 확정 False
+        decided = (~ln & ~lv) | (~rn & ~rv)  # either side is definitely False
         na = ~decided & (ln | rn)
         values = ~decided & ~na
     elif op == "or":
-        decided = (~ln & lv) | (~rn & rv)  # 한쪽이 확정 True
+        decided = (~ln & lv) | (~rn & rv)  # either side is definitely True
         na = ~decided & (ln | rn)
         values = decided
     else:
@@ -217,12 +231,12 @@ def logical_not(value: BoolSignal) -> BoolSignal:
     return BoolSignal(values=np.where(value.na, False, ~value.values), na=value.na.copy())
 
 
-# ---- 시프트(인덱싱) ----
+# ---- Shift (indexing) ----
 
 
 def shift_numeric(value: FloatArray, offset: int) -> FloatArray:
-    """`s[offset]`의 원소 단위 동등물: 봉 t의 값 = `value[t-offset]`, `t<offset`
-    이면 na(`NaN`)."""
+    """Elementwise equivalent of `s[offset]`: the value at bar t equals
+    `value[t-offset]`, or na (`NaN`) when `t<offset`."""
     if offset < 0:
         raise VectorSignalError(f"시리즈 오프셋은 0 이상이어야 합니다: {offset}")
     n = len(value)
@@ -255,7 +269,7 @@ def nz(value: FloatArray, fill: float = 0.0) -> FloatArray:
 
 
 def is_na(value: FloatArray) -> BoolSignal:
-    """수치 시리즈의 na 여부. 결과 자신은 절대 na가 아니다(`runtime.series`
-    모듈 docstring 정의)."""
+    """Whether a numeric series element is na. The result itself is never na
+    (as defined in the `runtime.series` module docstring)."""
     mask = np.isnan(value)
     return BoolSignal(values=mask, na=np.zeros(len(value), dtype=np.bool_))

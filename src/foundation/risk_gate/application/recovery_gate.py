@@ -1,32 +1,38 @@
-"""RECOVERY 게이트 조립 — L4_risk_and_safety_v1.0.md#§9 R-53, §2 표 110행,
-§4.3 CB 표, I5(§8 394행). 선행: R-44 `src/core/safety/recovery_gate.py::
-can_reactivate`(순수 판정, 4가지 거부 규칙은 여기서 다시 쓰지 않는다),
-R-35 `evaluate_pre_submit.py`(조립 패턴 참고).
+"""Assembly of the RECOVERY gate — L4_risk_and_safety_v1.0.md#§9 R-53, §2 table
+row 110, §4.3 CB table, I5 (§8 line 394). Prior art: R-44
+`src/core/safety/recovery_gate.py::can_reactivate` (pure judgment; the four
+denial rules are not rewritten here), R-35 `evaluate_pre_submit.py` (see for
+the assembly pattern).
 
-이 리프는 조립·영속·근거 기록만 한다:
-1. `control_id`로 안전 통제(kill switch)를 조회한다. `SafetyControl`에는
-   circuit breaker 세부 단계가 없다 — ACTIVE면 `HALTED`로, INACTIVE면
-   `NORMAL`로 취급한다(재가동 대상 여부만 필요, R-44 계약이 요구하는
-   `CircuitBreakerLevel`을 만족시키는 최소 매핑).
-2. `approval_id`로 승인 요청을 조회한다. TTL 초과분은 R-45
-   `circuit_breaker_loop._effective_status`와 동일 규칙으로 "APPROVED
-   아님"으로 낮춘다(시계는 여기서만 본다 — can_reactivate는 보지 않는다).
-3. cooldown — `metrics_history`(초당 1샘플) 영속 테이블이 아직 없다(§10
-   미확정, R-54 이전이라 이 리프 범위 밖). 대신 `safety_control.created_at`
-   ("마지막 트립")부터 경과한 초를 baseline(0) 샘플로 채운다 — "그 구간이
-   실측으로 안전했다"는 증거가 아니라 "충분한 시간이 지났는가"만 대변한다
-   ("미검증": 과거 구간의 실측 이력 자체는 아직 아무 데도 없다). 실측 조건은
-   4번이 담당한다.
-4. fresh 재평가 — `CircuitBreakerService.get_state()`로 지금 이 순간의 전역
-   circuit breaker level을 다시 읽는다. R-45 tick 루프가 실측 지표로 계속
-   갱신하는 값을 그대로 재사용할 뿐, 이 함수 자신은 지표를 새로 수집하지
-   않는다.
-5. 위 네 입력으로 `can_reactivate()`를 호출하고, 결과를 `RiskDecision`으로
-   포장해 `RiskDecisionRecorder`(R-25)로 WORM 기록한다(ALLOW/DENY 모두).
-6. ALLOW일 때만 기존 `deactivate_safety_control`(R-23 해제 커맨드)을 호출한다
-   — 새 해제 경로를 만들지 않는다. DENY는 `RecoveryDeniedError`를 던져
-   라우터가 EXCEPTION_MAP으로 403을 번역하게 한다(`RiskGateDeniedError`와
-   동일한 관례, start_deployment.py 참조) — raw HTTPException 금지.
+This leaf only assembles, persists, and records evidence:
+1. Look up the safety control (kill switch) by `control_id`. `SafetyControl`
+   has no circuit-breaker sub-levels — treat ACTIVE as `HALTED` and INACTIVE
+   as `NORMAL` (only whether reactivation applies matters here; this is the
+   minimal mapping that satisfies the `CircuitBreakerLevel` the R-44 contract
+   requires).
+2. Look up the approval request by `approval_id`. Anything past TTL is
+   downgraded to "not APPROVED" using the same rule as R-45's
+   `circuit_breaker_loop._effective_status` (the clock is only consulted here
+   — `can_reactivate` never sees it).
+3. cooldown — the `metrics_history` (1 sample per second) persistence table
+   does not exist yet (§10 undecided, out of this leaf's scope pending R-54).
+   Instead, fill baseline(0) samples for the seconds elapsed since
+   `safety_control.created_at` ("last trip") — this stands only for "has
+   enough time passed," not evidence that "that interval was measured safe"
+   ("unverified": there is no stored measurement history for the past
+   interval at all). The measured condition is handled by step 4.
+4. fresh re-evaluation — read the current global circuit-breaker level right
+   now via `CircuitBreakerService.get_state()`. This simply reuses the value
+   that the R-45 tick loop keeps updating from live metrics; this function
+   itself does not collect any new metrics.
+5. Call `can_reactivate()` with the four inputs above, wrap the result as a
+   `RiskDecision`, and record it to WORM via `RiskDecisionRecorder` (R-25) for
+   both ALLOW and DENY.
+6. Only on ALLOW, call the existing `deactivate_safety_control` (R-23
+   deactivation command) — no new deactivation path is created. On DENY,
+   raise `RecoveryDeniedError` so the router translates it to 403 via
+   EXCEPTION_MAP (the same convention as `RiskGateDeniedError`, see
+   start_deployment.py) — raw HTTPException is forbidden.
 """
 from __future__ import annotations
 
@@ -63,14 +69,14 @@ _ENGINE_VERSION = "risk_gate.recovery/1"
 _RULE_HASH = sha256_hex(canonical_json({"gate_kind": "RECOVERY", "rule_version": _RULE_VERSION}))
 _DECISION_ID_NAMESPACE = UUID("b3f1c2d4-6a7e-4c8b-9a1d-2e3f4a5b6c7d")
 _TTL_SECONDS = 5.0
-# spec §9 R-53 DoD — evidence 없음 거부는 taxonomy RSK-007로 노출한다. 다른
-# 거부 사유는 can_reactivate의 원 코드를 그대로 쓴다(taxonomy 미확정).
+# spec §9 R-53 DoD — the "no evidence" denial is exposed as taxonomy RSK-007.
+# Other denial reasons keep can_reactivate's original code as-is (taxonomy undecided).
 _TAXONOMY = {"RECOVERY_EVIDENCE_MISSING": "RSK-007"}
 _REACTIVATABLE_CB_LEVELS = (CircuitBreakerLevel.HALTED, CircuitBreakerLevel.EMERGENCY)
 
 
 class RecoveryDeniedError(Exception):
-    """DENY로 끝난 RiskDecision — 라우터가 EXCEPTION_MAP으로 403을 번역한다."""
+    """A RiskDecision that ended in DENY — the router translates it to 403 via EXCEPTION_MAP."""
 
     def __init__(self, decision: RiskDecision) -> None:
         super().__init__(f"recovery denied: {decision.reason_codes}")
@@ -106,7 +112,7 @@ class _RecoveryInputs(BaseModel, frozen=True):
 def _effective_approval_status(
     request: ApprovalRequest, *, ttl_sec: int, now: datetime
 ) -> str:
-    """R-45 `circuit_breaker_loop._effective_status`와 동일 규칙."""
+    """Same rule as R-45's `circuit_breaker_loop._effective_status`."""
     if request.status == "APPROVED" and request.resolved_at is not None:
         if now - request.resolved_at > timedelta(seconds=ttl_sec):
             return "EXPIRED"

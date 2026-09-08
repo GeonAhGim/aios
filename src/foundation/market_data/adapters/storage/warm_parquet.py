@@ -1,25 +1,29 @@
-"""DC-14 — warm 계층(Parquet, 종목×연도) 캔들 저장 — `CandleColumns` 직접 왕복.
+"""DC-14 — warm-tier (Parquet, instrument x year) candle storage — round-trips
+`CandleColumns` directly.
 
 Spec: docs/specs/L4_analytics_authoring_backtest_marketplace_v1.0.md
-§2.1 DC-14(선행 DC-13), §9.2 DC-14.
+§2.1 DC-14 (depends on DC-13), §9.2 DC-14.
 
-DC-13 `hot_postgres.HotPostgresStorage`가 위임하는 `ports/candle_store.
-CandleStore` 포트(`read_candles_columnar`)를 그대로 구현한다(decision: 새
-포트·새 DTO 신설 금지 — §C 중복 컨텍스트). warm 계층은 hot(`md_candle`)에서
-승격된 오래된 파티션의 아카이브라 append-only 배치 쓰기(DC-15 `tiering.py`
-소관)만 있고, hot의 `created_at` 스냅샷 격리(`as_of`)에 대응하는 메타데이터가
-없다 — `as_of`를 조용히 무시하면 hot과 다른(더 넓은) 결과를 반환할 위험이
-있어 fail-closed로 거부한다(`AsOfNotSupportedError`).
+Implements, as-is, the `ports/candle_store.CandleStore` port
+(`read_candles_columnar`) delegated to by DC-13's
+`hot_postgres.HotPostgresStorage` (decision: no new port or new DTO — §C
+duplicate-context rule). The warm tier is an archive of old partitions
+promoted from hot (`md_candle`), so it only has append-only batch writes
+(owned by DC-15 `tiering.py`) and has no metadata corresponding to hot's
+`created_at` snapshot isolation (`as_of`) — silently ignoring `as_of` risks
+returning a different (broader) result than hot, so it is rejected
+fail-closed (`AsOfNotSupportedError`).
 
-파일 레이아웃: `<root>/<venue>/<timeframe>/<instrument_id>/<year>.parquet`
-(스펙 §9.2 DC-14 "종목×연도"). 컬럼은 전부 문자열로 저장한다
-(`Decimal`→`str`, `AwareDatetime`→`isoformat()`) — pyarrow의
-`decimal128`/`timestamp` 타입이 강제하는 precision/scale·tz 정규화를 피해
-DoD(a) 왕복 바이트 동일성을 보장하기 위한 선택이다(파일 크기는 이진
-인코딩보다 커진다 — 정직하게 남겨두는 트레이드오프).
+File layout: `<root>/<venue>/<timeframe>/<instrument_id>/<year>.parquet`
+(spec §9.2 DC-14 "instrument x year"). All columns are stored as strings
+(`Decimal` -> `str`, `AwareDatetime` -> `isoformat()`) — this avoids the
+precision/scale and tz normalization that pyarrow's `decimal128`/`timestamp`
+types would force, in order to guarantee DoD(a) byte-identical round-tripping
+(file size ends up larger than binary encoding would produce — an honest
+trade-off left as-is).
 
-pyarrow만 사용한다(Apache-2.0) — ArcticDB(BSL 1.1)·Timescale 컬럼스토어
-(Timescale License) 반입 금지(decision, note (e)).
+Uses pyarrow only (Apache-2.0) — bringing in ArcticDB (BSL 1.1) or a
+Timescale column store (Timescale License) is prohibited (decision, note (e)).
 """
 from __future__ import annotations
 
@@ -59,14 +63,15 @@ _Row = tuple[datetime, Decimal, Decimal, Decimal, Decimal, Decimal, Decimal | No
 
 
 class AsOfNotSupportedError(NotImplementedError):
-    """warm parquet 파일은 스냅샷 격리 메타데이터(`created_at`)를 갖지 않는다
-    — `as_of != None`은 지원 불가로 fail-closed 거부한다(§ 포트 계약을
-    조용히 어기지 않기 위함)."""
+    """Warm parquet files carry no snapshot-isolation metadata (`created_at`)
+    — `as_of != None` is therefore unsupported and rejected fail-closed (so as
+    not to silently violate the port contract)."""
 
 
 class YearMismatchError(ValueError):
-    """`write_year(year=...)`에 다른 연도의 `open_time`이 섞여 들어오면
-    파일명이 실제 내용과 거짓말을 하게 된다 — 조용히 잘라내지 않고 거부한다."""
+    """If `write_year(year=...)` receives `open_time` values from a different
+    year mixed in, the filename would lie about the actual contents —
+    rejected rather than silently truncated."""
 
 
 def _series_dir(root: Path, key: SeriesKey) -> Path:
@@ -85,7 +90,8 @@ def _add_months(dt: datetime, n: int) -> datetime:
 
 
 def _months_between(start: datetime, end: datetime) -> list[tuple[datetime, datetime]]:
-    """`[start, end)`와 겹치는 달력 월 구간을 월 경계로 클립해 반환한다."""
+    """Returns the calendar-month windows overlapping `[start, end)`, clipped to month
+    boundaries."""
     cursor = start.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
     windows: list[tuple[datetime, datetime]] = []
     while cursor < end:
@@ -98,8 +104,8 @@ def _months_between(start: datetime, end: datetime) -> list[tuple[datetime, date
 def _coalesce_missing(
     ranges: list[tuple[datetime, datetime]],
 ) -> list[tuple[datetime, datetime]]:
-    """인접·중첩한 결측 구간을 하나로 합친다(월 단위로 쌓인 원시 구간을
-    사람이 읽기 좋은 최소 구간 목록으로 압축)."""
+    """Merges adjacent/overlapping missing ranges into one (compresses the
+    raw per-month ranges into a minimal, human-readable list of ranges)."""
     if not ranges:
         return []
     ordered = sorted(ranges)
@@ -114,8 +120,9 @@ def _coalesce_missing(
 
 
 def _read_year_file(path: Path) -> list[_Row]:
-    """손상된(잘린) parquet은 pyarrow가 예외를 던지도록 그대로 전파한다
-    (DoD(d) — 빈 결과로 조용히 뭉개는 것은 실패)."""
+    """Lets pyarrow's exception propagate as-is for a corrupted (truncated)
+    parquet file (DoD(d) — silently swallowing it into an empty result is a
+    failure)."""
     table = pq.read_table(path, schema=_ARROW_SCHEMA)
     rows: list[_Row] = []
     for record in table.to_pylist():
@@ -135,10 +142,11 @@ def _read_year_file(path: Path) -> list[_Row]:
 
 
 class WarmParquetStorage:
-    """`ports/candle_store.CandleStore`가 요구하는 컬럼지향 읽기 표면을
-    구현하는 파일 기반(Parquet) 어댑터. 쓰기는 이 리프의 왕복 DoD 검증용
-    표면(`write_year`)만 제공한다 — 실제 hot→warm 승격 오케스트레이션은
-    DC-15 `tiering.py` 소관(이 클래스를 호출부로 사용)."""
+    """File-based (Parquet) adapter implementing the column-oriented read
+    surface required by `ports/candle_store.CandleStore`. Writing only
+    exposes this leaf's round-trip-DoD-verification surface (`write_year`)
+    — the actual hot->warm promotion orchestration is owned by DC-15
+    `tiering.py` (which uses this class as its callee)."""
 
     def __init__(self, root: Path) -> None:
         self._root = root
@@ -183,9 +191,10 @@ class WarmParquetStorage:
     def read_columns(
         self, key: SeriesKey, start: AwareDatetime, end: AwareDatetime
     ) -> tuple[CandleColumns, tuple[tuple[datetime, datetime], ...]]:
-        """`[start, end)`를 월 단위로 훑어, 연도 파일이 커버하는 부분만
-        슬라이싱해 돌려주고 나머지는 두 번째 반환값(결측 구간, 오름차순
-        병합됨)으로 명시한다(DoD(b) — 빈 결과로 뭉개지 않는다)."""
+        """Scans `[start, end)` month by month, slicing out and returning
+        only the portion covered by year files, and reports the rest via the
+        second return value (missing ranges, merged in ascending order)
+        (DoD(b) — does not collapse into an empty result)."""
         if start.tzinfo is None or end.tzinfo is None:
             raise ValueError("start/end는 tz-aware datetime이어야 한다(fail-closed).")
         if end <= start:
@@ -230,11 +239,12 @@ class WarmParquetStorage:
         end: AwareDatetime,
         as_of: AwareDatetime | None,
     ) -> CandleColumns:
-        """`CandleStore.read_candles_columnar`와 같은 이름·형태(DC-13이 쓰는
-        포트를 재사용) — `_conn`은 hot 계층과 달리 트랜잭션이 필요 없어
-        받아서 무시한다. 결측 구간 정보가 필요한 호출자는 `read_columns`를
-        직접 써야 한다(포트 반환형은 `CandleColumns` 고정이라 여기서 더
-        얹을 수 없다)."""
+        """Same name and shape as `CandleStore.read_candles_columnar`
+        (reusing the port DC-13 uses) — unlike the hot tier, no transaction
+        is needed, so `_conn` is accepted and ignored. Callers that need
+        missing-range information must call `read_columns` directly (the
+        port's return type is fixed to `CandleColumns`, so nothing more can
+        be attached here)."""
         if as_of is not None:
             raise AsOfNotSupportedError(
                 "warm parquet은 스냅샷 메타데이터가 없어 as_of를 지원하지 않는다(fail-closed)."

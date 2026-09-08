@@ -1,20 +1,24 @@
-"""L4-18a/b(task-2151/task-2310) — 재시작 복구: 만료 execution lease 회수 +
-outbox SENDING 재진입/UNKNOWN 전환 + 복구 완료 전 submit_order 거부.
+"""L4-18a/b (task-2151/task-2310) -- restart recovery: reclaim expired execution
+leases + outbox SENDING re-entry/UNKNOWN transition + deny submit_order before
+recovery completes.
 
 Spec: docs/specs/L4_execution_oms_and_exchange_v1.0.md §6 F6, §9 L4-18.
-F6은 5단계(①outbox lease 만료→UNKNOWN ②UNKNOWN 전부 resolver ③비터미널
-주문 RESYNC ④기존 recovery_wiring ⑤완료 전 submit_order 거부)로 정의돼
-있다. task-2151(배치 1/2)은 execution_ownership `execution_leases` 회수와
-⑤ submit 거부를 다뤘다. 이 배치(task-2310, L4-18b)는 ①②를 잇는다 —
-`recover_stuck_outbox_commands`가 outbox SENDING(lease 만료) 행을 §4.2/§4.4
-상태기계에 따라 재진입(PENDING) 또는 UNKNOWN 전환하고, UNKNOWN이 된 주문은
-`unknown_resolver.resolve_unknown`(task-1604)에 곧장 위임한다 — 재구현
-금지. ③(비터미널 주문 RESYNC)은 여전히 범위 밖이다(decision).
+F6 defines 5 steps (① outbox lease expiry -> UNKNOWN ② delegate all UNKNOWN to
+the resolver ③ RESYNC non-terminal orders ④ existing recovery_wiring
+⑤ deny submit_order until complete). task-2151 (batches 1/2) covered
+reclaiming execution_ownership `execution_leases` and ⑤ denying submit.
+This batch (task-2310, L4-18b) picks up ①② --
+`recover_stuck_outbox_commands` re-enters (PENDING) or transitions to UNKNOWN
+outbox SENDING (lease-expired) rows per the §4.2/§4.4 state machine, and
+orders that become UNKNOWN are handed straight off to
+`unknown_resolver.resolve_unknown` (task-1604) -- do not reimplement.
+③ (RESYNC of non-terminal orders) is still out of scope (decision).
 
-이 모듈은 순수 조각만 제공한다: 실제 오케스트레이션(리스 회수 → outbox
-복구 → `recover_orders_on_startup` → 완료 표시)은 기존 조립 지점인
-`execution_loop/recovery_wiring.py`가 이어서 한다(§C 중복 컨텍스트 금지 —
-새 오케스트레이터를 여기 또 만들지 않는다).
+This module provides pure building blocks only: the actual orchestration
+(lease reclaim -> outbox recovery -> `recover_orders_on_startup` -> mark
+complete) is carried out by the existing assembly point,
+`execution_loop/recovery_wiring.py` (§C forbids duplicate context -- do not
+build another orchestrator here).
 """
 from __future__ import annotations
 
@@ -48,13 +52,14 @@ _LEASE_EXPIRED_UNKNOWN_REASON = "RESTART_RECOVERY_LEASE_EXPIRED"
 
 
 class RecoveryState:
-    """재시작 복구 완료 여부를 프로세스 전역에서 공유하는 가변 상태.
+    """Mutable state shared process-wide for whether restart recovery has completed.
 
-    `asyncio.Event`가 아니라 단순 bool 플래그다 — `make_recovery_gate`는
-    복구가 끝나길 기다렸다(`await event.wait()`) 통과시키면 안 되고, 끝나지
-    않았으면 그 자리에서 즉시 거부해야 한다(§6 F6 ⑤). 한 프로세스 수명 동안
-    한 인스턴스만 만들어 `recovery_wiring.run_startup_recovery`가 채우고
-    `background_loops.py`가 게이트 생성자에 그대로 넘긴다."""
+    A plain bool flag, not an `asyncio.Event` -- `make_recovery_gate` must not
+    wait for recovery to finish (`await event.wait()`) before letting a call
+    through; it must deny immediately on the spot if recovery hasn't finished
+    yet (§6 F6 ⑤). Exactly one instance is created per process lifetime,
+    filled in by `recovery_wiring.run_startup_recovery`, and passed straight
+    through to the gate constructor by `background_loops.py`."""
 
     def __init__(self) -> None:
         self._complete = False
@@ -68,15 +73,17 @@ class RecoveryState:
 
 
 async def reclaim_expired_leases(pool: asyncpg.Pool) -> int:
-    """만료된(`expires_at < now()`) `execution_leases` 행을 삭제해 회수한다.
+    """Delete and reclaim `execution_leases` rows that have expired (`expires_at < now()`).
 
-    재시작한 새 프로세스는 죽은 프로세스의 `owner_id`(`{host}:{pid}:{uuid}`
-    형태, `background_loops.py`)를 모르므로 `release_all(old_owner)`을 부를
-    수 없다 — 이미 TTL이 지난 리스는 다음 `acquire_or_renew_many`가 자연히
-    인수하지만(`postgres_repository.py`의 `WHERE ... expires_at < now()`),
-    재시작 직후 명시적으로 청소해 두면 실행 루프가 뜨기 전에 소유권 상태를
-    깨끗하게 만든다. 아직 TTL이 남은(만료 전) 행은 건드리지 않는다 — 다른
-    살아있는 프로세스가 정상적으로 쥐고 있을 수 있다."""
+    A freshly restarted process doesn't know the dead process's `owner_id`
+    (the `{host}:{pid}:{uuid}` form, `background_loops.py`), so it can't call
+    `release_all(old_owner)` -- leases whose TTL has already passed would
+    naturally be taken over by the next `acquire_or_renew_many` anyway (via
+    the `WHERE ... expires_at < now()` clause in `postgres_repository.py`),
+    but explicitly cleaning up right after restart leaves ownership state
+    clean before the execution loop comes up. Rows whose TTL hasn't expired
+    yet are left untouched -- another live process may legitimately still
+    hold them."""
     async with pool.acquire() as conn:
         result = await conn.execute("DELETE FROM execution_leases WHERE expires_at < now()")
     reclaimed = int(result.split()[-1])
@@ -94,10 +101,10 @@ async def reclaim_expired_leases(pool: asyncpg.Pool) -> int:
 
 
 def make_recovery_gate(state: RecoveryState, delegate: PreSubmitGate) -> PreSubmitGate:
-    """§6 F6 ⑤ — 복구가 끝나기 전에는 `delegate`(보통
-    `make_foundation_pre_submit_gate`)를 아예 부르지 않고 무조건 DENY한다.
-    복구 완료 후에는 매 호출마다 `state.complete`를 다시 확인만 하고(별도
-    캐싱 없음) `delegate`로 위임한다."""
+    """§6 F6 ⑤ -- before recovery completes, never call `delegate` (usually
+    `make_foundation_pre_submit_gate`) at all and unconditionally DENY.
+    After recovery completes, each call simply re-checks `state.complete`
+    (no separate caching) and delegates to `delegate`."""
 
     async def gate(context: OrderContext) -> GateDecision:
         if not state.complete:
@@ -127,18 +134,21 @@ async def recover_stuck_outbox_commands(
     limit: int = 500,
     clock: Callable[[], datetime] = utcnow,
 ) -> int:
-    """§6 F6 ①② — lease가 만료된 SENDING outbox 행을 §4.2/§4.4 상태기계에
-    따라 재진입(PENDING) 또는 UNKNOWN 전환한다.
+    """§6 F6 ①② -- transitions outbox SENDING rows whose lease has expired
+    to re-entry (PENDING) or UNKNOWN per the §4.2/§4.4 state machine.
 
-    CANCEL/MODIFY는 멱등 계열(`outbox_commands.py` 모듈 docstring)이라
-    무조건 재진입해도 안전하다. SUBMIT은 어댑터 호출 여부가 불확실할 때만
-    (`outbox_dispatcher.py`의 `SENT` tx가 커밋돼 주문이 이미 SUBMITTED인데
-    그 뒤 finalize tx가 못 돈 경우) 재전송 금지 원칙(§5.4)에 따라 UNKNOWN
-    으로 보낸다 — 주문이 아직 VALIDATED면(그 tx조차 커밋 안 됨) 어댑터
-    호출 0회가 확정이라 재진입이 안전하다. UNKNOWN이 된 주문은 곧장
-    `unknown_resolver.resolve_unknown`에 위임한다(재구현 금지, task-1604).
+    CANCEL/MODIFY belong to the idempotent family (see the `outbox_commands.py`
+    module docstring), so re-entering them unconditionally is safe. SUBMIT is
+    only sent to UNKNOWN, per the no-resend principle (§5.4), when whether the
+    adapter was actually called is uncertain (i.e. the `SENT` tx in
+    `outbox_dispatcher.py` committed and the order is already SUBMITTED, but
+    the subsequent finalize tx never landed) -- if the order is still
+    VALIDATED (meaning even that tx never committed), zero adapter calls is
+    guaranteed, so re-entry is safe. Orders that become UNKNOWN are handed
+    straight off to `unknown_resolver.resolve_unknown` (do not reimplement,
+    task-1604).
     """
-    if risk_gate_repo is None:  # I-01 — 안전 게이트 인자는 None 기본값을 갖지 않는다
+    if risk_gate_repo is None:  # I-01 -- the safety-gate argument has no None default
         raise TypeError(
             "risk_gate_repo는 필수입니다(I-01) — None을 명시적으로 넘길 수 없습니다."
         )
@@ -185,7 +195,8 @@ async def _recover_stuck_submit(
     async with pool.acquire() as conn, conn.transaction():
         order = await order_repo.get_for_update(conn, row.order_id)
         if order.status not in (OrderStatus.VALIDATED, OrderStatus.SUBMITTED):
-            await writes.done(conn, row)  # 이미 다른 경로(inbox 등)로 확정 — 명령 소진
+            # already finalized elsewhere (e.g. inbox) -- command exhausted
+            await writes.done(conn, row)
             return None
         if order.status is OrderStatus.VALIDATED:
             await outbox_repo.mark_retry(
@@ -193,7 +204,7 @@ async def _recover_stuck_submit(
                 last_error=_REENTRY_REASON, expected_worker=writes.worker_id,
             )
             return None
-        await writes.done(conn, row)  # 펜스 먼저(§5.1) — 재전송 금지
+        await writes.done(conn, row)  # fence first (§5.1) -- no resend
         return await writes.transition(
             conn, row, order, OrderStatus.UNKNOWN, OrderEvent.RESPONSE_LOST,
             _LEASE_EXPIRED_UNKNOWN_REASON, {"unknown_since": clock()},

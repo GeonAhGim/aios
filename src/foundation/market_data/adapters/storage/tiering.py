@@ -1,35 +1,41 @@
-"""DC-15 — hot→warm 캔들 승격/아카이브 잡: 멱등 + 계보 기록.
+"""DC-15 — hot->warm candle promotion/archival job: idempotent + lineage recording.
 
 Spec: docs/specs/L4_analytics_authoring_backtest_marketplace_v1.0.md
-§2.1 DC-15(선행 DC-14), §9.2 DC-15.
+§2.1 DC-15 (depends on DC-14), §9.2 DC-15.
 
-승격 순서(DoD(b) fail-closed): hot에서 읽는다 → warm에 쓴다(DC-14
-`WarmParquetStorage.write_year`) → warm을 다시 읽어 digest가 원본과
-바이트 동일한지 검증한다 → **검증을 통과했을 때만** hot에서 그 연도를
-지운다. 검증 실패(`VerificationFailedError`) 또는 그 이전 어느 단계에서
-예외가 나든 hot은 그대로 남는다 — `write_year`는 대상 파일을 항상
-통째로 덮어쓰므로(DC-14) 중단된 부분 파일이 있어도 다음 실행이 hot의
-전체 데이터로 처음부터 다시 쓴다(DoD(c), 별도의 재개 상태를 두지 않는
-것 자체가 안전장치다).
+Promotion order (DoD(b), fail-closed): read from hot -> write to warm (DC-14
+`WarmParquetStorage.write_year`) -> read warm back and verify the digest is
+byte-identical to the source -> **only once verification passes** delete
+that year from hot. If verification fails (`VerificationFailedError`), or an
+exception is raised at any earlier step, hot is left untouched — since
+`write_year` always overwrites the target file wholesale (DC-14), even a
+partial file left behind by an interrupted run gets rewritten from scratch
+on the next run using hot's full data (DoD(c); deliberately not keeping any
+separate resume state is itself the safety mechanism).
 
-멱등(DoD(a))은 "승격할 게 없으면 아무것도 안 한다"로 얻는다: 해당
-연도에 hot 행이 이미 0건이면(첫 승격이 성공해 지워졌거나 애초에 없던
-경우) warm/계보 어느 쪽도 건드리지 않고 즉시 반환한다 — 두 번째 실행은
-결과 parquet도, 계보 파일도 바꾸지 않는다.
+Idempotency (DoD(a)) is achieved via "if there is nothing to promote, do
+nothing": if hot already has 0 rows for that year (either because the first
+promotion succeeded and deleted them, or because there were none to begin
+with), the function returns immediately without touching warm or the
+lineage — a second run changes neither the resulting parquet nor the
+lineage file.
 
-계보(DoD(d))는 새 스키마를 만들지 않는다 — DC-22
-`contracts/v2/candle_lineage.SourceKind`를 그대로 재사용해 승격 배치를
-태그만 하고, 레코드 자체는 임시 dict를 JSON Lines로 남긴다(신규 pydantic
-모델·DB 테이블 없음). `md_candle`은 아직 캔들 단위 `source_kind`를 갖지
-않으므로(DC-13 문서화된 경계) 이 잡은 항상 `VENDOR`로 태그한다 — 실제
-출처를 아는 상위 컨텍스트가 생기면 그 값을 받아쓰도록 바꿔야 한다.
+Lineage (DoD(d)) does not introduce a new schema — it reuses DC-22's
+`contracts/v2/candle_lineage.SourceKind` as-is just to tag the promotion
+batch, and the record itself is a plain dict written out as JSON Lines (no
+new pydantic model, no DB table). Since `md_candle` does not yet carry a
+per-candle `source_kind` (a documented boundary from DC-13), this job always
+tags with `VENDOR` — this should be changed to pass through the actual
+value once an upstream context that knows the real source exists.
 
-새 마이그레이션 없음(DoD(e)) — 계보는 warm 루트 옆 JSON Lines 파일.
+No new migration (DoD(e)) — lineage is a JSON Lines file sitting next to
+the warm root.
 
-경계(정직하게 남겨 둔다): `hot.delete_year`는 연도 전체를 지우므로,
-`hot.read_year` 스냅샷 이후 같은 연도에 새 행이 동시에 들어오면 그 행도
-함께(승격되지 않은 채) 지워질 수 있다 — 동시 백필과의 직렬화는 이
-리프의 범위 밖(단일 워커 배치 잡을 전제)이다.
+Boundary (left honest rather than hidden): since `hot.delete_year` deletes
+the entire year, if new rows for that same year arrive concurrently after
+the `hot.read_year` snapshot, those rows can be deleted too (without ever
+being promoted) — serializing against concurrent backfills is out of scope
+for this leaf (it assumes a single-worker batch job).
 """
 from __future__ import annotations
 
@@ -55,24 +61,27 @@ __all__ = [
 
 
 class VerificationFailedError(RuntimeError):
-    """warm 왕복 검증(digest 일치, 결측 구간 없음)이 실패했다 — hot은
-    지우지 않는다(fail-closed, DoD(b))."""
+    """The warm round-trip verification (digest match, no missing ranges)
+    failed — hot is not deleted (fail-closed, DoD(b))."""
 
 
 @runtime_checkable
 class HotYearSource(Protocol):
-    """tiering이 hot 계층에 요구하는 최소 표면. `HotPostgresStorage`(DC-13)
-    는 이 두 메서드를 아직 갖지 않는다 — 실 Postgres 배선은 이 Protocol을
-    구현하는 어댑터를 만드는 후속 작업 소관이고, 이 리프는 인터페이스와
-    순수 오케스트레이션만 책임진다."""
+    """The minimal surface tiering requires from the hot tier.
+    `HotPostgresStorage` (DC-13) does not yet have these two methods —
+    wiring up the real Postgres adapter that implements this Protocol is
+    the responsibility of a follow-up task; this leaf is only responsible
+    for the interface and pure orchestration."""
 
     async def read_year(self, key: SeriesKey, year: int) -> CandleColumns:
-        """`year` 전체(해당 연도 `open_time`만)를 반환한다. 없으면 빈
-        `CandleColumns`."""
+        """Returns the entirety of `year` (only rows whose `open_time`
+        falls in that year). Returns an empty `CandleColumns` if there
+        are none."""
         ...
 
     async def delete_year(self, key: SeriesKey, year: int) -> int:
-        """`year` 전체를 지우고 지운 행 수를 반환한다."""
+        """Deletes the entirety of `year` and returns the number of rows
+        deleted."""
         ...
 
 
@@ -95,8 +104,8 @@ class WarmYearStorage(Protocol):
 
 @dataclass(frozen=True, slots=True)
 class PromotionOutcome:
-    """`promote_year` 한 번 호출의 결과. `promoted=False`는 멱등 스킵
-    (승격할 hot 행이 없었음)을 뜻한다."""
+    """The result of a single `promote_year` call. `promoted=False` means
+    an idempotent skip (there were no hot rows to promote)."""
 
     promoted: bool
     row_count: int
@@ -110,8 +119,9 @@ def _year_bounds(year: int) -> tuple[datetime, datetime]:
 
 
 def _digest(columns: CandleColumns) -> str:
-    """DC-14 테스트의 정준 직렬화와 같은 방식(값만 비교, tzinfo 클래스
-    정체성 무시) — 여기서는 hot→warm 왕복 검증에 실제로 쓰인다."""
+    """The same canonical serialization used by the DC-14 tests (compares
+    values only, ignores tzinfo class identity) — here it is actually used
+    for the hot->warm round-trip verification."""
     parts: list[str] = []
     for i in range(len(columns)):
         parts.append(columns.ts[i].isoformat())
@@ -129,8 +139,9 @@ def _lineage_path(root: Path, key: SeriesKey) -> Path:
 
 
 def read_lineage(root: Path, key: SeriesKey) -> list[dict[str, object]]:
-    """지금까지 이 시리즈에 기록된 승격 계보 행을 오름차순으로 반환한다.
-    파일이 없으면 빈 목록(아직 승격된 적 없음)."""
+    """Returns the promotion lineage rows recorded so far for this series
+    in ascending order. Returns an empty list if the file does not exist
+    (nothing has been promoted yet)."""
     path = _lineage_path(root, key)
     if not path.exists():
         return []
@@ -149,9 +160,10 @@ def _append_lineage(root: Path, key: SeriesKey, entry: dict[str, object]) -> Non
 async def promote_year(
     hot: HotYearSource, warm: WarmYearStorage, root: Path, key: SeriesKey, year: int
 ) -> PromotionOutcome:
-    """`year`의 hot 파티션을 warm parquet로 승격하고, 검증 통과 후에만
-    hot에서 지운 뒤 계보 한 줄을 남긴다. hot에 그 연도 행이 이미 없으면
-    아무것도 하지 않고 반환한다(DoD(a) 멱등)."""
+    """Promotes the hot partition for `year` to warm parquet, and only
+    after verification passes deletes it from hot and appends one lineage
+    line. If hot already has no rows for that year, returns without doing
+    anything (DoD(a) idempotency)."""
     source = await hot.read_year(key, year)
     if len(source) == 0:
         return PromotionOutcome(promoted=False, row_count=0, digest="")
@@ -161,9 +173,10 @@ async def promote_year(
 
     start, end = _year_bounds(year)
     written, _missing = warm.read_columns(key, start, end)
-    # `_missing`는 그 달력 월에 데이터가 아예 없다는 뜻일 뿐(§DC-14
-    # read_columns) — hot 파티션이 원래 그 달에 캔들이 없었다면 정상이라
-    # 훼손 신호가 아니다. 왕복 무결성은 digest 동일성만으로 판단한다.
+    # `_missing` only means that calendar month has no data at all (§DC-14
+    # read_columns) — that's normal if the hot partition never had candles
+    # for that month, so it isn't a corruption signal. Round-trip
+    # integrity is judged purely by digest equality.
     if _digest(written) != source_digest:
         raise VerificationFailedError(
             f"warm round-trip verification failed for {key.instrument_id}/{year} "

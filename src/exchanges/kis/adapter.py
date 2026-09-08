@@ -7,12 +7,13 @@ is_paper_trading)였으나, 실제로는 모든 계좌/주문 API가 종합계�
 계좌상품코드(ACNT_PRDT_CD)를 필수 파라미터로 요구한다는 것을 조사 중
 발견 — 생성자에 cano/acnt_prdt_cd 추가.
 
-L4-21 — OAuth2 토큰 발급/캐싱 + 서명·전송 공통 로직은 300줄 캡 때문에
-`oauth_client.py`(`_KISTokenTransportMixin`)로 분리했다(엔드포인트/인증
-상세는 그 모듈 docstring 참조). `_resolve_tr_id`/`_PAPER_SWAP_PREFIXES`
-만은 여기 남긴다 — `test_overseas_futureoption_tr_reference.py`의 mutation
-테스트가 `_PAPER_SWAP_PREFIXES`를 이 모듈(`adapter_module`) 전역으로
-직접 monkeypatch하기 때문이다(oauth_client.py 모듈 docstring 참조).
+L4-21 — OAuth2 token issuance/caching plus the common signing/transport
+logic were split out into `oauth_client.py` (`_KISTokenTransportMixin`)
+because of the 300-line cap (see that module's docstring for
+endpoint/auth details). Only `_resolve_tr_id`/`_PAPER_SWAP_PREFIXES` stay
+here — the mutation test in `test_overseas_futureoption_tr_reference.py`
+monkeypatches `_PAPER_SWAP_PREFIXES` directly on this module
+(`adapter_module`) at global scope (see oauth_client.py's module docstring).
 """
 from __future__ import annotations
 
@@ -39,8 +40,8 @@ from src.exchanges.kis.trading_mixin import KISTradingMixin
 from src.exchanges.kis.trading_query_mixin import KISTradingQueryMixin
 from src.exchanges.kis.websocket_mixin import KISWebSocketMixin
 
-# tests/contract/exchanges/kis/test_generated_contract.py가 이 이름으로
-# 임포트한다 — oauth_client.py의 실제 값을 그대로 재수출한다(중복 정의 아님).
+# tests/contract/exchanges/kis/test_generated_contract.py imports these
+# names — re-exported as-is from oauth_client.py (not a duplicate definition).
 __all__ = ["PAPER_BASE_URL", "REAL_BASE_URL", "KISAdapter", "_KISHTTPClient"]
 
 # 앞글자가 이 중 하나면 모의투자 tr_id는 'V'로 치환한다(실거래/정정취소류).
@@ -49,8 +50,8 @@ _PAPER_SWAP_PREFIXES = ("T", "J", "C")
 
 
 class _KISHTTPClient(_KISTokenTransportMixin):
-    """tr_id 실전/모의 치환. 토큰 발급/전송은 `_KISTokenTransportMixin`
-    (oauth_client.py) 참조."""
+    """tr_id live/paper substitution. See `_KISTokenTransportMixin`
+    (oauth_client.py) for token issuance/transport."""
 
     def _resolve_tr_id(self, tr_id: str) -> str:
         if self._is_paper_trading and tr_id[0] in _PAPER_SWAP_PREFIXES:

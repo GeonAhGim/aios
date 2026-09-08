@@ -1,13 +1,15 @@
-"""9.2/9.5 — Griefing 방어: 계좌 손실이 시장 전체 급변과 상관되는지 판정.
+"""9.2/9.5 — Griefing defense: decides whether an account loss correlates
+with a market-wide move.
 
 Spec: docs/specs/L4_risk_and_safety_v1.0.md §2.3 (`market_correlation.py`),
-§4.3 liquidation_request 상태표, RED_TEAM_FINDINGS RTF-03(task-1568).
+§4.3 liquidation_request state table, RED_TEAM_FINDINGS RTF-03 (task-1568).
 
-순수 함수 하나. 여러 심볼(basket)의 수익률을 받아 "동시에 유의미하게
-하락했는가"만 판정한다 — 상관계수 산식(피어슨 등)은 `risk_stats/
-correlation_matrix.py`(R-18~20)의 몫이고 여기서 재구현하지 않는다.
-이 리프는 그 결과를 쓰는 쪽(watchdog)이 필요로 하는 "바스켓 급변 여부"라는
-더 좁은 이진 판정만 담당한다.
+A single pure function. Given the returns of several symbols (a basket), it
+decides only whether they "declined simultaneously and meaningfully" —
+the correlation-coefficient math itself (Pearson, etc.) belongs to
+`risk_stats/correlation_matrix.py` (R-18~20) and is not reimplemented here.
+This leaf owns only the narrower boolean decision — "did the basket move
+sharply" — that the consumer of the result (watchdog) needs.
 """
 from __future__ import annotations
 
@@ -21,14 +23,17 @@ def is_market_wide_move(
     min_symbols: int = 3,
     move_threshold_pct: Decimal,
 ) -> bool | None:
-    """basket이 `min_symbols` 미만이면 판정 불가 → `None`(호출부는 이를
-    "조작 의심"과 동일하게 안전한 쪽으로 취급한다 — `watchdog.decide` 참조).
+    """If the basket has fewer than `min_symbols`, no decision can be made →
+    `None` (the caller treats this the same as "suspected manipulation" and
+    errs on the safe side — see `watchdog.decide`).
 
-    계좌 손실(`account_loss_pct`, 항상 0 이상)이 실제로 존재할 때만 상관을
-    따진다 — 손실이 없으면 "시장 급변과 손실이 상관됐는지" 자체가 성립하지
-    않으므로 False. basket 과반수 심볼이 `move_threshold_pct` 이상 동시에
-    하락했으면 시장 전체 급변으로 판정한다(단일·소수 심볼 급변은 고립된
-    손실 — 조작 의심 쪽으로 남긴다).
+    Correlation is only considered when an account loss
+    (`account_loss_pct`, always >= 0) actually exists — if there is no loss,
+    "did the market move correlate with the loss" doesn't even apply, so this
+    returns False. If a majority of the basket's symbols declined
+    simultaneously by at least `move_threshold_pct`, this is judged a
+    market-wide move (a move confined to a single symbol or a minority of
+    symbols is left as an isolated loss — treated as suspected manipulation).
     """
     if len(basket_returns) < min_symbols:
         return None

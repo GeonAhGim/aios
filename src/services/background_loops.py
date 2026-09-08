@@ -14,9 +14,10 @@ main.py는 pool/event_bus/credential_resolver 등 앱 전역 객체를 조립한
 동작은 분리 이전과 동일 — 이 모듈은 main.py에 있던 코드를 그대로 옮긴 것이다.
 
 §9 PLT-08 — heartbeat/alert/risk_guard/safety_reactivation 4개 루프는
-`LoopHealth.record_tick`으로 계측된다(`_run_instrumented` 공용 래퍼, tick마다
-`bind_system(f"loop.{name}")`으로 컨텍스트 재바인딩). execution_loop은 별도
-스케줄러(`ExecutionLoopScheduler`)라 이 리프 범위 밖이다.
+is instrumented via `LoopHealth.record_tick` (the shared `_run_instrumented`
+wrapper; each tick re-binds context via `bind_system(f"loop.{name}")`).
+execution_loop is a separate scheduler (`ExecutionLoopScheduler`) and is
+out of scope for this leaf.
 """
 from __future__ import annotations
 
@@ -225,8 +226,8 @@ async def start_background_loops(
         )
     )
 
-    # 05번 §5.6 + task-2151(L4-18a) — 재시작 복구, 백그라운드 루프 전에 1회.
-    # flag off/실패 시 동작(fail-closed)은 recovery_wiring.py 참조.
+    # Doc 05 §5.6 + task-2151(L4-18a) — startup recovery, once before the background loops.
+    # See recovery_wiring.py for behavior when the flag is off / on failure (fail-closed).
     recovery_state = await run_startup_recovery_gated(
         pool,
         resolve_adapter=credential_resolver.get_adapter,
@@ -234,10 +235,11 @@ async def start_background_loops(
         enabled=flag_enabled("AIOS_STARTUP_RECOVERY_ENABLED"),
     )
 
-    # FD-8 실행 루프(전수감사 §3 최대 배선 결함 — run_execution_tick은 완전했지만
-    # 호출자가 테스트뿐이었다). 주기는 risk_policy.yaml의 execution_loop.
-    # interval_sec. EO-03 최소 배선(리스 갱신·release_all·적대적 테스트는
-    # EO-04로 남김); 신규 필수 인자(I-01)는 기존 컴포넌트만으로 채운다.
+    # FD-8 execution loop (full-audit §3's largest wiring gap — run_execution_tick was
+    # complete, but its only caller was tests). The interval comes from risk_policy.yaml's
+    # execution_loop.interval_sec. EO-03 minimal wiring (lease renewal / release_all /
+    # adversarial tests are left to EO-04); the newly required argument (I-01) is filled
+    # using only existing components.
     owner_id = f"{socket.gethostname()}:{os.getpid()}:{uuid4()}"
     lease_repo = PostgresExecutionLeaseRepository(pool)
     execution_scheduler = ExecutionLoopScheduler(

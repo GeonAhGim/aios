@@ -153,11 +153,12 @@ async def post_deactivate_safety_control(
     return ok(result)
 
 
-# R-53 — RECOVERY 게이트. evidence·approval·cooldown·fresh 재평가를 전부
-# 통과해야 해제된다(§9 R-53, I5) — 운영자 전용(ApprovalService PLATFORM
-# scope와 같은 신뢰 경계, ADR-2026-08-10-D §③). DENY는 여기서 200을 만들지
-# 않는다 — evaluate_recovery가 RecoveryDeniedError를 던지고
-# EXCEPTION_MAP(RISK_DENIED→403)이 봉투를 만든다.
+# R-53 — RECOVERY gate. Must pass evidence/approval/cooldown/fresh
+# re-evaluation entirely before release (§9 R-53, I5) — operator-only (same
+# trust boundary as ApprovalService's PLATFORM scope, ADR-2026-08-10-D §3).
+# DENY does not produce a 200 here — evaluate_recovery raises
+# RecoveryDeniedError and EXCEPTION_MAP (RISK_DENIED -> 403) builds the
+# envelope.
 @router.post("/safety-controls/{control_id}:evaluate-recovery")
 async def post_evaluate_recovery(
     control_id: UUID,

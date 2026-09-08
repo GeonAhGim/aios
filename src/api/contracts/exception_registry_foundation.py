@@ -198,7 +198,7 @@ EXCEPTION_MAP_FOUNDATION: list[tuple[type[Exception], ErrorCode]] = [
     (MaterialChangeRequiresReauthError, ErrorCode.AUTH_MFA_REQUIRED),
     (MaterialChangeRequiresFreshConsentError, ErrorCode.POLICY_DENIED),
     (CoolingOffNotElapsedError, ErrorCode.STATE_INVALID_TRANSITION),
-    # CM-5(task-2118) — 작성자≠승인자(CM-A3) 위반, 400 매핑(DoD 명시).
+    # CM-5 (task-2118) — author != approver (CM-A3) violation, mapped to 400 (per DoD).
     (SelfApprovalNotAllowedError, ErrorCode.VALIDATION_INVALID_FIELD),
     # evidence.py 체인 무결성 — 없는 코드라 409 conflict로 접는다.
     (ChainIntegrityError, ErrorCode.STATE_INVALID_TRANSITION),
@@ -229,9 +229,10 @@ EXCEPTION_MAP_FOUNDATION: list[tuple[type[Exception], ErrorCode]] = [
     (UnauthorizedSafetyControlScopeError, ErrorCode.AUTHZ_FORBIDDEN),
     (MissingScopeRefError, ErrorCode.VALIDATION_INVALID_FIELD),
     (SafetyControlNotFoundError, ErrorCode.RESOURCE_NOT_FOUND),
-    # R-53 — RECOVERY 게이트 DENY(evidence/approval/cooldown/fresh 중 하나라도
-    # 미달). RiskGateDeniedError(start_deployment.py)와 동일 관례로 RISK_DENIED
-    # (403)에 접는다 — reason_codes는 details에 실린다(RSK-007 포함).
+    # R-53 — RECOVERY gate DENY (any of evidence/approval/cooldown/fresh not
+    # met). Folded into RISK_DENIED (403) using the same convention as
+    # RiskGateDeniedError (start_deployment.py) — reason_codes ride in
+    # details (including RSK-007).
     (RecoveryDeniedError, ErrorCode.RISK_DENIED),
     (DisclosureNotFoundError, ErrorCode.RESOURCE_NOT_FOUND),
     (DisclosureRetiredError, ErrorCode.VALIDATION_DISCLOSURE_RETIRED),

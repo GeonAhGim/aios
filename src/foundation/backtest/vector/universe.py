@@ -1,32 +1,34 @@
-"""BT-17 — `backtest/vector/universe.py`: 다종목 유니버스 스윕.
+"""BT-17 — `backtest/vector/universe.py`: multi-symbol universe sweep.
 
 Spec: docs/specs/L4_analytics_authoring_backtest_marketplace_v1.0.md §9.9
-BT-17. 선행: BT-15(`vector/{arrays,signals,fills}.py`, 1c5e4b5f 계열)·DC-13
-(hot/warm 계층, 1212 계열) — 둘 다 origin/main 병합 완료(task-2372 decision).
+BT-17. Depends on: BT-15 (`vector/{arrays,signals,fills}.py`, 1c5e4b5f lineage) · DC-13
+(hot/warm tiering, 1212 lineage) — both already merged into origin/main (task-2372 decision).
 
-이 모듈은 BT-15b `fills.run_vector_backtest`(벡터 신호 + BT-2~6 이벤트 체결
-엔진)를 종목별로 순회 호출만 한다 — 체결 산식을 재구현하지 않는다(I-05).
-캔들 표현도 LA-23b/BT-15a `CandleColumns`를 그대로 재사용한다 — 종목별
-dict-of-DataFrame 같은 새 시계열 표현을 신설하지 않는다(§C 중복 컨텍스트
-회피). 유니버스 자체는 `symbol -> (CandleColumns, VectorSignal)` 매핑으로만
-표현한다.
+This module only loops over BT-15b `fills.run_vector_backtest` (vector signal + BT-2~6
+event fill engine) per symbol — it does not reimplement the fill arithmetic (I-05).
+It also reuses LA-23b/BT-15a `CandleColumns` as-is for candle representation — it does
+not introduce a new per-symbol time-series representation such as a dict-of-DataFrame
+(§C avoid duplicate context). The universe itself is represented only as a
+`symbol -> (CandleColumns, VectorSignal)` mapping.
 
-메모리 상한(`MAX_UNIVERSE_CANDLES`): 유니버스 전 종목의 캔들 수 합이 상한을
-넘으면 종목을 하나도 처리하지 않고 즉시 거부한다(fail-closed) — 상한 직전까지
-처리하다 중간에 멈추는 "부분 결과"를 절대 반환하지 않는다. 합계 검사가
-순회보다 먼저 끝나므로 이 보장은 코드 구조 자체가 준다(사후 검사가 아니다).
-100종목×1년 D1(≈36,500봉)이 여유 있게 들어가면서 경계 테스트가 실제로
-그만큼의 `CandleColumns`를 만들어도 무리 없는 크기로 40,000을 골랐다 — 이
-숫자 자체는 실측 메모리 프로파일링이 아니라 "합이 상한을 넘으면 계산을
-시작하지 않는다"는 구조를 증명하기 위한 값이다(미검증: 실제 운영 환경의
-가용 메모리와의 관계는 별도로 확인해야 한다).
+Memory cap (`MAX_UNIVERSE_CANDLES`): if the sum of candle counts across every symbol in
+the universe exceeds the cap, no symbol is processed at all and the call is rejected
+immediately (fail-closed) — it never returns a "partial result" that stopped partway
+through after processing up to the cap. Because the sum check finishes before the loop
+starts, this guarantee comes from the code structure itself (it is not a post-hoc check).
+40,000 was chosen as a size that comfortably fits 100 symbols × 1 year of D1 (≈36,500
+candles) while still being large enough that a boundary test can actually build that many
+`CandleColumns` without strain — this number itself is not derived from measured memory
+profiling but exists to demonstrate the structure "if the sum exceeds the cap, computation
+never starts" (unverified: the relationship to actually available memory in a real
+production environment still needs separate confirmation).
 
-결측 종목: 어떤 종목의 `CandleColumns`가 비어 있으면(구간에 캔들이 없음)
-그 종목은 조용히 건너뛰지 않고 `UniverseSweepResult.skipped`에 종목명이
-그대로 남는다 — "0건 스윕 성공"과 "그 종목만 데이터가 없었다"를 호출자가
-구분할 수 있어야 한다.
+Missing symbols: if a symbol's `CandleColumns` is empty (no candles in the range), that
+symbol is not silently skipped — its name is left in `UniverseSweepResult.skipped` as-is —
+so callers can distinguish "the sweep succeeded with 0 results" from "only that symbol had
+no data".
 
-순수 모듈 — I/O 없음.
+Pure module — no I/O.
 """
 from __future__ import annotations
 
@@ -47,14 +49,14 @@ __all__ = [
     "sweep_universe",
 ]
 
-# 유니버스 전 종목 캔들 수 합계 상한 — 모듈 상수로 노출해 호출자가 사전에
-# 유니버스 크기를 검사할 수 있게 한다(모듈 docstring 근거).
+# Cap on the sum of candle counts across all symbols in the universe — exposed as a
+# module constant so callers can check universe size upfront (rationale in the module docstring).
 MAX_UNIVERSE_CANDLES = 40_000
 
 
 class UniverseMemoryLimitError(ValueError):
-    """`BT_VECTOR_UNIVERSE_MEMORY_LIMIT` — 유니버스 총 캔들 수가
-    `MAX_UNIVERSE_CANDLES`를 넘으면 부분 결과 없이 fail-closed로 거부한다."""
+    """`BT_VECTOR_UNIVERSE_MEMORY_LIMIT` — rejected fail-closed with no partial result
+    when the universe's total candle count exceeds `MAX_UNIVERSE_CANDLES`."""
 
     def __init__(self, total_candles: int) -> None:
         super().__init__(
@@ -65,9 +67,10 @@ class UniverseMemoryLimitError(ValueError):
 
 @dataclass(frozen=True, slots=True)
 class UniverseSweepResult:
-    """`results`는 실제로 스윕한 종목만 담는다(`symbol -> QuickBacktestResult`).
-    `skipped`는 구간에 캔들이 없어 건너뛴 종목명이다 — 두 컬렉션은 항상
-    유니버스 키 전체를 정확히 분할한다(교집합 없음, 합집합이 입력 키 전체)."""
+    """`results` holds only the symbols actually swept (`symbol -> QuickBacktestResult`).
+    `skipped` holds symbol names skipped because the range had no candles — the two
+    collections always exactly partition the full set of universe keys (no overlap,
+    union equals all input keys)."""
 
     results: dict[str, QuickBacktestResult]
     skipped: tuple[str, ...]
@@ -81,10 +84,10 @@ def sweep_universe(
     initial_cash: Decimal,
     funding_rate: Decimal | None = None,
 ) -> UniverseSweepResult:
-    """`universe`의 각 종목에 같은 `config`로 `run_vector_backtest`를 돌린다.
+    """Runs `run_vector_backtest` with the same `config` for each symbol in `universe`.
 
-    상한 검사가 순회 전체보다 먼저 끝나므로, 상한을 넘는 유니버스는 어떤
-    종목도 계산하지 않은 채 거부된다(부분 결과 없음)."""
+    Because the cap check finishes before the loop starts, a universe that exceeds the
+    cap is rejected without computing any symbol (no partial result)."""
     total_candles = sum(len(columns) for columns, _ in universe.values())
     if total_candles > MAX_UNIVERSE_CANDLES:
         raise UniverseMemoryLimitError(total_candles)

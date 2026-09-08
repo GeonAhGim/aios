@@ -44,8 +44,8 @@ class ApproveRuleBundleRequest(BaseModel):
 
 
 class RecoverySafetyControlRequest(BaseModel):
-    """R-53 — RECOVERY 게이트(§9). `evidence_ref=None`은 거부 사유
-    RSK-007로 이어진다(evaluate_recovery가 판정, 여기서는 필드만 옮긴다)."""
+    """R-53 — RECOVERY gate (§9). `evidence_ref=None` leads to denial reason
+    RSK-007 (evaluate_recovery makes that judgment; this only carries the field)."""
 
     evidence_ref: str | None = None
     approval_id: int

@@ -75,7 +75,7 @@ class PostgresRouteDecisionRepository:
                 row = await conn.fetchrow(
                     "SELECT * FROM route_decisions WHERE order_id = $1", order_id
                 )
-            assert row is not None  # ON CONFLICT DO NOTHING이 발동했다면 반드시 존재
+            assert row is not None  # if ON CONFLICT DO NOTHING fired, the row must exist
         return _row_to_record(row)
 
     async def get_by_order_id(self, order_id: UUID) -> RouteDecisionRecord | None:

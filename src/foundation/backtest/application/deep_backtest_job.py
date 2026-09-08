@@ -65,9 +65,10 @@ DEFAULT_CHUNK_BARS = 200  # bar segment between checkpoints/progress reports
 
 
 class BacktestCheckpointMismatchError(ValueError):
-    """`BT_DEEP_CHECKPOINT_MISMATCH` — resume 요청의 현재 `config_hash`가
-    저장된 체크포인트와 다르다. 조용히 처음부터 재실행하거나 이어서
-    계산하지 않고 거부한다(fail-closed, §9.5 BT-11 DoD (b))."""
+    """`BT_DEEP_CHECKPOINT_MISMATCH` — the resume request's current
+    `config_hash` differs from the stored checkpoint's. Rejects the resume
+    instead of silently restarting from scratch or silently continuing the
+    computation (fail-closed, §9.5 BT-11 DoD (b))."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -84,14 +85,14 @@ class DeepBacktestCheckpoint:
 
 
 class CheckpointPort(Protocol):
-    """체크포인트 저장소 포트 — 영속 어댑터는 후속 리프(task-2152 decision)."""
+    """Checkpoint storage port — the durable adapter is a follow-up leaf (task-2152 decision)."""
 
     def load(self, job_id: str) -> DeepBacktestCheckpoint | None: ...
     def save(self, job_id: str, checkpoint: DeepBacktestCheckpoint) -> None: ...
 
 
 class InMemoryCheckpointStore:
-    """테스트·단일 프로세스용 인메모리 `CheckpointPort` 구현."""
+    """In-memory `CheckpointPort` implementation for tests and single-process use."""
 
     def __init__(self) -> None:
         self._checkpoints: dict[str, DeepBacktestCheckpoint] = {}
@@ -108,17 +109,17 @@ class ProgressCallback(Protocol):
 
 
 class ContinuePredicate(Protocol):
-    """`False`를 돌려주면 다음 구간을 처리하지 않고 현재 체크포인트에서
-    멈춘다(협조적 취소 — 강제 종료가 아니다)."""
+    """Returning `False` stops processing the next chunk and halts at the
+    current checkpoint (cooperative cancellation — not a forced termination)."""
 
     def __call__(self) -> bool: ...
 
 
 @dataclass(frozen=True, slots=True)
 class DeepBacktestOutcome:
-    """`suspended`면 `result`가 없다 — 호출자가 같은 `job_id`로 다시
-    호출해 체크포인트부터 재개한다. `completed`면 `result`가 전체 구간을
-    처리한 BT-10 `QuickBacktestResult`다."""
+    """If `suspended`, `result` is absent — the caller calls again with the
+    same `job_id` to resume from the checkpoint. If `completed`, `result` is
+    the BT-10 `QuickBacktestResult` covering the whole range."""
 
     status: Literal["completed", "suspended"]
     result: QuickBacktestResult | None
@@ -126,8 +127,9 @@ class DeepBacktestOutcome:
 
 
 def _state_digest(result: QuickBacktestResult) -> str:
-    """BT-9(`reproducibility.py`)와 같은 정준 직렬화 규칙(정렬 키, 고정
-    구분자, ensure_ascii, allow_nan=False)으로 누적 상태를 sha256 hex한다."""
+    """SHA-256 hex digests the accumulated state using the same canonical
+    serialization rules as BT-9 (`reproducibility.py`) — sorted keys, fixed
+    separators, ensure_ascii, allow_nan=False."""
     payload = {
         "cash": str(result.cash),
         "position_quantity": str(result.position_quantity),
@@ -173,10 +175,11 @@ def run_deep_backtest_job(
     on_progress: ProgressCallback | None = None,
     should_continue: ContinuePredicate | None = None,
 ) -> DeepBacktestOutcome:
-    """`columns` 전체를 `chunk_bars` 단위 구간으로 나눠 BT-10 실행 코어를
-    반복 호출한다. 매 구간 끝마다 체크포인트를 저장하고 진행률을 보고한다
-    — `should_continue()`가 `False`를 돌려주면 다음 구간을 처리하지 않고
-    멈춘다(호출자가 나중에 같은 `job_id`로 재개)."""
+    """Splits all of `columns` into `chunk_bars`-sized segments and repeatedly
+    calls the BT-10 execution core. Saves a checkpoint and reports progress
+    at the end of every chunk — if `should_continue()` returns `False`,
+    stops before processing the next chunk (the caller resumes later with
+    the same `job_id`)."""
     if not job_id.strip():
         raise ValueError("job_id는 비어 있을 수 없다")
     if chunk_bars <= 0:
@@ -223,7 +226,7 @@ def run_deep_backtest_job(
         if on_progress is not None:
             on_progress(checkpoint.progress)
 
-    if result is None:  # start == n이었다 — 이미 완결된 job에 다시 걸린 호출
+    if result is None:  # start == n — a call re-triggered on an already-completed job
         checkpoint, result = _run_chunk(n)
         checkpoints.save(job_id, checkpoint)
         if on_progress is not None:

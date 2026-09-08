@@ -1,25 +1,29 @@
-"""BT-15b (2/2) — vector-signal 배열을 BT-2~6 이벤트 체결 엔진에 연결.
+"""BT-15b (2/2) — connects vector-signal arrays to the BT-2~6 event fill engine.
 
 Spec: docs/specs/L4_analytics_authoring_backtest_marketplace_v1.0.md §9.9
-BT-15(2/2). 선행: BT-15a `vector/{arrays,signals}.py`(13e16cc2), BT-2~6 체결
-현실성(fa3afe4), `quick_backtest`(9a1ae87).
+BT-15(2/2). Prerequisites: BT-15a `vector/{arrays,signals}.py`(13e16cc2), BT-2~6
+fill realism(fa3afe4), `quick_backtest`(9a1ae87).
 
-체결은 대기 주문 잔량·포지션·펀딩/차입 정산이 봉을 가로질러 이월되는 상태
-기계다(`quick_backtest_fill.PendingOrder`/`Holding`) — 원소마다 독립적인
-numpy 배열 연산으로 병렬화할 수 없다. 그래서 이 모듈은 체결 산식을 배열로
-다시 쓰지 않는다(§C 중복 컨텍스트·I-05 위반 회피): BT-15a `signals.py`가
-봉 전체를 한 번에 벡터 연산해 낸 진입/청산 `BoolSignal`("벡터"는 여기까지)을
-BT-10 `quick_backtest.run_quick_backtest`가 요구하는 `SignalSource` 프로토콜
-어댑터로 감싸, BT-2~6을 그대로 실행하는 기존 이벤트 루프에 그대로 넘긴다.
-`arrays.py` 모듈 docstring이 이미 선언한 설계(신호=float64 벡터, 체결=
-Decimal 이벤트 엔진)를 그대로 따른다 — 신뢰 가능한 체결 로그는 항상 이
-이벤트 경로가 낸다. 이 설계 덕분에 벡터 경로와 이벤트 경로의 체결·equity는
-근사가 아니라 항상 정확히 같다(같은 함수 호출이므로).
+Fills are a state machine where pending-order remainder, position, and
+funding/borrow settlement carry over across bars
+(`quick_backtest_fill.PendingOrder`/`Holding`) — they can't be parallelized
+with per-element-independent numpy array operations. So this module does not
+rewrite the fill arithmetic as arrays (avoiding §C duplicated-context /
+I-05 violation): it wraps the entry/exit `BoolSignal` that BT-15a `signals.py`
+computes in one vectorized pass over the whole bar series ("vector" ends
+here) in a `SignalSource` protocol adapter required by BT-10
+`quick_backtest.run_quick_backtest`, and hands it straight to the existing
+event loop that runs BT-2~6 unchanged. It follows the design the `arrays.py`
+module docstring already declares (signal = float64 vector, fill = Decimal
+event engine) — the event path is always what produces a trustworthy fill
+log. Thanks to this design, fills and equity from the vector path and the
+event path are always exactly identical, not merely approximate (since it's
+the same function call).
 
-롱 온리(숏 신호는 이 리프 범위 밖 — 필요해지면 별도 리프에서 명시적으로
-다룬다, 추측으로 지금 만들지 않는다).
+Long-only (short signals are out of scope for this leaf — if needed, handle
+them explicitly in a separate leaf; don't build it now on speculation).
 
-순수 모듈 — I/O 없음.
+Pure module — no I/O.
 """
 from __future__ import annotations
 
@@ -43,14 +47,16 @@ __all__ = ["VectorFillsError", "VectorSignal", "run_vector_backtest"]
 
 
 class VectorFillsError(ValueError):
-    """`BT_VECTOR_FILLS` — signal 길이 불일치·수량 계약 위반 fail-closed 거부."""
+    """`BT_VECTOR_FILLS` — fail-closed rejection for signal length mismatch or quantity
+    contract violation."""
 
 
 @dataclass(frozen=True, slots=True)
 class VectorSignal:
-    """BT-15a가 봉 전체에 대해 한 번에 계산한 진입/청산 불리언 배열.
-    `entries[i]`가 확정 참(na 아님)이고 포지션이 0이면 봉 `i`에서 시장가
-    매수, `exits[i]`가 확정 참이고 포지션이 있으면 시장가 전량 청산한다."""
+    """Entry/exit boolean arrays that BT-15a computes in one pass over the
+    whole bar series. If `entries[i]` is definitely true (not na) and the
+    position is 0, market-buy at bar `i`; if `exits[i]` is definitely true
+    and there is a position, market-sell the full position."""
 
     entries: BoolSignal
     exits: BoolSignal
@@ -70,10 +76,11 @@ def _is_true(signal: BoolSignal, i: int) -> bool:
 
 
 class _VectorSignalSource:
-    """`VectorSignal` 배열 조회만 하는 `SignalSource`(BT-10 프로토콜) 어댑터.
-    `window`의 마지막 인덱스(`len(window) - 1` = 현재 봉)만 읽는다 — 그 이상
-    (t+1 이후)은 `BarWindow`가 이미 `LookAheadError`로 막으므로 이 어댑터는
-    아예 접근할 수 없다."""
+    """`SignalSource` (BT-10 protocol) adapter that only looks up `VectorSignal`
+    arrays. It only reads the last index of `window` (`len(window) - 1` = the
+    current bar) — anything beyond that (t+1 onward) is already blocked by
+    `BarWindow` raising `LookAheadError`, so this adapter can't access it at
+    all."""
 
     __slots__ = ("_signal",)
 
@@ -100,9 +107,10 @@ def run_vector_backtest(
     funding_rate: Decimal | None = None,
     lower_columns: CandleColumns | None = None,
 ) -> QuickBacktestResult:
-    """`signal`(BT-15a 벡터 경로가 낸 진입/청산 배열)을 `columns` 위에서
-    재생한다. 체결은 전부 BT-10 이벤트 엔진(BT-2~6 위임)이 낸다 — 이 함수는
-    신호 조회 방식만 다르다(DSL 전략 콜백 대신 사전 계산된 배열)."""
+    """Replays `signal` (the entry/exit arrays produced by BT-15a's vector
+    path) over `columns`. All fills come from the BT-10 event engine
+    (delegating to BT-2~6) — this function only differs in how it looks up
+    signals (a precomputed array instead of a DSL strategy callback)."""
     if len(signal.entries) != len(columns):
         raise VectorFillsError(
             f"signal 길이 {len(signal.entries)} != 캔들 수 {len(columns)}"

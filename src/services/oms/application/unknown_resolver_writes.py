@@ -1,14 +1,17 @@
-"""L4-16/L4-27 — UNKNOWN 해소 3분기 확정 쓰기(트랜잭션) + §7.3 escalation 로그.
+"""L4-16/L4-27 — UNKNOWN-resolution three-way finalized commit writes (transaction) +
+§7.3 escalation logging.
 
-Spec: docs/specs/L4_execution_oms_and_exchange_v1.0.md §4.2 UNKNOWN 행 3종
-(`RESOLVED_AS`/`RESOLVED_ABSENT`/`UNRESOLVED_LIMIT`), §7.3, §9 L4-16/L4-27.
+Spec: docs/specs/L4_execution_oms_and_exchange_v1.0.md §4.2 the three UNKNOWN row
+kinds (`RESOLVED_AS`/`RESOLVED_ABSENT`/`UNRESOLVED_LIMIT`), §7.3, §9 L4-16/L4-27.
 
-`unknown_resolver.py`(L4-16, 재시도 루프 본체)에서 분리된 모듈이다 —
-outbox_dispatcher.py/outbox_commands.py(L4-31)와 같은 이유(파일당 300줄
-한도, ADR-2026-09-06-G §10)로, 메트릭/로그 계측(L4-27)을 추가하면서
-루프 본체 파일이 한도를 넘겨 이 3개 확정-쓰기 함수 + 해시 헬퍼를 옮겼다.
-각 함수는 독립된 트랜잭션 하나를 열고 커밋/롤백까지 스스로 책임진다는
-계약은 그대로다.
+Split out of `unknown_resolver.py` (L4-16, the retry-loop body) for the
+same reason as outbox_dispatcher.py/outbox_commands.py (L4-31) — a
+300-line-per-file cap (ADR-2026-09-06-G §10). Adding metrics/log
+instrumentation (L4-27) pushed the loop-body file over the cap, so
+these 3 finalized-write functions plus the hash helper were moved here.
+Each function still opens exactly one independent transaction and is
+solely responsible for its own commit/rollback — that contract is
+unchanged.
 """
 from __future__ import annotations
 
@@ -51,7 +54,7 @@ async def apply_resolved_as(
         try:
             current = await repo.get_for_update(conn, order_id)
             if current.status is not OrderStatus.UNKNOWN:
-                result = current  # 이미 다른 경로로 해소됨(경합) — 멱등 반환
+                result = current  # already resolved via another path (race) — idempotent return
             else:
                 target = found.status
                 if target not in ALLOWED[OrderStatus.UNKNOWN]:
@@ -154,7 +157,8 @@ async def escalate(
         try:
             current = await repo.get_for_update(conn, order_id)
             if current.status is not OrderStatus.UNKNOWN:
-                result = current  # 경합 중 이미 해소됨 — 안전통제를 걸 이유가 없다
+                # already resolved during the race -- no reason to activate a safety control
+                result = current
             else:
                 target = next_status(current.status, OrderEvent.UNRESOLVED_LIMIT)
                 event = OrderTransitionEvent(

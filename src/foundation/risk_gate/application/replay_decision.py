@@ -1,17 +1,21 @@
-"""L4_risk_and_safety_v1.0.md#§2 112행, §9 R-54 — 저장된 결정 재계산·대조.
+"""L4_risk_and_safety_v1.0.md#§2 line 112, §9 R-54 — recompute and compare
+stored decisions.
 
-Spec: 선행 R-16(`src/core/risk/evaluator.py`), R-22(`postgres_bundle_repository.py`),
-R-24(`postgres_decision_repository.py`). WORM 행에 저장된 `inputs_snapshot`과,
-그 결정이 실제로 사용한 `rule_hash`에 매칭되는 rule_bundle을 "pinned" 입력으로
-그대로 R-16 `evaluate()`에 통과시켜 재판정을 얻는다 — 판정 로직(임계값 비교)은
-여기서 재구현하지 않는다(§C 중복 컨텍스트 금지). 불일치는 §5·§7
-`aios.core_risk.replay_mismatch.count_total` 1 증가로 관측되고,
-`INTEGRITY_RISK_REPLAY_MISMATCH`(§ 에러 taxonomy 295행)로 호출자
-(`src/tools/risk_replay.py`)가 exit code로 표면화한다.
+Spec: prior art R-16 (`src/core/risk/evaluator.py`), R-22
+(`postgres_bundle_repository.py`), R-24 (`postgres_decision_repository.py`).
+Feed the `inputs_snapshot` stored in the WORM row, together with the
+rule_bundle matching the `rule_hash` that decision actually used, straight
+through to R-16 `evaluate()` as "pinned" input to get a re-judgment — the
+judgment logic (threshold comparisons) is not reimplemented here (§C forbids
+duplicating context). A mismatch is observed as a +1 increment of
+`aios.core_risk.replay_mismatch.count_total` (§5·§7) and surfaced by the
+caller (`src/tools/risk_replay.py`) as an exit code via
+`INTEGRITY_RISK_REPLAY_MISMATCH` (§ error taxonomy line 295).
 
-`decision_repo`/`bundle_repo`는 구조적 타입(Protocol)만 요구한다 — 기존
-`PostgresDecisionRepository.get()`/`PostgresBundleRepository.get_by_rule_hash()`가
-그대로 만족한다(별도 어댑터 불필요).
+`decision_repo`/`bundle_repo` require only a structural type (Protocol) — the
+existing `PostgresDecisionRepository.get()`/
+`PostgresBundleRepository.get_by_rule_hash()` already satisfy it as-is (no
+separate adapter needed).
 """
 from __future__ import annotations
 
@@ -28,9 +32,11 @@ from src.core.risk.policy_bundle import RiskRuleBundle
 
 INTEGRITY_RISK_REPLAY_MISMATCH = "INTEGRITY_RISK_REPLAY_MISMATCH"
 
-# 재계산 결과와 저장된 결정을 대조할 필드 — 전부 evaluator의 "판정 산출물"이지
-# 재계산 입력(rule_version/rule_hash/engine_version은 같은 bundle에서 나오므로
-# 항상 일치, inputs_hash는 같은 inputs_snapshot에서 나오므로 항상 일치)이 아니다.
+# Fields to compare between the recomputed result and the stored decision —
+# all are the evaluator's "judgment output," not its recomputation input
+# (rule_version/rule_hash/engine_version always match because they come from
+# the same bundle, and inputs_hash always matches because it comes from the
+# same inputs_snapshot).
 _COMPARED_FIELDS: tuple[str, ...] = (
     "decision_id",
     "outcome",
@@ -55,11 +61,11 @@ class ReplayResult:
 
 
 class DecisionNotFoundError(LookupError):
-    """`decision_id`가 WORM 원장에 없다."""
+    """`decision_id` is not in the WORM ledger."""
 
 
 class BundleNotFoundError(LookupError):
-    """저장된 `rule_hash`에 매칭되는 rule_bundle이 없다 — 번들 삭제/오염 신호."""
+    """No rule_bundle matches the stored `rule_hash` — signals bundle deletion/corruption."""
 
 
 async def replay(

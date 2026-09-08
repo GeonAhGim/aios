@@ -1,19 +1,22 @@
-"""L4-24 — 3자 대사 주기 실행기.
+"""L4-24 — 3-way reconciliation periodic runner.
 
 Spec: docs/specs/L4_execution_oms_and_exchange_v1.0.md §2-C `reconcile_scheduler.py`,
-§9 L4-24, §5.1(advisory lock, REC-004).
+§9 L4-24, §5.1 (advisory lock, REC-004).
 
-DoD (d) "새 상주 루프 프레임워크를 재발명하지 않는다" — `OutboxDispatcher.
-run_forever`(L4-14)와 같은 "무한 sleep→tick, 한 주기 예외는 로그만 남기고
-계속"이라는 이미 검증된 패턴을 그대로 따른다. 이 리프는 orders만 비교하는
-`three_way_reconciler.reconcile_account`(그 모듈 docstring — 내부 잔고/포지션
-원장 부재로 범위 축소)만 호출하므로 주문 주기(5분) 하나만 둔다. 잔고·포지션
-15분 주기(§2-C 표)는 그 원장이 생긴 뒤 추가한다.
+DoD (d) "do not reinvent a new resident-loop framework" — follows the same
+already-proven pattern as `OutboxDispatcher.run_forever` (L4-14): "sleep->tick
+forever, log a single cycle's exception and keep going". Since this leaf only
+calls `three_way_reconciler.reconcile_account` (see that module's docstring —
+scope reduced due to the absence of an internal balance/position ledger),
+which compares orders only, it keeps a single orders cadence (5 minutes). The
+balance/position 15-minute cadence (§2-C table) will be added once that ledger
+exists.
 
-실제 백그라운드 태스크 등록(`background_loops.py`)은 이 리프 스콥 밖이다 —
-`wiring.py`의 `start_bitget_private_ws_inbox_task`(L4-20)와 같은 이유
-("wiring.py 변경은 등록용 조립 함수 하나로 한정" decision, 후속 리프가
-main.py/background_loops.py에 실제로 태스크로 얹는다).
+Actually registering the background task (`background_loops.py`) is out of
+this leaf's scope — for the same reason as `wiring.py`'s
+`start_bitget_private_ws_inbox_task` (L4-20) (the decision that "wiring.py
+changes are limited to a single registration assembly function"; a follow-up
+leaf actually attaches it as a task in main.py/background_loops.py).
 """
 from __future__ import annotations
 
@@ -33,7 +36,7 @@ from src.services.oms.application.three_way_reconciler import DEFAULT_POLICY, re
 logger = logging.getLogger(__name__)
 
 DEFAULT_ORDER_WINDOW = timedelta(minutes=5)
-DEFAULT_INTERVAL_SEC = 300.0  # §2-C "주문 5분" 주기
+DEFAULT_INTERVAL_SEC = 300.0  # §2-C "orders every 5 minutes" cadence
 
 
 @dataclass(frozen=True)
@@ -48,10 +51,11 @@ TargetProvider = Callable[[], Awaitable[Sequence[ReconcileTarget]]]
 
 
 class ReconcileScheduler:
-    """대상별 `pg_try_advisory_xact_lock(hashtext('recon:'||account_ref))` —
-    같은 계정을 여러 스케줄러 인스턴스/수동 실행이 동시에 대사하지 않도록
-    한다(REC-004 "충돌 시 skip"). 잠금은 그 대사 1회를 감싸는 트랜잭션이
-    끝나면(advisory **xact** lock) 자동 해제된다 — 별도 해제 호출이 없다."""
+    """Per-target `pg_try_advisory_xact_lock(hashtext('recon:'||account_ref))` —
+    prevents multiple scheduler instances/manual runs from reconciling the same
+    account concurrently (REC-004 "skip on conflict"). The lock is released
+    automatically when the transaction wrapping that single reconciliation ends
+    (advisory **xact** lock) — there is no separate release call."""
 
     def __init__(
         self,
@@ -71,8 +75,10 @@ class ReconcileScheduler:
         self._sleep = sleep
 
     async def tick(self) -> int:
-        """한 주기 — 대상 전부를 대사 시도. 반환값은 실제로 락을 얻어 대사를
-        수행한 건수(락 획득 실패로 건너뛴 건은 제외, 관측용)."""
+        """One cycle — attempts to reconcile every target. The return value is
+        the count of targets that actually acquired the lock and were
+        reconciled (excludes ones skipped due to lock-acquisition failure;
+        for observability)."""
         reconciled = 0
         for target in await self._targets():
             if await self._reconcile_one(target):
@@ -117,8 +123,8 @@ class ReconcileScheduler:
         return True
 
     async def run_forever(self) -> None:
-        """`outbox_dispatcher.run_forever`와 동일 원칙 — 한 주기 전체 실패가
-        루프 자체를 죽이지 않는다."""
+        """Same principle as `outbox_dispatcher.run_forever` — a whole cycle's
+        failure does not kill the loop itself."""
         while True:
             try:
                 await self.tick()

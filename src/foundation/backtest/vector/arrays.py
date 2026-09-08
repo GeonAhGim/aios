@@ -1,28 +1,31 @@
-"""BT-15a (1/2) — `CandleColumns` 컬럼 경로 위 numpy 배열 뷰.
+"""BT-15a (1/2) — numpy array view over the `CandleColumns` column-path.
 
 Spec: docs/specs/L4_analytics_authoring_backtest_marketplace_v1.0.md §9.9
-BT-15(1/2). 선행: BT-14 라이선스 평가(1b53ad92), BT-2~6 체결 모델(fa3afe4),
-LA-23b `CandleColumns` 컬럼 경로(be1c88b).
+BT-15(1/2). Depends on: BT-14 license evaluation (1b53ad92), BT-2~6 fill model (fa3afe4),
+LA-23b `CandleColumns` column-path (be1c88b).
 
-BT-16(그리드·워크포워드·몬테카를로, 1,000조합 ≤60s)·BT-17(다종목 스윕)이
-대량 조합을 numpy/numba로 빠르게 돌리려면 캔들을 배열로 들고 있어야 한다.
-이 모듈은 그 배열을 새로 설계하지 않는다(§C 중복 컨텍스트 회피) — LA-23b
-`CandleColumns`(ts/open/high/low/close/volume/quote_volume, 이 순서)를 그대로
-numpy dtype으로 옮긴다. 필드 이름·순서·개수는 `CandleColumns` 정의와 항상
-같아야 하므로 `from_candle_columns`가 그 사실 자체를 실행 시점에 단언한다
-(리플렉션 대조 — 한쪽만 필드를 추가/삭제/재배열하면 즉시 실패한다).
+BT-16 (grid/walk-forward/Monte Carlo, 1,000 combinations ≤60s) and BT-17 (multi-symbol
+sweep) need candles held as arrays to run large batches of combinations quickly with
+numpy/numba. This module does not design that array representation from scratch (§C
+avoid duplicate context) — it carries LA-23b `CandleColumns`
+(ts/open/high/low/close/volume/quote_volume, in this order) straight over into a numpy
+dtype. Field names, order, and count must always match the `CandleColumns` definition,
+so `from_candle_columns` asserts that fact itself at execution time (reflection
+cross-check — if either side adds/removes/reorders a field alone, it fails immediately).
 
-`Decimal` → `float64` 변환은 정밀도를 버리는 의도적 선택이다: 이 엔진은
-BT-16 대량 스윕을 위한 속도 우선 경로이고, 신뢰 가능한 최종 체결 로그는
-여전히 이벤트 엔진(`quick_backtest.run_quick_backtest`, `Decimal`)이 낸다.
-단일 조합에서 두 엔진이 원소 단위로 얼마나 일치하는지는 BT-15b(fills.py +
-동등성 테스트)의 몫이다 — 이 리프는 그 전 단계인 컬럼 로드만 다룬다.
+The `Decimal` → `float64` conversion is a deliberate choice to give up precision: this
+engine is the speed-first path for BT-16's large-scale sweeps, and the trustworthy final
+fill log is still produced by the event engine (`quick_backtest.run_quick_backtest`,
+`Decimal`). How closely the two engines agree element-by-element for a single
+combination is BT-15b's concern (fills.py + equivalence tests) — this leaf only handles
+the column-loading step that precedes it.
 
-`ts`는 tz-aware `datetime`을 UTC 자정 기준 정수 나노초로 바꾼다(부동소수
-경유 없이 `timedelta`의 정수 필드만 사용 — 큰 epoch 값에서 float64 가수부
-(52비트, 약 4.5e15) 정밀도 손실을 피한다).
+`ts` converts a tz-aware `datetime` into an integer count of nanoseconds since UTC
+midnight (using only `timedelta`'s integer fields, without going through floating point
+— avoiding the precision loss of the float64 mantissa (52 bits, about 4.5e15) at large
+epoch values).
 
-순수 모듈 — I/O 없음.
+Pure module — no I/O.
 """
 from __future__ import annotations
 
@@ -49,17 +52,19 @@ _PRICE_FIELDS = ("open", "high", "low", "close", "volume", "quote_volume")
 
 
 class ArrayDtypeError(TypeError):
-    """`BT_VECTOR_ARRAY_DTYPE` — `CandleArrays` 필드 dtype이나 `CandleColumns`와의
-    필드 대응이 계약과 다르면 fail-closed로 거부한다(조용한 형변환 금지)."""
+    """`BT_VECTOR_ARRAY_DTYPE` — rejected fail-closed when a `CandleArrays` field's dtype,
+    or its field correspondence with `CandleColumns`, does not match the contract (no
+    silent coercion)."""
 
 
 @dataclass(frozen=True, slots=True)
 class CandleArrays:
-    """`CandleColumns`와 같은 필드 이름·순서(ts/open/high/low/close/volume/
-    quote_volume)를 갖는 numpy 배열 뷰. 인덱스 `i`가 캔들 하나에 대응하는 것도
-    동일하다 — 저장 형식만 파이썬 `list[Decimal]` 대신 numpy 배열이다."""
+    """A numpy array view with the same field names and order as `CandleColumns`
+    (ts/open/high/low/close/volume/quote_volume). Index `i` corresponds to a single
+    candle just the same — only the storage format differs, numpy arrays instead of
+    a Python `list[Decimal]`."""
 
-    ts: TimestampArray  # int64, UTC epoch 나노초
+    ts: TimestampArray  # int64, UTC epoch nanoseconds
     open: FloatArray
     high: FloatArray
     low: FloatArray
@@ -84,10 +89,10 @@ class CandleArrays:
 
 
 def from_candle_columns(columns: CandleColumns) -> CandleArrays:
-    """`columns`를 `CandleArrays`로 옮긴다. `CandleColumns`가 필드를 추가·
-    삭제·재배열해 이 모듈이 뒤따라 갱신되지 않으면(§C 중복 컨텍스트가 벌어질
-    조짐) 여기서 즉시 실패한다 — 두 dataclass의 필드 이름 목록을 순서까지
-    대조한다."""
+    """Transfers `columns` into a `CandleArrays`. If `CandleColumns` adds, removes, or
+    reorders a field and this module isn't updated to follow (a sign that §C duplicate
+    context is happening), this fails immediately here — it cross-checks the two
+    dataclasses' field name lists including order."""
     columns_fields = [f.name for f in fields(CandleColumns)]
     arrays_fields = [f.name for f in fields(CandleArrays)]
     if columns_fields != arrays_fields:

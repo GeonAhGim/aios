@@ -1,18 +1,23 @@
-"""L4-21 — F5-b UNKNOWN 역조회: 순수 로직(응답 행 파싱 + 후보 매칭, I/O 없음).
+"""L4-21 — F5-b UNKNOWN reverse lookup: pure logic (response row parsing + candidate
+matching, no I/O).
 
 Spec: docs/specs/L4_execution_oms_and_exchange_v1.0.md §6 F5-b, §9 L4-21
 
-KIS는 client_order_id 개념이 없어(F5-a와 달리, kis/adapter.py 모듈
-docstring 참조) client id로 거래소 주문을 역조회할 수 없다 — 대신
-(symbol, side, quantity, price, 제출시각±30s)로 후보를 매칭한다(§6 F5-b).
-후보가 0개면 호출부(향후 unknown_resolver F5-b 경로)가 ABSENT 판정을
-이어가고, 1개면 채택, **2개 이상이면 임의로 하나를 고르지 않고 즉시
-ESCALATE**(`MultipleCandidateOrdersError`) — "자동 판단 금지" 원칙.
+KIS has no client_order_id concept (unlike F5-a, see the kis/adapter.py
+module docstring), so exchange orders can't be reverse-looked-up by client
+id — instead, candidates are matched by (symbol, side, quantity, price,
+submit time ±30s) (§6 F5-b). If there are 0 candidates, the caller (the
+future unknown_resolver F5-b path) proceeds with an ABSENT verdict; 1
+candidate is adopted; **2 or more candidates trigger an immediate
+ESCALATE** (`MultipleCandidateOrdersError`) rather than arbitrarily picking
+one — the "no automatic judgment" principle.
 
-`row_to_order`(inquire-psbl-rvsecncl/inquire-daily-ccld 공통 행 형태 →
-Order)는 place_order 응답으로 확인된 필드(KRX_FWDG_ORD_ORGNO/ODNO/
-ORD_TMD)와 이름 관례를 맞췄을 뿐 실계좌 왕복으로 확인하지 못했다
-(**미검증** — 다른 조회 메서드와 동일 원칙, trading_query_mixin.py 참조).
+`row_to_order` (maps the common row shape from inquire-psbl-rvsecncl/
+inquire-daily-ccld to an Order) only matches naming conventions against
+fields confirmed from the place_order response (KRX_FWDG_ORD_ORGNO/ODNO/
+ORD_TMD) and has not been confirmed by a real-account round trip
+(**unverified** — same principle as the other query methods, see
+trading_query_mixin.py).
 """
 from __future__ import annotations
 
@@ -32,7 +37,8 @@ _KST_OFFSET = timedelta(hours=9)
 
 @dataclass(frozen=True)
 class OrderMatchQuery:
-    """F5-b 매칭 기준 — UNKNOWN 처리 전 로컬 DB에 남아있던 원주문 속성."""
+    """F5-b matching criteria — the original order's attributes as they remained in the
+    local DB before UNKNOWN handling."""
 
     symbol: str
     side: OrderSide
@@ -42,10 +48,11 @@ class OrderMatchQuery:
 
 
 class MultipleCandidateOrdersError(FatalExchangeError):
-    """F5-b ESCALATE — 후보가 2개 이상이라 자동 채택이 안전하지 않다.
+    """F5-b ESCALATE — automatic adoption isn't safe because there are 2 or more candidates.
 
-    호출부는 이 예외를 잡아 운영자 recovery_case로 넘겨야 한다(§6 F5-b) —
-    첫 번째 후보를 임의로 고르는 폴백은 만들지 않는다(자동 판단 금지).
+    The caller must catch this exception and hand it off to an operator
+    recovery_case (§6 F5-b) — there is deliberately no fallback that
+    arbitrarily picks the first candidate (no automatic judgment).
     """
 
     def __init__(self, query: OrderMatchQuery, candidates: list[Order]) -> None:
@@ -60,10 +67,11 @@ class MultipleCandidateOrdersError(FatalExchangeError):
 
 
 def _parse_ord_tmd(order_date: str, ord_tmd: str | None) -> datetime | None:
-    """`ord_tmd`("HHMMSS")와 `order_date`("YYYYMMDD")를 합쳐 tz-aware UTC
-    시각을 만든다. 필드가 없거나 형식이 어긋나면 시각 매칭을 포기하고
-    None을 돌려준다 — `_within_window`가 None을 "시각 조건 통과"로 보수적
-    으로 처리해, 시각 정보 부재가 조용한 후보 누락으로 이어지지 않는다."""
+    """Combines `ord_tmd`("HHMMSS") and `order_date`("YYYYMMDD") into a
+    tz-aware UTC timestamp. If the field is missing or malformed, gives up
+    on time matching and returns None instead — `_within_window` treats
+    None conservatively as "time condition passed," so a missing timestamp
+    never causes a candidate to be silently dropped."""
     if not ord_tmd or len(ord_tmd) != 6 or len(order_date) != 8:
         return None
     try:
@@ -74,9 +82,10 @@ def _parse_ord_tmd(order_date: str, ord_tmd: str | None) -> datetime | None:
 
 
 def row_to_order(row: dict[str, Any], *, order_date: str) -> Order:
-    """inquire-psbl-rvsecncl(미체결)/inquire-daily-ccld(당일 체결) 공통
-    행 형태를 Order로 매핑한다. `tot_ccld_qty`가 없는 행(미체결 목록)은
-    체결수량 0으로 본다."""
+    """Maps the row shape common to inquire-psbl-rvsecncl (unfilled orders)
+    and inquire-daily-ccld (today's fills) to an Order. Rows without
+    `tot_ccld_qty` (the unfilled-orders list) are treated as having filled
+    quantity 0."""
     ord_qty = Decimal(row.get("ord_qty", "0"))
     filled_quantity = Decimal(row.get("tot_ccld_qty", "0"))
     if filled_quantity == 0:
@@ -96,8 +105,8 @@ def row_to_order(row: dict[str, Any], *, order_date: str) -> Order:
     return Order(
         order_id=uuid4(),
         exchange_order_id=f"{row.get('krx_fwdg_ord_orgno', '')}:{row.get('odno', '')}",
-        client_order_id="",  # KIS는 client_order_id 개념이 없음(어댑터 docstring 참조)
-        strategy_id="",  # 자리표시자 — 호출부가 DB 조회로 채워야 함
+        client_order_id="",  # KIS has no client_order_id concept (see adapter docstring)
+        strategy_id="",  # placeholder — the caller must fill this in via a DB lookup
         strategy_version="",
         symbol=row.get("pdno", ""),
         exchange="kis",
@@ -133,8 +142,9 @@ def _matches(order: Order, query: OrderMatchQuery) -> bool:
 
 
 def find_matching_order(query: OrderMatchQuery, candidates: list[Order]) -> Order | None:
-    """§6 F5-b — 후보 0개 → None(호출부가 ABSENT 판정을 이어감), 1개 →
-    채택, ≥2개 → `MultipleCandidateOrdersError`(ESCALATE, 자동 판단 금지)."""
+    """§6 F5-b — 0 candidates → None (caller proceeds with an ABSENT
+    verdict); 1 → adopted; ≥2 → `MultipleCandidateOrdersError` (ESCALATE, no
+    automatic judgment)."""
     matched = [order for order in candidates if _matches(order, query)]
     if len(matched) >= 2:
         raise MultipleCandidateOrdersError(query, matched)

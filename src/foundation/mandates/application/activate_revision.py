@@ -13,7 +13,8 @@ material change 게이트(75번 §2)는 원래 별도 승인자(approval_binding
 없다 — 대신 기존 `reauthenticate()`(비밀번호+MFA)와 FND-01 Trust Core의
 동의 신선도, 그리고 cooling-off 경과 시간 3중 게이트로 대체한다.
 
-CM-5(§9, CM-A3 "번들 활성화는 작성자와 다른 승인자를 요구한다"): when the
+CM-5 (§9, CM-A3 — spec text: "bundle activation requires an approver
+different from the author"): when the
 revision being activated was created via `propose_amendment(...,
 proposer_id=..., audit_repo=...)`, the proposer's identity is on record in
 `foundation_audit_event` (see `PROPOSED_ACTION` there). This command looks

@@ -1,4 +1,4 @@
-"""L4-16 — UNKNOWN 주문 해소(§4.2 F5-a, §6 F5-a) + L4-27 관측성 계측.
+"""L4-16 — UNKNOWN order resolution (§4.2 F5-a, §6 F5-a) + L4-27 observability instrumentation.
 
 Spec: docs/specs/L4_execution_oms_and_exchange_v1.0.md §2-C
 `application/unknown_resolver.py`, §4.2 UNKNOWN 행 3종
@@ -29,11 +29,12 @@ UnsupportedCapabilityError로 fail-closed").
 테스트는 실시간 대기 없이 backoff 스텝 수만 단언한다(test_split_brain
 d3227c9 선례와 동일 원칙, 모듈 docstring이 아니라 여기 실제로 지킨다).
 
-확정 쓰기 3분기(`apply_resolved_as`/`apply_resolved_absent`/`escalate`)는
-`unknown_resolver_writes.py`로 분리됐다(300줄 한도, 모듈 docstring 참조).
-`aios.oms.unknown_resolution.duration_seconds{outcome}`는 해소 시도 1건당
-(재시도 루프 전체가 끝나는 시점에) 정확히 1회 관측한다 — outcome은 최종
-분기 이름(RESOLVED_AS/RESOLVED_ABSENT/UNRESOLVED_LIMIT) 그대로다.
+The three commit-write branches (`apply_resolved_as`/`apply_resolved_absent`/
+`escalate`) were split out into `unknown_resolver_writes.py` (300-line cap,
+see that module's docstring). `aios.oms.unknown_resolution.duration_seconds
+{outcome}` is observed exactly once per resolution attempt (at the point the
+whole retry loop finishes) — `outcome` is the final branch name
+(RESOLVED_AS/RESOLVED_ABSENT/UNRESOLVED_LIMIT) verbatim.
 """
 from __future__ import annotations
 

@@ -1,7 +1,7 @@
 """AmendMandate 커맨드 — 현재 ACTIVE revision을 기준으로 새 PROPOSED revision을
 append한다.
 
-Spec: AIOSproject 45번 §3 (`AmendMandate` -> proposed revision),
+Spec: AIOSproject No. 45 §3 (`AmendMandate` -> proposed revision),
 docs/specs/L4_compliance_and_regulatory_v1.0.md#§9 CM-5.
 
 CM-5: when `proposer_id`/`audit_repo` are supplied, this command records who

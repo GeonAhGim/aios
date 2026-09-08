@@ -1,27 +1,30 @@
-"""L4-24 — 3자 대사(내부 orders vs 거래소 조회) 오케스트레이션 + I12 배선.
+"""L4-24 — 3-way reconciliation (internal orders vs exchange query) orchestration + I12 wiring.
 
 Spec: docs/specs/L4_execution_oms_and_exchange_v1.0.md §2-C `three_way_reconciler.py`,
 §9 L4-24, §4.1 I11/I12, §6 F7.
 
-범위 축소(문서화, `foundation/reconciliation/application/run_reconciliation.py`
-docstring과 같은 전례): 이 코드베이스에는 아직 OMS가 참조할 수 있는 내부
-잔고/포지션 원장이 없다("paper_control(FND-07)에 아직 fill/position/balance
-내부 원장이 없다") — 그래서 이 리프는 **주문만** 비교한다(local open orders
-vs `ExchangeAdapter.get_open_orders()`). 명세 §2-C 표가 나열한
-`get_order_history`/`get_fills`/`get_balance` 의존은 내부 원장이 생기기
-전까지는 비교할 대상이 없어 호출하지 않는다 — 원장이 생기면 `_compare`에
-BALANCE_MISMATCH/FILL_MISSING_INTERNAL 패스를 추가하기만 하면 된다
-(`reconcile_rules.compare_triple`이 이미 그 파라미터를 받는다).
+Scope reduction (documented, following the same precedent as the
+`foundation/reconciliation/application/run_reconciliation.py` docstring): this
+codebase does not yet have an internal balance/position ledger that OMS can
+reference ("paper_control (FND-07) does not yet have an internal
+fill/position/balance ledger") — so this leaf compares **orders only** (local
+open orders vs `ExchangeAdapter.get_open_orders()`). The `get_order_history`/
+`get_fills`/`get_balance` dependencies listed in the spec's §2-C table have
+nothing to compare against until the internal ledger exists, so they are not
+called — once the ledger exists, adding BALANCE_MISMATCH/FILL_MISSING_INTERNAL
+passes to `_compare` is all that's needed (`reconcile_rules.compare_triple`
+already accepts that parameter).
 
-I12("MATERIAL_MISMATCH/PROVIDER_UNAVAILABLE 집계 시 ACCOUNT 스코프 safety
-control ACTIVE 전까지 새 SUBMIT 거부")는 여기서 `activate_safety_control`/
-`deactivate_safety_control`(scope=ACCOUNT, scope_ref=str(tenant_id))을 직접
-호출해 강제한다. `submit_order`(`order_service/foundation_gate.py`)의
-`pre_submit_gate`는 이미 매 제출마다 `fence_pairs_for`의 ACCOUNT 쌍을 포함한
-5쌍 전부를 읽어 ACTIVE control이 하나라도 있으면 DENY한다(I-01, 변경 없이
-재사용) — 이 파일이 하는 배선은 그 기존 게이트가 볼 control 행을 만들고
-지우는 것뿐이다. 이 파일의 `activate_safety_control` 호출을 제거하면
-`test_three_way_reconciler.py`의 DENY 단언이 실패한다(배선 증명).
+I12 ("while MATERIAL_MISMATCH/PROVIDER_UNAVAILABLE is aggregated, deny new
+SUBMITs until the ACCOUNT-scope safety control is ACTIVE") is enforced here by
+calling `activate_safety_control`/`deactivate_safety_control` directly
+(scope=ACCOUNT, scope_ref=str(tenant_id)). `submit_order`'s
+(`order_service/foundation_gate.py`) `pre_submit_gate` already reads all five
+pairs from `fence_pairs_for`, including the ACCOUNT pair, on every submission
+and DENYs if any control is ACTIVE (I-01, reused unchanged) — the wiring this
+file does is only to create and remove the control rows that existing gate
+reads. Removing this file's `activate_safety_control` call would fail the
+DENY assertion in `test_three_way_reconciler.py` (proof of wiring).
 """
 from __future__ import annotations
 
@@ -58,11 +61,12 @@ DEFAULT_POLICY = MaterialityPolicy(
 _OPEN_STATUSES = (OrderStatus.SUBMITTED, OrderStatus.ACKNOWLEDGED, OrderStatus.PARTIALLY_FILLED)
 _BLOCKING = frozenset({Classification.MATERIAL_MISMATCH, Classification.PROVIDER_UNAVAILABLE})
 _BLOCK_REASON_PREFIX = "INTEGRITY_RECONCILIATION_MISMATCH"
-# 80번 §2 "typed severity"와 같은 순서. `compare_triple`은 HEALTHY 항목을
-# 결과에 아예 담지 않으므로(§9 DoD "정상 케이스는 0건 보고"), 빈 리스트는
-# `_aggregate`가 아니라 호출부가 직접 HEALTHY로 판정한다(빈 튜플→PENDING인
-# `foundation.reconciliation.domain.rules.aggregate_classification`은 "한
-# 번도 대사된 적 없음"을 뜻해 이 맥락과 다르다).
+# Same ordering as ticket #80 §2 "typed severity". Since `compare_triple`
+# never includes HEALTHY entries in its result (§9 DoD "the normal case
+# reports 0 items"), an empty list is judged HEALTHY directly by the caller,
+# not by `_aggregate` (an empty tuple -> PENDING in
+# `foundation.reconciliation.domain.rules.aggregate_classification` means
+# "never reconciled", which differs from this context).
 _SEVERITY = (
     Classification.MATERIAL_MISMATCH,
     Classification.PROVIDER_UNAVAILABLE,
@@ -72,8 +76,9 @@ _SEVERITY = (
 
 
 class ProviderUnavailableError(Exception):
-    """`adapter.get_open_orders()` 실패(타임아웃/네트워크/미인증) 내부 신호 —
-    이 모듈 밖으로 전파하지 않고 REC-003 `PROVIDER_UNAVAILABLE`로 흡수한다."""
+    """Internal signal for `adapter.get_open_orders()` failure (timeout/network/
+    unauthenticated) — absorbed as REC-003 `PROVIDER_UNAVAILABLE` instead of
+    propagating outside this module."""
 
 
 def _aggregate(materialities: list[Classification]) -> Classification:
@@ -87,10 +92,11 @@ def _aggregate(materialities: list[Classification]) -> Classification:
 
 
 def _provider_order_view(internal: OrderView, provider: ProviderOrder) -> OrderView:
-    """internal과 같은 `order_id`를 그대로 써 `compare_triple`의 dict 조인이
-    한 주문으로 매칭하게 한다(실제 매칭 키는 호출부가 이미 확인한
-    `client_order_id` — `OrderView.order_id`는 OMS 내부에서만 의미 있는
-    키라 provider 쪽엔 대응값이 없다)."""
+    """Reuses the same `order_id` as `internal` so `compare_triple`'s dict join
+    matches it as one order (the actual matching key is `client_order_id`,
+    already confirmed by the caller — `OrderView.order_id` is a key that is
+    only meaningful inside OMS, so the provider side has no corresponding
+    value)."""
     return internal.model_copy(
         update={
             "status": provider.status,
@@ -107,7 +113,7 @@ def _provider_order_view(internal: OrderView, provider: ProviderOrder) -> OrderV
 async def _fetch_provider_orders(adapter: ExchangeAdapter) -> list[ProviderOrder]:
     try:
         return await adapter.get_open_orders()
-    except Exception as exc:  # noqa: BLE001 — I11: 어댑터 실패는 0 가정이 아니라 PROVIDER_UNAVAILABLE
+    except Exception as exc:  # noqa: BLE001 — I11: adapter failure is PROVIDER_UNAVAILABLE, not an assumed 0
         raise ProviderUnavailableError(str(exc)) from exc
 
 
@@ -121,12 +127,14 @@ async def _connection_unavailable(pool: asyncpg.Pool, connection_id: UUID | None
 async def _apply_account_gate(
     risk_repo: RiskGateRepository, *, tenant_id: UUID, blocked: bool, reason: str
 ) -> None:
-    """I12 — MATERIAL_MISMATCH/PROVIDER_UNAVAILABLE가 열려 있는 동안 ACCOUNT
-    범위 safety control을 ACTIVE로 유지하고, 해소되면 즉시 해제한다.
-    REC-006 재실행 dedupe — `activate_safety_control`(risk_gate)은 자체
-    idempotency_digest를 채우지 않아(`insert_safety_control` 참조) 매 호출이
-    새 행을 만든다. 같은 `reason`의 ACTIVE ACCOUNT control이 이미 있으면
-    다시 만들지 않는 건 이 함수가 진다."""
+    """I12 — keeps the ACCOUNT-scope safety control ACTIVE while
+    MATERIAL_MISMATCH/PROVIDER_UNAVAILABLE is open, and deactivates it as soon
+    as it's resolved.
+    REC-006 rerun dedupe — `activate_safety_control` (risk_gate) does not
+    populate its own idempotency_digest (see `insert_safety_control`), so every
+    call creates a new row. This function is responsible for not creating a
+    duplicate when an ACTIVE ACCOUNT control with the same `reason` already
+    exists."""
     scope_ref = str(tenant_id)
     existing = [
         c
@@ -137,7 +145,8 @@ async def _apply_account_gate(
     if blocked:
         if any(c.reason == reason for c in existing):
             return
-        # 사람이 아니라 대사 엔진 자신의 판단(run_reconciliation.py와 동일 근거).
+        # This is the reconciliation engine's own judgment, not a human's (same rationale
+        # as run_reconciliation.py).
         await activate_safety_control(
             risk_repo,
             tenant_id=tenant_id,

@@ -1,20 +1,22 @@
 """DC-17 — Realtime market data fanout.
 
 Spec: docs/specs/L4_analytics_authoring_backtest_marketplace_v1.0.md §9.2 DC-17.
-선행: DC-9 `domain/entitlement/policy.py::allowed()`, PLT-06 `event_bus/envelope.py`.
+Prerequisites: DC-9 `domain/entitlement/policy.py::allowed()`, PLT-06 `event_bus/envelope.py`.
 
-Entitlement 판정은 전부 DC-9 `allowed()`에 위임한다 — 이 모듈은 tier/scope 비교
-로직을 재구현하지 않는다. 거부된 구독자는 큐에 아무것도 받지 못하고(0건 수신),
-거부 사유(`EntitlementDenialReason`)가 메트릭 라벨로 남는다(fail-closed).
+Entitlement decisions are delegated entirely to DC-9 `allowed()` — this module
+does not reimplement tier/scope comparison logic. A denied subscriber receives
+nothing on its queue (zero deliveries), and the denial reason
+(`EntitlementDenialReason`) is recorded as a metric label (fail-closed).
 
-Backpressure는 구독자별 큐 상한(`max_queue_depth`, 기본 1000)을 넘으면 가장
-오래된 항목부터 버린다(drop-oldest) — `asyncio.Queue`는 표준적으로 신규 투입을
-거부(drop-newest)하므로, 상한 직전에 수동으로 가장 오래된 항목을 비워 정확한
-drop-oldest 의미를 구현한다.
+Backpressure: once a subscriber's per-queue cap (`max_queue_depth`, default
+1000) is exceeded, the oldest item is dropped first (drop-oldest) —
+`asyncio.Queue` by default rejects the new insertion instead (drop-newest), so
+just before hitting the cap we manually evict the oldest item to implement
+true drop-oldest semantics.
 
-새 이벤트 버스나 새 봉투를 만들지 않는다 — PLT-06 `wrap()`이 publish 시점의
-PLT-01 `RequestContext`(trace_id/tenant_id)를 그대로 실어 각 구독자 큐에 넣는
-`EventEnvelope`를 만든다.
+No new event bus or envelope type is introduced — PLT-06 `wrap()` builds the
+`EventEnvelope` carrying the publish-time PLT-01 `RequestContext`
+(trace_id/tenant_id) as-is into each subscriber's queue.
 """
 from __future__ import annotations
 
@@ -39,7 +41,8 @@ DEFAULT_MAX_QUEUE_DEPTH = 1000
 
 @dataclass
 class Subscription:
-    """구독 1건 — 판정 대상(`subject`)과 원하는 피드(`feed`), 전달 큐."""
+    """One subscription — the entitlement subject (`subject`), the requested feed
+    (`feed`), and the delivery queue."""
 
     subscription_id: UUID
     subject: EntitlementSubject
@@ -55,8 +58,9 @@ def _topic_for(feed: FeedRequest) -> str:
 
 
 class RealtimeFanout:
-    """실시간 시세를 구독자별 큐로 팬아웃한다. 권한 판정과 backpressure drop
-    카운팅을 제외하면 순수 라우팅만 수행한다(직렬화·전송 계층은 이 모듈 밖)."""
+    """Fans out real-time market data to each subscriber's queue. Aside from
+    entitlement decisions and backpressure drop counting, this performs pure
+    routing only (serialization and transport layers live outside this module)."""
 
     def __init__(
         self,
@@ -65,7 +69,7 @@ class RealtimeFanout:
         metrics: MetricsPort | None = None,
     ) -> None:
         self._max_queue_depth = max_queue_depth
-        # PLT-10 패턴 — 기본값 NullMetrics, 전역 싱글턴 미사용(호출부 주입).
+        # PLT-10 pattern — defaults to NullMetrics, no global singleton (caller injects it).
         self._metrics: MetricsPort = metrics if metrics is not None else NullMetrics()
         self._subscriptions: dict[UUID, Subscription] = {}
 
@@ -78,10 +82,11 @@ class RealtimeFanout:
         self._subscriptions.pop(subscription_id, None)
 
     async def publish(self, feed: FeedRequest, payload: Any, *, as_of: datetime) -> None:
-        """`feed`를 구독 중인 대상 전원에게 권한 판정 후 전달한다.
+        """Delivers to every subscriber of `feed` after an entitlement check.
 
-        `as_of`는 DC-9 `allowed()`가 요구하는 결정론적 시계 입력이다(호출자가
-        tz-aware UTC로 넘긴다) — 이 함수는 현재 시각을 스스로 읽지 않는다.
+        `as_of` is the deterministic clock input required by DC-9 `allowed()`
+        (the caller passes tz-aware UTC) — this function never reads the
+        current time itself.
         """
         envelope: EventEnvelope | None = None
         for subscription in list(self._subscriptions.values()):
@@ -89,8 +94,8 @@ class RealtimeFanout:
                 continue
             entitlement = allowed(subscription.subject, feed, as_of)
             if not entitlement.allowed:
-                # Entitlement의 model_validator가 allowed=False -> reason 존재를
-                # 보장하지만(policy.py), mypy 관점에서는 여전히 Optional이다.
+                # Entitlement's model_validator guarantees allowed=False -> reason
+                # is present (policy.py), but mypy still sees it as Optional.
                 reason = entitlement.reason.value if entitlement.reason is not None else "unknown"
                 self._metrics.counter(
                     metric_names.MARKET_DATA_FANOUT_DENIED_COUNT_TOTAL,
@@ -107,7 +112,7 @@ class RealtimeFanout:
         if queue.qsize() >= self._max_queue_depth:
             try:
                 queue.get_nowait()
-            except asyncio.QueueEmpty:  # pragma: no cover — qsize>=max_queue_depth(>0)면 불가
+            except asyncio.QueueEmpty:  # pragma: no cover — impossible when qsize>=max_queue_depth
                 pass
             else:
                 self._metrics.counter(metric_names.MARKET_DATA_FANOUT_DROPPED_COUNT_TOTAL)

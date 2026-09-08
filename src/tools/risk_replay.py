@@ -1,17 +1,20 @@
-"""L4_risk_and_safety_v1.0.md#§2 146행, §9 R-54 — 야간 결정 재생 CLI.
+"""L4_risk_and_safety_v1.0.md#§2 line 146, §9 R-54 — nightly decision-replay CLI.
 
 python -m src.tools.risk_replay --decision-id <uuid> | --since <ISO8601>
 
-`replay_decision.py`(R-54)로 저장된 결정을 재계산해 WORM 원장과 대조한다.
-exit 0=전부 일치, 2=불일치 1건 이상(재계산 불일치 및 번들 소실 포함),
-1=도구 자체 예외(DB 접속 실패 등).
-`--since`는 task-2060 FA-15 `scripts/replay_verify.py`와 같은 고정
-윈도 관례(local_ci.py 매 커밋, §6 "재생 불일치 | 야간 replay" 배선).
+Recomputes decisions stored via `replay_decision.py` (R-54) and compares them
+against the WORM ledger. exit 0 = everything matches, 2 = one or more
+mismatches (including recompute mismatches and missing bundles),
+1 = the tool itself raised an exception (e.g. DB connection failure).
+`--since` follows the same fixed-window convention as task-2060 FA-15's
+`scripts/replay_verify.py` (local_ci.py on every commit, §6 "replay mismatch
+| nightly replay" wiring).
 
-`BundleNotFoundError`(저장된 rule_hash에 매칭되는 번들이 없음)는 조용히
-건너뛰지 않는다 — 다른 결정과 나란히 실패로 세어 exit 2를 내되, 배치 전체를
-죽이지 않고 나머지 decision_id를 계속 재생한다. 감사 로그에서 재현 불가
-결정이 그냥 사라지면 안 되기 때문이다(task-2174).
+`BundleNotFoundError` (no bundle matches the stored rule_hash) is not
+silently skipped — it is counted as a failure alongside other decisions,
+producing exit 2, without killing the whole batch; the remaining
+decision_ids continue to be replayed. An irreproducible decision must not
+simply vanish from the audit log (task-2174).
 """
 from __future__ import annotations
 

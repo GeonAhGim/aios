@@ -1,36 +1,41 @@
-"""6.9/L4-21 — KIS OAuth2 토큰 발급/캐싱 + 서명·전송 공통 로직.
+"""6.9/L4-21 — KIS OAuth2 token issuance/caching + shared signing/transport logic.
 
 Spec: 02_exchange_adapter_v1.2.md#§2.1,
       docs/specs/L4_execution_oms_and_exchange_v1.0.md §9 L4-21
 
-인증/엔드포인트(2026-08-28 KIS 공식 GitHub 예제
-github.com/koreainvestment/open-trading-api 소스코드 확인):
+Auth/endpoints (confirmed 2026-08-28 against the KIS official GitHub sample
+source at github.com/koreainvestment/open-trading-api):
 - OAuth2: POST /oauth2/tokenP, body {grant_type:"client_credentials",
-  appkey, appsecret} → {access_token, access_token_token_expired}(1일 유효)
-- Base URL: 실전 https://openapi.koreainvestment.com:9443,
-  모의투자 https://openapivts.koreainvestment.com:29443
-- 요청 헤더: Content-Type/Accept/charset + authorization: Bearer {token} +
+  appkey, appsecret} → {access_token, access_token_token_expired} (valid for 1 day)
+- Base URL: real trading https://openapi.koreainvestment.com:9443,
+  paper trading https://openapivts.koreainvestment.com:29443
+- Request headers: Content-Type/Accept/charset + authorization: Bearer {token} +
   appkey + appsecret + tr_id + custtype: "P"
-- tr_id 실전/모의 변환: 앞글자가 T/J/C면 모의투자는 'V'로 치환(예:
-  TTTC8434R → VTTC8434R). 시세조회(F로 시작)류는 실전/모의 동일 tr_id.
-- 응답 포맷: {rt_cd: "0"(성공)|기타, msg_cd, msg1, output/output1/output2}
+- tr_id real/paper substitution: if the leading character is T/J/C, paper
+  trading substitutes it with 'V' (e.g. TTTC8434R → VTTC8434R). Market-data
+  lookups (tr_id starting with F) use the same tr_id for both real and paper.
+- Response format: {rt_cd: "0"(success)|other, msg_cd, msg1, output/output1/output2}
 
-`adapter.py`(300줄 캡, L4-21 신규 로직 추가로 초과)가 토큰/전송 로직을 이
-파일로 분리했다(순수 이동, 동작 변경 없음 — bitget/trading_query_mixin.py
-분리와 동일 판단). `_resolve_tr_id`/`_PAPER_SWAP_PREFIXES`만은 `adapter.py`
-에 남긴다 — `tests/unit/exchanges/kis/test_overseas_futureoption_tr_reference
-.py::test_paper_swap_rule_mutation_breaks_tr_id_identity`가
-`monkeypatch.setattr(adapter_module, "_PAPER_SWAP_PREFIXES", ...)`로 그
-모듈 전역을 직접 패치한다 — 전역 참조는 정의된 모듈 기준으로 묶이므로
-(closure가 아니라 함수가 정의된 모듈의 네임스페이스), `_resolve_tr_id`를
-여기로 옮기면 그 몽키패치가 조용히 무효화된다.
+`adapter.py` (300-line cap, exceeded by new L4-21 logic) had its token/transport
+logic split out into this file (a pure move, no behavior change — the same
+call made for the bitget/trading_query_mixin.py split). Only `_resolve_tr_id`/
+`_PAPER_SWAP_PREFIXES` stay in `adapter.py` — because
+`tests/unit/exchanges/kis/test_overseas_futureoption_tr_reference
+.py::test_paper_swap_rule_mutation_breaks_tr_id_identity` directly patches that
+module's global via
+`monkeypatch.setattr(adapter_module, "_PAPER_SWAP_PREFIXES", ...)` — since a
+global reference is bound to the module it's defined in (not a closure, but
+the namespace of the module where the function is defined), moving
+`_resolve_tr_id` here would silently break that monkeypatch.
 
-재시도·백오프·서킷·클럭보정은 여기서 재구현하지 않고 `ResilientTransport`
-(L4-12, common/transport.py)에 위임한다. 토큰 캐시는 NH(BR-10,
-oauth_http.py)가 먼저 올린 `MonotonicTokenCache`를 재사용한다(이 리프가
-"KIS 이관은 후속 리프 몫"이었던 그 후속 리프다) — `asyncio.Lock`으로 감싸
-만료 상태에서 동시에 여러 코루틴이 들어와도 토큰 발급 엔드포인트는 정확히
-1회만 불린다(double-checked locking, DoD a).
+Retry/backoff/circuit-breaking/clock-skew handling is not reimplemented here;
+it's delegated to `ResilientTransport` (L4-12, common/transport.py). The token
+cache reuses the `MonotonicTokenCache` that NH (BR-10, oauth_http.py) landed
+first (this leaf is the follow-up leaf for what was noted as "the KIS
+migration is a follow-up leaf's job") — wrapped in an `asyncio.Lock` so that
+even when multiple coroutines arrive concurrently while the token is expired,
+the token issuance endpoint is called exactly once (double-checked locking,
+DoD a).
 """
 from __future__ import annotations
 
@@ -50,10 +55,11 @@ PAPER_BASE_URL = "https://openapivts.koreainvestment.com:29443"
 
 
 class _KISTokenTransportMixin:
-    """OAuth2 토큰 발급/캐싱 + 요청 전송 공통 로직. `adapter.py`의
-    `_KISHTTPClient(_KISTokenTransportMixin)`이 `_resolve_tr_id`를 얹어
-    완성한다 — `_headers()`가 부르는 `self._resolve_tr_id(tr_id)`는 인스턴스
-    속성 조회라 어느 파일에 있든 정상 동작한다(모듈 docstring 참조)."""
+    """Shared OAuth2 token issuance/caching + request transport logic.
+    `adapter.py`'s `_KISHTTPClient(_KISTokenTransportMixin)` completes this by
+    adding `_resolve_tr_id` — since `self._resolve_tr_id(tr_id)`, called from
+    `_headers()`, is an instance attribute lookup, it works correctly
+    regardless of which file it lives in (see the module docstring)."""
 
     def __init__(
         self,
@@ -82,7 +88,8 @@ class _KISTokenTransportMixin:
         if cached is not None:
             return cached
         async with self._token_lock:
-            # double-checked — lock 대기 중 다른 코루틴이 이미 발급했을 수 있다.
+            # double-checked — while waiting on the lock, another coroutine may
+            # have already issued the token.
             cached = self._token_cache.get()
             if cached is not None:
                 return cached
@@ -107,19 +114,22 @@ class _KISTokenTransportMixin:
 
         data = response.json()
         token: str = data["access_token"]
-        # KIS는 만료시각을 "YYYY-MM-DD HH:MM:SS" 문자열로 주지만(1일 유효),
-        # 여기서는 보수적으로 23시간만 캐싱해 만료 직전 재사용을 피한다.
+        # KIS returns the expiry time as a "YYYY-MM-DD HH:MM:SS" string (valid
+        # for 1 day), but here we conservatively cache for only 23 hours to
+        # avoid reusing the token right before it expires.
         self._token_cache.set(token, 23 * 3600)
         return token
 
     def _invalidate_token(self) -> None:
-        # ttl=0 → 다음 get()은 항상 만료로 본다(MonotonicTokenCache.get()의
-        # `<` 비교는 같은 순간이어도 통과하지 않는다 — 경합 없이 결정적).
+        # ttl=0 → the next get() always treats it as expired
+        # (MonotonicTokenCache.get()'s `<` comparison doesn't pass even for
+        # the same instant — deterministic, no race).
         self._token_cache.set("", 0.0)
 
     def _resolve_tr_id(self, tr_id: str) -> str:
-        """실전/모의 tr_id 치환. `adapter.py`의 `_KISHTTPClient`가 실제
-        구현을 얹는다(모듈 docstring 참조) — 이 스텁이 직접 불릴 일은 없다."""
+        """Real/paper tr_id substitution. `adapter.py`'s `_KISHTTPClient`
+        supplies the actual implementation (see the module docstring) — this
+        stub is never called directly."""
         raise NotImplementedError
 
     async def _headers(self, tr_id: str) -> dict[str, str]:
@@ -164,10 +174,11 @@ class _KISTokenTransportMixin:
         params: dict[str, Any] | None = None,
         body: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
-        """DoD(b) — 401(AUTH)은 토큰을 무효화하고 원요청을 정확히 1회만
-        재시도한다. 재시도에서도 401이면 더 반복하지 않고 그대로 예외로
-        표면화한다. HTTP 상태코드/네트워크 재시도·백오프는
-        `ResilientTransport`(DoD c)가 맡고 여기서 다시 구현하지 않는다."""
+        """DoD(b) — a 401 (AUTH) invalidates the token and retries the
+        original request exactly once. If the retry also gets a 401, it does
+        not retry again and surfaces the exception as-is. HTTP status
+        code/network retry and backoff are handled by `ResilientTransport`
+        (DoD c) and are not reimplemented here."""
         retried_after_auth = False
         while True:
             headers = await self._headers(tr_id)

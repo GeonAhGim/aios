@@ -279,6 +279,7 @@ class BitgetAdapter(
         )
 
     def venue_profile(self) -> VenueCapabilityProfile:
-        """L4-30 — `exchanges/bitget/venue_profile.py`의 스팟 프로파일
-        상수를 노출한다(ABC 기본 구현은 `UnsupportedCapabilityError`)."""
+        """L4-30 — exposes the spot profile constants from
+        `exchanges/bitget/venue_profile.py` (the ABC's default implementation
+        raises `UnsupportedCapabilityError`)."""
         return BITGET_SPOT_PROFILE

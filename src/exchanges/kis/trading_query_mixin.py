@@ -1,13 +1,14 @@
-"""6.9-보강/L4-21 — KISAdapter 주문 **조회** 메서드군(read-only, 자금 이동 없음).
+"""6.9-supplement/L4-21 — KISAdapter order **query** methods (read-only, no funds movement).
 
 Spec: 02d_kis_api_supplement_v1.md#§2(FD-4.1/4.4/20),
       docs/specs/L4_execution_oms_and_exchange_v1.0.md §6 F5-b, §9 L4-21
 
-`trading_mixin.py`(주문 변경계, place/cancel/modify)가 L4-21로 300줄 캡에
-닿아 조회 전용 메서드를 이 파일로 분리했다(bitget/trading_query_mixin.py와
-동일 판단, task-1519 선례). 기존 4개 메서드(get_buyable_amount 등)는
-순수 이동이고, `get_open_orders`/`get_order_history`/`find_order_by_match`
-가 이 리프의 신규 로직이다(§6 F5-b UNKNOWN 역조회).
+`trading_mixin.py` (the order-mutating group: place/cancel/modify) hit the
+300-line cap under L4-21, so the query-only methods were split out into this
+file (same call as bitget/trading_query_mixin.py, per the task-1519
+precedent). The existing 4 methods (get_buyable_amount, etc.) are a pure
+move; `get_open_orders`/`get_order_history`/`find_order_by_match` are the
+new logic in this leaf (§6 F5-b UNKNOWN reverse lookup).
 """
 from __future__ import annotations
 
@@ -23,22 +24,23 @@ from src.exchanges.kis.order_reverse_lookup import (
     row_to_order,
 )
 
-_EXCHANGE_ID = "KRX"  # Phase 1 대상(06번 §6.1)
+_EXCHANGE_ID = "KRX"  # Phase 1 target (doc 06 §6.1)
 _KST_OFFSET_HOURS = 9
 
 
 def _kst_today() -> str:
-    """KIS는 KST 달력일 기준으로 "당일"을 해석한다 — UTC 자정 이후
-    15~24시(KST로는 이미 다음 날) 구간에 UTC 날짜를 그대로 쓰면 어제
-    날짜로 조회돼 오늘 주문을 놓친다(order_reverse_lookup.row_to_order의
-    order_date 가정과도 맞춰야 한다: 그쪽은 이 값을 KST 달력일로 본다)."""
+    """KIS interprets "today" as a KST calendar day — between UTC 15:00 and
+    24:00 (already the next day in KST), using the raw UTC date would query
+    yesterday's date and miss today's orders (this must also line up with the
+    order_date assumption in order_reverse_lookup.row_to_order, which treats
+    this value as a KST calendar day)."""
     return (datetime.now(timezone.utc) + timedelta(hours=_KST_OFFSET_HOURS)).strftime("%Y%m%d")
 
 
 class _ReverseLookupClient(KISHTTPClient, Protocol):
-    """`find_order_by_match`가 같은 클래스의 `get_open_orders`/
-    `get_order_history`를 호출한다 — trading_mixin.py의 `_OrderMutatingClient`
-    와 동일 이유로 명시적으로 계약에 포함한다."""
+    """`find_order_by_match` calls `get_open_orders`/`get_order_history` on the
+    same class — included explicitly in the contract for the same reason as
+    `_OrderMutatingClient` in trading_mixin.py."""
 
     async def get_open_orders(self, symbol: str | None = None) -> list[Order]: ...
 
@@ -51,10 +53,12 @@ class KISTradingQueryMixin:
     async def get_buyable_amount(
         self: KISHTTPClient, symbol: str, price: Decimal
     ) -> dict[str, Any]:
-        """02d 스펙 §2(P0) — FD-4.1 사전검증(주문가능금액/수량). 공식
-        예제(inquire_psbl_order) 기준 최선 추정치, 라이브 검증 필요.
-        raw dict 반환 — 현금/신용/증거금 등 여러 금액 필드가 함께
-        내려와(§2 모델 재사용 원칙) 아직 모델화하지 않는다."""
+        """02d spec §2 (P0) — FD-4.1 pre-order validation (buyable amount/
+        quantity). Best-effort estimate based on the official example
+        (inquire_psbl_order); needs live verification.
+        Returns a raw dict — several amount fields (cash/margin/collateral,
+        etc.) come back together (per the §2 model-reuse principle), so this
+        is not modeled yet."""
         raw = await self._request(
             "GET",
             "/uapi/domestic-stock/v1/trading/inquire-psbl-order",
@@ -72,8 +76,8 @@ class KISTradingQueryMixin:
         return dict(raw.get("output", {}))
 
     async def get_sellable_quantity(self: KISHTTPClient, symbol: str) -> Decimal:
-        """02d 스펙 §2(P0). 공식 예제(inquire_psbl_sell) 기준 최선
-        추정치, 라이브 검증 필요."""
+        """02d spec §2 (P0). Best-effort estimate based on the official
+        example (inquire_psbl_sell); needs live verification."""
         raw = await self._request(
             "GET",
             "/uapi/domestic-stock/v1/trading/inquire-psbl-sell",
@@ -88,10 +92,11 @@ class KISTradingQueryMixin:
         return Decimal(output.get("ord_psbl_qty", "0"))
 
     async def get_cancelable_orders(self: KISHTTPClient) -> list[dict[str, Any]]:
-        """02d 스펙 §2(P0) — FD-4.4 정정 전 검증. 공식 예제
-        (inquire_psbl_rvsecncl) 기준 최선 추정치, 라이브 검증 필요. raw
-        dict 리스트 반환(정정취소 가능수량 등 KIS 전용 필드 위주라
-        Order 모델과 형태가 다름)."""
+        """02d spec §2 (P0) — FD-4.4 pre-modification validation. Best-effort
+        estimate based on the official example (inquire_psbl_rvsecncl); needs
+        live verification. Returns a raw dict list (mostly KIS-specific
+        fields such as the modifiable/cancelable quantity, so the shape
+        differs from the Order model)."""
         raw = await self._request(
             "GET",
             "/uapi/domestic-stock/v1/trading/inquire-psbl-rvsecncl",
@@ -110,9 +115,11 @@ class KISTradingQueryMixin:
     async def get_realized_pnl(
         self: KISHTTPClient, *, start_date: str | None = None, end_date: str | None = None
     ) -> list[dict[str, Any]]:
-        """02d 스펙 §2(P0) — FD-20(운용보고서) 보강용. 공식 예제
-        (inquire_balance_rlz_pl) 기준 최선 추정치, 라이브 검증 필요.
-        `start_date`/`end_date`는 "YYYYMMDD", 생략 시 당일."""
+        """02d spec §2 (P0) — supplementary support for FD-20 (operations
+        report). Best-effort estimate based on the official example
+        (inquire_balance_rlz_pl); needs live verification.
+        `start_date`/`end_date` are "YYYYMMDD"; default to today if
+        omitted."""
         today = datetime.now(timezone.utc).strftime("%Y%m%d")
         raw = await self._request(
             "GET",
@@ -132,9 +139,10 @@ class KISTradingQueryMixin:
         return list(raw.get("output1", []))
 
     async def get_open_orders(self: KISHTTPClient, symbol: str | None = None) -> list[Order]:
-        """§6 F5-b 역조회 1단계. 별도 "미체결 목록" 전용 TR을 공식 예제
-        에서 찾지 못해 inquire-psbl-rvsecncl(정정취소가능주문조회,
-        get_cancelable_orders와 동일 엔드포인트)을 재사용한다(**미검증**)."""
+        """§6 F5-b reverse-lookup step 1. Could not find a dedicated "open
+        order list" TR in the official examples, so this reuses
+        inquire-psbl-rvsecncl (the modify/cancel-eligible order inquiry, the
+        same endpoint as get_cancelable_orders) (**unverified**)."""
         raw = await self._request(
             "GET",
             "/uapi/domestic-stock/v1/trading/inquire-psbl-rvsecncl",
@@ -154,9 +162,10 @@ class KISTradingQueryMixin:
     async def get_order_history(
         self: KISHTTPClient, symbol: str | None = None, *, date: str | None = None
     ) -> list[Order]:
-        """§6 F5-b 역조회 2단계. `get_order()`가 단건 조회에 쓰는 것과
-        같은 TR(inquire-daily-ccld)을 ODNO 필터 없이 호출해 지정일(생략
-        시 당일, §6 F5-b "today") 전체 행을 돌려준다."""
+        """§6 F5-b reverse-lookup step 2. Calls the same TR that
+        `get_order()` uses for single-order lookup (inquire-daily-ccld),
+        without an ODNO filter, and returns all rows for the given date
+        (defaults to today per §6 F5-b "today")."""
         order_date = date or _kst_today()
         raw = await self._request(
             "GET",
@@ -188,12 +197,13 @@ class KISTradingQueryMixin:
     async def find_order_by_match(
         self: _ReverseLookupClient, query: OrderMatchQuery
     ) -> Order | None:
-        """§6 F5-b — client_order_id가 없는 KIS의 UNKNOWN 역조회.
-        `find_order_by_client_id`(F5-a, Bitget 전용)와 달리 symbol/side/
-        quantity/price/제출시각으로 후보를 매칭한다. 후보가 2개 이상이면
-        `find_matching_order`가 `MultipleCandidateOrdersError`를 던져
-        즉시 ESCALATE한다(자동 판단 금지) — 여기서 폴백으로 하나를 고르지
-        않는다."""
+        """§6 F5-b — UNKNOWN reverse lookup for KIS, which has no
+        client_order_id. Unlike `find_order_by_client_id` (F5-a,
+        Bitget-only), this matches candidates by symbol/side/quantity/price/
+        submission time. If two or more candidates match,
+        `find_matching_order` raises `MultipleCandidateOrdersError` to
+        ESCALATE immediately (no automatic judgment) — no fallback selection
+        is made here."""
         open_orders = await self.get_open_orders(query.symbol)
         history = await self.get_order_history(query.symbol)
         candidates: dict[str, Order] = {}

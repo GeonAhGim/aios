@@ -52,13 +52,15 @@ _SUCCESS_CODES = {"00000", "00166", "00221", "13578"}
 
 class _NHHTTPClient:
     """OAuth2 토큰 발급/캐싱 + 요청 전송 공통 로직. Mixin들이 self._request()로
-    접근한다.
+    access it.
 
-    L4-21 — 재시도·백오프·서킷·클럭보정은 여기서 재구현하지 않고
-    `ResilientTransport`(L4-12, common/transport.py)에 위임한다. 토큰
-    발급은 `asyncio.Lock`으로 감싸 만료 상태에서 동시에 여러 코루틴이
-    들어와도 발급 엔드포인트는 정확히 1회만 불린다(double-checked
-    locking, kis/adapter.py의 `_KISHTTPClient`와 동일 패턴, DoD a).
+    L4-21 — retry/backoff/circuit-breaking/clock-skew correction are not
+    reimplemented here; they are delegated to `ResilientTransport`
+    (L4-12, common/transport.py). Token issuance is wrapped in an
+    `asyncio.Lock` so that even when the token has expired and multiple
+    coroutines arrive concurrently, the issuance endpoint is called
+    exactly once (double-checked locking, the same pattern as
+    `_KISHTTPClient` in kis/adapter.py, DoD a).
     """
 
     def __init__(
@@ -86,7 +88,8 @@ class _NHHTTPClient:
         if cached is not None:
             return cached
         async with self._token_lock:
-            # double-checked — lock 대기 중 다른 코루틴이 이미 발급했을 수 있다.
+            # double-checked — while waiting on the lock, another coroutine may already
+            # have issued a token.
             cached = self._token_cache.get()
             if cached is not None:
                 return cached
@@ -118,8 +121,8 @@ class _NHHTTPClient:
         return token
 
     def _invalidate_token(self) -> None:
-        # ttl=0 → 다음 get()은 항상 만료로 본다(MonotonicTokenCache.get()의
-        # `<` 비교는 같은 순간이어도 통과하지 않는다 — 경합 없이 결정적).
+        # ttl=0 → the next get() always treats it as expired (MonotonicTokenCache.get()'s
+        # `<` comparison never passes even at the exact same instant — deterministic, no race).
         self._token_cache.set("", 0.0)
 
     async def _headers(self) -> dict[str, str]:
@@ -162,10 +165,11 @@ class _NHHTTPClient:
         params: dict[str, Any] | None = None,
         body: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
-        """DoD(b) — 401(AUTH)은 토큰을 무효화하고 원요청을 정확히 1회만
-        재시도한다. 재시도에서도 401이면 더 반복하지 않고 그대로 예외로
-        표면화한다. HTTP 상태코드/네트워크 재시도·백오프는
-        `ResilientTransport`(DoD c)가 맡고 여기서 다시 구현하지 않는다."""
+        """DoD(b) — on 401 (AUTH), invalidate the token and retry the original
+        request exactly once. If the retry also gets a 401, do not repeat
+        further — surface it as an exception as-is. HTTP status code /
+        network retry and backoff are handled by `ResilientTransport`
+        (DoD c) and are not reimplemented here."""
         retried_after_auth = False
         while True:
             headers = await self._headers()
