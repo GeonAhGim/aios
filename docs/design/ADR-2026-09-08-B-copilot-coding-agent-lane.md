@@ -44,3 +44,28 @@ Copilot CLI 1.0.83이 설치됐다(`copilot -p <prompt> --allow-all -C <dir>`로
 ## Rejected
 - 워커를 전부 Copilot으로 교체: 안전 게이트·마이그레이션·통제면은 우리 지침을 깊이 아는 워커가 맡아야 한다. 분리 레인이 맞다.
 - Copilot PR을 검증 없이 자동 머지: 어떤 에이전트의 출력도 게이트 없이 main에 들어가지 않는다는 원칙과 충돌.
+
+## 파일럿 결과 (2026-09-08, OPS-2 task-2149)
+
+PLT-44 잔여 배치를 `role: copilot` task로 만들어 오케스트레이터가 `gh agent-task create`를 호출하는 전
+과정을 관찰하려 했으나, **PR 생성 이전 단계(사전 점검)에서 막혀 파일럿을 시작하지 못했다.**
+
+- 명령 인터페이스: 정상. `gh agent-task create/list/view`는 여전히 동작한다(단, preview라 `list`에
+  `--repo`가 없다는 기존 관찰과 동일 — cwd를 대상 저장소로 둬야 한다).
+- 권한: **실패.** `gh auth status`와 `gh api user`가 이 실행 환경에서 "not logged in"으로 실패한다.
+  `GH_TOKEN`/`GITHUB_TOKEN` 환경변수는 설정돼 있지 않고, gh 자체 인증 저장소(호스트 설정)도 비어 있다.
+  `gh auth token`은 문자열을 하나 반환하지만(존재 여부·유효성을 검증하지 않는 명령이라는 gh 공식 동작대로),
+  그 토큰으로는 실제 API 호출(`gh api user`)이 인증되지 않는다 — 즉 사용 가능한 자격증명이 아니다.
+  2026-09-08 본문의 "실측: `gh agent-task create` 사용 가능"은 다른 세션/환경에서 이미 로그인된 상태로
+  확인된 것으로 보이며, 그 인증 상태가 이 worktree/워커 실행 환경까지 이어지지 않는다.
+- 게이트: 관찰 못 함(PR이 생성되지 않아 Actions Quality Gate에 도달하지 못했다).
+- 소요 시간·프리미엄 요청 수: 해당 없음(파일럿이 시작되지 않았다).
+- 조치: PLT-44 배치 절단·`role: copilot` task 생성·원본 task-1759 갱신은 보류했다 — 인증 없이 만들면
+  오케스트레이터가 매 주기 `gh agent-task create`를 재시도만 하다 계속 실패하는 무의미한 상태가 된다
+  (실패 시 task는 `assigned`로 그대로 남는 안전한 실패 모드이긴 하다, `spawn_copilot`이 로그만 남기고
+  continue한다).
+
+**PM/CA 결정 필요**: 이 함대의 실제 실행 환경(오케스트레이터가 상주하는 `C:\aios\pm` 프로세스, 혹은 향후
+ops/copilot 워커가 도는 환경)에 유효한 GitHub 자격증명을 어떻게 공급할지 — (a) 그 환경에서 `gh auth login`
+1회 수행, (b) Copilot coding agent·repo 스코프를 가진 PAT를 `GH_TOKEN`으로 주입, 둘 중 결정해야 파일럿을
+재시도할 수 있다.
