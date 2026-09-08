@@ -6,7 +6,7 @@ from datetime import datetime
 from decimal import Decimal
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, field_serializer
 
 from src.foundation.backtest.application.compute_metrics import compute_metrics
 from src.foundation.backtest.domain.models import BacktestResult
@@ -21,8 +21,6 @@ class EmptyEquityCurveError(ValueError):
 
 class TearsheetView(BaseModel):
     """Stable v1 snapshot of backtest performance metrics."""
-
-    model_config = ConfigDict(json_encoders={Decimal: str})
 
     period_start: datetime
     period_end: datetime
@@ -39,6 +37,24 @@ class TearsheetView(BaseModel):
     risk: dict[str, Decimal | None]
     warnings: list[str]
     schema_version: Literal["v1"] = "v1"
+
+    @field_serializer(
+        "initial_equity",
+        "final_equity",
+        "total_return",
+        "max_drawdown",
+        "sharpe",
+        "sortino",
+        "win_rate",
+        "turnover",
+        when_used="json",
+    )
+    def _serialize_decimal(self, value: Decimal | None) -> str | None:
+        return None if value is None else str(value)
+
+    @field_serializer("risk", when_used="json")
+    def _serialize_risk(self, value: dict[str, Decimal | None]) -> dict[str, str | None]:
+        return {key: None if metric is None else str(metric) for key, metric in value.items()}
 
 
 def build_tearsheet(result: BacktestResult) -> TearsheetView:

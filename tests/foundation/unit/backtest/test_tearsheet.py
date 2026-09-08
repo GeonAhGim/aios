@@ -5,6 +5,7 @@ from decimal import Decimal
 
 import pytest
 
+import src.foundation.backtest.application.tearsheet as tearsheet
 from src.foundation.backtest.application.tearsheet import (
     EmptyEquityCurveError,
     build_tearsheet,
@@ -15,6 +16,7 @@ from src.foundation.backtest.domain.models import (
     BacktestResult,
     CostModel,
     EquityPoint,
+    SimulatedFill,
 )
 
 _T0 = datetime(2026, 1, 1, tzinfo=timezone.utc)
@@ -69,6 +71,33 @@ def test_tearsheet_returns_none_for_unavailable_statistics() -> None:
     assert report.sharpe is None
     assert report.sortino is None
     assert report.win_rate is None
+
+
+def test_tearsheet_computes_metrics_once(monkeypatch: pytest.MonkeyPatch) -> None:
+    result = _result(["1000", "1001"])
+    calls = 0
+    original = tearsheet.compute_metrics
+
+    def spy(
+        *,
+        equity_curve: list[EquityPoint],
+        fills: list[SimulatedFill],
+        initial_equity: Decimal,
+        periods_per_year: int,
+    ) -> BacktestMetrics:
+        nonlocal calls
+        calls += 1
+        return original(
+            equity_curve=equity_curve,
+            fills=fills,
+            initial_equity=initial_equity,
+            periods_per_year=periods_per_year,
+        )
+
+    monkeypatch.setattr(tearsheet, "compute_metrics", spy)
+    build_tearsheet(result)
+
+    assert calls == 1
 
 
 def test_empty_equity_curve_fails_closed() -> None:
