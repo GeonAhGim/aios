@@ -13,6 +13,12 @@ worker_id=$expected_worker`(§5.1) — 0행이면 리스를 잃은 워커의 늦
 `ConcurrencyConflictError`(core/db/conditional_write, 105번 §2)를 그대로
 던진다 — 새 예외 클래스를 추가하지 않는다(기존 클래스 우선).
 
+`reclaim_stuck_sending`(task-2310, L4-18b, §6 F6 ①)은 `claim_batch`와 같은
+`FOR UPDATE SKIP LOCKED` claim 모양이지만 `state='SENDING' AND lease_until <
+now()`를 골라 `worker_id`/`lease_until`을 복구 워커 앞으로 재할당한다 —
+상태는 `SENDING`으로 그대로 두어(펜스 조건은 안 바뀜) 이어지는
+`mark_done/mark_retry` 호출이 같은 `expected_worker`로 그대로 통과한다.
+
 `payload`는 JSONB인데 asyncpg는 jsonb 코덱을 자동 등록하지 않는다(이
 프로젝트의 다른 어댑터도 동일, 예: `src/core/idempotency.py`) — 쓸 때
 `json.dumps` + `$N::jsonb`, 읽을 때 `json.loads`를 수동으로 맞춘다.
@@ -38,6 +44,24 @@ WITH claimed AS (
     WHERE id IN (
         SELECT id FROM order_command_outbox
         WHERE state = 'PENDING' AND not_before <= now()
+        ORDER BY created_at
+        LIMIT $3
+        FOR UPDATE SKIP LOCKED
+    )
+    RETURNING *
+)
+SELECT * FROM claimed ORDER BY created_at
+"""
+
+_RECLAIM_STUCK_SENDING_SQL = """
+WITH claimed AS (
+    UPDATE order_command_outbox
+    SET worker_id = $1,
+        lease_until = now() + make_interval(secs => $2::double precision),
+        updated_at = now()
+    WHERE id IN (
+        SELECT id FROM order_command_outbox
+        WHERE state = 'SENDING' AND lease_until < now()
         ORDER BY created_at
         LIMIT $3
         FOR UPDATE SKIP LOCKED
@@ -92,6 +116,12 @@ class OutboxRepository:
         self, conn: asyncpg.Connection, *, worker_id: str, limit: int, lease_sec: int
     ) -> list[OutboxRow]:
         records = await conn.fetch(_CLAIM_SQL, worker_id, lease_sec, limit)
+        return [_row_to_outbox_row(r) for r in records]
+
+    async def reclaim_stuck_sending(
+        self, conn: asyncpg.Connection, *, worker_id: str, limit: int, lease_sec: int
+    ) -> list[OutboxRow]:
+        records = await conn.fetch(_RECLAIM_STUCK_SENDING_SQL, worker_id, lease_sec, limit)
         return [_row_to_outbox_row(r) for r in records]
 
     async def mark_done(

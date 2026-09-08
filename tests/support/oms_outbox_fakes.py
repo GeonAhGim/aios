@@ -160,6 +160,30 @@ class InMemoryOutboxRepo:
             claimed.append(new)
         return claimed
 
+    async def reclaim_stuck_sending(
+        self, conn: FakeConn, *, worker_id: str, limit: int, lease_sec: int
+    ) -> list[OutboxRow]:
+        now = self._clock()
+        candidates = sorted(
+            (
+                r
+                for r in self.rows.values()
+                if r.state == "SENDING" and r.lease_until is not None and r.lease_until < now
+            ),
+            key=lambda r: r.created_at,
+        )[:limit]
+        claimed: list[OutboxRow] = []
+        for row in candidates:
+            new = row.model_copy(
+                update={
+                    "worker_id": worker_id, "lease_until": now + timedelta(seconds=lease_sec),
+                    "updated_at": now,
+                }
+            )
+            self._put(conn, new)
+            claimed.append(new)
+        return claimed
+
     async def mark_done(self, conn: FakeConn, id: UUID, *, expected_worker: str) -> None:
         row = self._fenced(id, expected_worker)
         self._put(conn, row.model_copy(update={"state": "DONE", "updated_at": self._clock()}))

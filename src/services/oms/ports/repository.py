@@ -105,6 +105,10 @@ class OutboxRepoPort(Protocol):
         self, conn: asyncpg.Connection, *, worker_id: str, limit: int, lease_sec: int
     ) -> list[OutboxRow]: ...
 
+    async def reclaim_stuck_sending(
+        self, conn: asyncpg.Connection, *, worker_id: str, limit: int, lease_sec: int
+    ) -> list[OutboxRow]: ...
+
     async def mark_done(
         self, conn: asyncpg.Connection, id: UUID, *, expected_worker: str
     ) -> None: ...
