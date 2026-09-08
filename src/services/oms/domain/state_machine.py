@@ -67,18 +67,19 @@ _TERMINAL_STATES = frozenset(
 )
 
 ALLOWED: Mapping[OrderStatus, frozenset[OrderStatus]] = {
-    # CREATED -> UNKNOWN(task-2184, 리뷰 task-2171 REJECT 수정) — legacy
-    # `order_service/submit.py`·`fenced_submit.py`의 동기 클레임 경로는
-    # VALIDATED/SUBMITTED를 별도 행으로 persist하지 않고 CREATED에서 곧장
-    # 어댑터를 부른다. 응답 유실(전송 후 확인 불가, I10)이면 이 claim 행이
-    # 갈 수 있는 유일한 정직한 목적지가 UNKNOWN이다 — 원래 §4.2 표의
-    # SUBMITTED->RESPONSE_LOST->UNKNOWN(아래 SUBMITTED 항목)과 같은 사유,
-    # 다만 legacy 경로가 SUBMITTED를 거치지 않아 CREATED에서 직접 허용한다.
-    # DB 트리거 `oms_enforce_order_transition`의 `_ALLOWED_PAIRS`(073beca589d5)는
-    # 이 커밋에서 갱신하지 않았다 — `oms_order_transition_cutover.cutover_at`가
-    # 아직 무장되지 않아(레거시 주문에는 I2 미적용) 당장 DB 레벨 충돌은 없지만,
-    # cutover를 무장하는 마이그레이션에서 `_ALLOWED_PAIRS`에 "CREATED->UNKNOWN"을
-    # 반드시 추가해야 한다(그전까지는 이 전이가 DB에서 거부된다).
+    # CREATED -> UNKNOWN (task-2184, fixes review task-2171 REJECT) — the
+    # legacy synchronous claim path in `order_service/submit.py`/
+    # `fenced_submit.py` never persists VALIDATED/SUBMITTED as separate rows;
+    # it calls the adapter straight from CREATED. On response loss (sent but
+    # unconfirmed, I10) the only honest destination for that claim row is
+    # UNKNOWN — same reason as the SUBMITTED->RESPONSE_LOST->UNKNOWN pair
+    # below, just allowed directly from CREATED because the legacy path
+    # never visits SUBMITTED. The DB trigger's `_ALLOWED_PAIRS`
+    # (073beca589d5, `oms_enforce_order_transition`) is NOT updated in this
+    # commit — `oms_order_transition_cutover.cutover_at` is still unarmed
+    # (I2 doesn't apply to legacy orders yet) so there's no DB-level conflict
+    # today, but the migration that arms cutover MUST add "CREATED->UNKNOWN"
+    # to `_ALLOWED_PAIRS`, or this transition will be rejected at the DB.
     OrderStatus.CREATED: frozenset(
         {OrderStatus.VALIDATED, OrderStatus.FAILED, OrderStatus.UNKNOWN}
     ),

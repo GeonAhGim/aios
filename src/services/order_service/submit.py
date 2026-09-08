@@ -63,10 +63,10 @@ class OrderDeniedByRiskGateError(Exception):
 async def _mark_claim_send_outcome(
     conn: asyncpg.Connection, claimed: Order, *, user_id: UUID, exc: BaseException
 ) -> OrderStatus:
-    """전송 시도 중 예외가 난 claim 행을 CREATED→{FAILED,UNKNOWN}으로 확정한다
-    (oms `order_repository.transition()` 재사용, task-1566). task-2184 —
-    `dispatch_outcome.classify_submit_failure`(재구현 금지) 재사용:
-    `SendOutcome.not_sent`가 참(미전송 확정)일 때만 FAILED, 그 외는 UNKNOWN."""
+    """Finalizes a claim row that errored during send: CREATED->{FAILED,
+    UNKNOWN} (reuses oms `order_repository.transition()`, task-1566).
+    task-2184 — reuses `dispatch_outcome.classify_submit_failure` (do not
+    reimplement): FAILED only if `SendOutcome.not_sent`, else UNKNOWN."""
     outcome = classify_submit_failure(exc)
     target_status = OrderStatus.FAILED if outcome.not_sent else OrderStatus.UNKNOWN
     event_kind = OrderEvent.VALIDATION_FAILED if outcome.not_sent else OrderEvent.RESPONSE_LOST
@@ -167,10 +167,11 @@ async def submit_order(
     # client_order_id로 이 함수를 처음부터 다시 거쳐야 한다(이 함수 내부에서
     # 자체 재시도하지 않는다) — 그대로 전파한다.
     #
-    # task-1566(L4-09) 편차 — 예전엔 claim 행을 지웠다(레드팀 #2026-09-02-19).
-    # 지금은 CREATED→{FAILED,UNKNOWN} 확정만 하고 행은 남긴다(감사 흔적
-    # 보존). task-2184(리뷰 task-2171 REJECT) — 미전송 확정(회로 OPEN 등)만
-    # FAILED, 응답 유실(예: httpx.ReadTimeout)은 UNKNOWN(FAILED는 I4 터미널).
+    # task-1566(L4-09) deviation — this used to delete the claim row
+    # (redteam #2026-09-02-19); now it finalizes CREATED->{FAILED,UNKNOWN}
+    # and keeps the row. task-2184 (fixes review task-2171 REJECT) —
+    # confirmed not-sent (circuit OPEN etc.) goes FAILED; response loss
+    # (e.g. httpx.ReadTimeout) goes UNKNOWN (FAILED is an I4 terminal).
     try:
         submitted = await adapter.place_order(claimed)
     except Exception as exc:
