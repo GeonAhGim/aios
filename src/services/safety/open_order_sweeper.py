@@ -36,7 +36,8 @@ CANCEL_REQUESTED로 전이된 행은 후보 선별 쿼리(`status IN (...)`)에 
 DB 상태를 되돌리지 않는다(CANCEL_REQUESTED로 남겨 재시도/조회 대상이
 되게 한다).
 
-알려진 한계(task-2406 DoD(e), 미해결 — needs_decision 사유): `orders.status =
+알려진 한계(task-2406 DoD(e), 문서화된 갭으로 수용 — 해소는 task-2432 위임):
+`orders.status =
 'CANCEL_REQUESTED'`는 L4-06 `OrderStatus`(01번 공유접점 동결 계약, `src/
 data/models/trading.py`)에 없는 kill-switch 전용 문자열이다. 이 값은
 DoD(c)의 멱등성(재선별 쿼리가 `status IN ('SUBMITTED','PARTIALLY_FILLED')`만
@@ -54,7 +55,10 @@ REQUESTED')와 orders 투영이 접는 상태(자기루프라 안 바뀜)가 여
 그 주문은 replay_verify의 orders 스트림에서 불일치로 잡힌다(크래시는 아님).
 `OrderStatus`/073beca589d5 `_ALLOWED_PAIRS`에 실제 `CANCEL_REQUESTED` 상태를
 추가하는 마이그레이션 없이는(DoD(f)가 새 마이그레이션을 금지) 이 불일치
-자체를 없앨 수 없다 — DoD(e) "0건"은 이 리프 단독으로는 못 채운다."""
+자체를 없앨 수 없다 — DoD(e) "0건"은 이 리프 단독으로는 못 채운다. 재현:
+`test_sweep_open_orders_event_does_not_crash_replay_verify_timeline_read`
+(크래시는 없음을 증명, 투영 불일치 자체는 남음). 승격 마이그레이션은
+task-2432로 분리했다(§C 직렬화상 마이그레이션 사슬 뒤)."""
 from __future__ import annotations
 
 import hashlib
@@ -76,6 +80,8 @@ logger = logging.getLogger(__name__)
 
 _CANCELABLE_STATUSES = ("SUBMITTED", "PARTIALLY_FILLED")
 _CANCELABLE_STATUSES_SQL = ", ".join(f"'{s}'" for s in _CANCELABLE_STATUSES)
+# CANCEL_REQUESTED is not an OrderStatus member yet; replay_verify orders
+# projection cannot byte-match until task-2432 promotes it.
 _TO_STATUS = "CANCEL_REQUESTED"
 _EVENT = "CANCEL_REQUESTED"
 
