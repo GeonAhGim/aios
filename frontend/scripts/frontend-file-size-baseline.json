@@ -1,10 +1,8 @@
 {
   "note": "task-2026 P6 ratchet floor. Only growth past these counts fails; shrinking is reported as improvable but never auto-applied here. New violations not listed here fail at the 300-line limit directly. Counts are exact `wc -l` measurements, not rounded.",
-  "generated_at": "2026-09-07T02:40:00+00:00",
+  "generated_at": "2026-09-08T05:21:19+00:00",
   "files": {
-    "packages/chart-engine/src/compute/clientEngine.ts": 442,
     "apps/web/src/routes/chart/ChartToolbar.tsx": 369,
-    "packages/api-client/src/apiPaths.ts": 345,
     "packages/chart-engine/src/index.ts": 340
   }
 }
