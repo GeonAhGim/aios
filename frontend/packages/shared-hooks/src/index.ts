@@ -67,6 +67,15 @@ export {
   useRejectRequest,
 } from "./useAdmin";
 export { useSafetyControls, useDeactivateSafetyControl, useEvaluateRecovery } from "./useRiskGate";
+export {
+  useMandateStatus,
+  useCreateMandateDraft,
+  useProposeMandateAmendment,
+  useActivateMandateRevision,
+  usePauseMandate,
+  useResumeMandate,
+  useEvaluateMandatePolicy,
+} from "./useMandates";
 export { useWalletBalance, useRequestTopup } from "./useWallet";
 export { useMyAlerts, useCreateAlert, useCancelAlert } from "./useAlerts";
 export {

@@ -24,6 +24,7 @@ import { InstrumentsPage } from "./routes/market/InstrumentsPage";
 import { ListingDetailPage } from "./routes/marketplace/ListingDetailPage";
 import { MarketplaceBrowsePage } from "./routes/marketplace/MarketplaceBrowsePage";
 import { SellStrategyPage } from "./routes/marketplace/SellStrategyPage";
+import { MandatesPage } from "./routes/mandates/MandatesPage";
 import { MfaSetupPage } from "./routes/onboarding/MfaSetupPage";
 import { RiskAssessmentPage } from "./routes/onboarding/RiskAssessmentPage";
 import { PortfolioPage } from "./routes/portfolio/PortfolioPage";
@@ -72,6 +73,7 @@ export const router = createBrowserRouter([
   { path: "/marketplace/:listingId", element: protect(<ListingDetailPage />) },
   { path: "/executions", element: protect(<ExecutionControlPage />) },
   { path: "/portfolio", element: protect(<PortfolioPage />) },
+  { path: "/mandates", element: protect(<MandatesPage />) },
   { path: "/reports", element: protect(<ReportsPage />) },
   { path: "/wallet", element: protect(<WalletPage />) },
   { path: "/wallet/ledger", element: protect(<LedgerHistoryPage />) },

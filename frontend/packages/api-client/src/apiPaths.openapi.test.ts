@@ -115,13 +115,9 @@ const UNREGISTERED_ROUTE_WHITELIST: Readonly<Record<string, string>> = {
   "/v1/foundation/connections/{connection_id}:sync": "계정 연동 동기화 액션 UI가 없다",
   "/v1/foundation/evidence/chain:verify": "증빙 체인 검증 화면이 없다",
   "/v1/foundation/evidence/timeline": "증빙 타임라인 뷰어 화면이 없다",
-  "/v1/foundation/mandates/amendments": "위임장(mandate) 관리 화면이 없다(apps/web/src/routes에 mandates 없음)",
-  "/v1/foundation/mandates/drafts": "위임장 관리 화면이 없다",
-  "/v1/foundation/mandates/mandate:pause": "위임장 관리 화면이 없다",
-  "/v1/foundation/mandates/mandate:resume": "위임장 관리 화면이 없다",
-  "/v1/foundation/mandates/policy:evaluate": "위임장 관리 화면이 없다",
-  "/v1/foundation/mandates/revisions/{revision_id}:activate": "위임장 관리 화면이 없다",
-  "/v1/foundation/mandates/status": "위임장 관리 화면이 없다",
+  // task-2336(FE-OPS-2): MandatesPage가 status/drafts/amendments/revisions/
+  // {revision_id}:activate/mandate:pause/mandate:resume/policy:evaluate 7건 전부를
+  // mandates.*로 등록했다 — 여기 남아 있던 7개 항목(task-2168 원 목록)을 제거한다.
   "/v1/foundation/performance-statements": "실적 명세서 화면이 없다",
   "/v1/foundation/performance-statements/{statement_id}": "실적 명세서 화면이 없다",
   "/v1/foundation/performance-statements/{statement_id}:correct": "실적 명세서 정정 액션 UI가 없다",

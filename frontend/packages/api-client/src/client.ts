@@ -5,6 +5,7 @@ import { withAuth } from "./clients/auth";
 import { withExchange } from "./clients/exchange";
 import { withExecutions } from "./clients/executions";
 import { withFoundation } from "./clients/foundation";
+import { withMandates } from "./clients/mandates";
 import { withMarketplace } from "./clients/marketplace";
 import { withNotifications } from "./clients/notifications";
 import { withPlatform } from "./clients/platform";
@@ -23,8 +24,10 @@ const ComposedApiClient = withPlatform(
         withScripts(
           withStrategyBuilder(
             withFoundation(
-              withRiskGate(
-                withExchange(withExecutions(withPortfolio(withAccount(withAuth(ApiClientBase))))),
+              withMandates(
+                withRiskGate(
+                  withExchange(withExecutions(withPortfolio(withAccount(withAuth(ApiClientBase))))),
+                ),
               ),
             ),
           ),

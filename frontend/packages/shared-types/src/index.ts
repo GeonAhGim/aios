@@ -10,6 +10,7 @@ export * from "./notification";
 export * from "./deviceToken";
 export * from "./admin";
 export * from "./riskGate";
+export * from "./mandates";
 export * from "./wallet";
 export * from "./walletBalance";
 export * from "./alert";

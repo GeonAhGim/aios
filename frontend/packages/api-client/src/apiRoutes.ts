@@ -273,4 +273,23 @@ export const API_ROUTES = defineApiRoutes({
     null,
     true,
   ),
+
+  // task-2336(FE-OPS-2): src/api/routers/foundation/mandates.py 원문 확인 —
+  // `APIRouter(prefix="/v1/foundation/mandates")`(mandates.py:43), router_registry.py
+  // include_router(추가 prefix 없음). 7라우트 전부 `-> ApiResponse[...]` + `ok(...)`
+  // (:50·:66·:88·:101·:135·:147·:159)라 envelope=true. riskGate.*와 동일 사유로
+  // mount_v1(PLT-16) 미도달이라 v1Path=null. contracts/openapi/v1.json에 7경로 전부
+  // 실재함을 python으로 직접 확인(paths 키 대조) — STALE_SNAPSHOT_WHITELIST 대상 아님.
+  "mandates.status": route("/v1/foundation/mandates/status", true, null, true),
+  "mandates.drafts.create": route("/v1/foundation/mandates/drafts", true, null, true),
+  "mandates.amendments.propose": route("/v1/foundation/mandates/amendments", true, null, true),
+  "mandates.revisions.activate": route(
+    "/v1/foundation/mandates/revisions/:revisionId:activate",
+    true,
+    null,
+    true,
+  ),
+  "mandates.mandate.pause": route("/v1/foundation/mandates/mandate:pause", true, null, true),
+  "mandates.mandate.resume": route("/v1/foundation/mandates/mandate:resume", true, null, true),
+  "mandates.policy.evaluate": route("/v1/foundation/mandates/policy:evaluate", true, null, true),
 });
