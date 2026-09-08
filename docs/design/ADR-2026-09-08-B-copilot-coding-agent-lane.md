@@ -36,6 +36,22 @@ Copilot CLI 1.0.83이 설치됐다(`copilot -p <prompt> --allow-all -C <dir>`로
   한도 감지는 출력 문구·exit code로 하고 `model_limits.json`의 `copilot` 항목으로 기존 fallback 체계에 편입한다.
 두 레인 모두 D2 기준과 D3 게이트를 그대로 적용한다. 안전 게이트·마이그레이션·통제면은 여전히 Claude 워커 몫이다.
 
+### D5. 엔진 매트릭스와 라우팅 (2026-09-08 추가 — 사용자가 Codex·Copilot 유료, Cursor 무료 사용을 위임)
+실측: Copilot CLI 설치됨. Codex CLI(`codex exec`)와 Cursor 헤드리스(`cursor-agent`)는 미설치(데스크톱 `cursor` 3.18.9만 있음) — OPS-4가 설치·검증한다.
+
+| 엔진 | 과금 | 실행 위치 | 맡기는 일 | 순위 |
+|---|---|---|---|---|
+| Claude sonnet 워커 | Max 공유 한도 | 로컬 | 안전 게이트·마이그레이션·통제면·명세 밀도 높은 리프 | 필수 영역 전담 |
+| Copilot 코딩 에이전트 | Copilot 기본 유료(별도 한도) | GitHub 러너(RAM 0) | 기계적·대량·테스트로 반증되는 리프 | 1순위 |
+| Codex CLI (`codex exec`) | ChatGPT 기본 유료(별도 한도) | 로컬 | 테스트 생성·리팩터·타입/주석 감축 같은 코드 일괄 작업 | 2순위 |
+| Copilot CLI (`copilot -p`) | Copilot 한도 | 로컬 | Codex 한도 소진 시 대체 | 3순위 |
+| Cursor (`cursor-agent -p`) | 무료(소량) | 로컬 | 문서 정합성·소규모 lint 수정만. 한도 도달 시 자동 제외 | 보조 |
+
+라우팅 원칙: (1) D2 기준을 통과하는 리프는 외부 엔진 우선, Anthropic 한도는 필수 영역에 남긴다.
+(2) 엔진별 한도는 `model_limits.json`의 엔진 키로 기록해 오케스트레이터가 자동으로 다음 순위로 넘긴다.
+(3) 어떤 엔진 출력도 D3 게이트(로컬 CI 16종 / Actions) 없이 main에 들어가지 않는다.
+(4) 엔진별 완료율·재시도율·게이트 실패율을 task JSON에 남겨 2주 뒤 순위를 재평가한다.
+
 ## Consequences
 - Anthropic 한도와 무관한 병렬 실행력이 생기고, 로컬 RAM 상한과도 무관하다.
 - 구현은 ops 풀 task로 한다(OPS-1 레인 구현, OPS-2 파일럿 1건). CA는 결정만 한다(ADR-2026-09-08 위임 원칙).
