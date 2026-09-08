@@ -111,6 +111,47 @@ describe("buildPlotLayer", () => {
     expect(result.issues).toEqual([{ overlayId: "WEIRD", output: "value", code: "PLOT_RENDER_UNKNOWN_KIND" }]);
   });
 
+  it("negative: fill_between partner series with a mismatched length is rejected, not silently skipped", () => {
+    const overlays = [
+      overlay("MISMATCHED_BAND", "main-overlay", [
+        { name: "upperband", series: "line" },
+        { name: "lowerband", series: "line" },
+      ]),
+    ];
+    const points = CANDLES.map((c, i) => ({ time: c.openTimeMs, value: 100 + i }));
+    const overlaySeries = new Map<string, OverlaySeriesByOutput>([
+      [
+        "MISMATCHED_BAND",
+        new Map([
+          ["upperband", series(points)],
+          ["lowerband", series(points.slice(0, points.length - 1))],
+        ]),
+      ],
+    ]);
+    const overlayPlotSpecs = new Map([
+      [
+        "MISMATCHED_BAND",
+        new Map<string, unknown>([
+          [
+            "upperband",
+            { kind: "band", scale: "overlay", default_pane: "price", fill_between: "lowerband", color_rule: null, precision: null, legend_format: null },
+          ],
+        ]),
+      ],
+    ]);
+    const result = buildPlotLayer({
+      overlays,
+      overlaySeries,
+      overlayPlotSpecs,
+      mainScale: MAIN_SCALE,
+      ownScale: MAIN_SCALE,
+      timeScale: TIME_SCALE,
+    });
+    expect(result.issues).toEqual([{ overlayId: "MISMATCHED_BAND", output: "upperband", code: "FILL_BETWEEN_LENGTH_MISMATCH" }]);
+    const { container } = render(<svg>{result.nodes}</svg>);
+    expect(container.querySelectorAll("polygon")).toHaveLength(0);
+  });
+
   it("an overlay with no series data yet draws nothing and raises no issue (not-yet-computed is not a rejection)", () => {
     const overlays = [overlay("NOT_COMPUTED_YET", "sub-pane", [{ name: "value", series: "line" }])];
     const result = buildPlotLayer({

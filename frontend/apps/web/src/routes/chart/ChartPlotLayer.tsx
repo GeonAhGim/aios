@@ -24,6 +24,14 @@
 // — that is the DoD's "adding an indicator needs zero screen-code changes"
 // property, proven by __tests__/ChartPlotLayer.test.tsx registering two
 // brand-new PlotSpec kinds against this same function.
+//
+// CH-15c (task-2127) — `render/fillBetween.ts`'s `FillBetweenError` is caught
+// here directly (deep import below), not just left as an internal
+// `plotRenderers.ts` detail: without this catch, a `fill_between` PlotSpec
+// whose partner series has a different length/timestamps than declared would
+// throw past this function's try/catch and blank the whole plot layer,
+// instead of surfacing one `PlotLayerIssue` for the offending output the way
+// every other malformed-spec case already does.
 import type { ReactNode } from "react";
 import type { StreamCandle } from "@aios/chart-engine/src/data/candleStream";
 import type { OverlayEntry } from "@aios/chart-engine/src/indicators/overlayRegistry";
@@ -42,6 +50,7 @@ import {
   renderPlot,
 } from "@aios/chart-engine/src/render/plotRenderers";
 import { ScaleBindingError, bindScale, type ScaleBindingErrorCode } from "@aios/chart-engine/src/render/scaleBinding";
+import { FillBetweenError, type FillBetweenErrorCode } from "@aios/chart-engine/src/render/fillBetween";
 
 /** No server `plots` field exists yet (IND-12) — a raw, undecoded override lets a caller (or a test) supply one anyway; `decodePlotSpec` still fail-closes on it. */
 export type OverlaySeriesByOutput = ReadonlyMap<string, readonly PlotSeriesPoint[]>;
@@ -57,7 +66,7 @@ export type OverlayPlotSpecOverrides = ReadonlyMap<string, unknown>;
 export interface PlotLayerIssue {
   readonly overlayId: string;
   readonly output: string;
-  readonly code: PlotRenderErrorCode | ScaleBindingErrorCode;
+  readonly code: PlotRenderErrorCode | ScaleBindingErrorCode | FillBetweenErrorCode;
 }
 
 export const PLOT_ERROR_REASONS: Record<PlotLayerIssue["code"], string> = {
@@ -68,6 +77,8 @@ export const PLOT_ERROR_REASONS: Record<PlotLayerIssue["code"], string> = {
   PLOT_RENDER_FILL_TARGET_MISSING: "채움 대상 시리즈를 찾을 수 없습니다.",
   SCALE_BINDING_UNKNOWN_SCALE: "알 수 없는 스케일(scale)입니다.",
   SCALE_BINDING_NON_POSITIVE_FOR_LOG: "로그 스케일에는 0 이하 값을 표시할 수 없습니다.",
+  FILL_BETWEEN_LENGTH_MISMATCH: "채움(fill_between) 두 시리즈의 길이가 서로 다릅니다.",
+  FILL_BETWEEN_TIME_MISMATCH: "채움(fill_between) 두 시리즈의 시간축이 서로 다릅니다.",
 };
 
 /** Candle high/low across the whole series — the "overlay" scale's domain (main pane). */
@@ -194,7 +205,7 @@ export function buildPlotLayer(input: PlotLayerInput): PlotLayerResult {
         const projection = bindScale(spec.scale, { mainScale, ownScale, timeScale });
         renderPlot(spec, output.name, seriesByOutput, projection, styleFor(output.name, index), target);
       } catch (err) {
-        if (err instanceof PlotRenderError || err instanceof ScaleBindingError) {
+        if (err instanceof PlotRenderError || err instanceof ScaleBindingError || err instanceof FillBetweenError) {
           issues.push({ overlayId: overlay.id, output: output.name, code: err.code });
         } else {
           throw err;
