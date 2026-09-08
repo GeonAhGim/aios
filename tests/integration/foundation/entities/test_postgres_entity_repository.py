@@ -14,6 +14,7 @@ import pytest
 from src.core.db.conditional_write import ConcurrencyConflictError
 from src.data.models.base import Currency
 from src.foundation.entities.contracts.v1 import Fund, LegalEntity, Portfolio, SubAccount
+from src.foundation.entities.domain.hierarchy import HierarchyViolationError
 from tests.integration.conftest import create_test_user
 from tests.integration.foundation.entities.conftest import build_hierarchy, now_utc
 
@@ -128,6 +129,15 @@ async def test_sub_account_rejects_reference_to_missing_portfolio(pool, repo):
 
 async def test_close_legal_entity_then_reclose_raises_concurrency_conflict(pool, repo):
     seeded = await build_hierarchy(pool, repo)
+    # 상위 폐쇄는 활성 하위가 없어야 하므로(NOT EXISTS 절, FA-2) 최하위부터
+    # 순서대로 닫는다.
+    await repo.close_sub_account(
+        seeded.tenant_id, seeded.sub_account.sub_account_id, closed_at=now_utc()
+    )
+    await repo.close_portfolio(
+        seeded.tenant_id, seeded.portfolio.portfolio_id, closed_at=now_utc()
+    )
+    await repo.close_fund(seeded.tenant_id, seeded.fund.fund_id, closed_at=now_utc())
 
     closed = await repo.close_legal_entity(
         seeded.tenant_id, seeded.legal_entity.entity_id, closed_at=now_utc()
@@ -168,6 +178,9 @@ async def test_close_fund_cross_tenant_raises_lookup_error_and_leaves_open(pool,
 
 async def test_close_portfolio_then_reclose_raises_concurrency_conflict(pool, repo):
     seeded = await build_hierarchy(pool, repo)
+    await repo.close_sub_account(
+        seeded.tenant_id, seeded.sub_account.sub_account_id, closed_at=now_utc()
+    )
 
     closed = await repo.close_portfolio(
         seeded.tenant_id, seeded.portfolio.portfolio_id, closed_at=now_utc()
@@ -193,10 +206,127 @@ async def test_close_sub_account_cross_tenant_raises_lookup_error(pool, repo):
 async def test_list_children_reflect_created_rows(pool, repo):
     seeded = await build_hierarchy(pool, repo)
 
-    funds = await repo.list_funds_by_entity(seeded.legal_entity.entity_id)
-    portfolios = await repo.list_portfolios_by_fund(seeded.fund.fund_id)
-    sub_accounts = await repo.list_sub_accounts_by_portfolio(seeded.portfolio.portfolio_id)
+    funds = await repo.list_funds_by_entity(seeded.tenant_id, seeded.legal_entity.entity_id)
+    portfolios = await repo.list_portfolios_by_fund(seeded.tenant_id, seeded.fund.fund_id)
+    sub_accounts = await repo.list_sub_accounts_by_portfolio(
+        seeded.tenant_id, seeded.portfolio.portfolio_id
+    )
 
     assert [f.fund_id for f in funds] == [seeded.fund.fund_id]
     assert [p.portfolio_id for p in portfolios] == [seeded.portfolio.portfolio_id]
     assert [s.sub_account_id for s in sub_accounts] == [seeded.sub_account.sub_account_id]
+
+
+async def test_list_funds_by_entity_cross_tenant_returns_empty(pool, repo):
+    seeded = await build_hierarchy(pool, repo)
+    other_tenant_id = await create_test_user(pool)
+
+    assert await repo.list_funds_by_entity(other_tenant_id, seeded.legal_entity.entity_id) == []
+
+
+async def test_list_portfolios_by_fund_cross_tenant_returns_empty(pool, repo):
+    seeded = await build_hierarchy(pool, repo)
+    other_tenant_id = await create_test_user(pool)
+
+    assert await repo.list_portfolios_by_fund(other_tenant_id, seeded.fund.fund_id) == []
+
+
+async def test_list_sub_accounts_by_portfolio_cross_tenant_returns_empty(pool, repo):
+    seeded = await build_hierarchy(pool, repo)
+    other_tenant_id = await create_test_user(pool)
+
+    assert (
+        await repo.list_sub_accounts_by_portfolio(other_tenant_id, seeded.portfolio.portfolio_id)
+        == []
+    )
+
+
+async def test_close_legal_entity_toctou_active_fund_inserted_after_precheck_is_rejected(
+    pool, repo
+):
+    # 사전 SELECT(list_funds_by_entity)가 "활성 자식 없음"을 본 직후, UPDATE
+    # 이전에 다른 트랜잭션이 활성 Fund를 INSERT하는 경합을 재현한다. 수정 전
+    # 코드(조건부 UPDATE에 NOT EXISTS가 없던 버전)는 이 사전검사만 믿고 상위를
+    # 그대로 CLOSED로 만들었다(활성 자식을 둔 채) — 수정 후에는 UPDATE 문
+    # 자체가 NOT EXISTS로 재확인하므로 HierarchyViolationError로 거부된다.
+    seeded = await build_hierarchy(pool, repo)
+    await repo.close_sub_account(
+        seeded.tenant_id, seeded.sub_account.sub_account_id, closed_at=now_utc()
+    )
+    await repo.close_portfolio(
+        seeded.tenant_id, seeded.portfolio.portfolio_id, closed_at=now_utc()
+    )
+    await repo.close_fund(seeded.tenant_id, seeded.fund.fund_id, closed_at=now_utc())
+
+    precheck = await repo.list_funds_by_entity(seeded.tenant_id, seeded.legal_entity.entity_id)
+    assert all(f.closed_at is not None for f in precheck)
+
+    # 경합 주입 — 사전검사가 "닫아도 된다"고 판단한 직후 다른 트랜잭션이
+    # 새 활성 Fund를 만든다.
+    other_fund = Fund(
+        fund_id=uuid4(),
+        entity_id=seeded.legal_entity.entity_id,
+        base_currency=Currency.USDT,
+        inception=date(2026, 1, 1),
+    )
+    await repo.create_fund(other_fund)
+
+    with pytest.raises(HierarchyViolationError):
+        await repo.close_legal_entity(
+            seeded.tenant_id, seeded.legal_entity.entity_id, closed_at=now_utc()
+        )
+
+    reread = await repo.get_legal_entity(seeded.tenant_id, seeded.legal_entity.entity_id)
+    assert reread is not None
+    assert reread.closed_at is None
+
+
+async def test_close_fund_toctou_active_portfolio_inserted_after_precheck_is_rejected(pool, repo):
+    seeded = await build_hierarchy(pool, repo)
+    await repo.close_sub_account(
+        seeded.tenant_id, seeded.sub_account.sub_account_id, closed_at=now_utc()
+    )
+    precheck = await repo.list_portfolios_by_fund(seeded.tenant_id, seeded.fund.fund_id)
+    assert all(p.closed_at is None for p in precheck)
+
+    other_portfolio = Portfolio(
+        portfolio_id=uuid4(), fund_id=seeded.fund.fund_id, venue_account_ref="race"
+    )
+    await repo.create_portfolio(other_portfolio)
+
+    with pytest.raises(HierarchyViolationError):
+        await repo.close_fund(seeded.tenant_id, seeded.fund.fund_id, closed_at=now_utc())
+
+    reread = await repo.get_fund(seeded.tenant_id, seeded.fund.fund_id)
+    assert reread is not None
+    assert reread.closed_at is None
+
+
+async def test_close_portfolio_toctou_active_sub_account_inserted_after_precheck_is_rejected(
+    pool, repo
+):
+    seeded = await build_hierarchy(pool, repo)
+    precheck = await repo.list_sub_accounts_by_portfolio(
+        seeded.tenant_id, seeded.portfolio.portfolio_id
+    )
+    assert precheck == [seeded.sub_account]
+
+    await repo.close_sub_account(
+        seeded.tenant_id, seeded.sub_account.sub_account_id, closed_at=now_utc()
+    )
+
+    other_sub_account = SubAccount(
+        sub_account_id=uuid4(),
+        portfolio_id=seeded.portfolio.portfolio_id,
+        owner_ref=seeded.tenant_id,
+    )
+    await repo.create_sub_account(other_sub_account)
+
+    with pytest.raises(HierarchyViolationError):
+        await repo.close_portfolio(
+            seeded.tenant_id, seeded.portfolio.portfolio_id, closed_at=now_utc()
+        )
+
+    reread = await repo.get_portfolio(seeded.tenant_id, seeded.portfolio.portfolio_id)
+    assert reread is not None
+    assert reread.closed_at is None

@@ -11,11 +11,17 @@ JOIN을 타고 `WHERE le.tenant_id = $1`을 반드시 건다 — `tenant_id`는
 않는 id와 다른 tenant 소유 id는 항상 같은 `None`으로 접는다(404 동형,
 호출부가 둘을 구분할 방법이 없다).
 
-폐쇄(`closed_at`)는 `conditional_update`/동등한 조건부 UPDATE로만
-쓴다 — `closed_at IS NULL`을 기대 상태로 걸어 동시 이중 폐쇄를 막는다
-(105번). 조건부 UPDATE가 0행이면 "존재하지 않음/교차 테넌트"와 "이미
-폐쇄됨(경합)"을 구분해야 하므로 `activate_revision()`(mandates 어댑터)과
-같은 방식으로 재조회해 갈라 던진다.
+폐쇄(`closed_at`)는 조건부 UPDATE로만 쓴다 — `closed_at IS NULL`을 기대
+상태로 걸어 동시 이중 폐쇄를 막는다(105번). 상위 폐쇄(legal_entity/fund/
+portfolio)는 같은 UPDATE 문 안에 `NOT EXISTS(활성 자식)` 절을 추가로 건다
+— 사전 SELECT(도메인 `validate_close_*`용 `list_*_by_*` 호출)와 이 UPDATE
+사이에 다른 트랜잭션이 활성 자식을 INSERT하는 TOCTOU 경합을 막기 위함이다.
+tenant 소유권을 EXISTS로 원자화한 기법을 그대로 확장한 것 — 도메인 판정
+(`domain/hierarchy.py`)은 사전검사로만 남고 재구현하지 않는다, 이 DB 절이
+최종 권위다. 조건부 UPDATE가 0행이면 "존재하지 않음/교차 테넌트"·"이미
+폐쇄됨(경합)"·"활성 자식 존재(계층 위반)"를 구분해야 하므로
+`activate_revision()`(mandates 어댑터)과 같은 방식으로 재조회해 갈라
+던진다.
 """
 from __future__ import annotations
 
@@ -24,8 +30,9 @@ from uuid import UUID
 
 import asyncpg
 
-from src.core.db.conditional_write import ConcurrencyConflictError, conditional_update
+from src.core.db.conditional_write import ConcurrencyConflictError
 from src.foundation.entities.contracts.v1 import Fund, LegalEntity, Portfolio, SubAccount
+from src.foundation.entities.domain.hierarchy import HierarchyViolationError
 
 
 def _row_to_legal_entity(row: asyncpg.Record) -> LegalEntity:
@@ -100,26 +107,38 @@ class PostgresEntityRepository:
         self, tenant_id: UUID, entity_id: UUID, *, closed_at: datetime
     ) -> LegalEntity:
         async with self._pool.acquire() as conn:
-            try:
-                row = await conditional_update(
-                    conn,
-                    table="legal_entity",
-                    id_column="entity_id",
-                    id_value=entity_id,
-                    expected_state_column="closed_at",
-                    expected_state_value=None,
-                    set_values={"closed_at": closed_at},
-                    extra_conditions={"tenant_id": tenant_id},
+            row = await conn.fetchrow(
+                "UPDATE legal_entity SET closed_at = $1 "
+                "WHERE entity_id = $2 AND tenant_id = $3 AND closed_at IS NULL "
+                "AND NOT EXISTS (SELECT 1 FROM fund f "
+                "WHERE f.entity_id = legal_entity.entity_id AND f.closed_at IS NULL) "
+                "RETURNING *",
+                closed_at,
+                entity_id,
+                tenant_id,
+            )
+            if row is None:
+                existing = await self.get_legal_entity(tenant_id, entity_id)
+                if existing is None:
+                    raise LookupError(f"존재하지 않는 LegalEntity입니다: {entity_id}")
+                if existing.closed_at is not None:
+                    raise ConcurrencyConflictError(
+                        f"legal_entity.entity_id={entity_id}: 다른 요청이 먼저 폐쇄했습니다."
+                    )
+                raise HierarchyViolationError(
+                    f"LegalEntity {entity_id} 폐쇄 불가 — 활성 Fund가 남아 있습니다."
                 )
-            except ConcurrencyConflictError:
-                if await self.get_legal_entity(tenant_id, entity_id) is None:
-                    raise LookupError(f"존재하지 않는 LegalEntity입니다: {entity_id}") from None
-                raise
         return _row_to_legal_entity(row)
 
-    async def list_funds_by_entity(self, entity_id: UUID) -> list[Fund]:
+    async def list_funds_by_entity(self, tenant_id: UUID, entity_id: UUID) -> list[Fund]:
         async with self._pool.acquire() as conn:
-            rows = await conn.fetch("SELECT * FROM fund WHERE entity_id = $1", entity_id)
+            rows = await conn.fetch(
+                "SELECT f.* FROM fund f "
+                "JOIN legal_entity le ON le.entity_id = f.entity_id "
+                "WHERE le.tenant_id = $1 AND f.entity_id = $2",
+                tenant_id,
+                entity_id,
+            )
         return [_row_to_fund(row) for row in rows]
 
     # -- Fund ---------------------------------------------------------------
@@ -155,22 +174,36 @@ class PostgresEntityRepository:
                 "WHERE fund_id = $2 AND closed_at IS NULL "
                 "AND EXISTS (SELECT 1 FROM legal_entity le "
                 "WHERE le.entity_id = fund.entity_id AND le.tenant_id = $3) "
+                "AND NOT EXISTS (SELECT 1 FROM portfolio p "
+                "WHERE p.fund_id = fund.fund_id AND p.closed_at IS NULL) "
                 "RETURNING *",
                 closed_at,
                 fund_id,
                 tenant_id,
             )
             if row is None:
-                if await self.get_fund(tenant_id, fund_id) is None:
+                existing = await self.get_fund(tenant_id, fund_id)
+                if existing is None:
                     raise LookupError(f"존재하지 않는 Fund입니다: {fund_id}")
-                raise ConcurrencyConflictError(
-                    f"fund.fund_id={fund_id}: 다른 요청이 먼저 폐쇄했습니다."
+                if existing.closed_at is not None:
+                    raise ConcurrencyConflictError(
+                        f"fund.fund_id={fund_id}: 다른 요청이 먼저 폐쇄했습니다."
+                    )
+                raise HierarchyViolationError(
+                    f"Fund {fund_id} 폐쇄 불가 — 활성 Portfolio가 남아 있습니다."
                 )
         return _row_to_fund(row)
 
-    async def list_portfolios_by_fund(self, fund_id: UUID) -> list[Portfolio]:
+    async def list_portfolios_by_fund(self, tenant_id: UUID, fund_id: UUID) -> list[Portfolio]:
         async with self._pool.acquire() as conn:
-            rows = await conn.fetch("SELECT * FROM portfolio WHERE fund_id = $1", fund_id)
+            rows = await conn.fetch(
+                "SELECT p.* FROM portfolio p "
+                "JOIN fund f ON f.fund_id = p.fund_id "
+                "JOIN legal_entity le ON le.entity_id = f.entity_id "
+                "WHERE le.tenant_id = $1 AND p.fund_id = $2",
+                tenant_id,
+                fund_id,
+            )
         return [_row_to_portfolio(row) for row in rows]
 
     # -- Portfolio ------------------------------------------------------------
@@ -208,23 +241,38 @@ class PostgresEntityRepository:
                 "AND EXISTS (SELECT 1 FROM fund f "
                 "JOIN legal_entity le ON le.entity_id = f.entity_id "
                 "WHERE f.fund_id = portfolio.fund_id AND le.tenant_id = $3) "
+                "AND NOT EXISTS (SELECT 1 FROM sub_account s "
+                "WHERE s.portfolio_id = portfolio.portfolio_id AND s.closed_at IS NULL) "
                 "RETURNING *",
                 closed_at,
                 portfolio_id,
                 tenant_id,
             )
             if row is None:
-                if await self.get_portfolio(tenant_id, portfolio_id) is None:
+                existing = await self.get_portfolio(tenant_id, portfolio_id)
+                if existing is None:
                     raise LookupError(f"존재하지 않는 Portfolio입니다: {portfolio_id}")
-                raise ConcurrencyConflictError(
-                    f"portfolio.portfolio_id={portfolio_id}: 다른 요청이 먼저 폐쇄했습니다."
+                if existing.closed_at is not None:
+                    raise ConcurrencyConflictError(
+                        f"portfolio.portfolio_id={portfolio_id}: 다른 요청이 먼저 폐쇄했습니다."
+                    )
+                raise HierarchyViolationError(
+                    f"Portfolio {portfolio_id} 폐쇄 불가 — 활성 SubAccount가 남아 있습니다."
                 )
         return _row_to_portfolio(row)
 
-    async def list_sub_accounts_by_portfolio(self, portfolio_id: UUID) -> list[SubAccount]:
+    async def list_sub_accounts_by_portfolio(
+        self, tenant_id: UUID, portfolio_id: UUID
+    ) -> list[SubAccount]:
         async with self._pool.acquire() as conn:
             rows = await conn.fetch(
-                "SELECT * FROM sub_account WHERE portfolio_id = $1", portfolio_id
+                "SELECT s.* FROM sub_account s "
+                "JOIN portfolio p ON p.portfolio_id = s.portfolio_id "
+                "JOIN fund f ON f.fund_id = p.fund_id "
+                "JOIN legal_entity le ON le.entity_id = f.entity_id "
+                "WHERE le.tenant_id = $1 AND s.portfolio_id = $2",
+                tenant_id,
+                portfolio_id,
             )
         return [_row_to_sub_account(row) for row in rows]
 

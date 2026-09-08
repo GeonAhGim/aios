@@ -20,15 +20,17 @@ from tests.integration.foundation.entities.conftest import build_hierarchy, now_
 async def test_close_blocked_while_active_children_exist_then_succeeds_bottom_up(pool, repo):
     seeded = await build_hierarchy(pool, repo)
 
-    funds = await repo.list_funds_by_entity(seeded.legal_entity.entity_id)
+    funds = await repo.list_funds_by_entity(seeded.tenant_id, seeded.legal_entity.entity_id)
     with pytest.raises(CloseBlockedByChildError):
         validate_close_entity(seeded.legal_entity, funds)
 
-    portfolios = await repo.list_portfolios_by_fund(seeded.fund.fund_id)
+    portfolios = await repo.list_portfolios_by_fund(seeded.tenant_id, seeded.fund.fund_id)
     with pytest.raises(CloseBlockedByChildError):
         validate_close_fund(seeded.fund, portfolios)
 
-    sub_accounts = await repo.list_sub_accounts_by_portfolio(seeded.portfolio.portfolio_id)
+    sub_accounts = await repo.list_sub_accounts_by_portfolio(
+        seeded.tenant_id, seeded.portfolio.portfolio_id
+    )
     with pytest.raises(CloseBlockedByChildError):
         validate_close_portfolio(seeded.portfolio, sub_accounts)
 
@@ -38,17 +40,21 @@ async def test_close_blocked_while_active_children_exist_then_succeeds_bottom_up
         seeded.tenant_id, seeded.sub_account.sub_account_id, closed_at=now_utc()
     )
 
-    portfolios_after = await repo.list_sub_accounts_by_portfolio(seeded.portfolio.portfolio_id)
+    portfolios_after = await repo.list_sub_accounts_by_portfolio(
+        seeded.tenant_id, seeded.portfolio.portfolio_id
+    )
     validate_close_portfolio(seeded.portfolio, portfolios_after)
     await repo.close_portfolio(
         seeded.tenant_id, seeded.portfolio.portfolio_id, closed_at=now_utc()
     )
 
-    funds_after = await repo.list_portfolios_by_fund(seeded.fund.fund_id)
+    funds_after = await repo.list_portfolios_by_fund(seeded.tenant_id, seeded.fund.fund_id)
     validate_close_fund(seeded.fund, funds_after)
     await repo.close_fund(seeded.tenant_id, seeded.fund.fund_id, closed_at=now_utc())
 
-    entity_funds_after = await repo.list_funds_by_entity(seeded.legal_entity.entity_id)
+    entity_funds_after = await repo.list_funds_by_entity(
+        seeded.tenant_id, seeded.legal_entity.entity_id
+    )
     validate_close_entity(seeded.legal_entity, entity_funds_after)
     closed_entity = await repo.close_legal_entity(
         seeded.tenant_id, seeded.legal_entity.entity_id, closed_at=now_utc()
