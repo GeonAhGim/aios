@@ -20,7 +20,7 @@ from src.services.condition_compiler import ConditionCompiler
 from src.services.order_service.gate import GateDecision, GateOutcome
 from src.services.order_service.position_ledger import record_fill_in_position_ledger
 from src.services.preview_service import PreviewCondition
-from tests.integration.conftest import create_test_user
+from tests.integration.conftest import create_test_tenant
 from tests.integration.fake_exchange_adapter import FakeExchangeAdapter
 
 
@@ -119,7 +119,7 @@ async def _fsm_state_writer_for(pool: asyncpg.Pool):
 
 
 async def test_live_mode_is_hard_blocked_before_any_order_is_placed(pool):
-    user_id = await create_test_user(pool)
+    user_id = await create_test_tenant(pool)
     execution_id = await _create_execution(pool, user_id, mode="LIVE")
     adapter = FakeExchangeAdapter()
     writer, calls = await _fsm_state_writer_for(pool)
@@ -150,7 +150,7 @@ async def test_paper_mode_with_non_sandboxed_adapter_is_hard_blocked(pool):
     """레드팀 감사(2026-09-01-08) 회귀 — DB mode='PAPER'라도 전달된
     adapter가 스스로 sandbox 바인딩을 증명하지 못하면(예: demo_mode=False로
     잘못 구성된 real adapter) 차단해야 한다. mode 문자열만 믿지 않는다."""
-    user_id = await create_test_user(pool)
+    user_id = await create_test_tenant(pool)
     execution_id = await _create_execution(pool, user_id, mode="PAPER")
     adapter = FakeExchangeAdapter(is_sandboxed=False)
     writer, calls = await _fsm_state_writer_for(pool)
@@ -178,7 +178,7 @@ async def test_paper_mode_with_non_sandboxed_adapter_is_hard_blocked(pool):
 
 
 async def test_paper_mode_rejects_a_live_configured_adapter_before_order_submission(pool):
-    user_id = await create_test_user(pool)
+    user_id = await create_test_tenant(pool)
     execution_id = await _create_execution(pool, user_id, mode="PAPER")
     adapter = FakeExchangeAdapter(is_paper_trading=False)
     writer, calls = await _fsm_state_writer_for(pool)
@@ -205,7 +205,7 @@ async def test_paper_mode_rejects_a_live_configured_adapter_before_order_submiss
 
 
 async def test_risk_not_approved_raises_before_any_order_is_placed(pool):
-    user_id = await create_test_user(pool)
+    user_id = await create_test_tenant(pool)
     execution_id = await _create_execution(pool, user_id, mode="PAPER")
     adapter = FakeExchangeAdapter()
     writer, _calls = await _fsm_state_writer_for(pool)
@@ -233,7 +233,7 @@ async def test_risk_not_approved_raises_before_any_order_is_placed(pool):
 
 
 async def test_paper_mode_synchronous_fill_advances_fsm_state(pool):
-    user_id = await create_test_user(pool)
+    user_id = await create_test_tenant(pool)
     execution_id = await _create_execution(pool, user_id, mode="PAPER")
     adapter = FakeExchangeAdapter(place_order_result_status=OrderStatus.FILLED)
     writer, calls = await _fsm_state_writer_for(pool)
@@ -269,7 +269,7 @@ async def test_paper_mode_pending_fill_does_not_advance_fsm_state(pool):
     """즉시 체결되지 않으면(SUBMITTED로 남으면) fsm_state를 건드리지
     않는다 — ORDER_FILLED 전이는 체결이 실제로 확인됐을 때만(FD-8.4
     처리단계 5)."""
-    user_id = await create_test_user(pool)
+    user_id = await create_test_tenant(pool)
     execution_id = await _create_execution(pool, user_id, mode="PAPER")
     adapter = FakeExchangeAdapter(place_order_result_status=OrderStatus.SUBMITTED)
     writer, calls = await _fsm_state_writer_for(pool)
@@ -301,7 +301,7 @@ async def test_record_fill_partial_close_computes_accurate_average_and_pnl(pool)
     같아야 한다. Executor의 FSM 전이는 이 검증과 무관해 직접
     record_fill_in_position_ledger를 호출한다(test_record_fill.py와 달리
     legacy positions 투영까지 거친다는 게 이 테스트의 차이점)."""
-    user_id = await create_test_user(pool)
+    user_id = await create_test_tenant(pool)
     execution_id = await _create_execution(pool, user_id, mode="PAPER")
 
     def _filled_order(side: OrderSide, quantity: Decimal, price: Decimal) -> Order:
@@ -355,7 +355,7 @@ async def test_submission_failure_does_not_roll_back_fsm_state(pool):
     이미 설정해둔 PENDING 상태 그대로 남는다)."""
     from src.core.exceptions import RetryableExchangeError
 
-    user_id = await create_test_user(pool)
+    user_id = await create_test_tenant(pool)
     execution_id = await _create_execution(pool, user_id, mode="PAPER")
 
     async def failing_place_order(order: Order) -> Order:

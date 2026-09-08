@@ -11,7 +11,7 @@ from dotenv import dotenv_values
 from src.core.loader.risk_policy_loader import load_risk_policy
 from src.services.execution_service import ExecutionControlError, ExecutionService
 from src.services.order_service.foundation_gate import make_foundation_pre_submit_gate
-from tests.integration.conftest import create_test_user
+from tests.integration.conftest import create_test_tenant
 
 
 def _asyncpg_dsn() -> str:
@@ -84,7 +84,7 @@ async def _create_paper_execution(service, pool, user_id):
 
 
 async def test_convert_creates_new_live_execution_and_preserves_paper(service, pool):
-    user_id = await create_test_user(pool)
+    user_id = await create_test_tenant(pool)
     paper = await _create_paper_execution(service, pool, user_id)
     await service.start(paper.id, user_id)
 
@@ -113,7 +113,7 @@ async def test_convert_creates_new_live_execution_and_preserves_paper(service, p
 
 
 async def test_convert_requires_full_approval_flow_again(service, pool):
-    user_id = await create_test_user(pool)
+    user_id = await create_test_tenant(pool)
     paper = await _create_paper_execution(service, pool, user_id)
 
     live = await service.convert_to_live(
@@ -130,7 +130,7 @@ async def test_convert_requires_full_approval_flow_again(service, pool):
 
 
 async def test_cannot_convert_already_live_execution(service, pool):
-    user_id = await create_test_user(pool)
+    user_id = await create_test_tenant(pool)
     strategy_id, version = await _create_approved_strategy(pool, user_id)
     await _link_credential(pool, user_id)
     live = await service.create_execution(
@@ -156,8 +156,8 @@ async def test_cannot_convert_already_live_execution(service, pool):
 
 
 async def test_convert_rejects_non_owner(service, pool):
-    user_id = await create_test_user(pool)
-    other_user = await create_test_user(pool)
+    user_id = await create_test_tenant(pool)
+    other_user = await create_test_tenant(pool)
     paper = await _create_paper_execution(service, pool, user_id)
 
     with pytest.raises(ExecutionControlError):

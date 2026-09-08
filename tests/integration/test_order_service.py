@@ -25,7 +25,7 @@ from src.services.order_service import (
 )
 from src.services.order_service import repository as order_repository
 from src.services.order_service.gate import GateDecision, GateOutcome
-from tests.integration.conftest import create_test_user
+from tests.integration.conftest import create_test_tenant
 from tests.integration.fake_exchange_adapter import FakeExchangeAdapter
 
 
@@ -112,7 +112,7 @@ def _limit_order(execution_id: int, *, client_order_id: str | None = None) -> Or
 
 
 async def test_submit_order_persists_and_publishes(pool):
-    user_id = await create_test_user(pool)
+    user_id = await create_test_tenant(pool)
     execution_id = await _create_running_execution(pool, user_id)
     adapter = FakeExchangeAdapter()
     published: list[tuple[str, dict]] = []
@@ -144,7 +144,7 @@ async def test_submit_order_persists_and_publishes(pool):
 async def test_submit_order_idempotent_on_same_client_order_id(pool):
     """FD-4.2-a 완료조건 — 동일 client_order_id로 2번 호출해도 실제 거래소
     호출은 1번만 발생해야 한다."""
-    user_id = await create_test_user(pool)
+    user_id = await create_test_tenant(pool)
     execution_id = await _create_running_execution(pool, user_id)
     adapter = FakeExchangeAdapter()
 
@@ -166,7 +166,7 @@ async def test_submit_order_concurrent_calls_only_send_to_exchange_once(pool):
     실제 주문을 두 번 낼 수 있었다. 지금은 거래소 호출 전에 INSERT로
     client_order_id를 먼저 원자적으로 선점하므로, 동시에 호출해도 실제
     place_order()는 정확히 1번만 일어나야 한다."""
-    user_id = await create_test_user(pool)
+    user_id = await create_test_tenant(pool)
     execution_id = await _create_running_execution(pool, user_id)
 
     async def slow_place_order(order: Order) -> Order:
@@ -198,7 +198,7 @@ async def test_submit_order_concurrent_calls_only_send_to_exchange_once(pool):
 async def test_submit_order_rejected_is_not_an_exception(pool):
     """FD-4.2-b 예외상황 — 거래소 REJECTED는 예외가 아니라 정상 흐름으로
     status=REJECTED 처리된다."""
-    user_id = await create_test_user(pool)
+    user_id = await create_test_tenant(pool)
     execution_id = await _create_running_execution(pool, user_id)
     adapter = FakeExchangeAdapter(place_order_result_status=OrderStatus.REJECTED)
 
@@ -218,7 +218,7 @@ async def test_submit_order_network_error_propagates(pool):
     task-1566(L4-09) 편차 — 이전엔 claim 행을 지워 DB에 흔적을 남기지
     않았다. 지금은 oms `order_repository.transition()`으로 CREATED→FAILED
     확정만 하고 행은 남긴다(감사 흔적 보존, order_events WORM에도 남음)."""
-    user_id = await create_test_user(pool)
+    user_id = await create_test_tenant(pool)
     execution_id = await _create_running_execution(pool, user_id)
 
     async def failing_place_order(order: Order) -> Order:
@@ -244,7 +244,7 @@ async def test_update_from_exchange_raises_on_status_mismatch(pool):
     """레드팀 #2026-09-02-20 회귀 테스트 — 갱신 시점에 실제 DB의 status가
     호출자가 읽었던 값과 다르면(다른 경로가 먼저 바꿈) 조용히 덮어쓰지
     않고 ConcurrencyConflictError를 던져야 한다."""
-    user_id = await create_test_user(pool)
+    user_id = await create_test_tenant(pool)
     execution_id = await _create_running_execution(pool, user_id)
     adapter = FakeExchangeAdapter()
     order = _market_order(execution_id)
@@ -279,7 +279,7 @@ async def test_cancel_order_acknowledged_enqueues_cancel_command(pool):
     않는다(`oms.application.cancel_order`에 위임, 모듈 docstring 참조). ACK된
     주문의 취소는 자기루프 전이 + outbox `CANCEL` enqueue로 끝나고, 실제
     CANCELLED 확정은 `outbox_dispatcher`(L4-14)/inbox(L4-15)가 비동기로 한다."""
-    user_id = await create_test_user(pool)
+    user_id = await create_test_tenant(pool)
     execution_id = await _create_running_execution(pool, user_id)
     adapter = FakeExchangeAdapter(place_order_result_status=OrderStatus.ACKNOWLEDGED)
     order = _market_order(execution_id)
@@ -310,7 +310,7 @@ async def test_cancel_already_filled_order_raises(pool):
     상태 재조회가 아니라 명시적 거부다(§4.2 전이표 밖, `oms.application.
     cancel_order`가 fail-closed로 `InvalidOrderTransitionError`를 던지고
     `OrderCancelError`로 감싸 전파한다)."""
-    user_id = await create_test_user(pool)
+    user_id = await create_test_tenant(pool)
     execution_id = await _create_running_execution(pool, user_id)
     adapter = FakeExchangeAdapter(place_order_result_status=OrderStatus.FILLED)
     order = _market_order(execution_id)
@@ -357,7 +357,7 @@ class _ModifiableFakeAdapter(FakeExchangeAdapter):
 
 
 async def test_modify_market_order_rejected_before_exchange_call(pool):
-    user_id = await create_test_user(pool)
+    user_id = await create_test_tenant(pool)
     execution_id = await _create_running_execution(pool, user_id)
     adapter = _ModifiableFakeAdapter(place_order_result_status=OrderStatus.ACKNOWLEDGED)
     order = _market_order(execution_id)
@@ -381,7 +381,7 @@ async def test_modify_already_filled_order_raises(pool):
     (`InvalidOrderTransitionError`)로 거부되고, `OrderModifyError`로
     감싸 전파돼야 한다(cancel.py 동일 편차의 modify 대응, 모듈 docstring
     참조)."""
-    user_id = await create_test_user(pool)
+    user_id = await create_test_tenant(pool)
     execution_id = await _create_running_execution(pool, user_id)
     adapter = _ModifiableFakeAdapter(place_order_result_status=OrderStatus.FILLED)
     order = _limit_order(execution_id)
@@ -405,7 +405,7 @@ async def test_resolve_unknown_confirms_status_within_max_attempts(pool):
     돌려주면 재시도 대기 없이 바로 RESOLVED_AS 전이한다. 그 경로를 타려면
     먼저 주문이 실제로 UNKNOWN이어야 한다(그렇지 않으면 `resolve_unknown`은
     이미 해소된 것으로 보고 조회 없이 즉시 반환한다)."""
-    user_id = await create_test_user(pool)
+    user_id = await create_test_tenant(pool)
     execution_id = await _create_running_execution(pool, user_id)
     adapter = FakeExchangeAdapter(get_order_status=OrderStatus.FILLED)
     order = _market_order(execution_id)
@@ -435,7 +435,7 @@ async def test_resolve_unknown_gives_up_after_max_attempts(pool):
     """FD-4.5 완료조건 — 강제 UNKNOWN 시뮬레이션 시 정확히 5회(기본
     max_attempts, task-1604 unknown_resolver 위임 이후 §9 L4-16 계약) 재조회
     후 UNKNOWN을 유지하고 CRITICAL 로그를 남긴다(예외를 던지지 않음)."""
-    user_id = await create_test_user(pool)
+    user_id = await create_test_tenant(pool)
     execution_id = await _create_running_execution(pool, user_id)
     adapter = FakeExchangeAdapter(get_order_status=OrderStatus.UNKNOWN)
     order = _market_order(execution_id)
@@ -470,7 +470,7 @@ async def test_synchronous_fill_round_trip_opens_and_closes_position(pool):
     테이블에 아무도 쓰지 않아 risk_guard_service/portfolio_service의
     PnL 합산이 항상 0이었던 결함. BUY 동기체결로 포지션이 열리고, SELL
     동기체결로 realized_pnl과 함께 닫히는지 확인."""
-    user_id = await create_test_user(pool)
+    user_id = await create_test_tenant(pool)
     execution_id = await _create_running_execution(pool, user_id)
 
     def _fill_at(price: str):

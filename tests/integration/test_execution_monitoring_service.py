@@ -12,7 +12,7 @@ from src.core.loader.risk_policy_loader import load_risk_policy
 from src.services.execution_monitoring_service import ExecutionMonitoringService
 from src.services.execution_service import ExecutionService
 from src.services.order_service.foundation_gate import make_foundation_pre_submit_gate
-from tests.integration.conftest import create_test_user
+from tests.integration.conftest import create_test_tenant
 
 
 def _asyncpg_dsn() -> str:
@@ -114,7 +114,7 @@ async def _insert_position(
 async def test_execution_with_no_positions_reports_zero_pnl(
     execution_service, monitoring_service, pool
 ):
-    user_id = await create_test_user(pool)
+    user_id = await create_test_tenant(pool)
     execution_id, _ = await _create_running_execution(execution_service, pool, user_id)
 
     cards = await monitoring_service.list_for_user(user_id)
@@ -128,7 +128,7 @@ async def test_execution_with_no_positions_reports_zero_pnl(
 async def test_two_running_executions_track_pnl_independently(
     execution_service, monitoring_service, pool
 ):
-    user_id = await create_test_user(pool)
+    user_id = await create_test_tenant(pool)
     exec_a, strategy_a = await _create_running_execution(execution_service, pool, user_id)
     exec_b, strategy_b = await _create_running_execution(
         execution_service, pool, user_id, link_credential=False
@@ -154,7 +154,7 @@ async def test_two_running_executions_track_pnl_independently(
 async def test_multiple_positions_in_same_execution_sum_correctly(
     execution_service, monitoring_service, pool
 ):
-    user_id = await create_test_user(pool)
+    user_id = await create_test_tenant(pool)
     execution_id, strategy_id = await _create_running_execution(execution_service, pool, user_id)
 
     await _insert_position(
@@ -181,7 +181,7 @@ async def test_multiple_positions_in_same_execution_sum_correctly(
 
 
 async def test_no_executions_returns_empty_list_not_error(monitoring_service, pool):
-    user_id = await create_test_user(pool)
+    user_id = await create_test_tenant(pool)
 
     cards = await monitoring_service.list_for_user(user_id)
 

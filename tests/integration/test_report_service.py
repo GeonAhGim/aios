@@ -13,7 +13,7 @@ from src.core.loader.risk_policy_loader import load_risk_policy
 from src.services.execution_service import ExecutionService
 from src.services.order_service.foundation_gate import make_foundation_pre_submit_gate
 from src.services.report_service import ReportService
-from tests.integration.conftest import create_test_user
+from tests.integration.conftest import create_test_tenant
 
 
 def _asyncpg_dsn() -> str:
@@ -107,7 +107,7 @@ async def _close_position(pool, user_id, execution_id, strategy_id, *, realized_
 
 
 async def test_empty_period_returns_empty_report_not_error(report_service, pool):
-    user_id = await create_test_user(pool)
+    user_id = await create_test_tenant(pool)
 
     report = await report_service.generate_report(
         user_id, date(2020, 1, 1), date(2020, 1, 31)
@@ -120,7 +120,7 @@ async def test_empty_period_returns_empty_report_not_error(report_service, pool)
 
 
 async def test_report_matches_manually_computed_totals(execution_service, report_service, pool):
-    user_id = await create_test_user(pool)
+    user_id = await create_test_tenant(pool)
     execution_id, strategy_id, _ = await _create_running_execution(execution_service, pool, user_id)
 
     today = date.today()
@@ -147,7 +147,7 @@ async def test_report_matches_manually_computed_totals(execution_service, report
 
 
 async def test_positions_outside_period_excluded(execution_service, report_service, pool):
-    user_id = await create_test_user(pool)
+    user_id = await create_test_tenant(pool)
     execution_id, strategy_id, _ = await _create_running_execution(execution_service, pool, user_id)
     today = date.today()
 
@@ -171,7 +171,7 @@ async def test_positions_outside_period_excluded(execution_service, report_servi
 async def test_max_drawdown_computed_from_daily_cumulative_curve(
     execution_service, report_service, pool
 ):
-    user_id = await create_test_user(pool)
+    user_id = await create_test_tenant(pool)
     execution_id, strategy_id, _ = await _create_running_execution(execution_service, pool, user_id)
     today = date.today()
 
@@ -201,7 +201,7 @@ async def test_max_drawdown_computed_from_daily_cumulative_curve(
 async def test_execution_id_filter_scopes_to_single_execution(
     execution_service, report_service, pool
 ):
-    user_id = await create_test_user(pool)
+    user_id = await create_test_tenant(pool)
     execution_a, strategy_a, _ = await _create_running_execution(execution_service, pool, user_id)
     execution_b, strategy_b, _ = await _create_running_execution(
         execution_service, pool, user_id, link_credential=False
@@ -224,7 +224,7 @@ async def test_execution_id_filter_scopes_to_single_execution(
 
 
 async def test_strategy_contributions_grouped_correctly(execution_service, report_service, pool):
-    user_id = await create_test_user(pool)
+    user_id = await create_test_tenant(pool)
     execution_id, strategy_id, version = await _create_running_execution(
         execution_service, pool, user_id
     )

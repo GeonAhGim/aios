@@ -13,7 +13,7 @@ from src.core.loader.risk_policy_loader import load_risk_policy
 from src.services.execution_service import ExecutionService
 from src.services.order_service.foundation_gate import make_foundation_pre_submit_gate
 from src.services.portfolio_service import PortfolioService, RebalanceAdjustment, RebalanceError
-from tests.integration.conftest import create_test_user
+from tests.integration.conftest import create_test_tenant
 
 
 def _asyncpg_dsn() -> str:
@@ -96,7 +96,7 @@ async def _create_running_execution(
 
 
 async def test_no_executions_shows_all_cash(portfolio_service, pool):
-    user_id = await create_test_user(pool)
+    user_id = await create_test_tenant(pool)
 
     view = await portfolio_service.get_portfolio(user_id, total_cash_balance=Decimal("5000"))
 
@@ -108,7 +108,7 @@ async def test_no_executions_shows_all_cash(portfolio_service, pool):
 async def test_three_executions_weights_sum_to_100_percent(
     execution_service, portfolio_service, pool
 ):
-    user_id = await create_test_user(pool)
+    user_id = await create_test_tenant(pool)
     await _create_running_execution(execution_service, pool, user_id, capital=Decimal("1000"))
     await _create_running_execution(
         execution_service, pool, user_id, capital=Decimal("2000"), link_credential=False
@@ -129,7 +129,7 @@ async def test_three_executions_weights_sum_to_100_percent(
 async def test_retired_execution_excluded_from_portfolio(
     execution_service, portfolio_service, pool
 ):
-    user_id = await create_test_user(pool)
+    user_id = await create_test_tenant(pool)
     execution_id = await _create_running_execution(execution_service, pool, user_id)
     await execution_service.retire(execution_id, user_id)
 
@@ -139,7 +139,7 @@ async def test_retired_execution_excluded_from_portfolio(
 
 
 async def test_pnl_included_in_current_value(execution_service, portfolio_service, pool):
-    user_id = await create_test_user(pool)
+    user_id = await create_test_tenant(pool)
     execution_id = await _create_running_execution(
         execution_service, pool, user_id, capital=Decimal("1000")
     )
@@ -192,7 +192,7 @@ async def _create_running_execution_with_mode(
 async def test_rebalance_decreases_allocation_without_touching_positions(
     execution_service, portfolio_service, pool
 ):
-    user_id = await create_test_user(pool)
+    user_id = await create_test_tenant(pool)
     execution_id = await _create_running_execution(
         execution_service, pool, user_id, capital=Decimal("2000")
     )
@@ -232,7 +232,7 @@ async def test_rebalance_decreases_allocation_without_touching_positions(
 async def test_rebalance_increase_paper_needs_no_approval(
     execution_service, portfolio_service, pool
 ):
-    user_id = await create_test_user(pool)
+    user_id = await create_test_tenant(pool)
     execution_id = await _create_running_execution(
         execution_service, pool, user_id, capital=Decimal("500")
     )
@@ -250,7 +250,7 @@ async def test_rebalance_increase_paper_needs_no_approval(
 async def test_rebalance_increase_live_triggers_approval(
     execution_service, portfolio_service, pool
 ):
-    user_id = await create_test_user(pool)
+    user_id = await create_test_tenant(pool)
     execution_id = await _create_running_execution_with_mode(
         execution_service, pool, user_id, mode="LIVE", capital=Decimal("500")
     )
@@ -268,7 +268,7 @@ async def test_rebalance_increase_live_triggers_approval(
 async def test_rebalance_rejects_total_exceeding_balance(
     execution_service, portfolio_service, pool
 ):
-    user_id = await create_test_user(pool)
+    user_id = await create_test_tenant(pool)
     execution_id = await _create_running_execution(
         execution_service, pool, user_id, capital=Decimal("500")
     )
@@ -292,8 +292,8 @@ async def test_rebalance_rejects_total_exceeding_balance(
 
 
 async def test_rebalance_rejects_non_owner(execution_service, portfolio_service, pool):
-    user_id = await create_test_user(pool)
-    other_user = await create_test_user(pool)
+    user_id = await create_test_tenant(pool)
+    other_user = await create_test_tenant(pool)
     execution_id = await _create_running_execution(execution_service, pool, user_id)
 
     with pytest.raises(RebalanceError):
@@ -309,7 +309,7 @@ async def test_rebalance_rejects_non_owner(execution_service, portfolio_service,
 
 
 async def test_rebalance_rejects_retired_execution(execution_service, portfolio_service, pool):
-    user_id = await create_test_user(pool)
+    user_id = await create_test_tenant(pool)
     execution_id = await _create_running_execution(execution_service, pool, user_id)
     await execution_service.retire(execution_id, user_id)
 
@@ -339,7 +339,7 @@ async def test_concurrent_rebalance_does_not_allow_combined_total_to_exceed_bala
     실제 sleep을 살짝 끼워 넣어 두 번째 호출이 그 사이 반드시 진입하도록
     강제한다 — 잠금 자체는 이 인위적 지연이 아니라 실제 Postgres
     FOR UPDATE가 담당한다."""
-    user_id = await create_test_user(pool)
+    user_id = await create_test_tenant(pool)
     # 미인증 전략 배분 상한(10%, config/risk_policy.yaml)을 개별 조정 각각은
     # 넘지 않으면서(90/1000=9%) A+B 합산은 잔고를 초과하도록, 이미 잔고
     # 대부분을 쓰는 실행 C를 함께 둔다(850 + 90 + 90 = 1030 > 1000).

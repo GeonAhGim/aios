@@ -18,7 +18,7 @@ from dotenv import dotenv_values
 from src.core.loader.risk_policy_loader import load_risk_policy
 from src.services.execution_service import ExecutionControlError, ExecutionService
 from src.services.order_service.foundation_gate import make_foundation_pre_submit_gate
-from tests.integration.conftest import create_test_user
+from tests.integration.conftest import create_test_tenant
 
 
 def _asyncpg_dsn() -> str:
@@ -93,7 +93,7 @@ async def _create_execution(service, pool, user_id, *, mode="PAPER"):
 
 
 async def test_start_paper_execution_transitions_to_running(service, pool):
-    user_id = await create_test_user(pool)
+    user_id = await create_test_tenant(pool)
     created = await _create_execution(service, pool, user_id, mode="PAPER")
 
     result = await service.start(created.id, user_id)
@@ -102,7 +102,7 @@ async def test_start_paper_execution_transitions_to_running(service, pool):
 
 
 async def test_start_live_execution_blocked_until_approved(service, pool):
-    user_id = await create_test_user(pool)
+    user_id = await create_test_tenant(pool)
     created = await _create_execution(service, pool, user_id, mode="LIVE")
 
     with pytest.raises(ExecutionControlError):
@@ -119,7 +119,7 @@ async def test_start_live_execution_blocked_until_approved(service, pool):
 
 
 async def test_cannot_start_retired_execution(service, pool):
-    user_id = await create_test_user(pool)
+    user_id = await create_test_tenant(pool)
     created = await _create_execution(service, pool, user_id)
     await service.start(created.id, user_id)
     await service.retire(created.id, user_id)
@@ -129,8 +129,8 @@ async def test_cannot_start_retired_execution(service, pool):
 
 
 async def test_start_rejects_non_owner(service, pool):
-    user_id = await create_test_user(pool)
-    other_user = await create_test_user(pool)
+    user_id = await create_test_tenant(pool)
+    other_user = await create_test_tenant(pool)
     created = await _create_execution(service, pool, user_id)
 
     with pytest.raises(ExecutionControlError):
@@ -138,7 +138,7 @@ async def test_start_rejects_non_owner(service, pool):
 
 
 async def test_pause_running_execution_by_user(service, pool):
-    user_id = await create_test_user(pool)
+    user_id = await create_test_tenant(pool)
     created = await _create_execution(service, pool, user_id)
     await service.start(created.id, user_id)
 
@@ -148,7 +148,7 @@ async def test_pause_running_execution_by_user(service, pool):
 
 
 async def test_user_can_restart_own_paused_execution(service, pool):
-    user_id = await create_test_user(pool)
+    user_id = await create_test_tenant(pool)
     created = await _create_execution(service, pool, user_id)
     await service.start(created.id, user_id)
     await service.pause(created.id, paused_by="USER", user_id=user_id)
@@ -161,7 +161,7 @@ async def test_user_can_restart_own_paused_execution(service, pool):
 async def test_safety_layer_pause_blocks_user_restart(service, pool):
     """16.5 핵심 완료조건 — 안전장치 우선순위(8.6-B)가 사용자 버튼보다
     우선한다."""
-    user_id = await create_test_user(pool)
+    user_id = await create_test_tenant(pool)
     created = await _create_execution(service, pool, user_id)
     await service.start(created.id, user_id)
 
@@ -172,7 +172,7 @@ async def test_safety_layer_pause_blocks_user_restart(service, pool):
 
 
 async def test_pause_rejects_non_running_execution(service, pool):
-    user_id = await create_test_user(pool)
+    user_id = await create_test_tenant(pool)
     created = await _create_execution(service, pool, user_id)  # PENDING_APPROVAL
 
     with pytest.raises(ExecutionControlError):
@@ -180,7 +180,7 @@ async def test_pause_rejects_non_running_execution(service, pool):
 
 
 async def test_retire_running_execution(service, pool):
-    user_id = await create_test_user(pool)
+    user_id = await create_test_tenant(pool)
     created = await _create_execution(service, pool, user_id)
     await service.start(created.id, user_id)
 
@@ -190,8 +190,8 @@ async def test_retire_running_execution(service, pool):
 
 
 async def test_retire_rejects_non_owner(service, pool):
-    user_id = await create_test_user(pool)
-    other_user = await create_test_user(pool)
+    user_id = await create_test_tenant(pool)
+    other_user = await create_test_tenant(pool)
     created = await _create_execution(service, pool, user_id)
     await service.start(created.id, user_id)
 
@@ -208,7 +208,7 @@ async def test_concurrent_safety_pause_blocks_racing_user_start(service, pool, m
     04번 항목 수정 때 확인한 대로 asyncio.gather만으로는 두 코루틴의 SELECT가
     실제로 겹친다는 보장이 없어, start()의 SELECT 직후 지점에 barrier를
     걸어 pause()가 반드시 그 사이에 커밋되도록 강제한다."""
-    user_id = await create_test_user(pool)
+    user_id = await create_test_tenant(pool)
     created = await _create_execution(service, pool, user_id)
     await service.start(created.id, user_id)
 
