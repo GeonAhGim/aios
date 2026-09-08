@@ -68,6 +68,11 @@ POSITIONS_SCHEDULER_CYCLE_SUCCESS_GAUGE = "aios.positions.scheduler_cycle_succes
 # L4_risk_and_safety §7 "재생 불일치 — 목표 0 — replay" 행 원문 (R-54).
 CORE_RISK_REPLAY_MISMATCH_COUNT_TOTAL = "aios.core_risk.replay_mismatch.count_total"
 
+# DC-17 — application/realtime_fanout.py 계측 지점.
+MARKET_DATA_FANOUT_PUBLISHED_COUNT_TOTAL = "aios.market_data.fanout_publish.count_total"
+MARKET_DATA_FANOUT_DENIED_COUNT_TOTAL = "aios.market_data.fanout_deny.count_total"
+MARKET_DATA_FANOUT_DROPPED_COUNT_TOTAL = "aios.market_data.fanout_drop.count_total"
+
 ALL_METRIC_NAMES: frozenset[str] = frozenset(
     {
         API_REQUEST_COUNT_TOTAL,
@@ -101,6 +106,9 @@ ALL_METRIC_NAMES: frozenset[str] = frozenset(
         POSITIONS_SCHEDULER_CYCLE_FAILURE_COUNT_TOTAL,
         POSITIONS_SCHEDULER_CYCLE_SUCCESS_GAUGE,
         CORE_RISK_REPLAY_MISMATCH_COUNT_TOTAL,
+        MARKET_DATA_FANOUT_PUBLISHED_COUNT_TOTAL,
+        MARKET_DATA_FANOUT_DENIED_COUNT_TOTAL,
+        MARKET_DATA_FANOUT_DROPPED_COUNT_TOTAL,
     }
 )
 
