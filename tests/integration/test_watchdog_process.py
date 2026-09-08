@@ -21,8 +21,11 @@ from src.core.safety.heartbeat import write_heartbeat
 from src.core.safety.split_brain import SplitBrainDiagnostics
 from src.core.safety.watchdog import WatchdogAction, WatchdogDecision, WatchdogService, decide
 from src.watchdog_process import (
+    WATCHDOG_SYSTEM_ACTOR_ID,
     _apply_decision,
+    _LastAppliedAction,
     _LatestExchangeHealth,
+    build_kill_switch_service,
     compute_system_equity,
     run_one_cycle,
 )
@@ -41,6 +44,26 @@ async def pool():
     p = await asyncpg.create_pool(_asyncpg_dsn(), min_size=1, max_size=2)
     yield p
     await p.close()
+
+
+@pytest.fixture
+def kill_switch(pool):
+    return build_kill_switch_service(pool)
+
+
+@pytest.fixture(autouse=True)
+async def _deactivate_watchdog_controls_after(pool):
+    """이 파일의 여러 테스트가 _apply_decision/run_one_cycle을 통해
+    WATCHDOG_SYSTEM_ACTOR_ID로 GLOBAL safety_control을 만든다 — ACTIVE로
+    남으면 공유 테스트 DB의 다른 risk-gate 테스트가 RISK_KILL_SWITCH_ACTIVE_
+    GLOBAL로 오염된다. 이 파일이 만든 통제만 지운다(actor_subject_id로 한정)."""
+    yield
+    async with pool.acquire() as conn:
+        await conn.execute(
+            "UPDATE safety_control SET state = 'INACTIVE', deactivated_at = now() "
+            "WHERE actor_subject_id = $1 AND state = 'ACTIVE'",
+            WATCHDOG_SYSTEM_ACTOR_ID,
+        )
 
 
 async def _create_running_execution(pool: asyncpg.Pool, user_id) -> int:
@@ -72,12 +95,14 @@ async def _create_running_execution(pool: asyncpg.Pool, user_id) -> int:
     return row["id"]
 
 
-async def test_apply_decision_pauses_running_executions(pool):
+async def test_apply_decision_pauses_running_executions(pool, kill_switch):
     user_id = await create_test_user(pool)
     execution_id = await _create_running_execution(pool, user_id)
 
     await _apply_decision(
-        pool, WatchdogDecision(action=WatchdogAction.HALT, reason="main_process_unresponsive")
+        pool,
+        WatchdogDecision(action=WatchdogAction.HALT, reason="main_process_unresponsive"),
+        kill_switch,
     )
 
     async with pool.acquire() as conn:
@@ -88,13 +113,14 @@ async def test_apply_decision_pauses_running_executions(pool):
     assert row["paused_by"] == "SAFETY_LAYER"
 
 
-async def test_apply_decision_records_audit_log(pool):
+async def test_apply_decision_records_audit_log(pool, kill_switch):
     user_id = await create_test_user(pool)
     await _create_running_execution(pool, user_id)
 
     await _apply_decision(
         pool,
         WatchdogDecision(action=WatchdogAction.LIQUIDATE, reason="market_wide_correlated_loss"),
+        kill_switch,
     )
 
     async with pool.acquire() as conn:
@@ -108,7 +134,7 @@ async def test_apply_decision_records_audit_log(pool):
     assert data["reason"] == "market_wide_correlated_loss"
 
 
-async def test_stale_heartbeat_leads_to_halt_and_real_pause(pool, tmp_path):
+async def test_stale_heartbeat_leads_to_halt_and_real_pause(pool, kill_switch, tmp_path):
     """FD-9.1 완료조건 재현 — 메인 프로세스가 멎으면(heartbeat 미갱신) Watchdog가
     unresponsive_sec 상승을 관측하고, FD-9.2 판정을 거쳐 실제로 실행을 멈춘다."""
     user_id = await create_test_user(pool)
@@ -134,7 +160,7 @@ async def test_stale_heartbeat_leads_to_halt_and_real_pause(pool, tmp_path):
     assert decision.action == WatchdogAction.HALT
     assert decision.reason == "main_process_unresponsive"
 
-    await _apply_decision(pool, decision)
+    await _apply_decision(pool, decision, kill_switch)
 
     async with pool.acquire() as conn:
         row = await conn.fetchrow(
@@ -144,7 +170,7 @@ async def test_stale_heartbeat_leads_to_halt_and_real_pause(pool, tmp_path):
     assert row["paused_by"] == "SAFETY_LAYER"
 
 
-async def test_run_one_cycle_suppresses_action_on_db_isolated_failure(pool, tmp_path):
+async def test_run_one_cycle_suppresses_action_on_db_isolated_failure(pool, kill_switch, tmp_path):
     """FD-9.3 완료조건 — "DB만 강제로 차단했을 때 강제청산이 발동하지 않고
     신규주문만 보류되는지 확인". 여기서는 실제로 DB 연결을 끊을 수 없으니
     (그러면 검증용 SELECT도 못 함) check_db 콜백만 가짜로 "끊겼다"고
@@ -172,6 +198,7 @@ async def test_run_one_cycle_suppresses_action_on_db_isolated_failure(pool, tmp_
     )
     # 실제 5분 대신 즉시 히스테리시스가 확정되도록 임계값을 짧게.
     split_brain = SplitBrainDiagnostics(entry_confirm_seconds=0.01, recovery_confirm_seconds=0.01)
+    last_action = _LastAppliedAction()
 
     await run_one_cycle(
         pool,
@@ -180,6 +207,8 @@ async def test_run_one_cycle_suppresses_action_on_db_isolated_failure(pool, tmp_
         check_exchange=check_exchange,
         check_db=check_db,
         exchange_health_cache=exchange_health_cache,
+        kill_switch=kill_switch,
+        last_action=last_action,
     )
     await asyncio.sleep(0.02)  # entry_confirm_seconds 경과시켜 히스테리시스 확정
     await run_one_cycle(
@@ -189,6 +218,8 @@ async def test_run_one_cycle_suppresses_action_on_db_isolated_failure(pool, tmp_
         check_exchange=check_exchange,
         check_db=check_db,
         exchange_health_cache=exchange_health_cache,
+        kill_switch=kill_switch,
+        last_action=last_action,
     )
 
     async with pool.acquire() as conn:
@@ -199,7 +230,7 @@ async def test_run_one_cycle_suppresses_action_on_db_isolated_failure(pool, tmp_
     assert row["paused_by"] is None
 
 
-async def test_run_one_cycle_applies_action_when_not_db_isolated(pool, tmp_path):
+async def test_run_one_cycle_applies_action_when_not_db_isolated(pool, kill_switch, tmp_path):
     """대조군 — DB는 멀쩡하고 메인 프로세스만 응답불능이면(Split-Brain
     진단상 DB_ISOLATED_FAILURE가 아님) 평소대로 강제조치가 적용돼야 한다."""
     user_id = await create_test_user(pool)
@@ -223,6 +254,7 @@ async def test_run_one_cycle_applies_action_when_not_db_isolated(pool, tmp_path)
         heartbeat_path=heartbeat,
     )
     split_brain = SplitBrainDiagnostics(entry_confirm_seconds=0.01, recovery_confirm_seconds=0.01)
+    last_action = _LastAppliedAction()
 
     await run_one_cycle(
         pool,
@@ -231,6 +263,8 @@ async def test_run_one_cycle_applies_action_when_not_db_isolated(pool, tmp_path)
         check_exchange=check_exchange,
         check_db=check_db,
         exchange_health_cache=exchange_health_cache,
+        kill_switch=kill_switch,
+        last_action=last_action,
     )
     await asyncio.sleep(0.02)
     await run_one_cycle(
@@ -240,6 +274,8 @@ async def test_run_one_cycle_applies_action_when_not_db_isolated(pool, tmp_path)
         check_exchange=check_exchange,
         check_db=check_db,
         exchange_health_cache=exchange_health_cache,
+        kill_switch=kill_switch,
+        last_action=last_action,
     )
 
     async with pool.acquire() as conn:
@@ -250,7 +286,7 @@ async def test_run_one_cycle_applies_action_when_not_db_isolated(pool, tmp_path)
     assert row["paused_by"] == "SAFETY_LAYER"
 
 
-async def test_run_one_cycle_calls_check_exchange_exactly_once(pool, tmp_path):
+async def test_run_one_cycle_calls_check_exchange_exactly_once(pool, kill_switch, tmp_path):
     """docs/RED_TEAM_FINDINGS.md #06 회귀 — take_snapshot()의 health_check와
     split_brain.diagnose()의 check_exchange가 각자 실제 API를 호출하면
     사이클당 2회 중복 호출됐다. 캐시(_LatestExchangeHealth)로 사이클당
@@ -285,6 +321,8 @@ async def test_run_one_cycle_calls_check_exchange_exactly_once(pool, tmp_path):
         check_exchange=check_exchange,
         check_db=check_db,
         exchange_health_cache=exchange_health_cache,
+        kill_switch=kill_switch,
+        last_action=_LastAppliedAction(),
     )
 
     assert call_count == 1
