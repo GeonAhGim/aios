@@ -23,6 +23,13 @@ Spec: 05_communication_architecture_v1.2.md#§5.6, src/core/event_bus/recovery.p
 
 한계(후속 leaf): 취소·거부로 끝난 주문의 FSM 상태(BUY/SELL_ORDER_PENDING)를
 되돌리는 로직은 cancel.py에도 tick.py에도 없다 — 복구와 무관한 기존 결함.
+
+task-2151(L4-18a) — `run_startup_recovery`가 이 파일의 조립 진입점을
+확장한다: 만료 execution lease 회수(`restart_recovery.reclaim_expired_
+leases`) 후 위 `recover_orders_on_startup`을 이어 부르고, 끝나면
+`RecoveryState`를 완료로 표시한다(§6 F6 ⑤ 배선용 — `background_loops.py`가
+그 상태로 `pre_submit_gate`를 감싸 복구 완료 전 submit을 거부한다). outbox
+SENDING 재진입/UNKNOWN 전환(F6 ①②③)은 여기서 다루지 않는다(task-2310).
 """
 from __future__ import annotations
 
@@ -35,6 +42,7 @@ from src.core.event_bus.recovery import recover_pending_orders
 from src.core.logging.audit_log import record_audit_log
 from src.data.models.trading import OrderStatus
 from src.services.execution_loop.scheduler import AdapterResolver
+from src.services.oms.application.restart_recovery import RecoveryState, reclaim_expired_leases
 from src.services.order_service import repository
 from src.services.order_service.submit import PublishFn
 
@@ -108,3 +116,49 @@ async def recover_orders_on_startup(
         republish_order_event=republish_order_event,
         record_recovery=record_recovery,
     )
+
+
+async def run_startup_recovery(
+    pool: asyncpg.Pool,
+    *,
+    resolve_adapter: AdapterResolver,
+    publish: PublishFn,
+) -> RecoveryState:
+    """task-2151(L4-18a) 조립 진입점 — 만료 execution lease 회수 후 기존
+    `recover_orders_on_startup`을 잇고, 둘 다 끝나야 `RecoveryState`를
+    완료로 표시한다.
+
+    실패하면(어느 단계든) 표시하지 않고 예외를 그대로 던진다 — 호출자
+    (`background_loops.py`)가 이를 삼켜도 반환된 상태는 여전히 미완료라
+    `make_recovery_gate`가 만든 게이트는 재시작 전까지 계속 DENY한다
+    (I-10 fail-closed: 복구가 끝났다고 확인 못 하면 제출을 열지 않는다)."""
+    state = RecoveryState()
+    await reclaim_expired_leases(pool)
+    await recover_orders_on_startup(pool, resolve_adapter=resolve_adapter, publish=publish)
+    state.mark_complete()
+    return state
+
+
+async def run_startup_recovery_gated(
+    pool: asyncpg.Pool,
+    *,
+    resolve_adapter: AdapterResolver,
+    publish: PublishFn,
+    enabled: bool,
+) -> RecoveryState:
+    """`background_loops.py`가 부르는 조립 지점 — flag(`AIOS_STARTUP_
+    RECOVERY_ENABLED`) off면(테스트 conftest 등) 복구 자체를 건너뛰고 곧장
+    완료로 표시해 기존 동작을 유지한다. flag on인데 실패하면 완료로
+    표시하지 않고 예외를 삼킨다 — 앱 기동 자체는 막지 않되(§5.6과 동일
+    태도), `run_startup_recovery`가 돌려준 `RecoveryState`가 미완료로
+    남아 `make_recovery_gate`가 재시작 전까지 submit을 계속 거부한다(§6
+    F6 ⑤, I-10 fail-closed)."""
+    if not enabled:
+        state = RecoveryState()
+        state.mark_complete()
+        return state
+    try:
+        return await run_startup_recovery(pool, resolve_adapter=resolve_adapter, publish=publish)
+    except Exception:
+        logger.exception("restart_recovery: 재시작 복구 실패 — 완료 표시 없이 계속 거부합니다.")
+        return RecoveryState()

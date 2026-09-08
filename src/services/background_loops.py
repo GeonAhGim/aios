@@ -14,11 +14,9 @@ main.py는 pool/event_bus/credential_resolver 등 앱 전역 객체를 조립한
 동작은 분리 이전과 동일 — 이 모듈은 main.py에 있던 코드를 그대로 옮긴 것이다.
 
 §9 PLT-08 — heartbeat/alert/risk_guard/safety_reactivation 4개 루프는
-`LoopHealth.record_tick`으로 계측된다(`_run_instrumented` 공용 래퍼). tick마다
-`bind_system(f"loop.{name}")`으로 시스템 컨텍스트를 새로 바인딩한다(부모 요청
-컨텍스트 누수 방지, `context.py` 모듈독스트링 참조). execution_loop은
-`ExecutionLoopScheduler`가 별도 스케줄러라 이 리프 범위 밖이다(선행 리프에서
-계측 예정).
+`LoopHealth.record_tick`으로 계측된다(`_run_instrumented` 공용 래퍼, tick마다
+`bind_system(f"loop.{name}")`으로 컨텍스트 재바인딩). execution_loop은 별도
+스케줄러(`ExecutionLoopScheduler`)라 이 리프 범위 밖이다.
 """
 from __future__ import annotations
 
@@ -54,8 +52,9 @@ from src.foundation.paper_control.adapters.postgres_repository import PostgresPa
 from src.foundation.risk_gate.adapters.postgres_repository import PostgresRiskGateRepository
 from src.services.alert_service import AlertService
 from src.services.credential_resolver import CredentialResolver
-from src.services.execution_loop.recovery_wiring import recover_orders_on_startup
+from src.services.execution_loop.recovery_wiring import run_startup_recovery_gated
 from src.services.execution_loop.scheduler import ExecutionLoopScheduler
+from src.services.oms.application.restart_recovery import make_recovery_gate
 from src.services.oms.application.wiring import start_outbox_dispatcher_task
 from src.services.order_service import fenced_submit_wiring as fsw
 from src.services.order_service.foundation_gate import make_foundation_pre_submit_gate
@@ -226,21 +225,19 @@ async def start_background_loops(
         )
     )
 
-    # 05번 §5.6 — 재시작 복구. 백그라운드 루프를 띄우기 전에 1회. 거래소가
-    # 응답하지 않아도 앱 기동 자체는 막지 않는다(복구는 다음 틱이 이어받는다).
-    if flag_enabled("AIOS_STARTUP_RECOVERY_ENABLED"):
-        try:
-            await recover_orders_on_startup(
-                pool, resolve_adapter=credential_resolver.get_adapter, publish=event_bus.publish
-            )
-        except Exception:
-            logger.exception("restart_recovery: 재시작 복구 실패 — 실행 루프 tick이 이어받습니다.")
+    # 05번 §5.6 + task-2151(L4-18a) — 재시작 복구, 백그라운드 루프 전에 1회.
+    # flag off/실패 시 동작(fail-closed)은 recovery_wiring.py 참조.
+    recovery_state = await run_startup_recovery_gated(
+        pool,
+        resolve_adapter=credential_resolver.get_adapter,
+        publish=event_bus.publish,
+        enabled=flag_enabled("AIOS_STARTUP_RECOVERY_ENABLED"),
+    )
 
-    # FD-8 실행 루프 — 전수감사 §3에서 확인된 최대 배선 결함. run_execution_tick은
-    # 완전했지만 호출자가 테스트뿐이었다. 주기는 risk_policy.yaml의
-    # execution_loop.interval_sec에서 읽는다. EO-03 최소 배선 — 리스 갱신·kill
-    # switch 해제 release_all 연결·적대적 테스트는 EO-04(§9)로 남긴다. 신규 필수
-    # 인자 없이는 컴파일조차 안 되는 시그니처(I-01)를 기존 컴포넌트만으로 채운다.
+    # FD-8 실행 루프(전수감사 §3 최대 배선 결함 — run_execution_tick은 완전했지만
+    # 호출자가 테스트뿐이었다). 주기는 risk_policy.yaml의 execution_loop.
+    # interval_sec. EO-03 최소 배선(리스 갱신·release_all·적대적 테스트는
+    # EO-04로 남김); 신규 필수 인자(I-01)는 기존 컴포넌트만으로 채운다.
     owner_id = f"{socket.gethostname()}:{os.getpid()}:{uuid4()}"
     lease_repo = PostgresExecutionLeaseRepository(pool)
     execution_scheduler = ExecutionLoopScheduler(
@@ -248,7 +245,9 @@ async def start_background_loops(
         resolve_adapter=credential_resolver.get_adapter,
         policy=policy,
         publish=event_bus.publish,
-        pre_submit_gate=make_foundation_pre_submit_gate(pool, require_mandate=False),
+        pre_submit_gate=make_recovery_gate(
+            recovery_state, make_foundation_pre_submit_gate(pool, require_mandate=False)
+        ),
         distrust_monitor=DataDistrustMonitor(publish=event_bus.publish),
         lease_repo=lease_repo,
         owner_id=owner_id,
