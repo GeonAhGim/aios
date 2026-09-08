@@ -34,6 +34,7 @@ const SECRET_REF = "src/core/security/secret_ref.py";
 const INDICATOR_SPEC = "src/core/indicators/spec.py";
 const INDICATORS_SCHEMA = "src/api/schemas/indicators.py";
 const CHARTING_V1 = "src/foundation/charting/contracts/v1.py";
+const LEDGER_QUERIES_V1 = "src/foundation/ledger/application/queries.py";
 
 export const CONTRACT_FIELD_SPECS: readonly ContractFieldSpec[] = [
   // ---- positionView.ts (§3.2 B) ----
@@ -256,18 +257,42 @@ export const CONTRACT_FIELD_SPECS: readonly ContractFieldSpec[] = [
     parser: "toIndicatorTemplateRecord",
     fields: ["id", "tenant_id", "owner_subject_id", "name", "template", "revision", "created_at", "updated_at"],
   },
+
+  // ---- walletBalance.ts (§9 LC-16, task-2187 배치3) ----
+  // application/queries.py에 있다(contracts/v1.py가 아니다) — 쓰기 경로 계약이
+  // 아니라 GET /wallet/balance 전용 조회 뷰라서 위치가 다르다.
+  {
+    file: LEDGER_QUERIES_V1,
+    className: "WalletBalanceView",
+    parser: "parseWalletBalance",
+    fields: ["user_id", "balance", "available", "held", "pending_payout"],
+  },
 ];
 
-// task-1332 배치2 note — 이 리프에서 함께 다루지 않은 것:
-// §3.4 SessionView(frontend/packages/shared-types/src/session.ts)와 §3.5
-// MembershipView(spec 379-390행)는 백엔드에 대응하는 pydantic SSOT 클래스가
-// 아직 없다. TenantContext에는 membership_id 필드만 추가돼 있고(PLT-28),
-// MembershipView/TenantKind/MembershipRole/MembershipState는
-// src/foundation/trust/contracts/v1.py에 전혀 없다(grep 확인, 2026-09-04).
-// session_id/created_at/last_seen_at/user_agent/ip/revoked_at을 반환하는
-// 세션 목록 API도 아직 없다(tokenPair.ts 주석 "서버 PLT-23/24는 아직 미구현"
-// 참고). 존재하지 않는 백엔드 클래스를 겨냥한 스펙은
-// contractDrift.test.ts의 `expect(actual).not.toBeNull()`에 항상 걸려
-// 드리프트가 아니라 "클래스가 없다"는 이유로 상시 FAIL한다 — 이는 드리프트
-// 가드가 아니라 백엔드 구현을 기다리는 표식일 뿐이므로 여기 등재하지
-// 않는다. 백엔드가 두 계약을 구현하면 후속 리프에서 채운다.
+// task-2187 배치3 — CONTRACT_FIELD_SPECS에 등재하지 않는 파서 파일의 사유를
+// 여기 명시한다. contractCoverage.test.ts가 shared-types/src의 모든
+// `export function parse[A-Z]...` 파일을 스캔해 이 맵에도 CONTRACT_FIELD_SPECS
+// 에도 없으면 FAIL시킨다 — 사유 없는(빈 문자열) 항목은 등재로 치지 않는다.
+export const UNREGISTERED_PARSER_ALLOWLIST: ReadonlyMap<string, string> = new Map([
+  [
+    "session.ts",
+    "SessionView(session_id/created_at/last_seen_at/user_agent/ip/revoked_at)에 대응하는 " +
+      "백엔드 pydantic SSOT 클래스가 없다 — 세션 목록 API 자체가 미구현(tokenPair.ts 주석의 " +
+      "PLT-23/24 참고). 등재하면 extractPydanticFields가 null을 반환해 클래스 없음으로 " +
+      "상시 FAIL한다(task-1332).",
+  ],
+  [
+    "membership.ts",
+    "MembershipView(membership_id/tenant_id/subject_id/role/state/revision/created_at/" +
+      "updated_at)에 대응하는 백엔드 pydantic SSOT 클래스가 src/foundation/trust/contracts/" +
+      "v1.py에 없다(멤버십 목록 API PLT-29 trust_memberships 미구현, 2026-09-04 grep 확인). " +
+      "등재하면 상시 FAIL한다(task-1332).",
+  ],
+]);
+
+// note — session.ts/membership.ts를 CONTRACT_FIELD_SPECS에 넣지 않는 이유는
+// 위 UNREGISTERED_PARSER_ALLOWLIST 값에 적었다(백엔드 SSOT 클래스 부재).
+// 억지로 등재하면 contractDrift.test.ts의 `expect(actual).not.toBeNull()`이
+// 항상 걸려 "드리프트"가 아니라 "클래스 없음"으로 상시 FAIL한다(task-1332).
+// 백엔드가 두 계약을 구현하면 후속 리프에서 CONTRACT_FIELD_SPECS로 옮기고
+// allowlist에서 뺀다. walletBalance.ts는 이번 배치(task-2187)에서 이미 등재.
