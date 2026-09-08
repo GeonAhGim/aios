@@ -23,6 +23,8 @@ KIS와 마찬가지로 모든 계좌 관련 API가 `act_no`(계좌번호)를 요
 """
 from __future__ import annotations
 
+import asyncio
+from collections.abc import Awaitable, Callable
 from decimal import Decimal
 from typing import Any
 
@@ -31,7 +33,9 @@ import httpx
 from src.core.exceptions import FatalExchangeError, RetryableExchangeError
 from src.data.models.base import AssetClass
 from src.exchanges.common.adapter import ExchangeAdapter
-from src.exchanges.common.oauth_http import MonotonicTokenCache, send_or_raise_retryable
+from src.exchanges.common.error_taxonomy import ExchangeError, ExchangeErrorKind
+from src.exchanges.common.oauth_http import MonotonicTokenCache
+from src.exchanges.common.transport import ResilientTransport
 from src.exchanges.common.types import ExchangeCapability, MarketHours
 from src.exchanges.nh.account_mixin import NHAccountMixin
 from src.exchanges.nh.market_data_mixin import NHMarketDataMixin
@@ -48,7 +52,14 @@ _SUCCESS_CODES = {"00000", "00166", "00221", "13578"}
 
 class _NHHTTPClient:
     """OAuth2 토큰 발급/캐싱 + 요청 전송 공통 로직. Mixin들이 self._request()로
-    접근한다."""
+    접근한다.
+
+    L4-21 — 재시도·백오프·서킷·클럭보정은 여기서 재구현하지 않고
+    `ResilientTransport`(L4-12, common/transport.py)에 위임한다. 토큰
+    발급은 `asyncio.Lock`으로 감싸 만료 상태에서 동시에 여러 코루틴이
+    들어와도 발급 엔드포인트는 정확히 1회만 불린다(double-checked
+    locking, kis/adapter.py의 `_KISHTTPClient`와 동일 패턴, DoD a).
+    """
 
     def __init__(
         self,
@@ -58,6 +69,7 @@ class _NHHTTPClient:
         *,
         is_paper_trading: bool = True,
         http_client: httpx.AsyncClient | None = None,
+        sleep_fn: Callable[[float], Awaitable[None]] | None = None,
     ) -> None:
         self._app_key = app_key
         self._app_secret = app_secret
@@ -65,25 +77,38 @@ class _NHHTTPClient:
         self._is_paper_trading = is_paper_trading
         base_url = PAPER_BASE_URL if is_paper_trading else REAL_BASE_URL
         self._client = http_client or httpx.AsyncClient(base_url=base_url, timeout=10.0)
+        self._transport = ResilientTransport(venue="nh", sleep=sleep_fn or asyncio.sleep)
         self._token_cache = MonotonicTokenCache()
+        self._token_lock = asyncio.Lock()
 
     async def _ensure_token(self) -> str:
         cached = self._token_cache.get()
         if cached is not None:
             return cached
+        async with self._token_lock:
+            # double-checked — lock 대기 중 다른 코루틴이 이미 발급했을 수 있다.
+            cached = self._token_cache.get()
+            if cached is not None:
+                return cached
+            return await self._fetch_token()
 
-        response = await self._client.post(
-            "/oauth2/token",
-            params={
-                "appkey": self._app_key,
-                "appsecretkey": self._app_secret,
-                "grant_type": "client_credentials",
-                "scope": "oob",
-            },
-            headers={"Content-Type": "application/x-www-form-urlencoded"},
-        )
-        if response.status_code != 200:
-            raise FatalExchangeError(f"NH 토큰 발급 실패: {response.status_code} {response.text}")
+    async def _fetch_token(self) -> str:
+        async def send_once() -> httpx.Response:
+            return await self._client.post(
+                "/oauth2/token",
+                params={
+                    "appkey": self._app_key,
+                    "appsecretkey": self._app_secret,
+                    "grant_type": "client_credentials",
+                    "scope": "oob",
+                },
+                headers={"Content-Type": "application/x-www-form-urlencoded"},
+            )
+
+        try:
+            response = await self._transport.request(send_once)
+        except ExchangeError as exc:
+            raise FatalExchangeError(f"NH 토큰 발급 실패: {exc}") from exc
 
         data = response.json()
         token: str = data["access_token"]
@@ -91,6 +116,11 @@ class _NHHTTPClient:
         # 만료 직전 재사용을 피하려 60초 여유를 둔다(문서화된 안전 마진).
         self._token_cache.set(token, max(expires_in - 60, 0))
         return token
+
+    def _invalidate_token(self) -> None:
+        # ttl=0 → 다음 get()은 항상 만료로 본다(MonotonicTokenCache.get()의
+        # `<` 비교는 같은 순간이어도 통과하지 않는다 — 경합 없이 결정적).
+        self._token_cache.set("", 0.0)
 
     async def _headers(self) -> dict[str, str]:
         token = await self._ensure_token()
@@ -101,6 +131,29 @@ class _NHHTTPClient:
             "content-type": "application/json; charset=UTF-8",
         }
 
+    def _classify_body(self, response: httpx.Response) -> ExchangeError | None:
+        try:
+            data: dict[str, Any] = response.json()
+        except ValueError:
+            return ExchangeError(
+                ExchangeErrorKind.UNKNOWN_RESPONSE,
+                retryable=True,
+                venue="nh",
+                http_status=response.status_code,
+                message=f"NH 응답이 JSON이 아님: {response.text}",
+            )
+        rsp_cd = data.get("rsp_cd")
+        rsp_msg = data.get("rsp_msg", "")
+        if rsp_cd in _SUCCESS_CODES or "완료" in rsp_msg:
+            return None
+        return ExchangeError(
+            ExchangeErrorKind.UNKNOWN_RESPONSE,
+            retryable=True,
+            venue="nh",
+            http_status=response.status_code,
+            message=f"NH API 오류: {data}",
+        )
+
     async def _request(
         self,
         method: str,
@@ -109,23 +162,32 @@ class _NHHTTPClient:
         params: dict[str, Any] | None = None,
         body: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
-        headers = await self._headers()
-        response = await send_or_raise_retryable(
-            self._client, method, path, venue="NH", params=params, body=body, headers=headers
-        )
+        """DoD(b) — 401(AUTH)은 토큰을 무효화하고 원요청을 정확히 1회만
+        재시도한다. 재시도에서도 401이면 더 반복하지 않고 그대로 예외로
+        표면화한다. HTTP 상태코드/네트워크 재시도·백오프는
+        `ResilientTransport`(DoD c)가 맡고 여기서 다시 구현하지 않는다."""
+        retried_after_auth = False
+        while True:
+            headers = await self._headers()
 
-        try:
-            data: dict[str, Any] = response.json()
-        except ValueError as exc:
-            raise RetryableExchangeError(f"NH 응답이 JSON이 아님: {response.text}") from exc
+            async def send_once(headers: dict[str, str] = headers) -> httpx.Response:
+                return await self._client.request(
+                    method, path, params=params, json=body, headers=headers
+                )
 
-        rsp_cd = data.get("rsp_cd")
-        rsp_msg = data.get("rsp_msg", "")
-        if rsp_cd not in _SUCCESS_CODES and "완료" not in rsp_msg:
-            if response.status_code in (401, 403):
-                raise FatalExchangeError(f"NH 인증 오류: {data}")
-            raise RetryableExchangeError(f"NH API 오류: {data}")
-        return data
+            try:
+                response = await self._transport.request(
+                    send_once, classify_body=self._classify_body
+                )
+            except ExchangeError as exc:
+                if exc.kind is ExchangeErrorKind.AUTH and not retried_after_auth:
+                    self._invalidate_token()
+                    retried_after_auth = True
+                    continue
+                if exc.retryable:
+                    raise RetryableExchangeError(str(exc)) from exc
+                raise FatalExchangeError(str(exc)) from exc
+            return dict(response.json())
 
     async def aclose(self) -> None:
         await self._client.aclose()

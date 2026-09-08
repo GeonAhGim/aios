@@ -2,32 +2,22 @@
 
 Spec: 02_exchange_adapter_v1.2.md#§2.1
 
-인증/엔드포인트(2026-08-28 KIS 공식 GitHub 예제
-github.com/koreainvestment/open-trading-api 소스코드 확인):
-- OAuth2: POST /oauth2/tokenP, body {grant_type:"client_credentials",
-  appkey, appsecret} → {access_token, access_token_token_expired}(1일 유효)
-- Base URL: 실전 https://openapi.koreainvestment.com:9443,
-  모의투자 https://openapivts.koreainvestment.com:29443
-- 요청 헤더: Content-Type/Accept/charset + authorization: Bearer {token} +
-  appkey + appsecret + tr_id + custtype: "P"
-- tr_id 실전/모의 변환: 앞글자가 T/J/C면 모의투자는 'V'로 치환(예:
-  TTTC8434R → VTTC8434R). 시세조회(F로 시작)류는 실전/모의 동일 tr_id.
-- 응답 포맷: {rt_cd: "0"(성공)|기타, msg_cd, msg1, output/output1/output2}
-
 편차: 02번 스펙 원문 시그니처는 __init__(app_key, app_secret,
 is_paper_trading)였으나, 실제로는 모든 계좌/주문 API가 종합계좌번호(CANO)와
 계좌상품코드(ACNT_PRDT_CD)를 필수 파라미터로 요구한다는 것을 조사 중
 발견 — 생성자에 cano/acnt_prdt_cd 추가.
+
+L4-21 — OAuth2 토큰 발급/캐싱 + 서명·전송 공통 로직은 300줄 캡 때문에
+`oauth_client.py`(`_KISTokenTransportMixin`)로 분리했다(엔드포인트/인증
+상세는 그 모듈 docstring 참조). `_resolve_tr_id`/`_PAPER_SWAP_PREFIXES`
+만은 여기 남긴다 — `test_overseas_futureoption_tr_reference.py`의 mutation
+테스트가 `_PAPER_SWAP_PREFIXES`를 이 모듈(`adapter_module`) 전역으로
+직접 monkeypatch하기 때문이다(oauth_client.py 모듈 docstring 참조).
 """
 from __future__ import annotations
 
-import time
 from decimal import Decimal
-from typing import Any
 
-import httpx
-
-from src.core.exceptions import FatalExchangeError, RetryableExchangeError
 from src.data.models.base import AssetClass
 from src.data.models.trading import Order
 from src.exchanges.common.adapter import ExchangeAdapter
@@ -41,110 +31,31 @@ from src.exchanges.kis.elw_mixin import KISElwMixin
 from src.exchanges.kis.etf_mixin import KISEtfMixin
 from src.exchanges.kis.generated import KISGeneratedMixin
 from src.exchanges.kis.market_data_mixin import KISMarketDataMixin
+from src.exchanges.kis.oauth_client import PAPER_BASE_URL, REAL_BASE_URL, _KISTokenTransportMixin
 from src.exchanges.kis.order_dispatch import dispatch_place_order
 from src.exchanges.kis.overseas_futureoption_mixin import KISOverseasFutureoptionMixin
 from src.exchanges.kis.overseas_stock_mixin import KISOverseasStockMixin
 from src.exchanges.kis.trading_mixin import KISTradingMixin
+from src.exchanges.kis.trading_query_mixin import KISTradingQueryMixin
 from src.exchanges.kis.websocket_mixin import KISWebSocketMixin
 
-REAL_BASE_URL = "https://openapi.koreainvestment.com:9443"
-PAPER_BASE_URL = "https://openapivts.koreainvestment.com:29443"
+# tests/contract/exchanges/kis/test_generated_contract.py가 이 이름으로
+# 임포트한다 — oauth_client.py의 실제 값을 그대로 재수출한다(중복 정의 아님).
+__all__ = ["PAPER_BASE_URL", "REAL_BASE_URL", "KISAdapter", "_KISHTTPClient"]
 
 # 앞글자가 이 중 하나면 모의투자 tr_id는 'V'로 치환한다(실거래/정정취소류).
 # 시세조회(F로 시작 등)는 치환 대상 아님 — 실전/모의 동일 tr_id 사용.
 _PAPER_SWAP_PREFIXES = ("T", "J", "C")
 
 
-class _KISHTTPClient:
-    """OAuth2 토큰 발급/캐싱 + 요청 전송 공통 로직. Mixin들이 self._request()로
-    접근한다."""
-
-    def __init__(
-        self,
-        app_key: str,
-        app_secret: str,
-        cano: str,
-        acnt_prdt_cd: str,
-        *,
-        is_paper_trading: bool = True,
-        http_client: httpx.AsyncClient | None = None,
-    ) -> None:
-        self._app_key = app_key
-        self._app_secret = app_secret
-        self._cano = cano
-        self._acnt_prdt_cd = acnt_prdt_cd
-        self._is_paper_trading = is_paper_trading
-        base_url = PAPER_BASE_URL if is_paper_trading else REAL_BASE_URL
-        self._client = http_client or httpx.AsyncClient(base_url=base_url, timeout=10.0)
-        self._access_token: str | None = None
-        self._token_expires_at: float = 0.0
+class _KISHTTPClient(_KISTokenTransportMixin):
+    """tr_id 실전/모의 치환. 토큰 발급/전송은 `_KISTokenTransportMixin`
+    (oauth_client.py) 참조."""
 
     def _resolve_tr_id(self, tr_id: str) -> str:
         if self._is_paper_trading and tr_id[0] in _PAPER_SWAP_PREFIXES:
             return "V" + tr_id[1:]
         return tr_id
-
-    async def _ensure_token(self) -> str:
-        if self._access_token is not None and time.monotonic() < self._token_expires_at:
-            return self._access_token
-
-        response = await self._client.post(
-            "/oauth2/tokenP",
-            json={
-                "grant_type": "client_credentials",
-                "appkey": self._app_key,
-                "appsecret": self._app_secret,
-            },
-            headers={"Content-Type": "application/json; charset=UTF-8"},
-        )
-        if response.status_code != 200:
-            raise FatalExchangeError(f"KIS 토큰 발급 실패: {response.status_code} {response.text}")
-
-        data = response.json()
-        self._access_token = data["access_token"]
-        # KIS는 만료시각을 "YYYY-MM-DD HH:MM:SS" 문자열로 주지만(1일 유효),
-        # 여기서는 보수적으로 23시간만 캐싱해 만료 직전 재사용을 피한다.
-        self._token_expires_at = time.monotonic() + 23 * 3600
-        return self._access_token
-
-    async def _headers(self, tr_id: str) -> dict[str, str]:
-        token = await self._ensure_token()
-        return {
-            "Content-Type": "application/json; charset=UTF-8",
-            "Accept": "text/plain",
-            "authorization": f"Bearer {token}",
-            "appkey": self._app_key,
-            "appsecret": self._app_secret,
-            "tr_id": self._resolve_tr_id(tr_id),
-            "custtype": "P",
-        }
-
-    async def _request(
-        self,
-        method: str,
-        path: str,
-        tr_id: str,
-        *,
-        params: dict[str, Any] | None = None,
-        body: dict[str, Any] | None = None,
-    ) -> dict[str, Any]:
-        headers = await self._headers(tr_id)
-        try:
-            response = await self._client.request(
-                method, path, params=params, json=body, headers=headers
-            )
-        except httpx.TransportError as exc:
-            raise RetryableExchangeError(f"KIS 요청 전송 실패: {exc}") from exc
-
-        data: dict[str, Any] = response.json()
-        if data.get("rt_cd") != "0":
-            if response.status_code in (401, 403):
-                raise FatalExchangeError(f"KIS 인증 오류: {data}")
-            raise RetryableExchangeError(f"KIS API 오류: {data}")
-        return data
-
-    async def aclose(self) -> None:
-        await self._client.aclose()
 
 
 class KISAdapter(
@@ -152,6 +63,7 @@ class KISAdapter(
     KISMarketDataMixin,
     KISAccountMixin,
     KISTradingMixin,
+    KISTradingQueryMixin,
     KISDomesticStockExtraMixin,
     KISOverseasStockMixin,
     KISDomesticBondMixin,
