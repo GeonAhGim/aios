@@ -25,6 +25,7 @@ from uuid import UUID, uuid4
 import pytest
 
 from scripts import replay_verify
+from src.core.eventstore import replay
 from src.core.eventstore.projections.orders import EventChainBrokenError
 from src.data.models.base import Currency
 from src.data.models.trading import OrderStatus
@@ -238,6 +239,139 @@ async def test_replay_detects_ledger_balance_tampered_outside_the_event_trail(po
         assert debit_code in tampered_run.stderr
     finally:
         await _bump_balance(-1)
+
+
+async def test_replay_digest_differs_between_accounts_with_different_balances(pool):
+    """DoD(b), task-2394 -- falsifies the ci:77871f678ce2 symptom directly:
+    every `USER:*:AVAILABLE` key reported the exact same two digests
+    (`replayed`/`actual`), which is only possible if the digest input never
+    actually varied with account balance. Two accounts posted with different
+    amounts must fold to different `replayed` states and therefore different
+    digests -- if `digest_state`'s input ever regresses to empty/constant
+    (e.g. `_ledger_pairs` folding zero entries), this fails immediately
+    instead of silently matching."""
+    journal = PostgresJournalRepository(pool)
+
+    async def _seed(amount: Decimal) -> str:
+        debit_code = await _seed_ledger_account(pool, allow_negative=True)
+        credit_code = await _seed_ledger_account(pool, allow_negative=False)
+        event = LedgerEvent(
+            event_type=LedgerEventType.MANUAL_ADJUSTMENT,
+            event_ref=f"adj:{uuid4().hex}",
+            tenant_id=None,
+            actor_subject_id=None,
+            trace_id=uuid4(),
+            amount=amount,
+            currency=Currency.KRW,
+            parties={},
+            extra={"debit_account": debit_code, "credit_account": credit_code},
+        )
+        async with pool.acquire() as conn, conn.transaction():
+            await post_entry(
+                conn, event, journal=journal, balances=PostgresBalanceRepository(pool),
+                audit=PostgresAuditEventRepository(pool), clock=_clock,
+            )
+        return credit_code
+
+    code_a = await _seed(Decimal("10.00"))
+    code_b = await _seed(Decimal("25.00"))
+
+    async with pool.acquire() as conn:
+        pairs = await replay_verify._ledger_pairs(conn, journal, [code_a, code_b])
+
+    replayed_a, actual_a = pairs[("ledger", code_a)]
+    replayed_b, actual_b = pairs[("ledger", code_b)]
+    assert replayed_a["balance"] != replayed_b["balance"]
+    assert replay.digest_state(replayed_a) != replay.digest_state(replayed_b)
+    assert replay.digest_state(actual_a) != replay.digest_state(actual_b)
+    assert replay.digest_state(replayed_a) == replay.digest_state(actual_a)
+    assert replay.digest_state(replayed_b) == replay.digest_state(actual_b)
+
+
+class _DiscardTransaction(Exception):
+    """Sentinel to force `conn.transaction()` to roll back on a clean pass."""
+
+
+async def test_replay_flags_order_status_changed_without_event_as_mismatch(pool):
+    """task-2394 -- reproduces the write-path gap behind ci:77871f678ce2's
+    'orders 1건' mismatch: `src/services/safety/open_order_sweeper.py`'s
+    `sweep_open_orders()` does `UPDATE orders SET status = 'CANCEL_REQUESTED'
+    ...` directly, with no matching `order_events` row (its docstring's
+    single-statement-UPDATE design is deliberate -- see task note). The
+    order's event chain is not *broken* (task-2173's pre-cutover carve-out
+    doesn't apply here -- every recorded event is complete and in order,
+    unlike `_seed_broken_chain_order`'s mid-chain gap); it is *incomplete*:
+    replay stops at SUBMITTED while `orders.status` silently moved on.
+    replay_verify must report that as a real mismatch, not silently pass --
+    fail-closed is the entire point of FA-15/FA-16.
+
+    Everything after `order_id` runs inside one explicit transaction that is
+    always rolled back (`_DiscardTransaction`), never committed -- `orders`
+    has no WORM guard but `073beca589d5`'s I5 trigger unconditionally
+    auto-increments `version` on *every* UPDATE (cutover or not), so even a
+    "restore status" cleanup UPDATE desyncs `version` from what replay would
+    fold and leaves the row permanently mismatching. A first version of this
+    test tried exactly that revert-via-UPDATE cleanup and it visibly poisoned
+    three sibling tests' `hours=1` windows in the same run (all started
+    failing on the leftover order) -- a live, small-scale rerun of this same
+    task's CI symptom. Rollback is the only cleanup that actually leaves zero
+    trace, so `replay_verify._order_pair` is called directly on this
+    transaction's own connection (not `verify()`/`pool.acquire()`, which
+    would open a second connection and never see the uncommitted rows)."""
+    user_id = await create_test_user(pool)
+    repo = PostgresOrderRepository()
+    async with pool.acquire() as conn:
+        try:
+            async with conn.transaction():
+                order_id = await insert_order(conn, user_id, status="CREATED")
+                await repo.transition(
+                    conn,
+                    order_id=order_id,
+                    expected_status=OrderStatus.CREATED,
+                    expected_version=0,
+                    new_status=OrderStatus.VALIDATED,
+                    patch={},
+                    event=_order_event(
+                        order_id,
+                        from_status=OrderStatus.CREATED,
+                        to_status=OrderStatus.VALIDATED,
+                        event="VALIDATED",
+                    ),
+                )
+                await repo.transition(
+                    conn,
+                    order_id=order_id,
+                    expected_status=OrderStatus.VALIDATED,
+                    expected_version=1,
+                    new_status=OrderStatus.SUBMITTED,
+                    patch={},
+                    event=_order_event(
+                        order_id,
+                        from_status=OrderStatus.VALIDATED,
+                        to_status=OrderStatus.SUBMITTED,
+                        event="SENT",
+                    ),
+                )
+                # Mirrors open_order_sweeper.sweep_open_orders()'s bulk cancel
+                # UPDATE exactly -- no SET LOCAL oms.event_written, no
+                # order_events row.
+                await conn.execute(
+                    "UPDATE orders SET status = 'CANCEL_REQUESTED', updated_at = now() "
+                    "WHERE order_id = $1",
+                    order_id,
+                )
+
+                cutover_at = await replay_verify._cutover_at(conn)
+                pair = await replay_verify._order_pair(conn, order_id, cutover_at=cutover_at)
+
+                assert pair is not None, "chain is complete, not broken -- must not be skipped"
+                replayed, actual = pair
+                assert replayed["status"] != actual["status"]
+                assert replay.digest_state(replayed) != replay.digest_state(actual)
+
+                raise _DiscardTransaction
+        except _DiscardTransaction:
+            pass
 
 
 async def _seed_broken_chain_order(pool) -> UUID:

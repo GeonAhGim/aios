@@ -198,10 +198,20 @@ async def _ledger_pairs(
 
 async def verify(pool: asyncpg.Pool, *, as_of: datetime, hours: int) -> replay.ReplayReport:
     """Load every stream touched in `window(as_of, hours)`, replay it via
-    FA-14's projections, and diff against its current table row."""
+    FA-14's projections, and diff against its current table row.
+
+    `REPEATABLE READ` (read-only) wraps the whole scan in one snapshot --
+    without it, the touched-id scan and the later fold-and-compare reads
+    (`_order_pair`/`_ledger_pairs`) are separate auto-committed statements,
+    so a write landing on an already-scanned stream in between would make
+    `actual` reflect it while `replayed` (folded from an earlier read) does
+    not, a false mismatch with no real drift behind it. task-2394 found no
+    live evidence of this actually firing (a concurrent-writer stress test
+    against this function produced zero mismatches), but it costs nothing
+    to close a real TOCTOU gap outright rather than leave it to chance."""
     start, end = window(as_of, hours)
     journal = PostgresJournalRepository(pool)
-    async with pool.acquire() as conn:
+    async with pool.acquire() as conn, conn.transaction(isolation="repeatable_read", readonly=True):
         order_ids = await _touched_order_ids(conn, start, end)
         account_codes = await _touched_ledger_accounts(conn, start, end)
         cutover_at = await _cutover_at(conn)
