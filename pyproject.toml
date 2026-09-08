@@ -197,6 +197,7 @@ extend-immutable-calls = ["fastapi.Depends", "fastapi.Query", "fastapi.Path", "f
 "src/foundation/evidence/application/append_audit_event.py" = ["S101"]
 "src/foundation/evidence/contracts/v1.py" = ["S105"]
 "src/foundation/evidence/domain/models.py" = ["S105"]
+"src/foundation/ems/adapters/postgres_route_decision_repository.py" = ["S101"]
 "src/foundation/ledger/adapters/postgres_hold_repository.py" = ["S608"]
 "src/foundation/ledger/adapters/postgres_journal_repository.py" = ["S101"]
 "src/foundation/ledger/adapters/postgres_payout_repository.py" = ["ARG002", "S101", "S608"]
