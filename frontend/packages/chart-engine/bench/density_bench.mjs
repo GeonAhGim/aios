@@ -51,6 +51,14 @@ const TARGET_PIXEL_WIDTH = 1200;
 const PAN_ZOOM_STEPS_PER_PHASE = 60;
 const TICK_SAMPLE_COUNT = 500;
 const INDICATOR_ADD_RUNS = 5;
+/**
+ * Number of full measurement sweeps per run, min-reduced per metric. A
+ * shared dev/CI box runs other work concurrently, so a single sweep can land
+ * entirely inside someone else's CPU burst; the per-metric min across sweeps
+ * reports the best (least-contaminated) sample instead of whichever sweep
+ * happened to be unlucky.
+ */
+const MEASURE_SWEEPS = 3;
 
 /** Feeds the full candle history through every instance, keeping the primary output aligned by candle index (null while unwarmed). */
 function warmInstances(instances, candles) {
@@ -181,16 +189,24 @@ async function main() {
   }
   const valuesByInstance = warmInstances(instances, candles);
 
-  const panZoom = measurePanZoomFrameMs(candles, instances, valuesByInstance);
-  const indicatorAddMs = measureIndicatorAddMs(catalog, candles);
-  const tickUpdate = measureTickUpdateMs(instances, candles);
-
+  const sweeps = [];
+  for (let i = 0; i < MEASURE_SWEEPS; i++) {
+    const panZoom = measurePanZoomFrameMs(candles, instances, valuesByInstance);
+    const indicatorAddMs = measureIndicatorAddMs(catalog, candles);
+    const tickUpdate = measureTickUpdateMs(instances, candles);
+    sweeps.push({
+      panZoomFrameMsP95: panZoom.p95,
+      indicatorAddMs,
+      tickUpdateMsP95: tickUpdate.p95,
+    });
+  }
   const current = {
-    panZoomFrameMsP95: panZoom.p95,
-    indicatorAddMs,
-    tickUpdateMsP95: tickUpdate.p95,
+    panZoomFrameMsP95: Math.min(...sweeps.map((s) => s.panZoomFrameMsP95)),
+    indicatorAddMs: Math.min(...sweeps.map((s) => s.indicatorAddMs)),
+    tickUpdateMsP95: Math.min(...sweeps.map((s) => s.tickUpdateMsP95)),
   };
-  console.log("[density-bench] measured:", JSON.stringify(current));
+  console.log(`[density-bench] sweeps (${MEASURE_SWEEPS}):`, JSON.stringify(sweeps));
+  console.log("[density-bench] measured (min across sweeps):", JSON.stringify(current));
   console.log(
     "[density-bench] dev-machine targets (report only, never asserted in CI): " +
       "panZoomFrameMsP95<=16.7 indicatorAddMs<=100 tickUpdateMsP95<=8",
