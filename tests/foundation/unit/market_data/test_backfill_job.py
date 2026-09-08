@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 from decimal import Decimal
-from uuid import UUID, uuid4
+from uuid import UUID
 
 import pytest
 
@@ -10,10 +10,10 @@ from src.data.models.base import AssetClass
 from src.foundation.market_data.contracts.v1 import CandleRecord, SeriesKey, Timeframe, Venue
 from src.foundation.market_data.contracts.v2.coverage import CoverageSpan, QualityGrade
 from src.foundation.market_data.contracts.v2.instruments import VenueListing
+from src.foundation.market_data.application.backfill_job import BackfillJob
 from src.foundation.market_data.domain.calendar.known_venues import KNOWN_SESSIONS
 from src.foundation.market_data.domain.calendar.session_rules import VenueCalendar
 from src.foundation.market_data.domain.candle_columns import CandleColumns
-from src.foundation.market_data.application.backfill_job import BackfillJob
 from src.foundation.market_data.ports.provider import TimeSpan
 
 
@@ -121,6 +121,7 @@ async def test_resume_is_idempotent_and_second_run_does_not_fetch() -> None:
 
     assert first.gaps_planned == 5
     assert first.gaps_filled == 5
+    assert len(job.coverage_spans) == 1
     assert second.gaps_planned == 0
     assert len(provider.calls) == calls_after_first
 
