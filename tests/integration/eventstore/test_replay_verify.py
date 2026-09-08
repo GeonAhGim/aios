@@ -20,11 +20,12 @@ import sys
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from pathlib import Path
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import pytest
 
 from scripts import replay_verify
+from src.core.eventstore.projections.orders import EventChainBrokenError
 from src.data.models.base import Currency
 from src.data.models.trading import OrderStatus
 from src.foundation.evidence.adapters.postgres_repository import PostgresAuditEventRepository
@@ -150,7 +151,7 @@ def _run_script(
         cwd=_REPO_ROOT,
         env=env,
         capture_output=True,
-        text=True,
+        encoding="utf-8",
         timeout=60,
     )
 
@@ -237,3 +238,85 @@ async def test_replay_detects_ledger_balance_tampered_outside_the_event_trail(po
         assert debit_code in tampered_run.stderr
     finally:
         await _bump_balance(-1)
+
+
+async def _seed_broken_chain_order(pool) -> UUID:
+    """A raw-seeded order (status set directly at INSERT, bypassing
+    order_events entirely -- the pattern several OMS test fixtures use to
+    start a test mid-lifecycle) plus one real transition. The resulting
+    `order_events` timeline has exactly one row whose `from_status` is
+    VALIDATED, not CREATED -- the same shape 753a88c6aeb5's CI run hit
+    (order 70d76b11-..., seq=21, from_status=VALIDATED)."""
+    user_id = await create_test_user(pool)
+    async with pool.acquire() as conn:
+        order_id = await insert_order(conn, user_id, status="VALIDATED")
+        async with conn.transaction():
+            # `SET LOCAL` is transaction-scoped -- I6 (073beca589d5) only sees
+            # `oms.event_written='1'` if the append and the UPDATE share the
+            # same tx, exactly like every real `transition()` caller wraps it
+            # (submit_order.py/outbox_dispatcher.py, `conn.transaction()`).
+            await PostgresOrderRepository().transition(
+                conn,
+                order_id=order_id,
+                expected_status=OrderStatus.VALIDATED,
+                expected_version=0,
+                new_status=OrderStatus.SUBMITTED,
+                patch={},
+                event=_order_event(
+                    order_id,
+                    from_status=OrderStatus.VALIDATED,
+                    to_status=OrderStatus.SUBMITTED,
+                    event="SENT",
+                ),
+            )
+    return order_id
+
+
+async def test_replay_skips_pre_cutover_order_with_broken_event_chain(pool):
+    """task-2173 -- `oms_order_transition_cutover.cutover_at` is NULL
+    (unarmed) by default in this test DB, so 073beca589d5's I6 trigger never
+    required this order to carry a complete `order_events` trail. Before the
+    fix, `orders_projection.project()`'s `EventChainBrokenError` propagated
+    all the way out of `verify()` and crashed the script; now `_order_pair`
+    recognizes the order predates any armed cutover and skips it instead of
+    crashing or reporting a false mismatch."""
+    order_id = await _seed_broken_chain_order(pool)
+    as_of = _clock() + timedelta(minutes=1)
+
+    report = await replay_verify.verify(pool, as_of=as_of, hours=1)
+
+    assert report.ok, report.mismatches
+    assert not any(d.key == str(order_id) for d in report.mismatches)
+
+
+async def test_replay_still_raises_for_post_cutover_broken_event_chain(pool):
+    """Negative test for the task-2173 fix itself -- once cutover is armed,
+    073beca589d5's I6 trigger makes a broken chain structurally impossible
+    for any real write path, so a broken chain on an order created at/after
+    the armed cutover must still fail closed (not be silently skipped the
+    way a pre-cutover order is)."""
+    async with pool.acquire() as conn:
+        # `cutover_at = now()` (not further back) so this only pulls *this*
+        # test's own order into I6 scope -- other tests in this same
+        # session may have left pre-cutover broken-chain orders committed
+        # in the last hour (test_replay_skips_pre_cutover_..._chain does),
+        # and those must stay out of scope or this test would catch the
+        # wrong order's EventChainBrokenError.
+        armed = await conn.fetchval(
+            "UPDATE oms_order_transition_cutover SET cutover_at = now(), "
+            "armed_by = 'test-2173' WHERE id = 1 AND cutover_at IS NULL RETURNING cutover_at"
+        )
+    assert armed is not None, "cutover already armed by another test run -- refusing to clobber it"
+    try:
+        order_id = await _seed_broken_chain_order(pool)
+        as_of = _clock() + timedelta(minutes=1)
+
+        with pytest.raises(EventChainBrokenError) as excinfo:
+            await replay_verify.verify(pool, as_of=as_of, hours=1)
+        assert excinfo.value.order_id == order_id
+    finally:
+        async with pool.acquire() as conn:
+            await conn.execute(
+                "UPDATE oms_order_transition_cutover SET cutover_at = NULL, armed_by = NULL "
+                "WHERE id = 1"
+            )

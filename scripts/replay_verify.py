@@ -32,6 +32,20 @@ Orders' and ledger's projection logic is reused as-is from FA-14
 (src/core/eventstore/projections/{orders,ledger}.py, task-2050 decision) --
 not re-implemented here, so "byte-identical" actually proves the projection
 and the write path agree.
+
+task-2173 fix: orders whose `order_events` chain does not start at CREATED
+are skipped (not counted a mismatch, not a crash) when they predate
+`oms_order_transition_cutover.cutover_at` -- 073beca589d5's I6 trigger (`no
+status change without an order_events row`) only enforces completeness for
+orders created at/after an armed cutover; its own docstring says enforcing
+it unconditionally would immediately break order_service/repository.py's
+pre-cutover legacy writers. Replaying a pre-cutover order byte-identical is
+therefore not a promise this checker can make -- `_order_pair` mirrors the
+exact same cutover_at boundary the write-path guard already uses, so this
+is not a lenient fold (src/core/eventstore/projections/orders.py's
+`EventChainBrokenError` still fires and still fails closed for any order at
+or after an armed cutover, where I6 makes a broken chain structurally
+impossible).
 """
 from __future__ import annotations
 
@@ -40,7 +54,7 @@ import asyncio
 import os
 import sys
 from datetime import datetime, timedelta, timezone
-from typing import Any
+from typing import Any, cast
 from uuid import UUID
 
 import asyncpg
@@ -99,12 +113,44 @@ async def _touched_ledger_accounts(
     return [row["account_code"] for row in rows]
 
 
+async def _cutover_at(conn: asyncpg.Connection) -> datetime | None:
+    value = await conn.fetchval("SELECT cutover_at FROM oms_order_transition_cutover WHERE id = 1")
+    return cast(datetime | None, value)
+
+
 async def _order_pair(
-    conn: asyncpg.Connection, order_id: UUID
-) -> tuple[dict[str, Any], dict[str, Any]]:
+    conn: asyncpg.Connection, order_id: UUID, *, cutover_at: datetime | None
+) -> tuple[dict[str, Any], dict[str, Any]] | None:
+    """Replay one order's timeline and diff it against its current row --
+    `None` if the order predates `oms_order_transition_cutover.cutover_at`
+    and its chain is broken. 073beca589d5's I6 trigger only enforces "no
+    status change without an order_events row" for orders created at/after
+    an armed cutover (its own docstring: enforcing it unconditionally would
+    immediately break order_service/repository.py's pre-cutover legacy
+    writers) -- pre-cutover orders were never guaranteed a complete event
+    trail, so FA-15 replaying them byte-identical is not a promise this
+    system makes. Orders at/after an armed cutover still fail closed (the
+    exception propagates) -- for those, I6 means this should be structurally
+    impossible."""
     events = await PostgresOrderEventRepository().timeline(conn, order_id)
     fills = await FillsRepository().list_for_order(conn, order_id)
-    projected = orders_projection.project(order_id, events, fills)
+    row = await conn.fetchrow(
+        "SELECT created_at, status, version, filled_quantity, average_fill_price, "
+        "fee_total, fee_currency FROM orders WHERE order_id = $1",
+        order_id,
+    )
+    try:
+        projected = orders_projection.project(order_id, events, fills)
+    except orders_projection.EventChainBrokenError as exc:
+        pre_cutover = cutover_at is None or row is None or row["created_at"] < cutover_at
+        if not pre_cutover:
+            raise
+        print(
+            f"replay_verify: order_id={order_id} skipped -- pre-cutover order, "
+            f"event history incomplete (not an FA-16 wiring guarantee): {exc}",
+            file=sys.stderr,
+        )
+        return None
     replayed: dict[str, Any] = {
         "status": projected.status.value,
         "version": projected.version,
@@ -113,11 +159,6 @@ async def _order_pair(
         "fee_total": projected.fee_total,
         "fee_currency": projected.fee_currency,
     }
-    row = await conn.fetchrow(
-        "SELECT status, version, filled_quantity, average_fill_price, fee_total, fee_currency "
-        "FROM orders WHERE order_id = $1",
-        order_id,
-    )
     actual: dict[str, Any] = {field: None if row is None else row[field] for field in _ORDER_FIELDS}
     return replayed, actual
 
@@ -163,10 +204,13 @@ async def verify(pool: asyncpg.Pool, *, as_of: datetime, hours: int) -> replay.R
     async with pool.acquire() as conn:
         order_ids = await _touched_order_ids(conn, start, end)
         account_codes = await _touched_ledger_accounts(conn, start, end)
+        cutover_at = await _cutover_at(conn)
 
         streams: dict[replay.StreamKey, tuple[dict[str, Any], dict[str, Any]]] = {}
         for order_id in order_ids:
-            streams[("orders", str(order_id))] = await _order_pair(conn, order_id)
+            pair = await _order_pair(conn, order_id, cutover_at=cutover_at)
+            if pair is not None:
+                streams[("orders", str(order_id))] = pair
         streams.update(await _ledger_pairs(conn, journal, account_codes))
 
     return replay.verify_replay(streams)
