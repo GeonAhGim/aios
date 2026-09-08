@@ -19,10 +19,11 @@ class Ticker(BaseModel):
     volume_24h: Decimal
     timestamp: datetime
     source_type: str  # "primary" | "reference" — 8.1-A 다중소스 교차검증용
-    # ADR-2026-09-06-H D7 — 사용자 소유 브로커 연결로 받은 시세는 재배포
-    # 권리가 연결 소유자 본인에게만 있다. None은 "이 경로가 아직 태깅하지
-    # 않음"이지 "공유 가능"이 아니다 — 값을 소비해 차단하는 로직은 이
-    # 필드를 추가하는 리프가 아니라 그 소비자(캐시/screener 등) 몫이다.
+    # ADR-2026-09-06-H D7 — for a quote received via a user-owned broker
+    # connection, redistribution rights belong only to the connection's
+    # owner. None means "this path hasn't tagged it yet," not "shareable" —
+    # the logic that consumes this value to actually block sharing belongs
+    # to the consumer (cache/screener, etc.), not to this field-adding leaf.
     redistribution_scope: str | None = None
 
 

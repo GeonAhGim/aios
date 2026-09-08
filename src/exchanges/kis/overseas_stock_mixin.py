@@ -2,15 +2,18 @@
 
 Spec: 02d_kis_api_full_spec_v1.md §4, §7(작업 분해 3번)
 ADR-2026-09-06-I D2 — BR-4: 거래소 전수(US를 NAS/NASD 하나로 뭉치지 않는다).
-ADR-2026-09-06-H D7 — L4-32: 사용자 소유 증권사 연결로 미국 등 해외
-증시에 참여하는 경로. `KISAdapter.get_capabilities()`(BR-8, adapter.py)가
-이제 US_EQUITY/US_ETF/US_ETN을 선언하고 `place_order()`가 이 mixin으로
-실제 분기하므로(order_dispatch.py) `ExchangeAdapter` ABC 계약은 이미
-채워져 있다 — 이 리프가 남긴 것은 D7이 요구하는 마지막 조각, 이 경로로
-들어온 시세를 `USER_SCOPED`로 태깅하는 것뿐이다(`get_overseas_ticker`
-참조). 재배포 계약 없이 미국 실시간 시세를 화면에 그릴 수 있는 이유는
-사용자 본인 소유 연결이기 때문이며, 그 사실이 시세 자체에 표시돼야
-공유 캐시·스크리너로 새는 것을 구조로 막을 수 있다(D7 원칙).
+ADR-2026-09-06-H D7 — L4-32: the path by which a user's own brokerage
+connection participates in overseas markets such as the US.
+`KISAdapter.get_capabilities()` (BR-8, adapter.py) now declares
+US_EQUITY/US_ETF/US_ETN, and `place_order()` actually branches into this
+mixin (order_dispatch.py), so the `ExchangeAdapter` ABC contract is already
+fulfilled — what this leaf leaves behind is the last piece D7 requires:
+tagging quotes that arrive through this path as `USER_SCOPED` (see
+`get_overseas_ticker`). The reason US real-time quotes can be rendered on
+screen without a redistribution agreement is that the connection is owned
+by the user themselves, and that fact must be marked on the quote itself so
+that leaking into a shared cache or screener is structurally prevented (the
+D7 principle).
 
 최초 조사(WebFetch, github.com/koreainvestment/open-trading-api/
 examples_llm/overseas_stock, 2026-09-02)로 실제 예제 코드의 tr_id/

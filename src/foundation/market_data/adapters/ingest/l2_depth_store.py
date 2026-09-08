@@ -1,16 +1,18 @@
-"""RD-19 — L2 호가창 원시 기록 저장소(로컬 파일) + 보존 정책 집행.
+"""RD-19 — L2 orderbook raw record store (local files) + retention policy enforcement.
 
 Spec: docs/design/ADR-2026-09-06-H-data-sourcing-self-build-and-contract-tiers.md
-D5 "비용은 저장·운영이다(심볼 소수라도 일 단위 GB) — 보존 정책을 처음부터
-넣는다." 전체 깊이 기록은 Postgres가 아니라 파일로 저장한다(D5가 인정하는
-비용 성격에 비추어 관계형 DB에 물량 데이터를 태우지 않는다 — DC-8
-`coverage_spans`는 온라인 여부만 기록하는 메타이지 이 파일들의 저장소가
-아니다).
+D5 "The cost is storage and operations (GB per day even with only a few
+symbols) — build in a retention policy from the start." Full-depth
+records are stored as files, not in Postgres (per the cost profile D5
+acknowledges, we don't dump bulk volume data into the relational DB — the
+DC-8 `coverage_spans` table is metadata that only records whether a span
+is online; it is not the store for these files).
 
-각 레코드의 시각은 저장 호출자가 넘긴 `as_of`로 결정된다(OS 파일
-mtime을 신뢰하지 않는다) — `domain/l2_retention.plan_retention`이 요구하는
-가상 시계 결정론 테스트를 이 어댑터도 그대로 지원하기 위함이다. 매니페스트
-(`manifest.json`)가 레코드 메타의 SSOT이고 실제 파일은 페이로드만 갖는다.
+Each record's timestamp is determined by the `as_of` passed by the
+caller at write time (the OS file mtime is not trusted) — this is so the
+adapter can support the virtual-clock determinism tests required by
+`domain/l2_retention.plan_retention`. The manifest (`manifest.json`) is
+the SSOT for record metadata; the actual files hold only the payload.
 """
 from __future__ import annotations
 
@@ -64,7 +66,7 @@ class L2DepthStore:
         )
 
     def write_full_depth(self, as_of: datetime, payload: bytes) -> str:
-        """전체 깊이 레코드 1개를 저장하고 record_id를 반환한다."""
+        """Store one full-depth record and return its record_id."""
         record_id = uuid4().hex
         path = self._root / f"{record_id}.full.json"
         path.write_bytes(payload)
@@ -97,8 +99,8 @@ class L2DepthStore:
     def enforce_retention(
         self, policy: RetentionPolicy, now: datetime, downsample_fn: DownsampleFn
     ) -> RetentionResult:
-        """`domain/l2_retention.plan_retention`이 결정한 계획을 실제 파일에
-        적용한다. `KEEP_FULL`/`KEEP_AGGREGATE`는 아무 것도 하지 않는다."""
+        """Applies the plan decided by `domain/l2_retention.plan_retention` to
+        the actual files. `KEEP_FULL`/`KEEP_AGGREGATE` are no-ops."""
         plan = plan_retention(self.records(), now, policy)
         deleted = downsampled = 0
         for record_id, action in plan.actions.items():

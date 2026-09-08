@@ -1,18 +1,22 @@
-"""RD-19 — Binance 공개 WS 증분 호가(depthUpdate) 파서.
+"""RD-19 — Binance public WS incremental orderbook (depthUpdate) parser.
 
 Spec: docs/design/ADR-2026-09-06-H-data-sourcing-self-build-and-contract-tiers.md
-D3. `exchanges/common/ws_session.WsSession`(재사용)에 꽂는 얇은 파서 —
-새 세션 계층을 만들지 않는다.
+D3. A thin parser plugged into `exchanges/common/ws_session.WsSession`
+(reused) — does not create a new session layer.
 
-미검증(외부 문서 라이브 대조 전, 성공으로 위장하지 않음):
-- combined stream 엔드포인트(`wss://stream.binance.com:9443/ws`)에 대한
-  SUBSCRIBE 프레임 응답이 `{"result": null, "id": ...}` 형태라는 것은
-  공개 문서 기억 기반이며 실제 응답을 라이브로 대조하지 않았다.
-- REST 스냅샷 엔드포인트(`/api/v3/depth`)의 요청당 rate limit(weight)은
-  대조하지 않았다 — 이 리프는 rate limit 헤더 파싱을 하지 않는다.
-- 엄밀한 시퀀스 연속성 규칙은 문서상 `U <= last_u + 1 <= u`이지만,
-  `WsSession.seq_extractor` 계약은 메시지당 정수 1개만 받으므로 최종
-  갱신ID(`u`)만 비교하는 근사치를 쓴다(엄밀한 `U` 검증은 스콥 밖).
+Unverified (not checked live against external docs, not pretending to be
+verified):
+- That the SUBSCRIBE frame response for the combined stream endpoint
+  (`wss://stream.binance.com:9443/ws`) has the shape `{"result": null,
+  "id": ...}` is based on public documentation memory and has not been
+  checked against a live response.
+- The per-request rate limit (weight) of the REST snapshot endpoint
+  (`/api/v3/depth`) has not been verified — this leaf does not parse rate
+  limit headers.
+- The strict sequence-continuity rule per the docs is `U <= last_u + 1 <=
+  u`, but since the `WsSession.seq_extractor` contract only accepts a
+  single integer per message, this uses the approximation of comparing
+  only the final update ID (`u`) (strict `U` validation is out of scope).
 """
 from __future__ import annotations
 
@@ -43,7 +47,7 @@ class BinanceL2Adapter:
         self._http = http_client or httpx.AsyncClient(base_url=_REST_BASE, timeout=10.0)
 
     def ws_url(self, instrument_symbol: str) -> str:
-        del instrument_symbol  # combined stream 엔드포인트는 심볼 무관
+        del instrument_symbol  # the combined stream endpoint is symbol-agnostic
         return _WS_URL
 
     def subscription_messages(self, instrument_symbol: str) -> list[dict[str, Any]]:

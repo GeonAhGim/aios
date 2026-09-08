@@ -1,25 +1,27 @@
 """FA-11 — positions/domain/restatement.py: retroactive fill reflection.
 
 Spec: docs/specs/L4_ibor_fund_accounting_and_resilience_v1.0.md#§9 FA-11
-(선행 FA-10=task-2051).
+(precedes FA-10=task-2051).
 
-`pos_journal`은 append-only(§4.3 "(position_key, sequence_no) 유일·연속") —
-늦게 도착한 체결(`occurred_at`이 과거)도 새 `sequence_no`로만 꼬리에 붙을 수
-있다. 그래서 이 모듈은 저널 순서를 재배열하지 않는다: 새 엔트리를 기존
-fold 위에 그대로 접되(LB-5 `snapshot_builder.apply_one` 재사용, 재구현 금지),
-그 결과를 FA-9 `core.bitemporal.BitemporalRecord` 두 벌로 감싼다 — 이전
-"현재" 레코드는 `tx_to`를 닫고(append-only, UPDATE 없음), 새 레코드는
-`valid_from`을 `now`가 아니라 `late_entry.occurred_at`으로 연다(그 사실은
-원래부터 참이었고 지금 늦게 알았을 뿐이므로). 이 패턴은 FA-9 자체 테스트
-(`tests/unit/core/test_bitemporal.py`의 RECORD_A/RECORD_B 정정 사례)와
-동일하다.
+`pos_journal` is append-only (§4.3 "(position_key, sequence_no) unique and
+contiguous") — even a late-arriving fill (with a past `occurred_at`) can only
+be appended at the tail with a new `sequence_no`. So this module does not
+reorder the journal: it folds the new entry onto the existing fold as-is
+(reusing LB-5 `snapshot_builder.apply_one`, no reimplementation), then wraps
+the result in a pair of FA-9 `core.bitemporal.BitemporalRecord`s — the
+previous "current" record closes its `tx_to` (append-only, no UPDATE), and
+the new record opens `valid_from` not at `now` but at `late_entry.occurred_at`
+(since that fact was always true and we're only learning it late). This
+pattern is identical to FA-9's own test (the RECORD_A/RECORD_B correction
+case in `tests/unit/core/test_bitemporal.py`).
 
-기업행위(CORP_ACTION) 소급은 `snapshot_builder.apply_one`이 아직 그
-`entry_type`을 모른다(LB-5 범위 밖, `UnsupportedEntryTypeError`) — 이 모듈은
-`entry_type`을 가리지 않고 그대로 위임하므로, LB-5가 CORP_ACTION을 지원하는
-순간 이 모듈도 별도 변경 없이 지원하게 된다.
+Retroactive corporate-action (CORP_ACTION) handling is out of scope:
+`snapshot_builder.apply_one` doesn't yet know that `entry_type` (outside
+LB-5's scope, `UnsupportedEntryTypeError`) — this module doesn't filter by
+`entry_type` and simply delegates, so the moment LB-5 supports CORP_ACTION,
+this module supports it too with no further changes.
 
-순수 함수만 — I/O 없음, 시각은 `now` 인자로만 받는다.
+Pure functions only — no I/O, time is only accepted via the `now` argument.
 """
 from __future__ import annotations
 
@@ -33,25 +35,28 @@ from src.foundation.positions.domain.snapshot_builder import SnapshotFold, apply
 
 
 class NotRetroactiveError(ValueError):
-    """`late_entry.occurred_at`이 `prior`의 `valid_from`보다 이르지 않다 — 이건
-    정정이 아니라 그냥 다음 정상 엔트리다(호출자가 판정해서 넘겨야 함)."""
+    """`late_entry.occurred_at` is not earlier than `prior`'s `valid_from` —
+    this isn't a correction, just the next normal entry (the caller must
+    determine that before passing it in)."""
 
 
 class RecordAlreadyClosedError(ValueError):
-    """`prior.tx_to`가 이미 닫혀 있다 — 정정은 현재(`tx_to=None`) 레코드
-    위에만 적용한다. 정정을 다시 정정하려면 그 결과의 `restated_current`를
-    새 `prior`로 다시 넘겨야 한다."""
+    """`prior.tx_to` is already closed — a correction can only be applied to
+    the current (`tx_to=None`) record. To correct a correction, pass its
+    `restated_current` back in as the new `prior`."""
 
 
 def is_retroactive(late_entry: PositionJournalEntryView, current_valid_from: datetime) -> bool:
-    """`late_entry`가 현재 유효 구간이 시작된 시점보다 이전에 일어난 사실인가."""
+    """Whether `late_entry` reflects a fact that occurred before the current
+    valid interval began."""
     return late_entry.occurred_at < current_valid_from
 
 
 @dataclass(frozen=True, slots=True)
 class Restatement:
-    """정정 결과 = 닫힌 이전 레코드 + 새로 연 현재 레코드. 둘 다 append-only
-    표현이다(FA-A2 — 어느 쪽도 in-place로 만들지 않는다)."""
+    """Correction result = the closed prior record + the newly opened
+    current record. Both are append-only representations (FA-A2 — neither
+    is mutated in place)."""
 
     closed_prior: BitemporalRecord[SnapshotFold]
     restated_current: BitemporalRecord[SnapshotFold]
@@ -66,9 +71,10 @@ def restate_position(
     late_entry: PositionJournalEntryView,
     now: datetime,
 ) -> Restatement:
-    """`late_entry`(다음 `sequence_no`로 이미 저널에 append된 엔트리)를
-    `prior` fold 위에 접어 정정된 fold를 만들고, FA-9 정정 패턴(닫힌 이전 +
-    새 현재)으로 감싼다."""
+    """Folds `late_entry` (an entry already appended to the journal under
+    the next `sequence_no`) onto the `prior` fold to produce the corrected
+    fold, and wraps it in the FA-9 correction pattern (closed prior + new
+    current)."""
     if prior.tx_to is not None:
         raise RecordAlreadyClosedError(
             f"{position_key}: prior 레코드가 이미 tx_to={prior.tx_to}로 닫혀 있습니다."

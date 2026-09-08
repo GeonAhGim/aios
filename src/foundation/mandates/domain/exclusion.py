@@ -1,15 +1,16 @@
 """Pure exclusion-list + leverage rules for the CM-2 7-constraint mandate model.
 
-Spec: docs/specs/L4_compliance_and_regulatory_v1.0.md §9 CM-2 ("기존
-MandateRuleInput에 제약 확장(자산군·국가·통화·유동성·ESG 배제)").
+Spec: docs/specs/L4_compliance_and_regulatory_v1.0.md §9 CM-2 ("extend
+constraints on the existing MandateRuleInput (asset class / country /
+currency / liquidity / ESG exclusion)").
 
 Deviation from spec text (approved in task-2036 decision): the spec names this
 module `mandates/domain/rules/exclusion.py`, but `domain/rules.py` in this repo
 is already a module, not a package — promoting it to a package to nest a
 sibling would be a pure-rename mass move outside this leaf's scope. This file
 lives at `domain/exclusion.py` instead and imports `domain/rules.py` rather
-than duplicating its judgement logic (decision: "기존 rules.py의 판정 로직을
-복제하지 말고 임포트해 쓴다").
+than duplicating its judgement logic (decision: "don't duplicate rules.py's
+existing judgement logic — import and use it").
 
 No I/O — every function here takes only `MandateRevision`/`PolicyEvaluationSubject`
 value objects and returns plain data (I-01~I-11: pure domain functions, no
@@ -71,8 +72,8 @@ def evaluate_mandate_constraints(
     `max_single_instrument_pct`, plus the pre-existing total exposure/cash
     buffer/daily loss/autonomy/forbidden-asset checks it also runs), and the
     5 exclusion-list + leverage checks this module adds. `PAUSE_REQUIRED` from
-    the base evaluation always wins (75번 §3 강도 순서: PAUSE_REQUIRED >
-    DENY); the new checks here never raise PAUSE_REQUIRED themselves.
+    the base evaluation always wins (doc 75 §3 severity order: PAUSE_REQUIRED
+    > DENY); the new checks here never raise PAUSE_REQUIRED themselves.
     """
     base_outcome, base_reasons, obligations = evaluate_policy(revision, subject)
     reasons = list(base_reasons)

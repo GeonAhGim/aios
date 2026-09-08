@@ -50,10 +50,12 @@ class MandateRevision:
     cooling_off_started_at: datetime | None = None
     created_at: datetime | None = None
     activated_at: datetime | None = None
-    # L4_compliance_and_regulatory_v1.0.md §9 CM-2 — 7종 제약 중 이 리프가
-    # 새로 추가하는 5종(자산군·국가·통화·유동성·ESG 배제). 집중도는 기존
-    # max_single_instrument_pct, 레버리지는 아래 max_leverage_ratio가 맡는다.
-    # 전부 기본값을 둬 기존 DB 컬럼(마이그레이션 없음)·기존 호출부와 호환된다.
+    # L4_compliance_and_regulatory_v1.0.md §9 CM-2 — of the 7 constraints,
+    # the 5 this leaf newly adds (asset class / country / currency /
+    # liquidity / ESG exclusion). Concentration is handled by the existing
+    # max_single_instrument_pct, and leverage by max_leverage_ratio below.
+    # All have defaults so they stay compatible with the existing DB
+    # columns (no migration) and existing call sites.
     excluded_asset_classes: tuple[str, ...] = field(default_factory=tuple)
     excluded_countries: tuple[str, ...] = field(default_factory=tuple)
     excluded_currencies: tuple[str, ...] = field(default_factory=tuple)
@@ -106,9 +108,10 @@ class PolicyEvaluationSubject:
     projected_daily_loss_pct: float | None = None
     requested_autonomy: Autonomy | None = None
     asset: str | None = None
-    # CM-2 §9 — 7종 제약 평가에 필요한 나머지 입력. `asset`은 forbidden_assets와
-    # esg_excluded_symbols 양쪽에 재사용한다(둘 다 "이 심볼이 목록에 있는가"라
-    # 별도 필드가 필요 없다).
+    # CM-2 §9 — the remaining inputs needed to evaluate the 7 constraints.
+    # `asset` is reused for both forbidden_assets and esg_excluded_symbols
+    # (both are just "is this symbol on the list", so no separate field is
+    # needed).
     asset_class: str | None = None
     country: str | None = None
     currency: str | None = None

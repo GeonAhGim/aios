@@ -1,11 +1,12 @@
-"""RD-20 — `CorporateActionFilingRepository`의 asyncpg 구현.
+"""RD-20 — asyncpg implementation of `CorporateActionFilingRepository`.
 
 Spec: docs/specs/L4_research_data_and_market_ecosystem_v1.0.md §9 RD-20.
-마이그레이션 `md_corporate_action_filing`(append-only, `source_ref` UNIQUE)이
-저장소다 — `md_corporate_action`(LA-12, `(instrument_id, action_type,
-ex_date)` UNIQUE)과는 다른 테이블이다: LA-12는 "지금 유효한 값 하나"를
-관리하는 장부 연동 테이블이고, 이 테이블은 "정정을 포함한 전체 공시
-이력"을 append-only로 쌓는 RD-20 전용 테이블이다.
+Migration table `md_corporate_action_filing` (append-only, `source_ref`
+UNIQUE) is the store — a different table from `md_corporate_action`
+(LA-12, `(instrument_id, action_type, ex_date)` UNIQUE): LA-12 is the
+ledger-integration table that manages "the single currently valid
+value," while this table is the RD-20-only table that appends "the
+full filing history, including corrections."
 """
 from __future__ import annotations
 

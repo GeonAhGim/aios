@@ -1,15 +1,17 @@
-"""RD-20 — `known_at` 기준 point-in-time 조회 (순수 함수, I/O 없음).
+"""RD-20 — Point-in-time lookup keyed on `known_at` (pure function, no I/O).
 
 Spec: docs/specs/L4_research_data_and_market_ecosystem_v1.0.md §9 RD-20.
 
-저장소(`adapters/opendart/postgres_filing_repository.py`)는 정정 공시를
-UPDATE 없이 새 행으로만 쌓는다 — 같은 `(instrument_id, action_type,
-ex_date)`에 `known_at`이 다른 여러 `CorporateAction`이 있을 수 있다. 이
-함수는 그 전체 이력을 받아 `as_of` 시점에 "우리가 알고 있었을" 값 하나만
-골라낸다: 그룹별로 `known_at <= as_of`인 것 중 가장 늦은 `known_at`을 쓴다.
-정정 전 시점을 물으면 정정 전 값이, 정정 후 시점을 물으면 정정된 값이
-나온다 — 둘 다 저장소에 그대로 남아 있으므로 가능하다(UPDATE였다면 정정
-전 값은 영원히 사라졌을 것이다).
+The store (`adapters/opendart/postgres_filing_repository.py`) appends
+correcting filings only as new rows, never via UPDATE — so there can be
+multiple `CorporateAction`s with the same `(instrument_id, action_type,
+ex_date)` but different `known_at`. This function takes that full history
+and picks the single value "we would have known" as of `as_of`: for each
+group, it uses the latest `known_at` that is `<= as_of`. Asking about a
+time before the correction returns the pre-correction value; asking about
+a time after returns the corrected value — this is possible because both
+remain in the store (had it been an UPDATE, the pre-correction value would
+have been lost forever).
 """
 from __future__ import annotations
 

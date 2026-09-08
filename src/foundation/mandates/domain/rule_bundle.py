@@ -7,8 +7,8 @@ short_sale,wash_trade,position_limit}.py` (CM-6/CM-7/CM-9) do not exist yet
 and how a set of them is identified (`bundle_hash`). Hashing reuses R-01's
 `canonical_json`/`sha256_hex` (`src.core.risk.hashing`) the same way R-15's
 `policy_bundle.compute_rule_hash` does — this module does not reimplement
-normalization or sha256 (decision note: "R-01/R-15 정책번들 해시 유틸 재사용,
-재구현 금지").
+normalization or sha256 (decision note: "reuse R-01/R-15's policy-bundle
+hash util, do not reimplement").
 """
 from __future__ import annotations
 
@@ -40,7 +40,7 @@ class RuleSpec:
 class RuleBundle:
     """A named, versioned set of `RuleSpec`s.
 
-    §9 CM-3 "순서 무관" — the set is unordered by contract, so
+    §9 CM-3 "order-independent" — the set is unordered by contract, so
     `bundle_hash()` sorts by `rule_id` before hashing regardless of the
     order `rules` was constructed in.
     """

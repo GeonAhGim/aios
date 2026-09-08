@@ -1,20 +1,22 @@
-"""RD-19 — L2 호가창 보존 정책(순수).
+"""RD-19 — L2 order book retention policy (pure).
 
 Spec: docs/design/ADR-2026-09-06-H-data-sourcing-self-build-and-contract-tiers.md
-D5 "전체 깊이는 단기 보존, 집계·상위 N호가는 장기 보존" + "비용은 저장·
-운영이다 — 보존 정책을 처음부터 넣는다."
+D5 "full depth is kept short-term, aggregated top-N is kept long-term" +
+"cost is storage and operations — build the retention policy in from the
+start."
 
-세 등급으로 나눈다: `age < full_depth_ttl`인 레코드는 전체 깊이 그대로
-(`KEEP_FULL`), `full_depth_ttl <= age < aggregate_ttl`인 레코드는
-상위 N호가로 축소(`DOWNSAMPLE`), `age >= aggregate_ttl`인 레코드는
-삭제(`DELETE`). 디스크 상한을 넘으면 축소본부터(오래된 순) 추가로
-삭제하되, `full_depth_ttl` 이내의 전체 깊이 레코드는 이 정책이 스스로
-지우지 않는다 — "단기 보존은 보장한다"는 D5 약속을 상한 초과라는
-이유로 조용히 깨지 않는다(그 경우 `cap_still_exceeded=True`로 표면화해
-호출자가 알아채게 한다. fail-closed).
+Splits into three tiers: records with `age < full_depth_ttl` keep full
+depth as-is (`KEEP_FULL`); records with `full_depth_ttl <= age <
+aggregate_ttl` are downsampled to the top-N levels (`DOWNSAMPLE`); records
+with `age >= aggregate_ttl` are deleted (`DELETE`). If the disk cap is
+exceeded, downsampled records are deleted further (oldest first), but this
+policy never deletes full-depth records within `full_depth_ttl` on its
+own — it will not silently break the D5 promise that "short-term retention
+is guaranteed" just because the cap is exceeded (instead it surfaces
+`cap_still_exceeded=True` so the caller notices; fail-closed).
 
-I/O 없음 — 실제 파일 삭제·다운샘플 변환은 `adapters/ingest/l2_depth_store.py`
-소관이다.
+No I/O — actual file deletion / downsample conversion is the
+responsibility of `adapters/ingest/l2_depth_store.py`.
 """
 from __future__ import annotations
 
@@ -47,7 +49,10 @@ class RetentionAction(str, Enum):
 
 @dataclass(frozen=True)
 class DepthRecordMeta:
-    """저장소가 보고하는 레코드 1개의 메타(실 파일/행에 대한 순수 값 사본)."""
+    """Metadata for a single record as reported by the store.
+
+    A pure value copy of the actual file/row.
+    """
 
     record_id: str
     kind: RecordKind
@@ -80,10 +85,10 @@ class RetentionPlan:
 def plan_retention(
     records: Sequence[DepthRecordMeta], now: datetime, policy: RetentionPolicy
 ) -> RetentionPlan:
-    """`records`(임의 순서)에 대해 결정론적 보존 계획을 반환한다.
+    """Returns a deterministic retention plan for `records` (in any order).
 
-    `now`는 호출자가 넘기는 결정론적 시계 입력(가상 시계 테스트 지원) —
-    이 함수는 wall clock을 읽지 않는다.
+    `now` is a deterministic clock input passed in by the caller (supports
+    virtual-clock testing) — this function never reads the wall clock.
     """
     actions: dict[str, RetentionAction] = {}
     projected_sizes: dict[str, int] = {}
@@ -106,8 +111,9 @@ def plan_retention(
 
     total = sum(projected_sizes.values())
     if total > policy.disk_cap_bytes:
-        # 오래된 순으로 축소본(집계/다운샘플 예정)부터 추가 삭제 — 단기
-        # 보존 구간(KEEP_FULL)은 절대 건드리지 않는다(D5 약속).
+        # Delete downsample-bound records (aggregate/to-be-downsampled) first,
+        # oldest first — never touch the short-term retention window
+        # (KEEP_FULL); that is the D5 promise.
         _prunable_actions = (RetentionAction.KEEP_AGGREGATE, RetentionAction.DOWNSAMPLE)
         prunable = sorted(
             (r for r in records if actions[r.record_id] in _prunable_actions),

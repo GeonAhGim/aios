@@ -4,10 +4,12 @@ Revision ID: bd931e3aa0d4
 Revises: 7020473c9e74, 2e35eea547f2
 Create Date: 2026-09-07 14:04:18.141515
 
-두 워커가 동시에 같은 부모(6325757fd371, task-1768 캘린더 source 폭 확장)를
-merge 대상으로 삼아 각자 병합 스텁을 만들면서 또 다른 dual head가 됐다
-(7020473c9e74=task-1766 쪽 병합, 2e35eea547f2=task-1987 쪽 병합). 순수
-병합 스텁(빈 upgrade/downgrade)으로 다시 단일 head로 되돌린다.
+Two workers independently targeted the same parent (6325757fd371,
+task-1768's calendar source width expansion) for a merge and each
+created their own merge stub, producing yet another dual head
+(7020473c9e74 = the task-1766-side merge, 2e35eea547f2 = the
+task-1987-side merge). This is a pure merge stub (empty
+upgrade/downgrade) that folds it back into a single head again.
 """
 from collections.abc import Sequence
 

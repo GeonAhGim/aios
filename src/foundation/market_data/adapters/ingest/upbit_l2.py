@@ -1,24 +1,28 @@
-"""RD-19 — Upbit 공개 WS 호가(orderbook) 파서.
+"""RD-19 — Upbit public WS orderbook parser.
 
 Spec: docs/design/ADR-2026-09-06-H-data-sourcing-self-build-and-contract-tiers.md
-D3. `exchanges/common/ws_session.WsSession`(재사용)에 꽂는 얇은 파서.
+D3. A thin parser plugged into `exchanges/common/ws_session.WsSession` (reused).
 
-Upbit의 공개 orderbook 채널은 Binance/Bybit/OKX와 달리 **증분이 아니라
-매 틱 전체 호가창을 다시 보낸다**(문서 기억 기반, 미검증) — 그래서 이
-어댑터는 시퀀스 필드를 갖지 않고(`seq_extractor`는 항상 `None`), 구독
-ack 프레임도 없다(`ack_validator`는 항상 `NOT_ACK` — 첫 데이터 프레임이
-곧 ack 역할). `parse_event`는 매번 `L2Snapshot`을 반환한다(`L2Diff`가
-아님) — 오케스트레이터가 이를 받으면 로컬 상태를 diff 적용이 아니라
-전체 치환한다.
+Unlike Binance/Bybit/OKX, Upbit's public orderbook channel does **not
+send incremental diffs — it resends the entire orderbook on every
+tick** (based on documentation memory, unverified) — so this adapter has
+no sequence field (`seq_extractor` always returns `None`) and there is no
+subscription ack frame either (`ack_validator` always returns `NOT_ACK` —
+the first data frame effectively serves as the ack). `parse_event`
+returns an `L2Snapshot` every time (never an `L2Diff`) — when the
+orchestrator receives it, it fully replaces the local state instead of
+applying a diff.
 
-시퀀스 갭 판정은 이 벤처에는 적용되지 않는다(매 프레임이 이미 완전한
-진실이라 "누락"이라는 개념 자체가 없다) — 연결 끊김→재연결 시
-`WsSession`의 distrust 기반 재동기화는 여전히 동작한다(전송 계층
-끊김은 벤처 프로토콜과 무관).
+Sequence-gap detection does not apply to this venue (every frame is
+already the complete truth, so there is no concept of "missing" data) —
+`WsSession`'s distrust-based resync on connection drop -> reconnect still
+works as normal (a transport-layer disconnect is unrelated to the venue
+protocol).
 
-미검증: 구독 프레임 포맷(`[{"ticket": ...}, {"type": "orderbook",
-"codes": [...]}]`)과 응답 필드명(`orderbook_units`)은 공개 문서 기억
-기반이며 라이브 대조하지 않았다.
+Unverified: the subscription frame format (`[{"ticket": ...}, {"type":
+"orderbook", "codes": [...]}]`) and the response field name
+(`orderbook_units`) are based on public documentation memory and have not
+been checked against a live feed.
 """
 from __future__ import annotations
 
@@ -40,7 +44,7 @@ _REST_BASE = "https://api.upbit.com"
 
 
 def _to_market(instrument_symbol: str) -> str:
-    """`KRW-BTC` 표기를 그대로 기대한다(Upbit market 코드) — 변환하지 않는다."""
+    """Expects `KRW-BTC` notation as-is (Upbit market code) — no conversion is done."""
     return instrument_symbol
 
 
@@ -62,7 +66,7 @@ class UpbitL2Adapter:
         self._http = http_client or httpx.AsyncClient(base_url=_REST_BASE, timeout=10.0)
 
     def ws_url(self, instrument_symbol: str) -> str:
-        del instrument_symbol  # 단일 public 엔드포인트는 심볼 무관
+        del instrument_symbol  # a single public endpoint is symbol-agnostic
         return _WS_URL
 
     def subscription_messages(self, instrument_symbol: str) -> list[dict[str, Any]]:
@@ -73,11 +77,11 @@ class UpbitL2Adapter:
         ]
 
     def ack_validator(self, message: dict[str, Any]) -> AckResult:
-        del message  # Upbit는 구독 ack 프레임이 없다 — 데이터 프레임이 곧 확인
+        del message  # Upbit has no subscription ack frame — the data frame itself confirms it
         return NOT_ACK
 
     def seq_extractor(self, message: dict[str, Any]) -> int | None:
-        del message  # 매 프레임이 전체 스냅샷 — 시퀀스 갭 개념이 없다
+        del message  # every frame is a full snapshot — there is no sequence-gap concept
         return None
 
     def parse_event(self, message: dict[str, Any]) -> L2Snapshot | None:

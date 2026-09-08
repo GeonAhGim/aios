@@ -48,12 +48,13 @@ class PostgresPolicyRepositoryMixin:
     _pool: asyncpg.Pool
 
     async def insert_policy_bundle(self, bundle: PolicyBundle) -> PolicyBundle:
-        """`policy_bundle`은 이제 전체 행 WORM이다(`c6a3d8f14b92`) — 동시 삽입
-        경쟁에서 진 쪽을 위한 upsert도 그 행에 UPDATE를 실행할 수 없다.
-        `DO NOTHING`으로 충돌을 흡수하고(트리거를 아예 건드리지 않음), 승자의
-        행을 `RETURNING`이 아니라 별도 SELECT로 다시 읽는다 — 105번 §2.2
-        "UNIQUE 제약이 단일 소유자를 보장" 패턴과 동일하게, 진 쪽은 항상
-        승자가 쓴 행을 그대로 읽는다."""
+        """`policy_bundle` is now a full-row WORM table (`c6a3d8f14b92`) — even
+        the upsert for the loser of a concurrent insert race cannot run an
+        UPDATE on that row. Absorb the conflict with `DO NOTHING` (never
+        touching the trigger at all), and re-read the winner's row via a
+        separate SELECT rather than `RETURNING` — matching doc 105 §2.2's
+        "a UNIQUE constraint guarantees a single owner" pattern: the loser
+        always reads back exactly the row the winner wrote."""
         async with self._pool.acquire() as conn:
             row = await conn.fetchrow(
                 "INSERT INTO policy_bundle (mandate_revision_id, compiler_version, rule_hash) "

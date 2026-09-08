@@ -1,20 +1,26 @@
-"""RD-20 — OpenDART 공시를 `CorporateAction`으로 정규화하는 순수 규칙.
+"""RD-20 — Pure rules for normalizing OpenDART filings into `CorporateAction`.
 
 Spec: docs/specs/L4_research_data_and_market_ecosystem_v1.0.md §9 RD-20,
-ADR-2026-09-06-H D3(국내 기업행위는 벤더가 아니라 전자공시 원본에서 뽑는다).
+ADR-2026-09-06-H D3 (domestic corporate actions are sourced from the
+electronic disclosure originals, not from a vendor).
 
-**미검증**: `OpenDartFiling`은 금감원 OpenDART Open API가 실제로 반환하는
-JSON 필드명을 그대로 매핑한 것이 아니다 — 그 원문(예: 배당결정·액면분할
-결정·합병결정 각 API의 실제 필드명)을 이 안정된 내부 표현으로 옮기는 변환은
-`adapters/opendart/`에서 실 API 연동 시 별도로 검증해야 한다. 이 모듈은 그
-변환 이후의 표현만 다루며, 종목 식별(`instrument_id`) 해석도 이미 끝난
-입력을 받는다(심볼→instrument_id 조회는 I/O라 순수 함수 밖에서 한다).
+**Unverified**: `OpenDartFiling` is not a direct mapping of the JSON field
+names actually returned by the FSS OpenDART Open API — the conversion from
+that raw source (e.g. the actual field names of each dividend-decision,
+stock-split-decision, and merger-decision API) into this stable internal
+representation must be separately verified in `adapters/opendart/` when
+the real API integration is built. This module only deals with the
+representation after that conversion, and also receives input where
+instrument identification (`instrument_id`) has already been resolved
+(symbol -> instrument_id lookup is I/O, so it happens outside pure
+functions).
 
-정정 공시(`corrects_rcept_no`가 채워짐)는 원본과 같은 `(instrument_id,
-action_type, ex_date)`를 갖되 `known_at`(접수 시각)이 다른 새
-`CorporateAction`을 만든다 — 기존 행을 고치지 않는다. 저장(append-only,
-UPDATE 금지)은 `adapters/opendart/postgres_filing_repository.py`가 보장하고,
-이 함수는 그 저장에 넘길 값만 순수하게 계산한다.
+A correcting filing (`corrects_rcept_no` populated) creates a new
+`CorporateAction` with the same `(instrument_id, action_type, ex_date)` as
+the original but a different `known_at` (receipt time) — it never modifies
+the existing row. Append-only storage (no UPDATE) is guaranteed by
+`adapters/opendart/postgres_filing_repository.py`; this function only
+purely computes the values to be passed to that storage.
 """
 from __future__ import annotations
 
@@ -33,13 +39,15 @@ _REPORT_TYPES = ("SPLIT", "CASH_DIVIDEND", "MERGER")
 
 @dataclass(frozen=True, slots=True)
 class OpenDartFiling:
-    """OpenDART 공시 한 건에서 뽑아낸 최소 정규화 입력.
+    """The minimal normalization input extracted from one OpenDART filing.
 
-    `rcept_no`(DART 접수번호)는 공시 문서 하나를 식별하는 고유값이라
-    `CorporateAction.source_ref`이자 저장소의 멱등키로 쓴다 — 정정 공시는
-    원 공시와 다른 자신만의 `rcept_no`를 가지므로, 정정을 반영해도 원본
-    행을 덮지 않고 새 `rcept_no` 행이 추가된다(그래서 UPDATE가 아니라 새
-    행이 자연히 나온다).
+    `rcept_no` (the DART receipt number) uniquely identifies a single
+    filing document, so it is used both as `CorporateAction.source_ref`
+    and as the store's idempotency key — a correcting filing has its own
+    `rcept_no` distinct from the original filing's, so applying a
+    correction adds a new `rcept_no` row instead of overwriting the
+    original row (which is why a new row naturally results, rather than an
+    UPDATE).
     """
 
     instrument_id: UUID
@@ -55,8 +63,9 @@ class OpenDartFiling:
 
 
 class FilingParseError(ValueError):
-    """공시를 정규화할 수 없다 — 조용히 버리지 않고 호출자가 미처리 큐에
-    남기도록 예외로 알린다(RD-20 DoD)."""
+    """The filing cannot be normalized — instead of silently discarding it,
+    this is raised as an exception so the caller can leave it in an
+    unprocessed queue (RD-20 DoD)."""
 
     def __init__(self, filing: OpenDartFiling, reason: str) -> None:
         super().__init__(
@@ -81,7 +90,7 @@ def _split_ratio(filing: OpenDartFiling) -> Decimal:
 
 
 def normalize_filing(filing: OpenDartFiling) -> CorporateAction:
-    """공시 하나 -> `CorporateAction` 하나. 실패는 항상 `FilingParseError`."""
+    """One filing -> one `CorporateAction`. Failure always raises `FilingParseError`."""
     if filing.known_at.tzinfo is None:
         raise FilingParseError(filing, "known_at는 tz-aware여야 함")
     if not filing.rcept_no:
@@ -96,7 +105,7 @@ def normalize_filing(filing: OpenDartFiling) -> CorporateAction:
     elif filing.report_type == "MERGER":
         ratio = _require_positive(filing, filing.merger_ratio, "merger_ratio")
         cash_amount = None
-    else:  # pragma: no cover - Literal이 막지만 fail-closed 기본값
+    else:  # pragma: no cover - Literal prevents this, but this is the fail-closed default
         raise FilingParseError(filing, f"알 수 없는 report_type: {filing.report_type}")
 
     return CorporateAction(

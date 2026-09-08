@@ -32,14 +32,16 @@ Spec: docs/specs/L4_analytics_authoring_backtest_marketplace_v1.0.md
 검증만 한다 — 포트/저장소 접근이 전혀 없으므로 이 모듈 스스로 미래를
 조회할 방법이 없다.
 
-정렬 전제 재검증: `CandleColumns`는 타입 자체로 정렬을 보장하지 않는다
-(어댑터의 `ORDER BY`에 기대는 전제일 뿐 — `candle_columns.py` 참고).
-호출자가 이 전제를 어기고 뒤섞인 `lower_bars`를 넘기면, 시간창 검증만으로는
-걸러지지 않는다(모든 행이 창 안에 있어도 순서가 틀릴 수 있다) — 그대로
-이어붙이면 "체결 순서"가 조용히 실제 시간순과 어긋난다. DC-10
-`timeframe_rollup.rollup`이 같은 전제를 `UnsortedCandlesError`로 재검증하는
-것과 동일한 이유로, 여기서도 `ts` 오름차순을 재검증해 `UnsortedLowerBarsError`로
-fail-closed 한다.
+Sort-precondition re-validation: `CandleColumns` does not guarantee sorting
+by type alone (it's only a precondition the adapter's `ORDER BY` is
+expected to satisfy — see `candle_columns.py`). If a caller violates this
+precondition and passes in shuffled `lower_bars`, the time-window check
+alone won't catch it (every row can be inside the window and still be out
+of order) — splicing them together as-is would silently make the "fill
+order" diverge from actual chronological order. For the same reason DC-10's
+`timeframe_rollup.rollup` re-validates the same precondition via
+`UnsortedCandlesError`, this module also re-validates ascending `ts` order
+here and fails closed with `UnsortedLowerBarsError`.
 
 Timeframe 길이는 LA-2(`domain.timeframe.duration`)를 그대로 쓰고
 재구현하지 않는다. 하위 봉 컨테이너는 DC-10 rollup의 산출 타입
@@ -92,9 +94,10 @@ class IncompatibleMagnifierTimeframeError(ValueError):
 
 
 class UnsortedLowerBarsError(ValueError):
-    """`BT_MAGNIFIER_UNSORTED_LOWER_BARS` — `lower_bars.ts`가 오름차순이
-    아니다. 모든 행이 상위 봉 시간창 안에 있어도(`LookAheadError`로는
-    걸러지지 않음) 순서가 뒤섞이면 체결 순서가 실제 시간순과 어긋난다."""
+    """`BT_MAGNIFIER_UNSORTED_LOWER_BARS` — `lower_bars.ts` is not in
+    ascending order. Even if every row is inside the higher bar's time
+    window (which `LookAheadError` won't catch), an out-of-order sequence
+    makes the fill order diverge from actual chronological order."""
 
 
 def validate_magnifier_config(*, higher_tf: Timeframe, magnifier_tf: Timeframe | None) -> None:

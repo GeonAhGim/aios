@@ -1,8 +1,9 @@
-"""RD-20 — `UnprocessedFilingQueue`의 asyncpg 구현.
+"""RD-20 — asyncpg implementation of `UnprocessedFilingQueue`.
 
 Spec: docs/specs/L4_research_data_and_market_ecosystem_v1.0.md §9 RD-20 DoD
-"파싱 실패 공시는 조용히 버리지 않고 미처리 큐에 남는다" — 이 테이블
-(`research_opendart_unprocessed_filing`)이 그 증거다.
+"filings that fail to parse are not silently dropped; they are left in
+the unprocessed queue" — this table
+(`research_opendart_unprocessed_filing`) is the proof of that.
 """
 from __future__ import annotations
 

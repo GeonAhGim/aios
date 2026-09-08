@@ -1,11 +1,13 @@
-"""RD-20 — 기업행위 공시 저장 포트(append-only).
+"""RD-20 — Corporate action filing storage port (append-only).
 
 Spec: docs/specs/L4_research_data_and_market_ecosystem_v1.0.md §9 RD-20.
 
-`append`는 절대 UPDATE하지 않는다 — 정정 공시는 같은 `(instrument_id,
-action_type, ex_date)`라도 `source_ref`(DART 접수번호)가 다른 새 행으로
-들어간다. `source_ref`는 저장소의 멱등키다: 같은 공시(같은 접수번호)를
-두 번 넣으면 새 행을 만들지 않고 기존 행을 그대로 반환한다.
+`append` never performs an UPDATE — a corrective filing goes in as a new
+row with a different `source_ref` (DART receipt number), even for the
+same `(instrument_id, action_type, ex_date)`. `source_ref` is the
+repository's idempotency key: inserting the same filing (same receipt
+number) twice does not create a new row, it just returns the existing
+row unchanged.
 """
 from __future__ import annotations
 
@@ -24,14 +26,16 @@ class CorporateActionFilingRepository(Protocol):
     async def append(
         self, conn: asyncpg.Connection, action: CorporateAction
     ) -> CorporateAction:
-        """`source_ref` 멱등 — 이미 있으면 기존 값을 그대로 반환(새 행을
-        만들지 않음). `source_ref`가 다르면(정정 공시) 반드시 새 행이다."""
+        """Idempotent on `source_ref` — if it already exists, the existing value
+        is returned unchanged (no new row is created). A different `source_ref`
+        (a corrective filing) always results in a new row."""
         ...
 
     async def list_history(
         self, conn: asyncpg.Connection, instrument_id: UUID
     ) -> list[CorporateAction]:
-        """`known_at` 오름차순 전체 이력 — 정정으로 쌓인 모든 행을 포함한다.
-        point-in-time 해석은 `domain/corporate_action/point_in_time.py`가
-        한다(이 포트는 저장된 사실을 그대로 돌려줄 뿐이다)."""
+        """Full history in ascending `known_at` order — includes every row
+        accumulated through corrections. Point-in-time interpretation is
+        handled by `domain/corporate_action/point_in_time.py` (this port
+        simply returns the stored facts as-is)."""
         ...

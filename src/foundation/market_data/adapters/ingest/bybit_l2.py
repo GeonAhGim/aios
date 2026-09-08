@@ -1,15 +1,18 @@
-"""RD-19 — Bybit 공개 WS 호가(orderbook) 파서.
+"""RD-19 — Bybit public WS orderbook parser.
 
 Spec: docs/design/ADR-2026-09-06-H-data-sourcing-self-build-and-contract-tiers.md
-D3. `exchanges/common/ws_session.WsSession`(재사용)에 꽂는 얇은 파서.
+D3. A thin parser plugged into `exchanges/common/ws_session.WsSession` (reused).
 
-미검증(외부 문서 라이브 대조 전, 성공으로 위장하지 않음):
-- v5 public spot 채널(`orderbook.50.<symbol>`)의 최초 푸시가 `type:
-  "snapshot"`이고 이후가 `type: "delta"`라는 것, 구독 ack가
-  `{"success": true, "op": "subscribe"}` 형태라는 것은 공개 문서 기억
-  기반이며 라이브 대조하지 않았다.
-- REST 스냅샷(`/v5/market/orderbook`)의 depth 파라미터 상한(spot=200)은
-  대조하지 않아 보수적으로 50을 쓴다.
+Unverified (not checked live against external docs, not pretending to be
+verified):
+- That the v5 public spot channel (`orderbook.50.<symbol>`)'s first push
+  is `type: "snapshot"` and subsequent pushes are `type: "delta"`, and
+  that the subscription ack has the shape `{"success": true, "op":
+  "subscribe"}`, are based on public documentation memory and have not
+  been checked against a live feed.
+- The depth parameter upper bound for the REST snapshot
+  (`/v5/market/orderbook`) (spot=200 per the docs) has not been verified,
+  so a conservative value of 50 is used.
 """
 from __future__ import annotations
 
@@ -41,7 +44,7 @@ class BybitL2Adapter:
         self._http = http_client or httpx.AsyncClient(base_url=_REST_BASE, timeout=10.0)
 
     def ws_url(self, instrument_symbol: str) -> str:
-        del instrument_symbol  # 단일 public spot 엔드포인트는 심볼 무관
+        del instrument_symbol  # the single public spot endpoint is symbol-agnostic
         return _WS_URL
 
     def _topic(self, instrument_symbol: str) -> str:

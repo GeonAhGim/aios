@@ -1,15 +1,18 @@
-"""RD-19 — OKX 공개 WS 호가(books) 파서.
+"""RD-19 — OKX public WS orderbook (books) parser.
 
 Spec: docs/design/ADR-2026-09-06-H-data-sourcing-self-build-and-contract-tiers.md
-D3. `exchanges/common/ws_session.WsSession`(재사용)에 꽂는 얇은 파서.
+D3. A thin parser plugged into `exchanges/common/ws_session.WsSession` (reused).
 
-미검증(외부 문서 라이브 대조 전, 성공으로 위장하지 않음):
-- `books` 채널의 `action: "snapshot"|"update"` 및 `seqId`/`prevSeqId`
-  필드명, 구독 ack `{"event":"subscribe","arg":{...}}` 형태는 공개 문서
-  기억 기반이며 라이브 대조하지 않았다. checksum 검증(문서상 CRC32)은
-  스콥 밖 — `seqId` 연속성만으로 갭을 판정한다(WsSession 공용 계약).
-- REST 스냅샷(`/api/v5/market/books`) `sz` 상한(문서상 400)은 대조하지
-  않았다.
+Unverified (not checked live against external docs, not pretending to be
+verified):
+- The `books` channel's `action: "snapshot"|"update"` behavior, the
+  `seqId`/`prevSeqId` field names, and the subscription ack shape
+  `{"event":"subscribe","arg":{...}}` are based on public documentation
+  memory and have not been checked against a live feed. Checksum
+  validation (CRC32 per the docs) is out of scope — gaps are determined
+  solely from `seqId` continuity (the WsSession shared contract).
+- The REST snapshot (`/api/v5/market/books`) `sz` upper bound (400 per
+  the docs) has not been verified.
 """
 from __future__ import annotations
 
@@ -31,14 +34,15 @@ _SZ = 400
 
 
 def _levels(raw: list[list[str]]) -> tuple[tuple[Decimal, Decimal], ...]:
-    # OKX 레벨은 [price, size, deprecated, numOrders] — 앞 2개만 쓴다.
+    # OKX levels are [price, size, deprecated, numOrders] — only the first 2 are used.
     return tuple((Decimal(level[0]), Decimal(level[1])) for level in raw)
 
 
 def _to_inst_id(instrument_symbol: str) -> str:
-    """`BTCUSDT` → `BTC-USDT`(OKX instId 표기, base/quote 4자 이상 심볼은
-    미검증 — 이 리프는 `<BASE><QUOTE>`가 quote=USDT/USDC/KRW로 끝난다고
-    가정하지 않고 호출자가 이미 `BTC-USDT` 형태로 넘긴다고 가정한다)."""
+    """`BTCUSDT` -> `BTC-USDT` (OKX instId notation; base/quote symbols of 4+
+    characters are unverified — this leaf does not assume `<BASE><QUOTE>`
+    ends with quote=USDT/USDC/KRW, and instead assumes the caller already
+    passes the `BTC-USDT` form)."""
     return instrument_symbol if "-" in instrument_symbol else instrument_symbol
 
 
@@ -49,7 +53,7 @@ class OkxL2Adapter:
         self._http = http_client or httpx.AsyncClient(base_url=_REST_BASE, timeout=10.0)
 
     def ws_url(self, instrument_symbol: str) -> str:
-        del instrument_symbol  # 단일 public 엔드포인트는 심볼 무관
+        del instrument_symbol  # a single public endpoint is symbol-agnostic
         return _WS_URL
 
     def subscription_messages(self, instrument_symbol: str) -> list[dict[str, Any]]:

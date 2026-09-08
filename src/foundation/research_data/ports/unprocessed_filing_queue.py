@@ -1,7 +1,8 @@
-"""RD-20 — 파싱 실패 공시 미처리 큐 포트.
+"""RD-20 — Unprocessed queue port for filings that fail to parse.
 
 Spec: docs/specs/L4_research_data_and_market_ecosystem_v1.0.md §9 RD-20 DoD
-"파싱 실패 공시는 조용히 버리지 않고 미처리 큐에 남는다".
+"filings that fail to parse are not silently dropped; they are left in
+the unprocessed queue".
 """
 from __future__ import annotations
 
@@ -22,7 +23,8 @@ class UnprocessedFilingQueue(Protocol):
         raw_payload: dict[str, object],
         reason: str,
     ) -> None:
-        """실패 원인과 함께 원문(본문 텍스트 제외, 구조화 필드만)을 남긴다.
-        호출자는 이 이후 예외를 던지지 않는다 — 큐에 남는 것 자체가
-        "조용히 버리지 않음"의 증거다."""
+        """Leaves the raw data (structured fields only, no body text) along with
+        the failure reason. The caller does not throw an exception after this
+        — being left in the queue is itself the proof of "not silently
+        dropped"."""
         ...

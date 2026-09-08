@@ -1,15 +1,18 @@
-"""RD-20 — OpenDART 공시 수집 유스케이스.
+"""RD-20 — OpenDART filing ingestion use case.
 
 Spec: docs/specs/L4_research_data_and_market_ecosystem_v1.0.md §9 RD-20,
-ADR-2026-09-06-H D1/D2(source_contract 게이트 통과 전에는 어댑터를 부르지
-않는다).
+ADR-2026-09-06-H D1/D2 (the adapter must not be called before the
+source_contract gate is passed).
 
-호출 순서는 항상: (1) `authorize_source_access`로 "OPENDART" 소스 접근이
-허용되는지 확인 -> 거부면 미처리 큐에 남기고 끝, (2) 순수 함수
-`normalize_filing`으로 정규화 -> 파싱 실패면 미처리 큐에 남기고 끝, (3)
-`CorporateActionFilingRepository.append`로 저장(멱등, append-only). 어느
-단계에서 실패해도 예외를 던져 배치 전체를 중단시키지 않는다 — 조용히
-버리지도 않는다: 실패는 반드시 미처리 큐 행 하나로 남는다.
+The call order is always: (1) confirm via `authorize_source_access` that
+access to the "OPENDART" source is allowed -> if denied, leave it in the
+unprocessed queue and stop; (2) normalize with the pure function
+`normalize_filing` -> if parsing fails, leave it in the unprocessed queue
+and stop; (3) persist via `CorporateActionFilingRepository.append`
+(idempotent, append-only). A failure at any stage must not throw an
+exception that aborts the whole batch — nor should it be silently
+dropped: every failure must leave exactly one row in the unprocessed
+queue.
 """
 from __future__ import annotations
 
@@ -40,8 +43,9 @@ OPENDART_SOURCE_ID = "OPENDART"
 
 
 def _raw_payload(filing: OpenDartFiling) -> dict[str, object]:
-    """본문 텍스트를 담지 않는다 — `OpenDartFiling`이 애초에 구조화된
-    필드만 갖고 있어(공시 원문 텍스트 없음) 별도 필터링이 필요 없다."""
+    """Does not carry the filing body text — `OpenDartFiling` only ever holds
+    structured fields (no raw filing text), so no separate filtering is
+    needed."""
     payload = asdict(filing)
     payload["instrument_id"] = str(filing.instrument_id)
     payload["event_date"] = filing.event_date.isoformat()

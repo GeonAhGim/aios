@@ -2,7 +2,7 @@
 (LC) into per-account balance state.
 
 Spec: docs/specs/L4_ibor_fund_accounting_and_resilience_v1.0.md#§2.4, §9 FA-14
-("기존 ledger_journal_entry(LC)를 이벤트 원천으로 삼아 투영 정의").
+("define a projection using the existing ledger_journal_entry(LC) as the event source").
 
 Pure fold, no I/O. Two pieces are reused rather than re-implemented (decision:
 new event tables/logic are out of scope, this is a context extension):
@@ -11,8 +11,9 @@ new event tables/logic are out of scope, this is a context extension):
   re-checks the §4.4 invariants (`held >= 0`, `available >= 0` unless
   `allow_negative`) — replay re-validates the same fail-closed conditions
   that held at write time.
-- The debit/credit sign rule (§4.4 "자산·비용은 차변 증가, 부채·수익은 대변
-  증가") is the same one-line rule `post_entry._signed_delta`(LC-9) applies —
+- The debit/credit sign rule (§4.4 "assets and expenses increase on the
+  debit side, liabilities and revenue increase on the credit side") is the
+  same one-line rule `post_entry._signed_delta`(LC-9) applies —
   that function is module-private, so this module re-derives the same
   judgement from the public `chart_of_accounts.account_type`(LC-2) rather
   than reaching into another module's private name. No new sign table is

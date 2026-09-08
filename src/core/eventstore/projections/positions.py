@@ -1,7 +1,7 @@
 """FA-14 — positions projection: replay `pos_journal`(LB-5) into position state.
 
 Spec: docs/specs/L4_ibor_fund_accounting_and_resilience_v1.0.md#§2.4, §9 FA-14
-("기존 pos_journal(LB-5)을 이벤트 원천으로 삼아 투영 정의").
+("define a projection using the existing pos_journal(LB-5) as the event source").
 
 This projection does not recompute anything new — `snapshot_builder.fold`
 (LB-5) already *is* "snapshot = fold(journal)"(§4.3) as a pure function, and

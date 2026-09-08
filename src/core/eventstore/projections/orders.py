@@ -1,8 +1,8 @@
 """FA-14 — orders projection: replay `order_events`(OMS) + `fills` into order state.
 
 Spec: docs/specs/L4_ibor_fund_accounting_and_resilience_v1.0.md#§2.4, §9 FA-14
-("기존 order_events(OMS)를 이벤트 원천으로 삼아 투영 정의(새 이벤트 테이블
-신설 금지)").
+("define a projection using the existing order_events(OMS) as the event
+source (no new event tables)").
 
 Pure fold, no I/O: `project()` takes the `order_events` timeline for one
 order (`OrderTransitionEvent`, L4-06/07 contract, reused as-is) plus the

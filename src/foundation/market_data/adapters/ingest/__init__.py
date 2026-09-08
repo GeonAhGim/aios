@@ -1,1 +1,1 @@
-"""RD-19 — 암호화폐 L2 자체 수집기 어댑터 패키지."""
+"""RD-19 — Crypto L2 self-built ingest adapter package."""

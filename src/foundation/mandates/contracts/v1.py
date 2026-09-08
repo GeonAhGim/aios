@@ -173,7 +173,7 @@ class ComplianceDecision(BaseModel):
 class PolicyDecisionRow(BaseModel):
     """Source data for `compliance_decision_from_policy_decision` — a plain
     value object, not a new table. Every field already exists on the
-    domain `PolicyDecision`/`PolicyBundle` rows (75번 §1/§3); this type only
+    domain `PolicyDecision`/`PolicyBundle` rows (doc 75 §1/§3); this type only
     bundles them so the mapper below takes a single one-line argument
     instead of a per-field keyword signature.
     """
