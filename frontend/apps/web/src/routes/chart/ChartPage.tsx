@@ -2,11 +2,7 @@
 // 대신 vendor klinecharts 포크에 의존하지 않는 서브모듈만 직접 불러온다
 // (배럴은 core/klinechartsBackend를 통해 vendor까지 재수출해 apps/web의
 // 엄격한 tsconfig에서 tsc -b가 깨진다).
-import type { ChartingPort } from "@aios/chart-engine/src/layout/persistence";
-import type { IndicatorCatalogEntry } from "@aios/chart-engine/src/plugins/indicatorPlugin";
-import type { CandleQueryParams, CandleQueryResult, CoverageQueryParams, CoverageSpanView } from "@aios/api-client";
-import { ApiError, createBacktestsClient, createChartingClient, createMarketDataClient } from "@aios/api-client";
-import { useAuthStore } from "@aios/shared-hooks";
+import { ApiError } from "@aios/api-client";
 import { routeApiError, type Timeframe, type Venue } from "@aios/shared-types";
 import { CandlestickChart, EmptyState, LoadingState, PageHeader } from "@aios/ui-web";
 import { useMemo, useState } from "react";
@@ -15,17 +11,29 @@ import { useSearchParams } from "react-router-dom";
 import { AppShell } from "../../components/layout/AppShell";
 import { CoverageBadge } from "../../components/CoverageBadge";
 import { ErrorMessage } from "../../components/ErrorMessage";
-import { BacktestPanel, type RunQuickBacktest } from "./BacktestPanel";
+import { BacktestPanel } from "./BacktestPanel";
 import { ChartPanes } from "./ChartPanes";
 import { ChartToolbar } from "./ChartToolbar";
 import { CompareSymbols, type CompareSymbolRef } from "./CompareSymbols";
-import { ChartTemplates, type ChartTemplatesPort } from "./ChartTemplates";
+import { ChartTemplates } from "./ChartTemplates";
 import { ChartLayoutErrorBanners } from "./ChartLayoutErrorBanners";
 import { ChartDrawingsErrorBanners } from "./ChartDrawingsErrorBanners";
 import { buildChartLayoutControls } from "./chartToolbarLayoutProps";
+import {
+  backtestsClient,
+  chartingClient,
+  DEFAULT_TIMEFRAME,
+  DEFAULT_VENUE,
+  marketDataClient,
+  VISIBLE_CANDLE_COUNT,
+  type ChartPageProps,
+} from "./chartPageConfig";
+// 하위 호환 재수출: ChartPage.test.tsx 등 기존 소비자가 이 화면 파일에서
+// 타입을 가져오는 공개 API를 그대로 유지한다(순수 이동, 소비자 수정 없음).
+export type { ChartPageProps, FetchCandles, FetchCoverage } from "./chartPageConfig";
 import { decodeCompareSymbol, encodeCompareSymbol, NoInstrumentSelected, TIMEFRAME_MS } from "./chartPageHelpers";
 import { DrawingsList } from "./DrawingsList";
-import { IndicatorParityPanel, type ServerIndicatorSeriesPort } from "./IndicatorParityPanel";
+import { IndicatorParityPanel } from "./IndicatorParityPanel";
 import { IndicatorPicker } from "./IndicatorPicker";
 import { StrategyMarkers } from "./StrategyMarkers";
 import { useChartDrawings } from "./useChartDrawings";
@@ -42,45 +50,6 @@ import { useIndicatorSelection } from "./useIndicatorSelection";
 // task-2011: 상태 소유 단위(그리기/레전드·오브젝트 트리/리플레이)는 각각
 // useChartDrawings/useIndicatorSelection/useChartReplaySession으로, 순수 함수는
 // chartPageHelpers.tsx로 옮겼다 — 이 파일은 화면 조립만 남긴다(순수 이동).
-
-const VISIBLE_CANDLE_COUNT = 200;
-const DEFAULT_VENUE: Venue = "BITGET";
-const DEFAULT_TIMEFRAME: Timeframe = "1h";
-
-const baseUrl = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8000";
-const marketDataClient = createMarketDataClient(baseUrl, () => useAuthStore.getState().token);
-const chartingClient = createChartingClient(baseUrl, () => useAuthStore.getState().token);
-const backtestsClient = createBacktestsClient(baseUrl, () => useAuthStore.getState().token);
-
-export type FetchCandles = (params: CandleQueryParams) => Promise<CandleQueryResult>;
-// DC-18b: 캔들 조회 포트와 같은 관용(테스트에서 서버 왕복 없이 주입) — 캔들의
-// venue/timeframe만 넘기고, 축(현재 visible range)은 이 화면이 start/end로 이미
-// 갖고 있으므로 CoverageBadge가 그 값을 그대로 받는다.
-export type FetchCoverage = (params: CoverageQueryParams) => Promise<CoverageSpanView[]>;
-
-export interface ChartPageProps {
-  fetchCandles?: FetchCandles;
-  // DC-18b: 미지정 시 실 서버 클라이언트(marketDataClient.getCoverage)를 쓴다 —
-  // listInstruments와 동일 관용. 이 화면 테스트는 renderPage가 항상 스텁을 넘긴다
-  // (실 네트워크 회피).
-  fetchCoverage?: FetchCoverage;
-  // CH-6b: CH-8 레이아웃 CRUD 포트 — 테스트에서 서버 왕복 없이 주입한다(fetchCandles와 동일 관용).
-  chartingPort?: ChartingPort;
-  // CH-17c: CH-17b 지표 템플릿 CRUD 포트 — 같은 관용으로 주입 가능하게 둔다.
-  templatesPort?: ChartTemplatesPort;
-  // CH-13b: CompareSymbols의 InstrumentView 목록 조회 포트 — 같은 관용으로 주입 가능하게 둔다.
-  listInstruments?: typeof marketDataClient.listInstruments;
-  // BT-13: 즉시 백테스트 실행 포트 — 같은 관용으로 서버 왕복 없이 주입 가능하게 둔다.
-  runQuickBacktest?: RunQuickBacktest;
-  // CH-18b: IndicatorParityPanel의 화이트리스트 판정 입력(IND-12 카탈로그). 실
-  // 배선(라이브 fetch)이 아직 없다 — 기본값 []는 "아무 지표도 검증 대상 아님"을
-  // 정직하게 반영한다(fail-closed, IndicatorParityPanel.tsx 상단 주석 참고).
-  indicatorCatalog?: readonly IndicatorCatalogEntry[];
-  // CH-18b: 서버 참조 지표 시리즈 포트. 실 IND-1 계산 엔드포인트가 아직 없어
-  // 기본값은 IndicatorParityPanel의 자체 기본값(항상 null)을 그대로 쓴다.
-  resolveServerIndicatorSeries?: ServerIndicatorSeriesPort;
-  now?: Date;
-}
 
 export function ChartPage({
   fetchCandles = marketDataClient.getCandles,
