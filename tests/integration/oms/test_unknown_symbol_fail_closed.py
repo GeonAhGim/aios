@@ -31,12 +31,36 @@ from src.services.oms.application.wiring import (
 from src.services.oms.contracts.v1_commands import OrderIdempotencyScope, SubmitOrderCommand
 from src.services.oms.domain.errors import UnknownSymbolError
 from src.services.order_service.gate import GateDecision, GateOutcome, OrderContext
+from tests.integration.fake_exchange_adapter import FakeExchangeAdapter
 from tests.integration.oms.conftest import create_test_tenant, seed_entity_context
 from tests.support.oms_outbox_fakes import ScriptedAdapter
 
 
 async def _allow_gate(context: OrderContext) -> GateDecision:
     return GateDecision(outcome=GateOutcome.ALLOW)
+
+
+async def _drain_stale_outbox(pool) -> None:
+    """공유 테스트 DB에는 트랜잭션 격리가 없어(모듈 docstring), 먼저 끝난
+    다른 oms 테스트가 처리하지 않은 `order_command_outbox` PENDING 행을 남길
+    수 있다. 이 테스트의 핵심 단언(`report.claimed == 0`)은 우리 실행과 무관한
+    잔여 행 수에 흔들리면 안 되므로, 우리 자신의 spy로 재는 직전에 별도
+    어댑터로 큐를 먼저 비운다(무한루프 방지로 상한을 둔다)."""
+
+    async def _resolve(tenant_id: uuid.UUID, exchange: str) -> FakeExchangeAdapter:
+        return FakeExchangeAdapter()
+
+    drainer = build_outbox_dispatcher(
+        pool,
+        resolve_adapter=_resolve,
+        outbox_repo=OutboxRepository(),
+        order_repo=PostgresOrderRepository(),
+        worker_id=f"drain-stale-outbox-{uuid.uuid4().hex[:8]}",
+    )
+    for _ in range(20):
+        report = await drainer.dispatch_once()
+        if report.claimed == 0:
+            return
 
 
 async def _create_running_execution(pool, user_id: uuid.UUID) -> int:
@@ -66,6 +90,7 @@ async def _create_running_execution(pool, user_id: uuid.UUID) -> int:
 
 
 async def test_unknown_symbol_rejected_before_any_row_and_adapter_never_called(pool) -> None:
+    await _drain_stale_outbox(pool)
     user_id = await create_test_tenant(pool)
     execution_id = await _create_running_execution(pool, user_id)
     entity_context = await seed_entity_context(pool, user_id)

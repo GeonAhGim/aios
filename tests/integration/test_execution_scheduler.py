@@ -29,7 +29,7 @@ from src.foundation.execution_ownership.adapters.postgres_repository import (
 from src.services.credential_resolver import CredentialNotFoundError
 from src.services.execution_loop.scheduler import ExecutionLoopScheduler
 from src.services.order_service.gate import GateDecision, GateOutcome, OrderContext
-from tests.integration.conftest import create_test_user
+from tests.integration.conftest import create_test_tenant, create_test_user
 from tests.integration.fake_exchange_adapter import FakeExchangeAdapter
 from tests.integration.test_execution_tick import _create_execution
 
@@ -107,8 +107,11 @@ async def _fsm_state(pool: asyncpg.Pool, execution_id: int) -> str:
 
 
 async def test_tick_all_running_ticks_every_paper_execution(pool):
-    user_a = await create_test_user(pool)
-    user_b = await create_test_user(pool)
+    # risk_decision.tenant_id는 tenant(id)를 FK한다(94da854f522f, task-1988) —
+    # 이 틱이 위험 단계까지 도달해 risk_decision을 쓰므로 create_test_user만으로는
+    # 대응하는 tenant 행이 없어 FK 위반이 난다.
+    user_a = await create_test_tenant(pool)
+    user_b = await create_test_tenant(pool)
     exec_a = await _create_execution(pool, user_a, entry_threshold=100.0)
     exec_b = await _create_execution(pool, user_b, entry_threshold=100.0)
     adapter_a, adapter_b = _filled_adapter(), _filled_adapter()
@@ -127,8 +130,10 @@ async def test_tick_all_running_ticks_every_paper_execution(pool):
 
 
 async def test_one_failing_execution_does_not_block_the_others(pool):
-    user_ok = await create_test_user(pool)
-    user_broken = await create_test_user(pool)
+    # risk_decision.tenant_id FK가 tenant(id)를 가리킨다(94da854f522f) — 두
+    # 실행 모두 위험 단계에 도달하므로 tenant 행이 있는 사용자가 필요하다.
+    user_ok = await create_test_tenant(pool)
+    user_broken = await create_test_tenant(pool)
     exec_ok = await _create_execution(pool, user_ok, entry_threshold=100.0)
     exec_broken = await _create_execution(pool, user_broken, entry_threshold=100.0)
 
@@ -192,7 +197,9 @@ async def test_execution_with_lease_held_by_other_owner_is_skipped(pool):
     """§4.1 — 다른 프로세스가 만료 전 리스를 쥔 execution_id는 RUNNING/PAPER라도
     이번 주기 tick 대상에서 빠진다(예외 없이 건너뜀). 같은 주기에 리스가 없는
     다른 execution은 정상적으로 tick된다."""
-    user_leased, user_free = await create_test_user(pool), await create_test_user(pool)
+    # risk_decision.tenant_id FK가 tenant(id)를 가리킨다(94da854f522f) — free_id는
+    # 위험 단계까지 도달해 risk_decision을 쓰므로 tenant 행이 있는 사용자가 필요하다.
+    user_leased, user_free = await create_test_tenant(pool), await create_test_tenant(pool)
     leased_id = await _create_execution(pool, user_leased, entry_threshold=100.0)
     free_id = await _create_execution(pool, user_free, entry_threshold=100.0)
     lease_repo = PostgresExecutionLeaseRepository(pool)
