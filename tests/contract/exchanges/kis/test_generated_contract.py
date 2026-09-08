@@ -179,6 +179,7 @@ async def test_contract_helper_detects_mismatched_path() -> None:
     path를 하나 조작하면 `_assert_rest_contract`가 즉시 잡아야 한다(테스트가
     실제로 뭔가를 검증하고 있다는 근거)."""
     case = _REST_CASES[0]
+    assert case.path is not None, "REST case는 path가 None일 수 없음"
     mutated = replace(case, path=case.path + "-broken")
     with pytest.raises(AssertionError):
         await _assert_rest_contract(mutated)
