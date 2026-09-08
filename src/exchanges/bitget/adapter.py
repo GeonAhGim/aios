@@ -18,7 +18,7 @@ import hmac
 import json
 from collections.abc import Awaitable, Callable
 from decimal import Decimal
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import httpx
 
@@ -47,11 +47,15 @@ from src.exchanges.bitget.subaccount_mixin import BitgetSubaccountMixin
 from src.exchanges.bitget.tax_mixin import BitgetTaxMixin
 from src.exchanges.bitget.trading_mixin import BitgetTradingMixin
 from src.exchanges.bitget.trading_plan_mixin import BitgetTradingPlanMixin
+from src.exchanges.bitget.venue_profile import BITGET_SPOT_PROFILE
 from src.exchanges.common.adapter import ExchangeAdapter
 from src.exchanges.common.error_taxonomy import ExchangeError, ExchangeErrorKind
 from src.exchanges.common.http_policy import RetryPolicy
 from src.exchanges.common.transport import ResilientTransport
 from src.exchanges.common.types import ExchangeCapability
+
+if TYPE_CHECKING:
+    from src.services.oms.domain.venue_profile import VenueCapabilityProfile
 
 BASE_URL = "https://api.bitget.com"
 
@@ -273,3 +277,8 @@ class BitgetAdapter(
             reference_feed_coverage="high",
             has_official_sandbox=True,
         )
+
+    def venue_profile(self) -> VenueCapabilityProfile:
+        """L4-30 — `exchanges/bitget/venue_profile.py`의 스팟 프로파일
+        상수를 노출한다(ABC 기본 구현은 `UnsupportedCapabilityError`)."""
+        return BITGET_SPOT_PROFILE
