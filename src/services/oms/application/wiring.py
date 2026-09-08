@@ -114,11 +114,13 @@ def start_outbox_dispatcher_task(
 def start_bitget_private_ws_inbox_task(
     pool: asyncpg.Pool, adapter: PrivateWsInboxClient
 ) -> asyncio.Task[None]:
-    """L4-20 — Bitget private `orders` 채널 구독 조립(태스크 등록만, 이
-    함수를 실제로 호출해 `background_loops.py`에 태우는 배선은 이 리프
-    범위 밖 — L4-14 dispatcher가 그랬듯 후속 리프가 담당한다, decision
-    "wiring.py 수정은 구독 등록 1블록으로 제한"). `adapter`는
-    `CredentialResolver.get_adapter(tenant_id, "bitget")`가 돌려주는
-    인스턴스를 그대로 넘기면 된다(factory의 LIVE 차단을 그대로 통과)."""
+    """L4-20 -- assembles the Bitget private `orders` channel subscription
+    (registration only; actually calling this to wire it into
+    `background_loops.py` is out of this leaf's scope -- a later leaf
+    owns that, same as the L4-14 dispatcher did, per decision "wiring.py
+    changes are limited to one subscription-registration block").
+    `adapter` should be the instance returned by `CredentialResolver.
+    get_adapter(tenant_id, "bitget")` (passes through the factory's LIVE
+    block unchanged)."""
     inbox = InboxProcessor(pool)
     return asyncio.create_task(subscribe_bitget_orders_to_inbox(adapter, inbox))
