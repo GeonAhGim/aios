@@ -304,7 +304,7 @@
   "VenueListing": {
     "$defs": {
       "Venue": {
-        "description": "세션 규칙(A3) 조회 키. KIS는 시장별로 캘린더가 달라 KRX/US를 분리한다.",
+        "description": "Lookup key for session rules (A3).\n\nKIS has different calendars per market, so KRX/US are separated.",
         "enum": [
           "BITGET",
           "KIS_KRX",
