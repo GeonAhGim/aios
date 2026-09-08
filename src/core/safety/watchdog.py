@@ -26,6 +26,7 @@ from typing import Any
 from pydantic import BaseModel
 
 from src.core.safety.heartbeat import read_heartbeat_age_seconds
+from src.core.safety.split_brain import Diagnosis, FailureDomain
 
 logger = logging.getLogger(__name__)
 
@@ -138,19 +139,34 @@ def decide(
     snapshot: WatchdogSnapshot,
     *,
     market_wide_correlated: bool | None,
+    failure_domain: FailureDomain | None = None,
     loss_threshold_pct: Decimal = DEFAULT_LOSS_THRESHOLD_PCT,
     unresponsive_sec_threshold: float = DEFAULT_UNRESPONSIVE_SEC_THRESHOLD,
 ) -> WatchdogDecision:
-    """FD-9.2 판정 로직. `market_wide_correlated`는 FD-2.6/9.5 결과 —
-    True(시장 전체 급변과 상관됨)/False(고립된 손실)/None(판정 불가, 데이터
-    부족) 세 값을 받는다. None은 "조작 의심"과 동일하게 안전한 쪽으로
-    취급한다(예외상황 원칙 — 판단 불가를 정상으로 취급하지 않는다)."""
+    """FD-9.2 판정 로직. `market_wide_correlated`는 FD-2.6/9.5 결과(위임
+    산식은 `market_correlation.is_market_wide_move`) — True(시장 전체
+    급변과 상관됨)/False(고립된 손실)/None(판정 불가, 데이터 부족) 세
+    값을 받는다. None은 "조작 의심"과 동일하게 안전한 쪽으로 취급한다
+    (예외상황 원칙 — 판단 불가를 정상으로 취급하지 않는다).
+
+    `failure_domain`은 FD-9.3 Split-Brain 진단(§4.3/§6 "DB 단독 장애")
+    결과다. DB만 단독으로 끊긴 상태에서는 거래소 API를 잠정 진실 소스로
+    취급해 강제청산 대상에서 제외한다 — 이 진단이면 LIQUIDATE 판정을
+    HALT로 강등한다(DB 쓰기가 필요한 청산 요청 자체를 만들지 않는다)."""
     unresponsive = snapshot.unresponsive_sec >= unresponsive_sec_threshold
     if unresponsive and snapshot.loss_pct < loss_threshold_pct:
         return WatchdogDecision(action=WatchdogAction.HALT, reason="main_process_unresponsive")
 
     if snapshot.loss_pct >= loss_threshold_pct:
         if market_wide_correlated is True:
+            db_isolated = (
+                failure_domain is not None
+                and failure_domain.diagnosis == Diagnosis.DB_ISOLATED_FAILURE
+            )
+            if db_isolated:
+                return WatchdogDecision(
+                    action=WatchdogAction.HALT, reason="db_isolated_liquidate_downgraded"
+                )
             # Phase 1은 SOR 미구현(06번 §6.4) — 정책문서 8.6-A-1의 "분할 실행
             # 불가능 시 즉시 시장가 청산" 조항으로 시장가 폴백을 정당화.
             return WatchdogDecision(
