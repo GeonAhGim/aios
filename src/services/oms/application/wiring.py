@@ -52,6 +52,7 @@ from src.services.oms.application.outbox_dispatcher import (
     DEFAULT_POLL_INTERVAL_SEC,
     OutboxDispatcher,
 )
+from src.services.oms.application.reconcile_scheduler import ReconcileScheduler, TargetProvider
 from src.services.oms.ports.repository import OrderRepoPort, OutboxRepoPort
 from src.services.order_service.foundation_gate import make_foundation_pre_submit_gate
 
@@ -109,6 +110,21 @@ def start_outbox_dispatcher_task(
         )
         return None
     return asyncio.create_task(dispatcher.run_forever())
+
+
+def start_reconcile_scheduler_task(
+    pool: asyncpg.Pool, targets: TargetProvider
+) -> asyncio.Task[None]:
+    """L4-24 -- assembles the 3-way reconciliation scheduler (registration
+    only; actually wiring the returned task into `background_loops.py` is
+    out of this leaf's scope, same precedent as
+    `start_bitget_private_ws_inbox_task` above -- a later leaf owns that).
+    `targets` resolves the (tenant, connection, account_ref, adapter) list
+    to reconcile each tick; callers should build adapters via
+    `CredentialResolver.get_adapter(tenant_id, exchange)` (passes through
+    the factory's LIVE block unchanged, same as the dispatcher above)."""
+    scheduler = ReconcileScheduler(pool, targets=targets)
+    return asyncio.create_task(scheduler.run_forever())
 
 
 def start_bitget_private_ws_inbox_task(
