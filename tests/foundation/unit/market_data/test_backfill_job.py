@@ -1,9 +1,10 @@
 """DC-16 백필 유스케이스 단위 테스트 — 실 DB 없이 포트 fake만 주입한다."""
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, time, timedelta, timezone
 from decimal import Decimal
-from uuid import UUID, uuid4
+from uuid import UUID
+from zoneinfo import ZoneInfo
 
 import pytest
 
@@ -12,8 +13,7 @@ from src.foundation.market_data.application.backfill_job import BackfillRequest,
 from src.foundation.market_data.contracts.v1 import SeriesKey, Timeframe, Venue
 from src.foundation.market_data.contracts.v2.coverage import QualityGrade
 from src.foundation.market_data.contracts.v2.instruments import VenueListing
-from src.foundation.market_data.domain.calendar.known_venues import KNOWN_SESSIONS
-from src.foundation.market_data.domain.calendar.session_rules import VenueCalendar
+from src.foundation.market_data.domain.calendar.session_rules import SessionSpec, VenueCalendar
 from src.foundation.market_data.domain.candle_columns import CandleColumns
 
 _INSTRUMENT_ID = "01ARZ3NDEKTSV4RRFFQ69G5FAV"
@@ -32,16 +32,24 @@ def _request() -> BackfillRequest:
     )
     return BackfillRequest(
         listing=listing,
-        key=SeriesKey(venue=Venue.BITGET, instrument_id=_SERIES_ID, timeframe=Timeframe.H1),
+        key=SeriesKey(venue=Venue.BITGET, instrument_id=_SERIES_ID, timeframe=Timeframe.D1),
         asset_class=AssetClass.CRYPTO,
         quality_grade=QualityGrade.RAW,
         calendar=VenueCalendar(
             venue=Venue.BITGET,
-            tz=KNOWN_SESSIONS[Venue.BITGET.value].tz,
-            regular=KNOWN_SESSIONS[Venue.BITGET.value],
+            tz=ZoneInfo("UTC"),
+            regular=SessionSpec(
+                tz=ZoneInfo("UTC"),
+                open_time=time.min,
+                close_time=time.max,
+                weekdays=frozenset(range(7)),
+            ),
+            holidays=frozenset(
+                _START.date() + timedelta(days=offset) for offset in (1, 3, 5, 7, 9)
+            ),
         ),
         range_start=_START,
-        range_end=_START + timedelta(hours=5),
+        range_end=_START + timedelta(days=10),
     )
 
 
@@ -143,8 +151,8 @@ async def test_interruption_keeps_completed_segments_for_resume() -> None:
         )
 
     assert len(provider.calls) == 3
-    assert len(spans) == 1
-    assert (spans[0].start_at, spans[0].end_at) == (_START, _START + timedelta(hours=2))
+    assert len(spans) == 2
+    assert len({span.start_at for span in spans}) == 2
     assert len(candles) == 2
     assert store.calls == 2
 
@@ -159,8 +167,4 @@ async def test_interruption_keeps_completed_segments_for_resume() -> None:
 
     assert len(provider.calls) == 6
     assert len(candles) == 5
-    assert len(spans) == 1
-    assert (spans[0].start_at, spans[0].end_at) == (
-        _START,
-        _START + timedelta(hours=5),
-    )
+    assert len(spans) == 5

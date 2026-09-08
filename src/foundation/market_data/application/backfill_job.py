@@ -7,13 +7,13 @@
 """
 from __future__ import annotations
 
-from collections.abc import MutableSequence, Sequence
+from collections.abc import Callable, MutableSequence
 from dataclasses import dataclass
 from datetime import datetime
 from uuid import UUID, uuid4
 
 from src.data.models.base import AssetClass
-from src.foundation.market_data.contracts.v1 import CandleRecord, SeriesKey, Timeframe
+from src.foundation.market_data.contracts.v1 import CandleRecord, SeriesKey
 from src.foundation.market_data.contracts.v2.coverage import CoverageSpan, QualityGrade
 from src.foundation.market_data.contracts.v2.instruments import VenueListing
 from src.foundation.market_data.domain.calendar.session_rules import VenueCalendar
@@ -52,7 +52,7 @@ async def backfill(
     coverage_spans: MutableSequence[CoverageSpan],
     candles: MutableSequence[CandleRecord],
     conn: object = None,
-    batch_id_factory: type[UUID] = uuid4,
+    batch_id_factory: Callable[[], UUID] = uuid4,
 ) -> BackfillResult:
     """계획된 갭을 하나씩 fetch → 저장 → 커버리지 갱신한다.
 
