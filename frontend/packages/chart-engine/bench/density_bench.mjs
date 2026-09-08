@@ -13,27 +13,48 @@
  * pattern, and honest about what actually runs client-side, unlike
  * fabricating 30 distinct algorithm names.
  *
- * Reports three real measurements. Development-machine targets from the
- * spec row (docs/specs/L4_analytics_authoring_backtest_marketplace_v1.0.md
- * #CH-19) are printed for reference only — pan/zoom frame p95 <= 16.7ms,
- * indicator-add <= 100ms, tick update <= 8ms — and are NEVER asserted here.
- * CI hardware load varies too much for an absolute-ms gate to stay green
- * (decision, repeats the task-1038/1405/920 precedent). The only pass/fail
- * gate is the `density-baseline.json` regression ratchet: any metric more
- * than 20% slower than its baseline fails; a faster metric updates the
- * baseline (same policy as scripts/coverage_ratchet.py, applied per-metric
- * instead of to one rolled-up number).
+ * Reports three real measurements against two independent gates. (1) The
+ * `density-baseline.json` regression ratchet: any metric more than 20%
+ * slower than its baseline fails; a faster metric updates the baseline
+ * (same policy as scripts/coverage_ratchet.py, applied per-metric instead
+ * of to one rolled-up number). (2) CH-19e — the spec row's own absolute
+ * targets (docs/specs/L4_analytics_authoring_backtest_marketplace_v1.0.md
+ * #CH-19: pan/zoom frame p95 <= 16.7ms, indicator-add <= 100ms, tick update
+ * <= 8ms), which a purely relative ratchet could drift past one +20% hop at
+ * a time. A bare absolute-ms gate is what task-1038/1405/920 ruled out for
+ * CI (shared/contended hardware fails code that isn't actually slower), so
+ * `densityRatchet.mjs#checkAbsoluteThresholds` scales the targets by a
+ * calib probe measured fresh each run — see that function's docstring.
+ * Every metric's raw value plus the calib ratio and the resulting
+ * normalized targets are always printed, so normalization can only widen
+ * the gate, never hide a value that actually exceeds it.
+ *
+ * Each of the three metrics is a median across `MEASURE_SWEEPS` full
+ * sweeps rather than a single sample or a min-reduction: a shared dev/CI
+ * box runs other work concurrently, and a min-reduction across too few
+ * sweeps tends to just report whichever sweep got the least contention
+ * rather than a representative cost — the median is more resistant to a
+ * single lucky or unlucky sweep in either direction.
  *
  * Usage: node --experimental-strip-types bench/density_bench.mjs
- * Exit 0 = no metric regressed >20% vs baseline (or baseline created/improved).
- * Exit 1 = some metric regressed >20% vs baseline.
+ * Exit 0 = no metric regressed >20% vs baseline AND all metrics are within
+ *          the calib-normalized CH-19 absolute targets.
+ * Exit 1 = either gate failed.
  */
 import { register } from "node:module";
 import { dirname, resolve as resolvePath } from "node:path";
 import { fileURLToPath } from "node:url";
 import { genCandles, percentile } from "./densityData.mjs";
 import { buildCatalog, buildInstances } from "./densityIndicators.mjs";
-import { checkRatchet, loadBaseline, writeBaseline } from "./densityRatchet.mjs";
+import {
+  CALIB_BASE_MS,
+  CH19_ABSOLUTE_TARGET_MS,
+  checkAbsoluteThresholds,
+  checkRatchet,
+  loadBaseline,
+  measureCalibMs,
+  writeBaseline,
+} from "./densityRatchet.mjs";
 
 register("./tsLoader.mjs", import.meta.url);
 
@@ -52,13 +73,11 @@ const PAN_ZOOM_STEPS_PER_PHASE = 60;
 const TICK_SAMPLE_COUNT = 500;
 const INDICATOR_ADD_RUNS = 5;
 /**
- * Number of full measurement sweeps per run, min-reduced per metric. A
- * shared dev/CI box runs other work concurrently, so a single sweep can land
- * entirely inside someone else's CPU burst; the per-metric min across sweeps
- * reports the best (least-contaminated) sample instead of whichever sweep
- * happened to be unlucky.
+ * Number of full measurement sweeps per run, median-reduced per metric (see
+ * module docstring). 5 gives the median a real middle (not just an average
+ * of 2) while keeping the whole bench's wall time reasonable.
  */
-const MEASURE_SWEEPS = 3;
+const MEASURE_SWEEPS = 5;
 
 /** Feeds the full candle history through every instance, keeping the primary output aligned by candle index (null while unwarmed). */
 function warmInstances(instances, candles) {
@@ -201,15 +220,18 @@ async function main() {
     });
   }
   const current = {
-    panZoomFrameMsP95: Math.min(...sweeps.map((s) => s.panZoomFrameMsP95)),
-    indicatorAddMs: Math.min(...sweeps.map((s) => s.indicatorAddMs)),
-    tickUpdateMsP95: Math.min(...sweeps.map((s) => s.tickUpdateMsP95)),
+    panZoomFrameMsP95: percentile(sweeps.map((s) => s.panZoomFrameMsP95), 50),
+    indicatorAddMs: percentile(sweeps.map((s) => s.indicatorAddMs), 50),
+    tickUpdateMsP95: percentile(sweeps.map((s) => s.tickUpdateMsP95), 50),
   };
   console.log(`[density-bench] sweeps (${MEASURE_SWEEPS}):`, JSON.stringify(sweeps));
-  console.log("[density-bench] measured (min across sweeps):", JSON.stringify(current));
-  console.log(
-    "[density-bench] dev-machine targets (report only, never asserted in CI): " +
-      "panZoomFrameMsP95<=16.7 indicatorAddMs<=100 tickUpdateMsP95<=8",
+  console.log("[density-bench] measured (median across sweeps):", JSON.stringify(current));
+
+  const calibMs = measureCalibMs();
+  const { failures: absoluteFailures, normalized, calibRatio } = checkAbsoluteThresholds(current, calibMs);
+  console.error(
+    `[density-bench] CH-19e calib: ${calibMs.toFixed(3)}ms (base ${CALIB_BASE_MS}ms, ratio ${calibRatio.toFixed(3)}); ` +
+      `normalized absolute targets: ${JSON.stringify(normalized)}; raw spec targets: ${JSON.stringify(CH19_ABSOLUTE_TARGET_MS)}`,
   );
 
   const baselineMeta = { candleCount: CANDLE_COUNT, indicatorInstanceCount: INDICATOR_INSTANCE_COUNT };
@@ -217,6 +239,11 @@ async function main() {
   if (baseline === null) {
     writeBaseline(BASELINE_PATH, current, baselineMeta);
     console.log(`[density-bench] BASELINE created: ${BASELINE_PATH}`);
+    if (absoluteFailures.length > 0) {
+      console.error("[density-bench] FAIL: CH-19e absolute threshold (host-load normalized):");
+      for (const failure of absoluteFailures) console.error(`  - ${failure}`);
+      return 1;
+    }
     return 0;
   }
 
@@ -224,6 +251,11 @@ async function main() {
   if (failures.length > 0) {
     console.error("[density-bench] FAIL: regression >20% vs baseline:");
     for (const failure of failures) console.error(`  - ${failure}`);
+    return 1;
+  }
+  if (absoluteFailures.length > 0) {
+    console.error("[density-bench] FAIL: CH-19e absolute threshold (host-load normalized):");
+    for (const failure of absoluteFailures) console.error(`  - ${failure}`);
     return 1;
   }
   if (Object.keys(improved).length > 0) {

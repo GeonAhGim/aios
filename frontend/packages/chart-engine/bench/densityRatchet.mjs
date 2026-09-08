@@ -50,3 +50,92 @@ export function checkRatchet(current, baselineMetrics, tolerance = REGRESSION_TO
   }
   return { failures, improved };
 }
+
+/**
+ * CH-19e — spec (§9.11 CH-19) absolute thresholds, host-load normalized.
+ * These sit alongside checkRatchet's baseline ratchet (never replace it):
+ * the ratchet catches the bench's own code regressing; this catches the
+ * bench drifting away from what the spec actually promises users, which a
+ * pure relative ratchet can silently drift past one +20% hop at a time.
+ *
+ * A bare absolute ms gate is exactly what task-1038/1405/920 (see this
+ * file's density_bench.mjs docstring) ruled out for CI: a shared/contended
+ * machine fails code that is not actually slower. So the target is scaled
+ * by how loaded *this run's* host is, measured directly instead of assumed:
+ * `measureCalibMs()` times a fixed, side-effect-free synthetic workload
+ * right before the real measurements, and `calibRatio = calibMs /
+ * CALIB_BASE_MS` says how many times slower this run's host is than the
+ * reference. `max(1, ratio)` never *tightens* the target below spec on a
+ * fast host — CH-19 is already the floor.
+ */
+export const CH19_ABSOLUTE_TARGET_MS = {
+  panZoomFrameMsP95: 16.7,
+  indicatorAddMs: 100,
+  tickUpdateMsP95: 8,
+};
+
+const CALIB_SAMPLES = 5;
+const CALIB_INNER_ITERATIONS = 300;
+const CALIB_BUFFER_SIZE = 4096;
+
+/**
+ * Reference calib probe cost for CH19_ABSOLUTE_TARGET_MS's "1.0x" host.
+ * Measured 2026-09-09 on this session's machine (git 370d6507) with no
+ * other benches running: 5 calls to measureCalibMs(), each itself a
+ * median of 5 inner samples: 15.86/13.13/12.67/12.27/14.00ms, median of
+ * medians 13.13ms. Rounded down slightly so a rerun on the same idle
+ * machine reads as ratio<=1 (raw target, unscaled) rather than drifting
+ * >1 from measurement jitter alone.
+ */
+export const CALIB_BASE_MS = 13.0;
+
+/**
+ * Fixed-iteration float/typed-array workload with no dependency on chart
+ * code, candle data, or indicator kernels — its only job is to answer "how
+ * fast is this CPU right now", independent of anything under test. `acc`
+ * is folded into a never-thrown check purely so the JIT can't prove the
+ * loop body is dead and elide it.
+ */
+export function measureCalibMs() {
+  const times = [];
+  for (let s = 0; s < CALIB_SAMPLES; s++) {
+    const buf = new Float64Array(CALIB_BUFFER_SIZE);
+    const t0 = performance.now();
+    let acc = 0;
+    for (let iter = 0; iter < CALIB_INNER_ITERATIONS; iter++) {
+      for (let i = 0; i < buf.length; i++) {
+        buf[i] = Math.sin(i * 0.001 + iter) * Math.sqrt(i + 1);
+        acc += buf[i];
+      }
+    }
+    const elapsed = performance.now() - t0;
+    if (!Number.isFinite(acc)) throw new Error("unreachable: calib probe produced a non-finite accumulator");
+    times.push(elapsed);
+  }
+  times.sort((a, b) => a - b);
+  return times[Math.floor(times.length / 2)];
+}
+
+/**
+ * calibMs/calibBaseMs (floored at 1) scales every target in `targets` up
+ * for a loaded host; `normalized` and `calibRatio` are returned (not just
+ * failures) so the caller can print them unconditionally — normalization
+ * must never be able to hide a real regression silently.
+ */
+export function checkAbsoluteThresholds(current, calibMs, calibBaseMs = CALIB_BASE_MS, targets = CH19_ABSOLUTE_TARGET_MS) {
+  const calibRatio = Math.max(1, calibMs / calibBaseMs);
+  const normalized = {};
+  const failures = [];
+  for (const [key, target] of Object.entries(targets)) {
+    const normalizedTarget = target * calibRatio;
+    normalized[key] = normalizedTarget;
+    const value = current[key];
+    if (typeof value === "number" && value > normalizedTarget) {
+      failures.push(
+        `${key} ${value}ms exceeds normalized target ${normalizedTarget.toFixed(3)}ms ` +
+          `(spec target ${target}ms x calib ratio ${calibRatio.toFixed(3)})`,
+      );
+    }
+  }
+  return { failures, normalized, calibRatio };
+}
