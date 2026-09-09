@@ -13,6 +13,7 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from datetime import datetime, timedelta
+from decimal import Decimal
 from typing import Any, Literal, Protocol, runtime_checkable
 from uuid import UUID
 
@@ -71,6 +72,19 @@ class OrderRepoPort(Protocol):
     async def find_by_scope_hash(
         self, conn: asyncpg.Connection, scope_hash: str
     ) -> OrderView | None: ...
+
+    async def list_children_for_update(
+        self, conn: asyncpg.Connection, parent_order_id: UUID
+    ) -> list[OrderView]: ...
+
+    async def set_committed_child_qty(
+        self,
+        conn: asyncpg.Connection,
+        *,
+        parent_order_id: UUID,
+        expected_version: int,
+        committed_child_qty: Decimal,
+    ) -> OrderView: ...
 
 
 @runtime_checkable

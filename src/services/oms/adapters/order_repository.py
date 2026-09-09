@@ -26,6 +26,7 @@ application 방향이라 이례적) — I-10 "배선·우회불가": `transition
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from decimal import Decimal
 from typing import Any
 from uuid import UUID
 
@@ -72,6 +73,7 @@ def _row_to_view(row: asyncpg.Record) -> OrderView:
         version=row["version"],
         parent_order_id=row["parent_order_id"],
         algo_run_id=row["algo_run_id"],
+        committed_child_qty=row["committed_child_qty"],
         unknown_since=row["unknown_since"],
         provider_order_date=row["provider_order_date"],
         created_at=row["created_at"],
@@ -102,6 +104,48 @@ class PostgresOrderRepository:
             scope_hash,
         )
         return None if row is None else _row_to_view(row)
+
+    async def list_children_for_update(
+        self, conn: asyncpg.Connection, parent_order_id: UUID
+    ) -> list[OrderView]:
+        """EM-3 -- every child of `parent_order_id` (identified the canonical
+        way, `orders.parent_order_id`), row-locked so a concurrent child
+        INSERT/transition can't race `aggregate_parent.py`'s rollup within
+        the same tx."""
+        rows = await conn.fetch(
+            "SELECT * FROM orders WHERE parent_order_id = $1 ORDER BY order_id FOR UPDATE",
+            parent_order_id,
+        )
+        return [_row_to_view(row) for row in rows]
+
+    async def set_committed_child_qty(
+        self,
+        conn: asyncpg.Connection,
+        *,
+        parent_order_id: UUID,
+        expected_version: int,
+        committed_child_qty: Decimal,
+    ) -> OrderView:
+        """EM-3 -- materialize EM-A1's running commitment onto the parent row.
+
+        No `status` change here (the caller already holds the parent locked
+        via `get_for_update`, EM-A1/EM-A4 already checked) -- ordinary
+        version-guarded `conditional_update`, no `order_events` row (I6 only
+        gates `status` changes, not this column)."""
+        row = await conditional_update(
+            conn,
+            table="orders",
+            id_column="order_id",
+            id_value=parent_order_id,
+            expected_state_column="version",
+            expected_state_value=expected_version,
+            set_values={
+                "committed_child_qty": committed_child_qty,
+                "updated_at": datetime.now(timezone.utc),
+            },
+            returning="*",
+        )
+        return _row_to_view(row)
 
     async def transition(
         self,

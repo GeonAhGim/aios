@@ -38,6 +38,7 @@ class OrderView(BaseModel):
     version: int
     parent_order_id: UUID | None
     algo_run_id: UUID | None
+    committed_child_qty: Decimal = Decimal("0")
     unknown_since: datetime | None
     provider_order_date: date | None
     created_at: datetime

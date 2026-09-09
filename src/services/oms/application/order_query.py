@@ -81,6 +81,7 @@ def _row_to_order_view(row: asyncpg.Record) -> OrderView:
         version=row["version"],
         parent_order_id=row["parent_order_id"],
         algo_run_id=row["algo_run_id"],
+        committed_child_qty=row["committed_child_qty"],
         unknown_since=row["unknown_since"],
         provider_order_date=row["provider_order_date"],
         created_at=row["created_at"],

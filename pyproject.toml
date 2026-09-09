@@ -122,6 +122,11 @@ extend-immutable-calls = ["fastapi.Depends", "fastapi.Query", "fastapi.Path", "f
 # repository port를 새로 만들지 않고 ledger/positions/trust application/**과
 # 동일하게 예외를 둔다. mandates domain/**은 여전히 순수하다.
 "src/foundation/mandates/application/**" = ["TID251"]
+# EM-3(task-2121) -- aggregate_parent.py reads/writes orders.committed_child_qty
+# through the OMS OrderRepoPort's `conn`-taking methods (same reasoning as
+# ledger/positions/trust application/**: it holds the transaction boundary
+# across a lock-then-conditional-update sequence). ems domain/** stays pure.
+"src/foundation/ems/application/**" = ["TID251"]
 "src/main.py" = ["TID251"]
 "src/services/*.py" = ["TID251"]
 "src/services/execution_loop/**" = ["TID251"]
@@ -149,6 +154,7 @@ extend-immutable-calls = ["fastapi.Depends", "fastapi.Query", "fastapi.Path", "f
 # 생성한 coverage.xml(신뢰된 입력)을 읽는 coverage_ratchet.py 하나뿐이다.
 "scripts/**" = ["TID251", "T201", "S603", "S607", "S314"]
 "scripts/check_compliance_gate.py" = ["S101"]
+"scripts/check_child_order_path.py" = ["S101"]
 
 # R-54 — src/tools/**: scripts/**와 동일한 운영자 CLI 계층(`python -m
 # src.tools.<name>`)이다. asyncpg로 직접 접속하고 exit code로 결과를
