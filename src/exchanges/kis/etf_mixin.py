@@ -16,17 +16,18 @@ from datetime import datetime, timezone
 from decimal import Decimal
 
 from src.data.models.market_data import Ticker
+from src.exchanges.common.http_client import KISHTTPClient
 
 _MARKET_CODE = "J"  # KRX(공식 예제 확인 — ETF/ETN도 일반 주식과 동일 시장코드)
 
 
 class KISEtfMixin:
-    async def get_etf_price(self, etf_code: str) -> Ticker:
+    async def get_etf_price(self: KISHTTPClient, etf_code: str) -> Ticker:
         """응답에 NAV(순자산가치) 등 ETF 전용 필드도 함께 오지만(§2 모델
         재사용 원칙) 소비하는 호출부가 생기기 전까지 Ticker의 표준
         필드만 채운다 — NAV 괴리율 등은 raw 응답이 필요해지면 별도
         메서드로 추가."""
-        raw = await self._request(  # type: ignore[attr-defined]
+        raw = await self._request(
             "GET",
             "/uapi/etfetn/v1/quotations/inquire-price",
             "FHPST02400000",

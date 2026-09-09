@@ -15,13 +15,14 @@ from datetime import datetime, timezone
 from decimal import Decimal
 
 from src.data.models.market_data import Ticker
+from src.exchanges.common.http_client import KISHTTPClient
 
 _MARKET_CODE = "W"  # ELW시장(공식 예제 확인)
 
 
 class KISElwMixin:
-    async def get_elw_price(self, elw_code: str) -> Ticker:
-        raw = await self._request(  # type: ignore[attr-defined]
+    async def get_elw_price(self: KISHTTPClient, elw_code: str) -> Ticker:
+        raw = await self._request(
             "GET",
             "/uapi/domestic-stock/v1/quotations/inquire-elw-price",
             "FHKEW15010000",
