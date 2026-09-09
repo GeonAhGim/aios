@@ -23,6 +23,21 @@ task-1715(P0-B) — `pre_submit_gate`는 두 경로 모두에 필수 인자다(I
 FROZEN_PAPER_ONLY 승인(감사 2026-09-06 P0)으로 이 시그니처를 바꿨다 —
 게이트 없이는 `execute()` 자체를 호출할 수 없다(정적으로 걸림, 런타임
 None 주입도 `submit_order`/`is_submission_allowed`가 다시 막는다).
+
+task-2351 (L4-10, FROZEN_PAPER_ONLY PM approval) -- `client_order_id` used
+to be self-generated from `execution_id:pending_fsm_state:now()`, so every
+retry of the same intent (e.g. a crash-recovery re-call of `execute()`)
+minted a brand-new id and defeated the whole point of an idempotency key.
+It is now delegated to the shared OMS idempotency module
+(`services/oms/domain/idempotency.py`, L4-03) -- a deterministic function
+of an `OrderIdempotencyScope` built from this call's own execution_id,
+strategy_id/version and `strategy_executions.intent_counter`. The counter
+is only *read* here, never incremented: the FSM-transition writer bumps it
+when a genuinely new intent begins (a follow-up leaf), so a retry that
+calls `execute()` again without an intervening transition reads the same
+counter value and therefore derives the same `client_order_id` -- the
+existing `orders.client_order_id` UNIQUE claim in `submit_order` then
+absorbs the duplicate before the exchange adapter is ever called.
 """
 
 from __future__ import annotations
@@ -43,6 +58,8 @@ from src.data.models.strategy_fsm import FSMState, FSMStrategyConfig
 from src.data.models.trading import Order, OrderSide, OrderStatus, OrderType
 from src.exchanges.common.adapter import ExchangeAdapter
 from src.services.condition_compiler import ORDER_FILLED
+from src.services.oms.domain.idempotency import build_scope
+from src.services.oms.domain.idempotency import client_order_id as derive_client_order_id
 from src.services.order_service import OrderSubmissionError, submit_order
 from src.services.order_service.fenced_submit import FenceReader, submit_with_fence
 from src.services.order_service.gate import GateDecision, GateOutcome, PreSubmitGate
@@ -52,6 +69,42 @@ from src.services.order_service.worm_decision_check import DecisionReader
 logger = logging.getLogger(__name__)
 
 FsmStateWriter = Callable[[int, FSMState, FSMState], Awaitable[None]]
+
+# Bitget spot's documented client_order_id limit (`exchanges/bitget/venue_profile.py`
+# BITGET_SPOT_PROFILE, DOC_ONLY/unverified per that module's own provenance note).
+# Executor only ever runs against a paper-sandboxed adapter (guarded below), which
+# in Phase 1 is always Bitget, so this conservative bound is safe without importing
+# a venue-specific module into this venue-agnostic file. A real per-venue profile
+# lookup belongs to a future leaf once Executor needs more than one paper venue.
+_CLIENT_ORDER_ID_MAX_LEN = 40
+_CLIENT_ORDER_ID_CHARSET = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789"
+_IDEMPOTENCY_WINDOW_SECONDS = 60
+
+
+def _floor_to_window(now: datetime) -> datetime:
+    """Floors `now` to the `OrderIdempotencyScope.window_start` window
+    (L4-03 domain contract) -- a retry inside the same 60s window derives
+    the same `client_order_id`; one issued after the window boundary is
+    treated as a distinct intent. This is the existing L4-03 window
+    semantics (shared by every OMS caller), not a new tradeoff."""
+    epoch_seconds = int(now.timestamp())
+    floored = epoch_seconds - (epoch_seconds % _IDEMPOTENCY_WINDOW_SECONDS)
+    return datetime.fromtimestamp(floored, tz=timezone.utc)
+
+
+async def _read_intent_counter(pool: asyncpg.Pool, execution_id: int) -> int:
+    """Reads (never increments) `strategy_executions.intent_counter`. The
+    FSM-transition writer bumps it when a genuinely new intent begins (a
+    follow-up leaf); a retry of the same intent calls `Executor.execute()`
+    again without another transition, so this always reads back the same
+    value and therefore derives the same deterministic `client_order_id`."""
+    async with pool.acquire() as conn:
+        value = await conn.fetchval(
+            "SELECT intent_counter FROM strategy_executions WHERE id = $1", execution_id
+        )
+    if value is None:
+        raise ValueError(f"존재하지 않는 실행입니다: execution_id={execution_id}")
+    return int(value)
 
 
 def next_fsm_state_after_fill(fsm_config: FSMStrategyConfig, pending_state: FSMState) -> FSMState:
@@ -105,8 +158,22 @@ class Executor:
                 "PAPER 실행에는 sandbox로 구성된 거래소 adapter만 주입할 수 있습니다."
             )
 
-        client_order_id = (
-            f"{execution_id}:{pending_fsm_state.value}:{datetime.now(timezone.utc).isoformat()}"
+        intent_seq = await _read_intent_counter(pool, execution_id)
+        scope = build_scope(
+            tenant_id=user_id,
+            # Phase 1 has no per-account scoping below tenant (one paper
+            # account per user) -- same placeholder convention already used
+            # by `foundation/ems/domain/algo/twap.py`'s `account_ref=""`.
+            account_ref="",
+            provider=adapter.get_capabilities().exchange_name,
+            strategy_id=allocation.strategy_id,
+            strategy_version=strategy_version,
+            execution_id=execution_id,
+            intent_seq=intent_seq,
+            window_start=_floor_to_window(datetime.now(timezone.utc)),
+        )
+        client_order_id = derive_client_order_id(
+            scope, max_len=_CLIENT_ORDER_ID_MAX_LEN, charset=_CLIENT_ORDER_ID_CHARSET
         )
         order = Order(
             client_order_id=client_order_id,
