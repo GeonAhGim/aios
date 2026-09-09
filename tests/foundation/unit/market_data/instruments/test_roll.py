@@ -1,4 +1,4 @@
-﻿"""DC-25 exact adjustment, calendar delegation, and fail-closed evidence."""
+"""DC-25 exact adjustment, calendar delegation, and fail-closed evidence."""
 from datetime import date, datetime, time, timezone
 from decimal import Decimal, localcontext
 from pathlib import Path

@@ -1,4 +1,4 @@
-﻿"""DC-23 exact round trips, fail-closed partitions and million-tick streaming."""
+"""DC-23 exact round trips, fail-closed partitions and million-tick streaming."""
 from concurrent.futures import ThreadPoolExecutor
 from datetime import date, datetime, timezone
 from decimal import Decimal

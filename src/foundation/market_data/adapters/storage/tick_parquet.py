@@ -1,4 +1,4 @@
-﻿"""DC-23: bounded-batch tick/quote Parquet archive (pyarrow, Apache-2.0).
+"""DC-23: bounded-batch tick/quote Parquet archive (pyarrow, Apache-2.0).
 
 Layout: root/venue/instrument_id/YYYY-MM-DD/{trades,quotes}.parquet.
 Decimal and nanosecond timestamps retain their exact string representations.

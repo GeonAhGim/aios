@@ -1,4 +1,4 @@
-﻿"""CM-14 exact evidence, dependency delegation and fail-closed tests."""
+"""CM-14 exact evidence, dependency delegation and fail-closed tests."""
 import os
 import pickle
 import subprocess
