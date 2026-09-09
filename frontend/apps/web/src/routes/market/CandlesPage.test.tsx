@@ -187,6 +187,24 @@ describe("CandlesPage", () => {
     expect(fetchCandles).not.toHaveBeenCalled();
   });
 
+  // DEPTH_LA_LB_LC(task-2723)가 원 task-1525(561a9e6)를 D3 미달로 판정한 근거
+  // 중 하나 — 이 스위트는 지금까지 ApiError(모의 HTTP 에러 바디)만 던지는
+  // fetchCandles로 에러 분기를 검증했지 실 네트워크 단절류 예외는 다루지
+  // 않았다(task-2996 DEEPEN). ApiError가 아닌 예외도 errorCode=undefined
+  // 분기(CandlesPage.tsx query.error instanceof ApiError 체크)로 안전하게
+  // 빠져 화면이 죽지 않아야 한다.
+  it("failure-injection: fetchCandles가 ApiError가 아닌 순수 네트워크 예외(TypeError, 실제 단절 시뮬레이션)로 거부해도 화면이 크래시하지 않고 일반 안내를 보여준다", async () => {
+    const fetchCandles = vi.fn(async () => {
+      throw new TypeError("Failed to fetch");
+    });
+    renderPage(fetchCandles);
+
+    await waitFor(() => expect(screen.getByText("Failed to fetch")).toBeInTheDocument());
+    expect(screen.queryByRole("button", { name: "다시 시도" })).not.toBeInTheDocument();
+    expect(screen.queryByTestId("candlestick-chart")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("candle-quality-badge")).not.toBeInTheDocument();
+  });
+
   it("instrument_id는 쿼리스트링에서 읽어 읽기 전용으로 보여주고 자유입력 필드는 없다", async () => {
     const fetchCandles = vi.fn(async () => okResult());
     renderPage(fetchCandles);
