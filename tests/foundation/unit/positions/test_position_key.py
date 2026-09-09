@@ -6,6 +6,7 @@ docs/specs/L4_ibor_fund_accounting_and_resilience_v1.0.md#FA-0d
 """
 from __future__ import annotations
 
+from typing import cast
 from uuid import UUID, uuid4
 
 import pytest
@@ -87,7 +88,7 @@ def test_construct_rejects_non_uuid_portfolio_id() -> None:
     with pytest.raises(InvalidPositionKeyError):
         PositionKey(
             venue="bitget", instrument_id="BTC/USDT", strategy_id="strat-1", execution_id="exec-1",
-            portfolio_id="not-a-uuid",  # type: ignore[arg-type]
+            portfolio_id=cast(UUID, "not-a-uuid"),
         )
 
 

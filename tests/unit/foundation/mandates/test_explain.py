@@ -12,6 +12,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
+from typing import Any
 from uuid import UUID, uuid4
 
 import pytest
@@ -36,7 +37,7 @@ _NOW = datetime(2026, 1, 5, 5, 0, 0, tzinfo=timezone.utc)
 
 
 def _revision(**overrides: object) -> MandateRevision:
-    base: dict[str, object] = {
+    base: dict[str, Any] = {
         "id": uuid4(),
         "mandate_id": uuid4(),
         "revision_no": 1,
@@ -49,7 +50,7 @@ def _revision(**overrides: object) -> MandateRevision:
         "forbidden_assets": (),
     }
     base.update(overrides)
-    return MandateRevision(**base)  # type: ignore[arg-type]
+    return MandateRevision(**base)
 
 
 def _bundle(revision: MandateRevision, *, rule_hash: str | None = None) -> PolicyBundle:

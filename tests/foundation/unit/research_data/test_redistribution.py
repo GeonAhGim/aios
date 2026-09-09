@@ -17,7 +17,11 @@ from src.foundation.market_data.domain.entitlement.source_contract import (
     SourceContractGrant,
     SourceContractTier,
 )
-from src.foundation.research_data.contracts.v1 import ResearchItem, SourceMeta
+from src.foundation.research_data.contracts.v1 import (
+    RedistributionPolicy,
+    ResearchItem,
+    SourceMeta,
+)
 from src.foundation.research_data.domain.redistribution import (
     RedistributionViolationError,
     assert_redistribution_allowed,
@@ -46,11 +50,13 @@ def _item(*, source_id: str = "GDELT", body_ref: str | None) -> ResearchItem:
     )
 
 
-def _source(*, source_id: str = "GDELT", redistribution: str = "link_only") -> SourceMeta:
+def _source(
+    *, source_id: str = "GDELT", redistribution: RedistributionPolicy = "link_only"
+) -> SourceMeta:
     return SourceMeta(
         source_id=source_id,
         publisher="GDELT Project",
-        redistribution=redistribution,  # type: ignore[arg-type]
+        redistribution=redistribution,
         license_ref="https://example.com/license",
         rate_limit=60,
         coverage="2015-01-01~present",

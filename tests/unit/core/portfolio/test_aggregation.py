@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 from decimal import Decimal
+from typing import cast
 
 import pytest
 from pydantic import ValidationError
@@ -95,7 +96,7 @@ def test_aggregate_with_no_exposures_is_all_cash():
 
 def test_aggregate_rejects_as_of_none_instead_of_defaulting():
     with pytest.raises(MissingAsOfError):
-        aggregate(_exposures(), cash=Decimal("5000"), as_of=None)  # type: ignore[arg-type]
+        aggregate(_exposures(), cash=Decimal("5000"), as_of=cast(datetime, None))
 
 
 # --- (d) total_equity<=0 is a defined rejection, not ZeroDivisionError -------

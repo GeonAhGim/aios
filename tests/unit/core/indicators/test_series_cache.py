@@ -6,6 +6,7 @@ Spec: docs/specs/L4_strategy_portfolio_backtest_v1.0.md §2.2 L28, DoD:
 """
 from __future__ import annotations
 
+from collections.abc import Sequence
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 
@@ -19,7 +20,7 @@ from src.core.indicators.series_cache import (
     SeriesKey,
 )
 from src.core.indicators.spec import IndicatorSpec, ParamSpec, PlotSpec
-from src.core.indicators.talib_adapter import IndicatorService
+from src.core.indicators.talib_adapter import IndicatorResult, IndicatorService
 from src.data.models.market_data import Candle
 
 
@@ -134,7 +135,9 @@ def test_duplicate_keys_are_computed_once() -> None:
     calls: list[str] = []
 
     class _CountingService(IndicatorService):
-        def calculate(self, indicator: str, candles, **params):  # type: ignore[override]
+        def calculate(
+            self, indicator: str, candles: Sequence[Candle], **params: int
+        ) -> IndicatorResult:
             calls.append(indicator)
             return super().calculate(indicator, candles, **params)
 
