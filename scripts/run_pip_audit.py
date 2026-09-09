@@ -110,10 +110,15 @@ def evaluate_pip_audit_json(raw_stdout: str, ignored_ids: set[str]) -> list[str]
             if skip_reason != EXPECTED_SKIP_REASON:
                 failures.append(f"{dep['name']}: 수집 실패 — {skip_reason}")
             continue
-        vulns = [v for v in dep.get("vulns", []) if not (set(v.get("aliases", [])) | {v.get("id")}) & ignored_ids]
+        vulns = [
+            v for v in dep.get("vulns", [])
+            if not (set(v.get("aliases", [])) | {v.get("id")}) & ignored_ids
+        ]
         for v in vulns:
             fix = v.get("fix_versions") or ["no fix"]
-            failures.append(f"{dep['name']} {dep['version']}: {v.get('id')} (fix: {', '.join(fix)})")
+            failures.append(
+                f"{dep['name']} {dep['version']}: {v.get('id')} (fix: {', '.join(fix)})"
+            )
     return failures
 
 
