@@ -92,6 +92,14 @@ os.environ.setdefault("AIOS_STARTUP_RECOVERY_ENABLED", "0")
 # 자체는 tests/integration/oms/test_background_loops_wiring.py가 플래그를
 # 켜고 직접 호출해 검증한다.
 os.environ.setdefault("AIOS_OMS_DISPATCHER_ENABLED", "0")
+# task-2358(R-52) — liquidation_executor's worker loop calls a real
+# BitgetAdapter.get_ticker() every tick; block it in lifespan integration
+# tests for the same reason as the two flags above. Exercised directly by
+# tests/integration/risk/test_liquidation_worker.py.
+os.environ.setdefault("AIOS_LIQUIDATION_WORKER_ENABLED", "0")
+# §10 -- run_liquidation_worker_once() fails closed without this secret;
+# tests need a deterministic value, not a real production key.
+os.environ.setdefault("AIOS_LIQUIDATION_SEED_KEY", "test-only-liquidation-seed-key")
 
 
 async def retry_too_many_connections(factory, *, attempts: int = 6, base_delay: float = 0.5):

@@ -30,6 +30,7 @@ import time
 from collections import deque
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from typing import Any
 from uuid import uuid4
 
@@ -44,6 +45,7 @@ from src.core.safety.data_distrust import DataDistrustMonitor
 from src.core.safety.data_freshness import DataFreshnessTracker
 from src.core.safety.heartbeat import DEFAULT_HEARTBEAT_PATH, write_heartbeat
 from src.core.safety.metrics_collector import ApiCallTracker
+from src.exchanges.bitget.adapter import BitgetAdapter
 from src.foundation.evidence.adapters.postgres_repository import PostgresAuditEventRepository
 from src.foundation.execution_ownership.adapters.postgres_repository import (
     PostgresExecutionLeaseRepository,
@@ -66,6 +68,7 @@ from src.services.safety.circuit_breaker_loop import (
     run_circuit_breaker_tick,
 )
 from src.services.safety.kill_switch_service import KillSwitchService
+from src.services.safety.liquidation_executor import run_liquidation_worker_once
 
 logger = logging.getLogger(__name__)
 
@@ -73,6 +76,7 @@ HEARTBEAT_INTERVAL_SECONDS = 2.0  # Draft — watchdog_process.py의 5초 폴링
 ALERT_EVALUATION_INTERVAL_SECONDS = 60.0  # Draft — 가격/지표 알림 평가 주기
 RISK_GUARD_INTERVAL_SECONDS = 30.0  # Draft — 손실 한도 자동정지 평가 주기
 SAFETY_REACTIVATION_INTERVAL_SECONDS = 10.0  # Draft — Circuit Breaker 재가동 승인 반영 주기
+LIQUIDATION_WORKER_INTERVAL_SECONDS = 3.0  # Draft — slice.not_before 최소 간격(2s)보다 촘촘히
 
 
 def flag_enabled(name: str) -> bool:
@@ -288,8 +292,29 @@ async def start_background_loops(
         )
     )
 
+    # R-52 — liquidation_executor.run_liquidation_worker_once. Adapters are
+    # keyed by exchange (not per-user, task-2358 decision) since a GLOBAL
+    # liquidation_request has no single owning tenant to borrow credentials
+    # from (same reasoning as build_kill_switch_service's exchange_adapters).
+    liquidation_adapters = {"bitget": BitgetAdapter("", "", "", demo_mode=True)}
+
+    async def _liquidation_tick() -> None:
+        now = datetime.now(timezone.utc)
+        await run_liquidation_worker_once(pool, liquidation_adapters, now=now)
+
+    liquidation_task: asyncio.Task[None] | None = None
+    if flag_enabled("AIOS_LIQUIDATION_WORKER_ENABLED"):
+        liquidation_task = asyncio.create_task(
+            run_periodic_loop(
+                "liquidation_worker", LIQUIDATION_WORKER_INTERVAL_SECONDS, _liquidation_tick,
+                health=health, on_error="liquidation_worker_loop: 이번 주기 실패 — 재시도",
+            )
+        )
+
     tasks = [heartbeat_task, alert_task, risk_guard_task, safety_task]
-    tasks.extend(t for t in (execution_loop_task, oms_dispatcher_task) if t is not None)
+    tasks.extend(
+        t for t in (execution_loop_task, oms_dispatcher_task, liquidation_task) if t is not None
+    )
 
     return BackgroundLoops(
         execution_scheduler=execution_scheduler,
