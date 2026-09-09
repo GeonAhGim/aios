@@ -1,8 +1,8 @@
 """EM-8 -- domain/algo/twap.py: promote oms/domain/algo_slicer.py to an EMS port.
 
 Spec: docs/specs/L4_ems_routing_algos_and_tca_v1.0.md #2 module table
-(`domain/algo/twap.py`), #9 EM-8 ("기존 oms/domain/algo_slicer.py를 EMS
-포트로 승격(재작성 금지)"). DoD: schedule snapshot + determinism (EM-A3).
+(`domain/algo/twap.py`), #9 EM-8 ("promote the existing oms/domain/
+algo_slicer.py to an EMS port (no rewrite)"). DoD: schedule snapshot + determinism (EM-A3).
 
 This leaf does **not** reimplement TWAP slicing --
 `src/services/oms/domain/algo_slicer.py`'s `plan_slices()` already does

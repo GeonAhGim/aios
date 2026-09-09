@@ -4,7 +4,7 @@ Spec: docs/specs/L4_strategy_portfolio_backtest_v1.0.md#§9 L29 (public
 contract in §2's domain/universe.py row).
 
 A symbol's survivorship status is only knowable as of the snapshot that
-recorded it (109번 §5, I-03) -- so `is_member` never guesses. A symbol the
+recorded it (standard 109 §5, I-03) -- so `is_member` never guesses. A symbol the
 snapshot never heard of, or a query for a time after the snapshot's `as_of`,
 is not "not a member" -- it is unknown, and unknown must fail closed
 (`SurvivorshipUnknownError`) rather than silently collapse to `False`. Only

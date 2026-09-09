@@ -9,8 +9,9 @@ covered when `snapshot["borrow_available_qty"]` is at least the excess —
 LA-25's `pos_borrow_position` (task-1752) locate data, passed in as a
 snapshot field. This rule never queries a borrow desk or database itself.
 
-KRX uptick note (UNVERIFIED — 미검증): the Korean short-sale price
-restriction (공매도 가격 제한, 자본시장법 시행령 §208) is modeled here as
+KRX uptick note (UNVERIFIED): the Korean short-sale price
+restriction (the "short-sale price restriction", Enforcement Decree of the
+Financial Investment Services and Capital Markets Act §208) is modeled here as
 "a short sale's order price must not be below the last trade price" when
 `params["krx_uptick_required"]` is set and `snapshot["venue"] == "KRX"`.
 The exact regulatory tick/exception conditions (e.g. an intraday uptick

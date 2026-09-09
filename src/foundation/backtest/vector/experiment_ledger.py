@@ -1,7 +1,7 @@
 """BT-16b — experiment ledger record model (grid sweep leaf of AI-10).
 
 Spec: docs/specs/L4_analytics_authoring_backtest_marketplace_v1.0.md §9.9 BT-16
-("실험 원장 기록"). The full AI-10 contract (`docs/specs/
+("experiment ledger record"). The full AI-10 contract (`docs/specs/
 L4_ai_research_strategy_factory_v1.0.md` §2.4 `Experiment{experiment_id,
 reproducibility_key, kind, inputs_hash, metrics, artifacts, parent_id,
 created_by}`, append-only WORM storage + migration) is out of scope for this

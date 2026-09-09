@@ -25,7 +25,7 @@ _NORMAL = NormalDist()
 
 class OverfittingError(ValueError):
     """Fail-closed rejection for `overfitting.py` -- degenerate inputs that would
-    otherwise force a 0/1/None/NaN placeholder value (spec #3.5: "0 대체 금지")."""
+    otherwise force a 0/1/None/NaN placeholder value (spec #3.5: "substituting 0 is forbidden")."""
 
 
 def deflated_sharpe(

@@ -1,8 +1,9 @@
-"""FA-2 -- asyncpg.Record -> 계약 dataclass 변환 함수 4종.
+"""FA-2 -- four asyncpg.Record -> contract dataclass conversion functions.
 
-postgres_repository.py가 300줄 상한(P6)을 넘겨 엔티티 레벨별 믹스인으로
-쪼갠 것 중 공용 부분 -- 각 믹스인이 자기 레벨 것뿐 아니라 자식 레벨
-변환기도 필요(list_*_by_* 반환 타입)해 한 곳에 모았다.
+The shared part after postgres_repository.py exceeded the 300-line cap (P6)
+and was split into per-entity-level mixins -- each mixin needs not only its
+own level's converter but also its child level's (for list_*_by_* return
+types), so they were collected in one place.
 """
 from __future__ import annotations
 

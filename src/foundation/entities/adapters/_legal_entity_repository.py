@@ -1,8 +1,9 @@
-"""FA-2 -- LegalEntity 저장소 메서드(PostgresEntityRepository 믹스인 4개 중 하나).
+"""FA-2 -- LegalEntity repository methods (one of PostgresEntityRepository's 4 mixins).
 
-300줄 상한(P6) 때문에 레벨별로 분리했다 -- 단독으로 쓰지 않는다,
-`postgres_repository.PostgresEntityRepository`가 4개 믹스인을 합성한다.
-동시성/tenant 격리 규약은 그 파일 모듈 docstring 참고.
+Split out per entity level because of the 300-line cap (P6) -- not used
+standalone; `postgres_repository.PostgresEntityRepository` composes all 4
+mixins. See that file's module docstring for the concurrency/tenant
+isolation contract.
 """
 from __future__ import annotations
 

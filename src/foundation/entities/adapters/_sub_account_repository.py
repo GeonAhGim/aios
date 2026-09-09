@@ -1,9 +1,10 @@
-"""FA-2 -- SubAccount 저장소 메서드(PostgresEntityRepository 믹스인 4개 중 하나).
+"""FA-2 -- SubAccount repository methods (one of PostgresEntityRepository's 4 mixins).
 
-300줄 상한(P6) 때문에 레벨별로 분리했다 -- 단독으로 쓰지 않는다,
-`postgres_repository.PostgresEntityRepository`가 4개 믹스인을 합성한다.
-동시성/tenant 격리 규약은 그 파일 모듈 docstring 참고. 최하위 레벨이라
-`list_*_by_*`/`NOT EXISTS` 자식 검사가 없다."""
+Split out per entity level because of the 300-line cap (P6) -- not used
+standalone; `postgres_repository.PostgresEntityRepository` composes all 4
+mixins. See that file's module docstring for the concurrency/tenant
+isolation contract. Being the lowest level, it has no `list_*_by_*`/
+`NOT EXISTS` child check."""
 from __future__ import annotations
 
 from datetime import datetime
