@@ -33,7 +33,7 @@ test = [
     "pytest-timeout>=2.3",
 ]
 dev = [
-    "ruff>=0.16",
+    "ruff>=0.16.6",
     "mypy>=1.13",
     "types-PyYAML>=6.0",
     "pytest-xdist>=3.6",
