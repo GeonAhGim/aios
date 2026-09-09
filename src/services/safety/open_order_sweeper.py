@@ -69,8 +69,7 @@ cannot be eliminated without a migration that adds a real
 this leaf alone. Reproduction:
 `test_sweep_open_orders_event_does_not_crash_replay_verify_timeline_read`
 (proves no crash; the projection mismatch itself remains). The promotion
-migration was split off into task-2432 (after the §C serialization-order
-migration chain)."""
+migration was split off into task-2432 (after the §C serialization-order migration chain)."""
 from __future__ import annotations
 
 import hashlib
