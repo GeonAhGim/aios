@@ -41,8 +41,9 @@ from src.exchanges.common.live_guard import require_paper_sandbox
 
 __all__ = ["BitgetTradingMixin", "_row_to_order"]
 
-# UTA v3 는 category를 명시해야 한다(공식 업그레이드 가이드, 2026-09-09
-# 조사) — 이 어댑터는 Phase 1 스콥(06번 §6.1)상 스팟만 다루므로 상수 하나.
+# UTA v3 requires `category` to be specified explicitly (per the official
+# upgrade guide, researched 2026-09-09) — this adapter only handles spot
+# within Phase 1 scope (doc 06 §6.1), hence a single constant.
 _V3_SPOT_CATEGORY = "SPOT"
 
 
@@ -55,19 +56,21 @@ class _OrderReadingClient(SignedRequestClient, Protocol):
 
 
 class _AccountModeClient(SignedRequestClient, AccountModeAwareClient, Protocol):
-    """L4-31 — place/cancel이 계정 모드에 맞는 v2/v3 경로·body를 조립하려면
-    `self.account_mode`도 함께 필요하다(공통 SignedRequestClient는 모른다)."""
+    """L4-31 — place/cancel need `self.account_mode` as well in order to
+    assemble the v2/v3 path and body matching the account mode (the common
+    SignedRequestClient does not know it)."""
 
 
 class BitgetTradingMixin(BitgetTradingQueryMixin):
     @require_paper_sandbox
     async def place_order(self: _AccountModeClient, order: Order) -> Order:
-        """L4-31(task-2514) — Classic v2는 `size`, UTA v3는 `qty` +
-        `category`를 요구한다(공식 업그레이드 가이드 조사, **미검증**
-        실계정 왕복). CLASSIC에서 40085를 받으면 이 클로저가 UNIFIED
-        모드로 다시 호출돼 올바른 필드 이름으로 재조립한다(account_mode.
-        account_aware_request 참고 — 재시도가 중복 주문을 만들지 않는
-        이유는 그쪽 docstring)."""
+        """L4-31(task-2514) — Classic v2 requires `size`, UTA v3 requires
+        `qty` + `category` (per official upgrade guide research,
+        **UNVERIFIED** against a real-account round trip). If CLASSIC
+        returns 40085, this closure re-invokes in UNIFIED mode and
+        reassembles the request with the correct field names (see
+        account_mode.account_aware_request — why the retry does not create
+        a duplicate order is explained in that docstring)."""
 
         def build(mode: BitgetAccountMode) -> RequestSpec:
             body: dict[str, Any] = {

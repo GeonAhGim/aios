@@ -146,14 +146,17 @@ async def verify_entity_context(repo: EntityRepository, ctx: EntityContext) -> N
 async def resolve_portfolio_scope(
     repo: EntityRepository, tenant_id: UUID, portfolio_id: UUID
 ) -> Portfolio:
-    """FA-6 — 읽기 경로(포지션·성과 조회)가 명시적 `portfolio_id`로 스코프를
-    좁힐 때 쓰는 해석. `resolve_context()`처럼 계층 전체(LegalEntity -> Fund
-    -> Portfolio)의 소유·개방 여부를 `_require_open`으로 확인하지만,
-    `sub_account_id`까지는 강제하지 않는다 — 읽기 스코프는 포트폴리오 단위고,
-    이 함수는 쓰기 전용 5필드 계약인 `EntityContext`를 만들지 않는다(그 계약을
-    바꾸는 것은 이 리프의 파일 범위 밖이다). 실패(미존재/폐쇄/타 테넌트)는
-    값을 추측하지 않고 fail-closed로 `EntityContextResolutionError`를 던진다
-    — 호출자는 전체 반환이 아니라 거부해야 한다(교차 포트폴리오 유출 방지)."""
+    """FA-6 — resolution used when a read path (position/performance lookup)
+    scopes explicitly by `portfolio_id`. Like `resolve_context()`, it confirms
+    ownership/openness across the whole hierarchy (LegalEntity -> Fund ->
+    Portfolio) via `_require_open`, but does not enforce `sub_account_id` —
+    the read scope is at the portfolio level, and this function does not
+    build the write-only 5-field contract `EntityContext` (changing that
+    contract is out of scope for this leaf's files). On failure
+    (nonexistent/closed/other tenant), it raises
+    `EntityContextResolutionError` fail-closed without guessing a value —
+    the caller must reject rather than return everything (prevents
+    cross-portfolio leakage)."""
     portfolio = await repo.get_portfolio(tenant_id, portfolio_id)
     _require_open(portfolio, kind="Portfolio", entity_id=portfolio_id)
     portfolio = cast(Portfolio, portfolio)

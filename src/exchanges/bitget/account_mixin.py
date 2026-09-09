@@ -3,12 +3,13 @@
 Spec: 02_exchange_adapter_v1.2.md#§2.1, L4_execution_oms_and_exchange_v1.0.md#L4-31
 
 엔드포인트: GET /api/v2/spot/account/assets (2026-08-28 문서 조사 확인 —
-2026-09-09 실키 실측(task-2514)으로 이 v2 엔드포인트가 UTA(Unified) 계정
-에서 40085로 거부됨을 확인). CLASSIC 모드는 그대로 v2를 쓰고, UNIFIED
-모드는 GET /api/v3/account/assets로 분기한다(docs/design/
-02d_bitget_uta_v3_spec_v1.md — 응답 필드명은 공식 문서 조사 기준이며
-실제 UTA 계정으로 왕복 검증 전까지 **미검증**, `_parse_v3_balance_row`
-docstring 참고).
+2026-09-09 real-key empirical test (task-2514) confirmed this v2 endpoint is
+rejected with 40085 on a UTA (Unified) account). CLASSIC mode keeps using v2,
+while UNIFIED mode branches to GET /api/v3/account/assets
+(docs/design/02d_bitget_uta_v3_spec_v1.md — response field names follow
+official documentation research and are **UNVERIFIED** until confirmed
+against a real UTA account round trip; see `_parse_v3_balance_row`
+docstring).
 """
 from __future__ import annotations
 
@@ -34,8 +35,8 @@ _QUOTE_CURRENCIES = ("USDT",)  # Phase 1 스콥(06번 §6.1) — USDT 마켓만
 
 
 class _AccountModeClient(SignedRequestClient, AccountModeAwareClient, Protocol):
-    """`self._request`(공통 계약) + `self.account_mode`(L4-31 상태) 둘 다
-    필요한 계좌 메서드용 좁혀진 타입."""
+    """Narrowed type for account methods that need both `self._request` (the
+    common contract) and `self.account_mode` (L4-31 state)."""
 
 
 class _TickerReadingClient(_AccountModeClient, Protocol):
@@ -61,11 +62,13 @@ def _parse_v2_balance_row(item: dict[str, Any]) -> AccountBalance:
 
 
 def _parse_v3_balance_row(item: dict[str, Any]) -> AccountBalance:
-    """**미검증**(task-2514) — UTA v3 `/api/v3/account/assets` 응답 필드는
-    실제 UTA 계정으로 라이브 검증 전이다. 공식 문서 조사(2026-09-09) 기준
-    행마다 `coin`/`available`/`locked`가 있고(v2의 `frozen`이 `locked`로
-    통합된 것으로 보인다), v2에는 없던 `equity`/`usdValue`/`debt`가
-    추가됐다는 정황이 있으나 이 어댑터가 아직 쓰지 않는 필드다."""
+    """**UNVERIFIED** (task-2514) — UTA v3 `/api/v3/account/assets` response
+    fields have not yet been live-verified against a real UTA account. Per
+    official documentation research (2026-09-09), each row appears to have
+    `coin`/`available`/`locked` (v2's `frozen` appears to have been merged
+    into `locked`), and there are indications that `equity`/`usdValue`/`debt`,
+    absent in v2, were added — but these are fields this adapter does not yet
+    use."""
     available = Decimal(item.get("available", "0"))
     locked = Decimal(item.get("locked", "0"))
     return AccountBalance(
@@ -78,8 +81,9 @@ def _parse_v3_balance_row(item: dict[str, Any]) -> AccountBalance:
 
 
 def _v3_asset_rows(data: Any) -> list[dict[str, Any]]:
-    """**미검증**(task-2514) — 공식 문서 조사 기준 `data.assets`가 배열로
-    보이나, `data` 자체가 배열일 가능성도 배제할 수 없어 둘 다 받아들인다."""
+    """**UNVERIFIED** (task-2514) — per official documentation research,
+    `data.assets` appears to be an array, but the possibility that `data`
+    itself is an array cannot be ruled out, so both are accepted."""
     if isinstance(data, dict):
         return list(data.get("assets", []))
     return list(data)
@@ -170,11 +174,13 @@ class BitgetAccountMixin:
 
     async def get_account_info(self: _AccountModeClient) -> dict[str, Any]:
         """02b 스펙 §3.3(P1) — UID·권한(authorities) 확인용. 아직 소비하는
-        호출부가 없어(§2 모델 재사용 원칙) raw dict 그대로 반환한다.
+        no consuming caller yet (§2 model-reuse principle), so it returns the
+        raw dict as-is.
 
-        L4-31(task-2514) — 이 엔드포인트가 실키 실측에서 실제로 40085를
-        반환한 바로 그 호출이다(spec note). 응답 shape 자체는 v2/v3 모두
-        raw dict 재수출이라 파싱 분기가 필요 없다 — 경로만 갈라진다."""
+        L4-31 (task-2514) — this is the exact endpoint call that actually
+        returned 40085 during the real-key empirical test (spec note). The
+        response shape itself is a raw dict re-export for both v2/v3, so no
+        parsing branch is needed — only the path differs."""
 
         def build(mode: BitgetAccountMode) -> RequestSpec:
             path = (
@@ -217,12 +223,14 @@ class BitgetAccountMixin:
         명확히 하기 위해 메서드명도 `withdraw`가 아닌 `transfer`로 둔다.
         `from_type`/`to_type`은 Bitget V2 문서 값 그대로 전달(예:
         "spot"/"usdt_futures"/"coin_futures"/"crossed_margin"/
-        "isolated_margin") — 검증은 거래소 응답에 위임(§8.3 원칙).
+        "isolated_margin") — validation is delegated to the exchange response
+        (§8.3 principle).
 
-        esc-2514(task-2530) — Executor를 거치지 않는 확장 메서드인데도
-        `@require_paper_sandbox`가 누락돼 LIVE adapter에서도 실제 자금
-        이동이 가능했던 P0 결함(레드팀 #2026-09-02-32와 동일 클래스,
-        convert_mixin.py::execute_convert와 동일 패턴으로 복구)."""
+        esc-2514 (task-2530) — a P0 defect where, even though this is an
+        extension method that bypasses the Executor, `@require_paper_sandbox`
+        was missing, making real fund movement possible even on the LIVE
+        adapter (same class as red-team #2026-09-02-32; fixed with the same
+        pattern as convert_mixin.py::execute_convert)."""
         body: dict[str, Any] = {
             "fromType": from_type,
             "toType": to_type,

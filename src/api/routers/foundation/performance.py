@@ -14,11 +14,12 @@ Spec: docs/specs/L4_strategy_portfolio_backtest_v1.0.md §2.6/§9(L49).
 `EXCEPTION_MAP`이 전역 핸들러에서 봉투로 번역한다. get_statement.py와
 correct_statement.py가 이름은 같지만 서로 다른
 StatementNotFoundError/CrossTenantStatementAccessError 클래스를 각자
-정의해두므로 `EXCEPTION_MAP`이 양쪽 클래스를 모두 등록한다.
+so `EXCEPTION_MAP` registers both classes.
 
-FA-6: 두 GET 엔드포인트에 선택적 `portfolio_id` 쿼리 파라미터가 추가됐다
-(새 경로 아님) — 스코프 검증은 `get_statement.py`가 한다. 생략하면 이전
-리프와 응답이 바이트 동일하다."""
+FA-6: an optional `portfolio_id` query parameter was added to both GET
+endpoints (not a new route) — scope validation is done by
+`get_statement.py`. Omitting it makes the response byte-identical to the
+previous leaf."""
 from __future__ import annotations
 
 from uuid import UUID, uuid4

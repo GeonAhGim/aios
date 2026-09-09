@@ -14,10 +14,11 @@ tenant를 받지 않는다). 타 테넌트 리소스는 존재하지 않는 것�
 `GET /positions/nav`는 `/{position_key}/journal`보다 먼저 선언한다 —
 지금은 경로가 겹치지 않지만, 정적 세그먼트가 동적 세그먼트보다 앞서는
 관례를 유지해 후속 엔드포인트가 추가돼도 `nav`가 position_key로 잡히지
-않게 한다.
+does not get caught.
 
-FA-6: `GET /positions`에 선택적 `portfolio_id` 쿼리 파라미터가 추가됐다
-(새 경로 아님). 생략하면 이전 리프와 응답이 바이트 동일하다."""
+FA-6: an optional `portfolio_id` query parameter was added to
+`GET /positions` (not a new route). Omitting it makes the response
+byte-identical to the previous leaf."""
 from __future__ import annotations
 
 from datetime import date, timedelta

@@ -90,11 +90,12 @@ class BitgetBrokerMixin:
         to_type: str = "spot",
     ) -> bool:
         """브로커 계정↔하위 서브계정 내부 이체 — 7.9 원칙 무관(외부 출금
-        아님, subaccount_mixin.py::transfer_to_subaccount와 동일 판단).
+        is not — per the same judgment as
+        subaccount_mixin.py::transfer_to_subaccount).
 
-        esc-2514(task-2530) 스캔 확장으로 함께 발견된 동일 결함 클래스
-        (`@require_paper_sandbox` 누락) — account_mixin.py::transfer와
-        같은 이유로 복구."""
+        esc-2514(task-2530) — same defect class found together via the scan
+        expansion (`@require_paper_sandbox` missing) — restored for the
+        same reason as account_mixin.py::transfer."""
         raw = await self._request(
             "POST",
             "/api/v2/broker/account/subaccount-transfer",

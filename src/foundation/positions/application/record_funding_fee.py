@@ -116,8 +116,8 @@ async def record_funding_fee(
     clock: Clock,
     fx_rate: FXRate | None = None,
 ) -> PositionSnapshotView:
-    # FA-0d: [[record_fill]]과 같은 이유로 fail-closed 형식 검사(중앙 생성자
-    # 경유 확인).
+    # FA-0d: same reason as [[record_fill]] — fail-closed format check (confirms it
+    # went through the central constructor).
     PositionKey.parse(command.position_key)
     await _acquire_position_lock(conn, command.position_key)
 

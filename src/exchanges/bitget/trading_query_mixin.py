@@ -133,18 +133,19 @@ def _first_row(data: Any) -> dict[str, Any] | None:
 
 
 def _normalize_v3_order_row(data: dict[str, Any]) -> dict[str, Any]:
-    """**미검증**(task-2514) — UTA v3는 공식 업그레이드 가이드 기준 주문
-    수량 필드명을 `size`에서 `qty`로 바꿨다. `_row_to_order`를 v2/v3 양쪽에
-    재사용하기 위해 여기서만 `qty` -> `size`로 되돌린다(원본 dict는
-    변경하지 않는다)."""
+    """**UNVERIFIED** (task-2514) — per the official upgrade guide, UTA v3
+    renamed the order quantity field from `size` to `qty`. To reuse
+    `_row_to_order` for both v2 and v3, this converts `qty` -> `size` back
+    here only (the original dict is left unchanged)."""
     if "size" not in data and "qty" in data:
         return {**data, "size": data["qty"]}
     return data
 
 
 class _AccountModeClient(SignedRequestClient, AccountModeAwareClient, Protocol):
-    """L4-31 — get_order()가 계정 모드에 맞는 v2/v3 경로를 조립하려면
-    `self.account_mode`도 필요하다(공통 SignedRequestClient는 모른다)."""
+    """L4-31 — get_order() also needs `self.account_mode` to assemble the
+    v2/v3 path matching the account mode (the common SignedRequestClient
+    does not know it)."""
 
 
 class BitgetTradingQueryMixin:
@@ -154,10 +155,11 @@ class BitgetTradingQueryMixin:
         strategy_version/asset_class 등)가 없다 — 거래소는 그 개념 자체를
         모른다. 여기서는 거래소가 실제로 아는 필드(상태·체결정보·가격)만
         신뢰할 수 있게 채우고, AIOS 전용 필드는 자리표시자로 둔다 — 호출부
-        (Reconciliation, FD-9.6)가 기존 DB 행과 병합해 완성해야 한다.
+        (Reconciliation, FD-9.6) must merge this with the existing DB row to
+        complete it.
 
-        L4-31(task-2514) — CLASSIC은 `/api/v2/spot/trade/orderInfo`,
-        UNIFIED는 `/api/v3/trade/order-info`(+ `category`)로 분기한다."""
+        L4-31(task-2514) — branches to `/api/v2/spot/trade/orderInfo` for
+        CLASSIC and `/api/v3/trade/order-info` (+ `category`) for UNIFIED."""
 
         def build(mode: BitgetAccountMode) -> RequestSpec:
             if mode is BitgetAccountMode.UNIFIED:

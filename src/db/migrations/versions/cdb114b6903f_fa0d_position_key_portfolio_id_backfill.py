@@ -1,55 +1,64 @@
-"""FA-0d -- position_key portfolio_id 편입: pos_snapshot 백필.
+"""FA-0d -- position_key portfolio_id incorporation: pos_snapshot backfill.
 
 Revision ID: cdb114b6903f
 Revises: 18965d657219
 Create Date: 2026-09-09 05:00:00.000000
 
 Spec: docs/specs/L4_ibor_fund_accounting_and_resilience_v1.0.md#FA-0d
-(§9 표 113행). task-1943.
+(§9 table row 113). task-1943.
 
-`domain/position_key.py`(`PositionKey`)가 4부분
-(`venue:instrument_id:strategy_id:execution_id`)에서 5부분(+`portfolio_id`)으로
-바뀌었다(task-1943) -- 다포트폴리오 전환 이후 같은 venue/instrument/strategy/
-execution 조합이 서로 다른 포트폴리오에서 동시에 열릴 수 있어 4부분만으로는
-더 이상 포지션을 유일하게 식별하지 못하기 때문이다. `record_fill`/
-`rebuild_snapshot`/`record_funding_fee`가 이제 `PositionKey.parse()`로 5부분
-형식을 강제하므로, 기존 `pos_snapshot` 행의 `position_key`(PK)도 새 형식으로
-다시 써야 그 행들이 계속 읽힌다.
+`domain/position_key.py` (`PositionKey`) changed from 4 parts
+(`venue:instrument_id:strategy_id:execution_id`) to 5 parts (+`portfolio_id`)
+(task-1943) -- since the multi-portfolio transition, the same venue/instrument/
+strategy/execution combination can now be open concurrently in different
+portfolios, so 4 parts alone can no longer uniquely identify a position.
+`record_fill`/`rebuild_snapshot`/`record_funding_fee` now enforce the 5-part
+format via `PositionKey.parse()`, so the `position_key` (PK) of existing
+`pos_snapshot` rows must also be rewritten to the new format for those rows
+to keep being readable.
 
-`portfolio_id` 값은 새로 계산하지 않는다 -- FA-4(`963d5f3cfb1b`)가 이미
-`pos_snapshot.portfolio_id` 컬럼을 tenant_id별 FA-1 기본 포트폴리오로 백필해
-뒀으므로 그 컬럼값을 그대로 재사용한다(관리자가 그 이후 실제로 다른
-포트폴리오로 재배정했더라도 이 컬럼이 SSOT다).
+The `portfolio_id` value is not recomputed -- FA-4 (`963d5f3cfb1b`) has
+already backfilled the `pos_snapshot.portfolio_id` column to the per-tenant_id
+FA-1 default portfolio, so that column value is reused as-is (even if an
+admin later actually reassigned it to a different portfolio, this column is
+the SSOT).
 
-역산 불가 처리(PM decision, task-1943): FA-4는 백필 실패 행(포트폴리오
-미부트스트랩 tenant)을 조용히 건너뛰었지만, 이 리프는 `position_key` 자체
-(PK)를 바꾸는 것이라 조용히 건너뛰면 그 행은 새 5부분 형식을 강제하는
-`PositionKey.parse()` 검사를 영원히 통과하지 못하는 접근 불가능한 좀비 행이
-된다. 그래서 `portfolio_id`가 NULL이거나 기존 `position_key`가 정확히
-4부분이 아닌 행이 하나라도 있으면 마이그레이션을 그 자리에서 실패시킨다
-(운영자가 먼저 FA-4 백필/포트폴리오 부트스트랩을 끝내야 한다). 이미 5부분
-형식(끝 구성요소가 유효한 UUID)인 행은 그대로 건너뛴다(재실행 멱등).
+Fail-closed handling for unbackfillable rows (PM decision, task-1943): FA-4
+silently skipped rows where the backfill failed (tenants without a
+bootstrapped portfolio), but this migration changes `position_key` itself
+(the PK), so silently skipping such a row would leave it an inaccessible
+zombie row that can never pass the `PositionKey.parse()` check enforcing the
+new 5-part format. So if even one row has `portfolio_id` NULL or an existing
+`position_key` that is not exactly 4 parts, the migration fails right there
+on the spot (the operator must first finish the FA-4 backfill / portfolio
+bootstrap). Rows already in the 5-part format (whose final component is a
+valid UUID) are skipped as-is (idempotent on rerun).
 
-WORM: `pos_journal`은 손대지 않는다(`963d5f3cfb1b`과 같은 이유 -- append-only
-트리거가 물리적으로 UPDATE/DELETE를 막는다, I-04 위반 우회 금지). 그 결과
-이 마이그레이션 시점에 이미 저널 엔트리가 있던 포지션은 백필 이후
-새 `position_key`로 `journal.list_for()`를 조회하면 그 이전 엔트리가 보이지
-않는다(옛 키로만 조회 가능) -- FA-4가 `pos_journal.fund_id`/`portfolio_id`를
-영구 NULL로 남긴 것과 같은 부류의 WORM 기술부채다.
+WORM: `pos_journal` is left untouched (same reason as `963d5f3cfb1b` --
+append-only triggers physically block UPDATE/DELETE; bypassing that would
+violate I-04 and is not allowed). As a result, for positions that already had
+journal entries at the time of this migration, querying `journal.list_for()`
+with the new `position_key` after the backfill will not show those prior
+entries (they remain queryable only under the old key) -- this is the same
+class of WORM technical debt as FA-4 leaving `pos_journal.fund_id`/
+`portfolio_id` permanently NULL.
 
-실DB(TEST_DATABASE_URL) 확인 결과(task-1943 note): 착수 시점 로컬 테스트 DB는
-`pos_snapshot`/`pos_journal` 둘 다 0행이라 이 백필 경로 자체는 실행되지
-않았다 -- `pos_journal.UNIQUE(position_key, sequence_no)`는 이 마이그레이션이
-`pos_journal`을 전혀 건드리지 않으므로 구조적으로 영향을 받지 않는다(신규
-쓰기만 새 5부분 키를 쓰고, 기존 행은 옛 키를 그대로 유지 -- 두 형식이 같은
-문자열 충돌을 일으킬 실질적 경우는 없다). `tests/foundation/integration/
-positions/test_migration_fa0d_position_key_portfolio_id.py`가 합성 행으로
-백필 성공/실패(NULL portfolio_id) 두 분기를 실DB에 대해 검증한다.
+Real-DB (TEST_DATABASE_URL) verification result (task-1943 note): at the time
+this work started, the local test DB had 0 rows in both `pos_snapshot` and
+`pos_journal`, so this backfill path itself was never actually exercised --
+`pos_journal.UNIQUE(position_key, sequence_no)` is structurally unaffected
+because this migration never touches `pos_journal` at all (only new writes
+use the new 5-part key, and existing rows keep the old key as-is -- there is
+no practical case where the two formats collide on the same string).
+`tests/foundation/integration/
+positions/test_migration_fa0d_position_key_portfolio_id.py` verifies both the
+backfill-success and backfill-failure (NULL portfolio_id) branches against
+the real DB using synthetic rows.
 
-`pos_snapshot`에는 `no_update_guard`(`a2c4f9e1b3d5`, FA-10)가 걸려 있어 PK인
-`position_key`를 UPDATE로 바꿀 수 없다 -- `position_ledger.py`가
-`legacy_position_id` 갱신에 쓰는 것과 같은 DELETE(old) + INSERT(new, 나머지
-컬럼 동일) 패턴으로 대체한다.
+`pos_snapshot` has `no_update_guard` (`a2c4f9e1b3d5`, FA-10) attached, which
+blocks changing the PK `position_key` via UPDATE -- this is replaced with the
+same DELETE(old) + INSERT(new, other columns identical) pattern that
+`position_ledger.py` uses when updating `legacy_position_id`.
 """
 from collections.abc import Sequence
 
@@ -72,11 +81,11 @@ _OTHER_COLUMNS = ", ".join(c for c in _COLUMNS if c != "position_key")
 
 
 class UnbackfillablePositionKeyError(RuntimeError):
-    """역산 불가 `pos_snapshot` 행을 만나 마이그레이션을 그 자리에서 멈춘다."""
+    """Raised when an unbackfillable `pos_snapshot` row halts the migration on the spot."""
 
 
 _REPLACE_SQL = (
-    "WITH prior AS ("  # noqa: S608 -- 컬럼명은 상수 튜플(_COLUMNS)에서만 오고, 값은 전부 바인드 파라미터
+    "WITH prior AS ("  # noqa: S608 -- col names from _COLUMNS const tuple only; vals are bound
     "  DELETE FROM pos_snapshot WHERE position_key = :old_key RETURNING *"
     ") "
     f"INSERT INTO pos_snapshot (position_key, {_OTHER_COLUMNS}) "
@@ -104,7 +113,7 @@ def upgrade() -> None:
     for position_key, portfolio_id in rows:
         parts = position_key.split(":")
         if len(parts) == 5:
-            continue  # 이미 새 형식(재실행 멱등)
+            continue  # already in new format (idempotent on rerun)
         if len(parts) != 4:
             raise UnbackfillablePositionKeyError(
                 f"pos_snapshot.position_key={position_key!r}: 4부분 레거시 형식이 "
@@ -127,6 +136,6 @@ def downgrade() -> None:
     for (position_key,) in rows:
         parts = position_key.split(":")
         if len(parts) != 5:
-            continue  # 이미 옛 형식
+            continue  # already in old format
         old_key = ":".join(parts[:4])
         _replace_position_key(position_key, old_key)

@@ -164,10 +164,10 @@ async def record_fill(
     clock: Clock,
     fx_rate: FXRate | None = None,
 ) -> PositionSnapshotView:
-    # FA-0d: position_key는 반드시 domain.position_key.PositionKey(중앙 생성자)
-    # 경유로 만들어진 값이어야 한다 — 여기서 parse()로 형식을 확인해
-    # f-string/concat으로 조립된 레거시·비정상 키가 저널에 들어가지 못하게
-    # fail-closed로 막는다(재시도 불가, 호출자 버그).
+    # FA-0d: position_key must be a value built via domain.position_key.PositionKey
+    # (the central constructor) — parse() here confirms the format so that
+    # legacy/malformed keys assembled via f-string/concat can't enter the journal;
+    # this blocks them fail-closed (not retryable, caller bug).
     PositionKey.parse(command.position_key)
     await _acquire_position_lock(conn, command.position_key)
 

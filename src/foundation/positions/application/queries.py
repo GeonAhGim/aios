@@ -17,12 +17,13 @@ decision, `frontend/packages/shared-types/src/positionView.ts`)이 SSOT로
 예외를 던진다(존재 비노출, 404 동형). `pos_account` 조회 포트는 §2 표에
 없어 여기서 SQL 한 줄로 읽는다 — 계정 저장소 포트가 생기면 그리로 옮긴다.
 
-FA-6(docs/specs/L4_ibor_fund_accounting_and_resilience_v1.0.md#FA-6, §9 표
-120행): `list_positions`가 선택적 `portfolio_id` 필터를 받는다 — 새 API
-경로가 아니라 기존 쿼리 파라미터다. 스코프 해석은 FA-5
-`entities/application/resolve_context.py`의 `resolve_portfolio_scope`를
-재사용한다(재구현 금지). `portfolio_id`를 주지 않은 호출은 이 리프 이전과
-바이트 동일하게 동작한다."""
+FA-6 (docs/specs/L4_ibor_fund_accounting_and_resilience_v1.0.md#FA-6, §9
+table row 120): `list_positions` accepts an optional `portfolio_id` filter —
+this is an existing query parameter, not a new API path. Scope resolution
+reuses `resolve_portfolio_scope` from FA-5's
+`entities/application/resolve_context.py` (no reimplementation). Calls that
+do not supply `portfolio_id` behave byte-identically to before this
+leaf."""
 from __future__ import annotations
 
 from datetime import date, timedelta
@@ -112,21 +113,24 @@ async def list_positions(
     portfolio_id: UUID | None = None,
     entities: EntityRepository | None = None,
 ) -> list[PositionSnapshotView]:
-    """LB-19 `GET /positions` — tenant의 열린 포지션(계정·instrument·FA-6
-    portfolio 필터). `account_id`가 tenant 소유가 아니면
-    `PositionAccountNotFoundError`; 필터 결과가 없는 것은 오류가 아니라 빈
-    리스트다.
+    """LB-19 `GET /positions` — the tenant's open positions (account /
+    instrument / FA-6 portfolio filters). If `account_id` is not owned by
+    the tenant, raises `PositionAccountNotFoundError`; a filter result with
+    no matches is not an error, just an empty list.
 
-    FA-6: `portfolio_id`를 생략하면(기존 호출자) 이 함수는 이전 리프와 바이트
-    동일하게 동작한다 — 새 파라미터는 전부 기본값을 갖고, 새 코드 경로는
-    `portfolio_id is not None`일 때만 실행된다. 주면 먼저
-    `resolve_portfolio_scope`(FA-5 단일 진입점 재사용)로 그 포트폴리오가 이
-    tenant 소유·개방 상태인지 fail-closed로 확인한 뒤(교차 포트폴리오 유출을
-    거부로 막는다, 전체 반환 폴백 없음), `position_key`에 편입된
-    `portfolio_id`(FA-0d `PositionKey`)로 결과를 좁힌다 — 이 필드는 뷰
-    계약(`PositionSnapshotView`)에 별도 컬럼으로 없으므로 새로 파싱한다.
-    옛(마이그레이션 이전) 4부분 키는 어느 포트폴리오에도 귀속시킬 수 없어
-    스코프 필터가 걸리면 제외한다(값 추측 금지)."""
+    FA-6: if `portfolio_id` is omitted (existing callers), this function
+    behaves byte-identically to before this leaf — all new parameters have
+    defaults, and the new code path runs only when `portfolio_id is not
+    None`. When it is given, it first fail-closed-verifies, via
+    `resolve_portfolio_scope` (reusing FA-5's single entry point), that the
+    portfolio is owned by this tenant and open (rejecting rather than
+    falling back to returning everything, to block cross-portfolio leakage),
+    then narrows the results by the `portfolio_id` embedded in
+    `position_key` (FA-0d `PositionKey`) — this field has no separate
+    column in the view contract (`PositionSnapshotView`), so it is parsed
+    fresh. Old (pre-migration) 4-part keys cannot be attributed to any
+    portfolio, so they are excluded whenever a scope filter is applied (no
+    guessing values)."""
     if portfolio_id is not None:
         if entities is None:
             raise EntityContextResolutionError(

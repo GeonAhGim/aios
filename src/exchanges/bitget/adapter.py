@@ -87,9 +87,10 @@ class _BitgetHTTPClient:
         self._api_secret = api_secret
         self._api_passphrase = api_passphrase
         self._demo_mode = demo_mode
-        # L4-31(task-2514) — 40085 실측 전까지는 항상 CLASSIC으로 시작한다.
-        # account_mode.account_aware_request()가 40085를 관측하면 이 인스턴스
-        # 수명 동안 UNIFIED로 단조 전환한다(docstring 근거는 account_mode.py).
+        # L4-31 (task-2514) — always starts as CLASSIC until 40085 is
+        # empirically observed. If account_mode.account_aware_request()
+        # observes 40085, it transitions monotonically to UNIFIED for this
+        # instance's lifetime (see account_mode.py docstring for rationale).
         self.account_mode: BitgetAccountMode = BitgetAccountMode.CLASSIC
         self._client = http_client or httpx.AsyncClient(base_url=BASE_URL, timeout=10.0)
         # L4-12(task-1015) — 재시도/백오프/서버시간 보정을 직접 구현하지

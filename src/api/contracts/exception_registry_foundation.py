@@ -283,9 +283,10 @@ EXCEPTION_MAP_FOUNDATION: list[tuple[type[Exception], ErrorCode]] = [
     # exception_registry.py), so it is not added here again.
     (ChartIndicatorTemplateNotFoundError, ErrorCode.RESOURCE_NOT_FOUND),
     (CrossTenantChartIndicatorTemplateAccessError, ErrorCode.RESOURCE_NOT_FOUND),
-    # FA-6(task-1944) — positions/performance 읽기 경로의 명시적 portfolio_id
-    # 스코프 해석 실패(미존재·폐쇄·타 테넌트·미귀속). 존재 비노출 404 동형
-    # 원칙(§9 LB-19와 동일)을 그대로 따른다 — 403이 아니라 404다.
+    # FA-6(task-1944) — explicit portfolio_id scope resolution failure on
+    # the positions/performance read paths (nonexistent/closed/other
+    # tenant/unattributed). Follows the same non-disclosure-of-existence
+    # 404-uniformity principle (same as §9 LB-19) — 404, not 403.
     (EntityContextResolutionError, ErrorCode.RESOURCE_NOT_FOUND),
 ]
 

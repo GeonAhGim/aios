@@ -3,20 +3,22 @@
 Spec: docs/specs/L4_strategy_portfolio_backtest_v1.0.md §2.6/§9(L49), 81번
 §3 "labels estimates ... never calls result 'guaranteed'".
 
-FA-6(docs/specs/L4_ibor_fund_accounting_and_resilience_v1.0.md#FA-6, §9 표
-120행): 두 쿼리 모두 선택적 `portfolio_id` 스코프를 받는다. `performance_
-statement`에는 아직 portfolio_id 컬럼이 없다 — statement는 tenant 단위로만
-쌓이고(PAPER `scope_ref`는 오늘 `str(user.user_id)`), 리프별 필드 추가는
-FA-8(allocation) 이후 마이그레이션의 몫이라 이 리프(쓰기 경로 확장 없음,
-PM decision)에서 새로 만들지 않는다. 그래서 `portfolio_id`가 주어지면
-`resolve_portfolio_scope`(FA-5 단일 진입점 재사용)로 소유·개방을 fail-closed
-확인한 뒤, 그 값이 tenant의 FA-1 기본 포트폴리오(`default_portfolio_id`)와
-일치하는지도 확인한다 — 오늘 존재하는 모든 statement가 귀속될 수 있는
-유일한 포트폴리오이기 때문이다. 다른(하지만 유효한) 포트폴리오를 주면 그
-포트폴리오에 실제로 귀속된 statement가 하나도 없다는 뜻이므로, tenant
-전체를 돌려주는 대신 거부한다(교차 포트폴리오 유출 방지, "전체 반환
-폴백 금지"). `portfolio_id`를 생략하면(기존 호출자) 이 모듈은 이전 리프와
-바이트 동일하게 동작한다."""
+FA-6(docs/specs/L4_ibor_fund_accounting_and_resilience_v1.0.md#FA-6, §9 table
+row 120): both queries accept an optional `portfolio_id` scope. `performance_
+statement` has no portfolio_id column yet — statements accumulate only at
+the tenant level (PAPER `scope_ref` is today `str(user.user_id)`), and
+per-leaf field additions belong to a migration after FA-8 (allocation), so
+this leaf (no write-path expansion, PM decision) does not add one now. So
+when `portfolio_id` is given, `resolve_portfolio_scope` (reusing the FA-5
+single entry point) confirms ownership/openness fail-closed, then also
+confirms that value matches the tenant's FA-1 default portfolio
+(`default_portfolio_id`) — because that is the only portfolio any statement
+existing today could belong to. Passing a different (but valid) portfolio
+means no statement is actually attributed to that portfolio, so instead of
+returning the whole tenant, it is rejected (prevents cross-portfolio
+leakage, "no full-return fallback"). Omitting `portfolio_id` (existing
+callers) makes this module behave byte-identically to the previous
+leaf."""
 from __future__ import annotations
 
 from uuid import UUID

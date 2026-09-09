@@ -13,14 +13,16 @@ test_api_error_response_raises_retryable_by_default`), 이 리프의 DoD는
 그 기존 동작을 무수정으로 유지하는 것이다. 실 API 키로 개별 코드를
 검증한 뒤에야 이 표를 안전하게 좁힐 수 있다(미검증).
 
-2026-09-09 실키 실측(task-2514) — 40085("Unified Account mode, Classic
-Account API not supported")와 40099("exchange environment is incorrect")
-는 위 기본값(SERVER_ERROR, 재시도 가능)으로 두면 안 된다: 둘 다 계정
-모드/환경 설정이 이 호출과 맞지 않는다는 뜻이라 몇 번을 재시도해도
-그대로 실패한다. AUTH로 분류해 `retryable=False`를 명시한다 — "서명이
-틀렸다"는 좁은 의미가 아니라 "이 자격증명으로는 이 API 표면에 접근할 수
-없다"는 넓은 의미의 인증 경계 실패로 본다. 40085는 추가로
-`account_mode.requires_unified_switch()`가 계정 모드 전환 신호로도 쓴다.
+2026-09-09 live-key measurement (task-2514) — 40085 ("Unified Account mode,
+Classic Account API not supported") and 40099 ("exchange environment is
+incorrect") must not be left at the default above (SERVER_ERROR, retryable):
+both mean the account mode/environment configuration does not match this
+call, so retrying any number of times still fails the same way. Classify
+these as AUTH and set `retryable=False` explicitly — read not narrowly as
+"the signature was wrong" but broadly as an auth-boundary failure meaning
+"this credential cannot reach this API surface." 40085 is additionally
+used by `account_mode.requires_unified_switch()` as an account-mode-switch
+signal.
 """
 from __future__ import annotations
 
@@ -29,8 +31,8 @@ from src.exchanges.common.error_taxonomy import ExchangeErrorKind
 SUCCESS_CODE = "00000"
 
 # 서명 오류(40012) / API 키 없음(40037) — 문서 조사 기준, 재시도 무의미.
-# 40085(Classic API가 UTA 계정에서 거부됨) / 40099(데모·라이브 환경 불일치)
-# — 실측(task-2514), 둘 다 재시도 무의미.
+# 40085 (Classic API rejected on a UTA account) / 40099 (demo/live environment
+# mismatch) — measured live (task-2514); retrying either one is pointless.
 _AUTH_CODES = frozenset({"40012", "40037", "40085", "40099"})
 
 

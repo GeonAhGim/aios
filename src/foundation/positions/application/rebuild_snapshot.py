@@ -96,8 +96,8 @@ async def rebuild_snapshot(
     clock: Clock,
     dry_run: bool = True,
 ) -> RebuildReport:
-    # FA-0d: [[record_fill]]과 같은 이유로 fail-closed 형식 검사(중앙 생성자
-    # 경유 확인) — 재빌드 대상 키도 예외가 아니다.
+    # FA-0d: same reason as [[record_fill]] — fail-closed format check (confirms
+    # it went through the central constructor) — the rebuild target key is no exception.
     PositionKey.parse(position_key)
     async with pool.acquire() as conn, conn.transaction():
         await _acquire_position_lock(conn, position_key)

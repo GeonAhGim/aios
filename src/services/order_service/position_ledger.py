@@ -56,9 +56,10 @@ async def record_fill_in_position_ledger(
         if user_id is None:
             logger.warning("position_ledger: execution_id=%s user_id 없음", order.execution_id)
             return
-        # FA-0d: portfolio_id는 이 리프의 범위 안에서는 FA-1 기본 포트폴리오
-        # (`default_portfolio_id`, user_id 단일 인자 UUIDv5)로 고정한다 — FA-5/6의
-        # 다포트폴리오 선택 UX가 이 쓰기 경로에 아직 배선되지 않았다(별도 리프).
+        # FA-0d: within this leaf's scope, portfolio_id is pinned to the FA-1 default
+        # portfolio (`default_portfolio_id`, UUIDv5 from the single user_id argument) —
+        # the FA-5/6 multi-portfolio selection UX isn't wired into this write path yet
+        # (separate leaf).
         position_key = str(PositionKey(
             venue=order.exchange, instrument_id=order.symbol, strategy_id=order.strategy_id,
             execution_id=str(order.execution_id), portfolio_id=default_portfolio_id(user_id),

@@ -37,9 +37,9 @@ class ExplainErrorCode(str, Enum):
 
 
 class ExplainError(Exception):
-    """`explain()`의 유일한 실패 형태 — 호출부(API 라우터 등)가 `code`로 HTTP
-    상태를 매핑할 수 있게, 존재하지 않는 id나 정합성 위반을 원시 예외
-    (KeyError/AttributeError 등)로 흘리지 않고 이 타입 하나로만 거부한다
+    """The only failure mode of `explain()` — so callers (e.g. the API router) can
+    map `code` to an HTTP status, this rejects only with this type, never leaking
+    a nonexistent id or integrity violation as a raw exception (KeyError/AttributeError, etc.)
     (§9 CM-13 DoD (b)/(c))."""
 
     def __init__(self, code: ExplainErrorCode, message: str) -> None:
@@ -48,9 +48,9 @@ class ExplainError(Exception):
 
 
 async def explain(repo: MandateRepository, decision_id: UUID) -> ComplianceDecision:
-    """§9 CM-13 공개 계약. 같은 `decision_id`로 몇 번을 불러도 동일한
-    `ComplianceDecision`을 반환한다 — 규칙을 재평가하지 않고, 저장된
-    `policy_decision`/`policy_bundle` 행을 그대로 재현한다."""
+    """§9 CM-13 public contract. Calling this any number of times with the same
+    `decision_id` returns the identical `ComplianceDecision` — it does not re-evaluate
+    rules, but replays the stored `policy_decision`/`policy_bundle` rows as-is."""
     decision = await repo.get_policy_decision(decision_id)
     if decision is None:
         raise ExplainError(
