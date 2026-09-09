@@ -35,17 +35,29 @@ export function writeBaseline(path, metrics, meta) {
  * >20% slower than baseline AND more than REGRESSION_FLOOR_MS slower in
  * absolute terms fails; faster than baseline is reported for the caller to
  * persist.
+ *
+ * `calibRatio` (see `checkAbsoluteThresholds` below) brings `value` back to
+ * the reference host's time scale before comparing: without it, a
+ * shared/contended box that is merely slower right now — not a real
+ * regression — fails every metric uniformly (task-2479: observed
+ * panZoomFrameMsP95/indicatorAddMs/tickUpdateMsP95 all ~6-13x over baseline
+ * on a run whose calib probe itself was ~20x the reference cost). `improved`
+ * stores the normalized value too, so the persisted baseline always stays in
+ * reference-host-equivalent terms regardless of which host recorded it.
  */
-export function checkRatchet(current, baselineMetrics, tolerance = REGRESSION_TOLERANCE, floorMs = REGRESSION_FLOOR_MS) {
+export function checkRatchet(current, baselineMetrics, calibRatio = 1, tolerance = REGRESSION_TOLERANCE, floorMs = REGRESSION_FLOOR_MS) {
   const failures = [];
   const improved = {};
   for (const [key, value] of Object.entries(current)) {
     const base = baselineMetrics[key];
     if (typeof base !== "number") continue;
-    if (value > base * (1 + tolerance) && value - base > floorMs) {
-      failures.push(`${key}: ${value}ms is >${tolerance * 100}% slower than baseline ${base}ms`);
-    } else if (value < base) {
-      improved[key] = value;
+    const normalized = value / calibRatio;
+    if (normalized > base * (1 + tolerance) && normalized - base > floorMs) {
+      failures.push(
+        `${key}: ${value}ms (host-load normalized ${normalized.toFixed(3)}ms @ calib ratio ${calibRatio.toFixed(3)}) is >${tolerance * 100}% slower than baseline ${base}ms`,
+      );
+    } else if (normalized < base) {
+      improved[key] = normalized;
     }
   }
   return { failures, improved };

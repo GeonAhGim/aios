@@ -247,7 +247,7 @@ async function main() {
     return 0;
   }
 
-  const { failures, improved } = checkRatchet(current, baseline.metrics);
+  const { failures, improved } = checkRatchet(current, baseline.metrics, calibRatio);
   if (failures.length > 0) {
     console.error("[density-bench] FAIL: regression >20% vs baseline:");
     for (const failure of failures) console.error(`  - ${failure}`);
