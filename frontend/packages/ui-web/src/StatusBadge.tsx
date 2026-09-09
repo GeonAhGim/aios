@@ -10,6 +10,8 @@ const SUCCESS_STATUSES = new Set([
   "RESOLVED",
   "HEALTHY",
   "SUCCESS",
+  // task-2346(FE-OPS-5): 계정 연동(connections) 정상 상태.
+  "ACTIVE_READONLY",
 ]);
 const DANGER_STATUSES = new Set([
   "SUSPENDED",
@@ -25,6 +27,8 @@ const DANGER_STATUSES = new Set([
   "ERROR",
   // task-2338(FE-OPS-4): 신뢰(trust) 동의·멤버십 폐기 상태.
   "REVOKED",
+  // task-2346(FE-OPS-5): 계정 연동 완전 단절 상태.
+  "DISCONNECTED",
 ]);
 const WARNING_STATUSES = new Set([
   "PAUSED",
@@ -38,6 +42,10 @@ const WARNING_STATUSES = new Set([
   "MINOR_DIFFERENCE",
   "PROVIDER_UNAVAILABLE",
   "INVESTIGATING",
+  // task-2346(FE-OPS-5): 계정 연동 진행 중/성능 저하 상태.
+  "PENDING_CONSENT",
+  "CONNECTING",
+  "DEGRADED",
 ]);
 
 // 여러 도메인(실행 status, 결제 status, 분쟁 status 등)이 같은 3단계

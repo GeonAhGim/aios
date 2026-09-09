@@ -18,6 +18,17 @@
 // 표(문서 438행)는 "POST /v1/foundation/trust/consents"(accept, 이미
 // foundation.trustConsents.accept로 등록됨)만 열거하고 여기 5경로는 열거하지 않는다 —
 // idempotencyRequired=false(기본값) 그대로 둔다.
+//
+// task-2346(FE-OPS-5): src/api/routers/foundation/connections.py 원문 확인 —
+// `APIRouter(prefix="/v1/foundation/connections")`, GET ""(목록)/POST ""(생성)/
+// POST "/{connection_id}:confirm"/POST "/{connection_id}:sync"/
+// POST "/{connection_id}:revoke") 5라우트 전부 `-> ApiResponse[...]`+`ok(...)`라
+// envelope=true. contracts/openapi/v1.json에 4경로(목록·생성은 같은 legacyPath를
+// 공유) 전부 실재함을 node로 직접 확인(paths 키 대조) — STALE_SNAPSHOT_WHITELIST
+// 대상 아님. v1Path는 mandates.*/trust.*와 동일 사유(mount_v1 PLT-16 미도달)로
+// null. 목록(GET)·생성(POST)은 같은 경로를 공유하므로 apiRouteTypes.ts의 관용대로
+// "connections.base" 한 항목으로 등록한다(메서드별 분리 금지). 계정 연동은 §9
+// PLT-15 금전 라우트 표에 없어 idempotencyRequired=false(기본값) 그대로 둔다.
 import { route } from "./apiRouteTypes";
 
 // 명시적 Record<string, ApiRouteDefinition> 타입 주석을 주지 않는다 — 그러면 spread된
@@ -34,4 +45,8 @@ export const FOUNDATION_OPS_ROUTES = {
   "trust.memberships.grant": route("/v1/foundation/trust/memberships", true, null, true),
   "trust.memberships.suspend": route("/v1/foundation/trust/memberships/:subjectId:suspend", true, null, true),
   "trust.memberships.revoke": route("/v1/foundation/trust/memberships/:subjectId:revoke", true, null, true),
+  "connections.base": route("/v1/foundation/connections", true, null, true),
+  "connections.confirm": route("/v1/foundation/connections/:connectionId:confirm", true, null, true),
+  "connections.sync": route("/v1/foundation/connections/:connectionId:sync", true, null, true),
+  "connections.revoke": route("/v1/foundation/connections/:connectionId:revoke", true, null, true),
 };

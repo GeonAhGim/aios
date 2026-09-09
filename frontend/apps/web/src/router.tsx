@@ -37,6 +37,7 @@ import { WriteReviewPage } from "./routes/reviews/WriteReviewPage";
 import { ScriptEditorPage } from "./routes/scripts/ScriptEditorPage";
 import { AccountDeletionPage } from "./routes/settings/AccountDeletionPage";
 import { ApprovalSettingsPage } from "./routes/settings/ApprovalSettingsPage";
+import { ConnectionsPage } from "./routes/settings/ConnectionsPage";
 import { MembersPage } from "./routes/settings/MembersPage";
 import { NotificationSettingsPage } from "./routes/settings/NotificationSettingsPage";
 import { SessionsPage } from "./routes/settings/SessionsPage";
@@ -91,6 +92,7 @@ export const router = createBrowserRouter([
   { path: "/settings/account", element: protect(<AccountDeletionPage />) },
   { path: "/settings/sessions", element: protect(<SessionsPage />) },
   { path: "/settings/members", element: protect(<MembersPage />) },
+  { path: "/settings/connections", element: protect(<ConnectionsPage />) },
   { path: "/reviews/write/:purchaseId", element: protect(<WriteReviewPage />) },
   { path: "/disputes/submit", element: protect(<DisputeSubmitPage />) },
   { path: "/admin", element: protectAdmin(<AdminHomePage />) },

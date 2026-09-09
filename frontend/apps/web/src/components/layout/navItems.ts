@@ -34,6 +34,7 @@ export const SETTINGS_NAV_ITEMS: NavItem[] = [
   { to: "/settings/sessions", label: "세션관리" },
   { to: "/settings/members", label: "멤버관리" },
   { to: "/settings/account", label: "계정삭제" },
+  { to: "/settings/connections", label: "계정연동" },
 ];
 
 // AppShell이 me.isPlatformAdmin일 때만 렌더한다(§3.5 fail-closed, AppShell.test.tsx).

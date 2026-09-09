@@ -85,6 +85,13 @@ export {
   useSuspendMembership,
   useRevokeMembership,
 } from "./useTrust";
+export {
+  useConnections,
+  useBeginConnection,
+  useConfirmConnection,
+  useSyncConnection,
+  useRevokeConnection,
+} from "./useConnections";
 export { useWalletBalance, useRequestTopup } from "./useWallet";
 export { useMyAlerts, useCreateAlert, useCancelAlert } from "./useAlerts";
 export {

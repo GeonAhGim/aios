@@ -115,10 +115,9 @@ const UNREGISTERED_ROUTE_WHITELIST: Readonly<Record<string, string>> = {
   "/livez": "인프라 헬스체크 프로브다(k8s liveness) — 앱 API 표면이 아니다",
   "/metrics": "인프라 메트릭 엔드포인트다(모니터링 전용) — 앱 API 표면이 아니다",
   "/readyz": "인프라 헬스체크 프로브다(k8s readiness) — 앱 API 표면이 아니다",
-  "/v1/foundation/connections": "계정 연동(connections) 관리 화면이 없다(apps/web/src/routes에 connections 없음)",
-  "/v1/foundation/connections/{connection_id}:confirm": "계정 연동 확인 액션 UI가 없다",
-  "/v1/foundation/connections/{connection_id}:revoke": "계정 연동 해제 액션 UI가 없다",
-  "/v1/foundation/connections/{connection_id}:sync": "계정 연동 동기화 액션 UI가 없다",
+  // task-2346(FE-OPS-5): ConnectionsPage가 목록·생성·confirm·sync·revoke 5건 전부를
+  // connections.*로 등록했다 — 여기 있던 4개 항목(task-2168 원 목록, 목록·생성은
+  // connections.base 하나로 등록되므로 legacyPath 4개가 아니라 3개 route명)을 제거한다.
   // task-2337(FE-OPS-3): EvidenceChainPage가 timeline/chain:verify 2건을 evidence.*로
   // 등록했다 — 여기 있던 2개 항목(task-2168 원 목록)을 제거한다.
   // task-2336(FE-OPS-2): MandatesPage가 status/drafts/amendments/revisions/
