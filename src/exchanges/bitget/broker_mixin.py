@@ -24,6 +24,7 @@ from decimal import Decimal
 from typing import Any
 
 from src.exchanges.common.http_client import SignedRequestClient
+from src.exchanges.common.live_guard import require_paper_sandbox
 
 
 class BitgetBrokerMixin:
@@ -78,6 +79,7 @@ class BitgetBrokerMixin:
         )
         return list(raw["data"])
 
+    @require_paper_sandbox
     async def transfer_broker_subaccount(
         self: SignedRequestClient,
         subaccount_uid: str,
@@ -88,7 +90,11 @@ class BitgetBrokerMixin:
         to_type: str = "spot",
     ) -> bool:
         """브로커 계정↔하위 서브계정 내부 이체 — 7.9 원칙 무관(외부 출금
-        아님, subaccount_mixin.py::transfer_to_subaccount와 동일 판단)."""
+        아님, subaccount_mixin.py::transfer_to_subaccount와 동일 판단).
+
+        esc-2514(task-2530) 스캔 확장으로 함께 발견된 동일 결함 클래스
+        (`@require_paper_sandbox` 누락) — account_mixin.py::transfer와
+        같은 이유로 복구."""
         raw = await self._request(
             "POST",
             "/api/v2/broker/account/subaccount-transfer",

@@ -28,6 +28,7 @@ from src.exchanges.bitget.account_mode import (
 )
 from src.exchanges.bitget.symbols import to_bitget_symbol as _to_bitget_symbol
 from src.exchanges.common.http_client import SignedRequestClient
+from src.exchanges.common.live_guard import require_paper_sandbox
 
 _QUOTE_CURRENCIES = ("USDT",)  # Phase 1 스콥(06번 §6.1) — USDT 마켓만
 
@@ -200,6 +201,7 @@ class BitgetAccountMixin:
         )
         return list(raw["data"])
 
+    @require_paper_sandbox
     async def transfer(
         self: SignedRequestClient,
         from_type: str,
@@ -215,7 +217,12 @@ class BitgetAccountMixin:
         명확히 하기 위해 메서드명도 `withdraw`가 아닌 `transfer`로 둔다.
         `from_type`/`to_type`은 Bitget V2 문서 값 그대로 전달(예:
         "spot"/"usdt_futures"/"coin_futures"/"crossed_margin"/
-        "isolated_margin") — 검증은 거래소 응답에 위임(§8.3 원칙)."""
+        "isolated_margin") — 검증은 거래소 응답에 위임(§8.3 원칙).
+
+        esc-2514(task-2530) — Executor를 거치지 않는 확장 메서드인데도
+        `@require_paper_sandbox`가 누락돼 LIVE adapter에서도 실제 자금
+        이동이 가능했던 P0 결함(레드팀 #2026-09-02-32와 동일 클래스,
+        convert_mixin.py::execute_convert와 동일 패턴으로 복구)."""
         body: dict[str, Any] = {
             "fromType": from_type,
             "toType": to_type,

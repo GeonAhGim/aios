@@ -20,18 +20,26 @@ review:1971 REJECT 후속(task-1975) — `_FUND_MOVING_NAME`은 "동사가 이�
 아니라 `docs/design/kis_tr_reference.json`의 TR 메타데이터(method=POST
 =주문·정정·취소)로도 병행한다 — 두 판별식의 합집합이 위반 여부를
 결정한다(화이트리스트 확장이 아니라 판별식 자체를 넓히는 방식).
+
+esc-2514 guard flag 후속(task-2530) — `_FUND_MOVING_NAME`은 주문/포지션
+계열 동사만 다뤄 `BitgetAccountMixin.transfer`(계정 내부 자금 이체)
+같은 이체 계열 메서드를 놓쳤다. 판별식에 `transfer`/`withdraw` 이름
+패턴을 추가한다 — 이름 규칙 하나에 fail-open하는 결함 클래스를
+반복하지 않도록, 이번에도 화이트리스트가 아니라 판별식 자체를 넓힌다.
 """
 from __future__ import annotations
 
 import ast
 import json
 import re
+from decimal import Decimal
 from pathlib import Path
 
 import httpx
 import pytest
 
 from src.core.exceptions import FrozenZonePaperAdapterBlockedError
+from src.exchanges.bitget.adapter import BitgetAdapter
 from src.exchanges.nh.adapter import NHAdapter
 
 _REPO_ROOT = Path(__file__).resolve().parents[3]
@@ -39,7 +47,8 @@ _SRC_EXCHANGES = _REPO_ROOT / "src" / "exchanges"
 _KIS_TR_REFERENCE = _REPO_ROOT / "docs" / "design" / "kis_tr_reference.json"
 
 _FUND_MOVING_NAME = re.compile(
-    r"^(place|cancel|modify|amend|close|submit)_\w*(order|orders|position|tpsl)\w*$",
+    r"^(place|cancel|modify|amend|close|submit)_\w*(order|orders|position|tpsl)\w*$"
+    r"|^\w*(transfer|withdraw)\w*$",
     re.IGNORECASE,
 )
 
@@ -159,6 +168,19 @@ def test_scanner_detects_generator_style_name_via_tr_metadata():
     assert _matches_kis_order_tr_id(name, order_tr_ids)
 
 
+def test_scanner_detects_transfer_style_fund_moving_names():
+    """esc-2514(task-2530) — `_FUND_MOVING_NAME`이 이체 계열 이름
+    (`transfer`/`transfer_broker_subaccount`/`withdraw_to_address`)도
+    잡아내는지 고정한다. 이 판별이 없으면 account_mixin.py::transfer의
+    `@require_paper_sandbox`를 지워도 전체 스캔 테스트가 FAIL 하지
+    않는다(DoD (c))."""
+    assert _FUND_MOVING_NAME.match("transfer")
+    assert _FUND_MOVING_NAME.match("transfer_broker_subaccount")
+    assert _FUND_MOVING_NAME.match("transfer_to_subaccount")
+    assert _FUND_MOVING_NAME.match("withdraw_to_address")
+    assert not _FUND_MOVING_NAME.match("get_convert_history")
+
+
 def test_scanner_ignores_abstract_stub_methods():
     """`src/exchanges/common/adapter.py`의 ABC 선언부(본문이 docstring +
     `...` 또는 `...`뿐)는 실제 구현이 아니므로 스캐너가 건너뛰어야 한다."""
@@ -225,3 +247,55 @@ def _order_stub():
         quantity=Decimal("10"),
         asset_class=AssetClass.KR_EQUITY,
     )
+
+
+def _make_live_bitget_adapter() -> BitgetAdapter:
+    """esc-2514(task-2530) — LIVE(demo_mode=False)로 구성된 BitgetAdapter.
+    핸들러가 요청을 받으면 즉시 AssertionError — 가드가 실행 자체를
+    막아야 하므로 이 핸들러가 호출되는 순간 이미 결함이다."""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        raise AssertionError("가드가 막았어야 할 요청이 실제로 나갔습니다.")
+
+    transport = httpx.MockTransport(handler)
+    http_client = httpx.AsyncClient(base_url="https://api.bitget.com", transport=transport)
+    return BitgetAdapter("key", "secret", "passphrase", demo_mode=False, http_client=http_client)
+
+
+def _make_paper_bitget_adapter(handler) -> BitgetAdapter:
+    transport = httpx.MockTransport(handler)
+    http_client = httpx.AsyncClient(base_url="https://api.bitget.com", transport=transport)
+    return BitgetAdapter("key", "secret", "passphrase", demo_mode=True, http_client=http_client)
+
+
+async def test_bitget_transfer_rejects_live_adapter():
+    """esc-2514(task-2530) DoD (a)/(b) — account_mixin.py:transfer가
+    `@require_paper_sandbox` 없이 LIVE adapter에서도 실행되던 결함의
+    재현/회귀 테스트. 가드가 있으면 이 호출은 HTTP 요청이 나가기 전에
+    FrozenZonePaperAdapterBlockedError로 거부된다."""
+    live_adapter = _make_live_bitget_adapter()
+    with pytest.raises(FrozenZonePaperAdapterBlockedError):
+        await live_adapter.transfer("spot", "usdt_futures", Decimal("100"), "usdt")
+
+
+async def test_bitget_transfer_allows_paper_adapter():
+    """DoD (b) 양방향 단언 — PAPER/샌드박스 인스턴스에서는 기존 경로가
+    그대로 동작해야 한다(무회귀)."""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == "/api/v2/spot/wallet/transfer"
+        return httpx.Response(
+            200, json={"code": "00000", "msg": "success", "requestTime": 1, "data": {}}
+        )
+
+    paper_adapter = _make_paper_bitget_adapter(handler)
+    result = await paper_adapter.transfer("spot", "usdt_futures", Decimal("100"), "usdt")
+    assert result is True
+
+
+async def test_bitget_transfer_broker_subaccount_rejects_live_adapter():
+    """esc-2514 스캔 확장으로 함께 발견된 동일 결함 클래스
+    (`broker_mixin.py::transfer_broker_subaccount`)의 회귀 테스트."""
+    live_adapter = _make_live_bitget_adapter()
+    with pytest.raises(FrozenZonePaperAdapterBlockedError):
+        await live_adapter.transfer_broker_subaccount("sub-1", "usdt", Decimal("10"))
