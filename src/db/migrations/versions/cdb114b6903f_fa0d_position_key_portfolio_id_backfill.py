@@ -85,7 +85,16 @@ _REPLACE_SQL = (
 
 
 def _replace_position_key(old_key: str, new_key: str) -> None:
-    op.get_bind().execute(text(_REPLACE_SQL), {"old_key": old_key, "new_key": new_key})
+    bind = op.get_bind()
+    bind.execute(text(_REPLACE_SQL), {"old_key": old_key, "new_key": new_key})
+    # 위 DELETE+INSERT는 DEFERRABLE인 pos_snapshot_legacy_position_id_fkey
+    # (963d5f3cfb1b) 재검사를 트랜잭션 끝까지 미룬다. alembic은 upgrade/downgrade
+    # 전체를 한 트랜잭션으로 묶으므로(env.py), 이 마이그레이션 다음에 실행되는
+    # 다른 리비전이 같은 트랜잭션 안에서 pos_snapshot에 ALTER TABLE을 걸면(예:
+    # a2c4f9e1b3d5 downgrade) 대기 중인 트리거 이벤트 때문에 Postgres가
+    # ObjectInUseError로 거부한다 — 여기서 바로 확정지어 다음 리비전으로
+    # 미결 상태를 넘기지 않는다.
+    bind.execute(text("SET CONSTRAINTS pos_snapshot_legacy_position_id_fkey IMMEDIATE"))
 
 
 def upgrade() -> None:

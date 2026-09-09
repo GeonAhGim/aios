@@ -66,13 +66,22 @@ async def pool():
 
 def _key() -> str:
     return str(
-        PositionKey(portfolio_id=uuid4(), 
+        PositionKey(portfolio_id=uuid4(),
             venue="TESTVENUE",
             instrument_id=f"INST{uuid4().hex[:8]}",
             strategy_id="default",
             execution_id="race",
         )
     )
+
+
+async def _delete_pos_snapshot(pool, *, position_key: str) -> None:
+    """FA-0d(cdb114b6903f)는 `pos_snapshot`에 남은 행을 하나라도 보면 이후
+    마이그레이션 왕복 테스트를 fail-closed로 거부한다(task-2543) — 이 행의
+    `portfolio_id`는 합성값이라 실제 FA-4 백필로 재현할 수 없으므로,
+    부트스트랩 대신 테스트가 끝나면 직접 지워 그 불변조건(0행)을 지킨다."""
+    async with pool.acquire() as conn:
+        await conn.execute("DELETE FROM pos_snapshot WHERE position_key = $1", position_key)
 
 
 async def _fill_once(pool: asyncpg.Pool, *, tenant_id, account_id, position_key) -> None:
@@ -109,33 +118,37 @@ async def test_twenty_concurrent_fills_produce_gapless_unique_sequence(pool):
     account_id = await create_pos_account(pool, tenant_id)
     position_key = _key()
     await open_position(pool, tenant_id=tenant_id, account_id=account_id, position_key=position_key)
-
-    results = await asyncio.gather(
-        *[
-            _fill_once(pool, tenant_id=tenant_id, account_id=account_id, position_key=position_key)
-            for _ in range(_CONCURRENT_FILLS)
-        ],
-        return_exceptions=True,
-    )
-
-    failures = [r for r in results if isinstance(r, BaseException)]
-    assert failures == []  # 락이 제대로 걸리면 전부 성공해야 한다 — 실패는 곧 경쟁상태.
-
-    async with pool.acquire() as conn:
-        seqs = [
-            row["sequence_no"]
-            for row in await conn.fetch(
-                "SELECT sequence_no FROM pos_journal WHERE position_key = $1 "
-                "ORDER BY sequence_no",
-                position_key,
-            )
-        ]
-        snapshot_row = await conn.fetchrow(
-            "SELECT quantity, last_journal_seq FROM pos_snapshot WHERE position_key = $1",
-            position_key,
+    try:
+        results = await asyncio.gather(
+            *[
+                _fill_once(
+                    pool, tenant_id=tenant_id, account_id=account_id, position_key=position_key
+                )
+                for _ in range(_CONCURRENT_FILLS)
+            ],
+            return_exceptions=True,
         )
 
-    assert seqs == list(range(1, _CONCURRENT_FILLS + 1)), "저널 sequence_no에 빈틈 또는 중복"
-    assert len(set(seqs)) == _CONCURRENT_FILLS
-    assert snapshot_row["quantity"] == Decimal(_CONCURRENT_FILLS)
-    assert snapshot_row["last_journal_seq"] == _CONCURRENT_FILLS
+        failures = [r for r in results if isinstance(r, BaseException)]
+        assert failures == []  # 락이 제대로 걸리면 전부 성공해야 한다 — 실패는 곧 경쟁상태.
+
+        async with pool.acquire() as conn:
+            seqs = [
+                row["sequence_no"]
+                for row in await conn.fetch(
+                    "SELECT sequence_no FROM pos_journal WHERE position_key = $1 "
+                    "ORDER BY sequence_no",
+                    position_key,
+                )
+            ]
+            snapshot_row = await conn.fetchrow(
+                "SELECT quantity, last_journal_seq FROM pos_snapshot WHERE position_key = $1",
+                position_key,
+            )
+
+        assert seqs == list(range(1, _CONCURRENT_FILLS + 1)), "저널 sequence_no에 빈틈 또는 중복"
+        assert len(set(seqs)) == _CONCURRENT_FILLS
+        assert snapshot_row["quantity"] == Decimal(_CONCURRENT_FILLS)
+        assert snapshot_row["last_journal_seq"] == _CONCURRENT_FILLS
+    finally:
+        await _delete_pos_snapshot(pool, position_key=position_key)

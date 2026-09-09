@@ -22,23 +22,15 @@ from __future__ import annotations
 import os
 import subprocess
 import sys
-from datetime import date
 from pathlib import Path
 from uuid import uuid4
 
 import asyncpg
 import pytest
 
-from src.data.models.base import Currency
-from src.foundation.entities.adapters.postgres_repository import PostgresEntityRepository
-from src.foundation.entities.contracts.v1 import Fund, LegalEntity, Portfolio
-from src.foundation.entities.domain.defaults import (
-    default_entity_id,
-    default_fund_id,
-    default_portfolio_id,
-)
 from src.foundation.positions.domain.position_key import PositionKey
 from tests.integration.conftest import create_test_tenant
+from tests.support.entities_seed import bootstrap_default_portfolio
 
 _PROJECT_ROOT = Path(__file__).resolve().parents[4]
 _DOWN_REVISION = "18965d657219"
@@ -79,34 +71,6 @@ def _ensure_head():
     _run_alembic_ok("upgrade", "head")
     yield
     _run_alembic_ok("upgrade", "head")
-
-
-async def _bootstrap_hierarchy(pool: asyncpg.Pool, tenant_id) -> None:
-    repo = PostgresEntityRepository(pool)
-    entity = await repo.create_legal_entity(
-        LegalEntity(
-            entity_id=default_entity_id(tenant_id),
-            tenant_id=tenant_id,
-            name="FA-0d Test Entity",
-            jurisdiction="KR",
-            region_tag="kr-seoul",
-        )
-    )
-    fund = await repo.create_fund(
-        Fund(
-            fund_id=default_fund_id(tenant_id),
-            entity_id=entity.entity_id,
-            base_currency=Currency.USDT,
-            inception=date(2026, 1, 1),
-        )
-    )
-    await repo.create_portfolio(
-        Portfolio(
-            portfolio_id=default_portfolio_id(tenant_id),
-            fund_id=fund.fund_id,
-            venue_account_ref=f"fa0d-test-venue-{uuid4().hex[:8]}",
-        )
-    )
 
 
 async def _insert_pos_account(pool: asyncpg.Pool, tenant_id) -> object:
@@ -152,8 +116,7 @@ async def _insert_legacy_pos_journal(
 
 async def test_backfill_rewrites_snapshot_key_but_leaves_worm_journal_untouched(pool):
     tenant_id = await create_test_tenant(pool)
-    await _bootstrap_hierarchy(pool, tenant_id)
-    portfolio_id = default_portfolio_id(tenant_id)
+    portfolio_id = await bootstrap_default_portfolio(pool, tenant_id)
 
     _run_alembic_ok("downgrade", _DOWN_REVISION)
     account_id = await _insert_pos_account(pool, tenant_id)
@@ -169,36 +132,46 @@ async def test_backfill_rewrites_snapshot_key_but_leaves_worm_journal_untouched(
     _run_alembic_ok("upgrade", "head")
 
     expected_new_key = f"{old_key}:{portfolio_id}"
-    async with pool.acquire() as conn:
-        old_row = await conn.fetchrow(
-            "SELECT 1 FROM pos_snapshot WHERE position_key = $1", old_key
-        )
-        new_row = await conn.fetchrow(
-            "SELECT tenant_id, account_id, portfolio_id FROM pos_snapshot WHERE position_key = $1",
-            expected_new_key,
-        )
-        journal_row = await conn.fetchrow(
-            "SELECT position_key FROM pos_journal WHERE id = $1", journal_id
-        )
+    try:
+        async with pool.acquire() as conn:
+            old_row = await conn.fetchrow(
+                "SELECT 1 FROM pos_snapshot WHERE position_key = $1", old_key
+            )
+            new_row = await conn.fetchrow(
+                "SELECT tenant_id, account_id, portfolio_id FROM pos_snapshot "
+                "WHERE position_key = $1",
+                expected_new_key,
+            )
+            journal_row = await conn.fetchrow(
+                "SELECT position_key FROM pos_journal WHERE id = $1", journal_id
+            )
 
-    assert old_row is None
-    assert new_row is not None
-    assert new_row["tenant_id"] == tenant_id
-    assert new_row["account_id"] == account_id
-    assert new_row["portfolio_id"] == portfolio_id
-    # 새 키는 중앙 생성자(PositionKey)가 강제하는 5부분 형식을 통과해야 한다.
-    parsed = PositionKey.parse(expected_new_key)
-    assert parsed.portfolio_id == portfolio_id
-    # WORM: pos_journal은 옛 4부분 키 그대로 남는다(알려진 한계, 마이그레이션 docstring).
-    assert journal_row["position_key"] == old_key
+        assert old_row is None
+        assert new_row is not None
+        assert new_row["tenant_id"] == tenant_id
+        assert new_row["account_id"] == account_id
+        assert new_row["portfolio_id"] == portfolio_id
+        # 새 키는 중앙 생성자(PositionKey)가 강제하는 5부분 형식을 통과해야 한다.
+        parsed = PositionKey.parse(expected_new_key)
+        assert parsed.portfolio_id == portfolio_id
+        # WORM: pos_journal은 옛 4부분 키 그대로 남는다(알려진 한계, 마이그레이션 docstring).
+        assert journal_row["position_key"] == old_key
+    finally:
+        # FA-0d(cdb114b6903f)는 pos_snapshot에 남은 행을 하나라도 보면 이후
+        # 마이그레이션 왕복 테스트를 fail-closed로 거부한다(task-2543) -- 이
+        # 합성 행의 portfolio_id는 이 테스트 안에서만 부트스트랩된 것이라
+        # 다른 테스트가 그 사이 entity 테이블을 왕복시키면 재현되지 않는다.
+        async with pool.acquire() as conn:
+            await conn.execute(
+                "DELETE FROM pos_snapshot WHERE position_key = $1", expected_new_key
+            )
 
 
 async def test_backfill_fails_closed_and_rolls_back_whole_migration_when_portfolio_id_null(
     pool,
 ):
     resolvable_tenant = await create_test_tenant(pool)
-    await _bootstrap_hierarchy(pool, resolvable_tenant)
-    resolvable_portfolio_id = default_portfolio_id(resolvable_tenant)
+    resolvable_portfolio_id = await bootstrap_default_portfolio(pool, resolvable_tenant)
     bare_tenant = await create_test_tenant(pool)
 
     _run_alembic_ok("downgrade", _DOWN_REVISION)

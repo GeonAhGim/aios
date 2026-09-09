@@ -62,13 +62,22 @@ async def pool():
 
 def _key() -> str:
     return str(
-        PositionKey(portfolio_id=uuid4(), 
+        PositionKey(portfolio_id=uuid4(),
             venue="TESTVENUE",
             instrument_id=f"INST{uuid4().hex[:8]}",
             strategy_id="default",
             execution_id="cross-tenant",
         )
     )
+
+
+async def _delete_pos_snapshot(pool, *, position_key: str) -> None:
+    """FA-0d(cdb114b6903f)는 `pos_snapshot`에 남은 행을 하나라도 보면 이후
+    마이그레이션 왕복 테스트를 fail-closed로 거부한다(task-2543) — 이 행의
+    `portfolio_id`는 합성값이라 실제 FA-4 백필로 재현할 수 없으므로,
+    부트스트랩 대신 테스트가 끝나면 직접 지워 그 불변조건(0행)을 지킨다."""
+    async with pool.acquire() as conn:
+        await conn.execute("DELETE FROM pos_snapshot WHERE position_key = $1", position_key)
 
 
 async def _attack_command(*, tenant_id, account_id, position_key) -> RecordFillCommand:
@@ -94,43 +103,45 @@ async def test_cross_tenant_position_key_rejected(pool):
     await open_position(
         pool, tenant_id=owner_id, account_id=owner_account_id, position_key=position_key
     )
+    try:
+        attacker_id = await create_test_tenant(pool)
+        attacker_account_id = await create_pos_account(pool, attacker_id)
+        journal = PostgresJournalRepository(pool)
+        snapshots = PostgresSnapshotRepository(pool)
+        audit = PostgresAuditEventRepository(pool)
 
-    attacker_id = await create_test_tenant(pool)
-    attacker_account_id = await create_pos_account(pool, attacker_id)
-    journal = PostgresJournalRepository(pool)
-    snapshots = PostgresSnapshotRepository(pool)
-    audit = PostgresAuditEventRepository(pool)
+        with pytest.raises(UnknownPositionError):
+            async with pool.acquire() as conn, conn.transaction():
+                await record_fill(
+                    conn,
+                    await _attack_command(
+                        tenant_id=attacker_id,
+                        account_id=attacker_account_id,
+                        position_key=position_key,
+                    ),
+                    asset_class=AssetClass.CRYPTO,
+                    journal=journal,
+                    snapshots=snapshots,
+                    audit=audit,
+                    clock=_clock,
+                )
 
-    with pytest.raises(UnknownPositionError):
-        async with pool.acquire() as conn, conn.transaction():
-            await record_fill(
-                conn,
-                await _attack_command(
-                    tenant_id=attacker_id,
-                    account_id=attacker_account_id,
-                    position_key=position_key,
-                ),
-                asset_class=AssetClass.CRYPTO,
-                journal=journal,
-                snapshots=snapshots,
-                audit=audit,
-                clock=_clock,
+        async with pool.acquire() as conn:
+            journal_count = await conn.fetchval(
+                "SELECT count(*) FROM pos_journal WHERE position_key = $1", position_key
             )
-
-    async with pool.acquire() as conn:
-        journal_count = await conn.fetchval(
-            "SELECT count(*) FROM pos_journal WHERE position_key = $1", position_key
-        )
-        snapshot_row = await conn.fetchrow(
-            "SELECT quantity, last_journal_seq, tenant_id, account_id FROM pos_snapshot "
-            "WHERE position_key = $1",
-            position_key,
-        )
-    assert journal_count == 0, "공격자의 체결이 저널에 그대로 기록됐습니다"
-    assert snapshot_row["quantity"] == Decimal("0")
-    assert snapshot_row["last_journal_seq"] == 0
-    assert snapshot_row["tenant_id"] == owner_id
-    assert snapshot_row["account_id"] == owner_account_id
+            snapshot_row = await conn.fetchrow(
+                "SELECT quantity, last_journal_seq, tenant_id, account_id FROM pos_snapshot "
+                "WHERE position_key = $1",
+                position_key,
+            )
+        assert journal_count == 0, "공격자의 체결이 저널에 그대로 기록됐습니다"
+        assert snapshot_row["quantity"] == Decimal("0")
+        assert snapshot_row["last_journal_seq"] == 0
+        assert snapshot_row["tenant_id"] == owner_id
+        assert snapshot_row["account_id"] == owner_account_id
+    finally:
+        await _delete_pos_snapshot(pool, position_key=position_key)
 
 
 async def test_same_tenant_different_account_position_key_rejected(pool):
@@ -143,30 +154,32 @@ async def test_same_tenant_different_account_position_key_rejected(pool):
     await open_position(
         pool, tenant_id=owner_id, account_id=owner_account_id, position_key=position_key
     )
+    try:
+        other_account_id = await create_pos_account(pool, owner_id, venue="OTHERVENUE")
+        journal = PostgresJournalRepository(pool)
+        snapshots = PostgresSnapshotRepository(pool)
+        audit = PostgresAuditEventRepository(pool)
 
-    other_account_id = await create_pos_account(pool, owner_id, venue="OTHERVENUE")
-    journal = PostgresJournalRepository(pool)
-    snapshots = PostgresSnapshotRepository(pool)
-    audit = PostgresAuditEventRepository(pool)
+        with pytest.raises(UnknownPositionError):
+            async with pool.acquire() as conn, conn.transaction():
+                await record_fill(
+                    conn,
+                    await _attack_command(
+                        tenant_id=owner_id,
+                        account_id=other_account_id,
+                        position_key=position_key,
+                    ),
+                    asset_class=AssetClass.CRYPTO,
+                    journal=journal,
+                    snapshots=snapshots,
+                    audit=audit,
+                    clock=_clock,
+                )
 
-    with pytest.raises(UnknownPositionError):
-        async with pool.acquire() as conn, conn.transaction():
-            await record_fill(
-                conn,
-                await _attack_command(
-                    tenant_id=owner_id,
-                    account_id=other_account_id,
-                    position_key=position_key,
-                ),
-                asset_class=AssetClass.CRYPTO,
-                journal=journal,
-                snapshots=snapshots,
-                audit=audit,
-                clock=_clock,
+        async with pool.acquire() as conn:
+            journal_count = await conn.fetchval(
+                "SELECT count(*) FROM pos_journal WHERE position_key = $1", position_key
             )
-
-    async with pool.acquire() as conn:
-        journal_count = await conn.fetchval(
-            "SELECT count(*) FROM pos_journal WHERE position_key = $1", position_key
-        )
-    assert journal_count == 0
+        assert journal_count == 0
+    finally:
+        await _delete_pos_snapshot(pool, position_key=position_key)
