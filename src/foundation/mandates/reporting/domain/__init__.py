@@ -1,0 +1,1 @@
+"""Pure compliance report calculations."""
