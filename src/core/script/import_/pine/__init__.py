@@ -13,11 +13,9 @@ AIOS Script로의 변환(transpile)은 DSL-15의 몫이라 이 패키지는 파�
 """
 from __future__ import annotations
 
+from src.core.script.import_.pine.ast import PineProgram
 from src.core.script.import_.pine.lexer import PineSyntaxError, Token, TokenKind, tokenize
-from src.core.script.import_.pine.parser import (
-    PineProgram,
-    parse,
-)
+from src.core.script.import_.pine.parser import parse
 
 __all__ = [
     "PineProgram",

@@ -1,44 +1,48 @@
 """DSL-14 — Pine Script v5 부분 문법 재귀하향 파서.
 
 Spec: docs/specs/L4_analytics_authoring_backtest_marketplace_v1.0.md §9.9
-DSL-14. `lexer.py`의 `tokenize()` 토큰만 입력으로 받아 이 파일에 정의한
-AST(discriminated union 없이 타입 자체로 판별하는 얕은 dataclass 트리)만
-출력한다. AIOS Script로의 변환(transpile)은 DSL-15의 몫이라 하지 않는다.
+DSL-14. `lexer.py`의 `tokenize()` 토큰만 입력으로 받아 `ast.py`에 정의된
+AST만 출력한다. AIOS Script로의 변환(transpile)은 DSL-15의 몫이라 하지 않는다.
 
-# 지원 문법(허용 목록, 그 밖은 전부 위치 포함 거부)
-- 리터럴: 정수/실수, 문자열("..."/'...'), `true`/`false`
-- 식별자 참조: `close`/`open`/`len` 등 네임스페이스 없는 평범한 이름
-- 시리즈 산술: `+ - * / %`, 비교: `< <= == != >= >`, 논리: `and or not`
-- 과거참조: `expr[N]`(N은 0 이상 정수 상수 — 변수·음수 인덱스 금지)
-- 호출: `ta.<ident>(...)`, `input.<ident>(...)`(네임스페이스 안에서는 임의
-  식별자 허용 — Pine의 `ta.*`/`input.*` 전체가 여기 해당), `strategy.entry(...)`,
-  `strategy.exit(...)`(strategy 네임스페이스는 이 둘만), 그리고 바깥 함수
-  호출 중 `plot(...)` 하나만.
-- 단일 대입문: `ident = expr`(AIOS Script의 `let`에 대응 — Pine에는 `let`이
-  없어 맨 대입문으로 표현한다. decision: 대입은 §9.9 표에 명시된 항목은
-  아니지만 "시리즈 산술"을 변수에 담아 재사용하는 것이 Pine 실사용 100%에
-  해당해 뺄 수 없다고 판단했다. 반대로 `var`/`varip`(영속 변수)·`:=`
-  (재대입)는 다른 실행 의미론이라 명시적으로 거부한다)
-- 인자 이름 지정: 호출 인자 안에서만 `ident = expr`(Pine의 keyword arg,
-  예: `input.int(14, title="Length")`)
+지원(허용 목록): 리터럴(정수/실수/문자열/`true`·`false`), 네임스페이스 없는
+식별자 참조, 시리즈 산술(`+-*/%`)·비교(`< <= == != >= >`)·논리(`and or not`),
+과거참조 `expr[N]`(N은 0 이상 정수 상수), `ta.<ident>(...)`·`input.<ident>(...)`
+(네임스페이스 안은 임의 식별자 허용), `strategy.entry/exit(...)`, 바깥 함수
+호출 중 `plot(...)` 하나, 단일 대입문 `ident = expr`(Pine에 `let`이 없어
+이걸로 대체 — decision: §9.9 표에 명시되지 않았지만 시리즈를 변수에 담아
+재사용하는 것이 Pine 실사용 100%라 뺄 수 없다고 판단; 반대로 `var`/`varip`·
+`:=`는 다른 실행 의미론이라 명시 거부), 호출 인자 안에서만 `ident = expr`
+keyword arg(예: `title="Length"`).
 
-# 미지원(전부 PineSyntaxError로 (line, col) 포함 거부)
-- `request.security()` 등 request 네임스페이스 전체, `array.*`/`matrix.*`/
-  `map.*`/`math.*`/`str.*`/`color.*`/`table.*`/`line.*`/`box.*` 등 위
-  허용 목록 밖 네임스페이스
-- `strategy.*` 중 entry/exit 이외(예: `strategy.close`), 그리고 `ns.ident`를
-  호출 없이 값으로 참조하는 표기(예: `strategy.long`) — 호출 형태만 허용
-- `plot` 이외의 바깥(네임스페이스 없는) 함수 호출 — `indicator()`/`strategy()`
-  스크립트 선언 호출도 포함(§9.9 표에 명시되지 않은 항목이라 이 리프의
-  범위 밖으로 둔다 — decision)
-- 사용자 함수 정의(`f(x) => ...`), `if`/`for`/`while`/`switch` 블록,
-  재대입 연산자 `:=`, `var`/`varip` 선언, 삼항 연산자 `?:`
+미지원(전부 PineSyntaxError로 (line, col) 포함 거부): `request.*`/`array.*`/
+`matrix.*`/`map.*`/`math.*`/`str.*`/`color.*`/`table.*`/`line.*`/`box.*` 등
+허용 목록 밖 네임스페이스, `strategy.*` 중 entry/exit 이외 및 `ns.ident` 값
+참조(호출 형태만 허용), `plot` 이외의 바깥 함수 호출(`indicator()`/`strategy()`
+선언 호출 포함 — §9.9 표 밖이라 범위 밖으로 둔다, decision), 사용자 함수
+정의(`f(x) => ...`), `if`/`for`/`while`/`switch` 블록, 재대입 연산자 `:=`,
+`var`/`varip` 선언, 삼항 연산자 `?:`.
 """
 from __future__ import annotations
 
 from collections.abc import Callable
-from dataclasses import dataclass
 
+from src.core.script.import_.pine.ast import (
+    AssignStmt,
+    BinaryExpr,
+    BoolLiteral,
+    CallArg,
+    CallExpr,
+    Expr,
+    ExprStmt,
+    Identifier,
+    NotExpr,
+    NumberLiteral,
+    PineProgram,
+    PostfixExpr,
+    Statement,
+    StringLiteral,
+    UnaryExpr,
+)
 from src.core.script.import_.pine.lexer import PineSyntaxError, Token, TokenKind, tokenize
 
 _TA_NAMESPACE = "ta"
@@ -46,108 +50,9 @@ _INPUT_NAMESPACE = "input"
 _STRATEGY_NAMESPACE = "strategy"
 _STRATEGY_ALLOWED_CALLS = frozenset({"entry", "exit"})
 _BARE_CALL_ALLOWED = frozenset({"plot"})
-
 _CMP_OPS = frozenset({"<", "<=", "==", "!=", ">=", ">"})
 _ARITH_OPS = frozenset({"+", "-"})
 _TERM_OPS = frozenset({"*", "/", "%"})
-
-
-# ---- AST — 타입 자체가 판별자(discriminator)라 별도 kind 필드를 두지 않는다 ----
-
-
-@dataclass(frozen=True, slots=True)
-class NumberLiteral:
-    value: int | float
-
-
-@dataclass(frozen=True, slots=True)
-class StringLiteral:
-    value: str
-
-
-@dataclass(frozen=True, slots=True)
-class BoolLiteral:
-    value: bool
-
-
-@dataclass(frozen=True, slots=True)
-class Identifier:
-    name: str
-
-
-@dataclass(frozen=True, slots=True)
-class CallArg:
-    name: str | None
-    value: Expr
-
-
-@dataclass(frozen=True, slots=True)
-class CallExpr:
-    """`ns is None`이면 바깥 함수 호출(`plot(...)`), 아니면 `ns.ident(...)`."""
-
-    ns: str | None
-    ident: str
-    args: tuple[CallArg, ...]
-
-
-@dataclass(frozen=True, slots=True)
-class UnaryExpr:
-    op: str  # "-"
-    operand: Expr
-
-
-@dataclass(frozen=True, slots=True)
-class PostfixExpr:
-    """`base[index]` — 과거참조만(index는 0 이상 정수 상수)."""
-
-    base: Expr
-    index: int
-
-
-@dataclass(frozen=True, slots=True)
-class NotExpr:
-    operand: Expr
-
-
-@dataclass(frozen=True, slots=True)
-class BinaryExpr:
-    op: str
-    left: Expr
-    right: Expr
-
-
-Expr = (
-    NumberLiteral
-    | StringLiteral
-    | BoolLiteral
-    | Identifier
-    | CallExpr
-    | UnaryExpr
-    | PostfixExpr
-    | NotExpr
-    | BinaryExpr
-)
-
-
-@dataclass(frozen=True, slots=True)
-class AssignStmt:
-    """`ident = expr` — 단일 대입(재대입 `:=`은 별도 거부, 아래 docstring 참조)."""
-
-    name: str
-    expr: Expr
-
-
-@dataclass(frozen=True, slots=True)
-class ExprStmt:
-    expr: Expr
-
-
-Statement = AssignStmt | ExprStmt
-
-
-@dataclass(frozen=True, slots=True)
-class PineProgram:
-    statements: tuple[Statement, ...]
 
 
 def parse(source: str) -> PineProgram:
