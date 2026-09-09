@@ -34,6 +34,7 @@ class TokenBucket:
         self._sleep = sleep
         self._tokens = burst
         self._last_refill = clock()
+        self._lock = asyncio.Lock()
 
     def _refill(self) -> None:
         now = self._clock()
@@ -45,22 +46,28 @@ class TokenBucket:
         """토큰 n개를 확보한다. 대기해도 timeout 내 확보 불가능하면
         `ExchangeError(RATE_LIMITED, retryable=True)`를 즉시 발생시킨다
         (실제로 timeout만큼 기다린 뒤 실패시키지 않는다 — 필요한 대기시간을
-        미리 계산해 fail-fast한다)."""
-        if n > self._burst:
-            raise ExchangeError(
-                ExchangeErrorKind.RATE_LIMITED,
-                message=f"요청 토큰 {n}개가 버스트 한도 {self._burst}개를 초과함",
-            )
-        self._refill()
-        if self._tokens >= n:
-            self._tokens -= n
-            return
-        wait_needed = (n - self._tokens) / self._rate
-        if wait_needed > timeout:
-            raise ExchangeError(
-                ExchangeErrorKind.RATE_LIMITED,
-                message=f"rate limit 대기시간 {wait_needed:.3f}s가 timeout {timeout}s 초과",
-            )
-        await self._sleep(wait_needed)
-        self._refill()
-        self._tokens = max(0.0, self._tokens - n)
+        미리 계산해 fail-fast한다).
+
+        `_lock`으로 전체 호출을 직렬화한다 — 동시 호출자가 각자 대기 전
+        토큰 잔량을 읽고 대기 후 재검증 없이 차감(0으로 클램프)하면, 동시에
+        기다리던 다른 호출자와 잔량을 이중으로 소비해 버스트 한도를 넘겨
+        발급할 수 있다(TOCTOU race, DEPTH_L4_BR task-456 D3 감사 발견)."""
+        async with self._lock:
+            if n > self._burst:
+                raise ExchangeError(
+                    ExchangeErrorKind.RATE_LIMITED,
+                    message=f"요청 토큰 {n}개가 버스트 한도 {self._burst}개를 초과함",
+                )
+            self._refill()
+            if self._tokens >= n:
+                self._tokens -= n
+                return
+            wait_needed = (n - self._tokens) / self._rate
+            if wait_needed > timeout:
+                raise ExchangeError(
+                    ExchangeErrorKind.RATE_LIMITED,
+                    message=f"rate limit 대기시간 {wait_needed:.3f}s가 timeout {timeout}s 초과",
+                )
+            await self._sleep(wait_needed)
+            self._refill()
+            self._tokens = max(0.0, self._tokens - n)
