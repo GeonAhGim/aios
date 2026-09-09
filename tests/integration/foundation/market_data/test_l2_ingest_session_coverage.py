@@ -122,6 +122,18 @@ def _fake_ulid() -> str:
     return "0" + uuid.uuid4().hex[:25].upper()
 
 
+@pytest.fixture(autouse=True)
+async def _cleanup_l2_coverage_rows(pool: asyncpg.Pool):
+    """이 파일이 남기는 `Timeframe.L2` `coverage_spans` 행은 정리하지 않으면
+    `test_downgrade_then_upgrade_round_trip`(migration round trip)이 4b19195124bb를
+    downgrade할 때 되살리는 구 CHECK(`_OLD_TIMEFRAMES`에 'L2' 없음)를 위반해
+    공유 TEST_DATABASE_URL 세션 전체를 깨뜨린다 — test_fa0c_account_scope.py의
+    `_cleanup_portfolio_test_accounts`와 동일한 위생 규칙."""
+    yield
+    async with pool.acquire() as conn:
+        await conn.execute("DELETE FROM coverage_spans WHERE timeframe = 'L2'")
+
+
 async def _insert_instrument(pool: asyncpg.Pool, instrument_id: str) -> None:
     await pool.execute(
         """

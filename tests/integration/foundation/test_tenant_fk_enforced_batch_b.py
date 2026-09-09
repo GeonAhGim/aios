@@ -35,6 +35,21 @@ async def pool():
     await p.close()
 
 
+@pytest.fixture(autouse=True)
+async def _cleanup_batch_b_test_accounts(pool: asyncpg.Pool):
+    """`test_ledger_account_null_tenant_id_still_allowed` commits a
+    `TEST:BATCH-B-NULL:*` row directly via `pool.acquire()` (no rollback) —
+    left uncleaned it survives into any later test in the same
+    TEST_DATABASE_URL session that replays the full migration chain
+    (e.g. FA-0c's `18965d657219` backfill, task-1942), whose
+    `chart_of_accounts.default_scope()` hard-fails on a non-`USER:`/`PLATFORM:`
+    account_code (same hygiene rule as test_fa0c_account_scope.py's
+    `_cleanup_portfolio_test_accounts`)."""
+    yield
+    async with pool.acquire() as conn:
+        await conn.execute("DELETE FROM ledger_account WHERE account_code LIKE 'TEST:BATCH-B-%'")
+
+
 async def _fk_ref(pool: asyncpg.Pool, table: str, constraint: str) -> tuple[str, str] | None:
     async with pool.acquire() as conn:
         row = await conn.fetchrow(

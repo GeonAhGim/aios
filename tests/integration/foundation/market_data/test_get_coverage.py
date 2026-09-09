@@ -69,6 +69,19 @@ async def _grant_entitlement(pool: asyncpg.Pool, *, tenant_id: UUID, venue: Venu
     )
 
 
+@pytest.fixture(autouse=True)
+async def _cleanup_upbit_coverage_rows(pool):
+    """`test_get_coverage_ignores_spans_from_other_venues`가 심는
+    `Venue.UPBIT` `coverage_spans` 행은 정리하지 않으면
+    `test_downgrade_then_upgrade_round_trip`(migration round trip)이
+    4b19195124bb를 downgrade할 때 되살리는 구 CHECK(`_OLD_VENUES`에 'UPBIT'
+    없음)를 위반해 공유 TEST_DATABASE_URL 세션 전체를 깨뜨린다 —
+    test_fa0c_account_scope.py의 `_cleanup_portfolio_test_accounts`와
+    동일한 위생 규칙."""
+    yield
+    await pool.execute("DELETE FROM coverage_spans WHERE venue = 'UPBIT'")
+
+
 @pytest.fixture
 def coverage_repo(pool):
     return PostgresCoverageRepository(pool)

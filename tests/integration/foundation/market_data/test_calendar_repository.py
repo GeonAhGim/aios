@@ -135,15 +135,28 @@ async def test_yaml_calendar_loaded_twice_keeps_row_count_stable(pool, repo):
             source,
         )
 
-    async with pool.acquire() as conn, conn.transaction():
-        await repo.upsert_days(conn, Venue.KIS_KRX, days)
-    async with pool.acquire() as conn:
-        first_count = await _count(conn)
+    try:
+        async with pool.acquire() as conn, conn.transaction():
+            await repo.upsert_days(conn, Venue.KIS_KRX, days)
+        async with pool.acquire() as conn:
+            first_count = await _count(conn)
 
-    async with pool.acquire() as conn, conn.transaction():
-        await repo.upsert_days(conn, Venue.KIS_KRX, days)
-    async with pool.acquire() as conn:
-        second_count = await _count(conn)
+        async with pool.acquire() as conn, conn.transaction():
+            await repo.upsert_days(conn, Venue.KIS_KRX, days)
+        async with pool.acquire() as conn:
+            second_count = await _count(conn)
 
-    assert first_count == len(days)
-    assert second_count == first_count
+        assert first_count == len(days)
+        assert second_count == first_count
+    finally:
+        # `source`("collected_at=" 실제 타임스탬프 포함)가 50자를 넘길 수 있어
+        # 정리하지 않으면 test_db_transition_trigger.py의 전체이력 downgrade가
+        # md_venue_calendar_day.source를 VARCHAR(50)으로 되돌릴 때 이 행이
+        # StringDataRightTruncationError로 공유 TEST_DATABASE_URL 세션을 깨뜨린다
+        # (test_fa0c_account_scope.py의 `_cleanup_portfolio_test_accounts`와 동일 위생).
+        async with pool.acquire() as conn:
+            await conn.execute(
+                "DELETE FROM md_venue_calendar_day WHERE venue = $1 AND source = $2",
+                Venue.KIS_KRX.value,
+                source,
+            )
