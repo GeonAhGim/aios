@@ -2,24 +2,23 @@
 
 Spec: docs/specs/L4_analytics_authoring_backtest_marketplace_v1.0.md §9.9 DSL-14. Takes only
 `lexer.py`'s `tokenize()` tokens as input and outputs only the AST defined in `ast.py`.
-Conversion (transpile) to AIOS Script is DSL-15's job and is not done here.
+Conversion (transpile) to AIOS Script is DSL-15's job, not done here.
 
 Supported (allow-list): literals (int/float/string/`true`/`false`), namespace-less identifier
 references, series arithmetic (`+-*/%`), comparison (`< <= == != >= >`), logic (`and or not`),
 historical reference `expr[N]` (N is a constant integer >= 0), `ta.<ident>(...)`/
 `input.<ident>(...)` (any identifier allowed inside the namespace), `strategy.entry/exit(...)`,
 exactly one bare function call, `plot(...)`, and a single assignment statement `ident = expr`
-(Pine has no `let`, so this substitutes for it — decision: not in the §9.9 table, but judged to
-cover 100% of real Pine usage of storing a series in a variable for reuse; `var`/`varip` and `:=`
-have different semantics and are rejected). `ident = expr` keyword args (e.g. `title="Length"`)
-are supported only inside call arguments.
+(Pine has no `let`; this substitutes for it, per decision — covers real Pine usage of storing a
+series in a variable for reuse; `var`/`varip`/`:=` differ semantically and are rejected).
+`ident = expr` keyword args (e.g. `title="Length"`) are supported only inside call arguments.
 
 Unsupported (all rejected as PineSyntaxError with (line, col)): namespaces outside the allow-list
 such as `request.*`/`array.*`/`matrix.*`/`map.*`/`math.*`/`str.*`/`color.*`/`table.*`/`line.*`/
-`box.*`; any `strategy.*` other than entry/exit, and `ns.ident` value references (only call form
-allowed); bare function calls other than `plot` (`indicator()`/`strategy()` declaration calls
-included — out of scope, §9.9 table, decision); user function definitions (`f(x) => ...`);
-`if`/`for`/`while`/`switch` blocks; `:=`; `var`/`varip` declarations; the ternary operator `?:`.
+`box.*`; any `strategy.*` other than entry/exit, and `ns.ident` value references (call form only
+allowed); bare function calls other than `plot` (`indicator()`/`strategy()` declarations included
+— out of scope, decision); user function definitions (`f(x) => ...`); `if`/`for`/`while`/`switch`
+blocks; `:=`; `var`/`varip` declarations; the ternary operator `?:`.
 """
 from __future__ import annotations
 

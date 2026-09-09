@@ -1,5 +1,4 @@
-"""L4_compliance_and_regulatory_v1.0.md#9 CM-11 -- post-trade / end-of-day batch determination
-for fills.
+"""L4_compliance_and_regulatory_v1.0.md#9 CM-11 -- post-trade/EOD batch determination for fills.
 
 CM-9 (`domain/rules/{short_sale,wash_trade}.py`) and CM-10 (`domain/market_abuse.py`) rules are
 only called, never reimplemented: CM-9 rides on CM-3 `evaluator.evaluate_bundle` (the existing
