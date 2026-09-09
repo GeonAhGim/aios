@@ -1,9 +1,8 @@
 """L4_strategy_portfolio_backtest_v1.0.md#§2 row 91 — volatility-target sizing.
 
-`weight = target_vol_pct / realized_vol_pct` (capped at 100%). If
-`realized_vol_pct` is `None`, this rejects with
-`PORTFOLIO_SIZING_INPUT_MISSING` rather than substituting 0 (the negative
-case the spec calls out explicitly).
+`weight = target_vol_pct / realized_vol_pct`(상한 100%). `realized_vol_pct`가
+`None`이면 0으로 대체하지 않고 `PORTFOLIO_SIZING_INPUT_MISSING`으로 거부한다
+(스펙에 명시된 negative case).
 """
 from __future__ import annotations
 

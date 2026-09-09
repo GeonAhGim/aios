@@ -1,21 +1,18 @@
-"""Task series 16xx — creation/recovery/cancellation of main.py lifespan's
-background loops (heartbeat/alert/risk_guard/execution_loop/safety/
-liquidation/post_trade_batch).
+"""Task series 16xx — creation/recovery/cancellation of main.py lifespan's background loops
+(heartbeat/alert/risk_guard/execution_loop/safety/liquidation/post_trade_batch).
 
-Spec: 16_backend_signatures.md, ADR-2026-08-10-B, P6 (no file may exceed 300
-lines), L4_compliance_and_regulatory_v1.0.md#9 CM-11.
+Spec: 16_backend_signatures.md, ADR-2026-08-10-B, P6 (no file may exceed 300 lines),
+L4_compliance_and_regulatory_v1.0.md#9 CM-11.
 
-Deviation: task-117 originally intended to place this at
-src/app/background_loops.py, but since .aios-zone does not declare
-`src/app/**` (agents may not modify zone policy, P8), it is placed instead
-under `src/services/**`, already declared as SCAFFOLD.
+Deviation: task-117 originally intended to place this at src/app/background_loops.py, but since
+.aios-zone does not declare `src/app/**` (agents may not modify zone policy, P8), it is placed
+instead under `src/services/**`, already declared as SCAFFOLD.
 
 main.py assembles pool/event_bus/credential_resolver etc., passes them to
-:func:`start_background_loops` to start the loops, and on shutdown only
-calls the returned :class:`BackgroundLoops`'s :meth:`~BackgroundLoops.stop`.
-Every loop is instrumented via `LoopHealth.record_tick` (the shared
-`_run_instrumented` wrapper) -- only execution_loop has its own separate
-scheduler (`ExecutionLoopScheduler`) and is outside this leaf.
+:func:`start_background_loops` to start the loops, and on shutdown only calls the returned
+:class:`BackgroundLoops`'s :meth:`~BackgroundLoops.stop`. Every loop is instrumented via
+`LoopHealth.record_tick` (the shared `_run_instrumented` wrapper) -- only execution_loop has its
+own separate scheduler (`ExecutionLoopScheduler`) and is outside this leaf.
 """
 from __future__ import annotations
 
@@ -82,9 +79,8 @@ POST_TRADE_BATCH_INTERVAL_SECONDS = 3600.0  # Draft — once a day would be corr
 
 
 def flag_enabled(name: str) -> bool:
-    """Default is on in production. Integration tests (tests/conftest.py) boot
-    the whole lifespan, so this is switched off with "0" to keep real-exchange
-    ticks/lookups from leaking into the shared dev DB."""
+    """Default is on. Integration tests (tests/conftest.py) boot the whole lifespan, so this is
+    switched off with "0" to keep real-exchange ticks/lookups off the shared dev DB."""
     return os.environ.get(name, "1") != "0"
 
 

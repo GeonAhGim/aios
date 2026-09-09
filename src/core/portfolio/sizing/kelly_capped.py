@@ -1,8 +1,8 @@
 """L4_strategy_portfolio_backtest_v1.0.md#§2 row 92 — capped Kelly sizing.
 
-`f* = p − (1−p)/b`, `f = min(max(f*, 0), kelly_cap)`. `win_rate` (p) is a
-[0,1] probability, `avg_win_loss_ratio` (b) is the average-win/average-loss
-ratio — if either is `None`, this rejects rather than substituting 0/1/etc.
+`f* = p − (1−p)/b`, `f = min(max(f*, 0), kelly_cap)`. `win_rate`(p)는 [0,1]
+확률, `avg_win_loss_ratio`(b)는 평균승/평균패 비율 — 둘 중 하나라도 `None`이면
+0/1 등으로 대체하지 않고 거부한다.
 """
 from __future__ import annotations
 

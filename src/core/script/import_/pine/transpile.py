@@ -1,47 +1,38 @@
-"""L4_analytics_authoring_backtest_marketplace_v1.0.md §9.9 DSL-15 —
-Converts Pine AST (DSL-14 `PineProgram`) to AIOS Script AST (DSL-1
-`Program`), plus a compile/verify round trip.
+"""L4_analytics_authoring_backtest_marketplace_v1.0.md §9.9 DSL-15 — converts Pine AST (DSL-14
+`PineProgram`) to AIOS Script AST (DSL-1 `Program`), plus a compile/verify round trip.
 
-Takes only a `PineProgram` already parsed by DSL-14 as input (the
-supported/unsupported decision is already final by the time the parser
-finishes). One statement does not always become one decl — the only
-exception is `AssignStmt(name, input.<kind>(...))`, which becomes an
-`InputDecl` (in AIOS Script, input is a top-level decl, not something
-layered on `let`); every other `AssignStmt` becomes a `LetDecl`.
+Takes only a `PineProgram` already parsed by DSL-14 as input (the supported/unsupported decision
+is already final by the time the parser finishes). One statement does not always become one decl
+— the only exception is `AssignStmt(name, input.<kind>(...))`, which becomes an `InputDecl` (in
+AIOS Script, input is a top-level decl, not something layered on `let`); every other `AssignStmt`
+becomes a `LetDecl`.
 
-Things that cannot be carried over structurally (all raise
-`PineTranspileError` with the reason stated in the message — the "state the
-semantic difference" DoD): string and raw bool literal expressions (neither
-is in the `grammar.ast.Expr` discriminated union, DSL-1 decision — the only
-exception is the `input.bool(...)` default-value slot, whose field is an
-`int|float|bool` literal, not an `Expr`); the `%`/`!=` operators (outside the
-`BinaryOp` grammar table); `plot(...)` in a non-top-level position
-(`CallExpr.ns` is required, so there is no slot for a namespace-less call);
-`strategy.exit(...)` (AIOS `OrderDecl` can only express "one new order" — it
-has no "close" semantics that look up an existing position by id; forcing it
-in would be a mistranslation, so it is rejected); keyword arguments to
-`ta.*`/`input.*` calls (`CallExpr.args` is a positional tuple only, with the
-sole exception of `strategy.entry`'s `qty=`).
+Things that cannot be carried over structurally (all raise `PineTranspileError` with the reason
+stated in the message — the "state the semantic difference" DoD): string and raw bool literal
+expressions (neither is in the `grammar.ast.Expr` discriminated union, DSL-1 decision — the only
+exception is the `input.bool(...)` default-value slot, whose field is an `int|float|bool`
+literal, not an `Expr`); the `%`/`!=` operators (outside the `BinaryOp` grammar table);
+`plot(...)` in a non-top-level position (`CallExpr.ns` is required, so there is no slot for a
+namespace-less call); `strategy.exit(...)` (AIOS `OrderDecl` can only express "one new order" —
+it has no "close" semantics that look up an existing position by id; forcing it in would be a
+mistranslation, so it is rejected); keyword arguments to `ta.*`/`input.*` calls (`CallExpr.args`
+is a positional tuple only, with the sole exception of `strategy.entry`'s `qty=`).
 
-Things converted even though the semantics change: for `plot(expr, ...)`,
-the style arguments (from the 2nd onward) are dropped (`PlotDecl.style` is
-an undefined field DSL-4/6 do not check, and is usually a string/color with
-no slot to carry it anyway). For `strategy.entry(id, direction, qty=..)`,
-`id` is dropped, and `qty` is pinned to `1` when omitted (this subgrammar
-has no strategy declaration, so there is no Pine `default_qty`). Pine's
-`strategy.entry` normally only executes inside an `if`, but this Pine
-subgrammar has no `if` (DSL-14), so every parsed call is an unconditional
-statement — `OrderDecl.when` is filled with an "always true" placeholder
-(`1 == 1`; a literal `true` is not in the grammar). Referencing an OHLCV
-identifier (open/high/low/close/volume) without declaring it auto-injects
-`input <name> : series<float> = 0` (it is really a market-data reference,
-not a genuine input, but AIOS Script v1 has no separate decl for that, and
-the value is unused).
+Things converted even though the semantics change: for `plot(expr, ...)`, the style arguments
+(from the 2nd onward) are dropped (`PlotDecl.style` is an undefined field DSL-4/6 do not check,
+and is usually a string/color with no slot to carry it anyway). For
+`strategy.entry(id, direction, qty=..)`, `id` is dropped, and `qty` is pinned to `1` when omitted
+(this subgrammar has no strategy declaration, so there is no Pine `default_qty`). Pine's
+`strategy.entry` normally only executes inside an `if`, but this Pine subgrammar has no `if`
+(DSL-14), so every parsed call is an unconditional statement — `OrderDecl.when` is filled with an
+"always true" placeholder (`1 == 1`; a literal `true` is not in the grammar). Referencing an
+OHLCV identifier (open/high/low/close/volume) without declaring it auto-injects
+`input <name> : series<float> = 0` (it is really a market-data reference, not a genuine input,
+but AIOS Script v1 has no separate decl for that, and the value is unused).
 
-Lookahead (DSL-5) is not re-verified here: the Pine parser already rejects
-negative/variable postfix indices and `request.*`/`security`-style
-namespaces outright, so any `Program` this module can produce could not
-constitute a `SCRIPT_LOOKAHEAD` violation in the first place.
+Lookahead (DSL-5) is not re-verified here: the Pine parser already rejects negative/variable
+postfix indices and `request.*`/`security`-style namespaces outright, so any `Program` this
+module can produce could not constitute a `SCRIPT_LOOKAHEAD` violation in the first place.
 """
 from __future__ import annotations
 

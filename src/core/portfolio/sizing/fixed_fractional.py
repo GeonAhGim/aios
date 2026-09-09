@@ -1,10 +1,9 @@
 """L4_strategy_portfolio_backtest_v1.0.md#§2 row 90 — fixed fractional sizing.
 
-`qty = allocated_capital × fraction% / price`. `allocated_capital`,
-`current_price`, and `total_equity` are already enforced as required
-(non-Optional) fields by `PortfolioStateInput`, so this only adds a
-fail-closed check that `price`/`total_equity` > 0, to keep a division by
-zero or a negative weight from occurring here.
+`qty = allocated_capital × fraction% / price`. `allocated_capital`·
+`current_price`·`total_equity`는 `PortfolioStateInput`이 이미 필수(Optional
+아님) 필드로 강제하므로, 여기서는 0으로 나누거나 음수 비중이 나오지 않도록
+`price`/`total_equity` > 0만 fail-closed로 추가 검증한다.
 """
 from __future__ import annotations
 

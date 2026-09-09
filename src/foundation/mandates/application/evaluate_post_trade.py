@@ -1,35 +1,31 @@
-"""L4_compliance_and_regulatory_v1.0.md#9 CM-11 -- post-trade / end-of-day
-batch determination for fills.
+"""L4_compliance_and_regulatory_v1.0.md#9 CM-11 -- post-trade / end-of-day batch determination
+for fills.
 
-CM-9 (`domain/rules/{short_sale,wash_trade}.py`) and CM-10
-(`domain/market_abuse.py`) rules are only called, never reimplemented: CM-9
-rides on CM-3 `evaluator.evaluate_bundle` (the existing fail-closed wrapper
-plus worst-verdict adoption), and CM-10 calls `market_abuse.detect()`
-directly -- if a crossing-price/wash-window/spoofing-ratio formula
-reappears in this file, that is a defect.
+CM-9 (`domain/rules/{short_sale,wash_trade}.py`) and CM-10 (`domain/market_abuse.py`) rules are
+only called, never reimplemented: CM-9 rides on CM-3 `evaluator.evaluate_bundle` (the existing
+fail-closed wrapper plus worst-verdict adoption), and CM-10 calls `market_abuse.detect()`
+directly -- if a crossing-price/wash-window/spoofing-ratio formula reappears in this file, that
+is a defect.
 
-A violation (`ComplianceVerdict.DENY`) leads to `KillSwitchService.
-activate()` (TENANT scope) -- because of R-40/I3 (there is exactly one
-safety_control insert call site, `postgres_repository.py`), this file never
-writes to that table directly. As a result, the tenant's next order is
-rejected by the already-wired ACTIVE control check in `foundation_gate.py`
--- it rides the existing path with no new gate.
+A violation (`ComplianceVerdict.DENY`) leads to `KillSwitchService.activate()` (TENANT scope) --
+because of R-40/I3 (there is exactly one safety_control insert call site,
+`postgres_repository.py`), this file never writes to that table directly. As a result, the
+tenant's next order is rejected by the already-wired ACTIVE control check in
+`foundation_gate.py` -- it rides the existing path with no new gate.
 
-Reduced scope (unverified, for a follow-up leaf): `position_qty` is the
-current-quantity snapshot from `positions` (not a per-fill running balance).
-`borrow_available_qty` is always 0 -- LA-25 `pos_borrow_position`
-(`positions/domain/borrow.py`) has no lookup adapter yet, so "no
-borrow available" is used as the safe-side default. `market_close_at` is UTC
-midnight (the next day at 0:00), not the actual exchange close.
+Reduced scope (unverified, for a follow-up leaf): `position_qty` is the current-quantity
+snapshot from `positions` (not a per-fill running balance). `borrow_available_qty` is always 0
+-- LA-25 `pos_borrow_position` (`positions/domain/borrow.py`) has no lookup adapter yet, so "no
+borrow available" is used as the safe-side default. `market_close_at` is UTC midnight (the next
+day at 0:00), not the actual exchange close.
 
-For the idempotency key (DoD (c)), instead of `safety_control.
-idempotency_digest` (UNIQUE, already created by `f4b9d6e5a7c8` but not yet
-populated by any call site), this file looks up whether an ACTIVE control
-already exists for the same reason (tenant+rule_code+business_date) before
-activating, and skips if so -- using that column would require changing
-`insert_safety_control()`'s signature, which is outside this file's declared
-scope. Being read-then-write, it is not safe under concurrent races, but
-this batch only ever runs as a single serial tick (no overlap).
+For the idempotency key (DoD (c)), instead of `safety_control.idempotency_digest` (UNIQUE,
+already created by `f4b9d6e5a7c8` but not yet populated by any call site), this file looks up
+whether an ACTIVE control already exists for the same reason (tenant+rule_code+business_date)
+before activating, and skips if so -- using that column would require changing
+`insert_safety_control()`'s signature, which is outside this file's declared scope. Being
+read-then-write, it is not safe under concurrent races, but this batch only ever runs as a
+single serial tick (no overlap).
 """
 from __future__ import annotations
 
@@ -105,13 +101,11 @@ def evaluate_tenant_day(
     rule_params: Mapping[str, Mapping[str, Any]],
     now: datetime,
 ) -> tuple[list[PostTradeViolation], list[PostTradeViolation]]:
-    """Pure evaluation (one tenant's day), no I/O or clock reads (`now` is
-    caller-injected, same convention as `evaluate_bundle`). Both CM-9 rules
-    are always DENY on a hit; the three real CM-10 detections are WARN (only
-    `DATA_MISSING` is DENY, I-02) -- per §3 "WARN passes through but is
-    recorded", these only surface via `warnings` and never block.
-    Deduplicated by rule/pattern id (multiple fills can hit the same rule
-    more than once)."""
+    """Pure evaluation (one tenant's day), no I/O or clock reads (`now` is caller-injected, same
+    convention as `evaluate_bundle`). Both CM-9 rules are always DENY on a hit; the three real
+    CM-10 detections are WARN (only `DATA_MISSING` is DENY, I-02) -- per §3 "WARN passes through
+    but is recorded", these only surface via `warnings` and never block. Deduplicated by
+    rule/pattern id (multiple fills can hit the same rule more than once)."""
     bundle = _cm9_bundle(rule_params)
     blocking: dict[str, PostTradeViolation] = {}
     warnings: dict[str, PostTradeViolation] = {}
