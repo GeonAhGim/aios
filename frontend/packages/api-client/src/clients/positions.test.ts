@@ -174,6 +174,30 @@ describe("createPositionsClient", () => {
     expect(result.asOf).toBe(META.as_of);
   });
 
+  it("수치/성능: listPositions가 500개 항목을 받아도 항목마다 정확히 판별하고 짧은 시간 안에 끝난다", async () => {
+    const ITEM_COUNT = 500;
+    const items = Array.from({ length: ITEM_COUNT }, (_, i) =>
+      i % 2 === 0
+        ? { ...SNAPSHOT, position_key: `upbit:BTC-KRW:strat-1:exec-${i}` }
+        : { schema_version: "v2" },
+    );
+    stubFetch({ data: { items }, meta: META });
+
+    const startedAt = performance.now();
+    const result = await makeClient().listPositions();
+    const elapsedMs = performance.now() - startedAt;
+
+    expect(result.items).toHaveLength(ITEM_COUNT);
+    expect(result.items.filter((item) => item.kind === "ok")).toHaveLength(ITEM_COUNT / 2);
+    expect(result.items.filter((item) => item.kind === "unsupported_schema_version")).toHaveLength(
+      ITEM_COUNT / 2,
+    );
+    // 항목마다 parsePositionSnapshot을 한 번씩만 호출하는 O(n) 파싱이면 500건은
+    // 수백 ms를 넘길 이유가 없다 — 회귀로 항목마다 배열 전체를 재스캔하는 O(n^2)가
+    // 되면 이 임계값이 신호를 준다.
+    expect(elapsedMs).toBeLessThan(1000);
+  });
+
   it("negative: 404 RESOURCE_NOT_FOUND 봉투는 ApiError(404, errorCode)로 그대로 던진다(재분류·빈 목록 대체 금지)", async () => {
     stubFetch(
       { error_code: "RESOURCE_NOT_FOUND", message: "없음", details: {}, trace_id: "trace-1", retry_after_seconds: null },

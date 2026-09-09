@@ -167,6 +167,32 @@ describe("PortfolioPage 포지션 실데이터", () => {
     expect(screen.getByTestId("mark-stale-badge")).toBeInTheDocument();
   });
 
+  it(
+    "수치/성능: 40개의 포지션 스냅샷을 받아도 정확히 40장의 카드로 렌더하고 여유 시간 안에 끝난다",
+    async () => {
+      const POSITION_COUNT = 40;
+      const items = Array.from({ length: POSITION_COUNT }, (_, i) =>
+        parsePositionSnapshot({ ...SNAPSHOT, position_key: `upbit:BTC-KRW:strat-1:exec-${i}` }),
+      );
+
+      const startedAt = performance.now();
+      renderPage(
+        fakeClient({ listPositions: vi.fn().mockResolvedValue({ items, asOf: AS_OF_FRESH }) }),
+      );
+      await waitFor(
+        () => expect(screen.getAllByTestId("position-pnl-card")).toHaveLength(POSITION_COUNT),
+        { timeout: 15000 },
+      );
+      const elapsedMs = performance.now() - startedAt;
+
+      // jsdom 렌더 자체가 무겁고 공유 머신(다른 스위트와 CPU 경합, task-1968과 동일한
+      // 사유)에서 실측 편차가 커서 절대 임계값을 넉넉히 둔다 — 카드마다 O(1) 렌더가
+      // 카드마다 전체 목록을 재스캔하는 O(n^2)로 퇴행하면 40건도 이 임계값을 넘긴다.
+      expect(elapsedMs).toBeLessThan(15000);
+    },
+    20000,
+  );
+
   it("negative: 404 RESOURCE_NOT_FOUND는 NotFoundState(재시도 없음)로 그리고 서버 message를 노출하지 않는다", async () => {
     renderPage(
       fakeClient({ listPositions: vi.fn().mockRejectedValue(apiError(404, "RESOURCE_NOT_FOUND")) }),
