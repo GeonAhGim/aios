@@ -23,6 +23,8 @@ const DANGER_STATUSES = new Set([
   "MATERIAL_MISMATCH",
   "DENIED",
   "ERROR",
+  // task-2338(FE-OPS-4): 신뢰(trust) 동의·멤버십 폐기 상태.
+  "REVOKED",
 ]);
 const WARNING_STATUSES = new Set([
   "PAUSED",

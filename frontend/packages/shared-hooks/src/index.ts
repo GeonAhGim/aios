@@ -78,6 +78,13 @@ export {
 } from "./useMandates";
 export { useReconciliationStates, useResolveReconciliation } from "./useReconciliation";
 export { useAuditTimeline, useVerifyAuditChain } from "./useEvidence";
+export {
+  useTrustStatus,
+  useRevokeConsent,
+  useGrantMembership,
+  useSuspendMembership,
+  useRevokeMembership,
+} from "./useTrust";
 export { useWalletBalance, useRequestTopup } from "./useWallet";
 export { useMyAlerts, useCreateAlert, useCancelAlert } from "./useAlerts";
 export {

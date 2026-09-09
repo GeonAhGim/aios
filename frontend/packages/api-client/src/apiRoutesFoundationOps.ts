@@ -10,6 +10,14 @@
 // 아님). v1Path는 mandates.*와 동일 사유로 mount_v1(PLT-16) 미도달이라 null. POST
 // "/runs"(대사 실행)는 decision상 이 리프의 UI 범위 밖이라 등록하지 않는다(사람이
 // EntitySnapshot을 입력해 만드는 화면이 없다 — UNREGISTERED_ROUTE_WHITELIST에 남겨둠).
+//
+// task-2338(FE-OPS-4): trust.py(GET /status, POST /consents/{consent_id}:revoke)와
+// trust_memberships.py(POST /memberships, POST /memberships/{subject_id}:suspend,
+// POST /memberships/{subject_id}:revoke) 5경로 — 전부 `-> ApiResponse[...]`+`ok(...)`라
+// envelope=true, v1Path는 동일 사유(mount_v1 미도달)로 null. §9 PLT-15 금전 라우트
+// 표(문서 438행)는 "POST /v1/foundation/trust/consents"(accept, 이미
+// foundation.trustConsents.accept로 등록됨)만 열거하고 여기 5경로는 열거하지 않는다 —
+// idempotencyRequired=false(기본값) 그대로 둔다.
 import { route } from "./apiRouteTypes";
 
 // 명시적 Record<string, ApiRouteDefinition> 타입 주석을 주지 않는다 — 그러면 spread된
@@ -21,4 +29,9 @@ export const FOUNDATION_OPS_ROUTES = {
   "reconciliation.resolve": route("/v1/foundation/reconciliation/:targetRef:resolve", true, null, true),
   "evidence.timeline": route("/v1/foundation/evidence/timeline", true, null, true),
   "evidence.chainVerify": route("/v1/foundation/evidence/chain:verify", true, null, true),
+  "trust.status": route("/v1/foundation/trust/status", true, null, true),
+  "trust.consents.revoke": route("/v1/foundation/trust/consents/:consentId:revoke", true, null, true),
+  "trust.memberships.grant": route("/v1/foundation/trust/memberships", true, null, true),
+  "trust.memberships.suspend": route("/v1/foundation/trust/memberships/:subjectId:suspend", true, null, true),
+  "trust.memberships.revoke": route("/v1/foundation/trust/memberships/:subjectId:revoke", true, null, true),
 };

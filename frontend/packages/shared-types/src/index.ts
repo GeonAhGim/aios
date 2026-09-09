@@ -32,6 +32,7 @@ export * from "./tokenPair";
 export * from "./canonicalDigest";
 export * from "./membership";
 export * from "./membershipMutation";
+export * from "./trust";
 export * from "./secretRef";
 export * from "./session";
 export * from "./positionView";

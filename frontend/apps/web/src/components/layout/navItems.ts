@@ -48,6 +48,7 @@ export const ADMIN_NAV_ITEMS: NavItem[] = [
   { to: "/admin/safety-controls", label: "안전통제" },
   { to: "/admin/reconciliation", label: "대사관리" },
   { to: "/admin/evidence-chain", label: "증빙체인검증" },
+  { to: "/admin/trust", label: "신뢰멤버십" },
 ];
 
 export const ALL_NAV_ITEMS: NavItem[] = [

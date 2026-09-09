@@ -15,6 +15,7 @@ import { withReconciliation } from "./clients/reconciliation";
 import { withRiskGate } from "./clients/riskGate";
 import { withScripts } from "./clients/scripts";
 import { withStrategyBuilder } from "./clients/strategyBuilder";
+import { withTrust } from "./clients/trust";
 import { withValidation } from "./clients/validation";
 
 // 도메인별 메서드는 clients/*.ts의 믹스인으로 분리되어 있다(파일당 ≤300줄
@@ -28,11 +29,13 @@ const ComposedApiClient = withPlatform(
           withStrategyBuilder(
             withValidation(
               withFoundation(
-                withEvidence(
-                  withReconciliation(
-                    withMandates(
-                      withRiskGate(
-                        withExchange(withExecutions(withPortfolio(withAccount(withAuth(ApiClientBase))))),
+                withTrust(
+                  withEvidence(
+                    withReconciliation(
+                      withMandates(
+                        withRiskGate(
+                          withExchange(withExecutions(withPortfolio(withAccount(withAuth(ApiClientBase))))),
+                        ),
                       ),
                     ),
                   ),

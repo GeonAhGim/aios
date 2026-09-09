@@ -137,11 +137,9 @@ const UNREGISTERED_ROUTE_WHITELIST: Readonly<Record<string, string>> = {
   "/v1/foundation/risk-gate/evaluate": "리스크 게이트 평가 트리거 화면이 없다",
   "/v1/foundation/risk-gate/rule-bundles/{bundle_id}:activate": "룰번들 활성화 액션 UI가 없다",
   "/v1/foundation/risk-gate/rule-bundles/{bundle_id}:approve": "룰번들 승인 액션 UI가 없다",
-  "/v1/foundation/trust/consents/{consent_id}:revoke": "동의 철회 액션 UI가 없다(accept만 foundation.trustConsents.accept로 등록돼 있음)",
-  "/v1/foundation/trust/memberships": "신뢰 멤버십 관리 화면이 없다",
-  "/v1/foundation/trust/memberships/{subject_id}:revoke": "신뢰 멤버십 관리 화면이 없다",
-  "/v1/foundation/trust/memberships/{subject_id}:suspend": "신뢰 멤버십 관리 화면이 없다",
-  "/v1/foundation/trust/status": "신뢰 상태 조회 화면이 없다",
+  // task-2338(FE-OPS-4): TrustPage가 status/consents:revoke/memberships(grant/suspend/
+  // revoke) 5건 전부를 trust.*로 등록했다 — 여기 남아 있던 5개 항목(task-2168 원 목록)을
+  // 제거한다.
 };
 
 function nonGhostRouteEntries(): Array<[ApiRouteName, ApiRouteDefinition]> {

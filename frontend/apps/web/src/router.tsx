@@ -10,6 +10,7 @@ import { EvidenceChainPage } from "./routes/admin/EvidenceChainPage";
 import { PlatformListingPage } from "./routes/admin/PlatformListingPage";
 import { ReconciliationPage } from "./routes/admin/ReconciliationPage";
 import { SafetyControlsPage } from "./routes/admin/SafetyControlsPage";
+import { TrustPage } from "./routes/admin/TrustPage";
 import { UserManagementPage } from "./routes/admin/UserManagementPage";
 import { VerificationQueuePage } from "./routes/admin/VerificationQueuePage";
 import { WalletTopupsPage } from "./routes/admin/WalletTopupsPage";
@@ -111,4 +112,5 @@ export const router = createBrowserRouter([
   { path: "/admin/safety-controls", element: protectAdmin(<SafetyControlsPage />) },
   { path: "/admin/reconciliation", element: protectAdmin(<ReconciliationPage />) },
   { path: "/admin/evidence-chain", element: protectAdmin(<EvidenceChainPage />) },
+  { path: "/admin/trust", element: protectAdmin(<TrustPage />) },
 ]);
