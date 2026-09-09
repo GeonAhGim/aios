@@ -93,3 +93,39 @@ describe("WalletBalanceCard", () => {
     expect(screen.getByText(/잔액 정보를 표시할 수 없습니다/)).toBeInTheDocument();
   });
 });
+
+// DEPTH_LA_LB_LC(task-2723)가 원 task-618(ea7bafe)을 D1로 판정한 미달 항목 중
+// failure-injection(API/백엔드 결함 시뮬레이션)을 화면 계층에서 보강한다 —
+// parseWalletBalance(walletBalance.test.ts)가 거부 판정을 내는 것과, 그 판정이
+// 카드까지 예외 없이 전파돼 실제로 화면에 안전하게 표시되는 것은 별개 증명이다.
+describe("WalletBalanceCard failure-injection — 백엔드 결함 시뮬레이션이 화면까지 전파되지 않는다", () => {
+  it("컬럼 마이그레이션 중 ORM이 available을 문자열 대신 숫자 0으로 흘려보내도 크래시 없이 오류 카드를 보여준다", () => {
+    const malformed = {
+      userId: "u-1",
+      balance: "10000",
+      available: 0,
+      held: "2000",
+      pendingPayout: "1000",
+    } as unknown as WalletBalance;
+    render(<WalletBalanceCard balance={malformed} />);
+    expect(screen.getByText(/잔액 정보를 표시할 수 없습니다/)).toBeInTheDocument();
+  });
+
+  it("백엔드 Decimal 직렬화기가 지수표기법('1e5')으로 금액을 보내도 크래시 없이 오류 카드를 보여준다", () => {
+    const malformed = { userId: "u-1", balance: "1e5" } as unknown as WalletBalance;
+    render(<WalletBalanceCard balance={malformed} />);
+    expect(screen.getByText(/잔액 정보를 표시할 수 없습니다/)).toBeInTheDocument();
+  });
+
+  it("held 필드가 명시적 null로 오는 결함 응답도 크래시 없이 오류 카드를 보여준다", () => {
+    const malformed = {
+      userId: "u-1",
+      balance: "10000",
+      available: "7000",
+      held: null,
+      pendingPayout: "1000",
+    } as unknown as WalletBalance;
+    render(<WalletBalanceCard balance={malformed} />);
+    expect(screen.getByText(/잔액 정보를 표시할 수 없습니다/)).toBeInTheDocument();
+  });
+});
