@@ -24,7 +24,13 @@ from src.core.safety.circuit_breaker import (
     CircuitBreakerMetrics,
     CircuitBreakerService,
 )
-from src.services.safety.circuit_breaker_loop import _check_reactivation, cooldown_ticks
+from src.core.safety.data_freshness import DataFreshnessTracker
+from src.core.safety.metrics_collector import ApiCallTracker
+from src.services.safety.circuit_breaker_loop import (
+    _check_reactivation,
+    cooldown_ticks,
+    run_circuit_breaker_tick,
+)
 from tests.integration.conftest import create_test_user
 
 _BAD_METRICS = CircuitBreakerMetrics(data_delay_sec=Decimal("6"))  # halted 임계(5) 초과
@@ -200,3 +206,61 @@ async def test_worsening_while_pending_cancels_request(pool, cb, events):
     cancelled = await approval.get_request(pool, request_id)
     assert cancelled.status == "CANCELLED"
     assert events.count("risk.circuit_breaker.reactivation_cancelled") == 1
+
+
+def _fresh_freshness_tracker() -> DataFreshnessTracker:
+    """`freshness=None`이면 `collect_circuit_breaker_metrics`가 data_delay_sec을
+    항상 None("모름")으로 채우고, compute_level은 그걸 항상 halted 임계
+    초과로 fail-closed 처리한다(metrics_collector.py 설계 노트) — 그러면
+    run_circuit_breaker_tick 자체를 도는 이 테스트들은 지표와 무관하게
+    항상 halted를 관측하게 돼 무의미해진다. 실측을 흉내내 최근 close_time을
+    기록해둔다."""
+    tracker = DataFreshnessTracker()
+    tracker.record("binance", "BTC/USDT", datetime.now(timezone.utc))
+    return tracker
+
+
+async def test_run_circuit_breaker_tick_collects_and_evaluates_via_public_entrypoint(
+    pool, cb, policy
+):
+    """`_check_reactivation`만 테스트하면 배선 진입점인
+    `run_circuit_breaker_tick`(수집→evaluate→recovery_gate→check_reactivation
+    전체)이 실제로 조립돼 있다는 증거가 안 된다(I-10) — 여기서는 그 공개
+    함수를 직접(스케줄러 없이) 호출해 수집→evaluate가 실행되고 history에
+    표본이 쌓이는지 본다."""
+    history: deque[CircuitBreakerMetrics] = deque(maxlen=cooldown_ticks(policy))
+
+    await run_circuit_breaker_tick(
+        pool, cb, ApiCallTracker(), _fresh_freshness_tracker(), policy, history=history
+    )
+
+    assert len(history) == 1
+    state = await cb.get_state()
+    assert state.level == CircuitBreakerLevel.NORMAL  # 빈 테스트 DB + 실측 지표 -> 정상
+
+
+async def test_run_circuit_breaker_tick_drives_full_reactivation_end_to_end(
+    pool, cb, policy, events
+):
+    """같은 진입점으로 halted -> (승인+evidence+cooldown) -> normal 전체
+    파이프라인이 한 번의 tick 호출로 조립돼 동작하는지 증명한다."""
+    request_id = await _make_halted_with_pending_request(pool, cb)
+    await _approve(pool, request_id, evidence_ref="ev-1")
+
+    history = _full_history(policy)
+    later = lambda: datetime.now(timezone.utc)  # noqa: E731
+
+    await run_circuit_breaker_tick(
+        pool,
+        cb,
+        ApiCallTracker(),
+        _fresh_freshness_tracker(),
+        policy,
+        history=history,
+        now=later,
+    )
+
+    state = await cb.get_state()
+    assert state.level == CircuitBreakerLevel.NORMAL
+    assert state.reactivation_approval_id is None
+    assert events.count("risk.circuit_breaker.reactivated") == 1
