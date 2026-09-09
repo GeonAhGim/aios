@@ -19,6 +19,7 @@ from src.core.observability.metric_names import ORDER_FILL_COUNT_TOTAL
 from src.core.observability.metrics import MetricsPort, NullMetrics
 from src.data.models.base import Currency, Money
 from src.data.models.trading import Order, OrderStatus
+from src.foundation.entities.domain.defaults import default_portfolio_id
 from src.foundation.evidence.adapters.postgres_repository import PostgresAuditEventRepository
 from src.foundation.positions.adapters.postgres_journal_repository import PostgresJournalRepository
 from src.foundation.positions.adapters.postgres_snapshot_repository import (
@@ -55,9 +56,12 @@ async def record_fill_in_position_ledger(
         if user_id is None:
             logger.warning("position_ledger: execution_id=%s user_id 없음", order.execution_id)
             return
+        # FA-0d: portfolio_id는 이 리프의 범위 안에서는 FA-1 기본 포트폴리오
+        # (`default_portfolio_id`, user_id 단일 인자 UUIDv5)로 고정한다 — FA-5/6의
+        # 다포트폴리오 선택 UX가 이 쓰기 경로에 아직 배선되지 않았다(별도 리프).
         position_key = str(PositionKey(
             venue=order.exchange, instrument_id=order.symbol, strategy_id=order.strategy_id,
-            execution_id=str(order.execution_id),
+            execution_id=str(order.execution_id), portfolio_id=default_portfolio_id(user_id),
         ))
         fill_price = order.average_fill_price
         currency = fill_price.currency if fill_price else Currency.USDT

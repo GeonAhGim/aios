@@ -42,6 +42,7 @@ from src.foundation.positions.contracts.v1 import (
     RecordFundingCommand,
 )
 from src.foundation.positions.domain import fx, journal_rules
+from src.foundation.positions.domain.position_key import PositionKey
 from src.foundation.positions.domain.snapshot_builder import SnapshotFold, apply_one
 from src.foundation.positions.ports.journal_repository import PositionJournalRepository
 from src.foundation.positions.ports.snapshot_repository import SnapshotRepository
@@ -115,6 +116,9 @@ async def record_funding_fee(
     clock: Clock,
     fx_rate: FXRate | None = None,
 ) -> PositionSnapshotView:
+    # FA-0d: [[record_fill]]과 같은 이유로 fail-closed 형식 검사(중앙 생성자
+    # 경유 확인).
+    PositionKey.parse(command.position_key)
     await _acquire_position_lock(conn, command.position_key)
 
     snapshot = await snapshots.get(conn, command.tenant_id, command.position_key)

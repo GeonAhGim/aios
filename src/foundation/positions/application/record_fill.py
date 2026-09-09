@@ -72,6 +72,7 @@ from src.foundation.positions.domain import fx, journal_rules
 from src.foundation.positions.domain.cost_basis.fifo import FifoLots, FillEvent
 from src.foundation.positions.domain.cost_basis.selector import cost_basis_for
 from src.foundation.positions.domain.cost_basis.weighted import WeightedAverage
+from src.foundation.positions.domain.position_key import PositionKey
 from src.foundation.positions.domain.snapshot_builder import SnapshotFold, apply_one
 from src.foundation.positions.ports.journal_repository import PositionJournalRepository
 from src.foundation.positions.ports.snapshot_repository import SnapshotRepository
@@ -163,6 +164,11 @@ async def record_fill(
     clock: Clock,
     fx_rate: FXRate | None = None,
 ) -> PositionSnapshotView:
+    # FA-0d: position_key는 반드시 domain.position_key.PositionKey(중앙 생성자)
+    # 경유로 만들어진 값이어야 한다 — 여기서 parse()로 형식을 확인해
+    # f-string/concat으로 조립된 레거시·비정상 키가 저널에 들어가지 못하게
+    # fail-closed로 막는다(재시도 불가, 호출자 버그).
+    PositionKey.parse(command.position_key)
     await _acquire_position_lock(conn, command.position_key)
 
     snapshot = await snapshots.get(conn, command.tenant_id, command.position_key)

@@ -39,6 +39,7 @@ import asyncpg
 
 from src.data.models.base import AssetClass, Money
 from src.foundation.positions.contracts.v1 import PositionSnapshotView, RebuildReport
+from src.foundation.positions.domain.position_key import PositionKey
 from src.foundation.positions.domain.snapshot_builder import SnapshotFold, fold
 from src.foundation.positions.ports.journal_repository import PositionJournalRepository
 from src.foundation.positions.ports.snapshot_repository import SnapshotRepository
@@ -95,6 +96,9 @@ async def rebuild_snapshot(
     clock: Clock,
     dry_run: bool = True,
 ) -> RebuildReport:
+    # FA-0d: [[record_fill]]과 같은 이유로 fail-closed 형식 검사(중앙 생성자
+    # 경유 확인) — 재빌드 대상 키도 예외가 아니다.
+    PositionKey.parse(position_key)
     async with pool.acquire() as conn, conn.transaction():
         await _acquire_position_lock(conn, position_key)
 

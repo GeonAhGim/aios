@@ -42,6 +42,7 @@ from src.foundation.positions.adapters.postgres_snapshot_repository import (
 )
 from src.foundation.positions.application.record_fill import record_fill
 from src.foundation.positions.contracts.v1 import CostMethod, RecordFillCommand
+from src.foundation.positions.domain.position_key import PositionKey
 from src.services.oms.adapters.fills_repository import FillsRepository
 from src.services.oms.adapters.order_events_repository import PostgresOrderEventRepository
 from src.services.oms.adapters.order_repository import PostgresOrderRepository
@@ -263,7 +264,12 @@ async def _record_two_fills(pool) -> tuple:
     audit = PostgresAuditEventRepository(pool)
     tenant_id = await create_test_tenant(pool)
     account_id = await create_pos_account(pool, tenant_id)
-    position_key = f"TESTVENUE:INST{uuid4().hex[:8]}:default:paper"
+    position_key = str(
+        PositionKey(
+            venue="TESTVENUE", instrument_id=f"INST{uuid4().hex[:8]}", strategy_id="default",
+            execution_id="paper", portfolio_id=uuid4(),
+        )
+    )
     await open_position(
         pool, tenant_id=tenant_id, account_id=account_id, position_key=position_key
     )

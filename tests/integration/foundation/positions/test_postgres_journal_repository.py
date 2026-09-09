@@ -28,7 +28,7 @@ from tests.integration.foundation.positions.conftest import create_pos_account, 
 
 def _key() -> str:
     return str(
-        PositionKey(
+        PositionKey(portfolio_id=uuid4(), 
             venue="TESTVENUE",
             instrument_id=f"INST{uuid4().hex[:8]}",
             strategy_id="default",

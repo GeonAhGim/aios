@@ -197,7 +197,7 @@ def _unique_symbol(prefix: str) -> str:
 
 def _position_key(venue_symbol: str) -> str:
     return str(
-        PositionKey(
+        PositionKey(portfolio_id=uuid4(), 
             venue="bitget",
             instrument_id=venue_symbol,
             strategy_id="default",
@@ -437,7 +437,7 @@ async def test_unknown_venue_position_key_yields_none_mark(pool, refs, store, ca
         pool, tenant_id, venue="TESTVENUE", base_currency=Currency.USDT
     )
     position_key = str(
-        PositionKey(
+        PositionKey(portfolio_id=uuid4(), 
             venue="TESTVENUE",
             instrument_id=_unique_symbol("BTCUSDT"),
             strategy_id="default",

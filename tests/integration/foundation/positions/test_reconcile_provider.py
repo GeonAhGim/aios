@@ -71,7 +71,10 @@ async def _open_position(
     pool, *, tenant_id, account_id, asset: str, quantity: Decimal
 ) -> PositionSnapshotView:
     position_key = str(
-        PositionKey(venue="bitget", instrument_id=asset, strategy_id="default", execution_id="p1")
+        PositionKey(
+            portfolio_id=uuid4(), venue="bitget", instrument_id=asset, strategy_id="default",
+            execution_id="p1",
+        )
     )
     snapshot = PositionSnapshotView(
         position_key=position_key,

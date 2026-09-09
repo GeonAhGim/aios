@@ -63,7 +63,7 @@ def _unique_symbol(prefix: str) -> str:
 
 def _position_key(venue_symbol: str) -> str:
     return str(
-        PositionKey(
+        PositionKey(portfolio_id=uuid4(), 
             venue="bitget", instrument_id=venue_symbol, strategy_id="default", execution_id="paper"
         )
     )
