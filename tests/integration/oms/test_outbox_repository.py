@@ -4,19 +4,34 @@
 Spec: docs/specs/L4_execution_oms_and_exchange_v1.0.md §9 L4-08, §5.1 outbox
 claim/done/retry/dead 행.
 
-지연 단언은 쓰지 않는다(headless worker 지침) — `asyncio.gather`로 3워커를
-동시에 실행한 뒤 각 행이 정확히 한 워커에게만 갔는지 구조로 확인한다.
+3워커 경합/펜싱 테스트는 `asyncio.gather`로 동시 실행한 뒤 각 행이 정확히
+한 워커에게만 갔는지 구조로 확인한다(지연 단언 없음).
+
+DEPTH_L4_BR(task-2722)가 원 리프(task-1565, 232cd45)를 D1로 판정 — 3워커
+정확히-1회 레이스 증명은 강하지만 수치 성능/지연 단언과, 그 단언들이 실제
+회귀를 잡는지 보이는 명시적 CI red-line 테스트가 없었다. task-2764 DEEPEN으로
+아래 두 가지를 추가한다:
+- `test_claim_batch_is_single_round_trip_with_bounded_latency` — 수치 성능
+  단언. task-1038/1521 decision(`tests/performance/oms/`)과 동일하게 절대
+  지연은 공유 CI 환경 편차 신호라 print(비차단)로만 남기고, `claim_batch`
+  1회의 순차 DB 왕복 수만 정확히(==2, CTE UPDATE...RETURNING 1 + 세션 리셋 1) CI
+  차단 게이트로 둔다.
+- `_RacyOutboxRepository` + `test_broken_claim_atomicity_is_caught_by_exactly_once_gate`
+  — `claim_batch`의 원자성(SKIP LOCKED)만 의도적으로 깨서, 이 파일의
+  "행당 정확히 1회" 단언들이 장식이 아니라 그 회귀(중복 클레임)를 실제로
+  관측 가능하게 만드는 게이트임을 증명한다.
 """
 from __future__ import annotations
 
 import asyncio
+import time
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 
 import pytest
 
 from src.core.db.conditional_write import ConcurrencyConflictError
-from src.services.oms.adapters.outbox_repository import OutboxRepository
+from src.services.oms.adapters.outbox_repository import OutboxRepository, _row_to_outbox_row
 from src.services.oms.ports.repository import OutboxRepoPort
 from tests.integration.oms.conftest import create_test_user, insert_order
 
@@ -110,6 +125,108 @@ async def test_three_workers_claim_each_row_exactly_once(pool):
     assert len(claimed_ids) == len(set(claimed_ids))  # 중복 없음(행당 정확히 1회)
     for rows in results:
         assert len(rows) <= 3  # limit 준수 — 정확한 분배 비율은 스케줄링에 의존
+
+
+async def test_claim_batch_is_single_round_trip_with_bounded_latency(pool):
+    """DEPTH_L4_BR(task-2722) D2 — 수치 성능 단언(CI 차단 게이트).
+
+    task-1038/1521 decision과 동일: 절대 지연은 공유 CI의 CPU/DB 편차 신호라
+    게이트로 쓰지 않고 print만 남긴다. `claim_batch` 1회가 쓰는 순차 DB 왕복
+    수는 환경과 무관하게 결정적이므로(CTE `UPDATE ... RETURNING` 1 + asyncpg
+    `pool.release()` 세션 리셋 1 — `tests/performance/oms/`의 왕복 집계 관례와
+    동일하게 리셋도 예산에 포함한다, `conn.add_query_logger` 콜백은 release
+    시점에야 배출되는 걸 실측 확인했다) 그 값만 정확히(==2) 단언한다 — N+1
+    회귀를 CI가 차단한다.
+    """
+    repo = OutboxRepository()
+    order_id = await _order_id(pool)
+
+    latencies_ms: list[float] = []
+    for _ in range(20):
+        await _enqueue(pool, repo, order_id)
+        async with pool.acquire() as conn:
+            started = time.perf_counter()
+            rows = await repo.claim_batch(conn, worker_id="w-perf", limit=1, lease_sec=30)
+            latencies_ms.append((time.perf_counter() - started) * 1000.0)
+        assert len(rows) == 1
+
+    latencies_ms.sort()
+    throughput = 1000.0 / (sum(latencies_ms) / len(latencies_ms))
+    queries: list[str] = []
+    await _enqueue(pool, repo, order_id)
+    async with pool.acquire() as conn:
+        conn.add_query_logger(lambda record: queries.append(getattr(record, "query", "")))
+        await repo.claim_batch(conn, worker_id="w-perf", limit=1, lease_sec=30)
+    round_trips = len(queries)  # release(세션 리셋)까지 끝난 뒤 읽는다 — 콜백은 지연 배출된다
+
+    print(
+        f"\nclaim_batch(limit=1) latency (n=20): "
+        f"p50={latencies_ms[10]:.2f}ms p95={latencies_ms[18]:.2f}ms "
+        f"max={latencies_ms[-1]:.2f}ms throughput~={throughput:.1f} calls/s "
+        f"(절대시간 비차단 — task-1038/1521 decision); "
+        f"round trips={round_trips} (budget==2, CI 차단)"
+    )
+    assert round_trips == 2, (
+        f"claim_batch가 SQL 왕복을 {round_trips}개 냈다(예산=2 — CTE UPDATE..."
+        "RETURNING 1 + 세션 리셋 1) — 구조 변경(N+1 성능 회귀)입니다."
+    )
+
+
+class _RacyOutboxRepository(OutboxRepository):
+    """negative 전용(CI red-line, DEPTH_L4_BR task-2722) — `claim_batch`의
+    원자성(SKIP LOCKED가 주는 "후보 스냅샷과 SENDING 기록이 한 원자적 SQL문"
+    보장)을 의도적으로 깬다: 후보를 잠금 없이 먼저 SELECT하고 `await`로 창을
+    넓힌 뒤, 각 행을 상태 조건 없이 UPDATE한다. 여러 워커가 같은 PENDING
+    스냅샷을 동시에 후보로 볼 수 있어 같은 행이 두 번 이상 "클레임"된다."""
+
+    async def claim_batch(self, conn, *, worker_id, limit, lease_sec):
+        candidates = await conn.fetch(
+            "SELECT id FROM order_command_outbox WHERE state = 'PENDING' "
+            "AND not_before <= now() ORDER BY created_at LIMIT $1",
+            limit,
+        )
+        await asyncio.sleep(0.05)  # 회귀 주입 — 다른 워커의 SELECT가 같은 스냅샷을 본다
+        claimed = []
+        for record in candidates:
+            row = await conn.fetchrow(
+                "UPDATE order_command_outbox SET state = 'SENDING', worker_id = $1, "
+                "lease_until = now() + make_interval(secs => $2::double precision), "
+                "updated_at = now() WHERE id = $3 RETURNING *",
+                worker_id,
+                lease_sec,
+                record["id"],
+            )
+            if row is not None:
+                claimed.append(_row_to_outbox_row(row))
+        return claimed
+
+
+async def test_broken_claim_atomicity_is_caught_by_exactly_once_gate(pool):
+    """DEPTH_L4_BR(task-2722) — 명시적 CI red-line 회귀 테스트.
+
+    `_RacyOutboxRepository`로 claim_batch의 원자성(SKIP LOCKED)만 제거하고
+    나머지는 그대로 둔 채 3워커를 동시에 돌린다. 이 파일의
+    `test_three_workers_claim_each_row_exactly_once`가 지키는 "행당 정확히
+    1회" 불변이 실제로 깨져야, 그 단언이 장식이 아니라 회귀를 적색으로
+    만드는 게이트임이 증명된다.
+    """
+    repo = _RacyOutboxRepository()
+    order_id = await _order_id(pool)
+    row_ids = {await _enqueue(pool, repo, order_id) for _ in range(9)}
+
+    async def claim_as(worker_id: str):
+        async with pool.acquire() as conn:
+            return await repo.claim_batch(conn, worker_id=worker_id, limit=3, lease_sec=30)
+
+    results = await asyncio.gather(claim_as("A"), claim_as("B"), claim_as("C"))
+    claimed_ids = [r.id for rows in results for r in rows]
+    duplicates = len(claimed_ids) - len(set(claimed_ids))
+    assert row_ids & set(claimed_ids)  # 정상 흐름과 무관하게 최소한 뭔가는 클레임됐다
+    assert duplicates > 0, (
+        "claim_batch 원자성을 깼는데도 중복 클레임이 하나도 관측되지 않았다 — "
+        "이 파일의 정확히-1회 단언들이 회귀를 잡지 못하는 무력한 게이트일 수 있다"
+        "(red-line 실패)."
+    )
 
 
 async def test_lease_expired_row_reclaimed_after_recovery_resets_pending(pool):
