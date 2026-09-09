@@ -3,11 +3,15 @@
 순수 함수만 다룬다(네트워크 없음). 공식 저장소 예제의 세 가지 실제 구조를 합성
 데이터로 재현한다: REST GET(조회), REST POST(주문, 실전/모의 tr_id 분기), WebSocket
 (체결/호가 등, `columns=[...]`로 필드가 코드에 그대로 남는 유일한 경우).
+
+DEEPEN(task-2784, docs/audit/DEPTH_L4_BR.md #1928, D1 실측 -> D2 하한): 원 커밋(92c3cac)의
+정규식 파서에 수치 성능 단언이 없었다는 공백을 아래 스케일링 테스트로 채운다.
 """
 from __future__ import annotations
 
 import importlib.util
 import sys
+import time
 from pathlib import Path
 from types import ModuleType
 
@@ -228,6 +232,55 @@ def test_extract_trs_from_text_surfaces_extraction_error_not_silently() -> None:
     assert rows[0]["path"] is None
     assert rows[0]["method"] is None
     assert rows[0]["extraction_error"]  # 조용히 비어있지 않고 사유가 남아야 한다
+
+
+def _params_block_text(param_count: int) -> str:
+    params_lines = "\n".join(f'        "P{i}": p{i},' for i in range(param_count))
+    signature = ", ".join(f"p{i}: str" for i in range(param_count))
+    return f'''
+API_URL = "/uapi/domestic-stock/v1/quotations/inquire-price"
+
+def inquire_price({signature}):
+    tr_id = "FHKST01010100"
+    params = {{
+{params_lines}
+    }}
+    res = ka._url_fetch(API_URL, tr_id, "", params)
+    if res.isOK():
+        return res.getBody().output
+'''
+
+
+def test_extract_trs_from_text_latency_scales_linearly_not_quadratically() -> None:
+    """수치 성능 단언 — `extract_trs_from_text`는 예제 파일 하나당 정규식 추출을
+    한 번 돌린다(`build_reference`가 375개 파일 각각에 호출). params 항목 수를
+    10배로 늘렸을 때 소요시간이 선형 배율(10배)의 넉넉한 배수(예산 8배, 총 80배)를
+    넘어서면 파라미터 개수에 대해 초선형(O(n^2))인 회귀다. 절대 ms 임계 대신 같은
+    프로세스에서 방금 잰 작은 입력 기준값에 정규화한 배율을 써서 머신 속도 편차에
+    강건하게 만든다."""
+    small_text = _params_block_text(20)
+    large_text = _params_block_text(200)  # 10배
+
+    kis_tr_parse.extract_trs_from_text(small_text, "x/y/z.py")  # 워밍업
+
+    small_started = time.perf_counter()
+    for _ in range(20):
+        kis_tr_parse.extract_trs_from_text(small_text, "x/y/z.py")
+    small_elapsed = time.perf_counter() - small_started
+
+    large_started = time.perf_counter()
+    for _ in range(20):
+        kis_tr_parse.extract_trs_from_text(large_text, "x/y/z.py")
+    large_elapsed = time.perf_counter() - large_started
+
+    size_ratio = 200 / 20  # 10.0
+    budget_multiplier = 8.0  # 선형(10배) 대비 넉넉한 여유 -> 총 80배까지 허용
+    time_budget = small_elapsed * size_ratio * budget_multiplier
+    assert large_elapsed <= time_budget, (
+        f"extract_trs_from_text 소요시간이 params 10배 증가에 비해 초선형으로 늘었습니다 "
+        f"(small={small_elapsed * 1000:.2f}ms n=20, large={large_elapsed * 1000:.2f}ms "
+        f"n=200, budget={time_budget * 1000:.2f}ms) — O(n^2) 회귀 가능성."
+    )
 
 
 def test_extract_trs_from_text_is_deterministic() -> None:
