@@ -1,8 +1,10 @@
 """Reusable suite: subclass FixSessionContract and supply a fresh session fixture."""
 
+import socket
 from collections.abc import Callable
 from datetime import datetime, timezone
 from decimal import Decimal
+from time import perf_counter
 from uuid import uuid4
 
 import pytest
@@ -110,3 +112,55 @@ def test_partial_implementation_is_rejected() -> None:
         ) -> None: ...
 
     assert isinstance(MissingSendOrder(), FixSessionPort) is False
+
+
+@pytest.mark.asyncio
+async def test_tcp_eof_before_acceptance_preserves_state(order: ChildOrder) -> None:
+    """Real TCP EOF, test-only transport probe; production FIX remains 미검증."""
+    class TcpProbeSession(FakeFixSession):
+        async def send_order(self, order: ChildOrder, *, cl_ord_id: str) -> int:
+            if client.recv(1) == b"":
+                raise RuntimeError("Transport closed before acceptance")
+            return await super().send_order(order, cl_ord_id=cl_ord_id)
+
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as listener:
+        listener.settimeout(2)
+        listener.bind(("127.0.0.1", 0))
+        listener.listen(1)
+        with socket.create_connection(listener.getsockname(), timeout=2) as client:
+            peer, _ = listener.accept()
+            with peer:
+                session = TcpProbeSession()
+                await session.logon()
+                peer.sendall(b"+")
+                assert await session.send_order(order, cl_ord_id="accepted") == 1
+                peer.shutdown(socket.SHUT_WR)
+                with pytest.raises(RuntimeError, match="Transport closed"):
+                    await session.send_order(order, cl_ord_id="rejected")
+                assert session.seq_num == 1
+                assert session.sent == {"accepted"}
+
+
+@pytest.mark.asyncio
+async def test_local_acceptance_performance(order: ChildOrder) -> None:
+    """Local contract budget only, not network or venue throughput."""
+    session = FakeFixSession()
+    await session.logon()
+    started = perf_counter()
+    for number in range(10_000):
+        assert await session.send_order(order, cl_ord_id=str(number)) == number + 1
+    elapsed = perf_counter() - started
+    assert elapsed < 1.0, f"10000 local accepts took {elapsed:.3f}s (budget 1s)"
+    assert len(session.sent) == 10_000
+
+
+@pytest.mark.asyncio
+async def test_contract_gate_rejects_duplicate_bypass_mutant(order: ChildOrder) -> None:
+    """The unchanged reusable contract turns red when duplicate defense is bypassed."""
+    class DuplicateBypassSession(FakeFixSession):
+        async def send_order(self, order: ChildOrder, *, cl_ord_id: str) -> int:
+            self.sent.discard(cl_ord_id)
+            return await super().send_order(order, cl_ord_id=cl_ord_id)
+
+    with pytest.raises(pytest.fail.Exception, match="DID NOT RAISE"):
+        await FixSessionContract().test_rejects_duplicate(DuplicateBypassSession(), order)

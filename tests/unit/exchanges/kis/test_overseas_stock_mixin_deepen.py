@@ -137,7 +137,8 @@ async def test_cancel_overseas_order_malformed_json_raises_without_returning_boo
             "ORG:1", "AAPL", "NASD", original_quantity=Decimal("1")
         )
 
-    assert business_calls["n"] == 1  # 바디 레벨 실패(HTTP 200 + 비JSON)는 단발, 불리언으로 삼켜지지 않음
+    # 바디 레벨 실패(HTTP 200 + 비JSON)는 단발, 불리언으로 삼켜지지 않음
+    assert business_calls["n"] == 1
 
 
 async def test_get_overseas_balance_network_drop_exhausts_retries_then_raises() -> None:
