@@ -2,7 +2,7 @@
 real OrderStatus member (task-2432, closes task-2406 DoD(e) gap).
 
 Revision ID: f93d241b4ab6
-Revises: c7f1e3a9d024
+Revises: f5529244403f
 Create Date: 2026-09-09 12:40:00.000000
 
 Spec: docs/specs/execution_oms_and_exchange.md#§2-C 상태기계 표 · §9 L4-06 +
@@ -45,7 +45,13 @@ clause -- this trigger already fires on every `UPDATE ON orders`).
 This is deliberately the only migration in this leaf (task-2432's decision:
 "한 사이클 한 개 원칙에 따라 이 리프 외 마이그레이션 금지") -- landed at the
 tail of the already-open migration chain (1942->1943->2351->2121, 2357),
-confirmed by a single `alembic heads` at the start of this task.
+confirmed by a single `alembic heads` (`c7f1e3a9d024`) at the start of this
+task. `f5529244403f` (RD-4, task-2463) landed on `main` from a concurrent
+worker while this leaf was in flight, also declaring `c7f1e3a9d024` as its
+`down_revision` and forking `heads` to two -- this file's `down_revision`
+was retargeted from `c7f1e3a9d024` to `f5529244403f` to re-serialize onto
+the new tip (a plain single-parent rebase, not a merge revision, so the
+task's "직접 merge revision 만들지 말 것" instruction still holds).
 
 downgrade loads 073beca589d5's own `_GUARD_FN_SQL` by file path (same
 pattern as a7c3d9e1f2b4) and re-executes it verbatim, restoring the
@@ -63,7 +69,7 @@ from alembic import op
 
 # revision identifiers, used by Alembic.
 revision: str = "f93d241b4ab6"
-down_revision: str | Sequence[str] | None = "c7f1e3a9d024"
+down_revision: str | Sequence[str] | None = "f5529244403f"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
