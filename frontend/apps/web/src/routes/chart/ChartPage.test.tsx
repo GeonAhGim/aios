@@ -229,6 +229,24 @@ describe("ChartPage", () => {
 
     expect(await screen.findByRole("button", { name: "SMA ✕" })).toBeInTheDocument();
   });
+
+  // DC-18b 실패주입: coverageQuery는 candles 조회와 독립적으로 실행된다(주석
+  // "candles 조회 실패와 독립적으로 항상 시도한다") — 그 역방향, 즉 coverage
+  // 조회가 실패해도 candles 렌더링이 물려서 죽지 않는지는 지금껏 테스트가
+  // 없었다. fetchCoverage가 reject하면 coverageQuery.data는 undefined로
+  // 남고 CoverageBadge는 `coverageQuery.data ?? []`로 빈 배열을 받아 "미커버
+  // 구간"으로 보여야 한다(에러를 화면 밖으로 던지거나 크래시하지 않음).
+  it("negative: fetchCoverage가 reject해도 화면이 죽지 않고 캔들은 정상 렌더되며 커버리지는 미커버로 표시된다", async () => {
+    const fetchCandles = vi.fn(async () => okResult());
+    const fetchCoverage = vi.fn(async () => {
+      throw new Error("coverage endpoint 500");
+    });
+    renderPage(fetchCandles, "BTCUSDT", fakeChartingPort(), undefined, fetchCoverage);
+
+    await waitFor(() => expect(screen.getByTestId("candlestick-chart")).toHaveTextContent("캔들 3개"));
+    await waitFor(() => expect(fetchCoverage).toHaveBeenCalled());
+    await waitFor(() => expect(screen.getByTestId("coverage-gap-badge")).toHaveTextContent("미커버 구간"));
+  });
 });
 
 // CH-18b: parityCheck.ts 기반 클라이언트/서버 지표값 대조·폴백 화면 배선.
