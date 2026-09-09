@@ -144,3 +144,6 @@ FD-8 구현 시 반드시 지켜야 하는 것 — 이후 실제 구현 leaf들�
 - 기능설계문서_v1.21.md FD-4(주문 전송, 미구현 확인됨), FD-8(판단 계층), FD-9(안전장치, 8.6-B/9.9)
 - 06_mvp_scope_v1.3.md §6.3(Definition of Done), §6.4(명시적 제외)
 - risk_policy.yaml(8.2-B 8개 지표 Draft 수치)
+
+## Amended 2026-09-09 (ADR-2026-09-09-D/F)
+- 하드가드 해제(실자금 개통) 조건에 `docs/milestones/MVP-1_CLOSEOUT.md` 존재와 HB-5 사용자 승인을 명시한다. 둘 중 하나라도 없으면 해제 불가. 해제 절차 자체는 변경 없음.
