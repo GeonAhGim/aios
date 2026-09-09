@@ -43,6 +43,11 @@ export function ChartDrawingsErrorBanners({ drawings }: ChartDrawingsErrorBanner
           message={drawings.saveError instanceof Error ? drawings.saveError.message : undefined}
           traceId={drawings.saveError instanceof ApiError ? drawings.saveError.traceId : undefined}
           retryAfterSec={saveRouted.kind === "backoff_retry" ? saveRouted.afterSec : undefined}
+          onRetry={
+            saveRouted.kind === "refetch_retry" || saveRouted.kind === "backoff_retry"
+              ? drawings.retryPersist
+              : undefined
+          }
         />
       )}
     </>

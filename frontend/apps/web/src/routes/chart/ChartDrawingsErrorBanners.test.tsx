@@ -20,6 +20,7 @@ function baseDrawings(overrides: Partial<UseChartDrawingsResult> = {}): UseChart
     saveStatus: "idle",
     saveError: null,
     persist: vi.fn(async () => {}),
+    retryPersist: vi.fn(),
     ...overrides,
   };
 }
@@ -69,19 +70,30 @@ describe("ChartDrawingsErrorBanners 저장 실패(saveStatus)", () => {
     expect(screen.getByText("요청한 항목을 찾을 수 없습니다.")).toBeInTheDocument();
   });
 
-  // known gap: task-2476 — saveStatus=error 분기(ChartDrawingsErrorBanners.tsx
-  // line 40-47)는 sibling인 ChartLayoutErrorBanners의 saveRouted 분기와 달리
-  // onRetry를 배선하지 않는다. RATE_LIMIT_EXCEEDED(backoff_retry)는 classifyRetry상
-  // 재시도 가능하지만 onRetry가 없어 ErrorMessage가 버튼을 렌더하지 않는다 — 이
-  // 비대칭은 실결함으로 판정됐고(task-2466 decision) 수정은 task-2476으로 분리됐다.
-  // task-2476이 배선을 넣으면 이 단언(재시도 버튼 부재)이 깨져 반드시 갱신돼야 한다.
-  it("error·RATE_LIMIT_EXCEEDED면 배너 메시지는 렌더되지만 재시도 버튼은 배선되지 않는다(known gap: task-2476)", () => {
-    const saveError = new ApiError(429, "과도한 요청", "trace-2", "RATE_LIMIT_EXCEEDED", 5);
-    render(<ChartDrawingsErrorBanners drawings={baseDrawings({ saveStatus: "error", saveError })} />);
+  it("error·RATE_LIMIT_EXCEEDED면 재시도 버튼을 보여주고 클릭 시 retryPersist를 호출한다(DoD(a)/(b): backoff_retry 저장 재시도 배선, 형제 ChartLayoutErrorBanners와 동일 형태)", () => {
+    const retryPersist = vi.fn();
+    const saveError = new ApiError(429, "과도한 요청", "trace-2", "RATE_LIMIT_EXCEEDED");
+    render(
+      <ChartDrawingsErrorBanners drawings={baseDrawings({ saveStatus: "error", saveError, retryPersist })} />,
+    );
 
     expect(screen.getByText("요청이 너무 많습니다. 잠시 후 다시 시도해주세요.")).toBeInTheDocument();
     expect(screen.getByText("지원코드: trace-2")).toBeInTheDocument();
+    const retryButton = screen.getByRole("button", { name: "다시 시도" });
+    fireEvent.click(retryButton);
+    expect(retryPersist).toHaveBeenCalledTimes(1);
+  });
+
+  it("error·POLICY_DENIED(재시도 불가)면 배너 메시지는 렌더되지만 재시도 버튼은 렌더되지 않는다(DoD(b): 재시도 불가 분류는 배선하지 않는다)", () => {
+    const retryPersist = vi.fn();
+    const saveError = new ApiError(403, "정책 위반", "trace-3", "POLICY_DENIED");
+    render(
+      <ChartDrawingsErrorBanners drawings={baseDrawings({ saveStatus: "error", saveError, retryPersist })} />,
+    );
+
+    expect(screen.getByText("정책에 의해 거부된 요청입니다. 세부 사유를 확인해주세요.")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "다시 시도" })).not.toBeInTheDocument();
+    expect(retryPersist).not.toHaveBeenCalled();
   });
 
   it("saveStatus가 idle로 돌아오면 저장 에러 배너가 사라진다", () => {

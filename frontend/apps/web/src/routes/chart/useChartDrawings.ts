@@ -71,6 +71,8 @@ export interface UseChartDrawingsResult {
   readonly saveError: unknown;
   /** Persists the current local drawings against `layoutId` (the just-resolved id from `layout.save()`). */
   readonly persist: (layoutId: string) => Promise<void>;
+  /** Re-runs persist() against the hook's current `layoutId` option — mirrors retryRestore's pattern for the save side. */
+  readonly retryPersist: () => void;
 }
 
 export function useChartDrawings(
@@ -168,6 +170,10 @@ export function useChartDrawings(
     [port, drawings],
   );
 
+  const retryPersist = useCallback(() => {
+    if (layoutId !== null) void persist(layoutId);
+  }, [layoutId, persist]);
+
   function handleAddDrawing(latestCandle: StreamCandle | undefined): void {
     if (!drawingTool) return;
     if (!latestCandle) return;
@@ -194,5 +200,6 @@ export function useChartDrawings(
     saveStatus,
     saveError,
     persist,
+    retryPersist,
   };
 }
