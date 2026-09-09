@@ -674,7 +674,7 @@ DoD 공통: `ruff` · `mypy --strict` · `scripts/check_zone_manifest.py` 통과
 |---|---|---|---|
 | U1 | FROZEN_PAPER_ONLY 파일(★ 리프 17개) 수정 승인 | 미승인 | PM(agent-platform-12) 사전 승인. ADR-E "인터페이스 자체 변경 없음" 준수 근거: 위치 인자 불변, 키워드 추가만 |
 | U2 | `FSMStrategyConfig`(공유접점문서 §2 동결 계약) | 변경 없음 | `FSMTransition.condition: str` 유지 — v2 문법이 문자열 안에서 표현되므로 계약 무변경. `fsm_definition.risk_params`는 JSONB 추가 키(계약 필드 아님) |
-| U3 | DSR·PBO 수식 | **미확인** — Bailey & López de Prado(2014) "The Deflated Sharpe Ratio", Bailey et al.(2015) "The Probability of Backtest Overfitting" 원문 대조 필요. §3.5는 구현 세션의 기억 기반 | L34 착수 전 원문 확인, 픽스처 값 확정. 불일치 시 `ofit-v1` 버전 그대로 두고 v2로 수정(107번) |
+| U3 | DSR·PBO 수식 | **확인됨(2026-09-09, task-2604)** — Bailey & López de Prado(2014) "The Deflated Sharpe Ratio" 수치 예제(N=100/46/88, T=1250 → DSR≈0.9004/0.9505/0.9505)와 Bailey et al.(2015) "The Probability of Backtest Overfitting" Algorithm 2.3(CSCV)을 원문 대조한 결과 `ofit-v1` 구현과 완전 일치. 회귀 테스트: `tests/foundation/unit/backtest/test_overfitting.py` | 완료. `ofit-v1` 유지(수정 불필요) |
 | U4 | Bitget 캔들 `close_time`·펀딩 주기·maker/taker 실수수료 | **미확인**(감사 §7 "실캡처 픽스처 1개") | 비용모델 기본값은 보수적 상수(10/10bps, 5bps), 실측 후 `PortfolioConfig.cost_model` 갱신. 실측 전 검증 결과는 obligation `COST_MODEL_UNVERIFIED` |
 | U5 | PAPER 시뮬레이터 어댑터(`src/exchanges/paper_sim/`) | 별도 L4 필요(감사 §7 "PAPER 시뮬레이터 부재") | 이 문서는 `FillSimulatorPort` 계약만 고정. Bitget Demo 실왕복(§11-4) 결과에 따라 시뮬레이터 vs Demo 결정 |
 | U6 | 스냅샷 JSONB 크기(1m × 90일 초과) | 리스크 | 90일 초과 시 `bytea` 압축 또는 객체 저장소 ref로 M4 v2. 지금은 1h/4h/1d 우선 |

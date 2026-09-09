@@ -5,8 +5,13 @@ Spec: docs/specs/L4_strategy_portfolio_backtest_v1.0.md #9 L34 (formulas #3.5 li
 374-375; public contract #2 table `overfitting.py` row). Pure domain module -- no I/O,
 no randomness, stdlib only (`math`, `statistics`, `decimal`).
 
-formulas transcribed from spec §3.5; Bailey & Lopez de Prado originals not yet
-cross-checked (spec §10 U3) -- keep ofit-v1, bump to v2 on any correction.
+formulas cross-checked against the original papers (spec §10 U3, closed 2026-09-09):
+Bailey & Lopez de Prado (2014) "The Deflated Sharpe Ratio" eq.(2) numerical example
+(N=100, T=1250, skew=-3, kurt=10 -> DSR~=0.9004; N=46, or Normal returns with N=88
+-> DSR~=0.9505 both), and Bailey, Borwein, Lopez de Prado & Zhu (2015) "The
+Probability of Backtest Overfitting" Algorithm 2.3 (CSCV) -- both match `ofit-v1`
+bit for bit; see tests/foundation/unit/backtest/test_overfitting.py. No correction
+needed.
 """
 from __future__ import annotations
 

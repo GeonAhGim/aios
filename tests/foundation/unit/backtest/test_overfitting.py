@@ -80,6 +80,65 @@ def test_always_overfit_matrix_has_high_pbo() -> None:
     assert pbo >= Decimal("0.8")
 
 
+def test_deflated_sharpe_matches_bailey_lopez_de_prado_2014_numerical_example() -> None:
+    """ADR-2026-09-09-B H-9 / spec §10 U3: cross-check against Bailey & Lopez de
+    Prado (2014) "The Deflated Sharpe Ratio" §"A Numerical Example". N=100,
+    V[SR]=1/2 (annualized), T=1250, skew=-3, kurt=10, SR_hat=2.5 (annualized,
+    250 obs/year) -> paper reports SR0~=0.1132 (non-annualized) and
+    DSR~=0.9004 < 0.95 (paper's investor rejects the strategy)."""
+    sr_hat = Decimal("2.5") / Decimal(250).sqrt()
+    sr_var = Decimal("0.5") / Decimal(250)
+
+    dsr = deflated_sharpe(sr_hat, 100, 1250, Decimal(-3), Decimal(10), sr_var)
+
+    assert float(dsr) == pytest.approx(0.9004, abs=1e-4)
+
+
+def test_deflated_sharpe_matches_bailey_lopez_de_prado_2014_breakeven_trial_counts() -> None:
+    """Same paper: had the strategist stopped at N=46 independent trials (same
+    non-Normal returns), or had the returns been Normal (skew=0, kurt=3) with
+    N=88 trials, the paper reports DSR~=0.9505 both times -- the 95% confidence
+    breakeven points either side of the multiple-testing / non-Normality axes."""
+    sr_hat = Decimal("2.5") / Decimal(250).sqrt()
+    sr_var = Decimal("0.5") / Decimal(250)
+
+    dsr_fewer_trials = deflated_sharpe(sr_hat, 46, 1250, Decimal(-3), Decimal(10), sr_var)
+    dsr_normal_returns = deflated_sharpe(sr_hat, 88, 1250, Decimal(0), Decimal(3), sr_var)
+
+    assert float(dsr_fewer_trials) == pytest.approx(0.9505, abs=1e-4)
+    assert float(dsr_normal_returns) == pytest.approx(0.9505, abs=1e-4)
+
+
+def test_pbo_cscv_is_zero_under_pointwise_dominance() -> None:
+    """ADR-2026-09-09-B H-9: known-answer synthetic case derived directly from
+    Algorithm 2.3 in Bailey, Borwein, Lopez de Prado & Zhu (2015) "The
+    Probability of Backtest Overfitting". If one column's performance is
+    strictly greater than every other column's in every single row, its
+    IS-half mean and OOS-half mean are both the maximum for *every* possible
+    CSCV split (the mean preserves pointwise dominance over any subset of
+    rows), so it is selected as n* and always ranks best (N) OOS too -> every
+    logit lambda_c > 0 -> PBO = 0 exactly, for any valid n_blocks."""
+    matrix = [[Decimal(10), Decimal(1), Decimal(0)] for _ in range(8)]
+
+    assert pbo_cscv(matrix, 4) == Decimal(0)
+
+
+def test_pbo_cscv_is_one_under_zero_sum_reversal_construction() -> None:
+    """Known-answer synthetic case derived from Algorithm 2.3: with N=2 columns
+    and per-row difference d_i = A_i - B_i chosen so that sum(d_i) == 0 across
+    all T=S=4 rows/blocks (here d = [100, 80, -75, -105], no partial pair-sum
+    of d is zero), every CSCV split's IS-pair sum of d is the exact negation
+    of its complementary OOS-pair sum (the two halves partition the same four
+    d_i, which sum to zero). So whichever column wins IS (positive pair-sum)
+    necessarily loses OOS (negated, thus negative, pair-sum) in all
+    C(4,2)=6 combinations -> PBO = 1 exactly."""
+    column_a = [Decimal("100"), Decimal("90"), Decimal("12.5"), Decimal("-2.5")]
+    column_b = [Decimal("0"), Decimal("10"), Decimal("87.5"), Decimal("102.5")]
+    matrix = [[column_a[i], column_b[i]] for i in range(4)]
+
+    assert pbo_cscv(matrix, 4) == Decimal(1)
+
+
 def test_deflated_sharpe_rejects_n_trials_below_2() -> None:
     with pytest.raises(OverfittingError):
         deflated_sharpe(
