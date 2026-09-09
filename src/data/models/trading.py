@@ -24,6 +24,11 @@ class OrderStatus(str, Enum):
     SUBMITTED = "SUBMITTED"
     ACKNOWLEDGED = "ACKNOWLEDGED"
     PARTIALLY_FILLED = "PARTIALLY_FILLED"
+    # task-2432 (L4-06 §9): promoted from a kill-switch-only literal written
+    # by src/services/safety/open_order_sweeper.py -- previously outside this
+    # frozen contract (§3.3), which forced that module into a self-loop event
+    # workaround to avoid crashing replay_verify (see its module docstring).
+    CANCEL_REQUESTED = "CANCEL_REQUESTED"
     FILLED = "FILLED"
     REJECTED = "REJECTED"
     CANCELLED = "CANCELLED"

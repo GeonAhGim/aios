@@ -43,33 +43,16 @@ reconcile owns the final truth of cancel success/failure, the DB state is
 not rolled back here (it is left as CANCEL_REQUESTED so it stays eligible
 for retry/lookup).
 
-Known limitation (task-2406 DoD(e), accepted as a documented gap — closing
-it is delegated to task-2432): `orders.status = 'CANCEL_REQUESTED'` is a
-kill-switch-only string that is not a member of L4-06 `OrderStatus` (the
-frozen contract of shared touchpoint 01, `src/data/models/trading.py`).
-This value is required for DoD(c)'s idempotency (the re-selection query
-only looks at `status IN ('SUBMITTED','PARTIALLY_FILLED')`, so a row
-already at CANCEL_REQUESTED is not matched again) — without transitioning
-to a value outside `_CANCELABLE_STATUSES`, re-running the same sweep would
-try to cancel the same order again. So `order_events` cannot carry that
-value either (`OrderTransitionEvent.to_status` is cast to `OrderStatus`,
-and `scripts/replay_verify.py` selects every order this sweep touched via
-`order_events` and reads it with `PostgresOrderEventRepository.timeline()`
-— putting 'CANCEL_REQUESTED' there was measured to crash all of
-replay_verify with a `ValueError`). So this event is left as a self-loop
-(`from_status == to_status`, the same convention as OMS
-`cancel_order.py`'s ACKNOWLEDGED/PARTIALLY_FILLED self-loop) — replay_verify
-doesn't crash, but the order's `orders.status` (actually
-'CANCEL_REQUESTED') and the orders projection's folded state (unchanged,
-because it's a self-loop) still diverge, so that order is caught as a
-mismatch in replay_verify's orders stream (not a crash). This mismatch
-cannot be eliminated without a migration that adds a real
-`CANCEL_REQUESTED` state to `OrderStatus`/073beca589d5's `_ALLOWED_PAIRS`
-(DoD(f) forbids a new migration here) — DoD(e)'s "0 cases" cannot be met by
-this leaf alone. Reproduction:
-`test_sweep_open_orders_event_does_not_crash_replay_verify_timeline_read`
-(proves no crash; the projection mismatch itself remains). The promotion
-migration was split off into task-2432 (after the §C serialization-order migration chain)."""
+task-2432 (closes task-2406 DoD(e)): `CANCEL_REQUESTED` is now a real
+`OrderStatus` member (`src/data/models/trading.py`) with entry/exit edges in
+both `state_machine.ALLOWED` (L4-02) and `073beca589d5`'s
+`oms_enforce_order_transition` `_ALLOWED_PAIRS` (migration f93d241b4ab6). So
+the `order_events` row this module writes is a genuine transition
+(`from_status` = the order's actual prior status, `to_status` =
+CANCEL_REQUESTED) rather than the self-loop this module previously used to
+avoid crashing `PostgresOrderEventRepository._row_to_event()`'s
+`OrderStatus(...)` cast — `scripts/replay_verify.py`'s orders projection now
+folds to CANCEL_REQUESTED and byte-matches the real row."""
 from __future__ import annotations
 
 import hashlib
@@ -83,18 +66,18 @@ from uuid import UUID, uuid4
 import asyncpg
 
 from src.core.db.conditional_write import conditional_update
+from src.data.models.trading import OrderStatus
 from src.exchanges.common.adapter import ExchangeAdapter
 from src.foundation.risk_gate.domain.models import SafetyScope
+from src.services.oms.domain.state_machine import OrderEvent
 from src.services.safety.legacy_execution_pauser import _condition_for
 
 logger = logging.getLogger(__name__)
 
 _CANCELABLE_STATUSES = ("SUBMITTED", "PARTIALLY_FILLED")
 _CANCELABLE_STATUSES_SQL = ", ".join(f"'{s}'" for s in _CANCELABLE_STATUSES)
-# CANCEL_REQUESTED is not an OrderStatus member yet; replay_verify orders
-# projection cannot byte-match until task-2432 promotes it.
-_TO_STATUS = "CANCEL_REQUESTED"
-_EVENT = "CANCEL_REQUESTED"
+_TO_STATUS = OrderStatus.CANCEL_REQUESTED.value
+_EVENT = OrderEvent.CANCEL_REQUESTED.value
 
 
 @dataclass(frozen=True)
@@ -156,31 +139,20 @@ async def _transition_to_cancel_requested(
         # order_events INSERT. Valid only within this transaction (= this
         # row), not the whole batch.
         #
-        # order_events.to_status carries `from_status` as-is, not `_TO_STATUS`
-        # ('CANCEL_REQUESTED', the orders.status literal) — a self-loop.
-        # Reason (see "known gap" at the bottom of the module docstring):
-        # `_TO_STATUS` is a kill-switch-only string absent from the frozen
-        # L4-06 `OrderStatus` contract (shared touchpoint 01), so
-        # `PostgresOrderEventRepository._row_to_event()`'s
-        # `OrderStatus(row["to_status"])` raises when it meets that value —
-        # putting it straight into `order_events.to_status` crashes the
-        # moment `scripts/replay_verify.py` reads that row (any order this
-        # sweep touches ends up in order_events). The self-loop follows the
-        # same convention the real OMS `cancel_order.py` uses for its
-        # ACKNOWLEDGED/PARTIALLY_FILLED self-loop CANCEL_REQUESTED event
-        # (§3.3, "new events must not touch the orders.status frozen
-        # contract") — the event column has no enum cast (raw string), so it
-        # can keep 'CANCEL_REQUESTED' as-is.
+        # task-2432: a genuine transition (from_status -> _TO_STATUS), not the
+        # self-loop this module used before CANCEL_REQUESTED was a real
+        # OrderStatus member — see module docstring.
         await conn.execute("SELECT set_config('oms.event_written', '1', true)")
         await conn.execute(
             """
             INSERT INTO order_events (
                 order_id, from_status, to_status, event, reason_code,
                 actor_subject_id, trace_id, command_id, occurred_at, payload_hash
-            ) VALUES ($1, $2, $2, $3, $4, 'system', $5, $6, now(), $7)
+            ) VALUES ($1, $2, $3, $4, $5, 'system', $6, $7, now(), $8)
             """,
             order_id,
             from_status,
+            _TO_STATUS,
             _EVENT,
             f"kill_switch:{scope.value}",
             uuid4(),

@@ -171,3 +171,29 @@ def test_allowed_covers_every_order_status() -> None:
     키로 존재해야 fail-closed가 성립한다."""
     for status in OrderStatus:
         assert status in ALLOWED, f"{status}가 ALLOWED에 없음"
+
+
+@pytest.mark.parametrize(
+    "current", (OrderStatus.SUBMITTED, OrderStatus.ACKNOWLEDGED, OrderStatus.PARTIALLY_FILLED)
+)
+def test_cancel_requested_is_a_valid_entry_target(current: OrderStatus) -> None:
+    """task-2432 — entry edges: SUBMITTED/ACKNOWLEDGED/PARTIALLY_FILLED can
+    reach the now-promoted CANCEL_REQUESTED status (R-39 kill-switch sweep)."""
+    assert OrderStatus.CANCEL_REQUESTED in ALLOWED[current]
+
+
+@pytest.mark.parametrize(
+    "target", (OrderStatus.CANCELLED, OrderStatus.FILLED, OrderStatus.PARTIALLY_FILLED)
+)
+def test_cancel_requested_is_not_terminal_and_resolves_to(target: OrderStatus) -> None:
+    """task-2432 — exit edges: CANCEL_REQUESTED always resolves via reconcile,
+    it is not a dead end."""
+    assert is_terminal(OrderStatus.CANCEL_REQUESTED) is False
+    assert target in ALLOWED[OrderStatus.CANCEL_REQUESTED]
+
+
+def test_filled_to_cancel_requested_is_rejected() -> None:
+    """Negative test (task-2432 DoD(a)) — FILLED is terminal, §4.2 has no
+    FILLED -> CANCEL_REQUESTED row, so it must not be reachable even though
+    CANCEL_REQUESTED is now a real OrderStatus member."""
+    assert OrderStatus.CANCEL_REQUESTED not in ALLOWED[OrderStatus.FILLED]

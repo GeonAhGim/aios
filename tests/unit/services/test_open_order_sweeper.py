@@ -310,13 +310,9 @@ async def test_missing_adapter_for_exchange_is_reported_as_failed_not_raised(poo
 
 async def test_each_transitioned_order_produces_exactly_one_order_event(pool):
     """DoD(a)(b) — 전이된 각 주문은 정확히 1개의 order_events 행을 동반한다
-    (bulk UPDATE 시절에는 0건이었다 — FA-16 재현 대상). `to_status`는
-    `orders.status`에 실제로 쓰는 'CANCEL_REQUESTED' 리터럴이 아니라
-    `from_status`와 같은 자기루프다 — 그 리터럴은 L4-06 `OrderStatus`
-    동결 계약 밖이라 order_events에 그대로 넣으면 `PostgresOrderEventRepository.
-    timeline()`(replay_verify가 쓴다)이 `OrderStatus('CANCEL_REQUESTED')`에서
-    죽는다(모듈 docstring "known gap" 참조, OMS `cancel_order.py`의
-    ACKNOWLEDGED/PARTIALLY_FILLED 자기루프와 같은 관례)."""
+    (bulk UPDATE 시절에는 0건이었다 — FA-16 재현 대상). task-2432부터
+    `CANCEL_REQUESTED`가 실제 `OrderStatus` 멤버라 `to_status`는 자기루프가
+    아니라 실제 도착 상태('CANCEL_REQUESTED')를 그대로 담는다."""
     user_id = await create_test_user(pool)
     submitted = await _seed_order(pool, user_id, status="SUBMITTED")
     partially_filled = await _seed_order(pool, user_id, status="PARTIALLY_FILLED")
@@ -335,13 +331,10 @@ async def test_each_transitioned_order_produces_exactly_one_order_event(pool):
         )
     assert len(rows) == 2
     by_order = {r["order_id"]: r for r in rows}
-    assert by_order[submitted]["from_status"] == by_order[submitted]["to_status"] == "SUBMITTED"
-    assert (
-        by_order[partially_filled]["from_status"]
-        == by_order[partially_filled]["to_status"]
-        == "PARTIALLY_FILLED"
-    )
+    assert by_order[submitted]["from_status"] == "SUBMITTED"
+    assert by_order[partially_filled]["from_status"] == "PARTIALLY_FILLED"
     for row in rows:
+        assert row["to_status"] == "CANCEL_REQUESTED"
         assert row["event"] == "CANCEL_REQUESTED"
 
 

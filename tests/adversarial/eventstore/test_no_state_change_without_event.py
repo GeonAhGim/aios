@@ -20,15 +20,17 @@ order_event`는 `orders.status`가 바뀐 주문마다 `order_events` 행이
 되돌리면 이 테스트가 다시 FAIL한다는 뜻.
 
 DoD(b) — 073beca589d5의 `oms_enforce_order_transition_trg`(I6)를
-우회하지 않는다는 증거. `CANCEL_REQUESTED`는 073beca589d5의 §4.2
-`_ALLOWED_PAIRS`에 없는 kill-switch 전용 상태값(OMS `OrderStatus`
-동결 계약 밖, `open_order_sweeper.py` 모듈 docstring 참조)이라, cutover가
-무장되면 이 전이는 I2(전이표)에서 먼저 막힌다 — `_ALLOWED_PAIRS` 확장은
-새 마이그레이션이 필요하고 이 task의 DoD(f)가 그걸 금지한다. 그래서 여기서는
-`_ALLOWED_PAIRS`에 이미 있는 일반 전이(CREATED->VALIDATED)로 I6 자체의
-매커니즘 — "플래그 없이 UPDATE하면 막힌다", "플래그는 한 행에서 소진된다"
-— 만 증명한다. `sweep_open_orders`가 배치 전체에 플래그를 한 번만 세우면
-(원래 코드가 이랬다면) 두 번째 행부터 이 트리거에 막혔을 것이라는 근거다.
+우회하지 않는다는 증거. 이 테스트가 작성될 당시(task-2406) `CANCEL_REQUESTED`는
+073beca589d5의 §4.2 `_ALLOWED_PAIRS`에 없는 kill-switch 전용 상태값이라,
+cutover가 무장되면 I2(전이표)에서 먼저 막혀 I6까지 도달하지 못했다 — 그래서
+`_ALLOWED_PAIRS`에 이미 있던 일반 전이(CREATED->VALIDATED)로 I6 자체의
+매커니즘만 증명했다. task-2432가 `CANCEL_REQUESTED`를 실제 `OrderStatus`
+멤버로 승격하고 `_ALLOWED_PAIRS`에도 등재했지만(migration f93d241b4ab6),
+이 테스트는 여전히 CREATED->VALIDATED로 남긴다 — I6 메커니즘 자체("플래그
+없이 UPDATE하면 막힌다", "플래그는 한 행에서 소진된다")는 어느 전이쌍으로
+증명해도 동일하고, 바꿀 이유가 없다. `sweep_open_orders`가 배치 전체에
+플래그를 한 번만 세우면(원래 코드가 이랬다면) 두 번째 행부터 이 트리거에
+막혔을 것이라는 근거다.
 """
 from __future__ import annotations
 
@@ -37,6 +39,7 @@ from uuid import UUID, uuid4
 import asyncpg
 import pytest
 
+from src.data.models.trading import OrderStatus
 from src.foundation.risk_gate.domain.models import SafetyScope
 from src.services.oms.adapters.order_events_repository import PostgresOrderEventRepository
 from src.services.safety.open_order_sweeper import sweep_open_orders
@@ -94,12 +97,13 @@ async def test_sweep_open_orders_each_transitioned_order_has_an_order_event(pool
 
 
 async def test_sweep_open_orders_event_does_not_crash_replay_verify_timeline_read(pool):
-    """알려진 한계(모듈 docstring) 회귀 방지 — order_events.to_status에
-    'CANCEL_REQUESTED'(orders.status 리터럴, L4-06 `OrderStatus` 밖) 값이
-    들어가면 `PostgresOrderEventRepository.timeline()`(scripts/replay_verify.py
-    가 sweep이 닿은 모든 주문에 대해 호출한다)이 `OrderStatus('CANCEL_
-    REQUESTED')`에서 ValueError로 죽는다는 걸 실측 확인했다(자기루프로
-    고치기 전). 이 테스트는 그 회귀를 막는다 — 지우면 다시 죽는다."""
+    """task-2432 (closes task-2406 DoD(e)) — `CANCEL_REQUESTED` is now a real
+    `OrderStatus` member, so `order_events.to_status` carries it directly
+    (a genuine transition, no longer the self-loop workaround this test used
+    to guard). `PostgresOrderEventRepository.timeline()`
+    (`scripts/replay_verify.py` calls it for every order a sweep touches)
+    must still not crash -- this is the regression this test protects,
+    now proven against the real value instead of the self-loop stand-in."""
     user_id = await create_test_user(pool)
     order_id = await _seed_order(pool, user_id)
 
@@ -114,7 +118,8 @@ async def test_sweep_open_orders_event_does_not_crash_replay_verify_timeline_rea
     async with pool.acquire() as conn:
         events = await PostgresOrderEventRepository().timeline(conn, order_id)
     assert len(events) == 1
-    assert events[0].to_status.value == events[0].from_status.value
+    assert events[0].from_status.value == "SUBMITTED"
+    assert events[0].to_status == OrderStatus.CANCEL_REQUESTED
 
 
 async def test_trigger_blocks_update_without_flag_and_flag_is_consumed_per_row(pool):

@@ -91,6 +91,7 @@ ALLOWED: Mapping[OrderStatus, frozenset[OrderStatus]] = {
             OrderStatus.UNKNOWN,
             OrderStatus.PARTIALLY_FILLED,
             OrderStatus.FILLED,
+            OrderStatus.CANCEL_REQUESTED,  # task-2432 — R-39 kill-switch sweep
         }
     ),
     OrderStatus.ACKNOWLEDGED: frozenset(
@@ -100,6 +101,7 @@ ALLOWED: Mapping[OrderStatus, frozenset[OrderStatus]] = {
             OrderStatus.FILLED,
             OrderStatus.CANCELLED,
             OrderStatus.EXPIRED,
+            OrderStatus.CANCEL_REQUESTED,  # task-2432 — R-39 kill-switch sweep
         }
     ),
     OrderStatus.PARTIALLY_FILLED: frozenset(
@@ -108,6 +110,17 @@ ALLOWED: Mapping[OrderStatus, frozenset[OrderStatus]] = {
             OrderStatus.FILLED,
             OrderStatus.CANCELLED,
             OrderStatus.EXPIRED,
+            OrderStatus.CANCEL_REQUESTED,  # task-2432 — R-39 kill-switch sweep
+        }
+    ),
+    # task-2432 — entry edges above (SUBMITTED/ACKNOWLEDGED/PARTIALLY_FILLED
+    # -> CANCEL_REQUESTED), exit edges here. Not terminal: reconcile always
+    # resolves a CANCEL_REQUESTED order to one of these three.
+    OrderStatus.CANCEL_REQUESTED: frozenset(
+        {
+            OrderStatus.CANCELLED,
+            OrderStatus.FILLED,
+            OrderStatus.PARTIALLY_FILLED,
         }
     ),
     OrderStatus.UNKNOWN: frozenset(
