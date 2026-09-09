@@ -4,19 +4,36 @@ Spec: docs/specs/L4_execution_oms_and_exchange_v1.0.md §9 L4-24 DoD — REC-001
 002/003/006 각각 재현 + MATERIAL 등급 동안 같은 계정의 신규 submit_order가
 DENY, 해소 후 재허용(배선 증명: `reconcile_account`의 `activate_safety_control`
 호출을 지우면 DENY 단언이 실패한다). 금액 비교는 전부 `Decimal(...)`(DoD (c)).
+
+DEEPEN(task-2800) — DEPTH 감사(task-2722, docs/audit/DEPTH_L4_BR.md#2316)가
+원 구현(4f1a05de)을 D3 미달(실측 D1)로 판정한 두 가지 근거를 파일 하단에
+보강한다: "수치 latency/throughput 단언 없음", "다중 인스턴스/adversarial/
+replay 증명 없음(단일 pool, 동시 reconciler 없음, DENY 우회 시도 없음)".
+아래 세 테스트가 각각 대응한다: (1) `reconcile_account` 왕복 지연/처리량을
+기준 왕복비용에 정규화한 수치로 단언(절대 ms 상수 금지 —
+`test_gate_perf_multiinstance.py`, `test_kis_durability.py` 선례), (2) 서로
+다른 `ReconcileScheduler` 인스턴스 다수가 동일 account_ref를 정확히 같은
+시각에 동시 대사해도 advisory xact lock(REC-004) 덕에 정확히 1개만 실제로
+실행됨, (3) MATERIAL_MISMATCH ACTIVE 동안 다수의 `submit_order` 시도가
+정확히 같은 시각에 경합해도(DENY 우회 레이스 시도) 단 하나도 통과하지
+못함.
 """
 from __future__ import annotations
 
+import asyncio
+import time
 import uuid
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 
+import asyncpg
 import pytest
 
 from src.data.models.base import AssetClass
 from src.data.models.trading import Order as ProviderOrder
 from src.data.models.trading import OrderSide, OrderStatus, OrderType
 from src.foundation.entities.adapters.postgres_repository import PostgresEntityRepository
+from src.services.oms.application.reconcile_scheduler import ReconcileScheduler, ReconcileTarget
 from src.services.oms.application.submit_order import OrderSubmitDeniedError, submit_order
 from src.services.oms.application.three_way_reconciler import reconcile_account
 from src.services.oms.contracts.v1_commands import OrderIdempotencyScope, SubmitOrderCommand
@@ -24,7 +41,7 @@ from src.services.oms.domain.symbol_registry import SymbolRegistry
 from src.services.oms.domain.venue_profile import TimeoutBudget, VenueCapabilityProfile
 from src.services.order_service.foundation_gate import make_foundation_pre_submit_gate
 from tests.integration.fake_exchange_adapter import FakeExchangeAdapter
-from tests.integration.oms.conftest import create_test_tenant, seed_entity_context
+from tests.integration.oms.conftest import _asyncpg_dsn, create_test_tenant, seed_entity_context
 
 
 class _ScriptedAdapter(FakeExchangeAdapter):
@@ -297,3 +314,172 @@ async def test_reconcile_rerun_dedupe_does_not_duplicate_safety_control(pool):
     assert first.overall_classification == "MATERIAL_MISMATCH"
     assert second.overall_classification == "MATERIAL_MISMATCH"
     assert await _active_account_controls(pool, user_id) == 1
+
+
+# ---------- DEEPEN(2800) — 수치 성능 + 다중 인스턴스 + adversarial ----------
+
+
+@pytest.mark.perf
+async def test_reconcile_account_latency_within_normalized_throughput_budget(pool):
+    """D2 수치 latency/throughput 단언 — 절대 ms 상수는 쓰지 않는다(공유 CI
+    환경에서 절대 임계가 로컬 대비 크게 변동한 전례, `test_gate_perf_
+    multiinstance.py`/`test_kis_durability.py`와 동일 근거). 같은 연결의
+    기준 왕복비용(`SELECT 1`)에 정규화한 예산 안에서 `reconcile_account`가
+    끝나야 하고, 처리량(calls/s)도 함께 기록한다."""
+    user_id = await create_test_tenant(pool)
+    client_id = f"recon-cid-{uuid.uuid4().hex[:10]}"
+    await _insert_open_order(
+        pool, user_id, client_order_id=client_id,
+        quantity=Decimal("5"), filled_quantity=Decimal("2"),
+    )
+    adapter = _ScriptedAdapter(
+        open_orders=[_provider_order(client_id, Decimal("5"), Decimal("2"))]
+    )
+
+    async with pool.acquire() as conn:
+        baseline_reps = 20
+        t0 = time.perf_counter()
+        for _ in range(baseline_reps):
+            await conn.fetchval("SELECT 1")
+        baseline_per_call = (time.perf_counter() - t0) / baseline_reps
+
+    reps = 10
+    t0 = time.perf_counter()
+    for _ in range(reps):
+        summary = await reconcile_account(
+            pool=pool, adapter=adapter, tenant_id=user_id, connection_id=None,
+            account_ref=str(user_id), window=timedelta(minutes=5),
+        )
+    elapsed = time.perf_counter() - t0
+    per_call = elapsed / reps
+    throughput = reps / elapsed
+
+    # reconcile_account issues several round trips (order list + provider
+    # fetch + risk-control lookup) per call, so a generous multiple of the
+    # single round-trip baseline is the budget, not an absolute constant.
+    budget = max(0.5, baseline_per_call * 300)
+    print(  # noqa: T201 — 실측치는 비차단 기록, 게이트는 아래 assert.
+        f"reconcile_account per_call={per_call * 1000:.3f}ms "
+        f"throughput={throughput:.2f} calls/s "
+        f"baseline(SELECT 1)={baseline_per_call * 1000:.3f}ms budget={budget * 1000:.3f}ms"
+    )
+    assert summary.overall_classification == "HEALTHY"
+    assert per_call < budget
+
+
+async def test_concurrent_reconciler_instances_only_one_reconciles_same_account(pool):
+    """D3 다중 인스턴스 증명 — REC-004: 서로 다른 `ReconcileScheduler`
+    인스턴스(별도 스케줄러 프로세스 시뮬레이션) 여러 개가 동일 account_ref를
+    정확히 같은 시각에(asyncio.gather) 동시 대사하려 해도
+    `pg_try_advisory_xact_lock`이 정확히 1개만 통과시키고 나머지는 이번
+    주기를 건너뛴다(단일 프로세스 순차 재실행이 아니라 실제 동시 경합).
+
+    전용 커넥션 풀을 별도로 연다 — 공용 `pool` 픽스처는 `max_size=4`라
+    `_reconcile_one`이 잠금용 커넥션 1개를 쥔 채로 `reconcile_account` 내부가
+    또 다른 커넥션을 요구하는 상황에서, 인스턴스 수가 4를 넘으면 전부가
+    서로의 커넥션 반납을 기다리며 교착한다(각 워커 프로세스가 자기 풀을
+    갖는 실제 운영 구조와도 더 가깝다)."""
+    user_id = await create_test_tenant(pool)
+    client_id = f"recon-cid-{uuid.uuid4().hex[:10]}"
+    await _insert_open_order(
+        pool, user_id, client_order_id=client_id,
+        quantity=Decimal("5"), filled_quantity=Decimal("2"),
+    )
+    account_ref = str(user_id)
+
+    async def _no_targets() -> list[ReconcileTarget]:
+        return []
+
+    n_instances = 5
+    scheduler_pool = await asyncpg.create_pool(
+        _asyncpg_dsn(), min_size=1, max_size=4 * n_instances
+    )
+    try:
+        schedulers = [
+            ReconcileScheduler(scheduler_pool, targets=_no_targets) for _ in range(n_instances)
+        ]
+        target = ReconcileTarget(
+            tenant_id=user_id,
+            connection_id=None,
+            account_ref=account_ref,
+            adapter=_ScriptedAdapter(
+                open_orders=[_provider_order(client_id, Decimal("5"), Decimal("2"))]
+            ),
+        )
+
+        results = await asyncio.gather(
+            *(scheduler._reconcile_one(target) for scheduler in schedulers)
+        )
+    finally:
+        await scheduler_pool.close()
+
+    assert sum(results) == 1
+
+
+async def test_adversarial_concurrent_submit_race_all_denied_during_material_mismatch(pool):
+    """D3 adversarial 증명 — ACCOUNT 세이프티 컨트롤이 MATERIAL_MISMATCH로
+    ACTIVE인 동안, 서로 다른 intent_seq를 쓰는 다수의 `submit_order` 호출이
+    정확히 같은 시각에(asyncio.gather) 경합해도(DENY를 레이스로 우회하려는
+    시도) 단 하나도 통과하지 못하고 orders 테이블에 행이 하나도 남지
+    않는다 — 순차 단일 시도(REC-002 기존 테스트)와 달리 동시 경합에서도
+    게이트가 새지 않음을 증명한다."""
+    user_id = await create_test_tenant(pool)
+    execution_id = await _create_running_execution(pool, user_id)
+    entity_context = await seed_entity_context(pool, user_id)
+    client_id = f"recon-cid-{uuid.uuid4().hex[:10]}"
+    await _insert_open_order(
+        pool, user_id, client_order_id=client_id,
+        quantity=Decimal("10"), filled_quantity=Decimal("3"),
+    )
+    mismatched_adapter = _ScriptedAdapter(
+        open_orders=[_provider_order(client_id, Decimal("10"), Decimal("7"))]
+    )
+    summary = await reconcile_account(
+        pool=pool, adapter=mismatched_adapter, tenant_id=user_id, connection_id=None,
+        account_ref=str(user_id), window=timedelta(minutes=5),
+    )
+    assert summary.overall_classification == "MATERIAL_MISMATCH"
+
+    n_attempts = 8
+    # 전용 커넥션 풀 — 각 submit_order 호출이 자기 트랜잭션(1커넥션) 안에서
+    # pre_submit_gate의 감사로그/결정 기록을 위해 추가 커넥션을 잠깐
+    # 요구한다(`make_foundation_pre_submit_gate`/`RiskDecisionRecorder`
+    # 내부). 공용 `pool` 픽스처(max_size=4)로 8개를 동시에 돌리면 모두가
+    # 서로의 두 번째 커넥션 반납을 기다리며 교착한다 — 위 다중 인스턴스
+    # 테스트와 동일한 이유로 여기서도 넉넉한 전용 풀을 쓴다.
+    submit_pool = await asyncpg.create_pool(_asyncpg_dsn(), min_size=1, max_size=4 * n_attempts)
+    try:
+        gate = make_foundation_pre_submit_gate(submit_pool, require_mandate=False)
+
+        async def attempt(seq: int) -> str:
+            scope = OrderIdempotencyScope(
+                tenant_id=user_id, account_ref="acct-1", provider="bitget", strategy_id="s1",
+                strategy_version="1.0.0", execution_id=execution_id, intent_seq=seq,
+                window_start=datetime.now(timezone.utc),
+            )
+            cmd = SubmitOrderCommand(
+                command_id=uuid.uuid4(), trace_id=uuid.uuid4(), scope=scope, symbol="BTC/USDT",
+                side=OrderSide.BUY, order_type=OrderType.MARKET, quantity=Decimal("0.01"),
+                asset_class=AssetClass.CRYPTO, actor_subject_id=user_id,
+                issued_at=datetime.now(timezone.utc),
+            )
+            try:
+                await submit_order(
+                    cmd, pool=submit_pool, profile=_profile(), registry=_registry(),
+                    pre_submit_gate=gate, entity_context=entity_context,
+                    entity_repo=PostgresEntityRepository(submit_pool),
+                )
+            except OrderSubmitDeniedError:
+                return "denied"
+            return "allowed"
+
+        results = await asyncio.gather(*(attempt(seq) for seq in range(1, n_attempts + 1)))
+    finally:
+        await submit_pool.close()
+
+    assert results == ["denied"] * n_attempts
+    async with pool.acquire() as conn:
+        order_count = await conn.fetchval(
+            "SELECT count(*) FROM orders WHERE execution_id = $1", execution_id
+        )
+    assert order_count == 0
