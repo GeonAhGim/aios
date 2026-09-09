@@ -49,7 +49,9 @@ from tests.integration.fake_exchange_adapter import FakeExchangeAdapter
 
 
 async def _allow_gate(context: object) -> GateDecision:
-    return GateDecision(outcome=GateOutcome.ALLOW)
+    return GateDecision(
+        outcome=GateOutcome.ALLOW, decision_id=uuid.uuid4(), compliance_decision_id=uuid.uuid4()
+    )
 
 
 async def _create_running_execution(pool: asyncpg.Pool, user_id: uuid.UUID) -> int:

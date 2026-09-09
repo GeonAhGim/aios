@@ -25,7 +25,9 @@ async def test_missing_gate_fails_closed():
 
 async def test_allow_decision_permits_submission():
     async def gate(context: OrderContext) -> GateDecision:
-        return GateDecision(outcome=GateOutcome.ALLOW)
+        return GateDecision(
+            outcome=GateOutcome.ALLOW, decision_id=uuid4(), compliance_decision_id=uuid4()
+        )
 
     allowed = await is_submission_allowed(gate, user_id=uuid4(), execution_id=1, exchange="bitget")
     assert allowed is True
@@ -45,7 +47,9 @@ async def test_gate_receives_correct_order_context():
 
     async def gate(context: OrderContext) -> GateDecision:
         seen.append(context)
-        return GateDecision(outcome=GateOutcome.ALLOW)
+        return GateDecision(
+            outcome=GateOutcome.ALLOW, decision_id=uuid4(), compliance_decision_id=uuid4()
+        )
 
     await is_submission_allowed(gate, user_id=user_id, execution_id=42, exchange="kis")
 
@@ -62,7 +66,9 @@ async def test_gate_receives_observed_fence_when_provided():
 
     async def gate(context: OrderContext) -> GateDecision:
         seen.append(context)
-        return GateDecision(outcome=GateOutcome.ALLOW)
+        return GateDecision(
+            outcome=GateOutcome.ALLOW, decision_id=uuid4(), compliance_decision_id=uuid4()
+        )
 
     await is_submission_allowed(
         gate,

@@ -5,13 +5,11 @@ Spec: docs/specs/L4_execution_oms_and_exchange_v1.0.md §2-C 표
 `submit_order(cmd, *, pool, profile, registry, pre_submit_gate, clock)->OrderView`,
 §5.2(idempotency.py L4-03 재사용), §5.3(전송 전 실패=FAILED, 유실=UNKNOWN), §9.
 
-FA-5(L4_ibor_fund_accounting_and_resilience_v1.0.md#FA-5)가 `entity_context: EntityContext`
-필수 인자를 추가했다 — `resolve_context()`(같은 리프) 산출값을 그대로 넘긴다.
-`orders.fund_id`/`portfolio_id`(FA-3, 아직 nullable)를 이 INSERT부터 채운다(NOT NULL
-승격은 범위 밖). task-1925(리뷰 REJECT 후속) — 호출자 직접 생성 `entity_context`는 위조
-가능해(같은 tenant_id + 타 테넌트 fund_id) `entity_repo` 필수 인자로 INSERT 직전
+FA-5가 `entity_context: EntityContext` 필수 인자를 추가했다 — `resolve_context()`(같은
+리프) 산출값을 그대로 넘긴다. `orders.fund_id`/`portfolio_id`(FA-3, 아직 nullable)를 이
+INSERT부터 채운다(NOT NULL 승격은 범위 밖). task-1925 — 호출자 직접 생성 `entity_context`는
+위조 가능해(같은 tenant_id + 타 테넌트 fund_id) `entity_repo` 필수 인자로 INSERT 직전
 `verify_entity_context()`를 호출해 실소유권을 재확인한다.
-
 실제 거래소 호출은 이 함수가 하지 않는다 — `outbox_dispatcher.py`(L4-14)가
 `order_command_outbox`의 SUBMIT 행을 비동기 소비해 호출한다(§5.3, 이 함수는 그 행을
 만드는 것까지만 책임진다).
@@ -19,20 +17,16 @@ FA-5(L4_ibor_fund_accounting_and_resilience_v1.0.md#FA-5)가 `entity_context: En
 INSERT-먼저(claim이 그 다음) 순서: `order_idempotency.order_id`는 `orders`를 참조하는
 NOT DEFERRABLE FK(073beca589d5)라 claim이 참조할 행이 먼저 있어야 한다 — §2-C 표의
 "멱등 선점→orders INSERT"는 개념 순서고, 실제 SQL은 FK 제약이 강제하는 순서를 따른다.
-경합에서 진 시도는 방금 넣은 CREATED 행까지 포함해 tx 전체를 롤백하므로("ok" 플래그로
-커밋/롤백 명시 제어) 최종적으로 남는 행은 항상 승자 하나뿐이다(DoD "동시 50 submit → 1행").
-
+경합에서 진 시도는 방금 넣은 CREATED 행까지 포함해 tx 전체를 롤백하므로 최종적으로
+남는 행은 항상 승자 하나뿐이다(DoD "동시 50 submit → 1행").
 `client_order_id`는 `scope`의 결정론적 함수(domain/idempotency.py L4-03)라 같은 의도의
 동시 요청은 모두 같은 값을 계산한다 — `orders.client_order_id` UNIQUE 제약(210cc26533c7)이
-진짜 동시성 관문이고, `order_idempotency.scope_hash` 선점은 digest 비교용이다(둘 다 같은
-`scope`의 함수라 client_order_id 충돌 없이 scope_hash만 충돌하는 경로는 없다). 패자는
-`UniqueViolationError`를 받는데, Postgres UNIQUE는 충돌 행이 **커밋된 뒤에만** 확정
-에러를 내므로 이 시점엔 승자 tx가 이미 커밋 완료돼 있다 — 패자는 자기 tx를 롤백하고
-새 tx로 승자 행을 조회해 반환한다.
-
-게이트는 claim이 NEW를 반환했을 때만(§2-C "EXISTING이면 기존 OrderView 반환") INSERT
-직후·VALIDATED 전이 직전에 평가한다. DENY면 커밋하지 않고 tx를 롤백한다(0행) —
-`outbox_dispatcher._send_submit`과 같은 패턴(L4-14).
+진짜 동시성 관문이고, `order_idempotency.scope_hash` 선점은 digest 비교용이다. 패자는
+`UniqueViolationError`를 받는데(커밋 뒤에만 확정되는 Postgres UNIQUE라 승자 tx가 이미
+커밋 완료) 자기 tx를 롤백하고 새 tx로 승자 행을 조회해 반환한다.
+게이트는 claim이 NEW를 반환했을 때만(§2-C "EXISTING이면 기존 OrderView 반환") INSERT 직후
+평가한다. DENY면 tx를 롤백한다(0행, `outbox_dispatcher._send_submit`과 같은 패턴, L4-14).
+CM-8 §3 — ALLOW는 `GateDecision.decision_id`/`.compliance_decision_id` 둘 다 필수다.
 """
 from __future__ import annotations
 
@@ -221,10 +215,16 @@ async def submit_order(
                             execution_id=cmd.scope.execution_id,
                             exchange=profile.venue,
                             mandate_revision_id=None,
+                            # CM-8 — real fields so restricted_list can evaluate this order.
+                            symbol=cmd.symbol,
+                            side=cmd.side.value,
+                            quantity=cmd.quantity,
                         )
                     )
                     if decision.outcome != GateOutcome.ALLOW:
                         raise OrderSubmitDeniedError(decision.reason_codes)
+                    if decision.decision_id is None or decision.compliance_decision_id is None:
+                        raise OrderSubmitDeniedError(("CM_DECISION_ID_MISSING",))
 
                     occurred_at = clock()
                     event = OrderTransitionEvent(
@@ -281,9 +281,8 @@ async def submit_order(
 async def _resolve_after_collision(
     pool: asyncpg.Pool, *, scope_hash_val: str, digest: str
 ) -> OrderView:
-    """`orders.client_order_id` UNIQUE 충돌 뒤(패자) — 승자 tx는 이미 커밋
-    완료라 새 tx로 조회하면 된다. digest도 직접 대조해 승자가 다른 내용의
-    명령이었다면(이론상 도달 불가에 가깝지만 fail-closed) 거부한다."""
+    """`orders.client_order_id` UNIQUE 충돌 뒤(패자) — 승자 tx는 이미 커밋 완료라
+    새 tx로 조회한다. digest도 대조해 승자가 다른 명령이었다면 거부한다(fail-closed)."""
     async with pool.acquire() as conn:
         stored_digest = await conn.fetchval(
             "SELECT digest FROM order_idempotency WHERE scope_hash = $1", scope_hash_val

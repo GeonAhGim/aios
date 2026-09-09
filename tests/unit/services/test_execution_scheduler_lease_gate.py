@@ -83,7 +83,9 @@ class _RecordingLeaseRepo:
 
 
 async def _allow_all(_context: OrderContext) -> GateDecision:
-    return GateDecision(outcome=GateOutcome.ALLOW)
+    return GateDecision(
+        outcome=GateOutcome.ALLOW, decision_id=uuid.uuid4(), compliance_decision_id=uuid.uuid4()
+    )
 
 
 async def _resolve_adapter(user_id: uuid.UUID, exchange: str) -> Any:
@@ -140,7 +142,9 @@ async def test_tick_one_forwards_injected_gate_and_monitor(
     monitor = DataDistrustMonitor()
 
     async def _gate(_context: OrderContext) -> GateDecision:
-        return GateDecision(outcome=GateOutcome.ALLOW)
+        return GateDecision(
+            outcome=GateOutcome.ALLOW, decision_id=uuid.uuid4(), compliance_decision_id=uuid.uuid4()
+        )
 
     kwargs = _required_kwargs(_RecordingLeaseRepo({7}))
     kwargs.update(pre_submit_gate=_gate, distrust_monitor=monitor)

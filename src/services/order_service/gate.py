@@ -74,6 +74,15 @@ class GateDecision:
     # None — `decision_id`(risk_gate)와 달리 fail-closed 강제 대상이
     # 아니다(감사·조회용 참조).
     policy_decision_id: UUID | None = None
+    # CM-8 — `mandates.application.evaluate_pre_trade`가 낸
+    # `ComplianceDecision.decision_id`(또는 그 WORM `policy_decision.id`).
+    # `policy_decision_id`(mandate 수치 정책)와는 별개 판정 축이다(§0 권위
+    # 원칙: 리스크·컴플라이언스는 분리된 두 권위). `foundation_gate.py`의
+    # ALLOW 반환 경로는 항상 이 값을 채운다(require_compliance_mandate=False
+    # 라도 — 평가 자체는 항상 하고, 미구성 mandate에 대해서만 통과 여부를
+    # 그 플래그로 정한다). `submit_order`는 outcome이 ALLOW인데 이 값이
+    # None이면 거부한다(L4_compliance_and_regulatory_v1.0.md §3).
+    compliance_decision_id: UUID | None = None
 
 
 PreSubmitGate = Callable[[OrderContext], Awaitable[GateDecision]]

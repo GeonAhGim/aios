@@ -408,7 +408,9 @@ async def enqueue(
 
 
 async def allow_gate(ctx: OrderContext) -> GateDecision:
-    return GateDecision(outcome=GateOutcome.ALLOW)
+    return GateDecision(
+        outcome=GateOutcome.ALLOW, decision_id=uuid4(), compliance_decision_id=uuid4()
+    )
 
 
 async def deny_gate(ctx: OrderContext) -> GateDecision:

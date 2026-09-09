@@ -121,7 +121,9 @@ async def test_recovery_gate_delegates_after_recovery_complete():
 
     async def delegate(context: OrderContext) -> GateDecision:
         delegated.append(context)
-        return GateDecision(outcome=GateOutcome.ALLOW)
+        return GateDecision(
+            outcome=GateOutcome.ALLOW, decision_id=uuid.uuid4(), compliance_decision_id=uuid.uuid4()
+        )
 
     gate = make_recovery_gate(state, delegate)
     decision = await gate(
@@ -170,7 +172,9 @@ async def test_submit_order_allowed_after_recovery_complete(pool):
     state.mark_complete()
 
     async def allow_all(context: OrderContext) -> GateDecision:
-        return GateDecision(outcome=GateOutcome.ALLOW)
+        return GateDecision(
+            outcome=GateOutcome.ALLOW, decision_id=uuid.uuid4(), compliance_decision_id=uuid.uuid4()
+        )
 
     gate = make_recovery_gate(state, allow_all)
     order = _make_order(execution_id)

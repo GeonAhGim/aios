@@ -36,7 +36,9 @@ from tests.integration.test_execution_tick import _create_execution
 
 
 async def _allow_all(_context: OrderContext) -> GateDecision:
-    return GateDecision(outcome=GateOutcome.ALLOW)
+    return GateDecision(
+        outcome=GateOutcome.ALLOW, decision_id=uuid.uuid4(), compliance_decision_id=uuid.uuid4()
+    )
 
 
 def _resolver_for(adapters: dict[UUID, ExchangeAdapter]):

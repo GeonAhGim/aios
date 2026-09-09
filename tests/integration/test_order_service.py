@@ -34,7 +34,9 @@ async def _allow_gate(context: object) -> GateDecision:
     검증한다 — 실제 risk_gate는 `test_order_service_risk_gate.py`가 맡는다
     (task-1715/P0-B가 `pre_submit_gate`를 필수 인자로 바꾼 뒤에도 이 파일의
     기존 시나리오가 게이트 자체를 우회 없이 그대로 통과하게 하는 대역)."""
-    return GateDecision(outcome=GateOutcome.ALLOW)
+    return GateDecision(
+        outcome=GateOutcome.ALLOW, decision_id=uuid.uuid4(), compliance_decision_id=uuid.uuid4()
+    )
 
 
 def _asyncpg_dsn() -> str:

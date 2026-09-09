@@ -38,7 +38,9 @@ def _command() -> SubmitOrderCommand:
 
 
 async def _allow_gate(context: OrderContext) -> GateDecision:
-    return GateDecision(outcome=GateOutcome.ALLOW)
+    return GateDecision(
+        outcome=GateOutcome.ALLOW, decision_id=uuid4(), compliance_decision_id=uuid4()
+    )
 
 
 class _PoolSpy:

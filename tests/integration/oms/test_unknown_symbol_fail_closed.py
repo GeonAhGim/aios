@@ -37,7 +37,9 @@ from tests.support.oms_outbox_fakes import ScriptedAdapter
 
 
 async def _allow_gate(context: OrderContext) -> GateDecision:
-    return GateDecision(outcome=GateOutcome.ALLOW)
+    return GateDecision(
+        outcome=GateOutcome.ALLOW, decision_id=uuid.uuid4(), compliance_decision_id=uuid.uuid4()
+    )
 
 
 async def _drain_stale_outbox(pool) -> None:

@@ -44,7 +44,9 @@ def _asyncpg_dsn() -> str:
 
 
 async def _allow_all(_context: OrderContext) -> GateDecision:
-    return GateDecision(outcome=GateOutcome.ALLOW)
+    return GateDecision(
+        outcome=GateOutcome.ALLOW, decision_id=uuid.uuid4(), compliance_decision_id=uuid.uuid4()
+    )
 
 
 def _owner_id() -> str:

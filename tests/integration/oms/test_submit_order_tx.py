@@ -111,7 +111,9 @@ def _command(user_id: uuid.UUID, execution_id: int, **overrides: object) -> Subm
 
 
 async def _allow_gate(context: OrderContext) -> GateDecision:
-    return GateDecision(outcome=GateOutcome.ALLOW)
+    return GateDecision(
+        outcome=GateOutcome.ALLOW, decision_id=uuid.uuid4(), compliance_decision_id=uuid.uuid4()
+    )
 
 
 async def _deny_gate(context: OrderContext) -> GateDecision:

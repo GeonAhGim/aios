@@ -2,65 +2,35 @@
 실제 구현체 — foundation risk_gate/mandates를 여기서만 import한다
 (`gate.py`/`submit.py`는 foundation을 모른다, PM 지침).
 
-R-36 — R-35 `evaluate_pre_submit`(task-1362, d103d07)이 도입한 원자적
-fence+control 읽기(`fence_pairs_for` + `read_fence_and_controls`)에
-위임한다: 기존 `list_active_controls(tenant_id, provider_code)`는
-GLOBAL/TENANT/ACCOUNT/PROVIDER 4쌍만 봤고 STRATEGY_DEPLOYMENT 범위
-킬스위치를 놓쳤다 — `fence_pairs_for`의 5쌍 전부를 같은 트랜잭션
-(REPEATABLE READ)에서 함께 읽어 그 결손을 없애고, 동시에 F0(fence
-snapshot)를 확보해 `GateDecision.fence_snapshot`으로 호출부까지 그대로
-넘긴다(R-33 fence 관통). `evaluate_pre_submit` 자체(CB/data-distrust/
-connection-freshness)는 아직 위임하지 않는다 — 그 3개 입력은 Foundation
-onboarding(`account_connections`)을 거친 tenant만 값을 가지는데, legacy
-PAPER 실행 전부가 아직 그 온보딩을 거치지 않아 그대로 위임하면 모든 legacy
-주문이 "입력 결손 → fail-closed DENY"로 즉시 막힌다 — 별도 리프에서
-onboarding 이관과 함께 다뤄야 한다(미검증 스코프 밖, 이 파일 docstring에
-남겨 둔다).
+R-36 — 원자적 fence+control 읽기(`fence_pairs_for` + `read_fence_and_controls`,
+같은 REPEATABLE READ 트랜잭션)에 위임해 GLOBAL/TENANT/ACCOUNT/PROVIDER/
+STRATEGY_DEPLOYMENT 5쌍 전부를 보고, F0을 `GateDecision.fence_snapshot`으로
+관통시킨다(R-33). `evaluate_pre_submit`(CB/data-distrust/connection-freshness)
+은 아직 위임하지 않는다 — Foundation onboarding을 거치지 않은 legacy PAPER
+실행이 즉시 fail-closed DENY로 막히기 때문(별도 리프, 미검증 스코프 밖).
 
-2단 게이트:
-1층(항상 검사): fence가 stale하면(§3.6 관측된 F0보다 현재 토큰이 크면)
-   즉시 DENY — 이번 평가 근거가 이미 낡았다는 뜻이라 그 아래 판단을
-   신뢰할 수 없다. 다음으로 GLOBAL/TENANT/ACCOUNT/PROVIDER/이 실행 범위에
-   활성 control이 하나라도 있으면 mandate 유무와 무관하게 DENY.
-2층: mandate가 없을 때의 처리는 `require_mandate`(호출부가 반드시 명시,
-   기본값 없음 — 이 자체가 예전 `AIOS_REQUIRE_MANDATE_FOR_SUBMIT` env var
-   우회 경로를 없앤 지점이다: env var는 배포 시점에 코드 리뷰 없이 조용히
-   뒤집을 수 있었지만, 이제는 호출부 코드에 `True`/`False`가 그대로
-   드러난다)로 정해진다.
-   - `require_mandate=True`: mandate 미연결이면 `RISK_MANDATE_REQUIRED`
-     DENY(I-01 fail-closed, RSK-002 완전 적용). 이 경로의 정확성은
-     `tests/integration/test_order_service_risk_gate.py`가 독립적으로
-     증명한다.
-   - `require_mandate=False`(현재 두 프로덕션 조립부 `background_loops.py`
-     pre_submit_gate·`execution_deps.py` pre_start_gate 전부 이 값):
-     mandate 미연결이어도 audit_log만 남기고 통과 — execution 생성 UI가
-     아직 어떤 execution에도 `mandate_revision_id`를 연결하지 않는다
-     (컬럼은 있지만 채우는 경로가 없음). 지금 `True`로 뒤집으면 legacy
-     PAPER/LIVE 실행 전체가 이번 tick부터 예외 없이 막히는 회귀가 된다
-     — mandate-연결 UI가 나오면 그때 두 조립부를 `True`로 뒤집는다
-     (R-36은 그 스위치를 만들고 증명하는 리프이지, 오늘 당장 켜는
-     리프가 아니다).
-   If a mandate exists (or is claimed to exist), it first checks whether
-   `context.mandate_revision_id` matches the tenant's current active
-   revision (task-1806, the same observed-vs-current pattern as fence) —
-   if an amendment changed the revision but the caller still holds the old
-   revision id, it's `RISK_MANDATE_REVISION_STALE` DENY. Only once they
-   match does it proceed to formal evaluation via
-   `mandates.evaluate_policy()`.
+3단 게이트(순서대로 평가, 먼저 DENY가 나오면 그 자리에서 반환):
+1층: fence stale(§3.6) 또는 활성 control → 즉시 DENY.
+2층(CM-8/CM-A5): `evaluate_compliance_gate` — mandate 위임장 규칙(CM-6/7)
+   위반은 리스크·수치정책이 ALLOW여도 DENY(권위 분리). `require_compliance_
+   mandate`가 "mandate 자체가 없을 때"의 처리를 정한다(기본 False — 아래
+   `require_mandate`와 같은 이유).
+3층: mandate 수치 정책. `require_mandate`(호출부 필수 명시, 기본값 없음 —
+   예전 `AIOS_REQUIRE_MANDATE_FOR_SUBMIT` env var 우회를 없앤 지점)로
+   "mandate 미연결"의 처리를 정한다. `True`면 `RISK_MANDATE_REQUIRED` DENY
+   (`tests/integration/test_order_service_risk_gate.py`가 증명). `False`
+   (현재 모든 프로덕션 조립부)면 audit_log만 남기고 통과 — execution 생성
+   UI가 아직 `mandate_revision_id`를 연결하지 않기 때문(컬럼은 있음).
+   mandate가 있으면 `context.mandate_revision_id`가 현재 active revision과
+   일치하는지 먼저 본다(task-1806, fence와 같은 관측-대-현재 패턴) — 불일치면
+   `RISK_MANDATE_REVISION_STALE` DENY, 일치해야 `mandates.evaluate_policy()`로
+   진행한다.
 
-task-1717 P0-D — 전수감사가 지적한 결함은 "이 함수가 내리는 실제 결정이
-`risk_decision` WORM 테이블에 전혀 기록되지 않아 `GateDecision.decision_id`가
-항상 None이고, 그래서 `orders.risk_decision_id`를 쓰는 운영 경로가 0개"였다.
-위 2단 게이트 로직 자체(fence/control/mandate)는 그대로 두고, 그 결과를
-`_record_decision()`으로 WORM에 기록해 `decision_id`를 채운다 — 이 결정은
-`GateKind.PRE_SUBMIT`이지만 `evaluate_pre_submit()`이 쓰는 4-rule 스키마와는
-별개(그 함수를 호출하지 않으므로 CB/distrust/connection 필드가 없다)다.
-`fenced_submit.bind_to_worm_decision`/`decision_binding.verify_decision_binding`이
-요구하는 최소 계약(top-level `symbol`/`side`/`quantity`/`fence_snapshot`,
-`execution_ref`)만 만족시킨다. mandate를 정식 평가한 경우
-`GateDecision.policy_decision_id`에 그 `PolicyDecisionView.id`도 함께
-반환한다(신규 필드, mandates bounded context 자체 결정 id — risk_gate WORM
-과 별개 테이블).
+task-1717 P0-D — 모든 결정을 `_record_decision()`으로 `risk_decision` WORM에
+기록해 `GateDecision.decision_id`를 채운다(`GateKind.PRE_SUBMIT`,
+`evaluate_pre_submit`의 4-rule 스키마와는 별개 — CB/distrust/connection
+필드 없음). mandate를 정식 평가했으면 `policy_decision_id`도, CM-8 컴플라이언스
+판정을 했으면 `compliance_decision_id`도 함께 채운다(각각 별개 테이블 참조).
 """
 from __future__ import annotations
 
@@ -89,6 +59,7 @@ from src.foundation.risk_gate.adapters.postgres_decision_repository import (
 from src.foundation.risk_gate.adapters.postgres_repository import PostgresRiskGateRepository
 from src.foundation.risk_gate.domain.fence import fence_pairs_for
 from src.foundation.risk_gate.domain.models import FenceSnapshot
+from src.services.order_service.foundation_compliance import evaluate_compliance_gate
 from src.services.order_service.gate import GateDecision, GateOutcome, OrderContext, PreSubmitGate
 from src.services.risk_decision_recorder import RiskDecisionRecorder
 
@@ -178,7 +149,17 @@ async def _record_decision(
     return decision_id
 
 
-def make_foundation_pre_submit_gate(pool: asyncpg.Pool, *, require_mandate: bool) -> PreSubmitGate:
+def make_foundation_pre_submit_gate(
+    pool: asyncpg.Pool,
+    *,
+    require_mandate: bool,
+    # CM-8 — sibling flag for the independent compliance rule-bundle check
+    # (`evaluate_compliance_gate`); only governs "no mandate configured at
+    # all" (same reasoning/default as `require_mandate`, no UI binds mandates
+    # to executions yet). CM-A5 (mandate violations block even risk-ALLOW
+    # orders) is enforced unconditionally, regardless of this flag.
+    require_compliance_mandate: bool = False,
+) -> PreSubmitGate:
     risk_repo = PostgresRiskGateRepository(pool)
     mandate_repo = PostgresMandateRepository(pool)
     recorder = RiskDecisionRecorder(pool, PostgresDecisionRepository(pool), InProcessEventBus())
@@ -212,6 +193,37 @@ def make_foundation_pre_submit_gate(pool: asyncpg.Pool, *, require_mandate: bool
                 fence_snapshot=fence, decision_id=decision_id,
             )
 
+        # CM-8/CM-A5 — evaluated here but only consumed at the two ALLOW
+        # points below, so existing risk/numeric-mandate DENY reason codes
+        # keep their own specific reason; compliance only gets the final say
+        # when this function was about to return ALLOW anyway.
+        compliance = await evaluate_compliance_gate(
+            mandate_repo, context,
+            require_compliance_mandate=require_compliance_mandate,
+            now=datetime.now(timezone.utc),
+        )
+
+        async def _finish_allow(*, policy_decision_id: UUID | None = None) -> GateDecision:
+            if not compliance.allowed:
+                cid = await _record_decision(
+                    recorder, context=context, outcome=GateOutcome.DENY,
+                    reason_codes=compliance.reason_codes, fence=fence, start_ns=start_ns,
+                )
+                return GateDecision(
+                    outcome=GateOutcome.DENY, reason_codes=compliance.reason_codes,
+                    fence_snapshot=fence, decision_id=cid,
+                    compliance_decision_id=compliance.compliance_decision_id,
+                )
+            cid = await _record_decision(
+                recorder, context=context, outcome=GateOutcome.ALLOW, reason_codes=(),
+                fence=fence, start_ns=start_ns,
+            )
+            return GateDecision(
+                outcome=GateOutcome.ALLOW, fence_snapshot=fence, decision_id=cid,
+                policy_decision_id=policy_decision_id,
+                compliance_decision_id=compliance.compliance_decision_id,
+            )
+
         if context.mandate_revision_id is None:
             async with pool.acquire() as conn:
                 await record_audit_log(
@@ -232,13 +244,7 @@ def make_foundation_pre_submit_gate(pool: asyncpg.Pool, *, require_mandate: bool
                     outcome=GateOutcome.DENY, reason_codes=("RISK_MANDATE_REQUIRED",),
                     fence_snapshot=fence, decision_id=decision_id,
                 )
-            decision_id = await _record_decision(
-                recorder, context=context, outcome=GateOutcome.ALLOW,
-                reason_codes=(), fence=fence, start_ns=start_ns,
-            )
-            return GateDecision(
-                outcome=GateOutcome.ALLOW, fence_snapshot=fence, decision_id=decision_id,
-            )
+            return await _finish_allow()
 
         # task-1806 — applies the same observed-vs-current pattern as R-36
         # to the mandate revision too: `context.mandate_revision_id` is the
@@ -287,13 +293,6 @@ def make_foundation_pre_submit_gate(pool: asyncpg.Pool, *, require_mandate: bool
                 outcome=GateOutcome.DENY, reason_codes=reason_codes, fence_snapshot=fence,
                 decision_id=decision_id, policy_decision_id=mandate_decision.id,
             )
-        decision_id = await _record_decision(
-            recorder, context=context, outcome=GateOutcome.ALLOW, reason_codes=(), fence=fence,
-            start_ns=start_ns,
-        )
-        return GateDecision(
-            outcome=GateOutcome.ALLOW, fence_snapshot=fence, decision_id=decision_id,
-            policy_decision_id=mandate_decision.id,
-        )
+        return await _finish_allow(policy_decision_id=mandate_decision.id)
 
     return gate

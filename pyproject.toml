@@ -148,6 +148,7 @@ extend-immutable-calls = ["fastapi.Depends", "fastapi.Query", "fastapi.Path", "f
 # 내부에서 신뢰된 인자로 여는 서브프로세스이고, S314는 pytest-cov가 로컬에
 # 생성한 coverage.xml(신뢰된 입력)을 읽는 coverage_ratchet.py 하나뿐이다.
 "scripts/**" = ["TID251", "T201", "S603", "S607", "S314"]
+"scripts/check_compliance_gate.py" = ["S101"]
 
 # R-54 — src/tools/**: scripts/**와 동일한 운영자 CLI 계층(`python -m
 # src.tools.<name>`)이다. asyncpg로 직접 접속하고 exit code로 결과를
@@ -221,6 +222,7 @@ extend-immutable-calls = ["fastapi.Depends", "fastapi.Query", "fastapi.Path", "f
 "src/foundation/mandates/adapters/postgres_policy_repository.py" = ["S101"]
 "src/foundation/mandates/adapters/postgres_repository.py" = ["S101"]
 "src/foundation/mandates/application/evaluate_policy.py" = ["S101"]
+"src/foundation/mandates/application/evaluate_pre_trade.py" = ["S101"]
 "src/foundation/market_data/application/scheduler.py" = ["S101"]
 "src/foundation/paper_control/adapters/fake_paper_adapter.py" = ["ARG002"]
 "src/foundation/paper_control/adapters/postgres_repository.py" = ["S101"]

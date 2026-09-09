@@ -122,7 +122,9 @@ def _command(user_id: uuid.UUID, execution_id: int) -> SubmitOrderCommand:
 
 
 async def _allow_gate(context: OrderContext) -> GateDecision:
-    return GateDecision(outcome=GateOutcome.ALLOW)
+    return GateDecision(
+        outcome=GateOutcome.ALLOW, decision_id=uuid.uuid4(), compliance_decision_id=uuid.uuid4()
+    )
 
 
 async def _kill_switch_gate(context: OrderContext) -> GateDecision:

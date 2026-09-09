@@ -28,7 +28,9 @@ async def _allow_gate(context: object) -> GateDecision:
     """이 파일은 LIVE 하드가드·FSM 전이 등 Executor 자체 로직을 검증한다 —
     실제 게이트 배선은 tests/adversarial/risk/test_executor_requires_gate.py
     (task-1715/P0-B)가 맡는다."""
-    return GateDecision(outcome=GateOutcome.ALLOW)
+    return GateDecision(
+        outcome=GateOutcome.ALLOW, decision_id=uuid.uuid4(), compliance_decision_id=uuid.uuid4()
+    )
 
 
 def _asyncpg_dsn() -> str:

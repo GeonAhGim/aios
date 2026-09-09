@@ -90,7 +90,9 @@ class _ExplodingPool:
 
 
 async def _allow_gate(context: object) -> GateDecision:
-    return GateDecision(outcome=GateOutcome.ALLOW)
+    return GateDecision(
+        outcome=GateOutcome.ALLOW, decision_id=uuid4(), compliance_decision_id=uuid4()
+    )
 
 
 def _order(**overrides: object) -> Order:

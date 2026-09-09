@@ -92,7 +92,9 @@ def _registry() -> SymbolRegistry:
 
 
 async def _allow_gate(context: OrderContext) -> GateDecision:
-    return GateDecision(outcome=GateOutcome.ALLOW)
+    return GateDecision(
+        outcome=GateOutcome.ALLOW, decision_id=uuid4(), compliance_decision_id=uuid4()
+    )
 
 
 async def _create_running_execution(pool: asyncpg.Pool, user_id: UUID) -> int:
