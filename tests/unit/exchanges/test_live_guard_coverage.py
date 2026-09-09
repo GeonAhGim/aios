@@ -32,6 +32,8 @@ from __future__ import annotations
 import ast
 import json
 import re
+import sys
+import time
 from decimal import Decimal
 from pathlib import Path
 
@@ -299,3 +301,99 @@ async def test_bitget_transfer_broker_subaccount_rejects_live_adapter():
     live_adapter = _make_live_bitget_adapter()
     with pytest.raises(FrozenZonePaperAdapterBlockedError):
         await live_adapter.transfer_broker_subaccount("sub-1", "usdt", Decimal("10"))
+
+
+# ---------------------------------------------------------------------------
+# DEEPEN(task-2788, docs/audit/DEPTH_L4_BR.md #1975) — the DEPTH audit graded
+# task-1975's leaf D1 (below the D2 floor): the TR-metadata scanner above has
+# gate-red regression coverage (test_scanner_detects_generator_style_name_via_
+# tr_metadata) but no failure-injection test and no numeric performance/
+# throughput assertion. The two groups below fill exactly that gap without
+# touching the scanner's detection logic.
+# ---------------------------------------------------------------------------
+
+
+def test_load_kis_order_tr_ids_raises_on_malformed_reference_not_fail_open(monkeypatch, tmp_path):
+    """failure-injection — a corrupted `kis_tr_reference.json` must make the
+    scanner fail loudly, not silently fall back to an empty `order_tr_ids`
+    set. An empty set would make `_matches_kis_order_tr_id` reject nothing,
+    reopening exactly the fail-open hole this leaf closed (BR-12's 19
+    unguarded generator-style methods, task-1975)."""
+    broken = tmp_path / "kis_tr_reference.json"
+    broken.write_text("{not valid json", encoding="utf-8")
+    monkeypatch.setattr(sys.modules[__name__], "_KIS_TR_REFERENCE", broken)
+
+    with pytest.raises(json.JSONDecodeError):
+        _load_kis_order_tr_ids()
+
+
+def test_load_kis_order_tr_ids_raises_on_missing_reference_file(monkeypatch, tmp_path):
+    """failure-injection — a missing reference file (e.g. deleted/renamed by
+    an unrelated change) must raise `FileNotFoundError`, not be silently
+    treated as "no order TRs" that lets every generator-style method pass."""
+    monkeypatch.setattr(
+        sys.modules[__name__], "_KIS_TR_REFERENCE", tmp_path / "does-not-exist.json"
+    )
+
+    with pytest.raises(FileNotFoundError):
+        _load_kis_order_tr_ids()
+
+
+def test_scan_raises_on_syntax_error_source_instead_of_silently_skipping_file(
+    monkeypatch, tmp_path
+):
+    """failure-injection — a source file with a syntax error must abort the
+    scan (`ast.parse` propagates `SyntaxError`) instead of being silently
+    skipped. A scanner that swallowed per-file parse errors would let an
+    unguarded order method hide behind a deliberately or accidentally broken
+    sibling file in the same directory."""
+    (tmp_path / "broken.py").write_text("def broken(:\n    pass\n", encoding="utf-8")
+    monkeypatch.setattr(sys.modules[__name__], "_SRC_EXCHANGES", tmp_path)
+
+    with pytest.raises(SyntaxError):
+        _find_unguarded_fund_moving_methods()
+
+
+# ── 수치 성능/처리량 단언 ────────────────────────────────────────────────
+
+
+def test_matches_kis_order_tr_id_scales_linearly_not_quadratically_with_tr_id_count():
+    """수치 성능 단언 — DEPTH 감사(#1975)가 지적한 공백. `_matches_kis_order_tr_id`는
+    스캔 대상 이름마다 `order_tr_ids`(실제 기준 목록 기준 수백 건)를 선형 스캔한다
+    (`any(... for tr_id in order_tr_ids)`) — `_find_unguarded_fund_moving_methods`가
+    저장소 전체의 매 async 메서드마다 이 함수를 호출하므로, tr_id 집합 크기가 늘어도
+    호출당 비용이 선형(O(n))을 유지해야 하고 초선형(O(n^2))으로 퇴화하면 CI 전체
+    스캔이 느려진다. 절대 ms 임계 대신 같은 프로세스에서 방금 잰 소규모 기준값에
+    정규화한 배율을 쓴다(task-2784/2785와 동일 결정, 디스크 I/O 없이 순수 함수만
+    측정해 파일시스템/바이러스 백신 변동성을 배제한다)."""
+    small_ids = frozenset(f"vtxx{i:04d}u" for i in range(40))
+    large_ids = frozenset(f"vtxx{i:04d}u" for i in range(400))  # 10x
+    name = "order_cash_vtxx9999u"  # 어느 tr_id와도 안 맞음 -> 매 호출이 최악의 전체 스캔
+
+    assert not _matches_kis_order_tr_id(name, small_ids)  # 워밍업 + 전제 확인
+    assert not _matches_kis_order_tr_id(name, large_ids)
+
+    n = 3000
+    small_started = time.perf_counter()
+    for _ in range(n):
+        _matches_kis_order_tr_id(name, small_ids)
+    small_elapsed = time.perf_counter() - small_started
+
+    large_started = time.perf_counter()
+    for _ in range(n):
+        _matches_kis_order_tr_id(name, large_ids)
+    large_elapsed = time.perf_counter() - large_started
+
+    size_ratio = 10.0
+    budget_multiplier = 5.0
+    budget = small_elapsed * size_ratio * budget_multiplier
+    print(
+        f"\n_matches_kis_order_tr_id: n={n} small={small_elapsed * 1000:.1f}ms "
+        f"large={large_elapsed * 1000:.1f}ms ratio={large_elapsed / small_elapsed:.2f} "
+        f"(budget_ratio={size_ratio * budget_multiplier:.1f})"
+    )
+    assert large_elapsed <= budget, (
+        f"tr_id 집합 크기 10배 증가에 소요시간이 초선형으로 늘었습니다 "
+        f"(small={small_elapsed * 1000:.2f}ms n={n}, large={large_elapsed * 1000:.2f}ms n={n}, "
+        f"budget={budget * 1000:.2f}ms) -- O(n^2) 회귀 가능성."
+    )
