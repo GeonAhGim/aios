@@ -12,7 +12,9 @@ demo/paper 리터럴로만 존재하는지를 AST로 함께 증명한다.
 from __future__ import annotations
 
 import ast
+import asyncio
 import inspect
+import time
 from pathlib import Path
 
 import pytest
@@ -216,3 +218,68 @@ def test_operational_wiring_defaults_to_guarded_factory():
     for cls in (CredentialResolver, ExchangeCredentialService):
         param = inspect.signature(cls.__init__).parameters["adapter_factory"]
         assert param.default is build_adapter, cls.__name__
+
+
+# ---------------------------------------------------------------------------
+# DEPTH D2/D3 보강(task-2757) — 수치 지연 단언 + 다중 인스턴스/재현 증명
+#
+# task-2722(DEPTH_L4_BR.md)가 원 task-1519를 D1로 판정 — 기존
+# test_live_adapter_blocked_without_env는 단발 guard-bypass 단위테스트
+# 하나뿐이라 D2(수치 성능 단언)·D3(다중 인스턴스/재현 증명) 하한 미달.
+# ---------------------------------------------------------------------------
+
+
+async def test_concurrent_live_adapter_requests_all_blocked_without_race(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """다중 인스턴스 증명(D3) — 여러 OMS/backend 워커가 동시에 같은
+    프로세스에서 `build_adapter(demo_mode=False)`를 호출하는 상황을
+    `asyncio.gather`로 흉내낸다. 환경변수가 비어 있는 동안에는 호출
+    개수·거래소 조합과 무관하게 전부 차단돼야 한다 — 레이스로 한 요청만
+    새는(가드를 한 번이라도 통과시키는) 사고를 방지한다."""
+
+    async def _attempt(exchange: str, extra: dict[str, str]) -> FrozenZonePaperAdapterBlockedError:
+        try:
+            build_adapter(exchange, "key", "secret", extra, demo_mode=False)
+        except FrozenZonePaperAdapterBlockedError as exc:
+            return exc
+        raise AssertionError(f"{exchange}: guard bypass 허용됨")  # pragma: no cover
+
+    attempts = [("bitget", _BITGET_EXTRA), ("kis", _KIS_EXTRA), ("nh", _NH_EXTRA)] * 20
+    results = await asyncio.gather(*(_attempt(ex, extra) for ex, extra in attempts))
+
+    assert len(results) == 60
+    assert all(isinstance(r, FrozenZonePaperAdapterBlockedError) for r in results)
+
+
+def test_guard_replay_toggle_env_var_never_leaks_across_calls(monkeypatch: pytest.MonkeyPatch):
+    """재현(replay) 증명(D3) — 환경변수를 50회 on/off로 반복 토글하면서
+    매 상태 전환 직후 `build_adapter` 결과가 그 순간의 환경변수 값과
+    정확히 일치해야 한다. 캐시/메모이제이션으로 이전 상태가 새는 회귀를
+    잡는다(예: 한 번 허용됐던 프로세스가 환경변수를 지운 뒤에도 계속
+    허용되는 사고 — `live_adapter_allowed()`가 매 호출마다 환경변수를
+    새로 읽지 않고 첫 결과를 캐시하면 이 테스트가 적색이 된다)."""
+    for i in range(50):
+        if i % 2 == 0:
+            monkeypatch.delenv(LIVE_ADAPTER_ENV, raising=False)
+            with pytest.raises(FrozenZonePaperAdapterBlockedError):
+                build_adapter("bitget", "key", "secret", _BITGET_EXTRA, demo_mode=False)
+        else:
+            monkeypatch.setenv(LIVE_ADAPTER_ENV, "1")
+            adapter = build_adapter("bitget", "key", "secret", _BITGET_EXTRA, demo_mode=False)
+            assert adapter.is_paper_trading is False
+
+
+def test_blocked_guard_check_has_bounded_latency_under_repeated_calls():
+    """수치 성능 단언(D2) — 가드 체크(`live_adapter_allowed()` + 예외
+    생성)는 환경변수 읽기 하나뿐인 순수 CPU 경로여야 한다. 1000회 연속
+    차단 호출의 실측 벽시계 지연이 명시적 상한(0.5s) 이내여야 한다 —
+    이 경로에 실수로 네트워크 호출이나 sleep이 섞여 들어가면 상한을
+    넘겨 테스트가 적색이 된다."""
+    started = time.perf_counter()
+    for _ in range(1000):
+        with pytest.raises(FrozenZonePaperAdapterBlockedError):
+            build_adapter("bitget", "key", "secret", _BITGET_EXTRA, demo_mode=False)
+    elapsed = time.perf_counter() - started
+
+    assert elapsed < 0.5

@@ -13,6 +13,8 @@ Spec: docs/specs/L4_execution_oms_and_exchange_v1.0.md §2-B(adapter.py 행), §
 """
 from __future__ import annotations
 
+import asyncio
+import time
 from datetime import datetime, timezone
 from typing import Any
 
@@ -286,3 +288,59 @@ def test_status_map_new_and_init_marked_acknowledged_unknown_otherwise():
     assert _row_to_order(_order_row(status="new")).status == OrderStatus.ACKNOWLEDGED
     assert _row_to_order(_order_row(status="init")).status == OrderStatus.ACKNOWLEDGED
     assert _row_to_order(_order_row(status="???")).status == OrderStatus.UNKNOWN
+
+
+# ---------------------------------------------------------------------------
+# DEPTH D2/D3 보강(task-2757) — 수치 지연 단언 + 다중 인스턴스 증명
+#
+# task-2722(DEPTH_L4_BR.md)가 원 task-1519를 D1로 판정 — 기존 5종의
+# `pytest.raises` 테스트는 각각 단일 인스턴스·단일 호출뿐이라 D2(수치
+# 성능 단언)·D3(다중 인스턴스 증명) 하한 미달.
+# ---------------------------------------------------------------------------
+
+
+async def test_default_unsupported_raises_have_bounded_latency_under_concurrent_load():
+    """수치 성능 단언(D2) — 기본 구현 5종은 순수 예외 발생이라 I/O가
+    전혀 없어야 한다. 500개의 독립 `_MinimalAdapter` 인스턴스가 동시에
+    `get_open_orders`를 호출해도 실측 벽시계 지연이 명시적 상한(0.5s)
+    이내여야 한다. 이 경로에 실수로 blocking I/O나 sleep이 섞여 들어가면
+    (예: capability 미지원 여부를 원격 조회하는 회귀) 상한을 넘겨
+    테스트가 적색이 된다."""
+    started = time.perf_counter()
+    results = await asyncio.gather(
+        *(_MinimalAdapter().get_open_orders() for _ in range(500)),
+        return_exceptions=True,
+    )
+    elapsed = time.perf_counter() - started
+
+    assert all(isinstance(r, UnsupportedCapabilityError) for r in results)
+    assert elapsed < 0.5
+
+
+async def test_many_independent_adapter_instances_report_isolated_exceptions():
+    """다중 인스턴스 증명(D3) — 여러 OMS 워커가 동시에 서로 다른
+    어댑터 인스턴스(클래스가 다른 것 포함)를 만들어 같은 기본 구현을
+    호출하는 상황을 흉내낸다. 한 인스턴스의 예외가 다른 인스턴스로
+    상태를 새거나(모듈 전역 캐시 등) 잘못된 `adapter` 이름을 보고하지
+    않아야 한다 — `UnsupportedCapabilityError.adapter`는 호출한 그
+    인스턴스의 클래스 이름과 항상 일치해야 한다."""
+
+    class _NamedAdapter(_MinimalAdapter):
+        pass
+
+    adapters: list[ExchangeAdapter] = [_MinimalAdapter() for _ in range(10)] + [
+        _NamedAdapter() for _ in range(10)
+    ]
+
+    async def _call(adapter: ExchangeAdapter) -> tuple[str, str]:
+        try:
+            await adapter.find_order_by_client_id("c-1")
+        except UnsupportedCapabilityError as exc:
+            return type(adapter).__name__, exc.adapter
+        raise AssertionError("expected UnsupportedCapabilityError")  # pragma: no cover
+
+    results = await asyncio.gather(*(_call(adapter) for adapter in adapters))
+
+    assert len(results) == 20
+    for expected_class_name, reported_adapter_name in results:
+        assert expected_class_name == reported_adapter_name  # 인스턴스 간 상태 누출 없음
