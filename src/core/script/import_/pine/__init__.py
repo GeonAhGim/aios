@@ -8,20 +8,33 @@ Spec: docs/specs/L4_analytics_authoring_backtest_marketplace_v1.0.md
 AIOS Script 문법(`src/core/script/grammar/{lexer,parser}.py`)과 다른
 언어(Pine v5)를 다루므로 그 모듈들을 재사용하지도, 수정하지도 않는다.
 
-AIOS Script로의 변환(transpile)은 DSL-15의 몫이라 이 패키지는 파싱까지만
-한다 — `parse()`가 반환하는 `PineProgram`은 이 리프의 최종 산출물이다.
+AIOS Script로의 변환(transpile)은 DSL-15(`transpile.py`)의 몫이다 —
+`parse()`가 반환하는 `PineProgram`이 DSL-14의 최종 산출물이자 DSL-15의
+입력이다.
 """
 from __future__ import annotations
 
 from src.core.script.import_.pine.ast import PineProgram
 from src.core.script.import_.pine.lexer import PineSyntaxError, Token, TokenKind, tokenize
 from src.core.script.import_.pine.parser import parse
+from src.core.script.import_.pine.transpile import (
+    PineTranspileError,
+    TranspileResult,
+    transpile_and_verify,
+    transpile_program,
+    transpile_source,
+)
 
 __all__ = [
     "PineProgram",
     "PineSyntaxError",
+    "PineTranspileError",
     "Token",
     "TokenKind",
+    "TranspileResult",
     "parse",
     "tokenize",
+    "transpile_and_verify",
+    "transpile_program",
+    "transpile_source",
 ]
