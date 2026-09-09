@@ -129,7 +129,9 @@ async def run_execution_tick(
 
     symbol = fsm_config.target_asset
     candles = await adapter.get_ohlcv(symbol, "1m", limit=100)
-    market_state = build_market_state(fsm_config, candles)
+    as_of = datetime.now(timezone.utc)
+    market_state_dto = build_market_state(fsm_config, {"1m": candles}, as_of=as_of)
+    market_state = {k: float(v) for k, v in market_state_dto.values.items()}
 
     # R-48 — 캔들 수집 직후 데이터 신뢰도를 매 틱 관측·영속한다(신호가
     # 없어도 상태는 계속 최신으로 유지해야 관측 공백이 없다). 실제 주문

@@ -130,7 +130,10 @@ def run_backtest(
             continue
 
         window = bars[: bar_index + 1]
-        market_state = build_market_state(fsm_config, window, indicator_service=service)
+        market_state_dto = build_market_state(
+            fsm_config, {"1m": window}, as_of=bar.close_time, indicator_service=service
+        )
+        market_state = {k: float(v) for k, v in market_state_dto.values.items()}
         try:
             signal = strategy_engine.evaluate(
                 fsm_config,
