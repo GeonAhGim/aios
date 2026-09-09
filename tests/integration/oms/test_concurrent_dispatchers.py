@@ -23,14 +23,26 @@ DEPTH_L4_BR(task-2722)가 원 리프(task-1538, 38e811f)를 D1로 판정 — 3�
   "행당 정확히 1회" 불변을 위반하는 관측 가능한 증상(중복 전송 또는 펜스
   충돌)을 낸다는 것을 증명한다 — 위 테스트들의 단언이 장식이 아니라 실제
   회귀를 잡는 게이트임을 보이는 red-line.
+
+DEPTH_L4_BR(task-2722)가 원 리프(task-1567, 46ace35 — 이 파일 아래쪽 실DB
+섹션)를 D1로 판정 — 실DB 3워커 레이스 증명은 강하지만 이 실DB 변형에는 위와
+같은 명시적 CI red-line이 없었다. task-2766 DEEPEN으로
+`test_broken_claim_atomicity_is_caught_by_exactly_once_gate_real_db`를
+추가한다 — 위 `_RacyOutboxRepo`(포트 대역)와 같은 취지를
+`order_command_outbox`의 실제 SQL(`_CLAIM_SQL`)에 대고 재생한다: SKIP LOCKED
+서브쿼리+UPDATE가 한 문장인 원자성을 SELECT 후보 조회와 상태 재확인 없는
+UPDATE로 쪼개서, 실DB에서도 이 분리가 중복 전송을 낸다는 것을 증명한다.
 """
 from __future__ import annotations
 
 import asyncio
+import json
 import time
 from collections import Counter
 from datetime import datetime, timedelta, timezone
 from uuid import UUID
+
+import asyncpg
 
 from src.data.models.trading import Order, OrderStatus
 from src.exchanges.common.error_taxonomy import SentUnknownError
@@ -322,3 +334,92 @@ async def test_three_workers_send_each_row_exactly_once_real_db(pool):
     assert {r["status"] for r in order_rows} == {"ACKNOWLEDGED"}
     assert {r["version"] for r in order_rows} == {2}  # VALIDATED->SUBMITTED->ACKNOWLEDGED
     assert all(r["exchange_order_id"] is not None for r in order_rows)
+
+
+class _RacyOutboxRepository(OutboxRepository):
+    """negative 전용(CI red-line, task-2766) — 실 `_CLAIM_SQL`(SKIP LOCKED
+    서브쿼리 + UPDATE가 한 문장)의 원자성을 의도적으로 깨서, 이 회귀가 실DB에서도
+    관측 가능한 증상(중복 전송)을 낸다는 것을 증명한다. 후보 조회(SELECT, 잠금
+    없음)와 클레임(UPDATE, `state='PENDING'` 재확인 없음)을 분리한다 — 다른
+    워커가 같은 후보를 동시에 봐도 UPDATE가 막지 않는다."""
+
+    async def claim_batch(
+        self, conn: asyncpg.Connection, *, worker_id: str, limit: int, lease_sec: int
+    ) -> list[OutboxRow]:
+        candidates = await conn.fetch(
+            "SELECT id FROM order_command_outbox WHERE state = 'PENDING' AND not_before <= now() "
+            "ORDER BY created_at LIMIT $1",
+            limit,
+        )
+        ids = [r["id"] for r in candidates]
+        if not ids:
+            return []
+        await asyncio.sleep(0.05)  # 회귀 주입 — 다른 워커의 SELECT가 같은 후보를 본다
+        records = await conn.fetch(
+            "UPDATE order_command_outbox SET state = 'SENDING', worker_id = $1, "
+            "lease_until = now() + make_interval(secs => $2::double precision), "
+            "updated_at = now() "
+            "WHERE id = ANY($3::uuid[]) "  # 의도적으로 state = 'PENDING' 재확인 생략
+            "RETURNING *",
+            worker_id,
+            lease_sec,
+            ids,
+        )
+        return [
+            OutboxRow(
+                id=r["id"],
+                order_id=r["order_id"],
+                command_type=r["command_type"],
+                payload=json.loads(r["payload"]) if isinstance(r["payload"], str) else r["payload"],
+                state=r["state"],
+                attempt=r["attempt"],
+                not_before=r["not_before"],
+                lease_until=r["lease_until"],
+                worker_id=r["worker_id"],
+                last_error=r["last_error"],
+                created_at=r["created_at"],
+                updated_at=r["updated_at"],
+            )
+            for r in records
+        ]
+
+
+async def test_broken_claim_atomicity_is_caught_by_exactly_once_gate_real_db(pool):
+    """DEPTH_L4_BR(task-2722) — 실DB 명시적 CI red-line 회귀 테스트.
+
+    `_RacyOutboxRepository`로 실 `_CLAIM_SQL`의 원자성만 제거하고 나머지는
+    그대로 둔 채 3워커를 실 `order_command_outbox`/`orders`에 대고 돌린다.
+    SELECT 후보 조회에는 잠금이 없으므로, 어떤 워커도 아직 커밋하지 않은
+    시점에 3워커가 같은 PENDING 행들을 후보로 본다 — 그리고 UPDATE가
+    `state='PENDING'`을 재확인하지 않으므로 그중 하나가 아니라 여러 워커가
+    같은 행을 각자 "클레임"에 성공한다. 정상 `_CLAIM_SQL`(SKIP LOCKED가 같은
+    문장 안에서 후보 선정과 잠금을 묶는다)에서는 절대 관측되지 않는 증상이다.
+    이 증상이 실제로 나타남을 확인해, `test_three_workers_send_each_row_
+    exactly_once_real_db`의 "행당 정확히 1회" 단언들이 실DB에서도 장식이
+    아니라 회귀를 실제로 적색으로 만드는 게이트임을 증명한다.
+    """
+    _, _, order_ids, client_order_ids = await _setup_real_orders(pool, 10)
+    order_repo, outbox_repo = PostgresOrderRepository(), _RacyOutboxRepository()
+    adapter = ScriptedAdapter()
+
+    async def resolve(tenant_id: UUID, exchange: str) -> ScriptedAdapter:
+        return adapter
+
+    dispatchers = [
+        OutboxDispatcher(
+            pool, outbox_repo=outbox_repo, order_repo=order_repo, resolve_adapter=resolve,
+            pre_send_gate=allow_gate, worker_id=w,
+        )
+        for w in WORKERS
+    ]
+
+    reports = await asyncio.gather(*(d.dispatch_once(limit=10) for d in dispatchers))
+
+    call_counts = Counter(c for c in adapter.calls if c in client_order_ids)
+    duplicate_calls = sum(count - 1 for count in call_counts.values() if count > 1)
+    conflicts = sum(r.conflicts for r in reports)
+    assert duplicate_calls > 0 or conflicts > 0, (
+        "실 claim_batch의 원자성을 깼는데도 중복 전송이나 펜스 충돌이 하나도 "
+        "관측되지 않았다 — 이 파일의 정확히-1회 단언들이 실DB에서 회귀를 잡지 "
+        "못하는 무력한 게이트일 수 있다(red-line 실패)."
+    )
