@@ -15,6 +15,7 @@ import { UserManagementPage } from "./routes/admin/UserManagementPage";
 import { VerificationQueuePage } from "./routes/admin/VerificationQueuePage";
 import { WalletTopupsPage } from "./routes/admin/WalletTopupsPage";
 import { AlertsPage } from "./routes/alerts/AlertsPage";
+import { SweepResultsPage } from "./routes/backtest/SweepResultsPage";
 import { ChartPage } from "./routes/chart/ChartPage";
 import { LoginPage } from "./routes/auth/LoginPage";
 import { SignupPage } from "./routes/auth/SignupPage";
@@ -71,6 +72,7 @@ export const router = createBrowserRouter([
   { path: "/scripts/editor", element: protect(<ScriptEditorPage />) },
   { path: "/market/candles", element: protect(<CandlesPage />) },
   { path: "/chart", element: protect(<ChartPage />) },
+  { path: "/backtest/sweep-results", element: protect(<SweepResultsPage />) },
   { path: "/marketplace", element: protect(<MarketplaceBrowsePage />) },
   { path: "/marketplace/sell", element: protect(<SellStrategyPage />) },
   { path: "/marketplace/:listingId", element: protect(<ListingDetailPage />) },

@@ -211,6 +211,17 @@ export const API_ROUTES = defineApiRoutes({
   // 동기 실행·무저장(라우터 docstring decision)이라 idempotencyRequired 없음(false).
   "backtests.quick": route("/v1/backtests/quick", true, null, true),
 
+  // task-2428(BT-18): SweepResultsPage.tsx가 그리드 스윕 결과(히트맵·안정성 표면·
+  // 재현 키)를 그리려면 실행 엔드포인트가 필요하지만, BT-16은 지금까지 순수 함수만
+  // 냈다 — task-2371(f76a07ee) sweep_grid, task-2426(e9be3488) sweep_grid_and_record +
+  // experiment_ledger.py. 그 둘을 감싸는 API 라우터는 src/api/routers/backtests.py에
+  // 없다(grep 확인, "/v1/backtests"는 quick 하나뿐) — 실험 원장 영속 어댑터(AI-10)도
+  // 미착수라 어차피 결과를 저장할 곳이 없다. auth.sessions.*(task-1325)와 동일한
+  // 유령 경로 사유로 implemented=false 등록 — SweepResultsPage는 이 라우터가 생기기
+  // 전까지 네트워크 호출 대신 SweepRouteNotImplementedError(typed)로 단락한다.
+  // apiPaths.openapi.test.ts GHOST_PATH_WHITELIST에도 함께 추가할 것.
+  "backtests.sweep": route("/v1/backtests/sweep", true, null, false),
+
   // task-1593(CH-8): src/api/routers/charting.py 원문 확인(CH-5, task-1557 06e5560) —
   // `APIRouter(prefix="/v1/foundation/charting")`(charting.py:37), router_registry.py
   // include_router(추가 prefix 없음). 7개 엔드포인트 전부 `-> ApiResponse[...]` + `ok(...)`

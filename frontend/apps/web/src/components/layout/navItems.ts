@@ -12,6 +12,7 @@ export const MAIN_NAV_ITEMS: NavItem[] = [
   { to: "/market/instruments", label: "종목" },
   { to: "/market/candles", label: "캔들" },
   { to: "/chart", label: "차트" },
+  { to: "/backtest/sweep-results", label: "스윕 결과" },
   { to: "/strategy-builder", label: "전략편집기" },
   { to: "/scripts/editor", label: "스크립트편집기" },
   { to: "/marketplace", label: "마켓플레이스" },

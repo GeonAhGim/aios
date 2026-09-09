@@ -48,6 +48,9 @@ const snapshotPathSet = new Set(snapshotPathList);
 const GHOST_PATH_WHITELIST: ReadonlySet<ApiRouteName> = new Set<ApiRouteName>([
   "auth.sessions.list",
   "auth.sessions.revoke",
+  // task-2428(BT-18): backtests.sweep — apiRoutes.ts의 등록 주석 참조(실행 라우터
+  // 자체가 아직 없음, sessions.*와 동일 사유).
+  "backtests.sweep",
 ]);
 
 // STALE_SNAPSHOT_WHITELIST: GHOST_PATH_WHITELIST와는 다른 사유 — "라우터가
