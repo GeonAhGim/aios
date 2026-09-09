@@ -110,6 +110,106 @@ def test_missing_versions_dir_fails(tmp_path: Path) -> None:
 
 
 # ---------------------------------------------------------------------------
+# check_migration_chain — merge revision (task-2099/a3096b99 dual-head 회귀 방지)
+#
+# task-2099가 고친 실제 장애: alembic head 2개가 rebase로 발생 → 표준
+# `alembic merge`(down_revision이 튜플인 no-op 리비전)로 병합. 아래는 그
+# 병합 패턴 자체를 정적 검사기가 올바르게 처리하는지(양성), 병합이 깨지면
+# 다시 게이트가 적색이 되는지(음성/실패 주입), 그리고 저장소의 실제 병합
+# 리비전을 제거하면 원래 장애가 재현되는지(게이트 적색 재현)를 검증한다.
+# ---------------------------------------------------------------------------
+
+MERGE_REVISION_TEMPLATE = '''"""{revision} merge fixture"""
+from __future__ import annotations
+
+from collections.abc import Sequence
+
+revision: str = "{revision}"
+down_revision: str | Sequence[str] | None = {down_revisions!r}
+branch_labels: str | Sequence[str] | None = None
+depends_on: str | Sequence[str] | None = None
+
+
+def upgrade() -> None:
+    pass
+
+
+def downgrade() -> None:
+    pass
+'''
+
+
+def _write_merge_revision(
+    versions_dir: Path, revision: str, down_revisions: tuple[str, ...]
+) -> None:
+    path = versions_dir / f"{revision}_fixture.py"
+    path.write_text(
+        MERGE_REVISION_TEMPLATE.format(revision=revision, down_revisions=down_revisions),
+        encoding="utf-8",
+    )
+
+
+def test_merge_revision_resolves_dual_head(tmp_path: Path) -> None:
+    _write_revision(tmp_path, "a", None)
+    _write_revision(tmp_path, "b", "a")  # branch 1 head
+    _write_revision(tmp_path, "c", "a")  # branch 2 head — 병합 전에는 다중 head
+    assert any(
+        "다중 head" in issue for issue in check_migration_chain.find_chain_issues(tmp_path)
+    )
+
+    _write_merge_revision(tmp_path, "d", ("b", "c"))  # task-2099 방식 no-op merge
+
+    issues = check_migration_chain.find_chain_issues(tmp_path)
+    assert issues == []
+    assert check_migration_chain.main(["--versions-dir", str(tmp_path)]) == 0
+
+
+def test_merge_revision_with_typo_parent_still_fails_closed(tmp_path: Path) -> None:
+    """병합 리비전이 오타로 한쪽 부모를 놓치면 여전히 적색이어야 한다(fail-closed)."""
+    _write_revision(tmp_path, "a", None)
+    _write_revision(tmp_path, "b", "a")
+    _write_revision(tmp_path, "c", "a")
+    _write_merge_revision(tmp_path, "d", ("b", "c-typo"))
+
+    issues = check_migration_chain.find_chain_issues(tmp_path)
+
+    assert any("끊김" in issue for issue in issues)
+    assert any("다중 head" in issue for issue in issues)  # c는 여전히 미병합 head
+    assert check_migration_chain.main(["--versions-dir", str(tmp_path)]) == 1
+
+
+def test_real_migrations_directory_has_single_head() -> None:
+    """저장소의 실제 마이그레이션 체인이 현재 head 1개로 유지되는지 확인한다."""
+    versions_dir = ROOT / "src" / "db" / "migrations" / "versions"
+
+    issues = check_migration_chain.find_chain_issues(versions_dir)
+
+    assert issues == []
+    assert check_migration_chain.main(["--versions-dir", str(versions_dir)]) == 0
+
+
+def test_removing_task_2099_merge_revision_reproduces_dual_head_gate_failure(
+    tmp_path: Path,
+) -> None:
+    """task-2099(a3096b99) 병합 리비전을 걷어내면 원래 장애(다중 head)가 재현되는지 확인한다."""
+    real_versions_dir = ROOT / "src" / "db" / "migrations" / "versions"
+    merge_file_name = "6877947783a6_merge_heads_fa0a_batch_c_and_fa10_.py"
+    assert (real_versions_dir / merge_file_name).is_file()
+
+    shadow = tmp_path / "versions"
+    shadow.mkdir()
+    for path in real_versions_dir.glob("*.py"):
+        if path.name in {"__init__.py", merge_file_name}:
+            continue
+        (shadow / path.name).write_text(path.read_text(encoding="utf-8"), encoding="utf-8")
+
+    issues = check_migration_chain.find_chain_issues(shadow)
+
+    assert any("다중 head" in issue for issue in issues)
+    assert check_migration_chain.main(["--versions-dir", str(shadow)]) == 1
+
+
+# ---------------------------------------------------------------------------
 # check_zone_diff
 # ---------------------------------------------------------------------------
 
