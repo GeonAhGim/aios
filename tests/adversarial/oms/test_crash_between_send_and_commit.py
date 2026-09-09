@@ -13,15 +13,19 @@ outbox 행은 lease가 만료된 SENDING으로 남는다 — 어댑터를 실제
 """
 from __future__ import annotations
 
+import asyncio
 import inspect
 import json
+import time
 from datetime import datetime, timedelta, timezone
+from decimal import Decimal
 from uuid import UUID
 
 import asyncpg
 import pytest
 
-from src.data.models.trading import Order
+from src.data.models.base import AssetClass
+from src.data.models.trading import Order, OrderSide, OrderStatus, OrderType
 from src.foundation.risk_gate.adapters.postgres_repository import PostgresRiskGateRepository
 from src.services.oms.adapters.order_repository import PostgresOrderRepository
 from src.services.oms.adapters.outbox_repository import OutboxRepository
@@ -109,15 +113,52 @@ def _resolve_adapter(adapter: _LookupAdapter):
     return _resolve
 
 
-async def _recover(pool: asyncpg.Pool, adapter: _LookupAdapter) -> int:
+async def _recover(
+    pool: asyncpg.Pool, adapter: _LookupAdapter, *, worker_id: str = "restart_recovery"
+) -> int:
     return await restart_recovery.recover_stuck_outbox_commands(
         pool,
         order_repo=PostgresOrderRepository(),
         outbox_repo=OutboxRepository(),
         resolve_adapter=_resolve_adapter(adapter),
         risk_gate_repo=PostgresRiskGateRepository(pool),
+        worker_id=worker_id,
         clock=lambda: datetime.now(timezone.utc),
     )
+
+
+def _resolved_order(status: OrderStatus = OrderStatus.ACKNOWLEDGED) -> Order:
+    """즉시 해소(RESOLVED_AS) 경로 전용 lookup 결과 — `unknown_resolver.
+    resolve_unknown`은 `find_order_by_client_id`가 non-None을 돌려주면 첫
+    시도에서 곧장 반환한다(real `asyncio.sleep` backoff 없음). 이 파일의
+    동시성/성능 테스트가 재시도 backoff(최대 attempt 5회, 누적 최대 15초
+    실시간 sleep)에 발이 묶이지 않도록 일부러 이 경로를 쓴다 — backoff 자체는
+    test_crash_after_sent_before_finalize_becomes_unknown_not_resent가 NOT_FOUND
+    경로로 이미 별도 검증한다."""
+    return Order(
+        client_order_id="resolved-lookup",
+        strategy_id="oms-trg-test",
+        strategy_version="1.0.0",
+        symbol="BTC/USDT",
+        exchange="bitget",
+        side=OrderSide.BUY,
+        order_type=OrderType.MARKET,
+        quantity=Decimal("1"),
+        status=status,
+        asset_class=AssetClass.CRYPTO,
+    )
+
+
+async def _insert_stuck_submitted_orders(
+    pool: asyncpg.Pool, user_id: UUID, count: int
+) -> list[UUID]:
+    order_ids: list[UUID] = []
+    async with pool.acquire() as conn:
+        for _ in range(count):
+            order_ids.append(await insert_order(conn, user_id, status="SUBMITTED"))
+    for order_id in order_ids:
+        await _insert_stuck_outbox_row(pool, order_id, lease_until=_PAST)
+    return order_ids
 
 
 async def test_crash_after_sent_before_finalize_becomes_unknown_not_resent(pool):
@@ -201,3 +242,55 @@ def test_order_view_has_no_duplicate_send_side_effect() -> None:
     source = inspect.getsource(restart_recovery.recover_stuck_outbox_commands)
     source += inspect.getsource(restart_recovery._recover_stuck_submit)
     assert "place_order" not in source
+
+
+async def test_concurrent_recovery_workers_do_not_double_process(pool):
+    """DEPTH 감사 보강 — 다중 워커/동시성 경합 증명. 두 복구 워커가 동시에
+    같은 lease-만료 SENDING 배치를 향해 `recover_stuck_outbox_commands`를
+    부르면 `outbox_repository.py`의 `FOR UPDATE SKIP LOCKED`(claim_batch와
+    같은 모양, 모듈 docstring)가 행을 서로 겹치지 않게 나눠야 한다. 겹치면
+    (a) 두 워커의 processed 합계가 실제 행 수를 넘거나 (b) 같은 주문이
+    어댑터에 두 번 조회된다 — 둘 다 숫자로 잡는다(불변식 위반이면 반드시
+    수치가 어긋난다)."""
+    user_id = await create_test_user(pool)
+    order_ids = await _insert_stuck_submitted_orders(pool, user_id, count=20)
+    adapter = _LookupAdapter(lookup_result=_resolved_order())
+
+    processed_a, processed_b = await asyncio.gather(
+        _recover(pool, adapter, worker_id="recovery-worker-a"),
+        _recover(pool, adapter, worker_id="recovery-worker-b"),
+    )
+
+    assert processed_a + processed_b == len(order_ids)  # 행 손실도 중복도 없음
+    assert adapter.lookup_calls == len(order_ids)  # 주문마다 정확히 1회만 해소
+    for order_id in order_ids:
+        assert await _order_status(pool, order_id) == "ACKNOWLEDGED"
+    async with pool.acquire() as conn:
+        remaining_sending = await conn.fetchval(
+            "SELECT count(*) FROM order_command_outbox WHERE order_id = ANY($1) "
+            "AND state = 'SENDING'",
+            order_ids,
+        )
+    assert remaining_sending == 0  # 재클레임되지 않은 채 방치된 행 없음
+
+
+async def test_recovery_latency_bound_for_batch(pool):
+    """DEPTH 감사 보강 — 숫자 성능/지연 단언. 상한이 없으면 회귀(예: 행마다
+    O(n) 전체 스캔, 혹은 `unknown_resolver`의 real backoff sleep이 실수로
+    이 경로에 섞여 들어옴)가 조용히 들어와도 아무 테스트도 못 잡는다.
+    즉시 해소되는(RESOLVED_AS, real sleep 없음) 20건 배치를 복구하고 총
+    소요시간과 행당 평균 소요시간에 명시적 상한을 건다."""
+    user_id = await create_test_user(pool)
+    order_ids = await _insert_stuck_submitted_orders(pool, user_id, count=20)
+    adapter = _LookupAdapter(lookup_result=_resolved_order())
+
+    start = time.perf_counter()
+    processed = await _recover(pool, adapter)
+    elapsed = time.perf_counter() - start
+
+    assert processed == len(order_ids)
+    per_row = elapsed / len(order_ids)
+    assert elapsed < 5.0, f"복구 배치 {len(order_ids)}건이 {elapsed:.2f}s 걸림 — 상한 5.0s 초과"
+    assert per_row < 0.25, (
+        f"행당 평균 {per_row:.3f}s — 상한 0.25s 초과(실시간 backoff sleep 유입 의심)"
+    )
