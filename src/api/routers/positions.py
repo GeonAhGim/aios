@@ -14,7 +14,10 @@ tenant를 받지 않는다). 타 테넌트 리소스는 존재하지 않는 것�
 `GET /positions/nav`는 `/{position_key}/journal`보다 먼저 선언한다 —
 지금은 경로가 겹치지 않지만, 정적 세그먼트가 동적 세그먼트보다 앞서는
 관례를 유지해 후속 엔드포인트가 추가돼도 `nav`가 position_key로 잡히지
-않게 한다."""
+않게 한다.
+
+FA-6: `GET /positions`에 선택적 `portfolio_id` 쿼리 파라미터가 추가됐다
+(새 경로 아님). 생략하면 이전 리프와 응답이 바이트 동일하다."""
 from __future__ import annotations
 
 from datetime import date, timedelta
@@ -34,6 +37,8 @@ from src.api.schemas.positions import (
     decode_cursor,
     encode_cursor,
 )
+from src.foundation.entities.adapters.postgres_repository import PostgresEntityRepository
+from src.foundation.entities.application.resolve_context import EntityRepository
 from src.foundation.positions.adapters.postgres_journal_repository import (
     PostgresJournalRepository,
 )
@@ -66,20 +71,28 @@ def get_nav_repository(pool: asyncpg.Pool = Depends(get_pool)) -> NavRepository:
     return PostgresNavRepository(pool)
 
 
+def get_entity_repository(pool: asyncpg.Pool = Depends(get_pool)) -> EntityRepository:
+    return PostgresEntityRepository(pool)
+
+
 @router.get("")
 async def get_positions(
     account_id: UUID | None = None,
     instrument_id: UUID | None = None,
+    portfolio_id: UUID | None = None,
     context: TenantContext = Depends(get_tenant_context),
     pool: asyncpg.Pool = Depends(get_pool),
     snapshots: SnapshotRepository = Depends(get_snapshot_repository),
+    entities: EntityRepository = Depends(get_entity_repository),
 ) -> ApiResponse[PositionListResponse]:
     items = await list_positions(
         pool,
         context.tenant_id,
         account_id=account_id,
         instrument_id=instrument_id,
+        portfolio_id=portfolio_id,
         snapshots=snapshots,
+        entities=entities,
     )
     return ok(PositionListResponse(items=items))
 

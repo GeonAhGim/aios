@@ -14,16 +14,21 @@ Spec: docs/specs/L4_strategy_portfolio_backtest_v1.0.md §2.6/§9(L49).
 `EXCEPTION_MAP`이 전역 핸들러에서 봉투로 번역한다. get_statement.py와
 correct_statement.py가 이름은 같지만 서로 다른
 StatementNotFoundError/CrossTenantStatementAccessError 클래스를 각자
-정의해두므로 `EXCEPTION_MAP`이 양쪽 클래스를 모두 등록한다."""
+정의해두므로 `EXCEPTION_MAP`이 양쪽 클래스를 모두 등록한다.
+
+FA-6: 두 GET 엔드포인트에 선택적 `portfolio_id` 쿼리 파라미터가 추가됐다
+(새 경로 아님) — 스코프 검증은 `get_statement.py`가 한다. 생략하면 이전
+리프와 응답이 바이트 동일하다."""
 from __future__ import annotations
 
 from uuid import UUID, uuid4
 
+import asyncpg
 from fastapi import APIRouter, Depends, status
 
 from src.api.contracts.envelope import ApiResponse, ok
 from src.api.contracts.exception_mapping import UnsupportedStatementScopeError
-from src.api.deps import get_current_user
+from src.api.deps import get_current_user, get_pool
 from src.api.foundation_deps import (
     get_audit_event_repository,
     get_paper_statement_input_adapter,
@@ -36,6 +41,8 @@ from src.api.schemas.foundation.performance import (
     PerformanceStatementView,
     StatementScope,
 )
+from src.foundation.entities.adapters.postgres_repository import PostgresEntityRepository
+from src.foundation.entities.application.resolve_context import EntityRepository
 from src.foundation.evidence.ports.repository import AuditEventRepository
 from src.foundation.performance.application.compute_statement import compute_statement
 from src.foundation.performance.application.correct_statement import correct_statement
@@ -48,6 +55,10 @@ from src.foundation.performance.ports.repository import PerformanceRepository, S
 from src.services.auth_service import User
 
 router = APIRouter(prefix="/v1/foundation/performance-statements", tags=["foundation:performance"])
+
+
+def get_entity_repository(pool: asyncpg.Pool = Depends(get_pool)) -> EntityRepository:
+    return PostgresEntityRepository(pool)
 
 
 @router.post(":compute", status_code=status.HTTP_202_ACCEPTED)
@@ -82,11 +93,17 @@ async def post_compute_statement(
 @router.get("")
 async def list_performance_statements(
     scope: StatementScope | None = None,
+    portfolio_id: UUID | None = None,
     user: User = Depends(get_current_user),
     repo: PerformanceRepository = Depends(get_performance_repository),
+    entities: EntityRepository = Depends(get_entity_repository),
 ) -> ApiResponse[PerformanceStatementListResponse]:
     statements = await list_statements(
-        repo, tenant_id=user.user_id, scope=scope.value if scope is not None else None
+        repo,
+        tenant_id=user.user_id,
+        scope=scope.value if scope is not None else None,
+        portfolio_id=portfolio_id,
+        entities=entities,
     )
     return ok(PerformanceStatementListResponse(statements=list(statements)))
 
@@ -94,10 +111,18 @@ async def list_performance_statements(
 @router.get("/{statement_id}")
 async def get_performance_statement(
     statement_id: UUID,
+    portfolio_id: UUID | None = None,
     user: User = Depends(get_current_user),
     repo: PerformanceRepository = Depends(get_performance_repository),
+    entities: EntityRepository = Depends(get_entity_repository),
 ) -> ApiResponse[PerformanceStatementView]:
-    result = await get_statement_query(repo, tenant_id=user.user_id, statement_id=statement_id)
+    result = await get_statement_query(
+        repo,
+        tenant_id=user.user_id,
+        statement_id=statement_id,
+        portfolio_id=portfolio_id,
+        entities=entities,
+    )
     return ok(result)
 
 

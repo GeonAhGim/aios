@@ -19,6 +19,7 @@ import pytest
 from httpx import ASGITransport, AsyncClient
 
 from src.data.models.base import Currency, Money
+from src.foundation.entities.adapters.postgres_repository import PostgresEntityRepository
 from src.foundation.positions.adapters.postgres_journal_repository import (
     PostgresJournalRepository,
 )
@@ -34,6 +35,7 @@ from src.foundation.positions.contracts.v1 import (
 )
 from src.main import app
 from tests.conftest import lifespan_context_with_retry, retry_too_many_connections
+from tests.integration.foundation.entities.conftest import build_hierarchy
 
 STRONG_PASSWORD = "Str0ng!Passw0rd"
 BASE = "/v1/positions"
@@ -86,9 +88,18 @@ async def _create_account(pool: asyncpg.Pool, tenant_id: UUID) -> UUID:
 
 
 async def _open_position(
-    pool: asyncpg.Pool, *, tenant_id: UUID, account_id: UUID, quantity: Decimal
+    pool: asyncpg.Pool,
+    *,
+    tenant_id: UUID,
+    account_id: UUID,
+    quantity: Decimal,
+    portfolio_id: UUID | None = None,
 ) -> PositionSnapshotView:
-    key = f"TESTVENUE:{uuid.uuid4().hex}:strat:exec"
+    # FA-0d 5부분 형식(+portfolio_id)은 portfolio_id가 주어졌을 때만 쓴다 —
+    # 나머지 기존 호출은 이전 리프의 옛(4부분) 키를 그대로 재현해 회귀를 지킨다.
+    key = f"TESTVENUE:{uuid.uuid4().hex}:strat:exec" + (
+        "" if portfolio_id is None else f":{portfolio_id}"
+    )
     snapshot = PositionSnapshotView(
         position_key=key,
         tenant_id=tenant_id,
@@ -221,6 +232,93 @@ async def test_list_positions_other_tenant_account_is_404_isomorphic(client, poo
 
     own = await client.get(BASE, headers=victim_headers, params={"account_id": str(account_id)})
     assert own.status_code == 200 and len(own.json()["data"]["items"]) == 1
+
+
+# --- FA-6 portfolio_id scope -------------------------------------------------
+
+
+async def test_list_positions_without_portfolio_id_is_unchanged_regression(client, pool):
+    """FA-6 DoD "기존 단일계좌 응답 무변경" — `portfolio_id`를 주지 않은
+    요청은 이 리프 이전과 바이트 동일한 응답을 낸다(새 필드가 몰래 끼어들지
+    않는다, 필터링도 걸리지 않는다)."""
+    headers, tenant_id = await _register(client)
+    account_id = await _create_account(pool, tenant_id)
+    opened = await _open_position(
+        pool, tenant_id=tenant_id, account_id=account_id, quantity=Decimal("2")
+    )
+
+    response = await client.get(BASE, headers=headers)
+    assert response.status_code == 200
+    items = response.json()["data"]["items"]
+    assert [item["position_key"] for item in items] == [opened.position_key]
+    assert set(items[0]) == {
+        "position_key", "tenant_id", "account_id", "instrument_id", "quantity", "avg_cost",
+        "cost_method", "lots", "realized_pnl_base", "unrealized_pnl_base", "fees_base",
+        "funding_base", "mark_price", "mark_at", "base_currency", "last_journal_seq",
+        "updated_at", "schema_version",
+    }
+
+
+async def test_list_positions_portfolio_id_filters_to_that_portfolio_only(client, pool):
+    headers, tenant_id = await _register(client)
+    repo = PostgresEntityRepository(pool)
+    hierarchy_a = await build_hierarchy(pool, repo, tenant_id=tenant_id)
+    hierarchy_b = await build_hierarchy(pool, repo, tenant_id=tenant_id)
+    account_id = await _create_account(pool, tenant_id)
+    in_a = await _open_position(
+        pool,
+        tenant_id=tenant_id,
+        account_id=account_id,
+        quantity=Decimal("1"),
+        portfolio_id=hierarchy_a.portfolio.portfolio_id,
+    )
+    await _open_position(
+        pool,
+        tenant_id=tenant_id,
+        account_id=account_id,
+        quantity=Decimal("1"),
+        portfolio_id=hierarchy_b.portfolio.portfolio_id,
+    )
+
+    response = await client.get(
+        BASE, headers=headers, params={"portfolio_id": str(hierarchy_a.portfolio.portfolio_id)}
+    )
+    assert response.status_code == 200
+    items = response.json()["data"]["items"]
+    assert [item["position_key"] for item in items] == [in_a.position_key]
+
+
+async def test_list_positions_portfolio_id_rejects_cross_tenant_scope_fail_closed(client, pool):
+    """negative — 다른 테넌트 소유 portfolio_id를 주면 그 tenant의 포지션
+    전체를 돌려주는 대신(전체 반환 폴백 금지) 404로 거부한다."""
+    _, victim_id = await _register(client)
+    attacker_headers, attacker_id = await _register(client)
+    repo = PostgresEntityRepository(pool)
+    victim_hierarchy = await build_hierarchy(pool, repo, tenant_id=victim_id)
+    attacker_account = await _create_account(pool, attacker_id)
+    await _open_position(
+        pool, tenant_id=attacker_id, account_id=attacker_account, quantity=Decimal("1")
+    )
+
+    response = await client.get(
+        BASE,
+        headers=attacker_headers,
+        params={"portfolio_id": str(victim_hierarchy.portfolio.portfolio_id)},
+    )
+    assert response.status_code == 404
+    _assert_error_envelope(response.json(), "RESOURCE_NOT_FOUND")
+
+
+async def test_list_positions_portfolio_id_rejects_unknown_portfolio(client, pool):
+    headers, tenant_id = await _register(client)
+    account_id = await _create_account(pool, tenant_id)
+    await _open_position(pool, tenant_id=tenant_id, account_id=account_id, quantity=Decimal("1"))
+
+    response = await client.get(
+        BASE, headers=headers, params={"portfolio_id": str(uuid.uuid4())}
+    )
+    assert response.status_code == 404
+    _assert_error_envelope(response.json(), "RESOURCE_NOT_FOUND")
 
 
 # --- GET /positions/{key}/journal ------------------------------------------

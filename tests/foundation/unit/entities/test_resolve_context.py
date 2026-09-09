@@ -16,6 +16,7 @@ from src.foundation.entities.application.resolve_context import (
     EntityContextResolutionError,
     ResolveContextRequest,
     resolve_context,
+    resolve_portfolio_scope,
 )
 from src.foundation.entities.contracts.v1 import Fund, LegalEntity, Portfolio, SubAccount
 from src.foundation.entities.domain.defaults import build_default_hierarchy
@@ -130,3 +131,62 @@ async def test_resolve_context_rejects_closed_fund():
 
     with pytest.raises(EntityContextResolutionError):
         await resolve_context(repo, ResolveContextRequest(tenant_id=tenant_id, user_id=user_id))
+
+
+# --- FA-6 resolve_portfolio_scope ------------------------------------------
+
+
+async def test_resolve_portfolio_scope_returns_portfolio_for_owner_tenant():
+    user_id = uuid4()
+    tenant_id = uuid4()
+    repo, hierarchy = _seeded_repo(user_id, tenant_id)
+
+    portfolio = await resolve_portfolio_scope(repo, tenant_id, hierarchy.portfolio.portfolio_id)
+
+    assert portfolio.portfolio_id == hierarchy.portfolio.portfolio_id
+
+
+async def test_resolve_portfolio_scope_rejects_unknown_portfolio():
+    """negative — 존재하지 않는 portfolio_id는 값을 추측하지 않고 거부된다."""
+    repo = _FakeEntityRepository()
+
+    with pytest.raises(EntityContextResolutionError):
+        await resolve_portfolio_scope(repo, uuid4(), uuid4())
+
+
+async def test_resolve_portfolio_scope_rejects_cross_tenant_portfolio():
+    """negative — 다른 테넌트가 소유한(존재는 하는) portfolio_id는 교차
+    포트폴리오/테넌트 유출 없이 거부된다(404 동형 원칙)."""
+    user_id = uuid4()
+    owner_tenant_id = uuid4()
+    repo, hierarchy = _seeded_repo(user_id, owner_tenant_id)
+
+    with pytest.raises(EntityContextResolutionError):
+        await resolve_portfolio_scope(repo, uuid4(), hierarchy.portfolio.portfolio_id)
+
+
+async def test_resolve_portfolio_scope_rejects_closed_portfolio():
+    """negative — 포트폴리오 자체가 폐쇄되면 소유가 맞아도 거부된다."""
+    user_id = uuid4()
+    tenant_id = uuid4()
+    repo, hierarchy = _seeded_repo(user_id, tenant_id)
+    closed_portfolio = hierarchy.portfolio.model_copy(
+        update={"closed_at": datetime.now(timezone.utc)}
+    )
+    repo.portfolios[closed_portfolio.portfolio_id] = closed_portfolio
+
+    with pytest.raises(EntityContextResolutionError):
+        await resolve_portfolio_scope(repo, tenant_id, closed_portfolio.portfolio_id)
+
+
+async def test_resolve_portfolio_scope_rejects_closed_parent_fund():
+    """negative — 포트폴리오는 열려 있어도 상위 Fund가 폐쇄되면 거부된다
+    (계층 전체 확인, resolve_context와 동일한 fail-closed 조합)."""
+    user_id = uuid4()
+    tenant_id = uuid4()
+    repo, hierarchy = _seeded_repo(user_id, tenant_id)
+    closed_fund = hierarchy.fund.model_copy(update={"closed_at": datetime.now(timezone.utc)})
+    repo.funds[closed_fund.fund_id] = closed_fund
+
+    with pytest.raises(EntityContextResolutionError):
+        await resolve_portfolio_scope(repo, tenant_id, hierarchy.portfolio.portfolio_id)
