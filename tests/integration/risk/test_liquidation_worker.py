@@ -8,7 +8,7 @@ from __future__ import annotations
 import os
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
-from uuid import UUID
+from uuid import UUID, uuid4
 
 import asyncpg
 import pytest
@@ -33,27 +33,50 @@ async def pool():
     await p.close()
 
 
+@pytest.fixture(scope="module", autouse=True)
+async def _clear_stale_requests():
+    """`_select_candidate`'s SELECT...FOR UPDATE SKIP LOCKED LIMIT 1 has no
+    per-test scoping (the frozen contract has no request_id param) -- it
+    picks whatever non-terminal `liquidation_request` row is globally
+    oldest. Other suites in the shared TEST_DATABASE_URL (e.g.
+    test_watchdog_liquidation_request.py, which predates this worker and
+    never transitions the rows it creates) can leave REQUESTED rows behind
+    that would otherwise silently steal every test in this module."""
+    pool = await asyncpg.create_pool(_asyncpg_dsn(), min_size=1, max_size=2)
+    async with pool.acquire() as conn:
+        await conn.execute(
+            "UPDATE liquidation_request SET state='ABORTED', completed_at=now() "
+            "WHERE state IN ('REQUESTED','PLANNED','EXECUTING')"
+        )
+    await pool.close()
+    yield
+
+
 async def _create_request(pool: asyncpg.Pool, actor: UUID, requests: list[UUID]) -> UUID:
-    """§4 row 430 -- what watchdog_process._apply_decision does for LIQUIDATE."""
+    """§4 row 430 -- what watchdog_process._apply_decision does for LIQUIDATE,
+    except scope=ACCOUNT(actor) instead of watchdog's own GLOBAL: GLOBAL has
+    no scope_ref filter at all, so it would sum every other test's (and every
+    unrelated test suite's) leftover positions in the shared TEST_DATABASE_URL
+    into this plan. `_load_positions`/`run_liquidation_worker_once` treat
+    both scopes identically -- only the SQL filter differs -- so this is
+    still exercising the real ACCOUNT code path, not a shortcut."""
     repo = PostgresRiskGateRepository(pool)
     view = await activate_safety_control(
         repo, tenant_id=actor, actor_subject_id=actor, actor_is_admin=True,
-        scope=SafetyScope.GLOBAL, scope_ref=None, reason="test",
+        scope=SafetyScope.ACCOUNT, scope_ref=str(actor), reason="test",
     )
     async with pool.acquire() as conn:
         row = await conn.fetchrow(
             "INSERT INTO liquidation_request "
             "(safety_control_id, scope, scope_ref, state, requested_by, fence_token) "
-            "VALUES ($1, 'GLOBAL', '', 'REQUESTED', 'test', $2) RETURNING id",
-            view.id, view.fence_token,
+            "VALUES ($1, 'ACCOUNT', $2, 'REQUESTED', 'test', $3) RETURNING id",
+            view.id, str(actor), view.fence_token,
         )
     requests.append(row["id"])
     return row["id"]
 
 
-async def _insert_open_position(
-    pool: asyncpg.Pool, user_id: UUID, *, symbol: str = "BTC/USDT"
-) -> None:
+async def _insert_open_position(pool: asyncpg.Pool, user_id: UUID, symbol: str) -> None:
     async with pool.acquire() as conn:
         await conn.execute(
             "INSERT INTO positions (user_id, symbol, exchange, strategy_id, quantity, "
@@ -64,14 +87,16 @@ async def _insert_open_position(
 
 
 async def _setup(pool: asyncpg.Pool, ctx: dict, *, with_position: bool = True) -> UUID:
-    """§4 GLOBAL scope has no scope_ref filter -- `_load_positions` sees
-    every account's open positions, so each test needs its own isolated
-    `positions`/`liquidation_request` rows cleaned up afterward (`ctx`,
-    consumed by the `_cleanup` fixture) or tests contaminate each other."""
+    """§4 GLOBAL scope has no scope_ref filter -- `_load_positions` sums every
+    account's open positions *per symbol*, so a random per-test symbol is
+    what actually isolates tests from each other's leftovers in the shared
+    TEST_DATABASE_URL (row cleanup via `ctx`/`_cleanup` on top, belt and
+    braces): no other test can ever hold a position in this test's symbol."""
     actor = await create_test_user(pool)
     ctx["actors"].append(actor)
     if with_position:
-        await _insert_open_position(pool, actor)
+        symbol = f"TL{uuid4().hex[:10]}/USDT"
+        await _insert_open_position(pool, actor, symbol)
     return await _create_request(pool, actor, ctx["requests"])
 
 
@@ -150,11 +175,11 @@ async def test_fence_change_aborts_request_and_skips_slices(pool, ctx):
     await run_liquidation_worker_once(pool, adapters, now=datetime.now(timezone.utc))
     assert (await _request_row(pool, request_id))["state"] == "PLANNED"
 
-    # A brand-new control bumps the GLOBAL fence past this request's snapshot.
+    # A brand-new control bumps this ACCOUNT's fence past the request's snapshot.
     repo = PostgresRiskGateRepository(pool)
     await activate_safety_control(
         repo, tenant_id=actor, actor_subject_id=actor, actor_is_admin=True,
-        scope=SafetyScope.GLOBAL, scope_ref=None, reason="supersede",
+        scope=SafetyScope.ACCOUNT, scope_ref=str(actor), reason="supersede",
     )
 
     await run_liquidation_worker_once(pool, adapters, now=datetime.now(timezone.utc))

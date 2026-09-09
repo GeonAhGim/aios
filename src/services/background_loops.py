@@ -1,23 +1,19 @@
 """16번대 — main.py lifespan의 백그라운드 루프(heartbeat/alert/risk_guard/
-execution_loop/safety) 생성·복구·취소.
+execution_loop/safety/liquidation) 생성·복구·취소.
 
 Spec: 16_backend_signatures.md, ADR-2026-08-10-B, P6(파일당 300줄 초과 금지)
 
-편차: task-117은 원래 이 모듈을 src/app/background_loops.py에 두려 했지만,
-.aios-zone(Meta-Control Plane, 사람만 수정)이 `src/app/**`를 선언하지 않아
-새 zone 없이는 만들 수 없다 — zone 정책 파일 수정은 에이전트 금지(P8)이므로
-이미 SCAFFOLD로 선언된 `src/services/**` 아래로 대신 둔다.
+편차: task-117은 원래 src/app/background_loops.py에 두려 했지만, .aios-zone이
+`src/app/**`를 선언하지 않아(zone 정책 수정은 에이전트 금지, P8) 이미
+SCAFFOLD로 선언된 `src/services/**` 아래로 대신 둔다.
 
-main.py는 pool/event_bus/credential_resolver 등 앱 전역 객체를 조립한 뒤 이
-모듈의 :func:`start_background_loops`에 넘겨 루프를 띄우고, shutdown 시
-반환된 :class:`BackgroundLoops`의 :meth:`~BackgroundLoops.stop`만 호출한다.
-동작은 분리 이전과 동일 — 이 모듈은 main.py에 있던 코드를 그대로 옮긴 것이다.
+main.py는 pool/event_bus/credential_resolver 등을 조립한 뒤
+:func:`start_background_loops`에 넘겨 루프를 띄우고, shutdown 시 반환된
+:class:`BackgroundLoops`의 :meth:`~BackgroundLoops.stop`만 호출한다.
 
-§9 PLT-08 — heartbeat/alert/risk_guard/safety_reactivation 4개 루프는
-is instrumented via `LoopHealth.record_tick` (the shared `_run_instrumented`
-wrapper; each tick re-binds context via `bind_system(f"loop.{name}")`).
-execution_loop is a separate scheduler (`ExecutionLoopScheduler`) and is
-out of scope for this leaf.
+§9 PLT-08 — heartbeat/alert/risk_guard/safety_reactivation/liquidation_worker
+는 `LoopHealth.record_tick`으로 계측된다(공용 `_run_instrumented` 래퍼).
+execution_loop만 별도 스케줄러(`ExecutionLoopScheduler`)로 이 leaf 밖이다.
 """
 from __future__ import annotations
 
@@ -101,9 +97,8 @@ class BackgroundLoops:
         for task in self.tasks:
             with contextlib.suppress(asyncio.CancelledError):
                 await task
-        # §6 — 정상 종료는 만료(TTL)를 기다리지 않고 즉시 리스를 넘긴다.
-        # 위에서 execution_loop_task를 먼저 취소했으므로 release 이후
-        # 이 owner_id가 새 리스를 다시 획득하는 레이스는 없다.
+        # §6 — 정상 종료는 TTL을 기다리지 않고 즉시 리스를 넘긴다(execution_loop_task를
+        # 먼저 취소했으므로 release 이후 새 리스를 다시 획득하는 레이스는 없다).
         await self.lease_repo.release_all(self.owner_id)
 
 
@@ -115,8 +110,7 @@ async def _run_instrumented(
     health: LoopHealth,
     on_error: str,
 ) -> None:
-    """PLT-08 공용 계측 래퍼 — `bind_system` + `LoopHealth.record_tick`. 예외는
-    여기서 삼키고(로그만 남김) 루프 자체는 죽지 않는다(각 루프 원래 동작과 동일)."""
+    """PLT-08 공용 계측 래퍼 — 예외는 여기서 삼키고(로그만) 루프는 죽지 않는다."""
     start = time.monotonic()
     ok = True
     try:
@@ -137,9 +131,7 @@ async def run_periodic_loop(
     health: LoopHealth,
     on_error: str,
 ) -> None:
-    """`sleep(interval_sec)` → 계측된 tick 1회, 무한 반복. alert/risk_guard/
-    safety_reactivation과 main.py의 LedgerIntegrityScheduler 무결성 루프가
-    공유하는 공용 루프 본체(export — main.py가 직접 가져다 쓴다)."""
+    """`sleep(interval_sec)` → 계측된 tick 1회, 무한 반복(export — main.py도 직접 쓴다)."""
     while True:
         await asyncio.sleep(interval_sec)
         await _run_instrumented(name, interval_sec, tick, health=health, on_error=on_error)
@@ -159,13 +151,10 @@ async def start_background_loops(
     health = health if health is not None else loop_health()
 
     async def _heartbeat_loop() -> None:
-        """FD-9.1 — watchdog_process.py(별도 OS 프로세스)가 이 메인 프로세스의
-        생사를 판정하는 유일한 신호. 프로세스 메모리를 공유하지 않으므로
-        파일 타임스탬프로만 통신한다(core/safety/heartbeat.py).
-
-        예외를 삼키지 않는다(다른 3개 루프와 달리) — heartbeat 실패는 watchdog이
-        프로세스 사망으로 오판하길 원하는 신호이므로, 원래 동작대로 전파해
-        태스크를 죽인다. `LoopHealth`에는 실패로 기록한 뒤 다시 던진다."""
+        """FD-9.1 — watchdog_process.py(별도 OS 프로세스)가 메인 프로세스 생사를
+        판정하는 유일한 신호(파일 타임스탬프, core/safety/heartbeat.py). 다른
+        루프와 달리 예외를 삼키지 않는다 — watchdog이 실패를 곧바로 감지하도록
+        `LoopHealth`에 기록한 뒤 그대로 다시 던져 태스크를 죽인다."""
         while True:
             start = time.monotonic()
             ok = True
@@ -176,28 +165,21 @@ async def start_background_loops(
                 ok = False
                 raise
             finally:
+                elapsed = time.monotonic() - start
                 health.record_tick(
-                    "heartbeat",
-                    ok,
-                    time.monotonic() - start,
-                    interval_sec=HEARTBEAT_INTERVAL_SECONDS,
+                    "heartbeat", ok, elapsed, interval_sec=HEARTBEAT_INTERVAL_SECONDS
                 )
             await asyncio.sleep(HEARTBEAT_INTERVAL_SECONDS)
 
     heartbeat_task = asyncio.create_task(_heartbeat_loop())
 
-    # FD-14(신설) — 가격/지표 알림 평가 루프. heartbeat_loop과 동일 패턴
-    # (main.py가 유일한 백그라운드 스케줄러 지점) — 알림 하나 평가가
-    # 실패해도(자격증명 해지 등) 다음 알림·다음 주기로 계속 진행한다
-    # (alert_service.py::evaluate_all_active 참조).
+    # FD-14 — 가격/지표 알림 평가 루프(알림 하나 실패해도 다음 주기로 계속).
     alert_service = AlertService(
         pool, credential_resolver=credential_resolver, publish=event_bus.publish
     )
 
-    # 레드팀 #2026-09-02-21 — evaluate_all_active()는 개별 알림 실패를 내부에서
-    # 이미 건너뛰지만, 이 호출 자체(또는 그 안에서 예상 못한 예외)가 이 루프를
-    # 빠져나가면 alert_task 코루틴이 영구히 죽어 재시작 전까지 아무 사용자의
-    # 알림도 평가되지 않는다 — 두 번째 방어선으로 `run_periodic_loop`가 잡는다.
+    # 레드팀 #2026-09-02-21 — evaluate_all_active() 자체가 예외를 내면 alert_task가
+    # 영구히 죽는다 — 두 번째 방어선으로 `run_periodic_loop`가 잡는다.
     alert_task = asyncio.create_task(
         run_periodic_loop(
             "alert_evaluation",
@@ -208,9 +190,8 @@ async def start_background_loops(
         )
     )
 
-    # ZuluTrade식 "위험 관리" 손실 한도(%) 자동 정지 루프. R-41 — 실제 정지는
-    # KillSwitchService(R-40)에 위임한다. 시스템 전역 자격증명이 없어
-    # exchange_adapters는 빈 매핑(sweeper fan-out 실패는 비치명적 clean-up).
+    # R-41 손실 한도(%) 자동 정지 루프 — 실제 정지는 KillSwitchService(R-40)에 위임.
+    # 시스템 전역 자격증명이 없어 exchange_adapters는 빈 매핑(sweeper fan-out 비치명적).
     kill_switch_service = KillSwitchService(
         risk_gate_repo=PostgresRiskGateRepository(pool), pg_pool=pool,
         paper_control_repo=PostgresPaperControlRepository(pool),
@@ -218,8 +199,7 @@ async def start_background_loops(
     )
     risk_guard_service = RiskGuardService(pool, kill_switch_service, publish=event_bus.publish)
 
-    # 레드팀 #25 / 전수감사 §2 P1 — alert 루프와 같은 방어선. 이 호출이 예외를
-    # 내면 손실 한도 자동정지가 재시작 전까지 영구히 죽는다.
+    # 레드팀 #25 — alert 루프와 같은 방어선(이 호출 자체가 예외를 내면 영구히 죽는다).
     risk_guard_task = asyncio.create_task(
         run_periodic_loop(
             "risk_guard",
@@ -239,10 +219,7 @@ async def start_background_loops(
         enabled=flag_enabled("AIOS_STARTUP_RECOVERY_ENABLED"),
     )
 
-    # FD-8 execution loop (full-audit §3's largest wiring gap -- run_execution_tick was
-    # complete, but its only caller was tests). Interval from risk_policy.yaml's
-    # execution_loop.interval_sec. EO-03 minimal wiring (lease renewal/release_all/
-    # adversarial tests left to EO-04); the new required arg (I-01) uses only existing components.
+    # FD-8 execution loop -- EO-03 minimal wiring (adversarial tests left to EO-04).
     owner_id = f"{socket.gethostname()}:{os.getpid()}:{uuid4()}"
     lease_repo = PostgresExecutionLeaseRepository(pool)
     execution_scheduler = ExecutionLoopScheduler(
@@ -267,9 +244,8 @@ async def start_background_loops(
             "execution_loop: AIOS_EXECUTION_LOOP_ENABLED=0 — 실행 루프를 띄우지 않습니다."
         )
     oms_dispatcher_task = start_outbox_dispatcher_task(pool, credential_resolver.get_adapter)
-    # R-45 — circuit_breaker_loop.run_circuit_breaker_tick(수집→evaluate→
-    # recovery_gate→check_reactivation)을 그대로 돌린다. `history`는 프로세스
-    # 수명 동안 유지되는 이력 버퍼 — main.py가 안 넘기면 여기서 만든다.
+    # R-45 — run_circuit_breaker_tick(수집→evaluate→recovery_gate→check_reactivation).
+    # `history`는 프로세스 수명 동안 유지되는 이력 버퍼(안 넘기면 여기서 만든다).
     circuit_breaker = CircuitBreakerService(pool, policy.circuit_breaker, publish=event_bus.publish)
     history = (
         reactivation_history
@@ -292,10 +268,9 @@ async def start_background_loops(
         )
     )
 
-    # R-52 — liquidation_executor.run_liquidation_worker_once. Adapters are
-    # keyed by exchange (not per-user, task-2358 decision) since a GLOBAL
-    # liquidation_request has no single owning tenant to borrow credentials
-    # from (same reasoning as build_kill_switch_service's exchange_adapters).
+    # R-52(task-2358) -- adapters keyed by exchange, not per-user: a GLOBAL
+    # liquidation_request has no single owning tenant (same reasoning as
+    # kill_switch_service's exchange_adapters above).
     liquidation_adapters = {"bitget": BitgetAdapter("", "", "", demo_mode=True)}
 
     async def _liquidation_tick() -> None:
