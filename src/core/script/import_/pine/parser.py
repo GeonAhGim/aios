@@ -9,10 +9,9 @@ AST만 출력한다. AIOS Script로의 변환(transpile)은 DSL-15의 몫이라 
 과거참조 `expr[N]`(N은 0 이상 정수 상수), `ta.<ident>(...)`·`input.<ident>(...)`
 (네임스페이스 안은 임의 식별자 허용), `strategy.entry/exit(...)`, 바깥 함수
 호출 중 `plot(...)` 하나, 단일 대입문 `ident = expr`(Pine에 `let`이 없어
-이걸로 대체 — decision: §9.9 표에 명시되지 않았지만 시리즈를 변수에 담아
-재사용하는 것이 Pine 실사용 100%라 뺄 수 없다고 판단; 반대로 `var`/`varip`·
-`:=`는 다른 실행 의미론이라 명시 거부), 호출 인자 안에서만 `ident = expr`
-keyword arg(예: `title="Length"`).
+이걸로 대체 — decision: §9.9 표에 없지만 시리즈를 변수에 담아 재사용하는
+것이 Pine 실사용 100%라 판단; `var`/`varip`·`:=`는 다른 의미론이라 거부),
+호출 인자 안에서만 `ident = expr` keyword arg(예: `title="Length"`).
 
 미지원(전부 PineSyntaxError로 (line, col) 포함 거부): `request.*`/`array.*`/
 `matrix.*`/`map.*`/`math.*`/`str.*`/`color.*`/`table.*`/`line.*`/`box.*` 등
