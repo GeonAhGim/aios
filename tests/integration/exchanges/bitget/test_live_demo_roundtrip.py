@@ -4,13 +4,23 @@ Spec: docs/specs/L4_execution_oms_and_exchange_v1.0.md §8.6, §9 L4-30
       (ADR-2026-09-06-G §11 — "구체적 거부 입력" DoD 강화)
 
 이 파일의 두 테스트는 `pytest.mark.live_demo`로만 실행된다(기본 CI
-`addopts`가 `not live_demo`로 제외 — pyproject.toml). Bitget REST 서명은
-ACCESS-KEY/ACCESS-SIGN/ACCESS-PASSPHRASE 3종을 요구하는데, 이 커밋
-시점에는 `.env`에 `BITGET_API_KEY`/`BITGET_API_SECRET`만 등록돼 있고
-`BITGET_API_PASSPHRASE`가 없다(task-2179 note) — 서명 자체가 불가능하므로
-두 테스트 모두 `pytest.skip()`으로 정확한 사유를 출력한다(빈 통과 금지).
-세 값이 모두 채워지면 이 파일을 고치지 않고도 Bitget 데모 계정에 대해
-place/cancel/get 왕복과 틱사이즈 위반 거부를 실측한다.
+`addopts`가 `not live_demo`로 제외 — pyproject.toml).
+
+DEEPEN(task-2795) — 원래 이 파일은 `BITGET_API_KEY`/`BITGET_API_SECRET`/
+`BITGET_API_PASSPHRASE`를 읽었는데, 이는 실제로 절대 실행될 수 없는
+결함이었다: `tests/conftest.py`가 라우터 임포트 안전장치로 프로세스 시작
+시점에 `BITGET_API_KEY`/`BITGET_API_SECRET`를 항상 고정 테스트값
+(`aios-test-only-bitget-*`)으로 덮어쓴다(`.env`에 진짜 값이 있어도).
+즉 이 두 값은 "누락"으로 skip되지도, 진짜 키로 인증되지도 않고 가짜
+값으로 Bitget 서버에 서명 시도를 했을 것이다 — 미실행 상태가 skip으로
+위장돼 있었을 뿐인 결함(task-2795 spec). KIS의 동일 문제
+(`tests/integration/exchanges/kis/test_live_demo_roundtrip.py`)와 같은
+이유로, conftest가 건드리지 않는 별도 이름 `BITGET_DEMO_API_KEY`/
+`BITGET_DEMO_API_SECRET`/`BITGET_DEMO_API_PASSPHRASE`(.env 주석: "Bitget
+데모 트레이딩용 별도 키")를 쓴다. 세 값이 모두 채워지면 이 파일을
+고치지 않고도 Bitget 데모 계정에 대해 place/cancel/get 왕복과 틱사이즈
+위반 거부를 실측한다. 세 값이 없으면 `pytest.skip()`으로 정확한 사유를
+출력한다(빈 통과 금지).
 
 `BITGET_SPOT_PROFILE.verified`(venue_profile.py)를 `"LIVE_VERIFIED"`로
 바꾸는 것은 이 두 테스트가 **둘 다** 실제로 통과한 뒤 사람이 하는
@@ -37,7 +47,11 @@ from src.exchanges.bitget.venue_profile import BITGET_SPOT_PROFILE
 pytestmark = pytest.mark.live_demo
 
 _SYMBOL = "BTC/USDT"
-_CREDENTIAL_ENV_VARS = ("BITGET_API_KEY", "BITGET_API_SECRET", "BITGET_API_PASSPHRASE")
+_CREDENTIAL_ENV_VARS = (
+    "BITGET_DEMO_API_KEY",
+    "BITGET_DEMO_API_SECRET",
+    "BITGET_DEMO_API_PASSPHRASE",
+)
 
 # 왕복용 지정가 — 실측(2026-09-08) 공개 심볼가보다 훨씬 낮게 잡아 체결
 # 위험 없이 미체결 상태로 place/get/cancel을 왕복한다. 수량은 min_notional
@@ -59,9 +73,9 @@ async def demo_adapter() -> BitgetAdapter:
             f"{', '.join(missing)} (값 자체는 절대 출력하지 않음, redaction)"
         )
     adapter = BitgetAdapter(
-        os.environ["BITGET_API_KEY"],
-        os.environ["BITGET_API_SECRET"],
-        os.environ["BITGET_API_PASSPHRASE"],
+        os.environ["BITGET_DEMO_API_KEY"],
+        os.environ["BITGET_DEMO_API_SECRET"],
+        os.environ["BITGET_DEMO_API_PASSPHRASE"],
         demo_mode=True,
     )
     await adapter.sync_server_time()
