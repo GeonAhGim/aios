@@ -80,6 +80,11 @@ class PostgresPolicyRepositoryMixin:
             )
         return _row_to_bundle(row) if row is not None else None
 
+    async def get_bundle(self, bundle_id: UUID) -> PolicyBundle | None:
+        async with self._pool.acquire() as conn:
+            row = await conn.fetchrow("SELECT * FROM policy_bundle WHERE id = $1", bundle_id)
+        return _row_to_bundle(row) if row is not None else None
+
     async def insert_policy_decision(self, decision: PolicyDecision) -> PolicyDecision:
         async with self._pool.acquire() as conn:
             row = await conn.fetchrow(
@@ -97,6 +102,11 @@ class PostgresPolicyRepositoryMixin:
                 decision.expires_at,
             )
         return _row_to_decision(row)
+
+    async def get_policy_decision(self, decision_id: UUID) -> PolicyDecision | None:
+        async with self._pool.acquire() as conn:
+            row = await conn.fetchrow("SELECT * FROM policy_decision WHERE id = $1", decision_id)
+        return _row_to_decision(row) if row is not None else None
 
     async def get_cached_decision(
         self, tenant_id: UUID, command_fingerprint: str

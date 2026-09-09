@@ -94,7 +94,20 @@ class MandateRepository(Protocol):
 
     async def get_bundle_for_revision(self, revision_id: UUID) -> PolicyBundle | None: ...
 
+    async def get_bundle(self, bundle_id: UUID) -> PolicyBundle | None:
+        """`bundle_id`로 직접 조회한다 — `get_bundle_for_revision`은 revision을
+        아는 호출자용이고, `policy_decision.bundle_id`만 들고 있는 호출자
+        (CM-13 `application/explain.py`)는 이 메서드로 역참조한다."""
+        ...
+
     async def insert_policy_decision(self, decision: PolicyDecision) -> PolicyDecision: ...
+
+    async def get_policy_decision(self, decision_id: UUID) -> PolicyDecision | None:
+        """`id`로 직접 조회한다 — `get_cached_decision`은 fingerprint+TTL로
+        "지금 재사용 가능한 결정"을 찾는 캐시 조회이고, 이 메서드는 과거에
+        내려진 특정 결정 하나를 그대로 다시 읽는(CM-13 `explain()`) 재현용
+        조회라 TTL/만료를 걸지 않는다(WORM이므로 언제 읽어도 같은 행)."""
+        ...
 
     async def get_cached_decision(
         self, tenant_id: UUID, command_fingerprint: str
