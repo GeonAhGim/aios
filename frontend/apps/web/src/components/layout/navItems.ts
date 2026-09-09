@@ -46,6 +46,8 @@ export const ADMIN_NAV_ITEMS: NavItem[] = [
   { to: "/admin/marketplace/platform-listings", label: "플랫폼목록" },
   { to: "/admin/approval-requests", label: "승인요청관리" },
   { to: "/admin/safety-controls", label: "안전통제" },
+  { to: "/admin/reconciliation", label: "대사관리" },
+  { to: "/admin/evidence-chain", label: "증빙체인검증" },
 ];
 
 export const ALL_NAV_ITEMS: NavItem[] = [

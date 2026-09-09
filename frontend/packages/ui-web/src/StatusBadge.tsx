@@ -8,6 +8,8 @@ const SUCCESS_STATUSES = new Set([
   "CONFIRMED",
   "SENT",
   "RESOLVED",
+  "HEALTHY",
+  "SUCCESS",
 ]);
 const DANGER_STATUSES = new Set([
   "SUSPENDED",
@@ -17,6 +19,10 @@ const DANGER_STATUSES = new Set([
   "EXPIRED",
   "DELISTED",
   "DELETED",
+  // task-2337(FE-OPS-3): 대사(reconciliation) 불일치·증빙 이벤트 결과.
+  "MATERIAL_MISMATCH",
+  "DENIED",
+  "ERROR",
 ]);
 const WARNING_STATUSES = new Set([
   "PAUSED",
@@ -25,6 +31,11 @@ const WARNING_STATUSES = new Set([
   "PENDING_PAYMENT",
   "OPEN",
   "DRAFT",
+  // task-2337(FE-OPS-3): 대사 조사 중/공급자 응답 없음/경미한 차이 상태.
+  "PENDING",
+  "MINOR_DIFFERENCE",
+  "PROVIDER_UNAVAILABLE",
+  "INVESTIGATING",
 ]);
 
 // 여러 도메인(실행 status, 결제 status, 분쟁 status 등)이 같은 3단계

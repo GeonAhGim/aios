@@ -11,6 +11,8 @@ export * from "./deviceToken";
 export * from "./admin";
 export * from "./riskGate";
 export * from "./mandates";
+export * from "./reconciliation";
+export * from "./evidence";
 export * from "./wallet";
 export * from "./walletBalance";
 export * from "./alert";

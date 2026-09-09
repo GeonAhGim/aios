@@ -1,13 +1,12 @@
-// clients/*.ts에 흩어진 문자열 경로의 단일 출처(origin/main 5f7c00b 기준 전수
-// 조사). foundation.ts의 "/v1/foundation/..."는 이 표의 /api/v1과는 무관한
-// 별도 네임스페이스라 v1Path를 아직 비워 둔다(PLT-16 mount_v1 구현 전이라
-// 최종 마운트 경로가 확정되지 않았다 — 추측 대신 null로 명시).
-//
-// task-2098(P6 300줄 상한)로 apiPaths.ts에서 이 등록 표만 분리했다 — route()/
-// defineApiRoutes()는 apiRouteTypes.ts, resolvePath 등 조회 함수는 apiPaths.ts.
-// 동작 변경 없음.
+// clients/*.ts에 흩어진 문자열 경로의 단일 출처(origin/main 5f7c00b 기준 전수 조사).
+// foundation.ts의 "/v1/foundation/..."는 이 표의 /api/v1과는 무관한 별도 네임스페이스라
+// v1Path를 아직 비워 둔다(PLT-16 mount_v1 구현 전이라 최종 마운트 경로 미확정). task-2098
+// (P6 300줄 상한)로 apiPaths.ts에서 이 등록 표만 분리했다(route는 apiRouteTypes.ts,
+// resolvePath는 apiPaths.ts) — task-2337: 같은 이유로 이 표도 다 못 담아
+// apiRoutesFoundationOps.ts로 일부를 더 분리했다(API_ROUTES는 여전히 단일 export다).
 
 import { defineApiRoutes, route } from "./apiRouteTypes";
+import { FOUNDATION_OPS_ROUTES } from "./apiRoutesFoundationOps";
 
 export const API_ROUTES = defineApiRoutes({
   "auth.register": route("/auth/register", true),
@@ -297,4 +296,5 @@ export const API_ROUTES = defineApiRoutes({
   // "/{strategy_id}/{strategy_version}" -> ApiResponse[ValidationResultView] + ok(...).
   // envelope=true, mount_v1(PLT-16) 미도달이라 v1Path=null(foundation.*와 동일 사유).
   "validation.start": route("/v1/foundation/validation-runs/:strategyId/:strategyVersion", true, null, true),
+  ...FOUNDATION_OPS_ROUTES,
 });

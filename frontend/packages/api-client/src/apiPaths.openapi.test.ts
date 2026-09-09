@@ -116,8 +116,8 @@ const UNREGISTERED_ROUTE_WHITELIST: Readonly<Record<string, string>> = {
   "/v1/foundation/connections/{connection_id}:confirm": "계정 연동 확인 액션 UI가 없다",
   "/v1/foundation/connections/{connection_id}:revoke": "계정 연동 해제 액션 UI가 없다",
   "/v1/foundation/connections/{connection_id}:sync": "계정 연동 동기화 액션 UI가 없다",
-  "/v1/foundation/evidence/chain:verify": "증빙 체인 검증 화면이 없다",
-  "/v1/foundation/evidence/timeline": "증빙 타임라인 뷰어 화면이 없다",
+  // task-2337(FE-OPS-3): EvidenceChainPage가 timeline/chain:verify 2건을 evidence.*로
+  // 등록했다 — 여기 있던 2개 항목(task-2168 원 목록)을 제거한다.
   // task-2336(FE-OPS-2): MandatesPage가 status/drafts/amendments/revisions/
   // {revision_id}:activate/mandate:pause/mandate:resume/policy:evaluate 7건 전부를
   // mandates.*로 등록했다 — 여기 남아 있던 7개 항목(task-2168 원 목록)을 제거한다.
@@ -125,9 +125,10 @@ const UNREGISTERED_ROUTE_WHITELIST: Readonly<Record<string, string>> = {
   "/v1/foundation/performance-statements/{statement_id}": "실적 명세서 화면이 없다",
   "/v1/foundation/performance-statements/{statement_id}:correct": "실적 명세서 정정 액션 UI가 없다",
   "/v1/foundation/performance-statements:compute": "실적 명세서 계산 액션 UI가 없다",
-  "/v1/foundation/reconciliation": "정합성 대사(reconciliation) 화면이 없다",
+  // task-2337(FE-OPS-3): ReconciliationPage가 목록 조회·해소(resolve) 2건을
+  // reconciliation.*로 등록했다 — 실행 이력(POST /runs)은 decision상 이 리프의
+  // UI 범위 밖이라 그대로 남긴다(사람이 EntitySnapshot을 입력해 만드는 화면이 없다).
   "/v1/foundation/reconciliation/runs": "정합성 대사 실행 이력 화면이 없다",
-  "/v1/foundation/reconciliation/{target_ref}:resolve": "정합성 대사 해소 액션 UI가 없다",
   // task-2335(FE-OPS-1): SafetyControlsPage가 GET(list)/deactivate/evaluate-recovery
   // 3건을 riskGate.safetyControls.*로 등록했다 — 아래 3건은 decision상 이 리프가
   // 만들지 않는 개통(activate)·룰번들 승인/활성화·evaluate 트리거라 그대로 남긴다
