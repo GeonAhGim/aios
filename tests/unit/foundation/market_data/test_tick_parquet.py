@@ -1,7 +1,10 @@
 ﻿"""DC-23 exact round trips, fail-closed partitions and million-tick streaming."""
+from concurrent.futures import ThreadPoolExecutor
 from datetime import date, datetime, timezone
 from decimal import Decimal
 from pathlib import Path
+from threading import Barrier
+from time import perf_counter
 
 import pyarrow as pa
 import pyarrow.parquet as pq
@@ -92,7 +95,11 @@ def test_million_ticks_bounded_arrow_memory(tmp_path: Path):
     store = TickParquetStorage(tmp_path, batch_size=65536)
     tick = record()
     baseline = pa.total_allocated_bytes()
+    started = perf_counter()
     store.write_day(VENUE, ID, DAY, (tick for _ in range(1_000_000)), kind="trades")
+    write_seconds = perf_counter() - started
+    assert write_seconds < 200, write_seconds
+    started = perf_counter()
     total = 0
     for batch in store.read_columns(VENUE, ID, DAY, kind="trades"):
         assert batch.num_rows <= 65536
@@ -102,6 +109,64 @@ def test_million_ticks_bounded_arrow_memory(tmp_path: Path):
             assert batch.column(name).unique().to_pylist() == [str(value)]
         total += batch.num_rows
     assert total == 1_000_000
+    read_seconds = perf_counter() - started
+    assert read_seconds < 20, read_seconds
+    print(f"million ticks: write={write_seconds:.3f}s read={read_seconds:.3f}s")
     projected = next(store.read_columns(VENUE, ID, DAY, kind="trades", columns=["ts_event"]))
     assert projected.schema.names == ["ts_event"]
+
+
+@pytest.mark.parametrize("kind", ["trades", "quotes"])
+@pytest.mark.parametrize("conflict", [False, True])
+def test_concurrent_publication_and_independent_replay(tmp_path, monkeypatch, kind, conflict):
+    from src.foundation.market_data.adapters.storage import tick_parquet
+
+    barrier = Barrier(2)
+    link = tick_parquet.os.link
+
+    def synchronized_link(source, destination):
+        barrier.wait(timeout=10)
+        link(source, destination)
+
+    monkeypatch.setattr(tick_parquet.os, "link", synchronized_link)
+
+    def publish(seq):
+        try:
+            return TickParquetStorage(tmp_path).write_day(
+                VENUE, ID, DAY, [record(kind, seq=seq)], kind=kind)
+        except FileExistsError:
+            return None
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        results = list(pool.map(publish, [0, int(conflict)]))
+    assert sum(result is not None for result in results) == (1 if conflict else 2)
+    monkeypatch.setattr(tick_parquet.os, "link", link)
+    reader = TickParquetStorage(tmp_path)
+    rows = [row for batch in reader.read_columns(VENUE, ID, DAY, kind=kind)
+            for row in batch.to_pylist()]
+    winner = int(rows[0]["seq"])
+    path = next(result for result in results if result is not None)
+    before = path.read_bytes()
+    assert publish(winner) == path
+    assert publish(winner + 10) is None
+    assert path.read_bytes() == before
+    assert not list(tmp_path.rglob("*.tmp"))
+
+
+@pytest.mark.parametrize("kind", ["trades", "quotes"])
+def test_interrupted_stream_and_unvalidated_model_fail_closed(tmp_path, kind):
+    store = TickParquetStorage(tmp_path, batch_size=1)
+
+    def interrupted():
+        yield record(kind)
+        raise RuntimeError("interrupted")
+
+    with pytest.raises(RuntimeError, match="interrupted"):
+        store.write_day(VENUE, ID, DAY, interrupted(), kind=kind)
+    invalid = record(kind).model_copy(update={"seq": -1})
+    with pytest.raises(ValueError):
+        store.write_day(VENUE, ID, DAY, [invalid], kind=kind)
+    assert not list(tmp_path.rglob("*.parquet"))
+    assert not list(tmp_path.rglob("*.tmp"))
+    store.write_day(VENUE, ID, DAY, [record(kind)], kind=kind)
 

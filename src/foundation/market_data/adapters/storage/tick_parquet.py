@@ -12,7 +12,8 @@ from __future__ import annotations
 import hashlib
 import os
 from collections.abc import Iterable, Iterator
-from datetime import date, datetime, timedelta
+from datetime import date, datetime
+from enum import Enum
 from pathlib import Path
 from tempfile import NamedTemporaryFile
 from typing import Literal
@@ -74,25 +75,32 @@ class TickParquetStorage:
             raise AsOfNotSupportedError("tick parquet does not support as_of")
         path = self._path(venue, instrument_id, day, kind)
         schema = _schema(kind)
+        names = schema.names
+        model = _MODELS[kind]
+        day_number = (day - _EPOCH).days
         path.parent.mkdir(parents=True, exist_ok=True)
         with NamedTemporaryFile(dir=path.parent, suffix=".tmp", delete=False) as stream:
             temporary = Path(stream.name)
         try:
             with pq.ParquetWriter(temporary, schema) as writer:
-                columns: dict[str, list[str]] = {name: [] for name in schema.names}
+                columns: dict[str, list[str]] = {name: [] for name in names}
                 for record in records:
-                    if not isinstance(record, _MODELS[kind]):
+                    if not isinstance(record, model):
                         raise ValueError("record type does not match partition kind")
-                    record = _MODELS[kind].model_validate(record.model_dump())
+                    # Revalidate even frozen DTOs: model_copy/model_construct can
+                    # bypass validation. The field mapping avoids two complete
+                    # serialization passes before Arrow receives string columns.
+                    record = model.model_validate(vars(record))
                     if (record.venue != venue or record.instrument_id != instrument_id
-                            or _EPOCH + timedelta(days=record.ts_event // _DAY_NS) != day):
+                            or record.ts_event // _DAY_NS != day_number):
                         raise ValueError("record does not match UTC day/venue/instrument partition")
-                    values = record.model_dump(mode="json")
-                    for name in schema.names:
-                        columns[name].append(str(values[name]))
+                    values = vars(record)
+                    for name in names:
+                        value = values[name]
+                        columns[name].append(str(value.value if isinstance(value, Enum) else value))
                     if len(columns["seq"]) == self._batch_size:
                         writer.write_table(pa.table(columns, schema=schema))
-                        columns = {name: [] for name in schema.names}
+                        columns = {name: [] for name in names}
                 if columns["seq"]:
                     writer.write_table(pa.table(columns, schema=schema))
             try:
