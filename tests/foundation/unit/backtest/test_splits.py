@@ -1,4 +1,6 @@
 """Unit tests for `backtest/domain/splits.py` -- task-2386 L33 DoD (a)-(d)."""
+from typing import Literal, cast
+
 import pytest
 
 from src.foundation.backtest.domain.splits import (
@@ -12,8 +14,8 @@ from src.foundation.backtest.domain.splits import (
 GAP = 15  # purge=10 + embargo=5, DoD (a) fixture
 
 
-def _valid_splits(mode: str) -> list[Split]:
-    return make_splits(n_bars=1000, n_splits=5, mode=mode, purge=10, embargo=5, min_train=200)  # type: ignore[arg-type]
+def _valid_splits(mode: Literal["anchored", "rolling"]) -> list[Split]:
+    return make_splits(n_bars=1000, n_splits=5, mode=mode, purge=10, embargo=5, min_train=200)
 
 
 def test_rolling_splits_have_no_leakage_and_exact_gap() -> None:
@@ -76,4 +78,11 @@ def test_min_train_violation_rejected_even_with_zero_gap() -> None:
 
 def test_unknown_mode_is_rejected() -> None:
     with pytest.raises(ValueError):
-        make_splits(n_bars=1000, n_splits=5, mode="sideways", purge=10, embargo=5, min_train=200)  # type: ignore[arg-type]
+        make_splits(
+            n_bars=1000,
+            n_splits=5,
+            mode=cast(Literal["anchored", "rolling"], "sideways"),
+            purge=10,
+            embargo=5,
+            min_train=200,
+        )

@@ -45,6 +45,7 @@ import pytest
 from src.services.oms.adapters.order_repository import PostgresOrderRepository
 from src.services.oms.adapters.outbox_repository import OutboxRepository
 from src.services.oms.application.outbox_dispatcher import OutboxDispatcher
+from src.services.oms.ports.repository import OutboxRow
 from tests.integration.oms.conftest import create_test_user, insert_order
 from tests.performance.oms.conftest import (
     attach_round_trip_logger,
@@ -76,7 +77,9 @@ class _ChattyOutboxRepo(OutboxRepository):
     """negative 전용(I-10) — 클레임 전에 불필요한 왕복을 하나 더 낸다
     (`claim_batch`는 `dispatch_once` 1회당 정확히 1번만 불린다)."""
 
-    async def claim_batch(self, conn, *, worker_id, limit, lease_sec):  # type: ignore[override]
+    async def claim_batch(
+        self, conn: asyncpg.Connection, *, worker_id: str, limit: int, lease_sec: int
+    ) -> list[OutboxRow]:
         await conn.fetchval("SELECT 1")
         return await super().claim_batch(
             conn, worker_id=worker_id, limit=limit, lease_sec=lease_sec

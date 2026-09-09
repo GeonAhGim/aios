@@ -10,6 +10,7 @@ import ast
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from pathlib import Path
+from typing import Any
 
 import pytest
 from pydantic import ValidationError
@@ -101,31 +102,33 @@ def test_bar_snapshot_hash_stable_across_decimal_trailing_zero_forms() -> None:
 
 
 def test_bar_snapshot_ref_missing_snapshot_hash_is_rejected() -> None:
+    fields: dict[str, Any] = dict(
+        symbol="BTC/USDT",
+        exchange="binance",
+        timeframe="1h",
+        from_time=_T0,
+        to_time=_T0,
+        bar_count=1,
+        source="binance",
+        as_of=_T0,
+    )
     with pytest.raises(ValidationError):
-        BarSnapshotRef(  # type: ignore[call-arg]
-            symbol="BTC/USDT",
-            exchange="binance",
-            timeframe="1h",
-            from_time=_T0,
-            to_time=_T0,
-            bar_count=1,
-            source="binance",
-            as_of=_T0,
-        )
+        BarSnapshotRef(**fields)
 
 
 def test_bar_snapshot_ref_missing_bar_count_is_rejected() -> None:
+    fields: dict[str, Any] = dict(
+        snapshot_hash="a" * 64,
+        symbol="BTC/USDT",
+        exchange="binance",
+        timeframe="1h",
+        from_time=_T0,
+        to_time=_T0,
+        source="binance",
+        as_of=_T0,
+    )
     with pytest.raises(ValidationError):
-        BarSnapshotRef(  # type: ignore[call-arg]
-            snapshot_hash="a" * 64,
-            symbol="BTC/USDT",
-            exchange="binance",
-            timeframe="1h",
-            from_time=_T0,
-            to_time=_T0,
-            source="binance",
-            as_of=_T0,
-        )
+        BarSnapshotRef(**fields)
 
 
 # --------------------------------------------------------------------------

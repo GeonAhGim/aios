@@ -80,7 +80,7 @@ def test_order_event_is_frozen() -> None:
         decision_hash="a" * 64,
     )
     with pytest.raises(ValidationError):
-        ev.qty = Decimal("2")  # type: ignore[misc]
+        ev.__setattr__("qty", Decimal("2"))
 
 
 def test_bar_signal_fill_events_roundtrip() -> None:

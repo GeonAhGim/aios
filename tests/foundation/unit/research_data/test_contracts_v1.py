@@ -12,6 +12,7 @@ from __future__ import annotations
 import json
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Any
 from uuid import uuid4
 
 import pytest
@@ -36,7 +37,7 @@ def _now() -> datetime:
 
 
 def _sample_item(**overrides: object) -> v1.ResearchItem:
-    base: dict[str, object] = dict(
+    base: dict[str, Any] = dict(
         item_id=uuid4(),
         source_id="opendart",
         kind="filing",
@@ -51,11 +52,11 @@ def _sample_item(**overrides: object) -> v1.ResearchItem:
         revision_of=None,
     )
     base.update(overrides)
-    return v1.ResearchItem(**base)  # type: ignore[arg-type]
+    return v1.ResearchItem(**base)
 
 
 def _sample_source_meta(**overrides: object) -> v1.SourceMeta:
-    base: dict[str, object] = dict(
+    base: dict[str, Any] = dict(
         source_id="opendart",
         publisher="금융감독원",
         redistribution="store_full",
@@ -64,7 +65,7 @@ def _sample_source_meta(**overrides: object) -> v1.SourceMeta:
         coverage="2015-01-01~present",
     )
     base.update(overrides)
-    return v1.SourceMeta(**base)  # type: ignore[arg-type]
+    return v1.SourceMeta(**base)
 
 
 def test_schema_snapshot_matches_fixture() -> None:
@@ -97,7 +98,7 @@ def test_research_item_naive_published_at_rejected() -> None:
 def test_research_item_missing_known_at_rejected() -> None:
     """§3 "known_at 없는 항목은 저장 거부" — 기본값 채우기(now())는 반려 대상이라
     known_at을 아예 빼면 pydantic이 필수 필드 누락으로 막아야 한다."""
-    payload = dict(
+    payload: dict[str, Any] = dict(
         item_id=uuid4(),
         source_id="opendart",
         kind="filing",
@@ -111,7 +112,7 @@ def test_research_item_missing_known_at_rejected() -> None:
         revision_of=None,
     )
     with pytest.raises(ValidationError) as exc_info:
-        v1.ResearchItem(**payload)  # type: ignore[arg-type]
+        v1.ResearchItem(**payload)
     assert "known_at" in str(exc_info.value)
 
 

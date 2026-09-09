@@ -9,6 +9,7 @@ import json
 from datetime import datetime, timezone
 from decimal import Decimal
 from pathlib import Path
+from typing import Any
 from uuid import uuid4
 
 import pytest
@@ -21,7 +22,7 @@ FIXTURE = Path(__file__).parent / "fixtures" / "risk_decision_v1.json"
 
 def _sample_decision(**overrides: object) -> RiskDecision:
     now = datetime(2026, 9, 3, 0, 0, tzinfo=timezone.utc)
-    base: dict[str, object] = dict(
+    base: dict[str, Any] = dict(
         decision_id=uuid4(),
         gate_kind=GateKind.PRE_TRADE,
         tenant_id=uuid4(),
@@ -43,7 +44,7 @@ def _sample_decision(**overrides: object) -> RiskDecision:
         latency_us=100,
     )
     base.update(overrides)
-    return RiskDecision(**base)  # type: ignore[arg-type]
+    return RiskDecision(**base)
 
 
 def test_schema_snapshot_matches_fixture():

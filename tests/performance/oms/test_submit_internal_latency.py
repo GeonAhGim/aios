@@ -44,10 +44,9 @@ from uuid import UUID
 import asyncpg
 import pytest
 
-from src.foundation.entities.adapters.postgres_repository import (
-    PostgresEntityRepository,
-    _row_to_legal_entity,
-)
+from src.foundation.entities.adapters._rows import row_to_legal_entity
+from src.foundation.entities.adapters.postgres_repository import PostgresEntityRepository
+from src.foundation.entities.contracts.v1 import LegalEntity
 from src.services.oms.application.submit_order import submit_order
 from tests.integration.oms.conftest import create_test_tenant, seed_entity_context
 from tests.performance.oms._fixtures import (
@@ -73,7 +72,7 @@ class _ChattyEntityRepo(PostgresEntityRepository):
     커넥션 안에서 왕복을 하나 더 낸다(별도 acquire/release를 쓰면 asyncpg
     세션 리셋 쿼리까지 딸려 와 +2가 되어 "정확히 1 어긋남" 단언이 깨진다)."""
 
-    async def get_legal_entity(self, tenant_id: UUID, entity_id: UUID):  # type: ignore[override]
+    async def get_legal_entity(self, tenant_id: UUID, entity_id: UUID) -> LegalEntity | None:
         async with self._pool.acquire() as conn:
             await conn.fetchval("SELECT 1")
             row = await conn.fetchrow(
@@ -81,7 +80,7 @@ class _ChattyEntityRepo(PostgresEntityRepository):
                 tenant_id,
                 entity_id,
             )
-        return _row_to_legal_entity(row) if row is not None else None
+        return row_to_legal_entity(row) if row is not None else None
 
 
 async def _count_submit_round_trips(

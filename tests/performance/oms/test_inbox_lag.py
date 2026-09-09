@@ -42,6 +42,7 @@ import pytest
 
 from src.services.oms.adapters.fills_repository import FillsRepository
 from src.services.oms.application.inbox_processor import InboxProcessor
+from src.services.oms.contracts.v1_events import FillEvent
 from tests.integration.oms.conftest import create_test_user
 from tests.performance.oms._fixtures import insert_open_order, partial_fill_event
 from tests.performance.oms.conftest import (
@@ -58,7 +59,7 @@ _INGEST_PARTIAL_ROUND_TRIPS = 21  # 모듈 docstring 구성표 — 정확 단언
 class _ChattyFillsRepo(FillsRepository):
     """negative 전용(I-10) — fills 삽입 전에 불필요한 왕복을 하나 더 낸다."""
 
-    async def insert_if_absent(self, conn, fill):  # type: ignore[override]
+    async def insert_if_absent(self, conn: asyncpg.Connection, fill: FillEvent) -> bool:
         await conn.fetchval("SELECT 1")
         return await super().insert_if_absent(conn, fill)
 

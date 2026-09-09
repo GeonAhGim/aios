@@ -9,6 +9,7 @@ import ast
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from pathlib import Path
+from typing import Any
 from uuid import uuid4
 
 import pytest
@@ -33,7 +34,7 @@ _T0 = datetime(2026, 1, 1, tzinfo=timezone.utc)
 
 
 def _algo(**overrides: object) -> AlgoSpec:
-    defaults: dict[str, object] = {
+    defaults: dict[str, Any] = {
         "kind": AlgoKind.TWAP,
         "start": _T0,
         "end": _T0 + timedelta(minutes=10),
@@ -43,11 +44,11 @@ def _algo(**overrides: object) -> AlgoSpec:
         "seed": 42,
     }
     defaults.update(overrides)
-    return AlgoSpec(**defaults)  # type: ignore[arg-type]
+    return AlgoSpec(**defaults)
 
 
 def _parent(**overrides: object) -> ParentOrder:
-    defaults: dict[str, object] = {
+    defaults: dict[str, Any] = {
         "parent_id": uuid4(),
         "instrument_id": "BTC/USDT",
         "side": OrderSide.BUY,
@@ -60,7 +61,7 @@ def _parent(**overrides: object) -> ParentOrder:
         "status": OrderStatus.CREATED,
     }
     defaults.update(overrides)
-    return ParentOrder(**defaults)  # type: ignore[arg-type]
+    return ParentOrder(**defaults)
 
 
 def _abundant_volume_profile(slice_count: int) -> list[Decimal]:
