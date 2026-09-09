@@ -1,6 +1,6 @@
 {
   "ResearchItem": {
-    "description": "개별 리서치 항목(공시·뉴스·거시·대안데이터 공통 포락선).\n\n`known_at`은 그 사실을 시스템이 알 수 있었던 시각 — 백테스트·전략은\n`known_at <= bar_ts`만 읽는다(§1 시점 정합, RD-A1). 점검은\n`domain/known_at.assert_point_in_time`이 한다(이 파일은 계약만 정의).\n`revision_of`가 채워지면 이 항목은 그 `item_id`의 정정판이다(RD-3의\n입력, 이 리프에서는 체인 규칙을 강제하지 않는다).",
+    "description": "A single research item (the common envelope for filings, news, macro,\nand alt data).\n\n`known_at` is when the system could have known this fact -- backtests\nand strategies only ever read `known_at <= bar_ts` (§1 point-in-time\nintegrity, RD-A1). The check itself is\n`domain/known_at.assert_point_in_time`'s job (this file only defines the\ncontract). When `revision_of` is set, this item is a correction of that\n`item_id` (input for RD-3; this leaf does not enforce chain rules).",
     "properties": {
       "item_id": {
         "format": "uuid",
@@ -102,7 +102,7 @@
     "type": "object"
   },
   "SourceMeta": {
-    "description": "소스별 메타 — 라이선스·수집 정책 강제 근거(RD-A3, RD-3의 입력).\n\n`rate_limit`은 분당 허용 요청 수(토큰버킷 파라미터 선언값, 실제 제한은\n수집 어댑터 소관 — `market_data/ports/provider.py`의 `RateLimitSpec`과\n동일 원칙). `coverage`는 사람이 읽는 커버리지 설명(예: \"2015-01-01~\npresent, 지연 5분\") — 구조화된 커버리지 판정은 DC-19~22의 몫이다.",
+    "description": "Per-source metadata -- the basis for enforcing license/collection\npolicy (RD-A3, input to RD-3).\n\n`rate_limit` is the allowed requests per minute (a declared token-bucket\nparameter; the actual limiting is the collector adapter's\nresponsibility -- the same principle as `RateLimitSpec` in\n`market_data/ports/provider.py`). `coverage` is a human-readable\ncoverage description (e.g. \"2015-01-01~present, 5 min delay\") --\nstructured coverage determination is DC-19 through 22's job.",
     "properties": {
       "source_id": {
         "title": "Source Id",
