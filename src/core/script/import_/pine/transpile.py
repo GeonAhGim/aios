@@ -36,10 +36,12 @@ lookahead(DSL-5) 재검증은 하지 않는다: Pine 파서가 이미 음수·�
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import cast
 
 from src.core.script.analysis.resources import DEFAULT_LIMITS, ResourceLimits, check_resources
 from src.core.script.grammar.ast import (
     BinaryExpr,
+    BinaryOp,
     CallExpr,
     Decl,
     Expr,
@@ -222,7 +224,7 @@ def _transpile_expr(expr: pine_ast.Expr) -> Expr:
                 f"연산자 {expr.op!r}는 AIOS Script BinaryOp 문법표에 없어 변환하지 않습니다"
             )
         return BinaryExpr(
-            op=expr.op,  # type: ignore[arg-type]
+            op=cast(BinaryOp, expr.op),
             left=_transpile_expr(expr.left),
             right=_transpile_expr(expr.right),
         )

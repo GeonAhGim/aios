@@ -95,7 +95,7 @@ def _profile(**overrides: object) -> VenueCapabilityProfile:
         "verified": "DOC_ONLY",
     }
     defaults.update(overrides)
-    return VenueCapabilityProfile(**defaults)  # type: ignore[arg-type]
+    return VenueCapabilityProfile.model_validate(defaults)
 
 
 async def _insert_order(
@@ -142,7 +142,7 @@ def _cancel_command(
         "issued_at": datetime.now(timezone.utc),
     }
     defaults.update(overrides)
-    return CancelOrderCommand(**defaults)  # type: ignore[arg-type]
+    return CancelOrderCommand.model_validate(defaults)
 
 
 def _modify_command(
@@ -160,7 +160,7 @@ def _modify_command(
         "new_quantity": None,
     }
     defaults.update(overrides)
-    return ModifyOrderCommand(**defaults)  # type: ignore[arg-type]
+    return ModifyOrderCommand.model_validate(defaults)
 
 
 async def _row_counts(pool: asyncpg.Pool, order_id: uuid.UUID, event: str) -> dict[str, int]:

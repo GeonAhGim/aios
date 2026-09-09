@@ -42,7 +42,7 @@ def _config(**overrides: object) -> BacktestConfig:
         "periods_per_year": 252,
     }
     fields.update(overrides)
-    return BacktestConfig(**fields)  # type: ignore[arg-type]
+    return BacktestConfig.model_validate(fields)
 
 
 def _result(

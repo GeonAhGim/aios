@@ -13,8 +13,10 @@ from __future__ import annotations
 from collections.abc import AsyncIterator, Sequence
 from datetime import datetime, timezone
 from decimal import Decimal
+from typing import cast
 from uuid import UUID, uuid4
 
+import asyncpg
 import pytest
 
 from src.data.models.base import AssetClass
@@ -34,7 +36,9 @@ from src.foundation.market_data.ports.coverage_repository import (
     CoverageSpan as StoredCoverageSpan,
 )
 from src.foundation.market_data.ports.provider import (
+    ProviderCandle,
     ProviderCapabilities,
+    ProviderTick,
     TimeSpan,
 )
 
@@ -101,7 +105,9 @@ class _FakeProvider:
         self.calls.append(span)
         return self._answers[(span.start, span.end)]
 
-    async def subscribe(self, listings: Sequence[VenueListing]) -> AsyncIterator[object]:
+    async def subscribe(
+        self, listings: Sequence[VenueListing]
+    ) -> AsyncIterator[ProviderTick | ProviderCandle]:
         raise NotImplementedError
 
 
@@ -184,10 +190,10 @@ async def _run(
     series_key: SeriesKey | None = None,
 ):
     return await run_backfill_job(
-        conn=object(),  # type: ignore[arg-type]
-        provider=provider,  # type: ignore[arg-type]
-        store=store,  # type: ignore[arg-type]
-        coverage_repo=coverage_repo,  # type: ignore[arg-type]
+        conn=cast(asyncpg.Connection, object()),
+        provider=provider,
+        store=store,
+        coverage_repo=coverage_repo,
         listing=listing or _listing(),
         series_key=series_key or _series_key(),
         tf=Timeframe.H1,
