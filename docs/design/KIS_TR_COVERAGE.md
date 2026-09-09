@@ -406,3 +406,24 @@ BR-1(ADR-2026-09-06-I D2). 생성: `python scripts/kis_tr_coverage.py`(오프라
 | VTTT3014U | overseas_stock | 구현됨 | [해외주식] 주문/계좌 > 해외주식 예약주문접수[v1_해외주식-002] | `examples_llm/overseas_stock/order_resv/order_resv.py` |
 | VTTT3016U | overseas_stock | 구현됨 | [해외주식] 주문/계좌 > 해외주식 예약주문접수[v1_해외주식-002] | `examples_llm/overseas_stock/order_resv/order_resv.py` |
 | VTTT3017U | overseas_stock | 구현됨 | [해외주식] 주문/계좌 > 해외주식 예약주문접수취소[v1_해외주식-004] | `examples_llm/overseas_stock/order_resv_ccnl/order_resv_ccnl.py` |
+
+## 왕복 검증(실계좌, task-2787 BR-14)
+
+DoD: 도메인별 대표 TR 각 3건 이상 실왕복 성공, 실패한 TR은 사유와 함께 `실전계좌필요`/`미지원`으로 재분류. 모의투자 계좌는 사람만 만들 수 있어(HB-3, 미해소) 아래는 전부 실행 전이다 — 자격증명이 채워지면 `tests/integration/exchanges/kis/test_live_demo_roundtrip.py`가 이 표를 고치지 않고도 왕복한다.
+
+| 도메인 | TR ID | 역할 | 상태 | 비고 |
+|---|---|---|---|---|
+| domestic_futureoption | TTTO1101U | place | 미실행(계좌없음) | test_domestic_futureoption_place_cancel_balance_roundtrip(월물 심볼 KIS_LIVE_DEMO_KR_FUTURES_SYMBOL 별도 필요) |
+| domestic_futureoption | TTTO1103U | cancel | 미실행(계좌없음) | test_domestic_futureoption_place_cancel_balance_roundtrip |
+| domestic_futureoption | CTFO6118R | balance | 미실행(계좌없음) | test_domestic_futureoption_place_cancel_balance_roundtrip |
+| domestic_stock | TTTC0012U/TTTC0011U | place(매수/매도) | 미실행(계좌없음) | test_domestic_stock_place_get_cancel_roundtrip |
+| domestic_stock | TTTC0013U | cancel | 미실행(계좌없음) | test_domestic_stock_place_get_cancel_roundtrip |
+| domestic_stock | TTTC0081R | get(체결조회) | 미실행(계좌없음) | test_domestic_stock_place_get_cancel_roundtrip |
+| overseas_futureoption | OTFM3001U | place | 미지원(모의투자, 구조적 증거) | O-접두 — adapter.py _PAPER_SWAP_PREFIXES(T/J/C)에 없어 V-치환 불가 |
+| overseas_futureoption | OTFM3003U | cancel | 미지원(모의투자, 구조적 증거) | O-접두 — 위와 동일 |
+| overseas_futureoption | OTFM1412R | balance | 미지원(모의투자, 구조적 증거) | O-접두 — 위와 동일 |
+| overseas_stock | TTTT1002U/TTTT1006U | place(매수/매도) | 미실행(계좌없음) | test_overseas_stock_place_cancel_balance_roundtrip |
+| overseas_stock | TTTT1004U | cancel | 미실행(계좌없음) | test_overseas_stock_place_cancel_balance_roundtrip |
+| overseas_stock | TTTS3012R | balance | 미실행(계좌없음) | test_overseas_stock_place_cancel_balance_roundtrip |
+
+요약: 미실행(계좌없음) 9건, 미지원(모의투자, 구조적 증거) 3건.

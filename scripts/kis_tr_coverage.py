@@ -41,6 +41,86 @@ _VALID_REASONS = frozenset({"구현됨", "실전계좌필요", "범위밖", "미
 # 자체는 건드리지 않고, "목록엔 있지만 구현 대상에서 뺀다"는 결정만 여기 남긴다.
 _SCOPE_OVERRIDES: dict[str, str] = {}
 
+# task-2787(DEEPEN 1931, BR-14, ADR-2026-09-06-I D7) — "구현됨"은 코드 존재만
+# 증명한다. 이 표는 그 위에 얹는 별개 축: 고정 픽스처 계약 테스트가 실제
+# KIS 모의투자 서버에서도 통과하는지(실왕복)를 도메인별 대표 TR 3건 이상으로
+# 추적한다. 모의투자 계좌는 사람만 만들 수 있어(HB-3, 미해소) 아래 상태는
+# 전부 실행 전이다 — 자격증명이 채워지면
+# tests/integration/exchanges/kis/test_live_demo_roundtrip.py가 이 표를
+# 고치지 않고도 각 TR을 실제로 왕복한다(값만 바꾸는 것은 금지, Bitget
+# task-2179/ADR-2026-09-06-G §11과 동일 원칙).
+LiveDemoStatus = Literal["미실행(계좌없음)", "미지원(모의투자, 구조적 증거)"]
+
+
+@dataclass(frozen=True)
+class LiveDemoTr:
+    tr_id: str
+    role: str  # place/cancel/balance/get 등 이 TR이 왕복에서 맡는 역할
+    status: LiveDemoStatus
+    note: str
+
+
+# 도메인 키는 위 build_matrix()의 domain 필드와 동일 값을 쓴다.
+LIVE_DEMO_MATRIX: dict[str, tuple[LiveDemoTr, ...]] = {
+    "domestic_stock": (
+        LiveDemoTr(
+            "TTTC0012U/TTTC0011U", "place(매수/매도)", "미실행(계좌없음)",
+            "test_domestic_stock_place_get_cancel_roundtrip",
+        ),
+        LiveDemoTr(
+            "TTTC0013U", "cancel", "미실행(계좌없음)",
+            "test_domestic_stock_place_get_cancel_roundtrip",
+        ),
+        LiveDemoTr(
+            "TTTC0081R", "get(체결조회)", "미실행(계좌없음)",
+            "test_domestic_stock_place_get_cancel_roundtrip",
+        ),
+    ),
+    "overseas_stock": (
+        LiveDemoTr(
+            "TTTT1002U/TTTT1006U", "place(매수/매도)", "미실행(계좌없음)",
+            "test_overseas_stock_place_cancel_balance_roundtrip",
+        ),
+        LiveDemoTr(
+            "TTTT1004U", "cancel", "미실행(계좌없음)",
+            "test_overseas_stock_place_cancel_balance_roundtrip",
+        ),
+        LiveDemoTr(
+            "TTTS3012R", "balance", "미실행(계좌없음)",
+            "test_overseas_stock_place_cancel_balance_roundtrip",
+        ),
+    ),
+    "domestic_futureoption": (
+        LiveDemoTr(
+            "TTTO1101U", "place", "미실행(계좌없음)",
+            "test_domestic_futureoption_place_cancel_balance_roundtrip"
+            "(월물 심볼 KIS_LIVE_DEMO_KR_FUTURES_SYMBOL 별도 필요)",
+        ),
+        LiveDemoTr(
+            "TTTO1103U", "cancel", "미실행(계좌없음)",
+            "test_domestic_futureoption_place_cancel_balance_roundtrip",
+        ),
+        LiveDemoTr(
+            "CTFO6118R", "balance", "미실행(계좌없음)",
+            "test_domestic_futureoption_place_cancel_balance_roundtrip",
+        ),
+    ),
+    "overseas_futureoption": (
+        LiveDemoTr(
+            "OTFM3001U", "place", "미지원(모의투자, 구조적 증거)",
+            "O-접두 — adapter.py _PAPER_SWAP_PREFIXES(T/J/C)에 없어 V-치환 불가",
+        ),
+        LiveDemoTr(
+            "OTFM3003U", "cancel", "미지원(모의투자, 구조적 증거)",
+            "O-접두 — 위와 동일",
+        ),
+        LiveDemoTr(
+            "OTFM1412R", "balance", "미지원(모의투자, 구조적 증거)",
+            "O-접두 — 위와 동일",
+        ),
+    ),
+}
+
 
 class KisTrCoverageError(ValueError):
     """reference/coverage 파일 형식 오류 또는 불변조건 위반."""
@@ -177,7 +257,38 @@ def render_markdown(reference: dict[str, Any], matrix: MatrixResult) -> str:
             f"| {row.tr_id} | {row.domain} | {row.reason} | {label} | `{row.source_path}` |"
         )
     lines.append("")
+    lines += render_live_demo_section()
     return "\n".join(lines)
+
+
+def render_live_demo_section() -> list[str]:
+    """task-2787(BR-14) — 도메인별 대표 TR ≥3건의 실왕복 검증 상태.
+    `LIVE_DEMO_MATRIX`가 유일한 소스라 이 함수는 그걸 표로 옮기기만 한다
+    (결정적, 오프라인)."""
+    status_counts: dict[str, int] = {}
+    lines = [
+        "## 왕복 검증(실계좌, task-2787 BR-14)",
+        "",
+        (
+            "DoD: 도메인별 대표 TR 각 3건 이상 실왕복 성공, 실패한 TR은 사유와 함께 "
+            "`실전계좌필요`/`미지원`으로 재분류. 모의투자 계좌는 사람만 만들 수 있어"
+            "(HB-3, 미해소) 아래는 전부 실행 전이다 — 자격증명이 채워지면 "
+            "`tests/integration/exchanges/kis/test_live_demo_roundtrip.py`가 이 표를 "
+            "고치지 않고도 왕복한다."
+        ),
+        "",
+        "| 도메인 | TR ID | 역할 | 상태 | 비고 |",
+        "|---|---|---|---|---|",
+    ]
+    for domain in sorted(LIVE_DEMO_MATRIX):
+        for tr in LIVE_DEMO_MATRIX[domain]:
+            status_counts[tr.status] = status_counts.get(tr.status, 0) + 1
+            lines.append(f"| {domain} | {tr.tr_id} | {tr.role} | {tr.status} | {tr.note} |")
+    lines.append("")
+    summary = ", ".join(f"{status} {count}건" for status, count in sorted(status_counts.items()))
+    lines.append(f"요약: {summary}." if summary else "요약: (비어있음).")
+    lines.append("")
+    return lines
 
 
 def render_coverage_txt(matrix: MatrixResult) -> str:
