@@ -332,7 +332,7 @@ DoD 공통: `ruff` · `mypy --strict` · `scripts/check_zone_manifest.py` 통과
 | CH-1 | `packages/chart-engine` 골격 + `vendor/`에 포크 반입(NOTICE·LICENSE) + `src/core/*.ts` 래퍼 + 테스트 | CH-0 | 시리즈 생성·업데이트·리사이즈, 라이선스 고지 파일 존재, 빌드 통과 | 600 |
 | CH-2 | `data/candleStream.ts` + 테스트 | CH-1, DC-18 | 페이지네이션+실시간 병합, 중복/역순/갭 | 240 |
 | CH-3 | `indicators/overlayRegistry.ts` + 테스트 | CH-1 | 페인/오버레이 매핑 | 200 |
-| CH-4 | `drawings/{model,tools,serialize}.ts` — **벤더 오버레이 위임 어댑터**. KLineChart `extension/overlay/`가 이미 17종(피보나치·브러시·가격채널·평행선·레이·수평/수직선·가격선·주석·태그)을 제공하므로 `tools.ts`는 `chart.createOverlay()`/`registerOverlay()` 호출부여야 하고 `serialize.ts`는 벤더 오버레이 서술자를 왕복시킨다. **병행 모델 신설 금지**(피보나치 구현이 둘로 갈라진다) | CH-1 | 벤더 17종 전부 노출, 직렬화 왕복, 자체 기하 계산 코드 0줄 | 300 |
+| CH-4 | `drawings/{model,tools,serialize}.ts` — **벤더 오버레이 위임 어댑터**. KLineChart `extension/overlay/`가 이미 17종(피보나치·브러시·가격채널·평행선·레이·수평/수직선·가격선·주석·태그)을 제공하므로 `tools.ts`는 `chart.createOverlay()`/`registerOverlay()` 호출부여야 하고 `serialize.ts`는 벤더 오버레이 서술자를 왕복시킨다. **병행 모델 신설 금지**(피보나치 구현이 둘로 갈라진다). **구현 예외(2026-09-09, CA, task-1526)**: 실제 구현(8bd4077f)은 벤더 위임 없이 독립 불변 모델+자체 기하 계산으로 착륙했고 CH-4b/CH-4c·apps/web이 이미 이를 소비 중이라 재작성 파급이 크므로 현재 형태를 이 리프의 공식 예외로 승인한다. 벤더 위임 어댑터로의 전환은 CH-4b 후속 리프로 분리 발행한다(미발행) | CH-1 | 벤더 17종 전부 노출, 직렬화 왕복, 자체 기하 계산 코드 0줄 — **예외 승인으로 미충족, 대신 독립 모델 왕복 property 테스트 77/77** | 300 |
 | CH-5 | backend charting 컨텍스트(계약·저장·API) + 통합·교차테넌트 테스트 | PLT-28 | 낙관적 잠금 409, 타 테넌트 404 | 780 |
 | CH-6 | `ChartPage.tsx` + `ChartToolbar.tsx` + `IndicatorPicker.tsx` | CH-2~5 | 화면 조립·키보드 접근성 | 900 |
 | CH-7 | `replay/replayController.ts` + 데이터 동일성 테스트 | CH-2, BT-10 | 리플레이=백테스트 봉 시퀀스 동일 | 220 |
