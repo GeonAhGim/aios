@@ -366,7 +366,7 @@ DC-1~18(R/L4 잔여보다 먼저, backend 4 중 2 고정) → CH-1~10 ∥ IND-1~
 |---|---|---|---|---|
 | IND-9 | `docs/design/INDICATOR_OSS_EVAL.md` — TA-Lib·pandas-ta·`ta` 라이선스 원문·종수·품질(참조 벡터 가용) 평가, GPL/LGPL(tulip·backtrader·Nautilus) 제외 근거 | — | CH-0 형식 채점표 | 200 |
 | ~~IND-10~~ | **폐기 — IND-2g와 같은 생성기다**(둘 다 `talib.get_functions() × abstract.Function(n).info`로 161종을 만든다). IND-11·IND-7g의 선행도 이미 IND-2g다. 얇은 재노출이 필요하면 IND-2g 안에서 한다 | — | — | 0 |
-| IND-11 | `adapters/pandas_ta_bridge.py` + 검증 — **TA-Lib과 겹치는 지표는 제외하고 순증분만 등록**(ADR-2026-09-06-F, 우선순위 하향) | IND-9, IND-2g | 순증분 종수 보고, 중복 0 | 280 |
+| IND-11 | `adapters/pandas_ta_bridge.py` + 검증 — **대상 패키지 `pandas-ta-classic`(MIT, Python>=3.10, 공개 저장소, TA-Lib 오라클 테스트)** (원안 pandas-ta 0.4.71b0은 Python>=3.12·저장소 404·numba 고정으로 탈락, ADR-2026-09-09-A). TA-Lib과 겹치는 지표는 제외하고 순증분만 등록(ADR-2026-09-06-F) | IND-9, IND-2g | 순증분 종수 보고, 중복 0, `pip show tulipy`가 not found(oracle extra 미설치) | 280 |
 | IND-12 | `catalog/registry_tiers.py`(코어/OSS/스크립트 3층, 이름 충돌·버전·해시 규칙) + `GET /indicators` API(검색·카테고리·페이지네이션) | IND-10 | 목록 API p95 200ms | 300 |
 | IND-13 | 참조 벡터 대량 검증 잡(`reference/verify_all.py`, nightly) + CI 샘플링 | IND-12 | nightly 전수, CI 30종 | 200 |
 | IND-14 | 프론트 IndicatorPicker 확장(3층 탐색·검색·즐겨찾기·스크립트 지표 즉시 미리보기) | IND-12, CH-6 | 화면·negative | 300 |
