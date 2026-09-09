@@ -143,3 +143,55 @@ def test_source_constraints() -> None:
     assert "calendar.trading_day_of(" in source
 
 
+
+@pytest.mark.parametrize("changes", [
+    {"underlying_id": "01ARZ3NDEKTSV4RRFFQ69G5FAZ"},
+    {"contract_multiplier": D(2)}, {"quote": "EUR"}, {"currency": "EUR"},
+    {"contract_multiplier": D("NaN")},
+])
+def test_incompatible_chain(calendar: VenueCalendar, changes: dict[str, object]) -> None:
+    with pytest.raises(RollError):
+        continuous_futures([contract(0), contract(1, 25).model_copy(update=changes)],
+                           {}, [date(2026, 9, 9)], calendar)
+
+
+def test_local_expiry_date_and_continuous_calendar() -> None:
+    tz = ZoneInfo("Asia/Seoul")
+    cal = VenueCalendar("TEST", tz, SessionSpec(tz, time.min, time.min, frozenset(), True))
+    expiry = datetime(2026, 9, 11, 16, tzinfo=timezone.utc)
+    assert roll_date(expiry, cal, 0) == date(2026, 9, 12)
+    assert roll_date(expiry, cal, 1) == date(2026, 9, 11)
+
+
+@pytest.mark.parametrize("method,expected", [
+    (Adjustment.RATIO, D("92.4")), (Adjustment.DIFFERENCE, D(95)),
+])
+def test_sparse_history_crosses_two_rolls(
+    calendar: VenueCalendar, method: Adjustment, expected: Decimal,
+) -> None:
+    a, b, c = contract(0, 10), contract(1, 18), contract(2, 25)
+    start, end = date(2026, 9, 9), date(2026, 9, 21)
+    prices = {a.instrument_id: {start: D(80), date(2026, 9, 10): D(100)},
+              b.instrument_id: {date(2026, 9, 10): D(105), date(2026, 9, 18): D(100)},
+              c.instrument_id: {date(2026, 9, 18): D(110), end: D(120)}}
+    result = continuous_futures([a, b, c], prices, [start, end], calendar, 0, method)
+    assert [bar.close for bar in result] == [expected, D(120)]
+    assert [bar.instrument_id for bar in result] == [a.instrument_id, c.instrument_id]
+
+
+def test_history_start_after_roll_needs_no_past_anchors(calendar: VenueCalendar) -> None:
+    a, b = contract(0), contract(1, 25)
+    day = date(2026, 9, 14)
+    result = continuous_futures([a, b], {b.instrument_id: {day: D(110)}}, [day], calendar)
+    assert result[0].close == D(110)
+    assert result[0].instrument_id == b.instrument_id
+
+
+def test_difference_supports_negative_prices(calendar: VenueCalendar) -> None:
+    a, b = contract(0), contract(1, 25)
+    before, boundary = date(2026, 9, 9), date(2026, 9, 10)
+    prices = {a.instrument_id: {before: D(-40), boundary: D(-30)},
+              b.instrument_id: {boundary: D(10)}}
+    result = continuous_futures([a, b], prices, [before, boundary], calendar,
+                                adjustment=Adjustment.DIFFERENCE)
+    assert [bar.close for bar in result] == [D(0), D(10)]

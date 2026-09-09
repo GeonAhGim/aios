@@ -4,6 +4,8 @@ Roll dates exclude the expiry trading day when counting a positive offset.
 Offset zero uses the expiry day or its preceding session. On a roll date,
 the incoming contract is selected; both same-day closes anchor adjustment.
 These are caller-selected rules, not exchange-specific expiry conventions.
+Exchange-specific expiry conventions are 미검증; callers supply expiries.
+Prices must use the same quote/currency units across the contract chain.
 """
 from __future__ import annotations
 
@@ -72,8 +74,10 @@ def _contracts(contracts: Sequence[Instrument], calendar: VenueCalendar) -> None
             raise RollError("Underlying and positive finite multiplier are required")
         if (contract.underlying_id != first.underlying_id
                 or multiplier != first.contract_multiplier
+                or contract.quote != first.quote
+                or contract.currency != first.currency
                 or contract.calendar_id != calendar.venue):
-            raise RollError("Contracts must share underlying, multiplier, and calendar")
+            raise RollError("Contracts must share underlying, multiplier, units, and calendar")
         if contract.instrument_id in ids:
             raise RollError("Contract identifiers must be unique")
         ids.add(contract.instrument_id)
