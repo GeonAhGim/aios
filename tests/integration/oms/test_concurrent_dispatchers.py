@@ -8,12 +8,28 @@ LOCKED), §9 L4-14 "3워커 정확히 1회".
 행은 정확히 한 워커가 한 번만 전송하고 한 번만 닫는다. 실DB(`order_command_outbox`
 + `FOR UPDATE SKIP LOCKED`) 변형은 L4-06/08 이후 같은 케이스로 추가한다
 (task-1538 note — 스키마·어댑터 부재).
+
+DEPTH_L4_BR(task-2722)가 원 리프(task-1538, 38e811f)를 D1로 판정 — 3워커
+레이스 증명은 강하지만 수치 성능/지연 단언(D2)과 게이트가 실제로 회귀를
+잡는지 보이는 명시적 CI red-line 테스트가 없었다. task-2759 DEEPEN으로
+아래 두 가지를 추가한다:
+- `test_three_workers_throughput_has_bounded_wall_clock_latency` — 수치
+  지연/처리량 단언(포트 대역은 순수 asyncio 스케줄링이라 실DB 성능테스트
+  (`tests/performance/oms/test_outbox_dispatch_latency.py`, task-2323)와
+  달리 절대시간 상한을 비차단 print가 아니라 CI 차단 게이트로 써도 환경
+  편차에 노출되지 않는다).
+- `test_broken_claim_atomicity_is_caught_by_exactly_once_gate` — `_RacyOutboxRepo`로
+  claim_batch의 원자성(await 없음)을 의도적으로 깨서, 이 회귀가 실제로
+  "행당 정확히 1회" 불변을 위반하는 관측 가능한 증상(중복 전송 또는 펜스
+  충돌)을 낸다는 것을 증명한다 — 위 테스트들의 단언이 장식이 아니라 실제
+  회귀를 잡는 게이트임을 보이는 red-line.
 """
 from __future__ import annotations
 
 import asyncio
+import time
 from collections import Counter
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from uuid import UUID
 
 from src.data.models.trading import Order, OrderStatus
@@ -21,8 +37,10 @@ from src.exchanges.common.error_taxonomy import SentUnknownError
 from src.services.oms.adapters.order_repository import PostgresOrderRepository
 from src.services.oms.adapters.outbox_repository import OutboxRepository
 from src.services.oms.application.outbox_dispatcher import DispatchReport, OutboxDispatcher
+from src.services.oms.ports.repository import OutboxRow
 from tests.integration.oms.conftest import create_test_user, insert_order
 from tests.support.oms_outbox_fakes import (
+    FakeConn,
     FixedClock,
     InMemoryOrderRepo,
     InMemoryOutboxRepo,
@@ -70,9 +88,11 @@ async def _drain(
 Setup = tuple[InMemoryOutboxRepo, InMemoryOrderRepo, list[OutboxDispatcher], list[UUID]]
 
 
-async def _setup(n: int, adapter: ScriptedAdapter) -> Setup:
+async def _setup(
+    n: int, adapter: ScriptedAdapter, *, outbox_cls: type[InMemoryOutboxRepo] = InMemoryOutboxRepo
+) -> Setup:
     clock = FixedClock()
-    outbox, orders = InMemoryOutboxRepo(clock=clock), InMemoryOrderRepo()
+    outbox, orders = outbox_cls(clock=clock), InMemoryOrderRepo()
     order_ids = []
     for _ in range(n):
         view = orders.add(make_order_view())
@@ -102,6 +122,93 @@ async def test_three_workers_send_each_row_exactly_once():
     assert all(orders.orders[o].status is OrderStatus.ACKNOWLEDGED for o in order_ids)
     assert all(orders.orders[o].version == 3 for o in order_ids)
     assert Counter(e.event for e in orders.events) == {"SENT": 50, "ACK": 50}
+
+
+async def test_three_workers_throughput_has_bounded_wall_clock_latency():
+    """DEPTH_L4_BR(task-2722) D2 — 수치 성능/처리량 단언(CI 차단 게이트).
+
+    포트 대역은 실DB I/O 없이 순수 asyncio 스케줄링만 돌리므로(모듈 docstring
+    "await 없음 — SKIP LOCKED 원자성 모델"), `tests/performance/oms/`의 실DB
+    성능테스트(task-2323, task-1038/1521 decision — 절대시간은 print 비차단)와
+    달리 절대 벽시계 시간 상한을 CI 차단 단언으로 써도 환경(CPU/DB) 편차에
+    노출되지 않는다. 200건×3워커 처리가 이 상한을 넘으면 디스패치 루프에
+    직렬화·교착·불필요한 폴링 지연이 섞여든 구조적 회귀다.
+    """
+    adapter = _yielding()
+    outbox, orders, dispatchers, order_ids = await _setup(200, adapter)
+
+    started = time.monotonic()
+    reports = await _drain(dispatchers, outbox, limit=10)
+    elapsed = time.monotonic() - started
+
+    assert sum(r.acknowledged for r in reports) == 200
+    assert sum(r.conflicts + r.errors for r in reports) == 0
+    throughput = 200 / elapsed if elapsed > 0 else float("inf")
+    print(
+        f"\n3-worker in-memory outbox dispatch: n=200 elapsed={elapsed:.3f}s "
+        f"throughput={throughput:.1f} rows/s (budget<5.0s, CI 차단)"
+    )
+    assert elapsed < 5.0, (
+        f"3워커 200건 outbox 디스패치가 {elapsed:.3f}s로 상한(5.0s)을 초과했다 — "
+        "디스패치 루프 성능 회귀입니다."
+    )
+
+
+class _RacyOutboxRepo(InMemoryOutboxRepo):
+    """negative 전용(CI red-line, task-2759) — `claim_batch`의 원자성을 의도적으로
+    깨서(후보 스냅샷과 SENDING 기록 사이에 `await`를 끼운다) 이 파일의 "행당
+    정확히 1회" 단언들이 실제로 그 회귀를 잡아내는 게이트임을 증명한다. 정상
+    `InMemoryOutboxRepo.claim_batch`는 await 없이 한 번에 끝나 두 워커가 같은
+    PENDING 스냅샷을 동시에 보는 일이 있을 수 없다(모듈 docstring) — 여기서는
+    그 보장을 제거한다."""
+
+    async def claim_batch(
+        self, conn: FakeConn, *, worker_id: str, limit: int, lease_sec: int
+    ) -> list[OutboxRow]:
+        self.claim_calls += 1
+        now = self._clock()
+        candidates = sorted(
+            (r for r in self.rows.values() if r.state == "PENDING" and r.not_before <= now),
+            key=lambda r: r.created_at,
+        )[:limit]
+        await asyncio.sleep(0)  # 회귀 주입 — 다른 워커의 claim_batch가 같은 스냅샷을 본다
+        claimed: list[OutboxRow] = []
+        for row in candidates:
+            new = row.model_copy(
+                update={
+                    "state": "SENDING", "worker_id": worker_id,
+                    "lease_until": now + timedelta(seconds=lease_sec), "updated_at": now,
+                }
+            )
+            self._put(conn, new)
+            claimed.append(new)
+        return claimed
+
+
+async def test_broken_claim_atomicity_is_caught_by_exactly_once_gate():
+    """DEPTH_L4_BR(task-2722) — 명시적 CI red-line 회귀 테스트.
+
+    `_RacyOutboxRepo`로 claim_batch의 원자성만 제거하고 나머지는 그대로 둔 채
+    3워커를 돌린다. 원자성이 깨지면 두 워커가 같은 행을 동시에 SENDING으로
+    "클레임"할 수 있고, 그중 하나는 (a) 어댑터를 중복 호출하거나 (b) 나중에
+    outbox 펜스(`mark_done`의 `state='SENDING' AND worker_id=expected`)에서
+    `ConcurrencyConflictError`로 걸린다 — 즉 정상 코드에서는 절대 발생하지
+    않는 관측 가능한 증상이 남는다. 이 테스트는 그 증상이 실제로 나타남을
+    확인해, `test_three_workers_send_each_row_exactly_once`류 단언이 장식이
+    아니라 회귀를 실제로 적색으로 만드는 게이트임을 증명한다.
+    """
+    adapter = _yielding(times=5)
+    outbox, orders, dispatchers, order_ids = await _setup(30, adapter, outbox_cls=_RacyOutboxRepo)
+
+    reports = await _drain(dispatchers, outbox, limit=5)
+
+    duplicate_calls = len(adapter.calls) - len(set(adapter.calls))
+    conflicts = sum(r.conflicts for r in reports)
+    assert duplicate_calls > 0 or conflicts > 0, (
+        "claim_batch 원자성을 깼는데도 중복 전송이나 펜스 충돌이 하나도 관측되지 "
+        "않았다 — 이 파일의 정확히-1회 단언들이 회귀를 잡지 못하는 무력한 게이트일 "
+        "수 있다(red-line 실패)."
+    )
 
 
 async def test_response_loss_under_concurrency_is_still_exactly_once():
