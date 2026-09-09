@@ -4,7 +4,7 @@ Spec: docs/specs/L4_research_data_and_market_ecosystem_v1.0.md §2.2
 `adapters/postgres_repository.py`, §4 RD-A2, §9 RD-4. Migration
 `f5529244403f` is the schema this adapter talks to.
 
-`append_item` is the RD-4 idempotency boundary (§3 "재수집은 같은 행"):
+`append_item` is the RD-4 idempotency boundary (§3 "re-collection is the same row"):
 the unique key is `(tenant_id, source_id, external_id)` — `external_id`
 is the source's own document id (e.g. a DART receipt number), not part
 of RD-2's `ResearchItem` contract, so it is a required parameter here

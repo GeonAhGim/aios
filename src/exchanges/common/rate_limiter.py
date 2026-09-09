@@ -1,10 +1,11 @@
-"""L4-11 — venue·엔드포인트 그룹별 토큰 버킷.
+"""L4-11 — per venue/endpoint-group token bucket.
 
 Spec: docs/specs/L4_execution_oms_and_exchange_v1.0.md#§2-D, §9 L4-11
 
-`time.monotonic`/`asyncio.sleep`을 직접 호출하지 않고 `clock`/`sleep`을 kw
-인자로 주입받는다 — 테스트가 가짜 시계+즉시 반환하는 가짜 sleep을 넣어
-실제 대기 없이 결정론적으로 검증할 수 있다(task-423 d3227c9 패턴 재사용).
+Does not call `time.monotonic`/`asyncio.sleep` directly; injects
+`clock`/`sleep` as kw arguments — so tests can supply a fake clock plus a
+fake sleep that returns immediately, verifying deterministically with no
+real waiting (reusing the task-423 d3227c9 pattern).
 """
 from __future__ import annotations
 
@@ -43,15 +44,17 @@ class TokenBucket:
         self._last_refill = now
 
     async def acquire(self, n: float = 1, *, timeout: float) -> None:
-        """토큰 n개를 확보한다. 대기해도 timeout 내 확보 불가능하면
-        `ExchangeError(RATE_LIMITED, retryable=True)`를 즉시 발생시킨다
-        (실제로 timeout만큼 기다린 뒤 실패시키지 않는다 — 필요한 대기시간을
-        미리 계산해 fail-fast한다).
+        """Acquires n tokens. If they cannot be acquired within timeout even by
+        waiting, immediately raises `ExchangeError(RATE_LIMITED,
+        retryable=True)` (this does not actually wait the full timeout before
+        failing -- it precomputes the needed wait time and fails fast).
 
-        `_lock`으로 전체 호출을 직렬화한다 — 동시 호출자가 각자 대기 전
-        토큰 잔량을 읽고 대기 후 재검증 없이 차감(0으로 클램프)하면, 동시에
-        기다리던 다른 호출자와 잔량을 이중으로 소비해 버스트 한도를 넘겨
-        발급할 수 있다(TOCTOU race, DEPTH_L4_BR task-456 D3 감사 발견)."""
+        `_lock` serializes the entire call -- if concurrent callers each read
+        the remaining token count before waiting and deduct it after waiting
+        without re-verifying (clamped to 0), they could double-consume the
+        remaining balance with another waiting caller and issue more than the
+        burst limit allows (TOCTOU race, DEPTH_L4_BR task-456 D3 audit
+        finding)."""
         async with self._lock:
             if n > self._burst:
                 raise ExchangeError(

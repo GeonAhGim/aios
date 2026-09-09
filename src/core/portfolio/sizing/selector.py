@@ -1,9 +1,10 @@
 """L4_strategy_portfolio_backtest_v1.0.md#§2 row 94 — sizing method dispatch.
 
-방법 → 함수 디스패치 + 결과 `inputs_hash` 검증. `config.method`와
-`inp.portfolio_config.method`가 어긋나면(호출자 버그) 즉시 거부하고, 반환된
-`SizingResult.method`가 요청한 방법과 다르거나 `inputs_hash`가 sha256 hex
-형태가 아니면(구현 오류·위조) 마찬가지로 거부한다.
+Method -> function dispatch, plus verification of the returned
+`inputs_hash`. If `config.method` and `inp.portfolio_config.method` disagree
+(a caller bug), this rejects immediately; if the returned
+`SizingResult.method` differs from the requested method, or `inputs_hash` is
+not sha256-hex shaped (an implementation bug or forgery), it likewise rejects.
 """
 from __future__ import annotations
 

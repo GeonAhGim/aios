@@ -1,10 +1,11 @@
-"""L4-11 — 서버시간 오프셋 보정.
+"""L4-11 — server-time offset correction.
 
 Spec: docs/specs/L4_execution_oms_and_exchange_v1.0.md#§2-D, §9 L4-11
 
-`time.time`을 직접 호출하지 않고 `clock: Callable[[], float]`(epoch ms
-반환)을 kw 인자로 주입받는다(task-423 d3227c9 패턴 재사용) — 테스트가
-가짜 시계로 왕복시간·skew를 결정론적으로 재현한다.
+Does not call `time.time` directly; injects `clock: Callable[[], float]`
+(returns epoch ms) as a kw argument (reusing the task-423 d3227c9 pattern) —
+so tests can deterministically reproduce round-trip time and skew with a
+fake clock.
 """
 from __future__ import annotations
 
@@ -43,17 +44,20 @@ class ServerClock:
         return self._last_sync_at
 
     async def sync(self, fetch_server_ms: Callable[[], Awaitable[int]]) -> None:
-        """서버시간을 조회해 오프셋을 갱신한다(왕복시간 절반 보정).
+        """Queries server time and updates the offset (corrected by half the
+        round-trip time).
 
-        `abs(offset_ms)`가 `max_skew_ms`를 넘으면 오프셋은 갱신한 채로
-        `ExchangeError(CLOCK_SKEW)`를 발생시켜 이후 서명 단계를 차단한다
-        (fail-closed — 스큐가 큰 상태로 서명된 요청은 거래소가 거부하거나
-        더 나쁘게는 시간창 검증을 우회할 수 있다).
+        If `abs(offset_ms)` exceeds `max_skew_ms`, the offset is still
+        updated, but this raises `ExchangeError(CLOCK_SKEW)` to block the
+        signing step that follows (fail-closed — a request signed while skew
+        is large could be rejected by the exchange or, worse, bypass its
+        time-window validation).
 
-        `_lock`으로 전체 왕복(요청→응답→오프셋 갱신)을 직렬화한다 — 겹쳐
-        호출된 두 `sync()`가 인터리빙되면, 먼저 시작했지만 나중에 끝난
-        오래된(리플레이된) 응답이 더 최근 오프셋을 덮어쓸 수 있다
-        (DEPTH_L4_BR task-456 D3 감사 발견: replay 순서 보장 부재)."""
+        `_lock` serializes the entire round trip (request -> response ->
+        offset update) — if two overlapping `sync()` calls interleave, an
+        older (replayed) response that started earlier but finished later
+        could overwrite a more recent offset (DEPTH_L4_BR task-456 D3 audit
+        finding: no guaranteed replay ordering)."""
         async with self._lock:
             t0 = self._clock()
             server_ms = await fetch_server_ms()

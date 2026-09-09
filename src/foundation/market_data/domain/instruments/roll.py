@@ -4,7 +4,7 @@ Roll dates exclude the expiry trading day when counting a positive offset.
 Offset zero uses the expiry day or its preceding session. On a roll date,
 the incoming contract is selected; both same-day closes anchor adjustment.
 These are caller-selected rules, not exchange-specific expiry conventions.
-Exchange-specific expiry conventions are 미검증; callers supply expiries.
+Exchange-specific expiry conventions are unverified; callers supply expiries.
 Prices must use the same quote/currency units across the contract chain.
 """
 from __future__ import annotations

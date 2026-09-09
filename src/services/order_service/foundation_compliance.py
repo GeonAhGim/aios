@@ -39,7 +39,7 @@ def _compliance_snapshot(context: OrderContext) -> dict[str, object]:
     """Only fields a real per-order call site actually has today. `context.
     symbol` is `None` for execution-*start* gate calls (`ExecutionService.
     pre_start_gate` — no specific order exists yet); this leaf's rule-bundle
-    checks are order-level (§2.2 "주문 제출 경로"), so an absent symbol simply
+    checks are order-level (§2.2 "order submission path"), so an absent symbol simply
     yields an empty bundle (still a real, persisted ALLOW decision) rather
     than a spurious deny."""
     snapshot: dict[str, object] = {}
@@ -60,7 +60,7 @@ async def evaluate_compliance_gate(
     now: datetime,
 ) -> ComplianceGateResult:
     """CM-A5 — always evaluated, independent of the risk/numeric-mandate
-    branch this is called alongside (§0 권위 원칙). `allowed=True` always
+    branch this is called alongside (§0 authority principle). `allowed=True` always
     carries a real, non-None `compliance_decision_id` (`submit_order`'s
     fail-closed contract): a genuine WORM `policy_decision` row when a rule
     bundle actually ran, or a deterministic marker when no mandate is
@@ -82,7 +82,7 @@ async def evaluate_compliance_gate(
             return ComplianceGateResult(False, ("CM_MANDATE_MISSING",), marker)
         return ComplianceGateResult(True, (), marker)
     except ComplianceBundleInactiveError:
-        # §6 "번들 미활성 → 409 fail-closed" — always denies, never gated by
+        # §6 "inactive bundle -> 409 fail-closed" — always denies, never gated by
         # `require_compliance_mandate` (that flag only covers "mandate is
         # absent", not "mandate exists but is broken/paused").
         return ComplianceGateResult(

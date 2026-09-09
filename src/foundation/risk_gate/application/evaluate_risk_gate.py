@@ -1,12 +1,12 @@
-"""EvaluateRiskGate 커맨드(DEPLOYMENT/PRE_INTENT 게이트 공용).
+"""EvaluateRiskGate command (shared by the DEPLOYMENT/PRE_INTENT gates).
 
-Spec: AIOSproject 48번 §3, 78번 §2/§3.
+Spec: AIOSproject #48 §3, #78 §2/§3.
 
-71번 §4 Contract ownership — risk_gate는 mandate PolicyDecision과 connection
-health를 "이미 판단이 끝난 입력"으로만 소비한다. mandates.evaluate_policy()를
-그대로 재사용하는 건 mandates 자신의 docstring이 명시한 설계 의도다("다른
-bounded context(risk_gate, ...)는 이 함수를 통해서만 mandate 판단을
-소비한다").
+#71 §4 Contract ownership — risk_gate only consumes mandate PolicyDecision
+and connection health as "input whose judgment is already final". Reusing
+mandates.evaluate_policy() as-is is the design intent mandates' own
+docstring states ("other bounded contexts (risk_gate, ...) consume mandate
+judgment only through this function").
 """
 from __future__ import annotations
 
@@ -32,15 +32,16 @@ from src.foundation.risk_gate.domain.rules import (
 from src.foundation.risk_gate.ports.repository import RiskGateRepository
 
 EVALUATION_CACHE_TTL_SECONDS = 10
-"""78번 §2 "ALLOW expires rapidly" — mandates(30초)보다 짧다. risk_gate는
-최종 veto라 mandate가 바뀐 뒤 더 오래 stale ALLOW를 재사용하면 안 된다."""
+"""#78 §2 "ALLOW expires rapidly" — shorter than mandates' (30s). Because
+risk_gate is the final veto, it must not reuse a stale ALLOW any longer
+after a mandate changes."""
 
 _DEPLOYMENT_CHECK_SUBJECT = PolicyEvaluationSubject(command_type="RISK_GATE_DEPLOYMENT_CHECK")
 
 
 class CrossTenantConnectionReferenceError(Exception):
-    """다른 tenant의 connection_id를 이 tenant의 게이트 평가에 끼워 넣으려는
-    시도 — 존재 여부를 흘리지 않고 거부한다."""
+    """An attempt to slip another tenant's connection_id into this tenant's
+    gate evaluation — rejected without leaking whether it exists."""
 
 
 def _evaluation_to_view(evaluation: RiskEvaluation) -> RiskEvaluationView:
@@ -58,15 +59,16 @@ def _evaluation_to_view(evaluation: RiskEvaluation) -> RiskEvaluationView:
 
 
 async def _mandate_state_marker(mandate_repo: MandateRepository, tenant_id: UUID) -> str:
-    """H-11(0598fdab과 동일 결함 클래스, 여기서는 risk_gate 자신의
-    `EVALUATION_CACHE_TTL_SECONDS`짜리 캐시) — `subject_fingerprint`가
-    mandate 상태를 반영하지 않으면, mandate가 activate/pause/resume으로
-    바뀌어도 이미 캐시된 ALLOW를 TTL이 끝날 때까지 그대로 돌려줄 수 있다.
-    `evaluate_policy.py`의 `_fingerprint()`가 이미 증명한 해법(revision
-    id+state를 fingerprint에 포함)을 여기서도 그대로 적용한다 — 별도
-    무효화 호출(라우터의 `invalidate_evaluations()` 등)을 잊어도 mandate가
-    바뀌는 즉시(0ms) 자연히 캐시 미스가 나므로, 그 명시적 호출들은 이제
-    안전망일 뿐 정확성의 전제조건이 아니다."""
+    """H-11 (same defect class as 0598fdab, here risk_gate's own
+    `EVALUATION_CACHE_TTL_SECONDS` cache) — if `subject_fingerprint` does not
+    reflect mandate state, a cached ALLOW can keep being returned until its
+    TTL expires even after the mandate transitions via activate/pause/resume.
+    The fix `evaluate_policy.py`'s `_fingerprint()` already proved (including
+    revision id+state in the fingerprint) is applied here the same way --
+    even if a separate invalidation call (the router's
+    `invalidate_evaluations()`, etc.) is forgotten, a cache miss naturally
+    occurs the instant (0ms) the mandate changes, so those explicit calls are
+    now just a safety net, not a precondition for correctness."""
     mandate = await mandate_repo.get_mandate(tenant_id)
     if mandate is None or mandate.active_revision_id is None:
         return "NO_MANDATE"
@@ -119,10 +121,10 @@ async def evaluate_risk_gate(
         connection_fresh = health is not None and health.state.value == "HEALTHY"
         provider_code = connection.provider_code
 
-    # 레드팀 #2026-09-02-27 — provider_code를 안 넘기면 PROVIDER 범위
-    # safety control이 여기서 영원히 조회되지 않는다(list_active_controls의
-    # provider_code=None 기본값 참조) — connection이 있으면 반드시 그
-    # provider의 통제도 함께 확인한다.
+    # Red team #2026-09-02-27 — if provider_code is not passed, a PROVIDER-scoped
+    # safety control would never be looked up here (referencing
+    # list_active_controls' provider_code=None default) -- if a connection
+    # exists, its provider's controls must also be checked.
     active_controls = await repo.list_active_controls(
         tenant_id=tenant_id, provider_code=provider_code
     )
@@ -138,10 +140,11 @@ async def evaluate_risk_gate(
     )
 
     now = datetime.now(timezone.utc)
-    # PLT-01 §3.1 — 신규 평가 행은 항상 현재 요청/시스템 컨텍스트의 trace_id를
-    # 찍는다(f4b9d6e5a7c8, §3.8 추적). 컨텍스트가 바인딩된 적 없어도
-    # `current()`는 fail-open 폴백값을 반환하므로 여기서 None으로 뭉개지
-    # 않는다 — fail-closed 판단(입력 결손 시 DENY 등)은 이미 위에서 끝났다.
+    # PLT-01 §3.1 — a new evaluation row always stamps the trace_id of the
+    # current request/system context (f4b9d6e5a7c8, §3.8 tracing). Even if a
+    # context was never bound, `current()` returns a fail-open fallback
+    # value, so this never collapses to None here -- the fail-closed
+    # decision (DENY on missing input, etc.) has already finished above.
     trace_id = current_request_context().trace_id
     evaluation = await repo.insert_evaluation(
         RiskEvaluation(

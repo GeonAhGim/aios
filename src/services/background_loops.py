@@ -1,18 +1,21 @@
-"""16번대 — main.py lifespan의 백그라운드 루프(heartbeat/alert/risk_guard/
-execution_loop/safety/liquidation/post_trade_batch) 생성·복구·취소.
+"""Task series 16xx — creation/recovery/cancellation of main.py lifespan's
+background loops (heartbeat/alert/risk_guard/execution_loop/safety/
+liquidation/post_trade_batch).
 
-Spec: 16_backend_signatures.md, ADR-2026-08-10-B, P6(파일당 300줄 초과 금지),
-L4_compliance_and_regulatory_v1.0.md#9 CM-11.
+Spec: 16_backend_signatures.md, ADR-2026-08-10-B, P6 (no file may exceed 300
+lines), L4_compliance_and_regulatory_v1.0.md#9 CM-11.
 
-편차: task-117은 원래 src/app/background_loops.py에 두려 했지만, .aios-zone이
-`src/app/**`를 선언하지 않아(zone 정책 수정은 에이전트 금지, P8) 이미
-SCAFFOLD로 선언된 `src/services/**` 아래로 대신 둔다.
+Deviation: task-117 originally intended to place this at
+src/app/background_loops.py, but since .aios-zone does not declare
+`src/app/**` (agents may not modify zone policy, P8), it is placed instead
+under `src/services/**`, already declared as SCAFFOLD.
 
-main.py는 pool/event_bus/credential_resolver 등을 조립한 뒤
-:func:`start_background_loops`에 넘겨 루프를 띄우고, shutdown 시 반환된
-:class:`BackgroundLoops`의 :meth:`~BackgroundLoops.stop`만 호출한다. 전 루프는
-`LoopHealth.record_tick`으로 계측된다(공용 `_run_instrumented` 래퍼) —
-execution_loop만 별도 스케줄러(`ExecutionLoopScheduler`)로 이 leaf 밖이다.
+main.py assembles pool/event_bus/credential_resolver etc., passes them to
+:func:`start_background_loops` to start the loops, and on shutdown only
+calls the returned :class:`BackgroundLoops`'s :meth:`~BackgroundLoops.stop`.
+Every loop is instrumented via `LoopHealth.record_tick` (the shared
+`_run_instrumented` wrapper) -- only execution_loop has its own separate
+scheduler (`ExecutionLoopScheduler`) and is outside this leaf.
 """
 from __future__ import annotations
 
@@ -73,13 +76,15 @@ ALERT_EVALUATION_INTERVAL_SECONDS = 60.0  # Draft — 가격/지표 알림 평�
 RISK_GUARD_INTERVAL_SECONDS = 30.0  # Draft — 손실 한도 자동정지 평가 주기
 SAFETY_REACTIVATION_INTERVAL_SECONDS = 10.0  # Draft — Circuit Breaker 재가동 승인 반영 주기
 LIQUIDATION_WORKER_INTERVAL_SECONDS = 3.0  # Draft — slice.not_before 최소 간격(2s)보다 촘촘히
-POST_TRADE_BATCH_INTERVAL_SECONDS = 3600.0  # Draft — 일 1회가 맞지만 cron 인프라가 없어
-# run_periodic_loop 재사용(재판정 idempotent라 매 tick 반복해도 안전).
+POST_TRADE_BATCH_INTERVAL_SECONDS = 3600.0  # Draft — once a day would be correct, but there is
+# no cron infrastructure, so this reuses run_periodic_loop (safe to repeat every tick since
+# re-evaluation is idempotent).
 
 
 def flag_enabled(name: str) -> bool:
-    """운영 기본값은 켜짐. 통합테스트(tests/conftest.py)는 lifespan을 통째로 띄우므로,
-    공유 dev DB에 실거래소 tick/조회가 새지 않도록 "0"으로 끈다."""
+    """Default is on in production. Integration tests (tests/conftest.py) boot
+    the whole lifespan, so this is switched off with "0" to keep real-exchange
+    ticks/lookups from leaking into the shared dev DB."""
     return os.environ.get(name, "1") != "0"
 
 
@@ -266,8 +271,9 @@ async def start_background_loops(
             )
         )
 
-    # CM-11(task-2509) -- DENY를 찾으면 KillSwitchService(TENANT)로 이어져 다음 주문이
-    # foundation_gate의 ACTIVE control 검사에서 거부된다. 지우면 test_post_trade_batch가 실패.
+    # CM-11(task-2509) -- finding a DENY leads to KillSwitchService(TENANT), which causes the
+    # next order to be rejected by foundation_gate's ACTIVE control check. Removing this breaks
+    # test_post_trade_batch.
     async def _post_trade_batch_tick() -> None:
         now = datetime.now(timezone.utc)
         business_date = (now - timedelta(days=1)).date()

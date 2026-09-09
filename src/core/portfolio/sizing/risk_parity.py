@@ -1,20 +1,22 @@
 """L4_strategy_portfolio_backtest_v1.0.md#§2 row 93 — risk-parity sizing.
 
-실행 간 역변동성 가중 `w_i ∝ 1/σ_i`, 합 = 1. `PortfolioAggregate`(L18)는
-전략별 노출 비중(`per_strategy_pct`)만 보존하고 개별 실행의 변동성은 버리므로,
-이 리프는 다른 실행 각각의 실제 σ_j를 다시 조회할 수 없다 — 그 한계 안에서
-**2-블록(신규 포지션 vs 기존 노출 총합) 단순화**를 쓴다: 기존 노출 총합
-(`exposures.total_exposure_pct`)을 하나의 카운터파티로 취급하고, 신규
-포지션의 몫을 그 대비 `1/σ_i` 비례로 나눈다.
+Inverse-volatility weighting across runs, `w_i ∝ 1/σ_i`, summing to 1.
+`PortfolioAggregate` (L18) only preserves the per-strategy exposure share
+(`per_strategy_pct`) and discards each individual run's volatility, so this
+leaf cannot look up the actual σ_j of each other run — within that
+constraint it uses a **2-block simplification (new position vs. total
+existing exposure)**: total existing exposure
+(`exposures.total_exposure_pct`) is treated as a single counterparty, and
+the new position's share is split against it in proportion to `1/σ_i`.
 
-`w_i = (1/σ_i) / (1/σ_i + S)`, `S = existing_fraction`이면 대수적으로
-`w_i + S/(1/σ_i + S) = 1`이 항상 성립한다(§8 테스트표 "리스크패리티 합=1").
-`existing_block_weight_fraction()`이 그 두 번째 항을 반환하므로 테스트가
-둘의 합을 직접 검증할 수 있다.
+If `w_i = (1/σ_i) / (1/σ_i + S)` with `S = existing_fraction`, then
+algebraically `w_i + S/(1/σ_i + S) = 1` always holds (§8 test table
+"risk-parity weights sum to 1"). `existing_block_weight_fraction()` returns
+that second term, so tests can directly verify the two sum to 1.
 
-다중 전략 각각의 개별 변동성을 보존하는 진짜 N-자산 리스크패리티는 L18이
-전략별 vol 필드를 추가하기 전까지는 이 시그니처(`size(inp)`, 단일 실행 입력
-하나)로 계산할 수 없다 — 미검증.
+A true N-asset risk parity that preserves each of multiple strategies'
+individual volatility cannot be computed with this signature (`size(inp)`,
+a single run's input) until L18 adds a per-strategy vol field — unverified.
 """
 from __future__ import annotations
 
@@ -34,9 +36,9 @@ _ONE = Decimal("1")
 
 
 def _denominator(inp: PortfolioStateInput) -> tuple[Decimal, Decimal, Decimal]:
-    """`(inv_vol, existing_fraction, denom)` — `size()`와
-    `existing_block_weight_fraction()`이 같은 세 값을 공유해야 두 결과의
-    합이 대수적으로 정확히 1이 된다."""
+    """`(inv_vol, existing_fraction, denom)` — `size()` and
+    `existing_block_weight_fraction()` must share these same three values for
+    the two results to sum to exactly 1 algebraically."""
     exposures = require(inp.exposures, "exposures")
     realized_vol_pct = require(inp.realized_vol_pct, "realized_vol_pct")
     require_positive(realized_vol_pct, "realized_vol_pct")
@@ -47,8 +49,8 @@ def _denominator(inp: PortfolioStateInput) -> tuple[Decimal, Decimal, Decimal]:
 
 
 def existing_block_weight_fraction(inp: PortfolioStateInput) -> Decimal:
-    """기존 노출 블록이 차지하는 몫 — `size()`가 반환하는 `weight_pct/100`과
-    더하면 항상 1이다."""
+    """The share taken by the existing-exposure block — always sums to 1 when
+    added to `size()`'s returned `weight_pct/100`."""
     _inv_vol, existing_fraction, denom = _denominator(inp)
     return existing_fraction / denom
 

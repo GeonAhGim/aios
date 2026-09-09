@@ -1,17 +1,19 @@
-"""BT-12 — 백테스트 성과 리포트 뷰.
+"""BT-12 — backtest performance report view.
 
 Spec: docs/specs/L4_analytics_authoring_backtest_marketplace_v1.0.md
-§2.5 `application/tearsheet.py`(성과 리포트, 기존 performance 계약
-재사용), §9.5 BT-12(선행 BT-10).
+§2.5 `application/tearsheet.py` (performance report, reuses the existing
+performance contract), §9.5 BT-12 (prerequisite BT-10).
 
-지표 산식(Sharpe/Sortino/MDD/승률/수익률)을 다시 구현하지 않는다 —
-BT-10(`compute_metrics.py`)이 이미 계산해 넣은 `BacktestResult.metrics`를
-그대로 읽어 `src/foundation/performance/contracts/v1.py`의 `ReturnValue`
-DTO 모양으로 옮겨 담을 뿐이다(벤더/기존 컨텍스트 우선 원칙, §C).
+Does not reimplement the metric formulas (Sharpe/Sortino/MDD/win
+rate/return) — it only reads `BacktestResult.metrics` as already computed by
+BT-10 (`compute_metrics.py`) and repacks it into the `ReturnValue` DTO shape
+from `src/foundation/performance/contracts/v1.py` (prefer vendor/existing
+context principle, §C).
 
-순수 함수 — I/O·시계·난수 접근이 없다. 같은 `BacktestResult` 입력이면
-바이트 동일한 `TearsheetView`를 낸다(리프 DoD "리포트 스냅샷 결정론").
-HTTP 라우터·DB 저장(리포트 영속화)은 이 리프의 범위 밖이다(후속 리프).
+A pure function — no I/O, clock, or randomness access. The same
+`BacktestResult` input always yields a byte-identical `TearsheetView` (leaf
+DoD "report snapshot determinism"). HTTP routing and DB storage (report
+persistence) are out of scope for this leaf (a follow-up leaf).
 """
 from __future__ import annotations
 
@@ -28,9 +30,9 @@ __all__ = ["TearsheetView", "build_tearsheet"]
 
 
 class TearsheetView(BaseModel):
-    """BT-12 리포트 스냅샷. `Decimal` 필드는 pydantic v2 JSON 모드가
-    기본으로 문자열 직렬화한다(`model_dump(mode="json")`) — 별도 인코더가
-    필요 없다."""
+    """BT-12 report snapshot. `Decimal` fields are serialized to strings by
+    default under pydantic v2 JSON mode (`model_dump(mode="json")`) — no
+    separate encoder is needed."""
 
     strategy_id: str
     strategy_version: str
@@ -52,9 +54,10 @@ class TearsheetView(BaseModel):
 
 
 def build_tearsheet(result: BacktestResult) -> TearsheetView:
-    """`BacktestResult`(run_backtest.py 산출물, `metrics`는 이미 BT-10이
-    계산 완료) → 리포트 뷰. 빈 `equity_curve`는 호출자 버그 신호라 조용히
-    0을 채우지 않고 거부한다(compute_metrics.py와 같은 원칙)."""
+    """`BacktestResult` (run_backtest.py's output, `metrics` already computed
+    by BT-10) -> report view. An empty `equity_curve` signals a caller bug,
+    so this rejects it rather than silently filling in 0 (same principle as
+    compute_metrics.py)."""
     if not result.equity_curve:
         raise ValueError("빈 equity_curve로는 리포트를 만들 수 없습니다.")
 
@@ -62,7 +65,7 @@ def build_tearsheet(result: BacktestResult) -> TearsheetView:
     config = result.config
     total_return = ReturnValue(
         value_pct=metrics.total_return_pct,
-        basis="NET",  # 체결 fee/slippage가 이미 fills에 반영된 equity 기준(76번 §2)
+        basis="NET",  # equity basis already reflects fill fee/slippage in fills (row 76 §2)
         method="TWR",
         period_start=metrics.period_start,
         period_end=metrics.period_end,

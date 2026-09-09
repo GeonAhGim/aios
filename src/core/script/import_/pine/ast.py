@@ -1,12 +1,13 @@
-"""DSL-14 — Pine Script v5 부분 문법 AST.
+"""DSL-14 — Pine Script v5 partial-grammar AST.
 
 Spec: docs/specs/L4_analytics_authoring_backtest_marketplace_v1.0.md §9.9
-DSL-14. `parser.py`가 만들어 내는 산출물의 형태만 고정한다 — 문법 규칙과
-허용/거부 판정은 `parser.py`의 몫이다(architecture 가드 P6.line_cap 준수를
-위해 분리, AIOS Script `grammar/ast.py`+`grammar/parser.py` 분리 선례를
-따른다). 노드는 discriminated union 대신 타입 자체를 판별자로 쓰는 얕은
-`dataclass(frozen=True, slots=True)` 트리다 — JSON 왕복은 이 리프의
-요구사항이 아니다(transpile은 DSL-15의 몫).
+DSL-14. Only fixes the shape of what `parser.py` produces — grammar rules
+and allow/reject decisions are `parser.py`'s job (split out to satisfy the
+architecture guard P6.line_cap, following the precedent of AIOS Script's
+`grammar/ast.py`+`grammar/parser.py` split). Nodes form a shallow
+`dataclass(frozen=True, slots=True)` tree that uses the type itself as the
+discriminant instead of a discriminated union — a JSON round trip is not a
+requirement for this leaf (transpile is DSL-15's job).
 """
 from __future__ import annotations
 
@@ -41,7 +42,7 @@ class CallArg:
 
 @dataclass(frozen=True, slots=True)
 class CallExpr:
-    """`ns is None`이면 바깥 함수 호출(`plot(...)`), 아니면 `ns.ident(...)`."""
+    """If `ns is None` this is a bare function call (`plot(...)`); otherwise `ns.ident(...)`."""
 
     ns: str | None
     ident: str
@@ -56,7 +57,7 @@ class UnaryExpr:
 
 @dataclass(frozen=True, slots=True)
 class PostfixExpr:
-    """`base[index]` — 과거참조만(index는 0 이상 정수 상수)."""
+    """`base[index]` — historical reference only (index is a constant integer >= 0)."""
 
     base: Expr
     index: int
@@ -89,7 +90,7 @@ Expr = (
 
 @dataclass(frozen=True, slots=True)
 class AssignStmt:
-    """`ident = expr` — 단일 대입(재대입 `:=`은 `parser.py`가 별도 거부)."""
+    """`ident = expr` — a single assignment (`parser.py` separately rejects reassignment `:=`)."""
 
     name: str
     expr: Expr

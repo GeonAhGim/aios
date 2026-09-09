@@ -1,25 +1,32 @@
-"""DSL-14 — Pine Script v5 부분 문법 재귀하향 파서.
+"""DSL-14 — Pine Script v5 partial-grammar recursive-descent parser.
 
 Spec: docs/specs/L4_analytics_authoring_backtest_marketplace_v1.0.md §9.9
-DSL-14. `lexer.py`의 `tokenize()` 토큰만 입력으로 받아 `ast.py`에 정의된
-AST만 출력한다. AIOS Script로의 변환(transpile)은 DSL-15의 몫이라 하지 않는다.
+DSL-14. Takes only `lexer.py`'s `tokenize()` tokens as input and outputs
+only the AST defined in `ast.py`. Conversion (transpile) to AIOS Script is
+DSL-15's job and is not done here.
 
-지원(허용 목록): 리터럴(정수/실수/문자열/`true`·`false`), 네임스페이스 없는
-식별자 참조, 시리즈 산술(`+-*/%`)·비교(`< <= == != >= >`)·논리(`and or not`),
-과거참조 `expr[N]`(N은 0 이상 정수 상수), `ta.<ident>(...)`·`input.<ident>(...)`
-(네임스페이스 안은 임의 식별자 허용), `strategy.entry/exit(...)`, 바깥 함수
-호출 중 `plot(...)` 하나, 단일 대입문 `ident = expr`(Pine에 `let`이 없어
-이걸로 대체 — decision: §9.9 표에 없지만 시리즈를 변수에 담아 재사용하는
-것이 Pine 실사용 100%라 판단; `var`/`varip`·`:=`는 다른 의미론이라 거부),
-호출 인자 안에서만 `ident = expr` keyword arg(예: `title="Length"`).
+Supported (allow-list): literals (int/float/string/`true`/`false`),
+namespace-less identifier references, series arithmetic (`+-*/%`),
+comparison (`< <= == != >= >`), logic (`and or not`), historical reference
+`expr[N]` (N is a constant integer >= 0), `ta.<ident>(...)`/
+`input.<ident>(...)` (any identifier allowed inside the namespace),
+`strategy.entry/exit(...)`, exactly one bare function call, `plot(...)`, and
+a single assignment statement `ident = expr` (Pine has no `let`, so this
+substitutes for it — decision: not in the §9.9 table, but judged to cover
+100% of real Pine usage of storing a series in a variable for reuse;
+`var`/`varip` and `:=` have different semantics and are rejected).
+`ident = expr` keyword args (e.g. `title="Length"`) are supported only
+inside call arguments.
 
-미지원(전부 PineSyntaxError로 (line, col) 포함 거부): `request.*`/`array.*`/
-`matrix.*`/`map.*`/`math.*`/`str.*`/`color.*`/`table.*`/`line.*`/`box.*` 등
-허용 목록 밖 네임스페이스, `strategy.*` 중 entry/exit 이외 및 `ns.ident` 값
-참조(호출 형태만 허용), `plot` 이외의 바깥 함수 호출(`indicator()`/`strategy()`
-선언 호출 포함 — §9.9 표 밖이라 범위 밖으로 둔다, decision), 사용자 함수
-정의(`f(x) => ...`), `if`/`for`/`while`/`switch` 블록, 재대입 연산자 `:=`,
-`var`/`varip` 선언, 삼항 연산자 `?:`.
+Unsupported (all rejected as PineSyntaxError with (line, col)): namespaces
+outside the allow-list such as `request.*`/`array.*`/`matrix.*`/`map.*`/
+`math.*`/`str.*`/`color.*`/`table.*`/`line.*`/`box.*`; any `strategy.*`
+other than entry/exit, and `ns.ident` value references (only call form is
+allowed); bare function calls other than `plot` (including `indicator()`/
+`strategy()` declaration calls — out of scope because they are outside the
+§9.9 table, decision); user function definitions (`f(x) => ...`);
+`if`/`for`/`while`/`switch` blocks; the reassignment operator `:=`;
+`var`/`varip` declarations; the ternary operator `?:`.
 """
 from __future__ import annotations
 
@@ -55,8 +62,9 @@ _TERM_OPS = frozenset({"*", "/", "%"})
 
 
 def parse(source: str) -> PineProgram:
-    """Pine 소스 전체를 `PineProgram`으로 파싱한다(`program := stmt*`,
-    문장은 줄바꿈으로 구분). 지원 범위 밖 구문은 전부 `PineSyntaxError`."""
+    """Parses an entire Pine source into a `PineProgram` (`program := stmt*`,
+    statements separated by newlines). Anything outside the supported
+    grammar raises `PineSyntaxError`."""
     tokens = tokenize(source)
     parser = _Parser(tokens)
     statements: list[Statement] = []
@@ -141,7 +149,7 @@ class _Parser:
             )
         return stmt
 
-    # ---- expr := or_expr; or/and/cmp/arith/term은 좌결합 ----
+    # ---- expr := or_expr; or/and/cmp/arith/term are left-associative ----
 
     def _expr(self) -> Expr:
         return self._binary_keyword(self._and_expr, "or")
@@ -189,7 +197,7 @@ class _Parser:
             return UnaryExpr(op="-", operand=self._unary())
         return self._postfix()
 
-    # postfix := primary ("[" INT "]")? — 과거참조만(상수 n>=0)
+    # postfix := primary ("[" INT "]")? — historical reference only (constant n>=0)
     def _postfix(self) -> Expr:
         base = self._primary()
         if not self._check(TokenKind.DELIM, "["):
@@ -234,7 +242,7 @@ class _Parser:
         raise PineSyntaxError(f"예상치 못한 토큰 {tok.value!r}", tok.line, tok.col)
 
     def _bare_call(self) -> CallExpr:
-        """bare_call := IDENT "(" args ")" — `plot` 하나만 허용."""
+        """bare_call := IDENT "(" args ")" — only `plot` is allowed."""
         ident_tok = self._advance()
         if ident_tok.value not in _BARE_CALL_ALLOWED:
             raise PineSyntaxError(
@@ -248,8 +256,9 @@ class _Parser:
         return CallExpr(ns=None, ident=ident_tok.value, args=args)
 
     def _qualified(self) -> CallExpr:
-        """qualified := ns "." ident "(" args ")" — ns ∈ {ta, input, strategy},
-        strategy는 entry/exit만. 호출이 아닌 `ns.ident` 값 참조는 거부한다."""
+        """qualified := ns "." ident "(" args ")" — ns is one of
+        {ta, input, strategy}, and strategy allows only entry/exit. A
+        non-call `ns.ident` value reference is rejected."""
         ns_tok = self._advance()
         self._advance()  # "."
         ident_tok = self._expect(
@@ -291,7 +300,7 @@ class _Parser:
         return tuple(args)
 
     def _arg(self) -> CallArg:
-        """arg := (IDENT "=")? expr — Pine의 keyword argument(예: `title="x"`)."""
+        """arg := (IDENT "=")? expr — Pine's keyword argument (e.g. `title="x"`)."""
         if self._check(TokenKind.IDENT) and self._peek(1).subtype == "ASSIGN":
             name = self._advance().value
             self._advance()  # "="

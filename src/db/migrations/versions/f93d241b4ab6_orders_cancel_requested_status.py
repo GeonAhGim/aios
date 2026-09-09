@@ -5,7 +5,7 @@ Revision ID: f93d241b4ab6
 Revises: f5529244403f
 Create Date: 2026-09-09 12:40:00.000000
 
-Spec: docs/specs/execution_oms_and_exchange.md#§2-C 상태기계 표 · §9 L4-06 +
+Spec: docs/specs/execution_oms_and_exchange.md#§2-C state-machine table · §9 L4-06 +
 ibor_fund_accounting_and_resilience(§9 FA-16 replay_verify).
 
 `src/services/safety/open_order_sweeper.py`'s kill-switch cancel path
@@ -43,7 +43,7 @@ a7c3d9e1f2b4, which also had to widen its trigger's `UPDATE OF <columns>`
 clause -- this trigger already fires on every `UPDATE ON orders`).
 
 This is deliberately the only migration in this leaf (task-2432's decision:
-"한 사이클 한 개 원칙에 따라 이 리프 외 마이그레이션 금지") -- landed at the
+"per the one-cycle-one-migration rule, no migrations outside this leaf") -- landed at the
 tail of the already-open migration chain (1942->1943->2351->2121, 2357),
 confirmed by a single `alembic heads` (`c7f1e3a9d024`) at the start of this
 task. `f5529244403f` (RD-4, task-2463) landed on `main` from a concurrent
@@ -51,7 +51,7 @@ worker while this leaf was in flight, also declaring `c7f1e3a9d024` as its
 `down_revision` and forking `heads` to two -- this file's `down_revision`
 was retargeted from `c7f1e3a9d024` to `f5529244403f` to re-serialize onto
 the new tip (a plain single-parent rebase, not a merge revision, so the
-task's "직접 merge revision 만들지 말 것" instruction still holds).
+task's "do not create a merge revision directly" instruction still holds).
 
 downgrade loads 073beca589d5's own `_GUARD_FN_SQL` by file path (same
 pattern as a7c3d9e1f2b4) and re-executes it verbatim, restoring the
@@ -145,16 +145,16 @@ BEGIN
     RETURN NEW;
 END;
 $$ LANGUAGE plpgsql
-"""  # noqa: S608 — 식별자·상수 문구만 보간(사용자 입력 없음)
+"""  # noqa: S608 — only identifiers/constant strings are interpolated (no user input)
 
 
 def _load_parent() -> ModuleType:
-    """073beca589d5 모듈을 파일 경로로 로드해 원문 `_GUARD_FN_SQL`을 그대로
-    재실행한다(downgrade가 복사본을 따로 들고 있다가 원본과 드리프트하는
-    것을 막는다 — a7c3d9e1f2b4와 동일 관례)."""
+    """Loads the 073beca589d5 module by file path and re-executes its original
+    `_GUARD_FN_SQL` verbatim (prevents downgrade from holding a separate copy
+    that drifts from the original -- same convention as a7c3d9e1f2b4)."""
     path = Path(__file__).with_name(_PARENT_FILE)
     spec = importlib.util.spec_from_file_location(f"_parent_{down_revision}", path)
-    if spec is None or spec.loader is None:  # pragma: no cover — 파일 손상 시에만
+    if spec is None or spec.loader is None:  # pragma: no cover — only if the file is corrupted
         raise RuntimeError(f"parent revision file not loadable: {path}")
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
@@ -167,4 +167,4 @@ def upgrade() -> None:
 
 def downgrade() -> None:
     parent = _load_parent()
-    op.execute(parent._GUARD_FN_SQL)  # noqa: SLF001 — 원문 복원이 목적
+    op.execute(parent._GUARD_FN_SQL)  # noqa: SLF001 — the goal is to restore the original text

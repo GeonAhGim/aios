@@ -1,37 +1,47 @@
 """L4_analytics_authoring_backtest_marketplace_v1.0.md §9.9 DSL-15 —
-Pine AST(DSL-14 `PineProgram`) → AIOS Script AST(DSL-1 `Program`) 변환 +
-컴파일·검증 왕복.
+Converts Pine AST (DSL-14 `PineProgram`) to AIOS Script AST (DSL-1
+`Program`), plus a compile/verify round trip.
 
-DSL-14가 파싱한 `PineProgram`만 입력으로 받는다(지원/미지원 판정은 파서가
-이미 끝냈다). 문장 하나가 항상 decl 하나로 내려가지는 않는다 —
-`AssignStmt(name, input.<kind>(...))`만 예외로 `InputDecl`(AIOS Script는
-input이 최상위 decl이지 `let`에 얹는 개념이 아님)이 되고, 나머지 `AssignStmt`는
-전부 `LetDecl`이다.
+Takes only a `PineProgram` already parsed by DSL-14 as input (the
+supported/unsupported decision is already final by the time the parser
+finishes). One statement does not always become one decl — the only
+exception is `AssignStmt(name, input.<kind>(...))`, which becomes an
+`InputDecl` (in AIOS Script, input is a top-level decl, not something
+layered on `let`); every other `AssignStmt` becomes a `LetDecl`.
 
-구조적으로 옮길 수 없는 것(전부 `PineTranspileError`, 사유를 메시지에 명시
-— "의미 차이 명시" DoD): 문자열·원시 bool 리터럴 표현식(`grammar.ast.Expr`
-판별 union에 둘 다 없음, DSL-1 decision — `input.bool(...)` 기본값 자리만
-예외, 그 필드는 `Expr`가 아니라 `int|float|bool` 리터럴); `%`·`!=` 연산자
-(`BinaryOp` 문법표 밖); 최상위가 아닌 자리의 `plot(...)`(`CallExpr.ns`가
-필수라 네임스페이스 없는 호출을 실을 자리가 없음); `strategy.exit(...)`
-(AIOS `OrderDecl`은 "신규 주문 하나"만 표현해 id로 기존 포지션을 찾아 닫는
-"청산" 의미가 없음 — 억지로 넣으면 오역이라 거부); `ta.*`/`input.*` 호출의
-키워드 인자(`CallExpr.args`는 위치 튜플뿐, `strategy.entry`의 `qty=`만 예외).
+Things that cannot be carried over structurally (all raise
+`PineTranspileError` with the reason stated in the message — the "state the
+semantic difference" DoD): string and raw bool literal expressions (neither
+is in the `grammar.ast.Expr` discriminated union, DSL-1 decision — the only
+exception is the `input.bool(...)` default-value slot, whose field is an
+`int|float|bool` literal, not an `Expr`); the `%`/`!=` operators (outside the
+`BinaryOp` grammar table); `plot(...)` in a non-top-level position
+(`CallExpr.ns` is required, so there is no slot for a namespace-less call);
+`strategy.exit(...)` (AIOS `OrderDecl` can only express "one new order" — it
+has no "close" semantics that look up an existing position by id; forcing it
+in would be a mistranslation, so it is rejected); keyword arguments to
+`ta.*`/`input.*` calls (`CallExpr.args` is a positional tuple only, with the
+sole exception of `strategy.entry`'s `qty=`).
 
-의미가 달라지는데도 변환하는 것: `plot(expr, ...)`의 스타일 인자(2번째부터)는
-버린다(`PlotDecl.style`은 DSL-4/6이 검사 안 하는 미정의 필드라 대개
-문자열·색상이라 옮길 자리도 없음). `strategy.entry(id, direction, qty=..)`의
-`id`는 버리고, `qty` 생략 시 `1`로 고정한다(이 하위 문법엔 전략 선언이 없어
-Pine의 `default_qty`가 없음). Pine의 `strategy.entry`는 보통 `if` 안에서만
-실행되지만 이 Pine 하위 문법은 `if`가 없어(DSL-14) 파싱된 호출은 전부 무조건
-실행문이다 — `OrderDecl.when`엔 "항상 참" 자리표시(`1 == 1`, 리터럴 `true`는
-문법에 없음)를 채운다. OHLCV 식별자(open/high/low/close/volume)를 선언 없이
-참조하면 `input <name> : series<float> = 0`을 자동 주입한다(진짜 입력이
-아니라 시장데이터 참조지만 AIOS Script v1엔 그 별도 decl이 없음, 값은 안 쓰임).
+Things converted even though the semantics change: for `plot(expr, ...)`,
+the style arguments (from the 2nd onward) are dropped (`PlotDecl.style` is
+an undefined field DSL-4/6 do not check, and is usually a string/color with
+no slot to carry it anyway). For `strategy.entry(id, direction, qty=..)`,
+`id` is dropped, and `qty` is pinned to `1` when omitted (this subgrammar
+has no strategy declaration, so there is no Pine `default_qty`). Pine's
+`strategy.entry` normally only executes inside an `if`, but this Pine
+subgrammar has no `if` (DSL-14), so every parsed call is an unconditional
+statement — `OrderDecl.when` is filled with an "always true" placeholder
+(`1 == 1`; a literal `true` is not in the grammar). Referencing an OHLCV
+identifier (open/high/low/close/volume) without declaring it auto-injects
+`input <name> : series<float> = 0` (it is really a market-data reference,
+not a genuine input, but AIOS Script v1 has no separate decl for that, and
+the value is unused).
 
-lookahead(DSL-5) 재검증은 하지 않는다: Pine 파서가 이미 음수·변수 postfix
-인덱스와 `request.*`/`security`류 네임스페이스를 전부 거부해서, 이 모듈이
-만들 수 있는 `Program`은 애초에 `SCRIPT_LOOKAHEAD` 위반을 구성할 수 없다.
+Lookahead (DSL-5) is not re-verified here: the Pine parser already rejects
+negative/variable postfix indices and `request.*`/`security`-style
+namespaces outright, so any `Program` this module can produce could not
+constitute a `SCRIPT_LOOKAHEAD` violation in the first place.
 """
 from __future__ import annotations
 
@@ -75,8 +85,9 @@ _ALWAYS_TRUE: Expr = BinaryExpr(op="==", left=_ONE, right=_ONE)
 
 
 class PineTranspileError(Exception):
-    """Pine AST → AIOS Script AST 변환 불가(구조적으로 표현할 자리가 없음). (line, col)
-    없음 — DSL-14 `import_/pine/ast.py`에 위치 필드가 없다(그 리프의 decision과 동일)."""
+    """Pine AST cannot be converted to AIOS Script AST (structurally no slot to
+    express it). No (line, col) — DSL-14 `import_/pine/ast.py` has no position
+    field (same decision as that leaf)."""
 
     def __init__(self, message: str) -> None:
         super().__init__(message)
@@ -85,7 +96,8 @@ class PineTranspileError(Exception):
 
 @dataclass(frozen=True)
 class TranspileResult:
-    """변환 + 왕복 검증(타입·자원·IR 하강·직렬화)까지 통과한 산출물."""
+    """Output of conversion plus the round-trip verification (type, resource,
+    IR lowering, serialization)."""
 
     program: Program
     ir: IRProgram
@@ -93,12 +105,12 @@ class TranspileResult:
 
 
 def transpile_source(source: str) -> Program:
-    """Pine 소스 → `parse`(DSL-14) → `transpile_program`."""
+    """Pine source -> `parse` (DSL-14) -> `transpile_program`."""
     return transpile_program(parse_pine(source))
 
 
 def transpile_program(pine: pine_ast.PineProgram) -> Program:
-    """`PineProgram`의 문장을 순서대로 `Decl`로 옮긴다."""
+    """Moves `PineProgram`'s statements into `Decl`s in order."""
     decls: list[Decl] = []
     declared: set[str] = set()
     for stmt in pine.statements:
@@ -115,11 +127,13 @@ def transpile_program(pine: pine_ast.PineProgram) -> Program:
 def transpile_and_verify(
     source: str, *, limits: ResourceLimits = DEFAULT_LIMITS
 ) -> TranspileResult:
-    """Pine 소스 → `Program` → 타입검사(DSL-4) → 자원상한(DSL-6) → IR 하강(DSL-7) →
-    직렬화 왕복(`to_bytes`/`from_bytes` + `verify_stack`)까지 통과해야 성공한다("컴파일·
-    검증 왕복", DoD). 실패는 `PineTranspileError` 또는 각 단계의 taxonomy 예외를 그대로
-    전파한다(여기서 감싸지 않음 — §3.3 taxonomy는 소스 텍스트를 받는 DSL-12 API 계약이라
-    AST를 받는 이 함수는 그 타입 밖이다)."""
+    """Succeeds only if Pine source -> `Program` -> type check (DSL-4) ->
+    resource limits (DSL-6) -> IR lowering (DSL-7) -> serialization round trip
+    (`to_bytes`/`from_bytes` + `verify_stack`) all pass ("compile/verify round
+    trip" DoD). Failures propagate `PineTranspileError` or each stage's
+    taxonomy exception as-is (not wrapped here — §3.3 taxonomy is a DSL-12 API
+    contract that takes source text, and this function, which takes an AST,
+    is outside that type)."""
     program = transpile_program(parse_pine(source))
     check_program(program)
     check_resources(program, limits)

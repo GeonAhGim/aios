@@ -19,7 +19,7 @@ cross-tenant lookups are enforced by the adapter's `WHERE tenant_id = $1`
 follows the same "policy is code, not RLS" path §10 risk1 already uses
 for the legacy `orders`/`positions`/`strategy_executions` tables).
 
-`research_items.hash` is RD-2's content-integrity hash (§1 "출처 추적"),
+`research_items.hash` is RD-2's content-integrity hash (§1 "source tracing"),
 not an idempotency key — the actual idempotency key
 (`(tenant_id, source_id, external_id)` UNIQUE) uses a new `external_id`
 column (the source's own document/receipt id, e.g. a DART receipt

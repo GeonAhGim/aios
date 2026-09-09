@@ -1,29 +1,35 @@
-"""L4_compliance_and_regulatory_v1.0.md#9 CM-11 -- 체결·일마감 사후 배치 판정.
+"""L4_compliance_and_regulatory_v1.0.md#9 CM-11 -- post-trade / end-of-day
+batch determination for fills.
 
-CM-9(`domain/rules/{short_sale,wash_trade}.py`)·CM-10(`domain/market_abuse.py`)
-규칙은 재구현하지 않고 호출만 한다: CM-9는 CM-3 `evaluator.evaluate_bundle`
-(기존 fail-closed 래퍼 + 최악판정 채택)에 얹고, CM-10은 `market_abuse.
-detect()`를 그대로 부른다 -- 이 파일에 crossing-price/wash-window/
-spoofing-ratio 수식이 다시 나오면 결함이다.
+CM-9 (`domain/rules/{short_sale,wash_trade}.py`) and CM-10
+(`domain/market_abuse.py`) rules are only called, never reimplemented: CM-9
+rides on CM-3 `evaluator.evaluate_bundle` (the existing fail-closed wrapper
+plus worst-verdict adoption), and CM-10 calls `market_abuse.detect()`
+directly -- if a crossing-price/wash-window/spoofing-ratio formula
+reappears in this file, that is a defect.
 
-위반(`ComplianceVerdict.DENY`)은 `KillSwitchService.activate()`(TENANT
-범위)로 이어진다 -- R-40/I3(safety_control insert 호출부는 정확히 한 곳,
-`postgres_repository.py`) 때문에 여기서 그 테이블에 직접 쓰지 않는다. 그
-결과 tenant의 다음 주문은 이미 배선된 `foundation_gate.py`의 ACTIVE
-control 검사에 걸려 거부된다 -- 새 게이트 없이 기존 경로에 올라탄다.
+A violation (`ComplianceVerdict.DENY`) leads to `KillSwitchService.
+activate()` (TENANT scope) -- because of R-40/I3 (there is exactly one
+safety_control insert call site, `postgres_repository.py`), this file never
+writes to that table directly. As a result, the tenant's next order is
+rejected by the already-wired ACTIVE control check in `foundation_gate.py`
+-- it rides the existing path with no new gate.
 
-스코프 축소(미검증, 후속 리프 대상): `position_qty`는 `positions`의 현재
-수량 스냅샷(체결별 running balance 아님). `borrow_available_qty`는 항상
-0 -- LA-25 `pos_borrow_position`(`positions/domain/borrow.py`)엔 아직
-조회 어댑터가 없어 "락 없음"을 안전측 기본값으로 쓴다. `market_close_at`
-은 실제 거래소 마감이 아니라 UTC 자정(다음날 0시)이다.
+Reduced scope (unverified, for a follow-up leaf): `position_qty` is the
+current-quantity snapshot from `positions` (not a per-fill running balance).
+`borrow_available_qty` is always 0 -- LA-25 `pos_borrow_position`
+(`positions/domain/borrow.py`) has no lookup adapter yet, so "no
+borrow available" is used as the safe-side default. `market_close_at` is UTC
+midnight (the next day at 0:00), not the actual exchange close.
 
-멱등키(DoD (c))는 `safety_control.idempotency_digest`(UNIQUE, 이미
-`f4b9d6e5a7c8`가 만들었지만 아직 어떤 호출부도 채우지 않음) 대신, activate
-전에 같은 reason(tenant+rule_code+business_date)의 ACTIVE control이 있는지
-조회해 건너뛰는 방식을 쓴다 -- 그 컬럼을 쓰려면 `insert_safety_control()`
-시그니처를 바꿔야 해 선언된 파일 범위 밖이다. read-then-write라 동시
-레이스엔 안전하지 않지만, 이 배치는 단일 직렬 tick으로만 돈다(안 겹침).
+For the idempotency key (DoD (c)), instead of `safety_control.
+idempotency_digest` (UNIQUE, already created by `f4b9d6e5a7c8` but not yet
+populated by any call site), this file looks up whether an ACTIVE control
+already exists for the same reason (tenant+rule_code+business_date) before
+activating, and skips if so -- using that column would require changing
+`insert_safety_control()`'s signature, which is outside this file's declared
+scope. Being read-then-write, it is not safe under concurrent races, but
+this batch only ever runs as a single serial tick (no overlap).
 """
 from __future__ import annotations
 
@@ -49,8 +55,8 @@ from src.services.safety.kill_switch_service import KillSwitchService
 
 logger = logging.getLogger(__name__)
 
-# watchdog_process.WATCHDOG_SYSTEM_ACTOR_ID / e5a8c5d4f6b7가 심은 시스템
-# `users` 행 -- liquidation_executor.py와 동일한 관행으로 로컬 재정의.
+# The system `users` row seeded by watchdog_process.WATCHDOG_SYSTEM_ACTOR_ID /
+# e5a8c5d4f6b7 -- redefined locally here, same practice as liquidation_executor.py.
 SYSTEM_ACTOR_ID = UUID("00000000-0000-0000-0000-000000000002")
 
 _CM9_BUNDLE_VERSION = "cm11.post_trade.cm9/1"
@@ -99,12 +105,13 @@ def evaluate_tenant_day(
     rule_params: Mapping[str, Mapping[str, Any]],
     now: datetime,
 ) -> tuple[list[PostTradeViolation], list[PostTradeViolation]]:
-    """순수 평가(한 tenant의 하루), I/O·시계 읽기 없음(`now`는 `evaluate_
-    bundle`과 같은 규약으로 호출자 주입). CM-9 두 규칙은 히트하면 항상
-    DENY, CM-10 실제 탐지 3종은 WARN(`DATA_MISSING`만 DENY, I-02) -- §3
-    "WARN은 통과시키되 기록"에 따라 `warnings`로만 나가고 차단하지 않는다.
-    규칙/패턴 id로 중복 제거(체결 여러 건이 같은 규칙을 여러 번 히트할 수
-    있음)."""
+    """Pure evaluation (one tenant's day), no I/O or clock reads (`now` is
+    caller-injected, same convention as `evaluate_bundle`). Both CM-9 rules
+    are always DENY on a hit; the three real CM-10 detections are WARN (only
+    `DATA_MISSING` is DENY, I-02) -- per §3 "WARN passes through but is
+    recorded", these only surface via `warnings` and never block.
+    Deduplicated by rule/pattern id (multiple fills can hit the same rule
+    more than once)."""
     bundle = _cm9_bundle(rule_params)
     blocking: dict[str, PostTradeViolation] = {}
     warnings: dict[str, PostTradeViolation] = {}
@@ -126,8 +133,8 @@ def evaluate_tenant_day(
         abuse_hits: list[AbuseHit] = market_abuse.detect(
             market_abuse_window, rule_params.get("market_abuse", {})
         )
-    except Exception:  # noqa: BLE001 -- DoD (d) fail-closed: 예외는 판정
-        # 없음이 아니라 차단으로 이어져야 한다.
+    except Exception:  # noqa: BLE001 -- DoD (d) fail-closed: an exception
+        # must lead to a block, not "no verdict".
         abuse_hits = [
             AbuseHit(
                 pattern_id="market_abuse.evaluation_exception",
@@ -164,8 +171,9 @@ async def _tenants_with_fills(
 async def _load_tenant_window(
     pool: asyncpg.Pool, tenant_id: UUID, day_start: datetime, day_end: datetime
 ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
-    """CM-9 체결 스냅샷 + CM-10 윈도우를 `fills`/`orders`/`positions`에서
-    조립(스코프 축소는 모듈 docstring 참조)."""
+    """Assembles the CM-9 fill snapshots and CM-10 window from
+    `fills`/`orders`/`positions` (see the module docstring for reduced
+    scope)."""
     async with pool.acquire() as conn:
         fill_rows = await conn.fetch(
             "SELECT f.id, f.side, f.quantity, f.price, f.symbol, f.venue_ts "
@@ -242,7 +250,8 @@ async def run_daily_post_trade_batch(
     now: datetime,
     rule_params: Mapping[str, Mapping[str, Any]] | None = None,
 ) -> PostTradeBatchReport:
-    """§9 CM-11 공개 진입점 -- `background_loops.py`가 주기적으로 호출한다."""
+    """§9 CM-11 public entry point -- called periodically by
+    `background_loops.py`."""
     resolved_params = rule_params or {}
     day_start = datetime.combine(business_date, time.min, tzinfo=timezone.utc)
     day_end = day_start + timedelta(days=1)

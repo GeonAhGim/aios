@@ -1,11 +1,11 @@
 """L4_strategy_portfolio_backtest_v1.0.md#§2 rows 90~94 — sizing package.
 
-`SizingResult`/`PortfolioSizingError`는 개념상 §2 row 87의
-`core.portfolio.models` MINOR 확장(SizingResult DTO)에 속하지만, L17
-(task-2452)의 실제 커밋은 그 확장을 하지 않았고, 이 리프(L19, task-2525)의
-파일 범위는 `sizing/**`로 고정돼 있다 — 그래서 사이징 패키지가 자신의 공개
-결과 타입·공용 예외를 여기서 직접 소유한다(범위 밖 `models.py`는 건드리지
-않는다).
+`SizingResult`/`PortfolioSizingError` conceptually belong to the §2 row 87
+`core.portfolio.models` MINOR extension (the SizingResult DTO), but L17's
+(task-2452) actual commit did not make that extension, and this leaf's
+(L19, task-2525) file scope is pinned to `sizing/**` — so the sizing package
+owns its own public result type and shared exception directly here (the
+out-of-scope `models.py` is left untouched).
 """
 from __future__ import annotations
 
@@ -24,13 +24,13 @@ _T = TypeVar("_T")
 
 
 class PortfolioSizingError(ValueError):
-    """사이징 입력이 계약을 벗어났다 — fail-closed 기본 예외."""
+    """Sizing input violates the contract — the fail-closed base exception."""
 
     code = "PORTFOLIO_SIZING_ERROR"
 
 
 class SizingInputMissingError(PortfolioSizingError):
-    """필수 입력이 `None` — 0/기본값으로 대체하지 않고 거부한다."""
+    """A required input is `None` — rejected rather than substituted with 0/a default."""
 
     code = "PORTFOLIO_SIZING_INPUT_MISSING"
 
@@ -40,7 +40,8 @@ class SizingInputMissingError(PortfolioSizingError):
 
 
 class SizingInputInvalidError(PortfolioSizingError):
-    """입력값이 존재하지만 산식이 정의되지 않는 범위(예: `price <= 0`)."""
+    """The input value is present but outside the domain the formula defines
+    (e.g. `price <= 0`)."""
 
     code = "PORTFOLIO_SIZING_INPUT_INVALID"
 
@@ -58,7 +59,7 @@ class SizingResult(BaseModel):
 
 
 def require(value: _T | None, field: str) -> _T:
-    """`None` 입력을 여기서 걸러 각 산식 파일에서 반복하지 않게 한다."""
+    """Filters out `None` input here so each formula file doesn't repeat the check."""
     if value is None:
         raise SizingInputMissingError(field)
     return value
@@ -71,6 +72,6 @@ def require_positive(value: Decimal, field: str) -> Decimal:
 
 
 def hash_inputs(method: SizingMethod, **fields: Any) -> str:
-    """R1: 같은 산식·같은 입력이면 항상 같은 `inputs_hash`."""
+    """R1: the same formula with the same input always yields the same `inputs_hash`."""
     payload = {"method": method.value, **fields}
     return sha256_hex(canonical_json(payload))
