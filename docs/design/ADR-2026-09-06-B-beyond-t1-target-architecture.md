@@ -93,3 +93,6 @@ Accepted (2026-09-06, Chief Architect). 사용자 지시: "최대한 리팩터�
    `fund_id`만 추가하면 ADR이 피하려던 재구축 비용을 그대로 치른다.**
 5. **D3의 실제 공백은 도메인 테이블이 아니라 이벤트 버스다.** `order_events`·`pos_journal`·`ledger_journal_entry`는 이미 해시체인
    append-only이고 `pos_snapshot`·`ledger_balance`는 이미 재구축 가능한 투영이다. `src/core/event_bus/`가 아무것도 영속화하지 않는 것이 공백이다.
+
+## Amended 2026-09-09 (ADR-2026-09-09-B/F)
+- "어댑터·운영은 MVP-2"를 분할: T2 완성·사용자 가치는 MVP-2(ADR-B), T1 운영 깊이(FIX·규제 제출·다중 커스터디언·HA 실배포·SOC2·GIPS)는 MVP-3(ADR-F). 초저지연 포기는 F-6 조건부 해제로 바뀐다.

@@ -54,3 +54,7 @@ backend 4 중 2는 항상 "안전·실행·리스크" 축(EO/L4/R), 2는 "데이
   구현 약 2일, 종료 기준 증빙(패리티·E2E·성능) 약 1일 — **약 3일**.
 - post-MVP 41 리프(MP·SIG·CH 고급·DC 계층·R 청산/알림·L4 알고)는 MVP-1 종료 기준 통과 전에는 배정하지 않는다.
 - 이 ADR이 PM_CYCLE_PROMPT의 배정 범위를 정의한다. 범위 밖 리프 생성은 PM 결함으로 간주한다.
+
+## Amended 2026-09-09 (ADR-2026-09-09-B/C/F)
+- 종료 기준에 11항 추가: 하드닝 H-1~H-13 전부 CI 증빙으로 닫힘(ADR-B). 모든 리프의 완료 하한은 깊이 D2, 안전축은 D3(ADR-C).
+- 마일스톤 종결은 `scripts/closeout_check.py` 녹색 + `docs/milestones/MVP-1_CLOSEOUT.md` + 태그로만 성립(ADR-D). 최종 목표 등급은 F(ADR-F).
