@@ -1,0 +1,4 @@
+{
+  "_설명": "pip-audit(scripts/run_pip_audit.py)이 읽는 알려진 예외 목록. id/reason/expires 모두 필수 — expires가 지나면 CI가 예외 자체를 실패시킨다(예외 방치 금지, ADR-2026-09-09-B H-5).",
+  "ignore": []
+}

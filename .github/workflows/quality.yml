@@ -59,8 +59,21 @@ jobs:
           python-version: "3.11"
           cache: pip
 
+      # pip-audit이 setuptools 자체를 감사 대상에 넣는데, actions/setup-python이 심는
+      # 기본 setuptools(ensurepip 번들)가 알려진 CVE를 가진 옛 버전인 경우가 있다 —
+      # 프로젝트 의존성이 아니라 툴체인 문제라 여기서 먼저 고정한다.
+      - name: Upgrade pip toolchain
+        run: python -m pip install --upgrade pip setuptools
+
       - name: Install application and quality dependencies
         run: python -m pip install -e ".[test,dev]"
+
+      # H-5(ADR-2026-09-09-B) — pip-audit(--strict 대신 scripts/run_pip_audit.py가
+      # 판정을 대신한다). 저장소가 스스로를 editable로 설치하므로 pip-audit --strict를
+      # 그대로 쓰면 자기 자신의 skip이 항상 fatal이 된다(스크립트 docstring 참조).
+      # 알려진 예외는 .pip-audit-ignore에 사유·만료일과 함께 적는다 — 만료되면 즉시 FAIL.
+      - name: Supply chain audit (pip)
+        run: python scripts/run_pip_audit.py
 
       - name: Apply test database migrations
         run: alembic upgrade head
@@ -146,6 +159,14 @@ jobs:
           cache: npm
           cache-dependency-path: frontend/package-lock.json
       - run: npm ci --workspaces --include-workspace-root
+
+      # H-5(ADR-2026-09-09-B) — 프론트엔드 공급망 게이트. high 이상만 실패시킨다
+      # (backend와 달리 예외 파일이 없다 — 발견되면 업그레이드로 고치는 게 기본이고,
+      # 정말 유예가 필요하면 이 스텝 자체에 사유·만료일 주석을 남기고 --audit-level을
+      # 일시적으로 조정한다).
+      - name: Supply chain audit (npm)
+        run: npm audit --audit-level=high
+
       - run: npm run lint --workspace=apps/web
       - run: npm run build --workspace=apps/web
       - name: Unit tests + coverage (vitest, 있을 때)
