@@ -31,6 +31,18 @@ docstring of
 update to `"LIVE_VERIFIED"` in the commit where both DoDs actually pass --
 changing the value without passing them is forbidden
 (ADR-2026-09-06-G §11).
+
+UTA(Unified Account) demo trading (task-2514, 2026-09-09 official-doc
+research -- unverified live): demo trading is supported under UTA v3 too,
+but it requires a **separate Demo API Key** created specifically for demo
+trading -- an existing live-account key does not become a demo key just by
+adding the `paptrading: 1` header (this matches the 2026-09-09 real-key
+measurement in the task spec: sending `paptrading: 1` with a non-demo key
+returned body code 40099 "exchange environment is incorrect", classified
+as AUTH in `error_codes.py`). The header name and REST base URL are
+unchanged from Classic (`account_mode.py`/`adapter.py` reuse `_headers()`
+as-is); only the account-mode-specific endpoint paths differ (see
+`docs/design/02d_bitget_uta_v3_spec_v1.md`).
 """
 from __future__ import annotations
 

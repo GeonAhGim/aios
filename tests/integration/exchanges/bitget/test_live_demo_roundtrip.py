@@ -86,6 +86,18 @@ def _order(*, price: Decimal, quantity: Decimal = _SAFE_QUANTITY, tag: str) -> O
     )
 
 
+async def test_get_balance_succeeds_regardless_of_account_mode(
+    demo_adapter: BitgetAdapter,
+) -> None:
+    """L4-31(task-2514) DoD 3 — 이 계정이 Classic이든 UTA(Unified)든 잔고
+    조회가 성공해야 한다. `account_aware_request()`(account_mode.py)가
+    40085를 관측하면 자동으로 UNIFIED로 전환해 v3로 재시도하므로, 이
+    테스트는 계정 모드를 미리 알 필요가 없다 — 두 모드 중 어느 쪽이든
+    예외 없이 리스트가 나오면 통과다."""
+    balances = await demo_adapter.get_balance()
+    assert isinstance(balances, list)
+
+
 async def test_place_get_cancel_roundtrip(demo_adapter: BitgetAdapter) -> None:
     """DoD 1/2 — place/get/cancel 왕복이 Bitget 데모에서 성공."""
     placed = await demo_adapter.place_order(_order(price=_SAFE_PRICE, tag="roundtrip"))

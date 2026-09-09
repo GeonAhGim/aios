@@ -25,11 +25,17 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 from decimal import Decimal
-from typing import Any
+from typing import Any, Protocol
 from uuid import uuid4
 
 from src.data.models.base import AssetClass, Currency, Money
 from src.data.models.trading import Order, OrderSide, OrderStatus, OrderType
+from src.exchanges.bitget.account_mode import (
+    AccountModeAwareClient,
+    BitgetAccountMode,
+    RequestSpec,
+    account_aware_request,
+)
 from src.exchanges.bitget.symbols import to_bitget_symbol as _to_bitget_symbol
 from src.exchanges.common.http_client import SignedRequestClient
 
@@ -126,18 +132,46 @@ def _first_row(data: Any) -> dict[str, Any] | None:
     return data or None
 
 
+def _normalize_v3_order_row(data: dict[str, Any]) -> dict[str, Any]:
+    """**미검증**(task-2514) — UTA v3는 공식 업그레이드 가이드 기준 주문
+    수량 필드명을 `size`에서 `qty`로 바꿨다. `_row_to_order`를 v2/v3 양쪽에
+    재사용하기 위해 여기서만 `qty` -> `size`로 되돌린다(원본 dict는
+    변경하지 않는다)."""
+    if "size" not in data and "qty" in data:
+        return {**data, "size": data["qty"]}
+    return data
+
+
+class _AccountModeClient(SignedRequestClient, AccountModeAwareClient, Protocol):
+    """L4-31 — get_order()가 계정 모드에 맞는 v2/v3 경로를 조립하려면
+    `self.account_mode`도 필요하다(공통 SignedRequestClient는 모른다)."""
+
+
 class BitgetTradingQueryMixin:
-    async def get_order(self: SignedRequestClient, order_id: str) -> Order:
+    async def get_order(self: _AccountModeClient, order_id: str) -> Order:
         """편차: 02번 인터페이스가 order_id 하나만으로 완전한 Order를
         반환하도록 요구하지만, Bitget 응답에는 AIOS 전용 컨텍스트(strategy_id/
         strategy_version/asset_class 등)가 없다 — 거래소는 그 개념 자체를
         모른다. 여기서는 거래소가 실제로 아는 필드(상태·체결정보·가격)만
         신뢰할 수 있게 채우고, AIOS 전용 필드는 자리표시자로 둔다 — 호출부
-        (Reconciliation, FD-9.6)가 기존 DB 행과 병합해 완성해야 한다."""
-        raw = await self._request(
-            "GET", "/api/v2/spot/trade/orderInfo", params={"orderId": order_id}
-        )
+        (Reconciliation, FD-9.6)가 기존 DB 행과 병합해 완성해야 한다.
+
+        L4-31(task-2514) — CLASSIC은 `/api/v2/spot/trade/orderInfo`,
+        UNIFIED는 `/api/v3/trade/order-info`(+ `category`)로 분기한다."""
+
+        def build(mode: BitgetAccountMode) -> RequestSpec:
+            if mode is BitgetAccountMode.UNIFIED:
+                path = "/api/v3/trade/order-info"
+                params = {"orderId": order_id, "category": "SPOT"}
+            else:
+                path = "/api/v2/spot/trade/orderInfo"
+                params = {"orderId": order_id}
+            return "GET", path, params, None
+
+        raw = await account_aware_request(self, build)
         data = raw["data"][0] if isinstance(raw["data"], list) else raw["data"]
+        if self.account_mode is BitgetAccountMode.UNIFIED:
+            data = _normalize_v3_order_row(data)
         return _row_to_order(data)
 
     async def find_order_by_client_id(

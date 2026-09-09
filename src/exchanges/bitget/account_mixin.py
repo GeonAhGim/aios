@@ -1,10 +1,14 @@
 """6.6 — BitgetAdapter Account 메서드군(get_balance/get_positions).
 
-Spec: 02_exchange_adapter_v1.2.md#§2.1
+Spec: 02_exchange_adapter_v1.2.md#§2.1, L4_execution_oms_and_exchange_v1.0.md#L4-31
 
 엔드포인트: GET /api/v2/spot/account/assets (2026-08-28 문서 조사 확인 —
-실제 응답은 Demo API 키로 라이브 검증 필요, .env BITGET_API_KEY 채워지면
-최우선 검증 대상).
+2026-09-09 실키 실측(task-2514)으로 이 v2 엔드포인트가 UTA(Unified) 계정
+에서 40085로 거부됨을 확인). CLASSIC 모드는 그대로 v2를 쓰고, UNIFIED
+모드는 GET /api/v3/account/assets로 분기한다(docs/design/
+02d_bitget_uta_v3_spec_v1.md — 응답 필드명은 공식 문서 조사 기준이며
+실제 UTA 계정으로 왕복 검증 전까지 **미검증**, `_parse_v3_balance_row`
+docstring 참고).
 """
 from __future__ import annotations
 
@@ -16,13 +20,24 @@ from src.core.exceptions import ExchangeAPIError
 from src.data.models.base import AssetClass, Currency, Money
 from src.data.models.market_data import Ticker
 from src.data.models.trading import AccountBalance, Position
+from src.exchanges.bitget.account_mode import (
+    AccountModeAwareClient,
+    BitgetAccountMode,
+    RequestSpec,
+    account_aware_request,
+)
 from src.exchanges.bitget.symbols import to_bitget_symbol as _to_bitget_symbol
 from src.exchanges.common.http_client import SignedRequestClient
 
 _QUOTE_CURRENCIES = ("USDT",)  # Phase 1 스콥(06번 §6.1) — USDT 마켓만
 
 
-class _TickerReadingClient(SignedRequestClient, Protocol):
+class _AccountModeClient(SignedRequestClient, AccountModeAwareClient, Protocol):
+    """`self._request`(공통 계약) + `self.account_mode`(L4-31 상태) 둘 다
+    필요한 계좌 메서드용 좁혀진 타입."""
+
+
+class _TickerReadingClient(_AccountModeClient, Protocol):
     """get_positions()가 market_data_mixin의 get_ticker()를 교차 호출하고,
     같은 클래스의 get_balance()도 self가 이 좁혀진 타입인 채로 호출하므로
     둘 다 계약에 포함한다(공통 http_client.py는 이 스팟-전용 조합을 모른다)."""
@@ -31,30 +46,62 @@ class _TickerReadingClient(SignedRequestClient, Protocol):
     async def get_balance(self, asset: str | None = None) -> list[AccountBalance]: ...
 
 
+def _parse_v2_balance_row(item: dict[str, Any]) -> AccountBalance:
+    available = Decimal(item["available"])
+    frozen = Decimal(item["frozen"])
+    locked = Decimal(item.get("locked", "0"))
+    return AccountBalance(
+        exchange="bitget",
+        asset=item["coin"].upper(),
+        total=available + frozen + locked,
+        available=available,
+        used_margin=frozen + locked,
+    )
+
+
+def _parse_v3_balance_row(item: dict[str, Any]) -> AccountBalance:
+    """**미검증**(task-2514) — UTA v3 `/api/v3/account/assets` 응답 필드는
+    실제 UTA 계정으로 라이브 검증 전이다. 공식 문서 조사(2026-09-09) 기준
+    행마다 `coin`/`available`/`locked`가 있고(v2의 `frozen`이 `locked`로
+    통합된 것으로 보인다), v2에는 없던 `equity`/`usdValue`/`debt`가
+    추가됐다는 정황이 있으나 이 어댑터가 아직 쓰지 않는 필드다."""
+    available = Decimal(item.get("available", "0"))
+    locked = Decimal(item.get("locked", "0"))
+    return AccountBalance(
+        exchange="bitget",
+        asset=item["coin"].upper(),
+        total=available + locked,
+        available=available,
+        used_margin=locked,
+    )
+
+
+def _v3_asset_rows(data: Any) -> list[dict[str, Any]]:
+    """**미검증**(task-2514) — 공식 문서 조사 기준 `data.assets`가 배열로
+    보이나, `data` 자체가 배열일 가능성도 배제할 수 없어 둘 다 받아들인다."""
+    if isinstance(data, dict):
+        return list(data.get("assets", []))
+    return list(data)
+
+
 class BitgetAccountMixin:
     async def get_balance(
-        self: SignedRequestClient,
+        self: _AccountModeClient,
         asset: str | None = None,
     ) -> list[AccountBalance]:
-        params: dict[str, Any] | None = {"coin": asset} if asset else None
-        raw = await self._request(
-            "GET", "/api/v2/spot/account/assets", params=params
-        )
-        balances = []
-        for item in raw["data"]:
-            available = Decimal(item["available"])
-            frozen = Decimal(item["frozen"])
-            locked = Decimal(item.get("locked", "0"))
-            balances.append(
-                AccountBalance(
-                    exchange="bitget",
-                    asset=item["coin"].upper(),
-                    total=available + frozen + locked,
-                    available=available,
-                    used_margin=frozen + locked,
-                )
+        def build(mode: BitgetAccountMode) -> RequestSpec:
+            params: dict[str, Any] | None = {"coin": asset} if asset else None
+            path = (
+                "/api/v2/spot/account/assets"
+                if mode is BitgetAccountMode.CLASSIC
+                else "/api/v3/account/assets"
             )
-        return balances
+            return "GET", path, params, None
+
+        raw = await account_aware_request(self, build)
+        if self.account_mode is BitgetAccountMode.UNIFIED:
+            return [_parse_v3_balance_row(item) for item in _v3_asset_rows(raw["data"])]
+        return [_parse_v2_balance_row(item) for item in raw["data"]]
 
     async def get_positions(
         self: _TickerReadingClient, symbol: str | None = None
@@ -120,10 +167,23 @@ class BitgetAccountMixin:
         )
         return dict(raw["data"])
 
-    async def get_account_info(self: SignedRequestClient) -> dict[str, Any]:
+    async def get_account_info(self: _AccountModeClient) -> dict[str, Any]:
         """02b 스펙 §3.3(P1) — UID·권한(authorities) 확인용. 아직 소비하는
-        호출부가 없어(§2 모델 재사용 원칙) raw dict 그대로 반환한다."""
-        raw = await self._request("GET", "/api/v2/spot/account/info")
+        호출부가 없어(§2 모델 재사용 원칙) raw dict 그대로 반환한다.
+
+        L4-31(task-2514) — 이 엔드포인트가 실키 실측에서 실제로 40085를
+        반환한 바로 그 호출이다(spec note). 응답 shape 자체는 v2/v3 모두
+        raw dict 재수출이라 파싱 분기가 필요 없다 — 경로만 갈라진다."""
+
+        def build(mode: BitgetAccountMode) -> RequestSpec:
+            path = (
+                "/api/v2/spot/account/info"
+                if mode is BitgetAccountMode.CLASSIC
+                else "/api/v3/account/info"
+            )
+            return "GET", path, None, None
+
+        raw = await account_aware_request(self, build)
         return dict(raw["data"])
 
     async def get_account_bills(

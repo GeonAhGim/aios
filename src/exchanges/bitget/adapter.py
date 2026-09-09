@@ -25,6 +25,7 @@ import httpx
 from src.core.exceptions import FatalExchangeError, RetryableExchangeError
 from src.data.models.base import AssetClass
 from src.exchanges.bitget.account_mixin import BitgetAccountMixin
+from src.exchanges.bitget.account_mode import BitgetAccountMode
 from src.exchanges.bitget.broker_mixin import BitgetBrokerMixin
 from src.exchanges.bitget.convert_mixin import BitgetConvertMixin
 from src.exchanges.bitget.copy_trading_mixin import BitgetCopyTradingMixin
@@ -86,6 +87,10 @@ class _BitgetHTTPClient:
         self._api_secret = api_secret
         self._api_passphrase = api_passphrase
         self._demo_mode = demo_mode
+        # L4-31(task-2514) — 40085 실측 전까지는 항상 CLASSIC으로 시작한다.
+        # account_mode.account_aware_request()가 40085를 관측하면 이 인스턴스
+        # 수명 동안 UNIFIED로 단조 전환한다(docstring 근거는 account_mode.py).
+        self.account_mode: BitgetAccountMode = BitgetAccountMode.CLASSIC
         self._client = http_client or httpx.AsyncClient(base_url=BASE_URL, timeout=10.0)
         # L4-12(task-1015) — 재시도/백오프/서버시간 보정을 직접 구현하지
         # 않고 ResilientTransport(L4-11 5모듈 조립)에 위임한다. rng를 상수

@@ -27,6 +27,12 @@ from __future__ import annotations
 from typing import Any, Protocol
 
 from src.data.models.trading import Order, OrderStatus
+from src.exchanges.bitget.account_mode import (
+    AccountModeAwareClient,
+    BitgetAccountMode,
+    RequestSpec,
+    account_aware_request,
+)
 from src.exchanges.bitget.symbols import to_bitget_symbol as _to_bitget_symbol
 from src.exchanges.bitget.trading_query_mixin import BitgetTradingQueryMixin
 from src.exchanges.bitget.trading_query_mixin import _row_to_order as _row_to_order
@@ -34,6 +40,10 @@ from src.exchanges.common.http_client import SignedRequestClient
 from src.exchanges.common.live_guard import require_paper_sandbox
 
 __all__ = ["BitgetTradingMixin", "_row_to_order"]
+
+# UTA v3 는 category를 명시해야 한다(공식 업그레이드 가이드, 2026-09-09
+# 조사) — 이 어댑터는 Phase 1 스콥(06번 §6.1)상 스팟만 다루므로 상수 하나.
+_V3_SPOT_CATEGORY = "SPOT"
 
 
 class _OrderReadingClient(SignedRequestClient, Protocol):
@@ -44,33 +54,58 @@ class _OrderReadingClient(SignedRequestClient, Protocol):
     async def get_order(self, order_id: str) -> Order: ...
 
 
+class _AccountModeClient(SignedRequestClient, AccountModeAwareClient, Protocol):
+    """L4-31 — place/cancel이 계정 모드에 맞는 v2/v3 경로·body를 조립하려면
+    `self.account_mode`도 함께 필요하다(공통 SignedRequestClient는 모른다)."""
+
+
 class BitgetTradingMixin(BitgetTradingQueryMixin):
     @require_paper_sandbox
-    async def place_order(self: SignedRequestClient, order: Order) -> Order:
-        body: dict[str, Any] = {
-            "symbol": _to_bitget_symbol(order.symbol),
-            "side": order.side.value.lower(),
-            "orderType": order.order_type.value.lower(),
-            "force": "gtc",
-            "size": str(order.quantity),
-            "clientOid": order.client_order_id,
-        }
-        if order.price is not None:
-            body["price"] = str(order.price.amount)
+    async def place_order(self: _AccountModeClient, order: Order) -> Order:
+        """L4-31(task-2514) — Classic v2는 `size`, UTA v3는 `qty` +
+        `category`를 요구한다(공식 업그레이드 가이드 조사, **미검증**
+        실계정 왕복). CLASSIC에서 40085를 받으면 이 클로저가 UNIFIED
+        모드로 다시 호출돼 올바른 필드 이름으로 재조립한다(account_mode.
+        account_aware_request 참고 — 재시도가 중복 주문을 만들지 않는
+        이유는 그쪽 docstring)."""
 
-        raw = await self._request(
-            "POST", "/api/v2/spot/trade/place-order", body=body
-        )
+        def build(mode: BitgetAccountMode) -> RequestSpec:
+            body: dict[str, Any] = {
+                "symbol": _to_bitget_symbol(order.symbol),
+                "side": order.side.value.lower(),
+                "orderType": order.order_type.value.lower(),
+                "force": "gtc",
+                "clientOid": order.client_order_id,
+            }
+            if order.price is not None:
+                body["price"] = str(order.price.amount)
+            if mode is BitgetAccountMode.UNIFIED:
+                body["qty"] = str(order.quantity)
+                body["category"] = _V3_SPOT_CATEGORY
+                path = "/api/v3/trade/place-order"
+            else:
+                body["size"] = str(order.quantity)
+                path = "/api/v2/spot/trade/place-order"
+            return "POST", path, None, body
+
+        raw = await account_aware_request(self, build)
         data = raw["data"]
         return order.model_copy(
             update={"exchange_order_id": data["orderId"], "status": OrderStatus.SUBMITTED}
         )
 
     @require_paper_sandbox
-    async def cancel_order(self: SignedRequestClient, order_id: str) -> bool:
-        raw = await self._request(
-            "POST", "/api/v2/spot/trade/cancel-order", body={"orderId": order_id}
-        )
+    async def cancel_order(self: _AccountModeClient, order_id: str) -> bool:
+        def build(mode: BitgetAccountMode) -> RequestSpec:
+            body: dict[str, Any] = {"orderId": order_id}
+            if mode is BitgetAccountMode.UNIFIED:
+                body["category"] = _V3_SPOT_CATEGORY
+                path = "/api/v3/trade/cancel-order"
+            else:
+                path = "/api/v2/spot/trade/cancel-order"
+            return "POST", path, None, body
+
+        raw = await account_aware_request(self, build)
         return bool(raw.get("code") == "00000")
 
     @require_paper_sandbox
