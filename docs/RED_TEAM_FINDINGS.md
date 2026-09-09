@@ -29,10 +29,10 @@ UPDATE 7건을 §9 R-58 리프(task-1521)로 이 장부에 등재한다. 명세 
 | RTF | # | 항목 | 발견 | 수정 리프·커밋 | 증명 테스트 | 상태 / 잔여 |
 |---|---|---|---|---|---|---|
 | RTF-01 | #42 | `correlation_with()` 미지 페어 0.0 fail-open | 명세 §1 R3 | R-11 `900704b` · R-29 `e8d4160` · R-31 `d6f48be` | `tests/unit/core/risk/test_correlation.py` missing_pairs DENY 3건 | ✅ FIXED — 잔여: 타 심볼 보유 시 과잉거부(#42) |
-| RTF-02 | #43 | `metrics_collector.data_delay_sec` 상수 0 | 명세 §1 R3/R7 | R-42 `a0652c9` · R-43 `bb513af` | `tests/integration/test_circuit_breaker.py::test_unknown_data_delay_does_not_read_as_normal` | ✅ FIXED — 잔여: 운영 조립부 tracker 미주입 → 상시 HALTED(#43) |
-| RTF-03 | #44 | watchdog `market_wide_correlated=None` 고정 → LIQUIDATE 영구 미발동 | 명세 §1 R3 | R-49 · R-51 (미착수) | — | ⏳ OPEN |
+| RTF-02 | #43 | `metrics_collector.data_delay_sec` 상수 0 | 명세 §1 R3/R7 | R-42 `a0652c9` · R-43 `bb513af` · 배선 `cc6a8d0` | `tests/integration/test_circuit_breaker.py::test_unknown_data_delay_does_not_read_as_normal` | ✅ FIXED(task-1714 P0 `cc6a8d0`로 main.py 배선까지 완료) |
+| RTF-03 | #44 | watchdog `market_wide_correlated=None` 고정 → LIQUIDATE 영구 미발동 | 명세 §1 R3 | R-49 `e89217e` (판정기만) · R-51 `1504fd9` (발동 경로만) | `tests/unit/core/safety/test_market_correlation.py` | ⏳ OPEN — 잔여: run_one_cycle이 여전히 `market_wide_correlated=None` 하드코딩(#44) |
 | RTF-04 | #45 | `foundation_gate` mandate 우회 env 플래그 | 명세 §1 R3 | R-36 `a2e2646` | `tests/integration/test_order_service_risk_gate.py` unmandated DENY 2건 | ✅ FIXED(플래그 제거) — 잔여: 조립부 3곳 `require_mandate=False`(#45, task-1568 재대조로 1곳 추가 확인) |
-| RTF-05 | #46 | `watchdog_process._apply_decision` 무조건 UPDATE | 명세 §1 R8 | R-51 (미착수) | — | ⏳ OPEN |
+| RTF-05 | #46 | `watchdog_process._apply_decision` 무조건 UPDATE | 명세 §1 R8 | R-51 `1504fd9` | `tests/integration/risk/test_watchdog_liquidation_request.py::test_watchdog_process_has_no_unconditional_update_strategy_executions` | ✅ FIXED |
 | RTF-06 | #47 | `circuit_breaker._set_level` 무조건 UPDATE | 명세 §1 R7 | R-43 `bb513af` | `tests/integration/test_circuit_breaker.py::test_concurrent_set_level_only_one_writer_wins` | ✅ FIXED |
 | RTF-07 | #48 | `strategy_allocation` 분모 available_balance | 명세 §2.1 | R-09 `e8ae0c7` · R-17 `35ec47a` | `tests/unit/core/risk/test_strategy_allocation.py::test_denominator_is_total_equity_not_available_balance` | ✅ FIXED — 잔여: total_equity USDT 근사(명세 §10) |
 
@@ -67,7 +67,7 @@ fail-open(78번 §1 I2 위반).
 
 ## 2026-09-05-43 · [safety] `metrics_collector.data_delay_sec`가 상수 0이라 Circuit Breaker가 stale 데이터에서 절대 트립하지 않음 — 심각도 높음 (RTF-02)
 
-**상태**: ✅ FIXED (R-42 `a0652c9` task-1330 · R-43 `bb513af` task-1350) — 운영 배선 잔여 있음(아래)
+**상태**: ✅ FIXED (R-42 `a0652c9` task-1330 · R-43 `bb513af` task-1350 · 운영 배선 `cc6a8d0` task-1714 P0)
 
 **발견**: 명세 §1 R3/R7. `collect_circuit_breaker_metrics()`가 `data_delay_sec=0`을
 상수로 채워 `halted.data_delay_sec` 임계가 영원히 닿지 않았다.
@@ -76,31 +76,37 @@ fail-open(78번 §1 I2 위반).
 `InstrumentedAdapter` freshness 옵션. R-43은 collector가 tracker에서 `max_delay_sec`를
 읽고, tracker 미주입이면 `None`("모름")을 넘기며 `CircuitBreakerMetrics.data_delay_sec`
 를 `Decimal | None`으로 바꿨다. `compute_level._exceeds_or_unknown()`은 None을
-항상 임계 초과(HALTED 후보)로 취급한다 — 모름을 0으로 뭉개지 않는다.
+항상 임계 초과(HALTED 후보)로 취급한다 — 모름을 0으로 뭉개지 않는다. 등재 당시
+남아 있던 운영 배선 잔여(`src/main.py`가 `freshness_tracker`를 만들지 않아
+`instrumented_adapter_factory`·`start_background_loops` 양쪽이 `freshness=None`으로
+돌아 상시 HALTED 후보였던 결함)는 `cc6a8d0`(task-1714 P0)가 main.py에서 트래커
+하나를 만들어 양쪽에 주입해 닫았다.
 
-**증명**: `tests/integration/test_circuit_breaker.py::test_unknown_data_delay_does_not_read_as_normal`.
-
-**잔여(운영 배선)**: `src/main.py → start_background_loops(...)`가 `freshness_tracker`를
-넘기지 않아(기본 `None`) 운영 안전 tick(`run_circuit_breaker_tick`)의
-`data_delay_sec`는 항상 "모름"이고, 따라서 compute_level은 매 사이클 HALTED
-후보를 낸다. fail-closed라 우회는 아니지만 실측 없이 CB가 HALTED에 고정되는
-상태다. 해소: tick 어댑터에 `InstrumentedAdapter(freshness=...)`를 붙이고 같은
-tracker를 main에서 주입(R-45 `58b3c16` 이후 남은 배선 항목, PM 판단).
+**증명**: `tests/integration/test_circuit_breaker.py::test_unknown_data_delay_does_not_read_as_normal`
++ `cc6a8d0`가 추가한 `::test_operational_metrics_with_fresh_observation_avoids_permanent_halt`,
+`::test_instrumented_adapter_get_ohlcv_feeds_freshness_into_circuit_breaker`(main.py 배선 회귀).
 
 ---
 
 ## 2026-09-05-44 · [safety] watchdog가 `market_wide_correlated=None`을 고정으로 넘겨 LIQUIDATE가 영구 미발동 — 심각도 중간 (RTF-03)
 
-**상태**: ⏳ OPEN — 수정 리프 R-49(`core/safety/market_correlation.py` + `watchdog.decide` 확장)·R-51(`watchdog_process.py`) 미착수
+**상태**: ⏳ OPEN(부분 진행, 2026-09-09 task-1543 QA 재대조 갱신) — R-49 `e89217e`
+(task-2133)가 순수 판정기 `is_market_wide_move()`와 `decide()`의
+`failure_domain` 인자(DB_ISOLATED 강등)를 만들었고 R-51 `1504fd9`(task-2357)가
+LIQUIDATE 발동 시 `liquidation_request` INSERT 경로를 완성했지만, **호출부
+배선이 빠졌다** — `src/watchdog_process.py::run_one_cycle`은 여전히
+`decide(snapshot, market_wide_correlated=None)`을 하드코딩 호출한다(basket
+returns를 만들어 넘기는 코드가 없다). `core/safety/watchdog.py`의 LIQUIDATE
+분기는 `market_wide_correlated is True`일 때만 열리므로 시장 전체 급변 판정이
+없는 한 강제청산은 여전히 구조적으로 도달 불가 — "구현됨"이지 "배선"은 아니다
+(I-10). HALT 경로(및 R-49가 새로 붙인 DB_ISOLATED 강등 경로 — `run_one_cycle`이
+`failure_domain.diagnosis == DB_ISOLATED_FAILURE`일 때 조치를 스킵하는 별도
+분기로 대체 구현됨, `decide()`의 `failure_domain` 인자 자체는 호출부에서도
+안 씀)는 동작한다.
 
-**발견**: 명세 §1 R3. `src/watchdog_process.py:151`
-`decide(snapshot, market_wide_correlated=None)` — `core/safety/watchdog.py`의
-LIQUIDATE 분기는 `market_wide_correlated is True`일 때만 열리므로 시장 전체
-급변 판정이 없는 한 강제청산은 구조적으로 도달 불가. HALT 경로는 동작한다.
-`src/core/safety/market_correlation.py`는 아직 없다(2026-09-05 origin/main).
-
-**해소 조건**: R-49 `is_market_wide_move(basket_returns, ...)`(basket<3=None→HALT
-강등) 배선 + R-51 LIQUIDATE→`liquidation_request` INSERT.
+**해소 조건**: `run_one_cycle`에 basket 시세를 조달해 `is_market_wide_move()`
+결과를 `decide(..., market_wide_correlated=...)`에 실제로 전달하는 배선(별도
+리프, PM 판단).
 
 ---
 
@@ -131,7 +137,7 @@ pre_submit_gate · `execution_deps.py` pre_start_gate · task-1538로 신설된
 
 ## 2026-09-05-46 · [watchdog] `watchdog_process._apply_decision`이 범위 무관 전체 RUNNING을 무조건 PAUSED로 UPDATE — 심각도 높음 (RTF-05)
 
-**상태**: ⏳ OPEN — 수정 리프 R-51(마이그레이션 `e5a8c5d4f6b7` + `watchdog_process.py`) 미착수
+**상태**: ✅ FIXED (R-51 `1504fd9` task-2357 — 마이그레이션 `e5a8c5d4f6b7` + `watchdog_process.py`)
 
 **발견**: 명세 §1 R8. `src/watchdog_process.py:92~96`
 `UPDATE strategy_executions SET status='PAUSED', paused_by='SAFETY_LAYER' WHERE
@@ -141,8 +147,15 @@ R-41 `807d748`이 `risk_guard_service`는 `KillSwitchService` 단일 경로로 �
 watchdog 프로세스는 그대로다(watchdog은 DB만 쓰는 별도 프로세스라 R-40
 서비스를 직접 import하지 않는 설계 — 명세 §3.9/§10 ADR 항목).
 
-**해소 조건**: R-51 — LIQUIDATE→control(GLOBAL/ACCOUNT)+`liquidation_request`
-INSERT, HALT→control, "무조건 UPDATE 0건"(DoD).
+**수정**: `_apply_decision`이 `strategy_executions`를 직접 UPDATE하지 않고
+`KillSwitchService.activate(scope=GLOBAL)`에 위임(`INSERT INTO safety_control`
+호출부를 `postgres_repository.py` 한 곳으로 유지, I-3) — RUNNING 실행 전환·
+paper_control fan-out·open_order_sweeper가 모두 그 안에서 일어난다. LIQUIDATE만
+같은 control의 fence_token으로 `liquidation_request`를 REQUESTED INSERT한다.
+
+**증명**: `tests/integration/risk/test_watchdog_liquidation_request.py::test_watchdog_process_has_no_unconditional_update_strategy_executions`,
+`::test_liquidate_creates_control_and_liquidation_request_with_fence`,
+`::test_halt_creates_control_only_no_liquidation_request`.
 
 ---
 
