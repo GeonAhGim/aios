@@ -57,6 +57,25 @@ def _evaluation_to_view(evaluation: RiskEvaluation) -> RiskEvaluationView:
     )
 
 
+async def _mandate_state_marker(mandate_repo: MandateRepository, tenant_id: UUID) -> str:
+    """H-11(0598fdab과 동일 결함 클래스, 여기서는 risk_gate 자신의
+    `EVALUATION_CACHE_TTL_SECONDS`짜리 캐시) — `subject_fingerprint`가
+    mandate 상태를 반영하지 않으면, mandate가 activate/pause/resume으로
+    바뀌어도 이미 캐시된 ALLOW를 TTL이 끝날 때까지 그대로 돌려줄 수 있다.
+    `evaluate_policy.py`의 `_fingerprint()`가 이미 증명한 해법(revision
+    id+state를 fingerprint에 포함)을 여기서도 그대로 적용한다 — 별도
+    무효화 호출(라우터의 `invalidate_evaluations()` 등)을 잊어도 mandate가
+    바뀌는 즉시(0ms) 자연히 캐시 미스가 나므로, 그 명시적 호출들은 이제
+    안전망일 뿐 정확성의 전제조건이 아니다."""
+    mandate = await mandate_repo.get_mandate(tenant_id)
+    if mandate is None or mandate.active_revision_id is None:
+        return "NO_MANDATE"
+    revision = await mandate_repo.get_revision(mandate.active_revision_id)
+    if revision is None:
+        return "NO_MANDATE"
+    return f"{revision.id}:{revision.state.value}"
+
+
 async def evaluate_risk_gate(
     repo: RiskGateRepository,
     mandate_repo: MandateRepository,
@@ -67,8 +86,10 @@ async def evaluate_risk_gate(
     connection_id: UUID | None = None,
     plan: PolicyEvaluationSubject | None = None,
 ) -> RiskEvaluationView:
+    mandate_state_marker = await _mandate_state_marker(mandate_repo, tenant_id)
     fingerprint_payload = (
         f"{connection_id}|{plan.model_dump_json() if plan is not None else ''}"
+        f"|{mandate_state_marker}"
     )
     fingerprint = compute_subject_fingerprint(str(tenant_id), gate_kind.value, fingerprint_payload)
 

@@ -27,6 +27,7 @@ from src.foundation.connections.domain.models import (
 from src.foundation.evidence.adapters.postgres_repository import PostgresAuditEventRepository
 from src.foundation.evidence.application.get_audit_timeline import get_audit_timeline
 from src.foundation.mandates.adapters.postgres_repository import PostgresMandateRepository
+from src.foundation.mandates.application.pause_mandate import pause_mandate
 from src.foundation.risk_gate.adapters.postgres_repository import PostgresRiskGateRepository
 from src.foundation.risk_gate.application.activate_safety_control import (
     MissingScopeRefError,
@@ -315,6 +316,110 @@ async def test_kill_switch_after_cached_allow_takes_effect_immediately(
     )
     assert second.outcome.value == "DENY"
     assert second.id != first.id  # 캐시가 무효화돼 새로 평가됐음을 방증
+
+
+class _FailingMandateRepo:
+    """H-11 fail-closed 회귀용 fake — mandate 저장소 조회 자체가 실패했을 때
+    (예: DB 단절) risk_gate가 이미 캐시된(그리고 이제 검증 불가능한) ALLOW로
+    조용히 넘어가지 않고 예외를 그대로 전파하는지 확인한다. `evaluate_risk_gate`
+    는 캐시 조회보다 먼저 mandate 상태를 읽어 fingerprint를 계산하므로, 이
+    조회가 실패하면 캐시 히트 여부를 확인하기도 전에 예외가 난다 — 암묵적
+    ALLOW로 뭉개지는 경로가 없다는 뜻이다."""
+
+    async def get_mandate(self, tenant_id):  # noqa: ANN001, ANN201
+        raise RuntimeError("mandate store unavailable")
+
+    async def get_revision(self, revision_id):  # noqa: ANN001, ANN201
+        raise NotImplementedError
+
+
+async def test_mandate_lookup_failure_never_falls_back_to_cached_allow(
+    pool, repo, mandate_repo, trust_repo, connection_repo
+):
+    """H-11 DoD — 무효화(여기서는 mandate 상태 확인 자체) 실패 시 fail-closed:
+    캐시에 유효한 ALLOW가 있어도 mandate 저장소를 읽을 수 없으면 그 캐시를
+    신뢰하지 않고 예외를 전파해야 한다."""
+    tenant_id = await _tenant(pool)
+    await activate_mandate_with_defaults(mandate_repo, trust_repo, tenant_id=tenant_id)
+
+    warm = await evaluate_risk_gate(
+        repo, mandate_repo, connection_repo, tenant_id=tenant_id, gate_kind=GateKind.DEPLOYMENT
+    )
+    assert warm.outcome.value == "ALLOW"
+
+    with pytest.raises(RuntimeError):
+        await evaluate_risk_gate(
+            repo,
+            _FailingMandateRepo(),
+            connection_repo,
+            tenant_id=tenant_id,
+            gate_kind=GateKind.DEPLOYMENT,
+        )
+
+
+async def test_pause_mandate_immediately_denies_next_risk_gate_evaluation(
+    pool, repo, mandate_repo, trust_repo, connection_repo
+):
+    """H-11 DoD — pause 직후 0ms에 REJECT: `pause_mandate` 커맨드를(라우터의
+    명시적 `risk_gate_repo.invalidate_evaluations()` 호출 없이) 직접 호출해도,
+    이미 데워진 risk_gate ALLOW 캐시를 곧바로 재사용하지 않아야 한다.
+    `subject_fingerprint`가 이제 mandate revision id+state를 포함하므로,
+    pause가 커밋되는 순간 fingerprint 자체가 바뀌어 옛 캐시 행은 더 이상
+    조회되지 않는다 — 별도 무효화 호출이나 TTL 만료를 기다릴 필요가 없다."""
+    tenant_id = await _tenant(pool)
+    await activate_mandate_with_defaults(mandate_repo, trust_repo, tenant_id=tenant_id)
+
+    warm = await evaluate_risk_gate(
+        repo, mandate_repo, connection_repo, tenant_id=tenant_id, gate_kind=GateKind.DEPLOYMENT
+    )
+    assert warm.outcome.value == "ALLOW"
+
+    await pause_mandate(mandate_repo, tenant_id=tenant_id)
+
+    result = await evaluate_risk_gate(
+        repo, mandate_repo, connection_repo, tenant_id=tenant_id, gate_kind=GateKind.DEPLOYMENT
+    )
+    assert result.outcome.value == "DENY"
+    assert result.id != warm.id
+
+
+async def test_concurrent_pause_and_evaluate_never_serves_stale_allow_once_paused(
+    pool, repo, mandate_repo, trust_repo, connection_repo
+):
+    """H-11 DoD — 동시 pause+submit 경합: pause 커맨드와 여러 번의 risk_gate
+    재평가를 동시에 실행한다. 경합 도중(아직 pause가 커밋되기 전) 평가가
+    ALLOW를 받는 것은 TOCTOU상 허용되지만, pause가 완료된 *이후* 실행되는
+    어떤 평가도 그 이전에 데워진 stale ALLOW를 돌려받아서는 안 된다."""
+    tenant_id = await _tenant(pool)
+    await activate_mandate_with_defaults(mandate_repo, trust_repo, tenant_id=tenant_id)
+
+    warm = await evaluate_risk_gate(
+        repo, mandate_repo, connection_repo, tenant_id=tenant_id, gate_kind=GateKind.DEPLOYMENT
+    )
+    assert warm.outcome.value == "ALLOW"
+
+    async def _submit_loop() -> list[str]:
+        outcomes = []
+        for _ in range(20):
+            r = await evaluate_risk_gate(
+                repo,
+                mandate_repo,
+                connection_repo,
+                tenant_id=tenant_id,
+                gate_kind=GateKind.DEPLOYMENT,
+            )
+            outcomes.append(r.outcome.value)
+        return outcomes
+
+    await asyncio.gather(
+        pause_mandate(mandate_repo, tenant_id=tenant_id),
+        _submit_loop(),
+    )
+
+    after = await evaluate_risk_gate(
+        repo, mandate_repo, connection_repo, tenant_id=tenant_id, gate_kind=GateKind.DEPLOYMENT
+    )
+    assert after.outcome.value == "DENY"
 
 
 async def test_global_kill_switch_invalidates_cached_allow_for_every_tenant(
