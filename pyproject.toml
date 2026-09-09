@@ -117,6 +117,11 @@ extend-immutable-calls = ["fastapi.Depends", "fastapi.Query", "fastapi.Path", "f
 # domain/**는 여전히 순수하다(test_zone_purity.py가 domain/**만 검사) —
 # application/**만 ledger/positions/market_data와 동일하게 예외.
 "src/foundation/trust/application/**" = ["TID251"]
+# CM-11(task-2509) -- evaluate_post_trade.py는 mandates가 소유하지 않는
+# fills/orders/positions을 직접 조회하는 배치 진입점이라, 그 셋을 위한
+# repository port를 새로 만들지 않고 ledger/positions/trust application/**과
+# 동일하게 예외를 둔다. mandates domain/**은 여전히 순수하다.
+"src/foundation/mandates/application/**" = ["TID251"]
 "src/main.py" = ["TID251"]
 "src/services/*.py" = ["TID251"]
 "src/services/execution_loop/**" = ["TID251"]

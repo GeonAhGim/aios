@@ -97,6 +97,11 @@ os.environ.setdefault("AIOS_OMS_DISPATCHER_ENABLED", "0")
 # tests for the same reason as the two flags above. Exercised directly by
 # tests/integration/risk/test_liquidation_worker.py.
 os.environ.setdefault("AIOS_LIQUIDATION_WORKER_ENABLED", "0")
+# task-2509(CM-11) — post_trade_batch도 같은 이유로 기본 차단: 공유
+# TEST_DATABASE_URL에 다른 테스트가 남긴 fills/orders를 lifespan 통합테스트가
+# 자기도 모르게 스캔해 다른 테스트의 tenant에 kill switch를 걸지 않도록.
+# 배치 자체는 tests/integration/mandates/test_post_trade_batch.py가 직접 호출해 검증한다.
+os.environ.setdefault("AIOS_POST_TRADE_BATCH_ENABLED", "0")
 # §10 -- run_liquidation_worker_once() fails closed without this secret;
 # tests need a deterministic value, not a real production key.
 os.environ.setdefault("AIOS_LIQUIDATION_SEED_KEY", "test-only-liquidation-seed-key")
