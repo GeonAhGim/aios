@@ -12,6 +12,8 @@
     "check:filesize": "node scripts/check_frontend_file_size.mjs",
     "check:unwired-modules": "node scripts/check_unwired_modules.mjs",
     "test:unwired-modules": "node --test scripts/check_unwired_modules.test.mjs",
+    "check:lockfile-workspaces": "node scripts/check_lockfile_workspaces.mjs",
+    "test:lockfile-workspaces": "node --test scripts/check_lockfile_workspaces.test.mjs",
     "bench:density": "npm run bench:density --workspace=packages/chart-engine",
     "check:coverage": "npm run test:coverage --workspace=apps/web && node ../scripts/frontend_coverage_ratchet.mjs",
     "test:e2e": "playwright test"
