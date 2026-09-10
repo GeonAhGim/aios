@@ -4,8 +4,9 @@
 `save_equity_baseline`(실 DB 대상)은 tests/integration/services/test_equity_tracker.py로
 분리했다(task-1615, PLT-36 — tests/unit 아래는 실DB에 접속하지 않는다).
 """
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
+from unittest.mock import patch
 
 from src.services.execution_loop.equity_tracker import ExecutionEquityTracker, _utc_today
 
@@ -78,3 +79,49 @@ def test_default_clock_is_utc_fixed_not_local() -> None:
     tracker = ExecutionEquityTracker()
     assert tracker._today is _utc_today
     assert tracker._today() == datetime.now(timezone.utc).date()
+
+
+def test_day_start_before_any_record_or_seed_raises_key_error() -> None:
+    """호출부(`record_and_persist_equity`)는 반드시 `record()` 직후에만
+    `day_start()`를 부른다는 계약이다 — 순서를 어기면 잘못된(0값 등)
+    기본값을 조용히 반환하는 대신 즉시 KeyError로 fail-closed 해야 한다."""
+    tracker = ExecutionEquityTracker(today=lambda: date(2026, 9, 2))
+    try:
+        tracker.day_start(1)
+    except KeyError:
+        pass
+    else:
+        raise AssertionError("day_start() must raise before record()/seed()")
+
+
+def test_peak_before_any_record_or_seed_raises_key_error() -> None:
+    tracker = ExecutionEquityTracker(today=lambda: date(2026, 9, 2))
+    try:
+        tracker.peak(1)
+    except KeyError:
+        pass
+    else:
+        raise AssertionError("peak() must raise before record()/seed()")
+
+
+def test_utc_today_diverges_from_os_local_timezone_at_day_boundary() -> None:
+    """R-30이 요구하는 UTC 고정 일경계 실증 — UTC 자정 직후(00:30 UTC)
+    시각을 고정하면, UTC-8 로컬 벽시계는 아직 전날(16:30, 전날 날짜)이다.
+    `date.today()`(OS 로컬 tz)를 썼다면 day boundary가 하루 늦게
+    잡혔을 것이라는 걸 같은 순간의 로컬 환산값과 대조해 증명한다."""
+    fixed_instant = datetime(2026, 9, 10, 0, 30, tzinfo=timezone.utc)
+    local_equivalent = fixed_instant.astimezone(timezone(timedelta(hours=-8)))
+    assert local_equivalent.date() == date(2026, 9, 9)
+
+    class _FixedDatetime(datetime):
+        @classmethod
+        def now(cls, tz=None):  # type: ignore[override]
+            return fixed_instant if tz is not None else fixed_instant.replace(tzinfo=None)
+
+    with patch(
+        "src.services.execution_loop.equity_tracker.datetime", _FixedDatetime
+    ):
+        result = _utc_today()
+
+    assert result == date(2026, 9, 10)
+    assert result != local_equivalent.date()
