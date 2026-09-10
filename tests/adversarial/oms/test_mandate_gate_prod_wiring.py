@@ -12,8 +12,17 @@ no-op이 되는 형태다. ADR-2026-09-06-G §8이 지적한 시점에는
 `src/services/background_loops.py:252`가 실제로 `require_mandate=False`였다
 (H-1b/task-3369가 이후 세 조립 지점 모두 `True`로 교정).
 
-이 파일은 그 교정이 유지됨을 회귀 방지로 고정한다. 두 운영 조립 지점
-(`src/services/background_loops.py`, `src/api/execution_deps.py`)의
+task-1568 재대조(RED_TEAM_FINDINGS.md RTF-04)가 발견: 조립 지점은 실제로
+2곳이 아니라 3곳이다 — task-1538로 신설된
+`src/services/oms/application/wiring.py::build_outbox_dispatcher`도 같은
+팩토리를 호출한다. task-2836이 이 스캐너의 `_TARGET_FILES`에 그 세 번째
+파일이 빠져 있던 것 자체가 드리프트임을 확인하고 추가했다 — 세 번째
+조립 지점만 회귀해도(예: 다음 리팩터가 `require_mandate=False`로 되돌려도)
+이전 스캐너는 초록불을 냈을 것이다.
+
+이 파일은 그 교정이 유지됨을 회귀 방지로 고정한다. 세 운영 조립 지점
+(`src/services/background_loops.py`, `src/api/execution_deps.py`,
+`src/services/oms/application/wiring.py`)의
 `make_foundation_pre_submit_gate(...)` 호출부를 AST로 찾아 각각:
   (a) `require_mandate=True` 리터럴이거나,
   (b) 호출 직전 3줄 이내에 `ADR-EXCEPTION: <adr-id> require_mandate=False
@@ -21,6 +30,7 @@ no-op이 되는 형태다. ADR-2026-09-06-G §8이 지적한 시점에는
 둘 중 어느 쪽도 아니면(또는 예외가 만료됐으면) 위반이다 — "무기한 우회"를
 "만료 추적되는 우회"로 바꾸는 것이 이 DoD의 핵심이다.
 """
+
 from __future__ import annotations
 
 import ast
@@ -38,6 +48,7 @@ _REPO_ROOT = Path(__file__).resolve().parents[3]
 _TARGET_FILES = (
     "src/services/background_loops.py",
     "src/api/execution_deps.py",
+    "src/services/oms/application/wiring.py",
 )
 
 _GATE_FACTORY = "make_foundation_pre_submit_gate"
@@ -169,9 +180,7 @@ def _scan_violations(*, today: date) -> list[Finding]:
 
 def test_scanner_accepts_require_mandate_true():
     source = "make_foundation_pre_submit_gate(pool, require_mandate=True)\n"
-    violations = [
-        f for f in _scan_source(source, "fixture.py", today=date(2026, 1, 1)) if not f.ok
-    ]
+    violations = [f for f in _scan_source(source, "fixture.py", today=date(2026, 1, 1)) if not f.ok]
     assert violations == []
 
 
@@ -202,9 +211,7 @@ def test_scanner_accepts_unexpired_adr_exception():
         "    require_mandate=False,\n"
         ")\n"
     )
-    violations = [
-        f for f in _scan_source(source, "fixture.py", today=date(2026, 1, 1)) if not f.ok
-    ]
+    violations = [f for f in _scan_source(source, "fixture.py", today=date(2026, 1, 1)) if not f.ok]
     assert violations == []
 
 
@@ -257,6 +264,34 @@ def test_regression_flags_original_i09_bug_shape():
     violations = [f for f in findings if not f.ok]
     assert len(violations) == 1
     assert "이중 권위 우회" in violations[0].reason
+
+
+def test_regression_flags_third_assembly_point_wiring_py_bug_shape():
+    """task-2836 — task-1568 재대조가 찾아낸 실드리프트(RTF-04 2→3 지점)의
+    게이트 적색 재현. `_TARGET_FILES`가 두 파일만 담고 있었다면 이 시나리오
+    (`build_outbox_dispatcher`가 `require_mandate=False`로 퇴행)를 스캐너가
+    영원히 놓쳤을 것이다 — `wiring.py`가 목록에 없기 때문이다."""
+    source = (
+        "def build_outbox_dispatcher(pool, *, resolve_adapter, outbox_repo, order_repo):\n"
+        "    return OutboxDispatcher(\n"
+        "        pool,\n"
+        "        pre_send_gate=make_foundation_pre_submit_gate(pool, require_mandate=False),\n"
+        "    )\n"
+    )
+    findings = _scan_source(
+        source, "src/services/oms/application/wiring.py", today=date(2026, 1, 1)
+    )
+    violations = [f for f in findings if not f.ok]
+    assert len(violations) == 1
+    assert "이중 권위 우회" in violations[0].reason
+
+
+def test_third_assembly_point_is_registered_in_target_files():
+    """negative 4 — `_TARGET_FILES`에서 세 번째 조립 지점이 다시 빠지는
+    회귀(예: 리스트 재정렬 실수)를 직접 잡는다. 위 두 테스트는 스캐너 함수
+    자체의 정확성만 증명하고, 실제로 하드 게이트(`_scan_violations`)가 그
+    파일을 스캔 대상에 넣고 있는지는 이 assert가 담당한다."""
+    assert "src/services/oms/application/wiring.py" in _TARGET_FILES
 
 
 # --- 실제 배선 코드 검사(하드 게이트) ----------------------------------------

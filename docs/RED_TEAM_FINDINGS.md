@@ -31,7 +31,7 @@ UPDATE 7건을 §9 R-58 리프(task-1521)로 이 장부에 등재한다. 명세 
 | RTF-01 | #42 | `correlation_with()` 미지 페어 0.0 fail-open | 명세 §1 R3 | R-11 `900704b` · R-29 `e8d4160` · R-31 `d6f48be` | `tests/unit/core/risk/test_correlation.py` missing_pairs DENY 3건 | ✅ FIXED — 잔여: 타 심볼 보유 시 과잉거부(#42) |
 | RTF-02 | #43 | `metrics_collector.data_delay_sec` 상수 0 | 명세 §1 R3/R7 | R-42 `a0652c9` · R-43 `bb513af` · 배선 `cc6a8d0` | `tests/integration/test_circuit_breaker.py::test_unknown_data_delay_does_not_read_as_normal` | ✅ FIXED(task-1714 P0 `cc6a8d0`로 main.py 배선까지 완료) |
 | RTF-03 | #44 | watchdog `market_wide_correlated=None` 고정 → LIQUIDATE 영구 미발동 | 명세 §1 R3 | R-49 `e89217e` (판정기만) · R-51 `1504fd9` (발동 경로만) | `tests/unit/core/safety/test_market_correlation.py` | ⏳ OPEN — 잔여: run_one_cycle이 여전히 `market_wide_correlated=None` 하드코딩(#44) |
-| RTF-04 | #45 | `foundation_gate` mandate 우회 env 플래그 | 명세 §1 R3 | R-36 `a2e2646` | `tests/integration/test_order_service_risk_gate.py` unmandated DENY 2건 | ✅ FIXED(플래그 제거) — 잔여: 조립부 3곳 `require_mandate=False`(#45, task-1568 재대조로 1곳 추가 확인) |
+| RTF-04 | #45 | `foundation_gate` mandate 우회 env 플래그 | 명세 §1 R3 | R-36 `a2e2646` · H-1b `3d83e8d0`(task-3369) | `tests/integration/test_order_service_risk_gate.py` unmandated DENY 2건 · `tests/adversarial/oms/test_mandate_gate_prod_wiring.py` R-59 하드 게이트(3곳 전부) | ✅ FIXED — 조립부 3곳 전부 `require_mandate=True`(task-3369), 회귀 방지 하드 게이트가 3곳 전부 스캔(task-2836이 `wiring.py` 누락분 추가) |
 | RTF-05 | #46 | `watchdog_process._apply_decision` 무조건 UPDATE | 명세 §1 R8 | R-51 `1504fd9` | `tests/integration/risk/test_watchdog_liquidation_request.py::test_watchdog_process_has_no_unconditional_update_strategy_executions` | ✅ FIXED |
 | RTF-06 | #47 | `circuit_breaker._set_level` 무조건 UPDATE | 명세 §1 R7 | R-43 `bb513af` | `tests/integration/test_circuit_breaker.py::test_concurrent_set_level_only_one_writer_wins` | ✅ FIXED |
 | RTF-07 | #48 | `strategy_allocation` 분모 available_balance | 명세 §2.1 | R-09 `e8ae0c7` · R-17 `35ec47a` | `tests/unit/core/risk/test_strategy_allocation.py::test_denominator_is_total_equity_not_available_balance` | ✅ FIXED — 잔여: total_equity USDT 근사(명세 §10) |
@@ -112,7 +112,7 @@ returns를 만들어 넘기는 코드가 없다). `core/safety/watchdog.py`의 L
 
 ## 2026-09-05-45 · [order_service] `foundation_gate`가 env 플래그(`AIOS_REQUIRE_MANDATE_FOR_SUBMIT`)로 mandate 검사를 조용히 끌 수 있음 — 심각도 높음 (RTF-04)
 
-**상태**: ✅ FIXED(플래그 제거) (R-36 `a2e2646` task-1403) — 조립부 스위치 잔여(아래)
+**상태**: ✅ FIXED (R-36 `a2e2646` task-1403 플래그 제거, H-1b `3d83e8d0` task-3369 조립부 3곳 `True` 전환, task-2836 회귀 방지 하드 게이트 3곳 전부 커버)
 
 **발견**: 명세 §1 R3. mandate가 없으면 통과하는 동작이 배포 시점 env var로
 결정돼 코드 리뷰 없이 뒤집을 수 있었다(I-01/I-11 취지 위반).
@@ -126,12 +126,26 @@ returns를 만들어 넘기는 코드가 없다). `core/safety/watchdog.py`의 L
 **증명**: `tests/integration/test_order_service_risk_gate.py::test_unmandated_submit_denied`,
 `::test_active_kill_switch_denies_unmandated_legacy_submit`.
 
-**잔여(2026-09-06 task-1568 재대조 갱신)**: 프로덕션 조립부 3곳(`background_loops.py`
-pre_submit_gate · `execution_deps.py` pre_start_gate · task-1538로 신설된
+**잔여였던 것(2026-09-06 task-1568 재대조 기록, 이후 해소)**: 당시 프로덕션
+조립부 3곳(`background_loops.py` pre_submit_gate · `execution_deps.py`
+pre_start_gate · task-1538로 신설된
 `src/services/oms/application/wiring.py::build_outbox_dispatcher` pre_send_gate)이
-`require_mandate=False` — execution 생성 UI가 `mandate_revision_id`를 연결하지
-않아 지금 켜면 legacy 실행 전체가 막힌다. 값이 코드에 드러나므로 env 우회는
-불가하며, mandate 연결 UI 이후 세 곳을 `True`로 전환(별도 리프).
+`require_mandate=False`였다 — execution 생성 UI가 `mandate_revision_id`를
+연결하지 않아 켜면 legacy 실행 전체가 막힌다는 이유였다.
+
+**해소**: H-1b(`3d83e8d0` task-3369)가 H-1a resolver(`foundation_mandate_
+resolution.with_resolved_mandate`, 진입 시 `mandate_revision_id` 자동 채움)를
+먼저 배선한 뒤 세 조립부 전부를 `require_mandate=True`로 전환했다(현재
+`foundation_gate.py` 모듈 docstring, grep으로 재확인: 세 파일 전부 `True`
+리터럴). R-59(task-1750)가 `tests/adversarial/oms/test_mandate_gate_prod_
+wiring.py`에 AST 기반 회귀 방지 하드 게이트를 추가했으나 `_TARGET_FILES`가
+`background_loops.py`·`execution_deps.py` 2곳만 담아 `wiring.py`가 스캔
+대상에서 빠져 있었다 — task-1568이 지적한 "2→3곳" 드리프트가 이 하드
+게이트에도 그대로 재발한 형태. task-2836이 `wiring.py`를 `_TARGET_FILES`에
+추가하고 회귀 재현 테스트
+(`test_regression_flags_third_assembly_point_wiring_py_bug_shape`)와 목록
+누락 방지 테스트(`test_third_assembly_point_is_registered_in_target_files`)를
+더해 3곳 전부가 상시 스캔되도록 고정했다.
 
 ---
 
