@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from src.foundation.execution_ownership.domain.models import ExecutionLease
+from src.foundation.execution_ownership.domain.models import ExecutionLease, require_aware_utc
 
 
 def is_lease_available(
@@ -31,8 +31,7 @@ def is_lease_available(
     일치해야 할 판정 규칙의 실행 가능한 명세이며,
     `tests/foundation/unit/execution_ownership/test_rules.py`의 경계값
     테스트가 그 일치를 증명한다 — 어댑터를 호출하는 진입점이 아니다."""
-    if now.tzinfo is None:
-        raise ValueError("naive datetime은 허용하지 않는다 — tz-aware UTC만 사용한다")
+    require_aware_utc(now)
     if existing is None:
         return True
     if existing.owner_id == requesting_owner:

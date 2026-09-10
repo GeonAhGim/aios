@@ -11,8 +11,12 @@ from dataclasses import dataclass
 from datetime import datetime
 
 
-def _require_aware_utc(value: datetime) -> datetime:
-    if value.tzinfo is None:
+def require_aware_utc(value: datetime) -> datetime:
+    """tz-aware datetime만 통과시킨다. `tzinfo is None`만 보면 `utcoffset()`이
+    None을 돌려주는 기형 tzinfo(예: 적대적으로 조작된 커스텀 tzinfo)가 통과해
+    비교 시점에 제어되지 않은 TypeError로 새는 것을 막는다 — 반드시 이
+    ValueError로 fail-closed해야 한다."""
+    if value.tzinfo is None or value.utcoffset() is None:
         raise ValueError("naive datetime은 허용하지 않는다 — tz-aware UTC만 사용한다")
     return value
 
@@ -30,5 +34,5 @@ class ExecutionLease:
     expires_at: datetime
 
     def __post_init__(self) -> None:
-        _require_aware_utc(self.heartbeat_at)
-        _require_aware_utc(self.expires_at)
+        require_aware_utc(self.heartbeat_at)
+        require_aware_utc(self.expires_at)
