@@ -100,6 +100,16 @@ jobs:
       - name: Compliance gate wiring
         run: python scripts/check_compliance_gate.py
 
+      # EM-3(task-2121/2585) — EM-A2 정적 검사(자식 주문이 submit_order 밖에서
+      # parent_order_id/algo_run_id를 세팅하는 경로 부재). 이 스크립트의
+      # test_submit_order_still_sets_child_columns/main()은 파일명이 test_*.py가
+      # 아니라 pytest 기본 수집 대상이 아니다 — 전체 pytest(위 Test 스텝)가 실제로
+      # 돌리는 건 tests/adversarial/ems/test_child_order_bypass.py의 동등한 스캔
+      # 뿐이라 이 스크립트 자체는 이 스텝 없이는 CI에서 한 번도 실행되지 않는다.
+      # scripts/check_child_order_path.py 참조.
+      - name: Child order path gate wiring
+        run: python scripts/check_child_order_path.py
+
       - name: Test
         run: pytest -q --cov=src --cov-report=term --cov-report=xml
 
