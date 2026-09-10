@@ -7,6 +7,7 @@ import hashlib
 import json
 import subprocess
 import sys
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 from uuid import UUID, uuid4
@@ -765,3 +766,124 @@ async def test_migration_round_trip_restores_gate_kinds_and_new_columns(pool):
         assert await _column_exists(pool, "strategy_executions", "paused_by_control_id")
     finally:
         _run_alembic("upgrade", "head")
+
+
+async def test_idempotency_digest_unique_violation_detection_stays_fast_at_scale(pool):
+    """성능 단언(D2) — safety_control.idempotency_digest UNIQUE는 인덱스를
+    타야 한다. 인덱스 없이 순차 스캔이면 위반 감지 시간이 기존 행 수에
+    비례해 늘어난다. 200개의 서로 다른 digest를 먼저 채운 뒤, 그중 하나를
+    중복 삽입하는 시도가 여전히 짧은 시간 안에 거부되는지 확인한다(웜업
+    1회로 최초 쿼리플랜 컴파일 비용을 측정에서 제외)."""
+    tenant_id = await _tenant(pool)
+    digests = [
+        hashlib.sha256(f"r-34-perf-{tenant_id}-{i}".encode()).hexdigest() for i in range(200)
+    ]
+    async with pool.acquire() as conn:
+        try:
+            for i, digest in enumerate(digests):
+                await conn.execute(
+                    "INSERT INTO safety_control "
+                    "(scope, scope_ref, reason, actor_subject_id, fence_token, idempotency_digest) "
+                    "VALUES ('ACCOUNT', $1, 'perf-scale-fill', $2, $3, $4)",
+                    str(tenant_id),
+                    tenant_id,
+                    i + 1,
+                    digest,
+                )
+
+            async def _duplicate_insert(digest: str, fence: int) -> None:
+                with pytest.raises(asyncpg.UniqueViolationError):
+                    await conn.execute(
+                        "INSERT INTO safety_control "
+                        "(scope, scope_ref, reason, actor_subject_id, fence_token, "
+                        " idempotency_digest) "
+                        "VALUES ('ACCOUNT', $1, 'perf-scale-dup', $2, $3, $4)",
+                        str(tenant_id),
+                        tenant_id,
+                        fence,
+                        digest,
+                    )
+
+            await _duplicate_insert(digests[1], 9001)  # 웜업 — 계획 캐시 컴파일 제외
+
+            start = time.perf_counter()
+            await _duplicate_insert(digests[0], 9002)
+            elapsed = time.perf_counter() - start
+            assert elapsed < 0.5, (
+                f"UNIQUE 위반 감지가 {elapsed:.3f}s 걸렸다 — 인덱스 미사용(순차 스캔) 의심"
+            )
+        finally:
+            await conn.execute(
+                "DELETE FROM safety_control WHERE actor_subject_id = $1", tenant_id
+            )
+
+
+async def test_concurrent_replay_with_same_idempotency_digest_only_one_instance_wins(pool):
+    """다중 인스턴스 리플레이 경합(D3) — §5 "요청 Idempotency-Key"는 여러
+    앱 인스턴스가 네트워크 재시도로 동시에 같은 activate 요청을 다시 보내는
+    상황을 막기 위한 것이다. 10개의 동시 삽입이 정확히 같은
+    idempotency_digest를 갖고 경합해도 UNIQUE 제약이 정확히 하나만 통과시켜야
+    한다(나머지는 유실이 아니라 명시적 거부)."""
+    tenant_id = await _tenant(pool)
+    digest = hashlib.sha256(f"r-34-concurrent-replay:{tenant_id}".encode()).hexdigest()
+
+    async def _try_insert(fence: int) -> bool:
+        async with pool.acquire() as conn:
+            try:
+                await conn.execute(
+                    "INSERT INTO safety_control "
+                    "(scope, scope_ref, reason, actor_subject_id, fence_token, "
+                    " idempotency_digest) "
+                    "VALUES ('ACCOUNT', $1, 'concurrent-replay', $2, $3, $4)",
+                    str(tenant_id),
+                    tenant_id,
+                    fence,
+                    digest,
+                )
+                return True
+            except asyncpg.UniqueViolationError:
+                return False
+
+    try:
+        results = await asyncio.gather(*[_try_insert(i) for i in range(10)])
+        assert results.count(True) == 1, "동시 재시도(다중 인스턴스) 중 정확히 하나만 성공해야 한다"
+        assert results.count(False) == 9
+    finally:
+        async with pool.acquire() as conn:
+            await conn.execute(
+                "DELETE FROM safety_control WHERE actor_subject_id = $1", tenant_id
+            )
+
+
+async def test_concurrent_evaluate_risk_gate_calls_never_cross_contaminate_trace_id(
+    pool, repo, mandate_repo, trust_repo, connection_repo
+):
+    """적대적/동시성 증명(D3) — `context.py` 모듈독스트링대로 asyncio 태스크는
+    생성 시점의 ContextVar를 복제해 상속한다. 여러 tenant의
+    `evaluate_risk_gate()` 호출을 동시에 실행해도, 각자 자신이 `bind()`한
+    trace_id만 기록해야 한다 — 한 요청의 trace_id가 다른 요청의
+    `risk_evaluation` 행으로 새어 들어가면 §3.8 감사 추적 자체가 오염된다."""
+    tenants = [await _tenant(pool) for _ in range(5)]
+    for tenant_id in tenants:
+        await activate_mandate_with_defaults(mandate_repo, trust_repo, tenant_id=tenant_id)
+
+    async def _evaluate(tenant_id: UUID) -> tuple[UUID, str]:
+        with bind_request_context() as ctx:
+            result = await evaluate_risk_gate(
+                repo,
+                mandate_repo,
+                connection_repo,
+                tenant_id=tenant_id,
+                gate_kind=GateKind.DEPLOYMENT,
+            )
+            assert result.outcome.value == "ALLOW"
+            return ctx.trace_id, result.trace_id
+
+    pairs = await asyncio.gather(*[_evaluate(t) for t in tenants])
+    for expected_trace_id, recorded_trace_id in pairs:
+        assert recorded_trace_id == expected_trace_id
+
+    all_trace_ids = [expected for expected, _ in pairs]
+    assert len(set(all_trace_ids)) == len(all_trace_ids), (
+        "서로 다른 동시 요청이 같은 trace_id를 공유했다 — 컨텍스트 격리 실패"
+    )
