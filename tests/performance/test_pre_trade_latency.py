@@ -36,11 +36,27 @@ PRE_SUBMIT 예산(`_PRE_SUBMIT_ROUND_TRIPS` = 8) 구성:
   task-1532(ae2a452) 의도 결속 키(`side`·`quantity`)는 WORM 스냅샷 필드만 늘리고
   왕복은 0 — 재실측 8 유지(task-1550). WORM 재조회는 `fenced_submit` 범위.
 
-negative test 2개(I-10 — 게이트가 "있다"가 아니라 "작동함"): 왕복을 하나 더
-내는 recorder/저장소를 끼우면 계수가 예산과 정확히 1 어긋나 실제로 실패한다.
+negative test 3개(I-10 — 게이트가 "있다"가 아니라 "작동함"): 왕복을 하나 더
+내는 recorder/저장소를 끼우면 계수가 예산과 정확히 1 어긋나 실제로 실패하고,
+WORM insert 자체가 실패하면 예외가 삼켜지지 않고 그대로 전파된다(fail-closed).
+
+task-2835(DEPTH 감사 D1→D3) 추가분:
+  - 성능 단언(D2): `_measure_and_gate` 왕복 수 게이트는 "왕복이 하나 늘었다"류
+    회귀만 잡는다 — 같은 왕복 *안에서* 스캔 비용이 커지는 회귀(R-27 노출
+    스냅샷의 `orders WHERE execution_id = $3` 집계 등)는 못 잡는다. 이
+    execution_id에 주문 이력을 대량으로 채운 뒤에도 phase가 관대한 절대
+    상한(task-1038/1405/822 선례와 동일한 "환경 정규화 상한" 방식) 안에서
+    끝나는지 확인한다.
+  - 실패 주입(D2): t4 WORM insert(R-24)가 실패하면 예외가 그대로 전파되고
+    그 뒤 audit_log 삽입까지 도달하지 않아야 한다(record()의 순서 보장,
+    무기록 승인 방지).
+  - 다중 인스턴스 동시성 증명(D3): 서로 다른 tenant의 사전검사가 동시에
+    실행돼도 각자의 WORM 기록이 자신의 tenant_id로만 귀속된다(컨텍스트
+    오염 없음).
 """
 from __future__ import annotations
 
+import asyncio
 import os
 import statistics
 import time
@@ -56,6 +72,8 @@ from src.foundation.risk_gate.adapters.postgres_repository import PostgresRiskGa
 from src.services.risk_decision_recorder import RiskDecisionRecorder
 from tests.integration.conftest import NoopEventBus, create_test_tenant
 from tests.performance.pre_trade_latency_support import (
+    PROVIDER,
+    SYMBOL,
     count_pre_submit_round_trips,
     count_pre_trade_round_trips,
     new_scenario,
@@ -164,3 +182,121 @@ async def test_pre_submit_round_trip_gate_detects_extra_query(pool):
     round_trips = await count_pre_submit_round_trips(pool, tenant_id, repo_cls=_ChattyRiskRepo)
     assert round_trips == _PRE_SUBMIT_ROUND_TRIPS + 1
     assert round_trips != _PRE_SUBMIT_ROUND_TRIPS
+
+
+_ORDER_HISTORY_ROWS = 2000
+_ORDER_HISTORY_LATENCY_CEILING_SECONDS = 0.5  # _P99_TARGET_MS(50ms)의 10배 — 환경 정규화 상한
+
+
+@pytest.mark.perf
+async def test_pre_trade_phase_stays_fast_with_large_order_history(pool):
+    """성능 단언(D2, task-2835) — 왕복 수 게이트(위 테스트들)는 "왕복이 하나
+    늘었다"류 회귀만 잡고, R-27 노출 스냅샷의 `orders WHERE execution_id = $3`
+    집계(trades_1h/trades_24h)처럼 같은 왕복 *안에서* 스캔 비용이 커지는
+    회귀는 놓친다. 이 execution_id에 주문 이력 2,000행을 채운 뒤에도 phase
+    1회가 관대한 절대 상한 안에서 끝나는지 확인한다 — task-1038/1405/822
+    선례와 동일하게, 정상 실측(p50≈19~20ms)의 10배를 상한으로 두어 CPU 편차로
+    상시 적색이 되는 것을 피하면서도 스캔 비용 폭증(예: 인덱스 누락)은 잡는다.
+    `created_at`을 2일 전으로 심어 trades_1h/24h 과다거래 룰(R-27 집계 소비자)을
+    건드리지 않고 순수 스캔 비용만 키운다."""
+    scenario = await new_scenario(pool)
+    recorder = RiskDecisionRecorder(pool, PostgresDecisionRepository(pool), NoopEventBus())
+    warm = await scenario.run_once(pool, recorder)
+    assert warm is not None and warm.decision.outcome == RiskOutcome.ALLOW
+
+    async with pool.acquire() as conn:
+        await conn.execute(
+            """
+            INSERT INTO orders (
+                user_id, client_order_id, strategy_id, strategy_version, symbol,
+                exchange, side, order_type, quantity, status, filled_quantity,
+                is_liquidation, execution_id, created_at
+            )
+            SELECT $1, 'perf-r57-hist-' || $5 || '-' || gs::text, $2, '1.0.0', $3, $4,
+                   'BUY', 'MARKET', 1, 'FILLED', 1, false, $6, now() - interval '2 days'
+            FROM generate_series(1, $7) AS gs
+            """,
+            scenario.user_id,
+            scenario.signal.strategy_id,
+            SYMBOL,
+            PROVIDER,
+            str(scenario.execution_id),
+            scenario.execution_id,
+            _ORDER_HISTORY_ROWS,
+        )
+
+    started = time.perf_counter()
+    outcome = await scenario.run_once(pool, recorder)
+    elapsed_seconds = time.perf_counter() - started
+    print(
+        f"\npre_trade_risk_phase latency with {_ORDER_HISTORY_ROWS}-row order history: "
+        f"{elapsed_seconds * 1000:.2f}ms (ceiling={_ORDER_HISTORY_LATENCY_CEILING_SECONDS}s)"
+    )
+    assert outcome is not None and outcome.decision.outcome == RiskOutcome.ALLOW
+    assert elapsed_seconds < _ORDER_HISTORY_LATENCY_CEILING_SECONDS, (
+        f"주문 이력 {_ORDER_HISTORY_ROWS}행 상태에서 사전검사 지연이 {elapsed_seconds:.3f}s로 "
+        f"상한({_ORDER_HISTORY_LATENCY_CEILING_SECONDS}s)을 넘었다 — R-27 노출 스냅샷의 "
+        "execution_id 집계가 인덱스를 타지 못하는 회귀 의심."
+    )
+
+
+class _FailingDecisionRepo(PostgresDecisionRepository):
+    """실패 주입 전용(task-2835) — WORM insert가 DB 장애로 실패하는 상황을
+    흉내낸다(예: 커넥션 단절·디스크 풀)."""
+
+    async def insert(self, decision, inputs_snapshot):  # type: ignore[override]
+        raise RuntimeError("simulated WORM write failure (fault injection)")
+
+
+async def test_pre_trade_phase_propagates_worm_write_failure_fail_closed(pool):
+    """실패 주입(D2, task-2835) — t4 `RiskDecisionRecorder.record`의 WORM
+    insert(R-24)가 실패하면 `run_pre_trade_risk_phase`는 예외를 삼키지 않고
+    그대로 전파해야 한다. 삼켜지면 결정이 WORM에 남지 않았는데도 t5/t6를
+    통과해 무기록 승인(`RiskPhaseOutcome`)을 돌려줄 수 있다 — R-25 "거부·허용
+    모두 WORM" 불변식 위반이다. `record()`는 insert 다음에 audit_log를
+    쓰므로(모듈 docstring 순서 보장), insert 실패 시 audit_log에도 남지
+    않아야 한다."""
+    scenario = await new_scenario(pool)
+    failing_recorder = RiskDecisionRecorder(pool, _FailingDecisionRepo(pool), NoopEventBus())
+
+    with pytest.raises(RuntimeError, match="simulated WORM write failure"):
+        await scenario.run_once(pool, failing_recorder)
+
+    async with pool.acquire() as conn:
+        audit_count = await conn.fetchval(
+            "SELECT count(*) FROM audit_log "
+            "WHERE user_id = $1 AND action_type = 'risk_decision_recorded'",
+            scenario.user_id,
+        )
+    assert audit_count == 0, (
+        "WORM insert가 실패했는데도 audit_log가 기록됐다 — record()의 순서 보장이 깨졌다."
+    )
+
+
+async def test_concurrent_pre_trade_phases_across_tenants_do_not_cross_contaminate(pool):
+    """다중 인스턴스 동시성 증명(D3, task-2835) — 서로 다른 tenant·
+    execution_id의 사전검사가 동시에 실행돼도(예: 여러 execution 루프
+    인스턴스) 각자의 WORM 기록(`risk_decision`)이 자신의 tenant_id로만
+    귀속돼야 한다. 한 인스턴스의 결정이 다른 인스턴스의 감사 추적으로
+    새면 §3.8 감사 추적 자체가 오염된다."""
+    scenarios = [await new_scenario(pool) for _ in range(5)]
+    recorder = RiskDecisionRecorder(pool, PostgresDecisionRepository(pool), NoopEventBus())
+
+    async def _run(scenario):
+        outcome = await scenario.run_once(pool, recorder)
+        assert outcome is not None and outcome.decision.outcome == RiskOutcome.ALLOW
+        return scenario.user_id, outcome.decision.decision_id
+
+    pairs = await asyncio.gather(*[_run(scenario) for scenario in scenarios])
+
+    decision_ids = [decision_id for _, decision_id in pairs]
+    assert len(set(decision_ids)) == len(decision_ids), "동시 실행 간 decision_id가 충돌했다"
+
+    async with pool.acquire() as conn:
+        for user_id, decision_id in pairs:
+            row = await conn.fetchrow(
+                "SELECT tenant_id FROM risk_decision WHERE decision_id = $1", decision_id
+            )
+            assert row is not None and row["tenant_id"] == user_id, (
+                "동시 실행 중 WORM 기록의 tenant_id가 실행 주체와 어긋났다 — 컨텍스트 오염 의심."
+            )
