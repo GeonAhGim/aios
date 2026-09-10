@@ -85,3 +85,48 @@ PLT-44 잔여 배치를 `role: copilot` task로 만들어 오케스트레이터�
 ops/copilot 워커가 도는 환경)에 유효한 GitHub 자격증명을 어떻게 공급할지 — (a) 그 환경에서 `gh auth login`
 1회 수행, (b) Copilot coding agent·repo 스코프를 가진 PAT를 `GH_TOKEN`으로 주입, 둘 중 결정해야 파일럿을
 재시도할 수 있다.
+
+## Amended (2026-09-10, OPS-34 task-2941) — 레인 v2: dirty PR 처리·격리 경로 제한·풀 재개 조건
+
+**현상**: 인증 문제 해결 후 파일럿이 재개됐고, Copilot PR 4~5건이 "Ready for review" 직전(draft)
+상태로 만들어졌으나 그사이 `main`이 빨리 움직여 여러 건이 `mergeable=CONFLICTING`(dirty)이 됐다.
+D1의 원래 폴링 로직은 dirty를 별도로 다루지 않고 체크 결과만 봤기 때문에, 체크가 아예 돌지 않는
+draft PR은 `pr_stale_hours`(기본 3h) 타임아웃으로 로컬 레인 전환만 반복했다 — PR 자체는 방치되고
+(자동 close 없음, D1 원문 그대로), Copilot 세션 비용만 반복 소모했다.
+
+### A1. dirty(mergeable=CONFLICTING) 전용 분기 추가
+`reap_copilot`이 `gh pr view`의 `mergeable` 필드가 `CONFLICTING`인 OPEN PR을 만나면, 기존처럼
+체크 결과를 기다리지 않고 `gh pr update-branch`를 **1회만** 시도한다.
+- 성공(rc=0): 새 커밋에서 체크가 다시 돌아야 하므로 이번 폴링에서는 merge/close 없이 대기한다.
+- 실패(rc≠0, 즉 진짜 충돌이라 자동 병합 불가) 또는 이미 한 번 시도했는데도 여전히 dirty: PR을
+  사유를 담은 코멘트와 함께 `gh pr close`하고, 파일 경로로 추정한 원래 축(frontend/ 접두면
+  frontend, 아니면 backend)으로 되돌린다(`_copilot_close_and_revert`). `pr_stale_hours` 타임아웃을
+  기다리지 않는다 — dirty는 시간이 지나도 저절로 안 풀리는 상태이기 때문이다.
+- D3(우리 게이트가 검증)는 그대로 유지: update-branch로 살아난 PR도 정상 체크 통과 후에만
+  기존 merge 경로(D1)를 탄다.
+
+### A2. 격리 경로 리프만 배정 (`tiers.yaml: isolated_paths`)
+D2("보낸다: 기계적·대량 작업")를 구체적인 판정 규칙으로 좁힌다. `orchestrator.is_isolated_leaf()`가
+`tiers.yaml`의 `isolated_paths`(`frontend/*`·`docs/*`·`tests/*`)와 대조해, 리프의 `files` 전부가
+그 패턴에 맞거나(예외: 파일이 정확히 1개고 저장소에 아직 없는 신규 파일 — "단일 모듈 신규 파일")
+아니면 copilot 레인 배정을 거부한다. `spawn_copilot`은 gh를 부르기 전에
+`reroute_non_isolated_copilot`으로 기준을 벗어난 task를 먼저 로컬 레인으로 되돌린다 — base가 빨리
+움직이는 기존 src 파일을 copilot에 보내는 것 자체가 A1이 다루는 dirty 발생의 주 원인이었다.
+
+### A3. 풀 재개 조건
+CTO가 반복되는 dirty/재시도 낭비 때문에 `pools.yaml`의 `copilot.size`를 0으로 내렸다. A1·A2 구현과
+단위테스트 통과를 재개 1단계 조건으로 삼아 size 1로 올린다. 이후 24시간 관찰한 머지율
+(`merged / (merged + closed)`, dirty-close 포함)이 50% 이상이면 size 2로 올린다. 50% 미만이면
+size를 다시 0으로 내리는 task를 발행하고 원인(격리 경로 판정 누락·update-branch 실패 패턴 등)을
+조사한다.
+
+### 처리 결과 (2026-09-10, task-2941 배정 시점의 실측)
+당시 열려 있던 Copilot PR 5건: #9(DC-16 backfill_job)·#10(BT-12 tearsheet)·#11(DSL-14
+lexer/parser)·#30(IND-8 dsl_indicator, WIP)·#31(DC-24 provider.py 확장, WIP).
+- #9·#10·#11: `mergeStateStatus=DIRTY`(`mergeable=CONFLICTING`), 전부 draft. 대응하는 로컬 task
+  (2158·2159·2307)는 이미 `pr_stale_hours` 타임아웃으로 backend 레인으로 전환된 뒤 완료
+  (QA·Review·DEEPEN 후속까지 끝남) — 즉 이 PR들의 작업은 로컬에서 이미 대체됐다. A1 로직을 수동
+  적용해(update-branch를 시도할 가치가 없는, 이미 superseded된 중복 draft라 바로) 사유 코멘트와
+  함께 close 처리했다.
+- #30·#31: `mergeable=MERGEABLE`이지만 `mergeStateStatus=UNSTABLE`(체크 미완료), 아직 `[WIP]` —
+  dirty가 아니고 대응하는 로컬 task(2308·2552)도 아직 시작 전이라 중복이 없다. 그대로 열어 둔다.
