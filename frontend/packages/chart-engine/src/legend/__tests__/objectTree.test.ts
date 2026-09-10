@@ -260,3 +260,99 @@ describe("buildObjectTree/applyObjectTreeState -- D3 property + multi-instance i
     }
   });
 });
+
+/** Fisher-Yates: an unbiased O(n) shuffle. A `.sort(() => rng.next() - 0.5)` comparator violates the total-order contract sort relies on and can degrade to pathological (super-linear) comparison counts in some engines — unusable for a timed perf loop. */
+function shuffled<T>(rng: Rng, items: readonly T[]): T[] {
+  const out = items.slice();
+  for (let i = out.length - 1; i > 0; i--) {
+    const j = rng.int(0, i);
+    [out[i], out[j]] = [out[j]!, out[i]!];
+  }
+  return out;
+}
+
+// DEPTH_CH(task-2729) 감사: task-2013(242f346, CH-16b)가 도입한 sortByPersistedOrder는
+// DEEPEN 1711(task-3085)의 buildObjectTree/applyObjectTreeState 보강 범위 밖이었다 —
+// 이 블록이 CH-16b 고유 함수 자체에 수치 성능·게이트 적색·D3를 채운다.
+describe("sortByPersistedOrder -- numeric performance (DEEPEN 2013)", () => {
+  it("2,000개 트리를 100개의 서로 다른 저장 순서로 재정렬해도 3s 예산 내에 끝난다", () => {
+    const rng = createRng(20130910);
+    const indicators = Array.from({ length: 1_000 }, (_, i) => genIndicatorSource(rng, `IND_${i}`));
+    const overlays = Array.from({ length: 1_000 }, (_, i) => genOverlaySource(rng, `OVL_${i}`));
+    const tree = buildObjectTree({ getIndicators: () => indicators, getOverlays: () => overlays });
+    const ids = tree.map((e) => e.id);
+    const orders = Array.from({ length: 100 }, () => shuffled(rng, ids));
+
+    const start = performance.now();
+    for (const order of orders) {
+      const sorted = sortByPersistedOrder(tree, order);
+      expect(sorted).toHaveLength(tree.length);
+    }
+    const elapsedMs = performance.now() - start;
+
+    // task-1968(vitest.config.ts 주석)이 문서화한 공유 머신 CPU 경합을 흡수하는 느슨한
+    // 예산이지만, sortByPersistedOrder가 O(n log n)에서 O(n^2)로 퇴행하면(예: rank
+    // Map 조회 대신 선형 탐색) 이 상한을 몇 배로 넘는다 — raw node 실측(~143ms, 이
+    // 규모 기준)에 20배 이상 여유를 둔 값.
+    expect(elapsedMs).toBeLessThan(3000);
+  });
+});
+
+describe("sortByPersistedOrder -- gate-red reproduction (DEEPEN 2013)", () => {
+  /** Mirrors sortByPersistedOrder but filters to only covered ids instead of appending the uncovered ones — the exact regression CH-16b exists to prevent (a newly added indicator must never vanish from the legend). */
+  function naiveSortByPersistedOrder(entries: readonly ObjectTreeEntry[], order: readonly string[]): readonly ObjectTreeEntry[] {
+    const byId = new Map(entries.map((e) => [e.id, e] as const));
+    return order.filter((id) => byId.has(id)).map((id) => byId.get(id)!);
+  }
+
+  it("red: naive filter-based resort silently drops an indicator added after the order was saved; real sortByPersistedOrder keeps it", () => {
+    const tree = buildObjectTree(fakeSource()); // trend-1, SMA, RSI
+    const staleOrder = ["RSI", "SMA"]; // saved before trend-1 existed
+
+    const naive = naiveSortByPersistedOrder(tree, staleOrder);
+    expect(naive.map((e) => e.id)).toEqual(["RSI", "SMA"]);
+    expect(naive.find((e) => e.id === "trend-1")).toBeUndefined();
+
+    const real = sortByPersistedOrder(tree, staleOrder);
+    expect(real).toHaveLength(3);
+    expect(real.find((e) => e.id === "trend-1")).toBeDefined();
+  });
+});
+
+describe("sortByPersistedOrder -- D3 property + multi-instance isolation (DEEPEN 2013)", () => {
+  it("300 seeded random trees/orders: every entry present before sorting is still present after, regardless of order coverage", () => {
+    const rng = createRng(20130911);
+    for (let i = 0; i < 300; i++) {
+      const indicatorCount = rng.int(0, 6);
+      const overlayCount = rng.int(0, 6);
+      const indicators = Array.from({ length: indicatorCount }, (_, idx) => genIndicatorSource(rng, `I${i}_${idx}`));
+      const overlays = Array.from({ length: overlayCount }, (_, idx) => genOverlaySource(rng, `O${i}_${idx}`));
+      const tree = buildObjectTree({ getIndicators: () => indicators, getOverlays: () => overlays });
+      if (tree.length === 0) continue;
+
+      const coverage = rng.int(0, tree.length);
+      const persistedOrder = shuffled(
+        rng,
+        tree.slice(0, coverage).map((e) => e.id),
+      );
+      const sorted = sortByPersistedOrder(tree, persistedOrder);
+
+      expect(sorted).toHaveLength(tree.length);
+      expect(new Set(sorted.map((e) => e.id))).toEqual(new Set(tree.map((e) => e.id)));
+    }
+  });
+
+  it("two independent panels' persisted orders never cross-contaminate a shared-shape tree", () => {
+    const rng = createRng(20130912);
+    const treeA = buildObjectTree({ getIndicators: () => [genIndicatorSource(rng, "SMA"), genIndicatorSource(rng, "RSI")], getOverlays: () => [] });
+    const treeB = buildObjectTree({ getIndicators: () => [genIndicatorSource(rng, "SMA"), genIndicatorSource(rng, "RSI")], getOverlays: () => [] });
+
+    const sortedA = sortByPersistedOrder(treeA, ["RSI", "SMA"]);
+    const sortedB = sortByPersistedOrder(treeB, ["SMA", "RSI"]);
+
+    expect(sortedA.map((e) => e.id)).toEqual(["RSI", "SMA"]);
+    expect(sortedB.map((e) => e.id)).toEqual(["SMA", "RSI"]);
+    // Sorting B's order after A must not retroactively change A's already-computed result (no shared mutable state).
+    expect(sortedA.map((e) => e.id)).toEqual(["RSI", "SMA"]);
+  });
+});

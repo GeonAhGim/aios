@@ -97,3 +97,51 @@ describe("ChartLegend — CH-16b 순서·잠금 조작", () => {
     expect(screen.queryByRole("button", { name: "잠금 전환 trendline:1" })).not.toBeInTheDocument();
   });
 });
+
+// DEPTH_CH(task-2729) 감사: task-2013(242f346)에 수치 성능 단언·D3 다중 인스턴스
+// 재현이 없었다(DEEPEN task-3100).
+describe("ChartLegend — 수치 성능·D3 다중 인스턴스 (DEEPEN task-3100)", () => {
+  it("수치 성능: 지표 150개를 렌더링해도 10s 예산 내에 끝난다", () => {
+    const entries: ObjectTreeEntry[] = Array.from({ length: 150 }, (_, i) => entry({ id: `IND_${i}`, name: `IND_${i}` }));
+
+    const start = performance.now();
+    render(<ChartLegend objectTree={entries} onToggleVisible={noop} onMoveEntry={noop} onToggleLocked={noop} />);
+    const elapsedMs = performance.now() - start;
+
+    expect(screen.getAllByRole("listitem")).toHaveLength(150);
+    // useChartLayout.test.ts의 VISIBLE_CANDLE_COUNT류 관용과 동일: jsdom 유닛테스트
+    // 환경(공유 머신 CPU 경합, task-1968)의 최초 렌더 JIT 워밍업 오버헤드까지 포함한
+    // 느슨한 예산이지만, 렌더가 항목 수에 비선형으로 퇴행하면(예: O(n^2) key 재계산)
+    // 이 상한을 넘는다.
+    expect(elapsedMs).toBeLessThan(10000);
+  });
+
+  it("D3 다중 인스턴스: 같은 화면에 동시에 렌더된 두 ChartLegend 인스턴스는 서로의 콜백을 교차호출하지 않는다", () => {
+    const onMoveEntryA = vi.fn();
+    const onMoveEntryB = vi.fn();
+    render(
+      <>
+        <ChartLegend
+          objectTree={[entry({ id: "SMA", name: "SMA" }), entry({ id: "RSI", name: "RSI" })]}
+          onToggleVisible={noop}
+          onMoveEntry={onMoveEntryA}
+          onToggleLocked={noop}
+        />
+        <ChartLegend
+          objectTree={[entry({ id: "EMA", name: "EMA" }), entry({ id: "WMA", name: "WMA" })]}
+          onToggleVisible={noop}
+          onMoveEntry={onMoveEntryB}
+          onToggleLocked={noop}
+        />
+      </>,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "순서 아래로 SMA" }));
+    expect(onMoveEntryA).toHaveBeenCalledWith("SMA", 1);
+    expect(onMoveEntryB).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole("button", { name: "순서 아래로 EMA" }));
+    expect(onMoveEntryB).toHaveBeenCalledWith("EMA", 1);
+    expect(onMoveEntryA).toHaveBeenCalledTimes(1); // unaffected by B's later click
+  });
+});

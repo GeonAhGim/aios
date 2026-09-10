@@ -280,6 +280,91 @@ describe("CH-16b: 오브젝트 트리 순서·잠금", () => {
   });
 });
 
+// DEPTH_CH(task-2729) 감사: task-2013(242f346, CH-16b)가 배선한 setObjectTreeOrder/
+// setLockedIndicatorIds 자체는 DEEPEN task-3081(1594)의 일반 복원/저장 보강 범위
+// 밖이었다 — 이 블록이 CH-16b 필드 고유의 실패주입(mocked network)·게이트 적색·
+// D3 다중 인스턴스를 채운다.
+describe("CH-16b 오브젝트 트리 순서·잠금 -- 실패주입/게이트적색/D3 (DEEPEN task-3100)", () => {
+  it("실패주입(mocked network): 순서 변경 저장이 네트워크 에러로 실패해도 로컬 objectTreeOrder는 유지되고(isDirty 유지), 재시도로 회복한다", async () => {
+    const record = layoutRecord(savedModelFor(BASE_VIEW));
+    const port = fakePort({ listLayouts: vi.fn(async () => [record]) });
+    const { result } = setup(port);
+    await waitFor(() => expect(result.current.status).toBe("ready"));
+
+    act(() => result.current.setObjectTreeOrder(["RSI", "SMA"]));
+    expect(result.current.isDirty).toBe(true);
+
+    const networkErr = apiErrorLike(503, "SERVICE_UNAVAILABLE");
+    port.updateLayout = vi.fn().mockRejectedValueOnce(networkErr);
+    await act(async () => {
+      await result.current.save();
+    });
+    expect(result.current.saveStatus).toBe("error");
+    expect(result.current.saveError).toBe(networkErr);
+    // A failed network write must not roll back the in-flight local edit.
+    expect(result.current.objectTreeOrder).toEqual(["RSI", "SMA"]);
+    expect(result.current.isDirty).toBe(true);
+
+    port.updateLayout = vi.fn(async (id, input) => ({
+      id,
+      name: input.name ?? record.name,
+      layoutState: input.layoutState ?? record.layoutState,
+      revision: (input.expectedRevision ?? record.revision) + 1,
+      updatedAt: "t1",
+    }));
+    await act(async () => {
+      await result.current.save();
+    });
+    expect(result.current.saveStatus).toBe("idle");
+    expect(result.current.objectTreeOrder).toEqual(["RSI", "SMA"]);
+  });
+
+  it("게이트 적색 재현: setObjectTreeOrder는 activePanelId 기준으로 쓴다 -- panels[0] 기준 naive 구현이라면 비활성 패널을 잘못 건드렸을 것", async () => {
+    const port = fakePort();
+    const { result } = setup(port);
+    await waitFor(() => expect(result.current.status).toBe("ready"));
+    const firstId = result.current.model.panels[0]!.id;
+
+    act(() => result.current.addPanel());
+    const secondId = result.current.model.activePanelId!;
+    expect(secondId).not.toBe(firstId);
+
+    act(() => result.current.setObjectTreeOrder(["RSI"]));
+
+    const naiveTarget = result.current.model.panels[0]!; // naive: always writes panels[0]
+    const realTarget = result.current.model.panels.find((p) => p.id === result.current.model.activePanelId)!;
+
+    // Red: a panels[0]-indexed naive implementation would have written the order onto
+    // firstId here, even though the active (second) panel is the one being edited.
+    expect(naiveTarget.id).toBe(firstId);
+    expect(naiveTarget.objectTreeOrder ?? []).toEqual([]);
+    // Green: the real hook wrote to the active panel instead.
+    expect(realTarget.id).toBe(secondId);
+    expect(realTarget.objectTreeOrder).toEqual(["RSI"]);
+  });
+
+  it("D3 다중 인스턴스: 서로 다른 포트의 두 useChartLayout 인스턴스가 동시에 순서·잠금을 편집해도 교차오염하지 않는다", async () => {
+    const portA = fakePort();
+    const portB = fakePort();
+    const { result: resultA } = setup(portA, BASE_VIEW, vi.fn());
+    const { result: resultB } = setup(portB, { ...BASE_VIEW, instrumentId: "ETHUSDT" }, vi.fn());
+
+    await waitFor(() => expect(resultA.current.status).toBe("ready"));
+    await waitFor(() => expect(resultB.current.status).toBe("ready"));
+
+    act(() => resultA.current.setObjectTreeOrder(["SMA", "RSI"]));
+    act(() => resultB.current.setLockedIndicatorIds(["EMA"]));
+
+    expect(resultA.current.objectTreeOrder).toEqual(["SMA", "RSI"]);
+    expect(resultA.current.lockedIndicatorIds).toEqual([]);
+    expect(resultB.current.objectTreeOrder).toEqual([]);
+    expect(resultB.current.lockedIndicatorIds).toEqual(["EMA"]);
+
+    act(() => resultA.current.setLockedIndicatorIds(["SMA"]));
+    expect(resultB.current.lockedIndicatorIds).toEqual(["EMA"]); // unaffected by A's later edit
+  });
+});
+
 describe("워치리스트 변경", () => {
   it("toggleWatchlistEntry를 두 번 호출하면 추가 후 제거된다", async () => {
     const port = fakePort();
