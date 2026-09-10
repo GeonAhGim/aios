@@ -4,12 +4,15 @@ Spec: docs/specs/L4_market_data_positions_ledger_v1.0.md#§9 LB-9.
 DoD(task-375): "조건부 upsert 충돌 시 오래된 스냅샷이 최신을 덮어쓰지 않음"
 (negative — stale `expected_seq`는 거부되고 최신 값이 유지돼야 한다).
 """
+
 from __future__ import annotations
 
+import asyncio
 import uuid
 from datetime import datetime, timezone
 from decimal import Decimal
 
+import asyncpg
 import pytest
 
 from src.core.db.conditional_write import ConcurrencyConflictError
@@ -72,8 +75,11 @@ async def test_get_returns_none_for_wrong_tenant(pool, repo):
     tenant_id, account_id = await _setup(pool)
     position_key = f"pos:{uuid.uuid4().hex}"
     snapshot = _snapshot(
-        tenant_id=tenant_id, account_id=account_id, position_key=position_key,
-        quantity=Decimal("0"), last_journal_seq=0,
+        tenant_id=tenant_id,
+        account_id=account_id,
+        position_key=position_key,
+        quantity=Decimal("0"),
+        last_journal_seq=0,
     )
     async with pool.acquire() as conn, conn.transaction():
         await repo.upsert(conn, snapshot, expected_seq=0)
@@ -87,8 +93,11 @@ async def test_upsert_creates_row_on_first_call_with_expected_seq_zero(pool, rep
     tenant_id, account_id = await _setup(pool)
     position_key = f"pos:{uuid.uuid4().hex}"
     snapshot = _snapshot(
-        tenant_id=tenant_id, account_id=account_id, position_key=position_key,
-        quantity=Decimal("0"), last_journal_seq=0,
+        tenant_id=tenant_id,
+        account_id=account_id,
+        position_key=position_key,
+        quantity=Decimal("0"),
+        last_journal_seq=0,
     )
 
     async with pool.acquire() as conn, conn.transaction():
@@ -108,15 +117,21 @@ async def test_upsert_with_matching_expected_seq_updates_row(pool, repo):
     tenant_id, account_id = await _setup(pool)
     position_key = f"pos:{uuid.uuid4().hex}"
     initial = _snapshot(
-        tenant_id=tenant_id, account_id=account_id, position_key=position_key,
-        quantity=Decimal("0"), last_journal_seq=0,
+        tenant_id=tenant_id,
+        account_id=account_id,
+        position_key=position_key,
+        quantity=Decimal("0"),
+        last_journal_seq=0,
     )
     async with pool.acquire() as conn, conn.transaction():
         await repo.upsert(conn, initial, expected_seq=0)
 
     updated_input = _snapshot(
-        tenant_id=tenant_id, account_id=account_id, position_key=position_key,
-        quantity=Decimal("5"), last_journal_seq=1,
+        tenant_id=tenant_id,
+        account_id=account_id,
+        position_key=position_key,
+        quantity=Decimal("5"),
+        last_journal_seq=1,
     )
     async with pool.acquire() as conn, conn.transaction():
         updated = await repo.upsert(conn, updated_input, expected_seq=0)
@@ -130,22 +145,31 @@ async def test_upsert_with_stale_expected_seq_raises_and_does_not_overwrite(pool
     tenant_id, account_id = await _setup(pool)
     position_key = f"pos:{uuid.uuid4().hex}"
     initial = _snapshot(
-        tenant_id=tenant_id, account_id=account_id, position_key=position_key,
-        quantity=Decimal("0"), last_journal_seq=0,
+        tenant_id=tenant_id,
+        account_id=account_id,
+        position_key=position_key,
+        quantity=Decimal("0"),
+        last_journal_seq=0,
     )
     async with pool.acquire() as conn, conn.transaction():
         await repo.upsert(conn, initial, expected_seq=0)
 
     fresh_update = _snapshot(
-        tenant_id=tenant_id, account_id=account_id, position_key=position_key,
-        quantity=Decimal("5"), last_journal_seq=1,
+        tenant_id=tenant_id,
+        account_id=account_id,
+        position_key=position_key,
+        quantity=Decimal("5"),
+        last_journal_seq=1,
     )
     async with pool.acquire() as conn, conn.transaction():
         await repo.upsert(conn, fresh_update, expected_seq=0)
 
     stale_update = _snapshot(
-        tenant_id=tenant_id, account_id=account_id, position_key=position_key,
-        quantity=Decimal("999"), last_journal_seq=2,
+        tenant_id=tenant_id,
+        account_id=account_id,
+        position_key=position_key,
+        quantity=Decimal("999"),
+        last_journal_seq=2,
     )
     with pytest.raises(ConcurrencyConflictError):
         async with pool.acquire() as conn, conn.transaction():
@@ -158,18 +182,83 @@ async def test_upsert_with_stale_expected_seq_raises_and_does_not_overwrite(pool
     assert current.last_journal_seq == 1
 
 
+async def test_concurrent_first_creation_raises_concurrency_conflict_not_raw_db_error(pool, repo):
+    """FA-10 QA(task-2095) 회귀: `_UPSERT_SQL`이 `INSERT ... ON CONFLICT DO
+    UPDATE`에서 DELETE+INSERT로 바뀌면서, 같은 `position_key`에 대한 두
+    동시 최초 생성(`expected_seq=0`)이 (수정 전에는) `asyncpg.
+    UniqueViolationError`를 그대로 새 나가게 했다 — 다른 모든 충돌 형태가
+    받는 `ConcurrencyConflictError`와 달리 호출자가 잡을 수 없는 드라이버
+    예외였다. `ON CONFLICT (position_key) DO NOTHING`을 추가해 이 경합도
+    같은 `ConcurrencyConflictError` 경로로 접히는지 검증한다."""
+    tenant_id, account_id = await _setup(pool)
+    position_key = f"pos:{uuid.uuid4().hex}"
+
+    # `pg_sleep` before the write is timing-dependent (flaky under load): both
+    # transactions must still be uncommitted when the *other* one evaluates
+    # `existing`, or the second one takes the legitimate "replace" branch
+    # instead of racing the INSERT. An explicit barrier makes the overlap
+    # deterministic: both transactions BEGIN, then wait for each other before
+    # either issues the upsert statement.
+    both_started = asyncio.Event()
+    arrivals = 0
+    arrivals_lock = asyncio.Lock()
+
+    async def create() -> PositionSnapshotView:
+        snapshot = _snapshot(
+            tenant_id=tenant_id,
+            account_id=account_id,
+            position_key=position_key,
+            quantity=Decimal("0"),
+            last_journal_seq=0,
+        )
+        conn = await pool.acquire()
+        try:
+            tx = conn.transaction()
+            await tx.start()
+            nonlocal arrivals
+            async with arrivals_lock:
+                arrivals += 1
+                if arrivals == 2:
+                    both_started.set()
+            await both_started.wait()
+            try:
+                result = await repo.upsert(conn, snapshot, expected_seq=0)
+            except BaseException:
+                await tx.rollback()
+                raise
+            await tx.commit()
+            return result
+        finally:
+            await pool.release(conn)
+
+    results = await asyncio.gather(create(), create(), return_exceptions=True)
+
+    successes = [r for r in results if isinstance(r, PositionSnapshotView)]
+    failures = [r for r in results if isinstance(r, BaseException)]
+    assert len(successes) == 1
+    assert len(failures) == 1
+    assert isinstance(failures[0], ConcurrencyConflictError)
+    assert not isinstance(failures[0], asyncpg.PostgresError)
+
+
 async def test_list_open_returns_only_nonzero_quantity_for_tenant_and_account(pool, repo):
     tenant_id, account_id = await _setup(pool)
     open_key = f"pos:{uuid.uuid4().hex}"
     closed_key = f"pos:{uuid.uuid4().hex}"
 
     open_snapshot = _snapshot(
-        tenant_id=tenant_id, account_id=account_id, position_key=open_key,
-        quantity=Decimal("3"), last_journal_seq=1,
+        tenant_id=tenant_id,
+        account_id=account_id,
+        position_key=open_key,
+        quantity=Decimal("3"),
+        last_journal_seq=1,
     )
     closed_snapshot = _snapshot(
-        tenant_id=tenant_id, account_id=account_id, position_key=closed_key,
-        quantity=Decimal("0"), last_journal_seq=1,
+        tenant_id=tenant_id,
+        account_id=account_id,
+        position_key=closed_key,
+        quantity=Decimal("0"),
+        last_journal_seq=1,
     )
     async with pool.acquire() as conn, conn.transaction():
         await repo.upsert(conn, open_snapshot, expected_seq=0)

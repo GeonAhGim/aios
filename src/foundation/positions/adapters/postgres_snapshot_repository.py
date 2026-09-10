@@ -20,8 +20,19 @@ seq matches, carrying `legacy_position_id` forward via RETURNING) -> INSERT
 (`expected_seq=0`, per the port's docstring) hits the `NOT EXISTS(existing)`
 branch and just inserts, since `existing` is empty; later writes only
 insert a new row if `prior` deleted a row matching the same snapshot
-`existing` just read -- there is no race window between two concurrent
-writers (one SQL round trip)."""
+`existing` just read.
+
+Two concurrent first-creations (`expected_seq=0`) for the same brand-new
+`position_key` both see `existing` empty and both attempt the INSERT --
+without `ON CONFLICT (position_key) DO NOTHING`, the loser used to
+surface a raw `asyncpg.UniqueViolationError` (reproduced empirically:
+QA task-2095) instead of the domain-level `ConcurrencyConflictError` the
+`row is None` branch below raises for every other conflict shape. `DO
+NOTHING` folds that race into the same `row is None` path -- it never
+fires for the "replace" case since `prior`'s DELETE has already removed
+the old row (same natural key) before this INSERT runs, so there is
+nothing left to conflict with."""
+
 from __future__ import annotations
 
 import json
@@ -54,6 +65,7 @@ _UPSERT_SQL = (
     "SELECT $1,$2,$3,$4,$5,$6,$7,$8::jsonb,$9,$10,$11,$12,$13,$14,$15,"
     " (SELECT legacy_position_id FROM prior), now() "
     "WHERE EXISTS (SELECT 1 FROM prior) OR NOT EXISTS (SELECT 1 FROM existing) "
+    "ON CONFLICT (position_key) DO NOTHING "
     "RETURNING *"
 )
 
