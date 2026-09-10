@@ -12,8 +12,10 @@ service only attaches a `severity` field to the payload it hands off.
 Clock and gateway are both injected (I-0x: no global clock/singleton in
 src/) so suppression-window tests do not depend on wall-clock time.
 """
+
 from __future__ import annotations
 
+import asyncio
 import logging
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -61,8 +63,13 @@ class RiskAlertService:
         self._gateway = gateway
         self._clock = clock
         self._window = suppression_window
-        # (tenant_id, limit_id, severity) -> last time a send *succeeded*.
+        # (tenant_id, limit_id, severity) -> last time a send was reserved.
         self._last_sent: dict[tuple[UUID, str, str], datetime] = {}
+        # Guards the check-then-reserve step in on_breach() so concurrent
+        # calls for the same key cannot both observe "not yet sent" before
+        # either has recorded its reservation -- without this, two racing
+        # coroutines could each dispatch inside the same 5-minute window.
+        self._lock = asyncio.Lock()
 
     async def on_breach(self, event: LimitBreachEvent) -> None:
         """Fail-closed towards the caller: a gateway failure is logged and
@@ -72,11 +79,16 @@ class RiskAlertService:
         being suppressed by its own failed attempt."""
         severity = LimitBreachSeverity.CRITICAL if event.hard else LimitBreachSeverity.WARN
         key = (event.tenant_id, event.limit_id, severity.value)
-        now = self._clock()
 
-        last = self._last_sent.get(key)
-        if last is not None and now - last < self._window:
-            return
+        async with self._lock:
+            now = self._clock()
+            last = self._last_sent.get(key)
+            if last is not None and now - last < self._window:
+                return
+            # Reserve the slot before the (possibly slow) gateway call so a
+            # concurrent on_breach() for the same key sees this reservation
+            # instead of racing to send a duplicate.
+            self._last_sent[key] = now
 
         payload = {
             "event_type": "alert.triggered",
@@ -94,9 +106,10 @@ class RiskAlertService:
                 event.limit_id,
                 severity.value,
             )
+            async with self._lock:
+                if self._last_sent.get(key) == now:
+                    del self._last_sent[key]
             return
-
-        self._last_sent[key] = now
 
 
 __all__ = ["RiskAlertService", "LimitBreachEvent", "AlertGateway"]
