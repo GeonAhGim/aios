@@ -15,20 +15,14 @@ STRATEGY_DEPLOYMENT 5쌍 전부를 보고, F0을 `GateDecision.fence_snapshot`�
    위반은 리스크·수치정책이 ALLOW여도 DENY(권위 분리). `require_compliance_
    mandate`가 "mandate 자체가 없을 때"의 처리를 정한다(기본 False — 아래
    `require_mandate`와 같은 이유).
-3층: mandate 수치 정책. `require_mandate`(호출부 필수 명시, 기본값 없음 —
-   예전 `AIOS_REQUIRE_MANDATE_FOR_SUBMIT` env var 우회를 없앤 지점)로
-   "mandate 미연결"의 처리를 정한다. `True`면 `RISK_MANDATE_REQUIRED` DENY
-   (`tests/integration/test_order_service_risk_gate.py`가 증명), `False`면
-   audit_log만 남기고 통과. H-1b(task-3369)부터 프로덕션 3개 조립부
-   (`execution_deps.py`/`background_loops.py`/`oms/application/wiring.py`)
-   전부 `True` — execution 생성 UI가 아직 `mandate_revision_id`를 직접
-   연결하지 않으므로(컬럼은 있음), 이 함수가 진입 시 H-1a
-   `resolve_binding.resolve_mandate_revision()`으로 그 자리를 대신 채운다
-   (위 코드 참고). 그래도 못 채우면(그 tenant의 `portfolio_mandate` 행 자체가
-   없음) 비로소 "mandate 없음"으로 취급한다.
-   mandate가 있으면(직접 전달됐든 방금 resolve됐든) `context.mandate_revision_id`가
-   현재 active revision과 일치하는지 먼저 본다(task-1806, fence와 같은
-   관측-대-현재 패턴) — 불일치면 `RISK_MANDATE_REVISION_STALE` DENY, 일치해야
+3층: mandate 수치 정책. `require_mandate`(호출부 필수 명시, 기본값 없음)로
+   "mandate 미연결"의 처리를 정한다 — `True`면 `RISK_MANDATE_REQUIRED` DENY,
+   `False`면 audit_log만 남기고 통과. H-1b(task-3369)부터 프로덕션 3개
+   조립부 전부 `True` — UI가 아직 안 채우는 `mandate_revision_id`는 진입 시
+   `foundation_mandate_resolution.with_resolved_mandate()`(H-1a resolver)가
+   대신 채운다. mandate가 있으면 `context.mandate_revision_id`가 현재 active
+   revision과 일치하는지 먼저 본다(task-1806, fence와 같은 관측-대-현재
+   패턴) — 불일치면 `RISK_MANDATE_REVISION_STALE` DENY, 일치해야
    `mandates.evaluate_policy()`로 진행한다.
 
 task-1717 P0-D — 모든 결정을 `_record_decision()`으로 `risk_decision` WORM에
@@ -41,7 +35,6 @@ from __future__ import annotations
 
 import time
 from collections.abc import Mapping
-from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from typing import Literal
@@ -54,11 +47,9 @@ from src.core.event_bus.in_process import InProcessEventBus
 from src.core.logging.audit_log import record_audit_log
 from src.core.risk.decision import GateKind, RiskDecision, RiskOutcome
 from src.core.risk.hashing import canonical_json, sha256_hex
-from src.foundation.entities.domain.defaults import default_portfolio_id
 from src.foundation.mandates.adapters.postgres_repository import PostgresMandateRepository
 from src.foundation.mandates.application.evaluate_policy import NoActiveMandateError
 from src.foundation.mandates.application.evaluate_policy import evaluate as evaluate_mandate_policy
-from src.foundation.mandates.application.resolve_binding import resolve_mandate_revision
 from src.foundation.mandates.contracts.v1 import PolicyEvaluationSubject
 from src.foundation.mandates.contracts.v1 import PolicyOutcome as MandateOutcome
 from src.foundation.risk_gate.adapters.postgres_decision_repository import (
@@ -68,6 +59,7 @@ from src.foundation.risk_gate.adapters.postgres_repository import PostgresRiskGa
 from src.foundation.risk_gate.domain.fence import fence_pairs_for
 from src.foundation.risk_gate.domain.models import FenceSnapshot
 from src.services.order_service.foundation_compliance import evaluate_compliance_gate
+from src.services.order_service.foundation_mandate_resolution import with_resolved_mandate
 from src.services.order_service.gate import GateDecision, GateOutcome, OrderContext, PreSubmitGate
 from src.services.risk_decision_recorder import RiskDecisionRecorder
 
@@ -174,20 +166,7 @@ def make_foundation_pre_submit_gate(
 
     async def gate(context: OrderContext) -> GateDecision:
         start_ns = time.perf_counter_ns()
-        if context.mandate_revision_id is None:
-            # H-1b — production call sites (execution_deps.py/background_loops.py/
-            # oms/application/wiring.py) still never fill in
-            # `context.mandate_revision_id` (no UI path binds it yet, see module
-            # docstring below); ask H-1a's resolver for the tenant's currently
-            # bound revision before falling through to the "no mandate" branch,
-            # so `require_mandate=True` doesn't blanket-deny every order for a
-            # tenant who does have one configured (whatever its state — PAUSED/
-            # other still routes through the normal policy evaluation below,
-            # which already classifies those correctly; only a resolver miss
-            # (no `portfolio_mandate` row at all) counts as "no mandate").
-            resolved = await resolve_mandate_revision(pool, default_portfolio_id(context.user_id))
-            if resolved is not None:
-                context = replace(context, mandate_revision_id=resolved.revision.id)
+        context = await with_resolved_mandate(pool, context)  # H-1b
         pairs = fence_pairs_for(context.user_id, context.exchange, f"exec:{context.execution_id}")
         fence_snapshot, active_controls = await risk_repo.read_fence_and_controls(pairs)
         fence = _flatten_fence(fence_snapshot)
