@@ -39,16 +39,17 @@ function assertValidSize(size: RenderSize): void {
   }
 }
 
-class NullRendererBackend implements RendererBackend {
-  mount(): void {}
-  unmount(): void {}
-  resize(): void {}
-  requestRender(): void {}
-  dispose(): void {}
-}
-
 export function createNullRendererBackend(): RendererBackend {
-  return new NullRendererBackend();
+  // A plain object literal (not a class instance) so `{ ...createNullRendererBackend(), foo() {} }`
+  // in tests copies every method as an own property — class prototype methods
+  // are not own-enumerable and would silently vanish under that spread.
+  return {
+    mount(): void {},
+    unmount(): void {},
+    resize(): void {},
+    requestRender(): void {},
+    dispose(): void {},
+  };
 }
 
 export function createRenderer(options: CreateRendererOptions = {}): Renderer {
