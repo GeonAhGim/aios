@@ -1,0 +1,189 @@
+{
+ "refreshed_at": "2026-09-10T08:25:00+00:00",
+ "specs": [
+  {
+   "file": "L4_ai_research_strategy_factory_v1.0.md",
+   "spec": "ai_research_strategy_factory",
+   "total": 23,
+   "done": 1,
+   "inflight": 22,
+   "untouched": 0,
+   "hold": 0,
+   "reopened": 1,
+   "depth": {
+    "D?": 1
+   }
+  },
+  {
+   "file": "L4_analytics_authoring_backtest_marketplace_v1.0.md",
+   "spec": "analytics_authoring_backtest_marketplace",
+   "total": 107,
+   "done": 86,
+   "inflight": 4,
+   "untouched": 0,
+   "hold": 17,
+   "reopened": 68,
+   "depth": {
+    "D1": 1,
+    "D2": 11,
+    "D?": 74
+   }
+  },
+  {
+   "file": "L4_compliance_and_regulatory_v1.0.md",
+   "spec": "compliance_and_regulatory",
+   "total": 20,
+   "done": 13,
+   "inflight": 6,
+   "untouched": 0,
+   "hold": 1,
+   "reopened": 3,
+   "depth": {
+    "D2": 2,
+    "D3": 5,
+    "D?": 6
+   }
+  },
+  {
+   "file": "L4_ems_routing_algos_and_tca_v1.0.md",
+   "spec": "ems_routing_algos_and_tca",
+   "total": 18,
+   "done": 14,
+   "inflight": 4,
+   "untouched": 0,
+   "hold": 0,
+   "reopened": 14,
+   "depth": {
+    "D?": 14
+   }
+  },
+  {
+   "file": "L4_execution_oms_and_exchange_v1.0.md",
+   "spec": "execution_oms_and_exchange",
+   "total": 30,
+   "done": 30,
+   "inflight": 0,
+   "untouched": 0,
+   "hold": 0,
+   "reopened": 4,
+   "depth": {
+    "D0": 1,
+    "D2": 1,
+    "D3": 18,
+    "D?": 10
+   }
+  },
+  {
+   "file": "L4_execution_ownership_and_safety_gate_wiring_v1.0.md",
+   "spec": "execution_ownership_and_safety_gate_wiring",
+   "total": 6,
+   "done": 6,
+   "inflight": 0,
+   "untouched": 0,
+   "hold": 0,
+   "reopened": 0,
+   "depth": {
+    "D2": 1,
+    "D?": 5
+   }
+  },
+  {
+   "file": "L4_ibor_fund_accounting_and_resilience_v1.0.md",
+   "spec": "ibor_fund_accounting_and_resilience",
+   "total": 29,
+   "done": 21,
+   "inflight": 8,
+   "untouched": 0,
+   "hold": 0,
+   "reopened": 21,
+   "depth": {
+    "D2": 2,
+    "D3": 8,
+    "D?": 11
+   }
+  },
+  {
+   "file": "L4_market_data_positions_ledger_v1.0.md",
+   "spec": "market_data_positions_ledger",
+   "total": 63,
+   "done": 63,
+   "inflight": 0,
+   "untouched": 0,
+   "hold": 0,
+   "reopened": 41,
+   "depth": {
+    "D2": 3,
+    "D?": 60
+   }
+  },
+  {
+   "file": "L4_platform_observability_tenancy_api_v1.0.md",
+   "spec": "platform_observability_tenancy_api",
+   "total": 42,
+   "done": 40,
+   "inflight": 2,
+   "untouched": 0,
+   "hold": 0,
+   "reopened": 38,
+   "depth": {
+    "D1": 2,
+    "D2": 1,
+    "D3": 3,
+    "D?": 34
+   }
+  },
+  {
+   "file": "L4_product_experience_and_discovery_v1.0.md",
+   "spec": "product_experience_and_discovery",
+   "total": 22,
+   "done": 1,
+   "inflight": 21,
+   "untouched": 0,
+   "hold": 0,
+   "reopened": 1,
+   "depth": {
+    "D?": 1
+   }
+  },
+  {
+   "file": "L4_research_data_and_market_ecosystem_v1.0.md",
+   "spec": "research_data_and_market_ecosystem",
+   "total": 18,
+   "done": 5,
+   "inflight": 13,
+   "untouched": 0,
+   "hold": 0,
+   "reopened": 5,
+   "depth": {
+    "D?": 5
+   }
+  },
+  {
+   "file": "L4_risk_and_safety_v1.0.md",
+   "spec": "risk_and_safety",
+   "total": 58,
+   "done": 53,
+   "inflight": 0,
+   "untouched": 0,
+   "hold": 5,
+   "reopened": 2,
+   "depth": {
+    "D3": 8,
+    "D?": 45
+   }
+  },
+  {
+   "file": "L4_strategy_portfolio_backtest_v1.0.md",
+   "spec": "strategy_portfolio_backtest",
+   "total": 46,
+   "done": 25,
+   "inflight": 21,
+   "untouched": 0,
+   "hold": 0,
+   "reopened": 24,
+   "depth": {
+    "D?": 25
+   }
+  }
+ ]
+}
