@@ -170,3 +170,109 @@ describe("AlertFromChart", () => {
     expect(document.activeElement).toBe(last);
   });
 });
+
+// DEEPEN(task-3079) of task-1570 (CH-9, commit 9554f6b), per DEPTH_CH audit
+// (task-2729, docs/audit/DEPTH_CH.md): the original 12-test leaf (+ 3 wiring
+// tests in ChartToolbar.test.tsx) already had negative>=3 and mocked
+// ApiError failure injection, but zero numeric performance assertion, no
+// gate-red reproduction, and no D3 (adversarial/multi-instance) proof. This
+// block fills those gaps.
+describe("DEEPEN(task-3079): numeric perf, gate-red, D3", () => {
+  it("수치 성능: 임계값 입력에 200회 연속 keystroke를 흘려도 6000ms 예산 내에 처리된다", () => {
+    renderDialog();
+    const input = screen.getByLabelText("임계값");
+
+    const startedAt = performance.now();
+    let value = "";
+    for (let i = 0; i < 200; i += 1) {
+      value += (i % 10).toString();
+      fireEvent.change(input, { target: { value } });
+    }
+    const elapsedMs = performance.now() - startedAt;
+
+    expect(input).toHaveValue(Number(value));
+    expect(elapsedMs).toBeLessThan(6000);
+  });
+
+  it("게이트 적색 재현: 열려 있는 동안 currentClose가 바뀌어도 임계값을 덮어쓰지 않는다 — 프리필 effect 의존성에 currentClose를 추가하면 적색", () => {
+    const { rerender } = renderDialog({ currentClose: 100 });
+    expect(screen.getByLabelText("임계값")).toHaveValue(100);
+
+    fireEvent.change(screen.getByLabelText("임계값"), { target: { value: "150" } });
+    expect(screen.getByLabelText("임계값")).toHaveValue(150);
+
+    rerender(
+      <MemoryRouter>
+        <AlertFromChart {...baseProps()} currentClose={999} />
+      </MemoryRouter>,
+    );
+
+    expect(screen.getByLabelText("임계값")).toHaveValue(150);
+  });
+
+  it("게이트 적색 재현: 닫았다가 다시 열면(isOpen false→true 전이) 새 currentClose로 다시 프리필된다 — 전이 감지가 깨지면(예: 빈 deps) 적색", () => {
+    const { rerender } = renderDialog({ currentClose: 100 });
+    fireEvent.change(screen.getByLabelText("임계값"), { target: { value: "150" } });
+    expect(screen.getByLabelText("임계값")).toHaveValue(150);
+
+    rerender(
+      <MemoryRouter>
+        <AlertFromChart {...baseProps()} isOpen={false} currentClose={100} />
+      </MemoryRouter>,
+    );
+    rerender(
+      <MemoryRouter>
+        <AlertFromChart {...baseProps()} isOpen currentClose={777} />
+      </MemoryRouter>,
+    );
+
+    expect(screen.getByLabelText("임계값")).toHaveValue(777);
+  });
+
+  it("어드버서리얼(D3): 서로 다른 차트 패널에 동시에 뜬 두 인스턴스가 임계값 상태를 공유하지 않는다", () => {
+    render(
+      <MemoryRouter>
+        <div>
+          <AlertFromChart {...baseProps()} instrumentId="BTCUSDT" currentClose={100} />
+          <AlertFromChart {...baseProps()} instrumentId="ETHUSDT" currentClose={200} />
+        </div>
+      </MemoryRouter>,
+    );
+
+    const dialogs = screen.getAllByRole("dialog");
+    expect(dialogs).toHaveLength(2);
+    // AlertFromChart는 정적 id="alert-threshold"를 쓴다(단일 다이얼로그 전제) — 두
+    // 인스턴스가 동시에 열리면 문서 전체에서 id가 중복되어 getByLabelText는 신뢰할
+    // 수 없으므로, 각 다이얼로그 서브트리 안에서 직접 DOM을 조회해 React 상태
+    // 자체의 인스턴스별 독립성만 검증한다.
+    const threshold0 = dialogs[0]!.querySelector<HTMLInputElement>("#alert-threshold")!;
+    const threshold1 = dialogs[1]!.querySelector<HTMLInputElement>("#alert-threshold")!;
+    expect(threshold0.value).toBe("100");
+    expect(threshold1.value).toBe("200");
+
+    fireEvent.change(threshold0, { target: { value: "555" } });
+
+    expect(threshold0.value).toBe("555");
+    expect(threshold1.value).toBe("200");
+  });
+
+  it("어드버서리얼(D3): 응답 대기 중 연속 두 번 클릭하면 mutateAsync가 두 번 호출된다 — 컴포넌트 자체엔 재요청 가드가 없고 disabled는 TanStack Query의 isPending 배선에만 의존한다(mock의 isPending은 항상 false)", async () => {
+    let resolvePromise!: (value: { id: number }) => void;
+    createAlertMutateAsync.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          resolvePromise = resolve;
+        }),
+    );
+    renderDialog();
+
+    const submit = screen.getByRole("button", { name: "알림 등록" });
+    fireEvent.click(submit);
+    fireEvent.click(submit);
+
+    expect(createAlertMutateAsync).toHaveBeenCalledTimes(2);
+
+    resolvePromise({ id: 1 });
+    await waitFor(() => expect(screen.getByText(/알림이 등록되었습니다/)).toBeInTheDocument());
+  });
+});
