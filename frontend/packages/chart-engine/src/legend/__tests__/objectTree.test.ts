@@ -271,9 +271,10 @@ function shuffled<T>(rng: Rng, items: readonly T[]): T[] {
   return out;
 }
 
-// DEPTH_CH(task-2729) 감사: task-2013(242f346, CH-16b)가 도입한 sortByPersistedOrder는
-// DEEPEN 1711(task-3085)의 buildObjectTree/applyObjectTreeState 보강 범위 밖이었다 —
-// 이 블록이 CH-16b 고유 함수 자체에 수치 성능·게이트 적색·D3를 채운다.
+// DEPTH_CH audit (task-2729): sortByPersistedOrder, introduced by task-2013
+// (242f346, CH-16b), fell outside the buildObjectTree/applyObjectTreeState
+// coverage DEEPEN task-3085 (1711) added — this block fills numeric
+// performance, gate-red reproduction, and D3 for the CH-16b-specific function itself.
 describe("sortByPersistedOrder -- numeric performance (DEEPEN 2013)", () => {
   it("2,000개 트리를 100개의 서로 다른 저장 순서로 재정렬해도 3s 예산 내에 끝난다", () => {
     const rng = createRng(20130910);
@@ -290,10 +291,10 @@ describe("sortByPersistedOrder -- numeric performance (DEEPEN 2013)", () => {
     }
     const elapsedMs = performance.now() - start;
 
-    // task-1968(vitest.config.ts 주석)이 문서화한 공유 머신 CPU 경합을 흡수하는 느슨한
-    // 예산이지만, sortByPersistedOrder가 O(n log n)에서 O(n^2)로 퇴행하면(예: rank
-    // Map 조회 대신 선형 탐색) 이 상한을 몇 배로 넘는다 — raw node 실측(~143ms, 이
-    // 규모 기준)에 20배 이상 여유를 둔 값.
+    // Loose budget absorbing the shared-machine CPU contention documented in
+    // vitest.config.ts (task-1968), but still catches sortByPersistedOrder
+    // regressing from O(n log n) to O(n^2) (e.g. a linear scan instead of the
+    // rank Map lookup) — over 20x the raw node measurement (~143ms) at this scale.
     expect(elapsedMs).toBeLessThan(3000);
   });
 });

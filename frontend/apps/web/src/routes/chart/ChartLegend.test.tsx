@@ -98,8 +98,8 @@ describe("ChartLegend — CH-16b 순서·잠금 조작", () => {
   });
 });
 
-// DEPTH_CH(task-2729) 감사: task-2013(242f346)에 수치 성능 단언·D3 다중 인스턴스
-// 재현이 없었다(DEEPEN task-3100).
+// DEPTH_CH audit (task-2729): task-2013 (242f346) had no numeric performance
+// assertion and no D3 multi-instance reproduction (DEEPEN task-3100).
 describe("ChartLegend — 수치 성능·D3 다중 인스턴스 (DEEPEN task-3100)", () => {
   it("수치 성능: 지표 150개를 렌더링해도 10s 예산 내에 끝난다", () => {
     const entries: ObjectTreeEntry[] = Array.from({ length: 150 }, (_, i) => entry({ id: `IND_${i}`, name: `IND_${i}` }));
@@ -109,10 +109,10 @@ describe("ChartLegend — 수치 성능·D3 다중 인스턴스 (DEEPEN task-310
     const elapsedMs = performance.now() - start;
 
     expect(screen.getAllByRole("listitem")).toHaveLength(150);
-    // useChartLayout.test.ts의 VISIBLE_CANDLE_COUNT류 관용과 동일: jsdom 유닛테스트
-    // 환경(공유 머신 CPU 경합, task-1968)의 최초 렌더 JIT 워밍업 오버헤드까지 포함한
-    // 느슨한 예산이지만, 렌더가 항목 수에 비선형으로 퇴행하면(예: O(n^2) key 재계산)
-    // 이 상한을 넘는다.
+    // Loose budget (same convention as the VISIBLE_CANDLE_COUNT assertion in
+    // useChartLayout.test.ts) that absorbs jsdom's first-render JIT warmup and
+    // shared-machine CPU contention (task-1968), but still catches a rendering
+    // regression that goes non-linear with entry count (e.g. O(n^2) key recompute).
     expect(elapsedMs).toBeLessThan(10000);
   });
 

@@ -280,10 +280,10 @@ describe("CH-16b: 오브젝트 트리 순서·잠금", () => {
   });
 });
 
-// DEPTH_CH(task-2729) 감사: task-2013(242f346, CH-16b)가 배선한 setObjectTreeOrder/
-// setLockedIndicatorIds 자체는 DEEPEN task-3081(1594)의 일반 복원/저장 보강 범위
-// 밖이었다 — 이 블록이 CH-16b 필드 고유의 실패주입(mocked network)·게이트 적색·
-// D3 다중 인스턴스를 채운다.
+// DEPTH_CH audit (task-2729): setObjectTreeOrder/setLockedIndicatorIds wired by
+// task-2013 (242f346, CH-16b) fell outside the general restore/save coverage
+// DEEPEN task-3081 (1594) added — this block fills the CH-16b-field-specific
+// failure-injection (mocked network), gate-red reproduction, and D3 multi-instance gaps.
 describe("CH-16b 오브젝트 트리 순서·잠금 -- 실패주입/게이트적색/D3 (DEEPEN task-3100)", () => {
   it("실패주입(mocked network): 순서 변경 저장이 네트워크 에러로 실패해도 로컬 objectTreeOrder는 유지되고(isDirty 유지), 재시도로 회복한다", async () => {
     const record = layoutRecord(savedModelFor(BASE_VIEW));
