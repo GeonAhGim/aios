@@ -16,17 +16,14 @@ STRATEGY_DEPLOYMENT 5쌍 전부를 보고, F0을 `GateDecision.fence_snapshot`�
    mandate`가 "mandate 자체가 없을 때"의 처리를 정한다(기본 False — 아래
    `require_mandate`와 같은 이유).
 Layer 3: mandate numeric policy. `require_mandate` (mandatory explicit
-   argument at each call site, no default) decides how "no mandate bound" is
-   handled -- `True` -> `RISK_MANDATE_REQUIRED` DENY, `False` -> pass through
-   with only an audit_log entry. As of H-1b (task-3369) all three production
-   assembly sites pass `True` -- `mandate_revision_id`, which the UI still
-   doesn't fill in, gets filled in on entry by
-   `foundation_mandate_resolution.with_resolved_mandate()` (the H-1a
-   resolver). Once a mandate is present, it first checks whether
-   `context.mandate_revision_id` matches the current active revision
-   (task-1806, the same observed-vs-current pattern as fence) -- a mismatch
-   is `RISK_MANDATE_REVISION_STALE` DENY; a match proceeds to
-   `mandates.evaluate_policy()`.
+   argument, no default) decides "no mandate bound" handling -- `True` ->
+   `RISK_MANDATE_REQUIRED` DENY, `False` -> pass with only an audit_log
+   entry. Since H-1b (task-3369) all three production assembly sites pass
+   `True`; the UI-unfilled `mandate_revision_id` is filled on entry by
+   `foundation_mandate_resolution.with_resolved_mandate()` (H-1a resolver).
+   Once present, a mismatch vs. the current active revision (task-1806,
+   observed-vs-current, same as fence) is `RISK_MANDATE_REVISION_STALE`
+   DENY; a match proceeds to `mandates.evaluate_policy()`.
 
 task-1717 P0-D — 모든 결정을 `_record_decision()`으로 `risk_decision` WORM에
 기록해 `GateDecision.decision_id`를 채운다(`GateKind.PRE_SUBMIT`,
