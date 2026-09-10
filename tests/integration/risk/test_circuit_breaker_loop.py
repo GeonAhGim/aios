@@ -5,10 +5,24 @@ I5(§8 394행). task-1363 decision — 실시간 타이밍은 주입 clock으로
 asyncio.sleep 대기 단언은 쓰지 않는다(test_split_brain/test_base_loop 결정론화
 선례). `_check_reactivation`은 이 모듈이 직접 참조하는 사적 헬퍼다(기존
 `test_circuit_breaker.py`도 `service._set_level`을 직접 호출하는 동일 관례).
+
+DEEPEN(task-2832, DEPTH 감사 docs/audit/DEPTH_R_EO.md#1363) D2->D3 증빙:
+4가지 거부사유·재악화취소는 탄탄했으나 성능단언·실패주입·게이트 적색
+재현(실제 배선 진입점 경유)·다중 인스턴스 동시성 증거가 없었다(안전축 R은
+D3 하한). 아래에 추가한다: (1) 지표 수집 실패가 삼켜지지 않고 그대로
+전파되는지(I2 fail-closed, 실패주입), (2) 수집기가 실제로 임계 초과 지표를
+반환할 때 `run_circuit_breaker_tick`(공개 진입점)만으로 halted(적색)가
+재현되는지(수동 `cb.evaluate()` 호출이 아닌 배선 경유, I-10), (3) 큰
+metrics_history를 반복 스캔해도 예산 내에 끝나는지(성능 단언), (4) 두
+엔진 인스턴스가 같은 승인된 재가동 요청에 동시에 `_check_reactivation`을
+쳐도 CAS(105번 §4.2 형태 B)가 정확히 한 번만 전이시키고 나머지는 조용히
+성공한 척 흘리지 않는지(다중 인스턴스 동시성, D3).
 """
 from __future__ import annotations
 
+import asyncio
 import os
+import time
 from collections import deque
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
@@ -18,6 +32,7 @@ import asyncpg
 import pytest
 
 from src.core.approval import service as approval
+from src.core.db.conditional_write import ConcurrencyConflictError
 from src.core.loader.risk_policy_loader import load_risk_policy
 from src.core.safety.circuit_breaker import (
     CircuitBreakerLevel,
@@ -264,3 +279,127 @@ async def test_run_circuit_breaker_tick_drives_full_reactivation_end_to_end(
     assert state.level == CircuitBreakerLevel.NORMAL
     assert state.reactivation_approval_id is None
     assert events.count("risk.circuit_breaker.reactivated") == 1
+
+
+async def test_run_circuit_breaker_tick_propagates_collector_failure_not_swallowed(
+    pool, cb, policy, monkeypatch
+):
+    """실패 주입(I2 fail-closed) — 지표 수집이 DB 레벨에서 실패하면 예외가
+    그대로 전파돼야 한다. 조용히 삼키고 evaluate를 건너뛰면 CB가 다음
+    tick까지 낡은 상태로 남아 fail-open 위험(§9 R-43 재발)이 생긴다."""
+
+    async def _failing_collector(pool, tracker, freshness):
+        raise asyncpg.PostgresConnectionError("simulated metrics collection failure")
+
+    monkeypatch.setattr(
+        "src.services.safety.circuit_breaker_loop.collect_circuit_breaker_metrics",
+        _failing_collector,
+    )
+
+    history: deque[CircuitBreakerMetrics] = deque(maxlen=cooldown_ticks(policy))
+    with pytest.raises(asyncpg.PostgresConnectionError):
+        await run_circuit_breaker_tick(
+            pool, cb, ApiCallTracker(), _fresh_freshness_tracker(), policy, history=history
+        )
+
+    assert len(history) == 0  # 실패한 표본은 이력에 남지 않는다
+    state = await cb.get_state()
+    assert state.level == CircuitBreakerLevel.NORMAL  # 실패 전 상태 그대로
+
+
+async def test_run_circuit_breaker_tick_reproduces_gate_red_via_collected_metrics(
+    pool, cb, policy, events, monkeypatch
+):
+    """게이트 적색 재현(I-10 배선 증거) — 기존 halted 테스트들은
+    `cb.evaluate()`를 직접 호출해 halted를 수동으로 만든다. 여기서는 실제
+    공개 진입점인 `run_circuit_breaker_tick`이 (위조한) 수집기가 반환한
+    임계 초과 지표를 통해 실제로 evaluate를 거쳐 halted(적색)로 전이시키는지
+    — 수동 호출이 아니라 배선된 파이프라인 자체가 조립돼 동작하는지 —
+    증명한다."""
+
+    async def _bad_collector(pool, tracker, freshness):
+        return _BAD_METRICS
+
+    monkeypatch.setattr(
+        "src.services.safety.circuit_breaker_loop.collect_circuit_breaker_metrics",
+        _bad_collector,
+    )
+
+    history: deque[CircuitBreakerMetrics] = deque(maxlen=cooldown_ticks(policy))
+    await run_circuit_breaker_tick(
+        pool, cb, ApiCallTracker(), _fresh_freshness_tracker(), policy, history=history
+    )
+
+    state = await cb.get_state()
+    assert state.level == CircuitBreakerLevel.HALTED
+    assert len(history) == 1
+    assert events.count("risk.circuit_breaker.level_changed") == 1
+
+
+async def test_check_reactivation_meets_latency_budget_with_large_history(pool, cb, policy):
+    """성능 단언(D2) — `can_reactivate`의 baseline 스캔은 metrics_history
+    길이에 비례한다(O(n)). 큰 이력(5000 표본)을 매 호출마다 반복 스캔해도
+    DB 왕복을 합쳐 예산 안에 끝나는지 확인한다 — 스캔 비용이 퇴화하면
+    (예: O(n^2)) 이 예산을 넘는다. fresh_risk_outcome을 매번 DENY로 고정해
+    (evidence+cooldown은 통과, 마지막 조건만 거부) 매 반복이 전체 이력을
+    끝까지 스캔하도록 강제한다."""
+    request_id = await _make_halted_with_pending_request(pool, cb)
+    await _approve(pool, request_id, evidence_ref="ev-1")
+
+    n = 5000
+    history: deque[CircuitBreakerMetrics] = deque([CircuitBreakerMetrics()] * n, maxlen=n)
+    now = lambda: datetime.now(timezone.utc)  # noqa: E731
+    iterations = 10
+    budget_sec = 5.0
+
+    start = time.perf_counter()
+    for _ in range(iterations):
+        await _check_reactivation(pool, cb, _BAD_METRICS, policy, history=history, now=now)
+    elapsed = time.perf_counter() - start
+
+    state = await cb.get_state()
+    assert state.level == CircuitBreakerLevel.HALTED  # fresh_deny가 매번 거부 -> 전이 없음
+    assert elapsed < budget_sec, (
+        f"_check_reactivation {iterations}x(history={n}) 가 예산({budget_sec}s)을 "
+        f"넘었습니다({elapsed:.3f}s) — 이력 스캔 비용 회귀 확인 필요."
+    )
+
+
+async def test_concurrent_reactivation_checks_only_one_instance_wins_the_transition(
+    pool, policy, events
+):
+    """다중 인스턴스 동시성(D3) — 여러 엔진 프로세스가 동시에 같은 10s tick을
+    돌려 `_check_reactivation`을 동시에 호출하는 상황을 시뮬레이션한다.
+    `CircuitBreakerService._set_level`의 CAS(105번 §4.2 형태 B)가 두 호출
+    중 정확히 하나만 통과시키고, 나머지는 조용히 성공한 것처럼 흘리지
+    않고 `ConcurrencyConflictError`로 명시 거부하거나(먼저 읽은 스냅샷이
+    이미 낡음) 최신 상태를 다시 읽어 조용히 할 일 없음으로 끝난다(나중에
+    읽은 쪽) — 어느 쪽이든 재가동 이벤트는 정확히 한 번만 발행된다."""
+
+    async def _publish(event_type, payload):
+        events.append(event_type)
+
+    cb_a = CircuitBreakerService(pool, policy.circuit_breaker, publish=_publish)
+    cb_b = CircuitBreakerService(pool, policy.circuit_breaker, publish=_publish)
+
+    request_id = await _make_halted_with_pending_request(pool, cb_a)
+    await _approve(pool, request_id, evidence_ref="ev-1")
+
+    history = _full_history(policy)
+    now = lambda: datetime.now(timezone.utc)  # noqa: E731
+
+    results = await asyncio.gather(
+        _check_reactivation(pool, cb_a, CircuitBreakerMetrics(), policy, history=history, now=now),
+        _check_reactivation(pool, cb_b, CircuitBreakerMetrics(), policy, history=history, now=now),
+        return_exceptions=True,
+    )
+
+    assert len(results) == 2
+    for result in results:
+        if result is not None:
+            assert isinstance(result, ConcurrencyConflictError), result
+
+    state = await cb_a.get_state()
+    assert state.level == CircuitBreakerLevel.NORMAL
+    assert state.reactivation_approval_id is None
+    assert events.count("risk.circuit_breaker.reactivated") == 1  # 정확히 한 번만 전이·발행
