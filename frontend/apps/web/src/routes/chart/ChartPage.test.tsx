@@ -641,3 +641,24 @@ describe("ChartPage — 성능 단언(DEEPEN task-3077)", () => {
     expect(elapsedMs).toBeLessThan(2000);
   });
 });
+
+// DEPTH_CH(task-2729) 감사: task-1914(b19b7a4, CH-14·CH-16 화면 배선)는 candles
+// 조회 실패 시 ChartPanes/ChartLegend/DataWindowPanel(멀티페인·objectTree·데이터
+// 윈도우 묶음)이 마운트되지 않는다는 것을 실제로 실패를 주입해 검증한 적이
+// 없었다 — task-3077(CH-6a)의 실패 주입은 ErrorMessage/재시도 버튼만 확인했다.
+// 여기서는 같은 mockRejectedValue 관용으로 CH-14·CH-16 화면 배선 자체가
+// fail-closed임을(부분/잔존 패널 노출 없음) 못박는다.
+describe("ChartPage — CH-14·CH-16 멀티페인 실패 주입(DEEPEN task-3092)", () => {
+  it("negative/failure-injection: fetchCandles가 실패하면 ChartPanes·ChartLegend·DataWindowPanel 전체가 마운트되지 않는다", async () => {
+    const fetchCandles = vi.fn(async () => {
+      throw apiErrorLike(429, "RATE_LIMIT_EXCEEDED");
+    });
+    renderPage(fetchCandles);
+
+    expect(await screen.findByRole("button", { name: "다시 시도" })).toBeInTheDocument();
+    expect(screen.queryByTestId("chart-panes")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("chart-legend")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("data-window-panel")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("candlestick-chart")).not.toBeInTheDocument();
+  });
+});

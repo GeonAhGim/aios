@@ -8,6 +8,7 @@ import { useState } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ChartPanes } from "./ChartPanes";
 import type { OverlayPlotSpecOverrides, OverlaySeriesByOutput } from "./ChartPlotLayer";
+import { buildInitialModel, MAIN_PANE_ID, subPaneId } from "./chartPanesModel";
 
 // CandlesPage.test.tsx/ChartPage.test.tsx의 관용과 동일 — lightweight-charts는
 // jsdom에서 canvas를 요구하므로 실 렌더러 대신 전달받은 data.length만 노출하는
@@ -283,5 +284,52 @@ describe("ChartPanes — CH-19c render/lod·render/viewport wiring", () => {
     const shown = Number(screen.getByTestId("candlestick-chart").textContent?.match(/\d+/)?.[0]);
     expect(shown).toBeGreaterThan(0);
     expect(shown).toBeLessThan(5000);
+  });
+});
+
+// DEPTH_CH(task-2729) 감사: task-1914(b19b7a4, CH-14·CH-16 화면 배선)에는 수치
+// 성능 단언이 없었다 — jsdom 유닛테스트 환경 기준 느슨한 ms 예산이지만, 서브페인
+// 수에 대해 렌더가 선형이 아니게(예: 페인마다 전체 candles 재스캔) 퇴행하면
+// 확실히 이 상한을 넘어 실패한다(task-3077/1809 DEEPEN과 동일 관용).
+describe("ChartPanes — 성능 단언(DEEPEN task-3092)", () => {
+  it("서브페인 20개(각 4포인트 시리즈 포함) 멀티페인 렌더가 2초 안에 끝난다", () => {
+    const many = Array.from({ length: 20 }, (_, i) => overlay(`IND_${i}`));
+    const overlaySeries = new Map<string, OverlaySeriesByOutput>(
+      many.map((o, i) => [o.id, new Map([["value", overlaySeriesPoints([i, i + 1, i + 2, i + 3])]])] as const),
+    );
+
+    const startedAt = performance.now();
+    render(<Harness initialSub={many} overlaySeries={overlaySeries} />);
+    const elapsedMs = performance.now() - startedAt;
+
+    expect(screen.getAllByTestId(/^chart-pane-ratio-/).length).toBe(21);
+    expect(elapsedMs).toBeLessThan(2000);
+  });
+});
+
+// DEPTH_CH(task-2729) 감사: task-1914에 게이트 적색 재현이 없었다 — heightRatio
+// 합 불일치를 fail-closed로 거부하는 계약(paneModel.setHeightRatios)이 실제로
+// 이 화면에서 지켜지고 있음을, "검증 없이 그대로 받아들이는" legacy 목업과
+// 대조해(red) 실 컴포넌트가 그 회귀를 내지 않는다는 것(green)으로 못박는다.
+describe("ChartPanes — 게이트 적색 재현(DEEPEN task-3092): heightRatio 합 미검증", () => {
+  /** setHeightRatios의 합=1 검증 이전 상태를 흉내낸 legacy 목업 — 실제 모듈이 아니다. */
+  function naiveApplyHeightRatios(base: ReturnType<typeof buildInitialModel>, ratios: Record<string, number>) {
+    return { ...base, panes: base.panes.map((p) => ({ ...p, heightRatio: ratios[p.id] ?? p.heightRatio })) };
+  }
+
+  it("red: 합 검증이 없는 legacy는 합계 0.9(main 0.5 + sub-MFI 0.4)를 그대로 받아들인다", () => {
+    const base = buildInitialModel(["MFI"]);
+    const naive = naiveApplyHeightRatios(base, { [MAIN_PANE_ID]: 0.5, [subPaneId("MFI")]: 0.4 });
+
+    const sum = naive.panes.reduce((acc, p) => acc + p.heightRatio, 0);
+    expect(sum).toBeCloseTo(0.9, 4);
+  });
+
+  it("green: 실 ChartPanes는 같은 입력을 거부하고 배너로 표면화하며 합=1로 남는다(legacy와 달리 무음 폴백하지 않는다)", () => {
+    render(<Harness initialSub={[overlay("MFI")]} restoredHeightRatios={{ [MAIN_PANE_ID]: 0.5, [subPaneId("MFI")]: 0.4 }} />);
+
+    expect(screen.getByTestId("chart-panes-layout-error")).toBeInTheDocument();
+    const ratios = ratiosOf([MAIN_PANE_ID, subPaneId("MFI")]);
+    expect(ratios.reduce((a, b) => a + b, 0)).toBeCloseTo(1, 4);
   });
 });
