@@ -6,18 +6,24 @@ test_circuit_breaker_loop.py`와 공유 TEST_DATABASE_URL을 쓴다 — `pool`
 fixture가 매 테스트 시작 시 `normal`로 리셋해 오염을 막는다(그 파일의
 동일 fixture와 같은 근거).
 """
+
 from __future__ import annotations
 
+import asyncio
 import os
+import time
 from datetime import datetime, timedelta, timezone
 from uuid import UUID, uuid4
 
 import asyncpg
 import pytest
+from httpx import ASGITransport, AsyncClient
 
 from src.api.contracts.error_codes import HTTP_STATUS, ErrorCode
 from src.api.contracts.exception_mapping import map_exception
+from src.api.deps import get_current_admin
 from src.core.approval import service as approval
+from src.core.db.conditional_write import ConcurrencyConflictError
 from src.core.loader.risk_policy_loader import load_risk_policy
 from src.core.risk.decision import GateKind, RiskDecision, RiskOutcome
 from src.core.safety.circuit_breaker import CircuitBreakerService
@@ -34,7 +40,10 @@ from src.foundation.risk_gate.application.recovery_gate import (
 )
 from src.foundation.risk_gate.domain.models import SafetyScope
 from src.foundation.risk_gate.ports.repository import RiskGateRepository
+from src.main import app
+from src.services.auth_service import User
 from src.services.risk_decision_recorder import RiskDecisionRecorder
+from tests.conftest import lifespan_context_with_retry
 from tests.integration.conftest import NoopEventBus, create_test_tenant
 
 _COOLDOWN_SEC = 900
@@ -330,3 +339,240 @@ def test_router_denied_maps_to_403_risk_denied_with_rsk007():
     assert code == ErrorCode.RISK_DENIED
     assert HTTP_STATUS[code] == 403
     assert details["reason_codes"] == ["RSK-007"]
+
+
+async def test_fresh_cb_level_still_reactivatable_denies_even_when_all_else_passes(
+    pool, risk_gate_repo, cb, recorder, actor_id
+):
+    """negative — 4번째 조건(fresh 재평가)만 단독으로 걸리는 경우. evidence·
+    cooldown·approval을 전부 충족시켜 놓고, 글로벌 `system_safety_state`를
+    직접 HALTED로 돌려(R-45 tick 루프가 방금 다시 트립시킨 상황을 흉내)
+    `CircuitBreakerService.get_state()`가 그 값을 그대로 돌려주게 만든다.
+    이 브랜치는 기존 테스트 어디에도 없었다 — `evaluate_recovery`가 실제로
+    이 라이브 상태를 조회해 `can_reactivate`에 넘긴다는 배선을 증명한다."""
+    control_id = await _make_halted_control(
+        pool, risk_gate_repo, actor_id=actor_id, elapsed_sec=2000
+    )
+    approval_id = await _make_approved_request(pool)
+    repos = _repos(risk_gate_repo, cb, pool, recorder)
+
+    async with pool.acquire() as conn:
+        await conn.execute(
+            "UPDATE system_safety_state SET circuit_breaker_level = 'halted' WHERE id = 1"
+        )
+
+    with pytest.raises(RecoveryDeniedError) as exc_info:
+        await evaluate_recovery(
+            repos,
+            tenant_id=actor_id,
+            control_id=control_id,
+            evidence_ref="ev-1",
+            approval_id=approval_id,
+            trace_id=uuid4(),
+        )
+    assert exc_info.value.details["reason_codes"] == ["RECOVERY_FRESH_RISK_DENY"]
+
+    async with pool.acquire() as conn:
+        state = await conn.fetchval("SELECT state FROM safety_control WHERE id = $1", control_id)
+    assert state == "ACTIVE"
+
+
+class _RecorderAlwaysFails:
+    """WORM 삽입 자체가 DB 장애로 실패하는 상황을 흉내낸다 — 실제
+    `RiskDecisionRecorder.record()`를 전혀 호출하지 않으므로, 판정이
+    ALLOW였어도 WORM 행이 한 건도 생기지 않은 채로 실패가 전파돼야 한다."""
+
+    async def record(self, decision, inputs, *, actor: str) -> None:
+        raise ConnectionResetError("simulated WORM write outage")
+
+
+async def test_worm_write_failure_propagates_and_control_stays_active(
+    pool, risk_gate_repo, cb, actor_id
+):
+    """WORM 불변성 실패주입 — decision recorder(WORM 삽입 경로)가 DB 장애로
+    실패하면, 4가지 조건을 전부 만족해 판정이 ALLOW였더라도 그 실패가
+    삼켜지지 않고 그대로 전파되며 `deactivate_safety_control`은 절대
+    호출되지 않는다(recovery_gate.py 217~224행 순서 — WORM 기록이 해제보다
+    먼저다). 영속 근거(WORM) 없이 실효(해제)만 먼저 발생하는 경로가 없다는
+    불변식을 증명한다."""
+    control_id = await _make_halted_control(
+        pool, risk_gate_repo, actor_id=actor_id, elapsed_sec=2000
+    )
+    approval_id = await _make_approved_request(pool)
+    repos = _repos(risk_gate_repo, cb, pool, _RecorderAlwaysFails())
+
+    with pytest.raises(ConnectionResetError):
+        await evaluate_recovery(
+            repos,
+            tenant_id=actor_id,
+            control_id=control_id,
+            evidence_ref="ev-1",
+            approval_id=approval_id,
+            trace_id=uuid4(),
+        )
+
+    async with pool.acquire() as conn:
+        state = await conn.fetchval("SELECT state FROM safety_control WHERE id = $1", control_id)
+        decision_count = await conn.fetchval(
+            "SELECT count(*) FROM risk_decision WHERE tenant_id = $1", actor_id
+        )
+    assert state == "ACTIVE"
+    assert decision_count == 0
+
+
+async def test_concurrent_recovery_instances_only_one_deactivates_control(
+    pool, risk_gate_repo, cb, recorder, actor_id
+):
+    """다중 인스턴스 증명(D3) — 서로 다른 서비스 인스턴스를 흉내낸 두 개의
+    독립된 `RecoveryGateRepos`(각자 새로 만든 `PostgresRiskGateRepository`)가
+    같은 halted control을 동시에 재가동 평가한다. 둘 다 같은 ACTIVE 상태를
+    읽어 `can_reactivate`가 둘 다 ALLOW를 내리지만,
+    `deactivate_safety_control`의 조건부 UPDATE(`WHERE state='ACTIVE'`,
+    105번 표준)는 정확히 한쪽만 통과시킨다 — 진 쪽은 `ConcurrencyConflictError`
+    로 실패가 그대로 전파돼야 한다(이중 해제 없음). 두 쪽 모두 WORM에는 각자의
+    ALLOW 판정을 남긴다 — 레코딩은 해제 성공 여부와 무관하게 먼저 일어난다."""
+    control_id = await _make_halted_control(
+        pool, risk_gate_repo, actor_id=actor_id, elapsed_sec=2000
+    )
+    approval_id = await _make_approved_request(pool)
+
+    repos_a = _repos(PostgresRiskGateRepository(pool), cb, pool, recorder)
+    repos_b = _repos(PostgresRiskGateRepository(pool), cb, pool, recorder)
+
+    async def _eval(repos):
+        return await evaluate_recovery(
+            repos,
+            tenant_id=actor_id,
+            control_id=control_id,
+            evidence_ref="ev-1",
+            approval_id=approval_id,
+            trace_id=uuid4(),
+        )
+
+    results = await asyncio.gather(_eval(repos_a), _eval(repos_b), return_exceptions=True)
+
+    successes = [r for r in results if isinstance(r, RiskDecision)]
+    failures = [r for r in results if isinstance(r, BaseException)]
+    assert len(successes) == 1
+    assert successes[0].outcome == RiskOutcome.ALLOW
+    assert len(failures) == 1
+    assert isinstance(failures[0], ConcurrencyConflictError)
+
+    async with pool.acquire() as conn:
+        state = await conn.fetchval("SELECT state FROM safety_control WHERE id = $1", control_id)
+        rows = await conn.fetch("SELECT outcome FROM risk_decision WHERE tenant_id = $1", actor_id)
+    assert state == "INACTIVE"
+    assert [r["outcome"] for r in rows] == ["ALLOW", "ALLOW"]
+
+
+@pytest.mark.perf
+async def test_evaluate_recovery_latency_within_normalized_budget(
+    pool, risk_gate_repo, cb, recorder, actor_id
+):
+    """성능 단언 — RECOVERY 게이트 평가(ALLOW) 1회의 p95 지연을 같은 연결의
+    기준 왕복비용(`SELECT 1`)에 정규화한 임계와 비교한다(절대 ms 상수 회피,
+    tests/adversarial/risk/test_tick_mandate_fence_staleness.py 관례 재사용).
+    각 반복마다 새 halted control을 미리 만들어, 측정 구간에는 평가 자체의
+    비용만 들어가게 한다."""
+    approval_id = await _make_approved_request(pool)
+    repos = _repos(risk_gate_repo, cb, pool, recorder)
+    reps = 15
+    control_ids = [
+        await _make_halted_control(pool, risk_gate_repo, actor_id=actor_id, elapsed_sec=2000)
+        for _ in range(reps)
+    ]
+
+    async def _p95_ms(step) -> float:
+        samples = []
+        for _ in range(reps):
+            t0 = time.perf_counter()
+            await step()
+            samples.append((time.perf_counter() - t0) * 1000)
+        samples.sort()
+        return samples[int(len(samples) * 0.95) - 1]
+
+    async with pool.acquire() as conn:
+        baseline_p95 = await _p95_ms(lambda: conn.fetchval("SELECT 1"))
+
+    index = {"i": 0}
+
+    async def _one_eval() -> None:
+        control_id = control_ids[index["i"]]
+        index["i"] += 1
+        await evaluate_recovery(
+            repos,
+            tenant_id=actor_id,
+            control_id=control_id,
+            evidence_ref="ev-1",
+            approval_id=approval_id,
+            trace_id=uuid4(),
+        )
+
+    gate_p95 = await _p95_ms(_one_eval)
+
+    # evaluate_recovery는 SELECT 1 왕복보다 훨씬 많은 순차 왕복(control 조회·
+    # approval 조회·cb 상태 조회·WORM 기록·해제 커맨드)을 거친다 — 같은
+    # 디렉터리의 다른 테스트가 먼저 쌓아 둔 테이블 크기에 따라 관측치가
+    # 커질 수 있어 여유를 크게 둔다.
+    budget_ms = max(600.0, 150.0 * baseline_p95)
+    print(  # noqa: T201 — 실측치는 비차단 기록, 게이트는 아래 assert.
+        f"evaluate_recovery p95={gate_p95:.3f}ms baseline(SELECT 1) p95={baseline_p95:.3f}ms "
+        f"budget={budget_ms:.3f}ms"
+    )
+    assert gate_p95 < budget_ms
+
+
+@pytest.fixture
+async def http_client():
+    async with lifespan_context_with_retry(app):
+        # raise_app_exceptions=False — 도메인 예외는 전역 핸들러가 봉투로
+        # 번역하고 Starlette가 정상 처리된 뒤에도 원본을 재전파하므로
+        # (tests/integration/api/test_positions_router.py의 client 픽스처와
+        # 같은 근거).
+        transport = ASGITransport(app=app, raise_app_exceptions=False)
+        async with AsyncClient(transport=transport, base_url="http://test") as ac:
+            yield ac
+
+
+async def test_router_recovery_denied_end_to_end_returns_403_rsk007_envelope(
+    pool, risk_gate_repo, actor_id, http_client
+):
+    """DENY→403 매핑 게이트 적색 재현 — `test_router_denied_maps_to_403_...`는
+    `map_exception`을 직접 호출해 매핑 테이블 항목만 검증했을 뿐, 실제 라우터
+    가 그 예외를 던지고 전역 핸들러(`install_exception_handlers`)가 그걸
+    받아 403 봉투로 바꾸는 전체 배선은 아무도 재현하지 않았다. 이 테스트는
+    진짜 FastAPI 앱에 실제 HTTP 요청을 보내 그 전체 경로를 end-to-end로
+    재현한다 — 라우터가 raw HTTPException을 쓰지 않는다는 계약이 배선까지
+    깨지지 않았음을 증명한다."""
+    control_id = await _make_halted_control(
+        pool, risk_gate_repo, actor_id=actor_id, elapsed_sec=2000
+    )
+    approval_id = await _make_approved_request(pool)
+
+    fake_admin = User(
+        user_id=actor_id,
+        email="admin@example.com",
+        display_name=None,
+        mfa_enabled=False,
+        mfa_verified_at=None,
+        status="ACTIVE",
+        is_verifier=False,
+        is_platform_admin=True,
+    )
+    app.dependency_overrides[get_current_admin] = lambda: fake_admin
+    try:
+        response = await http_client.post(
+            f"/v1/foundation/risk-gate/safety-controls/{control_id}:evaluate-recovery",
+            json={"evidence_ref": None, "approval_id": approval_id},
+        )
+    finally:
+        app.dependency_overrides.pop(get_current_admin, None)
+
+    assert response.status_code == 403
+    body = response.json()
+    assert body["error_code"] == "RISK_DENIED"
+    assert body["details"]["reason_codes"] == ["RSK-007"]
+
+    async with pool.acquire() as conn:
+        state = await conn.fetchval("SELECT state FROM safety_control WHERE id = $1", control_id)
+    assert state == "ACTIVE"
