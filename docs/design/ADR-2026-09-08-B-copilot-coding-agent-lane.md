@@ -168,3 +168,17 @@ task-2149가 "코드 변경 없음(ADR 문서뿐)"으로 DEEPEN 리프를 받았
 스코프를 가진 PAT를 `GH_TOKEN` 환경변수로 주입(프로세스 재시작에도 유지되도록 시스템 환경변수
 또는 서비스 정의에 고정). 이 결정 없이는 PLT-44 파일럿을 세 번째로 재시도해도 같은 지점에서
 막힐 것이다.
+
+## Amended 2026-09-10 (D5 automatic routing, CTO)
+- User directive: use GitHub Copilot, Codex CLI and Cursor CLI actively and automatically.
+- Routing moves from the PM prompt to the orchestrator (`orchestrator.auto_route_external`, every poll):
+  ready, non-S-tier, non-retry, non-refactor-wide backend/frontend leaves are moved into external lanes in the
+  order copilot (isolated paths only) -> codex-impl -> cursor-local, each up to `size * 2` (queue buffer).
+- A lane task that fails once is bounced back to its original Claude lane (different eyes), except while every
+  Claude model is under a recorded limit, in which case P0 leaves are also routed externally. Tier S never leaves
+  the Claude lane (ADR-2026-09-09-E). `codex-local` stays the XREV cross-engine review lane; implementation uses the
+  new `codex-impl` pool. `task.orig_role` keeps repository, prompt and follow-up routing on the original axis.
+- cursor-agent 2026.08.31 is installed natively on the Windows host (LOCALAPPDATA/cursor-agent) and works in
+  `-p` stdin mode; `cursor-local` size 1. External lanes are excluded from OPS-12 rebalancing (subscription
+  quotas, not RAM, are their bound).
+- Tests: pm tests/test_auto_route_external.py, tests/test_engines.py.
