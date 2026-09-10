@@ -1,11 +1,13 @@
-"""L4_compliance_and_regulatory_v1.0.md#9 CM-3 — `rule_bundle.py` +
-`evaluator.py` 단위 테스트.
+"""L4_compliance_and_regulatory_v1.0.md#9 CM-3 — unit tests for
+`rule_bundle.py` + `evaluator.py`.
 
-task-2037 DoD 4개 항목을 그대로 매핑한다: (1) 순서 무관 최악 판정,
-(2) bundle_hash의 1비트 변화 민감도, (3) 규칙 예외 fail-closed DENY,
-(4) 해시 유틸 재사용(직접 sha256/canonical_json을 다시 구현하지 않고
-`src.core.risk.hashing`을 그대로 참조해 교차검증).
+Maps directly onto task-2037's 4 DoD items: (1) order-independent
+worst-verdict-wins, (2) bundle_hash's sensitivity to a single-bit param
+change, (3) rule exceptions fail-closed to DENY, (4) hash utility reuse
+(cross-checked against `src.core.risk.hashing` directly instead of
+reimplementing sha256/canonical_json).
 """
+
 from __future__ import annotations
 
 from datetime import datetime, timezone
@@ -82,8 +84,10 @@ def test_rule_exception_is_fail_closed_deny_not_swallowed_uncaught():
     decision = evaluate_bundle(_bundle(ok_rule, broken_rule), {}, now=_NOW)
 
     assert decision.verdict == ComplianceVerdict.DENY
-    assert any(hit.rule_id == "R_BROKEN" and hit.severity == ComplianceVerdict.DENY
-               for hit in decision.rule_hits)
+    assert any(
+        hit.rule_id == "R_BROKEN" and hit.severity == ComplianceVerdict.DENY
+        for hit in decision.rule_hits
+    )
 
 
 def test_bundle_hash_changes_when_one_param_bit_flips():
