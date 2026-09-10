@@ -15,6 +15,7 @@ delisted/relisted)를 쓴다 — 어휘·행 구성이 달라 동형이 아니�
 순수 함수 범위 밖이다. 이 함수는 상태×이벤트만으로 정해지는 전이 가능
 여부와, 그 전이에 대응하는 감사 이벤트 이름만 판정한다.
 """
+
 from __future__ import annotations
 
 from typing import Final, Literal
@@ -41,9 +42,7 @@ __all__ = [
     "audit_event_for",
 ]
 
-LifecycleEvent = Literal[
-    "listed", "symbol_changed", "halted", "resumed", "delisted", "relisted"
-]
+LifecycleEvent = Literal["listed", "symbol_changed", "halted", "resumed", "delisted", "relisted"]
 
 EVENT_LISTED: Final[LifecycleEvent] = "listed"
 EVENT_SYMBOL_CHANGED: Final[LifecycleEvent] = "symbol_changed"
@@ -98,9 +97,7 @@ class RelistRequiresNewInstrumentError(LifecycleTransitionError):
     """
 
 
-def transition(
-    state: InstrumentLifecycle, event: LifecycleEvent
-) -> InstrumentLifecycle:
+def transition(state: InstrumentLifecycle, event: LifecycleEvent) -> InstrumentLifecycle:
     """§4.2 상태기계.
 
     delisted+relisted는 새 instrument 발급을 요구하므로 in-place 전이가
@@ -114,10 +111,8 @@ def transition(
         )
     try:
         return _TRANSITIONS[(state, event)]
-    except KeyError as exc:
-        raise LifecycleTransitionError(
-            f"허용되지 않는 전이: {state.value} + {event}"
-        ) from exc
+    except (KeyError, TypeError) as exc:
+        raise LifecycleTransitionError(f"허용되지 않는 전이: {state!r} + {event!r}") from exc
 
 
 def audit_event_for(state: InstrumentLifecycle, event: LifecycleEvent) -> str:
@@ -126,7 +121,5 @@ def audit_event_for(state: InstrumentLifecycle, event: LifecycleEvent) -> str:
     기준을 쓴다."""
     try:
         return _AUDIT_EVENTS[(state, event)]
-    except KeyError as exc:
-        raise LifecycleTransitionError(
-            f"허용되지 않는 전이: {state.value} + {event}"
-        ) from exc
+    except (KeyError, TypeError) as exc:
+        raise LifecycleTransitionError(f"허용되지 않는 전이: {state!r} + {event!r}") from exc
