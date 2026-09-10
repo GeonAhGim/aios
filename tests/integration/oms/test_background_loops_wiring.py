@@ -20,10 +20,13 @@ from uuid import UUID
 from src.core.event_bus.in_process import InProcessEventBus
 from src.core.loader.risk_policy_loader import load_risk_policy
 from src.core.safety.metrics_collector import ApiCallTracker
+from src.foundation.mandates.adapters.postgres_repository import PostgresMandateRepository
+from src.foundation.trust.adapters.postgres_repository import PostgresTrustRepository
 from src.services.background_loops import start_background_loops
 from src.services.oms.adapters.order_repository import PostgresOrderRepository
 from src.services.oms.adapters.outbox_repository import OutboxRepository
 from src.services.oms.application.wiring import OMS_DISPATCHER_FLAG
+from tests.foundation.integration.risk_gate.conftest import activate_mandate_with_defaults
 from tests.integration.oms.conftest import create_test_tenant, insert_order
 from tests.support.oms_outbox_fakes import ScriptedAdapter, submit_payload
 
@@ -63,6 +66,15 @@ async def test_start_background_loops_registers_oms_dispatcher_and_processes_row
     monkeypatch.setenv("AIOS_STARTUP_RECOVERY_ENABLED", "0")
 
     user_id = await create_test_tenant(pool)
+    # H-1b(task-3369) — `wiring.build_outbox_dispatcher`가 이제
+    # require_mandate=True로 조립되므로, mandate 없는 tenant의 주문은 H-1a
+    # resolver가 찾을 게 없어 RISK_MANDATE_REQUIRED로 거부된다(의도된
+    # 동작). 이 테스트는 디스패처 배선 자체(태스크 등록→실제 행 처리)를
+    # 보는 것이 목적이라, "paper 흐름 회귀 통과" DoD에 맞춰 tenant에 ACTIVE
+    # mandate를 연결해 정상 통과 경로를 유지한다.
+    await activate_mandate_with_defaults(
+        PostgresMandateRepository(pool), PostgresTrustRepository(pool), tenant_id=user_id
+    )
     order_id, client_order_id = await _enqueue_submit(pool, user_id)
     adapter = ScriptedAdapter()
 

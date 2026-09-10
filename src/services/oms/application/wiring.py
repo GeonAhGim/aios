@@ -11,7 +11,7 @@ task-1720(P1-A, 감사 2026-09-06) — 위 task-1538 decision이 실제로는 �
 `build_outbox_dispatcher`를 호출하고 `OMS_DISPATCHER_FLAG`로 등록한다.
 
 이 모듈이 고정하는 것(I-10 "배선·우회불가·증명됨"):
-- 전송 게이트는 `make_foundation_pre_submit_gate(pool, require_mandate=False)` —
+- 전송 게이트는 `make_foundation_pre_submit_gate(pool, require_mandate=True)` —
   실행 루프(`background_loops.py`)와 **같은 구현체**. kill switch·safety
   control(GLOBAL/TENANT/ACCOUNT/PROVIDER/STRATEGY_DEPLOYMENT)이 enqueue와
   dispatch 사이에 켜지면 전송을 막는다(우회 경로 없음, `OutboxDispatcher`는
@@ -87,7 +87,7 @@ def build_outbox_dispatcher(
         outbox_repo=outbox_repo,
         order_repo=order_repo,
         resolve_adapter=resolve_adapter,
-        pre_send_gate=make_foundation_pre_submit_gate(pool, require_mandate=False),
+        pre_send_gate=make_foundation_pre_submit_gate(pool, require_mandate=True),
         worker_id=worker_id if worker_id is not None else default_worker_id(),
         lease_sec=lease_sec,
         poll_interval_sec=poll_interval_sec,

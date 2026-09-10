@@ -467,6 +467,6 @@ async def test_wiring_uses_foundation_gate(monkeypatch, outbox, orders):
         pool,  # type: ignore[arg-type]
         resolve_adapter=resolve, outbox_repo=outbox, order_repo=orders,
     )
-    assert seen == {"pool": pool, "require_mandate": False}
+    assert seen == {"pool": pool, "require_mandate": True}
     assert d._gate is allow_gate
     assert len(d.worker_id.split(":")) == 3

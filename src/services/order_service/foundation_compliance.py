@@ -64,9 +64,11 @@ async def evaluate_compliance_gate(
     carries a real, non-None `compliance_decision_id` (`submit_order`'s
     fail-closed contract): a genuine WORM `policy_decision` row when a rule
     bundle actually ran, or a deterministic marker when no mandate is
-    configured and `require_compliance_mandate=False` lets that pass — the
-    same "audit-logged passthrough" shape as `foundation_gate.py`'s existing
-    `require_mandate=False` branch for the numeric-policy check.
+    configured and `require_compliance_mandate=False` lets that pass — mirrors
+    the numeric-policy check's own sibling `require_mandate` flag when that one
+    is off. H-1b(task-3369) flipped `require_mandate` to `True` in all three
+    production assemblies; this CM-8 flag is an independent axis and still
+    defaults to `False` (H-2/CM-11 is its own separate leaf).
     """
     try:
         result = await evaluate_pre_trade(
