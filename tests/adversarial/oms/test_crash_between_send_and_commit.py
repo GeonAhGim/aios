@@ -11,6 +11,7 @@ outbox 행은 lease가 만료된 SENDING으로 남는다 — 어댑터를 실제
 두 경로가 서로 다른 결과를 내야 "상태기계로 분기한다"는 주장이 증명된다
 (test_response_lost_after_send_becomes_unknown 선례와 동일 원칙).
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -223,6 +224,24 @@ async def test_live_lease_not_expired_is_left_untouched(pool):
     assert outbox["state"] == "SENDING"
     assert outbox["worker_id"] == "dead-worker"  # 복구 워커가 리스를 훔치지 않았다
     assert adapter.lookup_calls == 0
+
+
+async def test_risk_gate_repo_none_is_rejected_i01() -> None:
+    """I-01 배선 증명 — `unknown_resolver.resolve_unknown`과 같은 fail-closed
+    가드(`test_unknown_resolver_limits.py::test_risk_gate_repo_none_is_rejected_i01`
+    선례)가 `recover_stuck_outbox_commands`에도 그대로 있다: 안전 게이트 인자는
+    None 기본값을 가질 수 없다. 이 검사는 `pool.acquire()`보다 먼저 실행되므로
+    나머지 인자는 전부 더미로 충분하다 — 실제로 DB/어댑터를 열지 않고도
+    가드가 배선돼 있는지(구현만 되고 우회 가능한 게 아닌지) 증명한다."""
+    with pytest.raises(TypeError):
+        await restart_recovery.recover_stuck_outbox_commands(
+            None,  # type: ignore[arg-type]
+            order_repo=None,  # type: ignore[arg-type]
+            outbox_repo=None,  # type: ignore[arg-type]
+            resolve_adapter=None,  # type: ignore[arg-type]
+            risk_gate_repo=None,  # type: ignore[arg-type]
+            clock=lambda: datetime.now(timezone.utc),
+        )
 
 
 def test_delegates_to_unknown_resolver_without_reimplementing() -> None:
