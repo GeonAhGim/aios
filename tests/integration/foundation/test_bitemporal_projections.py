@@ -14,14 +14,17 @@ from __future__ import annotations
 import os
 import uuid
 from decimal import Decimal
+from uuid import UUID
 
 import asyncpg
 import pytest
 
+from src.foundation.entities.domain.defaults import default_portfolio_id
 from src.foundation.ledger.adapters.postgres_balance_repository import PostgresBalanceRepository
 from src.foundation.positions.adapters.postgres_snapshot_repository import (
     PostgresSnapshotRepository,
 )
+from src.foundation.positions.domain.position_key import PositionKey
 from tests.integration.conftest import create_test_tenant
 from tests.integration.foundation.ledger.conftest import create_ledger_account
 from tests.integration.foundation.positions.conftest import (
@@ -50,10 +53,20 @@ def _assert_no_update_violation(exc_info: pytest.ExceptionInfo) -> None:
         assert "no-update violation" in str(exc_info.value)
 
 
+def _snapshot_key(tenant_id: UUID) -> str:
+    return str(
+        PositionKey(
+            venue="TESTVENUE", instrument_id=f"INST{uuid.uuid4().hex[:8]}",
+            strategy_id="default", execution_id="paper",
+            portfolio_id=default_portfolio_id(tenant_id),
+        )
+    )
+
+
 async def test_aios_app_cannot_update_pos_snapshot(pool: asyncpg.Pool) -> None:
     tenant_id = await create_test_tenant(pool)
     account_id = await create_pos_account(pool, tenant_id)
-    position_key = f"pos:{uuid.uuid4().hex}"
+    position_key = _snapshot_key(tenant_id)
     await open_position(
         pool, tenant_id=tenant_id, account_id=account_id, position_key=position_key
     )
@@ -103,7 +116,7 @@ async def test_aios_app_cannot_update_positions(pool: asyncpg.Pool) -> None:
 async def test_pos_snapshot_fold_keeps_single_current_row(pool: asyncpg.Pool) -> None:
     tenant_id = await create_test_tenant(pool)
     account_id = await create_pos_account(pool, tenant_id)
-    position_key = f"pos:{uuid.uuid4().hex}"
+    position_key = _snapshot_key(tenant_id)
     snapshot = await open_position(
         pool, tenant_id=tenant_id, account_id=account_id, position_key=position_key
     )

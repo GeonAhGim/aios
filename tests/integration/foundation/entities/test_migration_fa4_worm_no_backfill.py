@@ -51,6 +51,7 @@ from src.foundation.ledger.domain.chart_of_accounts import PLATFORM_CASH_CLEARIN
 from src.foundation.ledger.domain.hash_chain import entry_hash, lines_digest
 from src.foundation.ledger.domain.idempotency import idempotency_key
 from tests.integration.conftest import create_test_tenant
+from tests.support.deep_downgrade import purge_position_snapshots
 
 _PROJECT_ROOT = Path(__file__).resolve().parents[4]
 _DOWN_REVISION = "789c138f13fe"
@@ -82,16 +83,36 @@ async def pool():
     await p.close()
 
 
+def _sweep_synthetic_snapshots(prefix: str) -> None:
+    """FA-0d-fix (task-771991202): rows this module inserts below FA-4 carry
+    synthetic non-5-part keys that `cdb114b6903f` (FA-0d) refuses fail-closed,
+    so they are removed before the schema is brought back to head."""
+    import asyncio
+
+    async def _sweep() -> None:
+        conn = await asyncpg.connect(_asyncpg_dsn())
+        try:
+            await conn.execute(
+                "DELETE FROM pos_snapshot WHERE position_key LIKE $1", f"{prefix}%"
+            )
+        finally:
+            await conn.close()
+
+    asyncio.run(_sweep())
+
+
 @pytest.fixture(autouse=True)
 def _ensure_head():
     _run_alembic("upgrade", "head")
     yield
+    _sweep_synthetic_snapshots("fa4-worm-test-")
     _run_alembic("upgrade", "head")
 
 
 async def test_pos_journal_never_backfilled_because_worm_blocks_update(pool):
     tenant_id = await create_test_tenant(pool)
 
+    await purge_position_snapshots(pool)  # deep downgrade: see tests/support/deep_downgrade.py
     _run_alembic("downgrade", _DOWN_REVISION)
     async with pool.acquire() as conn:
         account_id = await conn.fetchval(
@@ -120,7 +141,7 @@ async def test_pos_journal_never_backfilled_because_worm_blocks_update(pool):
             f"fa4-worm-test-{uuid4().hex}",
         )
 
-    _run_alembic("upgrade", "head")
+    _run_alembic("upgrade", "963d5f3cfb1b")
 
     async with pool.acquire() as conn:
         row = await conn.fetchrow(
@@ -270,6 +291,7 @@ async def _insert_pre_fa4_ledger_entry(pool: asyncpg.Pool, event_ref: str, user_
 
 
 async def test_ledger_journal_entry_and_posting_line_never_backfilled(pool):
+    await purge_position_snapshots(pool)  # deep downgrade: see tests/support/deep_downgrade.py
     _run_alembic("downgrade", _DOWN_REVISION)
     entry_id = await _insert_pre_fa4_ledger_entry(
         pool, f"fa4-worm-test:{uuid4().hex}", uuid4()

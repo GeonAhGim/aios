@@ -31,6 +31,7 @@ from src.foundation.entities.domain.defaults import (
     default_portfolio_id,
 )
 from tests.integration.conftest import create_test_tenant
+from tests.support.deep_downgrade import purge_position_snapshots
 
 _PROJECT_ROOT = Path(__file__).resolve().parents[4]
 _DOWN_REVISION = "789c138f13fe"
@@ -70,10 +71,29 @@ async def pool():
     await p.close()
 
 
+def _sweep_synthetic_snapshots(prefix: str) -> None:
+    """FA-0d-fix (task-771991202): rows this module inserts below FA-4 carry
+    synthetic non-5-part keys that `cdb114b6903f` (FA-0d) refuses fail-closed,
+    so they are removed before the schema is brought back to head."""
+    import asyncio
+
+    async def _sweep() -> None:
+        conn = await asyncpg.connect(_asyncpg_dsn())
+        try:
+            await conn.execute(
+                "DELETE FROM pos_snapshot WHERE position_key LIKE $1", f"{prefix}%"
+            )
+        finally:
+            await conn.close()
+
+    asyncio.run(_sweep())
+
+
 @pytest.fixture(autouse=True)
 def _ensure_head():
     _run_alembic("upgrade", "head")
     yield
+    _sweep_synthetic_snapshots("fa4-test-")
     _run_alembic("upgrade", "head")
 
 
@@ -121,6 +141,7 @@ async def test_upgrade_downgrade_upgrade_round_trip_adds_and_removes_columns(poo
         for column in ("fund_id", "portfolio_id"):
             assert await _column_exists(pool, table, column)
 
+    await purge_position_snapshots(pool)  # deep downgrade: see tests/support/deep_downgrade.py
     _run_alembic("downgrade", _DOWN_REVISION)
     for table in _ALL_TABLES:
         for column in ("fund_id", "portfolio_id"):
@@ -145,10 +166,11 @@ async def test_negative_insert_with_nonexistent_fund_id_rejected_by_fk(pool):
 
 
 async def test_backfill_computes_default_ids_for_bootstrapped_user_and_nulls_the_rest(pool):
-    bootstrapped_user = await create_test_tenant(pool)
-    bare_user = await create_test_tenant(pool)
+    bootstrapped_user = await create_test_tenant(pool, bootstrap_default_hierarchy_rows=False)
+    bare_user = await create_test_tenant(pool, bootstrap_default_hierarchy_rows=False)
     await _bootstrap_hierarchy(pool, bootstrapped_user)
 
+    await purge_position_snapshots(pool)  # deep downgrade: see tests/support/deep_downgrade.py
     _run_alembic("downgrade", _DOWN_REVISION)
     async with pool.acquire() as conn:
         bootstrapped_account_id = await conn.fetchval(
@@ -180,7 +202,7 @@ async def test_backfill_computes_default_ids_for_bootstrapped_user_and_nulls_the
             uuid4(),
         )
 
-    _run_alembic("upgrade", "head")
+    _run_alembic("upgrade", "963d5f3cfb1b")
 
     async with pool.acquire() as conn:
         pos_account_backfilled = await conn.fetchval(

@@ -14,6 +14,8 @@ from pathlib import Path
 import asyncpg
 import pytest
 
+from tests.support.deep_downgrade import purge_position_snapshots
+
 _PROJECT_ROOT = Path(__file__).resolve().parents[4]
 _DOWN_REVISION = "c1f4a9e7b3d6"
 
@@ -61,6 +63,7 @@ async def test_upgrade_downgrade_upgrade_round_trip_recreates_all_four_tables(po
     for table in ("legal_entity", "fund", "portfolio", "sub_account"):
         assert await _table_exists(pool, table)
 
+    await purge_position_snapshots(pool)  # deep downgrade: see tests/support/deep_downgrade.py
     _run_alembic("downgrade", _DOWN_REVISION)
     for table in ("legal_entity", "fund", "portfolio", "sub_account"):
         assert not await _table_exists(pool, table)
@@ -91,6 +94,7 @@ async def test_legal_entity_tenant_id_fk_targets_tenant_not_users(pool):
 
 
 async def test_fa2a_downgrade_restores_users_fk_then_upgrade_restores_tenant_fk(pool):
+    await purge_position_snapshots(pool)  # deep downgrade: see tests/support/deep_downgrade.py
     _run_alembic("downgrade", "e6b1d94a7c3f")
     assert await _legal_entity_tenant_fk_target(pool) == "users"
 

@@ -10,11 +10,12 @@ from __future__ import annotations
 import asyncio
 from datetime import datetime, timezone
 from decimal import Decimal
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import pytest
 
 from src.data.models.base import Currency, Money
+from src.foundation.entities.domain.defaults import default_portfolio_id
 from src.foundation.positions.adapters.postgres_journal_repository import (
     IdempotencyDigestMismatchError,
     PostgresJournalRepository,
@@ -26,9 +27,9 @@ from tests.integration.conftest import create_test_tenant
 from tests.integration.foundation.positions.conftest import create_pos_account, open_position
 
 
-def _key() -> str:
+def _key(tenant_id: UUID) -> str:
     return str(
-        PositionKey(portfolio_id=uuid4(), 
+        PositionKey(portfolio_id=default_portfolio_id(tenant_id),
             venue="TESTVENUE",
             instrument_id=f"INST{uuid4().hex[:8]}",
             strategy_id="default",
@@ -48,7 +49,7 @@ def repo(pool):
 async def _open(pool):
     tenant_id = await create_test_tenant(pool)
     account_id = await create_pos_account(pool, tenant_id)
-    position_key = _key()
+    position_key = _key(tenant_id)
     await open_position(pool, tenant_id=tenant_id, account_id=account_id, position_key=position_key)
     return tenant_id, account_id, position_key
 
@@ -122,7 +123,7 @@ async def test_append_same_key_different_content_raises_digest_mismatch(pool, re
 
 
 async def test_append_without_snapshot_raises_unknown_position(pool, repo):
-    position_key = _key()
+    position_key = _key(uuid4())  # no tenant/snapshot at all: must be rejected
 
     with pytest.raises(UnknownPositionError):
         await _append(repo, pool, position_key)

@@ -128,7 +128,7 @@ async def test_get_and_list_statements_without_portfolio_id_is_unchanged_regress
 async def test_get_and_list_statements_accept_tenant_default_portfolio_id(
     pool, perf_repo, entity_repo
 ):
-    tenant_id = await create_test_tenant(pool)
+    tenant_id = await create_test_tenant(pool, bootstrap_default_hierarchy_rows=False)
     await _seed_default_hierarchy(pool, entity_repo, tenant_id)
     await perf_repo.insert_methodology(DEFAULT_METHODOLOGY)
     inserted = await perf_repo.insert_statement(await _statement(tenant_id))

@@ -28,6 +28,7 @@ from src.core.eventstore.projections import orders as orders_projection
 from src.core.eventstore.projections import positions as positions_projection
 from src.data.models.base import AssetClass, Currency, Money
 from src.data.models.trading import OrderSide, OrderStatus
+from src.foundation.entities.domain.defaults import default_portfolio_id
 from src.foundation.evidence.adapters.postgres_repository import PostgresAuditEventRepository
 from src.foundation.ledger.adapters.postgres_balance_repository import PostgresBalanceRepository
 from src.foundation.ledger.adapters.postgres_journal_repository import PostgresJournalRepository
@@ -267,7 +268,7 @@ async def _record_two_fills(pool) -> tuple:
     position_key = str(
         PositionKey(
             venue="TESTVENUE", instrument_id=f"INST{uuid4().hex[:8]}", strategy_id="default",
-            execution_id="paper", portfolio_id=uuid4(),
+            execution_id="paper", portfolio_id=default_portfolio_id(tenant_id),
         )
     )
     await open_position(

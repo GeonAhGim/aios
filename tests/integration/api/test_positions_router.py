@@ -33,9 +33,11 @@ from src.foundation.positions.contracts.v1 import (
     NAVSnapshot,
     PositionSnapshotView,
 )
+from src.foundation.positions.domain.position_key import PositionKey
 from src.main import app
 from tests.conftest import lifespan_context_with_retry, retry_too_many_connections
 from tests.integration.foundation.entities.conftest import build_hierarchy
+from tests.support.entities_seed import bootstrap_default_portfolio
 
 STRONG_PASSWORD = "Str0ng!Passw0rd"
 BASE = "/v1/positions"
@@ -95,10 +97,21 @@ async def _open_position(
     quantity: Decimal,
     portfolio_id: UUID | None = None,
 ) -> PositionSnapshotView:
-    # FA-0d 5부분 형식(+portfolio_id)은 portfolio_id가 주어졌을 때만 쓴다 —
-    # 나머지 기존 호출은 이전 리프의 옛(4부분) 키를 그대로 재현해 회귀를 지킨다.
-    key = f"TESTVENUE:{uuid.uuid4().hex}:strat:exec" + (
-        "" if portfolio_id is None else f":{portfolio_id}"
+    # FA-0d-fix: the adapter now requires a 5-part key whose portfolio the
+    # tenant owns -- callers that do not pick a portfolio get the tenant's
+    # FA-1 default one. The default hierarchy is bootstrapped (idempotently,
+    # API-registered tenants have none yet) even when an explicit portfolio is
+    # given: a migration round trip below FA-4 re-derives `pos_snapshot.
+    # portfolio_id` from the tenant default, and FA-0d fails closed on rows
+    # whose tenant has none.
+    default_portfolio_id = await bootstrap_default_portfolio(pool, tenant_id)
+    if portfolio_id is None:
+        portfolio_id = default_portfolio_id
+    key = str(
+        PositionKey(
+            venue="TESTVENUE", instrument_id=uuid.uuid4().hex, strategy_id="strat",
+            execution_id="exec", portfolio_id=portfolio_id,
+        )
     )
     snapshot = PositionSnapshotView(
         position_key=key,

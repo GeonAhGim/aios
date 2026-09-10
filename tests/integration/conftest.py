@@ -10,6 +10,8 @@ from uuid import UUID, uuid4
 
 import asyncpg
 
+from tests.support.entities_seed import bootstrap_default_hierarchy
+
 
 async def create_test_user(pool: asyncpg.Pool) -> UUID:
     async with pool.acquire() as conn:
@@ -22,18 +24,31 @@ async def create_test_user(pool: asyncpg.Pool) -> UUID:
     return user_id
 
 
-async def create_test_tenant(pool: asyncpg.Pool) -> UUID:
+async def create_test_tenant(
+    pool: asyncpg.Pool, *, bootstrap_default_hierarchy_rows: bool = True
+) -> UUID:
     """`users` 행 + 그 PERSONAL `tenant` 행(id == user_id)을 함께 만든다.
 
     `f4a6b8c0d2e4`가 기존 사용자에 대해서만 PERSONAL tenant를 백필하므로,
     테스트에서 새로 만든 사용자는 이 헬퍼 없이는 대응하는 `tenant` 행이
     없다 — `tenant(id)`를 FK하는 테이블(예: `legal_entity`)에 행을
-    넣으려면 이 헬퍼로 만든 id를 써야 한다."""
+    넣으려면 이 헬퍼로 만든 id를 써야 한다.
+
+    FA-0d-fix (task-771991202): by default the tenant's FA-1 default
+    hierarchy (legal entity / fund / portfolio / sub-account, deterministic
+    ids) is persisted too, through the same idempotent
+    `ensure_default_hierarchy` the operational bootstrap uses -- every
+    `pos_snapshot` write now carries `default_portfolio_id(tenant_id)` as a
+    real FK, so a tenant without it cannot open a position. Pass
+    `bootstrap_default_hierarchy_rows=False` only for tests that assert the
+    un-bootstrapped branch or create the default-id rows themselves."""
     user_id = await create_test_user(pool)
     async with pool.acquire() as conn:
         await conn.execute(
             "INSERT INTO tenant (id, kind) VALUES ($1, 'PERSONAL')", user_id
         )
+    if bootstrap_default_hierarchy_rows:
+        await bootstrap_default_hierarchy(pool, user_id)
     return user_id
 
 

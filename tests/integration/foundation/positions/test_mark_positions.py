@@ -11,12 +11,13 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import pytest
 
 from src.core.db.conditional_write import ConcurrencyConflictError
 from src.data.models.base import AssetClass, Currency, Money
+from src.foundation.entities.domain.defaults import default_portfolio_id
 from src.foundation.market_data.contracts.v1 import (
     CandleRecord,
     InstrumentRef,
@@ -195,9 +196,9 @@ def _unique_symbol(prefix: str) -> str:
     return f"{prefix}{uuid4().hex[:8]}"
 
 
-def _position_key(venue_symbol: str) -> str:
+def _position_key(tenant_id: UUID, venue_symbol: str) -> str:
     return str(
-        PositionKey(portfolio_id=uuid4(), 
+        PositionKey(portfolio_id=default_portfolio_id(tenant_id),
             venue="bitget",
             instrument_id=venue_symbol,
             strategy_id="default",
@@ -254,7 +255,7 @@ async def test_fresh_mark_updates_unrealized_same_currency(pool, refs, store, ca
         pool, tenant_id, venue="bitget", base_currency=Currency.USDT
     )
     symbol = _unique_symbol("BTCUSDT")
-    position_key = _position_key(symbol)
+    position_key = _position_key(tenant_id, symbol)
     await _open_position(
         pool,
         tenant_id=tenant_id,
@@ -291,7 +292,7 @@ async def test_stale_candle_clears_previous_mark_instead_of_keeping_it(pool, ref
         pool, tenant_id, venue="bitget", base_currency=Currency.USDT
     )
     symbol = _unique_symbol("BTCUSDT")
-    position_key = _position_key(symbol)
+    position_key = _position_key(tenant_id, symbol)
     snapshot = await _open_position(
         pool,
         tenant_id=tenant_id,
@@ -335,7 +336,7 @@ async def test_unknown_instrument_yields_none_mark(pool, refs, store, cal):
     account_id = await create_pos_account(
         pool, tenant_id, venue="bitget", base_currency=Currency.USDT
     )
-    position_key = _position_key(_unique_symbol("UNKNOWNSYM"))
+    position_key = _position_key(tenant_id, _unique_symbol("UNKNOWNSYM"))
     await _open_position(
         pool,
         tenant_id=tenant_id,
@@ -364,7 +365,7 @@ async def test_missing_fx_keeps_mark_but_clears_unrealized(refs, store, cal):
     로만 재현할 수 있다."""
     tenant_id, account_id = uuid4(), uuid4()
     symbol = _unique_symbol("BTCUSDT")
-    position_key = _position_key(symbol)
+    position_key = _position_key(tenant_id, symbol)
     snapshots = FakeSnapshotRepository()
     snapshots.seed(
         PositionSnapshotView(
@@ -437,7 +438,7 @@ async def test_unknown_venue_position_key_yields_none_mark(pool, refs, store, ca
         pool, tenant_id, venue="TESTVENUE", base_currency=Currency.USDT
     )
     position_key = str(
-        PositionKey(portfolio_id=uuid4(), 
+        PositionKey(portfolio_id=default_portfolio_id(tenant_id),
             venue="TESTVENUE",
             instrument_id=_unique_symbol("BTCUSDT"),
             strategy_id="default",

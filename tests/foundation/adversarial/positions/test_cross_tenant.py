@@ -18,7 +18,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from decimal import Decimal
 from pathlib import Path
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import asyncpg
 import pytest
@@ -26,6 +26,7 @@ from dotenv import dotenv_values
 
 from src.data.models.base import AssetClass, Currency, Money
 from src.data.models.trading import OrderSide
+from src.foundation.entities.domain.defaults import default_portfolio_id
 from src.foundation.evidence.adapters.postgres_repository import PostgresAuditEventRepository
 from src.foundation.positions.adapters.postgres_journal_repository import (
     PostgresJournalRepository,
@@ -60,9 +61,9 @@ async def pool():
     await p.close()
 
 
-def _key() -> str:
+def _key(tenant_id: UUID) -> str:
     return str(
-        PositionKey(portfolio_id=uuid4(),
+        PositionKey(portfolio_id=default_portfolio_id(tenant_id),
             venue="TESTVENUE",
             instrument_id=f"INST{uuid4().hex[:8]}",
             strategy_id="default",
@@ -99,7 +100,7 @@ async def _attack_command(*, tenant_id, account_id, position_key) -> RecordFillC
 async def test_cross_tenant_position_key_rejected(pool):
     owner_id = await create_test_tenant(pool)
     owner_account_id = await create_pos_account(pool, owner_id)
-    position_key = _key()
+    position_key = _key(owner_id)
     await open_position(
         pool, tenant_id=owner_id, account_id=owner_account_id, position_key=position_key
     )
@@ -150,7 +151,7 @@ async def test_same_tenant_different_account_position_key_rejected(pool):
     복수 개일 수 있다) tenant 스코프만으로는 이 경계를 못 막는다."""
     owner_id = await create_test_tenant(pool)
     owner_account_id = await create_pos_account(pool, owner_id)
-    position_key = _key()
+    position_key = _key(owner_id)
     await open_position(
         pool, tenant_id=owner_id, account_id=owner_account_id, position_key=position_key
     )

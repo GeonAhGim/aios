@@ -21,12 +21,13 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 from decimal import Decimal
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import pytest
 
 from src.data.models.base import AssetClass, Currency, Money
 from src.data.models.trading import OrderSide
+from src.foundation.entities.domain.defaults import default_portfolio_id
 from src.foundation.evidence.adapters.postgres_repository import PostgresAuditEventRepository
 from src.foundation.positions.adapters.postgres_journal_repository import (
     PostgresJournalRepository,
@@ -45,9 +46,9 @@ def _clock() -> datetime:
     return datetime.now(timezone.utc)
 
 
-def _position_key() -> str:
+def _position_key(tenant_id: UUID) -> str:
     return str(
-        PositionKey(portfolio_id=uuid4(), 
+        PositionKey(portfolio_id=default_portfolio_id(tenant_id),
             venue="FA16ADV", instrument_id=f"INST{uuid4().hex[:8]}",
             strategy_id="default", execution_id="paper",
         )
@@ -73,7 +74,7 @@ class _BoomPositionJournal:
 async def _open_position(pool):
     tenant_id = await create_test_tenant(pool)
     account_id = await create_pos_account(pool, tenant_id)
-    position_key = _position_key()
+    position_key = _position_key(tenant_id)
     await open_position(pool, tenant_id=tenant_id, account_id=account_id, position_key=position_key)
     return tenant_id, account_id, position_key
 

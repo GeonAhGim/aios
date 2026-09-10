@@ -19,6 +19,7 @@ import pytest
 
 from tests.integration.conftest import create_test_user
 from tests.integration.core.db.conftest import AppRoleTx
+from tests.support.deep_downgrade import purge_position_snapshots
 
 _PROJECT_ROOT = Path(__file__).resolve().parents[4]
 # b3c7f19ad2e6(rls_policies_foundation, PLT-30 M5)의 down_revision. 이 리프
@@ -118,6 +119,7 @@ def _run_alembic(*args: str) -> None:
 
 async def test_upgrade_downgrade_round_trip(pool):
     try:
+        await purge_position_snapshots(pool)  # deep downgrade: see tests/support/deep_downgrade.py
         _run_alembic("downgrade", _PRE_RLS_REVISION)
         for table in _FOUNDATION_TABLES:
             assert await _relrowsecurity(pool, table) is False

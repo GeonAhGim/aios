@@ -19,7 +19,7 @@ import asyncio
 from datetime import datetime, timezone
 from decimal import Decimal
 from pathlib import Path
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import asyncpg
 import pytest
@@ -27,6 +27,7 @@ from dotenv import dotenv_values
 
 from src.data.models.base import AssetClass, Currency, Money
 from src.data.models.trading import OrderSide
+from src.foundation.entities.domain.defaults import default_portfolio_id
 from src.foundation.evidence.adapters.postgres_repository import PostgresAuditEventRepository
 from src.foundation.positions.adapters.postgres_journal_repository import (
     PostgresJournalRepository,
@@ -64,9 +65,9 @@ async def pool():
     await p.close()
 
 
-def _key() -> str:
+def _key(tenant_id: UUID) -> str:
     return str(
-        PositionKey(portfolio_id=uuid4(),
+        PositionKey(portfolio_id=default_portfolio_id(tenant_id),
             venue="TESTVENUE",
             instrument_id=f"INST{uuid4().hex[:8]}",
             strategy_id="default",
@@ -116,7 +117,7 @@ async def _fill_once(pool: asyncpg.Pool, *, tenant_id, account_id, position_key)
 async def test_twenty_concurrent_fills_produce_gapless_unique_sequence(pool):
     tenant_id = await create_test_tenant(pool)
     account_id = await create_pos_account(pool, tenant_id)
-    position_key = _key()
+    position_key = _key(tenant_id)
     await open_position(pool, tenant_id=tenant_id, account_id=account_id, position_key=position_key)
     try:
         results = await asyncio.gather(

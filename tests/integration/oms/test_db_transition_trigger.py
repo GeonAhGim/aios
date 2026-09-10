@@ -29,6 +29,7 @@ from tests.integration.oms.conftest import (
     insert_event,
     insert_order,
 )
+from tests.support.deep_downgrade import purge_position_snapshots
 
 _PROJECT_ROOT = Path(__file__).resolve().parents[3]
 
@@ -77,6 +78,7 @@ async def test_downgrade_then_upgrade_round_trip(pool):
     # "-1"이 아니라 073beca589d5의 down_revision을 명시한다 — 이 리프 위에
     # 다른 마이그레이션(d0a580db5ce8 등)이 쌓이면 "-1"은 그 최신 마이그레이션만
     # 되돌려 이 테스트의 전제(073beca589d5가 되돌려짐)가 깨진다.
+    await purge_position_snapshots(pool)  # deep downgrade: see tests/support/deep_downgrade.py
     _run_alembic("downgrade", "e1d9b5ed8d7d")
     for table in (
         "order_events",

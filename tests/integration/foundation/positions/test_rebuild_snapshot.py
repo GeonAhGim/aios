@@ -11,12 +11,13 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 from decimal import Decimal
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import pytest
 
 from src.data.models.base import AssetClass, Currency, Money
 from src.data.models.trading import OrderSide
+from src.foundation.entities.domain.defaults import default_portfolio_id
 from src.foundation.evidence.adapters.postgres_repository import PostgresAuditEventRepository
 from src.foundation.positions.adapters.postgres_journal_repository import (
     PostgresJournalRepository,
@@ -46,9 +47,9 @@ def _clock() -> datetime:
     return datetime.now(timezone.utc)
 
 
-def _key() -> str:
+def _key(tenant_id: UUID) -> str:
     return str(
-        PositionKey(portfolio_id=uuid4(), 
+        PositionKey(portfolio_id=default_portfolio_id(tenant_id),
             venue="TESTVENUE",
             instrument_id=f"INST{uuid4().hex[:8]}",
             strategy_id="default",
@@ -72,7 +73,7 @@ def ports(pool):
 async def _open(pool):
     tenant_id = await create_test_tenant(pool)
     account_id = await create_pos_account(pool, tenant_id)
-    position_key = _key()
+    position_key = _key(tenant_id)
     await open_position(pool, tenant_id=tenant_id, account_id=account_id, position_key=position_key)
     return tenant_id, account_id, position_key
 
@@ -130,7 +131,7 @@ async def test_unknown_position_rejected(pool, ports):
     tenant_id = await create_test_tenant(pool)
     with pytest.raises(UnknownPositionError):
         await rebuild_snapshot(
-            _key(),
+            _key(tenant_id),
             tenant_id=tenant_id,
             asset_class=AssetClass.CRYPTO,
             journal=ports.journal,

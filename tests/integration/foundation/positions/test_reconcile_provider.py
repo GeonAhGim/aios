@@ -21,6 +21,7 @@ from src.core.observability.metrics_registry import MetricsRegistry
 from src.data.models.base import Currency, Money
 from src.data.models.trading import AccountBalance
 from src.foundation.connections.adapters.postgres_repository import PostgresConnectionRepository
+from src.foundation.entities.domain.defaults import default_portfolio_id
 from src.foundation.positions.adapters.exchange_balance_source import ExchangeBalanceSource
 from src.foundation.positions.adapters.postgres_snapshot_repository import (
     PostgresSnapshotRepository,
@@ -72,8 +73,8 @@ async def _open_position(
 ) -> PositionSnapshotView:
     position_key = str(
         PositionKey(
-            portfolio_id=uuid4(), venue="bitget", instrument_id=asset, strategy_id="default",
-            execution_id="p1",
+            portfolio_id=default_portfolio_id(tenant_id), venue="bitget", instrument_id=asset,
+            strategy_id="default", execution_id="p1",
         )
     )
     snapshot = PositionSnapshotView(

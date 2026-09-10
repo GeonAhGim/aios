@@ -22,6 +22,7 @@ from src.core.observability.metric_names import (
 )
 from src.core.observability.metrics_registry import MetricsRegistry
 from src.data.models.base import Currency, Money
+from src.foundation.entities.domain.defaults import default_portfolio_id
 from src.foundation.market_data.domain.calendar.known_venues import KNOWN_SESSIONS
 from src.foundation.market_data.domain.calendar.session_rules import VenueCalendar
 from src.foundation.positions.adapters.postgres_snapshot_repository import (
@@ -72,7 +73,7 @@ async def _open_position(
     pool, *, tenant_id, account_id, quantity: Decimal, venue: str = "bitget"
 ) -> PositionSnapshotView:
     position_key = str(
-        PositionKey(portfolio_id=uuid4(), 
+        PositionKey(portfolio_id=default_portfolio_id(tenant_id), 
             venue=venue, instrument_id=_unique_symbol("BTCUSDT"), strategy_id="default",
             execution_id="paper",
         )

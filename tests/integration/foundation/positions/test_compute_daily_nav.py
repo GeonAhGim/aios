@@ -16,6 +16,7 @@ from zoneinfo import ZoneInfo
 import pytest
 
 from src.data.models.base import Currency, Money
+from src.foundation.entities.domain.defaults import default_portfolio_id
 from src.foundation.market_data.domain.calendar.known_venues import KNOWN_SESSIONS
 from src.foundation.market_data.domain.calendar.session_rules import VenueCalendar
 from src.foundation.positions.adapters.postgres_nav_repository import PostgresNavRepository
@@ -61,9 +62,9 @@ def _unique_symbol(prefix: str) -> str:
     return f"{prefix}{uuid4().hex[:8]}"
 
 
-def _position_key(venue_symbol: str) -> str:
+def _position_key(tenant_id: UUID, venue_symbol: str) -> str:
     return str(
-        PositionKey(portfolio_id=uuid4(), 
+        PositionKey(portfolio_id=default_portfolio_id(tenant_id),
             venue="bitget", instrument_id=venue_symbol, strategy_id="default", execution_id="paper"
         )
     )
@@ -72,7 +73,7 @@ def _position_key(venue_symbol: str) -> str:
 async def _open_marked_position(
     pool, *, tenant_id, account_id, quantity: Decimal, mark_price: Money | None
 ) -> PositionSnapshotView:
-    position_key = _position_key(_unique_symbol("BTCUSDT"))
+    position_key = _position_key(tenant_id, _unique_symbol("BTCUSDT"))
     snapshot = PositionSnapshotView(
         position_key=position_key,
         tenant_id=tenant_id,

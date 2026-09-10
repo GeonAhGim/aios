@@ -43,6 +43,7 @@ from src.foundation.risk_gate.domain.models import GateKind, SafetyScope
 from src.foundation.trust.adapters.postgres_repository import PostgresTrustRepository
 from tests.foundation.integration.risk_gate.conftest import activate_mandate_with_defaults
 from tests.integration.conftest import create_test_tenant
+from tests.support.deep_downgrade import purge_position_snapshots
 
 
 class _FakeHealthyConnectionRepo:
@@ -747,6 +748,7 @@ async def test_migration_round_trip_restores_gate_kinds_and_new_columns(pool):
         assert await _column_exists(pool, "safety_control", "idempotency_digest")
         assert await _column_exists(pool, "strategy_executions", "paused_by_control_id")
 
+        await purge_position_snapshots(pool)  # deep downgrade: see tests/support/deep_downgrade.py
         _run_alembic("downgrade", "c7e6a3b2d4f5")
 
         after_downgrade = await _gate_kind_check_def(pool)

@@ -20,6 +20,25 @@ import asyncpg
 from src.foundation.positions.contracts.v1 import PositionSnapshotView
 
 
+class SnapshotPortfolioError(ValueError):
+    """FA-0d-fix (task-771991202): the `portfolio_id` carried as the 5th part
+    of `snapshot.position_key` cannot be written for `snapshot.tenant_id`.
+    `upsert` writes that id into `pos_snapshot.portfolio_id` (a real FK) and
+    fences it on tenant ownership, so a caller gets one of the two subclasses
+    below instead of a driver-level FK error or a misleading
+    `ConcurrencyConflictError`."""
+
+
+class SnapshotPortfolioNotFoundError(SnapshotPortfolioError):
+    """No `portfolio` row exists for that id -- the tenant's FA-1 default
+    hierarchy was never bootstrapped (`ensure_default_hierarchy`)."""
+
+
+class SnapshotPortfolioTenantMismatchError(SnapshotPortfolioError):
+    """The portfolio exists but belongs to another tenant -- the write is
+    rejected without touching the existing row (cross-tenant fence)."""
+
+
 @runtime_checkable
 class SnapshotRepository(Protocol):
     async def get(
@@ -35,7 +54,12 @@ class SnapshotRepository(Protocol):
         """§4.3 "스냅샷 = fold(저널)" 결과를 조건부로 반영한다. 기존 행의
         `last_journal_seq != expected_seq`면 `ConcurrencyConflictError` —
         호출자가 같은 `conn`에서 저널 append 직후 재조회 없이 넘긴 값이
-        어긋났다는 뜻이다. 최초 upsert는 `expected_seq=0`."""
+        어긋났다는 뜻이다. 최초 upsert는 `expected_seq=0`.
+
+        `snapshot.position_key` must be a 5-part FA-0d `PositionKey` (else
+        `InvalidPositionKeyError`); its `portfolio_id` is persisted into the
+        `portfolio_id` column and must belong to `snapshot.tenant_id`, else
+        `SnapshotPortfolioNotFoundError` / `SnapshotPortfolioTenantMismatchError`."""
         ...
 
     async def list_open(

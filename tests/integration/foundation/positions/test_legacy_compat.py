@@ -16,9 +16,11 @@ from uuid import UUID
 import asyncpg
 import pytest
 
+from src.foundation.entities.domain.defaults import default_fund_id, default_portfolio_id
 from src.foundation.positions.adapters.legacy_positions_projection import (
     LegacyPositionsProjection,
 )
+from src.foundation.positions.domain.position_key import PositionKey
 from tests.integration.conftest import create_test_tenant
 from tests.integration.foundation.positions.conftest import create_pos_account, force_row_replace
 
@@ -55,23 +57,37 @@ async def _seed_linked_pair(
             """,
             tenant_id, symbol, _EXCHANGE, quantity, price, realized_pnl, closed_at,
         )
-        position_key = f"pos:{uuid.uuid4().hex}"
+        position_key = _snapshot_key(tenant_id)
         await conn.execute(
             """
             INSERT INTO pos_snapshot (
                 position_key, tenant_id, account_id, instrument_id, quantity,
                 avg_cost, cost_method, lots, realized_pnl_base,
                 unrealized_pnl_base, fees_base, funding_base, mark_price,
-                mark_at, last_journal_seq, legacy_position_id, updated_at
+                mark_at, last_journal_seq, legacy_position_id, updated_at,
+                fund_id, portfolio_id
             ) VALUES (
                 $1, $2, $3, $4, $5, $6, 'FIFO', $7::jsonb, $8, NULL, 0, 0,
-                NULL, NULL, 1, $9, now()
+                NULL, NULL, 1, $9, now(), $10, $11
             )
             """,
             position_key, tenant_id, account_id, uuid.uuid4(), quantity, price,
             json.dumps([]), realized_pnl, legacy_id,
+            default_fund_id(tenant_id), default_portfolio_id(tenant_id),
         )
     return legacy_id, position_key
+
+
+def _snapshot_key(tenant_id: UUID) -> str:
+    # FA-0d-fix: raw fixture rows must be re-keyable by cdb114b6903f on a
+    # migration round trip -- 5-part key + real default portfolio (FK).
+    return str(
+        PositionKey(
+            venue=_EXCHANGE, instrument_id=f"INST{uuid.uuid4().hex[:8]}",
+            strategy_id="test-strategy", execution_id="paper",
+            portfolio_id=default_portfolio_id(tenant_id),
+        )
+    )
 
 
 async def _direct_legacy_query(
@@ -183,13 +199,15 @@ async def test_no_linked_legacy_row_returns_empty_not_exception(pool, projection
                 position_key, tenant_id, account_id, instrument_id, quantity,
                 avg_cost, cost_method, lots, realized_pnl_base,
                 unrealized_pnl_base, fees_base, funding_base, mark_price,
-                mark_at, last_journal_seq, legacy_position_id, updated_at
+                mark_at, last_journal_seq, legacy_position_id, updated_at,
+                fund_id, portfolio_id
             ) VALUES (
                 $1, $2, $3, $4, 3, 10, 'FIFO', $5::jsonb, 0, NULL, 0, 0,
-                NULL, NULL, 1, NULL, now()
+                NULL, NULL, 1, NULL, now(), $6, $7
             )
             """,
-            f"pos:{uuid.uuid4().hex}", tenant_id, account_id, uuid.uuid4(), json.dumps([]),
+            _snapshot_key(tenant_id), tenant_id, account_id, uuid.uuid4(), json.dumps([]),
+            default_fund_id(tenant_id), default_portfolio_id(tenant_id),
         )
 
     projected = await _project(projection, pool, user_id=tenant_id, symbol=symbol)
