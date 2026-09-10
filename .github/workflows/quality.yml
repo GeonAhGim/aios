@@ -89,6 +89,12 @@ jobs:
       - name: Zone manifest
         run: python scripts/check_zone_manifest.py
 
+      # OPS-45(task-3387) — 957ae247 커밋 메시지가 BOM으로 시작했고, 5a20db30 이전에는
+      # BOM이 남은 소스 파일이 AST 게이트를 깼다(둘 다 Claude Code 훅이 적용되지 않는
+      # 외부 엔진 커밋 경로). scripts/check_no_bom.py 참조.
+      - name: No BOM
+        run: python scripts/check_no_bom.py
+
       # CM-8 — CM-A1 정적 검사(컴플라이언스 판정 없이 주문이 제출되는 경로
       # 부재). scripts/check_compliance_gate.py 참조.
       - name: Compliance gate wiring
