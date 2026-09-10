@@ -5,10 +5,15 @@ DoD: (1) insert 1행 + audit_log 1행 + `risk.decision.recorded` 1건이 한 경
 발생, (2) 시계 드리프트 > 2초는 DENY(`RISK_INPUT_STALE`)로 기록 + 로그, 2초
 이내는 정상 통과(경계 양쪽), (3) PK 충돌은 재시도 없이 예외 전파, (4) 로그·
 audit_log에 잔고 원값·inputs_snapshot 전문이 실리지 않음, (5) 롤백된(=저장
-실패한) 결정은 이벤트를 남기지 않는다.
+실패한) 결정은 이벤트를 남기지 않는다, (6) D3: 별도 `RiskDecisionRecorder`
+인스턴스(자기 repo·event bus) 두 개가 같은 decision_id로 동시에 경합해도
+정확히 하나만 WORM에 남고 나머지는 자기 audit_log·이벤트를 전혀 남기지
+않는다(ADR-2026-09-09-C D3 — 적대적 리플레이 + 다중 인스턴스 동시성 증명,
+task-2824).
 """
 from __future__ import annotations
 
+import asyncio
 import json
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
@@ -252,6 +257,61 @@ async def test_audit_log_excludes_raw_balance_and_inputs_snapshot(
 
     _, event_payload = event_bus.published[0]
     assert _DISTINCTIVE_BALANCE not in json.dumps(event_payload)
+
+
+async def test_concurrent_multi_instance_replay_race_only_one_writer_wins(
+    pool: asyncpg.Pool,
+) -> None:
+    """적대적 리플레이 + 다중 인스턴스 동시성(D3): 공격자가 정당한 결정과
+    같은 decision_id로 outcome을 바꿔치기한 두 번째 결정을, 별도
+    `RiskDecisionRecorder` 인스턴스(자기 repo·event bus 각자 보유 — 서로
+    다른 프로세스를 흉내)에서 동시에 밀어넣는다. WORM PK가 정확히 하나만
+    통과시켜야 하고, 진 쪽은 자기 audit_log·이벤트를 전혀 남기면 안 된다
+    (섞이거나 둘 다 남는 것은 WORM 불변식 위반)."""
+    tenant_id = await create_test_tenant(pool)
+    now = await _server_now(pool)
+    decision_id = uuid4()
+    inputs = _inputs(tenant_id=tenant_id)
+
+    legit = _decision(
+        tenant_id=tenant_id, evaluated_at=now, decision_id=decision_id, outcome=RiskOutcome.ALLOW
+    )
+    replay = _decision(
+        tenant_id=tenant_id,
+        evaluated_at=now,
+        decision_id=decision_id,
+        outcome=RiskOutcome.DENY,
+        reason_codes=("RISK_LIMIT_BREACH:SYMBOL:GROSS_NOTIONAL_PCT",),
+    )
+
+    repo_a = PostgresDecisionRepository(pool)
+    repo_b = PostgresDecisionRepository(pool)
+    bus_a = NoopEventBus()
+    bus_b = NoopEventBus()
+    recorder_a = RiskDecisionRecorder(pool, repo_a, bus_a)
+    recorder_b = RiskDecisionRecorder(pool, repo_b, bus_b)
+
+    results = await asyncio.gather(
+        recorder_a.record(legit, inputs, actor="legit-caller"),
+        recorder_b.record(replay, inputs, actor="attacker-replay"),
+        return_exceptions=True,
+    )
+
+    successes = [r for r in results if r is None]
+    failures = [r for r in results if isinstance(r, BaseException)]
+    assert len(successes) == 1, results
+    assert len(failures) == 1, results
+    assert isinstance(failures[0], asyncpg.UniqueViolationError)
+
+    stored = await repo_a.get(decision_id)
+    assert stored is not None
+    winning_actor = "legit-caller" if stored[0].outcome == RiskOutcome.ALLOW else "attacker-replay"
+
+    audit_rows = await _audit_rows(pool, decision_id)
+    assert len(audit_rows) == 1
+    assert audit_rows[0]["actor_agent"] == winning_actor
+
+    assert len(bus_a.published) + len(bus_b.published) == 1
 
 
 async def test_limit_breach_reason_code_publishes_extra_event(
