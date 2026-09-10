@@ -13,8 +13,10 @@ strictly greater denies) — mirrors `domain/rules.py`'s existing
 `POLICY_MAX_TOTAL_EXPOSURE`/`POLICY_MAX_SINGLE_INSTRUMENT` checks, which
 also use strict `>`.
 """
+
 from __future__ import annotations
 
+import math
 from collections.abc import Mapping
 from typing import Any
 
@@ -32,6 +34,10 @@ def _missing(field: str) -> RuleHit:
     )
 
 
+def _is_finite_number(value: Any) -> bool:
+    return isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(value)
+
+
 def check(params: Mapping[str, Any], snapshot: Mapping[str, Any]) -> RuleHit | None:
     limit = params.get("max_single_instrument_pct")
     if limit is None:
@@ -41,13 +47,23 @@ def check(params: Mapping[str, Any], snapshot: Mapping[str, Any]) -> RuleHit | N
     if observed is None:
         return _missing("snapshot.projected_instrument_pct")
 
+    if not _is_finite_number(limit) or not _is_finite_number(observed):
+        # CM-A2 fail-closed: NaN/+-inf (e.g. a divide-by-zero upstream when
+        # portfolio value is 0) must never silently compare as "within
+        # limit" — `nan > limit` and `-inf > limit` are both `False` in
+        # Python, which would otherwise ALLOW a malformed projection.
+        return RuleHit(
+            rule_id=RULE_ID,
+            severity=ComplianceVerdict.DENY,
+            message="non-finite percentage value cannot be evaluated safely",
+            evidence={"observed_pct": observed, "limit_pct": limit},
+        )
+
     if observed > limit:
         return RuleHit(
             rule_id=RULE_ID,
             severity=ComplianceVerdict.DENY,
-            message=(
-                f"projected instrument concentration {observed}% exceeds limit {limit}%"
-            ),
+            message=(f"projected instrument concentration {observed}% exceeds limit {limit}%"),
             evidence={"observed_pct": observed, "limit_pct": limit},
         )
     return None
