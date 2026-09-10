@@ -190,7 +190,7 @@ async def run_one_cycle(
     run_forever의 루프 몸체를 분리한 것(테스트 가능하도록, 순수 리팩터링).
     exchange_healthy는 decide()의 판정 입력이 아니다(HALT/LIQUIDATE/NORMAL은
     loss_pct·unresponsive_sec만 본다) — 거래소 응답성 판정은 Split-Brain이
-    전담한다. RTF-03(2721): failure_domain 실전달, market_wide_correlated는 여전히 None."""
+    전담한다."""
     exchange_health_cache.value = await check_exchange()
     snapshot = await service.take_snapshot()
     failure_domain = await split_brain.diagnose(
@@ -202,7 +202,6 @@ async def run_one_cycle(
     logger.info(
         "Watchdog snapshot=%s decision=%s failure_domain=%s", snapshot, decision, failure_domain
     )
-
     if failure_domain.diagnosis == Diagnosis.DB_ISOLATED_FAILURE:
         # FD-9.3 원문 — DB만 단독 장애면 강제청산 대상에서 제외하고 신규주문만
         # 보류한다(그 이상의 강제조치는 하지 않는다).
