@@ -18,6 +18,7 @@ Spec: docs/specs/L4_analytics_authoring_backtest_marketplace_v1.0.md
 미검증: 구간 겹침 판정([listed_at, delisted_at) 반열린)은 §4.1 DB
 EXCLUDE(gist) 제약을 순수 계층에서 재현한 사전 검사다 — 실제 강제는 DC-4의 몫.
 """
+
 from __future__ import annotations
 
 from collections.abc import Sequence
@@ -79,7 +80,13 @@ def _require_aware(value: datetime, label: str) -> None:
 
 
 def _normalize_symbol(venue: Venue, raw_symbol: str) -> str:
-    """대소문자 정규화(대문자) 후 LA-7 형식 검증(재사용, 재구현 아님)."""
+    """대소문자 정규화(대문자) 후 LA-7 형식 검증(재사용, 재구현 아님).
+
+    Non-str input (e.g. a deserialization path passing None/int) must not
+    leak AttributeError from .strip() -- fail-closed as SymbolMasterError.
+    """
+    if not isinstance(raw_symbol, str):
+        raise SymbolMasterError(f"venue_symbol은 str이어야 한다: {raw_symbol!r}")
     candidate = raw_symbol.strip().upper()
     try:
         to_canonical(venue, candidate)
