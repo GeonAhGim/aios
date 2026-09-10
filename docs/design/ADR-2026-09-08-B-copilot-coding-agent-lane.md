@@ -130,3 +130,41 @@ lexer/parser)·#30(IND-8 dsl_indicator, WIP)·#31(DC-24 provider.py 확장, WIP)
   함께 close 처리했다.
 - #30·#31: `mergeable=MERGEABLE`이지만 `mergeStateStatus=UNSTABLE`(체크 미완료), 아직 `[WIP]` —
   dirty가 아니고 대응하는 로컬 task(2308·2552)도 아직 시작 전이라 중복이 없다. 그대로 열어 둔다.
+
+## 파일럿 결과 재확인 (2026-09-10, DEEPEN task-3194)
+
+task-2149가 "코드 변경 없음(ADR 문서뿐)"으로 DEEPEN 리프를 받았다 — PLT-44 배치 자체가 한 번도
+실제로 생성되지 않아 PR/CI 통과·머지의 실증 증거가 없다는 QA 판정(process-verification 리프).
+이번 리프에서 실제로 PLT-44를 20건 단위 배치로 잘라 `role: copilot` task를 새로 만들고 전 과정을
+관찰하려 했으나, **2026-09-08 최초 파일럿과 정확히 같은 사전 점검 단계에서 다시 막혔다**:
+
+- 명령 인터페이스: 정상. `gh --version` 2.98.0, `gh agent-task --help`가 `create/list/view`
+  서브커맨드를 그대로 보여준다(여전히 preview).
+- 권한: **다시 실패.** 이 실행 환경(`C:\aios\wt\ops-1` worker worktree)에서 `gh auth status`·
+  `gh api user`가 "not logged in"으로 실패한다. `gh auth token`은 문자열(`gho_...`)을 반환하지만
+  그 토큰으로 `gh api user`를 호출해도 인증되지 않는다 — 2026-09-08 노트가 기록한 것과 동일한
+  증상. Amended 절(OPS-34, task-2941)이 "인증 문제 해결 후 파일럿이 재개됐다"고 적은 걸 보면
+  한 번은 어딘가(오케스트레이터 상주 프로세스 환경일 가능성이 크다)에서 인증이 됐었는데, 그
+  상태가 이 worktree/워커 실행 환경까지 이어지지 않는다는 원래 관찰이 그대로 재현됐다 — 즉
+  자격증명이 영구적으로(모든 실행 환경에) 공급된 적이 없고, 그때그때 한 프로세스에만 있다가
+  사라지는 상태로 보인다.
+- 게이트: 다시 관찰 못 함(PR이 생성되지 않았다).
+- 소요 시간·프리미엄 요청 수: 해당 없음(파일럿이 또 시작되지 않았다).
+- 조치: 원래 파일럿 노트의 판단을 그대로 따라 **PLT-44 배치 절단·`role: copilot` task 생성·
+  원본 task-1759 갱신은 이번에도 보류했다** — 인증 없이 만들면 오케스트레이터가 매 주기
+  `gh agent-task create`를 재시도만 하다 실패하는 assigned task 하나가 쌓일 뿐, PR/CI 증거는
+  여전히 생기지 않는다(실패 모드 자체는 안전하다 — `spawn_copilot`이 로그만 남기고 continue).
+  대신 fleet 코드(`orchestrator.py`) 쪽의 실제 결함 하나를 고쳤다: `gh_authenticated()`와
+  `spawn_copilot`의 미인증 분기가 "`escalations/esc-copilot-gh-auth.json` 참고"라고 2026-09-08부터
+  안내했지만, 그 파일을 실제로 쓰는 코드가 없어서 사람이 로그를 직접 뒤져야만 이 재발을 알 수
+  있었다. 이제 미인증이 감지되면 그 파일을 실제로 쓰고(인증 복구 시 자동 삭제) `dashboard.py`가
+  이미 읽는 `escalations/*.json` 규약에 얹어 대시보드에 드러나게 했다 — 파일럿 자체를 통과시키진
+  못했지만, 다음에 같은 인증 공백이 또 생겼을 때 사람이 더 빨리 알 수 있게 하는 것이 이 리프에서
+  낼 수 있는 유일한 실질 진전이라고 판단했다.
+
+**PM/CA 결정 필요(반복)**: 2026-09-08 노트와 동일한 질문이 여전히 해결되지 않았다 — 오케스트레이터
+상주 프로세스(`C:\aios\pm`)와 ops/copilot 워커가 실제로 도는 환경에 **영구적인** GitHub 자격증명을
+어떻게 공급할지: (a) 그 환경들 각각에서 `gh auth login` 1회 수행, (b) Copilot coding agent·repo
+스코프를 가진 PAT를 `GH_TOKEN` 환경변수로 주입(프로세스 재시작에도 유지되도록 시스템 환경변수
+또는 서비스 정의에 고정). 이 결정 없이는 PLT-44 파일럿을 세 번째로 재시도해도 같은 지점에서
+막힐 것이다.
