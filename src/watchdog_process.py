@@ -190,22 +190,8 @@ async def run_one_cycle(
     run_forever의 루프 몸체를 분리한 것(테스트 가능하도록, 순수 리팩터링).
     exchange_healthy는 decide()의 판정 입력이 아니다(HALT/LIQUIDATE/NORMAL은
     loss_pct·unresponsive_sec만 본다) — 거래소 응답성 판정은 Split-Brain이
-    전담한다.
-
-    DEPTH 감사(task-2721)·RED_TEAM_FINDINGS RTF-03 회귀 수정 — 이전엔 diagnose()가
-    decide() 호출 *뒤에* 실행돼 failure_domain을 decide()에 아예 넘기지 못했다
-    (옵션 인자가 항상 기본값 None으로 고정되는, task-1806 P0-B와 동일 클래스의
-    배선 결함). 이제 diagnose()를 먼저 실행해 그 결과를 decide()에 실제로
-    전달한다 — `tests/unit/core/safety/test_watchdog_decide.py`의 스캐너
-    하드 게이트가 이 배선을 회귀 방지한다.
-
-    `market_wide_correlated`는 여전히 고정 None이다 — `is_market_wide_move()`가
-    요구하는 basket 시세 조달원(심볼 유니버스·급변 임계값 정책)이 아직 없어
-    LIQUIDATE 분기는 구조적으로 도달 불가한 채 남는다(알려진 축소,
-    fail-closed로 HALT/isolated_loss 취급). 이 조달원 배선은 RED_TEAM_FINDINGS
-    RTF-03이 명시한 대로 별도 리프·PM 판단 대상이다."""
+    전담한다. RTF-03(2721): failure_domain 실전달, market_wide_correlated는 여전히 None."""
     exchange_health_cache.value = await check_exchange()
-
     snapshot = await service.take_snapshot()
     failure_domain = await split_brain.diagnose(
         check_exchange=exchange_health_cache.get,
@@ -213,7 +199,6 @@ async def run_one_cycle(
         main_process_ok_raw=snapshot.unresponsive_sec < DEFAULT_UNRESPONSIVE_SEC_THRESHOLD,
     )
     decision = decide(snapshot, market_wide_correlated=None, failure_domain=failure_domain)
-
     logger.info(
         "Watchdog snapshot=%s decision=%s failure_domain=%s", snapshot, decision, failure_domain
     )
