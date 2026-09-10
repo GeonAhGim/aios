@@ -205,6 +205,44 @@ describe("CH-4c: 변경 없는 저장은 chart-engine 직렬화기로 생략한�
   });
 });
 
+// 수치 성능 단언(DEEPEN task-3099, DEPTH_CH task-2729 감사 #2012 보강): CH-4b는
+// addDrawing/removeDrawing(순수 모델)을 그대로 재사용하지만, 이 훅 자신의 persist()
+// 경로(그린 도형 수만큼 serializeDrawings 재계산 + putDrawings 페이로드 조립)가 도형
+// 수에 비례해 감당 못 할 정도로 느려지는 회귀(예: O(n^2) 직렬화)가 없는지 실측 상한을
+// 둔다. jsdom 유닛테스트 시간이라 느슨한 예산(1초)이지만, 그런 회귀가 생기면 확실히 넘는다.
+describe("성능 단언", () => {
+  it("도형 300개를 그리고 저장하는 것이 1초 안에 끝난다", async () => {
+    const port = fakePort({
+      putDrawings: vi.fn(async (layoutId: string, input) => ({
+        layoutId,
+        document: { schema_version: input.schemaVersion, drawings: input.drawings },
+        revision: 1,
+        updatedAt: "t1",
+      })),
+    });
+    const { result } = setup(port, { layoutId: "layout-1" });
+    await waitFor(() => expect(result.current.restoreStatus).toBe("ready"));
+
+    act(() => result.current.setDrawingTool("horizontal-line"));
+
+    const startedAt = performance.now();
+    act(() => {
+      for (let i = 0; i < 300; i += 1) {
+        result.current.handleAddDrawing(fakeCandle(i * 3_600_000, String(100 + i)));
+      }
+    });
+    expect(result.current.drawings).toHaveLength(300);
+
+    await act(async () => {
+      await result.current.persist("layout-1");
+    });
+    const elapsedMs = performance.now() - startedAt;
+
+    expect(port.putDrawings).toHaveBeenCalledTimes(1);
+    expect(elapsedMs).toBeLessThan(1000);
+  });
+});
+
 describe("409 충돌: 낙관적 잠금", () => {
   it("PUT이 409로 실패하면 로컬 도형을 지우지 않고 saveStatus를 conflict로 표면화한다", async () => {
     const port = fakePort({ putDrawings: vi.fn().mockRejectedValue(apiErrorLike(409, "STATE_CONCURRENCY_CONFLICT")) });
