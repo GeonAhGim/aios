@@ -42,8 +42,13 @@ is None: return True`처럼 fail-open으로 이어지기 때문이다. 지금은
 from __future__ import annotations
 
 import ast
+import sys
+import time
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from pathlib import Path
+
+import pytest
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 
@@ -363,3 +368,83 @@ def test_no_optional_safety_gate_constructor_params():
     가리키는 정확한 신호다."""
     violations = _scan_violations()
     assert violations == [], "\n".join(str(v) for v in violations)
+
+
+# --- 실패 주입: I/O 실패가 조용히 fail-open으로 넘어가지 않는지 -------------
+#
+# 이 컴포넌트에 DB/네트워크 타임아웃에 해당하는 외부 의존성은 없다 — 유일한
+# 외부 의존성은 파일시스템 읽기(`_iter_target_files` → `Path.read_text`)다.
+# 안전 게이트 CI 검사가 이 읽기에서 실패했을 때 예외를 삼키고 "위반 0건"
+# 이라는 초록불을 내보내면 그게 바로 fail-open이다 — 실제로 파일이 사라지거나
+# 인코딩이 깨졌는데도 스캔이 통과로 보고되면 안전 검사 자체가 우회된다.
+
+
+def test_scan_violations_fails_closed_when_target_file_vanishes(monkeypatch, tmp_path):
+    """실패 주입 1 — 스캔 도중 대상 파일이 사라지면(파일시스템 경합) 조용히
+    위반 0건으로 넘어가는 대신 예외로 시끄럽게 실패해야 한다."""
+    vanished = tmp_path / "vanished_between_list_and_read.py"
+    this_module = sys.modules[__name__]
+    monkeypatch.setattr(this_module, "_REPO_ROOT", tmp_path)
+    monkeypatch.setattr(this_module, "_iter_target_files", lambda: [vanished])
+    with pytest.raises(FileNotFoundError):
+        _scan_violations()
+
+
+def test_scan_violations_fails_closed_on_undecodable_file(monkeypatch, tmp_path):
+    """실패 주입 2 — 대상 파일이 UTF-8로 디코딩되지 않으면(손상된 배포본 등)
+    역시 예외로 실패해야 한다. `errors="ignore"` 같은 관용적 디코딩으로
+    조용히 넘어가면 손상된 파일의 실제 내용을 검사하지 못한 채 초록불을
+    낼 수 있다."""
+    undecodable = tmp_path / "undecodable.py"
+    undecodable.write_bytes(b"\xff\xfe\x00\x01garbage-not-utf8")
+    this_module = sys.modules[__name__]
+    monkeypatch.setattr(this_module, "_REPO_ROOT", tmp_path)
+    monkeypatch.setattr(this_module, "_iter_target_files", lambda: [undecodable])
+    with pytest.raises(UnicodeDecodeError):
+        _scan_violations()
+
+
+# --- 성능 단언 ---------------------------------------------------------------
+
+
+def test_scan_source_perf_bound_for_large_synthetic_file():
+    """성능 단언 — `_scan_function_defs`는 같은 트리를 `ast.walk`로 두 번
+    순회한다(메서드 수집 1회 + 최상위 함수 수집 1회). 대상 파일이 커질수록
+    이차식으로 느려지는 회귀가 들어와도 잡히지 않으면 CI가 눈치채지 못한 채
+    점점 느려질 수 있다 — 합성 대형 파일로 시간 상한을 못박는다."""
+    source = "\n".join(
+        f"def f_{i}(pre_submit_gate_{i}: str) -> None:\n    pass\n" for i in range(3000)
+    )
+    start = time.perf_counter()
+    violations = _scan_source(source, "fixture.py")
+    elapsed = time.perf_counter() - start
+    assert violations == []
+    assert elapsed < 2.0, f"3000개 함수 스캔에 {elapsed:.2f}s — 이차식 회귀 의심"
+
+
+# --- 다중 인스턴스(동시 실행) 증명 -------------------------------------------
+
+
+def test_scan_source_consistent_across_concurrent_instances():
+    """다중 인스턴스 증거 — CI가 여러 워커(pytest-xdist 등)나 여러 스레드에서
+    동시에 이 스캐너를 돌릴 수 있다. 스캐너가 모듈 전역 가변 상태를 공유하면
+    경합으로 일부 실행이 위반을 놓치는 거짓 초록불(fail-open)이 나올 수
+    있다 — 알려진 위반이 섞인 동일 소스를 여러 스레드에서 동시에 스캔해도
+    항상 같은 결과가 나와야 한다(실제 전체 리포지토리를 8번 재스캔하면
+    수십 초가 드는 I/O 비용을 피하려 합성 소스를 쓴다)."""
+    source = (
+        "class Scheduler:\n"
+        "    def __init__(self, pre_submit_gate: str | None = None) -> None:\n"
+        "        pass\n\n"
+        "def is_submission_allowed(distrust_monitor: object | None = None) -> bool:\n"
+        "    return distrust_monitor is None\n"
+    )
+    expected = [
+        "fixture.py:Scheduler.__init__(pre_submit_gate) — `... | None` 애너테이션",
+        "fixture.py:is_submission_allowed(distrust_monitor) — `... | None` 애너테이션",
+    ]
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        results = list(
+            pool.map(lambda _: [str(v) for v in _scan_source(source, "fixture.py")], range(16))
+        )
+    assert all(r == expected for r in results)
