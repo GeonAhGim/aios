@@ -11,6 +11,7 @@ DoD(R-23): 승인자=작성자 거부, approval_ref 필수, 감사 이벤트.
 from __future__ import annotations
 
 import asyncio
+import time
 from pathlib import Path
 from uuid import UUID, uuid4
 
@@ -224,6 +225,52 @@ async def test_worm_trigger_allows_state_transition_unrelated_columns(repo, pool
     )
     assert activated.state == BundleState.ACTIVE
     assert activated.rule_hash == draft.rule_hash
+
+
+async def test_get_active_and_transition_are_single_round_trip_and_latency_bounded(
+    repo, pool, monkeypatch
+):
+    """성능 단언(task-2819 DEEPEN, D2 체크리스트 완성) — `get_active`/
+    `transition`은 각각 SELECT/UPDATE 정확히 1회 왕복이며(회귀 시 즉시 실패하는
+    강한 단언), 개별 호출 지연은 명백한 회귀만 잡는 느슨한 상한(500ms, 로컬 DB
+    기준 — CI 노이즈로 인한 flaky 실패를 피하려 절대 성능목표로 쓰지 않는다)
+    안에 든다."""
+    scope = _scope()
+    draft = await repo.insert_draft(_draft(scope=scope, version="v1"))
+    async with pool.acquire() as conn:
+        await _approve(conn, draft.id)
+
+    queries: list[str] = []
+    original_fetchrow = asyncpg.Connection.fetchrow
+
+    async def counting_fetchrow(self, query, *args, **kwargs):
+        queries.append(query)
+        return await original_fetchrow(self, query, *args, **kwargs)
+
+    monkeypatch.setattr(asyncpg.Connection, "fetchrow", counting_fetchrow)
+
+    queries.clear()
+    started = time.perf_counter()
+    activated = await repo.transition(
+        draft.id, expected_state=BundleState.APPROVED, new_state=BundleState.ACTIVE
+    )
+    transition_ms = (time.perf_counter() - started) * 1000.0
+    assert activated.state == BundleState.ACTIVE
+    assert len(queries) == 1, f"transition()은 1왕복이어야 하나 {len(queries)}회 관측됨"
+
+    queries.clear()
+    started = time.perf_counter()
+    active = await repo.get_active(scope)
+    get_active_ms = (time.perf_counter() - started) * 1000.0
+    assert active is not None and active.id == draft.id
+    assert len(queries) == 1, f"get_active()는 1왕복이어야 하나 {len(queries)}회 관측됨"
+
+    print(
+        f"\npostgres_bundle_repository latency: transition={transition_ms:.2f}ms "
+        f"get_active={get_active_ms:.2f}ms (upper bound 500ms, 회귀 감지용 — 절대 목표 아님)"
+    )
+    assert transition_ms < 500.0, f"transition() 왕복 지연 회귀 의심: {transition_ms:.2f}ms"
+    assert get_active_ms < 500.0, f"get_active() 왕복 지연 회귀 의심: {get_active_ms:.2f}ms"
 
 
 # --- R-23 approve_rule_bundle / activate_rule_bundle ---
