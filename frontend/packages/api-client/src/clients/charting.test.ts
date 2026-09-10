@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { API_ROUTES } from "../apiPaths";
+import { keysToCamel } from "../caseConvert";
 import { ApiError } from "../httpErrors";
 import { createChartingClient } from "./charting";
 
@@ -265,5 +266,78 @@ describe("createChartingClient", () => {
       meta: { trace_id: "t-1", as_of: "2026-09-07T00:00:00Z" },
     });
     await expect(makeClient().listIndicatorTemplates()).rejects.toThrow(/template/);
+  });
+});
+
+describe("numeric perf: listLayouts mapping large payloads", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("maps 500 layout records (fetch + camelCase + toLayoutRecord validation) within a 200ms budget", async () => {
+    const many = Array.from({ length: 500 }, (_, i) => ({ ...layoutView, id: `layout-${i}` }));
+    stubFetch({ data: many, meta: { trace_id: "t-1", as_of: "2026-09-06T00:00:00Z" } });
+
+    const startedAt = performance.now();
+    const result = await makeClient().listLayouts();
+    const elapsedMs = performance.now() - startedAt;
+
+    expect(result).toHaveLength(500);
+    expect(elapsedMs).toBeLessThan(200);
+  });
+});
+
+// toDrawingsRecord() special-cases the top-level schema_version key exactly
+// because http.ts's keysToCamel is a blind deep-recursive rename — it can't
+// tell CH-4's intentionally-snake `schema_version` from an ordinary
+// server field. These two tests pin both sides of that boundary: the naive
+// conversion this leaf works around (RED — what fromDrawingsDocument would
+// see if the restoration line were deleted) and the client's actual,
+// restored output (GREEN).
+describe("gate-red reproduction: schema_version restoration in toDrawingsRecord", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("RED: naive keysToCamel on the raw drawings envelope renames schema_version to schemaVersion, which fromDrawingsDocument does not recognize", () => {
+    const naive = keysToCamel<Record<string, unknown>>(drawingsView);
+    expect(naive.schemaVersion).toBe(1);
+    expect(naive.schema_version).toBeUndefined();
+  });
+
+  it("GREEN: the actual client restores the top-level schema_version key, undoing exactly that rename", async () => {
+    stubFetch({ data: drawingsView, meta: { trace_id: "t-1", as_of: "2026-09-06T00:00:00Z" } });
+    const result = await makeClient().getDrawings("layout-1");
+    expect(result.document.schema_version).toBe(1);
+    expect((result.document as Record<string, unknown>).schemaVersion).toBeUndefined();
+  });
+});
+
+describe("D3: multi-instance independence under concurrency", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("two independently-constructed clients (different baseUrl/token) issue concurrent requests without cross-contaminating headers, URLs, or results", async () => {
+    const fetchMock = vi.fn(async (url: unknown, init?: RequestInit) => {
+      const isA = (url as string).startsWith("https://a.example.test");
+      const body = { data: { ...layoutView, id: isA ? "layout-a" : "layout-b" }, meta: { trace_id: isA ? "t-a" : "t-b", as_of: "2026-09-06T00:00:00Z" } };
+      void init;
+      return new Response(JSON.stringify(body), { status: 200, headers: { "Content-Type": "application/json" } });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const clientA = createChartingClient("https://a.example.test", () => "token-a");
+    const clientB = createChartingClient("https://b.example.test", () => "token-b");
+
+    const [resultA, resultB] = await Promise.all([clientA.getLayout("x"), clientB.getLayout("y")]);
+
+    expect(resultA.id).toBe("layout-a");
+    expect(resultB.id).toBe("layout-b");
+
+    const callA = fetchMock.mock.calls.find(([url]) => (url as string).startsWith("https://a.example.test"))!;
+    const callB = fetchMock.mock.calls.find(([url]) => (url as string).startsWith("https://b.example.test"))!;
+    expect((callA[1]?.headers as Headers).get("Authorization")).toBe("Bearer token-a");
+    expect((callB[1]?.headers as Headers).get("Authorization")).toBe("Bearer token-b");
   });
 });
