@@ -4,9 +4,8 @@
 Spec: 16_backend_signatures.md, ADR-2026-08-10-B, P6 (300-line file cap),
 L4_compliance_and_regulatory_v1.0.md#9 CM-11.
 
-Deviation: task-117 originally intended to place this at src/app/background_loops.py, but since
-.aios-zone does not declare `src/app/**` (agents may not modify zone policy, P8), it is placed
-instead under `src/services/**`, already declared as SCAFFOLD.
+Deviation: task-117 wanted src/app/background_loops.py, but .aios-zone doesn't declare src/app/**
+(P8 -- agents may not modify zone policy), so this lives under src/services/** (SCAFFOLD) instead.
 
 main.py assembles pool/event_bus/credential_resolver etc. and passes them to
 :func:`start_background_loops`. On shutdown it calls only the returned
@@ -268,9 +267,8 @@ async def start_background_loops(
             )
         )
 
-    # CM-11(task-2509) -- finding a DENY leads to KillSwitchService(TENANT), which causes the
-    # next order to be rejected by foundation_gate's ACTIVE control check. Removing this breaks
-    # test_post_trade_batch.
+    # CM-11(task-2509) -- a DENY leads to KillSwitchService(TENANT), which causes the next order
+    # to be rejected by foundation_gate's ACTIVE check. Removing this breaks test_post_trade_batch.
     async def _post_trade_batch_tick() -> None:
         now = datetime.now(timezone.utc)
         business_date = (now - timedelta(days=1)).date()
