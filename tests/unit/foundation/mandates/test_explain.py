@@ -8,6 +8,7 @@ two calls, (b) stored bundle rule_hash vs. today's recompiled hash mismatch
 exception, (d) no reimplementation of `evaluate_policy()`/mapping -- this
 suite uses a fake `MandateRepository` and never calls the rule engine.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass, field
@@ -16,6 +17,7 @@ from typing import Any
 from uuid import UUID, uuid4
 
 import pytest
+from pydantic import ValidationError
 
 from src.foundation.mandates.application.explain import (
     ExplainError,
@@ -221,3 +223,59 @@ async def test_explain_never_mutates_or_reinserts_anything() -> None:
     result = await explain(repo, decision.id)
 
     assert result.decision_id == decision.id
+
+
+# --- gate-color regression (DEEPEN task-2866) --------------------------------
+#
+# task-2725 DEPTH 감사가 지적한 "게이트 적색 회귀 테스트 없음"의 fake-repo로
+# 가능한 절반: contracts/v1.py의 `_OUTCOME_TO_VERDICT` 표 자체는
+# test_contracts_v1.py가 이미 고정하지만, explain()이 그 표를 실제로
+# 그대로 경유하는지(자체적으로 outcome을 재해석하지 않는지)는 이 leaf의
+# 몫이다. PAUSE_REQUIRED는 §3 "정상 주문 흐름을 DENY와 동일하게 막는다"는
+# fail-closed 불변식의 핵심이라 DENY(적색)로 고정, REQUIRE_APPROVAL/
+# REQUIRE_REASSESSMENT는 WARN(황색)으로 고정한다.
+
+
+async def test_explain_pause_required_outcome_replays_as_deny_gate_red() -> None:
+    revision = _revision()
+    bundle = _bundle(revision)
+    decision = _decision(
+        bundle, outcome=PolicyOutcome.PAUSE_REQUIRED, reason_codes=("POLICY_DAILY_LOSS",)
+    )
+    repo = _repo_with(revision, bundle, decision)
+
+    result = await explain(repo, decision.id)
+
+    assert result.verdict == ComplianceVerdict.DENY
+
+
+async def test_explain_require_approval_outcome_replays_as_warn() -> None:
+    revision = _revision()
+    bundle = _bundle(revision)
+    decision = _decision(
+        bundle, outcome=PolicyOutcome.REQUIRE_APPROVAL, reason_codes=("POLICY_NEEDS_APPROVAL",)
+    )
+    repo = _repo_with(revision, bundle, decision)
+
+    result = await explain(repo, decision.id)
+
+    assert result.verdict == ComplianceVerdict.WARN
+
+
+# --- D3 adversarial (DEEPEN task-2866) ----------------------------------------
+
+
+async def test_explain_result_rejects_post_construction_tampering() -> None:
+    """D3 적대적 -- explain()이 반환한 `ComplianceDecision`은 `frozen=True`라
+    호출부가 판정을 받은 뒤 `.verdict`를 DENY에서 ALLOW로 몰래 바꿔치기할
+    수 없다(I-09)."""
+
+    revision = _revision()
+    bundle = _bundle(revision)
+    decision = _decision(bundle, outcome=PolicyOutcome.DENY)
+    repo = _repo_with(revision, bundle, decision)
+
+    result = await explain(repo, decision.id)
+
+    with pytest.raises(ValidationError):
+        result.verdict = ComplianceVerdict.ALLOW  # type: ignore[misc]
