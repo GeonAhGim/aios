@@ -71,13 +71,13 @@ def test_transition_rejects_garbage_state_fail_closed(garbage_state: Any) -> Non
     호출자(예: 역직렬화 경로)가 표에 없는 state를 주입해도 조용히 통과하거나
     임의 다음 state를 반환하지 않고 항상 거부돼야 한다(fail-closed)."""
     with pytest.raises(LifecycleTransitionError):
-        transition(garbage_state, "listed")  # type: ignore[arg-type]
+        transition(garbage_state, "listed")
 
 
 @pytest.mark.parametrize("garbage_event", _GARBAGE_EVENTS)
 def test_transition_rejects_garbage_event_fail_closed(garbage_event: Any) -> None:
     with pytest.raises(LifecycleTransitionError):
-        transition(InstrumentLifecycle.ACTIVE, garbage_event)  # type: ignore[arg-type]
+        transition(InstrumentLifecycle.ACTIVE, garbage_event)
 
 
 @pytest.mark.parametrize("garbage_state", _GARBAGE_STATES)
@@ -89,7 +89,7 @@ def test_transition_rejects_garbage_cross_product_fail_closed(
     (KeyError/TypeError 누출) 없이 전부 `LifecycleTransitionError` 하나로
     수렴함을 증명한다 — 호출자가 잡을 예외 타입이 하나뿐이라는 계약."""
     with pytest.raises(LifecycleTransitionError):
-        transition(garbage_state, garbage_event)  # type: ignore[arg-type]
+        transition(garbage_state, garbage_event)
 
 
 @pytest.mark.parametrize("garbage_state", _GARBAGE_STATES)
@@ -98,7 +98,7 @@ def test_audit_event_for_rejects_garbage_cross_product_fail_closed(
     garbage_state: Any, garbage_event: Any
 ) -> None:
     with pytest.raises(LifecycleTransitionError):
-        audit_event_for(garbage_state, garbage_event)  # type: ignore[arg-type]
+        audit_event_for(garbage_state, garbage_event)
 
 
 def test_transition_never_returns_unhashable_lookup_crash() -> None:
@@ -107,7 +107,7 @@ def test_transition_never_returns_unhashable_lookup_crash() -> None:
     `LifecycleTransitionError`로 통일해 호출자가 예외 타입을 하나만 알면
     되게 한다 — 내부 구현(dict)이 새는 것을 막는 방어."""
     with pytest.raises(LifecycleTransitionError):
-        transition([InstrumentLifecycle.ACTIVE], "listed")  # type: ignore[arg-type]
+        transition([InstrumentLifecycle.ACTIVE], "listed")
 
 
 # ---- 성능 단언(D2) ----
@@ -129,8 +129,8 @@ def test_transition_and_audit_event_for_meet_latency_budget() -> None:
     start = time.perf_counter()
     for _ in range(iterations):
         for state, event in calls:
-            transition(state, event)  # type: ignore[arg-type]
-            audit_event_for(state, event)  # type: ignore[arg-type]
+            transition(state, event)
+            audit_event_for(state, event)
     elapsed = time.perf_counter() - start
     total_calls = iterations * len(calls) * 2
     print(
@@ -185,7 +185,7 @@ def test_gate_red_blocks_illegal_transition_mid_replay_without_mutating_flow() -
     # DELISTED에서 그 외 모든 이벤트도 전부 적색 — 종단 상태 고정 증명.
     for event in ("listed", "symbol_changed", "halted", "resumed", "delisted"):
         with pytest.raises(LifecycleTransitionError):
-            transition(state, event)  # type: ignore[arg-type]
+            transition(state, event)
     assert state == InstrumentLifecycle.DELISTED
 
 
@@ -204,8 +204,8 @@ def test_gate_red_audit_event_matches_transition_outcome_along_happy_path() -> N
     state = InstrumentLifecycle.PENDING
     for expected_from, event, expected_audit in sequence:
         assert state == expected_from
-        assert audit_event_for(state, event) == expected_audit  # type: ignore[arg-type]
-        state = transition(state, event)  # type: ignore[arg-type]
+        assert audit_event_for(state, event) == expected_audit
+        state = transition(state, event)
 
 
 # ---- 리플레이 결정론 + 동시 다중 인스턴스(D3) ----
@@ -224,12 +224,12 @@ def test_replay_is_deterministic_for_transition_and_audit_event_for() -> None:
     """같은 (state, event)를 두 번 호출해도 완전히 동일한 결과 — 숨은
     시계·난수·전역 가변 상태가 없다는 재생(replay) 안전성 증거."""
     for state, event in _ALL_LEGAL_CALLS:
-        first = transition(state, event)  # type: ignore[arg-type]
-        second = transition(state, event)  # type: ignore[arg-type]
+        first = transition(state, event)
+        second = transition(state, event)
         assert first == second
 
-        first_audit = audit_event_for(state, event)  # type: ignore[arg-type]
-        second_audit = audit_event_for(state, event)  # type: ignore[arg-type]
+        first_audit = audit_event_for(state, event)
+        second_audit = audit_event_for(state, event)
         assert first_audit == second_audit
 
 
@@ -242,8 +242,8 @@ def test_concurrent_instances_do_not_cross_contaminate() -> None:
         pair: tuple[InstrumentLifecycle, str],
     ) -> tuple[tuple[InstrumentLifecycle, str], InstrumentLifecycle, str]:
         state, event = pair
-        result_state = transition(state, event)  # type: ignore[arg-type]
-        result_audit = audit_event_for(state, event)  # type: ignore[arg-type]
+        result_state = transition(state, event)
+        result_audit = audit_event_for(state, event)
         return pair, result_state, result_audit
 
     expected_states = {
