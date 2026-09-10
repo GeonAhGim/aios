@@ -10,7 +10,10 @@ scope 간 비교나 DB 원자성을 다루지 않고 "단일 번들 인스턴스
 """
 from __future__ import annotations
 
+import time
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
+from typing import Any
 from uuid import uuid4
 
 import pytest
@@ -336,3 +339,68 @@ def test_aware_utc_datetime_accepted_for_effective_from():
     )
     assert bundle.effective_from is not None
     assert bundle.effective_from.tzinfo is not None
+
+
+def test_active_to_approved_rollback_is_rejected():
+    # DRAFT로의 역행뿐 아니라 ACTIVE에서 APPROVED로의 "부분 롤백"도 선형
+    # 전이 밖이다 — 공격자가 재승인 없이 이전 단계로 되돌려 새 정책을
+    # 밀어넣는 경로를 막는다.
+    assert not is_valid_transition(BundleState.ACTIVE, BundleState.APPROVED)
+
+
+def test_uppercase_hex_rule_hash_rejected_as_bypass_attempt():
+    # sha256_hex는 항상 소문자 hex만 만든다. 대문자 hex는 바이트 값은
+    # 유효해 보이지만 이 스키마가 강제하는 정규형이 아니다 — 대소문자를
+    # 섞어 문자열 비교(rule_hash == bundle.rule_hash)를 우회하려는 시도를
+    # 검증 단계에서 그대로 막는다(fail-closed).
+    with pytest.raises(ValidationError):
+        _sample_bundle(rule_hash="A" * 64)
+
+
+class _CorruptedPolicy:
+    """`RiskPolicy`를 흉내 내지만 직렬화 시점에 실패하는 적대적 이중체 —
+    부패했거나 조작된 정책 객체가 로더 계층을 뚫고 들어온 상황을 흉내낸다."""
+
+    def model_dump(self, mode: str) -> dict[str, Any]:
+        raise RuntimeError("corrupted policy object: model_dump failed")
+
+
+def test_model_dump_failure_propagates_instead_of_silent_fallback_hash():
+    # I6(rule_hash 불일치 시 전체 DENY)가 의미를 가지려면, 해시 계산 자체가
+    # 실패했을 때 조용히 빈/기본 해시를 반환해서는 안 된다 — 예외가 그대로
+    # 전파돼 호출부가 이를 "해시 불일치"가 아니라 "계산 실패"로 fail-closed
+    # 처리하게 강제한다.
+    with pytest.raises(RuntimeError):
+        compute_rule_hash(_CorruptedPolicy(), _ENGINE_VERSION)  # type: ignore[arg-type]
+
+
+def test_compute_rule_hash_repeated_calls_stay_bounded(tmp_path):
+    # canonical_json의 정규화가 정책 크기에 대해 병적으로(지수적으로) 느려
+    # 지지 않는지 — 200회 반복이 여유 있는 상한 내에 끝나야 한다. 리스크
+    # 게이트 경로(R-16 evaluate)에서 매 결정마다 호출되므로 성능 회귀는
+    # 곧 지연 회귀다.
+    policy = load_risk_policy(_write_yaml(tmp_path, "perf.yaml", _YAML_TEMPLATE))
+    start = time.perf_counter()
+    for _ in range(200):
+        compute_rule_hash(policy, _ENGINE_VERSION)
+    elapsed = time.perf_counter() - start
+    assert elapsed < 2.0
+
+
+def test_multiple_concurrent_engine_instances_derive_identical_rule_hash(tmp_path):
+    # 다중 인스턴스 증명: 실제 배치 환경에서는 여러 봇/엔진 프로세스가 각자
+    # 독립적으로 risk_policy.yaml을 로드해 rule_hash를 계산한다.
+    # `verify_policy_against_bundle`(I6)이 fleet 전체에서 일관되게
+    # DENY/ALLOW를 판정하려면, 이 독립 계산들이 항상 같은 해시로 수렴해야
+    # 한다 — 스레드 동시 실행으로 이를 흉내내 증명한다.
+    path = _write_yaml(tmp_path, "fleet.yaml", _YAML_TEMPLATE)
+
+    def _load_and_hash(_: int) -> str:
+        policy = load_risk_policy(path)
+        return compute_rule_hash(policy, _ENGINE_VERSION)
+
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        hashes = list(pool.map(_load_and_hash, range(8)))
+
+    assert len(hashes) == 8
+    assert len(set(hashes)) == 1
