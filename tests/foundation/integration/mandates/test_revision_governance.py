@@ -10,13 +10,16 @@ activate_revision을 호출하면 400(작성자==승인자)으로 거부되고, 
 DoD (5): 승인 레코드(`foundation_audit_event`)에 proposer_id/approver_id가
 서로 다른 값으로 저장됨을 실DB로 단언한다.
 """
+
 from __future__ import annotations
 
+import time
 from uuid import UUID, uuid4
 
 import pytest
 
 from src.foundation.mandates.application.activate_revision import (
+    InvalidRevisionStateError,
     SelfApprovalNotAllowedError,
 )
 from src.foundation.mandates.application.activate_revision import (
@@ -134,3 +137,98 @@ async def test_activation_audit_row_stores_distinct_proposer_and_approver(
     assert activated_event.payload["proposer_id"] == str(u1)
     assert activated_event.payload["approver_id"] == str(u2)
     assert activated_event.payload["proposer_id"] != activated_event.payload["approver_id"]
+
+
+async def test_replaying_activation_after_it_already_succeeded_is_rejected(
+    pool, repo, trust_repo, audit_repo
+):
+    """리플레이 증명(DEEPEN task-2862): revision A가 이미 ACTIVE로 전이된 뒤,
+    같은 activate 커맨드를(같은 revision_id로) 다시 보내면 상태 가드
+    (`state in (DRAFT, PROPOSED)`)가 이를 거부해야 한다 — 네트워크 재시도나
+    메시지 중복 전달로 같은 커맨드가 두 번 도착해도 두 번째 활성화가 조용히
+    통과하거나 감사 로그가 중복 기록되지 않는다는 증거. 첫 성공의 승인자(u2)가
+    재전송해도, 다른 승인자(u3)가 재전송해도 둘 다 거부됨을 확인한다."""
+    u1 = uuid4()
+    u2 = uuid4()
+    u3 = uuid4()
+    tenant_id, proposed = await _propose_pending_amendment(
+        pool, repo, trust_repo, audit_repo, proposer_id=u1
+    )
+
+    activated = await activate_revision_command(
+        repo,
+        trust_repo,
+        tenant_id=tenant_id,
+        subject_id=u2,
+        revision_id=proposed.id,
+        reauthenticated=False,
+        audit_repo=audit_repo,
+    )
+    assert activated.state == MandateRevisionState.ACTIVE
+
+    for replayer in (u2, u3):
+        with pytest.raises(InvalidRevisionStateError):
+            await activate_revision_command(
+                repo,
+                trust_repo,
+                tenant_id=tenant_id,
+                subject_id=replayer,
+                revision_id=proposed.id,
+                reauthenticated=False,
+                audit_repo=audit_repo,
+            )
+
+    activated_events = await _all_activation_events(pool, proposed.id)
+    assert len(activated_events) == 1  # 재전송이 감사 로그를 중복 기록하지 않았다
+
+
+async def _all_activation_events(pool, revision_id: UUID) -> list[UUID]:
+    async with pool.acquire() as conn:
+        rows = await conn.fetch(
+            "SELECT id FROM foundation_audit_event "
+            "WHERE aggregate_type = 'mandate_revision' AND aggregate_id = $1 "
+            "AND action = 'mandate_revision_activated'",
+            revision_id,
+        )
+    return [row["id"] for row in rows]
+
+
+async def test_propose_and_activate_cycle_meets_throughput_budget(
+    pool, repo, trust_repo, audit_repo
+):
+    """수치 성능 단언(DEEPEN task-2862): propose_amendment + activate_revision
+    한 사이클(각각 여러 실DB 왕복 포함: 조회 3~4회 + INSERT/UPDATE + 감사
+    INSERT)을 번갈아 다른 제안자/승인자로 20회 반복한 처리량이 하한
+    아래로 떨어지면 회귀로 잡는다. 이전에는 성공/실패 여부만 확인했을 뿐
+    수치 상한이 전혀 없었다."""
+    tenant_id = await _activated_tenant(pool, repo, trust_repo)
+    u1, u2 = uuid4(), uuid4()
+
+    n_cycles = 20
+    started = time.perf_counter()
+    for i in range(n_cycles):
+        proposer, approver = (u1, u2) if i % 2 == 0 else (u2, u1)
+        proposed = await propose_amendment(
+            repo,
+            tenant_id=tenant_id,
+            rules=default_rules(max_total_exposure_pct=79.0 - i),
+            proposer_id=proposer,
+            audit_repo=audit_repo,
+        )
+        activated = await activate_revision_command(
+            repo,
+            trust_repo,
+            tenant_id=tenant_id,
+            subject_id=approver,
+            revision_id=proposed.id,
+            reauthenticated=False,
+            audit_repo=audit_repo,
+        )
+        assert activated.state == MandateRevisionState.ACTIVE
+    elapsed_s = time.perf_counter() - started
+    throughput = n_cycles / elapsed_s
+
+    assert elapsed_s < 15.0, (
+        f"{n_cycles}회 propose+activate 사이클이 {elapsed_s:.3f}s 걸림 (예산 15.0s)"
+    )
+    assert throughput > 2.0, f"처리량 {throughput:.2f} cycles/s < 2.0 cycles/s 하한"
