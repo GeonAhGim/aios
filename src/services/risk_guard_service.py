@@ -56,22 +56,25 @@ class RiskGuardService:
             if drawdown_pct < row["max_drawdown_pct"]:
                 continue
             scope_ref = f"exec:{row['execution_id']}"
-            async with self._pool.acquire() as conn:
+            # 다중 인스턴스 동시 평가 멱등: 테이블 락은 fan-out의 UPDATE와
+            # 자기 교착을 일으키므로 scope_ref별 advisory lock으로 직렬화한다.
+            async with self._pool.acquire() as conn, conn.transaction():
+                await conn.execute("SELECT pg_advisory_xact_lock(hashtext($1))", scope_ref)
                 active = await conn.fetchval(
                     "SELECT 1 FROM safety_control WHERE scope = 'STRATEGY_DEPLOYMENT' "
                     "AND scope_ref = $1 AND state = 'ACTIVE'",
                     scope_ref,
                 )
-            if active is not None:
-                continue
-            view = await self._kill_switch.activate(
-                scope=SafetyScope.STRATEGY_DEPLOYMENT,
-                scope_ref=scope_ref,
-                reason="MAX_DRAWDOWN_EXCEEDED",
-                actor_subject_id=row["user_id"],
-                actor_is_admin=True,
-                trace_id=current().trace_id,
-            )
+                if active is not None:
+                    continue
+                view = await self._kill_switch.activate(
+                    scope=SafetyScope.STRATEGY_DEPLOYMENT,
+                    scope_ref=scope_ref,
+                    reason="MAX_DRAWDOWN_EXCEEDED",
+                    actor_subject_id=row["user_id"],
+                    actor_is_admin=True,
+                    trace_id=current().trace_id,
+                )
             triggered.append(row["execution_id"])
             if self._publish is not None:
                 await self._publish(
