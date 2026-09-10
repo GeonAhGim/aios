@@ -55,14 +55,14 @@ test("isExcluded filters vendor/, *.test.tsx, dist/, node_modules/, and non-ts(x
   assert.equal(isExcluded("src/routes/Comp.tsx"), false);
 });
 
-test("rejects a brand-new file that exceeds the 300-line limit", () => {
+test("rejects a brand-new file that exceeds the 500-line limit", () => {
   const { root, src } = makeWorkspace();
   try {
-    writeFileSync(join(src, "Fresh.tsx"), linesOf(301));
+    writeFileSync(join(src, "Fresh.tsx"), linesOf(501));
     const baseline = writeBaseline(root, {});
     const { status, stdout } = run(root, src, baseline);
     assert.equal(status, 1);
-    assert.match(stdout, /FAIL: src\/Fresh\.tsx:301/);
+    assert.match(stdout, /FAIL: src\/Fresh\.tsx:501/);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
@@ -99,9 +99,9 @@ test("exclusion rules actually apply during a scan: vendor/test/dist files over 
   try {
     mkdirSync(join(src, "vendor", "klinecharts"), { recursive: true });
     mkdirSync(join(src, "dist"), { recursive: true });
-    writeFileSync(join(src, "vendor", "klinecharts", "Big.ts"), linesOf(301));
-    writeFileSync(join(src, "Comp.test.tsx"), linesOf(301));
-    writeFileSync(join(src, "dist", "Gen.ts"), linesOf(301));
+    writeFileSync(join(src, "vendor", "klinecharts", "Big.ts"), linesOf(501));
+    writeFileSync(join(src, "Comp.test.tsx"), linesOf(501));
+    writeFileSync(join(src, "dist", "Gen.ts"), linesOf(501));
     const baseline = writeBaseline(root, {});
     const { status, stdout } = run(root, src, baseline);
     assert.equal(status, 0);
