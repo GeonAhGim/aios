@@ -9,6 +9,7 @@ gate.py`)에서 판정을 지우면 방금 막혔던 시나리오가 통과로 �
 증거(배선 증명), (2) `submit_order` 자신도 게이트가 무엇을 반환하든
 `compliance_decision_id`가 없는 ALLOW는 거부한다(2차 방어선).
 """
+
 from __future__ import annotations
 
 import uuid
@@ -16,12 +17,16 @@ from datetime import datetime, timezone
 from decimal import Decimal
 from uuid import UUID
 
+import asyncpg
 import pytest
 
 import src.services.order_service.foundation_gate as foundation_gate_module
 from src.data.models.base import AssetClass
 from src.data.models.trading import OrderSide, OrderType
 from src.foundation.entities.adapters.postgres_repository import PostgresEntityRepository
+from src.foundation.mandates.adapters.postgres_policy_repository import (
+    PostgresPolicyRepositoryMixin,
+)
 from src.foundation.mandates.application.activate_revision import (
     activate_revision as activate_revision_command,
 )
@@ -65,8 +70,13 @@ def _profile() -> VenueCapabilityProfile:
 def _registry(symbol: str) -> SymbolRegistry:
     reg = SymbolRegistry()
     reg.register(
-        symbol, "bitget", symbol.replace("/", ""),
-        tick=Decimal("0.1"), lot=Decimal("0.0001"), min_notional=Decimal("5"), quote_ccy="USDT",
+        symbol,
+        "bitget",
+        symbol.replace("/", ""),
+        tick=Decimal("0.1"),
+        lot=Decimal("0.0001"),
+        min_notional=Decimal("5"),
+        quote_ccy="USDT",
     )
     return reg
 
@@ -82,7 +92,8 @@ async def _create_running_execution(pool, user_id: UUID) -> int:
             VALUES ($1, '1.0.0', $2, 'BTC/USDT', 'crypto', 'bitget', '{}'::jsonb,
                     'test-author', 'APPROVED')
             """,
-            strategy_id, user_id,
+            strategy_id,
+            user_id,
         )
         row = await conn.fetchrow(
             """
@@ -92,33 +103,51 @@ async def _create_running_execution(pool, user_id: UUID) -> int:
             VALUES ($1, '1.0.0', $2, 'bitget', 'PAPER', 100, 'USDT', 'RUNNING')
             RETURNING id
             """,
-            strategy_id, user_id,
+            strategy_id,
+            user_id,
         )
     return row["id"]
 
 
 def _submit_cmd(user_id: UUID, execution_id: int, symbol: str) -> SubmitOrderCommand:
     scope = OrderIdempotencyScope(
-        tenant_id=user_id, account_ref="acct-1", provider="bitget", strategy_id="s1",
-        strategy_version="1.0.0", execution_id=execution_id, intent_seq=1,
+        tenant_id=user_id,
+        account_ref="acct-1",
+        provider="bitget",
+        strategy_id="s1",
+        strategy_version="1.0.0",
+        execution_id=execution_id,
+        intent_seq=1,
         window_start=datetime.now(timezone.utc),
     )
     return SubmitOrderCommand(
-        command_id=uuid.uuid4(), trace_id=uuid.uuid4(), scope=scope, symbol=symbol,
-        side=OrderSide.BUY, order_type=OrderType.MARKET, quantity=Decimal("0.01"),
-        asset_class=AssetClass.CRYPTO, actor_subject_id=user_id,
+        command_id=uuid.uuid4(),
+        trace_id=uuid.uuid4(),
+        scope=scope,
+        symbol=symbol,
+        side=OrderSide.BUY,
+        order_type=OrderType.MARKET,
+        quantity=Decimal("0.01"),
+        asset_class=AssetClass.CRYPTO,
+        actor_subject_id=user_id,
         issued_at=datetime.now(timezone.utc),
     )
 
 
 async def _mandate_forbidding(pool, repo, trust_repo, tenant_id: UUID, symbol: str) -> None:
     draft = await create_draft_mandate(
-        repo, tenant_id=tenant_id, subject_id=tenant_id,
+        repo,
+        tenant_id=tenant_id,
+        subject_id=tenant_id,
         rules=default_rules(forbidden_assets=[symbol]),
     )
     await activate_revision_command(
-        repo, trust_repo, tenant_id=tenant_id, subject_id=tenant_id,
-        revision_id=draft.id, reauthenticated=False,
+        repo,
+        trust_repo,
+        tenant_id=tenant_id,
+        subject_id=tenant_id,
+        revision_id=draft.id,
+        reauthenticated=False,
     )
 
 
@@ -135,8 +164,12 @@ async def test_restricted_symbol_denies_despite_no_risk_control(pool, repo, trus
 
     with pytest.raises(OrderSubmitDeniedError) as exc_info:
         await submit_order(
-            submit_cmd, pool=pool, profile=_profile(), registry=_registry("XYZ"),
-            pre_submit_gate=gate, entity_context=entity_context,
+            submit_cmd,
+            pool=pool,
+            profile=_profile(),
+            registry=_registry("XYZ"),
+            pre_submit_gate=gate,
+            entity_context=entity_context,
             entity_repo=PostgresEntityRepository(pool),
         )
     assert "restricted_list" in exc_info.value.reason_codes
@@ -160,8 +193,12 @@ async def test_allowed_symbol_passes_with_real_compliance_decision(pool, repo, t
     submit_cmd = _submit_cmd(user_id, execution_id, "BTC/USDT")
 
     result = await submit_order(
-        submit_cmd, pool=pool, profile=_profile(), registry=_registry("BTC/USDT"),
-        pre_submit_gate=gate, entity_context=entity_context,
+        submit_cmd,
+        pool=pool,
+        profile=_profile(),
+        registry=_registry("BTC/USDT"),
+        pre_submit_gate=gate,
+        entity_context=entity_context,
         entity_repo=PostgresEntityRepository(pool),
     )
 
@@ -203,16 +240,18 @@ async def test_removing_compliance_wiring_lets_forbidden_symbol_through(
     submit_cmd = _submit_cmd(user_id, execution_id, "XYZ")
 
     allowed = await submit_order(
-        submit_cmd, pool=pool, profile=_profile(), registry=_registry("XYZ"),
-        pre_submit_gate=gate, entity_context=entity_context,
+        submit_cmd,
+        pool=pool,
+        profile=_profile(),
+        registry=_registry("XYZ"),
+        pre_submit_gate=gate,
+        entity_context=entity_context,
         entity_repo=PostgresEntityRepository(pool),
     )
     assert allowed.status.value == "VALIDATED"
 
 
-async def test_submit_order_rejects_allow_decision_missing_compliance_id(
-    pool, repo, trust_repo
-):
+async def test_submit_order_rejects_allow_decision_missing_compliance_id(pool, repo, trust_repo):
     """CM-A1 2차 방어선 — `foundation_gate.py`가 아닌 어떤 다른(가짜) 게이트가
     `compliance_decision_id`를 채우지 않은 채 ALLOW를 반환해도, `submit_order`
     자신이 그 주문을 거부한다."""
@@ -229,11 +268,65 @@ async def test_submit_order_rejects_allow_decision_missing_compliance_id(
 
     with pytest.raises(OrderSubmitDeniedError) as exc_info:
         await submit_order(
-            submit_cmd, pool=pool, profile=_profile(), registry=_registry("BTC/USDT"),
-            pre_submit_gate=_forged_allow_gate, entity_context=entity_context,
+            submit_cmd,
+            pool=pool,
+            profile=_profile(),
+            registry=_registry("BTC/USDT"),
+            pre_submit_gate=_forged_allow_gate,
+            entity_context=entity_context,
             entity_repo=PostgresEntityRepository(pool),
         )
     assert exc_info.value.reason_codes == ("CM_DECISION_ID_MISSING",)
+
+    async with pool.acquire() as conn:
+        order_count = await conn.fetchval(
+            "SELECT count(*) FROM orders WHERE execution_id = $1", execution_id
+        )
+    assert order_count == 0
+
+
+async def test_real_db_write_failure_during_compliance_check_blocks_order(
+    pool, repo, trust_repo, monkeypatch
+):
+    """실패 주입(DB/네트워크 결함, DEEPEN task-2861) — 위
+    `test_removing_compliance_wiring_lets_forbidden_symbol_through`은 판정
+    함수 자체(`evaluate_compliance_gate`)를 always-ALLOW 스텁으로 치환하는
+    비즈니스 로직 우회로, DEPTH 감사가 "배선 증명이지 DB/네트워크 결함
+    주입이 아니다"라고 지적한 바로 그 패턴이다. 이 테스트는 판정 로직은
+    전혀 건드리지 않고, `PostgresMandateRepository`가 실제로 쓰는 DB I/O
+    경계 하나(`insert_policy_decision`)만 진짜 asyncpg 커넥션-단절 예외
+    클래스(`ConnectionDoesNotExistError`)를 던지도록 만든다.
+    `foundation_gate.py`의 `evaluate_compliance_gate` 호출부는 try/except로
+    감싸여 있지 않으므로(코드 확인됨), 이 결함이 삼켜져 조용히 ALLOW로
+    새지 않고 `submit_order` 호출자까지 그대로 전파되어(fail-closed) 주문이
+    생성되지 않아야 한다 — 심지어 심볼 자체는 금지 목록에 없어(허용
+    판정이었을) 상황에서도."""
+
+    async def _broken_insert_policy_decision(self, decision):
+        raise asyncpg.exceptions.ConnectionDoesNotExistError("simulated connection loss")
+
+    monkeypatch.setattr(
+        PostgresPolicyRepositoryMixin, "insert_policy_decision", _broken_insert_policy_decision
+    )
+
+    user_id = await create_test_tenant(pool)
+    execution_id = await _create_running_execution(pool, user_id)
+    entity_context = await seed_entity_context(pool, user_id)
+    await _mandate_forbidding(pool, repo, trust_repo, user_id, "XYZ")
+
+    gate = make_foundation_pre_submit_gate(pool, require_mandate=False)
+    submit_cmd = _submit_cmd(user_id, execution_id, "BTC/USDT")  # XYZ가 아니라 허용될 심볼
+
+    with pytest.raises(asyncpg.exceptions.ConnectionDoesNotExistError):
+        await submit_order(
+            submit_cmd,
+            pool=pool,
+            profile=_profile(),
+            registry=_registry("BTC/USDT"),
+            pre_submit_gate=gate,
+            entity_context=entity_context,
+            entity_repo=PostgresEntityRepository(pool),
+        )
 
     async with pool.acquire() as conn:
         order_count = await conn.fetchval(
