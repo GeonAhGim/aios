@@ -8,11 +8,34 @@ Spec: docs/specs/L4_analytics_authoring_backtest_marketplace_v1.0.md
 §3.3 "필드 제거·이름 변경은 MAJOR"). 필드 추가는 새 MAJOR 버전(`v3`)이
 필요하다 — v2 안에서 조용히 추가하지 않는다. QA는 이 파일로 §3.2 계약을
 대조한다.
+
+DEEPEN 1123 (task-2874, docs/audit/DEPTH_DC_RD.md): the original DC-1 leaf
+graded D1 for missing failure injection, numeric performance assertions, a
+gate/CI red-regression test, and D3 adversarial/multi-instance/replay proof.
+This module is pure (no I/O, no mapper function), so those four are adapted
+to what a pure pydantic-contract module can actually exercise:
+  - failure injection: monkeypatch the ULID validator's pattern to simulate
+    a future regression and prove `Instrument` construction still fails
+    closed instead of silently accepting an unvalidated id
+    (`test_ulid_validator_failure_injection_fails_closed`).
+  - numeric performance: a wall-clock ceiling on constructing 5,000
+    `Instrument` records (`test_bulk_instrument_construction...`).
+  - gate/CI red regression: the DC-1 §3.2 required-field set must stay
+    exactly what the spec table lists — a future edit that silently
+    widens or narrows it fails this test red
+    (`test_instrument_required_fields_match_dc1_contract_table_ci_guard`).
+  - D3 adversarial + multi-instance/replay: frozen-model tamper rejection,
+    and byte-identical output from independent OS processes given the same
+    input (`test_frozen_...`, `test_replay_across_independent_processes...`).
 """
+
 import json
+import time
+from concurrent.futures import ProcessPoolExecutor
 from datetime import datetime, timezone
 from decimal import Decimal
 from pathlib import Path
+from typing import Any, cast
 
 import pytest
 from pydantic import ValidationError
@@ -29,6 +52,20 @@ _MODELS = (
 )
 
 _VALID_ULID = "01ARZ3NDEKTSV4RRFFQ69G5FAV"
+
+# Crockford base32 alphabet (excludes I, L, O, U per the ULID spec) — used
+# to generate distinct valid ULIDs for the bulk-construction perf test.
+_CROCKFORD_ALPHABET = "0123456789ABCDEFGHJKMNPQRSTVWXYZ"
+
+
+def _ulid_for(index: int) -> str:
+    digits = []
+    remaining = index
+    for _ in range(6):
+        digits.append(_CROCKFORD_ALPHABET[remaining % 32])
+        remaining //= 32
+    suffix = "".join(reversed(digits))
+    return _VALID_ULID[:20] + suffix
 
 
 def _now() -> datetime:
@@ -276,3 +313,120 @@ def test_instrument_currency_country_mic_normalized_to_uppercase() -> None:
     assert instrument.currency == "USD"
     assert instrument.country == "US"
     assert instrument.mic == "XNAS"
+
+
+# --- DEEPEN 1123 (task-2874): D3 adversarial, failure injection, numeric
+# performance, gate/CI red regression, multi-instance/replay ---
+
+
+def test_frozen_instrument_and_venue_listing_reject_post_construction_tampering() -> None:
+    """D3 adversarial: an in-memory `Instrument`/`VenueListing` must not be
+    mutable after construction — flipping `lifecycle_state` or swapping
+    `instrument_id` downstream (a bug or an attacker) must be a
+    `ValidationError`, not a silent attribute assignment. Mirrors every
+    other contract in this package (`candle_lineage.TickLineage`,
+    `coverage.CoverageSpan`, `microstructure.TradeTick`/`QuoteL1`/`BookL2`),
+    all of which are already `frozen=True`.
+    """
+    instrument = _sample_instrument()
+    with pytest.raises(ValidationError):
+        cast(Any, instrument).lifecycle_state = v2.InstrumentLifecycle.DELISTED
+    with pytest.raises(ValidationError):
+        cast(Any, instrument).instrument_id = "01ARZ3NDEKTSV4RRFFQ69G5FB9"
+
+    listing = _sample_listing()
+    with pytest.raises(ValidationError):
+        cast(Any, listing).is_primary = False
+
+
+def test_ulid_validator_failure_injection_fails_closed(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Failure injection: if the ULID validator's pattern breaks (e.g. a
+    future refactor leaves `_ULID_PATTERN` unset), `Instrument`/
+    `VenueListing` construction must still fail closed — never silently
+    accept an unvalidated `instrument_id`. `AfterValidator` runs
+    `_validate_ulid` unconditionally on every construction, so a broken
+    pattern surfaces as an exception immediately rather than producing a
+    half-validated record.
+    """
+    monkeypatch.setattr(v2, "_ULID_PATTERN", None)
+    with pytest.raises(AttributeError):
+        _sample_instrument()
+    with pytest.raises(AttributeError):
+        _sample_listing()
+
+
+def test_bulk_instrument_construction_completes_within_latency_budget() -> None:
+    """Numeric performance assertion: constructing a large symbol-master
+    page must not become a bottleneck for callers (DC-2 symbol_master,
+    DC-5 ports). 5,000 instruments is far more than the venue/instrument
+    count AIOS is provisioned for today; the budget is a generous ceiling
+    on frozen-model construction + validation cost, not a copy of any
+    specific SLO.
+    """
+    started = time.perf_counter()
+    instruments = [_sample_instrument(instrument_id=_ulid_for(i)) for i in range(5000)]
+    elapsed_s = time.perf_counter() - started
+
+    assert len(instruments) == 5000
+    assert elapsed_s < 2.0, f"constructing 5,000 Instruments took {elapsed_s:.3f}s (budget 2.0s)"
+
+
+def test_instrument_required_fields_match_dc1_contract_table_ci_guard() -> None:
+    """Gate/CI red regression: DC-1's §3.2 field table is fixed. If a
+    future edit makes any DC-20 derivative field (`kind`, `underlying_id`,
+    ...) required, or adds a new required field outside the table without
+    bumping to a `v3` module (107 §3.3 — a newly-required field is a MAJOR
+    change just as a removed one is), this guard trips CI red immediately
+    instead of surfacing as a silent deserialization failure for existing
+    rows written under the old (optional) shape.
+    """
+    expected_required = {
+        "instrument_id",
+        "asset_class",
+        "base",
+        "quote",
+        "isin",
+        "figi",
+        "tick_size",
+        "lot_size",
+        "calendar_id",
+        "lifecycle_state",
+        "created_at",
+    }
+    actual_required = {
+        name for name, field in v2.Instrument.model_fields.items() if field.is_required()
+    }
+    assert actual_required == expected_required
+
+
+def _replay_instrument_in_subprocess() -> str:
+    """Module-level so it is picklable for `ProcessPoolExecutor` on
+    Windows (spawn start method)."""
+    instrument = v2.Instrument(
+        instrument_id=_VALID_ULID,
+        asset_class=AssetClass.CRYPTO,
+        base="BTC",
+        quote="USDT",
+        isin=None,
+        figi=None,
+        tick_size=Decimal("0.01"),
+        lot_size=Decimal("0.0001"),
+        calendar_id="24x7",
+        lifecycle_state=v2.InstrumentLifecycle.ACTIVE,
+        created_at=_now(),
+    )
+    return instrument.model_dump_json()
+
+
+def test_replay_across_independent_processes_is_byte_identical() -> None:
+    """D3 multi-instance/replay proof: three independent OS processes,
+    each constructing the same `Instrument` from the same literal input,
+    must produce byte-identical serialized output — no process-local
+    cache or import-order nondeterminism leaking into the symbol master.
+    """
+    with ProcessPoolExecutor(max_workers=3) as pool:
+        futures = [pool.submit(_replay_instrument_in_subprocess) for _ in range(3)]
+        results = [future.result() for future in futures]
+
+    assert len(results) == 3
+    assert len(set(results)) == 1

@@ -32,6 +32,7 @@ option-chain API is DC-26). `currency`/`country`/`mic` are format-checked
 only (ISO 4217 3-letter, ISO 3166-1 alpha-2, ISO 10383 MIC 4-char) — no
 external code table is bundled or validated against.
 """
+
 from __future__ import annotations
 
 import re
@@ -137,10 +138,19 @@ class SettlementType(str, Enum):
     PHYSICAL = "PHYSICAL"
 
 
-class Instrument(BaseModel):
+class Instrument(BaseModel, frozen=True):
     """벤처 독립적인 심볼 마스터 레코드. `instrument_id`는 불변(§4.1) —
     재상장은 같은 id를 재사용하지 않고 새 `Instrument`를 발급한다(§4.2
-    delisted→relisted: "새 instrument 생성(구 id 유지 금지)")."""
+    delisted→relisted: "새 instrument 생성(구 id 유지 금지)").
+
+    `frozen=True` matches every other contract in this package
+    (`candle_lineage.TickLineage`, `coverage.CoverageSpan`,
+    `microstructure.TradeTick`/`QuoteL1`/`BookL2`) — the §4.1
+    `instrument_id` invariant must hold in memory, not just at the DB
+    constraint (DC-4). `lifecycle_state` transitions (DC-3) never mutate
+    this object in place; the repository reconstructs a fresh
+    `Instrument` from the DB `UPDATE ... RETURNING` row, so `frozen=True`
+    does not conflict with that flow."""
 
     instrument_id: ULID
     asset_class: AssetClass
@@ -168,12 +178,16 @@ class Instrument(BaseModel):
     schema_version: Literal["instruments-v2"] = SCHEMA_VERSION
 
 
-class VenueListing(BaseModel):
+class VenueListing(BaseModel, frozen=True):
     """벤처별 심볼 매핑. `(venue, venue_symbol, listed_at)`는 유일해야
     한다(§3.2) — 이 유일성은 DC-4 마이그레이션의 DB 제약(EXCLUDE)이 실제로
     강제하고, 이 DTO는 그 계약 형태만 표현한다. 심볼 변경은 구 listing에
     `delisted_at`을 채우고 새 listing을 등록하는 방식으로 표현한다
-    (`instrument_id`는 그대로)."""
+    (`instrument_id`는 그대로).
+
+    `frozen=True` for the same reason as `Instrument` (consistency with
+    every other contract in this package) — nothing quietly rewrites a
+    listing-history record in memory."""
 
     instrument_id: ULID
     venue: Venue
