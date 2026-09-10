@@ -38,7 +38,7 @@ async function importFromCwd(specifier) {
 // ---------------------------------------------------------------------------
 // Deterministic synthetic candle generator (seeded PRNG, no Date.now/Math.random)
 // ---------------------------------------------------------------------------
-function mulberry32(seed) {
+export function mulberry32(seed) {
   let a = seed >>> 0
   return function () {
     a |= 0
@@ -49,7 +49,7 @@ function mulberry32(seed) {
   }
 }
 
-function genCandles(n, seed = 42) {
+export function genCandles(n, seed = 42) {
   const rnd = mulberry32(seed)
   const candles = []
   let price = 100
@@ -67,7 +67,7 @@ function genCandles(n, seed = 42) {
   return candles
 }
 
-function percentile(arr, p) {
+export function percentile(arr, p) {
   const s = [...arr].sort((a, b) => a - b)
   const idx = Math.min(s.length - 1, Math.floor((p / 100) * s.length))
   return Math.round(s[idx] * 1000) / 1000
@@ -84,7 +84,7 @@ function percentile(arr, p) {
 // vsync-bound). callTimesMs = synchronous time spent inside the API call itself
 // (compute cost, not vsync-bound) — reported when the candidate's API is synchronous.
 // ---------------------------------------------------------------------------
-const ENTRIES = {
+export const ENTRIES = {
   klinecharts: (steps) => `
 import { init, dispose } from 'klinecharts'
 window.runBench = async function (candles, containerId) {
@@ -218,7 +218,7 @@ window.runBench = async function (candles, containerId) {
 }`,
 }
 
-function findChrome() {
+export function findChrome() {
   if (process.env.CHROME_PATH) return process.env.CHROME_PATH
   const candidates = [
     'C:/Program Files/Google/Chrome/Application/chrome.exe',
@@ -232,19 +232,28 @@ function findChrome() {
   return candidates.find((p) => fs.existsSync(p)) ?? null
 }
 
-async function benchOne(lib, candles, steps) {
+// `deps` overrides the three external-resource loaders (esbuild module, puppeteer-core
+// module, Chrome path resolution) — only ever supplied by tests, so the caller-facing
+// contract (main() calling benchOne(lib, candles, steps) with no 4th arg) is unchanged
+// and still resolves everything for real via the caller's cwd node_modules.
+export async function benchOne(lib, candles, steps, deps = {}) {
+  const {
+    loadEsbuild = () => importFromCwd('esbuild'),
+    loadPuppeteer = () => importFromCwd('puppeteer-core'),
+    resolveChromePath = findChrome,
+  } = deps
   let esbuild, puppeteer
   try {
-    esbuild = (await importFromCwd('esbuild')).default
+    esbuild = (await loadEsbuild()).default
   } catch (err) {
     return { status: 'UNMEASURED', reason: `esbuild not installed in cwd ${process.cwd()}: ${err.message.split('\n')[0]}` }
   }
   try {
-    puppeteer = (await importFromCwd('puppeteer-core')).default
+    puppeteer = (await loadPuppeteer()).default
   } catch (err) {
     return { status: 'UNMEASURED', reason: `puppeteer-core not installed in cwd ${process.cwd()}: ${err.message.split('\n')[0]}` }
   }
-  const chromePath = findChrome()
+  const chromePath = resolveChromePath()
   if (!chromePath) {
     return { status: 'UNMEASURED', reason: 'no local Chrome/Edge executable found (set CHROME_PATH)' }
   }
@@ -264,8 +273,9 @@ async function benchOne(lib, candles, steps) {
     return { status: 'UNMEASURED', reason: `bundle failed (candidate likely not installed): ${err.message.split('\n')[0]}` }
   }
 
-  const browser = await puppeteer.launch({ executablePath: chromePath, headless: true })
+  let browser
   try {
+    browser = await puppeteer.launch({ executablePath: chromePath, headless: true })
     const page = await browser.newPage()
     await page.setViewport({ width: 1280, height: 720 })
     await page.setContent('<!doctype html><html><body><div id="chart" style="width:1200px;height:600px"></div></body></html>')
@@ -286,11 +296,11 @@ async function benchOne(lib, candles, steps) {
   } catch (err) {
     return { status: 'UNMEASURED', reason: err.message.split('\n')[0] }
   } finally {
-    await browser.close()
+    if (browser) await browser.close()
   }
 }
 
-async function main() {
+export async function main() {
   const args = Object.fromEntries(
     process.argv.slice(2).map((a) => {
       const [k, v] = a.replace(/^--/, '').split('=')
@@ -312,6 +322,12 @@ async function main() {
     results[lib] = await benchOne(lib, candles, steps)
   }
   console.log(JSON.stringify(results, null, 2))
+  return results
 }
 
-main()
+// Only auto-run when executed directly (`node bench_chart_candles.mjs ...`), not
+// when imported by the test suite (bench_chart_candles.test.mjs) — importing this
+// module must not launch a CLI run as a side effect.
+if (process.argv[1] && pathToFileURL(process.argv[1]).href === import.meta.url) {
+  main()
+}

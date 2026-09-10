@@ -4,6 +4,7 @@
 - 근거: ADR-2026-09-04-B(D0, D2)
 - 범위: **문서 + 벤치 스크립트만.** `vendor/` 반입, `packages/chart-engine` 생성, `package.json` 의존성 추가는 전부 CH-1 몫이며 이 리프에서 하지 않았다. 결론이 나와도 CH-1은 CA(Chief Architect) 확정 전에는 착수하지 않는다.
 - 벤치 스크립트: `frontend/packages/ui-web/scripts/bench_chart_candles.mjs` (실행 방법은 §5)
+- 유닛테스트: `frontend/packages/ui-web/scripts/bench_chart_candles.test.mjs`(task-3068, DEPTH_CH 감사가 지적한 유닛테스트 0건 갭 보강) — `mulberry32`/`genCandles`/`percentile`/`findChrome`/`benchOne`/`main`을 커버한다(19 tests, negative-path 9건, 실패 주입 2건: `puppeteer.launch()` 크래시 + 페이지 내부 `runBench` throw, 수치 성능 단언 1건: 10만 봉 생성 <2s, 게이트 적색 재현 1건: 이 저장소 실제 상태로 `main()`을 실행하면 `puppeteer-core` 미설치로 4개 후보 전부 `UNMEASURED`임을 실증). 이 과정에서 `benchOne`의 실제 버그도 발견해 고쳤다: `puppeteer.launch()` 호출이 try/catch 밖에 있어 브라우저 실행 자체가 실패하면(OOM·샌드박스 오류 등) §4.1이 약속하는 "우아한 실패"를 어기고 예외가 그대로 전파되었다 — try 블록 안으로 옮기고 `browser`가 생성된 경우에만 `finally`에서 close하도록 수정했다.
 
 ## 0. 채점 원칙 — ADR-2026-09-04-B D0가 최상위
 
