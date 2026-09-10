@@ -2,12 +2,12 @@ import "@testing-library/jest-dom/vitest";
 import type { StreamCandle } from "@aios/chart-engine/src/data/candleStream";
 import { createDefaultOverlayRegistry } from "@aios/chart-engine/src/indicators/overlayRegistry";
 import type { IndicatorCatalogEntry } from "@aios/chart-engine/src/plugins/indicatorPlugin";
-import { computeIndicatorSeries } from "@aios/chart-engine/src/compute/clientEngine";
+import { CLIENT_ENGINE_COMPUTE_TASK, computeIndicatorSeries, type Bar } from "@aios/chart-engine/src/compute/clientEngine";
 import { VERIFIED_KERNEL_PINS } from "@aios/chart-engine/src/compute/verifiedIndicators";
 import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { IndicatorParityPanel, type ServerIndicatorSeriesPort } from "./IndicatorParityPanel";
-import type { WorkerPool } from "@aios/chart-engine/src/compute/workerPool";
+import { createWorkerPool, type WorkerPool } from "@aios/chart-engine/src/compute/workerPool";
 import { resolveVerifiedIndicators } from "@aios/chart-engine/src/compute/verifiedIndicators";
 
 // CH-18c — component-level tests (no ChartPage/IndicatorPicker mount): the
@@ -388,5 +388,145 @@ describe("IndicatorParityPanel — CH-18e workerPool 실배선", () => {
 
     expect(errorSpy).not.toHaveBeenCalled();
     errorSpy.mockRestore();
+  });
+});
+
+// DEEPEN 2039 (docs/audit/DEPTH_CH.md): the CH-18e leaf's own workerPool.test.ts
+// gaps (수치 성능 단언 없음, 게이트 적색 재현 없음) also show up one layer up, at
+// this panel's wiring — nothing here ever measured that dispatching through the
+// pool actually beats synchronous main-thread compute in wall-clock ms, and
+// nothing reproduced the pre-2039 "동기 계산" state to prove the async dispatch
+// is load-bearing rather than incidental.
+
+const PERF_PARAMS: Readonly<Record<string, Record<string, number>>> = {
+  SMA: { timeperiod: 20 },
+  EMA: { timeperiod: 20 },
+  RSI: { timeperiod: 14 },
+  ATR: { timeperiod: 14 },
+  CCI: { timeperiod: 14 },
+  WILLR: { timeperiod: 14 },
+  MFI: { timeperiod: 14 },
+  MACD: { fastperiod: 12, slowperiod: 26, signalperiod: 9 },
+  STOCH: { fastk_period: 5, slowk_period: 3, slowd_period: 3 },
+  OBV: {},
+};
+
+const PERF_SPEC_SHAPES: Readonly<Record<string, { inputs: readonly string[]; outputs: readonly string[] }>> = {
+  SMA: { inputs: ["close"], outputs: ["value"] },
+  EMA: { inputs: ["close"], outputs: ["value"] },
+  RSI: { inputs: ["close"], outputs: ["value"] },
+  ATR: { inputs: ["high", "low", "close"], outputs: ["value"] },
+  CCI: { inputs: ["high", "low", "close"], outputs: ["value"] },
+  WILLR: { inputs: ["high", "low", "close"], outputs: ["value"] },
+  MFI: { inputs: ["high", "low", "close", "volume"], outputs: ["value"] },
+  MACD: { inputs: ["close"], outputs: ["macd", "signal", "hist"] },
+  STOCH: { inputs: ["high", "low", "close"], outputs: ["slowk", "slowd"] },
+  OBV: { inputs: ["close", "volume"], outputs: ["value"] },
+};
+
+function allVerifiedCatalog(): IndicatorCatalogEntry[] {
+  return Object.entries(VERIFIED_KERNEL_PINS).map(([name, pin]) => ({
+    name,
+    tier: pin.tier,
+    category: "test",
+    version: "ind-v1",
+    hash: pin.entryHash,
+    inputs: PERF_SPEC_SHAPES[name]!.inputs,
+    outputs: PERF_SPEC_SHAPES[name]!.outputs,
+  }));
+}
+
+/** Fake `WorkerPool` backed by real `createWorkerPool` busy-tracking, running the *actual* `computeIndicatorSeries` after an artificial per-task delay — a stand-in for a real Worker's message round trip without needing jsdom `Worker` support. */
+function createSimulatedComputePool(backendCount: number, perTaskDelayMs: number): WorkerPool {
+  const backends = Array.from({ length: backendCount }, () => ({
+    async run<TArgs, TResult>(task: string, args: TArgs): Promise<TResult> {
+      if (perTaskDelayMs > 0) await new Promise((resolve) => setTimeout(resolve, perTaskDelayMs));
+      if (task !== CLIENT_ENGINE_COMPUTE_TASK) throw new Error(`unexpected task ${task}`);
+      return computeIndicatorSeries(args as Parameters<typeof computeIndicatorSeries>[0]) as unknown as TResult;
+    },
+    dispose: vi.fn(),
+  }));
+  return createWorkerPool(backends);
+}
+
+describe("IndicatorParityPanel — DEEPEN 2039 numeric performance & gate red reproduction", () => {
+  const perfNames = ["SMA", "EMA", "RSI", "ATR", "CCI"] as const;
+  const perfOverlays = perfNames.map((name) => registry.resolve(name));
+  const perfCatalog = allVerifiedCatalog().filter((entry) => (perfNames as readonly string[]).includes(entry.name));
+
+  it("수치 성능: 4-백엔드 풀로 5개 검증 지표를 계산하면, 동일 부하를 1-백엔드(직렬) 풀로 돌릴 때보다 렌더 완료까지의 실측 ms가 뚜렷이 짧다", async () => {
+    const perTaskDelayMs = 40;
+
+    async function measure(pool: WorkerPool): Promise<number> {
+      const start = performance.now();
+      const { unmount } = render(
+        <IndicatorParityPanel
+          candles={manyCandles(30)}
+          overlays={perfOverlays}
+          catalog={perfCatalog}
+          computePool={pool}
+          resolveServerSeries={() => null}
+        />,
+      );
+      // resolveServerSeries returns null -> resolveIndicatorSeries fails closed to
+      // "unverified" once the pool settles; only the *timing* of that transition
+      // (not which source string it lands on) is what this test cares about.
+      await waitFor(
+        () => {
+          for (const overlay of perfOverlays) {
+            expect(screen.getByTestId(`indicator-parity-source-${overlay.id}`)).toHaveTextContent("(unverified)");
+          }
+        },
+        { timeout: 5000 },
+      );
+      const elapsed = performance.now() - start;
+      unmount();
+      pool.dispose();
+      return elapsed;
+    }
+
+    const serialElapsed = await measure(createSimulatedComputePool(1, perTaskDelayMs));
+    const concurrentElapsed = await measure(createSimulatedComputePool(4, perTaskDelayMs));
+
+    // Serial lower bound: 5 * 40ms = 200ms. Generous CI margin, but a regression
+    // back to one shared backend (or to no pool at all) would fail this.
+    expect(serialElapsed).toBeGreaterThanOrEqual(perfNames.length * perTaskDelayMs * 0.8);
+    expect(concurrentElapsed).toBeLessThan(serialElapsed);
+  }, 10000);
+
+  it("게이트 적색 재현: pre-2039 방식(계산을 렌더 경로 안에서 동기로 끝냄)을 재현하면 그 호출 자체가 계산 완료까지 블로킹된다(적색); 실제 컴포넌트는 풀에 위임해 render() 호출이 계산을 기다리지 않고 즉시 반환된다(녹색)", () => {
+    const heavyCandles = manyCandles(20_000);
+    const heavyBars: Bar[] = heavyCandles.map((candle) => ({
+      open: Number(candle.record.open),
+      high: Number(candle.record.high),
+      low: Number(candle.record.low),
+      close: Number(candle.record.close),
+      volume: Number(candle.record.volume),
+    }));
+    const allOverlays = Object.keys(VERIFIED_KERNEL_PINS).map((name) => registry.resolve(name));
+    const catalog = allVerifiedCatalog();
+
+    // 적색: 17ef81ee 이전에는 client compute가 workerPool을 거치지 않고 렌더 경로
+    // 안에서 computeIndicatorSeries를 직접, 동기로 호출했다(모듈 docstring
+    // "현재 메인 스레드 동기 계산" 참고) — 그 호출 자체가 완료될 때까지 블로킹된다.
+    const redStart = performance.now();
+    for (const overlay of allOverlays) {
+      computeIndicatorSeries({ name: overlay.id, params: PERF_PARAMS[overlay.id] ?? {}, bars: heavyBars, catalog });
+    }
+    const redElapsed = performance.now() - redStart;
+
+    // 녹색: 실제 컴포넌트는 동일 크기의 부하를 풀에 위임한다(지연 0 — 동기 블로킹
+    // 여부만 비교, 왕복 지연은 위 수치 성능 테스트가 이미 담당). render() 자체는
+    // useEffect 안에서만 pool.submit을 호출하므로 계산 완료를 기다리지 않는다.
+    const pool = createSimulatedComputePool(allOverlays.length, 0);
+    const greenStart = performance.now();
+    render(
+      <IndicatorParityPanel candles={heavyCandles} overlays={allOverlays} catalog={catalog} computePool={pool} resolveServerSeries={() => null} />,
+    );
+    const greenElapsed = performance.now() - greenStart;
+    pool.dispose();
+
+    expect(redElapsed).toBeGreaterThan(5); // sanity: the red mutant really did block on real work
+    expect(greenElapsed).toBeLessThan(redElapsed * 0.5);
   });
 });
