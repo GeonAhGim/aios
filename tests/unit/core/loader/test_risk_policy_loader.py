@@ -1,3 +1,5 @@
+import time
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from uuid import uuid4
 
@@ -222,3 +224,96 @@ def test_verify_policy_against_bundle_raises_when_engine_version_differs():
 
     with pytest.raises(BundleMismatchError):
         verify_policy_against_bundle(policy, other_engine_bundle)
+
+
+# --- D2->D3: 실패 주입 / 성능 단언 / 다중 인스턴스 / 적대적 (DEPTH_R_EO.md leaf 1194) ---
+
+
+def test_corrupted_policy_field_raises_instead_of_silently_hashing():
+    """실패 주입 — 신뢰 경계 안쪽(캐시 역직렬화, DB 왕복 등)에서 pydantic
+    검증을 우회해 들어온 손상된 필드(예: `model_copy`로 만든 이중체)가
+    조용히 임의의(그러나 잘못된) rule_hash로 이어져 I6 게이트를 속여
+    넘어가서는 안 된다. `compute_rule_hash`가 `canonical_json`으로 못
+    직렬화하는 값을 만나면 `TypeError`를 그대로 전파해야 한다 — 삼켜서
+    엉뚱한 해시로 폴백하면 안 된다(fail-closed)."""
+    policy = load_risk_policy()
+    corrupted = policy.model_copy(update={"daily_loss": object()})
+
+    with pytest.raises(TypeError):
+        compute_rule_hash(corrupted, "engine-v1")
+
+    bundle = _sample_bundle(policy, "engine-v1")
+    with pytest.raises(TypeError):
+        verify_policy_against_bundle(corrupted, bundle)
+
+
+def test_bulk_verify_policy_against_bundle_stays_within_perf_budget():
+    """성능 단언 — I6 게이트는 R-16 evaluator가 매 결정마다(PRE_TRADE/
+    PRE_SUBMIT) 호출한다(§9). 재해시 비용이 병적으로 커지면 판단 계층
+    전체의 지연시간 예산을 잠식한다."""
+    policy = load_risk_policy()
+    bundle = _sample_bundle(policy, "engine-v1")
+
+    start = time.perf_counter()
+    for _ in range(500):
+        assert verify_policy_against_bundle(policy, bundle) is None
+    elapsed = time.perf_counter() - start
+
+    assert elapsed < 2.0
+
+
+def test_concurrent_load_and_verify_across_workers_without_cross_contamination():
+    """다중 인스턴스 증명 — 여러 게이트 워커(스레드)가 각자 독립적으로
+    같은 yaml을 로드하고 같은 ACTIVE 번들에 대해 검증해도(순수 함수,
+    전역 가변 상태 없음) 서로의 결과를 오염시키지 않는다. 모든 워커는
+    동일한 rule_hash를 재계산해야 한다."""
+    reference_policy = load_risk_policy()
+    bundle = _sample_bundle(reference_policy, "engine-v1")
+
+    def _worker(_: int) -> tuple[str, bool]:
+        worker_policy = load_risk_policy()
+        recomputed = compute_rule_hash(worker_policy, "engine-v1")
+        verify_policy_against_bundle(worker_policy, bundle)
+        return recomputed, worker_policy == reference_policy
+
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        results = list(pool.map(_worker, range(32)))
+
+    assert len(results) == 32
+    expected_hash = compute_rule_hash(reference_policy, "engine-v1")
+    for recomputed_hash, matches_reference in results:
+        assert recomputed_hash == expected_hash
+        assert matches_reference is True
+
+
+@pytest.mark.parametrize(
+    ("top_key", "nested_key", "tampered_value"),
+    [
+        ("daily_loss", "warning_pct", 3.1),
+        ("leverage", "default_max", 3.5),
+        ("var", "confidence", 0.90),
+        ("liquidation", "max_participation_pct", 11.0),
+        ("data_distrust", "enter_threshold_pct", 1.6),
+        ("version", None, "draft-2"),
+    ],
+)
+def test_tampering_any_single_field_after_bundle_activation_is_caught_by_hash_mismatch(
+    top_key: str, nested_key: str | None, tampered_value: object
+):
+    """적대적 — §4.1 I6는 "정책 파일이 ACTIVE 번들과 한 글자라도 다르면
+    DENY"를 요구한다. 하드코딩된 해시값 하나로 미스매치를 확인하는
+    기존 테스트만으로는 실제 공격 표면(운영자 실수 또는 승인 절차 우회로
+    yaml의 임의 한 필드가 사후에 바뀌는 경우) 전체를 대표하지 못한다 —
+    서로 다른 블록의 필드를 하나씩 바꿔도 전부 잡히는지 확인한다."""
+    original_policy = load_risk_policy()
+    bundle = _sample_bundle(original_policy, "engine-v1")
+
+    raw = original_policy.model_dump()
+    if nested_key is None:
+        raw[top_key] = tampered_value
+    else:
+        raw[top_key][nested_key] = tampered_value
+    tampered_policy = RiskPolicy(**raw)
+
+    with pytest.raises(BundleMismatchError):
+        verify_policy_against_bundle(tampered_policy, bundle)
