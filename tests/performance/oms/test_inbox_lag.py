@@ -31,18 +31,32 @@ negative test(I-10): `fills_repo.insert_if_absent`(ingest 1회당 정확히 1번
 `order_repo`/`fills_repo`/`inbox_repo`를 생성자 인자로 받으므로 `submit_order`와
 달리 직접 교체 가능하다 — `get_for_update`처럼 한 호출 안에서 여러 번(venue
 확인·재조회·transition 내부) 불리는 메서드를 훅하면 +1이 아니라 +N이 된다).
+
+DEEPEN(task-2802) — DEPTH 감사(task-2722, docs/audit/DEPTH_L4_BR.md#2323)
+근거 보강: (1) 정규화 목표(`normalized_target_ms`)를 이제 실제로 단언한다
+(절대 목표 `_P99_TARGET_MS` 자체는 여전히 비차단 print). (2) `order_repo.
+transition`이 tx 안에서(fills INSERT 이후, `mark_processed` 이전) 인프라
+오류로 실패하면 `ingest()`의 `async with ... conn.transaction()`이 전체를
+롤백한다 — `provider_event_inbox`/`fills` 어느 쪽에도 고아 행이 남지 않아,
+같은 이벤트를 나중에 재전달해도(F9 중복 흡수 전제가 깨지지 않음) 다시
+처리될 수 있다는 불변식의 증명이다.
 """
 from __future__ import annotations
 
 import statistics
 import time
+from typing import Any
+from uuid import UUID
 
 import asyncpg
 import pytest
 
+from src.data.models.trading import OrderStatus
 from src.services.oms.adapters.fills_repository import FillsRepository
+from src.services.oms.adapters.order_repository import PostgresOrderRepository
 from src.services.oms.application.inbox_processor import InboxProcessor
-from src.services.oms.contracts.v1_events import FillEvent
+from src.services.oms.contracts.v1_events import FillEvent, OrderTransitionEvent
+from src.services.oms.contracts.v1_views import OrderView
 from tests.integration.oms.conftest import create_test_user
 from tests.performance.oms._fixtures import insert_open_order, partial_fill_event
 from tests.performance.oms.conftest import (
@@ -62,6 +76,24 @@ class _ChattyFillsRepo(FillsRepository):
     async def insert_if_absent(self, conn: asyncpg.Connection, fill: FillEvent) -> bool:
         await conn.fetchval("SELECT 1")
         return await super().insert_if_absent(conn, fill)
+
+
+class _FailingOrderRepo(PostgresOrderRepository):
+    """failure-injection 전용(DEEPEN task-2802) — fills INSERT 이후, tx
+    커밋 이전 단계에서 인프라 오류를 흉내 낸다(전체 tx 롤백 증명용)."""
+
+    async def transition(
+        self,
+        conn: asyncpg.Connection,
+        *,
+        order_id: UUID,
+        expected_status: OrderStatus,
+        expected_version: int,
+        new_status: OrderStatus,
+        patch: dict[str, Any],
+        event: OrderTransitionEvent,
+    ) -> OrderView:
+        raise ConnectionError("simulated DB connection loss before order transition commit")
 
 
 async def _count_ingest_round_trips(
@@ -116,7 +148,16 @@ async def test_inbox_ingest_p99_measured_and_round_trips_exact(pool: asyncpg.Poo
         f"({_INGEST_PARTIAL_ROUND_TRIPS})과 다릅니다 — 구조 변경입니다"
         "(모듈 docstring 구성표를 갱신하고 리뷰를 받으세요)."
     )
-    # 절대시간(p99 ≤ 300ms)은 게이트로 쓰지 않는다(모듈 docstring, esc-826/task-1038 decision).
+    # 절대시간(p99 ≤ 300ms)은 여전히 게이트가 아니다(모듈 docstring, esc-826/task-1038
+    # decision) — p99/max는 n=100 표본에서 단일 꼬리 샘플이라 그 자체가 노이즈에
+    # 취약해(GC/스케줄링 지터 1회로도 튐) 게이트로 쓰지 않는다. 대신 이 환경의 기준
+    # 왕복비용에 정규화한 목표(DEEPEN task-2802)를 더 안정적인 p95에 건다.
+    p95_ms = latencies_ms[int(len(latencies_ms) * 0.95)]
+    assert p95_ms < normalized_target_ms, (
+        f"inbox ingest p95({p95_ms:.2f}ms)가 정규화 목표({normalized_target_ms:.2f}ms = "
+        f"max({_P99_TARGET_MS}, {_ROUND_TRIP_MULTIPLIER}x 기준왕복 {baseline_p95_ms:.2f}ms))를 "
+        "넘었습니다 — 이 환경의 DB 왕복비용 대비 상대적인 성능 회귀입니다."
+    )
 
 
 async def test_inbox_round_trip_gate_detects_extra_query(pool: asyncpg.Pool) -> None:
@@ -124,3 +165,33 @@ async def test_inbox_round_trip_gate_detects_extra_query(pool: asyncpg.Pool) -> 
     round_trips = await _count_ingest_round_trips(pool, fills_repo_cls=_ChattyFillsRepo)
     assert round_trips == _INGEST_PARTIAL_ROUND_TRIPS + 1
     assert round_trips != _INGEST_PARTIAL_ROUND_TRIPS
+
+
+async def test_ingest_rolls_back_fully_on_order_repo_failure(pool: asyncpg.Pool) -> None:
+    """failure-injection(DEEPEN task-2802): `order_repo.transition`이 tx
+    안에서 인프라 오류로 실패하면 `ingest()`는 그 오류를 그대로 전파하고,
+    같은 tx에서 앞서 쓴 `provider_event_inbox`/`fills` 행도 함께 롤백된다 —
+    이벤트가 "반쯤 처리된" 상태로 남지 않아 재전달 시 다시 처리될 수 있다."""
+    user_id = await create_test_user(pool)
+    _, cid, exoid = await insert_open_order(pool, user_id)
+    ev = partial_fill_event(exchange_order_id=exoid, client_order_id=cid)
+    processor = InboxProcessor(pool, order_repo=_FailingOrderRepo())
+
+    with pytest.raises(ConnectionError):
+        await processor.ingest(ev)
+
+    async with pool.acquire() as conn:
+        inbox_row = await conn.fetchrow(
+            "SELECT 1 FROM provider_event_inbox WHERE venue = $1 AND provider_event_id = $2",
+            ev.venue, ev.provider_event_id,
+        )
+        fill_row = await conn.fetchrow(
+            "SELECT 1 FROM fills WHERE venue = $1 AND provider_fill_id = $2",
+            ev.venue, ev.last_fill.provider_fill_id,
+        )
+        order_status = await conn.fetchval(
+            "SELECT status FROM orders WHERE exchange_order_id = $1", exoid
+        )
+    assert inbox_row is None, "실패한 ingest가 provider_event_inbox에 고아 행을 남겼습니다."
+    assert fill_row is None, "실패한 ingest가 fills에 고아 행을 남겼습니다."
+    assert order_status == "SUBMITTED"

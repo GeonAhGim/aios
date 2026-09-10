@@ -31,6 +31,15 @@ negative test(I-10): `outbox_repo.claim_batch`(tx1당 정확히 1회 호출)가
 `outbox_repo`를 생성자 인자로 받으므로 `submit_order`와 달리 직접 교체
 가능하다 — `get_for_update`처럼 한 호출 안에서 여러 번 불리는 메서드를
 훅하면 +1이 아니라 +N이 되어 "정확히 1 어긋남" 단언이 깨진다).
+
+DEEPEN(task-2802) — DEPTH 감사(task-2722, docs/audit/DEPTH_L4_BR.md#2323)
+근거 보강: (1) 정규화 목표(`normalized_target_ms`)를 이제 실제로 단언한다
+(절대 목표 `_P99_TARGET_MS` 자체는 여전히 비차단 print). (2) 어댑터
+`place_order`가 분류 불가한 예외(네트워크 유실류)로 실패하면
+`classify_submit_failure`가 `UNKNOWN`으로 분류해(`dispatch_outcome.py`) 주문을
+`UNKNOWN`(재조회 대상)으로, outbox 행을 `DONE`(§6 F3 "재전송 금지")으로
+확정한다 — 응답 유실 시 안전한 쪽(중복 전송 금지)으로 fail-close한다는
+불변식의 증명이다.
 """
 from __future__ import annotations
 
@@ -152,7 +161,16 @@ async def test_outbox_dispatch_p99_measured_and_round_trips_exact(pool: asyncpg.
         f"({_DISPATCH_ONE_ROUND_TRIPS})과 다릅니다 — 구조 변경입니다"
         "(모듈 docstring 구성표를 갱신하고 리뷰를 받으세요)."
     )
-    # 절대시간(p99 ≤ 200ms)은 게이트로 쓰지 않는다(모듈 docstring, esc-826/task-1038 decision).
+    # 절대시간(p99 ≤ 200ms)은 여전히 게이트가 아니다(모듈 docstring, esc-826/task-1038
+    # decision) — p99/max는 n=100 표본에서 단일 꼬리 샘플이라 그 자체가 노이즈에
+    # 취약해(GC/스케줄링 지터 1회로도 튐) 게이트로 쓰지 않는다. 대신 이 환경의 기준
+    # 왕복비용에 정규화한 목표(DEEPEN task-2802)를 더 안정적인 p95에 건다.
+    p95_ms = latencies_ms[int(len(latencies_ms) * 0.95)]
+    assert p95_ms < normalized_target_ms, (
+        f"outbox dispatch_once p95({p95_ms:.2f}ms)가 정규화 목표({normalized_target_ms:.2f}ms "
+        f"= max({_P99_TARGET_MS}, {_ROUND_TRIP_MULTIPLIER}x 기준왕복 {baseline_p95_ms:.2f}ms))를 "
+        "넘었습니다 — 이 환경의 DB 왕복비용 대비 상대적인 성능 회귀입니다."
+    )
 
 
 async def test_dispatch_round_trip_gate_detects_extra_query(pool: asyncpg.Pool) -> None:
@@ -160,3 +178,43 @@ async def test_dispatch_round_trip_gate_detects_extra_query(pool: asyncpg.Pool) 
     round_trips = await _count_dispatch_once_round_trips(pool, outbox_repo_cls=_ChattyOutboxRepo)
     assert round_trips == _DISPATCH_ONE_ROUND_TRIPS + 1
     assert round_trips != _DISPATCH_ONE_ROUND_TRIPS
+
+
+async def test_dispatch_classifies_adapter_failure_as_unknown_and_marks_outbox_done(
+    pool: asyncpg.Pool,
+) -> None:
+    """failure-injection(DEEPEN task-2802): 어댑터 `place_order`가 분류 불가한
+    예외(네트워크 유실류)로 실패하면 `dispatch_once`는 예외를 삼키고(전체
+    루프를 죽이지 않음) 주문을 `UNKNOWN`, outbox 행을 `DONE`(재전송 금지)으로
+    확정한다 — 응답 유실을 "성공"도 "안전한 재시도"도 아닌 별도 상태로 fail-close
+    한다는 §6 F3의 증명이다."""
+    order_repo, outbox_repo = PostgresOrderRepository(), OutboxRepository()
+
+    async def _raise_on_place(order: object) -> object:
+        raise ConnectionError("simulated exchange network failure")
+
+    adapter = ScriptedAdapter(on_place=_raise_on_place)
+
+    async def resolve(tenant_id: UUID, exchange: str) -> ScriptedAdapter:
+        return adapter
+
+    dispatcher = OutboxDispatcher(
+        pool, outbox_repo=outbox_repo, order_repo=order_repo, resolve_adapter=resolve,
+        pre_send_gate=allow_gate, worker_id="w-failure",
+    )
+    order_id = await _enqueue_pending_submit(pool, order_repo, outbox_repo)
+
+    report = await dispatcher.dispatch_once(limit=1)
+
+    assert report.claimed == 1
+    assert report.acknowledged == 0
+    assert report.unknown == 1
+    async with pool.acquire() as conn:
+        order_status = await conn.fetchval(
+            "SELECT status FROM orders WHERE order_id = $1", order_id
+        )
+        outbox_state = await conn.fetchval(
+            "SELECT state FROM order_command_outbox WHERE order_id = $1", order_id
+        )
+    assert order_status == "UNKNOWN"
+    assert outbox_state == "DONE"
