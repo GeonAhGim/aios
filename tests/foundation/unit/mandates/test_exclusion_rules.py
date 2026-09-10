@@ -1,6 +1,7 @@
 """CM-2 단위테스트 — 7종 제약(자산군·국가·통화·유동성·집중도·레버리지·ESG)이
 전부 domain/exclusion.py로 표현 가능함을 증명한다. DB/HTTP 없이 순수 함수만
 검증한다(I-01~I-11)."""
+
 from dataclasses import replace
 from datetime import datetime, timezone
 from typing import TypedDict
@@ -124,6 +125,26 @@ def test_concentration_one_cent_over_limit_is_denied():
     outcome, reasons, _ = evaluate_mandate_constraints(revision, subject)
     assert outcome == PolicyOutcome.DENY
     assert "POLICY_MAX_SINGLE_INSTRUMENT" in reasons
+
+
+def test_liquidity_exactly_at_minimum_is_allowed():
+    """min_liquidity_score와 정확히 같은 값은 '미만'이 아니므로 위반이 아니다 —
+    concentration/leverage와 동일한 경계 원칙."""
+    revision = _revision(min_liquidity_score=10.0)
+    subject = _subject(liquidity_score=10.0)
+    outcome, reasons, _ = evaluate_mandate_constraints(revision, subject)
+    assert outcome == PolicyOutcome.ALLOW
+    assert reasons == []
+
+
+def test_asset_class_present_but_not_excluded_is_allowed():
+    """subject 필드가 None이 아니라 실제 값이 있어도, 배제 목록에 없으면
+    위반이 아니다 (None-처리 테스트와 별개로 멤버십 자체를 검증)."""
+    revision = _revision()
+    subject = _subject(asset_class="EQUITY")
+    outcome, reasons, _ = evaluate_mandate_constraints(revision, subject)
+    assert outcome == PolicyOutcome.ALLOW
+    assert reasons == []
 
 
 # --- 7 constraints, parametrized (DoD 3) -----------------------------------
