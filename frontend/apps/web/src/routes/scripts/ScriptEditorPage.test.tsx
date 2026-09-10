@@ -227,6 +227,22 @@ describe("ScriptEditorPage", () => {
     expect(naiveShowGenericError(true)).toBe(true);
   });
 
+  it("CH-12: 첫 컴파일 시도부터 실패하면(이전 성공 이력 없음) 미리보기 서브패널을 전혀 그리지 않는다", async () => {
+    const compileScript = vi.fn(async () => {
+      throw new ApiError(400, "SCRIPT_SYNTAX: unexpected end of input", "trace-400", "VALIDATION_INVALID_FIELD", undefined, {
+        code: "SCRIPT_SYNTAX",
+        line: 1,
+        col: 12,
+      });
+    });
+    renderPage(compileScript);
+
+    fireEvent.click(screen.getByRole("button", { name: "컴파일" }));
+
+    await waitFor(() => expect(screen.getByTestId("script-editor-marker-0")).toBeInTheDocument());
+    expect(screen.queryByTestId("script-preview-panes")).not.toBeInTheDocument();
+  });
+
   it("CH-12: 다시 컴파일하면 이전 서브패널 대신 새 개수로 교체된다", async () => {
     const compileScript = vi
       .fn()
