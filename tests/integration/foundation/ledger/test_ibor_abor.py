@@ -15,8 +15,10 @@ posting이 생기면 `is_correction_pending`이 이를 표시해야 한다.
 `postgres_journal_repository.append`와 동일한 삽입 형태를 감사 이벤트부터
 직접 재현해, "과거 cutoff"를 결정론적으로 통제한다.
 """
+
 from __future__ import annotations
 
+import time
 from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 from typing import cast
@@ -25,6 +27,7 @@ from uuid import UUID, uuid4
 import asyncpg
 import pytest
 
+import src.core.bitemporal as bitemporal
 from src.data.models.base import Currency
 from src.foundation.entities.adapters.postgres_repository import PostgresEntityRepository
 from src.foundation.evidence.adapters.postgres_repository import PostgresAuditEventRepository
@@ -148,17 +151,21 @@ async def _insert_dated_entry(
     return entry_id
 
 
-def _balanced_pair(
-    debit_code: str, credit_code: str, amount: Decimal
-) -> list[PostingLine]:
+def _balanced_pair(debit_code: str, credit_code: str, amount: Decimal) -> list[PostingLine]:
     return [
         PostingLine(
-            line_no=1, account_code=debit_code, side=Side.DEBIT,
-            amount=amount, currency=Currency.KRW,
+            line_no=1,
+            account_code=debit_code,
+            side=Side.DEBIT,
+            amount=amount,
+            currency=Currency.KRW,
         ),
         PostingLine(
-            line_no=2, account_code=credit_code, side=Side.CREDIT,
-            amount=amount, currency=Currency.KRW,
+            line_no=2,
+            account_code=credit_code,
+            side=Side.CREDIT,
+            amount=amount,
+            currency=Currency.KRW,
         ),
     ]
 
@@ -236,12 +243,18 @@ async def test_ibor_view_recomputes_deterministically_as_of_cutoff(
     t1, t2 = _t(base, 0), _t(base, 10)
 
     await _insert_dated_entry(
-        pool, fund_id=fund_id, portfolio_id=portfolio_id, posted_at=t1,
+        pool,
+        fund_id=fund_id,
+        portfolio_id=portfolio_id,
+        posted_at=t1,
         lines=_balanced_pair(debit_code, credit_code, Decimal("100.00")),
         account_ids=account_ids,
     )
     await _insert_dated_entry(
-        pool, fund_id=fund_id, portfolio_id=portfolio_id, posted_at=t2,
+        pool,
+        fund_id=fund_id,
+        portfolio_id=portfolio_id,
+        posted_at=t2,
         lines=_balanced_pair(debit_code, credit_code, Decimal("50.00")),
         account_ids=account_ids,
     )
@@ -257,6 +270,76 @@ async def test_ibor_view_recomputes_deterministically_as_of_cutoff(
     # 재계산은 결정론적이다 -- 같은 cutoff는 언제 다시 물어도 같은 값.
     replay = await ibor_view.compute_ibor_view(pool, fund_id=fund_id, cutoff=t1)
     assert replay.balances == as_of_t1.balances
+
+
+async def test_compute_ibor_view_stays_within_latency_budget_for_50_postings(
+    pool, fund_id, portfolio_id, accounts
+):
+    """수치 성능 단언 (DEPTH_FA 감사, task-2059/FA-12 유일 미달 항목) --
+    50개 분개(100 posting line)에 대한 재계산이 예산(1.5s) 안에 끝나야
+    한다. 새 테이블 없이 매번 WORM 저널 전체를 `posted_at <= cutoff`로
+    다시 접는 설계(§9 FA-12 decision)라 상한이 없으면 회귀를 놓친다."""
+    debit_code, credit_code = accounts
+    account_ids = {
+        debit_code: await _account_id(pool, debit_code),
+        credit_code: await _account_id(pool, credit_code),
+    }
+    base = datetime.now(timezone.utc) - timedelta(hours=2)
+    for i in range(50):
+        await _insert_dated_entry(
+            pool,
+            fund_id=fund_id,
+            portfolio_id=portfolio_id,
+            posted_at=_t(base, i),
+            lines=_balanced_pair(debit_code, credit_code, Decimal("1.00")),
+            account_ids=account_ids,
+        )
+
+    started = time.perf_counter()
+    result = await ibor_view.compute_ibor_view(pool, fund_id=fund_id, cutoff=_t(base, 49))
+    elapsed_s = time.perf_counter() - started
+
+    assert elapsed_s < 1.5, f"compute_ibor_view over 50 entries took {elapsed_s:.3f}s (budget 1.5s)"
+    assert result.balances[debit_code] == Decimal("50.00")
+
+
+async def test_compute_ibor_view_delegates_to_core_bitemporal_as_of(
+    monkeypatch, pool, fund_id, portfolio_id, accounts
+):
+    """FA-12/task-2059 decision item 6 -- 재구현 금지: `posted_at <= cutoff`
+    가시성 판정은 FA-9 `core.bitemporal.as_of` 커널에 위임해야 한다. 실제
+    커널을 스파이로 감싸 호출을 증명한다(DC-21 `test_point_in_time.py`와
+    동일한 패턴) -- `ibor_view.py`가 이 위임을 걷어내고 로컬 비교로
+    재구현하면 이 assertion만 깨진다(값 검증 테스트는 우연히 통과할 수 있다)."""
+    debit_code, credit_code = accounts
+    account_ids = {
+        debit_code: await _account_id(pool, debit_code),
+        credit_code: await _account_id(pool, credit_code),
+    }
+    cutoff = datetime.now(timezone.utc) - timedelta(hours=1)
+    await _insert_dated_entry(
+        pool,
+        fund_id=fund_id,
+        portfolio_id=portfolio_id,
+        posted_at=cutoff,
+        lines=_balanced_pair(debit_code, credit_code, Decimal("7.00")),
+        account_ids=account_ids,
+    )
+
+    calls: list[dict[str, object]] = []
+    real_as_of = bitemporal.as_of
+
+    def spy_as_of(records, *, valid_time, tx_time):
+        calls.append({"valid_time": valid_time, "tx_time": tx_time})
+        return real_as_of(records, valid_time=valid_time, tx_time=tx_time)
+
+    monkeypatch.setattr("src.foundation.ledger.application.ibor_view.bitemporal_as_of", spy_as_of)
+
+    result = await ibor_view.compute_ibor_view(pool, fund_id=fund_id, cutoff=cutoff)
+
+    assert len(calls) == 1, "compute_ibor_view did not delegate to core.bitemporal.as_of"
+    assert calls[0] == {"valid_time": cutoff, "tx_time": cutoff}
+    assert result.balances[debit_code] == Decimal("7.00")
 
 
 async def test_ibor_view_rejects_naive_cutoff():
@@ -276,7 +359,10 @@ async def test_close_period_persists_the_recomputed_ibor_value(
     }
     cutoff = datetime.now(timezone.utc) - timedelta(hours=1)
     await _insert_dated_entry(
-        pool, fund_id=fund_id, portfolio_id=portfolio_id, posted_at=cutoff,
+        pool,
+        fund_id=fund_id,
+        portfolio_id=portfolio_id,
+        posted_at=cutoff,
         lines=_balanced_pair(debit_code, credit_code, Decimal("42.00")),
         account_ids=account_ids,
     )
@@ -308,7 +394,10 @@ async def test_close_period_rejects_reclose_of_same_as_of_date(
     }
     cutoff = datetime.now(timezone.utc) - timedelta(hours=1)
     await _insert_dated_entry(
-        pool, fund_id=fund_id, portfolio_id=portfolio_id, posted_at=cutoff,
+        pool,
+        fund_id=fund_id,
+        portfolio_id=portfolio_id,
+        posted_at=cutoff,
         lines=_balanced_pair(debit_code, credit_code, Decimal("10.00")),
         account_ids=account_ids,
     )
@@ -343,7 +432,10 @@ async def test_correction_pending_true_after_closing_when_new_posting_recorded(
     t1, t2 = _t(base, 0), _t(base, 30)
 
     await _insert_dated_entry(
-        pool, fund_id=fund_id, portfolio_id=portfolio_id, posted_at=t1,
+        pool,
+        fund_id=fund_id,
+        portfolio_id=portfolio_id,
+        posted_at=t1,
         lines=_balanced_pair(debit_code, credit_code, Decimal("5.00")),
         account_ids=account_ids,
     )
@@ -361,7 +453,10 @@ async def test_correction_pending_true_after_closing_when_new_posting_recorded(
     # 마감 이후(t1) 새로 기록된 posting -- 마감 스냅샷 값 자체는 바꾸지
     # 않지만 correction_pending은 True로 표시되어야 한다.
     await _insert_dated_entry(
-        pool, fund_id=fund_id, portfolio_id=portfolio_id, posted_at=t2,
+        pool,
+        fund_id=fund_id,
+        portfolio_id=portfolio_id,
+        posted_at=t2,
         lines=_balanced_pair(debit_code, credit_code, Decimal("1.00")),
         account_ids=account_ids,
     )

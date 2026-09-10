@@ -18,6 +18,18 @@ reimplement LC-3/LC-4/LC-5). `apply_entry` does not care how lines are
 grouped into entries, so every posting line in scope is folded as one
 flat sequence.
 
+The `posted_at <= cutoff` visibility decision is a single-axis as-of query
+(same shape as DC-21's `known_at <= as_of` in
+`market_data/domain/point_in_time.py`), so it is delegated to FA-9's
+`core.bitemporal.as_of` kernel rather than reimplemented as a bare Python
+comparison (task-2059/FA-12 decision item 6, "재구현 금지"). Each row is
+modeled as `valid_from = tx_from = posted_at`, `valid_to = tx_to = None`
+(a posting is never retroactively un-posted -- it is visible from the
+instant it is recorded, forever). SQL still pre-filters by `posted_at <=
+cutoff` for efficiency, matching the DC-21 precedent of pre-filtering in
+SQL and still routing the actual instant comparison through the shared
+kernel.
+
 `correction_pending` deliberately does not know about `ledger_abor_snapshot`
 (task-2059 decision item 5) -- it only answers "has this fund posted
 anything after `closing_recorded_at`". The caller (`abor_snapshot.py`,
@@ -25,6 +37,7 @@ which *is* allowed to know about the new table) supplies that cutoff after
 reading it back from a persisted close marker. This keeps IBOR computable
 even before any ABOR close ever happens.
 """
+
 from __future__ import annotations
 
 from datetime import datetime
@@ -34,6 +47,8 @@ from uuid import UUID
 import asyncpg
 from pydantic import AwareDatetime, BaseModel
 
+from src.core.bitemporal import BitemporalRecord
+from src.core.bitemporal import as_of as bitemporal_as_of
 from src.data.models.base import Currency
 from src.foundation.ledger.contracts.v1 import PostingLine, Side
 from src.foundation.ledger.domain import trial_balance
@@ -66,7 +81,7 @@ class IborView(BaseModel):
 
 
 _BALANCES_AS_OF_SQL = (
-    "SELECT la.account_code, pl.side, pl.amount, pl.currency "
+    "SELECT la.account_code, pl.side, pl.amount, pl.currency, e.posted_at "
     "FROM ledger_posting_line pl "
     "JOIN ledger_journal_entry e ON e.entry_id = pl.entry_id "
     "JOIN ledger_account la ON la.account_id = pl.account_id "
@@ -82,9 +97,7 @@ _CORRECTION_PENDING_SQL = (
 )
 
 
-async def compute_ibor_view(
-    pool: asyncpg.Pool, *, fund_id: UUID, cutoff: datetime
-) -> IborView:
+async def compute_ibor_view(pool: asyncpg.Pool, *, fund_id: UUID, cutoff: datetime) -> IborView:
     """`fund_id`의 postings를 `posted_at <= cutoff`로 필터링해 재계산한다.
 
     WORM 소스(추가만 가능, 기존 행의 `posted_at`는 절대 바뀌지 않는다)라
@@ -96,15 +109,26 @@ async def compute_ibor_view(
     async with pool.acquire() as conn:
         rows = await conn.fetch(_BALANCES_AS_OF_SQL, fund_id, cutoff)
 
+    records = [
+        BitemporalRecord(
+            value=row,
+            valid_from=row["posted_at"],
+            valid_to=None,
+            tx_from=row["posted_at"],
+            tx_to=None,
+        )
+        for row in rows
+    ]
+    visible = bitemporal_as_of(records, valid_time=cutoff, tx_time=cutoff)
     lines = [
         PostingLine(
             line_no=i,
-            account_code=row["account_code"],
-            side=Side(row["side"]),
-            amount=row["amount"],
-            currency=Currency(row["currency"]),
+            account_code=record.value["account_code"],
+            side=Side(record.value["side"]),
+            amount=record.value["amount"],
+            currency=Currency(record.value["currency"]),
         )
-        for i, row in enumerate(rows, start=1)
+        for i, record in enumerate(visible, start=1)
     ]
     balances = trial_balance.apply_entry({}, lines)
     return IborView(fund_id=fund_id, cutoff=cutoff, balances=balances)
@@ -123,6 +147,4 @@ async def correction_pending(
     """
     _require_tz_aware(closing_recorded_at, name="closing_recorded_at")
     async with pool.acquire() as conn:
-        return bool(
-            await conn.fetchval(_CORRECTION_PENDING_SQL, fund_id, closing_recorded_at)
-        )
+        return bool(await conn.fetchval(_CORRECTION_PENDING_SQL, fund_id, closing_recorded_at))
