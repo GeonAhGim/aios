@@ -8,6 +8,7 @@ import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { IndicatorParityPanel, type ServerIndicatorSeriesPort } from "./IndicatorParityPanel";
 import type { WorkerPool } from "@aios/chart-engine/src/compute/workerPool";
+import { resolveVerifiedIndicators } from "@aios/chart-engine/src/compute/verifiedIndicators";
 
 // CH-18c — component-level tests (no ChartPage/IndicatorPicker mount): the
 // real `GET /v1/indicators` network round trip the picker uses is not
@@ -113,6 +114,98 @@ describe("IndicatorParityPanel — CH-18c BBANDS(영구 미검증 지표) 서버
     await waitFor(() => expect(screen.getByTestId("indicator-parity-source-SMA")).toHaveTextContent("(client)"));
     expect(screen.getByTestId("indicator-parity-value-SMA")).toHaveTextContent("50200.000000");
     expect(screen.queryByTestId("indicator-parity-fallback-SMA")).not.toBeInTheDocument();
+  });
+
+  // 실패주입: resolveServerSeries는 IND-12 카탈로그와 달리 이 leaf가 배선하는 실제
+  // 서버 왕복 포트가 없어(모듈 docstring 참고) 부모(ChartPage)가 주입하는 콜백이다 —
+  // 네트워크 단절/파싱 실패 등으로 그 콜백이 예외를 던지는 것은 null을 반환하는 것과
+  // 마찬가지로 실제로 일어날 수 있는 실패 모드다. 이전에는 buildGateRow가 이 예외를
+  // 잡지 않아 IndicatorParityPanel 전체 렌더가 죽었다(다른 패널의 지표까지 함께
+  // 사라짐) — useIndicatorParityRows.ts의 buildGateRow에 try/catch를 추가해
+  // null-반환 케이스와 동일하게 unverified로 fail-closed 하도록 고쳤다.
+  it("negative ③(실패주입): 서버 참조 포트가 예외를 던져도 렌더가 죽지 않고 BBANDS는 unverified로 fail-closed 표시된다", () => {
+    const resolveServerSeries: ServerIndicatorSeriesPort = vi.fn(() => {
+      throw new Error("NETWORK_DOWN: indicator reference fetch failed");
+    });
+
+    expect(() =>
+      render(
+        <IndicatorParityPanel
+          candles={manyCandles(2)}
+          overlays={[BBANDS]}
+          catalog={smaVerifiedCatalog()}
+          resolveServerSeries={resolveServerSeries}
+        />,
+      ),
+    ).not.toThrow();
+
+    expect(screen.getByTestId("indicator-parity-value-BBANDS")).toHaveTextContent("--");
+    expect(screen.getByTestId("indicator-parity-source-BBANDS")).toHaveTextContent("(unverified)");
+    expect(screen.queryByTestId("indicator-parity-fallback-BBANDS")).not.toBeInTheDocument();
+  });
+
+  // 수치 성능: CH-18c 게이트 경로(candles→bars 변환 + 미검증 지표의 동기 서버-폴백
+  // 조회)는 렌더 중(useEffect 이전) 동기로 도는 유일한 구간이라, 큰 캔들 창에서도
+  // 메인 스레드를 눈에 띄게 막지 않아야 한다 — ChartPage가 실제로 그리는 수만 개
+  // 캔들 규모에서 고정 ms 예산을 단언한다(CH-19a/b와 동일한 수치 성능 축).
+  it("수치 성능: 캔들 3만 개 + BBANDS 미검증 게이트 경로가 3000ms 예산 내로 렌더된다", () => {
+    const bigCandles = manyCandles(30_000);
+    const resolveServerSeries: ServerIndicatorSeriesPort = ({ name }) => {
+      if (name !== "BBANDS") return null;
+      const series = Array.from({ length: 30_000 }, (_, i) => (i < 19 ? null : 50000 + i));
+      return { upperband: series, middleband: series, lowerband: series };
+    };
+
+    const start = performance.now();
+    render(
+      <IndicatorParityPanel
+        candles={bigCandles}
+        overlays={[BBANDS]}
+        catalog={smaVerifiedCatalog()}
+        resolveServerSeries={resolveServerSeries}
+      />,
+    );
+    const elapsedMs = performance.now() - start;
+
+    expect(screen.getByTestId("indicator-parity-source-BBANDS")).toHaveTextContent("(server)");
+    // 3s: generous margin for a contended CI host running many suites in parallel
+    // (isolated single-file run measures ~50-60ms; full-suite parallel run measured
+    // ~550ms) while still catching a real O(n^2) or worse regression in this path.
+    expect(elapsedMs).toBeLessThan(3000);
+  });
+
+  // 게이트 적색 재현: cc5ec7c5 이전에는 IndicatorParityPanel이 overlays를
+  // `resolveVerifiedIndicators` 화이트리스트로 먼저 필터링한 뒤에만 행을 만들었다 —
+  // BBANDS는 그 필터를 통과하지 못해 서버 폴백을 시도조차 하지 않고 행 자체가
+  // 조용히 사라졌다(커밋 메시지 "행 자체가 렌더되지 않음"). 여기서는 그 되돌린
+  // 동작을 실제 `resolveVerifiedIndicators`(여전히 export됨, 가짜 재구현 아님)로
+  // 정확히 재현해 — 동일 픽스처에서 사전 필터링된 props는 BBANDS 행이 전혀 없고
+  // (적색), 바로 다음 줄의 실제 컴포넌트(전체 overlays)는 폴백 배지와 함께 행을
+  // 렌더한다(녹색) — git revert 없이 파일 내에서 자동으로 대조한다.
+  it("게이트 적색 재현: cc5ec7c5 이전 사전 필터를 재현하면 BBANDS 행이 아예 없다(적색) vs 실제 컴포넌트는 폴백 표시된다(녹색)", () => {
+    const resolveServerSeries: ServerIndicatorSeriesPort = vi.fn(({ name }) => {
+      if (name !== "BBANDS") return null;
+      return { upperband: [null, 51000], middleband: [null, 50000], lowerband: [null, 49000] };
+    });
+    const catalog = smaVerifiedCatalog();
+
+    // 적색: pre-cc5ec7c5 필터를 실제 whitelist 함수로 재현 — BBANDS는 whitelist에
+    // 절대 오르지 못하므로 overlays가 빈 배열이 되고, 패널은 아무것도 렌더하지 않는다.
+    const verified = resolveVerifiedIndicators(catalog);
+    const preFilteredOverlays = [BBANDS].filter((overlay) => verified.has(overlay.id));
+    expect(preFilteredOverlays).toHaveLength(0);
+    const { container: redContainer } = render(
+      <IndicatorParityPanel candles={manyCandles(2)} overlays={preFilteredOverlays} catalog={catalog} resolveServerSeries={resolveServerSeries} />,
+    );
+    expect(redContainer.querySelector('[data-testid="indicator-parity-panel"]')).not.toBeInTheDocument();
+    expect(screen.queryByTestId("indicator-parity-value-BBANDS")).not.toBeInTheDocument();
+
+    // 녹색: 실제 컴포넌트는 사전 필터 없이 모든 selected overlay에 행을 준다.
+    render(
+      <IndicatorParityPanel candles={manyCandles(2)} overlays={[BBANDS]} catalog={catalog} resolveServerSeries={resolveServerSeries} />,
+    );
+    expect(screen.getByTestId("indicator-parity-value-BBANDS")).toHaveTextContent("51000.000000");
+    expect(screen.getByTestId("indicator-parity-fallback-BBANDS")).toBeInTheDocument();
   });
 });
 
