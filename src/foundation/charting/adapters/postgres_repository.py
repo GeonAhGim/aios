@@ -102,6 +102,7 @@ class PostgresChartingRepository:
         self,
         layout_id: UUID,
         *,
+        tenant_id: UUID,
         expected_revision: int,
         name: str | None,
         layout_state: dict[str, Any] | None,
@@ -109,8 +110,14 @@ class PostgresChartingRepository:
         # `conditional_write.conditional_update()`를 쓰지 않는다 — name/
         # layout_state가 각각 선택적 부분 갱신이고 jsonb 캐스트도 필요해
         # 공용 헬퍼의 고정 `set_values` 바인딩 방식으로는 표현할 수 없다.
+        # `tenant_id`를 WHERE에 명시한다 — 호출부(application/update_layout.py)가
+        # 이미 `load_owned_layout()`으로 소유권을 확인했더라도, connections
+        # 모듈의 `transition_connection_state()`와 동일 원칙으로 그 확인이
+        # 뚫리거나 우회되면 여기서 0행(RETURNING 없음)으로 fail-closed된다
+        # — RLS/`tenant_transaction()`만 믿지 않는다(운영 DSN이 슈퍼유저인
+        # 한 RLS는 아무것도 막지 못한다, task-1718 note와 동일 이유).
         assignments = ["revision = revision + 1", "updated_at = now()"]
-        params: list[Any] = [layout_id, expected_revision]
+        params: list[Any] = [layout_id, expected_revision, tenant_id]
         if name is not None:
             params.append(name)
             assignments.append(f"name = ${len(params)}")
@@ -120,7 +127,7 @@ class PostgresChartingRepository:
         async with self._pool.acquire() as conn:
             row = await conn.fetchrow(
                 "UPDATE chart_layout SET " + ", ".join(assignments) + " "  # noqa: S608
-                "WHERE id = $1 AND revision = $2 RETURNING *",
+                "WHERE id = $1 AND revision = $2 AND tenant_id = $3 RETURNING *",
                 *params,
             )
         if row is None:
@@ -130,9 +137,14 @@ class PostgresChartingRepository:
             )
         return _row_to_layout(row)
 
-    async def delete_layout(self, layout_id: UUID) -> None:
+    async def delete_layout(self, layout_id: UUID, *, tenant_id: UUID) -> None:
+        # update_layout()과 동일 이유로 tenant_id를 WHERE에 명시한다.
         async with self._pool.acquire() as conn:
-            await conn.execute("DELETE FROM chart_layout WHERE id = $1", layout_id)
+            await conn.execute(
+                "DELETE FROM chart_layout WHERE id = $1 AND tenant_id = $2",
+                layout_id,
+                tenant_id,
+            )
 
     async def get_drawing_set(self, layout_id: UUID) -> ChartDrawingSet | None:
         async with self._pool.acquire() as conn:

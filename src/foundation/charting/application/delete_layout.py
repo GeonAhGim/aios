@@ -10,4 +10,4 @@ from src.foundation.charting.ports.repository import ChartingRepository
 
 async def delete_layout(repo: ChartingRepository, *, tenant_id: UUID, layout_id: UUID) -> None:
     await load_owned_layout(repo, tenant_id=tenant_id, layout_id=layout_id)
-    await repo.delete_layout(layout_id)
+    await repo.delete_layout(layout_id, tenant_id=tenant_id)

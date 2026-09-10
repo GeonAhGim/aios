@@ -26,6 +26,7 @@ async def update_layout(
     await load_owned_layout(repo, tenant_id=tenant_id, layout_id=layout_id)
     updated = await repo.update_layout(
         layout_id,
+        tenant_id=tenant_id,
         expected_revision=expected_revision,
         name=name,
         layout_state=layout_state,
