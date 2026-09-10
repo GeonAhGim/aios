@@ -15,15 +15,18 @@ STRATEGY_DEPLOYMENT 5쌍 전부를 보고, F0을 `GateDecision.fence_snapshot`�
    위반은 리스크·수치정책이 ALLOW여도 DENY(권위 분리). `require_compliance_
    mandate`가 "mandate 자체가 없을 때"의 처리를 정한다(기본 False — 아래
    `require_mandate`와 같은 이유).
-3층: mandate 수치 정책. `require_mandate`(호출부 필수 명시, 기본값 없음)로
-   "mandate 미연결"의 처리를 정한다 — `True`면 `RISK_MANDATE_REQUIRED` DENY,
-   `False`면 audit_log만 남기고 통과. H-1b(task-3369)부터 프로덕션 3개
-   조립부 전부 `True` — UI가 아직 안 채우는 `mandate_revision_id`는 진입 시
-   `foundation_mandate_resolution.with_resolved_mandate()`(H-1a resolver)가
-   대신 채운다. mandate가 있으면 `context.mandate_revision_id`가 현재 active
-   revision과 일치하는지 먼저 본다(task-1806, fence와 같은 관측-대-현재
-   패턴) — 불일치면 `RISK_MANDATE_REVISION_STALE` DENY, 일치해야
-   `mandates.evaluate_policy()`로 진행한다.
+Layer 3: mandate numeric policy. `require_mandate` (mandatory explicit
+   argument at each call site, no default) decides how "no mandate bound" is
+   handled -- `True` -> `RISK_MANDATE_REQUIRED` DENY, `False` -> pass through
+   with only an audit_log entry. As of H-1b (task-3369) all three production
+   assembly sites pass `True` -- `mandate_revision_id`, which the UI still
+   doesn't fill in, gets filled in on entry by
+   `foundation_mandate_resolution.with_resolved_mandate()` (the H-1a
+   resolver). Once a mandate is present, it first checks whether
+   `context.mandate_revision_id` matches the current active revision
+   (task-1806, the same observed-vs-current pattern as fence) -- a mismatch
+   is `RISK_MANDATE_REVISION_STALE` DENY; a match proceeds to
+   `mandates.evaluate_policy()`.
 
 task-1717 P0-D — 모든 결정을 `_record_decision()`으로 `risk_decision` WORM에
 기록해 `GateDecision.decision_id`를 채운다(`GateKind.PRE_SUBMIT`,

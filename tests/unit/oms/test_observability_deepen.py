@@ -1,3 +1,7 @@
+# ratchet-allow: Protocol/repo test-double fakes below deliberately leave
+# unused methods unimplemented (raise NotImplementedError) so an unexpected
+# call fails loudly instead of silently returning a wrong value -- these are
+# test doubles, not the D0 production stubs ADR-2026-09-09-C targets.
 """L4-27 DEEPEN(task-2801) — 관측성 배선 D3 보강: failure-injection/수치 perf/
 multi-instance/adversarial-replay.
 

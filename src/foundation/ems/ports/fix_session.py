@@ -9,7 +9,7 @@ protection. Logout/logon preserves both sequence and duplicate protection.
 These are local port semantics, not a claim about venue FIX wire behavior.
 Known transport failure before acceptance must reject without advancing local
 sequence or duplicate state. Ambiguous delivery requires adapter reconciliation
-in MVP-2; production FIX disconnect/recovery behavior remains 미검증.
+in MVP-2; production FIX disconnect/recovery behavior remains unverified.
 Execution reports reuse OMS ProviderOrderEvent because EM-1 defines none.
 The registered synchronous callback receives normalized execution reports.
 """
