@@ -41,13 +41,15 @@ class ChartingRepository(Protocol):
         layout_state: dict[str, Any] | None,
     ) -> ChartLayout:
         """105번 표준 조건부 UPDATE — `expected_revision` 불일치는
-        `ConcurrencyConflictError`(409). `tenant_id`도 WHERE에 실려
-        호출부의 소유권 확인과 무관하게 이 계층에서 다시 한번 방어한다."""
+        `ConcurrencyConflictError`(409). `tenant_id` is also carried in the
+        WHERE clause, defending again at this layer independent of the
+        caller's ownership check."""
         ...
 
     async def delete_layout(self, layout_id: UUID, *, tenant_id: UUID) -> None:
         """`chart_drawing_set`은 FK `ON DELETE CASCADE`로 함께 지워진다.
-        `tenant_id`도 WHERE에 실려 이 계층에서 다시 한번 방어한다."""
+        `tenant_id` is also carried in the WHERE clause, defending again at
+        this layer."""
         ...
 
     async def get_drawing_set(self, layout_id: UUID) -> ChartDrawingSet | None: ...
