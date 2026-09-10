@@ -4,11 +4,13 @@ import { createEmptyLayoutModel, encodeLayoutModel } from "@aios/chart-engine/sr
 import type { ChartingLayoutRecord, ChartingPort } from "@aios/chart-engine/src/layout/persistence";
 import type { IndicatorCatalogEntry } from "@aios/chart-engine/src/plugins/indicatorPlugin";
 import { VERIFIED_KERNEL_PINS } from "@aios/chart-engine/src/compute/verifiedIndicators";
+import { routeApiError } from "@aios/shared-types";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ChartPage, type ChartPageProps, type FetchCandles, type FetchCoverage } from "./ChartPage";
+import { VISIBLE_CANDLE_COUNT } from "./chartPageConfig";
 
 // ChartPage는 restore/save 에러를 ApiError instanceof로 판별해 errorCode/traceId를
 // 뽑는다(query.error와 동일 관용) — 던지는 값이 실제 ApiError 인스턴스여야 한다.
@@ -567,5 +569,75 @@ describe("ChartPage — CH-4b 그리기 저장·복원", () => {
     await waitFor(() => expect(screen.getByTestId("candlestick-chart")).toHaveTextContent("캔들 3개"));
 
     expect(await screen.findByText(/요청한 항목을 찾을 수 없습니다/)).toBeInTheDocument();
+  });
+});
+
+// DEPTH_CH(task-2729) 감사: task-1559(02a788dc)는 fetchCandles가 항상 성공하는
+// mock만 썼다 — CoverageBadge용 fetchCoverage reject(dc-18b)와 달리, 화면의 주
+// 데이터 소스인 candles 조회 자체가 reject할 때의 경로(ErrorMessage 분기, 재시도
+// 가능 여부 판정)는 실제로 실패를 주입해 검증한 적이 없었다. task-2928(IndicatorPicker
+// DEEPEN)과 동일한 형식으로 이 leaf(ChartPage/ChartToolbar/IndicatorPicker)에 보강한다.
+describe("ChartPage — CH-6a fetchCandles 실패 주입 + 재시도 판정(DEEPEN task-3077)", () => {
+  it("negative/failure-injection: fetchCandles가 429(RATE_LIMIT_EXCEEDED)로 reject하면 재시도 버튼이 뜨고, 누르면 회복한다", async () => {
+    const fetchCandles = vi.fn(async () => okResult());
+    fetchCandles.mockRejectedValueOnce(apiErrorLike(429, "RATE_LIMIT_EXCEEDED"));
+    renderPage(fetchCandles);
+
+    expect(await screen.findByRole("button", { name: "다시 시도" })).toBeInTheDocument();
+    expect(screen.queryByTestId("candlestick-chart")).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "다시 시도" }));
+
+    await waitFor(() => expect(screen.getByTestId("candlestick-chart")).toHaveTextContent("캔들 3개"));
+    expect(fetchCandles).toHaveBeenCalledTimes(2);
+  });
+
+  // 게이트 적색 재현: ChartPage의 canRetry는 routeApiError(err).kind가
+  // refetch_retry/backoff_retry일 때만 true다(ChartPage.tsx). "ApiError면 무조건
+  // 재시도 가능"이라는 naive 판정으로 되돌리면 403 정책거부(POLICY_LIVE_BLOCKED)에도
+  // 재시도 버튼이 잘못 뜬다 — 아래는 그 회귀가 실제로 이 함수 대조로 적발됨을
+  // 고정하고, 뒤이어 실 컴포넌트가 naive 쪽이 아니라 real 쪽처럼 동작함을 DOM으로 증명한다.
+  function realCanRetry(err: unknown): boolean {
+    const routed = routeApiError(err);
+    return routed.kind === "refetch_retry" || routed.kind === "backoff_retry";
+  }
+  function naiveCanRetry(err: unknown): boolean {
+    return err instanceof ApiError;
+  }
+
+  it("negative: fetchCandles가 403(POLICY_LIVE_BLOCKED)로 reject하면 재시도 버튼 없이 에러만 보여준다(게이트 적색 재현)", async () => {
+    const policyErr = apiErrorLike(403, "POLICY_LIVE_BLOCKED");
+    // naive 판정이면 여기서 이미 true가 되어 실제 회귀를 놓친다 — real은 false.
+    expect(naiveCanRetry(policyErr)).toBe(true);
+    expect(realCanRetry(policyErr)).toBe(false);
+
+    const fetchCandles = vi.fn(async () => {
+      throw policyErr;
+    });
+    renderPage(fetchCandles);
+
+    expect(await screen.findByText("실거래 모드에서는 허용되지 않는 작업입니다.")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "다시 시도" })).not.toBeInTheDocument();
+  });
+});
+
+// 수치 성능 단언(DEEPEN task-3077): VISIBLE_CANDLE_COUNT(200)개 캔들의 초기 fetch
+// 완료→캔들스틱 표시까지 걸리는 실측 시간에 상한을 둔다 — ms/fps 절대치가 아니라
+// jsdom 유닛테스트 환경에서 걸리는 벽시계 시간이라 느슨한 예산(2s)이지만, 회귀로
+// 무한루프나 과도한 재렌더가 생기면(예: query key가 매 렌더 새 객체라 폴링 루프에
+// 빠지는 등) 이 상한을 확실히 넘어 실패한다.
+describe("ChartPage — 성능 단언(DEEPEN task-3077)", () => {
+  it(`VISIBLE_CANDLE_COUNT(${VISIBLE_CANDLE_COUNT})개 캔들 초기 렌더가 2초 안에 끝난다`, async () => {
+    const candles = manyCandles(VISIBLE_CANDLE_COUNT);
+    const fetchCandles = vi.fn(async () => okResultWithCandles(candles));
+
+    const startedAt = performance.now();
+    renderPage(fetchCandles);
+    await waitFor(() =>
+      expect(screen.getByTestId("candlestick-chart")).toHaveTextContent(`캔들 ${VISIBLE_CANDLE_COUNT}개`),
+    );
+    const elapsedMs = performance.now() - startedAt;
+
+    expect(elapsedMs).toBeLessThan(2000);
   });
 });
