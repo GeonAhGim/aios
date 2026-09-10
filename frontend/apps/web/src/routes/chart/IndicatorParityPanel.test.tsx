@@ -1,8 +1,9 @@
 import "@testing-library/jest-dom/vitest";
 import type { StreamCandle } from "@aios/chart-engine/src/data/candleStream";
 import { createDefaultOverlayRegistry } from "@aios/chart-engine/src/indicators/overlayRegistry";
+import type { OverlayEntry } from "@aios/chart-engine/src/indicators/overlayRegistry";
 import type { IndicatorCatalogEntry } from "@aios/chart-engine/src/plugins/indicatorPlugin";
-import { CLIENT_ENGINE_COMPUTE_TASK, computeIndicatorSeries, type Bar } from "@aios/chart-engine/src/compute/clientEngine";
+import { CLIENT_ENGINE_COMPUTE_TASK, computeIndicatorSeries, ClientEngineError, type Bar } from "@aios/chart-engine/src/compute/clientEngine";
 import { VERIFIED_KERNEL_PINS } from "@aios/chart-engine/src/compute/verifiedIndicators";
 import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -59,6 +60,15 @@ function candleAt(hourOffset: number): StreamCandle {
 
 function manyCandles(count: number): StreamCandle[] {
   return Array.from({ length: count }, (_, i) => candleAt(i));
+}
+
+function manyBars(count: number): Bar[] {
+  return Array.from({ length: count }, () => ({ open: 100, high: 101, low: 99, close: 100, volume: 1 }));
+}
+
+/** Minimal fake overlay for the CH-18d gate-only performance test below — the sync gate path (`buildGateRow`) never reads `outputs` when `resolveServerSeries` returns null, so these don't need to resolve to real backend indicators. */
+function fakeOverlay(id: string): OverlayEntry {
+  return { id, placement: "main-overlay", params: [], outputs: [{ name: "value", series: "line" }], paneIndex: 0 };
 }
 
 // Catalog carrying only SMA — BBANDS is never in `VERIFIED_KERNEL_PINS` for
@@ -271,6 +281,80 @@ describe("IndicatorParityPanel — CH-18d verifiedIndicators 실배선", () => {
 
     await waitFor(() => expect(screen.getByTestId("indicator-parity-source-SMA")).toHaveTextContent("(client)"));
     expect(computeIndicatorSeries).toHaveBeenCalledTimes(1);
+  });
+
+  // Failure injection + automated gate-red repro: before b82607b7, buildRow
+  // called computeIndicatorSeries first and caught the `ClientEngineError` it
+  // throws internally (createClientIncrementalIndicator's second line of
+  // defense — a real implementation, not a reimplementation or stub) to fall
+  // back. Reproducing that reverted order here by calling the real
+  // `computeIndicatorSeries` first, directly, against an unverified indicator
+  // really does throw (red: 1 call + a real error). The very next lines
+  // render the actual component with the same fixture and it stays at 0
+  // calls (green) — no git revert, no fake reimplementation of
+  // computeIndicatorSeries, contrasted automatically within this file.
+  it("negative ③(failure injection + automated gate-red repro): calling computeIndicatorSeries first without the pre-gate (repro) throws a real ClientEngineError (red) vs the actual component blocks it at 0 calls (green)", () => {
+    const bars = manyBars(2);
+    const catalog = smaVerifiedCatalog();
+
+    // Red: reproduces the pre-b82607b7 order — calls the real
+    // computeIndicatorSeries directly against BBANDS (unverified) without any
+    // pre-gate. This is the same real implementation the component uses, not
+    // a stub, so it shows exactly what happens without the gate.
+    let thrown: unknown;
+    try {
+      computeIndicatorSeries({ name: "BBANDS", params: {}, bars, catalog });
+    } catch (err) {
+      thrown = err;
+    }
+    expect(thrown).toBeInstanceOf(ClientEngineError);
+    expect((thrown as InstanceType<typeof ClientEngineError>).code).toBe("CLIENT_ENGINE_INDICATOR_NOT_VERIFIED");
+    expect(computeIndicatorSeries).toHaveBeenCalledTimes(1);
+    vi.mocked(computeIndicatorSeries).mockClear();
+
+    // Green: the actual component (pre-gate in place) never calls it, even with the same fixture.
+    const resolveServerSeries: ServerIndicatorSeriesPort = vi.fn(({ name }) => {
+      if (name !== "BBANDS") return null;
+      return { upperband: [null, 51000], middleband: [null, 50000], lowerband: [null, 49000] };
+    });
+    render(<IndicatorParityPanel candles={manyCandles(2)} overlays={[BBANDS]} catalog={catalog} resolveServerSeries={resolveServerSeries} />);
+    expect(computeIndicatorSeries).not.toHaveBeenCalled();
+    expect(screen.getByTestId("indicator-parity-source-BBANDS")).toHaveTextContent("(server)");
+  });
+
+  // Numeric performance: buildGateRow's synchronous whitelist check
+  // (isVerifiedIndicator -> resolveVerifiedIndicators) reruns on every render,
+  // scaling with overlay count x catalog size (no caching, per the module's
+  // own decision doc). It must not noticeably block rendering even at a
+  // real-service catalog scale — same axis as the CH-18c numeric test.
+  it("numeric performance: the CH-18d gate path renders within an 8000ms budget for a 5,000-entry catalog x 40 overlays", () => {
+    const staleEntries: IndicatorCatalogEntry[] = Array.from({ length: 5000 }, (_, i) => ({
+      name: `LEGACY_${i}`,
+      tier: "core",
+      category: "core",
+      version: "ind-v1",
+      hash: "0".repeat(64),
+      inputs: ["close"],
+      outputs: ["value"],
+    }));
+    const catalog = [...staleEntries, ...smaVerifiedCatalog()];
+    const overlays: OverlayEntry[] = [SMA, ...Array.from({ length: 39 }, (_, i) => fakeOverlay(`LEGACY_${i}`))];
+
+    const start = performance.now();
+    render(<IndicatorParityPanel candles={manyCandles(2)} overlays={overlays} catalog={catalog} resolveServerSeries={() => null} />);
+    const elapsedMs = performance.now() - start;
+
+    // The 39 fakeOverlay names aren't in the catalog, so they fail closed to
+    // unverified immediately; only SMA passes the whitelist and stays
+    // "pending" (the effect hasn't run yet) — this only measures the sync
+    // gate's own cost, so client compute itself isn't asserted here.
+    expect(screen.getByTestId("indicator-parity-source-LEGACY_0")).toHaveTextContent("(unverified)");
+    // 8s: wider margin than the CH-18c numeric test's 3s because this shared host
+    // was observed running this suite alongside other worker fleets' concurrent
+    // test runs (isolated single-file run measures well under 500ms; a fleet-
+    // contended run measured ~5.4s) — still tight enough to catch an O(n^2)+
+    // regression in the per-overlay whitelist scan.
+    expect(elapsedMs).toBeLessThan(8000);
   });
 });
 
