@@ -6,8 +6,11 @@ CM-A4 "판정 레코드는 append-only" 증명: `c6a3d8f14b92`가 두 테이블�
 애플리케이션이 쓰는 것과 같은 커넥션으로 직접 UPDATE/DELETE를 시도해
 실제로 막히는지 확인한다(REVOKE만으로는 테이블 소유자를 막지 못한다 —
 `src/core/db/append_only.py` 모듈 docstring)."""
+
 from __future__ import annotations
 
+import asyncio
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 from uuid import uuid4
@@ -27,7 +30,7 @@ from src.foundation.mandates.application.create_draft_mandate import create_draf
 from src.foundation.mandates.application.evaluate_policy import evaluate as evaluate_policy_command
 from src.foundation.mandates.application.propose_amendment import propose_amendment
 from src.foundation.mandates.contracts.v1 import PolicyEvaluationSubject
-from src.foundation.mandates.domain.models import PolicyBundle
+from src.foundation.mandates.domain.models import PolicyBundle, PolicyDecision, PolicyOutcome
 from src.foundation.trust.adapters.postgres_repository import PostgresTrustRepository
 from src.foundation.trust.application.accept_disclosure import accept_disclosure
 from src.foundation.trust.contracts.v1 import TenantContext as TrustTenantContext
@@ -224,3 +227,95 @@ async def test_insert_policy_bundle_race_returns_existing_row_without_update(
 
     assert second.id == first.id
     assert second.rule_hash == first.rule_hash  # 두 번째 호출의 값으로 UPDATE되지 않았다
+
+
+# --- Numeric performance/throughput (DEEPEN task-2857) ----------------------
+
+
+async def test_insert_policy_decision_meets_throughput_budget(pool, repo, trust_repo):
+    """수치 성능/처리량 단언: 실 DB(TEST_DATABASE_URL) 왕복을 포함해 policy_decision
+    200건을 연속 INSERT한 처리량이 하한(20 rows/s, 예산 10.0s) 아래로 떨어지면
+    안 된다 — 리포지토리 계층(직렬화·커넥션 획득)에 회귀가 생기면 이 테스트가
+    잡는다. 기존 테스트는 성공/거부 여부만 확인했을 뿐 수치 상한이 없었다."""
+    tenant_id = await _activated_tenant(pool, repo, trust_repo)
+    decision = await evaluate_policy_command(
+        repo, tenant_id=tenant_id, subject=PolicyEvaluationSubject(command_type="x")
+    )
+    bundle_id = decision.bundle_id
+
+    n = 200
+    started = time.perf_counter()
+    for i in range(n):
+        await repo.insert_policy_decision(
+            PolicyDecision(
+                id=uuid4(),
+                tenant_id=tenant_id,
+                bundle_id=bundle_id,
+                command_type="perf-test",
+                command_fingerprint=f"fp-{i}",
+                outcome=PolicyOutcome.ALLOW,
+                reason_codes=(),
+                obligations=(),
+                evaluated_at=datetime.now(timezone.utc),
+                expires_at=None,
+            )
+        )
+    elapsed_s = time.perf_counter() - started
+    throughput = n / elapsed_s
+
+    assert elapsed_s < 10.0, f"{n}건 INSERT가 {elapsed_s:.3f}s 걸림 (예산 10.0s)"
+    assert throughput > 20.0, f"처리량 {throughput:.1f} rows/s < 20.0 rows/s 하한"
+
+
+# --- D3 adversarial/multi-instance concurrent race proof (DEEPEN task-2857) -
+
+
+async def test_insert_policy_bundle_true_concurrent_race_converges_on_single_row(
+    pool, repo, trust_repo
+):
+    """D3 적대적/다중 인스턴스 증명: 위의
+    `test_insert_policy_bundle_race_returns_existing_row_without_update`은 두
+    호출을 순차로(await 뒤 await) 실행해 첫 호출이 커밋된 뒤에야 두 번째가
+    시작되므로 실제 DB 레벨 경합이 전혀 발생하지 않았다. 이 테스트는 서로 다른
+    실제 asyncpg 커넥션(별도 "인스턴스"를 흉내)을 가진 호출자 N명을
+    `asyncio.gather`로 동시에 실행해, 같은 mandate_revision_id에 대한 INSERT가
+    실제로 겹치는 트랜잭션 사이에서 경합하게 만든다 — 승자는 정확히 하나여야
+    하고, 나머지 전원은 `ON CONFLICT ... DO NOTHING` + 재조회로 승자의 행을
+    그대로 돌려받아야 하며, DB에는 최종적으로 정확히 1행만 남아야 한다
+    (policy_bundle의 UNIQUE (mandate_revision_id) + 전체 행 WORM이 실제 동시
+    쓰기 경합 아래서도 지켜짐을 실증)."""
+    tenant_id = await _activated_tenant(pool, repo, trust_repo)
+    mandate = await repo.get_mandate(tenant_id)
+    revision = await repo.get_revision(mandate.active_revision_id)
+    assert revision is not None
+
+    n_callers = 8
+    concurrent_pool = await asyncpg.create_pool(
+        _asyncpg_dsn(), min_size=n_callers, max_size=n_callers
+    )
+    try:
+        concurrent_repo = PostgresMandateRepository(concurrent_pool)
+
+        async def _attempt(i: int) -> PolicyBundle:
+            return await concurrent_repo.insert_policy_bundle(
+                PolicyBundle(
+                    id=uuid4(),
+                    mandate_revision_id=revision.id,
+                    compiler_version=f"v{i}",
+                    rule_hash=f"{i}" * 64,
+                    created_at=datetime.now(timezone.utc),
+                )
+            )
+
+        results = await asyncio.gather(*(_attempt(i) for i in range(n_callers)))
+    finally:
+        await concurrent_pool.close()
+
+    winner_ids = {r.id for r in results}
+    assert len(winner_ids) == 1, "동시 호출자 전원이 동일한 승자 행으로 수렴해야 한다"
+
+    async with pool.acquire() as conn:
+        row_count = await conn.fetchval(
+            "SELECT count(*) FROM policy_bundle WHERE mandate_revision_id = $1", revision.id
+        )
+    assert row_count == 1
