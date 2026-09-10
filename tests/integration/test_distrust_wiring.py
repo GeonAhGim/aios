@@ -3,6 +3,7 @@
 test_distrust_wiring.py)는 fake pool로 UPSERT 인자/gather만 검증하고,
 여기서는 실제 UPSERT의 since 보존·갱신 규칙과 restore 왕복을 검증한다.
 """
+import asyncio
 import uuid
 from datetime import datetime, timezone
 from decimal import Decimal
@@ -115,3 +116,39 @@ async def test_restore_distrust_state_round_trips_through_real_table(pool):
     assert fresh_monitor.current_level(symbol) == DataDistrustLevel.NORMAL  # 복원 전
     await restore_distrust_state(pool, fresh_monitor)
     assert fresh_monitor.current_level(symbol) == DataDistrustLevel.DISTRUSTED
+
+
+async def test_two_scheduler_instances_racing_the_same_symbol_leave_one_coherent_row(pool):
+    """다중 인스턴스 증명(D3) — 실제 배포에서 두 프로세스가 각자 별도
+    `DataDistrustMonitor` 인스턴스로 같은 (exchange, symbol)을 동시에
+    관측·영속화할 수 있다(watchdog 재시작 겹침, 배포 중 신구 프로세스
+    공존 등). ON CONFLICT UPSERT가 105번 표준대로 안전한지 실제 asyncio
+    동시 실행으로 증명한다 — 데드락/예외 없이 정확히 한 행만 남아야 하고,
+    그 행의 level은 두 인스턴스 중 하나가 실제로 계산한 값과 일치해야
+    한다(값이 섞여 CHECK 제약을 벗어난 제3의 값이 되지 않는다)."""
+    symbol = f"DIST-{uuid.uuid4().hex[:8]}/USDT"
+    monitor_a = DataDistrustMonitor()  # "프로세스 A"
+    monitor_b = DataDistrustMonitor()  # "프로세스 B" — 독립 인메모리 상태
+
+    async def _tick(monitor: DataDistrustMonitor) -> DataDistrustLevel:
+        providers = [_FakeProvider(_ticker("150")), _FakeProvider(_ticker("151"))]
+        return await check_and_persist_distrust(
+            pool,
+            monitor,
+            providers,
+            exchange="bitget",
+            symbol=symbol,
+            primary=_ticker("100"),
+            candles=[],
+        )
+
+    results = await asyncio.gather(_tick(monitor_a), _tick(monitor_b))
+
+    assert set(results) == {DataDistrustLevel.DISTRUSTED}  # 둘 다 같은 입력 -> 같은 판정
+    async with pool.acquire() as conn:
+        rows = await conn.fetch(
+            "SELECT level FROM data_distrust_state WHERE exchange = 'bitget' AND symbol = $1",
+            symbol,
+        )
+    assert len(rows) == 1  # PK(exchange, symbol) 하나 -> 경합 후에도 행 하나
+    assert rows[0]["level"] == DataDistrustLevel.DISTRUSTED.value

@@ -25,12 +25,22 @@ main.py의 다른 백그라운드 루프(heartbeat/alert/risk_guard)와 같은 �
   리스를 획득/갱신한 것만 tick 대상으로 돌려준다(I-02, §4.1) — 다른
   프로세스가 만료 전 리스를 쥐고 있으면 그 execution_id는 이번 주기에
   조용히 건너뛴다(예외를 던지지 않는다).
+- R-48 — `distrust_provider_factory`는 옵션이다(참조 시세는 안전장치를
+  강화할 뿐 차단 로직 자체의 전제조건이 아니라서, `run_execution_tick`의
+  `distrust_providers` 기본값 `()`도 유효한 값). 다만 이 팩토리를 비워
+  두면 매 틱 참조 쿼럼이 0개로 고정돼 `DataDistrustMonitor`가 항상
+  `DEGRADED_SINGLE_SOURCE`/`DISTRUSTED`(참조 0개 분기)로만 판정한다 —
+  실 배선(background_loops.py)은 반드시 채워 넣어야 한다(과거 이 인자가
+  통째로 빠져 2소스 쿼럼 비교가 프로덕션에서 한 번도 돌지 않았던 배선
+  결함, task-2810). 어댑터별로 다른 참조 소스가 필요해(Bitget 선물
+  마크가격은 이번 틱에 리졸브한 adapter가 필요) 생성 시점 고정 리스트가
+  아니라 `(adapter, exchange) -> providers` 팩토리로 받는다.
 """
 from __future__ import annotations
 
 import asyncio
 import logging
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass, field
 from uuid import UUID
 
@@ -50,10 +60,12 @@ from src.services.execution_loop.tick import FenceReaderFactory, run_execution_t
 from src.services.order_service.gate import PreSubmitGate
 from src.services.order_service.submit import PublishFn
 from src.services.order_service.worm_decision_check import DecisionReader
+from src.services.safety.reference_quotes import ReferenceQuoteProvider
 
 logger = logging.getLogger(__name__)
 
 AdapterResolver = Callable[[UUID, str], Awaitable[ExchangeAdapter]]
+DistrustProviderFactory = Callable[[ExchangeAdapter, str], Sequence[ReferenceQuoteProvider]]
 
 DEFAULT_MAX_CONCURRENT_TICKS = 4
 _LEASE_TTL_INTERVAL_MULTIPLIER = 5  # §5.2 Draft — interval_sec의 5배
@@ -83,6 +95,7 @@ class ExecutionLoopScheduler:
         ttl_override_seconds: float | None = None,
         fence_reader_factory: FenceReaderFactory | None = None,
         decision_reader: DecisionReader | None = None,
+        distrust_provider_factory: DistrustProviderFactory | None = None,
     ) -> None:
         self._pool = pool
         self._resolve_adapter = resolve_adapter
@@ -94,6 +107,7 @@ class ExecutionLoopScheduler:
         self._owner_id = owner_id
         self._fence_reader_factory = fence_reader_factory
         self._decision_reader = decision_reader
+        self._distrust_provider_factory = distrust_provider_factory
         self._lease_ttl_seconds = (
             ttl_override_seconds
             if ttl_override_seconds is not None
@@ -149,6 +163,11 @@ class ExecutionLoopScheduler:
                     "execution_loop: execution_id=%s 자격증명 없음 — 이번 틱 건너뜀", execution_id
                 )
                 return
+            distrust_providers = (
+                self._distrust_provider_factory(adapter, exchange)
+                if self._distrust_provider_factory is not None
+                else ()
+            )
             try:
                 await run_execution_tick(
                     self._pool,
@@ -163,6 +182,7 @@ class ExecutionLoopScheduler:
                     publish=self._publish,
                     pre_submit_gate=self._pre_submit_gate,
                     distrust_monitor=self._distrust_monitor,
+                    distrust_providers=distrust_providers,
                     fence_reader_factory=self._fence_reader_factory,
                     decision_reader=self._decision_reader,
                 )

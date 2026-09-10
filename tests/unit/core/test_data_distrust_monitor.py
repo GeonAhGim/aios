@@ -159,3 +159,51 @@ async def test_publish_called_only_on_transition():
     await monitor.check("BTC/USDT", _ticker("100"), [_ticker("100"), _ticker("100")], [])
 
     assert published == []  # 상태 변화 없었으므로(계속 NORMAL) 발행 안 됨
+
+
+async def test_check_latency_stays_within_budget_under_repeated_calls():
+    # 성능 단언(D2/D3 체크리스트) — tick.py는 매 틱(참조 2소스 포함) 이
+    # check()를 순차 호출한다. 순수 계산(median/hysteresis/통계검사)이라
+    # 네트워크 I/O 없이도 수백 회 호출이 빨라야 한다 — 여기서 느려지면
+    # execution_loop 전체 틱 주기(§5.2, interval_sec)를 잠식한다.
+    monitor = DataDistrustMonitor()
+    candles = _flat_candles("100", n=50)
+    iterations = 500
+
+    start = time.monotonic()
+    for i in range(iterations):
+        symbol = f"PERF-{i % 20}/USDT"
+        await monitor.check(
+            symbol, _ticker("100"), [_ticker("100.1"), _ticker("99.9")], candles
+        )
+    elapsed = time.monotonic() - start
+
+    per_call_seconds = elapsed / iterations
+    assert per_call_seconds < 0.005, (
+        f"check() 평균 {per_call_seconds * 1000:.3f}ms/call — 예산(5ms) 초과"
+    )
+
+
+async def test_many_symbols_tracked_independently_without_cross_contamination():
+    # 적대적에 가까운 부하 시나리오 — 서로 다른 심볼이 같은 monitor 인스턴스를
+    # 공유할 때(실제 배선처럼) 한 심볼의 DISTRUSTED 판정이 다른 심볼의
+    # 내부 히스테리시스 상태(_below_exit_since)를 오염시키지 않아야 한다.
+    monitor = DataDistrustMonitor(exit_sustain_seconds=60.0)
+
+    distrusted_symbol = "ATTACK/USDT"
+    quiet_symbol = "QUIET/USDT"
+
+    level = await monitor.check(
+        distrusted_symbol, _ticker("150"), [_ticker("100"), _ticker("100")], []
+    )
+    assert level == DataDistrustLevel.DISTRUSTED
+
+    # quiet_symbol은 한 번도 편차가 없었다 — distrusted_symbol의 내부 상태와
+    # 완전히 독립적으로 NORMAL을 유지해야 한다(같은 dict를 공유하는 구현이라도
+    # 키가 심볼별로 분리돼야 함).
+    quiet_level = await monitor.check(
+        quiet_symbol, _ticker("100"), [_ticker("100.05"), _ticker("99.95")], []
+    )
+    assert quiet_level == DataDistrustLevel.NORMAL
+    assert monitor.current_level(distrusted_symbol) == DataDistrustLevel.DISTRUSTED
+    assert monitor.current_level(quiet_symbol) == DataDistrustLevel.NORMAL

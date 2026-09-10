@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import os
 import uuid
+from datetime import datetime, timezone
 from decimal import Decimal
 
 import asyncpg
@@ -21,6 +22,7 @@ import pytest
 
 from src.core.loader.risk_policy_loader import load_risk_policy
 from src.core.safety.data_distrust import DataDistrustMonitor
+from src.data.models.market_data import Ticker
 from src.data.models.trading import AccountBalance, OrderStatus
 from src.exchanges.common.adapter import ExchangeAdapter
 from src.foundation.execution_ownership.adapters.postgres_repository import (
@@ -225,6 +227,64 @@ async def test_execution_with_lease_held_by_other_owner_is_skipped(pool):
     assert free_id in report.ticked
     assert adapter_leased.place_order_call_count == 0
     assert adapter_free.place_order_call_count == 1
+
+
+def _reference_ticker(price: str) -> Ticker:
+    return Ticker(
+        symbol="BTC/USDT",
+        exchange="reference",
+        price=Decimal(price),
+        bid=Decimal(price),
+        ask=Decimal(price),
+        volume_24h=Decimal("1"),
+        timestamp=datetime.now(timezone.utc),
+        source_type="reference",
+    )
+
+
+class _StubReferenceProvider:
+    def __init__(self, price: str) -> None:
+        self._price = price
+
+    async def get_reference_ticker(self, symbol: str) -> Ticker | None:
+        return _reference_ticker(self._price)
+
+
+async def test_distrust_provider_factory_wiring_blocks_order_on_diverging_references(pool):
+    """게이트 적색 재현 + 배선 결함 회귀(task-2810) — 예전엔
+    `ExecutionLoopScheduler`가 `distrust_providers`를 항상 기본값 `()`으로
+    넘겨(`distrust_provider_factory` 자체가 없었음) 참조 쿼럼 비교가
+    프로덕션에서 한 번도 실행되지 않았다. 여기서는 monkeypatch 없이 실제
+    `check_and_persist_distrust`/`DataDistrustMonitor.check()` 경로를 그대로
+    타고, 공격적으로 벌어진(primary=50 vs 참조 150/151) 참조 시세 2개를
+    주입해 실제 DISTRUSTED 판정 -> 신규 주문 차단까지 end-to-end로 증명한다."""
+    user = await create_test_tenant(pool)
+    execution_id = await _create_execution(pool, user, entry_threshold=100.0)
+    adapter = _filled_adapter()  # closes=[50]*65 -> primary ticker price=50
+
+    def _diverging_factory(_adapter: object, _exchange: str) -> list[_StubReferenceProvider]:
+        return [_StubReferenceProvider("150"), _StubReferenceProvider("151")]
+
+    scheduler = _scheduler(
+        pool,
+        resolve_adapter=_resolver_for({user: adapter}),
+        distrust_provider_factory=_diverging_factory,
+    )
+
+    report = await scheduler.tick_all_running()
+
+    assert execution_id in report.ticked  # tick 자체는 실패가 아니다(신규 주문만 스킵)
+    assert adapter.place_order_call_count == 0
+    assert await _fsm_state(pool, execution_id) == "IDLE"
+    async with pool.acquire() as conn:
+        level = await conn.fetchval(
+            "SELECT level FROM data_distrust_state WHERE exchange = 'bitget' AND symbol = "
+            "(SELECT target_asset FROM strategies s JOIN strategy_executions e "
+            " ON e.strategy_id = s.strategy_id AND e.strategy_version = s.version "
+            " WHERE e.id = $1)",
+            execution_id,
+        )
+    assert level == "DISTRUSTED"
 
 
 def test_interval_comes_from_risk_policy():

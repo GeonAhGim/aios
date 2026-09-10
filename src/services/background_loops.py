@@ -64,6 +64,7 @@ from src.services.safety.circuit_breaker_loop import (
 )
 from src.services.safety.kill_switch_service import KillSwitchService
 from src.services.safety.liquidation_executor import run_liquidation_worker_once
+from src.services.safety.reference_quotes import DefaultDistrustProviderFactory
 
 logger = logging.getLogger(__name__)
 
@@ -216,6 +217,7 @@ async def start_background_loops(
             recovery_state, make_foundation_pre_submit_gate(pool, require_mandate=True)
         ),
         distrust_monitor=DataDistrustMonitor(publish=event_bus.publish),
+        distrust_provider_factory=DefaultDistrustProviderFactory(),  # R-48/task-2810
         lease_repo=lease_repo, owner_id=owner_id,
         fence_reader_factory=fsw.make_fence_reader_factory(pool),  # task-1717 P0-D
         decision_reader=fsw.make_decision_reader(pool),
