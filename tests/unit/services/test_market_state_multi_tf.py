@@ -3,6 +3,7 @@
 다중 타임프레임 조립, `@tf` 없는 키의 1m 승격, U10(진행 중 bar 제외),
 부분 실패(필요 tf 통째로 없음) 시 예외 전파를 확인한다.
 """
+
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
@@ -10,11 +11,14 @@ from decimal import Decimal
 
 import pytest
 
+from src.core.indicators.registry import IndicatorError
 from src.data.models.market_data import Candle
 from src.data.models.strategy_fsm import FSMState, FSMStrategyConfig, FSMTransition
 from src.services.execution_loop.market_state import (
+    IndicatorKeyParseError,
     MarketStateAssemblyError,
     build_market_state,
+    parse_indicator_key,
     required_timeframes,
 )
 
@@ -124,3 +128,27 @@ def test_build_market_state_raises_when_required_timeframe_entirely_missing() ->
 
     with pytest.raises(MarketStateAssemblyError, match="1h"):
         build_market_state(fsm, {"1m": candles_1m}, as_of=candles_1m[-1].close_time)
+
+
+def test_parse_indicator_key_rejects_malformed_key() -> None:
+    # A key shape ConditionCompiler never produces must not be silently accepted.
+    with pytest.raises(IndicatorKeyParseError):
+        parse_indicator_key("not a valid key !!")
+
+
+def test_required_timeframes_raises_for_unregistered_indicator() -> None:
+    # An unregistered indicator name fails closed (IndicatorError) at lookback sizing.
+    fsm = _fsm("FAKEIND_timeperiod3 >= 1")
+
+    with pytest.raises(IndicatorError):
+        required_timeframes(fsm)
+
+
+def test_build_market_state_rejects_naive_as_of() -> None:
+    # A naive as_of can't be compared against aware candle.close_time -- must not pass silently.
+    fsm = _fsm("SMA_timeperiod3 >= 1")
+    candles = _candles(5, timeframe="1m", step=timedelta(minutes=1), start=_BASE)
+    naive_as_of = candles[-1].close_time.replace(tzinfo=None)
+
+    with pytest.raises(TypeError):
+        build_market_state(fsm, {"1m": candles}, as_of=naive_as_of)
