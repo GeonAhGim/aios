@@ -1,0 +1,14 @@
+{
+  "env_key_undocumented": 4,
+  "event_type_unconsumed": 4,
+  "feature_flag_undocumented": 5,
+  "migration_hygiene": 0,
+  "money_float": 10,
+  "naive_datetime": 0,
+  "openapi_client_mismatch": 48,
+  "port_method_unimplemented": 32,
+  "router_unregistered": 0,
+  "spec_leaf_untraced": 100,
+  "spec_template_incomplete": 0,
+  "symbol_id_assembly": 1
+}
