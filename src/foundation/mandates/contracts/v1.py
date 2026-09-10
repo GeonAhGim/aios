@@ -7,6 +7,7 @@ Spec: AIOSproject 45_portfolio_mandate_and_policy_specification_v1.0.md,
 다른 bounded context(risk_gate, paper_control 등)는 이 파일을 소비하고,
 domain/models.py를 직접 참조하지 않는다(71번 §4, 106번 §5).
 """
+
 from __future__ import annotations
 
 import re
@@ -124,7 +125,7 @@ class ComplianceVerdict(str, Enum):
     DENY = "DENY"
 
 
-class RuleHit(BaseModel):
+class RuleHit(BaseModel, frozen=True):
     """L4_compliance_and_regulatory_v1.0.md §3 RuleHit.
 
     CM-1 does not run a rule engine yet — the real `domain/rules/*.py`
@@ -133,6 +134,9 @@ class RuleHit(BaseModel):
     1:1 from an existing `policy_decision.reason_codes` entry, so
     `message`/`evidence` are direct passthroughs rather than structured
     rule output.
+
+    `frozen=True` mirrors `core/risk/decision.RuleResult` (I-09's other
+    authority): an audit finding must not be mutable after construction.
     """
 
     rule_id: str
@@ -141,7 +145,7 @@ class RuleHit(BaseModel):
     evidence: dict[str, Any] = {}
 
 
-class ComplianceDecision(BaseModel):
+class ComplianceDecision(BaseModel, frozen=True):
     """L4_compliance_and_regulatory_v1.0.md §3/§9 CM-1.
 
     Maps 1:1 onto the existing `policy_decision` row — CM-1 explicitly
@@ -149,6 +153,11 @@ class ComplianceDecision(BaseModel):
     derivable from `policy_decision`/`policy_bundle` columns that already
     exist. See `compliance_decision_from_policy_decision` below for the
     mapping.
+
+    `frozen=True` mirrors `core/risk/decision.RiskDecision` (I-09's other
+    authority): a compliance verdict must not be tamperable in memory after
+    the mapper returns it — flipping `.verdict` from DENY to ALLOW downstream
+    must be a `ValidationError`, not a silent attribute assignment.
     """
 
     decision_id: UUID
@@ -170,7 +179,7 @@ class ComplianceDecision(BaseModel):
         return _validate_tz_aware(value)
 
 
-class PolicyDecisionRow(BaseModel):
+class PolicyDecisionRow(BaseModel, frozen=True):
     """Source data for `compliance_decision_from_policy_decision` — a plain
     value object, not a new table. Every field already exists on the
     domain `PolicyDecision`/`PolicyBundle` rows (doc 75 §1/§3); this type only
