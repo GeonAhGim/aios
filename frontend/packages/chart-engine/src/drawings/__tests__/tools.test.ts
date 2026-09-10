@@ -18,7 +18,7 @@ import {
   trendLineSlope,
   updateDrawing,
 } from "../tools";
-import { createRng, genCollection, genDrawing } from "./arbitraries";
+import { ADVERSARIAL_IDS, createRng, genCollection, genDrawing } from "./arbitraries";
 import { approxEqual, expectDrawingError } from "./helpers";
 
 const p1 = { time: 10, price: 100 };
@@ -182,5 +182,69 @@ describe("collection ops", () => {
       collection.forEach(assertValidDrawing);
       expect(new Set(collection.map((d) => d.id)).size).toBe(collection.length);
     }
+  });
+});
+
+describe("adversarial ids (D3): array-backed collection has no prototype-pollution surface", () => {
+  it("round-trips each adversarial id through create/add/find/update/remove untouched", () => {
+    for (const id of ADVERSARIAL_IDS) {
+      let collection: DrawingCollection = [];
+      collection = addDrawing(collection, createHorizontalLine(id, 1));
+      expect(findDrawing(collection, id)?.id).toBe(id);
+
+      collection = updateDrawing(collection, createHorizontalLine(id, 2));
+      expect((findDrawing(collection, id) as { price: number }).price).toBe(2);
+
+      collection = removeDrawing(collection, id);
+      expect(findDrawing(collection, id)).toBeUndefined();
+    }
+    // A Map/object keyed by id (instead of the array this module uses) could
+    // leak these ids into the prototype chain; assert it stays pristine.
+    expect(({} as Record<string, unknown>).price).toBeUndefined();
+    expect(Object.prototype.hasOwnProperty.call({}, "polluted")).toBe(false);
+  });
+});
+
+describe("stateful replay fuzzer (D3): seeded operation-sequence replay", () => {
+  it("holds collection invariants across 300 seeded add/update/move/remove ops", () => {
+    const rng = createRng(0xdeadbeef);
+    let collection: DrawingCollection = [];
+    let nextId = 0;
+    let removals = 0;
+
+    for (let i = 0; i < 300; i++) {
+      const op: "add" | "move" | "update" | "remove" =
+        collection.length === 0 ? "add" : rng.pick(["add", "add", "move", "update", "remove"] as const);
+      switch (op) {
+        case "add":
+          collection = addDrawing(collection, genDrawing(rng, `replay-${nextId++}`));
+          break;
+        case "move": {
+          const target = collection[rng.int(0, collection.length - 1)]!;
+          if (target.locked) break;
+          const delta = { time: rng.int(-100, 100), price: rng.int(-100, 100) };
+          collection = updateDrawing(collection, moveDrawing(target, delta));
+          break;
+        }
+        case "update": {
+          const target = collection[rng.int(0, collection.length - 1)]!;
+          collection = updateDrawing(collection, setLocked(target, !target.locked));
+          break;
+        }
+        case "remove": {
+          const target = collection[rng.int(0, collection.length - 1)]!;
+          collection = removeDrawing(collection, target.id);
+          removals++;
+          break;
+        }
+      }
+      collection.forEach(assertValidDrawing);
+      expect(new Set(collection.map((d) => d.id)).size, `step ${i}`).toBe(collection.length);
+    }
+
+    expect(removals).toBeGreaterThan(0);
+    // The final state of the replay must itself still be a lossless round trip.
+    const encoded = JSON.stringify(collection);
+    expect(JSON.parse(encoded)).toEqual(collection);
   });
 });

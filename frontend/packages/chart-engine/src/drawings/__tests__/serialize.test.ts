@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { Drawing } from "../model";
+import { DrawingError, type Drawing, type DrawingCollection } from "../model";
 import {
   DRAWINGS_SCHEMA_VERSION,
   deserializeDrawings,
@@ -8,7 +8,7 @@ import {
   toDrawingsDocument,
 } from "../serialize";
 import { createFibonacci, createHorizontalLine, createTrendLine, createVerticalLine } from "../tools";
-import { createRng, genCollection } from "./arbitraries";
+import { corruptDocument, createRng, genCollection, genDrawing } from "./arbitraries";
 import { expectDrawingError } from "./helpers";
 
 const sample: readonly Drawing[] = [
@@ -141,5 +141,113 @@ describe("negative: per-drawing fields (no silent drop, no coercion)", () => {
       "t",
     );
     expect(err.message).toContain("points[0].price");
+  });
+});
+
+describe("failure injection: randomized wire-payload corruption", () => {
+  it("fail-closed for 200 seeded structural corruptions (never silently accepted)", () => {
+    const rng = createRng(0xfa17);
+    const exercised = new Set<string>();
+    let cases = 0;
+    for (let i = 0; i < 200; i++) {
+      const collection = genCollection(rng, 8);
+      if (collection.length === 0) continue;
+      const doc = toDrawingsDocument(collection) as unknown as {
+        schema_version: number;
+        drawings: readonly Record<string, unknown>[];
+      };
+      const injected = corruptDocument(rng, doc);
+      if (injected === null) continue;
+      cases++;
+      exercised.add(injected.corruption);
+      let caught: unknown;
+      try {
+        fromDrawingsDocument(injected.doc);
+      } catch (error) {
+        caught = error;
+      }
+      expect(caught, `corruption=${injected.corruption} case ${i}`).toBeInstanceOf(DrawingError);
+    }
+    // Every corruption kind must have fired at least once across the seeded run,
+    // and every fired case must have been rejected above — a single silent
+    // acceptance anywhere in the loop would already have failed the assertion.
+    expect(cases).toBeGreaterThan(100);
+    expect(exercised.size).toBe(7);
+  });
+});
+
+describe("performance: numeric ms budget for large collections", () => {
+  it("round-trips 5,000 drawings within a fixed ms budget", () => {
+    const rng = createRng(0x9e3779b9);
+    const collection: DrawingCollection = Array.from({ length: 5000 }, (_, i) => genDrawing(rng, `perf-${i}`));
+
+    const start = performance.now();
+    const text = serializeDrawings(collection);
+    const back = deserializeDrawings(text);
+    const elapsedMs = performance.now() - start;
+
+    expect(back.length).toBe(5000);
+    // Generous fixed budget (not a relative ratchet): a regression that makes
+    // encode/decode super-linear (e.g. an O(n^2) duplicate-id scan) would blow
+    // well past this on any machine, seeded/noise-free inputs aside.
+    expect(elapsedMs).toBeLessThan(1000);
+  });
+});
+
+describe("gate red reproduction: unknown-field drift guard", () => {
+  /**
+   * Mimics the pre-hardening decoder shape this module replaced: no
+   * `assertKnownFields` call anywhere, so a stray field introduced by a
+   * backend rename/typo is silently dropped instead of surfacing. This is a
+   * mutant of `decodeDrawing`, not part of the shipped module.
+   */
+  function legacyDecodeIgnoringUnknownFields(value: unknown): DrawingCollection {
+    const doc = value as { drawings?: readonly Record<string, unknown>[] };
+    const drawings = Array.isArray(doc.drawings) ? doc.drawings : [];
+    return drawings.map((raw) => {
+      const kind = raw.kind as string;
+      const out: Record<string, unknown> = { id: raw.id, kind };
+      switch (kind) {
+        case "trendline":
+        case "rectangle":
+          out.points = raw.points;
+          break;
+        case "fibonacci":
+          out.points = raw.points;
+          out.levels = raw.levels;
+          break;
+        case "horizontal-line":
+          out.price = raw.price;
+          break;
+        case "vertical-line":
+          out.time = raw.time;
+          break;
+      }
+      if (raw.locked !== undefined) out.locked = raw.locked;
+      if (raw.style !== undefined) out.style = raw.style;
+      return out as unknown as Drawing;
+    });
+  }
+
+  const driftedDocs: readonly unknown[] = [
+    docWith({ id: "h", kind: "horizontal-line", price: 1, unexpected_backend_field: "drift" }),
+    docWith({
+      id: "t",
+      kind: "trendline",
+      points: [{ time: 1, price: 2 }, { time: 3, price: 4 }],
+      renamed_field: true,
+    }),
+  ];
+
+  it("red: a pre-hardening decoder silently drops the drifted field instead of failing", () => {
+    for (const doc of driftedDocs) {
+      expect(() => legacyDecodeIgnoringUnknownFields(doc)).not.toThrow();
+    }
+  });
+
+  it("green: the shipped decoder rejects the same drift instead of silently dropping it", () => {
+    for (const doc of driftedDocs) {
+      expectDrawingError(() => fromDrawingsDocument(doc), "CHART_DRAWING_FIELD_UNKNOWN");
+    }
   });
 });

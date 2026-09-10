@@ -50,6 +50,35 @@ describe("coordinate system", () => {
     expect(toPixel({ time: 3, price: 4 }, cs)).toEqual({ x: 6, y: -4 });
     expect(fromPixel({ x: 6, y: -4 }, cs)).toEqual({ time: 3, price: 4 });
   });
+
+  it("multi-instance isolation (D3): two live coordinate systems never leak into each other", () => {
+    const csA: DrawingCoordinateSystem = {
+      timeToX: (t) => t,
+      xToTime: (x) => x,
+      priceToY: (p) => p * 2,
+      yToPrice: (y) => y / 2,
+    };
+    const csB: DrawingCoordinateSystem = {
+      timeToX: (t) => t * 10,
+      xToTime: (x) => x / 10,
+      priceToY: (p) => p + 1000,
+      yToPrice: (y) => y - 1000,
+    };
+    const point = { time: 5, price: 7 };
+
+    // Interleave calls against both systems: a naive shared-cache implementation
+    // (e.g. memoizing the last coordinate system used) would mix A and B up here.
+    const pxA1 = toPixel(point, csA);
+    const pxB1 = toPixel(point, csB);
+    const pxA2 = toPixel(point, csA);
+    const pxB2 = toPixel(point, csB);
+
+    expect(pxA1).toEqual(pxA2);
+    expect(pxB1).toEqual(pxB2);
+    expect(pxA1).not.toEqual(pxB1);
+    expect(fromPixel(pxA1, csA)).toEqual(point);
+    expect(fromPixel(pxB1, csB)).toEqual(point);
+  });
 });
 
 describe("assertValidDrawing", () => {
