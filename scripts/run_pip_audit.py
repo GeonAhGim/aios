@@ -20,9 +20,11 @@ check_audit_regressions.py와 같은 래칫 원칙).
 
 사용: `python scripts/run_pip_audit.py` (저장소 루트에서, 의존성이 이미
 설치된 환경에서 — quality.yml/local_ci.py 둘 다 이 스텝 앞에 install이 있다).
-종료코드 0=통과, 1=만료된 예외/진짜 수집 실패/미해결 취약점/pip-audit 실행
-자체의 실패.
+종료코드 0=통과, 1=만료된 예외/진짜 수집 실패/미해결 취약점, 3=pypi.org DNS/연결
+실패(OPS-44, task-3386 — 취약점 판정이 아니라 판정 불가 상태이므로 1과 구분해
+local_ci.py가 skipped(network)로 다루게 한다).
 """
+
 from __future__ import annotations
 
 import argparse
@@ -43,6 +45,18 @@ class IgnoreFileError(ValueError):
 
 class AuditFailure(ValueError):
     """pip-audit 실행 실패, 진짜 수집 실패, 또는 미해결 취약점 발견."""
+
+
+# OPS-44(task-3386): pypi.org DNS/연결 실패는 취약점 판정이 불가능한 상태이지, 취약점
+# 자체가 아니다. 이 마커가 rc=1 출력에 섞여 나오면 local_ci.py 쪽(ci_recheck.
+# is_supply_chain_network_error)이 "취약점 발견"과 구분해 skipped(network)로 다루도록
+# rc=3(구분 코드)을 대신 돌려준다.
+NETWORK_ERROR_MARKERS = ("ENOTFOUND", "NameResolutionError", "ConnectionError", "Max retries")
+NETWORK_ERROR_RC = 3
+
+
+def is_network_error(text: str) -> bool:
+    return any(marker in text for marker in NETWORK_ERROR_MARKERS)
 
 
 def load_ignored_vuln_ids(ignore_file: Path, *, today: dt.date) -> list[str]:
@@ -111,7 +125,8 @@ def evaluate_pip_audit_json(raw_stdout: str, ignored_ids: set[str]) -> list[str]
                 failures.append(f"{dep['name']}: 수집 실패 — {skip_reason}")
             continue
         vulns = [
-            v for v in dep.get("vulns", [])
+            v
+            for v in dep.get("vulns", [])
             if not (set(v.get("aliases", [])) | {v.get("id")}) & ignored_ids
         ]
         for v in vulns:
@@ -136,6 +151,13 @@ def main(argv: list[str] | None = None) -> int:
 
     cmd = build_pip_audit_command(args.python)
     proc = subprocess.run(cmd, capture_output=True, text=True)
+
+    if is_network_error(proc.stdout) or is_network_error(proc.stderr):
+        print(
+            "pip-audit 네트워크 오류(pypi.org DNS/연결 실패) -- 취약점 판정 불가:", file=sys.stderr
+        )
+        print(proc.stderr, file=sys.stderr)
+        return NETWORK_ERROR_RC
 
     try:
         failures = evaluate_pip_audit_json(proc.stdout, set(ignored_ids))
