@@ -169,6 +169,30 @@ task-2149가 "코드 변경 없음(ADR 문서뿐)"으로 DEEPEN 리프를 받았
 또는 서비스 정의에 고정). 이 결정 없이는 PLT-44 파일럿을 세 번째로 재시도해도 같은 지점에서
 막힐 것이다.
 
+## 파일럿 재확인 (2026-09-10, 미이행 후속 회수 task-3534)
+
+task-3194의 note가 "PLT-44 배치/role:copilot task 생성 보류 + PM/CA 결정 필요"를 미이행 항목으로
+남겨 leak_scan이 이 리프를 자동 발행했다. 재확인 결과, **이번에는 이 worker worktree
+(`C:\aios\wt\ops-1`)에서 `gh auth status`·`gh api user`가 성공한다** — 2026-09-08·2026-09-10(task-3194)
+두 차례 재발했던 "not logged in" 증상이 이번 실행에서는 재현되지 않았다:
+
+- `gh --version` 2.98.0, `gh auth status` → `Logged in to github.com account ... (keyring)`,
+  `gh api user` → 정상 JSON 응답.
+- `escalations/esc-copilot-gh-auth.json`도 없다(task-3194가 추가한 `gh_authenticated()`가 인증
+  성공 시 이 파일을 지우므로 일관된 상태) — orchestrator.py 쪽 코드는 이미 올바르게 동작하고
+  있어 이번 리프에서 추가로 고칠 결함이 없었다.
+- 다만 이전 노트가 이미 지적한 대로 이 자격증명은 "그때그때 한 프로세스에만" 있다가 사라지는
+  것으로 보인다 — 영구 공급 방법(로그인 vs `GH_TOKEN` 고정)에 대한 PM/CA 결정은 여전히 없다.
+  이번 재확인은 그 결정을 대체하지 않는다: 다음 워커/오케스트레이터 실행에서 다시 미인증으로
+  돌아갈 수 있고, 그 경우도 안전한 실패 모드(assigned 유지 + escalation 파일)로 이미 처리된다.
+
+인증은 됐지만 PLT-44 배치 자체는 이번 리프에서도 만들지 않았다: 현재 `type-ignore-budget.txt`는
+201인데 실측 `check_type_ignore_budget.py`는 242개로 다시 예산을 초과한 상태다(task-1759류
+회귀가 또 발생, 이 저장소에서 반복돼 온 패턴). 어느 20건을 배치로 자를지는 kis/bitget BR 축
+제외(task-1759 decision) 등 도메인 판단이 필요해 ops 리프 범위를 벗어난다 — 대신 backend 역할
+follow-up task를 새로 발행해 배치 절단과 `role: copilot` 전환을 위임했다(task 상세는 fleet
+task store 참고).
+
 ## Amended 2026-09-10 (D5 automatic routing, CTO)
 - User directive: use GitHub Copilot, Codex CLI and Cursor CLI actively and automatically.
 - Routing moves from the PM prompt to the orchestrator (`orchestrator.auto_route_external`, every poll):
