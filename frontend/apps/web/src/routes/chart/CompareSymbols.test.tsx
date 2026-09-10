@@ -1,6 +1,9 @@
 import "@testing-library/jest-dom/vitest";
-import { ApiError, type CandleQueryResult, type InstrumentListResult } from "@aios/api-client";
+import { ApiError, type CandleQueryParams, type CandleQueryResult, type InstrumentListResult } from "@aios/api-client";
 import type { CandleRecord, SeriesKey } from "@aios/shared-types";
+import { alignSeries } from "@aios/chart-engine/src/compare/align";
+import { normalizeToBase100, NormalizeError } from "@aios/chart-engine/src/compare/normalize";
+import { spread } from "@aios/chart-engine/src/compare/spread";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -70,6 +73,7 @@ function renderCompare(
   fetchCandles: FetchCompareCandles,
   baseCandles: CandleRecord[] = [candle(BASE_KEY, 0, "100"), candle(BASE_KEY, 1, "105")],
   listInstruments: ListCompareInstruments = async () => ({ items: [], nextCursor: null }),
+  compareSymbols: { instrumentId: string; venue: "BITGET" | "KIS_KRX" | "KIS_US" }[] = [{ instrumentId: "ETHUSDT", venue: "BITGET" }],
 ) {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   render(
@@ -81,7 +85,7 @@ function renderCompare(
         timeframe="1h"
         start="2026-09-03T00:00:00Z"
         end="2026-09-03T05:00:00Z"
-        compareSymbols={[{ instrumentId: "ETHUSDT", venue: "BITGET" }]}
+        compareSymbols={compareSymbols}
         onAdd={vi.fn()}
         onRemove={vi.fn()}
         fetchCandles={fetchCandles}
@@ -155,6 +159,26 @@ describe("CompareSymbols", () => {
     expect(optionValues).not.toContain("BTCUSDT");
     expect(optionValues).toContain("SOLUSDT");
   });
+
+  it("D3 다중 인스턴스: 비교 심볼 2개가 동시에 하나는 성공·하나는 404여도 서로의 페인을 교차오염하지 않는다", async () => {
+    const fetchCandles = vi.fn(async (params: CandleQueryParams) => {
+      if (params.instrumentId === "ETHUSDT") return okResult([candle(OTHER_KEY, 0, "50"), candle(OTHER_KEY, 1, "55")]);
+      throw apiErrorLike(404, "RESOURCE_NOT_FOUND");
+    });
+    renderCompare(fetchCandles, undefined, undefined, [
+      { instrumentId: "ETHUSDT", venue: "BITGET" },
+      { instrumentId: "SOLUSDT", venue: "BITGET" },
+    ]);
+
+    const ethPane = await screen.findByTestId("compare-pane-ETHUSDT");
+    const solPane = await screen.findByTestId("compare-pane-SOLUSDT");
+    expect(await within(ethPane).findByText(/정규화 오버레이/)).toBeInTheDocument();
+    expect(await within(solPane).findByText("요청한 항목을 찾을 수 없습니다.")).toBeInTheDocument();
+    // 각 페인은 자신의 queryKey(instrumentId 포함)로만 조회한다 -- 한쪽 실패가 다른 쪽 표시로 새면 안 된다.
+    expect(within(ethPane).queryByText("요청한 항목을 찾을 수 없습니다.")).not.toBeInTheDocument();
+    expect(within(solPane).queryByText(/정규화 오버레이/)).not.toBeInTheDocument();
+    expect(fetchCandles).toHaveBeenCalledTimes(2);
+  });
 });
 
 describe("computeComparison", () => {
@@ -178,5 +202,49 @@ describe("computeComparison", () => {
     const base = [candle(BASE_KEY, 0, "100")];
     const other = [candle(OTHER_KEY, 24 * 30, "50")];
     expect(computeComparison(base, other).kind).toBe("empty");
+  });
+
+  it("성능: 캔들 5,000개씩 align+normalize+spread 계산이 1.5s 이내에 끝난다", () => {
+    const base = Array.from({ length: 5000 }, (_, i) => candle(BASE_KEY, i, (100 + i * 0.01).toFixed(4)));
+    const other = Array.from({ length: 5000 }, (_, i) => candle(OTHER_KEY, i, (50 + i * 0.005).toFixed(4)));
+    const t0 = performance.now();
+    const outcome = computeComparison(base, other);
+    const elapsedMs = performance.now() - t0;
+    expect(outcome.kind).toBe("ok");
+    expect(elapsedMs).toBeLessThan(1500);
+  });
+
+  it("게이트 적색 재현: anchor를 find() 대신 정렬된 첫 원소로 naive하게 고르면, 실 구현이 ok로 처리하는 입력을 잘못 empty로 떨어뜨린다", () => {
+    // 실 구현(computeComparison)은 aligned.points.find((p) => p.base && p.other)로
+    // base·other 둘 다 존재하는 첫 지점을 anchor로 고른다. 이 guard를 걷어내고
+    // "정렬된 첫 원소가 곧 anchor"라고 가정하는 naive 판정으로 되돌리면, 겹침
+    // 구간의 첫 타임스탬프에 한쪽만 존재할 때 존재하지 않는 쪽의 anchor를 찾다가
+    // NormalizeError(anchor_not_found)로 떨어져 정상 입력을 잘못 empty로 만든다.
+    function naiveComputeComparison(base: readonly CandleRecord[], other: readonly CandleRecord[]) {
+      const aligned = alignSeries(base, other);
+      const anchor = aligned.points[0];
+      if (!anchor) return { kind: "empty" as const };
+      try {
+        const overlayBase = normalizeToBase100(base, anchor.timeMs);
+        const overlayOther = normalizeToBase100(other, anchor.timeMs);
+        const spreadPoints = spread(aligned, "ratio");
+        return { kind: "ok" as const, overlayBase, overlayOther, spreadPoints };
+      } catch (err) {
+        if (err instanceof NormalizeError) return { kind: "empty" as const };
+        throw err;
+      }
+    }
+
+    // base는 hour0,1,3만(hour2 결측), other는 hour2,3부터 시작 -- 겹침 구간 첫
+    // 타임스탬프(hour2)는 other만 있고 base는 없다. find()는 이를 건너뛰어
+    // hour3(둘 다 존재)을 anchor로 고른다; 정렬된 첫 원소는 hour2다.
+    const base: CandleRecord[] = [candle(BASE_KEY, 0, "100"), candle(BASE_KEY, 1, "110"), candle(BASE_KEY, 3, "130")];
+    const other: CandleRecord[] = [candle(OTHER_KEY, 2, "44"), candle(OTHER_KEY, 3, "46")];
+
+    const real = computeComparison(base, other);
+    const naive = naiveComputeComparison(base, other);
+
+    expect(real.kind).toBe("ok");
+    expect(naive.kind).toBe("empty");
   });
 });
