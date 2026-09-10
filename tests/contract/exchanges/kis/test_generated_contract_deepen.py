@@ -32,6 +32,7 @@ DEPTH 감사(task-2722, docs/audit/DEPTH_L4_BR.md #1930)는 원 커밋(126e271)�
    green(1 passed)에서 red(1 failed)로 뒤집힘을 증명한다(동일 기법,
    test_paper_drop_injection.py/task-1605 선례).
 """
+
 from __future__ import annotations
 
 import importlib
@@ -80,8 +81,13 @@ def _make_adapter(handler: Any) -> KISAdapter:
     # 동일 이유(task-2018/task-1975 require_paper_sandbox 하드가드 통과 +
     # BR-11 tr_id 문자 그대로 일치 유지).
     adapter = KISAdapter(
-        "app", "secret", "12345678", "01",
-        is_paper_trading=True, http_client=client, sleep_fn=_instant_sleep,
+        "app",
+        "secret",
+        "12345678",
+        "01",
+        is_paper_trading=True,
+        http_client=client,
+        sleep_fn=_instant_sleep,
     )
     adapter._resolve_tr_id = lambda tr_id: tr_id  # type: ignore[method-assign]
     return adapter
@@ -144,9 +150,7 @@ async def test_generated_method_malformed_json_raises_retryable_without_retry() 
     assert business_calls["n"] == 1  # 바디 레벨 실패는 재시도 없이 단발
 
 
-async def test_generated_method_business_rejection_raises_retryable_not_returned_as_data() -> (
-    None
-):
+async def test_generated_method_business_rejection_raises_retryable_not_returned_as_data() -> None:
     """거래소가 비즈니스 사유로 거부하면(rt_cd != "0") 그 응답 바디가 마치
     정상 데이터인 양 그대로 반환(왕복)되지 않고 `RetryableExchangeError`가
     난다 -- 원 계약 테스트의 "응답 항등 왕복" 단언은 rt_cd == "0" 성공
@@ -167,9 +171,7 @@ async def test_generated_method_business_rejection_raises_retryable_not_returned
         await adapter.aclose()
 
 
-async def test_generated_method_token_fetch_failure_raises_fatal_before_any_business_call() -> (
-    None
-):
+async def test_generated_method_token_fetch_failure_raises_fatal_before_any_business_call() -> None:
     """토큰 발급 자체가 실패하면(500) 생성 메서드가 어떤 자산군/청크에
     속하든 동일하게 `FatalExchangeError`가 나고, 실제 TR 엔드포인트에는
     어떤 요청도 나가지 않는다."""
@@ -272,6 +274,7 @@ def test_discovery_glob_source_matches_expected_snippet() -> None:
     형태 그대로인지 먼저 확인한다(소스가 바뀌면 아래 subprocess 테스트가
     무의미하게 항상 통과하는 것을 방지)."""
     module = importlib.import_module("tests.fixtures.kis.generated_cases")
+    assert module.__file__ is not None
     source = Path(module.__file__).read_text(encoding="utf-8")
     assert source.count(_GUARD) == 1
 
@@ -313,8 +316,13 @@ def test_pytest_gate_turns_red_when_generated_case_discovery_glob_is_narrowed(
     env = dict(os.environ, PYTHONPATH=repo_root, PYTEST_ADDOPTS="", PYTHONIOENCODING="utf-8")
 
     baseline = subprocess.run(
-        command, capture_output=True, encoding="utf-8", errors="replace",
-        env=env, timeout=120, check=False,
+        command,
+        capture_output=True,
+        encoding="utf-8",
+        errors="replace",
+        env=env,
+        timeout=120,
+        check=False,
     )
     assert baseline.returncode == 0, baseline.stdout + baseline.stderr
     assert "1 passed" in baseline.stdout
@@ -326,8 +334,12 @@ def test_pytest_gate_turns_red_when_generated_case_discovery_glob_is_narrowed(
 
     mutated = subprocess.run(
         [*command[:-1], "-p", plugin_module_name, command[-1]],
-        capture_output=True, encoding="utf-8", errors="replace",
-        env=mutated_env, timeout=120, check=False,
+        capture_output=True,
+        encoding="utf-8",
+        errors="replace",
+        env=mutated_env,
+        timeout=120,
+        check=False,
     )
     assert mutated.returncode != 0, mutated.stdout + mutated.stderr
     assert "1 passed" not in mutated.stdout
