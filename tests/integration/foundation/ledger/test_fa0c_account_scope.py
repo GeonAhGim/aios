@@ -6,8 +6,10 @@ Spec: docs/specs/L4_ibor_fund_accounting_and_resilience_v1.0.md#FA-0c
 (2) entity_id/fund_id/portfolio_id 구조적 컬럼을 쓰면 그 두 포트폴리오의
 계정 생성이 성공.
 """
+
 from __future__ import annotations
 
+import asyncio
 import uuid
 
 import asyncpg
@@ -172,3 +174,53 @@ async def test_backfilled_seed_accounts_share_house_scope(pool: asyncpg.Pool) ->
     assert len(scopes) == 1
     (entity_id, fund_id, portfolio_id) = next(iter(scopes))
     assert None not in (entity_id, fund_id, portfolio_id)
+
+
+async def test_concurrent_inserts_for_same_scope_and_type_serialize_to_one_winner(
+    pool: asyncpg.Pool,
+) -> None:
+    """D3: two genuinely concurrent connections race to insert the same
+    (entity_id, fund_id, portfolio_id, account_type) tuple. The structural
+    UNIQUE constraint must let exactly one commit and reject the other with
+    UniqueViolationError -- proving the invariant holds under real concurrency,
+    not just sequential calls against a single connection."""
+    entity_id, fund_id, portfolio_id = uuid.uuid4(), uuid.uuid4(), uuid.uuid4()
+    account_code_a = f"PORTFOLIO:{portfolio_id}:RACE_A_{uuid.uuid4().hex[:8]}"
+    account_code_b = f"PORTFOLIO:{portfolio_id}:RACE_B_{uuid.uuid4().hex[:8]}"
+
+    results = await asyncio.gather(
+        _insert_scoped_account(
+            pool,
+            account_code=account_code_a,
+            account_type=AccountType.ASSET,
+            entity_id=entity_id,
+            fund_id=fund_id,
+            portfolio_id=portfolio_id,
+        ),
+        _insert_scoped_account(
+            pool,
+            account_code=account_code_b,
+            account_type=AccountType.ASSET,
+            entity_id=entity_id,
+            fund_id=fund_id,
+            portfolio_id=portfolio_id,
+        ),
+        return_exceptions=True,
+    )
+
+    successes = [r for r in results if r is None]
+    failures = [r for r in results if r is not None]
+    assert len(successes) == 1
+    assert len(failures) == 1
+    assert isinstance(failures[0], asyncpg.UniqueViolationError)
+
+    async with pool.acquire() as conn:
+        count = await conn.fetchval(
+            "SELECT count(*) FROM ledger_account "
+            "WHERE entity_id = $1 AND fund_id = $2 AND portfolio_id = $3 "
+            "AND account_type = 'ASSET'",
+            entity_id,
+            fund_id,
+            portfolio_id,
+        )
+    assert count == 1
