@@ -30,6 +30,7 @@ fail-closed rules (DoD):
   window-derived opens are ever aggregated over; there is no separate
   in-session check to reimplement (LA-3 delegation).
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -41,7 +42,7 @@ from src.foundation.market_data.contracts.v2.candle_lineage import SourceKind, T
 from src.foundation.market_data.contracts.v2.microstructure import TradeTick
 from src.foundation.market_data.domain.calendar.session_rules import VenueCalendar
 from src.foundation.market_data.domain.candle_columns import CandleColumns
-from src.foundation.market_data.domain.timeframe import duration, expected_opens
+from src.foundation.market_data.domain.timeframe import align_open, duration, expected_opens
 
 __all__ = [
     "TickToCandleResult",
@@ -159,7 +160,12 @@ def ticks_to_candles(
     tick_dt = [_ts_event_to_utc(t.ts_event) for t in deduped]
 
     step = duration(tf)
-    range_start = tick_dt[0]
+    # tick_dt[0] itself is almost never grid-aligned (a trade can print at any
+    # second). Using it as range_start would make expected_opens's `start <=
+    # cursor` filter exclude the (grid-aligned, earlier) open of the window
+    # that actually contains tick_dt[0] -- silently dropping every tick in
+    # that leading partial window instead of aggregating them.
+    range_start = align_open(tick_dt[0], tf)
     range_end = tick_dt[-1] + step
     sessions = _sessions_between(calendar, range_start, range_end)
     opens = expected_opens(range_start, range_end, tf, sessions)
