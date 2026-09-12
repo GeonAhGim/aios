@@ -8,10 +8,13 @@ drop=500을 정확히 단언한다(근사 비교 금지). (c) 계측은 `metric_
 """
 from __future__ import annotations
 
+import asyncio
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any
 from uuid import UUID, uuid4
+
+import pytest
 
 from src.core.event_bus.envelope import EventEnvelope
 from src.core.observability import metric_names
@@ -183,3 +186,86 @@ async def test_as_of_naive_datetime_is_rejected_via_dc9_policy() -> None:
         assert "tz-aware" in str(exc)
     else:
         raise AssertionError("naive datetime이 거부되지 않았다")
+
+
+@pytest.mark.parametrize("want_realtime", [True, False])
+async def test_delayed_allowance_never_delivers_live_data(want_realtime: bool) -> None:
+    spy = _SpyMetrics()
+    fanout = RealtimeFanout(metrics=spy)
+    feed = _feed(want_realtime=want_realtime)
+    subscription = fanout.subscribe(_subject((_grant(realtime=False),)), feed)
+    for i in range(100):
+        await fanout.publish(feed, {"seq": i}, as_of=_AS_OF)
+    assert subscription.queue.empty()
+    assert spy.counters == [
+        (metric_names.MARKET_DATA_FANOUT_DENIED_COUNT_TOTAL, {"reason": "REALTIME_REQUIRED"})
+    ] * 100
+
+
+@pytest.mark.parametrize("depth", [0, -1, True, 1.5])
+def test_invalid_capacity_is_rejected(depth: Any) -> None:
+    with pytest.raises(ValueError, match="positive integer"):
+        RealtimeFanout(max_queue_depth=depth)
+
+
+async def test_slow_subscriber_isolated_and_join_completes_after_drops() -> None:
+    spy = _SpyMetrics()
+    fanout = RealtimeFanout(max_queue_depth=1, metrics=spy)
+    feed = _feed()
+    slow = fanout.subscribe(_subject((_grant(),)), feed)
+    fast = fanout.subscribe(_subject((_grant(),)), feed)
+    for i in range(5):
+        await fanout.publish(feed, {"seq": i}, as_of=_AS_OF)
+        assert fast.queue.get_nowait().payload == {"seq": i}
+        fast.queue.task_done()
+    assert slow.queue.maxsize == 1
+    assert slow.queue.get_nowait().payload == {"seq": 4}
+    slow.queue.task_done()
+    await asyncio.wait_for(slow.queue.join(), timeout=1)
+    await asyncio.wait_for(fast.queue.join(), timeout=1)
+    assert spy.counters.count((metric_names.MARKET_DATA_FANOUT_DROPPED_COUNT_TOTAL, None)) == 4
+    assert spy.counters.count((metric_names.MARKET_DATA_FANOUT_PUBLISHED_COUNT_TOTAL, None)) == 10
+
+
+@pytest.mark.parametrize(
+    ("overrides", "reason"),
+    [
+        ({"tenant_id": uuid4()}, "TENANT_MISMATCH"),
+        ({"subject_id": uuid4()}, "NO_GRANT"),
+        ({"instrument_ids": frozenset({"ETH-USDT"})}, "OUT_OF_SCOPE"),
+        ({"expires_at": _AS_OF}, "EXPIRED"),
+    ],
+)
+async def test_policy_denials_enforced_at_delivery(overrides: dict[str, Any], reason: str) -> None:
+    spy = _SpyMetrics()
+    fanout = RealtimeFanout(metrics=spy)
+    feed = _feed()
+    denied = fanout.subscribe(_subject((_grant(**overrides),)), feed)
+    permitted = fanout.subscribe(_subject((_grant(),)), feed)
+    await fanout.publish(feed, {}, as_of=_AS_OF)
+    assert denied.queue.empty()
+    assert permitted.queue.qsize() == 1
+    assert spy.counters == [
+        (metric_names.MARKET_DATA_FANOUT_DENIED_COUNT_TOTAL, {"reason": reason}),
+        (metric_names.MARKET_DATA_FANOUT_PUBLISHED_COUNT_TOTAL, None),
+    ]
+
+
+async def test_expiry_rechecked_on_each_publish() -> None:
+    spy = _SpyMetrics()
+    fanout = RealtimeFanout(max_queue_depth=1, metrics=spy)
+    feed = _feed()
+    expiry = _AS_OF + timedelta(seconds=1)
+    subscription = fanout.subscribe(_subject((_grant(expires_at=expiry),)), feed)
+    await fanout.publish(feed, {"seq": 0}, as_of=_AS_OF)
+    await fanout.publish(feed, {"seq": 1}, as_of=expiry)
+    assert subscription.queue.get_nowait().payload == {"seq": 0}
+    assert spy.counters == [
+        (metric_names.MARKET_DATA_FANOUT_PUBLISHED_COUNT_TOTAL, None),
+        (metric_names.MARKET_DATA_FANOUT_DENIED_COUNT_TOTAL, {"reason": "EXPIRED"}),
+    ]
+
+
+async def test_naive_clock_rejected_without_subscribers() -> None:
+    with pytest.raises(ValueError, match="tz-aware"):
+        await RealtimeFanout().publish(_feed(), {}, as_of=datetime(2026, 1, 1))

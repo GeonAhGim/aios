@@ -70,6 +70,7 @@ CORE_RISK_REPLAY_MISMATCH_COUNT_TOTAL = "aios.core_risk.replay_mismatch.count_to
 
 # DC-17 — application/realtime_fanout.py instrumentation points.
 MARKET_DATA_FANOUT_PUBLISHED_COUNT_TOTAL = "aios.market_data.fanout_publish.count_total"
+# Denial labels: DC-9 reasons or REALTIME_REQUIRED for delayed-only access.
 MARKET_DATA_FANOUT_DENIED_COUNT_TOTAL = "aios.market_data.fanout_deny.count_total"
 MARKET_DATA_FANOUT_DROPPED_COUNT_TOTAL = "aios.market_data.fanout_drop.count_total"
 

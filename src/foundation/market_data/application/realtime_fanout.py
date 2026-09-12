@@ -68,13 +68,18 @@ class RealtimeFanout:
         max_queue_depth: int = DEFAULT_MAX_QUEUE_DEPTH,
         metrics: MetricsPort | None = None,
     ) -> None:
+        if type(max_queue_depth) is not int or max_queue_depth <= 0:
+            raise ValueError("max_queue_depth must be a positive integer")
         self._max_queue_depth = max_queue_depth
         # PLT-10 pattern — defaults to NullMetrics, no global singleton (caller injects it).
         self._metrics: MetricsPort = metrics if metrics is not None else NullMetrics()
         self._subscriptions: dict[UUID, Subscription] = {}
 
     def subscribe(self, subject: EntitlementSubject, feed: FeedRequest) -> Subscription:
-        subscription = Subscription(subscription_id=uuid.uuid4(), subject=subject, feed=feed)
+        subscription = Subscription(
+            subscription_id=uuid.uuid4(), subject=subject, feed=feed,
+            queue=asyncio.Queue(maxsize=self._max_queue_depth),
+        )
         self._subscriptions[subscription.subscription_id] = subscription
         return subscription
 
@@ -88,6 +93,8 @@ class RealtimeFanout:
         (the caller passes tz-aware UTC) — this function never reads the
         current time itself.
         """
+        if as_of.tzinfo is None or as_of.utcoffset() is None:
+            raise ValueError("as_of must be a tz-aware datetime")
         envelope: EventEnvelope | None = None
         for subscription in list(self._subscriptions.values()):
             if subscription.feed != feed:
@@ -100,6 +107,14 @@ class RealtimeFanout:
                 self._metrics.counter(
                     metric_names.MARKET_DATA_FANOUT_DENIED_COUNT_TOTAL,
                     labels={"reason": reason},
+                )
+                continue
+            # Delayed permission from DC-9 must never expose live data.
+            # There is no delay buffer here, so reject partial allowances.
+            if entitlement.mode != "realtime":
+                self._metrics.counter(
+                    metric_names.MARKET_DATA_FANOUT_DENIED_COUNT_TOTAL,
+                    labels={"reason": "REALTIME_REQUIRED"},
                 )
                 continue
             if envelope is None:
@@ -115,5 +130,6 @@ class RealtimeFanout:
             except asyncio.QueueEmpty:  # pragma: no cover — impossible when qsize>=max_queue_depth
                 pass
             else:
+                queue.task_done()
                 self._metrics.counter(metric_names.MARKET_DATA_FANOUT_DROPPED_COUNT_TOTAL)
         queue.put_nowait(envelope)
