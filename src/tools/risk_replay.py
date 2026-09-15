@@ -21,6 +21,7 @@ e.g. NULL `latency_us`) is handled the same way — task-2395, CI 77871f678ce2
 observed a `pydantic.ValidationError` leaking through instead and killing the
 whole batch.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -81,7 +82,11 @@ async def _run(*, decision_id: UUID | None, since: datetime | None) -> int:
             if result.match:
                 print(f"risk_replay: MATCH {current_id}")
             else:
-                print(f"risk_replay: MISMATCH {current_id} diff={result.diff}", file=sys.stderr)
+                print(
+                    f"risk_replay: MISMATCH {current_id} error_code={result.error_code} "
+                    f"diff={result.diff}",
+                    file=sys.stderr,
+                )
                 mismatches.append(current_id)
     finally:
         await pool.close()

@@ -24,6 +24,7 @@ function does not catch it and lets it propagate to the caller
 matching bundle" and "corrupt row" are distinct failure modes, so each keeps
 its own exception type instead of being disguised as a diff.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -65,6 +66,7 @@ class BundleSource(Protocol):
 class ReplayResult:
     match: bool
     diff: dict[str, Any]
+    error_code: str | None = None
 
 
 class DecisionNotFoundError(LookupError):
@@ -109,10 +111,12 @@ async def replay(
             diff[field] = {"stored": stored_value, "recomputed": recomputed_value}
 
     match = not diff
+    error_code: str | None = None
     if not match:
+        error_code = INTEGRITY_RISK_REPLAY_MISMATCH
         get_registry().counter(CORE_RISK_REPLAY_MISMATCH_COUNT_TOTAL).inc()
 
-    return ReplayResult(match=match, diff=diff)
+    return ReplayResult(match=match, diff=diff, error_code=error_code)
 
 
 __all__ = [
