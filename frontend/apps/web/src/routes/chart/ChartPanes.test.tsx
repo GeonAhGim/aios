@@ -10,6 +10,7 @@ import { ChartPanes } from "./ChartPanes";
 import type { OverlayPlotSpecOverrides, OverlaySeriesByOutput } from "./ChartPlotLayer";
 import { buildInitialModel, MAIN_PANE_ID, subPaneId } from "./chartPanesModel";
 import { perfBudgetMs } from "../../test/perfBudget";
+import { resolveDataIndex } from "./DataWindowPanel";
 
 // CandlesPage.test.tsx/ChartPage.test.tsx의 관용과 동일 — lightweight-charts는
 // jsdom에서 canvas를 요구하므로 실 렌더러 대신 전달받은 data.length만 노출하는
@@ -22,7 +23,20 @@ vi.mock("@aios/ui-web", async () => {
   };
 });
 
-afterEach(cleanup);
+// DEPTH_CH(task-2729)/DEEPEN task-3106 — CH-16e statusLine 실패 주입: 실제
+// resolveDataIndex(StatusLine.tsx·DataWindowPanel.tsx가 공유하는 크로스헤어->바
+// 인덱스 조회)를 감싸는 spy로 바꿔, 한 테스트에서만 범위 밖 인덱스를 강제 반환시켜
+// 그 공유 의존성이 손상된 값을 내놓아도 StatusLine이 크래시하거나 NaN/Infinity를
+// 화면에 흘리지 않는지 확인한다. 다른 모든 테스트는 실제 구현 그대로 실행된다.
+vi.mock("./DataWindowPanel", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("./DataWindowPanel")>();
+  return { ...actual, resolveDataIndex: vi.fn(actual.resolveDataIndex) };
+});
+
+afterEach(() => {
+  cleanup();
+  vi.mocked(resolveDataIndex).mockClear();
+});
 
 function overlay(id: string, placement: OverlayEntry["placement"] = "sub-pane", outputs: OverlayEntry["outputs"] = [{ name: "value", series: "line" }]): OverlayEntry {
   return { id, placement, params: [], outputs, paneIndex: 1 };
@@ -269,6 +283,59 @@ describe("ChartPanes — CH-16e statusLine 실배선 (task-2045)", () => {
       expect(statusLineValue(title)).toBe("--");
     }
   });
+
+  // DEPTH_CH(task-2729)/DEEPEN task-3106: 위 negative는 "캔들 자체가 없음"
+  // 한 축뿐이었다. 아래 두 건은 "캔들은 있지만 일부만 결손"이라는 서로 다른
+  // 축을 추가한다 — 전체 공백이 아니라 필드 단위 fail-closed가 실제 배선에서
+  // 지켜지는지가 이전 negative만으로는 드러나지 않는다.
+  it("negative: 첫 바(이전 바 없음)에 크로스헤어를 두면 Chg/Chg%만 '--'이고 나머지 필드는 실값을 보인다", () => {
+    render(<Harness initialSub={[]} candles={OHLCV_BARS} />);
+
+    // Surface spans bar0..bar2 (2h); clientX=0 lands exactly on bar0's timestamp (no prev candle).
+    fireEvent.mouseMove(screen.getByTestId("chart-pane-surface-main"), { clientX: 0 });
+
+    expect(statusLineValue("O")).toBe("100.00");
+    expect(statusLineValue("H")).toBe("110.00");
+    expect(statusLineValue("L")).toBe("90.00");
+    expect(statusLineValue("C")).toBe("105.00");
+    expect(statusLineValue("Vol")).toBe("50");
+    expect(statusLineValue("Chg")).toBe("--");
+    expect(statusLineValue("Chg%")).toBe("--");
+  });
+
+  it("negative: volume이 거래소발 손상 문자열(숫자로 파싱 불가)이면 Vol만 '--'이고 O/H/L/C는 실값을 유지한다", () => {
+    const corrupted = ohlcvCandle(1, { open: 200, high: 220, low: 190, close: 210, volume: 75 });
+    const withBadVolume = { ...corrupted, record: { ...corrupted.record, volume: "not-a-number" } };
+    render(<Harness initialSub={[]} candles={[OHLCV_BARS[0]!, withBadVolume, OHLCV_BARS[2]!]} />);
+
+    fireEvent.mouseMove(screen.getByTestId("chart-pane-surface-main"), { clientX: 300 });
+
+    expect(statusLineValue("O")).toBe("200.00");
+    expect(statusLineValue("H")).toBe("220.00");
+    expect(statusLineValue("L")).toBe("190.00");
+    expect(statusLineValue("C")).toBe("210.00");
+    expect(statusLineValue("Vol")).toBe("--");
+  });
+
+  // DEPTH_CH(task-2729)/DEEPEN task-3106: 실패 주입 — StatusLine.tsx와
+  // DataWindowPanel.tsx가 공유하는 resolveDataIndex가 (버그로) 배열 범위 밖의
+  // 인덱스를 반환해도, resolveStatusLineNeighbor의 경계 검사가 이를 흡수해
+  // crash도 NaN/Infinity 누출도 없이 fail-closed로 렌더링하는지 확인한다.
+  it("실패 주입: 공유 의존성 resolveDataIndex가 배열 범위 밖 인덱스를 반환해도 crash 없이 fail-closed로 렌더링한다", () => {
+    render(<Harness initialSub={[]} candles={OHLCV_BARS} />);
+    vi.mocked(resolveDataIndex).mockReturnValueOnce(9999);
+
+    expect(() => {
+      fireEvent.mouseMove(screen.getByTestId("chart-pane-surface-main"), { clientX: 300 });
+    }).not.toThrow();
+
+    for (const title of ["O", "H", "L", "C", "Vol", "Chg", "Chg%"]) {
+      const text = statusLineValue(title);
+      expect(text).not.toContain("NaN");
+      expect(text).not.toContain("Infinity");
+      expect(text).toBe("--");
+    }
+  });
 });
 
 describe("ChartPanes — CH-19c render/lod·render/viewport wiring", () => {
@@ -332,5 +399,50 @@ describe("ChartPanes — 게이트 적색 재현(DEEPEN task-3092): heightRatio 
     expect(screen.getByTestId("chart-panes-layout-error")).toBeInTheDocument();
     const ratios = ratiosOf([MAIN_PANE_ID, subPaneId("MFI")]);
     expect(ratios.reduce((a, b) => a + b, 0)).toBeCloseTo(1, 4);
+  });
+});
+
+// DEPTH_CH(task-2729) 감사: 원 task-2045(CH-16e 상태줄 실배선, 4db8102f)에는
+// 수치 성능 단언이 없었다 — jsdom 유닛테스트 환경 기준 느슨한 ms 예산이지만,
+// 크로스헤어 드래그마다 렌더가 선형이 아니게(예: 매 이동마다 전 캔들 재스캔) 퇴행
+// 하면 확실히 이 상한을 넘어 실패한다(task-3092/1809 DEEPEN과 동일 관용).
+describe("ChartPanes — 성능 단언(DEEPEN task-3106): 크로스헤어 드래그 상태줄 갱신", () => {
+  it("1,000봉에서 크로스헤어를 300회 연속 이동해도 상태줄 갱신이 3초 안에 끝난다", () => {
+    const dense = denseCandles(1000);
+    render(<Harness initialSub={[]} candles={dense} />);
+    const surface = screen.getByTestId("chart-pane-surface-main");
+
+    const startedAt = performance.now();
+    for (let i = 0; i < 300; i++) {
+      fireEvent.mouseMove(surface, { clientX: i % 600 });
+    }
+    const elapsedMs = performance.now() - startedAt;
+
+    expect(screen.getByTestId("chart-status-line-O")).not.toHaveTextContent("--");
+    expect(elapsedMs).toBeLessThan(3000);
+  });
+});
+
+// DEPTH_CH(task-2729) 감사: 원 task-2045에 게이트 적색 재현이 없었다("이 배선을
+// 되돌리면 테스트가 FAIL한다"는 커밋 메시지 주장뿐, 자동화된 before/after 대조
+// 없음). resolveStatusLineNeighbor의 `i >= 0 && i < candles.length` 경계 검사가
+// 없던 상태를 흉내낸 naive 조회(red)와, 실제 StatusLine 배선(green)을 같은
+// "캔들 없음" 입력으로 직접 대조한다.
+describe("ChartPanes — 게이트 적색 재현(DEEPEN task-3106): 캔들 없음에서 크로스헤어 OHLCV 조회", () => {
+  /** resolveStatusLineNeighbor의 범위 검사 이전 상태를 흉내낸 naive 조회 — 실제 모듈이 아니다. */
+  function naiveOhlcvOpenAt(candles: readonly StreamCandle[], dataIndex: number): string {
+    return candles[dataIndex]!.record.open;
+  }
+
+  it("red: 경계 검사가 없는 naive 조회는 캔들 없음(dataIndex=-1)에서 그대로 throw한다", () => {
+    const dataIndex = -1; // resolveDataIndex([], null)의 실제 반환값과 동일
+    expect(() => naiveOhlcvOpenAt([], dataIndex)).toThrow(TypeError);
+  });
+
+  it("green: 실 StatusLine 배선은 같은 캔들 없음 입력을 '--'로 fail-closed 렌더링하며 throw하지 않는다", () => {
+    expect(() => render(<Harness initialSub={[]} candles={[]} />)).not.toThrow();
+    for (const title of ["O", "H", "L", "C", "Vol", "Chg", "Chg%"]) {
+      expect(statusLineValue(title)).toBe("--");
+    }
   });
 });
