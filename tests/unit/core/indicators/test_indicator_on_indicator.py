@@ -5,7 +5,10 @@ DoD (전부 반증 가능): (a) RSI(SMA(close,20),14) 정확값, (b) 순환·자
 (c) lookback 체인 합성 + fail-closed, (d) 깊이 상한, (e) 증분=일괄(1e-9),
 (f) 기존 카탈로그/레지스트리 계약 무변경.
 """
+
 from __future__ import annotations
+
+import time
 
 import numpy as np
 import pytest
@@ -215,3 +218,75 @@ def test_chain_entry_hash_is_deterministic_and_sensitive_to_graph_shape() -> Non
         name="SMA", params={"timeperiod": 21}, inputs={"close": ColumnSource("close")}
     )
     assert chain_entry_hash("rsi", changed, DEFAULT_REGISTRY) != first
+
+
+# --- DEEPEN task-2930: 실패 주입 + 수치 성능 단언 + 게이트 적색 재현 ---------
+#
+# task-2727 DEPTH 감사(docs/audit/DEPTH_DSL_IND.md)에서 원 task-2141(IND-16)이
+# 축 하한 미달로 판정됐다. negative(위 7건)는 이미 충분하므로, 부족했던 세
+# 증빙만 추가한다: 실패 주입(fault injection), 수치 성능 단언, 게이트 적색
+# 재현(회귀 가드) 각 1건.
+
+
+def test_non_finite_value_in_base_column_fails_closed_not_silently_propagated() -> None:
+    """실패 주입: `close`에 심은 `inf` 하나가 체인의 부모 노드(SMA) 계산에서
+    거부돼야 한다 -- IND-1 `vectorized._as_columns`의 `isfinite` 불변식이
+    실제로 체인 경로에도 배선돼 있다는 증거. 이 검사가 깨지면 inf가 조용히
+    다운스트림 RSI 계산에 섞여 들어가 버그 없이 통과해버린다."""
+    close = _close(3, 200)
+    close[100] = np.inf
+    graph = _rsi_of_sma_graph()
+    with pytest.raises(IndicatorError) as excinfo:
+        compute_chain(graph, "rsi", {"close": close})
+    assert excinfo.value.code == "INDICATOR_INPUT_INVALID"
+
+
+def test_resolve_chain_latency_is_bounded_for_max_depth_chain() -> None:
+    """수치 성능 단언: 그래프 해석(`resolve_chain`의 위상 정렬)과 lookback
+    체인 합성은 깊이 상한(MAX_CHAIN_DEPTH) 그래프에서도 호출당 5ms를 넘지
+    않아야 한다. O(depth) DFS가 실수로 재귀 재계산형(예: 메모이즈 누락으로
+    지수적 재방문)으로 퇴화하면 이 경계가 깨진다."""
+    graph = _linear_sma_chain(MAX_CHAIN_DEPTH)
+    root = f"n{MAX_CHAIN_DEPTH - 1}"
+    resolve_chain(graph, root, DEFAULT_REGISTRY)  # warm-up: import/캐시 워밍업 제외
+
+    iterations = 500
+    start = time.perf_counter()
+    for _ in range(iterations):
+        resolve_chain(graph, root, DEFAULT_REGISTRY)
+    elapsed = time.perf_counter() - start
+
+    per_call_ms = (elapsed / iterations) * 1000
+    assert per_call_ms < 5.0, f"resolve_chain graph 해석 지연 회귀: {per_call_ms:.4f}ms/call"
+
+
+def test_cycle_hidden_behind_one_valid_sibling_branch_is_still_detected() -> None:
+    """게이트 적색 재현(순환 탐지 회귀 가드): 다중 입력 노드(ATR)의 한 입력
+    (`high`)은 순환이 없는 정상 분기라 먼저 방문·완료되어 `visited`에
+    캐시된다. 같은 노드의 다른 입력(`close`)만 자기 자신으로 되돌아오는
+    순환이다 -- "형제 입력 하나가 정상 완료되면 노드 전체를 안전하다고
+    캐시한다"는 회귀가 생기면(예: `visiting`을 노드 단위가 아니라 첫 입력
+    처리 후 조기 discard) 이 테스트가 적색이 된다. 위 (b)의 2노드 순환
+    테스트는 단일 입력 체인만 다뤄 이 회귀를 못 잡는다."""
+    graph = {
+        "base_h": ChainNode(
+            name="SMA", params={"timeperiod": 2}, inputs={"close": ColumnSource("high")}
+        ),
+        "mix": ChainNode(
+            name="ATR",
+            params={"timeperiod": 14},
+            inputs={
+                "high": NodeSource(node="base_h", output="value"),
+                "low": ColumnSource("low"),
+                "close": NodeSource(node="base_c", output="value"),
+            },
+        ),
+        "base_c": ChainNode(
+            name="SMA",
+            params={"timeperiod": 2},
+            inputs={"close": NodeSource(node="mix", output="value")},
+        ),
+    }
+    with pytest.raises(IndicatorError) as excinfo:
+        resolve_chain(graph, "mix", DEFAULT_REGISTRY)
+    assert excinfo.value.code == "INDICATOR_CHAIN_CYCLE"
