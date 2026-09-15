@@ -4,10 +4,26 @@ Spec: docs/specs/L4_market_data_positions_ledger_v1.0.md#§2.2 LA-8, §9.2 LA-8.
 
 핵심 케이스(§9.2 LA-8): 같은 종목에 분할이 연속 2회 이상 있어도 각 캔들은
 자기 날짜보다 뒤에 일어난 조정만 누적 반영해야 한다. ratio<=0은 예외.
+
+DEEPEN(task-2954, docs/audit/DEPTH_LA_LB_LC.md original task-411): this module
+is a pure function with no I/O, so the DEPTH audit's 4 failure-injection/
+perf-assertion axes cannot be applied literally (see the same DEEPEN section
+in `test_timeframe.py` -- pure domain-function leaves translate the spirit of
+those axes instead). Added below: (1) one more negative case -- a batch that
+mixes a healthy action for one instrument with a corrupted one for another
+still fails closed as a whole, (2) failure injection -- since there is no
+adapter to inject a fault into, this simulates a corrupted `action_type` that
+bypassed Literal validation via `model_construct` (e.g. a stale value left
+over from a looser prior schema), (3) large-batch timing is observed but not
+asserted on (same policy as `test_lineage.py`'s
+`test_batch_hash_large_batch_stays_order_independent` -- avoids permanent
+CI-red, precedent 3ea1fc1/9bdcd21).
 """
+
 from __future__ import annotations
 
-from datetime import date, datetime, timezone
+import time
+from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 from uuid import uuid4
 
@@ -21,6 +37,7 @@ from src.foundation.market_data.contracts.v1 import (
     Venue,
 )
 from src.foundation.market_data.domain.corporate_actions.adjustment import (
+    InvalidActionTypeError,
     InvalidRatioError,
     adjust,
     factor_chain,
@@ -137,3 +154,76 @@ def test_negative_ratio_raises() -> None:
     action = _split(uuid4(), date(2024, 1, 1), "-1")
     with pytest.raises(InvalidRatioError):
         factor_chain([action], datetime(2024, 12, 1, tzinfo=timezone.utc))
+
+
+def test_factor_chain_fails_closed_when_one_action_among_many_is_invalid() -> None:
+    """negative (DEEPEN task-2954): a healthy adjustment for one instrument
+    mixed into the same batch as a corrupted one for another instrument must
+    not let the healthy instrument compute quietly -- the whole batch must
+    fail closed (no partial success)."""
+    good = _split(uuid4(), date(2024, 1, 10), "2")
+    bad = _split(uuid4(), date(2024, 3, 1), "0")
+
+    with pytest.raises(InvalidRatioError):
+        factor_chain([good, bad], datetime(2024, 12, 1, tzinfo=timezone.utc))
+
+
+def test_factor_chain_fails_closed_on_corrupted_action_type() -> None:
+    """failure injection (DEEPEN task-2954): this module has no I/O, so there
+    is no adapter to inject a fault into. The one realistic fault shape is a
+    corrupted `action_type` that bypassed Literal validation (e.g. a stale
+    value left over from a looser prior schema), simulated here via
+    `model_construct` (skips pydantic validation) -- it must die immediately
+    instead of being silently treated as a SPLIT."""
+    action = CorporateAction.model_construct(
+        action_type="SPINOFF",
+        instrument_id=uuid4(),
+        ex_date=date(2024, 1, 1),
+        ratio=Decimal("2"),
+        cash_amount=None,
+        source_ref="test",
+        known_at=None,
+        schema_version="v1",
+    )
+
+    with pytest.raises(InvalidActionTypeError):
+        factor_chain([action], datetime(2024, 12, 1, tzinfo=timezone.utc))
+
+
+def test_factor_chain_and_adjust_large_batch_stays_correct() -> None:
+    """Observes large-batch timing (print) without asserting a numeric bound
+    -- same policy as `test_lineage.py`'s
+    `test_batch_hash_large_batch_stays_order_independent` (avoids permanent
+    CI-red, precedent 3ea1fc1/9bdcd21). This leaf's invariant (each candle
+    only reflects adjustments after its own date) must still hold at scale."""
+    instrument_id = uuid4()
+    base_date = date(2020, 1, 1)
+    # Only 40 splits go on the instrument under assertion -- 2^40 is the
+    # largest exponent at which sequential multiplication and a single
+    # division stay byte-identical under the default Decimal precision (28
+    # significant digits, measured above), so the large batch can still be
+    # checked exactly. The rest are spread across other instruments just to
+    # fill out the batch size (500) -- more realistic anyway, since real
+    # batches mix adjustments for many instruments.
+    actions = [_split(instrument_id, base_date + timedelta(days=i), "2") for i in range(40)]
+    actions += [_split(uuid4(), base_date + timedelta(days=i), "2") for i in range(460)]
+    as_of = datetime(2021, 6, 1, tzinfo=timezone.utc)
+    candles = [
+        _candle(
+            instrument_id,
+            datetime(2019, 12, 31, tzinfo=timezone.utc) + timedelta(days=i),
+            Decimal("100"),
+        )
+        for i in range(2_000)
+    ]
+
+    started = time.perf_counter()
+    factors = factor_chain(actions, as_of)
+    adjusted = adjust(candles, factors)
+    elapsed = time.perf_counter() - started
+    print(f"\nfactor_chain+adjust latency (500 splits, 2000 candles): {elapsed:.4f}s")
+
+    # The earliest candle reflects all 40 splits (2:1 each): divided by 2^40.
+    assert adjusted[0].close == Decimal("100") / (Decimal(2) ** 40)
+    # An adjustment past `as_of` is not reflected.
+    assert adjusted[-1].close == Decimal("100")
