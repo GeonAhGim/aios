@@ -16,6 +16,20 @@ negative 1건(레거시>원장 드리프트)뿐이고 실패주입·성능단언
 위양성 드리프트를 결정론적으로 발생시키고, 같은 최종 상태에서 수정된
 단일 SQL 왕복 `get_balance`는 위양성이 없음을 대조). 코드 변경 없음
 (`queries.py`는 task-951에서 이미 고쳐진 그대로).
+
+DEEPEN(task-2989, docs/audit/DEPTH_LA_LB_LC.md#951) — 같은 파일을 다시
+가리키는 별도 축 항목(원 task-951, D1)이 위 task-2969 증적으로도 채워지지
+않는 요건 하나를 남겼다: "실패주입(드리프트가 실 SQL 데이터 손상으로
+생성되어 모의/시뮬레이션 예외 아님)"였다 — task-2969가 추가한 실패주입은
+`monkeypatch.setattr(asyncpg.connection.Connection, "fetch", ...)`로 커넥션
+예외를 시뮬레이션한 것이라 이 항목을 채우지 못한다. 아래 1건을 추가한다:
+`ledger_balance`(원장 진실)를 애플리케이션 계층(저널·감사 이중기록)을
+완전히 우회해 테스트 코드가 직접 DELETE+INSERT(WORM 트리거가 막는 건
+리터럴 UPDATE뿐 — FA-10, `a2c4f9e1b3d5_fa10_bitemporal_projections.py`)로
+손상시켜, 진짜 SQL 데이터 손상만으로 드리프트가 발생하고 `get_balance`가
+그 손상된 값을 진실로 오인하지 않고 fail-closed로 실패하는지 검증한다.
+negative≥3·성능 단언·게이트 적색 재현은 task-2969가 이미 채워 그대로
+유효하다. 코드 변경 없음.
 """
 
 from __future__ import annotations
@@ -322,6 +336,53 @@ async def test_get_balance_connection_failure_propagates_instead_of_silent_defau
     # 장애 주입 해제 후에는 정상 동작해야 한다 — 실패가 상태를 오염시키지 않았다.
     result = await get_balance(pool, user, balances=ports.balances)
     assert result.balance == Decimal("40.00")
+
+
+# ---- DEEPEN(task-2989): 실패주입(실 SQL 데이터 손상, 모의 예외 아님) ----
+
+
+async def test_get_balance_raises_drift_when_ledger_balance_row_directly_corrupted(pool, ports):
+    """DoD failure-injection(task-951 요건): 드리프트를 python 모의 예외가
+    아니라 실제 SQL 데이터 손상으로 만든다. `ledger_balance`는 WORM 트리거로
+    리터럴 UPDATE가 막혀 있지만(FA-10, a2c4f9e1b3d5) DELETE+INSERT는
+    허용된다 — `apply()` 자체가 갱신할 때 쓰는 패턴이다(postgres_balance_
+    repository.py 참고). 이 테스트는 그 DELETE+INSERT를 애플리케이션 계층
+    (저널 append·감사 이중기록·낙관적 락)을 완전히 우회해 테스트 코드가
+    직접 실행함으로써 "원장(진실) 자체가 SQL 레벨에서 손상된" 실제 운영
+    사고를 재현한다. 기존 negative 테스트들은 레거시(`user_wallets`) 쪽만
+    어긋나게 했다 — 이 테스트는 반대로 원장 쪽이 실 SQL로 손상돼도
+    `get_balance`가 손상된 값을 진실로 오인하지 않고 fail-closed로
+    `WalletLedgerDriftError`를 던지는지 검증한다."""
+    user = await create_test_user(pool)
+    async with pool.acquire() as conn, conn.transaction():
+        await bridge_credit(conn, user, Decimal("300.00"), "TOPUP")
+
+    available_code = ua(user, UserSub.AVAILABLE)
+    async with pool.acquire() as conn, conn.transaction():
+        row = await conn.fetchrow(
+            "SELECT lb.account_id, lb.held, lb.pending_payout, lb.allow_negative, "
+            "lb.last_entry_seq FROM ledger_balance lb JOIN ledger_account la "
+            "ON la.account_id = lb.account_id WHERE la.account_code = $1",
+            available_code,
+        )
+        await conn.execute("DELETE FROM ledger_balance WHERE account_id = $1", row["account_id"])
+        await conn.execute(
+            "INSERT INTO ledger_balance (account_id, balance, held, pending_payout, "
+            "allow_negative, last_entry_seq, updated_at) VALUES ($1, $2, $3, $4, $5, $6, now())",
+            row["account_id"],
+            Decimal("999999.00"),
+            row["held"],
+            row["pending_payout"],
+            row["allow_negative"],
+            row["last_entry_seq"] + 1,
+        )
+
+    with pytest.raises(WalletLedgerDriftError) as exc_info:
+        await get_balance(pool, user, balances=ports.balances)
+
+    assert exc_info.value.user_id == user
+    assert exc_info.value.legacy_balance == Decimal("300.00")
+    assert exc_info.value.ledger_available == Decimal("999999.00")
 
 
 # ---- DEEPEN(task-2969): 성능 단언 ----
