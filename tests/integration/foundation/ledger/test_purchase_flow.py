@@ -5,10 +5,12 @@ DoD(task-424): 동시 5건 구매 중 1건만 성공(나머지는 HOLD 충돌 �
 리스팅은 분개 0건 + 기존 `tests/integration/test_marketplace_router.py`
 무수정 통과(이 파일은 그 회귀를 건드리지 않는다 — 별도로 확인됨).
 """
+
 from __future__ import annotations
 
 import asyncio
 import json
+import time
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from uuid import UUID, uuid4
@@ -27,7 +29,7 @@ from src.foundation.ledger.application.purchase_flow import (
 )
 from src.foundation.ledger.contracts.v1 import HoldState, HoldView, UserSub
 from src.foundation.ledger.domain.chart_of_accounts import user_account as ua
-from src.foundation.ledger.domain.hold_state import HoldExpiredError
+from src.foundation.ledger.domain.hold_state import HoldExpiredError, IllegalHoldTransitionError
 from src.services.listing_service import ListingService
 from src.services.purchase_service import PurchaseService
 from src.services.verification_service import VerificationService
@@ -84,7 +86,10 @@ async def _create_strategy(pool, owner_user_id: UUID) -> tuple[str, str]:
             "(strategy_id, version, owner_user_id, target_asset, market, exchange, "
             " fsm_definition, author_agent) "
             "VALUES ($1, $2, $3, 'BTC/USDT', 'crypto', 'bitget', $4::jsonb, 'test-author')",
-            strategy_id, version, owner_user_id, json.dumps({}),
+            strategy_id,
+            version,
+            owner_user_id,
+            json.dumps({}),
         )
     return strategy_id, version
 
@@ -112,9 +117,18 @@ async def test_place_and_capture_hold_creates_two_entries_and_settles(pool, port
 
     async with pool.acquire() as conn, conn.transaction():
         hold = await place_hold(
-            conn, buyer_id=buyer, amount=price, purpose=_TEST_PURPOSE, reference=reference,
-            expires_at=_clock() + timedelta(minutes=15), actor_subject_id=buyer, trace_id=uuid4(),
-            journal=ports.journal, balances=ports.balances, audit=ports.audit, clock=ports.clock,
+            conn,
+            buyer_id=buyer,
+            amount=price,
+            purpose=_TEST_PURPOSE,
+            reference=reference,
+            expires_at=_clock() + timedelta(minutes=15),
+            actor_subject_id=buyer,
+            trace_id=uuid4(),
+            journal=ports.journal,
+            balances=ports.balances,
+            audit=ports.audit,
+            clock=ports.clock,
             holds=ports.holds,
         )
         assert hold.state == HoldState.PENDING
@@ -126,9 +140,17 @@ async def test_place_and_capture_hold_creates_two_entries_and_settles(pool, port
         assert mid_balance == Decimal("0.00")
 
         capture = await capture_hold(
-            conn, hold, seller_id=seller, commission_rate=Decimal("0.15"),
-            actor_subject_id=buyer, trace_id=uuid4(), now=_clock(),
-            journal=ports.journal, balances=ports.balances, audit=ports.audit, clock=ports.clock,
+            conn,
+            hold,
+            seller_id=seller,
+            commission_rate=Decimal("0.15"),
+            actor_subject_id=buyer,
+            trace_id=uuid4(),
+            now=_clock(),
+            journal=ports.journal,
+            balances=ports.balances,
+            audit=ports.audit,
+            clock=ports.clock,
             holds=ports.holds,
         )
 
@@ -153,23 +175,48 @@ async def test_capture_expired_hold_is_rejected(pool, ports):
 
     async with pool.acquire() as conn, conn.transaction():
         hold = await place_hold(
-            conn, buyer_id=buyer, amount=price, purpose=_TEST_PURPOSE, reference=reference,
-            expires_at=past, actor_subject_id=buyer, trace_id=uuid4(),
-            journal=ports.journal, balances=ports.balances, audit=ports.audit, clock=ports.clock,
+            conn,
+            buyer_id=buyer,
+            amount=price,
+            purpose=_TEST_PURPOSE,
+            reference=reference,
+            expires_at=past,
+            actor_subject_id=buyer,
+            trace_id=uuid4(),
+            journal=ports.journal,
+            balances=ports.balances,
+            audit=ports.audit,
+            clock=ports.clock,
             holds=ports.holds,
         )
 
         with pytest.raises(HoldExpiredError):
             await capture_hold(
-                conn, hold, seller_id=await create_test_user(pool), commission_rate=Decimal("0.15"),
-                actor_subject_id=buyer, trace_id=uuid4(), now=_clock(),
-                journal=ports.journal, balances=ports.balances, audit=ports.audit,
-                clock=ports.clock, holds=ports.holds,
+                conn,
+                hold,
+                seller_id=await create_test_user(pool),
+                commission_rate=Decimal("0.15"),
+                actor_subject_id=buyer,
+                trace_id=uuid4(),
+                now=_clock(),
+                journal=ports.journal,
+                balances=ports.balances,
+                audit=ports.audit,
+                clock=ports.clock,
+                holds=ports.holds,
             )
         # PENDING인 홀드는 release로 되돌릴 수 있다(구매가 아니어도 재사용, LC-14 대비).
         released = await release_hold(
-            conn, hold, reason="test", actor_subject_id=buyer, trace_id=uuid4(), now=_clock(),
-            journal=ports.journal, balances=ports.balances, audit=ports.audit, clock=ports.clock,
+            conn,
+            hold,
+            reason="test",
+            actor_subject_id=buyer,
+            trace_id=uuid4(),
+            now=_clock(),
+            journal=ports.journal,
+            balances=ports.balances,
+            audit=ports.audit,
+            clock=ports.clock,
             holds=ports.holds,
         )
     assert released.state == HoldState.RELEASED
@@ -186,10 +233,19 @@ async def test_place_hold_concurrent_same_reference_only_one_succeeds(pool, port
     async def _attempt() -> HoldView:
         async with pool.acquire() as conn, conn.transaction():
             return await place_hold(
-                conn, buyer_id=buyer, amount=price, purpose=_TEST_PURPOSE, reference=reference,
-                expires_at=expires_at, actor_subject_id=buyer, trace_id=uuid4(),
-                journal=ports.journal, balances=ports.balances, audit=ports.audit,
-                clock=ports.clock, holds=ports.holds,
+                conn,
+                buyer_id=buyer,
+                amount=price,
+                purpose=_TEST_PURPOSE,
+                reference=reference,
+                expires_at=expires_at,
+                actor_subject_id=buyer,
+                trace_id=uuid4(),
+                journal=ports.journal,
+                balances=ports.balances,
+                audit=ports.audit,
+                clock=ports.clock,
+                holds=ports.holds,
             )
 
     results = await asyncio.gather(*[_attempt() for _ in range(5)], return_exceptions=True)
@@ -201,7 +257,8 @@ async def test_place_hold_concurrent_same_reference_only_one_succeeds(pool, port
     async with pool.acquire() as conn:
         hold_count = await conn.fetchval(
             "SELECT COUNT(*) FROM ledger_hold WHERE purpose = $1 AND reference = $2",
-            _TEST_PURPOSE, reference,
+            _TEST_PURPOSE,
+            reference,
         )
     assert hold_count == 1
     assert await _available(pool, buyer) == price * 4  # 5건 펀딩 중 1건만 실제로 차감·확정
@@ -252,3 +309,204 @@ async def test_purchase_service_settles_seller_and_house_via_hold_flow(pool):
     assert hold_row["entry_id"] is not None
     assert hold_row["settled_entry_id"] is not None
     assert settlement_count == 2  # PAYOUT_RELEASE + commission MANUAL_ADJUSTMENT
+
+
+async def test_capture_already_captured_hold_is_rejected(pool, ports):
+    """DEEPEN(task-2960): negative 3번째 — `test_capture_expired_hold_is_rejected`가
+    "PENDING, capture, 만료" 가드를 증명한다면 이 테스트는 "CAPTURED, capture"
+    (전이표에 없는 조합, §4.5)를 증명한다 — 이미 캡처된 홀드를 다시 캡처하려는
+    이중 캡처 시도를 `hold_state.py`의 FSM이 DB 접근 전에 즉시 거부한다."""
+    buyer = await create_test_user(pool)
+    seller = await create_test_user(pool)
+    price = Decimal("20.00")
+    await _seed_available(pool, buyer, price)
+    reference = f"test-double-capture:{uuid4()}"
+    expires_at = _clock() + timedelta(minutes=15)
+
+    async with pool.acquire() as conn, conn.transaction():
+        hold = await place_hold(
+            conn,
+            buyer_id=buyer,
+            amount=price,
+            purpose=_TEST_PURPOSE,
+            reference=reference,
+            expires_at=expires_at,
+            actor_subject_id=buyer,
+            trace_id=uuid4(),
+            journal=ports.journal,
+            balances=ports.balances,
+            audit=ports.audit,
+            clock=ports.clock,
+            holds=ports.holds,
+        )
+        capture = await capture_hold(
+            conn,
+            hold,
+            seller_id=seller,
+            commission_rate=Decimal("0.15"),
+            actor_subject_id=buyer,
+            trace_id=uuid4(),
+            now=_clock(),
+            journal=ports.journal,
+            balances=ports.balances,
+            audit=ports.audit,
+            clock=ports.clock,
+            holds=ports.holds,
+        )
+
+    with pytest.raises(IllegalHoldTransitionError):
+        async with pool.acquire() as conn, conn.transaction():
+            await capture_hold(
+                conn,
+                capture.hold,
+                seller_id=seller,
+                commission_rate=Decimal("0.15"),
+                actor_subject_id=buyer,
+                trace_id=uuid4(),
+                now=_clock(),
+                journal=ports.journal,
+                balances=ports.balances,
+                audit=ports.audit,
+                clock=ports.clock,
+                holds=ports.holds,
+            )
+    # 이중 캡처 거부는 순수 FSM 가드(§4.5)라 DB 상태를 건드리지 않는다 — 원 캡처
+    # 그대로 남는다.
+    assert capture.hold.state == HoldState.CAPTURED
+
+
+async def test_place_and_capture_hold_round_trip_under_budget(pool, ports):
+    """DEEPEN(task-2960): 수치 성능 단언 — `place_hold`+`capture_hold` 왕복
+    20회(각자 fresh reference, 순차 실행)가 절대시간 예산 내에 있음을
+    증명한다. 실 DB 라운드트립(계정 보장 INSERT ON CONFLICT ×2, 분개
+    INSERT×2, 잔액 UPDATE×2, 홀드 INSERT+conditional UPDATE)이라 단위테스트
+    수준 마이크로초 예산은 의미가 없다 — 로컬 postgres 기준 넉넉한 절대
+    예산으로 회귀(N+1 쿼리 등)만 잡는다."""
+    buyer = await create_test_user(pool)
+    seller = await create_test_user(pool)
+    price = Decimal("1.00")
+    iterations = 20
+    budget_sec = 5.0
+    await _seed_available(pool, buyer, price * iterations)
+
+    start = time.perf_counter()
+    for _ in range(iterations):
+        reference = f"test-perf:{uuid4()}"
+        async with pool.acquire() as conn, conn.transaction():
+            hold = await place_hold(
+                conn,
+                buyer_id=buyer,
+                amount=price,
+                purpose=_TEST_PURPOSE,
+                reference=reference,
+                expires_at=_clock() + timedelta(minutes=15),
+                actor_subject_id=buyer,
+                trace_id=uuid4(),
+                journal=ports.journal,
+                balances=ports.balances,
+                audit=ports.audit,
+                clock=ports.clock,
+                holds=ports.holds,
+            )
+            await capture_hold(
+                conn,
+                hold,
+                seller_id=seller,
+                commission_rate=Decimal("0.15"),
+                actor_subject_id=buyer,
+                trace_id=uuid4(),
+                now=_clock(),
+                journal=ports.journal,
+                balances=ports.balances,
+                audit=ports.audit,
+                clock=ports.clock,
+                holds=ports.holds,
+            )
+    elapsed = time.perf_counter() - start
+    print(
+        f"[LC-13 purchase_flow] {iterations} place+capture 왕복 {elapsed:.3f}s "
+        f"(budget<{budget_sec}s, avg={elapsed / iterations * 1000:.1f}ms)"
+    )
+    assert elapsed < budget_sec, (
+        f"{iterations}회 place+capture 왕복이 예산({budget_sec}s)을 넘었습니다({elapsed:.3f}s)."
+    )
+
+
+# ---- 게이트 적색 재현 — HOLD 충돌이 트랜잭션 전체를 롤백함(부분 커밋 없음) --------
+
+
+async def test_gate_red_conflicting_hold_rolls_back_whole_transaction(pool, ports):
+    """DEEPEN(task-2960): 게이트 적색 재현 — 모듈 docstring(동시성 절)이
+    주장하는 "HoldConflictError가 나면 그 시도의 분개(잔액 차감 포함)까지
+    함께 취소된다"를 순차 재현으로 직접 증명한다: 같은 트랜잭션 안에서
+    (a) 합법적인 새 reference로 `place_hold` 성공 (b) 그 뒤 이미 다른
+    트랜잭션에서 커밋된 reference로 `place_hold` 재시도 -> `HoldConflictError`.
+    트랜잭션 전체가 롤백돼 (a)의 홀드도, 그 차감도 커밋되지 않아야 한다 —
+    아니라면(부분 커밋되면) buyer 잔액이 이중으로 차감된 채 남는
+    실제 자금 누출이라 이 스위트가 반드시 RED가 돼야 하는 경로다."""
+    buyer = await create_test_user(pool)
+    price = Decimal("10.00")
+    await _seed_available(pool, buyer, price * 2)
+    existing_reference = f"test-existing:{uuid4()}"
+    new_reference = f"test-new-in-same-tx:{uuid4()}"
+    expires_at = _clock() + timedelta(minutes=15)
+
+    async with pool.acquire() as conn, conn.transaction():
+        await place_hold(
+            conn,
+            buyer_id=buyer,
+            amount=price,
+            purpose=_TEST_PURPOSE,
+            reference=existing_reference,
+            expires_at=expires_at,
+            actor_subject_id=buyer,
+            trace_id=uuid4(),
+            journal=ports.journal,
+            balances=ports.balances,
+            audit=ports.audit,
+            clock=ports.clock,
+            holds=ports.holds,
+        )
+    balance_after_first = await _available(pool, buyer)
+    assert balance_after_first == price
+
+    with pytest.raises(HoldConflictError):
+        async with pool.acquire() as conn, conn.transaction():
+            await place_hold(
+                conn,
+                buyer_id=buyer,
+                amount=price,
+                purpose=_TEST_PURPOSE,
+                reference=new_reference,
+                expires_at=expires_at,
+                actor_subject_id=buyer,
+                trace_id=uuid4(),
+                journal=ports.journal,
+                balances=ports.balances,
+                audit=ports.audit,
+                clock=ports.clock,
+                holds=ports.holds,
+            )
+            await place_hold(
+                conn,
+                buyer_id=buyer,
+                amount=price,
+                purpose=_TEST_PURPOSE,
+                reference=existing_reference,
+                expires_at=expires_at,
+                actor_subject_id=buyer,
+                trace_id=uuid4(),
+                journal=ports.journal,
+                balances=ports.balances,
+                audit=ports.audit,
+                clock=ports.clock,
+                holds=ports.holds,
+            )
+
+    async with pool.acquire() as conn:
+        leaked_hold = await conn.fetchval(
+            "SELECT COUNT(*) FROM ledger_hold WHERE reference = $1",
+            new_reference,
+        )
+    assert leaked_hold == 0, "게이트 위반 트랜잭션의 앞선 place_hold가 커밋되어 남았습니다"
+    assert await _available(pool, buyer) == balance_after_first  # 추가 차감 없음(부분 커밋 없음)
