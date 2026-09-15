@@ -5,8 +5,11 @@ DoD("헤지 미실현 FX 손익이 NAV 분해에서 자산 손익과 분리 표�
 익스포저 리포트가 수기 계산과 소수 4자리까지 일치, 환율 출처가 known_at과
 함께 기록돼 재현 가능").
 """
+
 from __future__ import annotations
 
+import decimal
+import time
 from datetime import date, datetime, timezone
 from decimal import Decimal
 
@@ -147,9 +150,7 @@ def test_unhedged_exposure_ignores_hedges_for_other_currency_pairs() -> None:
         _contract(contract_id="h2", notional="9999", base=Currency.KRW, quote=Currency.USDT),
     ]
 
-    result = fxf.unhedged_exposure(
-        Decimal("1000"), hedges, base=Currency.USDT, quote=Currency.KRW
-    )
+    result = fxf.unhedged_exposure(Decimal("1000"), hedges, base=Currency.USDT, quote=Currency.KRW)
 
     assert result == Decimal("800")
 
@@ -157,8 +158,76 @@ def test_unhedged_exposure_ignores_hedges_for_other_currency_pairs() -> None:
 def test_unhedged_exposure_without_quantize_keeps_full_precision() -> None:
     hedges = [_contract(notional="333.33333333")]
 
-    result = fxf.unhedged_exposure(
-        Decimal("1000"), hedges, base=Currency.USDT, quote=Currency.KRW
-    )
+    result = fxf.unhedged_exposure(Decimal("1000"), hedges, base=Currency.USDT, quote=Currency.KRW)
 
     assert result == Decimal("666.66666667")
+
+
+def test_hedge_unrealized_pnl_signaling_nan_rate_fails_loud_not_silent() -> None:
+    """실패 주입: 상류 피드가 파싱 버그로 시그널링 NaN을 보내는 상황을
+    흉내낸다. Decimal 기본 컨텍스트는 InvalidOperation을 트랩하므로 연산
+    단계에서 즉시 예외가 나야 한다 — Money로 감싸져 NAV 분해에 "유효해
+    보이는" 숫자로 조용히 흘러들어가면 안 된다(fail-closed)."""
+    contract = _contract(notional="1000", contract_rate="1350")
+    corrupted = _quote(rate="sNaN")
+
+    with pytest.raises(decimal.InvalidOperation):
+        fxf.hedge_unrealized_pnl(contract, corrupted)
+
+
+def test_unhedged_exposure_perf_and_precision_at_volume() -> None:
+    """수치 성능/지연 단언: 기존 수치검증(소규모 hand-calc 4자리 일치)은
+    정확성만 봤다. 여기서는 10,000건 규모(매칭 통화쌍 5,000 + 무관 통화쌍
+    5,000)에서 (1) 선형 시간 내 완료해 루프/재계산 성능 회귀를 잡고 (2)
+    대량 합산에서도 Decimal 정밀도가 깨지지 않고 여전히 소수 4자리까지
+    수기 계산과 일치함을 함께 증명한다."""
+    matching = [_contract(contract_id=f"m{i}", notional="0.1") for i in range(5_000)]
+    other_pair = [
+        _contract(
+            contract_id=f"o{i}",
+            notional="9999.9999",
+            base=Currency.KRW,
+            quote=Currency.USDT,
+        )
+        for i in range(5_000)
+    ]
+    hedges = matching + other_pair
+
+    start = time.perf_counter()
+    result = fxf.unhedged_exposure(
+        Decimal("5000.0000"), hedges, base=Currency.USDT, quote=Currency.KRW, quantize_to=4
+    )
+    elapsed = time.perf_counter() - start
+
+    # 수기 계산: 5000.0000 - (5000 * 0.1) = 4500.0000 (다른 통화쌍 5,000건은 무시)
+    assert result == Decimal("4500.0000")
+    assert elapsed < 2.0
+
+
+def test_decompose_fx_pnl_detects_mismatch_hidden_among_many_matching_hedges() -> None:
+    """게이트 적색 재현: HedgeQuoteCurrencyMismatchError는 전체 hedge_pnls의
+    통화 집합을 모아 판정한다 — 앞쪽 몇 건만 비교하는 얕은(pairwise-adjacent)
+    구현이었다면 맨 끝에 섞인 통화 불일치 1건을 놓쳤을 것이다. KRW 표시
+    헤지 49건 사이에 USDT 표시 헤지 1건을 맨 끝에 섞어도 여전히 적색(예외)
+    이 되는지 재현한다."""
+    asset_fx = Money(amount=Decimal("-5000"), currency=Currency.KRW)
+    matching_hedges = [
+        fxf.HedgePnl(
+            contract_id=f"h{i}",
+            unrealized=Money(amount=Decimal("100"), currency=Currency.KRW),
+            rate_source="test-desk",
+            rate_known_at=_KNOWN_AT,
+        )
+        for i in range(49)
+    ]
+    mismatched = fxf.HedgePnl(
+        contract_id="h-mismatch",
+        unrealized=Money(amount=Decimal("20"), currency=Currency.USDT),
+        rate_source="test-desk",
+        rate_known_at=_KNOWN_AT,
+    )
+
+    with pytest.raises(fxf.HedgeQuoteCurrencyMismatchError) as exc_info:
+        fxf.decompose_fx_pnl(asset_fx, [*matching_hedges, mismatched])
+
+    assert exc_info.value.currencies == {Currency.KRW, Currency.USDT}
