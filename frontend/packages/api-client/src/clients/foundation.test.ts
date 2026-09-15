@@ -318,3 +318,67 @@ describe("DEEPEN 3185: 수치 성능 단언 + 게이트 적색 재현", () => {
     expect(goodResult.packageRef).toBe("pkg-1");
   });
 });
+
+// DEPTH_PLT(task-3139)가 원 task-493(5f7c00b)를 D2 축 하한 미달(D1)로 판정 —
+// stubFetch가 항상 정상 응답만 흉내내 네트워크 자체가 끊기거나 응답이 전송
+// 중 깨지는 실제 결함 클래스를 다루지 않았다. scripts.test.ts/marketData.test.ts
+// DEEPEN과 동일 기법을 그대로 따른다.
+describe("failure-injection — 실 어댑터/네트워크 결함 시뮬레이션", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("negative: 네트워크 완전 단절(fetch 자체가 reject)이면 ApiError로 재분류하지 않고 원본 예외를 그대로 던진다", async () => {
+    const fetchMock = vi.fn().mockRejectedValue(new TypeError("Failed to fetch"));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const err = await makeClient()
+      .requestPaperDeployment(
+        { packageRef: "pkg-1", adapterType: "bitget-sandbox", providerSandboxAccountRef: "acct-1" },
+        "caller-supplied-key-neta",
+      )
+      .catch((e: unknown) => e);
+
+    expect(err).toBeInstanceOf(TypeError);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("negative: 네트워크 타임아웃(AbortError)도 재시도 없이 원본 예외를 그대로 던진다(POST는 withGetRetry 대상이 아님)", async () => {
+    const timeoutError = new Error("The operation was aborted due to timeout");
+    timeoutError.name = "AbortError";
+    const fetchMock = vi.fn().mockRejectedValue(timeoutError);
+    vi.stubGlobal("fetch", fetchMock);
+
+    const err = await makeClient()
+      .startPaperDeployment("dep-1", "caller-supplied-key-netb")
+      .catch((e: unknown) => e as Error);
+
+    expect(err.name).toBe("AbortError");
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("negative: 응답 바디가 전송 중 잘린 깨진 JSON(실 어댑터 결함 — 에러 봉투가 아니라 파싱 자체가 불가)이면 SyntaxError를 그대로 던진다", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response('{"data": {"consent_id":', {
+        status: 201,
+        headers: { "Content-Type": "application/json" },
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const err = await makeClient()
+      .acceptTrustConsent({ purpose: "trading", disclosureRevision: 1 }, "caller-supplied-key-netc")
+      .catch((e: unknown) => e);
+
+    expect(err).toBeInstanceOf(SyntaxError);
+  });
+
+  it("negative: 응답 바디가 완전히 빈 문자열(연결이 중간에 끊긴 실 결함)이면 봉투 형식 위반으로 던지고 빈 값으로 뭉개지 않는다", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response("", { status: 200, headers: { "Content-Type": "application/json" } }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(makeClient().listPaperDeployments()).rejects.toThrow(/봉투 형식/);
+  });
+});
