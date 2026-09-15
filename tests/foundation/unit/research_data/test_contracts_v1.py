@@ -7,11 +7,13 @@ Spec: docs/specs/L4_research_data_and_market_ecosystem_v1.0.md §2.1 RD-2, §3.
 제거 시 실패"). 필드 추가는 minor 변경이므로 허용되고, 그 경우에만
 fixture를 함께 갱신한다.
 """
+
 from __future__ import annotations
 
 import json
 from datetime import datetime, timezone
 from pathlib import Path
+from time import perf_counter
 from typing import Any
 from uuid import uuid4
 
@@ -120,3 +122,20 @@ def test_source_meta_link_only_roundtrip() -> None:
     meta = _sample_source_meta(redistribution="link_only")
     assert meta.redistribution == "link_only"
     assert meta.schema_version == "v1"
+
+
+# ---- 성능 단언(DEPTH 감사 task-2724 D1 판정 근거, 1702/1701/2058 DEEPEN 선례와 동일 패턴) ----
+
+
+def test_research_item_construction_hot_path_performance() -> None:
+    # ResearchItem(**payload) 생성/검증은 모든 수집 어댑터가 아이템 하나마다
+    # 호출하는 순수 경로(pydantic validation)다. 10,000회 호출이 1s 내로
+    # 끝나야 한다 -- I/O 없는 순수 계약의 실측 증명.
+    iterations = 10_000
+
+    started = perf_counter()
+    for _ in range(iterations):
+        _sample_item()
+    elapsed = perf_counter() - started
+
+    assert elapsed < 1.0, f"{iterations}회 호출에 {elapsed:.4f}s — 순수 함수치고 너무 느리다"
