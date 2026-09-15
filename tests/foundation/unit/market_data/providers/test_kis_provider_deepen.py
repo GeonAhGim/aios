@@ -54,6 +54,7 @@ tests/unit/exchanges/kis/test_overseas_stock_mixin_deepen.py — task-2776
    passed)에서 red(1 failed)로 뒤집힘을 증명한다(동일 기법,
    test_overseas_stock_mixin_deepen.py 선례).
 """
+
 from __future__ import annotations
 
 import os
@@ -168,10 +169,21 @@ async def test_fetch_candles_filter_sort_throughput_bounded_vs_trivial_baseline(
     동등한 트리비얼 정렬 베이스라인(같은 N의 리스트를 comparison-key 정렬)
     대비 좁은 배율 범위여야 한다. 절대 ms 상수 대신 정규화 배율을 쓴다
     (task-2776/2778/2779 선례와 동일 판단 — 공유 CI 환경에서 절대 임계는
-    상시 적색을 낳는다)."""
+    상시 적색을 낳는다).
+
+    `KISProvider`(`base_adapter.py`)는 호출마다 토큰버킷(15 req/s, burst
+    15)을 통과한다 — `sleep`을 주입하지 않으면 30회 반복 중 burst를 넘는
+    호출들이 진짜 `asyncio.sleep`으로 대기해 측정 대상(필터+정렬)과 무관한
+    고정 지연이 섞여 배율이 기기 성능과 반비례로 널뛴다(task-3521 DC-12
+    bitget throughput perf test와 동일 결함, base_adapter.py의 "시간은
+    주입받는다" 설계를 그대로 따라 무지연 fake sleep을 준다)."""
     candles = _large_candle_set(_N_CANDLES)
     fake = _FakeKISAdapter({"005930": candles})
-    provider = KISProvider(fake)
+
+    async def _no_wait(_seconds: float) -> None:
+        return None
+
+    provider = KISProvider(fake, sleep=_no_wait)
     span = TimeSpan(start=_BASE, end=_BASE + timedelta(days=_N_CANDLES + 1))
 
     # 워밍업 — import/최초 호출 1회성 비용이 표본에 섞이지 않게 한다.
@@ -257,8 +269,13 @@ def test_pytest_gate_turns_red_when_br8_websocket_declaration_is_reverted(
     env = dict(os.environ, PYTHONPATH=repo_root, PYTEST_ADDOPTS="", PYTHONIOENCODING="utf-8")
 
     baseline = subprocess.run(
-        command, capture_output=True, encoding="utf-8", errors="replace",
-        env=env, timeout=120, check=False,
+        command,
+        capture_output=True,
+        encoding="utf-8",
+        errors="replace",
+        env=env,
+        timeout=120,
+        check=False,
     )
     assert baseline.returncode == 0, baseline.stdout + baseline.stderr
     assert "1 passed" in baseline.stdout
@@ -270,8 +287,12 @@ def test_pytest_gate_turns_red_when_br8_websocket_declaration_is_reverted(
 
     mutated = subprocess.run(
         [*command[:-1], "-p", plugin_module_name, command[-1]],
-        capture_output=True, encoding="utf-8", errors="replace",
-        env=mutated_env, timeout=120, check=False,
+        capture_output=True,
+        encoding="utf-8",
+        errors="replace",
+        env=mutated_env,
+        timeout=120,
+        check=False,
     )
     assert mutated.returncode != 0, mutated.stdout + mutated.stderr
     assert "1 passed" not in mutated.stdout
