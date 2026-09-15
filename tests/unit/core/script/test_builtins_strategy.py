@@ -9,10 +9,20 @@
 우회하지 않음, (e) 이 파일에 DB·네트워크·시계 임포트가 없고 자기 자신을
 재귀호출하지 않음(AST 정적 검사), (f) 등록된 함수 표가 entry/exit/close/order
 4종 정확히 일치.
+
+DEEPEN(task-2929, docs/audit/DEPTH_DSL_IND.md#2140): D2 하한 중 negative(8건)는
+이미 충분하다고 판정됐고, 나머지 세 축을 이 파일에서 채운다 -- 실패 주입 1건
+(`test_intents_to_bytes_fails_closed_on_a_corrupted_nan_qty`), 수치 성능 단언
+1건(`test_twenty_thousand_calls_and_serialization_complete_within_one_second`),
+게이트 적색 재현 1건(`test_purity_gate_flags_injected_violation` -- (e)의 AST
+순수성 검사가 이미 깨끗한 실제 모듈에서만 공허하게 통과하는 게 아니라 실제
+위반을 넣으면 잡아낸다는 것을 증명).
 """
+
 from __future__ import annotations
 
 import ast
+import time
 from pathlib import Path
 
 import pytest
@@ -218,8 +228,11 @@ _ALLOWED_IMPORT_PREFIXES = (
 )  # fmt: skip
 
 
-def test_module_imports_no_io_or_clock_and_never_calls_itself() -> None:
-    tree = ast.parse(_MODULE.read_text(encoding="utf-8"))
+def _purity_violations(source: str) -> list[str]:
+    """(e) 검사의 실제 판정 로직 -- 실제 모듈과 아래 게이트 적색 재현 테스트의
+    오염된 샘플이 같은 코드 경로로 검사받도록 분리해 둔다."""
+    violations: list[str] = []
+    tree = ast.parse(source)
     for node in ast.walk(tree):
         if isinstance(node, ast.Import):
             names = [alias.name for alias in node.names]
@@ -228,12 +241,64 @@ def test_module_imports_no_io_or_clock_and_never_calls_itself() -> None:
         else:
             continue
         for name in names:
-            assert name.startswith(_ALLOWED_IMPORT_PREFIXES), f"I/O 가능 import: {name}"
+            if not name.startswith(_ALLOWED_IMPORT_PREFIXES):
+                violations.append(f"I/O 가능 import: {name}")
     for func in [n for n in ast.walk(tree) if isinstance(n, ast.FunctionDef)]:
         for call_node in [n for n in ast.walk(func) if isinstance(n, ast.Call)]:
             callee = call_node.func
             own = (isinstance(callee, ast.Name) and callee.id == func.name) or (
                 isinstance(callee, ast.Attribute) and callee.attr == func.name
             )
-            assert not own, f"{func.name}가 자기 자신을 호출(재귀)"
-            assert not (isinstance(callee, ast.Name) and callee.id in {"open", "exec", "eval"})
+            if own:
+                violations.append(f"{func.name}가 자기 자신을 호출(재귀)")
+            if isinstance(callee, ast.Name) and callee.id in {"open", "exec", "eval"}:
+                violations.append(f"{func.name}가 위험 호출 사용: {callee.id}")
+    return violations
+
+
+def test_module_imports_no_io_or_clock_and_never_calls_itself() -> None:
+    assert _purity_violations(_MODULE.read_text(encoding="utf-8")) == []
+
+
+def test_purity_gate_flags_injected_violation() -> None:
+    """게이트 적색 재현: 위 테스트가 실제 모듈에서만 공허하게 통과하는 게
+    아니라, 진짜 위반이 있으면 실제로 잡아낸다는 것을 증명한다(같은
+    `_purity_violations` 판정 로직에 오염된 샘플 소스를 주입)."""
+    tainted_source = "import os\n\n\ndef cheat(n):\n    return cheat(n - 1)\n"
+    violations = _purity_violations(tainted_source)
+    assert any("import" in v for v in violations)
+    assert any("재귀" in v for v in violations)
+
+
+# ---- 실패 주입: 검증을 우회해 이미 기록된 intent가 손상된 상황을 재현 ----
+
+
+def test_intents_to_bytes_fails_closed_on_a_corrupted_nan_qty() -> None:
+    """실패 주입: `_resolve_qty`의 유한성 검사를 (미래의 버그로) 우회해 통과한
+    것처럼, 이미 기록된 intent를 frozen dataclass 우회 경로(`object.__setattr__`)로
+    직접 손상시킨다. DoD (a) 결정론 계약의 마지막 방어선인 `intents_to_bytes`가
+    `allow_nan=False`로 조용히 깨진 바이트를 만들지 않고 fail-closed로
+    거부하는지 검증한다."""
+    _, sb = call("entry", 1, 10.0)
+    corrupted = sb.intents[0]
+    object.__setattr__(corrupted, "qty", float("nan"))
+    with pytest.raises(ValueError):
+        intents_to_bytes(sb.intents)
+
+
+# ---- 수치 성능 단언: print만 하고 단언을 피하지 않는다 ----
+
+
+def test_twenty_thousand_calls_and_serialization_complete_within_one_second() -> None:
+    """수치 성능 단언: 실측 20,000 (call_index=19999까지) 호출 + 직렬화가
+    예산 안에 끝나는지 실제로 단언한다 (실측 약 0.1초, 10배 여유)."""
+    sb = StrategyBuiltins()
+    site = CallSite("strategy", "entry", "float", 4)
+    start = time.perf_counter()
+    for _ in range(20_000):
+        sb.table[("strategy", "entry")]((1, 1.0), site)
+    intents_to_bytes(sb.intents)
+    elapsed = time.perf_counter() - start
+    assert elapsed < 1.0
+    assert len(sb.intents) == 20_000
+    assert sb.intents[-1].call_index == 19_999
