@@ -366,6 +366,11 @@ async def test_get_balance_raises_drift_when_ledger_balance_row_directly_corrupt
             available_code,
         )
         await conn.execute("DELETE FROM ledger_balance WHERE account_id = $1", row["account_id"])
+        # audit-allow: ledger_balance_raw_seed -- FA-15a/esc-2115가 금지하는 것은
+        # 초기 잔액 raw 시드다. 이건 위 docstring이 설명하는 대로 WORM 트리거를
+        # 우회한 DELETE+INSERT로 "이벤트 트레일 밖에서 원장 자체가 손상된" 상황을
+        # 재현하는 adversarial tamper이지 시드가 아니다(test_replay_verify.py의
+        # 동일 패턴 `_bump_balance`와 같은 근거).
         await conn.execute(
             "INSERT INTO ledger_balance (account_id, balance, held, pending_payout, "
             "allow_negative, last_entry_seq, updated_at) VALUES ($1, $2, $3, $4, $5, $6, now())",
