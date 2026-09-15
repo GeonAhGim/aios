@@ -147,7 +147,10 @@ async def test_venue_listings_rejects_unknown_instrument_id_fk(pool):
 
 async def test_venue_listings_rejects_exact_duplicate_start_same_symbol(pool):
     """UNIQUE (venue, venue_symbol, listed_at) — EXCLUDE보다 먼저 걸리는
-    정확한 시작시각 중복도 거부돼야 한다(두 제약이 독립적으로 동작함)."""
+    정확한 시작시각 중복도 거부돼야 한다(두 제약이 독립적으로 동작함).
+    UNIQUE는 시작시각이 같은 행만 잡으므로 ExclusionViolationError만 허용하면
+    UNIQUE 제약을 빼도 통과하는 가짜 독립 검증이 된다 — 두 예외 모두 허용해야
+    이 테스트가 UNIQUE 제약을 실제로 검증한다."""
     instrument_a = _fake_ulid()
     instrument_b = _fake_ulid()
     await _insert_instrument(pool, instrument_a)
@@ -173,6 +176,19 @@ async def test_venue_listings_rejects_exact_duplicate_start_same_symbol(pool):
             venue_symbol=symbol,
             listed_at=t0,
             delisted_at=t0 + timedelta(days=2),
+        )
+
+    # 두 번째 검증: EXCLUDE 독립성 — 시작시각이 달라 UNIQUE는 못 잡고,
+    # 겹치는 구간만 EXCLUDE가 잡는 케이스(두 번째가 첫 번째에 포함).
+    # 이 케이스는 ExclusionViolationError만 허용해야 UNIQUE 제거 시 실패한다.
+    with pytest.raises(asyncpg.exceptions.ExclusionViolationError):
+        await _insert_listing(
+            pool,
+            instrument_id=instrument_a,
+            venue="BITGET",
+            venue_symbol=symbol,
+            listed_at=t0 + timedelta(hours=12),
+            delisted_at=t0 + timedelta(hours=24),
         )
 
 
