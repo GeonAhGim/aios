@@ -26,6 +26,7 @@ CASH_CLEARING에 부호까지 그대로 미러링) — 개별 사용자 잔액�
 그 합도 ≥0, 따라서 CASH_CLEARING(`allow_negative=False`, LC-6 시드)이
 이 경로만으로는 절대 음수로 거부되지 않는다.
 """
+
 from __future__ import annotations
 
 from datetime import datetime, timezone
@@ -49,7 +50,32 @@ from src.foundation.ledger.domain.chart_of_accounts import (
 )
 from src.foundation.ledger.domain.chart_of_accounts import user_account as ua
 
-_UNUSED_POOL = cast(asyncpg.Pool, None)  # 위 docstring 참조 — 실제로 참조되지 않는다.
+
+class PoolPlaceholderAccessedError(Exception):
+    """Raised when the "never touches `self._pool`" premise from the module
+    docstring breaks — one of the three adapters actually read an attribute
+    of `pool` (e.g. `.acquire`). `None` would only surface as an opaque
+    `AttributeError: 'NoneType' object has no attribute ...`; the sentinel
+    fails immediately with this explicit error instead."""
+
+
+class _UnusedPoolSentinel:
+    """Sentinel injected as `pool` into `PostgresJournalRepository`,
+    `PostgresBalanceRepository`, and `PostgresAuditEventRepository`.
+    Assignment (`self._pool = pool`) alone does not trigger it; it only
+    raises `PoolPlaceholderAccessedError` once an adapter actually reads
+    any attribute of `self._pool`."""
+
+    def __getattr__(self, name: str) -> None:
+        raise PoolPlaceholderAccessedError(
+            f"legacy_wallet_bridge: pool.{name} accessed — this bridge injects "
+            "a placeholder on the premise that the downstream adapter never "
+            "uses pool (see module docstring). If that premise broke, inject "
+            "a real pool instead."
+        )
+
+
+_UNUSED_POOL = cast(asyncpg.Pool, _UnusedPoolSentinel())
 _journal = PostgresJournalRepository(_UNUSED_POOL)
 _balances = PostgresBalanceRepository(_UNUSED_POOL)
 _audit = PostgresAuditEventRepository(_UNUSED_POOL)
@@ -81,13 +107,17 @@ async def _reconcile_ledger_with_projection(
     await conn.execute(
         "INSERT INTO ledger_account (account_code, account_type, currency, allow_negative) "
         "VALUES ($1, $2, $3, $4) ON CONFLICT (account_code) DO NOTHING",
-        code, account_type(code).value, currency.value, negative_ok,
+        code,
+        account_type(code).value,
+        currency.value,
+        negative_ok,
     )
     await conn.execute(
         "INSERT INTO ledger_balance (account_id, allow_negative) "
         "SELECT account_id, $2 FROM ledger_account WHERE account_code = $1 "
         "ON CONFLICT (account_id) DO NOTHING",
-        code, negative_ok,
+        code,
+        negative_ok,
     )
     projected = await conn.fetchval(
         "SELECT balance FROM user_wallets WHERE user_id = $1", user_id
@@ -153,18 +183,24 @@ async def _post_and_project(
     row = await conn.fetchrow(
         "UPDATE user_wallets SET balance = balance + $2, updated_at = now() "
         "WHERE user_id = $1 RETURNING balance",
-        user_id, signed_amount,
+        user_id,
+        signed_amount,
     )
     if row is None:
         row = await conn.fetchrow(
             "INSERT INTO user_wallets (user_id, balance) VALUES ($1, $2) RETURNING balance",
-            user_id, signed_amount,
+            user_id,
+            signed_amount,
         )
     await conn.execute(
         "INSERT INTO wallet_transactions "
         "(user_id, tx_type, amount, balance_after, related_purchase_id) "
         "VALUES ($1, $2, $3, $4, $5)",
-        user_id, tx_type, signed_amount, row["balance"], related_purchase_id,
+        user_id,
+        tx_type,
+        signed_amount,
+        row["balance"],
+        related_purchase_id,
     )
     return cast(Decimal, row["balance"])
 
@@ -178,7 +214,11 @@ async def bridge_debit(
     related_purchase_id: int | None = None,
 ) -> Decimal:
     return await _post_and_project(
-        conn, user_id, amount, tx_type, related_purchase_id,
+        conn,
+        user_id,
+        amount,
+        tx_type,
+        related_purchase_id,
         debit_account=ua(user_id, UserSub.AVAILABLE),
         credit_account=PLATFORM_CASH_CLEARING,
         signed_amount=-amount,
@@ -194,7 +234,11 @@ async def bridge_credit(
     related_purchase_id: int | None = None,
 ) -> Decimal:
     return await _post_and_project(
-        conn, user_id, amount, tx_type, related_purchase_id,
+        conn,
+        user_id,
+        amount,
+        tx_type,
+        related_purchase_id,
         debit_account=PLATFORM_CASH_CLEARING,
         credit_account=ua(user_id, UserSub.AVAILABLE),
         signed_amount=amount,
