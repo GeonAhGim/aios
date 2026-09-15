@@ -7,6 +7,7 @@ DoD: "재빌드 drift ∅" — 정상 스냅샷은 dry-run이든 아니든 drift
 절대 건드리지 않는다(WORM) — 아래 테스트는 재빌드 전후로 저널 행 수가
 그대로임을 확인해 이를 검증한다.
 """
+
 from __future__ import annotations
 
 from datetime import datetime, timezone
@@ -49,7 +50,8 @@ def _clock() -> datetime:
 
 def _key(tenant_id: UUID) -> str:
     return str(
-        PositionKey(portfolio_id=default_portfolio_id(tenant_id),
+        PositionKey(
+            portfolio_id=default_portfolio_id(tenant_id),
             venue="TESTVENUE",
             instrument_id=f"INST{uuid4().hex[:8]}",
             strategy_id="default",
@@ -145,18 +147,37 @@ async def test_healthy_snapshot_has_no_drift(pool, ports):
     tenant_id, account_id, position_key = await _open(pool)
     order_id = uuid4()
     await _fill(
-        pool, ports, tenant_id=tenant_id, account_id=account_id, position_key=position_key,
-        side=OrderSide.BUY, quantity=Decimal("10"), price=Decimal("100"),
-        fill_seq=1, order_id=order_id,
+        pool,
+        ports,
+        tenant_id=tenant_id,
+        account_id=account_id,
+        position_key=position_key,
+        side=OrderSide.BUY,
+        quantity=Decimal("10"),
+        price=Decimal("100"),
+        fill_seq=1,
+        order_id=order_id,
     )
     await _fill(
-        pool, ports, tenant_id=tenant_id, account_id=account_id, position_key=position_key,
-        side=OrderSide.SELL, quantity=Decimal("4"), price=Decimal("120"),
-        fill_seq=2, order_id=order_id,
+        pool,
+        ports,
+        tenant_id=tenant_id,
+        account_id=account_id,
+        position_key=position_key,
+        side=OrderSide.SELL,
+        quantity=Decimal("4"),
+        price=Decimal("120"),
+        fill_seq=2,
+        order_id=order_id,
     )
     await _funding(
-        pool, ports, tenant_id=tenant_id, account_id=account_id, position_key=position_key,
-        amount=Decimal("-2"), funding_id=str(uuid4()),
+        pool,
+        ports,
+        tenant_id=tenant_id,
+        account_id=account_id,
+        position_key=position_key,
+        amount=Decimal("-2"),
+        funding_id=str(uuid4()),
     )
 
     report = await rebuild_snapshot(
@@ -179,14 +200,25 @@ async def test_dry_run_reports_drift_without_writing(pool, ports):
     tenant_id, account_id, position_key = await _open(pool)
     order_id = uuid4()
     await _fill(
-        pool, ports, tenant_id=tenant_id, account_id=account_id, position_key=position_key,
-        side=OrderSide.BUY, quantity=Decimal("10"), price=Decimal("100"),
-        fill_seq=1, order_id=order_id,
+        pool,
+        ports,
+        tenant_id=tenant_id,
+        account_id=account_id,
+        position_key=position_key,
+        side=OrderSide.BUY,
+        quantity=Decimal("10"),
+        price=Decimal("100"),
+        fill_seq=1,
+        order_id=order_id,
     )
 
     await force_row_replace(
-        pool, table="pos_snapshot", id_column="position_key", id_value=position_key,
-        quantity=Decimal("999"), realized_pnl_base=Decimal("42"),
+        pool,
+        table="pos_snapshot",
+        id_column="position_key",
+        id_value=position_key,
+        quantity=Decimal("999"),
+        realized_pnl_base=Decimal("42"),
     )
 
     report = await rebuild_snapshot(
@@ -217,14 +249,28 @@ async def test_apply_fixes_drift_without_touching_journal(pool, ports):
     tenant_id, account_id, position_key = await _open(pool)
     order_id = uuid4()
     await _fill(
-        pool, ports, tenant_id=tenant_id, account_id=account_id, position_key=position_key,
-        side=OrderSide.BUY, quantity=Decimal("10"), price=Decimal("100"),
-        fill_seq=1, order_id=order_id,
+        pool,
+        ports,
+        tenant_id=tenant_id,
+        account_id=account_id,
+        position_key=position_key,
+        side=OrderSide.BUY,
+        quantity=Decimal("10"),
+        price=Decimal("100"),
+        fill_seq=1,
+        order_id=order_id,
     )
     await _fill(
-        pool, ports, tenant_id=tenant_id, account_id=account_id, position_key=position_key,
-        side=OrderSide.SELL, quantity=Decimal("4"), price=Decimal("120"),
-        fill_seq=2, order_id=order_id,
+        pool,
+        ports,
+        tenant_id=tenant_id,
+        account_id=account_id,
+        position_key=position_key,
+        side=OrderSide.SELL,
+        quantity=Decimal("4"),
+        price=Decimal("120"),
+        fill_seq=2,
+        order_id=order_id,
     )
 
     async with pool.acquire() as conn:
@@ -232,8 +278,12 @@ async def test_apply_fixes_drift_without_touching_journal(pool, ports):
             "SELECT count(*) FROM pos_journal WHERE position_key = $1", position_key
         )
     await force_row_replace(
-        pool, table="pos_snapshot", id_column="position_key", id_value=position_key,
-        quantity=Decimal("0"), realized_pnl_base=Decimal("0"),
+        pool,
+        table="pos_snapshot",
+        id_column="position_key",
+        id_value=position_key,
+        quantity=Decimal("0"),
+        realized_pnl_base=Decimal("0"),
     )
 
     report = await rebuild_snapshot(
@@ -272,9 +322,16 @@ async def test_apply_fixes_drift_without_touching_journal(pool, ports):
 async def test_apply_with_no_drift_is_noop(pool, ports):
     tenant_id, account_id, position_key = await _open(pool)
     await _fill(
-        pool, ports, tenant_id=tenant_id, account_id=account_id, position_key=position_key,
-        side=OrderSide.BUY, quantity=Decimal("10"), price=Decimal("100"),
-        fill_seq=1, order_id=uuid4(),
+        pool,
+        ports,
+        tenant_id=tenant_id,
+        account_id=account_id,
+        position_key=position_key,
+        side=OrderSide.BUY,
+        quantity=Decimal("10"),
+        price=Decimal("100"),
+        fill_seq=1,
+        order_id=uuid4(),
     )
 
     async with pool.acquire() as conn:
@@ -301,3 +358,188 @@ async def test_apply_with_no_drift_is_noop(pool, ports):
             "SELECT updated_at FROM pos_snapshot WHERE position_key = $1", position_key
         )
     assert before["updated_at"] == after["updated_at"]
+
+
+class _QueryCountingConnectionCtx:
+    """`pool.acquire()`의 async 컨텍스트 프록시 -- 내부 connection에 query
+    logger를 달아 rebuild_snapshot()이 자체적으로 여는 왕복 수를 센다
+    (`test_perf_journal_append.py`/`test_executor.py` ce2ce8ce와 동일 기법,
+    단 rebuild_snapshot은 record_fill_in_position_ledger처럼 connection을
+    노출하지 않고 자체 pool.acquire()를 여는 운영 도구라 pool 자체를 얇게
+    감싼다)."""
+
+    def __init__(self, inner_ctx: object, sink: list[str]) -> None:
+        self._inner_ctx = inner_ctx
+        self._sink = sink
+        self._conn = None
+        self._log = None
+
+    async def __aenter__(self):
+        self._conn = await self._inner_ctx.__aenter__()
+        self._log = lambda record: self._sink.append(getattr(record, "query", ""))
+        self._conn.add_query_logger(self._log)
+        return self._conn
+
+    async def __aexit__(self, exc_type, exc, tb):
+        if self._conn is not None and self._log is not None:
+            self._conn.remove_query_logger(self._log)
+        return await self._inner_ctx.__aexit__(exc_type, exc, tb)
+
+
+class _QueryCountingPool:
+    """rebuild_snapshot(pool, ...)가 유일하게 쓰는 `pool.acquire()`만 감싼다."""
+
+    def __init__(self, pool) -> None:
+        self._pool = pool
+        self.queries: list[str] = []
+
+    def acquire(self) -> _QueryCountingConnectionCtx:
+        return _QueryCountingConnectionCtx(self._pool.acquire(), self.queries)
+
+
+_MAX_REBUILD_ROUND_TRIPS = 8
+_MAX_REBUILD_LATENCY_MS = 2000.0
+
+
+@pytest.mark.perf
+async def test_rebuild_snapshot_round_trip_and_latency_guard(pool, ports):
+    """수치 성능 단언(DEEPEN task-2958) — DEPTH 감사(task-2723,
+    docs/audit/DEPTH_LA_LB_LC.md #452)가 원 리프(2c9bf78)에 이 축 증빙이
+    전무하다고 판정했다. task-2959/2962/2970/2974/2977과 같은 결정을
+    따른다: 공유 CI 환경의 절대 지연은 이 파일이 통제할 수 없는 변동성을
+    낳으므로, 구조 회귀 가드로 rebuild_snapshot() 1회(drift 존재 + 실제
+    반영)의 순차 DB 왕복 수 상한(lock + get + list_for + upsert(쿼리 4건)
+    + 쿼리 로거가 트랜잭션 경계(BEGIN/COMMIT)도 왕복으로 잡는다는 점까지
+    합쳐 실측 6회, 여유 2 -> 8)을 걸고, 지연은 "무한정 걸리지 않는다"는
+    느슨한 sanity 상한만 건다.
+    """
+    import time
+
+    tenant_id, account_id, position_key = await _open(pool)
+    order_id = uuid4()
+    await _fill(
+        pool,
+        ports,
+        tenant_id=tenant_id,
+        account_id=account_id,
+        position_key=position_key,
+        side=OrderSide.BUY,
+        quantity=Decimal("10"),
+        price=Decimal("100"),
+        fill_seq=1,
+        order_id=order_id,
+    )
+    await force_row_replace(
+        pool,
+        table="pos_snapshot",
+        id_column="position_key",
+        id_value=position_key,
+        quantity=Decimal("0"),
+    )
+
+    counting_pool = _QueryCountingPool(pool)
+    started = time.perf_counter()
+    report = await rebuild_snapshot(
+        position_key,
+        tenant_id=tenant_id,
+        asset_class=AssetClass.CRYPTO,
+        journal=ports.journal,
+        snapshots=ports.snapshots,
+        pool=counting_pool,
+        clock=_clock,
+        dry_run=False,
+    )
+    elapsed_ms = (time.perf_counter() - started) * 1000
+    round_trip_count = len(counting_pool.queries)
+
+    print(
+        f"\nrebuild_snapshot latency={elapsed_ms:.3f}ms "
+        f"(sanity max={_MAX_REBUILD_LATENCY_MS}ms); "
+        f"sequential DB round trips={round_trip_count} (max={_MAX_REBUILD_ROUND_TRIPS})"
+    )
+    assert report.applied is True
+    assert round_trip_count <= _MAX_REBUILD_ROUND_TRIPS, (
+        f"rebuild_snapshot 순차 DB 왕복 수({round_trip_count})가 상한"
+        f"({_MAX_REBUILD_ROUND_TRIPS})을 초과했습니다 — 왕복 수 회귀입니다."
+    )
+    assert elapsed_ms < _MAX_REBUILD_LATENCY_MS, (
+        f"rebuild_snapshot 지연({elapsed_ms:.1f}ms)이 sanity 상한"
+        f"({_MAX_REBUILD_LATENCY_MS}ms)을 초과했습니다."
+    )
+
+
+async def test_bypassing_position_lock_causes_concurrent_rebuild_conflict_gate_red(
+    pool, ports, monkeypatch
+):
+    """게이트 적색 재현(DEEPEN task-2958) + 동시성 증명 — 모듈독스트링이
+    전제하는 `_acquire_position_lock`(pg_advisory_xact_lock, record_fill과
+    같은 네임스페이스)이 없다면, rebuild_snapshot이 스냅샷을 읽은 *직후*
+    다른 트랜잭션(record_fill)이 같은 포지션에 새 체결을 커밋해도 이
+    재빌드는 그 사실을 모른 채 stale한 snapshot 기준으로 drift를 계산하고
+    upsert를 시도한다 — 105번 표준(조건부 UPDATE, expected_seq)이 실제로
+    0행을 반환해 `ConcurrencyConflictError`로 적색이 됨을 재현한다(락이
+    있었다면 이 두 번째 커밋은 재빌드의 advisory lock이 풀릴 때까지
+    대기했을 것이므로 이 경합 자체가 없다 — I-10 "우회불가"의 증거).
+    `pos_journal`은 rebuild_snapshot이 절대 쓰지 않으므로(WORM), 실패한
+    재빌드 시도는 경합에서 이긴 record_fill의 엔트리 1건 외에 아무 흔적도
+    남기지 않는다 -- 스냅샷도 그 record_fill이 이미 올바르게 반영한 값
+    그대로이지 rebuild가 되돌리거나 손대지 않는다."""
+    import src.foundation.positions.application.rebuild_snapshot as rebuild_snapshot_module
+    from src.core.db.conditional_write import ConcurrencyConflictError
+
+    tenant_id, account_id, position_key = await _open(pool)
+
+    async def _noop_lock(conn, key):
+        return None
+
+    monkeypatch.setattr(rebuild_snapshot_module, "_acquire_position_lock", _noop_lock)
+
+    real_get = PostgresSnapshotRepository.get
+    raced = False
+
+    async def _get_then_race(self, conn, tenant_id_, position_key_):
+        nonlocal raced
+        snapshot = await real_get(self, conn, tenant_id_, position_key_)
+        if not raced:
+            raced = True
+            await _fill(
+                pool,
+                ports,
+                tenant_id=tenant_id,
+                account_id=account_id,
+                position_key=position_key,
+                side=OrderSide.BUY,
+                quantity=Decimal("1"),
+                price=Decimal("100"),
+                fill_seq=1,
+                order_id=uuid4(),
+            )
+        return snapshot
+
+    monkeypatch.setattr(PostgresSnapshotRepository, "get", _get_then_race)
+
+    with pytest.raises(ConcurrencyConflictError):
+        await rebuild_snapshot(
+            position_key,
+            tenant_id=tenant_id,
+            asset_class=AssetClass.CRYPTO,
+            journal=ports.journal,
+            snapshots=ports.snapshots,
+            pool=pool,
+            clock=_clock,
+            dry_run=False,
+        )
+
+    async with pool.acquire() as conn:
+        journal_count = await conn.fetchval(
+            "SELECT count(*) FROM pos_journal WHERE position_key = $1", position_key
+        )
+        snapshot_row = await conn.fetchrow(
+            "SELECT quantity, last_journal_seq FROM pos_snapshot WHERE position_key = $1",
+            position_key,
+        )
+    assert journal_count == 1, "rebuild_snapshot은 WORM 저널에 절대 쓰지 않는다"
+    assert snapshot_row["quantity"] == Decimal("1"), (
+        "경합에서 이긴 record_fill이 반영한 값이 실패한 재빌드로 손상되면 안 된다"
+    )
+    assert snapshot_row["last_journal_seq"] == 1
