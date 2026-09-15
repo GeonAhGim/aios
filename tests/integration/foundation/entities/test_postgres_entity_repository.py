@@ -8,7 +8,15 @@ DEPTH 감사(task-2724, docs/audit/DEPTH_FA.md)가 이 리프의 D3 하한 미�
 지적한 공백(성능단언 없음, D3 증거(적대적/리플레이/다중워커) 없음)을
 `test_get_legal_entity_p95_latency_stays_within_normalized_ceiling`과
 `test_20_concurrent_close_legal_entity_requests_leave_exactly_one_winner`로
-메운다(task-3005)."""
+메운다(task-3005).
+
+task-2431(FA-2 TOCTOU 원자화 + list_*_by_* tenant_id 필수화, 실질 수정
+커밋 7bb3ac62 — task.json commit 필드가 뒤이은 순수 리팩터 커밋 6f9dd72d를
+가리키던 레코드 불일치를 task-3030이 정정)에 대해서도 동일하게 지적된
+"수치 성능 단언 없음"을
+`test_list_funds_by_entity_p95_latency_stays_within_normalized_ceiling`과
+`test_close_legal_entity_not_exists_guard_throughput_stays_within_budget`로
+메운다(task-3030)."""
 
 from __future__ import annotations
 
@@ -25,7 +33,7 @@ from src.core.db.conditional_write import ConcurrencyConflictError
 from src.data.models.base import Currency
 from src.foundation.entities.contracts.v1 import Fund, LegalEntity, Portfolio, SubAccount
 from src.foundation.entities.domain.hierarchy import HierarchyViolationError
-from tests.integration.conftest import create_test_user
+from tests.integration.conftest import create_test_tenant, create_test_user
 from tests.integration.foundation.entities.conftest import build_hierarchy, now_utc
 
 
@@ -401,3 +409,79 @@ async def test_concurrent_close_legal_entity_requests_leave_exactly_one_winner(p
     reread = await repo.get_legal_entity(seeded.tenant_id, seeded.legal_entity.entity_id)
     assert reread is not None
     assert reread.closed_at is not None
+
+
+async def test_list_funds_by_entity_p95_latency_stays_within_normalized_ceiling(pool, repo):
+    """수치 성능 단언 — DEPTH 재감사(task-2724)가 task-2431의 실질 수정 커밋
+    (7bb3ac62, task.json commit 필드 레코드 불일치 정정 — task-3030)에 지적한
+    공백을 메운다. list_funds_by_entity는 그 커밋에서 tenant_id 필수 인자 +
+    legal_entity JOIN(교차 테넌트 필터, LA-22/PLT-27 선례)을 새로 얻었으므로
+    이 JOIN이 늘어난 핫패스에 회귀 상한을 건다. 절대 ms 임계 대신 baseline
+    조회 1건 대비 정규화한 상한을 쓰는 이유는
+    test_get_legal_entity_p95_latency_stays_within_normalized_ceiling(task-3005)과
+    동일 — 공유 TEST_DATABASE_URL의 절대 지연 변동성."""
+    seeded = await build_hierarchy(pool, repo)
+
+    baseline_start = time.perf_counter()
+    await repo.list_funds_by_entity(seeded.tenant_id, seeded.legal_entity.entity_id)
+    baseline_elapsed = time.perf_counter() - baseline_start
+
+    samples: list[float] = []
+    for _ in range(60):
+        start = time.perf_counter()
+        await repo.list_funds_by_entity(seeded.tenant_id, seeded.legal_entity.entity_id)
+        samples.append(time.perf_counter() - start)
+
+    samples.sort()
+    p95 = samples[math.ceil(0.95 * len(samples)) - 1]
+
+    ceiling = baseline_elapsed * 5 + 0.05
+    assert p95 <= ceiling, (
+        f"list_funds_by_entity p95 지연 {p95:.4f}s가 정규화 상한 {ceiling:.4f}s"
+        f"(baseline {baseline_elapsed:.4f}s)를 초과했습니다 — tenant_id JOIN 핫패스 회귀 의심"
+    )
+
+
+async def test_close_legal_entity_not_exists_guard_throughput_stays_within_budget(pool, repo):
+    """수치 성능 단언 — close_legal_entity의 조건부 UPDATE에 붙은 NOT
+    EXISTS(활성 Fund) 서브쿼리(7bb3ac62, FA-2 TOCTOU 원자화)가 만드는 추가
+    비용에 명시적 예산을 건다. 자식 없는 LegalEntity N개를 만들어 NOT
+    EXISTS가 매번 즉시 거짓으로 걸러지는 경로를 반복 실측한다
+    (test_submit_order_entity_context_ownership.py FA-5 throughput 관례
+    재사용, 새 perf 패턴 발명 없음)."""
+    n = 20
+    budget_sec = 10.0
+    min_ops_per_sec = 2.0
+    tenant_id = await create_test_tenant(pool, bootstrap_default_hierarchy_rows=False)
+
+    entities: list[LegalEntity] = []
+    for i in range(n):
+        entity = await repo.create_legal_entity(
+            LegalEntity(
+                entity_id=uuid4(),
+                tenant_id=tenant_id,
+                name=f"Perf Entity {i}",
+                jurisdiction="KR",
+                region_tag="kr-seoul",
+            )
+        )
+        entities.append(entity)
+
+    start = time.perf_counter()
+    for entity in entities:
+        closed = await repo.close_legal_entity(tenant_id, entity.entity_id, closed_at=now_utc())
+        assert closed.closed_at is not None
+    elapsed = time.perf_counter() - start
+    ops_per_sec = n / elapsed
+
+    print(
+        f"[task-2431/3030 close_legal_entity NOT EXISTS guard] {n} closes {elapsed:.3f}s "
+        f"({ops_per_sec:.1f} ops/s, budget<{budget_sec}s, min>{min_ops_per_sec} ops/s)"
+    )
+    assert elapsed < budget_sec, (
+        f"{n}회 close_legal_entity가 예산({budget_sec}s)을 넘었습니다({elapsed:.3f}s)."
+    )
+    assert ops_per_sec > min_ops_per_sec, (
+        f"close_legal_entity 처리량이 최소값({min_ops_per_sec} ops/s)에 "
+        f"못 미칩니다({ops_per_sec:.1f})."
+    )
