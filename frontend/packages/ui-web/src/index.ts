@@ -25,3 +25,18 @@ export {
   type UseThemeResult,
 } from "./theme";
 export { ThemeToggle } from "./ThemeToggle";
+export {
+  getFocusableElements,
+  computeFocusTrapTarget,
+  useDialogFocusTrap,
+  type FocusQueryable,
+  type TrapNavigationEvent,
+  type UseDialogFocusTrapOptions,
+} from "./a11y/focus";
+export {
+  relativeLuminance,
+  contrastRatio,
+  meetsWcagAA,
+  WCAG_AA_TEXT,
+  WCAG_AA_LARGE_TEXT,
+} from "./a11y/contrast";

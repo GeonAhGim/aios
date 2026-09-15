@@ -84,4 +84,44 @@ describe("RiskWarningModal", () => {
 
     expect(screen.getByRole("button", { name: "취소" })).not.toBeDisabled();
   });
+
+  // UX-4 task-2688: role="dialog"/aria-labelledby + 포커스 트랩 baseline 증빙
+  // (AlertFromChart.test.tsx의 동형 테스트와 같은 계약).
+  it("dialog 역할과 제목에 연결된 aria-labelledby를 갖는다", () => {
+    render(<RiskWarningModal reason={REASON} onConsent={vi.fn()} onCancel={vi.fn()} />);
+
+    const dialog = screen.getByRole("dialog");
+    expect(dialog).toHaveAttribute("aria-modal", "true");
+    const labelledBy = dialog.getAttribute("aria-labelledby");
+    expect(labelledBy).toBeTruthy();
+    expect(document.getElementById(labelledBy!)).toHaveTextContent("위험등급 불일치 경고");
+  });
+
+  it("Esc를 누르면 onCancel이 호출된다(onConsent는 호출되지 않는다)", () => {
+    const onConsent = vi.fn();
+    const onCancel = vi.fn();
+    render(<RiskWarningModal reason={REASON} onConsent={onConsent} onCancel={onCancel} />);
+
+    fireEvent.keyDown(document, { key: "Escape" });
+
+    expect(onCancel).toHaveBeenCalledTimes(1);
+    expect(onConsent).not.toHaveBeenCalled();
+  });
+
+  it("[negative] Tab 포커스는 다이얼로그 안에서만 순환한다(포커스 트랩)", () => {
+    render(<RiskWarningModal reason={REASON} onConsent={vi.fn()} onCancel={vi.fn()} />);
+
+    const dialog = screen.getByRole("dialog");
+    const focusable = dialog.querySelectorAll<HTMLElement>("button:not(:disabled)");
+    const first = focusable[0]!;
+    const last = focusable[focusable.length - 1]!;
+
+    last.focus();
+    fireEvent.keyDown(document, { key: "Tab" });
+    expect(document.activeElement).toBe(first);
+
+    first.focus();
+    fireEvent.keyDown(document, { key: "Tab", shiftKey: true });
+    expect(document.activeElement).toBe(last);
+  });
 });

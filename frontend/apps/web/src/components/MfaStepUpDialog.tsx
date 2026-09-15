@@ -1,6 +1,6 @@
 import { configureMfaStepUpHandler } from "@aios/api-client";
 import { useVerifyMfa } from "@aios/shared-hooks";
-import { Alert, Button, Input } from "@aios/ui-web";
+import { Alert, Button, Input, useDialogFocusTrap } from "@aios/ui-web";
 import { useEffect, useRef, useState, type FormEvent } from "react";
 
 // spec §3.3/§3.4: http.ts가 403 AUTH_MFA_REQUIRED를 받으면 mfaStepUp.ts의
@@ -12,12 +12,15 @@ import { useEffect, useRef, useState, type FormEvent } from "react";
 //
 // 새 엔드포인트를 만들지 않고 기존 POST /auth/mfa/verify(useVerifyMfa →
 // authClient.verifyMfa)만 호출한다.
+const TITLE_ID = "mfa-step-up-dialog-title";
+
 export function MfaStepUpDialog() {
   const verifyMfa = useVerifyMfa();
   const [isOpen, setIsOpen] = useState(false);
   const [totpCode, setTotpCode] = useState("");
   const [error, setError] = useState<string | null>(null);
   const resolveRef = useRef<((ok: boolean) => void) | null>(null);
+  const dialogRef = useRef<HTMLDivElement>(null);
 
   // 성공·실패·언마운트 모든 경로에서 TOTP 입력값을 즉시 비운다(decision 4번).
   function finish(ok: boolean) {
@@ -58,12 +61,24 @@ export function MfaStepUpDialog() {
     }
   }
 
+  // UX-4 task-2688: 포커스 트랩 + Esc 닫기(취소와 동일) + 닫힌 뒤 트리거로
+  // 포커스 복귀. AlertFromChart.tsx(CH-9)와 같은 공용 훅.
+  useDialogFocusTrap({ isOpen, onClose: () => finish(false), containerRef: dialogRef });
+
   if (!isOpen) return null;
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 px-4">
-      <div className="w-full max-w-sm space-y-4 rounded-xl border border-border bg-surface p-6">
-        <h2 className="text-lg font-semibold text-fg">추가 인증이 필요합니다</h2>
+      <div
+        ref={dialogRef}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={TITLE_ID}
+        className="w-full max-w-sm space-y-4 rounded-xl border border-border bg-surface p-6"
+      >
+        <h2 id={TITLE_ID} className="text-lg font-semibold text-fg">
+          추가 인증이 필요합니다
+        </h2>
         <p className="text-sm text-fg-secondary">
           민감한 작업을 계속하려면 인증 앱의 6자리 코드를 입력해주세요.
         </p>

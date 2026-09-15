@@ -17,6 +17,8 @@
     "test:i18n-literals": "node --test scripts/check_i18n_literals.test.mjs",
     "check:hardcoded-colors": "node scripts/check_hardcoded_colors.mjs",
     "test:hardcoded-colors": "node --test scripts/check_hardcoded_colors.test.mjs",
+    "check:a11y-baseline": "node scripts/check_a11y_baseline.mjs",
+    "test:a11y-baseline": "node --test scripts/check_a11y_baseline.test.mjs",
     "check:lockfile-workspaces": "node scripts/check_lockfile_workspaces.mjs",
     "test:lockfile-workspaces": "node --test scripts/check_lockfile_workspaces.test.mjs",
     "bench:density": "npm run bench:density --workspace=packages/chart-engine",

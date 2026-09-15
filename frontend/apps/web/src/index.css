@@ -54,9 +54,13 @@
 
   --color-fg: #241f14;
   --color-fg-secondary: #5c5238;
-  --color-fg-muted: #8a7e5f;
+  /* UX-4 task-2688: 이전 #8a7e5f는 배경 대비 3.78:1로 WCAG AA 본문 기준
+     (4.5:1)에 못 미쳤다 -- 같은 색조를 유지한 채 어둡게 조정. */
+  --color-fg-muted: #7c7155;
 
-  --color-accent: #9a7209;
+  /* UX-4 task-2688: 이전 #9a7209는 --color-bg 대비 4.13:1로 텍스트로 쓰일 때
+     (text-accent, 12곳) WCAG AA 본문 기준(4.5:1)에 못 미쳤다 -- 미세 조정. */
+  --color-accent: #926c09;
   --color-accent-hover: #7e5d06;
   --color-accent-muted: #f3e6bc;
 

@@ -1,0 +1,12 @@
+{
+  "files": {
+    "apps/web/src/routes/ai/AiProviderSettings.tsx": 1,
+    "apps/web/src/routes/ai/AiTokens.tsx": 1,
+    "apps/web/src/routes/onboarding/RiskAssessmentPage.tsx": 2,
+    "apps/web/src/routes/reviews/WriteReviewPage.tsx": 1,
+    "apps/web/src/routes/settings/ApprovalSettingsPage.tsx": 2,
+    "apps/web/src/routes/settings/ConnectionsPage.tsx": 1,
+    "apps/web/src/routes/settings/NotificationSettingsPage.tsx": 1,
+    "apps/web/src/routes/strategy-builder/StrategyBuilderPage.tsx": 1
+  }
+}

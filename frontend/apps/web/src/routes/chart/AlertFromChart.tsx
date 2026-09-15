@@ -8,7 +8,7 @@ import {
   type Timeframe,
   type Venue,
 } from "@aios/shared-types";
-import { Alert, Button, Field, Input, Select } from "@aios/ui-web";
+import { Alert, Button, Field, Input, Select, useDialogFocusTrap } from "@aios/ui-web";
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { Link } from "react-router-dom";
 import { BadRequestNotice } from "../../components/BadRequestNotice";
@@ -66,14 +66,6 @@ export interface AlertFromChartProps {
 const TITLE_ID = "alert-from-chart-title";
 const INDICATOR_REASON_ID = "alert-from-chart-indicator-reason";
 
-function focusableElements(container: HTMLElement): HTMLElement[] {
-  return Array.from(
-    container.querySelectorAll<HTMLElement>(
-      'button:not(:disabled), [href], input:not(:disabled), select:not(:disabled), textarea:not(:disabled), [tabindex]:not([tabindex="-1"])',
-    ),
-  );
-}
-
 export function AlertFromChart({
   isOpen,
   onClose,
@@ -102,39 +94,9 @@ export function AlertFromChart({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isOpen]);
 
-  // 포커스 트랩 + Esc 닫기 + 닫힌 뒤 트리거로 포커스 복귀.
-  useEffect(() => {
-    if (!isOpen) return undefined;
-    const previouslyFocused = document.activeElement as HTMLElement | null;
-    const dialog = dialogRef.current;
-    focusableElements(dialog ?? document.body)[0]?.focus();
-
-    function onKeyDown(event: KeyboardEvent) {
-      if (event.key === "Escape") {
-        event.preventDefault();
-        onClose();
-        return;
-      }
-      if (event.key !== "Tab" || !dialog) return;
-      const items = focusableElements(dialog);
-      if (items.length === 0) return;
-      const first = items[0]!;
-      const last = items[items.length - 1]!;
-      if (event.shiftKey && document.activeElement === first) {
-        event.preventDefault();
-        last.focus();
-      } else if (!event.shiftKey && document.activeElement === last) {
-        event.preventDefault();
-        first.focus();
-      }
-    }
-
-    document.addEventListener("keydown", onKeyDown);
-    return () => {
-      document.removeEventListener("keydown", onKeyDown);
-      previouslyFocused?.focus();
-    };
-  }, [isOpen, onClose]);
+  // 포커스 트랩 + Esc 닫기 + 닫힌 뒤 트리거로 포커스 복귀 (UX-4 task-2688:
+  // @aios/ui-web의 공용 훅으로 추출, 동작은 이전과 동일).
+  useDialogFocusTrap({ isOpen, onClose, containerRef: dialogRef });
 
   if (!isOpen) return null;
 
