@@ -3,9 +3,13 @@
 Spec: docs/specs/L4_research_data_and_market_ecosystem_v1.0.md §9 RD-3
 DoD (c)(d).
 """
+
 from __future__ import annotations
 
+import random
+import time
 from datetime import datetime, timedelta, timezone
+from typing import Any
 from uuid import UUID, uuid4
 
 import pytest
@@ -123,3 +127,79 @@ def test_out_of_order_known_at_rejected_via_fa9_delegation() -> None:
     )
     with pytest.raises(PointInTimeViolationError):
         link_revision_chain([origin, earlier_rev])
+
+
+# ---- DEEPEN(task-2907) — DEPTH_DC_RD.md D2 부족분: 실패주입/성능단언/게이트적색 ----
+
+
+def test_link_revision_chain_rejects_non_research_item_element() -> None:
+    """실패 주입 — `Sequence[ResearchItem]` 타입힌트는 런타임을 강제하지
+    않는다. 역직렬화 경로(예: 캐시·큐 재생)에서 dict가 섞여 들어와도 조용히
+    건너뛰거나 잘못된 순서를 내지 않고 즉시 크래시해야 한다(fail-closed)."""
+    origin = _item(item_id=uuid4(), revision_of=None, known_at=_T0)
+    garbage: Any = {"item_id": uuid4(), "revision_of": origin.item_id, "known_at": _T0}
+    with pytest.raises(AttributeError):
+        link_revision_chain([origin, garbage])
+
+
+@pytest.mark.perf
+def test_link_revision_chain_meets_latency_budget_for_long_chain() -> None:
+    """성능 단언 — 단선 체인 워크(FA-9 위임 known_at 비교 포함)는
+    O(n)이어야 한다 — 회귀가 있다면(예: 매 단계마다 이미 방문한 전체
+    항목을 다시 스캔) O(n^2)로 퇴화한다."""
+    n = 5_000
+    items: list[ResearchItem] = []
+    prev_id: UUID | None = None
+    for i in range(n):
+        item_id = uuid4()
+        items.append(_item(item_id=item_id, revision_of=prev_id, known_at=_T0 + timedelta(days=i)))
+        prev_id = item_id
+    rng = random.Random(2907)
+    rng.shuffle(items)  # 입력 순서는 링크 구조와 무관해야 한다
+
+    budget_sec = 5.0  # 실측 로컬 <1s(5000개, FA-9 위임 비교 포함)
+    start_time = time.perf_counter()
+    ordered = link_revision_chain(items)
+    elapsed = time.perf_counter() - start_time
+
+    assert len(ordered) == n
+    print(f"[RD-3 revision] {n}-item chain linked in {elapsed:.3f}s (budget<{budget_sec}s)")
+    assert elapsed < budget_sec, (
+        f"link_revision_chain({n}개)가 예산({budget_sec}s)을 넘었습니다({elapsed:.3f}s) — "
+        "O(n) 워크가 O(n^2)로 퇴화했는지 확인하세요."
+    )
+
+
+def test_gate_red_if_branch_check_removed_existing_negative_would_flip() -> None:
+    """게이트 적색 재현 — RD-3(c) 분기 검출 줄이 실수로 삭제된 회귀를
+    흉내낸 대조 구현을 구성해, 그 버전은 분기 입력을 예외 없이 "먼저
+    등록된 자식 하나만" 골라 조용히 절반을 누락한 체인을 반환함(즉 데이터
+    손실이 조용히 일어남)을 실측한다. 현재 구현은 `RevisionBranchError`로
+    즉시 거부한다 — 이 테스트가 실제로 위험한 회귀를 잡아낼 수 있다는
+    증거다."""
+    origin = _item(item_id=uuid4(), revision_of=None, known_at=_T0)
+    rev_a = _item(item_id=uuid4(), revision_of=origin.item_id, known_at=_T0 + timedelta(days=1))
+    rev_b = _item(item_id=uuid4(), revision_of=origin.item_id, known_at=_T0 + timedelta(days=1))
+    items = [origin, rev_a, rev_b]
+
+    def _regressed_without_branch_check(items: list[ResearchItem]) -> list[ResearchItem]:
+        by_id = {item.item_id: item for item in items}
+        successors: dict[UUID | None, list[UUID]] = {}
+        for item in items:
+            successors.setdefault(item.revision_of, []).append(item.item_id)
+        # (분기 개수 검사가 빠진 회귀 -- 여러 자식 중 첫 번째만 따라간다)
+        roots = successors.get(None, [])
+        current_id: UUID | None = roots[0]
+        ordered: list[ResearchItem] = []
+        while current_id is not None:
+            current = by_id[current_id]
+            ordered.append(current)
+            next_ids = successors.get(current_id, [])
+            current_id = next_ids[0] if next_ids else None
+        return ordered
+
+    regressed = _regressed_without_branch_check(items)
+    assert len(regressed) == 2  # rev_b가 조용히 누락됐다 -- 회귀가 실제로 위험함을 증명
+
+    with pytest.raises(RevisionBranchError):
+        link_revision_chain(items)
