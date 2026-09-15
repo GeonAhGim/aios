@@ -4,9 +4,11 @@ Spec: docs/specs/L4_market_data_positions_ledger_v1.0.md#§9 LB-5,
 `unit/positions/test_snapshot_builder.py` DoD("property: 임의 체결열(시드
 랜덤 200열)에서 fold(all) == reduce(apply_one); 재빌드 결정론").
 """
+
 from __future__ import annotations
 
 import random
+import time
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from functools import reduce
@@ -14,6 +16,7 @@ from uuid import UUID
 
 import pytest
 
+import src.foundation.positions.domain.snapshot_builder as snapshot_builder
 from src.data.models.base import AssetClass, Currency, Money
 from src.data.models.trading import OrderSide
 from src.foundation.positions.contracts.v1 import (
@@ -297,3 +300,46 @@ def test_apply_one_rejects_unsupported_entry_type() -> None:
 
     with pytest.raises(UnsupportedEntryTypeError):
         _fold([unsupported])
+
+
+# ---- DEEPEN task-2944: 실패 주입 + 수치 성능 단언 ------------------------------
+#
+# task-2723 DEPTH 감사(docs/audit/DEPTH_LA_LB_LC.md#374)에서 원 task-374(LB-5)가
+# failure-injection 없음(전부 순수함수 ValueError)/수치 성능 단언 없음/게이트
+# 적색 재현 없음으로 D1 판정됐다. negative(SequenceConflictError·오버셀·
+# 미지원 entry_type·price 누락)는 이미 충분하므로 새 기능 없이 세 증빙만
+# 채운다(entry_type-only 탐지 회귀는 test_journal_rules.py에 추가).
+
+
+def test_apply_one_propagates_cost_basis_selector_fault_without_swallowing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """실패 주입: LB-3 원가법 selector(`cost_basis_for`)가 결함으로 예외를
+    던지면 `apply_one`이 삼키지 않고 그대로 전파해야 한다(fail-closed) —
+    잘못된 원가법 계산 결과가 조용히 스냅샷에 섞여 들어가는 것보다 즉시
+    멈추는 편이 안전하다."""
+
+    def _boom(*_args: object, **_kwargs: object) -> None:
+        raise RuntimeError("cost_basis_for 결함 주입")
+
+    monkeypatch.setattr(snapshot_builder, "cost_basis_for", _boom)
+    entry = _fill_view(1, OrderSide.BUY, "1", "100")
+
+    with pytest.raises(RuntimeError, match="결함 주입"):
+        _fold([entry])
+
+
+def test_fold_completes_within_latency_budget_for_10000_entries() -> None:
+    """수치 성능 단언: 10,000개 저널 엔트리 fold가 1초 예산 안에 끝나야 한다
+    (실측 약 0.06초, ~16배 여유). `apply_one`은 매 FILL 스텝마다
+    `_seeded_cost_basis`로 로트 전체를 재구성한다(O(lots) per step) — 로트
+    수가 무한정 자라거나 fold 자체가 스텝마다 O(n)으로 퇴화하는 회귀가
+    생기면 이 경계가 깨진다."""
+    entries = _random_entries(seed=321, n=10_000)
+
+    start = time.perf_counter()
+    result = _fold(entries)
+    elapsed = time.perf_counter() - start
+
+    assert elapsed < 1.0, f"fold 지연 회귀: {elapsed:.4f}s for 10,000 entries"
+    assert result.last_journal_seq == 10_000
