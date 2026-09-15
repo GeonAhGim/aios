@@ -151,3 +151,48 @@ export function checkAbsoluteThresholds(current, calibMs, calibBaseMs = CALIB_BA
   }
   return { failures, normalized, calibRatio };
 }
+
+/**
+ * density_bench.mjs's own gate wiring (DEEPEN task-3109, DEPTH_CH task-2729
+ * audit of task-2097/aceeeca2): checkRatchet/checkAbsoluteThresholds were
+ * unit tested in isolation by task-3096, but the orchestration that ties
+ * them to a baseline file — first-run creation, which failure wins when
+ * both gates fire, and which metrics actually get persisted back to
+ * density-baseline.json on an improvement — lived only inside
+ * density_bench.mjs's `main()` and had zero direct coverage. Pulled out
+ * here (no fs/console/ts-loader side effects) so it can run as a pure
+ * function against fabricated current/baseline fixtures instead of the real
+ * 100k-candle bench, and so density_bench.mjs's `main()` can stay a thin
+ * I/O shell around it.
+ */
+export function decideBenchOutcome({ current, baseline, absoluteFailures, calibRatio, baselineMeta, baselinePath }) {
+  const logs = [];
+
+  if (baseline === null) {
+    logs.push({ level: "log", message: `[density-bench] BASELINE created: ${baselinePath}` });
+    if (absoluteFailures.length > 0) {
+      logs.push({ level: "error", message: "[density-bench] FAIL: CH-19e absolute threshold (host-load normalized):" });
+      for (const failure of absoluteFailures) logs.push({ level: "error", message: `  - ${failure}` });
+      return { exitCode: 1, logs, baselineWrite: { metrics: current, meta: baselineMeta } };
+    }
+    return { exitCode: 0, logs, baselineWrite: { metrics: current, meta: baselineMeta } };
+  }
+
+  const { failures, improved } = checkRatchet(current, baseline.metrics, calibRatio);
+  if (failures.length > 0) {
+    logs.push({ level: "error", message: "[density-bench] FAIL: regression >20% vs baseline:" });
+    for (const failure of failures) logs.push({ level: "error", message: `  - ${failure}` });
+    return { exitCode: 1, logs, baselineWrite: null };
+  }
+  if (absoluteFailures.length > 0) {
+    logs.push({ level: "error", message: "[density-bench] FAIL: CH-19e absolute threshold (host-load normalized):" });
+    for (const failure of absoluteFailures) logs.push({ level: "error", message: `  - ${failure}` });
+    return { exitCode: 1, logs, baselineWrite: null };
+  }
+  if (Object.keys(improved).length > 0) {
+    logs.push({ level: "log", message: `[density-bench] OK: baseline improved: ${JSON.stringify(improved)}` });
+    return { exitCode: 0, logs, baselineWrite: { metrics: { ...baseline.metrics, ...improved }, meta: baselineMeta } };
+  }
+  logs.push({ level: "log", message: "[density-bench] OK: within baseline tolerance" });
+  return { exitCode: 0, logs, baselineWrite: null };
+}

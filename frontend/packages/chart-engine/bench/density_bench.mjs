@@ -50,7 +50,7 @@ import {
   CALIB_BASE_MS,
   CH19_ABSOLUTE_TARGET_MS,
   checkAbsoluteThresholds,
-  checkRatchet,
+  decideBenchOutcome,
   loadBaseline,
   measureCalibMs,
   writeBaseline,
@@ -236,35 +236,12 @@ async function main() {
 
   const baselineMeta = { candleCount: CANDLE_COUNT, indicatorInstanceCount: INDICATOR_INSTANCE_COUNT };
   const baseline = loadBaseline(BASELINE_PATH);
-  if (baseline === null) {
-    writeBaseline(BASELINE_PATH, current, baselineMeta);
-    console.log(`[density-bench] BASELINE created: ${BASELINE_PATH}`);
-    if (absoluteFailures.length > 0) {
-      console.error("[density-bench] FAIL: CH-19e absolute threshold (host-load normalized):");
-      for (const failure of absoluteFailures) console.error(`  - ${failure}`);
-      return 1;
-    }
-    return 0;
-  }
-
-  const { failures, improved } = checkRatchet(current, baseline.metrics, calibRatio);
-  if (failures.length > 0) {
-    console.error("[density-bench] FAIL: regression >20% vs baseline:");
-    for (const failure of failures) console.error(`  - ${failure}`);
-    return 1;
-  }
-  if (absoluteFailures.length > 0) {
-    console.error("[density-bench] FAIL: CH-19e absolute threshold (host-load normalized):");
-    for (const failure of absoluteFailures) console.error(`  - ${failure}`);
-    return 1;
-  }
-  if (Object.keys(improved).length > 0) {
-    writeBaseline(BASELINE_PATH, { ...baseline.metrics, ...improved }, baselineMeta);
-    console.log(`[density-bench] OK: baseline improved: ${JSON.stringify(improved)}`);
-  } else {
-    console.log("[density-bench] OK: within baseline tolerance");
-  }
-  return 0;
+  const outcome = decideBenchOutcome({
+    current, baseline, absoluteFailures, calibRatio, baselineMeta, baselinePath: BASELINE_PATH,
+  });
+  for (const { level, message } of outcome.logs) console[level](message);
+  if (outcome.baselineWrite) writeBaseline(BASELINE_PATH, outcome.baselineWrite.metrics, outcome.baselineWrite.meta);
+  return outcome.exitCode;
 }
 
 main()
