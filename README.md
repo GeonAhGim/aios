@@ -26,7 +26,9 @@ CI `guards` job이 고정 커밋으로 checkout해 모든 변경을 검사한다
 
 ```bash
 docker compose -f docker-compose.dev.yml up -d
-python -m venv .venv && .venv/Scripts/pip install -e ".[test,dev]"
+python -m venv .venv
+.venv/Scripts/pip install -r requirements-lock.txt   # 잠금 -- 갱신 절차는 docs/DEPENDENCIES.md
+.venv/Scripts/pip install -e . --no-deps
 cp .env.example .env            # 값 채우기
 .venv/Scripts/alembic upgrade head
 .venv/Scripts/uvicorn src.main:app --reload
