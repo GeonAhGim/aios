@@ -6,10 +6,12 @@ trading의 요청·응답 필드명은 2026-09-03(task-114) 공식 OpenAPI 스�
 (`https://www.nhplug.com/openapi-docs/krstock/openapi.json`, 도메인이
 정본임을 `nhplug-sdk` 레포 `docs/README.md`가 명시)을 직접 내려받아
 확인한 값이다 — 02e_nh_api_spec_v1.md §3 참조. WebSocket 구독은
-`nhplug/realtime.py` 공식 소스로 확인한 연결/구독/재연결 책임만
-검증한다(데이터 프레임 필드 스키마는 여전히 미확인, websocket_mixin.py
-모듈 docstring 참조).
+`nhplug/realtime.py` 공식 소스로 확인한 연결/구독/재연결 책임과
+(task-2615, 2026-09-16 재조사) `x-realtime-channels`로 확인한 `mc` 채널
+데이터 프레임 필드 스키마를 함께 검증한다(docs/exchanges/NH_GAPS.md §2
+참조).
 """
+
 import json
 from decimal import Decimal
 
@@ -210,8 +212,14 @@ def _depth_output(**extra) -> dict:
 
 async def test_get_orderbook_parses_full_depth():
     output = _depth_output(
-        askp1="70100", askp2="70200", askp_rsqn1="10", askp_rsqn2="20",
-        bidp1="69900", bidp2="69800", bidp_rsqn1="30", bidp_rsqn2="40",
+        askp1="70100",
+        askp2="70200",
+        askp_rsqn1="10",
+        askp_rsqn2="20",
+        bidp1="69900",
+        bidp2="69800",
+        bidp_rsqn1="30",
+        bidp_rsqn2="40",
     )
 
     def handler(request: httpx.Request) -> httpx.Response:
@@ -263,18 +271,12 @@ async def test_get_ohlcv_not_implemented():
         await adapter.get_ohlcv("005930", "1d")
 
 
-async def test_subscribe_ticker_stream_not_implemented():
-    adapter = _make_adapter(lambda request: httpx.Response(200, json=TOKEN_RESPONSE))
-    with pytest.raises(NotImplementedError):
-        await adapter.subscribe_ticker_stream("005930", lambda t: None)
-
-
-async def test_capabilities_declare_websocket_unsupported():
+async def test_capabilities_declare_websocket_supported():
     adapter = _make_adapter(lambda request: httpx.Response(200, json=TOKEN_RESPONSE))
     caps = adapter.get_capabilities()
 
     assert caps.supported_asset_classes == [AssetClass.KR_EQUITY]
-    assert caps.supports_websocket is False  # 데이터 메시지 필드 스키마 미확인
+    assert caps.supports_websocket is True  # task-2615 -- mc 채널 필드 스키마 확인됨
     assert caps.market_hours is not None
 
 
@@ -334,9 +336,7 @@ async def test_place_order_buy_uses_cash_buy_endpoint():
         assert body["nmn_pr_tp_cd"] == "01"  # 지정가
         return httpx.Response(200, json=_success({"mkt_orr_no": 999}))
 
-    adapter = _make_adapter(
-        lambda request: _route(request, {"/krstock/order/v1/cashBuy": handler})
-    )
+    adapter = _make_adapter(lambda request: _route(request, {"/krstock/order/v1/cashBuy": handler}))
     order = _order()
 
     result = await _unguarded_place_order(adapter, order)
@@ -364,9 +364,7 @@ async def test_place_order_market_type_uses_market_division_code():
         assert body["nmn_pr_tp_cd"] == "05"  # 시장가
         return httpx.Response(200, json=_success({"mkt_orr_no": 999}))
 
-    adapter = _make_adapter(
-        lambda request: _route(request, {"/krstock/order/v1/cashBuy": handler})
-    )
+    adapter = _make_adapter(lambda request: _route(request, {"/krstock/order/v1/cashBuy": handler}))
     order = _order(order_type=OrderType.MARKET, price=None)
 
     await _unguarded_place_order(adapter, order)
@@ -376,9 +374,7 @@ async def test_place_order_raises_fatal_when_field_missing():
     def handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(200, json=_success({"unexpected": "1"}))
 
-    adapter = _make_adapter(
-        lambda request: _route(request, {"/krstock/order/v1/cashBuy": handler})
-    )
+    adapter = _make_adapter(lambda request: _route(request, {"/krstock/order/v1/cashBuy": handler}))
     with pytest.raises(FatalExchangeError):
         await _unguarded_place_order(adapter, _order())
 
@@ -395,9 +391,7 @@ async def test_cancel_order_sends_confirmed_cancel_endpoint():
         assert body["all_pat_dit_cd"] == "1"
         return httpx.Response(200, json=_success())
 
-    adapter = _make_adapter(
-        lambda request: _route(request, {"/krstock/order/v1/cancel": handler})
-    )
+    adapter = _make_adapter(lambda request: _route(request, {"/krstock/order/v1/cancel": handler}))
     assert await _unguarded_cancel_order(adapter, "005930:999") is True
 
 
@@ -410,9 +404,7 @@ async def test_cancel_order_returns_true_on_alternate_success_code():
     def handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(200, json={"rsp_cd": "00166", "rsp_msg": "정상처리완료"})
 
-    adapter = _make_adapter(
-        lambda request: _route(request, {"/krstock/order/v1/cancel": handler})
-    )
+    adapter = _make_adapter(lambda request: _route(request, {"/krstock/order/v1/cancel": handler}))
     assert await _unguarded_cancel_order(adapter, "005930:999") is True
 
 
@@ -420,9 +412,7 @@ async def test_cancel_order_raises_retryable_on_business_failure():
     def handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(200, json={"rsp_cd": "99999", "rsp_msg": "이미 체결된 주문입니다"})
 
-    adapter = _make_adapter(
-        lambda request: _route(request, {"/krstock/order/v1/cancel": handler})
-    )
+    adapter = _make_adapter(lambda request: _route(request, {"/krstock/order/v1/cancel": handler}))
     with pytest.raises(RetryableExchangeError):
         await _unguarded_cancel_order(adapter, "005930:999")
 
@@ -452,9 +442,7 @@ async def test_modify_order_sends_confirmed_modify_endpoint():
         assert body["cor_pr"] == "71000"
         return httpx.Response(200, json=_success({"mkt_orr_no": 1000}))
 
-    adapter = _make_adapter(
-        lambda request: _route(request, {"/krstock/order/v1/modify": handler})
-    )
+    adapter = _make_adapter(lambda request: _route(request, {"/krstock/order/v1/modify": handler}))
     order = await _unguarded_modify_order(
         adapter, "005930:999", price=Decimal("71000"), size=Decimal("5")
     )
@@ -467,9 +455,7 @@ async def test_modify_order_accepts_quantity_kwarg_for_backward_compat():
     def handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(200, json=_success({"mkt_orr_no": 1000}))
 
-    adapter = _make_adapter(
-        lambda request: _route(request, {"/krstock/order/v1/modify": handler})
-    )
+    adapter = _make_adapter(lambda request: _route(request, {"/krstock/order/v1/modify": handler}))
     order = await _unguarded_modify_order(
         adapter, "005930:999", price=Decimal("71000"), quantity=Decimal("5")
     )
@@ -492,9 +478,7 @@ async def test_modify_order_raises_retryable_on_business_failure():
     def handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(200, json={"rsp_cd": "99999", "rsp_msg": "실패"})
 
-    adapter = _make_adapter(
-        lambda request: _route(request, {"/krstock/order/v1/modify": handler})
-    )
+    adapter = _make_adapter(lambda request: _route(request, {"/krstock/order/v1/modify": handler}))
     with pytest.raises(RetryableExchangeError):
         await _unguarded_modify_order(
             adapter, "005930:999", price=Decimal("71000"), size=Decimal("5")
@@ -505,9 +489,7 @@ async def test_modify_order_raises_fatal_when_response_field_missing():
     def handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(200, json=_success({"unexpected": "1"}))
 
-    adapter = _make_adapter(
-        lambda request: _route(request, {"/krstock/order/v1/modify": handler})
-    )
+    adapter = _make_adapter(lambda request: _route(request, {"/krstock/order/v1/modify": handler}))
     with pytest.raises(FatalExchangeError):
         await _unguarded_modify_order(
             adapter, "005930:999", price=Decimal("71000"), size=Decimal("5")
@@ -719,3 +701,102 @@ async def test_connect_and_subscribe_reconnects_after_disconnect():
     # 이미 호출됨).
     assert hooks == ["reconnecting", "reconnected", "reconnecting"]
     assert call_count["n"] == 3
+
+
+# ---------- subscribe_ticker_stream (task-2615 -- mc 채널 필드 스키마 확인) ----------
+
+
+_MC_PUSH_EXAMPLE = {
+    # 공식 openapi.json x-realtime-channels.channels[tr_cd=mc].push_example
+    # 그대로(docs/exchanges/NH_GAPS.md §2-1) -- 값 자체는 문서 예시.
+    "code": "005940",
+    "time": "14:00:31",
+    "sign": "2",
+    "change": "2500",
+    "price": "31750",
+    "chrate": "8.55",
+    "high": "32200",
+    "low": "29450",
+    "offer": "31750",
+    "bid": "31700",
+    "volume": "837624",
+}
+
+
+async def test_subscribe_ticker_stream_maps_mc_frame_to_ticker():
+    connection = _FakeConnection(
+        [json.dumps({"header": {"tr_cd": "mc", "tr_key": "005940"}, "body": _MC_PUSH_EXAMPLE})],
+        raise_after=ConnectionClosed(None, None),
+    )
+    call_count = {"n": 0}
+
+    def connect_fn(url: str):
+        call_count["n"] += 1
+        if call_count["n"] == 1:
+            return _FakeConnectCtx(connection)
+        raise _StopTest
+
+    adapter = _make_adapter(
+        lambda request: httpx.Response(200, json=TOKEN_RESPONSE), is_paper_trading=True
+    )
+
+    tickers = []
+
+    async def callback(ticker) -> None:
+        tickers.append(ticker)
+
+    with pytest.raises(_StopTest):
+        await adapter.subscribe_ticker_stream("005940", callback, connect_fn=connect_fn)
+
+    subscribe_msg = json.loads(connection.sent[0])
+    assert subscribe_msg["body"]["tr_cd"] == "mc"
+    assert subscribe_msg["body"]["tr_key"] == "005940"
+    assert len(tickers) == 1
+    ticker = tickers[0]
+    assert ticker.symbol == "005940"
+    assert ticker.price == Decimal("31750")
+    assert ticker.bid == Decimal("31700")
+    assert ticker.ask == Decimal("31750")
+    assert ticker.volume_24h == Decimal("837624")
+
+
+async def test_subscribe_ticker_stream_ignores_subscribe_ack_and_other_channels():
+    ack = json.dumps({"header": {"token": "t", "tr_type": "1"}, "body": {"tr_cd": "mc"}})
+    other_channel = json.dumps({"header": {"tr_cd": "mb", "tr_key": "005940"}, "body": {}})
+    connection = _FakeConnection([ack, other_channel], raise_after=ConnectionClosed(None, None))
+    call_count = {"n": 0}
+
+    def connect_fn(url: str):
+        call_count["n"] += 1
+        if call_count["n"] == 1:
+            return _FakeConnectCtx(connection)
+        raise _StopTest
+
+    adapter = _make_adapter(
+        lambda request: httpx.Response(200, json=TOKEN_RESPONSE), is_paper_trading=True
+    )
+
+    tickers = []
+
+    async def callback(ticker) -> None:
+        tickers.append(ticker)
+
+    with pytest.raises(_StopTest):
+        await adapter.subscribe_ticker_stream("005940", callback, connect_fn=connect_fn)
+
+    assert tickers == []
+
+
+async def test_subscribe_ticker_stream_raises_fatal_on_incomplete_mc_frame():
+    frame = json.dumps({"header": {"tr_cd": "mc", "tr_key": "005940"}, "body": {"code": "005940"}})
+    connection = _FakeConnection([frame], raise_after=ConnectionClosed(None, None))
+
+    def connect_fn(url: str):
+        return _FakeConnectCtx(connection)
+
+    adapter = _make_adapter(
+        lambda request: httpx.Response(200, json=TOKEN_RESPONSE), is_paper_trading=True
+    )
+
+    with pytest.raises(FatalExchangeError):
+        await adapter.subscribe_ticker_stream("005940", lambda t: None, connect_fn=connect_fn)

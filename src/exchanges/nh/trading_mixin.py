@@ -208,12 +208,19 @@ class NHTradingMixin:
         """모듈 docstring 참조 — 공식 openapi.json으로 확인한 구조적
         불일치(주문조회 응답에 우리 exchange_order_id 체계인 mkt_orr_no가
         없음) 때문에 근거 있는 구현이 불가능하다. 추측으로 잘못된 주문
-        상태를 만드는 것보다 명시적 미구현이 안전하다(PM 배정 지침 (2))."""
+        상태를 만드는 것보다 명시적 미구현이 안전하다(PM 배정 지침 (2)).
+
+        2026-09-16(task-2615) 재확인 -- `curl`로 openapi.json 원문을 다시
+        내려받아 `components.schemas`를 파이썬으로 직접 파싱해 결론을
+        재검증했다: dailyOrderExecution Output_1 항목 필드는 itg_orr_no/
+        mo_itg_orr_no/org_itg_orr_no뿐이고 mkt_orr_no는 없다. 예약주문조회
+        (reservedInquiry)도 확인했으나 bkg_orr_no 체계라 무관하다. 근거·
+        재개 조건 전문은 `docs/exchanges/NH_GAPS.md` §1 참조."""
         raise NotImplementedError(
             "NHAdapter.get_order: dailyOrderExecution 응답에 mkt_orr_no(당사 "
             "exchange_order_id 체계)를 조회할 필드가 없음이 공식 openapi.json으로 "
-            "확인됨(itg_orr_no만 존재, 02e 스펙 §3 참조) — 라이브 계좌로 두 "
-            "식별자의 매핑 관계를 확인하기 전까지 구현 보류"
+            "확인됨(itg_orr_no만 존재, 02e 스펙 §3, docs/exchanges/NH_GAPS.md §1 "
+            "참조) — 라이브 계좌로 두 식별자의 매핑 관계를 확인하기 전까지 구현 보류"
         )
 
     async def health_check(self: _BalanceReadingClient) -> bool:

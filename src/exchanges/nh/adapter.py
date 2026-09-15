@@ -21,6 +21,7 @@ KIS와 마찬가지로 모든 계좌 관련 API가 `act_no`(계좌번호)를 요
 (공식 SDK 확인) — 생성자에 act_no 추가(KIS의 cano/acnt_prdt_cd와 동일
 판단, 다만 NH는 계좌번호가 단일 문자열이라 분리하지 않음).
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -219,9 +220,11 @@ class NHAdapter(
     공식 스펙으로 "구조적으로 불가능"이 확인됐다** — 가장 가까운
     엔드포인트(dailyOrderExecution)의 응답에 place_order가 반환하는
     식별자(mkt_orr_no)를 조회할 필드가 없다(trading_mixin.py 참조).
-    WebSocket은 연결/구독/재연결까지 확인해 구현했지만(websocket_mixin.py)
-    데이터 프레임의 필드 스키마는 아직 미확인이라 `subscribe_ticker_stream()`
-    은 여전히 NotImplementedError다.
+    2026-09-16(task-2615) 재조사 -- 자산군 공식 openapi.json의
+    `x-realtime-channels`로 WebSocket 데이터 프레임(`tr_cd="mc"`, 국내주식
+    실시간체결가통합)의 `body` 필드 스키마가 확인돼 `subscribe_ticker_stream()`
+    을 구현했다(websocket_parsing.py 참조). 주문조회 불가/WS 스콥 결정의
+    상세 근거는 `docs/exchanges/NH_GAPS.md`에 기록한다.
     """
 
     @property
@@ -253,12 +256,12 @@ class NHAdapter(
             supports_spot=True,
             supports_futures=False,
             supports_leverage=False,
-            # 접속/구독 메시지 형식은 확인했지만(02e 스펙 §4) 실제 데이터
-            # 메시지의 응답 포맷을 확인 못해 subscribe_ticker_stream()이
-            # 아직 NotImplementedError를 던진다 — 여기서 True를 선언하면
-            # "지원한다"는 거짓 신호가 된다(KIS가 겪었던 것과 동일한 실수,
-            # PM 배정 지침 (1)과 같은 원칙: 확인 안 되면 False).
-            supports_websocket=False,
+            # 2026-09-16(task-2615) -- x-realtime-channels로 tr_cd="mc"
+            # 데이터 프레임 필드 스키마가 확인돼 subscribe_ticker_stream()이
+            # 실제로 Ticker를 만들어낸다(market_data_mixin.py 참조). mb(호가)/
+            # d2(체결통보)는 스키마만 확인됐고 소비 메서드가 없어 이 플래그가
+            # 의미하는 "지원"의 범위 밖(NH_GAPS.md §2-3).
+            supports_websocket=True,
             max_leverage=Decimal("1"),
             reference_feed_coverage="medium",
             has_official_sandbox=True,

@@ -14,6 +14,11 @@ SDK 스니펫에 요청 파라미터만 있어 응답 필드를 KIS 관례로 �
 - 호가 10단계 전체(`askp1..10`/`bidp1..10`, 잔량 `askp_rsqn{1..10}`/
   `bidp_rsqn{1..10}`)도 같은 응답에 포함된다 — 별도 호가 조회 엔드포인트가
   없다는 이전 추정이 맞았다(currentPrice가 시세+호가를 겸함).
+
+`subscribe_ticker_stream()`(2026-09-16, task-2615): `websocket_parsing.py`
+모듈 docstring 참조 — 공식 openapi.json의 `x-realtime-channels`로
+`tr_cd="mc"` 채널의 데이터 프레임 필드 스키마가 확인돼 더 이상
+fail-closed로 남길 필요가 없다.
 """
 
 # ratchet-allow: unverified-endpoint fields raise NotImplementedError instead of guessing (I2)
@@ -21,13 +26,34 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 from decimal import Decimal
+from typing import Protocol
 
 from src.core.exceptions import FatalExchangeError
 from src.data.models.market_data import Candle, OrderBook, OrderBookLevel, Ticker
 from src.exchanges.common.http_client import NHHTTPClient
 from src.exchanges.common.types import TickerCallback
+from src.exchanges.nh.websocket_mixin import ConnectFn, RawFrameHandler, _connect
+from src.exchanges.nh.websocket_parsing import parse_mc_ticker_frame
 
 _MARKET_CODE = "KRX"
+_TICKER_TR_CD = "mc"
+
+
+class _WebSocketSubscribingClient(Protocol):
+    """`subscribe_ticker_stream()`이 같은 인스턴스의 `NHWebSocketMixin.
+    connect_and_subscribe()`를 호출하지만, 이 파일 안에서는 그 계약이
+    보이지 않으므로 명시한다(trading_mixin.py `_BalanceReadingClient`와
+    동일 패턴)."""
+
+    async def connect_and_subscribe(
+        self,
+        tr_cd: str,
+        tr_key: str,
+        on_raw_frame: RawFrameHandler,
+        *,
+        is_domestic: bool = True,
+        connect_fn: ConnectFn = _connect,
+    ) -> None: ...
 
 
 class NHMarketDataMixin:
@@ -112,17 +138,28 @@ class NHMarketDataMixin:
             "§3 참조), 후속 리프에서 구현 필요"
         )
 
-    async def subscribe_ticker_stream(self, symbol: str, callback: TickerCallback) -> None:
-        """02e 스펙 §4 — 2026-09-03(task-114) 재확인: 공식 SDK 소스코드
-        (nhplug/realtime.py)로 접속(wss://{host}:{port}/websocket)·구독
-        메시지(header.token + body.tr_cd)·재연결까지 확인했고
-        websocket_mixin.py의 `connect_and_subscribe()`로 구현했다. 다만
-        **데이터 프레임의 `body` 내부 필드 스키마**(채널별 실제 필드명)는
-        SDK가 파싱을 호출부에 위임해 여전히 미확인이다 — 잘못된 파서로
-        조용히 틀린 Ticker를 만드는 것보다 명시적 미구현이 안전하다
-        (websocket_mixin.py 모듈 docstring 참조)."""
-        raise NotImplementedError(
-            "NHAdapter.subscribe_ticker_stream: 연결/구독은 구현됨"
-            "(websocket_mixin.connect_and_subscribe) — 데이터 프레임 필드 "
-            "추가 조사 필요"
-        )
+    async def subscribe_ticker_stream(
+        self: _WebSocketSubscribingClient,
+        symbol: str,
+        callback: TickerCallback,
+        *,
+        connect_fn: ConnectFn = _connect,
+    ) -> None:
+        """02e 스펙 §4 — 2026-09-16(task-2615) 재확인: 자산군 공식
+        openapi.json의 `x-realtime-channels`로 `tr_cd="mc"`(국내주식
+        실시간체결가통합) 데이터 프레임의 `body` 필드 스키마가 확인됐다
+        (websocket_parsing.py 모듈 docstring, docs/exchanges/NH_GAPS.md §2
+        참조) — 이전 세션(task-114)의 "SDK가 파싱을 위임해 미확인" 결론은
+        SDK 소스만 봤을 때 얘기였고, openapi.json 원문에는 실제로 채널별
+        필드 목록과 예시가 있었다. `mb`(호가)/`d2`(체결통보) 채널도
+        스키마는 확인됐지만 이를 소비할 확장 메서드가 아직 없어 이번
+        리프 스콥 밖(NH_GAPS.md §2-3). `connect_fn`은 KIS
+        `subscribe_ticker_stream()`과 동일하게 테스트 주입용(기본값은 실제
+        WebSocket 연결)."""
+
+        async def on_raw_frame(raw: str) -> None:
+            ticker = parse_mc_ticker_frame(raw)
+            if ticker is not None:
+                await callback(ticker)
+
+        await self.connect_and_subscribe(_TICKER_TR_CD, symbol, on_raw_frame, connect_fn=connect_fn)
