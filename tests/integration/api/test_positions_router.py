@@ -6,9 +6,11 @@ pos_nav_daily)는 LB-9 어댑터를 직접 호출해 만든다 — 라우터가 
 쓰기 경로가 HTTP에 없다는 사실 자체가 검증 대상이다(§9 LB-19 "쓰기 없음").
 교차 테넌트 검사는 응답 상태코드뿐 아니라 봉투의 error_code·키 집합까지
 미존재 응답과 같은지(동형) 비교한다."""
+
 from __future__ import annotations
 
 import os
+import time
 import uuid
 from datetime import date, datetime, timezone
 from decimal import Decimal
@@ -18,6 +20,8 @@ import asyncpg
 import pytest
 from httpx import ASGITransport, AsyncClient
 
+from src.api.deps import get_pool
+from src.api.routers.positions import get_snapshot_repository
 from src.data.models.base import Currency, Money
 from src.foundation.entities.adapters.postgres_repository import PostgresEntityRepository
 from src.foundation.positions.adapters.postgres_journal_repository import (
@@ -109,8 +113,11 @@ async def _open_position(
         portfolio_id = default_portfolio_id
     key = str(
         PositionKey(
-            venue="TESTVENUE", instrument_id=uuid.uuid4().hex, strategy_id="strat",
-            execution_id="exec", portfolio_id=portfolio_id,
+            venue="TESTVENUE",
+            instrument_id=uuid.uuid4().hex,
+            strategy_id="strat",
+            execution_id="exec",
+            portfolio_id=portfolio_id,
         )
     )
     snapshot = PositionSnapshotView(
@@ -233,9 +240,7 @@ async def test_list_positions_other_tenant_account_is_404_isomorphic(client, poo
     account_id = await _create_account(pool, victim_id)
     await _open_position(pool, tenant_id=victim_id, account_id=account_id, quantity=Decimal("1"))
 
-    cross = await client.get(
-        BASE, headers=attacker_headers, params={"account_id": str(account_id)}
-    )
+    cross = await client.get(BASE, headers=attacker_headers, params={"account_id": str(account_id)})
     ghost = await client.get(
         BASE, headers=attacker_headers, params={"account_id": str(uuid.uuid4())}
     )
@@ -265,10 +270,24 @@ async def test_list_positions_without_portfolio_id_is_unchanged_regression(clien
     items = response.json()["data"]["items"]
     assert [item["position_key"] for item in items] == [opened.position_key]
     assert set(items[0]) == {
-        "position_key", "tenant_id", "account_id", "instrument_id", "quantity", "avg_cost",
-        "cost_method", "lots", "realized_pnl_base", "unrealized_pnl_base", "fees_base",
-        "funding_base", "mark_price", "mark_at", "base_currency", "last_journal_seq",
-        "updated_at", "schema_version",
+        "position_key",
+        "tenant_id",
+        "account_id",
+        "instrument_id",
+        "quantity",
+        "avg_cost",
+        "cost_method",
+        "lots",
+        "realized_pnl_base",
+        "unrealized_pnl_base",
+        "fees_base",
+        "funding_base",
+        "mark_price",
+        "mark_at",
+        "base_currency",
+        "last_journal_seq",
+        "updated_at",
+        "schema_version",
     }
 
 
@@ -327,9 +346,7 @@ async def test_list_positions_portfolio_id_rejects_unknown_portfolio(client, poo
     account_id = await _create_account(pool, tenant_id)
     await _open_position(pool, tenant_id=tenant_id, account_id=account_id, quantity=Decimal("1"))
 
-    response = await client.get(
-        BASE, headers=headers, params={"portfolio_id": str(uuid.uuid4())}
-    )
+    response = await client.get(BASE, headers=headers, params={"portfolio_id": str(uuid.uuid4())})
     assert response.status_code == 404
     _assert_error_envelope(response.json(), "RESOURCE_NOT_FOUND")
 
@@ -374,12 +391,8 @@ async def test_journal_cross_tenant_is_404_isomorphic_with_unknown_key(client, p
     )
     await _append_fills(pool, opened.position_key, 1)
 
-    cross = await client.get(
-        f"{BASE}/{opened.position_key}/journal", headers=attacker_headers
-    )
-    ghost = await client.get(
-        f"{BASE}/TESTVENUE:nope:strat:exec/journal", headers=attacker_headers
-    )
+    cross = await client.get(f"{BASE}/{opened.position_key}/journal", headers=attacker_headers)
+    ghost = await client.get(f"{BASE}/TESTVENUE:nope:strat:exec/journal", headers=attacker_headers)
     assert cross.status_code == ghost.status_code == 404
     _assert_error_envelope(cross.json(), "RESOURCE_NOT_FOUND")
     assert cross.json()["error_code"] == ghost.json()["error_code"]
@@ -449,3 +462,139 @@ async def test_nav_cross_tenant_is_404_and_bad_range_is_rejected(client, pool):
         params=_nav_params(own_account, "2025-01-01", "2026-09-01"),
     )
     assert too_long.status_code == 400
+
+
+# --- DEEPEN task-2993: failure-injection / 수치 성능 단언 / 게이트 적색 재현 ----
+
+
+class _OutageSnapshotRepository:
+    """모의 어댑터 예외 -- 커넥션 단절 등 인프라 장애를 흉내낸다. 도메인
+    예외(PositionNotFoundError 등)가 아니라 asyncpg 드라이버 예외라 전역
+    `Exception` 핸들러의 미분류(INTERNAL_ERROR) 경로를 탄다."""
+
+    async def get(self, conn, tenant_id, position_key):
+        raise asyncpg.PostgresConnectionError("simulated adapter outage")
+
+    async def upsert(self, conn, snapshot, expected_seq):
+        raise AssertionError("읽기 라우터가 upsert를 호출했다 — §9 LB-19 '쓰기 없음' 위반")
+
+    async def list_open(self, conn, tenant_id, account_id):
+        raise asyncpg.PostgresConnectionError("simulated adapter outage")
+
+
+async def test_list_positions_snapshot_adapter_outage_is_fail_closed_500(client, pool):
+    """failure-injection -- SnapshotRepository 어댑터가 커넥션 예외를 던지면
+    부분 데이터나 200을 흘리지 않고 500/INTERNAL_ERROR 봉투로 fail-closed
+    한다. 원인 예외 문자열은 로그에만 남고 응답 메시지에는 새지 않는다
+    (handlers.py `_handle_domain_or_unknown_exception`)."""
+    headers, tenant_id = await _register(client)
+    account_id = await _create_account(pool, tenant_id)
+    await _open_position(pool, tenant_id=tenant_id, account_id=account_id, quantity=Decimal("1"))
+
+    app.dependency_overrides[get_snapshot_repository] = lambda: _OutageSnapshotRepository()
+    try:
+        response = await client.get(BASE, headers=headers)
+    finally:
+        app.dependency_overrides.pop(get_snapshot_repository, None)
+
+    assert response.status_code == 500
+    body = response.json()
+    _assert_error_envelope(body, "INTERNAL_ERROR")
+    assert "PostgresConnectionError" not in body["message"]
+    assert "simulated adapter outage" not in body["message"]
+
+
+class _QueryCountingConnectionCtx:
+    """`pool.acquire()`의 async 컨텍스트 프록시 -- 실 connection에 query
+    logger를 달아 라우터가 이 요청 하나에 실제로 여는 SQL 왕복 수를 센다
+    (test_rebuild_snapshot.py f80af78e와 동일 기법)."""
+
+    def __init__(self, inner_ctx, sink: list[str]) -> None:
+        self._inner_ctx = inner_ctx
+        self._sink = sink
+        self._conn = None
+        self._log = None
+
+    async def __aenter__(self):
+        self._conn = await self._inner_ctx.__aenter__()
+        self._log = lambda record: self._sink.append(getattr(record, "query", ""))
+        self._conn.add_query_logger(self._log)
+        return self._conn
+
+    async def __aexit__(self, exc_type, exc, tb):
+        if self._conn is not None and self._log is not None:
+            self._conn.remove_query_logger(self._log)
+        return await self._inner_ctx.__aexit__(exc_type, exc, tb)
+
+
+class _QueryCountingPool:
+    def __init__(self, pool) -> None:
+        self._pool = pool
+        self.queries: list[str] = []
+
+    def acquire(self) -> _QueryCountingConnectionCtx:
+        return _QueryCountingConnectionCtx(self._pool.acquire(), self.queries)
+
+
+_ACCOUNT_COUNT = 5
+_MAX_ROUND_TRIPS = _ACCOUNT_COUNT + 3  # 1(owned account ids) + N(list_open) + 여유분
+_MAX_LATENCY_MS = 3000.0
+
+
+@pytest.mark.perf
+async def test_list_positions_round_trip_and_latency_guard(client, pool):
+    """수치 성능 단언 -- `list_positions`는 계정별로 순차 `list_open` 왕복을
+    낸다(§9 LB-17 문서화된 N+1). 계정 수가 늘어도 왕복 수가 선형 상한
+    안에 있는지(회귀 가드)와, 공유 TEST_DATABASE_URL이 계속 자라는 환경에서도
+    버틸 넉넉한 지연 sanity 상한(절대 임계 대신, task-2959/2962/2970/2977과
+    동일 결정)을 함께 잰다."""
+    headers, tenant_id = await _register(client)
+    for _ in range(_ACCOUNT_COUNT):
+        account_id = await _create_account(pool, tenant_id)
+        await _open_position(
+            pool, tenant_id=tenant_id, account_id=account_id, quantity=Decimal("1")
+        )
+
+    counting_pool = _QueryCountingPool(pool)
+    app.dependency_overrides[get_pool] = lambda: counting_pool
+    try:
+        started = time.monotonic()
+        response = await client.get(BASE, headers=headers)
+        elapsed_ms = (time.monotonic() - started) * 1000
+    finally:
+        app.dependency_overrides.pop(get_pool, None)
+
+    assert response.status_code == 200
+    assert len(response.json()["data"]["items"]) == _ACCOUNT_COUNT
+    assert 0 < len(counting_pool.queries) <= _MAX_ROUND_TRIPS, counting_pool.queries
+    assert elapsed_ms <= _MAX_LATENCY_MS, elapsed_ms
+
+
+async def test_list_positions_closed_portfolio_scope_is_rejected_fail_closed(client, pool):
+    """게이트 적색 재현 -- portfolio_id는 실존하고 이 tenant 소유지만 폐쇄
+    (`closed_at` NOT NULL)된 실제 DB row다(목이 아니다). `resolve_portfolio_scope`의
+    `_require_open` 검사가 배선에서 빠지면 이 테스트는 200과 함께 폐쇄
+    포트폴리오의 포지션을 그대로 흘려 적색이 된다 -- 존재+소유 확인만으로는
+    부족하고 개방 상태까지 fail-closed로 확인해야 함을 실 DB 상태로 증명한다."""
+    headers, tenant_id = await _register(client)
+    repo = PostgresEntityRepository(pool)
+    hierarchy = await build_hierarchy(pool, repo, tenant_id=tenant_id)
+    account_id = await _create_account(pool, tenant_id)
+    await _open_position(
+        pool,
+        tenant_id=tenant_id,
+        account_id=account_id,
+        quantity=Decimal("1"),
+        portfolio_id=hierarchy.portfolio.portfolio_id,
+    )
+    async with pool.acquire() as conn:
+        await conn.execute(
+            "UPDATE portfolio SET closed_at = now() WHERE portfolio_id = $1",
+            hierarchy.portfolio.portfolio_id,
+        )
+
+    response = await client.get(
+        BASE, headers=headers, params={"portfolio_id": str(hierarchy.portfolio.portfolio_id)}
+    )
+    assert response.status_code == 404
+    _assert_error_envelope(response.json(), "RESOURCE_NOT_FOUND")
