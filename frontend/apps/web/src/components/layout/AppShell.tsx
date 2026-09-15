@@ -1,5 +1,5 @@
 import { useLogout, useMe } from "@aios/shared-hooks";
-import { cn } from "@aios/ui-web";
+import { cn, ThemeToggle } from "@aios/ui-web";
 import type { ReactNode } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { ADMIN_NAV_ITEMS, MAIN_NAV_ITEMS, SETTINGS_NAV_ITEMS, type NavItem } from "./navItems";
@@ -83,6 +83,7 @@ export function AppShell({ children }: { children: ReactNode }) {
           </nav>
           <div className="flex items-center gap-3 text-sm">
             <span className="text-fg-muted">{me?.email}</span>
+            <ThemeToggle />
             <button
               type="button"
               onClick={() => {

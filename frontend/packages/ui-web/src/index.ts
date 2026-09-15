@@ -10,3 +10,18 @@ export { AllocationBarChart, type AllocationSlice } from "./AllocationBarChart";
 export { CandlestickChart, type CandlestickPoint } from "./CandlestickChart";
 export { PnlChart, type DailyPnlPoint } from "./PnlChart";
 export { CATEGORICAL_PALETTE, NEUTRAL_SLOT, DIVERGING_UP, DIVERGING_DOWN } from "./chartPalette";
+export {
+  themeStore,
+  useTheme,
+  createThemeStore,
+  resolveInitialTheme,
+  applyThemeAttribute,
+  isThemeMode,
+  type ThemeMode,
+  type ThemeStore,
+  type ThemeStorage,
+  type ThemeRoot,
+  type ThemeStoreOptions,
+  type UseThemeResult,
+} from "./theme";
+export { ThemeToggle } from "./ThemeToggle";

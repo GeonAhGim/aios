@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
-    "lint": "oxlint && node ../../scripts/check_i18n_literals.mjs",
+    "lint": "oxlint && node ../../scripts/check_i18n_literals.mjs && node ../../scripts/check_hardcoded_colors.mjs",
     "preview": "vite preview",
     "test": "vitest run",
     "test:coverage": "vitest run --coverage"

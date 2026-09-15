@@ -2,6 +2,19 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
+    <!-- UX-3: 첫 페인트 전에 저장된 테마를 적용해 깜빡임(FOUC)을 막는다. 키
+         "aios-theme"는 packages/ui-web/src/theme.ts의 STORAGE_KEY와 반드시 일치해야
+         한다 -- 이 스크립트는 번들 밖 순수 HTML이라 상수를 공유하지 못한다. -->
+    <script>
+      (function () {
+        try {
+          var stored = localStorage.getItem("aios-theme");
+          if (stored === "light" || stored === "dark") {
+            document.documentElement.setAttribute("data-theme", stored);
+          }
+        } catch (e) {}
+      })();
+    </script>
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <link rel="manifest" href="/manifest.webmanifest" />
     <link rel="apple-touch-icon" href="/favicon.svg" />
