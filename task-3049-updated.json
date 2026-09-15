@@ -1,0 +1,28 @@
+{
+  "worker": "claude-local-5",
+  "role": "claude-local",
+  "model": "",
+  "stage": "implement",
+  "parent": null,
+  "depends_on": [],
+  "attempts": 0,
+  "title": "DEEPEN 2324 BT-15a 백테스트 벡터 엔진 코어 1/2: vector/{arrays,signals}.py (컬럼 로드·시그널 연산, 이벤트 경로와 원소",
+  "spec": "docs/specs/L4_analytics_authoring_backtest_marketplace_v1.0.md#§9.9 BT-15(1/2). 선행: BT-14 라이선스 평가(1b53ad92) 완료, BT-2~6 체결 모델(fa3afe4), DSL-8 runtime/series.py(9fa72b5), LA-23b CandleColumns 컬럼 경로(be1c88b).",
+  "files": [
+    "src/foundation/backtest/vector/__init__.py",
+    "src/foundation/backtest/vector/arrays.py",
+    "src/foundation/backtest/vector/signals.py",
+    "tests/unit/foundation/backtest/vector/test_vector_arrays_signals.py"
+  ],
+  "status": "done",
+  "commit": "13e16cc2",
+  "tests": "21 passed",
+  "note": "Already committed in 13e16cc2 (task-2324). arrays.py 120 lines CandleColumns validation, signals.py 261 lines DSL-8 numpy ops, 21 tests pass.",
+  "decision": "",
+  "priority": 2,
+  "id": 3049,
+  "updated_at": "2026-09-16T00:00:00+00:00",
+  "rev": 10,
+  "orig_role": "backend",
+  "processed": false
+}
