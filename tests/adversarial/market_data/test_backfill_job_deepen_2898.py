@@ -1,3 +1,4 @@
+# ratchet-allow: unused _FakeProvider stub methods raise NotImplementedError (never exercised)
 """DC-16 `application/backfill_job.py` -- DEEPEN(task-2898,
 DEPTH_DC_RD 소급감사 task-2726) D1 -> D3 증빙.
 

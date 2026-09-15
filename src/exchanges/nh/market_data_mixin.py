@@ -15,6 +15,8 @@ SDK 스니펫에 요청 파라미터만 있어 응답 필드를 KIS 관례로 �
   `bidp_rsqn{1..10}`)도 같은 응답에 포함된다 — 별도 호가 조회 엔드포인트가
   없다는 이전 추정이 맞았다(currentPrice가 시세+호가를 겸함).
 """
+
+# ratchet-allow: unverified-endpoint fields raise NotImplementedError instead of guessing (I2)
 from __future__ import annotations
 
 from datetime import datetime, timezone

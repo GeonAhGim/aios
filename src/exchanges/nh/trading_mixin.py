@@ -1,3 +1,4 @@
+# ratchet-allow: unverified order-status endpoint raises NotImplementedError, not a guess (I2)
 """NHAdapter Trading 메서드군 + health_check().
 
 Spec: 02_exchange_adapter_v1.3.md#§2.1, 02e_nh_api_spec_v1.md#§3
@@ -40,6 +41,7 @@ openapi.json`, `nhplug-sdk` 레포 `docs/README.md`/`AGENTS.md`가 이 URL을
 방법이 없다"는 것이 확정됐다 — 근거 없는 매핑(예: itg_orr_no==mkt_orr_no
 가정)으로 조용히 틀린 Order를 만드는 대신 명시적으로 NotImplementedError.
 """
+
 from __future__ import annotations
 
 from datetime import datetime, timezone
@@ -93,8 +95,10 @@ def _parse_mkt_orr_no(mkt_orr_no: str) -> int:
 class NHTradingMixin:
     @require_paper_sandbox
     async def place_order(self: NHHTTPClient, order: Order) -> Order:
-        path = "/krstock/order/v1/cashBuy" if order.side == OrderSide.BUY else (
-            "/krstock/order/v1/cashSell"
+        path = (
+            "/krstock/order/v1/cashBuy"
+            if order.side == OrderSide.BUY
+            else ("/krstock/order/v1/cashSell")
         )
         body: dict[str, Any] = {
             "act_no": self._act_no,
@@ -179,8 +183,7 @@ class NHTradingMixin:
             new_mkt_orr_no = str(raw["Output_0"]["mkt_orr_no"])
         except KeyError as exc:
             raise FatalExchangeError(
-                f"NH 정정 응답에 예상 필드 없음(공식 openapi.json 기준 mkt_orr_no "
-                f"필요): {exc}"
+                f"NH 정정 응답에 예상 필드 없음(공식 openapi.json 기준 mkt_orr_no 필요): {exc}"
             ) from exc
         now = datetime.now(timezone.utc)
         return Order(

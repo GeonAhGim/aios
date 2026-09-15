@@ -1,3 +1,4 @@
+# ratchet-allow: tr_id-substitution stub raises NotImplementedError, real impl lives in adapter.py
 """6.9/L4-21 — KIS OAuth2 token issuance/caching + shared signing/transport logic.
 
 Spec: 02_exchange_adapter_v1.2.md#§2.1,
@@ -37,6 +38,7 @@ even when multiple coroutines arrive concurrently while the token is expired,
 the token issuance endpoint is called exactly once (double-checked locking,
 DoD a).
 """
+
 from __future__ import annotations
 
 import asyncio

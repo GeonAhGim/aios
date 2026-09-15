@@ -1,3 +1,4 @@
+# ratchet-allow: out-of-DC-12-scope SPI methods raise NotImplementedError (fail-closed stub)
 """DC-12 — KIS(한국투자증권) `MarketDataProvider` SPI 위임 어댑터.
 
 Spec: docs/specs/L4_analytics_authoring_backtest_marketplace_v1.0.md
@@ -34,6 +35,7 @@ decision, `BitgetProvider`와 동일 근거 — instrument_id(ULID) 발급은 DC
 소관, 실시간 스트림 배선은 DC-17 소관). 둘 다 `NotImplementedError`로
 fail-closed 한다.
 """
+
 from __future__ import annotations
 
 from collections.abc import AsyncIterator, Sequence
@@ -95,9 +97,7 @@ class KISProvider(BaseProviderAdapter):
         self, listing: VenueListing, tf: Timeframe, span: TimeSpan
     ) -> CandleColumns:
         if listing.venue is not Venue.KIS_KRX:
-            raise ValueError(
-                f"KISProvider는 Venue.KIS_KRX listing만 처리한다: {listing.venue!r}"
-            )
+            raise ValueError(f"KISProvider는 Venue.KIS_KRX listing만 처리한다: {listing.venue!r}")
         if tf not in _SUPPORTED_TIMEFRAMES:
             raise ValueError(
                 f"KISProvider는 {sorted(t.value for t in _SUPPORTED_TIMEFRAMES)}만 "
@@ -118,8 +118,7 @@ class KISProvider(BaseProviderAdapter):
                     DataProviderErrorCode.DATA_COVERAGE_MISSING,
                     provider_id=self._provider_id,
                     message=(
-                        f"kis: {symbol} {tf.value} 구간 [{span.start}, {span.end}) "
-                        "데이터 없음"
+                        f"kis: {symbol} {tf.value} 구간 [{span.start}, {span.end}) 데이터 없음"
                     ),
                 )
             return CandleColumns(
@@ -134,9 +133,7 @@ class KISProvider(BaseProviderAdapter):
 
         return await self.call_with_retry(_op)
 
-    async def subscribe(
-        self, _listings: Sequence[VenueListing]
-    ) -> AsyncIterator[TickOrCandle]:
+    async def subscribe(self, _listings: Sequence[VenueListing]) -> AsyncIterator[TickOrCandle]:
         raise NotImplementedError(
             "KISProvider.subscribe: DC-12 스콥 밖 — 실시간 스트림 배선은 "
             "DC-17(realtime_fanout) 선행 리프 몫이다(task-1211 decision)."
