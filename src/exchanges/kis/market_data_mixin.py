@@ -11,6 +11,7 @@ Spec: 02_exchange_adapter_v1.2.md#§2.1
   tr_id FHKST03010100 (일/주/월/년봉만 — 분봉 없음, 분봉은 별도
   inquire-time-itemchartprice 엔드포인트 필요, 아직 미구현)
 """
+
 from __future__ import annotations
 
 from datetime import datetime, timezone
@@ -141,23 +142,26 @@ class KISMarketDataMixin:
         )
         rows = raw.get("output2", [])[:limit]
         candles = []
-        for row in rows:
-            day = row["stck_bsop_date"]  # "YYYYMMDD"
-            open_time = datetime.strptime(day, "%Y%m%d").replace(tzinfo=timezone.utc)
-            candles.append(
-                Candle(
-                    symbol=symbol,
-                    exchange="kis",
-                    timeframe="1d",
-                    open=Decimal(row["stck_oprc"]),
-                    high=Decimal(row["stck_hgpr"]),
-                    low=Decimal(row["stck_lwpr"]),
-                    close=Decimal(row["stck_clpr"]),
-                    volume=Decimal(row["acml_vol"]),
-                    open_time=open_time,
-                    close_time=open_time,
+        try:
+            for row in rows:
+                day = row["stck_bsop_date"]  # "YYYYMMDD"
+                open_time = datetime.strptime(day, "%Y%m%d").replace(tzinfo=timezone.utc)
+                candles.append(
+                    Candle(
+                        symbol=symbol,
+                        exchange="kis",
+                        timeframe="1d",
+                        open=Decimal(row["stck_oprc"]),
+                        high=Decimal(row["stck_hgpr"]),
+                        low=Decimal(row["stck_lwpr"]),
+                        close=Decimal(row["stck_clpr"]),
+                        volume=Decimal(row["acml_vol"]),
+                        open_time=open_time,
+                        close_time=open_time,
+                    )
                 )
-            )
+        except KeyError as exc:
+            raise FatalExchangeError(f"KIS 일봉 응답에 예상 필드 없음: {exc}") from exc
         return candles
 
     async def _get_intraday_candles(
@@ -183,24 +187,29 @@ class KISMarketDataMixin:
         )
         rows = raw.get("output2", [])[:limit]
         candles = []
-        for row in rows:
-            day = row.get("stck_bsop_date", now.strftime("%Y%m%d"))
-            hour = row["stck_cntg_hour"]  # "HHMMSS"
-            open_time = datetime.strptime(day + hour, "%Y%m%d%H%M%S").replace(tzinfo=timezone.utc)
-            candles.append(
-                Candle(
-                    symbol=symbol,
-                    exchange="kis",
-                    timeframe="1m",
-                    open=Decimal(row["stck_oprc"]),
-                    high=Decimal(row["stck_hgpr"]),
-                    low=Decimal(row["stck_lwpr"]),
-                    close=Decimal(row["stck_prpr"]),
-                    volume=Decimal(row["cntg_vol"]),
-                    open_time=open_time,
-                    close_time=open_time,
+        try:
+            for row in rows:
+                day = row.get("stck_bsop_date", now.strftime("%Y%m%d"))
+                hour = row["stck_cntg_hour"]  # "HHMMSS"
+                open_time = datetime.strptime(day + hour, "%Y%m%d%H%M%S").replace(
+                    tzinfo=timezone.utc
                 )
-            )
+                candles.append(
+                    Candle(
+                        symbol=symbol,
+                        exchange="kis",
+                        timeframe="1m",
+                        open=Decimal(row["stck_oprc"]),
+                        high=Decimal(row["stck_hgpr"]),
+                        low=Decimal(row["stck_lwpr"]),
+                        close=Decimal(row["stck_prpr"]),
+                        volume=Decimal(row["cntg_vol"]),
+                        open_time=open_time,
+                        close_time=open_time,
+                    )
+                )
+        except KeyError as exc:
+            raise FatalExchangeError(f"KIS 분봉 응답에 예상 필드 없음: {exc}") from exc
         return candles
 
     async def is_market_holiday(self: KISHTTPClient, date: str) -> bool:
@@ -217,4 +226,3 @@ class KISMarketDataMixin:
         if not rows:
             return False
         return bool(rows[0].get("opnd_yn") == "N")
-
