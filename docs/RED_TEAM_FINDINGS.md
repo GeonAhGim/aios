@@ -30,7 +30,7 @@ UPDATE 7건을 §9 R-58 리프(task-1521)로 이 장부에 등재한다. 명세 
 |---|---|---|---|---|---|---|
 | RTF-01 | #42 | `correlation_with()` 미지 페어 0.0 fail-open | 명세 §1 R3 | R-11 `900704b` · R-29 `e8d4160` · R-31 `d6f48be` | `tests/unit/core/risk/test_correlation.py` missing_pairs DENY 3건 | ✅ FIXED — 잔여: 타 심볼 보유 시 과잉거부(#42) |
 | RTF-02 | #43 | `metrics_collector.data_delay_sec` 상수 0 | 명세 §1 R3/R7 | R-42 `a0652c9` · R-43 `bb513af` · 배선 `cc6a8d0` | `tests/integration/test_circuit_breaker.py::test_unknown_data_delay_does_not_read_as_normal` | ✅ FIXED(task-1714 P0 `cc6a8d0`로 main.py 배선까지 완료) |
-| RTF-03 | #44 | watchdog `market_wide_correlated=None` 고정 → LIQUIDATE 영구 미발동 | 명세 §1 R3 | R-49 `e89217e` (판정기만) · R-51 `1504fd9` (발동 경로만) | `tests/unit/core/safety/test_market_correlation.py` | ⏳ OPEN — 잔여: run_one_cycle이 여전히 `market_wide_correlated=None` 하드코딩(#44) |
+| RTF-03 | #44 | watchdog `market_wide_correlated=None` 고정 → LIQUIDATE 영구 미발동 | 명세 §1 R3 | R-49 `e89217e` (판정기만) · R-51 `1504fd9` (발동 경로만) · task-2838 `0bd21d09`(failure_domain 배선) | `tests/unit/core/safety/test_market_correlation.py` · `tests/unit/core/safety/test_watchdog_decide.py` AST 스캐너 하드 게이트 | ⏳ OPEN(부분 진행) — task-2838이 `failure_domain` 미전달 배선 결함은 고쳤다(이제 `decide()`가 실제 진단 결과를 받는다). 잔여: `run_one_cycle`이 여전히 `market_wide_correlated=None` 하드코딩(#44, basket 시세 조달원 없음) |
 | RTF-04 | #45 | `foundation_gate` mandate 우회 env 플래그 | 명세 §1 R3 | R-36 `a2e2646` · H-1b `3d83e8d0`(task-3369) | `tests/integration/test_order_service_risk_gate.py` unmandated DENY 2건 · `tests/adversarial/oms/test_mandate_gate_prod_wiring.py` R-59 하드 게이트(3곳 전부) | ✅ FIXED — 조립부 3곳 전부 `require_mandate=True`(task-3369), 회귀 방지 하드 게이트가 3곳 전부 스캔(task-2836이 `wiring.py` 누락분 추가) |
 | RTF-05 | #46 | `watchdog_process._apply_decision` 무조건 UPDATE | 명세 §1 R8 | R-51 `1504fd9` | `tests/integration/risk/test_watchdog_liquidation_request.py::test_watchdog_process_has_no_unconditional_update_strategy_executions` | ✅ FIXED |
 | RTF-06 | #47 | `circuit_breaker._set_level` 무조건 UPDATE | 명세 §1 R7 | R-43 `bb513af` | `tests/integration/test_circuit_breaker.py::test_concurrent_set_level_only_one_writer_wins` | ✅ FIXED |
@@ -90,19 +90,25 @@ fail-open(78번 §1 I2 위반).
 
 ## 2026-09-05-44 · [safety] watchdog가 `market_wide_correlated=None`을 고정으로 넘겨 LIQUIDATE가 영구 미발동 — 심각도 중간 (RTF-03)
 
-**상태**: ⏳ OPEN(부분 진행, 2026-09-09 task-1543 QA 재대조 갱신) — R-49 `e89217e`
+**상태**: ⏳ OPEN(부분 진행, 2026-09-10 task-2838 갱신) — R-49 `e89217e`
 (task-2133)가 순수 판정기 `is_market_wide_move()`와 `decide()`의
 `failure_domain` 인자(DB_ISOLATED 강등)를 만들었고 R-51 `1504fd9`(task-2357)가
-LIQUIDATE 발동 시 `liquidation_request` INSERT 경로를 완성했지만, **호출부
-배선이 빠졌다** — `src/watchdog_process.py::run_one_cycle`은 여전히
-`decide(snapshot, market_wide_correlated=None)`을 하드코딩 호출한다(basket
-returns를 만들어 넘기는 코드가 없다). `core/safety/watchdog.py`의 LIQUIDATE
-분기는 `market_wide_correlated is True`일 때만 열리므로 시장 전체 급변 판정이
-없는 한 강제청산은 여전히 구조적으로 도달 불가 — "구현됨"이지 "배선"은 아니다
-(I-10). HALT 경로(및 R-49가 새로 붙인 DB_ISOLATED 강등 경로 — `run_one_cycle`이
-`failure_domain.diagnosis == DB_ISOLATED_FAILURE`일 때 조치를 스킵하는 별도
-분기로 대체 구현됨, `decide()`의 `failure_domain` 인자 자체는 호출부에서도
-안 씀)는 동작한다.
+LIQUIDATE 발동 시 `liquidation_request` INSERT 경로를 완성했다. 이후
+task-2838(커밋 `0bd21d09`)이 두 번째 배선 결함을 찾아 고쳤다 — 당시
+`run_one_cycle`이 `diagnose()`보다 *먼저* `decide()`를 호출해 `failure_domain`
+인자가 항상 기본값 None으로 고정돼 있었다(task-1806 P0-B와 동일 클래스,
+`decide()`의 `failure_domain` 인자 자체를 호출부가 안 쓰는 상태). 지금은
+`diagnose()`를 먼저 실행하고 그 결과를 `decide(..., failure_domain=failure_domain)`로
+실제로 전달한다 — `tests/unit/core/safety/test_watchdog_decide.py`의 AST
+스캐너 하드 게이트가 회귀를 잡는다. **다만 `market_wide_correlated`는 여전히
+고정 None이다** — `src/watchdog_process.py::run_one_cycle`이 basket returns를
+만들어 넘기는 코드가 없다(`decide(snapshot, market_wide_correlated=None,
+failure_domain=failure_domain)`). `core/safety/watchdog.py`의 LIQUIDATE 분기는
+`market_wide_correlated is True`일 때만 열리므로 시장 전체 급변 판정이 없는 한
+강제청산은 여전히 구조적으로 도달 불가 — "구현됨"이지 "배선"은 아니다(I-10).
+HALT 경로 및 DB_ISOLATED 강등 경로(`failure_domain.diagnosis ==
+DB_ISOLATED_FAILURE`일 때 조치를 스킵하는 분기)는 이제 실제로 진단 결과를
+받아 동작한다.
 
 **해소 조건**: `run_one_cycle`에 basket 시세를 조달해 `is_market_wide_move()`
 결과를 `decide(..., market_wide_correlated=...)`에 실제로 전달하는 배선(별도
