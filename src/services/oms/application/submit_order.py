@@ -1,5 +1,8 @@
 """L4-09 — OMS 유일 제출 경로: 멱등 선점 → orders INSERT → VALIDATED 전이 →
-outbox enqueue, 단일 tx.
+outbox enqueue, 단일 tx. outbox payload 빌더/이벤트 해시/충돌 후 조회는
+`submit_order_support.py`로 분할했다(300줄 캡, 그 모듈 docstring 참조) —
+`orders` INSERT SQL과 commit/rollback tx 본문은 EM-3 정적 검사
+(`scripts/check_child_order_path.py`)가 이 파일을 앵커로 삼아 여기 남는다.
 
 Spec: docs/specs/L4_execution_oms_and_exchange_v1.0.md §2-C 표
 `submit_order(cmd, *, pool, profile, registry, pre_submit_gate, clock)->OrderView`,
@@ -31,12 +34,10 @@ CM-8 §3 — ALLOW는 `GateDecision.decision_id`/`.compliance_decision_id` 둘 �
 
 from __future__ import annotations
 
-import hashlib
-import json
 import time
 from collections.abc import Callable
 from datetime import datetime, timedelta, timezone
-from uuid import UUID, uuid4
+from uuid import uuid4
 
 import asyncpg
 
@@ -45,8 +46,7 @@ from src.core.observability.metric_names import (
     OMS_ORDER_SUBMIT_DURATION_SECONDS,
 )
 from src.core.observability.metrics import MetricsPort, NullMetrics
-from src.data.models.base import Currency, Money
-from src.data.models.trading import Order, OrderStatus
+from src.data.models.trading import OrderStatus
 from src.foundation.entities.application.resolve_context import (
     EntityContextResolutionError,
     EntityRepository,
@@ -56,10 +56,14 @@ from src.foundation.entities.contracts.v1 import EntityContext
 from src.services.oms.adapters.idempotency_repository import IdempotencyRepository
 from src.services.oms.adapters.order_repository import PostgresOrderRepository
 from src.services.oms.adapters.outbox_repository import OutboxRepository
+from src.services.oms.application.submit_order_support import (
+    event_payload_hash,
+    resolve_after_collision,
+    venue_order,
+)
 from src.services.oms.contracts.v1_commands import SubmitOrderCommand
 from src.services.oms.contracts.v1_events import OrderTransitionEvent
 from src.services.oms.contracts.v1_views import OrderView
-from src.services.oms.domain.errors import IdempotencyDigestMismatchError
 from src.services.oms.domain.idempotency import client_order_id as derive_client_order_id
 from src.services.oms.domain.idempotency import command_digest, scope_hash
 from src.services.oms.domain.state_machine import OrderEvent
@@ -98,36 +102,6 @@ class OrderSubmitDeniedError(Exception):
     def __init__(self, reason_codes: tuple[str, ...]) -> None:
         self.reason_codes = reason_codes
         super().__init__(f"submit_order이 pre_submit_gate에 의해 거부됐습니다: {reason_codes}")
-
-
-def _venue_order(cmd: SubmitOrderCommand, *, order_id: UUID, client_id: str, venue: str) -> Order:
-    """outbox SUBMIT payload(§2-C "order" 키) — `order_from_payload`가 order_id/
-    client_order_id 일치만 검증하므로 나머지 필드는 어댑터 호출용 실값이면 된다.
-    통화는 Phase 1 관례대로 USDT 고정(order_service/repository.py 동일 편차)."""
-    price = Money(amount=cmd.price, currency=Currency.USDT) if cmd.price is not None else None
-    return Order(
-        order_id=order_id,
-        client_order_id=client_id,
-        strategy_id=cmd.scope.strategy_id,
-        strategy_version=cmd.scope.strategy_version,
-        execution_id=cmd.scope.execution_id,
-        symbol=cmd.symbol,
-        exchange=venue,
-        side=cmd.side,
-        order_type=cmd.order_type,
-        quantity=cmd.quantity,
-        price=price,
-        status=OrderStatus.VALIDATED,
-        asset_class=cmd.asset_class,
-        is_liquidation=cmd.is_liquidation,
-    )
-
-
-def _event_payload_hash(order_id: UUID, scope_hash_val: str) -> str:
-    canonical = json.dumps(
-        {"order_id": str(order_id), "scope_hash": scope_hash_val}, sort_keys=True
-    )
-    return hashlib.sha256(canonical.encode()).hexdigest()
 
 
 async def submit_order(
@@ -259,7 +233,7 @@ async def submit_order(
                             command_id=cmd.command_id,
                             provider_event_id=None,
                             occurred_at=occurred_at,
-                            payload_hash=_event_payload_hash(candidate_order_id, scope_hash_val),
+                            payload_hash=event_payload_hash(candidate_order_id, scope_hash_val),
                         )
                         validated = await _orders.transition(
                             conn,
@@ -270,7 +244,7 @@ async def submit_order(
                             patch={},
                             event=event,
                         )
-                        venue_order = _venue_order(
+                        built_order = venue_order(
                             cmd,
                             order_id=candidate_order_id,
                             client_id=client_id,
@@ -281,7 +255,7 @@ async def submit_order(
                             order_id=candidate_order_id,
                             command_type="SUBMIT",
                             payload={
-                                "order": venue_order.model_dump(mode="json"),
+                                "order": built_order.model_dump(mode="json"),
                                 "trace_id": str(cmd.trace_id),
                                 "command_id": str(cmd.command_id),
                             },
@@ -296,8 +270,8 @@ async def submit_order(
                     await tx.rollback()
 
         if collided:
-            resolved = await _resolve_after_collision(
-                pool, scope_hash_val=scope_hash_val, digest=digest
+            resolved = await resolve_after_collision(
+                pool, order_repo=_orders, scope_hash_val=scope_hash_val, digest=digest
             )
             outcome = "replay"
             return resolved
@@ -312,23 +286,3 @@ async def submit_order(
         elapsed = time.monotonic() - start
         m.counter(OMS_ORDER_SUBMIT_COUNT_TOTAL, {"outcome": outcome, "venue": venue_label})
         m.observe(OMS_ORDER_SUBMIT_DURATION_SECONDS, elapsed, {"venue": venue_label})
-
-
-async def _resolve_after_collision(
-    pool: asyncpg.Pool, *, scope_hash_val: str, digest: str
-) -> OrderView:
-    """`orders.client_order_id` UNIQUE 충돌 뒤(패자) — 승자 tx는 이미 커밋 완료라
-    새 tx로 조회한다. digest도 대조해 승자가 다른 명령이었다면 거부한다(fail-closed)."""
-    async with pool.acquire() as conn:
-        stored_digest = await conn.fetchval(
-            "SELECT digest FROM order_idempotency WHERE scope_hash = $1", scope_hash_val
-        )
-        if stored_digest is not None and stored_digest != digest:
-            raise IdempotencyDigestMismatchError(scope_hash_val)
-        existing = await _orders.find_by_scope_hash(conn, scope_hash_val)
-    if existing is None:
-        raise RuntimeError(
-            f"orders.client_order_id UNIQUE 충돌 뒤 scope_hash={scope_hash_val} 조회 실패 "
-            "— 승자 tx가 아직 안 보입니다(격리수준/타이밍 가정 위반)."
-        )
-    return existing
