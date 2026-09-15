@@ -267,6 +267,74 @@ describe("createChartingClient", () => {
     });
     await expect(makeClient().listIndicatorTemplates()).rejects.toThrow(/template/);
   });
+
+  // --- task-2664: CH-17 DoD("교차 테넌트 404")를 charting 클라이언트 경계에서
+  // 직접 증빙한다 — 서버(CH-17b, test_indicator_template_lifecycle.py)는 타
+  // 테넌트의 템플릿 get/delete를 404 RESOURCE_NOT_FOUND 동형으로 접는다
+  // (자기 것과 존재하지 않는 것을 구별 못 하게 함). 이 클라이언트가 그 응답을
+  // 그대로 ApiError로 전파하는지, 재시도·삭제 성공으로 오판하지 않는지 확인한다.
+  it("negative: 교차 테넌트 템플릿 삭제는 404 RESOURCE_NOT_FOUND로 거부되고, 성공으로 오판하지 않는다(실패 주입)", async () => {
+    const fetchMock = stubFetch(
+      { error_code: "RESOURCE_NOT_FOUND", message: "not found", trace_id: "t-404-tpl" },
+      404,
+    );
+    const err = await makeClient()
+      .deleteIndicatorTemplate("someone-elses-template")
+      .catch((e: unknown) => e as ApiError);
+    expect(err).toBeInstanceOf(ApiError);
+    expect(err.statusCode).toBe(404);
+    expect(err.errorCode).toBe("RESOURCE_NOT_FOUND");
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("negative: 이미 삭제된 템플릿을 다시 삭제하면 멱등 성공이 아니라 404로 거부된다(재시도로 조용히 넘어가지 않음)", async () => {
+    const fetchMock = stubFetch(
+      { error_code: "RESOURCE_NOT_FOUND", message: "not found", trace_id: "t-404-again" },
+      404,
+    );
+    await expect(makeClient().deleteIndicatorTemplate("template-1")).rejects.toMatchObject({ statusCode: 404 });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+});
+
+// task-2664: naive JSON.parse(응답) 소비는 template이 문자열이거나 아예 없어도
+// 조용히 "성공"처럼 통과한다(적색) — 이 클라이언트의 실제 toIndicatorTemplateRecord는
+// requireRecord()로 같은 입력을 즉시 거부한다(녹색). listIndicatorTemplates()
+// 왕복에서 실제로 그 녹색 경로가 타는지까지 한 테스트에서 대조한다.
+describe("gate-red reproduction: indicator template payload validation in toIndicatorTemplateRecord", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  const malformed = { ...indicatorTemplateView, template: "not-an-object" };
+
+  it("RED: naive consumption of the raw envelope accepts a string `template` without complaint", () => {
+    const naive = keysToCamel<{ template: unknown }>(malformed);
+    expect(typeof naive.template).toBe("string");
+  });
+
+  it("GREEN: the actual client rejects a non-object template field instead of passing it through", async () => {
+    stubFetch({ data: [malformed], meta: { trace_id: "t-1", as_of: "2026-09-07T00:00:00Z" } });
+    await expect(makeClient().listIndicatorTemplates()).rejects.toThrow(/template/);
+  });
+});
+
+describe("numeric perf: listIndicatorTemplates mapping large payloads", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("maps 500 indicator template records (fetch + camelCase + toIndicatorTemplateRecord validation) within a 200ms budget", async () => {
+    const many = Array.from({ length: 500 }, (_, i) => ({ ...indicatorTemplateView, id: `template-${i}` }));
+    stubFetch({ data: many, meta: { trace_id: "t-1", as_of: "2026-09-07T00:00:00Z" } });
+
+    const startedAt = performance.now();
+    const result = await makeClient().listIndicatorTemplates();
+    const elapsedMs = performance.now() - startedAt;
+
+    expect(result).toHaveLength(500);
+    expect(elapsedMs).toBeLessThan(200);
+  });
 });
 
 describe("numeric perf: listLayouts mapping large payloads", () => {

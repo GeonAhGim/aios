@@ -3,7 +3,7 @@ import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/re
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { ComponentProps } from "react";
-import { ApiError, type ChartIndicatorTemplateRecord } from "@aios/api-client";
+import { ApiError, type ChartIndicatorTemplateRecord, type CreateChartIndicatorTemplateInput } from "@aios/api-client";
 import { decodeTemplate, type Template } from "@aios/chart-engine/src/templates/templateModel";
 import { ChartTemplates, type ChartTemplatesPort, type TemplateApplyResult } from "./ChartTemplates";
 
@@ -240,5 +240,74 @@ describe("ChartTemplates", () => {
     const input = createIndicatorTemplate.mock.calls[0]?.[0];
     expect(input.template.indicators).toHaveLength(600);
     expect(input.template.panes).toHaveLength(301); // main pane + 300 sub panes
+  });
+
+  // --- task-2664: CH-17 DoD 자체("템플릿 적용 후 동일 화면 재현")의 왕복 증거.
+  // 기존 저장/적용 테스트는 각각 독립된 고정 fixture로만 검증돼 capture(save)의
+  // 출력이 apply의 입력으로 실제 왕복하는지는 어느 테스트도 직접 확인하지
+  // 않았다 — 여기서는 실제 저장 시 전송된 template JSON을 그대로 서버 응답인
+  // 것처럼 되돌려 적용하고, 그 결과가 캡처 당시 화면과 동일함을 단언한다.
+  // 화면이 그 사이(적용 시점) 완전히 다른 지표 구성이었어도(다른 세션에서
+  // 저장한 템플릿을 여는 상황) 재현 결과는 오직 저장된 템플릿에서만 나온다는
+  // 것까지 함께 증명한다.
+  it("동일 화면 재현: 캡처→저장된 template을 그대로 적용하면 캡처 당시 지표·페인 배치와 정확히 일치한다(현재 화면 구성과 무관)", async () => {
+    const capturedMainIds = ["SMA"];
+    const capturedSubIds = ["RSI", "MACD"];
+    let savedTemplate: CreateChartIndicatorTemplateInput["template"] | undefined;
+    const createIndicatorTemplate = vi.fn(async (input: { name: string; template: CreateChartIndicatorTemplateInput["template"] }) => {
+      savedTemplate = input.template;
+      return templateRecord({ name: input.name, template: input.template });
+    });
+
+    renderTemplates({
+      port: fakePort({ createIndicatorTemplate }),
+      mainIndicatorIds: capturedMainIds,
+      subIndicatorIds: capturedSubIds,
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "템플릿" }));
+    fireEvent.change(await screen.findByLabelText("템플릿 이름"), { target: { value: "캡처 템플릿" } });
+    fireEvent.click(screen.getByTestId("chart-templates-save"));
+    await waitFor(() => expect(createIndicatorTemplate).toHaveBeenCalledTimes(1));
+    expect(savedTemplate).toBeDefined();
+    cleanup();
+
+    // 저장된 template을 서버 응답처럼 그대로 되돌린다(decodeTemplate가 실제로
+    // 태우는 값과 동일 — encode/decode 경계를 우회하지 않는다).
+    const savedRecord = templateRecord({ template: savedTemplate! });
+
+    // "다른 화면"에서 연다: 현재 선택은 캡처 당시와 전혀 다르다.
+    const { onApplied } = renderTemplates({
+      port: fakePort({ listIndicatorTemplates: vi.fn(async () => [savedRecord]) }),
+      mainIndicatorIds: ["EMA"],
+      subIndicatorIds: ["ATR", "OBV", "VWAP"],
+      knownIndicatorIds: new Set(["SMA", "RSI", "MACD", "EMA", "ATR", "OBV", "VWAP"]),
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "템플릿" }));
+    fireEvent.click(await screen.findByTestId(`chart-templates-apply-${savedRecord.id}`));
+
+    await waitFor(() => expect(onApplied).toHaveBeenCalledTimes(1));
+    const result: TemplateApplyResult = onApplied.mock.calls[0]?.[0];
+
+    // 지표 구성: 캡처 당시의 세트와 정확히 일치한다(적용 시점 화면의 EMA/ATR/OBV/VWAP가 아니다).
+    expect(result.indicatorIds).toEqual([...capturedMainIds, ...capturedSubIds]);
+    // 페인 배치: 캡처 당시 3-way 균등분할(main + 2 sub) 그대로 재현된다.
+    expect(result.paneHeightRatios.main).toBeCloseTo(1 / 3, 10);
+    expect(result.paneHeightRatios["sub-RSI"]).toBeCloseTo(1 / 3, 10);
+    expect(result.paneHeightRatios["sub-MACD"]).toBeCloseTo(1 / 3, 10);
+    expect(Object.keys(result.paneHeightRatios)).toHaveLength(3);
+  });
+
+  // --- task-2664: negative — 교차 테넌트로 저장된(혹은 삭제된) 템플릿을 적용
+  // 시도하면 목록에 애초에 나타나지 않아(서버가 404 동형으로 접어 목록에서
+  // 제외) 적용 버튼 자체가 없다 — 화면이 "낙관적으로" 남아있던 적용 버튼을
+  // 눌러 조용히 실패하는 경로가 없음을 증명한다(negative).
+  it("negative: 목록에 없는 템플릿(교차 테넌트·삭제됨)은 적용 버튼이 애초에 렌더되지 않는다", async () => {
+    renderTemplates({ port: fakePort({ listIndicatorTemplates: vi.fn(async () => []) }) });
+
+    fireEvent.click(screen.getByRole("button", { name: "템플릿" }));
+    await waitFor(() => expect(screen.getByText("저장된 템플릿이 없습니다.")).toBeInTheDocument());
+    expect(screen.queryByTestId(/chart-templates-apply-/)).not.toBeInTheDocument();
   });
 });
