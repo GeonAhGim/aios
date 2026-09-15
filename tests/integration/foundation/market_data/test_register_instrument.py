@@ -5,13 +5,28 @@ Spec: docs/specs/L4_market_data_positions_ledger_v1.0.md#§4.2, §9.2 LA-14.
 DoD(task-616): 세 유스케이스 각각 감사 이벤트 1:1 + DELIST된 심볼 재등록/
 주문가능 전이 거부, negative: 정규화 불가한 venue_symbol·중복 (venue,
 canonical_symbol, listed_at) → 거부.
+
+DEPTH 감사(task-2723, docs/audit/DEPTH_LA_LB_LC.md#616) D1 판정 보강(task-2971):
+"수치 성능 단언 없음; 게이트 적색 재현 없음". `record_fill`/`replay` 계열
+선례(task-822/task-1038/task-1405)가 절대 지연 단언은 공유 CI의 네트워크/
+디스크 편차로 상시 적색을 만든다는 것을 이미 증명했으므로, 여기서도 절대
+시간을 차단 게이트로 쓰지 않는다 — `register_instrument()` 1회가 소비하는
+순차 DB 왕복 수(`add_query_logger` 계수, LA-23 `count_replay_round_trips`와
+동일 기법)를 구조 회귀 가드로 쓴다(수치 성능 단언). 그 가드가 실제로
+작동함은 왕복을 하나 더 내는 `ReferenceRepository`를 끼워 계수가 상한을
+넘기는 것으로 증명한다(게이트 적색 재현, I-10 — "있다"가 아니라 "작동함이
+증명됨").
 """
+
 from __future__ import annotations
 
 import uuid
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 
+import asyncpg
 import pytest
 
 from src.data.models.base import AssetClass
@@ -151,7 +166,8 @@ async def test_register_instrument_rolls_back_with_audit_failure(pool, refs):
     async with pool.acquire() as conn:
         row = await conn.fetchval(
             "SELECT 1 FROM md_instrument WHERE venue = $1 AND venue_symbol = $2",
-            Venue.KIS_KRX.value, symbol,
+            Venue.KIS_KRX.value,
+            symbol,
         )
     assert row is None
 
@@ -253,8 +269,12 @@ async def test_record_corporate_action_conflict_denied_and_audited(pool, refs, a
     conflicting = action.model_copy(update={"ratio": Decimal("3")})
     with pytest.raises(CorporateActionConflictError):
         await record_corporate_action(
-            pool, conflicting, actor_subject_id=uuid.uuid4(), trace_id=uuid.uuid4(),
-            refs=refs, audit=audit,
+            pool,
+            conflicting,
+            actor_subject_id=uuid.uuid4(),
+            trace_id=uuid.uuid4(),
+            refs=refs,
+            audit=audit,
         )
 
     assert await _event_count(pool, instrument.instrument_id) == 3  # registered + action + denied
@@ -269,14 +289,25 @@ async def test_sync_calendar_writes_one_audit_event_per_call(pool, cal, audit):
     year = _far_future_year()
     days = [
         CalendarDay(
-            venue=Venue.KIS_US, trade_date=date(year, 1, 1), is_trading_day=False,
-            open_at=None, close_at=None, early_close=False, source="TEST",
+            venue=Venue.KIS_US,
+            trade_date=date(year, 1, 1),
+            is_trading_day=False,
+            open_at=None,
+            close_at=None,
+            early_close=False,
+            source="TEST",
         )
     ]
 
     count = await sync_calendar(
-        pool, Venue.KIS_US, year, days,
-        actor_subject_id=uuid.uuid4(), trace_id=uuid.uuid4(), cal=cal, audit=audit,
+        pool,
+        Venue.KIS_US,
+        year,
+        days,
+        actor_subject_id=uuid.uuid4(),
+        trace_id=uuid.uuid4(),
+        cal=cal,
+        audit=audit,
     )
     assert count == 1
     assert await _event_count(pool, calendar_aggregate_id(Venue.KIS_US, year)) == 1
@@ -286,15 +317,103 @@ async def test_sync_calendar_rejects_venue_mismatch_without_writing(pool, cal, a
     year = _far_future_year()
     mismatched = [
         CalendarDay(
-            venue=Venue.KIS_US, trade_date=date(year, 1, 1), is_trading_day=False,
-            open_at=None, close_at=None, early_close=False, source="TEST",
+            venue=Venue.KIS_US,
+            trade_date=date(year, 1, 1),
+            is_trading_day=False,
+            open_at=None,
+            close_at=None,
+            early_close=False,
+            source="TEST",
         )
     ]
 
     with pytest.raises(CalendarVenueMismatchError):
         await sync_calendar(
-            pool, Venue.KIS_KRX, year, mismatched,
-            actor_subject_id=uuid.uuid4(), trace_id=uuid.uuid4(), cal=cal, audit=audit,
+            pool,
+            Venue.KIS_KRX,
+            year,
+            mismatched,
+            actor_subject_id=uuid.uuid4(),
+            trace_id=uuid.uuid4(),
+            cal=cal,
+            audit=audit,
         )
 
     assert await _event_count(pool, calendar_aggregate_id(Venue.KIS_KRX, year)) == 0
+
+
+class _PinnedConnectionPool:
+    """`register_instrument`는 자체 `pool.acquire()`를 여는 시그니처라(모듈
+    docstring 5-9행), 왕복 수를 세려면 미리 얻어 둔 커넥션 하나만 돌려주는
+    풀 대역이 필요하다(LA-23 `count_replay_round_trips`와 동일 기법,
+    `tests/integration/foundation/market_data/perf_replay_support.py`)."""
+
+    def __init__(self, conn: asyncpg.Connection) -> None:
+        self._conn = conn
+
+    @asynccontextmanager
+    async def acquire(self) -> AsyncIterator[asyncpg.Connection]:
+        yield self._conn
+
+
+# 실측 왕복 수를 그대로 상한으로 못박는다(LA-23 `_MAX_REPLAY_ROUND_TRIPS`와
+# 동일 관례) — register()의 중복확인 SELECT/INSERT md_instrument/INSERT
+# md_symbol_alias, 트랜잭션 BEGIN/COMMIT, append_event_in()의 advisory
+# lock/prev_row SELECT/INSERT로 구성된다. 늘리는 방향의 수정 금지 — 늘리면
+# 왕복 수 회귀를 이 게이트가 못 잡는다.
+_MAX_REGISTER_INSTRUMENT_ROUND_TRIPS = 8
+
+
+async def _count_register_instrument_round_trips(pool, *, refs, audit) -> int:
+    """`register_instrument()` 1회가 소비하는 순차 DB 왕복 수(구조 회귀
+    가드). 같은 커넥션에서 워밍업 호출 1회(다른 심볼)를 먼저 흘려 asyncpg
+    코덱 조회를 흡수시킨 뒤, 두 번째 호출만 쿼리 로거로 센다(LA-23 선례와
+    동일 이유 — perf_replay_support.py 모듈 docstring)."""
+    async with pool.acquire() as conn:
+        pinned = _PinnedConnectionPool(conn)
+        warmup_cmd = _register_cmd(venue_symbol=_krx_symbol(), listed_at=datetime.now(timezone.utc))
+        await register_instrument(pinned, warmup_cmd, refs=refs, audit=audit)
+
+        queries: list[str] = []
+
+        def _log(record: object) -> None:
+            queries.append(getattr(record, "query", ""))
+
+        conn.add_query_logger(_log)
+        try:
+            cmd = _register_cmd(venue_symbol=_krx_symbol(), listed_at=datetime.now(timezone.utc))
+            await register_instrument(pinned, cmd, refs=refs, audit=audit)
+        finally:
+            conn.remove_query_logger(_log)
+
+    return len(queries)
+
+
+async def test_register_instrument_round_trip_count_within_structural_ceiling(pool, refs, audit):
+    """수치 성능 단언(DEEPEN 616): 절대 지연 대신 순차 DB 왕복 수 상한을
+    쓴다 — record_fill/replay 선례(task-822/task-1038/task-1405)가 절대 ms
+    단언은 공유 CI의 네트워크/디스크 편차로 상시 적색을 만든다는 것을 이미
+    증명했고, §9.2 LA-14는 이 유스케이스에 절대 지연 목표를 못박아 두지도
+    않는다."""
+    round_trip_count = await _count_register_instrument_round_trips(pool, refs=refs, audit=audit)
+    print(f"register_instrument round trips: {round_trip_count}")
+    assert round_trip_count <= _MAX_REGISTER_INSTRUMENT_ROUND_TRIPS
+
+
+class _ChattyReferenceRepository(PostgresReferenceRepository):
+    """negative test 전용 — `register()`가 실제 등록 전에 왕복을 하나 더
+    낸다(구조 회귀의 최소 재현)."""
+
+    async def register(self, conn: asyncpg.Connection, cmd: RegisterInstrumentCommand):
+        await conn.fetchval("SELECT 1")
+        return await super().register(conn, cmd)
+
+
+async def test_round_trip_gate_detects_extra_query_in_register_instrument(pool, audit):
+    """게이트 적색 재현(DEEPEN 616): 왕복을 하나 더 내는 `ReferenceRepository`
+    를 끼우면 위 구조 회귀 가드가 상한을 넘겨 실제로 적색이 된다는 증명
+    (I-10: 게이트는 "있다"가 아니라 "작동함이 증명됨")."""
+    chatty = _ChattyReferenceRepository(pool)
+    round_trip_count = await _count_register_instrument_round_trips(pool, refs=chatty, audit=audit)
+    assert round_trip_count == _MAX_REGISTER_INSTRUMENT_ROUND_TRIPS + 1
+    assert round_trip_count > _MAX_REGISTER_INSTRUMENT_ROUND_TRIPS
