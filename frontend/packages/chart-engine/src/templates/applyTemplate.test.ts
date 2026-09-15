@@ -292,7 +292,7 @@ describe("D3 — property-based invariants & multi-instance isolation", () => {
     expect(resultB.paneModel.panes).toHaveLength(2);
     // Mutating B's plan array must never affect A's — proves apply() built
     // two independent result objects, not shared/aliased internals.
-    (resultB.plan.toRegister as { indicatorId: string }[]).push({ indicatorId: "ind.intruder" });
+    (resultB.plan.toRegister as unknown as { indicatorId: string }[]).push({ indicatorId: "ind.intruder" });
     expect(resultA.plan.toRegister).toEqual([{ indicatorId: "ind.sma", paneId: "main", params: { period: 20 } }]);
   });
 });
