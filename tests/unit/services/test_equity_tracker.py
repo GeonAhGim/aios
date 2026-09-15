@@ -9,6 +9,8 @@ from datetime import date, datetime, timedelta, timezone, tzinfo
 from decimal import Decimal
 from unittest.mock import patch
 
+from typing_extensions import Self
+
 from src.services.execution_loop.equity_tracker import ExecutionEquityTracker, _utc_today
 
 

@@ -65,6 +65,7 @@ from typing import Any
 
 import asyncpg
 import pytest
+from pydantic import BaseModel
 
 from src.core.risk.decision import RiskDecision, RiskOutcome
 from src.foundation.risk_gate.adapters.postgres_decision_repository import (
@@ -155,7 +156,7 @@ async def test_pre_submit_gate_round_trips_exact(pool):
 class _ChattyRecorder(RiskDecisionRecorder):
     """negative 전용 — 기록 전에 불필요한 왕복 하나를 더 낸다."""
 
-    async def record(self, decision, inputs, *, actor: str) -> None:  # type: ignore[override]
+    async def record(self, decision: RiskDecision, inputs: BaseModel, *, actor: str) -> None:
         async with self._pool.acquire() as conn:
             await conn.fetchval("SELECT 1")
         await super().record(decision, inputs, actor=actor)

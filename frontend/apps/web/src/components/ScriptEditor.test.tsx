@@ -2,6 +2,7 @@ import "@testing-library/jest-dom/vitest";
 import { cleanup, render, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ScriptEditor } from "./ScriptEditor";
+import { perfBudgetMs } from "../test/perfBudget";
 
 afterEach(cleanup);
 
@@ -111,7 +112,7 @@ describe("ScriptEditor", () => {
     expect(screen.getByTestId("script-editor-marker-199")).toHaveTextContent("SCRIPT_ERROR_199");
     // PortfolioPage.test.tsx의 40장 카드 케이스와 동일한 관용(15s급) 예산 안에서,
     // O(n^2)로 퇴행하면(1000줄 x 200마커) 수 초를 넘어가므로 그 전에 잡힌다.
-    expect(elapsed).toBeLessThan(5000);
+    expect(elapsed).toBeLessThan(perfBudgetMs(5000));
   });
 
   it("게이트 적색 재현: line/col/message가 완전히 동일한 마커 두 개가 와도 React key 충돌로 하나가 사라지지 않는다", () => {

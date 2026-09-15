@@ -39,7 +39,13 @@ from src.core.safety.circuit_breaker import (
 )
 from src.core.safety.data_freshness import DataFreshnessTracker
 from src.core.safety.metrics_collector import ApiCallTracker
+from src.exchanges.common.adapter import ExchangeAdapter
 from src.exchanges.common.instrumented_adapter import InstrumentedAdapter
+
+
+def _as_exchange_adapter(fake: object) -> ExchangeAdapter:
+    """The fakes implement only the slice of the adapter surface the wrapper touches."""
+    return cast(ExchangeAdapter, fake)
 
 
 def test_no_observations_returns_none() -> None:
@@ -115,7 +121,7 @@ async def test_get_ohlcv_records_last_candle_close_time_via_instrumented_adapter
     ]
     freshness = DataFreshnessTracker()
     wrapped = InstrumentedAdapter(
-        _FakeAdapterWithOhlcv(candles),  # type: ignore[arg-type]
+        _as_exchange_adapter(_FakeAdapterWithOhlcv(candles)),
         ApiCallTracker(),
         freshness=freshness,
     )
@@ -130,7 +136,7 @@ async def test_get_ohlcv_without_freshness_arg_does_not_raise() -> None:
     close_time = datetime(2026, 9, 4, 0, 0, 0, tzinfo=timezone.utc)
     candles = [_FakeCandle("bitget", "BTC/USDT", close_time)]
     wrapped = InstrumentedAdapter(
-        _FakeAdapterWithOhlcv(candles),  # type: ignore[arg-type]
+        _as_exchange_adapter(_FakeAdapterWithOhlcv(candles)),
         ApiCallTracker(),
     )
 
@@ -142,7 +148,7 @@ async def test_get_ohlcv_without_freshness_arg_does_not_raise() -> None:
 async def test_get_ohlcv_empty_result_does_not_record() -> None:
     freshness = DataFreshnessTracker()
     wrapped = InstrumentedAdapter(
-        _FakeAdapterWithOhlcv([]),  # type: ignore[arg-type]
+        _as_exchange_adapter(_FakeAdapterWithOhlcv([])),
         ApiCallTracker(),
         freshness=freshness,
     )
@@ -157,7 +163,7 @@ async def test_get_ohlcv_rejects_naive_close_time_from_candle() -> None:
     candles = [_FakeCandle("bitget", "BTC/USDT", datetime(2026, 9, 4, 0, 0, 0))]
     freshness = DataFreshnessTracker()
     wrapped = InstrumentedAdapter(
-        _FakeAdapterWithOhlcv(candles),  # type: ignore[arg-type]
+        _as_exchange_adapter(_FakeAdapterWithOhlcv(candles)),
         ApiCallTracker(),
         freshness=freshness,
     )

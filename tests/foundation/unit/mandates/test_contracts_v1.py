@@ -41,6 +41,7 @@ from src.foundation.mandates.contracts.v1 import (
     compliance_decision_from_policy_decision,
     verdict_for_outcome,
 )
+from tests.support.frozen import assign_attr
 
 NOW = datetime(2026, 9, 7, tzinfo=timezone.utc)
 

@@ -43,6 +43,7 @@ from src.foundation.mandates.contracts.v1 import ComplianceVerdict
 from src.foundation.mandates.domain.evaluator import evaluate_bundle
 from src.foundation.mandates.domain.rule_bundle import RuleBundle, RuleSpec
 from src.foundation.mandates.domain.rules import short_sale, wash_trade
+from tests.support.frozen import assign_attr
 
 _FORBIDDEN_IMPORTS = ("datetime", "random", "httpx", "asyncpg", "openai")
 _NOW = datetime(2026, 9, 8, 0, 0, tzinfo=timezone.utc)

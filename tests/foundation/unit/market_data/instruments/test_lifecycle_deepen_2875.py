@@ -38,6 +38,7 @@ from src.foundation.market_data.domain.instruments.lifecycle import (
     AUDIT_EVENT_INSTRUMENT_LISTED,
     AUDIT_EVENT_INSTRUMENT_RESUMED,
     AUDIT_EVENT_LISTING_REPLACED,
+    LifecycleEvent,
     LifecycleTransitionError,
     RelistRequiresNewInstrumentError,
     audit_event_for,
@@ -119,7 +120,7 @@ def test_transition_and_audit_event_for_meet_latency_budget() -> None:
     잡아(느린 CI 머신 대비) 회귀(예: 선형탐색으로의 퇴화)만 잡는다."""
     iterations = 20_000
     budget_sec = 1.0  # 실측 로컬 <0.05s
-    calls = [
+    calls: list[tuple[InstrumentLifecycle, LifecycleEvent]] = [
         (InstrumentLifecycle.PENDING, "listed"),
         (InstrumentLifecycle.ACTIVE, "symbol_changed"),
         (InstrumentLifecycle.ACTIVE, "halted"),
@@ -183,7 +184,10 @@ def test_gate_red_blocks_illegal_transition_mid_replay_without_mutating_flow() -
     assert state == InstrumentLifecycle.DELISTED
 
     # DELISTED에서 그 외 모든 이벤트도 전부 적색 — 종단 상태 고정 증명.
-    for event in ("listed", "symbol_changed", "halted", "resumed", "delisted"):
+    terminal_events: tuple[LifecycleEvent, ...] = (
+        "listed", "symbol_changed", "halted", "resumed", "delisted"
+    )
+    for event in terminal_events:
         with pytest.raises(LifecycleTransitionError):
             transition(state, event)
     assert state == InstrumentLifecycle.DELISTED
@@ -194,7 +198,7 @@ def test_gate_red_audit_event_matches_transition_outcome_along_happy_path() -> N
     `transition`과 같은 (state, event) 판정 기준으로 정확히 대응하는 감사
     이벤트 이름을 낸다 — 두 함수의 판정이 어긋나 감사 로그 없이 전이가
     통과하는 구멍이 없음을 증명한다."""
-    sequence: list[tuple[InstrumentLifecycle, str, str]] = [
+    sequence: list[tuple[InstrumentLifecycle, LifecycleEvent, str]] = [
         (InstrumentLifecycle.PENDING, "listed", AUDIT_EVENT_INSTRUMENT_LISTED),
         (InstrumentLifecycle.ACTIVE, "symbol_changed", AUDIT_EVENT_LISTING_REPLACED),
         (InstrumentLifecycle.ACTIVE, "halted", AUDIT_EVENT_INSTRUMENT_HALTED),
@@ -210,7 +214,7 @@ def test_gate_red_audit_event_matches_transition_outcome_along_happy_path() -> N
 
 # ---- 리플레이 결정론 + 동시 다중 인스턴스(D3) ----
 
-_ALL_LEGAL_CALLS: tuple[tuple[InstrumentLifecycle, str], ...] = (
+_ALL_LEGAL_CALLS: tuple[tuple[InstrumentLifecycle, LifecycleEvent], ...] = (
     (InstrumentLifecycle.PENDING, "listed"),
     (InstrumentLifecycle.ACTIVE, "symbol_changed"),
     (InstrumentLifecycle.ACTIVE, "halted"),
@@ -239,8 +243,8 @@ def test_concurrent_instances_do_not_cross_contaminate() -> None:
     오염시키지 않는다 — 모듈 레벨 가변 상태가 없다는 동시성 증거(D3)."""
 
     def _run(
-        pair: tuple[InstrumentLifecycle, str],
-    ) -> tuple[tuple[InstrumentLifecycle, str], InstrumentLifecycle, str]:
+        pair: tuple[InstrumentLifecycle, LifecycleEvent],
+    ) -> tuple[tuple[InstrumentLifecycle, LifecycleEvent], InstrumentLifecycle, str]:
         state, event = pair
         result_state = transition(state, event)
         result_audit = audit_event_for(state, event)

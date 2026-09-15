@@ -69,7 +69,8 @@ def test_rule_protocol_matches_plain_function_signature():
         return RuleResult(rule_id="noop", outcome=RiskOutcome.ALLOW, unit="pct")
 
     conforming: Rule = _allow_all  # mypy가 시그니처 불일치를 잡아낸다
-    result = conforming(object(), object())  # type: ignore[arg-type]
+    opaque: Any = object()
+    result = conforming(opaque, opaque)
     assert result.outcome == RiskOutcome.ALLOW
 
 
@@ -129,6 +130,7 @@ def test_gate_stays_red_when_a_rule_raises_mid_evaluation():
 
     rules: list[Rule] = [_ok_rule, _broken_rule]
     results: list[RuleResult] = []
+    opaque: Any = object()
     for rule in rules:
         try:
             result = rule(cast(Any, object()), cast(Any, object()))

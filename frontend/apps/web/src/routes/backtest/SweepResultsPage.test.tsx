@@ -11,6 +11,7 @@ import {
   type SweepResultView,
 } from "@aios/api-client";
 import { SweepResultsPage, type SweepResultsPageProps } from "./SweepResultsPage";
+import { perfBudgetMs } from "../../test/perfBudget";
 
 vi.mock("@aios/shared-hooks", () => ({
   useMe: () => ({ data: { email: "a@example.com", isPlatformAdmin: false } }),
@@ -280,7 +281,7 @@ describe("SweepResultsPage", () => {
     await screen.findByTestId(`sweep-cell-${size - 1}-${size - 1}`);
     const elapsedMs = performance.now() - startedAt;
 
-    expect(elapsedMs).toBeLessThan(4000);
+    expect(elapsedMs).toBeLessThan(perfBudgetMs(4000));
     expect(screen.getByTestId("sweep-cell-0-0")).toHaveTextContent("0");
     expect(document.querySelectorAll('td[data-testid^="sweep-cell-"]')).toHaveLength(size * size);
   });

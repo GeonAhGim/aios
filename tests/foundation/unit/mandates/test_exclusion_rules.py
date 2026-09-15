@@ -47,6 +47,7 @@ from src.foundation.mandates.domain.models import (
     PolicyEvaluationSubject,
     PolicyOutcome,
 )
+from tests.support.frozen import assign_attr
 
 NOW = datetime(2026, 9, 7, tzinfo=timezone.utc)
 

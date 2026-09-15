@@ -5,6 +5,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ScriptEditorPage, type CompileScript } from "./ScriptEditorPage";
+import { perfBudgetMs } from "../../test/perfBudget";
 
 vi.mock("@aios/shared-hooks", () => ({
   useMe: () => ({ data: { email: "a@example.com", isPlatformAdmin: false } }),
@@ -191,7 +192,7 @@ describe("ScriptEditorPage", () => {
     // waitFor의 폴링·React 렌더 오버헤드까지 포함한 왕복 시간이라 여유를 크게
     // 둔다 — 목적은 정밀한 임계값이 아니라 동기 블로킹(예: 컴파일 결과를 받고도
     // 렌더가 초 단위로 밀리는 회귀)이 생기면 이 값이 신호를 준다는 것이다.
-    expect(elapsedMs).toBeLessThan(3000);
+    expect(elapsedMs).toBeLessThan(perfBudgetMs(3000));
   });
 
   // task-618 계열 DEEPEN과 동일 기법: showGenericError = isError && !compileErrorDetails

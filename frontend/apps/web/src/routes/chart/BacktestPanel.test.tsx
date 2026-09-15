@@ -6,6 +6,7 @@ import { ApiError, buildApiError } from "@aios/api-client";
 import type { BacktestFillView, QuickBacktestResultView } from "@aios/api-client";
 import type { CandlestickPoint } from "@aios/ui-web";
 import { BacktestPanel, type RunQuickBacktest } from "./BacktestPanel";
+import { perfBudgetMs } from "../../test/perfBudget";
 
 const T0 = Math.floor(Date.parse("2026-09-06T00:00:00Z") / 1000);
 const T1 = T0 + 3600;
@@ -267,7 +268,7 @@ describe("BacktestPanel", () => {
     await screen.findByTestId("backtest-markers-overlay");
     const elapsedMs = performance.now() - startedAt;
 
-    expect(elapsedMs).toBeLessThan(3000);
+    expect(elapsedMs).toBeLessThan(perfBudgetMs(3000));
     expect(screen.getAllByRole("img")).toHaveLength(500);
   });
 });

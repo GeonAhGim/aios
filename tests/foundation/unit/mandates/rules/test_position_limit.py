@@ -39,6 +39,7 @@ from src.foundation.mandates.contracts.v1 import ComplianceVerdict
 from src.foundation.mandates.domain.evaluator import evaluate_bundle
 from src.foundation.mandates.domain.rule_bundle import RuleBundle, RuleSpec
 from src.foundation.mandates.domain.rules import position_limit
+from tests.support.frozen import assign_attr
 
 _MAX_POSITION = Decimal("50000.00")
 _NOW = datetime(2026, 9, 10, tzinfo=timezone.utc)

@@ -9,6 +9,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { ChartPanes } from "./ChartPanes";
 import type { OverlayPlotSpecOverrides, OverlaySeriesByOutput } from "./ChartPlotLayer";
 import { buildInitialModel, MAIN_PANE_ID, subPaneId } from "./chartPanesModel";
+import { perfBudgetMs } from "../../test/perfBudget";
 
 // CandlesPage.test.tsx/ChartPage.test.tsx의 관용과 동일 — lightweight-charts는
 // jsdom에서 canvas를 요구하므로 실 렌더러 대신 전달받은 data.length만 노출하는
@@ -303,7 +304,7 @@ describe("ChartPanes — 성능 단언(DEEPEN task-3092)", () => {
     const elapsedMs = performance.now() - startedAt;
 
     expect(screen.getAllByTestId(/^chart-pane-ratio-/).length).toBe(21);
-    expect(elapsedMs).toBeLessThan(2000);
+    expect(elapsedMs).toBeLessThan(perfBudgetMs(2000));
   });
 });
 

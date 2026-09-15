@@ -39,6 +39,7 @@ from src.foundation.mandates.contracts.v1 import ComplianceVerdict
 from src.foundation.mandates.domain.evaluator import evaluate_bundle
 from src.foundation.mandates.domain.rule_bundle import RuleBundle, RuleSpec
 from src.foundation.mandates.domain.rules.restricted_list import RULE_ID, check
+from tests.support.frozen import assign_attr
 
 _NOW = datetime(2026, 9, 10, tzinfo=timezone.utc)
 

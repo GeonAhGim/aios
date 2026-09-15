@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import { createEmptyLayoutModel, encodeLayoutModel, type ChartLayoutModel } from "@aios/chart-engine/src/layout/layoutModel";
 import type { ChartingLayoutRecord, ChartingPort } from "@aios/chart-engine/src/layout/persistence";
 import { useChartLayout, type ChartViewSnapshot, type UseChartLayoutOptions } from "./useChartLayout";
+import { perfBudgetMs } from "../../test/perfBudget";
 
 // persistence.test.ts와 동일 관용: routeApiError는 statusCode/errorCode 덕타이핑으로
 // 분류하므로(errorRouting.ts) api-client의 ApiError를 임포트할 필요가 없다.
@@ -401,7 +402,7 @@ describe("수치 성능·게이트 적색 재현·D3 (DEEPEN task-3081)", () => 
     // ChartPage.test.tsx의 VISIBLE_CANDLE_COUNT 성능 단언과 동일 관용: jsdom
     // 유닛테스트 환경의 waitFor 폴링 오버헤드까지 포함한 느슨한 예산(2s)이지만,
     // 정렬 로직이 O(n^2)로 퇴행하거나 재렌더 루프에 빠지면 이 상한을 넘는다.
-    expect(elapsedMs).toBeLessThan(2000);
+    expect(elapsedMs).toBeLessThan(perfBudgetMs(2000));
     // updatedAt이 가장 늦은 마지막 레코드가 골라졌는지까지 확인한다(단순 완주가 아니라 정확성도 성능과 함께).
     expect(result.current.layoutId).toBe("layout-499");
   });
