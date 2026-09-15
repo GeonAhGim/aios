@@ -31,6 +31,7 @@ import sys
 import time
 from collections.abc import Callable
 from pathlib import Path
+from typing import Any
 
 from scripts.backup.base_backup import run_base_backup, server_url
 from scripts.backup.restore_drill import LOCAL_REPORT_PATH, PM_REPORT_PATH, run_drill, write_report
@@ -51,7 +52,7 @@ def _now() -> dt.datetime:
     return dt.datetime.now(dt.timezone.utc)
 
 
-def _finish(steps: dict[str, dict], started: dt.datetime) -> dict:
+def _finish(steps: dict[str, dict[str, Any]], started: dt.datetime) -> dict[str, Any]:
     return {
         "started_at": started.isoformat(timespec="seconds"),
         "finished_at": _now().isoformat(timespec="seconds"),
@@ -69,18 +70,18 @@ def run_backup_verify(
     dsn: str,
     repo_root: Path = ROOT,
     verify_wal_write: bool = False,
-    base_backup: Callable[[Path, str], dict] = run_base_backup,
+    base_backup: Callable[[Path, str], dict[str, Any]] = run_base_backup,
     read_wal: Callable[[str], dict[str, str]] = read_wal_settings,
     verify_write: Callable[[str, Path], str | None] = verify_archiving_advances,
-    drill: Callable[..., dict] = run_drill,
-) -> dict:
+    drill: Callable[..., dict[str, Any]] = run_drill,
+) -> dict[str, Any]:
     """세 단계(베이스 백업 -> WAL 아카이빙 검증 -> 복구 리허설)를 순서대로 실행한다.
     각 단계는 주입 가능한 콜러블이라 실제 pg_basebackup/asyncpg/pg_ctl 없이도 성공/실패
     경로를 단위 테스트로 검증할 수 있다(각 단계 자체의 세부 로직은 이미
     scripts/backup/*.py의 전용 테스트가 증명하므로 여기서는 순서·단락(short-circuit)
     만 검증 대상이다)."""
     started = _now()
-    steps: dict[str, dict] = {}
+    steps: dict[str, dict[str, Any]] = {}
 
     try:
         manifest = base_backup(backup_dest_dir, dsn)
@@ -116,7 +117,7 @@ def run_backup_verify(
 def run_scheduled(
     *,
     interval_hours: float,
-    run_once: Callable[[], dict],
+    run_once: Callable[[], dict[str, Any]],
     report_paths: list[Path],
     sleep: Callable[[float], None] = time.sleep,
     max_iterations: int | None = None,
@@ -184,7 +185,7 @@ def main(argv: list[str] | None = None) -> int:
         else [LOCAL_REPORT_PATH, PM_REPORT_PATH]
     )
 
-    def run_once() -> dict:
+    def run_once() -> dict[str, Any]:
         return run_backup_verify(
             backup_dest_dir=Path(args.dest_dir),
             archive_dir=Path(args.archive_dir),
