@@ -304,6 +304,37 @@ async def test_unbalanced_entry_fails_at_commit(raw_conn):
             )
 
 
+async def test_multi_currency_entry_fails_at_commit(raw_conn):
+    """§4.4 deferred constraint trigger의 두 번째 판정 분기 — 같은 entry에
+    서로 다른 통화의 posting line이 섞이면(금액이 맞아떨어져도) COMMIT
+    시점에 실패해야 한다. `test_unbalanced_entry_fails_at_commit`은 차대
+    불일치만 exercise하고 이 분기는 커버하지 않았다."""
+    audit_event_id = await _insert_audit_event(raw_conn)
+    entry_id = await _insert_entry(raw_conn, audit_event_id=audit_event_id)
+    accounts = await raw_conn.fetch(
+        "SELECT account_id, account_code FROM ledger_account WHERE account_code = ANY($1::text[])",
+        [PLATFORM_CASH_CLEARING, PLATFORM_COMMISSION_REVENUE],
+    )
+    account_id = {row["account_code"]: row["account_id"] for row in accounts}
+
+    with pytest.raises(asyncpg.RaiseError, match="more than one currency"):
+        async with raw_conn.transaction():
+            await raw_conn.execute(
+                "INSERT INTO ledger_posting_line "
+                "(entry_id, line_no, account_id, side, amount, currency) "
+                "VALUES ($1, 1, $2, 'DEBIT', 100.00, 'KRW')",
+                entry_id,
+                account_id[PLATFORM_CASH_CLEARING],
+            )
+            await raw_conn.execute(
+                "INSERT INTO ledger_posting_line "
+                "(entry_id, line_no, account_id, side, amount, currency) "
+                "VALUES ($1, 2, $2, 'CREDIT', 100.00, 'USDT')",
+                entry_id,
+                account_id[PLATFORM_COMMISSION_REVENUE],
+            )
+
+
 async def test_balanced_entry_commits_successfully(raw_conn):
     """위 테스트의 대조군 — deferred 트리거가 균형 잡힌 분개까지 잘못
     막지 않는지 확인한다."""
