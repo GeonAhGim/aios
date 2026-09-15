@@ -34,6 +34,11 @@ from src.data.models.base import AssetClass
 from src.data.models.trading import Order, OrderSide, OrderType
 from src.exchanges.nh.adapter import NHAdapter
 from src.exchanges.nh.websocket_parsing import parse_mc_ticker_frame
+from tests.integration.test_nh_adapter import (
+    _unguarded_cancel_order,
+    _unguarded_modify_order,
+    _unguarded_place_order,
+)
 
 # ---------------------------------------------------------------------------
 # 고정 참조(FROZEN REFERENCE) -- 2026-09-16, task-2615, curl + json.load로
@@ -187,7 +192,7 @@ async def test_place_order_body_covers_confirmed_required_fields():
         return httpx.Response(200, json=_success({"mkt_orr_no": 555}))
 
     adapter = _make_adapter(lambda request: _route(request, {"/krstock/order/v1/cashBuy": handler}))
-    result = await NHAdapter.place_order.__wrapped__(adapter, _order())  # type: ignore[attr-defined]
+    result = await _unguarded_place_order(adapter, _order())
 
     assert _CASHBUY_REQUIRED <= captured.keys(), (
         f"cashBuy body가 공식 openapi.json 필수 필드를 다 채우지 못함: "
@@ -205,7 +210,7 @@ async def test_modify_order_body_covers_confirmed_required_fields():
         return httpx.Response(200, json=_success({"mkt_orr_no": 777}))
 
     adapter = _make_adapter(lambda request: _route(request, {"/krstock/order/v1/modify": handler}))
-    result = await NHAdapter.modify_order.__wrapped__(  # type: ignore[attr-defined]
+    result = await _unguarded_modify_order(
         adapter, "005930:555", price=Decimal("71000"), size=Decimal("5")
     )
 
@@ -224,7 +229,7 @@ async def test_cancel_order_body_covers_confirmed_required_fields():
         return httpx.Response(200, json=_success({"mkt_orr_no": 999}))
 
     adapter = _make_adapter(lambda request: _route(request, {"/krstock/order/v1/cancel": handler}))
-    ok = await NHAdapter.cancel_order.__wrapped__(adapter, "005930:555")  # type: ignore[attr-defined]
+    ok = await _unguarded_cancel_order(adapter, "005930:555")
 
     assert _CANCEL_REQUIRED <= captured.keys(), (
         f"cancel body가 공식 openapi.json 필수 필드를 다 채우지 못함: "

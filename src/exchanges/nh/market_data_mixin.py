@@ -15,10 +15,10 @@ SDK 스니펫에 요청 파라미터만 있어 응답 필드를 KIS 관례로 �
   `bidp_rsqn{1..10}`)도 같은 응답에 포함된다 — 별도 호가 조회 엔드포인트가
   없다는 이전 추정이 맞았다(currentPrice가 시세+호가를 겸함).
 
-`subscribe_ticker_stream()`(2026-09-16, task-2615): `websocket_parsing.py`
-모듈 docstring 참조 — 공식 openapi.json의 `x-realtime-channels`로
-`tr_cd="mc"` 채널의 데이터 프레임 필드 스키마가 확인돼 더 이상
-fail-closed로 남길 필요가 없다.
+`subscribe_ticker_stream()` (2026-09-16, task-2615): see the
+`websocket_parsing.py` module docstring -- the official openapi.json's
+`x-realtime-channels` confirmed the `tr_cd="mc"` channel's data-frame
+field schema, so it no longer needs to stay fail-closed.
 """
 
 # ratchet-allow: unverified-endpoint fields raise NotImplementedError instead of guessing (I2)
@@ -40,10 +40,10 @@ _TICKER_TR_CD = "mc"
 
 
 class _WebSocketSubscribingClient(Protocol):
-    """`subscribe_ticker_stream()`이 같은 인스턴스의 `NHWebSocketMixin.
-    connect_and_subscribe()`를 호출하지만, 이 파일 안에서는 그 계약이
-    보이지 않으므로 명시한다(trading_mixin.py `_BalanceReadingClient`와
-    동일 패턴)."""
+    """`subscribe_ticker_stream()` calls `NHWebSocketMixin.
+    connect_and_subscribe()` on the same instance, but that contract isn't
+    visible from within this file, so it is declared explicitly here (same
+    pattern as `_BalanceReadingClient` in trading_mixin.py)."""
 
     async def connect_and_subscribe(
         self,
@@ -145,17 +145,19 @@ class NHMarketDataMixin:
         *,
         connect_fn: ConnectFn = _connect,
     ) -> None:
-        """02e 스펙 §4 — 2026-09-16(task-2615) 재확인: 자산군 공식
-        openapi.json의 `x-realtime-channels`로 `tr_cd="mc"`(국내주식
-        실시간체결가통합) 데이터 프레임의 `body` 필드 스키마가 확인됐다
-        (websocket_parsing.py 모듈 docstring, docs/exchanges/NH_GAPS.md §2
-        참조) — 이전 세션(task-114)의 "SDK가 파싱을 위임해 미확인" 결론은
-        SDK 소스만 봤을 때 얘기였고, openapi.json 원문에는 실제로 채널별
-        필드 목록과 예시가 있었다. `mb`(호가)/`d2`(체결통보) 채널도
-        스키마는 확인됐지만 이를 소비할 확장 메서드가 아직 없어 이번
-        리프 스콥 밖(NH_GAPS.md §2-3). `connect_fn`은 KIS
-        `subscribe_ticker_stream()`과 동일하게 테스트 주입용(기본값은 실제
-        WebSocket 연결)."""
+        """02e spec S4 -- 2026-09-16 (task-2615) re-confirmed: the official
+        asset-class openapi.json's `x-realtime-channels` confirmed the
+        `body` field schema of `tr_cd="mc"` (domestic consolidated
+        real-time trade price) data frames (see websocket_parsing.py
+        module docstring, docs/exchanges/NH_GAPS.md S2). The earlier
+        session's (task-114) "unconfirmed, SDK delegates parsing"
+        conclusion only held for the SDK source; the openapi.json itself
+        actually has per-channel field lists and examples. `mb` (order
+        book) / `d2` (execution notice) channels also have a confirmed
+        schema but no consuming method yet, so they are out of this
+        leaf's scope (NH_GAPS.md S2-3). `connect_fn` is test-injection
+        only, same as KIS's `subscribe_ticker_stream()` (default is a
+        real WebSocket connection)."""
 
         async def on_raw_frame(raw: str) -> None:
             ticker = parse_mc_ticker_frame(raw)

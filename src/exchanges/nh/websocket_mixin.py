@@ -18,19 +18,22 @@ github.com/PLUG-OpenAPI/nhplug-sdk, 도메인 명세가 SSOT)를 직접 확인�
   구독 ack와 데이터 푸시는 헤더에 `tr_type`/`rsp_cd`가 있는지로 구분한다
   (있으면 ack, 없으면 데이터 — realtime.py 소스 확인).
 
-2026-09-16(task-2615) 후속 조사로 위 "아직 미확인" 상태가 해소됐다 —
-자산군 `openapi.json` 루트의 `x-realtime-channels` 키(SDK가 아니라
-openapi.json 쪽에 있었다)에 채널별 `body` 필드 목록과 `push_example`이
-실제로 문서화돼 있었다(`curl`로 원문을 내려받아 확인, 상세는
-`websocket_parsing.py` 모듈 docstring/`docs/exchanges/NH_GAPS.md` §2
-참조). 체결가 채널 "mc"의 가격 필드는 `price`(REST의 `stck_prpr`와는
-다른 이름)다. `ExchangeAdapter.subscribe_ticker_stream()`(market_data_mixin.py)
-이 이제 이 모듈의 `connect_and_subscribe()` + `websocket_parsing.
-parse_mc_ticker_frame()`으로 실제 Ticker를 만든다. 이 모듈 자체는 여전히
-"연결·구독·재연결"만 책임진다 — 프레임 파싱은 의도적으로 별도 순수
-함수(websocket_parsing.py)에 둔다(I/O와 파싱 분리). `mb`(호가)/`d2`
-(체결통보) 채널도 스키마는 확인됐지만 이를 소비하는 확장 메서드는
-아직 없다(NH_GAPS.md §2-3, 후속 리프 후보).
+2026-09-16 (task-2615) follow-up investigation resolved the "still
+unconfirmed" state above -- the `x-realtime-channels` key at the root of
+the asset-class `openapi.json` (in the openapi.json, not the SDK) turned
+out to actually document per-channel `body` field lists and
+`push_example`s (confirmed by downloading the raw document with `curl`;
+see the `websocket_parsing.py` module docstring / `docs/exchanges/
+NH_GAPS.md` S2 for details). The trade-price channel "mc"'s price field
+is `price` (a different name from REST's `stck_prpr`).
+`ExchangeAdapter.subscribe_ticker_stream()` (market_data_mixin.py) now
+builds real `Ticker` objects using this module's `connect_and_subscribe()`
+plus `websocket_parsing.parse_mc_ticker_frame()`. This module itself still
+only owns "connect / subscribe / reconnect" -- frame parsing is
+deliberately kept in a separate pure function (websocket_parsing.py),
+separating I/O from parsing. The `mb` (order book) / `d2` (execution
+notice) channels also have a confirmed schema but no consuming method yet
+(NH_GAPS.md S2-3, a candidate for a follow-up leaf).
 """
 
 from __future__ import annotations

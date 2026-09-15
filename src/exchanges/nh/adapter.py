@@ -220,11 +220,13 @@ class NHAdapter(
     공식 스펙으로 "구조적으로 불가능"이 확인됐다** — 가장 가까운
     엔드포인트(dailyOrderExecution)의 응답에 place_order가 반환하는
     식별자(mkt_orr_no)를 조회할 필드가 없다(trading_mixin.py 참조).
-    2026-09-16(task-2615) 재조사 -- 자산군 공식 openapi.json의
-    `x-realtime-channels`로 WebSocket 데이터 프레임(`tr_cd="mc"`, 국내주식
-    실시간체결가통합)의 `body` 필드 스키마가 확인돼 `subscribe_ticker_stream()`
-    을 구현했다(websocket_parsing.py 참조). 주문조회 불가/WS 스콥 결정의
-    상세 근거는 `docs/exchanges/NH_GAPS.md`에 기록한다.
+    2026-09-16 (task-2615) re-investigation -- the asset-class official
+    openapi.json's `x-realtime-channels` confirmed the `body` field schema
+    of WebSocket data frames (`tr_cd="mc"`, domestic consolidated
+    real-time trade price), so `subscribe_ticker_stream()` is now
+    implemented (see websocket_parsing.py). Full reasoning for the
+    order-requery gap and the WS scope decision is in
+    `docs/exchanges/NH_GAPS.md`.
     """
 
     @property
@@ -256,11 +258,12 @@ class NHAdapter(
             supports_spot=True,
             supports_futures=False,
             supports_leverage=False,
-            # 2026-09-16(task-2615) -- x-realtime-channels로 tr_cd="mc"
-            # 데이터 프레임 필드 스키마가 확인돼 subscribe_ticker_stream()이
-            # 실제로 Ticker를 만들어낸다(market_data_mixin.py 참조). mb(호가)/
-            # d2(체결통보)는 스키마만 확인됐고 소비 메서드가 없어 이 플래그가
-            # 의미하는 "지원"의 범위 밖(NH_GAPS.md §2-3).
+            # 2026-09-16 (task-2615) -- x-realtime-channels confirmed the
+            # tr_cd="mc" data-frame field schema, so subscribe_ticker_stream()
+            # now actually produces Ticker objects (see market_data_mixin.py).
+            # mb (order book) / d2 (execution notice) only have a confirmed
+            # schema with no consuming method yet, so they are outside what
+            # this flag means by "supported" (NH_GAPS.md S2-3).
             supports_websocket=True,
             max_leverage=Decimal("1"),
             reference_feed_coverage="medium",
