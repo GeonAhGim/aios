@@ -6,6 +6,8 @@
 Spec: 04_db_schema_v1.7.md, 06_mvp_scope_v1.3.md#§6.3 DoD
 ("audit_log 테이블에 WORM 제약(REVOKE UPDATE, DELETE) 적용 확인")
 """
+
+import time
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from uuid import uuid4
@@ -265,9 +267,7 @@ async def test_ledger_balance_seeded_for_platform_and_house_accounts(db_conn):
 
 
 async def test_ledger_control_singleton_seeded(db_conn):
-    result = await db_conn.execute(
-        text("SELECT id, write_frozen FROM ledger_control")
-    )
+    result = await db_conn.execute(text("SELECT id, write_frozen FROM ledger_control"))
     rows = list(result)
     assert len(rows) == 1
     assert rows[0].id == 1
@@ -281,8 +281,7 @@ async def test_unbalanced_entry_fails_at_commit(raw_conn):
     audit_event_id = await _insert_audit_event(raw_conn)
     entry_id = await _insert_entry(raw_conn, audit_event_id=audit_event_id)
     accounts = await raw_conn.fetch(
-        "SELECT account_id, account_code FROM ledger_account "
-        "WHERE account_code = ANY($1::text[])",
+        "SELECT account_id, account_code FROM ledger_account WHERE account_code = ANY($1::text[])",
         [PLATFORM_CASH_CLEARING, PLATFORM_COMMISSION_REVENUE],
     )
     account_id = {row["account_code"]: row["account_id"] for row in accounts}
@@ -311,8 +310,7 @@ async def test_balanced_entry_commits_successfully(raw_conn):
     audit_event_id = await _insert_audit_event(raw_conn)
     entry_id = await _insert_entry(raw_conn, audit_event_id=audit_event_id)
     accounts = await raw_conn.fetch(
-        "SELECT account_id, account_code FROM ledger_account "
-        "WHERE account_code = ANY($1::text[])",
+        "SELECT account_id, account_code FROM ledger_account WHERE account_code = ANY($1::text[])",
         [PLATFORM_CASH_CLEARING, PLATFORM_COMMISSION_REVENUE],
     )
     account_id = {row["account_code"]: row["account_id"] for row in accounts}
@@ -356,8 +354,7 @@ async def test_aios_app_cannot_delete_ledger_posting_line(raw_conn):
     audit_event_id = await _insert_audit_event(raw_conn)
     entry_id = await _insert_entry(raw_conn, audit_event_id=audit_event_id)
     accounts = await raw_conn.fetch(
-        "SELECT account_id, account_code FROM ledger_account "
-        "WHERE account_code = ANY($1::text[])",
+        "SELECT account_id, account_code FROM ledger_account WHERE account_code = ANY($1::text[])",
         [PLATFORM_CASH_CLEARING, PLATFORM_COMMISSION_REVENUE],
     )
     account_id = {row["account_code"]: row["account_id"] for row in accounts}
@@ -380,9 +377,7 @@ async def test_aios_app_cannot_delete_ledger_posting_line(raw_conn):
     with pytest.raises(asyncpg.RaiseError, match="append-only violation"):
         async with raw_conn.transaction():
             await raw_conn.execute("SET ROLE aios_app")
-            await raw_conn.execute(
-                "DELETE FROM ledger_posting_line WHERE entry_id = $1", entry_id
-            )
+            await raw_conn.execute("DELETE FROM ledger_posting_line WHERE entry_id = $1", entry_id)
 
 
 # --- LC-7 (4a1d0c0de006_ledger_holds_payouts) ------------------------------
@@ -595,12 +590,18 @@ async def test_pos_journal_duplicate_position_key_sequence_no_rejected(raw_conn)
     position_key = f"BITGET:{uuid4().hex}:strat:exec"
 
     await _insert_pos_journal_entry(
-        raw_conn, tenant_id=tenant_id, account_id=account_id, position_key=position_key,
+        raw_conn,
+        tenant_id=tenant_id,
+        account_id=account_id,
+        position_key=position_key,
         sequence_no=1,
     )
     with pytest.raises(asyncpg.UniqueViolationError):
         await _insert_pos_journal_entry(
-            raw_conn, tenant_id=tenant_id, account_id=account_id, position_key=position_key,
+            raw_conn,
+            tenant_id=tenant_id,
+            account_id=account_id,
+            position_key=position_key,
             sequence_no=1,
         )
 
@@ -611,8 +612,11 @@ async def test_pos_journal_sequence_no_below_one_rejected(raw_conn):
     account_id = await _insert_pos_account(raw_conn, tenant_id=tenant_id)
     with pytest.raises(asyncpg.CheckViolationError):
         await _insert_pos_journal_entry(
-            raw_conn, tenant_id=tenant_id, account_id=account_id,
-            position_key=f"BITGET:{uuid4().hex}:strat:exec", sequence_no=0,
+            raw_conn,
+            tenant_id=tenant_id,
+            account_id=account_id,
+            position_key=f"BITGET:{uuid4().hex}:strat:exec",
+            sequence_no=0,
         )
 
 
@@ -657,7 +661,10 @@ async def test_aios_app_cannot_update_pos_journal(raw_conn):
     account_id = await _insert_pos_account(raw_conn, tenant_id=tenant_id)
     position_key = f"BITGET:{uuid4().hex}:strat:exec"
     await _insert_pos_journal_entry(
-        raw_conn, tenant_id=tenant_id, account_id=account_id, position_key=position_key,
+        raw_conn,
+        tenant_id=tenant_id,
+        account_id=account_id,
+        position_key=position_key,
         sequence_no=1,
     )
 
@@ -862,17 +869,20 @@ async def test_md_candles_tables_exist(db_conn):
     assert found == MD_CANDLES_TABLES
 
 
-async def _insert_md_ingest_batch(conn: asyncpg.Connection, *, instrument_id) -> object:
+async def _insert_md_ingest_batch(
+    conn: asyncpg.Connection, *, instrument_id, verdict: str = "ACCEPT"
+) -> object:
     audit_event_id = await _insert_audit_event(conn)
     return await conn.fetchval(
         "INSERT INTO md_ingest_batch "
         "(source, venue, instrument_id, timeframe, range_start, range_end, "
         " request_fingerprint, batch_hash, verdict, audit_event_id) "
-        "VALUES ('test', 'BITGET', $1, '1m', now(), now(), $2, $3, 'ACCEPT', $4) "
+        "VALUES ('test', 'BITGET', $1, '1m', now(), now(), $2, $3, $4, $5) "
         "RETURNING id",
         instrument_id,
         f"fp-{uuid4().hex}",
         f"hash-{uuid4().hex}",
+        verdict,
         audit_event_id,
     )
 
@@ -950,8 +960,14 @@ async def test_md_candle_valid_ohlcv_accepted(raw_conn):
     """위 6종 CHECK 테스트의 대조군 — 정상 캔들까지 잘못 막지 않는지 확인."""
     instrument_id, batch_id = await _md_candles_setup(raw_conn)
     await _insert_md_candle(
-        raw_conn, instrument_id=instrument_id, batch_id=batch_id,
-        open_=100, high=110, low=90, close=105, volume=10,
+        raw_conn,
+        instrument_id=instrument_id,
+        batch_id=batch_id,
+        open_=100,
+        high=110,
+        low=90,
+        close=105,
+        volume=10,
     )
     row = await raw_conn.fetchrow(
         "SELECT open FROM md_candle WHERE instrument_id = $1", instrument_id
@@ -969,8 +985,14 @@ async def test_aios_app_cannot_update_md_candle(raw_conn):
     # 경계를 넘을 수 있다(월별 경계는 날짜와 무관) — 먼저 여유 있게 확장한다.
     await raw_conn.execute("SELECT md_ensure_partitions(6)")
     await _insert_md_candle(
-        raw_conn, instrument_id=instrument_id, batch_id=batch_id,
-        open_=100, high=110, low=90, close=105, volume=10,
+        raw_conn,
+        instrument_id=instrument_id,
+        batch_id=batch_id,
+        open_=100,
+        high=110,
+        low=90,
+        close=105,
+        volume=10,
         open_time=future_open_time,
     )
 
@@ -1037,3 +1059,118 @@ async def test_md_ensure_partitions_creates_future_partitions(raw_conn):
     )
     after_names = {row["relname"] for row in after}
     assert after_names - before_names, "md_ensure_partitions()가 새 파티션을 만들지 않았다"
+
+
+@pytest.mark.perf
+async def test_md_candle_bulk_insert_p95_under_budget(raw_conn):
+    """LA-11 DEEPEN(task-2966, docs/audit/DEPTH_LA_LB_LC.md#450) — 수치
+    성능 단언. §4.1 배치 인제스트는 캔들마다 md_candle에 개별 INSERT를
+    낸다(CHECK 6종 평가 포함, WORM 트리거는 BEFORE UPDATE OR DELETE만이라
+    INSERT 경로엔 붙지 않는다) — 이 핫 경로의 p95 지연이 예산 안에 있는지
+    증명한다. 예산은 해시체인 계산까지 포함하는 원장 append p95 30ms
+    (task-489/LB-18, task-614/LC-17) 관행과 같은 자릿수를 쓴다: md_candle
+    INSERT는 해시체인이 없어 그보다 가벼워야 하지만, 공유 로컬 Postgres
+    편차를 감안해 같은 예산을 그대로 적용한다."""
+    instrument_id, batch_id = await _md_candles_setup(raw_conn)
+    n = 200
+    budget_p95_sec = 0.03
+    base_time = datetime.now(timezone.utc)
+    latencies: list[float] = []
+    for i in range(n):
+        start = time.perf_counter()
+        await _insert_md_candle(
+            raw_conn,
+            instrument_id=instrument_id,
+            batch_id=batch_id,
+            open_=100,
+            high=110,
+            low=90,
+            close=105,
+            volume=10,
+            open_time=base_time + timedelta(minutes=i),
+        )
+        latencies.append(time.perf_counter() - start)
+
+    latencies.sort()
+    p95 = latencies[int(n * 0.95)]
+    print(
+        f"[LA-11 md_candle insert] n={n} p95={p95 * 1000:.2f}ms "
+        f"(budget<{budget_p95_sec * 1000:.0f}ms)"
+    )
+    assert p95 < budget_p95_sec, f"md_candle 단건 INSERT p95가 예산을 넘었습니다: {p95:.4f}s"
+
+
+async def test_md_candle_lifecycle_replayed_quarantine_then_accept_does_not_leak(raw_conn):
+    """LA-11 DEEPEN(task-2966, docs/audit/DEPTH_LA_LB_LC.md#450) — 게이트
+    적색 재현. 동일 (instrument, timeframe, open_time)를 시간축으로
+    재생한다: 1차 배치가 OHLC 위반으로 REJECT되어 md_quarantine_candle에만
+    격리 -> 2차 배치가 같은 키로 정상 재인입되어 md_candle에 안착한다.
+    1차 격리분이 md_candle로 새거나(격리 우회), 2차 정상분이 격리 이력을
+    지워버리면(감사 흔적 소실) §4.1 품질 게이트가 무의미해진다 — 두 단계
+    사이에 상태가 새지 않고, 승격된 행에도 WORM이 그대로 걸리는지까지
+    증명한다."""
+    instrument_id = await _insert_md_instrument(raw_conn, canonical_symbol=f"TEST-{uuid4().hex}")
+    open_time = datetime.now(timezone.utc)
+    close_time = open_time + timedelta(minutes=1)
+
+    # 1단계: 1차 배치 REJECT — 위반 캔들은 md_quarantine_candle에만 격리.
+    batch1_id = await _insert_md_ingest_batch(
+        raw_conn, instrument_id=instrument_id, verdict="REJECT"
+    )
+    await raw_conn.execute(
+        "INSERT INTO md_quarantine_candle "
+        "(venue, instrument_id, timeframe, open_time, close_time, "
+        " open, high, low, close, volume, batch_id, issue_type) "
+        "VALUES ('BITGET', $1, '1m', $2, $3, 100, 90, 80, 85, 10, $4, 'OHLC_INCONSISTENT')",
+        instrument_id,
+        open_time,
+        close_time,
+        batch1_id,
+    )
+
+    leaked = await raw_conn.fetchval(
+        "SELECT count(*) FROM md_candle WHERE instrument_id = $1 AND open_time = $2",
+        instrument_id,
+        open_time,
+    )
+    assert leaked == 0, "REJECT 배치의 격리분이 md_candle로 샜다"
+
+    # 2단계: 2차 배치 ACCEPT — 같은 키로 정상 캔들 재인입.
+    batch2_id = await _insert_md_ingest_batch(raw_conn, instrument_id=instrument_id)
+    await _insert_md_candle(
+        raw_conn,
+        instrument_id=instrument_id,
+        batch_id=batch2_id,
+        open_=100,
+        high=110,
+        low=90,
+        close=105,
+        volume=10,
+        open_time=open_time,
+    )
+
+    accepted = await raw_conn.fetchrow(
+        "SELECT batch_id FROM md_candle WHERE instrument_id = $1 AND open_time = $2",
+        instrument_id,
+        open_time,
+    )
+    assert accepted is not None
+    assert accepted["batch_id"] == batch2_id
+
+    quarantine_count = await raw_conn.fetchval(
+        "SELECT count(*) FROM md_quarantine_candle WHERE instrument_id = $1 AND open_time = $2",
+        instrument_id,
+        open_time,
+    )
+    assert quarantine_count == 1, "1차 격리 이력이 2차 정상 인입으로 지워지면 안 된다"
+
+    # 3단계: 재생 직후에도 WORM이 그대로 걸려 있는지 재확인 — 재인입 경로가
+    # append-only 보호를 우회하는 부작용을 남기지 않았는지 증명한다.
+    with pytest.raises(asyncpg.RaiseError, match="append-only violation"):
+        async with raw_conn.transaction():
+            await raw_conn.execute("SET ROLE aios_app")
+            await raw_conn.execute(
+                "UPDATE md_candle SET volume = 999 WHERE instrument_id = $1 AND open_time = $2",
+                instrument_id,
+                open_time,
+            )
