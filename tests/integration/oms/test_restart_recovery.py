@@ -20,10 +20,12 @@ gate-red 회귀 가드 2건, (2) `reclaim_expired_leases`를 명시적으로
 (5) `reclaim_expired_leases`가 행 수 증가에도 단일 DELETE 왕복으로
 남아있음을 정규화 배율로 단언하는 수치 성능 테스트.
 """
+
 from __future__ import annotations
 
 import asyncio
 import inspect
+import json
 import time
 import uuid
 from datetime import datetime, timedelta, timezone
@@ -46,6 +48,7 @@ from src.services.order_service.submit import OrderDeniedByRiskGateError, submit
 from tests.integration.conftest import create_test_user
 from tests.integration.fake_exchange_adapter import FakeExchangeAdapter
 from tests.integration.foundation.execution_ownership.conftest import create_execution
+from tests.integration.oms.conftest import insert_order
 
 _INSERT_LEASE_SQL = """
     INSERT INTO execution_leases (execution_id, owner_id, fencing_token, heartbeat_at, expires_at)
@@ -387,3 +390,125 @@ async def test_reclaim_expired_leases_wall_time_scales_sublinearly(pool):
         f"reclaim_expired_leases가 {batch_size}배 행에서 단일 행 대비 {ratio:.1f}배로 "
         f"느려졌습니다(예산 {budget_ratio}배) — per-row 왕복으로 퇴화했을 가능성."
     )
+
+
+# ---------------------------------------------------------------------------
+# task-2673 -- run_startup_recovery(_gated) must call
+# restart_recovery.recover_stuck_outbox_commands (task-2345/task-3486 REJECT
+# 반영). Before this, `recover_stuck_outbox_commands` was fully implemented
+# and unit-tested (task-2310/L4-18b) but never invoked from the assembly
+# point -- an actual restart never recovered SENDING outbox commands
+# (dead code, I-10). These two tests exercise the *assembly point*
+# (`run_startup_recovery_gated`), not the pure function directly -- removing
+# the wiring call in recovery_wiring.py turns both red.
+# ---------------------------------------------------------------------------
+
+
+async def _insert_stuck_outbox(
+    pool: asyncpg.Pool, order_id: uuid.UUID, *, command_type: str
+) -> uuid.UUID:
+    async with pool.acquire() as conn:
+        return await conn.fetchval(
+            """
+            INSERT INTO order_command_outbox
+                (order_id, command_type, payload, state, attempt, lease_until, worker_id)
+            VALUES ($1, $2, $3::jsonb, 'SENDING', 0, now() - interval '1 minute', 'dead-worker')
+            RETURNING id
+            """,
+            order_id,
+            command_type,
+            json.dumps({}),
+        )
+
+
+async def test_run_startup_recovery_gated_reenters_stuck_cancel_command(pool):
+    """재진입 경로 -- CANCEL은 멱등 계열이라 lease가 만료된 SENDING 행은
+    무조건 PENDING으로 재진입해야 한다(§4.2/§4.4). `resolve_adapter`가
+    불리면 실패시켜 이 경로가 어댑터를 전혀 건드리지 않음도 함께 고정한다."""
+    user_id = await create_test_user(pool)
+    async with pool.acquire() as conn:
+        order_id = await insert_order(conn, user_id, status="SUBMITTED")
+    outbox_id = await _insert_stuck_outbox(pool, order_id, command_type="CANCEL")
+
+    async def resolve_adapter_must_not_be_called(uid: uuid.UUID, exchange: str):
+        raise AssertionError("CANCEL 재진입 경로는 어댑터를 호출하면 안 된다")
+
+    async def publish_noop(topic: str, payload: dict) -> None:
+        return None
+
+    state = await recovery_wiring.run_startup_recovery_gated(
+        pool,
+        resolve_adapter=resolve_adapter_must_not_be_called,
+        publish=publish_noop,
+        enabled=True,
+    )
+
+    assert state.complete is True
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            "SELECT state, last_error FROM order_command_outbox WHERE id = $1", outbox_id
+        )
+    assert row["state"] == "PENDING"
+    assert row["last_error"] == "RESTART_RECOVERY_REENTRY"
+
+
+async def test_run_startup_recovery_gated_transitions_stuck_submit_via_unknown(pool):
+    """UNKNOWN 전이 경로 -- 이미 SUBMITTED인 주문의 SUBMIT 명령이 SENDING에서
+    lease 만료로 멈추면(호출 여부 불확실) UNKNOWN으로 전이 후
+    `unknown_resolver.resolve_unknown`에 위임돼야 한다(§5.4 재전송 금지).
+    이 테스트의 어댑터는 즉시 조회에 성공해 RESOLVED_AS로 해소시킨다 --
+    order가 SUBMITTED에 머물러 있으면(배선이 빠지면) 이 단언이 적색이 된다."""
+    user_id = await create_test_user(pool)
+    async with pool.acquire() as conn:
+        order_id = await insert_order(conn, user_id, status="SUBMITTED")
+        client_order_id = await conn.fetchval(
+            "SELECT client_order_id FROM orders WHERE order_id = $1", order_id
+        )
+    outbox_id = await _insert_stuck_outbox(pool, order_id, command_type="SUBMIT")
+
+    resolved_order = Order(
+        client_order_id=client_order_id,
+        strategy_id="oms-recovery-outbox-test",
+        strategy_version="1.0.0",
+        symbol="BTC/USDT",
+        exchange="bitget",
+        side=OrderSide.BUY,
+        order_type=OrderType.MARKET,
+        quantity=Decimal("1"),
+        status=OrderStatus.ACKNOWLEDGED,
+        asset_class=AssetClass.CRYPTO,
+    )
+
+    class _ResolverAdapter:
+        async def find_order_by_client_id(self, client_order_id: str) -> Order | None:
+            return resolved_order
+
+        async def get_open_orders(self, symbol: str | None = None) -> list[Order]:
+            return []
+
+    async def resolve_adapter(uid: uuid.UUID, exchange: str) -> _ResolverAdapter:
+        return _ResolverAdapter()
+
+    async def publish_noop(topic: str, payload: dict) -> None:
+        return None
+
+    state = await recovery_wiring.run_startup_recovery_gated(
+        pool, resolve_adapter=resolve_adapter, publish=publish_noop, enabled=True
+    )
+
+    assert state.complete is True
+    async with pool.acquire() as conn:
+        status = await conn.fetchval("SELECT status FROM orders WHERE order_id = $1", order_id)
+        outbox_state = await conn.fetchval(
+            "SELECT state FROM order_command_outbox WHERE id = $1", outbox_id
+        )
+    assert status == "ACKNOWLEDGED"
+    assert outbox_state == "DONE"
+
+
+def test_run_startup_recovery_calls_recover_stuck_outbox_commands():
+    """게이트-레드 회귀 가드 -- `run_startup_recovery`의 소스에서 이 호출을
+    지우면(task-3486 REJECT가 지적한 바로 그 결함) 위 두 통합 테스트가
+    적색이 되지만, 실DB 없이도 소스 스캔으로 즉시 고정한다."""
+    source = inspect.getsource(recovery_wiring.run_startup_recovery)
+    assert "recover_stuck_outbox_commands(" in source
