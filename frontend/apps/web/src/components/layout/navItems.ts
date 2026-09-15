@@ -17,6 +17,7 @@ export const MAIN_NAV_ITEMS: NavItem[] = [
   { to: "/scripts/editor", label: "스크립트편집기" },
   { to: "/marketplace", label: "마켓플레이스" },
   { to: "/follow", label: "팔로우" },
+  { to: "/ai/studio", label: "AI 스튜디오" },
   { to: "/executions", label: "실행제어판" },
   { to: "/portfolio", label: "포트폴리오" },
   { to: "/mandates", label: "위임장" },

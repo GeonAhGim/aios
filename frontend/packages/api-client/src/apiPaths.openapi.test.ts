@@ -57,6 +57,16 @@ const GHOST_PATH_WHITELIST: ReadonlySet<ApiRouteName> = new Set<ApiRouteName>([
   "follow.subscriptions.base",
   "follow.subscriptions.cancel",
   "follow.subscriptions.performance",
+  // task-2657(AI-22): ai.* 8건 — apiRoutes.ts의 등록 주석 참조(src/foundation/ai
+  // 모듈·src/api/routers/ai.py 자체가 아직 없음, follow.subscriptions.*와 동일 사유).
+  "ai.providers.base",
+  "ai.providers.item",
+  "ai.tokens.base",
+  "ai.tokens.revoke",
+  "ai.proposals.base",
+  "ai.proposals.promoteTicket",
+  "ai.proposals.promote",
+  "ai.experiments.base",
 ]);
 
 // STALE_SNAPSHOT_WHITELIST: GHOST_PATH_WHITELIST와는 다른 사유 — "라우터가

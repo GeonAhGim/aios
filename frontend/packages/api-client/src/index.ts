@@ -128,3 +128,9 @@ export type { IndicatorCatalogItem, IndicatorsClient, IndicatorTier, ListIndicat
 // 유령 경로(FollowRouteNotImplementedError 참조, src/api/routers/follow.py 미구현).
 export { createFollowClient, FollowRouteNotImplementedError } from "./clients/follow";
 export type { FollowClient } from "./clients/follow";
+// task-2657(AI-22): §2.1~§2.4 AI 공급자 설정·에이전트 토큰·제안 목록·실험 비교·
+// PAPER 승격 확인 클라이언트(follow.ts와 동일 관용 — AiosApiClient 합성에는
+// 얹지 않고 화면이 createAiClient로 직접 만든다). 런타임에는 유령 경로
+// (AiRouteNotImplementedError 참조, src/api/routers/ai.py 미구현, AI-17).
+export { createAiClient, AiRouteNotImplementedError } from "./clients/ai";
+export type { AiClient } from "./clients/ai";

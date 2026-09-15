@@ -15,6 +15,7 @@ import { UserManagementPage } from "./routes/admin/UserManagementPage";
 import { VerificationQueuePage } from "./routes/admin/VerificationQueuePage";
 import { WalletTopupsPage } from "./routes/admin/WalletTopupsPage";
 import { AlertsPage } from "./routes/alerts/AlertsPage";
+import { AiStudioPage } from "./routes/ai/AiStudioPage";
 import { SweepResultsPage } from "./routes/backtest/SweepResultsPage";
 import { ChartPage } from "./routes/chart/ChartPage";
 import { CompliancePage } from "./routes/compliance/CompliancePage";
@@ -81,6 +82,7 @@ export const router = createBrowserRouter([
   { path: "/marketplace/:listingId", element: protect(<ListingDetailPage />) },
   { path: "/executions", element: protect(<ExecutionControlPage />) },
   { path: "/follow", element: protect(<FollowPage />) },
+  { path: "/ai/studio", element: protect(<AiStudioPage />) },
   { path: "/portfolio", element: protect(<PortfolioPage />) },
   { path: "/mandates", element: protect(<MandatesPage />) },
   { path: "/compliance", element: protect(<CompliancePage />) },

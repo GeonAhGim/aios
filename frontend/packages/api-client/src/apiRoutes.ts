@@ -334,5 +334,27 @@ export const API_ROUTES = defineApiRoutes({
     null,
     false,
   ),
+
+  // task-2657(AI-22): AiStudioPage.tsx(공급자 설정·토큰·제안 목록·실험 비교·승격
+  // 버튼 확인 흐름)는 spec L4_ai_research_strategy_factory_v1.0.md §2.1/§2.2/§2.3/
+  // §2.4가 정의하는 gateway·providers·factory·experiments 모듈을 앞서가는 선행
+  // 프론트다 — 그 모듈들과 이를 감싸는 API 라우터(src/api/routers/ai.py, AI-17)
+  // 모두 아직 없다(src/api/routers 디렉터리에 ai.py 부재, src/foundation/ai 디렉터리
+  // 자체가 없음 — grep으로 직접 확인). follow.subscriptions.*(task-2699)와 동일한
+  // 유령 경로 사유로 8개 라우트 모두 implemented=false 등록 — AiStudioPage.tsx는
+  // 라우터가 생기기 전까지 네트워크 호출 대신 AiRouteNotImplementedError(typed)로
+  // 단락한다. v1Path는 마운트 경로 확정 전이라 null. apiPaths.openapi.test.ts
+  // GHOST_PATH_WHITELIST에도 함께 추가할 것.
+  "ai.providers.base": route("/v1/ai/providers", true, null, false),
+  "ai.providers.item": route("/v1/ai/providers/:provider", true, null, false),
+  // GET(list)+POST(issue)는 같은 리소스 경로를 공유한다(follow.subscriptions.base와
+  // 동일 축약 관용).
+  "ai.tokens.base": route("/v1/ai/tokens", true, null, false),
+  "ai.tokens.revoke": route("/v1/ai/tokens/:tokenId:revoke", true, null, false),
+  "ai.proposals.base": route("/v1/ai/proposals", true, null, false),
+  "ai.proposals.promoteTicket": route("/v1/ai/proposals/:proposalId:promote-ticket", true, null, false),
+  "ai.proposals.promote": route("/v1/ai/proposals/:proposalId:promote", true, null, false),
+  "ai.experiments.base": route("/v1/ai/experiments", true, null, false),
+
   ...FOUNDATION_OPS_ROUTES,
 });
