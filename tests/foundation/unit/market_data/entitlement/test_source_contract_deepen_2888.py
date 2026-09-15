@@ -27,6 +27,7 @@ from __future__ import annotations
 import time
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
+from typing import cast
 
 import pytest
 from pydantic import ValidationError
@@ -94,7 +95,7 @@ def test_permits_use_fail_closed_denies_unknown_data_use_value_even_for_widest_s
     문자열을 매트릭스에 등록하는 걸 잊음) `KeyError`로 죽지 않고 조용히
     거부(`False`)로 fail-closed 된다. 가장 넓은 스코프(REDISTRIBUTE)에도
     등록되지 않은 용도는 절대 허용으로 새지 않음을 증명한다."""
-    assert permits_use(RedistributionScope.REDISTRIBUTE, "NOT_A_USE") is False  # type: ignore[arg-type]
+    assert permits_use(RedistributionScope.REDISTRIBUTE, cast(DataUse, "NOT_A_USE")) is False
 
 
 # ---- 성능 단언 ----
