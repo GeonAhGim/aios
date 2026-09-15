@@ -1,11 +1,13 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
+import { I18nextProvider } from "react-i18next";
 import { RouterProvider } from "react-router-dom";
 import { InstallPrompt } from "./components/InstallPrompt";
 import { MfaStepUpDialog } from "./components/MfaStepUpDialog";
 import { OfflineBanner } from "./components/OfflineBanner";
 import { RateLimitNotice } from "./components/RateLimitNotice";
+import i18n from "./i18n";
 import "./index.css";
 import { registerServiceWorker } from "./lib/serviceWorker";
 import { router } from "./router";
@@ -20,13 +22,15 @@ const queryClient = new QueryClient();
 // InstallPrompt도 동일한 "루트 1곳" 관용을 따른다.
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
-    <QueryClientProvider client={queryClient}>
-      <RouterProvider router={router} />
-      <MfaStepUpDialog />
-      <RateLimitNotice />
-      <OfflineBanner />
-      <InstallPrompt />
-    </QueryClientProvider>
+    <I18nextProvider i18n={i18n}>
+      <QueryClientProvider client={queryClient}>
+        <RouterProvider router={router} />
+        <MfaStepUpDialog />
+        <RateLimitNotice />
+        <OfflineBanner />
+        <InstallPrompt />
+      </QueryClientProvider>
+    </I18nextProvider>
   </StrictMode>,
 );
 

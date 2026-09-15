@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
-    "lint": "oxlint",
+    "lint": "oxlint && node ../../scripts/check_i18n_literals.mjs",
     "preview": "vite preview",
     "test": "vitest run",
     "test:coverage": "vitest run --coverage"
@@ -18,9 +18,11 @@
     "@aios/shared-types": "*",
     "@aios/ui-web": "*",
     "@tanstack/react-query": "^5.62.0",
+    "i18next": "^26.4.2",
     "qrcode": "^1.5.4",
     "react": "^19.2.8",
     "react-dom": "^19.2.8",
+    "react-i18next": "^17.0.14",
     "react-router-dom": "^6.28.0",
     "zustand": "^5.0.2"
   },
