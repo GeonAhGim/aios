@@ -11,3 +11,8 @@ pytest-timeout·tzdata가 아예 안 깔리는 사고가 새 PC/새 venv를 만�
 확인한 다음 커밋한다 — 이 마지막 재현 확인 없이 잠금 파일만 손으로 고치지 않는다.
 `C:\aios\pm\scripts\bootstrap_new_pc.ps1` §4도 이 파일로 설치하므로, 새 PC 이전 때마다 같은
 환경이 재현된다.
+
+`setuptools`·`pip`은 3.10 venv가 `ensurepip`로 깔아주는 65.5.0/23.0.1(각각 PYSEC-2022-43012 등,
+PYSEC-2026-196 등 다건 취약)보다 낮은 버전으로 새 venv가 시작하는 걸 막기 위해, 다른 패키지와
+동일하게 이 잠금에 명시로 고정한다 — 둘 다 `pip freeze`가 기본으로 빼먹는 부트스트랩 도구라
+잊기 쉽다(task-3622).
