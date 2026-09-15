@@ -1,6 +1,8 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { resolvePath } from "../apiPaths";
 import { ApiClientBase } from "../http";
 import { withFoundation } from "./foundation";
+import type { RequestPaperDeploymentBody } from "./foundation";
 
 class FoundationTestClient extends withFoundation(ApiClientBase) {}
 
@@ -229,5 +231,90 @@ describe("withFoundation: paper-deployments 5개 + trust/consents", () => {
     const second = stubFetch(envelope(consentView), 201);
     await expect(client.acceptTrustConsent({ purpose: "trading", disclosureRevision: 1 }, key)).resolves.toBeDefined();
     expect(second).toHaveBeenCalledTimes(1);
+  });
+});
+
+// DEEPEN task-3185(docs/audit/DEPTH_PLT.md #1309): 기존 스위트는 negative·replay
+// 증거는 충분했지만(D3급 replay 증명 有) 수치 성능 단언과 게이트 적색 재현이
+// 없어 D2 하한(ADR-2026-09-09-C, PLT축은 안전축 목록 밖이라 D3 불요)을
+// 채우지 못했다. 이 블록에서 두 결함을 각각 보강한다.
+describe("DEEPEN 3185: 수치 성능 단언 + 게이트 적색 재현", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  // 수치 성능: guardIdempotentBody(digest 선검증, httpIdempotent.ts)는 같은
+  // 키·다른 body를 fetch 호출 전에 거부한다. 그 "서버 왕복 전 차단"이 실제로
+  // 네트워크 지연을 기다리지 않는지 카운트가 아닌 실측 wall-clock ms로
+  // 증명한다 — 두 번째 fetch를 일부러 실제 네트워크 지연(200ms, real timer)으로
+  // 스텁해도 거부가 그 지연의 절반 미만에서 끝나야 guard가 fetch 이전에
+  // 단락(short-circuit)됐다고 볼 수 있다.
+  it("수치 성능: 같은 키·다른 body 거부는 네트워크 왕복(200ms)을 기다리지 않고 그 절반 미만에서 즉시 실패한다", async () => {
+    const NETWORK_LATENCY_MS = 200;
+    const key = "perf-mismatch-test-0001-abcdefgh";
+    const client = makeClient();
+
+    stubFetch(envelope(deploymentView), 201);
+    await client.requestPaperDeployment(
+      { packageRef: "pkg-a", adapterType: "bitget-sandbox", providerSandboxAccountRef: "acct-1" },
+      key,
+    );
+
+    const slowFetch = vi.fn(
+      () =>
+        new Promise<Response>((resolve) => {
+          setTimeout(() => resolve(jsonResponse(201, envelope(deploymentView))), NETWORK_LATENCY_MS);
+        }),
+    );
+    vi.stubGlobal("fetch", slowFetch);
+
+    const start = performance.now();
+    await expect(
+      client.requestPaperDeployment(
+        { packageRef: "pkg-b", adapterType: "bitget-sandbox", providerSandboxAccountRef: "acct-1" },
+        key,
+      ),
+    ).rejects.toThrow(/이전과 다른 요청 본문/);
+    const elapsedMs = performance.now() - start;
+
+    expect(slowFetch).not.toHaveBeenCalled();
+    expect(elapsedMs).toBeLessThan(NETWORK_LATENCY_MS / 2);
+  });
+
+  // 게이트 적색 재현: foundation.ts 101-105행 주석이 명시하는 실제 이력상
+  // 버그 — "이전 리프가 postIdempotent를 잘못 골라 응답 봉투를 그대로
+  // 반환"했다. postEnvelopeIdempotent 대신 postIdempotent를 쓰는 경로를
+  // 로컬로 재현해, 그 결함이 있으면 camelCase 필드가 비고 봉투가 그대로
+  // 새는지(적색)와 실제 구현은 정상 언랩되는지(녹색)를 대조한다.
+  class BuggyFoundationClient extends ApiClientBase {
+    async requestPaperDeploymentBuggy(body: RequestPaperDeploymentBody, idempotencyKey: string): Promise<unknown> {
+      const outgoing = { ...body, idempotencyKey };
+      return this.postIdempotent(resolvePath("foundation.paperDeployments.request"), outgoing, idempotencyKey);
+    }
+  }
+
+  it("게이트 적색 재현: postIdempotent를 잘못 쓰면 응답 봉투가 그대로 새어나와 packageRef가 undefined다(적색) vs 실제 구현은 정상 언랩한다(녹색)", async () => {
+    stubFetch(envelope(deploymentView), 201);
+    const buggyClient = new BuggyFoundationClient("https://api.example.test", () => null);
+
+    const buggyResult = (await buggyClient.requestPaperDeploymentBuggy(
+      { packageRef: "pkg-a", adapterType: "bitget-sandbox", providerSandboxAccountRef: "acct-1" },
+      "buggy-key-0000000000001",
+    )) as { data?: { packageRef?: string }; packageRef?: string };
+
+    // 적색: 언랩되지 않은 봉투({data, meta})가 그대로 반환돼 최상위 packageRef가
+    // 없다 — 값은 한 겹 안(data.packageRef, keysToCamel은 재귀 변환이라 여기도
+    // camelCase다)에 숨어 있다.
+    expect(buggyResult.packageRef).toBeUndefined();
+    expect(buggyResult.data?.packageRef).toBe("pkg-1");
+
+    stubFetch(envelope(deploymentView), 201);
+    const goodResult = await makeClient().requestPaperDeployment(
+      { packageRef: "pkg-a", adapterType: "bitget-sandbox", providerSandboxAccountRef: "acct-1" },
+      "good-key-00000000000001",
+    );
+
+    // 녹색: 실제 구현(postEnvelopeIdempotent)은 정상 언랩해 packageRef가 있다.
+    expect(goodResult.packageRef).toBe("pkg-1");
   });
 });
