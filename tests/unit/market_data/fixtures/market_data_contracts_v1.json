@@ -2,7 +2,7 @@
   "CalendarDay": {
     "$defs": {
       "Venue": {
-        "description": "세션 규칙(A3) 조회 키. KIS는 시장별로 캘린더가 달라 KRX/US를 분리한다.",
+        "description": "Lookup key for session rules (A3).\n\nKIS has different calendars per market, so KRX/US are separated.",
         "enum": [
           "BITGET",
           "KIS_KRX",
@@ -134,7 +134,7 @@
         "type": "string"
       },
       "Venue": {
-        "description": "세션 규칙(A3) 조회 키. KIS는 시장별로 캘린더가 달라 KRX/US를 분리한다.",
+        "description": "Lookup key for session rules (A3).\n\nKIS has different calendars per market, so KRX/US are separated.",
         "enum": [
           "BITGET",
           "KIS_KRX",
@@ -245,7 +245,7 @@
         "type": "string"
       },
       "Venue": {
-        "description": "세션 규칙(A3) 조회 키. KIS는 시장별로 캘린더가 달라 KRX/US를 분리한다.",
+        "description": "Lookup key for session rules (A3).\n\nKIS has different calendars per market, so KRX/US are separated.",
         "enum": [
           "BITGET",
           "KIS_KRX",
@@ -536,7 +536,7 @@
         "type": "string"
       },
       "Venue": {
-        "description": "세션 규칙(A3) 조회 키. KIS는 시장별로 캘린더가 달라 KRX/US를 분리한다.",
+        "description": "Lookup key for session rules (A3).\n\nKIS has different calendars per market, so KRX/US are separated.",
         "enum": [
           "BITGET",
           "KIS_KRX",
@@ -611,7 +611,7 @@
     "type": "object"
   },
   "CorporateAction": {
-    "description": "`ratio`: 2:1 분할이면 2. 배당은 ratio=1, `cash_amount`에 별도 기록.\n\n`known_at`(RD-20): 이 사실을 우리가 안 시각(공시 접수 시각) — `ex_date`\n(효력 발생일)와 분리된다. 정정 공시는 같은 `(instrument_id, action_type,\nex_date)`에 `known_at`이 다른 새 행으로 쌓인다(UPDATE 금지). 기존\nLA-12/LA-14 경로(장부 기록)는 이 필드를 채우지 않고 `None`으로 둔다 —\n107번 규칙대로 기본값 있는 필드 추가라 하위 호환된다.",
+    "description": "`ratio`: 2:1 분할이면 2. 배당은 ratio=1, `cash_amount`에 별도 기록.\n\n`known_at` (RD-20): the time we learned this fact (the filing's receipt\ntime) — distinct from `ex_date` (the effective date). A correcting\nfiling is appended as a new row with the same `(instrument_id,\naction_type, ex_date)` but a different `known_at` (no UPDATE). The\nexisting LA-12/LA-14 paths (ledger recording) leave this field unset\n(`None`) — per rule 107, this is backward compatible since it's an\nadded field with a default value.",
     "properties": {
       "action_type": {
         "enum": [
@@ -741,7 +741,7 @@
         "type": "string"
       },
       "Venue": {
-        "description": "세션 규칙(A3) 조회 키. KIS는 시장별로 캘린더가 달라 KRX/US를 분리한다.",
+        "description": "Lookup key for session rules (A3).\n\nKIS has different calendars per market, so KRX/US are separated.",
         "enum": [
           "BITGET",
           "KIS_KRX",
@@ -942,7 +942,7 @@
         "type": "string"
       },
       "Venue": {
-        "description": "세션 규칙(A3) 조회 키. KIS는 시장별로 캘린더가 달라 KRX/US를 분리한다.",
+        "description": "Lookup key for session rules (A3).\n\nKIS has different calendars per market, so KRX/US are separated.",
         "enum": [
           "BITGET",
           "KIS_KRX",
@@ -1098,7 +1098,7 @@
         "type": "string"
       },
       "Venue": {
-        "description": "세션 규칙(A3) 조회 키. KIS는 시장별로 캘린더가 달라 KRX/US를 분리한다.",
+        "description": "Lookup key for session rules (A3).\n\nKIS has different calendars per market, so KRX/US are separated.",
         "enum": [
           "BITGET",
           "KIS_KRX",
@@ -1201,7 +1201,7 @@
         "type": "string"
       },
       "Venue": {
-        "description": "세션 규칙(A3) 조회 키. KIS는 시장별로 캘린더가 달라 KRX/US를 분리한다.",
+        "description": "Lookup key for session rules (A3).\n\nKIS has different calendars per market, so KRX/US are separated.",
         "enum": [
           "BITGET",
           "KIS_KRX",
@@ -1604,7 +1604,7 @@
         "type": "string"
       },
       "Venue": {
-        "description": "세션 규칙(A3) 조회 키. KIS는 시장별로 캘린더가 달라 KRX/US를 분리한다.",
+        "description": "Lookup key for session rules (A3).\n\nKIS has different calendars per market, so KRX/US are separated.",
         "enum": [
           "BITGET",
           "KIS_KRX",
@@ -1742,7 +1742,7 @@
         "type": "string"
       },
       "Venue": {
-        "description": "세션 규칙(A3) 조회 키. KIS는 시장별로 캘린더가 달라 KRX/US를 분리한다.",
+        "description": "Lookup key for session rules (A3).\n\nKIS has different calendars per market, so KRX/US are separated.",
         "enum": [
           "BITGET",
           "KIS_KRX",
@@ -1968,7 +1968,7 @@
         "type": "string"
       },
       "Venue": {
-        "description": "세션 규칙(A3) 조회 키. KIS는 시장별로 캘린더가 달라 KRX/US를 분리한다.",
+        "description": "Lookup key for session rules (A3).\n\nKIS has different calendars per market, so KRX/US are separated.",
         "enum": [
           "BITGET",
           "KIS_KRX",
@@ -2069,7 +2069,7 @@
         "type": "string"
       },
       "Venue": {
-        "description": "세션 규칙(A3) 조회 키. KIS는 시장별로 캘린더가 달라 KRX/US를 분리한다.",
+        "description": "Lookup key for session rules (A3).\n\nKIS has different calendars per market, so KRX/US are separated.",
         "enum": [
           "BITGET",
           "KIS_KRX",
@@ -2259,7 +2259,7 @@
         "type": "string"
       },
       "Venue": {
-        "description": "세션 규칙(A3) 조회 키. KIS는 시장별로 캘린더가 달라 KRX/US를 분리한다.",
+        "description": "Lookup key for session rules (A3).\n\nKIS has different calendars per market, so KRX/US are separated.",
         "enum": [
           "BITGET",
           "KIS_KRX",
@@ -2372,7 +2372,7 @@
   "TickRecord": {
     "$defs": {
       "Venue": {
-        "description": "세션 규칙(A3) 조회 키. KIS는 시장별로 캘린더가 달라 KRX/US를 분리한다.",
+        "description": "Lookup key for session rules (A3).\n\nKIS has different calendars per market, so KRX/US are separated.",
         "enum": [
           "BITGET",
           "KIS_KRX",
