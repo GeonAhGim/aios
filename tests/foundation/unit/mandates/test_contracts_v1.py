@@ -23,6 +23,7 @@ dataclass/mapper module can actually exercise:
 import time
 from concurrent.futures import ProcessPoolExecutor
 from datetime import datetime, timezone
+from typing import Any, cast
 from uuid import uuid4
 
 import pytest
@@ -162,11 +163,11 @@ def test_frozen_decision_and_rule_hit_reject_post_construction_tampering() -> No
         evaluated_at=NOW,
     )
     with pytest.raises(ValidationError):
-        decision.verdict = ComplianceVerdict.ALLOW  # type: ignore[misc]
+        cast(Any, decision).verdict = ComplianceVerdict.ALLOW
 
     hit = RuleHit(rule_id="R1", severity=ComplianceVerdict.DENY, message="m", evidence={})
     with pytest.raises(ValidationError):
-        hit.severity = ComplianceVerdict.ALLOW  # type: ignore[misc]
+        cast(Any, hit).severity = ComplianceVerdict.ALLOW
 
 
 def test_mapper_propagates_rule_hit_construction_failure_instead_of_silently_allowing(

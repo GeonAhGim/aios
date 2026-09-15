@@ -20,6 +20,7 @@ test_inbox_lag.py`, commit `034fed00`)와 동일하게 `InboxProcessor.ingest()`
 
 왕복 수 예산(21)은 원 리프 산출과 동일 — task-2804 작업 중 재확인했다.
 """
+
 from __future__ import annotations
 
 import statistics
@@ -48,7 +49,7 @@ _INGEST_PARTIAL_ROUND_TRIPS = 21  # 원 리프 실측 구성표 그대로(task-2
 class _FailingFillsRepo(FillsRepository):
     """실패 주입 전용 — `insert_if_absent` 단계에서 DB 연결 장애를 흉내낸다."""
 
-    async def insert_if_absent(self, conn: asyncpg.Connection, fill: FillEvent) -> bool:  # type: ignore[override]
+    async def insert_if_absent(self, conn: asyncpg.Connection, fill: FillEvent) -> bool:
         raise ConnectionError("simulated DB connectivity failure during fill insert")
 
 

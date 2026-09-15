@@ -30,7 +30,7 @@ from __future__ import annotations
 import time
 from concurrent.futures import ProcessPoolExecutor
 from datetime import datetime, timezone
-from typing import Any
+from typing import Any, cast
 
 import pytest
 from pydantic import ValidationError
@@ -158,7 +158,7 @@ def test_rule_hit_rejects_post_construction_tampering() -> None:
     hit = check({"restricted_symbols": ("XYZ",)}, {"symbol": "XYZ"})
     assert hit is not None
     with pytest.raises(ValidationError):
-        hit.severity = ComplianceVerdict.ALLOW  # type: ignore[misc]
+        cast(Any, hit).severity = ComplianceVerdict.ALLOW
 
 
 def _replay_in_subprocess(params: dict[str, Any], snapshot: dict[str, Any]) -> tuple[str, str, str]:

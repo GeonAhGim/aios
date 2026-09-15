@@ -8,6 +8,7 @@ DC-28 후속(ADR-2026-09-06-H D7) — `test_get_isolates_cache_by_owner_id`가
 를 증명한다. 나머지 기존 테스트는 `owner_id`를 명시적으로 넘기도록만
 갱신했다(동작 변경 없음).
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -260,7 +261,7 @@ async def test_get_propagates_cancelled_error_instead_of_swallowing_it() -> None
     async def _raise_cancelled(*args: object, **kwargs: object) -> list[Candle]:
         raise asyncio.CancelledError()
 
-    adapter.get_ohlcv = _raise_cancelled  # type: ignore[method-assign]
+    adapter.get_ohlcv = _raise_cancelled
 
     with pytest.raises(asyncio.CancelledError):
         await cache.get(adapter, "BTC/USDT", bars=30, owner_id=_OWNER)

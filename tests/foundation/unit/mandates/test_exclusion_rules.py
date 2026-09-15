@@ -27,7 +27,7 @@ import time
 from concurrent.futures import ProcessPoolExecutor
 from dataclasses import FrozenInstanceError, replace
 from datetime import datetime, timezone
-from typing import TypedDict
+from typing import Any, TypedDict, cast
 from uuid import UUID, uuid4
 
 import pytest
@@ -369,11 +369,11 @@ def test_frozen_revision_and_subject_reject_post_construction_tampering() -> Non
     있음을 실증한다."""
     revision = _revision()
     with pytest.raises(FrozenInstanceError):
-        revision.excluded_countries = ()  # type: ignore[misc]
+        cast(Any, revision).excluded_countries = ()
 
     subject = _subject(asset="COAL_CO")
     with pytest.raises(FrozenInstanceError):
-        subject.asset = "CLEAN_CO"  # type: ignore[misc]
+        cast(Any, subject).asset = "CLEAN_CO"
 
 
 def _replay_in_subprocess(

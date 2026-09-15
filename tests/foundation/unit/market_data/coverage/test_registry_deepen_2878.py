@@ -28,7 +28,7 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
-from typing import Any
+from typing import Any, cast
 
 import pytest
 from pydantic import ValidationError
@@ -113,7 +113,7 @@ def test_coverage_span_rejects_ulid_with_crockford_excluded_characters() -> None
 
 def test_coverage_span_rejects_unknown_quality_grade() -> None:
     with pytest.raises(ValidationError):
-        _span(quality_grade="PLATINUM", start_at=_dt(1), end_at=_dt(2))  # type: ignore[arg-type]
+        _span(quality_grade=cast(Any, "PLATINUM"), start_at=_dt(1), end_at=_dt(2))
 
 
 def test_coverage_span_is_frozen_and_rejects_mutation() -> None:
@@ -123,7 +123,7 @@ def test_coverage_span_is_frozen_and_rejects_mutation() -> None:
     나중에 조작해 겹침을 만들 수 있다."""
     span = _span(start_at=_dt(1), end_at=_dt(2))
     with pytest.raises(ValidationError):
-        span.end_at = _dt(5)  # type: ignore[misc]
+        cast(Any, span).end_at = _dt(5)
 
 
 # ---- 실패 주입(D2) — merge_spans/coverage_for 호출 경계(failure-injection, 3) ----
@@ -143,7 +143,7 @@ def test_coverage_for_rejects_none_element_in_spans() -> None:
     instrument = _instrument()
     valid = _span(start_at=_dt(1), end_at=_dt(2))
     with pytest.raises(AttributeError):
-        coverage_for([valid, None], instrument, Timeframe.D1)  # type: ignore[list-item]
+        coverage_for(cast(Any, [valid, None]), instrument, Timeframe.D1)
 
 
 def test_merge_spans_massive_duplicate_flood_stays_within_invariant() -> None:

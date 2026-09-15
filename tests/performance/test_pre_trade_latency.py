@@ -54,17 +54,19 @@ task-2835(DEPTH 감사 D1→D3) 추가분:
     실행돼도 각자의 WORM 기록이 자신의 tenant_id로만 귀속된다(컨텍스트
     오염 없음).
 """
+
 from __future__ import annotations
 
 import asyncio
 import os
 import statistics
 import time
+from typing import Any
 
 import asyncpg
 import pytest
 
-from src.core.risk.decision import RiskOutcome
+from src.core.risk.decision import RiskDecision, RiskOutcome
 from src.foundation.risk_gate.adapters.postgres_decision_repository import (
     PostgresDecisionRepository,
 )
@@ -244,7 +246,7 @@ class _FailingDecisionRepo(PostgresDecisionRepository):
     """실패 주입 전용(task-2835) — WORM insert가 DB 장애로 실패하는 상황을
     흉내낸다(예: 커넥션 단절·디스크 풀)."""
 
-    async def insert(self, decision, inputs_snapshot):  # type: ignore[override]
+    async def insert(self, decision: RiskDecision, inputs_snapshot: dict[str, Any]) -> None:
         raise RuntimeError("simulated WORM write failure (fault injection)")
 
 

@@ -1,7 +1,9 @@
 """L4_risk_and_safety_v1.0.md#2.1, §9 R-04 — rules/base.py 계약 테스트."""
+
 import time
 from concurrent.futures import ThreadPoolExecutor
 from decimal import Decimal, InvalidOperation
+from typing import Any, cast
 
 import pytest
 from pydantic import ValidationError
@@ -75,13 +77,13 @@ def test_missing_rejects_invalid_unit():
     # negative — RuleUnit 밖의 값이 조용히 통과하면 하류(§8 단위 표)에서
     # unit 불일치가 새어나간다.
     with pytest.raises(ValidationError):
-        missing("daily_loss", "equity.daily_pnl_pct", unit="bogus")  # type: ignore[arg-type]
+        missing("daily_loss", "equity.daily_pnl_pct", unit=cast(Any, "bogus"))
 
 
 def test_rule_error_rejects_invalid_unit():
     # negative — missing()과 동일한 방어를 rule_error()에도 요구한다.
     with pytest.raises(ValidationError):
-        rule_error("daily_loss", unit="bogus")  # type: ignore[arg-type]
+        rule_error("daily_loss", unit=cast(Any, "bogus"))
 
 
 def test_pct_rejects_infinity():
@@ -98,7 +100,7 @@ def test_pct_raises_on_non_decimal_input():
     Decimal 대신 넘기면(직렬화 왕복 버그 등), pct()는 조용히 형변환하지
     않고 즉시 실패해야 한다(I2 — 판단 불가를 성공으로 위장하지 않는다)."""
     with pytest.raises(AttributeError):
-        pct("12.3")  # type: ignore[arg-type]
+        pct(cast(Any, "12.3"))
 
 
 def test_pct_bulk_calls_stay_within_perf_budget():
@@ -129,7 +131,7 @@ def test_gate_stays_red_when_a_rule_raises_mid_evaluation():
     results: list[RuleResult] = []
     for rule in rules:
         try:
-            result = rule(object(), object())  # type: ignore[arg-type]
+            result = rule(cast(Any, object()), cast(Any, object()))
         except Exception:  # noqa: BLE001 — I2: evaluator(R-16)와 동일하게 fail-closed
             result = rule_error("broken")
         results.append(result)

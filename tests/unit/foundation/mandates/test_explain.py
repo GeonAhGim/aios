@@ -13,7 +13,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from typing import Any
+from typing import Any, cast
 from uuid import UUID, uuid4
 
 import pytest
@@ -278,4 +278,4 @@ async def test_explain_result_rejects_post_construction_tampering() -> None:
     result = await explain(repo, decision.id)
 
     with pytest.raises(ValidationError):
-        result.verdict = ComplianceVerdict.ALLOW  # type: ignore[misc]
+        cast(Any, result).verdict = ComplianceVerdict.ALLOW

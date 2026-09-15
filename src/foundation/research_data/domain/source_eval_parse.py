@@ -4,6 +4,7 @@ Extracts LAYER_A section bodies and §9.1/§9.2 tables into typed records.
 Invariant checks live in `source_eval_gate.py` (same leaf, split for P6
 line_cap). Fail-closed via `SourceEvalGateError`.
 """
+
 from __future__ import annotations
 
 import re
@@ -78,7 +79,7 @@ _MEASURED_RATE_RE = re.compile(
 
 
 class SourceEvalGateError(ValueError):
-    """RD-1 DoD 위반 — 문서 게이트 적색. 추정·완화 없이 즉시 거부."""
+    """RD-1 DoD violation -- document gate red. Rejects immediately, no guessing or mitigation."""
 
     def __init__(self, code: str, detail: str) -> None:
         self.code = code

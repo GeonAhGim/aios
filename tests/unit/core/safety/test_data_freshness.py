@@ -19,6 +19,7 @@ DEEPEN(task-2826, DEPTH_R_EO 감사): 이 리프는 "관측 트래커"일 뿐 �
 다중 인스턴스 동시성(`test_concurrent_instrumented_adapters_share_tracker_without_clobbering`)
 을 더해 D2 네 항목을 모두 채운다.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -26,6 +27,7 @@ import time
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
+from typing import Any, cast
 
 import pytest
 
@@ -193,7 +195,7 @@ async def test_get_ohlcv_failure_does_not_record_and_propagates() -> None:
     삼키지 않고 그대로 전파해야 호출부가 실패를 인지할 수 있다."""
     freshness = DataFreshnessTracker()
     tracker = ApiCallTracker()
-    wrapped = InstrumentedAdapter(_FailingAdapter(), tracker, freshness=freshness)  # type: ignore[arg-type]
+    wrapped = InstrumentedAdapter(cast(Any, _FailingAdapter()), tracker, freshness=freshness)
 
     with pytest.raises(ConnectionError, match="simulated exchange timeout"):
         await wrapped.get_ohlcv("BTC/USDT", "1m")
@@ -243,12 +245,12 @@ async def test_concurrent_instrumented_adapters_share_tracker_without_clobbering
     freshness = DataFreshnessTracker()
     tracker = ApiCallTracker()
     bitget = InstrumentedAdapter(
-        _TaggedAdapter("bitget", "BTC/USDT", now - timedelta(seconds=10)),  # type: ignore[arg-type]
+        cast(Any, _TaggedAdapter("bitget", "BTC/USDT", now - timedelta(seconds=10))),
         tracker,
         freshness=freshness,
     )
     okx = InstrumentedAdapter(
-        _TaggedAdapter("okx", "ETH/USDT", now - timedelta(seconds=200)),  # type: ignore[arg-type]
+        cast(Any, _TaggedAdapter("okx", "ETH/USDT", now - timedelta(seconds=200))),
         tracker,
         freshness=freshness,
     )

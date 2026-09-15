@@ -25,6 +25,7 @@ oms/test_submit_internal_latency.py`, commit `034fed00`)는 순차 DB 왕복 수
 `_discover_round_trips`(임시, 커밋 대상 아님)로 재확인했다: 코드 변경
 (CM-8/EM-3 등) 이후에도 왕복 수가 그대로다.
 """
+
 from __future__ import annotations
 
 import statistics
@@ -36,6 +37,7 @@ import pytest
 
 from src.foundation.entities.adapters._rows import row_to_legal_entity
 from src.foundation.entities.adapters.postgres_repository import PostgresEntityRepository
+from src.foundation.entities.contracts.v1 import LegalEntity
 from src.services.oms.application.submit_order import submit_order
 from tests.integration.oms.conftest import create_test_tenant, seed_entity_context
 from tests.perf.oms.conftest import attach_round_trip_logger, measure_baseline_round_trip_p95_ms
@@ -66,7 +68,7 @@ class _FailingEntityRepo(PostgresEntityRepository):
     `ConnectionError`로도 같은 fail-closed 계약(예외 전파, 트랜잭션 미개시)을
     증명한다."""
 
-    async def get_legal_entity(self, tenant_id: UUID, entity_id: UUID):  # type: ignore[override]
+    async def get_legal_entity(self, tenant_id: UUID, entity_id: UUID) -> LegalEntity | None:
         raise ConnectionError("simulated DB connectivity failure in verify_entity_context")
 
 
@@ -78,14 +80,22 @@ async def _count_submit_round_trips(pool: asyncpg.Pool) -> int:
     queries = await attach_round_trip_logger(pool)
 
     await submit_order(  # 워밍업 — 커넥션의 1회성 드라이버 오버헤드 흡수
-        submit_command(user_id, execution_id, 1), pool=pool, profile=submit_profile(),
-        registry=submit_registry(), pre_submit_gate=allow_gate, entity_context=entity_context,
+        submit_command(user_id, execution_id, 1),
+        pool=pool,
+        profile=submit_profile(),
+        registry=submit_registry(),
+        pre_submit_gate=allow_gate,
+        entity_context=entity_context,
         entity_repo=entity_repo,
     )
     queries.clear()
     await submit_order(
-        submit_command(user_id, execution_id, 2), pool=pool, profile=submit_profile(),
-        registry=submit_registry(), pre_submit_gate=allow_gate, entity_context=entity_context,
+        submit_command(user_id, execution_id, 2),
+        pool=pool,
+        profile=submit_profile(),
+        registry=submit_registry(),
+        pre_submit_gate=allow_gate,
+        entity_context=entity_context,
         entity_repo=entity_repo,
     )
     return len(queries)
@@ -105,8 +115,12 @@ async def test_submit_internal_latency_within_environment_normalized_bound(
     for seq in range(_SAMPLE_COUNT):
         started = time.perf_counter()
         result = await submit_order(
-            submit_command(user_id, execution_id, seq + 100), pool=pool, profile=submit_profile(),
-            registry=submit_registry(), pre_submit_gate=allow_gate, entity_context=entity_context,
+            submit_command(user_id, execution_id, seq + 100),
+            pool=pool,
+            profile=submit_profile(),
+            registry=submit_registry(),
+            pre_submit_gate=allow_gate,
+            entity_context=entity_context,
             entity_repo=entity_repo,
         )
         latencies_ms.append((time.perf_counter() - started) * 1000.0)
@@ -154,8 +168,12 @@ async def test_submit_internal_fails_closed_when_entity_repo_connection_drops(
 
     with pytest.raises(ConnectionError):
         await submit_order(
-            submit_command(user_id, execution_id, 999), pool=pool, profile=submit_profile(),
-            registry=submit_registry(), pre_submit_gate=allow_gate, entity_context=entity_context,
+            submit_command(user_id, execution_id, 999),
+            pool=pool,
+            profile=submit_profile(),
+            registry=submit_registry(),
+            pre_submit_gate=allow_gate,
+            entity_context=entity_context,
             entity_repo=failing_repo,
         )
 
@@ -180,7 +198,7 @@ async def test_submit_round_trip_gate_detects_extra_query(pool: asyncpg.Pool) ->
     구현해 파일 길이를 줄인다)."""
 
     class _ChattyEntityRepo(PostgresEntityRepository):
-        async def get_legal_entity(self, tenant_id: UUID, entity_id: UUID):  # type: ignore[override]
+        async def get_legal_entity(self, tenant_id: UUID, entity_id: UUID) -> LegalEntity | None:
             async with self._pool.acquire() as conn:
                 await conn.fetchval("SELECT 1")
                 row = await conn.fetchrow(
@@ -197,14 +215,22 @@ async def test_submit_round_trip_gate_detects_extra_query(pool: asyncpg.Pool) ->
     queries = await attach_round_trip_logger(pool)
 
     await submit_order(  # 워밍업
-        submit_command(user_id, execution_id, 1), pool=pool, profile=submit_profile(),
-        registry=submit_registry(), pre_submit_gate=allow_gate, entity_context=entity_context,
+        submit_command(user_id, execution_id, 1),
+        pool=pool,
+        profile=submit_profile(),
+        registry=submit_registry(),
+        pre_submit_gate=allow_gate,
+        entity_context=entity_context,
         entity_repo=entity_repo,
     )
     queries.clear()
     await submit_order(
-        submit_command(user_id, execution_id, 2), pool=pool, profile=submit_profile(),
-        registry=submit_registry(), pre_submit_gate=allow_gate, entity_context=entity_context,
+        submit_command(user_id, execution_id, 2),
+        pool=pool,
+        profile=submit_profile(),
+        registry=submit_registry(),
+        pre_submit_gate=allow_gate,
+        entity_context=entity_context,
         entity_repo=entity_repo,
     )
     round_trips = len(queries)

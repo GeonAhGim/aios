@@ -6,6 +6,7 @@ DB를 상대로 fence 관통(R-33/R-35 위임)·mandate 필수(I-01 fail-closed)
 올바르게 적용하는지 확인한다. tests/integration/test_order_service.py의
 기존 12개 테스트(pre_submit_gate 미지정)는 이 변경으로 전혀 건드리지
 않는다(그 경로는 게이트 자체를 안 거친다)."""
+
 from __future__ import annotations
 
 import asyncio
@@ -14,6 +15,7 @@ import time
 import uuid
 from decimal import Decimal
 from pathlib import Path
+from typing import Any, cast
 
 import asyncpg
 import pytest
@@ -331,7 +333,7 @@ async def test_db_failure_during_fence_read_propagates_instead_of_fail_open(
     mandate = await mandate_repo.get_mandate(user_id)
 
     flaky_pool = _AcquireFailsAfter(pool, fail_after=0)
-    gate = make_foundation_pre_submit_gate(flaky_pool, require_mandate=True)  # type: ignore[arg-type]
+    gate = make_foundation_pre_submit_gate(cast(Any, flaky_pool), require_mandate=True)
 
     with pytest.raises(ConnectionResetError):
         await gate(

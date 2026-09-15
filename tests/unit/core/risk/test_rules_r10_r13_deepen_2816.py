@@ -16,11 +16,13 @@ audit docs/audit/DEPTH_R_EO.md#1177) D2->D3 증빙.
    결과를 내고(숨은 가변 상태 없음), 여러 스레드가 서로 다른 입력으로
    동시에 호출해도 서로 오염시키지 않는다(D3).
 """
+
 from __future__ import annotations
 
 import time
 from concurrent.futures import ThreadPoolExecutor
 from decimal import Decimal
+from typing import Any
 from uuid import uuid4
 
 import pytest
@@ -43,7 +45,7 @@ _TTL_SEC = 5.0
 
 
 def _bundle(**overrides: object) -> RiskRuleBundle:
-    fields: dict[str, object] = dict(
+    fields: dict[str, Any] = dict(
         id=uuid4(),
         version="policy-v1",
         rule_hash="a" * 64,
@@ -54,7 +56,7 @@ def _bundle(**overrides: object) -> RiskRuleBundle:
         approved_by=uuid4(),
     )
     fields.update(overrides)
-    return RiskRuleBundle(**fields)  # type: ignore[arg-type]
+    return RiskRuleBundle(**fields)
 
 
 def _safe_inputs(**overrides: object):
@@ -99,13 +101,13 @@ def _safe_inputs(**overrides: object):
     return sample_inputs(**base)
 
 
-def _evaluate(inputs, **kwargs: object):
+def _evaluate(inputs, **kwargs: Any):
     bundle = kwargs.pop("bundle", None) or _bundle()
     kwargs.setdefault("gate_kind", GateKind.PRE_TRADE)
     kwargs.setdefault("trace_id", uuid4())
     kwargs.setdefault("now", NOW)
     kwargs.setdefault("ttl", _TTL_SEC)
-    return evaluate(inputs, bundle, **kwargs)  # type: ignore[arg-type]
+    return evaluate(inputs, bundle, **kwargs)
 
 
 # ---- 게이트 DENY 재현(D2) — rule 함수 격리 호출이 아니라 evaluate() 전체 ----
@@ -146,9 +148,7 @@ def _evaluate(inputs, **kwargs: object):
         ),
         (
             dict(
-                activity=ActivityInputs(
-                    trades_last_1h=999, trades_avg_per_hour_24h=Decimal("10")
-                )
+                activity=ActivityInputs(trades_last_1h=999, trades_avg_per_hour_24h=Decimal("10"))
             ),
             "RISK_TRADE_FREQUENCY_ANOMALY",
         ),

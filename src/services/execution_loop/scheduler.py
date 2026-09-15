@@ -25,17 +25,20 @@ main.py의 다른 백그라운드 루프(heartbeat/alert/risk_guard)와 같은 �
   리스를 획득/갱신한 것만 tick 대상으로 돌려준다(I-02, §4.1) — 다른
   프로세스가 만료 전 리스를 쥐고 있으면 그 execution_id는 이번 주기에
   조용히 건너뛴다(예외를 던지지 않는다).
-- R-48 — `distrust_provider_factory`는 옵션이다(참조 시세는 안전장치를
-  강화할 뿐 차단 로직 자체의 전제조건이 아니라서, `run_execution_tick`의
-  `distrust_providers` 기본값 `()`도 유효한 값). 다만 이 팩토리를 비워
-  두면 매 틱 참조 쿼럼이 0개로 고정돼 `DataDistrustMonitor`가 항상
-  `DEGRADED_SINGLE_SOURCE`/`DISTRUSTED`(참조 0개 분기)로만 판정한다 —
-  실 배선(background_loops.py)은 반드시 채워 넣어야 한다(과거 이 인자가
-  통째로 빠져 2소스 쿼럼 비교가 프로덕션에서 한 번도 돌지 않았던 배선
-  결함, task-2810). 어댑터별로 다른 참조 소스가 필요해(Bitget 선물
-  마크가격은 이번 틱에 리졸브한 adapter가 필요) 생성 시점 고정 리스트가
-  아니라 `(adapter, exchange) -> providers` 팩토리로 받는다.
+- R-48 -- `distrust_provider_factory` is optional (reference quotes only
+  strengthen the safety net, they are not a precondition of the block logic
+  itself, so `run_execution_tick`'s `distrust_providers` default of `()` is
+  also a valid value). But leaving this factory empty pins the reference
+  quorum at 0 every tick, so `DataDistrustMonitor` can only ever judge
+  `DEGRADED_SINGLE_SOURCE`/`DISTRUSTED` (the 0-reference branch) -- the real
+  wiring (background_loops.py) must fill it in (this argument was entirely
+  missing once before, a wiring defect that meant the 2-source quorum
+  comparison never ran in production, task-2810). Different adapters need
+  different reference sources (Bitget futures mark price needs the adapter
+  resolved for this tick), so it takes a `(adapter, exchange) -> providers`
+  factory rather than a fixed list decided at construction time.
 """
+
 from __future__ import annotations
 
 import asyncio

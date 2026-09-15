@@ -45,7 +45,7 @@ from src.services.safety.kill_switch_service import KillSwitchService
 
 logger = logging.getLogger(__name__)
 
-# watchdog_process.py의 WATCHDOG_SYSTEM_ACTOR_ID(e5a8c5d4f6b7)를 liquidation_executor.py처럼 재정의.
+# Same WATCHDOG_SYSTEM_ACTOR_ID (e5a8c5d4f6b7) as watchdog_process.py/liquidation_executor.py.
 SYSTEM_ACTOR_ID = UUID("00000000-0000-0000-0000-000000000002")
 
 _CM9_BUNDLE_VERSION = "cm11.post_trade.cm9/1"
@@ -227,9 +227,9 @@ async def _activate_if_not_active(
     tenant_id: UUID,
     reason: str,
 ) -> bool:
-    """D3 다중 인스턴스 -- `risk_guard_service.py`의 scope_ref advisory lock과 같은 패턴으로
-    `(tenant_id, reason)` 키의 `pg_advisory_xact_lock`을 check+activate 전체 구간 동안 쥐어
-    다른 배치 인스턴스의 끼어들기를 막는다. True는 이번 호출이 실제로 활성화했음을 뜻한다."""
+    """D3 multi-instance -- same pattern as `risk_guard_service.py`'s scope_ref
+    advisory lock: holds `pg_advisory_xact_lock` on `(tenant_id, reason)` for
+    the whole check+activate span, blocking other instances; True means it activated."""
     # fmt: off
     async with pool.acquire() as conn, conn.transaction():
         await conn.execute(

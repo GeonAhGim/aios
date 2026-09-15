@@ -8,13 +8,14 @@ task-2765/task-2769/task-2805 DEEPEN convention.
 
 Spec: docs/specs/L4_execution_oms_and_exchange_v1.0.md#§9 L4-10 [FROZEN_PAPER_ONLY]
 """
+
 from __future__ import annotations
 
 import asyncio
 import json
 import time
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timezone, tzinfo
 from decimal import Decimal
 from pathlib import Path
 
@@ -272,8 +273,8 @@ class _ScriptedClock:
     def now(self, tz: object = None) -> datetime:
         return self._instants.pop(0)
 
-    def fromtimestamp(self, *args: object, **kwargs: object) -> datetime:
-        return datetime.fromtimestamp(*args, **kwargs)  # type: ignore[arg-type]
+    def fromtimestamp(self, timestamp: float, tz: tzinfo | None = None) -> datetime:
+        return datetime.fromtimestamp(timestamp, tz)
 
 
 async def test_wall_clock_drift_inside_one_window_does_not_break_idempotency_but_crossing_it_does(
@@ -298,9 +299,7 @@ async def test_wall_clock_drift_inside_one_window_does_not_break_idempotency_but
         window_start_epoch + _IDEMPOTENCY_WINDOW_SECONDS + 5, tz=timezone.utc
     )
 
-    monkeypatch.setattr(
-        "src.core.executor.executor.datetime", _ScriptedClock([t_a, t_b, t_c])
-    )
+    monkeypatch.setattr("src.core.executor.executor.datetime", _ScriptedClock([t_a, t_b, t_c]))
 
     first = await _execute_once(pool, adapter, execution_id, user_id)
     second = await _execute_once(pool, adapter, execution_id, user_id)

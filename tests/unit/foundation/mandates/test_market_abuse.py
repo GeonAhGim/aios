@@ -41,7 +41,7 @@ from concurrent.futures import ProcessPoolExecutor
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import pytest
 
@@ -478,7 +478,7 @@ def test_abuse_hit_rejects_post_construction_tampering():
     실증한다."""
     hit = _missing_hit_for_test()
     with pytest.raises(dataclasses.FrozenInstanceError):
-        hit.severity = ComplianceVerdict.WARN  # type: ignore[misc]
+        cast(Any, hit).severity = ComplianceVerdict.WARN
 
 
 def _missing_hit_for_test() -> AbuseHit:

@@ -20,6 +20,7 @@ import json
 import time
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
+from typing import Any, cast
 from uuid import UUID
 
 import asyncpg
@@ -235,11 +236,11 @@ async def test_risk_gate_repo_none_is_rejected_i01() -> None:
     가드가 배선돼 있는지(구현만 되고 우회 가능한 게 아닌지) 증명한다."""
     with pytest.raises(TypeError):
         await restart_recovery.recover_stuck_outbox_commands(
-            None,  # type: ignore[arg-type]
-            order_repo=None,  # type: ignore[arg-type]
-            outbox_repo=None,  # type: ignore[arg-type]
-            resolve_adapter=None,  # type: ignore[arg-type]
-            risk_gate_repo=None,  # type: ignore[arg-type]
+            cast(Any, None),
+            order_repo=cast(Any, None),
+            outbox_repo=cast(Any, None),
+            resolve_adapter=cast(Any, None),
+            risk_gate_repo=cast(Any, None),
             clock=lambda: datetime.now(timezone.utc),
         )
 

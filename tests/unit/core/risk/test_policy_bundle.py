@@ -8,12 +8,13 @@ scope 간 비교나 DB 원자성을 다루지 않고 "단일 번들 인스턴스
 유효한가"만 순수 판정하므로, R-22 어댑터가 `conditional_update`로 실제
 원자적 전이를 수행하기 전 단계의 사전 검증으로만 쓰인다.
 """
+
 from __future__ import annotations
 
 import time
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
-from typing import Any
+from typing import Any, cast
 from uuid import uuid4
 
 import pytest
@@ -253,9 +254,7 @@ def _sample_bundle(**overrides):
 def test_same_policy_and_engine_version_hash_is_stable(tmp_path):
     path = _write_yaml(tmp_path, "a.yaml", _YAML_TEMPLATE)
     policy = load_risk_policy(path)
-    assert compute_rule_hash(policy, _ENGINE_VERSION) == compute_rule_hash(
-        policy, _ENGINE_VERSION
-    )
+    assert compute_rule_hash(policy, _ENGINE_VERSION) == compute_rule_hash(policy, _ENGINE_VERSION)
 
 
 def test_yaml_comments_and_key_order_do_not_change_hash(tmp_path):
@@ -371,7 +370,7 @@ def test_model_dump_failure_propagates_instead_of_silent_fallback_hash():
     # 전파돼 호출부가 이를 "해시 불일치"가 아니라 "계산 실패"로 fail-closed
     # 처리하게 강제한다.
     with pytest.raises(RuntimeError):
-        compute_rule_hash(_CorruptedPolicy(), _ENGINE_VERSION)  # type: ignore[arg-type]
+        compute_rule_hash(cast(Any, _CorruptedPolicy()), _ENGINE_VERSION)
 
 
 def test_compute_rule_hash_repeated_calls_stay_bounded(tmp_path):

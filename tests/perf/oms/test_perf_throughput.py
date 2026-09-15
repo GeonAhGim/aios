@@ -18,6 +18,7 @@ commit `034fed00`)와 동일하게 "총 DB 왕복 수 == 고정 오버헤드 + N
    증명한다(전체 배치가 한 건의 장애로 멈추면 처리량 목표 자체가 무의미해
    진다 — 이 리프가 처음으로 배치 처리량 경로에 실패 주입을 더한다).
 """
+
 from __future__ import annotations
 
 import time
@@ -66,7 +67,10 @@ async def _seed_outbox_batch(pool: asyncpg.Pool, n: int) -> list[UUID]:
             order_id = await insert_order(conn, user_id, status="VALIDATED")
             view = await order_repo.get_for_update(conn, order_id)
             await outbox_repo.enqueue(
-                conn, order_id=order_id, command_type="SUBMIT", payload=submit_payload(view),
+                conn,
+                order_id=order_id,
+                command_type="SUBMIT",
+                payload=submit_payload(view),
                 not_before=datetime.now(timezone.utc),
             )
         order_ids.append(order_id)
@@ -84,8 +88,12 @@ async def test_outbox_single_worker_throughput_measured_and_round_trips_exact(
         return adapter
 
     dispatcher = OutboxDispatcher(
-        pool, outbox_repo=OutboxRepository(), order_repo=PostgresOrderRepository(),
-        resolve_adapter=resolve, pre_send_gate=allow_gate, worker_id="w-throughput",
+        pool,
+        outbox_repo=OutboxRepository(),
+        order_repo=PostgresOrderRepository(),
+        resolve_adapter=resolve,
+        pre_send_gate=allow_gate,
+        worker_id="w-throughput",
     )
     baseline_p95_ms = await measure_baseline_round_trip_p95_ms(pool)
     queries = await attach_round_trip_logger(pool)
@@ -146,8 +154,12 @@ async def test_outbox_batch_isolates_one_adapter_failure(pool: asyncpg.Pool) -> 
         return adapter
 
     dispatcher = OutboxDispatcher(
-        pool, outbox_repo=OutboxRepository(), order_repo=PostgresOrderRepository(),
-        resolve_adapter=resolve, pre_send_gate=allow_gate, worker_id="w-flaky",
+        pool,
+        outbox_repo=OutboxRepository(),
+        order_repo=PostgresOrderRepository(),
+        resolve_adapter=resolve,
+        pre_send_gate=allow_gate,
+        worker_id="w-flaky",
     )
     queries = await attach_round_trip_logger(pool)
     queries.clear()
@@ -233,7 +245,7 @@ async def test_inbox_backlog_isolates_one_poisoned_event(pool: asyncpg.Pool) -> 
     assert inserted is True
 
     class _PoisonedFillsRepo(FillsRepository):
-        async def insert_if_absent(self, conn: asyncpg.Connection, fill: FillEvent) -> bool:  # type: ignore[override]
+        async def insert_if_absent(self, conn: asyncpg.Connection, fill: FillEvent) -> bool:
             if fill.exchange_order_id == poisoned_exoid:
                 raise ConnectionError("simulated poisoned event")
             return await super().insert_if_absent(conn, fill)

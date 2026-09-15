@@ -1,15 +1,17 @@
-"""웹훅 알림 포트 + Slack 어댑터.
+"""Webhook alert port + Slack adapter.
 
 Spec: docs/design/ADR-2026-09-09-B-mvp1-hardening-and-mvp2-scope.md H-10.
-config/observability/alert_rules.yaml 11개 규칙이 config/observability/alertmanager.yml의
-라우팅을 거쳐도, 실제로 무언가가 발신하지 않으면 사람에게 닿지 않는다. `NotifyPort`는
-send(alert) 한 연산만 노출하는 순수 인터페이스이고, `WebhookNotifyAdapter`가 Slack
-Incoming Webhook 호환 페이로드(`{"text": ...}`)로 발신한다(어댑터 1종 — PagerDuty는
-같은 포트 위에 추후 추가 가능).
+Even if config/observability/alert_rules.yaml's 11 rules route through
+config/observability/alertmanager.yml, nothing reaches a human unless
+something actually sends. `NotifyPort` is a pure interface exposing only
+send(alert); `WebhookNotifyAdapter` sends a Slack Incoming Webhook compatible
+payload (`{"text": ...}`) (one adapter for now -- PagerDuty can be added
+later on the same port).
 
-`ALERT_WEBHOOK_URL`(.env 슬롯)이 비어 있으면 `WebhookNotifyAdapter.send`는 조용히
-성공한 척하지 않고 `ok=False`를 돌려준다 — H-10의 목적 자체가 "무음 알림"을 없애는
-것이므로, 미설정을 성공으로 위장하면 그 사고를 그대로 재현하게 된다.
+If `ALERT_WEBHOOK_URL` (.env slot) is empty, `WebhookNotifyAdapter.send`
+does not silently pretend to succeed -- it returns `ok=False`. H-10 exists
+specifically to eliminate "silent alerts", so treating a missing config as
+success would reproduce that exact incident.
 """
 
 from __future__ import annotations
@@ -53,10 +55,11 @@ def _format_slack_text(alert: AlertNotification) -> str:
 
 
 class WebhookNotifyAdapter:
-    """Slack Incoming Webhook 호환 발신 어댑터.
+    """Slack Incoming Webhook compatible sender adapter.
 
-    `webhook_url`을 생략하면 `ALERT_WEBHOOK_URL`(.env)을 읽는다. 값이 비어 있으면
-    실제로 발신하지 않고 `ok=False`를 돌려준다(미설정을 성공으로 위장하지 않는다).
+    If `webhook_url` is omitted, reads `ALERT_WEBHOOK_URL` (.env). If that
+    value is empty, does not actually send and returns `ok=False` (a missing
+    config is never disguised as success).
     """
 
     def __init__(self, webhook_url: str | None = None, *, timeout: float = 10.0) -> None:

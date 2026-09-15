@@ -6,6 +6,7 @@ KillSwitchService.activate(STRATEGY_DEPLOYMENT, "exec:<id>")로 통일한다(DoD
 fence++→legacy 정지→fan-out)는 전부 그쪽에 위임하고(R-40 배선 비복제),
 이미 ACTIVE인 control이 있는 실행은 재호출하지 않는다(멱등은 이 계층 책임).
 """
+
 from __future__ import annotations
 
 from collections.abc import Awaitable, Callable
@@ -56,8 +57,9 @@ class RiskGuardService:
             if drawdown_pct < row["max_drawdown_pct"]:
                 continue
             scope_ref = f"exec:{row['execution_id']}"
-            # 다중 인스턴스 동시 평가 멱등: 테이블 락은 fan-out의 UPDATE와
-            # 자기 교착을 일으키므로 scope_ref별 advisory lock으로 직렬화한다.
+            # Multi-instance concurrent-evaluation idempotency: a table lock
+            # would self-deadlock against fan-out's UPDATE, so serialize per
+            # scope_ref with an advisory lock instead.
             async with self._pool.acquire() as conn, conn.transaction():
                 await conn.execute("SELECT pg_advisory_xact_lock(hashtext($1))", scope_ref)
                 active = await conn.fetchval(

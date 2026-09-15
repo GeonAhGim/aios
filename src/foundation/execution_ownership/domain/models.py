@@ -5,6 +5,7 @@ Spec: docs/specs/L4_execution_ownership_and_safety_gate_wiring_v1.0.md
 `execution_leases` 테이블 행 하나를 표현만 하고 저장은 ports/adapters
 (EO-02)의 책임이다.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -12,10 +13,11 @@ from datetime import datetime
 
 
 def require_aware_utc(value: datetime) -> datetime:
-    """tz-aware datetime만 통과시킨다. `tzinfo is None`만 보면 `utcoffset()`이
-    None을 돌려주는 기형 tzinfo(예: 적대적으로 조작된 커스텀 tzinfo)가 통과해
-    비교 시점에 제어되지 않은 TypeError로 새는 것을 막는다 — 반드시 이
-    ValueError로 fail-closed해야 한다."""
+    """Only lets tz-aware datetimes through. Checking `tzinfo is None` alone
+    would let a malformed tzinfo (e.g. an adversarially crafted custom
+    tzinfo) whose `utcoffset()` returns None slip past and leak an
+    uncontrolled TypeError at comparison time -- this must fail-closed with
+    ValueError instead."""
     if value.tzinfo is None or value.utcoffset() is None:
         raise ValueError("naive datetime은 허용하지 않는다 — tz-aware UTC만 사용한다")
     return value
