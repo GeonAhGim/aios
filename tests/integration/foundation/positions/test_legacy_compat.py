@@ -319,7 +319,7 @@ async def test_get_positions_propagates_connection_fault_without_swallowing(proj
     한다(fail-closed, 실패 주입) — 이전엔 정상 경로만 검증했다."""
     with pytest.raises(RuntimeError, match="boom"):
         await projection.get_positions(
-            _FaultInjectingConnection(),  # type: ignore[arg-type]
+            _FaultInjectingConnection(),
             user_id=uuid.uuid4(),
             symbol="ANY",
             exchange=_EXCHANGE,
