@@ -85,6 +85,16 @@ def test_secref_value_passes_through_unredacted():
     assert result["credential"] == value
 
 
+def test_key_containing_secret_substring_is_redacted_even_when_value_is_a_safe_ref():
+    # Keys like vault_secret_ref (src/foundation/connections) partial-match "secret"
+    # and get masked even when the value is an opaque reference (secref://). This is
+    # over-masking, not a leak, so it's not a blocker -- pin the behavior here.
+    value = "secref://paper/exchange_credential/123@v2"
+    result = redact({"vault_secret_ref": value})
+
+    assert result["vault_secret_ref"] == REDACTED
+
+
 # --- 부분 문자열 오탐 방지: 값 패턴은 전체 문자열이 정확히 일치할 때만 마스킹한다.
 
 
