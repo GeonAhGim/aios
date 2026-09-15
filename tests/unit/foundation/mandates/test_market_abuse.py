@@ -55,7 +55,6 @@ from src.foundation.mandates.domain.market_abuse import (
     AbuseHit,
     detect,
 )
-from tests.support.frozen import assign_attr
 
 _T0 = datetime(2026, 1, 5, 5, 0, 0, tzinfo=timezone.utc)
 _CLOSE = datetime(2026, 1, 5, 6, 0, 0, tzinfo=timezone.utc)

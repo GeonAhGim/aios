@@ -34,7 +34,6 @@ from src.foundation.mandates.domain.models import (
     PolicyOutcome,
 )
 from src.foundation.mandates.domain.rules import compile_rule_hash
-from tests.support.frozen import assign_attr
 
 _NOW = datetime(2026, 1, 5, 5, 0, 0, tzinfo=timezone.utc)
 

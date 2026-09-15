@@ -40,7 +40,6 @@ from src.foundation.mandates.contracts.v1 import ComplianceVerdict
 from src.foundation.mandates.domain.evaluator import evaluate_bundle
 from src.foundation.mandates.domain.rule_bundle import RuleBundle, RuleSpec
 from src.foundation.mandates.domain.rules import liquidity
-from tests.support.frozen import assign_attr
 
 _MAX_PCT = Decimal("10.00")
 _ADV = Decimal("1000000.00")  # average daily traded value

@@ -289,9 +289,13 @@ def test_chart_passes_with_cross_tenant_test_and_frontend_config(tmp_path: Path)
     assert result.passed
 
 
-def test_chart_against_real_repo_currently_fails_missing_vitest_config() -> None:
+def test_chart_against_real_repo_now_passes_with_vitest_config() -> None:
+    """task-3460 CI-GREEN-2 (b) added frontend/vitest.config.ts (the vitest 4
+    `test.projects` workspace config -- see its own docstring), so this
+    criterion's "frontend/vitest.config.ts missing" gap is closed; this test
+    used to pin the opposite (missing-config) real-repo state."""
     result = cc.check_09_chart(ROOT)
-    assert not result.passed
+    assert result.passed
 
 
 # --------------------------------------------------------------------------- 10: 운영

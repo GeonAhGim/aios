@@ -130,7 +130,6 @@ def test_gate_stays_red_when_a_rule_raises_mid_evaluation():
 
     rules: list[Rule] = [_ok_rule, _broken_rule]
     results: list[RuleResult] = []
-    opaque: Any = object()
     for rule in rules:
         try:
             result = rule(cast(Any, object()), cast(Any, object()))
