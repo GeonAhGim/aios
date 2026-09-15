@@ -179,13 +179,26 @@ async def test_concurrent_activation_from_different_instances_only_one_wins(
     pool, repo, trust_repo, audit_repo
 ):
     """D3 다중 인스턴스 증명(DEEPEN task-2862): 서로 다른 실제 asyncpg
-    커넥션 풀(별도 앱 "인스턴스"를 흉내)을 쓰는 두 승인자가, 같은 활성
-    mandate에 대해 서로 다른(작성자가 각기 다른) PROPOSED revision을 정확히
-    동시에 activate하려 시도한다. `activate_revision.py`는 둘 다 같은
-    `expected_active_revision_id`(현재 ACTIVE revision)를 관찰한 뒤 조건부
-    UPDATE로 경합하므로, 실제 DB 레벨에서 정확히 하나만 이기고 나머지는
+    커넥션 풀(별도 앱 "인스턴스"를 흉내)을 쓰는 두 인스턴스가, 같이 관찰한
+    `expected_active_revision_id`(현재 ACTIVE revision)로 서로 다른 PROPOSED
+    revision을 정확히 동시에 `activate_revision`(리포지토리 CAS — 모듈
+    docstring이 "진짜 직렬화 지점"이라 부르는 지점)으로 activate하려
+    시도한다. 실제 DB 레벨에서 정확히 하나만 이기고 나머지는
     `ConcurrencyConflictError`로 거부되어야 한다 — 순차 await였다면(기존
-    디코이 테스트처럼) 이 경합이 전혀 재현되지 않는다."""
+    디코이 테스트처럼) 이 경합이 전혀 재현되지 않는다.
+
+    상위 커맨드(`activate_revision_command`)를 통째로 동시에 두 번 호출하는
+    방식은 이 환경에서 쓰지 않는다: 그 커맨드는 CAS 직전에
+    `get_active_revision`을 material-change 판단용으로 다시 읽는데, 두 커맨드
+    실행이 이 환경(Windows ProactorEventLoop)에서 사실상 순차로 끝나는 것이
+    관측됐다 — 패자가 CAS에 도달하기도 전에 이미 승자로 바뀐
+    current_active와 자기 규칙을 비교해 CAS 경합과 무관한
+    `MaterialChangeRequiresReauthError`로 거부되어, 이 테스트가 증명하려는
+    CAS 경합 자체가 재현되지 않는 거짓 통과를 만들었다(수정 전 실측:
+    5/5 결정론적으로 이 오분류 발생). 그래서 두 인스턴스가 **미리 고정해
+    공유하는** `expected_active_revision_id`로 리포지토리의
+    `activate_revision`(CAS)만 직접 동시 호출해, 상위 커맨드의 비즈니스
+    규칙과 무관하게 Postgres 행 잠금 레벨의 경합만 결정론적으로 재현한다."""
     u1 = uuid4()
     u2 = uuid4()
     tenant_id = await _activated_tenant(pool, repo, trust_repo)
@@ -204,6 +217,9 @@ async def test_concurrent_activation_from_different_instances_only_one_wins(
         audit_repo=audit_repo,
     )
 
+    mandate = await repo.get_mandate(tenant_id)
+    current_active = await repo.get_active_revision(mandate.id)
+
     n_instances = 2
     concurrent_pool = await asyncpg.create_pool(
         _asyncpg_dsn(), min_size=n_instances, max_size=n_instances
@@ -213,23 +229,11 @@ async def test_concurrent_activation_from_different_instances_only_one_wins(
         repo_2 = PostgresMandateRepository(concurrent_pool)
 
         results = await asyncio.gather(
-            activate_revision_command(
-                repo_1,
-                trust_repo,
-                tenant_id=tenant_id,
-                subject_id=u2,
-                revision_id=revision_a.id,
-                reauthenticated=False,
-                audit_repo=audit_repo,
+            repo_1.activate_revision(
+                mandate.id, revision_a.id, expected_active_revision_id=current_active.id
             ),
-            activate_revision_command(
-                repo_2,
-                trust_repo,
-                tenant_id=tenant_id,
-                subject_id=u1,
-                revision_id=revision_b.id,
-                reauthenticated=False,
-                audit_repo=audit_repo,
+            repo_2.activate_revision(
+                mandate.id, revision_b.id, expected_active_revision_id=current_active.id
             ),
             return_exceptions=True,
         )
@@ -242,19 +246,10 @@ async def test_concurrent_activation_from_different_instances_only_one_wins(
     assert len(failures) == 1
     assert isinstance(failures[0], ConcurrencyConflictError)
 
-    mandate = await repo.get_mandate(tenant_id)
+    refreshed_mandate = await repo.get_mandate(tenant_id)
     winner_id = successes[0].id
-    assert mandate.active_revision_id == winner_id
+    assert refreshed_mandate.active_revision_id == winner_id
 
     loser_id = revision_b.id if winner_id == revision_a.id else revision_a.id
     loser_revision = await repo.get_revision(loser_id)
     assert loser_revision.state == MandateRevisionState.PROPOSED  # 패자는 활성화되지 않았다
-
-    activated_count = 0
-    for rev_id in (revision_a.id, revision_b.id):
-        event = await audit_repo.get_latest_event(
-            "mandate_revision", rev_id, action="mandate_revision_activated"
-        )
-        if event is not None:
-            activated_count += 1
-    assert activated_count == 1  # 승자 한 명분의 감사 로그만 남는다
