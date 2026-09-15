@@ -54,7 +54,7 @@ def test_rejects_verdict_outside_allow_warn_deny() -> None:
     with pytest.raises(ValidationError):
         ComplianceDecision(
             decision_id=uuid4(),
-            verdict="ALLOWED",  # not in the ALLOW|WARN|DENY table
+            verdict=cast(Any, "ALLOWED"),  # not in the ALLOW|WARN|DENY table
             rule_hits=[],
             inputs_hash=_hex_digest("inputs"),
             bundle_version=_hex_digest("bundle"),
