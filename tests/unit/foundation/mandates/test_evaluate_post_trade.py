@@ -183,9 +183,10 @@ def test_violation_reason_encodes_tenant_scoped_key() -> None:
 
 
 def test_evaluate_tenant_day_meets_latency_and_throughput_budget() -> None:
-    """수치 성능/처리량 -- 이 배치는 스케줄러(`background_loops.py`,
-    3600s 주기)에서 돌아가므로 evaluate_tenant_day 자체가 병목이 되면 다음
-    tick을 잠식한다. market_abuse의 wash-trade 페어체크가 O(n^2)이라(DEEPEN
+    """수치 성능/처리량 -- 이 배치는 스케줄러(`background_loops.py`, 일 1회
+    고정 시각)에서 돌아가므로 evaluate_tenant_day 자체가 병목이 되면 tenant
+    수가 늘었을 때 다음 예정 시각 전에 끝나지 못할 수 있다. market_abuse의
+    wash-trade 페어체크가 O(n^2)이라(DEEPEN
     task-2864가 CM-10에서 확인한 것과 같은 특성) 하루치 한 tenant 체결량
     규모(500건)에서 상한(3.0s)과 하한 처리량(150 fills/s)을 수치로 고정한다."""
     fill_count = 500

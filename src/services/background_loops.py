@@ -72,9 +72,7 @@ ALERT_EVALUATION_INTERVAL_SECONDS = 60.0  # Draft — 가격/지표 알림 평�
 RISK_GUARD_INTERVAL_SECONDS = 30.0  # Draft — 손실 한도 자동정지 평가 주기
 SAFETY_REACTIVATION_INTERVAL_SECONDS = 10.0  # Draft — Circuit Breaker 재가동 승인 반영 주기
 LIQUIDATION_WORKER_INTERVAL_SECONDS = 3.0  # Draft — slice.not_before 최소 간격(2s)보다 촘촘히
-POST_TRADE_BATCH_INTERVAL_SECONDS = 3600.0  # Draft — once a day would be correct, but there is
-# no cron infrastructure, so this reuses run_periodic_loop (safe to repeat every tick since
-# re-evaluation is idempotent).
+POST_TRADE_BATCH_INTERVAL_SECONDS = 86400.0  # task-2616 -- CM-11 once daily (was 3600.0/hourly)
 
 
 def flag_enabled(name: str) -> bool:
@@ -91,6 +89,7 @@ class BackgroundLoops:
     lease_repo: ExecutionLeaseRepository
     owner_id: str
     tasks: list[asyncio.Task[None]] = field(default_factory=list)
+    trigger_post_trade_batch: Callable[[], Awaitable[None]] | None = None  # task-2616 on-demand
 
     async def stop(self) -> None:
         for task in self.tasks:
@@ -296,4 +295,5 @@ async def start_background_loops(
         lease_repo=lease_repo,
         owner_id=owner_id,
         tasks=tasks,
+        trigger_post_trade_batch=_post_trade_batch_tick if post_trade_batch_task else None,
     )

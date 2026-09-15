@@ -258,9 +258,10 @@ async def test_market_abuse_warn_only_leaves_gate_open(
 async def test_batch_meets_tenant_throughput_floor(
     pool: asyncpg.Pool, kill_switch: KillSwitchService, risk_gate_repo
 ) -> None:
-    """수치 성능/처리량 -- 이 배치는 3600초 스케줄러 tick(background_loops.py)
-    안에서 그 시점의 전체 tenant 목록을 순회한다. tenant 수가 늘어도 배치가
-    다음 tick 전에 끝나야 하므로, 20 tenant를 추가로 실 DB에 심어 처리하는 데
+    """수치 성능/처리량 -- 이 배치는 일 1회 고정 시각 스케줄러 tick
+    (background_loops.py) 안에서 그 시점의 전체 tenant 목록을 순회한다.
+    tenant 수가 늘어도 배치가 다음날 예정 시각 전에 끝나야 하므로, 20
+    tenant를 추가로 실 DB에 심어 처리하는 데
     걸리는 시간을 tenant당 평균으로 정규화해 하한 처리량(tenant당 0.5s 이하,
     즉 ≥2.0 tenants/s)을 고정한다. 이 파일의 다른 테스트들도 같은
     _BUSINESS_DATE에 tenant를 누적시키므로(DB가 테스트 간에 비워지지 않음)
@@ -345,7 +346,9 @@ async def test_concurrent_batch_instances_do_not_double_activate(pool: asyncpg.P
 
 def test_background_loops_wires_post_trade_batch() -> None:
     """DoD (e) -- 배선 증명. `background_loops.py`가 CM-11 배치를 실제로
-    임포트·스케줄하지 않으면 이 테스트가 실패한다."""
+    임포트·스케줄하지 않으면 이 테스트가 실패한다. task-2616 -- 온디맨드
+    진입점(`BackgroundLoops.trigger_post_trade_batch`)도 같이 배선됐는지
+    증명한다."""
     import src.services.background_loops as module
 
     assert "run_daily_post_trade_batch" in module.__dict__
@@ -355,3 +358,47 @@ def test_background_loops_wires_post_trade_batch() -> None:
         text = f.read()
     assert "run_daily_post_trade_batch(" in text
     assert "post_trade_batch_task" in text
+    assert "trigger_post_trade_batch" in text
+
+
+def test_post_trade_batch_run_time_is_once_daily_not_hourly() -> None:
+    """task-2616 -- 제목 그대로 "일 1회"다. 이전 구현은 3600초(매 시간)마다
+    다시 돌았다(멱등이라 안전은 했지만 스케줄 요구사항 위반) -- 24시간
+    (86400초)으로 고정해 그 회귀를 다시 못 들어오게 한다."""
+    import src.services.background_loops as module
+
+    assert module.POST_TRADE_BATCH_INTERVAL_SECONDS == 86400.0
+
+
+async def test_post_trade_batch_trigger_is_none_when_disabled(
+    pool: asyncpg.Pool, monkeypatch
+) -> None:
+    """negative -- AIOS_POST_TRADE_BATCH_ENABLED=0이면 스케줄 루프뿐 아니라
+    온디맨드 트리거도 막아야 한다(꺼둔 배치를 온디맨드로 우회하면 안 된다).
+    `tests/integration/oms/test_background_loops_wiring.py`와 같은 최소
+    부팅 패턴(execution_loop/startup_recovery는 이 테스트 범위 밖이라 off)."""
+    from src.core.event_bus.in_process import InProcessEventBus
+    from src.core.loader.risk_policy_loader import load_risk_policy
+    from src.core.safety.metrics_collector import ApiCallTracker
+    from src.services.background_loops import start_background_loops
+
+    monkeypatch.setenv("AIOS_POST_TRADE_BATCH_ENABLED", "0")
+    monkeypatch.setenv("AIOS_EXECUTION_LOOP_ENABLED", "0")
+    monkeypatch.setenv("AIOS_LIQUIDATION_WORKER_ENABLED", "0")
+    monkeypatch.setenv("AIOS_STARTUP_RECOVERY_ENABLED", "0")
+
+    class _StubCredentialResolver:
+        async def get_adapter(self, tenant_id, exchange):  # pragma: no cover - never called
+            raise AssertionError("post_trade_batch가 꺼진 상태에서는 호출되면 안 된다")
+
+    loops = await start_background_loops(
+        pool=pool,
+        policy=load_risk_policy(),
+        event_bus=InProcessEventBus(),
+        credential_resolver=_StubCredentialResolver(),
+        api_tracker=ApiCallTracker(),
+    )
+    try:
+        assert loops.trigger_post_trade_batch is None
+    finally:
+        await loops.stop()
