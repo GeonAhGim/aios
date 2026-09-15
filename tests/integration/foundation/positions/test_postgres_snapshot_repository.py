@@ -168,8 +168,11 @@ async def test_upsert_writes_portfolio_id_and_fund_id_columns_from_position_key(
         await repo.upsert(
             conn,
             _snapshot(
-                tenant_id=tenant_id, account_id=account_id, position_key=position_key,
-                quantity=Decimal("0"), last_journal_seq=0,
+                tenant_id=tenant_id,
+                account_id=account_id,
+                position_key=position_key,
+                quantity=Decimal("0"),
+                last_journal_seq=0,
             ),
             expected_seq=0,
         )
@@ -182,8 +185,11 @@ async def test_upsert_writes_portfolio_id_and_fund_id_columns_from_position_key(
         await repo.upsert(
             conn,
             _snapshot(
-                tenant_id=tenant_id, account_id=account_id, position_key=position_key,
-                quantity=Decimal("2"), last_journal_seq=1,
+                tenant_id=tenant_id,
+                account_id=account_id,
+                position_key=position_key,
+                quantity=Decimal("2"),
+                last_journal_seq=1,
             ),
             expected_seq=0,
         )
@@ -192,6 +198,60 @@ async def test_upsert_writes_portfolio_id_and_fund_id_columns_from_position_key(
     assert replaced["last_journal_seq"] == 1
     assert replaced["portfolio_id"] == default_portfolio_id(tenant_id)
     assert replaced["fund_id"] == default_fund_id(tenant_id)
+
+
+async def test_upsert_preserves_full_decimal_precision_and_lots_round_trip(pool, repo):
+    """수치 round-trip 단언(DEEPEN task-2945): `quantity`/`avg_cost`/
+    `realized_pnl_base`/`unrealized_pnl_base`/`fees_base`/`funding_base`/
+    `mark_price`는 NUMERIC(30,10) 컬럼이고 `lots`는 JSONB(Decimal이
+    문자열로 직렬화됨)다 — 정수부 다자릿수 + 소수부 10자리(음수 포함) 값이
+    INSERT...RETURNING 경로(`upsert`가 반환하는 뷰)와 별도 SELECT 경로
+    (`get`) 양쪽에서 원본 Decimal과 정확히 일치해야 한다."""
+    tenant_id, account_id = await _setup(pool)
+    position_key = _key(tenant_id)
+    quantity = Decimal("123456789012345.1234567890")
+    avg_cost = Decimal("-987654321098765.9876543211")
+    mark_price = Decimal("111111111111111.1111111111")
+    lot = Lot(quantity=quantity, unit_cost=avg_cost, opened_at=datetime.now(timezone.utc))
+    snapshot = _snapshot(
+        tenant_id=tenant_id,
+        account_id=account_id,
+        position_key=position_key,
+        quantity=quantity,
+        last_journal_seq=0,
+        avg_cost=Money(amount=avg_cost, currency=Currency.KRW),
+        lots=[lot],
+        realized_pnl_base=Decimal("-0.0000000001"),
+        unrealized_pnl_base=Decimal("0.0000000001"),
+        fees_base=Decimal("999999999999999.9999999999"),
+        funding_base=Decimal("-999999999999999.9999999999"),
+        mark_price=Money(amount=mark_price, currency=Currency.KRW),
+        mark_at=datetime.now(timezone.utc),
+    )
+
+    async with pool.acquire() as conn, conn.transaction():
+        created = await repo.upsert(conn, snapshot, expected_seq=0)
+
+    assert created.quantity == quantity
+    assert created.avg_cost.amount == avg_cost
+    assert created.realized_pnl_base == snapshot.realized_pnl_base
+    assert created.unrealized_pnl_base == snapshot.unrealized_pnl_base
+    assert created.fees_base == snapshot.fees_base
+    assert created.funding_base == snapshot.funding_base
+    assert created.mark_price is not None and created.mark_price.amount == mark_price
+    assert len(created.lots) == 1
+    assert created.lots[0].quantity == quantity
+    assert created.lots[0].unit_cost == avg_cost
+
+    async with pool.acquire() as conn, conn.transaction():
+        fetched = await repo.get(conn, tenant_id, position_key)
+    assert fetched is not None
+    assert fetched.quantity == quantity
+    assert fetched.avg_cost.amount == avg_cost
+    assert fetched.fees_base == snapshot.fees_base
+    assert fetched.funding_base == snapshot.funding_base
+    assert len(fetched.lots) == 1
+    assert fetched.lots[0].unit_cost == avg_cost
 
 
 async def test_upsert_rejects_legacy_or_malformed_position_key(pool, repo):
@@ -208,8 +268,11 @@ async def test_upsert_rejects_legacy_or_malformed_position_key(pool, repo):
                 await repo.upsert(
                     conn,
                     _snapshot(
-                        tenant_id=tenant_id, account_id=account_id, position_key=bad_key,
-                        quantity=Decimal("0"), last_journal_seq=0,
+                        tenant_id=tenant_id,
+                        account_id=account_id,
+                        position_key=bad_key,
+                        quantity=Decimal("0"),
+                        last_journal_seq=0,
                     ),
                     expected_seq=0,
                 )
@@ -226,8 +289,11 @@ async def test_upsert_rejects_portfolio_that_was_never_bootstrapped(pool, repo):
             await repo.upsert(
                 conn,
                 _snapshot(
-                    tenant_id=tenant_id, account_id=account_id, position_key=position_key,
-                    quantity=Decimal("0"), last_journal_seq=0,
+                    tenant_id=tenant_id,
+                    account_id=account_id,
+                    position_key=position_key,
+                    quantity=Decimal("0"),
+                    last_journal_seq=0,
                 ),
                 expected_seq=0,
             )
@@ -249,8 +315,11 @@ async def test_upsert_rejects_cross_tenant_portfolio_and_leaves_victim_row_untou
         await repo.upsert(
             conn,
             _snapshot(
-                tenant_id=victim_id, account_id=victim_account, position_key=position_key,
-                quantity=Decimal("3"), last_journal_seq=1,
+                tenant_id=victim_id,
+                account_id=victim_account,
+                position_key=position_key,
+                quantity=Decimal("3"),
+                last_journal_seq=1,
             ),
             expected_seq=0,
         )
@@ -261,8 +330,11 @@ async def test_upsert_rejects_cross_tenant_portfolio_and_leaves_victim_row_untou
                 await repo.upsert(
                     conn,
                     _snapshot(
-                        tenant_id=attacker_id, account_id=attacker_account,
-                        position_key=position_key, quantity=Decimal("999"), last_journal_seq=2,
+                        tenant_id=attacker_id,
+                        account_id=attacker_account,
+                        position_key=position_key,
+                        quantity=Decimal("999"),
+                        last_journal_seq=2,
                     ),
                     expected_seq=expected_seq,
                 )
@@ -279,8 +351,11 @@ async def test_upsert_rejects_cross_tenant_portfolio_and_leaves_victim_row_untou
             await repo.upsert(
                 conn,
                 _snapshot(
-                    tenant_id=attacker_id, account_id=attacker_account, position_key=fresh_key,
-                    quantity=Decimal("1"), last_journal_seq=0,
+                    tenant_id=attacker_id,
+                    account_id=attacker_account,
+                    position_key=fresh_key,
+                    quantity=Decimal("1"),
+                    last_journal_seq=0,
                 ),
                 expected_seq=0,
             )
@@ -373,8 +448,11 @@ async def test_upsert_in_rolled_back_transaction_leaves_previous_version(pool, r
             await repo.upsert(
                 conn,
                 _snapshot(
-                    tenant_id=tenant_id, account_id=account_id, position_key=position_key,
-                    quantity=Decimal("0"), last_journal_seq=0,
+                    tenant_id=tenant_id,
+                    account_id=account_id,
+                    position_key=position_key,
+                    quantity=Decimal("0"),
+                    last_journal_seq=0,
                 ),
                 expected_seq=0,
             )
@@ -385,8 +463,11 @@ async def test_upsert_in_rolled_back_transaction_leaves_previous_version(pool, r
         await repo.upsert(
             conn,
             _snapshot(
-                tenant_id=tenant_id, account_id=account_id, position_key=position_key,
-                quantity=Decimal("1"), last_journal_seq=1,
+                tenant_id=tenant_id,
+                account_id=account_id,
+                position_key=position_key,
+                quantity=Decimal("1"),
+                last_journal_seq=1,
             ),
             expected_seq=0,
         )
@@ -395,8 +476,11 @@ async def test_upsert_in_rolled_back_transaction_leaves_previous_version(pool, r
             await repo.upsert(
                 conn,
                 _snapshot(
-                    tenant_id=tenant_id, account_id=account_id, position_key=position_key,
-                    quantity=Decimal("7"), last_journal_seq=2,
+                    tenant_id=tenant_id,
+                    account_id=account_id,
+                    position_key=position_key,
+                    quantity=Decimal("7"),
+                    last_journal_seq=2,
                 ),
                 expected_seq=1,
             )
