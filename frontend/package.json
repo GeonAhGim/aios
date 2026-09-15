@@ -1,6 +1,7 @@
 {
   "name": "mihwa-aios-frontend",
   "private": true,
+  "type": "module",
   "workspaces": [
     "apps/*",
     "packages/*"
