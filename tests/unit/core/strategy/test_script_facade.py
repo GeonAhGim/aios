@@ -173,9 +173,13 @@ def test_frozen_evaluator_drift_is_caught_by_the_parity_gate(
 
     real_evaluate = ConditionEvaluator.evaluate
 
-    def _inverted(self: ConditionEvaluator, *args: object, **kwargs: object) -> bool | None:
-        result = real_evaluate(self, *args, **kwargs)  # type: ignore[arg-type]
-        return result if result is None else not result
+    def _inverted(
+        self: ConditionEvaluator,
+        expression: str,
+        market_state: dict[str, float],
+        prev_market_state: dict[str, float] | None,
+    ) -> bool:
+        return not real_evaluate(self, expression, market_state, prev_market_state)
 
     monkeypatch.setattr(ConditionEvaluator, "evaluate", _inverted)
     drifted_cond_v2 = condition_signal_series(expression, CANDLES)
