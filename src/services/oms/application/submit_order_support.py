@@ -1,12 +1,15 @@
-"""`submit_order.py`(L4-09)의 300줄 캡 분할 — outbox payload 빌더/이벤트 해시/
-UNIQUE 충돌 뒤 조회, 세 가지 다 단일 tx 밖(또는 tx 진입 전) 순수 보조 로직이다
-(outbox_dispatcher.py -> outbox_writes.py, unknown_resolver.py ->
-unknown_resolver_writes.py와 동일한 분할 원칙 — 그 모듈들 docstring 참조).
+"""300-line cap split of `submit_order.py` (L4-09) — the outbox payload builder,
+event hash, and post-UNIQUE-collision lookup. All three are pure supporting
+logic that runs outside the single tx (or before it's entered), same split
+principle as `outbox_dispatcher.py` -> `outbox_writes.py` and
+`unknown_resolver.py` -> `unknown_resolver_writes.py` (see those modules'
+docstrings).
 
-이 파일은 `orders` INSERT를 하지 않는다 — EM-3(`scripts/check_child_order_path.py`)의
-"child 컬럼을 쓰는 INSERT INTO orders는 submit_order.py 안에서만 허용" 불변식이
-`submit_order.py` 단일 파일을 앵커로 삼으므로, 그 SQL과 커밋/롤백 tx 본문은
-분할 대상에서 제외하고 `submit_order.py`에 남겨둔다.
+This file never issues an `orders` INSERT — EM-3
+(`scripts/check_child_order_path.py`)'s invariant ("an INSERT INTO orders that
+sets a child-identity column is only allowed inside submit_order.py") anchors
+on that single file, so the INSERT SQL and its commit/rollback tx body stay
+there and are excluded from this split.
 """
 
 from __future__ import annotations
@@ -26,9 +29,10 @@ from src.services.oms.domain.errors import IdempotencyDigestMismatchError
 
 
 def venue_order(cmd: SubmitOrderCommand, *, order_id: UUID, client_id: str, venue: str) -> Order:
-    """outbox SUBMIT payload(§2-C "order" 키) — `order_from_payload`가 order_id/
-    client_order_id 일치만 검증하므로 나머지 필드는 어댑터 호출용 실값이면 된다.
-    통화는 Phase 1 관례대로 USDT 고정(order_service/repository.py 동일 편차)."""
+    """Outbox SUBMIT payload (§2-C "order" key) — `order_from_payload` only checks
+    order_id/client_order_id agreement, so the remaining fields just need to be
+    real values for the adapter call. Currency is fixed to USDT per the Phase 1
+    convention (same deviation as `order_service/repository.py`)."""
     price = Money(amount=cmd.price, currency=Currency.USDT) if cmd.price is not None else None
     return Order(
         order_id=order_id,
@@ -62,11 +66,12 @@ async def resolve_after_collision(
     scope_hash_val: str,
     digest: str,
 ) -> OrderView:
-    """`orders.client_order_id` UNIQUE 충돌 뒤(패자) — 승자 tx는 이미 커밋 완료라
-    새 tx로 조회한다. digest도 대조해 승자가 다른 명령이었다면 거부한다(fail-closed).
-    `order_repo`는 호출자(`submit_order.py`)의 모듈 싱글톤을 그대로 받는다 —
-    failure-injection 테스트가 그 싱글톤 인스턴스를 monkeypatch하므로 여기서
-    새로 만들면 안 된다."""
+    """Called after an `orders.client_order_id` UNIQUE collision (the loser) —
+    the winner's tx has already committed, so this looks it up in a fresh tx.
+    Also compares digest and rejects fail-closed if the winner was a different
+    command. `order_repo` is passed through as the caller's (`submit_order.py`)
+    module singleton on purpose — failure-injection tests monkeypatch that
+    singleton instance, so this function must not construct its own."""
     async with pool.acquire() as conn:
         stored_digest = await conn.fetchval(
             "SELECT digest FROM order_idempotency WHERE scope_hash = $1", scope_hash_val

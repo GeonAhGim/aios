@@ -1,8 +1,10 @@
 """L4-09 — OMS 유일 제출 경로: 멱등 선점 → orders INSERT → VALIDATED 전이 →
-outbox enqueue, 단일 tx. outbox payload 빌더/이벤트 해시/충돌 후 조회는
-`submit_order_support.py`로 분할했다(300줄 캡, 그 모듈 docstring 참조) —
-`orders` INSERT SQL과 commit/rollback tx 본문은 EM-3 정적 검사
-(`scripts/check_child_order_path.py`)가 이 파일을 앵커로 삼아 여기 남는다.
+outbox enqueue, 단일 tx.
+
+The outbox payload builder, event hash, and post-collision lookup live in
+`submit_order_support.py` (300-line cap split, see that module's docstring).
+The `orders` INSERT SQL and the commit/rollback tx body stay here because the
+EM-3 static check (`scripts/check_child_order_path.py`) anchors on this file.
 
 Spec: docs/specs/L4_execution_oms_and_exchange_v1.0.md §2-C 표
 `submit_order(cmd, *, pool, profile, registry, pre_submit_gate, clock)->OrderView`,
@@ -116,10 +118,12 @@ async def submit_order(
     clock: Clock = utcnow,
     metrics: MetricsPort | None = None,
 ) -> OrderView:
-    """§7.2 계측: `outcome` in {accepted, denied, replay, error} — venue는 `profile.venue`
-    (호출자가 배선한 지원 거래소 값, 사용자 입력이 아니라 카디널리티가 자연히 낮다).
-    `finally`가 실행 경로 전체(정상/조기 raise 모두)에서 정확히 1회 카운터+히스토그램을
-    기록한다 — `outcome`은 기본값 "error"로 시작해 각 종료 지점에서만 갱신된다."""
+    """§7.2 instrumentation: `outcome` is one of {accepted, denied, replay, error};
+    `venue` is `profile.venue` (a caller-wired supported-exchange value, not user
+    input, so its cardinality is naturally low). The `finally` block records the
+    counter and histogram exactly once across every exit path (normal return or
+    early raise) — `outcome` starts at "error" and is only updated at each exit
+    point that reaches it."""
     m = metrics if metrics is not None else NullMetrics()
     venue_label = profile.venue if profile is not None else "unknown"
     start = time.monotonic()

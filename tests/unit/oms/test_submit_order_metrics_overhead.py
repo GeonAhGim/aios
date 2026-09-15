@@ -19,7 +19,7 @@ from src.core.observability.metric_names import (
     OMS_ORDER_SUBMIT_COUNT_TOTAL,
     OMS_ORDER_SUBMIT_DURATION_SECONDS,
 )
-from src.core.observability.metrics import NullMetrics
+from src.core.observability.metrics import MetricsPort, NullMetrics
 
 _SAMPLE_COUNT = 5000
 _P99_TARGET_MS = 0.2  # DoD "계측 오버헤드 p99 < 0.2ms"
@@ -44,13 +44,13 @@ class _ListSpyMetrics:
         return None
 
 
-def _record_submit_order_style(m: object, venue: str, outcome: str) -> None:
+def _record_submit_order_style(m: MetricsPort, venue: str, outcome: str) -> None:
     """`submit_order`의 `finally` 블록이 실제로 하는 작업을 그대로 재현한다
     (모듈을 통째로 부르지 않고 계측 부분만 분리해 DB 변동을 제거한다)."""
     start = time.monotonic()
     elapsed = time.monotonic() - start
-    m.counter(OMS_ORDER_SUBMIT_COUNT_TOTAL, {"outcome": outcome, "venue": venue})  # type: ignore[attr-defined]
-    m.observe(OMS_ORDER_SUBMIT_DURATION_SECONDS, elapsed, {"venue": venue})  # type: ignore[attr-defined]
+    m.counter(OMS_ORDER_SUBMIT_COUNT_TOTAL, {"outcome": outcome, "venue": venue})
+    m.observe(OMS_ORDER_SUBMIT_DURATION_SECONDS, elapsed, {"venue": venue})
 
 
 def test_null_metrics_instrumentation_overhead_p99_under_200us() -> None:
