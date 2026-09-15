@@ -4,9 +4,11 @@
 `save_equity_baseline`(실 DB 대상)은 tests/integration/services/test_equity_tracker.py로
 분리했다(task-1615, PLT-36 — tests/unit 아래는 실DB에 접속하지 않는다).
 """
-from datetime import date, datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone, tzinfo
 from decimal import Decimal
 from unittest.mock import patch
+
+from typing_extensions import Self
 
 from src.services.execution_loop.equity_tracker import ExecutionEquityTracker, _utc_today
 
@@ -115,8 +117,9 @@ def test_utc_today_diverges_from_os_local_timezone_at_day_boundary() -> None:
 
     class _FixedDatetime(datetime):
         @classmethod
-        def now(cls, tz=None):  # type: ignore[override]
-            return fixed_instant if tz is not None else fixed_instant.replace(tzinfo=None)
+        def now(cls, tz: tzinfo | None = None) -> Self:
+            frozen = cls(2026, 9, 10, 0, 30, tzinfo=timezone.utc)
+            return frozen if tz is not None else frozen.replace(tzinfo=None)
 
     with patch(
         "src.services.execution_loop.equity_tracker.datetime", _FixedDatetime

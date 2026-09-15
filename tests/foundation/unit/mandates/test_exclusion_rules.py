@@ -47,6 +47,7 @@ from src.foundation.mandates.domain.models import (
     PolicyEvaluationSubject,
     PolicyOutcome,
 )
+from tests.support.frozen import assign_attr
 
 NOW = datetime(2026, 9, 7, tzinfo=timezone.utc)
 
@@ -369,11 +370,11 @@ def test_frozen_revision_and_subject_reject_post_construction_tampering() -> Non
     있음을 실증한다."""
     revision = _revision()
     with pytest.raises(FrozenInstanceError):
-        revision.excluded_countries = ()  # type: ignore[misc]
+        assign_attr(revision, "excluded_countries", ())
 
     subject = _subject(asset="COAL_CO")
     with pytest.raises(FrozenInstanceError):
-        subject.asset = "CLEAN_CO"  # type: ignore[misc]
+        assign_attr(subject, "asset", "CLEAN_CO")
 
 
 def _replay_in_subprocess(

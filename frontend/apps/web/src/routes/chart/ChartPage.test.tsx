@@ -11,6 +11,7 @@ import { MemoryRouter } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ChartPage, type ChartPageProps, type FetchCandles, type FetchCoverage } from "./ChartPage";
 import { VISIBLE_CANDLE_COUNT } from "./chartPageConfig";
+import { perfBudgetMs } from "../../test/perfBudget";
 
 // ChartPage는 restore/save 에러를 ApiError instanceof로 판별해 errorCode/traceId를
 // 뽑는다(query.error와 동일 관용) — 던지는 값이 실제 ApiError 인스턴스여야 한다.
@@ -480,7 +481,12 @@ describe("ChartPage — CH-4b 그리기 저장·복원", () => {
     return { layoutId, document: { schema_version: schemaVersion, drawings }, revision: 1, updatedAt: "t1" };
   }
 
-  it("도형 3종(추세선·수평선·피보나치)을 그리고 저장하면 putDrawings가 실제로 호출되고(실배선), 컴포넌트를 재마운트하면 그 페이로드 그대로 좌표·스타일까지 동일하게 복원된다", async () => {
+  it("도형 3종(추세선·수평선·피보나치)을 그리고 저장하면 putDrawings가 실제로 호출되고(실배선), 컴포넌트를 재마운트하면 그 페이로드 그대로 좌표·스타일까지 동일하게 복원된다", {
+    // task-3460: this test mounts the full ChartPage twice (draw + save, then
+    // remount + restore). Under `--coverage` on the loaded CI host that takes
+    // 15-20s, so the global 20s testTimeout (task-1968) leaves no headroom.
+    timeout: 60_000,
+  }, async () => {
     const fetchCandles = vi.fn(async () => okResult());
     let stored: { schemaVersion: number; drawings: unknown[] } | undefined;
     const chartingPort = fakeChartingPort({
@@ -638,7 +644,7 @@ describe("ChartPage — 성능 단언(DEEPEN task-3077)", () => {
     );
     const elapsedMs = performance.now() - startedAt;
 
-    expect(elapsedMs).toBeLessThan(2000);
+    expect(elapsedMs).toBeLessThan(perfBudgetMs(2000));
   });
 });
 

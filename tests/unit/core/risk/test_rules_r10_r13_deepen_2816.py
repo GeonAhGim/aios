@@ -21,6 +21,7 @@ from __future__ import annotations
 import time
 from concurrent.futures import ThreadPoolExecutor
 from decimal import Decimal
+from typing import Any
 from uuid import uuid4
 
 import pytest
@@ -43,7 +44,7 @@ _TTL_SEC = 5.0
 
 
 def _bundle(**overrides: object) -> RiskRuleBundle:
-    fields: dict[str, object] = dict(
+    fields: dict[str, Any] = dict(
         id=uuid4(),
         version="policy-v1",
         rule_hash="a" * 64,
@@ -54,7 +55,7 @@ def _bundle(**overrides: object) -> RiskRuleBundle:
         approved_by=uuid4(),
     )
     fields.update(overrides)
-    return RiskRuleBundle(**fields)  # type: ignore[arg-type]
+    return RiskRuleBundle(**fields)
 
 
 def _safe_inputs(**overrides: object):
@@ -99,13 +100,13 @@ def _safe_inputs(**overrides: object):
     return sample_inputs(**base)
 
 
-def _evaluate(inputs, **kwargs: object):
+def _evaluate(inputs: Any, **kwargs: Any) -> Any:
     bundle = kwargs.pop("bundle", None) or _bundle()
     kwargs.setdefault("gate_kind", GateKind.PRE_TRADE)
     kwargs.setdefault("trace_id", uuid4())
     kwargs.setdefault("now", NOW)
     kwargs.setdefault("ttl", _TTL_SEC)
-    return evaluate(inputs, bundle, **kwargs)  # type: ignore[arg-type]
+    return evaluate(inputs, bundle, **kwargs)
 
 
 # ---- 게이트 DENY 재현(D2) — rule 함수 격리 호출이 아니라 evaluate() 전체 ----

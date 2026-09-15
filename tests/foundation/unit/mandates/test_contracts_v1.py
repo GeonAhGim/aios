@@ -40,6 +40,7 @@ from src.foundation.mandates.contracts.v1 import (
     compliance_decision_from_policy_decision,
     verdict_for_outcome,
 )
+from tests.support.frozen import assign_attr
 
 NOW = datetime(2026, 9, 7, tzinfo=timezone.utc)
 
@@ -162,11 +163,11 @@ def test_frozen_decision_and_rule_hit_reject_post_construction_tampering() -> No
         evaluated_at=NOW,
     )
     with pytest.raises(ValidationError):
-        decision.verdict = ComplianceVerdict.ALLOW  # type: ignore[misc]
+        assign_attr(decision, "verdict", ComplianceVerdict.ALLOW)
 
     hit = RuleHit(rule_id="R1", severity=ComplianceVerdict.DENY, message="m", evidence={})
     with pytest.raises(ValidationError):
-        hit.severity = ComplianceVerdict.ALLOW  # type: ignore[misc]
+        assign_attr(hit, "severity", ComplianceVerdict.ALLOW)
 
 
 def test_mapper_propagates_rule_hit_construction_failure_instead_of_silently_allowing(

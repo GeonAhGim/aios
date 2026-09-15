@@ -6,6 +6,7 @@ import { ApiError } from "@aios/api-client";
 import type { CandlestickPoint } from "@aios/ui-web";
 import type { PositionsClientLike } from "../../hooks/usePositions";
 import { StrategyMarkers } from "./StrategyMarkers";
+import { perfBudgetMs } from "../../test/perfBudget";
 
 const INSTRUMENT_ID = "instr-1";
 const POSITION_KEY = "bitget:instr-1:strat-1:exec-1";
@@ -293,7 +294,7 @@ describe("StrategyMarkers", () => {
       // jsdom 렌더 자체가 무겁고 공유 머신에서 실측 편차가 커서(PortfolioPage.test.tsx의
       // 40장 카드 케이스와 동일 사유) 절대 임계값을 넉넉히 둔다 — 마커 1개당 O(1) 매핑이
       // 저널 전체를 마커마다 재스캔하는 O(n^2)로 퇴행하면 200건도 이 임계값을 넘긴다.
-      expect(elapsedMs).toBeLessThan(15000);
+      expect(elapsedMs).toBeLessThan(perfBudgetMs(15000));
     },
     20000,
   );

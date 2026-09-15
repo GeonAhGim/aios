@@ -43,6 +43,7 @@ from src.foundation.mandates.contracts.v1 import ComplianceVerdict
 from src.foundation.mandates.domain.evaluator import evaluate_bundle
 from src.foundation.mandates.domain.rule_bundle import RuleBundle, RuleSpec
 from src.foundation.mandates.domain.rules import short_sale, wash_trade
+from tests.support.frozen import assign_attr
 
 _FORBIDDEN_IMPORTS = ("datetime", "random", "httpx", "asyncpg", "openai")
 _NOW = datetime(2026, 9, 8, 0, 0, tzinfo=timezone.utc)
@@ -338,7 +339,7 @@ def test_rule_hit_rejects_post_construction_tampering() -> None:
     )
     assert hit is not None
     with pytest.raises(ValidationError):
-        hit.severity = ComplianceVerdict.ALLOW  # type: ignore[misc]
+        assign_attr(hit, "severity", ComplianceVerdict.ALLOW)
 
 
 def _replay_in_subprocess(params: dict[str, Any], snapshot: dict[str, Any]) -> tuple[str, str, str]:

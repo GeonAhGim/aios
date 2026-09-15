@@ -44,6 +44,7 @@ from src.foundation.mandates.contracts.v1 import ComplianceVerdict
 from src.foundation.mandates.domain.evaluator import evaluate_bundle
 from src.foundation.mandates.domain.rule_bundle import RuleBundle, RuleSpec
 from src.foundation.mandates.domain.rules import leverage
+from tests.support.frozen import assign_attr
 
 _MAX_LEVERAGE = Decimal("3.00")
 _NOW = datetime(2026, 9, 10, tzinfo=timezone.utc)
@@ -203,7 +204,7 @@ def test_leverage_rule_hit_rejects_post_construction_tampering() -> None:
     )
     assert hit is not None
     with pytest.raises(ValidationError):
-        hit.severity = ComplianceVerdict.ALLOW  # type: ignore[misc]
+        assign_attr(hit, "severity", ComplianceVerdict.ALLOW)
 
 
 def _replay_in_subprocess(params: dict[str, Any], snapshot: dict[str, Any]) -> tuple[str, str, str]:

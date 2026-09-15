@@ -40,6 +40,7 @@ from src.foundation.mandates.contracts.v1 import ComplianceVerdict
 from src.foundation.mandates.domain.evaluator import evaluate_bundle
 from src.foundation.mandates.domain.rule_bundle import RuleBundle, RuleSpec
 from src.foundation.mandates.domain.rules import liquidity
+from tests.support.frozen import assign_attr
 
 _MAX_PCT = Decimal("10.00")
 _ADV = Decimal("1000000.00")  # average daily traded value
@@ -211,7 +212,7 @@ def test_liquidity_rule_hit_rejects_post_construction_tampering() -> None:
     )
     assert hit is not None
     with pytest.raises(ValidationError):
-        hit.severity = ComplianceVerdict.ALLOW  # type: ignore[misc]
+        assign_attr(hit, "severity", ComplianceVerdict.ALLOW)
 
 
 def _replay_in_subprocess(params: dict[str, Any], snapshot: dict[str, Any]) -> tuple[str, str, str]:

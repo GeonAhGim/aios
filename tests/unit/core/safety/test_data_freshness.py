@@ -26,6 +26,7 @@ import time
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
+from typing import cast
 
 import pytest
 
@@ -37,7 +38,13 @@ from src.core.safety.circuit_breaker import (
 )
 from src.core.safety.data_freshness import DataFreshnessTracker
 from src.core.safety.metrics_collector import ApiCallTracker
+from src.exchanges.common.adapter import ExchangeAdapter
 from src.exchanges.common.instrumented_adapter import InstrumentedAdapter
+
+
+def _as_exchange_adapter(fake: object) -> ExchangeAdapter:
+    """The fakes implement only the slice of the adapter surface the wrapper touches."""
+    return cast(ExchangeAdapter, fake)
 
 
 def test_no_observations_returns_none() -> None:
@@ -113,7 +120,7 @@ async def test_get_ohlcv_records_last_candle_close_time_via_instrumented_adapter
     ]
     freshness = DataFreshnessTracker()
     wrapped = InstrumentedAdapter(
-        _FakeAdapterWithOhlcv(candles),  # type: ignore[arg-type]
+        _as_exchange_adapter(_FakeAdapterWithOhlcv(candles)),
         ApiCallTracker(),
         freshness=freshness,
     )
@@ -128,7 +135,7 @@ async def test_get_ohlcv_without_freshness_arg_does_not_raise() -> None:
     close_time = datetime(2026, 9, 4, 0, 0, 0, tzinfo=timezone.utc)
     candles = [_FakeCandle("bitget", "BTC/USDT", close_time)]
     wrapped = InstrumentedAdapter(
-        _FakeAdapterWithOhlcv(candles),  # type: ignore[arg-type]
+        _as_exchange_adapter(_FakeAdapterWithOhlcv(candles)),
         ApiCallTracker(),
     )
 
@@ -140,7 +147,7 @@ async def test_get_ohlcv_without_freshness_arg_does_not_raise() -> None:
 async def test_get_ohlcv_empty_result_does_not_record() -> None:
     freshness = DataFreshnessTracker()
     wrapped = InstrumentedAdapter(
-        _FakeAdapterWithOhlcv([]),  # type: ignore[arg-type]
+        _as_exchange_adapter(_FakeAdapterWithOhlcv([])),
         ApiCallTracker(),
         freshness=freshness,
     )
@@ -155,7 +162,7 @@ async def test_get_ohlcv_rejects_naive_close_time_from_candle() -> None:
     candles = [_FakeCandle("bitget", "BTC/USDT", datetime(2026, 9, 4, 0, 0, 0))]
     freshness = DataFreshnessTracker()
     wrapped = InstrumentedAdapter(
-        _FakeAdapterWithOhlcv(candles),  # type: ignore[arg-type]
+        _as_exchange_adapter(_FakeAdapterWithOhlcv(candles)),
         ApiCallTracker(),
         freshness=freshness,
     )
@@ -193,7 +200,9 @@ async def test_get_ohlcv_failure_does_not_record_and_propagates() -> None:
     삼키지 않고 그대로 전파해야 호출부가 실패를 인지할 수 있다."""
     freshness = DataFreshnessTracker()
     tracker = ApiCallTracker()
-    wrapped = InstrumentedAdapter(_FailingAdapter(), tracker, freshness=freshness)  # type: ignore[arg-type]
+    wrapped = InstrumentedAdapter(
+        _as_exchange_adapter(_FailingAdapter()), tracker, freshness=freshness
+    )
 
     with pytest.raises(ConnectionError, match="simulated exchange timeout"):
         await wrapped.get_ohlcv("BTC/USDT", "1m")
@@ -243,12 +252,12 @@ async def test_concurrent_instrumented_adapters_share_tracker_without_clobbering
     freshness = DataFreshnessTracker()
     tracker = ApiCallTracker()
     bitget = InstrumentedAdapter(
-        _TaggedAdapter("bitget", "BTC/USDT", now - timedelta(seconds=10)),  # type: ignore[arg-type]
+        _as_exchange_adapter(_TaggedAdapter("bitget", "BTC/USDT", now - timedelta(seconds=10))),
         tracker,
         freshness=freshness,
     )
     okx = InstrumentedAdapter(
-        _TaggedAdapter("okx", "ETH/USDT", now - timedelta(seconds=200)),  # type: ignore[arg-type]
+        _as_exchange_adapter(_TaggedAdapter("okx", "ETH/USDT", now - timedelta(seconds=200))),
         tracker,
         freshness=freshness,
     )

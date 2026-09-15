@@ -3,6 +3,7 @@ import type { CoverageSpanView } from "@aios/api-client";
 import { cleanup, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
 import { CoverageBadge } from "./CoverageBadge";
+import { perfBudgetMs } from "../test/perfBudget";
 
 // DataFreshness.test.tsx/CandleQualityBadge.test.tsx와 동일 사유(vitest.config에
 // globals:true가 없어 자동 cleanup 미등록) — 여러 번 render하며 부재를 검증할 때
@@ -206,6 +207,6 @@ describe("CoverageBadge", () => {
     // O(n log n) 정렬 기반 병합이라면 500개 span 렌더는 수백 ms를 넘길 이유가
     // 없다 — 회귀로 O(n^2)가 되면(예: 정렬 없이 각 span마다 전체를 재스캔) 이
     // 임계값이 신호를 준다.
-    expect(elapsedMs).toBeLessThan(1000);
+    expect(elapsedMs).toBeLessThan(perfBudgetMs(1000));
   });
 });

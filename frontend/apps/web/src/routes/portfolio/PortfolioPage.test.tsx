@@ -7,6 +7,7 @@ import { ApiError } from "@aios/api-client";
 import { parseNavSnapshot, parsePositionSnapshot } from "@aios/shared-types";
 import type { PositionsClientLike } from "../../hooks/usePositions";
 import { PortfolioPage } from "./PortfolioPage";
+import { perfBudgetMs } from "../../test/perfBudget";
 
 let allocations: unknown[] = [];
 const mutateAsync = vi.fn();
@@ -188,7 +189,7 @@ describe("PortfolioPage 포지션 실데이터", () => {
       // jsdom 렌더 자체가 무겁고 공유 머신(다른 스위트와 CPU 경합, task-1968과 동일한
       // 사유)에서 실측 편차가 커서 절대 임계값을 넉넉히 둔다 — 카드마다 O(1) 렌더가
       // 카드마다 전체 목록을 재스캔하는 O(n^2)로 퇴행하면 40건도 이 임계값을 넘긴다.
-      expect(elapsedMs).toBeLessThan(15000);
+      expect(elapsedMs).toBeLessThan(perfBudgetMs(15000));
     },
     20000,
   );

@@ -39,6 +39,7 @@ from src.foundation.mandates.contracts.v1 import ComplianceVerdict
 from src.foundation.mandates.domain.evaluator import evaluate_bundle
 from src.foundation.mandates.domain.rule_bundle import RuleBundle, RuleSpec
 from src.foundation.mandates.domain.rules.restricted_list import RULE_ID, check
+from tests.support.frozen import assign_attr
 
 _NOW = datetime(2026, 9, 10, tzinfo=timezone.utc)
 
@@ -158,7 +159,7 @@ def test_rule_hit_rejects_post_construction_tampering() -> None:
     hit = check({"restricted_symbols": ("XYZ",)}, {"symbol": "XYZ"})
     assert hit is not None
     with pytest.raises(ValidationError):
-        hit.severity = ComplianceVerdict.ALLOW  # type: ignore[misc]
+        assign_attr(hit, "severity", ComplianceVerdict.ALLOW)
 
 
 def _replay_in_subprocess(params: dict[str, Any], snapshot: dict[str, Any]) -> tuple[str, str, str]:

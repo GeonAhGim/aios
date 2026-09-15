@@ -56,8 +56,9 @@ class RiskGuardService:
             if drawdown_pct < row["max_drawdown_pct"]:
                 continue
             scope_ref = f"exec:{row['execution_id']}"
-            # 다중 인스턴스 동시 평가 멱등: 테이블 락은 fan-out의 UPDATE와
-            # 자기 교착을 일으키므로 scope_ref별 advisory lock으로 직렬화한다.
+            # Idempotent under concurrent multi-instance evaluation: a table lock would
+            # self-deadlock against the fan-out UPDATE, so serialize per scope_ref with
+            # an advisory lock instead.
             async with self._pool.acquire() as conn, conn.transaction():
                 await conn.execute("SELECT pg_advisory_xact_lock(hashtext($1))", scope_ref)
                 active = await conn.fetchval(

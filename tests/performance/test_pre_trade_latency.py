@@ -60,11 +60,13 @@ import asyncio
 import os
 import statistics
 import time
+from typing import Any
 
 import asyncpg
 import pytest
+from pydantic import BaseModel
 
-from src.core.risk.decision import RiskOutcome
+from src.core.risk.decision import RiskDecision, RiskOutcome
 from src.foundation.risk_gate.adapters.postgres_decision_repository import (
     PostgresDecisionRepository,
 )
@@ -153,7 +155,7 @@ async def test_pre_submit_gate_round_trips_exact(pool):
 class _ChattyRecorder(RiskDecisionRecorder):
     """negative 전용 — 기록 전에 불필요한 왕복 하나를 더 낸다."""
 
-    async def record(self, decision, inputs, *, actor: str) -> None:  # type: ignore[override]
+    async def record(self, decision: RiskDecision, inputs: BaseModel, *, actor: str) -> None:
         async with self._pool.acquire() as conn:
             await conn.fetchval("SELECT 1")
         await super().record(decision, inputs, actor=actor)
@@ -244,7 +246,7 @@ class _FailingDecisionRepo(PostgresDecisionRepository):
     """실패 주입 전용(task-2835) — WORM insert가 DB 장애로 실패하는 상황을
     흉내낸다(예: 커넥션 단절·디스크 풀)."""
 
-    async def insert(self, decision, inputs_snapshot):  # type: ignore[override]
+    async def insert(self, decision: RiskDecision, inputs_snapshot: dict[str, Any]) -> None:
         raise RuntimeError("simulated WORM write failure (fault injection)")
 
 

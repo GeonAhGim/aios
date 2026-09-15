@@ -14,6 +14,7 @@ import {
   type FetchCompareCandles,
   type ListCompareInstruments,
 } from "./CompareSymbols";
+import { perfBudgetMs } from "../../test/perfBudget";
 
 // ChartPage.test.tsx와 동일 관용: ErrorMessage는 err instanceof ApiError로
 // errorCode를 뽑으므로(err.message 직접 렌더 금지) 실제 ApiError 인스턴스로만 검증한다.
@@ -211,7 +212,7 @@ describe("computeComparison", () => {
     const outcome = computeComparison(base, other);
     const elapsedMs = performance.now() - t0;
     expect(outcome.kind).toBe("ok");
-    expect(elapsedMs).toBeLessThan(1500);
+    expect(elapsedMs).toBeLessThan(perfBudgetMs(1500));
   });
 
   it("게이트 적색 재현: anchor를 find() 대신 정렬된 첫 원소로 naive하게 고르면, 실 구현이 ok로 처리하는 입력을 잘못 empty로 떨어뜨린다", () => {

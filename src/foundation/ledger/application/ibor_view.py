@@ -22,7 +22,7 @@ The `posted_at <= cutoff` visibility decision is a single-axis as-of query
 (same shape as DC-21's `known_at <= as_of` in
 `market_data/domain/point_in_time.py`), so it is delegated to FA-9's
 `core.bitemporal.as_of` kernel rather than reimplemented as a bare Python
-comparison (task-2059/FA-12 decision item 6, "재구현 금지"). Each row is
+comparison (task-2059/FA-12 decision item 6, "no reimplementation"). Each row is
 modeled as `valid_from = tx_from = posted_at`, `valid_to = tx_to = None`
 (a posting is never retroactively un-posted -- it is visible from the
 instant it is recorded, forever). SQL still pre-filters by `posted_at <=

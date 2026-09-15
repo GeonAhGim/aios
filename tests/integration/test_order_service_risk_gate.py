@@ -14,6 +14,7 @@ import time
 import uuid
 from decimal import Decimal
 from pathlib import Path
+from typing import Any
 
 import asyncpg
 import pytest
@@ -330,8 +331,8 @@ async def test_db_failure_during_fence_read_propagates_instead_of_fail_open(
     await activate_mandate_with_defaults(mandate_repo, trust_repo, tenant_id=user_id)
     mandate = await mandate_repo.get_mandate(user_id)
 
-    flaky_pool = _AcquireFailsAfter(pool, fail_after=0)
-    gate = make_foundation_pre_submit_gate(flaky_pool, require_mandate=True)  # type: ignore[arg-type]
+    flaky_pool: Any = _AcquireFailsAfter(pool, fail_after=0)
+    gate = make_foundation_pre_submit_gate(flaky_pool, require_mandate=True)
 
     with pytest.raises(ConnectionResetError):
         await gate(

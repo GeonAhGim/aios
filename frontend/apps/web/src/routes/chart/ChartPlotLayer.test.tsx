@@ -22,6 +22,7 @@ import {
 } from "@aios/chart-engine/src/render/plotRenderers";
 import { ScaleBindingError, bindScale } from "@aios/chart-engine/src/render/scaleBinding";
 import { FillBetweenError } from "@aios/chart-engine/src/render/fillBetween";
+import { perfBudgetMs } from "../../test/perfBudget";
 
 function candle(hourOffset: number, close: number): StreamCandle {
   const open = new Date(Date.UTC(2026, 8, 3, hourOffset, 0, 0));
@@ -390,7 +391,7 @@ describe("performance: numeric ms budget for bulk screen-level dispatch", () => 
     // per-overlay dispatch, spec derivation, or per-point projection
     // accidentally quadratic would blow well past this for 25,000 total
     // projected points spread across 50 overlays/~75 outputs.
-    expect(elapsedMs).toBeLessThan(2000);
+    expect(elapsedMs).toBeLessThan(perfBudgetMs(2000));
   });
 });
 

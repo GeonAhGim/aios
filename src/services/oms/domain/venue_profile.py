@@ -77,11 +77,12 @@ class VenueCapabilityProfile(BaseModel):
 
 
 def assert_supported(profile: VenueCapabilityProfile, cmd: SubmitOrderCommand) -> None:
-    # EM-19(task-1751) — trigger_price/trailing_offset은 계약·command_digest에는
-    # 배선됐지만(§9 EM-19), 실제 트리거 판정(domain/order_types/*)을 이 실행 경로
-    # (submit_order.py -> outbox -> venue)에 연결하는 리프는 아직 없다. 배선 전에
-    # 조용히 받아들이면 "스톱 주문"이 즉시 시장가/지정가로 나가버린다(I-10 위반,
-    # 무언의 트리거 무시) — 배선이 생기기 전까지 fail-closed로 거부한다.
+    # EM-19 (task-1751) -- trigger_price/trailing_offset are wired into the contract and
+    # command_digest (§9 EM-19), but no leaf yet connects the actual trigger evaluation
+    # (domain/order_types/*) to this execution path (submit_order.py -> outbox -> venue).
+    # Accepting them quietly before that wiring exists would send a "stop order" out
+    # immediately as a market/limit order (I-10 violation, silent trigger drop) --
+    # reject fail-closed until the wiring lands.
     if cmd.trigger_price is not None or cmd.trailing_offset is not None:
         raise OrderValidationError(
             "TRIGGER_ORDER_NOT_WIRED",

@@ -248,7 +248,9 @@ async def test_get_isolates_cache_by_exchange() -> None:
     assert adapter_kis.calls == [("AAPL", 30)]  # bitget의 캐시로 대신되지 않았다.
 
 
-async def test_get_propagates_cancelled_error_instead_of_swallowing_it() -> None:
+async def test_get_propagates_cancelled_error_instead_of_swallowing_it(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """negative + 실패주입 — `except Exception`은 `asyncio.CancelledError`
     (BaseException 하위)를 잡지 않는다. 취소를 조용히 삼켜 None으로
     위장하면, 종료(shutdown) 중인 작업이 정상적으로 "데이터 없음"을
@@ -260,7 +262,7 @@ async def test_get_propagates_cancelled_error_instead_of_swallowing_it() -> None
     async def _raise_cancelled(*args: object, **kwargs: object) -> list[Candle]:
         raise asyncio.CancelledError()
 
-    adapter.get_ohlcv = _raise_cancelled  # type: ignore[method-assign]
+    monkeypatch.setattr(adapter, "get_ohlcv", _raise_cancelled)
 
     with pytest.raises(asyncio.CancelledError):
         await cache.get(adapter, "BTC/USDT", bars=30, owner_id=_OWNER)

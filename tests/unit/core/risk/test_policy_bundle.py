@@ -371,7 +371,8 @@ def test_model_dump_failure_propagates_instead_of_silent_fallback_hash():
     # 전파돼 호출부가 이를 "해시 불일치"가 아니라 "계산 실패"로 fail-closed
     # 처리하게 강제한다.
     with pytest.raises(RuntimeError):
-        compute_rule_hash(_CorruptedPolicy(), _ENGINE_VERSION)  # type: ignore[arg-type]
+        corrupted: Any = _CorruptedPolicy()
+        compute_rule_hash(corrupted, _ENGINE_VERSION)
 
 
 def test_compute_rule_hash_repeated_calls_stay_bounded(tmp_path):

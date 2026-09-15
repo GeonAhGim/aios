@@ -20,6 +20,7 @@ import json
 import time
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
+from typing import Any
 from uuid import UUID
 
 import asyncpg
@@ -233,13 +234,14 @@ async def test_risk_gate_repo_none_is_rejected_i01() -> None:
     None 기본값을 가질 수 없다. 이 검사는 `pool.acquire()`보다 먼저 실행되므로
     나머지 인자는 전부 더미로 충분하다 — 실제로 DB/어댑터를 열지 않고도
     가드가 배선돼 있는지(구현만 되고 우회 가능한 게 아닌지) 증명한다."""
+    absent: Any = None  # the guard must reject this before any collaborator is touched
     with pytest.raises(TypeError):
         await restart_recovery.recover_stuck_outbox_commands(
-            None,  # type: ignore[arg-type]
-            order_repo=None,  # type: ignore[arg-type]
-            outbox_repo=None,  # type: ignore[arg-type]
-            resolve_adapter=None,  # type: ignore[arg-type]
-            risk_gate_repo=None,  # type: ignore[arg-type]
+            absent,
+            order_repo=absent,
+            outbox_repo=absent,
+            resolve_adapter=absent,
+            risk_gate_repo=absent,
             clock=lambda: datetime.now(timezone.utc),
         )
 

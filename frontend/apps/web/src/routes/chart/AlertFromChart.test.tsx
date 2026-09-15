@@ -4,6 +4,7 @@ import { MemoryRouter } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ApiError } from "@aios/api-client";
 import { AlertFromChart, type AlertFromChartProps } from "./AlertFromChart";
+import { perfBudgetMs } from "../../test/perfBudget";
 
 const createAlertMutateAsync = vi.fn();
 
@@ -191,7 +192,7 @@ describe("DEEPEN(task-3079): numeric perf, gate-red, D3", () => {
     const elapsedMs = performance.now() - startedAt;
 
     expect(input).toHaveValue(Number(value));
-    expect(elapsedMs).toBeLessThan(6000);
+    expect(elapsedMs).toBeLessThan(perfBudgetMs(6000));
   });
 
   it("게이트 적색 재현: 열려 있는 동안 currentClose가 바뀌어도 임계값을 덮어쓰지 않는다 — 프리필 effect 의존성에 currentClose를 추가하면 적색", () => {

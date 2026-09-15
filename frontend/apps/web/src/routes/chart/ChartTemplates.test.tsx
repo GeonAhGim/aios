@@ -6,6 +6,7 @@ import type { ComponentProps } from "react";
 import { ApiError, type ChartIndicatorTemplateRecord } from "@aios/api-client";
 import { decodeTemplate, type Template } from "@aios/chart-engine/src/templates/templateModel";
 import { ChartTemplates, type ChartTemplatesPort, type TemplateApplyResult } from "./ChartTemplates";
+import { perfBudgetMs } from "../../test/perfBudget";
 
 // CompareSymbols.test.tsx/AlertFromChart.test.tsx와 동일 관용: ErrorMessage는
 // err instanceof ApiError로 errorCode를 뽑아 EXACT_MESSAGES/PREFIX_MESSAGES로
@@ -236,7 +237,7 @@ describe("ChartTemplates", () => {
     await waitFor(() => expect(createIndicatorTemplate).toHaveBeenCalledTimes(1));
     const elapsedMs = performance.now() - start;
 
-    expect(elapsedMs).toBeLessThan(500);
+    expect(elapsedMs).toBeLessThan(perfBudgetMs(500));
     const input = createIndicatorTemplate.mock.calls[0]?.[0];
     expect(input.template.indicators).toHaveLength(600);
     expect(input.template.panes).toHaveLength(301); // main pane + 300 sub panes

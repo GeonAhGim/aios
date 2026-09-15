@@ -99,22 +99,22 @@ class BinancePublicTickerReference:
 
 
 class DefaultDistrustProviderFactory:
-    """R-48/task-2810 — `ExecutionLoopScheduler`가 매 틱 호출하는
-    `(adapter, exchange) -> providers` 배선 헬퍼. Binance는 거래소 무관
-    공개 API라 인스턴스 하나를 모든 호출이 공유하고, Bitget 선물
-    마크가격은 그 틱에 리졸브된 adapter별로 새로 감싼다(계정별 인증
-    세션이 달라 재사용 불가). 다른 거래소(kis/nh 등 크립토가 아닌 자산)는
-    아직 이 R-48 참조 쿼럼의 대상이 아니라 Binance만 참조로 쓴다."""
+    """R-48/task-2810 -- wiring helper that `ExecutionLoopScheduler` calls every tick as
+    `(adapter, exchange) -> providers`. Binance is an exchange-independent public API,
+    so one instance is shared by all calls; the Bitget futures mark price is wrapped
+    anew per adapter resolved in that tick (per-account auth sessions differ, so it
+    cannot be reused). Other exchanges (non-crypto assets such as kis/nh) are not yet
+    part of this R-48 reference quorum, so only Binance is used as a reference."""
 
     def __init__(self, *, binance: BinancePublicTickerReference | None = None) -> None:
         self._binance = binance or BinancePublicTickerReference()
 
     def __call__(self, adapter: Any, exchange: str) -> list[ReferenceQuoteProvider]:
-        # adapter는 `ExecutionLoopScheduler`가 이미 resolve한 실제 거래소
-        # adapter(런타임엔 BitgetAdapter, 또는 InstrumentedAdapter가 감싼
-        # 것 — 후자는 ExchangeAdapter를 상속하지 않고 __getattr__로만
-        # 위임한다, instrumented_adapter.py 참조). `_FuturesTickerCapable`
-        # 구조적 Protocol과 정적으로 맞물리지 않아 Any로 받는다.
+        # `adapter` is the real exchange adapter that `ExecutionLoopScheduler` already
+        # resolved (at runtime a BitgetAdapter, or one wrapped by InstrumentedAdapter --
+        # the latter does not inherit ExchangeAdapter and delegates only via
+        # __getattr__, see instrumented_adapter.py). It does not statically satisfy the
+        # `_FuturesTickerCapable` structural Protocol, hence it is accepted as Any.
         providers: list[ReferenceQuoteProvider] = [self._binance]
         if exchange == "bitget":
             providers.append(BitgetFuturesMarkPriceReference(adapter))

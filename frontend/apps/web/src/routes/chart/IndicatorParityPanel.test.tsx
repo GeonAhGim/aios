@@ -9,6 +9,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { IndicatorParityPanel, type ServerIndicatorSeriesPort } from "./IndicatorParityPanel";
 import type { WorkerPool } from "@aios/chart-engine/src/compute/workerPool";
 import { resolveVerifiedIndicators } from "@aios/chart-engine/src/compute/verifiedIndicators";
+import { perfBudgetMs } from "../../test/perfBudget";
 
 // CH-18c — component-level tests (no ChartPage/IndicatorPicker mount): the
 // real `GET /v1/indicators` network round trip the picker uses is not
@@ -171,7 +172,7 @@ describe("IndicatorParityPanel — CH-18c BBANDS(영구 미검증 지표) 서버
     // 3s: generous margin for a contended CI host running many suites in parallel
     // (isolated single-file run measures ~50-60ms; full-suite parallel run measured
     // ~550ms) while still catching a real O(n^2) or worse regression in this path.
-    expect(elapsedMs).toBeLessThan(3000);
+    expect(elapsedMs).toBeLessThan(perfBudgetMs(3000));
   });
 
   // 게이트 적색 재현: cc5ec7c5 이전에는 IndicatorParityPanel이 overlays를

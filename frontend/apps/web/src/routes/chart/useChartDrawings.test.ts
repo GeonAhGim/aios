@@ -4,6 +4,7 @@ import type { StreamCandle } from "@aios/chart-engine/src/data/candleStream";
 import { toDrawingsDocument } from "@aios/chart-engine/src/drawings/serialize";
 import type { ChartingPort, ChartingDrawingsRecord } from "@aios/chart-engine/src/layout/persistence";
 import { useChartDrawings, type UseChartDrawingsOptions } from "./useChartDrawings";
+import { perfBudgetMs } from "../../test/perfBudget";
 
 // persistence.test.ts/useChartLayout.test.ts와 동일 관용: routeApiError는
 // statusCode/errorCode 덕타이핑으로 분류하므로 ApiError 클래스를 임포트할 필요가 없다.
@@ -239,7 +240,7 @@ describe("성능 단언", () => {
     const elapsedMs = performance.now() - startedAt;
 
     expect(port.putDrawings).toHaveBeenCalledTimes(1);
-    expect(elapsedMs).toBeLessThan(1000);
+    expect(elapsedMs).toBeLessThan(perfBudgetMs(1000));
   });
 });
 

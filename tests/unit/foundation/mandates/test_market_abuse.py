@@ -55,6 +55,7 @@ from src.foundation.mandates.domain.market_abuse import (
     AbuseHit,
     detect,
 )
+from tests.support.frozen import assign_attr
 
 _T0 = datetime(2026, 1, 5, 5, 0, 0, tzinfo=timezone.utc)
 _CLOSE = datetime(2026, 1, 5, 6, 0, 0, tzinfo=timezone.utc)
@@ -478,7 +479,7 @@ def test_abuse_hit_rejects_post_construction_tampering():
     실증한다."""
     hit = _missing_hit_for_test()
     with pytest.raises(dataclasses.FrozenInstanceError):
-        hit.severity = ComplianceVerdict.WARN  # type: ignore[misc]
+        assign_attr(hit, "severity", ComplianceVerdict.WARN)
 
 
 def _missing_hit_for_test() -> AbuseHit:
