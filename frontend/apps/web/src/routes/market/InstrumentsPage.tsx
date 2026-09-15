@@ -10,6 +10,7 @@ import { AppShell } from "../../components/layout/AppShell";
 import { ErrorBanner, InstrumentDetailPanel } from "../../components/InstrumentDetailPanel";
 import { InstrumentLifecycleBadge } from "../../components/InstrumentLifecycleBadge";
 import { useCursorPage } from "../../hooks/useCursorPage";
+import { useTranslation } from "react-i18next";
 
 // spec §3.1 InstrumentView 목록·§4.2 심볼 생애주기. task-708(instrumentView.ts:
 // parseInstrumentView/parseSymbolAlias, InstrumentLifecycleBadge)과 task-462
@@ -32,6 +33,7 @@ interface InstrumentRowProps {
 }
 
 function InstrumentRow({ parsed, now, onSelect }: InstrumentRowProps) {
+  const { t } = useTranslation();
   if (parsed.kind !== "ok") {
     return (
       <li className="py-3">
@@ -56,8 +58,7 @@ function InstrumentRow({ parsed, now, onSelect }: InstrumentRowProps) {
         data-testid={`instrument-candles-link-${instrumentId}`}
         className="text-xs underline"
       >
-        캔들 보기
-      </Link>
+        {t("legacy.instrumentsPage.t1")}</Link>
     </li>
   );
 }
@@ -70,6 +71,7 @@ export interface InstrumentsPageProps {
 const baseUrl = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8000";
 
 export function InstrumentsPage({ marketDataClient, now }: InstrumentsPageProps) {
+  const { t } = useTranslation();
   const client = useMemo<Pick<MarketDataClient, "listInstruments" | "listInstrumentAliases">>(() => {
     if (marketDataClient) return marketDataClient;
     const getToken = () => useAuthStore.getState().token;
@@ -114,19 +116,19 @@ export function InstrumentsPage({ marketDataClient, now }: InstrumentsPageProps)
   return (
     <AppShell>
       <div className="max-w-4xl space-y-6">
-        <PageHeader title="심볼(Instrument)" />
+        <PageHeader title={t("legacy.instrumentsPage.title2")} />
 
         <Card>
           <div className="flex flex-wrap gap-3">
             <Select
-              aria-label="venue 필터"
+              aria-label={t("legacy.instrumentsPage.ariaLabel3")}
               value={venue}
               onChange={(e) => {
                 setVenue(e.target.value as Venue | "");
                 resetPaging();
               }}
             >
-              <option value="">전체 venue</option>
+              <option value="">{t("legacy.instrumentsPage.t4")}</option>
               {VENUE_OPTIONS.map((v) => (
                 <option key={v} value={v}>
                   {v}
@@ -134,14 +136,14 @@ export function InstrumentsPage({ marketDataClient, now }: InstrumentsPageProps)
               ))}
             </Select>
             <Select
-              aria-label="status 필터"
+              aria-label={t("legacy.instrumentsPage.ariaLabel5")}
               value={status}
               onChange={(e) => {
                 setStatus(e.target.value as SymbolStatus | "");
                 resetPaging();
               }}
             >
-              <option value="">전체 status</option>
+              <option value="">{t("legacy.instrumentsPage.t6")}</option>
               {STATUS_OPTIONS.map((s) => (
                 <option key={s} value={s}>
                   {s}
@@ -156,7 +158,7 @@ export function InstrumentsPage({ marketDataClient, now }: InstrumentsPageProps)
         ) : query.isLoading ? (
           <LoadingState />
         ) : items.length === 0 ? (
-          <EmptyState>표시할 심볼이 없습니다.</EmptyState>
+          <EmptyState>{t("legacy.instrumentsPage.t7")}</EmptyState>
         ) : (
           <Card>
             <ul className="divide-y divide-border">
@@ -187,8 +189,7 @@ export function InstrumentsPage({ marketDataClient, now }: InstrumentsPageProps)
                 setSelectedId(null);
               }}
             >
-              이전
-            </Button>
+              {t("legacy.instrumentsPage.t8")}</Button>
             <Button
               type="button"
               variant="secondary"
@@ -199,8 +200,7 @@ export function InstrumentsPage({ marketDataClient, now }: InstrumentsPageProps)
                 setSelectedId(null);
               }}
             >
-              다음
-            </Button>
+              {t("legacy.instrumentsPage.t9")}</Button>
           </div>
         )}
 

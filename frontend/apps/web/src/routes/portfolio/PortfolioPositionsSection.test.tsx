@@ -1,3 +1,4 @@
+import "../../i18n";
 import "@testing-library/jest-dom/vitest";
 import { cleanup, render, screen } from "@testing-library/react";
 import { parseNavSnapshot, parsePnLBreakdown, parsePositionSnapshot } from "@aios/shared-types";

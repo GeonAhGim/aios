@@ -16,6 +16,7 @@ import { ForbiddenNotice } from "../../components/ForbiddenNotice";
 import { ConditionGroup } from "./components/ConditionGroup";
 import { StrategyWizardPanel } from "./components/StrategyWizardPanel";
 import { ValidationRunPanel } from "./components/ValidationRunPanel";
+import { useTranslation } from "react-i18next";
 
 // spec §3.3 에러 taxonomy: 미리보기·저장 실패는 err.message를 직접 노출하지 않고
 // routeApiError(task-483)로 판정해 400/403/그 외를 각각 BadRequestNotice/
@@ -58,6 +59,7 @@ const DEFAULT_STOP_LOSS: PreviewCondition = {
 };
 
 export function StrategyBuilderPage() {
+  const { t } = useTranslation();
   const { data: indicatorList } = useIndicators();
   const createStrategy = useCreateStrategy();
   const previewStrategy = usePreviewStrategy();
@@ -109,7 +111,7 @@ export function StrategyBuilderPage() {
         combine: entryCombine,
       });
     } catch (err) {
-      setError(err instanceof ApiError ? err : new Error("미리보기에 실패했습니다."));
+      setError(err instanceof ApiError ? err : new Error(t("legacy.strategyBuilderPage.t14")));
     }
   }
 
@@ -117,7 +119,7 @@ export function StrategyBuilderPage() {
     setClientError(null);
     setError(null);
     if (!strategyId.trim()) {
-      setClientError("전략 ID를 입력해주세요.");
+      setClientError(t("legacy.strategyBuilderPage.t15"));
       return;
     }
     try {
@@ -136,17 +138,17 @@ export function StrategyBuilderPage() {
       });
       setSaved({ strategyId: result.strategyId, version: result.version, status: result.status });
     } catch (err) {
-      setError(err instanceof ApiError ? err : new Error("저장에 실패했습니다."));
+      setError(err instanceof ApiError ? err : new Error(t("legacy.strategyBuilderPage.t16")));
     }
   }
 
   return (
     <AppShell>
       <div className="space-y-6">
-        <PageHeader title="전략 편집기" />
+        <PageHeader title={t("legacy.strategyBuilderPage.title1")} />
 
         <div className="grid grid-cols-3 gap-4 rounded-lg border border-border bg-surface p-4">
-          <Field label="전략 ID">
+          <Field label={t("legacy.strategyBuilderPage.label2")}>
             <input
               type="text"
               value={strategyId}
@@ -155,7 +157,7 @@ export function StrategyBuilderPage() {
               className="w-full rounded-md border border-border bg-bg px-3 py-2 text-sm text-fg placeholder:text-fg-muted outline-none focus:border-accent focus:ring-1 focus:ring-accent"
             />
           </Field>
-          <Field label="대상 자산">
+          <Field label={t("legacy.strategyBuilderPage.label3")}>
             <Select value={targetAsset} onChange={(e) => setTargetAsset(e.target.value)}>
               {TARGET_ASSETS.map((asset) => (
                 <option key={asset} value={asset}>
@@ -164,7 +166,7 @@ export function StrategyBuilderPage() {
               ))}
             </Select>
           </Field>
-          <Field label="거래소">
+          <Field label={t("legacy.strategyBuilderPage.label4")}>
             <Select value={exchange} onChange={(e) => setExchange(e.target.value)}>
               <option value="bitget">bitget</option>
             </Select>
@@ -177,8 +179,7 @@ export function StrategyBuilderPage() {
           </h2>
           {candlesFailed ? (
             <p className="text-sm text-fg-muted">
-              차트를 불러올 수 없습니다 — {exchange} 거래소 연동이 필요합니다.
-            </p>
+              {t("legacy.strategyBuilderPage.t5", { exchange: exchange })}</p>
           ) : candles && candles.length > 0 ? (
             <CandlestickChart
               data={candles.map((c) => ({
@@ -190,14 +191,14 @@ export function StrategyBuilderPage() {
               }))}
             />
           ) : (
-            <p className="text-sm text-fg-muted">차트 데이터를 불러오는 중...</p>
+            <p className="text-sm text-fg-muted">{t("legacy.strategyBuilderPage.t6")}</p>
           )}
         </Card>
 
         <StrategyWizardPanel onApply={applyGenerated} />
 
         <ConditionGroup
-          title="진입 조건"
+          title={t("legacy.strategyBuilderPage.title7")}
           conditions={entryConditions}
           combine={entryCombine}
           onConditionsChange={setEntryConditions}
@@ -205,7 +206,7 @@ export function StrategyBuilderPage() {
           indicators={indicators}
         />
         <ConditionGroup
-          title="청산 조건"
+          title={t("legacy.strategyBuilderPage.title8")}
           conditions={exitConditions}
           combine={exitCombine}
           onConditionsChange={setExitConditions}
@@ -213,7 +214,7 @@ export function StrategyBuilderPage() {
           indicators={indicators}
         />
         <ConditionGroup
-          title="손절 조건"
+          title={t("legacy.strategyBuilderPage.title9")}
           conditions={stopLossConditions}
           combine={stopLossCombine}
           onConditionsChange={setStopLossConditions}
@@ -231,11 +232,9 @@ export function StrategyBuilderPage() {
             onClick={handlePreview}
             loading={previewStrategy.isPending}
           >
-            진입 조건 미리보기
-          </Button>
+            {t("legacy.strategyBuilderPage.t10")}</Button>
           <Button type="button" onClick={handleSave} loading={createStrategy.isPending}>
-            전략 저장
-          </Button>
+            {t("legacy.strategyBuilderPage.t11")}</Button>
         </div>
 
         {previewStrategy.data && (
@@ -245,8 +244,7 @@ export function StrategyBuilderPage() {
               <p className="text-fg-muted">{previewStrategy.data.message}</p>
             ) : (
               <p>
-                최근 {previewStrategy.data.signalIndices.length}개 신호 발생 시점:{" "}
-                {previewStrategy.data.signalTimes.slice(0, 5).join(", ")}
+                {t("legacy.strategyBuilderPage.t12", { length: previewStrategy.data.signalIndices.length, val: " ", val2: previewStrategy.data.signalTimes.slice(0, 5).join(", ") })}
                 {previewStrategy.data.signalTimes.length > 5 ? " ..." : ""}
               </p>
             )}
@@ -255,8 +253,7 @@ export function StrategyBuilderPage() {
 
         {saved && (
           <Alert tone="success">
-            전략이 저장됐습니다 — {saved.strategyId}@{saved.version} ({saved.status})
-          </Alert>
+            {t("legacy.strategyBuilderPage.t13", { strategyId: saved.strategyId, version: saved.version, status: saved.status })}</Alert>
         )}
 
         <ValidationRunPanel

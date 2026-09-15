@@ -3,6 +3,7 @@ import { cn, ThemeToggle } from "@aios/ui-web";
 import type { ReactNode } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { ADMIN_NAV_ITEMS, MAIN_NAV_ITEMS, SETTINGS_NAV_ITEMS, type NavItem } from "./navItems";
+import { useTranslation } from "react-i18next";
 
 function NavLink({
   item,
@@ -39,6 +40,7 @@ function Logo() {
 }
 
 export function AppShell({ children }: { children: ReactNode }) {
+  const { t } = useTranslation();
   const { data: me } = useMe();
   const logout = useLogout();
   const navigate = useNavigate();
@@ -95,8 +97,7 @@ export function AppShell({ children }: { children: ReactNode }) {
               }}
               className="rounded-md border border-border-strong px-3 py-1.5 text-fg-secondary transition-colors hover:bg-surface-hover hover:text-fg"
             >
-              로그아웃
-            </button>
+              {t("legacy.appShell.t1")}</button>
           </div>
         </div>
       </header>

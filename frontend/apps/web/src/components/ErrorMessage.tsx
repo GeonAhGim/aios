@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { classifyRetry, getApiErrorMessage } from "@aios/shared-types";
 import { Alert, Button } from "@aios/ui-web";
+import { useTranslation } from "react-i18next";
 
 // ApiError(§3.3 ApiError 봉투)의 error_code를 사용자용 한국어 메시지로 바꿔
 // 보여주는 표시 전용 컴포넌트. 매핑 로직 자체는 shared-types/apiError.ts에
@@ -31,6 +32,7 @@ export function ErrorMessage({
   onRetry,
   fieldErrors,
 }: ErrorMessageProps) {
+  const { t } = useTranslation();
   const text = getApiErrorMessage(errorCode, message);
   const hasMappedFieldErrors = Boolean(fieldErrors && Object.keys(fieldErrors).length > 0);
   const classification = classifyRetry({ errorCode, retryAfterSec });
@@ -55,15 +57,14 @@ export function ErrorMessage({
   return (
     <Alert tone="danger">
       <p>{text}</p>
-      {traceId && <p className="mt-1 text-xs text-fg-muted">지원코드: {traceId}</p>}
+      {traceId && <p className="mt-1 text-xs text-fg-muted">{t("legacy.errorMessage.t1", { traceId: traceId })}</p>}
       {canRetry && onRetry && (
         <div className="mt-2 flex items-center gap-2">
           {remainingSec > 0 && (
-            <span className="text-xs text-fg-muted">{remainingSec}초 후 재시도 가능</span>
+            <span className="text-xs text-fg-muted">{t("legacy.errorMessage.t2", { remainingSec: remainingSec })}</span>
           )}
           <Button size="sm" variant="secondary" disabled={remainingSec > 0} onClick={onRetry}>
-            다시 시도
-          </Button>
+            {t("legacy.errorMessage.t3")}</Button>
         </div>
       )}
     </Alert>

@@ -2,6 +2,7 @@ import { configureMfaStepUpHandler } from "@aios/api-client";
 import { useVerifyMfa } from "@aios/shared-hooks";
 import { Alert, Button, Input, useDialogFocusTrap } from "@aios/ui-web";
 import { useEffect, useRef, useState, type FormEvent } from "react";
+import { useTranslation } from "react-i18next";
 
 // spec §3.3/§3.4: http.ts가 403 AUTH_MFA_REQUIRED를 받으면 mfaStepUp.ts의
 // requestMfaStepUp()을 거쳐 이 컴포넌트가 등록한 핸들러를 부른다(task-481).
@@ -15,6 +16,7 @@ import { useEffect, useRef, useState, type FormEvent } from "react";
 const TITLE_ID = "mfa-step-up-dialog-title";
 
 export function MfaStepUpDialog() {
+  const { t } = useTranslation();
   const verifyMfa = useVerifyMfa();
   const [isOpen, setIsOpen] = useState(false);
   const [totpCode, setTotpCode] = useState("");
@@ -57,7 +59,7 @@ export function MfaStepUpDialog() {
       finish(true);
     } catch {
       setTotpCode("");
-      setError("인증에 실패했습니다. 코드를 다시 확인해주세요.");
+      setError(t("legacy.mfaStepUpDialog.t6"));
     }
   }
 
@@ -77,18 +79,17 @@ export function MfaStepUpDialog() {
         className="w-full max-w-sm space-y-4 rounded-xl border border-border bg-surface p-6"
       >
         <h2 id={TITLE_ID} className="text-lg font-semibold text-fg">
-          추가 인증이 필요합니다
+          {t("legacy.mfaStepUpDialog.t1")}
         </h2>
         <p className="text-sm text-fg-secondary">
-          민감한 작업을 계속하려면 인증 앱의 6자리 코드를 입력해주세요.
-        </p>
+          {t("legacy.mfaStepUpDialog.t2")}</p>
         <form onSubmit={handleSubmit} className="space-y-3">
           <Input
             type="text"
             inputMode="numeric"
             required
             autoFocus
-            placeholder="6자리 코드"
+            placeholder={t("legacy.mfaStepUpDialog.placeholder3")}
             value={totpCode}
             onChange={(e) => setTotpCode(e.target.value)}
             className="text-center text-lg tracking-[0.3em]"
@@ -96,11 +97,9 @@ export function MfaStepUpDialog() {
           {error && <Alert>{error}</Alert>}
           <div className="flex justify-end gap-2">
             <Button type="button" variant="secondary" onClick={() => finish(false)}>
-              취소
-            </Button>
+              {t("legacy.mfaStepUpDialog.t4")}</Button>
             <Button type="submit" loading={verifyMfa.isPending}>
-              확인
-            </Button>
+              {t("legacy.mfaStepUpDialog.t5")}</Button>
           </div>
         </form>
       </div>

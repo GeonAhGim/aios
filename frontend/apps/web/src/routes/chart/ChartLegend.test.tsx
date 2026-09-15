@@ -1,3 +1,4 @@
+import "../../i18n";
 import "@testing-library/jest-dom/vitest";
 import type { ObjectTreeEntry } from "@aios/chart-engine/src/legend/objectTree";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";

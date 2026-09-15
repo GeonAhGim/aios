@@ -7,6 +7,7 @@ import { useState } from "react";
 import { AppShell } from "../../components/layout/AppShell";
 import { ErrorMessage } from "../../components/ErrorMessage";
 import { ForbiddenNotice } from "../../components/ForbiddenNotice";
+import { useTranslation } from "react-i18next";
 
 // spec §3.3 에러 taxonomy: 해제(deactivate)·복구평가(evaluate-recovery) 실패는
 // err.message를 직접 노출하지 않고 routeApiError로 판정해 403/그 외를 각각
@@ -28,10 +29,11 @@ function SafetyControlActionError({ error, onRetry }: { error: unknown; onRetry?
 }
 
 function RecoveryDecisionSummary({ decision }: { decision: RecoveryDecisionView }) {
+  const { t } = useTranslation();
   return (
     <div className="mt-2 rounded-md border border-border bg-surface-hover p-3 text-sm">
       <p className="font-medium text-fg">
-        복구 평가 결과: <StatusBadge status={decision.outcome} />
+        {t("legacy.safetyControlsPage.t1")}<StatusBadge status={decision.outcome} />
       </p>
       {decision.reasonCodes.length > 0 && (
         <ul className="mt-1 list-disc pl-5 text-fg-muted">
@@ -41,13 +43,14 @@ function RecoveryDecisionSummary({ decision }: { decision: RecoveryDecisionView 
         </ul>
       )}
       <p className="mt-1 text-xs text-fg-muted">
-        만료: {new Date(decision.expiresAt).toLocaleString()}
+        {t("legacy.safetyControlsPage.t2")}{new Date(decision.expiresAt).toLocaleString()}
       </p>
     </div>
   );
 }
 
 export function SafetyControlsPage() {
+  const { t } = useTranslation();
   const { data, isLoading, isError, error, refetch } = useSafetyControls();
   const deactivate = useDeactivateSafetyControl();
   const evaluateRecovery = useEvaluateRecovery();
@@ -102,7 +105,7 @@ export function SafetyControlsPage() {
             </div>
             <p className="text-sm text-fg-muted">{control.reason}</p>
             <p className="text-xs text-fg-muted">
-              펜스 토큰 {control.fenceToken}
+              {t("legacy.safetyControlsPage.t3", { fenceToken: control.fenceToken })}
               {control.createdAt && ` · 발동: ${new Date(control.createdAt).toLocaleString()}`}
               {control.deactivatedAt && ` · 해제: ${new Date(control.deactivatedAt).toLocaleString()}`}
             </p>
@@ -115,22 +118,21 @@ export function SafetyControlsPage() {
               loading={deactivate.isPending}
               onClick={() => handleDeactivate(control.id)}
             >
-              즉시 해제
-            </Button>
+              {t("legacy.safetyControlsPage.t4")}</Button>
           )}
         </div>
         {isActive && (
           <div className="mt-3 flex items-end gap-2">
             <Input
               type="number"
-              placeholder="승인 요청 ID"
+              placeholder={t("legacy.safetyControlsPage.placeholder5")}
               value={recoveryInput(control.id).approvalId}
               onChange={(e) => setRecoveryField(control.id, "approvalId", e.target.value)}
               className="w-36"
             />
             <Input
               type="text"
-              placeholder="증빙 참조(evidence_ref)"
+              placeholder={t("legacy.safetyControlsPage.placeholder6")}
               value={recoveryInput(control.id).evidenceRef}
               onChange={(e) => setRecoveryField(control.id, "evidenceRef", e.target.value)}
               className="w-56"
@@ -142,8 +144,7 @@ export function SafetyControlsPage() {
               loading={evaluateRecovery.isPending}
               onClick={() => handleEvaluateRecovery(control.id)}
             >
-              복구 평가(R-53)
-            </Button>
+              {t("legacy.safetyControlsPage.t7")}</Button>
           </div>
         )}
         {recoveryDecisions[control.id] && <RecoveryDecisionSummary decision={recoveryDecisions[control.id]} />}
@@ -159,7 +160,7 @@ export function SafetyControlsPage() {
   return (
     <AppShell>
       <div className="space-y-6">
-        <PageHeader title="안전 통제(Safety Controls)" />
+        <PageHeader title={t("legacy.safetyControlsPage.title8")} />
         {isError ? (
           <SafetyControlActionError error={error} onRetry={() => refetch()} />
         ) : isLoading ? (
@@ -167,7 +168,7 @@ export function SafetyControlsPage() {
         ) : data && data.controls.length > 0 ? (
           <ul className="space-y-3">{data.controls.map(renderControl)}</ul>
         ) : (
-          <EmptyState>활성 안전 통제가 없습니다.</EmptyState>
+          <EmptyState>{t("legacy.safetyControlsPage.t9")}</EmptyState>
         )}
       </div>
     </AppShell>

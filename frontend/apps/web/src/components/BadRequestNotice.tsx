@@ -1,5 +1,6 @@
 import { classifyBadRequest, extractFieldErrors, getApiErrorMessage } from "@aios/shared-types";
 import { Alert, Button } from "@aios/ui-web";
+import { useTranslation } from "react-i18next";
 
 // 400 응답을 classifyBadRequest(shared-types/badRequest.ts)의 다섯 갈래로 나눠 보여주는
 // 표시 전용 컴포넌트. status가 400이 아니면(또는 error가 비어있으면) null을 반환해
@@ -37,6 +38,7 @@ function extractMessage(error: unknown): string | undefined {
 }
 
 export function BadRequestNotice({ error, onReload, onFocusMfaCode }: BadRequestNoticeProps) {
+  const { t } = useTranslation();
   const kind = classifyBadRequest(error);
   if (!kind) return null;
 
@@ -65,15 +67,13 @@ export function BadRequestNotice({ error, onReload, onFocusMfaCode }: BadRequest
       {kind === "disclosure_retired" && onReload && (
         <div className="mt-2">
           <Button size="sm" variant="secondary" onClick={onReload}>
-            최신 내용 다시 불러오기
-          </Button>
+            {t("legacy.badRequestNotice.t1")}</Button>
         </div>
       )}
       {kind === "mfa_invalid" && onFocusMfaCode && (
         <div className="mt-2">
           <Button size="sm" variant="secondary" onClick={onFocusMfaCode}>
-            새 코드 입력
-          </Button>
+            {t("legacy.badRequestNotice.t2")}</Button>
         </div>
       )}
     </Alert>

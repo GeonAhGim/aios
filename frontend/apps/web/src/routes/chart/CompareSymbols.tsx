@@ -12,6 +12,7 @@ import { createOverlayRegistry, DEFAULT_OVERLAY_DEFINITIONS, MAIN_PANE_INDEX } f
 import { routeApiError, type CandleRecord, type Timeframe, type Venue } from "@aios/shared-types";
 import { Button, CATEGORICAL_PALETTE, EmptyState, LoadingState, Select } from "@aios/ui-web";
 import { ErrorMessage } from "../../components/ErrorMessage";
+import { useTranslation } from "react-i18next";
 
 export interface CompareSymbolRef {
   readonly instrumentId: string;
@@ -124,6 +125,7 @@ interface AddSymbolFormProps {
 }
 
 function AddSymbolForm({ baseVenue, baseInstrumentId, existing, listInstruments, onAdd }: AddSymbolFormProps) {
+  const { t } = useTranslation();
   const [open, setOpen] = useState(false);
   const [venue, setVenue] = useState<Venue>(baseVenue);
   const [instrumentId, setInstrumentId] = useState("");
@@ -144,7 +146,7 @@ function AddSymbolForm({ baseVenue, baseInstrumentId, existing, listInstruments,
     if (!instrumentId) return;
     const candidate: CompareSymbolRef = { instrumentId, venue };
     if (isDuplicateCompareSymbol(existing, baseVenue, baseInstrumentId, candidate)) {
-      setRejected(`${candidate.instrumentId}은(는) 이미 기준/비교 심볼입니다.`);
+      setRejected(t("legacy.compareSymbols.t14", { instrumentId: candidate.instrumentId }));
       return;
     }
     setRejected(null);
@@ -155,14 +157,13 @@ function AddSymbolForm({ baseVenue, baseInstrumentId, existing, listInstruments,
   if (!open) {
     return (
       <Button type="button" variant="secondary" size="sm" onClick={() => setOpen(true)}>
-        비교 심볼 추가
-      </Button>
+        {t("legacy.compareSymbols.t1")}</Button>
     );
   }
 
   return (
     <div className="flex flex-wrap items-end gap-2" data-testid="compare-add-form">
-      <Select aria-label="비교 심볼 venue" value={venue} onChange={(e) => { setVenue(e.target.value as Venue); setInstrumentId(""); }}>
+      <Select aria-label={t("legacy.compareSymbols.ariaLabel2")} value={venue} onChange={(e) => { setVenue(e.target.value as Venue); setInstrumentId(""); }}>
         {VENUES.map((v) => (
           <option key={v} value={v}>
             {v}
@@ -172,8 +173,8 @@ function AddSymbolForm({ baseVenue, baseInstrumentId, existing, listInstruments,
       {query.isLoading ? (
         <LoadingState />
       ) : (
-        <Select aria-label="비교 심볼 선택" value={instrumentId} onChange={(e) => setInstrumentId(e.target.value)}>
-          <option value="">심볼 선택</option>
+        <Select aria-label={t("legacy.compareSymbols.ariaLabel3")} value={instrumentId} onChange={(e) => setInstrumentId(e.target.value)}>
+          <option value="">{t("legacy.compareSymbols.t4")}</option>
           {options.map((v) => (
             <option key={v.instrument_id} value={v.instrument_id}>
               {v.instrument_id}
@@ -182,11 +183,9 @@ function AddSymbolForm({ baseVenue, baseInstrumentId, existing, listInstruments,
         </Select>
       )}
       <Button type="button" size="sm" disabled={!instrumentId} onClick={handleAdd}>
-        추가
-      </Button>
+        {t("legacy.compareSymbols.t5")}</Button>
       <Button type="button" variant="ghost" size="sm" onClick={() => setOpen(false)}>
-        취소
-      </Button>
+        {t("legacy.compareSymbols.t6")}</Button>
       {rejected && <p className="w-full text-xs text-danger">{rejected}</p>}
     </div>
   );
@@ -204,6 +203,7 @@ interface CompareSymbolPaneProps {
 }
 
 function CompareSymbolPane({ symbolRef, baseInstrumentId, baseCandles, timeframe, start, end, fetchCandles, onRemove }: CompareSymbolPaneProps) {
+  const { t } = useTranslation();
   const query = useQuery({
     queryKey: ["compare-candles", symbolRef.venue, symbolRef.instrumentId, timeframe, start, end],
     queryFn: () => fetchCandles({ venue: symbolRef.venue, instrumentId: symbolRef.instrumentId, timeframe, start, end }),
@@ -228,13 +228,13 @@ function CompareSymbolPane({ symbolRef, baseInstrumentId, baseCandles, timeframe
     const series = query.data?.series;
     const candles = series?.kind === "ok" ? series.value.candles : [];
     const outcome = computeComparison(baseCandles, candles);
-    if (outcome.kind === "empty") body = <EmptyState>겹치는 캔들이 없습니다.</EmptyState>;
-    else if (outcome.kind === "scale_mismatch") body = <EmptyState>통화·스케일이 달라 스프레드를 계산할 수 없습니다.</EmptyState>;
+    if (outcome.kind === "empty") body = <EmptyState>{t("legacy.compareSymbols.t7")}</EmptyState>;
+    else if (outcome.kind === "scale_mismatch") body = <EmptyState>{t("legacy.compareSymbols.t8")}</EmptyState>;
     else
       body = (
         <>
           <div>
-            <p className="text-xs text-fg-muted">정규화 오버레이 (base=100, 메인 페인 {MAIN_PANE_INDEX})</p>
+            <p className="text-xs text-fg-muted">{t("legacy.compareSymbols.t9", { mAINPANEINDEX: MAIN_PANE_INDEX })}</p>
             <Sparkline
               label={`${baseInstrumentId} vs ${symbolRef.instrumentId} 정규화 오버레이`}
               series={[
@@ -244,7 +244,7 @@ function CompareSymbolPane({ symbolRef, baseInstrumentId, baseCandles, timeframe
             />
           </div>
           <div>
-            <p className="text-xs text-fg-muted">스프레드 (서브 페인 {spreadPaneEntry().paneIndex})</p>
+            <p className="text-xs text-fg-muted">{t("legacy.compareSymbols.t10", { paneIndex: spreadPaneEntry().paneIndex })}</p>
             <Sparkline label={`${symbolRef.instrumentId} 스프레드`} series={[{ label: "spread", color: CATEGORICAL_PALETTE[2]!, points: outcome.spreadPoints }]} />
           </div>
         </>
@@ -258,8 +258,7 @@ function CompareSymbolPane({ symbolRef, baseInstrumentId, baseCandles, timeframe
           {symbolRef.instrumentId} <span className="text-xs text-fg-muted">({symbolRef.venue})</span>
         </h3>
         <Button type="button" variant="ghost" size="sm" onClick={onRemove}>
-          제거
-        </Button>
+          {t("legacy.compareSymbols.t11")}</Button>
       </div>
       {body}
     </section>
@@ -270,9 +269,10 @@ export function CompareSymbols({
   baseVenue, baseInstrumentId, baseCandles, timeframe, start, end,
   compareSymbols, onAdd, onRemove, fetchCandles, listInstruments,
 }: CompareSymbolsProps) {
+  const { t } = useTranslation();
   return (
-    <section aria-label="비교 심볼 목록" className="space-y-3">
-      <h2 className="text-sm font-medium text-fg-secondary">비교 심볼 ({compareSymbols.length})</h2>
+    <section aria-label={t("legacy.compareSymbols.ariaLabel12")} className="space-y-3">
+      <h2 className="text-sm font-medium text-fg-secondary">{t("legacy.compareSymbols.t13", { length: compareSymbols.length })}</h2>
       <AddSymbolForm baseVenue={baseVenue} baseInstrumentId={baseInstrumentId} existing={compareSymbols} listInstruments={listInstruments} onAdd={onAdd} />
       <div className="space-y-3">
         {compareSymbols.map((symbolRef) => (

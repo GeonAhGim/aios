@@ -1,3 +1,4 @@
+import "../../i18n";
 import "@testing-library/jest-dom/vitest";
 import { ApiError, type IndicatorCatalogItem, type ListIndicatorsResult } from "@aios/api-client";
 import { createDefaultOverlayRegistry } from "@aios/chart-engine/src/indicators/overlayRegistry";

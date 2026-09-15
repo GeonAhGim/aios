@@ -6,8 +6,10 @@ import { useState, type FormEvent } from "react";
 import { AppShell } from "../../components/layout/AppShell";
 import { ErrorMessage } from "../../components/ErrorMessage";
 import { DuplicateSubmitError, useIdempotentSubmit } from "../../hooks/useIdempotentSubmit";
+import { useTranslation } from "react-i18next";
 
 export function WalletPage() {
+  const { t } = useTranslation();
   const { data: balance, isLoading } = useWalletBalance();
   const requestTopup = useRequestTopup();
   const { submit } = useIdempotentSubmit("wallet.topup");
@@ -25,7 +27,7 @@ export function WalletPage() {
       setSubmitted({ id: result.id, amount: result.requestedAmount });
     } catch (err) {
       if (err instanceof DuplicateSubmitError) return;
-      setError(err instanceof ApiError ? err : new Error("충전 요청에 실패했습니다."));
+      setError(err instanceof ApiError ? err : new Error(t("legacy.walletPage.t7")));
     }
   }
 
@@ -43,9 +45,9 @@ export function WalletPage() {
   return (
     <AppShell>
       <div className="max-w-md space-y-6">
-        <PageHeader title="지갑" />
+        <PageHeader title={t("legacy.walletPage.title1")} />
         <Stat
-          label="보유 크레딧"
+          label={t("legacy.walletPage.label2")}
           value={isLoading ? "…" : `${balance?.balance ?? "0"} 크레딧`}
         />
 
@@ -53,7 +55,7 @@ export function WalletPage() {
           onSubmit={handleSubmit}
           className="space-y-3 rounded-lg border border-border bg-surface p-6"
         >
-          <Field label="충전 신청 금액 (크레딧, 1크레딧 = 1원)">
+          <Field label={t("legacy.walletPage.label3")}>
             <Input
               type="number"
               step="1"
@@ -64,8 +66,7 @@ export function WalletPage() {
             />
           </Field>
           <p className="text-xs text-fg-muted">
-            신청 후 실제 계좌로 입금하면 관리자 확인 즉시 크레딧이 반영됩니다.
-          </p>
+            {t("legacy.walletPage.t4")}</p>
           {error && (
             <ErrorMessage
               errorCode={error instanceof ApiError ? error.errorCode : null}
@@ -77,12 +78,10 @@ export function WalletPage() {
           )}
           {submitted && (
             <Alert tone="success">
-              충전 요청 #{submitted.id} 접수됨 ({submitted.amount} 크레딧) — 관리자 확인 대기 중
-            </Alert>
+              {t("legacy.walletPage.t5", { id: submitted.id, amount: submitted.amount })}</Alert>
           )}
           <Button type="submit" loading={requestTopup.isPending} className="w-full">
-            충전 신청
-          </Button>
+            {t("legacy.walletPage.t6")}</Button>
         </form>
       </div>
     </AppShell>

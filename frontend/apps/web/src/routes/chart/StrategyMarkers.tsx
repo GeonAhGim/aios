@@ -12,6 +12,7 @@ import { NotFoundState } from "../../components/NotFoundState";
 import { useCursorPage } from "../../hooks/useCursorPage";
 import { usePositionJournal, usePositionList, usePositionsClient, type PositionsClientLike } from "../../hooks/usePositions";
 import type { CursorNavigatorMeta } from "../../lib/cursorPagination";
+import { useTranslation } from "react-i18next";
 
 // CH-10 — chart-engine 엔진 내부는 손대지 않는다: createTimeScale/createPriceScale
 // (공개 API)로 캔들 시간·가격 범위를 이 컴포넌트 소유 DOM 오버레이에 그대로
@@ -110,9 +111,10 @@ function markerAriaLabel(marker: JournalMarker): string {
 // 만들지 않고 routeApiError/classifyForbidden만 경유한다. 화면마다 로컬로 두는 것이
 // 기존 관용이다(ExecutionsListError/RebalanceError와 동일 패턴).
 function JournalQueryError({ error, onRetry }: { error: unknown; onRetry: () => void }) {
+  const { t } = useTranslation();
   const routed = routeApiError(error);
   if (routed.kind === "not_found") {
-    return <NotFoundState title="이 포지션의 저널을 찾을 수 없습니다." />;
+    return <NotFoundState title={t("legacy.strategyMarkers.title1")} />;
   }
   if (classifyForbidden(error)) {
     return <ForbiddenNotice error={error} />;
@@ -130,6 +132,7 @@ function JournalQueryError({ error, onRetry }: { error: unknown; onRetry: () => 
 }
 
 export function StrategyMarkers({ instrumentId, points, client: injected, height = DEFAULT_HEIGHT }: StrategyMarkersProps) {
+  const { t } = useTranslation();
   const client = usePositionsClient(injected);
   const executionsQuery = useExecutions();
   const executions = executionsQuery.data ?? [];
@@ -204,14 +207,14 @@ export function StrategyMarkers({ instrumentId, points, client: injected, height
   );
 
   return (
-    <section aria-label="전략 신호·체결 마커" className="space-y-2">
+    <section aria-label={t("legacy.strategyMarkers.ariaLabel2")} className="space-y-2">
       <div className="flex items-center gap-3">
         <Select
           value={selectedExecutionId !== null ? String(selectedExecutionId) : ""}
           onChange={(e) => setSelectedExecutionId(e.target.value === "" ? null : Number(e.target.value))}
           data-testid="strategy-markers-execution-select"
         >
-          <option value="">실행 선택</option>
+          <option value="">{t("legacy.strategyMarkers.t3")}</option>
           {executions.map((exec) => (
             <option key={exec.executionId} value={exec.executionId}>
               {exec.strategyId} (#{exec.executionId})
@@ -222,17 +225,17 @@ export function StrategyMarkers({ instrumentId, points, client: injected, height
       </div>
 
       {selectedExecutionId === null ? (
-        <EmptyState>실행을 선택하면 신호·체결 마커를 표시합니다.</EmptyState>
+        <EmptyState>{t("legacy.strategyMarkers.t4")}</EmptyState>
       ) : positionsQuery.isPending ? (
         <LoadingState />
       ) : positionKey === null ? (
-        <EmptyState>이 심볼에 대한 포지션이 없습니다.</EmptyState>
+        <EmptyState>{t("legacy.strategyMarkers.t5")}</EmptyState>
       ) : journalQuery.isError ? (
         <JournalQueryError error={journalQuery.error} onRetry={() => journalQuery.refetch()} />
       ) : journalQuery.isPending ? (
         <LoadingState />
       ) : markers.length === 0 ? (
-        <EmptyState>표시할 체결·신호가 없습니다.</EmptyState>
+        <EmptyState>{t("legacy.strategyMarkers.t6")}</EmptyState>
       ) : (
         <div
           ref={containerRef}
@@ -261,11 +264,9 @@ export function StrategyMarkers({ instrumentId, points, client: injected, height
       {journalEnabled && (
         <div className="flex gap-2">
           <Button type="button" variant="secondary" size="sm" onClick={pager.prev} disabled={!pager.hasPrev} data-testid="strategy-markers-prev">
-            이전
-          </Button>
+            {t("legacy.strategyMarkers.t7")}</Button>
           <Button type="button" variant="secondary" size="sm" onClick={pager.next} disabled={!pager.hasNext} data-testid="strategy-markers-next">
-            다음
-          </Button>
+            {t("legacy.strategyMarkers.t8")}</Button>
         </div>
       )}
     </section>

@@ -12,6 +12,7 @@ import { AlertFromChart } from "./AlertFromChart";
 import { DrawingReplayToolbar } from "./DrawingReplayToolbar";
 import { LayoutPanelControls } from "./LayoutPanelControls";
 import type { ChartLayoutSaveStatus } from "./useChartLayout";
+import { useTranslation } from "react-i18next";
 
 // CH-6b: CH-8(task-1593) 레이아웃 CRUD의 화면 배선. 실제 복원·저장·충돌 판정은
 // useChartLayout이 전담하고, 여기서는 그 결과(panels/activePanelId/saveStatus 등)를
@@ -94,11 +95,12 @@ export function ChartToolbar({
   selectedIndicatorIds,
   layout,
 }: ChartToolbarProps) {
+  const { t } = useTranslation();
   const [alertDialogOpen, setAlertDialogOpen] = useState(false);
 
   return (
     <div className="flex flex-wrap items-end gap-3" data-testid="chart-toolbar">
-      <Field label="거래소">
+      <Field label={t("legacy.chartToolbar.label1")}>
         <Select value={venue} onChange={(e) => onVenueChange(e.target.value as Venue)}>
           {VENUES.map((v) => (
             <option key={v} value={v}>
@@ -107,7 +109,7 @@ export function ChartToolbar({
           ))}
         </Select>
       </Field>
-      <Field label="타임프레임">
+      <Field label={t("legacy.chartToolbar.label2")}>
         <Select value={timeframe} onChange={(e) => onTimeframeChange(e.target.value as Timeframe)}>
           {TIMEFRAMES.map((t) => (
             <option key={t} value={t}>
@@ -129,7 +131,7 @@ export function ChartToolbar({
         onStep={onStep}
       />
 
-      <Field label="배속">
+      <Field label={t("legacy.chartToolbar.label3")}>
         <Select
           value={String(replaySpeed)}
           disabled={replayDisabled}
@@ -144,8 +146,7 @@ export function ChartToolbar({
       </Field>
 
       <Button type="button" variant="secondary" size="sm" onClick={() => setAlertDialogOpen(true)}>
-        알림
-      </Button>
+        {t("legacy.chartToolbar.t4")}</Button>
       <AlertFromChart
         isOpen={alertDialogOpen}
         onClose={() => setAlertDialogOpen(false)}

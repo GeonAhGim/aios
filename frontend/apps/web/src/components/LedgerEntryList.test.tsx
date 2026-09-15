@@ -1,3 +1,4 @@
+import "../i18n";
 import "@testing-library/jest-dom/vitest";
 import type { ApiResponsePageMeta } from "@aios/api-client";
 import { cleanup, render, screen } from "@testing-library/react";

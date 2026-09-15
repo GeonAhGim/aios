@@ -2,6 +2,7 @@
 // 로직 변경 없음.
 import type { DrawingCollection } from "@aios/chart-engine/src/drawings/model";
 import { drawingLabel } from "./chartPageHelpers";
+import { useTranslation } from "react-i18next";
 
 export interface DrawingsListProps {
   readonly drawings: DrawingCollection;
@@ -9,17 +10,17 @@ export interface DrawingsListProps {
 }
 
 export function DrawingsList({ drawings, onRemove }: DrawingsListProps) {
+  const { t } = useTranslation();
   return (
-    <section aria-label="그리기 목록" className="space-y-1.5">
-      <h2 className="text-sm font-medium text-fg-secondary">그리기 ({drawings.length})</h2>
+    <section aria-label={t("legacy.drawingsList.ariaLabel1")} className="space-y-1.5">
+      <h2 className="text-sm font-medium text-fg-secondary">{t("legacy.drawingsList.t2", { length: drawings.length })}</h2>
       {drawings.length > 0 && (
         <ul className="space-y-1">
           {drawings.map((d) => (
             <li key={d.id} className="flex items-center justify-between gap-2 text-sm text-fg">
               <span>{drawingLabel(d)}</span>
               <button type="button" className="text-xs text-danger underline" onClick={() => onRemove(d.id)}>
-                삭제
-              </button>
+                {t("legacy.drawingsList.t3")}</button>
             </li>
           ))}
         </ul>

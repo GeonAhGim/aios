@@ -10,6 +10,7 @@ import { DataFreshness } from "../../components/DataFreshness";
 import { ErrorMessage } from "../../components/ErrorMessage";
 import { HoldStatusBadge, PayoutBatchStatusBadge } from "../../components/HoldStatusBadge";
 import { useCursorPage } from "../../hooks/useCursorPage";
+import { useTranslation } from "react-i18next";
 
 // spec §3.3 (C) HoldView/PayoutBatchView 목록 화면. task-658(holdPayoutView.ts:
 // parseHoldView/parsePayoutBatchView, HoldStatusBadge/PayoutBatchStatusBadge)을
@@ -47,6 +48,7 @@ function ParseFailureCard({ kind, received, message }: { kind: "unsupported_sche
 }
 
 function HoldCard({ raw }: { raw: unknown }) {
+  const { t } = useTranslation();
   const parsed = parseHoldView(raw);
   if (parsed.kind !== "ok") {
     return <ParseFailureCard kind={parsed.kind} received={parsed.kind === "unsupported_schema_version" ? parsed.received : undefined} message="홀드 정보를 해석할 수 없습니다." />;
@@ -60,7 +62,7 @@ function HoldCard({ raw }: { raw: unknown }) {
             {hold.purpose} · {hold.reference}
           </p>
           <p className="text-xs text-fg-muted">
-            {hold.account_code} · 만료 {hold.expires_at}
+            {t("legacy.payoutsPage.t1", { accountcode: hold.account_code, expiresat: hold.expires_at })}
           </p>
         </div>
         <HoldStatusBadge hold={parsed} />
@@ -71,6 +73,7 @@ function HoldCard({ raw }: { raw: unknown }) {
 }
 
 function PayoutBatchCard({ raw }: { raw: unknown }) {
+  const { t } = useTranslation();
   const parsed = parsePayoutBatchView(raw);
   if (parsed.kind !== "ok") {
     return <ParseFailureCard kind={parsed.kind} received={parsed.kind === "unsupported_schema_version" ? parsed.received : undefined} message="정산 배치 정보를 해석할 수 없습니다." />;
@@ -84,9 +87,8 @@ function PayoutBatchCard({ raw }: { raw: unknown }) {
             {batch.seller_user_id} · {batch.period_start} ~ {batch.period_end}
           </p>
           <p className="text-xs text-fg-muted">
-            캡처 {batch.capture_entry_ids.length}건
-            {batch.release_entry_id && <> · 해제 {batch.release_entry_id}</>}
-            {batch.paid_entry_id && <> · 지급 {batch.paid_entry_id}</>}
+            {t("legacy.payoutsPage.t2", { length: batch.capture_entry_ids.length })}{batch.release_entry_id && <> {t("legacy.payoutsPage.t3", { releaseentryid: batch.release_entry_id })}</>}
+            {batch.paid_entry_id && <> {t("legacy.payoutsPage.t4", { paidentryid: batch.paid_entry_id })}</>}
           </p>
         </div>
         <PayoutBatchStatusBadge payoutBatch={parsed} />
@@ -110,6 +112,7 @@ function CursorListSection({ title, testId, fetchPage, renderItem, emptyText, st
   // LedgerHistoryPage와 같은 관용: useCursorPage는 매 렌더마다 "가장 최근 응답의
   // page meta"를 그대로 받는 계약이라 직전 성공 응답의 meta를 cursor와 함께
   // state로 들고 있다가 넘긴다. effect가 아닌 렌더 중 상태 조정으로 갱신한다.
+  const { t } = useTranslation();
   const [committed, setCommitted] = useState<{ cursor: string | undefined; meta: ApiResponsePageMeta | null } | null>(
     null,
   );
@@ -154,11 +157,9 @@ function CursorListSection({ title, testId, fetchPage, renderItem, emptyText, st
       {!query.isError && (query.data || cursorPage.hasPrev) && (
         <div className="flex items-center justify-center gap-2">
           <Button type="button" variant="secondary" size="sm" disabled={!cursorPage.hasPrev} onClick={cursorPage.prev}>
-            이전
-          </Button>
+            {t("legacy.payoutsPage.t5")}</Button>
           <Button type="button" variant="secondary" size="sm" disabled={!cursorPage.hasNext} onClick={cursorPage.next}>
-            다음
-          </Button>
+            {t("legacy.payoutsPage.t6")}</Button>
         </div>
       )}
     </section>
@@ -178,11 +179,12 @@ export function PayoutsPage({
   staleAfterSec,
   now,
 }: PayoutsPageProps) {
+  const { t } = useTranslation();
   return (
     <AppShell>
       <div className="max-w-3xl space-y-8">
         <CursorListSection
-          title="보류(홀드)"
+          title={t("legacy.payoutsPage.title7")}
           testId="holds"
           fetchPage={fetchHolds}
           renderItem={(raw, index) => <HoldCard key={index} raw={raw} />}
@@ -191,7 +193,7 @@ export function PayoutsPage({
           now={now}
         />
         <CursorListSection
-          title="정산 배치"
+          title={t("legacy.payoutsPage.title8")}
           testId="payoutBatches"
           fetchPage={fetchPayoutBatches}
           renderItem={(raw, index) => <PayoutBatchCard key={index} raw={raw} />}

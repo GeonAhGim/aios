@@ -1,3 +1,4 @@
+import "../../i18n";
 import "@testing-library/jest-dom/vitest";
 import type { StreamCandle } from "@aios/chart-engine/src/data/candleStream";
 import { createDefaultOverlayRegistry } from "@aios/chart-engine/src/indicators/overlayRegistry";

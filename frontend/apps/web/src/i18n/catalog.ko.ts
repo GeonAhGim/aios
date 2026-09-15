@@ -1,3 +1,7 @@
+import { catalogKoLegacyA } from "./catalog.ko.legacyA";
+import { catalogKoLegacyB } from "./catalog.ko.legacyB";
+import { catalogKoLegacyC } from "./catalog.ko.legacyC";
+import { catalogKoLegacyD } from "./catalog.ko.legacyD";
 // UX-1 (task-2685): catalog.ko 골격. 실제 147개 파일의 문자열 추출·치환은 UX-1이
 // 의존하는 UX-2(task-2686)의 범위다 -- 여기서는 프레임워크가 실제로 동작함을
 // 증명할 최소 네임스페이스만 채운다. 새 화면 문구를 추가할 때는 이 카탈로그에
@@ -163,6 +167,12 @@ export const catalogKo = {
       targetSymbolDuplicate: "{{position}}번째 종목이 중복되었습니다.",
     },
   },
+  // task-2686 (UX-2): mechanically extracted from the 102 baseline .tsx files
+  // (scripts/i18n-literals-baseline.json) via an AST codemod -- one namespace per
+  // file (camelCase basename), keys are sequential (t1, t2.../title1, label1...).
+  // Rough draft: rename keys/reshape into feature namespaces during future manual
+  // review, the codemod's job was safe zero-literal extraction, not naming.
+  legacy: { ...catalogKoLegacyA, ...catalogKoLegacyB, ...catalogKoLegacyC, ...catalogKoLegacyD },
 } as const;
 
 export type CatalogKo = typeof catalogKo;

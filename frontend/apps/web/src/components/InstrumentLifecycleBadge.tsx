@@ -1,5 +1,6 @@
 import type { ParsedInstrumentView, SymbolAlias, SymbolStatus } from "@aios/shared-types";
 import { Alert, Badge } from "@aios/ui-web";
+import { useTranslation } from "react-i18next";
 
 // spec §4.2 심볼 생애주기 표시 전용 배지. CandleQualityBadge와 같은 순수 표시
 // 컴포넌트 패턴 — 서버가 계산한 status를 그대로 보여줄 뿐, 상태기계를
@@ -47,10 +48,11 @@ function needsReview(status: SymbolStatus, aliases: SymbolAlias[], now: string):
 }
 
 export function InstrumentLifecycleBadge({ instrument, aliases = [], now }: InstrumentLifecycleBadgeProps) {
+  const { t } = useTranslation();
   if (instrument.kind === "unsupported_schema_version") {
     return (
       <div data-testid="instrument-lifecycle-badge">
-        <Alert tone="danger">지원하지 않는 schema_version입니다 ({String(instrument.received)}).</Alert>
+        <Alert tone="danger">{t("legacy.instrumentLifecycleBadge.t1", { string: String(instrument.received) })}</Alert>
       </div>
     );
   }
@@ -58,7 +60,7 @@ export function InstrumentLifecycleBadge({ instrument, aliases = [], now }: Inst
   if (instrument.kind !== "ok") {
     return (
       <div data-testid="instrument-lifecycle-badge">
-        <Alert tone="danger">인스트루먼트 정보를 해석할 수 없습니다.</Alert>
+        <Alert tone="danger">{t("legacy.instrumentLifecycleBadge.t2")}</Alert>
       </div>
     );
   }
@@ -76,8 +78,7 @@ export function InstrumentLifecycleBadge({ instrument, aliases = [], now }: Inst
       </span>
       {flagged && (
         <Badge tone="warning" data-testid="needs-review-badge">
-          확인 필요
-        </Badge>
+          {t("legacy.instrumentLifecycleBadge.t3")}</Badge>
       )}
     </div>
   );

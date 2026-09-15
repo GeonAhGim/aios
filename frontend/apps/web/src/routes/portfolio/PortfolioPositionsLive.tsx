@@ -11,6 +11,7 @@ import {
 import { PortfolioPositionsSection } from "./PortfolioPositionsSection";
 import { PositionJournalPanel } from "./PositionJournalPanel";
 import { PositionsQueryError } from "./PositionsQueryError";
+import { useTranslation } from "react-i18next";
 
 // task-1524(LB-19): task-709가 "서버 라우트 대기"로 positions=[]로 두었던 자리를 실데이터로
 // 연결한다. GET /v1/positions(테넌트 전체)로 스냅샷을, 그 스냅샷들의 account_id로
@@ -66,6 +67,7 @@ export interface PortfolioPositionsLiveProps {
 }
 
 export function PortfolioPositionsLive({ client: injected, now }: PortfolioPositionsLiveProps) {
+  const { t } = useTranslation();
   const client = usePositionsClient(injected);
   // 첫 렌더 시각으로 고정(CandlesPage anchor 관용) — start/end가 매 렌더 흔들려 queryKey가
   // 바뀌는 일이 없게 한다.
@@ -106,7 +108,7 @@ export function PortfolioPositionsLive({ client: injected, now }: PortfolioPosit
   return (
     <div className="space-y-3">
       {accountIds.length > 1 && (
-        <Field label="NAV 계좌">
+        <Field label={t("legacy.portfolioPositionsLive.label1")}>
           <Select
             value={accountId ?? ""}
             onChange={(e) => setSelectedAccount(e.target.value)}

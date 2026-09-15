@@ -14,6 +14,7 @@ import { Link } from "react-router-dom";
 import { BadRequestNotice } from "../../components/BadRequestNotice";
 import { ErrorMessage } from "../../components/ErrorMessage";
 import { ForbiddenNotice } from "../../components/ForbiddenNotice";
+import { useTranslation } from "react-i18next";
 
 // CH-9 — AlertsPage(task-930/§3.3)와 동일한 에러 표시 조합을 그대로 재사용한다.
 // 알림 생성 실패 판정·표시 로직을 이 파일에서 다시 구현하지 않는다(routeApiError
@@ -75,6 +76,7 @@ export function AlertFromChart({
   currentClose,
   selectedIndicatorIds,
 }: AlertFromChartProps) {
+  const { t } = useTranslation();
   const createAlert = useCreateAlert();
   const dialogRef = useRef<HTMLDivElement>(null);
   const [direction, setDirection] = useState<PriceDirection>("above");
@@ -115,7 +117,7 @@ export function AlertFromChart({
       });
       setCreatedId(created.id);
     } catch (err) {
-      setError(err instanceof ApiError ? err : new Error("알림 생성에 실패했습니다."));
+      setError(err instanceof ApiError ? err : new Error(t("legacy.alertFromChart.t15")));
     }
   }
 
@@ -134,30 +136,27 @@ export function AlertFromChart({
         className="w-full max-w-md space-y-4 rounded-xl border border-border bg-surface p-6"
       >
         <h2 id={TITLE_ID} className="text-lg font-semibold text-fg">
-          차트에서 알림 만들기
-        </h2>
+          {t("legacy.alertFromChart.t1")}</h2>
         <p className="text-sm text-fg-secondary">
-          {instrumentId} · {timeframe} · 현재가 {currentClose ?? "—"}
+          {t("legacy.alertFromChart.t2", { instrumentId: instrumentId, timeframe: timeframe })}{currentClose ?? "—"}
         </p>
 
         {createdId !== null ? (
           <div className="space-y-3">
             <Alert tone="success">
-              <p>알림이 등록되었습니다 (#{createdId}).</p>
+              <p>{t("legacy.alertFromChart.t3", { createdId: createdId })}</p>
             </Alert>
             <div className="flex justify-end gap-2">
               <Link to="/alerts" className="text-sm text-accent underline" onClick={onClose}>
-                알림 목록에서 확인
-              </Link>
+                {t("legacy.alertFromChart.t4")}</Link>
               <Button type="button" variant="secondary" onClick={onClose}>
-                닫기
-              </Button>
+                {t("legacy.alertFromChart.t5")}</Button>
             </div>
           </div>
         ) : (
           <form onSubmit={handleSubmit} className="space-y-3">
             <fieldset className="space-y-2">
-              <legend className="text-sm font-medium text-fg-secondary">조건</legend>
+              <legend className="text-sm font-medium text-fg-secondary">{t("legacy.alertFromChart.t6")}</legend>
               <label htmlFor="alert-condition-price" className="flex items-center gap-2 text-sm text-fg">
                 <input
                   id="alert-condition-price"
@@ -167,8 +166,7 @@ export function AlertFromChart({
                   checked
                   onChange={() => {}}
                 />
-                가격 above/below
-              </label>
+                {t("legacy.alertFromChart.t7")}</label>
               <label
                 htmlFor="alert-condition-indicator"
                 className="flex items-center gap-2 text-sm text-fg-muted"
@@ -183,25 +181,24 @@ export function AlertFromChart({
                   onChange={() => {}}
                   aria-describedby={INDICATOR_REASON_ID}
                 />
-                지표 교차 (crosses above/below)
-              </label>
+                {t("legacy.alertFromChart.t8")}</label>
               <p id={INDICATOR_REASON_ID} className="text-xs text-fg-muted">
                 {indicatorDisabledReason}
               </p>
             </fieldset>
 
             <div className="grid grid-cols-2 gap-3">
-              <Field label="방향" htmlFor="alert-direction">
+              <Field label={t("legacy.alertFromChart.label9")} htmlFor="alert-direction">
                 <Select
                   id="alert-direction"
                   value={direction}
                   onChange={(e) => setDirection(e.target.value as PriceDirection)}
                 >
-                  <option value="above">above (초과 시)</option>
-                  <option value="below">below (미만 시)</option>
+                  <option value="above">{t("legacy.alertFromChart.t10")}</option>
+                  <option value="below">{t("legacy.alertFromChart.t11")}</option>
                 </Select>
               </Field>
-              <Field label="임계값" htmlFor="alert-threshold">
+              <Field label={t("legacy.alertFromChart.label12")} htmlFor="alert-threshold">
                 <Input
                   id="alert-threshold"
                   type="number"
@@ -216,11 +213,9 @@ export function AlertFromChart({
 
             <div className="flex justify-end gap-2">
               <Button type="button" variant="secondary" onClick={onClose}>
-                취소
-              </Button>
+                {t("legacy.alertFromChart.t13")}</Button>
               <Button type="submit" loading={createAlert.isPending}>
-                알림 등록
-              </Button>
+                {t("legacy.alertFromChart.t14")}</Button>
             </div>
           </form>
         )}

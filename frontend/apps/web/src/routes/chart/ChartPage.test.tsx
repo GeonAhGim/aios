@@ -1,3 +1,4 @@
+import "../../i18n";
 import "@testing-library/jest-dom/vitest";
 import { ApiError, type CandleQueryResult } from "@aios/api-client";
 import { createEmptyLayoutModel, encodeLayoutModel } from "@aios/chart-engine/src/layout/layoutModel";

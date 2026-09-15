@@ -28,6 +28,7 @@ import { NotFoundState } from "../../components/NotFoundState";
 import { DuplicateSubmitError, useIdempotentSubmit } from "../../hooks/useIdempotentSubmit";
 import { useConflictRetry } from "../../hooks/useConflictRetry";
 import { ExecutionCard } from "./components/ExecutionCard";
+import { useTranslation } from "react-i18next";
 
 // spec §3.3 에러 taxonomy: 실행 생성 실패는 err.message를 직접 노출하지 않고
 // routeApiError(task-483)로 판정해 400/403/그 외를 각각 BadRequestNotice/
@@ -55,10 +56,11 @@ function CreateExecutionError({ error, onRetry }: { error: unknown; onRetry: () 
 // (task-1056/ListingDetailPage와 동일 패턴). 그 외 에러는 classifyServerError로
 // 재시도 가능 여부를 판정해 ErrorMessage에 onRetry를 넘긴다.
 function ExecutionsListError({ error, onRetry }: { error: unknown; onRetry: () => void }) {
+  const { t } = useTranslation();
   if (isResourceNotFound(error)) {
     return (
       <NotFoundState
-        title="실행 목록을 찾을 수 없습니다"
+        title={t("legacy.executionControlPage.title1")}
         description="삭제되었거나 존재하지 않는 데이터입니다."
       />
     );
@@ -77,6 +79,7 @@ function ExecutionsListError({ error, onRetry }: { error: unknown; onRetry: () =
 }
 
 export function ExecutionControlPage() {
+  const { t } = useTranslation();
   const {
     data: executions,
     isLoading,
@@ -122,7 +125,7 @@ export function ExecutionControlPage() {
       setStrategyId("");
     } catch (err) {
       if (err instanceof DuplicateSubmitError) return;
-      setError(err instanceof ApiError ? err : new Error("실행 생성에 실패했습니다."));
+      setError(err instanceof ApiError ? err : new Error(t("legacy.executionControlPage.t15")));
     }
   }
 
@@ -134,22 +137,22 @@ export function ExecutionControlPage() {
   return (
     <AppShell>
       <div className="space-y-8">
-        <PageHeader title="실행 제어판" />
+        <PageHeader title={t("legacy.executionControlPage.title2")} />
 
         <Card>
-          <CardTitle>새 실행 설정</CardTitle>
+          <CardTitle>{t("legacy.executionControlPage.t3")}</CardTitle>
           <form onSubmit={handleSubmit} className="grid grid-cols-2 gap-4 md:grid-cols-5">
-            <Field label="전략 ID">
+            <Field label={t("legacy.executionControlPage.label4")}>
               <Input required value={strategyId} onChange={(e) => setStrategyId(e.target.value)} />
             </Field>
-            <Field label="버전">
+            <Field label={t("legacy.executionControlPage.label5")}>
               <Input
                 required
                 value={strategyVersion}
                 onChange={(e) => setStrategyVersion(e.target.value)}
               />
             </Field>
-            <Field label="배분 자본(USDT)">
+            <Field label={t("legacy.executionControlPage.label6")}>
               <Input
                 type="number"
                 required
@@ -157,21 +160,20 @@ export function ExecutionControlPage() {
                 onChange={(e) => setAllocatedCapital(e.target.value)}
               />
             </Field>
-            <Field label="거래소">
+            <Field label={t("legacy.executionControlPage.label7")}>
               <Select value={exchange} onChange={(e) => setExchange(e.target.value)}>
                 <option value="bitget">bitget</option>
               </Select>
             </Field>
-            <Field label="모드">
+            <Field label={t("legacy.executionControlPage.label8")}>
               <Select value={mode} onChange={(e) => setMode(e.target.value as "PAPER" | "LIVE")}>
-                <option value="PAPER">PAPER(모의)</option>
-                <option value="LIVE">LIVE(실거래)</option>
+                <option value="PAPER">{t("legacy.executionControlPage.t9")}</option>
+                <option value="LIVE">{t("legacy.executionControlPage.t10")}</option>
               </Select>
             </Field>
             <div className="col-span-2 flex items-end md:col-span-1">
               <Button type="submit" loading={createExecution.isPending} className="w-full">
-                실행 생성
-              </Button>
+                {t("legacy.executionControlPage.t11")}</Button>
             </div>
           </form>
           {error !== null && (
@@ -182,15 +184,13 @@ export function ExecutionControlPage() {
           {createExecution.data?.approvalRequestId && (
             <div className="mt-3">
               <Alert tone="warning">
-                LIVE 모드 승인 대기 중입니다(요청 #{createExecution.data.approvalRequestId}) —
-                강제 대기시간이 지난 뒤 관리자 승인이 필요합니다.
-              </Alert>
+                {t("legacy.executionControlPage.t12", { approvalRequestId: createExecution.data.approvalRequestId })}</Alert>
             </div>
           )}
         </Card>
 
         <section className="space-y-4">
-          <h2 className="text-lg font-medium text-fg">실행 목록</h2>
+          <h2 className="text-lg font-medium text-fg">{t("legacy.executionControlPage.t13")}</h2>
           {executionsIsError ? (
             <ExecutionsListError error={executionsError} onRetry={() => void refetch()} />
           ) : isLoading ? (
@@ -202,7 +202,7 @@ export function ExecutionControlPage() {
               ))}
             </div>
           ) : (
-            <EmptyState>실행 중인 전략이 없습니다.</EmptyState>
+            <EmptyState>{t("legacy.executionControlPage.t14")}</EmptyState>
           )}
         </section>
       </div>

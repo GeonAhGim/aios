@@ -12,8 +12,10 @@ import { useConflictRetry } from "../../hooks/useConflictRetry";
 import { useFieldErrors } from "../../hooks/useFieldErrors";
 import { CredentialListCard } from "./CredentialListCard";
 import { RegisterCredentialForm } from "./RegisterCredentialForm";
+import { useTranslation } from "react-i18next";
 
 export function ExchangeManagementPage() {
+  const { t } = useTranslation();
   const { data: credentials, isLoading, refetch } = useExchangeCredentials();
   const register = useRegisterExchangeCredential();
   const revoke = useRevokeExchangeCredential();
@@ -87,7 +89,7 @@ export function ExchangeManagementPage() {
     } catch (err) {
       setApiSecret("");
       setApiPassphrase("");
-      setError(err instanceof ApiError ? err : new Error("등록에 실패했습니다."));
+      setError(err instanceof ApiError ? err : new Error(t("legacy.exchangeManagementPage.t2")));
       setFromError(err);
     }
   }
@@ -120,7 +122,7 @@ export function ExchangeManagementPage() {
   return (
     <AppShell>
       <div className="space-y-8">
-        <PageHeader title="거래소 연동" />
+        <PageHeader title={t("legacy.exchangeManagementPage.title1")} />
 
         <CredentialListCard
           credentials={credentials}

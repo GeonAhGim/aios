@@ -12,6 +12,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useMemo, useState } from "react";
 import { AppShell } from "../../components/layout/AppShell";
 import { ErrorMessage } from "../../components/ErrorMessage";
+import { useTranslation } from "react-i18next";
 
 // spec L4_product_experience_and_discovery_v1.0.md UX-15 — FollowPage.tsx(팔로우
 // 관리·성과 비교). 선행 리프 UX-13/UX-14(src/foundation/follow/*)와 이를 감싸는
@@ -62,6 +63,7 @@ function FollowErrorBanner({ error, onRetry }: { error: unknown; onRetry?: () =>
 }
 
 function PerformancePanel({ client, subscriptionId }: { client: FollowClient; subscriptionId: number }) {
+  const { t } = useTranslation();
   const query = useQuery({
     queryKey: ["follow-performance", subscriptionId],
     queryFn: () => client.getPerformanceComparison(subscriptionId),
@@ -70,20 +72,19 @@ function PerformancePanel({ client, subscriptionId }: { client: FollowClient; su
   if (query.isLoading) return <LoadingState />;
   if (query.isError) return <FollowErrorBanner error={query.error} onRetry={() => query.refetch()} />;
   if (!query.data || query.data.points.length === 0) {
-    return <p className="text-sm text-fg-muted">아직 비교할 성과 데이터가 없습니다.</p>;
+    return <p className="text-sm text-fg-muted">{t("legacy.followPage.t1")}</p>;
   }
   return (
     <div className="space-y-2 text-sm">
       <p className="text-fg-muted">
-        추적 오차 <span className="tabular text-fg">{query.data.trackingDifferencePct}%</span>
+        {t("legacy.followPage.t2")}<span className="tabular text-fg">{query.data.trackingDifferencePct}%</span>
       </p>
       <ul className="divide-y divide-border">
         {query.data.points.map((point) => (
           <li key={point.asOf} className="flex items-center justify-between py-1">
             <span className="text-fg-muted">{new Date(point.asOf).toLocaleDateString()}</span>
             <span className="tabular">
-              원본 {point.sourceReturnPct}% · 팔로워 {point.followerReturnPct}%
-            </span>
+              {t("legacy.followPage.t3", { sourceReturnPct: point.sourceReturnPct, followerReturnPct: point.followerReturnPct })}</span>
           </li>
         ))}
       </ul>
@@ -106,18 +107,19 @@ function SubscriptionCard({
   cancelling: boolean;
   client: FollowClient;
 }) {
+  const { t } = useTranslation();
   const cancellable = subscription.status !== "CANCELLED";
   return (
     <Card data-testid={`follow-subscription-${subscription.id}`}>
       <div className="flex items-center justify-between gap-4">
         <div>
           <div className="flex items-center gap-2">
-            <CardTitle>리스팅 #{subscription.sourceListingId}</CardTitle>
+            <CardTitle>{t("legacy.followPage.t4", { sourceListingId: subscription.sourceListingId })}</CardTitle>
             <Badge tone={STATUS_TONE[subscription.status]}>{subscription.status}</Badge>
             <Badge tone="accent">PAPER</Badge>
           </div>
           <p className="text-sm text-fg-muted">
-            {SIZING_POLICY_LABEL[subscription.sizingPolicy]} · 최대 {subscription.maxNotional}
+            {t("legacy.followPage.t5", { val: SIZING_POLICY_LABEL[subscription.sizingPolicy], maxNotional: subscription.maxNotional })}
           </p>
         </div>
         <div className="flex items-center gap-2">
@@ -126,8 +128,7 @@ function SubscriptionCard({
           </Button>
           {cancellable && (
             <Button type="button" variant="danger" size="sm" disabled={cancelling} onClick={onCancel}>
-              해지
-            </Button>
+              {t("legacy.followPage.t6")}</Button>
           )}
         </div>
       </div>
@@ -141,6 +142,7 @@ function SubscriptionCard({
 }
 
 export function FollowPage({ followClient }: FollowPageProps) {
+  const { t } = useTranslation();
   const queryClient = useQueryClient();
   const client = useMemo(() => followClient ?? defaultFollowClient(), [followClient]);
   const [expandedId, setExpandedId] = useState<number | null>(null);
@@ -170,7 +172,7 @@ export function FollowPage({ followClient }: FollowPageProps) {
   return (
     <AppShell>
       <div className="max-w-3xl space-y-6">
-        <PageHeader title="팔로우 관리" />
+        <PageHeader title={t("legacy.followPage.title7")} />
         <div data-testid="follow-advisory-disclaimer">
           <Alert tone="warning">{NOT_INVESTMENT_ADVICE_DISCLAIMER_KO}</Alert>
         </div>
@@ -180,7 +182,7 @@ export function FollowPage({ followClient }: FollowPageProps) {
 
         {!query.isError && query.isLoading && <LoadingState />}
         {!query.isError && !query.isLoading && items.length === 0 && (
-          <EmptyState>팔로우 중인 전략이 없습니다.</EmptyState>
+          <EmptyState>{t("legacy.followPage.t8")}</EmptyState>
         )}
         {!query.isError && !query.isLoading && items.length > 0 && (
           <div className="space-y-4">

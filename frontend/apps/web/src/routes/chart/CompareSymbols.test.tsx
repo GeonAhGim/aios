@@ -1,3 +1,4 @@
+import "../../i18n";
 import "@testing-library/jest-dom/vitest";
 import { ApiError, type CandleQueryParams, type CandleQueryResult, type InstrumentListResult } from "@aios/api-client";
 import type { CandleRecord, SeriesKey } from "@aios/shared-types";

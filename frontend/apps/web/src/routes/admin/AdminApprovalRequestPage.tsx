@@ -11,6 +11,7 @@ import { useParams } from "react-router-dom";
 import { AppShell } from "../../components/layout/AppShell";
 import { ErrorMessage } from "../../components/ErrorMessage";
 import { ForbiddenNotice } from "../../components/ForbiddenNotice";
+import { useTranslation } from "react-i18next";
 
 // FD-10.1(LIVE 실행 승인) / FD-9.4b(Circuit Breaker 재가동 승인)이 동일
 // 구조를 공유한다. PLATFORM 범위(user_id 없음, 예: Circuit Breaker
@@ -36,6 +37,7 @@ function ApprovalActionError({ error }: { error: unknown }) {
 }
 
 export function AdminApprovalRequestPage() {
+  const { t } = useTranslation();
   const params = useParams<{ requestId?: string }>();
   const { data: pending, isLoading } = usePendingApprovalRequests();
   const [requestId, setRequestId] = useState(params.requestId ?? "");
@@ -52,14 +54,14 @@ export function AdminApprovalRequestPage() {
         : await reject.mutateAsync(Number(id));
       setResult({ status: r.status, requestedAction: r.requestedAction });
     } catch (err) {
-      setError(err instanceof ApiError ? err : new Error("처리에 실패했습니다."));
+      setError(err instanceof ApiError ? err : new Error(t("legacy.adminApprovalRequestPage.t9")));
     }
   }
 
   return (
     <AppShell>
       <div className="max-w-md space-y-6">
-        <PageHeader title="승인 요청 처리" />
+        <PageHeader title={t("legacy.adminApprovalRequestPage.title1")} />
         {error !== null && <ApprovalActionError error={error} />}
         {result && (
           <Alert tone="success">
@@ -89,8 +91,7 @@ export function AdminApprovalRequestPage() {
                     onClick={() => handle("approve", String(r.id))}
                     loading={approve.isPending}
                   >
-                    승인
-                  </Button>
+                    {t("legacy.adminApprovalRequestPage.t2")}</Button>
                   <Button
                     type="button"
                     variant="danger"
@@ -98,19 +99,18 @@ export function AdminApprovalRequestPage() {
                     onClick={() => handle("reject", String(r.id))}
                     loading={reject.isPending}
                   >
-                    거절
-                  </Button>
+                    {t("legacy.adminApprovalRequestPage.t3")}</Button>
                 </div>
               </li>
             ))}
           </ul>
         ) : (
-          <EmptyState>대기 중인 승인 요청이 없습니다.</EmptyState>
+          <EmptyState>{t("legacy.adminApprovalRequestPage.t4")}</EmptyState>
         )}
 
         <div className="space-y-3 rounded-lg border border-border-strong bg-bg p-4">
-          <p className="text-xs text-fg-muted">목록에 없는 요청 ID를 직접 처리</p>
-          <Field label="승인요청 ID">
+          <p className="text-xs text-fg-muted">{t("legacy.adminApprovalRequestPage.t5")}</p>
+          <Field label={t("legacy.adminApprovalRequestPage.label6")}>
             <Input type="number" value={requestId} onChange={(e) => setRequestId(e.target.value)} />
           </Field>
           <div className="flex gap-3">
@@ -122,8 +122,7 @@ export function AdminApprovalRequestPage() {
               disabled={!requestId}
               loading={approve.isPending}
             >
-              승인
-            </Button>
+              {t("legacy.adminApprovalRequestPage.t7")}</Button>
             <Button
               type="button"
               variant="secondary"
@@ -132,8 +131,7 @@ export function AdminApprovalRequestPage() {
               disabled={!requestId}
               loading={reject.isPending}
             >
-              거절
-            </Button>
+              {t("legacy.adminApprovalRequestPage.t8")}</Button>
           </div>
         </div>
       </div>

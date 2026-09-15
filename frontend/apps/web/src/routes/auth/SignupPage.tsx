@@ -9,6 +9,7 @@ import { ErrorMessage } from "../../components/ErrorMessage";
 import { ForbiddenNotice } from "../../components/ForbiddenNotice";
 import { useFieldErrors } from "../../hooks/useFieldErrors";
 import { AuthLayout } from "./AuthLayout";
+import { useTranslation } from "react-i18next";
 
 // spec §3.3 에러 taxonomy: 회원가입 실패는 err.message를 직접 노출하지 않고
 // routeApiError(task-483)로 판정해 400/403/그 외를 각각 BadRequestNotice/
@@ -37,6 +38,7 @@ function SignupError({ error, fieldErrors }: { error: unknown; fieldErrors: Reco
 }
 
 export function SignupPage() {
+  const { t } = useTranslation();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState<unknown>(null);
@@ -61,16 +63,16 @@ export function SignupPage() {
       await signup.mutateAsync({ email, password });
       navigate("/onboarding/mfa-setup");
     } catch (err) {
-      setError(err instanceof ApiError ? err : new Error("회원가입에 실패했습니다."));
+      setError(err instanceof ApiError ? err : new Error(t("legacy.signupPage.t8")));
       setFromError(err);
       setLockoutRemainingSec(deriveLockout(err).retryAfterSec);
     }
   }
 
   return (
-    <AuthLayout title="AIOS 회원가입" subtitle="자동매매를 시작하기 위한 첫 단계입니다">
+    <AuthLayout title={t("legacy.signupPage.title1")} subtitle="자동매매를 시작하기 위한 첫 단계입니다">
       <form onSubmit={handleSubmit} className="space-y-4">
-        <Field label="이메일" htmlFor="email" error={fieldErrors.email}>
+        <Field label={t("legacy.signupPage.label2")} htmlFor="email" error={fieldErrors.email}>
           <Input
             id="email"
             type="email"
@@ -84,7 +86,7 @@ export function SignupPage() {
             }}
           />
         </Field>
-        <Field label="비밀번호" htmlFor="password" hint="12자 이상" error={fieldErrors.password}>
+        <Field label={t("legacy.signupPage.label3")} htmlFor="password" hint="12자 이상" error={fieldErrors.password}>
           <Input
             id="password"
             type="password"
@@ -102,17 +104,14 @@ export function SignupPage() {
         {error !== null && <SignupError error={error} fieldErrors={fieldErrors} />}
         {locked && (
           <p role="status" className="text-sm text-fg-muted">
-            {lockoutRemainingSec}초 후 다시 시도할 수 있습니다.
-          </p>
+            {t("legacy.signupPage.t4", { lockoutRemainingSec: lockoutRemainingSec })}</p>
         )}
         <Button type="submit" loading={signup.isPending} disabled={locked} className="w-full">
-          가입하기
-        </Button>
+          {t("legacy.signupPage.t5")}</Button>
         <p className="text-center text-sm text-fg-muted">
-          이미 계정이 있으신가요?{" "}
+          {t("legacy.signupPage.t6", { val: " " })}
           <Link to="/login" className="text-accent-hover hover:underline">
-            로그인
-          </Link>
+            {t("legacy.signupPage.t7")}</Link>
         </p>
       </form>
     </AuthLayout>

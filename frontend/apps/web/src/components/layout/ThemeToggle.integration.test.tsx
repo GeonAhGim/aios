@@ -1,3 +1,4 @@
+import "../../i18n";
 // UX-3 (task-2687): apps/web is the only project in this workspace whose vitest
 // project runs jsdom (see vitest.config.ts header comment), so the real browser-path
 // singleton (packages/ui-web/src/theme.ts's module-scope `themeStore`, using real

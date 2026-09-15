@@ -1,6 +1,7 @@
 import type { CoverageSpanView } from "@aios/api-client";
 import { deriveFreshness } from "@aios/api-client";
 import { Badge } from "@aios/ui-web";
+import { useTranslation } from "react-i18next";
 
 // DC-18b — task-2195(DC-18a)의 GET .../market-data/coverage 응답(병합된
 // CoverageSpan 목록)을 화면에 "지연/미커버 구간"으로 표시하는 순수 표시 컴포넌트
@@ -77,12 +78,12 @@ function latestEndAt(spans: CoverageSpanView[]): string | null {
 }
 
 export function CoverageBadge({ spans, rangeStart, rangeEnd, now, staleAfterSec = 300 }: CoverageBadgeProps) {
+  const { t } = useTranslation();
   if (spans.length === 0) {
     return (
       <div className="flex flex-wrap items-center gap-2" data-testid="coverage-badge">
         <Badge tone="danger" data-testid="coverage-gap-badge">
-          미커버 구간
-        </Badge>
+          {t("legacy.coverageBadge.t1")}</Badge>
       </div>
     );
   }
@@ -95,17 +96,14 @@ export function CoverageBadge({ spans, rangeStart, rangeEnd, now, staleAfterSec 
     <div className="flex flex-wrap items-center gap-2" data-testid="coverage-badge">
       {gaps.length > 0 ? (
         <Badge tone="warning" data-testid="coverage-gap-badge">
-          미커버 {gaps.length}구간
-        </Badge>
+          {t("legacy.coverageBadge.t2", { length: gaps.length })}</Badge>
       ) : (
         <Badge tone="success" data-testid="coverage-gap-badge">
-          구간 전체 커버
-        </Badge>
+          {t("legacy.coverageBadge.t3")}</Badge>
       )}
       {isStale && (
         <Badge tone="warning" data-testid="coverage-stale-badge">
-          지연됨
-        </Badge>
+          {t("legacy.coverageBadge.t4")}</Badge>
       )}
     </div>
   );

@@ -1,5 +1,6 @@
 import type { CheckResult } from "@aios/api-client";
 import { Badge } from "@aios/ui-web";
+import { useTranslation } from "react-i18next";
 
 // spec §3.2 ReadinessReport.checks 표. loop:<name> 키는 서버가 루프별로 몇 개든
 // 추가할 수 있으므로("전방호환" — readiness.ts 주석 참고) 별도 화이트리스트 없이
@@ -27,6 +28,7 @@ function splitLoopChecks(checks: Record<string, CheckResult>): { loops: CheckRow
 }
 
 function CheckTable({ title, rows }: { title: string; rows: CheckRow[] }) {
+  const { t } = useTranslation();
   if (rows.length === 0) return null;
   return (
     <div>
@@ -34,8 +36,8 @@ function CheckTable({ title, rows }: { title: string; rows: CheckRow[] }) {
       <table className="w-full text-sm">
         <thead className="text-left text-fg-muted">
           <tr>
-            <th className="pb-2 font-normal">이름</th>
-            <th className="pb-2 font-normal">상태</th>
+            <th className="pb-2 font-normal">{t("legacy.readinessChecksTable.t1")}</th>
+            <th className="pb-2 font-normal">{t("legacy.readinessChecksTable.t2")}</th>
             <th className="pb-2 font-normal">detail</th>
             <th className="pb-2 font-normal">observed</th>
             <th className="pb-2 font-normal">threshold</th>
@@ -60,16 +62,17 @@ function CheckTable({ title, rows }: { title: string; rows: CheckRow[] }) {
 }
 
 export function ReadinessChecksTable({ checks }: ReadinessChecksTableProps) {
+  const { t } = useTranslation();
   const { loops, others } = splitLoopChecks(checks);
 
   if (loops.length === 0 && others.length === 0) {
-    return <p className="text-sm text-fg-muted">등록된 체크가 없습니다.</p>;
+    return <p className="text-sm text-fg-muted">{t("legacy.readinessChecksTable.t3")}</p>;
   }
 
   return (
     <div className="space-y-6" data-testid="readiness-checks-table">
-      <CheckTable title="체크" rows={others} />
-      <CheckTable title="루프" rows={loops} />
+      <CheckTable title={t("legacy.readinessChecksTable.title4")} rows={others} />
+      <CheckTable title={t("legacy.readinessChecksTable.title5")} rows={loops} />
     </div>
   );
 }

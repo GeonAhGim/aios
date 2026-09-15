@@ -17,12 +17,14 @@ import { ErrorMessage } from "../../components/ErrorMessage";
 import { AppShell } from "../../components/layout/AppShell";
 import { Pagination } from "../../components/Pagination";
 import { derivePageState } from "../../lib/pagination";
+import { useTranslation } from "react-i18next";
 
 type SortBy = "RECOMMENDED" | "SHARPE_RATIO";
 
 const DEFAULT_PAGE_SIZE = 20;
 
 export function MarketplaceBrowsePage() {
+  const { t } = useTranslation();
   const [searchParams, setSearchParams] = useSearchParams();
   const [sortBy, setSortBy] = useState<SortBy>("RECOMMENDED");
   const page = Math.max(1, Number(searchParams.get("page")) || 1);
@@ -88,16 +90,16 @@ export function MarketplaceBrowsePage() {
     <AppShell>
       <div className="space-y-6">
         <PageHeader
-          title="마켓플레이스"
+          title={t("legacy.marketplaceBrowsePage.title1")}
           action={
             <Link to="/marketplace/sell">
-              <Button type="button">내 전략 판매하기</Button>
+              <Button type="button">{t("legacy.marketplaceBrowsePage.t2")}</Button>
             </Link>
           }
         />
 
         <div className="flex items-center gap-2 text-sm">
-          <span className="text-fg-muted">정렬</span>
+          <span className="text-fg-muted">{t("legacy.marketplaceBrowsePage.t3")}</span>
           <Select
             value={sortBy}
             onChange={(e) => {
@@ -106,8 +108,8 @@ export function MarketplaceBrowsePage() {
             }}
             className="w-40"
           >
-            <option value="RECOMMENDED">추천순</option>
-            <option value="SHARPE_RATIO">샤프비율순(랭킹)</option>
+            <option value="RECOMMENDED">{t("legacy.marketplaceBrowsePage.t4")}</option>
+            <option value="SHARPE_RATIO">{t("legacy.marketplaceBrowsePage.t5")}</option>
           </Select>
         </div>
 
@@ -133,7 +135,7 @@ export function MarketplaceBrowsePage() {
                 <div className="flex items-center gap-2">
                   <p className="font-medium text-fg">{listing.strategyId}</p>
                   {listing.sellerType === "PLATFORM" && (
-                    <Badge tone="accent">플랫폼</Badge>
+                    <Badge tone="accent">{t("legacy.marketplaceBrowsePage.t6")}</Badge>
                   )}
                 </div>
                 <p className="text-sm text-fg-muted">
@@ -151,7 +153,7 @@ export function MarketplaceBrowsePage() {
             ))}
           </div>
         ) : (
-          <EmptyState>등록된 리스팅이 없습니다.</EmptyState>
+          <EmptyState>{t("legacy.marketplaceBrowsePage.t7")}</EmptyState>
         )}
 
         {data && <Pagination state={pageState} onPageChange={goToPage} />}
