@@ -19,6 +19,7 @@ export const MAIN_NAV_ITEMS: NavItem[] = [
   { to: "/executions", label: "실행제어판" },
   { to: "/portfolio", label: "포트폴리오" },
   { to: "/mandates", label: "위임장" },
+  { to: "/compliance", label: "컴플라이언스" },
   { to: "/reports", label: "보고서" },
   { to: "/wallet", label: "지갑" },
   { to: "/wallet/ledger", label: "지갑거래내역" },

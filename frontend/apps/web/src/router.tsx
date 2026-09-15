@@ -17,6 +17,7 @@ import { WalletTopupsPage } from "./routes/admin/WalletTopupsPage";
 import { AlertsPage } from "./routes/alerts/AlertsPage";
 import { SweepResultsPage } from "./routes/backtest/SweepResultsPage";
 import { ChartPage } from "./routes/chart/ChartPage";
+import { CompliancePage } from "./routes/compliance/CompliancePage";
 import { LoginPage } from "./routes/auth/LoginPage";
 import { SignupPage } from "./routes/auth/SignupPage";
 import { DashboardPage } from "./routes/dashboard/DashboardPage";
@@ -80,6 +81,7 @@ export const router = createBrowserRouter([
   { path: "/executions", element: protect(<ExecutionControlPage />) },
   { path: "/portfolio", element: protect(<PortfolioPage />) },
   { path: "/mandates", element: protect(<MandatesPage />) },
+  { path: "/compliance", element: protect(<CompliancePage />) },
   { path: "/reports", element: protect(<ReportsPage />) },
   { path: "/wallet", element: protect(<WalletPage />) },
   { path: "/wallet/ledger", element: protect(<LedgerHistoryPage />) },
