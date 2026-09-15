@@ -30,9 +30,10 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from decimal import Decimal
+from typing import Any
 
 import pytest
-from pydantic import BaseModel, ValidationError
+from pydantic import AwareDatetime, BaseModel, ValidationError
 
 from src.data.models.base import AssetClass
 from src.foundation.market_data.contracts.v2 import instruments as v2
@@ -56,8 +57,8 @@ def _now() -> datetime:
     return datetime(2026, 9, 3, 0, 0, tzinfo=timezone.utc)
 
 
-def _sample_instrument(**overrides: object) -> v2.Instrument:
-    base: dict[str, object] = dict(
+def _sample_instrument(**overrides: Any) -> v2.Instrument:
+    base: dict[str, Any] = dict(
         instrument_id=_ulid(0),
         asset_class=AssetClass.CRYPTO,
         base="BTC",
@@ -71,13 +72,13 @@ def _sample_instrument(**overrides: object) -> v2.Instrument:
         created_at=_now(),
     )
     base.update(overrides)
-    return v2.Instrument(**base)  # type: ignore[arg-type]
+    return v2.Instrument(**base)
 
 
 # ---- 1. 실패 주입(D2) — 형식은 그럴듯하나 표/타입에 없는 값이 전부
 # ValidationError 하나로 수렴함(fail-closed) ----
 
-_MALFORMED_OVERRIDES: tuple[tuple[str, dict[str, object]], ...] = (
+_MALFORMED_OVERRIDES: tuple[tuple[str, dict[str, Any]], ...] = (
     ("kind_unknown_string", {"kind": "SPACESHIP"}),
     ("kind_wrong_type_int", {"kind": 123}),
     ("kind_wrong_type_list", {"kind": ["OPTION"]}),
@@ -107,7 +108,7 @@ _MALFORMED_OVERRIDES: tuple[tuple[str, dict[str, object]], ...] = (
     [o for _, o in _MALFORMED_OVERRIDES],
     ids=[name for name, _ in _MALFORMED_OVERRIDES],
 )
-def test_derivative_field_rejects_malformed_value_fail_closed(overrides: dict[str, object]) -> None:
+def test_derivative_field_rejects_malformed_value_fail_closed(overrides: dict[str, Any]) -> None:
     """Literal/Enum/Decimal/AwareDatetime 타입힌트는 런타임을 강제하지
     않는다 — mypy를 우회하는 호출자(예: JSON 역직렬화)가 표에 없거나 타입이
     틀린 값을 주입해도, 조용히 통과하거나 다른 예외(TypeError/AttributeError
@@ -190,14 +191,14 @@ class _PreDc20Instrument(BaseModel):
     lot_size: Decimal
     calendar_id: str
     lifecycle_state: v2.InstrumentLifecycle
-    created_at: v2.AwareDatetime  # type: ignore[name-defined]
+    created_at: AwareDatetime
 
 
 def test_gate_red_pre_dc20_schema_silently_drops_derivative_fields() -> None:
     """적색: DC-20 이전 스키마로 옵션 데이터를 구성하면 예외 없이 통과하지만
     `kind`/`strike`/`option_right` 등은 조회 불가능한 채로 사라진다 — 호출자가
     저장 후 다시 읽으면 이 인스턴트가 옵션이었다는 사실 자체를 잃는다."""
-    option_kwargs: dict[str, object] = dict(
+    option_kwargs: dict[str, Any] = dict(
         instrument_id=_ulid(1),
         asset_class=AssetClass.CRYPTO,
         base="BTC",
@@ -216,7 +217,7 @@ def test_gate_red_pre_dc20_schema_silently_drops_derivative_fields() -> None:
         option_right=v2.OptionRight.CALL,
     )
 
-    pre_dc20 = _PreDc20Instrument(**option_kwargs)  # type: ignore[arg-type]
+    pre_dc20 = _PreDc20Instrument(**option_kwargs)
     for lost_field in ("kind", "underlying_id", "expiry", "strike", "option_right"):
         assert not hasattr(pre_dc20, lost_field), (
             f"pre-DC-20 모델이 {lost_field!r}을 보존했습니다 — 이 테스트는 "
@@ -225,7 +226,7 @@ def test_gate_red_pre_dc20_schema_silently_drops_derivative_fields() -> None:
     # 조용히 사라졌다 — 예외도, 경고도 없다(적색의 핵심: 실패가 보이지 않음).
     assert "kind" not in pre_dc20.model_dump()
 
-    green = v2.Instrument(**option_kwargs)  # type: ignore[arg-type]
+    green = v2.Instrument(**option_kwargs)
     assert green.kind == v2.InstrumentKind.OPTION
     assert green.underlying_id == _ulid(2)
     assert green.strike == Decimal("70000")
