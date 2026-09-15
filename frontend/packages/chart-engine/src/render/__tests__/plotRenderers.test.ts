@@ -496,7 +496,7 @@ describe("CH-15/2028 DEEPEN: color_rule=sign & fill_between direction consumptio
       const calls: string[] = [];
       const target: PlotRenderTarget = {
         drawLine: () => {},
-        drawHistogram: (bars, style) => {
+        drawHistogram: (_bars, style) => {
           calls.push(style.color);
           if (style.color === SIGN_STYLE.downColor) throw new Error("simulated canvas failure on down-bar draw");
         },
