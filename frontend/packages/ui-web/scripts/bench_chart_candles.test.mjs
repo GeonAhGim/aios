@@ -213,7 +213,7 @@ describe("main() CLI entrypoint", () => {
     }
   });
 
-  it("게이트 적색 재현: run for real (no injected deps) against this repo's actual state — every candidate is UNMEASURED today because puppeteer-core is not installed anywhere in the monorepo (by design: CH-1 vendoring hasn't happened for this bench script's own deps). If a CI gate ever required MEASURED here, it would be red right now, exactly as §4.1's documented graceful-degradation contract promises.", async () => {
+  it("게이트 적색 재현: run for real (no injected deps) against this repo's actual state — every candidate is UNMEASURED today because esbuild/puppeteer-core are not installed anywhere in the monorepo (by design: CH-1 vendoring hasn't happened for this bench script's own deps). If a CI gate ever required MEASURED here, it would be red right now, exactly as §4.1's documented graceful-degradation contract promises.", async () => {
     const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
     const prevArgv = process.argv;
     process.argv = ["node", "bench_chart_candles.mjs", "--lib=all", "--candles=5", "--steps=1"];
@@ -222,7 +222,10 @@ describe("main() CLI entrypoint", () => {
       expect(Object.keys(results).sort()).toEqual(Object.keys(ENTRIES).sort());
       for (const lib of Object.keys(ENTRIES)) {
         expect(results[lib].status).toBe("UNMEASURED");
-        expect(results[lib].reason).toMatch(/puppeteer-core not installed/);
+        // Which loader (esbuild vs puppeteer-core) is missing first depends on the
+        // monorepo's current dependency tree, not on this leaf's contract — assert
+        // the graceful-degradation shape, not a specific package name.
+        expect(results[lib].reason).toMatch(/not installed in cwd/);
       }
     } finally {
       process.argv = prevArgv;
