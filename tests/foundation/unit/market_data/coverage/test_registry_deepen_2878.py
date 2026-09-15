@@ -106,7 +106,7 @@ def test_coverage_span_rejects_invalid_ulid_instrument_id() -> None:
 def test_coverage_span_rejects_ulid_with_crockford_excluded_characters() -> None:
     """Crockford Base32는 I/L/O/U를 제외한다 — 26자 형식이어도 이 문자가
     섞이면 거부돼야 한다."""
-    garbage = "0IARZ3NDEKTSV4RRFFQ69G5FA"  # 'I'는 Crockford에서 제외된 문자
+    garbage = "0IARZ3NDEKTSV4RRFFQ69G5FA0"  # 26자, 'I'는 Crockford에서 제외된 문자
     with pytest.raises(ValidationError):
         _span(instrument_id=garbage, start_at=_dt(1), end_at=_dt(2))
 
@@ -311,3 +311,161 @@ def test_concurrent_merge_calls_across_independent_axes_do_not_cross_contaminate
             _span(venue=venue, start_at=_dt(20), end_at=_dt(22)),
         ]
         assert result == expected, f"{venue} 스레드가 다른 축의 병합 결과와 섞였다: {result}"
+
+
+# ---- 추가 DEEPEN: ULID 검증 경계 + 병합 경계 케이스 ----
+
+
+@pytest.mark.parametrize(
+    "bad_char",
+    ["I", "L", "O", "U"],
+    ids=["crockford-I", "crockford-L", "crockford-O", "crockford-U"],
+)
+def test_coverage_span_rejects_each_crockford_excluded_character(bad_char: str) -> None:
+    """Crockford Base32에서 제외된 문자(I/L/O/U)가 26자 형식의 어느 위치에
+    있든 거부돼야 한다 — 25자 garbage는 길이 검사만으로 거부되므로 Crockford
+    문자 검증이 제거되어도 통과하는 허수아비 테스트를 피한다."""
+    # 첫 글자(0-7)를 제외한 25자 슬롯 중 하나를 bad_char로 교체
+    base = "01ARZ3NDEKTSV4RRFFQ69G5FA"  # 25자 (첫 글자 '0' 제외)
+    garbage = "0" + base[:12] + bad_char + base[13:]
+    assert len(garbage) == 26, f"garbage 길이가 26이 아님: {len(garbage)}"
+    with pytest.raises(ValidationError):
+        _span(instrument_id=garbage, start_at=_dt(1), end_at=_dt(2))
+
+
+def test_coverage_span_normalizes_lowercase_ulid() -> None:
+    """ULID validator는 소문자 입력을 .upper()로 정규화한 뒤 패턴을 검사한다 —
+    소문자 26자 Crockford Base32는 유효한 ULID으로 수용된다(거부되지 않음)."""
+    span = _span(instrument_id="01arz3ndektsv4rrffq69g5fav", start_at=_dt(1), end_at=_dt(2))
+    assert span.instrument_id == "01ARZ3NDEKTSV4RRFFQ69G5FAV"
+
+
+def test_coverage_span_rejects_ulid_with_digit_8_or_9_as_first_char() -> None:
+    """ULID 첫 글자는 타임스탬프 오버플로 방지 위해 0-7로 제한된다 —
+    8 또는 9로 시작하는 26자는 거부돼야 한다."""
+    with pytest.raises(ValidationError):
+        _span(instrument_id="8ARZ3NDEKTSV4RRFFQ69G5FAV", start_at=_dt(1), end_at=_dt(2))
+    with pytest.raises(ValidationError):
+        _span(instrument_id="9ARZ3NDEKTSV4RRFFQ69G5FAV", start_at=_dt(1), end_at=_dt(2))
+
+
+def test_merge_spans_empty_input_returns_empty_list() -> None:
+    """빈 입력은 빈 리스트를 반환한다 — 예외가 아니라 정상 경로."""
+    assert merge_spans([]) == []
+
+
+def test_coverage_for_no_matching_spans_returns_empty_list() -> None:
+    """instrument·timeframe이 하나도 일치하지 않으면 빈 리스트를 반환한다
+    (커버리지 없음 — 호출자가 DATA_COVERAGE_MISSING으로 판정)."""
+    other_instrument = _instrument(instrument_id="01ARZ3NDEKTSV4RRFFQ69G5FB0")
+    spans = [_span(start_at=_dt(1), end_at=_dt(2))]
+    assert coverage_for(spans, other_instrument, Timeframe.D1) == []
+
+
+def test_coverage_for_filters_by_timeframe() -> None:
+    """같은 instrument라도 timeframe이 다르면 필터링되어 빈 결과를 반환한다."""
+    instrument = _instrument()
+    d1_span = _span(timeframe=Timeframe.D1, start_at=_dt(1), end_at=_dt(2))
+    h1_span = _span(timeframe=Timeframe.H1, start_at=_dt(1), end_at=_dt(2))
+    assert coverage_for([d1_span, h1_span], instrument, Timeframe.D1) == [d1_span]
+    assert coverage_for([d1_span, h1_span], instrument, Timeframe.H1) == [h1_span]
+
+
+def test_merge_spans_nested_overlap_resolves_to_single_span() -> None:
+    """완전히 포함(nested)되는 span — [1,10)이 [2,5)를 포함하면 결과는
+    [1,10) 하나다. 부분 겹침이 여러 단계에 걸쳐 연결되면 단일 span으로
+    수렴한다."""
+    spans = [
+        _span(start_at=_dt(1), end_at=_dt(10)),
+        _span(start_at=_dt(2), end_at=_dt(5)),  # [1,10)에 포함
+        _span(start_at=_dt(3), end_at=_dt(4)),  # [2,5)에 포함
+    ]
+    result = merge_spans(spans)
+    assert result == [_span(start_at=_dt(1), end_at=_dt(10))]
+
+
+def test_merge_spans_chain_overlap_produces_single_span() -> None:
+    """연쇄 겹침: [1,3) ∪ [2,5) ∪ [4,7) — 각 쌍이 겹치지만 첫·마지막은
+    직접 겹치지 않는다. 결과는 [1,7) 하나다."""
+    spans = [
+        _span(start_at=_dt(1), end_at=_dt(3)),
+        _span(start_at=_dt(2), end_at=_dt(5)),
+        _span(start_at=_dt(4), end_at=_dt(7)),
+    ]
+    result = merge_spans(spans)
+    assert result == [_span(start_at=_dt(1), end_at=_dt(7))]
+
+
+def test_merge_spans_identical_spans_collapse_to_one() -> None:
+    """완전히 동일한 span이 여러 개면 하나로 수렴한다."""
+    spans = [_span(start_at=_dt(1), end_at=_dt(5)) for _ in range(10)]
+    result = merge_spans(spans)
+    assert result == [_span(start_at=_dt(1), end_at=_dt(5))]
+
+
+def test_merge_spans_disjoint_spans_preserve_order() -> None:
+    """서로 불연속인 span은 start_at 오름차순으로 정렬되어 반환된다."""
+    spans = [
+        _span(start_at=_dt(10), end_at=_dt(12)),
+        _span(start_at=_dt(1), end_at=_dt(2)),
+        _span(start_at=_dt(5), end_at=_dt(6)),
+    ]
+    result = merge_spans(spans)
+    assert result == [
+        _span(start_at=_dt(1), end_at=_dt(2)),
+        _span(start_at=_dt(5), end_at=_dt(6)),
+        _span(start_at=_dt(10), end_at=_dt(12)),
+    ]
+
+
+def test_merge_spans_different_axes_do_not_merge_even_if_overlapping() -> None:
+    """같은 기간이라도 venue가 다르면 다른 축이므로 병합하지 않는다 —
+    서로 다른 소스의 독립적 선언이다."""
+    bitget = _span(venue=Venue.BITGET, start_at=_dt(1), end_at=_dt(5))
+    binance = _span(venue=Venue.BINANCE, start_at=_dt(1), end_at=_dt(5))
+    result = merge_spans([bitget, binance])
+    assert len(result) == 2
+    assert bitget in result
+    assert binance in result
+
+
+def test_merge_spans_different_quality_grades_do_not_merge() -> None:
+    """같은 venue라도 quality_grade가 다르면 다른 축이므로 병합하지 않는다."""
+    raw = _span(quality_grade=QualityGrade.RAW, start_at=_dt(1), end_at=_dt(5))
+    gold = _span(quality_grade=QualityGrade.GOLD, start_at=_dt(1), end_at=_dt(5))
+    result = merge_spans([raw, gold])
+    assert len(result) == 2
+    assert raw in result
+    assert gold in result
+
+
+def test_merge_spans_different_asset_classes_do_not_merge() -> None:
+    """asset_class가 다르면 다른 축이므로 병합하지 않는다."""
+    crypto = _span(asset_class=AssetClass.CRYPTO, start_at=_dt(1), end_at=_dt(5))
+    kr_equity = _span(asset_class=AssetClass.KR_EQUITY, start_at=_dt(1), end_at=_dt(5))
+    result = merge_spans([crypto, kr_equity])
+    assert len(result) == 2
+    assert crypto in result
+    assert kr_equity in result
+
+
+def test_merge_spans_different_instruments_do_not_merge() -> None:
+    """instrument_id가 다르면 다른 축이므로 병합하지 않는다."""
+    inst_a = _span(instrument_id="01ARZ3NDEKTSV4RRFFQ69G5FAV", start_at=_dt(1), end_at=_dt(5))
+    inst_b = _span(instrument_id="01ARZ3NDEKTSV4RRFFQ69G5FB0", start_at=_dt(1), end_at=_dt(5))
+    result = merge_spans([inst_a, inst_b])
+    assert len(result) == 2
+    assert inst_a in result
+    assert inst_b in result
+
+
+def test_coverage_for_merges_within_matching_axis_only() -> None:
+    """coverage_for는 instrument×tf로 필터링한 뒤 같은 축 안에서만 병합한다 —
+    다른 instrument의 span은 결과에 포함되지 않는다."""
+    instrument = _instrument()
+    other = _instrument(instrument_id="01ARZ3NDEKTSV4RRFFQ69G5FB0")
+    my_span_a = _span(start_at=_dt(1), end_at=_dt(3))
+    my_span_b = _span(start_at=_dt(3), end_at=_dt(5))  # 인접 -> 병합
+    other_span = _span(instrument_id=other.instrument_id, start_at=_dt(1), end_at=_dt(10))
+    result = coverage_for([my_span_a, my_span_b, other_span], instrument, Timeframe.D1)
+    assert result == [_span(start_at=_dt(1), end_at=_dt(5))]
