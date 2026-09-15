@@ -15,12 +15,18 @@ import {
 
 export type PushStatus = "unsupported" | "idle" | "denied" | "subscribed" | "error";
 
+const SERVICE_WORKER_URL = "/sw.js";
+
 // UX-17 DoD(구독·해지·수신) 중 구독/해지 흐름 — push.ts(순수 브라우저 API 래핑)를
 // device_tokens 등록/해지 API(useAccountSettings.ts의 useNotification* 자매 함수)에
-// 이어붙인다. "수신"은 public/push-sw.js의 push 이벤트 리스너(서비스워커 스코프,
-// React 밖)가 담당한다. push.ts가 spec 아키텍처 표(apps/web/src/pwa/*)에 묶여 있어
-// packages/shared-hooks가 아닌 여기(apps/web)에 둔다 — shared-hooks는 apps/web을
-// 참조하지 않는 방향으로만 의존해야 한다.
+// 이어붙인다. "수신"은 public/sw.js의 push 이벤트 리스너(서비스워커 스코프, React 밖)가
+// 담당한다. UX-16(task-2700)이 이미 "/sw.js"를 스코프 "/"에 등록해 오프라인 셸을
+// 서빙 중이므로, 여기서도 같은 스크립트를 등록한다 — 같은 스코프에 다른 스크립트를
+// 등록하면 나중 등록이 이전 것을 교체해(register()는 스코프당 활성 워커 1개) 오프라인
+// 셸의 fetch 핸들러가 사라진다. register()는 동일 스크립트+스코프에 대해 멱등이라
+// 여기서 다시 불러도 중복 설치가 일어나지 않는다. push.ts가 spec 아키텍처 표
+// (apps/web/src/pwa/*)에 묶여 있어 packages/shared-hooks가 아닌 여기(apps/web)에
+// 둔다 — shared-hooks는 apps/web을 참조하지 않는 방향으로만 의존해야 한다.
 export function usePushNotifications() {
   const [status, setStatus] = useState<PushStatus>(() => (isPushSupported() ? "idle" : "unsupported"));
   const [error, setError] = useState<Error | null>(null);
@@ -47,7 +53,7 @@ export function usePushNotifications() {
         const platform = detectPlatform(navigator.userAgent);
         if (!platform) throw new PushPlatformUnsupportedError();
 
-        const registration = await navigator.serviceWorker.register("/push-sw.js");
+        const registration = await navigator.serviceWorker.register(SERVICE_WORKER_URL);
         const subscription = await subscribeForPush(registration, vapidPublicKey);
         const record = await register.mutateAsync(toDeviceTokenRequest(subscription, platform));
 
@@ -69,7 +75,7 @@ export function usePushNotifications() {
     try {
       await deactivate.mutateAsync(deviceId);
       try {
-        const registration = await navigator.serviceWorker.getRegistration("/push-sw.js");
+        const registration = await navigator.serviceWorker.getRegistration(SERVICE_WORKER_URL);
         if (registration) await unsubscribeFromPush(registration);
       } catch {
         // 브라우저 측 구독 해제 실패는 device_tokens 해지(위에서 이미 성공)를

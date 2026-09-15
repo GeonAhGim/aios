@@ -74,6 +74,10 @@ describe("usePushNotifications.enable", () => {
     expect(registerDeviceToken).toHaveBeenCalledWith(
       expect.objectContaining({ platform: "iOS" }),
     );
+    // UX-16(task-2700)이 등록한 "/sw.js"와 같은 스크립트를 재사용해야 한다 —
+    // 별도 스크립트(예: push-sw.js)를 같은 스코프("/")에 등록하면 그게 나중 활성
+    // 워커가 되어 UX-16 오프라인 셸의 fetch 핸들러를 밀어낸다.
+    expect(navigator.serviceWorker.register).toHaveBeenCalledWith("/sw.js");
   });
 
   // negative: 권한이 거부되면 device_tokens 등록을 아예 시도하지 않는다(불필요한

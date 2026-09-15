@@ -40,3 +40,41 @@ self.addEventListener("fetch", (event) => {
 
   event.respondWith(caches.match(request).then((cached) => cached || fetch(request)));
 });
+
+// UX-17: 푸시 수신. navigator.serviceWorker.register("/sw.js")는 스코프("/")가
+// 겹치면 마지막 등록만 활성 워커로 남으므로(둘 이상의 스크립트를 같은 스코프에
+// 등록하면 나중 것이 이전 것을 교체한다), 오프라인 셸(위 install/activate/fetch)과
+// 푸시 리스너를 별도 스크립트가 아니라 이 파일 하나에 함께 둔다 — 별도 push-sw.js를
+// 두면 그것이 활성화되는 순간 앱 셸 캐싱(fetch 핸들러)이 사라져 UX-16 오프라인
+// 진입이 깨진다.
+self.addEventListener("push", (event) => {
+  let payload = { title: "AIOS", body: "" };
+  if (event.data) {
+    try {
+      payload = event.data.json();
+    } catch {
+      payload = { title: "AIOS", body: event.data.text() };
+    }
+  }
+
+  event.waitUntil(
+    self.registration.showNotification(payload.title ?? "AIOS", {
+      body: payload.body ?? "",
+      icon: "/icons.svg",
+      data: { url: payload.url ?? "/" },
+    }),
+  );
+});
+
+self.addEventListener("notificationclick", (event) => {
+  event.notification.close();
+  const targetUrl = event.notification.data?.url ?? "/";
+  event.waitUntil(
+    self.clients.matchAll({ type: "window", includeUncontrolled: true }).then((clientList) => {
+      for (const client of clientList) {
+        if (client.url === targetUrl && "focus" in client) return client.focus();
+      }
+      if (self.clients.openWindow) return self.clients.openWindow(targetUrl);
+    }),
+  );
+});
