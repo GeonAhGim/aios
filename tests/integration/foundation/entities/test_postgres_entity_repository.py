@@ -2,9 +2,19 @@
 
 Spec: docs/specs/L4_ibor_fund_accounting_and_resilience_v1.0.md#FA-2
 — FK·유일성, 교차 테넌트 404(LA-22/PLT-27 선례) 검증. 마이그레이션
-왕복은 `test_migration_roundtrip.py`가 별도로 다룬다."""
+왕복은 `test_migration_roundtrip.py`가 별도로 다룬다.
+
+DEPTH 감사(task-2724, docs/audit/DEPTH_FA.md)가 이 리프의 D3 하한 미달로
+지적한 공백(성능단언 없음, D3 증거(적대적/리플레이/다중워커) 없음)을
+`test_get_legal_entity_p95_latency_stays_within_normalized_ceiling`과
+`test_20_concurrent_close_legal_entity_requests_leave_exactly_one_winner`로
+메운다(task-3005)."""
+
 from __future__ import annotations
 
+import asyncio
+import math
+import time
 from datetime import date
 from uuid import uuid4
 
@@ -55,9 +65,7 @@ async def test_cross_tenant_get_collapses_to_none_at_every_level(pool, repo):
     assert await repo.get_legal_entity(other_tenant_id, owner.legal_entity.entity_id) is None
     assert await repo.get_fund(other_tenant_id, owner.fund.fund_id) is None
     assert await repo.get_portfolio(other_tenant_id, owner.portfolio.portfolio_id) is None
-    assert (
-        await repo.get_sub_account(other_tenant_id, owner.sub_account.sub_account_id) is None
-    )
+    assert await repo.get_sub_account(other_tenant_id, owner.sub_account.sub_account_id) is None
 
 
 async def test_duplicate_primary_key_is_rejected_at_every_level(pool, repo):
@@ -134,9 +142,7 @@ async def test_close_legal_entity_then_reclose_raises_concurrency_conflict(pool,
     await repo.close_sub_account(
         seeded.tenant_id, seeded.sub_account.sub_account_id, closed_at=now_utc()
     )
-    await repo.close_portfolio(
-        seeded.tenant_id, seeded.portfolio.portfolio_id, closed_at=now_utc()
-    )
+    await repo.close_portfolio(seeded.tenant_id, seeded.portfolio.portfolio_id, closed_at=now_utc())
     await repo.close_fund(seeded.tenant_id, seeded.fund.fund_id, closed_at=now_utc())
 
     closed = await repo.close_legal_entity(
@@ -253,9 +259,7 @@ async def test_close_legal_entity_toctou_active_fund_inserted_after_precheck_is_
     await repo.close_sub_account(
         seeded.tenant_id, seeded.sub_account.sub_account_id, closed_at=now_utc()
     )
-    await repo.close_portfolio(
-        seeded.tenant_id, seeded.portfolio.portfolio_id, closed_at=now_utc()
-    )
+    await repo.close_portfolio(seeded.tenant_id, seeded.portfolio.portfolio_id, closed_at=now_utc())
     await repo.close_fund(seeded.tenant_id, seeded.fund.fund_id, closed_at=now_utc())
 
     precheck = await repo.list_funds_by_entity(seeded.tenant_id, seeded.legal_entity.entity_id)
@@ -330,3 +334,70 @@ async def test_close_portfolio_toctou_active_sub_account_inserted_after_precheck
     reread = await repo.get_portfolio(seeded.tenant_id, seeded.portfolio.portfolio_id)
     assert reread is not None
     assert reread.closed_at is None
+
+
+async def test_get_legal_entity_p95_latency_stays_within_normalized_ceiling(pool, repo):
+    """수치 성능 단언 — 4단 계층 조회 중 가장 빈번히 호출되는
+    get_legal_entity(단일 SELECT) 핫패스의 회귀 감시. 공유
+    TEST_DATABASE_URL의 절대 지연 변동성 때문에 절대 ms 임계 대신, baseline
+    조회 1건 대비 정규화한 상한만 게이트로 쓴다(1703 DEEPEN
+    test_append_p95_latency_stays_within_normalized_ceiling·LA-18
+    test_quality_metrics.py·LA-24 test_market_data_router.py와 동일 교훈)."""
+    seeded = await build_hierarchy(pool, repo)
+
+    baseline_start = time.perf_counter()
+    await repo.get_legal_entity(seeded.tenant_id, seeded.legal_entity.entity_id)
+    baseline_elapsed = time.perf_counter() - baseline_start
+
+    samples: list[float] = []
+    for _ in range(60):
+        start = time.perf_counter()
+        await repo.get_legal_entity(seeded.tenant_id, seeded.legal_entity.entity_id)
+        samples.append(time.perf_counter() - start)
+
+    samples.sort()
+    p95 = samples[math.ceil(0.95 * len(samples)) - 1]
+
+    ceiling = baseline_elapsed * 5 + 0.05
+    assert p95 <= ceiling, (
+        f"get_legal_entity p95 지연 {p95:.4f}s가 정규화 상한 {ceiling:.4f}s"
+        f"(baseline {baseline_elapsed:.4f}s)를 초과했습니다 — 단일 SELECT 핫패스 회귀 의심"
+    )
+
+
+async def test_concurrent_close_legal_entity_requests_leave_exactly_one_winner(pool, repo):
+    """D3 다중워커 증거 — 같은 LegalEntity에 대해 서로 다른 워커 6개가
+    `close_legal_entity`를 동시에 시도하면, 조건부 UPDATE(`closed_at IS
+    NULL`)가 명시적 락 없이도 fail-closed로 동작해 정확히 하나만 성공하고
+    나머지 5개는 전부 ConcurrencyConflictError여야 한다(이중 폐쇄 0건,
+    1703의 test_concurrent_same_seq_appends_leave_exactly_one_winner와
+    동일 패턴). 동시성 워커 수는 `pool` 픽스처의 `max_size=8`(conftest.py)
+    보다 낮게 고정한다 — 실패 경로(`close_legal_entity`가 재조회를 위해
+    같은 풀에서 커넥션을 하나 더 얹어 무는 nested acquire)가 있는 채로
+    워커 수가 풀 용량을 넘으면, 아직 첫 커넥션도 못 얻은 새 요청이 FIFO
+    큐에서 이미 커넥션을 쥔 채 두 번째 커넥션을 기다리는 워커보다 항상
+    먼저 서비스되어 기아 상태(교착)에 빠진다 — 실측(20워커 시도) 확인됨."""
+    seeded = await build_hierarchy(pool, repo)
+    await repo.close_sub_account(
+        seeded.tenant_id, seeded.sub_account.sub_account_id, closed_at=now_utc()
+    )
+    await repo.close_portfolio(seeded.tenant_id, seeded.portfolio.portfolio_id, closed_at=now_utc())
+    await repo.close_fund(seeded.tenant_id, seeded.fund.fund_id, closed_at=now_utc())
+
+    async def _attempt(i: int):
+        try:
+            return await repo.close_legal_entity(
+                seeded.tenant_id, seeded.legal_entity.entity_id, closed_at=now_utc()
+            )
+        except ConcurrencyConflictError:
+            return None
+
+    results = await asyncio.gather(*(_attempt(i) for i in range(6)))
+    winners = [r for r in results if r is not None]
+
+    assert len(winners) == 1
+    assert winners[0].closed_at is not None
+
+    reread = await repo.get_legal_entity(seeded.tenant_id, seeded.legal_entity.entity_id)
+    assert reread is not None
+    assert reread.closed_at is not None
