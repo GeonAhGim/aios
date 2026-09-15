@@ -3,7 +3,11 @@ name = "mihwa-aios"
 version = "0.1.0"
 requires-python = ">=3.10"
 dependencies = [
-    "fastapi>=0.115",
+    # task-3532: >=0.116 라운드에서 204 응답에 response_model 추론 결과가
+    # 남아 있으면 "Status code 204 must not have a response body"로 라우터
+    # import가 죽는 경로가 있었다(charting.py 204 DELETE, response_model=None
+    # 명시로 회피) -- 0.141.1까지 실제 검증됐으니 그 범위로 고정한다.
+    "fastapi>=0.116,<0.142",
     "uvicorn[standard]>=0.32",
     "pydantic>=2.9",
     "sqlalchemy[asyncio]>=2.0",
