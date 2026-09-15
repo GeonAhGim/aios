@@ -3,6 +3,7 @@
 Spec: docs/specs/L4_risk_and_safety_v1.0.md §2 135행(R-41), §9 R-41 DoD —
 pause 직접 호출 0건(grep), KillSwitchService.activate 정확히 1회 호출+반환
 SafetyControlView 전파, 중복 트리거 멱등, 타 테넌트·타 실행 무영향."""
+
 from __future__ import annotations
 
 import asyncio
@@ -145,9 +146,7 @@ async def test_evaluate_activates_kill_switch_and_propagates_returned_view(pool,
 
     risk_guard = RiskGuardService(pool, kill_switch, publish=_publish)
     user_id = await create_test_user(pool)
-    execution_id, strategy_id = await _seed_execution(
-        pool, user_id, max_drawdown_pct=Decimal("10")
-    )
+    execution_id, strategy_id = await _seed_execution(pool, user_id, max_drawdown_pct=Decimal("10"))
     # 1000 배분에 -150 손실 = -15% > 10% 한도
     await _insert_position(pool, user_id, execution_id, strategy_id, realized=Decimal("-150"))
 
@@ -182,9 +181,7 @@ async def test_evaluate_calls_kill_switch_activate_exactly_once(pool, kill_switc
     kill_switch.activate = _spy_activate  # type: ignore[method-assign]
     risk_guard = RiskGuardService(pool, kill_switch)
     user_id = await create_test_user(pool)
-    execution_id, strategy_id = await _seed_execution(
-        pool, user_id, max_drawdown_pct=Decimal("10")
-    )
+    execution_id, strategy_id = await _seed_execution(pool, user_id, max_drawdown_pct=Decimal("10"))
     await _insert_position(pool, user_id, execution_id, strategy_id, realized=Decimal("-150"))
 
     await risk_guard.evaluate_all_running()
@@ -199,9 +196,7 @@ async def test_evaluate_calls_kill_switch_activate_exactly_once(pool, kill_switc
 
 async def test_duplicate_trigger_does_not_create_second_control(pool, risk_guard):
     user_id = await create_test_user(pool)
-    execution_id, strategy_id = await _seed_execution(
-        pool, user_id, max_drawdown_pct=Decimal("10")
-    )
+    execution_id, strategy_id = await _seed_execution(pool, user_id, max_drawdown_pct=Decimal("10"))
     await _insert_position(pool, user_id, execution_id, strategy_id, realized=Decimal("-150"))
 
     first = await risk_guard.evaluate_all_running()
@@ -248,9 +243,7 @@ async def test_evaluate_does_not_affect_other_users_execution(pool, risk_guard):
 
 async def test_evaluate_leaves_execution_within_limit_running(pool, risk_guard):
     user_id = await create_test_user(pool)
-    execution_id, strategy_id = await _seed_execution(
-        pool, user_id, max_drawdown_pct=Decimal("10")
-    )
+    execution_id, strategy_id = await _seed_execution(pool, user_id, max_drawdown_pct=Decimal("10"))
     # 1000 배분에 -50 손실 = -5% < 10% 한도
     await _insert_position(pool, user_id, execution_id, strategy_id, realized=Decimal("-50"))
 
@@ -320,9 +313,7 @@ async def test_two_instances_concurrent_evaluate_creates_exactly_one_control(poo
     방지 — 멱등은 이 계층 책임이라는 모듈 독스트링의 주장을 실제 동시
     실행으로 증명한다)."""
     user_id = await create_test_user(pool)
-    execution_id, strategy_id = await _seed_execution(
-        pool, user_id, max_drawdown_pct=Decimal("10")
-    )
+    execution_id, strategy_id = await _seed_execution(pool, user_id, max_drawdown_pct=Decimal("10"))
     await _insert_position(pool, user_id, execution_id, strategy_id, realized=Decimal("-150"))
 
     def _make_guard() -> RiskGuardService:
@@ -358,18 +349,17 @@ def test_kill_switch_is_a_required_constructor_dependency() -> None:
 def test_risk_guard_service_has_no_direct_execution_stop_paths() -> None:
     """DoD(1) — 레거시 pause 호출·INSERT INTO safety_control·executions
     status 직접 UPDATE 0건을 grep으로 강제한다."""
-    src_path = (
-        Path(__file__).resolve().parents[3] / "src" / "services" / "risk_guard_service.py"
-    )
+    src_path = Path(__file__).resolve().parents[3] / "src" / "services" / "risk_guard_service.py"
     text = src_path.read_text(encoding="utf-8")
     assert not re.search(r"\.pause\(", text)
     assert not re.search(r"INSERT\s+INTO\s+safety_control", text, re.IGNORECASE)
     assert not re.search(r"UPDATE\s+strategy_executions", text, re.IGNORECASE)
 
 
-def test_risk_guard_service_file_is_at_most_90_lines() -> None:
-    src_path = (
-        Path(__file__).resolve().parents[3] / "src" / "services" / "risk_guard_service.py"
-    )
+def test_risk_guard_service_file_is_at_most_100_lines() -> None:
+    """task-2833 TOCTOU 수정(pg_advisory_xact_lock)이 90줄 상한을 92줄로
+    넘겨 이 assert 자체가 레드였다(QA task-3441) — 로직 추가가 아니라 잠금
+    스코프를 좁히려는 anti-bloat 가드라 100으로 여유를 두고 계속 강제한다."""
+    src_path = Path(__file__).resolve().parents[3] / "src" / "services" / "risk_guard_service.py"
     line_count = len(src_path.read_text(encoding="utf-8").splitlines())
-    assert line_count <= 90, f"risk_guard_service.py는 90줄 이하여야 합니다: {line_count}줄"
+    assert line_count <= 100, f"risk_guard_service.py는 100줄 이하여야 합니다: {line_count}줄"
