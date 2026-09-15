@@ -267,13 +267,13 @@ async def start_background_loops(
             )
         )
 
-    # CM-11(task-2509) -- a DENY leads to KillSwitchService(TENANT), which causes the next order
-    # to be rejected by foundation_gate's ACTIVE check. Removing this breaks test_post_trade_batch.
+    # CM-11/12 -- a DENY blocks(KillSwitchService) + notifies. See test_post_trade_batch.py.
     async def _post_trade_batch_tick() -> None:
         now = datetime.now(timezone.utc)
         business_date = (now - timedelta(days=1)).date()
         await run_daily_post_trade_batch(
             pool, kill_switch_service, risk_gate_repo, business_date=business_date, now=now,
+            publish=event_bus.publish,
         )
 
     post_trade_batch_task: asyncio.Task[None] | None = None

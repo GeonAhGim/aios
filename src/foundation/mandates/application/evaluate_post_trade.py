@@ -1,30 +1,24 @@
-"""L4_compliance_and_regulatory_v1.0.md#9 CM-11 -- post-trade/EOD batch determination for fills.
+"""L4_compliance_and_regulatory_v1.0.md#9 CM-11/CM-12 -- post-trade/EOD determination, block
+notification, and (via the existing `KillSwitchService.deactivate()`) the release audit trail.
 
-CM-9 (`domain/rules/{short_sale,wash_trade}.py`) and CM-10 (`domain/market_abuse.py`) rules are
-only called, never reimplemented -- if a crossing-price/wash-window/spoofing-ratio formula
-reappears here, that is a defect. A DENY leads to `KillSwitchService.activate()` (TENANT scope);
-because of R-40/I3 (one safety_control insert call site, `postgres_repository.py`) this file
-never writes to that table directly -- the tenant's next order is rejected by the already-wired
-ACTIVE control check in `foundation_gate.py`.
+CM-9/CM-10 rule modules are only called here, never reimplemented. A DENY leads to
+`KillSwitchService.activate()` (TENANT scope) -- this file never inserts into `safety_control`
+directly (R-40/I3); the tenant's next order is rejected by `foundation_gate.py`'s ACTIVE check.
+Release is the existing, unchanged `deactivate()` (R-40 evidence_ref + audit).
 
-Reduced scope (unverified, follow-up leaf): `position_qty` is the current-quantity snapshot from
-`positions` (not a per-fill running balance); `borrow_available_qty` is always 0 (LA-25
-`pos_borrow_position` has no lookup adapter yet); `market_close_at` is UTC midnight, not the
-actual exchange close.
+Reduced scope (unverified): `position_qty` is a snapshot, not a per-fill running balance;
+`borrow_available_qty` is always 0 (no lookup adapter yet); `market_close_at` is UTC midnight.
 
-Idempotency (DoD (c)): instead of `safety_control.idempotency_digest` (changing
-`insert_safety_control()`'s signature is outside this file's scope), this file checks for an
-existing ACTIVE control for the same reason (tenant+rule_code+business_date) before activating.
-That check-then-activate is a read-then-write race under concurrent batch instances; DEEPEN
-task-2865 closes it the way `risk_guard_service.py` closes its scope_ref race -- a
-`pg_advisory_xact_lock` on `(tenant_id, reason)` held for the whole check+activate
-(`_activate_if_not_active`).
+Idempotency (DoD (c)/CM-12): an existing ACTIVE control for the same reason
+(tenant+rule_code+business_date) short-circuits activation, guarded by a `pg_advisory_xact_lock`
+on `(tenant_id, reason)` (`_activate_if_not_active`, DEEPEN task-2865) -- CM-12's notification
+reuses that same newly-activated signal, so a rerun does not re-notify.
 """
 
 from __future__ import annotations
 
 import logging
-from collections.abc import Mapping, Sequence
+from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import date, datetime, time, timedelta, timezone
 from decimal import Decimal
@@ -33,6 +27,7 @@ from uuid import UUID, uuid4
 
 import asyncpg
 
+from src.foundation.mandates.application.notify_compliance_violation import notify_violations
 from src.foundation.mandates.contracts.v1 import ComplianceVerdict
 from src.foundation.mandates.domain import market_abuse
 from src.foundation.mandates.domain.evaluator import evaluate_bundle
@@ -253,9 +248,10 @@ async def run_daily_post_trade_batch(
     business_date: date,
     now: datetime,
     rule_params: Mapping[str, Mapping[str, Any]] | None = None,
+    publish: Callable[[str, dict[str, Any]], Awaitable[None]] | None = None,
 ) -> PostTradeBatchReport:
-    """§9 CM-11 public entry point -- called periodically by
-    `background_loops.py`."""
+    """§9 CM-11 public entry point -- called periodically by `background_loops.py`.
+    `publish` (CM-12) is optional so existing callers/tests keep working unchanged."""
     # fmt: off
     resolved_params = rule_params or {}
     day_start = datetime.combine(business_date, time.min, tzinfo=timezone.utc)
@@ -288,6 +284,10 @@ async def run_daily_post_trade_batch(
                 logger.warning(
                     "evaluate_post_trade: tenant=%s rule=%s business_date=%s -- COMPLIANCE 차단",
                     tenant_id, violation.rule_code, business_date,
+                )
+                await notify_violations(  # CM-12 -- no rerun spam (only if newly-ACTIVE)
+                    publish, tenant_id=tenant_id, business_date=business_date,
+                    rule_codes=(violation.rule_code,),
                 )
             activated.append(violation.rule_code)
         blocked[tenant_id] = tuple(activated)
