@@ -53,8 +53,10 @@ task-1029(CI 상시 적색 재발): 정규화 후에도 CI 실측 p95=172.7ms가
 감추는 방식은 이미 XPASS strict로 되돌아온 전례가 있어(task-920) 둘 다
 금지한다. src(postgres_journal_repository.py)는 무수정이다(왕복 축소는
 이미 37a5375로 끝났고, 계약·동작을 바꾸지 않는다)."""
+
 from __future__ import annotations
 
+import asyncio
 import time
 from decimal import Decimal
 from uuid import UUID, uuid4
@@ -62,10 +64,18 @@ from uuid import UUID, uuid4
 import pytest
 
 from src.data.models.base import Currency
+from src.foundation.ledger.adapters.postgres_balance_repository import UnknownAccountError
 from src.foundation.ledger.adapters.postgres_journal_repository import PostgresJournalRepository
-from src.foundation.ledger.contracts.v1 import LedgerEvent, LedgerEventType, UserSub
+from src.foundation.ledger.contracts.v1 import (
+    LedgerEvent,
+    LedgerEventType,
+    PostingLine,
+    Side,
+    UserSub,
+)
 from src.foundation.ledger.domain import posting_rules
 from src.foundation.ledger.domain.chart_of_accounts import user_account as ua
+from src.foundation.ledger.domain.idempotency import IdempotencyDigestMismatchError
 from tests.integration.conftest import create_test_user
 
 _SAMPLE_COUNT = 100
@@ -209,3 +219,181 @@ async def test_journal_append_p95_under_30ms(pool) -> None:
     # 반영한다. 임계를 올려 통과시키거나 xfail로 숨기는 대신(task-920 XPASS
     # strict 전례) 왕복 수 단언만 차단 게이트로 남기고 지연은 위 print로
     # 계속 실측치를 남긴다.
+
+
+# --- DEEPEN task-2975 — negative(3) + failure-injection. DEPTH 감사
+# (task-2723)가 이 파일을 "성능 테스트 단독, negative 0건"으로 판정한
+# 공백을 메운다. 대상은 위 성능 측정과 같은 `append()`의 왕복 축소 경로
+# (task-627/37a5375, CTE/LATERAL 통합 조회 + 멱등 조회) — 일반 CRUD
+# negative는 test_postgres_journal_repository.py가 이미 갖고 있지만, 이
+# 리프(LC-17 결함 B)의 증빙은 왕복을 줄인 바로 그 쿼리 경로가 실패
+# 시나리오에서도 여전히 정확함을 이 파일 안에서 직접 보여야 한다. ---
+
+
+async def test_journal_append_rejects_all_unknown_accounts_not_just_first(pool) -> None:
+    """negative(1/3) — 왕복 축소가 묶은 계좌 해석 LATERAL/array_agg가 여러
+    미지 계좌 중 일부만 조용히 누락하지 않고 전부 보고하는지 검증한다.
+    `array_agg`가 매칭된 행만 모으므로, 구현이 실수로 첫 번째 미지 코드만
+    비교하거나 결과 개수로만 판단했다면 두 번째 미지 코드를 놓칠 수 있다."""
+    journal = PostgresJournalRepository(pool)
+    user_id = await create_test_user(pool)
+    await _seed_user_available_account(pool, user_id)
+
+    event = _topup_event(user_id)
+    lines = [
+        PostingLine(
+            line_no=1,
+            account_code="PLATFORM:DOES_NOT_EXIST_A",
+            side=Side.DEBIT,
+            amount=Decimal("1.00"),
+            currency=Currency.KRW,
+        ),
+        PostingLine(
+            line_no=2,
+            account_code="PLATFORM:DOES_NOT_EXIST_B",
+            side=Side.CREDIT,
+            amount=Decimal("1.00"),
+            currency=Currency.KRW,
+        ),
+    ]
+
+    with pytest.raises(UnknownAccountError) as exc_info:
+        async with pool.acquire() as conn, conn.transaction():
+            await journal.append(conn, event, lines)
+
+    assert set(exc_info.value.missing_codes) == {
+        "PLATFORM:DOES_NOT_EXIST_A",
+        "PLATFORM:DOES_NOT_EXIST_B",
+    }
+    async with pool.acquire() as conn:
+        found = await conn.fetchval(
+            "SELECT 1 FROM ledger_journal_entry WHERE idempotency_key = $1",
+            f"{event.event_type.value}:{event.event_ref}",
+        )
+    assert found is None
+
+
+async def test_journal_append_rejects_tampered_resend_as_digest_mismatch(pool) -> None:
+    """negative(2/3) — 같은 `idempotency_key`가 다른 `lines`로 재전송되면
+    왕복 축소 CTE가 기존 행을 정확히 찾아 `lines_digest`를 비교해 거부한다
+    (한 왕복으로 합친 조회가 여전히 정확한 기존 행을 반환하는지가 이
+    리프의 핵심 위험)."""
+    journal = PostgresJournalRepository(pool)
+    user_id = await create_test_user(pool)
+    await _seed_user_available_account(pool, user_id)
+
+    event_ref = f"perf:topup:{uuid4()}"
+    first_event = LedgerEvent(
+        event_type=LedgerEventType.TOPUP_CONFIRMED,
+        event_ref=event_ref,
+        tenant_id=None,
+        actor_subject_id=None,
+        trace_id=uuid4(),
+        amount=Decimal("1.00"),
+        currency=Currency.KRW,
+        parties={"user": user_id},
+        extra={},
+    )
+    async with pool.acquire() as conn, conn.transaction():
+        await journal.append(conn, first_event, posting_rules.lines_for(first_event))
+
+    tampered_event = first_event.model_copy(update={"amount": Decimal("999.00")})
+    with pytest.raises(IdempotencyDigestMismatchError):
+        async with pool.acquire() as conn, conn.transaction():
+            await journal.append(conn, tampered_event, posting_rules.lines_for(tampered_event))
+
+    async with pool.acquire() as conn:
+        count = await conn.fetchval(
+            "SELECT COUNT(*) FROM ledger_journal_entry WHERE idempotency_key = $1",
+            f"{first_event.event_type.value}:{event_ref}",
+        )
+    assert count == 1
+
+
+async def test_journal_append_concurrent_tampered_resend_rejects_loser(pool) -> None:
+    """negative(3/3) + 적대적 동시성 — 같은 `idempotency_key`로 서로 다른
+    내용의 두 호출이 동시에 경합하면(task-614 LC-17 gold-standard와 동일한
+    asyncio.gather 패턴), 전역 advisory lock이 직렬화하는 왕복 축소 경로가
+    정확히 하나만 성공시키고 나머지는 REPLAY가 아니라
+    `IdempotencyDigestMismatchError`로 거부해야 한다."""
+    journal = PostgresJournalRepository(pool)
+    user_id = await create_test_user(pool)
+    await _seed_user_available_account(pool, user_id)
+    event_ref = f"perf:topup:{uuid4()}"
+
+    async def _attempt(amount: Decimal) -> object:
+        event = LedgerEvent(
+            event_type=LedgerEventType.TOPUP_CONFIRMED,
+            event_ref=event_ref,
+            tenant_id=None,
+            actor_subject_id=None,
+            trace_id=uuid4(),
+            amount=amount,
+            currency=Currency.KRW,
+            parties={"user": user_id},
+            extra={},
+        )
+        async with pool.acquire() as conn, conn.transaction():
+            return await journal.append(conn, event, posting_rules.lines_for(event))
+
+    results = await asyncio.gather(
+        _attempt(Decimal("1.00")), _attempt(Decimal("2.00")), return_exceptions=True
+    )
+
+    successes = [r for r in results if not isinstance(r, BaseException)]
+    mismatches = [r for r in results if isinstance(r, IdempotencyDigestMismatchError)]
+    assert len(successes) == 1, f"정확히 1건만 성공해야 합니다: {results}"
+    assert len(mismatches) == 1, f"패자는 digest mismatch로 거부돼야 합니다: {results}"
+
+    async with pool.acquire() as conn:
+        count = await conn.fetchval(
+            "SELECT COUNT(*) FROM ledger_journal_entry WHERE idempotency_key = $1",
+            f"{LedgerEventType.TOPUP_CONFIRMED.value}:{event_ref}",
+        )
+    assert count == 1
+
+
+async def test_journal_append_rolls_back_entirely_when_audit_append_fails(
+    pool, monkeypatch
+) -> None:
+    """failure-injection — 왕복 축소 경로는 계좌 해석까지 한 왕복(CTE)으로
+    끝내고 그 다음 감사 이벤트(FND-03)를 append한 뒤에야 저널·분개행을
+    INSERT한다(모듈 docstring FK 제약 설명 참고). 감사 append가 I/O 장애로
+    실패해도(디스크·잠금 등을 흉내) 트랜잭션 전체가 롤백돼 저널 엔트리도
+    분개행도 남지 않아야 하고, 실패한 시도가 다음 재시도의 CTE 컨텍스트
+    (다음 sequence_no·prev_hash 계산)를 오염시키지 않아야 한다."""
+    journal = PostgresJournalRepository(pool)
+    user_id = await create_test_user(pool)
+    await _seed_user_available_account(pool, user_id)
+    event = _topup_event(user_id)
+    lines = posting_rules.lines_for(event)
+    idempotency_key = f"{event.event_type.value}:{event.event_ref}"
+
+    async def _boom(*args: object, **kwargs: object) -> object:
+        raise OSError("injected audit append failure")
+
+    monkeypatch.setattr(journal._audit_repo, "append_event_in", _boom)
+
+    with pytest.raises(OSError, match="injected audit append failure"):
+        async with pool.acquire() as conn, conn.transaction():
+            await journal.append(conn, event, lines)
+
+    async with pool.acquire() as conn:
+        entry_count = await conn.fetchval(
+            "SELECT COUNT(*) FROM ledger_journal_entry WHERE idempotency_key = $1",
+            idempotency_key,
+        )
+        line_count = await conn.fetchval(
+            "SELECT COUNT(*) FROM ledger_posting_line pl "
+            "JOIN ledger_journal_entry e ON e.entry_id = pl.entry_id "
+            "WHERE e.idempotency_key = $1",
+            idempotency_key,
+        )
+    assert entry_count == 0
+    assert line_count == 0
+
+    monkeypatch.undo()
+    async with pool.acquire() as conn, conn.transaction():
+        retried = await journal.append(conn, event, lines)
+    assert retried.replayed is False
+    assert retried.sequence_no >= 1
