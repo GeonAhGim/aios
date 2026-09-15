@@ -1,11 +1,19 @@
 """FA-13 `append.py` 통합테스트 — 실 DB(TEST_DATABASE_URL) 대상.
 
 DoD(task-1703): 시퀀스 충돌 거부, 체인 검증.
+
+DEPTH 감사(task-2724, docs/audit/DEPTH_FA.md)가 이 리프의 D3 하한 미달로
+지적한 마지막 공백(negative=4·실패주입·게이트재현·D3 동시성증거는 이미
+충족, 수치 성능 단언만 없음)을 `test_append_p95_latency_stays_within_normalized_ceiling`로
+메운다 — §5 "이벤트 append p95 20ms" 목표의 회귀 감시(task-3004).
 """
+
 from __future__ import annotations
 
 import asyncio
 import json
+import math
+import time
 from datetime import datetime, timezone
 from uuid import uuid4
 
@@ -166,7 +174,8 @@ async def test_tampered_payload_breaks_hash_recomputation(pool: asyncpg.Pool):
             stream_id,
         )
         row = await conn.fetchrow(
-            f"SELECT * FROM {TABLE} WHERE stream_id = $1 AND seq = 1", stream_id  # noqa: S608
+            f"SELECT * FROM {TABLE} WHERE stream_id = $1 AND seq = 1",  # noqa: S608
+            stream_id,
         )
 
     tampered_digest = payload_digest(json.loads(row["payload"]))
@@ -193,3 +202,34 @@ async def test_append_rejects_naive_datetime(pool: asyncpg.Pool):
 
     with pytest.raises(ValueError):
         await _append(pool, stream_id, 1, occurred_at=datetime(2026, 1, 1))
+
+
+async def test_append_p95_latency_stays_within_normalized_ceiling(pool: asyncpg.Pool):
+    """수치 성능 단언 — §5 "이벤트 append p95 20ms" 목표의 회귀 감시.
+    공유 TEST_DATABASE_URL의 절대 지연 변동성 때문에 절대 ms 임계 대신,
+    가벼운 baseline append 1건 대비 정규화한 상한만 게이트로 쓴다(LA-18
+    test_quality_metrics.py·LA-24 test_market_data_router.py와 동일 교훈).
+    append()는 매 호출마다 SELECT(head 조회) + INSERT 두 번의 라운드트립뿐이라
+    스트림이 길어져도 지연이 자라지 않아야 한다 -- 회귀가 생기면(예: head
+    조회가 seq로 스캔하도록 바뀌는 등) 뒤쪽 샘플의 p95가 baseline 대비
+    크게 벌어진다."""
+    stream_id = _stream()
+
+    baseline_start = time.perf_counter()
+    await _append(pool, stream_id, 1)
+    baseline_elapsed = time.perf_counter() - baseline_start
+
+    samples: list[float] = []
+    for seq in range(2, 62):
+        start = time.perf_counter()
+        await _append(pool, stream_id, seq)
+        samples.append(time.perf_counter() - start)
+
+    samples.sort()
+    p95 = samples[math.ceil(0.95 * len(samples)) - 1]
+
+    ceiling = baseline_elapsed * 5 + 0.05
+    assert p95 <= ceiling, (
+        f"append p95 지연 {p95:.4f}s가 정규화 상한 {ceiling:.4f}s(baseline "
+        f"{baseline_elapsed:.4f}s)를 초과했습니다 -- §5 append p95 20ms 목표 회귀 의심"
+    )
