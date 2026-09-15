@@ -1,7 +1,8 @@
-// task-3182: coverage-ratchet 스크립트(scripts/frontend_coverage_ratchet.mjs)에
-// happy-path조차 검증하는 테스트가 없었다. baseline 초기화, 허용 오차 내/초과
-// 하락, ratchet-up, 커스텀 오차, summary/baseline 누락·오손 케이스를 실제로
-// 프로세스를 실행해 종료코드·stdout·baseline 파일 내용으로 검증한다.
+// task-3182: scripts/frontend_coverage_ratchet.mjs had no test file at all,
+// not even happy-path coverage. Exercises baseline init, drops within/beyond
+// tolerance, ratchet-up, custom tolerance, and missing/malformed
+// summary/baseline cases by actually running the process and checking exit
+// code, stdout, and the resulting baseline file contents.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
