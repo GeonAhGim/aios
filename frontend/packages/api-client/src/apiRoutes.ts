@@ -369,5 +369,19 @@ export const API_ROUTES = defineApiRoutes({
   // 함께 추가할 것.
   "screener.run": route("/v1/foundation/screener/run", true, null, false),
 
+  // task-2696(UX-12): WhatIfPanel.tsx·RebalancePage.tsx는 spec
+  // L4_product_experience_and_discovery_v1.0.md §2.3/UX-9/UX-10/UX-11이 정의하는
+  // `src/foundation/whatif/` 모듈을 앞서가는 선행 프론트다 — domain/impact.py
+  // (UX-9)·application/preview_order.py(UX-10)·application/rebalance_plan.py
+  // (UX-11)·이를 감싸는 API 라우터(src/api/routers/whatif.py) 모두 아직 없다
+  // (src/api/routers 디렉터리에 whatif.py 부재, src/foundation/whatif 디렉터리
+  // 자체가 없음 — grep으로 직접 확인). screener.run(task-2692)과 동일한 유령
+  // 경로 사유로 implemented=false 등록 — WhatIfPanel·RebalancePage는 라우터가
+  // 생기기 전까지 네트워크 호출 대신 WhatIfRouteNotImplementedError(typed)로
+  // 단락한다. v1Path는 마운트 경로 확정 전이라 null. apiPaths.openapi.test.ts
+  // GHOST_PATH_WHITELIST에도 함께 추가할 것.
+  "whatif.previewOrder": route("/v1/foundation/whatif/preview-order", true, null, false),
+  "whatif.rebalancePlan": route("/v1/foundation/whatif/rebalance-plan", true, null, false),
+
   ...FOUNDATION_OPS_ROUTES,
 });

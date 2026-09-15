@@ -21,6 +21,7 @@ export const MAIN_NAV_ITEMS: NavItem[] = [
   { to: "/ai/studio", label: "AI 스튜디오" },
   { to: "/executions", label: "실행제어판" },
   { to: "/portfolio", label: "포트폴리오" },
+  { to: "/rebalance", label: "리밸런싱" },
   { to: "/mandates", label: "위임장" },
   { to: "/compliance", label: "컴플라이언스" },
   { to: "/reports", label: "보고서" },

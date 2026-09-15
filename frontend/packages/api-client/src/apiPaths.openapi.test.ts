@@ -70,6 +70,10 @@ const GHOST_PATH_WHITELIST: ReadonlySet<ApiRouteName> = new Set<ApiRouteName>([
   // task-2692(UX-8): screener.run — apiRoutes.ts의 등록 주석 참조(src/foundation/
   // screener 모듈·src/api/routers/screener.py 자체가 아직 없음, ai.*와 동일 사유).
   "screener.run",
+  // task-2696(UX-12): whatif.* 2건 — apiRoutes.ts의 등록 주석 참조(src/foundation/
+  // whatif 모듈·src/api/routers/whatif.py 자체가 아직 없음, screener.run과 동일 사유).
+  "whatif.previewOrder",
+  "whatif.rebalancePlan",
 ]);
 
 // STALE_SNAPSHOT_WHITELIST: GHOST_PATH_WHITELIST와는 다른 사유 — "라우터가

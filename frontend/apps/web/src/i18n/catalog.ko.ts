@@ -115,6 +115,54 @@ export const catalogKo = {
       totalLabel: "{{total}}건",
     },
   },
+  // task-2696(UX-12): WhatIfPanel.tsx(가상 주문 영향 미리보기)·RebalancePage.tsx
+  // (목표 비중 → 리밸런싱 계획) — screener.*와 동일하게 문구를 전부 t(key)로 조회한다.
+  whatif: {
+    order: {
+      title: "가상 주문 영향 미리보기",
+      symbolLabel: "종목",
+      sideLabel: "매매 구분",
+      side: {
+        buy: "매수",
+        sell: "매도",
+      },
+      quantityLabel: "수량",
+      run: "미리보기",
+      beforeRun: "주문을 입력하고 미리보기를 실행하세요.",
+    },
+    orderValidation: {
+      symbolRequired: "종목을 입력하세요.",
+      quantityInvalid: "수량은 0보다 큰 숫자여야 합니다.",
+    },
+    impact: {
+      exposureDeltaLabel: "노출 변화",
+      concentrationDeltaLabel: "집중도 변화",
+      varDeltaLabel: "VaR 변화",
+      limitHeadroomDeltaLabel: "한도 여유 변화",
+    },
+    rebalance: {
+      pageTitle: "리밸런싱",
+      targetBuilderTitle: "목표 비중",
+      symbolLabel: "종목",
+      weightLabel: "목표 비중(%)",
+      addTarget: "목표 추가",
+      removeTarget: "제거",
+      run: "계획 생성",
+      resultsTitle: "계획",
+      beforeRun: "목표 비중을 구성하고 계획을 생성하세요.",
+      resultsEmpty: "생성된 거래가 없습니다.",
+      turnoverLabel: "회전율 {{value}}%",
+      estCostLabel: "예상 비용 {{value}}",
+      skippedTitle: "건너뜀",
+      previewImpact: "영향 미리보기",
+    },
+    targetValidation: {
+      targetsRequired: "목표 비중을 하나 이상 추가하세요.",
+      targetSymbolRequired: "{{position}}번째 목표의 종목을 입력하세요.",
+      targetWeightInvalid: "{{position}}번째 목표의 비중은 0~100 사이 숫자여야 합니다.",
+      targetSymbolDuplicate: "{{position}}번째 종목이 중복되었습니다.",
+    },
+  },
 } as const;
 
 export type CatalogKo = typeof catalogKo;

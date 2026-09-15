@@ -47,3 +47,4 @@ export * from "./connections";
 export * from "./follow";
 export * from "./advisoryDisclaimer";
 export * from "./screener";
+export * from "./whatif";

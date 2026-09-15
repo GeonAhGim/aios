@@ -35,6 +35,7 @@ import { MandatesPage } from "./routes/mandates/MandatesPage";
 import { MfaSetupPage } from "./routes/onboarding/MfaSetupPage";
 import { RiskAssessmentPage } from "./routes/onboarding/RiskAssessmentPage";
 import { PortfolioPage } from "./routes/portfolio/PortfolioPage";
+import { RebalancePage } from "./routes/whatif/RebalancePage";
 import { ReportsPage } from "./routes/reports/ReportsPage";
 import { ScreenerPage } from "./routes/screener/ScreenerPage";
 import { WriteReviewPage } from "./routes/reviews/WriteReviewPage";
@@ -86,6 +87,7 @@ export const router = createBrowserRouter([
   { path: "/follow", element: protect(<FollowPage />) },
   { path: "/ai/studio", element: protect(<AiStudioPage />) },
   { path: "/portfolio", element: protect(<PortfolioPage />) },
+  { path: "/rebalance", element: protect(<RebalancePage />) },
   { path: "/mandates", element: protect(<MandatesPage />) },
   { path: "/compliance", element: protect(<CompliancePage />) },
   { path: "/reports", element: protect(<ReportsPage />) },

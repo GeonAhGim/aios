@@ -139,3 +139,9 @@ export type { AiClient } from "./clients/ai";
 // (ScreenerRouteNotImplementedError 참조, src/api/routers/screener.py 미구현, UX-6).
 export { createScreenerClient, ScreenerRouteNotImplementedError } from "./clients/screener";
 export type { ScreenerClient } from "./clients/screener";
+// task-2696(UX-12): §2.3 가상 주문 영향 미리보기·리밸런싱 계획 클라이언트(screener.ts와
+// 동일 관용 — AiosApiClient 합성에는 얹지 않고 화면이 createWhatIfClient로 직접
+// 만든다). 런타임에는 유령 경로(WhatIfRouteNotImplementedError 참조,
+// src/api/routers/whatif.py 미구현, UX-10/UX-11).
+export { createWhatIfClient, WhatIfRouteNotImplementedError } from "./clients/whatif";
+export type { WhatIfClient } from "./clients/whatif";
