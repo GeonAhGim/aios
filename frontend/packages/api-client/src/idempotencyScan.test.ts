@@ -1,8 +1,17 @@
-import { readdirSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { API_ROUTES, type ApiRouteName } from "./apiPaths";
+
+// [QA task-2730 DEPTH_PLT] 실패 주입: 순수 소스 스캔이라 원래 외부 의존성이 없으나,
+// listClientSourceFiles가 거치는 유일한 외부 경계(파일시스템)를 vi.mock으로 대체해
+// 읽기 실패를 인위적으로 주입한다. mockImplementationOnce는 1회 호출 후 actual 구현으로
+// 자동 복귀하므로 다른 테스트에 영향을 주지 않는다.
+vi.mock("node:fs", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("node:fs")>();
+  return { ...actual, readdirSync: vi.fn(actual.readdirSync), readFileSync: vi.fn(actual.readFileSync) };
+});
+const { readdirSync, readFileSync } = await import("node:fs");
 
 // task-1333: §3.7 IdempotencyScope · §9 PLT-15 전수 회귀 가드. apiPaths.ts의
 // idempotencyRequired 표식(단일 출처)이 실제 호출부와 어긋나지 않는지 소스
@@ -215,6 +224,62 @@ describe("idempotencyScan — negative fixture(위반이 실제로 FAIL한다)",
     expect(result.markedWithoutIdempotentCall).toEqual([]);
     expect(result.markedButNonIdempotentCall).toEqual([]);
     expect(result.idempotentCallButUnmarked).toEqual([]);
+  });
+
+  // [QA task-2730 DEPTH_PLT] negative 3번째: 기존 2건은 모두 패턴 A(직접 리터럴 중첩)만
+  // 겨냥했다. foundation.ts의 PAPER_DEPLOYMENT_COMMAND_ROUTES처럼 Record 간접 참조를
+  // 거쳐 변수로 소비되는 실제 스타일(패턴 B')에서도 비멱등 재호출이 검출되는지는
+  // 아무도 확인하지 않았다 — findCallSites 자체 검증 테스트는 이 조합을 멱등 메서드
+  // 경로로만 확인했을 뿐, "위반"(post 등 비멱등)으로는 확인하지 않는다.
+  it("Record 간접 참조(변수 경유)로 비멱등 재호출된 fixture도 markedButNonIdempotentCall을 채운다", () => {
+    const files = [
+      {
+        path: "fixture.ts",
+        source: [
+          'const CMD: Record<string, string> = {',
+          '  start: "x.money",',
+          "};",
+          "const path = resolvePath(CMD[command]).replace(':id', d);",
+          "return this.post(path, body);",
+        ].join("\n"),
+      },
+    ];
+    const result = scanCallSites(files, MONEY_ROUTES);
+    expect(result.markedButNonIdempotentCall).toEqual(['fixture.ts: "x.money" via this.post(...)']);
+    expect(result.markedWithoutIdempotentCall).toEqual(["x.money"]);
+  });
+});
+
+// [QA task-2730 DEPTH_PLT] 실패 주입: listClientSourceFiles가 거치는 유일한 외부 경계인
+// 파일시스템 읽기가 깨졌을 때 스캔이 결과를 조용히 비워서 "위반 없음"으로 위장하지
+// 않고 즉시 예외를 전파하는지(fail-closed) 확인한다. 이게 없으면 CI 러너의 권한
+// 문제 등으로 clients/*.ts 일부가 안 읽혀도 게이트가 녹색으로 통과해버릴 수 있다.
+describe("idempotencyScan — 실패 주입(파일시스템 읽기 실패는 조용히 삼켜지지 않는다)", () => {
+  it("readFileSync가 던지면 listClientSourceFiles가 그대로 전파한다(fail-closed)", () => {
+    vi.mocked(readFileSync).mockImplementationOnce(() => {
+      throw new Error("EACCES: permission denied, open 'clients/wallet.ts'");
+    });
+    expect(() => listClientSourceFiles()).toThrow("EACCES: permission denied");
+  });
+
+  it("readdirSync가 던지면 listClientSourceFiles가 그대로 전파한다(fail-closed)", () => {
+    vi.mocked(readdirSync).mockImplementationOnce(() => {
+      throw new Error("ENOENT: no such file or directory, scandir 'clients'");
+    });
+    expect(() => listClientSourceFiles()).toThrow("ENOENT: no such file or directory");
+  });
+});
+
+// [QA task-2730 DEPTH_PLT] 수치 성능 단언: 이 가드는 CI의 모든 리프 커밋마다 돈다
+// (task-1333 DoD). 정규식 스캔이 어떤 clients/*.ts 추가로든 조용히 비선형으로
+// 느려지면 로컬/CI 피드백 루프가 저하되는데, 지금까지는 그걸 잡는 단언이 없었다.
+describe("idempotencyScan — 성능 단언(전수 스캔 소요 시간)", () => {
+  it("clients/*.ts 전수 스캔(findCallSites+scanCallSites)이 200ms 이내에 끝난다", () => {
+    const files = listClientSourceFiles();
+    const start = performance.now();
+    scanCallSites(files, API_ROUTES);
+    const elapsedMs = performance.now() - start;
+    expect(elapsedMs).toBeLessThan(200);
   });
 });
 
