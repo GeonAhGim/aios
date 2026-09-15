@@ -37,6 +37,7 @@ else: rollback`)를 무조건 커밋으로 바꿔치기하고, 이미 있는
 red(1 failed)로 바뀌는 것까지 증명한다 — DoD "gate DENY 시 0행"이 정말로
 그 분기에 의존한다는 뜻이다.
 """
+
 from __future__ import annotations
 
 import itertools
@@ -97,8 +98,13 @@ def _profile(**overrides: object) -> VenueCapabilityProfile:
 def _registry() -> SymbolRegistry:
     reg = SymbolRegistry()
     reg.register(
-        "BTC/USDT", "bitget", "BTCUSDT",
-        tick=Decimal("0.1"), lot=Decimal("0.0001"), min_notional=Decimal("5"), quote_ccy="USDT",
+        "BTC/USDT",
+        "bitget",
+        "BTCUSDT",
+        tick=Decimal("0.1"),
+        lot=Decimal("0.0001"),
+        min_notional=Decimal("5"),
+        quote_ccy="USDT",
     )
     return reg
 
@@ -114,7 +120,9 @@ async def _create_running_execution(pool: asyncpg.Pool, user_id: uuid.UUID) -> i
             VALUES ($1, '1.0.0', $2, 'BTC/USDT', 'crypto', 'bitget', $3::jsonb,
                     'test-author', 'APPROVED')
             """,
-            strategy_id, user_id, json.dumps({}),
+            strategy_id,
+            user_id,
+            json.dumps({}),
         )
         row = await conn.fetchrow(
             """
@@ -124,21 +132,33 @@ async def _create_running_execution(pool: asyncpg.Pool, user_id: uuid.UUID) -> i
             VALUES ($1, '1.0.0', $2, 'bitget', 'PAPER', 100, 'USDT', 'RUNNING')
             RETURNING id
             """,
-            strategy_id, user_id,
+            strategy_id,
+            user_id,
         )
     return row["id"]
 
 
 def _command(user_id: uuid.UUID, execution_id: int, *, intent_seq: int = 1) -> SubmitOrderCommand:
     scope = OrderIdempotencyScope(
-        tenant_id=user_id, account_ref="acct-1", provider="bitget", strategy_id="s1",
-        strategy_version="1.0.0", execution_id=execution_id, intent_seq=intent_seq,
+        tenant_id=user_id,
+        account_ref="acct-1",
+        provider="bitget",
+        strategy_id="s1",
+        strategy_version="1.0.0",
+        execution_id=execution_id,
+        intent_seq=intent_seq,
         window_start=datetime.now(timezone.utc),
     )
     return SubmitOrderCommand(
-        command_id=uuid.uuid4(), trace_id=uuid.uuid4(), scope=scope, symbol="BTC/USDT",
-        side=OrderSide.BUY, order_type=OrderType.MARKET, quantity=Decimal("0.01"),
-        asset_class=AssetClass.CRYPTO, actor_subject_id=user_id,
+        command_id=uuid.uuid4(),
+        trace_id=uuid.uuid4(),
+        scope=scope,
+        symbol="BTC/USDT",
+        side=OrderSide.BUY,
+        order_type=OrderType.MARKET,
+        quantity=Decimal("0.01"),
+        asset_class=AssetClass.CRYPTO,
+        actor_subject_id=user_id,
         issued_at=datetime.now(timezone.utc),
     )
 
@@ -158,11 +178,13 @@ async def _row_counts(
         )
         events = await conn.fetchval(
             "SELECT count(*) FROM order_events oe JOIN orders o ON o.order_id = oe.order_id "
-            "WHERE o.execution_id = $1", execution_id,
+            "WHERE o.execution_id = $1",
+            execution_id,
         )
         outbox = await conn.fetchval(
             "SELECT count(*) FROM order_command_outbox oco JOIN orders o "
-            "ON o.order_id = oco.order_id WHERE o.execution_id = $1", execution_id,
+            "ON o.order_id = oco.order_id WHERE o.execution_id = $1",
+            execution_id,
         )
         idempotency = await conn.fetchval(
             "SELECT count(*) FROM order_idempotency WHERE scope_hash = $1", scope_hash_val
@@ -195,8 +217,13 @@ async def test_simulated_db_connection_drop_during_idempotency_claim_rolls_back_
 
     with pytest.raises(asyncpg.exceptions.ConnectionDoesNotExistError):
         await submit_order(
-            cmd, pool=pool, profile=_profile(), registry=_registry(), pre_submit_gate=_allow_gate,
-            entity_context=entity_context, entity_repo=PostgresEntityRepository(pool),
+            cmd,
+            pool=pool,
+            profile=_profile(),
+            registry=_registry(),
+            pre_submit_gate=_allow_gate,
+            entity_context=entity_context,
+            entity_repo=PostgresEntityRepository(pool),
         )
 
     counts = await _row_counts(pool, execution_id=execution_id, scope_hash_val=scope_hash_val)
@@ -227,8 +254,13 @@ async def test_simulated_dropped_message_during_outbox_enqueue_rolls_back_atomic
 
     with pytest.raises(ConnectionResetError):
         await submit_order(
-            cmd, pool=pool, profile=_profile(), registry=_registry(), pre_submit_gate=_allow_gate,
-            entity_context=entity_context, entity_repo=PostgresEntityRepository(pool),
+            cmd,
+            pool=pool,
+            profile=_profile(),
+            registry=_registry(),
+            pre_submit_gate=_allow_gate,
+            entity_context=entity_context,
+            entity_repo=PostgresEntityRepository(pool),
         )
 
     counts = await _row_counts(pool, execution_id=execution_id, scope_hash_val=scope_hash_val)
@@ -262,8 +294,13 @@ async def test_simulated_worker_crash_during_validated_transition_rolls_back_ato
 
     with pytest.raises(_SimulatedWorkerCrash):
         await submit_order(
-            cmd, pool=pool, profile=_profile(), registry=_registry(), pre_submit_gate=_allow_gate,
-            entity_context=entity_context, entity_repo=PostgresEntityRepository(pool),
+            cmd,
+            pool=pool,
+            profile=_profile(),
+            registry=_registry(),
+            pre_submit_gate=_allow_gate,
+            entity_context=entity_context,
+            entity_repo=PostgresEntityRepository(pool),
         )
 
     counts = await _row_counts(pool, execution_id=execution_id, scope_hash_val=scope_hash_val)
@@ -303,8 +340,13 @@ async def test_submit_order_happy_path_latency_within_normalized_budget(pool):
     async def _one_new_submit() -> None:
         cmd = _command(user_id, execution_id, intent_seq=next(seqs))
         await submit_order(
-            cmd, pool=pool, profile=_profile(), registry=_registry(), pre_submit_gate=_allow_gate,
-            entity_context=entity_context, entity_repo=entity_repo,
+            cmd,
+            pool=pool,
+            profile=_profile(),
+            registry=_registry(),
+            pre_submit_gate=_allow_gate,
+            entity_context=entity_context,
+            entity_repo=entity_repo,
         )
 
     submit_p95 = await _p95_ms(_one_new_submit)
@@ -323,13 +365,13 @@ _TARGET_TEST = (
     "tests/integration/oms/test_submit_order_tx.py::test_submit_order_gate_deny_leaves_zero_rows"
 )
 _GUARD = (
-    "        finally:\n"
-    "            if ok:\n"
-    "                await tx.commit()\n"
-    "            else:\n"
-    "                await tx.rollback()\n"
+    "            finally:\n"
+    "                if ok:\n"
+    "                    await tx.commit()\n"
+    "                else:\n"
+    "                    await tx.rollback()\n"
 )
-_MUTATED = "        finally:\n            await tx.commit()\n"
+_MUTATED = "            finally:\n                await tx.commit()\n"
 _MUTATED_MODULE_NAME = "_mutate_submit_order_commit_gate"
 _PLUGIN_SOURCE = f"""\
 import importlib
@@ -359,8 +401,13 @@ def test_pytest_gate_turns_red_when_commit_rollback_branch_is_removed(tmp_path: 
     env = dict(os.environ, PYTHONPATH=repo_root, PYTEST_ADDOPTS="", PYTHONIOENCODING="utf-8")
 
     baseline = subprocess.run(
-        command, capture_output=True, encoding="utf-8", errors="replace",
-        env=env, timeout=120, check=False,
+        command,
+        capture_output=True,
+        encoding="utf-8",
+        errors="replace",
+        env=env,
+        timeout=120,
+        check=False,
     )
     assert baseline.returncode == 0, baseline.stdout + baseline.stderr
     assert "1 passed" in baseline.stdout
@@ -371,8 +418,12 @@ def test_pytest_gate_turns_red_when_commit_rollback_branch_is_removed(tmp_path: 
 
     mutated = subprocess.run(
         [*command[:-1], "-p", _MUTATED_MODULE_NAME, command[-1]],
-        capture_output=True, encoding="utf-8", errors="replace",
-        env=mutated_env, timeout=120, check=False,
+        capture_output=True,
+        encoding="utf-8",
+        errors="replace",
+        env=mutated_env,
+        timeout=120,
+        check=False,
     )
     assert mutated.returncode != 0, mutated.stdout + mutated.stderr
     assert "1 passed" not in mutated.stdout

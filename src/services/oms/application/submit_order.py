@@ -28,16 +28,23 @@ NOT DEFERRABLE FK(073beca589d5)라 claim이 참조할 행이 먼저 있어야 �
 평가한다. DENY면 tx를 롤백한다(0행, `outbox_dispatcher._send_submit`과 같은 패턴, L4-14).
 CM-8 §3 — ALLOW는 `GateDecision.decision_id`/`.compliance_decision_id` 둘 다 필수다.
 """
+
 from __future__ import annotations
 
 import hashlib
 import json
+import time
 from collections.abc import Callable
 from datetime import datetime, timedelta, timezone
 from uuid import UUID, uuid4
 
 import asyncpg
 
+from src.core.observability.metric_names import (
+    OMS_ORDER_SUBMIT_COUNT_TOTAL,
+    OMS_ORDER_SUBMIT_DURATION_SECONDS,
+)
+from src.core.observability.metrics import MetricsPort, NullMetrics
 from src.data.models.base import Currency, Money
 from src.data.models.trading import Order, OrderStatus
 from src.foundation.entities.application.resolve_context import (
@@ -133,149 +140,178 @@ async def submit_order(
     entity_context: EntityContext,
     entity_repo: EntityRepository,
     clock: Clock = utcnow,
+    metrics: MetricsPort | None = None,
 ) -> OrderView:
-    if entity_context is None:  # 정적 검사 우회(런타임 None 주입) 방어, FA-5
-        raise EntityContextResolutionError(
-            "entity_context는 필수입니다(FA-5) — None을 명시적으로 넘길 수 없습니다."
+    """§7.2 계측: `outcome` in {accepted, denied, replay, error} — venue는 `profile.venue`
+    (호출자가 배선한 지원 거래소 값, 사용자 입력이 아니라 카디널리티가 자연히 낮다).
+    `finally`가 실행 경로 전체(정상/조기 raise 모두)에서 정확히 1회 카운터+히스토그램을
+    기록한다 — `outcome`은 기본값 "error"로 시작해 각 종료 지점에서만 갱신된다."""
+    m = metrics if metrics is not None else NullMetrics()
+    venue_label = profile.venue if profile is not None else "unknown"
+    start = time.monotonic()
+    outcome = "error"
+    try:
+        if entity_context is None:  # 정적 검사 우회(런타임 None 주입) 방어, FA-5
+            raise EntityContextResolutionError(
+                "entity_context는 필수입니다(FA-5) — None을 명시적으로 넘길 수 없습니다."
+            )
+        if entity_context.tenant_id != cmd.scope.tenant_id:
+            raise EntityContextResolutionError(
+                f"entity_context.tenant_id({entity_context.tenant_id})가 "
+                f"cmd.scope.tenant_id({cmd.scope.tenant_id})와 다릅니다 — 교차 테넌트 쓰기 거부."
+            )
+        if pre_submit_gate is None:  # 정적 검사 우회(런타임 None 주입) 방어, I-01
+            raise TypeError(
+                "pre_submit_gate는 필수입니다(I-01) — None을 명시적으로 넘길 수 없습니다."
+            )
+        if entity_repo is None:  # 정적 검사 우회 방어, task-1925
+            raise EntityContextResolutionError("entity_repo는 필수입니다(task-1925).")
+        await verify_entity_context(entity_repo, entity_context)  # task-1925: 위조 방어
+        assert_supported(profile, cmd)
+        venue_symbol = registry.to_venue(cmd.symbol, profile.venue)
+        client_id = derive_client_order_id(
+            cmd.scope,
+            max_len=profile.client_order_id_max_len,
+            charset=profile.client_order_id_charset,
         )
-    if entity_context.tenant_id != cmd.scope.tenant_id:
-        raise EntityContextResolutionError(
-            f"entity_context.tenant_id({entity_context.tenant_id})가 "
-            f"cmd.scope.tenant_id({cmd.scope.tenant_id})와 다릅니다 — 교차 테넌트 쓰기 거부."
-        )
-    if pre_submit_gate is None:  # 정적 검사 우회(런타임 None 주입) 방어, I-01
-        raise TypeError("pre_submit_gate는 필수입니다(I-01) — None을 명시적으로 넘길 수 없습니다.")
-    if entity_repo is None:  # 정적 검사 우회 방어, task-1925
-        raise EntityContextResolutionError("entity_repo는 필수입니다(task-1925).")
-    await verify_entity_context(entity_repo, entity_context)  # task-1925: 위조 EntityContext 방어
-    assert_supported(profile, cmd)
-    venue_symbol = registry.to_venue(cmd.symbol, profile.venue)
-    client_id = derive_client_order_id(
-        cmd.scope, max_len=profile.client_order_id_max_len, charset=profile.client_order_id_charset
-    )
-    scope_hash_val = scope_hash(cmd.scope)
-    digest = command_digest(cmd)
-    candidate_order_id = uuid4()
+        scope_hash_val = scope_hash(cmd.scope)
+        digest = command_digest(cmd)
+        candidate_order_id = uuid4()
 
-    collided = False
-    result: OrderView | None = None
+        collided = False
+        result: OrderView | None = None
 
-    async with pool.acquire() as conn:
-        tx = conn.transaction()
-        await tx.start()
-        ok = False
-        try:
+        async with pool.acquire() as conn:
+            tx = conn.transaction()
+            await tx.start()
+            ok = False
             try:
-                await conn.execute(
-                    _INSERT_ORDER_SQL,
-                    candidate_order_id,
-                    cmd.scope.tenant_id,
-                    client_id,
-                    cmd.scope.strategy_id,
-                    cmd.scope.strategy_version,
-                    cmd.scope.execution_id,
-                    cmd.symbol,
-                    venue_symbol,
-                    profile.venue,
-                    cmd.side.value,
-                    cmd.order_type.value,
-                    cmd.time_in_force,
-                    cmd.quantity,
-                    cmd.price,
-                    cmd.is_liquidation,
-                    cmd.asset_class.value,
-                    cmd.parent_order_id,
-                    cmd.algo_run_id,
-                    entity_context.fund_id,
-                    entity_context.portfolio_id,
-                )
-            except asyncpg.UniqueViolationError:
-                collided = True
-            else:
-                claim = await _idempotency.claim(
-                    conn,
-                    scope_hash=scope_hash_val,
-                    digest=digest,
-                    order_id=candidate_order_id,
-                    ttl=DEFAULT_IDEMPOTENCY_TTL,
-                )
-                if claim.kind == "EXISTING":
-                    # 방어적 분기 — client_order_id가 scope의 결정론 함수라 여기 도달하려면
-                    # 이미 위 INSERT에서 UniqueViolationError로 걸러졌어야 한다(정상 도달 불가).
-                    result = await _orders.find_by_scope_hash(conn, scope_hash_val)
-                    if result is None:
-                        raise RuntimeError(
-                            f"order_idempotency scope_hash={scope_hash_val}: EXISTING인데 "
-                            "orders 조인 결과가 없습니다 — 데이터 정합성 결함."
-                        )
+                try:
+                    await conn.execute(
+                        _INSERT_ORDER_SQL,
+                        candidate_order_id,
+                        cmd.scope.tenant_id,
+                        client_id,
+                        cmd.scope.strategy_id,
+                        cmd.scope.strategy_version,
+                        cmd.scope.execution_id,
+                        cmd.symbol,
+                        venue_symbol,
+                        profile.venue,
+                        cmd.side.value,
+                        cmd.order_type.value,
+                        cmd.time_in_force,
+                        cmd.quantity,
+                        cmd.price,
+                        cmd.is_liquidation,
+                        cmd.asset_class.value,
+                        cmd.parent_order_id,
+                        cmd.algo_run_id,
+                        entity_context.fund_id,
+                        entity_context.portfolio_id,
+                    )
+                except asyncpg.UniqueViolationError:
+                    collided = True
                 else:
-                    decision = await pre_submit_gate(
-                        OrderContext(
-                            user_id=cmd.scope.tenant_id,
-                            execution_id=cmd.scope.execution_id,
-                            exchange=profile.venue,
-                            mandate_revision_id=None,
-                            # CM-8 — real fields so restricted_list can evaluate this order.
-                            symbol=cmd.symbol,
-                            side=cmd.side.value,
-                            quantity=cmd.quantity,
+                    claim = await _idempotency.claim(
+                        conn,
+                        scope_hash=scope_hash_val,
+                        digest=digest,
+                        order_id=candidate_order_id,
+                        ttl=DEFAULT_IDEMPOTENCY_TTL,
+                    )
+                    if claim.kind == "EXISTING":
+                        # 방어적 분기 — client_order_id가 scope의 결정론 함수라 여기 도달하려면
+                        # 이미 위 INSERT에서 UniqueViolationError로 걸러졌어야 한다(정상 도달 불가).
+                        result = await _orders.find_by_scope_hash(conn, scope_hash_val)
+                        if result is None:
+                            raise RuntimeError(
+                                f"order_idempotency scope_hash={scope_hash_val}: EXISTING인데 "
+                                "orders 조인 결과가 없습니다 — 데이터 정합성 결함."
+                            )
+                    else:
+                        decision = await pre_submit_gate(
+                            OrderContext(
+                                user_id=cmd.scope.tenant_id,
+                                execution_id=cmd.scope.execution_id,
+                                exchange=profile.venue,
+                                mandate_revision_id=None,
+                                # CM-8 — real fields so restricted_list can evaluate this order.
+                                symbol=cmd.symbol,
+                                side=cmd.side.value,
+                                quantity=cmd.quantity,
+                            )
                         )
-                    )
-                    if decision.outcome != GateOutcome.ALLOW:
-                        raise OrderSubmitDeniedError(decision.reason_codes)
-                    if decision.decision_id is None or decision.compliance_decision_id is None:
-                        raise OrderSubmitDeniedError(("CM_DECISION_ID_MISSING",))
+                        if decision.outcome != GateOutcome.ALLOW:
+                            raise OrderSubmitDeniedError(decision.reason_codes)
+                        if decision.decision_id is None or decision.compliance_decision_id is None:
+                            raise OrderSubmitDeniedError(("CM_DECISION_ID_MISSING",))
 
-                    occurred_at = clock()
-                    event = OrderTransitionEvent(
-                        order_id=candidate_order_id,
-                        from_status=OrderStatus.CREATED,
-                        to_status=OrderStatus.VALIDATED,
-                        event=OrderEvent.VALIDATED.value,
-                        reason_code=None,
-                        actor_subject_id=cmd.actor_subject_id,
-                        trace_id=cmd.trace_id,
-                        command_id=cmd.command_id,
-                        provider_event_id=None,
-                        occurred_at=occurred_at,
-                        payload_hash=_event_payload_hash(candidate_order_id, scope_hash_val),
-                    )
-                    validated = await _orders.transition(
-                        conn,
-                        order_id=candidate_order_id,
-                        expected_status=OrderStatus.CREATED,
-                        expected_version=0,
-                        new_status=OrderStatus.VALIDATED,
-                        patch={},
-                        event=event,
-                    )
-                    venue_order = _venue_order(
-                        cmd, order_id=candidate_order_id, client_id=client_id, venue=profile.venue
-                    )
-                    await _outbox.enqueue(
-                        conn,
-                        order_id=candidate_order_id,
-                        command_type="SUBMIT",
-                        payload={
-                            "order": venue_order.model_dump(mode="json"),
-                            "trace_id": str(cmd.trace_id),
-                            "command_id": str(cmd.command_id),
-                        },
-                        not_before=occurred_at,
-                    )
-                    result = validated
-                    ok = True
-        finally:
-            if ok:
-                await tx.commit()
-            else:
-                await tx.rollback()
+                        occurred_at = clock()
+                        event = OrderTransitionEvent(
+                            order_id=candidate_order_id,
+                            from_status=OrderStatus.CREATED,
+                            to_status=OrderStatus.VALIDATED,
+                            event=OrderEvent.VALIDATED.value,
+                            reason_code=None,
+                            actor_subject_id=cmd.actor_subject_id,
+                            trace_id=cmd.trace_id,
+                            command_id=cmd.command_id,
+                            provider_event_id=None,
+                            occurred_at=occurred_at,
+                            payload_hash=_event_payload_hash(candidate_order_id, scope_hash_val),
+                        )
+                        validated = await _orders.transition(
+                            conn,
+                            order_id=candidate_order_id,
+                            expected_status=OrderStatus.CREATED,
+                            expected_version=0,
+                            new_status=OrderStatus.VALIDATED,
+                            patch={},
+                            event=event,
+                        )
+                        venue_order = _venue_order(
+                            cmd,
+                            order_id=candidate_order_id,
+                            client_id=client_id,
+                            venue=profile.venue,
+                        )
+                        await _outbox.enqueue(
+                            conn,
+                            order_id=candidate_order_id,
+                            command_type="SUBMIT",
+                            payload={
+                                "order": venue_order.model_dump(mode="json"),
+                                "trace_id": str(cmd.trace_id),
+                                "command_id": str(cmd.command_id),
+                            },
+                            not_before=occurred_at,
+                        )
+                        result = validated
+                        ok = True
+            finally:
+                if ok:
+                    await tx.commit()
+                else:
+                    await tx.rollback()
 
-    if collided:
-        return await _resolve_after_collision(pool, scope_hash_val=scope_hash_val, digest=digest)
-    if result is None:
-        raise RuntimeError("submit_order: 도달 불가 상태 — collided도 아니고 결과도 없습니다.")
-    return result
+        if collided:
+            resolved = await _resolve_after_collision(
+                pool, scope_hash_val=scope_hash_val, digest=digest
+            )
+            outcome = "replay"
+            return resolved
+        if result is None:
+            raise RuntimeError("submit_order: 도달 불가 상태 — collided도 아니고 결과도 없습니다.")
+        outcome = "accepted" if ok else "replay"
+        return result
+    except OrderSubmitDeniedError:
+        outcome = "denied"
+        raise
+    finally:
+        elapsed = time.monotonic() - start
+        m.counter(OMS_ORDER_SUBMIT_COUNT_TOTAL, {"outcome": outcome, "venue": venue_label})
+        m.observe(OMS_ORDER_SUBMIT_DURATION_SECONDS, elapsed, {"venue": venue_label})
 
 
 async def _resolve_after_collision(
