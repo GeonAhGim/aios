@@ -307,5 +307,32 @@ export const API_ROUTES = defineApiRoutes({
   // "/{strategy_id}/{strategy_version}" -> ApiResponse[ValidationResultView] + ok(...).
   // envelope=true, mount_v1(PLT-16) 미도달이라 v1Path=null(foundation.*와 동일 사유).
   "validation.start": route("/v1/foundation/validation-runs/:strategyId/:strategyVersion", true, null, true),
+
+  // task-2699(UX-15): FollowPage.tsx(팔로우 관리·성과 비교)는 spec
+  // L4_product_experience_and_discovery_v1.0.md §2.4/UX-13/UX-14가 정의하는
+  // `src/foundation/follow/` 모듈을 앞서가는 선행 프론트다 — UX-13(contracts/
+  // mirror_rules)·UX-14(mirror_signal)·이를 감싸는 API 라우터
+  // (src/api/routers/follow.py) 모두 아직 없다(src/api/routers 디렉터리에
+  // follow.py 부재, src/foundation/follow 디렉터리 자체가 없음 — grep으로 직접
+  // 확인). auth.sessions.*(task-1325)·backtests.sweep(task-2428)과 동일한 유령
+  // 경로 사유로 4개 라우트 모두 implemented=false 등록 — FollowPage.tsx는 라우터가
+  // 생기기 전까지 네트워크 호출 대신 FollowRouteNotImplementedError(typed)로
+  // 단락한다. v1Path는 마운트 경로 확정 전이라 null. apiPaths.openapi.test.ts
+  // GHOST_PATH_WHITELIST에도 함께 추가할 것.
+  // GET(list)+POST(create)는 같은 리소스 경로를 공유한다(marketplace.listings.base와
+  // 동일 축약 관용, apiRouteTypes.ts 주석 참조) — 항목 하나로 묶는다.
+  "follow.subscriptions.base": route("/v1/foundation/follow/subscriptions", true, null, false),
+  "follow.subscriptions.cancel": route(
+    "/v1/foundation/follow/subscriptions/:subscriptionId",
+    true,
+    null,
+    false,
+  ),
+  "follow.subscriptions.performance": route(
+    "/v1/foundation/follow/subscriptions/:subscriptionId/performance",
+    true,
+    null,
+    false,
+  ),
   ...FOUNDATION_OPS_ROUTES,
 });

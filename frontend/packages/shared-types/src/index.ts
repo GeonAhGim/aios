@@ -43,3 +43,5 @@ export * from "./holdPayoutView";
 export * from "./script";
 export * from "./validationView";
 export * from "./connections";
+export * from "./follow";
+export * from "./advisoryDisclaimer";

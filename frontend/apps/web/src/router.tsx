@@ -24,6 +24,7 @@ import { DashboardPage } from "./routes/dashboard/DashboardPage";
 import { DisputeSubmitPage } from "./routes/disputes/DisputeSubmitPage";
 import { ExchangeManagementPage } from "./routes/exchanges/ExchangeManagementPage";
 import { ExecutionControlPage } from "./routes/executions/ExecutionControlPage";
+import { FollowPage } from "./routes/follow/FollowPage";
 import { CandlesPage } from "./routes/market/CandlesPage";
 import { InstrumentsPage } from "./routes/market/InstrumentsPage";
 import { ListingDetailPage } from "./routes/marketplace/ListingDetailPage";
@@ -79,6 +80,7 @@ export const router = createBrowserRouter([
   { path: "/marketplace/sell", element: protect(<SellStrategyPage />) },
   { path: "/marketplace/:listingId", element: protect(<ListingDetailPage />) },
   { path: "/executions", element: protect(<ExecutionControlPage />) },
+  { path: "/follow", element: protect(<FollowPage />) },
   { path: "/portfolio", element: protect(<PortfolioPage />) },
   { path: "/mandates", element: protect(<MandatesPage />) },
   { path: "/compliance", element: protect(<CompliancePage />) },

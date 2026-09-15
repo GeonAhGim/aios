@@ -123,3 +123,8 @@ export type {
 // IndicatorCatalogPort로 화면이 직접 주입한다).
 export { createIndicatorsClient } from "./clients/indicators";
 export type { IndicatorCatalogItem, IndicatorsClient, IndicatorTier, ListIndicatorsParams, ListIndicatorsResult } from "./clients/indicators";
+// task-2699(UX-15): §2.4 follow 구독·성과 비교 클라이언트(backtests.ts와 동일 관용 —
+// AiosApiClient 합성에는 얹지 않고 화면이 createFollowClient로 직접 만든다). 런타임에는
+// 유령 경로(FollowRouteNotImplementedError 참조, src/api/routers/follow.py 미구현).
+export { createFollowClient, FollowRouteNotImplementedError } from "./clients/follow";
+export type { FollowClient } from "./clients/follow";
