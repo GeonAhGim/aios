@@ -9,7 +9,7 @@ from __future__ import annotations
 import asyncio
 import json
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from pathlib import Path
@@ -259,31 +259,21 @@ def test_digest_detects_single_field_corruption_in_every_column(tmp_path: Path):
     original = _daily_columns(2026, [0, 1, 2])
     base_digest = _digest(original)
 
-    def _replace(**overrides: object) -> CandleColumns:
-        fields: dict[str, object] = {
-            "ts": original.ts,
-            "open": original.open,
-            "high": original.high,
-            "low": original.low,
-            "close": original.close,
-            "volume": original.volume,
-            "quote_volume": original.quote_volume,
-        }
-        fields.update(overrides)
-        return CandleColumns(**fields)  # type: ignore[arg-type]
-
     corrupted_variants = [
-        _replace(ts=[original.ts[0] + timedelta(seconds=1), *original.ts[1:]]),
-        _replace(open=[original.open[0] + Decimal("0.0000000001"), *original.open[1:]]),
-        _replace(high=[original.high[0] + Decimal("0.0000000001"), *original.high[1:]]),
-        _replace(low=[original.low[0] + Decimal("0.0000000001"), *original.low[1:]]),
-        _replace(close=[original.close[0] + Decimal("0.0000000001"), *original.close[1:]]),
-        _replace(volume=[original.volume[0] + Decimal("0.0000000001"), *original.volume[1:]]),
-        _replace(
+        replace(original, ts=[original.ts[0] + timedelta(seconds=1), *original.ts[1:]]),
+        replace(original, open=[original.open[0] + Decimal("0.0000000001"), *original.open[1:]]),
+        replace(original, high=[original.high[0] + Decimal("0.0000000001"), *original.high[1:]]),
+        replace(original, low=[original.low[0] + Decimal("0.0000000001"), *original.low[1:]]),
+        replace(original, close=[original.close[0] + Decimal("0.0000000001"), *original.close[1:]]),
+        replace(
+            original, volume=[original.volume[0] + Decimal("0.0000000001"), *original.volume[1:]]
+        ),
+        replace(
+            original,
             quote_volume=[
                 Decimal("0") if original.quote_volume[0] is None else None,
                 *original.quote_volume[1:],
-            ]
+            ],
         ),
     ]
 
