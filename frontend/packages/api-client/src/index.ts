@@ -134,3 +134,8 @@ export type { FollowClient } from "./clients/follow";
 // (AiRouteNotImplementedError 참조, src/api/routers/ai.py 미구현, AI-17).
 export { createAiClient, AiRouteNotImplementedError } from "./clients/ai";
 export type { AiClient } from "./clients/ai";
+// task-2692(UX-8): §2.2 스크리너 실행 클라이언트(follow.ts와 동일 관용 — AiosApiClient
+// 합성에는 얹지 않고 화면이 createScreenerClient로 직접 만든다). 런타임에는 유령 경로
+// (ScreenerRouteNotImplementedError 참조, src/api/routers/screener.py 미구현, UX-6).
+export { createScreenerClient, ScreenerRouteNotImplementedError } from "./clients/screener";
+export type { ScreenerClient } from "./clients/screener";

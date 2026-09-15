@@ -36,6 +36,7 @@ import { MfaSetupPage } from "./routes/onboarding/MfaSetupPage";
 import { RiskAssessmentPage } from "./routes/onboarding/RiskAssessmentPage";
 import { PortfolioPage } from "./routes/portfolio/PortfolioPage";
 import { ReportsPage } from "./routes/reports/ReportsPage";
+import { ScreenerPage } from "./routes/screener/ScreenerPage";
 import { WriteReviewPage } from "./routes/reviews/WriteReviewPage";
 import { ScriptEditorPage } from "./routes/scripts/ScriptEditorPage";
 import { AccountDeletionPage } from "./routes/settings/AccountDeletionPage";
@@ -76,6 +77,7 @@ export const router = createBrowserRouter([
   { path: "/scripts/editor", element: protect(<ScriptEditorPage />) },
   { path: "/market/candles", element: protect(<CandlesPage />) },
   { path: "/chart", element: protect(<ChartPage />) },
+  { path: "/screener", element: protect(<ScreenerPage />) },
   { path: "/backtest/sweep-results", element: protect(<SweepResultsPage />) },
   { path: "/marketplace", element: protect(<MarketplaceBrowsePage />) },
   { path: "/marketplace/sell", element: protect(<SellStrategyPage />) },

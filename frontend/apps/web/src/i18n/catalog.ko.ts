@@ -72,6 +72,49 @@ export const catalogKo = {
       noMetrics: "비교할 지표가 없습니다.",
     },
   },
+  // task-2692(UX-8): ScreenerPage.tsx(필터 빌더·결과 표·차트/백테스트 연결) — ai.*
+  // 와 동일하게 이 화면도 문구를 전부 t(key)로 조회한다.
+  screener: {
+    pageTitle: "스크리너",
+    filterBuilder: {
+      title: "필터 빌더",
+      universeLabel: "유니버스",
+      universePlaceholder: "예: KRX, BITGET",
+      kindLabel: "종류",
+      kind: {
+        indicator: "지표",
+        fundamental: "펀더멘털",
+        research: "리서치",
+        backtest_stat: "백테스트 통계",
+      },
+      fieldLabel: "필드",
+      operatorLabel: "연산자",
+      valueLabel: "값",
+      asOfLabel: "기준 시각(as_of)",
+      addFilter: "필터 추가",
+      removeFilter: "필터 제거",
+      sortFieldLabel: "정렬 필드",
+      sortDirection: {
+        asc: "오름차순",
+        desc: "내림차순",
+      },
+      run: "실행",
+    },
+    validation: {
+      universeRequired: "유니버스를 입력하세요.",
+      filtersRequired: "필터를 하나 이상 추가하세요.",
+      filterIncomplete: "{{position}}번째 필터의 필드·값을 채우세요.",
+      filterResearchAsOfRequired: "{{position}}번째 리서치 필터는 기준 시각(as_of)이 필요합니다(누수 차단).",
+    },
+    results: {
+      title: "결과",
+      beforeRun: "필터를 구성하고 실행하세요.",
+      empty: "조건에 맞는 종목이 없습니다.",
+      truncated: "결과가 1,000행 상한에 도달해 잘렸습니다.",
+      viewInChart: "차트/백테스트에서 보기",
+      totalLabel: "{{total}}건",
+    },
+  },
 } as const;
 
 export type CatalogKo = typeof catalogKo;
