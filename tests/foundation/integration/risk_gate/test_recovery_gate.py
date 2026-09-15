@@ -88,6 +88,50 @@ async def actor_id(pool) -> UUID:
     return await create_test_tenant(pool)
 
 
+class _Rendezvous:
+    """n-party barrier (stdlib `asyncio.Barrier` needs 3.11+, this repo runs
+    3.10). Used to force two coroutines to reach the same point before
+    either proceeds -- see `_GatedRepo` below."""
+
+    def __init__(self, n: int) -> None:
+        self._n = n
+        self._count = 0
+        self._event = asyncio.Event()
+
+    async def wait(self) -> None:
+        self._count += 1
+        if self._count >= self._n:
+            self._event.set()
+        else:
+            await self._event.wait()
+
+
+class _GatedRecorder:
+    """Wraps a `RiskDecisionRecorder` so `record()` blocks on a shared
+    rendezvous before returning. Without this, plain `asyncio.gather` does
+    not actually race two `evaluate_recovery()` calls against a local
+    Postgres -- one coroutine's whole call chain (read, decide, WORM
+    record, deactivate) consistently completes before the other's very
+    first query lands, so the loser observes the control already INACTIVE
+    at its own read instead of racing at the conditional UPDATE. Gating
+    `record()` forces both calls to finish reading+deciding+recording
+    (while the control is still ACTIVE for both) before either is allowed
+    to proceed to `deactivate_safety_control`, so they race for real at the
+    DB-level conditional UPDATE."""
+
+    def __init__(self, inner, rendezvous: _Rendezvous) -> None:
+        self._inner = inner
+        self._rendezvous = rendezvous
+
+    def __getattr__(self, name):
+        return getattr(self._inner, name)
+
+    async def record(self, *args, **kwargs):
+        result = await self._inner.record(*args, **kwargs)
+        await self._rendezvous.wait()
+        return result
+
+
 def _repos(risk_gate_repo, cb, pool, recorder, **overrides) -> RecoveryGateRepos:
     kwargs = {"cooldown_sec": _COOLDOWN_SEC, "approval_ttl_sec": _APPROVAL_TTL_SEC, **overrides}
     return RecoveryGateRepos(
@@ -436,8 +480,13 @@ async def test_concurrent_recovery_instances_only_one_deactivates_control(
     )
     approval_id = await _make_approved_request(pool)
 
-    repos_a = _repos(PostgresRiskGateRepository(pool), cb, pool, recorder)
-    repos_b = _repos(PostgresRiskGateRepository(pool), cb, pool, recorder)
+    rendezvous = _Rendezvous(2)
+    repos_a = _repos(
+        PostgresRiskGateRepository(pool), cb, pool, _GatedRecorder(recorder, rendezvous)
+    )
+    repos_b = _repos(
+        PostgresRiskGateRepository(pool), cb, pool, _GatedRecorder(recorder, rendezvous)
+    )
 
     async def _eval(repos):
         return await evaluate_recovery(
