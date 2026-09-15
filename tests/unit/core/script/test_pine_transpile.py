@@ -12,7 +12,10 @@ TradingView 원문 반입 금지 — 라이선스 문제 없이 흔한 Pine 관�
    거부 10개는 실패가 나는 계층(Pine 파서 DSL-14 vs 이 리프의 변환)과 이유를
    구분해 "의미 차이 명시" DoD를 정확한 예외 타입으로 고정한다.
 """
+
 from __future__ import annotations
+
+from typing import Any
 
 import pytest
 
@@ -47,13 +50,11 @@ def test_assign_becomes_let_decl() -> None:
 
 def test_input_int_becomes_input_decl() -> None:
     program = transpile_source('len = input.int(14, title="Length")')
-    assert program.decls == (
-        InputDecl(name="len", type=TypeNode(name="int"), value=14),
-    )
+    assert program.decls == (InputDecl(name="len", type=TypeNode(name="int"), value=14),)
 
 
 def test_input_float_becomes_input_decl_with_float_value() -> None:
-    program = transpile_source("mult = input.float(2, title=\"Mult\")")
+    program = transpile_source('mult = input.float(2, title="Mult")')
     decl = program.decls[0]
     assert isinstance(decl, InputDecl)
     assert decl.type.name == "float"
@@ -285,3 +286,55 @@ def test_public_corpus_pass_rate_is_reported() -> None:
     pass_count = sum(outcomes)
     assert pass_count == 20
     assert len(outcomes) - pass_count == 10
+
+
+# ---- DEPTH D2 추가 증빙 (task-2374 회신) ----
+
+
+# 1. 실패 주입 (failure injection): transpile_program이 예외를 raise하면
+#    transpile_and_verify가 그 예외를 그대로 전파한다.
+def test_failure_injection_transpile_program_raises() -> None:
+    """DoD "실패 주입" — transpile_program을 monkeypatch해 인위적 실패를 주입하고,
+    transpile_and_verify가 그 예외를 감싸지 않고 전파하는지를 확인한다."""
+    from unittest.mock import patch
+
+    def _raise_always(_pine: Any) -> Any:
+        raise PineTranspileError("injected failure")
+
+    with patch("src.core.script.import_.pine.transpile.transpile_program", _raise_always):
+        with pytest.raises(PineTranspileError, match="injected failure"):
+            transpile_and_verify("close > open")
+
+
+# 2. 수치 성능 단언 (numerical performance): transpile 지연이 임계치 이하
+def test_transpile_latency_under_threshold() -> None:
+    """DoD "수치 성능 단언" — 공개 예제 30개를 transpile_and_verify할 때
+    총 지연이 10초 미만이어야 한다(성능 회귀 가드)."""
+    import time
+
+    start = time.perf_counter()
+    for _case_id, source, _expect in _CORPUS:
+        if _expect == _OK:
+            transpile_and_verify(source)
+    elapsed = time.perf_counter() - start
+    assert elapsed < 10.0, f"transpile 지연 {elapsed:.2f}s — 임계치 10초 초과"
+
+
+# 3. 게이트 적색 재현 (gate red reproduction): corpus 통과율 회귀 가드
+#    통과율 20/30(66.7%)가 의도된 거부이므로, 회귀로 통과율이 떨어지면 게이트 적색.
+def test_corpus_pass_rate_regression_guard() -> None:
+    """DoD "게이트 적색 재현" — corpus 통과율이 의도된 값(20/30) 아래로 떨어지면
+    실패한다. 회귀는 허용되지 않는다."""
+    outcomes: list[bool] = []
+    for _case_id, source, _expect in _CORPUS:
+        try:
+            transpile_and_verify(source)
+            outcomes.append(True)
+        except Exception:  # noqa: BLE001
+            outcomes.append(False)
+    pass_rate = sum(outcomes) / len(outcomes)
+    expected_rate = 20 / 30
+    assert pass_rate >= expected_rate, (
+        f"corpus 통과율 회귀: {sum(outcomes)}/{len(outcomes)} ({pass_rate:.1%}) < "
+        f"의도된 {expected_rate:.1%} — 회귀 가드 적색"
+    )
