@@ -195,10 +195,21 @@ async def test_bitget_fetch_candles_filter_sort_throughput_bounded_vs_trivial_ba
     30회 반복 처리하는 총소요시간이, 같은 프로세스가 방금 측정한 구조적으로
     동등한 트리비얼 정렬 베이스라인 대비 좁은 배율 범위여야 한다. 절대 ms
     상수 대신 정규화 배율을 쓴다(test_kis_provider_deepen.py 선례와 동일
-    판단 — 공유 CI 환경에서 절대 임계는 상시 적색을 낳는다)."""
+    판단 — 공유 CI 환경에서 절대 임계는 상시 적색을 낳는다).
+
+    `BitgetProvider`(`base_adapter.py`)는 호출마다 토큰버킷
+    (10 req/s, burst 20)을 통과한다 — `sleep`을 주입하지 않으면 30회
+    반복 중 burst를 넘는 호출들이 진짜 `asyncio.sleep`으로 대기해
+    측정 대상(필터+정렬)과 무관한 고정 지연이 섞여 배율이 기기 성능과
+    반비례로 널뛴다(base_adapter.py의 "시간은 주입받는다" 설계를 그대로
+    따라 무지연 fake sleep을 준다)."""
     candles = _large_bitget_candle_set(_N_CANDLES)
     fake = _FakeBitgetAdapter({"BTC/USDT": candles})
-    provider = BitgetProvider(fake)
+
+    async def _no_wait(_seconds: float) -> None:
+        return None
+
+    provider = BitgetProvider(fake, sleep=_no_wait)
     span = TimeSpan(start=_BASE, end=_BASE + timedelta(hours=_N_CANDLES + 1))
 
     # 워밍업 — import/최초 호출 1회성 비용이 표본에 섞이지 않게 한다.
