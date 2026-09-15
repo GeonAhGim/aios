@@ -8,6 +8,7 @@ fail-closed 규칙표(§4.1) 그대로: REJECT 심각도 이슈는 캔들별 격
 `total<=0`은 채점 불가 상태라 fail-closed 기본값으로 REJECT를 반환한다
 (§4.1 표에 명시된 배치 규칙은 아니며, 방어적 기본값 — 미검증).
 """
+
 from __future__ import annotations
 
 from decimal import Decimal
@@ -25,7 +26,7 @@ def decide(issues: list[QualityIssue], total: int) -> QualityVerdict:
             verdict=Verdict.REJECT, accepted=0, quarantined=0, rejected=0, issues=list(issues)
         )
 
-    rejected = sum(1 for issue in issues if issue.severity is Severity.REJECT)
+    rejected = sum(1 for issue in issues if issue.severity == Severity.REJECT)
     if Decimal(rejected) / Decimal(total) > _REJECT_RATIO_LIMIT:
         return QualityVerdict(
             verdict=Verdict.QUARANTINE,
