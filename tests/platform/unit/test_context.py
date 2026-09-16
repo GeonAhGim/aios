@@ -1,11 +1,28 @@
 import asyncio
+import time
 import uuid
+from unittest.mock import patch
 
 import pytest
 from pydantic import ValidationError
 
 from src.core.logging.request_context import request_id_var
-from src.core.observability.context import bind, bind_system, current
+from src.core.observability.context import RequestContext, bind, bind_system, current
+
+# ADR-2026-09-09-C Decision 1 예산표에 contextvar 전파 전용 항목은 없다. bind_system()은
+# 매 백그라운드 루프 tick(또는 매 요청, bind() 경유)마다 I/O 없이 도는 인프로세스 핫패스라
+# 가장 근접한 항목인 "사전거래 게이트 p99 5ms"(§Decision 1)를 차용한다.
+_PRETRADE_GATE_P99_BUDGET_SEC = 0.005
+
+
+def _measure_bind_system_cycle(n: int) -> list[float]:
+    samples = []
+    for _ in range(n):
+        start = time.perf_counter()
+        with bind_system("perf.probe"):
+            current()
+        samples.append(time.perf_counter() - start)
+    return samples
 
 
 def test_current_without_bind_returns_system_default():
@@ -112,3 +129,56 @@ def test_bind_exception_still_restores_context():
 
     assert current().component == before.component
     assert request_id_var.get() is None
+
+
+def test_request_context_rejects_invalid_actor_subject_id():
+    """negative — actor_subject_id는 UUID이거나 리터럴 "system"이어야 한다. 이 두 형태를
+    벗어난 값(예: 임의 문자열)이 검증 없이 통과하면 감사 로그의 행위자 식별이 깨진다."""
+    with pytest.raises(ValidationError):
+        RequestContext(
+            trace_id=uuid.uuid4(),
+            request_id="req-invalid-actor",
+            actor_subject_id="not-system-and-not-a-uuid",
+        )
+
+
+def test_bind_system_failure_during_trace_id_generation_leaves_no_partial_context():
+    """실패 주입 — bind_system이 새 trace_id/request_id를 만드는 도중(uuid.uuid4) 예외가
+    나면 fail-closed여야 한다: 예외가 인자 평가 단계에서 나므로 `_context_var`/
+    `request_id_var` 어느 쪽도 set되지 않은 채 그대로 원복(무영향) 상태로 남아야 한다."""
+    before = current()
+    assert request_id_var.get() is None
+
+    with patch("src.core.observability.context.uuid.uuid4", side_effect=RuntimeError("boom")):
+        with pytest.raises(RuntimeError):
+            with bind_system("safety.watchdog"):
+                pass
+
+    assert current().component == before.component
+    assert request_id_var.get() is None
+
+
+def test_bind_system_cycle_meets_pretrade_gate_budget():
+    """수치 성능 단언 — bind_system()+current() 사이클(트레이스 생성 2회 + contextvar
+    set/reset 2쌍)의 p99가 예산 안에 들어오는지 확인한다. 예산 근거는 모듈 상단 주석."""
+    samples = sorted(_measure_bind_system_cycle(500))
+    p99 = samples[int(len(samples) * 0.99)]
+
+    assert p99 < _PRETRADE_GATE_P99_BUDGET_SEC
+
+
+def test_bind_system_cycle_budget_assertion_catches_regression():
+    """게이트 적색 재현 — uuid.uuid4에 10ms 인위 지연을 주입해 위 p99 예산 단언이 실제로
+    AssertionError를 내는지 확인한다(타우톨로지가 아님을 증명)."""
+    real_uuid4 = uuid.uuid4
+
+    def _slow_uuid4() -> uuid.UUID:
+        time.sleep(0.01)
+        return real_uuid4()
+
+    with patch("src.core.observability.context.uuid.uuid4", side_effect=_slow_uuid4):
+        samples = sorted(_measure_bind_system_cycle(20))
+    p99 = samples[int(len(samples) * 0.99)]
+
+    with pytest.raises(AssertionError):
+        assert p99 < _PRETRADE_GATE_P99_BUDGET_SEC
