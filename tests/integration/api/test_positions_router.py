@@ -9,6 +9,8 @@ pos_nav_daily)는 LB-9 어댑터를 직접 호출해 만든다 — 라우터가 
 
 from __future__ import annotations
 
+import asyncio
+import math
 import os
 import time
 import uuid
@@ -21,7 +23,7 @@ import pytest
 from httpx import ASGITransport, AsyncClient
 
 from src.api.deps import get_pool
-from src.api.routers.positions import get_snapshot_repository
+from src.api.routers.positions import get_entity_repository, get_snapshot_repository
 from src.data.models.base import Currency, Money
 from src.foundation.entities.adapters.postgres_repository import PostgresEntityRepository
 from src.foundation.positions.adapters.postgres_journal_repository import (
@@ -598,3 +600,128 @@ async def test_list_positions_closed_portfolio_scope_is_rejected_fail_closed(cli
     )
     assert response.status_code == 404
     _assert_error_envelope(response.json(), "RESOURCE_NOT_FOUND")
+
+
+class _OutageEntityRepository:
+    """FA-6 실패주입 -- entities 저장소가 `resolve_portfolio_scope` 조회
+    도중 커넥션 예외를 던지는 인프라 장애를 흉내낸다(도메인 예외가 아니라
+    asyncpg 드라이버 예외). DEPTH 감사(task-2724)가 지적한 공백: 지금까지의
+    `portfolio_id` negative는 전부 "존재하지 않음/폐쇄됨" 같은 정상 입력
+    검증 거부였을 뿐, entities 저장소 자체가 죽는 경우는 흉내낸 적이 없었다."""
+
+    async def get_legal_entity(self, tenant_id, entity_id):
+        raise asyncpg.PostgresConnectionError("simulated entities adapter outage")
+
+    async def get_fund(self, tenant_id, fund_id):
+        raise asyncpg.PostgresConnectionError("simulated entities adapter outage")
+
+    async def get_portfolio(self, tenant_id, portfolio_id):
+        raise asyncpg.PostgresConnectionError("simulated entities adapter outage")
+
+    async def get_sub_account(self, tenant_id, sub_account_id):
+        raise asyncpg.PostgresConnectionError("simulated entities adapter outage")
+
+
+async def test_list_positions_portfolio_id_entities_outage_is_fail_closed_500(client, pool):
+    """failure-injection -- `portfolio_id` 스코프 검증에 쓰는 entities
+    저장소가 커넥션 예외를 던지면, 이미 조회를 시작했다는 이유로 스코프
+    없이(또는 unscoped) 200을 흘리지 않고 500/INTERNAL_ERROR 봉투로
+    fail-closed 한다. 원인 예외 문자열은 응답 메시지에 새지 않는다."""
+    headers, tenant_id = await _register(client)
+    repo = PostgresEntityRepository(pool)
+    hierarchy = await build_hierarchy(pool, repo, tenant_id=tenant_id)
+    account_id = await _create_account(pool, tenant_id)
+    await _open_position(
+        pool,
+        tenant_id=tenant_id,
+        account_id=account_id,
+        quantity=Decimal("1"),
+        portfolio_id=hierarchy.portfolio.portfolio_id,
+    )
+
+    app.dependency_overrides[get_entity_repository] = lambda: _OutageEntityRepository()
+    try:
+        response = await client.get(
+            BASE, headers=headers, params={"portfolio_id": str(hierarchy.portfolio.portfolio_id)}
+        )
+    finally:
+        app.dependency_overrides.pop(get_entity_repository, None)
+
+    assert response.status_code == 500
+    body = response.json()
+    _assert_error_envelope(body, "INTERNAL_ERROR")
+    assert "PostgresConnectionError" not in body["message"]
+    assert "simulated entities adapter outage" not in body["message"]
+
+
+async def test_list_positions_portfolio_id_concurrent_mixed_tenants_do_not_cross_leak(client, pool):
+    """D3증거 -- 서로 다른 tenant가 `portfolio_id`로 스코프한 `GET /positions`를
+    asyncio.gather로 동시에 섞어 호출해도(공유 커넥션 풀·앱 인스턴스) 각
+    요청은 자신의 tenant_id/portfolio_id 기준으로만 결과를 받는다 -- 동시
+    실행이 만드는 경합으로 한 tenant의 포지션이 다른 tenant 응답에 섞여
+    드는 사고(교차 유출)가 없음을 증명한다."""
+    repo = PostgresEntityRepository(pool)
+    sessions: list[tuple[dict, UUID]] = []
+    for _ in range(3):
+        headers, tenant_id = await _register(client)
+        hierarchy = await build_hierarchy(pool, repo, tenant_id=tenant_id)
+        account_id = await _create_account(pool, tenant_id)
+        await _open_position(
+            pool,
+            tenant_id=tenant_id,
+            account_id=account_id,
+            quantity=Decimal("1"),
+            portfolio_id=hierarchy.portfolio.portfolio_id,
+        )
+        sessions.append((headers, hierarchy.portfolio.portfolio_id))
+
+    async def _fetch(headers: dict, portfolio_id: UUID):
+        return await client.get(BASE, headers=headers, params={"portfolio_id": str(portfolio_id)})
+
+    calls = [_fetch(headers, portfolio_id) for headers, portfolio_id in sessions for _ in range(3)]
+    responses = await asyncio.gather(*calls)
+
+    for response in responses:
+        assert response.status_code == 200
+        assert len(response.json()["data"]["items"]) == 1
+
+
+async def test_list_positions_portfolio_id_p95_latency_stays_within_normalized_ceiling(
+    client, pool
+):
+    """수치 성능 단언 -- 공유 TEST_DATABASE_URL의 절대 지연 변동성 때문에
+    절대 ms 임계 대신, 가벼운 baseline 호출 1건 대비 정규화한 상한만
+    게이트로 쓴다(task-2993/3009와 동일 교훈). `portfolio_id` 경로는
+    `resolve_portfolio_scope`가 추가하는 3회 라운드트립만큼 무변경 경로보다
+    비용이 늘어야 정상이므로, 그 고정 비용이 회귀로 자라는지 감시한다."""
+    headers, tenant_id = await _register(client)
+    repo = PostgresEntityRepository(pool)
+    hierarchy = await build_hierarchy(pool, repo, tenant_id=tenant_id)
+    account_id = await _create_account(pool, tenant_id)
+    await _open_position(
+        pool,
+        tenant_id=tenant_id,
+        account_id=account_id,
+        quantity=Decimal("1"),
+        portfolio_id=hierarchy.portfolio.portfolio_id,
+    )
+
+    async def _call() -> float:
+        started = time.monotonic()
+        response = await client.get(
+            BASE, headers=headers, params={"portfolio_id": str(hierarchy.portfolio.portfolio_id)}
+        )
+        elapsed = time.monotonic() - started
+        assert response.status_code == 200
+        return elapsed
+
+    baseline_elapsed = await _call()
+    samples = sorted([await _call() for _ in range(20)])
+    p95 = samples[math.ceil(0.95 * len(samples)) - 1]
+
+    ceiling = baseline_elapsed * 5 + 0.05
+    assert p95 <= ceiling, (
+        f"GET /positions?portfolio_id=... p95 지연 {p95:.4f}s가 정규화 상한 "
+        f"{ceiling:.4f}s(baseline {baseline_elapsed:.4f}s)를 초과했습니다 -- "
+        "resolve_portfolio_scope 라운드트립 회귀 의심"
+    )
