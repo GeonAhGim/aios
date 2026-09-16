@@ -6,9 +6,11 @@ a denial, an off-by-one clamp value, a clamp-to-zero silently approving a
 zero-quantity order, or reasons ordering drifting between two identical
 calls must each fail some test here.
 """
+
 from __future__ import annotations
 
 import hashlib
+import time
 from datetime import datetime, timezone
 from decimal import Decimal
 from uuid import uuid4
@@ -264,3 +266,31 @@ def test_unclamped_order_approves_full_quantity_with_no_reasons():
     assert result.denied is False
     assert result.quantity == Decimal("10")
     assert result.reasons == []
+
+
+# --- D2 성능 단언 (performance assertion) --------------------------------------
+
+
+def test_bind_p99_latency_within_pretrade_gate_budget():
+    """ADR-2026-09-09-C Decision 1 축별 성능 예산: 사전거래 게이트 p99 5ms.
+    `bind()`가 바로 그 사전거래 사이징 게이트다(모듈 docstring -- 매수/매도
+    수량이 거래소로 나가기 직전에 호출됨)."""
+    m = mandate(
+        max_single_instrument_pct=20.0,
+        max_total_exposure_pct=30.0,
+        min_cash_buffer_pct=10.0,
+    )
+    a = agg(
+        total_equity=Decimal("10000"),
+        per_symbol_pct={"BTC/USDT": Decimal("5")},
+        total_exposure_pct=Decimal("10"),
+    )
+    samples: list[float] = []
+    for _ in range(200):
+        start = time.perf_counter()
+        bind(qty=Decimal("50"), price=Decimal("100"), symbol="BTC/USDT", agg=a, mandate=m)
+        samples.append(time.perf_counter() - start)
+
+    samples.sort()
+    p99_seconds = samples[int(len(samples) * 0.99)]
+    assert p99_seconds < 0.005, f"p99={p99_seconds * 1000:.3f}ms exceeds 5ms budget"
