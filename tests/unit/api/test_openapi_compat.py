@@ -7,9 +7,11 @@ DB·네트워크·앱 임포트 전부 없음(decision) — 베이스라인/현�
 from __future__ import annotations
 
 import json
+import subprocess
 
 import pytest
 
+import scripts.check_openapi_compat as compat_module
 from scripts.check_openapi_compat import find_violations, main
 
 
@@ -312,9 +314,7 @@ def _envelope_bundle(inner_props: dict) -> dict:
             "responses": {
                 "200": {
                     "content": {
-                        "application/json": {
-                            "schema": {"$ref": "#/components/schemas/Envelope"}
-                        }
+                        "application/json": {"schema": {"$ref": "#/components/schemas/Envelope"}}
                     }
                 }
             }
@@ -403,9 +403,7 @@ def test_array_items_ref_nested_property_removed_fails():
 
     violations = find_violations(baseline, current)
 
-    assert any(
-        "response property 제거" in v and ".results[] .label" in v for v in violations
-    )
+    assert any("response property 제거" in v and ".results[] .label" in v for v in violations)
 
 
 def test_array_items_ref_nested_property_type_change_fails():
@@ -441,3 +439,42 @@ def test_self_referential_ref_cycle_terminates_without_error():
     current = json.loads(json.dumps(baseline))
 
     assert find_violations(baseline, current) == []
+
+
+# --- PLT-16 DEEPEN(task-3151): 실패 주입 -----------------------------------
+# `--current` 생략 시 `main()`은 `export_openapi.py`를 서브프로세스로 실행해
+# "현재" 스키마를 얻는다(export_openapi_current 경유). 이 외부 의존이 깨지면
+# 검사가 그걸 삼켜 거짓 OK를 내면 안 된다 — CLAUDE.md "기본 태세는 fail-closed"
+# 원칙을 이 서브프로세스 경계에서 실증한다.
+
+
+def test_main_propagates_when_export_subprocess_fails(monkeypatch, tmp_path):
+    """실패 주입: export_openapi.py가 비정상 종료(예: 앱 임포트 깨짐)하면
+    예외가 그대로 전파돼야 한다 — 삼켜서 exit 0을 내면 안 된다."""
+    baseline = _schema(paths={"/widgets": _get_ok_path()}, schemas={"Widget": _widget_schema()})
+    baseline_path = tmp_path / "baseline.json"
+    baseline_path.write_text(json.dumps(baseline), encoding="utf-8")
+
+    def _fail(*args, **kwargs):
+        raise subprocess.CalledProcessError(returncode=1, cmd=["export_openapi"])
+
+    monkeypatch.setattr(compat_module.subprocess, "run", _fail)
+
+    with pytest.raises(subprocess.CalledProcessError):
+        main(["--baseline", str(baseline_path)])
+
+
+def test_main_propagates_when_export_subprocess_lies_about_success(monkeypatch, tmp_path):
+    """실패 주입: 서브프로세스가 returncode 0으로 끝나도 출력 파일을 쓰지
+    않으면(부분 실패·버그) 그 누락을 놓치고 통과시키면 안 된다."""
+    baseline = _schema(paths={"/widgets": _get_ok_path()}, schemas={"Widget": _widget_schema()})
+    baseline_path = tmp_path / "baseline.json"
+    baseline_path.write_text(json.dumps(baseline), encoding="utf-8")
+
+    def _noop_run(*args, **kwargs):
+        return subprocess.CompletedProcess(args=["export_openapi"], returncode=0)
+
+    monkeypatch.setattr(compat_module.subprocess, "run", _noop_run)
+
+    with pytest.raises(FileNotFoundError):
+        main(["--baseline", str(baseline_path)])
