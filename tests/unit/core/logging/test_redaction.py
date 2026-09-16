@@ -34,7 +34,18 @@ def _measure_redact_cycle(n: int) -> list[float]:
 
 @pytest.mark.parametrize(
     "key",
-    ["api_key", "API_KEY", "user_api_key", "secret", "Password", "totp", "TOKEN", "private_key"],
+    [
+        "api_key",
+        "API_KEY",
+        "user_api_key",
+        "secret",
+        "Password",
+        "totp",
+        "TOKEN",
+        "private_key",
+        "vault_secret_ref",
+        "exchange_secret_key",
+    ],
 )
 def test_deny_key_partial_match_case_insensitive(key: str):
     result = redact({key: "s3nsitive-value"})
