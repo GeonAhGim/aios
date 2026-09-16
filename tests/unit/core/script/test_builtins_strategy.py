@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import ast
 import time
+from decimal import Decimal
 from pathlib import Path
 
 import pytest
@@ -56,7 +57,7 @@ def call(kind: str, *args: Value, bars: int = 4) -> tuple[Value, StrategyBuiltin
 
 def test_table_contains_exactly_the_documented_functions() -> None:
     sb = StrategyBuiltins()
-    assert set(STRATEGY_KINDS) == {"entry", "exit", "close", "order"}
+    assert set(STRATEGY_KINDS) == {"entry", "exit", "close", "order", "bracket"}
     assert set(sb.table) == {("strategy", kind) for kind in STRATEGY_KINDS}
 
 
@@ -143,6 +144,179 @@ def test_entry_rejects_side_outside_long_short_encoding(bad_side: Value) -> None
     with pytest.raises(BuiltinCallError) as info:
         call("entry", bad_side, 1)
     assert info.value.reason == "SCRIPT_BUILTIN_ARG"
+
+
+# ---- task-2623: limit/stop trigger price on entry/order/exit ----
+
+
+@pytest.mark.parametrize(
+    ("kind", "args", "expected_side", "expected_order_type", "expected_trigger"),
+    [
+        ("entry", (1, 10, 100, 1), "long", "limit", 100.0),
+        ("entry", (-1, 5, 50, -1), "short", "stop", 50.0),
+        ("order", (1, 5, 20, 1), "long", "limit", 20.0),
+        ("order", (-1, 5, 20, -1), "short", "stop", 20.0),
+    ],
+)
+def test_entry_order_accept_trigger_price_and_type_code(
+    kind: str,
+    args: tuple[Value, ...],
+    expected_side: str,
+    expected_order_type: str,
+    expected_trigger: float,
+) -> None:
+    result, sb = call(kind, *args)
+    assert result == args[1]
+    intent = sb.intents[0]
+    assert intent.side == expected_side
+    assert intent.order_type == expected_order_type
+    assert intent.trigger_price == Decimal(str(expected_trigger))
+
+
+@pytest.mark.parametrize(
+    ("args", "expected_order_type", "expected_trigger"),
+    [
+        ((3, 90, 1), "limit", 90.0),
+        ((3, 80, -1), "stop", 80.0),
+    ],
+)
+def test_exit_accepts_trigger_price_and_type_code(
+    args: tuple[Value, ...], expected_order_type: str, expected_trigger: float
+) -> None:
+    result, sb = call("exit", *args)
+    assert result == args[0]
+    intent = sb.intents[0]
+    assert intent.kind == "exit"
+    assert intent.side is None
+    assert intent.order_type == expected_order_type
+    assert intent.trigger_price == Decimal(str(expected_trigger))
+
+
+def test_market_entry_defaults_order_type_and_trigger_price() -> None:
+    _, sb = call("entry", 1, 10)
+    intent = sb.intents[0]
+    assert intent.order_type == "market"
+    assert intent.trigger_price is None
+
+
+@pytest.mark.parametrize(
+    ("kind", "args"),
+    [
+        ("entry", (1, 10, 100)),  # 3 args: trigger_price without type_code
+        ("order", (1, 10, 100)),
+        ("exit", (3, 100)),  # 2 args: trigger_price without type_code
+    ],
+)
+def test_trigger_price_and_type_code_are_all_or_nothing(kind: str, args: tuple[Value, ...]) -> None:
+    with pytest.raises(BuiltinCallError) as info:
+        call(kind, *args)
+    assert info.value.reason == "SCRIPT_BUILTIN_ARITY"
+
+
+@pytest.mark.parametrize("bad_type_code", [0, 2, -2, 1.5, None])
+def test_entry_rejects_type_code_outside_limit_stop_encoding(bad_type_code: Value) -> None:
+    with pytest.raises(BuiltinCallError) as info:
+        call("entry", 1, 10, 100, bad_type_code)
+    assert info.value.reason == "SCRIPT_BUILTIN_ARG"
+
+
+@pytest.mark.parametrize("bad_trigger", [0, -1, None])
+def test_entry_rejects_non_positive_or_na_trigger_price(bad_trigger: Value) -> None:
+    with pytest.raises(BuiltinCallError) as info:
+        call("entry", 1, 10, bad_trigger, 1)
+    assert info.value.reason == "SCRIPT_BUILTIN_ARG"
+
+
+def test_entry_rejects_series_trigger_price_even_when_statically_scalar() -> None:
+    with pytest.raises(BuiltinCallError) as info:
+        call("entry", 1, 10, Series.of_floats([100.0, 100.0, 100.0, 100.0]), 1)
+    assert info.value.reason == "SCRIPT_STRATEGY_NONCONSTANT"
+
+
+def test_entry_rejects_series_type_code() -> None:
+    with pytest.raises(BuiltinCallError) as info:
+        call("entry", 1, 10, 100, Series.of_floats([1.0, 1.0, 1.0, 1.0]))
+    assert info.value.reason == "SCRIPT_STRATEGY_NONCONSTANT"
+
+
+# ---- task-2623: strategy.bracket(qty, profit_price, loss_price, trail_pct) ----
+
+
+def test_bracket_records_all_three_legs() -> None:
+    result, sb = call("bracket", 10, 120, 90, 0.05)
+    assert result == 10.0
+    intent = sb.intents[0]
+    assert intent.kind == "bracket"
+    assert intent.side is None
+    assert intent.qty == Decimal("10")
+    assert intent.profit_price == Decimal("120")
+    assert intent.loss_price == Decimal("90")
+    assert intent.trail_pct == Decimal("0.05")
+
+
+@pytest.mark.parametrize(
+    ("args", "expected_profit", "expected_loss", "expected_trail"),
+    [
+        ((10, 120, None, None), Decimal("120"), None, None),
+        ((10, None, 90, None), None, Decimal("90"), None),
+        ((10, None, None, 0.05), None, None, Decimal("0.05")),
+        ((10, 120, 90, None), Decimal("120"), Decimal("90"), None),
+    ],
+)
+def test_bracket_accepts_any_nonempty_subset_of_legs(
+    args: tuple[Value, ...],
+    expected_profit: Decimal | None,
+    expected_loss: Decimal | None,
+    expected_trail: Decimal | None,
+) -> None:
+    _, sb = call("bracket", *args)
+    intent = sb.intents[0]
+    assert intent.profit_price == expected_profit
+    assert intent.loss_price == expected_loss
+    assert intent.trail_pct == expected_trail
+
+
+def test_bracket_rejects_all_three_legs_na() -> None:
+    with pytest.raises(BuiltinCallError) as info:
+        call("bracket", 10, None, None, None)
+    assert info.value.reason == "SCRIPT_BUILTIN_ARG"
+
+
+@pytest.mark.parametrize(("bad_qty"), [0, -1, None])
+def test_bracket_rejects_non_positive_or_na_qty(bad_qty: Value) -> None:
+    with pytest.raises(BuiltinCallError) as info:
+        call("bracket", bad_qty, 120, None, None)
+    assert info.value.reason == "SCRIPT_BUILTIN_ARG"
+
+
+@pytest.mark.parametrize("bad_price", [0, -1])
+def test_bracket_rejects_non_positive_profit_or_loss_price(bad_price: Value) -> None:
+    with pytest.raises(BuiltinCallError) as info:
+        call("bracket", 10, bad_price, None, None)
+    assert info.value.reason == "SCRIPT_BUILTIN_ARG"
+
+
+@pytest.mark.parametrize("bad_trail", [0, 1, 1.5, -0.1])
+def test_bracket_rejects_trail_pct_outside_open_unit_interval(bad_trail: Value) -> None:
+    with pytest.raises(BuiltinCallError) as info:
+        call("bracket", 10, None, None, bad_trail)
+    assert info.value.reason == "SCRIPT_BUILTIN_ARG"
+
+
+@pytest.mark.parametrize(
+    "args",
+    [(), (10,), (10, 120), (10, 120, 90), (10, 120, 90, 0.05, 1)],
+)
+def test_bracket_wrong_arity_is_rejected(args: tuple[Value, ...]) -> None:
+    with pytest.raises(BuiltinCallError) as info:
+        call("bracket", *args)
+    assert info.value.reason == "SCRIPT_BUILTIN_ARITY"
+
+
+def test_bracket_rejects_series_profit_price() -> None:
+    with pytest.raises(BuiltinCallError) as info:
+        call("bracket", 10, Series.of_floats([120.0, 120.0, 120.0, 120.0]), None, None)
+    assert info.value.reason == "SCRIPT_STRATEGY_NONCONSTANT"
 
 
 # ---- negative: (c) 상수 강제 — Series 인자는 타입과 무관하게 거부 ----
@@ -258,6 +432,15 @@ def _purity_violations(source: str) -> list[str]:
 
 def test_module_imports_no_io_or_clock_and_never_calls_itself() -> None:
     assert _purity_violations(_MODULE.read_text(encoding="utf-8")) == []
+
+
+def test_args_module_imports_no_io_or_clock_and_never_calls_itself() -> None:
+    """task-2623로 리졸버들을 `builtins_strategy_args.py`로 분리했다 -- 그
+    파일도 같은 순수성 계약(DoD (e))을 진다."""
+    from src.core.script.runtime import builtins_strategy_args
+
+    args_module = Path(builtins_strategy_args.__file__)
+    assert _purity_violations(args_module.read_text(encoding="utf-8")) == []
 
 
 def test_purity_gate_flags_injected_violation() -> None:
