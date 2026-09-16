@@ -273,10 +273,11 @@ export const API_ROUTES = defineApiRoutes({
     null,
     true,
   ),
-  // evaluate-recovery(risk_gate.py:161)는 contracts/openapi/v1.json에 아직 없다(grep
-  // 직접 확인 — risk-gate 6경로 중 :evaluate-recovery만 스냅샷에 없음) — 라우터는
-  // 실재하므로 GHOST_PATH_WHITELIST(라우터 자체가 없음)가 아니라
-  // STALE_SNAPSHOT_WHITELIST(라우터는 있는데 스냅샷이 낡음, CH-17c 선례)로 뺀다.
+  // task-3850(PLT-35-fix): require_break_glass 배선과 함께 contracts/openapi/v1.json을
+  // 갱신해 이제 스냅샷에 실재한다 — STALE_SNAPSHOT_WHITELIST에서 뺐다(apiPaths.openapi.test.ts).
+  // `:controlId:evaluate-recovery`(camelCase+콜론 복합 세그먼트) vs 서버의
+  // `{control_id}:evaluate-recovery`(snake_case) 표기 차이는 scripts/check_consistency.py의
+  // 크루드 정규화가 구분 못 하는 별개의 오탐이라 그쪽 `_OPENAPI_NO_FRONTEND_UI_ALLOWLIST`에서 다룬다.
   "riskGate.safetyControls.evaluateRecovery": route(
     "/v1/foundation/risk-gate/safety-controls/:controlId:evaluate-recovery",
     true,

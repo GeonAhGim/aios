@@ -9,7 +9,16 @@ FD-18.1(검증 대기열 조회)은 운영자가 아니라 검증담당자(is_ve
 16번(실행 제어판) leaf에서 미룬 FD-10.1 승인 결정(approve/reject) HTTP
 엔드포인트를 여기서 채운다 — LIVE 실행 시작에 필요한 승인은 운영자
 액션이라 이 위치가 맞다.
+
+PLT-35-fix(task-3850): `list_audit_log` reads sensitive cross-tenant/
+cross-user audit history, so it now also carries
+`require_break_glass("tenant_read")` -- the caller must present an
+approved grant via the `X-Break-Glass-Grant` header (which itself goes
+through `get_current_mfa_admin`, so an MFA_VERIFIED session is enforced
+too). The remaining `get_current_admin`-only routes (15+) stay as-is per
+the CTO decision -- out of this leaf's DoD, to avoid a broad regression.
 """
+
 from __future__ import annotations
 
 from uuid import UUID
@@ -23,6 +32,7 @@ from src.api.admin_deps import (
     get_seller_suspension_service,
     get_user_admin_service,
     get_verification_queue_service,
+    require_break_glass,
 )
 from src.api.contracts.envelope import ApiResponse, ok
 from src.api.contracts.idempotency import IdempotencyScope, require_idempotency_key, run_idempotent
@@ -43,6 +53,7 @@ from src.api.schemas.marketplace import (
 from src.api.service_deps import get_wallet_service
 from src.core.approval.service import ApprovalRequest, approve, list_pending, reject
 from src.core.db.conditional_write import ConcurrencyConflictError
+from src.core.security.break_glass import BreakGlassGrant
 from src.services.audit_log_read_service import AuditLogPage, AuditLogReadService
 from src.services.auth_service import User
 from src.services.dispute_resolution_service import (
@@ -79,6 +90,7 @@ async def list_audit_log(
     page_size: int = 50,
     admin: User = Depends(get_current_admin),
     service: AuditLogReadService = Depends(get_audit_log_read_service),
+    _grant: BreakGlassGrant = Depends(require_break_glass("tenant_read")),  # noqa: B008 -- same existing convention as admin_deps.py (the factory call itself is the Depends argument)
 ) -> ApiResponse[AuditLogPage]:
     result = await service.list_entries(
         action_type=action_type,

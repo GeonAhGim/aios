@@ -567,8 +567,24 @@ _ROUTE_CALL_RE = re.compile(r'route\(\s*"([^"]+)"')
 # 테스트가 먼저 잡는다. 값은 "서버 라우터 파일:라인 -- 사유".
 _OPENAPI_NO_FRONTEND_UI_ALLOWLIST: dict[str, str] = {
     "/admin/audit-log": "src/api/routers/admin.py:73 -- 관리자 감사 로그 화면 없음",
+    "/admin/break-glass/grants": (
+        "src/api/routers/admin_break_glass.py:30 -- break-glass grant 요청 콘솔 UI 없음 (task-3850)"
+    ),
+    "/admin/break-glass/grants/{grant_id}:approve": (
+        "src/api/routers/admin_break_glass.py:44 -- break-glass grant 승인 콘솔 UI 없음 (task-3850)"
+    ),
     "/admin/ledger/payouts/{batch_id}/paid": (
         "src/api/routers/foundation/ledger_admin.py:46 -- 정산 배치 확정 액션 UI 없음"
+    ),
+    # task-3850: 이 leaf에서 스냅샷에 처음 등록한 경로(기존에는 스냅샷이 이 경로
+    # 자체를 담고 있지 않아 유령/누락 어느 쪽도 아니었다) — 화면은 이미
+    # riskGate.safetyControls.evaluateRecovery로 이 액션을 호출한다(SafetyControlsPage,
+    # task-2335). `{control_id}:evaluate-recovery` vs `:controlId:evaluate-recovery`
+    # 복합 세그먼트를 이 크루드 스캐너가 구분 못 해 유령으로 오탐한다 — 주석
+    # 558-559행에 이미 기록된 것과 같은 종류의 알려진 오탐.
+    "/v1/foundation/risk-gate/safety-controls/{control_id}:evaluate-recovery": (
+        "src/api/routers/foundation/risk_gate.py:170 -- SafetyControlsPage가 이미 호출함"
+        "(복합 세그먼트 오탐, task-3850)"
     ),
     "/exchange-credentials/{exchange}/positions": (
         "src/api/routers/exchange_credentials.py:97 -- exchange.ts에 positions 조회 없음"

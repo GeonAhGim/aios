@@ -1,10 +1,12 @@
 """18번대 통합테스트 — /admin 라우터. 실제 FastAPI 앱 + 실제 dev DB."""
+
 import json
 import uuid
 from decimal import Decimal
 from pathlib import Path
 
 import asyncpg
+import pyotp
 import pytest
 from dotenv import dotenv_values
 from fastapi import Depends
@@ -15,6 +17,7 @@ from src.api.service_deps import get_credential_resolver
 from src.data.models.trading import AccountBalance
 from src.main import app
 from tests.integration.conftest import NoopEventBus
+from tests.integration.mfa_clock import mfa_clock_shifted, totp_at
 
 STRONG_PASSWORD = "Str0ng!Passw0rd"
 
@@ -94,6 +97,47 @@ async def _make_admin(pool, user_id):
         await conn.execute(
             "UPDATE users SET is_platform_admin = true WHERE user_id = $1", uuid.UUID(user_id)
         )
+
+
+async def _mfa_verified_admin_headers(client, pool) -> dict:
+    """PLT-35-fix(task-3850): `/admin/audit-log`가 이제 `require_break_glass
+    ("tenant_read")`를 요구해, `get_current_admin`만으로는 더 이상 충분하지
+    않다 -- 실제 MFA 설정/로그인 왕복으로 MFA_VERIFIED 토큰을 발급받는다
+    (tests/integration/test_admin_break_glass_router.py의 `_register_mfa_admin`과
+    동일 패턴)."""
+    email = _unique_email()
+    register_response = await client.post(
+        "/auth/register", json={"email": email, "password": STRONG_PASSWORD}
+    )
+    token = register_response.json()["data"]["access_token"]
+    headers = {"Authorization": f"Bearer {token}"}
+    me = await client.get("/users/me", headers=headers)
+    await _make_admin(pool, me.json()["data"]["user_id"])
+
+    setup_response = await client.post("/auth/mfa/setup", headers=headers)
+    secret = setup_response.json()["data"]["secret"]
+    verify_code = pyotp.totp.TOTP(secret).now()
+    await client.post("/auth/mfa/verify", json={"totp_code": verify_code}, headers=headers)
+
+    with mfa_clock_shifted(app, 31) as shifted_now:
+        login_code = totp_at(secret, shifted_now())
+        login_response = await client.post(
+            "/auth/login",
+            json={"email": email, "password": STRONG_PASSWORD, "totp_code": login_code},
+        )
+    mfa_token = login_response.json()["data"]["access_token"]
+    return {"Authorization": f"Bearer {mfa_token}"}
+
+
+async def _approved_break_glass_grant(client, requester_headers, approver_headers, *, scope):
+    request_response = await client.post(
+        "/admin/break-glass/grants",
+        json={"scope": scope, "reason": "test_admin_router", "ttl_minutes": 30},
+        headers=requester_headers,
+    )
+    grant_id = request_response.json()["data"]["id"]
+    await client.post(f"/admin/break-glass/grants/{grant_id}:approve", headers=approver_headers)
+    return grant_id
 
 
 async def _make_verifier(pool, user_id):
@@ -362,10 +406,18 @@ async def test_admin_can_list_audit_log(client, pool):
         headers=admin_headers,
     )
 
+    # PLT-35-fix(task-3850): 감사로그 조회는 이제 승인된 break-glass grant를
+    # 요구한다 -- 요청자 본인은 승인할 수 없으므로(I12) 별도 MFA admin이 승인한다.
+    reader_headers = await _mfa_verified_admin_headers(client, pool)
+    approver_headers = await _mfa_verified_admin_headers(client, pool)
+    grant_id = await _approved_break_glass_grant(
+        client, reader_headers, approver_headers, scope="tenant_read"
+    )
+
     response = await client.get(
         "/admin/audit-log",
         params={"action_type": "seller.suspended", "target_id": target_id},
-        headers=admin_headers,
+        headers={**reader_headers, "X-Break-Glass-Grant": grant_id},
     )
 
     assert response.status_code == 200
@@ -528,8 +580,7 @@ async def test_admin_can_approve_live_execution_request(client, pool):
 
     async with pool.acquire() as conn:
         await conn.execute(
-            "UPDATE approval_requests SET created_at = now() - interval '2 minutes' "
-            "WHERE id = $1",
+            "UPDATE approval_requests SET created_at = now() - interval '2 minutes' WHERE id = $1",
             request_id,
         )
 

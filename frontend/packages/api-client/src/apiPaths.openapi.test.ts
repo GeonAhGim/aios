@@ -97,14 +97,13 @@ const GHOST_PATH_WHITELIST: ReadonlySet<ApiRouteName> = new Set<ApiRouteName>([
 // src/api/routers/market_data.py에 실재하게 됐지만(GET .../market-data/coverage),
 // 스냅샷은 그 병합 이후 재생성된 적이 없다 — charting.indicatorTemplates.*와
 // 동일 사유(라우터는 있는데 스냅샷이 낡음)라 STALE_SNAPSHOT_WHITELIST에 둔다.
-// task-2335(FE-OPS-1): riskGate.safetyControls.evaluateRecovery도 동일 사유 —
-// src/api/routers/foundation/risk_gate.py:161 post_evaluate_recovery는 실재하지만
-// contracts/openapi/v1.json에는 없다(grep 직접 확인, risk-gate 6경로 중 유일).
+// task-3850(PLT-35-fix): riskGate.safetyControls.evaluateRecovery는 이 leaf가
+// require_break_glass를 배선하며 contracts/openapi/v1.json을 갱신해 이제 스냅샷에
+// 실재한다(python으로 paths 키 직접 확인) — STALE_SNAPSHOT_WHITELIST에서 제거한다.
 const STALE_SNAPSHOT_WHITELIST: ReadonlySet<ApiRouteName> = new Set<ApiRouteName>([
   "charting.indicatorTemplates.base",
   "charting.indicatorTemplates.item",
   "marketData.coverage.get",
-  "riskGate.safetyControls.evaluateRecovery",
   // task-2668(CM-18): compliance.decisions.get도 동일 사유 — apiRoutes.ts 등록
   // 주석 참조(src/api/routers/foundation/compliance.py:57-63는 실재하지만
   // contracts/openapi/v1.json은 task-2618 이후 재생성된 적이 없다).
@@ -142,6 +141,11 @@ const KNOWN_ENVELOPE_DRIFT: ReadonlySet<ApiRouteName> = new Set<ApiRouteName>([]
 // apiRoutes.ts에 등록) — 여기 있던 항목을 제거한다.
 const UNREGISTERED_ROUTE_WHITELIST: Readonly<Record<string, string>> = {
   "/admin/audit-log": "관리자 감사 로그 화면이 없다(apps/web/src/routes/admin에 audit-log 라우트 없음)",
+  // task-3850(PLT-35-fix): break-glass grant 요청/승인 HTTP 엔드포인트를 새로 열었지만
+  // 이 리프의 스콥은 백엔드 배선(DI 체인 403 증명)뿐이다 — 관리자 콘솔에서 grant를
+  // 요청/승인하는 화면은 후속 리프.
+  "/admin/break-glass/grants": "break-glass grant 요청 콘솔 화면이 없다",
+  "/admin/break-glass/grants/{grant_id}:approve": "break-glass grant 승인 콘솔 화면이 없다",
   "/admin/ledger/payouts/{batch_id}/paid": "정산 배치 확정 액션 UI가 없다",
   "/exchange-credentials/{exchange}/positions": "exchange.ts 클라이언트에 balance/capabilities만 있고 positions 조회는 없다",
   "/livez": "인프라 헬스체크 프로브다(k8s liveness) — 앱 API 표면이 아니다",

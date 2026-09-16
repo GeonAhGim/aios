@@ -18,6 +18,7 @@ from fastapi import FastAPI
 def register_routers(app: FastAPI) -> None:
     from src.api.routers import (
         admin,
+        admin_break_glass,
         alerts,
         auth,
         backtests,
@@ -85,6 +86,7 @@ def register_routers(app: FastAPI) -> None:
     app.include_router(executions.router, prefix="/executions", tags=["executions"])
     app.include_router(notifications.router, prefix="/notifications", tags=["notifications"])
     app.include_router(admin.router, tags=["admin"])
+    app.include_router(admin_break_glass.router)
     app.include_router(portfolio.router, prefix="/portfolio", tags=["portfolio"])
     app.include_router(reports.router, prefix="/reports", tags=["reports"])
     app.include_router(device_tokens.router, prefix="/device-tokens", tags=["device-tokens"])

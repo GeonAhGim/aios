@@ -410,6 +410,22 @@
         "title": "ApiResponse[AuditTimelinePage]",
         "type": "object"
       },
+      "ApiResponse_BreakGlassGrant_": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/BreakGlassGrant"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/Meta"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "title": "ApiResponse[BreakGlassGrant]",
+        "type": "object"
+      },
       "ApiResponse_CandleSeriesView_": {
         "properties": {
           "data": {
@@ -872,6 +888,22 @@
           "meta"
         ],
         "title": "ApiResponse[ReconciliationStateView]",
+        "type": "object"
+      },
+      "ApiResponse_RecoveryDecisionView_": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/RecoveryDecisionView"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/Meta"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "title": "ApiResponse[RecoveryDecisionView]",
         "type": "object"
       },
       "ApiResponse_ReplaySeriesView_": {
@@ -1918,6 +1950,90 @@
           "requested_capability_profile"
         ],
         "title": "BeginConnectionRequest",
+        "type": "object"
+      },
+      "BreakGlassGrant": {
+        "properties": {
+          "approver_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Approver Id"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "expires_at": {
+            "format": "date-time",
+            "title": "Expires At",
+            "type": "string"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "reason": {
+            "title": "Reason",
+            "type": "string"
+          },
+          "requester_id": {
+            "format": "uuid",
+            "title": "Requester Id",
+            "type": "string"
+          },
+          "scope": {
+            "enum": [
+              "kill_switch_override",
+              "tenant_read",
+              "credential_revoke"
+            ],
+            "title": "Scope",
+            "type": "string"
+          },
+          "state": {
+            "enum": [
+              "REQUESTED",
+              "APPROVED",
+              "USED",
+              "EXPIRED"
+            ],
+            "title": "State",
+            "type": "string"
+          },
+          "used_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Used At"
+          }
+        },
+        "required": [
+          "id",
+          "requester_id",
+          "approver_id",
+          "scope",
+          "reason",
+          "state",
+          "created_at",
+          "expires_at",
+          "used_at"
+        ],
+        "title": "BreakGlassGrant",
         "type": "object"
       },
       "BundleState": {
@@ -6971,6 +7087,79 @@
         "title": "ReconciliationStateView",
         "type": "object"
       },
+      "RecoveryDecisionView": {
+        "properties": {
+          "evaluated_at": {
+            "format": "date-time",
+            "title": "Evaluated At",
+            "type": "string"
+          },
+          "expires_at": {
+            "format": "date-time",
+            "title": "Expires At",
+            "type": "string"
+          },
+          "gate_kind": {
+            "$ref": "#/components/schemas/GateKind"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "outcome": {
+            "$ref": "#/components/schemas/RiskOutcome"
+          },
+          "reason_codes": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Reason Codes",
+            "type": "array"
+          },
+          "trace_id": {
+            "format": "uuid",
+            "title": "Trace Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "gate_kind",
+          "outcome",
+          "reason_codes",
+          "evaluated_at",
+          "expires_at",
+          "trace_id"
+        ],
+        "title": "RecoveryDecisionView",
+        "type": "object"
+      },
+      "RecoverySafetyControlRequest": {
+        "description": "R-53 — RECOVERY gate (§9). `evidence_ref=None` leads to denial reason\nRSK-007 (evaluate_recovery makes that judgment; this only carries the field).",
+        "properties": {
+          "approval_id": {
+            "title": "Approval Id",
+            "type": "integer"
+          },
+          "evidence_ref": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Evidence Ref"
+          }
+        },
+        "required": [
+          "approval_id"
+        ],
+        "title": "RecoverySafetyControlRequest",
+        "type": "object"
+      },
       "RefreshRequest": {
         "description": "PLT-24 — `session_id`를 함께 보내야 하는 이유는\n`src/services/auth/refresh.py` 모듈 docstring 참조: refresh_hash만으로는\n회전된 옛 토큰을 역참조할 수 없다.",
         "properties": {
@@ -7146,6 +7335,34 @@
           "daily_pnl"
         ],
         "title": "ReportSummary",
+        "type": "object"
+      },
+      "RequestBreakGlassGrantRequest": {
+        "properties": {
+          "reason": {
+            "title": "Reason",
+            "type": "string"
+          },
+          "scope": {
+            "enum": [
+              "kill_switch_override",
+              "tenant_read",
+              "credential_revoke"
+            ],
+            "title": "Scope",
+            "type": "string"
+          },
+          "ttl_minutes": {
+            "default": 60,
+            "title": "Ttl Minutes",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "scope",
+          "reason"
+        ],
+        "title": "RequestBreakGlassGrantRequest",
         "type": "object"
       },
       "RequestDeploymentRequest": {
@@ -9468,6 +9685,16 @@
               "title": "Page Size",
               "type": "integer"
             }
+          },
+          {
+            "in": "header",
+            "name": "X-Break-Glass-Grant",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "X-Break-Glass-Grant",
+              "type": "string"
+            }
           }
         ],
         "responses": {
@@ -9500,6 +9727,100 @@
         "summary": "List Audit Log",
         "tags": [
           "admin"
+        ]
+      }
+    },
+    "/admin/break-glass/grants": {
+      "post": {
+        "operationId": "post_request_grant_admin_break_glass_grants_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RequestBreakGlassGrantRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiResponse_BreakGlassGrant_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Post Request Grant",
+        "tags": [
+          "admin:break-glass"
+        ]
+      }
+    },
+    "/admin/break-glass/grants/{grant_id}:approve": {
+      "post": {
+        "operationId": "post_approve_grant_admin_break_glass_grants__grant_id__approve_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "grant_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Grant Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiResponse_BreakGlassGrant_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Post Approve Grant",
+        "tags": [
+          "admin:break-glass"
         ]
       }
     },
@@ -9672,6 +9993,16 @@
             "schema": {
               "format": "uuid",
               "title": "Batch Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Break-Glass-Grant",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "X-Break-Glass-Grant",
               "type": "string"
             }
           }
@@ -15431,6 +15762,74 @@
           }
         ],
         "summary": "Post Deactivate Safety Control",
+        "tags": [
+          "foundation:risk-gate"
+        ]
+      }
+    },
+    "/v1/foundation/risk-gate/safety-controls/{control_id}:evaluate-recovery": {
+      "post": {
+        "operationId": "post_evaluate_recovery_v1_foundation_risk_gate_safety_controls__control_id__evaluate_recovery_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "control_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Control Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Break-Glass-Grant",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "X-Break-Glass-Grant",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RecoverySafetyControlRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiResponse_RecoveryDecisionView_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Post Evaluate Recovery",
         "tags": [
           "foundation:risk-gate"
         ]

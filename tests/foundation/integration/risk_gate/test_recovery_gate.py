@@ -19,6 +19,7 @@ import asyncpg
 import pytest
 from httpx import ASGITransport, AsyncClient
 
+from src.api.admin_deps import get_current_mfa_admin
 from src.api.contracts.error_codes import HTTP_STATUS, ErrorCode
 from src.api.contracts.exception_mapping import map_exception
 from src.api.deps import get_current_admin
@@ -28,6 +29,7 @@ from src.core.loader.risk_policy_loader import load_risk_policy
 from src.core.risk.decision import GateKind, RiskDecision, RiskOutcome
 from src.core.safety.circuit_breaker import CircuitBreakerService
 from src.core.safety.recovery_gate import RecoveryDecision
+from src.core.security import break_glass
 from src.foundation.risk_gate.adapters.postgres_decision_repository import (
     PostgresDecisionRepository,
 )
@@ -44,7 +46,7 @@ from src.main import app
 from src.services.auth_service import User
 from src.services.risk_decision_recorder import RiskDecisionRecorder
 from tests.conftest import lifespan_context_with_retry
-from tests.integration.conftest import NoopEventBus, create_test_tenant
+from tests.integration.conftest import NoopEventBus, create_test_tenant, create_test_user
 
 _COOLDOWN_SEC = 900
 _APPROVAL_TTL_SEC = 300
@@ -608,14 +610,39 @@ async def test_router_recovery_denied_end_to_end_returns_403_rsk007_envelope(
         is_verifier=False,
         is_platform_admin=True,
     )
+    # PLT-35-fix(task-3850): 이 라우트는 이제 require_break_glass("kill_switch_override")도
+    # 거친다 -- `fake_admin`은 실제 로그인을 거치지 않은 plain `User`라 MFA 검사
+    # 대상 필드(auth_level)가 없으므로 get_current_mfa_admin도 함께 오버라이드해
+    # 이 테스트의 실제 초점(RSK-007 DENY→403 매핑)과 무관한 MFA 단계를 우회한다.
+    # 소비되는 grant 자체는 실제 core 경로(request_grant/approve_grant/consume)로
+    # 만든 진짜 APPROVED 레코드다 -- break-glass 게이트 자체를 가짜로 만들지 않는다.
+    approver_id = await create_test_user(pool)
+    async with pool.acquire() as conn:
+        grant = await break_glass.request_grant(
+            conn,
+            requester_id=actor_id,
+            requester_auth_level="MFA_VERIFIED",
+            scope="kill_switch_override",
+            reason="test_recovery_gate",
+        )
+        await break_glass.approve_grant(
+            conn,
+            grant_id=grant.id,
+            approver_id=approver_id,
+            approver_auth_level="MFA_VERIFIED",
+        )
+
     app.dependency_overrides[get_current_admin] = lambda: fake_admin
+    app.dependency_overrides[get_current_mfa_admin] = lambda: fake_admin
     try:
         response = await http_client.post(
             f"/v1/foundation/risk-gate/safety-controls/{control_id}:evaluate-recovery",
             json={"evidence_ref": None, "approval_id": approval_id},
+            headers={"X-Break-Glass-Grant": str(grant.id)},
         )
     finally:
         app.dependency_overrides.pop(get_current_admin, None)
+        app.dependency_overrides.pop(get_current_mfa_admin, None)
 
     assert response.status_code == 403
     body = response.json()
