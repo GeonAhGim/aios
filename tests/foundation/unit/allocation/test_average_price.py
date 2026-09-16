@@ -1,6 +1,8 @@
 """FA-7 domain/average_price.py — 블록 주문 평균단가 단위테스트(순수 함수만)."""
+
 from __future__ import annotations
 
+import time
 from decimal import Decimal
 from uuid import uuid4
 
@@ -106,3 +108,39 @@ def test_apply_average_price_rejects_empty_lines():
         apply_average_price(
             [], Decimal("10"), total_notional=Decimal("0"), notional_quantum=Decimal("0.01")
         )
+
+
+# ---- 수치 성능 단언 ----
+# average_price.py는 I/O 없는 순수 함수 모듈이라 실패주입/게이트재현/D3
+# (적대적·리플레이·동시성) 증거는 구조적으로 불가능하다(DEPTH_FA.md 요약
+# 문단 — 1701·1702·1708·2058 공통 사유). 채울 수 있는 유일한 누락 항목인
+# 수치 성능 단언만 추가한다(선례: dceb4b2b, 63764b46, 775370f2).
+
+
+def test_blended_average_price_hot_path_performance():
+    fills = [
+        PartialFill(quantity=Decimal("60"), price=Decimal("10.00")),
+        PartialFill(quantity=Decimal("40"), price=Decimal("11.00")),
+    ]
+    start = time.perf_counter()
+    for _ in range(10_000):
+        blended_average_price(fills, Decimal("0.01"))
+    elapsed = time.perf_counter() - start
+    assert elapsed < 1.0
+
+
+def test_apply_average_price_hot_path_performance():
+    lines = [
+        AllocationLine(sub_account_id=uuid4(), quantity=Decimal("60")),
+        AllocationLine(sub_account_id=uuid4(), quantity=Decimal("40")),
+    ]
+    start = time.perf_counter()
+    for _ in range(10_000):
+        apply_average_price(
+            lines,
+            Decimal("10.40"),
+            total_notional=Decimal("1040.00"),
+            notional_quantum=Decimal("0.01"),
+        )
+    elapsed = time.perf_counter() - start
+    assert elapsed < 1.0

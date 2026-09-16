@@ -1,6 +1,8 @@
 """FA-7 domain/policy.py — 3정책 배분 단위테스트(순수 함수만, DB 없음)."""
+
 from __future__ import annotations
 
+import time
 from decimal import Decimal
 from uuid import uuid4
 
@@ -215,3 +217,33 @@ def test_allocate_dispatches_pro_rata():
 def test_allocate_rejects_unknown_policy():
     with pytest.raises(AllocationResidualError):
         allocate("unknown_policy", Decimal("10"))  # type: ignore[arg-type]
+
+
+# ---- 수치 성능 단언 ----
+# policy.py는 I/O 없는 순수 함수 모듈이라 실패주입/게이트재현/D3(적대적·
+# 리플레이·동시성) 증거는 구조적으로 불가능하다(DEPTH_FA.md 요약 문단 —
+# 1701·1702·1708·2058 공통 사유). 채울 수 있는 유일한 누락 항목인 수치
+# 성능 단언만 추가한다(선례: dceb4b2b, 63764b46, 775370f2).
+
+
+def test_allocate_by_weight_hot_path_performance():
+    # pro_rata/fixed_weight가 공유하는 _allocate_by_weight 커널 — 잔여
+    # 흡수 루프가 우연히 O(n^2)로 퇴화하는 회귀를 잡는다.
+    targets = _equal_weights(*(uuid4() for _ in range(5)))
+    start = time.perf_counter()
+    for _ in range(10_000):
+        allocate_pro_rata(Decimal("1000"), targets, Decimal("1"))
+    elapsed = time.perf_counter() - start
+    assert elapsed < 1.0
+
+
+def test_allocate_manual_hot_path_performance():
+    targets = [
+        ManualTarget(sub_account_id=uuid4(), quantity=Decimal(str(q))) for q in (10, 20, 30, 40)
+    ]
+    total = sum((t.quantity for t in targets), Decimal("0"))
+    start = time.perf_counter()
+    for _ in range(10_000):
+        allocate_manual(total, targets)
+    elapsed = time.perf_counter() - start
+    assert elapsed < 1.0
