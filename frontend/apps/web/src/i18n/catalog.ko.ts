@@ -187,6 +187,22 @@ export const catalogKo = {
       failed: "실패",
     },
   },
+  commandPalette: {
+    trigger: "명령 팔레트",
+    searchTitle: "명령 검색",
+    helpTitle: "단축키 도움말",
+    showHelp: "단축키 보기",
+    showSearch: "검색으로 돌아가기",
+    placeholder: "화면 이름으로 검색...",
+    empty: "일치하는 화면이 없습니다.",
+    shortcut: {
+      openSearch: "명령 팔레트 열기",
+      openHelp: "단축키 도움말 열기",
+      navigate: "목록 이동",
+      select: "선택한 화면으로 이동",
+      close: "닫기",
+    },
+  },
   // task-2686 (UX-2): mechanically extracted from the 102 baseline .tsx files
   // (scripts/i18n-literals-baseline.json) via an AST codemod -- one namespace per
   // file (camelCase basename), keys are sequential (t1, t2.../title1, label1...).

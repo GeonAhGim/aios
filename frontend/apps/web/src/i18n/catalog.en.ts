@@ -190,6 +190,22 @@ export const catalogEn = {
       failed: "Failed",
     },
   },
+  commandPalette: {
+    trigger: "Command palette",
+    searchTitle: "Search commands",
+    helpTitle: "Keyboard shortcuts",
+    showHelp: "Show shortcuts",
+    showSearch: "Back to search",
+    placeholder: "Search by screen name...",
+    empty: "No matching screens.",
+    shortcut: {
+      openSearch: "Open command palette",
+      openHelp: "Open keyboard shortcuts help",
+      navigate: "Move through the list",
+      select: "Go to selected screen",
+      close: "Close",
+    },
+  },
   legacy: { ...catalogEnLegacyA, ...catalogEnLegacyB, ...catalogEnLegacyC, ...catalogEnLegacyD },
 } satisfies Stringify<CatalogKo>;
 

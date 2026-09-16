@@ -2,6 +2,7 @@ import { useLogout, useMe } from "@aios/shared-hooks";
 import { cn, ThemeToggle } from "@aios/ui-web";
 import type { ReactNode } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
+import { CommandPalette } from "../../commandPalette/CommandPalette";
 import { ADMIN_NAV_ITEMS, MAIN_NAV_ITEMS, SETTINGS_NAV_ITEMS, type NavItem } from "./navItems";
 import { useTranslation } from "react-i18next";
 
@@ -85,6 +86,7 @@ export function AppShell({ children }: { children: ReactNode }) {
           </nav>
           <div className="flex items-center gap-3 text-sm">
             <span className="text-fg-muted">{me?.email}</span>
+            <CommandPalette isAdmin={Boolean(me?.isPlatformAdmin)} />
             <ThemeToggle />
             <button
               type="button"
