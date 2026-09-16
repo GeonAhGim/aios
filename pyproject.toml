@@ -42,7 +42,7 @@ test = [
     "pytest-timeout==2.4.0",
     # task-2613: property tests (tests/property/) for ledger double-entry,
     # risk limit monotonicity, PositionKey round-trip.
-    "hypothesis>=6.100",
+    "hypothesis>=6.168.0",
 ]
 dev = [
     "ruff>=0.16",
