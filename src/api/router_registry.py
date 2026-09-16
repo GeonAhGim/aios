@@ -54,6 +54,7 @@ def register_routers(app: FastAPI) -> None:
     from src.api.routers.foundation import trust as foundation_trust
     from src.api.routers.foundation import trust_memberships as foundation_trust_memberships
     from src.api.routers.foundation import validation as foundation_validation
+    from src.api.ws import market_ws
 
     app.include_router(auth.router, prefix="/auth", tags=["auth"])
     app.include_router(users.router, prefix="/users", tags=["users"])
@@ -95,3 +96,4 @@ def register_routers(app: FastAPI) -> None:
     app.include_router(alerts.router, prefix="/alerts", tags=["alerts"])
     app.include_router(metrics.router)
     app.include_router(health.router)
+    app.include_router(market_ws.router)  # M2-1(task-2621) /ws/market
