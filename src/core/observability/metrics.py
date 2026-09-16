@@ -12,10 +12,13 @@ task-129)의 재구현이 아니라 그 위에 얹히는 얇은 어댑터라는 
 """
 from __future__ import annotations
 
+import logging
 import threading
 from typing import Any, Protocol
 
 from src.core.observability.metric_names import to_prom
+
+logger = logging.getLogger(__name__)
 
 
 class MetricsPort(Protocol):
@@ -104,3 +107,32 @@ def set_metrics(port: MetricsPort) -> None:
     """싱글턴을 교체한다(테스트는 `set_metrics(NullMetrics())`로 격리)."""
     global _current_metrics
     _current_metrics = port
+
+
+def safe_counter(
+    metrics_port: MetricsPort, name: str, labels: dict[str, str] | None = None
+) -> None:
+    """Isolates a metrics-hook failure from the caller's order path (L4-27 D3).
+
+    `PrometheusMetrics` raises `ValueError` when the same name is re-registered
+    with a different label-key set (see that class's docstring) -- one mistake
+    at an instrumentation site must not roll back an order/fill/resolution
+    transaction or propagate as an exception to the caller."""
+    try:
+        metrics_port.counter(name, labels)
+    except Exception:
+        logger.warning(
+            "metrics.counter failed name=%s -- order path continues", name, exc_info=True
+        )
+
+
+def safe_observe(
+    metrics_port: MetricsPort, name: str, value: float, labels: dict[str, str] | None = None
+) -> None:
+    """Same rationale as `safe_counter`, for the `observe` hook."""
+    try:
+        metrics_port.observe(name, value, labels)
+    except Exception:
+        logger.warning(
+            "metrics.observe failed name=%s -- order path continues", name, exc_info=True
+        )
