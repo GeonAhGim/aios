@@ -222,5 +222,11 @@ export const catalogKoLegacyA = {
     "t6": "다음",
     "title7": "보류(홀드)",
     "title8": "정산 배치",
+    "label9": "외부 참조번호",
+    "placeholder9": "외부 참조번호(external_ref)",
+    "label10": "브레이크글래스 그랜트 ID",
+    "placeholder10": "브레이크글래스 그랜트 ID",
+    "t11": "정산 확정",
+    "t12": "정산 배치가 지급 완료로 확정됐습니다.",
   },
 } as const;

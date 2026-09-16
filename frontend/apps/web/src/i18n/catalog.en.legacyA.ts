@@ -220,5 +220,11 @@ export const catalogEnLegacyA = {
     "t6": "Next",
     "title7": "Hold",
     "title8": "Settlement batch",
+    "label9": "External reference",
+    "placeholder9": "External reference (external_ref)",
+    "label10": "Break-glass grant ID",
+    "placeholder10": "Break-glass grant ID",
+    "t11": "Mark as paid",
+    "t12": "The settlement batch has been marked as paid.",
   },
 } as const;
