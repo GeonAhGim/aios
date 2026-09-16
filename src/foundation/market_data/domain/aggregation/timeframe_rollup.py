@@ -27,6 +27,7 @@ fail-closed 규칙(§4.1):
 한계는 남는다(정직하게 남겨 두는 편차) — 규칙을 바꿀 때 서술도 함께
 고치는 리뷰 규율에 의존한다.
 """
+
 from __future__ import annotations
 
 import hashlib
@@ -131,6 +132,7 @@ def rollup(columns: CandleColumns, tf: Timeframe, calendar: VenueCalendar) -> Ro
     }
     if any(length != n for length in lengths.values()):
         raise MismatchedColumnLengthError({"ts": n, **lengths})
+    step = duration(tf)  # validates tf is registered (fail-closed)
     if n == 0:
         return RollupResult(columns=_empty_columns(), rollup_version=ROLLUP_VERSION)
     for i in range(n - 1):
@@ -140,7 +142,6 @@ def rollup(columns: CandleColumns, tf: Timeframe, calendar: VenueCalendar) -> Ro
                 f"({columns.ts[i + 1]!r})보다 늦습니다"
             )
 
-    step = duration(tf)
     m1_step = duration(Timeframe.M1)
     range_start = columns.ts[0]
     range_end = columns.ts[-1] + m1_step
