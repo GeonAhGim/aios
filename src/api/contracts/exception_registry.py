@@ -141,8 +141,8 @@ EXCEPTION_MAP_SERVICES: list[tuple[type[Exception], ErrorCode]] = [
     (RebalanceError, ErrorCode.VALIDATION_INVALID_FIELD),
     # PLT-29(trust_memberships)·원장(ledger) 매핑은 foundation.* 소스라
     # exception_registry_foundation.py의 EXCEPTION_MAP_FOUNDATION에 있다.
-    # PLT-35 — break-glass grant(src/core/security/break_glass.py) +
-    # admin_deps.py의 MFA 게이트.
+    # PLT-35 -- break-glass grant (src/core/security/break_glass.py) +
+    # admin_deps.py's MFA gate.
     (AdminMfaRequiredError, ErrorCode.AUTH_MFA_REQUIRED),
     (BreakGlassMfaRequiredError, ErrorCode.AUTH_MFA_REQUIRED),
     (BreakGlassSelfApprovalError, ErrorCode.AUTHZ_FORBIDDEN),

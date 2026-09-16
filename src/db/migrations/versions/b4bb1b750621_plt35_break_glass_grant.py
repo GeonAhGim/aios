@@ -5,7 +5,8 @@ Revises: f93d241b4ab6
 Create Date: 2026-09-16 02:00:00.000000
 
 Spec: docs/specs/L4_platform_observability_tenancy_api_v1.0.md §2.5 M7 DDL,
-§4 I12 ("break-glass grant는 요청자≠승인자, ≤60분, 1회 소비").
+§4 I12 ("a break-glass grant requires requester != approver, TTL <= 60min,
+single use").
 
 The two CHECK constraints are the DB-side half of I12 (the code half is
 `src/core/security/break_glass.py`'s conditional UPDATE on `used_at`): a

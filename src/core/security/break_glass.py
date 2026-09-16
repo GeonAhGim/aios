@@ -1,20 +1,22 @@
-"""L4 §2.2(B) PLT-35 -- 비상 권한(break-glass) 요청/승인/소비.
+"""L4 Sec 2.2(B) PLT-35 -- break-glass grant request/approve/consume.
 
-Spec: docs/specs/L4_platform_observability_tenancy_api_v1.0.md §2.2 (row
-`src/core/security/break_glass.py`), §2.5 M7 DDL, §4 I12
-("break-glass grant는 요청자≠승인자, ≤60분, 1회 소비").
+Spec: docs/specs/L4_platform_observability_tenancy_api_v1.0.md Sec 2.2 (row
+`src/core/security/break_glass.py`), Sec 2.5 M7 DDL, Sec 4 I12
+("a break-glass grant requires requester != approver, TTL <= 60min, single use").
 
-DB가 1차 방어선이다(마이그레이션 `b4bb1b750621`의 두 CHECK 제약): 자기승인과
-60분 초과 TTL은 애플리케이션 가드가 우회되거나 버그가 있어도 INSERT/UPDATE
-자체가 거부된다. 이 모듈의 코드 가드(`approve_grant`의 사전 확인, `consume`의
-조건부 UPDATE)는 사람이 읽을 수 있는 에러 메시지와 fail-closed 순서를 위한
-것이지, 유일한 방어선이 아니다.
+The DB is the first line of defense (migration `b4bb1b750621`'s two CHECK
+constraints): self-approval and a >60min TTL are rejected at the INSERT/UPDATE
+itself even if the application guard is bypassed or buggy. This module's code
+guards (the pre-check in `approve_grant`, the conditional UPDATE in `consume`)
+exist for readable error messages and fail-closed ordering, not as the sole
+line of defense.
 
-정직하게 남기는 한계(§10-10, 미확정): 스펙 §10-10은 "break-glass 2인 승인"이
-운영자 1인 체제(ADR-2026-08-10)에서 승인자가 구조적으로 없다는 미해결 갭을
-지적한다 -- `approve_grant`는 이 갭을 풀지 않는다(PM 결정 대기). 1인 체제에서는
-`request_grant`로 만든 grant를 아무도 승인할 수 없다는 뜻이며, 이 모듈은 그
-상태를 "승인 불가"로 정직하게 실패시킬 뿐 우회 경로를 만들지 않는다.
+Known gap, stated honestly (spec Sec 10-10, undecided): the spec's Sec 10-10
+flags that "break-glass two-person approval" has no structural approver in a
+single-operator regime (ADR-2026-08-10) -- `approve_grant` does not solve that
+gap (pending a PM decision). Under a single-operator regime, a grant created
+by `request_grant` cannot be approved by anyone; this module fails that state
+honestly as "cannot approve" rather than building a workaround.
 """
 
 from __future__ import annotations
@@ -57,28 +59,31 @@ class BreakGlassGrant(BaseModel):
 
 
 class BreakGlassMfaRequiredError(Exception):
-    """request_grant/approve_grant 둘 다 auth_level=MFA_VERIFIED 필수(§2.2
-    PLT-35). 403 AUTH_MFA_REQUIRED."""
+    """Both request_grant/approve_grant require auth_level=MFA_VERIFIED
+    (Sec 2.2 PLT-35). 403 AUTH_MFA_REQUIRED."""
 
 
 class BreakGlassSelfApprovalError(Exception):
-    """approver == requester -- 자기승인 금지(DB CHECK가 이중 방어선, I12).
-    403 AUTHZ_FORBIDDEN."""
+    """approver == requester -- self-approval is forbidden (DB CHECK is the
+    second line of defense, I12). 403 AUTHZ_FORBIDDEN."""
 
 
 class BreakGlassInvalidStateError(Exception):
-    """승인 대상이 REQUESTED가 아니거나, consume 대상이 APPROVED+미소비+미만료가
-    아니거나(이미 소비/만료/미승인) -- 409 STATE_INVALID_TRANSITION."""
+    """The approval target isn't REQUESTED, or the consume target isn't
+    APPROVED+unused+unexpired (already used/expired/not yet approved) --
+    409 STATE_INVALID_TRANSITION."""
 
 
 class AdminMfaRequiredError(Exception):
-    """§2.2 PLT-35 -- break-glass 경로의 admin은 `auth_level == "MFA_VERIFIED"`가
-    필수다(403 AUTH_MFA_REQUIRED). `src/api/admin_deps.py`의 `get_current_mfa_admin`이
-    던진다 -- 여기(break_glass.py)에 두는 이유는 순환 임포트 회피다:
-    `exception_registry.py`가 이 예외를 ErrorCode에 매핑하려면 import해야 하는데,
-    `admin_deps.py`는 `src/api/deps.py`를 import하고 `deps.py`는
-    `exception_mapping.py`(그 자매 모듈이 `exception_registry.py`)를 import해서
-    admin_deps.py에 두면 순환이 생긴다. break_glass.py는 그 사슬 밖에 있다."""
+    """Sec 2.2 PLT-35 -- an admin on the break-glass path requires
+    `auth_level == "MFA_VERIFIED"` (403 AUTH_MFA_REQUIRED). Raised by
+    `get_current_mfa_admin` in `src/api/admin_deps.py` -- it lives here
+    (break_glass.py) to avoid a circular import: `exception_registry.py`
+    needs to import this to map it to an ErrorCode, but `admin_deps.py`
+    imports `src/api/deps.py`, and `deps.py` imports `exception_mapping.py`
+    (whose sibling module is `exception_registry.py`) -- putting this class in
+    admin_deps.py would create a cycle. break_glass.py sits outside that chain.
+    """
 
 
 def _row_to_grant(row: asyncpg.Record) -> BreakGlassGrant:
@@ -104,9 +109,9 @@ async def request_grant(
     reason: str,
     ttl_minutes: int = MAX_GRANT_MINUTES,
 ) -> BreakGlassGrant:
-    """새 grant를 REQUESTED 상태로 만든다. `ttl_minutes`가 60을 넘으면 DB
-    CHECK가 INSERT 자체를 거부한다(I12) -- 여기서는 그보다 먼저 사람이 읽을 수
-    있는 메시지로 막는다."""
+    """Creates a new grant in the REQUESTED state. If `ttl_minutes` exceeds
+    60, the DB CHECK rejects the INSERT itself (I12) -- this raises a
+    human-readable error before that, first."""
     if requester_auth_level != "MFA_VERIFIED":
         raise BreakGlassMfaRequiredError(
             f"requester_id={requester_id}: break-glass 요청은 MFA 재확인이 필요합니다."
@@ -148,8 +153,8 @@ async def approve_grant(
     approver_id: UUID,
     approver_auth_level: AuthLevel,
 ) -> BreakGlassGrant:
-    """REQUESTED -> APPROVED. approver는 requester와 달라야 하고(코드 선확인 +
-    DB CHECK 이중 방어) MFA_VERIFIED여야 한다."""
+    """REQUESTED -> APPROVED. The approver must differ from the requester
+    (code pre-check + DB CHECK, defense in depth) and must be MFA_VERIFIED."""
     if approver_auth_level != "MFA_VERIFIED":
         raise BreakGlassMfaRequiredError(
             f"approver_id={approver_id}: break-glass 승인은 MFA 재확인이 필요합니다."
@@ -180,9 +185,10 @@ async def approve_grant(
         raise BreakGlassInvalidStateError(
             f"grant_id={grant_id}: REQUESTED 상태가 아니어서 승인할 수 없습니다."
         ) from exc
-    # 위 애플리케이션 검사를 TOCTOU로 우회해도(동시에 requester_id가 바뀌는
-    # 일은 없지만) DB CHECK(approver_id <> requester_id)가 이 UPDATE 자체를
-    # CheckViolationError로 거부한다 -- I12 이중 방어선.
+    # Even if the application check above is bypassed via a TOCTOU race (the
+    # requester_id itself can't change concurrently, but as defense in depth),
+    # the DB CHECK (approver_id <> requester_id) rejects this same UPDATE with
+    # a CheckViolationError -- I12's second line of defense.
 
     grant = _row_to_grant(row)
     await record_audit_log(
@@ -199,10 +205,11 @@ async def approve_grant(
 
 
 async def consume(conn: asyncpg.Connection, *, grant_id: UUID, admin_id: UUID) -> BreakGlassGrant:
-    """APPROVED + 미소비 + 미만료 grant를 1회 소비한다(단일 조건부 UPDATE,
-    105번 표준). `used_at IS NULL`과 `expires_at > now()`를 같은 WHERE에 걸어
-    "이미 썼다"와 "만료됐다"를 별도 SELECT 없이 원자적으로 막는다 -- 두 실행이
-    동시에 같은 grant를 consume하면 정확히 하나만 성공한다."""
+    """Consumes an APPROVED + unused + unexpired grant exactly once (a single
+    conditional UPDATE, per the 105 standard). `used_at IS NULL` and
+    `expires_at > now()` are checked in the same WHERE clause, atomically
+    ruling out "already used" and "expired" without a separate SELECT -- if
+    two callers race to consume the same grant, exactly one succeeds."""
     now = datetime.now(timezone.utc)
     row = await conn.fetchrow(
         f"""
@@ -215,9 +222,10 @@ async def consume(conn: asyncpg.Connection, *, grant_id: UUID, admin_id: UUID) -
         now,
     )
     if row is None:
-        # 실패 사유(없음/미승인/이미 소비/만료)는 보안에 영향 없는 진단
-        # 목적으로만 별도 조회한다 -- 이 조회 결과로 분기하지 않는다(위 UPDATE가
-        # 이미 유일한 판정 지점).
+        # The failure reason (missing/not-approved/already-used/expired) is
+        # looked up separately for diagnostics only, with no security
+        # implication -- this lookup does not branch behavior (the UPDATE
+        # above is already the sole decision point).
         reason_row = await conn.fetchrow(
             "SELECT state, used_at, expires_at FROM break_glass_grant WHERE id = $1", grant_id
         )
