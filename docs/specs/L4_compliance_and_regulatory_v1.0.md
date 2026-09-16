@@ -137,7 +137,7 @@
 | CM-13 | application/explain.py + 재현 테스트 | done | 2510,2866 |  | D3 | fb3d580c |
 | CM-14 | reporting/domain/best_execution.py + test | done | 2526,2867 |  | D2 | cd1a00de |
 | CM-15 | reporting/domain/trade_report.py + test | inflight |  | 2617 |  |  |
-| CM-16 | reporting/ports/report_submitter.py + application/generate_report.py + | done | 2620 | 2618,2668,3636 |  | b4c1037a |
+| CM-16 | reporting/ports/report_submitter.py + application/generate_report.py + | done | 3636 |  | D3 |  |
 | CM-17 | src/api/routers/compliance.py + 통합·교차 테넌트 | done | 2620 |  |  | b4c1037a |
 | CM-18 | 프론트 CompliancePage.tsx(판정 조회·규칙 히트·예외 승인) | inflight |  | 2668 |  |  |
 | CM-19 | 프론트 MandatePage.tsx(위임장 편집·승인 흐름) | hold |  |  |  |  |
