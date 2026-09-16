@@ -9,9 +9,12 @@ registry.py(조회·검증 단일 진입점)는 L02 몫이라 아직 없다 — 
 `TALIB_SPECS`/`ParamSpec`의 범위 값 자체를 직접 대조해 "미지 지표"·
 "범위 밖 파라미터" negative case를 검증한다.
 """
+
 from __future__ import annotations
 
+import hashlib
 import inspect
+import time
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 
@@ -254,3 +257,114 @@ def test_calculate_min_required_bars_matches_registry_lookback(name: str) -> Non
 
     just_enough = IndicatorService().calculate(name, _candles(lookback + 1))
     assert just_enough.values != []
+
+
+# --- DEEPEN(task-3198): 실패 주입 — TA-Lib 네이티브 실패가 성공으로 위장되지 않음 ---
+
+
+def test_calculate_propagates_talib_runtime_failure_instead_of_masking_it(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """실패 주입: TA-Lib 네이티브 함수가 예외를 던지면(손상된 빌드·SIMD 버전
+    불일치 등) `IndicatorService.calculate()`가 그 예외를 삼키고 빈 결과나
+    기본값으로 위장하지 않고 그대로 전파하는지 확인한다(fail-closed, L03이
+    L01/L02에 위임하는 경계 — 계산 실패를 검증 실패처럼 감추면 안 된다)."""
+
+    def _broken_sma(*args: object, **kwargs: object) -> object:
+        raise RuntimeError("simulated TA-Lib native failure")
+
+    monkeypatch.setattr(talib, "SMA", _broken_sma)
+
+    with pytest.raises(RuntimeError, match="simulated TA-Lib native failure"):
+        IndicatorService().calculate("SMA", _candles(30), timeperiod=5)
+
+
+# --- DEEPEN(task-3198): 수치 성능 단언 — registry_hash() 지연 ---------------
+
+
+def _hash_latencies_ms(iterations: int = 20) -> list[float]:
+    samples = []
+    for _ in range(iterations):
+        started = time.perf_counter()
+        IndicatorRegistry().registry_hash()
+        samples.append((time.perf_counter() - started) * 1000)
+    samples.sort()
+    return samples
+
+
+def _p95(samples: list[float]) -> float:
+    return samples[min(int(len(samples) * 0.95), len(samples) - 1)]
+
+
+_REGISTRY_HASH_BUDGET_MS = 50.0
+
+
+def test_registry_hash_p95_latency_within_self_declared_budget() -> None:
+    """수치 성능 단언: ADR-2026-09-09-C Decision 1 예산표에 `registry_hash()`
+    전용 항목이 없다(가장 가까운 항목은 "지표 증분=일괄 동일", 지연 예산가
+    아님) — 161종 스펙을 정준 JSON 직렬화 + sha256 하는 순수 CPU 경로(디스크·
+    네트워크 I/O 없음)라는 사실 위에 자체 예산을 건다: 로컬 실측 p95 대비
+    넉넉한 여유를 둔 50ms. `registry_hash()`는 strategy_artifact 해시 계산의
+    입력이라 아티팩트 빌드 경로를 막으면 안 된다 — 벗어나면 회귀(예:
+    `canonical_spec_dict` 중복 순회)로 본다."""
+    samples = _hash_latencies_ms(iterations=20)
+    p95_ms = _p95(samples)
+    print(
+        f"[L02 registry] registry_hash() p95={p95_ms:.2f}ms "
+        f"budget<{_REGISTRY_HASH_BUDGET_MS:.0f}ms (n={len(samples)})"
+    )
+    assert p95_ms < _REGISTRY_HASH_BUDGET_MS
+
+
+def test_registry_hash_budget_gate_actually_fails_past_budget(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """게이트 적색 재현: 위 단언식이, 해시 계산 경로 한 곳이 예산을 실제로
+    넘기도록 지연을 주입했을 때 진짜로 `AssertionError`를 내는지(= CI가
+    실제로 빨간불이 되는지) 확인한다. 이 테스트가 없으면 위 단언이 항상
+    통과하는 tautology인지 아무도 검증하지 못한다."""
+    original_sha256 = hashlib.sha256
+
+    def _stalled_sha256(*args: object, **kwargs: object) -> object:
+        time.sleep(_REGISTRY_HASH_BUDGET_MS / 1000.0)
+        return original_sha256(*args, **kwargs)
+
+    monkeypatch.setattr("src.core.indicators.registry.hashlib.sha256", _stalled_sha256)
+
+    samples = _hash_latencies_ms(iterations=3)
+    p95_ms = _p95(samples)
+    with pytest.raises(AssertionError):
+        assert p95_ms < _REGISTRY_HASH_BUDGET_MS
+
+
+# --- DEEPEN(task-3198): 게이트 적색 재현 — lookback 오지정 시 실측 대조 실패 ---
+
+
+def test_lookback_nan_count_gate_turns_red_when_lookback_formula_is_off_by_one() -> None:
+    """게이트 적색 재현: 위쪽 `test_specs_lookback_matches_talib_nan_count`가
+    실제로 틀린 lookback을 잡아내는지 확인한다 — SMA의 lookback을 정답인
+    `timeperiod - 1` 대신 `timeperiod`로(오프바이원) 바꿔치기한
+    `IndicatorSpec`을 만든 뒤, 같은 실측 대조식이 진짜로 `AssertionError`를
+    내는지 본다. 이 테스트가 없으면 위 대조가 우연히 항상 통과하는
+    tautology인지 아무도 검증하지 못한다."""
+    spec = TALIB_SPECS["SMA"]
+    arrays = _synthetic_ohlcv()
+    inputs = [arrays[key] for key in spec.inputs]
+    params = _default_params(spec)
+
+    raw_output = talib.SMA(*inputs, **params)
+    actual_leading_nan = _leading_nan_count(raw_output)
+
+    broken_spec = IndicatorSpec(
+        name=spec.name,
+        inputs=spec.inputs,
+        params=spec.params,
+        outputs=spec.outputs,
+        lookback=lambda p: p["timeperiod"],  # off-by-one 버그: 정답은 timeperiod - 1
+        plots=spec.plots,
+        causal=spec.causal,
+    )
+
+    assert broken_spec.lookback(params) != actual_leading_nan  # sanity: 실제로 다름
+    with pytest.raises(AssertionError):
+        assert broken_spec.lookback(params) == actual_leading_nan
