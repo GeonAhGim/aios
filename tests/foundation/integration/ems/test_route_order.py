@@ -11,6 +11,7 @@ and carries `ONLY_VENUE`; empty candidates is a fail-closed domain
 rejection with no row written; (3) idempotency -- concurrent calls for the
 same `order_id` leave exactly one row.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -127,6 +128,25 @@ async def test_route_order_rejects_empty_candidates(pool, repo):
     assert await repo.get_by_order_id(order_id) is None
 
 
+async def test_route_order_rejects_duplicate_venue_candidates(pool, repo):
+    """DoD 2 negative -- duplicate venue codes (EM-5's `rank_venues`
+    rejection) leave no `route_decisions` row either, against a real DB
+    rather than a fake repository."""
+    order_id = uuid4()
+    candidates = [
+        VenueCandidate(venue="DUP", fee_bps=Decimal("1"), liquidity_score=Decimal("0.5")),
+        VenueCandidate(venue="DUP", fee_bps=Decimal("2"), liquidity_score=Decimal("0.1")),
+    ]
+
+    with pytest.raises(ValueError, match="duplicate venue codes"):
+        await route_order(
+            repo, order_id=order_id, candidates=candidates, decided_at=datetime.now(timezone.utc)
+        )
+
+    assert await _row_count(pool, order_id) == 0
+    assert await repo.get_by_order_id(order_id) is None
+
+
 async def test_route_order_concurrent_calls_are_idempotent(pool, repo):
     """DoD 3 -- 20 concurrent route_order calls for the same order_id leave
     exactly one route_decisions row."""
@@ -139,9 +159,7 @@ async def test_route_order_concurrent_calls_are_idempotent(pool, repo):
 
     results = await asyncio.gather(
         *(
-            route_order(
-                repo, order_id=order_id, candidates=candidates, decided_at=decided_at
-            )
+            route_order(repo, order_id=order_id, candidates=candidates, decided_at=decided_at)
             for _ in range(20)
         )
     )
