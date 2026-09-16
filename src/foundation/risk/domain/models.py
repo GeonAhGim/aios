@@ -1,6 +1,6 @@
-"""U-15 PERSONAL 모드 순수 도메인 모델 — I/O 없음, Decimal만 쓴다.
+"""U-15 PERSONAL mode pure domain models — no I/O, Decimal only.
 
-Spec: task-2749, ADR-2026-09-09-B Decision C 확장.
+Spec: task-2749, ADR-2026-09-09-B Decision C extension.
 """
 
 from __future__ import annotations
@@ -14,11 +14,12 @@ PERSONAL_CONSERVATIVE_BUNDLE_NAME = "personal-conservative"
 
 @dataclass(frozen=True)
 class PersonalRiskBundle:
-    """`config/risk_policy/personal-conservative.yaml`의 도메인 표현.
+    """Domain representation of
+    `config/risk_policy/personal-conservative.yaml`.
 
-    `symbol_whitelist`가 비어 있으면 그 어떤 심볼도 허용되지 않는다
-    (fail-closed) — "신규 심볼 화이트리스트"는 운영자가 명시적으로 등록한
-    심볼만 거래를 허용한다는 뜻이다.
+    An empty `symbol_whitelist` means no symbol is allowed at all
+    (fail-closed) — the "new-symbol whitelist" only allows trading on
+    symbols the operator has explicitly registered.
     """
 
     name: str

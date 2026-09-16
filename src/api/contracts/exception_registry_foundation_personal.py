@@ -12,9 +12,10 @@ from src.api.contracts.error_codes import ErrorCode
 from src.foundation.risk.application.promotion_checklist import PromotionDeniedError
 
 EXCEPTION_MAP_FOUNDATION_PERSONAL: list[tuple[type[Exception], ErrorCode]] = [
-    # U-15 — LIVE 전환 체크리스트 미충족(fail-closed). 사유 목록은
-    # PromotionDeniedError.details["blockers"]에 실려 map_exception()의
-    # _structured_details()가 그대로 봉투 details로 전달한다.
+    # U-15 -- LIVE promotion checklist unmet (fail-closed). The blocker list
+    # rides in PromotionDeniedError.details["blockers"], which
+    # map_exception()'s _structured_details() passes straight through to
+    # the envelope's details.
     (PromotionDeniedError, ErrorCode.POLICY_LIVE_BLOCKED),
 ]
 

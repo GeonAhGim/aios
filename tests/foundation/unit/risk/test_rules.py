@@ -22,17 +22,23 @@ _BUNDLE = PersonalRiskBundle(
 )
 
 
-def _order(**overrides: object) -> OrderRiskCheckInput:
-    defaults: dict[str, object] = {
-        "exchange": "bitget",
-        "symbol": "BTC/USDT",
-        "order_notional_krw": Decimal("10000"),
-        "account_equity_krw": Decimal("1000000"),
-        "current_exposure_krw": Decimal("0"),
-        "daily_realized_pnl_pct": Decimal("0"),
-    }
-    defaults.update(overrides)
-    return OrderRiskCheckInput(**defaults)  # type: ignore[arg-type]
+def _order(
+    *,
+    exchange: str = "bitget",
+    symbol: str = "BTC/USDT",
+    order_notional_krw: Decimal = Decimal("10000"),
+    account_equity_krw: Decimal = Decimal("1000000"),
+    current_exposure_krw: Decimal = Decimal("0"),
+    daily_realized_pnl_pct: Decimal = Decimal("0"),
+) -> OrderRiskCheckInput:
+    return OrderRiskCheckInput(
+        exchange=exchange,
+        symbol=symbol,
+        order_notional_krw=order_notional_krw,
+        account_equity_krw=account_equity_krw,
+        current_exposure_krw=current_exposure_krw,
+        daily_realized_pnl_pct=daily_realized_pnl_pct,
+    )
 
 
 def test_allowed_order_within_all_limits():

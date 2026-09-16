@@ -1,9 +1,11 @@
-"""U-15 PAPER→LIVE 승격 체크리스트 애플리케이션 계층.
+"""U-15 PAPER->LIVE promotion checklist application layer.
 
-`domain/promotion.py`의 순수 판정에 운영 상태(파일 저장 PAPER 이력) I/O를
-연결한다. ADR-08-29-E 조건 2 충족 여부는 코드가 스스로 검증할 수 없는
-실계좌 운영 사실이므로(미검증), 환경변수
-`PERSONAL_ADR_0829E_CONDITION2_MET`(기본 false, fail-closed)로만 판단한다.
+Connects the pure decision in `domain/promotion.py` to operational state
+I/O (file-backed PAPER history). Whether ADR-08-29-E condition 2 is met is
+a real-account operational fact the code cannot verify on its own
+(unverified), so it is decided solely by the
+`PERSONAL_ADR_0829E_CONDITION2_MET` environment variable (default false,
+fail-closed).
 """
 
 from __future__ import annotations
@@ -39,7 +41,8 @@ class PersonalPromotionChecklist:
 
 
 class PromotionDeniedError(Exception):
-    """LIVE 전환 요청이 체크리스트 미충족으로 거부됨 — fail-closed."""
+    """LIVE promotion request denied because the checklist is unmet —
+    fail-closed."""
 
     def __init__(self, blockers: tuple[str, ...]) -> None:
         self.blockers = blockers

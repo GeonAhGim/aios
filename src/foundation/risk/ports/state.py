@@ -1,6 +1,7 @@
-"""U-15 PERSONAL 모드 프로세스 상태 포트 — kill switch 여부 + PAPER 운영
-이력(시작일·위반 건수). domain/application은 이 Protocol만 알고 실제 저장
-방식(adapters/json_state_store.py)은 모른다.
+"""U-15 PERSONAL mode process-state port — kill switch status + PAPER
+operating history (start date, violation count). domain/application know
+only this Protocol; the actual storage mechanism
+(adapters/json_state_store.py) is unknown to them.
 """
 
 from __future__ import annotations
@@ -17,8 +18,9 @@ class PersonalOperationStatePort(Protocol):
     async def engage_kill(self, *, reason: str) -> None: ...
 
     async def mark_paper_started_if_unset(self, *, today: date) -> date:
-        """PAPER 시작일이 아직 없으면 `today`로 기록하고 반환한다(멱등) —
-        이미 있으면 저장된 값을 그대로 반환한다."""
+        """If no PAPER start date is recorded yet, record `today` and
+        return it (idempotent) — if one already exists, return the stored
+        value unchanged."""
         ...
 
     async def record_violation(self, *, occurred_on: date) -> None: ...

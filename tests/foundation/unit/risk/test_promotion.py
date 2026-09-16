@@ -10,15 +10,19 @@ from src.foundation.risk.domain.promotion import (
 )
 
 
-def _input(**overrides: object) -> PromotionChecklistInput:
-    defaults: dict[str, object] = {
-        "adr_0829e_condition2_met": True,
-        "bundle_active": True,
-        "paper_days_elapsed": MIN_PAPER_DAYS,
-        "paper_violation_count": 0,
-    }
-    defaults.update(overrides)
-    return PromotionChecklistInput(**defaults)  # type: ignore[arg-type]
+def _input(
+    *,
+    adr_0829e_condition2_met: bool = True,
+    bundle_active: bool = True,
+    paper_days_elapsed: int = MIN_PAPER_DAYS,
+    paper_violation_count: int = 0,
+) -> PromotionChecklistInput:
+    return PromotionChecklistInput(
+        adr_0829e_condition2_met=adr_0829e_condition2_met,
+        bundle_active=bundle_active,
+        paper_days_elapsed=paper_days_elapsed,
+        paper_violation_count=paper_violation_count,
+    )
 
 
 def test_all_conditions_met_is_eligible():

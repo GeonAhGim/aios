@@ -1,8 +1,8 @@
-"""U-15 PERSONAL 모드 계약 v1 — YAML 설정 스키마 + API 응답 DTO.
+"""U-15 PERSONAL mode contracts v1 — YAML config schema + API response DTOs.
 
-Spec: task-2749. `PersonalRiskBundleConfigV1`은
-`config/risk_policy/personal-conservative.yaml`의 스키마이고, 나머지는
-`src/api/routers/personal.py`가 반환하는 응답 뷰다.
+Spec: task-2749. `PersonalRiskBundleConfigV1` is the schema for
+`config/risk_policy/personal-conservative.yaml`; the rest are response
+views returned by `src/api/routers/personal.py`.
 """
 
 from __future__ import annotations
@@ -13,9 +13,9 @@ SCHEMA_VERSION = "v1"
 
 
 class _StrictModel(BaseModel):
-    """미지 키를 조용히 무시하지 않는다(fail-closed) — risk_policy_loader.py와
-    동일 원칙(오타·잘못된 위치의 키가 그대로 로드 성공으로 이어지는 것을
-    막는다)."""
+    """Does not silently ignore unknown keys (fail-closed) — same principle
+    as risk_policy_loader.py (a typo or misplaced key must not load as a
+    success)."""
 
     model_config = ConfigDict(extra="forbid")
 

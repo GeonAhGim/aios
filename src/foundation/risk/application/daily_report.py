@@ -1,8 +1,9 @@
-"""U-15 일일 리포트 — 손익·체결·위반 요약.
+"""U-15 daily report — P&L, fill, and violation summary.
 
-미검증/TODO: 체결·손익 데이터 소스 연동(실제 원장·performance 모듈 조회)은
-이 리프 스콥 밖이다 — 호출자가 그날의 실현손익과 체결 건수를 직접 넘긴다.
-위반 건수만 이 모듈이 상태 저장소에서 직접 조회한다(단일 출처).
+Unverified/TODO: wiring to a real fill/P&L data source (the real ledger /
+performance module) is out of this leaf's scope — the caller passes in
+today's realized P&L and fill count directly. Only the violation count is
+read by this module from the state store (single source of truth).
 """
 
 from __future__ import annotations

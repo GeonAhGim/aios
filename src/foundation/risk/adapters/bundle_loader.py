@@ -1,7 +1,8 @@
-"""U-15 personal-conservative 정책 번들 YAML 로더.
+"""U-15 personal-conservative policy bundle YAML loader.
 
-`src/core/loader/risk_policy_loader.py`와 동일 원칙 — pydantic
-`extra="forbid"`로 오타/미지 키를 로드 성공으로 넘기지 않는다(fail-closed).
+Same principle as `src/core/loader/risk_policy_loader.py` — pydantic
+`extra="forbid"` prevents a typo or unknown key from silently loading as a
+success (fail-closed).
 """
 
 from __future__ import annotations

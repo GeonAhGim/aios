@@ -1,11 +1,13 @@
-"""U-15 PERSONAL 모드 상태 파일 저장소 — 단일 운영자 프로세스 로컬 상태
-(kill switch·PAPER 시작일·위반 이력)를 JSON 파일 하나에 담는다.
+"""U-15 PERSONAL mode state file store — a single JSON file holding the
+local process state (kill switch, PAPER start date, violation history) for
+a single-operator process.
 
-이 리프는 마이그레이션 승인이 없어 새 DB 테이블을 만들지 않는다 — 재시작
-후에도 상태가 남아야 하는 개인 운영 도구 특성상 파일 저장을 쓴다. 여러
-프로세스의 동시쓰기는 가정하지 않는다(1인 운영자, 단일 프로세스) — 그런
-환경이 필요해지면 postgres 어댑터로 교체한다(포트가 이미 분리돼 있어
-호출부는 바뀌지 않는다).
+This leaf has no migration approval, so it does not create a new DB
+table — file storage is used because a personal operating tool needs state
+to survive restarts. Concurrent writes from multiple processes are not
+assumed (single operator, single process) — if that ever becomes
+necessary, swap in a Postgres adapter (the port is already separated, so
+callers do not change).
 """
 
 from __future__ import annotations

@@ -1,7 +1,8 @@
-"""U-15 개인 운영 주문 리스크 평가 순수 규칙 — DB/HTTP 없이 단위 테스트
-가능해야 한다.
+"""U-15 personal-mode order risk evaluation — pure rules, unit-testable
+without DB/HTTP.
 
-Spec: task-2749 DoD "번들 적대 테스트(한도 초과 REJECT·kill 자동 발동)".
+Spec: task-2749 DoD "bundle adversarial tests (over-limit REJECT, auto
+kill)".
 """
 
 from __future__ import annotations
@@ -30,7 +31,8 @@ class OrderRiskCheckInput:
     account_equity_krw: Decimal
     current_exposure_krw: Decimal
     daily_realized_pnl_pct: Decimal
-    """오늘 실현손익률. 음수 = 손실, 예: Decimal("-0.02") == -2%."""
+    """Today's realized P&L ratio. Negative = loss, e.g. Decimal("-0.02")
+    == -2%."""
 
 
 @dataclass(frozen=True)
@@ -43,9 +45,10 @@ class OrderRiskDecision:
 def evaluate_personal_order(
     bundle: PersonalRiskBundle, order: OrderRiskCheckInput
 ) -> OrderRiskDecision:
-    """fail-closed: 계좌 자본이 0 이하면 비율 계산 없이 즉시 거부한다(0으로
-    나누기를 방지하는 동시에, 계좌 상태를 알 수 없을 때 암묵적 허용을
-    만들지 않는다)."""
+    """Fail-closed: if account equity is zero or negative, reject
+    immediately without computing any ratio (avoids division by zero and,
+    just as importantly, avoids an implicit allow when account state is
+    unknown)."""
     if order.account_equity_krw <= 0:
         return OrderRiskDecision(
             allowed=False,

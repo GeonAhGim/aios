@@ -1,14 +1,16 @@
-"""U-15 PERSONAL 모드 API — 개인 운영자용 리스크 번들 상태·PAPER→LIVE 승격
-체크리스트·대시보드 kill 버튼·일일 리포트.
+"""U-15 PERSONAL mode API — solo-operator risk bundle status, PAPER->LIVE
+promotion checklist, dashboard kill button, daily report.
 
-Spec: task-2749, ADR-2026-09-09-B Decision C 확장(사용자 개인 운영 곁가지).
-71번 §6 규칙에 따라 router는 auth/주입/transport validation/command
-invocation만 담당한다 — 도메인 예외(`PromotionDeniedError`)는 여기서 잡지
-않고 `src/api/contracts/exception_mapping.py`의 `EXCEPTION_MAP`이 전역
-핸들러에서 `POLICY_LIVE_BLOCKED`(403)로 번역한다.
+Spec: task-2749, ADR-2026-09-09-B Decision C extension (solo-operator
+branch). Per rule 71 §6, routers only handle auth/injection/transport
+validation/command invocation — domain exceptions (`PromotionDeniedError`)
+are not caught here; `EXCEPTION_MAP` in
+`src/api/contracts/exception_mapping.py` translates them to
+`POLICY_LIVE_BLOCKED` (403) in the global handler.
 
-단일 운영자 도구이므로 모든 엔드포인트는 `get_current_admin`(운영자) 전용
-이다 — 일반 사용자 self-service 경로가 아니다.
+This is a single-operator tool, so every endpoint requires
+`get_current_admin` (operator only) — it is not a general-user
+self-service path.
 """
 
 from __future__ import annotations
@@ -96,9 +98,10 @@ async def post_promote(
     _admin: User = Depends(get_current_admin),
     state: PersonalOperationStatePort = Depends(get_personal_state),
 ) -> ApiResponse[PromotionChecklistView]:
-    """체크리스트 미충족이면 `PromotionDeniedError`가 그대로 전파되어 전역
-    핸들러가 403 `POLICY_LIVE_BLOCKED`로 거부한다(fail-closed) — 이 함수가
-    정상 반환하면 승격 체크리스트가 전부 충족됐다는 뜻이다."""
+    """If the checklist is unmet, `PromotionDeniedError` propagates and the
+    global handler denies with 403 `POLICY_LIVE_BLOCKED` (fail-closed) —
+    a normal return from this function means the checklist is fully
+    satisfied."""
     bundle = load_personal_bundle()
     checklist = await request_promotion(
         bundle_active=bundle.name == PERSONAL_CONSERVATIVE_BUNDLE_NAME, state=state
@@ -122,12 +125,12 @@ async def post_kill_switch(
     state: PersonalOperationStatePort = Depends(get_personal_state),
     notifier: TelegramNotifierAdapter = Depends(get_personal_notifier),
 ) -> ApiResponse[KillSwitchView]:
-    """대시보드 원클릭 kill 버튼."""
+    """One-click dashboard kill button."""
     await state.engage_kill(reason="MANUAL_DASHBOARD_KILL")
     await notifier.send(
         PersonalNotification(
             kind=PersonalNotificationKind.KILL_SWITCH,
-            message="운영자가 대시보드에서 수동으로 kill 스위치를 발동함",
+            message="Operator manually engaged the kill switch from the dashboard",
         )
     )
     return ok(
@@ -143,8 +146,9 @@ async def get_daily_report(
     realized_pnl_krw: Decimal = Query(default=Decimal("0")),
     fill_count: int = Query(default=0, ge=0),
 ) -> ApiResponse[DailyReportView]:
-    """미검증/TODO: 체결·손익 소스 연동은 별도 리프 — 현재는 호출자가
-    query parameter로 그날의 손익·체결 건수를 직접 넘긴다."""
+    """Unverified/TODO: fill/P&L source wiring is a separate leaf — for now
+    the caller passes today's P&L and fill count directly as query
+    parameters."""
     effective_date = report_date if report_date is not None else datetime.now(timezone.utc).date()
     report = await build_daily_report(
         report_date=effective_date,

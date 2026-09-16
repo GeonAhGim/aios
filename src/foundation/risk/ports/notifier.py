@@ -1,5 +1,6 @@
-"""U-15 텔레그램 등 개인 운영 알림 포트. domain/application은 이 Protocol만
-알고, 실제 전송 수단(adapters/telegram_adapter.py)은 모른다.
+"""U-15 personal-operator notification port (Telegram etc). domain/
+application know only this Protocol; the actual delivery mechanism
+(adapters/telegram_adapter.py) is unknown to them.
 """
 
 from __future__ import annotations

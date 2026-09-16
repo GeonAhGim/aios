@@ -68,17 +68,23 @@ class _FakeState:
         return sum(1 for v in self.violations if v == day)
 
 
-def _order(**overrides: object) -> OrderRiskCheckInput:
-    defaults: dict[str, object] = {
-        "exchange": "bitget",
-        "symbol": "BTC/USDT",
-        "order_notional_krw": Decimal("10000"),
-        "account_equity_krw": Decimal("1000000"),
-        "current_exposure_krw": Decimal("0"),
-        "daily_realized_pnl_pct": Decimal("0"),
-    }
-    defaults.update(overrides)
-    return OrderRiskCheckInput(**defaults)  # type: ignore[arg-type]
+def _order(
+    *,
+    exchange: str = "bitget",
+    symbol: str = "BTC/USDT",
+    order_notional_krw: Decimal = Decimal("10000"),
+    account_equity_krw: Decimal = Decimal("1000000"),
+    current_exposure_krw: Decimal = Decimal("0"),
+    daily_realized_pnl_pct: Decimal = Decimal("0"),
+) -> OrderRiskCheckInput:
+    return OrderRiskCheckInput(
+        exchange=exchange,
+        symbol=symbol,
+        order_notional_krw=order_notional_krw,
+        account_equity_krw=account_equity_krw,
+        current_exposure_krw=current_exposure_krw,
+        daily_realized_pnl_pct=daily_realized_pnl_pct,
+    )
 
 
 async def test_position_size_over_limit_is_rejected_and_recorded():
@@ -96,7 +102,7 @@ async def test_position_size_over_limit_is_rejected_and_recorded():
     assert PersonalRiskViolation.POSITION_SIZE_EXCEEDED in decision.violations
     assert len(state.violations) == 1
     assert len(notifier.sent) == 1
-    assert "주문 거부" in notifier.sent[0].message
+    assert "Order rejected" in notifier.sent[0].message
 
 
 async def test_notional_cap_exceeded_is_rejected():

@@ -1,7 +1,8 @@
-"""U-15 주문 리스크 게이트 애플리케이션 계층 — 순수 domain 판정에 알림/kill
-상태 갱신 I/O를 얹는다.
+"""U-15 order risk-gate application layer — attaches notification/kill
+state I/O to the pure domain decision.
 
-Spec: task-2749 DoD "번들 적대 테스트(한도 초과 REJECT·kill 자동 발동)".
+Spec: task-2749 DoD "bundle adversarial tests (over-limit REJECT, auto
+kill)".
 """
 
 from __future__ import annotations
@@ -29,9 +30,10 @@ async def check_personal_order(
     notifier: PersonalNotifierPort,
     state: PersonalOperationStatePort,
 ) -> OrderRiskDecision:
-    """한도 위반이면 위반 이력을 기록하고 알림을 보낸다. 일일 손실 한도가
-    깨졌으면(이미 kill이 걸려 있지 않은 한) kill switch를 발동하고 별도
-    알림을 보낸다 — 두 알림은 서로 다른 사유라 합치지 않는다."""
+    """On any violation, record it and send an alert. If the daily-loss
+    limit is breached (and kill is not already engaged), engage the kill
+    switch and send a separate alert — the two alerts are distinct reasons
+    and are not merged."""
     decision = evaluate_personal_order(bundle, order)
 
     if decision.violations:
@@ -40,7 +42,7 @@ async def check_personal_order(
         await notifier.send(
             PersonalNotification(
                 kind=PersonalNotificationKind.LIMIT_BREACH,
-                message=f"{order.exchange}:{order.symbol} 주문 거부 — {reasons}",
+                message=f"Order rejected for {order.exchange}:{order.symbol} - {reasons}",
             )
         )
 
@@ -49,7 +51,7 @@ async def check_personal_order(
         await notifier.send(
             PersonalNotification(
                 kind=PersonalNotificationKind.KILL_SWITCH,
-                message="일일 손실 한도 초과로 자동 kill 발동",
+                message="Daily loss limit breached - kill switch auto-engaged",
             )
         )
 

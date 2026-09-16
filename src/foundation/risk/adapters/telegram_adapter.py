@@ -1,11 +1,12 @@
-"""U-15 텔레그램 알림 어댑터 — 체결/한도위반/kill 알림.
+"""U-15 Telegram notifier adapter — fill/limit-breach/kill alerts.
 
-`TELEGRAM_BOT_TOKEN`/`TELEGRAM_CHAT_ID`(.env 슬롯)가 비어 있으면 실제로
-보내지 않고 `ok=False`를 반환한다 — `src/core/observability/notify_port.py`
-`WebhookNotifyAdapter`와 동일 원칙(미설정을 성공으로 위장하지 않는다).
+If `TELEGRAM_BOT_TOKEN`/`TELEGRAM_CHAT_ID` (.env slots) are empty, this
+does not actually send and returns `ok=False` — same principle as
+`WebhookNotifyAdapter` in `src/core/observability/notify_port.py` (a
+missing config is never disguised as success).
 
-미검증: 텔레그램 Bot API 응답 스키마는 공개 문서 기준 가정이며, 실제 봇
-토큰으로 검증되지 않았다.
+Unverified: the Telegram Bot API response shape is assumed from public
+docs and has not been verified against a real bot token.
 """
 
 from __future__ import annotations
