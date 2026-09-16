@@ -12,6 +12,7 @@ Prometheus 노출 시 이름의 `.`는 `_`로 치환한다(`to_prom`) — Promet
 "정규식 전수 통과"를 요구하므로 `aios.readiness.check.status`로 세그먼트를 추가했다 —
 PLT-11(alert_rules.yaml)이 이 상수 값을 그대로 참조하면 문서 표기와의 괴리는 생기지 않는다.
 """
+
 from __future__ import annotations
 
 API_REQUEST_COUNT_TOTAL = "aios.api.request.count_total"
@@ -56,13 +57,9 @@ SECURITY_KEY_ROTATION_COUNT_TOTAL = "aios.security.key_rotation.count_total"
 
 READINESS_CHECK_STATUS = "aios.readiness.check.status"
 
-POSITIONS_RECONCILIATION_MISMATCH_COUNT_TOTAL = (
-    "aios.positions.reconciliation.mismatch_count_total"
-)
+POSITIONS_RECONCILIATION_MISMATCH_COUNT_TOTAL = "aios.positions.reconciliation.mismatch_count_total"
 
-POSITIONS_SCHEDULER_CYCLE_FAILURE_COUNT_TOTAL = (
-    "aios.positions.scheduler.cycle_failure_count_total"
-)
+POSITIONS_SCHEDULER_CYCLE_FAILURE_COUNT_TOTAL = "aios.positions.scheduler.cycle_failure_count_total"
 POSITIONS_SCHEDULER_CYCLE_SUCCESS_GAUGE = "aios.positions.scheduler_cycle_success.gauge"
 
 # L4_risk_and_safety §7 verbatim row "replay mismatch — target 0 — replay" (R-54).
@@ -124,6 +121,17 @@ PAPER_SIM_FILL_COUNT_TOTAL = "aios.paper_sim.fill.count_total"
 # Original: `aios.paper_sim.slippage_bps` — only 2 segments, so split into `slippage`/`bps`.
 PAPER_SIM_SLIPPAGE_BPS = "aios.paper_sim.slippage.bps"
 
+# L50 (docs/specs/L4_strategy_portfolio_backtest_v1.0.md §9) — observability wiring for the
+# backtest/validation/performance contexts.
+BACKTEST_RUN_COUNT_TOTAL = "aios.backtest.run.count_total"
+BACKTEST_RUN_DURATION_SECONDS = "aios.backtest.run.duration_seconds"
+
+VALIDATION_RUN_COUNT_TOTAL = "aios.validation.run.count_total"
+VALIDATION_RUN_DURATION_SECONDS = "aios.validation.run.duration_seconds"
+
+PERFORMANCE_STATEMENT_COUNT_TOTAL = "aios.performance.statement.count_total"
+PERFORMANCE_STATEMENT_DURATION_SECONDS = "aios.performance.statement.duration_seconds"
+
 ALL_METRIC_NAMES: frozenset[str] = frozenset(
     {
         API_REQUEST_COUNT_TOTAL,
@@ -182,6 +190,12 @@ ALL_METRIC_NAMES: frozenset[str] = frozenset(
         EXCHANGE_WS_HEARTBEAT_MISS_COUNT_TOTAL,
         PAPER_SIM_FILL_COUNT_TOTAL,
         PAPER_SIM_SLIPPAGE_BPS,
+        BACKTEST_RUN_COUNT_TOTAL,
+        BACKTEST_RUN_DURATION_SECONDS,
+        VALIDATION_RUN_COUNT_TOTAL,
+        VALIDATION_RUN_DURATION_SECONDS,
+        PERFORMANCE_STATEMENT_COUNT_TOTAL,
+        PERFORMANCE_STATEMENT_DURATION_SECONDS,
     }
 )
 

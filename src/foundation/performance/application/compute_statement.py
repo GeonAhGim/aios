@@ -13,12 +13,20 @@ immutable statement + evidence.
 0으로 대체하지 않는다(PRF-002) — 이 리프가 실제로 검증하는 건 "입력이
 부족하면 억지로 항등식을 통과시키지 않는다"는 이 규율 자체다.
 """
+
 from __future__ import annotations
 
+import logging
+import time
 from datetime import datetime, timezone
 from decimal import Decimal
 from uuid import UUID, uuid4
 
+from src.core.observability.metric_names import (
+    PERFORMANCE_STATEMENT_COUNT_TOTAL,
+    PERFORMANCE_STATEMENT_DURATION_SECONDS,
+)
+from src.core.observability.metrics import MetricsPort, NullMetrics
 from src.foundation.evidence.application.record_command_event import record_command_event
 from src.foundation.evidence.ports.repository import AuditEventRepository
 from src.foundation.performance.application.statement_projection import statement_to_view
@@ -38,6 +46,8 @@ from src.foundation.performance.domain.models import (
 )
 from src.foundation.performance.domain.rules import assert_single_scope, next_revision
 from src.foundation.performance.ports.repository import PerformanceRepository, StatementInputPort
+
+logger = logging.getLogger(__name__)
 
 _INSUFFICIENT_VALUATION_LIMITATION = (
     "IDENTITY_INSUFFICIENT_VALUATION_HISTORY: 기간 경계 평가액이 1개뿐이라 "
@@ -80,13 +90,39 @@ async def compute_statement(
     tenant_id: UUID,
     cmd: ComputeStatementCommand,
     trace_id: UUID,
+    metrics: MetricsPort | None = None,
 ) -> PerformanceStatementView:
+    # PLT-10 instrumentation point — defaults to NullMetrics, so existing callers
+    # that don't pass `metrics` stay unaffected.
+    metrics = metrics if metrics is not None else NullMetrics()
+    started = time.monotonic()
     methodology_version = cmd.methodology_version or DEFAULT_METHODOLOGY.version
-    methodology = await repo.get_methodology(methodology_version)
-    if methodology is None:
-        if methodology_version != DEFAULT_METHODOLOGY.version:
-            raise MethodologyNotFoundError(methodology_version)
-        methodology = await repo.insert_methodology(DEFAULT_METHODOLOGY)
+    try:
+        methodology = await repo.get_methodology(methodology_version)
+        if methodology is None:
+            if methodology_version != DEFAULT_METHODOLOGY.version:
+                raise MethodologyNotFoundError(methodology_version)
+            methodology = await repo.insert_methodology(DEFAULT_METHODOLOGY)
+    except MethodologyNotFoundError as exc:
+        metrics.counter(PERFORMANCE_STATEMENT_COUNT_TOTAL, {"op": "compute", "outcome": "failed"})
+        metrics.observe(
+            PERFORMANCE_STATEMENT_DURATION_SECONDS,
+            time.monotonic() - started,
+            {"op": "compute", "outcome": "failed"},
+        )
+        logger.error(
+            "performance_statement_compute_failed",
+            extra={
+                "event": "performance_statement_compute_failed",
+                "duration_ms": round((time.monotonic() - started) * 1000),
+                "payload": {
+                    "tenant_id": str(tenant_id),
+                    "scope": cmd.scope.value,
+                    "reason_code": exc.reason_code,
+                },
+            },
+        )
+        raise
 
     snapshots = await inputs.load_reconciled_snapshots(
         scope_ref=cmd.scope_ref, period_start=cmd.period_start, period_end=cmd.period_end
@@ -192,4 +228,22 @@ async def compute_statement(
     )
 
     saved = await repo.insert_statement(statement)
+    elapsed = time.monotonic() - started
+    metrics.counter(PERFORMANCE_STATEMENT_COUNT_TOTAL, {"op": "compute", "outcome": "completed"})
+    metrics.observe(
+        PERFORMANCE_STATEMENT_DURATION_SECONDS, elapsed, {"op": "compute", "outcome": "completed"}
+    )
+    logger.info(
+        "performance_statement_computed",
+        extra={
+            "event": "performance_statement_computed",
+            "duration_ms": round(elapsed * 1000),
+            "payload": {
+                "tenant_id": str(tenant_id),
+                "statement_id": str(saved.id),
+                "scope": cmd.scope.value,
+                "revision_no": saved.revision_no,
+            },
+        },
+    )
     return statement_to_view(saved)
