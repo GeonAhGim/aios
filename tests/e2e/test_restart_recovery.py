@@ -28,6 +28,7 @@ import pytest
 
 from src.data.models.base import AssetClass, Currency, Money
 from src.data.models.trading import AccountBalance, Order, OrderSide, OrderStatus, OrderType
+from src.exchanges.common.adapter import ExchangeAdapter
 from src.exchanges.paper.fee_model import FeeModel
 from src.exchanges.paper.fill_model import FillModel
 from src.exchanges.paper.latency_model import LatencyModel
@@ -41,7 +42,7 @@ from src.services.oms.application.restart_recovery import (
 )
 from src.services.order_service import repository
 from src.services.order_service.foundation_gate import make_foundation_pre_submit_gate
-from src.services.order_service.gate import GateOutcome, OrderContext
+from src.services.order_service.gate import GateDecision, GateOutcome, OrderContext
 from src.services.order_service.submit import OrderDeniedByRiskGateError, submit_order
 from tests.integration.conftest import create_test_tenant
 from tests.integration.fake_exchange_adapter import FakeExchangeAdapter
@@ -224,7 +225,7 @@ async def test_submit_order_denied_until_recovery_completes_then_allowed(
     order = _make_market_order(execution_id, "restart-gated-order")
     state = RecoveryState()  # 새로 시작한 프로세스 — 복구가 아직 안 끝났다
 
-    async def never_delegate(context: object) -> None:
+    async def never_delegate(context: OrderContext) -> GateDecision:
         raise AssertionError("복구 미완료 상태에서는 실제 게이트로 위임하면 안 된다")
 
     with pytest.raises(OrderDeniedByRiskGateError) as exc_info:
@@ -233,7 +234,7 @@ async def test_submit_order_denied_until_recovery_completes_then_allowed(
             user_id=user_id,
             adapter=adapter,
             pool=pool,
-            pre_submit_gate=make_recovery_gate(state, never_delegate),  # type: ignore[arg-type]
+            pre_submit_gate=make_recovery_gate(state, never_delegate),
         )
     assert exc_info.value.reason_codes == (RECOVERY_IN_PROGRESS_REASON,)
     async with pool.acquire() as conn:
@@ -270,7 +271,7 @@ async def test_recovery_failure_injection_keeps_submissions_denied(
 
     monkeypatch.setattr(recovery_wiring, "reclaim_expired_leases", boom)
 
-    async def resolve_adapter_must_not_be_called(_user_id: UUID, _exchange: str) -> None:
+    async def resolve_adapter_must_not_be_called(_user_id: UUID, _exchange: str) -> ExchangeAdapter:
         raise AssertionError("lease reclaim이 실패했으면 어댑터를 조회하면 안 된다")
 
     async def publish_must_not_be_called(_topic: str, _payload: dict[str, object]) -> None:
@@ -278,17 +279,17 @@ async def test_recovery_failure_injection_keeps_submissions_denied(
 
     state = await recovery_wiring.run_startup_recovery_gated(
         pool,
-        resolve_adapter=resolve_adapter_must_not_be_called,  # type: ignore[arg-type]
+        resolve_adapter=resolve_adapter_must_not_be_called,
         publish=publish_must_not_be_called,
         enabled=True,
     )
 
     assert state.complete is False
 
-    async def never_delegate(context: object) -> None:
+    async def never_delegate(context: OrderContext) -> GateDecision:
         raise AssertionError("복구 실패 후에도 게이트가 위임되면 안 된다")
 
-    gate = make_recovery_gate(state, never_delegate)  # type: ignore[arg-type]
+    gate = make_recovery_gate(state, never_delegate)
 
     decision = await gate(
         OrderContext(
