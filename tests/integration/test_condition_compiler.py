@@ -3,6 +3,7 @@
 실제 dev DB 대상 — 컴파일된 FSMStrategyConfig를 14.3(StrategyBuilderService)
 으로 저장했다가 다시 읽어와도 9.11 스키마를 그대로 만족함을 검증한다.
 """
+
 import json
 from pathlib import Path
 from uuid import uuid4
@@ -74,13 +75,15 @@ def test_compiled_conditions_embedded_in_correct_transitions(compiler):
     config = compiler.compile(**_sample_kwargs(f"test-{uuid4().hex[:8]}"))
 
     entry_transition = next(
-        t for t in config.transitions
+        t
+        for t in config.transitions
         if t.from_state == FSMState.IDLE and t.to_state == FSMState.BUY_ORDER_PENDING
     )
     assert "RSI_timeperiod14 < 30.0" == entry_transition.condition
 
     exit_transition = next(
-        t for t in config.transitions
+        t
+        for t in config.transitions
         if t.from_state == FSMState.HOLDING and t.to_state == FSMState.SELL_ORDER_PENDING
     )
     assert "RSI_timeperiod14 > 70.0" == exit_transition.condition
@@ -111,6 +114,59 @@ def test_compile_rejects_unsupported_operator(compiler):
         PreviewCondition.model_construct(indicator="RSI", params={}, operator="~=", threshold=1)
     ]
 
+    with pytest.raises(ConditionCompileError):
+        compiler.compile(**kwargs)
+
+
+def test_compile_p95_latency_is_within_dsl_compile_budget(compiler):
+    """ADR-2026-09-09-C Decision 1 "DSL 컴파일 300ms" 예산 — 조건 3그룹을
+    FSM 6전이로 컴파일하는 이 경로도 같은 컴파일 축 예산을 적용받는다."""
+    import time
+
+    kwargs = _sample_kwargs(f"test-{uuid4().hex[:8]}")
+
+    samples_ms: list[float] = []
+    for _ in range(500):
+        start = time.perf_counter()
+        compiler.compile(**kwargs)
+        samples_ms.append((time.perf_counter() - start) * 1000)
+
+    samples_ms.sort()
+    p95_ms = samples_ms[int(len(samples_ms) * 0.95)]
+    assert p95_ms < 300, f"compile() p95={p95_ms:.3f}ms exceeds 300ms DSL compile budget"
+
+
+def _compile_condition_group_without_operator_guard(
+    conditions: list[PreviewCondition], combine: str
+) -> str:
+    """`_compile_condition_group()`의 연산자 화이트리스트 검사(`_OPERATOR_SYMBOLS`
+    lookup, condition_compiler.py:64)를 빼먹은 회귀본 — 미지원 연산자 문자열을
+    검증 없이 그대로 조건식 문자열에 꽂아 넣는다."""
+    parts = []
+    for condition in conditions:
+        params_suffix = "".join(f"_{key}{value}" for key, value in sorted(condition.params.items()))
+        parts.append(
+            f"{condition.indicator}{params_suffix} {condition.operator} {condition.threshold}"
+        )
+    joiner = " AND " if combine == "AND" else " OR "
+    return joiner.join(parts)
+
+
+def test_gate_red_missing_operator_guard_leaks_unsupported_operator_into_fsm_condition(compiler):
+    """적색: 연산자 화이트리스트 검사를 뺀 회귀본은 FROZEN Strategy Engine이
+    해석할 수 없는 "~=" 연산자를 그대로 FSM 전이 조건 문자열에 흘려보낸다.
+    녹색: 실제 `ConditionCompiler.compile()`은 같은 입력을 컴파일 시점에
+    `ConditionCompileError`로 fail-closed 거부해 이 문자열이 FSM에 저장되지
+    못하게 막는다."""
+    bad_condition = PreviewCondition.model_construct(
+        indicator="RSI", params={}, operator="~=", threshold=1
+    )
+
+    leaked = _compile_condition_group_without_operator_guard([bad_condition], "AND")
+    assert "~=" in leaked
+
+    kwargs = _sample_kwargs(f"test-{uuid4().hex[:8]}")
+    kwargs["exit_conditions"] = [bad_condition]
     with pytest.raises(ConditionCompileError):
         compiler.compile(**kwargs)
 

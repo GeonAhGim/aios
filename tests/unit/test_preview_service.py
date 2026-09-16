@@ -3,8 +3,21 @@
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 
+import pytest
+
+from src.core.indicators.talib_adapter import IndicatorResult
 from src.data.models.market_data import Candle
 from src.services.preview_service import DISCLAIMER, PreviewCalculator, PreviewCondition
+
+
+class _TruncatedIndicatorService:
+    """실패 주입: 캔들 개수보다 짧은 values를 돌려주는 손상된 지표 백엔드를
+    흉내낸다(예: 상류 API가 부분 응답을 캐시하다 회귀로 잘라 보내는 경우)."""
+
+    def calculate(self, indicator: str, candles: list[Candle], **params: int) -> IndicatorResult:
+        return IndicatorResult(
+            indicator=indicator, values=[1.0] * (len(candles) - 2), params=params
+        )
 
 
 def _candles(prices: list[float]) -> list[Candle]:
@@ -101,3 +114,17 @@ def test_crosses_above_detects_transition():
 
     assert 4 in result.signal_indices
     assert 3 not in result.signal_indices
+
+
+def test_truncated_indicator_backend_fails_closed_instead_of_silent_partial_signal():
+    """IndicatorService가 캔들 수보다 짧은 values를 돌려주는 백엔드 회귀가
+    나면, PreviewCalculator는 남은 캔들들을 조용히 '조건 불만족'으로 넘기며
+    잘못된 부분 신호를 내보내지 않고 즉시 크래시한다(fail-closed) — 신호를
+    과소 계산해 사용자에게 거짓 안전 신호를 주는 것보다 낫다."""
+    condition = PreviewCondition(
+        indicator="RSI", params={"timeperiod": 2}, operator=">", threshold=0
+    )
+    calc = PreviewCalculator(indicator_service=_TruncatedIndicatorService())
+
+    with pytest.raises(IndexError):
+        calc.preview(_candles([100 + i for i in range(10)]), [condition])
