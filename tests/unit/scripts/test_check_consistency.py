@@ -332,6 +332,42 @@ def test_openapi_removing_a_registered_non_allowlisted_path_is_still_flagged(
     assert hits == [("contracts/openapi/v1.json#/foo/{id}", 0)]
 
 
+def test_openapi_passes_for_compound_colon_verb_segment(tmp_path: Path) -> None:
+    """task-3981: "{id}:verb" 복합 세그먼트(예: connections/{connection_id}:confirm)를
+    frontend가 ":id:verb"로 등록하면 정상 매칭돼야 한다 -- 예전에는
+    _normalize_legacy_path가 ":id:verb" 세그먼트 전체를 "*"로 뭉개 ":verb" 접미사를
+    잃어버려서 이런 경로를 전부 유령으로 오탐했다."""
+    _write(
+        tmp_path,
+        "contracts/openapi/v1.json",
+        json.dumps({"paths": {"/foo/{id}:confirm": {}}}),
+    )
+    _write(
+        tmp_path,
+        "frontend/packages/api-client/src/apiRoutes.ts",
+        'export const API_ROUTES = { "x": route("/foo/:id:confirm", true) };\n',
+    )
+    assert cc.check_openapi_frontend(tmp_path) == []
+
+
+def test_openapi_flags_compound_colon_verb_mismatch(tmp_path: Path) -> None:
+    """위 테스트의 반증: frontend가 다른 ":verb" 접미사(:approve)로 등록하면
+    "*" 뭉개기로 우연히 통과하지 않고 여전히 양방향 모두 적색이어야 한다."""
+    _write(
+        tmp_path,
+        "contracts/openapi/v1.json",
+        json.dumps({"paths": {"/foo/{id}:confirm": {}}}),
+    )
+    _write(
+        tmp_path,
+        "frontend/packages/api-client/src/apiRoutes.ts",
+        'export const API_ROUTES = { "x": route("/foo/:id:approve", true) };\n',
+    )
+    hits = cc.check_openapi_frontend(tmp_path)
+    assert ("contracts/openapi/v1.json#/foo/{id}:confirm", 0) in hits
+    assert ("frontend/packages/api-client/src/apiRoutes.ts#/foo/:id:approve", 0) in hits
+
+
 # ---------------------------------------------------------------------------
 # 8. spec_leaf_untraced
 # ---------------------------------------------------------------------------

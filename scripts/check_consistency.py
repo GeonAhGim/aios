@@ -558,13 +558,19 @@ def check_migrations(root: Path) -> list[Hit]:
 _OPENAPI_PARAM_RE = re.compile(r"\{[^}]+\}")
 _ROUTE_CALL_RE = re.compile(r'route\(\s*"([^"]+)"')
 
-# task-3716: 이 스캐너는 리터럴/세그먼트 단위 정규화만 하는 크루드 대조라 ":id:verb"
-# 복합 세그먼트(예: "{connection_id}:confirm")를 구분하지 못하는 것과는 별개로,
-# "서버 라우터는 있지만 화면이 아직 없어 apiRoutes.ts에 의도적으로 등록하지 않은"
-# 경로까지 유령 경로로 오탐한다. 이 15건은 frontend/packages/api-client/src/
-# apiPaths.openapi.test.ts의 UNREGISTERED_ROUTE_WHITELIST(task-2168 §E)와 정확히
-# 같은 경로·같은 사유다 -- 두 목록이 갈라지면 그 vitest의 "화이트리스트 부패 방지"
-# 테스트가 먼저 잡는다. 값은 "서버 라우터 파일:라인 -- 사유".
+# task-3981: ":id:verb" 복합 세그먼트(예: "{connection_id}:confirm")는
+# frontend/packages/api-client/src/apiPaths.openapi.scanner.ts의
+# legacyPathToTemplate()과 동일한 규칙으로 _normalize_legacy_path()가 처리한다
+# (":paramName" 접두만 "*"로 치환하고 뒤에 붙은 ":verb" 리터럴은 보존) -- 예전에는
+# 이 정규화가 세그먼트 전체를 "*"로 뭉개 복합 세그먼트를 유령 경로로 오탐했다
+# (task-3850이 그 오탐 1건을 아래 화이트리스트에 개별 우회로 남겼던 이유). 지금은
+# _normalize_legacy_path()가 이를 올바르게 처리하므로 그런 우회는 더 필요 없다.
+#
+# 아래 화이트리스트는 그와는 다른, 진짜 사유("서버 라우터는 있지만 화면이 아직 없어
+# apiRoutes.ts에 의도적으로 등록하지 않은" 경로)만 남긴다. frontend/packages/
+# api-client/src/apiPaths.openapi.test.ts의 UNREGISTERED_ROUTE_WHITELIST
+# (task-2168 §E)와 정확히 같은 경로·같은 사유다 -- 두 목록이 갈라지면 그 vitest의
+# "화이트리스트 부패 방지" 테스트가 먼저 잡는다. 값은 "서버 라우터 파일:라인 -- 사유".
 _OPENAPI_NO_FRONTEND_UI_ALLOWLIST: dict[str, str] = {
     "/admin/audit-log": "src/api/routers/admin.py:73 -- 관리자 감사 로그 화면 없음",
     "/admin/break-glass/grants": (
@@ -575,16 +581,6 @@ _OPENAPI_NO_FRONTEND_UI_ALLOWLIST: dict[str, str] = {
     ),
     "/admin/ledger/payouts/{batch_id}/paid": (
         "src/api/routers/foundation/ledger_admin.py:46 -- 정산 배치 확정 액션 UI 없음"
-    ),
-    # task-3850: 이 leaf에서 스냅샷에 처음 등록한 경로(기존에는 스냅샷이 이 경로
-    # 자체를 담고 있지 않아 유령/누락 어느 쪽도 아니었다) — 화면은 이미
-    # riskGate.safetyControls.evaluateRecovery로 이 액션을 호출한다(SafetyControlsPage,
-    # task-2335). `{control_id}:evaluate-recovery` vs `:controlId:evaluate-recovery`
-    # 복합 세그먼트를 이 크루드 스캐너가 구분 못 해 유령으로 오탐한다 — 주석
-    # 558-559행에 이미 기록된 것과 같은 종류의 알려진 오탐.
-    "/v1/foundation/risk-gate/safety-controls/{control_id}:evaluate-recovery": (
-        "src/api/routers/foundation/risk_gate.py:170 -- SafetyControlsPage가 이미 호출함"
-        "(복합 세그먼트 오탐, task-3850)"
     ),
     "/exchange-credentials/{exchange}/positions": (
         "src/api/routers/exchange_credentials.py:97 -- exchange.ts에 positions 조회 없음"
@@ -626,8 +622,15 @@ def _normalize_openapi_path(p: str) -> str:
     return _OPENAPI_PARAM_RE.sub("*", p)
 
 
+def _normalize_legacy_segment(seg: str) -> str:
+    if not seg.startswith(":"):
+        return seg
+    parts = seg[1:].split(":")
+    return "*" if len(parts) == 1 else f"*:{':'.join(parts[1:])}"
+
+
 def _normalize_legacy_path(p: str) -> str:
-    return "/".join("*" if seg.startswith(":") else seg for seg in p.split("/"))
+    return "/".join(_normalize_legacy_segment(seg) for seg in p.split("/"))
 
 
 def check_openapi_frontend(root: Path) -> list[Hit]:
