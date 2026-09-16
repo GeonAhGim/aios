@@ -1,0 +1,11 @@
+# H-13 live 프로필 (ADR-2026-09-09-B). 비밀 없는 설정만 둔다 — 자격증명/키는
+# 계속 .env 또는 KeyRing(src/core/security/key_ring.py)에서 읽는다.
+#
+# 주의: 이 파일이 로드된다고 실계좌 주문이 열리지 않는다. 실행 시점 가드는
+# 별도(AIOS_ALLOW_LIVE_ADAPTER, src/exchanges/factory.py). 이 프로필의 역할은
+# 오직 하나 — KIS_PAPER_TRADING/NH_PAPER_TRADING/BITGET_PAPER_TRADING 중
+# 하나라도 여전히 paper/demo를 가리키면(값이 없어도 fail-closed로 paper
+# 취급) src/core/config/profile.py의 로더가 기동 자체를 거부한다.
+environment: live
+log_level: WARNING
+cors_allowed_origins: []

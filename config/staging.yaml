@@ -1,0 +1,6 @@
+# H-13 staging 프로필 (ADR-2026-09-09-B). 비밀 없는 설정만 둔다 — 자격증명/키는
+# 계속 .env 또는 KeyRing(src/core/security/key_ring.py)에서 읽는다.
+environment: staging
+log_level: INFO
+cors_allowed_origins:
+  - https://staging.aios.internal
