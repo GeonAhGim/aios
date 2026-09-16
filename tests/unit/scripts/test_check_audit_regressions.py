@@ -6,10 +6,12 @@ DoD: "새 정적 검사가 raw 시드 픽스처를 주입하면 실패함을 증
 `# audit-allow` 주석이 있는 문서화된 예외는 봐주는지를 직접 실행해
 확인한다. DB·네트워크 접근 없음 — 순수 텍스트 스캔이라 임시 파일만 쓴다.
 """
+
 from __future__ import annotations
 
 import importlib.util
 import sys
+import time
 from pathlib import Path
 from types import ModuleType
 
@@ -41,7 +43,7 @@ def test_flags_raw_balance_seed_injected_into_a_fixture(tmp_path, monkeypatch) -
     monkeypatch.setattr(check_audit_regressions, "ROOT", tmp_path)
     _write_injected_fixture(
         tmp_path,
-        'async def create_ledger_account(pool, *, initial_balance):\n'
+        "async def create_ledger_account(pool, *, initial_balance):\n"
         "    async with pool.acquire() as conn:\n"
         "        await conn.execute(\n"
         '            "INSERT INTO ledger_balance (account_id, balance, allow_negative) "\n'
@@ -101,3 +103,88 @@ def test_current_repository_has_no_open_ledger_balance_raw_seed_findings() -> No
     finding = check_audit_regressions.check_ledger_balance_raw_seed()
 
     assert finding is None
+
+
+def test_flags_raw_balance_seed_with_column_list_on_continuation_line(
+    tmp_path, monkeypatch
+) -> None:
+    """컬럼 목록이 문자열 리터럴 이어붙이기로 다음 줄에 걸쳐 있어도(체크 docstring이
+    설명하는 실제 관례) `balance` 컬럼을 놓치지 않고 잡아야 한다 — `INSERT INTO`가
+    있는 줄 자체에는 `balance`가 없는 경계 사례."""
+    monkeypatch.setattr(check_audit_regressions, "ROOT", tmp_path)
+    _write_injected_fixture(
+        tmp_path,
+        "async def _seed(conn, account_id, initial_balance, allow_negative):\n"
+        "    await conn.execute(\n"
+        '        "INSERT INTO ledger_balance "\n'
+        '        "(account_id, balance, allow_negative) "\n'
+        '        "VALUES ($1, $2, $3)",\n'
+        "        account_id, initial_balance, allow_negative,\n"
+        "    )\n",
+    )
+
+    finding = check_audit_regressions.check_ledger_balance_raw_seed()
+
+    assert finding is not None
+    assert finding.code == "ledger_balance_raw_seed"
+
+
+def test_flags_raw_balance_seed_when_allow_marker_is_outside_context_window(
+    tmp_path, monkeypatch
+) -> None:
+    """`# audit-allow` 주석이 12줄 컨텍스트 창보다 더 위에 있으면 예외로 인정되지
+    않는다 — 화이트박스 주석을 파일 어딘가에 던져두고 무관한 위반을 가리는
+    회피를 막는 경계 사례."""
+    monkeypatch.setattr(check_audit_regressions, "ROOT", tmp_path)
+    padding = "\n".join(f"    # padding {i}" for i in range(15))
+    _write_injected_fixture(
+        tmp_path,
+        "async def _seed(conn, account_id, initial_balance, allow_negative):\n"
+        "    # audit-allow: ledger_balance_raw_seed -- 너무 멀리 있어 무효해야 한다\n"
+        f"{padding}\n"
+        "    await conn.execute(\n"
+        '        "INSERT INTO ledger_balance (account_id, balance, allow_negative) "\n'
+        '        "VALUES ($1, $2, $3)",\n'
+        "        account_id, initial_balance, allow_negative,\n"
+        "    )\n",
+    )
+
+    finding = check_audit_regressions.check_ledger_balance_raw_seed()
+
+    assert finding is not None
+    assert finding.code == "ledger_balance_raw_seed"
+
+
+def test_check_ledger_balance_raw_seed_completes_within_time_budget(tmp_path, monkeypatch) -> None:
+    """성능단언: 대규모 저장소(수천 개 테스트 파일)에서도 raw seed 스캔이 예산
+    내에 끝나는지, 그리고 그 규모 속에서도 유일한 위반을 정확히 찾는지 확인한다."""
+    monkeypatch.setattr(check_audit_regressions, "ROOT", tmp_path)
+    generated_dir = tmp_path / "tests" / "generated"
+    for i in range(500):
+        sub = generated_dir / f"pkg_{i % 50}"
+        sub.mkdir(parents=True, exist_ok=True)
+        (sub / f"test_{i}.py").write_text(
+            'async def test_noop(conn):\n    await conn.execute("SELECT 1")\n',
+            encoding="utf-8",
+        )
+    _write_injected_fixture(
+        tmp_path,
+        "async def create_ledger_account(pool, *, initial_balance):\n"
+        "    async with pool.acquire() as conn:\n"
+        "        await conn.execute(\n"
+        '            "INSERT INTO ledger_balance (account_id, balance, allow_negative) "\n'
+        '            "VALUES ($1, $2, $3)",\n'
+        "            account_id, initial_balance, allow_negative,\n"
+        "        )\n",
+    )
+    assert (
+        len(list(generated_dir.rglob("*.py"))) > 300
+    )  # 벤치마크가 무의미해지지 않도록 규모를 보장
+
+    start = time.perf_counter()
+    finding = check_audit_regressions.check_ledger_balance_raw_seed()
+    elapsed = time.perf_counter() - start
+
+    assert finding is not None
+    assert any("conftest.py" in e for e in finding.evidence)
+    assert elapsed < 5.0, f"raw seed 스캔이 {elapsed:.3f}s — 예산(5.0s) 초과"
