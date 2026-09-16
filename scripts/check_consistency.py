@@ -621,8 +621,18 @@ def _expand_leaf_ids(token: str) -> list[str]:
 def _collect_spec_leaf_ids(specs_dir: Path) -> set[str]:
     ids: set[str] = set()
     for path in sorted(specs_dir.glob("L4_*.md")):
+        in_status_block = False
         for line in path.read_text(encoding="utf-8", errors="replace").splitlines():
-            m = _LEAF_ROW_RE.match(line.strip())
+            stripped = line.strip()
+            if stripped.startswith("<!-- spec-status:begin"):
+                in_status_block = True
+                continue
+            if stripped.startswith("<!-- spec-status:end"):
+                in_status_block = False
+                continue
+            if in_status_block:
+                continue
+            m = _LEAF_ROW_RE.match(stripped)
             if m:
                 ids.update(_expand_leaf_ids(m.group(1)))
     return ids
