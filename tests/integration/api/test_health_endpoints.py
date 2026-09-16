@@ -6,8 +6,20 @@ DoD(task-939): 정상 시 `GET /readyz` 200, DB 풀을 끊으면 503, `/metrics`
 토큰 없이 403. `/readyz`·`/livez`는 `ApiResponse` 봉투를 쓰지 않으므로
 `response.json()`이 바로 `ReadinessReport` 모양이어야 한다(frontend
 readiness.ts의 raw-first 파싱 분기와 대응).
+
+task-3158 DEEPEN: 원 리프(task-939)는 negative·실패 주입은 이미 충족하지만
+수치 성능 단언이 없었다(`_check_loops()`의 `observed < threshold` 정적
+비교는 판정 로직이지 지연 측정이 아니다) — 게이트 적색 재현도 없었다. 새
+기능 추가 없이 `/readyz`가 스펙 521행 "read 라우트 p95 < 300 ms"(73 §10)
+예산을 지키는지, 그 단언이 실제 회귀에는 적색이 되는지(상시-녹색 아님)를
+보강한다.
 """
+
 from __future__ import annotations
+
+import asyncio
+import math
+import time
 
 import pytest
 from httpx import ASGITransport, AsyncClient
@@ -16,6 +28,8 @@ from src.api.deps import get_pool
 from src.core.observability.loop_health import LoopHealth, loop_health, set_loop_health
 from src.main import app
 from tests.conftest import lifespan_context_with_retry
+
+_READYZ_READ_ROUTE_P95_BUDGET_SECONDS = 0.3
 
 
 @pytest.fixture
@@ -130,3 +144,60 @@ async def test_metrics_with_correct_token_returns_prometheus_text(
 
     assert response.status_code == 200
     assert response.headers["content-type"].startswith("text/plain")
+
+
+# ---------------------------------------------------------------------------
+# task-3158 DEEPEN — `/readyz` 지연 예산(스펙 521행 "read 라우트 p95 <
+# 300 ms")의 수치 성능 단언 + 게이트 적색 재현.
+#
+# `_check_loops()`의 `observed < threshold` 비교는 판정 로직(loop 신선도)이지
+# 지연 측정이 아니다 — 이 두 테스트는 엔드포인트 왕복 자체의 p95 지연을
+# 실측하고, 그 단언이 실제 회귀에는 적색이 되는지(상시-녹색 아님)까지
+# 증명한다.
+# ---------------------------------------------------------------------------
+
+
+def _p95(samples: list[float]) -> float:
+    ordered = sorted(samples)
+    index = max(0, math.ceil(0.95 * len(ordered)) - 1)
+    return ordered[index]
+
+
+class _SlowPool:
+    """`get_pool` 오버라이드용 더블 — `fetchval`에 read 라우트 예산의 2배
+    지연을 인위 주입해, 아래 p95 단언이 tautology가 아니라 실제 회귀를
+    잡는지(게이트 적색 재현) 증명한다."""
+
+    async def fetchval(self, *args: object, **kwargs: object) -> int:
+        await asyncio.sleep(_READYZ_READ_ROUTE_P95_BUDGET_SECONDS * 2)
+        return 1
+
+
+async def test_readyz_p95_latency_within_read_route_budget(client: AsyncClient) -> None:
+    samples: list[float] = []
+    for _ in range(30):
+        started = time.perf_counter()
+        response = await client.get("/readyz")
+        samples.append(time.perf_counter() - started)
+        assert response.status_code == 200
+
+    assert _p95(samples) < _READYZ_READ_ROUTE_P95_BUDGET_SECONDS
+
+
+async def test_readyz_p95_latency_budget_fails_when_db_pool_is_slow(
+    client: AsyncClient,
+) -> None:
+    async def _slow_pool() -> _SlowPool:
+        return _SlowPool()
+
+    app.dependency_overrides[get_pool] = _slow_pool
+
+    samples: list[float] = []
+    for _ in range(5):
+        started = time.perf_counter()
+        response = await client.get("/readyz")
+        samples.append(time.perf_counter() - started)
+        assert response.status_code == 200
+
+    with pytest.raises(AssertionError):
+        assert _p95(samples) < _READYZ_READ_ROUTE_P95_BUDGET_SECONDS
