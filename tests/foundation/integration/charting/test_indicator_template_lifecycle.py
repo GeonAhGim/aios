@@ -4,6 +4,7 @@ Spec: docs/specs/L4_analytics_authoring_backtest_marketplace_v1.0.md §9.11
 CH-17 DoD "템플릿 적용 후 동일 화면 재현, 교차 테넌트 404". `tenant_id`가
 `tenant(id)`를 FK하므로(`b5bf8da8e058`) `create_test_tenant()`로 실제
 `tenant` 행을 먼저 만든다(`create_test_user()`만으로는 FK 위반)."""
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -196,3 +197,30 @@ async def test_delete_indicator_template_removes_row(repo, pool):
 
     with pytest.raises(ChartIndicatorTemplateNotFoundError):
         await get_indicator_template(repo, tenant_id=tenant_id, template_id=created.id)
+
+
+async def test_repo_delete_indicator_template_cross_tenant_is_noop(repo, pool):
+    """Gate-red repro for the Review task-3444 REJECT: `PostgresChartingRepository.
+    delete_indicator_template()` calls the repo directly (bypassing the
+    application-layer `load_owned_indicator_template()` ownership check) to
+    prove the `tenant_id` clause in the DELETE statement's WHERE is itself
+    load-bearing, not merely redundant with the application-layer guard —
+    same principle as `delete_layout()`'s WHERE-clause defense."""
+    owner_tenant = await _tenant(pool)
+    other_tenant = await _tenant(pool)
+    created = await create_indicator_template(
+        repo,
+        tenant_id=owner_tenant,
+        owner_subject_id=owner_tenant,
+        name="repo-layer-defense",
+        template=_sample_template(),
+    )
+
+    # Bypasses the application-layer ownership check on purpose.
+    await repo.delete_indicator_template(created.id, tenant_id=other_tenant)
+
+    fetched = await get_indicator_template(repo, tenant_id=owner_tenant, template_id=created.id)
+    assert fetched.id == created.id
+
+    await repo.delete_indicator_template(created.id, tenant_id=owner_tenant)
+    assert await repo.get_indicator_template(created.id) is None

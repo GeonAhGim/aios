@@ -1,5 +1,6 @@
 """ChartingRepository port. domain은 이 Protocol만 알고, 실제 구현(adapters/)은
 모른다(71번 §4)."""
+
 from __future__ import annotations
 
 from typing import Any, Protocol
@@ -85,4 +86,8 @@ class ChartingRepository(Protocol):
         self, tenant_id: UUID
     ) -> tuple[ChartIndicatorTemplate, ...]: ...
 
-    async def delete_indicator_template(self, template_id: UUID) -> None: ...
+    async def delete_indicator_template(self, template_id: UUID, *, tenant_id: UUID) -> None:
+        """`tenant_id` is also carried in the WHERE clause, defending again at
+        this layer independent of the caller's ownership check — same
+        principle as `delete_layout()`."""
+        ...

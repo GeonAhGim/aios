@@ -103,8 +103,10 @@ class FakeChartingRepository:
     async def list_indicator_templates(self, tenant_id: UUID) -> tuple[ChartIndicatorTemplate, ...]:
         return tuple(t for t in self.templates.values() if t.tenant_id == tenant_id)
 
-    async def delete_indicator_template(self, template_id: UUID) -> None:
-        self.templates.pop(template_id, None)
+    async def delete_indicator_template(self, template_id: UUID, *, tenant_id: UUID) -> None:
+        existing = self.templates.get(template_id)
+        if existing is not None and existing.tenant_id == tenant_id:
+            self.templates.pop(template_id, None)
 
 
 # ---------------------------------------------------------------------------

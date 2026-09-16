@@ -182,7 +182,7 @@ class FakeChartingRepository:
     async def list_indicator_templates(self, tenant_id: UUID) -> Any:
         raise _OutOfScopeError
 
-    async def delete_indicator_template(self, template_id: UUID) -> None:
+    async def delete_indicator_template(self, template_id: UUID, *, tenant_id: UUID) -> None:
         raise _OutOfScopeError
 
 

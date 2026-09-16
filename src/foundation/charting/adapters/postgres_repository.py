@@ -4,6 +4,7 @@ Spec: 105번(동시성 표준). `create_layout()`이 두 테이블을 하나의 
 묶는 유일한 쓰기 경로다 — 그 결과 `put_drawings()`는 `chart_drawing_set`
 행이 항상 존재한다고 가정하고 조건부 UPDATE 하나만 한다(INSERT-or-UPDATE
 분기의 first-write 경합을 설계로 없앤다, ports/repository.py 참조)."""
+
 from __future__ import annotations
 
 import json
@@ -219,19 +220,19 @@ class PostgresChartingRepository:
             )
         return _row_to_indicator_template(row) if row is not None else None
 
-    async def list_indicator_templates(
-        self, tenant_id: UUID
-    ) -> tuple[ChartIndicatorTemplate, ...]:
+    async def list_indicator_templates(self, tenant_id: UUID) -> tuple[ChartIndicatorTemplate, ...]:
         async with self._pool.acquire() as conn:
             rows = await conn.fetch(
-                "SELECT * FROM chart_indicator_template WHERE tenant_id = $1 "
-                "ORDER BY created_at",
+                "SELECT * FROM chart_indicator_template WHERE tenant_id = $1 ORDER BY created_at",
                 tenant_id,
             )
         return tuple(_row_to_indicator_template(row) for row in rows)
 
-    async def delete_indicator_template(self, template_id: UUID) -> None:
+    async def delete_indicator_template(self, template_id: UUID, *, tenant_id: UUID) -> None:
+        # Same reason as delete_layout() -- tenant_id is stated explicitly in the WHERE clause.
         async with self._pool.acquire() as conn:
             await conn.execute(
-                "DELETE FROM chart_indicator_template WHERE id = $1", template_id
+                "DELETE FROM chart_indicator_template WHERE id = $1 AND tenant_id = $2",
+                template_id,
+                tenant_id,
             )
