@@ -12,11 +12,13 @@ checker actually fail, both as a pure `verify()` call and as the real
 would pass DoD(1) alone but not this. DoD(3) replaying the same window twice
 yields the same `combined_digest` (no clock/dict-order dependence).
 """
+
 from __future__ import annotations
 
 import os
 import subprocess
 import sys
+import time
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from pathlib import Path
@@ -268,8 +270,12 @@ async def test_replay_digest_differs_between_accounts_with_different_balances(po
         )
         async with pool.acquire() as conn, conn.transaction():
             await post_entry(
-                conn, event, journal=journal, balances=PostgresBalanceRepository(pool),
-                audit=PostgresAuditEventRepository(pool), clock=_clock,
+                conn,
+                event,
+                journal=journal,
+                balances=PostgresBalanceRepository(pool),
+                audit=PostgresAuditEventRepository(pool),
+                clock=_clock,
             )
         return credit_code
 
@@ -454,3 +460,30 @@ async def test_replay_still_raises_for_post_cutover_broken_event_chain(pool):
                 "UPDATE oms_order_transition_cutover SET cutover_at = NULL, armed_by = NULL "
                 "WHERE id = 1"
             )
+
+
+async def test_replay_verify_completes_within_latency_budget_for_fifty_streams(pool):
+    """수치 성능 단언 (DEPTH_FA 감사 task-3019/FA-15 유일 미달 항목) -- `verify()`의
+    원장 쪽은 매 실행마다 `PostgresJournalRepository.list_since`로 저널 전체를
+    시퀀스 1부터 다시 접는 설계이고(scripts/replay_verify.py 모듈 독스트링,
+    "there is no cheaper since-yesterday fold"), 주문 쪽은 스트림마다 개별
+    타임라인/체결 조회를 한다(`_order_pair`, 스트림당 3쿼리) -- 어느 한쪽이든
+    윈도 안에서 건드린 스트림 수에 비례해 느려질 수 있는데 수치 상한이 없으면
+    회귀(예: N+1 확대, 캐시 소실)를 놓친다. 주문 25개 + 원장 분개 25개(계정
+    50개, 스트림 75개 이상)로 규모를 재현한다."""
+    for _ in range(25):
+        await _seed_order(pool)
+    for _ in range(25):
+        await _seed_ledger_entry(pool)
+    as_of = _clock() + timedelta(minutes=1)
+
+    started = time.perf_counter()
+    report = await replay_verify.verify(pool, as_of=as_of, hours=1)
+    elapsed_s = time.perf_counter() - started
+
+    assert report.ok, report.mismatches
+    assert report.streams_checked >= 50
+    assert elapsed_s < 5.0, (
+        f"replay_verify.verify over {report.streams_checked} streams took "
+        f"{elapsed_s:.3f}s (budget 5.0s)"
+    )
