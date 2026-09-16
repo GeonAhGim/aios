@@ -4,6 +4,7 @@ Spec: AIOSproject 109번 §5 — look-ahead bias 방지가 이 엔진의 핵심 
 docs/specs/L4_strategy_portfolio_backtest_v1.0.md#§9 L29 (rules.py extension row) --
 the `assert_fill_after_signal`/`require_cost_model` addition.
 """
+
 from __future__ import annotations
 
 from typing import ClassVar, Protocol, runtime_checkable
@@ -13,12 +14,16 @@ from src.foundation.backtest.domain.models import CostModel
 
 @runtime_checkable
 class _HasBarIndex(Protocol):
-    """The minimal structure both `OrderEvent` and `FillEvent` (L30
-    domain/events.py, not yet implemented) satisfy -- checking I2 only needs
-    `bar_index`, so this pure rule does not depend on an event module that
-    isn't wired up yet."""
+    """The minimal structure both `OrderEvent` and `FillEvent`
+    (domain/events.py) satisfy -- checking I2 only needs `bar_index`, so this
+    pure rule keeps a narrow structural dependency instead of importing the
+    event module directly. Declared as a read-only property (not a plain
+    field) because both events are frozen pydantic models -- a plain
+    `bar_index: int` member would demand a settable attribute and reject
+    every frozen model under mypy's structural check."""
 
-    bar_index: int
+    @property
+    def bar_index(self) -> int: ...
 
 
 class LookaheadViolationError(ValueError):
