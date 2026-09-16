@@ -1,6 +1,6 @@
-Status: REVIEW → ADR CANDIDATE (task IDEA-02; concretizes ADR-2026-09-05-A agent gateway)
-
 # 02. 사용자 경험과 BYOAI Agent Connector
+
+> Status: REVIEW → ADR CANDIDATE (ADR-2026-09-17-A-BYOAI-connector.md 초안)
 
 Status: IDEA / REVIEW  
 Date: 2026-09-10
