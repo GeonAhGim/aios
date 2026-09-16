@@ -38,7 +38,7 @@ def _p95(samples: list[float]) -> float:
 def _load_v1_snapshot() -> dict | None:
     if not _V1_SNAPSHOT_PATH.exists():
         return None  # 스냅샷 없는 환경(pytest.skip 대신 — check_code_ratchets.py skip_xfail 예산)
-    return json.loads(_V1_SNAPSHOT_PATH.read_text(encoding="utf-8"))  # type: ignore[no-any-return]
+    return json.loads(_V1_SNAPSHOT_PATH.read_text(encoding="utf-8"))
 
 
 def test_find_violations_p95_latency_within_budget_for_real_v1_snapshot() -> None:
