@@ -46,6 +46,7 @@ let statusResult: {
 vi.mock("@aios/shared-hooks", () => ({
   useMandateStatus: () => statusResult,
   useEvaluateMandatePolicy: () => ({ mutate: evaluateMutate, isPending: false }),
+  useComplianceDecisionLookup: () => ({ mutate: vi.fn(), isPending: false }),
   useMe: () => ({ data: { email: "user@example.com", isPlatformAdmin: false } }),
   useLogout: () => vi.fn(),
 }));

@@ -99,6 +99,17 @@ export const catalogKoLegacyC = {
     "t10": "만료 시각",
     "t11": "의무(obligations)",
   },
+  "complianceDecisionLookupPanel": {
+    "t1": "판정 조회(decision_id)",
+    "label2": "판정 ID (decision_id)",
+    "t3": "조회",
+    "t4": "판정 ID를 입력하세요.",
+    "t5": "판정: ",
+    "t6": "규칙 히트",
+    "t7": "규칙 위반 없음.",
+    "t8": "번들 버전",
+    "t9": "판정 시각",
+  },
   "disputeSubmitPage": {
     "title1": "분쟁 신고",
     "t2": "분쟁이 접수됐습니다 (#{{disputeId}}, {{status}}).",

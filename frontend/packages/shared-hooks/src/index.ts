@@ -76,6 +76,7 @@ export {
   useResumeMandate,
   useEvaluateMandatePolicy,
 } from "./useMandates";
+export { useComplianceDecisionLookup } from "./useCompliance";
 export { useReconciliationStates, useResolveReconciliation } from "./useReconciliation";
 export { useAuditTimeline, useVerifyAuditChain } from "./useEvidence";
 export {

@@ -2,6 +2,7 @@ import { ApiClientBase } from "./http";
 import { withAccount } from "./clients/account";
 import { withAdmin } from "./clients/admin";
 import { withAuth } from "./clients/auth";
+import { withCompliance } from "./clients/compliance";
 import { withConnections } from "./clients/connections";
 import { withEvidence } from "./clients/evidence";
 import { withExchange } from "./clients/exchange";
@@ -34,9 +35,11 @@ const ComposedApiClient = withPlatform(
                   withConnections(
                     withEvidence(
                       withReconciliation(
-                        withMandates(
-                          withRiskGate(
-                            withExchange(withExecutions(withPortfolio(withAccount(withAuth(ApiClientBase))))),
+                        withCompliance(
+                          withMandates(
+                            withRiskGate(
+                              withExchange(withExecutions(withPortfolio(withAccount(withAuth(ApiClientBase))))),
+                            ),
                           ),
                         ),
                       ),

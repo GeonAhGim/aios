@@ -97,6 +97,17 @@ export const catalogEnLegacyC = {
     "t10": "Expiry time",
     "t11": "Obligations",
   },
+  "complianceDecisionLookupPanel": {
+    "t1": "Decision lookup (decision_id)",
+    "label2": "Decision ID (decision_id)",
+    "t3": "Look up",
+    "t4": "Enter a decision ID.",
+    "t5": "Verdict: ",
+    "t6": "Rule hits",
+    "t7": "No rule violations.",
+    "t8": "Bundle version",
+    "t9": "Verdict time",
+  },
   "disputeSubmitPage": {
     "title1": "Report a dispute",
     "t2": "Dispute submitted (#{{disputeId}}, {{status}}).",

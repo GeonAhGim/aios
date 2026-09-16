@@ -1,6 +1,7 @@
 {
   "files": {
     "apps/web/src/components/AdminRoute.tsx": 1,
+    "apps/web/src/commandPalette/CommandPalette.tsx": 1,
     "apps/web/src/components/BadRequestNotice.tsx": 1,
     "apps/web/src/components/ErrorMessage.tsx": 1,
     "apps/web/src/components/ProtectedRoute.tsx": 1,

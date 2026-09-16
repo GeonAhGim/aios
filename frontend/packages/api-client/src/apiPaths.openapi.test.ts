@@ -100,6 +100,10 @@ const STALE_SNAPSHOT_WHITELIST: ReadonlySet<ApiRouteName> = new Set<ApiRouteName
   "charting.indicatorTemplates.item",
   "marketData.coverage.get",
   "riskGate.safetyControls.evaluateRecovery",
+  // task-2668(CM-18): compliance.decisions.get도 동일 사유 — apiRoutes.ts 등록
+  // 주석 참조(src/api/routers/foundation/compliance.py:57-63는 실재하지만
+  // contracts/openapi/v1.json은 task-2618 이후 재생성된 적이 없다).
+  "compliance.decisions.get",
 ]);
 
 // KNOWN_ENVELOPE_DRIFT: task-1165 시점 전수 대조 결과, apiPaths.ts에 등록된 envelope

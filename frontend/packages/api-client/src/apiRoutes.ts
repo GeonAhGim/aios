@@ -303,6 +303,21 @@ export const API_ROUTES = defineApiRoutes({
   "mandates.mandate.resume": route("/v1/foundation/mandates/mandate:resume", true, null, true),
   "mandates.policy.evaluate": route("/v1/foundation/mandates/policy:evaluate", true, null, true),
 
+  // task-2668(CM-18): src/api/routers/foundation/compliance.py 원문 확인(task-2618,
+  // 098380f7) — `APIRouter(prefix="/v1/foundation/compliance")`, GET
+  // "/decisions/{decision_id}" -> ApiResponse[ComplianceDecisionView] + ok(...)
+  // (compliance.py:57-63). envelope=true, mount_v1(PLT-16) 미도달이라 v1Path=null
+  // (mandates.*와 동일 사유). contracts/openapi/v1.json은 task-2618 병합 이후
+  // 재생성된 적이 없어 이 경로가 아직 없다(grep 직접 확인) — 라우터 자체는
+  // 실재하므로 GHOST_PATH_WHITELIST가 아니라 STALE_SNAPSHOT_WHITELIST
+  // (riskGate.safetyControls.evaluateRecovery와 동일 처리, apiPaths.openapi.test.ts)로 뺀다.
+  "compliance.decisions.get": route(
+    "/v1/foundation/compliance/decisions/:decisionId",
+    true,
+    null,
+    true,
+  ),
+
   // task-2412(FE-OPS-8): src/api/routers/foundation/validation.py 원문 확인 — POST
   // "/{strategy_id}/{strategy_version}" -> ApiResponse[ValidationResultView] + ok(...).
   // envelope=true, mount_v1(PLT-16) 미도달이라 v1Path=null(foundation.*와 동일 사유).
