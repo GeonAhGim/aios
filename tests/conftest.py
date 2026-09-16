@@ -102,6 +102,12 @@ os.environ.setdefault("AIOS_LIQUIDATION_WORKER_ENABLED", "0")
 # 자기도 모르게 스캔해 다른 테스트의 tenant에 kill switch를 걸지 않도록.
 # 배치 자체는 tests/integration/mandates/test_post_trade_batch.py가 직접 호출해 검증한다.
 os.environ.setdefault("AIOS_POST_TRADE_BATCH_ENABLED", "0")
+# EM-15 -- algo tick scheduler polls every registered run on its own interval; block it
+# in lifespan integration tests for the same reason as the flags above (no algo run is
+# ever registered against `tests/conftest.py`'s shared pool, so this would just be a
+# no-op poll loop, but it still costs a task/log line every cycle). Exercised directly by
+# tests/integration/ems/test_algo_lifecycle.py and tests/unit/foundation/ems/test_start_algo.py.
+os.environ.setdefault("AIOS_ALGO_SCHEDULER_ENABLED", "0")
 # §10 -- run_liquidation_worker_once() fails closed without this secret;
 # tests need a deterministic value, not a real production key.
 os.environ.setdefault("AIOS_LIQUIDATION_SEED_KEY", "test-only-liquidation-seed-key")

@@ -6,6 +6,7 @@ Spec: 16_backend_signatures.md, ADR-2026-08-10-B
 만들어진 40여개 서비스가 전부 asyncpg.Pool을 직접 받는 방식이라 raw asyncpg가
 실제 계약이다 — asyncpg.Pool 하나를 app.state에 두고 라우터가 Depends로 꺼낸다.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -38,6 +39,7 @@ from src.core.safety.metrics_collector import ApiCallTracker
 from src.core.security.key_ring import KeyRing
 from src.exchanges.common.instrumented_adapter import instrumented_adapter_factory
 from src.exchanges.factory import build_adapter
+from src.foundation.ems.application.tick_algo import AlgoScheduler
 from src.foundation.evidence.adapters.postgres_repository import PostgresAuditEventRepository
 from src.foundation.ledger.adapters.postgres_balance_repository import PostgresBalanceRepository
 from src.foundation.ledger.adapters.postgres_journal_repository import PostgresJournalRepository
@@ -59,6 +61,7 @@ from src.foundation.positions.application.scheduler import PositionsScheduler
 from src.services.background_loops import flag_enabled, run_periodic_loop, start_background_loops
 from src.services.credential_resolver import CredentialResolver
 from src.services.exchange_credential_service import ExchangeCredentialService
+from src.services.oms.adapters.order_repository import PostgresOrderRepository
 from src.services.safety.circuit_breaker_loop import cooldown_ticks
 
 logger = logging.getLogger(__name__)
@@ -138,6 +141,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         registry=get_registry(),
         payouts=PostgresPayoutRepository(pool),
     )
+
     # PLT-08 — run_forever() 대신 run_periodic_loop로 LoopHealth를 계측한다
     # (scheduler.py 시그니처 불변). 정산 루프는 ~24h 간격이라 "3×interval
     # stale" 판정에 맞지 않아 계측 대상에서 뺀다.
@@ -200,6 +204,20 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             "positions 스케줄러를 띄우지 않습니다."
         )
 
+    # EM-15 — algo (TWAP/VWAP/POV/IS) tick scheduler. Same pattern/flag convention as
+    # the three schedulers above. Registration is in-memory only (start_algo.py
+    # docstring, no algo-run table exists yet) — whatever request path calls
+    # `start_algo` registers the resulting plan on `app.state.algo_scheduler` so this
+    # loop's ticks actually reach it.
+    algo_scheduler = AlgoScheduler(pool, PostgresOrderRepository())
+    algo_tasks: list[asyncio.Task[None]] = []
+    if flag_enabled("AIOS_ALGO_SCHEDULER_ENABLED"):
+        algo_tasks = [asyncio.create_task(algo_scheduler.run_forever())]
+    else:
+        logger.warning(
+            "algo_scheduler: AIOS_ALGO_SCHEDULER_ENABLED=0 — algo 스케줄러를 띄우지 않습니다."
+        )
+
     app.state.pool = pool
     app.state.secrets = secrets
     app.state.event_bus = event_bus
@@ -208,10 +226,11 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.ledger_scheduler = ledger_scheduler
     app.state.market_data_scheduler = market_data_scheduler
     app.state.positions_scheduler = positions_scheduler
+    app.state.algo_scheduler = algo_scheduler
     try:
         yield
     finally:
-        all_scheduler_tasks = [*ledger_tasks, *market_data_tasks, *positions_tasks]
+        all_scheduler_tasks = [*ledger_tasks, *market_data_tasks, *positions_tasks, *algo_tasks]
         for task in all_scheduler_tasks:
             task.cancel()
         for task in all_scheduler_tasks:
