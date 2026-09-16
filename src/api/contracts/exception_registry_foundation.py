@@ -111,6 +111,7 @@ from src.foundation.reconciliation.application.resolve_reconciliation import (
     NotResolvableError,
     ReconciliationStateNotFoundError,
 )
+from src.foundation.reporting.application.account_summary import AccountNotFoundError
 from src.foundation.risk_gate.application.activate_rule_bundle import (
     MissingApprovalRefError,
     RuleBundleNotFoundError,
@@ -279,6 +280,9 @@ EXCEPTION_MAP_FOUNDATION: list[tuple[type[Exception], ErrorCode]] = [
     # tenant/unattributed). Follows the same non-disclosure-of-existence
     # 404-uniformity principle (same as §9 LB-19) — 404, not 403.
     (EntityContextResolutionError, ErrorCode.RESOURCE_NOT_FOUND),
+    # U-2a(task-2629) — dashboard.py account summary read path. Same
+    # non-disclosure-of-existence 404-uniformity principle as LB-19.
+    (AccountNotFoundError, ErrorCode.RESOURCE_NOT_FOUND),
     # task-2749 U-15 — personal-mode PAPER->LIVE promotion checklist bucket,
     # split into exception_registry_foundation_personal.py (P6.line_cap).
     *EXCEPTION_MAP_FOUNDATION_PERSONAL,

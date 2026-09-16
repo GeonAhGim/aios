@@ -23,6 +23,7 @@ def register_routers(app: FastAPI) -> None:
         auth,
         backtests,
         charting,
+        dashboard,
         device_tokens,
         exchange_credentials,
         executions,
@@ -84,6 +85,7 @@ def register_routers(app: FastAPI) -> None:
     app.include_router(indicators.router)  # IND-12(task-1730) /v1/indicators
     app.include_router(backtests.router)  # BT-10c(task-1619) /v1/backtests/quick
     app.include_router(positions.router)
+    app.include_router(dashboard.router)  # U-2a(task-2629) /v1/accounts/summary
     app.include_router(executions.router, prefix="/executions", tags=["executions"])
     app.include_router(notifications.router, prefix="/notifications", tags=["notifications"])
     app.include_router(admin.router, tags=["admin"])
