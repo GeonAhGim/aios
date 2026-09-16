@@ -19,31 +19,49 @@ BT-2~7(체결 모델)·BT-9(재현 키)가 이 계약에 1:1 의존하므로 §3
 모든 금액·비율·수수료는 `Decimal`이다(float 금지, 부동소수 오차가 체결
 현실성 모델의 비교·누적 계산에 섞이는 것을 막는다).
 """
+
 from __future__ import annotations
 
 import json
 from decimal import Decimal
 from typing import Annotated, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, BeforeValidator, Field
 
 from src.foundation.market_data.contracts.v1 import Timeframe
 
 SCHEMA_VERSION: Literal["backtest-v2"] = "backtest-v2"
 
 
+def _reject_float(value: object) -> object:
+    """Reject `float` explicitly, since it carries binary floating-point
+    error (module docstring's "no float" invariant — pydantic's default
+    behavior silently coerces `float` into `Decimal`, so without this
+    validator the invariant is never wired in). `int`/`str`/`Decimal`
+    pass through unchanged."""
+
+    if isinstance(value, float):
+        raise ValueError("float is not accepted here — pass Decimal or a decimal string")
+    return value
+
+
+NonNegativeDecimal = Annotated[Decimal, BeforeValidator(_reject_float), Field(ge=0)]
+UnitDecimal = Annotated[Decimal, BeforeValidator(_reject_float), Field(gt=0, le=1)]
+OptionalNonNegativeDecimal = Annotated[Decimal, BeforeValidator(_reject_float), Field(ge=0)] | None
+
+
 class FixedSlippage(BaseModel):
     """봉마다 고정 bps만큼 불리한 체결가를 가정한다."""
 
     kind: Literal["fixed"] = "fixed"
-    bps: Decimal = Field(ge=0)
+    bps: NonNegativeDecimal
 
 
 class PercentSlippage(BaseModel):
     """체결가 대비 고정 비율(%)만큼 불리한 체결가를 가정한다."""
 
     kind: Literal["percent"] = "percent"
-    pct: Decimal = Field(ge=0)
+    pct: NonNegativeDecimal
 
 
 class VolumeImpactSlippage(BaseModel):
@@ -52,8 +70,8 @@ class VolumeImpactSlippage(BaseModel):
     참여율(0 초과 1 이하) — 초과분 이월 처리는 체결 모델(BT-2~7)의 책임."""
 
     kind: Literal["volume_impact"] = "volume_impact"
-    k: Decimal = Field(ge=0)
-    participation_cap: Decimal = Field(gt=0, le=1)
+    k: NonNegativeDecimal
+    participation_cap: UnitDecimal
 
 
 SlippageModel = Annotated[
@@ -66,16 +84,16 @@ class VenueTierCommission(BaseModel):
     """거래소·등급별 메이커/테이커 수수료 + 최소 수수료(정액)."""
 
     venue: str
-    maker_bps: Decimal = Field(ge=0)
-    taker_bps: Decimal = Field(ge=0)
-    min_fee: Decimal = Field(ge=0)
+    maker_bps: NonNegativeDecimal
+    taker_bps: NonNegativeDecimal
+    min_fee: NonNegativeDecimal
 
 
 class PartialFillConfig(BaseModel):
     """한 봉에서 채울 수 있는 최대 참여율(0 초과 1 이하) — 초과 주문은
     체결 모델(BT-5)이 부분체결로 처리한다."""
 
-    max_participation_pct: Decimal = Field(gt=0, le=1)
+    max_participation_pct: UnitDecimal
 
 
 class OrderTypesConfig(BaseModel):
@@ -93,7 +111,7 @@ class CostsConfig(BaseModel):
     `None`(적용 안 함)을 명시적으로 남긴다 — 0%로 조용히 채우지 않는다."""
 
     funding: bool
-    borrow_apr: Decimal | None = Field(default=None, ge=0)
+    borrow_apr: OptionalNonNegativeDecimal = None
 
 
 class AdjustmentsConfig(BaseModel):
