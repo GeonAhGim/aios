@@ -10,13 +10,17 @@ output + 1, captured at authoring time by running:
 
 Output: `19 49 14 33` -> +1 each: SMA(20)=20, SMA(50)=50, RSI(14)=15, MACD(default)=34.
 """
+
 from __future__ import annotations
 
 import ast
+import time
+from collections.abc import Mapping
 from pathlib import Path
 
 import pytest
 
+from scripts.check_code_language import count_file
 from src.core.indicators.lookback import indicator_required_bars, required_bars
 from src.core.indicators.registry import IndicatorError, IndicatorRegistry
 from src.core.strategy.indicator_key import IndicatorKeyError
@@ -107,3 +111,71 @@ def test_l07_lookback_module_has_no_io_or_nondeterministic_calls() -> None:
 def test_l07_lookback_module_is_within_80_line_budget() -> None:
     lines = LOOKBACK_PATH.read_text(encoding="utf-8").splitlines()
     assert len(lines) <= 80
+
+
+# -- D2 실패 주입 --------------------------------------------------------------
+
+
+def test_l07_registry_failure_on_one_key_aborts_whole_batch_not_partial() -> None:
+    """`required_bars` has exactly one collaborator (`IndicatorRegistry.lookback`);
+    inject a registry regression (e.g. a corrupted spec entry) that raises for
+    one key in a multi-key, single-timeframe batch and confirm the exception
+    propagates instead of `required_bars` silently returning a dict with only
+    the keys computed before the failure. A partial dict here would under-size
+    the candle fetch for that timeframe (L14 `market_state.required_timeframes`
+    consumes this result directly) instead of failing the whole tick closed."""
+
+    class _PoisonedRegistry:
+        def lookback(self, name: str, params: Mapping[str, int]) -> int:
+            if name == "MACD":
+                raise RuntimeError("simulated registry corruption")
+            return REGISTRY.lookback(name, params)
+
+    with pytest.raises(RuntimeError):
+        required_bars(
+            ["SMA_timeperiod20@1h", "MACD_fastperiod12_slowperiod26_signalperiod9@1h"],
+            _PoisonedRegistry(),
+        )
+
+
+# -- D2 성능 단언 --------------------------------------------------------------
+
+
+def test_l07_required_bars_throughput_budget() -> None:
+    """`required_timeframes` (L14 `market_state.py`) calls `required_bars`
+    once per warm-up sizing pass; 5,000 calls over a 6-key/3-timeframe
+    strategy must stay well under a 500ms budget to rule out a pathological
+    per-call regression (e.g. re-parsing specs) creeping into this path."""
+    keys = [
+        "SMA_timeperiod20@1h",
+        "RSI_timeperiod14@1h",
+        "MACD_fastperiod12_slowperiod26_signalperiod9@4h",
+        "SMA_timeperiod50@4h",
+        "RSI_timeperiod14@1d",
+        "SMA_timeperiod20@1d",
+    ]
+    start = time.perf_counter()
+    for _ in range(5_000):
+        required_bars(keys, REGISTRY)
+    elapsed = time.perf_counter() - start
+    assert elapsed < 0.5, f"5,000 required_bars calls took {elapsed * 1000:.2f}ms, budget 500ms"
+
+
+# -- D2 게이트 적색 재현 -------------------------------------------------------
+
+
+def test_l07_code_language_gate_flags_korean_comment_regression(tmp_path: Path) -> None:
+    """ADR-2026-09-07-A requires English-only comments/docstrings under `src/`
+    (enforced by `scripts/check_code_language.py`, wired into CI). Prove the
+    gate's own counter fires red for a synthetic Hangul-comment regression,
+    and stays green (0) for this leaf's actual current source -- using a temp
+    file so the test doesn't require the regression to exist in the tree."""
+    poisoned = tmp_path / "poisoned.py"
+    poisoned.write_text(
+        "def f() -> int:\n"
+        "    # simulated regression comment written in Korean: 이것은 한글 주석\n"
+        "    return 1\n",
+        encoding="utf-8",
+    )
+    assert count_file(poisoned) == 1
+    assert count_file(LOOKBACK_PATH) == 0
