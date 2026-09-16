@@ -30,6 +30,7 @@ CM-A2는 지금까지 선언만 하고 검사하지 않았다 — `domain/rules/
 (`restricted_list.check`)에 의도적으로 `httpx` 호출을 주입해 이 테스트가
 반드시 실패(예외 전파 또는 기록된 호출 비어있지 않음)함을 증명한다(DoD).
 """
+
 from __future__ import annotations
 
 import ast
@@ -272,9 +273,7 @@ def _install_io_traps(monkeypatch: pytest.MonkeyPatch, calls: list[str]) -> None
     def _trap(name: str) -> Callable[..., Any]:
         def _raise(*_args: Any, **_kwargs: Any) -> Any:
             calls.append(name)
-            raise NetworkAccessError(
-                f"CM-A2 violation: {name} invoked during rule evaluation"
-            )
+            raise NetworkAccessError(f"CM-A2 violation: {name} invoked during rule evaluation")
 
         return _raise
 
@@ -359,7 +358,11 @@ _SHORT_SALE_CASES: list[tuple[Mapping[str, Any], Mapping[str, Any]]] = [
     ),
     ({}, {"side": "BUY"}),
     (
-        {"krx_uptick_required": True},
+        # task-3849/CM-9-fix: krx_uptick_required now raises NotImplementedError
+        # (fail-closed, statute text unconfirmed) — omitted here so this rule
+        # returns normally like every other case in this I/O-purity sweep;
+        # `test_short_sale.py` covers the NotImplementedError/fail-closed path.
+        {},
         {
             "side": "SELL",
             "order_qty": Decimal("10"),

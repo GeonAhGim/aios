@@ -2,9 +2,14 @@
 unit tests.
 
 task-2458 DoD mapping: (b) position-exceeds boundary (100/101 shares) +
-locate coverage via `borrow_available_qty` + KRX uptick rule boundary
-(9990/10000/10010), (d) missing-field fail-closed, (e) static purity/
-determinism (no wall-clock/random/network imports).
+locate coverage via `borrow_available_qty`, (d) missing-field fail-closed,
+(e) static purity/determinism (no wall-clock/random/network imports).
+
+task-3849/CM-9-fix (reviewer REJECT on task-3502): the KRX uptick boundary
+tests (9990/10000/10010) modeled a guessed rule never checked against the
+statute text (Enforcement Decree of FSCMA §208) and were replaced with tests
+proving `krx_uptick_required` now fails closed via `NotImplementedError`
+instead of guessing.
 
 DEEPEN 2863 (task-2863, docs/audit/DEPTH_CM.md): the original CM-9 leaf
 graded D1 for missing failure injection, a numeric performance assertion, a
@@ -92,7 +97,10 @@ def test_buy_order_is_never_a_short_sale():
     assert short_sale.check({}, snapshot) is None
 
 
-def test_krx_uptick_below_last_price_denies():
+def test_krx_uptick_required_raises_not_implemented_instead_of_guessing():
+    """task-3849/CM-9-fix: the KRX uptick statute text (Enforcement Decree of
+    FSCMA §208) has not been confirmed, so `check()` must refuse to guess and
+    raise `NotImplementedError` rather than silently apply/pass a rule."""
     snapshot = {
         "side": "SELL",
         "order_qty": Decimal("1"),
@@ -102,37 +110,50 @@ def test_krx_uptick_below_last_price_denies():
         "order_price": Decimal("9990"),
         "last_price": Decimal("10000"),
     }
-    hit = short_sale.check({"krx_uptick_required": True}, snapshot)
-    assert hit is not None
-    assert hit.severity == ComplianceVerdict.DENY
-    assert hit.evidence["order_price"] == "9990"
-    assert hit.evidence["last_price"] == "10000"
+    with pytest.raises(NotImplementedError):
+        short_sale.check({"krx_uptick_required": True}, snapshot)
 
 
-def test_krx_uptick_at_last_price_passes():
+def test_krx_uptick_required_fails_closed_to_deny_through_the_gate():
+    """The same unimplemented branch, run through the real
+    `RuleBundle`/`evaluate_bundle` pipeline (CM-A2): the `NotImplementedError`
+    must not propagate out of the gate uncaught — it must become a DENY hit,
+    same as any other broken rule (see
+    `test_corrupted_decimal_subtraction_fails_closed_through_the_gate`)."""
+    bundle = _bundle_of({"krx_uptick_required": True})
     snapshot = {
         "side": "SELL",
         "order_qty": Decimal("1"),
         "position_qty": Decimal("0"),
         "borrow_available_qty": Decimal("10"),
         "venue": "KRX",
-        "order_price": Decimal("10000"),
+        "order_price": Decimal("9990"),
         "last_price": Decimal("10000"),
     }
-    assert short_sale.check({"krx_uptick_required": True}, snapshot) is None
+    decision = evaluate_bundle(bundle, snapshot, now=_NOW)
+
+    assert decision.verdict == ComplianceVerdict.DENY
+    assert len(decision.rule_hits) == 1
+    assert decision.rule_hits[0].rule_id == short_sale.RULE_ID
 
 
-def test_krx_uptick_above_last_price_passes():
-    snapshot = {
+def test_krx_uptick_not_required_or_non_krx_venue_still_passes():
+    """Neither flag set nor a non-KRX venue must not trip the unimplemented
+    branch — the rest of the rule stays untouched (spec REJECT scope: only
+    `krx_uptick_required` is fail-closed, not the whole rule)."""
+    covered_short = {
         "side": "SELL",
         "order_qty": Decimal("1"),
         "position_qty": Decimal("0"),
         "borrow_available_qty": Decimal("10"),
         "venue": "KRX",
-        "order_price": Decimal("10010"),
+        "order_price": Decimal("9990"),
         "last_price": Decimal("10000"),
     }
-    assert short_sale.check({"krx_uptick_required": True}, snapshot) is None
+    assert short_sale.check({}, covered_short) is None
+
+    non_krx_venue = {**covered_short, "venue": "NASDAQ"}
+    assert short_sale.check({"krx_uptick_required": True}, non_krx_venue) is None
 
 
 def test_missing_position_qty_is_fail_closed_deny():
