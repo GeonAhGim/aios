@@ -3,11 +3,15 @@
 DoD: 두 head fixture와 FROZEN diff fixture가 각각 FAIL하는 것을 직접 단언한다.
 DB·네트워크 접근 없음 — 임시 디렉터리와 로컬 git 명령(네트워크 없는 `git init`류)만 쓴다.
 """
+
 from __future__ import annotations
 
+import ast
 import importlib.util
 import subprocess
 import sys
+import time
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from types import ModuleType
 
@@ -153,9 +157,7 @@ def test_merge_revision_resolves_dual_head(tmp_path: Path) -> None:
     _write_revision(tmp_path, "a", None)
     _write_revision(tmp_path, "b", "a")  # branch 1 head
     _write_revision(tmp_path, "c", "a")  # branch 2 head — 병합 전에는 다중 head
-    assert any(
-        "다중 head" in issue for issue in check_migration_chain.find_chain_issues(tmp_path)
-    )
+    assert any("다중 head" in issue for issue in check_migration_chain.find_chain_issues(tmp_path))
 
     _write_merge_revision(tmp_path, "d", ("b", "c"))  # task-2099 방식 no-op merge
 
@@ -202,6 +204,173 @@ def test_removing_task_2099_merge_revision_reproduces_dual_head_gate_failure(
         if path.name in {"__init__.py", merge_file_name}:
             continue
         (shadow / path.name).write_text(path.read_text(encoding="utf-8"), encoding="utf-8")
+
+    issues = check_migration_chain.find_chain_issues(shadow)
+
+    assert any("다중 head" in issue for issue in issues)
+    assert check_migration_chain.main(["--versions-dir", str(shadow)]) == 1
+
+
+# ---------------------------------------------------------------------------
+# check_migration_chain — merge revision (task-1814/f03d9ff FA-0a batch A ×
+# DC-27 dual-head 회귀 방지, DEPTH_FA.md D0 스텁 판정 보강 — task-3015)
+#
+# task-1814가 고친 실제 장애: rebase 도중 origin/main에 DC-27(ff56c0e3e1ea)이
+# 먼저 병합되어 FA-0a batch A(ccfb229d760d)와 head가 갈라졌다 — 표준 alembic
+# merge(24af9c37d76f, upgrade/downgrade 모두 pass인 no-op)로 합쳤다.
+# DEPTH_FA.md 감사(2026-09-10)는 이 커밋이 테스트 파일 0개인 완전 스텁(D0)
+# 이라고 판정했다. 아래는 이 병합이 실제로 두 head를 정확히 해소하는지
+# (contract), 부모 하나가 누락되거나 오탈자·문법 오류로 깨지면 다시
+# 게이트가 적색이 되는지(실패주입·negative), 병합 리비전 자체를 제거하면
+# 원래 장애가 재현되는지(게이트 적색 재현), 실제 저장소 규모(116개 리비전)
+# 에서도 검사가 예산 내에 끝나는지(수치 성능 단언), 동시/반복 실행에도
+# 결과가 안정적인지(D3 다중 인스턴스·리플레이), 그리고 이 병합이 존재해도
+# 그 위에 새로 생긴 미병합 브랜치는 여전히 잡히는지(D3 적대적)를 검증한다.
+# ---------------------------------------------------------------------------
+
+_TASK_1814_MERGE_FILE = "24af9c37d76f_merge_heads_fa0a_batch_a_and_dc27.py"
+_TASK_1814_PARENTS = ("ccfb229d760d", "ff56c0e3e1ea")
+
+
+def _shadow_real_versions_dir(tmp_path: Path, *, exclude: str | None = None) -> Path:
+    real_versions_dir = ROOT / "src" / "db" / "migrations" / "versions"
+    shadow = tmp_path / "versions"
+    shadow.mkdir()
+    for path in real_versions_dir.glob("*.py"):
+        if path.name == "__init__.py" or path.name == exclude:
+            continue
+        (shadow / path.name).write_text(path.read_text(encoding="utf-8"), encoding="utf-8")
+    return shadow
+
+
+def test_task_1814_merge_revision_declares_exactly_batch_a_and_dc27_parents() -> None:
+    """병합 리비전의 down_revision이 정확히 두 부모(FA-0a batch A, DC-27)인지 정적 확인."""
+    real_versions_dir = ROOT / "src" / "db" / "migrations" / "versions"
+    record = check_migration_chain.parse_revision_file(real_versions_dir / _TASK_1814_MERGE_FILE)
+
+    assert record is not None
+    assert record.revision == "24af9c37d76f"
+    assert set(record.down_revisions) == set(_TASK_1814_PARENTS)
+
+
+def test_task_1814_merge_revision_upgrade_downgrade_bodies_are_true_noops() -> None:
+    """ "no-op 병합"이라는 DEPTH_FA.md 판정이 이후 편집으로 깨지지 않는지 AST로 고정한다."""
+    real_versions_dir = ROOT / "src" / "db" / "migrations" / "versions"
+    source = (real_versions_dir / _TASK_1814_MERGE_FILE).read_text(encoding="utf-8")
+    tree = ast.parse(source)
+
+    functions = {
+        node.name: node
+        for node in ast.iter_child_nodes(tree)
+        if isinstance(node, ast.FunctionDef) and node.name in {"upgrade", "downgrade"}
+    }
+
+    assert set(functions) == {"upgrade", "downgrade"}
+    for name, func in functions.items():
+        assert len(func.body) == 1, f"{name}()가 pass 하나가 아니라 실질 연산을 담고 있다"
+        assert isinstance(func.body[0], ast.Pass), f"{name}()가 더 이상 no-op이 아니다"
+
+
+def test_task_1814_merge_missing_one_declared_parent_reintroduces_dual_head(
+    tmp_path: Path,
+) -> None:
+    """실패주입: 부모 하나가 누락되면(불완전 리베이스) 다시 다중 head로 적색이 되어야 한다."""
+    shadow = _shadow_real_versions_dir(tmp_path)
+    (shadow / _TASK_1814_MERGE_FILE).write_text(
+        MERGE_REVISION_TEMPLATE.format(
+            revision="24af9c37d76f", down_revisions=(_TASK_1814_PARENTS[0],)
+        ),
+        encoding="utf-8",
+    )
+
+    issues = check_migration_chain.find_chain_issues(shadow)
+
+    assert any("다중 head" in issue for issue in issues)
+    assert check_migration_chain.main(["--versions-dir", str(shadow)]) == 1
+
+
+def test_task_1814_merge_parent_typo_breaks_chain_and_reflags_dual_head(
+    tmp_path: Path,
+) -> None:
+    """negative: 부모 id에 오탈자가 생기면 체인 끊김과 다중 head가 동시에 잡혀야 한다."""
+    shadow = _shadow_real_versions_dir(tmp_path)
+    (shadow / _TASK_1814_MERGE_FILE).write_text(
+        MERGE_REVISION_TEMPLATE.format(
+            revision="24af9c37d76f",
+            down_revisions=(_TASK_1814_PARENTS[0], _TASK_1814_PARENTS[1] + "-typo"),
+        ),
+        encoding="utf-8",
+    )
+
+    issues = check_migration_chain.find_chain_issues(shadow)
+
+    assert any("끊김" in issue for issue in issues)
+    assert any("다중 head" in issue for issue in issues)
+    assert check_migration_chain.main(["--versions-dir", str(shadow)]) == 1
+
+
+def test_task_1814_merge_revision_corrupted_syntax_fails_closed(tmp_path: Path) -> None:
+    """실패주입: 병합 리비전 파일이 문법 오류로 깨지면 조용히 통과하지 않고 적색이어야 한다."""
+    shadow = _shadow_real_versions_dir(tmp_path)
+    (shadow / _TASK_1814_MERGE_FILE).write_text("def upgrade(:\n    pass\n", encoding="utf-8")
+
+    issues = check_migration_chain.find_chain_issues(shadow)
+
+    assert any("정적 파싱 실패" in issue for issue in issues)
+    assert any("다중 head" in issue for issue in issues)  # 두 브랜치가 다시 미병합 상태
+    assert check_migration_chain.main(["--versions-dir", str(shadow)]) == 1
+
+
+def test_task_1814_merge_still_flags_new_unmerged_sibling_branch_as_head(
+    tmp_path: Path,
+) -> None:
+    """D3 적대적: 1814 병합이 있어도 그 위에 새 미병합 브랜치가 생기면 여전히 다중 head로 잡힌다."""
+    shadow = _shadow_real_versions_dir(tmp_path)
+    _write_revision(shadow, "adversarial-branch", _TASK_1814_PARENTS[0])
+
+    issues = check_migration_chain.find_chain_issues(shadow)
+
+    assert any("다중 head" in issue for issue in issues)
+    assert check_migration_chain.main(["--versions-dir", str(shadow)]) == 1
+
+
+def test_check_migration_chain_real_versions_dir_completes_within_time_budget() -> None:
+    """성능단언: 실제 저장소(116개 리비전) 전수 체인 검사가 예산 내에 끝나는지 수치로 확인한다."""
+    real_versions_dir = ROOT / "src" / "db" / "migrations" / "versions"
+    revision_count = len([p for p in real_versions_dir.glob("*.py") if p.name != "__init__.py"])
+    assert revision_count > 100  # 이 벤치마크가 무의미해지지 않도록 규모를 보장
+
+    start = time.perf_counter()
+    issues = check_migration_chain.find_chain_issues(real_versions_dir)
+    elapsed = time.perf_counter() - start
+
+    assert issues == []
+    assert elapsed < 2.0, f"마이그레이션 체인 검사가 {elapsed:.3f}s — 예산(2.0s) 초과"
+
+
+def test_task_1814_merge_check_is_deterministic_under_concurrent_replay() -> None:
+    """D3: 여러 워커가 동시에 반복 실행해도(리플레이·다중 인스턴스) 결과가 항상 동일해야 한다."""
+    real_versions_dir = ROOT / "src" / "db" / "migrations" / "versions"
+
+    with ThreadPoolExecutor(max_workers=16) as pool:
+        results = list(
+            pool.map(
+                lambda _: check_migration_chain.find_chain_issues(real_versions_dir), range(16)
+            )
+        )
+
+    assert all(result == [] for result in results)
+    assert len({tuple(result) for result in results}) == 1
+
+
+def test_removing_task_1814_merge_revision_reproduces_original_dual_head_failure(
+    tmp_path: Path,
+) -> None:
+    """게이트재현: task-1814(f03d9ff) 병합 리비전을 걷어내면 원래 dual-head 장애가 재현된다."""
+    real_versions_dir = ROOT / "src" / "db" / "migrations" / "versions"
+    assert (real_versions_dir / _TASK_1814_MERGE_FILE).is_file()
+
+    shadow = _shadow_real_versions_dir(tmp_path, exclude=_TASK_1814_MERGE_FILE)
 
     issues = check_migration_chain.find_chain_issues(shadow)
 
