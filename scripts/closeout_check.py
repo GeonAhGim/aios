@@ -1,8 +1,10 @@
 """MVP-1 종료조건 기계 검사 — ADR-2026-09-09-D Decision 3.
 
-ADR-2026-09-04-D의 T3 종료 기준 1~10과 ADR-2026-09-09-B로 추가된 11항
-(H-1~H-13 전부 CI 증빙으로 닫힘)을 각각 검사 함수로 판정해 PASS/FAIL과
-증빙 경로를 마크다운 표로 출력한다.
+ADR-2026-09-04-D의 T3 종료 기준 1~10, ADR-2026-09-09-B로 추가된 11항
+(H-1~H-13 전부 CI 증빙으로 닫힘), ADR-2026-09-10-C Decision 5로 추가된 12항
+("현재 main HEAD가 quality.yml에서 독립적으로 녹색" — 과거 어느 커밋이
+녹색이었는지와는 구분)을 각각 검사 함수로 판정해 PASS/FAIL과 증빙 경로를
+마크다운 표로 출력한다.
 
 전부 저장소 안 정적 증거(파일 존재·grep·순수 모듈 import)만 본다 —
 `check_release_gate.py`·`check_audit_regressions.py`와 같은 방식으로
@@ -12,11 +14,13 @@ DB·네트워크 접근이 없어 CI worktree에서도 그대로 돈다. "최근
 경로를 넘기면 그 값을 쓰고, 안 넘기면 "미검증(외부 리포트 미지정)"으로
 FAIL 처리한다(하나라도 적색이면 종결 불가라는 ADR-D 원칙 — 모른다=통과 아님).
 
-사용: `python scripts/closeout_check.py [--ci-report P] [--guard-report P] [--write PATH]`.
+사용: `python scripts/closeout_check.py [--ci-report P] [--guard-report P] [--write PATH]
+[--live-head-check] [--trigger-head-recheck]`.
 `--write`는 전부 PASS일 때만 그 경로에 `MVP-1_CLOSEOUT.md`류 문서를 쓴다
 (ADR-D: "전부 녹색이면 문서 생성", 하나라도 적색이면 쓰지 않는다).
 종료코드: 0=전부 PASS, 1=하나 이상 FAIL.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -25,6 +29,7 @@ import json
 import re
 import subprocess
 import sys
+import time
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -98,7 +103,7 @@ def check_01_parity(repo_root: Path) -> CheckResult:
     missing = [p for p in paths if p not in ok]
     passed = not missing
     detail = (
-        "패리티 테스트 파일 존재(정적 확인). \"최근 CI 통과\"는 --ci-report로만 판정한다."
+        '패리티 테스트 파일 존재(정적 확인). "최근 CI 통과"는 --ci-report로만 판정한다.'
         if passed
         else f"패리티 테스트 파일 누락: {', '.join(missing)}"
     )
@@ -109,8 +114,9 @@ def check_02_safety_wiring(repo_root: Path) -> CheckResult:
     """기준2 — kill switch/DataDistrust 적대 테스트 + 게이트 인자 Optional 0건(I-01)."""
     kill_switch = "tests/adversarial/order_service/test_kill_switch_blocks_execution_loop.py"
     kill_switch_ok = _has_test_def(repo_root, kill_switch)
-    distrust_hits = _grep(repo_root, ("tests/adversarial", "tests/foundation/adversarial"),
-                          r"DataDistrust|DEGRADED")
+    distrust_hits = _grep(
+        repo_root, ("tests/adversarial", "tests/foundation/adversarial"), r"DataDistrust|DEGRADED"
+    )
     optional_gate_hits = _grep(
         repo_root,
         ("src/services/order_service", "src/services/oms", "src/services/execution_loop"),
@@ -213,8 +219,11 @@ def check_06_backtest_realism(repo_root: Path) -> CheckResult:
     """기준6 — 슬리피지·수수료·지연·부분체결·주문유형·펀딩 계약 테스트 + ≤5s 즉시 백테스트 벤치."""
     contract_hits = _grep(
         repo_root,
-        ("tests/foundation/unit/backtest", "tests/foundation/integration/backtest",
-         "tests/integration/backtest"),
+        (
+            "tests/foundation/unit/backtest",
+            "tests/foundation/integration/backtest",
+            "tests/integration/backtest",
+        ),
         r"slippage|fee_tier|funding|partial_fill|latency",
         re.I,
     )
@@ -234,8 +243,12 @@ def check_06_backtest_realism(repo_root: Path) -> CheckResult:
 
 def check_07_execution(repo_root: Path) -> CheckResult:
     """기준7 — OMS 상태기계 실배선 통합테스트 + pre-trade 지연 CI 단언(R-57)."""
-    wiring_hits = _grep(repo_root, ("tests/integration/oms", "tests/adversarial/oms"),
-                        r"partial.?fill|cancel|amend|recover|reconcil", re.I)
+    wiring_hits = _grep(
+        repo_root,
+        ("tests/integration/oms", "tests/adversarial/oms"),
+        r"partial.?fill|cancel|amend|recover|reconcil",
+        re.I,
+    )
     latency_hits = _grep(repo_root, ("tests",), r"@pytest\.mark\.perf")
     pretrade_latency_hits = [
         h for h in latency_hits if "pre_trade" in h.lower() or "pre_submit" in h.lower()
@@ -455,7 +468,8 @@ def _h7_e2e_suites(repo_root: Path) -> tuple[bool, str]:
     playwright_present = (repo_root / "frontend" / "playwright.config.ts").is_file()
     ok = backend_e2e >= 3 and playwright_present
     return ok, (
-        f"백엔드 e2e {backend_e2e}건, playwright 설정 존재" if ok
+        f"백엔드 e2e {backend_e2e}건, playwright 설정 존재"
+        if ok
         else f"백엔드 e2e {backend_e2e}건(<3) 또는 playwright 설정 없음"
     )
 
@@ -463,8 +477,12 @@ def _h7_e2e_suites(repo_root: Path) -> tuple[bool, str]:
 def _h8_property_tests(repo_root: Path) -> tuple[bool, str]:
     hits = _grep(
         repo_root,
-        ("tests/unit/core/ledger", "tests/foundation/unit/ledger", "tests/unit/core/risk",
-         "tests/unit/core/portfolio"),
+        (
+            "tests/unit/core/ledger",
+            "tests/foundation/unit/ledger",
+            "tests/unit/core/risk",
+            "tests/unit/core/portfolio",
+        ),
         r"hypothesis|given\(",
     )
     ok = bool(hits)
@@ -492,9 +510,7 @@ def _h10_alert_routing(repo_root: Path) -> tuple[bool, str]:
 
 
 def _h11_mandate_cache_invalidation(repo_root: Path) -> tuple[bool, str]:
-    hits = _grep(
-        repo_root, ("src/services", "src/foundation"), r"mandate.*(cache|invalidat)", re.I
-    )
+    hits = _grep(repo_root, ("src/services", "src/foundation"), r"mandate.*(cache|invalidat)", re.I)
     race_test = bool(_grep(repo_root, ("tests",), r"mandate.*(cache|stale)", re.I))
     ok = bool(hits) and race_test
     if ok:
@@ -507,7 +523,8 @@ def _h12_legacy_wallet_bridge_sentinel(repo_root: Path) -> tuple[bool, str]:
     text = _read(path)
     placeholder_cast = bool(re.search(r"cast\(\s*asyncpg\.Pool\s*,\s*None\s*\)", text))
     return not placeholder_cast, (
-        "pool 주입 정식화 확인" if not placeholder_cast
+        "pool 주입 정식화 확인"
+        if not placeholder_cast
         else "여전히 cast(asyncpg.Pool, None) placeholder 사용 중"
     )
 
@@ -555,15 +572,223 @@ def check_11_hardening(
     return CheckResult("11_hardening", title, all_ok, tuple(evidence), detail)
 
 
+# --------------------------------------------------------------------------- 12: HEAD Actions 녹색
+
+
+GH_QUALITY_WORKFLOW = "quality.yml"
+HEAD_WAIT_TIMEOUT_SEC = 40 * 60
+HEAD_WAIT_POLL_SEC = 30.0
+
+GhRunner = Callable[[Sequence[str]], "subprocess.CompletedProcess[str]"]
+
+
+@dataclass(frozen=True)
+class ActionsRun:
+    head_sha: str
+    conclusion: str | None
+    status: str
+    url: str
+
+
+def _default_gh_run(args: Sequence[str]) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(  # noqa: S603,S607 - 고정 gh 서브커맨드, 사용자 입력 없음
+        ["gh", *args],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        timeout=60,
+    )
+
+
+def _default_git_head(repo_root: Path) -> str | None:
+    result = subprocess.run(  # noqa: S603,S607 - 고정 git 서브커맨드, 사용자 입력 없음
+        ["git", "rev-parse", "HEAD"],
+        cwd=repo_root,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        timeout=30,
+    )
+    if result.returncode != 0:
+        return None
+    sha = result.stdout.strip()
+    return sha or None
+
+
+def _list_quality_runs(gh_run: GhRunner, *, limit: int = 20) -> list[ActionsRun] | None:
+    result = gh_run(
+        [
+            "run",
+            "list",
+            "--workflow",
+            GH_QUALITY_WORKFLOW,
+            "--json",
+            "headSha,conclusion,status,url",
+            "--limit",
+            str(limit),
+        ]
+    )
+    if result.returncode != 0:
+        return None
+    try:
+        rows = json.loads(result.stdout)
+    except json.JSONDecodeError:
+        return None
+    return [
+        ActionsRun(
+            head_sha=row.get("headSha", ""),
+            conclusion=row.get("conclusion") or None,
+            status=row.get("status", ""),
+            url=row.get("url", ""),
+        )
+        for row in rows
+    ]
+
+
+def check_12_head_actions_green(
+    repo_root: Path,
+    *,
+    gh_run: GhRunner | None = None,
+    git_head: Callable[[Path], str | None] = _default_git_head,
+) -> CheckResult:
+    """기준12(ADR-2026-09-10-C Decision 5) — 현재 main HEAD가 quality.yml에서 success.
+
+    "최근 어떤 커밋이 녹색이었나"와 구분한다: 과거에 성공한 실행이 있어도
+    그 headSha가 지금의 HEAD와 다르면 FAIL이다 — 그 사이 커밋들은 Actions
+    독립 환경에서 아직 검증되지 않았을 수 있다. `gh` 호출은 네트워크·GitHub
+    인증에 의존하므로 이 함수 혼자서는 완전히 판정할 수 없다 — 이 스크립트의
+    다른 정적 검사와 달리 `gh_run`을 명시적으로 넘겨야 실제로 조회한다
+    (안 넘기면 UNVERIFIED로 FAIL — 모른다=통과 아님, ADR-D 원칙).
+    """
+    key, title = "12_head_actions_green", "현재 HEAD Actions 녹색"
+    head_sha = git_head(repo_root)
+    if head_sha is None:
+        return CheckResult(key, title, False, (), "git rev-parse HEAD 실패 — 저장소 아님/git 없음")
+    if gh_run is None:
+        return CheckResult(
+            key,
+            title,
+            False,
+            (f"head={head_sha}", UNVERIFIED),
+            f"{UNVERIFIED}: --live-head-check 없이는 gh를 호출하지 않는다",
+        )
+    runs = _list_quality_runs(gh_run)
+    if runs is None:
+        return CheckResult(
+            key,
+            title,
+            False,
+            (f"head={head_sha}",),
+            "gh run list 실패(네트워크/인증 문제로 추정) — 미검증",
+        )
+    match = next((r for r in runs if r.head_sha == head_sha), None)
+    if match is None:
+        recent_note = (
+            f"최근 실행 headSha={runs[0].head_sha[:8]}({runs[0].conclusion})"
+            if runs
+            else "quality.yml 실행 이력 없음"
+        )
+        return CheckResult(
+            key,
+            title,
+            False,
+            (f"head={head_sha}", recent_note),
+            f"HEAD({head_sha[:8]})에 대한 quality.yml 실행 없음 — {recent_note}"
+            "(다른 커밋이 녹색인 것과는 구분)",
+        )
+    passed = match.conclusion == "success"
+    evidence = (f"head={head_sha}", f"run_url={match.url}", f"conclusion={match.conclusion}")
+    detail = (
+        f"HEAD({head_sha[:8]})가 quality.yml에서 success: {match.url}"
+        if passed
+        else f"HEAD({head_sha[:8]}) quality.yml conclusion={match.conclusion}: {match.url}"
+    )
+    return CheckResult(key, title, passed, evidence, detail)
+
+
+def trigger_head_workflow_dispatch(
+    gh_run: GhRunner = _default_gh_run, *, ref: str = "main"
+) -> bool:
+    """`quality.yml`을 workflow_dispatch로 수동 트리거한다(HEAD 재검증 스크립트)."""
+    result = gh_run(["workflow", "run", GH_QUALITY_WORKFLOW, "--ref", ref])
+    return result.returncode == 0
+
+
+def wait_for_head_green(
+    repo_root: Path,
+    *,
+    gh_run: GhRunner = _default_gh_run,
+    git_head: Callable[[Path], str | None] = _default_git_head,
+    sleep: Callable[[float], None] = time.sleep,
+    now: Callable[[], float] = time.monotonic,
+    timeout_sec: float = HEAD_WAIT_TIMEOUT_SEC,
+    poll_sec: float = HEAD_WAIT_POLL_SEC,
+) -> CheckResult:
+    """HEAD가 이미 녹색이면 그대로 반환하고, 아니면 workflow_dispatch로 재검증을
+    트리거한 뒤 최대 `timeout_sec`(기본 40분) 폴링하며 결과를 기다린다.
+
+    Actions 스케줄(3시간 주기)을 기다리지 않고 지금 이 HEAD를 즉시 재검증하기
+    위한 수동 트리거 경로 — closeout 직전 "혹시 아직 한 번도 안 돌았나"를
+    확인할 때 쓴다.
+    """
+    result = check_12_head_actions_green(repo_root, gh_run=gh_run, git_head=git_head)
+    if result.passed:
+        return result
+    head_sha = git_head(repo_root)
+    if head_sha is None:
+        return result
+    if not trigger_head_workflow_dispatch(gh_run):
+        return CheckResult(
+            result.key,
+            result.title,
+            False,
+            result.evidence,
+            f"{result.detail}; workflow_dispatch 트리거 실패",
+        )
+    deadline = now() + timeout_sec
+    while now() < deadline:
+        sleep(poll_sec)
+        runs = _list_quality_runs(gh_run)
+        if not runs:
+            continue
+        match = next((r for r in runs if r.head_sha == head_sha), None)
+        if match is None or match.status != "completed":
+            continue
+        passed = match.conclusion == "success"
+        evidence = (f"head={head_sha}", f"run_url={match.url}", f"conclusion={match.conclusion}")
+        detail = (
+            f"workflow_dispatch 재검증 후 HEAD({head_sha[:8]}) success: {match.url}"
+            if passed
+            else f"workflow_dispatch 재검증 후 HEAD({head_sha[:8]}) "
+            f"conclusion={match.conclusion}: {match.url}"
+        )
+        return CheckResult(result.key, result.title, passed, evidence, detail)
+    minutes = int(timeout_sec // 60)
+    return CheckResult(
+        result.key,
+        result.title,
+        False,
+        result.evidence,
+        f"{result.detail}; workflow_dispatch 트리거 후 {minutes}분 대기했지만 완료되지 않음",
+    )
+
+
 # --------------------------------------------------------------------------- 리포트
 
 
 def run_all(
-    repo_root: Path, *, ci_report: Path | None = None, guard_report: Path | None = None
+    repo_root: Path,
+    *,
+    ci_report: Path | None = None,
+    guard_report: Path | None = None,
+    head_green_result: CheckResult | None = None,
 ) -> list[CheckResult]:
     results = [fn(repo_root) for fn in CHECKS_1_10]
     results.append(check_10_ops(repo_root, ci_report=ci_report, guard_report=guard_report))
     results.append(check_11_hardening(repo_root))
+    results.append(head_green_result or check_12_head_actions_green(repo_root))
     return results
 
 
@@ -600,15 +825,37 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--ci-report", type=Path, default=None, help='pm/ci/latest.json류 {"passed": bool}'
     )
-    parser.add_argument(
-        "--guard-report", type=Path, default=None, help='{"veto_count": int}'
-    )
+    parser.add_argument("--guard-report", type=Path, default=None, help='{"veto_count": int}')
     parser.add_argument(
         "--write", type=Path, default=None, help="전부 PASS일 때만 이 경로에 문서를 쓴다"
     )
+    parser.add_argument(
+        "--live-head-check",
+        action="store_true",
+        help="12번 항목을 실제 `gh run list`로 조회한다(네트워크·GitHub 인증 필요)",
+    )
+    parser.add_argument(
+        "--trigger-head-recheck",
+        action="store_true",
+        help=(
+            "12번 항목이 FAIL이면 workflow_dispatch로 quality.yml을 재트리거하고 "
+            "최대 40분 대기해 재검증한다(네트워크·GitHub 인증 필요, --live-head-check 함의)"
+        ),
+    )
     args = parser.parse_args(argv)
 
-    results = run_all(args.repo_root, ci_report=args.ci_report, guard_report=args.guard_report)
+    head_green_result: CheckResult | None = None
+    if args.trigger_head_recheck:
+        head_green_result = wait_for_head_green(args.repo_root)
+    elif args.live_head_check:
+        head_green_result = check_12_head_actions_green(args.repo_root, gh_run=_default_gh_run)
+
+    results = run_all(
+        args.repo_root,
+        ci_report=args.ci_report,
+        guard_report=args.guard_report,
+        head_green_result=head_green_result,
+    )
     print(render_markdown(results))
 
     all_passed = all(r.passed for r in results)
