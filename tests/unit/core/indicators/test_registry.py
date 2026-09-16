@@ -160,6 +160,13 @@ def test_registry_lookback_delegates_to_spec_with_resolved_params() -> None:
     assert registry.lookback("MACD", {}) == 26 + 9 - 2
 
 
+def test_registry_lookback_unknown_indicator_raises() -> None:
+    registry = IndicatorRegistry()
+    with pytest.raises(IndicatorError) as excinfo:
+        registry.lookback("ICHIMOKU", {})
+    assert excinfo.value.code == "STRATEGY_INDICATOR_UNKNOWN"
+
+
 def test_registry_hash_is_stable_across_calls_and_instances() -> None:
     first = IndicatorRegistry()
     second = IndicatorRegistry()
@@ -191,6 +198,99 @@ def test_registry_hash_unaffected_by_dict_construction_order() -> None:
     reversed_specs = dict(reversed(list(TALIB_SPECS.items())))
     backward = IndicatorRegistry(reversed_specs)
     assert forward.registry_hash() == backward.registry_hash()
+
+
+# --- DEEPEN(task-3199): L02 registry.py 자체 실패 주입 — 손상된 기본값도 fail-closed ---
+
+
+def test_validate_params_fails_closed_when_spec_default_is_corrupted_out_of_range() -> None:
+    """실패 주입: L01 스펙 데이터가 손상되어(배포 사고·수기 오버라이드 실수 등)
+    `default`가 선언된 [min, max] 밖에 있는 상태로 레지스트리에 실리면, L02는
+    그 손상된 기본값을 조용히 통과시키지 않고 fail-closed로 거부해야 한다
+    (CLAUDE.md §3 "Default posture is fail-closed") — 호출자가 override를
+    전혀 주지 않아도(=default 그대로 채택되는 경로) 거부되는지 확인한다."""
+    original = TALIB_SPECS["SMA"]
+    corrupted_spec = IndicatorSpec(
+        name=original.name,
+        inputs=original.inputs,
+        params=(ParamSpec(name="timeperiod", min=2, max=500, default=999),),
+        outputs=original.outputs,
+        lookback=original.lookback,
+        plots=original.plots,
+        causal=original.causal,
+    )
+    registry = IndicatorRegistry({"SMA": corrupted_spec})
+
+    with pytest.raises(IndicatorError) as excinfo:
+        registry.validate_params("SMA", {})
+    assert excinfo.value.code == "STRATEGY_PARAM_OUT_OF_RANGE"
+
+
+# --- DEEPEN(task-3199): 수치 성능 단언 — get/validate_params/lookback 핫 패스 ---
+
+
+def _registry_hot_path_latencies_ms(iterations: int = 200) -> list[float]:
+    registry = IndicatorRegistry()
+    samples = []
+    for _ in range(iterations):
+        started = time.perf_counter()
+        registry.get("SMA")
+        registry.validate_params("SMA", {"timeperiod": 20})
+        registry.lookback("SMA", {"timeperiod": 20})
+        samples.append((time.perf_counter() - started) * 1000)
+    samples.sort()
+    return samples
+
+
+_REGISTRY_HOT_PATH_BUDGET_MS = 1.0
+
+
+def test_registry_get_validate_lookback_p95_latency_within_self_declared_budget() -> None:
+    """수치 성능 단언: `get`/`validate_params`/`lookback`은 전략 실행 루프가 매
+    평가 틱마다 호출하는 핫 패스다(ADR-2026-09-09-C 예산표에 전용 항목은
+    없다 — dict 조회 + 정수 범위 비교뿐인 순수 CPU 경로라는 사실 위에 자체
+    예산을 건다). 로컬 실측 p95 대비 넉넉한 여유를 둔 1ms."""
+    samples = _registry_hot_path_latencies_ms()
+    p95_ms = _p95(samples)
+    print(
+        f"[L02 registry] get+validate_params+lookback p95={p95_ms:.3f}ms "
+        f"budget<{_REGISTRY_HOT_PATH_BUDGET_MS:.1f}ms (n={len(samples)})"
+    )
+    assert p95_ms < _REGISTRY_HOT_PATH_BUDGET_MS
+
+
+# --- DEEPEN(task-3199): 게이트 적색 재현 — validate_params 경계값 검사 ---------
+
+
+def test_registry_validate_params_boundary_gate_turns_red_on_off_by_one(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """게이트 적색 재현: `test_registry_validate_params_accepts_in_range_override`류
+    경계값 negative test가 실제로 min/max 경계 하나 밖 버그를 잡아내는지
+    확인한다 — `validate_params`의 범위 비교를 폐구간(`<=`)에서 개구간(`<`)으로
+    바꿔치기한 손상된 구현을 흉내 내, max 경계값(500) 자체가 부당하게
+    거부되는지 재현한다. 이 테스트가 없으면 경계값 검사가 우연히 항상
+    통과하는 tautology인지 아무도 검증하지 못한다."""
+
+    def _broken_validate_params(
+        self: IndicatorRegistry, name: str, params: dict[str, int]
+    ) -> dict[str, int]:
+        spec = self.get(name)
+        resolved: dict[str, int] = {}
+        for param_spec in spec.params:
+            value = params.get(param_spec.name, param_spec.default)
+            if not isinstance(value, int) or isinstance(value, bool):
+                raise IndicatorError("STRATEGY_PARAM_OUT_OF_RANGE")
+            if not (param_spec.min < value < param_spec.max):  # 버그: 폐구간이어야 함
+                raise IndicatorError("STRATEGY_PARAM_OUT_OF_RANGE")
+            resolved[param_spec.name] = value
+        return resolved
+
+    monkeypatch.setattr(IndicatorRegistry, "validate_params", _broken_validate_params)
+    registry = IndicatorRegistry()
+
+    with pytest.raises(IndicatorError):
+        registry.validate_params("SMA", {"timeperiod": 500})  # 원래는 허용돼야 함(max 경계)
 
 
 # --- L03 talib_adapter.py: registry 위임 ------------------------------------
