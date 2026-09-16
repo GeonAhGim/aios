@@ -47,7 +47,7 @@ describe("decideBenchOutcome — density_bench.mjs gate orchestration (DEEPEN ta
     });
     expect(outcome.exitCode).toBe(1);
     expect(outcome.baselineWrite).toBeNull();
-    expect(outcome.logs.some((l) => l.level === "error" && l.message.includes("regression >20%"))).toBe(true);
+    expect(outcome.logs.some((l) => l.level === "error" && l.message.includes("regression vs baseline"))).toBe(true);
   });
 
   it("gate-red: the relative ratchet passing does not mask a CH-19e absolute-threshold failure", () => {
@@ -85,6 +85,15 @@ describe("decideBenchOutcome — density_bench.mjs gate orchestration (DEEPEN ta
     expect(outcome.exitCode).toBe(0);
     expect(outcome.baselineWrite).toBeNull();
     expect(outcome.logs.some((l) => l.message.includes("within baseline tolerance"))).toBe(true);
+  });
+
+  it("task-3311: indicatorAddMs 25% above baseline passes through decideBenchOutcome via the widened override", () => {
+    const baseline = { metrics: { panZoomFrameMsP95: 6.6, indicatorAddMs: 28.51, tickUpdateMsP95: 0.013 } };
+    const current = { panZoomFrameMsP95: 6.6, indicatorAddMs: 28.51 * 1.25, tickUpdateMsP95: 0.013 };
+    const outcome = decideBenchOutcome({
+      current, baseline, absoluteFailures: [], calibRatio: 1, baselineMeta, baselinePath,
+    });
+    expect(outcome.exitCode).toBe(0);
   });
 
   it("negative path: a baseline missing a metric key is not treated as a regression for that key", () => {

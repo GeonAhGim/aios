@@ -12,6 +12,24 @@ import { existsSync, readFileSync, writeFileSync } from "node:fs";
 export const REGRESSION_TOLERANCE = 0.2;
 
 /**
+ * task-3311 (follow-up to task-2089's CI red): indicatorAddMs is one big
+ * timed loop over 100k candles per run (median of `INDICATOR_ADD_RUNS`,
+ * `density_bench.mjs`), unlike panZoomFrameMsP95/tickUpdateMsP95 which are a
+ * p95 over hundreds of small per-frame/per-tick samples — that per-sample
+ * percentile already absorbs a stray GC pause or scheduler tick, whereas
+ * indicatorAddMs's few, larger samples let a single paused run shift the
+ * median noticeably. Observed as a 2/18 false-positive rate against the
+ * shared 20% tolerance on this machine even after task-2097's multi-run
+ * median. Widened to 30% for this metric only — the other two metrics keep
+ * the shared default, and `checkAbsoluteThresholds`'s CH-19e gate (spec
+ * target 100ms, host-load normalized) still catches a real regression this
+ * misses.
+ */
+export const REGRESSION_TOLERANCE_OVERRIDES = {
+  indicatorAddMs: 0.3,
+};
+
+/**
  * Below this absolute gap, a percentage comparison is meaningless: e.g.
  * tickUpdateMsP95 sits around 0.01-0.03ms on a quiet machine, where a single
  * OS scheduler tick (commonly 10s of microseconds) swings the percentage by
@@ -45,16 +63,24 @@ export function writeBaseline(path, metrics, meta) {
  * stores the normalized value too, so the persisted baseline always stays in
  * reference-host-equivalent terms regardless of which host recorded it.
  */
-export function checkRatchet(current, baselineMetrics, calibRatio = 1, tolerance = REGRESSION_TOLERANCE, floorMs = REGRESSION_FLOOR_MS) {
+export function checkRatchet(
+  current,
+  baselineMetrics,
+  calibRatio = 1,
+  tolerance = REGRESSION_TOLERANCE,
+  floorMs = REGRESSION_FLOOR_MS,
+  toleranceOverrides = REGRESSION_TOLERANCE_OVERRIDES,
+) {
   const failures = [];
   const improved = {};
   for (const [key, value] of Object.entries(current)) {
     const base = baselineMetrics[key];
     if (typeof base !== "number") continue;
+    const effectiveTolerance = toleranceOverrides[key] ?? tolerance;
     const normalized = value / calibRatio;
-    if (normalized > base * (1 + tolerance) && normalized - base > floorMs) {
+    if (normalized > base * (1 + effectiveTolerance) && normalized - base > floorMs) {
       failures.push(
-        `${key}: ${value}ms (host-load normalized ${normalized.toFixed(3)}ms @ calib ratio ${calibRatio.toFixed(3)}) is >${tolerance * 100}% slower than baseline ${base}ms`,
+        `${key}: ${value}ms (host-load normalized ${normalized.toFixed(3)}ms @ calib ratio ${calibRatio.toFixed(3)}) is >${effectiveTolerance * 100}% slower than baseline ${base}ms`,
       );
     } else if (normalized < base) {
       improved[key] = normalized;
@@ -180,7 +206,7 @@ export function decideBenchOutcome({ current, baseline, absoluteFailures, calibR
 
   const { failures, improved } = checkRatchet(current, baseline.metrics, calibRatio);
   if (failures.length > 0) {
-    logs.push({ level: "error", message: "[density-bench] FAIL: regression >20% vs baseline:" });
+    logs.push({ level: "error", message: "[density-bench] FAIL: regression vs baseline (per-metric tolerance):" });
     for (const failure of failures) logs.push({ level: "error", message: `  - ${failure}` });
     return { exitCode: 1, logs, baselineWrite: null };
   }

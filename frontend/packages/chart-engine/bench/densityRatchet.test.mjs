@@ -8,6 +8,8 @@ import {
   checkAbsoluteThresholds,
   checkRatchet,
   loadBaseline,
+  REGRESSION_FLOOR_MS,
+  REGRESSION_TOLERANCE,
   writeBaseline,
 } from "./densityRatchet.mjs";
 
@@ -40,6 +42,45 @@ describe("checkRatchet", () => {
     const { improved } = checkRatchet({ panZoomFrameMsP95: 20 }, { panZoomFrameMsP95: 6.6 }, 10);
     expect(improved.panZoomFrameMsP95).toBeLessThan(6.6);
     expect(improved.panZoomFrameMsP95).toBe(2);
+  });
+});
+
+// task-3311: follow-up to task-2089's CI red — 20% was too tight for
+// indicatorAddMs's noise profile on this machine (observed 2/18
+// false-positive rate). REGRESSION_TOLERANCE_OVERRIDES widens that one
+// metric only; every other metric must keep the original 20% behavior.
+describe("checkRatchet — per-metric tolerance overrides (task-3311)", () => {
+  it("does not flag indicatorAddMs at 25% slower, which the shared 20% tolerance would have failed", () => {
+    const current = { indicatorAddMs: 28.51 * 1.25 };
+    const baseline = { indicatorAddMs: 28.51 };
+    const { failures } = checkRatchet(current, baseline, 1);
+    expect(failures).toEqual([]);
+  });
+
+  it("still flags indicatorAddMs once it exceeds its own 30% override", () => {
+    const current = { indicatorAddMs: 28.51 * 1.5 };
+    const baseline = { indicatorAddMs: 28.51 };
+    const { failures } = checkRatchet(current, baseline, 1);
+    expect(failures.length).toBe(1);
+    expect(failures[0]).toMatch(/indicatorAddMs/);
+    expect(failures[0]).toContain(">30%");
+  });
+
+  it("leaves other metrics at the shared 20% tolerance unaffected by the indicatorAddMs override", () => {
+    const current = { panZoomFrameMsP95: 6.6 * 1.25 };
+    const baseline = { panZoomFrameMsP95: 6.6 };
+    const { failures } = checkRatchet(current, baseline, 1);
+    expect(failures.length).toBe(1);
+    expect(failures[0]).toMatch(/panZoomFrameMsP95/);
+    expect(failures[0]).toContain(">20%");
+  });
+
+  it("an explicit empty overrides map falls back every metric to the shared tolerance", () => {
+    const current = { indicatorAddMs: 28.51 * 1.25 };
+    const baseline = { indicatorAddMs: 28.51 };
+    const { failures } = checkRatchet(current, baseline, 1, REGRESSION_TOLERANCE, REGRESSION_FLOOR_MS, {});
+    expect(failures.length).toBe(1);
+    expect(failures[0]).toContain(">20%");
   });
 });
 

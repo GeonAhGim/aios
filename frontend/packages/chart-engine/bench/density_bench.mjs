@@ -14,7 +14,9 @@
  * fabricating 30 distinct algorithm names.
  *
  * Reports three real measurements against two independent gates. (1) The
- * `density-baseline.json` regression ratchet: any metric more than 20%
+ * `density-baseline.json` regression ratchet: any metric more than its
+ * tolerance (20% default, `densityRatchet.mjs#REGRESSION_TOLERANCE_OVERRIDES`
+ * widens indicatorAddMs to 30% — task-3311, see that constant's docstring)
  * slower than its baseline fails; a faster metric updates the baseline
  * (same policy as scripts/coverage_ratchet.py, applied per-metric instead
  * of to one rolled-up number). (2) CH-19e — the spec row's own absolute
@@ -37,8 +39,9 @@
  * single lucky or unlucky sweep in either direction.
  *
  * Usage: node --experimental-strip-types bench/density_bench.mjs
- * Exit 0 = no metric regressed >20% vs baseline AND all metrics are within
- *          the calib-normalized CH-19 absolute targets.
+ * Exit 0 = no metric regressed beyond its tolerance vs baseline (20% default,
+ *          30% for indicatorAddMs) AND all metrics are within the
+ *          calib-normalized CH-19 absolute targets.
  * Exit 1 = either gate failed.
  */
 import { register } from "node:module";
@@ -71,7 +74,16 @@ const INDICATOR_INSTANCE_COUNT = 30;
 const TARGET_PIXEL_WIDTH = 1200;
 const PAN_ZOOM_STEPS_PER_PHASE = 60;
 const TICK_SAMPLE_COUNT = 500;
-const INDICATOR_ADD_RUNS = 5;
+/**
+ * task-3311: raised from 5 to 9. indicatorAddMs is a single big timed loop
+ * per run (unlike panZoom/tick's many small per-frame/per-tick samples
+ * already smoothed by a p95), so it is the metric most exposed to a single
+ * paused run (GC, scheduler tick) shifting the median — this was the direct
+ * cause of the observed 2/18 false-positive rate. More inner runs narrows
+ * that median's spread on top of (not instead of) the wider tolerance in
+ * `densityRatchet.mjs#REGRESSION_TOLERANCE_OVERRIDES`.
+ */
+const INDICATOR_ADD_RUNS = 9;
 /**
  * Number of full measurement sweeps per run, median-reduced per metric (see
  * module docstring). 5 gives the median a real middle (not just an average
