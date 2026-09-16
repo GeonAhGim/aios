@@ -151,8 +151,8 @@ export function AccountDeletionPage() {
               <Button
                 type="button"
                 variant="secondary"
-                onClick={() => {
-                  logout();
+                onClick={async () => {
+                  await logout();
                   navigate("/login");
                 }}
               >

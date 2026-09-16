@@ -128,11 +128,16 @@ export function AppShell({ children }: { children: ReactNode }) {
             <ThemeToggle />
             <button
               type="button"
-              onClick={() => {
+              onClick={async () => {
                 // 사용자가 직접 누른 로그아웃이라 next 복귀가 필요 없다 — 세션
                 // 만료로 인한 자동 로그아웃(task-354)은 useAuthStore의 401
                 // 핸들러가 처리하고, ProtectedRoute가 next를 붙여 리다이렉트한다.
-                logout();
+                //
+                // task-3323: useLogout()(shared-hooks/useAuth.ts)이 이제 서버
+                // POST /auth/logout 베스트 에포트 호출까지 포함한다 — 로컬 정리만
+                // 하던 이전 구현을 감사가 "로그아웃 no-op"으로 지적한 바 있다.
+                // 정리가 끝나길 기다렸다가 이동한다.
+                await logout();
                 navigate("/login");
               }}
               className="rounded-md border border-border-strong px-3 py-1.5 text-fg-secondary transition-colors hover:bg-surface-hover hover:text-fg"

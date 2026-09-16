@@ -1,7 +1,11 @@
+import { createLogoutClient, type LogoutClient } from "@aios/api-client";
 import type { LoginRequest, SignupRequest } from "@aios/shared-types";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useMemo } from "react";
 import { apiClient } from "./clientInstance";
 import { useAuthStore } from "./useAuthStore";
+
+const baseUrl = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8000";
 
 export function useMe() {
   const token = useAuthStore((s) => s.token);
@@ -37,11 +41,24 @@ export function useLogin() {
   });
 }
 
+// spec §3.4 + §9 PLT-24. 감사 지적("로그아웃 no-op"): 이 훅은 원래 서버를
+// 전혀 호출하지 않고 로컬 상태만 비웠다 — task-3323이 api-client/logout.ts의
+// createLogoutClient(서버 베스트 에포트 POST /auth/logout + 로컬 정리)로
+// 교체해 실제 로그아웃 요청이 나가도록 고쳤다. 반환값이 Promise로 바뀌었으니
+// 호출부는 await해야 정리가 끝난 뒤 다음 동작(navigate 등)을 할 수 있다.
 export function useLogout() {
-  const logout = useAuthStore((s) => s.logout);
   const qc = useQueryClient();
-  return () => {
-    logout();
+  const client: LogoutClient = useMemo(
+    () =>
+      createLogoutClient({
+        baseUrl,
+        getToken: () => useAuthStore.getState().token,
+        store: { clear: () => useAuthStore.getState().logout() },
+      }),
+    [],
+  );
+  return async () => {
+    await client.logout();
     qc.clear();
   };
 }
