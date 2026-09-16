@@ -13,9 +13,11 @@ Spec: docs/specs/L4_market_data_positions_ledger_v1.0.md#§8.3 LB-18
 않게 하고, 저널 `sequence_no` 집합이 `{1..20}`과 정확히 같은지(빈틈도
 중복도 없는지)만 본다.
 """
+
 from __future__ import annotations
 
 import asyncio
+import time
 from datetime import datetime, timezone
 from decimal import Decimal
 from pathlib import Path
@@ -58,16 +60,15 @@ def _asyncpg_dsn() -> str:
 
 @pytest.fixture
 async def pool():
-    p = await asyncpg.create_pool(
-        _asyncpg_dsn(), min_size=1, max_size=_CONCURRENT_FILLS + 5
-    )
+    p = await asyncpg.create_pool(_asyncpg_dsn(), min_size=1, max_size=_CONCURRENT_FILLS + 5)
     yield p
     await p.close()
 
 
 def _key(tenant_id: UUID) -> str:
     return str(
-        PositionKey(portfolio_id=default_portfolio_id(tenant_id),
+        PositionKey(
+            portfolio_id=default_portfolio_id(tenant_id),
             venue="TESTVENUE",
             instrument_id=f"INST{uuid4().hex[:8]}",
             strategy_id="default",
@@ -120,6 +121,7 @@ async def test_twenty_concurrent_fills_produce_gapless_unique_sequence(pool):
     position_key = _key(tenant_id)
     await open_position(pool, tenant_id=tenant_id, account_id=account_id, position_key=position_key)
     try:
+        started = time.perf_counter()
         results = await asyncio.gather(
             *[
                 _fill_once(
@@ -129,9 +131,18 @@ async def test_twenty_concurrent_fills_produce_gapless_unique_sequence(pool):
             ],
             return_exceptions=True,
         )
+        elapsed = time.perf_counter() - started
 
         failures = [r for r in results if isinstance(r, BaseException)]
         assert failures == []  # 락이 제대로 걸리면 전부 성공해야 한다 — 실패는 곧 경쟁상태.
+        # 수치 성능 단언 (DEPTH_FA 감사 task-3034/FA-0d 유일 미달 항목): 20개 워커가
+        # 모두 같은 position_key의 pg_advisory_xact_lock에서 줄을 서므로(모듈
+        # 독스트링) 대기는 본질적으로 순차지만, 락이 풀리지 않거나(교착) 재시도
+        # 폭주로 퇴화하면 이 예산을 넘긴다 — 수치 상한이 없으면 그런 회귀를
+        # 놓친다.
+        assert elapsed < 10.0, (
+            f"20건 동시 체결(pg_advisory_xact_lock 직렬화)이 {elapsed:.3f}s — 예산(10.0s) 초과"
+        )
 
         async with pool.acquire() as conn:
             seqs = [
