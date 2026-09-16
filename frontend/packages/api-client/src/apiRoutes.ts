@@ -58,6 +58,25 @@ export const API_ROUTES = defineApiRoutes({
   "admin.approvalRequests.approve": route("/admin/approval-requests/:requestId/approve", true),
   "admin.approvalRequests.reject": route("/admin/approval-requests/:requestId/reject", true),
   "admin.approvalRequests.pending": route("/admin/approval-requests/pending", true),
+  // task-4024(FE-OPS-7a): src/api/routers/admin.py:84 GET /admin/audit-log 원문 확인 —
+  // `-> ApiResponse[AuditLogPage]` + `ok(...)`(:94/:102)라 envelope=true(스냅샷 컴포넌트
+  // ApiResponse_AuditLogPage_로 재확인, python으로 contracts/openapi/v1.json 직접 대조).
+  // PLT-35-fix(task-3850)가 require_break_glass("tenant_read")를 얹어 X-Break-Glass-Grant
+  // 헤더(UUID)가 필수다 — clients/admin.ts의 listAuditLog가 호출자에게서 grant id를
+  // 받아 헤더로 흘려보낸다. 다른 admin.* 관용대로 v1Path는 명시하지 않는다(기본값
+  // /api/v1/admin/audit-log).
+  "admin.auditLog": route("/admin/audit-log", true),
+  // task-4024(FE-OPS-7a): src/api/routers/foundation/ledger_admin.py:53 POST
+  // /admin/ledger/payouts/{batch_id}/paid 원문 확인 — `-> ApiResponse[PayoutBatchView]`
+  // + `ok(...)`(:53/:69)라 envelope=true(스냅샷 ApiResponse_PayoutBatchView_로 재확인).
+  // 위 admin.auditLog와 동일하게 require_break_glass("tenant_read") 헤더가 필수다.
+  // idempotencyRequired는 표시하지 않는다 — mark_payout_paid(LC-15a)는 배치 상태
+  // (SCHEDULED/RELEASED→PAID) 조건부 UPDATE로 재확정을 막고(ConcurrencyConflictError),
+  // 라우터 자체도 require_idempotency_key를 쓰지 않는다(admin.py의 wallet 확정 라우트와
+  // 달리 import조차 없음) — spec §9 PLT-15 금전 라우트 표(L4_platform_observability_
+  // tenancy_api_v1.0.md 라인 438)에도 이 라우트가 없다. idempotencyScan.test.ts의
+  // PLT15_MONEY_ROUTES 양방향 대조를 깨지 않으려면 이 표식을 붙이지 않아야 한다.
+  "admin.ledger.payoutsMarkPaid": route("/admin/ledger/payouts/:batchId/paid", true),
 
   // task-1333: §9 PLT-15 금전 라우트 — idempotencyRequired=true.
   "exchange.credentials.base": route("/exchange-credentials", false, undefined, undefined, true),

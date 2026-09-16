@@ -140,13 +140,14 @@ const KNOWN_ENVELOPE_DRIFT: ReadonlySet<ApiRouteName> = new Set<ApiRouteName>([]
 // 실제로 부른다(StrategyBuilderPage → ValidationRunPanel → validation.start,
 // apiRoutes.ts에 등록) — 여기 있던 항목을 제거한다.
 const UNREGISTERED_ROUTE_WHITELIST: Readonly<Record<string, string>> = {
-  "/admin/audit-log": "관리자 감사 로그 화면이 없다(apps/web/src/routes/admin에 audit-log 라우트 없음)",
   // task-3850(PLT-35-fix): break-glass grant 요청/승인 HTTP 엔드포인트를 새로 열었지만
   // 이 리프의 스콥은 백엔드 배선(DI 체인 403 증명)뿐이다 — 관리자 콘솔에서 grant를
   // 요청/승인하는 화면은 후속 리프.
   "/admin/break-glass/grants": "break-glass grant 요청 콘솔 화면이 없다",
   "/admin/break-glass/grants/{grant_id}:approve": "break-glass grant 승인 콘솔 화면이 없다",
-  "/admin/ledger/payouts/{batch_id}/paid": "정산 배치 확정 액션 UI가 없다",
+  // task-4024(FE-OPS-7a): admin.auditLog·admin.ledger.payoutsMarkPaid로 apiRoutes.ts에
+  // 등록했다(API 레이어만 — 화면 배선은 후속 FE-OPS-7b 소관) — 여기 있던 두 항목을
+  // 제거한다.
   // task-4001(FE-OPS-10a): exchange.credentials.positions로 apiRoutes.ts에 등록했다 —
   // 여기 있던 항목을 제거한다(실제 화면 배선은 FE-OPS-10b 소관, §E는 등록 여부만 본다).
   "/livez": "인프라 헬스체크 프로브다(k8s liveness) — 앱 API 표면이 아니다",
