@@ -482,6 +482,17 @@ def test_money_float_passes_with_decimal(tmp_path: Path) -> None:
     assert cc.check_money_float(tmp_path) == []
 
 
+def test_money_float_regression_task_3828_sites_stay_clean() -> None:
+    """task-3828 회귀 가드 -- CI(ci/48ec858bf68c) 적색의 실제 원인이었던 세 필드
+    (`LiquidationPolicy.max_slice_notional`, `metrics_registry.Counter/Gauge`의
+    `amount` 파라미터, `StrategyIntent.qty`)가 다시 float로 되돌아가면 실제
+    저장소(tmp_path 합성이 아니라 ROOT)를 스캔하는 이 테스트가 즉시 잡는다."""
+    hits = dict(cc.check_money_float(ROOT))
+    assert "src/core/loader/risk_policy_loader.py" not in hits
+    assert "src/core/observability/metrics_registry.py" not in hits
+    assert "src/core/script/runtime/builtins_strategy.py" not in hits
+
+
 # ---------------------------------------------------------------------------
 # 11. symbol_id_assembly
 # ---------------------------------------------------------------------------

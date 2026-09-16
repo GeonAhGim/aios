@@ -223,7 +223,7 @@ def test_lookahead_variable_index_is_not_bypassed_via_strategy_namespace() -> No
 # ---- (e) 순수성: I/O·시계 임포트 없음 + 자기 재귀 없음 ----
 
 _ALLOWED_IMPORT_PREFIXES = (
-    "__future__", "collections.abc", "dataclasses", "json", "math", "typing",
+    "__future__", "collections.abc", "dataclasses", "decimal", "json", "math", "typing",
     "src.core.script.",
 )  # fmt: skip
 

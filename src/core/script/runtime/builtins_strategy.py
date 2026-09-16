@@ -50,12 +50,14 @@ Design decisions this leaf makes (the spec leaves them open):
 
 Pure module: no I/O, no clock, no recursion (DoD (e)).
 """
+
 from __future__ import annotations
 
 import json
 import math
 from collections.abc import Sequence
 from dataclasses import asdict, dataclass
+from decimal import Decimal
 from typing import TYPE_CHECKING, Final, Literal
 
 from src.core.script.runtime.builtins_math import BuiltinCallError
@@ -83,8 +85,20 @@ class StrategyIntent:
 
     kind: Kind
     side: Side | None
-    qty: float | None
+    qty: Decimal | None
     call_index: int
+
+
+def _json_default(value: object) -> str:
+    """`qty` is `Decimal` (order-quantity precision, not DSL float arithmetic) --
+    plain `json.dumps` has no native Decimal support. Mirrors `allow_nan=False`
+    for the one type it doesn't itself inspect, so a corrupted non-finite
+    Decimal fails closed here too instead of round-tripping as `"NaN"`."""
+    if isinstance(value, Decimal):
+        if not value.is_finite():
+            raise ValueError(f"non-finite qty in intent payload: {value!r}")
+        return str(value)
+    raise TypeError(f"Object of type {type(value).__name__} is not JSON serializable")
 
 
 def intents_to_bytes(intents: Sequence[StrategyIntent]) -> bytes:
@@ -92,7 +106,12 @@ def intents_to_bytes(intents: Sequence[StrategyIntent]) -> bytes:
     same script + same bar input -> the same bytes, run after run."""
     payload = [asdict(intent) for intent in intents]
     return json.dumps(
-        payload, sort_keys=True, separators=(",", ":"), ensure_ascii=True, allow_nan=False
+        payload,
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=True,
+        allow_nan=False,
+        default=_json_default,
     ).encode("utf-8")
 
 
@@ -143,7 +162,12 @@ class StrategyBuiltins:
             side = _resolve_side(where, args[0], pos)
             idx = 1
         qty = _resolve_qty(where, args[idx], pos) if len(args) > idx else None
-        self._intents.append(StrategyIntent(kind=kind, side=side, qty=qty, call_index=pos))
+        # `qty` stays a DSL `float` for the return value (every `strategy.*`
+        # call's result feeds back into float/Series arithmetic elsewhere in
+        # the interpreter) -- only the recorded intent switches to `Decimal`,
+        # since that's the value a later leaf turns into an actual order qty.
+        intent_qty = None if qty is None else Decimal(str(qty))
+        self._intents.append(StrategyIntent(kind=kind, side=side, qty=intent_qty, call_index=pos))
         return 0.0 if qty is None else qty
 
 

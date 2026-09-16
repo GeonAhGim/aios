@@ -5,8 +5,10 @@ Spec: 07_logging_config_v1.3.md#§7.2
 8.2-B 원칙 — Risk 수치는 코드에 하드코딩하지 않고 이 파일로 관리한다.
 Loader.load_config()(5.1)로 읽은 dict를 여기서 Pydantic 모델로 검증한다.
 """
+
 from __future__ import annotations
 
+from decimal import Decimal
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -131,7 +133,7 @@ class LiquidationPolicy(_StrictModel):
     size_jitter_pct: float = _PCT
     interval_min_sec: float = Field(gt=0)
     interval_max_sec: float = Field(gt=0)
-    max_slice_notional: float = Field(gt=0)
+    max_slice_notional: Decimal = Field(gt=0)
     limit_tolerance_bps: float = Field(gt=0)
     slice_ttl_sec: float = Field(gt=0)
     adverse_move_abort_pct: float = _PCT
