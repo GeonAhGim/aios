@@ -1,4 +1,7 @@
 export { AiosApiClient, ApiError, buildApiError } from "./client";
+// task-4003(FE-OPS-10c): withExchange(client.ts에 합성)의 응답 타입을 소비 화면
+// (ExchangePositionsCard)이 쓸 수 있게 재수출한다 — task-4002가 남긴 승격 지점.
+export type { ExchangePosition, ExchangePositionMoney } from "./clients/exchange";
 export { keysToCamel, keysToSnake } from "./caseConvert";
 export { unwrap, EnvelopeFormatError, deriveFreshness } from "./envelope";
 export { configureUnauthorizedHandler, resetUnauthorizedGuard, configureTenantHeadersProvider } from "./http";

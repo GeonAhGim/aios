@@ -31,6 +31,12 @@ export const catalogEn = {
     supportCode: "Support code: {{code}}",
     retryAfterSeconds: "Retry available in {{seconds}}s",
   },
+  exchangePositions: {
+    title: "Open positions",
+    selectPrompt: "Select an exchange to see its open positions.",
+    notFoundTitle: "No credential for this exchange.",
+    empty: "No open positions on {{exchange}}.",
+  },
   ai: {
     pageTitle: "AI Research Studio",
     sections: {

@@ -11,6 +11,7 @@ import { AppShell } from "../../components/layout/AppShell";
 import { useConflictRetry } from "../../hooks/useConflictRetry";
 import { useFieldErrors } from "../../hooks/useFieldErrors";
 import { CredentialListCard } from "./CredentialListCard";
+import { ExchangePositionsCard } from "./ExchangePositionsCard";
 import { RegisterCredentialForm } from "./RegisterCredentialForm";
 import { useTranslation } from "react-i18next";
 
@@ -135,6 +136,8 @@ export function ExchangeManagementPage() {
           onRevoke={handleRevoke}
           onRetryRevoke={handleRetryRevoke}
         />
+
+        <ExchangePositionsCard exchange={selectedExchange} />
 
         <RegisterCredentialForm
           exchange={exchange}

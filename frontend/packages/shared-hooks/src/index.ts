@@ -19,6 +19,7 @@ export {
   useRegisterExchangeCredential,
   useRevokeExchangeCredential,
   useExchangeBalance,
+  useExchangePositions,
 } from "./useExchanges";
 export {
   useIndicators,

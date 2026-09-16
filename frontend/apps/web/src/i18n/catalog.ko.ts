@@ -20,6 +20,13 @@ export const catalogKo = {
     supportCode: "지원코드: {{code}}",
     retryAfterSeconds: "{{seconds}}초 후 재시도 가능",
   },
+  // task-4003(FE-OPS-10c): ExchangePositionsCard의 새 문구.
+  exchangePositions: {
+    title: "보유 포지션",
+    selectPrompt: "거래소를 선택하면 보유 포지션을 볼 수 있습니다.",
+    notFoundTitle: "이 거래소의 자격증명이 없습니다.",
+    empty: "{{exchange}}에 보유 포지션이 없습니다.",
+  },
   // task-2657(AI-22): AiStudioPage.tsx는 이 카탈로그가 골격 이상으로 실제 채워진
   // 첫 화면이다 — 새 화면 문구는 리터럴 대신 여기 키를 만들고 t(key)만 쓴다
   // (scripts/check_i18n_literals.mjs가 새 리터럴을 게이트에서 막는다).
