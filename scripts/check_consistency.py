@@ -655,6 +655,16 @@ def _git_commit_subjects(root: Path) -> str:
         return ""
 
 
+def _leaf_referenced(leaf: str, *blobs: str) -> bool:
+    """leaf가 blob 안에 온전한 토큰으로 등장하는지 검사한다.
+
+    plain substring(`leaf in blob`)은 AI-2가 AI-22/AI-20의 접두라서 그 커밋/코드만
+    보고도 "추적됨"으로 오판한다 -- 양옆이 영숫자가 아닐 때만 일치로 센다.
+    """
+    pattern = re.compile(r"(?<![A-Za-z0-9])" + re.escape(leaf) + r"(?![A-Za-z0-9])")
+    return any(pattern.search(blob) for blob in blobs)
+
+
 def check_spec_leaf_traceability(root: Path) -> list[Hit]:
     specs_dir = root / "docs" / "specs"
     if not specs_dir.is_dir():
@@ -675,7 +685,7 @@ def check_spec_leaf_traceability(root: Path) -> list[Hit]:
     return [
         (f"docs/specs#{leaf}", 0)
         for leaf in sorted(leaf_ids)
-        if leaf not in code_blob and leaf not in commit_blob
+        if not _leaf_referenced(leaf, code_blob, commit_blob)
     ]
 
 

@@ -332,6 +332,49 @@ def test_collect_spec_leaf_ids_ignores_rows_inside_status_block(tmp_path: Path) 
     assert ids == {"EO-01"}
 
 
+def test_spec_leaf_flags_id_that_is_prefix_of_another_traced_id(tmp_path: Path) -> None:
+    # task-3680: substring 매칭("AI-2 in code_blob")은 AI-2가 AI-22의 접두라서
+    # AI-22만 구현된 코드를 보고도 AI-2를 "추적됨"으로 오판했다(esc-ci-6e80c35b1015).
+    _write(
+        tmp_path,
+        "docs/specs/L4_x_v1.0.md",
+        "## 9. 리프 목록\n| 리프 ID | 파일 |\n|---|---|\n"
+        "| Z-1 | src/z1.py |\n| Z-10 | src/z10.py |\n",
+    )
+    _write(tmp_path, "src/z10.py", "# Z-10 구현\nx = 1\n")
+    hits = cc.check_spec_leaf_traceability(tmp_path)
+    assert hits == [("docs/specs#Z-1", 0)]
+
+
+def test_spec_leaf_flags_id_that_is_prefix_of_id_in_commit_subject(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _write(
+        tmp_path,
+        "docs/specs/L4_x_v1.0.md",
+        "## 9. 리프 목록\n| 리프 ID | 파일 |\n|---|---|\n| AI-2 | src/token.py |\n",
+    )
+    monkeypatch.setattr(
+        cc, "_git_commit_subjects", lambda root: "feat: task-2657 AI-22 AiStudioPage\n"
+    )
+    hits = cc.check_spec_leaf_traceability(tmp_path)
+    assert hits == [("docs/specs#AI-2", 0)]
+
+
+def test_spec_leaf_passes_when_id_appears_as_whole_token_in_commit_subject(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _write(
+        tmp_path,
+        "docs/specs/L4_x_v1.0.md",
+        "## 9. 리프 목록\n| 리프 ID | 파일 |\n|---|---|\n| AI-2 | src/token.py |\n",
+    )
+    monkeypatch.setattr(
+        cc, "_git_commit_subjects", lambda root: "feat: task-2600 AI-2 token_rules.py\n"
+    )
+    assert cc.check_spec_leaf_traceability(tmp_path) == []
+
+
 def test_spec_leaf_passes_when_status_block_duplicates_unpadded_id(tmp_path: Path) -> None:
     # task-3629 CONSIST-1: spec_status.py의 자동생성 §11 표는 norm_leaf_id로 선행 0을
     # 뗀 ID를 쓴다(EO-1). §9는 패딩형(EO-01)이라 코드/커밋 검색엔 EO-01만 등장하므로,
