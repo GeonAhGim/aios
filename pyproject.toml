@@ -53,6 +53,12 @@ dev = [
     "pytest-xdist==3.8.0",
     "pip-audit>=2.7",
 ]
+mutation = [
+    # task-2851 MUT-1: scripts/run_mutation.py driver. mutmut is intentionally not
+    # listed here -- mutmut>=3 refuses to run on native Windows (this repo's CI
+    # runners), cosmic-ray does not have that restriction.
+    "cosmic-ray>=8.7",
+]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
@@ -286,4 +292,9 @@ ignore_missing_imports = true
 
 [[tool.mypy.overrides]]
 module = "pyarrow.*"
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+# task-2851 MUT-1: cosmic-ray ships no py.typed marker.
+module = "cosmic_ray.*"
 ignore_missing_imports = true

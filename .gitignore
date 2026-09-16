@@ -10,3 +10,6 @@ __pycache__/
 coverage.xml
 # task-2613: hypothesis example database is local-only, never committed.
 .hypothesis/
+# task-2851 MUT-1: regenerated every scripts/run_mutation.py run -- the ratchet
+# state that persists is mutation-score-baseline.json (committed).
+/mutation-report.json
