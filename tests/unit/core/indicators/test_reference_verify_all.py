@@ -10,8 +10,10 @@ BBANDS의 분산 계산(`E[X^2]-E[X]^2` 방식)이 표본이 2개뿐일 때 우�
 증분·벡터 엔진이 공유하는 산식)보다 상쇄오차에 더 취약해서 생기는 실측 결과다 —
 정확히 IND-7g가 잡아내야 하는 종류의 불일치라 스킵하지 않고 명시적으로 고정한다.
 """
+
 from __future__ import annotations
 
+import time
 from collections.abc import Mapping
 from pathlib import Path
 
@@ -150,3 +152,41 @@ def test_main_exits_zero_when_scope_excludes_the_known_failure(
     monkeypatch.setattr(verify_all, "sample_names", lambda k, **_: tuple(passing))
     code = verify_all.main(["--mode", "ci", "--sample", "10"])
     assert code == 0
+
+
+# --- DEEPEN(task-2927): 수치 성능 단언 — 전체 3자 교차검증 실행 지연 --------
+
+
+def _verification_latencies_ms(iterations: int = 10) -> list[float]:
+    samples = []
+    for _ in range(iterations):
+        started = time.perf_counter()
+        verify_all.run_verification()
+        samples.append((time.perf_counter() - started) * 1000)
+    samples.sort()
+    return samples
+
+
+def _p95(samples: list[float]) -> float:
+    return samples[min(int(len(samples) * 0.95), len(samples) - 1)]
+
+
+_FULL_VERIFICATION_BUDGET_MS = 800.0
+
+
+def test_full_verification_p95_latency_within_self_declared_budget() -> None:
+    """수치 성능 단언: ADR-2026-09-09-C Decision 1 예산표에 "3자 교차검증"
+    전용 항목이 없다(가장 가까운 항목은 "지표 증분=일괄 동일", 지연 예산이
+    아님) — 순수 인메모리 계산(디스크·네트워크 I/O 없음, 11개 지표 x 최대
+    4개 데이터셋 x 파라미터 변형)이라는 사실 위에 자체 예산을 건다: 로컬
+    실측 p95 ~87ms(2026-09-16, VERIFIABLE_NAMES 11종 전수) 대비 약 9배
+    여유를 둔 800ms. 예산을 벗어나면 실측 환경 문제가 아니라 회귀(예:
+    데이터셋·파라미터 조합의 우발적 폭증, TA-Lib 직접 호출 경로의 중복
+    실행)로 본다."""
+    samples = _verification_latencies_ms(iterations=10)
+    p95_ms = _p95(samples)
+    print(
+        f"[IND-7g] run_verification() p95={p95_ms:.2f}ms "
+        f"budget<{_FULL_VERIFICATION_BUDGET_MS:.0f}ms (n={len(samples)})"
+    )
+    assert p95_ms < _FULL_VERIFICATION_BUDGET_MS
