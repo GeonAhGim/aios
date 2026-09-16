@@ -5,6 +5,7 @@ Spec: docs/specs/L4_execution_oms_and_exchange_v1.0.md#§8.1
 재구독 순서, distrust 진입/해제 쌍). 실소켓 없이 가짜 connect_fn/sleep_fn을
 주입해 결정론적으로 재현한다.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -31,8 +32,12 @@ class _Stop(Exception):
 
 class _FakeConnection:
     def __init__(
-        self, messages: list[str], *, raise_after: BaseException | None = None,
-        hang: bool = False, echo: tuple[str, str] | None = None,
+        self,
+        messages: list[str],
+        *,
+        raise_after: BaseException | None = None,
+        hang: bool = False,
+        echo: tuple[str, str] | None = None,
     ) -> None:
         """`echo=(ping, pong)`이면 ping 수신 시 pong을 되돌려주는 살아있는 서버."""
         self._messages = messages
@@ -140,9 +145,16 @@ class _Harness:
 
     def session(self, connect_fn, **kw: Any) -> WsSession:
         defaults: dict[str, Any] = dict(
-            venue="test", channel="ticker", ack_validator=_ack, connect_fn=connect_fn,
-            seq_extractor=_seq, on_resync=self.on_resync, on_distrust=self.on_distrust,
-            sleep_fn=_no_sleep, ping_sleep_fn=_never, registry=self.registry,
+            venue="test",
+            channel="ticker",
+            ack_validator=_ack,
+            connect_fn=connect_fn,
+            seq_extractor=_seq,
+            on_resync=self.on_resync,
+            on_distrust=self.on_distrust,
+            sleep_fn=_no_sleep,
+            ping_sleep_fn=_never,
+            registry=self.registry,
         )
         defaults.update(kw)
         return WsSession("wss://fake", **defaults)
@@ -215,9 +227,7 @@ async def test_custom_heartbeat_spec_is_honoured():
         await _yield()
 
     with pytest.raises(_Stop):
-        await h.session(connect_fn, heartbeat=spec, ping_sleep_fn=ping_sleep).run(
-            [SUB], h.handler
-        )
+        await h.session(connect_fn, heartbeat=spec, ping_sleep_fn=ping_sleep).run([SUB], h.handler)
 
     assert intervals == [5.0, 5.0, 5.0]
     assert conn.sent[1:] == ["PING-X", "PING-X"]
@@ -388,6 +398,23 @@ async def test_non_dict_or_invalid_json_frame_raises_protocol_error(frame: str):
     connect_fn, calls = _connect_sequence([conn])
 
     with pytest.raises(WsProtocolError):
+        await h.session(connect_fn).run([SUB], h.handler)
+
+    assert calls["n"] == 1
+    assert h.received == []
+
+
+async def test_non_str_bytes_frame_raises_protocol_error_before_json_decode():
+    """negative — `_decode`의 isinstance 분기(task-1759 DEEPEN, commit
+    b3957486): 프레임이 str/bytes/bytearray 중 무엇도 아니면 `json.loads`에
+    넘기지 않고 즉시 `WsProtocolError`로 표면화한다. 원래는 이 자리에서
+    타입 검사 없이 `json.loads`를 호출해 mypy가 놓치던 `TypeError`를
+    `type: ignore`로 억누르고 있었다."""
+    h = _Harness()
+    conn = _FakeConnection([12345], raise_after=_closed())  # str도 bytes도 아닌 프레임
+    connect_fn, calls = _connect_sequence([conn])
+
+    with pytest.raises(WsProtocolError, match="JSON 아닌 프레임"):
         await h.session(connect_fn).run([SUB], h.handler)
 
     assert calls["n"] == 1
