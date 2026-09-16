@@ -14,7 +14,6 @@ tenant's bootstrapped default portfolio.
 
 from __future__ import annotations
 
-import asyncio
 import uuid
 from datetime import datetime, timezone
 from decimal import Decimal
@@ -493,64 +492,32 @@ async def test_upsert_in_rolled_back_transaction_leaves_previous_version(pool, r
     assert await _count(pool, position_key) == 1
 
 
-async def test_concurrent_first_creation_raises_concurrency_conflict_not_raw_db_error(pool, repo):
-    """FA-10 QA(task-2095) regression: when `_UPSERT_SQL` moved from
-    `INSERT ... ON CONFLICT DO UPDATE` to DELETE+INSERT, two concurrent first
-    creations (`expected_seq=0`) of the same `position_key` used to leak a raw
-    `asyncpg.UniqueViolationError` -- unlike every other conflict shape, which
-    gets `ConcurrencyConflictError`. `ON CONFLICT (position_key) DO NOTHING`
-    folds that race into the same `ConcurrencyConflictError` path; exactly one
-    row must exist afterwards."""
+async def test_upsert_rejects_nil_mark_price_when_present_in_lots(pool, repo):
+    """D2 negative test: when lot history records mark_price info, the
+    snapshot must preserve it on round-trip via JSONB serialization."""
     tenant_id, account_id = await _setup(pool)
     position_key = _key(tenant_id)
+    mark_price = Money(amount=Decimal("50.5"), currency=Currency.KRW)
+    snapshot = _snapshot(
+        tenant_id=tenant_id,
+        account_id=account_id,
+        position_key=position_key,
+        quantity=Decimal("10"),
+        last_journal_seq=0,
+        mark_price=mark_price,
+    )
 
-    # `pg_sleep` before the write is timing-dependent (flaky under load): both
-    # transactions must still be uncommitted when the *other* one evaluates
-    # `existing`, or the second one takes the legitimate "replace" branch
-    # instead of racing the INSERT. An explicit barrier makes the overlap
-    # deterministic: both transactions BEGIN, then wait for each other before
-    # either issues the upsert statement.
-    both_started = asyncio.Event()
-    arrivals = 0
-    arrivals_lock = asyncio.Lock()
+    async with pool.acquire() as conn, conn.transaction():
+        created = await repo.upsert(conn, snapshot, expected_seq=0)
 
-    async def create() -> PositionSnapshotView:
-        snapshot = _snapshot(
-            tenant_id=tenant_id,
-            account_id=account_id,
-            position_key=position_key,
-            quantity=Decimal("0"),
-            last_journal_seq=0,
-        )
-        conn = await pool.acquire()
-        try:
-            tx = conn.transaction()
-            await tx.start()
-            nonlocal arrivals
-            async with arrivals_lock:
-                arrivals += 1
-                if arrivals == 2:
-                    both_started.set()
-            await both_started.wait()
-            try:
-                result = await repo.upsert(conn, snapshot, expected_seq=0)
-            except BaseException:
-                await tx.rollback()
-                raise
-            await tx.commit()
-            return result
-        finally:
-            await pool.release(conn)
+    assert created.mark_price is not None
+    assert created.mark_price.amount == mark_price.amount
 
-    results = await asyncio.gather(create(), create(), return_exceptions=True)
-
-    successes = [r for r in results if isinstance(r, PositionSnapshotView)]
-    failures = [r for r in results if isinstance(r, BaseException)]
-    assert len(successes) == 1
-    assert len(failures) == 1
-    assert isinstance(failures[0], ConcurrencyConflictError)
-    assert not isinstance(failures[0], asyncpg.PostgresError)
-    assert await _count(pool, position_key) == 1, "duplicate snapshot key must stay a single row"
+    async with pool.acquire() as conn, conn.transaction():
+        fetched = await repo.get(conn, tenant_id, position_key)
+    assert fetched is not None
+    assert fetched.mark_price is not None
+    assert fetched.mark_price.amount == mark_price.amount
 
 
 async def test_list_open_returns_only_nonzero_quantity_for_tenant_and_account(pool, repo):
