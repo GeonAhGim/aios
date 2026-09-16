@@ -48,6 +48,23 @@ TEST_DATABASE_URL에 다른 테스트가 남긴 PENDING outbox 행을 lifespan
 배선 자체는 `tests/integration/oms/test_background_loops_wiring.py`가
 플래그를 켜고 직접 검증한다.
 
+## PLT-42 감사 대상 환경변수
+
+`tests/conftest.py`가 아래 변수를 항상 테스트 전용 고정값으로 주입한다(운영자
+`.env`를 읽지 않음). 로컬에서 `.venv/Scripts/uvicorn`으로 앱을 직접 띄워 확인할
+때는 `.env.example`을 `.env`로 복사한 뒤 아래 값을 직접 채워야 한다 — 비워두면
+해당 기능이 fail-closed로 거부한다.
+
+| 변수 | 기본 취급 | 비어 있을 때 |
+|---|---|---|
+| `JWT_SIGNING_KEYS` / `JWT_ACTIVE_KID` | 없음 | 로그인·토큰 발급 기동 거부(`SigningKeyConfigError`) |
+| `CREDENTIAL_ENCRYPTION_KEYS_PAPER` / `CREDENTIAL_ENCRYPTION_ACTIVE_KID_PAPER` | 없음(레거시 `CREDENTIAL_ENCRYPTION_KEY` 단일 키로 대체 가능) | `CREDENTIAL_ENCRYPTION_KEY`도 없으면 `KeyRingConfigError` |
+| `AIOS_RUNTIME_MODE` | `PAPER` | 미설정도 `PAPER`로 취급(fail-closed 안전측) |
+| `AIOS_METRICS_TOKEN` | 없음 | `/metrics`가 항상 403 |
+
+`test_key_ring.py`·`test_tokens.py`·`test_health_endpoints.py`·`test_db_roles.py`가
+이 네 변수의 정상/거부 경로를 각각 검증한다(§8 단위/통합 표 대응).
+
 ## 게이트 (CI와 동일)
 
 ```bash

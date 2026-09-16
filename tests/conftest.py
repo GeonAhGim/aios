@@ -49,9 +49,9 @@ _TEST_ENV = {
     "JWT_SECRET_KEY": "aios-test-only-jwt-secret-must-be-at-least-32-bytes",
     "JWT_ALGORITHM": "HS256",
     "JWT_EXPIRE_MINUTES": "60",
-    # PLT-24 — src/services/auth/tokens.py TokenIssuer/TokenVerifier.from_env()
-    # 전용 kid 회전 키(레거시 JWT_SECRET_KEY와는 별개 체계). 실제 .env.example
-    # 배선은 PLT-42 스콥.
+    # PLT-24 -- kid-rotation key for src/services/auth/tokens.py
+    # TokenIssuer/TokenVerifier.from_env() (a separate scheme from the legacy
+    # JWT_SECRET_KEY). The .env.example slot is wired by PLT-42.
     "JWT_SIGNING_KEYS": "test1:" + "aa" * 32,
     "JWT_ACTIVE_KID": "test1",
     "CREDENTIAL_ENCRYPTION_KEY": "22" * 32,

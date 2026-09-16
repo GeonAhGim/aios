@@ -36,3 +36,10 @@ cp .env.example .env            # 값 채우기
 
 테스트·게이트는 `docs/TESTING.md`, 개발 조직(Orchestrator·헤드리스 worker·PM)은 `docs/specs/README.md`와
 `docs/FULL_AUDIT_2026-09-02.md` §2-B를 본다.
+
+`.env.example`은 `scripts/check_consistency.py`(`env_key_undocumented`)가 `src/`의
+`os.environ` 직접 접근 키를 대조해 누락을 정적으로 잡아낸다. 다만 함수 인자로 넘겨받은
+`Mapping`을 통해 읽는 키(`JWT_SIGNING_KEYS`, `CREDENTIAL_ENCRYPTION_KEYS_PAPER`,
+`AIOS_RUNTIME_MODE`)는 이 검사가 구조적으로 놓치므로 새 환경변수를 추가하면 코드 리뷰에서
+`.env.example` 갱신 여부를 수동으로 함께 확인한다(PLT-42, `docs/TESTING.md`
+"PLT-42 감사 대상 환경변수" 참고).
