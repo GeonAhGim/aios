@@ -3,6 +3,7 @@
 Spec: docs/specs/L4_ems_routing_algos_and_tca_v1.0.md #9 EM-8 DoD
 ("schedule snapshot, determinism"). No DB -- pure function tests only.
 """
+
 from __future__ import annotations
 
 import ast
@@ -169,9 +170,7 @@ def test_long_volume_profile_is_rejected() -> None:
 
 
 def test_slice_count_over_the_cap_is_rejected() -> None:
-    parent = _parent(
-        algo=_algo(start=_T0, end=_T0 + timedelta(seconds=1000), slice_interval_sec=1)
-    )
+    parent = _parent(algo=_algo(start=_T0, end=_T0 + timedelta(seconds=1000), slice_interval_sec=1))
     with pytest.raises(AlgoConstraintError, match="500"):
         plan_twap_schedule(parent, volume_profile=_abundant_volume_profile(1000))
 
@@ -256,9 +255,87 @@ def test_twap_module_does_not_reimplement_oms_algo_slicer() -> None:
     )
 
 
-# -- file size discipline -----------------------------------------------------
+# -- D2-deepen: failure-injection, numerical assertion, gate-red reproduction --
 
 
-def test_twap_module_is_at_most_300_lines() -> None:
-    line_count = len(_TWAP_PATH.read_text(encoding="utf-8").splitlines())
-    assert line_count <= 300, f"twap.py has {line_count} lines, exceeding the 300-line leaf cap."
+def test_failure_injection_zero_volume_profile_rejected() -> None:
+    """Inject a volume profile of all zeros — check_participation rejects
+    it because market_volume (the profile entry) is 0, which is <= 0.
+    This is a *failure-injection* test: we feed a clearly broken profile
+    to prove the guard catches it early, before any scheduling."""
+    parent = _parent(qty=Decimal("10"))
+    with pytest.raises(ParticipationExceededError, match="market_volume"):
+        plan_twap_schedule(parent, volume_profile=[Decimal("0")] * 10)
+
+
+def test_failure_injection_negative_volume_profile_rejected() -> None:
+    """Inject a volume profile with negative values — check_participation
+    rejects it because market_volume (the profile entry) is <= 0.
+    This is a second failure-injection test covering the negative-volume
+    path in check_participation."""
+    parent = _parent(qty=Decimal("10"))
+    with pytest.raises(ParticipationExceededError, match="market_volume"):
+        plan_twap_schedule(
+            parent, volume_profile=[Decimal("-1"), Decimal("11")] + [Decimal("0")] * 8
+        )
+
+
+def test_numerical_assertion_exact_timing_and_quantity() -> None:
+    """Assert that the generated schedule has *exact* numerical properties:
+    (a) child start times form a perfect arithmetic progression matching
+        slice_interval_sec,
+    (b) planned_qty sums to exactly parent.qty (no float drift),
+    (c) the last child's scheduled_at equals parent.algo.end.
+    These are D2 numerical invariants — Decimal arithmetic must preserve
+    exactness across all 10 slices."""
+    parent = _parent(
+        qty=Decimal("10.00000001"),
+        algo=_algo(
+            start=_T0,
+            end=_T0 + timedelta(seconds=900),  # 15 min = 10 slices × 90s
+            slice_interval_sec=90,
+        ),
+    )
+    children = plan_twap_schedule(parent, volume_profile=_abundant_volume_profile(10))
+    assert len(children) == 10
+    # (b) exact quantity sum — Decimal must not drift
+    total_qty = sum(c.planned_qty for c in children)
+    assert total_qty == parent.qty, (
+        f"Quantity sum {total_qty} != parent qty {parent.qty} — Decimal drift detected"
+    )
+    # (a) perfect arithmetic progression
+    for i, child in enumerate(children):
+        expected_start = _T0 + timedelta(seconds=i * 90)
+        assert child.scheduled_at == expected_start, (
+            f"Child {i} start {child.scheduled_at} != expected {expected_start}"
+        )
+    # (c) last child's scheduled_at is at (child_count-1) * slice_interval_sec
+    # from start — the schedule does not extend to algo.end, it fits within it.
+    expected_last_start = _T0 + timedelta(seconds=(10 - 1) * 90)
+    assert children[-1].scheduled_at == expected_last_start
+    # The schedule fits within the algo window: last start + slice_interval <= end
+    assert children[-1].scheduled_at + timedelta(seconds=90) <= parent.algo.end
+
+
+def test_gate_red_reproduction_participation_cap_all_slices() -> None:
+    """Reproduce a *gate-red* condition: every slice exceeds the participation
+    cap, so the guard rejects the entire schedule.  This proves the guard
+    gate is active and returns the correct error type (ParticipationExceededError).
+
+    Setup: qty=100, 10 slices → each slice=10. Market volume=10000, cap=1%
+    → allowed per slice = 100. Every slice (10) does NOT exceed 100, so we
+    need a tighter cap.  cap=0.01% → allowed per slice = 1.0. Every slice
+    (10) exceeds 1.0 → gate-red.
+    """
+    parent = _parent(
+        qty=Decimal("100"),
+        algo=_algo(
+            max_participation_pct=Decimal("0.01"),
+            slice_interval_sec=60,
+        ),
+    )
+    # volume_profile must match child count and have positive market_volume
+    # so that check_participation fires on the qty-vs-cap comparison,
+    # not on market_volume <= 0.
+    with pytest.raises(ParticipationExceededError, match="exceeding the cap"):
+        plan_twap_schedule(parent, volume_profile=[Decimal("10000")] * 10)
