@@ -64,7 +64,7 @@ def test_run_stress_still_correct_when_run_backtest_stalls(
 
     def _stalled_run_backtest(*args: object, **kwargs: object) -> object:
         time.sleep(delay_s)
-        return original_run_backtest(*args, **kwargs)  # type: ignore[arg-type]
+        return original_run_backtest(*args, **kwargs)
 
     monkeypatch.setattr(stress_mod, "run_backtest", _stalled_run_backtest)
 
@@ -102,7 +102,7 @@ def test_budget_gate_actually_fails_when_run_backtest_stalls_past_budget(
 
     def _stalled_run_backtest(*args: object, **kwargs: object) -> object:
         time.sleep(_BUDGET_MS / 1000 / _RUN_BACKTEST_CALLS + 0.01)
-        return original_run_backtest(*args, **kwargs)  # type: ignore[arg-type]
+        return original_run_backtest(*args, **kwargs)
 
     monkeypatch.setattr(stress_mod, "run_backtest", _stalled_run_backtest)
 
