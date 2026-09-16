@@ -1,13 +1,16 @@
-"""`foundation_gate.py`의 3층(mandate numeric policy) 평가 — task-4006, P6
-LOC 분할로 책임 분리(로직 이동만, 평가 순서·fail-closed 불변식은 그대로).
+"""Layer 3 (mandate numeric policy) evaluation for `foundation_gate.py` --
+split out for LOC (task-4006, P6, logic move only, evaluation order and
+fail-closed invariants unchanged).
 
-task-1806 — R-36의 observed-vs-current 패턴을 mandate revision에도 적용한다:
-`context.mandate_revision_id`는 이 execution이 마지막으로 바인딩한 revision
-(observed)이다. 그 사이 amendment로 새 revision이 활성화됐다면(이전 revision은
-SUPERSEDED로 전이) `evaluate_mandate_policy`는 항상 "현재" 활성 revision을
-기준으로 평가하므로, 확인 없이 통과시키면 이 execution이 동의한 적 없는
-규칙(더 느슨하거나 엄격한)으로 조용히 재평가하게 된다 — fence staleness와
-같은 결함 부류다. 불일치 시 거부하고 재바인딩을 요구한다.
+task-1806 -- applies the same observed-vs-current pattern as R-36 to the
+mandate revision too: `context.mandate_revision_id` is the revision this
+execution last bound to (observed). If a new revision was activated by an
+amendment in the meantime (the prior revision becomes SUPERSEDED),
+`evaluate_mandate_policy` always evaluates against the "current" active
+revision, so passing through without checking would silently re-evaluate
+the execution against rules it never agreed to (looser or stricter) -- the
+same class of defect as fence staleness. On mismatch, deny and require
+rebinding.
 """
 
 from __future__ import annotations

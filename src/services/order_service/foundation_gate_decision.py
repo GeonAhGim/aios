@@ -1,8 +1,9 @@
-"""`foundation_gate.py`의 WORM `risk_decision` 기록 헬퍼 — task-1717 P0-D
-`_record_decision()`을 책임 분리(task-4006, P6 LOC 분할, 로직 이동만·불변식
-불변). fence 평탄화(`flatten_fence`)/stale 판정(`is_stale`)도 같은 "결정
-기록에 필요한 입력 가공" 축이라 함께 옮긴다 — 게이트 4단 평가 순서 자체는
-`foundation_gate.py`에 남는다.
+"""WORM `risk_decision` recording helpers for `foundation_gate.py` --
+task-1717 P0-D's `_record_decision()` split out for LOC (task-4006, P6,
+logic move only, invariants unchanged). Fence flattening (`flatten_fence`)
+and staleness detection (`is_stale`) move alongside it -- same "inputs for
+recording a decision" axis. The 4-layer gate evaluation order itself stays
+in `foundation_gate.py`.
 """
 
 from __future__ import annotations
@@ -32,11 +33,11 @@ _TTL_SECONDS = 30.0
 
 
 class _GateInputs(BaseModel, frozen=True):
-    """WORM `inputs_snapshot`용 — `decision_binding.verify_decision_binding`이
-    요구하는 최소 계약(top-level symbol/side/quantity/fence_snapshot)만
-    채운다. `evaluate_pre_submit._PreSubmitInputs`와 스키마가 다르다(이
-    게이트는 CB/distrust/connection을 보지 않는다, `foundation_gate.py`
-    모듈 docstring)."""
+    """For the WORM `inputs_snapshot` -- fills only the minimal contract
+    `decision_binding.verify_decision_binding` requires (top-level
+    symbol/side/quantity/fence_snapshot). Schema differs from
+    `evaluate_pre_submit._PreSubmitInputs` (this gate does not look at
+    CB/distrust/connection, see `foundation_gate.py`'s module docstring)."""
 
     schema_version: Literal["v1"] = "v1"
     tenant_id: UUID

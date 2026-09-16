@@ -1,7 +1,8 @@
-"""FD-3.4 폴링 체결 반영 — `submit.py`(FD-4.2 주문 전송)에서 책임 분리
-(task-4006, P6 LOC 분할, 로직 이동만·순서/불변식 불변).
+"""FD-3.4 polling fill application -- split out of `submit.py` (FD-4.2 order
+submission) for LOC (task-4006, P6, logic move only, order/invariants
+unchanged).
 
-Spec: 기능설계문서_v1.21.md#FD-4.2 (apply_fill 관련 절)
+Spec: 기능설계문서_v1.21.md#FD-4.2
 """
 
 from __future__ import annotations
@@ -42,10 +43,10 @@ async def apply_fill(
     provider_fill_id`를 `order_id`+`filled_quantity`의 결정론적 함수로
     합성한다 — 같은 스냅샷의 재호출(재시도·중복 폴링)은 항상 같은 키가 되어
     inbox/fills 양쪽의 ON CONFLICT가 흡수한다(§6 F9와 동일 보장)."""
-    # 지연 임포트 — inbox_processor.py가 `order_service.repository`/
-    # `position_ledger`를 쓰므로(§`_apply_position_ledger`), 모듈 최상단에서
-    # 임포트하면 order_service/__init__.py → apply_fill.py → inbox_processor.py →
-    # order_service(패키지) 순환 임포트가 된다.
+    # Lazy import -- inbox_processor.py uses `order_service.repository`/
+    # `position_ledger` (see `_apply_position_ledger`), so importing it at
+    # module top-level would cycle: order_service/__init__.py ->
+    # apply_fill.py -> inbox_processor.py -> order_service (package).
     from src.services.oms.application.inbox_processor import InboxProcessor
 
     metrics = metrics if metrics is not None else NullMetrics()

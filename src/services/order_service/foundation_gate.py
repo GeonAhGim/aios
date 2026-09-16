@@ -26,11 +26,12 @@ Layer 3: mandate numeric policy (`foundation_gate_mandate_layer.
    observed-vs-current, same as fence) is `RISK_MANDATE_REVISION_STALE`
    DENY; a match proceeds to `mandates.evaluate_policy()`.
 
-task-1717 P0-D — 모든 결정을 `record_decision()`으로 `risk_decision` WORM에
-기록해 `GateDecision.decision_id`를 채운다(`GateKind.PRE_SUBMIT`,
-`evaluate_pre_submit`의 4-rule 스키마와는 별개 — CB/distrust/connection
-필드 없음). mandate를 정식 평가했으면 `policy_decision_id`도, CM-8 컴플라이언스
-판정을 했으면 `compliance_decision_id`도 함께 채운다(각각 별개 테이블 참조).
+task-1717 P0-D -- every decision is recorded to the `risk_decision` WORM via
+`record_decision()`, filling `GateDecision.decision_id` (`GateKind.
+PRE_SUBMIT`, a separate schema from `evaluate_pre_submit`'s 4-rule one --
+no CB/distrust/connection fields). If mandate was actually evaluated,
+`policy_decision_id` is also filled; if a CM-8 compliance verdict was made,
+`compliance_decision_id` is filled too (each references its own table).
 
 task-3986 — layer 4, `foundation_personal_gate.evaluate_personal_layer`, is
 only evaluated once layers 1-3 all ALLOW (`_finish_allow`). It only acts
@@ -39,10 +40,11 @@ when personal mode is actually scoped to this account/tenant
 untouched (no global enforcement; fixes the "denies nothing" defect QA
 task-3819 found).
 
-task-4006 — P6 LOC 분할(책임 분리, 로직 이동만 — 4단 평가 순서·fail-closed
-불변식은 그대로): WORM `risk_decision` 기록(`record_decision`/
-`flatten_fence`/`is_stale`)은 `foundation_gate_decision.py`로, layer 3
-(mandate numeric policy)은 `foundation_gate_mandate_layer.py`로 옮겼다.
+task-4006 -- P6 LOC split (logic move only, 4-layer evaluation order and
+fail-closed invariants unchanged): WORM `risk_decision` recording
+(`record_decision`/`flatten_fence`/`is_stale`) moved to
+`foundation_gate_decision.py`; layer 3 (mandate numeric policy) moved to
+`foundation_gate_mandate_layer.py`.
 """
 
 from __future__ import annotations
