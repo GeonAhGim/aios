@@ -3,6 +3,7 @@
 task-1723 P1-D: websocket_mixin.py(422줄, P6 300줄 초과)에서 연결 프로토콜과
 재연결 루프를 분리. 공개 심볼은 websocket_mixin.py가 그대로 재수출한다.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -10,7 +11,7 @@ import json
 import logging
 from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import AbstractAsyncContextManager
-from typing import Any, Protocol
+from typing import Any, Protocol, cast
 
 from websockets.asyncio.client import connect as _default_connect
 from websockets.exceptions import ConnectionClosed
@@ -33,7 +34,14 @@ ConnectFn = Callable[[str], AbstractAsyncContextManager[WsConnection]]
 
 
 def _connect(url: str) -> AbstractAsyncContextManager[WsConnection]:
-    return _default_connect(url)  # type: ignore[return-value]
+    """`websockets.asyncio.client.connect()`가 반환하는 `Connect`는
+    구조적으로 `WsConnection`(send/pong/__aiter__)을 만족하는
+    `ClientConnection`을 내지만, mypy는 라이브러리 반환 타입 자체를
+    `AbstractAsyncContextManager`의 서브타입으로 인식하지 못한다(nh
+    PLT-40c 조사와 동일 원인) — `cast()`는 런타임에 아무 동작도 하지
+    않으므로(단순 타입 단언) 기존 `# type: ignore[return-value]`와
+    동일하게 무해하다."""
+    return cast(AbstractAsyncContextManager[WsConnection], _default_connect(url))
 
 
 async def _run_kis_ws_subscription(

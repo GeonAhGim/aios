@@ -18,11 +18,13 @@ task-1781(BR-3)로 추가된 6개 신용잔고/대주/재무제표 엔드포인�
 없으면(스키마 변경 등) 조용히 빈 값을 반환하지 않고 FatalExchangeError를
 낸다 — 위 구세대 5개 메서드의 `.get(key, [])` 관례와 다르다.
 """
+
 from __future__ import annotations
 
 from typing import Any
 
 from src.core.exceptions import FatalExchangeError
+from src.exchanges.common.http_client import KISHTTPClient
 
 _MARKET_CODE = "J"  # KRX
 
@@ -43,9 +45,9 @@ def _as_rows(value: Any) -> list[dict[str, Any]]:
 
 
 class KISDomesticStockExtraMixin:
-    async def get_investor_trend_estimate(self, symbol: str) -> list[dict[str, Any]]:
+    async def get_investor_trend_estimate(self: KISHTTPClient, symbol: str) -> list[dict[str, Any]]:
         """장중 추정 투자자별(외국인/기관) 매매동향."""
-        raw = await self._request(  # type: ignore[attr-defined]
+        raw = await self._request(
             "GET",
             "/uapi/domestic-stock/v1/quotations/investor-trend-estimate",
             "HHPTJ04160200",
@@ -54,10 +56,10 @@ class KISDomesticStockExtraMixin:
         return list(raw.get("output2", []))
 
     async def get_financial_ratio(
-        self, symbol: str, *, period_div_code: str = "0"
+        self: KISHTTPClient, symbol: str, *, period_div_code: str = "0"
     ) -> list[dict[str, Any]]:
         """`period_div_code`: "0"=연간, "1"=분기(문서 관례)."""
-        raw = await self._request(  # type: ignore[attr-defined]
+        raw = await self._request(
             "GET",
             "/uapi/domestic-stock/v1/finance/financial-ratio",
             "FHKST66430300",
@@ -69,9 +71,9 @@ class KISDomesticStockExtraMixin:
         )
         return list(raw.get("output", []))
 
-    async def get_investor_trading_by_stock(self, symbol: str) -> dict[str, Any]:
+    async def get_investor_trading_by_stock(self: KISHTTPClient, symbol: str) -> dict[str, Any]:
         """개인/외국인/기관 매매 현황(현재가 기준 단일 조회)."""
-        raw = await self._request(  # type: ignore[attr-defined]
+        raw = await self._request(
             "GET",
             "/uapi/domestic-stock/v1/quotations/inquire-investor",
             "FHKST01010900",
@@ -80,7 +82,7 @@ class KISDomesticStockExtraMixin:
         return dict(raw.get("output", {}))
 
     async def get_dividend_disclosures(
-        self,
+        self: KISHTTPClient,
         *,
         symbol: str | None = None,
         start_date: str | None = None,
@@ -89,7 +91,7 @@ class KISDomesticStockExtraMixin:
     ) -> list[dict[str, Any]]:
         """배당 공시 정보(KSD 예탁결제원 제공). `symbol` 생략 시 전체
         종목 대상(문서 관례 — 공백 문자열)."""
-        raw = await self._request(  # type: ignore[attr-defined]
+        raw = await self._request(
             "GET",
             "/uapi/domestic-stock/v1/ksdinfo/dividend",
             "HHKDB669102C0",
@@ -105,7 +107,7 @@ class KISDomesticStockExtraMixin:
         return list(raw.get("output", []))
 
     async def get_credit_balance_ranking(
-        self,
+        self: KISHTTPClient,
         *,
         symbol_scope: str = "0000",
         period: str = "2",
@@ -119,7 +121,7 @@ class KISDomesticStockExtraMixin:
         `symbol_scope`: "0000"=전체,"0001"=거래소,"1001"=코스닥,"2001"=코스피200(원문).
         `rank_sort_code`: 0~4=융자 잔고 순위, 5~9=대주 잔고 순위(원문 docstring).
         """
-        raw = await self._request(  # type: ignore[attr-defined]
+        raw = await self._request(
             "GET",
             "/uapi/domestic-stock/v1/ranking/credit-balance",
             "FHKST17010000",
@@ -137,7 +139,7 @@ class KISDomesticStockExtraMixin:
         }
 
     async def get_daily_credit_balance(
-        self, symbol: str, *, settle_date: str
+        self: KISHTTPClient, symbol: str, *, settle_date: str
     ) -> list[dict[str, Any]]:
         """국내주식 신용잔고 일별추이[국내주식-110]. 상환수량은 매도상환수량
         +현금상환수량 합계(원문 주석).
@@ -149,7 +151,7 @@ class KISDomesticStockExtraMixin:
         한 번의 호출에 최대 30건, `settle_date`로 다음 조회 가능(원문 docstring,
         이 메서드는 페이지네이션을 자동으로 하지 않는다).
         """
-        raw = await self._request(  # type: ignore[attr-defined]
+        raw = await self._request(
             "GET",
             "/uapi/domestic-stock/v1/quotations/daily-credit-balance",
             "FHPST04760000",
@@ -163,7 +165,7 @@ class KISDomesticStockExtraMixin:
         return _as_rows(_require(raw, "output", "FHPST04760000"))
 
     async def get_lendable_by_company(
-        self,
+        self: KISHTTPClient,
         *,
         exchange_code: str = "00",
         symbol: str = "",
@@ -178,7 +180,7 @@ class KISDomesticStockExtraMixin:
         `/uapi/domestic-stock/v1/quotations/lendable-by-company`.
         `exchange_code`: "00"=전체,"02"=거래소,"03"=코스닥(원문 docstring).
         """
-        raw = await self._request(  # type: ignore[attr-defined]
+        raw = await self._request(
             "GET",
             "/uapi/domestic-stock/v1/quotations/lendable-by-company",
             "CTSC2702R",
@@ -197,7 +199,7 @@ class KISDomesticStockExtraMixin:
         }
 
     async def get_credit_by_company(
-        self,
+        self: KISHTTPClient,
         *,
         symbol_scope: str = "0000",
         orderable_only: bool = True,
@@ -213,7 +215,7 @@ class KISDomesticStockExtraMixin:
         다른 메서드와 달리 대문자가 아니다. KIS 쿼리 파라미터는 통상
         대소문자 무관이라 실동작에는 영향 없을 것으로 보이나 미검증.
         """
-        raw = await self._request(  # type: ignore[attr-defined]
+        raw = await self._request(
             "GET",
             "/uapi/domestic-stock/v1/quotations/credit-by-company",
             "FHPST04770000",
@@ -228,7 +230,7 @@ class KISDomesticStockExtraMixin:
         return _as_rows(_require(raw, "output", "FHPST04770000"))
 
     async def get_financial_balance_sheet(
-        self, symbol: str, *, period_div_code: str = "0"
+        self: KISHTTPClient, symbol: str, *, period_div_code: str = "0"
     ) -> list[dict[str, Any]]:
         """국내주식 대차대조표(재무상태표)[v1_국내주식-078].
 
@@ -238,7 +240,7 @@ class KISDomesticStockExtraMixin:
         `period_div_code`: "0"=연간,"1"=분기(원문 docstring, get_financial_ratio와
         동일 관례). 파라미터 대소문자도 원문 그대로(FID_DIV_CLS_CODE만 대문자).
         """
-        raw = await self._request(  # type: ignore[attr-defined]
+        raw = await self._request(
             "GET",
             "/uapi/domestic-stock/v1/finance/balance-sheet",
             "FHKST66430100",
@@ -251,7 +253,7 @@ class KISDomesticStockExtraMixin:
         return _as_rows(_require(raw, "output", "FHKST66430100"))
 
     async def get_income_statement(
-        self, symbol: str, *, period_div_code: str = "0"
+        self: KISHTTPClient, symbol: str, *, period_div_code: str = "0"
     ) -> list[dict[str, Any]]:
         """국내주식 손익계산서[v1_국내주식-079].
 
@@ -261,7 +263,7 @@ class KISDomesticStockExtraMixin:
         `period_div_code`: "0"=연간,"1"=분기(원문 docstring). 파라미터
         대소문자도 원문 그대로(FID_DIV_CLS_CODE만 대문자).
         """
-        raw = await self._request(  # type: ignore[attr-defined]
+        raw = await self._request(
             "GET",
             "/uapi/domestic-stock/v1/finance/income-statement",
             "FHKST66430200",
@@ -274,7 +276,7 @@ class KISDomesticStockExtraMixin:
         return _as_rows(_require(raw, "output", "FHKST66430200"))
 
     async def get_program_trade_daily(
-        self,
+        self: KISHTTPClient,
         market_class_code: str,
         *,
         start_date: str | None = None,
@@ -282,7 +284,7 @@ class KISDomesticStockExtraMixin:
     ) -> list[dict[str, Any]]:
         """`market_class_code`: "K"=코스피, "Q"=코스닥(문서 관례). 프로그램
         매매(차익/비차익) 일별 동향 — 시장 전체 신호 보강용."""
-        raw = await self._request(  # type: ignore[attr-defined]
+        raw = await self._request(
             "GET",
             "/uapi/domestic-stock/v1/quotations/comp-program-trade-daily",
             "FHPPG04600001",
