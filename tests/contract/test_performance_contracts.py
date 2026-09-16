@@ -128,5 +128,5 @@ def test_money_value_rejects_state_outside_estimated_final_literal():
             currency="USDT",
             precision=2,
             as_of=_NOW,
-            state="CORRECTED",  # type: ignore[arg-type]
+            state="CORRECTED",
         )
