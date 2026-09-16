@@ -288,6 +288,50 @@ def test_openapi_passes_when_path_registered(tmp_path: Path) -> None:
     assert cc.check_openapi_frontend(tmp_path) == []
 
 
+def test_openapi_allowlisted_no_ui_path_is_not_flagged(tmp_path: Path) -> None:
+    """task-3716: 서버 라우터는 있지만 화면이 없어 등록하지 않은 경로(예: /livez)는
+    frontend에 등록되지 않아도 유령 경로로 오탐하지 않는다(apiPaths.openapi.test.ts의
+    UNREGISTERED_ROUTE_WHITELIST와 동일 근거)."""
+    _write(
+        tmp_path,
+        "contracts/openapi/v1.json",
+        json.dumps({"paths": {"/livez": {}}}),
+    )
+    _write(
+        tmp_path,
+        "frontend/packages/api-client/src/apiRoutes.ts",
+        "export const API_ROUTES = {};\n",
+    )
+    assert cc.check_openapi_frontend(tmp_path) == []
+
+
+def test_openapi_removing_a_registered_non_allowlisted_path_is_still_flagged(
+    tmp_path: Path,
+) -> None:
+    """task-3716 DoD(c): allowlist는 개별 경로 단위라 다른 경로까지 조용히 삼키지
+    않는다 -- allowlist 경로(/livez)와 나란히 등록됐던 실제 경로(/foo/{id})의
+    frontend 등록을 지우면 그 경로만 정확히 지목해 적색이 된다."""
+    _write(
+        tmp_path,
+        "contracts/openapi/v1.json",
+        json.dumps({"paths": {"/livez": {}, "/foo/{id}": {}}}),
+    )
+    _write(
+        tmp_path,
+        "frontend/packages/api-client/src/apiRoutes.ts",
+        'export const API_ROUTES = { "x": route("/foo/:id", true) };\n',
+    )
+    assert cc.check_openapi_frontend(tmp_path) == []
+
+    _write(
+        tmp_path,
+        "frontend/packages/api-client/src/apiRoutes.ts",
+        "export const API_ROUTES = {};\n",
+    )
+    hits = cc.check_openapi_frontend(tmp_path)
+    assert hits == [("contracts/openapi/v1.json#/foo/{id}", 0)]
+
+
 # ---------------------------------------------------------------------------
 # 8. spec_leaf_untraced
 # ---------------------------------------------------------------------------

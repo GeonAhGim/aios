@@ -555,6 +555,53 @@ def check_migrations(root: Path) -> list[Hit]:
 _OPENAPI_PARAM_RE = re.compile(r"\{[^}]+\}")
 _ROUTE_CALL_RE = re.compile(r'route\(\s*"([^"]+)"')
 
+# task-3716: 이 스캐너는 리터럴/세그먼트 단위 정규화만 하는 크루드 대조라 ":id:verb"
+# 복합 세그먼트(예: "{connection_id}:confirm")를 구분하지 못하는 것과는 별개로,
+# "서버 라우터는 있지만 화면이 아직 없어 apiRoutes.ts에 의도적으로 등록하지 않은"
+# 경로까지 유령 경로로 오탐한다. 이 15건은 frontend/packages/api-client/src/
+# apiPaths.openapi.test.ts의 UNREGISTERED_ROUTE_WHITELIST(task-2168 §E)와 정확히
+# 같은 경로·같은 사유다 -- 두 목록이 갈라지면 그 vitest의 "화이트리스트 부패 방지"
+# 테스트가 먼저 잡는다. 값은 "서버 라우터 파일:라인 -- 사유".
+_OPENAPI_NO_FRONTEND_UI_ALLOWLIST: dict[str, str] = {
+    "/admin/audit-log": "src/api/routers/admin.py:73 -- 관리자 감사 로그 화면 없음",
+    "/admin/ledger/payouts/{batch_id}/paid": (
+        "src/api/routers/foundation/ledger_admin.py:46 -- 정산 배치 확정 액션 UI 없음"
+    ),
+    "/exchange-credentials/{exchange}/positions": (
+        "src/api/routers/exchange_credentials.py:97 -- exchange.ts에 positions 조회 없음"
+    ),
+    "/livez": "src/api/routers/health.py:79 -- k8s liveness 프로브, 앱 API 표면 아님",
+    "/metrics": "src/api/routers/metrics.py:36 -- 모니터링 전용 엔드포인트, 앱 API 표면 아님",
+    "/readyz": "src/api/routers/health.py:85 -- k8s readiness 프로브, 앱 API 표면 아님",
+    "/v1/foundation/performance-statements": (
+        "src/api/routers/foundation/performance.py:94 -- 실적 명세서 화면 없음"
+    ),
+    "/v1/foundation/performance-statements/{statement_id}": (
+        "src/api/routers/foundation/performance.py:112 -- 실적 명세서 화면 없음"
+    ),
+    "/v1/foundation/performance-statements/{statement_id}:correct": (
+        "src/api/routers/foundation/performance.py:130 -- 실적 명세서 정정 액션 UI 없음"
+    ),
+    "/v1/foundation/performance-statements:compute": (
+        "src/api/routers/foundation/performance.py:65 -- 실적 명세서 계산 액션 UI 없음"
+    ),
+    "/v1/foundation/reconciliation/runs": (
+        "src/api/routers/foundation/reconciliation.py:50 -- 정합성 대사 실행 이력 화면 없음"
+    ),
+    "/v1/foundation/risk-gate/admin/safety-controls": (
+        "src/api/routers/foundation/risk_gate.py:203 -- 리스크 게이트 관리자 개통 UI 없음"
+    ),
+    "/v1/foundation/risk-gate/evaluate": (
+        "src/api/routers/foundation/risk_gate.py:78 -- 리스크 게이트 평가 트리거 화면 없음"
+    ),
+    "/v1/foundation/risk-gate/rule-bundles/{bundle_id}:activate": (
+        "src/api/routers/foundation/risk_gate.py:259 -- 룰번들 활성화 액션 UI 없음"
+    ),
+    "/v1/foundation/risk-gate/rule-bundles/{bundle_id}:approve": (
+        "src/api/routers/foundation/risk_gate.py:240 -- 룰번들 승인 액션 UI 없음"
+    ),
+}
+
 
 def _normalize_openapi_path(p: str) -> str:
     return _OPENAPI_PARAM_RE.sub("*", p)
@@ -587,6 +634,8 @@ def check_openapi_frontend(root: Path) -> list[Hit]:
     rel_frontend = routes_files[0].relative_to(root).as_posix()
     hits: list[Hit] = []
     for p in sorted(openapi_paths):
+        if p in _OPENAPI_NO_FRONTEND_UI_ALLOWLIST:
+            continue
         if _normalize_openapi_path(p) not in frontend_norm:
             hits.append((f"{rel_openapi}#{p}", 0))
     for p in sorted(set(frontend_paths)):
