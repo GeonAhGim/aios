@@ -5,6 +5,14 @@ Spec: docs/specs/L4_ibor_fund_accounting_and_resilience_v1.0.md#FA-0c
 같은 account_type의 계정을 만들 때 UniqueViolation으로 거부됨을 재현,
 (2) entity_id/fund_id/portfolio_id 구조적 컬럼을 쓰면 그 두 포트폴리오의
 계정 생성이 성공.
+
+DEPTH 감사(task-2724, docs/audit/DEPTH_FA.md)가 원 task-1942(commit
+4c925cf4)의 D3 하한 미달로 지적한 공백 중 동시성은
+`test_concurrent_inserts_for_same_scope_and_type_serialize_to_one_winner`
+(task-2474/qa-2474, commit 5c147d58)로 이미 메워졌다. 이 파일은 여기에
+적대적 증거(`test_adversarial_null_scope_column_bypasses_structural_unique_constraint`)
+를 task-3031에서 추가한다. 리플레이 증거·성능 단언은 순수 도메인 쪽(I/O
+없음)이라 tests/foundation/unit/ledger/test_chart_of_accounts.py에 있다.
 """
 
 from __future__ import annotations
@@ -224,3 +232,57 @@ async def test_concurrent_inserts_for_same_scope_and_type_serialize_to_one_winne
             portfolio_id,
         )
     assert count == 1
+
+
+async def test_adversarial_null_scope_column_bypasses_structural_unique_constraint(
+    pool: asyncpg.Pool,
+) -> None:
+    """적대적 -- Postgres composite UNIQUE는 NULL을 서로 다른 값으로 취급한다
+    (NULL IS DISTINCT FROM NULL). 마이그레이션 18965d657219의 독스트링이
+    명시하듯 `ensure_account`가 만드는 USER/PLATFORM 계정은 entity_id/
+    fund_id/portfolio_id를 전부 NULL로 남겨둔다 -- "FA-4/FA-8이 실제
+    포트폴리오 배선을 맡는다"는 전제다. 이 테스트는 그 경계를 실DB로
+    고정한다: 세 스코프 컬럼 중 단 하나만 NULL이어도(entity_id/fund_id는
+    같고 portfolio_id만 NULL인 행) 구조적 UNIQUE(tenant_id, entity_id,
+    fund_id, portfolio_id, account_type)는 이미 존재하는 완전한 스코프
+    행과 전혀 충돌하지 않고 중복 삽입이 그냥 성공한다. 향후 FA-4/FA-8
+    포트폴리오 배선 코드가 세 컬럼 중 하나라도 채우지 않고 지나가면 이
+    불변식이 조용히 깨진다는 것을 이 회귀 테스트가 붙잡는다."""
+    entity_id, fund_id, portfolio_id = uuid.uuid4(), uuid.uuid4(), uuid.uuid4()
+
+    await _insert_scoped_account(
+        pool,
+        account_code=coa.portfolio_account(portfolio_id, AccountType.LIABILITY),
+        account_type=AccountType.LIABILITY,
+        entity_id=entity_id,
+        fund_id=fund_id,
+        portfolio_id=portfolio_id,
+    )
+
+    bypass_code = f"PORTFOLIO:NULL_BYPASS_{uuid.uuid4().hex[:8]}"
+    async with pool.acquire() as conn:
+        await conn.execute(
+            "INSERT INTO ledger_account "
+            "(account_code, account_type, currency, allow_negative, "
+            " tenant_id, entity_id, fund_id, portfolio_id) "
+            "VALUES ($1, $2, $3, FALSE, $4, $5, $6, NULL)",
+            bypass_code,
+            AccountType.LIABILITY.value,
+            Currency.KRW.value,
+            _TEST_TENANT_ID,
+            entity_id,
+            fund_id,
+        )
+
+    async with pool.acquire() as conn:
+        count = await conn.fetchval(
+            "SELECT count(*) FROM ledger_account "
+            "WHERE entity_id = $1 AND fund_id = $2 AND account_type = 'LIABILITY'",
+            entity_id,
+            fund_id,
+        )
+    assert count == 2, (
+        "NULL portfolio_id가 구조적 UNIQUE의 보호 범위 밖이라는 경계가 바뀌었다 -- "
+        "포트폴리오 배선 코드는 반드시 entity_id/fund_id/portfolio_id를 항상 "
+        "함께 채워야 한다."
+    )

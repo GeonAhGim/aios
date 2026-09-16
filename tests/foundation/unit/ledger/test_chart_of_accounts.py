@@ -1,7 +1,18 @@
 """LC-2 — chart_of_accounts 단위테스트.
 
 Spec: docs/specs/L4_market_data_positions_ledger_v1.0.md#§3.3, §4.4, §9 LC-2.
+
+DEPTH 감사(task-2724, docs/audit/DEPTH_FA.md)가 원 task-1942/FA-0c(commit
+4c925cf4)의 D3 하한 미달로 지적한 공백 중 리플레이 증거와 성능 단언을
+`test_default_scope_is_deterministic_across_repeated_replays`와
+`test_default_scope_derivation_throughput_stays_within_budget`로 여기서
+메운다(task-3031). 적대적 증거는 I/O가 필요해
+tests/integration/foundation/ledger/test_fa0c_account_scope.py에 있고,
+동시성(D3)은 그 파일에 이미 있다(task-2474/qa-2474,
+test_concurrent_inserts_for_same_scope_and_type_serialize_to_one_winner).
 """
+
+import time
 from uuid import UUID, uuid4
 
 import pytest
@@ -171,3 +182,49 @@ def test_portfolio_account_differs_across_portfolios_for_same_type() -> None:
     code_b = coa.portfolio_account(uuid4(), AccountType.ASSET)
 
     assert code_a != code_b
+
+
+def test_default_scope_is_deterministic_across_repeated_replays() -> None:
+    """리플레이 증거 -- 마이그레이션 18965d657219의 백필은 각 시드 행의
+    account_code를 한 번만 지나가지만, 같은 계정코드가 감사 재현·마이그레이션
+    리허설 등으로 반복해서 default_scope()를 다시 거칠 수 있다. 같은
+    account_code를 200회 반복 호출해도 완전히 동일한
+    (entity_id, fund_id, portfolio_id) 삼중값이 나오는지(비결정성 없음)
+    검증한다 -- 한 번이라도 흔들리면 마이그레이션과 런타임이 서로 다른
+    스코프를 계산해 UNIQUE 위반 또는 조용한 스코프 분기로 이어진다."""
+    code = coa.user_account(_USER_ID, UserSub.AVAILABLE)
+
+    replays = [coa.default_scope(code) for _ in range(200)]
+
+    assert len(set(replays)) == 1
+
+
+def test_default_scope_derivation_throughput_stays_within_budget() -> None:
+    """수치 성능 단언 -- DEPTH 재감사(task-2724)가 지적한 공백을 메운다.
+    `default_scope()`는 I/O 없는 순수 함수지만 계정 조회 경로마다 호출될 수
+    있으므로(마이그레이션 백필, 향후 FA-4/FA-8 포트폴리오 배선), 서로 다른
+    20,000개 계정코드에 대한 파싱+UUIDv5 3회 도출 처리량이 예산 아래인지
+    단언한다."""
+    n = 20_000
+    budget_sec = 2.0
+    min_ops_per_sec = 10_000.0
+    codes = [coa.user_account(uuid4(), UserSub.AVAILABLE) for _ in range(n)]
+
+    start = time.perf_counter()
+    for code in codes:
+        scope = coa.default_scope(code)
+        assert scope.entity_id is not None
+    elapsed = time.perf_counter() - start
+    ops_per_sec = n / elapsed
+
+    print(
+        f"[task-1942/3031 default_scope] {n} calls {elapsed:.3f}s "
+        f"({ops_per_sec:.0f} ops/s, budget<{budget_sec}s, min>{min_ops_per_sec:.0f} ops/s)"
+    )
+    assert elapsed < budget_sec, (
+        f"{n}회 default_scope() 호출이 예산({budget_sec}s)을 넘었습니다({elapsed:.3f}s)."
+    )
+    assert ops_per_sec > min_ops_per_sec, (
+        f"default_scope() 처리량이 최소값({min_ops_per_sec:.0f} ops/s)에 "
+        f"못 미칩니다({ops_per_sec:.0f})."
+    )
