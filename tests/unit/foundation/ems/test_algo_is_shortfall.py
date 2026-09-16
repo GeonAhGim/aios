@@ -4,9 +4,11 @@ Spec: docs/specs/L4_ems_routing_algos_and_tca_v1.0.md #9 EM-11 DoD
 ("urgency-cost tradeoff, monotonicity, sum conservation"). No DB -- pure
 function tests only.
 """
+
 from __future__ import annotations
 
 import ast
+import time
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from pathlib import Path
@@ -23,6 +25,8 @@ from src.foundation.ems.contracts.v1 import (
     ParentOrder,
     ParentOrderConstraints,
 )
+from src.foundation.ems.domain.algo import is_shortfall as is_shortfall_module
+from src.foundation.ems.domain.algo.guard import ParticipationExceededError
 from src.foundation.ems.domain.algo.is_shortfall import (
     AlgoConstraintError,
     ParentTerminalError,
@@ -212,9 +216,7 @@ def test_long_volume_profile_is_rejected() -> None:
 
 
 def test_slice_count_over_the_cap_is_rejected() -> None:
-    parent = _parent(
-        algo=_algo(start=_T0, end=_T0 + timedelta(seconds=1000), slice_interval_sec=1)
-    )
+    parent = _parent(algo=_algo(start=_T0, end=_T0 + timedelta(seconds=1000), slice_interval_sec=1))
     with pytest.raises(AlgoConstraintError, match="500"):
         plan_is_schedule(parent, volume_profile=_abundant_volume_profile(1000))
 
@@ -329,6 +331,84 @@ def test_is_shortfall_module_imports_twap_exception_classes() -> None:
         "is_shortfall.py must reuse AlgoConstraintError/ParentTerminalError "
         "from twap.py rather than declaring a third copy."
     )
+
+
+# -- DEEPEN 2502 (D2): failure injection -- corrupted cap fails closed ------
+
+
+def test_corrupted_participation_cap_is_rejected_even_when_every_slice_qty_is_zero() -> None:
+    """Failure injection: `AlgoSpec.max_participation_pct`'s
+    `Field(gt=0, le=100)` only runs at construction time -- pydantic does
+    not re-validate on plain attribute assignment (no
+    `model_config = ConfigDict(validate_assignment=True)` here) -- so a
+    downstream mutation bug (e.g. a normalization/reprice step touching
+    the wrong field) can leave a live `AlgoSpec` holding a negative cap.
+    A negative cap drives `cap_qty = max(0, volume * pct / 100)` to `0` for
+    every non-final slice, so `slice_qty` is `0` there too and the
+    per-slice `check_participation` call is never reached (see the
+    gate-red repro below for what that would let happen). This must still
+    be rejected via `_validate_participation_cap`'s up-front call."""
+    parent = _parent(
+        qty=Decimal("1000"),
+        algo=_algo(urgency=Decimal("0.5"), max_participation_pct=Decimal("10")),
+    )
+    object.__setattr__(parent.algo, "max_participation_pct", Decimal("-5"))
+    with pytest.raises(ParticipationExceededError):
+        plan_is_schedule(parent, volume_profile=_abundant_volume_profile(4))
+
+
+# -- DEEPEN 2502 (D2): numeric performance assertion -------------------------
+
+
+def test_plan_is_schedule_stays_under_budget_at_the_max_slice_count() -> None:
+    """500 slices (the module's own `_MAX_SLICE_COUNT` cap) x 50 calls must
+    finish well under a generous wall-clock budget -- a regression that
+    turned the per-slice O(n) loop, weight computation, or the guard calls
+    into something O(n^2) would blow well past this on 500 slices."""
+    parent = _parent(
+        qty=Decimal("1000000"),
+        algo=_algo(
+            start=_T0,
+            end=_T0 + timedelta(seconds=500),
+            slice_interval_sec=1,
+            urgency=Decimal("0.7"),
+            max_participation_pct=Decimal("100"),
+        ),
+    )
+    profile = [Decimal("100000")] * 500
+    started = time.perf_counter()
+    for _ in range(50):
+        plan_is_schedule(parent, volume_profile=profile)
+    elapsed_ms = (time.perf_counter() - started) * 1000
+    assert elapsed_ms < 800, (
+        f"plan_is_schedule took {elapsed_ms:.1f}ms for 50 calls at 500 slices, "
+        "exceeding the 800ms budget."
+    )
+
+
+# -- DEEPEN 2502 (D2): gate-red repro -----------------------------------------
+
+
+def test_gate_red_without_the_upfront_cap_validation_the_corrupted_cap_passes_silently(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Before/after proof that `_validate_participation_cap`'s call is
+    load-bearing, not decorative: disable only that one guard call
+    (monkeypatched to a no-op, leaving every per-slice
+    `guard.check_participation` call untouched) and replay the exact
+    corrupted-cap scenario from the failure-injection test above. Without
+    the up-front call, nothing else in `plan_is_schedule` ever notices --
+    the whole order is silently dumped into the exempt final slice."""
+    monkeypatch.setattr(is_shortfall_module, "_validate_participation_cap", lambda _pct: None)
+    parent = _parent(
+        qty=Decimal("1000"),
+        algo=_algo(urgency=Decimal("0.5"), max_participation_pct=Decimal("10")),
+    )
+    object.__setattr__(parent.algo, "max_participation_pct", Decimal("-5"))
+    children = plan_is_schedule(parent, volume_profile=_abundant_volume_profile(4))
+    quantities = [c.planned_qty for c in children]
+    assert quantities == [Decimal("1000")]
+    assert sum(quantities) == Decimal("1000")
 
 
 # -- file size discipline -----------------------------------------------------
