@@ -63,6 +63,10 @@ export const API_ROUTES = defineApiRoutes({
   "exchange.credentials.base": route("/exchange-credentials", false, undefined, undefined, true),
   "exchange.credentials.item": route("/exchange-credentials/:exchange", false),
   "exchange.credentials.balance": route("/exchange-credentials/:exchange/balance", false),
+  // task-4001(FE-OPS-10a): src/api/routers/exchange_credentials.py:97-104 get_positions는
+  // list[Position]을 그대로 반환한다(ApiResponse 봉투 아님) — balance/capabilities와
+  // 동일하게 envelope=false.
+  "exchange.credentials.positions": route("/exchange-credentials/:exchange/positions", false),
   "exchange.credentials.capabilities": route("/exchange-credentials/:exchange/capabilities", false),
 
   // task-1333: §9 PLT-15 금전 라우트(create/start/convertToLive) — idempotencyRequired=true.

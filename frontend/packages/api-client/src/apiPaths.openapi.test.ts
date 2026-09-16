@@ -147,7 +147,8 @@ const UNREGISTERED_ROUTE_WHITELIST: Readonly<Record<string, string>> = {
   "/admin/break-glass/grants": "break-glass grant 요청 콘솔 화면이 없다",
   "/admin/break-glass/grants/{grant_id}:approve": "break-glass grant 승인 콘솔 화면이 없다",
   "/admin/ledger/payouts/{batch_id}/paid": "정산 배치 확정 액션 UI가 없다",
-  "/exchange-credentials/{exchange}/positions": "exchange.ts 클라이언트에 balance/capabilities만 있고 positions 조회는 없다",
+  // task-4001(FE-OPS-10a): exchange.credentials.positions로 apiRoutes.ts에 등록했다 —
+  // 여기 있던 항목을 제거한다(실제 화면 배선은 FE-OPS-10b 소관, §E는 등록 여부만 본다).
   "/livez": "인프라 헬스체크 프로브다(k8s liveness) — 앱 API 표면이 아니다",
   "/metrics": "인프라 메트릭 엔드포인트다(모니터링 전용) — 앱 API 표면이 아니다",
   "/readyz": "인프라 헬스체크 프로브다(k8s readiness) — 앱 API 표면이 아니다",
