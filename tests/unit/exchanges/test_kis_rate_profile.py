@@ -11,28 +11,51 @@ red-line 회귀 테스트가 없었다. 아래에 (a) rejection/negative 테스�
 4개로 늘리고, (b) sleep 실패를 주입해 fail-closed(무음 성공 금지)를
 증명하는 테스트, (c) fallback이 "가장 보수적" 불변식을 잃으면 실제로
 pytest가 red가 되는 것까지 증명하는 gate/CI red-line 회귀 테스트를 추가한다.
+
+DEEPEN(task-3458, BR-2b, 리뷰 3306 REJECT #2): `build_token_bucket`이
+(account_type, tr_group) 키의 캐시 싱글턴 registry로 바뀌었다 — 아래에
+(d) 싱글턴 재사용(같은 그룹 반복 호출이 같은 버킷을 돌려줌), (e) 그룹 간
+독립(한 그룹 소진이 다른 그룹에 새지 않음), (f) "캐싱을 깜빡한 호출부"
+시나리오에서도 한도가 실제로 강제됨을 증명하는 negative 테스트, (g) 시계
+역행 실패 주입, (h) 토큰 획득 p99 성능 단언을 추가한다. registry는 프로세스
+전역 싱글턴이라 테스트 순서에 안전하도록 매 테스트 전에 리셋한다.
 """
+
 from __future__ import annotations
 
 import os
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 import pytest
 
 from src.exchanges.common.error_taxonomy import ExchangeError, ExchangeErrorKind
+from src.exchanges.common.rate_limiter import TokenBucket
 from src.exchanges.common.transport import RateLimitWaitObserver
 from src.exchanges.kis.rate_profile import (
     KisAccountType,
     RateLimitSpec,
     build_token_bucket,
     get_rate_limit,
+    reset_token_bucket_registry_for_test,
     tr_group_for,
 )
 
 _KNOWN_TR_ID = "FHKST01010100"  # [국내주식] 주식현재가 시세 — kis_tr_reference.json에 존재
+_OVERSEAS_TR_ID = "CTLN4050R"  # [해외주식] 주문 — kis_tr_reference.json domain=overseas_stock
 _UNKNOWN_TR_ID = "ZZZZZZZZZ_NOT_A_REAL_TR"
+
+
+@pytest.fixture(autouse=True)
+def _reset_bucket_registry() -> None:
+    """`build_token_bucket`의 registry는 프로세스 전역 싱글턴이다 — 테스트
+    실행 순서에 따라 이전 테스트가 소진한 토큰이 남아 있으면 안 되므로
+    매 테스트 전후로 리셋한다."""
+    reset_token_bucket_registry_for_test()
+    yield
+    reset_token_bucket_registry_for_test()
 
 
 def test_real_and_paper_profiles_differ_for_same_group() -> None:
@@ -187,16 +210,27 @@ def test_pytest_gate_turns_red_when_fallback_stops_being_conservative(
     config = tmp_path / "pytest.ini"
     config.write_text("[pytest]\nasyncio_mode = auto\n", encoding="utf-8")
     command = [
-        sys.executable, "-m", "pytest", "-q", "-p", "no:cacheprovider",
-        "-c", str(config), "--confcutdir", str(tmp_path),
+        sys.executable,
+        "-m",
+        "pytest",
+        "-q",
+        "-p",
+        "no:cacheprovider",
+        "-c",
+        str(config),
+        "--confcutdir",
+        str(tmp_path),
         f"{test_copy}::test_unknown_group_falls_back_to_most_conservative_limit",
     ]
-    env = dict(
-        os.environ, PYTHONPATH=str(Path.cwd()), PYTEST_ADDOPTS="", PYTHONIOENCODING="utf-8"
-    )
+    env = dict(os.environ, PYTHONPATH=str(Path.cwd()), PYTEST_ADDOPTS="", PYTHONIOENCODING="utf-8")
     baseline = subprocess.run(
-        command, capture_output=True, encoding="utf-8", errors="replace",
-        env=env, timeout=60, check=False,
+        command,
+        capture_output=True,
+        encoding="utf-8",
+        errors="replace",
+        env=env,
+        timeout=60,
+        check=False,
     )
     assert baseline.returncode == 0, baseline.stdout + baseline.stderr
     assert "3 passed" in baseline.stdout
@@ -214,8 +248,105 @@ def test_pytest_gate_turns_red_when_fallback_stops_being_conservative(
         encoding="utf-8",
     )
     mutated = subprocess.run(
-        command, capture_output=True, encoding="utf-8", errors="replace",
-        env=env, timeout=60, check=False,
+        command,
+        capture_output=True,
+        encoding="utf-8",
+        errors="replace",
+        env=env,
+        timeout=60,
+        check=False,
     )
     assert mutated.returncode == 1, mutated.stdout + mutated.stderr
     assert "3 failed" in mutated.stdout
+
+
+def test_build_token_bucket_returns_singleton_for_same_account_and_group() -> None:
+    """DoD(BR-2b) — 같은 (account_type, tr_group) 조합은 호출할 때마다 같은
+    `TokenBucket` 인스턴스를 돌려준다(코드로 강제된 캐싱, docstring 약속이
+    아님). 서로 다른 tr_id라도 같은 그룹에 속하면 같은 버킷이어야 한다."""
+    first = build_token_bucket(KisAccountType.REAL, _KNOWN_TR_ID)
+    second = build_token_bucket(KisAccountType.REAL, _KNOWN_TR_ID)
+    assert first is second
+
+    another_tr_in_same_group = "FHKST01010200"  # domestic_stock 그룹의 다른 TR
+    assert tr_group_for(another_tr_in_same_group) == tr_group_for(_KNOWN_TR_ID)
+    third = build_token_bucket(KisAccountType.REAL, another_tr_in_same_group)
+    assert third is first
+
+
+async def test_build_token_bucket_groups_are_independent_buckets() -> None:
+    """negative test — 그룹 간 독립. 한 그룹(domestic_stock)의 버킷을 소진해도
+    다른 그룹(overseas_stock)의 버킷은 영향받지 않아야 한다(REJECT 3306의
+    "그룹 간 독립" 요구사항)."""
+    assert tr_group_for(_OVERSEAS_TR_ID) == "overseas_stock"
+    domestic_spec = get_rate_limit(KisAccountType.REAL, tr_group_for(_KNOWN_TR_ID))
+    overseas_spec = get_rate_limit(KisAccountType.REAL, tr_group_for(_OVERSEAS_TR_ID))
+
+    domestic_bucket = build_token_bucket(KisAccountType.REAL, _KNOWN_TR_ID)
+    overseas_bucket = build_token_bucket(KisAccountType.REAL, _OVERSEAS_TR_ID)
+    assert domestic_bucket is not overseas_bucket
+
+    await domestic_bucket.acquire(domestic_spec.burst, timeout=0.01)  # domestic 버스트 완전 소진
+    # overseas 버킷은 여전히 자기 burst 전량을 즉시 확보할 수 있어야 한다 —
+    # domestic 소진이 새어 나갔다면 여기서 대기/거부가 발생한다.
+    await overseas_bucket.acquire(overseas_spec.burst, timeout=0.01)
+
+
+async def test_build_token_bucket_enforces_limit_even_when_caller_refetches_each_time() -> None:
+    """negative test — REJECT 3306 원 결함 재현: 호출부가 버킷을 들고 있지
+    않고 요청마다 `build_token_bucket()`을 새로 부르는(캐싱을 깜빡한)
+    상황이어도 registry 싱글턴 덕에 그룹당 처리량 상한이 그대로 강제돼야
+    한다. registry가 없다면(이전 구현) 매번 새 버킷이 나와 burst를 몇 배로
+    초과해도 전부 즉시 통과했을 것이다."""
+    spec = get_rate_limit(KisAccountType.PAPER, tr_group_for(_KNOWN_TR_ID))
+    burst = int(spec.burst)
+
+    for _ in range(burst):
+        # 매번 새로 "조회"한다 — 참조를 들고 있지 않는 호출부를 흉내낸다.
+        bucket = build_token_bucket(KisAccountType.PAPER, _KNOWN_TR_ID)
+        await bucket.acquire(1, timeout=0.01)
+
+    with pytest.raises(ExchangeError) as exc_info:
+        bucket = build_token_bucket(KisAccountType.PAPER, _KNOWN_TR_ID)
+        await bucket.acquire(1, timeout=0.001)
+    assert exc_info.value.kind == ExchangeErrorKind.RATE_LIMITED
+
+
+async def test_clock_regression_does_not_bypass_rate_limit_fail_closed() -> None:
+    """failure-injection test — 버킷 리셋/시계 역행. 시스템 시계가 NTP 보정
+    등으로 뒤로 가도(`clock()`이 이전 호출보다 작은 값을 돌려줘도) 그
+    시간차가 공짜 토큰이나 즉시 통과로 새지 않는다(`TokenBucket._refill`의
+    `max(0.0, now - last_refill)` 클램프가 fail-closed를 유지). 클램프가
+    없다면 역행분이 음수 wait_needed를 만들어 timeout 검사를 우회했을
+    것이다."""
+    clock_values = iter([100.0, 100.0, 40.0])  # 생성자 1회 + acquire 2회
+
+    def regressing_clock() -> float:
+        return next(clock_values)
+
+    bucket = TokenBucket(10.0, 1.0, clock=regressing_clock)
+    await bucket.acquire(1, timeout=0.01)  # burst 소진(tokens=0)
+
+    with pytest.raises(ExchangeError) as exc_info:
+        # 시계가 40.0으로 역행 — 클램프가 살아있으면 elapsed=0으로 처리돼
+        # 여전히 리필 대기가 필요하고, timeout이 짧아 거부돼야 한다.
+        await bucket.acquire(1, timeout=0.001)
+    assert exc_info.value.kind == ExchangeErrorKind.RATE_LIMITED
+
+
+async def test_token_bucket_acquire_p99_latency_under_1ms() -> None:
+    """성능 단언(DoD) — 토큰이 충분한 fast path(락 획득 + 리필 계산 +
+    차감만 수행, 실제 대기 없음)에서 `acquire()` 1회 호출의 p99 지연이
+    1ms 미만이어야 한다."""
+    spec = RateLimitSpec(rate_per_sec=1_000_000.0, burst=1_000_000.0, verified="ESTIMATED")
+    bucket = spec.new_bucket()
+
+    samples: list[float] = []
+    for _ in range(300):
+        started = time.perf_counter()
+        await bucket.acquire(1, timeout=1.0)
+        samples.append(time.perf_counter() - started)
+
+    samples.sort()
+    p99 = samples[int(len(samples) * 0.99) - 1]
+    assert p99 < 0.001, f"p99={p99 * 1000:.3f}ms, samples={samples}"

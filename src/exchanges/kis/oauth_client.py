@@ -37,6 +37,17 @@ migration is a follow-up leaf's job") — wrapped in an `asyncio.Lock` so that
 even when multiple coroutines arrive concurrently while the token is expired,
 the token issuance endpoint is called exactly once (double-checked locking,
 DoD a).
+
+BR-2b(task-3458, review 3306 REJECT #1) — the per-TR `ResilientTransport` used
+by `_request()` used to be built with `rate_limiter=None`, so no KIS call was
+ever actually throttled client-side no matter what `rate_profile.py` declared.
+`_transport_for_tr()` now lazily builds one `ResilientTransport` per resolved
+TR group, injecting `rate_profile.build_token_bucket(account_type, tr_id)` as
+its `rate_limiter` — the bucket itself is a process-wide singleton keyed by
+(account_type, group) (see that module's docstring), so even if this instance
+cache were skipped the throughput cap would still hold. The token-issuance
+transport (`self._transport`, used only by `_fetch_token`) is unaffected —
+OAuth2 token issuance is not a TR call and has no group to rate-limit by.
 """
 
 from __future__ import annotations
@@ -50,7 +61,8 @@ import httpx
 from src.core.exceptions import FatalExchangeError, RetryableExchangeError
 from src.exchanges.common.error_taxonomy import ExchangeError, ExchangeErrorKind
 from src.exchanges.common.oauth_http import MonotonicTokenCache
-from src.exchanges.common.transport import ResilientTransport
+from src.exchanges.common.transport import RateLimitWaitObserver, ResilientTransport
+from src.exchanges.kis.rate_profile import KisAccountType, build_token_bucket, tr_group_for
 
 REAL_BASE_URL = "https://openapi.koreainvestment.com:9443"
 PAPER_BASE_URL = "https://openapivts.koreainvestment.com:29443"
@@ -81,9 +93,18 @@ class _KISTokenTransportMixin:
         self._is_paper_trading = is_paper_trading
         base_url = PAPER_BASE_URL if is_paper_trading else REAL_BASE_URL
         self._client = http_client or httpx.AsyncClient(base_url=base_url, timeout=10.0)
-        self._transport = ResilientTransport(venue="kis", sleep=sleep_fn or asyncio.sleep)
+        self._sleep_fn = sleep_fn or asyncio.sleep
+        self._transport = ResilientTransport(venue="kis", sleep=self._sleep_fn)
         self._token_cache = MonotonicTokenCache()
         self._token_lock = asyncio.Lock()
+        # BR-2b — one ResilientTransport per resolved TR group, each wrapping
+        # the (account_type, group) singleton bucket from rate_profile.py.
+        # Lazily built (and cached here just to avoid rebuilding the
+        # ResilientTransport wrapper object on every call, not to hold the
+        # actual rate-limit state -- that lives in the singleton bucket).
+        self._rate_limit_observer = RateLimitWaitObserver()
+        self._tr_group_transports: dict[str | None, ResilientTransport] = {}
+        self._tr_group_transports_lock = asyncio.Lock()
 
     async def _ensure_token(self) -> str:
         cached = self._token_cache.get()
@@ -134,6 +155,36 @@ class _KISTokenTransportMixin:
         stub is never called directly."""
         raise NotImplementedError
 
+    def _account_type(self) -> KisAccountType:
+        return KisAccountType.PAPER if self._is_paper_trading else KisAccountType.REAL
+
+    async def _transport_for_tr(self, tr_id: str) -> ResilientTransport:
+        """`ResilientTransport` bound to `tr_id`'s BR-1 group, with
+        `rate_profile.build_token_bucket`'s (account_type, group) singleton
+        bucket injected as `rate_limiter` (BR-2b DoD a/b: real/paper differ,
+        groups are independent)."""
+        group = tr_group_for(tr_id)
+        transport = self._tr_group_transports.get(group)
+        if transport is not None:
+            return transport
+        async with self._tr_group_transports_lock:
+            transport = self._tr_group_transports.get(group)
+            if transport is None:
+                bucket = build_token_bucket(
+                    self._account_type(), tr_id, observer=self._rate_limit_observer
+                )
+                transport = ResilientTransport(
+                    venue="kis", rate_limiter=bucket, sleep=self._sleep_fn
+                )
+                self._tr_group_transports[group] = transport
+            return transport
+
+    @property
+    def rate_limit_wait_count(self) -> int:
+        """Observability (BR-2b DoD) -- number of times this client instance
+        actually absorbed a call-rate excess as a wait instead of a 429."""
+        return self._rate_limit_observer.waits
+
     async def _headers(self, tr_id: str) -> dict[str, str]:
         token = await self._ensure_token()
         return {
@@ -181,6 +232,7 @@ class _KISTokenTransportMixin:
         not retry again and surfaces the exception as-is. HTTP status
         code/network retry and backoff are handled by `ResilientTransport`
         (DoD c) and are not reimplemented here."""
+        transport = await self._transport_for_tr(tr_id)
         retried_after_auth = False
         while True:
             headers = await self._headers(tr_id)
@@ -191,9 +243,7 @@ class _KISTokenTransportMixin:
                 )
 
             try:
-                response = await self._transport.request(
-                    send_once, classify_body=self._classify_body
-                )
+                response = await transport.request(send_once, classify_body=self._classify_body)
             except ExchangeError as exc:
                 if exc.kind is ExchangeErrorKind.AUTH and not retried_after_auth:
                     self._invalidate_token()

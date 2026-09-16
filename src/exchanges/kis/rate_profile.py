@@ -21,11 +21,23 @@ TR -> 그룹 매핑은 BR-1(task-1779)이 이미 기계 추출해 커밋한
 향후 실측/공식 문서로 확인되면 이 표만 갱신하면 되도록 유지한다.
 `burst == rate`로 둬 순간 폭주를 허용하지 않는다(사고 방지가 상한을
 정확히 맞추는 것보다 우선).
+
+BR-2b(task-3458, review 3306 REJECT #2) — `build_token_bucket` now always
+returns the **same** `TokenBucket` instance for a given (account_type,
+tr_group). This invariant used to live only in a docstring ("callers should
+fetch it once per group and cache it") — when the caller (`oauth_client.py`)
+fetched a fresh bucket on every request instead, the per-group throughput cap
+was effectively meaningless. `_BUCKET_REGISTRY` (keyed by (account_type,
+tr_group), guarded by `threading.Lock`) now enforces that invariant in code:
+even if a caller forgets to cache the result (exactly the bug being fixed),
+the limit itself still holds.
 """
+
 from __future__ import annotations
 
 import asyncio
 import json
+import threading
 from collections.abc import Mapping
 from dataclasses import dataclass
 from enum import Enum
@@ -108,17 +120,51 @@ def get_rate_limit(account_type: KisAccountType, tr_group: str | None) -> RateLi
     return _PROFILE[account_type].get(tr_group, _CONSERVATIVE_FALLBACK[account_type])
 
 
+# BR-2b(task-3458) — cache-singleton registry keyed by (account_type,
+# tr_group). If `build_token_bucket` handed out a fresh bucket on every call,
+# the throughput cap would depend entirely on whether the caller happens to
+# cache it (review 3306 REJECT #2) — the registry removes that dependency.
+# `threading.Lock` rather than `asyncio.Lock`: an asyncio.Lock is bound to
+# the event loop it was created on and breaks if awaited from outside that
+# loop (sync code, another thread), while `threading.Lock` is safe from
+# either.
+_BUCKET_REGISTRY: dict[tuple[KisAccountType, str | None], TokenBucket] = {}
+_BUCKET_REGISTRY_LOCK = threading.Lock()
+
+
 def build_token_bucket(
     account_type: KisAccountType,
     tr_id: str,
     *,
     observer: RateLimitWaitObserver | None = None,
 ) -> TokenBucket:
-    """`tr_id`를 그룹으로 변환해 계좌유형에 맞는 `TokenBucket`을 새로
-    만든다. 호출부가 TR 그룹별로 독립된 버킷을 유지하려면 그룹당 1회만
-    불러 `ResilientTransport(rate_limiter=...)`에 캐싱해 넘긴다.
+    """Resolves `tr_id` to its group and returns the `TokenBucket` for that
+    account type.
 
-    `observer`를 주면(선택) 버킷이 실제로 대기할 때마다
-    `observer.record_wait()`가 호출된다 — 한도 초과가 429가 아니라
-    대기·재시도로 흡수됐다는 사실을 지표로 관측하기 위함(DoD)."""
-    return get_rate_limit(account_type, tr_group_for(tr_id)).new_bucket(observer=observer)
+    Always returns the same `TokenBucket` instance for a given
+    (account_type, tr_group) pair (`_BUCKET_REGISTRY`, thread-safe) — the
+    per-group throughput cap is enforced regardless of whether the caller
+    caches the result. `observer` is only honored the **first** time a
+    bucket is created for a given key — an already-cached bucket's sleep
+    wrapper is not swapped for a different observer passed in on a later
+    call (the singleton keeps its first owner's observability wiring)."""
+    group = tr_group_for(tr_id)
+    key = (account_type, group)
+    with _BUCKET_REGISTRY_LOCK:
+        bucket = _BUCKET_REGISTRY.get(key)
+        if bucket is None:
+            bucket = get_rate_limit(account_type, group).new_bucket(observer=observer)
+            _BUCKET_REGISTRY[key] = bucket
+        return bucket
+
+
+def reset_token_bucket_registry_for_test() -> None:
+    """Test-only — clears `_BUCKET_REGISTRY`.
+
+    Since the registry is a process-wide singleton, tests need to reset it
+    between runs to stay order-independent. Never call this from production
+    code — resetting it at runtime would wipe every group's accumulated
+    consumption, reproducing the exact bug this module exists to prevent
+    (per-group throughput cap silently defeated)."""
+    with _BUCKET_REGISTRY_LOCK:
+        _BUCKET_REGISTRY.clear()
