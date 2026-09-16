@@ -159,12 +159,12 @@ async def test_trigger_order_rejected_before_reaching_faulty_broker_adapter() ->
     with pytest.raises(OrderValidationError) as exc_info:
         await submit_order(
             _trigger_command(tenant_id),
-            pool=pool,  # type: ignore[arg-type]
+            pool=pool,
             profile=submit_profile(),
             registry=submit_registry(),
             pre_submit_gate=allow_gate,
             entity_context=entity_context,
-            entity_repo=entity_repo,  # type: ignore[arg-type]
+            entity_repo=entity_repo,
         )
 
     assert exc_info.value.code == "OMS_VALIDATION_TRIGGER_ORDER_NOT_WIRED"
@@ -250,12 +250,12 @@ async def test_gate_red_repro_trigger_guard_removal_lets_stop_order_reach_broker
     with pytest.raises(OrderValidationError):
         await submit_order(
             cmd,
-            pool=pool_before,  # type: ignore[arg-type]
+            pool=pool_before,
             profile=submit_profile(),
             registry=submit_registry(),
             pre_submit_gate=allow_gate,
             entity_context=entity_context,
-            entity_repo=entity_repo,  # type: ignore[arg-type]
+            entity_repo=entity_repo,
         )
     assert pool_before.acquire_calls == 0
 
@@ -282,12 +282,12 @@ async def test_gate_red_repro_trigger_guard_removal_lets_stop_order_reach_broker
     with pytest.raises(ConnectionError):  # 가드 없이 실제 어댑터 경계까지 도달해 그 자리에서 실패
         await submit_order(
             cmd,
-            pool=pool_after,  # type: ignore[arg-type]
+            pool=pool_after,
             profile=submit_profile(),
             registry=submit_registry(),
             pre_submit_gate=allow_gate,
             entity_context=entity_context,
-            entity_repo=entity_repo,  # type: ignore[arg-type]
+            entity_repo=entity_repo,
         )
     assert pool_after.acquire_calls == 1, (
         "가드 제거 후에도 어댑터에 도달하지 못했습니다 — 이 재현이 실제로 "
