@@ -3,7 +3,7 @@
 - 리프: IND-9 (`docs/specs/L4_analytics_authoring_backtest_marketplace_v1.0.md` §9.9)
 - 근거: ADR-2026-09-05-A D1(OSS 어댑터 층, GPL/LGPL 코드 차용·링크 금지), Consequences("라이선스 검증 리프 통과 전 어떤 OSS도 반입하지 않는다")
 - 형식: CH-0(`CHART_ENGINE_FORK_EVAL.md`, b0826da) 채점표 형식 재사용
-- 범위: **문서만.** 코드 변경 0, 의존성 추가 0. IND-10(TA-Lib 브리지)·IND-11(pandas-ta 브리지)은 이 문서를 CA가 확정하기 전에 배정하지 않는다.
+- 범위: **채점 본문은 문서만.** 코드 변경 0, 의존성 추가 0. IND-10(TA-Lib 브리지)·IND-11(pandas-ta 브리지)은 이 문서를 CA가 확정하기 전에 배정하지 않는다. task-2919 deepen: `src/core/indicators/oss_eval_gate.py`가 §5 GPL/LGPL 배제 후보·§6 채점표 결론을 실제 `pyproject.toml` 선언 의존성과 대조하는 순수 게이트를 추가했다 — 이 채점 자체를 바꾸는 기능은 아니며, 향후 누군가 tulipy·backtrader·nautilus_trader류를 의존성에 추가하면 기계적으로 적색이 되게 하는 회귀 방지선이다. CLI: `python scripts/check_indicator_oss_eval.py`(OPS-42: CI 필수 게이트 미승격·warn 후보).
 - 확인일: 2026-09-06. 모든 라이선스 원문은 PyPI 배포물(wheel/sdist 내부 파일) 또는 각 저장소 `raw.githubusercontent.com`에서 직접 읽었다. 확인하지 못한 항목은 "미확인"으로 남기고 추정하지 않았다(§7).
 
 ## 0. 채점 원칙 — 전제와 게이트
