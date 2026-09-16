@@ -1,11 +1,15 @@
 """Unit tests for `backtest/domain/overfitting.py` -- task-2410 L34 DoD (a)-(f)."""
+
+import decimal
 import math
 import random
+import time
 from decimal import Decimal
 from statistics import NormalDist
 
 import pytest
 
+from src.foundation.backtest.domain import overfitting as overfitting_module
 from src.foundation.backtest.domain.overfitting import (
     OVERFITTING_VERSION,
     OverfittingError,
@@ -34,8 +38,12 @@ def _expected_dsr(
 def test_deflated_sharpe_matches_hand_computed_fixture() -> None:
     expected = _expected_dsr(sr_hat=0.5, n_trials=100, T=250, skew=-0.5, kurt=4.0, sr_var=0.04)
     actual = deflated_sharpe(
-        sr_hat=Decimal("0.5"), n_trials=100, T=250,
-        skew=Decimal("-0.5"), kurt=Decimal("4.0"), sr_var=Decimal("0.04"),
+        sr_hat=Decimal("0.5"),
+        n_trials=100,
+        T=250,
+        skew=Decimal("-0.5"),
+        kurt=Decimal("4.0"),
+        sr_var=Decimal("0.04"),
     )
     assert abs(float(actual) - expected) < 1e-9
 
@@ -142,24 +150,36 @@ def test_pbo_cscv_is_one_under_zero_sum_reversal_construction() -> None:
 def test_deflated_sharpe_rejects_n_trials_below_2() -> None:
     with pytest.raises(OverfittingError):
         deflated_sharpe(
-            sr_hat=Decimal("0.5"), n_trials=1, T=250,
-            skew=Decimal("0"), kurt=Decimal("3"), sr_var=Decimal("0.04"),
+            sr_hat=Decimal("0.5"),
+            n_trials=1,
+            T=250,
+            skew=Decimal("0"),
+            kurt=Decimal("3"),
+            sr_var=Decimal("0.04"),
         )
 
 
 def test_deflated_sharpe_rejects_T_below_2() -> None:
     with pytest.raises(OverfittingError):
         deflated_sharpe(
-            sr_hat=Decimal("0.5"), n_trials=100, T=1,
-            skew=Decimal("0"), kurt=Decimal("3"), sr_var=Decimal("0.04"),
+            sr_hat=Decimal("0.5"),
+            n_trials=100,
+            T=1,
+            skew=Decimal("0"),
+            kurt=Decimal("3"),
+            sr_var=Decimal("0.04"),
         )
 
 
 def test_deflated_sharpe_rejects_non_positive_sr_var() -> None:
     with pytest.raises(OverfittingError):
         deflated_sharpe(
-            sr_hat=Decimal("0.5"), n_trials=100, T=250,
-            skew=Decimal("0"), kurt=Decimal("3"), sr_var=Decimal("0"),
+            sr_hat=Decimal("0.5"),
+            n_trials=100,
+            T=250,
+            skew=Decimal("0"),
+            kurt=Decimal("3"),
+            sr_var=Decimal("0"),
         )
 
 
@@ -178,3 +198,97 @@ def test_pbo_rejects_ragged_matrix() -> None:
 
 def test_overfitting_version_constant() -> None:
     assert OVERFITTING_VERSION == "ofit-v1"
+
+
+# --- DEEPEN(task-3203): 실패 주입 -- 상류(리포트/분산 계산) 손상 데이터도 fail-closed ---
+
+
+def test_deflated_sharpe_rejects_nan_sr_var_from_corrupted_upstream_variance() -> None:
+    """실패 주입: 상류 표본분산 계산이 0으로 나누기 등으로 손상되어 sr_var가
+    `Decimal('NaN')`으로 들어오면(overfitting.py 모듈 docstring: "substituting
+    0/1/None/NaN ... is forbidden"), deflated_sharpe는 그 NaN을 그대로
+    Phi(...)로 흘려보내 조용히 NaN을 반환하지 않고 fail-closed 거부해야
+    한다. Decimal의 NaN 비교(`sr_var <= 0`)는 CPython에서 이미
+    decimal.InvalidOperation을 내므로, 이 테스트는 그 사실이 향후 리팩터링
+    (예: `sr_var <= 0`을 `float(sr_var) <= 0`으로 바꾸는 변경)에도 유지되는지
+    못박는다."""
+    with pytest.raises(decimal.InvalidOperation):
+        deflated_sharpe(
+            sr_hat=Decimal("0.5"),
+            n_trials=100,
+            T=250,
+            skew=Decimal("0"),
+            kurt=Decimal("3"),
+            sr_var=Decimal("NaN"),
+        )
+
+
+def test_pbo_cscv_rejects_float_corrupted_column_from_upstream_serialization() -> None:
+    """실패 주입: 상류 성과 리포트 직렬화가 손상되어(CLAUDE.md #3 "Monetary
+    amounts are Decimal, never float" 위반) perf_matrix의 값 하나가 float로
+    섞여 들어오면, pbo_cscv의 열 평균 계산(`_column_mean`의
+    `sum(values, Decimal(0))`)은 그 값을 조용히 섞어 잘못된 PBO를 내지 않고
+    TypeError로 fail-closed 거부해야 한다."""
+    matrix = [[Decimal(10), Decimal(1), Decimal(0)] for _ in range(8)]
+    matrix[3][1] = 0.5  # 주입된 손상: float, Decimal 아님
+    with pytest.raises(TypeError):
+        pbo_cscv(matrix, 4)
+
+
+# --- DEEPEN(task-3203): 수치 성능 단언 -- pbo_cscv 조합 폭발 핫 패스 ---
+
+
+def _pbo_cscv_latencies_ms(iterations: int = 30) -> list[float]:
+    rng = random.Random(20260917)
+    matrix = [[Decimal(str(rng.uniform(-1.0, 1.0))) for _ in range(8)] for _ in range(64)]
+    samples: list[float] = []
+    for _ in range(iterations):
+        started = time.perf_counter()
+        pbo_cscv(matrix, 8)
+        samples.append((time.perf_counter() - started) * 1000)
+    samples.sort()
+    return samples
+
+
+def _p95(samples: list[float]) -> float:
+    return samples[min(int(len(samples) * 0.95), len(samples) - 1)]
+
+
+_PBO_CSCV_BUDGET_MS = 15.0
+
+
+def test_pbo_cscv_p95_latency_within_self_declared_budget() -> None:
+    """수치 성능 단언: pbo_cscv는 n_blocks가 커질수록 C(n_blocks, n_blocks/2)
+    조합만큼 열 평균 계산을 반복하는 조합 폭발 경로다(ADR-2026-09-09-C
+    예산표에 전용 항목은 없다 -- combinations 순회 + Decimal 산술뿐인 순수
+    CPU 경로라는 사실 위에 자체 예산을 건다). 64행x8열/n_blocks=8
+    (C(8,4)=70 조합) 기준 로컬 실측 p95(~4.3ms) 대비 넉넉한 여유를 둔
+    15ms."""
+    samples = _pbo_cscv_latencies_ms()
+    p95_ms = _p95(samples)
+    print(
+        f"[L34 overfitting] pbo_cscv p95={p95_ms:.3f}ms "
+        f"budget<{_PBO_CSCV_BUDGET_MS:.0f}ms (n={len(samples)})"
+    )
+    assert p95_ms < _PBO_CSCV_BUDGET_MS
+
+
+def test_pbo_cscv_budget_gate_actually_fails_past_budget(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """게이트 적색 재현: 위 단언식이, `_split_blocks` 경로(호출당 1회) 한
+    곳이 예산을 실제로 넘기도록 지연을 주입했을 때 진짜로 AssertionError를
+    내는지(= CI가 실제로 빨간불이 되는지) 확인한다. 이 테스트가 없으면 위
+    단언이 항상 통과하는 tautology인지 아무도 검증하지 못한다."""
+    original_split_blocks = overfitting_module._split_blocks
+
+    def _stalled_split_blocks(n_rows: int, n_blocks: int) -> list[list[int]]:
+        time.sleep(_PBO_CSCV_BUDGET_MS / 1000.0)
+        return original_split_blocks(n_rows, n_blocks)
+
+    monkeypatch.setattr(overfitting_module, "_split_blocks", _stalled_split_blocks)
+
+    samples = _pbo_cscv_latencies_ms(iterations=3)
+    p95_ms = _p95(samples)
+    with pytest.raises(AssertionError):
+        assert p95_ms < _PBO_CSCV_BUDGET_MS
