@@ -15,6 +15,8 @@ export const catalogEnLegacyD = {
   },
   "appShell": {
     "t1": "Log out",
+    "t2": "Open menu",
+    "t3": "Close menu",
   },
   "pagination": {
     "t1": "Previous",

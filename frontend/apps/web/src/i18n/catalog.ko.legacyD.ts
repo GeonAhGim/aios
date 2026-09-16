@@ -17,6 +17,8 @@ export const catalogKoLegacyD = {
   },
   "appShell": {
     "t1": "로그아웃",
+    "t2": "메뉴 열기",
+    "t3": "메뉴 닫기",
   },
   "pagination": {
     "t1": "이전",

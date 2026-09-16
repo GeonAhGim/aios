@@ -53,24 +53,26 @@ function ExperimentComparison({ experiments }: { experiments: ExperimentView[] }
         </Select>
       </div>
       {left && right && metricKeys.length > 0 ? (
-        <table className="w-full text-sm" data-testid="ai-experiment-comparison-table">
-          <thead>
-            <tr className="text-left text-fg-muted">
-              <th>{t("ai.experiments.metricColumn")}</th>
-              <th>{left.experimentId}</th>
-              <th>{right.experimentId}</th>
-            </tr>
-          </thead>
-          <tbody>
-            {metricKeys.map((key) => (
-              <tr key={key} className="border-t border-border">
-                <td className="py-1">{key}</td>
-                <td className="tabular">{left.metrics[key] ?? "—"}</td>
-                <td className="tabular">{right.metrics[key] ?? "—"}</td>
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm" data-testid="ai-experiment-comparison-table">
+            <thead>
+              <tr className="text-left text-fg-muted">
+                <th>{t("ai.experiments.metricColumn")}</th>
+                <th>{left.experimentId}</th>
+                <th>{right.experimentId}</th>
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {metricKeys.map((key) => (
+                <tr key={key} className="border-t border-border">
+                  <td className="py-1">{key}</td>
+                  <td className="tabular">{left.metrics[key] ?? "—"}</td>
+                  <td className="tabular">{right.metrics[key] ?? "—"}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       ) : (
         <p className="text-sm text-fg-muted">{t("ai.experiments.noMetrics")}</p>
       )}

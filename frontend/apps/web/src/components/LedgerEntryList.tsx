@@ -28,30 +28,32 @@ const SIDE_LABEL: Record<PostingLine["side"], string> = {
 function PostingLinesTable({ lines }: { lines: PostingLine[] }) {
   const { t } = useTranslation();
   return (
-    <table className="w-full text-sm">
-      <thead>
-        <tr className="text-left text-xs text-fg-muted">
-          <th className="py-1 pr-2 font-normal">#</th>
-          <th className="py-1 pr-2 font-normal">{t("legacy.ledgerEntryList.t1")}</th>
-          <th className="py-1 pr-2 font-normal">{t("legacy.ledgerEntryList.t2")}</th>
-          <th className="py-1 pr-2 text-right font-normal">{t("legacy.ledgerEntryList.t3")}</th>
-          <th className="py-1 font-normal">{t("legacy.ledgerEntryList.t4")}</th>
-        </tr>
-      </thead>
-      <tbody>
-        {lines.map((line) => (
-          <tr key={line.line_no} className="border-t border-border">
-            <td className="py-1 pr-2 text-fg-muted">{line.line_no}</td>
-            <td className="py-1 pr-2 font-mono text-xs">{line.account_code}</td>
-            <td className="py-1 pr-2">
-              <Badge tone={line.side === "DEBIT" ? "neutral" : "accent"}>{SIDE_LABEL[line.side]}</Badge>
-            </td>
-            <td className="tabular py-1 pr-2 text-right">{line.amount}</td>
-            <td className="py-1">{line.currency}</td>
+    <div className="overflow-x-auto">
+      <table className="w-full text-sm">
+        <thead>
+          <tr className="text-left text-xs text-fg-muted">
+            <th className="py-1 pr-2 font-normal">#</th>
+            <th className="py-1 pr-2 font-normal">{t("legacy.ledgerEntryList.t1")}</th>
+            <th className="py-1 pr-2 font-normal">{t("legacy.ledgerEntryList.t2")}</th>
+            <th className="py-1 pr-2 text-right font-normal">{t("legacy.ledgerEntryList.t3")}</th>
+            <th className="py-1 font-normal">{t("legacy.ledgerEntryList.t4")}</th>
           </tr>
-        ))}
-      </tbody>
-    </table>
+        </thead>
+        <tbody>
+          {lines.map((line) => (
+            <tr key={line.line_no} className="border-t border-border">
+              <td className="py-1 pr-2 text-fg-muted">{line.line_no}</td>
+              <td className="py-1 pr-2 font-mono text-xs">{line.account_code}</td>
+              <td className="py-1 pr-2">
+                <Badge tone={line.side === "DEBIT" ? "neutral" : "accent"}>{SIDE_LABEL[line.side]}</Badge>
+              </td>
+              <td className="tabular py-1 pr-2 text-right">{line.amount}</td>
+              <td className="py-1">{line.currency}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
   );
 }
 

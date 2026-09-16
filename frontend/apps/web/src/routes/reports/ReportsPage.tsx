@@ -87,26 +87,28 @@ export function ReportsPage() {
             <Card>
               <CardTitle>{t("legacy.reportsPage.t9")}</CardTitle>
               {report.strategyContributions.length > 0 ? (
-                <table className="w-full text-sm">
-                  <thead className="text-left text-fg-muted">
-                    <tr>
-                      <th className="pb-2 font-normal">{t("legacy.reportsPage.t10")}</th>
-                      <th className="pb-2 font-normal">{t("legacy.reportsPage.t11")}</th>
-                      <th className="pb-2 font-normal">{t("legacy.reportsPage.t12")}</th>
-                    </tr>
-                  </thead>
-                  <tbody className="tabular text-fg">
-                    {report.strategyContributions.map((c) => (
-                      <tr key={`${c.strategyId}-${c.strategyVersion}`} className="border-t border-border">
-                        <td className="py-2">
-                          {c.strategyId}@{c.strategyVersion}
-                        </td>
-                        <td className="py-2">{c.realizedPnl}</td>
-                        <td className="py-2">{c.tradeCount}</td>
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead className="text-left text-fg-muted">
+                      <tr>
+                        <th className="pb-2 font-normal">{t("legacy.reportsPage.t10")}</th>
+                        <th className="pb-2 font-normal">{t("legacy.reportsPage.t11")}</th>
+                        <th className="pb-2 font-normal">{t("legacy.reportsPage.t12")}</th>
                       </tr>
-                    ))}
-                  </tbody>
-                </table>
+                    </thead>
+                    <tbody className="tabular text-fg">
+                      {report.strategyContributions.map((c) => (
+                        <tr key={`${c.strategyId}-${c.strategyVersion}`} className="border-t border-border">
+                          <td className="py-2">
+                            {c.strategyId}@{c.strategyVersion}
+                          </td>
+                          <td className="py-2">{c.realizedPnl}</td>
+                          <td className="py-2">{c.tradeCount}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
               ) : (
                 <EmptyState>{t("legacy.reportsPage.t13")}</EmptyState>
               )}

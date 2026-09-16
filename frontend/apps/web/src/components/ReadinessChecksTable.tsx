@@ -33,30 +33,32 @@ function CheckTable({ title, rows }: { title: string; rows: CheckRow[] }) {
   return (
     <div>
       <h2 className="mb-2 text-sm font-medium text-fg-muted">{title}</h2>
-      <table className="w-full text-sm">
-        <thead className="text-left text-fg-muted">
-          <tr>
-            <th className="pb-2 font-normal">{t("legacy.readinessChecksTable.t1")}</th>
-            <th className="pb-2 font-normal">{t("legacy.readinessChecksTable.t2")}</th>
-            <th className="pb-2 font-normal">detail</th>
-            <th className="pb-2 font-normal">observed</th>
-            <th className="pb-2 font-normal">threshold</th>
-          </tr>
-        </thead>
-        <tbody className="tabular text-fg">
-          {rows.map(({ name, check }) => (
-            <tr key={name} className="border-t border-border">
-              <td className="py-2 font-mono">{name}</td>
-              <td className="py-2">
-                <Badge tone={check.ok ? "success" : "danger"}>{check.ok ? "정상" : "실패"}</Badge>
-              </td>
-              <td className="py-2 text-fg-muted">{check.detail ?? "-"}</td>
-              <td className="py-2">{formatNumber(check.observed)}</td>
-              <td className="py-2">{formatNumber(check.threshold)}</td>
+      <div className="overflow-x-auto">
+        <table className="w-full text-sm">
+          <thead className="text-left text-fg-muted">
+            <tr>
+              <th className="pb-2 font-normal">{t("legacy.readinessChecksTable.t1")}</th>
+              <th className="pb-2 font-normal">{t("legacy.readinessChecksTable.t2")}</th>
+              <th className="pb-2 font-normal">detail</th>
+              <th className="pb-2 font-normal">observed</th>
+              <th className="pb-2 font-normal">threshold</th>
             </tr>
-          ))}
-        </tbody>
-      </table>
+          </thead>
+          <tbody className="tabular text-fg">
+            {rows.map(({ name, check }) => (
+              <tr key={name} className="border-t border-border">
+                <td className="py-2 font-mono">{name}</td>
+                <td className="py-2">
+                  <Badge tone={check.ok ? "success" : "danger"}>{check.ok ? "정상" : "실패"}</Badge>
+                </td>
+                <td className="py-2 text-fg-muted">{check.detail ?? "-"}</td>
+                <td className="py-2">{formatNumber(check.observed)}</td>
+                <td className="py-2">{formatNumber(check.threshold)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
     </div>
   );
 }

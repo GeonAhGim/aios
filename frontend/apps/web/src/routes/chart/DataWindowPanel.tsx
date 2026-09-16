@@ -104,21 +104,23 @@ export function DataWindowPanel({ overlays, overlaySeries, candles, crosshairTim
           </Alert>
         </div>
       ) : (
-        <table className="w-full">
-          <tbody>
-            {rows.map((row) => (
-              <tr key={`${row.indicatorId}:${row.outputKey}`} data-testid="data-window-row">
-                <td style={{ color: row.color }}>{row.label}</td>
-                <td className="text-right">{row.value}</td>
-              </tr>
-            ))}
-            {rows.length === 0 && (
-              <tr>
-                <td className="text-fg-muted">{t("legacy.dataWindowPanel.t2")}</td>
-              </tr>
-            )}
-          </tbody>
-        </table>
+        <div className="overflow-x-auto">
+          <table className="w-full">
+            <tbody>
+              {rows.map((row) => (
+                <tr key={`${row.indicatorId}:${row.outputKey}`} data-testid="data-window-row">
+                  <td style={{ color: row.color }}>{row.label}</td>
+                  <td className="text-right">{row.value}</td>
+                </tr>
+              ))}
+              {rows.length === 0 && (
+                <tr>
+                  <td className="text-fg-muted">{t("legacy.dataWindowPanel.t2")}</td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
       )}
     </section>
   );
