@@ -300,3 +300,70 @@ def test_parse_mc_ticker_frame_fails_closed_on_missing_field():
 def test_parse_mc_ticker_frame_fails_closed_on_non_json():
     with pytest.raises(FatalExchangeError):
         parse_mc_ticker_frame("not-json")
+
+
+# ---------- 4. task-3979 (H-3, task-3798 리뷰 REJECT 후속) -- D2 하한 보강 ----------
+#
+# task-3798 리뷰가 지적한 결함: parse_mc_ticker_frame(신규 WS 핫패스)에
+# 수치 성능 단언이 없고, get_order() fail-closed 경로에 게이트 적색
+# 재현(실측 필드 누락 주입)이 없다(ecc08318/1bf6c043과 동일 결함 패턴).
+# 새 기능 추가 없이 증빙만 보강한다 -- 아래 두 테스트가 그 보강분이다.
+
+
+def test_parse_mc_ticker_frame_meets_ws_fanout_latency_budget():
+    """수치 성능 단언 -- ADR-2026-09-09-C Decision 1 예산표에 WS 프레임
+    파싱 전용 항목이 없어 가장 가까운 유사 항목("WS 팬아웃 p95 500ms")을
+    자체 예산으로 차용한다(task-3167/ecc08318, task-3165/1bf6c043
+    DEEPEN과 동일 차용 근거) -- parse_mc_ticker_frame()은 그 팬아웃
+    파이프라인의 첫 단계이므로 반복 호출의 p95 지연이 그 예산 안에
+    들어와야 한다."""
+    import time
+
+    raw = json.dumps({"header": {"tr_cd": "mc", "tr_key": "005940"}, "body": _MC_PUSH_EXAMPLE})
+    samples = 500
+    budget_sec = 0.5  # WS 팬아웃 p95 500ms 예산(ADR Decision 1) 차용
+
+    latencies: list[float] = []
+    for _ in range(samples):
+        start = time.perf_counter()
+        parse_mc_ticker_frame(raw)
+        latencies.append(time.perf_counter() - start)
+    latencies.sort()
+    p95 = latencies[int(samples * 0.95) - 1]
+
+    print(
+        f"[H-3 nh ws] parse_mc_ticker_frame x{samples} p95={p95 * 1000:.4f}ms "
+        f"(budget<{budget_sec * 1000:.0f}ms)"
+    )
+    assert p95 < budget_sec, f"WS 팬아웃 p95 예산({budget_sec}s) 초과: {p95:.6f}s"
+
+
+async def test_get_order_field_missing_injection_confirms_fail_closed_reasoning():
+    """게이트 적색 재현(필드 누락 주입) -- get_order()가 fail-closed인
+    근거(§1: dailyOrderExecution Output_1에 mkt_orr_no가 없음)를 리터럴
+    비교(`test_daily_order_execution_output1_has_no_mkt_orr_no_field`)가
+    아니라 실제 요청 경로(`adapter._request`)로 재현한다. 공식 스키마와
+    동일한 필드 집합(`_DAILY_ORDER_EXECUTION_OUTPUT_1_FIELDS`, mkt_orr_no
+    없음)을 그대로 응답 바디로 흘려보낸 뒤, place_order/modify_order가
+    성공 시 쓰는 것과 동일한 방식(`Output_x["mkt_orr_no"]`)으로 주문
+    식별자를 꺼내려 하면 KeyError로 즉시 실패함을 확인한다 -- get_order()가
+    이 실패를 삼키지 않고 NotImplementedError로 미리 막는 이유가 실측
+    와이어 데이터로도 성립함을 증명한다(tautology가 아님)."""
+    output_1_row = {field: "0" for field in _DAILY_ORDER_EXECUTION_OUTPUT_1_FIELDS}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={"rsp_cd": "00000", "rsp_msg": "정상처리완료", "Output_1": [output_1_row]},
+        )
+
+    adapter = _make_adapter(
+        lambda request: _route(request, {"/krstock/inquiry/v1/dailyOrderExecution": handler})
+    )
+    raw = await adapter._request(
+        "POST", "/krstock/inquiry/v1/dailyOrderExecution", body={"act_no": "1234567890"}
+    )
+    row = raw["Output_1"][0]
+    assert "itg_orr_no" in row  # 공식 스펙 확인 필드는 그대로 존재
+    with pytest.raises(KeyError):
+        _ = row["mkt_orr_no"]  # place_order/modify_order와 동일 방식의 추출은 즉시 실패
