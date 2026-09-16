@@ -43,6 +43,7 @@ import { FeatureFlagGate } from "./components/FeatureFlagGate";
 import { PortfolioPage } from "./routes/portfolio/PortfolioPage";
 import { RebalancePage } from "./routes/whatif/RebalancePage";
 import { ReportsPage } from "./routes/reports/ReportsPage";
+import { ResearchPage } from "./routes/research/ResearchPage";
 import { ScreenerPage } from "./routes/screener/ScreenerPage";
 import { WriteReviewPage } from "./routes/reviews/WriteReviewPage";
 import { ScriptEditorPage } from "./routes/scripts/ScriptEditorPage";
@@ -111,6 +112,7 @@ export const router = createBrowserRouter([
   { path: "/market/candles", element: protect(<CandlesPage />) },
   { path: "/chart", element: protect(<ChartPage />) },
   { path: "/screener", element: protect(<ScreenerPage />) },
+  { path: "/research", element: protect(<ResearchPage />) },
   { path: "/backtest/sweep-results", element: protect(<SweepResultsPage />) },
   { path: "/marketplace", element: protect(<MarketplaceBrowsePage />) },
   { path: "/marketplace/sell", element: protect(<SellStrategyPage />) },

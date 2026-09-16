@@ -18,6 +18,7 @@ export const MAIN_NAV_ITEMS: NavItem[] = [
   { to: "/market/candles", label: "nav./market/candles" },
   { to: "/chart", label: "nav./chart" },
   { to: "/screener", label: "nav./screener" },
+  { to: "/research", label: "nav./research" },
   { to: "/backtest/sweep-results", label: "nav./backtest/sweep-results" },
   { to: "/strategy-builder", label: "nav./strategy-builder" },
   { to: "/scripts/editor", label: "nav./scripts/editor" },

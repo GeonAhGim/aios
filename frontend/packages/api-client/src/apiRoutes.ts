@@ -398,5 +398,21 @@ export const API_ROUTES = defineApiRoutes({
   "whatif.previewOrder": route("/v1/foundation/whatif/preview-order", true, null, false),
   "whatif.rebalancePlan": route("/v1/foundation/whatif/rebalance-plan", true, null, false),
 
+  // task-2718(RD-17): ResearchPage.tsx(검색·소스 상태·종목 연결 표시)는 spec
+  // L4_research_data_and_market_ecosystem_v1.0.md §2.1/RD-2~RD-5가 정의하는
+  // `src/foundation/research_data/` 모듈을 앞서가는 선행 프론트다 —
+  // application/query.py(RD-7, as_of PIT 필터)·entitlement 연동 + 이를 감싸는
+  // API 라우터(src/api/routers/research_data.py, RD-8) 모두 아직 없다
+  // (src/api/routers 디렉터리에 research_data.py 부재 — grep으로 직접 확인;
+  // src/foundation/research_data에는 contracts/domain/adapters/application만
+  // 있고 API 라우터가 없다). screener.run(task-2692)·whatif.*(task-2696)와
+  // 동일한 유령 경로 사유로 2개 라우트 모두 implemented=false 등록 —
+  // ResearchPage.tsx는 라우터가 생기기 전까지 네트워크 호출 대신
+  // ResearchDataRouteNotImplementedError(typed)로 단락한다. v1Path는 마운트
+  // 경로 확정 전이라 null. apiPaths.openapi.test.ts GHOST_PATH_WHITELIST에도
+  // 함께 추가할 것.
+  "researchData.search": route("/v1/foundation/research-data/search", true, null, false),
+  "researchData.sources.list": route("/v1/foundation/research-data/sources", true, null, false),
+
   ...FOUNDATION_OPS_ROUTES,
 });

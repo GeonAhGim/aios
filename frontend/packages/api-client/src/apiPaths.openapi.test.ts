@@ -74,6 +74,11 @@ const GHOST_PATH_WHITELIST: ReadonlySet<ApiRouteName> = new Set<ApiRouteName>([
   // whatif 모듈·src/api/routers/whatif.py 자체가 아직 없음, screener.run과 동일 사유).
   "whatif.previewOrder",
   "whatif.rebalancePlan",
+  // task-2718(RD-17): researchData.* 2건 — apiRoutes.ts의 등록 주석 참조
+  // (src/foundation/research_data에는 API 라우터가 아직 없음, whatif.*와
+  // 동일 사유).
+  "researchData.search",
+  "researchData.sources.list",
 ]);
 
 // STALE_SNAPSHOT_WHITELIST: GHOST_PATH_WHITELIST와는 다른 사유 — "라우터가

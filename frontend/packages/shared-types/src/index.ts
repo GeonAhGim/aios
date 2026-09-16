@@ -49,3 +49,4 @@ export * from "./follow";
 export * from "./advisoryDisclaimer";
 export * from "./screener";
 export * from "./whatif";
+export * from "./researchData";

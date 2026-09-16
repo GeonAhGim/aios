@@ -145,3 +145,9 @@ export type { ScreenerClient } from "./clients/screener";
 // src/api/routers/whatif.py 미구현, UX-10/UX-11).
 export { createWhatIfClient, WhatIfRouteNotImplementedError } from "./clients/whatif";
 export type { WhatIfClient } from "./clients/whatif";
+// task-2718(RD-17): §2.1 리서치 데이터 검색·소스 상태 클라이언트(screener.ts와
+// 동일 관용 — AiosApiClient 합성에는 얹지 않고 화면이 createResearchDataClient로
+// 직접 만든다). 런타임에는 유령 경로(ResearchDataRouteNotImplementedError 참조,
+// src/api/routers/research_data.py 미구현, RD-8).
+export { createResearchDataClient, ResearchDataRouteNotImplementedError } from "./clients/researchData";
+export type { ResearchDataClient } from "./clients/researchData";

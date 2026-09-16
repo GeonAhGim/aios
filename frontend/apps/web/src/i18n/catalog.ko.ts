@@ -120,6 +120,46 @@ export const catalogKo = {
       totalLabel: "{{total}}건",
     },
   },
+  // task-2718(RD-17): ResearchPage.tsx(검색·소스 상태·종목 연결 표시) —
+  // screener.*와 동일하게 문구를 전부 t(key)로 조회한다.
+  research: {
+    pageTitle: "리서치 데이터",
+    kind: {
+      filing: "공시",
+      news: "뉴스",
+      macro: "거시",
+      alt: "대안 데이터",
+    },
+    searchForm: {
+      title: "검색",
+      queryLabel: "검색어",
+      instrumentLabel: "종목(instrument_id)",
+      asOfLabel: "기준 시각(as_of)",
+      run: "검색",
+    },
+    validation: {
+      queryRequired: "검색어를 입력하세요.",
+    },
+    results: {
+      title: "결과",
+      beforeRun: "검색어를 입력하고 검색하세요.",
+      empty: "조건에 맞는 항목이 없습니다.",
+      truncated: "결과가 상한에 도달해 잘렸습니다.",
+      viewInChart: "차트에서 보기",
+      unmappedNoKey: "미매핑(확정 키 없음)",
+      unmappedNotFound: "미매핑(종목 없음)",
+      totalLabel: "{{total}}건",
+    },
+    sources: {
+      title: "소스 상태",
+      empty: "등록된 소스가 없습니다.",
+      redistribution: {
+        storeFull: "본문 저장",
+        storeExcerpt: "발췌 저장",
+        linkOnly: "링크만",
+      },
+    },
+  },
   // task-2696(UX-12): WhatIfPanel.tsx(가상 주문 영향 미리보기)·RebalancePage.tsx
   // (목표 비중 → 리밸런싱 계획) — screener.*와 동일하게 문구를 전부 t(key)로 조회한다.
   whatif: {
@@ -312,6 +352,7 @@ export const catalogKo = {
     "/market/candles": "캔들",
     "/chart": "차트",
     "/screener": "스크리너",
+    "/research": "리서치 데이터",
     "/backtest/sweep-results": "스윕 결과",
     "/strategy-builder": "전략편집기",
     "/scripts/editor": "스크립트편집기",

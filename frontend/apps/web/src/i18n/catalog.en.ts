@@ -127,6 +127,44 @@ export const catalogEn = {
       totalLabel: "{{total}}",
     },
   },
+  research: {
+    pageTitle: "Research data",
+    kind: {
+      filing: "Filing",
+      news: "News",
+      macro: "Macro",
+      alt: "Alt data",
+    },
+    searchForm: {
+      title: "Search",
+      queryLabel: "Query",
+      instrumentLabel: "Instrument (instrument_id)",
+      asOfLabel: "As-of time (as_of)",
+      run: "Search",
+    },
+    validation: {
+      queryRequired: "Please enter a search query.",
+    },
+    results: {
+      title: "Results",
+      beforeRun: "Enter a query and search.",
+      empty: "No items match the conditions.",
+      truncated: "Results were truncated at the cap.",
+      viewInChart: "View in chart",
+      unmappedNoKey: "Unmapped (no deterministic key)",
+      unmappedNotFound: "Unmapped (instrument not found)",
+      totalLabel: "{{total}}",
+    },
+    sources: {
+      title: "Source status",
+      empty: "No sources registered.",
+      redistribution: {
+        storeFull: "Store full",
+        storeExcerpt: "Store excerpt",
+        linkOnly: "Link only",
+      },
+    },
+  },
   whatif: {
     order: {
       title: "What-if order impact preview",
@@ -303,6 +341,7 @@ export const catalogEn = {
     "/market/candles": "Candles",
     "/chart": "Chart",
     "/screener": "Screener",
+    "/research": "Research data",
     "/backtest/sweep-results": "Sweep results",
     "/strategy-builder": "Strategy builder",
     "/scripts/editor": "Script editor",
