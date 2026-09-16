@@ -32,6 +32,10 @@ from src.core.db.conditional_write import ConcurrencyConflictError, conditional_
 from src.core.logging.audit_log import record_audit_log
 from src.core.observability.metric_names import SECURITY_BREAK_GLASS_COUNT_TOTAL
 from src.core.observability.metrics import metrics
+from src.foundation.trust.domain.rules.segregation_of_duty import (
+    SegregationOfDutyViolation,
+    assert_actor_not_counterparty,
+)
 from src.services.auth.tokens import AuthLevel
 
 BreakGlassScope = Literal["kill_switch_override", "tenant_read", "credential_revoke"]
@@ -165,10 +169,14 @@ async def approve_grant(
     )
     if existing is None:
         raise BreakGlassInvalidStateError(f"grant_id={grant_id}: 존재하지 않습니다.")
-    if existing["requester_id"] == approver_id:
+    try:
+        assert_actor_not_counterparty(
+            approver_id, existing["requester_id"], action="break_glass.approve_grant"
+        )
+    except SegregationOfDutyViolation as exc:
         raise BreakGlassSelfApprovalError(
             f"grant_id={grant_id}: 요청자 본인은 승인할 수 없습니다(자기승인 금지)."
-        )
+        ) from exc
 
     try:
         row = await conditional_update(
