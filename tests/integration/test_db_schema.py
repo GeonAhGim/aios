@@ -70,7 +70,7 @@ async def raw_conn():
     await connection.close()
 
 
-async def _insert_audit_event(conn: asyncpg.Connection):
+async def _insert_audit_event(conn: asyncpg.Connection) -> object:
     row = await conn.fetchrow(
         "INSERT INTO foundation_audit_event "
         "(sequence_no, aggregate_type, aggregate_id, action, outcome, trace_id, "
@@ -82,7 +82,7 @@ async def _insert_audit_event(conn: asyncpg.Connection):
     return row["id"]
 
 
-async def _insert_entry(conn: asyncpg.Connection, *, audit_event_id) -> object:
+async def _insert_entry(conn: asyncpg.Connection, *, audit_event_id: object) -> object:
     row = await conn.fetchrow(
         "INSERT INTO ledger_journal_entry "
         "(sequence_no, event_type, event_ref, idempotency_key, lines_digest, entry_hash, "
@@ -185,7 +185,7 @@ LEDGER_CORE_TABLES = {
 PLATFORM_HOUSE_USER_ID = "00000000-0000-0000-0000-000000000001"
 
 
-async def test_ledger_core_tables_exist(db_conn):
+async def test_ledger_core_tables_exist(db_conn) -> None:
     result = await db_conn.execute(
         text(
             "SELECT table_name FROM information_schema.tables "
@@ -198,7 +198,7 @@ async def test_ledger_core_tables_exist(db_conn):
 
 
 @pytest.mark.parametrize("table", ["ledger_journal_entry", "ledger_posting_line"])
-async def test_ledger_entry_and_line_worm_revoked_from_public(db_conn, table):
+async def test_ledger_entry_and_line_worm_revoked_from_public(db_conn, table: str) -> None:
     result = await db_conn.execute(
         text(
             "SELECT privilege_type FROM information_schema.table_privileges "
@@ -211,7 +211,7 @@ async def test_ledger_entry_and_line_worm_revoked_from_public(db_conn, table):
     assert "DELETE" not in granted
 
 
-async def test_ledger_platform_and_house_accounts_seeded(db_conn):
+async def test_ledger_platform_and_house_accounts_seeded(db_conn) -> None:
     """계정코드·유형이 `domain/chart_of_accounts.py`(LC-2)의 상수와 어긋나면
     LC-9(post_entry)가 계정을 못 찾거나 잘못된 부호로 분개한다 — 마이그레이션
     시드값이 도메인 모듈과 같은 값인지 여기서 고정한다."""
@@ -238,7 +238,7 @@ async def test_ledger_platform_and_house_accounts_seeded(db_conn):
         assert row.allow_negative is False, code
 
 
-async def test_ledger_balance_seeded_for_platform_and_house_accounts(db_conn):
+async def test_ledger_balance_seeded_for_platform_and_house_accounts(db_conn) -> None:
     """balance/held/pending_payout는 시드 시점엔 0이지만, 같은 TEST_DATABASE_URL을
     공유하는 test_post_entry.py/test_backfill.py 등이 이 플랫폼 계정으로 실제
     커밋되는 분개를 내며 값을 바꾼다(전체 스위트 실행 순서에 따라 값이 달라짐) —
@@ -266,7 +266,7 @@ async def test_ledger_balance_seeded_for_platform_and_house_accounts(db_conn):
         assert row.allow_negative is False
 
 
-async def test_ledger_control_singleton_seeded(db_conn):
+async def test_ledger_control_singleton_seeded(db_conn) -> None:
     result = await db_conn.execute(text("SELECT id, write_frozen FROM ledger_control"))
     rows = list(result)
     assert len(rows) == 1
@@ -274,7 +274,7 @@ async def test_ledger_control_singleton_seeded(db_conn):
     assert rows[0].write_frozen is False
 
 
-async def test_unbalanced_entry_fails_at_commit(raw_conn):
+async def test_unbalanced_entry_fails_at_commit(raw_conn) -> None:
     """§4.4 deferred constraint trigger — Σ차변 != Σ대변인 분개는 개별
     INSERT가 아니라 COMMIT 시점에 실패해야 한다(entry의 모든 행이 다
     들어온 뒤에야 판정 가능하므로)."""
@@ -304,7 +304,7 @@ async def test_unbalanced_entry_fails_at_commit(raw_conn):
             )
 
 
-async def test_multi_currency_entry_fails_at_commit(raw_conn):
+async def test_multi_currency_entry_fails_at_commit(raw_conn) -> None:
     """§4.4 deferred constraint trigger의 두 번째 판정 분기 — 같은 entry에
     서로 다른 통화의 posting line이 섞이면(금액이 맞아떨어져도) COMMIT
     시점에 실패해야 한다. `test_unbalanced_entry_fails_at_commit`은 차대
@@ -335,7 +335,7 @@ async def test_multi_currency_entry_fails_at_commit(raw_conn):
             )
 
 
-async def test_balanced_entry_commits_successfully(raw_conn):
+async def test_balanced_entry_commits_successfully(raw_conn) -> None:
     """위 테스트의 대조군 — deferred 트리거가 균형 잡힌 분개까지 잘못
     막지 않는지 확인한다."""
     audit_event_id = await _insert_audit_event(raw_conn)
@@ -368,7 +368,7 @@ async def test_balanced_entry_commits_successfully(raw_conn):
     assert row is not None
 
 
-async def test_aios_app_cannot_update_ledger_journal_entry(raw_conn):
+async def test_aios_app_cannot_update_ledger_journal_entry(raw_conn) -> None:
     audit_event_id = await _insert_audit_event(raw_conn)
     entry_id = await _insert_entry(raw_conn, audit_event_id=audit_event_id)
 
@@ -381,7 +381,7 @@ async def test_aios_app_cannot_update_ledger_journal_entry(raw_conn):
             )
 
 
-async def test_aios_app_cannot_delete_ledger_posting_line(raw_conn):
+async def test_aios_app_cannot_delete_ledger_posting_line(raw_conn) -> None:
     audit_event_id = await _insert_audit_event(raw_conn)
     entry_id = await _insert_entry(raw_conn, audit_event_id=audit_event_id)
     accounts = await raw_conn.fetch(
