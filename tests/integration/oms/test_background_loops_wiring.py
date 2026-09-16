@@ -10,6 +10,7 @@ TEST_DATABASE_URL)에 대고 `start_background_loops`를 직접 호출해, 등�
 태스크가 실제로 행을 처리하는지와 플래그 off 시 경고 로그를 남기는지 둘 다
 증명한다.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -17,12 +18,15 @@ import logging
 from datetime import datetime, timezone
 from uuid import UUID
 
+import src.services.background_loops as background_loops_module
 from src.core.event_bus.in_process import InProcessEventBus
 from src.core.loader.risk_policy_loader import load_risk_policy
+from src.core.observability.loop_health import LoopHealth
 from src.core.safety.metrics_collector import ApiCallTracker
 from src.foundation.mandates.adapters.postgres_repository import PostgresMandateRepository
 from src.foundation.trust.adapters.postgres_repository import PostgresTrustRepository
 from src.services.background_loops import start_background_loops
+from src.services.execution_loop.scheduler import ExecutionLoopScheduler
 from src.services.oms.adapters.order_repository import PostgresOrderRepository
 from src.services.oms.adapters.outbox_repository import OutboxRepository
 from src.services.oms.application.wiring import OMS_DISPATCHER_FLAG
@@ -125,6 +129,62 @@ async def test_flag_off_logs_warning_and_skips_dispatcher_task(pool, monkeypatch
         assert any(m.startswith("oms_dispatcher:") and OMS_DISPATCHER_FLAG in m for m in messages)
         # heartbeat/alert/risk_guard/safety 4개뿐 — execution_loop도 플래그 off,
         # oms_dispatcher도 플래그 off라 태스크가 추가되지 않았다.
+        assert len(loops.tasks) == 4
+    finally:
+        await loops.stop()
+
+
+async def test_start_background_loops_wires_four_core_loops_and_scheduler(
+    pool, monkeypatch
+) -> None:
+    """DEEPEN(task-3155, 원 리프 task-938) — heartbeat/alert_evaluation/
+    risk_guard/safety_reactivation 4개 코어 루프와 execution_scheduler 배선
+    전용 테스트. 지금까지는 없었다 — 위 테스트들은 OMS outbox 디스패처 배선만
+    보고, `test_loop_health.py`는 `LoopHealth` 자체의 순수 단위테스트라
+    `start_background_loops`를 호출하지 않는다.
+
+    간격 상수를 monkeypatch로 짧게 낮춰(module-level 상수는 `start_background_
+    loops` 호출 시점에 읽히므로 몽키패치가 먹힌다) 4개 전부 실제 asyncio 태스크
+    로 돌며 주입한 `LoopHealth`에 성공 tick을 남기는지 결정론적으로 짧게
+    기다려 확인한다."""
+    monkeypatch.setattr(background_loops_module, "HEARTBEAT_INTERVAL_SECONDS", 0.05)
+    monkeypatch.setattr(background_loops_module, "ALERT_EVALUATION_INTERVAL_SECONDS", 0.05)
+    monkeypatch.setattr(background_loops_module, "RISK_GUARD_INTERVAL_SECONDS", 0.05)
+    monkeypatch.setattr(background_loops_module, "SAFETY_REACTIVATION_INTERVAL_SECONDS", 0.05)
+    monkeypatch.setenv("AIOS_EXECUTION_LOOP_ENABLED", "0")
+    monkeypatch.setenv("AIOS_LIQUIDATION_WORKER_ENABLED", "0")
+    monkeypatch.setenv("AIOS_POST_TRADE_BATCH_ENABLED", "0")
+    monkeypatch.setenv("AIOS_STARTUP_RECOVERY_ENABLED", "0")
+
+    health = LoopHealth()
+    core_loop_names = ("heartbeat", "alert_evaluation", "risk_guard", "safety_reactivation")
+
+    loops = await background_loops_module.start_background_loops(
+        pool=pool,
+        policy=load_risk_policy(),
+        event_bus=InProcessEventBus(),
+        credential_resolver=_StubCredentialResolver(ScriptedAdapter()),
+        api_tracker=ApiCallTracker(),
+        health=health,
+    )
+    try:
+        for _ in range(100):
+            snapshot = health.snapshot()
+            if all(
+                name in snapshot
+                and snapshot[name].last_success_at is not None
+                and snapshot[name].consecutive_failures == 0
+                for name in core_loop_names
+            ):
+                break
+            await asyncio.sleep(0.05)
+        else:
+            raise AssertionError(
+                "4개 코어 루프가 시한 안에 전부 성공 tick을 남기지 않았다 — 배선 회귀"
+            )
+        assert isinstance(loops.execution_scheduler, ExecutionLoopScheduler)
+        # execution_loop/liquidation_worker/post_trade_batch/oms_dispatcher 전부
+        # 플래그 off라 코어 4개만 남는다.
         assert len(loops.tasks) == 4
     finally:
         await loops.stop()
