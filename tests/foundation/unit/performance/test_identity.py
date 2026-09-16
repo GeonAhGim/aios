@@ -1,12 +1,15 @@
 """회계 항등식 검사 — 잔차/PENDING.
 
 Spec: docs/specs/L4_strategy_portfolio_backtest_v1.0.md §8 (L46 DoD)."""
+
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 
-from src.foundation.performance.domain.identity import check_identity
+import pytest
+
+from src.foundation.performance.domain.identity import _require, check_identity
 from src.foundation.performance.domain.models import Cashflow, CashflowKind, ComponentBreakdown
 
 _T0 = datetime(2026, 1, 1, tzinfo=timezone.utc)
@@ -76,3 +79,11 @@ def test_mismatched_end_valuation_reports_nonzero_residual():
     assert result.ok is False
     assert result.residual is not None
     assert result.residual != 0
+
+
+def test_require_raises_on_unexpected_none():
+    """negative — `_require()`는 pending 검사를 통과한 뒤에도 `None`이면 조용히
+    0으로 대체하지 않고 불변식 위반을 예외로 드러낸다(task-1759가 `# type:
+    ignore` 3건을 대체한 분기, 그 이후 직접 겨냥한 테스트가 없었다)."""
+    with pytest.raises(ValueError, match="net_pnl.*None"):
+        _require(None, "net_pnl")
