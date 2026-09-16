@@ -38,12 +38,62 @@ function stripInterpolations(text) {
   return text.replace(/\{[^{}]*\}/g, " ");
 }
 
-/** Counts JSX text-node spans (between `>` and `<`) that contain Hangul once interpolations are removed. */
+/**
+ * Strips `//` and `/* *\/` comments, leaving string/template literal contents untouched.
+ * Without this, a `>` from a TS generic (e.g. `Props>`) paired with an unrelated later
+ * `<` (e.g. `useState<string>`) can span a Korean *code comment* in between, and the
+ * naive `/>([^<>]*)</` scan below misreads that comment as JSX text (real incident:
+ * EventLineageLookupPanel.tsx false-positived on its own explanatory comment).
+ */
+export function stripComments(source) {
+  let out = "";
+  let i = 0;
+  const n = source.length;
+  while (i < n) {
+    const ch = source[i];
+    const next = source[i + 1];
+    if (ch === "/" && next === "/") {
+      while (i < n && source[i] !== "\n") i += 1;
+      continue;
+    }
+    if (ch === "/" && next === "*") {
+      i += 2;
+      while (i < n && !(source[i] === "*" && source[i + 1] === "/")) i += 1;
+      i = Math.min(i + 2, n);
+      continue;
+    }
+    if (ch === '"' || ch === "'" || ch === "`") {
+      const quote = ch;
+      out += ch;
+      i += 1;
+      while (i < n && source[i] !== quote) {
+        if (source[i] === "\\" && i + 1 < n) {
+          out += source[i] + source[i + 1];
+          i += 2;
+          continue;
+        }
+        out += source[i];
+        i += 1;
+      }
+      if (i < n) {
+        out += source[i];
+        i += 1;
+      }
+      continue;
+    }
+    out += ch;
+    i += 1;
+  }
+  return out;
+}
+
+/** Counts JSX text-node spans (between `>` and `<`) that contain Hangul once comments and interpolations are removed. */
 export function countJsxTextLiterals(source) {
+  const withoutComments = stripComments(source);
   let count = 0;
   const re = />([^<>]*)</g;
   let m;
-  while ((m = re.exec(source)) !== null) {
+  while ((m = re.exec(withoutComments)) !== null) {
     const stripped = stripInterpolations(m[1]);
     if (HANGUL.test(stripped)) count += 1;
   }
@@ -52,11 +102,12 @@ export function countJsxTextLiterals(source) {
 
 /** Counts string-literal attribute values (title=, placeholder=, ...) that contain Hangul. */
 export function countAttrLiterals(source) {
+  const withoutComments = stripComments(source);
   let count = 0;
   const names = ATTR_NAMES.join("|");
   const re = new RegExp(`\\b(?:${names})\\s*=\\s*["']([^"']*)["']`, "g");
   let m;
-  while ((m = re.exec(source)) !== null) {
+  while ((m = re.exec(withoutComments)) !== null) {
     if (HANGUL.test(m[1])) count += 1;
   }
   return count;

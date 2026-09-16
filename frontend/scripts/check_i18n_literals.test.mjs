@@ -15,6 +15,7 @@ import {
   countAttrLiterals,
   countLiterals,
   checkRatchet,
+  stripComments,
 } from "./check_i18n_literals.mjs";
 
 const SCRIPT = join(import.meta.dirname, "check_i18n_literals.mjs");
@@ -68,6 +69,32 @@ test("countAttrLiterals flags Hangul in user-facing attributes but not other att
 
 test("countLiterals sums JSX text and attribute hits", () => {
   assert.equal(countLiterals('<button title="확인">확인</button>'), 2);
+});
+
+test("countJsxTextLiterals ignores Hangul inside a // comment sitting between an unrelated `>` and `<` (EventLineageLookupPanel.tsx false positive)", () => {
+  // A TS generic's closing `>` paired with a later `<` (e.g. useState<string>) can
+  // span a code comment with no real JSX text in between -- the comment must not
+  // be misread as a text node.
+  const source = [
+    "interface Props extends Foo<Bar> {}",
+    "export function C(props: Props) {",
+    "  // 한글 주석: 실제 JSX 텍스트가 아니다",
+    "  const [x] = useState<string | null>(null);",
+    "  return <p>Retry</p>;",
+    "}",
+  ].join("\n");
+  assert.equal(countJsxTextLiterals(source), 0);
+});
+
+test("countJsxTextLiterals still flags real Hangul JSX text that follows a // comment", () => {
+  const source = ["function C() {", "  // 주석", "  return <p>다시 시도</p>;", "}"].join("\n");
+  assert.equal(countJsxTextLiterals(source), 1);
+});
+
+test("stripComments removes // and /* */ comments but leaves string/template literal contents untouched", () => {
+  assert.equal(stripComments("a; // 한글 comment\nb;"), "a; \nb;");
+  assert.equal(stripComments("/* 한글 block */ x"), " x");
+  assert.equal(stripComments('const s = "http://not-a-comment";'), 'const s = "http://not-a-comment";');
 });
 
 test("isExcluded filters vendor/, i18n/, *.test.tsx, dist/, node_modules/, and non-ts(x) files", () => {
