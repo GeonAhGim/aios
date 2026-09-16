@@ -40,6 +40,9 @@ test = [
     # task-3577: pinned exact -- version drift here previously broke
     # tests/unit/test_per_test_timeout_kill_scope.py on a rebuilt venv.
     "pytest-timeout==2.4.0",
+    # task-2613: property tests (tests/property/) for ledger double-entry,
+    # risk limit monotonicity, PositionKey round-trip.
+    "hypothesis>=6.100",
 ]
 dev = [
     "ruff>=0.16",

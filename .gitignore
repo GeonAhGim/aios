@@ -8,3 +8,5 @@ __pycache__/
 /runtime/
 .coverage
 coverage.xml
+# task-2613: hypothesis example database is local-only, never committed.
+.hypothesis/
