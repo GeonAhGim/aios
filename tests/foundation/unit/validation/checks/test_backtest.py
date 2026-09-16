@@ -36,7 +36,7 @@ _PAID_COST = CostModel(fee_bps=Decimal("10"), slippage_bps=Decimal("5"))
 _ZERO_COST = CostModel(fee_bps=Decimal("0"), slippage_bps=Decimal("0"))
 
 
-def _fsm_definition_never_fires() -> dict:
+def _fsm_definition_never_fires() -> dict[str, object]:
     """A real (non-fake) `RSI_timeperiod14` condition that is structurally
     valid but can never be true (RSI is bounded to [0, 100]) -- this way the
     real `IndicatorService`/TA-Lib path runs end to end without ever
@@ -83,7 +83,7 @@ def _bars(n: int) -> list[Candle]:
 def _ctx(
     *,
     cost_model: CostModel = _PAID_COST,
-    fsm_definition: dict | None = None,
+    fsm_definition: dict[str, object] | None = None,
     bars: list[Candle] | None = None,
     allow_zero_cost: bool = False,
     warmup_bars: int = 5,

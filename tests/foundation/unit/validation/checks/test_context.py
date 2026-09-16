@@ -24,8 +24,8 @@ from src.foundation.validation.domain.policy import ValidationPolicy
 _T0 = datetime(2026, 1, 1, tzinfo=timezone.utc)
 
 
-def _ctx(**overrides: object) -> CheckContext:
-    kwargs: dict[str, object] = dict(
+def _ctx() -> CheckContext:
+    return CheckContext(
         artifact=build_artifact(
             strategy_id="strat-1",
             version="v1",
@@ -58,8 +58,6 @@ def _ctx(**overrides: object) -> CheckContext:
         trace_id="trace-1",
         prior_results={},
     )
-    kwargs.update(overrides)
-    return CheckContext(**kwargs)  # type: ignore[arg-type]
 
 
 def test_field_order_matches_spec_signature() -> None:
@@ -78,5 +76,8 @@ def test_field_order_matches_spec_signature() -> None:
 
 def test_context_is_frozen_rejects_mutation() -> None:
     ctx = _ctx()
+    attr_name = (
+        "seed"  # non-literal so this exercises runtime __setattr__, not a lint-visible field write
+    )
     with pytest.raises(FrozenInstanceError):
-        ctx.seed = 1  # type: ignore[misc]
+        setattr(ctx, attr_name, 1)
