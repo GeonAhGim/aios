@@ -10,6 +10,7 @@ DoD: "새 정적 검사가 raw 시드 픽스처를 주입하면 실패함을 증
 from __future__ import annotations
 
 import importlib.util
+import json
 import sys
 import time
 from pathlib import Path
@@ -188,3 +189,95 @@ def test_check_ledger_balance_raw_seed_completes_within_time_budget(tmp_path, mo
     assert finding is not None
     assert any("conftest.py" in e for e in finding.evidence)
     assert elapsed < 5.0, f"raw seed 스캔이 {elapsed:.3f}s — 예산(5.0s) 초과"
+
+
+def _marker_check():
+    return check_audit_regressions.Finding("marker_ok", "정상 검사 통과 표식", ["marker:1"])
+
+
+def _raising_check():
+    raise ValueError("boom-injected")
+
+
+def test_run_isolates_a_raising_checker_and_keeps_running_the_rest(monkeypatch) -> None:
+    """실패주입: task-1923에서 해소한 격리 성질(검사 하나가 죽어도 나머지가
+    돈다)을 직접 검증한다. 예외가 새는 순간 뒤 검사 전부가 조용히 스킵되는
+    회귀를 잡기 위해 실패 검사 앞뒤에 정상 검사를 배치한다."""
+    monkeypatch.setattr(
+        check_audit_regressions,
+        "CHECKS",
+        [_marker_check, _raising_check, _marker_check],
+    )
+
+    findings = check_audit_regressions.run()
+
+    codes = [f.code for f in findings]
+    assert codes.count("marker_ok") == 2  # 실패한 검사 앞뒤 둘 다 실행됨
+    error_findings = [f for f in findings if f.code.startswith("checker_error_")]
+    assert len(error_findings) == 1
+    assert error_findings[0].code == "checker_error__raising_check"
+    assert "boom-injected" in error_findings[0].detail
+
+
+def test_run_reports_each_failing_checker_under_its_own_isolated_code(monkeypatch) -> None:
+    """네거티브: 서로 다른 두 검사가 각각 다른 예외로 죽어도 서로의 Finding을
+    덮어쓰거나 뒤섞지 않고 독립된 checker_error_<이름> 코드로 분리돼야 한다."""
+
+    def _raise_a():
+        raise RuntimeError("A-fail")
+
+    def _raise_b():
+        raise KeyError("B-fail")
+
+    monkeypatch.setattr(check_audit_regressions, "CHECKS", [_raise_a, _raise_b])
+
+    findings = check_audit_regressions.run()
+
+    by_code = {f.code: f for f in findings}
+    assert set(by_code) == {"checker_error__raise_a", "checker_error__raise_b"}
+    assert "A-fail" in by_code["checker_error__raise_a"].detail
+    assert "B-fail" in by_code["checker_error__raise_b"].detail
+
+
+def test_main_exits_red_when_a_checker_crash_is_a_new_unbaselined_finding(
+    tmp_path, monkeypatch, capsys
+) -> None:
+    """게이트 적색 재현: local_ci가 실제로 참조하는 rc 계약 그대로, 베이스라인에
+    없는 checker_error_* 가 나타나면 main()이 rc=1로 끝나고 에스컬레이션 본문과
+    대조 가능한 고정 문구("FAIL: 베이스라인에 없는 결함")를 그대로 찍어야 한다."""
+    baseline = tmp_path / "audit-baseline.json"
+    baseline.write_text(json.dumps({"open": {}}), encoding="utf-8")
+    monkeypatch.setattr(check_audit_regressions, "CHECKS", [_raising_check])
+    monkeypatch.setattr(sys, "argv", ["check_audit_regressions.py", "--baseline", str(baseline)])
+
+    rc = check_audit_regressions.main()
+    out = capsys.readouterr().out
+
+    assert rc == 1
+    assert "FAIL: 베이스라인에 없는 결함" in out
+    assert "checker_error__raising_check" in out
+
+
+def test_run_completes_within_time_budget_when_many_checkers_fail(monkeypatch) -> None:
+    """성능단언: 격리 로직(try/except)이 검사 수백 개 규모에서도 예외 처리
+    오버헤드로 예산을 넘기지 않는지 확인한다."""
+    checks = []
+    for i in range(300):
+        if i % 2 == 0:
+
+            def _c(i: int = i):
+                raise ValueError(f"fail-{i}")
+        else:
+
+            def _c(i: int = i):
+                return None
+
+        checks.append(_c)
+    monkeypatch.setattr(check_audit_regressions, "CHECKS", checks)
+
+    start = time.perf_counter()
+    findings = check_audit_regressions.run()
+    elapsed = time.perf_counter() - start
+
+    assert len(findings) == 150  # 절반만 예외로 죽어 Finding을 남김
+    assert elapsed < 1.0, f"run()이 {elapsed:.3f}s — 예산(1.0s) 초과"
