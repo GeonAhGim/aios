@@ -26,6 +26,7 @@ import time
 import uuid
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
+from typing import cast
 
 import asyncpg
 import pytest
@@ -47,35 +48,41 @@ _PERF_BUDGET_SEC = 5.0
 
 
 @pytest.fixture
-def hot_storage(pool):
+def hot_storage(pool: asyncpg.Pool) -> HotPostgresStorage:
     return HotPostgresStorage(pool)
 
 
 @pytest.fixture
-def batch_repo(pool):
+def batch_repo(pool: asyncpg.Pool) -> PostgresBatchRepository:
     return PostgresBatchRepository(pool)
 
 
 async def _audit_event_id(conn: asyncpg.Connection) -> uuid.UUID:
-    return await conn.fetchval(
-        "INSERT INTO foundation_audit_event "
-        "(sequence_no, aggregate_type, aggregate_id, action, outcome, trace_id, "
-        " payload_hash, payload, event_hash) "
-        "VALUES ($1, 'test.market_data', gen_random_uuid(), 'test.md.ingest', 'SUCCESS', "
-        " gen_random_uuid(), 'deadbeef', '{}'::jsonb, 'deadbeef') RETURNING id",
-        uuid.uuid4().int % (2**62),
+    return cast(
+        uuid.UUID,
+        await conn.fetchval(
+            "INSERT INTO foundation_audit_event "
+            "(sequence_no, aggregate_type, aggregate_id, action, outcome, trace_id, "
+            " payload_hash, payload, event_hash) "
+            "VALUES ($1, 'test.market_data', gen_random_uuid(), 'test.md.ingest', 'SUCCESS', "
+            " gen_random_uuid(), 'deadbeef', '{}'::jsonb, 'deadbeef') RETURNING id",
+            uuid.uuid4().int % (2**62),
+        ),
     )
 
 
 async def _instrument_id(conn: asyncpg.Connection, prefix: str = "DC13DEEPEN") -> uuid.UUID:
     symbol = f"{prefix}-{uuid.uuid4().hex}"
-    return await conn.fetchval(
-        "INSERT INTO md_instrument "
-        "(venue, canonical_symbol, venue_symbol, asset_class, tick_size, lot_size, "
-        " status, listed_at) "
-        "VALUES ('BITGET', $1, $1, 'CRYPTO', 0.01, 0.0001, 'LISTED', now()) "
-        "RETURNING instrument_id",
-        symbol,
+    return cast(
+        uuid.UUID,
+        await conn.fetchval(
+            "INSERT INTO md_instrument "
+            "(venue, canonical_symbol, venue_symbol, asset_class, tick_size, lot_size, "
+            " status, listed_at) "
+            "VALUES ('BITGET', $1, $1, 'CRYPTO', 0.01, 0.0001, 'LISTED', now()) "
+            "RETURNING instrument_id",
+            symbol,
+        ),
     )
 
 
@@ -123,22 +130,32 @@ async def _create_batch(
     return await batch_repo.create(conn, batch)
 
 
-async def _row_count(pool, *, instrument_id: uuid.UUID, open_time: datetime | None = None) -> int:
+async def _row_count(
+    pool: asyncpg.Pool, *, instrument_id: uuid.UUID, open_time: datetime | None = None
+) -> int:
     if open_time is None:
-        return await pool.fetchval(
-            "SELECT count(*) FROM md_candle WHERE instrument_id = $1", instrument_id
+        return cast(
+            int,
+            await pool.fetchval(
+                "SELECT count(*) FROM md_candle WHERE instrument_id = $1", instrument_id
+            ),
         )
-    return await pool.fetchval(
-        "SELECT count(*) FROM md_candle WHERE instrument_id = $1 AND open_time = $2",
-        instrument_id,
-        open_time,
+    return cast(
+        int,
+        await pool.fetchval(
+            "SELECT count(*) FROM md_candle WHERE instrument_id = $1 AND open_time = $2",
+            instrument_id,
+            open_time,
+        ),
     )
 
 
 # ---- 실패주입(D2) — CandleRecord(pydantic)가 안 거르는 DB CHECK/FK ----
 
 
-async def test_write_batch_rejects_high_less_than_open(hot_storage, batch_repo, pool):
+async def test_write_batch_rejects_high_less_than_open(
+    hot_storage: HotPostgresStorage, batch_repo: PostgresBatchRepository, pool: asyncpg.Pool
+) -> None:
     """`ck_md_candle_high_ge_open` — pydantic `CandleRecord`는 OHLC 부등식을
     검증하지 않으므로(모듈 docstring), 코드 검증을 우회해도 DB CHECK가
     최후 방어선으로 막아야 한다."""
@@ -160,7 +177,9 @@ async def test_write_batch_rejects_high_less_than_open(hot_storage, batch_repo, 
             await hot_storage.write_batch(conn, batch.batch_id, [bad])
 
 
-async def test_write_batch_rejects_negative_volume(hot_storage, batch_repo, pool):
+async def test_write_batch_rejects_negative_volume(
+    hot_storage: HotPostgresStorage, batch_repo: PostgresBatchRepository, pool: asyncpg.Pool
+) -> None:
     """`ck_md_candle_volume_nonneg` — 음수 거래량은 거부된다."""
     async with pool.acquire() as conn, conn.transaction():
         instrument_id = await _instrument_id(conn)
@@ -180,7 +199,9 @@ async def test_write_batch_rejects_negative_volume(hot_storage, batch_repo, pool
             await hot_storage.write_batch(conn, batch.batch_id, [bad])
 
 
-async def test_write_batch_rejects_unknown_instrument_fk(hot_storage, batch_repo, pool):
+async def test_write_batch_rejects_unknown_instrument_fk(
+    hot_storage: HotPostgresStorage, batch_repo: PostgresBatchRepository, pool: asyncpg.Pool
+) -> None:
     """`md_candle.instrument_id` FK — 기존 테스트는 항상 미리 instrument를
     등록해 이 경로를 안 탔다. 등록되지 않은 instrument를 가리키는 candle은
     배치 자체는 유효해도 거부된다."""
@@ -204,7 +225,9 @@ async def test_write_batch_rejects_unknown_instrument_fk(hot_storage, batch_repo
             await hot_storage.write_batch(conn, batch.batch_id, [bad])
 
 
-async def test_write_batch_rejects_unknown_batch_id_fk(hot_storage, pool):
+async def test_write_batch_rejects_unknown_batch_id_fk(
+    hot_storage: HotPostgresStorage, pool: asyncpg.Pool
+) -> None:
     """`md_candle.batch_id` FK — `md_ingest_batch`에 존재하지 않는
     `batch_id`로는 아무리 유효한 candle이라도 쓸 수 없다."""
     async with pool.acquire() as conn, conn.transaction():
@@ -221,7 +244,9 @@ async def test_write_batch_rejects_unknown_batch_id_fk(hot_storage, pool):
 
 
 @pytest.mark.perf
-async def test_write_batch_bulk_meets_latency_budget(hot_storage, batch_repo, pool):
+async def test_write_batch_bulk_meets_latency_budget(
+    hot_storage: HotPostgresStorage, batch_repo: PostgresBatchRepository, pool: asyncpg.Pool
+) -> None:
     """읽기 경로(`test_read_columns_5000_candles_p95_measured`)는
     task-1038/9bdcd21 선례로 절대 지연을 의도적으로 비차단하지만, 그
     선례는 이 쓰기 경로에는 적용된 적이 없다 — `write_batch` 다중행 INSERT
@@ -264,8 +289,8 @@ async def test_write_batch_bulk_meets_latency_budget(hot_storage, batch_repo, po
 
 
 async def test_gate_red_single_call_check_violation_rolls_back_whole_insert(
-    hot_storage, batch_repo, pool
-):
+    hot_storage: HotPostgresStorage, batch_repo: PostgresBatchRepository, pool: asyncpg.Pool
+) -> None:
     """`write_batch` 한 번 호출에 유효한 candle과 CHECK 위반 candle을 함께
     넘기면, 다중행 INSERT는 문장 단위 원자성이라 유효한 쪽도 커밋되지
     않아야 한다(부분 성공 없음)."""
@@ -293,8 +318,8 @@ async def test_gate_red_single_call_check_violation_rolls_back_whole_insert(
 
 
 async def test_gate_red_transaction_fk_violation_rolls_back_prior_write(
-    hot_storage, batch_repo, pool
-):
+    hot_storage: HotPostgresStorage, batch_repo: PostgresBatchRepository, pool: asyncpg.Pool
+) -> None:
     """같은 트랜잭션 안에서 (a) 유효한 write_batch 성공 (b) 그 뒤 FK 위반
     write_batch를 실행하면, 트랜잭션 전체가 롤백돼 (a)도 커밋되지 않아야
     한다 — 게이트 적색이 문장 하나가 아니라 트랜잭션 전체의 원자적 실패임을
@@ -333,8 +358,8 @@ async def test_gate_red_transaction_fk_violation_rolls_back_prior_write(
 
 
 async def test_concurrent_write_batch_same_open_time_exactly_one_winner(
-    hot_storage, batch_repo, pool
-):
+    hot_storage: HotPostgresStorage, batch_repo: PostgresBatchRepository, pool: asyncpg.Pool
+) -> None:
     """서로 다른 커넥션(다중 워커/재수집 시뮬레이션) 8개가 동일한
     `(venue, instrument_id, timeframe, open_time)` PK를 동시에
     `write_batch`로 쓰려고 시도한다. 앱 레벨 check-then-insert였다면
@@ -375,8 +400,8 @@ async def test_concurrent_write_batch_same_open_time_exactly_one_winner(
 
 
 async def test_concurrent_write_batch_disjoint_open_times_all_succeed(
-    hot_storage, batch_repo, pool
-):
+    hot_storage: HotPostgresStorage, batch_repo: PostgresBatchRepository, pool: asyncpg.Pool
+) -> None:
     """겹치지 않는 `open_time`이면 동시에 write_batch해도 전부 성공해야
     한다 — PK 제약이 과도하게 넓게 직렬화(모든 동시 쓰기를 막음)하지
     않는다는 회귀 방지."""

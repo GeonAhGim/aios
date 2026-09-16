@@ -78,7 +78,7 @@ def test_unknown_redistribution_scope_string_is_rejected_at_construction() -> No
             source_id="BITGET",
             tier=SourceContractTier.ENTERPRISE,
             credential_ref="vault:bitget:v1",
-            redistribution_scope="NOT_A_SCOPE",
+            redistribution_scope=cast(RedistributionScope, "NOT_A_SCOPE"),
             rate_limit=1000,
             quota=1_000_000,
             valid_from=_NOW - timedelta(days=30),
