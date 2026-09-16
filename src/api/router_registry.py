@@ -9,6 +9,7 @@
 
 새 라우터는 `src/main.py`가 아니라 여기에 한 줄 추가한다.
 """
+
 from __future__ import annotations
 
 from fastapi import FastAPI
@@ -39,6 +40,7 @@ def register_routers(app: FastAPI) -> None:
         users,
         wallet,
     )
+    from src.api.routers.foundation import compliance as foundation_compliance
     from src.api.routers.foundation import connections as foundation_connections
     from src.api.routers.foundation import evidence as foundation_evidence
     from src.api.routers.foundation import ledger_admin as foundation_ledger_admin
@@ -54,14 +56,17 @@ def register_routers(app: FastAPI) -> None:
     app.include_router(auth.router, prefix="/auth", tags=["auth"])
     app.include_router(users.router, prefix="/users", tags=["users"])
     app.include_router(
-        exchange_credentials.router, prefix="/exchange-credentials", tags=["exchanges"])
+        exchange_credentials.router, prefix="/exchange-credentials", tags=["exchanges"]
+    )
     app.include_router(marketplace.router, prefix="/marketplace", tags=["marketplace"])
     app.include_router(
-        strategy_builder.router, prefix="/strategy-builder", tags=["strategy-builder"])
+        strategy_builder.router, prefix="/strategy-builder", tags=["strategy-builder"]
+    )
     app.include_router(suitability.router)
     app.include_router(foundation_trust.router)
     app.include_router(foundation_trust_memberships.router)
     app.include_router(foundation_mandates.router)
+    app.include_router(foundation_compliance.router)
     app.include_router(foundation_evidence.router)
     app.include_router(foundation_ledger_admin.router)
     app.include_router(foundation_connections.router)
