@@ -34,13 +34,13 @@ ConnectFn = Callable[[str], AbstractAsyncContextManager[WsConnection]]
 
 
 def _connect(url: str) -> AbstractAsyncContextManager[WsConnection]:
-    """`websockets.asyncio.client.connect()`가 반환하는 `Connect`는
-    구조적으로 `WsConnection`(send/pong/__aiter__)을 만족하는
-    `ClientConnection`을 내지만, mypy는 라이브러리 반환 타입 자체를
-    `AbstractAsyncContextManager`의 서브타입으로 인식하지 못한다(nh
-    PLT-40c 조사와 동일 원인) — `cast()`는 런타임에 아무 동작도 하지
-    않으므로(단순 타입 단언) 기존 `# type: ignore[return-value]`와
-    동일하게 무해하다."""
+    """`websockets.asyncio.client.connect()` returns a `Connect` that
+    structurally satisfies `WsConnection` (send/pong/__aiter__) via the
+    `ClientConnection` it yields, but mypy doesn't recognize the library's
+    own return type as a subtype of `AbstractAsyncContextManager` (same
+    root cause as the nh PLT-40c investigation) — `cast()` is a no-op at
+    runtime (a pure type assertion), equivalent to the previous
+    `# type: ignore[return-value]`."""
     return cast(AbstractAsyncContextManager[WsConnection], _default_connect(url))
 
 

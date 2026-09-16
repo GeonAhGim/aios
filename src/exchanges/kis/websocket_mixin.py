@@ -116,7 +116,7 @@ OrderCallback = Callable[[Order], Awaitable[None]]
 
 @runtime_checkable
 class _ApprovalKeyClient(Protocol):
-    """`_KISTokenTransportMixin` 전송/자격증명 계약(nh `_TokenizedClient` 패턴)."""
+    """`_KISTokenTransportMixin` transport/credential contract (nh `_TokenizedClient` pattern)."""
 
     _client: httpx.AsyncClient
     _app_key: str

@@ -56,10 +56,11 @@ ConnectFn = Callable[[str], AbstractAsyncContextManager[WsConnection]]
 
 
 def default_connect(url: str) -> AbstractAsyncContextManager[WsConnection]:
-    """`websockets.asyncio.client.connect`의 좁은 타입 래퍼 — 테스트가
-    주입하는 가짜 `connect_fn`과 같은 시그니처로 맞춘다. mypy가 라이브러리
-    반환 타입을 `AbstractAsyncContextManager`의 서브타입으로 인식하지
-    못하는 것은 nh PLT-40c 조사와 동일 원인 — `cast()`는 런타임 무해."""
+    """Narrow type wrapper around `websockets.asyncio.client.connect` —
+    matches the signature of the fake `connect_fn` tests inject. mypy
+    doesn't recognize the library's return type as a subtype of
+    `AbstractAsyncContextManager` (same root cause as the nh PLT-40c
+    investigation) — `cast()` is a no-op at runtime."""
     return cast(AbstractAsyncContextManager[WsConnection], _default_connect(url))
 
 
