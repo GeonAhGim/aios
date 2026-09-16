@@ -13,26 +13,45 @@
 `current().trace_id`를 읽는다. `bind(trace_id=...)`는 `RequestContextMiddleware`가
 매 요청 진입 시 호출하는 것과 동일한 컨텍스트 바인딩 지점이므로, 한 요청 안에서
 그 두 함수가 호출되는 상황을 그대로 재현한다.
+
+3차(task-3149 DEEPEN): 원 리프(commit 40f8586)는 happy-path/행위 확인뿐이라
+negative<3·실패 주입 0·수치 성능 단언 0·게이트 적색 재현 0으로 D2 하한
+미달이었다. 새 규칙 추가 없이 이 리프의 증빙만 보강한다 — `tenant_binding.py`의
+`rebind_tenant`(원래 "후속 리프가 배선할 신규 유틸"이라 전용 테스트 0건)에
+negative 3건, `RequestContextMiddleware.dispatch`를 직접 단위 호출해 실패 주입
+1건과 108 §8 "미들웨어 오버헤드 p95 < 1 ms" 성능 예산 단언 1건, 그 단언이
+tautology가 아님을 증명하는 게이트 적색 재현 1건을 추가한다.
 """
+
 from __future__ import annotations
 
 import logging
 import os
 import re
+import time
 import uuid
+from types import SimpleNamespace
 
 import asyncpg
 import pytest
 from httpx import ASGITransport, AsyncClient
+from starlette.requests import Request
+from starlette.responses import Response
 
-from src.api.middleware.request_context import TRACE_ID_HEADER
+from src.api.middleware import request_context as request_context_module
+from src.api.middleware.request_context import TRACE_ID_HEADER, RequestContextMiddleware
 from src.api.middleware.request_id import REQUEST_ID_HEADER
 from src.core.logging import fields as log_fields
 from src.core.logging.audit_log import record_audit_log
+from src.core.observability import context as observability_context
 from src.core.observability.context import bind
 from src.core.observability.context import current as current_request_context
+from src.core.observability.metric_names import AUTH_TENANT_MISMATCH_COUNT_TOTAL
+from src.core.observability.metrics import NullMetrics, set_metrics
+from src.core.observability.tenant_binding import rebind_tenant
 from src.foundation.evidence.adapters.postgres_repository import PostgresAuditEventRepository
 from src.foundation.evidence.application.record_command_event import record_command_event
+from src.foundation.trust.contracts.v1 import TenantContext
 from src.main import app
 
 _UUID_RE = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$")
@@ -212,3 +231,182 @@ async def test_record_audit_log_defaults_trace_id_to_current_context_negative(cl
     assert row_a["trace_id"] is not None
     assert row_b["trace_id"] is not None
     assert row_a["trace_id"] != row_b["trace_id"]
+
+
+# ---------------------------------------------------------------------------
+# task-3149 DEEPEN — tenant_binding.rebind_tenant negative tests.
+#
+# rebind_tenant는 원 리프에서 "후속 리프가 배선할 신규 유틸"로 남아 전용
+# 테스트가 0건이었다. INVARIANTS I1(스펙 446행)은 "한 trace_id에 둘 이상의
+# tenant_id가 관측되지 않는다"를 fail-open(요청은 진행) + warn + 카운터로
+# 강제하라고 규정한다 — 그 세 경로(최초 바인딩=불일치 아님, 반복 동일
+# tenant=불일치 아님, 실제 불일치=카운터+경고+fail-open)를 negative로 고정한다.
+# ---------------------------------------------------------------------------
+
+
+class _SpyMetrics(NullMetrics):
+    """counter() 호출만 기록하는 스파이 — 실제 prometheus 레지스트리를 만들지
+    않는다(PLT-10 스펙의 "NullMetrics 스파이" 패턴과 동일)."""
+
+    def __init__(self) -> None:
+        self.counters: list[tuple[str, dict[str, str] | None]] = []
+
+    def counter(self, name: str, labels: dict[str, str] | None = None) -> None:
+        self.counters.append((name, labels))
+
+
+@pytest.fixture
+def spy_metrics():
+    spy = _SpyMetrics()
+    set_metrics(spy)
+    try:
+        yield spy
+    finally:
+        set_metrics(NullMetrics())
+
+
+def test_rebind_tenant_first_binding_without_previous_tenant_is_not_a_mismatch(spy_metrics):
+    """negative: 인증 전에는 tenant_id가 아직 None이다(§3.1 계약) — 그 위에
+    최초로 tenant_id를 얹는 것은 "불일치"가 아니므로 카운터를 올리면 안 된다."""
+    trace_id = uuid.uuid4()
+    ctx = TenantContext(tenant_id=uuid.uuid4(), subject_id=uuid.uuid4(), mfa_verified=True)
+
+    with bind(trace_id=trace_id, tenant_id=None):
+        rebind_tenant(ctx)
+        assert observability_context.current().tenant_id == ctx.tenant_id
+        assert observability_context.current().actor_subject_id == ctx.subject_id
+
+    assert spy_metrics.counters == []
+
+
+def test_rebind_tenant_same_tenant_id_repeated_does_not_count_as_mismatch(spy_metrics):
+    """negative: 같은 tenant_id로 두 번 rebind해도(같은 요청 안에서 인증
+    의존성이 여러 번 통과하는 정상 상황) 거짓양성 mismatch가 나면 안 된다."""
+    trace_id = uuid.uuid4()
+    tenant_id = uuid.uuid4()
+    ctx = TenantContext(tenant_id=tenant_id, subject_id=uuid.uuid4(), mfa_verified=True)
+
+    with bind(trace_id=trace_id, tenant_id=tenant_id):
+        rebind_tenant(ctx)
+        rebind_tenant(ctx)
+
+    assert spy_metrics.counters == []
+
+
+def test_rebind_tenant_mismatch_increments_metric_and_warns_but_stays_fail_open(
+    spy_metrics, caplog
+):
+    """negative: 같은 trace_id 위에 서로 다른 tenant_id가 오면(비정상 상황,
+    예: admin 교차 조회) INVARIANTS I1대로 fail-open — 예외를 던져 요청을
+    막지 않되 mismatch 카운터를 올리고 경고 로그를 남긴다(스펙 446행)."""
+    trace_id = uuid.uuid4()
+    first_tenant = uuid.uuid4()
+    second_tenant = uuid.uuid4()
+    ctx = TenantContext(tenant_id=second_tenant, subject_id=uuid.uuid4(), mfa_verified=True)
+
+    with caplog.at_level(logging.WARNING, logger="src.core.observability.tenant_binding"):
+        with bind(trace_id=trace_id, tenant_id=first_tenant):
+            rebind_tenant(ctx)  # fail-open: 예외 없이 진행
+            assert observability_context.current().tenant_id == second_tenant
+
+    assert spy_metrics.counters == [(AUTH_TENANT_MISMATCH_COUNT_TOTAL, None)]
+    assert any(record.message == "tenant_mismatch" for record in caplog.records)
+
+
+# ---------------------------------------------------------------------------
+# task-3149 DEEPEN — RequestContextMiddleware.dispatch 실패 주입 + 성능 단언.
+#
+# 실DB/실앱 왕복(client 픽스처)은 라우팅·JSON 직렬화 시간이 섞여 미들웨어
+# 자체 오버헤드를 격리 측정할 수 없다. dispatch()를 직접 호출해 call_next를
+# 스텁으로 교체하면 trace_id 파싱·bind()·로그·메트릭만 남는다.
+# ---------------------------------------------------------------------------
+
+
+def _bare_request() -> Request:
+    scope = {
+        "type": "http",
+        "method": "GET",
+        "path": "/perf-probe",
+        "raw_path": b"/perf-probe",
+        "query_string": b"",
+        "headers": [],
+        "app": SimpleNamespace(routes=[]),
+        "client": ("test", 123),
+        "server": ("test", 80),
+        "scheme": "http",
+    }
+    return Request(scope)
+
+
+async def _dispatch_p95_ms(middleware: RequestContextMiddleware, *, n: int) -> float:
+    async def fast_call_next(request: Request) -> Response:
+        return Response(status_code=200)
+
+    durations_ms: list[float] = []
+    for _ in range(n):
+        request = _bare_request()
+        start = time.perf_counter()
+        await middleware.dispatch(request, fast_call_next)
+        durations_ms.append((time.perf_counter() - start) * 1000)
+    durations_ms.sort()
+    return durations_ms[int(len(durations_ms) * 0.95)]
+
+
+async def test_downstream_exception_still_emits_completion_log_before_propagating(spy_metrics):
+    """실패 주입: call_next가 처리되지 않은 예외로 죽어도(다운스트림 핸들러
+    버그) http_request_completed 로그 1줄은 finally 블록에서 먼저 기록된 뒤에
+    예외가 그대로 전파된다 — 크래시가 감사 흔적을 지우지 않는다는 R1("모든
+    요청이 끝까지 추적된다")의 fail-closed 성질을 직접 증명한다."""
+    capture = _StructuredCapture()
+    root = logging.getLogger()
+    root.addHandler(capture)
+    middleware = RequestContextMiddleware(app=lambda scope, receive, send: None)
+
+    async def exploding_call_next(request: Request) -> Response:
+        raise RuntimeError("boom - simulated handler crash")
+
+    request = _bare_request()
+    try:
+        with pytest.raises(RuntimeError, match="boom"):
+            await middleware.dispatch(request, exploding_call_next)
+    finally:
+        root.removeHandler(capture)
+
+    completed = [line for line in capture.lines if line.get("event") == "http_request_completed"]
+    assert len(completed) == 1
+    # call_next가 status_code를 절대 설정하지 못했으므로(예외로 죽음) dispatch()의
+    # 방어적 초기값 500이 그대로 로그에 남는다.
+    assert completed[0]["extra"]["status"] == 500
+
+
+async def test_middleware_dispatch_overhead_p95_under_1ms_budget(spy_metrics):
+    """수치 성능 단언: 108 §8 "미들웨어 오버헤드 p95 < 1 ms" 예산(스펙 524행).
+    call_next를 즉시 반환하는 스텁으로 바꿔 실제 라우팅·DB 시간을 섞지 않고,
+    dispatch() 자체의 오버헤드(trace_id 파싱·bind·로그·메트릭)만 200회 반복
+    측정한다."""
+    middleware = RequestContextMiddleware(app=lambda scope, receive, send: None)
+
+    p95_ms = await _dispatch_p95_ms(middleware, n=200)
+
+    assert p95_ms < 1.0
+
+
+async def test_middleware_overhead_budget_gate_fails_on_injected_regression(
+    spy_metrics, monkeypatch
+):
+    """게이트 적색 재현: 위 p95 단언이 실제로 회귀를 잡는지 확인한다 —
+    dispatch()가 호출하는 logger.info에 2ms 인위 지연을 주입해, 같은 측정
+    로직이 실제로 AssertionError를 내는지 본다(tautology가 아님을 증명)."""
+    middleware = RequestContextMiddleware(app=lambda scope, receive, send: None)
+    original_info = request_context_module.logger.info
+
+    def _slow_info(*args: object, **kwargs: object) -> None:
+        time.sleep(0.002)
+        original_info(*args, **kwargs)
+
+    monkeypatch.setattr(request_context_module.logger, "info", _slow_info)
+
+    p95_ms = await _dispatch_p95_ms(middleware, n=20)
+
+    with pytest.raises(AssertionError):
+        assert p95_ms < 1.0
