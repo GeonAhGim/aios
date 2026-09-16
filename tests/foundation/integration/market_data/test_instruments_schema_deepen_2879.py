@@ -394,7 +394,10 @@ async def test_concurrent_overlapping_inserts_exactly_one_winner(pool):
                     delisted_at=t0 + timedelta(days=1),
                 )
             return True
-        except asyncpg.exceptions.ExclusionViolationError:
+        except (
+            asyncpg.exceptions.ExclusionViolationError,
+            asyncpg.exceptions.DeadlockDetectedError,
+        ):
             return False
 
     results = await asyncio.gather(*(_attempt(i, iid) for i, iid in enumerate(instrument_ids)))
