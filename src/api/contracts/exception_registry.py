@@ -6,6 +6,7 @@ docstring 참조. `src.foundation.*` 매핑은 `exception_registry_foundation.py
 자매 모듈)에 있다. 공개 API(`map_exception()`/`override_status()`)는 `exception_mapping.py`가
 이 파일과 자매 모듈의 EXCEPTION_MAP_*/STATUS_OVERRIDE_*를 합쳐서 제공한다.
 """
+
 from __future__ import annotations
 
 from starlette import status
@@ -16,6 +17,12 @@ from src.core.approval.service import ApprovalError
 from src.core.db.conditional_write import ConcurrencyConflictError
 from src.core.indicators.talib_adapter import IndicatorError
 from src.core.script.artifact.compile import ScriptCompileError
+from src.core.security.break_glass import (
+    AdminMfaRequiredError,
+    BreakGlassInvalidStateError,
+    BreakGlassMfaRequiredError,
+    BreakGlassSelfApprovalError,
+)
 from src.services.account_deletion_service import AccountDeletionError
 from src.services.alert_service import AlertError, AlertNotFoundError
 from src.services.approval_settings_service import ApprovalSettingsError
@@ -134,6 +141,12 @@ EXCEPTION_MAP_SERVICES: list[tuple[type[Exception], ErrorCode]] = [
     (RebalanceError, ErrorCode.VALIDATION_INVALID_FIELD),
     # PLT-29(trust_memberships)·원장(ledger) 매핑은 foundation.* 소스라
     # exception_registry_foundation.py의 EXCEPTION_MAP_FOUNDATION에 있다.
+    # PLT-35 — break-glass grant(src/core/security/break_glass.py) +
+    # admin_deps.py의 MFA 게이트.
+    (AdminMfaRequiredError, ErrorCode.AUTH_MFA_REQUIRED),
+    (BreakGlassMfaRequiredError, ErrorCode.AUTH_MFA_REQUIRED),
+    (BreakGlassSelfApprovalError, ErrorCode.AUTHZ_FORBIDDEN),
+    (BreakGlassInvalidStateError, ErrorCode.STATE_INVALID_TRANSITION),
 ]
 
 STATUS_OVERRIDE_SERVICES: list[tuple[type[Exception], int]] = [
