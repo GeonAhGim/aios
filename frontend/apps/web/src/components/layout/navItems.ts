@@ -27,6 +27,7 @@ export const MAIN_NAV_ITEMS: NavItem[] = [
   { to: "/rebalance", label: "nav./rebalance" },
   { to: "/mandates", label: "nav./mandates" },
   { to: "/compliance", label: "nav./compliance" },
+  { to: "/decisions/history", label: "nav./decisions/history" },
   { to: "/reports", label: "nav./reports" },
   { to: "/wallet", label: "nav./wallet" },
   { to: "/wallet/ledger", label: "nav./wallet/ledger" },

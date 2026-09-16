@@ -231,6 +231,19 @@ export const catalogKo = {
       },
     },
   },
+  // task-2706 (UX-22): 결정 이력 뷰어. 새 판정/집계 로직 없음 — 기존
+  // ComplianceDecisionLookupPanel(CM-18)과 PositionJournalPanel(LB-19)을 그대로
+  // 재사용하고, 이 네임스페이스는 그 둘을 한 화면에 담는 페이지·진입점 문구만
+  // 갖는다(AiStudioPage와 같은 관용 — legacy 코드모드 대상이 아닌 신규 화면).
+  decisions: {
+    pageTitle: "결정 이력 뷰어",
+    eventLineage: {
+      heading: "이벤트 계보 조회(position_key)",
+      label: "포지션 키(position_key)",
+      button: "조회",
+      validationEmpty: "포지션 키를 입력하세요.",
+    },
+  },
   nav: {
     "/dashboard": "대시보드",
     "/onboarding/first-run": "시작하기",
@@ -250,6 +263,7 @@ export const catalogKo = {
     "/rebalance": "리밸런싱",
     "/mandates": "위임장",
     "/compliance": "컴플라이언스",
+    "/decisions/history": "결정 이력",
     "/reports": "보고서",
     "/wallet": "지갑",
     "/wallet/ledger": "지갑거래내역",

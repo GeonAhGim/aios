@@ -232,6 +232,15 @@ export const catalogEn = {
       },
     },
   },
+  decisions: {
+    pageTitle: "Decision history viewer",
+    eventLineage: {
+      heading: "Event lineage lookup (position_key)",
+      label: "Position key (position_key)",
+      button: "Look up",
+      validationEmpty: "Enter a position key.",
+    },
+  },
   nav: {
     "/dashboard": "Dashboard",
     "/onboarding/first-run": "Get started",
@@ -251,6 +260,7 @@ export const catalogEn = {
     "/rebalance": "Rebalance",
     "/mandates": "Mandates",
     "/compliance": "Compliance",
+    "/decisions/history": "Decision history",
     "/reports": "Reports",
     "/wallet": "Wallet",
     "/wallet/ledger": "Wallet ledger",
