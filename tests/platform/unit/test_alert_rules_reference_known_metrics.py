@@ -6,9 +6,11 @@ Spec: docs/specs/L4_platform_observability_tenancy_api_v1.0.md §7.4/§9 PLT-11.
 alert가 조용히 참조하는 사고를 정적으로 막는다. 로그 기반 규칙(`source: logs`)은
 Prometheus 메트릭이 아니므로 이 검증에서 자연히 제외된다(expr에 `aios_*` 토큰이 없음).
 """
+
 from __future__ import annotations
 
 import re
+import time
 from pathlib import Path
 from typing import Any
 
@@ -48,6 +50,35 @@ def _unknown_metric_tokens(rules: list[dict[str, Any]]) -> dict[str, set[str]]:
     return violations
 
 
+def _missing_required_fields(rule: dict[str, Any]) -> list[str]:
+    """rule에서 빠졌거나 허용되지 않은 값을 가진 필수 필드 이름 목록을 반환한다."""
+    missing: list[str] = []
+    if not rule.get("alert"):
+        missing.append("alert")
+    if not rule.get("expr"):
+        missing.append("expr")
+    if "for" not in rule:
+        missing.append("for")
+    labels = rule.get("labels") or {}
+    if labels.get("severity") not in {"warn", "critical"}:
+        missing.append("labels.severity")
+    if not labels.get("runbook"):
+        missing.append("labels.runbook")
+    if not (rule.get("annotations") or {}).get("summary"):
+        missing.append("annotations.summary")
+    return missing
+
+
+def _invalid_runbook_reason(rule: dict[str, Any], runbooks_dir: Path = RUNBOOKS_DIR) -> str | None:
+    """runbook 라벨이 형식·존재 여부 검증을 통과 못하면 사유를, 통과하면 None을 반환한다."""
+    runbook = rule["labels"]["runbook"]
+    if not _RUNBOOK_RE.match(runbook):
+        return f"잘못된 runbook id 형식 {runbook!r}"
+    if not (runbooks_dir / f"{runbook}.md").is_file():
+        return f"runbook 파일 없음 {runbook}"
+    return None
+
+
 def test_alert_rules_yaml_parses_and_has_groups() -> None:
     rules = _load_rules()
     assert len(rules) > 0
@@ -56,13 +87,7 @@ def test_alert_rules_yaml_parses_and_has_groups() -> None:
 def test_every_rule_has_required_fields() -> None:
     rules = _load_rules()
     for rule in rules:
-        assert rule.get("alert"), rule
-        assert rule.get("expr"), rule
-        assert "for" in rule, rule
-        labels = rule.get("labels") or {}
-        assert labels.get("severity") in {"warn", "critical"}, rule
-        assert labels.get("runbook"), rule
-        assert (rule.get("annotations") or {}).get("summary"), rule
+        assert _missing_required_fields(rule) == [], rule
 
 
 def test_alert_names_are_unique() -> None:
@@ -80,10 +105,8 @@ def test_every_rule_references_a_known_metric_name() -> None:
 def test_every_runbook_label_points_to_an_existing_runbook_file() -> None:
     rules = _load_rules()
     for rule in rules:
-        runbook = rule["labels"]["runbook"]
-        assert _RUNBOOK_RE.match(runbook), f"{rule['alert']}: 잘못된 runbook id 형식 {runbook!r}"
-        runbook_path = RUNBOOKS_DIR / f"{runbook}.md"
-        assert runbook_path.is_file(), f"{rule['alert']}: runbook 파일 없음 {runbook_path}"
+        reason = _invalid_runbook_reason(rule)
+        assert reason is None, f"{rule['alert']}: {reason}"
 
 
 def test_all_eight_runbooks_exist() -> None:
@@ -123,3 +146,97 @@ def test_every_spec_alert_id_is_present(alert_id: str) -> None:
     rules = _load_rules()
     prefixes = [rule["alert"].split("_", 1)[0] for rule in rules]
     assert alert_id in prefixes, f"{alert_id} 규칙 누락"
+
+
+def test_rule_missing_severity_label_is_rejected() -> None:
+    """negative: severity 라벨이 아예 없는 규칙은 필수 필드 검증에 걸려야 한다."""
+    bad_rule = {
+        "alert": "Bogus2",
+        "expr": "up == 1",
+        "for": "0m",
+        "labels": {"runbook": "RB-01"},
+        "annotations": {"summary": "x"},
+    }
+    assert "labels.severity" in _missing_required_fields(bad_rule)
+
+
+def test_rule_with_invalid_severity_value_is_rejected() -> None:
+    """negative: severity가 존재하지만 warn/critical이 아닌 값(오타 등)도 걸려야 한다."""
+    bad_rule = {
+        "alert": "Bogus3",
+        "expr": "up == 1",
+        "for": "0m",
+        "labels": {"severity": "info", "runbook": "RB-01"},
+        "annotations": {"summary": "x"},
+    }
+    assert "labels.severity" in _missing_required_fields(bad_rule)
+
+
+def test_runbook_id_with_wrong_format_is_rejected() -> None:
+    """negative: RB-NN 정규식에 맞지 않는 runbook id(자릿수 오타 등)는 거부돼야 한다."""
+    bad_rule = {"alert": "Bogus4", "labels": {"runbook": "RB-1"}}
+    reason = _invalid_runbook_reason(bad_rule)
+    assert reason is not None and "형식" in reason
+
+
+def test_runbook_pointing_to_nonexistent_file_is_rejected() -> None:
+    """negative: 형식은 RB-NN이 맞지만 실제 파일이 없는 runbook 참조(RB-99)는 거부돼야 한다."""
+    bad_rule = {"alert": "Bogus5", "labels": {"runbook": "RB-99"}}
+    reason = _invalid_runbook_reason(bad_rule)
+    assert reason is not None and "파일 없음" in reason
+
+
+def test_malformed_yaml_file_raises_instead_of_silently_passing(tmp_path: Path) -> None:
+    """실패 주입: 문법이 깨진 alert_rules.yaml(닫히지 않은 리스트)을 실제로 디스크에
+    써서 실 로더(_load_rules)에 태운다 — fail-closed 기본 원칙(CLAUDE.md §3)에 따라
+    파싱 실패는 조용히 규칙 0건으로 넘어가지 않고 예외로 드러나야 한다."""
+    bad_path = tmp_path / "alert_rules.yaml"
+    bad_path.write_text("groups:\n  - name: x\n    rules: [\n", encoding="utf-8")
+    with pytest.raises(yaml.YAMLError):
+        _load_rules(bad_path)
+
+
+def test_missing_groups_key_raises_instead_of_returning_empty(tmp_path: Path) -> None:
+    """실패 주입: 최상위 `groups` 키가 없는 파일(들여쓰기·키 이름 오타로 실제 발생 가능)을
+    실 로더에 태워 KeyError로 드러나는지 확인한다 — 빈 리스트를 반환해 "규칙 0건"을
+    정상으로 오인하면 alert_rules.yaml 전체가 조용히 무력화되는 사고로 이어진다."""
+    bad_path = tmp_path / "alert_rules.yaml"
+    bad_path.write_text("not_groups: []\n", encoding="utf-8")
+    with pytest.raises(KeyError):
+        _load_rules(bad_path)
+
+
+def test_full_validation_pipeline_p95_latency_within_budget() -> None:
+    """수치 성능 단언: 이 파일의 정적 검증은 CI 게이트마다 매번 실행된다. 전체 규칙
+    (11개)에 대해 메트릭 토큰 대조 + 필수 필드 + runbook 검증을 1회 통과하는 시간의
+    p95가 5ms를 넘지 않아야 한다 — 순수 정적 스캔(디스크 I/O 없이 이미 로드된 파이썬
+    객체만 순회)이므로 여유는 충분히 크게 잡았다."""
+    rules = _load_rules()
+    samples: list[float] = []
+    for _ in range(200):
+        start = time.perf_counter()
+        _unknown_metric_tokens(rules)
+        for rule in rules:
+            _missing_required_fields(rule)
+            if "runbook" in (rule.get("labels") or {}):
+                _invalid_runbook_reason(rule)
+        samples.append(time.perf_counter() - start)
+    samples.sort()
+    p95 = samples[int(len(samples) * 0.95)]
+    assert p95 < 0.005, f"p95={p95 * 1000:.3f}ms >= 5ms 예산"
+
+
+def test_gate_goes_red_when_a_real_rule_expr_is_corrupted_with_unknown_metric() -> None:
+    """게이트 적색 재현: 실제 alert_rules.yaml에서 로드한 규칙 중 하나의 expr에
+    존재하지 않는 메트릭 토큰을 주입한 뒤, test_every_rule_references_a_known_metric_name
+    이 쓰는 것과 동일한 단언식을 그대로 실행해 실제로 AssertionError가 나는지 확인한다 —
+    오타 메트릭이 실 파일에 병합돼도 CI가 실제로 빨간불이 됨을 증명한다(정적 검증만으로
+    "게이트가 통과할 것"이라 가정하지 않는다)."""
+    rules = _load_rules()
+    corrupted = [dict(r) for r in rules]
+    corrupted[0] = dict(corrupted[0])
+    corrupted[0]["expr"] = corrupted[0]["expr"] + " and aios_typo_metric_total > 0"
+
+    violations = _unknown_metric_tokens(corrupted)
+    with pytest.raises(AssertionError):
+        assert violations == {}, f"metric_names.py에 없는 메트릭 참조: {violations}"
