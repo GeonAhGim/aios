@@ -15,6 +15,9 @@ from src.api.contracts.error_codes import ErrorCode
 from src.api.contracts.exception_registry_foundation_mandates import (
     EXCEPTION_MAP_FOUNDATION_MANDATES,
 )
+from src.api.contracts.exception_registry_foundation_personal import (
+    EXCEPTION_MAP_FOUNDATION_PERSONAL,
+)
 from src.api.schemas.positions import InvalidCursorError
 from src.core.script.runtime.series import ScriptRuntimeError
 from src.foundation.backtest.application.quick_backtest import (
@@ -276,6 +279,9 @@ EXCEPTION_MAP_FOUNDATION: list[tuple[type[Exception], ErrorCode]] = [
     # tenant/unattributed). Follows the same non-disclosure-of-existence
     # 404-uniformity principle (same as §9 LB-19) — 404, not 403.
     (EntityContextResolutionError, ErrorCode.RESOURCE_NOT_FOUND),
+    # task-2749 U-15 — personal-mode PAPER->LIVE promotion checklist bucket,
+    # split into exception_registry_foundation_personal.py (P6.line_cap).
+    *EXCEPTION_MAP_FOUNDATION_PERSONAL,
 ]
 
 STATUS_OVERRIDE_FOUNDATION: list[tuple[type[Exception], int]] = [

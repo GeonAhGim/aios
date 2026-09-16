@@ -31,6 +31,7 @@ def register_routers(app: FastAPI) -> None:
         marketplace,
         metrics,
         notifications,
+        personal,
         portfolio,
         positions,
         reports,
@@ -88,6 +89,7 @@ def register_routers(app: FastAPI) -> None:
     app.include_router(reports.router, prefix="/reports", tags=["reports"])
     app.include_router(device_tokens.router, prefix="/device-tokens", tags=["device-tokens"])
     app.include_router(wallet.router, prefix="/wallet", tags=["wallet"])
+    app.include_router(personal.router)  # U-15(task-2749) /v1/foundation/personal
     app.include_router(alerts.router, prefix="/alerts", tags=["alerts"])
     app.include_router(metrics.router)
     app.include_router(health.router)
