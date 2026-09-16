@@ -9,6 +9,12 @@ services:
       - "5432:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
+  # M2-8 Phase2 — RedisStreamsEventBus 통합테스트용(tests/integration/event_bus/,
+  # `pytest -m redis`). 기본 pytest 실행에는 필요 없다(해당 마커는 addopts에서
+  # 제외됨) — 로컬에서 그 마커를 명시 실행할 때만 필요하다.
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6380:6379"
 volumes:
   pgdata:
-  # Event Bus는 Phase 1 In-process이므로 별도 컨테이너 불필요(05번 원칙)
