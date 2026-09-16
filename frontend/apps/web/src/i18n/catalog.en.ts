@@ -25,6 +25,7 @@ export const catalogEn = {
     retry: "Retry",
     save: "Save",
     loading: "Loading",
+    featureDisabled: "This feature is currently disabled.",
   },
   errors: {
     supportCode: "Support code: {{code}}",
@@ -232,6 +233,57 @@ export const catalogEn = {
       },
     },
   },
+  connectWizard: {
+    pageTitle: "Connection wizard",
+    stepLabel: "Step {{step}}/{{total}}",
+    steps: {
+      provider: {
+        title: "1. Choose provider",
+        providerLabel: "Provider code",
+        keyLabel: "Account key (opaque_account_ref)",
+        keyPlaceholder: "Paste the issued key",
+        keyHint: "The key is stored only in the server KeyRing and is masked on screen.",
+        capabilityLegend: "Requested permissions (read-only only)",
+        next: "Next",
+      },
+      permissions: {
+        title: "2. Review permissions",
+        readonlyNotice: "All selected permissions are read-only. Order or withdrawal permissions are never requested.",
+        confirmLabel: "I confirm only read-only permissions are requested.",
+        back: "Back",
+        next: "Next",
+      },
+      review: {
+        title: "3. Review and connect",
+        providerLabel: "Provider",
+        keyLabel: "Account key",
+        capabilityLabel: "Permissions",
+        back: "Back",
+        submit: "Connect",
+        success: "Connection request sent. Check its status under Settings > Connections.",
+        goToConnections: "Go to connections",
+      },
+    },
+  },
+  demoMode: {
+    pageTitle: "Demo mode",
+    description: "Try charts and backtests with a fixed sample dataset (1 year of 1-minute bars, 3 instruments) without a real connection.",
+    instrumentListLabel: "Sample instruments",
+    sampleTag: "Sample",
+    startCta: "Start demo",
+    chart: {
+      pageTitle: "Demo chart",
+      backLink: "Back to demo instruments",
+      runBacktest: "Run backtest now",
+      summary: {
+        heading: "Backtest summary",
+        finalEquity: "Final equity",
+        trades: "Trades",
+        maxDrawdown: "Max drawdown",
+      },
+      unknownInstrument: "Unknown demo instrument.",
+    },
+  },
   decisions: {
     pageTitle: "Decision history viewer",
     eventLineage: {
@@ -244,6 +296,8 @@ export const catalogEn = {
   nav: {
     "/dashboard": "Dashboard",
     "/onboarding/first-run": "Get started",
+    "/onboarding/connect": "Connection wizard",
+    "/onboarding/demo": "Demo mode",
     "/exchanges": "Exchanges",
     "/market/instruments": "Instruments",
     "/market/candles": "Candles",

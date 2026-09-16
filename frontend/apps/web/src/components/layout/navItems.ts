@@ -11,6 +11,8 @@ export interface NavItem {
 export const MAIN_NAV_ITEMS: NavItem[] = [
   { to: "/dashboard", label: "nav./dashboard" },
   { to: "/onboarding/first-run", label: "nav./onboarding/first-run" },
+  { to: "/onboarding/connect", label: "nav./onboarding/connect" },
+  { to: "/onboarding/demo", label: "nav./onboarding/demo" },
   { to: "/exchanges", label: "nav./exchanges" },
   { to: "/market/instruments", label: "nav./market/instruments" },
   { to: "/market/candles", label: "nav./market/candles" },

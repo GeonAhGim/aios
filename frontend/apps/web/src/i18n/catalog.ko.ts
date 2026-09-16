@@ -14,6 +14,7 @@ export const catalogKo = {
     retry: "다시 시도",
     save: "저장",
     loading: "불러오는 중",
+    featureDisabled: "이 기능은 현재 비활성화되어 있습니다.",
   },
   errors: {
     supportCode: "지원코드: {{code}}",
@@ -231,6 +232,63 @@ export const catalogKo = {
       },
     },
   },
+  // task-2632(U-10): connections API(FE-OPS-5) 위에 얹는 3단계 마법사 —
+  // provider/key/권한 입력 → 읽기 전용 권한 점검 → 검토·제출. 키 원문은 이
+  // 네임스페이스가 아니라 컴포넌트의 maskKey()가 마스킹해 다룬다.
+  connectWizard: {
+    pageTitle: "연결 마법사",
+    stepLabel: "{{step}}/{{total}}단계",
+    steps: {
+      provider: {
+        title: "1. 공급자 선택",
+        providerLabel: "공급자 코드",
+        keyLabel: "계정 키(opaque_account_ref)",
+        keyPlaceholder: "발급받은 키를 붙여넣으세요",
+        keyHint: "키는 서버 KeyRing에만 저장되며 화면에는 마스킹되어 표시됩니다.",
+        capabilityLegend: "요청 권한(읽기 전용만 가능)",
+        next: "다음",
+      },
+      permissions: {
+        title: "2. 권한 점검",
+        readonlyNotice: "선택한 권한은 모두 읽기 전용입니다. 주문·출금 권한은 요청되지 않습니다.",
+        confirmLabel: "읽기 전용 권한만 요청됨을 확인했습니다.",
+        back: "이전",
+        next: "다음",
+      },
+      review: {
+        title: "3. 검토 및 연결",
+        providerLabel: "공급자",
+        keyLabel: "계정 키",
+        capabilityLabel: "권한",
+        back: "이전",
+        submit: "연결하기",
+        success: "연결 요청을 보냈습니다. 설정 > 연결에서 상태를 확인하세요.",
+        goToConnections: "연결 목록으로 이동",
+      },
+    },
+  },
+  // task-2632(U-10): 데모 모드 — 고정 샘플 데이터셋(1년 M1 3종목)으로 실 연결
+  // 없이 차트·백테스트를 체험한다. 데이터 자체는 demoDataset.ts가 결정론적으로
+  // 생성하고, 여기는 화면 문구만 갖는다.
+  demoMode: {
+    pageTitle: "데모 모드",
+    description: "고정 샘플 데이터(1년치 1분봉, 3종목)로 실제 연결 없이 차트와 백테스트를 체험합니다.",
+    instrumentListLabel: "샘플 종목",
+    sampleTag: "샘플",
+    startCta: "데모 시작",
+    chart: {
+      pageTitle: "데모 차트",
+      backLink: "데모 종목 목록으로",
+      runBacktest: "지금 백테스트 실행",
+      summary: {
+        heading: "백테스트 요약",
+        finalEquity: "최종 자산",
+        trades: "거래 횟수",
+        maxDrawdown: "최대 낙폭",
+      },
+      unknownInstrument: "알 수 없는 데모 종목입니다.",
+    },
+  },
   // task-2706 (UX-22): 결정 이력 뷰어. 새 판정/집계 로직 없음 — 기존
   // ComplianceDecisionLookupPanel(CM-18)과 PositionJournalPanel(LB-19)을 그대로
   // 재사용하고, 이 네임스페이스는 그 둘을 한 화면에 담는 페이지·진입점 문구만
@@ -247,6 +305,8 @@ export const catalogKo = {
   nav: {
     "/dashboard": "대시보드",
     "/onboarding/first-run": "시작하기",
+    "/onboarding/connect": "연결 마법사",
+    "/onboarding/demo": "데모 모드",
     "/exchanges": "거래소",
     "/market/instruments": "종목",
     "/market/candles": "캔들",

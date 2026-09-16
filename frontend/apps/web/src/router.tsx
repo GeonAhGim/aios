@@ -33,9 +33,13 @@ import { ListingDetailPage } from "./routes/marketplace/ListingDetailPage";
 import { MarketplaceBrowsePage } from "./routes/marketplace/MarketplaceBrowsePage";
 import { SellStrategyPage } from "./routes/marketplace/SellStrategyPage";
 import { MandatesPage } from "./routes/mandates/MandatesPage";
+import { ConnectionWizardPage } from "./routes/onboarding/ConnectionWizardPage";
+import { DemoChartPage } from "./routes/onboarding/DemoChartPage";
+import { DemoModePage } from "./routes/onboarding/DemoModePage";
 import { MfaSetupPage } from "./routes/onboarding/MfaSetupPage";
 import { OnboardingFlowPage } from "./routes/onboarding/OnboardingFlowPage";
 import { RiskAssessmentPage } from "./routes/onboarding/RiskAssessmentPage";
+import { FeatureFlagGate } from "./components/FeatureFlagGate";
 import { PortfolioPage } from "./routes/portfolio/PortfolioPage";
 import { RebalancePage } from "./routes/whatif/RebalancePage";
 import { ReportsPage } from "./routes/reports/ReportsPage";
@@ -75,6 +79,30 @@ export const router = createBrowserRouter([
   { path: "/onboarding/mfa-setup", element: protect(<MfaSetupPage />) },
   { path: "/onboarding/risk-assessment", element: protect(<RiskAssessmentPage />) },
   { path: "/onboarding/first-run", element: protect(<OnboardingFlowPage />) },
+  {
+    path: "/onboarding/connect",
+    element: protect(
+      <FeatureFlagGate flag="onboarding_connection_wizard">
+        <ConnectionWizardPage />
+      </FeatureFlagGate>,
+    ),
+  },
+  {
+    path: "/onboarding/demo",
+    element: protect(
+      <FeatureFlagGate flag="onboarding_demo_mode">
+        <DemoModePage />
+      </FeatureFlagGate>,
+    ),
+  },
+  {
+    path: "/onboarding/demo/:instrumentId",
+    element: protect(
+      <FeatureFlagGate flag="onboarding_demo_mode">
+        <DemoChartPage />
+      </FeatureFlagGate>,
+    ),
+  },
   { path: "/dashboard", element: protect(<DashboardPage />) },
   { path: "/exchanges", element: protect(<ExchangeManagementPage />) },
   { path: "/market/instruments", element: protect(<InstrumentsPage />) },
