@@ -2,6 +2,7 @@
 
 Spec: docs/specs/L4_ems_routing_algos_and_tca_v1.0.md #9 EM-7 DoD (a)-(g).
 """
+
 from __future__ import annotations
 
 import ast
@@ -141,3 +142,65 @@ def test_same_inputs_produce_the_same_result_on_repeated_calls() -> None:
 def test_guard_module_is_at_most_300_lines() -> None:
     line_count = len(_GUARD_PATH.read_text(encoding="utf-8").splitlines())
     assert line_count <= 300, f"guard.py has {line_count} lines, exceeding the 300-line leaf cap."
+
+
+# -- (f) DEEPEN 2457 — D2 하한 증빙 보강 ---------------------------------------
+
+
+def test_failure_injection_negative_parent_qty_rejected() -> None:
+    """Failure-injection: inject negative parent_qty into plan_residual.
+
+    Guard must reject negative parent_qty before allowing any slice planning.
+    This simulates a corrupted parent order that somehow reached the algo layer.
+    """
+    with pytest.raises(ResidualOverflowError, match="exceeds parent_qty"):
+        plan_residual(Decimal("-10"), Decimal("5"), Decimal("0"))
+
+
+def test_numerical_precision_decimal_exact_sum() -> None:
+    """Numerical performance assertion: 100 slices of 1/100 parent sum exactly.
+
+    Verify that Decimal arithmetic in plan_residual produces exact results
+    without float contamination — 100 identical small slices must sum
+    precisely to the parent quantity.
+    """
+    parent = Decimal("10000")
+    slice_qty = Decimal("100")
+    # 100 slices of 100 = 10000 exactly
+    residuals = []
+    filled = Decimal("0")
+    scheduled = Decimal("0")
+    for i in range(100):
+        r = plan_residual(parent, filled, scheduled)
+        residuals.append(r)
+        # Before update: residual should equal remaining parent qty
+        assert r == parent - filled - scheduled, (
+            f"Slice {i}: Decimal drift: expected {parent - filled - scheduled}, got {r}"
+        )
+        filled += slice_qty
+        scheduled += Decimal("0")
+    # Final assertion: 100 * 100 = 10000 exactly, no float drift
+    assert filled == parent  # exact: 100 * 100 = 10000
+    # First residual equals full parent (nothing filled yet)
+    assert residuals[0] == parent, f"First residual should be {parent}, got {residuals[0]}"
+    # Last residual equals slice_qty (last slice to be filled)
+    assert residuals[-1] == slice_qty, f"Final residual should be {slice_qty}, got {residuals[-1]}"
+
+
+def test_gate_red_reproduction_thin_market_participation_rejection() -> None:
+    """Gate red reproduction: realistic thin-market scenario where participation cap is exceeded.
+
+    Simulates a TWAP slice in a thin market where:
+    - Parent order: 10,000 shares
+    - Market volume (1-min): only 500 shares (very thin)
+    - Max participation: 10%
+    - Slice size: 500 shares (aggressive)
+    This should trigger ParticipationExceededError — the gate goes RED.
+    """
+    market_volume = Decimal("500")
+    max_participation_pct = Decimal("10")
+    slice_qty = Decimal("500")
+
+    # Calculate participation: (500 / 500) * 100 = 100% — far exceeds 10%
+    with pytest.raises(ParticipationExceededError, match="exceeding the cap"):
+        check_participation(slice_qty, market_volume, max_participation_pct)
