@@ -3,8 +3,10 @@
 Spec: docs/specs/L4_platform_observability_tenancy_api_v1.0.md §2.2, §3.4, §9 PLT-23
 DoD("단위: kid 회전·alg 고정").
 """
+
 from __future__ import annotations
 
+import time
 from datetime import datetime, timedelta, timezone
 from uuid import uuid4
 
@@ -12,6 +14,7 @@ import jwt
 import pytest
 from pydantic import ValidationError
 
+import src.services.auth.tokens as tokens_module
 from src.services.auth.tokens import (
     AccessClaims,
     SigningKeyConfigError,
@@ -168,3 +171,52 @@ def test_issue_refresh_is_random_each_call() -> None:
     first, _ = TokenIssuer.issue_refresh()
     second, _ = TokenIssuer.issue_refresh()
     assert first != second
+
+
+def _issue_and_verify_p95_ms(issuer: TokenIssuer, verifier: TokenVerifier, *, n: int) -> float:
+    durations_ms: list[float] = []
+    for _ in range(n):
+        start = time.perf_counter()
+        token = issuer.issue_access(
+            user_id=uuid4(), tenant_id=uuid4(), session_id=uuid4(), auth_level="PASSWORD"
+        )
+        verifier.verify(token)
+        durations_ms.append((time.perf_counter() - start) * 1000)
+    durations_ms.sort()
+    return durations_ms[int(len(durations_ms) * 0.95)]
+
+
+def test_issue_and_verify_p95_under_borrowed_pretrade_gate_budget() -> None:
+    """수치 성능 단언: ADR-2026-09-09-C Decision 1 예산표에 access 토큰
+    발급/검증 전용 항목은 없다 — I/O 없는 순수 CPU 연산(로컬 동기 검사 1회)
+    이라는 점에서 가장 가까운 유사 항목("사전거래 게이트 p99 5ms")을 자체
+    예산으로 차용한다(task-3148 PLT-22 DEEPEN과 동일 차용 근거).
+    issue_access+verify 50회 반복 p95를 그 예산 내로 단언한다."""
+    issuer = _issuer("v1")
+    verifier = _verifier()
+
+    p95_ms = _issue_and_verify_p95_ms(issuer, verifier, n=50)
+
+    assert p95_ms < 5.0
+
+
+def test_issue_and_verify_budget_gate_fails_on_injected_regression(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """게이트 적색 재현: 위 p95 단언이 실제로 회귀를 잡는지 확인한다 —
+    `jwt.encode`에 10ms 인위 지연을 주입해, 같은 측정 로직이 실제로
+    AssertionError를 내는지 본다(tautology가 아님을 증명)."""
+    original_encode = tokens_module.jwt.encode
+
+    def _slow_encode(*args: object, **kwargs: object) -> str:
+        time.sleep(0.01)
+        return original_encode(*args, **kwargs)
+
+    monkeypatch.setattr(tokens_module.jwt, "encode", _slow_encode)
+
+    issuer = _issuer("v1")
+    verifier = _verifier()
+    p95_ms = _issue_and_verify_p95_ms(issuer, verifier, n=10)
+
+    with pytest.raises(AssertionError):
+        assert p95_ms < 5.0

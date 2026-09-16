@@ -3,11 +3,15 @@ refresh 회전 후 이전 해시 재사용 감지 시 세션 revoke.
 
 Spec: docs/specs/L4_platform_observability_tenancy_api_v1.0.md §2 M3, §3.4, §9 PLT-23.
 """
+
 from __future__ import annotations
 
+import asyncio
+import time
 from datetime import datetime, timedelta, timezone
 from uuid import uuid4
 
+import asyncpg
 import pytest
 
 from src.services.auth import session_repository as sessions
@@ -145,3 +149,51 @@ async def test_revoke_all_for_user_returns_count_and_revokes_only_active(pool):
 
     assert row_a["revoke_reason"] == "logout"
     assert row_b["revoke_reason"] == "admin_suspend"
+
+
+async def _rotate_refresh_p95_ms(pool, user_id, *, n: int) -> float:
+    durations_ms: list[float] = []
+    for _ in range(n):
+        session = await _insert_session(pool, user_id)
+        _new_plaintext, new_hash = TokenIssuer.issue_refresh()
+        async with pool.acquire() as conn:
+            start = time.perf_counter()
+            await sessions.rotate_refresh(
+                conn, session.id, expected_hash=session.refresh_hash, new_hash=new_hash
+            )
+            durations_ms.append((time.perf_counter() - start) * 1000)
+    durations_ms.sort()
+    return durations_ms[int(len(durations_ms) * 0.95)]
+
+
+async def test_rotate_refresh_p95_under_borrowed_single_roundtrip_budget(pool):
+    """수치 성능 단언: ADR-2026-09-09-C Decision 1 예산표에 refresh 회전
+    전용 항목은 없다 — `rotate_refresh`는 `conditional_update` 1회(단일 실DB
+    왕복)라는 점에서 가장 가까운 유사 항목("주문 제출→ACK p95 50ms(paper)")을
+    자체 예산으로 차용한다(task-3148 PLT-22 DEEPEN과 동일 차용 근거).
+    rotate_refresh 30회 반복 p95를 그 예산 내로 단언한다."""
+    user_id = await create_test_user(pool)
+
+    p95_ms = await _rotate_refresh_p95_ms(pool, user_id, n=30)
+
+    assert p95_ms < 50.0
+
+
+async def test_rotate_refresh_budget_gate_fails_on_injected_regression(pool, monkeypatch):
+    """게이트 적색 재현: 위 p95 단언이 실제로 회귀를 잡는지 확인한다 —
+    `conditional_update`가 내부적으로 쓰는 `asyncpg.Connection.fetchrow`에
+    60ms 인위 지연을 주입해, 같은 측정 로직이 실제로 AssertionError를
+    내는지 본다(tautology가 아님을 증명)."""
+    user_id = await create_test_user(pool)
+    original_fetchrow = asyncpg.Connection.fetchrow
+
+    async def _slow_fetchrow(self: asyncpg.Connection, *args: object, **kwargs: object) -> object:
+        await asyncio.sleep(0.06)
+        return await original_fetchrow(self, *args, **kwargs)
+
+    monkeypatch.setattr(asyncpg.Connection, "fetchrow", _slow_fetchrow)
+
+    p95_ms = await _rotate_refresh_p95_ms(pool, user_id, n=5)
+
+    with pytest.raises(AssertionError):
+        assert p95_ms < 50.0
