@@ -206,3 +206,50 @@ task store 참고).
   `-p` stdin mode; `cursor-local` size 1. External lanes are excluded from OPS-12 rebalancing (subscription
   quotas, not RAM, are their bound).
 - Tests: pm tests/test_auto_route_external.py, tests/test_engines.py.
+
+## 파일럿 재확인 (2026-09-16, backend follow-up task-3544)
+
+task-3534(ops)가 "배치 절단은 backend 도메인 판단(BR축 제외) 필요"로 위임한 후속. 이번 재확인에서
+지난 세 차례(2026-09-08, task-3194, task-3534)와 다른 지점에서 추가로 막혔다 — gh 인증만이
+유일한 걸림돌이 아니었다.
+
+- **gh 인증**: 이번에도 실패. 이 worktree(`C:\aios\wt\backend-1`)에서 `gh auth status` →
+  "You are not logged into any GitHub hosts." task-3534(ops-1 worktree)의 성공과 다시 엇갈린다 —
+  이전 노트들의 "그때그때 한 프로세스에만 있다가 사라진다" 관찰이 그대로 재현됐다. 영구 공급
+  방법(로그인 vs `GH_TOKEN` 고정)에 대한 PM/CA 결정은 여전히 없다.
+- **예산 전제 자체가 낡았다**: task-3534 노트가 적은 "`type-ignore-budget.txt`=201, 실측=242(회귀)"는
+  이번 리프 시작 시점에는 이미 사실이 아니다. commit `7e3c4c7d`(task-2683, KIS 잔여 43건 제거)가
+  이 리프 이전에 main에 반영돼 있어, 실측 재실행 결과 `type-ignore-budget.txt`=152, 실제
+  `check_type_ignore_budget.py`=152로 예산 초과가 없다(OK). 즉 "예산 회귀를 해소할 20건"이라는
+  급박성은 이번 시점에는 존재하지 않는다 — 파일럿은 여전히 유효한 목적(D1~D3 배관 실증)이지만,
+  긴급한 예산 위반 해소가 아니라 순수 기술부채 감축 + 파이프라인 실증 목적으로 재정의해야 한다.
+- **src/ 배치는 격리 경로 판정에 원천적으로 걸린다**: 남은 152건 중 kis/bitget(BR축, 어댑터
+  파일명 기준 `kis_provider.py`/`bitget_provider.py` 포함)을 제외한 `src/` 후보는 14건뿐이다 —
+  `src/api/routers/backtests.py`(1), `src/core/indicators/generate_specs.py`(11),
+  `src/foundation/evidence/domain/rules.py`(1), `src/services/execution_loop/equity_tracker.py`(1),
+  `src/services/execution_loop/scheduler.py`(1). 20건에 못 미칠 뿐 아니라, `src/*`는 애초에
+  `tiers.yaml: isolated_paths`(`frontend/*`·`docs/*`·`tests/*`)에 없는 경로라 A2(`orchestrator.
+  reroute_non_isolated_copilot`)가 `gh agent-task create` 호출 전에 해당 task를 무조건 로컬
+  레인으로 되돌린다 — src/ 배치로 만드는 순간 이번 파일럿의 DoD("오케스트레이터가 실제로 gh
+  agent-task create를 호출하는 것까지 관찰")는 인증 여부와 무관하게 항상 실패한다.
+  반면 실측 152건 중 125건(`tests/unit` 60, `tests/foundation` 39, `tests/integration` 22,
+  `tests/adversarial` 4)이 `tests/*`에 있고, 이 경로는 이미 격리 경로 허용 목록에 있다 — 파일럿을
+  실제로 gh 호출까지 밀어붙이려면 배치를 `tests/*`로 잡아야 한다(BR축 제외 원칙은 kis/bitget
+  전용 fixture·테스트에 그대로 적용).
+- **role:copilot task 생성 자체가 backend worker 권한 밖**: `C:\aios\pm\CLAUDE.md`("새 task는
+  `create_task`로만 만든다")와 `.claude/hooks/deny_live_pm_writes.py`(라이브 `tasks/*.json` 직접
+  편집 차단)에 따르면 새 task 파일은 `orchestrator.create_task`(오케스트레이터/CA 스크립트 전용)
+  경로로만 만들어진다 — 이 저장소 CLAUDE.md §4("task 상태 갱신은 자기 task 파일에만")와 정합적인
+  제약이다. backend-1 worker는 자기 task-3544.json 갱신 권한만 있고, 새 task-<id>.json을 직접
+  만들 권한이 없다. 지난 세 차례의 "인증 없으면 만들지 않는다"는 판단은 옳았지만, 인증이 됐어도
+  이 권한 경계 때문에 backend/ops worker가 직접 role:copilot task를 만들 수는 없었다 — 이번에
+  처음 드러난 사실이다.
+
+**PM/CA 결정 필요**: 위 네 가지가 모두 해소돼야 파일럿이 실제로 PR 생성까지 간다. 제안:
+(1) `type-ignore-budget.txt`는 이제 152=152로 정상이므로, 이 배치를 "예산 회귀 해소"가 아니라
+"D2 기준 기계적 대량 작업"으로 재분류해 PM/CA가 직접(또는 ops task로) `create_task`를 호출한다.
+(2) 새 task의 `files`는 `tests/unit`·`tests/foundation`에서 kis/bitget 전용 파일을 제외한 20건
+내외로 잡아 격리 경로 판정을 통과시킨다. (3) spawn 시점 `gh_authenticated()` 재확인은 오케스트레이터
+자기 프로세스 기준이므로 이 리프의 worktree 실패가 spawn 실패를 보장하지는 않는다 — 실제 관찰은
+task 생성 후 오케스트레이터 로그로 한다. (4) 영구 GitHub 자격증명 공급(로그인 vs `GH_TOKEN`)은
+여전히 미결이며 이번에도 대체하지 않는다.
