@@ -7,11 +7,17 @@
 대조 — hypothesis 미설치라 `random.Random`), (4) negative: 인자 개수·bool·길이
 불일치는 `BuiltinCallError`(fail-closed), (5) I-10 배선: `default_builtins()`로
 파싱→IR→실행 경로에서 실제 디스패치됨.
+(6) DEEPEN(task-2920) 수치 성능 단언: 시리즈 인자 빌트인 호출(브로드캐스트 포함)
+1회 지연이 ADR-2026-09-09-C 백테스트 예산 하루치 몫 안에 든다.
+(7) DEEPEN(task-2920) 게이트 적색 재현: `_numeric()`의 bool 거부(19~20행)가
+없으면 `True`/`False`가 수치로 조용히 통과함을 먼저 보이고, 실장은 즉시 거부한다.
 """
+
 from __future__ import annotations
 
 import math
 import random
+import time
 from collections.abc import Callable
 
 import pytest
@@ -223,3 +229,62 @@ def test_wired_through_interpreter_with_default_builtins() -> None:
     assert result.signals["ok"] == Series((False, True, False, True))
     with pytest.raises(ScriptRuntimeError, match="미등록"):
         execute(lower_program(parse(src)), bar_count=4, inputs={"close": close})
+
+
+# ---- DEEPEN(task-2920): 수치 성능 단언(빌트인 호출 지연) ----
+
+
+def test_series_builtin_call_latency_p95_within_backtest_budget_slice() -> None:
+    """ADR-2026-09-09-C Decision 1의 백테스트 예산(로컬 기준, 1개월 M1 1심볼 3초)
+    중 빌트인 호출 1회(하루치 bar_count=1440, 1일치 1분봉에 시리즈 인자를 브로드
+    캐스트하는 `apply_elementwise` 경로) 몫을 5ms로 상한한다 — DSL-8 인터프리터
+    실행 예산(250ms/30-let 체인, task-2917)에서 빌트인 호출 1개가 차지할 몫에
+    넉넉한 여유를 둔 수치다. 20회 반복 실행해 p95로 잰다."""
+    bar_count = 1440
+    series = Series.of_floats([float(i % 97) - 48.0 for i in range(bar_count)])
+    site = CallSite("math", "abs", "series<float>", bar_count)
+    fn = MATH_BUILTINS[("math", "abs")]
+
+    samples = []
+    for _ in range(20):
+        start = time.perf_counter()
+        fn((series,), site)
+        samples.append(time.perf_counter() - start)
+    samples.sort()
+    p95 = samples[min(int(len(samples) * 0.95), len(samples) - 1)]
+
+    budget_sec = 0.005
+    print(f"[math.abs] bar_count={bar_count} p95={p95 * 1e3:.3f}ms budget<{budget_sec * 1e3:.0f}ms")
+    assert p95 < budget_sec
+
+
+# ---- DEEPEN(task-2920): 게이트 적색 재현(bool 도메인 거부 무력화) ----
+
+
+def test_disabling_bool_domain_guard_lets_true_false_compute_silently_regression(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """`_numeric()`의 bool 거부(모듈 docstring 19~20행 "Python `bool`이 `int`의
+    하위형이라 명시적으로 걸러낸다")가 무력화되는 회귀를 먼저 재현한다: bool
+    검사를 지운 버전으로 바꿔치기하면 `True`/`False`가 수치로 조용히 통과해
+    `math.abs(True)`가 `1.0`을 낸다(레드 — DSL-4가 bool 반환을 모델링하지 않는데도
+    bool이 float 결과 계산에 섞여 들어간다). `_numeric`은 `apply_elementwise`
+    안에서 이름으로(모듈 전역) 조회되므로 모듈 속성 교체가 실제 호출 경로에
+    반영된다. 원래 구현은 `BuiltinCallError`(SCRIPT_BUILTIN_ARG)로 즉시 거부한다
+    (회귀 가드)."""
+    import src.core.script.runtime.builtins_math as builtins_math_module
+
+    def numeric_without_bool_guard(v: object, where: str) -> float | None:
+        if v is None:
+            return None
+        if not isinstance(v, int | float):
+            raise BuiltinCallError("SCRIPT_BUILTIN_ARG", f"{where}: 수치가 아닙니다: {v!r}")
+        return float(v)
+
+    monkeypatch.setattr(builtins_math_module, "_numeric", numeric_without_bool_guard)
+    assert call("abs", True) == 1.0  # 레드: bool이 수치로 조용히 통과
+
+    monkeypatch.undo()
+    with pytest.raises(BuiltinCallError) as info:
+        call("abs", True)
+    assert info.value.reason == "SCRIPT_BUILTIN_ARG"
