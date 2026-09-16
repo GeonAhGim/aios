@@ -520,6 +520,57 @@ async def test_upsert_rejects_nil_mark_price_when_present_in_lots(pool, repo):
     assert fetched.mark_price.amount == mark_price.amount
 
 
+async def test_sequential_first_creation_after_winner_commits_does_not_overwrite(pool, repo):
+    """task-3568 review REJECT (finding 2), task-3863 regression fix: `last_journal_seq
+    IS NOT DISTINCT FROM $16` alone cannot tell "no row for this key" apart from "a row
+    already exists whose seq happens to be 0" -- a brand-new key's first row is *always*
+    written at `last_journal_seq=0` too. Before the fix, a second, unsynchronized
+    "first creation" call (`expected_seq=0`) that lands *after* the first one already
+    committed would read the winner's just-committed seq=0 row, mistake it for a
+    legitimate prior version, delete it, and silently insert the loser's data in its
+    place -- no `ConcurrencyConflictError`, no unique-violation, just quiet data loss.
+    Unlike a true in-flight INSERT-vs-INSERT overlap (which resolves via `ON CONFLICT
+    DO NOTHING`), this reproduces the *sequential* interleaving directly: the winner's
+    transaction is fully committed before the loser's `upsert` call even starts, so
+    there is no INSERT-vs-INSERT overlap for the unique index to arbitrate -- only the
+    DELETE's own seq-match logic stood between the loser and a silent overwrite."""
+    tenant_id, account_id = await _setup(pool)
+    position_key = _key(tenant_id)
+
+    winner = _snapshot(
+        tenant_id=tenant_id,
+        account_id=account_id,
+        position_key=position_key,
+        quantity=Decimal("0"),
+        last_journal_seq=0,
+    )
+    async with pool.acquire() as conn, conn.transaction():
+        created = await repo.upsert(conn, winner, expected_seq=0)
+    winner_instrument_id = created.instrument_id
+
+    loser = _snapshot(
+        tenant_id=tenant_id,
+        account_id=account_id,
+        position_key=position_key,
+        quantity=Decimal("999"),
+        last_journal_seq=0,
+    )
+    with pytest.raises(ConcurrencyConflictError):
+        async with pool.acquire() as conn, conn.transaction():
+            await repo.upsert(conn, loser, expected_seq=0)
+
+    row = await _row(pool, position_key)
+    assert row is not None
+    assert row["quantity"] == Decimal("0"), "loser's first-creation retry overwrote the winner"
+    assert row["last_journal_seq"] == 0
+    assert await _count(pool, position_key) == 1
+
+    async with pool.acquire() as conn, conn.transaction():
+        fetched = await repo.get(conn, tenant_id, position_key)
+    assert fetched is not None
+    assert fetched.instrument_id == winner_instrument_id
+
+
 async def test_list_open_returns_only_nonzero_quantity_for_tenant_and_account(pool, repo):
     tenant_id, account_id = await _setup(pool)
     open_key = _key(tenant_id)

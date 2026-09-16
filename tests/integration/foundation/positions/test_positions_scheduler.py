@@ -170,7 +170,12 @@ async def _open_position(
         mark_price=None,
         mark_at=None,
         base_currency=Currency.USDT,
-        last_journal_seq=0,
+        # task-3863: a real "open" position (quantity != 0) always got there via
+        # record_fill folding at least one journal entry, so last_journal_seq=1
+        # here (not the 0 sentinel that means "no row for this key yet") -- an
+        # already-open position's mark-price replace must stay a normal CAS, not
+        # collide with the adapter's first-creation-only guard at expected_seq=0.
+        last_journal_seq=1,
         updated_at=_NOW,
     )
     repo = PostgresSnapshotRepository(pool)
@@ -385,11 +390,13 @@ async def test_concurrent_fill_during_mark_cycle_fails_closed_without_blocking_o
     cycle_task = asyncio.create_task(scheduler.run_mark_cycle())
     await asyncio.wait_for(reached.wait(), timeout=5)
 
-    # 동시 체결 흉내: 마크 사이클이 이미 읽어 든(last_journal_seq=0) 스냅샷이
-    # 낡아지도록, 다른 트랜잭션이 먼저 last_journal_seq를 1로 올려 쓴다.
-    bumped = snapshot.model_copy(update={"quantity": Decimal("2"), "last_journal_seq": 1})
+    # 동시 체결 흉내: 마크 사이클이 이미 읽어 든(last_journal_seq=1) 스냅샷이
+    # 낡아지도록, 다른 트랜잭션이 먼저 last_journal_seq를 2로 올려 쓴다.
+    bumped = snapshot.model_copy(update={"quantity": Decimal("2"), "last_journal_seq": 2})
     async with pool.acquire() as conn, conn.transaction():
-        await PostgresSnapshotRepository(pool).upsert(conn, bumped, expected_seq=0)
+        await PostgresSnapshotRepository(pool).upsert(
+            conn, bumped, expected_seq=snapshot.last_journal_seq
+        )
 
     resume.set()
     report = await asyncio.wait_for(cycle_task, timeout=5)
@@ -401,7 +408,7 @@ async def test_concurrent_fill_during_mark_cycle_fails_closed_without_blocking_o
         [current] = await PostgresSnapshotRepository(pool).list_open(conn, tenant_id, account_id)
     # 마크 사이클의 낡은 쓰기가 동시 체결을 덮어쓰지 않았다 -- fail-closed.
     assert current.quantity == Decimal("2")
-    assert current.last_journal_seq == 1
+    assert current.last_journal_seq == 2
     assert current.mark_price is None
 
 

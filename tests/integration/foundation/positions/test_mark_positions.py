@@ -245,7 +245,12 @@ async def _open_position(
         mark_price=None,
         mark_at=None,
         base_currency=base_currency,
-        last_journal_seq=0,
+        # task-3863: a real "open" position (quantity != 0) always got there via
+        # record_fill folding at least one journal entry, so last_journal_seq=1
+        # here (not the 0 sentinel that means "no row for this key yet") -- an
+        # already-open position's mark-price replace must stay a normal CAS, not
+        # collide with the adapter's first-creation-only guard at expected_seq=0.
+        last_journal_seq=1,
         updated_at=_NOW,
     )
     repo = PostgresSnapshotRepository(pool)
@@ -333,7 +338,9 @@ async def test_stale_candle_clears_previous_mark_instead_of_keeping_it(pool, ref
         }
     )
     async with pool.acquire() as conn, conn.transaction():
-        await PostgresSnapshotRepository(pool).upsert(conn, stale_snapshot, expected_seq=0)
+        await PostgresSnapshotRepository(pool).upsert(
+            conn, stale_snapshot, expected_seq=snapshot.last_journal_seq
+        )
 
     instrument_id = _instrument_id()
     ref = _instrument_ref(instrument_id, venue_symbol=symbol, quote="USDT")
@@ -682,7 +689,7 @@ async def test_concurrent_journal_write_causes_concurrency_conflict_gate_red(
             position_key,
         )
     assert row["mark_price"] is None, "경합에서 진 마크 갱신이 조용히 반영됐습니다"
-    assert row["last_journal_seq"] == 1
+    assert row["last_journal_seq"] == 2
 
 
 async def test_snapshot_adapter_failure_mid_batch_propagates_without_silent_skip(

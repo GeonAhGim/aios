@@ -34,6 +34,33 @@ fires for the "replace" case since `prior`'s DELETE has already removed
 the old row (same natural key) before this INSERT runs, so there is
 nothing left to conflict with.
 
+task-3568 review REJECT (finding 2), task-3863 fix: `last_journal_seq IS
+NOT DISTINCT FROM $16` alone cannot tell "no row for this key yet" apart
+from "a row exists whose seq already happens to be 0" -- both make the
+DELETE match when `expected_seq=0`. A brand-new key's very first `pos_
+snapshot` row is *always* written with `last_journal_seq=0` too (per the
+port's own contract: the first upsert for a key uses `expected_seq=0`),
+so a second, unsynchronized "first creation" call for the same key that
+lands *after* the first one has already committed reads that
+just-committed seq=0 row via `existing`/`prior`'s own MVCC snapshot,
+matches it as if it were a legitimate prior version, and replaces it --
+the loser silently overwrites the winner instead of hitting `ON CONFLICT
+DO NOTHING` (empirically confirmed by
+`test_sequential_first_creation_after_winner_commits_does_not_overwrite`
+in tests/integration/foundation/positions/test_postgres_snapshot_repository.py).
+The `AND NOT ($16 = 0 AND $15 = 0)` guard on `prior`'s DELETE closes this:
+a write that neither expects nor produces any advance past the zero
+sentinel (`expected_seq=0` *and* the new row's own `last_journal_seq=0`)
+is categorically a "first creation," never a legitimate replace, so it is
+barred from matching an existing row at all -- it can only succeed via the
+`NOT EXISTS(existing)` insert branch (or, in true insert-vs-insert overlap,
+`ON CONFLICT DO NOTHING`), both of which correctly conflict once any row
+is already there. Every real replace (mark-to-market with an unchanged
+seq, or a journal fold that advances `last_journal_seq` past 0, as in
+`record_fill`'s own follow-up write to the row this same call just
+created) has a nonzero `expected_seq` or a nonzero new `last_journal_seq`
+and is untouched by the guard.
+
 FA-0d-fix (task-771991202, root cause of CI red 77871f67): the 5-part
 `position_key` (FA-0d `PositionKey`) already carries `portfolio_id`, but this
 adapter never wrote it into the `pos_snapshot.portfolio_id` column that FA-4
@@ -89,6 +116,7 @@ _UPSERT_SQL = (
     " DELETE FROM pos_snapshot"
     " WHERE position_key = $1 AND tenant_id = $2"
     " AND last_journal_seq IS NOT DISTINCT FROM $16"
+    " AND NOT ($16 = 0 AND $15 = 0)"
     " AND EXISTS (SELECT 1 FROM owned_portfolio)"
     " RETURNING legacy_position_id"
     ") "
