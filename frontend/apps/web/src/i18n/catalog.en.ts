@@ -172,6 +172,24 @@ export const catalogEn = {
       targetSymbolDuplicate: "Symbol for target #{{position}} is duplicated.",
     },
   },
+  notificationCenter: {
+    title: "Notification center",
+    filterLabel: "Channel",
+    channel: {
+      ALL: "All",
+      EMAIL: "Email",
+      PUSH: "Push",
+      IN_APP: "In-app",
+    },
+    empty: "No notification history to show.",
+    unknownDate: "Unknown date",
+    totalCount: "{{count}}",
+    stat: {
+      total: "Total",
+      sent: "Sent",
+      failed: "Failed",
+    },
+  },
   legacy: { ...catalogEnLegacyA, ...catalogEnLegacyB, ...catalogEnLegacyC, ...catalogEnLegacyD },
 } satisfies Stringify<CatalogKo>;
 

@@ -29,6 +29,7 @@ export const MAIN_NAV_ITEMS: NavItem[] = [
   { to: "/wallet/ledger", label: "지갑거래내역" },
   { to: "/wallet/payouts", label: "출금" },
   { to: "/alerts", label: "알림" },
+  { to: "/notifications", label: "알림센터" },
   { to: "/system/paper-deployments", label: "페이퍼배포" },
   { to: "/approval-requests", label: "승인대기" },
 ];

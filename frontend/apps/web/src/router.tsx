@@ -44,6 +44,7 @@ import { AccountDeletionPage } from "./routes/settings/AccountDeletionPage";
 import { ApprovalSettingsPage } from "./routes/settings/ApprovalSettingsPage";
 import { ConnectionsPage } from "./routes/settings/ConnectionsPage";
 import { MembersPage } from "./routes/settings/MembersPage";
+import { NotificationCenterPage } from "./routes/notifications/NotificationCenterPage";
 import { NotificationSettingsPage } from "./routes/settings/NotificationSettingsPage";
 import { SessionsPage } from "./routes/settings/SessionsPage";
 import { StrategyBuilderPage } from "./routes/strategy-builder/StrategyBuilderPage";
@@ -95,6 +96,7 @@ export const router = createBrowserRouter([
   { path: "/wallet/ledger", element: protect(<LedgerHistoryPage />) },
   { path: "/wallet/payouts", element: protect(<PayoutsPage />) },
   { path: "/alerts", element: protect(<AlertsPage />) },
+  { path: "/notifications", element: protect(<NotificationCenterPage />) },
   { path: "/system/paper-deployments", element: protect(<PaperDeploymentsPage />) },
   { path: "/approval-requests", element: protect(<MyApprovalRequestsPage />) },
   { path: "/settings/approval", element: protect(<ApprovalSettingsPage />) },

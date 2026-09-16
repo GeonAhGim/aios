@@ -167,6 +167,26 @@ export const catalogKo = {
       targetSymbolDuplicate: "{{position}}번째 종목이 중복되었습니다.",
     },
   },
+  // task-2702(UX-18): NotificationCenterPage.tsx(알림 센터 + 일간 다이제스트
+  // 요약) — screener.*/whatif.*와 동일하게 문구를 전부 t(key)로 조회한다.
+  notificationCenter: {
+    title: "알림 센터",
+    filterLabel: "채널",
+    channel: {
+      ALL: "전체",
+      EMAIL: "이메일",
+      PUSH: "푸시",
+      IN_APP: "인앱",
+    },
+    empty: "표시할 알림 이력이 없습니다.",
+    unknownDate: "날짜 미상",
+    totalCount: "{{count}}건",
+    stat: {
+      total: "전체",
+      sent: "발송됨",
+      failed: "실패",
+    },
+  },
   // task-2686 (UX-2): mechanically extracted from the 102 baseline .tsx files
   // (scripts/i18n-literals-baseline.json) via an AST codemod -- one namespace per
   // file (camelCase basename), keys are sequential (t1, t2.../title1, label1...).
