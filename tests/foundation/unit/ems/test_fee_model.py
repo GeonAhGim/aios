@@ -1,4 +1,5 @@
 """EM-4 domain/route/fee_model.py -- tier selection, boundary bps, negative cases."""
+
 from __future__ import annotations
 
 from decimal import Decimal
@@ -14,9 +15,7 @@ from src.foundation.ems.domain.route.fee_model import (
 
 _TIERS = (
     FeeTier(min_30d_volume=Decimal("0"), maker_bps=Decimal("10"), taker_bps=Decimal("15")),
-    FeeTier(
-        min_30d_volume=Decimal("1000000"), maker_bps=Decimal("8"), taker_bps=Decimal("12")
-    ),
+    FeeTier(min_30d_volume=Decimal("1000000"), maker_bps=Decimal("8"), taker_bps=Decimal("12")),
     FeeTier(min_30d_volume=Decimal("5000000"), maker_bps=Decimal("2"), taker_bps=Decimal("6")),
 )
 
@@ -100,3 +99,31 @@ def test_schedule_not_starting_at_zero_is_rejected() -> None:
 def test_fee_tier_rejects_negative_bps() -> None:
     with pytest.raises(ValueError, match="rebate"):
         FeeTier(min_30d_volume=Decimal("0"), maker_bps=Decimal("-1"), taker_bps=Decimal("5"))
+
+
+# -- failure-injection: malicious tier schedule causes fee explosion ----------
+
+# A corrupted tier schedule with a tiny volume threshold but extremely high
+# taker_bps simulates a data-integrity failure (e.g. misconfigured exchange
+# reporting).  The fee model itself does not clamp — it faithfully returns the
+# configured bps.  Downstream gate logic must reject such venues.
+#
+# This test proves the fee model *exposes* the bad value rather than hiding it,
+# so the gate layer can detect and reject it.
+
+
+def test_malicious_high_fee_is_exposed_not_clamped() -> None:
+    """Failure-injection: a tier with 10000 bps taker fee is returned verbatim."""
+    malicious_tiers = (
+        FeeTier(
+            min_30d_volume=Decimal("0"),
+            maker_bps=Decimal("10"),
+            taker_bps=Decimal("10000"),
+        ),
+    )
+    tier = select_fee_tier(malicious_tiers, Decimal("0"))
+    fee = fee_bps_for_liquidity(tier, "TAKER")
+    # The fee model returns the raw value — no silent clamping.
+    assert fee == Decimal("10000")
+    # A downstream gate should reject fees above a reasonable threshold (e.g. 500 bps).
+    assert fee > Decimal("500")
