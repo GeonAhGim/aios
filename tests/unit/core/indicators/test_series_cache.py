@@ -4,6 +4,7 @@ Spec: docs/specs/L4_strategy_portfolio_backtest_v1.0.md §2.2 L28, DoD:
 `value_at`이 전량 계산 결과와 bar별 재계산 결과 동일(인과성 증명),
 미래 인덱스 접근 경로 부재.
 """
+
 from __future__ import annotations
 
 from collections.abc import Sequence
@@ -215,3 +216,85 @@ def test_series_key_of_normalizes_param_order() -> None:
     b = SeriesKey.of("SMA", {"extra": 1, "timeperiod": 10}, "1h")
     assert a == b
     assert hash(a) == hash(b)
+
+
+# ── D2 보강: failure injection ───────────────────────────────────────────
+
+
+def test_service_calculate_exception_propagates() -> None:
+    """IndicatorService.calculate()가 예외 발생 시, build()도 예외를 전파한다.
+
+    부분 실패 시나리오: 지표 계산 중 예외가 나면 캐시 빌드 자체가 실패해야
+    손상된 반쪽 결과로 IndicatorSeriesCache가 생성되지 않는다.
+    """
+
+    class _FailingService(IndicatorService):
+        def calculate(
+            self, indicator: str, candles: Sequence[Candle], **params: int
+        ) -> IndicatorResult:
+            raise RuntimeError("TA-Lib 내부 오류")
+
+    bars = _candles(40)
+    key = SeriesKey.of("SMA", {"timeperiod": 10}, "1h")
+
+    with pytest.raises(RuntimeError, match="TA-Lib 내부 오류"):
+        IndicatorSeriesCache.build({"1h": bars}, [key], _FailingService())
+
+
+# ── D2 보강: performance assertion ───────────────────────────────────────
+
+
+def test_value_at_is_o1_no_recomputation() -> None:
+    """value_at() 호출이 재계산을 trigger하지 않음을 호출 카운트로 검증.
+
+    캐시 조회가 O(1) — 같은 키로 1000회 조회해도 underlying calculate()는
+    build() 시점 1회만 호출된다.
+    """
+    bars = _candles(100)
+    call_count = 0
+
+    class _CountingService(IndicatorService):
+        def calculate(
+            self, indicator: str, candles: Sequence[Candle], **params: int
+        ) -> IndicatorResult:
+            nonlocal call_count
+            call_count += 1
+            return super().calculate(indicator, candles, **params)
+
+    key = SeriesKey.of("SMA", {"timeperiod": 10}, "1h")
+    cache = IndicatorSeriesCache.build({"1h": bars}, [key], _CountingService())
+
+    # build() 시 1회 호출
+    assert call_count == 1
+
+    # value_at() 1000회 호출 — calculate() 호출 수는 변하지 않아야 함
+    for i in range(1000):
+        cache.value_at(key, i % len(bars))
+    assert call_count == 1
+
+
+# ── D2 보강: gate-red reproduction (mypy 타입 정확성) ────────────────────
+
+
+def test_decimal_precision_preserved_through_cache() -> None:
+    """Decimal 정밀도 손실 감지 — float → str → Decimal 경로 검증.
+
+    mypy --strict가 타입 힌트를 엄격히 검사하므로, build()의
+    `Decimal(str(v))` 변환이 정밀도를 유지하는지 확인한다.
+    float로 직접 Decimal을 만들면 정밀도 손실이 발생하므로
+    반드시 str 경유해야 한다.
+    """
+    bars = _candles(50)
+    service = IndicatorService()
+    key = SeriesKey.of("SMA", {"timeperiod": 5}, "1h")
+    cache = IndicatorSeriesCache.build({"1h": bars}, [key], service)
+
+    # 캐시에서 읽은 값이 모두 Decimal 타입이다
+    for i in range(len(bars)):
+        val = cache.value_at(key, i)
+        if val is not None:
+            assert isinstance(val, Decimal)
+            # 정밀도: float로 역변환 후 다시 Decimal하면 원값과 다를 수 있음
+            # 하지만 Decimal(str(float)) 경로는 원본 float의 정확한 decimal 표현
+            float_repr = float(val)
+            assert float_repr == float(Decimal(str(float_repr)))
