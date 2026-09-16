@@ -33,8 +33,11 @@ export function CommandPalette({ isAdmin }: CommandPaletteProps) {
 
   const commands = useMemo(() => {
     const items = [...MAIN_NAV_ITEMS, ...SETTINGS_NAV_ITEMS, ...(isAdmin ? ADMIN_NAV_ITEMS : [])];
-    return buildNavCommands(items);
-  }, [isAdmin]);
+    return buildNavCommands(items).map(cmd => ({
+      ...cmd,
+      label: t(cmd.label as any),
+    }));
+  }, [isAdmin, t]);
 
   const results = useMemo(() => matchCommands(commands, query), [commands, query]);
 

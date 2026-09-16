@@ -6,15 +6,14 @@ import { CommandPalette } from "../../commandPalette/CommandPalette";
 import { ADMIN_NAV_ITEMS, MAIN_NAV_ITEMS, SETTINGS_NAV_ITEMS, type NavItem } from "./navItems";
 import { useTranslation } from "react-i18next";
 
-function NavLink({
-  item,
-  pathname,
-  activeClassName,
-}: {
+interface NavLinkProps {
   item: NavItem;
   pathname: string;
   activeClassName: string;
-}) {
+}
+
+function NavLink({ item, pathname, activeClassName }: NavLinkProps) {
+  const { t } = useTranslation();
   const isActive = pathname.startsWith(item.to);
   return (
     <Link
@@ -24,7 +23,7 @@ function NavLink({
         isActive ? activeClassName : "text-fg-secondary hover:bg-surface-hover hover:text-fg",
       )}
     >
-      {item.label}
+      {t(item.label as any)}
     </Link>
   );
 }
