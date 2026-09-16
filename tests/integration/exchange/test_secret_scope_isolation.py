@@ -8,9 +8,12 @@ scope="PAPER"만 읽고 쓴다(ADR-2026-08-29-E). 이 테스트는 (1) 마이그
 증명한다 — LIVE 키는 이 서비스로 열리는 순간이 없어야 한다(I7과 동일한
 정신, §10-8).
 """
+
 from __future__ import annotations
 
+import asyncio
 import os
+import time
 
 import asyncpg
 import pytest
@@ -19,6 +22,12 @@ from src.core.security.encryption import legacy_encrypt
 from src.core.security.key_ring import KeyRing
 from src.services.exchange_credential_service import ExchangeCredentialService
 from tests.integration.conftest import create_test_user
+
+# 예산표(ADR-2026-09-09-C Decision 1)에 자격증명 복호 조회 전용 항목은
+# 없다 — get_decrypted는 단일 실DB 왕복(fetchrow 1회) + 로컬 복호라는
+# 점에서 "주문 제출→ACK p95 50ms(paper)"를 가장 가까운 유사 항목으로
+# 차용한다(task-3160/3162 DEEPEN과 동일 차용 근거).
+_GET_DECRYPTED_P95_BUDGET_MS = 50.0
 
 ENCRYPTION_KEY = "22" * 32
 
@@ -107,8 +116,53 @@ async def test_revoke_does_not_touch_live_scope_row(service, pool):
 
     async with pool.acquire() as conn:
         live_active = await conn.fetchval(
-            "SELECT is_active FROM exchange_credentials "
-            "WHERE user_id = $1 AND scope = 'LIVE'",
+            "SELECT is_active FROM exchange_credentials WHERE user_id = $1 AND scope = 'LIVE'",
             user_id,
         )
     assert live_active is True
+
+
+async def _get_decrypted_p95_ms(service, user_id, exchange, *, n: int) -> float:
+    durations_ms: list[float] = []
+    for _ in range(n):
+        start = time.perf_counter()
+        await service.get_decrypted(user_id, exchange)
+        durations_ms.append((time.perf_counter() - start) * 1000)
+    durations_ms.sort()
+    return durations_ms[int(len(durations_ms) * 0.95)]
+
+
+async def test_get_decrypted_p95_under_borrowed_order_ack_budget(service, pool):
+    """수치 성능 단언: get_decrypted는 단일 실DB 왕복(fetchrow 1회) + 로컬
+    복호라는 점에서 "주문 제출→ACK p95 50ms(paper)"를 자체 예산으로
+    차용한다(task-3160/3162 DEEPEN과 동일 차용 근거). 30회 반복 p95를
+    그 예산 내로 단언한다."""
+    user_id = await create_test_user(pool)
+    await service.register(user_id, "bitget", "paper-key", "paper-secret")
+
+    p95_ms = await _get_decrypted_p95_ms(service, user_id, "bitget", n=30)
+
+    assert p95_ms < _GET_DECRYPTED_P95_BUDGET_MS
+
+
+async def test_get_decrypted_budget_gate_fails_on_injected_regression(
+    monkeypatch: pytest.MonkeyPatch, service, pool
+):
+    """게이트 적색 재현: 위 p95 단언이 실제로 회귀를 잡는지 확인한다 —
+    asyncpg.Connection.fetchrow에 60ms 인위 지연을 주입해, 같은 측정
+    로직이 실제로 AssertionError를 내는지 본다(tautology 아님을 증명)."""
+    user_id = await create_test_user(pool)
+    await service.register(user_id, "bitget", "paper-key", "paper-secret")
+
+    original_fetchrow = asyncpg.Connection.fetchrow
+
+    async def _slow_fetchrow(self, *args, **kwargs):
+        await asyncio.sleep(0.06)
+        return await original_fetchrow(self, *args, **kwargs)
+
+    monkeypatch.setattr(asyncpg.Connection, "fetchrow", _slow_fetchrow)
+
+    p95_ms = await _get_decrypted_p95_ms(service, user_id, "bitget", n=5)
+
+    with pytest.raises(AssertionError):
+        assert p95_ms < _GET_DECRYPTED_P95_BUDGET_MS
