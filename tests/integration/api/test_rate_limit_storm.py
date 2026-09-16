@@ -8,9 +8,11 @@ Spec: docs/specs/L4_platform_observability_tenancy_api_v1.0.md#§9 PLT-25
 `InMemoryTokenBucket`을 명시적으로 다시 꽂는다 — 다른 테스트 파일에 영향이
 새지 않는다(그 자체가 이 리프의 DoD "conftest override로 기존 테스트 무영향").
 """
+
 from __future__ import annotations
 
 import asyncio
+import math
 import time
 
 import pytest
@@ -18,8 +20,27 @@ from httpx import ASGITransport, AsyncClient
 
 from src.api.contracts.error_codes import ErrorCode
 from src.core.rate_limit.limiter import Decision, InMemoryTokenBucket, set_limiter
-from src.core.rate_limit.policy import POLICIES
+from src.core.rate_limit.policy import POLICIES, RateLimitPolicy
 from src.main import app
+
+# ADR-2026-09-09-C Decision 1 축별 성능 예산표에 rate limiter 전용 항목이 없어
+# 가장 가까운 유사 항목("사전거래 게이트 p99 5ms" — 이쪽도 I/O 없이 인메모리
+# 상태만 보고 즉시 allow/deny를 판정하는 동기 게이트)을 자체 예산으로 차용한다.
+_ACQUIRE_P99_BUDGET_SECONDS = 0.005
+
+
+def _p99(samples: list[float]) -> float:
+    ordered = sorted(samples)
+    index = max(0, math.ceil(0.99 * len(ordered)) - 1)
+    return ordered[index]
+
+
+class _BrokenLimiter:
+    """acquire()가 항상 예외를 던지는 고장 난 백엔드(예: 향후 Redis 어댑터
+    장애)를 흉내 낸다 — fail-closed 회귀 방지 테스트 전용."""
+
+    async def acquire(self, policy: RateLimitPolicy, key: str) -> Decision:
+        raise RuntimeError("rate limiter backend unavailable")
 
 
 @pytest.fixture
@@ -127,3 +148,63 @@ async def test_distinct_keys_have_independent_buckets():
 
     assert not (await bucket.acquire(policy, "ip:1.1.1.1")).allowed
     assert (await bucket.acquire(policy, "ip:2.2.2.2")).allowed
+
+
+async def test_broken_limiter_backend_fails_closed_not_silently_allowed(client):
+    """limiter() 백엔드가 예외를 던지면(예: §10.4가 미확정으로 남긴 Redis
+    어댑터 전환 이후의 네트워크 장애) 미들웨어가 그 예외를 삼켜 "제한 없음"
+    으로 위장하면 안 된다 — CLAUDE.md §3 fail-closed 기본 위반. `RateLimitMiddleware`
+    는 스택 최외곽(이 모듈 docstring이 아니라 rate_limit.py 모듈 docstring
+    §14행 "등록 순서" 참고)이라 `install_exception_handlers`(ExceptionMiddleware
+    안쪽)를 거치지 않고 Starlette `ServerErrorMiddleware`까지 그대로 전파되어
+    5xx로 끝난다 — 정확한 포맷은 이 리프 책임 밖이므로 "200으로 조용히
+    통과하지 않는다"만 확인한다."""
+    set_limiter(_BrokenLimiter())
+
+    response = await client.get("/openapi.json")
+
+    assert response.status_code != 200
+    assert response.status_code >= 500
+
+
+async def test_acquire_p99_latency_within_budget():
+    """`InMemoryTokenBucket.acquire()`는 I/O 없이 dict 조회 + 락만 쓰므로
+    ADR-2026-09-09-C 예산표의 "사전거래 게이트 p99 5ms"를 자체 예산으로
+    차용해 반복 호출 p99가 그 안에 드는지 단언한다."""
+    bucket = InMemoryTokenBucket(clock=time.monotonic)
+    policy = POLICIES["read"]
+
+    samples: list[float] = []
+    for _ in range(30):
+        started = time.perf_counter()
+        await bucket.acquire(policy, "perf:subject-1")
+        samples.append(time.perf_counter() - started)
+
+    assert _p99(samples) < _ACQUIRE_P99_BUDGET_SECONDS
+
+
+async def test_gate_red_reproduction_acquire_p99_budget_guard_catches_lock_regression(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """위 단언이 상시-녹색이 아님을 증명 — 버킷 dict 접근을 직렬화하는 락
+    (limiter.py 모듈 docstring 47행) 획득 경로에 예산의 배수만큼 지연을
+    주입하면(락 경합 회귀를 흉내) 같은 p99 단언이 실제로 적색(AssertionError)
+    이 되어야 한다."""
+    bucket = InMemoryTokenBucket(clock=time.monotonic)
+    policy = POLICIES["read"]
+    original_acquire = bucket._lock.acquire
+
+    async def delayed_acquire() -> bool:
+        await asyncio.sleep(_ACQUIRE_P99_BUDGET_SECONDS * 3)
+        return await original_acquire()
+
+    monkeypatch.setattr(bucket._lock, "acquire", delayed_acquire)
+
+    samples: list[float] = []
+    for _ in range(5):
+        started = time.perf_counter()
+        await bucket.acquire(policy, "perf:subject-2")
+        samples.append(time.perf_counter() - started)
+
+    with pytest.raises(AssertionError):
+        assert _p99(samples) < _ACQUIRE_P99_BUDGET_SECONDS
