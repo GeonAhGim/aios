@@ -88,9 +88,7 @@ def test_from_record_defaults_event_and_duration_when_absent():
         ("CRITICAL", logging.CRITICAL, "error"),  # §2: critical은 로그 레벨로 쓰지 않는다
     ],
 )
-def test_from_record_maps_stdlib_level_names(
-    levelname: str, levelno: int, expected: str
-) -> None:
+def test_from_record_maps_stdlib_level_names(levelname: str, levelno: int, expected: str) -> None:
     record = _make_record()
     record.levelname = levelname
     record.levelno = levelno
@@ -116,6 +114,20 @@ def test_structured_log_line_rejects_unknown_level():
             level="critical",  # type: ignore[arg-type]
             trace_id="t-1",
             actor_subject_id="system",
+            component="foundation.trust.application",
+            event="membership_granted",
+            message="x",
+        )
+
+
+def test_structured_log_line_rejects_missing_actor_subject_id():
+    """negative — actor_subject_id는 기본값이 없다. 누락된 채로 생성이 성공하면 감사 로그에서
+    행위자 식별이 비어있는 라인이 만들어질 수 있으므로 생성 자체가 실패해야 한다."""
+    with pytest.raises(ValidationError):
+        StructuredLogLine(
+            timestamp="2026-09-03T00:00:00Z",
+            level="info",
+            trace_id="t-1",
             component="foundation.trust.application",
             event="membership_granted",
             message="x",
