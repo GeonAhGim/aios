@@ -276,4 +276,24 @@ export const catalogKoLegacyD = {
     "t2": "이전",
     "t3": "다음",
   },
+  // task-4025(FE-OPS-7b): admin.py:84 GET /admin/audit-log는 PLT-35-fix(task-3850)의
+  // require_break_glass("tenant_read")를 소비한다 — 그랜트 발급/승인 화면이 아직 없어
+  // (packages/api-client/src/clients/admin.ts 주석 참고) PayoutsPage(task-4026)와
+  // 같은 관용으로 호출자가 이미 들고 있는 그랜트 id를 직접 입력받는다.
+  "auditLogPage": {
+    "title1": "감사 로그",
+    "label2": "Break-Glass 그랜트 ID",
+    "placeholder2": "그랜트 ID(UUID)",
+    "label3": "액션 타입",
+    "placeholder3": "액션 타입(선택)",
+    "label4": "대상 타입",
+    "placeholder4": "대상 타입(선택)",
+    "label5": "대상 ID",
+    "placeholder5": "대상 ID(선택)",
+    "t6": "조회",
+    "t7": "그랜트 ID를 입력하고 조회하세요.",
+    "t8": "{{actorAgent}} · 사용자 {{userId}}",
+    "t9": "대상 {{targetType}} #{{targetId}}",
+    "t10": "감사 로그가 없습니다.",
+  },
 } as const;

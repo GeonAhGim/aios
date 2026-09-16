@@ -66,6 +66,7 @@ export {
   usePendingApprovalRequests,
   useApproveRequest,
   useRejectRequest,
+  useAuditLog,
 } from "./useAdmin";
 export { useSafetyControls, useDeactivateSafetyControl, useEvaluateRecovery } from "./useRiskGate";
 export {

@@ -5,6 +5,7 @@ import { ProtectedRoute } from "./components/ProtectedRoute";
 import { AdminApprovalRequestPage } from "./routes/admin/AdminApprovalRequestPage";
 import { MyApprovalRequestsPage } from "./routes/approvals/MyApprovalRequestsPage";
 import { AdminHomePage } from "./routes/admin/AdminHomePage";
+import { AuditLogPage } from "./routes/admin/AuditLogPage";
 import { DisputeManagementPage } from "./routes/admin/DisputeManagementPage";
 import { EvidenceChainPage } from "./routes/admin/EvidenceChainPage";
 import { PlatformListingPage } from "./routes/admin/PlatformListingPage";
@@ -163,4 +164,5 @@ export const router = createBrowserRouter([
   { path: "/admin/reconciliation", element: protectAdmin(<ReconciliationPage />) },
   { path: "/admin/evidence-chain", element: protectAdmin(<EvidenceChainPage />) },
   { path: "/admin/trust", element: protectAdmin(<TrustPage />) },
+  { path: "/admin/audit-log", element: protectAdmin(<AuditLogPage />) },
 ]);
