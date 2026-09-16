@@ -1,7 +1,8 @@
 """L4_strategy_portfolio_backtest_v1.0.md#§2 row 92, §8 line 572 — kelly_capped.py tests."""
+
 from __future__ import annotations
 
-from decimal import Decimal
+from decimal import Decimal, DivisionByZero
 from typing import Any
 
 import pytest
@@ -83,3 +84,20 @@ def test_size_rejects_none_avg_win_loss_ratio():
 def test_size_rejects_win_rate_out_of_range():
     with pytest.raises(SizingInputInvalidError):
         size(_inp(win_rate=Decimal("1.5")))
+
+
+def _kelly_without_payoff_guard(win_rate: Decimal, payoff_ratio: Decimal) -> Decimal:
+    """`require_positive(payoff_ratio, ...)` 가드를 빼먹은 회귀본 — kelly_capped.py:32
+    의 가드가 실제로 `avg_win_loss_ratio=0`을 막고 있음을 대조 증명한다."""
+    return win_rate - (Decimal("1") - win_rate) / payoff_ratio
+
+
+def test_gate_red_missing_payoff_guard_leaks_division_by_zero():
+    """`avg_win_loss_ratio=0`일 때, 가드를 뺀 회귀본은 decimal.DivisionByZero를
+    그대로 새어나가게 한다(적색) — 실제 구현은 require_positive가 그 지점에
+    도달하기 전에 SizingInputInvalidError로 fail-closed 거부한다(녹색)."""
+    with pytest.raises(DivisionByZero):
+        _kelly_without_payoff_guard(Decimal("0.6"), Decimal("0"))
+
+    with pytest.raises(SizingInputInvalidError):
+        size(_inp(avg_win_loss_ratio=Decimal("0")))
