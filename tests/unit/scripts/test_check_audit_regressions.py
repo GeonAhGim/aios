@@ -156,6 +156,52 @@ def test_flags_raw_balance_seed_when_allow_marker_is_outside_context_window(
     assert finding.code == "ledger_balance_raw_seed"
 
 
+def _write_class_fixture(tmp_path: Path, rel_path: str, body: str) -> None:
+    file_path = tmp_path / rel_path
+    file_path.parent.mkdir(parents=True, exist_ok=True)
+    file_path.write_text(body, encoding="utf-8")
+
+
+def test_flags_duplicate_idempotency_scope_class_names_injected_into_src(
+    tmp_path, monkeypatch
+) -> None:
+    """게이트 적색 재현(task-3189, PLT-45) — task-1815 개명(f6986bbb) 이전
+    실제 상태(`src/api/contracts/idempotency.py`와
+    `src/services/oms/contracts/v1_commands.py`가 똑같이
+    `class IdempotencyScope`를 정의)를 임시 트리에 재현해
+    `check_duplicate_type_names`가 실제로 잡아내는지 확인한다 — tautology가
+    아님을 증명한다."""
+    monkeypatch.setattr(check_audit_regressions, "ROOT", tmp_path)
+    _write_class_fixture(
+        tmp_path,
+        "src/api/contracts/idempotency.py",
+        "class IdempotencyScope:\n    pass\n",
+    )
+    _write_class_fixture(
+        tmp_path,
+        "src/services/oms/contracts/v1_commands.py",
+        "class IdempotencyScope:\n    pass\n",
+    )
+
+    finding = check_audit_regressions.check_duplicate_type_names()
+
+    assert finding is not None
+    assert finding.code == "duplicate_type_names"
+    assert any("idempotency.py" in e for e in finding.evidence)
+    assert any("v1_commands.py" in e for e in finding.evidence)
+
+
+def test_current_repository_has_zero_duplicate_idempotency_scope_type_names() -> None:
+    """task-1815 개명(f6986bbb, `IdempotencyScope -> OrderIdempotencyScope`)
+    이후 실제 저장소는 이 결함이 닫혀 있어야 한다 — task-3189 DoD
+    "check_audit_regressions의 duplicate_type_names가 0건"의 직접 증거.
+    회귀(OMS 쪽에 `class IdempotencyScope`가 다시 생김)가 들어오면 이
+    테스트가 바로 잡는다."""
+    finding = check_audit_regressions.check_duplicate_type_names()
+
+    assert finding is None
+
+
 def test_check_ledger_balance_raw_seed_completes_within_time_budget(tmp_path, monkeypatch) -> None:
     """성능단언: 대규모 저장소(수천 개 테스트 파일)에서도 raw seed 스캔이 예산
     내에 끝나는지, 그리고 그 규모 속에서도 유일한 위반을 정확히 찾는지 확인한다."""
