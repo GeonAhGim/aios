@@ -1,4 +1,5 @@
 """16번대 통합테스트 — /marketplace 라우터. 실제 FastAPI 앱 + 실제 dev DB."""
+
 import json
 import uuid
 from decimal import Decimal
@@ -453,3 +454,24 @@ async def test_purchase_same_key_different_body_returns_409(client, pool):
             uuid.UUID(buyer_id),
         )
     assert count == 1
+
+
+async def test_list_reviews_for_nonexistent_listing_returns_404(client):
+    """task-3459 — list_reviews가 listing 존재를 확인하지 않고 상시 200
+    빈배열을 돌려주던 문제(리뷰 3330, task-407/724/3330 3회 반복 확인)."""
+    response = await client.get("/marketplace/listings/999999999/reviews")
+
+    assert response.status_code == 404
+    assert response.json()["error_code"] == "RESOURCE_NOT_FOUND"
+
+
+async def test_list_reviews_returns_200_empty_array_for_listing_without_reviews(client, pool):
+    _, seller_headers, seller_id = await _register(client)
+    listing_id = await _listed_listing_via_api(client, pool, seller_headers, seller_id)
+
+    response = await client.get(f"/marketplace/listings/{listing_id}/reviews")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["reviews"] == []
+    assert body["review_count"] == 0

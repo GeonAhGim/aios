@@ -46,7 +46,7 @@ from src.services.listing_service import ListingError
 from src.services.mfa_service import MfaError, MfaReauthenticationRequiredError
 from src.services.portfolio_service import RebalanceError
 from src.services.purchase_service import InsufficientWalletBalanceError, PurchaseError
-from src.services.review_service import ReviewError
+from src.services.review_service import ReviewError, ReviewNotFoundError
 from src.services.risk_profile_service import RiskProfileError, RiskProfileNotFoundError
 from src.services.seller_suspension_service import SellerSuspensionError
 from src.services.strategy_access_service import StrategyAccessError
@@ -114,6 +114,7 @@ EXCEPTION_MAP_SERVICES: list[tuple[type[Exception], ErrorCode]] = [
     (VerificationInvalidTransitionError, ErrorCode.STATE_INVALID_TRANSITION),
     (VerificationError, ErrorCode.VALIDATION_INVALID_FIELD),
     (StrategyAccessError, ErrorCode.AUTHZ_FORBIDDEN),
+    (ReviewNotFoundError, ErrorCode.RESOURCE_NOT_FOUND),
     (ReviewError, ErrorCode.VALIDATION_INVALID_FIELD),
     (DisputeError, ErrorCode.VALIDATION_INVALID_FIELD),
     (IndicatorError, ErrorCode.VALIDATION_INVALID_FIELD),
