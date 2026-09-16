@@ -1,4 +1,4 @@
-import "../i18n";
+import i18n from "../i18n";
 import "@testing-library/jest-dom/vitest";
 import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
@@ -120,7 +120,8 @@ describe("CommandPalette", () => {
 
     const options = screen.getAllByRole("option").map((el) => el.textContent);
     for (const item of [...MAIN_NAV_ITEMS, ...SETTINGS_NAV_ITEMS]) {
-      expect(options.some((text) => text?.includes(item.label))).toBe(true);
+      const translated = i18n.t(item.label as any);
+      expect(options.some((text) => text?.includes(translated))).toBe(true);
     }
   });
 
@@ -130,7 +131,8 @@ describe("CommandPalette", () => {
 
     const options = screen.getAllByRole("option").map((el) => el.textContent);
     for (const item of ADMIN_NAV_ITEMS) {
-      expect(options.some((text) => text?.includes(item.label))).toBe(true);
+      const translated = i18n.t(item.label as any);
+      expect(options.some((text) => text?.includes(translated))).toBe(true);
     }
   });
 });

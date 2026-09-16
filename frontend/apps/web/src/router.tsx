@@ -33,6 +33,7 @@ import { MarketplaceBrowsePage } from "./routes/marketplace/MarketplaceBrowsePag
 import { SellStrategyPage } from "./routes/marketplace/SellStrategyPage";
 import { MandatesPage } from "./routes/mandates/MandatesPage";
 import { MfaSetupPage } from "./routes/onboarding/MfaSetupPage";
+import { OnboardingFlowPage } from "./routes/onboarding/OnboardingFlowPage";
 import { RiskAssessmentPage } from "./routes/onboarding/RiskAssessmentPage";
 import { PortfolioPage } from "./routes/portfolio/PortfolioPage";
 import { RebalancePage } from "./routes/whatif/RebalancePage";
@@ -72,6 +73,7 @@ export const router = createBrowserRouter([
   { path: "/login", element: <LoginPage /> },
   { path: "/onboarding/mfa-setup", element: protect(<MfaSetupPage />) },
   { path: "/onboarding/risk-assessment", element: protect(<RiskAssessmentPage />) },
+  { path: "/onboarding/first-run", element: protect(<OnboardingFlowPage />) },
   { path: "/dashboard", element: protect(<DashboardPage />) },
   { path: "/exchanges", element: protect(<ExchangeManagementPage />) },
   { path: "/market/instruments", element: protect(<InstrumentsPage />) },

@@ -2,6 +2,7 @@ import { useExecutions, usePortfolio, useRiskProfile } from "@aios/shared-hooks"
 import {
   AllocationBarChart,
   Badge,
+  Button,
   Card,
   CardTitle,
   EmptyState,
@@ -10,6 +11,7 @@ import {
   Stat,
   StatusBadge,
 } from "@aios/ui-web";
+import { Link } from "react-router-dom";
 import { AppShell } from "../../components/layout/AppShell";
 import { DataFreshness } from "../../components/DataFreshness";
 import { exchangeLabel } from "../../lib/exchangeLabels";
@@ -80,7 +82,17 @@ export function DashboardPage() {
               ))}
             </ul>
           ) : (
-            <EmptyState>{t("legacy.dashboardPage.t8")}</EmptyState>
+            <EmptyState
+              action={
+                <Link to="/onboarding/first-run">
+                  <Button type="button" variant="secondary" size="sm">
+                    {t("onboarding.emptyStateCta")}
+                  </Button>
+                </Link>
+              }
+            >
+              {t("legacy.dashboardPage.t8")}
+            </EmptyState>
           )}
         </Card>
       </div>

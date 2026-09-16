@@ -41,8 +41,12 @@ export function CommandPalette({ isAdmin }: CommandPaletteProps) {
 
   const results = useMemo(() => matchCommands(commands, query), [commands, query]);
 
-  // t()의 키 인자는 catalog.ko 구조의 리터럴 유니온만 받는다(i18next.d.ts) --
-  // SHORTCUT_ENTRIES.id로 동적 조회하기 위해 리터럴 호출을 이 레코드에 모아둔다.
+  // t()'s key argument only accepts the literal union derived from catalog.ko's
+  // shape (i18next.d.ts) -- collect the literal calls here so SHORTCUT_ENTRIES.id
+  // can still look labels up dynamically.
+  // (English comment: a Korean comment sitting between the `>` above and the `<`
+  // in `Record<...>` below false-triggers scripts/check_i18n_literals.mjs's
+  // JSX-text heuristic, which doesn't respect line breaks -- task-2704 UX-20.)
   const shortcutLabels: Record<ShortcutId, string> = {
     openSearch: t("commandPalette.shortcut.openSearch"),
     openHelp: t("commandPalette.shortcut.openHelp"),

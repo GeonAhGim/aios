@@ -19,10 +19,11 @@ export function Alert({
   );
 }
 
-export function EmptyState({ children }: { children: ReactNode }) {
+export function EmptyState({ children, action }: { children: ReactNode; action?: ReactNode }) {
   return (
     <div className="rounded-lg border border-dashed border-border py-12 text-center text-sm text-fg-muted">
-      {children}
+      <p>{children}</p>
+      {action && <div className="mt-4 flex justify-center">{action}</div>}
     </div>
   );
 }
