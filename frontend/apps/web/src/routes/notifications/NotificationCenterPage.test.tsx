@@ -117,4 +117,41 @@ describe("NotificationCenterPage: 이력·요약(UX-18 DoD)", () => {
 
     await waitFor(() => expect(screen.getByText("ECONNRESET")).toBeInTheDocument());
   });
+
+  // negative: 로딩 중에는 이력이 undefined이면 로딩 상태를 보여준다(에러 아님).
+  it("negative: 조회 중(data=undefined, isError=false)이면 LoadingState를 보여준다", async () => {
+    historyResult = {
+      data: undefined,
+      isError: false,
+      error: null,
+      refetch: () => {},
+    };
+    renderPage();
+
+    await waitFor(() => {
+      // LoadingState는 "로딩 중..." 같은 텍스트를 표시하거나 로딩 인디케이터를 표시한다
+      // 여기서는 에러 배너와 빈 상태 안내가 나타나지 않음을 확인한다
+      expect(screen.queryByText("이 작업을 수행할 권한이 없습니다.")).not.toBeInTheDocument();
+      expect(screen.queryByText("표시할 알림 이력이 없습니다.")).not.toBeInTheDocument();
+    });
+  });
+
+  // negative: 채널 필터 변경 후 모든 이력이 필터 대상이 아니면 빈 상태를 보여준다.
+  it("negative: 채널 필터링 후 결과가 없으면 빈 상태를 보여준다", async () => {
+    historyResult = {
+      data: [SAME_DAY_ENTRY, SAME_DAY_ENTRY_2], // EMAIL, PUSH만
+      isError: false,
+      error: null,
+      refetch: () => {},
+    };
+    renderPage();
+
+    await waitFor(() => expect(screen.getByText("risk_mismatch")).toBeInTheDocument());
+    // IN_APP 필터 선택 (없는 채널)
+    fireEvent.change(screen.getByLabelText("채널"), { target: { value: "IN_APP" } });
+
+    await waitFor(() =>
+      expect(screen.getByText("표시할 알림 이력이 없습니다.")).toBeInTheDocument(),
+    );
+  });
 });
