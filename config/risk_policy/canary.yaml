@@ -1,0 +1,28 @@
+# Bitget 실계좌 소액 카나리아 왕복 검증 상한 — task-2750 L4-30b.
+# ADR-2026-08-29-E(Amended 2026-09-09)의 하드가드가 해제되고(docs/milestones/
+# MVP-1_CLOSEOUT.md 존재 + HB-5 사용자 승인) task decision에 실행 승인이
+# 기록된 뒤에만, 이 번들이 강제하는 상한 아래에서 scripts/canary_bitget.py가
+# 실계좌 주문을 낸다. 코드 상수가 아니라 이 파일로 관리한다(8.2-B 원칙,
+# config/risk_policy/personal-conservative.yaml과 동일 원칙).
+
+name: canary-bitget-v1
+version: 1
+
+# 주문 1건당 상한 (USDT). 이 값을 넘는 주문은 로컬 게이트가 거래소로
+# 내보내지 않고 REJECT한다.
+max_order_usdt: 10
+
+# 이번 카나리아 세션 전체 누적 상한 (USDT). 여러 건이 이 합을 넘기면
+# 그 시점부터 신규 주문은 REJECT.
+max_total_usdt: 50
+
+# 화이트리스트 — 비어 있으면 아무 심볼도 허용되지 않는다(fail-closed).
+# 거래소 네이티브 표기(Bitget v2 spot symbol, 예: "BTCUSDT").
+symbols: [BTCUSDT]
+
+# 이번 세션에서 허용할 최대 체결 횟수(왕복 1회 = 매수 1 + 매도 1 = 2).
+max_fills: 2
+
+# 당일 손실이 관측되면(kill switch ACTIVE) 즉시 중단하고 신규 주문을
+# 내지 않는다.
+stop_on_daily_loss: true
