@@ -233,6 +233,7 @@ extend-immutable-calls = ["fastapi.Depends", "fastapi.Query", "fastapi.Path", "f
 "src/exchanges/common/circuit_breaker.py" = ["S101"]
 "src/exchanges/kis/account_mixin.py" = ["ARG002"]
 "src/exchanges/nh/account_mixin.py" = ["ARG002"]
+"src/foundation/ai/gateway/contracts/v1.py" = ["S105"]
 "src/foundation/connections/adapters/fake_provider.py" = ["ARG002"]
 "src/foundation/connections/adapters/live_provider.py" = ["ARG002"]
 "src/foundation/connections/application/sync_snapshot.py" = ["S101"]
