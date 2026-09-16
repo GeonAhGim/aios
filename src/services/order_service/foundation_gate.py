@@ -30,7 +30,15 @@ task-1717 P0-D — 모든 결정을 `_record_decision()`으로 `risk_decision` W
 `evaluate_pre_submit`의 4-rule 스키마와는 별개 — CB/distrust/connection
 필드 없음). mandate를 정식 평가했으면 `policy_decision_id`도, CM-8 컴플라이언스
 판정을 했으면 `compliance_decision_id`도 함께 채운다(각각 별개 테이블 참조).
+
+task-3986 — layer 4, `foundation_personal_gate.evaluate_personal_layer`, is
+only evaluated once layers 1-3 all ALLOW (`_finish_allow`). It only acts
+when personal mode is actually scoped to this account/tenant
+(`personal_state.personal_mode_account_id()`) -- every other account is
+untouched (no global enforcement; fixes the "denies nothing" defect QA
+task-3819 found).
 """
+
 from __future__ import annotations
 
 import time
@@ -52,6 +60,10 @@ from src.foundation.mandates.application.evaluate_policy import NoActiveMandateE
 from src.foundation.mandates.application.evaluate_policy import evaluate as evaluate_mandate_policy
 from src.foundation.mandates.contracts.v1 import PolicyEvaluationSubject
 from src.foundation.mandates.contracts.v1 import PolicyOutcome as MandateOutcome
+from src.foundation.risk.adapters.json_state_store import JsonPersonalStateStore
+from src.foundation.risk.adapters.telegram_adapter import TelegramNotifierAdapter
+from src.foundation.risk.ports.notifier import PersonalNotifierPort
+from src.foundation.risk.ports.state import PersonalOperationStatePort
 from src.foundation.risk_gate.adapters.postgres_decision_repository import (
     PostgresDecisionRepository,
 )
@@ -60,6 +72,7 @@ from src.foundation.risk_gate.domain.fence import fence_pairs_for
 from src.foundation.risk_gate.domain.models import FenceSnapshot
 from src.services.order_service.foundation_compliance import evaluate_compliance_gate
 from src.services.order_service.foundation_mandate_resolution import with_resolved_mandate
+from src.services.order_service.foundation_personal_gate import evaluate_personal_layer
 from src.services.order_service.gate import GateDecision, GateOutcome, OrderContext, PreSubmitGate
 from src.services.risk_decision_recorder import RiskDecisionRecorder
 
@@ -102,8 +115,13 @@ def _is_stale(observed: Mapping[str, int], current: Mapping[str, int]) -> bool:
 
 
 async def _record_decision(
-    recorder: RiskDecisionRecorder, *, context: OrderContext, outcome: GateOutcome,
-    reason_codes: tuple[str, ...], fence: Mapping[str, int], start_ns: int,
+    recorder: RiskDecisionRecorder,
+    *,
+    context: OrderContext,
+    outcome: GateOutcome,
+    reason_codes: tuple[str, ...],
+    fence: Mapping[str, int],
+    start_ns: int,
 ) -> UUID:
     now = datetime.now(timezone.utc)
     # task-2395 — measured from gate() entry, same max(1, ...) convention as evaluator.py.
@@ -159,10 +177,21 @@ def make_foundation_pre_submit_gate(
     # to executions yet). CM-A5 (mandate violations block even risk-ALLOW
     # orders) is enforced unconditionally, regardless of this flag.
     require_compliance_mandate: bool = False,
+    # task-3986 — the personal-conservative 4th layer's own ports. Default
+    # to the real single-operator adapters (cheap, I/O-free __init__, so
+    # constructing them here can never fail the whole factory -- see
+    # foundation_personal_gate.py's module docstring on why a broken bundle
+    # config still only denies the one scoped account, not this factory
+    # call). None of the three production assembly sites pass these
+    # explicitly today, so this is purely additive for every other account.
+    personal_state: PersonalOperationStatePort | None = None,
+    personal_notifier: PersonalNotifierPort | None = None,
 ) -> PreSubmitGate:
     risk_repo = PostgresRiskGateRepository(pool)
     mandate_repo = PostgresMandateRepository(pool)
     recorder = RiskDecisionRecorder(pool, PostgresDecisionRepository(pool), InProcessEventBus())
+    p_state = personal_state if personal_state is not None else JsonPersonalStateStore()
+    p_notifier = personal_notifier if personal_notifier is not None else TelegramNotifierAdapter()
 
     async def gate(context: OrderContext) -> GateDecision:
         start_ns = time.perf_counter_ns()
@@ -173,12 +202,18 @@ def make_foundation_pre_submit_gate(
 
         if context.observed_fence is not None and _is_stale(context.observed_fence, fence):
             decision_id = await _record_decision(
-                recorder, context=context, outcome=GateOutcome.DENY,
-                reason_codes=("RISK_FENCE_STALE",), fence=fence, start_ns=start_ns,
+                recorder,
+                context=context,
+                outcome=GateOutcome.DENY,
+                reason_codes=("RISK_FENCE_STALE",),
+                fence=fence,
+                start_ns=start_ns,
             )
             return GateDecision(
-                outcome=GateOutcome.DENY, reason_codes=("RISK_FENCE_STALE",),
-                fence_snapshot=fence, decision_id=decision_id,
+                outcome=GateOutcome.DENY,
+                reason_codes=("RISK_FENCE_STALE",),
+                fence_snapshot=fence,
+                decision_id=decision_id,
             )
 
         if active_controls:
@@ -186,12 +221,18 @@ def make_foundation_pre_submit_gate(
                 f"RISK_KILL_SWITCH_ACTIVE_{c.scope.value}" for c in active_controls
             )
             decision_id = await _record_decision(
-                recorder, context=context, outcome=GateOutcome.DENY,
-                reason_codes=reason_codes, fence=fence, start_ns=start_ns,
+                recorder,
+                context=context,
+                outcome=GateOutcome.DENY,
+                reason_codes=reason_codes,
+                fence=fence,
+                start_ns=start_ns,
             )
             return GateDecision(
-                outcome=GateOutcome.DENY, reason_codes=reason_codes,
-                fence_snapshot=fence, decision_id=decision_id,
+                outcome=GateOutcome.DENY,
+                reason_codes=reason_codes,
+                fence_snapshot=fence,
+                decision_id=decision_id,
             )
 
         # CM-8/CM-A5 — evaluated here but only consumed at the two ALLOW
@@ -199,7 +240,8 @@ def make_foundation_pre_submit_gate(
         # keep their own specific reason; compliance only gets the final say
         # when this function was about to return ALLOW anyway.
         compliance = await evaluate_compliance_gate(
-            mandate_repo, context,
+            mandate_repo,
+            context,
             require_compliance_mandate=require_compliance_mandate,
             now=datetime.now(timezone.utc),
         )
@@ -207,20 +249,55 @@ def make_foundation_pre_submit_gate(
         async def _finish_allow(*, policy_decision_id: UUID | None = None) -> GateDecision:
             if not compliance.allowed:
                 cid = await _record_decision(
-                    recorder, context=context, outcome=GateOutcome.DENY,
-                    reason_codes=compliance.reason_codes, fence=fence, start_ns=start_ns,
+                    recorder,
+                    context=context,
+                    outcome=GateOutcome.DENY,
+                    reason_codes=compliance.reason_codes,
+                    fence=fence,
+                    start_ns=start_ns,
                 )
                 return GateDecision(
-                    outcome=GateOutcome.DENY, reason_codes=compliance.reason_codes,
-                    fence_snapshot=fence, decision_id=cid,
+                    outcome=GateOutcome.DENY,
+                    reason_codes=compliance.reason_codes,
+                    fence_snapshot=fence,
+                    decision_id=cid,
+                    compliance_decision_id=compliance.compliance_decision_id,
+                )
+            # layer 4 (task-3986) -- only reached when layers 1-3 all ALLOW.
+            # If personal mode is not scoped to this account,
+            # evaluate_personal_layer returns a no-op (_ALLOW) immediately,
+            # so every other account is unaffected.
+            personal = await evaluate_personal_layer(
+                context, personal_state=p_state, personal_notifier=p_notifier
+            )
+            if personal.denied:
+                cid = await _record_decision(
+                    recorder,
+                    context=context,
+                    outcome=GateOutcome.DENY,
+                    reason_codes=personal.reason_codes,
+                    fence=fence,
+                    start_ns=start_ns,
+                )
+                return GateDecision(
+                    outcome=GateOutcome.DENY,
+                    reason_codes=personal.reason_codes,
+                    fence_snapshot=fence,
+                    decision_id=cid,
                     compliance_decision_id=compliance.compliance_decision_id,
                 )
             cid = await _record_decision(
-                recorder, context=context, outcome=GateOutcome.ALLOW, reason_codes=(),
-                fence=fence, start_ns=start_ns,
+                recorder,
+                context=context,
+                outcome=GateOutcome.ALLOW,
+                reason_codes=(),
+                fence=fence,
+                start_ns=start_ns,
             )
             return GateDecision(
-                outcome=GateOutcome.ALLOW, fence_snapshot=fence, decision_id=cid,
+                outcome=GateOutcome.ALLOW,
+                fence_snapshot=fence,
+                decision_id=cid,
                 policy_decision_id=policy_decision_id,
                 compliance_decision_id=compliance.compliance_decision_id,
             )
@@ -238,12 +315,18 @@ def make_foundation_pre_submit_gate(
                 )
             if require_mandate:
                 decision_id = await _record_decision(
-                    recorder, context=context, outcome=GateOutcome.DENY,
-                    reason_codes=("RISK_MANDATE_REQUIRED",), fence=fence, start_ns=start_ns,
+                    recorder,
+                    context=context,
+                    outcome=GateOutcome.DENY,
+                    reason_codes=("RISK_MANDATE_REQUIRED",),
+                    fence=fence,
+                    start_ns=start_ns,
                 )
                 return GateDecision(
-                    outcome=GateOutcome.DENY, reason_codes=("RISK_MANDATE_REQUIRED",),
-                    fence_snapshot=fence, decision_id=decision_id,
+                    outcome=GateOutcome.DENY,
+                    reason_codes=("RISK_MANDATE_REQUIRED",),
+                    fence_snapshot=fence,
+                    decision_id=decision_id,
                 )
             return await _finish_allow()
 
@@ -260,12 +343,18 @@ def make_foundation_pre_submit_gate(
         mandate = await mandate_repo.get_mandate(context.user_id)
         if mandate is None or mandate.active_revision_id != context.mandate_revision_id:
             decision_id = await _record_decision(
-                recorder, context=context, outcome=GateOutcome.DENY,
-                reason_codes=("RISK_MANDATE_REVISION_STALE",), fence=fence, start_ns=start_ns,
+                recorder,
+                context=context,
+                outcome=GateOutcome.DENY,
+                reason_codes=("RISK_MANDATE_REVISION_STALE",),
+                fence=fence,
+                start_ns=start_ns,
             )
             return GateDecision(
-                outcome=GateOutcome.DENY, reason_codes=("RISK_MANDATE_REVISION_STALE",),
-                fence_snapshot=fence, decision_id=decision_id,
+                outcome=GateOutcome.DENY,
+                reason_codes=("RISK_MANDATE_REVISION_STALE",),
+                fence_snapshot=fence,
+                decision_id=decision_id,
             )
 
         try:
@@ -276,23 +365,36 @@ def make_foundation_pre_submit_gate(
             )
         except NoActiveMandateError:
             decision_id = await _record_decision(
-                recorder, context=context, outcome=GateOutcome.DENY,
-                reason_codes=("RISK_INPUT_MANDATE_MISSING",), fence=fence, start_ns=start_ns,
+                recorder,
+                context=context,
+                outcome=GateOutcome.DENY,
+                reason_codes=("RISK_INPUT_MANDATE_MISSING",),
+                fence=fence,
+                start_ns=start_ns,
             )
             return GateDecision(
-                outcome=GateOutcome.DENY, reason_codes=("RISK_INPUT_MANDATE_MISSING",),
-                fence_snapshot=fence, decision_id=decision_id,
+                outcome=GateOutcome.DENY,
+                reason_codes=("RISK_INPUT_MANDATE_MISSING",),
+                fence_snapshot=fence,
+                decision_id=decision_id,
             )
 
         if mandate_decision.outcome != MandateOutcome.ALLOW:
             reason_codes = tuple(mandate_decision.reason_codes)
             decision_id = await _record_decision(
-                recorder, context=context, outcome=GateOutcome.DENY,
-                reason_codes=reason_codes, fence=fence, start_ns=start_ns,
+                recorder,
+                context=context,
+                outcome=GateOutcome.DENY,
+                reason_codes=reason_codes,
+                fence=fence,
+                start_ns=start_ns,
             )
             return GateDecision(
-                outcome=GateOutcome.DENY, reason_codes=reason_codes, fence_snapshot=fence,
-                decision_id=decision_id, policy_decision_id=mandate_decision.id,
+                outcome=GateOutcome.DENY,
+                reason_codes=reason_codes,
+                fence_snapshot=fence,
+                decision_id=decision_id,
+                policy_decision_id=mandate_decision.id,
             )
         return await _finish_allow(policy_decision_id=mandate_decision.id)
 

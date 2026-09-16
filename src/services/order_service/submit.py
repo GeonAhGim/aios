@@ -35,6 +35,7 @@ from src.services.order_service import repository
 from src.services.order_service.gate import (
     GateOutcome,
     OrderContext,
+    PersonalOrderRiskSnapshot,
     PreSubmitGate,
     record_gate_decision,
 )
@@ -105,6 +106,11 @@ async def submit_order(
     pre_submit_gate: PreSubmitGate,
     mandate_revision_id: UUID | None = None,
     metrics: MetricsPort | None = None,
+    # task-3986 — the personal-conservative 4th layer's numeric snapshot (no
+    # live equity/exposure source is wired to this call site yet, see
+    # foundation_personal_gate.py's docstring); left unset by every
+    # production caller today, so this is purely additive.
+    personal_risk_snapshot: PersonalOrderRiskSnapshot | None = None,
 ) -> Order:
     # PLT-10 — 기본값 NullMetrics: 호출부가 미설정이면(기존 실행 전부) 무영향.
     metrics = metrics if metrics is not None else NullMetrics()
@@ -135,6 +141,7 @@ async def submit_order(
             execution_id=order.execution_id,
             exchange=order.exchange,
             mandate_revision_id=mandate_revision_id,
+            personal_risk_snapshot=personal_risk_snapshot,
         )
     )
     record_gate_decision(metrics, decision, duration_seconds=time.monotonic() - gate_started)
