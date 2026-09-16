@@ -17,6 +17,9 @@
   10. money_float              -- 금액류 이름(amount/price/fee 등)이 float로 선언됨
   11. symbol_id_assembly       -- symbol/instrument_id를 f-string/concat/join으로 직접 조립
   12. spec_template_incomplete -- 명세 파일에 "## 9." 리프 목록 또는 미확정 절이 없음
+  13. authority_duplication    -- 같은 bounded context에서 같은 "authority"(멱등키 등)를
+                                   2개 이상의 파일이 각자 raw assembly로 재조립(RATCHET-2,
+                                   task-3256)
 
 `check_code_ratchets.py`와 같은 래칫 방식: `consistency-baseline.json`에 지표별
 현재 위반 수를 기록하고, 이후 실행에서 그 수가 늘면 exit 2(적색). 각 검사는
@@ -887,6 +890,69 @@ def check_symbol_id_assembly(root: Path) -> list[Hit]:
 
 
 # ---------------------------------------------------------------------------
+# 13. authority_duplication (RATCHET-2, task-3256)
+# ---------------------------------------------------------------------------
+
+_AUTHORITY_TARGET_NAMES = frozenset({"idempotency_key"})
+
+
+def _bounded_context(rel_parts: tuple[str, ...]) -> str | None:
+    """`src/foundation/<agg>/...` -> `foundation.<agg>`, `src/core/<d>/...` -> `core.<d>`."""
+    if len(rel_parts) < 3:
+        return None
+    if rel_parts[0] == "src" and rel_parts[1] in ("foundation", "core"):
+        return f"{rel_parts[1]}.{rel_parts[2]}"
+    return None
+
+
+def check_authority_duplication(root: Path) -> list[Hit]:
+    """같은 bounded context 안에서 같은 이름의 "authority"(멱등키 등)를 서로 다른
+    파일이 각자 raw assembly(f-string/concat/join)로 재조립하면 위반 --
+    `record_fill.py`가 `journal_rules.py`의 `fill:` 멱등키 스킴을 독립적으로
+    재구성한 사례가 실제 동기다(FA 축, task-3256 조사). 캔노니컬 빌더 호출이나
+    기존 값을 그대로 전달하는 것은 위반이 아니다 -- raw assembly만 잡는다
+    (`check_position_key_central.py`와 같은 판정 원칙: 완벽한 판정을 목표하지
+    않고, 늘어나는 것만 baseline으로 막는다)."""
+    by_context_target: dict[tuple[str, str], list[Hit]] = {}
+    for path in _iter_py_files(root, "src"):
+        rel_parts = path.relative_to(root).parts
+        if any(rel_parts[: len(prefix)] == prefix for prefix in _EXEMPT_DIR_PARTS):
+            continue
+        context = _bounded_context(rel_parts)
+        if context is None:
+            continue
+        tree = _safe_parse(path)
+        if tree is None:
+            continue
+        rel = path.relative_to(root).as_posix()
+        for node in ast.walk(tree):
+            targets: list[ast.expr] = []
+            value: ast.expr | None = None
+            lineno = 0
+            if isinstance(node, ast.Assign):
+                targets, value, lineno = node.targets, node.value, node.lineno
+            elif isinstance(node, ast.AnnAssign) and node.value is not None:
+                targets, value, lineno = [node.target], node.value, node.lineno
+            if value is not None and _is_assembly_expr(value):
+                for target in targets:
+                    if isinstance(target, ast.Name) and target.id in _AUTHORITY_TARGET_NAMES:
+                        key = (context, target.id)
+                        by_context_target.setdefault(key, []).append((rel, lineno))
+            if isinstance(node, ast.Call):
+                for kw in node.keywords:
+                    if kw.arg in _AUTHORITY_TARGET_NAMES and _is_assembly_expr(kw.value):
+                        key = (context, kw.arg)
+                        by_context_target.setdefault(key, []).append((rel, kw.value.lineno))
+
+    hits: list[Hit] = []
+    for sites in by_context_target.values():
+        distinct_files = {rel for rel, _ in sites}
+        if len(distinct_files) >= 2:
+            hits.extend(sites)
+    return hits
+
+
+# ---------------------------------------------------------------------------
 # 12. spec_template_incomplete
 # ---------------------------------------------------------------------------
 
@@ -926,6 +992,7 @@ METRICS: dict[str, Callable[[Path], list[Hit]]] = {
     "money_float": check_money_float,
     "symbol_id_assembly": check_symbol_id_assembly,
     "spec_template_incomplete": check_spec_template,
+    "authority_duplication": check_authority_duplication,
 }
 
 

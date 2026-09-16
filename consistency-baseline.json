@@ -1,4 +1,5 @@
 {
+  "authority_duplication": 4,
   "env_key_undocumented": 4,
   "event_type_unconsumed": 4,
   "feature_flag_undocumented": 5,

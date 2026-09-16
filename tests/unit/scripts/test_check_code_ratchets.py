@@ -5,6 +5,7 @@ exit 2로 적색 재현하고(re-repro), 감소는 --update 없이는 baseline�
 않다가 --update로만 반영됨을 직접 단언한다. 정적 AST/tokenize 스캔만 하는 순수
 파서이므로 DB·import 없이 tmp_path에 합성한 `.py` 파일만으로 검증한다.
 """
+
 from __future__ import annotations
 
 import importlib.util
@@ -47,7 +48,14 @@ def _write_baseline(
 
 
 def _empty_baseline() -> dict[str, int]:
-    return {"skip_xfail": 0, "todo_fixme_xxx": 0, "not_implemented_error": 0}
+    return {
+        "skip_xfail": 0,
+        "todo_fixme_xxx": 0,
+        "not_implemented_error": 0,
+        "loc_over_500": 0,
+        "loc_over_800": 0,
+        "loc_over_1000": 0,
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -170,7 +178,14 @@ def test_first_run_initializes_baseline_from_measurement(tmp_path: Path) -> None
 
     assert exit_code == 0
     data = json.loads(baseline_path.read_text(encoding="utf-8"))
-    assert data == {"skip_xfail": 0, "todo_fixme_xxx": 0, "not_implemented_error": 1}
+    assert data == {
+        "skip_xfail": 0,
+        "todo_fixme_xxx": 0,
+        "not_implemented_error": 1,
+        "loc_over_500": 0,
+        "loc_over_800": 0,
+        "loc_over_1000": 0,
+    }
 
 
 def test_increase_in_not_implemented_error_fails_red(
@@ -285,3 +300,72 @@ def test_baseline_missing_metric_key_fails(tmp_path: Path) -> None:
     )
 
     assert exit_code == 1
+
+
+# ---------------------------------------------------------------------------
+# LOC 관찰 지표(ADR-2026-09-10-C §7, RATCHET-2 task-3256)
+# ---------------------------------------------------------------------------
+
+
+def test_scan_counts_file_over_500_lines(tmp_path: Path) -> None:
+    _write_py(tmp_path, "src/a.py", "x = 1\n" * 501)
+
+    hits = check_code_ratchets.scan_tree(tmp_path, subdirs=("src",))
+
+    assert hits["loc_over_500"] == [("src/a.py", 501)]
+    assert hits["loc_over_800"] == []
+    assert hits["loc_over_1000"] == []
+
+
+def test_scan_counts_file_over_800_and_1000_lines_cumulatively(tmp_path: Path) -> None:
+    _write_py(tmp_path, "src/a.py", "x = 1\n" * 1200)
+
+    hits = check_code_ratchets.scan_tree(tmp_path, subdirs=("src",))
+
+    assert hits["loc_over_500"] == [("src/a.py", 1200)]
+    assert hits["loc_over_800"] == [("src/a.py", 1200)]
+    assert hits["loc_over_1000"] == [("src/a.py", 1200)]
+
+
+def test_scan_ignores_file_under_500_lines() -> None:
+    hits = check_code_ratchets._scan_file("a.py", "x = 1\n" * 100)
+    assert hits["loc_over_500"] == []
+
+
+def test_loc_allow_header_exempts_loc_metrics(tmp_path: Path) -> None:
+    content = "# loc-allow: generated protocol mapping table\n" + "x = 1\n" * 1200
+    _write_py(tmp_path, "src/a.py", content)
+
+    hits = check_code_ratchets.scan_tree(tmp_path, subdirs=("src",))
+
+    assert hits["loc_over_500"] == []
+    assert hits["loc_over_800"] == []
+    assert hits["loc_over_1000"] == []
+
+
+def test_loc_allow_only_exempts_loc_metrics_not_others(tmp_path: Path) -> None:
+    content = "# loc-allow: generated table\n# TODO: still counted\n" + "x = 1\n" * 600
+    _write_py(tmp_path, "src/a.py", content)
+
+    hits = check_code_ratchets.scan_tree(tmp_path, subdirs=("src",))
+
+    assert hits["loc_over_500"] == []
+    assert len(hits["todo_fixme_xxx"]) == 1
+
+
+def test_increase_in_loc_over_500_fails_red(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """게이트 적색 재현: LOC 관찰 지표도 다른 세 지표와 동일하게 증가 시 exit 2."""
+    _write_py(tmp_path, "src/a.py", "x = 1\n" * 501)
+    _write_py(tmp_path, "src/b.py", "x = 1\n" * 501)
+    baseline_path = _write_baseline(tmp_path, {**_empty_baseline(), "loc_over_500": 1})
+
+    exit_code = check_code_ratchets.main(
+        ["--root", str(tmp_path), "--baseline", str(baseline_path)]
+    )
+
+    out = capsys.readouterr().out
+    assert exit_code == 2
+    assert "loc_over_500" in out
+    assert "1개 -> 2개" in out

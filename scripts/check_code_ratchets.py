@@ -1,11 +1,18 @@
 """Code-quality-leak ratchet — ADR-2026-09-09-D Decision 2 "코드 래칫".
 
-Tracks three counts across `src/`, `tests/`, `scripts/`:
+Tracks six counts across `src/`, `tests/`, `scripts/`:
 
   * ``skip_xfail``          -- ``pytest.mark.skip``/``skipif``/``xfail`` decorators and
                                 ``pytest.skip()``/``pytest.xfail()`` calls
   * ``todo_fixme_xxx``      -- ``TODO``/``FIXME``/``XXX`` markers in comments
   * ``not_implemented_error`` -- ``raise NotImplementedError`` sites
+  * ``loc_over_500``/``loc_over_800``/``loc_over_1000`` -- file-policy (ADR-2026-09-10-C
+    §7) LOC observation thresholds: files whose line count exceeds 500/800/1000 lines,
+    excluding files whose first 20 lines carry a ``# loc-allow: <reason>`` comment
+    (generated tables, protocol mappings, deterministic rule matrices). These are
+    observation aids, not a hard cap enforced by this script -- a file over 1000 lines
+    without ``loc-allow`` is a reviewer/architecture-review signal (RATCHET-2, task-3256),
+    counted here the same warn+baseline way as the other three metrics.
 
 Unlike `coverage_ratchet.py`/`check_type_ignore_budget.py`, the baseline in
 ``code-ratchets-baseline.json`` is **not** auto-updated on a green run: a
@@ -20,6 +27,7 @@ file's first 20 lines contain a comment ``# ratchet-allow: <reason>``.
 Usage: `python scripts/check_code_ratchets.py [--update]` (repo root).
 Exit code: 0 = pass, 2 = a count increased beyond baseline, 1 = input error.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -52,13 +60,22 @@ _EXCLUDE_DIR_NAMES = frozenset(
 
 _TODO_RE = re.compile(r"\b(?:TODO|FIXME|XXX)\b")
 _RATCHET_ALLOW_RE = re.compile(r"#\s*ratchet-allow:\s*(\S.*)")
+_LOC_ALLOW_RE = re.compile(r"#\s*loc-allow:\s*(\S.*)")
 _HEADER_SCAN_LINES = 20
+_LOC_THRESHOLDS = (500, 800, 1000)
 
 _SKIP_XFAIL_NAMES = frozenset(
     {"pytest.mark.skip", "pytest.mark.skipif", "pytest.mark.xfail", "pytest.skip", "pytest.xfail"}
 )
 
-METRICS = ("skip_xfail", "todo_fixme_xxx", "not_implemented_error")
+METRICS = (
+    "skip_xfail",
+    "todo_fixme_xxx",
+    "not_implemented_error",
+    "loc_over_500",
+    "loc_over_800",
+    "loc_over_1000",
+)
 
 Hit = tuple[str, int]
 
@@ -85,6 +102,17 @@ def _ratchet_allow_reason(text: str) -> str | None:
     fail-closed 어댑터가 의도적으로 raise하는 NotImplementedError를 예외 처리하기 위함."""
     for line in text.splitlines()[:_HEADER_SCAN_LINES]:
         m = _RATCHET_ALLOW_RE.search(line)
+        if m:
+            return m.group(1).strip()
+    return None
+
+
+def _loc_allow_reason(text: str) -> str | None:
+    """파일 상단(첫 _HEADER_SCAN_LINES줄)의 'loc-allow: <사유>' 주석을 찾는다 --
+    ADR-2026-09-10-C §7(생성 테이블/프로토콜 매핑/결정론적 규칙 행렬)의 LOC 하드캡
+    예외를 위함."""
+    for line in text.splitlines()[:_HEADER_SCAN_LINES]:
+        m = _LOC_ALLOW_RE.search(line)
         if m:
             return m.group(1).strip()
     return None
@@ -129,6 +157,12 @@ def _comment_tokens(text: str) -> list[tuple[int, str]]:
 
 def _scan_file(rel: str, text: str) -> dict[str, list[Hit]]:
     hits: dict[str, list[Hit]] = {m: [] for m in METRICS}
+
+    if _loc_allow_reason(text) is None:
+        loc = len(text.splitlines())
+        for threshold in _LOC_THRESHOLDS:
+            if loc > threshold:
+                hits[f"loc_over_{threshold}"].append((rel, loc))
 
     for lineno, comment in _comment_tokens(text):
         for _ in _TODO_RE.finditer(comment):

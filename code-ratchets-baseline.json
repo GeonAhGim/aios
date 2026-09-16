@@ -1,4 +1,7 @@
 {
+  "loc_over_1000": 2,
+  "loc_over_500": 46,
+  "loc_over_800": 7,
   "not_implemented_error": 41,
   "skip_xfail": 3,
   "todo_fixme_xxx": 0
