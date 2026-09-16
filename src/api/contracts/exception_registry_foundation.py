@@ -6,11 +6,15 @@ docstring 참조. services/auth 매핑은 `exception_registry.py`(같은 이유�
 있다. 공개 API(`map_exception()`/`override_status()`)는 `exception_mapping.py`가 이 파일과
 자매 모듈의 EXCEPTION_MAP_*/STATUS_OVERRIDE_*를 합쳐서 제공한다.
 """
+
 from __future__ import annotations
 
 from starlette import status
 
 from src.api.contracts.error_codes import ErrorCode
+from src.api.contracts.exception_registry_foundation_mandates import (
+    EXCEPTION_MAP_FOUNDATION_MANDATES,
+)
 from src.api.schemas.positions import InvalidCursorError
 from src.core.script.runtime.series import ScriptRuntimeError
 from src.foundation.backtest.application.quick_backtest import (
@@ -47,17 +51,6 @@ from src.foundation.entities.application.resolve_context import EntityContextRes
 from src.foundation.evidence.domain.rules import ChainIntegrityError
 from src.foundation.ledger.application.payouts import UnknownPayoutBatchError
 from src.foundation.ledger.application.queries import WalletLedgerDriftError
-from src.foundation.mandates.application.activate_revision import (
-    CoolingOffNotElapsedError,
-    CrossTenantMandateAccessError,
-    InvalidRevisionStateError,
-    MaterialChangeRequiresFreshConsentError,
-    MaterialChangeRequiresReauthError,
-    RevisionNotFoundError,
-    SelfApprovalNotAllowedError,
-)
-from src.foundation.mandates.application.create_draft_mandate import MandateAlreadyExistsError
-from src.foundation.mandates.application.evaluate_policy import NoActiveMandateError
 from src.foundation.market_data.application.get_candles import (
     AsOfInFutureError,
     QuarantinedViewUnsupportedError,
@@ -191,16 +184,11 @@ EXCEPTION_MAP_FOUNDATION: list[tuple[type[Exception], ErrorCode]] = [
     (ConnectionRevokedDuringSyncError, ErrorCode.STATE_INVALID_TRANSITION),
     (ProviderUnavailableError, ErrorCode.EXCHANGE_FATAL),
     (ConnectionNotRevocableError, ErrorCode.STATE_INVALID_TRANSITION),
-    (MandateAlreadyExistsError, ErrorCode.STATE_INVALID_TRANSITION),
-    (NoActiveMandateError, ErrorCode.RESOURCE_NOT_FOUND),
-    (RevisionNotFoundError, ErrorCode.RESOURCE_NOT_FOUND),
-    (CrossTenantMandateAccessError, ErrorCode.RESOURCE_NOT_FOUND),
-    (InvalidRevisionStateError, ErrorCode.STATE_INVALID_TRANSITION),
-    (MaterialChangeRequiresReauthError, ErrorCode.AUTH_MFA_REQUIRED),
-    (MaterialChangeRequiresFreshConsentError, ErrorCode.POLICY_DENIED),
-    (CoolingOffNotElapsedError, ErrorCode.STATE_INVALID_TRANSITION),
-    # CM-5 (task-2118) — author != approver (CM-A3) violation, mapped to 400 (per DoD).
-    (SelfApprovalNotAllowedError, ErrorCode.VALIDATION_INVALID_FIELD),
+    # The foundation.mandates.* cluster (activate_revision/evaluate_policy/
+    # create_draft_mandate/explain) moved to
+    # exception_registry_foundation_mandates.py (task-2618, this file hit
+    # the P6.line_cap 300-line guard again).
+    *EXCEPTION_MAP_FOUNDATION_MANDATES,
     # evidence.py 체인 무결성 — 없는 코드라 409 conflict로 접는다.
     (ChainIntegrityError, ErrorCode.STATE_INVALID_TRANSITION),
     # PLT-21b(task-1217) — foundation/paper_control·performance·reconciliation.
