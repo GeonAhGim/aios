@@ -226,6 +226,136 @@ def test_full_validation_pipeline_p95_latency_within_budget() -> None:
     assert p95 < 0.005, f"p95={p95 * 1000:.3f}ms >= 5ms 예산"
 
 
+def test_rule_missing_expr_field_is_rejected() -> None:
+    """negative: expr 필드가 아예 없는 규칙은 필수 필드 검증에 걸려야 한다."""
+    bad_rule = {
+        "alert": "BogusExpr",
+        "for": "0m",
+        "labels": {"severity": "warn", "runbook": "RB-01"},
+        "annotations": {"summary": "x"},
+    }
+    assert "expr" in _missing_required_fields(bad_rule)
+
+
+def test_rule_missing_alert_field_is_rejected() -> None:
+    """negative: alert 필드가 아예 없는 규칙은 필수 필드 검증에 걸려야 한다."""
+    bad_rule = {
+        "expr": "up == 1",
+        "for": "0m",
+        "labels": {"severity": "warn", "runbook": "RB-01"},
+        "annotations": {"summary": "x"},
+    }
+    assert "alert" in _missing_required_fields(bad_rule)
+
+
+def test_rule_missing_for_field_is_rejected() -> None:
+    """negative: for 필드가 없는 규칙은 필수 필드 검증에 걸려야 한다."""
+    bad_rule = {
+        "alert": "BogusFor",
+        "expr": "up == 1",
+        "labels": {"severity": "warn", "runbook": "RB-01"},
+        "annotations": {"summary": "x"},
+    }
+    assert "for" in _missing_required_fields(bad_rule)
+
+
+def test_runbook_label_missing_is_rejected() -> None:
+    """negative: labels.runbook가 아예 없는 규칙은 필수 필드 검증에 걸려야 한다."""
+    bad_rule = {
+        "alert": "BogusRunbook",
+        "expr": "up == 1",
+        "for": "0m",
+        "labels": {"severity": "warn"},
+        "annotations": {"summary": "x"},
+    }
+    assert "labels.runbook" in _missing_required_fields(bad_rule)
+
+
+def test_annotations_summary_missing_is_rejected() -> None:
+    """negative: annotations.summary가 없거나 빈 문자열인 규칙은 필수 필드 검증에 걸려야 한다."""
+    bad_rule = {
+        "alert": "BogusSummary",
+        "expr": "up == 1",
+        "for": "0m",
+        "labels": {"severity": "warn", "runbook": "RB-01"},
+        "annotations": {},
+    }
+    assert "annotations.summary" in _missing_required_fields(bad_rule)
+
+
+def test_unknown_severity_value_rejected() -> None:
+    """negative: severity가 공백, 대문자, 기타 값인 경우 모두 거부된다."""
+    for bad_value in ["", "WARN", "Critical", "error", "none"]:
+        bad_rule = {
+            "alert": "BogusSeverity",
+            "expr": "up == 1",
+            "for": "0m",
+            "labels": {"severity": bad_value, "runbook": "RB-01"},
+            "annotations": {"summary": "x"},
+        }
+        assert "labels.severity" in _missing_required_fields(bad_rule), (
+            f"severity={bad_value!r}가 통과하면 안 된다"
+        )
+
+
+def test_metric_token_with_uppercase_is_not_matched() -> None:
+    """negative: aios_* 토큰은 소문자만 매칭되므로 대문자 혼합 메트릭은 무시된다 —
+    Prometheus 이름 규칙과 일치한다."""
+    tokens = _metric_tokens("aios_MixedCase_total > 0")
+    assert tokens == set(), "대문자가 섞인 토큰은 메트릭 토큰으로 매칭되면 안 된다"
+
+
+def test_metric_token_with_digits_at_end() -> None:
+    """음수 검증: aios_로 시작하지만 숫자로 끝나는 토큰은 매칭되지 않는다."""
+    tokens = _metric_tokens("aios_metric_123 > 0")
+    assert "aios_metric_123" in tokens
+
+
+def test_full_validation_on_corrupted_runbook_file_raises_monkeypatch(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """실패 주입(monkeypatch): _invalid_runbook_reason 이 내부적으로 호출하는
+    Path.is_file() 를 모의 객체로 바꿔서 FileNotFoundError 를 유발한다 —
+    실제 파일 시스템 I/O 가 실패해도 검증 로직이 예외를 잡거나 최소한 정당한
+    사유를 반환하는지 확인한다."""
+    bad_rule = {
+        "alert": "MonkeyPatchTest",
+        "expr": "up == 1",
+        "for": "0m",
+        "labels": {"severity": "warn", "runbook": "RB-01"},
+        "annotations": {"summary": "x"},
+    }
+    # Path.is_file() 가 항상 False 를 반환하도록 모의: runbook 파일이
+    # "존재하지 않는" 상태로 간주되어야 한다.
+    monkeypatch.setattr(
+        "pathlib.Path.is_file",
+        lambda self: False,
+    )
+    reason = _invalid_runbook_reason(bad_rule, RUNBOOKS_DIR)
+    assert reason is not None and "파일 없음" in reason
+
+
+def test_full_validation_on_missing_labels_dict_raises_monkeypatch(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """실패 주입(monkeypatch): labels 가 None 인 규칙에서 _missing_required_fields 가
+    NoneType 에 .get() 을 호출해도 예외 없이 처리되는지 확인한다 — YAML 에서
+    labels: null 이 올 수 있으므로 fail-closed 가 null 도 허용해야 한다."""
+    bad_rule = {
+        "alert": "NullLabels",
+        "expr": "up == 1",
+        "for": "0m",
+        "labels": None,
+        "annotations": {"summary": "x"},
+    }
+    # labels 가 None 이면 .get() 은 AttributeError 를 일으켜야 하지만
+    # _missing_required_fields 는 "labels.severity" 를 missing 에 추가해야 한다.
+    missing = _missing_required_fields(bad_rule)
+    assert "labels.severity" in missing
+
+
 def test_gate_goes_red_when_a_real_rule_expr_is_corrupted_with_unknown_metric() -> None:
     """게이트 적색 재현: 실제 alert_rules.yaml에서 로드한 규칙 중 하나의 expr에
     존재하지 않는 메트릭 토큰을 주입한 뒤, test_every_rule_references_a_known_metric_name
@@ -240,3 +370,31 @@ def test_gate_goes_red_when_a_real_rule_expr_is_corrupted_with_unknown_metric() 
     violations = _unknown_metric_tokens(corrupted)
     with pytest.raises(AssertionError):
         assert violations == {}, f"metric_names.py에 없는 메트릭 참조: {violations}"
+
+
+def test_full_validation_on_corrupted_yaml_with_real_metric_name_raises(
+    tmp_path: Path,
+) -> None:
+    """실패 주입: 유효한 메트릭 이름이 담긴 YAML 이지만 구문이 깨진 파일을 로드할 때
+    예외가 발생하는지 확인 — 메트릭 이름이 정확해도 YAML 구문 오류는 조용히 넘어가지
+    않아야 한다."""
+    bad_path = tmp_path / "alert_rules.yaml"
+    bad_path.write_text(
+        "groups:\n"
+        "  - name: x\n"
+        "    rules:\n"
+        "      - alert: A1\n"
+        "        expr: aios_loop_last_success_age_seconds > 900\n"
+        "        for:\n"
+        "        labels:\n          severity: warn\n"
+        "        # 깨진 들여쓰기\n"
+        "      - alert: broken_indent\n"
+        "        expr: up\n"
+        "    rules:\n",
+        encoding="utf-8",
+    )
+    # yaml.safe_load 는 구문을 허용할 수 있으나, 두 번째 rules: 키가
+    # 첫 번째 rules 리스트를 덮어써서 None 이 되므로 _load_rules 가
+    # TypeError 를 일으켜야 한다 — 조용히 통과하지 않음.
+    with pytest.raises(TypeError):
+        _load_rules(bad_path)
