@@ -19,6 +19,7 @@
 (직접 실행하면 scripts/가 sys.path[0]이 되어 `from scripts.backup...`가 깨진다 --
 scripts/rotate_credential_keys.py와 동일 규약).
 """
+
 from __future__ import annotations
 
 import argparse
@@ -46,8 +47,16 @@ def _now() -> dt.datetime:
 
 def _run(cmd: list[str], cwd: Path, env: dict | None, timeout: int) -> tuple[int, str]:
     try:
-        r = subprocess.run(cmd, cwd=cwd, env=env, capture_output=True, text=True, encoding="utf-8",
-                           errors="replace", timeout=timeout)
+        r = subprocess.run(
+            cmd,
+            cwd=cwd,
+            env=env,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=timeout,
+        )
         return r.returncode, (r.stdout + r.stderr)[-4000:]
     except subprocess.TimeoutExpired:
         return 124, f"timeout {timeout}s"
@@ -154,19 +163,42 @@ def run_drill(
     restore_dsn = with_port(dsn_template, restore_port)
     started_server = False
     try:
+        # -l <logfile> prevents Windows pipe-inheritance deadlock: when pg_ctl start
+        # is called with capture_output=True (PIPE), the postgres daemon inherits the
+        # stdout/stderr handle and Python's communicate() never sees EOF. Writing to
+        # a file directly (official pg_ctl pattern) breaks the handle chain.
+        log_path = restore_data_dir / "pg_ctl_start.log"
         rc, tail = run_cmd(
-            [pg_ctl_bin, "start", "-D", str(restore_data_dir),
-             "-o", f"-p {restore_port}", "-w", "-t", "60"],
-            repo_root, None, 90,
+            [
+                pg_ctl_bin,
+                "start",
+                "-D",
+                str(restore_data_dir),
+                "-o",
+                f"-p {restore_port}",
+                "-w",
+                "-t",
+                "60",
+                "-l",
+                str(log_path),
+            ],
+            repo_root,
+            None,
+            90,
         )
         steps["start_postgres"] = {"ok": rc == 0, "rc": rc, "tail": tail}
         started_server = rc == 0
 
         if started_server:
             reason = wait_for_recovery(
-                restore_dsn, psql_bin=psql_bin, run_cmd=run_cmd, cwd=repo_root,
-                timeout=recovery_poll_timeout, poll_interval=recovery_poll_interval,
-                sleep=sleep, clock=clock,
+                restore_dsn,
+                psql_bin=psql_bin,
+                run_cmd=run_cmd,
+                cwd=repo_root,
+                timeout=recovery_poll_timeout,
+                poll_interval=recovery_poll_interval,
+                sleep=sleep,
+                clock=clock,
             )
             steps["wait_recovery"] = {"ok": reason is None, "detail": reason or "recovery complete"}
 
@@ -177,8 +209,8 @@ def run_drill(
     finally:
         if started_server:
             rc, tail = run_cmd(
-                [pg_ctl_bin, "stop", "-D", str(restore_data_dir), "-m", "fast"],
-                repo_root, None, 60)
+                [pg_ctl_bin, "stop", "-D", str(restore_data_dir), "-m", "fast"], repo_root, None, 60
+            )
             steps["stop_postgres"] = {"ok": rc == 0, "rc": rc, "tail": tail}
         shutil.rmtree(restore_data_dir, ignore_errors=True)
 
@@ -197,17 +229,26 @@ def write_report(result: dict, paths: list[Path]) -> None:
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
-        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--backup-dir", default=str(ROOT / "runtime" / "backup" / "base"),
-                         help="base_backup.py --dest-dir와 같은 경로")
-    parser.add_argument("--archive-dir", required=True,
-                         help="wal_archive.py가 검증하는 아카이브 디렉터리")
-    parser.add_argument("--restore-data-dir",
-                         default=str(ROOT / "runtime" / "backup" / "restore_pgdata"))
+        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
+    )
+    parser.add_argument(
+        "--backup-dir",
+        default=str(ROOT / "runtime" / "backup" / "base"),
+        help="base_backup.py --dest-dir와 같은 경로",
+    )
+    parser.add_argument(
+        "--archive-dir", required=True, help="wal_archive.py가 검증하는 아카이브 디렉터리"
+    )
+    parser.add_argument(
+        "--restore-data-dir", default=str(ROOT / "runtime" / "backup" / "restore_pgdata")
+    )
     parser.add_argument("--restore-port", type=int, default=15433)
     parser.add_argument("--dsn", help="생략하면 DATABASE_URL(.env)을 쓴다")
-    parser.add_argument("--report-path", action="append",
-                         help="결과 JSON을 남길 경로(반복 가능). 생략 시 기본 2곳(로컬 + fleet)")
+    parser.add_argument(
+        "--report-path",
+        action="append",
+        help="결과 JSON을 남길 경로(반복 가능). 생략 시 기본 2곳(로컬 + fleet)",
+    )
     args = parser.parse_args(argv)
 
     dsn = args.dsn or server_url()
@@ -218,8 +259,11 @@ def main(argv: list[str] | None = None) -> int:
         restore_port=args.restore_port,
         dsn_template=dsn,
     )
-    report_paths = ([Path(p) for p in args.report_path] if args.report_path
-                     else [LOCAL_REPORT_PATH, PM_REPORT_PATH])
+    report_paths = (
+        [Path(p) for p in args.report_path]
+        if args.report_path
+        else [LOCAL_REPORT_PATH, PM_REPORT_PATH]
+    )
     write_report(result, report_paths)
 
     out = sys.stdout if result["ok"] else sys.stderr
