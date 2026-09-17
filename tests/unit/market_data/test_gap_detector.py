@@ -22,10 +22,11 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 from datetime import date, datetime, timedelta
 from decimal import Decimal
-from typing import cast
+from typing import Any, cast
 from uuid import uuid4
 
 import pytest
+from pydantic import ValidationError
 
 from src.foundation.market_data.contracts.v1 import (
     CandleRecord,
@@ -187,6 +188,90 @@ def test_detect_gaps_is_order_independent_of_candle_input_order() -> None:
 
     assert shuffled_result == reference
     assert [i.open_time for i in reference] == sorted(missing)
+
+
+# --- DEEPEN(task-4111) negative/failure-injection/성능 --------------------------------
+
+
+def test_detect_gaps_handles_duplicate_candles_without_false_gaps() -> None:
+    """중복 open_time을 가진 캔들이 입력되어도 received 집합(set)이
+    중복을 자동으로 제거하므로 false positive 갭이 발생하지 않는다.
+    불변식: 중복 입력이 결정론적 결과를 깨뜨리지 않음."""
+    key = SeriesKey(venue=Venue.KIS_KRX, instrument_id=uuid4(), timeframe=Timeframe.H1)
+    sessions = _calendar(Venue.KIS_KRX).sessions_for(date(2026, 9, 4))
+    expected = expected_opens(sessions[0].open_at, sessions[0].close_at, Timeframe.H1, sessions)
+    assert len(expected) >= 2
+    # 첫 번째 캔들을 10배 중복
+    duplicate_candle = _candle(key, expected[0], Timeframe.H1)
+    candles = [duplicate_candle] * 10 + [_candle(key, ot, Timeframe.H1) for ot in expected[1:]]
+    issues = detect_gaps(candles, Timeframe.H1, sessions)
+    assert issues == []  # 중복이 갭 수에 영향을 주지 않아야 한다
+
+
+def test_detect_gaps_rejects_naive_open_time_at_model_boundary() -> None:
+    """naive datetime(open_time이 tzinfo 없음)을 가진 CandleRecord는
+    Pydantic 모델 단계에서 거부된다 — detect_gaps 호출 전에 fail-closed
+    불변식이 이미 발동한다. 이 테스트는 그 경계가 유지됨을 검증한다."""
+    key = SeriesKey(venue=Venue.KIS_KRX, instrument_id=uuid4(), timeframe=Timeframe.H1)
+    # naive datetime은 Pydantic이 즉시 거부
+    with pytest.raises(ValidationError):
+        CandleRecord(
+            key=key,
+            open_time=datetime(2026, 9, 4, 10, 0),  # tzinfo 없음
+            close_time=datetime(2026, 9, 4, 11, 0),
+            open=Decimal("100"),
+            high=Decimal("110"),
+            low=Decimal("90"),
+            close=Decimal("105"),
+            volume=Decimal("10"),
+        )
+
+
+def test_detect_gaps_fails_closed_when_expected_opens_raises(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """expected_opens가 예외를 내면 detect_gaps도 예외를 낸다 —
+    실패주입: monkeypatch로 expected_opens를 예외 유발 함수로 교체하고
+    fail-closed를 검증한다. 예외가 잡혀 빈 리스트로 대체되면(fail-open)
+    이 테스트가 적색이 된다."""
+    key = SeriesKey(venue=Venue.KIS_KRX, instrument_id=uuid4(), timeframe=Timeframe.H1)
+    sessions = _calendar(Venue.KIS_KRX).sessions_for(date(2026, 9, 4))
+    candles = [_candle(key, sessions[0].open_at, Timeframe.H1)]
+
+    def mock_expected_opens_raises(*args: Any, **kwargs: Any) -> None:
+        raise RuntimeError("mock: expected_opens corrupted")
+
+    monkeypatch.setattr(
+        "src.foundation.market_data.domain.quality.gap_detector.expected_opens",
+        mock_expected_opens_raises,
+    )
+    with pytest.raises(RuntimeError, match="mock: expected_opens corrupted"):
+        detect_gaps(candles, Timeframe.H1, sessions)
+
+
+# --- DEEPEN(task-4111) 수치 성능 단언 ---------------------------------------------
+
+
+def test_detect_gaps_handles_10k_candles_within_budget() -> None:
+    """10,000개 캔들에 대해 1초 안에 결과를 낸다 — O(캔들 수)를
+    유지하는 회귀 가드다(우발적으로 O(n^2) 연산이 끼어들면 이 임계값을
+    넘는다)."""
+    key = SeriesKey(venue=Venue.BITGET, instrument_id=uuid4(), timeframe=Timeframe.M1)
+    sessions = _calendar(Venue.BITGET).sessions_for(date(2026, 9, 4))
+    expected = expected_opens(sessions[0].open_at, sessions[0].close_at, Timeframe.M1, sessions)
+    # 10,000개 캔들 생성 (일부 결측 포함)
+    missing_count = 100
+    missing_indices = set(random.Random(42).sample(range(len(expected)), missing_count))
+    candles = [
+        _candle(key, expected[i], Timeframe.M1)
+        for i in range(len(expected))
+        if i not in missing_indices
+    ]
+    start = time.perf_counter()
+    issues = detect_gaps(candles, Timeframe.M1, sessions)
+    elapsed = time.perf_counter() - start
+    assert elapsed < 1.0, f"10k candles took {elapsed:.2f}s — exceeds 1s budget"
+    assert len(issues) == missing_count
 
 
 # --- DEEPEN(task-2952) 동시성/replay 증명 -----------------------------------------
