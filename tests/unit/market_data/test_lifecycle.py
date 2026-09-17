@@ -61,6 +61,19 @@ def test_delisted_rejects_every_event() -> None:
             transition(SymbolStatus.DELISTED, event)
 
 
+def test_pending_rejects_non_list_events() -> None:
+    """PENDING 상태는 LIST 이벤트만 허용한다 — SUSPEND/RESUME/DELIST/RENAME
+    이 조용히 통과하면, 상장 전 심볼이 거래 정지·상장폐지·이름바꿈 상태를
+    진입할 수 있어 원장이 불일치한다. (I-07 hard-fail 조건)
+    """
+    for event in _EVENTS:
+        if event == "LIST":
+            assert transition(SymbolStatus.PENDING, event) == SymbolStatus.LISTED
+        else:
+            with pytest.raises(LifecycleTransitionError):
+                transition(SymbolStatus.PENDING, event)
+
+
 # --- DEEPEN(task-2951) 실패주입: 모듈 전역 전이표 손상 -------------------------
 
 
@@ -79,6 +92,18 @@ def test_transition_fails_closed_when_valid_entry_removed_from_table(
 
     with pytest.raises(LifecycleTransitionError):
         transition(SymbolStatus.LISTED, "SUSPEND")
+
+
+def test_transition_fails_closed_when_table_is_cleared(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """`_TRANSITIONS` 전체가 비어 있으면, 정당한 LIST 전이조차 예외로
+    죽는다 — fail-closed가 전이표 공백에서도 작동함을 증명한다.
+    """
+    monkeypatch.setattr(lifecycle_module, "_TRANSITIONS", {})
+
+    with pytest.raises(LifecycleTransitionError):
+        transition(SymbolStatus.PENDING, "LIST")
 
 
 # --- DEEPEN(task-2951) 수치 성능 단언 ------------------------------------------
