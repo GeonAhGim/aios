@@ -94,3 +94,38 @@ describe("LayoutPanelControls 에러·거부 표면(saveStatus)", () => {
     expect(screen.queryByText(/다시 불러오기/)).not.toBeInTheDocument();
   });
 });
+
+describe("LayoutPanelControls 실패 처리(동시 저장 충돌)", () => {
+  it("negative(실패 주입): saveStatus가 conflict로 전환되어도 렌더가 유지되고 다시 불러오기 버튼만 활성화된다", () => {
+    const onReload = vi.fn();
+    const { rerender } = render(
+      <LayoutPanelControls layout={baseLayout({ saveStatus: "idle", onReload })} />,
+    );
+
+    expect(screen.queryByText(/충돌/)).not.toBeInTheDocument();
+
+    rerender(
+      <LayoutPanelControls layout={baseLayout({ saveStatus: "conflict", onReload })} />,
+    );
+
+    expect(screen.getByText(/다른 세션이 먼저 저장했습니다/)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "다시 불러오기" })).not.toBeDisabled();
+    expect(onReload).not.toHaveBeenCalled();
+  });
+});
+
+describe("LayoutPanelControls 성능 단언(CH-19 레이아웃 패널)", () => {
+  it("패널이 100개인 큰 레이아웃도 50ms 내로 렌더된다", () => {
+    const manyPanels = Array.from({ length: 100 }, (_, i) => ({
+      id: `p${i}`,
+      label: `패널 ${i + 1}`,
+    }));
+
+    const start = performance.now();
+    render(<LayoutPanelControls layout={baseLayout({ panels: manyPanels, activePanelId: "p0" })} />);
+    const elapsed = performance.now() - start;
+
+    expect(screen.getByRole("tab", { name: "패널 1" })).toBeInTheDocument();
+    expect(elapsed).toBeLessThan(50);
+  });
+});

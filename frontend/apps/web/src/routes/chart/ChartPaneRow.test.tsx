@@ -79,3 +79,22 @@ describe("ChartPaneRow 에러 표면(plotLayer.issues)", () => {
     expect(screen.queryByText(/지표 표시 실패/)).not.toBeInTheDocument();
   });
 });
+
+describe("ChartPaneRow 성능 단언(CH-14 고밀도 렌더)", () => {
+  it("고밀도 렌더: 매우 큰 plotLayer 결과(노드 1000개+)도 100ms 내로 렌더된다", () => {
+    const hugeNodes = Array.from({ length: 1000 }, (_, i) => ({
+      type: "line" as const,
+      x: i,
+      y: 100 + Math.sin(i) * 50,
+      color: "#1f77b4",
+    }));
+    const plotLayer: PlotLayerResult = { nodes: hugeNodes, issues: [] };
+
+    const start = performance.now();
+    render(<ChartPaneRow {...baseProps()} plotLayer={plotLayer} />);
+    const elapsed = performance.now() - start;
+
+    expect(screen.getByText("CANDLE_CHART")).toBeInTheDocument();
+    expect(elapsed).toBeLessThan(100);
+  });
+});

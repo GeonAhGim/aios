@@ -114,3 +114,33 @@ describe("DrawingReplayToolbar 거부 입력(비활성)", () => {
     expect(onStep).not.toHaveBeenCalled();
   });
 });
+
+describe("DrawingReplayToolbar 실패 처리(동시 클릭)", () => {
+  it("negative(실패 주입): 빠른 연속 클릭(레이싱) 시에도 각각 정확히 한 번씩만 호출된다", () => {
+    const onStep = vi.fn();
+    const { rerender } = render(<DrawingReplayToolbar {...baseProps()} onStep={onStep} />);
+
+    const stepBackBtn = screen.getByRole("button", { name: "이전 봉" });
+    const stepFwdBtn = screen.getByRole("button", { name: "다음 봉" });
+
+    fireEvent.click(stepBackBtn);
+    fireEvent.click(stepFwdBtn);
+    fireEvent.click(stepBackBtn);
+
+    expect(onStep).toHaveBeenCalledTimes(3);
+    expect(onStep).toHaveBeenNthCalledWith(1, -1);
+    expect(onStep).toHaveBeenNthCalledWith(2, 1);
+    expect(onStep).toHaveBeenNthCalledWith(3, -1);
+  });
+});
+
+describe("DrawingReplayToolbar 성능 단언(CH-17 툴바 렌더)", () => {
+  it("많은 도구 버튼(20개+)을 가진 툴바도 30ms 내로 렌더된다", () => {
+    const start = performance.now();
+    render(<DrawingReplayToolbar {...baseProps()} />);
+    const elapsed = performance.now() - start;
+
+    expect(screen.getByRole("toolbar", { name: "그리기·재생 도구" })).toBeInTheDocument();
+    expect(elapsed).toBeLessThan(30);
+  });
+});
