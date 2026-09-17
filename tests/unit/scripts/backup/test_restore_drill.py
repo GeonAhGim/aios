@@ -10,6 +10,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
+
 from scripts.backup import restore_drill
 
 
@@ -153,7 +155,9 @@ def test_write_recovery_config_creates_signal_and_restore_command(tmp_path: Path
     assert (data_dir / "recovery.signal").exists()
     conf = (data_dir / "postgresql.auto.conf").read_text(encoding="utf-8")
     assert "restore_command" in conf
-    assert str(archive_dir) in conf
+    # forward slash로 저장됨 (Windows backslash GUC escape corruption 방지)
+    assert archive_dir.name in conf
+    assert "\\" not in conf
 
 
 def test_wait_for_recovery_returns_none_when_recovery_complete():
@@ -216,3 +220,35 @@ def test_write_report_does_not_raise_when_one_path_unwritable(tmp_path: Path):
     restore_drill.write_report({"ok": False}, [unwritable_parent / "drill_latest.json", ok_path])
 
     assert json.loads(ok_path.read_text(encoding="utf-8")) == {"ok": False}
+
+
+def test_write_recovery_config_escapes_windows_backslashes(tmp_path: Path):
+    """Windows 경로에 백슬래시가 들어와도 restore_command에 control character(백스페이스 등)가
+    섞이지 않고 경로 세그먼트가 그대로 보존됨을 확인한다.
+
+    Regression: task-4073 -- PostgreSQL GUC 파서가 백슬래시 시퀀스를 C-스타일 escape로
+    해석하는 문제(\\b -> backspace 0x08)로 WAL 복원이 0건 반복되던 원인 수정.
+    """
+
+    # Windows 경로 스타일 (실제 백슬래시 포함)
+    archive_dir = tmp_path / "C:\\aios\\backup_runtime\\wal_archive"
+    archive_dir.mkdir(parents=True, exist_ok=True)
+    data_dir = tmp_path / "restore_pgdata"
+    data_dir.mkdir(parents=True, exist_ok=True)
+
+    restore_drill.write_recovery_config(data_dir, archive_dir)
+
+    conf_content = (data_dir / "postgresql.auto.conf").read_text(encoding="utf-8")
+    # Control character(0x00~0x1F)가 없어야 함
+    for i, ch in enumerate(conf_content):
+        code = ord(ch)
+        if code < 0x20 and code not in (0x0A, 0x0D):  # newline, cr는 허용
+            pytest.fail(
+                f"restore_command에 control character U+{code:04X} 발견 "
+                f"(위치 {i}): 경로 corruption 원인"
+            )
+    # forward slash가 사용되었는지 확인
+    assert "cp" in conf_content  # Windows copy 대신 cp 사용
+    assert "wal_archive" in conf_content
+    # 백슬래시가 남아있지 않아야 함
+    assert "\\" not in conf_content or '""' in conf_content  # double-quote 내부면 허용

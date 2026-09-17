@@ -71,11 +71,23 @@ def with_port(url: str, port: int) -> str:
     return urlunsplit((parts.scheme, new_netloc, parts.path, parts.query, parts.fragment))
 
 
+def _escape_path_for_pg_conf(path: Path) -> str:
+    """PostgreSQL postgresql.conf 값에 넣기 전에 Windows 경로를 forward slash로 변환한다.
+
+    PostgreSQL GUC 문자열 파서는 따옴표로 감싼 값 안의 백슬래시 시퀀스를
+    C-스타일 escape로 해석한다(\\b -> backspace, \\a -> bell 등).
+    Windows 경로에 역슬래시가 섞이면 restore_command 등에 치명적인 corruption을
+    일으키므로, conf 파일에 쓰기 전에 모든 역슬래시를 forward slash로 통일한다.
+    PostgreSQL 문서도 Windows 경로는 conf 파일에 forward slash로 쓰라고 권장한다.
+    """
+    return str(path).replace("\\", "/")
+
+
 def write_recovery_config(data_dir: Path, archive_dir: Path) -> None:
     (data_dir / "recovery.signal").touch()
-    restore_command = (
-        f'copy "{archive_dir}\\%f" "%p"' if os.name == "nt" else f"cp {archive_dir}/%f %p"
-    )
+    # backslash -> forward slash (GUC escape corruption 방지)
+    safe_archive = _escape_path_for_pg_conf(archive_dir)
+    restore_command = f'cp "{safe_archive}/%f" "%p"'
     conf = data_dir / "postgresql.auto.conf"
     existing = conf.read_text(encoding="utf-8") if conf.exists() else ""
     conf.write_text(existing + f"\nrestore_command = '{restore_command}'\n", encoding="utf-8")
