@@ -20,6 +20,7 @@ def register_routers(app: FastAPI) -> None:
         admin,
         admin_break_glass,
         alerts,
+        assistant,
         auth,
         backtests,
         charting,
@@ -84,6 +85,7 @@ def register_routers(app: FastAPI) -> None:
     app.include_router(scripts.router)  # DSL-12(task-1535) /v1/scripts/compile
     app.include_router(indicators.router)  # IND-12(task-1730) /v1/indicators
     app.include_router(backtests.router)  # BT-10c(task-1619) /v1/backtests/quick
+    app.include_router(assistant.router)  # U-3a(task-2630) /v1/assistant
     app.include_router(positions.router)
     app.include_router(dashboard.router)  # U-2a(task-2629) /v1/accounts/summary
     app.include_router(executions.router, prefix="/executions", tags=["executions"])

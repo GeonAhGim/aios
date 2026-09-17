@@ -16,6 +16,7 @@ limiter를 생성자 인자로 받는 시그니처를 제시하지만, 그러면
 비용조차 치르지 않고 최대한 빨리 거절하는 게 목적이라 의도적인 트레이드오프다
 — 그래서 429 응답의 `X-Request-ID`/`X-Trace-Id`는 이 미들웨어가 직접 채운다.
 """
+
 from __future__ import annotations
 
 import logging
@@ -54,6 +55,8 @@ def default_resolve_policy(request: Request) -> RateLimitPolicy | None:
         return POLICIES["admin"]
     if path == "/metrics":
         return POLICIES["metrics"]
+    if path.startswith("/v1/assistant"):
+        return POLICIES["ai_assistant"]
     if method in ("GET", "HEAD"):
         return POLICIES["read"]
     if method in ("POST", "PUT", "PATCH", "DELETE"):

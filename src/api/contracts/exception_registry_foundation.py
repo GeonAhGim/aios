@@ -12,6 +12,7 @@ from __future__ import annotations
 from starlette import status
 
 from src.api.contracts.error_codes import ErrorCode
+from src.api.contracts.exception_registry_foundation_ai_assistant import EXCEPTION_MAP_AI_ASSISTANT
 from src.api.contracts.exception_registry_foundation_mandates import (
     EXCEPTION_MAP_FOUNDATION_MANDATES,
 )
@@ -286,6 +287,8 @@ EXCEPTION_MAP_FOUNDATION: list[tuple[type[Exception], ErrorCode]] = [
     # task-2749 U-15 — personal-mode PAPER->LIVE promotion checklist bucket,
     # split into exception_registry_foundation_personal.py (P6.line_cap).
     *EXCEPTION_MAP_FOUNDATION_PERSONAL,
+    # task-2630 U-3a — assistant.py, split out (P6.line_cap).
+    *EXCEPTION_MAP_AI_ASSISTANT,
 ]
 
 STATUS_OVERRIDE_FOUNDATION: list[tuple[type[Exception], int]] = [
