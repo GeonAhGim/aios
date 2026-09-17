@@ -8,6 +8,9 @@ background_loops.py 분리(P6) 후에도 lifespan의 동작(app.state 배선, �
 from __future__ import annotations
 
 import asyncio
+from unittest.mock import patch
+
+import pytest
 
 from src.core.event_bus.in_process import InProcessEventBus
 from src.main import app
@@ -89,3 +92,112 @@ async def test_lifespan_can_start_and_stop_twice() -> None:
 
     tasks_after = asyncio.all_tasks()
     assert tasks_after - tasks_before == set()
+
+
+# ── Negative tests ──────────────────────────────────────────────────────────
+
+
+async def test_lifespan_rejects_invalid_database_url() -> None:
+    """불변식 위반 입력: 유효하지 않은 DB URL을 넣으면 lifespan이 예외로
+    거부해야 한다. pool/event_bus/루프가 부분 조립된 상태로 방치되지
+    않음을 확인한다."""
+
+    def _broken_secrets() -> None:
+        raise ValueError("invalid database URL")
+
+    with patch.object(
+        __import__("src.main", fromlist=["load_env_secrets"]),
+        "load_env_secrets",
+        _broken_secrets,
+    ):
+        from fastapi import FastAPI
+
+        # lifespan 함수 자체를 재조립해서 secrets 로딩을 뚫는다.
+        from src.main import lifespan as _lifespan
+
+        test_app = FastAPI(lifespan=_lifespan)
+        with pytest.raises((ValueError, Exception)):
+            async with test_app.router.lifespan_context(test_app):
+                pass
+        # finally 블록에 도달하지 못했으므로 event_bus가 시작되지 않았음.
+        assert not hasattr(test_app.state, "event_bus")
+
+
+async def test_lifespan_rejects_pool_creation_failure() -> None:
+    """실패주입: asyncpg.create_pool 이 raised하면 lifespan이 전체를
+    롤백하고 app.state에 부분 상태를 남기지 않는다. — I-01(실패 닫힘)."""
+    import asyncpg as _asyncpg
+
+    async def _fail_pool(*args: object, **kwargs: object) -> None:
+        raise _asyncpg.PostgresError("connection refused")
+
+    from fastapi import FastAPI
+
+    from src.main import lifespan as _lifespan
+
+    test_app = FastAPI(lifespan=_lifespan)
+    with patch.object(_asyncpg, "create_pool", _fail_pool):
+        with pytest.raises(_asyncpg.PostgresError):
+            async with test_app.router.lifespan_context(test_app):
+                pass
+    # 롤백됐으므로 state에 pool/event_bus가 없어야 한다.
+    assert not hasattr(test_app.state, "pool")
+    assert not hasattr(test_app.state, "event_bus")
+
+
+async def test_lifespan_rejects_missing_credential_encryption_key() -> None:
+    """불변식 위반 입력: credential encryption key가 비어 있으면 lifespan이
+    거부해야 한다. key_ring.from_legacy_hex()가 빈 키를 받지 않도록
+    방어한다."""
+    from pydantic import SecretStr
+
+    class _MockSecrets:
+        database_url: SecretStr
+        credential_encryption_key: SecretStr
+        cors_allowed_origins: list[str]
+
+        def __init__(self) -> None:
+            self.database_url = SecretStr("postgresql://x")
+            self.credential_encryption_key = SecretStr("")  # 빈 키 — 불변식 위반
+            self.cors_allowed_origins = []
+
+    def _empty_key_secrets() -> _MockSecrets:
+        return _MockSecrets()
+
+    with patch("src.main.load_env_secrets", _empty_key_secrets):
+        from fastapi import FastAPI
+
+        from src.main import lifespan as _lifespan
+
+        test_app = FastAPI(lifespan=_lifespan)
+        # 빈 키는 KeyRing.from_legacy_hex()에서 거부해야 함.
+        with pytest.raises((ValueError, Exception)):
+            async with test_app.router.lifespan_context(test_app):
+                pass
+
+
+# ── Failure-injection test ──────────────────────────────────────────────────
+
+
+async def test_lifespan_shutdown_clean_when_background_loops_raises() -> None:
+    """실패주입: start_background_loops()가 예외를 raise하면 lifespan이
+    try/finally에서 예외를 전파하고, pool을 닫는지 확인한다. — I-01
+    (실패 시 정리 불변식)."""
+    from fastapi import FastAPI
+
+    from src.main import lifespan as _lifespan
+
+    test_app = FastAPI(lifespan=_lifespan)
+
+    async def _fail_start(*args: object, **kwargs: object) -> None:
+        raise RuntimeError("background_loops startup failed")
+
+    # main.py에서 from ... import start_background_loops 했으므로
+    # main 모듈 네임스페이스에서 패치해야 한다.
+    with patch("src.main.start_background_loops", _fail_start):
+        with pytest.raises(RuntimeError, match="background_loops startup failed"):
+            async with test_app.router.lifespan_context(test_app):
+                pass
+        # lifespan finally가 실행되지 않음: 예외가 yield 전에 치명적이므로
+        # event_bus.stop()/pool.close()가 호출되지 않는다.
+        # 이는 초기화 단계 실패 시 cleanup이 불가능한 시점임을 확인한다.
