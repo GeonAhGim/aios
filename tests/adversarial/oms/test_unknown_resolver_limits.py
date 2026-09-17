@@ -8,6 +8,7 @@ DoD("NOT_FOUND 2회+120s → FAILED; 상한 → safety control"), I-01.
 가짜(`_FakePool`)를 쓴다(모듈 docstring "sleep/실시간 의존 금지"와 동일
 원칙 — 시각은 전부 고정 `clock` 람다, `sleep`은 즉시 반환하는 no-op).
 """
+
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
@@ -125,7 +126,7 @@ class _FakeOrderRepo:
         return self.order
 
     async def find_by_scope_hash(self, conn: object, scope_hash: str) -> OrderView | None:
-        raise NotImplementedError
+        return None
 
     async def transition(
         self,

@@ -1,5 +1,6 @@
 """FND-06 Risk & Safety Gate 통합테스트 — 실제 dev DB 대상. 48번 §5/78번 §6 중
 FND-07(paper_control)/order adapter 없이 재현 가능한 범위(RSK-001~005)."""
+
 from __future__ import annotations
 
 import asyncio
@@ -332,7 +333,10 @@ class _FailingMandateRepo:
         raise RuntimeError("mandate store unavailable")
 
     async def get_revision(self, revision_id):  # noqa: ANN001, ANN201
-        raise NotImplementedError
+        # Stub — 이 테스트는 get_mandate 실패 경로만 타며 get_revision은
+        # 호출되지 않음. 캐시 무효화 회귀 테스트에서 mandate 조회 자체가
+        # 실패하면 예외가 전파됨을 확인한다.
+        return None
 
 
 async def test_mandate_lookup_failure_never_falls_back_to_cached_allow(
@@ -528,9 +532,7 @@ async def test_activate_missing_scope_ref_for_tenant_scope_is_rejected(pool, rep
         )
 
 
-async def test_activate_and_deactivate_safety_control_record_audit_events(
-    pool, repo, audit_repo
-):
+async def test_activate_and_deactivate_safety_control_record_audit_events(pool, repo, audit_repo):
     """전수감사 §6 — safety control 활성화/비활성화가 실제 감사 이벤트를
     남기는지 확인(append_audit_event 호출자 0이던 문제의 회귀 테스트)."""
     tenant_id = await _tenant(pool)
@@ -681,9 +683,7 @@ async def test_idempotency_digest_unique_rejects_duplicate(pool):
                     digest,
                 )
         finally:
-            await conn.execute(
-                "DELETE FROM safety_control WHERE idempotency_digest = $1", digest
-            )
+            await conn.execute("DELETE FROM safety_control WHERE idempotency_digest = $1", digest)
 
 
 async def test_paused_by_control_id_fk_rejects_unknown_control(pool):
@@ -815,9 +815,7 @@ async def test_idempotency_digest_unique_violation_detection_stays_fast_at_scale
                 f"UNIQUE 위반 감지가 {elapsed:.3f}s 걸렸다 — 인덱스 미사용(순차 스캔) 의심"
             )
         finally:
-            await conn.execute(
-                "DELETE FROM safety_control WHERE actor_subject_id = $1", tenant_id
-            )
+            await conn.execute("DELETE FROM safety_control WHERE actor_subject_id = $1", tenant_id)
 
 
 async def test_concurrent_replay_with_same_idempotency_digest_only_one_instance_wins(pool):
@@ -852,9 +850,7 @@ async def test_concurrent_replay_with_same_idempotency_digest_only_one_instance_
         assert results.count(False) == 9
     finally:
         async with pool.acquire() as conn:
-            await conn.execute(
-                "DELETE FROM safety_control WHERE actor_subject_id = $1", tenant_id
-            )
+            await conn.execute("DELETE FROM safety_control WHERE actor_subject_id = $1", tenant_id)
 
 
 async def test_concurrent_evaluate_risk_gate_calls_never_cross_contaminate_trace_id(
