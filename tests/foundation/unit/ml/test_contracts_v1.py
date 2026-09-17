@@ -6,6 +6,7 @@ Spec: docs/specs/L4_ai_research_strategy_factory_v1.0.md §2.5 AI-18.
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
+from typing import Any
 
 import pytest
 from pydantic import ValidationError
@@ -17,16 +18,16 @@ _LINEAGE_START = _NOW - timedelta(days=30)
 _LINEAGE_END = _NOW - timedelta(days=1)
 
 
-def _lineage(**overrides: object) -> TrainDataLineage:
-    base: dict[str, object] = dict(
+def _lineage(**overrides: Any) -> TrainDataLineage:
+    base: dict[str, Any] = dict(
         start=_LINEAGE_START, end=_LINEAGE_END, source_ref="parquet://features/v1"
     )
     base.update(overrides)
-    return TrainDataLineage(**base)  # type: ignore[arg-type]
+    return TrainDataLineage(**base)
 
 
-def _model_card(**overrides: object) -> ModelCard:
-    base: dict[str, object] = dict(
+def _model_card(**overrides: Any) -> ModelCard:
+    base: dict[str, Any] = dict(
         model_id="momentum-lgbm",
         version="1",
         model_hash="a" * 64,
@@ -36,7 +37,7 @@ def _model_card(**overrides: object) -> ModelCard:
         drift_baseline={"rsi_14": (1.0, 2.0, 3.0)},
     )
     base.update(overrides)
-    return ModelCard(**base)  # type: ignore[arg-type]
+    return ModelCard(**base)
 
 
 # --- happy path ---
@@ -82,15 +83,16 @@ def test_model_card_rejects_trained_at_before_lineage_end() -> None:
 
 
 def test_model_card_rejects_unknown_field() -> None:
+    payload: dict[str, Any] = dict(
+        model_id="x",
+        version="1",
+        model_hash="a" * 64,
+        train_data_lineage=_lineage(),
+        trained_at=_NOW,
+        extra_field="not allowed",
+    )
     with pytest.raises(ValidationError):
-        ModelCard(
-            model_id="x",
-            version="1",
-            model_hash="a" * 64,
-            train_data_lineage=_lineage(),
-            trained_at=_NOW,
-            extra_field="not allowed",  # type: ignore[call-arg]
-        )
+        ModelCard.model_validate(payload)
 
 
 def test_feature_spec_rejects_blank_feature_id() -> None:
