@@ -6,9 +6,11 @@ DoD: (a) 미허가 구독자는 100건 발행에 정확히 0건 수신 + 거부 
 drop=500을 정확히 단언한다(근사 비교 금지). (c) 계측은 `metric_names.py`
 상수만 쓴다. (d) PLT-06 envelope의 trace_id/tenant_id를 전파한다.
 """
+
 from __future__ import annotations
 
 import asyncio
+import time
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from typing import Any
@@ -20,7 +22,10 @@ from src.core.event_bus.envelope import EventEnvelope
 from src.core.observability import metric_names
 from src.core.observability.context import bind
 from src.data.models.base import AssetClass
-from src.foundation.market_data.application.realtime_fanout import RealtimeFanout
+from src.foundation.market_data.application.realtime_fanout import (
+    DEFAULT_MAX_QUEUE_DEPTH,
+    RealtimeFanout,
+)
 from src.foundation.market_data.contracts.v1 import Timeframe, Venue
 from src.foundation.market_data.domain.entitlement.policy import (
     EntitlementDenialReason,
@@ -197,9 +202,11 @@ async def test_delayed_allowance_never_delivers_live_data(want_realtime: bool) -
     for i in range(100):
         await fanout.publish(feed, {"seq": i}, as_of=_AS_OF)
     assert subscription.queue.empty()
-    assert spy.counters == [
-        (metric_names.MARKET_DATA_FANOUT_DENIED_COUNT_TOTAL, {"reason": "REALTIME_REQUIRED"})
-    ] * 100
+    assert (
+        spy.counters
+        == [(metric_names.MARKET_DATA_FANOUT_DENIED_COUNT_TOTAL, {"reason": "REALTIME_REQUIRED"})]
+        * 100
+    )
 
 
 @pytest.mark.parametrize("depth", [0, -1, True, 1.5])
@@ -269,3 +276,75 @@ async def test_expiry_rechecked_on_each_publish() -> None:
 async def test_naive_clock_rejected_without_subscribers() -> None:
     with pytest.raises(ValueError, match="tz-aware"):
         await RealtimeFanout().publish(_feed(), {}, as_of=datetime(2026, 1, 1))
+
+
+async def test_venue_mismatch_denies_with_out_of_scope_reason() -> None:
+    """정책 4단계 깔때기 중 ③(venue·자산군·종목·TF 스코프) 단계가 venue
+    불일치 하나만으로도 OUT_OF_SCOPE로 거부함을 고정한다 — 기존 파라미터화
+    케이스(test_policy_denials_enforced_at_delivery)는 instrument_ids만
+    다뤘고 venue 자체가 다른 입력은 아직 아무 테스트도 거치지 않았다."""
+    spy = _SpyMetrics()
+    fanout = RealtimeFanout(metrics=spy)
+    feed = _feed(venue=Venue.BITGET)
+    subscription = fanout.subscribe(_subject((_grant(venue=Venue.KIS_KRX),)), feed)
+
+    await fanout.publish(feed, {"px": 1}, as_of=_AS_OF)
+
+    assert subscription.queue.empty()
+    assert spy.counters == [
+        (metric_names.MARKET_DATA_FANOUT_DENIED_COUNT_TOTAL, {"reason": "OUT_OF_SCOPE"})
+    ]
+
+
+async def test_allowed_policy_exception_propagates_and_halts_fanout_fail_closed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """DC-9 `allowed()`가 예외를 내면(예: 이용권 저장소 조회 장애가 판정
+    함수 안까지 새어 들어온 경우) realtime_fanout은 이를 삼켜 조용히
+    허용/거부로 위장하지 않고 그대로 전파해야 한다(fail-closed). 두 번째
+    구독자가 정상적으로 허가받은 상태라도, 첫 구독자 판정에서 예외가 나면
+    루프가 즉시 멈춰 어느 큐에도 부분 배달이 일어나지 않아야 한다."""
+    spy = _SpyMetrics()
+    fanout = RealtimeFanout(metrics=spy)
+    feed = _feed()
+    first = fanout.subscribe(_subject((_grant(),)), feed)
+    second = fanout.subscribe(_subject((_grant(),)), feed)
+
+    def _boom(*_args: Any, **_kwargs: Any) -> Any:
+        raise RuntimeError("entitlement store unavailable")
+
+    monkeypatch.setattr("src.foundation.market_data.application.realtime_fanout.allowed", _boom)
+
+    with pytest.raises(RuntimeError, match="entitlement store unavailable"):
+        await fanout.publish(feed, {"px": 1}, as_of=_AS_OF)
+
+    assert first.queue.empty()
+    assert second.queue.empty()
+    assert spy.counters == []
+
+
+@pytest.mark.perf
+async def test_publish_throughput_meets_budget_across_many_subscribers() -> None:
+    """`publish()`는 실시간 틱마다 재호출되는 hot path다 — 다수 구독자
+    앞에서 반복 호출해도 절대시간 예산을 지켜야 실시간 지연 SLA가 깨지지
+    않는다."""
+    spy = _SpyMetrics()
+    fanout = RealtimeFanout(metrics=spy)
+    feed = _feed()
+    subscriptions = [fanout.subscribe(_subject((_grant(),)), feed) for _ in range(20)]
+    iterations = 2_000
+    budget_sec = 3.0  # 실측 로컬 <0.5s, CI 편차 감안
+
+    start = time.perf_counter()
+    for i in range(iterations):
+        await fanout.publish(feed, {"seq": i}, as_of=_AS_OF)
+    elapsed = time.perf_counter() - start
+
+    print(
+        f"[DC-17 realtime_fanout] publish() x{iterations} to {len(subscriptions)} "
+        f"subscribers in {elapsed:.4f}s (budget<{budget_sec}s)"
+    )
+    assert elapsed < budget_sec, (
+        f"publish {iterations}회 반복이 예산({budget_sec}s)을 넘었습니다({elapsed:.4f}s)."
+    )
+    assert all(sub.queue.qsize() == DEFAULT_MAX_QUEUE_DEPTH for sub in subscriptions)
