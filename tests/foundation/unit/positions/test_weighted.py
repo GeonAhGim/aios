@@ -118,7 +118,7 @@ def test_apply_lot_model_copy_failure_propagates() -> None:
     def failing_model_copy(self, **kwargs):
         raise RuntimeError("simulated persistence failure")
 
-    type(wavg._lot).model_copy = failing_model_copy  # type: ignore[assignment]
+    type(wavg._lot).model_copy = failing_model_copy
 
     try:
         with pytest.raises(RuntimeError, match="simulated persistence failure"):
