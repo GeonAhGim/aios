@@ -1,8 +1,14 @@
 import json
 import logging
 import uuid
+from datetime import datetime, timezone
 from logging.handlers import QueueHandler
 
+import pytest
+from pydantic import ValidationError
+from pydantic_core import PydanticSerializationError
+
+from src.core.logging import fields as log_fields
 from src.core.logging.fields import REQUIRED_FIELDS
 from src.core.logging.redaction import REDACTED, RedactionFilter
 from src.core.logging.request_context import request_id_var
@@ -184,3 +190,62 @@ def test_formatter_extra_reflects_redaction_filter_applied_before_format():
 
     assert entry["extra"]["api_key"] == REDACTED
     assert entry["extra"]["note"] == "ok"
+
+
+# ── negative tests (invariant-violating 입력 명시적 거부) ───────────────────
+
+
+def test_log_entry_rejects_missing_required_field():
+    """음성 테스트: `message`는 LogEntry의 필수 필드다 — 누락된 채로 생성을
+    시도하면 조용히 기본값을 채우는 대신 ValidationError로 거부해야 한다
+    (07 §7.1 계약 필드 누락을 fail-closed로 처리)."""
+    with pytest.raises(ValidationError):
+        LogEntry(
+            timestamp=datetime.now(timezone.utc),
+            level="WARNING",
+            module="m",
+            event_type="e",
+        )
+
+
+def test_log_entry_rejects_non_dict_extra():
+    """음성 테스트: `extra`는 dict[str, Any] 계약이다 — list 등 다른 타입을
+    넘기면 어떤 형태로든 강제 변환하지 않고 ValidationError로 거부해야
+    한다."""
+    with pytest.raises(ValidationError):
+        LogEntry(
+            timestamp=datetime.now(timezone.utc),
+            level="WARNING",
+            module="m",
+            event_type="e",
+            message="hi",
+            extra=["not", "a", "dict"],
+        )
+
+
+def test_formatter_raises_on_non_json_serializable_payload():
+    """음성 테스트: payload(extra)에 JSON으로 직렬화할 수 없는 객체가 실리면
+    `JSONLinesFormatter.format()`은 조용히 문자열로 치환하지 않고
+    PydanticSerializationError를 던져야 한다 — 로그 라인이 손상된 채 나가는
+    것보다 fail-closed가 낫다."""
+    record = _make_record(payload={"bad": object()})
+
+    with pytest.raises(PydanticSerializationError):
+        JSONLinesFormatter().format(record)
+
+
+# ── 실패주입 (monkeypatch 의존성 예외 유발) ─────────────────────────────────
+
+
+def test_formatter_fails_closed_when_required_field_unknown_to_structured_log_line(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """실패주입: `fields.REQUIRED_FIELDS`(단일 출처, PLT-02)에 `StructuredLogLine`이
+    만들어내지 못하는 필드 이름이 섞여 들어오면, `JSONLinesFormatter.format()`은
+    그 필드를 조용히 건너뛰지 않고 KeyError로 죽어야 한다 — 108 §2 필수 필드
+    목록과 실제 값 생성 로직이 어긋난 상태로 로그가 나가는 것을 막는다."""
+    monkeypatch.setattr(log_fields, "REQUIRED_FIELDS", (*log_fields.REQUIRED_FIELDS, "bogus_field"))
+    record = _make_record()
+
+    with pytest.raises(KeyError):
+        JSONLinesFormatter().format(record)
