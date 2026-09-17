@@ -36,9 +36,9 @@ this leaf's job starts at "checks already ran" and ends at "outcome decided
 and recorded" -- exactly the AI-12 row's own two clauses.
 
 `record_experiment` (AI-11) is the sole persistence path -- both PASS and
-FAIL are recorded (spec DoD "FAIL 기록", not "FAIL discarded"); "FAIL이면
-종료" is satisfied by this function never attempting anything past recording
-(there is no promotion call here for either outcome -- that is AI-13's
+FAIL are recorded (spec DoD "FAIL is recorded", not "FAIL discarded"); the
+DoD's "stop on FAIL" is satisfied by this function never attempting anything
+past recording (there is no promotion call here for either outcome -- that is AI-13's
 `promote_to_paper`, a separate leaf this module does not import), and by the
 returned `ProposalEvaluation.accepted` flag being the only thing a caller
 needs to gate on before ever considering promotion.
