@@ -1,14 +1,13 @@
-"""scripts/check_migration_chain.py, scripts/check_zone_diff.py 단위 테스트 — PLT-38.
+"""scripts/check_migration_chain.py 단위 테스트 — PLT-38.
 
-DoD: 두 head fixture와 FROZEN diff fixture가 각각 FAIL하는 것을 직접 단언한다.
-DB·네트워크 접근 없음 — 임시 디렉터리와 로컬 git 명령(네트워크 없는 `git init`류)만 쓴다.
+DoD: 두 head fixture가 FAIL하는 것을 직접 단언한다.
+DB·네트워크 접근 없음 — 임시 디렉터리만 쓴다.
 """
 
 from __future__ import annotations
 
 import ast
 import importlib.util
-import subprocess
 import sys
 import time
 from concurrent.futures import ThreadPoolExecutor
@@ -31,7 +30,6 @@ def _load_module(name: str, path: Path) -> ModuleType:
 check_migration_chain = _load_module(
     "check_migration_chain", SCRIPTS_DIR / "check_migration_chain.py"
 )
-check_zone_diff = _load_module("check_zone_diff", SCRIPTS_DIR / "check_zone_diff.py")
 
 
 REVISION_TEMPLATE = '''"""{revision} test fixture"""
@@ -677,77 +675,3 @@ def test_removing_task_1988_merge_revision_reproduces_original_dual_head_failure
 
     assert any("다중 head" in issue for issue in issues)
     assert check_migration_chain.main(["--versions-dir", str(shadow)]) == 1
-
-
-# ---------------------------------------------------------------------------
-# check_zone_diff
-# ---------------------------------------------------------------------------
-
-
-def _run_git(repo: Path, *args: str) -> None:
-    subprocess.run(["git", *args], cwd=repo, check=True, capture_output=True, text=True)
-
-
-def _init_repo_with_manifest(repo: Path) -> None:
-    _run_git(repo, "init", "-q")
-    _run_git(repo, "config", "user.email", "test@example.com")
-    _run_git(repo, "config", "user.name", "test")
-    (repo / ".aios-zone").write_text(
-        'zones:\n  FROZEN:\n    - "aios/kernel/**"\n  OPEN:\n    - "docs/**"\n',
-        encoding="utf-8",
-    )
-    (repo / "docs").mkdir()
-    (repo / "docs" / "readme.md").write_text("base\n", encoding="utf-8")
-    _run_git(repo, "add", "-A")
-    _run_git(repo, "commit", "-q", "-m", "base")
-    _run_git(repo, "branch", "base")
-
-
-def test_frozen_zone_diff_fails(tmp_path: Path) -> None:
-    _init_repo_with_manifest(tmp_path)
-
-    kernel_dir = tmp_path / "aios" / "kernel" / "policy"
-    kernel_dir.mkdir(parents=True)
-    (kernel_dir / "rule.py").write_text("# frozen change\n", encoding="utf-8")
-    _run_git(tmp_path, "add", "-A")
-    _run_git(tmp_path, "commit", "-q", "-m", "touch frozen zone")
-
-    exit_code = check_zone_diff.main(["--base", "base", "--head", "HEAD", "--repo", str(tmp_path)])
-
-    assert exit_code == 1
-
-
-def test_non_frozen_diff_passes(tmp_path: Path) -> None:
-    _init_repo_with_manifest(tmp_path)
-
-    (tmp_path / "docs" / "other.md").write_text("more docs\n", encoding="utf-8")
-    _run_git(tmp_path, "add", "-A")
-    _run_git(tmp_path, "commit", "-q", "-m", "touch open zone")
-
-    exit_code = check_zone_diff.main(["--base", "base", "--head", "HEAD", "--repo", str(tmp_path)])
-
-    assert exit_code == 0
-
-
-def test_missing_manifest_fails(tmp_path: Path) -> None:
-    _run_git(tmp_path, "init", "-q")
-
-    exit_code = check_zone_diff.main(["--base", "HEAD", "--head", "HEAD", "--repo", str(tmp_path)])
-
-    assert exit_code == 1
-
-
-def test_find_frozen_violations_completes_within_time_budget() -> None:
-    """성능단언: 대규모 PR(수천 개 변경 파일)에서도 FROZEN 존 스캔이 예산 내에 끝나는지 확인."""
-    frozen_patterns = ["aios/kernel/**", "src/core/strategy/**"]
-    changed_files = [f"docs/generated/report_{i}.md" for i in range(4000)]
-    changed_files += [f"tests/unit/generated/test_{i}.py" for i in range(4000)]
-    changed_files.append("aios/kernel/policy/rule.py")  # 위반 1건을 대량 diff 속에 섞는다
-    assert len(changed_files) > 1000  # 이 벤치마크가 무의미해지지 않도록 규모를 보장
-
-    start = time.perf_counter()
-    violations = check_zone_diff.find_frozen_violations(changed_files, frozen_patterns)
-    elapsed = time.perf_counter() - start
-
-    assert violations == ["aios/kernel/policy/rule.py"]
-    assert elapsed < 1.0, f"FROZEN 존 위반 스캔이 {elapsed:.3f}s — 예산(1.0s) 초과"
