@@ -19,6 +19,7 @@ from pathlib import Path
 
 import numpy as np
 import pytest
+import talib
 
 from src.core.indicators.engine import incremental, vectorized
 from src.core.indicators.reference import verify_all
@@ -172,6 +173,39 @@ def _p95(samples: list[float]) -> float:
 
 
 _FULL_VERIFICATION_BUDGET_MS = 800.0
+
+
+def test_verify_indicator_rejects_unknown_indicator_name() -> None:
+    """VERIFIABLE_NAMES 밖의 지표명은 조용히 빈 결과가 아니라 KeyError로 거부된다."""
+    with pytest.raises(KeyError):
+        verify_all.verify_indicator("NOT_A_REAL_INDICATOR", verify_all.default_datasets())
+
+
+def test_write_snapshot_rejects_unknown_indicator_name(tmp_path: Path) -> None:
+    dataset = verify_all.default_datasets()[0]
+    with pytest.raises(KeyError):
+        verify_all.write_snapshot("NOT_A_REAL_INDICATOR", dataset, vectors_dir=tmp_path)
+
+
+def test_main_rejects_invalid_mode_argument() -> None:
+    """`--mode`는 nightly/ci만 허용 — 그 외 값은 argparse가 exit code 2로 거부한다."""
+    with pytest.raises(SystemExit) as exc_info:
+        verify_all.main(["--mode", "not-a-real-mode"])
+    assert exc_info.value.code == 2
+
+
+def test_talib_dependency_failure_propagates_fail_closed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """TA-Lib C 호출 자체가 예외를 던지면(라이브러리 버전 불일치 등) 삼켜서
+    빈 mismatch 목록으로 위장하지 않고 그대로 전파한다(fail-closed, CLAUDE.md §3)."""
+
+    def boom(*_args: object, **_kwargs: object) -> object:
+        raise RuntimeError("injected TA-Lib failure")
+
+    monkeypatch.setattr(talib, "SMA", boom)
+    with pytest.raises(RuntimeError, match="injected TA-Lib failure"):
+        verify_all.verify_indicator("SMA", verify_all.default_datasets())
 
 
 def test_full_verification_p95_latency_within_self_declared_budget() -> None:
