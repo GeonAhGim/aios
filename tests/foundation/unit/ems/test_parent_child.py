@@ -18,6 +18,8 @@ from src.foundation.ems.domain.parent_child import (
     assert_parent_accepts_new_child,
     assert_slice_within_parent_qty,
     children_pending_cancellation,
+    compute_child_state,
+    validate_aggregate_fills,
 )
 
 _PARENT_QTY = Decimal("100")
@@ -212,3 +214,44 @@ def test_gate_red_proof_invariant_mutation_turns_red() -> None:
         # This proves the original test was enforcing a real invariant,
         # not a no-op assertion.
         assert_slice_within_parent_qty(_PARENT_QTY, Decimal("60"), Decimal("50"))
+
+
+# -- DEEPEN 4154 (EM-2) — validate_aggregate_fills / compute_child_state ---
+# were added by a801768f but never exercised by this suite; cover them here.
+
+
+def test_validate_aggregate_fills_rejects_multi_child_overshoot() -> None:
+    """Negative test: aggregate fill across several children exceeding parent
+    qty must be rejected, even when no single child alone overshoots.
+
+    50 + 30 + 25 = 105 > 100 parent qty -- none of the three children is
+    individually over the limit, only their sum is.
+    """
+    parent_id = uuid4()
+    children = [
+        ChildFillState(uuid4(), Decimal("50"), OrderStatus.PARTIALLY_FILLED),
+        ChildFillState(uuid4(), Decimal("30"), OrderStatus.PARTIALLY_FILLED),
+        ChildFillState(uuid4(), Decimal("25"), OrderStatus.PARTIALLY_FILLED),
+    ]
+    with pytest.raises(AlgoConstraintError, match="aggregate.*exceeds") as exc_info:
+        validate_aggregate_fills(parent_id, children, _PARENT_QTY)
+    assert exc_info.value.code == EmsErrorCode.ALGO_CONSTRAINT
+
+
+def test_compute_child_state_failure_injection_propagates_dependency_exception() -> None:
+    """Failure-injection: if the underlying invariant check itself misbehaves
+    (e.g. a dependency defect makes it raise an unexpected error type),
+    `compute_child_state` must propagate the failure rather than swallowing
+    it and reporting a false success -- fail-closed, not fail-open.
+    """
+    from unittest.mock import patch
+
+    parent_id = uuid4()
+    children = [ChildFillState(uuid4(), Decimal("10"), OrderStatus.PARTIALLY_FILLED)]
+
+    with patch(
+        "src.foundation.ems.domain.parent_child.validate_aggregate_fills",
+        side_effect=RuntimeError("audit dependency unreachable"),
+    ):
+        with pytest.raises(RuntimeError, match="audit dependency unreachable"):
+            compute_child_state(parent_id, children, _PARENT_QTY)
