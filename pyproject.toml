@@ -208,6 +208,7 @@ extend-immutable-calls = ["fastapi.Depends", "fastapi.Query", "fastapi.Path", "f
 "src/api/contracts/error_codes.py" = ["S105"]
 "src/api/contracts/handlers.py" = ["ARG001"]
 "src/api/marketplace_deps.py" = ["ARG001"]
+"src/api/mcp/server.py" = ["S105"]
 "src/api/middleware/request_context.py" = ["S101"]
 "src/api/routers/admin.py" = ["ARG001"]
 "src/api/routers/foundation/evidence.py" = ["ARG001"]
