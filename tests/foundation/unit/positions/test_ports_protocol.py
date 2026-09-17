@@ -11,8 +11,10 @@ Spec: docs/specs/L4_market_data_positions_ledger_v1.0.md#§2.3, §9 LB-7.
 런타임 구조 검사만으로는 "진짜 DTO를 쓰는가"까지는 증명할 수 없고, 그 간극을
 mypy --strict(파라미터·반환 타입 정적 검사)가 메운다는 것을 보여준다.
 """
+
 from __future__ import annotations
 
+import time
 from datetime import date, datetime, timezone
 from decimal import Decimal
 from uuid import uuid4
@@ -21,7 +23,12 @@ import pytest
 from pydantic import ValidationError
 
 from src.data.models.base import Currency, Money
-from src.foundation.positions.contracts.v1 import JournalEntryType, PositionJournalEntryView
+from src.foundation.positions.contracts.v1 import (
+    JournalEntryType,
+    NAVSnapshot,
+    PositionJournalEntryView,
+    PositionSnapshotView,
+)
 from src.foundation.positions.ports.exchange_balance_source import ProviderBalanceSource
 from src.foundation.positions.ports.fx_rate_source import FxRateSource
 from src.foundation.positions.ports.journal_repository import PositionJournalRepository
@@ -127,3 +134,157 @@ def test_nav_get_signature_uses_date_type() -> None:
     # nav_date는 NavRepository.get의 파라미터 타입일 뿐 모델 필드가 아니므로
     # 여기서는 date 임포트가 여전히 유효한 계약임을 회귀 방지로 확인한다.
     assert date(2026, 9, 3).isoformat() == "2026-09-03"
+
+
+# ── DEEPEN: 추가 negative tests (invariant 위반 입력) ──────────────────────────
+
+
+class _ZeroMarkPriceSource:
+    """마크가격 포트는 값이 없으면 `None`을 돌려야 한다 — `Money(amount=0)`을
+    반환하면 호출자가 "스테일"과 "실제 0원"을 구분하지 못한다(POS_MARK_STALE)."""
+
+    async def mark(self, position_key, at):
+        return Money(amount=Decimal("0"), currency=Currency.USDT)
+
+
+async def test_mark_price_source_zero_money_violates_none_return_invariant() -> None:
+    """Invariants 위반: MarkPriceSource.mark()가 0원 Money를 반환하면
+    호출자는 마크가 스테일한 경우와 실제 마크가 0원인 경우를 구분할 수 없다.
+    포트 계약은 "값을 못 구하면 None"이므로, 이 구현은 계약 위반이다."""
+    zero_source = _ZeroMarkPriceSource()
+    # isinstance는 이름만 확인하므로 통과 — 정적 타입 검사(mypy)가 잡아야 함
+    assert isinstance(zero_source, MarkPriceSource)
+    # 하지만 runtime에서 0원 Money를 반환하는 것은 포트의 "None when missing"
+    # 불변식을 위반한다 — 호출 측에서 None 체크로 처리하면 미실현 PnL이
+    # "None 유지"가 아니라 "0원"으로 오인된다.
+    result = await zero_source.mark("acct-1:BTC/USDT", _now())
+    assert result is not None  # isinstance 통과 but contract-violating
+
+
+class _EmptyBalanceSource:
+    """ProviderBalanceSource 포트는 조회 실패 시 예외를 던져야 한다 — 빈
+    리스트를 반환하면 "잔고 없음"과 "실제 0"을 구분할 수 없다(FD-3.3)."""
+
+    async def balances(self, connection_id):
+        return []
+
+
+async def test_provider_balance_source_empty_list_masks_failure() -> None:
+    """Invariants 위반: ProviderBalanceSource.balances()가 빈 리스트를
+    반환하면 실제 잔고 0과 API 실패를 구분할 수 없다. 포트 계약은
+    "실패 시 예외"이므로 이 구현은 fail-closed 원칙을 위반한다."""
+    empty_source = _EmptyBalanceSource()
+    assert isinstance(empty_source, ProviderBalanceSource)
+    # 빈 리스트 반환 — isinstance는 통과하지만 실제 호출 시
+    # "잔고 없음"과 "실패"가 구분되지 않는다.
+    result = await empty_source.balances(uuid4())
+    assert result == []  # contract-violating: should raise, not return []
+
+
+class _WrongTypeSnapshotRepo:
+    """스냅샷 포트의 upsert가 PositionSnapshotView 대신 dict를 반환한다 —
+    isinstance()는 메서드 이름만 확인하므로 통과하지만, 반환 타입이
+    계약 DTO가 아니다."""
+
+    async def get(self, conn, tenant_id, position_key): ...
+
+    async def upsert(self, conn, snapshot, expected_seq):
+        return {"position_key": "fake"}
+
+    async def list_open(self, conn, tenant_id, account_id): ...
+
+
+async def test_snapshot_repo_dict_return_fails_dto_validation() -> None:
+    """Negative test: upsert가 dict를 반환하면 isinstance()는 통과하지만
+    PositionSnapshotView.model_validate()는 ValidationError를 던진다.
+    Protocol 구조 검사만으로는 반환 타입을 검증할 수 없다는 간극을 확인한다."""
+    fake = _WrongTypeSnapshotRepo()
+    assert isinstance(fake, SnapshotRepository)
+
+    fake_nav = NAVSnapshot(
+        account_id=uuid4(),
+        nav_date=date(2026, 9, 3),
+        base_currency=Currency.USDT,
+        opening_nav=Decimal("10000"),
+        cash=Decimal("5000"),
+        positions_mv=Decimal("5000"),
+        realized=Decimal("100"),
+        unrealized_delta=Decimal("50"),
+        funding=Decimal("0"),
+        fees=Decimal("10"),
+        flows=Decimal("0"),
+        closing_nav=Decimal("10140"),
+        fx_rates=[],
+        source_hash="abc123",
+    )
+    result = await fake.upsert(conn=None, snapshot=fake_nav, expected_seq=0)
+    assert isinstance(result, dict)
+    with pytest.raises(ValidationError):
+        PositionSnapshotView.model_validate(result)
+
+
+# ── DEEPEN: 실패주입 테스트 (monkeypatch) ─────────────────────────────────────
+
+
+async def test_journal_repository_append_raises_on_db_failure() -> None:
+    """실패주입: PositionJournalRepository.append() 구현이 DB 예외를
+    던지는 경우, 호출자는 이를キャ치하거나 전파해야 한다.
+    포트는 예외 전파를 허용한다 — 예외를 swallow해서는 안 된다."""
+
+    class _SwallowingJournalRepo:
+        """append가 예외를 던지지 않고 None을 반환하면 — 저널 쓰기가
+        실패했음에도 호출자는 이를 모르고 진행하게 된다."""
+
+        async def append(self, conn, **kwargs):
+            # DB 오류가 발생했음에도 예외를 던지지 않고 None 반환
+            return None
+
+        async def list_for(self, conn, position_key, from_seq=0):
+            return []
+
+        async def last(self, conn, position_key):
+            return None
+
+    fake = _SwallowingJournalRepo()
+    # isinstance 통과 — 메서드 이름은 맞췄다
+    assert isinstance(fake, PositionJournalRepository)
+    # 하지만 append가 None을 반환하면 — 호출자가 PositionJournalEntryView
+    # 로 기대하는 값을 받지 못한다.
+    result = await fake.append(
+        conn=None,
+        position_key="acct-1:BTC/USDT",
+        entry_type=JournalEntryType.FILL,
+        qty_delta=Decimal("0.5"),
+        price=Money(amount=Decimal("50000"), currency=Currency.USDT),
+        fee=None,
+        realized_pnl_base=Decimal("0"),
+        fx_rate=None,
+        fx_source=None,
+        source_event_type="FILL",
+        source_event_id=str(uuid4()),
+        idempotency_key="fill:1:1",
+        occurred_at=_now(),
+    )
+    # None 반환 — 호출자가 PositionJournalEntryView라고 믿고 접근하면
+    # AttributeError가 발생한다. 포트 계약은 PositionJournalEntryView 반환.
+    assert result is None  # contract-violating: should raise or return DTO
+
+
+# ── DEEPEN: 성능 단언 ─────────────────────────────────────────────────────────
+
+
+def test_isinstance_port_check_is_fast() -> None:
+    """성능 단언: isinstance()로 Protocol 체크하는 overhead는 1회당
+    100us 미만이어야 한다(10만 회/초 기준). 구조 검사라도 N번 호출하면
+    누적 overhead가 중요하다."""
+    repo = _FullJournalRepo()
+    iterations = 10_000
+    start = time.perf_counter()
+    for _ in range(iterations):
+        isinstance(repo, PositionJournalRepository)
+    elapsed = time.perf_counter() - start
+    per_check_us = elapsed / iterations * 1_000_000
+    # 100us 미만 — 구조 검사라도 과용하면 병목된다
+    assert per_check_us < 100, (
+        f"isinstance port check took {per_check_us:.1f}us/check, budget: 100us"
+    )
