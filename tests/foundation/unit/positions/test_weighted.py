@@ -3,6 +3,7 @@
 Spec: docs/specs/L4_market_data_positions_ledger_v1.0.md#§9 LB-3,
 `unit/positions/test_weighted.py` DoD("평단 재계산, 매도 시 평단 불변").
 """
+
 from __future__ import annotations
 
 from datetime import datetime, timezone
@@ -94,3 +95,50 @@ def test_sell_with_no_position_rejected() -> None:
     wavg = WeightedAverage()
     with pytest.raises(NegativeQuantityError):
         wavg.apply(_fill(OrderSide.SELL, "1", "100"))
+
+
+def test_zero_quantity_fill_rejected() -> None:
+    """불변식: quantity > 0. Zero 수량은 FillEvent 생성 단계에서 거부된다."""
+    with pytest.raises(ValueError, match="quantity는 양수여야 합니다"):
+        FillEvent(
+            side=OrderSide.BUY,
+            quantity=Decimal("0"),
+            price=Decimal("100"),
+            occurred_at=_now(),
+        )
+
+
+def test_apply_lot_model_copy_failure_propagates() -> None:
+    """실패주입: Lot.model_copy 가 예외를 던지면 apply 도 그대로 전파한다."""
+    wavg = WeightedAverage()
+    wavg.apply(_fill(OrderSide.BUY, "10", "100"))
+
+    original_model_copy = type(wavg._lot).model_copy
+
+    def failing_model_copy(self, **kwargs):
+        raise RuntimeError("simulated persistence failure")
+
+    type(wavg._lot).model_copy = failing_model_copy  # type: ignore[assignment]
+
+    try:
+        with pytest.raises(RuntimeError, match="simulated persistence failure"):
+            wavg.apply(_fill(OrderSide.SELL, "5", "120"))
+    finally:
+        type(wavg._lot).model_copy = original_model_copy
+
+
+def test_weighted_average_10k_fills_within_budget() -> None:
+    """성능 단언: 10,000회 연속 매수+매도 사이클이 5초 이내야 한다."""
+    import time
+
+    wavg = WeightedAverage()
+    n = 10_000
+    start = time.monotonic()
+    for i in range(n):
+        price = Decimal("100") + Decimal(str(i % 100))
+        wavg.apply(_fill(OrderSide.BUY, "1", str(price)))
+        wavg.apply(_fill(OrderSide.SELL, "1", str(price)))
+    elapsed = time.monotonic() - start
+
+    # D2: 10k 사이클 ≤ 5초 (≈2,000 ops/s)
+    assert elapsed < 5.0, f"10k 사이클이 {elapsed:.2f}초 — 예산 5초 초과"
