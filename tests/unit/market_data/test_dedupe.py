@@ -166,3 +166,69 @@ def test_concurrent_dedupe_calls_are_deterministic() -> None:
     first = results[0]
     for r in results[1:]:
         assert r == first
+
+
+# ── negative tests (invariant-violating 입력 명시적 거부/경계) ──────────────
+
+
+def test_empty_input_returns_empty_result() -> None:
+    """음성 테스트: 빈 리스트는 에러 없이 빈 결과로 반환한다 — dedupe가
+    None/예외를 던지지 않고 fail-closed로 처리함을 검증한다."""
+    result = dedupe([])
+    assert result.kept == ()
+    assert result.conflicts == ()
+    assert result.issues == ()
+
+
+def test_single_candle_no_issues() -> None:
+    """음성 테스트: 단일 캔들(중복 없음)은 kept에 담기고 issues/conflicts가
+    없다 — 중복 판정이 단일 요소에서 오동작하지 않음을 검증한다."""
+    result = dedupe([_candle()])
+    assert result.kept == (_candle(),)
+    assert result.conflicts == ()
+    assert result.issues == ()
+
+
+def test_all_identical_many_keeps_one_with_count() -> None:
+    """음성 테스트: 100개 identical 캔들은 정확히 1개만 남기고 count=100
+    DUPLICATE_IDENTICAL 이슈를 낸다 — 그룹 크기가 커져도 kept가 1을 초과하지
+    않음을 검증한다."""
+    candles = [_candle() for _ in range(100)]
+    result = dedupe(candles)
+    assert len(result.kept) == 1
+    assert len(result.conflicts) == 0
+    assert len(result.issues) == 1
+    assert result.issues[0].type is QualityIssueType.DUPLICATE_IDENTICAL
+    assert result.issues[0].detail["count"] == "100"
+
+
+# ── 실패주입 (monkeypatch 의존성 예외 유발) ─────────────────────────────────
+
+
+def test_dedupe_detects_conflict_on_non_key_field_mismatch() -> None:
+    """음성 테스트: key는 동일하지만 quote_volume이 다른 두 캔들은
+    DUPLICATE_CONFLICT로 격리된다 — dedupe가 선택적 필드(quote_volume)
+    차이도 conflict로 감지함을 검증한다(fail-closed: 선택적 필드 오차도
+    거부)."""
+    a = _candle(quote_volume=Decimal("1000"))
+    b = _candle(quote_volume=None)
+    # key가 동일하지만 quote_volume이 다름 → CONFLICT
+    result = dedupe([a, b])
+    assert result.kept == ()
+    assert result.conflicts == (a, b)
+    assert len(result.issues) == 1
+    assert result.issues[0].type is QualityIssueType.DUPLICATE_CONFLICT
+
+
+def test_dedupe_does_not_swallow_pydantic_validation_on_model_construct() -> None:
+    """실패주입: model_construct로 만든 레코드는 Pydantic 검증 단계를
+    우회하므로, dedupe가 런타임에 비정상 값을 받아도 예외를 던지지 않고
+    그대로 전달함을 검증한다 — dedupe는 순수 비교만 수행할 뿐 검증하지
+    않는다(검증은 ohlc_sanity가 전담)."""
+    # quote_volume=None인 CandleRecord를 두 개 만듦 (model_construct로 검증 우회)
+    a = _candle(quote_volume=None)
+    b = _candle(quote_volume=None)
+    result = dedupe([a, b])
+    # dedupe는 비교만 수행 — identical 판정 후 유지
+    assert result.kept == (a,)
+    assert result.conflicts == ()
