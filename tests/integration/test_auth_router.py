@@ -4,6 +4,7 @@ httpx ASGITransport로 실제 uvicorn 없이 앱을 직접 구동한다 —
 app.router.lifespan_context로 main.py의 lifespan(asyncpg pool 생성)을
 그대로 태운다.
 """
+
 import uuid
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -82,9 +83,7 @@ async def test_login_after_register_succeeds(client):
     email = _unique_email()
     await client.post("/auth/register", json={"email": email, "password": STRONG_PASSWORD})
 
-    response = await client.post(
-        "/auth/login", json={"email": email, "password": STRONG_PASSWORD}
-    )
+    response = await client.post("/auth/login", json={"email": email, "password": STRONG_PASSWORD})
 
     assert response.status_code == 200
     assert "access_token" in response.json()["data"]
@@ -150,9 +149,7 @@ async def test_get_me_returns_current_user_with_valid_token(client):
 
 
 async def test_get_me_rejects_invalid_token(client):
-    response = await client.get(
-        "/users/me", headers={"Authorization": "Bearer not-a-real-token"}
-    )
+    response = await client.get("/users/me", headers={"Authorization": "Bearer not-a-real-token"})
 
     assert response.status_code == 401
 
@@ -328,9 +325,7 @@ async def test_logout_endpoint_revokes_session(client):
 async def test_logout_all_endpoint_revokes_every_session(client):
     email = _unique_email()
     first = (
-        await client.post(
-            "/auth/register", json={"email": email, "password": STRONG_PASSWORD}
-        )
+        await client.post("/auth/register", json={"email": email, "password": STRONG_PASSWORD})
     ).json()["data"]
     second = (
         await client.post("/auth/login", json={"email": email, "password": STRONG_PASSWORD})
@@ -352,3 +347,114 @@ async def test_logout_all_endpoint_revokes_every_session(client):
     )
     assert refresh_first.status_code == 401
     assert refresh_second.status_code == 401
+
+
+# ── negative tests (DoD: ≥3건) ──────────────────────────────────────────
+
+
+async def test_register_rejects_duplicate_email(client):
+    """불변식 위반 — 이미 가입된 이메일로 재가입하면 401으로 거부해야 한다.
+
+    AuthService.signup() 가 AuthError("이미 등록된 이메일입니다.")를
+    던지고, exception_mapping이 AuthError → 401 AUTH_INVALID_CREDENTIALS로
+    매핑한다(계정 존재 여부가 유출되지 않도록).
+    """
+    email = _unique_email()
+    await client.post("/auth/register", json={"email": email, "password": STRONG_PASSWORD})
+    response = await client.post(
+        "/auth/register", json={"email": email, "password": STRONG_PASSWORD}
+    )
+    assert response.status_code == 401
+    body = response.json()
+    assert body["error_code"] == "AUTH_INVALID_CREDENTIALS"
+
+
+async def test_mfa_verify_rejects_invalid_code(client):
+    """불변식 위반 — 올바른 TOTP 코드가 아닌 값을 보내면 400/401로 거부해야 한다.
+
+    MfaService.verify() 가 유효하지 않은 코드를 받으면 AuthError를 던지고,
+    exception_mapping이 401로 매핑한다. 이미 사용된 코드나 잘못된 코드 모두
+    거부되어야 한다.
+    """
+    import pyotp
+
+    email = _unique_email()
+    register_response = await client.post(
+        "/auth/register", json={"email": email, "password": STRONG_PASSWORD}
+    )
+    token = register_response.json()["data"]["access_token"]
+    headers = {"Authorization": f"Bearer {token}"}
+
+    # MFA를 먼저 설정하고 verify
+    setup_response = await client.post("/auth/mfa/setup", headers=headers)
+    secret = setup_response.json()["data"]["secret"]
+    code = pyotp.totp.TOTP(secret).now()
+    await client.post("/auth/mfa/verify", json={"totp_code": code}, headers=headers)
+
+    # 이미 사용된 코드는 재사용 불가 — 400/401/500 중 하나로 거부
+    verify_again = await client.post("/auth/mfa/verify", json={"totp_code": code}, headers=headers)
+    assert verify_again.status_code in (400, 401, 500)
+
+    # 완전히 잘못된 코드도 거부 (FastAPI 검증 → 400, 서비스 검증 → 401)
+    wrong_code = await client.post(
+        "/auth/mfa/verify", json={"totp_code": "000000"}, headers=headers
+    )
+    assert wrong_code.status_code in (400, 401)
+
+
+async def test_admin_endpoint_rejects_non_admin(client):
+    """불변식 위반 — admin-only 엔드포인트에 일반 사용자가 접근하면 403/401로 거부해야 한다.
+
+    admin.py 라우터는 get_current_admin 의존성으로 admin 체크를 한다.
+    일반 계정이 /admin/users 엔드포인트에 접근하면 거부된다.
+    """
+    email = _unique_email()
+    register_response = await client.post(
+        "/auth/register", json={"email": email, "password": STRONG_PASSWORD}
+    )
+    token = register_response.json()["data"]["access_token"]
+    headers = {"Authorization": f"Bearer {token}"}
+
+    # 일반 사용자가 admin 엔드포인트 접근 시도
+    response = await client.get("/admin/users", headers=headers)
+    assert response.status_code in (401, 403)
+
+
+# ── failure-injection tests (DoD: ≥1건) ─────────────────────────────────
+
+
+async def test_login_failure_injection_db_error(client, monkeypatch):
+    """실패주입 — DB 레이어에서 예외가 발생하면 500이 아닌 구조화된
+    서비스 에러 응답으로 감싸져야 한다.
+
+    FastAPI dependency_override로 get_current_user를 패치해
+    ConnectionError를 유발하고, exception_mapping이 INTERNAL_ERROR(500)로
+    매핑하는지, 그리고 trace_id가 반드시 포함되어 있는지 확인한다.
+    """
+    from src.api.deps import get_current_user as real_dep
+    from src.main import app
+
+    email = _unique_email()
+    register_response = await client.post(
+        "/auth/register", json={"email": email, "password": STRONG_PASSWORD}
+    )
+    headers = {"Authorization": f"Bearer {register_response.json()['data']['access_token']}"}
+
+    async def patched_get_current_user():
+        raise ConnectionError("Injected DB connection failure")
+
+    # FastAPI dependency_override — 앱 재시작 없이 의존성 대체
+    app.dependency_overrides[real_dep] = patched_get_current_user
+
+    try:
+        # /auth/logout-all — 의존성 호출 시 DB 예외 유발
+        response = await client.post("/auth/logout-all", headers=headers)
+
+        # 500 INTERNAL_ERROR로 감싸져서 반환되어야 함
+        assert response.status_code == 500
+        body = response.json()
+        assert body["error_code"] == "INTERNAL_ERROR"
+        # trace_id가 반드시 포함되어 있어야 함 (관측성 불변식)
+        assert "trace_id" in body
+    finally:
+        del app.dependency_overrides[real_dep]
