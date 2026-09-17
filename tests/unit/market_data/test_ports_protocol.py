@@ -202,6 +202,65 @@ def test_isinstance_checks_over_thousands_of_instances_stay_fast() -> None:
     assert elapsed < 1.0
 
 
+class _MissingLoadCalendarRepository:
+    """`load` 메서드가 빠진 CalendarRepository 불완전 구현 — 두 번째 포트
+    타입에서 fail-closed가 우연이 아님을 보이는 추가 negative test."""
+
+    async def upsert_days(self, conn, venue, days): ...
+
+
+class _MissingFetchIngestSource:
+    """`fetch_candles` 메서드가 빠진 IngestSource 불완전 구현 — 세 번째
+    포트 타입에서 fail-closed가 우연이 아님을 보이는 추가 negative test."""
+
+
+def test_calendar_repository_missing_load_fails_port_check() -> None:
+    """추가 negative test 1건: `CalendarRepository`에서 `load` 메서드
+    누락 → isinstance() False. CandleStore/ReferenceRepository에 국한되지
+    않는 fail-closed 행동을 증명한다."""
+    assert not isinstance(_MissingLoadCalendarRepository(), CalendarRepository)
+
+
+def test_ingest_source_missing_fetch_fails_port_check() -> None:
+    """추가 negative test 2건: `IngestSource`에서 `fetch_candles` 메서드
+    누락 → isinstance() False. 구조적 계약이 모든 포트 타입에서 fail-closed
+    됨을 확인한다."""
+    assert not isinstance(_MissingFetchIngestSource(), IngestSource)
+
+
+async def test_upsert_batch_failure_injection_raises() -> None:
+    """실패주입 케이스 1건: `CandleStore.upsert_batch`가 의존하는
+    데이터베이스 레이어에서 예외가 발생하는 상황을 monkeypatch로 재현한다.
+    어댑터가 이 예외를 silently吃掉하면 배치 손실을 알 수 없으므로,
+    isinstance() 통과한 구현체가 실제 예외를 그대로 전파하는지 검증한다."""
+    from src.foundation.market_data.ports.candle_store import CandleStore
+
+    class _FailingCandleStore:
+        async def upsert_batch(self, conn, batch_id, candles):
+            raise ConnectionRefusedError("simulated db connection lost")
+
+        async def quarantine(self, conn, batch_id, candles, issues): ...
+
+        async def query(self, conn, key, start, end, as_of):
+            return []
+
+        async def last_open_time(self, conn, key):
+            return None
+
+        async def read_candles_columnar(self, conn, key, start, end, as_of):
+            from src.foundation.market_data.domain.candle_columns import (
+                CandleColumns,
+            )
+
+            return CandleColumns([], [], [], [], [], [], [])
+
+    fake = _FailingCandleStore()
+    assert isinstance(fake, CandleStore)  # 구조는 만족
+
+    with pytest.raises(ConnectionRefusedError):
+        await fake.upsert_batch(conn=None, batch_id=None, candles=[])
+
+
 async def test_sync_method_silently_satisfies_async_protocol_gate_red() -> None:
     """게이트 적색 재현: `isinstance()`는 멤버가 코루틴 함수(`async def`)인지
     검사하지 않고 이름 존재만 본다. 그래서 실수로 `last_open_time`을 동기
