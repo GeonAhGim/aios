@@ -40,7 +40,7 @@ class TradeImpact:
 
     as_of: datetime
     symbol: str
-    notional_delta: Decimal  # + for BUY, - for SELL
+    notional_delta: Decimal  # absolute trade size, always positive
     cash_delta: Decimal  # - for BUY (cash out), + for SELL (cash in)
     total_equity_delta: Decimal  # = notional_delta + cash_delta (net zero for pure swap)
     position_count_delta: int  # +1 on BUY, -1 on SELL (if position crosses zero)
@@ -96,9 +96,11 @@ def delta_impact(
     else:
         raise ValueError(f"unknown side: {trade.side!r}")
 
-    # --- total equity delta: exposure changes by notional, cash changes by
-    # cash_delta. Net effect is zero for a pure cash<->exposure swap. ---
-    total_equity_delta = trade.notional + cash_delta  # = 0 for valid sides
+    # --- total equity delta: exposure changes by exposure_delta, cash
+    # changes by cash_delta. Net effect is zero for a pure cash<->exposure
+    # swap (BUY: exposure +notional, SELL: exposure -notional). ---
+    exposure_delta = trade.notional if trade.side == "BUY" else -trade.notional
+    total_equity_delta = exposure_delta + cash_delta  # = 0 for valid sides
 
     # --- position count delta ---
     # BUY adds one open position (symbol didn't exist or was flat).

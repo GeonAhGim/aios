@@ -67,9 +67,15 @@ class TestBuyExisting:
         assert impact.cash_delta == Decimal("-50000")
 
     def test_total_equity_delta_zero(self):
-        """Cash<->exposure swap: total equity unchanged."""
+        """Cash<->exposure swap: total equity unchanged (BUY)."""
         before = _make_state()
         impact = delta_impact(before=before, trade=BUY_AAPL)
+        assert impact.total_equity_delta == Decimal("0")
+
+    def test_total_equity_delta_zero_sell(self):
+        """Cash<->exposure swap: total equity unchanged (SELL)."""
+        before = _make_state()
+        impact = delta_impact(before=before, trade=SELL_AAPL)
         assert impact.total_equity_delta == Decimal("0")
 
     def test_position_count_increases(self):
@@ -138,6 +144,12 @@ class TestSellExisting:
         before = _make_state()
         impact = delta_impact(before=before, trade=SELL_AAPL)
         assert impact.per_symbol_pct_delta["AAPL"] < Decimal("0")
+
+    def test_per_symbol_pct_delta_zero_other_symbols_sell(self):
+        """SELL existing symbol: other symbols' pct unchanged (equity delta=0)."""
+        before = _make_state()
+        impact = delta_impact(before=before, trade=SELL_AAPL)
+        assert impact.per_symbol_pct_delta["GOOG"] == Decimal("0")
 
 
 # ---------------------------------------------------------------------------
