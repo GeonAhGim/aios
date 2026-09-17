@@ -18,6 +18,13 @@ for a proposal candidate (schema/compile/data-coverage/forbidden-API, this
 leaf's four checks) -- it is not AI-12's later validation-pipeline (L36-L44)
 result, which is a separate contract that leaf will define when implemented.
 
+`ProposalEvaluation` is that AI-12 contract (`application/evaluate_proposal.py`).
+It carries `src.foundation.validation.domain.rules::evaluate_bundle`'s verdict
+for an already-accepted `StrategyProposal` -- `accepted`/`hard_fail_reasons`
+mirror `evaluate_bundle`'s own "FAIL iff hard_fail_reasons non-empty" (I-07)
+biconditional exactly, the same discipline `ProposalOutcome._check_consistency`
+already applies one stage earlier in this pipeline.
+
 `domain/token_rules.py`/`domain/confirm.py` do not import this module (they
 predate AI-1 consolidation, task-2643 note dated 2026-09-17); this module
 follows the same "contracts is the base layer" rule for AI-8's own domain
@@ -29,7 +36,7 @@ from __future__ import annotations
 
 import enum
 import re
-from typing import Literal
+from typing import Any, Literal
 from uuid import UUID
 
 from pydantic import AwareDatetime, BaseModel, field_validator, model_validator
@@ -43,6 +50,7 @@ __all__ = [
     "DataScope",
     "StrategyProposal",
     "ProposalOutcome",
+    "ProposalEvaluation",
 ]
 
 SCHEMA_VERSION: Literal["v1"] = "v1"
@@ -190,4 +198,32 @@ class ProposalOutcome(BaseModel, frozen=True):
                 raise ValueError("a rejected outcome must carry a rejection_reason")
             if self.script_hash is not None:
                 raise ValueError("a rejected outcome must not carry a script_hash")
+        return self
+
+
+class ProposalEvaluation(BaseModel, frozen=True):
+    """AI-12 -- `application/evaluate_proposal.py`'s verdict for an already
+    -accepted `StrategyProposal`, produced by delegating to
+    `src.foundation.validation.domain.rules::evaluate_bundle` (L42) over a
+    caller-supplied `CheckResult` sequence. `accepted`/`hard_fail_reasons`
+    are kept mutually consistent by construction (`_check_consistency`),
+    mirroring `evaluate_bundle`'s own `_decide` biconditional (I-07: outcome
+    is FAIL iff `hard_fail_reasons` is non-empty) -- the same "no silently
+    contradictory state" discipline `ProposalOutcome._check_consistency`
+    already applies one stage earlier in this pipeline."""
+
+    proposal_id: UUID
+    experiment_id: UUID
+    accepted: bool
+    hard_fail_reasons: tuple[str, ...] = ()
+    obligations: tuple[str, ...] = ()
+    metrics: dict[str, Any] = {}
+    schema_version: Literal["v1"] = SCHEMA_VERSION
+
+    @model_validator(mode="after")
+    def _check_consistency(self) -> ProposalEvaluation:
+        if self.accepted and self.hard_fail_reasons:
+            raise ValueError("an accepted evaluation must not carry hard_fail_reasons")
+        if not self.accepted and not self.hard_fail_reasons:
+            raise ValueError("a rejected evaluation must carry at least one hard_fail_reason")
         return self
