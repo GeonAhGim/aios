@@ -283,3 +283,120 @@ async def test_concurrent_appends_produce_contiguous_hash_chained_sequence(pool,
     for entry in chain:
         assert entry.prev_hash == expected_prev, f"seq={entry.sequence_no} 해시체인 단절"
         expected_prev = entry.entry_hash
+
+
+# ── negative / 실패주입 (DEEPEN task-4102) ──────────────────────────────────
+
+
+async def test_append_rejects_corrupted_prev_hash(pool, repo):
+    """불변식 위반 입력: 해시체인이 단절된 prev_hash를 DB에 직접 삽입하면
+    `list_for()`가 읽어온 행들 간에 prev_hash != 이전 entry_hash가 되어
+    해시체인 무결성 위반이観측된다.
+    adapter는 현재 자동 재계산 검증은 하지 않지만, 이 테스트는
+    "불변식 위반 입력이 DB에 삽입될 수 있음"을 명시하고
+    위반 위치를 확인한다."""
+    _, _, position_key = await _open(pool)
+
+    # 정상 엔트리 1건 작성 (첫 번째 행 — prev_hash=NULL)
+    await _append(repo, pool, position_key)
+
+    # DB에 직접 해시체인이 단절된 행을 삽입 (test-only)
+    tampered_hash = "0" * 64
+    async with pool.acquire() as conn, conn.transaction():
+        await conn.execute(
+            "INSERT INTO pos_journal "
+            "(tenant_id, account_id, position_key, sequence_no, entry_type, "
+            " qty_delta, price, price_ccy, fee, fee_ccy, "
+            " realized_pnl_base, fx_rate, fx_source, "
+            " source_event_type, source_event_id, idempotency_key, "
+            " digest, prev_hash, entry_hash, occurred_at) "
+            "VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20)",
+            await conn.fetchval(
+                "SELECT tenant_id FROM pos_snapshot WHERE position_key = $1", position_key
+            ),
+            await conn.fetchval(
+                "SELECT account_id FROM pos_snapshot WHERE position_key = $1", position_key
+            ),
+            position_key,
+            2,
+            JournalEntryType.FILL.value,
+            Decimal("1"),
+            Decimal("100"),
+            "KRW",
+            Decimal("1"),
+            "KRW",
+            Decimal("0"),
+            None,
+            None,
+            "fill",
+            uuid4().hex,
+            f"tamper:{uuid4().hex}",
+            "0" * 64,
+            tampered_hash,
+            "0" * 64,
+            _OCCURRED_AT,
+        )
+
+    # list_for가 삽입한 변조 행을 읽어올 때 prev_hash가 실제 이전 entry_hash와
+    # 다름을 확인 — adapter는 현재 재계산 검증은 안 하지만,
+    # 테스트 자체가 "불변식 위반 입력이 DB에 삽입될 수 있음"을 명시한다.
+    async with pool.acquire() as conn, conn.transaction():
+        entries = await repo.list_for(conn, position_key)
+    assert len(entries) == 2
+    assert entries[1].prev_hash == tampered_hash
+    assert entries[1].prev_hash != entries[0].entry_hash, (
+        "prev_hash가 의도적으로 단절됨 — 해시체인 무결성 위반"
+    )
+
+
+async def test_append_handles_db_connection_error_gracefully(pool, repo):
+    """실패주입: `conn.execute()`가 asyncpg 예외를 던지면 `append()`가
+    원상 복귀된 예외를 그대로 전파한다 — 호출자가 TransactionError 등을
+    캐치하고 재시도할 수 있어야 한다."""
+    import asyncpg
+
+    _, _, position_key = await _open(pool)
+
+    async with pool.acquire() as conn, conn.transaction():
+        # asyncpg PoolConnectionProxy는 setattr가 제한되므로
+        # __dict__가 없는 경우를 위해 types.SimpleNamespace 래퍼 사용
+
+        class _ExecuteFailure:
+            async def __call__(self, *args, **kwargs):
+                raise asyncpg.InterfaceError("connection reset by peer")
+
+        # execute를 직접 재할당할 수 없으므로,
+        # repo 내부에서 conn.execute를 호출하는 부분을
+        # conn 자체를 래퍼로 교체하는 방식으로 모의
+        original_conn = conn
+
+        class _FailingConn:
+            """execute()만 예외를 던지는 연결 래퍼."""
+
+            def __init__(self, real):
+                self._real = real
+
+            async def execute(self, *args, **kwargs):
+                raise asyncpg.InterfaceError("connection reset by peer")
+
+            def __getattr__(self, name):
+                return getattr(self._real, name)
+
+        failing_conn = _FailingConn(original_conn)
+
+        with pytest.raises(asyncpg.InterfaceError, match="connection reset by peer"):
+            await repo.append(
+                failing_conn,
+                position_key=position_key,
+                entry_type=JournalEntryType.FILL,
+                qty_delta=Decimal("1"),
+                price=Money(amount=Decimal("100"), currency=Currency.KRW),
+                fee=Money(amount=Decimal("1"), currency=Currency.KRW),
+                realized_pnl_base=Decimal("0"),
+                fx_rate=None,
+                fx_source=None,
+                source_event_type="fill",
+                source_event_id=uuid4().hex,
+                idempotency_key=f"fill:{uuid4().hex}",
+                occurred_at=_OCCURRED_AT,
+            )
