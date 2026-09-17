@@ -1,3 +1,5 @@
+# loc-allow: integration test file for legacy_positions_projection; 4 negative/invariant tests +
+#   failure-injection + performance assertions require substantial fixture/setup code
 """LegacyPositionsProjection 통합테스트 — 실 DB(TEST_DATABASE_URL) 대상.
 
 Spec: docs/specs/L4_market_data_positions_ledger_v1.0.md#§9.3 LB-10.
