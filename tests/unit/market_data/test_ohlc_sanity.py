@@ -178,7 +178,7 @@ def test_concurrent_check_candle_calls_are_deterministic() -> None:
     """동시성 증명: 순수 함수이므로 20개 스레드가 동일 입력에 동시 접근해도
     전부 동일한 결과를 내야 한다(공유 가변 상태 없음의 증거)."""
     candle = _candle(low=Decimal("101"))
-    results: list[list[object]] = []
+    results: list = []  # type: ignore[type-arg]
 
     def _run() -> None:
         results.append(check_candle(candle))
