@@ -270,6 +270,66 @@ async def test_journal_repository_append_raises_on_db_failure() -> None:
     assert result is None  # contract-violating: should raise or return DTO
 
 
+# ── DEEPEN: 추가 negative test — 포트 메서드 시그니처/반환 타입 위반 ──────────
+
+
+def test_missing_upsert_fails_snapshot_repository_check() -> None:
+    """negative test: SnapshotRepository의 upsert가 빠르면 isinstance() False.
+    조건부 업데이트가 없으면 동시성 방어가 없으므로 포트 불만족."""
+
+    class _SnapshotNoUpsert:
+        async def get(self, conn, tenant_id, position_key): ...
+        async def list_open(self, conn, tenant_id, account_id): ...
+
+    assert not isinstance(_SnapshotNoUpsert(), SnapshotRepository)
+
+
+def test_nav_repository_missing_get_fails_port_check() -> None:
+    """negative test: NavRepository의 get이 빠르면 isinstance() False.
+    멱등 재계산 체크에 get이 필수 — 없으면 같은 날 중복 삽입 가능."""
+
+    class _NavNoGet:
+        async def insert(self, conn, nav): ...
+
+    assert not isinstance(_NavNoGet(), NavRepository)
+
+
+# ── DEEPEN: 실패주입 — 의존성 예외 유발 ─────────────────────────────────────
+
+
+async def test_mark_price_source_raises_on_missing_price() -> None:
+    """실패주입: 마크가격 소스가 None 대신 예외를 던지는 경우.
+    포트 계약은 None 반환을 허용하지만, 실제 어댑터가 네트워크 오류 등으로
+    예외를 던질 때 호출자가 이를 잡지 않으면 PositionJournalEntryView
+    생성이 실패해야 한다 — fail-closed."""
+
+    class _FailingMarkPriceSource:
+        async def mark(self, position_key, at):
+            raise ConnectionError("exchange unreachable")
+
+    # isinstance 통과 — 메서드 이름만 검사하므로
+    assert isinstance(_FailingMarkPriceSource(), MarkPriceSource)
+    # 하지만 실제 호출 시 예외가 던져진다 — 호출자가 이를 처리하지 않으면
+    # 포트 계약상 None이어야 할 값 대신 예외가 전파된다.
+    with pytest.raises(ConnectionError, match="exchange unreachable"):
+        await _FailingMarkPriceSource().mark("acct-1:BTC/USDT", _now())
+
+
+async def test_fx_rate_source_raises_on_missing_rate() -> None:
+    """실패주입: 환율 소스가 None 대신 예외를 던지는 경우.
+    포트 계약은 None 반환을 명시하지만, 외부 API 장애 시 예외가 던져질 수 있다.
+    호출자는 이를 POS_FX_RATE_MISSING으로 변환해야 한다."""
+
+    class _FailingFxRateSource:
+        async def rate(self, base, quote, at):
+            raise TimeoutError("fx rate provider timeout")
+
+    assert isinstance(_FailingFxRateSource(), FxRateSource)
+
+    with pytest.raises(TimeoutError, match="fx rate provider timeout"):
+        await _FailingFxRateSource().rate(Currency.KRW, Currency.USDT, _now())
+
+
 # ── DEEPEN: 성능 단언 ─────────────────────────────────────────────────────────
 
 
