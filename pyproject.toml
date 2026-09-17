@@ -29,6 +29,9 @@ dependencies = [
     # task-3577: Windows has no IANA tz db bundled; zoneinfo (src/foundation/
     # market_data/domain/calendar/**, src/exchanges/kis/**) needs tzdata there.
     "tzdata>=2024.1; sys_platform == 'win32'",
+    # AI-20: local model training (src/foundation/ml/adapters/local_trainer.py).
+    # docs/design/AI_DEPENDENCIES_EVAL.md §4 verdict: MIT, no conditions attached.
+    "lightgbm>=4.7,<5.0",
 ]
 
 [project.optional-dependencies]
