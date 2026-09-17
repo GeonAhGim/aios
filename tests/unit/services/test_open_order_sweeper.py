@@ -476,6 +476,52 @@ async def test_tenant_scope_rejects_non_uuid_scope_ref(pool):
         )
 
 
+async def test_strategy_deployment_exec_prefix_rejects_non_digit_id(pool):
+    """negative test(task-4139 DEEPEN) — `exec:` 접두사가 있어도 뒤가 정수가
+    아니면 §3.8 'exec:<int>' 형식 위반으로 거부한다(조용히 0건이 아니라
+    fail-closed)."""
+    with pytest.raises(MalformedScopeRefError):
+        await sweep_open_orders(
+            pool,
+            _adapters("bitget"),
+            control_id=uuid4(),
+            scope=SafetyScope.STRATEGY_DEPLOYMENT,
+            scope_ref="exec:not-a-number",
+        )
+
+
+async def test_conditional_update_failure_rolls_back_order_event_atomically(pool, monkeypatch):
+    """실패주입(task-4139 DEEPEN, monkeypatch로 의존성 예외 유발) — 조건부
+    UPDATE 의존성(`conditional_update`)이 예외를 던지면 같은 트랜잭션 안의
+    `order_events` INSERT도 함께 롤백되어야 한다(I-10: 이벤트 없는 상태변경도,
+    상태 없는 이벤트도 남지 않는다). 모듈 docstring이 명시하듯 이 실패는
+    개별 주문 실패로 삼켜지는 어댑터 예외가 아니라 "genuine invariant
+    violation"이라 그대로 전파된다."""
+    user_id = await create_test_user(pool)
+    order_id = await _seed_order(pool, user_id)
+
+    async def _raise(*args, **kwargs):
+        raise RuntimeError("conditional_update dependency exploded")
+
+    monkeypatch.setattr("src.services.safety.open_order_sweeper.conditional_update", _raise)
+
+    with pytest.raises(RuntimeError, match="conditional_update dependency exploded"):
+        await sweep_open_orders(
+            pool,
+            _adapters("bitget"),
+            control_id=uuid4(),
+            scope=SafetyScope.TENANT,
+            scope_ref=str(user_id),
+        )
+
+    assert await _status_of(pool, order_id) == "SUBMITTED"
+    async with pool.acquire() as conn:
+        event_count = await conn.fetchval(
+            "SELECT count(*) FROM order_events WHERE order_id = $1", order_id
+        )
+    assert event_count == 0
+
+
 async def test_sweep_open_orders_p95_latency_stays_within_normalized_ceiling(pool):
     """수치 성능 단언(task-3029, DEPTH 감사 task-2724가 지목한 마지막 공백).
     단일 취소대상 주문에 대한 `sweep_open_orders` 1회 호출은 후보 선별 SELECT
