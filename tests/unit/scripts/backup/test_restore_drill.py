@@ -4,6 +4,7 @@ DoD: 실패 주입 시(각 단계별) ok=False가 나오고, 성공 경로에서
 정리(stop_postgres)가 항상 실행되는지를 실제 Postgres/pg_ctl 없이 검증한다
 (run_cmd/which/find_backup/sleep/clock 전부 주입).
 """
+
 from __future__ import annotations
 
 import json
@@ -19,8 +20,9 @@ def _fake_backup_dir(tmp_path: Path) -> Path:
     return backup / "base"
 
 
-def _dispatching_run_cmd(*, start_rc=0, recovery_rc=0, recovery_out="f",
-                          replay_rc=0, stop_rc=0, calls=None):
+def _dispatching_run_cmd(
+    *, start_rc=0, recovery_rc=0, recovery_out="f", replay_rc=0, stop_rc=0, calls=None
+):
     calls = calls if calls is not None else []
 
     def run_cmd(cmd, cwd, env, timeout):
@@ -75,8 +77,14 @@ def test_success_path_records_all_steps_and_stops_server(tmp_path: Path):
     result = restore_drill.run_drill(**_common_kwargs(tmp_path, run_cmd=run_cmd))
 
     assert result["ok"] is True
-    for step in ("find_backup", "restore_files", "start_postgres", "wait_recovery",
-                 "replay_verify", "stop_postgres"):
+    for step in (
+        "find_backup",
+        "restore_files",
+        "start_postgres",
+        "wait_recovery",
+        "replay_verify",
+        "stop_postgres",
+    ):
         assert result["steps"][step]["ok"] is True, result["steps"]
     stop_calls = [c for c in calls if c[0] == "pg_ctl" and c[1] == "stop"]
     assert len(stop_calls) == 1  # 성공해도 임시 인스턴스는 반드시 내린다
@@ -96,9 +104,14 @@ def test_start_postgres_failure_stops_drill_without_stopping_unstarted_server(tm
 
 def test_recovery_timeout_still_stops_server(tmp_path: Path):
     run_cmd, calls = _dispatching_run_cmd(recovery_rc=0, recovery_out="t")  # 계속 recovery 중
-    result = restore_drill.run_drill(**_common_kwargs(
-        tmp_path, run_cmd=run_cmd, recovery_poll_timeout=3.0, recovery_poll_interval=1.0,
-    ))
+    result = restore_drill.run_drill(
+        **_common_kwargs(
+            tmp_path,
+            run_cmd=run_cmd,
+            recovery_poll_timeout=3.0,
+            recovery_poll_interval=1.0,
+        )
+    )
 
     assert result["ok"] is False
     assert result["steps"]["wait_recovery"]["ok"] is False
@@ -116,6 +129,7 @@ def test_replay_verify_mismatch_fails_drill_and_still_cleans_up(tmp_path: Path):
 
 
 # --- 순수 헬퍼 ------------------------------------------------------------------
+
 
 def test_with_port_swaps_port_keeps_host_and_user():
     assert restore_drill.with_port("postgresql://alice@dbhost:5432/aios_dev", 15433) == (
@@ -144,22 +158,44 @@ def test_write_recovery_config_creates_signal_and_restore_command(tmp_path: Path
 
 def test_wait_for_recovery_returns_none_when_recovery_complete():
     reason = restore_drill.wait_for_recovery(
-        "postgresql://x/y", psql_bin="psql",
+        "postgresql://x/y",
+        psql_bin="psql",
         run_cmd=lambda cmd, cwd, env, timeout: (0, "f"),
-        cwd=Path("."), timeout=10.0, poll_interval=1.0,
-        sleep=lambda s: None, clock=iter([0.0]).__next__,
+        cwd=Path("."),
+        timeout=10.0,
+        poll_interval=1.0,
+        sleep=lambda s: None,
+        clock=iter([0.0]).__next__,
     )
     assert reason is None
 
 
 def test_wait_for_recovery_times_out_while_still_in_recovery():
     reason = restore_drill.wait_for_recovery(
-        "postgresql://x/y", psql_bin="psql",
+        "postgresql://x/y",
+        psql_bin="psql",
         run_cmd=lambda cmd, cwd, env, timeout: (0, "t"),
-        cwd=Path("."), timeout=3.0, poll_interval=1.0,
-        sleep=lambda s: None, clock=iter([0.0, 1.0, 2.0, 4.0, 4.0]).__next__,
+        cwd=Path("."),
+        timeout=3.0,
+        poll_interval=1.0,
+        sleep=lambda s: None,
+        clock=iter([0.0, 1.0, 2.0, 4.0, 4.0]).__next__,
     )
     assert reason is not None
+
+
+def test_pg_ctl_start_includes_logfile_flag_on_windows(tmp_path: Path):
+    """Windows pipe-deadlock 회피: pg_ctl start 명령에 -l 플래그가 반드시 포함됨을 확인한다."""
+    run_cmd, calls = _dispatching_run_cmd()
+    restore_drill.run_drill(**_common_kwargs(tmp_path, run_cmd=run_cmd))
+
+    start_calls = [c for c in calls if c[0] == "pg_ctl" and c[1] == "start"]
+    assert len(start_calls) == 1
+    cmd = start_calls[0]
+    assert "-l" in cmd, "pg_ctl start에 -l 플래그가 없어서 Windows pipe 데드락이 발생할 수 있다"
+    log_idx = cmd.index("-l")
+    log_path = cmd[log_idx + 1]
+    assert log_path.endswith("pg_ctl_start.log")
 
 
 def test_write_report_writes_json_to_every_path(tmp_path: Path):
