@@ -1,3 +1,7 @@
+# loc-allow: DSL-8 interpreter property test; generator+reference 구현(약 370줄) 위에
+#   DEEPEN(task-4146)로 negative 4 + failure-injection 1 + red-gate 재현 1 + 성능 단언 1을
+#   추가해 500줄을 넘었다 — 같은 REGISTRY/Reference/_check_program을 공유해야 하는 property
+#   보강이라 별도 파일로 쪼개면 fixture 중복이 생긴다.
 """L4_analytics_authoring_backtest_marketplace_v1.0.md §9.4 DSL-8 DoD "참조 구현 대비 동일" —
 property 테스트(시드 고정 무작위 프로그램, hypothesis 미설치라 `random.Random` 사용).
 
