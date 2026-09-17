@@ -13,11 +13,13 @@ revision.state를 ACTIVE→PAUSED로 바꿔도 같은 subject로 재요청하면
 mandate가 바뀌는 즉시(별도 invalidate 호출 없이) 자연히 캐시 미스가 나게
 한다 — "명시적 무효화를 잊으면 뚫린다"는 클래스의 결함(risk_gate #26과 동일
 클래스)을 fingerprint 설계 자체로 막는다."""
+
 from __future__ import annotations
 
 import hashlib
 import json
 from datetime import datetime, timedelta, timezone
+from decimal import Decimal
 from uuid import UUID, uuid4
 
 from src.foundation.mandates.contracts.v1 import PolicyDecisionView, PolicyEvaluationSubject
@@ -110,7 +112,9 @@ async def evaluate(
             command_type=subject.command_type,
             instrument_exposure_pct=subject.instrument_exposure_pct,
             total_exposure_pct=subject.total_exposure_pct,
-            cash_buffer_pct=subject.cash_buffer_pct,
+            cash_buffer_pct=(
+                None if subject.cash_buffer_pct is None else Decimal(str(subject.cash_buffer_pct))
+            ),
             projected_daily_loss_pct=subject.projected_daily_loss_pct,
             requested_autonomy=(
                 None

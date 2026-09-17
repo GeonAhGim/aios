@@ -2,10 +2,12 @@
 
 Spec: AIOSproject 75_portfolio_mandate_l3_build_and_operational_specification_v1.0.md §1.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import datetime
+from decimal import Decimal
 from enum import Enum
 from uuid import UUID
 
@@ -42,7 +44,7 @@ class MandateRevision:
     state: MandateRevisionState
     max_total_exposure_pct: float
     max_single_instrument_pct: float
-    min_cash_buffer_pct: float
+    min_cash_buffer_pct: Decimal
     max_daily_loss_pct: float
     allowed_autonomy: Autonomy
     forbidden_assets: tuple[str, ...] = field(default_factory=tuple)
@@ -104,7 +106,7 @@ class PolicyEvaluationSubject:
     command_type: str
     instrument_exposure_pct: float | None = None
     total_exposure_pct: float | None = None
-    cash_buffer_pct: float | None = None
+    cash_buffer_pct: Decimal | None = None
     projected_daily_loss_pct: float | None = None
     requested_autonomy: Autonomy | None = None
     asset: str | None = None
