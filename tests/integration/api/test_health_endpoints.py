@@ -201,3 +201,125 @@ async def test_readyz_p95_latency_budget_fails_when_db_pool_is_slow(
 
     with pytest.raises(AssertionError):
         assert _p95(samples) < _READYZ_READ_ROUTE_P95_BUDGET_SECONDS
+
+
+# ---------------------------------------------------------------------------
+# task-4131 DEEPEN — 추가 negative/불변식 위반 케이스.
+#
+# 원 리프(task-939)와 task-3158 DEEPEN이 coverage를 넓혔으나 다음
+# 불변식 위반 케이스가 누락되어 있었다:
+#   I-07(응답 구조): readiness/liveness 엔드포인트는 ApiResponse 봉투를
+#     쓰지 않아야 한다(운영 프로브는 빠르고 단순해야 함).
+#   I-09(오류 축약): db_pool check.detail에 원본 예외 메시지(DSN/호스트)
+#    가 새어 나오면 안 된다(PLT-02).
+#   INVARIANTS.md §loop_freshness: interval 미설정 루프는 ready로 판정.
+# ---------------------------------------------------------------------------
+
+
+async def test_readyz_does_not_wrap_in_api_response(client: AsyncClient) -> None:
+    """I-07: readiness 엔드포인트는 ApiResponse 봉투를 쓰지 않는다.
+
+    운영 프로브는 `response.json()`이 바로 `ReadinessReport` 모양이어야
+    하므로, `data`·`error` 같은 봉투 필드가 있으면 안 된다.
+    """
+    response = await client.get("/readyz")
+
+    assert response.status_code == 200
+    body = response.json()
+    # ApiResponse 봉투 필드가 없어야 함.
+    assert "data" not in body
+    assert "error" not in body
+    # 대신 ReadinessReport 직시 필드가 있어야 함.
+    assert "status" in body
+    assert "checks" in body
+    assert "as_of" in body
+
+
+async def test_livez_does_not_wrap_in_api_response(client: AsyncClient) -> None:
+    """I-07: liveness 엔드포인트도 ApiResponse 봉투를 쓰지 않는다."""
+    response = await client.get("/livez")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert "data" not in body
+    assert "error" not in body
+    assert "status" in body
+
+
+async def test_readyz_db_check_detail_does_not_leak_connection_info(
+    client: AsyncClient,
+) -> None:
+    """I-09/PLT-02: db_pool check.detail에 DSN·호스트·원본 예외가 새면 안 된다."""
+
+    async def _broken_pool() -> _BrokenPool:
+        return _BrokenPool()
+
+    app.dependency_overrides[get_pool] = _broken_pool
+
+    response = await client.get("/readyz")
+
+    assert response.status_code == 503
+    body = response.json()
+    detail = body["checks"]["db_pool"]["detail"]
+    # DSN 관련 키워드가 detail에 섞이지 않아야 함.
+    for keyword in ("user", "password", "localhost", "5432", "asyncpg", "dsn"):
+        assert keyword not in detail.lower(), f"detail에 민감 정보 누출: '{keyword}'"
+
+
+async def test_readyz_with_no_loop_records_returns_200(
+    client: AsyncClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """INVARIANTS.md loop_freshness: 아직 tick 한 번도 안 한 루프는 ready에 영향 없다.
+
+    `loop_health().snapshot()`이 빈 딕셔너리를 반환하면 `_check_loops()`는
+    loop check를 생성하지 않고, db_pool만 남으므로 DB가 정상이면 ready.
+    """
+    from src.core.observability.loop_health import LoopHealth
+
+    empty_health = LoopHealth(clock=_FakeClock())
+    # record_tick() 한 번도 호출하지 않음 → snapshot() == {}
+
+    previous = loop_health()
+    set_loop_health(empty_health)
+    try:
+        response = await client.get("/readyz")
+    finally:
+        set_loop_health(previous)
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["status"] == "ready"
+    # loop 관련 check가 하나도 없어야 함.
+    loop_keys = [k for k in body["checks"] if k.startswith("loop:")]
+    assert loop_keys == []
+
+
+async def test_readyz_returns_both_db_and_loop_failures_in_checks(
+    client: AsyncClient,
+) -> None:
+    """불변식 위반: 여러 check가 동시에 실패해도 status는 'not_ready'여야 하고
+    각 check의 ok 필드가 개별 결과를 반영해야 한다."""
+    clock = _FakeClock()
+    fake_health = LoopHealth(clock=clock)
+    fake_health.record_tick("heartbeat", True, 0.01, interval_sec=10.0)
+    clock.now += 10.0 * 3 + 1.0  # stale
+
+    async def _broken_pool() -> _BrokenPool:
+        return _BrokenPool()
+
+    previous = loop_health()
+    set_loop_health(fake_health)
+    app.dependency_overrides[get_pool] = _broken_pool
+    try:
+        response = await client.get("/readyz")
+    finally:
+        set_loop_health(previous)
+        app.dependency_overrides.pop(get_pool, None)
+
+    assert response.status_code == 503
+    body = response.json()
+    assert body["status"] == "not_ready"
+    # 두 check가 모두 실패로 표시되어야 함.
+    assert body["checks"]["db_pool"]["ok"] is False
+    assert body["checks"]["loop:heartbeat"]["ok"] is False
