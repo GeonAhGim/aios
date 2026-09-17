@@ -126,3 +126,91 @@ async def test_main_process_unresponsive_triggers_apply_watchdog_decision():
     diag = _diag(entry_confirm_seconds=0.0)
     result = await diag.diagnose(check_exchange=_ok, check_db=_ok, main_process_ok_raw=False)
     assert result.diagnosis == Diagnosis.APPLY_WATCHDOG_DECISION
+
+
+# --- negative tests: invariant-violating inputs must be explicitly rejected ---
+
+
+async def test_both_exchange_and_db_fail_yields_apply_watchdog_not_db_isolated():
+    """불변식: DB만 단독 장애일 때만 DB_ISOLATED_FAILURE.
+    거래소+DB 동시 실패는 DB 고립이 아니므로 APPLY_WATCHDOG_DECISION 이어야 한다.
+    """
+    diag = _diag(entry_confirm_seconds=0.0)
+    result = await diag.diagnose(check_exchange=_fail, check_db=_fail, main_process_ok_raw=True)
+    assert result.diagnosis == Diagnosis.APPLY_WATCHDOG_DECISION
+    assert result.exchange_ok is False
+    assert result.db_ok is False
+
+
+async def test_exchange_failure_with_main_process_failure_also_triggers_watchdog():
+    """불변식: exchange가 실패하고 main_process도 실패하면 APPLY_WATCHDOG_DECISION.
+    DB가 살아있어도 exchange+main_process 동시 실패는-watchdog 개입 필요.
+    """
+    diag = _diag(entry_confirm_seconds=0.0)
+    result = await diag.diagnose(check_exchange=_fail, check_db=_ok, main_process_ok_raw=False)
+    assert result.diagnosis == Diagnosis.APPLY_WATCHDOG_DECISION
+    assert result.exchange_ok is False
+
+
+async def test_db_isolated_failure_does_not_mask_as_normal():
+    """불변식: DB가 실패하면 NORMAL이 절대 될 수 없다.
+    exchange와 main_process가 살아있어도 DB 단독 실패는 DB_ISOLATED_FAILURE여야 한다.
+    """
+    diag = _diag(entry_confirm_seconds=0.0)
+    result = await diag.diagnose(check_exchange=_ok, check_db=_fail, main_process_ok_raw=True)
+    assert result.diagnosis != Diagnosis.NORMAL
+    assert result.diagnosis == Diagnosis.DB_ISOLATED_FAILURE
+
+
+# --- failure-injection tests: monkeypatch dependency to raise ---
+
+
+async def test_inject_exchange_check_exception_injected_via_monkeypatch():
+    """실패주입: check_exchange 의존성이 ConnectionError를 유발하면
+    exchange_ok=False로 처리되어야 한다(낙관적 True 취급 금지).
+    """
+    diag = _diag(entry_confirm_seconds=0.0)
+
+    def _injected_failure():
+        raise ConnectionRefusedError("port already in use")
+
+    result = await diag.diagnose(
+        check_exchange=_injected_failure, check_db=_ok, main_process_ok_raw=True
+    )
+    assert result.exchange_ok is False
+    assert result.db_ok is True
+    assert result.diagnosis == Diagnosis.APPLY_WATCHDOG_DECISION
+
+
+async def test_inject_db_check_exception_injected_via_monkeypatch():
+    """실패주입: check_db 의존성이 OSError를 유발하면 db_ok=False.
+    exchange가 살아있으므로 DB_ISOLATED_FAILURE가 되어야 한다.
+    """
+    diag = _diag(entry_confirm_seconds=0.0)
+
+    def _injected_db_failure():
+        raise OSError("disk full")
+
+    result = await diag.diagnose(
+        check_exchange=_ok, check_db=_injected_db_failure, main_process_ok_raw=True
+    )
+    assert result.db_ok is False
+    assert result.exchange_ok is True
+    assert result.diagnosis == Diagnosis.DB_ISOLATED_FAILURE
+
+
+# --- performance assertion: diagnose() must complete within budget ---
+
+
+async def test_diagnose_completes_within_100ms_budget():
+    """성능 단언: diagnose() 호출 하나당 100ms 이내 완료 (budget: ADR-2026-09-09-C).
+    실제 환경에서 폴링 주기와 충돌하지 않도록 충분한 마크업.
+    """
+    import time
+
+    diag = _diag(entry_confirm_seconds=0.0)
+    start = time.perf_counter()
+    for _ in range(100):
+        await diag.diagnose(check_exchange=_ok, check_db=_ok, main_process_ok_raw=True)
+    elapsed_ms = (time.perf_counter() - start) * 1000
+    assert elapsed_ms < 1000, f"100회 diagnose()가 {elapsed_ms:.0f}ms — budget 1초 초과"
