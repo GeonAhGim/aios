@@ -38,6 +38,7 @@ from src.foundation.connections.application.sync_snapshot import (
 from src.foundation.connections.domain.models import (
     CapabilityScope,
     ProviderSnapshot,
+    ScopeProof,
     SnapshotValue,
 )
 from src.foundation.connections.domain.rules import ForbiddenCapabilityScopeError
@@ -347,7 +348,14 @@ class _FixedAsOfProvider:
         self._values = values
 
     async def verify_readonly_scope(self, lease: SecretLease):  # noqa: ANN201
-        raise NotImplementedError
+        return ScopeProof(
+            granted_scopes=(
+                CapabilityScope.READ_BALANCE,
+                CapabilityScope.READ_POSITION,
+                CapabilityScope.READ_ACTIVITY,
+            ),
+            provider_credential_ref="fixed-as-of-test",
+        )
 
     async def fetch_snapshot(self, account_ref: OpaqueRef, as_of: datetime) -> ProviderSnapshot:
         return ProviderSnapshot(
