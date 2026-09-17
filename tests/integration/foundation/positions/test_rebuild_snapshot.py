@@ -14,6 +14,7 @@ from datetime import datetime, timezone
 from decimal import Decimal
 from uuid import UUID, uuid4
 
+import asyncpg
 import pytest
 
 from src.data.models.base import AssetClass, Currency, Money
@@ -543,3 +544,203 @@ async def test_bypassing_position_lock_causes_concurrent_rebuild_conflict_gate_r
         "경합에서 이긴 record_fill이 반영한 값이 실패한 재빌드로 손상되면 안 된다"
     )
     assert snapshot_row["last_journal_seq"] == 1
+
+
+# --- DEEPEN additions: negative / failure-injection tests ---
+
+
+async def test_rebuild_snapshot_journal_list_failure(pool, ports, monkeypatch):
+    """실패주입(DEEPEN) — journal.list_for 가 DB 예외를 던지면 rebuild_snapshot
+    은 트랜잭션 롤백으로 전체 연산을 취소해야 한다. 저널 행 수가 늘지 않고
+    스냅샷도 변하지 않아야 한다."""
+
+    tenant_id, account_id, position_key = await _open(pool)
+    await _fill(
+        pool,
+        ports,
+        tenant_id=tenant_id,
+        account_id=account_id,
+        position_key=position_key,
+        side=OrderSide.BUY,
+        quantity=Decimal("5"),
+        price=Decimal("50"),
+        fill_seq=1,
+        order_id=uuid4(),
+    )
+
+    # Capture pre-state
+    async with pool.acquire() as conn:
+        journal_before = await conn.fetchval(
+            "SELECT count(*) FROM pos_journal WHERE position_key = $1", position_key
+        )
+        qty_before = await conn.fetchval(
+            "SELECT quantity FROM pos_snapshot WHERE position_key = $1", position_key
+        )
+
+    # Monkeypatch journal.list_for to raise
+    async def _raise_list_for(conn, position_key_):
+        raise asyncpg.PostgresError("simulated connection reset")
+
+    monkeypatch.setattr(ports.journal, "list_for", _raise_list_for)
+
+    with pytest.raises(asyncpg.PostgresError):
+        await rebuild_snapshot(
+            position_key,
+            tenant_id=tenant_id,
+            asset_class=AssetClass.CRYPTO,
+            journal=ports.journal,
+            snapshots=ports.snapshots,
+            pool=pool,
+            clock=_clock,
+            dry_run=False,
+        )
+
+    # Verify no side effects — WORM journal untouched, snapshot unchanged
+    async with pool.acquire() as conn:
+        journal_after = await conn.fetchval(
+            "SELECT count(*) FROM pos_journal WHERE position_key = $1", position_key
+        )
+        qty_after = await conn.fetchval(
+            "SELECT quantity FROM pos_snapshot WHERE position_key = $1", position_key
+        )
+    assert journal_after == journal_before, "DB 예외 발생 시 저널 행 수가 늘어나면 안 된다"
+    assert qty_after == qty_before, "DB 예외 발생 시 스냅샷이 변하면 안 된다"
+
+
+async def test_rebuild_snapshot_upsert_failure_isolation(pool, ports, monkeypatch):
+    """실패주입(DEEPEN) — fold 계산은 성공했지만 snapshots.upsert 가 예외를
+    던지는 경우. 트랜잭션이 롤백되어 저널/스냅샷 모두 원상태여야 한다.
+    rebuild_snapshot 자체는 예외를 전파한다."""
+
+    tenant_id, account_id, position_key = await _open(pool)
+    await _fill(
+        pool,
+        ports,
+        tenant_id=tenant_id,
+        account_id=account_id,
+        position_key=position_key,
+        side=OrderSide.BUY,
+        quantity=Decimal("3"),
+        price=Decimal("200"),
+        fill_seq=1,
+        order_id=uuid4(),
+    )
+
+    # Corrupt snapshot so drift exists (triggers upsert path)
+    await force_row_replace(
+        pool,
+        table="pos_snapshot",
+        id_column="position_key",
+        id_value=position_key,
+        quantity=Decimal("0"),
+    )
+
+    # Capture pre-state
+    async with pool.acquire() as conn:
+        qty_before = await conn.fetchval(
+            "SELECT quantity FROM pos_snapshot WHERE position_key = $1", position_key
+        )
+        seq_before = await conn.fetchval(
+            "SELECT last_journal_seq FROM pos_snapshot WHERE position_key = $1", position_key
+        )
+
+    # Monkeypatch upsert to raise
+    async def _raise_upsert(conn, snapshot, expected_seq):
+        raise asyncpg.IntegrityConstraintViolationError(
+            'duplicate key value violates constraint "pos_snapshot_pkey"'
+        )
+
+    monkeypatch.setattr(ports.snapshots, "upsert", _raise_upsert)
+
+    with pytest.raises(asyncpg.IntegrityConstraintViolationError):
+        await rebuild_snapshot(
+            position_key,
+            tenant_id=tenant_id,
+            asset_class=AssetClass.CRYPTO,
+            journal=ports.journal,
+            snapshots=ports.snapshots,
+            pool=pool,
+            clock=_clock,
+            dry_run=False,
+        )
+
+    # Verify rollback: snapshot unchanged despite upsert failure
+    async with pool.acquire() as conn:
+        qty_after = await conn.fetchval(
+            "SELECT quantity FROM pos_snapshot WHERE position_key = $1", position_key
+        )
+        seq_after = await conn.fetchval(
+            "SELECT last_journal_seq FROM pos_snapshot WHERE position_key = $1", position_key
+        )
+    assert qty_after == qty_before, "upsert 실패 시 스냅샷 quantity 가 변하면 안 된다"
+    assert seq_after == seq_before, "upsert 실패 시 last_journal_seq 가 변하면 안 된다"
+
+
+async def test_funding_fee_rebuild_with_fee_applied(pool, ports):
+    """음성 테스트 — 펀딩피가 기록된 포지션에 rebuild_snapshot(dry_run=False)
+    을 호출하면 funding_base drift 가 정확히 보고되고 적용된다.
+    fundings가 fold 에 제대로 반영되는지 검증."""
+    tenant_id, account_id, position_key = await _open(pool)
+    # Buy 10 @ 100
+    await _fill(
+        pool,
+        ports,
+        tenant_id=tenant_id,
+        account_id=account_id,
+        position_key=position_key,
+        side=OrderSide.BUY,
+        quantity=Decimal("10"),
+        price=Decimal("100"),
+        fill_seq=1,
+        order_id=uuid4(),
+    )
+
+    # Record funding fee: positive amount
+    funding_id = str(uuid4())
+    await _funding(
+        pool,
+        ports,
+        tenant_id=tenant_id,
+        account_id=account_id,
+        position_key=position_key,
+        amount=Decimal("5"),
+        funding_id=funding_id,
+    )
+
+    # Now corrupt snapshot's funding_base to create drift
+    await force_row_replace(
+        pool,
+        table="pos_snapshot",
+        id_column="position_key",
+        id_value=position_key,
+        funding_base=Decimal("0"),
+    )
+
+    report = await rebuild_snapshot(
+        position_key,
+        tenant_id=tenant_id,
+        asset_class=AssetClass.CRYPTO,
+        journal=ports.journal,
+        snapshots=ports.snapshots,
+        pool=pool,
+        clock=_clock,
+        dry_run=False,
+    )
+
+    assert report.applied is True
+    assert "funding_base" in report.drift, (
+        "펀팅피가 기록된 포지션에서 funding_base drift 가 없으면 fold 가 펀팅피를 누락한다"
+    )
+    assert report.drift["funding_base"] == (Decimal("0"), Decimal("5")), (
+        "funding_base drift 값이 펀딩피 금액과 일치해야 한다"
+    )
+
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            "SELECT funding_base, last_journal_seq FROM pos_snapshot WHERE position_key = $1",
+            position_key,
+        )
+    assert row["funding_base"] == Decimal("5"), (
+        "rebuild_snapshot 적용 후 funding_base 가 펀딩피 금액으로 고쳐져야 한다"
+    )
+    assert row["last_journal_seq"] == 2, "펀딩피 1건 + 체결 1건 = last_journal_seq 2 여야 한다"
