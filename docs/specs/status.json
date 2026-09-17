@@ -1,18 +1,18 @@
 {
- "refreshed_at": "2026-09-16T17:30:45+00:00",
+ "refreshed_at": "2026-09-17T17:31:56+00:00",
  "specs": [
   {
    "file": "L4_ai_research_strategy_factory_v1.0.md",
    "spec": "ai_research_strategy_factory",
    "total": 23,
-   "done": 12,
-   "inflight": 11,
+   "done": 23,
+   "inflight": 0,
    "untouched": 0,
    "hold": 0,
-   "reopened": 11,
+   "reopened": 1,
    "depth": {
     "D2": 1,
-    "D?": 11
+    "D?": 22
    }
   },
   {
@@ -23,12 +23,12 @@
    "inflight": 3,
    "untouched": 0,
    "hold": 17,
-   "reopened": 8,
+   "reopened": 12,
    "depth": {
     "D1": 1,
-    "D2": 27,
+    "D2": 32,
     "D3": 19,
-    "D?": 40
+    "D?": 35
    }
   },
   {
@@ -39,7 +39,7 @@
    "inflight": 0,
    "untouched": 0,
    "hold": 1,
-   "reopened": 2,
+   "reopened": 0,
    "depth": {
     "D2": 6,
     "D3": 12,
@@ -50,15 +50,15 @@
    "file": "L4_ems_routing_algos_and_tca_v1.0.md",
    "spec": "ems_routing_algos_and_tca",
    "total": 18,
-   "done": 16,
-   "inflight": 2,
+   "done": 17,
+   "inflight": 1,
    "untouched": 0,
    "hold": 0,
-   "reopened": 1,
+   "reopened": 5,
    "depth": {
     "D2": 5,
     "D3": 2,
-    "D?": 9
+    "D?": 10
    }
   },
   {
@@ -69,7 +69,7 @@
    "inflight": 0,
    "untouched": 0,
    "hold": 0,
-   "reopened": 1,
+   "reopened": 2,
    "depth": {
     "D0": 1,
     "D2": 1,
@@ -95,15 +95,15 @@
    "file": "L4_ibor_fund_accounting_and_resilience_v1.0.md",
    "spec": "ibor_fund_accounting_and_resilience",
    "total": 29,
-   "done": 22,
-   "inflight": 7,
+   "done": 27,
+   "inflight": 2,
    "untouched": 0,
    "hold": 0,
-   "reopened": 1,
+   "reopened": 0,
    "depth": {
     "D2": 2,
     "D3": 12,
-    "D?": 8
+    "D?": 13
    }
   },
   {
@@ -114,11 +114,11 @@
    "inflight": 0,
    "untouched": 0,
    "hold": 0,
-   "reopened": 2,
+   "reopened": 6,
    "depth": {
-    "D2": 4,
+    "D2": 5,
     "D3": 5,
-    "D?": 54
+    "D?": 53
    }
   },
   {
@@ -132,38 +132,38 @@
    "reopened": 7,
    "depth": {
     "D1": 2,
-    "D2": 6,
+    "D2": 10,
     "D3": 3,
-    "D?": 31
+    "D?": 27
    }
   },
   {
    "file": "L4_product_experience_and_discovery_v1.0.md",
    "spec": "product_experience_and_discovery",
    "total": 22,
-   "done": 14,
-   "inflight": 8,
+   "done": 20,
+   "inflight": 2,
    "untouched": 0,
    "hold": 0,
-   "reopened": 0,
+   "reopened": 1,
    "depth": {
     "D2": 12,
-    "D?": 2
+    "D?": 8
    }
   },
   {
    "file": "L4_research_data_and_market_ecosystem_v1.0.md",
    "spec": "research_data_and_market_ecosystem",
    "total": 18,
-   "done": 6,
-   "inflight": 12,
+   "done": 16,
+   "inflight": 2,
    "untouched": 0,
    "hold": 0,
-   "reopened": 0,
+   "reopened": 3,
    "depth": {
-    "D2": 2,
+    "D2": 3,
     "D3": 2,
-    "D?": 2
+    "D?": 11
    }
   },
   {
@@ -174,7 +174,7 @@
    "inflight": 0,
    "untouched": 0,
    "hold": 5,
-   "reopened": 2,
+   "reopened": 3,
    "depth": {
     "D3": 27,
     "D?": 26
@@ -184,14 +184,14 @@
    "file": "L4_strategy_portfolio_backtest_v1.0.md",
    "spec": "strategy_portfolio_backtest",
    "total": 46,
-   "done": 38,
-   "inflight": 8,
+   "done": 42,
+   "inflight": 4,
    "untouched": 0,
    "hold": 0,
-   "reopened": 5,
+   "reopened": 15,
    "depth": {
-    "D2": 4,
-    "D?": 34
+    "D2": 14,
+    "D?": 28
    }
   }
  ]
