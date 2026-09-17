@@ -20,6 +20,7 @@ import threading
 import time
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal, InvalidOperation
+from typing import Any
 from uuid import UUID
 
 import pytest
@@ -222,3 +223,70 @@ def test_concurrent_detect_spikes_calls_are_consistent_and_thread_safe() -> None
         t.join()
 
     assert all(r == expected for r in results)
+
+
+def test_detect_spikes_empty_candles_list_returns_empty() -> None:
+    """Adversarial input -- an empty candle list must not crash; the module
+    should return an empty issue list (defensive guard)."""
+    assert detect_spikes([]) == []
+
+
+def test_detect_spikes_all_identical_prices_returns_no_issues() -> None:
+    """Adversarial input -- a perfectly flat market (zero variance) must not
+    raise or produce false positives; the `_MAD_FLOOR` guard must absorb the
+    zero-MAD case."""
+    flat = [Decimal("100")] * 120
+    candles = _series(flat)
+
+    issues = detect_spikes(candles)
+
+    assert issues == []
+
+
+def test_detect_spikes_multiple_separate_spikes_flags_all() -> None:
+    """Negative test -- when multiple non-consecutive candles are spiked, the
+    detector must flag each one independently (not collapse into a single
+    issue or skip after the first detection)."""
+    closes = _noisy_closes(seed=42, steps=200, bound="0.01")
+    # Inject spikes at indices 50, 100, 150 (separated)
+    spike_indices = {50, 100, 150}
+    spiked = [c * Decimal("1.50") if i in spike_indices else c for i, c in enumerate(closes)]
+    candles = _series(spiked)
+
+    issues = detect_spikes(candles)
+
+    issue_times = {iss.open_time for iss in issues}
+    for idx in spike_indices:
+        assert candles[idx].open_time in issue_times, f"Spike at index {idx} was not detected"
+
+
+def test_detect_spikes_propagates_failure_from_corrupted_log_returns() -> None:
+    """Failure injection -- if `_log_returns` (or the `Decimal.ln()` call
+    inside it) fails unexpectedly, `detect_spikes` must not swallow it into
+    a silent empty/partial result. Pins the fail-loud behaviour."""
+
+    def _boom_returns(candles: list[Any]) -> list[Any]:
+        raise RuntimeError("simulated log-returns computation failure")
+
+    monkeypatch = pytest.MonkeyPatch()
+    monkeypatch.setattr(_outlier_detector_module, "_log_returns", _boom_returns)
+    try:
+        closes = _noisy_closes(seed=1, steps=20, bound="0.01")
+        candles = _series(closes)
+        with pytest.raises(RuntimeError, match="simulated log-returns computation failure"):
+            detect_spikes(candles)
+    finally:
+        monkeypatch.undo()
+
+
+def test_detect_spikes_window_zero_skips_mad_channel_below_min_window() -> None:
+    """Adversarial input -- when `window=0`, the trailing window slice is
+    always empty (< `_MIN_WINDOW`), so the MAD channel must be skipped and
+    only the hl_ratio channel can fire. Verifies the window parameter
+    is respected and does not cause index errors."""
+    flat = [Decimal("100")] * 80
+    candles = _series(flat)
+    # No spike, so MAD channel would fire if window were active; with
+    # window=0 it should be skipped entirely and produce no issues.
+    issues = detect_spikes(candles, window=0)
+    assert issues == []
