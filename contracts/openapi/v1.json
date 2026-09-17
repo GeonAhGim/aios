@@ -61,6 +61,96 @@
         "title": "AccountBalance",
         "type": "object"
       },
+      "AccountCashSummary": {
+        "description": "Cash / position market value / unrealized aggregation for one account.",
+        "properties": {
+          "account_id": {
+            "format": "uuid",
+            "title": "Account Id",
+            "type": "string"
+          },
+          "base_currency": {
+            "$ref": "#/components/schemas/Currency"
+          },
+          "cash": {
+            "anyOf": [
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cash"
+          },
+          "closing_nav": {
+            "anyOf": [
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Closing Nav"
+          },
+          "nav_date": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Nav Date"
+          },
+          "open_positions": {
+            "items": {
+              "$ref": "#/components/schemas/PositionSnapshotView"
+            },
+            "title": "Open Positions",
+            "type": "array"
+          },
+          "positions_mv": {
+            "anyOf": [
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Positions Mv"
+          },
+          "schema_version": {
+            "const": "v1",
+            "default": "v1",
+            "title": "Schema Version",
+            "type": "string"
+          },
+          "venue": {
+            "title": "Venue",
+            "type": "string"
+          }
+        },
+        "required": [
+          "account_id",
+          "venue",
+          "base_currency",
+          "nav_date",
+          "cash",
+          "positions_mv",
+          "closing_nav",
+          "open_positions"
+        ],
+        "title": "AccountCashSummary",
+        "type": "object"
+      },
       "AccountConnectionView": {
         "description": "74번 §4 \"returns masked provider/account label, allowed capability,\nstate, last successful sync, freshness\" — provider access token/secret은\n필드 자체가 존재하지 않는다(반환할 수 있는 게 없음).",
         "properties": {
@@ -175,6 +265,36 @@
         "title": "AccountSnapshotView",
         "type": "object"
       },
+      "AccountsSummaryResponse": {
+        "properties": {
+          "accounts": {
+            "items": {
+              "$ref": "#/components/schemas/AccountCashSummary"
+            },
+            "title": "Accounts",
+            "type": "array"
+          },
+          "schema_version": {
+            "const": "v1",
+            "default": "v1",
+            "title": "Schema Version",
+            "type": "string"
+          },
+          "totals": {
+            "items": {
+              "$ref": "#/components/schemas/CurrencyTotal"
+            },
+            "title": "Totals",
+            "type": "array"
+          }
+        },
+        "required": [
+          "accounts",
+          "totals"
+        ],
+        "title": "AccountsSummaryResponse",
+        "type": "object"
+      },
       "ActivateRevisionRequest": {
         "description": "password/totp_code가 있으면 라우터가 reauthenticate()를 호출해 material\nchange 게이트(activate_revision.py)를 통과시킨다 — 없으면\nreauthenticated=False로 넘겨 non-material 변경만 허용한다.",
         "properties": {
@@ -257,6 +377,82 @@
           "dividends"
         ],
         "title": "AdjustmentsConfig",
+        "type": "object"
+      },
+      "AgentTokenListResponse": {
+        "properties": {
+          "tokens": {
+            "items": {
+              "$ref": "#/components/schemas/AgentTokenView"
+            },
+            "title": "Tokens",
+            "type": "array"
+          }
+        },
+        "required": [
+          "tokens"
+        ],
+        "title": "AgentTokenListResponse",
+        "type": "object"
+      },
+      "AgentTokenView": {
+        "properties": {
+          "allow_instruments": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Allow Instruments",
+            "type": "array"
+          },
+          "expires_at": {
+            "format": "date-time",
+            "title": "Expires At",
+            "type": "string"
+          },
+          "notional_cap": {
+            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+            "title": "Notional Cap",
+            "type": "string"
+          },
+          "paper_only": {
+            "title": "Paper Only",
+            "type": "boolean"
+          },
+          "revoked_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Revoked At"
+          },
+          "scopes": {
+            "items": {
+              "$ref": "#/components/schemas/Scope"
+            },
+            "title": "Scopes",
+            "type": "array"
+          },
+          "token_id": {
+            "format": "uuid",
+            "title": "Token Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "token_id",
+          "scopes",
+          "allow_instruments",
+          "notional_cap",
+          "expires_at",
+          "paper_only",
+          "revoked_at"
+        ],
+        "title": "AgentTokenView",
         "type": "object"
       },
       "AlertCreateRequest": {
@@ -344,6 +540,54 @@
           "meta"
         ],
         "title": "ApiResponse[AccountSnapshotView]",
+        "type": "object"
+      },
+      "ApiResponse_AccountsSummaryResponse_": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/AccountsSummaryResponse"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/Meta"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "title": "ApiResponse[AccountsSummaryResponse]",
+        "type": "object"
+      },
+      "ApiResponse_AgentTokenListResponse_": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/AgentTokenListResponse"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/Meta"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "title": "ApiResponse[AgentTokenListResponse]",
+        "type": "object"
+      },
+      "ApiResponse_AgentTokenView_": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/AgentTokenView"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/Meta"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "title": "ApiResponse[AgentTokenView]",
         "type": "object"
       },
       "ApiResponse_ApprovalRequest_": {
@@ -442,6 +686,22 @@
         "title": "ApiResponse[CandleSeriesView]",
         "type": "object"
       },
+      "ApiResponse_ChartIndicatorTemplateView_": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/ChartIndicatorTemplateView"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/Meta"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "title": "ApiResponse[ChartIndicatorTemplateView]",
+        "type": "object"
+      },
       "ApiResponse_ChartLayoutView_": {
         "properties": {
           "data": {
@@ -474,6 +734,22 @@
         "title": "ApiResponse[CompileScriptView]",
         "type": "object"
       },
+      "ApiResponse_ComplianceDecision_": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/ComplianceDecision"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/Meta"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "title": "ApiResponse[ComplianceDecision]",
+        "type": "object"
+      },
       "ApiResponse_ConnectionListResponse_": {
         "properties": {
           "data": {
@@ -504,6 +780,22 @@
           "meta"
         ],
         "title": "ApiResponse[ConsentDecision]",
+        "type": "object"
+      },
+      "ApiResponse_DailyReportView_": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/DailyReportView"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/Meta"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "title": "ApiResponse[DailyReportView]",
         "type": "object"
       },
       "ApiResponse_DeletionResponse_": {
@@ -586,6 +878,70 @@
         "title": "ApiResponse[DrawingsDocumentView]",
         "type": "object"
       },
+      "ApiResponse_Experiment_": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/Experiment"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/Meta"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "title": "ApiResponse[Experiment]",
+        "type": "object"
+      },
+      "ApiResponse_ExplainBacktestView_": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/ExplainBacktestView"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/Meta"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "title": "ApiResponse[ExplainBacktestView]",
+        "type": "object"
+      },
+      "ApiResponse_ExplainScriptView_": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/ExplainScriptView"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/Meta"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "title": "ApiResponse[ExplainScriptView]",
+        "type": "object"
+      },
+      "ApiResponse_GenerateScriptView_": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/GenerateScriptView"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/Meta"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "title": "ApiResponse[GenerateScriptView]",
+        "type": "object"
+      },
       "ApiResponse_IndicatorListView_": {
         "properties": {
           "data": {
@@ -616,6 +972,38 @@
           "meta"
         ],
         "title": "ApiResponse[InstrumentListView]",
+        "type": "object"
+      },
+      "ApiResponse_IssuedAgentTokenView_": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/IssuedAgentTokenView"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/Meta"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "title": "ApiResponse[IssuedAgentTokenView]",
+        "type": "object"
+      },
+      "ApiResponse_KillSwitchView_": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/KillSwitchView"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/Meta"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "title": "ApiResponse[KillSwitchView]",
         "type": "object"
       },
       "ApiResponse_ListingResponse_": {
@@ -778,6 +1166,22 @@
         "title": "ApiResponse[PerformanceStatementView]",
         "type": "object"
       },
+      "ApiResponse_PersonalRiskBundleView_": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/PersonalRiskBundleView"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/Meta"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "title": "ApiResponse[PersonalRiskBundleView]",
+        "type": "object"
+      },
       "ApiResponse_PolicyDecisionView_": {
         "properties": {
           "data": {
@@ -826,10 +1230,42 @@
         "title": "ApiResponse[PositionListResponse]",
         "type": "object"
       },
+      "ApiResponse_PromotionChecklistView_": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/PromotionChecklistView"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/Meta"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "title": "ApiResponse[PromotionChecklistView]",
+        "type": "object"
+      },
+      "ApiResponse_ProposalListResponse_": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/ProposalListResponse"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/Meta"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "title": "ApiResponse[ProposalListResponse]",
+        "type": "object"
+      },
       "ApiResponse_QuickBacktestResultView_": {
         "properties": {
           "data": {
-            "$ref": "#/components/schemas/QuickBacktestResultView"
+            "$ref": "#/components/schemas/QuickBacktestResultView-Output"
           },
           "meta": {
             "$ref": "#/components/schemas/Meta"
@@ -1000,6 +1436,22 @@
           "meta"
         ],
         "title": "ApiResponse[SellerSuspensionResult]",
+        "type": "object"
+      },
+      "ApiResponse_StrategyProposal_": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/StrategyProposal"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/Meta"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "title": "ApiResponse[StrategyProposal]",
         "type": "object"
       },
       "ApiResponse_TokenPairResponse_": {
@@ -1210,6 +1662,26 @@
         "title": "ApiResponse[list[ApprovalRequest]]",
         "type": "object"
       },
+      "ApiResponse_list_ChartIndicatorTemplateView__": {
+        "properties": {
+          "data": {
+            "items": {
+              "$ref": "#/components/schemas/ChartIndicatorTemplateView"
+            },
+            "title": "Data",
+            "type": "array"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/Meta"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "title": "ApiResponse[list[ChartIndicatorTemplateView]]",
+        "type": "object"
+      },
       "ApiResponse_list_ChartLayoutView__": {
         "properties": {
           "data": {
@@ -1230,6 +1702,26 @@
         "title": "ApiResponse[list[ChartLayoutView]]",
         "type": "object"
       },
+      "ApiResponse_list_CoverageSpan__": {
+        "properties": {
+          "data": {
+            "items": {
+              "$ref": "#/components/schemas/CoverageSpan"
+            },
+            "title": "Data",
+            "type": "array"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/Meta"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "title": "ApiResponse[list[CoverageSpan]]",
+        "type": "object"
+      },
       "ApiResponse_list_DisputeSummary__": {
         "properties": {
           "data": {
@@ -1248,6 +1740,26 @@
           "meta"
         ],
         "title": "ApiResponse[list[DisputeSummary]]",
+        "type": "object"
+      },
+      "ApiResponse_list_Experiment__": {
+        "properties": {
+          "data": {
+            "items": {
+              "$ref": "#/components/schemas/Experiment"
+            },
+            "title": "Data",
+            "type": "array"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/Meta"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "title": "ApiResponse[list[Experiment]]",
         "type": "object"
       },
       "ApiResponse_list_QueuedListing__": {
@@ -2253,6 +2765,66 @@
         "title": "CapabilityScope",
         "type": "string"
       },
+      "ChartIndicatorTemplateView": {
+        "description": "`template` is CH-17a `templateModel.ts`'s `Template`\n(`encodeTemplate()` output) as-is — this contract does not remodel its\ninternals either (same principle as `layout_state`, see the file's\ntop-level docstring).",
+        "properties": {
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "owner_subject_id": {
+            "format": "uuid",
+            "title": "Owner Subject Id",
+            "type": "string"
+          },
+          "revision": {
+            "title": "Revision",
+            "type": "integer"
+          },
+          "schema_version": {
+            "default": "v1",
+            "title": "Schema Version",
+            "type": "string"
+          },
+          "template": {
+            "additionalProperties": true,
+            "title": "Template",
+            "type": "object"
+          },
+          "tenant_id": {
+            "format": "uuid",
+            "title": "Tenant Id",
+            "type": "string"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "title": "Updated At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "tenant_id",
+          "owner_subject_id",
+          "name",
+          "template",
+          "revision",
+          "created_at",
+          "updated_at"
+        ],
+        "title": "ChartIndicatorTemplateView",
+        "type": "object"
+      },
       "ChartLayoutView": {
         "properties": {
           "created_at": {
@@ -2310,6 +2882,39 @@
           "updated_at"
         ],
         "title": "ChartLayoutView",
+        "type": "object"
+      },
+      "CompileErrorView": {
+        "properties": {
+          "code": {
+            "title": "Code",
+            "type": "string"
+          },
+          "col": {
+            "title": "Col",
+            "type": "integer"
+          },
+          "line": {
+            "title": "Line",
+            "type": "integer"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          },
+          "suggestion": {
+            "title": "Suggestion",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "message",
+          "line",
+          "col",
+          "suggestion"
+        ],
+        "title": "CompileErrorView",
         "type": "object"
       },
       "CompileScriptRequest": {
@@ -2373,6 +2978,63 @@
         ],
         "title": "CompileScriptView",
         "type": "object"
+      },
+      "ComplianceDecision": {
+        "description": "L4_compliance_and_regulatory_v1.0.md §3/§9 CM-1.\n\nMaps 1:1 onto the existing `policy_decision` row — CM-1 explicitly\nforbids a new table (§9 CM-1 decision note), so every field here is\nderivable from `policy_decision`/`policy_bundle` columns that already\nexist. See `compliance_decision_from_policy_decision` below for the\nmapping.\n\n`frozen=True` mirrors `core/risk/decision.RiskDecision` (I-09's other\nauthority): a compliance verdict must not be tamperable in memory after\nthe mapper returns it — flipping `.verdict` from DENY to ALLOW downstream\nmust be a `ValidationError`, not a silent attribute assignment.",
+        "properties": {
+          "bundle_version": {
+            "title": "Bundle Version",
+            "type": "string"
+          },
+          "decision_id": {
+            "format": "uuid",
+            "title": "Decision Id",
+            "type": "string"
+          },
+          "evaluated_at": {
+            "format": "date-time",
+            "title": "Evaluated At",
+            "type": "string"
+          },
+          "inputs_hash": {
+            "title": "Inputs Hash",
+            "type": "string"
+          },
+          "rule_hits": {
+            "items": {
+              "$ref": "#/components/schemas/RuleHit"
+            },
+            "title": "Rule Hits",
+            "type": "array"
+          },
+          "schema_version": {
+            "default": "v1",
+            "title": "Schema Version",
+            "type": "string"
+          },
+          "verdict": {
+            "$ref": "#/components/schemas/ComplianceVerdict"
+          }
+        },
+        "required": [
+          "decision_id",
+          "verdict",
+          "rule_hits",
+          "inputs_hash",
+          "bundle_version",
+          "evaluated_at"
+        ],
+        "title": "ComplianceDecision",
+        "type": "object"
+      },
+      "ComplianceVerdict": {
+        "enum": [
+          "ALLOW",
+          "WARN",
+          "DENY"
+        ],
+        "title": "ComplianceVerdict",
+        "type": "string"
       },
       "ComponentBreakdown": {
         "description": "§3.4 회계 항등식(domain/identity.py)의 입력이자 출력 —\n`gross_pnl - fees - slippage - funding ± fx - estimated_tax = net_pnl`.",
@@ -2636,12 +3298,16 @@
           "borrow_apr": {
             "anyOf": [
               {
-                "minimum": 0.0,
-                "type": "number"
-              },
-              {
-                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
-                "type": "string"
+                "anyOf": [
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                    "type": "string"
+                  }
+                ],
+                "ge": 0
               },
               {
                 "type": "null"
@@ -2658,6 +3324,75 @@
           "funding"
         ],
         "title": "CostsConfig",
+        "type": "object"
+      },
+      "CoverageSpan": {
+        "description": "`[start_at, end_at)` 반개구간(half-open) — `end_at`은 배타적 상한.\n\n같은 (instrument_id, venue, asset_class, timeframe, quality_grade) 축\n안에서 두 span이 겹치는 것은 DB EXCLUDE 제약(§4.1)이 거부하는\n상태다 — `domain/coverage/registry.py`의 병합을 거치지 않은 원본\n선언 목록에는 일시적으로 존재할 수 있지만, 저장 직전에는 반드시\n병합돼야 한다.",
+        "properties": {
+          "asset_class": {
+            "$ref": "#/components/schemas/AssetClass"
+          },
+          "end_at": {
+            "format": "date-time",
+            "title": "End At",
+            "type": "string"
+          },
+          "instrument_id": {
+            "title": "Instrument Id",
+            "type": "string"
+          },
+          "quality_grade": {
+            "$ref": "#/components/schemas/QualityGrade"
+          },
+          "schema_version": {
+            "const": "coverage-v2",
+            "default": "coverage-v2",
+            "title": "Schema Version",
+            "type": "string"
+          },
+          "start_at": {
+            "format": "date-time",
+            "title": "Start At",
+            "type": "string"
+          },
+          "timeframe": {
+            "$ref": "#/components/schemas/Timeframe"
+          },
+          "venue": {
+            "$ref": "#/components/schemas/Venue"
+          }
+        },
+        "required": [
+          "instrument_id",
+          "venue",
+          "asset_class",
+          "timeframe",
+          "quality_grade",
+          "start_at",
+          "end_at"
+        ],
+        "title": "CoverageSpan",
+        "type": "object"
+      },
+      "CreateChartIndicatorTemplateRequest": {
+        "properties": {
+          "name": {
+            "maxLength": 120,
+            "minLength": 1,
+            "title": "Name",
+            "type": "string"
+          },
+          "template": {
+            "additionalProperties": true,
+            "title": "Template",
+            "type": "object"
+          }
+        },
+        "required": [
+          "name",
+          "template"
+        ],
+        "title": "CreateChartIndicatorTemplateRequest",
         "type": "object"
       },
       "CreateChartLayoutRequest": {
@@ -2784,6 +3519,43 @@
         "title": "Currency",
         "type": "string"
       },
+      "CurrencyTotal": {
+        "description": "Account totals grouped by one currency (exact Decimal sum, same-currency only).",
+        "properties": {
+          "base_currency": {
+            "$ref": "#/components/schemas/Currency"
+          },
+          "cash": {
+            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+            "title": "Cash",
+            "type": "string"
+          },
+          "closing_nav": {
+            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+            "title": "Closing Nav",
+            "type": "string"
+          },
+          "positions_mv": {
+            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+            "title": "Positions Mv",
+            "type": "string"
+          },
+          "schema_version": {
+            "const": "v1",
+            "default": "v1",
+            "title": "Schema Version",
+            "type": "string"
+          }
+        },
+        "required": [
+          "base_currency",
+          "cash",
+          "positions_mv",
+          "closing_nav"
+        ],
+        "title": "CurrencyTotal",
+        "type": "object"
+      },
       "DailyPnL": {
         "properties": {
           "cumulative_pnl": {
@@ -2808,6 +3580,84 @@
           "cumulative_pnl"
         ],
         "title": "DailyPnL",
+        "type": "object"
+      },
+      "DailyReportView": {
+        "properties": {
+          "fill_count": {
+            "title": "Fill Count",
+            "type": "integer"
+          },
+          "realized_pnl_krw": {
+            "title": "Realized Pnl Krw",
+            "type": "number"
+          },
+          "report_date": {
+            "title": "Report Date",
+            "type": "string"
+          },
+          "schema_version": {
+            "default": "v1",
+            "title": "Schema Version",
+            "type": "string"
+          },
+          "violation_count": {
+            "title": "Violation Count",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "report_date",
+          "realized_pnl_krw",
+          "fill_count",
+          "violation_count"
+        ],
+        "title": "DailyReportView",
+        "type": "object"
+      },
+      "DataScope": {
+        "description": "§2.3 AI-8 row verbatim: `data_scope{instruments, tf, span}`.\n\n`instruments` is a set of instrument identifiers, the same\n`frozenset[str]` shape as `AgentToken.allow_instruments`\n(gateway/contracts/v1.py) -- both are opaque identifier strings compared\nfor equality against `CoverageSpan.instrument_id`\n(market_data/contracts/v2/coverage.py), not resolved to a full\n`Instrument` record here (that resolution, if needed, is an application\nconcern). `span` is a half-open `[start, end)` pair, matching\n`CoverageSpan`'s own half-open convention so \"data scope within\ncoverage\" (`domain/proposal_rules.py::check_data_scope_covered`) is a\nplain interval-containment check.",
+        "properties": {
+          "instruments": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Instruments",
+            "type": "array",
+            "uniqueItems": true
+          },
+          "schema_version": {
+            "const": "v1",
+            "default": "v1",
+            "title": "Schema Version",
+            "type": "string"
+          },
+          "span": {
+            "maxItems": 2,
+            "minItems": 2,
+            "prefixItems": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "format": "date-time",
+                "type": "string"
+              }
+            ],
+            "title": "Span",
+            "type": "array"
+          },
+          "tf": {
+            "$ref": "#/components/schemas/Timeframe"
+          }
+        },
+        "required": [
+          "instruments",
+          "tf",
+          "span"
+        ],
+        "title": "DataScope",
         "type": "object"
       },
       "DeletionRequest": {
@@ -3588,6 +4438,205 @@
         "title": "ExecutionResponse",
         "type": "object"
       },
+      "Experiment": {
+        "description": "§2.4 AI-10 row verbatim field list, plus `tenant_id`/`created_at`\n(persistence metadata every foundation aggregate carries -- not spec-\nnamed, but required by the WORM table's tenant isolation and insertion-\norder columns).",
+        "properties": {
+          "artifacts": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Artifacts",
+            "type": "array"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "created_by": {
+            "format": "uuid",
+            "title": "Created By",
+            "type": "string"
+          },
+          "experiment_id": {
+            "format": "uuid",
+            "title": "Experiment Id",
+            "type": "string"
+          },
+          "inputs_hash": {
+            "title": "Inputs Hash",
+            "type": "string"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/ExperimentKind"
+          },
+          "metrics": {
+            "additionalProperties": true,
+            "default": {},
+            "title": "Metrics",
+            "type": "object"
+          },
+          "parent_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Parent Id"
+          },
+          "reproducibility_key": {
+            "title": "Reproducibility Key",
+            "type": "string"
+          },
+          "schema_version": {
+            "const": "v1",
+            "default": "v1",
+            "title": "Schema Version",
+            "type": "string"
+          },
+          "tenant_id": {
+            "format": "uuid",
+            "title": "Tenant Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "experiment_id",
+          "tenant_id",
+          "reproducibility_key",
+          "kind",
+          "inputs_hash",
+          "created_by",
+          "created_at"
+        ],
+        "title": "Experiment",
+        "type": "object"
+      },
+      "ExperimentKind": {
+        "enum": [
+          "backtest",
+          "sweep",
+          "walk_forward",
+          "paper"
+        ],
+        "title": "ExperimentKind",
+        "type": "string"
+      },
+      "ExplainBacktestRequest": {
+        "properties": {
+          "question": {
+            "anyOf": [
+              {
+                "maxLength": 2000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Question"
+          },
+          "result": {
+            "$ref": "#/components/schemas/QuickBacktestResultView-Input"
+          }
+        },
+        "required": [
+          "result"
+        ],
+        "title": "ExplainBacktestRequest",
+        "type": "object"
+      },
+      "ExplainBacktestView": {
+        "properties": {
+          "ignored_snippets": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Ignored Snippets",
+            "type": "array"
+          },
+          "injected_instruction_ignored": {
+            "title": "Injected Instruction Ignored",
+            "type": "boolean"
+          },
+          "narrative": {
+            "title": "Narrative",
+            "type": "string"
+          }
+        },
+        "required": [
+          "narrative",
+          "injected_instruction_ignored",
+          "ignored_snippets"
+        ],
+        "title": "ExplainBacktestView",
+        "type": "object"
+      },
+      "ExplainScriptRequest": {
+        "properties": {
+          "source": {
+            "maxLength": 64000,
+            "minLength": 1,
+            "title": "Source",
+            "type": "string"
+          }
+        },
+        "required": [
+          "source"
+        ],
+        "title": "ExplainScriptRequest",
+        "type": "object"
+      },
+      "ExplainScriptView": {
+        "properties": {
+          "error": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CompileErrorView"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "explanation": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Explanation"
+          },
+          "script_hash": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Script Hash"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "status"
+        ],
+        "title": "ExplainScriptView",
+        "type": "object"
+      },
       "FXRate": {
         "description": "환율 스냅샷. 8.1-A 다중소스 교차검증과 동일한 원칙 적용 대상.",
         "properties": {
@@ -3622,7 +4671,92 @@
         "title": "FXRate",
         "type": "object"
       },
-      "FillView": {
+      "FillView-Input": {
+        "properties": {
+          "bar_index": {
+            "title": "Bar Index",
+            "type": "integer"
+          },
+          "commission": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                "type": "string"
+              }
+            ],
+            "title": "Commission"
+          },
+          "open_time": {
+            "format": "date-time",
+            "title": "Open Time",
+            "type": "string"
+          },
+          "order_type": {
+            "enum": [
+              "market",
+              "limit",
+              "stop"
+            ],
+            "title": "Order Type",
+            "type": "string"
+          },
+          "price": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                "type": "string"
+              }
+            ],
+            "title": "Price"
+          },
+          "quantity": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                "type": "string"
+              }
+            ],
+            "title": "Quantity"
+          },
+          "remaining_quantity": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                "type": "string"
+              }
+            ],
+            "title": "Remaining Quantity"
+          },
+          "side": {
+            "$ref": "#/components/schemas/OrderSide"
+          }
+        },
+        "required": [
+          "bar_index",
+          "open_time",
+          "side",
+          "order_type",
+          "quantity",
+          "price",
+          "commission",
+          "remaining_quantity"
+        ],
+        "title": "FillView",
+        "type": "object"
+      },
+      "FillView-Output": {
         "properties": {
           "bar_index": {
             "title": "Bar Index",
@@ -3685,7 +4819,6 @@
           "bps": {
             "anyOf": [
               {
-                "minimum": 0.0,
                 "type": "number"
               },
               {
@@ -3693,6 +4826,7 @@
                 "type": "string"
               }
             ],
+            "ge": 0,
             "title": "Bps"
           },
           "kind": {
@@ -3720,6 +4854,72 @@
         ],
         "title": "GateKind",
         "type": "string"
+      },
+      "GenerateScriptRequest": {
+        "properties": {
+          "prompt": {
+            "maxLength": 4000,
+            "minLength": 1,
+            "title": "Prompt",
+            "type": "string"
+          }
+        },
+        "required": [
+          "prompt"
+        ],
+        "title": "GenerateScriptRequest",
+        "type": "object"
+      },
+      "GenerateScriptView": {
+        "properties": {
+          "error": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CompileErrorView"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "ignored_snippets": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Ignored Snippets",
+            "type": "array"
+          },
+          "injected_instruction_ignored": {
+            "title": "Injected Instruction Ignored",
+            "type": "boolean"
+          },
+          "script": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CompileScriptView"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "source": {
+            "title": "Source",
+            "type": "string"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "status",
+          "source",
+          "injected_instruction_ignored",
+          "ignored_snippets"
+        ],
+        "title": "GenerateScriptView",
+        "type": "object"
       },
       "GeneratedConditions": {
         "properties": {
@@ -4101,6 +5301,115 @@
         "title": "InvestmentGoal",
         "type": "string"
       },
+      "IssueAgentTokenRequest": {
+        "properties": {
+          "allow_instruments": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Allow Instruments",
+            "type": "array"
+          },
+          "notional_cap": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                "type": "string"
+              }
+            ],
+            "title": "Notional Cap"
+          },
+          "scopes": {
+            "items": {
+              "$ref": "#/components/schemas/Scope"
+            },
+            "title": "Scopes",
+            "type": "array"
+          },
+          "ttl_seconds": {
+            "exclusiveMinimum": 0.0,
+            "maximum": 2592000.0,
+            "title": "Ttl Seconds",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "scopes",
+          "notional_cap",
+          "ttl_seconds"
+        ],
+        "title": "IssueAgentTokenRequest",
+        "type": "object"
+      },
+      "IssuedAgentTokenView": {
+        "properties": {
+          "allow_instruments": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Allow Instruments",
+            "type": "array"
+          },
+          "expires_at": {
+            "format": "date-time",
+            "title": "Expires At",
+            "type": "string"
+          },
+          "notional_cap": {
+            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+            "title": "Notional Cap",
+            "type": "string"
+          },
+          "paper_only": {
+            "title": "Paper Only",
+            "type": "boolean"
+          },
+          "revoked_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Revoked At"
+          },
+          "scopes": {
+            "items": {
+              "$ref": "#/components/schemas/Scope"
+            },
+            "title": "Scopes",
+            "type": "array"
+          },
+          "secret": {
+            "title": "Secret",
+            "type": "string"
+          },
+          "token_id": {
+            "format": "uuid",
+            "title": "Token Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "token_id",
+          "scopes",
+          "allow_instruments",
+          "notional_cap",
+          "expires_at",
+          "paper_only",
+          "revoked_at",
+          "secret"
+        ],
+        "title": "IssuedAgentTokenView",
+        "type": "object"
+      },
       "JournalEntryType": {
         "enum": [
           "FILL",
@@ -4111,6 +5420,35 @@
         ],
         "title": "JournalEntryType",
         "type": "string"
+      },
+      "KillSwitchView": {
+        "properties": {
+          "engaged": {
+            "title": "Engaged",
+            "type": "boolean"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          },
+          "schema_version": {
+            "default": "v1",
+            "title": "Schema Version",
+            "type": "string"
+          }
+        },
+        "required": [
+          "engaged"
+        ],
+        "title": "KillSwitchView",
+        "type": "object"
       },
       "LiquidityNeed": {
         "enum": [
@@ -5177,8 +6515,6 @@
           "max_participation_pct": {
             "anyOf": [
               {
-                "exclusiveMinimum": 0.0,
-                "maximum": 1.0,
                 "type": "number"
               },
               {
@@ -5186,6 +6522,8 @@
                 "type": "string"
               }
             ],
+            "gt": 0,
+            "le": 1,
             "title": "Max Participation Pct"
           }
         },
@@ -5297,7 +6635,6 @@
           "pct": {
             "anyOf": [
               {
-                "minimum": 0.0,
                 "type": "number"
               },
               {
@@ -5305,6 +6642,7 @@
                 "type": "string"
               }
             ],
+            "ge": 0,
             "title": "Pct"
           }
         },
@@ -5517,6 +6855,52 @@
           "evidence_refs"
         ],
         "title": "PerformanceStatementView",
+        "type": "object"
+      },
+      "PersonalRiskBundleView": {
+        "properties": {
+          "daily_loss_kill_pct": {
+            "title": "Daily Loss Kill Pct",
+            "type": "number"
+          },
+          "default_notional_cap_krw": {
+            "title": "Default Notional Cap Krw",
+            "type": "number"
+          },
+          "max_exposure_pct": {
+            "title": "Max Exposure Pct",
+            "type": "number"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "position_pct_of_equity": {
+            "title": "Position Pct Of Equity",
+            "type": "number"
+          },
+          "schema_version": {
+            "default": "v1",
+            "title": "Schema Version",
+            "type": "string"
+          },
+          "symbol_whitelist": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Symbol Whitelist",
+            "type": "array"
+          }
+        },
+        "required": [
+          "name",
+          "position_pct_of_equity",
+          "daily_loss_kill_pct",
+          "max_exposure_pct",
+          "default_notional_cap_krw",
+          "symbol_whitelist"
+        ],
+        "title": "PersonalRiskBundleView",
         "type": "object"
       },
       "PlatformListingCreateRequest": {
@@ -6504,6 +7888,47 @@
         "title": "PriceAlert",
         "type": "object"
       },
+      "PromotionChecklistView": {
+        "properties": {
+          "blockers": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Blockers",
+            "type": "array"
+          },
+          "eligible": {
+            "title": "Eligible",
+            "type": "boolean"
+          },
+          "min_paper_days": {
+            "title": "Min Paper Days",
+            "type": "integer"
+          },
+          "paper_days_elapsed": {
+            "title": "Paper Days Elapsed",
+            "type": "integer"
+          },
+          "paper_violation_count": {
+            "title": "Paper Violation Count",
+            "type": "integer"
+          },
+          "schema_version": {
+            "default": "v1",
+            "title": "Schema Version",
+            "type": "string"
+          }
+        },
+        "required": [
+          "eligible",
+          "blockers",
+          "min_paper_days",
+          "paper_days_elapsed",
+          "paper_violation_count"
+        ],
+        "title": "PromotionChecklistView",
+        "type": "object"
+      },
       "PromptGenerateRequest": {
         "properties": {
           "prompt": {
@@ -6516,6 +7941,33 @@
         ],
         "title": "PromptGenerateRequest",
         "type": "object"
+      },
+      "ProposalListResponse": {
+        "properties": {
+          "proposals": {
+            "items": {
+              "$ref": "#/components/schemas/StrategyProposal"
+            },
+            "title": "Proposals",
+            "type": "array"
+          }
+        },
+        "required": [
+          "proposals"
+        ],
+        "title": "ProposalListResponse",
+        "type": "object"
+      },
+      "ProviderRef": {
+        "description": "Which channel produced the proposal -- §2.2's four adapters\n(anthropic_provider/openai_compatible_provider/gemini_provider) plus the\nnon-adapter \"proposal channel\" (external_agent_provider: any MCP client,\ne.g. Claude Code/Codex CLI/Gemini CLI, attached with an agent token).\nNot a `ModelProvider` -- §2.2 states the pipeline is complete even\nwithout a built-in model.",
+        "enum": [
+          "anthropic",
+          "openai_compatible",
+          "gemini",
+          "external_agent"
+        ],
+        "title": "ProviderRef",
+        "type": "string"
       },
       "PurchaseCreateRequest": {
         "properties": {
@@ -6612,6 +8064,16 @@
         ],
         "title": "PutDrawingsRequest",
         "type": "object"
+      },
+      "QualityGrade": {
+        "description": "선언된 커버리지 구간의 신뢰 등급. 미검증: 거래소·벤더별 실제 등급\n구분 기준은 외부 계약서에 근거하지 않았다 — 이 3단계는 이 프로젝트가\n자체 정의한 내부 등급이다.",
+        "enum": [
+          "RAW",
+          "VALIDATED",
+          "GOLD"
+        ],
+        "title": "QualityGrade",
+        "type": "string"
       },
       "QueuedListing": {
         "properties": {
@@ -6764,7 +8226,122 @@
         "title": "QuickBacktestRequest",
         "type": "object"
       },
-      "QuickBacktestResultView": {
+      "QuickBacktestResultView-Input": {
+        "properties": {
+          "bars": {
+            "title": "Bars",
+            "type": "integer"
+          },
+          "borrow_cost": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                "type": "string"
+              }
+            ],
+            "title": "Borrow Cost"
+          },
+          "cash": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                "type": "string"
+              }
+            ],
+            "title": "Cash"
+          },
+          "equity_curve": {
+            "items": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                  "type": "string"
+                }
+              ]
+            },
+            "title": "Equity Curve",
+            "type": "array"
+          },
+          "expired_orders": {
+            "title": "Expired Orders",
+            "type": "integer"
+          },
+          "fills": {
+            "items": {
+              "$ref": "#/components/schemas/FillView-Input"
+            },
+            "title": "Fills",
+            "type": "array"
+          },
+          "final_equity": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                "type": "string"
+              }
+            ],
+            "title": "Final Equity"
+          },
+          "funding_cost": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                "type": "string"
+              }
+            ],
+            "title": "Funding Cost"
+          },
+          "position_quantity": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                "type": "string"
+              }
+            ],
+            "title": "Position Quantity"
+          },
+          "warnings": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Warnings",
+            "type": "array"
+          }
+        },
+        "required": [
+          "fills",
+          "equity_curve",
+          "final_equity",
+          "cash",
+          "position_quantity",
+          "funding_cost",
+          "borrow_cost",
+          "bars",
+          "expired_orders",
+          "warnings"
+        ],
+        "title": "QuickBacktestResultView",
+        "type": "object"
+      },
+      "QuickBacktestResultView-Output": {
         "properties": {
           "bars": {
             "title": "Bars",
@@ -6794,7 +8371,7 @@
           },
           "fills": {
             "items": {
-              "$ref": "#/components/schemas/FillView"
+              "$ref": "#/components/schemas/FillView-Output"
             },
             "title": "Fills",
             "type": "array"
@@ -7605,6 +9182,21 @@
         "title": "ReviewResponse",
         "type": "object"
       },
+      "RevokeAgentTokenRequest": {
+        "properties": {
+          "reason": {
+            "maxLength": 50,
+            "minLength": 1,
+            "title": "Reason",
+            "type": "string"
+          }
+        },
+        "required": [
+          "reason"
+        ],
+        "title": "RevokeAgentTokenRequest",
+        "type": "object"
+      },
       "RiskEvaluationView": {
         "properties": {
           "evaluated_at": {
@@ -7884,6 +9476,50 @@
         "title": "RiskRuleBundle",
         "type": "object"
       },
+      "RotateAgentTokenRequest": {
+        "properties": {
+          "ttl_seconds": {
+            "exclusiveMinimum": 0.0,
+            "maximum": 2592000.0,
+            "title": "Ttl Seconds",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "ttl_seconds"
+        ],
+        "title": "RotateAgentTokenRequest",
+        "type": "object"
+      },
+      "RuleHit": {
+        "description": "L4_compliance_and_regulatory_v1.0.md §3 RuleHit.\n\nCM-1 does not run a rule engine yet — the real `domain/rules/*.py`\nmodules (one rule per file, pure functions returning `RuleHit | None`)\nship in CM-3/CM-6/CM-7/CM-9. Until then, each RuleHit here is derived\n1:1 from an existing `policy_decision.reason_codes` entry, so\n`message`/`evidence` are direct passthroughs rather than structured\nrule output.\n\n`frozen=True` mirrors `core/risk/decision.RuleResult` (I-09's other\nauthority): an audit finding must not be mutable after construction.",
+        "properties": {
+          "evidence": {
+            "additionalProperties": true,
+            "default": {},
+            "title": "Evidence",
+            "type": "object"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          },
+          "rule_id": {
+            "title": "Rule Id",
+            "type": "string"
+          },
+          "severity": {
+            "$ref": "#/components/schemas/ComplianceVerdict"
+          }
+        },
+        "required": [
+          "rule_id",
+          "severity",
+          "message"
+        ],
+        "title": "RuleHit",
+        "type": "object"
+      },
       "RunReconciliationRequest": {
         "properties": {
           "connection_id": {
@@ -8052,6 +9688,17 @@
           "PROVIDER"
         ],
         "title": "SafetyScope",
+        "type": "string"
+      },
+      "Scope": {
+        "description": "The full universe of scopes per spec §3 \"scope semantics\" -- exactly\nthese four. LIVE, funds, policy, and token-management scopes do not\nexist (I-06, spec §3 \"LIVE, funds, policy, and token-management scopes\ndo not exist\"). Adding a value requires a spec revision first.",
+        "enum": [
+          "read",
+          "research",
+          "propose",
+          "paper"
+        ],
+        "title": "Scope",
         "type": "string"
       },
       "SellerSuspensionResult": {
@@ -8413,6 +10060,77 @@
         "title": "StrategyDetailResponse",
         "type": "object"
       },
+      "StrategyProposal": {
+        "description": "§2.3 AI-8 row verbatim field list.\n\n`params` values are restricted to JSON scalars (`bool | int | float |\nstr`) -- spec §3's \"reject unknown fields\"/\"free text forbidden\" rules\nbar smuggling another script or an arbitrary nested object through a\nparameter value;\nevery parameter a script actually consumes is itself a scalar `input`\ndeclaration (DSL-1 grammar). `bool` is listed before `int` in the union\nso pydantic's smart-union mode does not coerce a `True`/`False` value\ninto `1`/`0`.",
+        "properties": {
+          "created_by_token": {
+            "format": "uuid",
+            "title": "Created By Token",
+            "type": "string"
+          },
+          "data_scope": {
+            "$ref": "#/components/schemas/DataScope"
+          },
+          "hypothesis": {
+            "title": "Hypothesis",
+            "type": "string"
+          },
+          "params": {
+            "additionalProperties": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "string"
+                }
+              ]
+            },
+            "default": {},
+            "title": "Params",
+            "type": "object"
+          },
+          "prompt_hash": {
+            "title": "Prompt Hash",
+            "type": "string"
+          },
+          "proposal_id": {
+            "format": "uuid",
+            "title": "Proposal Id",
+            "type": "string"
+          },
+          "provider_ref": {
+            "$ref": "#/components/schemas/ProviderRef"
+          },
+          "schema_version": {
+            "const": "v1",
+            "default": "v1",
+            "title": "Schema Version",
+            "type": "string"
+          },
+          "script_source": {
+            "title": "Script Source",
+            "type": "string"
+          }
+        },
+        "required": [
+          "proposal_id",
+          "script_source",
+          "hypothesis",
+          "data_scope",
+          "provider_ref",
+          "prompt_hash",
+          "created_by_token"
+        ],
+        "title": "StrategyProposal",
+        "type": "object"
+      },
       "StrategyResponse": {
         "properties": {
           "fsm_definition": {
@@ -8607,7 +10325,8 @@
           "30m",
           "1h",
           "4h",
-          "1d"
+          "1d",
+          "L2"
         ],
         "title": "Timeframe",
         "type": "string"
@@ -8999,11 +10718,15 @@
         "type": "object"
       },
       "Venue": {
-        "description": "세션 규칙(A3) 조회 키. KIS는 시장별로 캘린더가 달라 KRX/US를 분리한다.",
+        "description": "Lookup key for session rules (A3).\n\nKIS has different calendars per market, so KRX/US are separated.",
         "enum": [
           "BITGET",
           "KIS_KRX",
-          "KIS_US"
+          "KIS_US",
+          "BINANCE",
+          "BYBIT",
+          "OKX",
+          "UPBIT"
         ],
         "title": "Venue",
         "type": "string"
@@ -9014,7 +10737,6 @@
           "maker_bps": {
             "anyOf": [
               {
-                "minimum": 0.0,
                 "type": "number"
               },
               {
@@ -9022,12 +10744,12 @@
                 "type": "string"
               }
             ],
+            "ge": 0,
             "title": "Maker Bps"
           },
           "min_fee": {
             "anyOf": [
               {
-                "minimum": 0.0,
                 "type": "number"
               },
               {
@@ -9035,12 +10757,12 @@
                 "type": "string"
               }
             ],
+            "ge": 0,
             "title": "Min Fee"
           },
           "taker_bps": {
             "anyOf": [
               {
-                "minimum": 0.0,
                 "type": "number"
               },
               {
@@ -9048,6 +10770,7 @@
                 "type": "string"
               }
             ],
+            "ge": 0,
             "title": "Taker Bps"
           },
           "venue": {
@@ -9094,7 +10817,6 @@
           "k": {
             "anyOf": [
               {
-                "minimum": 0.0,
                 "type": "number"
               },
               {
@@ -9102,6 +10824,7 @@
                 "type": "string"
               }
             ],
+            "ge": 0,
             "title": "K"
           },
           "kind": {
@@ -9113,8 +10836,6 @@
           "participation_cap": {
             "anyOf": [
               {
-                "exclusiveMinimum": 0.0,
-                "maximum": 1.0,
                 "type": "number"
               },
               {
@@ -9122,6 +10843,8 @@
                 "type": "string"
               }
             ],
+            "gt": 0,
+            "le": 1,
             "title": "Participation Cap"
           }
         },
@@ -13354,6 +15077,555 @@
         ]
       }
     },
+    "/v1/accounts/summary": {
+      "get": {
+        "operationId": "get_accounts_summary_endpoint_v1_accounts_summary_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "account_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Account Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiResponse_AccountsSummaryResponse_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Get Accounts Summary Endpoint",
+        "tags": [
+          "dashboard"
+        ]
+      }
+    },
+    "/v1/ai/experiments/{experiment_id}": {
+      "get": {
+        "operationId": "get_experiment_view_v1_ai_experiments__experiment_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "experiment_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Experiment Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiResponse_Experiment_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Get Experiment View",
+        "tags": [
+          "ai-gateway"
+        ]
+      }
+    },
+    "/v1/ai/experiments/{experiment_id}/lineage": {
+      "get": {
+        "operationId": "get_experiment_lineage_v1_ai_experiments__experiment_id__lineage_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "experiment_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Experiment Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiResponse_list_Experiment__"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Get Experiment Lineage",
+        "tags": [
+          "ai-gateway"
+        ]
+      }
+    },
+    "/v1/ai/proposals": {
+      "get": {
+        "operationId": "list_proposals_v1_ai_proposals_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiResponse_ProposalListResponse_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "List Proposals",
+        "tags": [
+          "ai-gateway"
+        ]
+      }
+    },
+    "/v1/ai/proposals/{proposal_id}": {
+      "get": {
+        "operationId": "get_proposal_v1_ai_proposals__proposal_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "proposal_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Proposal Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiResponse_StrategyProposal_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Get Proposal",
+        "tags": [
+          "ai-gateway"
+        ]
+      }
+    },
+    "/v1/ai/tokens": {
+      "get": {
+        "operationId": "list_agent_tokens_v1_ai_tokens_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiResponse_AgentTokenListResponse_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "List Agent Tokens",
+        "tags": [
+          "ai-gateway"
+        ]
+      },
+      "post": {
+        "operationId": "issue_agent_token_v1_ai_tokens_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/IssueAgentTokenRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiResponse_IssuedAgentTokenView_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Issue Agent Token",
+        "tags": [
+          "ai-gateway"
+        ]
+      }
+    },
+    "/v1/ai/tokens/{token_id}:revoke": {
+      "post": {
+        "operationId": "revoke_agent_token_v1_ai_tokens__token_id__revoke_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "token_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Token Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RevokeAgentTokenRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiResponse_AgentTokenView_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Revoke Agent Token",
+        "tags": [
+          "ai-gateway"
+        ]
+      }
+    },
+    "/v1/ai/tokens/{token_id}:rotate": {
+      "post": {
+        "operationId": "rotate_agent_token_v1_ai_tokens__token_id__rotate_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "token_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Token Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RotateAgentTokenRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiResponse_IssuedAgentTokenView_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Rotate Agent Token",
+        "tags": [
+          "ai-gateway"
+        ]
+      }
+    },
+    "/v1/assistant/explain-backtest": {
+      "post": {
+        "operationId": "explain_backtest_endpoint_v1_assistant_explain_backtest_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ExplainBacktestRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiResponse_ExplainBacktestView_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Explain Backtest Endpoint",
+        "tags": [
+          "assistant"
+        ]
+      }
+    },
+    "/v1/assistant/explain-script": {
+      "post": {
+        "operationId": "explain_script_endpoint_v1_assistant_explain_script_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ExplainScriptRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiResponse_ExplainScriptView_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Explain Script Endpoint",
+        "tags": [
+          "assistant"
+        ]
+      }
+    },
+    "/v1/assistant/generate-script": {
+      "post": {
+        "operationId": "generate_script_endpoint_v1_assistant_generate_script_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GenerateScriptRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiResponse_GenerateScriptView_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Generate Script Endpoint",
+        "tags": [
+          "assistant"
+        ]
+      }
+    },
     "/v1/backtests/quick": {
       "post": {
         "operationId": "quick_backtest_endpoint_v1_backtests_quick_post",
@@ -13397,6 +15669,163 @@
         "summary": "Quick Backtest Endpoint",
         "tags": [
           "backtests"
+        ]
+      }
+    },
+    "/v1/foundation/charting/indicator-templates": {
+      "get": {
+        "operationId": "get_list_indicator_templates_v1_foundation_charting_indicator_templates_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiResponse_list_ChartIndicatorTemplateView__"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Get List Indicator Templates",
+        "tags": [
+          "foundation:charting"
+        ]
+      },
+      "post": {
+        "operationId": "post_create_indicator_template_v1_foundation_charting_indicator_templates_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateChartIndicatorTemplateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiResponse_ChartIndicatorTemplateView_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Post Create Indicator Template",
+        "tags": [
+          "foundation:charting"
+        ]
+      }
+    },
+    "/v1/foundation/charting/indicator-templates/{template_id}": {
+      "delete": {
+        "operationId": "delete_indicator_template_by_id_v1_foundation_charting_indicator_templates__template_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "template_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Template Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Delete Indicator Template By Id",
+        "tags": [
+          "foundation:charting"
+        ]
+      },
+      "get": {
+        "operationId": "get_indicator_template_by_id_v1_foundation_charting_indicator_templates__template_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "template_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Template Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiResponse_ChartIndicatorTemplateView_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Get Indicator Template By Id",
+        "tags": [
+          "foundation:charting"
         ]
       }
     },
@@ -13714,6 +16143,80 @@
         "summary": "Put Layout Drawings",
         "tags": [
           "foundation:charting"
+        ]
+      }
+    },
+    "/v1/foundation/compliance/decisions/{decision_id}": {
+      "get": {
+        "operationId": "get_decision_v1_foundation_compliance_decisions__decision_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "decision_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Decision Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiResponse_ComplianceDecision_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Get Decision",
+        "tags": [
+          "foundation:compliance"
+        ]
+      }
+    },
+    "/v1/foundation/compliance/mandate/status": {
+      "get": {
+        "operationId": "get_mandate_status_v1_foundation_compliance_mandate_status_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiResponse_MandateStatusResponse_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Get Mandate Status",
+        "tags": [
+          "foundation:compliance"
         ]
       }
     },
@@ -14648,6 +17151,70 @@
         ]
       }
     },
+    "/v1/foundation/market-data/coverage": {
+      "get": {
+        "description": "DC-18a — merged `coverage_spans` (DC-1 ULID `instrument_id`, not the\n`md_instrument` UUID above); no coverage / no entitlement -> 200 + `[]`.",
+        "operationId": "get_coverage_endpoint_v1_foundation_market_data_coverage_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "instrument_id",
+            "required": true,
+            "schema": {
+              "title": "Instrument Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "venue",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/Venue"
+            }
+          },
+          {
+            "in": "query",
+            "name": "timeframe",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/Timeframe"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiResponse_list_CoverageSpan__"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Get Coverage Endpoint",
+        "tags": [
+          "foundation:market-data"
+        ]
+      }
+    },
     "/v1/foundation/market-data/instruments": {
       "get": {
         "description": "자기 테넌트가 등록한 벤처의 인스트루먼트만. 등록 벤처가 없으면 빈\n목록(200) — 목록은 존재 누설 문제가 없어 404가 아니다. `cursor`는 직전\n페이지 마지막 `instrument_id`(keyset).",
@@ -15133,6 +17700,23 @@
               ],
               "title": "Scope"
             }
+          },
+          {
+            "in": "query",
+            "name": "portfolio_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Portfolio Id"
+            }
           }
         ],
         "responses": {
@@ -15180,6 +17764,23 @@
               "format": "uuid",
               "title": "Statement Id",
               "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "portfolio_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Portfolio Id"
             }
           }
         ],
@@ -15317,6 +17918,221 @@
         "summary": "Post Compute Statement",
         "tags": [
           "foundation:performance"
+        ]
+      }
+    },
+    "/v1/foundation/personal/bundle": {
+      "get": {
+        "operationId": "get_bundle_v1_foundation_personal_bundle_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiResponse_PersonalRiskBundleView_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Get Bundle",
+        "tags": [
+          "foundation:personal"
+        ]
+      }
+    },
+    "/v1/foundation/personal/daily-report": {
+      "get": {
+        "description": "Unverified/TODO: fill/P&L source wiring is a separate leaf — for now\nthe caller passes today's P&L and fill count directly as query\nparameters.",
+        "operationId": "get_daily_report_v1_foundation_personal_daily_report_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "report_date",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "date",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Report Date"
+            }
+          },
+          {
+            "in": "query",
+            "name": "realized_pnl_krw",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                  "type": "string"
+                }
+              ],
+              "default": "0",
+              "title": "Realized Pnl Krw"
+            }
+          },
+          {
+            "in": "query",
+            "name": "fill_count",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "minimum": 0,
+              "title": "Fill Count",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiResponse_DailyReportView_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Get Daily Report",
+        "tags": [
+          "foundation:personal"
+        ]
+      }
+    },
+    "/v1/foundation/personal/kill": {
+      "get": {
+        "operationId": "get_kill_switch_v1_foundation_personal_kill_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiResponse_KillSwitchView_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Get Kill Switch",
+        "tags": [
+          "foundation:personal"
+        ]
+      },
+      "post": {
+        "description": "One-click dashboard kill button.",
+        "operationId": "post_kill_switch_v1_foundation_personal_kill_post",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiResponse_KillSwitchView_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Post Kill Switch",
+        "tags": [
+          "foundation:personal"
+        ]
+      }
+    },
+    "/v1/foundation/personal/promote": {
+      "post": {
+        "description": "If the checklist is unmet, `PromotionDeniedError` propagates and the\nglobal handler denies with 403 `POLICY_LIVE_BLOCKED` (fail-closed) —\na normal return from this function means the checklist is fully\nsatisfied.",
+        "operationId": "post_promote_v1_foundation_personal_promote_post",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiResponse_PromotionChecklistView_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Post Promote",
+        "tags": [
+          "foundation:personal"
+        ]
+      }
+    },
+    "/v1/foundation/personal/promotion-checklist": {
+      "get": {
+        "operationId": "get_promotion_checklist_v1_foundation_personal_promotion_checklist_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiResponse_PromotionChecklistView_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Get Promotion Checklist",
+        "tags": [
+          "foundation:personal"
         ]
       }
     },
@@ -16299,6 +19115,23 @@
                 }
               ],
               "title": "Instrument Id"
+            }
+          },
+          {
+            "in": "query",
+            "name": "portfolio_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Portfolio Id"
             }
           }
         ],

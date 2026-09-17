@@ -107,3 +107,21 @@ class PostgresProposalRepository:
                 tenant_id,
             )
         return None if row is None else _row_to_proposal(row)
+
+    async def list_for_tenant(
+        self, tenant_id: UUID, *, limit: int = 50
+    ) -> tuple[StrategyProposal, ...]:
+        """AI-17 -- `api/routers/ai.py`'s proposal list view. Same tenant scoping
+        join as `get_for_tenant` (no `tenant_id` column on `strategy_proposal`
+        itself), newest first. This adapter's own addition beyond the
+        `ProposalRepository` Protocol, same precedent as `get_for_tenant`'s own
+        docstring already sets."""
+        async with self._pool.acquire() as conn:
+            rows = await conn.fetch(
+                "SELECT sp.* FROM strategy_proposal sp "
+                "JOIN agent_token at ON at.token_id = sp.created_by_token "
+                "WHERE at.tenant_id = $1 ORDER BY sp.created_at DESC LIMIT $2",
+                tenant_id,
+                limit,
+            )
+        return tuple(_row_to_proposal(row) for row in rows)

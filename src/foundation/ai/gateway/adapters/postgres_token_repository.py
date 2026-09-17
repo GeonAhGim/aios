@@ -87,6 +87,21 @@ class PostgresAgentTokenRepository:
             row = await conn.fetchrow("SELECT * FROM agent_token WHERE token_hash = $1", token_hash)
         return None if row is None else _row_to_token(row)
 
+    async def list_for_tenant(self, tenant_id: UUID) -> tuple[AgentToken, ...]:
+        """AI-17 -- `api/routers/ai.py`'s "token management" list view. Newest
+        first (`issued_at DESC`), same ordering convention as
+        `PostgresProposalRepository.list_for_tenant`. This adapter's own
+        addition beyond the (issue/revoke-focused) uses this module already
+        served -- no Protocol declares it, the same "adapter's own addition"
+        precedent `PostgresProposalRepository.get_for_tenant`'s docstring
+        already sets."""
+        async with self._pool.acquire() as conn:
+            rows = await conn.fetch(
+                "SELECT * FROM agent_token WHERE tenant_id = $1 ORDER BY issued_at DESC",
+                tenant_id,
+            )
+        return tuple(_row_to_token(row) for row in rows)
+
     async def revoke_token(
         self, token_id: UUID, *, tenant_id: UUID, reason: str
     ) -> AgentToken | None:
