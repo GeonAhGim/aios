@@ -24,6 +24,9 @@ CI `guards` job이 고정 커밋으로 checkout해 모든 변경을 검사한다
 
 ## 시작
 
+Claude Code 웹(클라우드 세션)에서는 `.claude/hooks/session-start.sh`가 아래 절차를 자동으로 수행한다 —
+`docs/CLOUD_SESSION_SETUP.md` 참고. 아래는 로컬 개발 머신(Windows) 기준이다.
+
 ```bash
 docker compose -f docker-compose.dev.yml up -d
 python -m venv .venv
