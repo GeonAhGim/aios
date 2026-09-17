@@ -529,6 +529,17 @@ def test_money_float_regression_task_3828_sites_stay_clean() -> None:
     assert "src/core/script/runtime/builtins_strategy.py" not in hits
 
 
+def test_money_float_regression_task_4188_krx_data_stays_clean() -> None:
+    """task-4188 회귀 가드 -- money_float이 10 -> 13으로 재발한 원인은 RD-12
+    산출물 `src/foundation/market_data/adapters/krx_data.py`의 `IndexQuote.price`/
+    `IndexPoint.price`/`ShortResistanceStock.price` 세 필드가 float로 선언된
+    것이었다(mandates/contracts, risk/contracts의 나머지 10건은 OpenAPI 응답
+    스키마라 task-3828 때부터 baseline 부채로 남겨둔 것과 별개). 세 필드를
+    다시 float로 되돌리면 실제 저장소를 스캔하는 이 테스트가 즉시 잡는다."""
+    hits = dict(cc.check_money_float(ROOT))
+    assert "src/foundation/market_data/adapters/krx_data.py" not in hits
+
+
 # ---------------------------------------------------------------------------
 # 11. symbol_id_assembly
 # ---------------------------------------------------------------------------

@@ -149,7 +149,7 @@ class TestKRXIndexAdapter:
         quote = await adapter.get_index_price("00001")
         assert quote.code == "00001"
         assert quote.name == "KOSPI"
-        assert quote.price == 2.45
+        assert quote.price == Decimal("2.45")
         assert quote.change == 0.78
         assert quote.change_rate == 0.35
         assert quote.high == 2680.50
@@ -173,8 +173,8 @@ class TestKRXIndexAdapter:
         assert trend.code == "00001"
         assert trend.name == "KOSPI"
         assert len(trend.points) == 2
-        assert trend.points[0] == IndexPoint("20260901", 2650.0, -0.5)
-        assert trend.points[1] == IndexPoint("20260902", 2660.0, 0.38)
+        assert trend.points[0] == IndexPoint("20260901", Decimal("2650.0"), -0.5)
+        assert trend.points[1] == IndexPoint("20260902", Decimal("2660.0"), 0.38)
 
     async def test_get_index_trend_empty(self, fake_client: _FakeKISClient) -> None:
         fake_client.responses["FHKST030201R"] = {"output1": []}

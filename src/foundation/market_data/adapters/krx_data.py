@@ -12,6 +12,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from decimal import Decimal
 from typing import Any, Protocol
 
 # ---------------------------------------------------------------------------
@@ -25,7 +26,7 @@ class IndexQuote:
 
     code: str
     name: str
-    price: float
+    price: Decimal
     change: float
     change_rate: float
     high: float
@@ -48,7 +49,7 @@ class IndexPoint:
     """One point in an index trend series."""
 
     date: str  # "YYYYMMDD"
-    price: float
+    price: Decimal
     change_rate: float
 
 
@@ -70,7 +71,7 @@ class ShortResistanceStock:
 
     stock_code: str
     stock_name: str
-    price: float
+    price: Decimal
     short_volume: int
     total_volume: int
     short_ratio: float
@@ -125,7 +126,7 @@ class KRXIndexAdapter:
         return IndexQuote(
             code=row.get("indicode", code),
             name=row.get("inpct_name", ""),
-            price=float(row.get("prdy_vrss", 0)),
+            price=Decimal(str(row.get("prdy_vrss", 0))),
             change=float(row.get("prdy_crt", 0)),
             change_rate=float(row.get("stdc_crt", 0)),
             high=float(row.get("hts_hgpr", 0)),
@@ -157,7 +158,7 @@ class KRXIndexAdapter:
         points = [
             IndexPoint(
                 date=p.get("indidate", ""),
-                price=float(p.get("indiprice", 0)),
+                price=Decimal(str(p.get("indiprice", 0))),
                 change_rate=float(p.get("indichg", 0)),
             )
             for p in points_raw
@@ -248,7 +249,7 @@ class KRXShortAdapter:
                 ShortResistanceStock(
                     stock_code=row.get("ispr_code", ""),
                     stock_name=row.get("ispr_name", ""),
-                    price=float(row.get("ispr_px", 0)),
+                    price=Decimal(str(row.get("ispr_px", 0))),
                     short_volume=short_vol,
                     total_volume=total_vol,
                     short_ratio=ratio,
