@@ -118,7 +118,7 @@ describe("DrawingReplayToolbar 거부 입력(비활성)", () => {
 describe("DrawingReplayToolbar 실패 처리(동시 클릭)", () => {
   it("negative(실패 주입): 빠른 연속 클릭(레이싱) 시에도 각각 정확히 한 번씩만 호출된다", () => {
     const onStep = vi.fn();
-    const { rerender } = render(<DrawingReplayToolbar {...baseProps()} onStep={onStep} />);
+    render(<DrawingReplayToolbar {...baseProps()} onStep={onStep} />);
 
     const stepBackBtn = screen.getByRole("button", { name: "이전 봉" });
     const stepFwdBtn = screen.getByRole("button", { name: "다음 봉" });

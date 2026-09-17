@@ -82,12 +82,16 @@ describe("ChartPaneRow 에러 표면(plotLayer.issues)", () => {
 
 describe("ChartPaneRow 성능 단언(CH-14 고밀도 렌더)", () => {
   it("고밀도 렌더: 매우 큰 plotLayer 결과(노드 1000개+)도 100ms 내로 렌더된다", () => {
-    const hugeNodes = Array.from({ length: 1000 }, (_, i) => ({
-      type: "line" as const,
-      x: i,
-      y: 100 + Math.sin(i) * 50,
-      color: "#1f77b4",
-    }));
+    // ChartPaneRow.tsx는 plotLayer.nodes를 <svg>{plotLayer.nodes}</svg>로 그대로 렌더한다
+    // (PlotLayerResult.nodes: readonly ReactNode[]). 여기서 {type,x,y,color} 같은 순수 데이터
+    // 객체를 넣으면 React가 reconcileChildren 중
+    // "Objects are not valid as a React child"로 크래시한다 — vitest test:coverage가
+    // node_modules/react-dom/cjs/react-dom-client.development.js의 reconcileChildren/
+    // beginWork/performUnitOfWork 스택으로 반복 실패한 원인(esc-ci-38c28e2a2177/
+    // b4851ec32970/cec0cf9fd1aa, task-4072). 실제 렌더 트리와 같은 SVG 엘리먼트를 써야 한다.
+    const hugeNodes = Array.from({ length: 1000 }, (_, i) => (
+      <circle key={i} cx={i} cy={100 + Math.sin(i) * 50} r={1} fill="#1f77b4" />
+    ));
     const plotLayer: PlotLayerResult = { nodes: hugeNodes, issues: [] };
 
     const start = performance.now();
