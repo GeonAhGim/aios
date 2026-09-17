@@ -1,7 +1,8 @@
-"""Unit tests for `src/foundation/ml/application/serve_signal.py` -- AI-21
-task-2656. D2 depth (ADR-2026-09-09-C): negative >= 3, failure injection 1,
-numeric performance assertion 1, gate-red reproduction 1, plus the AI-21 DoD
-"incremental=batch equivalence" property test.
+"""Unit tests for `src/foundation/ml/application/serve_signal.py` +
+`serve_signal_batch.py` -- AI-21 task-2656. D2 depth (ADR-2026-09-09-C):
+negative >= 3, failure injection 1, numeric performance assertion 1,
+gate-red reproduction 1, plus the AI-21 DoD "incremental=batch equivalence"
+property test.
 
 All ports are in-memory fakes (`_FakeModelRegistry`/`_FakeFeatureStore`) --
 `FeatureStorePort`/`ModelRegistryPort` themselves are already covered by
@@ -20,6 +21,7 @@ from typing import Any
 import pytest
 
 from src.foundation.ml.application import serve_signal as ss
+from src.foundation.ml.application import serve_signal_batch as ssb
 from src.foundation.ml.contracts.v1 import FeatureSpec, ModelCard, TrainDataLineage
 from src.foundation.ml.domain.point_in_time import FutureDataLeakageError
 from src.foundation.ml.ports.feature_store import FeatureValue
@@ -240,11 +242,11 @@ async def test_serve_signal_propagates_a_predictor_failure_instead_of_a_default_
 async def test_gate_red_naive_selection_would_leak_a_future_row(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Red repro: swap `_select` for a naive "most recent row regardless of
-    as_of" implementation and show it *would* return a future-dated value
-    (the bug `_select`'s `row.as_of > as_of` guard exists to prevent) --
-    then restore the real implementation and confirm the same fixture
-    raises `FeatureNotFoundError` instead."""
+    """Red repro: swap `select_most_recent` for a naive "most recent row
+    regardless of as_of" implementation and show it *would* return a
+    future-dated value (the bug `select_most_recent`'s `row.as_of > as_of`
+    guard exists to prevent) -- then restore the real implementation and
+    confirm the same fixture raises `FeatureNotFoundError` instead."""
     registry = _FakeModelRegistry({("momentum-lgbm", "v1"): _card()})
     store = _store_with_row("rsi_14", "BTC-USD", _NOW + timedelta(hours=1), "99.0")
     predictor = _LinearPredictor({"rsi_14": 1.0})
@@ -255,7 +257,7 @@ async def test_gate_red_naive_selection_would_leak_a_future_row(
         matching = [r for r in rows if r.entity_id == entity_id]
         return matching[-1].value if matching else None
 
-    monkeypatch.setattr(ss, "_select", _naive_select)
+    monkeypatch.setattr(ss, "select_most_recent", _naive_select)
     leaked = await ss.serve_signal(
         model_id="momentum-lgbm",
         version="v1",
@@ -298,7 +300,7 @@ async def test_check_signal_equivalence_agrees_across_many_days() -> None:
         )
     predictor = _LinearPredictor({"rsi_14": 0.5}, bias=-3.0)
 
-    worst = await ss.check_signal_equivalence(
+    worst = await ssb.check_signal_equivalence(
         model_id="momentum-lgbm",
         version="v1",
         entity_id="BTC-USD",
@@ -331,7 +333,7 @@ async def test_check_signal_equivalence_raises_when_the_cache_returns_a_stale_da
         )
     predictor = _LinearPredictor({"rsi_14": 1.0})
 
-    real_serve_signal_batch = ss.serve_signal_batch
+    real_serve_signal_batch = ssb.serve_signal_batch
 
     async def _stale_cache_batch(**kwargs: Any) -> list[ss.SignalResult]:
         results = await real_serve_signal_batch(**kwargs)
@@ -348,9 +350,9 @@ async def test_check_signal_equivalence_raises_when_the_cache_returns_a_stale_da
         )
         return results
 
-    monkeypatch.setattr(ss, "serve_signal_batch", _stale_cache_batch)
-    with pytest.raises(ss.SignalEngineMismatchError):
-        await ss.check_signal_equivalence(
+    monkeypatch.setattr(ssb, "serve_signal_batch", _stale_cache_batch)
+    with pytest.raises(ssb.SignalEngineMismatchError):
+        await ssb.check_signal_equivalence(
             model_id="momentum-lgbm",
             version="v1",
             entity_id="BTC-USD",
