@@ -1,14 +1,15 @@
 """Anthropic provider adapter -- structured output via forced tool-use, cost metering.
 
-Spec: docs/specs/L4_ai_research_strategy_factory_v1.0.md §2.2 AI-6
-"anthropic_provider.py: Claude API(구조화 출력, 비용 계측)". Implements the
-`ModelProvider` Protocol (AI-5, `ports/model_provider.py`) against Anthropic's
-public Messages API (`POST /v1/messages`, versioned via the `anthropic-version`
-header -- a documented, stable contract, not an unverified fact). This adapter
-calls that HTTP endpoint directly with `httpx` rather than the `anthropic` PyPI
-package: AI-3 already cleared the package for import
-(docs/design/AI_DEPENDENCIES_EVAL.md §1.2 "반입 가"), but it is not installed in
-this venv and one HTTP call needs nothing beyond what
+Spec: docs/specs/L4_ai_research_strategy_factory_v1.0.md §2.2 AI-6 row --
+`anthropic_provider.py`: Claude API, structured output, cost metering.
+Implements the `ModelProvider` Protocol (AI-5, `ports/model_provider.py`)
+against Anthropic's public Messages API (`POST /v1/messages`, versioned via
+the `anthropic-version` header -- a documented, stable contract, not an
+unverified fact). This adapter calls that HTTP endpoint directly with `httpx`
+rather than the `anthropic` PyPI package: AI-3 already cleared the package for
+import (docs/design/AI_DEPENDENCIES_EVAL.md §1.2, verdict: importable, no
+blocking condition), but it is not installed in this venv and one HTTP call
+needs nothing beyond what
 `src/foundation/risk/adapters/telegram_adapter.py` already does for a simpler
 API -- same "hand-rolled httpx client, no vendor SDK" precedent as bitget/kis/nh.
 
@@ -20,7 +21,7 @@ tool so the model can only reply by calling it. A response lacking that exact
 tool_use block is rejected fail-closed (`AnthropicStructuredOutputError`) rather
 than falling back to free text.
 
-Cost measurement (§2.2 "비용 계측"): actual cost always comes from the response's
+Cost measurement (§2.2 "cost metering"): actual cost always comes from the response's
 `usage.{input,output}_tokens` (present on every /v1/messages reply) multiplied by
 `AnthropicPricing` -- a rate table the caller supplies and owns, never hardcoded
 here. Anthropic's published $/token rates drift over time and differ per model;
