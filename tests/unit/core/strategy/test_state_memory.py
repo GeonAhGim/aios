@@ -128,7 +128,40 @@ def test_state_memory_rejects_invalid_schema_version() -> None:
         )
 
 
+def test_market_state_rejects_unsupported_timeframe_in_key() -> None:
+    """`indicator_key.parse_key`에는 두 개의 개별 거부 분기가 있다 -- 문법이
+    깨진 키(정규식 불일치)와, 문법은 맞지만 `ALLOWED_TIMEFRAMES`에 없는
+    timeframe을 가리키는 키. 아래 실패 주입 테스트는 앞의 분기만 건드리므로,
+    `MarketState`의 정상 생성 경로(우회 없이)가 뒤의 분기도 fail-closed로
+    막는다는 것을 별도로 확인한다 -- "2h"는 문법은 유효하지만 L08이 아는
+    timeframe 집합 밖이라 조용히 통과하면 안 된다."""
+    with pytest.raises(ValidationError):
+        MarketState(
+            as_of=_T1,
+            values={"RSI_timeperiod14@2h": Decimal("1")},
+            bar_close_time={},
+        )
+
+
 # -- D2 실패 주입 --------------------------------------------------------------
+
+
+def test_advance_propagates_unsupported_timeframe_from_bypassed_validation() -> None:
+    """`test_advance_propagates_malformed_key_from_bypassed_validation`과 같은
+    신뢰된 역직렬화 경로(`model_construct`)를 우회하지만, 이번엔 문법은 유효한
+    키가 `ALLOWED_TIMEFRAMES` 밖의 timeframe을 가리키는 손상 케이스다 --
+    `parse_key`의 서로 다른 거부 분기를 `advance()`가 둘 다 fail-closed로
+    전파하는지 확인한다."""
+    memory = StrategyStateMemory(execution_id=1, state_version=0, last_bar_time={}, prev_values={})
+    corrupted_market_state = MarketState.model_construct(
+        schema_version="ms-v1",
+        as_of=_T1,
+        values={"RSI_timeperiod14@2h": Decimal("1")},
+        bar_close_time={},
+    )
+
+    with pytest.raises(IndicatorKeyError):
+        advance(memory, corrupted_market_state, bar_times={})
 
 
 def test_advance_propagates_malformed_key_from_bypassed_validation() -> None:
