@@ -64,6 +64,7 @@ export const ADMIN_NAV_ITEMS: NavItem[] = [
   { to: "/admin/reconciliation", label: "nav./admin/reconciliation" },
   { to: "/admin/evidence-chain", label: "nav./admin/evidence-chain" },
   { to: "/admin/trust", label: "nav./admin/trust" },
+  { to: "/admin/audit-log", label: "nav./admin/audit-log" },
 ];
 
 export const ALL_NAV_ITEMS: NavItem[] = [
