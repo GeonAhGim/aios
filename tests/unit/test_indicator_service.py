@@ -203,8 +203,8 @@ def test_calculate_p95_latency_within_self_declared_budget():
 
 
 def test_calculate_budget_gate_actually_fails_past_budget(monkeypatch: pytest.MonkeyPatch):
-    """게이트 적색 재현: 위 단언식이, TA-Lib 호출 경로 한 곳이 예산을 실제로
-    넘기도록 지연을 주입했을 때 진짜로 `AssertionError`를 내는지(= CI가
+    """게이트 적색 재현: 실제 성능 테스트를 호출하여 TA-Lib 호출 경로가
+    예산을 넘기도록 지연을 주입했을 때 `AssertionError`를 내는지(= CI가
     실제로 빨간불이 되는지) 확인한다. 이 테스트가 없으면 위 단언이 항상
     통과하는 tautology인지 아무도 검증하지 못한다."""
     original_sma = talib.SMA
@@ -215,7 +215,5 @@ def test_calculate_budget_gate_actually_fails_past_budget(monkeypatch: pytest.Mo
 
     monkeypatch.setattr(talib, "SMA", _stalled_sma)
 
-    samples = _calculate_latencies_ms(iterations=3)
-    p95_ms = _p95(samples)
     with pytest.raises(AssertionError):
-        assert p95_ms < _CALCULATE_BUDGET_MS
+        test_calculate_p95_latency_within_self_declared_budget()
