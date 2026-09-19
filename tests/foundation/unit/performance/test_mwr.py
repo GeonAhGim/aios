@@ -1,6 +1,6 @@
 """MWR(금액가중수익률, IRR 이분법) — 알려진 값과 수렴 실패 케이스.
 
-Spec: docs/specs/L4_strategy_portfolio_backtest_v1.0.md §8 (L46 DoD)."""
+Spec: docs/specs/L4_strategy_portfolio_backtest_v1.0.md §9 (L46 DoD)."""
 
 from __future__ import annotations
 
@@ -63,8 +63,9 @@ def test_mwr_latency_budget_actually_fails_when_bisection_regresses(monkeypatch)
 
     monkeypatch.setattr(mwr_module, "_npv", _slow_npv)
 
+    latency_ms = _p95_latency_ms(samples=3)
     with pytest.raises(AssertionError):
-        assert _p95_latency_ms(samples=3) < _MWR_LATENCY_BUDGET_MS
+        assert latency_ms < _MWR_LATENCY_BUDGET_MS
 
 
 def test_mwr_with_no_interim_cashflows_matches_simple_return():
@@ -100,3 +101,25 @@ def test_mwr_returns_none_when_period_has_zero_duration():
 
 def test_mwr_returns_none_when_start_value_is_not_positive():
     assert mwr([], Decimal("0"), Decimal("1100"), _T0, _T1) is None
+
+
+def test_mwr_red_gate_propagates_npv_assertion(monkeypatch):
+    """계산 오류가 지연 예산 초과로 오인되어 적색 재현을 통과하면 안 된다."""
+    failure = AssertionError("injected NPV calculation failure")
+
+    def _broken_npv(rate: Decimal, flows: Sequence[tuple[Decimal, Decimal]]) -> Decimal:
+        raise failure
+
+    monkeypatch.setattr(mwr_module, "_npv", _broken_npv)
+    with pytest.raises(AssertionError, match="injected NPV calculation failure") as exc:
+        test_mwr_latency_budget_actually_fails_when_bisection_regresses(monkeypatch)
+    assert exc.value is failure
+
+
+def test_mwr_returns_none_when_root_is_outside_bracket():
+    assert mwr([], Decimal("1000"), Decimal("12000"), _T0, _T1) is None
+
+
+def test_mwr_returns_none_when_iteration_budget_is_exhausted(monkeypatch):
+    monkeypatch.setattr(mwr_module, "MWR_MAX_ITERATIONS", 1)
+    assert mwr([], Decimal("1000"), Decimal("1100"), _T0, _T1) is None
