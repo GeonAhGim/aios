@@ -85,6 +85,9 @@
     "description": "A one-time confirmation ticket (§2.1 AI-1 row verbatim field list).\n\n`action_digest` is the digest of the previewed action; AI-2's\n`domain/confirm.py` is the only place that compares it against the\nexecution-time digest and enforces single use.",
     "properties": {
       "action_digest": {
+        "maxLength": 64,
+        "minLength": 64,
+        "pattern": "^[0-9a-f]{64}$",
         "title": "Action Digest",
         "type": "string"
       },

@@ -32,7 +32,7 @@ from decimal import Decimal
 from typing import Literal
 from uuid import UUID
 
-from pydantic import AwareDatetime, BaseModel, field_validator
+from pydantic import AwareDatetime, BaseModel, Field, field_validator
 
 __all__ = [
     "SCHEMA_VERSION",
@@ -111,7 +111,7 @@ class ConfirmTicket(BaseModel, frozen=True):
     """
 
     ticket_id: UUID
-    action_digest: str
+    action_digest: str = Field(min_length=64, max_length=64, pattern=_SHA256_HEX_RE.pattern)
     expires_at: AwareDatetime
     schema_version: Literal["v1"] = SCHEMA_VERSION
 

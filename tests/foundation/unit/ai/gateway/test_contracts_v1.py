@@ -27,6 +27,7 @@ from typing import Any
 from uuid import uuid4
 
 import pytest
+from jsonschema import Draft202012Validator
 from pydantic import ValidationError
 
 from src.foundation.ai.gateway.contracts import v1
@@ -220,3 +221,58 @@ def test_gate_red_budget_actually_fails_past_budget() -> None:
 
     with pytest.raises(AssertionError):
         assert elapsed < absurdly_low_budget_sec
+
+
+@pytest.mark.parametrize("mode", ["validation", "serialization"])
+@pytest.mark.parametrize(
+    "digest",
+    [
+        "not-a-digest",
+        "a" * 63,
+        "a" * 65,
+        "A" * 64,
+        "g" * 64,
+        "a" * 64 + "\n",
+        "\n" + "a" * 64,
+        "",
+        123,
+        None,
+    ],
+)
+def test_digest_schema_and_model_reject_invalid_values(mode, digest) -> None:
+    schema = v1.ConfirmTicket.model_json_schema(mode=mode)
+    Draft202012Validator.check_schema(schema)
+    payload = v1.ConfirmTicket(**_ticket_kwargs()).model_dump(mode="json")
+    payload["action_digest"] = digest
+    errors = list(Draft202012Validator(schema).iter_errors(payload))
+    assert errors, f"schema accepted invalid digest: {digest!r}"
+    assert all(list(error.path) == ["action_digest"] for error in errors)
+    with pytest.raises(ValidationError, match="action_digest"):
+        v1.ConfirmTicket.model_validate_json(json.dumps(payload))
+
+
+@pytest.mark.parametrize("mode", ["validation", "serialization"])
+def test_digest_schema_rejects_injected_corruption_and_recovers(mode) -> None:
+    validator = Draft202012Validator(v1.ConfirmTicket.model_json_schema(mode=mode))
+    payload = v1.ConfirmTicket(**_ticket_kwargs()).model_dump(mode="json")
+    for digest in ["0123456789abcdef" * 4, "f" * 64, "0" * 64]:
+        payload["action_digest"] = digest
+        validator.validate(payload)
+        assert v1.ConfirmTicket.model_validate(payload).action_digest == digest
+        payload["action_digest"] = digest[:-1] + "G"
+        assert not validator.is_valid(payload)
+        with pytest.raises(ValidationError, match="action_digest"):
+            v1.ConfirmTicket.model_validate(payload)
+
+
+@pytest.mark.perf
+def test_digest_validation_p99_within_gate_budget() -> None:
+    payload = _ticket_kwargs()
+    samples = []
+    for _ in range(1000):
+        start = time.perf_counter()
+        v1.ConfirmTicket(**payload)
+        samples.append(time.perf_counter() - start)
+    p99 = sorted(samples)[989]
+    print(f"[AI-1 digest] p99={p99:.6f}s; budget=0.005s")
+    assert p99 < 0.005  # ADR-2026-09-09-C pre-trade gate budget.
