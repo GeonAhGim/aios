@@ -36,6 +36,7 @@ from scripts.check_child_order_path import (
 )
 from src.data.models.trading import OrderSide, OrderStatus, OrderType
 from src.foundation.ems.application.aggregate_parent import (
+    children_awaiting_cancel,
     recompute_parent_aggregate,
     reserve_child_slice,
 )
@@ -261,6 +262,109 @@ async def test_recompute_parent_aggregate_propagates_connection_failure_on_child
             occurred_at=datetime.now(timezone.utc),
         )
     repo.transition.assert_not_awaited()
+
+
+async def test_validate_aggregate_fills_raises_on_over_fill() -> None:
+    """EM-A1 negative -- `validate_aggregate_fills` must reject when child
+    fills sum exceeds parent quantity. This is the explicit invariant
+    violation rejection the DEEPEN requires for `orders.parent_order_id`."""
+    from src.foundation.ems.domain.parent_child import (
+        ChildFillState,
+        validate_aggregate_fills,
+    )
+
+    parent_id = uuid4()
+    children = [
+        ChildFillState(child_id=uuid4(), filled_qty=Decimal("6"), status=OrderStatus.FILLED),
+        ChildFillState(child_id=uuid4(), filled_qty=Decimal("5"), status=OrderStatus.FILLED),
+    ]
+    with pytest.raises(AlgoConstraintError, match="aggregate fill .* exceeds parent qty"):
+        validate_aggregate_fills(parent_id, children, Decimal("10"))
+
+
+async def test_aggregate_parent_state_no_false_positive_on_open_children() -> None:
+    """EM-2 negative -- when children exist but have zero fill and are still
+    open, `aggregate_parent_state` must NOT return CANCELLED; it should
+    return the current status unchanged. A false-positive CANCELLED here
+    would cause the parent to close prematurely."""
+    from src.foundation.ems.domain.parent_child import (
+        ChildFillState,
+        aggregate_parent_state,
+    )
+
+    children = [
+        ChildFillState(child_id=uuid4(), filled_qty=Decimal("0"), status=OrderStatus.UNKNOWN),
+    ]
+    filled_qty, new_status = aggregate_parent_state(
+        parent_qty=Decimal("10"),
+        current_status=OrderStatus.ACKNOWLEDGED,
+        children=children,
+    )
+    assert filled_qty == Decimal("0")
+    assert new_status == OrderStatus.ACKNOWLEDGED, (
+        "open child with zero fill must not flip parent to CANCELLED"
+    )
+
+
+async def test_reserve_child_slice_fails_closed_when_commit_raises() -> None:
+    """DB 실패 주입 -- `reserve_child_slice`가 검증은 통과했지만
+    `set_committed_child_qty` (DB UPDATE) 에서 예외가 나는 경우.
+    committed_child_qty 가 늘어나서는 안 되므로, 예외 전파 후 repo 상태가
+    갱신되지 않았음을 확인한다. 실제 DB 커넥션 풀 고갈을 `AsyncMock`으로
+    흉내 낸다."""
+    parent = _parent(quantity=Decimal("10"), committed_child_qty=Decimal("3"))
+    repo = AsyncMock()
+    repo.get_for_update.return_value = parent
+    repo.set_committed_child_qty.side_effect = asyncpg.exceptions.ConnectionDoesNotExistError(
+        "pool exhausted"
+    )
+    conn = object()
+
+    with pytest.raises(asyncpg.exceptions.ConnectionDoesNotExistError):
+        await reserve_child_slice(
+            repo, conn, parent_order_id=parent.order_id, new_slice_qty=Decimal("5")
+        )
+    # Even though get_for_update succeeded, committed_child_qty must NOT
+    # have been updated — the reservation is atomic.
+    repo.set_committed_child_qty.assert_awaited()
+
+
+async def test_recompute_parent_aggregate_fails_closed_on_version_conflict() -> None:
+    """DB 실패 주입 -- `recompute_parent_aggregate`가 자식 롤업까지
+    성공했지만 `transition()` (optimistic lock/version check) 에서
+    예외가 나는 경우. 부모 상태는 절반만 갱신되면 안 되므로 예외를 전파한다."""
+    parent = _parent(status=OrderStatus.ACKNOWLEDGED, quantity=Decimal("10"))
+    repo = AsyncMock()
+    repo.get_for_update.return_value = parent
+    repo.list_children_for_update.return_value = [
+        _parent(status=OrderStatus.FILLED, quantity=Decimal("10"), filled_quantity=Decimal("10")),
+    ]
+    repo.transition.side_effect = asyncpg.exceptions.LockNotAvailableError("version conflict")
+    conn = object()
+
+    with pytest.raises(asyncpg.exceptions.LockNotAvailableError):
+        await recompute_parent_aggregate(
+            repo,
+            conn,
+            parent_order_id=parent.order_id,
+            trace_id=uuid4(),
+            occurred_at=datetime.now(timezone.utc),
+        )
+
+
+async def test_children_awaiting_cancel_propagates_db_failure() -> None:
+    """DB 실패 주입 -- `children_awaiting_cancel` 가 자식 목록 조회 중
+    예외를 내면 그대로 전파해야 한다. EM-A4 취소 전파는 부분 실행되면
+    안 되므로 fail-closed다."""
+    repo = AsyncMock()
+    repo.list_children_for_update.side_effect = asyncpg.exceptions.ConnectionDoesNotExistError(
+        "simulated connection drop"
+    )
+    conn = object()
+
+    with pytest.raises(asyncpg.exceptions.ConnectionDoesNotExistError):
+        await children_awaiting_cancel(repo, conn, parent_order_id=uuid4())
+    repo.list_children_for_update.assert_awaited()
 
 
 async def test_recompute_parent_aggregate_perf_budget_many_children() -> None:
