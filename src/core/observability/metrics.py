@@ -10,6 +10,7 @@ task-129)의 재구현이 아니라 그 위에 얹히는 얇은 어댑터라는 
 설치되지 않은 환경에서도 기본값인 `NullMetrics` 경로는 그대로 동작해야 하기 때문이다
 (§9 PLT-04 decision).
 """
+
 from __future__ import annotations
 
 import logging
@@ -67,9 +68,7 @@ class PrometheusMetrics:
         with self._lock:
             metric = store.get(name)
             if metric is None:
-                metric = factory(
-                    to_prom(name), name, list(label_names), registry=self._registry
-                )
+                metric = factory(to_prom(name), name, list(label_names), registry=self._registry)
                 store[name] = metric
             return metric
 
@@ -136,3 +135,13 @@ def safe_observe(
         logger.warning(
             "metrics.observe failed name=%s -- order path continues", name, exc_info=True
         )
+
+
+def safe_gauge(
+    metrics_port: MetricsPort, name: str, value: float, labels: dict[str, str] | None = None
+) -> None:
+    """Same rationale as `safe_counter`, for the `gauge` hook."""
+    try:
+        metrics_port.gauge(name, value, labels)
+    except Exception:
+        logger.warning("metrics.gauge failed name=%s -- order path continues", name, exc_info=True)

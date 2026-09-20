@@ -10,6 +10,7 @@ Spec: docs/specs/L4_platform_observability_tenancy_api_v1.0.md §2.1(A), §9 PLT
 내보내므로, 이 레지스트리는 `/readyz`(PLT-09)가 읽는 인메모리 상태이자
 Prometheus 노출의 원천 양쪽 역할을 겸한다.
 """
+
 from __future__ import annotations
 
 import threading
@@ -22,7 +23,13 @@ from src.core.observability.metric_names import (
     LOOP_TICK_COUNT_TOTAL,
     LOOP_TICK_DURATION_SECONDS,
 )
-from src.core.observability.metrics import MetricsPort, metrics
+from src.core.observability.metrics import (
+    MetricsPort,
+    metrics,
+    safe_counter,
+    safe_gauge,
+    safe_observe,
+)
 
 Clock = Callable[[], float]
 
@@ -73,8 +80,10 @@ class LoopHealth:
         기준이다."""
         port = self._port()
         loop_labels = {"loop": loop}
-        port.counter(LOOP_TICK_COUNT_TOTAL, {**loop_labels, "outcome": "ok" if ok else "error"})
-        port.observe(LOOP_TICK_DURATION_SECONDS, duration_s, loop_labels)
+        safe_counter(
+            port, LOOP_TICK_COUNT_TOTAL, {**loop_labels, "outcome": "ok" if ok else "error"}
+        )
+        safe_observe(port, LOOP_TICK_DURATION_SECONDS, duration_s, loop_labels)
 
         with self._lock:
             state = self._states.get(loop)
@@ -90,7 +99,7 @@ class LoopHealth:
                 state.consecutive_failures += 1
 
         age = self.last_success_age(loop)
-        port.gauge(LOOP_LAST_SUCCESS_AGE_SECONDS, age, loop_labels)
+        safe_gauge(port, LOOP_LAST_SUCCESS_AGE_SECONDS, age, loop_labels)
 
     def last_success_age(self, loop: str) -> float:
         """마지막 성공 이후 경과 시간(초). 한 번도 성공한 적 없으면 `+inf`
