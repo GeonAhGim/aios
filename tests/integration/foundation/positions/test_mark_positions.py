@@ -1,3 +1,6 @@
+# ratchet-allow: test doubles (FakeCandleStore, FakeReferenceRepository,
+#   FakeCalendarRepository) use raise NotImplementedError as fail-closed guards —
+#   any call path reaching these stubs indicates a bug in the test or code under test.
 """LB-14 `mark_positions`/`CandleMarkPriceSource`/`CandleFxRateSource`
 통합테스트 — 실 DB(TEST_DATABASE_URL) 대상.
 
