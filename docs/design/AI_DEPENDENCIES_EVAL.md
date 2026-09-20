@@ -1,172 +1,125 @@
-# AI_DEPENDENCIES_EVAL — AI 파이프라인 라이선스·의존성 확인 (AI-3)
+# AI_DEPENDENCIES_EVAL — AI 파이프라인 라이선스·의존성 평가 (AI-3)
 
-- 리프: AI-3 (`docs/specs/L4_ai_research_strategy_factory_v1.0.md` §9, §10)
-- 근거: ADR-2026-09-05-A(모델 공급자 추상화·ML 신호 모델), spec §10 "공급자 SDK·ML 라이브러리 라이선스는
-  AI-3에서 원문 확인(LightGBM MIT·PyTorch BSD·Ollama MIT로 알려져 있으나 확인 전 반입 금지)"
-- 형식: CH-0(`CHART_ENGINE_FORK_EVAL.md`, b0826da) / IND-9(`INDICATOR_OSS_EVAL.md`) 원문-확인 형식 재사용.
-  단 CH-0·IND-9는 **경쟁 후보 중 택1**을 채점했지만, 이 리프의 5개 패키지는 spec §2.1/§2.2/§2.5가 이미
-  지목한 확정 의존성이라 경쟁 채점표는 없다 — 각 패키지를 개별로 "반입 가/조건부/불가"만 판정한다.
-- 범위: **문서만.** `pyproject.toml` 의존성 추가, `src/foundation/ai/**` 코드 작성은 전부 후속 리프
-  (AI-6·AI-7·AI-15·AI-20) 몫이며 이 리프에서 하지 않았다.
-- 확인 대상: MCP SDK(`mcp`, AI-1/AI-15), Anthropic SDK(`anthropic`, AI-6), LightGBM(`lightgbm`, AI-19/20),
-  PyTorch(`torch`, AI-19/20), Ollama 클라이언트(`ollama`, AI-7/AI-20 로컬 LLM 경로).
-- 확인일: 2026-09-17. 모든 라이선스 원문은 각 패키지의 `pyproject.toml`/PyPI `project_urls.Repository`가
-  가리키는 GitHub 저장소에서 `raw.githubusercontent.com`으로 직접 읽었다(요약 아님, 원문 인용). 보조 사실
-  (버전·SPDX 분류자·wheel 크기·저장소 활성도)은 PyPI JSON API(`pypi.org/pypi/<name>/json`)와 GitHub REST
-  API(`api.github.com/repos/<owner>/<repo>`)로 실측했다. 확인하지 못한 항목은 §5에 "미확인"으로 남기고
-  추정하지 않았다.
+- 근거: `docs/specs/L4_ai_research_strategy_factory_v1.0.md` §2·§9·§10.
+- 형식: CH-0의 원문 근거 → 평가 축 → 비교표 → 채택 조건 → 검증 순서.
+- 재확인일: 2026-09-20. 아래 공식 저장소 LICENSE 원문을 웹 도구로 열어 확인했다.
+- 범위: 평가 문서와 문서 회귀 테스트. 의존성 설치·교체 및 FROZEN 영역 변경 없음.
+- 이전 문서의 버전·별 수·wheel 크기·Python 호환성·90개 고지 수치는 재현 자료가 없어 철회한다.
+  저장소 이전, NOTICE 부재, 모든 번들 구성요소의 라이선스도 이번 확인 사실에 포함하지 않는다.
 
-## 0. 채점 원칙 — spec §10의 사전 경고가 게이트
+## 0. 평가 원칙
 
-> "LightGBM MIT·PyTorch BSD·Ollama MIT로 **알려져 있으나 확인 전 반입 금지**"
+라이선스 원문 확인이 최우선이다. 확인 불가·조건 불충족이면 반입 보류한다.
+다섯 패키지는 서로 대체 후보가 아니므로 총점으로 하나를 선택하지 않는다.
+CH-0의 차트 fps·드로잉·TS 축은 N/A(서버 SDK·ML 의존성 평가)이며 아래 축으로 대체한다.
 
-spec 저자 자신이 "알려진 통념"과 "원문 확인"을 구분하라고 명시했다. 이 문서의 유일한 산출물은 그 구분을
-메우는 것이다: 각 패키지에 대해 (a) PyPI가 배포하는 wheel/sdist의 선언 라이선스, (b) 그 라이선스가
-가리키는 저장소의 `LICENSE` 원문, (c) 원문과 통념이 다른 지점(있다면)을 기록한다.
+| 축 | 값 | 판정 방법 |
+|---|---|---|
+| L: 루트 라이선스 | 확인 / 미확인 | 공식 LICENSE 원문과 고지 의무를 기록 |
+| A: 배포 아티팩트 | 확인 / 미확인 | 사용할 버전·해시·번들 및 전이 의존성 고지를 확인 |
+| R: 실행 호환성 | 확인 / 미확인 | 대상 Python·OS에서 설치·import·최소 호출 검증 |
+| 결론 | 조건부 / 보류 | L 확인이면 조건부 후보, L 미확인이면 보류. A/R 미확인은 설치 승인 아님 |
 
-라이선스 자유도가 최상위 게이트라는 점은 CH-0/IND-9와 동일하다: **AIOS는 public 모노레포이지만 루트에
-`LICENSE` 파일이 없다(OSS 라이선스 미선언 = 저작권 유보, IND-9 §0 판단 재확인). 제품은 테넌트 인증 뒤의
-유료 SaaS다.** 따라서 카피레프트 전파 의무(GPL/LGPL류)가 있는 패키지는 이 리프에서 즉시 탈락 대상이나,
-아래 5개는 전부 permissive 계열로 사전 필터링된 상태다(spec 저자가 이미 MIT/BSD로 알려진 것만 선정) —
-그럼에도 원문 확인 결과는 5개 전부 실제로 permissive임을 재확인했고, PyTorch는 통념("BSD")이 가리키지
-않는 부수 의무(하단 §2.4)를 실제로 갖고 있었다.
+루트의 허용적 라이선스만으로 모델 가중치·데이터·API 서비스 약관까지 승인하지 않는다.
+GPL/LGPL 등 별도 검토가 필요한 조건을 발견하면 제품 배포 방식과 함께 재검토하고 자동 승인하지 않는다.
 
-## 1. 라이선스 원문 확인 (조항 원문 인용)
+## 1. 라이선스 원문과 의무
 
-### 1.1 MCP SDK (`mcp`, PyPI 2.2.0, `github.com/modelcontextprotocol/python-sdk`)
-- PyPI 선언: `License: MIT`, classifier `License :: OSI Approved :: MIT License`.
-- 저장소 `LICENSE` 원문(전문, 요약 아님):
-  > "MIT License / Copyright (c) 2024 Anthropic, PBC / Permission is hereby granted, free of charge, to
-  > any person obtaining a copy of this software and associated documentation files (the "Software"), to
-  > deal in the Software without restriction, including without limitation the rights to use, copy,
-  > modify, merge, publish, distribute, sublicense, and/or sell copies of the Software... The above
-  > copyright notice and this permission notice shall be included in all copies or substantial portions
-  > of the Software."
-- GitHub `licensee`: `MIT`. 저장소에 별도 `NOTICE` 파일 없음 → 전파 의무 없음.
-- 결론: **원문·통념 일치.** 재배포·수정·상용 사용 전부 허용, 부담은 저작권고지 보존뿐.
+링크는 브랜치 HEAD이므로 변경될 수 있다. 아래 확인은 조회 당시 루트 원문에 한정한다.
+실제 반입 시 태그/커밋 SHA와 배포 파일 SHA-256을 별도로 고정해야 한다.
+짧은 인용은 전문을 대체하지 않으며 배포 시 원문 전체와 해당 고지를 보존한다.
 
-### 1.2 Anthropic SDK (`anthropic`, PyPI 1.6.0, `github.com/anthropics/anthropic-sdk-python`)
-- PyPI 선언: `License: MIT`, classifier `License :: OSI Approved :: MIT License`.
-- 저장소 `LICENSE` 원문(전문): "Copyright 2023 Anthropic, PBC." + MIT 표준 본문(1.1과 동일 조항). `NOTICE`
-  파일 없음.
-- 결론: **원문·통념 일치.** 의무 최소.
+### 1.1 MCP Python SDK (`mcp`)
 
-### 1.3 LightGBM (`lightgbm`, PyPI 4.7.0, `github.com/lightgbm-org/LightGBM` — 舊 `microsoft/LightGBM`,
-  2026년 중 `lightgbm-org` 조직으로 저장소 이전. `github.com/microsoft/LightGBM`는 301로 리다이렉트되며
-  코드 자체가 사라진 것은 아니다.)
-- PyPI 메타데이터에 `license`/`license_expression`/classifier가 전부 비어 있다(신형 PyPI 메타데이터 필드
-  미기재 — pandas-ta류 provenance 결함과 달리 배포 자체가 문제는 아니고 `pyproject.toml` 선언 누락).
-  wheel/sdist에 `license_files` 필드도 없어 **원문 확인은 저장소 `LICENSE`로만 가능**.
-- 저장소 `LICENSE` 원문(전문): "The MIT License (MIT) / Copyright (c) Microsoft Corporation / Copyright
-  (c) The LightGBM developers / Permission is hereby granted, free of charge..." — 1.1과 동일 MIT 표준
-  본문. GitHub `licensee`: `MIT`.
-- LightGBM Python 패키지는 TA-Lib과 유사하게 **C++ 코어를 컴파일해 바이너리로 번들**한다(win_amd64 wheel
-  1.4MB, `lib_lightgbm.dll` 정적 포함). C++ 코어와 Python 바인딩이 **같은 저장소, 같은 LICENSE 파일** 아래
-  있음을 저장소 구조로 확인했다 — TA-Lib처럼 래퍼/코어 라이선스가 분리돼 있지 않다.
-- 결론: **원문 확인 완료, 통념(MIT)과 일치.** PyPI 메타데이터 공백은 반입 차단 사유가 아니다(원문이
-  저장소에 명확히 존재).
+- [공식 LICENSE](https://raw.githubusercontent.com/modelcontextprotocol/python-sdk/main/LICENSE)
+- MIT. 귀속: Anthropic, PBC (2024).
+- 고지 조건 원문: “The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.”
+- 상용 사용·수정·재배포 허용 조항을 확인했다. 저작권·허가 고지 및 면책 본문을 보존한다.
+- AI-1/AI-15의 Python SDK 대상이며 TypeScript SDK 등 별도 패키지에는 이 판정을 전용하지 않는다.
 
-### 1.4 PyTorch (`torch`, PyPI 2.14.0, `github.com/pytorch/pytorch`)
-- PyPI `license_expression`(SPDX): `Apache-2.0 AND Apache-2.0 WITH LLVM-exception AND BSD-2-Clause AND
-  BSD-3-Clause AND BSL-1.0 AND MIT` — **단일 라이선스가 아니라 복합 표현식**이다. `license_files` 필드에
-  루트 `LICENSE` 외에 `third_party/**` 하위 **90개** 개별 `LICENSE` 파일이 나열된다(FP16, XNNPACK,
-  cutlass, flash-attention, protobuf, onnx, pybind11, sleef 등).
-- 루트 저장소 `LICENSE` 원문(전문, `curl raw.githubusercontent.com/pytorch/pytorch/main/LICENSE`로 확인):
-  > "From PyTorch: / Copyright (c) 2016- Facebook, Inc (Adam Paszke) ... [다수 기여자 귀속] ... From
-  > Caffe2: / Copyright (c) 2016-present, Facebook Inc. All rights reserved. ... Redistribution and use in
-  > source and binary forms, with or without modification, are permitted provided that the following
-  > conditions are met: 1. Redistributions of source code must retain the above copyright notice... 2.
-  > Redistributions in binary form must reproduce the above copyright notice... 3. Neither the names of
-  > Facebook, Deepmind Technologies, NYU, NEC Laboratories America and IDIAP Research Institute nor the
-  > names of its contributors may be used to endorse or promote products derived from this software
-  > without specific prior written permission. THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND
-  > CONTRIBUTORS "AS IS"..."
-  이는 **BSD 3-Clause**다(3항 "명칭 사용 금지" 조항 포함 — spec §10의 "PyTorch BSD" 통념과 일치).
-- **통념과 다른 지점(원문 확인으로 새로 드러남):** GitHub `licensee`가 이 저장소를 `NOASSERTION`(자동 분류
-  불가)으로 판정한다 — 루트 `LICENSE`가 PyTorch(BSD-3 계열)와 Caffe2(별도 귀속 모델, "각 기여자가 자신의
-  기여분에 대한 저작권 보유") 두 프로젝트 합병 이력을 한 파일에 담고 있어 단일 SPDX 식별자로 환원되지
-  않는다. 게다가 wheel은 third_party 하위 90개 컴포넌트(Apache-2.0·BSL-1.0·MIT 등 혼재)를 **정적으로
-  컴파일해 바이너리에 포함**한다(win_amd64 wheel 124.1MB — MCP SDK 대비 340배, LightGBM 대비 89배).
-- 결론: **원문 확인 완료, 핵심 라이선스는 BSD-3(통념과 일치)이나 의무 무게는 LightGBM/MCP/Anthropic보다
-  훨씬 무겁다.** 재배포·수정 자체는 permissive이지만, AIOS가 torch를 포함해 재배포(예: 온프레미스 배포판)
-  할 경우 루트 BSD-3 고지 + third_party 90개 컴포넌트 고지 전부를 동봉해야 조건을 충족한다. AI-19/20이
-  torch를 실제로 반입하는 시점에 `docs/design/THIRD_PARTY_NOTICES.md`(또는 동등 파일)에 이 목록을 옮겨
-  적어야 한다(IND-10이 TA-Lib에 대해 요구한 것과 동일 패턴).
+### 1.2 Anthropic Python SDK (`anthropic`)
 
-### 1.5 Ollama 클라이언트 (`ollama`, PyPI 0.6.2, `github.com/ollama/ollama-python`)
-- PyPI `license_expression`: `MIT`.
-- 저장소 `LICENSE` 원문(전문): "MIT License / Copyright (c) Ollama" + MIT 표준 본문(1.1과 동일 조항).
-  GitHub `licensee`: `MIT`. `NOTICE` 파일 없음.
-- 주의: spec §2.2는 로컬 LLM을 **OpenAI 호환 HTTP 엔드포인트**(`adapters/openai_compatible_provider.py`)
-  로 통일해 붙이라고 명시한다 — 이 `ollama` PyPI 패키지(공식 Python 클라이언트, Ollama 자체 REST API용)는
-  AI-7의 기본 경로가 아니다. 이 패키지는 AI-3 task 제목이 명시적으로 지정했으므로 원문 확인 범위에는
-  포함했으나, **채택 여부는 AI-7 구현 시점의 설계 결정**(OpenAI 호환 경로로 충분하면 이 패키지 자체를
-  의존성에 추가할 필요가 없을 수 있다)이며 이 문서가 그 결정을 대신하지 않는다.
-- 결론: **원문 확인 완료, 통념(MIT)과 일치.** 의무 최소.
+- [공식 LICENSE](https://raw.githubusercontent.com/anthropics/anthropic-sdk-python/main/LICENSE)
+- MIT 본문. 귀속: Anthropic, PBC (2023).
+- 고지 조건 원문: “The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.”
+- SDK의 상용 사용·수정·재배포 시 저작권·허가 고지와 면책을 보존한다.
+- AI-6 대상. SDK 라이선스는 유료 API 이용 조건·데이터 처리 조건을 대신하지 않는다.
 
-## 2. 저장소 활성도 (참고 지표, 게이트 축은 아님)
+### 1.3 LightGBM (`lightgbm`)
 
-GitHub REST API로 확인(2026-09-17 기준):
+- [공식 LICENSE](https://raw.githubusercontent.com/microsoft/LightGBM/master/LICENSE)
+- MIT. 귀속: Microsoft Corporation 및 The LightGBM developers.
+- 고지 조건 원문: “The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.”
+- 루트 원문은 상용 사용·수정·재배포를 허용한다. Python 배포물의 네이티브 라이브러리와
+  전이 의존성까지 동일 조건이라고 추정하지 않고 실제 배포물별 고지를 확인한다.
+- AI-19/20 대상. PyPI 메타데이터 누락 여부·wheel 내용은 이번에 미검증이다.
 
-| 패키지 | 저장소 | ★ | 최근 push | archived |
-|---|---|---|---|---|
-| mcp | modelcontextprotocol/python-sdk | 24,314 | 2026-09-16 | false |
-| anthropic | anthropics/anthropic-sdk-python | 3,904 | 2026-09-15 | false |
-| lightgbm | lightgbm-org/LightGBM | 18,770 | 2026-09-13 | false |
-| torch | pytorch/pytorch | 103,059 | 2026-09-16 | false |
-| ollama | ollama/ollama-python | 10,534 | 2026-09-16 | false |
+### 1.4 PyTorch (`torch`)
 
-5개 전부 활발(30일 이내 push, archived=false) — 유지보수 축에서 탈락 사유 없음.
+- [공식 LICENSE](https://raw.githubusercontent.com/pytorch/pytorch/main/LICENSE)
+- BSD-3-Clause 계열 본문과 PyTorch/Caffe2 및 여러 기여자 귀속을 확인했다.
+- §1 원문: “Redistributions of source code must retain the above copyright notice, this list of conditions and the following disclaimer.”
+- §2는 바이너리 재배포 시 문서 등 배포 자료에 저작권·조건·면책 재현을 요구한다.
+  §3은 사전 서면 허가 없이 명칭을 제품 보증·홍보에 사용하는 것을 금지한다.
+- AI-19/20 대상. 루트 BSD 조건은 wheel 전체에 대한 단일 라이선스 판정이 아니다.
+  third_party 및 CPU/CUDA 등 선택한 배포물의 구성요소별 LICENSE/NOTICE를 확인하여
+  `THIRD_PARTY_NOTICES.md` 또는 동등한 배포 고지에 반영해야 한다. 개수는 미검증이다.
 
-## 3. 런타임 호환 (실측: PyPI JSON `requires_python` + wheel 목록)
+### 1.5 Ollama Python 클라이언트 (`ollama`)
 
-| 패키지 | `requires_python` | 저장소 `>=3.10` 요구(repo `pyproject.toml`)와 호환 | win_amd64 wheel 존재 |
-|---|---|---|---|
-| mcp | `>=3.10` | 가 | 365.7 KB (pure-Python, `py3-none-any`) |
-| anthropic | `>=3.10` | 가 | 1,249.1 KB (pure-Python, `py3-none-any`) |
-| lightgbm | `>=3.10` | 가 | 1.4 MB (cp310 전용 바이너리) |
-| torch | `>=3.10` | 가 | 124.1 MB (cp310 전용 바이너리, CUDA 미포함 CPU 빌드로 추정 — 별도 `nvidia-*` 패키지 의존 없음을 wheel 메타데이터로 확인) |
-| ollama | `>=3.8` | 가(하한이 저장소보다 낮아 문제 없음) | 15.1 KB (pure-Python, `py3-none-any`) |
+- [공식 LICENSE](https://raw.githubusercontent.com/ollama/ollama-python/main/LICENSE)
+- MIT. 귀속: Ollama.
+- 고지 조건 원문: “The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.”
+- 클라이언트의 상용 사용·수정·재배포 시 저작권·허가 고지와 면책을 보존한다.
+- Ollama 서버·다운로드 모델 가중치의 라이선스는 별도 확인 대상이다.
+  spec §2.2의 AI-7 기본 경로는 OpenAI 호환 HTTP이므로 이 클라이언트 설치는 필수가 아니다.
 
-pandas-ta(IND-9에서 Python ≥3.12 요구로 반입 자체가 거부됐던 사례)와 달리, 5개 전부 현재 venv
-(Python 3.10.11)와 호환된다. torch의 124.1MB는 AI-19/20 착수 시 CI 캐시·아티팩트 크기 예산에 반영해야
-할 실측치로 남긴다(이 문서 범위 밖 — CI 배선은 후속 리프).
+## 2. 런타임·의존성 확인 범위
 
-## 4. 결론 — 리프별 반입 판정
+로컬 `pyproject.toml`은 Python `>=3.10`을 요구하며 `lightgbm>=4.7,<5.0`을 이미 선언한다.
+나머지 네 패키지는 직접 의존성 목록에 없다. 이는 설치 환경의 전체 패키지 목록을 뜻하지 않는다.
+LightGBM 선언 옆의 기존 “no conditions attached” 주석은 이번 §4의 조건부 판정 근거가 아니다.
+이 문서는 기존 설치를 검증한 것으로 간주하지 않으며 해당 선언은 이 작업에서 변경하지 않는다.
 
-| 패키지 | 판정 | 근거 | 착수 조건(해당 리프에서) |
-|---|---|---|---|
-| **mcp** | 반입 가 | MIT, NOTICE 없음, 활발, 3.10 호환 | 없음 |
-| **anthropic** | 반입 가 | MIT, NOTICE 없음, 활발, 3.10 호환 | 없음 |
-| **lightgbm** | 반입 가 | 원문 MIT(저장소 확인, PyPI 메타데이터 공백은 무해), 활발, 3.10 호환 | 없음 |
-| **torch** | 조건부 가 | 핵심 BSD-3는 permissive이나 third_party 90개 컴포넌트 고지 의무가 있다 | AI-19/20 반입 시 `THIRD_PARTY_NOTICES.md`(또는 동등 파일)에 루트 BSD-3 + third_party 목록 동봉 |
-| **ollama** | 반입 가(선택적) | MIT, NOTICE 없음. 단 AI-7 기본 경로는 OpenAI 호환 HTTP이므로 실제 의존성 추가 여부는 AI-7 설계 결정 | AI-7 구현 시점에 실제로 필요한지 재확인 |
+아래 항목은 전부 미검증으로 남긴다: 선택 버전의 Requires-Python, Windows/Linux 및 CPU/GPU
+wheel 가용성, 전이 의존성 충돌, 설치 용량, import/호출 성공, 취약점 상태와 유지보수 활성도.
+버전 범위가 존재한다는 사실만으로 위 조건을 통과했다고 판단하지 않는다.
 
-카피레프트(GPL/LGPL) 탈락 대상은 이 5개 중 없다 — spec 저자의 사전 통념(MIT/BSD)이 원문 확인으로
-전부 재확인됐고, 유일한 신규 발견은 torch의 라이선스가 "BSD" 한 줄로 요약할 수 없는 복합 표현식이라는
-점(§1.4)이다.
+## 3. CH-0 비교표
 
-## 5. 미확인 항목 (추정하지 않음)
+| 패키지 | 루트 라이선스 | L | A | R | 판정 |
+|---|---|---|---|---|---|
+| mcp | MIT | 확인 | 미확인 | 미확인 | 조건부 |
+| anthropic | MIT | 확인 | 미확인 | 미확인 | 조건부 |
+| lightgbm | MIT | 확인 | 미확인 | 미확인 | 조건부 |
+| torch | BSD-3-Clause 계열 | 확인 | 미확인 | 미확인 | 조건부 |
+| ollama | MIT | 확인 | 미확인 | 미확인 | 조건부 |
 
-- LightGBM `microsoft/LightGBM` → `lightgbm-org/LightGBM` 조직 이전의 정확한 시점·사유(현재 접근 가능한
-  GitHub API 응답으로는 이전 완료 사실과 301 리다이렉트만 확인 가능, 이전 공지문 원문은 미확인).
-- torch `NOASSERTION` 판정이 향후 GitHub `licensee` 버전 업그레이드로 바뀔지 여부(현재 스냅샷 기준
-  기록).
-- torch win_amd64 wheel이 실제로 CUDA 코드를 전혀 포함하지 않는지(바이너리 내부 실행 검증은 하지 않았고,
-  wheel이 별도 `nvidia-*` 의존성을 선언하지 않는다는 메타데이터 사실만 확인했다).
-- ollama-python 패키지가 AI-7에서 실제로 쓰일지 여부(§1.5 — 설계 결정 미확정, 이 문서 범위 밖).
+## 4. 결론 — 후속 리프 반입 조건
 
-## 6. 테스트 가능성에 대한 메모 (D2 체크리스트 미충족 사유)
+루트 라이선스는 다섯 패키지 모두 허용적이다. **미확인 아티팩트의 무조건 반입은 금지한다.**
+AI-6·AI-15는 각각 SDK 경계에서, AI-19/20은 ML 어댑터 경계에서 다음 증거를 남긴다.
 
-이 리프는 CH-0·IND-9와 동일하게 **문서 산출물뿐**이며 코드 변경이 0이다(`git diff --stat` 대상은
-`docs/design/AI_DEPENDENCIES_EVAL.md` 1개 파일뿐). ADR-2026-09-09-C의 D2 하한(negative test ≥3, 실패
-주입 1, 성능 단언 1, 게이트 적색 재현 1)은 **N/A(테스트 가능한 코드가 없음)** — CH-0(task-1133)이
-`DEPTH_CH.md` 감사에서 "문서+측정스크립트 리프라 테스트 인프라 자체가 없음"으로 D0 판정을 받은 것과
-동일한 구조적 사유다. 이 문서 자체에는 벤치 스크립트도 없다(CH-0과 달리 AI-3 DoD는 "CH-0 형식"만
-요구하고 별도 실측 스크립트를 요구하지 않는다 — spec §9 AI-3 행 참고). depth = D0(N/A, 문서 전용 리프).
+1. 사용할 버전과 저장소 태그/커밋, wheel/sdist 출처 및 SHA-256을 기록한다.
+2. 해당 버전 LICENSE 전문·NOTICE·번들/전이 의존성을 조사하고 배포 고지를 보존한다.
+   torch는 CPU/CUDA 배포 선택에 따라 재검토하며 모델 가중치는 따로 판정한다.
+3. 대상 Python·OS에서 설치·import·최소 호출을 검증하고 충돌·실패 로그도 기록한다.
+4. 확인 불가 또는 의무 미충족은 반입 보류한다. AI-7의 ollama는 HTTP 경로로 충분한지 먼저 판단한다.
 
-## 7. 게이트
+## 5. 불변조건 확인
 
-이 문서가 AI-3의 전체 산출물이다. **AI-19/20(ML 신호 모델의 LightGBM/torch 실제 반입)과 AI-7(로컬 LLM
-경로에서 ollama 클라이언트 채택 여부)은 이 문서의 §4 판정을 전제로 진행하며, torch를 실제로
-`pyproject.toml`에 추가하는 시점에 §1.4의 third_party 고지 의무를 이행해야 한다.**
+I-01~I-05·I-09: 실행·주문·장부·아티팩트 코드 변경 없음.
+I-06·I-08: SDK 허용이 인간 세션 권한 상속이나 MCP의 독자 인가 로직을 허용하지 않는다.
+I-07·I-10: 이 문서는 정책 엔진 또는 런타임 강제 게이트가 아니다. 아래 테스트는 문서 계약만 검사한다.
+I-11: 라이선스 판정은 PAPER 실행의 1회성 확인 토큰 요건을 대체하지 않는다.
+
+## 6. 검증 및 한계
+
+`tests/unit/scripts/test_ai_dependencies_eval.py`는 실제 문서의 다섯 출처·평가표·반입 조건을 검사한다.
+출처 삭제, 패키지 행 삭제, 미확인 상태의 무조건 승인 변조를 각각 거부하는 negative test를 포함한다.
+외부 네트워크와 패키지 설치 없이 재현할 수 있으며 외부 원문의 진위·미래 변경을 보증하지 않는다.
+
+실행: `python -m pytest -q -p no:cacheprovider tests/unit/scripts/test_ai_dependencies_eval.py`.
+변경한 Python 테스트는 `python -m py_compile tests/unit/scripts/test_ai_dependencies_eval.py`로 검사한다.
+D2 실패 주입은 문서 변조로 검증한다. 성능 수치·실행 게이트 적색·replay_verify는
+N/A(런타임 구현·CI 게이트를 도입하지 않는 문서 평가 리프). 새 CI 게이트 도입 없음.
