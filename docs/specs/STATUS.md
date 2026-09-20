@@ -1,10 +1,10 @@
 # 명세 리프 진행 현황 (자동 생성 — C:/aios/pm/spec_status.py, 편집 금지)
 
-갱신: 2026-09-17T17:31:56+00:00
+갱신: 2026-09-20T01:29:40+00:00
 
 | 명세 | 총 | done | 재오픈 | inflight | untouched | hold | done% | 깊이(done) |
 |---|---|---|---|---|---|---|---|---|
-| ai_research_strategy_factory | 23 | 23 | 1 | 0 | 0 | 0 | 100% | {'D2': 1, 'D?': 22} |
+| ai_research_strategy_factory | 23 | 23 | 2 | 0 | 0 | 0 | 100% | {'D2': 1, 'D?': 22} |
 | analytics_authoring_backtest_marketplace | 107 | 87 | 12 | 3 | 0 | 17 | 81% | {'D1': 1, 'D2': 32, 'D3': 19, 'D?': 35} |
 | compliance_and_regulatory | 20 | 19 | 0 | 0 | 0 | 1 | 95% | {'D2': 6, 'D3': 12, 'D?': 1} |
 | ems_routing_algos_and_tca | 18 | 17 | 5 | 1 | 0 | 0 | 94% | {'D2': 5, 'D3': 2, 'D?': 10} |
@@ -17,6 +17,6 @@
 | research_data_and_market_ecosystem | 18 | 16 | 3 | 2 | 0 | 0 | 89% | {'D2': 3, 'D3': 2, 'D?': 11} |
 | risk_and_safety | 58 | 53 | 3 | 0 | 0 | 5 | 91% | {'D3': 27, 'D?': 26} |
 | strategy_portfolio_backtest | 46 | 42 | 15 | 4 | 0 | 0 | 91% | {'D2': 14, 'D?': 28} |
-| **합계** | 482 | 445 | 55 | 14 | 0 | 23 | 92% | |
+| **합계** | 482 | 445 | 56 | 14 | 0 | 23 | 92% | |
 
 상태 정의: done = 해당 ID를 제목/명세에 포함한 implement task가 done(재오픈 = done인데 열린 task도 있음: DEEPEN·묶음 QA), inflight = 열린 implement task만 존재, untouched = task 미발행, hold = spec_hold.yaml. depth = QA task note의 `depth=D<n>` 최대값(ADR-2026-09-09-C: done 하한 D2, 안전축 D3). D? = QA 등급 미기록.
