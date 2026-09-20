@@ -114,12 +114,14 @@ def _validated_candles(columns: CandleColumns, key: SeriesKey) -> list[CandleRec
 @dataclass(frozen=True, slots=True)
 class BackfillSegmentResult:
     """Result of processing one gap. `stored=0` means the provider reported
-    no candles for that range (not an error) — in that case `span` is
-    `None` and no coverage span is created either (§4.1 no silent zero-fill)."""
+    no candles for that range (not an error). `spans` contains every saved
+    continuous range; `span` is available only for a single continuous range.
+    Empty responses create no coverage (§4.1 no silent zero-fill)."""
 
     gap: CoverageGap
     stored: int
     span: StoredCoverageSpan | None
+    spans: tuple[StoredCoverageSpan, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -184,16 +186,36 @@ async def run_backfill_job(
             continue
 
         stored_count = await store.upsert_batch(conn, uuid4(), candles)
-        new_span = StoredCoverageSpan(
-            instrument_id=listing.instrument_id,
-            venue=listing.venue,
-            timeframe=tf,
-            quality=quality,
-            start=candles[0].open_time,
-            end=candles[-1].open_time + duration(tf),
-        )
-        saved_span = await coverage_repo.upsert_span(conn, new_span)
-        merged = merge_spans([*merged, _to_merge_span(saved_span, asset_class=asset_class)])
-        segments.append(BackfillSegmentResult(gap=gap, stored=stored_count, span=saved_span))
+        # Delegate adjacency/ordering to the registry; never bridge absent candles.
+        returned_spans = merge_spans([
+            MergeCoverageSpan(
+                instrument_id=listing.instrument_id,
+                venue=listing.venue,
+                asset_class=asset_class,
+                timeframe=tf,
+                quality_grade=_QUALITY_TO_GRADE[quality],
+                start_at=candle.open_time,
+                end_at=candle.open_time + duration(tf),
+            )
+            for candle in candles
+        ])
+        saved_spans: list[StoredCoverageSpan] = []
+        for span in returned_spans:
+            saved_spans.append(await coverage_repo.upsert_span(conn, StoredCoverageSpan(
+                instrument_id=listing.instrument_id,
+                venue=listing.venue,
+                timeframe=tf,
+                quality=quality,
+                start=span.start_at,
+                end=span.end_at,
+            )))
+        merged = merge_spans([
+            *merged, *(_to_merge_span(s, asset_class=asset_class) for s in saved_spans)
+        ])
+        segments.append(BackfillSegmentResult(
+            gap=gap, stored=stored_count,
+            span=saved_spans[0] if len(saved_spans) == 1 else None,
+            spans=tuple(saved_spans),
+        ))
 
     return BackfillJobResult(gaps_planned=len(gaps), segments=segments, merged_coverage=merged)

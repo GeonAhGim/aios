@@ -98,7 +98,6 @@ def test_size_rejects_zero_total_equity() -> None:
 
 def test_size_monkeypatch_dependency_error(monkeypatch: pytest.MonkeyPatch) -> None:
     """Failure-injection: if a downstream dependency raises, the caller propagates it."""
-    original_validate = PortfolioStateInput.model_validate
 
     def broken_validate(data: Any) -> PortfolioStateInput:
         raise RuntimeError("database connection lost")
