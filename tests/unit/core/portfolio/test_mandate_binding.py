@@ -15,6 +15,8 @@ from datetime import datetime, timezone
 from decimal import Decimal
 from uuid import uuid4
 
+import pytest
+
 from src.core.portfolio.mandate_binding import (
     POLICY_FORBIDDEN_ASSET,
     POLICY_MAX_SINGLE_INSTRUMENT,
@@ -266,6 +268,155 @@ def test_unclamped_order_approves_full_quantity_with_no_reasons():
     assert result.denied is False
     assert result.quantity == Decimal("10")
     assert result.reasons == []
+
+
+# --- negative tests: invariant-violating inputs must be rejected ---------------
+
+
+def test_nan_quantity_denied():
+    """NaN qty triggers _is_unsafe_input → denied with MAX_SINGLE_INSTRUMENT."""
+    result = bind(
+        qty=Decimal("nan"),
+        price=Decimal("100"),
+        symbol="BTC/USDT",
+        agg=agg(),
+        mandate=mandate(),
+    )
+    assert result.denied is True
+    assert result.quantity == Decimal("0")
+    assert result.reasons == [POLICY_MAX_SINGLE_INSTRUMENT]
+
+
+def test_nan_price_denied():
+    """NaN price triggers _is_unsafe_input → denied."""
+    result = bind(
+        qty=Decimal("10"),
+        price=Decimal("nan"),
+        symbol="BTC/USDT",
+        agg=agg(),
+        mandate=mandate(),
+    )
+    assert result.denied is True
+    assert result.quantity == Decimal("0")
+    assert result.reasons == [POLICY_MAX_SINGLE_INSTRUMENT]
+
+
+def test_nan_total_equity_rejected_by_portfolio_aggregate():
+    """NaN total_equity is rejected by PortfolioAggregate (Pydantic finite_number
+    constraint) before bind() even runs — fail-closed at the model layer."""
+    from pydantic import ValidationError
+
+    with pytest.raises(ValidationError):
+        agg(total_equity=Decimal("nan"))
+
+
+def test_zero_quantity_denied():
+    """Zero qty is unsafe input → denied, never approved."""
+    result = bind(
+        qty=Decimal("0"),
+        price=Decimal("100"),
+        symbol="BTC/USDT",
+        agg=agg(),
+        mandate=mandate(),
+    )
+    assert result.denied is True
+    assert result.quantity == Decimal("0")
+    assert result.reasons == [POLICY_MAX_SINGLE_INSTRUMENT]
+
+
+def test_negative_price_denied():
+    """Negative price is unsafe input → denied (would make qty*price look small)."""
+    result = bind(
+        qty=Decimal("10"),
+        price=Decimal("-100"),
+        symbol="BTC/USDT",
+        agg=agg(),
+        mandate=mandate(),
+    )
+    assert result.denied is True
+    assert result.quantity == Decimal("0")
+    assert result.reasons == [POLICY_MAX_SINGLE_INSTRUMENT]
+
+
+def test_zero_total_equity_denied():
+    """Zero total_equity is unsafe input → denied."""
+    result = bind(
+        qty=Decimal("10"),
+        price=Decimal("100"),
+        symbol="BTC/USDT",
+        agg=agg(total_equity=Decimal("0")),
+        mandate=mandate(),
+    )
+    assert result.denied is True
+    assert result.quantity == Decimal("0")
+    assert result.reasons == [POLICY_MAX_SINGLE_INSTRUMENT]
+
+
+def test_revision_hash_mismatch_raises():
+    """Tampered revision_hash raises MandateRevisionHashMismatchError — fail-closed."""
+    from src.core.portfolio.mandate_binding import MandateRevisionHashMismatchError
+
+    tampered = mandate(
+        max_total_exposure_pct=100.0,
+    )
+    tampered.revision_hash = tampered.revision_hash + "x"
+    try:
+        bind(
+            qty=Decimal("10"),
+            price=Decimal("100"),
+            symbol="BTC/USDT",
+            agg=agg(),
+            mandate=tampered,
+        )
+    except ValueError as exc:
+        assert isinstance(exc, MandateRevisionHashMismatchError)
+        assert "hash mismatch" in str(exc)
+    else:
+        raise AssertionError("Expected MandateRevisionHashMismatchError on hash mismatch")
+
+
+def test_forbidden_asset_precedes_all_clamps():
+    """FORBIDDEN_ASSET denial happens before any clamp arithmetic — even if
+    clamps would also bind, only FORBIDDEN_ASSET appears in reasons."""
+    result = bind(
+        qty=Decimal("1000"),
+        price=Decimal("1"),
+        symbol="SANCTIONED/USDT",
+        agg=agg(total_equity=Decimal("10000"), per_symbol_pct={"SANCTIONED/USDT": Decimal("999")}),
+        mandate=mandate(
+            max_single_instrument_pct=5.0,
+            max_total_exposure_pct=10.0,
+            min_cash_buffer_pct=50.0,
+            forbidden_assets=["SANCTIONED/USDT"],
+        ),
+    )
+    assert result.denied is True
+    assert result.quantity == Decimal("0")
+    assert result.reasons == [POLICY_FORBIDDEN_ASSET]
+    # Verify no clamp reason leaks into the denial
+    assert POLICY_MAX_SINGLE_INSTRUMENT not in result.reasons
+
+
+# --- failure injection: dependency exception -----------------------------------
+
+
+def test_mandate_revision_hash_mismatch_error_type_is_value_error_subclass():
+    """MandateRevisionHashMismatchError must be a ValueError subclass so that
+    callers catching ValueError around bind() still pick it up (fail-closed)."""
+    from src.core.portfolio.mandate_binding import MandateRevisionHashMismatchError
+
+    assert issubclass(MandateRevisionHashMismatchError, ValueError)
+
+
+def test_float_quantity_rejected_by_binding_result_validator():
+    """BindingResult._no_float validator must reject float quantities — a
+    common bug vector when callers pass float instead of Decimal."""
+    from pydantic import ValidationError
+
+    from src.core.portfolio.mandate_binding import BindingResult
+
+    with pytest.raises(ValidationError):
+        BindingResult(quantity=10.5, reasons=[], denied=False)
 
 
 # --- D2 성능 단언 (performance assertion) --------------------------------------
