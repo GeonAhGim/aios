@@ -35,6 +35,7 @@ def register_routers(app: FastAPI) -> None:
         marketplace,
         metrics,
         notifications,
+        options_chain,
         personal,
         portfolio,
         positions,
@@ -83,6 +84,7 @@ def register_routers(app: FastAPI) -> None:
     app.include_router(foundation_performance.router)
     app.include_router(charting.router)  # CH-5(task-1557) /v1/foundation/charting
     app.include_router(market_data.router)  # LA-24(task-1376) /v1/foundation/market-data
+    app.include_router(options_chain.router)  # DC-26(task-2663) option chain
     app.include_router(scripts.router)  # DSL-12(task-1535) /v1/scripts/compile
     app.include_router(indicators.router)  # IND-12(task-1730) /v1/indicators
     app.include_router(backtests.router)  # BT-10c(task-1619) /v1/backtests/quick
