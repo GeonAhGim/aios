@@ -252,3 +252,30 @@ def test_write_recovery_config_escapes_windows_backslashes(tmp_path: Path):
     assert "wal_archive" in conf_content
     # 백슬래시가 남아있지 않아야 함
     assert "\\" not in conf_content or '""' in conf_content  # double-quote 내부면 허용
+
+
+def test_pg_ctl_start_includes_log_file_flag_for_windows(tmp_path: Path):
+    """pg_ctl start 호출에 -l 플래그(로그 파일 경로)가 반드시 포함됨을 확인한다.
+
+    Windows에서 capture_output=True 로 pg_ctl start 를 호출하면 postgres(daemonized child)가
+    stdout/stderr PIPE handle 을 물려받아 Python 의 communicate() 가 EOF 를 영원히 못 받는
+    데드락이 발생한다. -l 플래그로 로그를 파일로 직접 리다이렉트하면 handle 상속 체인이
+    끊겨 이 문제가 해결된다(task-3933).
+    """
+
+    run_cmd, calls = _dispatching_run_cmd()
+    restore_drill.run_drill(**_common_kwargs(tmp_path, run_cmd=run_cmd))
+
+    # pg_ctl start 호출 하나만 추출
+    start_calls = [c for c in calls if c[0] == "pg_ctl" and c[1] == "start"]
+    assert len(start_calls) == 1, f"expected 1 start call, got {len(start_calls)}"
+    start_cmd = start_calls[0]
+
+    # -l 플래그와 로그 파일 경로가 포함되어야 함
+    assert "-l" in start_cmd, (
+        "pg_ctl start 에 -l 플래그가 없다 — Windows pipe-inheritance 데드락 원인"
+    )
+    log_idx = start_cmd.index("-l")
+    log_path = Path(start_cmd[log_idx + 1])
+    assert log_path.name == "pg_ctl_start.log"
+    assert log_path.parent == tmp_path / "restore_pgdata"
