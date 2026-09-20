@@ -7,6 +7,7 @@ Spec: docs/specs/L4_market_data_positions_ledger_v1.0.md#§3.1 (A), §9.2 LA-1.
 실패"). 필드 추가는 minor 변경이므로 허용되고, 그 경우에만 fixture를 함께
 갱신한다.
 """
+
 import json
 from datetime import date, datetime, timezone
 from decimal import Decimal
@@ -191,4 +192,98 @@ def test_calendar_day_naive_open_at_rejected() -> None:
             open_at=datetime(2026, 9, 3, 0, 0),
             close_at=_now(),
             source="test",
+        )
+
+
+# ── DEEPEN: negative tests (LA-1) ──────────────────────────────────────────
+
+
+def test_register_instrument_command_naive_listed_at_rejected() -> None:
+    """RegisterInstrumentCommand.listed_at은 AwareDatetime — naive 거부."""
+    with pytest.raises(ValidationError):
+        v1.RegisterInstrumentCommand(
+            venue=v1.Venue.KIS_KRX,
+            venue_symbol="005930.KS",
+            asset_class=AssetClass.KR_EQUITY,
+            tick_size=Decimal("1"),
+            lot_size=Decimal("1"),
+            listed_at=datetime(2026, 9, 3, 0, 0),
+            actor_subject_id=uuid4(),
+            trace_id=uuid4(),
+        )
+
+
+def test_lifecycle_event_command_naive_effective_at_rejected() -> None:
+    """LifecycleEventCommand.effective_at은 AwareDatetime — naive 거부."""
+    with pytest.raises(ValidationError):
+        v1.LifecycleEventCommand(
+            instrument_id=uuid4(),
+            event="LIST",
+            effective_at=datetime(2026, 9, 3, 0, 0),
+            source_ref="test",
+            actor_subject_id=uuid4(),
+            trace_id=uuid4(),
+        )
+
+
+def test_quality_issue_naive_open_time_rejected() -> None:
+    """QualityIssue.open_time가 AwareDatetime | None — None은 허용, naive datetime은 거부."""
+    with pytest.raises(ValidationError):
+        v1.QualityIssue(
+            type=v1.QualityIssueType.GAP,
+            severity=v1.Severity.REJECT,
+            open_time=datetime(2026, 9, 3, 0, 0),
+            detail={"detail": "gap detected"},
+        )
+
+
+def test_ingest_batch_result_missing_required_rejected() -> None:
+    """IngestBatchResult는 모든 필드가 NOT NULL — 누락 시 ValidationError."""
+    with pytest.raises(ValidationError):
+        v1.IngestBatchResult(  # type: ignore[call-arg]
+            batch_id=uuid4(),
+            source="test",
+            venue=v1.Venue.KIS_KRX,
+            instrument_id=uuid4(),
+            timeframe=v1.Timeframe.M1,
+            range_start=_now(),
+            range_end=_now(),
+            request_fingerprint="abc",
+            verdict=v1.QualityVerdict(
+                verdict=v1.Verdict.ACCEPT,
+                accepted=1,
+                quarantined=0,
+                rejected=0,
+                issues=[],
+            ),
+            batch_hash="sha256fake",
+            # audit_event_id 누락
+        )
+
+
+def test_data_quality_metrics_missing_key_rejected() -> None:
+    """DataQualityMetrics.key는 필수 — 누락 시 ValidationError."""
+    with pytest.raises(ValidationError):
+        v1.DataQualityMetrics(  # type: ignore[call-arg]
+            staleness_s=300,
+            gap_ratio_24h=Decimal("0.01"),
+            reject_ratio_24h=Decimal("0.00"),
+            last_batch_id=None,
+        )
+
+
+# ── DEEPEN: failure-injection test (LA-1) ─────────────────────────────────
+
+
+def test_quality_issue_detail_type_enforced() -> None:
+    """QualityIssue.detail은 dict[str, str] — value가 str이 아니면 거부.
+
+    monkeypatch로 detail value에 int를 주입해 타입 불일치를 유발한다.
+    """
+    with pytest.raises(ValidationError):
+        v1.QualityIssue(
+            type=v1.QualityIssueType.SPIKE,
+            severity=v1.Severity.WARN,
+            open_time=None,
+            detail={"price": 12345},  # type: ignore[dict-item]  # int should be rejected
         )
