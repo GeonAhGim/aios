@@ -548,6 +548,77 @@ async def test_equity_baseline_persists_and_survives_simulated_restart(pool):
     assert row_after_restart["equity_peak_value"] == Decimal("10000.0000000000")
 
 
+async def test_nonexistent_execution_id_raises_value_error(pool):
+    """LB-12 — 존재하지 않는 execution_id를 전달하면 ValueError를 던진다.
+    _load_execution_context가 "존재하지 않는 실행입니다" 메시지로 단언한다."""
+    with pytest.raises(ValueError, match="존재하지 않는 실행"):
+        await run_execution_tick(pool, FakeExchangeAdapter(), 99999999, **_engines())
+
+
+async def test_invalid_fsm_state_raises_value_error(pool):
+    """LB-12 — DB CHECK 제약 조건이 FSMState enum 범위를 벗어난 값을
+    거부한다. strategy_executions_fsm_state_check 제약이
+    ENUM_TO_CHAR(FSMState) 범위만 허용하므로 'BOGUS_STATE'은 INSERT/UPDATE
+    시 CheckViolationError를 던진다. (DB constraint가 코드보다 먼저
+    무효 상태를 차단함을 검증.)"""
+    user_id = await create_test_tenant(pool)
+    execution_id = await _create_execution(pool, user_id, entry_threshold=100.0)
+    async with pool.acquire() as conn:
+        with pytest.raises(asyncpg.CheckViolationError):
+            await conn.execute(
+                "UPDATE strategy_executions SET fsm_state = 'BOGUS_STATE' WHERE id = $1",
+                execution_id,
+            )
+
+
+async def test_strategy_engine_evaluation_error_propagates(pool, monkeypatch):
+    """실패주입 — StrategyEngine.evaluate()가 예외를 던지면 tick 전체가
+    실패해야 한다(FSM 상태 변경 없이 예외가 외부로 전파)."""
+    user_id = await create_test_tenant(pool)
+    execution_id = await _create_execution(pool, user_id, entry_threshold=100.0)
+    adapter = FakeExchangeAdapter(closes=[Decimal("50")] * 65)
+    engines = _engines()
+
+    def fake_evaluate(*args, **kwargs):
+        raise RuntimeError("strategy evaluation failed")
+
+    monkeypatch.setattr(engines["strategy_engine"], "evaluate", fake_evaluate)
+
+    with pytest.raises(RuntimeError, match="strategy evaluation failed"):
+        await run_execution_tick(pool, adapter, execution_id, **engines)
+
+    # FSM이 IDLE 그대로 남아있어야 함(중간 상태 갱신 없음).
+    async with pool.acquire() as conn:
+        fsm_state = await conn.fetchval(
+            "SELECT fsm_state FROM strategy_executions WHERE id = $1", execution_id
+        )
+    assert fsm_state == "IDLE"
+
+
+async def test_portfolio_engine_allocation_error_propagates(pool, monkeypatch):
+    """실패주입 — PortfolioEngine.allocate()가 예외를 던지면 tick 전체가
+    실패해야 한다. 신호는 평가됐으나 배분 단계에서 오류."""
+    user_id = await create_test_tenant(pool)
+    execution_id = await _create_execution(pool, user_id, entry_threshold=100.0)
+    adapter = FakeExchangeAdapter(closes=[Decimal("50")] * 65)
+    engines = _engines()
+
+    def fake_allocate(*args, **kwargs):
+        raise RuntimeError("portfolio allocation failed")
+
+    monkeypatch.setattr(engines["portfolio_engine"], "allocate", fake_allocate)
+
+    with pytest.raises(RuntimeError, match="portfolio allocation failed"):
+        await run_execution_tick(pool, adapter, execution_id, **engines)
+
+    # FSM이 IDLE 그대로 남아있어야 함.
+    async with pool.acquire() as conn:
+        fsm_state = await conn.fetchval(
+            "SELECT fsm_state FROM strategy_executions WHERE id = $1", execution_id
+        )
+    assert fsm_state == "IDLE"
+
+
 class _SpyRecorder(RiskDecisionRecorder):
     """실제 WORM insert는 그대로 수행하고 호출 횟수만 센다(R-32 t4 검증)."""
 
