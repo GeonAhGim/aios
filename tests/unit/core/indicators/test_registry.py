@@ -154,6 +154,24 @@ def test_registry_validate_params_unknown_indicator_raises() -> None:
     assert excinfo.value.code == "STRATEGY_INDICATOR_UNKNOWN"
 
 
+def test_registry_validate_params_rejects_unknown_param_names() -> None:
+    """범위 밖 파라미터(스펙에 정의되지 않은 이름)를 명시적으로 거부해야 한다.
+    호출자가 오타나 잘못된 파라미터 이름을 전달해도 조용히 무시하지 않고
+    fail-closed로 차단한다."""
+    registry = IndicatorRegistry()
+    with pytest.raises(IndicatorError) as excinfo:
+        registry.validate_params("SMA", {"timeperiod": 20, "fake_param": 42})
+    assert excinfo.value.code == "STRATEGY_PARAM_UNKNOWN"
+
+
+def test_registry_validate_params_rejects_multiple_unknown_param_names() -> None:
+    """여러 개의 알려지지 않은 파라미터 이름도 모두 거부한다."""
+    registry = IndicatorRegistry()
+    with pytest.raises(IndicatorError) as excinfo:
+        registry.validate_params("SMA", {"bogus1": 1, "bogus2": 2})
+    assert excinfo.value.code == "STRATEGY_PARAM_UNKNOWN"
+
+
 def test_registry_lookback_delegates_to_spec_with_resolved_params() -> None:
     registry = IndicatorRegistry()
     assert registry.lookback("SMA", {"timeperiod": 20}) == 19
