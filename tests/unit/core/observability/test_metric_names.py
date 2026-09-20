@@ -79,3 +79,83 @@ def test_gate_catches_unregistered_module_constant(monkeypatch: pytest.MonkeyPat
     }
     assert declared != metric_names.ALL_METRIC_NAMES
     assert "aios.stray.metric.count_total" in declared - metric_names.ALL_METRIC_NAMES
+
+
+# ── negative tests: metric name format violations ──────────────────────────
+
+
+def test_negative_three_segment_name_rejected() -> None:
+    """음성 테스트: 세그먼트가 3개만 있는 이름은 정규식을 만족하지 않는다.
+    `aios.request.count`는 `aios.<context>.<subject>.<verb>` 4세그먼트를
+    위반하므로 정적으로 거부되어야 한다.
+    """
+    assert not _METRIC_NAME_RE.match("aios.request.count")
+    assert not _METRIC_NAME_RE.match("aios.x.y")
+
+
+def test_negative_numeric_segment_rejected() -> None:
+    """음성 테스트: 세그먼트에 숫자가 포함되면 `[a-z_]+`를 위반한다.
+    `aios.api.v1.request.count_total`은 숫자 세그먼트 `v1`을 포함하므로 거부된다.
+    """
+    assert not _METRIC_NAME_RE.match("aios.api.v1.request.count_total")
+    assert not _METRIC_NAME_RE.match("aios.api2.request.count_total")
+
+
+def test_negative_segment_starts_with_digit_rejected() -> None:
+    """음성 테스트: 세그먼트가 숫자로 시작하면 `[a-z_]+`를 위반한다.
+    `aios.1api.request.count_total`은 세그먼트가 숫자로 시작하므로 거부된다.
+    """
+    assert not _METRIC_NAME_RE.match("aios.1api.request.count_total")
+    assert not _METRIC_NAME_RE.match("aios.api1.request.count_total")
+
+
+def test_negative_trailing_dot_rejected() -> None:
+    """음성 테스트: 마침표로 끝나면 빈 세그먼트가 생성된다(`aios.api.request.`)."""
+    assert not _METRIC_NAME_RE.match("aios.api.request.")
+    assert not _METRIC_NAME_RE.match("aios.api.request.count_total.")
+
+
+def test_negative_spaces_in_segment_rejected() -> None:
+    """음성 테스트: 공백이 포함된 세그먼트는 `[a-z_]+`를 위반한다."""
+    assert not _METRIC_NAME_RE.match("aios.api request.count_total")
+    assert not _METRIC_NAME_RE.match("aios.api.request count_total")
+
+
+def test_negative_special_chars_rejected() -> None:
+    """음성 테스트: `-`, `@`, `!` 등 특수문자는 `[a-z_]+`를 위반한다."""
+    assert not _METRIC_NAME_RE.match("aios.api-request.count_total")
+    assert not _METRIC_NAME_RE.match("aios.api@request.count_total")
+
+
+# ── failure-injection tests ───────────────────────────────────────────────
+
+
+def test_to_prom_with_all_metric_names_does_not_raise(monkeypatch: pytest.MonkeyPatch) -> None:
+    """실패주입: `to_prom()`이 모든 등록된 메트릭 이름에 대해 예외 없이 동작함을
+    검증한다. `metric_names` 모듈의 상수를 동적으로 주입해 `to_prom` 호출이
+    실패하면 계측 지점에서 문자열 조작 실패가 주문 경로로 전파된다.
+    """
+    for name in metric_names.ALL_METRIC_NAMES:
+        result = metric_names.to_prom(name)
+        assert isinstance(result, str)
+        assert "." not in result
+        assert result == name.replace(".", "_")
+
+
+def test_to_prom_preserves_underscore_already_converted() -> None:
+    """`to_prom()`은 이미 `_`로 된 이름에 영향을 주지 않는다(이중 변환 안전)."""
+    original = "aios_api_request_count_total"
+    assert metric_names.to_prom(original) == original
+
+
+def test_all_registered_names_pass_to_prom_and_regex() -> None:
+    """통합 검증: `ALL_METRIC_NAMES`의 각 이름이 `to_prom()`을 거친 후에도
+    유효한 Prometheus 이름이 되고, 원본 이름도 정규식을 만족한다.
+    단일 상수라도 `to_prom()` 결과나 원본이 위반하면 즉시 탐지된다.
+    """
+    for name in metric_names.ALL_METRIC_NAMES:
+        assert _METRIC_NAME_RE.match(name), f"정규식 위반: {name}"
+        prom_name = metric_names.to_prom(name)
+        # Prometheus 이름은 `_`만 허용, 숫자로 시작 불가
+        assert prom_name.startswith("aios_"), f"to_prom 결과 prefix 위반: {prom_name}"
+        assert not prom_name[5:].startswith("_"), f"to_prom 결과 세그먼트가 `_`로 시작: {prom_name}"
