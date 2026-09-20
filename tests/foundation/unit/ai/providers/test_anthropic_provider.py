@@ -241,6 +241,82 @@ async def test_network_error_raises_upstream_error_with_no_status_code(
     assert exc_info.value.status_code is None
 
 
+# --- usage 토큰 누락/음수 처리 (AI-6 negative tests) ---
+
+
+async def test_generate_missing_usage_defaults_to_zero_cost(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """usage 필드가 아예 없으면 cost=0, tokens=0이어야 한다(과소 기록 방지)."""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={
+                "content": [
+                    {"type": "tool_use", "name": "structured_output", "input": {"hypothesis": "x"}}
+                ],
+            },
+        )
+
+    _mock_transport(monkeypatch, httpx.MockTransport(handler))
+    provider = _provider()
+
+    result = await provider.generate(_SCHEMA, _prompt(), _budget())
+
+    assert result.cost == Decimal("0")
+    assert result.output_tokens == 0
+
+
+async def test_generate_negative_input_tokens_clamped_to_zero(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """음수 input_tokens가 들어오면 0으로 클램프해야 한다."""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={
+                "content": [
+                    {"type": "tool_use", "name": "structured_output", "input": {"hypothesis": "x"}}
+                ],
+                "usage": {"input_tokens": -1, "output_tokens": 2},
+            },
+        )
+
+    _mock_transport(monkeypatch, httpx.MockTransport(handler))
+    provider = _provider()
+
+    result = await provider.generate(_SCHEMA, _prompt(), _budget())
+
+    assert result.output_tokens == 2
+    assert result.cost == Decimal("2") * _PRICING.output_cost_per_token
+
+
+async def test_generate_negative_output_tokens_clamped_to_zero(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """음수 output_tokens가 들어오면 0으로 클램프해야 한다."""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={
+                "content": [
+                    {"type": "tool_use", "name": "structured_output", "input": {"hypothesis": "x"}}
+                ],
+                "usage": {"input_tokens": 10, "output_tokens": -5},
+            },
+        )
+
+    _mock_transport(monkeypatch, httpx.MockTransport(handler))
+    provider = _provider()
+
+    result = await provider.generate(_SCHEMA, _prompt(), _budget())
+
+    assert result.cost == Decimal("10") * _PRICING.input_cost_per_token
+
+
 # --- 성능 단언 + 게이트 적색 재현 ---
 
 _OVERHEAD_BUDGET_SECONDS = 0.05

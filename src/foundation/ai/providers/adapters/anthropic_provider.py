@@ -184,8 +184,8 @@ class AnthropicProvider:
         body = response.json()
         data = _extract_tool_input(body)
         usage = body.get("usage") or {}
-        input_tokens = int(usage.get("input_tokens", 0))
-        output_tokens = int(usage.get("output_tokens", 0))
+        input_tokens = max(0, int(usage.get("input_tokens") or 0))
+        output_tokens = max(0, int(usage.get("output_tokens") or 0))
         cost = (
             Decimal(input_tokens) * self._pricing.input_cost_per_token
             + Decimal(output_tokens) * self._pricing.output_cost_per_token
