@@ -240,35 +240,39 @@ def test_quality_issue_naive_open_time_rejected() -> None:
 def test_ingest_batch_result_missing_required_rejected() -> None:
     """IngestBatchResult는 모든 필드가 NOT NULL — 누락 시 ValidationError."""
     with pytest.raises(ValidationError):
-        v1.IngestBatchResult(  # type: ignore[call-arg]
-            batch_id=uuid4(),
-            source="test",
-            venue=v1.Venue.KIS_KRX,
-            instrument_id=uuid4(),
-            timeframe=v1.Timeframe.M1,
-            range_start=_now(),
-            range_end=_now(),
-            request_fingerprint="abc",
-            verdict=v1.QualityVerdict(
-                verdict=v1.Verdict.ACCEPT,
-                accepted=1,
-                quarantined=0,
-                rejected=0,
-                issues=[],
-            ),
-            batch_hash="sha256fake",
-            # audit_event_id 누락
+        v1.IngestBatchResult.model_validate(
+            {
+                "batch_id": str(uuid4()),
+                "source": "test",
+                "venue": "KIS_KRX",
+                "instrument_id": str(uuid4()),
+                "timeframe": "M1",
+                "range_start": _now().isoformat(),
+                "range_end": _now().isoformat(),
+                "request_fingerprint": "abc",
+                "verdict": {
+                    "verdict": "ACCEPT",
+                    "accepted": 1,
+                    "quarantined": 0,
+                    "rejected": 0,
+                    "issues": [],
+                },
+                "batch_hash": "sha256fake",
+                # audit_event_id 누락
+            }
         )
 
 
 def test_data_quality_metrics_missing_key_rejected() -> None:
     """DataQualityMetrics.key는 필수 — 누락 시 ValidationError."""
     with pytest.raises(ValidationError):
-        v1.DataQualityMetrics(  # type: ignore[call-arg]
-            staleness_s=300,
-            gap_ratio_24h=Decimal("0.01"),
-            reject_ratio_24h=Decimal("0.00"),
-            last_batch_id=None,
+        v1.DataQualityMetrics.model_validate(
+            {
+                "staleness_s": 300,
+                "gap_ratio_24h": "0.01",
+                "reject_ratio_24h": "0.00",
+                "last_batch_id": None,
+            }
         )
 
 
@@ -278,12 +282,14 @@ def test_data_quality_metrics_missing_key_rejected() -> None:
 def test_quality_issue_detail_type_enforced() -> None:
     """QualityIssue.detail은 dict[str, str] — value가 str이 아니면 거부.
 
-    monkeypatch로 detail value에 int를 주입해 타입 불일치를 유발한다.
+    model_validate로 dict에 int value를 주입해 런타임 검증 거부를 유도한다.
     """
     with pytest.raises(ValidationError):
-        v1.QualityIssue(
-            type=v1.QualityIssueType.SPIKE,
-            severity=v1.Severity.WARN,
-            open_time=None,
-            detail={"price": 12345},  # type: ignore[dict-item]  # int should be rejected
+        v1.QualityIssue.model_validate(
+            {
+                "type": "SPIKE",
+                "severity": "WARN",
+                "open_time": None,
+                "detail": {"price": 12345},
+            }
         )
