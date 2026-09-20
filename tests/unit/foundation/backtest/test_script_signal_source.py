@@ -8,6 +8,7 @@ na), (6) `ScriptRuntimeError`(및 그 하위) 전파. 컴파일·실행은 DSL-1
 `compile_source`/DSL-8 `execute`를 그대로 쓴다 — 이 테스트는 렉서·파서·
 인터프리터를 재구현하지 않는다.
 """
+
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
@@ -122,7 +123,7 @@ def test_when_series_length_mismatch_is_rejected() -> None:
         when=bad_when, side=Identifier(name="buy"), qty_expr=NumberLiteral(value=1), opts=None
     )
     result = ExecutionResult(bar_count=5, bindings={}, signals={}, plots=(), orders=(order,))
-    with pytest.raises(sss.ScriptSignalSourceError, match="시리즈 길이"):
+    with pytest.raises(sss.ScriptSignalSourceError, match="series length"):
         sss._materialize_plan(result, bar_count=5)
 
 
@@ -156,18 +157,14 @@ def test_unknown_side_identifier_is_rejected() -> None:
 def test_zero_quantity_on_firing_bar_is_rejected() -> None:
     columns = _columns(["100", "101"])
     source = "input qty: int = 0\norder(buy, qty) when 1 < 2"
-    with pytest.raises(sss.ScriptSignalSourceError, match="양수"):
+    with pytest.raises(sss.ScriptSignalSourceError, match="positive"):
         _build(source, columns)
 
 
 def test_na_quantity_on_firing_bar_is_rejected() -> None:
     """`close[1]`은 bar0에서 na다 — bar0에서 발화하면 수량을 확정할 수 없다."""
     columns = _columns(["100", "101"])
-    source = (
-        "input close: series<float> = 0\n"
-        "let q = close[1]\n"
-        "order(buy, q) when 1 < 2"
-    )
+    source = "input close: series<float> = 0\nlet q = close[1]\norder(buy, q) when 1 < 2"
     with pytest.raises(sss.ScriptSignalSourceError, match="na"):
         _build(source, columns)
 
