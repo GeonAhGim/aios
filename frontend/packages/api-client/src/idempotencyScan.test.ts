@@ -1,6 +1,7 @@
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it, vi } from "vitest";
+import ts from "typescript";
 import { API_ROUTES, type ApiRouteName } from "./apiPaths";
 
 // [QA task-2730 DEPTH_PLT] 실패 주입: 순수 소스 스캔이라 원래 외부 의존성이 없으나,
@@ -40,7 +41,7 @@ const MUTATING_NON_IDEMPOTENT_METHODS = new Set([
 ]);
 
 // 주석 안의 코드 예시(설명용)가 실호출로 오탐되지 않도록 지운다. 길이·개행은
-// 보존해 이후 정규식의 인덱스 기반 탐색(findConsumingMethod)이 흔들리지 않게 한다.
+// 보존해 이후 정규식의 인덱스 기반 탐색(consumingMethods)이 흔들리지 않게 한다.
 function stripComments(source: string): string {
   return source
     .replace(/\/\*[\s\S]*?\*\//g, (m) => m.replace(/[^\n]/g, " "))
@@ -65,15 +66,33 @@ function extractRouteMapIdentifiers(source: string): Map<string, string[]> {
   return map;
 }
 
-// `const path = resolvePath(...)...; ... this.<method>(path, ...)` 처럼 라우트가
-// 변수를 거쳐 호출부에 도달하는 경우, 대입 지점 이후 가장 가까운 소비 호출을 찾는다.
-// 윈도우를 두는 이유: 같은 변수명(`path`)이 다른 메서드에서도 재사용되므로 무한정
-// 탐색하면 엉뚱한 메서드의 호출을 집어올 수 있다 — 이 레포의 실제 스타일(대입 직후
-// 바로 소비)에서는 600자면 충분하고 넘치는 법이 없다.
-function findConsumingMethod(source: string, fromIndex: number, varName: string): string | null {
-  const window = source.slice(fromIndex, fromIndex + 600);
-  const match = window.match(new RegExp(`this\\.([A-Za-z]\\w*)\\(\\s*${varName}\\b`));
-  return match ? match[1] : null;
+// 각 변수의 심볼로 소비 호출을 묶어 재사용은 모두 수집하고 다른 스코프의
+// 동명 변수는 제외한다. 타입 검사·파일 읽기 없이 현재 소스 하나만 바인딩한다.
+function consumingMethods(source: string): Map<number, string[]> {
+  const file = ts.createSourceFile("scan.ts", source, ts.ScriptTarget.Latest, true);
+  const options = { noLib: true, noResolve: true };
+  const host = ts.createCompilerHost(options);
+  host.getSourceFile = (name) => name === "scan.ts" ? file : undefined;
+  const checker = ts.createProgram(["scan.ts"], options, host).getTypeChecker();
+  const methods = new Map<number, string[]>();
+  const visit = (node: ts.Node) => {
+    if (ts.isCallExpression(node) && ts.isPropertyAccessExpression(node.expression)
+      && node.expression.expression.kind === ts.SyntaxKind.ThisKeyword) {
+      const argument = node.arguments[0];
+      if (argument && ts.isIdentifier(argument)) {
+        const declaration = checker.getSymbolAtLocation(argument)?.valueDeclaration;
+        if (declaration && ts.isVariableDeclaration(declaration)) {
+          const position = declaration.getStart(file);
+          const consumers = methods.get(position) ?? [];
+          consumers.push(node.expression.name.text);
+          methods.set(position, consumers);
+        }
+      }
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(file);
+  return methods;
 }
 
 // clients/*.ts 소스 하나에서 "이 라우트가 어떤 this.<method>(...)로 호출됐는지"
@@ -86,6 +105,7 @@ function findConsumingMethod(source: string, fromIndex: number, varName: string)
 export function findCallSites(source: string): RouteCallSite[] {
   const stripped = stripComments(source);
   const routeMaps = extractRouteMapIdentifiers(stripped);
+  const consumers = consumingMethods(stripped);
   const sites: RouteCallSite[] = [];
   let m: RegExpExecArray | null;
 
@@ -101,14 +121,16 @@ export function findCallSites(source: string): RouteCallSite[] {
 
   const varLiteral = /const\s+(\w+)\s*=\s*resolvePath\(\s*"([a-zA-Z][\w.]*)"/g;
   while ((m = varLiteral.exec(stripped)) !== null) {
-    const method = findConsumingMethod(stripped, m.index + m[0].length, m[1]);
-    if (method) sites.push({ method, routeName: m[2] });
+    for (const method of consumers.get(m.index + m[0].indexOf(m[1], 5)) ?? []) {
+      sites.push({ method, routeName: m[2] });
+    }
   }
 
   const varIdent = /const\s+(\w+)\s*=\s*resolvePath\(\s*([A-Za-z_$][\w$]*)\s*[[)]/g;
   while ((m = varIdent.exec(stripped)) !== null) {
-    const method = findConsumingMethod(stripped, m.index + m[0].length, m[1]);
-    if (method) for (const routeName of routeMaps.get(m[2]) ?? []) sites.push({ method, routeName });
+    for (const method of consumers.get(m.index + m[0].indexOf(m[1], 5)) ?? []) {
+      for (const routeName of routeMaps.get(m[2]) ?? []) sites.push({ method, routeName });
+    }
   }
 
   const byRoute = /this\.(requestByRoute)\(\s*"([a-zA-Z][\w.]*)"/g;
@@ -204,6 +226,42 @@ describe("idempotencyScan — findCallSites 자체 검증(스캐너 파서)", ()
 
 describe("idempotencyScan — negative fixture(위반이 실제로 FAIL한다)", () => {
   const MONEY_ROUTES = { "x.money": { idempotencyRequired: true } };
+
+  it.each(["post", "postEnvelope", "put", "patch", "del"])("멱등 호출 뒤 같은 경로의 %s 호출도 검출한다", (method) => {
+    for (const indirect of [false, true]) {
+      const source = [
+        'const CMD: Record<string, string> = {',
+        '  start: "x.money",',
+        '};',
+        `const path = resolvePath(${indirect ? "CMD[command]" : '"x.money"'});`,
+        "this.postIdempotent(path, body, key);",
+        `this.${method}(path, body);`,
+      ].join("\n");
+      expect(scanCallSites([{ path: "fixture.ts", source }], MONEY_ROUTES)).toEqual({
+        markedWithoutIdempotentCall: [],
+        markedButNonIdempotentCall: [`fixture.ts: "x.money" via this.${method}(...)`],
+        idempotentCallButUnmarked: [],
+      });
+    }
+  });
+
+  it("다른 메서드의 동명 경로를 이전 라우트의 소비로 오인하지 않는다", () => {
+    const source = `class Client {
+      money() { const path = resolvePath("x.money"); this.postIdempotent(path, body, key); }
+      other() { const path = resolvePath("x.other"); this.post(path, body); }
+    }`;
+    expect(scanCallSites([{ path: "fixture.ts", source }], MONEY_ROUTES).markedButNonIdempotentCall).toEqual([]);
+  });
+
+  it("600자 뒤의 재사용도 수집하고 내부 블록의 동명 변수는 제외한다", () => {
+    const source = `const path = resolvePath("x.money");
+      this.postIdempotent(path, body, key);
+      { const path = resolvePath("x.other"); this.post(path, body); }
+      ${" ".repeat(650)}
+      this.put(path, body);`;
+    expect(scanCallSites([{ path: "fixture.ts", source }], MONEY_ROUTES).markedButNonIdempotentCall)
+      .toEqual(['fixture.ts: "x.money" via this.put(...)']);
+  });
 
   it("금전 라우트를 일반 post로 바꾼 fixture는 markedButNonIdempotentCall·markedWithoutIdempotentCall을 채운다", () => {
     const files = [{ path: "fixture.ts", source: 'return this.post(resolvePath("x.money"), body);' }];
