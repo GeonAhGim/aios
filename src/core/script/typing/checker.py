@@ -1,34 +1,37 @@
 """L4_analytics_authoring_backtest_marketplace_v1.0.md §3.3/§9.4 DSL-4 —
-AIOS Script 정적 타입 검사기.
+AIOS Script static type checker.
 
-DSL-3(`grammar/parser.py`)가 만든 `Program`(DSL-1 AST)만 입력으로 받는다.
-decl을 소스 순서대로 훑으며 `input`/`let`/`signal` 이름을 타입 환경에
-등록하고, `let`/`plot`/`signal`/`order`의 표현식을 `types.py`의 승격 격자로
-검사한다(DoD: 시리즈/스칼라 승격·거부). 위반은 `ScriptTypeError`
-(§3.3 taxonomy의 `SCRIPT_TYPE`)로 fail-closed 거부한다.
+Accepts only a `Program` (DSL-1 AST) produced by DSL-3 (`grammar/parser.py`).
+Walks `decl`s in source order, registers `input`/`let`/`signal` names in the
+type environment, and validates the expressions of `let`/`plot`/`signal`/`order`
+against the promotion lattice in `types.py` (DoD: series/scalar promotion and
+rejection). Violations are rejected fail-closed as `ScriptTypeError`
+(`SCRIPT_TYPE` from the §3.3 taxonomy).
 
-범위 밖(의도적으로 검사하지 않음):
-- 내장 식별자 없음. `close`/`open`처럼 시장 데이터를 가리키는 이름도
-  `input ... : series<float> = 0`으로 먼저 선언해야 참조할 수 있다 —
-  §3.3 문법은 그런 이름을 예약하지 않는다(테스트 파일들의 `close` 등은
-  파서 문법 예시일 뿐, DSL-4가 전제하는 계약이 아니다).
-- `OrderDecl.side`/`qty_expr`/`opts`, `PlotDecl.style` — DSL-1(`ast.py`)
-  자신의 decision대로 "§3.3에 별도 프로덕션이 없어 일반 Expr로만 받은"
-  필드라 5종 타입 격자에 대응하는 의미가 아직 정의돼 있지 않다. 여기서
-  임의로 의미를 만들어 붙이지 않고 `when`/`expr`만 검사한다.
+Out of scope (intentionally not checked):
+- No built-in identifiers. Names like `close`/`open` that refer to market data
+  must be declared first via `input ... : series<float> = 0` — the §3.3 syntax
+  does not reserve such names (the `close` usages in test files are parser
+  syntax examples only, not a contract assumed by DSL-4).
+- `OrderDecl.side`/`qty_expr`/`opts`, `PlotDecl.style` — per DSL-1 (`ast.py`),
+  these fields were accepted only as generic `Expr` because "there is no
+  dedicated production in §3.3", so their meaning against the 5-type-lattice
+  categories is not yet defined. We do not invent meaning here and only
+  validate `when`/`expr`.
 
-미검증: `ns.ident(...)` 호출(`ta.*`/`math.*`/`series.*`)의 함수별 시그니처는
-IND 레지스트리(DSL-9가 소비할 `builtins_ta.py` 등)가 아직 없어 알 수 없다.
-그때까지는 인자가 전부 수치 계열이어야 하고, 하나라도 시리즈면 결과가
-시리즈로 승격된다(§3.3 "시리즈/스칼라 승격")는 일반 규칙만 적용한다 —
-함수별 반환 타입(예: `series.rising`이 series<bool>일 수 있는 경우)은
-레지스트리가 붙는 시점에 이 함수만 좁히면 된다.
+Unverified: per-function signatures for `ns.ident(...)` calls (`ta.*`/`math.*`/
+`series.*`) cannot be determined yet because the IND registry
+(`builtins_ta.py` etc. that DSL-9 will consume) does not exist. Until then,
+the general rule applies: all arguments must be numeric, and if any argument
+is a series the result is promoted to series (§3.3 "series/scalar promotion")
+— per-function return types (e.g. `series.rising` possibly being `series<bool>`)
+can be narrowed to just this function when the registry lands.
 
-에러에는 (line, col)이 없다 — DSL-1 `ScriptNode`에 위치 필드가 없어서다
-(파서·AST는 이번 사이클 다른 worker 소유라 임의로 확장하지 않는다, decision
-참조). §3.3 "위치 정보 포함"은 `POST /scripts/compile`(DSL-12)의 최종
-응답 계약이라, 그 리프가 (line, col) 매핑을 어떻게 복원할지는 여기서
-선취하지 않는다.
+Errors carry no (line, col) — the DSL-1 `ScriptNode` has no position field
+(the parser/AST belongs to another worker this cycle, so we do not extend it
+ad hoc; see decision). §3.3 "position info included" is the final response
+contract for `POST /scripts/compile` (DSL-12), and we do not pre-empt how that
+leaf restores (line, col) mappings here.
 """
 from __future__ import annotations
 
@@ -71,7 +74,7 @@ TypeEnv = dict[str, Type]
 
 
 class ScriptTypeError(Exception):
-    """§3.3 에러 taxonomy의 `SCRIPT_TYPE`(400, 재시도 불가)."""
+    """§3.3 error taxonomy `SCRIPT_TYPE`(400, non-retryable)."""
 
     code = "SCRIPT_TYPE"
 
@@ -81,10 +84,10 @@ class ScriptTypeError(Exception):
 
 
 def check_program(program: Program) -> TypeEnv:
-    """`Program`의 decl을 순서대로 검사하고 최종 타입 환경을 반환한다.
+    """Check `Program` decls in order and return the final type environment.
 
-    선언 순서가 곧 참조 가능 순서다(전방 참조 없음 — §3.3 문법이 애초에
-    decl을 앞에서부터 순차적으로만 구성하게 한다).
+    Declaration order is the reference order (no forward references — §3.3
+    syntax only allows sequential decl construction from top to bottom).
     """
     env: TypeEnv = {}
     for decl in program.decls:
@@ -133,7 +136,7 @@ def _check_decl(decl: Decl, env: TypeEnv) -> None:
 
 
 def infer_type(expr: Expr, env: TypeEnv) -> Type:
-    """Expr의 정적 타입을 추론한다. 위반은 `ScriptTypeError`."""
+    """Infer the static type of an Expr. Raises `ScriptTypeError` on violation."""
     if isinstance(expr, NumberLiteral):
         return "int" if isinstance(expr.value, int) else "float"
     if isinstance(expr, Identifier):
@@ -200,10 +203,11 @@ def _infer_binary(expr: BinaryExpr, env: TypeEnv) -> Type:
 
 
 def _infer_request(expr: RequestExpr, env: TypeEnv) -> Type:
-    """M2-2a: request(symbol, timeframe, expr)의 결과는 항상 `series<float>`다
-    — 다른 타임프레임 컨텍스트에서 봉마다 구체화되는 값이라 스칼라로 접히지
-    않는다(§3.3 승격 규칙과 별개의 고정 규칙). 내부 `expr`은 현재 env에서
-    수치 계열이어야 한다(MTF 컨텍스트에서의 재바인딩은 M2-2b 몫)."""
+    """M2-2a: request(symbol, timeframe, expr) always returns `series<float>` —
+    it is a value materialised per-bar in another timeframe context and does not
+    collapse to scalar (§3.3 promotion rules do not apply; this is a fixed rule).
+    The inner `expr` must be numeric in the current env (rebinding in MTF
+    context is M2-2b's responsibility)."""
     inner = infer_type(expr.expr, env)
     if inner not in NUMERIC_TYPES:
         raise ScriptTypeError(
