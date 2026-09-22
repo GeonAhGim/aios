@@ -187,7 +187,7 @@ def test_indicator_spec_rejects_extra_plot_without_matching_output() -> None:
 
 
 def test_indicator_spec_rejects_fill_between_referencing_unknown_output() -> None:
-    with pytest.raises(ValueError, match="fill_between references unknown output"):
+    with pytest.raises(ValueError, match="fill_between 'does_not_exist' not in outputs"):
         IndicatorSpec(
             name="BAD_FILL",
             inputs=("close",),
