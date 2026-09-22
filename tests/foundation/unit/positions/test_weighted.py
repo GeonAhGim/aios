@@ -113,18 +113,18 @@ def test_apply_lot_model_copy_failure_propagates() -> None:
     wavg = WeightedAverage()
     wavg.apply(_fill(OrderSide.BUY, "10", "100"))
 
-    original_model_copy = type(wavg._lot).model_copy
+    original_model_copy = type(wavg._lot).model_copy  # type: ignore[union-attr]
 
-    def failing_model_copy(self, **kwargs):
+    def failing_model_copy(self, **kwargs):  # type: ignore[no-untyped-def]
         raise RuntimeError("simulated persistence failure")
 
-    type(wavg._lot).model_copy = failing_model_copy
+    type(wavg._lot).model_copy = failing_model_copy  # type: ignore[method-assign, union-attr]
 
     try:
         with pytest.raises(RuntimeError, match="simulated persistence failure"):
             wavg.apply(_fill(OrderSide.SELL, "5", "120"))
     finally:
-        type(wavg._lot).model_copy = original_model_copy
+        type(wavg._lot).model_copy = original_model_copy  # type: ignore[method-assign, union-attr]
 
 
 def test_weighted_average_10k_fills_within_budget() -> None:
