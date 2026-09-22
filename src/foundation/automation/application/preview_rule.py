@@ -26,7 +26,7 @@ from src.foundation.automation.contracts.v1 import (
     PreviewResult,
 )
 from src.foundation.automation.domain.evaluate import MarketSnapshot, evaluate_conditions
-from src.foundation.backtest.adapters.list_bars import ListBars
+from src.foundation.backtest.api import ListBars
 
 __all__ = ["preview_rule"]
 
