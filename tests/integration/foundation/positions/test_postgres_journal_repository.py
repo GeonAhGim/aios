@@ -419,3 +419,48 @@ async def test_append_handles_db_connection_error_gracefully(pool, repo):
                 idempotency_key=f"fill:{uuid4().hex}",
                 occurred_at=_OCCURRED_AT,
             )
+
+
+async def test_list_for_from_seq_beyond_max_returns_empty(pool, repo):
+    """negative test: from_seq > max(sequence_no)인 경우 빈 리스트를 반환한다.
+    이 경계 조건은 pagination 사용자가 의존하는 불변식이다."""
+    _, _, position_key = await _open(pool)
+
+    # 3개 엔트리 추가
+    for _ in range(3):
+        await _append(repo, pool, position_key)
+
+    async with pool.acquire() as conn, conn.transaction():
+        # from_seq=100 (max sequence_no=3보다 큼)
+        result = await repo.list_for(conn, position_key, from_seq=100)
+
+    assert result == [], f"from_seq > max_sequence_no일 때 빈 리스트여야 하는데 {len(result)}개 반환됨"
+
+
+async def test_list_for_connection_error_propagates(pool, repo):
+    """실패주입: `list_for()` 내 `conn.fetch()`가 asyncpg 예외를 던지면
+    호출자가 처리할 수 있도록 그대로 전파된다."""
+    import asyncpg
+
+    _, _, position_key = await _open(pool)
+    await _append(repo, pool, position_key)
+
+    async with pool.acquire() as conn, conn.transaction():
+        original_conn = conn
+
+        class _FailingFetchConn:
+            """fetch()만 예외를 던지는 연결 래퍼."""
+
+            def __init__(self, real):
+                self._real = real
+
+            async def fetch(self, *args, **kwargs):
+                raise asyncpg.InterfaceError("network timeout")
+
+            def __getattr__(self, name):
+                return getattr(self._real, name)
+
+        failing_conn = _FailingFetchConn(original_conn)
+
+        with pytest.raises(asyncpg.InterfaceError, match="network timeout"):
+            await repo.list_for(failing_conn, position_key)
