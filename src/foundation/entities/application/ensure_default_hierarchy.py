@@ -17,16 +17,31 @@ scoped, FA-2 `get_*`) and created only when missing, so calling it again for
 an already bootstrapped user is a no-op that returns the persisted rows. It
 never guesses ids -- the ids are deterministic (FA-1), which is what makes
 the lookup-then-create shape safe without a stored mapping table.
+
+That said, "looked up then created" is two round trips, not one atomic step
+-- two concurrent callers for the *same* `user_id` (e.g. two in-flight
+requests during signup retry) can both observe a level missing and both
+attempt to create it. The loser's INSERT hits the level's unique constraint;
+the adapter turns that into `ConcurrencyConflictError` (105 standard, `src/
+core/db/conditional_write.py`) rather than letting the raw driver error leak.
+`_get_or_create` below recovers by re-querying once, per that error's own
+documented contract ("caller must re-query and retry") -- the winner's row
+is what both callers converge on, so the function stays idempotent under
+concurrency and not just under sequential retries.
 """
 from __future__ import annotations
 
+from collections.abc import Awaitable, Callable
 from datetime import date
-from typing import Protocol
+from typing import Protocol, TypeVar
 from uuid import UUID
 
+from src.core.db.conditional_write import ConcurrencyConflictError
 from src.data.models.base import Currency
 from src.foundation.entities.contracts.v1 import Fund, LegalEntity, Portfolio, SubAccount
 from src.foundation.entities.domain.defaults import DefaultHierarchy, build_default_hierarchy
+
+_T = TypeVar("_T")
 
 
 class EntityBootstrapRepository(Protocol):
@@ -50,6 +65,28 @@ class EntityBootstrapRepository(Protocol):
     ) -> SubAccount | None: ...
 
     async def create_sub_account(self, sub_account: SubAccount) -> SubAccount: ...
+
+
+async def _get_or_create(
+    get: Callable[[], Awaitable[_T | None]],
+    create: Callable[[], Awaitable[_T]],
+) -> _T:
+    """Get-or-create for one hierarchy level, safe against a concurrent
+    bootstrap racing us to create the same deterministic id. If `create`
+    loses the race it raises `ConcurrencyConflictError` (105 standard); we
+    recover by re-querying once, per that error's own contract. Re-raise if
+    the row still is not there -- that means the failure was not actually a
+    create-vs-create race and swallowing it would hide a real problem."""
+    existing = await get()
+    if existing is not None:
+        return existing
+    try:
+        return await create()
+    except ConcurrencyConflictError:
+        winner = await get()
+        if winner is None:
+            raise
+        return winner
 
 
 async def ensure_default_hierarchy(
@@ -76,18 +113,22 @@ async def ensure_default_hierarchy(
         venue_account_ref=venue_account_ref,
         inception=inception,
     )
-    entity = await repo.get_legal_entity(tenant_id, wanted.legal_entity.entity_id)
-    if entity is None:
-        entity = await repo.create_legal_entity(wanted.legal_entity)
-    fund = await repo.get_fund(tenant_id, wanted.fund.fund_id)
-    if fund is None:
-        fund = await repo.create_fund(wanted.fund)
-    portfolio = await repo.get_portfolio(tenant_id, wanted.portfolio.portfolio_id)
-    if portfolio is None:
-        portfolio = await repo.create_portfolio(wanted.portfolio)
-    sub_account = await repo.get_sub_account(tenant_id, wanted.sub_account.sub_account_id)
-    if sub_account is None:
-        sub_account = await repo.create_sub_account(wanted.sub_account)
+    entity = await _get_or_create(
+        lambda: repo.get_legal_entity(tenant_id, wanted.legal_entity.entity_id),
+        lambda: repo.create_legal_entity(wanted.legal_entity),
+    )
+    fund = await _get_or_create(
+        lambda: repo.get_fund(tenant_id, wanted.fund.fund_id),
+        lambda: repo.create_fund(wanted.fund),
+    )
+    portfolio = await _get_or_create(
+        lambda: repo.get_portfolio(tenant_id, wanted.portfolio.portfolio_id),
+        lambda: repo.create_portfolio(wanted.portfolio),
+    )
+    sub_account = await _get_or_create(
+        lambda: repo.get_sub_account(tenant_id, wanted.sub_account.sub_account_id),
+        lambda: repo.create_sub_account(wanted.sub_account),
+    )
     return DefaultHierarchy(
         legal_entity=entity, fund=fund, portfolio=portfolio, sub_account=sub_account
     )

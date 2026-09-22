@@ -22,16 +22,24 @@ class LegalEntityRepositoryMixin:
     _pool: asyncpg.Pool
 
     async def create_legal_entity(self, entity: LegalEntity) -> LegalEntity:
-        async with self._pool.acquire() as conn:
-            row = await conn.fetchrow(
-                "INSERT INTO legal_entity (entity_id, tenant_id, name, jurisdiction, region_tag) "
-                "VALUES ($1, $2, $3, $4, $5) RETURNING *",
-                entity.entity_id,
-                entity.tenant_id,
-                entity.name,
-                entity.jurisdiction,
-                entity.region_tag,
-            )
+        try:
+            async with self._pool.acquire() as conn:
+                row = await conn.fetchrow(
+                    "INSERT INTO legal_entity (entity_id, tenant_id, name, jurisdiction, "
+                    "region_tag) VALUES ($1, $2, $3, $4, $5) RETURNING *",
+                    entity.entity_id,
+                    entity.tenant_id,
+                    entity.name,
+                    entity.jurisdiction,
+                    entity.region_tag,
+                )
+        except asyncpg.UniqueViolationError as exc:
+            # Two concurrent bootstraps for the same deterministic id (FA-1
+            # UUIDv5) race here -- ensure_default_hierarchy catches this and
+            # recovers via get_legal_entity (105 standard).
+            raise ConcurrencyConflictError(
+                f"legal_entity.entity_id={entity.entity_id}: 다른 요청이 먼저 생성했습니다."
+            ) from exc
         return row_to_legal_entity(row)
 
     async def get_legal_entity(self, tenant_id: UUID, entity_id: UUID) -> LegalEntity | None:
