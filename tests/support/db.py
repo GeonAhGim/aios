@@ -22,10 +22,22 @@ from __future__ import annotations
 
 import asyncio
 import re
+from collections.abc import AsyncGenerator
+from typing import Any
 from urllib.parse import urlsplit, urlunsplit
 
 import asyncpg
 import pytest
+
+__all__ = [
+    "session_database_url",
+    "ensure_worker_database",
+    "tx_conn",
+    "_db_name",
+    "_with_database",
+    "_asyncpg_dsn",
+    "asyncpg",
+]
 
 _NAME_RE = re.compile(r"^[a-z0-9_]{1,40}$")
 _CLONE_ATTEMPTS = 5
@@ -108,7 +120,7 @@ async def ensure_worker_database(template_url: str, worker_id: str) -> str:
 
 
 @pytest.fixture
-async def tx_conn(pool):
+async def tx_conn(pool: Any) -> AsyncGenerator[Any, None]:
     """단일 커넥션 트랜잭션 픽스처 — 테스트 종료 시 항상 ROLLBACK.
 
     커넥션 풀 전체가 아니라 한 커넥션 안에서만 격리하면 되는 가벼운 테스트용
