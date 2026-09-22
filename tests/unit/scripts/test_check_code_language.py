@@ -167,9 +167,16 @@ def test_main_gate_red_reproduction_real_violation_still_fails(
     assert baseline_path.read_text(encoding="utf-8").strip() == "0"  # 실패 시 미변경
 
 
-def test_main_decrease_still_ratchets_baseline_down(tmp_path: Path) -> None:
-    target = tmp_path / "src"
-    _write_py(target / "a.py", "x = 1  # english only\n")
+def test_main_decrease_reports_without_update_baseline_flag(
+    in_repo_dir: Path, tmp_path: Path, capsys
+) -> None:
+    """A real, plausible reduction is not silently written -- --update-baseline is
+    required, so a plain CI run never mutates the baseline file underneath a reviewer."""
+    target = in_repo_dir / "src"
+    _write_py(
+        target / "a.py",
+        "a = 1  # 한글 하나\nb = 2  # 한글 둘\nc = 3  # 한글 셋\n",
+    )
     baseline_path = tmp_path / "code-language-baseline.txt"
     baseline_path.write_text("5\n", encoding="utf-8")
 
@@ -178,7 +185,88 @@ def test_main_decrease_still_ratchets_baseline_down(tmp_path: Path) -> None:
     )
 
     assert exit_code == 0
-    assert baseline_path.read_text(encoding="utf-8").strip() == "0"
+    out = capsys.readouterr().out
+    assert "reduced" in out
+    assert "--update-baseline" in out
+    assert baseline_path.read_text(encoding="utf-8").strip() == "5"
+
+
+def test_main_decrease_writes_baseline_with_update_flag(
+    in_repo_dir: Path, tmp_path: Path
+) -> None:
+    target = in_repo_dir / "src"
+    _write_py(target / "a.py", "x = 1  # 한글 하나\n")
+    baseline_path = tmp_path / "code-language-baseline.txt"
+    baseline_path.write_text("2\n", encoding="utf-8")
+
+    exit_code = check_code_language.main(
+        ["--target", str(target), "--baseline", str(baseline_path), "--update-baseline"]
+    )
+
+    assert exit_code == 0
+    assert baseline_path.read_text(encoding="utf-8").strip() == "1"
+
+
+# ---------------------------------------------------------------------------
+# 하한 가드 -- task-5303: 측정치 0(또는 직전 baseline의 50% 미만)은 baseline을
+# 건드리지 않고 rc=2로 거부한다 (4acc2620, c2770645/task-4328 재발 방지)
+# ---------------------------------------------------------------------------
+
+
+def test_main_zero_total_refuses_to_touch_baseline(tmp_path: Path, capsys) -> None:
+    """전량 영어(측정치 0)는 정말 다 고쳤다는 증거가 아니라 십중팔구 측정 오류다 --
+    baseline이 무엇이든 rc=2로 거부하고 파일은 그대로 둔다."""
+    target = tmp_path / "src"
+    _write_py(target / "a.py", "x = 1  # english only\n")
+    baseline_path = tmp_path / "code-language-baseline.txt"
+    baseline_path.write_text("5\n", encoding="utf-8")
+
+    exit_code = check_code_language.main(
+        ["--target", str(target), "--baseline", str(baseline_path), "--update-baseline"]
+    )
+
+    out = capsys.readouterr().out
+    assert exit_code == 2
+    assert "FAIL" in out
+    assert "implausible" in out
+    assert baseline_path.read_text(encoding="utf-8").strip() == "5"
+
+
+def test_main_below_half_baseline_refuses_to_touch_baseline(
+    in_repo_dir: Path, tmp_path: Path, capsys
+) -> None:
+    """직전 baseline의 50% 미만으로 급락한 측정치도 같은 실패 모드다(4acc2620처럼
+    잘못된 target이 부분적으로만 스캔됐을 때) -- 0이 아니어도 거부한다."""
+    target = in_repo_dir / "src"
+    _write_py(target / "a.py", "x = 1  # 한글\n")
+    baseline_path = tmp_path / "code-language-baseline.txt"
+    baseline_path.write_text("100\n", encoding="utf-8")
+
+    exit_code = check_code_language.main(
+        ["--target", str(target), "--baseline", str(baseline_path), "--update-baseline"]
+    )
+
+    out = capsys.readouterr().out
+    assert exit_code == 2
+    assert "implausible" in out
+    assert baseline_path.read_text(encoding="utf-8").strip() == "100"
+
+
+def test_main_missing_baseline_requires_update_flag(
+    in_repo_dir: Path, tmp_path: Path, capsys
+) -> None:
+    target = in_repo_dir / "src"
+    _write_py(target / "a.py", "x = 1  # 한글\n")
+    baseline_path = tmp_path / "does-not-exist-baseline.txt"
+
+    exit_code = check_code_language.main(
+        ["--target", str(target), "--baseline", str(baseline_path)]
+    )
+
+    out = capsys.readouterr().out
+    assert exit_code == 2
+    assert "--update-baseline" in out
+    assert not baseline_path.exists()
 
 
 # ---------------------------------------------------------------------------
