@@ -169,6 +169,11 @@ const UNREGISTERED_ROUTE_WHITELIST: Readonly<Record<string, string>> = {
   // reconciliation.*로 등록했다 — 실행 이력(POST /runs)은 decision상 이 리프의
   // UI 범위 밖이라 그대로 남긴다(사람이 EntitySnapshot을 입력해 만드는 화면이 없다).
   "/v1/foundation/reconciliation/runs": "정합성 대사 실행 이력 화면이 없다",
+  // task-5277(EM-14): ems.ts 라우터는 생겼지만 TCA 리포트 화면(EM-18 TcaPage.tsx)은
+  // 별도 리프라 아직 없다 — 아래 3건은 그때까지 그대로 남긴다.
+  "/v1/foundation/ems/tca/{parent_id}": "TCA 리포트 화면이 없다(EM-18 후속)",
+  "/v1/foundation/ems/tca/{parent_id}/revisions/{revision}": "TCA 리포트 화면이 없다(EM-18 후속)",
+  "/v1/foundation/ems/tca/{parent_id}:compute": "TCA 계산 트리거 화면이 없다(EM-18 후속)",
   // task-2335(FE-OPS-1): SafetyControlsPage가 GET(list)/deactivate/evaluate-recovery
   // 3건을 riskGate.safetyControls.*로 등록했다 — 아래 3건은 decision상 이 리프가
   // 만들지 않는 개통(activate)·룰번들 승인/활성화·evaluate 트리거라 그대로 남긴다

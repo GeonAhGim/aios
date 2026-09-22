@@ -1486,6 +1486,22 @@
         "title": "ApiResponse[StrategyProposal]",
         "type": "object"
       },
+      "ApiResponse_TcaResultView_": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/TcaResultView"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/Meta"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "title": "ApiResponse[TcaResultView]",
+        "type": "object"
+      },
       "ApiResponse_TokenPairResponse_": {
         "properties": {
           "data": {
@@ -3164,6 +3180,165 @@
         "title": "ComputeStatementRequest",
         "type": "object"
       },
+      "ComputeTcaBar": {
+        "properties": {
+          "close": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                "type": "string"
+              }
+            ],
+            "title": "Close"
+          },
+          "volume": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                "type": "string"
+              }
+            ],
+            "title": "Volume"
+          }
+        },
+        "required": [
+          "close",
+          "volume"
+        ],
+        "title": "ComputeTcaBar",
+        "type": "object"
+      },
+      "ComputeTcaFill": {
+        "properties": {
+          "price": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                "type": "string"
+              }
+            ],
+            "title": "Price"
+          },
+          "qty": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                "type": "string"
+              }
+            ],
+            "title": "Qty"
+          }
+        },
+        "required": [
+          "price",
+          "qty"
+        ],
+        "title": "ComputeTcaFill",
+        "type": "object"
+      },
+      "ComputeTcaRequest": {
+        "properties": {
+          "bars": {
+            "items": {
+              "$ref": "#/components/schemas/ComputeTcaBar"
+            },
+            "title": "Bars",
+            "type": "array"
+          },
+          "computed_at": {
+            "format": "date-time",
+            "title": "Computed At",
+            "type": "string"
+          },
+          "fees": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                "type": "string"
+              }
+            ],
+            "title": "Fees"
+          },
+          "fills": {
+            "items": {
+              "$ref": "#/components/schemas/ComputeTcaFill"
+            },
+            "title": "Fills",
+            "type": "array"
+          },
+          "price_at_arrival_ts": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                "type": "string"
+              }
+            ],
+            "title": "Price At Arrival Ts"
+          },
+          "revision": {
+            "default": 1,
+            "title": "Revision",
+            "type": "integer"
+          },
+          "side": {
+            "$ref": "#/components/schemas/OrderSide"
+          },
+          "spread_cost": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                "type": "string"
+              }
+            ],
+            "title": "Spread Cost"
+          },
+          "total_cost": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                "type": "string"
+              }
+            ],
+            "title": "Total Cost"
+          }
+        },
+        "required": [
+          "side",
+          "fills",
+          "price_at_arrival_ts",
+          "bars",
+          "spread_cost",
+          "fees",
+          "total_cost",
+          "computed_at"
+        ],
+        "title": "ComputeTcaRequest",
+        "type": "object"
+      },
       "ConnectionListResponse": {
         "properties": {
           "as_of": {
@@ -3199,7 +3374,7 @@
         "type": "string"
       },
       "ConsentDecision": {
-        "description": "AcceptDisclosure/RevokeConsent 커맨드의 결과이자, 다른 context가 소비하는\n계약. 원문 disclosure 본문이나 사용자 답변은 담지 않는다(73번 §8).",
+        "description": "AcceptDisclosure/RevokeConsent command result and the contract consumed\nby other contexts. Does not contain the original disclosure body or user\nanswer (73 §8).",
         "properties": {
           "accepted_at": {
             "anyOf": [
@@ -10587,6 +10762,80 @@
         "title": "SymbolStatus",
         "type": "string"
       },
+      "TcaResult": {
+        "description": "§3 — `TcaResult{arrival_bps, vwap_bps, impact_bps, fees_bps,\nopportunity_bps}`. The invariant that the decomposition sums to total\ncost (EM-A5/§8) is enforced by `domain/tca/decomposition.py` (EM-13) —\nthis contract only defines the shape.",
+        "properties": {
+          "arrival_bps": {
+            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+            "title": "Arrival Bps",
+            "type": "string"
+          },
+          "fees_bps": {
+            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+            "title": "Fees Bps",
+            "type": "string"
+          },
+          "impact_bps": {
+            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+            "title": "Impact Bps",
+            "type": "string"
+          },
+          "opportunity_bps": {
+            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+            "title": "Opportunity Bps",
+            "type": "string"
+          },
+          "schema_version": {
+            "const": "v1",
+            "default": "v1",
+            "title": "Schema Version",
+            "type": "string"
+          },
+          "vwap_bps": {
+            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+            "title": "Vwap Bps",
+            "type": "string"
+          }
+        },
+        "required": [
+          "arrival_bps",
+          "vwap_bps",
+          "impact_bps",
+          "fees_bps",
+          "opportunity_bps"
+        ],
+        "title": "TcaResult",
+        "type": "object"
+      },
+      "TcaResultView": {
+        "properties": {
+          "computed_at": {
+            "format": "date-time",
+            "title": "Computed At",
+            "type": "string"
+          },
+          "parent_id": {
+            "format": "uuid",
+            "title": "Parent Id",
+            "type": "string"
+          },
+          "result": {
+            "$ref": "#/components/schemas/TcaResult"
+          },
+          "revision": {
+            "title": "Revision",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "parent_id",
+          "revision",
+          "result",
+          "computed_at"
+        ],
+        "title": "TcaResultView",
+        "type": "object"
+      },
       "Tier": {
         "description": "Catalog priority order (declaration order = name collision resolution order, CORE is top).",
         "enum": [
@@ -16725,6 +16974,169 @@
         "summary": "Post Sync Connection",
         "tags": [
           "foundation:connections"
+        ]
+      }
+    },
+    "/v1/foundation/ems/tca/{parent_id}": {
+      "get": {
+        "operationId": "get_latest_tca_v1_foundation_ems_tca__parent_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "parent_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Parent Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiResponse_TcaResultView_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Get Latest Tca",
+        "tags": [
+          "foundation:ems:tca"
+        ]
+      }
+    },
+    "/v1/foundation/ems/tca/{parent_id}/revisions/{revision}": {
+      "get": {
+        "operationId": "get_tca_revision_v1_foundation_ems_tca__parent_id__revisions__revision__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "parent_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Parent Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "revision",
+            "required": true,
+            "schema": {
+              "title": "Revision",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiResponse_TcaResultView_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Get Tca Revision",
+        "tags": [
+          "foundation:ems:tca"
+        ]
+      }
+    },
+    "/v1/foundation/ems/tca/{parent_id}:compute": {
+      "post": {
+        "operationId": "post_compute_tca_v1_foundation_ems_tca__parent_id__compute_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "parent_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Parent Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ComputeTcaRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiResponse_TcaResultView_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Post Compute Tca",
+        "tags": [
+          "foundation:ems:tca"
         ]
       }
     },

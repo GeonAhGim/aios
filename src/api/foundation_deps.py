@@ -18,6 +18,8 @@ from src.foundation.connections.adapters.live_provider import LiveReadonlyAccoun
 from src.foundation.connections.adapters.postgres_repository import PostgresConnectionRepository
 from src.foundation.connections.ports.provider import ReadonlyAccountProvider
 from src.foundation.connections.ports.repository import ConnectionRepository
+from src.foundation.ems.adapters.tca_storage import PostgresTcaResultRepository
+from src.foundation.ems.ports.tca_result_repository import TcaResultRepository
 from src.foundation.evidence.adapters.postgres_repository import PostgresAuditEventRepository
 from src.foundation.evidence.ports.repository import AuditEventRepository
 from src.foundation.mandates.adapters.postgres_repository import PostgresMandateRepository
@@ -103,6 +105,10 @@ def get_audit_event_repository(
 
 def get_connection_repository(pool: asyncpg.Pool = Depends(get_pool)) -> ConnectionRepository:
     return PostgresConnectionRepository(pool)
+
+
+def get_tca_result_repository(pool: asyncpg.Pool = Depends(get_pool)) -> TcaResultRepository:
+    return PostgresTcaResultRepository(pool)
 
 
 def get_charting_repository(pool: asyncpg.Pool = Depends(get_pool)) -> ChartingRepository:

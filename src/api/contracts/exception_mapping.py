@@ -47,6 +47,7 @@ from src.api.contracts.exception_registry_foundation import (
     UnsupportedStatementScopeError,
 )
 from src.api.contracts.exception_registry_foundation_ai_gateway import EXCEPTION_MAP_AI_GATEWAY
+from src.api.contracts.exception_registry_foundation_ems import EXCEPTION_MAP_EMS
 
 __all__ = [
     "ApprovalOwnershipError",
@@ -62,7 +63,7 @@ __all__ = [
 # ceiling, see that module's own docstring) but fold into the same combined
 # EXCEPTION_MAP here rather than growing a third addend inside that file.
 EXCEPTION_MAP: list[tuple[type[Exception], ErrorCode]] = (
-    EXCEPTION_MAP_SERVICES + EXCEPTION_MAP_FOUNDATION + EXCEPTION_MAP_AI_GATEWAY
+    EXCEPTION_MAP_SERVICES + EXCEPTION_MAP_FOUNDATION + EXCEPTION_MAP_AI_GATEWAY + EXCEPTION_MAP_EMS
 )
 STATUS_OVERRIDE: list[tuple[type[Exception], int]] = (
     STATUS_OVERRIDE_SERVICES + STATUS_OVERRIDE_FOUNDATION

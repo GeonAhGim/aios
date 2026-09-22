@@ -603,6 +603,15 @@ _OPENAPI_NO_FRONTEND_UI_ALLOWLIST: dict[str, str] = {
     "/v1/foundation/reconciliation/runs": (
         "src/api/routers/foundation/reconciliation.py:50 -- 정합성 대사 실행 이력 화면 없음"
     ),
+    "/v1/foundation/ems/tca/{parent_id}": (
+        "src/api/routers/foundation/ems.py:81 -- TCA 리포트 화면 없음(EM-18 후속)"
+    ),
+    "/v1/foundation/ems/tca/{parent_id}/revisions/{revision}": (
+        "src/api/routers/foundation/ems.py:93 -- TCA 리포트 화면 없음(EM-18 후속)"
+    ),
+    "/v1/foundation/ems/tca/{parent_id}:compute": (
+        "src/api/routers/foundation/ems.py:42 -- TCA 계산 트리거 화면 없음(EM-18 후속)"
+    ),
     "/v1/foundation/risk-gate/admin/safety-controls": (
         "src/api/routers/foundation/risk_gate.py:203 -- 리스크 게이트 관리자 개통 UI 없음"
     ),

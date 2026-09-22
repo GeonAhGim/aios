@@ -49,6 +49,7 @@ def register_routers(app: FastAPI) -> None:
     )
     from src.api.routers.foundation import compliance as foundation_compliance
     from src.api.routers.foundation import connections as foundation_connections
+    from src.api.routers.foundation import ems as foundation_ems
     from src.api.routers.foundation import evidence as foundation_evidence
     from src.api.routers.foundation import ledger_admin as foundation_ledger_admin
     from src.api.routers.foundation import mandates as foundation_mandates
@@ -83,6 +84,7 @@ def register_routers(app: FastAPI) -> None:
     app.include_router(foundation_paper_control.router)
     app.include_router(foundation_reconciliation.router)
     app.include_router(foundation_performance.router)
+    app.include_router(foundation_ems.router)  # EM-14(task-5277) /v1/foundation/ems/tca
     app.include_router(charting.router)  # CH-5(task-1557) /v1/foundation/charting
     app.include_router(market_data.router)  # LA-24(task-1376) /v1/foundation/market-data
     app.include_router(research_data.router)  # RD-8(task-2709) /v1/foundation/research
