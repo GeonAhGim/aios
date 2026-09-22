@@ -28,7 +28,7 @@ def _asyncpg_dsn() -> str:
 
 
 @pytest.fixture
-async def pool():
+async def pool() -> asyncpg.Pool:
     p = await asyncpg.create_pool(_asyncpg_dsn(), min_size=2, max_size=32)
     yield p
     await p.close()
@@ -80,7 +80,7 @@ async def _insert_listing(
 # ---- 실패주입(D2) — CHECK/FK/UNIQUE 경계값, 정상 테스트가 놓친 제약 ----
 
 
-async def test_venue_listings_rejects_delisted_at_equal_to_listed_at(pool):
+async def test_venue_listings_rejects_delisted_at_equal_to_listed_at(pool: asyncpg.Pool) -> None:
     """CHECK (delisted_at IS NULL OR delisted_at > listed_at) — 등호 경계값이
     거부됨을 직접 증명한다(기존 테스트는 이 CHECK를 전혀 건드리지 않았다)."""
     instrument_id = _fake_ulid()
@@ -98,7 +98,7 @@ async def test_venue_listings_rejects_delisted_at_equal_to_listed_at(pool):
         )
 
 
-async def test_venue_listings_rejects_delisted_at_before_listed_at(pool):
+async def test_venue_listings_rejects_delisted_at_before_listed_at(pool: asyncpg.Pool) -> None:
     instrument_id = _fake_ulid()
     await _insert_instrument(pool, instrument_id)
     t0 = datetime.now(timezone.utc) - timedelta(days=1)
@@ -114,7 +114,7 @@ async def test_venue_listings_rejects_delisted_at_before_listed_at(pool):
         )
 
 
-async def test_venue_listings_rejects_unknown_venue(pool):
+async def test_venue_listings_rejects_unknown_venue(pool: asyncpg.Pool) -> None:
     """venue CHECK IN (...) — 심볼 마스터가 모르는 venue 문자열은 거부된다."""
     instrument_id = _fake_ulid()
     await _insert_instrument(pool, instrument_id)
@@ -131,7 +131,7 @@ async def test_venue_listings_rejects_unknown_venue(pool):
         )
 
 
-async def test_venue_listings_rejects_unknown_instrument_id_fk(pool):
+async def test_venue_listings_rejects_unknown_instrument_id_fk(pool: asyncpg.Pool) -> None:
     """instrument_id FK — 존재하지 않는 instrument를 참조하는 listing은
     거부된다(기존 테스트는 항상 미리 instrument를 만들어 이 경로를 안 탔다)."""
     with pytest.raises(asyncpg.exceptions.ForeignKeyViolationError):
@@ -145,7 +145,7 @@ async def test_venue_listings_rejects_unknown_instrument_id_fk(pool):
         )
 
 
-async def test_venue_listings_rejects_exact_duplicate_start_same_symbol(pool):
+async def test_venue_listings_rejects_exact_duplicate_start_same_symbol(pool: asyncpg.Pool) -> None:
     """UNIQUE (venue, venue_symbol, listed_at) — EXCLUDE보다 먼저 걸리는
     정확한 시작시각 중복도 거부돼야 한다(두 제약이 독립적으로 동작함).
     UNIQUE는 시작시각이 같은 행만 잡으므로 ExclusionViolationError만 허용하면
@@ -192,7 +192,7 @@ async def test_venue_listings_rejects_exact_duplicate_start_same_symbol(pool):
         )
 
 
-async def test_venue_listings_rejects_one_microsecond_overlap(pool):
+async def test_venue_listings_rejects_one_microsecond_overlap(pool: asyncpg.Pool) -> None:
     """정확히 1마이크로초 겹치는 구간도 거부된다 — half-open 경계
     (`[listed_at, delisted_at)`)가 소수점 이하에서도 정확함을 증명한다."""
     instrument_a = _fake_ulid()
@@ -222,7 +222,7 @@ async def test_venue_listings_rejects_one_microsecond_overlap(pool):
         )
 
 
-async def test_venue_listings_allows_touching_boundary_exactly(pool):
+async def test_venue_listings_allows_touching_boundary_exactly(pool: asyncpg.Pool) -> None:
     """직전 delisted_at과 정확히 같은 시각에 시작하는 구간은 겹치지 않는다
     (half-open 경계 — 위 마이크로초 테스트의 반대쪽 경계)."""
     instrument_a = _fake_ulid()
@@ -255,7 +255,7 @@ async def test_venue_listings_allows_touching_boundary_exactly(pool):
 
 
 @pytest.mark.perf
-async def test_bulk_non_overlapping_inserts_meet_latency_budget(pool):
+async def test_bulk_non_overlapping_inserts_meet_latency_budget(pool: asyncpg.Pool) -> None:
     """`EXCLUDE USING gist`는 삽입마다 겹침 검사를 위해 GiST 인덱스를
     스캔한다 — 인덱스가 없거나 퇴화하면 O(n) 순차비교로 느려진다. 500개
     서로 겹치지 않는 listing을 연속 삽입해 절대시간 예산 내임을 단언한다
@@ -296,7 +296,7 @@ async def test_bulk_non_overlapping_inserts_meet_latency_budget(pool):
 # ---- 게이트 적색 재현(D2) — 위반이 트랜잭션 전체를 롤백함(부분 커밋 없음) ----
 
 
-async def test_gate_red_exclusion_violation_rolls_back_whole_transaction(pool):
+async def test_gate_red_exclusion_violation_rolls_back_whole_transaction(pool: asyncpg.Pool) -> None:
     """같은 트랜잭션 안에서 (a) 합법적인 새 instrument 삽입 (b) 그 뒤 겹치는
     listing 삽입(위반)을 순서대로 실행하면, 트랜잭션 전체가 롤백돼 (a)도
     커밋되지 않아야 한다 — 게이트 적색이 "이 statement만" 취소가 아니라
@@ -334,7 +334,7 @@ async def test_gate_red_exclusion_violation_rolls_back_whole_transaction(pool):
     assert row is None, "게이트 위반 트랜잭션의 앞선 INSERT가 커밋되어 남았습니다"
 
 
-async def test_gate_red_instrument_id_update_rejects_multi_row_statement_atomically(pool):
+async def test_gate_red_instrument_id_update_rejects_multi_row_statement_atomically(pool: asyncpg.Pool) -> None:
     """한 UPDATE 문이 여러 행을 건드리고 그중 하나만 instrument_id를
     바꾸려 해도, 트리거가 그 statement 전체를 거부해 나머지 행의
     lifecycle_state 변경도 적용되지 않아야 한다(원자성)."""
@@ -368,7 +368,7 @@ async def test_gate_red_instrument_id_update_rejects_multi_row_statement_atomica
 # ---- 동시 다중 인스턴스/워커(D3) — TOCTOU 경합에서도 DB 제약이 지킨다 ----
 
 
-async def test_concurrent_overlapping_inserts_exactly_one_winner(pool):
+async def test_concurrent_overlapping_inserts_exactly_one_winner(pool: asyncpg.Pool) -> None:
     """서로 다른 커넥션(다중 워커/인스턴스 시뮬레이션) 10개가 같은
     (venue, venue_symbol)에서 서로 겹치는(그러나 `listed_at`은 각기 다른 —
     UNIQUE(venue, venue_symbol, listed_at)이 아니라 EXCLUDE 자체를 시험하기
@@ -412,7 +412,7 @@ async def test_concurrent_overlapping_inserts_exactly_one_winner(pool):
     assert rows[0]["n"] == 1
 
 
-async def test_concurrent_non_overlapping_inserts_all_succeed(pool):
+async def test_concurrent_non_overlapping_inserts_all_succeed(pool: asyncpg.Pool) -> None:
     """겹치지 않는 기간이면 동시에 삽입해도 전부 성공해야 한다 — EXCLUDE가
     과도하게 넓게 직렬화(모든 동시 쓰기를 막음)하지 않는다는 회귀 방지."""
     symbol = _venue_symbol()
@@ -441,7 +441,7 @@ async def test_concurrent_non_overlapping_inserts_all_succeed(pool):
     assert rows[0]["n"] == n
 
 
-async def test_concurrent_instrument_id_update_attempts_all_rejected(pool):
+async def test_concurrent_instrument_id_update_attempts_all_rejected(pool: asyncpg.Pool) -> None:
     """여러 워커가 동시에 같은 instrument의 instrument_id를 바꾸려 시도해도
     전부 거부되고, 원본 id가 그대로 살아있어야 한다(트리거가 동시성 하에서도
     구멍 없음)."""
