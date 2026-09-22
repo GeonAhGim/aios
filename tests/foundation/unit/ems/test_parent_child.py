@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import time
+from collections.abc import Callable
 from decimal import Decimal
 from uuid import uuid4
 
@@ -142,45 +143,70 @@ def test_failure_injection_audit_appender_defect_rejects_on_domain() -> None:
         assert_slice_within_parent_qty(_PARENT_QTY, Decimal("60"), Decimal("50"))
 
 
+def _median_elapsed_seconds(fn: Callable[[], None], *, trials: int = 3) -> float:
+    """3-trial median wall-clock elapsed time for `fn()` -- a single trial
+    is vulnerable to one scheduling hiccup (GC pause, CI host contention);
+    the median of 3 discards a single outlier trial in either direction."""
+    samples = []
+    for _ in range(trials):
+        start = time.perf_counter()
+        fn()
+        samples.append(time.perf_counter() - start)
+    samples.sort()
+    return samples[len(samples) // 2]
+
+
 def test_numerical_performance_assertion_baseline_ratio() -> None:
     """Numerical performance assertion: aggregate computation on
     10,000 children must complete within a baseline ratio.
 
-    Instead of asserting absolute milliseconds (which flake across
-    CI runners), we assert that the aggregate computation completes
-    within 200× the time of a single-child computation — a ratio
-    bound that is stable across environments.
+    Comparing against a 1-child computation (as an earlier version of this
+    test did) is unstable under CI host contention: the 1-child run is so
+    short that its wall-clock time is dominated by measurement noise (timer
+    resolution, GC, scheduler jitter) rather than the function's own cost,
+    so the same noise that slows down the 10,000-child run barely moves the
+    1-child denominator -- inflating the ratio under load even though
+    nothing regressed.
+
+    Instead we compare against a *reference loop* that does a comparable
+    amount of unrelated fixed-per-item Python work over the same `n_large`
+    item count (list build + attribute reads), and take the median of 3
+    trials on each side. Both sides scale with the same n and endure the
+    same host contention during the same measurement window, so contention
+    noise cancels out of the ratio instead of accumulating in it -- what's
+    left is the aggregate computation's own per-item overhead relative to a
+    trivial per-item baseline.
 
     This is a D2 numerical assertion per DEPTH_R_EO §D2-01:
     '성능 단언 1건' — assert performance is O(n) bounded.
     """
-    n_single = 1
     n_large = 10_000
-
-    # Time single-child computation
-    single_children = [
-        ChildFillState(uuid4(), Decimal("1"), OrderStatus.FILLED) for _ in range(n_single)
-    ]
-    start = time.perf_counter()
-    aggregate_parent_state(_PARENT_QTY, OrderStatus.SUBMITTED, single_children)
-    single_elapsed = time.perf_counter() - start
-
-    # Time 10,000-child computation
     large_children = [
         ChildFillState(uuid4(), Decimal("1"), OrderStatus.FILLED) for _ in range(n_large)
     ]
-    start = time.perf_counter()
-    aggregate_parent_state(_PARENT_QTY, OrderStatus.SUBMITTED, large_children)
-    large_elapsed = time.perf_counter() - start
 
-    # Ratio assertion: 10,000 children must not take more than
-    # 200× the time of 1 child (allowing 200× slack for Python
-    # overhead, object creation, etc.)
-    ratio = large_elapsed / single_elapsed if single_elapsed > 0 else 0
-    assert ratio < 200, (
-        f"Performance regression: {n_large} children took {ratio:.1f}× "
-        f"the time of {n_single} child (single={single_elapsed:.4f}s, "
-        f"large={large_elapsed:.4f}s)"
+    def _reference_loop() -> None:
+        total = Decimal("0")
+        for child in large_children:
+            total += child.filled_qty
+            _ = child.status
+
+    def _aggregate() -> None:
+        aggregate_parent_state(_PARENT_QTY, OrderStatus.SUBMITTED, large_children)
+
+    reference_elapsed = _median_elapsed_seconds(_reference_loop)
+    aggregate_elapsed = _median_elapsed_seconds(_aggregate)
+
+    # Ratio assertion: the real aggregation (fill-qty summation + status
+    # rollup) must not cost more than 20x a trivial per-item loop over the
+    # same n -- generous slack for the extra branching/comparisons
+    # aggregate_parent_state does per child, without pinning an absolute
+    # per-item cost that would vary across CI hosts.
+    ratio = aggregate_elapsed / reference_elapsed if reference_elapsed > 0 else 0
+    assert ratio < 20, (
+        f"Performance regression: aggregating {n_large} children took {ratio:.1f}x "
+        f"the reference per-item loop over the same n (reference="
+        f"{reference_elapsed:.4f}s, aggregate={aggregate_elapsed:.4f}s)"
     )
 
 
