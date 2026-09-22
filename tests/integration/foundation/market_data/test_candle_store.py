@@ -295,3 +295,154 @@ async def test_batch_create_duplicate_batch_id_raises(pool, batch_repo):
     with pytest.raises(DuplicateBatchError):
         async with pool.acquire() as conn, conn.transaction():
             await batch_repo.create(conn, batch)
+
+
+async def test_upsert_batch_rejects_low_below_high_check_violation(pool, candle_store, batch_repo):
+    """negative: low > high인 캔들은 md_candle의 CHECK 위반으로 거부되어야 한다."""
+    async with pool.acquire() as conn, conn.transaction():
+        instrument_id = await _instrument_id(conn)
+        t0 = datetime.now(timezone.utc).replace(microsecond=0)
+        batch = await _create_batch(
+            conn, batch_repo, instrument_id=instrument_id,
+            range_start=t0, range_end=t0 + timedelta(minutes=1),
+        )
+        key = SeriesKey(venue=Venue.BITGET, instrument_id=instrument_id, timeframe=Timeframe.M1)
+
+    bad_candle = _candle(key, t0, 100, 120, 125, 110, 10)  # low(125) > high(120)
+    with pytest.raises(asyncpg.CheckViolationError, match="ck_md_candle_high_ge_low"):
+        async with pool.acquire() as conn, conn.transaction():
+            await candle_store.upsert_batch(conn, batch.batch_id, [bad_candle])
+
+
+async def test_upsert_batch_rejects_close_outside_range_check_violation(pool, candle_store, batch_repo):
+    """negative: close가 high와 low 사이에 없으면 CHECK 위반으로 거부되어야 한다."""
+    async with pool.acquire() as conn, conn.transaction():
+        instrument_id = await _instrument_id(conn)
+        t0 = datetime.now(timezone.utc).replace(microsecond=0)
+        batch = await _create_batch(
+            conn, batch_repo, instrument_id=instrument_id,
+            range_start=t0, range_end=t0 + timedelta(minutes=1),
+        )
+        key = SeriesKey(venue=Venue.BITGET, instrument_id=instrument_id, timeframe=Timeframe.M1)
+
+    bad_candle = _candle(key, t0, 100, 120, 90, 130, 10)  # close(130) > high(120)
+    with pytest.raises(asyncpg.CheckViolationError):
+        async with pool.acquire() as conn, conn.transaction():
+            await candle_store.upsert_batch(conn, batch.batch_id, [bad_candle])
+
+
+async def test_upsert_batch_rejects_negative_volume(pool, candle_store, batch_repo):
+    """negative: 음수 거래량은 CHECK 위반으로 거부되어야 한다."""
+    async with pool.acquire() as conn, conn.transaction():
+        instrument_id = await _instrument_id(conn)
+        t0 = datetime.now(timezone.utc).replace(microsecond=0)
+        batch = await _create_batch(
+            conn, batch_repo, instrument_id=instrument_id,
+            range_start=t0, range_end=t0 + timedelta(minutes=1),
+        )
+        key = SeriesKey(venue=Venue.BITGET, instrument_id=instrument_id, timeframe=Timeframe.M1)
+
+    bad_candle = _candle(key, t0, 100, 110, 90, 105, -5)  # 음수 거래량
+    with pytest.raises(asyncpg.CheckViolationError, match="ck_md_candle_volume"):
+        async with pool.acquire() as conn, conn.transaction():
+            await candle_store.upsert_batch(conn, batch.batch_id, [bad_candle])
+
+
+async def test_query_with_empty_time_range(pool, candle_store, batch_repo):
+    """negative: start > end인 시간 범위 조회는 빈 결과를 반환해야 한다."""
+    t0 = datetime.now(timezone.utc).replace(microsecond=0)
+    t1 = t0 + timedelta(minutes=5)
+
+    async with pool.acquire() as conn, conn.transaction():
+        instrument_id = await _instrument_id(conn)
+        key = SeriesKey(venue=Venue.BITGET, instrument_id=instrument_id, timeframe=Timeframe.M1)
+        batch = await _create_batch(
+            conn, batch_repo, instrument_id=instrument_id,
+            range_start=t0, range_end=t1 + timedelta(minutes=1),
+        )
+        candle = _candle(key, t0, 100, 110, 90, 105, 10)
+        await candle_store.upsert_batch(conn, batch.batch_id, [candle])
+
+    async with pool.acquire() as conn, conn.transaction():
+        # start > end인 범위로 조회
+        result = await candle_store.query(
+            conn, key, t1, t0, as_of=None  # reversed time range
+        )
+    assert len(result) == 0, "반전된 시간 범위는 빈 결과를 반환해야 한다"
+
+
+async def test_batch_repo_handles_verdict_transitions(pool, batch_repo):
+    """failure-injection: 배치 생성 중 verdict 상태 전이를 검증하고 저장한다."""
+    async with pool.acquire() as conn, conn.transaction():
+        instrument_id = await _instrument_id(conn)
+        t0 = datetime.now(timezone.utc).replace(microsecond=0)
+        audit_event_id = await _audit_event_id(conn)
+
+        # PARTIAL verdict로 배치 생성
+        batch = IngestBatchResult(
+            batch_id=uuid.uuid4(),
+            source="test_source",
+            venue=Venue.BITGET,
+            instrument_id=instrument_id,
+            timeframe=Timeframe.M1,
+            range_start=t0,
+            range_end=t0 + timedelta(minutes=5),
+            request_fingerprint=f"fp-{uuid.uuid4().hex}",
+            verdict=QualityVerdict(
+                verdict=Verdict.PARTIAL,
+                accepted=8,
+                quarantined=1,
+                rejected=1,
+                issues=[],
+            ),
+            batch_hash=f"hash-{uuid.uuid4().hex}",
+            audit_event_id=audit_event_id,
+            stored_range=None,
+        )
+        result = await batch_repo.create(conn, batch)
+        assert result.verdict.verdict == Verdict.PARTIAL
+        assert result.verdict.accepted == 8
+        assert result.verdict.quarantined == 1
+        assert result.verdict.rejected == 1
+
+
+async def test_quarantine_with_multiple_candles(pool, candle_store, batch_repo):
+    """failure-injection: 격리 시 여러 캔들을 정확히 기록하는지 확인."""
+    async with pool.acquire() as conn, conn.transaction():
+        instrument_id = await _instrument_id(conn)
+        t0 = datetime.now(timezone.utc).replace(microsecond=0)
+        batch = await _create_batch(
+            conn, batch_repo, instrument_id=instrument_id,
+            range_start=t0, range_end=t0 + timedelta(minutes=3), accepted=0, quarantined=3,
+        )
+        key = SeriesKey(venue=Venue.BITGET, instrument_id=instrument_id, timeframe=Timeframe.M1)
+        
+        candles = [
+            _candle(key, t0 + timedelta(minutes=i), 100, 110, 90, 105, 10)
+            for i in range(3)
+        ]
+        
+        issues = [
+            QualityIssue(
+                type=QualityIssueType.OHLC_INCONSISTENT,
+                severity=Severity.REJECT,
+                open_time=t0,
+                detail={"reason": "close > high"},
+            ),
+        ]
+        await candle_store.quarantine(conn, batch.batch_id, candles, issues)
+        
+        # 모든 격리 캔들이 저장되었는지 확인
+        quarantine_count = await conn.fetchval(
+            "SELECT COUNT(*) FROM md_quarantine_candle WHERE batch_id = $1", batch.batch_id
+        )
+        assert quarantine_count == 3, "격리된 캔들 3건이 모두 저장되어야 한다"
+
+
+async def test_last_open_time_on_empty_table(pool, candle_store):
+    """negative: 저장된 캔들이 없으면 last_open_time은 None을 반환해야 한다."""
+    async with pool.acquire() as conn, conn.transaction():
+        instrument_id = await _instrument_id(conn)
+        key = SeriesKey(venue=Venue.BITGET, instrument_id=instrument_id, timeframe=Timeframe.M1)
+        result = await candle_store.last_open_time(conn, key)
+        assert result is None, "저장된 캔들이 없는 경우 None을 반환해야 한다"
