@@ -20,6 +20,7 @@ dataclass/mapper module can actually exercise:
     input (`test_frozen_...`, `test_replay_across_independent_processes...`).
 """
 
+import os
 import time
 from concurrent.futures import ProcessPoolExecutor
 from datetime import datetime, timezone
@@ -231,11 +232,11 @@ def test_outcome_to_verdict_mapping_total_over_enum_members_ci_guard() -> None:
     assert set(_OUTCOME_TO_VERDICT.keys()) == set(PolicyOutcome)
 
 
-def _replay_in_subprocess(row: PolicyDecisionRow) -> str:
+def _replay_in_subprocess(row: PolicyDecisionRow) -> tuple:
     """Module-level so it is picklable for `ProcessPoolExecutor` on
-    Windows (spawn start method)."""
+    Windows (spawn start method). Returns (json_bytes, pid) tuple."""
     decision = compliance_decision_from_policy_decision(row)
-    return decision.model_dump_json()
+    return (decision.model_dump_json(), os.getpid())
 
 
 def test_replay_across_independent_processes_is_byte_identical() -> None:
@@ -257,5 +258,9 @@ def test_replay_across_independent_processes_is_byte_identical() -> None:
     with ProcessPoolExecutor(max_workers=3) as pool:
         results = list(pool.map(_replay_in_subprocess, [row, row, row]))
 
-    assert len(results) == 3
-    assert len(set(results)) == 1
+    jsons, pids = zip(*results, strict=True)
+
+    assert len(pids) == 3
+    assert len(set(pids)) == 3, "각 워커 PID는 고유해야 한다"
+    assert all(pid != os.getpid() for pid in pids), "워커 PID는 부모와 달라야 한다"
+    assert len(set(jsons)) == 1
