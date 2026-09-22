@@ -171,6 +171,83 @@ def test_frozen_decision_and_rule_hit_reject_post_construction_tampering() -> No
         cast(Any, hit).severity = ComplianceVerdict.ALLOW
 
 
+def test_rule_hit_evidence_dict_rejects_in_place_mutation() -> None:
+    """I-09 D3 적대적(task-4937, task-4916 REJECT 후속): `frozen=True`는
+    `hit.evidence = {...}` 같은 필드 재대입만 막을 뿐, `hit.evidence`가
+    가리키는 dict 객체 자체는 평범한 가변 dict라서 `.clear()`/`.update()`
+    등으로 감사 증거가 조용히 변조될 수 있었다. 생성 시점에 `_FrozenDict`로
+    감싸 그 경로 자체를 예외로 막는다 — 선언된 필드 타입(`dict[str, Any]`)은
+    그대로 유지한다(P5 guard: 공개 계약 타입 변경 금지).
+    """
+    hit = RuleHit(
+        rule_id="R1",
+        severity=ComplianceVerdict.DENY,
+        message="m",
+        evidence={"key": "original"},
+    )
+
+    with pytest.raises(TypeError):
+        hit.evidence.clear()
+    with pytest.raises(TypeError):
+        hit.evidence["key"] = "tampered"
+    with pytest.raises(TypeError):
+        hit.evidence.update({"injected": "value"})
+    with pytest.raises(TypeError):
+        hit.evidence.pop("key")
+
+    assert hit.evidence == {"key": "original"}
+
+
+def test_compliance_decision_rule_hits_list_rejects_in_place_mutation() -> None:
+    """I-09 D3 적대적: `decision.rule_hits`가 가리키는 list도 evidence dict와
+    동일한 구멍이 있었다 — `.append()`로 존재하지 않던 위반을 감사 판정에
+    사후 주입하거나 `.clear()`로 DENY 근거를 전부 지울 수 있었다.
+    """
+    original_hit = RuleHit(rule_id="R1", severity=ComplianceVerdict.DENY, message="m", evidence={})
+    decision = ComplianceDecision(
+        decision_id=uuid4(),
+        verdict=ComplianceVerdict.DENY,
+        rule_hits=[original_hit],
+        inputs_hash=_hex_digest("tamper-rule-hits"),
+        bundle_version=_hex_digest("tamper-rule-hits-bundle"),
+        evaluated_at=NOW,
+    )
+
+    injected_hit = RuleHit(
+        rule_id="INJECTED", severity=ComplianceVerdict.ALLOW, message="m", evidence={}
+    )
+    with pytest.raises(TypeError):
+        decision.rule_hits.append(injected_hit)
+    with pytest.raises(TypeError):
+        decision.rule_hits.clear()
+    with pytest.raises(TypeError):
+        decision.rule_hits[0] = injected_hit
+
+    assert decision.rule_hits == [original_hit]
+
+
+def test_policy_decision_row_reason_codes_list_rejects_in_place_mutation() -> None:
+    """I-09 D3 적대적: 매퍼 입력인 `PolicyDecisionRow.reason_codes`가 매핑
+    이전에 변조되면 `compliance_decision_from_policy_decision`이 만드는
+    `rule_hits`도 함께 오염된다 — 입력 경계에서부터 막아야 한다.
+    """
+    row = PolicyDecisionRow(
+        decision_id=uuid4(),
+        outcome=PolicyOutcome.DENY,
+        reason_codes=["ORIGINAL_CODE"],
+        inputs_hash=_hex_digest("tamper-reason-codes"),
+        bundle_version=_hex_digest("tamper-reason-codes-bundle"),
+        evaluated_at=NOW,
+    )
+
+    with pytest.raises(TypeError):
+        row.reason_codes.append("INJECTED_CODE")
+    with pytest.raises(TypeError):
+        row.reason_codes.clear()
+
+    assert row.reason_codes == ["ORIGINAL_CODE"]
+
+
 def test_mapper_propagates_rule_hit_construction_failure_instead_of_silently_allowing(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
