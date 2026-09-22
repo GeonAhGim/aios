@@ -24,7 +24,7 @@ from __future__ import annotations
 from uuid import UUID
 
 import asyncpg
-from fastapi import APIRouter, Depends, status
+from fastapi import APIRouter, Depends, Query, status
 
 from src.api.admin_deps import (
     get_audit_log_read_service,
@@ -36,6 +36,7 @@ from src.api.admin_deps import (
 )
 from src.api.contracts.envelope import ApiResponse, ok
 from src.api.contracts.idempotency import IdempotencyScope, require_idempotency_key, run_idempotent
+from src.api.contracts.pagination import PageMeta, PageParams
 from src.api.deps import get_current_admin, get_current_verifier, get_pool
 from src.api.marketplace_deps import get_listing_service
 from src.api.schemas.admin import (
@@ -86,20 +87,27 @@ async def list_audit_log(
     action_type: str | None = None,
     target_type: str | None = None,
     target_id: str | None = None,
-    page: int = 1,
-    page_size: int = 50,
+    page: int = Query(1, ge=1),
+    page_size: int = Query(50, ge=1, le=100),
     admin: User = Depends(get_current_admin),
     service: AuditLogReadService = Depends(get_audit_log_read_service),
     _grant: BreakGlassGrant = Depends(require_break_glass("tenant_read")),  # noqa: B008 -- same existing convention as admin_deps.py (the factory call itself is the Depends argument)
 ) -> ApiResponse[AuditLogPage]:
+    # PLT-108: legacy `page`/`page_size` query names stay wire-compatible
+    # (frontend/packages/api-client already sends `page_size`) — PageParams
+    # is still the single validated representation used internally.
+    params = PageParams(page=page, size=page_size)
     result = await service.list_entries(
         action_type=action_type,
         target_type=target_type,
         target_id=target_id,
-        page=page,
-        page_size=page_size,
+        page=params.page,
+        page_size=params.size,
     )
-    return ok(result)
+    return ok(
+        result,
+        page=PageMeta(total=result.total, page=result.page, size=result.page_size),
+    )
 
 
 @router.get("/verification-queue")
@@ -172,12 +180,17 @@ async def suspend_seller(
 
 @router.get("/wallet/topups/pending")
 async def list_pending_topups(
-    page: int = 1,
-    page_size: int = 20,
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=100),
     admin: User = Depends(get_current_admin),
     service: WalletService = Depends(get_wallet_service),
 ) -> ApiResponse[WalletTopupPage]:
-    return ok(await service.list_pending_topups(page=page, page_size=page_size))
+    params = PageParams(page=page, size=page_size)
+    result = await service.list_pending_topups(page=params.page, page_size=params.size)
+    return ok(
+        result,
+        page=PageMeta(total=result.total, page=result.page, size=result.page_size),
+    )
 
 
 @router.post("/wallet/topups/{topup_id}/confirm")

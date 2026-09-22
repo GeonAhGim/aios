@@ -10588,7 +10588,7 @@
         "type": "string"
       },
       "Tier": {
-        "description": "카탈로그 우선순위(선언 순서 = 이름 충돌 해소 순서, CORE가 최상위).",
+        "description": "Catalog priority order (declaration order = name collision resolution order, CORE is top).",
         "enum": [
           "core",
           "oss",
@@ -11683,6 +11683,7 @@
             "required": false,
             "schema": {
               "default": 1,
+              "minimum": 1,
               "title": "Page",
               "type": "integer"
             }
@@ -11693,6 +11694,8 @@
             "required": false,
             "schema": {
               "default": 50,
+              "maximum": 100,
+              "minimum": 1,
               "title": "Page Size",
               "type": "integer"
             }
@@ -12313,6 +12316,7 @@
             "required": false,
             "schema": {
               "default": 1,
+              "minimum": 1,
               "title": "Page",
               "type": "integer"
             }
@@ -12323,6 +12327,8 @@
             "required": false,
             "schema": {
               "default": 20,
+              "maximum": 100,
+              "minimum": 1,
               "title": "Page Size",
               "type": "integer"
             }
