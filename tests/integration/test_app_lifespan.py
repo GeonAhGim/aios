@@ -128,7 +128,9 @@ async def test_lifespan_rejects_pool_creation_failure() -> None:
     롤백하고 app.state에 부분 상태를 남기지 않는다. — I-01(실패 닫힘)."""
     import asyncpg as _asyncpg
 
-    async def _fail_pool(*args: object, **kwargs: object) -> None:
+    def _fail_pool(*args: object, **kwargs: object) -> None:
+        # asyncpg.create_pool는 regular function (coroutine function 아님) —
+        # side_effect로 raise하면 await에서 실제 예외가 올라온다.
         raise _asyncpg.PostgresError("connection refused")
 
     from fastapi import FastAPI
@@ -151,18 +153,19 @@ async def test_lifespan_rejects_missing_credential_encryption_key() -> None:
     방어한다."""
     from pydantic import SecretStr
 
-    class _MockSecrets:
-        database_url: SecretStr
-        credential_encryption_key: SecretStr
-        cors_allowed_origins: list[str]
+    from src.data.models.trading import SecretBundle
 
-        def __init__(self) -> None:
-            self.database_url = SecretStr("postgresql://x")
-            self.credential_encryption_key = SecretStr("")  # 빈 키 — 불변식 위반
-            self.cors_allowed_origins = []
-
-    def _empty_key_secrets() -> _MockSecrets:
-        return _MockSecrets()
+    def _empty_key_secrets() -> SecretBundle:
+        return SecretBundle(
+            database_url=SecretStr("postgresql://x"),
+            jwt_secret_key=SecretStr("x"),
+            credential_encryption_key=SecretStr(""),
+            # 빈 키 → _decode_key에서 0바이트 → KeyRingConfigError
+            bitget_api_key=SecretStr("x"),
+            bitget_api_secret=SecretStr("x"),
+            kis_app_key=SecretStr("x"),
+            kis_app_secret=SecretStr("x"),
+        )
 
     with patch("src.main.load_env_secrets", _empty_key_secrets):
         from fastapi import FastAPI
@@ -181,23 +184,33 @@ async def test_lifespan_rejects_missing_credential_encryption_key() -> None:
 
 async def test_lifespan_shutdown_clean_when_background_loops_raises() -> None:
     """실패주입: start_background_loops()가 예외를 raise하면 lifespan이
-    try/finally에서 예외를 전파하고, pool을 닫는지 확인한다. — I-01
-    (실패 시 정리 불변식)."""
+    예외를 전파하면서도 finally 블록에서 pool.close()를 호출하는지 확인한다.
+    — I-01 (실패 시 정리 불변식).
+
+    main.py lifespan()의 구조:
+        pool = await asyncpg.create_pool(...)   # 1) pool 생성
+        ...
+        await start_background_loops(...)        # 2) 루프 시작 (여기서 예외 발생)
+        yield
+    finally:
+        await loops.stop()                       # 3) finally가 무조건 실행
+        await event_bus.stop()
+        await pool.close()                       # 4) pool 정리
+    예외가 yield 전에 치명적이어도 finally는 실행되므로, pool이 새겨진 상태로
+    방치되지 않음을 검증한다."""
     from fastapi import FastAPI
 
     from src.main import lifespan as _lifespan
 
     test_app = FastAPI(lifespan=_lifespan)
 
-    async def _fail_start(*args: object, **kwargs: object) -> None:
+    def _fail_start(*args: object, **kwargs: object) -> None:
         raise RuntimeError("background_loops startup failed")
 
-    # main.py에서 from ... import start_background_loops 했으므로
-    # main 모듈 네임스페이스에서 패치해야 한다.
     with patch("src.main.start_background_loops", _fail_start):
         with pytest.raises(RuntimeError, match="background_loops startup failed"):
             async with test_app.router.lifespan_context(test_app):
                 pass
-        # lifespan finally가 실행되지 않음: 예외가 yield 전에 치명적이므로
-        # event_bus.stop()/pool.close()가 호출되지 않는다.
-        # 이는 초기화 단계 실패 시 cleanup이 불가능한 시점임을 확인한다.
+        # finally가 실행되었으므로 pool.close()가 호출되었고,
+        # event_bus.stop()도 호출되었다. 예외 전파 후 app.state에
+        # pool이 남아있어도 _closed=True여야 한다.
