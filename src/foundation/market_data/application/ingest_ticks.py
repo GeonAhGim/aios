@@ -1,33 +1,33 @@
-"""LA-16 — 틱 인제스트: trade_id 단조성·시각 역행 검사 → 저장 → 감사.
+"""LA-16 - Tick ingest: trade_id monotonicity and time-regression check -> store -> audit.
 
 Spec: docs/specs/L4_market_data_positions_ledger_v1.0.md#§9.2 LA-16.
 
-캔들(LA-15)과 달리 세션·갭 검사가 없다(틱은 24시간 스트림) — 유일한
-게이트는 같은 (venue, instrument_id)에서 trade_id·traded_at이 뒤로 가지
-않는지뿐이다. 위반 시 배치 전체를 REJECT한다(부분 저장 금지, §9 DoD) —
-틱은 격리 테이블이 없어(LA-11) 캔들처럼 개별 레코드 격리를 하지 않는다.
+Unlike candles (LA-15), there are no session/gap checks (ticks are a 24-hour stream) - the only
+gate is that trade_id and traded_at do not go backward for the same (venue, instrument_id). On
+violation, the entire batch is REJECTED (no partial storage, §9 DoD) - ticks have no isolation
+table (LA-11), so individual record isolation like candles is not possible.
 
-`contracts/v1.py`·마이그레이션·`BatchRepository`는 수정 불가(task-842
-decision). `IngestSource`에 틱 조회 메서드가 없고 이 리프도 추가하지
-않으므로, 이미 올바른 `instrument_id`로 채워진 `TickRecord` 목록을
-호출부가 직접 넘긴다(재키잉 없음). `IngestTicksCommand`도 그래서 공개
-계약이 아니라 이 모듈 전용 입력이다 — 심볼 상태 검사·as-of 조회처럼
-참조데이터에 얽힌 것은 범위 밖이다.
+`contracts/v1.py`, migrations, and `BatchRepository` are immutable (task-842 decision).
+`IngestSource` has no tick lookup method and this leaf adds none, so the caller passes a
+pre-filled list of `TickRecord` objects with the correct `instrument_id` already set (no
+re-keying). `IngestTicksCommand` is therefore not a public contract but a module-private
+input - symbol status checks, as-of lookups, and other reference-data dependencies are
+out of scope.
 
-"직전 저장분 이하 trade_id는 REJECT"(§9)를 같음까지 포함해 그대로
-적용하면 재실행 멱등(같은 배치 재수집 시 `md_tick` ON CONFLICT DO
-NOTHING으로 조용히 성공, LA-15 캔들 재수집과 같은 원칙)이 깨진다 —
-배치 안에서 이미 `md_tick`에 UNIQUE 제약과 동일한 (trade_id, traded_at)
-복합키로 존재하는 틱만 "재수집"으로 보고 역행 검사에서 제외하고, 그
-복합키로도 아직 없는 틱만 지금까지 본 최댓값(직전 저장분 포함)보다
-작으면 역행으로 REJECT한다 — trade_id만으로 "이미 안다"고 판정하면
-같은 trade_id·다른 traded_at 재수집이 역행검사를 우회한다(리뷰 REJECT,
-task-1302).
+Applying "reject trade_id at or below last stored" (§9) literally (including equality)
+would break replay idempotency (re-fetching the same batch succeeds silently via `md_tick`
+ON CONFLICT DO NOTHING, same principle as LA-15 candle re-fetch) - instead, only ticks
+whose (trade_id, traded_at) composite key already matches the UNIQUE constraint on
+`md_tick` are treated as "already fetched" and excluded from the regression check. For
+ticks whose composite key is still absent, we reject as regression only if the value is
+less than the maximum seen so far (including last stored). If we judged "already known"
+by trade_id alone, a re-fetch with the same trade_id but a different traded_at would
+bypass the regression check (review REJECT, task-1302).
 
-트랜잭션 경계는 LA-15와 동일하게 저장·배치 기록·감사 이벤트를 하나로
-묶어 감사 실패 시 전부 롤백한다. 같은 (venue, instrument_id) 동시 호출이
-같은 "직전 저장분"을 읽고 둘 다 통과하는 경쟁을 막기 위해 읽기 전
-`pg_advisory_xact_lock`으로 트랜잭션이 끝날 때까지 직렬화한다.
+The transaction boundary bundles storage, batch recording, and audit events into one -
+on audit failure, everything rolls back (same as LA-15). To prevent concurrent calls for
+the same (venue, instrument_id) from reading the same "last stored" value and both
+passing, we serialize with `pg_advisory_xact_lock` until the transaction ends.
 """
 from __future__ import annotations
 
@@ -58,8 +58,8 @@ __all__ = ["IngestTicksCommand", "ingest_ticks"]
 
 @dataclass(frozen=True)
 class IngestTicksCommand:
-    """`ticks`는 이미 올바른 `instrument_id`로 채워진(모듈 docstring
-    참고) 비어 있지 않은, 같은 (venue, instrument_id)의 목록이어야 한다."""
+    """`ticks` must be a non-empty list of the same (venue, instrument_id), already
+    filled with the correct `instrument_id` (see module docstring)."""
 
     tenant_id: UUID | None
     source: str
@@ -68,8 +68,8 @@ class IngestTicksCommand:
 
 
 def _parse_trade_id(trade_id: str) -> int | None:
-    """숫자가 아닌 trade_id(거래소별 형식 미검증)는 `None` — 이때 trade_id
-    축은 검사에서 빠지고 시각 축만 역행을 판단한다."""
+    """Non-numeric trade_id (exchange format unvalidated) returns `None` - at this
+    point the trade_id axis is skipped and only the time axis determines regression."""
     try:
         return int(trade_id)
     except ValueError:
@@ -79,12 +79,12 @@ def _parse_trade_id(trade_id: str) -> int | None:
 async def _last_stored(
     conn: asyncpg.Connection, venue: Venue, instrument_id: UUID
 ) -> tuple[int | None, datetime | None]:
-    """최댓값 `traded_at`과 그 시각에 동시 체결된 모든 trade_id 중 최댓값을
-    baseline으로 삼는다. 같은 트랜잭션에서 저장된 동시 체결 틱은 `created_at`도
-    동일해(Postgres `now()`는 트랜잭션 시작 시각으로 고정) `traded_at DESC,
-    created_at DESC LIMIT 1`로는 어느 행이 뽑힐지 비결정적이라 더 작은
-    trade_id가 baseline이 될 수 있다 — 그러면 실제로는 역행인 배치가
-    통과된다(QA 발견, task-1004)."""
+    """Returns the maximum `traded_at` and, among all trade_ids for that timestamp
+    (concurrent fills), the maximum trade_id as baseline. Concurrent fills stored in
+    the same transaction share the same `created_at` (Postgres `now()` is fixed at
+    transaction start), so `traded_at DESC, created_at DESC LIMIT 1` is non-deterministic
+    and could pick a smaller trade_id as baseline - allowing a genuinely regressive batch
+    to pass (QA finding, task-1004)."""
     max_traded_at = await conn.fetchval(
         "SELECT MAX(traded_at) FROM md_tick WHERE venue = $1 AND instrument_id = $2",
         venue.value,
@@ -109,11 +109,11 @@ async def _last_stored(
 async def _known_ticks(
     conn: asyncpg.Connection, venue: Venue, instrument_id: UUID, ticks: list[TickRecord]
 ) -> set[tuple[str, datetime]]:
-    """`md_tick` UNIQUE(venue, instrument_id, trade_id, traded_at)와 동일한
-    복합키로 "이미 저장됨"을 판정한다. trade_id만으로 판정하면 같은
-    trade_id를 다른 traded_at으로 재수집할 때 재수집으로 오판해 역행검사
-    에서 빠지고, 그 경로로 역행 배치가 REJECT를 우회해 통과한다(리뷰
-    REJECT, task-1302)."""
+    """Determines "already stored" by the composite key matching
+    `md_tick` UNIQUE(venue, instrument_id, trade_id, traded_at). Judging by
+    trade_id alone would misclassify re-fetches with the same trade_id but a
+    different traded_at as duplicates, causing them to skip the regression check
+    and letting regressive batches bypass rejection (review REJECT, task-1302)."""
     rows = await conn.fetch(
         "SELECT trade_id, traded_at FROM md_tick WHERE venue = $1 AND instrument_id = $2 "
         "AND trade_id = ANY($3::text[])",
@@ -129,8 +129,9 @@ def _first_regression(
     baseline_trade_id: int | None,
     baseline_traded_at: datetime | None,
 ) -> QualityIssue | None:
-    """실행 최댓값(baseline 포함) 대비 trade_id/traded_at이 엄격히 감소하는
-    첫 지점을 순서대로 찾는다. 같음은 최댓값을 갱신하지 않을 뿐 위반이 아니다."""
+    """Finds, in order, the first point where trade_id/traded_at strictly decreases
+    relative to the running maximum (including baseline). Equality does not update the
+    maximum but is not a violation."""
     max_trade_id = baseline_trade_id
     max_traded_at = baseline_traded_at
     for tick in ticks:
@@ -176,7 +177,7 @@ async def ingest_ticks(
     pool: asyncpg.Pool,
 ) -> TickIngestBatchResult:
     if not cmd.ticks:
-        raise ValueError("빈 틱 배치는 처리할 수 없다")
+        raise ValueError("Empty tick batch cannot be processed")
 
     venue = cmd.ticks[0].venue
     instrument_id = cmd.ticks[0].instrument_id
@@ -196,7 +197,7 @@ async def ingest_ticks(
     batch_id = uuid4()
 
     async with pool.acquire() as conn, conn.transaction():
-        # 동시 배치의 "직전 저장분" 경쟁 방지(모듈 docstring 참고).
+        # Prevent race on "last stored" value for concurrent batches (see module docstring).
         await conn.execute(
             "SELECT pg_advisory_xact_lock(hashtext($1))", f"{venue.value}:{instrument_id}"
         )
