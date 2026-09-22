@@ -8,10 +8,12 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 from decimal import Decimal
+from typing import Any, cast
 
 import pytest
 
 from src.data.models.trading import OrderSide
+from src.foundation.positions.contracts.v1 import Lot
 from src.foundation.positions.domain.cost_basis.fifo import NegativeQuantityError
 from src.foundation.positions.domain.cost_basis.weighted import FillEvent, WeightedAverage
 
@@ -113,18 +115,19 @@ def test_apply_lot_model_copy_failure_propagates() -> None:
     wavg = WeightedAverage()
     wavg.apply(_fill(OrderSide.BUY, "10", "100"))
 
-    original_model_copy = type(wavg._lot).model_copy  # type: ignore[union-attr]
+    lot_cls = type(cast(Lot, wavg._lot))
+    original_model_copy = lot_cls.model_copy
 
-    def failing_model_copy(self, **kwargs):  # type: ignore[no-untyped-def]
+    def failing_model_copy(self: Any, **kwargs: Any) -> Any:
         raise RuntimeError("simulated persistence failure")
 
-    type(wavg._lot).model_copy = failing_model_copy  # type: ignore[method-assign, union-attr]
+    setattr(lot_cls, "model_copy", failing_model_copy)  # noqa: B010
 
     try:
         with pytest.raises(RuntimeError, match="simulated persistence failure"):
             wavg.apply(_fill(OrderSide.SELL, "5", "120"))
     finally:
-        type(wavg._lot).model_copy = original_model_copy  # type: ignore[method-assign, union-attr]
+        setattr(lot_cls, "model_copy", original_model_copy)  # noqa: B010
 
 
 def test_weighted_average_10k_fills_within_budget() -> None:

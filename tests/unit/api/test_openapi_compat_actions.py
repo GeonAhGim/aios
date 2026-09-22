@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import json
 import subprocess
-from typing import Any
+from typing import Any, cast
 
 import pytest
 
@@ -354,7 +354,9 @@ def test_main_propagates_when_export_subprocess_fails(monkeypatch: Any, tmp_path
     def _fail(*args: Any, **kwargs: Any) -> None:
         raise subprocess.CalledProcessError(returncode=1, cmd=["export_openapi"])
 
-    monkeypatch.setattr(compat_module.subprocess, "run", _fail)  # type: ignore[attr-defined]
+    monkeypatch.setattr(
+        cast(Any, compat_module).subprocess, "run", _fail
+    )
 
     with pytest.raises(subprocess.CalledProcessError):
         main(["--baseline", str(baseline_path)])
@@ -387,7 +389,9 @@ def test_main_propagates_when_export_subprocess_lies_about_success(monkeypatch: 
     def _noop_run(*args: Any, **kwargs: Any) -> subprocess.CompletedProcess[bytes]:
         return subprocess.CompletedProcess(args=["export_openapi"], returncode=0)
 
-    monkeypatch.setattr(compat_module.subprocess, "run", _noop_run)  # type: ignore[attr-defined]
+    monkeypatch.setattr(
+        cast(Any, compat_module).subprocess, "run", _noop_run
+    )
 
     with pytest.raises(FileNotFoundError):
         main(["--baseline", str(baseline_path)])

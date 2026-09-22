@@ -57,7 +57,7 @@ import asyncpg
 from src.foundation.ems.contracts.v1 import TcaResult
 from src.foundation.ems.ports.tca_result_repository import TcaResultRecord
 from src.foundation.evidence.adapters.postgres_repository import PostgresAuditEventRepository
-from src.foundation.evidence.domain.models import Classification, Outcome
+from src.foundation.evidence.domain.models import AuditEvent, Classification, Outcome
 from src.foundation.evidence.domain.rules import compute_payload_hash
 
 AGGREGATE_TYPE = "tca_result"
@@ -77,6 +77,14 @@ def _payload(result: TcaResult, computed_at: datetime) -> dict[str, Any]:
         **{field: str(getattr(result, field)) for field in _RESULT_FIELDS},
         "computed_at": computed_at.isoformat(),
     }
+
+
+def _require_occurred_at(event: AuditEvent) -> datetime:
+    """AuditEvent.occurred_at is Optional in the evidence model; a TCA record without a
+    timestamp is a data defect, so fail closed rather than silently passing None."""
+    if event.occurred_at is None:
+        raise ValueError(f"audit event {event.id} has no occurred_at")
+    return event.occurred_at
 
 
 def _record_from_payload(
@@ -161,7 +169,7 @@ class PostgresTcaResultRepository:
                 parent_id=parent_id,
                 revision=revision,
                 payload=payload,
-                created_at=event.occurred_at,  # type: ignore[arg-type]
+                created_at=_require_occurred_at(event),
             )
 
     async def get_by_revision(self, parent_id: UUID, revision: int) -> TcaResultRecord | None:

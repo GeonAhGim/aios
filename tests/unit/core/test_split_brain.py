@@ -1,6 +1,6 @@
 import asyncio
 from collections.abc import Callable, Coroutine
-from typing import Any
+from typing import Any, cast
 
 from src.core.safety.split_brain import Diagnosis, SplitBrainDiagnostics
 
@@ -27,7 +27,7 @@ def _diag(**overrides: Any) -> SplitBrainDiagnostics:
         entry_confirm_seconds=0.05, recovery_confirm_seconds=0.1, check_timeout_seconds=0.05
     )
     defaults.update(overrides)
-    return SplitBrainDiagnostics(**defaults)  # type: ignore[arg-type]
+    return SplitBrainDiagnostics(**cast(dict[str, Any], defaults))
 
 
 def _diag_with_clock(**overrides: Any) -> tuple[SplitBrainDiagnostics, _FakeClock]:
