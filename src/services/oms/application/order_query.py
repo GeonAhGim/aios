@@ -22,6 +22,7 @@ tenant 소유 `order_id`는 항상 같은 `None`으로 접는다(§8.3 "404 동�
 `_LEGACY_TABLES_POLICY_ONLY`)와는 이중 방어 — RLS가 나중에 켜져도
 이 필터는 그대로 유효하고, RLS가 없는 지금은 이 필터가 유일한 방어선이다.
 """
+
 from __future__ import annotations
 
 import base64
@@ -100,7 +101,15 @@ def _decode_cursor(cursor: str) -> tuple[datetime, UUID]:
         created_at_str, _, order_id_str = raw.partition(_CURSOR_SEP)
         if not order_id_str:
             raise ValueError("cursor에 구분자가 없습니다")
-        return datetime.fromisoformat(created_at_str), UUID(order_id_str)
+        created_at = datetime.fromisoformat(created_at_str)
+        if created_at.tzinfo is None:
+            # fromisoformat() silently accepts a tz-less string as a naive
+            # datetime. A crafted cursor could smuggle one through, and
+            # asyncpg would then interpret it in the server's local timezone,
+            # breaking the keyset boundary (CLAUDE.md: datetimes are always
+            # timezone-aware UTC). Reject fail-closed instead.
+            raise ValueError("cursor의 timestamp에 timezone 정보가 없습니다")
+        return created_at, UUID(order_id_str)
     except (ValueError, UnicodeDecodeError, binascii.Error) as exc:
         raise InvalidOrderCursorError(f"유효하지 않은 cursor: {cursor!r}") from exc
 
