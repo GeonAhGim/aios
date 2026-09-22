@@ -1,22 +1,26 @@
-"""FA-7 — allocation/domain/policy.py: 3정책 배분(순수).
+"""FA-7 — allocation/domain/policy.py: three-policy allocation (pure domain).
 
-Spec: docs/specs/L4_ibor_fund_accounting_and_resilience_v1.0.md#FA-7 (§2.2 표·§4 FA-A3).
+Spec: docs/specs/L4_ibor_fund_accounting_and_resilience_v1.0.md#FA-7 (§2.2 table, §4 FA-A3).
 
-`pro_rata`(비례) / `fixed_weight`(고정비율) / `manual`(수동 지정) 세 정책 모두
-"체결 수량을 여러 sub_account로 쪼개되 합은 항상 원 수량과 정확히 같다"는
-하나의 계약(FA-A3)을 만족해야 한다. `pro_rata`와 `fixed_weight`는 계산이
-동일하다 — 가중치 벡터의 출처만 다르다(pro_rata: 임의 양수 비율, 정규화해서
-사용; fixed_weight: 합이 정확히 1이어야 하는 사전 고정 비율). 두 정책 모두
-`_allocate_by_weight`를 공유한다.
+All three policies — `pro_rata` / `fixed_weight` / `manual` — must satisfy
+a single invariant (FA-A3): "when splitting a fill quantity across multiple
+sub_accounts, the sum must always equal the original quantity exactly."
+`pro_rata` and `fixed_weight` share the same calculation — the only
+difference is the source of the weight vector (pro_rata: arbitrary positive
+ratios, normalized at runtime; fixed_weight: pre-agreed ratios that must sum
+to exactly 1, not normalized). Both share `_allocate_by_weight`.
 
-라운딩은 [[rounding]](`src/foundation/ledger/domain/rounding.py`, LC-2)의
-원칙 — "반올림으로 생기는 나머지를 정해진 규칙으로 몰아줘서 합을 보존한다" —
-을 그대로 따르되 그 함수 자체(`split_commission`)는 2-way·고정 KRW quantum
-전용이라 이 리프의 N-way·임의 quantum 케이스에는 재사용할 수 없다(재구현이
-아니라 같은 원칙을 N-way로 일반화한 것). 각 목표를 quantum 단위로
-`ROUND_HALF_EVEN` 반올림한 뒤, 반올림 오차(= 체결 수량 − 반올림 합)를
-가중치가 큰 목표부터 순서대로 quantum 단위씩 보정한다 — 상대적으로 가장
-왜곡이 작은 목표부터 흡수시키기 위함이다. 순수(I/O·DB 임포트 0).
+Rounding follows the principle of [[rounding]]
+(`src/foundation/ledger/domain/rounding.py`, LC-2): "preserve the sum by
+concentrating rounding remainder into buckets according to a fixed rule."
+The function itself (`split_commission`) is dedicated to 2-way, fixed KRW
+quantum and cannot be reused for this leaf's N-way, arbitrary-quantum case
+(not a reimplementation, but an N-way generalization of the same principle).
+Each target is rounded to quantum granularity using `ROUND_HALF_EVEN`, then
+the rounding error (= fill quantity − sum of rounded quantities) is corrected
+in quantum-sized steps from the largest-weight targets downward — so the
+target with the least relative distortion absorbs the remainder first.
+Pure domain (zero I/O / DB imports).
 """
 from __future__ import annotations
 
@@ -32,27 +36,31 @@ SCHEMA_VERSION: Literal["v1"] = "v1"
 
 
 def round_to_quantum(value: Decimal, quantum: Decimal) -> Decimal:
-    """`value`를 `quantum`의 최근접 배수로 반올림한다(`ROUND_HALF_EVEN`).
+    """Round `value` to the nearest multiple of `quantum` (`ROUND_HALF_EVEN`).
 
-    [[QA 발견]] `Decimal.quantize(quantum)`은 `quantum`의 배수로 반올림하는
-    것이 아니라 `quantum`과 같은 지수(소수 자릿수)로 맞출 뿐이다 — 정수
-    리터럴은 전부 지수 0이라 `quantum=1`이든 `10`이든 `100`이든 똑같이
-    "정수로 반올림"이 된다(우연히 맞는 값은 `1`과 `0.1`·`0.01`류의 순수
-    소수뿐). 몫을 정수로 반올림한 뒤 quantum을 곱해야 실제 배수가 된다.
+    [[QA finding]] `Decimal.quantize(quantum)` does not round to a multiple
+    of `quantum` — it aligns the exponent (decimal places) to match
+    `quantum`. Integer literals all have exponent 0, so `quantum=1`, `10`,
+    and `100` all produce identical "round to integer" behavior (values that
+    happen to be correct are limited to pure decimals like `1`, `0.1`,
+    `0.01`). You must round the quotient to an integer and then multiply by
+    quantum to get an actual multiple.
     """
     units = (value / quantum).quantize(Decimal("1"), rounding=ROUND_HALF_EVEN)
     return units * quantum
 
 
 class AllocationErrorCode(str, Enum):
-    """§3 에러 taxonomy 중 이 리프(FA-7)가 정의하는 배분 관련 코드."""
+    """Allocation-related error codes defined by this leaf (FA-7) among the
+    §3 error taxonomy."""
 
-    RESIDUAL = "FA_ALLOCATION_RESIDUAL"  # 409, 배분 잔여/입력 불일치
+    RESIDUAL = "FA_ALLOCATION_RESIDUAL"  # 409, allocation residual / input mismatch
 
 
 class AllocationResidualError(ValueError):
-    """FA_ALLOCATION_RESIDUAL(409) — 배분 합이 체결 수량과 어긋나거나 입력이
-    배분 불가능한 상태(가중치 합 불일치, 음수/0 수량, 미지 정책 등)."""
+    """FA_ALLOCATION_RESIDUAL(409) — allocation sum diverges from fill
+    quantity, or input is in an unallocatable state (weight sum mismatch,
+    zero/negative quantity, unknown policy, etc.)."""
 
     code: ClassVar[AllocationErrorCode] = AllocationErrorCode.RESIDUAL
 
@@ -64,11 +72,13 @@ class AllocationPolicy(str, Enum):
 
 
 class WeightTarget(BaseModel):
-    """`pro_rata`/`fixed_weight` 배분 대상 한 개. 양수 검증은 이 계약이
-    아니라 배분 함수(`_allocate_by_weight`)의 책임이다(FA-1 `contracts/v1.py`
-    관례 — 계약은 형태만, 불변조건은 domain 함수) — pydantic
-    `model_validator`가 `ValueError`를 `ValidationError`로 감싸버려
-    `FA_ALLOCATION_RESIDUAL` 단일 예외 타입을 유지할 수 없기 때문이다."""
+    """A single `pro_rata`/`fixed_weight` allocation target. Positive-value
+    validation is not this model's responsibility — it belongs to the
+    allocation function (`_allocate_by_weight`) (FA-1 `contracts/v1.py`
+    convention — contracts define shape only, invariants live in domain
+    functions) — because pydantic `model_validator` wraps `ValueError` into
+    `ValidationError`, making it impossible to maintain the single
+    `FA_ALLOCATION_RESIDUAL` exception type."""
 
     sub_account_id: UUID
     weight: Decimal
@@ -76,8 +86,9 @@ class WeightTarget(BaseModel):
 
 
 class ManualTarget(BaseModel):
-    """`manual` 배분 대상 한 개 — 수량을 운영자가 직접 지정한다. 양수
-    검증은 `allocate_manual`의 책임이다([[WeightTarget]]과 동일 이유)."""
+    """A single `manual` allocation target — the operator specifies quantities
+    directly. Positive-value validation is `allocate_manual`'s responsibility
+    (same reason as [[WeightTarget]])."""
 
     sub_account_id: UUID
     quantity: Decimal
@@ -85,7 +96,7 @@ class ManualTarget(BaseModel):
 
 
 class AllocationLine(BaseModel):
-    """배분 결과 한 줄."""
+    """A single allocation result line."""
 
     sub_account_id: UUID
     quantity: Decimal
@@ -100,7 +111,8 @@ def allocate(
     manual_targets: Sequence[ManualTarget] = (),
     quantum: Decimal = Decimal("1"),
 ) -> tuple[AllocationLine, ...]:
-    """정책 이름으로 분기하는 단일 진입점. 미지 정책은 fail-closed로 거부한다."""
+    """Single entry point branching on policy name. Unknown policies are
+    rejected fail-closed."""
     if policy is AllocationPolicy.PRO_RATA:
         return allocate_pro_rata(total_quantity, weight_targets, quantum)
     if policy is AllocationPolicy.FIXED_WEIGHT:
@@ -115,8 +127,8 @@ def allocate_pro_rata(
     targets: Sequence[WeightTarget],
     quantum: Decimal,
 ) -> tuple[AllocationLine, ...]:
-    """비례 배분 — 가중치는 임의 양수(예: 기존 포지션 크기)이고 내부에서
-    가중치 합으로 정규화한다."""
+    """Pro-rata allocation — weights are arbitrary positive numbers (e.g.
+    existing position sizes) and are normalized by their sum internally."""
     return _allocate_by_weight(total_quantity, targets, quantum)
 
 
@@ -125,9 +137,9 @@ def allocate_fixed_weight(
     targets: Sequence[WeightTarget],
     quantum: Decimal,
 ) -> tuple[AllocationLine, ...]:
-    """고정비율 배분 — 가중치는 사전에 합의된 비율이라 합이 정확히 1이어야
-    한다(정규화하지 않는다 — 합 불일치는 설정 오류이므로 조용히 넘어가지
-    않고 거부한다)."""
+    """Fixed-weight allocation — weights are pre-agreed ratios that must sum
+    to exactly 1 (not normalized — a sum mismatch is a configuration error
+    and must be rejected, not silently ignored)."""
     if not targets:
         raise AllocationResidualError("fixed_weight 배분 대상이 비어 있음")
     weight_sum = sum((t.weight for t in targets), Decimal("0"))
@@ -140,8 +152,8 @@ def allocate_manual(
     total_quantity: Decimal,
     targets: Sequence[ManualTarget],
 ) -> tuple[AllocationLine, ...]:
-    """수동 배분 — 라운딩이 개입할 자리가 없다. 지정된 수량 합이 체결
-    수량과 정확히 같아야 한다."""
+    """Manual allocation — no rounding applies. The sum of specified
+    quantities must equal the fill quantity exactly."""
     if not targets:
         raise AllocationResidualError("manual 배분 대상이 비어 있음")
     for t in targets:
@@ -191,9 +203,10 @@ def _allocate_by_weight(
         )
     residual_units = int(residual / quantum)
 
-    # 잔여를 가중치 큰 순(동률은 sub_account_id 순 — 결정론적 재현)으로
-    # quantum 단위씩 나눠 흡수시킨다. 가장 큰 배분에 작은 보정을 먼저
-    # 얹는 편이 상대적 왜곡이 가장 작다.
+    # Distribute the remainder in quantum-sized steps from largest weight
+    # (ties broken by sub_account_id — deterministic reproducibility).
+    # Applying small corrections to the largest allocations first yields
+    # the least relative distortion.
     def _sort_key(i: int) -> tuple[Decimal, UUID]:
         return (-quantized[i][0].weight, quantized[i][0].sub_account_id)
 
