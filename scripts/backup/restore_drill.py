@@ -39,6 +39,7 @@ from scripts.backup.base_backup import latest_backup_dir, server_url
 ROOT = Path(__file__).resolve().parents[2]
 PM_REPORT_PATH = Path(r"C:\aios\pm") / "backup" / "drill_latest.json"
 LOCAL_REPORT_PATH = ROOT / "runtime" / "backup" / "drill_latest.json"
+LAST_FAILED_RESTORE_DIR = Path(r"C:\aios\pm") / "backup_runtime" / "last_failed_restore"
 
 
 def _now() -> dt.datetime:
@@ -93,6 +94,83 @@ def write_recovery_config(data_dir: Path, archive_dir: Path) -> None:
     conf.write_text(existing + f"\nrestore_command = '{restore_command}'\n", encoding="utf-8")
 
 
+def _tail_lines(text: str, n: int) -> str:
+    return "\n".join(text.splitlines()[-n:])
+
+
+def collect_start_failure_logs(restore_data_dir: Path) -> str:
+    """start_postgres 실패 시 진단용 로그를 모은다: pg_ctl_start.log 전체 +
+    restore_data_dir/log/*.log(logging_collector 사용 시 postgres 자체 로그) 마지막 80줄.
+    포트 충돌/복구 재생 시간 초과/권한 오류를 로그 내용으로 구분할 수 있게 한다(task-4978)."""
+    parts: list[str] = []
+    pg_ctl_log = restore_data_dir / "pg_ctl_start.log"
+    if pg_ctl_log.exists():
+        content = pg_ctl_log.read_text(encoding="utf-8", errors="replace")
+        parts.append(f"--- pg_ctl_start.log (전체) ---\n{content}")
+    else:
+        parts.append("--- pg_ctl_start.log 없음 ---")
+    log_dir = restore_data_dir / "log"
+    if log_dir.is_dir():
+        for log_file in sorted(log_dir.glob("*.log")):
+            content = log_file.read_text(encoding="utf-8", errors="replace")
+            parts.append(f"--- {log_file.name} (마지막 80줄) ---\n{_tail_lines(content, 80)}")
+    return "\n\n".join(parts)
+
+
+def preserve_failed_restore_logs(
+    restore_data_dir: Path, dest_dir: Path = LAST_FAILED_RESTORE_DIR
+) -> None:
+    """정리(rmtree) 전에 실패한 드릴의 로그를 fleet 저장소로 복사한다 -- restore_data_dir는
+    드릴 후 항상 지워지므로, 여기 복사해두지 않으면 원인 분석 근거가 남지 않는다(task-4978)."""
+    try:
+        dest_dir.mkdir(parents=True, exist_ok=True)
+        pg_ctl_log = restore_data_dir / "pg_ctl_start.log"
+        if pg_ctl_log.exists():
+            shutil.copy2(pg_ctl_log, dest_dir / "pg_ctl_start.log")
+        log_dir = restore_data_dir / "log"
+        if log_dir.is_dir():
+            dest_log_dir = dest_dir / "log"
+            dest_log_dir.mkdir(exist_ok=True)
+            for log_file in log_dir.glob("*.log"):
+                shutil.copy2(log_file, dest_log_dir / log_file.name)
+    except OSError:
+        pass
+
+
+def wait_for_process_start(
+    data_dir: Path,
+    *,
+    pg_ctl_bin: str,
+    run_cmd: Callable[[list[str], Path, dict | None, int], tuple[int, str]],
+    cwd: Path,
+    timeout: float,
+    poll_interval: float,
+    sleep: Callable[[float], None] = time.sleep,
+    clock: Callable[[], float] = time.monotonic,
+) -> str | None:
+    """postgres 프로세스가 실제로 떠 있는지(`pg_ctl status`)만 폴링한다 -- WAL replay가
+    끝나는지(pg_is_in_recovery)는 기다리지 않는다. 정상이면 None, 타임아웃까지 프로세스가
+    확인되지 않으면 사유 문자열을 돌려준다.
+
+    이전에는 `pg_ctl start -w -t 60`을 써서 -t가 '프로세스 기동'과 'WAL replay 완료'를
+    함께 기다렸다 -- archive recovery 중인 서버는 replay가 끝나야 연결을 받아들이므로
+    (hot_standby 없이는 recovery 중 연결이 거부된다), 735MB 베이스 백업 replay가 60초를
+    넘기면 실제로는 정상 진행 중인데도 start_postgres가 실패로 오분류됐다(task-4978).
+    이제 -t/이 함수의 timeout은 프로세스 기동(포트 바인딩 등)만 기다리고, replay 완료
+    대기는 wait_for_recovery로 분리했다."""
+    deadline = clock() + timeout
+    while True:
+        rc, tail = run_cmd([pg_ctl_bin, "status", "-D", str(data_dir)], cwd, None, 30)
+        if rc == 0:
+            return None
+        if clock() >= deadline:
+            return (
+                f"{timeout:.0f}초 안에 서버 프로세스가 뜨지 않았다"
+                f"(rc={rc}, tail={tail[-200:]!r})"
+            )
+        sleep(poll_interval)
+
+
 def wait_for_recovery(
     dsn: str,
     *,
@@ -142,8 +220,11 @@ def run_drill(
     find_backup: Callable[[Path], Path | None] = latest_backup_dir,
     sleep: Callable[[float], None] = time.sleep,
     clock: Callable[[], float] = time.monotonic,
-    recovery_poll_timeout: float = 120.0,
+    recovery_poll_timeout: float = 300.0,
     recovery_poll_interval: float = 2.0,
+    process_start_timeout: float = 30.0,
+    process_start_poll_interval: float = 1.0,
+    last_failed_restore_dir: Path = LAST_FAILED_RESTORE_DIR,
 ) -> dict:
     """복구 리허설 1회. 어느 단계에서 멈추든(백업 없음/기동 실패/복구 타임아웃/replay_verify
     불일치) `steps`에 실패한 단계가 남고 `ok`는 False가 된다 -- healthcheck의
@@ -179,8 +260,13 @@ def run_drill(
         # is called with capture_output=True (PIPE), the postgres daemon inherits the
         # stdout/stderr handle and Python's communicate() never sees EOF. Writing to
         # a file directly (official pg_ctl pattern) breaks the handle chain.
+        # -w/-t는 일부러 쓰지 않는다: 이 서버는 archive recovery로 뜨는 동안(hot_standby
+        # 없이는) 연결을 거부하므로, pg_ctl -w -t는 프로세스 기동이 아니라 WAL replay
+        # 완료까지 기다리다 큰 백업에서 60초를 넘겨 오탐 실패를 냈다(task-4978). 대신
+        # 비동기로 기동만 시키고, wait_for_process_start로 프로세스 기동만, wait_for_recovery로
+        # replay 완료만 각각 따로 기다린다.
         log_path = restore_data_dir / "pg_ctl_start.log"
-        rc, tail = run_cmd(
+        launch_rc, launch_tail = run_cmd(
             [
                 pg_ctl_bin,
                 "start",
@@ -188,18 +274,38 @@ def run_drill(
                 str(restore_data_dir),
                 "-o",
                 f"-p {restore_port}",
-                "-w",
-                "-t",
-                "60",
                 "-l",
                 str(log_path),
             ],
             repo_root,
             None,
-            90,
+            30,
         )
-        steps["start_postgres"] = {"ok": rc == 0, "rc": rc, "tail": tail}
-        started_server = rc == 0
+
+        if launch_rc != 0:
+            started_server = False
+            steps["start_postgres"] = {"ok": False, "rc": launch_rc, "tail": launch_tail}
+        else:
+            start_reason = wait_for_process_start(
+                restore_data_dir,
+                pg_ctl_bin=pg_ctl_bin,
+                run_cmd=run_cmd,
+                cwd=repo_root,
+                timeout=process_start_timeout,
+                poll_interval=process_start_poll_interval,
+                sleep=sleep,
+                clock=clock,
+            )
+            started_server = start_reason is None
+            steps["start_postgres"] = {
+                "ok": started_server,
+                "rc": launch_rc,
+                "tail": start_reason or launch_tail,
+            }
+
+        if not started_server:
+            steps["start_postgres"]["detail"] = collect_start_failure_logs(restore_data_dir)
+            preserve_failed_restore_logs(restore_data_dir, last_failed_restore_dir)
 
         if started_server:
             reason = wait_for_recovery(

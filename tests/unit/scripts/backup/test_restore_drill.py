@@ -23,7 +23,14 @@ def _fake_backup_dir(tmp_path: Path) -> Path:
 
 
 def _dispatching_run_cmd(
-    *, start_rc=0, recovery_rc=0, recovery_out="f", replay_rc=0, stop_rc=0, calls=None
+    *,
+    start_rc=0,
+    status_rc=0,
+    recovery_rc=0,
+    recovery_out="f",
+    replay_rc=0,
+    stop_rc=0,
+    calls=None,
 ):
     calls = calls if calls is not None else []
 
@@ -31,6 +38,8 @@ def _dispatching_run_cmd(
         calls.append(cmd)
         if cmd[0] == "pg_ctl" and cmd[1] == "start":
             return start_rc, "server started"
+        if cmd[0] == "pg_ctl" and cmd[1] == "status":
+            return status_rc, "server is running" if status_rc == 0 else "no server running"
         if cmd[0] == "pg_ctl" and cmd[1] == "stop":
             return stop_rc, "server stopped"
         if cmd[0] == "psql":
@@ -57,6 +66,7 @@ def _common_kwargs(tmp_path: Path, **overrides):
         pg_ctl_bin="pg_ctl",
         psql_bin="psql",
         python_bin="python",
+        last_failed_restore_dir=tmp_path / "last_failed_restore",
     )
     kwargs.update(overrides)
     return kwargs
@@ -104,6 +114,109 @@ def test_start_postgres_failure_stops_drill_without_stopping_unstarted_server(tm
     assert not any(c[0] == "pg_ctl" and c[1] == "stop" for c in calls)
 
 
+def test_start_postgres_failure_captures_diagnostic_logs_and_preserves_them(tmp_path: Path):
+    """task-4978: start_postgres 실패 시 pg_ctl_start.log 전체와 postgres 로그 tail이
+    steps.start_postgres.detail에 남고, 정리(rmtree) 전에 last_failed_restore_dir로
+    복사된다 -- restore_data_dir는 드릴 후 항상 지워지므로 미리 복사해두지 않으면
+    원인 분석 근거가 사라진다."""
+
+    def run_cmd(cmd, cwd, env, timeout):
+        if cmd[0] == "pg_ctl" and cmd[1] == "start":
+            data_dir = Path(cmd[3])
+            log_path = Path(cmd[-1])
+            log_path.write_text(
+                "FATAL: could not bind IPv4 address: Address already in use", encoding="utf-8"
+            )
+            log_dir = data_dir / "log"
+            log_dir.mkdir(exist_ok=True)
+            (log_dir / "postgresql-1.log").write_text(
+                "\n".join(f"line {i}" for i in range(100)), encoding="utf-8"
+            )
+            return 1, "start failed"
+        if cmd[0] == "psql":
+            return 0, ""  # 복제 슬롯 정리 쿼리(정리 단계, 결과 무시됨)
+        raise AssertionError(f"unexpected cmd {cmd}")
+
+    kwargs = _common_kwargs(tmp_path, run_cmd=run_cmd)
+    last_failed_dir = kwargs["last_failed_restore_dir"]
+
+    result = restore_drill.run_drill(**kwargs)
+
+    assert result["steps"]["start_postgres"]["ok"] is False
+    detail = result["steps"]["start_postgres"]["detail"]
+    assert "Address already in use" in detail
+    assert "line 99" in detail  # 마지막 80줄 안에 포함
+    assert "line 0" not in detail  # 마지막 80줄 밖은 제외
+
+    assert (last_failed_dir / "pg_ctl_start.log").read_text(encoding="utf-8") == (
+        "FATAL: could not bind IPv4 address: Address already in use"
+    )
+    assert (last_failed_dir / "log" / "postgresql-1.log").exists()
+    # restore_data_dir 자체는 드릴 종료 후 정리된다(원본은 last_failed_dir에만 남는다)
+    assert not kwargs["restore_data_dir"].exists()
+
+
+def test_process_start_timeout_fails_start_postgres_without_waiting_for_recovery(
+    tmp_path: Path,
+):
+    """서버 프로세스 자체가 뜨지 않으면(포트 충돌 등) start_postgres에서 바로 실패하고,
+    recovery 대기(wait_recovery)로는 넘어가지 않는다 -- 프로세스 기동 실패와 recovery
+    재생 시간 초과가 서로 다른 단계로 분류돼야 한다(task-4978)."""
+    run_cmd, calls = _dispatching_run_cmd(status_rc=1)  # pg_ctl status가 계속 "안 떠 있음"
+    result = restore_drill.run_drill(
+        **_common_kwargs(
+            tmp_path,
+            run_cmd=run_cmd,
+            process_start_timeout=2.0,
+            process_start_poll_interval=1.0,
+        )
+    )
+
+    assert result["ok"] is False
+    assert result["steps"]["start_postgres"]["ok"] is False
+    assert "wait_recovery" not in result["steps"]
+    # 뜨지 않은 서버를 stop 하려 하지 않는다
+    assert not any(c[0] == "pg_ctl" and c[1] == "stop" for c in calls)
+
+
+def test_recovery_slower_than_old_60s_process_start_timeout_still_succeeds(tmp_path: Path):
+    """회귀 방지: 프로세스는 즉시 뜨지만(WAL replay 중이라 아직 연결은 거부) replay가
+    이전 pg_ctl -t 60 예산을 넘겨도, replay가 recovery_poll_timeout 안에만 끝나면 드릴은
+    성공해야 한다 -- start_postgres(-t)와 recovery 완료 대기가 분리됐기 때문이다(task-4978)."""
+    recovery_outputs = iter(["t", "t", "t", "f"])
+
+    def run_cmd(cmd, cwd, env, timeout):
+        calls_list.append(cmd)
+        if cmd[0] == "pg_ctl" and cmd[1] == "start":
+            return 0, "server started"
+        if cmd[0] == "pg_ctl" and cmd[1] == "status":
+            return 0, "server is running"
+        if cmd[0] == "pg_ctl" and cmd[1] == "stop":
+            return 0, "server stopped"
+        if cmd[0] == "psql" and "pg_is_in_recovery" in cmd[-1]:
+            return 0, next(recovery_outputs)
+        if cmd[0] == "psql":
+            return 0, ""  # 복제 슬롯 정리 쿼리
+        if cmd[0] == "python" and "replay_verify.py" in cmd[-1]:
+            return 0, "replay done"
+        raise AssertionError(f"unexpected cmd {cmd}")
+
+    calls_list: list = []
+    result = restore_drill.run_drill(
+        **_common_kwargs(
+            tmp_path,
+            run_cmd=run_cmd,
+            recovery_poll_timeout=300.0,
+            recovery_poll_interval=1.0,
+            process_start_timeout=30.0,
+        )
+    )
+
+    assert result["ok"] is True
+    assert result["steps"]["wait_recovery"]["ok"] is True
+    assert result["steps"]["replay_verify"]["ok"] is True
+
+
 def test_recovery_timeout_still_stops_server(tmp_path: Path):
     run_cmd, calls = _dispatching_run_cmd(recovery_rc=0, recovery_out="t")  # 계속 recovery 중
     result = restore_drill.run_drill(
@@ -131,6 +244,84 @@ def test_replay_verify_mismatch_fails_drill_and_still_cleans_up(tmp_path: Path):
 
 
 # --- 순수 헬퍼 ------------------------------------------------------------------
+
+
+def test_wait_for_process_start_returns_none_when_status_ok():
+    reason = restore_drill.wait_for_process_start(
+        Path("."),
+        pg_ctl_bin="pg_ctl",
+        run_cmd=lambda cmd, cwd, env, timeout: (0, "server is running"),
+        cwd=Path("."),
+        timeout=10.0,
+        poll_interval=1.0,
+        sleep=lambda s: None,
+        clock=iter([0.0]).__next__,
+    )
+    assert reason is None
+
+
+def test_wait_for_process_start_times_out_when_process_never_appears():
+    reason = restore_drill.wait_for_process_start(
+        Path("."),
+        pg_ctl_bin="pg_ctl",
+        run_cmd=lambda cmd, cwd, env, timeout: (1, "no server running"),
+        cwd=Path("."),
+        timeout=3.0,
+        poll_interval=1.0,
+        sleep=lambda s: None,
+        clock=iter([0.0, 1.0, 2.0, 4.0, 4.0]).__next__,
+    )
+    assert reason is not None
+
+
+def test_collect_start_failure_logs_includes_full_pg_ctl_log_and_tailed_server_log(
+    tmp_path: Path,
+):
+    data_dir = tmp_path / "restore_pgdata"
+    data_dir.mkdir()
+    (data_dir / "pg_ctl_start.log").write_text("pg_ctl 전체 내용", encoding="utf-8")
+    log_dir = data_dir / "log"
+    log_dir.mkdir()
+    (log_dir / "postgresql-1.log").write_text(
+        "\n".join(f"line {i}" for i in range(100)), encoding="utf-8"
+    )
+
+    detail = restore_drill.collect_start_failure_logs(data_dir)
+
+    assert "pg_ctl 전체 내용" in detail
+    assert "line 99" in detail
+    assert "line 20" in detail  # 마지막 80줄(20~99) 안
+    assert "line 19" not in detail  # 마지막 80줄 밖
+
+
+def test_collect_start_failure_logs_handles_missing_pg_ctl_log(tmp_path: Path):
+    data_dir = tmp_path / "restore_pgdata"
+    data_dir.mkdir()
+
+    detail = restore_drill.collect_start_failure_logs(data_dir)
+
+    assert "없음" in detail
+
+
+def test_preserve_failed_restore_logs_copies_pg_ctl_log_and_server_log(tmp_path: Path):
+    data_dir = tmp_path / "restore_pgdata"
+    data_dir.mkdir()
+    (data_dir / "pg_ctl_start.log").write_text("pg_ctl log", encoding="utf-8")
+    log_dir = data_dir / "log"
+    log_dir.mkdir()
+    (log_dir / "postgresql-1.log").write_text("server log", encoding="utf-8")
+    dest = tmp_path / "last_failed_restore"
+
+    restore_drill.preserve_failed_restore_logs(data_dir, dest)
+
+    assert (dest / "pg_ctl_start.log").read_text(encoding="utf-8") == "pg_ctl log"
+    assert (dest / "log" / "postgresql-1.log").read_text(encoding="utf-8") == "server log"
+
+
+def test_preserve_failed_restore_logs_does_not_raise_when_source_missing(tmp_path: Path):
+    dest = tmp_path / "last_failed_restore"
+    restore_drill.preserve_failed_restore_logs(tmp_path / "does_not_exist", dest)
+    assert dest.exists()  # dest는 만들지만 없는 파일 복사는 조용히 건너뛴다
 
 
 def test_with_port_swaps_port_keeps_host_and_user():
