@@ -34,6 +34,8 @@ from uuid import UUID
 import asyncpg
 from pydantic import BaseModel
 
+from src.core.strategy.condition_evaluator import _ATOMIC_RE as _CONDITION_ATOMIC_RE
+from src.services.condition_compiler import ORDER_FILLED
 from src.services.risk_matching import check_mismatch
 
 LIFECYCLE_ORDER = (
@@ -63,6 +65,38 @@ class StrategyNotFoundError(StrategyLifecycleError):
     타입 기반이라 `StrategyLifecycleError` 그대로면 저장 시 409/400 사유와
     상태코드를 하나로만 고를 수 있다 — PLT-17 `ExchangeCredentialNotFoundError`와
     동일 근거)."""
+
+
+def _validate_condition_syntax(condition: str) -> None:
+    """L16 — `fsm_definition.transitions[].condition`을 ConditionEvaluator
+    (condition_evaluator.py, FROZEN)와 같은 단일 문법(`_ATOMIC_RE`: `{key} {연산자}
+    {threshold}`, AND/OR 결합)으로 검증한다. `ConditionEvaluator._evaluate_atomic`은
+    이 문법을 실행 시점에 검사하므로, 문법 오류인 채로 저장되면 실행 시점까지
+    오류가 미뤄진다(9.9 절대원칙 위반 여지) — 저장 시점에 앞당겨 막는다.
+    `key` 자체가 지표 레지스트리에 등록됐는지는 여기서 보지 않는다 — 손절
+    조건처럼 raw market-data 컬럼(`close` 등)도 `ConditionEvaluator`가 그대로
+    허용하는 유효한 키이기 때문이다(`market_state`에 있으면 그만)."""
+    if " AND " in condition:
+        clauses = condition.split(" AND ")
+    elif " OR " in condition:
+        clauses = condition.split(" OR ")
+    else:
+        clauses = [condition]
+
+    for clause in clauses:
+        if _CONDITION_ATOMIC_RE.match(clause.strip()) is None:
+            raise StrategyLifecycleError(f"fsm_definition 조건식 문법 오류: {clause!r}")
+
+
+def _validate_fsm_definition(fsm_definition: dict[str, Any]) -> None:
+    transitions = fsm_definition.get("transitions")
+    if not transitions:
+        return
+    for transition in transitions:
+        condition = transition.get("condition") if isinstance(transition, dict) else None
+        if not condition or condition == ORDER_FILLED:
+            continue
+        _validate_condition_syntax(condition)
 
 
 class SavedStrategy(BaseModel):
@@ -109,6 +143,7 @@ class StrategyBuilderService:
         fsm_definition: dict[str, Any],
         author_agent: str = "user",
     ) -> SavedStrategy:
+        _validate_fsm_definition(fsm_definition)
         async with self._pool.acquire() as conn:
             existing = await conn.fetchval(
                 "SELECT 1 FROM strategies WHERE strategy_id = $1 AND version = $2",
