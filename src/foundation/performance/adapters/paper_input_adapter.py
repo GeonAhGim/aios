@@ -1,29 +1,30 @@
-"""PAPER 스코프 `StatementInputPort` 구현.
+"""PAPER scope `StatementInputPort` implementation.
 
 Spec: docs/specs/L4_strategy_portfolio_backtest_v1.0.md §2.6/§9(L48).
 
-`scope_ref`는 이 어댑터에서 tenant의 `user_id`(문자열)로 취급한다 —
-`orders`/`positions`/`strategy_executions`가 전부 `user_id`로 소유자를
-표현하고(71번 §4 경계, 84b7d0faf14f 마이그레이션 편차 — P0 스콥에서
-tenant_id == user_id), reconciliation(FND-08)의 `target_ref`도 같은
-UUID를 가리키게 하면 별도 매핑 테이블 없이 세 컨텍스트가 같은 키로
-맞물린다.
+`scope_ref` is treated as the tenant's `user_id` (string) in this adapter —
+since `orders`/`positions`/`strategy_executions` all express ownership via
+`user_id` (boundary at §4, ticket 71; migration deviation 84b7d0faf14f —
+at P0 scope tenant_id == user_id), having reconciliation(FND-08)'s
+`target_ref` point to the same UUID lets all three contexts mesh on a
+single key without a separate mapping table.
 
-한계(명시, 스콥 축소 — 71/80/81번 여러 리프의 "아직 실제 원장이 없다"와
-같은 이유):
-- `orders`에는 `fee` 컬럼이 없다(210cc26533c7 마이그레이션 참조) — 체결
-  수수료는 항상 알 수 없음(PENDING)으로 남는다. 0으로 채우지 않는다.
-- `positions`는 현재 상태만 들고 있고 과거 시점 스냅샷을 재구성할 수
-  없다(`valuation_snapshot` 테이블(M5)에 아직 아무도 쓰지 않음 — 그
-  테이블은 이 리프의 스콥이 아니다). 그래서 `load_reconciled_snapshots`는
-  항상 "지금" 시점(호출 시각) 스냅샷 정확히 1개만 돌려준다 — `period_start`
-  시점 값을 흉내내지 않는다. TWR/MWR처럼 경계값 2개가 필요한 계산은
-  compute_statement.py(L49)가 스냅샷 부족을 그대로 PENDING으로 보고해야
-  한다.
-- `cash`는 파생값이다: `Σstrategy_executions.allocated_capital` −
-  `Σ(열린 포지션 quantity × average_entry_price)`. 실제 현금 원장이
-  아니라 근사치라는 걸 호출부가 알아야 한다(그래서 위 두 한계와 함께
-  `price_evidence=()`로 남겨 "가격 근거 없음"을 명시한다).
+Limitations (explicit, scope-reduced — same reasoning as "no real ledger yet"
+across tickets 71/80/81):
+- `orders` has no `fee` column (see migration 210cc26533c7) — filled fees
+  always remain unknown (PENDING). Do not fill with 0.
+- `positions` holds only the current state and cannot reconstruct historical
+  point-in-time snapshots (`valuation_snapshot` table (M5) is unused by
+  anyone yet — that table is out of scope for this leaf). Therefore
+  `load_reconciled_snapshots` always returns exactly 1 snapshot at the
+  "now" point (call time) — it does not simulate a `period_start` value.
+  Calculations requiring two boundary values like TWR/MWR should have
+  compute_statement.py(L49) report the snapshot shortage as PENDING.
+- `cash` is a derived value: `Σstrategy_executions.allocated_capital` −
+  `Σ(open position quantity × average_entry_price)`. The caller must know
+  this is an approximation, not a real cash ledger (hence alongside the
+  two limitations above, leave `price_evidence=()` to explicitly state
+  "no price evidence").
 """
 from __future__ import annotations
 
@@ -42,17 +43,17 @@ from src.foundation.performance.domain.models import (
 from src.foundation.reconciliation.contracts.v1 import Classification
 
 PERFORMANCE_RECONCILIATION_TARGET_TYPE = "paper_account"
-"""reconciliation(FND-08)에 이 컨텍스트가 쓰는 `target_type` 관례값 —
-`target_ref`는 tenant의 `user_id`."""
+"""reconciliation(FND-08) convention value for the `target_type` this context writes —
+`target_ref` is the tenant's `user_id`."""
 
 _TRUSTED_STATUSES = frozenset({Classification.HEALTHY, Classification.RESOLVED})
 
 
 class UnreconciledInputError(Exception):
-    """72번 에러 taxonomy `INTEGRITY_STATEMENT_INPUT_UNRECONCILED` — 라우터가
-    409로 매핑한다(L49 task 제목 "미리컨실 409"). reconciliation_state가
-    아예 없거나(한 번도 리컨실 안 됨) HEALTHY/RESOLVED가 아니면(진행 중인
-    불일치가 있음) 이 statement의 입력을 신뢰할 수 없다는 뜻이다."""
+    """72 error taxonomy `INTEGRITY_STATEMENT_INPUT_UNRECONCILED` — router maps to 409.
+The reconciliation state is either absent (never reconciled) or not
+HEALTHY/RESOLVED (an active discrepancy exists), meaning this statement's
+input cannot be trusted."""
 
     def __init__(self, scope_ref: str) -> None:
         super().__init__(f"INTEGRITY_STATEMENT_INPUT_UNRECONCILED: scope_ref={scope_ref}")
@@ -165,7 +166,7 @@ class PaperStatementInputAdapter:
                 "average_fill_price": (
                     str(r["average_fill_price"]) if r["average_fill_price"] is not None else None
                 ),
-                "fee": None,  # orders에 fee 컬럼 없음 — 항상 PENDING(위 모듈 docstring 참조)
+                "fee": None,  # no fee column in orders — always PENDING (see module docstring above)
                 "at": r["updated_at"].isoformat(),
             }
             for r in rows
