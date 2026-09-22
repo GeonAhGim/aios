@@ -1,28 +1,29 @@
-"""BT-9 — 백테스트 재현 키(`reproducibility_key`).
+"""BT-9 — Backtest reproducibility key (`reproducibility_key`).
 
 Spec: docs/specs/L4_analytics_authoring_backtest_marketplace_v1.0.md
-§2.5 BT-9, §3.4(재현 키: `sha256(script_hash ‖ data_lineage_hash ‖
-rollup_version ‖ config_hash)`; "같은 키 = 같은 결과(바이트 동일한 체결
-로그)"), §9.5 BT-9(DoD: 같은 키=바이트 동일 체결 로그).
+§2.5 BT-9, §3.4 (reproducibility key: `sha256(script_hash ‖ data_lineage_hash ‖
+rollup_version ‖ config_hash)`; "same key = same result (byte-identical trade
+log)"), §9.5 BT-9 (DoD: same key → byte-identical trade log).
 
-선행 리프가 이미 계산한 값을 받아서 하나의 키로 묶기만 하는 순수 조립
-함수다 — 각 값의 계산 자체는 이 모듈의 책임이 아니다:
+This is a pure assembly function that only takes values already computed by
+preceding leaves and bundles them into a single key — the computation of each
+value itself is not this module's responsibility:
 - `script_hash`: DSL-12 `src/core/script/artifact/hash.py::script_hash`.
 - `data_lineage_hash`: LA-23b `src/foundation/market_data/domain/lineage.py::batch_hash`
-  (또는 그 상위에서 조립한 데이터 계보 다이제스트).
+  (or a data-lineage digest assembled at a higher level).
 - `rollup_version`: DC-10 `src/foundation/market_data/domain/aggregation/
   timeframe_rollup.py::RollupResult.rollup_version`.
-- `config_hash`: BT-1 `domain/models_v2.py::BacktestConfigV2.canonical_json()`의
-  sha256 hex — 이 모듈의 `config_hash()`가 그 마지막 단계(직렬화→해시)를
-  맡는다(모델 docstring: "해시 계산 자체는 BT-9의 책임").
+- `config_hash`: sha256 hex of BT-1 `domain/models_v2.py::BacktestConfigV2.canonical_json()`
+  — this module's `config_hash()` takes the final step (serialization → hash)
+  (model docstring: "hash computation itself is not BT-9's responsibility").
 
-정준 직렬화는 DSL-12 `artifact/hash.py`와 같은 규칙(정렬된 키, 고정
-구분자 `(",", ":")`, `ensure_ascii=True`, `allow_nan=False`)을 그대로
-따른다 — 재현 키 계열의 해시들이 서로 다른 정규화 규칙을 쓰면 "같은
-입력=같은 해시" 계약의 강도가 리프마다 달라진다.
+Canonical serialization follows the same rules as DSL-12 `artifact/hash.py`
+(sorted keys, fixed delimiters `(",", ":")`, `ensure_ascii=True`,
+`allow_nan=False`) — if reproducibility-key hashes use different normalization
+rules, the strength of the "same input = same hash" contract varies per leaf.
 
-Fail-closed: 네 입력 중 하나라도 비어 있거나 잘못된 타입이면 `ValueError`
-로 거부한다 — 불완전한 재현 키로 "재현됨"을 위장하지 않는다.
+Fail-closed: if any of the four inputs is empty or has the wrong type, reject
+with `ValueError` — do not disguise "reproduced" with an incomplete key.
 """
 from __future__ import annotations
 
@@ -43,11 +44,12 @@ def _require_nonempty_str(value: str, name: str) -> str:
 
 
 def config_hash(config: BacktestConfigV2) -> str:
-    """`BacktestConfigV2.canonical_json()` → sha256 hex(64자).
+    """`BacktestConfigV2.canonical_json()` → sha256 hex (64 chars).
 
-    같은 계약 값(같은 슬리피지·수수료·지연·부분체결·주문유형·비용·조정·
-    캘린더 설정) = 같은 `config_hash` — `canonical_json()`이 이미 결정론
-    직렬화를 보장하므로 여기서는 그 바이트열을 그대로 해시만 한다.
+    Same contractual values (same slippage, fees, latency, partial fills,
+    order types, costs, adjustments, calendar settings) = same `config_hash` —
+    `canonical_json()` already guarantees deterministic serialization, so we
+    only hash its bytes here.
     """
     if not isinstance(config, BacktestConfigV2):
         raise ValueError(
@@ -64,7 +66,8 @@ def reproducibility_key_payload(
     rollup_version: str,
     config: BacktestConfigV2,
 ) -> dict[str, str]:
-    """재현 키 입력 4종을 검증해 정준 페이로드(dict)로 만든다. 테스트·감사용 공개."""
+    """Validate the four reproducibility-key inputs and produce a canonical
+    payload (dict). Published for testing and audit."""
     return {
         "schema": HASH_SCHEMA,
         "script_hash": _require_nonempty_str(script_hash, "script_hash"),
@@ -82,8 +85,9 @@ def reproducibility_key(
     config: BacktestConfigV2,
 ) -> str:
     """`script_hash ‖ data_lineage_hash ‖ rollup_version ‖ config_hash` →
-    sha256 hex(64자). 같은 네 입력 = 같은 키(§3.4) — 재현 검증 잡이 이
-    값만으로 "같은 조건에서 다시 돌렸다"를 판정한다."""
+    sha256 hex (64 chars). Same four inputs = same key (§3.4) — reproducibility
+    verification uses this value alone to determine "ran again under the same
+    conditions"."""
     payload = reproducibility_key_payload(
         script_hash=script_hash,
         data_lineage_hash=data_lineage_hash,
