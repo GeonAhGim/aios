@@ -56,6 +56,8 @@
 | `application/{ingest_job,backfill_job}.py` | 수집(멱등·재개·rate limit)·과거 적재 |
 | `application/query.py` | `search(instruments, kinds, span, as_of)` — `as_of` 미지정 시 현재, 지정 시 point-in-time |
 | `application/link_entities.py` | 미매핑 항목 재매핑 배치 |
+| `domain/as_of_binding.py` | 백테스트 스크립트의 `research.*` 호출용 `as_of` 자동 바인딩(bar_ts 기준) + 미래 참조 거부(순수) |
+| `adapters/dsl_query.py` | DSL `research.*` 빌트인(`filing_count`·`news_count`·`macro_count`·`alt_count`) — `application/query.search` 브릿지 |
 | `src/api/routers/research_data.py` | 검색·소스 목록·수집 상태(인간 세션) |
 | MCP 도구 `tools_research.research_data_search` | 에이전트용(읽기 전용, entitlement 경유) |
 
@@ -101,7 +103,7 @@
 | RD-6 | `application/{ingest_job,backfill_job}.py` + 통합 | RD-4 | 중단·재개, rate limit backoff, 갭 표시 | 500 |
 | RD-7 | `application/query.py` + `as_of` PIT 필터 + 적대적 테스트 | RD-4 | RD-A1 위반 0 | 300 |
 | RD-8 | entitlement 연동(DC-9) + `src/api/routers/research_data.py` + 통합 | RD-7, DC-9 | 교차 테넌트 404, 소스 권한 403 | 400 |
-| RD-9 | 백테스트·DSL 연결: `research.*` 조회를 스크립트에 노출하되 `as_of` 자동 바인딩 + 누수 테스트 | RD-7, DSL-9 | 미래 참조 시 컴파일/런타임 거부 | 300 |
+| RD-9 | `domain/as_of_binding.py`(`bind_as_of` — bar_ts 자동 바인딩·미래 참조 거부) + `adapters/dsl_query.py`(`research.{filing,news,macro,alt}_count()` DSL 빌트인, DSL-9 `builtins_ta.py` 등록 패턴) + test | RD-7, DSL-9 | 미래 참조는 런타임에 `AsOfBindingError`로 거부(bind_as_of); DSL 빌트인 자체는 그라마에 문자열 리터럴이 없어 스크립트가 `as_of`를 지정할 수 없으므로 미래 참조 구성이 구조적으로 불가(컴파일 거부는 "표현 불가"로 대체됨, 체크식 예외 경로 아님) | 300 |
 | RD-10 | `adapters/sources/opendart.py` + 계약 테스트(픽스처) | RD-1, RD-6 | 공시 목록·재무·정정 정규화 | 300 |
 | RD-11 | `adapters/sources/{ecos,kosis}.py` + `domain/macro_series.py` + test | RD-1, RD-6 | 빈도·단위·발표지연 정규화 | 460 |
 | RD-12 | `adapters/sources/krx_data.py` + test | RD-1, RD-6 | 지수·투자자별·공매도 | 300 |
