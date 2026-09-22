@@ -1,24 +1,26 @@
-"""DSL-2 — AIOS Script 렉서.
+"""DSL-2 — AIOS Script lexer.
 
 Spec: docs/specs/L4_analytics_authoring_backtest_marketplace_v1.0.md
-§3.3(GRAMMAR_VERSION="aios-script-1" 문법), §9.4(DSL-2), §2.4 표(상한 260줄).
+§3.3(GRAMMAR_VERSION="aios-script-1" grammar), §9.4(DSL-2), §2.4 table(soft cap 260 lines).
 
-토큰화만 한다 — 파싱·AST 조립은 DSL-3(`grammar/parser.py`)의 몫이다(decision,
-task-1235: ast.py를 임포트하지 않고 토큰 레벨에서 끝낸다). `tokenize()`는 소스
-문자열 하나를 받아 `Token` 리스트를 반환하거나 `ScriptSyntaxError`를 던지는
-순수 함수다 — I/O·전역 상태·난수·시계 없음.
+Tokenises only — parsing and AST assembly belong to DSL-3 (`grammar/parser.py`)
+(decision, task-1235: stop at token level without importing ast.py). `tokenize()` is
+a pure function that accepts a single source string, returns a `Token` list, or raises
+`ScriptSyntaxError` — no I/O, no global state, no randomness, no clock.
 
-미검증: §3.3 본문은 주석 마커를 명시하지 않는다. 이 저장소 전체가 Python이라
-`#` 라인 주석을 관례로 채택했다 — DSL-3/파서 리프에서 다른 마커로 확정되면
-이 파일만 고치면 된다(주석 스캔은 `_skip_trivia` 한 곳에 격리돼 있다).
+Unverified: §3.3 does not specify comment markers. Because this repository is entirely
+Python, we adopt `#` line comments as convention — if DSL-3/the parser leaf later
+chooses a different marker, only this file needs updating (comment scanning is
+isolated to `_skip_trivia` alone).
 """
 from __future__ import annotations
 
 import enum
 from dataclasses import dataclass
 
-# §3.3 문법의 예약어. ta/math/series(네임스페이스)는 문법상 평범한 ident이고
-# 파서가 "ns '.' ident" 형태로 해석하므로 여기서는 예약어로 다루지 않는다.
+# §3.3 grammar reserved words. ta/math/series (namespaces) are ordinary idents
+# in the grammar; the parser interprets them as "ns '.' ident", so we do not
+# treat them as reserved words here.
 KEYWORDS = frozenset(
     {
         "input",
@@ -36,10 +38,11 @@ KEYWORDS = frozenset(
     }
 )
 
-# type := "int" | "float" | "bool" | "series<float>" | "series<bool>" 중
-# 스칼라 원자 3개만 예약어다. "series<float>" 같은 복합 표기는 IDENT("series")
-# LT IDENT("float") GT 네 토큰의 조합으로 남겨 파서가 조립한다(렉서는 문맥을
-# 모른 채 문자만 본다 — "series < a" 같은 비교식과 동일한 토큰열).
+# type := "int" | "float" | "bool" | "series<float>" | "series<bool>" —
+# only the 3 scalar atoms are reserved words. Compound notations like
+# "series<float>" remain as 4 tokens: IDENT("series") LT IDENT("float") GT,
+# letting the parser assemble them (the lexer sees characters only, without
+# context — identical token stream to a comparison like "series < a").
 TYPE_WORDS = frozenset({"int", "float", "bool"})
 
 _TWO_CHAR_OPS = {"<=": "LE", "==": "EQEQ", ">=": "GE"}
@@ -52,8 +55,9 @@ _DELIMS = {
     ",": "COMMA",
     ":": "COLON",
     "=": "ASSIGN",
-    ".": "DOT",  # ns "." ident 호출 표기(call 규칙)에 필요 — §3.3 구분자 목록은
-    # 요약이라 "."을 명시하지 않았지만 grammar 본문의 call 규칙이 요구한다.
+    ".": "DOT",  # needed for ns "." ident call notation (call rule) — §3.3
+    # delimiter list is a summary and omits ".", but the call rule in the
+    # grammar body requires it.
 }
 
 
@@ -70,11 +74,11 @@ class TokenKind(enum.Enum):
 
 @dataclass(frozen=True, slots=True)
 class Token:
-    """`value`는 원문 그대로의 렉심(lexeme) 문자열이다 — 숫자를 int/float로
-    변환하거나 연산자 종류를 더 세분화하는 것은 파서/타입체커의 몫이다.
-    `subtype`은 OP/DELIM일 때만 `_ONE_CHAR_OPS` 등의 이름표를 담아 파서가
-    문자열 비교 없이 분기할 수 있게 한다(KEYWORD/TYPE/IDENT/NUMBER는 `value`
-    자체가 이미 유일한 판별자라 subtype이 빈 문자열)."""
+    """`value` is the lexeme string verbatim from source — converting numbers
+    to int/float or further subdividing operator kinds belongs to the parser/type
+    checker. `subtype` carries a label from `_ONE_CHAR_OPS`, etc., only for OP/DELIM,
+    letting the parser branch without string comparison (for KEYWORD/TYPE/IDENT/NUMBER,
+    `value` itself is already the unique discriminator, so subtype is an empty string)."""
 
     kind: TokenKind
     value: str
@@ -84,9 +88,9 @@ class Token:
 
 
 class ScriptSyntaxError(Exception):
-    """§3.3 에러 taxonomy 4종 중 `SCRIPT_SYNTAX`(400, 재시도 불가) — 렉서
-    단계에서 발생 가능한 유일한 코드다(TYPE/LOOKAHEAD/RESOURCE_LIMIT는 이후
-    컴파일 단계 전용, decision: 이 리프에서 taxonomy를 늘리지 않는다)."""
+    """§3.3 error taxonomy: `SCRIPT_SYNTAX`(400, non-retryable) — the only code
+    the lexer can produce (TYPE/LOOKAHEAD/RESOURCE_LIMIT are for later
+    compilation stages, decision: do not extend the taxonomy at this leaf)."""
 
     code = "SCRIPT_SYNTAX"
 
@@ -106,8 +110,9 @@ def _is_ident_cont(ch: str) -> bool:
 
 
 def tokenize(source: str) -> list[Token]:
-    """AIOS Script 소스를 토큰 리스트로 변환한다. 마지막 토큰은 항상
-    `TokenKind.EOF`(파서가 lookahead 시 특수 케이스 없이 끝을 알 수 있게)."""
+    """Tokenise an AIOS Script source string. The last token is always
+    `TokenKind.EOF` (so the parser can detect the end without a special case
+    during lookahead)."""
     tokens: list[Token] = []
     pos = 0
     line = 1
@@ -147,9 +152,9 @@ def tokenize(source: str) -> list[Token]:
         start_line, start_col = line, col
 
         if ch == '"':
-            # M2-2a: request(symbol, timeframe, expr)의 상수 인자용 문자열
-            # 리터럴. §3.3 원문 문법표에는 STRING이 없다 — 이스케이프·개행
-            # 없는 최소 문법(미검증, 다른 쓰임이 생기면 이 지점만 넓히면 됨).
+            # M2-2a: string literal for constant args of request(symbol, timeframe, expr).
+            # §3.3 source grammar table has no STRING — minimal grammar with no
+            # escapes or newlines (unverified; widen only this point if other uses arise).
             pos += 1
             col += 1
             begin = pos
