@@ -56,45 +56,45 @@ BUY_NEW = ProposedTrade(
 
 
 class TestBuyExisting:
-    def test_notional_delta_positive(self):
+    def test_notional_delta_positive(self) -> None:
         before = _make_state()
         impact = delta_impact(before=before, trade=BUY_AAPL)
         assert impact.notional_delta == Decimal("50000")
 
-    def test_cash_delta_negative_buy(self):
+    def test_cash_delta_negative_buy(self) -> None:
         before = _make_state()
         impact = delta_impact(before=before, trade=BUY_AAPL)
         assert impact.cash_delta == Decimal("-50000")
 
-    def test_total_equity_delta_zero(self):
+    def test_total_equity_delta_zero(self) -> None:
         """Cash<->exposure swap: total equity unchanged (BUY)."""
         before = _make_state()
         impact = delta_impact(before=before, trade=BUY_AAPL)
         assert impact.total_equity_delta == Decimal("0")
 
-    def test_total_equity_delta_zero_sell(self):
+    def test_total_equity_delta_zero_sell(self) -> None:
         """Cash<->exposure swap: total equity unchanged (SELL)."""
         before = _make_state()
         impact = delta_impact(before=before, trade=SELL_AAPL)
         assert impact.total_equity_delta == Decimal("0")
 
-    def test_position_count_increases(self):
+    def test_position_count_increases(self) -> None:
         before = _make_state()
         impact = delta_impact(before=before, trade=BUY_AAPL)
         assert impact.position_count_delta == 1
 
-    def test_gross_notional_increases(self):
+    def test_gross_notional_increases(self) -> None:
         before = _make_state()
         impact = delta_impact(before=before, trade=BUY_AAPL)
         assert impact.gross_notional_delta == Decimal("50000")
 
-    def test_per_symbol_pct_delta_positive(self):
+    def test_per_symbol_pct_delta_positive(self) -> None:
         """AAPL exposure % goes up after buying more AAPL."""
         before = _make_state()
         impact = delta_impact(before=before, trade=BUY_AAPL)
         assert impact.per_symbol_pct_delta["AAPL"] > Decimal("0")
 
-    def test_other_symbol_pct_decreases(self):
+    def test_other_symbol_pct_decreases(self) -> None:
         """GOOG pct drops because denominator (equity) unchanged but
         AAPL absorbs more of the pie — wait, equity is unchanged for
         cash<->exposure swap. GOOG pct drops because total_equity
@@ -119,33 +119,33 @@ class TestBuyExisting:
 
 
 class TestSellExisting:
-    def test_cash_delta_positive_sell(self):
+    def test_cash_delta_positive_sell(self) -> None:
         before = _make_state()
         impact = delta_impact(before=before, trade=SELL_AAPL)
         assert impact.cash_delta == Decimal("30000")
 
-    def test_notional_delta_positive(self):
+    def test_notional_delta_positive(self) -> None:
         """notional_delta is always the absolute trade size."""
         before = _make_state()
         impact = delta_impact(before=before, trade=SELL_AAPL)
         assert impact.notional_delta == Decimal("30000")
 
-    def test_gross_notional_decreases(self):
+    def test_gross_notional_decreases(self) -> None:
         before = _make_state()
         impact = delta_impact(before=before, trade=SELL_AAPL)
         assert impact.gross_notional_delta == Decimal("-30000")
 
-    def test_position_count_decreases(self):
+    def test_position_count_decreases(self) -> None:
         before = _make_state()
         impact = delta_impact(before=before, trade=SELL_AAPL)
         assert impact.position_count_delta == -1
 
-    def test_per_symbol_pct_delta_negative(self):
+    def test_per_symbol_pct_delta_negative(self) -> None:
         before = _make_state()
         impact = delta_impact(before=before, trade=SELL_AAPL)
         assert impact.per_symbol_pct_delta["AAPL"] < Decimal("0")
 
-    def test_per_symbol_pct_delta_zero_other_symbols_sell(self):
+    def test_per_symbol_pct_delta_zero_other_symbols_sell(self) -> None:
         """SELL existing symbol: other symbols' pct unchanged (equity delta=0)."""
         before = _make_state()
         impact = delta_impact(before=before, trade=SELL_AAPL)
@@ -158,22 +158,22 @@ class TestSellExisting:
 
 
 class TestNegative:
-    def test_zero_notional_raises(self):
+    def test_zero_notional_raises(self) -> None:
         trade = ProposedTrade(symbol="AAPL", notional=Decimal("0"), side="BUY")
         with pytest.raises(ValueError, match="notional must be positive"):
             delta_impact(before=_make_state(), trade=trade)
 
-    def test_negative_notional_raises(self):
+    def test_negative_notional_raises(self) -> None:
         trade = ProposedTrade(symbol="AAPL", notional=Decimal("-1000"), side="BUY")
         with pytest.raises(ValueError, match="notional must be positive"):
             delta_impact(before=_make_state(), trade=trade)
 
-    def test_invalid_side_raises(self):
+    def test_invalid_side_raises(self) -> None:
         trade = ProposedTrade(symbol="AAPL", notional=Decimal("1000"), side="HOLD")
         with pytest.raises(ValueError, match="unknown side"):
             delta_impact(before=_make_state(), trade=trade)
 
-    def test_zero_equity_after_raises(self):
+    def test_zero_equity_after_raises(self) -> None:
         """Edge: if before total_equity is 0 and trade makes it 0,
         denominator is zero — should raise."""
         before = _make_state(
@@ -194,7 +194,7 @@ class TestNegative:
 
 
 class TestFailureInjection:
-    def test_zero_equity_before_raises(self):
+    def test_zero_equity_before_raises(self) -> None:
         """Inject: total_equity=0, cash_pct=100, no positions.
         Buying with any notional makes new_equity = 0 + 0 = 0 (since
         total_equity_delta = 0 for valid BUY/SELL). Should raise."""
@@ -209,7 +209,7 @@ class TestFailureInjection:
         with pytest.raises(ValueError, match="total_equity must be positive"):
             delta_impact(before=before, trade=trade)
 
-    def test_sell_more_than_owned_reduces_gross(self):
+    def test_sell_more_than_owned_reduces_gross(self) -> None:
         """Inject: SELL 300k AAPL when only 300k owned.
         Gross goes to 0 for that symbol, delta should be -300k."""
         before = _make_state()
@@ -227,7 +227,7 @@ class TestFailureInjection:
 
 
 class TestPerformance:
-    def test_impact_computes_under_1ms_for_100_symbols(self):
+    def test_impact_computes_under_1ms_for_100_symbols(self) -> None:
         """D2 perf assertion: delta_impact must complete in < 1 ms
         even with 100 symbols in the portfolio."""
         import time
@@ -262,7 +262,7 @@ class TestPerformance:
 
 
 class TestGateRed:
-    def test_float_notional_rejected_at_caller(self):
+    def test_float_notional_rejected_at_caller(self) -> None:
         """Gate-red: caller must not pass float. The ProposedTrade dataclass
         does not enforce Decimal at the type level (Python has no runtime
         type enforcement), but the function raises ValueError for invalid
@@ -273,7 +273,7 @@ class TestGateRed:
         with pytest.raises(ValueError):
             delta_impact(before=before, trade=trade)
 
-    def test_buy_new_symbol_increases_position_count(self):
+    def test_buy_new_symbol_increases_position_count(self) -> None:
         """Buying a symbol not in the portfolio: position count +1."""
         before = _make_state()
         impact = delta_impact(before=before, trade=BUY_NEW)
