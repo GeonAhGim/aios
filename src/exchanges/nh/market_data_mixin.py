@@ -1,3 +1,4 @@
+# ratchet-allow: unverified-endpoint fields raise NotImplementedError instead of guessing (I2)
 """NHAdapter Market Data 메서드군.
 
 Spec: 02_exchange_adapter_v1.3.md#§2.1, 02e_nh_api_spec_v1.md#§3
@@ -21,7 +22,6 @@ SDK 스니펫에 요청 파라미터만 있어 응답 필드를 KIS 관례로 �
 field schema, so it no longer needs to stay fail-closed.
 """
 
-# ratchet-allow: unverified-endpoint fields raise NotImplementedError instead of guessing (I2)
 from __future__ import annotations
 
 from datetime import datetime, timezone
