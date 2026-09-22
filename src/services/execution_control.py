@@ -1,6 +1,6 @@
 """FD-16.3/16.5 — Execution start/pause/max drawdown/retire (start/pause/set_max_drawdown/retire).
 
-Spec: 기능설계문서_v1.20.md#FD-16.3, 16.5, item 06 §6.1, item 02 §2.2. To
+Spec: functional_specification_v1.20.md#FD-16.3, 16.5, item 06 §6.1, item 02 §2.2. To
 comply with P6 (300-line file cap), only the 4 "control" actions were moved
 from execution_service.py into this module (create_execution/convert_to_live
 remain as "creation" actions). Each method on `ExecutionService` is a thin
@@ -72,7 +72,7 @@ async def start(
                 user_id=user_id,
                 execution_id=execution_id,
                 exchange=execution["exchange"],
-                mandate_revision_id=None,  # 컬럼 없음 — 마이그레이션 대기
+                mandate_revision_id=None,  # Column does not exist — awaiting migration
             )
         )
         if decision.outcome != GateOutcome.ALLOW:
