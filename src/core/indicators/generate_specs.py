@@ -1,25 +1,26 @@
-"""IND-10 — TA-Lib 161종 메타데이터 → `IndicatorSpec` 자동 생성.
+"""IND-10 — Auto-generate `IndicatorSpec` metadata for 161 TA-Lib functions.
 
 Spec: docs/specs/L4_analytics_authoring_backtest_marketplace_v1.0.md §9.9 IND-10
-(선행 IND-9·IND-1, ADR-2026-09-06-F D1).
+(Precedes IND-9·IND-1, ADR-2026-09-06-F D1).
 
-`talib.get_functions()`(161종) × `abstract.Function(name).info`를 순회해 스펙을
-**생성**한다(수기 작성 금지) — group→카테고리(`TALIB_GROUPS`), parameters(기본값)→
-정수 파라미터 범위 규칙, `.lookback`→실측 lookback, output_names→출력 계약,
-output_flags/function_flags→`PlotSpec` 기본값.
+Iterates `talib.get_functions()` (161 types) x `abstract.Function(name).info` to
+**generate** specs (manual writing prohibited) — group→category (`TALIB_GROUPS`),
+parameters(defaults)→integer parameter range rules, `.lookback`→measured lookback,
+output_names→output contract, output_flags/function_flags→`PlotSpec` defaults.
 
-부동소수 파라미터(nbdevup·acceleration·penetration 등, 161종 중 14종)는 이번
-생성 단계에서 `ParamSpec`으로 노출하지 않는다 — `IndicatorRegistry`/`engine/
-incremental.py`·`engine/vectorized.py`(IND-1, 이 leaf 밖)가 파라미터를
-`dict[str, int]` 단일 타입으로 공유하므로, float를 1급으로 노출하려면 그 계약을
-전부 `int | float`로 넓혀야 한다 — 이 leaf의 파일 범위(`talib_adapter.py`·
-`registry.py`·`specs_talib.py`) 밖까지 번지는 변경이라 하지 않는다. 대신
-TA-Lib 자신의 기본값을 그대로 쓴다(`talib.abstract.Function(name, **only_int_params)`
-호출 시 미지정 float 파라미터는 TA-Lib이 자체 기본값을 적용 — 명시 전달과 값·
-lookback이 바이트 동일함을 확인함). "정수 주기 1~2000·편차 0.1~10" 규칙 중
-편차 쪽은 `_deviation_range()`로 순수 함수로만 구현해 두고(결정 노트의 규칙
-자체는 존재), 아직 `ParamSpec`에 배선하지 않는다 — IND-12(레지스트리 3층화)
-이후 필요해지면 그때 배선한다.
+Floating-point parameters (nbdevup, acceleration, penetration, etc., 14 of 161 types)
+are not exposed as `ParamSpec` at this generation stage — `IndicatorRegistry`/`engine/
+incremental.py`·`engine/vectorized.py` (IND-1, outside this leaf) share parameters
+as a single type `dict[str, int]`, so exposing float as a first-class type would
+require widening that contract to `int | float` everywhere — a change that spills
+outside this leaf's file scope (`talib_adapter.py`·`registry.py`·`specs_talib.py`),
+so we do not do it. Instead we rely on TA-Lib's own defaults
+(`talib.abstract.Function(name, **only_int_params)` — when float params are omitted,
+TA-Lib applies its own defaults; we verify the value/lookback is byte-identical to
+explicitly passing them). Of the "integer period 1~2000 · deviation 0.1~10" rules,
+the deviation side is implemented only as a pure function `_deviation_range()`
+(the rule itself exists in the decision note), and is not yet wired into
+`ParamSpec` — wire it later if needed after IND-12 (registry three-layering).
 """
 from __future__ import annotations
 
@@ -69,9 +70,10 @@ _LOWER_LIMIT_FLAG = "Values represent a lower limit"
 
 
 def _deviation_range(default: float) -> tuple[float, float]:
-    """결정 노트의 "편차 0.1~10" 규칙(순수 함수). 아직 `ParamSpec`에 배선하지
-    않는다 — 모듈 docstring 참조. 기본값이 규칙 범위를 벗어나면(SAR류 acceleration
-    등) 기본값을 포함하도록 대칭 확장한다(항상 min <= default <= max 보장)."""
+    """Decision note rule "deviation 0.1~10" (pure function). Not yet wired into
+    `ParamSpec` — see module docstring. If the default falls outside the rule range
+    (e.g. SAR acceleration), symmetrically expand to include the default
+    (always guarantees min <= default <= max)."""
     if _DEVIATION_MIN <= default <= _DEVIATION_MAX:
         return _DEVIATION_MIN, _DEVIATION_MAX
     if default <= 0:
@@ -80,11 +82,12 @@ def _deviation_range(default: float) -> tuple[float, float]:
 
 
 def _flatten_inputs(input_names: Mapping[str, object]) -> tuple[str, ...]:
-    """`abstract.Function.info["input_names"]`를 캔들 필드 이름 평탄 튜플로 만든다.
+    """Flatten `abstract.Function.info["input_names"]` into a tuple of candle field names.
 
-    값이 `list`면(예: `{'prices': ['high','low','close']}`) 펼치고, 문자열이면
-    (예: `{'price0': 'high'}`) 그대로 붙인다 — 순서는 info의 삽입 순서를 보존해야
-    talib 함수 호출 시 위치 인자 순서와 맞는다.
+    If the value is a `list` (e.g. `{'prices': ['high','low','close']}`), expand it;
+    if it's a string (e.g. `{'price0': 'high'}`), append it as-is — order must
+    preserve the insertion order from info so positional argument order matches
+    when calling the talib function.
     """
     flat: list[str] = []
     for value in input_names.values():
@@ -96,9 +99,9 @@ def _flatten_inputs(input_names: Mapping[str, object]) -> tuple[str, ...]:
 
 
 def _int_param_specs(parameters: Mapping[str, object]) -> tuple[ParamSpec, ...]:
-    """정수 파라미터만 `ParamSpec`으로 노출한다(float는 모듈 docstring 참조).
+    """Expose only integer parameters as `ParamSpec` (floats — see module docstring).
 
-    matype류는 0~8(talib.MA_Type 종수), 그 외 정수는 주기 규칙 1~2000.
+    matype family: 0~8 (talib.MA_Type ordinal); other integers: period rule 1~2000.
     """
     specs: list[ParamSpec] = []
     for name, default in parameters.items():
@@ -114,12 +117,13 @@ def _int_param_specs(parameters: Mapping[str, object]) -> tuple[ParamSpec, ...]:
 
 
 def _style_for_function(function_flags: Sequence[str] | None) -> tuple[ScaleHint, DefaultPane]:
-    """group 대신 `function_flags`(더 세밀한 talib 신호)로 스케일·페인을 정한다.
+    """Determine scale and pane from `function_flags` (finer talib signal) instead of group.
 
-    "캔들스틱"·"입력과 같은 스케일" 둘 다 가격 위 오버레이(`overlay`/`price`)로
-    그린다 — 후자는 SMA·BBANDS류(Overlap Studies·Price Transform), 전자는
-    Pattern Recognition 61종(마커로 그릴 스케일이 가격과 같다). 그 외(모멘텀·
-    거래량·변동성·사이클·수학 계열)는 자체 스케일 별도 페인.
+    "candlestick" and "same scale as input" both draw as price overlay (`overlay`/`price`)
+    — the latter covers SMA/BBANDS (Overlap Studies, Price Transform), the former
+    covers 61 Pattern Recognition types (scale for drawing markers matches price).
+    The rest (momentum, volume, volatility, cycle, math families) get their own
+    scale and separate pane.
     """
     flags = function_flags or []
     if _CANDLESTICK_FLAG in flags or _SAME_SCALE_FLAG in flags:
@@ -128,12 +132,12 @@ def _style_for_function(function_flags: Sequence[str] | None) -> tuple[ScaleHint
 
 
 def _plot_kind(flags: Sequence[str]) -> PlotKind:
-    """TA-Lib output_flags 하나를 PlotSpec.kind로 매핑(ADR-2026-09-06-F D1)."""
+    """Map one TA-Lib output_flag to PlotSpec.kind (ADR-2026-09-06-F D1)."""
     if _HISTOGRAM_FLAG in flags:
         return "histogram"
     if _UPPER_LIMIT_FLAG in flags or _LOWER_LIMIT_FLAG in flags:
         return "band"
-    return "line"  # Line·Dashed Line 둘 다 line
+    return "line"  # Both Line and Dashed Line map to "line"
 
 
 def _plots_from_talib(
@@ -141,16 +145,17 @@ def _plots_from_talib(
     output_names: tuple[str, ...],
     style: Mapping[str, Mapping[str, object]],
 ) -> tuple[PlotSpec, ...]:
-    """`talib_name`의 실제 output_flags에서 kind/fill_between을 도출해 PlotSpec을 만든다.
+    """Derive kind/fill_between from actual output_flags of `talib_name` to build PlotSpec.
 
-    `output_names`는 talib 원본 출력 순서와 1:1 대응하는(이름만 바꿔도 되는) 이
-    모듈의 출력 이름이어야 한다 — 순서가 어긋나면 kind/fill_between이 잘못 배정된다.
-    캔들스틱 함수는 output_flags가 `Line`이어도 실제로는 가격 위 마커이므로
-    `kind="marker"`로 강제한다. histogram 출력은 부호로 색을 나누는 것이 자연스러운
-    기본값이라 `color_rule`이 style에 없으면 "sign"을 자동 채운다.
+    `output_names` must be this module's output names that correspond 1:1 with talib's
+    original output order (only names may differ) — if order is off, kind/fill_between
+    will be assigned incorrectly. Candlestick functions have output_flags of `Line` but
+    are actually markers on price, so force `kind="marker"`. Histogram outputs naturally
+    split color by sign, so if `color_rule` is absent from style, auto-fill "sign".
     """
-    # talib/abstract.pyi는 개별 지표 함수만 선언하고 런타임 전용 `Function` 소개자
-    # 클래스는 선언하지 않는다(talib 패키지 stub 한계) — 값은 실제로 존재한다.
+    # talib/abstract.pyi declares only individual indicator functions and does not
+    # declare the runtime-only `Function` constructor class (talib package stub
+    # limitation) — the values actually exist at runtime.
     info = talib_abstract.Function(talib_name).info  # type: ignore[attr-defined]
     flags_by_output: list[list[str]] = list(info["output_flags"].values())
     if len(flags_by_output) != len(output_names):
@@ -195,10 +200,10 @@ def _plots_from_talib(
 
 
 def _make_lookback(talib_name: str) -> Callable[[dict[str, int]], int]:
-    """실제 `TA_*_Lookback`(C 라이브러리)을 매 호출마다 실측한다.
+    """Measure actual `TA_*_Lookback` (C library) on every call.
 
-    미지정 float 파라미터는 TA-Lib이 자체 기본값을 적용하므로(모듈 docstring
-    검증됨) 여기 전달하는 `params`는 정수 파라미터만으로 충분하다.
+    Unspecified float params are applied by TA-Lib with its own defaults (verified
+    in module docstring), so `params` passed here only need integer parameters.
     """
 
     def _lookback(params: dict[str, int]) -> int:
@@ -222,11 +227,12 @@ TALIB_GROUPS: dict[str, str] = {name: _talib_group(name) for name in sorted(_all
 
 
 def generate_talib_specs(names: Iterable[str] | None = None) -> dict[str, IndicatorSpec]:
-    """TA-Lib 메타데이터에서 `IndicatorSpec` 딕셔너리를 생성한다.
+    """Generate `IndicatorSpec` dict from TA-Lib metadata.
 
-    `names`가 None이면 `talib.get_functions()`(161종) 전체, 아니면 주어진
-    이름만 생성한다 — 증분 생성(부분집합)과 일괄 생성(전체) 결과가 겹치는
-    이름에 대해 바이트 동일해야 한다(DoD). 미지 함수명은 거부한다(fail-closed).
+    If `names` is None, generate all `talib.get_functions()` (161 types); otherwise
+    generate only the given names — incremental (subset) and batch (full) results
+    must be byte-identical for overlapping names (DoD). Reject unknown function
+    names (fail-closed).
     """
     known = set(_all_talib_functions())
     selected = sorted(known) if names is None else sorted(names)
