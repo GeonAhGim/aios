@@ -54,7 +54,7 @@ from src.core.script.runtime.builtins_math import MATH_BUILTINS, BuiltinCallErro
 from src.core.script.runtime.series import Scalar, ScriptRuntimeError, Series, Value, broadcast
 
 if TYPE_CHECKING:
-    from src.core.script.runtime.interpreter import Builtin, CallSite
+    from src.core.script.runtime.interpreter_types import Builtin, CallSite
 
 __all__ = ["TaBuiltins", "TaCall", "default_builtins", "ta_idents"]
 

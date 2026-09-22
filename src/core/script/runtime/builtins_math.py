@@ -34,7 +34,7 @@ from typing import TYPE_CHECKING, Final
 from src.core.script.runtime.series import Scalar, ScriptRuntimeError, Series, Value, broadcast
 
 if TYPE_CHECKING:
-    from src.core.script.runtime.interpreter import Builtin, CallSite
+    from src.core.script.runtime.interpreter_types import Builtin, CallSite
 
 __all__ = ["MATH_BUILTINS", "BuiltinCallError", "apply_elementwise"]
 

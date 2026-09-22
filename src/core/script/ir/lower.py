@@ -50,6 +50,7 @@ from src.core.script.grammar.ast import (
     PlotDecl,
     PostfixExpr,
     Program,
+    RequestExpr,
     SignalDecl,
     UnaryExpr,
 )
@@ -67,6 +68,7 @@ from src.core.script.ir.ops import (
     Not,
     Order,
     Plot,
+    Request,
     Signal,
     Store,
     verify_stack,
@@ -169,6 +171,11 @@ def _emit_expr(expr: Expr, env: TypeEnv, out: list[Instr]) -> None:
             _emit_expr(arg, env, out)
         out.append(
             Call(ns=expr.ns, ident=expr.ident, argc=len(expr.args), type=infer_type(expr, env))
+        )
+    elif isinstance(expr, RequestExpr):
+        _emit_expr(expr.expr, env, out)
+        out.append(
+            Request(symbol=expr.symbol, timeframe=expr.timeframe, type=infer_type(expr, env))
         )
     else:
         raise ScriptLowerError(f"지원하지 않는 Expr 노드: {type(expr).__name__}")

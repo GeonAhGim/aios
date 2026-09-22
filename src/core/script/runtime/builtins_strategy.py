@@ -82,7 +82,7 @@ from src.core.script.runtime.builtins_strategy_args import (
 )
 
 if TYPE_CHECKING:
-    from src.core.script.runtime.interpreter import Builtin, CallSite
+    from src.core.script.runtime.interpreter_types import Builtin, CallSite
     from src.core.script.runtime.series import Value
 
 __all__ = [
