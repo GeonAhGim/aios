@@ -231,3 +231,57 @@ async def test_submit_for_verification_rejects_seller_relying_on_other_users_his
 
     with pytest.raises(ListingError, match="3개월 이상의 Paper Trading 이력"):
         await service.submit_for_verification(listing.id, seller_a)
+
+
+async def test_check_paper_trading_eligibility_denies_empty_strategy_id(pool) -> None:
+    """불변식 위반(I-07): empty strategy_id는 명시적으로 거부되어야 한다."""
+    seller = await create_test_user(pool)
+
+    eligible = await check_paper_trading_eligibility(pool, "", "1.0.0", seller)
+
+    assert eligible is False
+
+
+async def test_check_paper_trading_eligibility_denies_empty_version(pool) -> None:
+    """불변식 위반(I-07): empty version은 명시적으로 거부되어야 한다."""
+    seller = await create_test_user(pool)
+
+    eligible = await check_paper_trading_eligibility(pool, "strategy-x", "", seller)
+
+    assert eligible is False
+
+
+class _FailingPool:
+    """pool.acquire() 자체가 실패하는 가짜 pool — acquire() 호출 실패 시나리오."""
+
+    def acquire(self):
+        raise asyncpg.PostgresConnectionError("pool exhausted")
+
+
+async def test_check_paper_trading_eligibility_denies_on_acquire_failure() -> None:
+    """실패주입 — pool.acquire()가 예외를 던지면 fail-closed해야 한다."""
+    eligible = await check_paper_trading_eligibility(
+        _FailingPool(), "strategy-x", "1.0.0", uuid4()
+    )
+
+    assert eligible is False
+
+
+async def test_check_paper_trading_eligibility_p95_latency(pool) -> None:
+    """성능 단언 — check_paper_trading_eligibility의 p95 레이턴시 <= 2s."""
+    import time
+
+    seller = await create_test_user(pool)
+    strategy_id, version = await _create_strategy(pool, seller)
+    await _insert_execution(pool, strategy_id, version, seller, days_ago=120)
+
+    latencies = []
+    for _ in range(20):
+        start = time.perf_counter()
+        await check_paper_trading_eligibility(pool, strategy_id, version, seller)
+        latencies.append((time.perf_counter() - start) * 1000)
+
+    sorted_latencies = sorted(latencies)
+    p95 = sorted_latencies[int(len(sorted_latencies) * 0.95)]
+
+    assert p95 <= 2000, f"p95 latency {p95}ms exceeds 2s budget"
