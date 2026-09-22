@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import asyncio
 import time
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
 
@@ -132,46 +132,47 @@ async def test_lifespan_startup_performance_meets_budget() -> None:
 async def test_lifespan_rejects_invalid_database_url() -> None:
     """불변식 위반 입력: 유효하지 않은 DB URL을 넣으면 lifespan이 예외로
     거부해야 한다. pool/event_bus/루프가 부분 조립된 상태로 방치되지
-    않음을 확인한다."""
+    않음을 확인한다.
+
+    P6 위반 해소: src/main.py(131-132) — load_env_secrets가 raise하면
+    create_pool이 호출되지 않으므로 event_bus가 등록되지 않는다.
+    """
+    import src.main as main_module
 
     def _broken_secrets() -> None:
         raise ValueError("invalid database URL")
 
-    with patch.object(
-        __import__("src.main", fromlist=["load_env_secrets"]),
-        "load_env_secrets",
-        _broken_secrets,
-    ):
+    with patch.object(main_module, "load_env_secrets", _broken_secrets):
         from fastapi import FastAPI
 
-        # lifespan 함수 자체를 재조립해서 secrets 로딩을 뚫는다.
         from src.main import lifespan as _lifespan
 
         test_app = FastAPI(lifespan=_lifespan)
-        with pytest.raises((ValueError, Exception)):
+        with pytest.raises(ValueError):
             async with test_app.router.lifespan_context(test_app):
                 pass
-        # finally 블록에 도달하지 못했으므로 event_bus가 시작되지 않았음.
+        # secrets 로딩 실패 → create_pool 미호출 → event_bus/pool 미등록.
         assert not hasattr(test_app.state, "event_bus")
+        assert not hasattr(test_app.state, "pool")
 
 
 async def test_lifespan_rejects_pool_creation_failure() -> None:
     """실패주입: asyncpg.create_pool 이 raised하면 lifespan이 전체를
     롤백하고 app.state에 부분 상태를 남기지 않는다. — I-01(실패 닫힘)."""
-    import asyncpg as _asyncpg
+    import asyncpg
 
     def _fail_pool(*args: object, **kwargs: object) -> None:
         # asyncpg.create_pool는 regular function (coroutine function 아님) —
         # side_effect로 raise하면 await에서 실제 예외가 올라온다.
-        raise _asyncpg.PostgresError("connection refused")
+        raise asyncpg.PostgresError("connection refused")
 
     from fastapi import FastAPI
 
     from src.main import lifespan as _lifespan
 
     test_app = FastAPI(lifespan=_lifespan)
-    with patch.object(_asyncpg, "create_pool", _fail_pool):
-        with pytest.raises(_asyncpg.PostgresError):
+    with patch.object(asyncpg, "create_pool", _fail_pool):
+        with pytest.raises(asyncpg.PostgresError):
             async with test_app.router.lifespan_context(test_app):
                 pass
     # 롤백됐으므로 state에 pool/event_bus가 없어야 한다.
@@ -182,7 +183,12 @@ async def test_lifespan_rejects_pool_creation_failure() -> None:
 async def test_lifespan_rejects_missing_credential_encryption_key() -> None:
     """불변식 위반 입력: credential encryption key가 비어 있으면 lifespan이
     거부해야 한다. key_ring.from_legacy_hex()가 빈 키를 받지 않도록
-    방어한다."""
+    방어한다.
+
+    P6 위반 해소: src/main.py(182-204) — 예외 범위를 ValueError에서
+    KeyRingConfigError로 좁히고, finally 블록이 정상 실행되어
+    pool이 부분 등록되지 않았음을 확인한다.
+    """
     from pydantic import SecretStr
 
     from src.data.models.trading import SecretBundle
@@ -205,10 +211,16 @@ async def test_lifespan_rejects_missing_credential_encryption_key() -> None:
         from src.main import lifespan as _lifespan
 
         test_app = FastAPI(lifespan=_lifespan)
-        # 빈 키는 KeyRing.from_legacy_hex()에서 거부해야 함.
-        with pytest.raises((ValueError, Exception)):
-            async with test_app.router.lifespan_context(test_app):
-                pass
+        # 빈 키는 KeyRing.from_legacy_hex()에서 KeyRingConfigError를 raise해야 함.
+        from src.core.security.key_ring import KeyRingConfigError
+
+        with patch("src.main.asyncpg.create_pool", new_callable=AsyncMock):
+            with pytest.raises(KeyRingConfigError):
+                async with test_app.router.lifespan_context(test_app):
+                    pass
+        # finally 블록이 굴러가므로 pool/event_bus가 세팅되지 않는다.
+        assert not hasattr(test_app.state, "pool")
+        assert not hasattr(test_app.state, "event_bus")
 
 
 # ── Failure-injection test ──────────────────────────────────────────────────
