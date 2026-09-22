@@ -1,16 +1,18 @@
-"""RequestDeployment(+Prepare) 커맨드.
+"""RequestDeployment(+Prepare) command.
 
-Spec: AIOSproject 47번 §3, 77번 §2/§3.
+Spec: AIOSproject #47 §3, #77 §2/§3.
 
-스콥 축소(명시, 마이그레이션 docstring 참조): 77번 §2는 REQUESTED->PREPARING
-->READY를 별도 단계로 나누지만, 이 리프는 두 전이 사이에 실제 비동기
-대기(외부 provider 승인 등)가 없어 REQUEST와 PREPARE를 한 커맨드로 합친다
-— provenance가 유효하고 mandate가 ACTIVE면 즉시 READY, 아니면 FAILED.
+Scope reduction (explicit, see migration docstring): #77 §2 splits REQUESTED->PREPARING
+->READY into separate steps, but this leaf has no real async wait
+(external provider approval, etc.) between the two transitions, so REQUEST and PREPARE
+are combined into a single command — if provenance is valid and mandate is ACTIVE,
+transition immediately to READY, otherwise FAILED.
 
-package_ref는 불투명 문자열로만 받는다 — FND-04(strategy_packages)가 아직
-PAPER_ELIGIBLE 패키지 lifecycle 자체를 구현하지 않아(validation-run까지만
-있음), 이 리프에서 package 유효성을 실제로 검증하지 못한다. package
-lifecycle이 생기면 이 함수의 package 검증 부분만 교체하면 된다."""
+package_ref is accepted as an opaque string only — FND-04(strategy_packages) has not yet
+implemented the PAPER_ELIGIBLE package lifecycle itself (only up to validation-run),
+so this leaf cannot actually validate package existence. When the package
+lifecycle is implemented, only the package validation portion of this
+function needs to be replaced."""
 from __future__ import annotations
 
 import hashlib
@@ -38,10 +40,10 @@ class NoActiveMandateError(Exception):
 
 
 class IdempotencyKeyConflictError(Exception):
-    """PAP-006 — 같은 idempotency_key로 이전과 다른 내용의 REQUEST가 왔다.
-    진짜 idempotency는 "같은 요청의 재시도"만 캐시해야 한다 — 다른 요청에
-    키를 잘못 재사용한 클라이언트 버그를 조용히 삼켜 엉뚱한 배포를 돌려주면
-    안 된다(전수감사 agent-platform-12 발견)."""
+    """PAP-006 — A REQUEST with different content but the same idempotency_key arrived.
+    True idempotency must only cache "retry of the same request" — silently swallowing
+    a client bug that reused the key for a different request and returning a wrong
+    deployment is unacceptable (discovered by full-audit agent platform-12)."""
 
 
 def _compute_request_digest(
@@ -71,15 +73,14 @@ async def _replay_or_conflict(
 ) -> PaperDeploymentView:
     if existing.request_digest != digest:
         raise IdempotencyKeyConflictError(
-            f"idempotency_key={idempotency_key}는 이전과 다른 요청 내용에 이미 "
-            "쓰였습니다."
+            f"idempotency_key={idempotency_key} is already used with different request content."
         )
     if existing.state == DeploymentState.FAILED:
-        # FAILED 결과도 최초 응답을 그대로 재현한다(원래 request_deployment()가
-        # 이 경우 예외를 던졌으므로, 재시도도 같은 예외를 받아야 한다).
+        # Replay the original response for FAILED results as well (the original
+        # request_deployment() raised an exception here, so retries must too).
         command = await repo.get_command_by_idempotency_key(existing.id, idempotency_key)
         detail = command.detail if command is not None else None
-        raise InvalidProvenanceError(detail or "provenance 검증 실패")
+        raise InvalidProvenanceError(detail or "provenance validation failed")
     return deployment_to_view(existing)
 
 
@@ -115,9 +116,9 @@ async def request_deployment(
         provider_sandbox_account_ref=provider_sandbox_account_ref,
         endpoint_classification=endpoint_classification,
     )
-    # PAP-006 — 같은 (tenant_id, idempotency_key)로 이미 만들어진 deployment가
-    # 있으면 새로 만들지 않는다(전수감사 발견 — 이전에는 이 확인 자체가 없어
-    # 매 재시도가 새 deployment를 만들었다).
+    # PAP-006 — Do not create a new deployment if one already exists with the same
+    # (tenant_id, idempotency_key) (discovered by full-audit — previously this check
+    # itself was missing, so every retry created a new deployment).
     existing = await repo.get_deployment_by_request_key(tenant_id, idempotency_key)
     if existing is not None:
         return await _replay_or_conflict(
@@ -138,9 +139,9 @@ async def request_deployment(
         provider_sandbox_account_ref=provider_sandbox_account_ref,
     )
 
-    # 이 리프는 REQUESTED 중간 행을 별도로 남기지 않는다(위 스콥 축소 —
-    # REQUEST+PREPARE를 한 커맨드로 합침) — provenance 검증 결과로 곧장
-    # READY 또는 FAILED 행 하나만 만든다.
+    # This leaf does not leave a separate REQUESTED intermediate row (scope reduction above —
+    # REQUEST+PREPARE are combined into one command) — the provenance validation result
+    # directly creates one READY or FAILED row.
     deployment_id = uuid4()
     detail: str | None = None
     try:
@@ -167,10 +168,11 @@ async def request_deployment(
         )
     )
     if deployment.id != deployment_id:
-        # 위의 사전 조회(get_deployment_by_request_key) 이후 이 INSERT 사이의
-        # 좁은 창에서 진짜 동시 요청에 졌다 — insert_deployment()가 이미
-        # ON CONFLICT DO NOTHING + 재조회로 승자의 행을 돌려줬다. 커맨드는
-        # 승자 쪽이 이미 기록했으니 여기서 다시 쓰지 않는다.
+        # Lost a true concurrent request in the narrow window between the
+        # pre-check above (get_deployment_by_request_key) and this INSERT —
+        # insert_deployment() already returned the winner's row via ON CONFLICT
+        # DO NOTHING + re-fetch. The command is already recorded on the winner's
+        # side, so we don't write again here.
         return await _replay_or_conflict(
             repo, deployment, digest=digest, idempotency_key=idempotency_key
         )
@@ -184,5 +186,5 @@ async def request_deployment(
         detail=detail,
     )
     if outcome is CommandOutcome.DENIED:
-        raise InvalidProvenanceError(detail or "provenance 검증 실패")
+        raise InvalidProvenanceError(detail or "provenance validation failed")
     return deployment_to_view(deployment)
