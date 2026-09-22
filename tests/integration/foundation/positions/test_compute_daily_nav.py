@@ -115,7 +115,12 @@ def _position_key(tenant_id: UUID, venue_symbol: str) -> str:
 
 
 async def _open_marked_position(
-    pool, *, tenant_id, account_id, quantity: Decimal, mark_price: Money | None
+    pool: asyncpg.Pool,
+    *,
+    tenant_id: UUID,
+    account_id: UUID,
+    quantity: Decimal,
+    mark_price: Money | None,
 ) -> PositionSnapshotView:
     position_key = _position_key(tenant_id, _unique_symbol("BTCUSDT"))
     snapshot = PositionSnapshotView(
@@ -142,7 +147,7 @@ async def _open_marked_position(
         return await repo.upsert(conn, snapshot, expected_seq=0)
 
 
-async def _setup_account(pool) -> tuple[UUID, UUID]:
+async def _setup_account(pool: asyncpg.Pool) -> tuple[UUID, UUID]:
     tenant_id = await create_test_tenant(pool)
     account_id = await create_pos_account(
         pool, tenant_id, venue="bitget", base_currency=Currency.USDT
@@ -152,15 +157,15 @@ async def _setup_account(pool) -> tuple[UUID, UUID]:
 
 def _cmd(
     *,
-    tenant_id,
-    account_id,
-    at,
-    realized="1000",
-    unrealized_delta="0",
-    funding="0",
-    fees="0",
-    flows="0",
-):
+    tenant_id: UUID,
+    account_id: UUID,
+    at: datetime,
+    realized: str = "1000",
+    unrealized_delta: str = "0",
+    funding: str = "0",
+    fees: str = "0",
+    flows: str = "0",
+) -> ComputeDailyNavCommand:
     return ComputeDailyNavCommand(
         tenant_id=tenant_id,
         account_id=account_id,
@@ -175,7 +180,7 @@ def _cmd(
     )
 
 
-async def test_first_day_has_zero_opening_and_persists(pool):
+async def test_first_day_has_zero_opening_and_persists(pool: asyncpg.Pool) -> None:
     tenant_id, account_id = await _setup_account(pool)
     cash = FakeCashSource()
     cash.seed(account_id, Decimal("1000"))
@@ -200,7 +205,7 @@ async def test_first_day_has_zero_opening_and_persists(pool):
     assert stored.source_hash == result.source_hash
 
 
-async def test_second_day_chains_off_first_days_closing(pool):
+async def test_second_day_chains_off_first_days_closing(pool: asyncpg.Pool) -> None:
     tenant_id, account_id = await _setup_account(pool)
     cash = FakeCashSource()
     cash.seed(account_id, Decimal("1000"))
@@ -234,7 +239,7 @@ async def test_second_day_chains_off_first_days_closing(pool):
     assert day2.closing_nav == Decimal("1030")
 
 
-async def test_rerun_same_day_is_idempotent_no_duplicate_row(pool):
+async def test_rerun_same_day_is_idempotent_no_duplicate_row(pool: asyncpg.Pool) -> None:
     tenant_id, account_id = await _setup_account(pool)
     cash = FakeCashSource()
     cash.seed(account_id, Decimal("500"))
@@ -262,7 +267,9 @@ async def test_rerun_same_day_is_idempotent_no_duplicate_row(pool):
     assert count == 1
 
 
-async def test_chain_break_when_rollforward_does_not_reconcile_is_rejected(pool):
+async def test_chain_break_when_rollforward_does_not_reconcile_is_rejected(
+    pool: asyncpg.Pool,
+) -> None:
     """DoD negative: 대차대조(cash+positions_mv=1000)와 롤포워드(realized=1
     뿐이라 0+1=1) 등식이 어긋나면 저장을 거부한다."""
     tenant_id, account_id = await _setup_account(pool)
@@ -286,7 +293,7 @@ async def test_chain_break_when_rollforward_does_not_reconcile_is_rejected(pool)
     assert stored is None, "체인 위반 시도가 행을 저장했습니다"
 
 
-async def test_stale_mark_on_open_position_rejects_nav(pool):
+async def test_stale_mark_on_open_position_rejects_nav(pool: asyncpg.Pool) -> None:
     """DoD negative: 열린 포지션의 mark_price가 None(스테일)이면 전체 NAV
     산출을 거부한다 — 추정치 대입 금지."""
     tenant_id, account_id = await _setup_account(pool)
@@ -313,7 +320,7 @@ async def test_stale_mark_on_open_position_rejects_nav(pool):
     assert stored is None
 
 
-async def test_marked_open_position_contributes_to_positions_mv(pool):
+async def test_marked_open_position_contributes_to_positions_mv(pool: asyncpg.Pool) -> None:
     tenant_id, account_id = await _setup_account(pool)
     await _open_marked_position(
         pool,
@@ -340,7 +347,7 @@ async def test_marked_open_position_contributes_to_positions_mv(pool):
     assert result.closing_nav == Decimal("250")  # cash(50) + mv(200)
 
 
-async def test_missing_cash_source_value_rejects_nav(pool):
+async def test_missing_cash_source_value_rejects_nav(pool: asyncpg.Pool) -> None:
     tenant_id, account_id = await _setup_account(pool)
     nav_repo = PostgresNavRepository(pool)
 
@@ -374,14 +381,16 @@ class _FlakyPool:
         self._error = error
         self._count = 0
 
-    def acquire(self):  # noqa: ANN201 -- returns whatever asyncpg.Pool.acquire() returns
+    def acquire(self) -> asyncpg.pool.PoolAcquireContext:
         self._count += 1
         if self._count == self._fail_at:
             raise self._error
         return self._pool.acquire()
 
 
-async def test_pool_connection_lost_before_write_propagates_and_writes_nothing(pool):
+async def test_pool_connection_lost_before_write_propagates_and_writes_nothing(
+    pool: asyncpg.Pool,
+) -> None:
     tenant_id, account_id = await _setup_account(pool)
     cash = FakeCashSource()
     cash.seed(account_id, Decimal("1000"))
@@ -411,7 +420,7 @@ async def test_pool_connection_lost_before_write_propagates_and_writes_nothing(p
 # ---------- 동시성(asyncio.gather) — 같은 (account_id, nav_date)에 실제 DB 경합 ----------
 
 
-async def test_concurrent_same_day_retries_converge_to_single_row(pool):
+async def test_concurrent_same_day_retries_converge_to_single_row(pool: asyncpg.Pool) -> None:
     """같은 커맨드(같은 source_hash)를 진짜 동시 커넥션으로 여러 번 실행해도
     `pos_nav_daily`에는 한 행만 남는다 — 순차 재실행 멱등(위 테스트)과 달리
     실제 DB 레벨 경합에서도 멱등이 유지되는지를 증명한다."""
@@ -442,7 +451,9 @@ async def test_concurrent_same_day_retries_converge_to_single_row(pool):
     assert count == 1
 
 
-async def test_concurrent_different_valid_computations_one_wins_one_rejected(pool):
+async def test_concurrent_different_valid_computations_one_wins_one_rejected(
+    pool: asyncpg.Pool,
+) -> None:
     """서로 다른(각자 self-consistent한) 두 계산이 같은 날짜를 놓고 진짜
     동시 커넥션으로 경합하면, 정확히 하나만 저장되고 나머지는 어댑터의
     `source_hash` 불일치 경로(`AdapterNavChainBrokenError`)로 거부된다 —
@@ -529,7 +540,7 @@ _MAX_SEQUENTIAL_ROUND_TRIPS = 3  # list_open + nav_repo.get(prev) + nav_repo.ins
 
 
 @pytest.mark.perf
-async def test_compute_daily_nav_sequential_round_trips_and_latency(pool):
+async def test_compute_daily_nav_sequential_round_trips_and_latency(pool: asyncpg.Pool) -> None:
     """수치 성능 단언(D3) — `compute_daily_nav` 1회가 쓰는 순차 DB 왕복 수를
     직접 세어 구조 회귀를 막는다. 절대 지연은 실행환경(네트워크/디스크)에
     선형 비례해 흔들리므로(task-822/1059 decision과 동일 이유) 게이트로 쓰지
@@ -648,6 +659,7 @@ def test_pytest_gate_turns_red_when_verify_chain_call_is_removed(tmp_path: Path)
     green에서 red로 뒤집혀야 한다 — 이 negative test가 실제로 그 회귀를
     잡는다는 증명(I-10)."""
     module = importlib.import_module("src.foundation.positions.application.compute_daily_nav")
+    assert module.__file__ is not None
     source = Path(module.__file__).read_text(encoding="utf-8")
     assert source.count(_VERIFY_CHAIN_GUARD) == 1
 
