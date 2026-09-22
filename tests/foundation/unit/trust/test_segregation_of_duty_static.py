@@ -10,8 +10,9 @@ ADR-2026-09-06-G §9: "'작성자≠승인자'가 기능마다 따로 구현된�
    (있으면 인라인 재발명 — 이 모듈을 거치도록 고쳐야 한다).
 2. 실존하는 세 호출처(`core/approval/service.py`의 DUAL 2차 서명 검사,
    `mandates/application/activate_revision.py`의 CM-5 작성자≠승인자,
-   `core/security/break_glass.py`의 PLT-35 자기승인 방지)가 모두 이 모듈을
-   실제로 import한다.
+   `api/routers/admin_break_glass.py`의 PLT-35 자기승인 방지 — RATCHET-2
+   core-no-io로 인해 task-5311부터 `core/security/break_glass.py`가 아니라
+   이 composition root가 import한다)가 모두 이 모듈을 실제로 import한다.
 3. 게이트 적색 재현(DEEPEN task-3192): `core/security/break_glass.py`는
    2026-09-16 이전에는 이 primitive를 거치지 않고
    `existing["requester_id"] == approver_id`처럼 dict-subscript로 감싼
@@ -64,7 +65,7 @@ _REINVENTION_PATTERN = re.compile(
 _KNOWN_CALL_SITES = (
     "core/approval/service.py",
     "foundation/mandates/application/activate_revision.py",
-    "core/security/break_glass.py",
+    "api/routers/admin_break_glass.py",
 )
 
 

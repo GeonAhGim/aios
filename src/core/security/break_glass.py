@@ -32,9 +32,9 @@ from src.core.db.conditional_write import ConcurrencyConflictError, conditional_
 from src.core.logging.audit_log import record_audit_log
 from src.core.observability.metric_names import SECURITY_BREAK_GLASS_COUNT_TOTAL
 from src.core.observability.metrics import metrics
-from src.foundation.trust.domain.rules.segregation_of_duty import (
+from src.core.security.segregation_of_duty_port import (
+    SegregationOfDutyChecker,
     SegregationOfDutyViolation,
-    assert_actor_not_counterparty,
 )
 from src.services.auth.tokens import AuthLevel
 
@@ -156,9 +156,18 @@ async def approve_grant(
     grant_id: UUID,
     approver_id: UUID,
     approver_auth_level: AuthLevel,
+    check_segregation_of_duty: SegregationOfDutyChecker,
 ) -> BreakGlassGrant:
     """REQUESTED -> APPROVED. The approver must differ from the requester
-    (code pre-check + DB CHECK, defense in depth) and must be MFA_VERIFIED."""
+    (code pre-check + DB CHECK, defense in depth) and must be MFA_VERIFIED.
+
+    `check_segregation_of_duty` is injected (not imported directly) because
+    `src/core` cannot import `src/foundation` (RATCHET-2 core-no-io) — the
+    caller (`src/api/routers/admin_break_glass.py`, the composition root)
+    passes `foundation.trust.domain.rules.segregation_of_duty.
+    assert_actor_not_counterparty`, the PLT-43 single definition of this
+    invariant.
+    """
     if approver_auth_level != "MFA_VERIFIED":
         raise BreakGlassMfaRequiredError(
             f"approver_id={approver_id}: break-glass 승인은 MFA 재확인이 필요합니다."
@@ -170,7 +179,7 @@ async def approve_grant(
     if existing is None:
         raise BreakGlassInvalidStateError(f"grant_id={grant_id}: 존재하지 않습니다.")
     try:
-        assert_actor_not_counterparty(
+        check_segregation_of_duty(
             approver_id, existing["requester_id"], action="break_glass.approve_grant"
         )
     except SegregationOfDutyViolation as exc:

@@ -35,6 +35,7 @@ from src.core.security.break_glass import (
     BreakGlassMfaRequiredError,
     BreakGlassSelfApprovalError,
 )
+from src.foundation.trust.domain.rules.segregation_of_duty import assert_actor_not_counterparty
 from tests.integration.conftest import create_test_user
 
 
@@ -121,7 +122,11 @@ async def test_request_approve_consume_happy_path(pool, spy_metrics):
         assert grant.state == "REQUESTED"
 
         approved = await break_glass.approve_grant(
-            conn, grant_id=grant.id, approver_id=approver_id, approver_auth_level="MFA_VERIFIED"
+            conn,
+            grant_id=grant.id,
+            approver_id=approver_id,
+            approver_auth_level="MFA_VERIFIED",
+            check_segregation_of_duty=assert_actor_not_counterparty,
         )
         assert approved.state == "APPROVED"
         assert approved.approver_id == approver_id
@@ -147,6 +152,7 @@ async def test_self_approval_rejected_by_app_guard(pool):
                 grant_id=grant.id,
                 approver_id=requester_id,
                 approver_auth_level="MFA_VERIFIED",
+                check_segregation_of_duty=assert_actor_not_counterparty,
             )
         # 거부 후에도 REQUESTED 상태 그대로(승인 처리가 일부라도 진행되지 않음).
         row = await conn.fetchrow(
@@ -214,7 +220,11 @@ async def test_double_consume_rejected(pool):
     async with pool.acquire() as conn:
         grant = await _request(pool, conn, requester_id)
         await break_glass.approve_grant(
-            conn, grant_id=grant.id, approver_id=approver_id, approver_auth_level="MFA_VERIFIED"
+            conn,
+            grant_id=grant.id,
+            approver_id=approver_id,
+            approver_auth_level="MFA_VERIFIED",
+            check_segregation_of_duty=assert_actor_not_counterparty,
         )
         await break_glass.consume(conn, grant_id=grant.id, admin_id=admin_id)
         with pytest.raises(BreakGlassInvalidStateError, match="이미 소비"):
@@ -228,7 +238,11 @@ async def test_expired_grant_consume_rejected(pool):
     async with pool.acquire() as conn:
         grant = await _request(pool, conn, requester_id, ttl_minutes=1)
         await break_glass.approve_grant(
-            conn, grant_id=grant.id, approver_id=approver_id, approver_auth_level="MFA_VERIFIED"
+            conn,
+            grant_id=grant.id,
+            approver_id=approver_id,
+            approver_auth_level="MFA_VERIFIED",
+            check_segregation_of_duty=assert_actor_not_counterparty,
         )
         # 실제 60초를 기다리지 않고 expires_at을 과거로 되돌려 만료를 재현한다
         # (실패 주입 -- 시계열 조건을 직접 조작).
@@ -279,6 +293,7 @@ async def test_audit_failure_rolls_back_approval(pool, monkeypatch):
                 grant_id=grant.id,
                 approver_id=approver_id,
                 approver_auth_level="MFA_VERIFIED",
+                check_segregation_of_duty=assert_actor_not_counterparty,
             )
 
     async with pool.acquire() as conn:
@@ -310,6 +325,7 @@ async def test_consume_latency_budget(pool):
                 grant_id=grant.id,
                 approver_id=approver_id,
                 approver_auth_level="MFA_VERIFIED",
+                check_segregation_of_duty=assert_actor_not_counterparty,
             )
             started = time.perf_counter()
             await break_glass.consume(conn, grant_id=grant.id, admin_id=admin_id)
@@ -331,7 +347,11 @@ async def test_require_break_glass_consumes_grant_on_matching_scope(pool):
     async with pool.acquire() as conn:
         grant = await _request(pool, conn, requester_id, scope="credential_revoke")
         await break_glass.approve_grant(
-            conn, grant_id=grant.id, approver_id=approver_id, approver_auth_level="MFA_VERIFIED"
+            conn,
+            grant_id=grant.id,
+            approver_id=approver_id,
+            approver_auth_level="MFA_VERIFIED",
+            check_segregation_of_duty=assert_actor_not_counterparty,
         )
 
     dependency = require_break_glass("credential_revoke")
@@ -347,7 +367,11 @@ async def test_require_break_glass_scope_mismatch_rejected(pool):
     async with pool.acquire() as conn:
         grant = await _request(pool, conn, requester_id, scope="tenant_read")
         await break_glass.approve_grant(
-            conn, grant_id=grant.id, approver_id=approver_id, approver_auth_level="MFA_VERIFIED"
+            conn,
+            grant_id=grant.id,
+            approver_id=approver_id,
+            approver_auth_level="MFA_VERIFIED",
+            check_segregation_of_duty=assert_actor_not_counterparty,
         )
 
     dependency = require_break_glass("credential_revoke")

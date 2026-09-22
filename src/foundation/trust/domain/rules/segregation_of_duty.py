@@ -17,31 +17,34 @@ DUAL-mode second-signature check in `core/approval/service.py`, CM-5's
 author != approver enforcement in `mandates/application/
 activate_revision.py` (the proposer identity it compares against comes
 from the existing audit trail — see that module's docstring), and PLT-35's
-break-glass approval pre-check in `core/security/break_glass.py` (the DB
-CHECK constraint on `break_glass_grant` remains the second line of
-defense — see that module's docstring). The static scan in
-`tests/foundation/unit/trust/test_segregation_of_duty_static.py` asserts
-"no code outside this primitive directly compares actor/counterparty
-equality" and that all three call sites import this module — if any of
+break-glass approval pre-check (the DB CHECK constraint on
+`break_glass_grant` remains the second line of defense). The static scan
+in `tests/foundation/unit/trust/test_segregation_of_duty_static.py`
+asserts "no code outside this primitive directly compares
+actor/counterparty equality" and that all three call sites import this
+module (directly, or — for `core/security/break_glass.py`, see below —
+via the composition root that injects this function into it) — if any of
 them is later rewritten to reinvent the comparison inline, this static
 check catches it immediately.
+
+RATCHET-2 (`core-no-io`, ADR-2026-09-10-C) forbids `src/core` from
+importing `src/foundation`, so `core/security/break_glass.py` can no
+longer import this module directly (task-5311) — it takes the checker as
+an injected `SegregationOfDutyChecker` parameter instead (the Protocol +
+`SegregationOfDutyViolation` are now owned by
+`src.core.security.segregation_of_duty_port`, which this module implements
+and re-exports for the two call sites that still import it directly).
+`src/api/routers/admin_break_glass.py` is the composition root that wires
+`assert_actor_not_counterparty` from here into `break_glass.approve_grant`.
 """
 
 from __future__ import annotations
 
 from collections.abc import Hashable
 
+from src.core.security.segregation_of_duty_port import SegregationOfDutyViolation
 
-class SegregationOfDutyViolation(Exception):
-    """The same subject tried to act as both the actor and counterparty of
-    an action."""
-
-    def __init__(self, actor_id: Hashable, action: str) -> None:
-        super().__init__(
-            f"{action}: actor({actor_id!r})는 자기 자신의 counterparty가 될 수 없습니다."
-        )
-        self.actor_id = actor_id
-        self.action = action
+__all__ = ["SegregationOfDutyViolation", "assert_actor_not_counterparty"]
 
 
 def assert_actor_not_counterparty(
@@ -58,6 +61,3 @@ def assert_actor_not_counterparty(
     """
     if counterparty_id is not None and actor_id == counterparty_id:
         raise SegregationOfDutyViolation(actor_id, action)
-
-
-__all__ = ["SegregationOfDutyViolation", "assert_actor_not_counterparty"]

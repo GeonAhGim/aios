@@ -42,6 +42,9 @@ from src.foundation.risk_gate.application.recovery_gate import (
 )
 from src.foundation.risk_gate.domain.models import SafetyScope
 from src.foundation.risk_gate.ports.repository import RiskGateRepository
+from src.foundation.trust.domain.rules.segregation_of_duty import (
+    assert_actor_not_counterparty,
+)
 from src.main import app
 from src.services.auth_service import User
 from src.services.risk_decision_recorder import RiskDecisionRecorder
@@ -630,6 +633,7 @@ async def test_router_recovery_denied_end_to_end_returns_403_rsk007_envelope(
             grant_id=grant.id,
             approver_id=approver_id,
             approver_auth_level="MFA_VERIFIED",
+            check_segregation_of_duty=assert_actor_not_counterparty,
         )
 
     app.dependency_overrides[get_current_admin] = lambda: fake_admin

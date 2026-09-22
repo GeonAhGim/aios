@@ -28,6 +28,9 @@ from src.api.deps import AuthenticatedUser, get_pool
 from src.api.schemas.admin_break_glass import RequestBreakGlassGrantRequest
 from src.core.security import break_glass
 from src.core.security.break_glass import BreakGlassGrant
+from src.foundation.trust.domain.rules.segregation_of_duty import (
+    assert_actor_not_counterparty,
+)
 
 router = APIRouter(prefix="/admin/break-glass", tags=["admin:break-glass"])
 
@@ -62,5 +65,6 @@ async def post_approve_grant(
             grant_id=grant_id,
             approver_id=admin.user_id,
             approver_auth_level=admin.auth_level,
+            check_segregation_of_duty=assert_actor_not_counterparty,
         )
     return ok(grant)
