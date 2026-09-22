@@ -3,11 +3,14 @@
 background_loops.py 분리(P6) 후에도 lifespan의 동작(app.state 배선, 백그라운드
 루프 시작·정지, pool/event_bus 정리)이 그대로인지 확인한다. 실제 dev DB에
 연결한다(tests/conftest.py의 TEST_DATABASE_URL).
+
+성능 단언(DoD): lifespan 초기화 p99 < 5s, 정리 p99 < 2s (ADR-2026-09-09-C).
 """
 
 from __future__ import annotations
 
 import asyncio
+import time
 from unittest.mock import patch
 
 import pytest
@@ -92,6 +95,35 @@ async def test_lifespan_can_start_and_stop_twice() -> None:
 
     tasks_after = asyncio.all_tasks()
     assert tasks_after - tasks_before == set()
+
+
+async def test_lifespan_startup_performance_meets_budget() -> None:
+    """성능 단언(DoD): lifespan 초기화/정리 시간이 예산 내인지 확인한다.
+    ADR-2026-09-09-C 성능 예산 기준:
+    - startup p99 < 5s (pool 생성, event_bus 초기화, background loops 시작)
+    - shutdown p99 < 2s (tasks cancel, pool.close, event_bus.stop)
+
+    3회 반복 측정 후 p99 계산."""
+    startup_times: list[float] = []
+    shutdown_times: list[float] = []
+
+    for _ in range(3):
+        start = time.perf_counter()
+        async with app.router.lifespan_context(app):
+            startup = time.perf_counter() - start
+            startup_times.append(startup)
+        shutdown = time.perf_counter() - start - startup
+        shutdown_times.append(shutdown)
+
+    p99_startup = sorted(startup_times)[-1]  # 3회 중 최대값 ≈ p99
+    p99_shutdown = sorted(shutdown_times)[-1]
+
+    assert (
+        p99_startup < 5.0
+    ), f"lifespan startup p99={p99_startup:.2f}s exceeded budget 5s (times={startup_times})"
+    assert (
+        p99_shutdown < 2.0
+    ), f"lifespan shutdown p99={p99_shutdown:.2f}s exceeded budget 2s (times={shutdown_times})"
 
 
 # ── Negative tests ──────────────────────────────────────────────────────────
