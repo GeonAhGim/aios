@@ -54,7 +54,15 @@ def _asyncpg_dsn() -> str:
 
 @pytest.fixture
 async def pool():
-    p = await asyncpg.create_pool(_asyncpg_dsn(), min_size=1, max_size=4)
+    # min_size=4(동시 워커 수만큼 사전 예열, task-4981) — min_size=1이면 동시
+    # 워커 중 1개만 미리 연결돼 있고 나머지는 asyncio.gather 시작 시점에
+    # 새로 커넥션을 맺는다. 그 연결 수립 지연이 의도된 0.05s 레이스 창보다
+    # 커서 "loser"가 이미 커밋된 최신 상태를 읽어버려 red-line 테스트
+    # (test_broken_claim_atomicity_is_caught_by_exactly_once_gate_real_db,
+    # test_missing_row_lock_lets_conflicting_transition_write_orphan_event)가
+    # 재현하려는 레이스가 사라진다 — 코드 회귀가 아니라 이 픽스처의 콜드
+    # 커넥션 지연이 게이트를 무력화시키는 결함이었다.
+    p = await asyncpg.create_pool(_asyncpg_dsn(), min_size=4, max_size=4)
     yield p
     await p.close()
 
