@@ -1,4 +1,7 @@
-"""PostgresCandleStore CHECK 제약·빈 범위 조회 — test_candle_store.py에서 분할(CTO 2026-09-23, loc_over_500 래칫)."""
+"""PostgresCandleStore CHECK 제약·빈 범위 조회 — test_candle_store.py에서 분할.
+
+CTO 2026-09-23, loc_over_500 래칫(ddb6ebea 504줄). 헬퍼는 candle_store_support.py.
+"""
 
 from __future__ import annotations
 

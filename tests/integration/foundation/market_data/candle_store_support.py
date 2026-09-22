@@ -1,4 +1,8 @@
-"""test_candle_store 공용 픽스처·헬퍼 — CTO 2026-09-23 분할(loc_over_500 래칫, ddb6ebea가 504줄로 초과)."""
+"""test_candle_store 공용 헬퍼 — CTO 2026-09-23 분할.
+
+loc_over_500 래칫: ddb6ebea가 test_candle_store.py를 504줄로 넘겨 CHECK 제약 테스트와
+헬퍼를 분리했다(픽스처 candle_store/batch_repo는 conftest.py).
+"""
 
 from __future__ import annotations
 
