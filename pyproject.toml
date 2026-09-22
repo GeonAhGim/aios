@@ -32,6 +32,13 @@ dependencies = [
     # AI-20: local model training (src/foundation/ml/adapters/local_trainer.py).
     # docs/design/AI_DEPENDENCIES_EVAL.md §4 verdict: MIT, no conditions attached.
     "lightgbm>=4.7,<5.0",
+    # IND-11 (task-4035, ADR-2026-09-09-A): pandas-ta bridge target package,
+    # swapped from the spec's original `pandas-ta` (Python>=3.12, repo 404,
+    # numba pin -- INDICATOR_OSS_EVAL.md §6) to this MIT fork. Bare
+    # distribution only -- the optional test-oracle extra pulls in tulipy
+    # (LGPL-3.0) and must never be installed (INDICATOR_OSS_EVAL.md §5,
+    # NOTICE-AIOS.md). Do not add extras to this requirement string.
+    "pandas-ta-classic>=0.6.52",
 ]
 
 [project.optional-dependencies]
