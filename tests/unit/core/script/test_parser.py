@@ -27,7 +27,7 @@ import time
 
 import pytest
 
-from src.core.script.grammar import parser as parser_module
+from src.core.script.grammar import parser_expr as parser_expr_module
 from src.core.script.grammar.ast import (
     BinaryExpr,
     CallExpr,
@@ -450,7 +450,9 @@ def test_namespace_whitelist_guard_prevents_script_syntax_regression(
     레드가 된다."""
     source = "let x = evil.exec(1)"
 
-    monkeypatch.setattr(parser_module, "_NAMESPACES", frozenset({"ta", "math", "series", "evil"}))
+    monkeypatch.setattr(
+        parser_expr_module, "_NAMESPACES", frozenset({"ta", "math", "series", "evil"})
+    )
     regressed = parse(source)
     decl = regressed.decls[0]
     assert isinstance(decl, LetDecl)
