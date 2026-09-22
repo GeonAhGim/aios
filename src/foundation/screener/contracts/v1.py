@@ -134,3 +134,53 @@ class SavedScreenerView(BaseModel, frozen=True):
     created_at: datetime
     updated_at: datetime
     schema_version: str = SCHEMA_VERSION
+
+
+# ---- UX-7: share (MP-3 immutable-version rule, applied locally) ----
+
+
+class SharedScreenerView(BaseModel, frozen=True):
+    """One immutable version of a shared screener (`shared_screeners`).
+
+    `marketplace/domain/versioning.py` (MP-3) is still `hold`
+    (L4_analytics_authoring_backtest_marketplace_v1.0.md §9.7), so
+    `application/share_screen.py` applies its immutable-version
+    invariant directly here instead of importing that module: each share
+    INSERTs the next `version` for `screener_id`, existing rows are never
+    UPDATEd."""
+
+    id: UUID
+    screener_id: UUID
+    tenant_id: UUID
+    name: str
+    definition: ScreenDefinition
+    version: int
+    created_at: datetime
+    schema_version: str = SCHEMA_VERSION
+
+
+# ---- UX-7: alert_on_screen (conditional alert on a saved screen's match count) ----
+
+MAX_ACTIVE_SCREEN_ALERTS_PER_TENANT = 50
+
+ScreenAlertOperator = Literal["gte", "gt", "lte", "lt", "eq"]
+ScreenAlertStatus = Literal["ACTIVE", "TRIGGERED", "CANCELLED"]
+
+
+class ScreenAlertView(BaseModel, frozen=True):
+    """Fires when a saved screen's matched-row count (`ScreenRunPage.total`,
+    `application/run_screen.py`) satisfies `operator threshold` — mirrors
+    `price_alerts`(FD-14, `src/services/alert_service.py`)'s
+    threshold/status shape, but the compared quantity is a match count
+    instead of a single indicator value."""
+
+    id: UUID
+    tenant_id: UUID
+    screener_id: UUID
+    operator: ScreenAlertOperator
+    threshold: int
+    status: ScreenAlertStatus
+    created_at: datetime
+    triggered_at: datetime | None = None
+    triggered_count: int | None = None
+    schema_version: str = SCHEMA_VERSION

@@ -10,7 +10,12 @@ from __future__ import annotations
 from typing import Protocol
 from uuid import UUID
 
-from src.foundation.screener.contracts.v1 import SavedScreenerView, ScreenDefinition
+from src.foundation.screener.contracts.v1 import (
+    SavedScreenerView,
+    ScreenAlertView,
+    ScreenDefinition,
+    SharedScreenerView,
+)
 
 
 class SavedScreenerLimitError(Exception):
@@ -19,6 +24,10 @@ class SavedScreenerLimitError(Exception):
 
 class SavedScreenerNameConflictError(Exception):
     """A saved screener with this name already exists for the tenant."""
+
+
+class ScreenAlertLimitError(Exception):
+    """Per-tenant active screen-alert cap (`MAX_ACTIVE_SCREEN_ALERTS_PER_TENANT`) exceeded."""
 
 
 class SavedScreenerRepository(Protocol):
@@ -44,4 +53,55 @@ class SavedScreenerRepository(Protocol):
         """`True` if a row was deleted. A cross-tenant delete attempt
         silently returns `False` (indistinguishable from "no such row" —
         existence is never revealed)."""
+        ...
+
+
+class SharedScreenerRepository(Protocol):
+    """Storage port for `shared_screeners` — cross-tenant readable by design
+    (that is the point of "share"), writes restricted to the owning tenant."""
+
+    async def create_version(
+        self, *, tenant_id: UUID, screener_id: UUID, name: str, definition: ScreenDefinition
+    ) -> SharedScreenerView:
+        """Insert the next immutable version for `screener_id` (prior max + 1,
+        starting at 1). Never mutates an existing row — sharing again after
+        editing the source screener creates a new version, past versions
+        stay frozen."""
+        ...
+
+    async def get_latest(self, screener_id: UUID) -> SharedScreenerView | None:
+        """`None` only when `screener_id` was never shared."""
+        ...
+
+    async def list_versions(self, screener_id: UUID) -> tuple[SharedScreenerView, ...]: ...
+
+
+class ScreenAlertRepository(Protocol):
+    async def create(
+        self, *, tenant_id: UUID, screener_id: UUID, operator: str, threshold: int
+    ) -> ScreenAlertView:
+        """Raises `ScreenAlertLimitError` if the tenant is already at
+        `MAX_ACTIVE_SCREEN_ALERTS_PER_TENANT` ACTIVE alerts."""
+        ...
+
+    async def list_for_tenant(self, tenant_id: UUID) -> tuple[ScreenAlertView, ...]: ...
+
+    async def get(self, tenant_id: UUID, alert_id: UUID) -> ScreenAlertView | None:
+        """Cross-tenant reads return `None`, same convention as
+        `SavedScreenerRepository.get`."""
+        ...
+
+    async def cancel(self, tenant_id: UUID, alert_id: UUID) -> bool:
+        """`True` only if an ACTIVE row owned by `tenant_id` was cancelled."""
+        ...
+
+    async def mark_triggered(self, alert_id: UUID, *, matched_count: int) -> ScreenAlertView | None:
+        """Idempotent: only an ACTIVE row transitions to TRIGGERED — calling
+        this again on an already-TRIGGERED/CANCELLED row is a no-op (`None`)."""
+        ...
+
+    async def list_active(self) -> tuple[ScreenAlertView, ...]:
+        """All ACTIVE alerts across every tenant — the evaluation loop's
+        input, same convention as `AlertService.evaluate_all_active`
+        (`src/services/alert_service.py`)."""
         ...
