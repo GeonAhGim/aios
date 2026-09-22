@@ -306,7 +306,7 @@ def test_metric_token_with_uppercase_is_not_matched() -> None:
 
 
 def test_metric_token_with_digits_at_end() -> None:
-    """음수 검증: aios_로 시작하지만 숫자로 끝나는 토큰은 매칭되지 않는다."""
+    """음수 검증: aios_로 시작하고 숫자로 끝나는 토큰도 허용 문자집합[a-z0-9_] 내에 들어와 매칭된다."""
     tokens = _metric_tokens("aios_metric_123 > 0")
     assert "aios_metric_123" in tokens
 
