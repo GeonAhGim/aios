@@ -197,6 +197,11 @@ const UNREGISTERED_ROUTE_WHITELIST: Readonly<Record<string, string>> = {
   "/v1/foundation/personal/kill": "퍼스널 모드 킬스위치 UI가 없다",
   "/v1/foundation/personal/promote": "퍼스널 모드 승격 액션 UI가 없다",
   "/v1/foundation/personal/promotion-checklist": "퍼스널 모드 승격 체크리스트 화면이 없다",
+  // task-4968: contracts/openapi/v1.json 재생성으로 새로 나타난 2건 — apps/web/src와
+  // packages/api-client/src/clients/*.ts를 grep으로 대조해 화면이 호출하지 않음을 확인했다.
+  "/v1/foundation/market-data/options/chain": "옵션 체인 화면이 없다(82eeff67 백엔드 경계만 추가)",
+  "/v1/foundation/research/items": "리서치 아이템 목록 화면이 없다(9359c634 RD-8 라우터만 추가)",
+  "/v1/foundation/research/items/{item_id}": "리서치 아이템 상세 화면이 없다(9359c634 RD-8 라우터만 추가)",
 };
 
 function nonGhostRouteEntries(): Array<[ApiRouteName, ApiRouteDefinition]> {

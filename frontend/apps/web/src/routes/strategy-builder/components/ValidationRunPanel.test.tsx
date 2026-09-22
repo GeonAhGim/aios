@@ -30,6 +30,7 @@ const PASS_RESULT: ValidationResultView = {
   obligations: [],
   result_hash: "hash-1",
   created_at: "2026-09-08T00:00:00Z",
+  evidence_refs: [],
 };
 
 function renderPanel() {

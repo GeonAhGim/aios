@@ -14,6 +14,7 @@ const RESULT = {
   obligations: [],
   result_hash: "hash-1",
   created_at: "2026-09-08T00:00:00Z",
+  evidence_refs: [],
   schema_version: "v1",
 };
 

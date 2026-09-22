@@ -331,13 +331,20 @@ describe("idempotencyScan — 실패 주입(파일시스템 읽기 실패는 조
 // [QA task-2730 DEPTH_PLT] 수치 성능 단언: 이 가드는 CI의 모든 리프 커밋마다 돈다
 // (task-1333 DoD). 정규식 스캔이 어떤 clients/*.ts 추가로든 조용히 비선형으로
 // 느려지면 로컬/CI 피드백 루프가 저하되는데, 지금까지는 그걸 잡는 단언이 없었다.
+// task-4968: `npm run test --workspaces`(local_ci.py)로 5개 워크스페이스가 같은
+// 머신에서 vitest worker thread를 동시에 띄우면 이 파일 하나만 격리 실행할 때(약
+// 30ms)와 달리 TypeScript 컴파일러(ts.createSourceFile)의 JIT/GC가 CPU 경합으로
+// 300~550ms까지 늘어나는 게 재현됐다(frontend를 건드리지 않은 커밋 3개 연속 rc=1,
+// task-4959/4968) — 알고리즘 회귀가 아니라 동시 실행 환경 잡음이다. 진짜 비선형
+// 회귀(수 초 단위)는 여전히 잡히도록 예산을 넉넉히 올린다(1000ms은 같은 파일군의
+// marketData.test.ts/positions.test.ts/scripts.test.ts가 이미 쓰는 값과 동일).
 describe("idempotencyScan — 성능 단언(전수 스캔 소요 시간)", () => {
-  it("clients/*.ts 전수 스캔(findCallSites+scanCallSites)이 200ms 이내에 끝난다", () => {
+  it("clients/*.ts 전수 스캔(findCallSites+scanCallSites)이 1000ms 이내에 끝난다", () => {
     const files = listClientSourceFiles();
     const start = performance.now();
     scanCallSites(files, API_ROUTES);
     const elapsedMs = performance.now() - start;
-    expect(elapsedMs).toBeLessThan(200);
+    expect(elapsedMs).toBeLessThan(1000);
   });
 });
 
