@@ -88,7 +88,9 @@ def write_recovery_config(data_dir: Path, archive_dir: Path) -> None:
     (data_dir / "recovery.signal").touch()
     # backslash -> forward slash (GUC escape corruption 방지)
     safe_archive = _escape_path_for_pg_conf(archive_dir)
-    restore_command = f'cp "{safe_archive}/%f" "%p"'
+    # Windows(cp 명령어 미존재)는 copy, Unix는 cp 사용
+    restore_cmd = "copy" if os.name == "nt" else "cp"
+    restore_command = f'{restore_cmd} "{safe_archive}/%f" "%p"'
     conf = data_dir / "postgresql.auto.conf"
     existing = conf.read_text(encoding="utf-8") if conf.exists() else ""
     conf.write_text(existing + f"\nrestore_command = '{restore_command}'\n", encoding="utf-8")

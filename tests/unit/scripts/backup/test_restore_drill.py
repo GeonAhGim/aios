@@ -8,6 +8,7 @@ DoD: 실패 주입 시(각 단계별) ok=False가 나오고, 성공 경로에서
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 
 import pytest
@@ -337,6 +338,12 @@ def test_with_port_works_without_userinfo():
 
 
 def test_write_recovery_config_creates_signal_and_restore_command(tmp_path: Path):
+    """restore_command가 recovery.signal과 함께 postgresql.auto.conf에 기록됨을 검증한다.
+
+    Windows(os.name == "nt")일 때 copy, Unix일 때 cp 명령이 선택되는지 플랫폼별 케이스로
+    분리 검증한다. 전체 archive_dir 경로(str(archive_dir) → forward slash 변환)가 conf에
+    포함되고 백슬래시가 없어야 한다.
+    """
     data_dir = tmp_path / "pgdata"
     data_dir.mkdir()
     archive_dir = tmp_path / "archive"
@@ -346,9 +353,15 @@ def test_write_recovery_config_creates_signal_and_restore_command(tmp_path: Path
     assert (data_dir / "recovery.signal").exists()
     conf = (data_dir / "postgresql.auto.conf").read_text(encoding="utf-8")
     assert "restore_command" in conf
-    # forward slash로 저장됨 (Windows backslash GUC escape corruption 방지)
-    assert archive_dir.name in conf
+    # 전체 archive_dir 경로(forward slash 변환 후)가 conf에 포함됨
+    expected_path = str(archive_dir).replace("\\", "/")
+    assert expected_path in conf, f"전체 경로 '{expected_path}'이 conf에 없음"
     assert "\\" not in conf
+    # 플랫폼별 명령어 검증: Windows→copy, Unix→cp
+    if os.name == "nt":
+        assert 'copy' in conf, "Windows에서 restore_command는 copy 명령어야 한다"
+    else:
+        assert 'cp' in conf, "Unix에서 restore_command는 cp 명령어야 한다"
 
 
 def test_wait_for_recovery_returns_none_when_recovery_complete():
@@ -415,7 +428,7 @@ def test_write_report_does_not_raise_when_one_path_unwritable(tmp_path: Path):
 
 def test_write_recovery_config_escapes_windows_backslashes(tmp_path: Path):
     """Windows 경로에 백슬래시가 들어와도 restore_command에 control character(백스페이스 등)가
-    섞이지 않고 경로 세그먼트가 그대로 보존됨을 확인한다.
+    섞이지 않고 전체 경로가 그대로 보존됨을 확인한다.
 
     Regression: task-4073 -- PostgreSQL GUC 파서가 백슬래시 시퀀스를 C-스타일 escape로
     해석하는 문제(\\b -> backspace 0x08)로 WAL 복원이 0건 반복되던 원인 수정.
@@ -438,9 +451,18 @@ def test_write_recovery_config_escapes_windows_backslashes(tmp_path: Path):
                 f"restore_command에 control character U+{code:04X} 발견 "
                 f"(위치 {i}): 경로 corruption 원인"
             )
-    # forward slash가 사용되었는지 확인
-    assert "cp" in conf_content  # Windows copy 대신 cp 사용
+    # 플랫폼별 조건: Windows→copy, Unix→cp
+    if os.name == "nt":
+        assert "copy" in conf_content, "Windows 경로에서 copy 명령어야 함"
+    else:
+        assert "cp" in conf_content, "Unix 환경에서는 cp 명령어야 함"
     assert "wal_archive" in conf_content
+    # 전체 archive_dir 경로(forward slash 변환됨)가 conf에 포함되는지 명시적 검증
+    expected_path = str(archive_dir).replace("\\", "/")
+    assert expected_path in conf_content, (
+        f"전체 경로 '{expected_path}'이 conf에 없음 — "
+        "restore_command가 잘못된 경로로 WAL을 찾는다"
+    )
     # 백슬래시가 남아있지 않아야 함
     assert "\\" not in conf_content or '""' in conf_content  # double-quote 내부면 허용
 
