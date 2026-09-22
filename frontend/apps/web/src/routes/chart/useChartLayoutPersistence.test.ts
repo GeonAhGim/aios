@@ -333,7 +333,16 @@ describe("gate red reproduction: 충돌 시 로컬 편집을 서버로 덮어쓰
     return pendingName;
   }
 
-  it("red: 강제 덮어쓰기 방식은 충돌 시 사용자가 방금 입력한 이름을 조용히 버린다", async () => {
+  // 두 구현(실제 훅 vs. 강제 덮어쓰기 mutant)에 동일하게 적용하는 보존 계약
+  // 단언. 하드코딩된 서버 이름 값이 아니라 "충돌 후에도 로컬 편집이 남아야
+  // 한다"는 계약 자체를 검증해야 D2 게이트 적색 재현으로 인정된다 —
+  // task-3624 XREV(task-4907) 지적: mutant의 서버 이름 반환을 정답으로
+  // 단언하면 보존 계약 위반에도 통과해버린다.
+  function assertPreservesLocalName(actualName: string, pendingName: string): void {
+    expect(actualName).toBe(pendingName);
+  }
+
+  it("red: 강제 덮어쓰기 방식은 충돌 시 사용자가 방금 입력한 이름을 조용히 버려 보존 단언이 실패한다", async () => {
     const record = layoutRecord(savedModelFor(BASE_VIEW), { name: "서버 원본 이름" });
     const port = fakePort({
       updateLayout: vi.fn().mockRejectedValue(apiErrorLike(409, "STATE_CONCURRENCY_CONFLICT")),
@@ -342,7 +351,10 @@ describe("gate red reproduction: 충돌 시 로컬 편집을 서버로 덮어쓰
 
     const resultName = await legacySaveForceOverwriteOnConflict(port, "layout-1", "이름변경");
 
-    expect(resultName).toBe("서버 원본 이름"); // 사용자가 입력한 "이름변경"이 사라졌다.
+    // green 테스트와 동일한 보존 단언을 mutant 결과에 적용하면 던진다 —
+    // 즉 이 mutant가 실제 훅 자리에 들어가면 D2 게이트가 이 assertion으로
+    // 적색이 됨을 증명한다.
+    expect(() => assertPreservesLocalName(resultName, "이름변경")).toThrow();
   });
 
   it("green: 실제 훅은 충돌 시 saveStatus만 conflict로 바꾸고 사용자의 편집(이름변경)은 그대로 남긴다", async () => {
@@ -360,6 +372,7 @@ describe("gate red reproduction: 충돌 시 로컬 편집을 서버로 덮어쓰
     });
 
     expect(result.current.saveStatus).toBe("conflict");
-    expect(result.current.layoutName).toBe("이름변경");
+    // mutant에서 던졌던 것과 동일한 보존 단언이 실제 훅에서는 통과한다.
+    assertPreservesLocalName(result.current.layoutName, "이름변경");
   });
 });
