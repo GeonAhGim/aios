@@ -64,7 +64,7 @@ def _asyncpg_dsn() -> str:
 
 
 @pytest.fixture
-async def pool():
+async def pool() -> asyncpg.Pool:
     p = await asyncpg.create_pool(_asyncpg_dsn(), min_size=1, max_size=_CONCURRENT_FILLS + 5)
     yield p
     await p.close()
@@ -82,7 +82,7 @@ def _key(tenant_id: UUID) -> str:
     )
 
 
-async def _delete_pos_snapshot(pool, *, position_key: str) -> None:
+async def _delete_pos_snapshot(pool: asyncpg.Pool, *, position_key: str) -> None:
     """FA-0d(cdb114b6903f)는 pos_snapshot에 남은 행을 하나라도 보면 이후
     마이그레이션 왕복 테스트를 fail-closed로 거부한다(task-2543) - 이 행의
     portfolio_id는 합성값이라 실제 FA-4 백필로 재현할 수 없으므로,
@@ -91,7 +91,7 @@ async def _delete_pos_snapshot(pool, *, position_key: str) -> None:
         await conn.execute("DELETE FROM pos_snapshot WHERE position_key = $1", position_key)
 
 
-async def _fill_once(pool: asyncpg.Pool, *, tenant_id, account_id, position_key) -> None:
+async def _fill_once(pool: asyncpg.Pool, *, tenant_id: UUID, account_id: UUID, position_key: str) -> None:
     journal = PostgresJournalRepository(pool)
     snapshots = PostgresSnapshotRepository(pool)
     audit = PostgresAuditEventRepository(pool)
@@ -125,7 +125,7 @@ async def _fill_once(pool: asyncpg.Pool, *, tenant_id, account_id, position_key)
 # ---------------------------------------------------------------------------
 
 
-async def test_malformed_position_key_rejected(pool):
+async def test_malformed_position_key_rejected(pool: asyncpg.Pool) -> None:
     """LB-18 negative: f-string/concat로 만든 position_key -> InvalidPositionKeyError."""
     tenant_id = await create_test_tenant(pool)
     account_id = await create_pos_account(pool, tenant_id)
@@ -160,7 +160,7 @@ async def test_malformed_position_key_rejected(pool):
             )
 
 
-async def test_account_mismatch_rejected(pool):
+async def test_account_mismatch_rejected(pool: asyncpg.Pool) -> None:
     """LB-18 negative: 같은 tenant, 다른 account -> UnknownPositionError."""
     owner_id = await create_test_tenant(pool)
     owner_account_id = await create_pos_account(pool, owner_id)
@@ -202,7 +202,7 @@ async def test_account_mismatch_rejected(pool):
         await _delete_pos_snapshot(pool, position_key=position_key)
 
 
-async def test_sell_beyond_quantity_rejected(pool):
+async def test_sell_beyond_quantity_rejected(pool: asyncpg.Pool) -> None:
     """LB-18 negative: 현재 포지션 수량보다 큰 Sell -> NegativeQuantityError."""
     tenant_id = await create_test_tenant(pool)
     account_id = await create_pos_account(pool, tenant_id)
@@ -276,7 +276,7 @@ async def test_sell_beyond_quantity_rejected(pool):
 # ---------------------------------------------------------------------------
 
 
-async def test_journal_write_failure_preserves_atomicity(pool):
+async def test_journal_write_failure_preserves_atomicity(pool: asyncpg.Pool) -> None:
     """LB-18 실패주입: journal.append가 예외를 던지면 저널/스냅샷에
     부분 기록이 남아서는 안 된다 - 트랜잭션 원자성 보장."""
     tenant_id = await create_test_tenant(pool)
@@ -315,7 +315,7 @@ async def test_journal_write_failure_preserves_atomicity(pool):
         )
 
         # journal.append를 monkeypatch해서 예외 유발
-        async def _boom_append(*args, **kwargs):
+        async def _boom_append(*args: object, **kwargs: object) -> None:
             raise asyncpg.PostgresConnectionError("simulated connection loss")
 
         with patch.object(journal, "append", _boom_append):
@@ -357,7 +357,7 @@ async def test_journal_write_failure_preserves_atomicity(pool):
 # ---------------------------------------------------------------------------
 
 
-async def test_concurrent_fills_serializable(pool):
+async def test_concurrent_fills_serializable(pool: asyncpg.Pool) -> None:
     tenant_id = await create_test_tenant(pool)
     account_id = await create_pos_account(pool, tenant_id)
     position_key = _key(tenant_id)
