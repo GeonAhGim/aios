@@ -337,6 +337,7 @@ def run_drill(
                 rc, tail = run_cmd([python_bin, "scripts/replay_verify.py"], repo_root, env, 300)
                 steps["replay_verify"] = {"ok": rc == 0, "rc": rc, "tail": tail}
     finally:
+        # --- 서버 중지 (실행 중이었으면) ---
         if started_server:
             rc, tail = run_cmd(
                 [pg_ctl_bin, "stop", "-D", str(restore_data_dir), "-m", "fast"],
@@ -345,10 +346,13 @@ def run_drill(
                 60,
             )
             steps["stop_postgres"] = {"ok": rc == 0, "rc": rc, "tail": tail}
-        # 복제 슬롯 aios_drill 제거 (pg_basebackup -C -S 가 생성함)
-        # 소스 서버 DSN 으로 연결해 슬롯을 정리한다.
+
+        # --- 복제 슬롯 정리 (성공·실패 모두 실행) ---
+        # pg_basebackup -C -S aios_drill 가 생성함. 소스 서버 DSN 으로 연결.
+        drop_rc = None
+        drop_tail = None
         try:
-            run_cmd(
+            drop_rc, drop_tail = run_cmd(
                 [
                     psql_bin,
                     dsn_template,
@@ -362,7 +366,15 @@ def run_drill(
                 30,
             )
         except OSError:
-            pass  # 슬롯이 없거나 소스 서버 연결 실패 → 무시
+            pass  # 소스 서버 연결 불가 → 슬롯 정리 실패 기록만 남김
+        finally:
+            steps["drop_replication_slot"] = {
+                "ok": drop_rc is not None and drop_rc == 0,
+                "rc": drop_rc,
+                "tail": drop_tail,
+            }
+
+        # --- 임시 데이터 디렉터리 정리 (항상 실행) ---
         shutil.rmtree(restore_data_dir, ignore_errors=True)
 
     return _finish(steps, started)

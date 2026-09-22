@@ -31,6 +31,7 @@ def _dispatching_run_cmd(
     recovery_out="f",
     replay_rc=0,
     stop_rc=0,
+    drop_slot_rc=0,
     calls=None,
 ):
     calls = calls if calls is not None else []
@@ -44,6 +45,9 @@ def _dispatching_run_cmd(
         if cmd[0] == "pg_ctl" and cmd[1] == "stop":
             return stop_rc, "server stopped"
         if cmd[0] == "psql":
+            # DROP_SLOT 쿼리: "pg_drop_replication_slot" 포함
+            if "pg_drop_replication_slot" in cmd[-1]:
+                return drop_slot_rc, "DROP SLOT"
             return recovery_rc, recovery_out
         if cmd[0] == "python" and "replay_verify.py" in cmd[-1]:
             return replay_rc, "replay done"
@@ -97,10 +101,18 @@ def test_success_path_records_all_steps_and_stops_server(tmp_path: Path):
         "wait_recovery",
         "replay_verify",
         "stop_postgres",
+        "drop_replication_slot",
     ):
+        assert step in result["steps"], f"missing step: {step}"
         assert result["steps"][step]["ok"] is True, result["steps"]
     stop_calls = [c for c in calls if c[0] == "pg_ctl" and c[1] == "stop"]
     assert len(stop_calls) == 1  # 성공해도 임시 인스턴스는 반드시 내린다
+    # DROP_SLOT 쿼리가 호출되었는지 확인
+    drop_calls = [
+        c for c in calls
+        if c[0] == "psql" and "pg_drop_replication_slot" in c[-1]
+    ]
+    assert len(drop_calls) == 1
     assert not (tmp_path / "restore_pgdata").exists()  # 임시 데이터 디렉터리는 정리된다
 
 
@@ -113,6 +125,48 @@ def test_start_postgres_failure_stops_drill_without_stopping_unstarted_server(tm
     assert "wait_recovery" not in result["steps"]
     # 못 띄운 서버를 내리려 하지 않는다
     assert not any(c[0] == "pg_ctl" and c[1] == "stop" for c in calls)
+    # 서버가 안 떴어도 finally 에서 DROP_SLOT 은 호출된다
+    drop_calls = [
+        c for c in calls
+        if c[0] == "psql" and "pg_drop_replication_slot" in c[-1]
+    ]
+    assert len(drop_calls) == 1
+    assert result["steps"]["drop_replication_slot"]["ok"] is True
+
+
+def test_drop_slot_called_when_existing_slot_exists(tmp_path: Path):
+    """기존 복제 슬롯 aios_drill 이 있을 때 finally 에서 DROP_SLOT 쿼리를 호출한다."""
+
+    run_cmd, calls = _dispatching_run_cmd()
+    result = restore_drill.run_drill(**_common_kwargs(tmp_path, run_cmd=run_cmd))
+
+    assert result["ok"] is True
+    drop_calls = [
+        c for c in calls
+        if c[0] == "psql" and "pg_drop_replication_slot" in c[-1]
+    ]
+    assert len(drop_calls) == 1
+    # DROP_SLOT 쿼리가 성공(ok=True)으로 기록됨
+    assert result["steps"]["drop_replication_slot"]["ok"] is True
+    assert result["steps"]["drop_replication_slot"]["rc"] == 0
+
+
+def test_drop_slot_failure_still_cleans_restore_data_dir(tmp_path: Path):
+    """DROP_SLOT 이 실패(rc≠0)해도 restore_data_dir 는 정리되고 steps 에 실패 기록된다."""
+
+    run_cmd, calls = _dispatching_run_cmd(drop_slot_rc=1)
+    result = restore_drill.run_drill(**_common_kwargs(tmp_path, run_cmd=run_cmd))
+
+    # 서버 기동→복구→replay_verify 는 ok지만 DROP_SLOT 이 실패하면 전체 ok=False
+    assert result["ok"] is False
+    assert result["steps"]["start_postgres"]["ok"] is True
+    assert result["steps"]["wait_recovery"]["ok"] is True
+    assert result["steps"]["replay_verify"]["ok"] is True
+    # DROP_SLOT 은 실패했지만
+    assert result["steps"]["drop_replication_slot"]["ok"] is False
+    assert result["steps"]["drop_replication_slot"]["rc"] == 1
+    # 임시 데이터 디렉터리는 여전히 정리된다
+    assert not (tmp_path / "restore_pgdata").exists()
 
 
 def test_start_postgres_failure_captures_diagnostic_logs_and_preserves_them(tmp_path: Path):
