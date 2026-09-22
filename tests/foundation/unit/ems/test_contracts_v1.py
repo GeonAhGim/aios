@@ -136,16 +136,18 @@ def test_parent_order_and_child_order_roundtrip() -> None:
 
 def test_parent_order_qty_rejects_float() -> None:
     with pytest.raises(ValidationError):
-        ParentOrder(
-            parent_id=uuid4(),
-            instrument_id="BTC/USDT",
-            side=OrderSide.BUY,
-            qty=1.5,  # type: ignore[arg-type]
-            algo=_algo_spec(),
-            constraints=ParentOrderConstraints(max_participation_pct=Decimal("10")),
-            fund_id=uuid4(),
-            portfolio_id=uuid4(),
-            arrival_ts=_NOW,
+        ParentOrder.model_validate(
+            {
+                "parent_id": uuid4(),
+                "instrument_id": "BTC/USDT",
+                "side": OrderSide.BUY,
+                "qty": 1.5,
+                "algo": _algo_spec(),
+                "constraints": ParentOrderConstraints(max_participation_pct=Decimal("10")),
+                "fund_id": uuid4(),
+                "portfolio_id": uuid4(),
+                "arrival_ts": _NOW,
+            }
         )
 
 
@@ -176,7 +178,9 @@ def test_route_decision_requires_reason_codes() -> None:
 
 def test_route_decision_expected_cost_bps_rejects_float() -> None:
     with pytest.raises(ValidationError):
-        RouteDecision(venue="binance", reason_codes=["BEST_FEE"], expected_cost_bps=1.2)  # type: ignore[arg-type]
+        RouteDecision.model_validate(
+            {"venue": "binance", "reason_codes": ["BEST_FEE"], "expected_cost_bps": 1.2}
+        )
 
 
 def test_tca_result_fields_are_strict_decimal() -> None:
@@ -189,12 +193,14 @@ def test_tca_result_fields_are_strict_decimal() -> None:
     )
     assert result.schema_version == "v1"
     with pytest.raises(ValidationError):
-        TcaResult(
-            arrival_bps=1.0,  # type: ignore[arg-type]
-            vwap_bps=Decimal("2"),
-            impact_bps=Decimal("3"),
-            fees_bps=Decimal("4"),
-            opportunity_bps=Decimal("5"),
+        TcaResult.model_validate(
+            {
+                "arrival_bps": 1.0,
+                "vwap_bps": Decimal("2"),
+                "impact_bps": Decimal("3"),
+                "fees_bps": Decimal("4"),
+                "opportunity_bps": Decimal("5"),
+            }
         )
 
 
