@@ -20,7 +20,7 @@
         "type": "object"
       },
       "AccountBalance": {
-        "description": "v1.4(ADR-2026-08-28) — 실제 Bitget 잔고 API 조사 중 발견: 이 모델은\nMoney(currency: Currency)를 쓰면 안 된다. Currency enum은 USDT/KRW\n(결제·표시 통화)만 정의하는데, 실제 잔고는 BTC/ETH/SOL 등 임의 코인\n보유량이라 Currency로 표현할 수 없다. asset 필드가 이미 \"무엇의 수량인지\"\n를 담당하므로 Decimal을 그대로 쓴다(01번 §1.4 주석 참조).",
+        "description": "v1.4 (ADR-2026-08-28) — discovered during real Bitget balance API\ninvestigation: this model must NOT use Money(currency: Currency). The\nCurrency enum only defines USDT/KRW (settlement/display currencies), but\nactual balances hold arbitrary coins like BTC/ETH/SOL which cannot be\nexpressed as Currency. The asset field already handles \"what quantity\" so\nDecimal is used directly (see 01 §1.4 comment).",
         "properties": {
           "asset": {
             "title": "Asset",
@@ -1102,6 +1102,22 @@
         "title": "ApiResponse[NavSeriesResponse]",
         "type": "object"
       },
+      "ApiResponse_OptionChainView_": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/OptionChainView"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/Meta"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "title": "ApiResponse[OptionChainView]",
+        "type": "object"
+      },
       "ApiResponse_PaperDeploymentView_": {
         "properties": {
           "data": {
@@ -1356,6 +1372,22 @@
           "meta"
         ],
         "title": "ApiResponse[ReplaySeriesView]",
+        "type": "object"
+      },
+      "ApiResponse_ResearchItem_": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/ResearchItem"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/Meta"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "title": "ApiResponse[ResearchItem]",
         "type": "object"
       },
       "ApiResponse_RiskEvaluationView_": {
@@ -1780,6 +1812,26 @@
           "meta"
         ],
         "title": "ApiResponse[list[QueuedListing]]",
+        "type": "object"
+      },
+      "ApiResponse_list_ResearchItem__": {
+        "properties": {
+          "data": {
+            "items": {
+              "$ref": "#/components/schemas/ResearchItem"
+            },
+            "title": "Data",
+            "type": "array"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/Meta"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "title": "ApiResponse[list[ResearchItem]]",
         "type": "object"
       },
       "ApiResponse_list_SymbolAliasRef__": {
@@ -6346,6 +6398,132 @@
         "title": "NotificationHistoryEntry",
         "type": "object"
       },
+      "OptionChainView": {
+        "properties": {
+          "as_of": {
+            "format": "date-time",
+            "title": "As Of",
+            "type": "string"
+          },
+          "contracts": {
+            "items": {
+              "$ref": "#/components/schemas/OptionContractView"
+            },
+            "title": "Contracts",
+            "type": "array"
+          },
+          "greeks_indicator_ref": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Greeks Indicator Ref"
+          },
+          "underlying_id": {
+            "format": "uuid",
+            "title": "Underlying Id",
+            "type": "string"
+          },
+          "underlying_symbol": {
+            "title": "Underlying Symbol",
+            "type": "string"
+          }
+        },
+        "required": [
+          "underlying_id",
+          "underlying_symbol",
+          "as_of",
+          "contracts"
+        ],
+        "title": "OptionChainView",
+        "type": "object"
+      },
+      "OptionContractView": {
+        "properties": {
+          "ask": {
+            "anyOf": [
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ask"
+          },
+          "bid": {
+            "anyOf": [
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Bid"
+          },
+          "contract_multiplier": {
+            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+            "title": "Contract Multiplier",
+            "type": "string"
+          },
+          "expiry": {
+            "format": "date-time",
+            "title": "Expiry",
+            "type": "string"
+          },
+          "instrument_id": {
+            "format": "uuid",
+            "title": "Instrument Id",
+            "type": "string"
+          },
+          "observed_at": {
+            "format": "date-time",
+            "title": "Observed At",
+            "type": "string"
+          },
+          "option_right": {
+            "enum": [
+              "CALL",
+              "PUT"
+            ],
+            "title": "Option Right",
+            "type": "string"
+          },
+          "strike": {
+            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+            "title": "Strike",
+            "type": "string"
+          },
+          "symbol": {
+            "title": "Symbol",
+            "type": "string"
+          },
+          "underlying_id": {
+            "format": "uuid",
+            "title": "Underlying Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "instrument_id",
+          "underlying_id",
+          "symbol",
+          "expiry",
+          "strike",
+          "option_right",
+          "contract_multiplier",
+          "observed_at"
+        ],
+        "title": "OptionContractView",
+        "type": "object"
+      },
       "OptionType": {
         "enum": [
           "CALL",
@@ -8987,6 +9165,108 @@
         "title": "RequestDeploymentRequest",
         "type": "object"
       },
+      "ResearchItem": {
+        "description": "A single research item (the common envelope for filings, news, macro,\nand alt data).\n\n`known_at` is when the system could have known this fact -- backtests\nand strategies only ever read `known_at <= bar_ts` (§1 point-in-time\nintegrity, RD-A1). The check itself is\n`domain/known_at.assert_point_in_time`'s job (this file only defines the\ncontract). When `revision_of` is set, this item is a correction of that\n`item_id` (input for RD-3; this leaf does not enforce chain rules).",
+        "properties": {
+          "body_ref": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Body Ref"
+          },
+          "hash": {
+            "title": "Hash",
+            "type": "string"
+          },
+          "instruments": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Instruments",
+            "type": "array"
+          },
+          "item_id": {
+            "format": "uuid",
+            "title": "Item Id",
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "filing",
+              "news",
+              "macro",
+              "alt"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "known_at": {
+            "format": "date-time",
+            "title": "Known At",
+            "type": "string"
+          },
+          "language": {
+            "title": "Language",
+            "type": "string"
+          },
+          "published_at": {
+            "format": "date-time",
+            "title": "Published At",
+            "type": "string"
+          },
+          "revision_of": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Revision Of"
+          },
+          "schema_version": {
+            "const": "v1",
+            "default": "v1",
+            "title": "Schema Version",
+            "type": "string"
+          },
+          "source_id": {
+            "title": "Source Id",
+            "type": "string"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          },
+          "url": {
+            "title": "Url",
+            "type": "string"
+          }
+        },
+        "required": [
+          "item_id",
+          "source_id",
+          "kind",
+          "published_at",
+          "known_at",
+          "instruments",
+          "title",
+          "body_ref",
+          "url",
+          "language",
+          "hash",
+          "revision_of"
+        ],
+        "title": "ResearchItem",
+        "type": "object"
+      },
       "ResolveReconciliationRequest": {
         "properties": {
           "reason": {
@@ -10623,6 +10903,14 @@
             "format": "date-time",
             "title": "Created At",
             "type": "string"
+          },
+          "evidence_refs": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Evidence Refs",
+            "type": "array"
           },
           "hard_fail_reasons": {
             "items": {
@@ -17379,6 +17667,115 @@
         ]
       }
     },
+    "/v1/foundation/market-data/options/chain": {
+      "get": {
+        "description": "Return a tenant-authorized chain; a foreign underlying is indistinguishable from missing.\n\nThe read/write reference port resolves symbols; the read-only port resolves\nUUIDs. Both are injected so the existing tenant-safe seams remain usable.",
+        "operationId": "get_options_chain_v1_foundation_market_data_options_chain_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "venue",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/Venue"
+            }
+          },
+          {
+            "in": "query",
+            "name": "symbol",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Symbol"
+            }
+          },
+          {
+            "in": "query",
+            "name": "instrument_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Instrument Id"
+            }
+          },
+          {
+            "in": "query",
+            "name": "expiry",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "date-time",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Expiry"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 100,
+              "maximum": 500,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiResponse_OptionChainView_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Get Options Chain",
+        "tags": [
+          "foundation:market-data"
+        ]
+      }
+    },
     "/v1/foundation/paper-deployments": {
       "get": {
         "operationId": "list_deployments_v1_foundation_paper_deployments_get",
@@ -18263,6 +18660,186 @@
         "summary": "Post Resolve Reconciliation",
         "tags": [
           "foundation:reconciliation"
+        ]
+      }
+    },
+    "/v1/foundation/research/items": {
+      "get": {
+        "description": "`source_id`는 필수다 -- DC-27 소스 계약 판정이 소스 단위이기 때문에\n(§ module docstring), 소스를 밝히지 않은 전체 검색은 이 leaf의 스콥\n밖이다. `instruments`/`kinds`는 콤마 구분 문자열.",
+        "operationId": "search_items_endpoint_v1_foundation_research_items_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "source_id",
+            "required": true,
+            "schema": {
+              "title": "Source Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "instruments",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Instruments"
+            }
+          },
+          {
+            "in": "query",
+            "name": "kinds",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Kinds"
+            }
+          },
+          {
+            "in": "query",
+            "name": "published_from",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "date-time",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Published From"
+            }
+          },
+          {
+            "in": "query",
+            "name": "published_to",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "date-time",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Published To"
+            }
+          },
+          {
+            "in": "query",
+            "name": "as_of",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "date-time",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "As Of"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiResponse_list_ResearchItem__"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Search Items Endpoint",
+        "tags": [
+          "foundation:research-data"
+        ]
+      }
+    },
+    "/v1/foundation/research/items/{item_id}": {
+      "get": {
+        "description": "타 테넌트/미존재는 동형 404(`require_item`). 항목이 자기 테넌트\n것으로 확인된 *후에* 소스 권한을 판정해 403을 준다 -- 순서를 바꾸면\n\"이 소스는 거부됐다\"는 신호가 \"이 item_id가 존재한다\"는 사실을 먼저\n노출하게 된다.",
+        "operationId": "get_item_endpoint_v1_foundation_research_items__item_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "item_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Item Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiResponse_ResearchItem_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Get Item Endpoint",
+        "tags": [
+          "foundation:research-data"
         ]
       }
     },

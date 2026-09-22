@@ -19,6 +19,7 @@ from src.api.contracts.exception_registry_foundation_mandates import (
 from src.api.contracts.exception_registry_foundation_personal import (
     EXCEPTION_MAP_FOUNDATION_PERSONAL,
 )
+from src.api.contracts.exception_registry_foundation_research import EXCEPTION_MAP_RESEARCH
 from src.api.schemas.positions import InvalidCursorError
 from src.core.script.runtime.series import ScriptRuntimeError
 from src.foundation.backtest.application.quick_backtest import (
@@ -262,7 +263,7 @@ EXCEPTION_MAP_FOUNDATION: list[tuple[type[Exception], ErrorCode]] = [
     (ReplayIncompleteError, ErrorCode.DATA_COVERAGE_MISSING),
     (MarketDataQueryError, ErrorCode.VALIDATION_INVALID_FIELD),
     (AsOfInFutureError, ErrorCode.VALIDATION_INVALID_FIELD),
-    (QuarantinedViewUnsupportedError, ErrorCode.VALIDATION_INVALID_FIELD),
+    (QuarantinedViewUnsupportedError, ErrorCode.VALIDATION_INVALID_FIELD), *EXCEPTION_MAP_RESEARCH,
     # CH-5(task-1557) — foundation/charting. 타 테넌트도 미존재와 동형 404
     # (§9.6 DoD "타 테넌트 404") — ConcurrencyConflictError(409)는 이미
     # exception_registry.py에 전역 등록돼 있어 여기 새로 추가하지 않는다.
