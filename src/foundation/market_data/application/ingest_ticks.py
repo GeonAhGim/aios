@@ -37,8 +37,12 @@ from uuid import UUID, uuid4
 
 import asyncpg
 
-from src.foundation.evidence.domain.models import Classification, Outcome
-from src.foundation.evidence.domain.rules import assert_safe_payload, compute_payload_hash
+from src.foundation.evidence.api import (
+    Classification,
+    Outcome,
+    assert_safe_payload,
+    compute_payload_hash,
+)
 from src.foundation.market_data.application.ingest_candles import AuditAppender
 from src.foundation.market_data.contracts.v1 import (
     QualityIssue,

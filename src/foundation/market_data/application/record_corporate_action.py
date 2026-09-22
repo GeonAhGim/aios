@@ -26,8 +26,13 @@ from uuid import UUID
 
 import asyncpg
 
-from src.foundation.evidence.domain.models import AuditEvent, Classification, Outcome
-from src.foundation.evidence.domain.rules import assert_safe_payload, compute_payload_hash
+from src.foundation.evidence.api import (
+    AuditEvent,
+    Classification,
+    Outcome,
+    assert_safe_payload,
+    compute_payload_hash,
+)
 from src.foundation.market_data.contracts.v1 import CorporateAction
 from src.foundation.market_data.ports.reference_repository import ReferenceRepository
 

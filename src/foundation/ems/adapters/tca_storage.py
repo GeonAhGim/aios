@@ -56,9 +56,13 @@ import asyncpg
 
 from src.foundation.ems.contracts.v1 import TcaResult
 from src.foundation.ems.ports.tca_result_repository import TcaResultRecord
-from src.foundation.evidence.adapters.postgres_repository import PostgresAuditEventRepository
-from src.foundation.evidence.domain.models import AuditEvent, Classification, Outcome
-from src.foundation.evidence.domain.rules import compute_payload_hash
+from src.foundation.evidence.api import (
+    AuditEvent,
+    Classification,
+    Outcome,
+    PostgresAuditEventRepository,
+    compute_payload_hash,
+)
 
 AGGREGATE_TYPE = "tca_result"
 ACTION = "TCA_COMPUTED"
