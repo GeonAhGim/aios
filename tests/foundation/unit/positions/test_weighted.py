@@ -101,13 +101,15 @@ def test_sell_with_no_position_rejected() -> None:
 
 def test_zero_quantity_fill_rejected() -> None:
     """불변식: quantity > 0. Zero 수량은 FillEvent 생성 단계에서 거부된다."""
-    with pytest.raises(ValueError, match="quantity는 양수여야 합니다"):
+    with pytest.raises(ValueError) as exc_info:
         FillEvent(
             side=OrderSide.BUY,
             quantity=Decimal("0"),
             price=Decimal("100"),
             occurred_at=_now(),
         )
+    # Language-agnostic: check exception type + that the message mentions quantity
+    assert "quantity" in str(exc_info.value)
 
 
 def test_apply_lot_model_copy_failure_propagates() -> None:
