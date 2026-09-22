@@ -46,6 +46,7 @@ from src.core.script.grammar.ast import (
     PlotDecl,
     PostfixExpr,
     Program,
+    RequestExpr,
     SignalDecl,
     UnaryExpr,
 )
@@ -155,6 +156,8 @@ def infer_type(expr: Expr, env: TypeEnv) -> Type:
         return _infer_binary(expr, env)
     if isinstance(expr, CallExpr):
         return _infer_call(expr, env)
+    if isinstance(expr, RequestExpr):
+        return _infer_request(expr, env)
     raise AssertionError(f"알 수 없는 Expr kind: {expr!r}")  # pragma: no cover
 
 
@@ -194,6 +197,19 @@ def _infer_binary(expr: BinaryExpr, env: TypeEnv) -> Type:
             )
         return arith
     raise AssertionError(f"알 수 없는 BinaryOp: {expr.op!r}")  # pragma: no cover
+
+
+def _infer_request(expr: RequestExpr, env: TypeEnv) -> Type:
+    """M2-2a: request(symbol, timeframe, expr)의 결과는 항상 `series<float>`다
+    — 다른 타임프레임 컨텍스트에서 봉마다 구체화되는 값이라 스칼라로 접히지
+    않는다(§3.3 승격 규칙과 별개의 고정 규칙). 내부 `expr`은 현재 env에서
+    수치 계열이어야 한다(MTF 컨텍스트에서의 재바인딩은 M2-2b 몫)."""
+    inner = infer_type(expr.expr, env)
+    if inner not in NUMERIC_TYPES:
+        raise ScriptTypeError(
+            f"request(...)의 expr 인자는 수치 계열이어야 합니다(받음: {inner})"
+        )
+    return "series<float>"
 
 
 def _infer_call(expr: CallExpr, env: TypeEnv) -> Type:

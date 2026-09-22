@@ -29,6 +29,7 @@ from src.core.script.grammar.ast import (
     PlotDecl,
     PostfixExpr,
     Program,
+    RequestExpr,
     SignalDecl,
     TypeName,
     TypeNode,
@@ -238,12 +239,14 @@ class _Parser:
         self._expect(TokenKind.DELIM, "]", "postfix 인덱스 뒤에는 ']'가 필요합니다")
         return PostfixExpr(base=base, index=int(idx_tok.value))
 
-    # primary := NUMBER | ident | call | "(" expr ")"
+    # primary := NUMBER | ident | call | request | "(" expr ")"
     def _primary(self) -> Expr:
         tok = self._peek()
         if tok.kind is TokenKind.NUMBER:
             self._advance()
             return NumberLiteral(value=_number_value(tok.value))
+        if tok.kind is TokenKind.KEYWORD and tok.value == "request":
+            return self._request_expr()
         if tok.kind is TokenKind.IDENT:
             if self._peek(1).kind is TokenKind.DELIM and self._peek(1).value == ".":
                 return self._call()
@@ -278,3 +281,27 @@ class _Parser:
                 args.append(self._expr())
         self._expect(TokenKind.DELIM, ")", "호출 인자 뒤에는 ')'가 필요합니다")
         return CallExpr(ns=ns_tok.value, ident=ident, args=tuple(args))
+
+    def _request_expr(self) -> RequestExpr:
+        """request "(" STRING "," STRING "," expr ")" — M2-2a: symbol·
+        timeframe은 컴파일 시 상수(문자열 리터럴)여야 한다(동적 심볼 금지).
+        `_expect(TokenKind.STRING, ...)`가 리터럴이 아닌 인자(식별자·연산식
+        등)를 여기서 즉시 `SCRIPT_SYNTAX`로 거부한다 — DSL-4 타입 체커까지
+        기다리지 않는다."""
+        self._advance()  # "request"
+        self._expect(TokenKind.DELIM, "(", "request 뒤에는 '('가 필요합니다")
+        symbol = self._expect(
+            TokenKind.STRING,
+            None,
+            "request()의 symbol 인자는 문자열 리터럴이어야 합니다(동적 심볼 금지)",
+        ).value
+        self._expect(TokenKind.DELIM, ",", "request의 symbol 인자 뒤에는 ','가 필요합니다")
+        timeframe = self._expect(
+            TokenKind.STRING,
+            None,
+            "request()의 timeframe 인자는 문자열 리터럴이어야 합니다(동적 심볼 금지)",
+        ).value
+        self._expect(TokenKind.DELIM, ",", "request의 timeframe 인자 뒤에는 ','가 필요합니다")
+        expr = self._expr()
+        self._expect(TokenKind.DELIM, ")", "request 인자 뒤에는 ')'가 필요합니다")
+        return RequestExpr(symbol=symbol, timeframe=timeframe, expr=expr)

@@ -32,6 +32,7 @@ KEYWORDS = frozenset(
         "not",
         "crosses_above",
         "crosses_below",
+        "request",
     }
 )
 
@@ -61,6 +62,7 @@ class TokenKind(enum.Enum):
     TYPE = "TYPE"
     IDENT = "IDENT"
     NUMBER = "NUMBER"
+    STRING = "STRING"
     OP = "OP"
     DELIM = "DELIM"
     EOF = "EOF"
@@ -143,6 +145,24 @@ def tokenize(source: str) -> list[Token]:
             continue
 
         start_line, start_col = line, col
+
+        if ch == '"':
+            # M2-2a: request(symbol, timeframe, expr)의 상수 인자용 문자열
+            # 리터럴. §3.3 원문 문법표에는 STRING이 없다 — 이스케이프·개행
+            # 없는 최소 문법(미검증, 다른 쓰임이 생기면 이 지점만 넓히면 됨).
+            pos += 1
+            col += 1
+            begin = pos
+            while pos < n and source[pos] not in ('"', "\n", "\r"):
+                pos += 1
+                col += 1
+            if pos >= n or source[pos] != '"':
+                raise ScriptSyntaxError("미종결 문자열 리터럴", start_line, start_col)
+            value = source[begin:pos]
+            pos += 1
+            col += 1
+            tokens.append(Token(TokenKind.STRING, value, "", start_line, start_col))
+            continue
 
         if _is_ident_start(ch):
             begin = pos
