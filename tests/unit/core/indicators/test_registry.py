@@ -17,6 +17,7 @@ import inspect
 import time
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
+from typing import Any
 
 import numpy as np
 import pytest
@@ -38,7 +39,7 @@ def _default_params(spec: IndicatorSpec) -> dict[str, int]:
     return {p.name: p.default for p in spec.params}
 
 
-def _synthetic_ohlcv(n: int = 300) -> dict[str, np.ndarray]:
+def _synthetic_ohlcv(n: int = 300) -> dict[str, np.ndarray[Any, np.dtype[Any]]]:
     rng = np.random.default_rng(42)
     close = np.cumsum(rng.normal(size=n)) + 100.0
     high = close + np.abs(rng.normal(size=n)) + 0.5
@@ -47,7 +48,7 @@ def _synthetic_ohlcv(n: int = 300) -> dict[str, np.ndarray]:
     return {"open": close, "high": high, "low": low, "close": close, "volume": volume}
 
 
-def _leading_nan_count(arr: np.ndarray) -> int:
+def _leading_nan_count(arr: np.ndarray[Any, np.dtype[np.floating[Any]]]) -> int:
     valid = np.where(~np.isnan(arr))[0]
     return int(valid[0]) if len(valid) else len(arr)
 
@@ -443,9 +444,9 @@ def test_registry_hash_budget_gate_actually_fails_past_budget(
     통과하는 tautology인지 아무도 검증하지 못한다."""
     original_sha256 = hashlib.sha256
 
-    def _stalled_sha256(*args: object, **kwargs: object) -> object:
+    def _stalled_sha256(data: bytes, **kwargs: object) -> object:
         time.sleep(_REGISTRY_HASH_BUDGET_MS / 1000.0)
-        return original_sha256(*args, **kwargs)
+        return original_sha256(data)
 
     monkeypatch.setattr("src.core.indicators.registry.hashlib.sha256", _stalled_sha256)
 
@@ -470,7 +471,7 @@ def test_lookback_nan_count_gate_turns_red_when_lookback_formula_is_off_by_one()
     inputs = [arrays[key] for key in spec.inputs]
     params = _default_params(spec)
 
-    raw_output = talib.SMA(*inputs, **params)
+    raw_output = talib.SMA(*inputs, **params)  # type: ignore[arg-type]
     actual_leading_nan = _leading_nan_count(raw_output)
 
     broken_spec = IndicatorSpec(
