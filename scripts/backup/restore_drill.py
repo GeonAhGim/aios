@@ -224,6 +224,24 @@ def run_drill(
                 [pg_ctl_bin, "stop", "-D", str(restore_data_dir), "-m", "fast"], repo_root, None, 60
             )
             steps["stop_postgres"] = {"ok": rc == 0, "rc": rc, "tail": tail}
+        # 복제 슬롯 aios_drill 제거 (pg_basebackup -C -S 가 생성함)
+        # 소스 서버 DSN 으로 연결해 슬롯을 정리한다.
+        try:
+            run_cmd(
+                [
+                    psql_bin,
+                    dsn_template,
+                    "-tAc",
+                    "SELECT pg_drop_replication_slot('aios_drill') "
+                    "WHERE EXISTS (SELECT 1 FROM pg_replication_slots "
+                    "WHERE slot_name='aios_drill')",
+                ],
+                repo_root,
+                None,
+                30,
+            )
+        except OSError:
+            pass  # 슬롯이 없거나 소스 서버 연결 실패 → 무시
         shutil.rmtree(restore_data_dir, ignore_errors=True)
 
     return _finish(steps, started)
