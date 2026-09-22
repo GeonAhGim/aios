@@ -1,5 +1,5 @@
 {
- "refreshed_at": "2026-09-20T01:29:40+00:00",
+ "refreshed_at": "2026-09-22T11:11:33+00:00",
  "specs": [
   {
    "file": "L4_ai_research_strategy_factory_v1.0.md",
@@ -9,7 +9,7 @@
    "inflight": 0,
    "untouched": 0,
    "hold": 0,
-   "reopened": 2,
+   "reopened": 1,
    "depth": {
     "D2": 1,
     "D?": 22
@@ -23,7 +23,7 @@
    "inflight": 3,
    "untouched": 0,
    "hold": 17,
-   "reopened": 12,
+   "reopened": 15,
    "depth": {
     "D1": 1,
     "D2": 32,
@@ -39,7 +39,7 @@
    "inflight": 0,
    "untouched": 0,
    "hold": 1,
-   "reopened": 0,
+   "reopened": 2,
    "depth": {
     "D2": 6,
     "D3": 12,
@@ -54,7 +54,7 @@
    "inflight": 1,
    "untouched": 0,
    "hold": 0,
-   "reopened": 5,
+   "reopened": 3,
    "depth": {
     "D2": 5,
     "D3": 2,
@@ -69,7 +69,7 @@
    "inflight": 0,
    "untouched": 0,
    "hold": 0,
-   "reopened": 2,
+   "reopened": 1,
    "depth": {
     "D0": 1,
     "D2": 1,
@@ -95,15 +95,15 @@
    "file": "L4_ibor_fund_accounting_and_resilience_v1.0.md",
    "spec": "ibor_fund_accounting_and_resilience",
    "total": 29,
-   "done": 27,
-   "inflight": 2,
+   "done": 26,
+   "inflight": 3,
    "untouched": 0,
    "hold": 0,
-   "reopened": 0,
+   "reopened": 1,
    "depth": {
     "D2": 2,
     "D3": 12,
-    "D?": 13
+    "D?": 12
    }
   },
   {
@@ -129,7 +129,7 @@
    "inflight": 0,
    "untouched": 0,
    "hold": 0,
-   "reopened": 7,
+   "reopened": 1,
    "depth": {
     "D1": 2,
     "D2": 10,
@@ -141,14 +141,14 @@
    "file": "L4_product_experience_and_discovery_v1.0.md",
    "spec": "product_experience_and_discovery",
    "total": 22,
-   "done": 20,
-   "inflight": 2,
+   "done": 22,
+   "inflight": 0,
    "untouched": 0,
    "hold": 0,
    "reopened": 1,
    "depth": {
     "D2": 12,
-    "D?": 8
+    "D?": 10
    }
   },
   {
@@ -159,7 +159,7 @@
    "inflight": 2,
    "untouched": 0,
    "hold": 0,
-   "reopened": 3,
+   "reopened": 0,
    "depth": {
     "D2": 3,
     "D3": 2,
@@ -174,7 +174,7 @@
    "inflight": 0,
    "untouched": 0,
    "hold": 5,
-   "reopened": 3,
+   "reopened": 2,
    "depth": {
     "D3": 27,
     "D?": 26
@@ -184,14 +184,14 @@
    "file": "L4_strategy_portfolio_backtest_v1.0.md",
    "spec": "strategy_portfolio_backtest",
    "total": 46,
-   "done": 42,
-   "inflight": 4,
+   "done": 44,
+   "inflight": 2,
    "untouched": 0,
    "hold": 0,
-   "reopened": 15,
+   "reopened": 3,
    "depth": {
     "D2": 14,
-    "D?": 28
+    "D?": 30
    }
   }
  ]
