@@ -4,9 +4,9 @@ Spec: AIOSproject 76_strategy_package_validation_l3_build_and_operational_
 specification_v1.0.md §1/§3;
 docs/specs/L4_strategy_portfolio_backtest_v1.0.md §2 "existing" domain/
 models.py row / §9 L37 for the artifact-linkage fields and `ValidationBundle`
-added below -- L37's migration (M3) and repository/contracts wiring are a
-separate leaf; this module only carries the pure value objects those will
-read and write.
+added below -- migration M3 (`627bd92ec750`) and the matching
+`ports/repository.py`/`contracts/v1.py`/`adapters/postgres_repository.py`
+wiring persist and expose these value objects.
 """
 
 from __future__ import annotations
@@ -83,11 +83,12 @@ class ValidationBundle:
     """L4_strategy_portfolio_backtest_v1.0.md §9 L37 / L43 -- the outcome of
     evaluating one artifact's required checks together (`rules.
     evaluate_bundle`), persisted once per (artifact_hash, policy_version,
-    data_snapshot_hash) (migration M3's planned UNIQUE constraint).
+    data_snapshot_hash) (migration M3's `strategy_validation_bundle` UNIQUE
+    constraint).
 
     I6 ("a non-empty hard_fail_reasons means outcome must be FAIL", both
-    directions per §4.1 I6 -- the DB `CHECK` migration M3 will add only
-    enforces the forward direction, the reverse is code-only) is enforced
+    directions per §4.1 I6 -- migration M3's DB `CHECK` only enforces the
+    forward direction, the reverse is code-only) is enforced
     here at construction so a bundle built by hand (a test fixture, a row
     reconstructed from a future repository) can never silently mislabel a
     hard-failing bundle as PASS, or a FAIL bundle with no recorded reason.

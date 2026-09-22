@@ -4,6 +4,7 @@ Spec: AIOSproject 46_strategy_package_and_validation_specification_v1.0.md,
 76_strategy_package_validation_l3_build_and_operational_specification_v1.0.md §4,
 107_contract_versioning_and_compatibility_standard_v1.0.md.
 """
+
 from __future__ import annotations
 
 from datetime import datetime
@@ -57,5 +58,29 @@ class ValidationResultView(BaseModel):
     hard_fail_reasons: list[str]
     obligations: list[str]
     result_hash: str | None
+    created_at: datetime
+    # L37 (§9 L37) -- provenance pointers (`ValidationResult.evidence_refs`);
+    # defaulted so pre-L37 callers (`start_validation.py`) that never pass it
+    # keep constructing this view unchanged (107 §3.3 MINOR rule).
+    evidence_refs: list[str] = []
+    schema_version: str = SCHEMA_VERSION
+
+
+class ValidationBundleView(BaseModel):
+    """L37 (§9 L37) -- read view for `domain/models.ValidationBundle`, the
+    outcome of evaluating one artifact's required checks together. No writer
+    exists in this codebase yet (`application/build_bundle.py` is a later
+    leaf) -- this view exists so `ports/repository.ValidationBundleRepository`
+    has a stable wire shape to return once one does."""
+
+    id: UUID
+    artifact_hash: str
+    policy_version: str
+    data_snapshot_hash: str
+    outcome: Outcome
+    check_run_ids: list[UUID]
+    bundle_hash: str
+    hard_fail_reasons: list[str]
+    obligations: list[str]
     created_at: datetime
     schema_version: str = SCHEMA_VERSION
