@@ -22,6 +22,7 @@
     "check:lockfile-workspaces": "node scripts/check_lockfile_workspaces.mjs",
     "test:lockfile-workspaces": "node --test scripts/check_lockfile_workspaces.test.mjs",
     "bench:density": "npm run bench:density --workspace=packages/chart-engine",
+    "bench:idempotency-scan": "npm run bench:idempotency-scan --workspace=packages/api-client",
     "check:coverage": "npm run test:coverage --workspace=apps/web && node ../scripts/frontend_coverage_ratchet.mjs",
     "test:coverage-ratchet": "node --test ../scripts/frontend_coverage_ratchet.test.mjs",
     "test:e2e": "playwright test"
