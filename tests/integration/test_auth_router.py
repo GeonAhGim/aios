@@ -8,6 +8,7 @@ app.router.lifespan_context로 main.py의 lifespan(asyncpg pool 생성)을
 import uuid
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from typing import Any, AsyncGenerator
 
 import asyncpg
 import pytest
@@ -28,14 +29,14 @@ def _asyncpg_dsn() -> str:
 
 
 @pytest.fixture
-async def pool():
+async def pool() -> AsyncGenerator[asyncpg.Pool, None]:
     p = await asyncpg.create_pool(_asyncpg_dsn(), min_size=1, max_size=2)
     yield p
     await p.close()
 
 
 @pytest.fixture
-async def client():
+async def client() -> AsyncGenerator[AsyncClient, None]:
     async with app.router.lifespan_context(app):
         # raise_app_exceptions=False — 도메인 예외(AuthError 등)는 전역
         # Exception 핸들러(src/api/contracts/handlers.py)가 처리하는데,
@@ -53,7 +54,7 @@ def _unique_email() -> str:
     return f"test-{uuid.uuid4().hex}@example.com"
 
 
-async def test_register_returns_access_token(client):
+async def test_register_returns_access_token(client: AsyncClient) -> None:
     response = await client.post(
         "/auth/register", json={"email": _unique_email(), "password": STRONG_PASSWORD}
     )
@@ -71,7 +72,7 @@ async def test_register_returns_access_token(client):
     assert "session_id" in data
 
 
-async def test_register_rejects_weak_password(client):
+async def test_register_rejects_weak_password(client: AsyncClient) -> None:
     response = await client.post(
         "/auth/register", json={"email": _unique_email(), "password": "short"}
     )
@@ -79,7 +80,7 @@ async def test_register_rejects_weak_password(client):
     assert response.status_code in (400, 422)
 
 
-async def test_login_after_register_succeeds(client):
+async def test_login_after_register_succeeds(client: AsyncClient) -> None:
     email = _unique_email()
     await client.post("/auth/register", json={"email": email, "password": STRONG_PASSWORD})
 
@@ -89,7 +90,9 @@ async def test_login_after_register_succeeds(client):
     assert "access_token" in response.json()["data"]
 
 
-async def test_suspended_account_loses_access_mid_session_not_just_at_next_login(client, pool):
+async def test_suspended_account_loses_access_mid_session_not_just_at_next_login(
+    client: AsyncClient, pool: asyncpg.Pool
+) -> None:
     """73번 §6 규칙1 "A command requires an ACTIVE membership" — P0 단일-owner
     스콥에서는 "ACTIVE membership"이 곧 "이 계정 자체가 ACTIVE"다(TenantContext.role
     주석 참조, household/organization membership은 아직 없음). deps.py의
@@ -113,7 +116,7 @@ async def test_suspended_account_loses_access_mid_session_not_just_at_next_login
     assert after_suspend.status_code == 401
 
 
-async def test_login_with_wrong_password_rejected(client):
+async def test_login_with_wrong_password_rejected(client: AsyncClient) -> None:
     email = _unique_email()
     await client.post("/auth/register", json={"email": email, "password": STRONG_PASSWORD})
 
@@ -127,13 +130,13 @@ async def test_login_with_wrong_password_rejected(client):
     assert "trace_id" in body
 
 
-async def test_get_me_requires_authentication(client):
+async def test_get_me_requires_authentication(client: AsyncClient) -> None:
     response = await client.get("/users/me")
 
     assert response.status_code == 401
 
 
-async def test_get_me_returns_current_user_with_valid_token(client):
+async def test_get_me_returns_current_user_with_valid_token(client: AsyncClient) -> None:
     email = _unique_email()
     register_response = await client.post(
         "/auth/register", json={"email": email, "password": STRONG_PASSWORD}
@@ -148,13 +151,13 @@ async def test_get_me_returns_current_user_with_valid_token(client):
     assert body["mfa_enabled"] is False
 
 
-async def test_get_me_rejects_invalid_token(client):
+async def test_get_me_rejects_invalid_token(client: AsyncClient) -> None:
     response = await client.get("/users/me", headers={"Authorization": "Bearer not-a-real-token"})
 
     assert response.status_code == 401
 
 
-async def test_mfa_setup_and_verify_round_trip(client):
+async def test_mfa_setup_and_verify_round_trip(client: AsyncClient) -> None:
     import pyotp
 
     email = _unique_email()
@@ -192,7 +195,7 @@ async def test_mfa_setup_and_verify_round_trip(client):
     assert login_with_code.status_code == 200
 
 
-async def test_mfa_resetup_without_password_rejected_when_already_enabled(client):
+async def test_mfa_resetup_without_password_rejected_when_already_enabled(client: AsyncClient) -> None:
     """레드팀 감사 #11 후속 — 이미 켜진 MFA를 탈취한 Bearer 토큰만으로
     (비밀번호 없이) 재설정해 secret을 갈아치울 수 있으면 안 된다.
 
@@ -221,7 +224,7 @@ async def test_mfa_resetup_without_password_rejected_when_already_enabled(client
     assert resetup_response.status_code == 403
 
 
-async def test_mfa_resetup_with_correct_password_succeeds(client):
+async def test_mfa_resetup_with_correct_password_succeeds(client: AsyncClient) -> None:
     """esc-ci-67bd83edb539 — 옛 코드는 초기 setup/verify 코드를
     `pyotp...now()`(실시간)로 만들어 서버 실시간과 비교했다.
     test_mfa_resetup_without_password_rejected_when_already_enabled에서
@@ -257,13 +260,13 @@ async def test_mfa_resetup_with_correct_password_succeeds(client):
     assert new_secret != old_secret
 
 
-async def test_logout_requires_authentication(client):
+async def test_logout_requires_authentication(client: AsyncClient) -> None:
     response = await client.post("/auth/logout")
 
     assert response.status_code == 401
 
 
-async def test_refresh_endpoint_rotates_token_pair(client):
+async def test_refresh_endpoint_rotates_token_pair(client: AsyncClient) -> None:
     """PLT-24 — spec §9 DoD "기존 test_auth_router.py는 토큰 쌍 응답으로
     갱신"의 /auth/refresh 왕복 부분. 서비스 계층은
     tests/integration/services/auth/test_login_refresh_logout.py가 이미
@@ -287,7 +290,7 @@ async def test_refresh_endpoint_rotates_token_pair(client):
     assert rotated["access_token"] != pair["access_token"]
 
 
-async def test_refresh_endpoint_rejects_reused_refresh_token(client):
+async def test_refresh_endpoint_rejects_reused_refresh_token(client: AsyncClient) -> None:
     """핵심 DoD — 옛 refresh_token 재사용은 라우터 계층에서도 401
     AUTH_SESSION_REVOKED로 거부된다(RefreshReuseDetected 전파 확인)."""
     email = _unique_email()
@@ -304,7 +307,7 @@ async def test_refresh_endpoint_rejects_reused_refresh_token(client):
     assert response.json()["error_code"] == "AUTH_SESSION_REVOKED"
 
 
-async def test_logout_endpoint_revokes_session(client):
+async def test_logout_endpoint_revokes_session(client: AsyncClient) -> None:
     email = _unique_email()
     register_response = await client.post(
         "/auth/register", json={"email": email, "password": STRONG_PASSWORD}
@@ -322,7 +325,7 @@ async def test_logout_endpoint_revokes_session(client):
     assert refresh_after_logout.status_code == 401
 
 
-async def test_logout_all_endpoint_revokes_every_session(client):
+async def test_logout_all_endpoint_revokes_every_session(client: AsyncClient) -> None:
     email = _unique_email()
     first = (
         await client.post("/auth/register", json={"email": email, "password": STRONG_PASSWORD})
@@ -352,7 +355,7 @@ async def test_logout_all_endpoint_revokes_every_session(client):
 # ── negative tests (DoD: ≥3건) ──────────────────────────────────────────
 
 
-async def test_register_rejects_duplicate_email(client):
+async def test_register_rejects_duplicate_email(client: AsyncClient) -> None:
     """불변식 위반 — 이미 가입된 이메일로 재가입하면 401으로 거부해야 한다.
 
     AuthService.signup() 가 AuthError("이미 등록된 이메일입니다.")를
@@ -369,7 +372,7 @@ async def test_register_rejects_duplicate_email(client):
     assert body["error_code"] == "AUTH_INVALID_CREDENTIALS"
 
 
-async def test_mfa_verify_rejects_invalid_code(client):
+async def test_mfa_verify_rejects_invalid_code(client: AsyncClient) -> None:
     """불변식 위반 — 올바른 TOTP 코드가 아닌 값을 보내면 400/401로 거부해야 한다.
 
     MfaService.verify() 가 유효하지 않은 코드를 받으면 AuthError를 던지고,
@@ -402,7 +405,7 @@ async def test_mfa_verify_rejects_invalid_code(client):
     assert wrong_code.status_code in (400, 401)
 
 
-async def test_admin_endpoint_rejects_non_admin(client):
+async def test_admin_endpoint_rejects_non_admin(client: AsyncClient) -> None:
     """불변식 위반 — admin-only 엔드포인트에 일반 사용자가 접근하면 403/401로 거부해야 한다.
 
     admin.py 라우터는 get_current_admin 의존성으로 admin 체크를 한다.
@@ -423,7 +426,7 @@ async def test_admin_endpoint_rejects_non_admin(client):
 # ── failure-injection tests (DoD: ≥1건) ─────────────────────────────────
 
 
-async def test_login_failure_injection_db_error(client, monkeypatch):
+async def test_login_failure_injection_db_error(client: AsyncClient, monkeypatch: pytest.MonkeyPatch) -> None:
     """실패주입 — DB 레이어에서 예외가 발생하면 500이 아닌 구조화된
     서비스 에러 응답으로 감싸져야 한다.
 
@@ -440,7 +443,7 @@ async def test_login_failure_injection_db_error(client, monkeypatch):
     )
     headers = {"Authorization": f"Bearer {register_response.json()['data']['access_token']}"}
 
-    async def patched_get_current_user():
+    async def patched_get_current_user() -> Any:
         raise ConnectionError("Injected DB connection failure")
 
     # FastAPI dependency_override — 앱 재시작 없이 의존성 대체
