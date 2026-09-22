@@ -1,25 +1,26 @@
-"""13.2 — 전략 리스팅 API (생성 + 검증 제출).
+"""13.2 — Strategy Listing API (create + verification submission).
 
-Spec: 기능설계문서_v1.20.md#FD-13.1/FD-13.1b, 13번 §13.5, 15번 §15.5
+Spec: functional_design_v1.20.md#FD-13.1/FD-13.1b, #13 §13.5, #15 §15.5
 
-리스팅 생성(DRAFT)과 검증 제출(PENDING_VERIFICATION)은 별도 액션으로
-분리한다(재점검 라운드 정정 — 생성 즉시 자동으로 검증 대기열에 넣지
-않고, 판매자가 가격 등을 다시 검토할 여지를 준 뒤 명시적으로 제출).
+Listing creation (DRAFT) and verification submission (PENDING_VERIFICATION) are
+separate actions (revision round correction — do not auto-enqueue newly created
+listings into the verification queue; allow the seller to review price etc.
+before explicitly submitting).
 
-3개월 Paper Trading 이력 확인(9.5-A 원칙)은 FD-16(전략 실행)이 아직
-없어 그 이력을 실제로 추적할 방법이 없다 — verify_paper_trading_eligibility
-DI 콜백으로 주입받는다(이 세션에서 반복 적용한 패턴, WatchdogService.
-compute_equity/SurgeDetector.verify_provenance 등과 동일).
+Three-month Paper Trading history check (Principle 9.5-A) cannot be implemented
+here because FD-16 (Strategy Execution) does not yet exist — we accept it as a
+verify_paper_trading_eligibility DI callback (same pattern applied throughout
+this session, matching WatchdogService.compute_equity, SurgeDetector.verify_provenance, etc.).
 
-create_listing()은 users.seller_suspended도 확인한다 — FD-18.4(판매자
-정지)가 이 플래그를 토글하면 신규 리스팅 생성이 즉시 거부된다.
+create_listing() also checks users.seller_suspended — when FD-18.4 (Seller
+Suspension) toggles this flag, new listing creation is immediately rejected.
 
-편차(ADR-2026-08-29 §2): seller_type='PLATFORM'(플랫폼 직접판매) 리스팅은
-create_platform_listing()이라는 별도 경로로 만든다 — 제3자 판매자용
-DRAFT→PENDING_VERIFICATION→LISTED 검증 파이프라인을 그대로 재사용하지
-않고 관리자 등록 즉시 LISTED로 게시한다(아래 메서드 docstring 참조).
-커미션 계산(commission.py)은 그대로 재사용한다 — 동일 커미션 구조로
-취급하기로 결정했기 때문.
+Deviation (ADR-2026-08-29 §2): seller_type='PLATFORM' (platform direct-sale)
+listings use a separate path via create_platform_listing() — we do not reuse
+the third-party seller DRAFT→PENDING_VERIFICATION→LISTED verification pipeline;
+instead, admin registration publishes directly to LISTED (see method docstring).
+commission.py is still reused — we decided to treat it under the same commission
+structure.
 """
 from __future__ import annotations
 
@@ -37,7 +38,7 @@ VerifyEligibilityFn = Callable[[str, str, UUID], Awaitable[bool]]
 
 
 class ListingError(Exception):
-    """FD-13.1/13.1b 실패 — 라우터가 400/403/404로 변환."""
+    """FD-13.1/13.1b failure — router converts to 400/403/404."""
 
 
 class Listing(BaseModel):
@@ -52,9 +53,10 @@ class Listing(BaseModel):
 
 
 def _validate_price(price: Decimal | None) -> None:
-    """전수감사(docs/FULL_AUDIT_2026-09-02.md §2) 반영 — 음수 가격은 구매
-    시점에 지갑 차감이 아니라 증액이 되므로 서비스 계층에서도 거부한다
-    (API 스키마 `Field(ge=0)`·DB CHECK와 함께 세 겹)."""
+    """Reflects full-audit rule (docs/FULL_AUDIT_2026-09-02.md §2) — negative
+    prices would increase wallet balance at purchase time rather than deduct,
+    so the service layer rejects them too (three layers: API schema
+    `Field(ge=0)`, DB CHECK, and this check)."""
     if price is not None and price < 0:
         raise ListingError("가격은 0 이상이어야 합니다.")
 
@@ -105,13 +107,14 @@ class ListingService:
     async def create_platform_listing(
         self, strategy_id: str, strategy_version: str, price: Decimal | None
     ) -> Listing:
-        """ADR-2026-08-29 §2 — 플랫폼이 직접 등록하는 리스팅(seller_type=
-        'PLATFORM')은 제3자 판매자용 사기방지 검증 파이프라인(DRAFT→
-        PENDING_VERIFICATION→LISTED, submit_for_verification/decide)을
-        거칠 필요가 없다 — 관리자가 등록하는 행위 자체가 이미 검증이므로
-        LISTED로 즉시 게시한다. 판매자는 wallet_service.PLATFORM_HOUSE_
-        USER_ID(하우스 계정) 고정 — 이 계정은 정지 대상이 아니라 seller_
-        suspended 확인도 건너뛴다."""
+        """ADR-2026-08-29 §2 — Listings registered directly by the platform
+        (seller_type='PLATFORM') skip the third-party seller anti-fraud
+        verification pipeline (DRAFT→PENDING_VERIFICATION→LISTED via
+        submit_for_verification/decide) — the act of admin registration is
+        itself the verification, so we publish directly to LISTED. The seller
+        is fixed to wallet_service.PLATFORM_HOUSE_USER_ID (house account);
+        this account is not a suspension target, so we also skip the
+        seller_suspended check."""
         _validate_price(price)
         async with self._pool.acquire() as conn:
             owner_user_id = await conn.fetchval(
