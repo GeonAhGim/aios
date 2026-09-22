@@ -74,8 +74,8 @@ from src.foundation.experiments.application.query import get_lineage_chain as _g
 from src.foundation.experiments.application.query import list_reproductions as _list_reproductions
 from src.foundation.experiments.contracts.v1 import Experiment
 from src.foundation.experiments.ports.repository import ExperimentRepository
+from src.foundation.market_data.api import CandleColumns
 from src.foundation.market_data.contracts.v1 import Timeframe
-from src.foundation.market_data.domain.candle_columns import CandleColumns
 
 __all__ = [
     "MAX_QUICK_BARS",

@@ -44,7 +44,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Final
 
 from src.core.script.runtime.series import ScriptRuntimeError, Series, Value
-from src.foundation.market_data.domain.candle_columns import CandleColumns
+from src.foundation.market_data.api import CandleColumns
 from src.foundation.research_data.application.query import search
 from src.foundation.research_data.contracts.v1 import ResearchItem, ResearchItemKind
 from src.foundation.research_data.domain.as_of_binding import bind_as_of
