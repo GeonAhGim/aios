@@ -1,20 +1,21 @@
-"""BT-10 — 즉시 백테스트의 주문 1건 생애주기(BT-2~8 조립, 재구현 없음).
+"""BT-10 — Lifecycle of a single order in instant backtest (compose BT-2..8, no re-implementation).
 
 Spec: docs/specs/L4_analytics_authoring_backtest_marketplace_v1.0.md §2.5 BT-10,
-§3.4. `quick_backtest.py`(루프·전략 접점)에서 분리한 이유는 300줄 상한 —
-이 파일의 단일 책임은 "대기 주문 하나가 어느 봉에서 얼마에 얼마나 체결되고
-포지션 비용이 어떻게 정산되는가"이며, 봉 순회·전략 호출은 하지 않는다.
+§3.4. Split from `quick_backtest.py` (loop/strategy touchpoint) to keep this file
+under 300 lines — its sole responsibility is "how one pending order fills at what
+price and quantity on which bar, and how position cost settles"; it does not iterate
+bars or call strategies.
 
-위임 표(각 함수가 호출하는 도메인 리프):
+Delegation table (domain leaf each function calls):
 - `submit_order`   → BT-4 `latency.resolve_execution_bar_index`,
                      BT-6 `order_types.ensure_order_type_enabled`
-- `price_path`     → BT-7 `magnifier.magnify`(하위 TF 슬라이스는 여기서 자른다)
+- `price_path`     → BT-7 `magnifier.magnify` (sub-TF slices are cut here)
 - `try_fill`       → BT-6 `is_limit_triggered`/`is_stop_triggered`,
-                     BT-5 `compute_partial_fill`(잔량 이월은 호출자),
+                     BT-5 `compute_partial_fill` (carryover is caller's job),
                      BT-2 `apply_slippage`, BT-3 `compute_commission`
 - `settle_costs`   → BT-8 `compute_funding_cost`/`compute_borrow_cost`
 
-순수 함수만 — I/O·시계·난수 없음, 금액은 전부 `Decimal`.
+Pure functions only — no I/O, no clock, no randomness; amounts are all `Decimal`.
 """
 from __future__ import annotations
 
@@ -46,13 +47,14 @@ _ZERO = Decimal("0")
 
 
 class QuickBacktestInputError(ValueError):
-    """`BT_QUICK_INPUT` — 입력 자체가 계약을 만족하지 못한다(fail-closed)."""
+    """`BT_QUICK_INPUT` — the input itself violates the contract (fail-closed)."""
 
 
 @dataclass(frozen=True, slots=True)
 class OrderIntent:
-    """전략이 봉 하나에서 내는 주문 의도. `limit`/`stop`은 `trigger_price` 필수.
-    OCO·트레일링은 즉시 백테스트 범위 밖(BT-11)이라 표현할 수 없다."""
+    """Order intent the strategy places on a single bar. `trigger_price` is required
+    for `limit`/`stop`. OCO and trailing orders are out of scope for instant backtest
+    (BT-11) and cannot be expressed here."""
 
     side: OrderSide
     quantity: Decimal
@@ -69,19 +71,19 @@ class FillEvent:
     quantity: Decimal
     price: Decimal
     commission: Decimal
-    remaining_quantity: Decimal  # 부분체결(BT-5) 이월 잔량 — 0이면 완전 체결
+    remaining_quantity: Decimal  # Carryover from partial fill (BT-5) — 0 = fully filled
 
 
 @dataclass(slots=True)
 class PendingOrder:
     intent: OrderIntent
     remaining: Decimal
-    execution_index: int  # BT-4가 정한 첫 체결 가능 봉
+    execution_index: int  # First fillable bar as determined by BT-4
 
 
 @dataclass(frozen=True, slots=True)
 class Holding:
-    """비용 정산(BT-8) 단위 — 포지션이 0에서 벗어난 시점부터 0으로 돌아올 때까지."""
+    """Unit for cost settlement (BT-8) — from when position leaves 0 until it returns."""
 
     opened_at: datetime
     side: OrderSide
@@ -92,8 +94,9 @@ def submit_order(
     config: BacktestConfigV2, intent: OrderIntent, columns: CandleColumns, signal_index: int,
     *, timeframe: Timeframe,
 ) -> PendingOrder | None:
-    """봉 `signal_index`의 open_time에 제출된 주문의 첫 체결 가능 봉을 BT-4로
-    정한다. 데이터 범위 안에 그런 봉이 없으면(갭·말단) `None`(만료)."""
+    """Determines the first fillable bar for an order submitted at the open_time of
+    bar `signal_index`, per BT-4. Returns `None` if no such bar exists within the
+    data range (gap or end-of-data = expired)."""
     if intent.quantity.is_nan() or intent.quantity <= 0:
         raise QuickBacktestInputError(f"주문 수량은 양수여야 한다: {intent.quantity}")
     if intent.order_type != "market":
@@ -102,11 +105,11 @@ def submit_order(
             raise QuickBacktestInputError(f"{intent.order_type} 주문은 trigger_price가 필요하다")
     step_ms = int(duration(timeframe).total_seconds() * 1000)
     tail_start = signal_index + 1
-    span = config.latency_ms // step_ms + 2  # 지연이 덮는 봉 수 + 여유 — 슬라이스 복사 상한
+    span = config.latency_ms // step_ms + 2  # latency span + margin — max bars to copy
     short_tail = columns.ts[tail_start : tail_start + span]
     offset = _resolve_offset(config, columns, signal_index, short_tail)
     if offset is None and tail_start + span < len(columns):
-        # 짧은 창 안에 없을 때만(갭) 전체 꼬리를 복사한다 — 주문마다 O(n) 복사를 피한다.
+        # Copy the full tail only when not within a short window (gap) — avoids O(n) copy per order.
         offset = _resolve_offset(config, columns, signal_index, columns.ts[tail_start:])
     if offset is None:
         return None
@@ -146,8 +149,9 @@ def price_path(
     config: BacktestConfigV2, columns: CandleColumns, i: int, *, timeframe: Timeframe,
     lower_columns: CandleColumns | None, lower_cursor: int,
 ) -> tuple[tuple[Decimal, ...], int]:
-    """봉 `i`의 가격 방문 순서(BT-7)와 전진한 하위 봉 커서. 하위 봉은 시간순
-    정렬 전제(어댑터 ORDER BY)로 커서를 한 방향으로만 옮겨 전체 O(n)."""
+    """Price visit order on bar `i` (BT-7) and the advanced sub-bar cursor. Sub-bars
+    are assumed sorted chronologically (adapter ORDER BY); the cursor only moves
+    forward, yielding O(n) total."""
     bar = HigherBar(
         open_time=columns.ts[i], open=columns.open[i], high=columns.high[i],
         low=columns.low[i], close=columns.close[i],
@@ -170,12 +174,13 @@ def _triggered(intent: OrderIntent, trigger: Decimal, lo: Decimal, hi: Decimal) 
 
 
 def _reference_price(intent: OrderIntent, path: tuple[Decimal, ...]) -> Decimal | None:
-    """가격 방문 순서를 세그먼트로 훑어 BT-6 트리거가 처음 닿는 지점의 기준가.
-    세그먼트 시작가가 이미 트리거를 넘겼으면(갭) 그 시작가로 체결한다."""
+    """Sweep the price visit order by segment to find the reference price at the
+    first point where the BT-6 trigger is touched. If the segment's open price
+    already crossed the trigger (gap), fill at that open price."""
     if intent.order_type == "market":
         return path[0]
     trigger = intent.trigger_price
-    if trigger is None:  # submit_order가 이미 거부한 경로 — 방어적 fail-closed
+    if trigger is None:  # path already rejected by submit_order — defensive fail-closed
         raise QuickBacktestInputError(f"{intent.order_type} 주문은 trigger_price가 필요하다")
     prev = path[0]
     for point in path:
@@ -189,8 +194,8 @@ def try_fill(
     config: BacktestConfigV2, pending: PendingOrder, i: int, columns: CandleColumns,
     path: tuple[Decimal, ...],
 ) -> FillEvent | None:
-    """봉 `i`에서 대기 주문을 체결 시도한다. 트리거 미달·거래량 0이면 `None`
-    (호출자가 다음 봉으로 이월)."""
+    """Attempt to fill the pending order on bar `i`. Returns `None` if the trigger
+    is not hit or volume is zero (caller carries it to the next bar)."""
     intent = pending.intent
     reference = _reference_price(intent, path)
     if reference is None:
@@ -219,15 +224,16 @@ def try_fill(
 def settle_costs(
     config: BacktestConfigV2, holding: Holding, exit_time: datetime, funding_rate: Decimal | None
 ) -> tuple[Decimal, Decimal]:
-    """(펀딩, 차입) 비용. `funding=False`면 BT-8이 rate를 보지 않고 0을 돌려주고,
-    `True`면 호출자(`run_quick_backtest`)가 rate 존재를 미리 강제했다."""
+    """(funding, borrow) costs. When `funding=False`, BT-8 ignores the rate and
+    returns 0; when `True`, the caller (`run_quick_backtest`) pre-enforced that
+    a rate exists."""
     rate = funding_rate if funding_rate is not None else _ZERO
     funding = compute_funding_cost(
         config.costs, side=holding.side, notional=holding.notional, funding_rate=rate,
         entry_time=holding.opened_at, exit_time=exit_time,
     )
     borrow = _ZERO
-    if holding.side == OrderSide.SELL:  # 차입은 공매도(숏) 포지션에만
+    if holding.side == OrderSide.SELL:  # borrow cost applies to short (sell) positions only
         borrow = compute_borrow_cost(
             config.costs, notional=holding.notional, entry_time=holding.opened_at,
             exit_time=exit_time,
