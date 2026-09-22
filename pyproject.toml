@@ -77,8 +77,18 @@ asyncio_mode = "auto"
 # timeout_timer 참고). 얻는 것은 오직 "무엇이 원인인지 알 수 있다"이지
 # "하나가 죽어도 스위트는 산다"가 아니다. 후자를 원하면 pytest-xdist로 여러
 # 워커 프로세스에 분산해야 한다(워커별 DB 격리는 PLT-36/d0b948a로 이미
-# 준비돼 있으나, task-1986 실측에서 `-n 4`가 직렬 실행엔 없던 실패 6건을
-# 새로 드러내 아직 CI에 배선하지 않았다 — 격리 결함을 먼저 고칠 것).
+# 준비돼 있다). task-1986 실측 당시 `-n 4`가 직렬 실행엔 없던 실패 6건
+# (migration_tenant_membership, ledger verify_integrity x2, ledger
+# scheduler_purge_expired, oms outbox_repository x2)을 드러내 CI 배선을
+# 보류했었다 — task-3308 재검증(`pytest -n 4
+# tests/integration/foundation/ledger/ tests/integration/oms/
+# test_outbox_repository.py tests/integration/db/
+# test_migration_tenant_membership.py`, 140 passed)에서 해당 6건은 이미
+# 재발하지 않음을 확인했다(oms 2건은 task-1949, ledger 계열은 bf513da8/
+# 126fa0d7 DEEPEN이 격리 오토유즈 픽스처를 보강하며 함께 고쳐짐). `-n`을
+# 실제 CI 러너(`C:\aios\pm\local_ci.py`)에 배선하는 작업은 fleet 코드라
+# 별도 ops 레인 task로만 진행한다(CLAUDE.md — 워커가 C:\aios\pm을 직접
+# 고치지 않는다).
 # 값(120s)은 tests/conftest.py retry_too_many_connections 최악 백오프(~31s)와
 # 이 리포의 로컬 공유 Postgres 지연 배율을 감안한 여유치이고, perf 마커
 # 테스트는 의도적으로 더 크게 재정의한다(아래 tests/conftest.py
