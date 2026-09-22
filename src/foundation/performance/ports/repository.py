@@ -1,5 +1,5 @@
-"""Performance Reporting repository/input 포트. domain은 이 Protocol만 알고,
-실제 구현(adapters/)은 모른다(71번 §4).
+"""Performance Reporting repository/input port. The domain knows only this
+Protocol; actual implementations (adapters/) remain unknown (71 §4).
 
 Spec: docs/specs/L4_strategy_portfolio_backtest_v1.0.md §2.6.
 """
@@ -22,15 +22,16 @@ class PerformanceRepository(Protocol):
     async def get_methodology(self, version: str) -> Methodology | None: ...
 
     async def insert_methodology(self, methodology: Methodology) -> Methodology:
-        """버전 문자열이 내용 주소 성격이라(methodology_hash가 정의를 완전히
-        결정) 이미 있으면 재정의하지 않고 기존 행을 그대로 반환한다
-        (구현체가 `ON CONFLICT DO NOTHING` + 재조회로 멱등성을 보장)."""
+        """The version string acts as a content address (methodology_hash fully
+        defines the body), so if it already exists we skip re-insertion and
+        return the existing row (implementation guarantees idempotency via
+        `ON CONFLICT DO NOTHING` + re-query)."""
         ...
 
     async def insert_statement(self, statement: PerformanceStatement) -> PerformanceStatement:
-        """M5 `performance_statement`은 `REVOKE UPDATE, DELETE`(WORM) — append만
-        가능하다. 정정은 새 리비전(state=CORRECTED)을 또 insert하는 것으로
-        표현한다(correct_statement.py, L49)."""
+        """M5 `performance_statement` is `REVOKE UPDATE, DELETE` (WORM) — only
+        appends are allowed. Corrections are expressed by inserting another
+        revision (state=CORRECTED) (correct_statement.py, L49)."""
         ...
 
     async def get_statement(
@@ -45,42 +46,47 @@ class PerformanceRepository(Protocol):
         self, *, tenant_id: UUID, scope: str, scope_ref: str, period_start: datetime,
         period_end: datetime, methodology_version: str,
     ) -> PerformanceStatement | None:
-        """같은 (tenant, scope, scope_ref, period, methodology_version)의 가장
-        최신 리비전 — 정정 여부를 확인하거나 `prior_statement_id` 체인을 이을
-        때 쓴다. `methodology_version`도 키에 포함하는 이유(PRF-009): 방법론이
-        바뀌면 이전 방법론의 리비전 번호를 이어받지 않고 새 계보를 시작해야
-        "조용한 재계산"이 아니라 "새 statement"임이 리비전 번호 자체로도
-        드러난다."""
+        """The latest revision for the same (tenant, scope, scope_ref, period,
+        methodology_version) — used to check whether a correction exists or to
+        chain `prior_statement_id`. Reason `methodology_version` is part of the
+        key (PRF-009): when the methodology changes, the revision number must
+        start a new lineage rather than continuing the previous one, so that
+        the revision number itself signals "new statement" rather than
+        "quiet recalculation"."""
         ...
 
     async def insert_attribution(self, slice_: AttributionSlice) -> AttributionSlice:
-        """`slice_.statement_id`가 대상을 가리킨다(reconciliation의
-        `insert_run_with_items`처럼 부모-자식을 한 호출로 묶지 않는 이유는
-        attribution이 statement 계산 이후 별도 단계(선택적 분해)이기
-        때문 — L49가 실제 호출 순서를 정한다)."""
+        """`slice_.statement_id` points to the target statement. We do not
+        bundle parent-child into a single call (unlike reconciliation's
+        `insert_run_with_items`) because attribution is a separate optional
+        decomposition step that runs after the statement is computed — L49
+        defines the actual call order."""
         ...
 
     async def list_attribution(self, statement_id: UUID) -> tuple[AttributionSlice, ...]: ...
 
 
 class StatementInputPort(Protocol):
-    """스코프(PAPER/LIVE)별 입력 조립 — `PaperStatementInputAdapter`(L48)가
-    이 포트를 구현한다. compute_statement.py(L49)는 스코프가 뭔지 몰라도
-    이 포트 하나만으로 계산에 필요한 입력을 전부 얻는다."""
+    """Input assembly per scope (PAPER/LIVE) — `PaperStatementInputAdapter`
+    (L48) implements this port. compute_statement.py (L49) knows nothing
+    about scopes; it gets all inputs needed for computation through this
+    single port."""
 
     async def load_reconciled_snapshots(
         self, *, scope_ref: str, period_start: datetime, period_end: datetime
     ) -> tuple[ValuationSnapshot, ...]:
-        """RESOLVED 상태가 아닌(미리컨실) 기간이 섞여 있으면 그 사실 자체를
-        `ValuationSnapshot.state != RECONCILED`로 표현한다 — 조용히 걸러내지
-        않는다(호출부가 판단할 수 있게)."""
+        """If periods that are not RESOLVED (pre-reconciliation) are mixed in,
+        express that fact itself as
+        `ValuationSnapshot.state != RECONCILED` — do not silently filter
+        them out (let the caller decide)."""
         ...
 
     async def load_fills(
         self, *, scope_ref: str, period_start: datetime, period_end: datetime
     ) -> tuple[dict[str, object], ...]:
-        """체결 원장(수수료·체결가 포함) — 구조는 어댑터가 소유(71번 §4,
-        performance는 paper_control의 원시 스키마를 직접 알 필요 없다)."""
+        """Fill ledger (includes fees and execution prices) — the structure is
+        owned by the adapter (71 §4; performance does not need to know
+        paper_control's raw schema directly)."""
         ...
 
     async def load_cashflows(
