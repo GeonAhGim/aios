@@ -22,10 +22,10 @@ from uuid import uuid4
 
 import pytest
 
+from src.data.models.trading import OrderSide, OrderStatus
 from src.foundation.ems.contracts.v1 import (
     AlgoKind,
     AlgoSpec,
-    OrderSide,
     ParentOrder,
     ParentOrderConstraints,
 )
@@ -289,8 +289,6 @@ class TestPovInvariants:
 
     def test_terminal_parent_raises(self, parent_order: ParentOrder) -> None:
         """A terminal parent may not spawn new children (EM-A4)."""
-        from src.foundation.ems.contracts.v1 import OrderStatus
-
         parent_order.status = OrderStatus.FILLED
         slice_count = _slice_count(parent_order)
         volume_profile = [Decimal("1000000")] * slice_count
