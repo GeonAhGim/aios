@@ -18,6 +18,8 @@ from uuid import UUID
 
 from pydantic import BaseModel, field_validator
 
+from src.foundation.mandates.contracts._frozen_containers import FrozenDict, FrozenList
+
 SCHEMA_VERSION = "v1"
 
 _SHA256_HEX_RE = re.compile(r"^[0-9a-f]{64}$")
@@ -39,63 +41,6 @@ def _validate_tz_aware(value: datetime) -> datetime:
     if value.tzinfo is None:
         raise ValueError("must be tz-aware (naive datetime rejected)")
     return value
-
-
-class _FrozenDict(dict):  # type: ignore[type-arg]
-    """`dict` subclass that raises on every mutating call.
-
-    `frozen=True` on a pydantic model only blocks reassigning the field
-    itself (`model.evidence = {}`); the dict object it points at is still an
-    ordinary mutable dict, so `model.evidence.clear()` succeeds silently
-    (I-09 violation, task-4937 REJECT of task-4916). Wrapping the value in
-    this subclass at construction time keeps the declared field type as
-    `dict[str, Any]` (no public contract-type change — P5 guard) while
-    closing that hole: any call through the mutating dict API raises
-    instead of tampering the content in place.
-    """
-
-    def _blocked(self, *_args: object, **_kwargs: object) -> Any:
-        raise TypeError("this dict is frozen (I-09) — mutation is not allowed")
-
-    __setitem__ = _blocked
-    __delitem__ = _blocked
-    clear = _blocked
-    pop = _blocked
-    popitem = _blocked
-    setdefault = _blocked
-    update = _blocked
-
-    def __reduce__(self) -> tuple[Any, ...]:
-        # Default dict pickling round-trips through `update`/`__setitem__`,
-        # which are blocked above — reconstruct via the constructor instead
-        # (pickling crosses a process boundary, e.g. ProcessPoolExecutor).
-        return (self.__class__, (dict(self),))
-
-
-class _FrozenList(list):  # type: ignore[type-arg]
-    """`list` subclass that raises on every mutating call — see `_FrozenDict`."""
-
-    def _blocked(self, *_args: object, **_kwargs: object) -> Any:
-        raise TypeError("this list is frozen (I-09) — mutation is not allowed")
-
-    __setitem__ = _blocked
-    __delitem__ = _blocked
-    __iadd__ = _blocked
-    __imul__ = _blocked
-    append = _blocked
-    extend = _blocked
-    insert = _blocked
-    remove = _blocked
-    pop = _blocked
-    clear = _blocked
-    sort = _blocked
-    reverse = _blocked
-
-    def __reduce__(self) -> tuple[Any, ...]:
-        # Default list pickling round-trips through `extend`/`append`,
-        # which are blocked above — reconstruct via the constructor instead
-        # (pickling crosses a process boundary, e.g. ProcessPoolExecutor).
-        return (self.__class__, (list(self),))
 
 
 class MandateRevisionState(str, Enum):
@@ -204,7 +149,7 @@ class RuleHit(BaseModel, frozen=True):
     @field_validator("evidence")
     @classmethod
     def _freeze_evidence(cls, value: dict[str, Any]) -> dict[str, Any]:
-        return _FrozenDict(value)
+        return FrozenDict(value)
 
 
 class ComplianceDecision(BaseModel, frozen=True):
@@ -243,7 +188,7 @@ class ComplianceDecision(BaseModel, frozen=True):
     @field_validator("rule_hits")
     @classmethod
     def _freeze_rule_hits(cls, value: list[RuleHit]) -> list[RuleHit]:
-        return _FrozenList(value)
+        return FrozenList(value)
 
 
 class PolicyDecisionRow(BaseModel, frozen=True):
@@ -274,7 +219,7 @@ class PolicyDecisionRow(BaseModel, frozen=True):
     @field_validator("reason_codes")
     @classmethod
     def _freeze_reason_codes(cls, value: list[str]) -> list[str]:
-        return _FrozenList(value)
+        return FrozenList(value)
 
 
 # `policy_decision.outcome` has two states — REQUIRE_APPROVAL and
