@@ -25,7 +25,7 @@ from __future__ import annotations
 import time
 from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import pytest
 
@@ -44,7 +44,7 @@ from src.foundation.market_data.domain.corporate_actions.adjustment import (
 )
 
 
-def _candle(instrument_id: object, open_time: datetime, close: Decimal) -> CandleRecord:
+def _candle(instrument_id: UUID, open_time: datetime, close: Decimal) -> CandleRecord:
     key = SeriesKey(venue=Venue.KIS_KRX, instrument_id=instrument_id, timeframe=Timeframe.D1)
     return CandleRecord(
         key=key,
@@ -58,7 +58,7 @@ def _candle(instrument_id: object, open_time: datetime, close: Decimal) -> Candl
     )
 
 
-def _split(instrument_id: object, ex_date: date, ratio: str) -> CorporateAction:
+def _split(instrument_id: UUID, ex_date: date, ratio: str) -> CorporateAction:
     return CorporateAction(
         action_type="SPLIT",
         instrument_id=instrument_id,
