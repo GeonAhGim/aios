@@ -682,7 +682,7 @@ CI 신규 게이트 테스트: `tests/platform/unit/test_check_scripts.py`가 `c
 | PLT-29 | `grant/suspend/revoke_membership.py` + `trust_memberships.py` 라우터 + 적대 테스트 | 28,24 | last-owner 거부, 세션 revoke 부작용, cross-tenant 403 | 400 |
 | PLT-30 | `src/db/roles.sql` + M5 `rls_policies`(tenant_id 컬럼 테이블 전수) + `core/db/tenant_scope.py` + `test_rls_*` 3종 | 26 | CI Postgres에서 `aios_app` role 생성 스텝 추가; WHERE 없는 SELECT 0행 | 350 |
 | PLT-31 | `key_ring.py` + `encryption.py` 포맷 변경 + 단위 테스트 | — | 레거시 토큰 복호, LIVE 변수 기동 거부 | 220 |
-| PLT-32 | `envelope.py`(봉투 암호화), `secret_ref.py`, `secret_handle.py` | 31 | seal/open/rewrap 왕복; 핸들 종료 후 bytearray 0 | 260 |
+| PLT-32 | `envelope.py`(봉투 암호화), `secret_ref.py` | 31 | seal/open/rewrap 왕복. `secret_handle.py`는 task-1722(dcd2dda3)에서 소비자 없음으로 삭제됨 — 핸들 zeroize DoD는 더 이상 적용되지 않음(CTO 결정, task-3152, 2026-09-16). `envelope.py`/`secret_ref.py`도 현재 소비자 0건이므로 추가 DEEPEN(적대 테스트 강화 등)은 **실제 소비자를 도입하는 리프가 생길 때** 그 리프와 함께 수행한다 — 소비자 부재 상태에서 단독 DEEPEN 착수 금지 | 260 |
 | PLT-33 | M6 `exchange_credentials_key_version_scope`(key_id, scope, UNIQUE 교체) + `exchange_credential_service.py`·`credential_resolver.py` 수정 | 32 | 기존 자격증명 테스트 통과(legacy kid 복호), `test_secret_scope_isolation.py`, `test_log_leak.py` | 350 |
 | PLT-34 | `scripts/rotate_credential_keys.py` + `test_key_rotation.py` + RB-05 | 33 | 100행 회전 멱등·중단 재실행 | 200 |
 | PLT-35 | M7 `break_glass_grant` + `break_glass.py` + `admin_deps.py` 수정(MFA 필수) | 24 | 자기승인·만료·이중소비 거부; admin 라우트 MFA 미달 403 | 300 |
