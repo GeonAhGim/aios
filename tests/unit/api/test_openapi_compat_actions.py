@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import json
 import subprocess
+from typing import Any
 
 import pytest
 
@@ -20,7 +21,7 @@ import scripts.check_openapi_compat as compat_module
 from scripts.check_openapi_compat import find_violations, main
 
 
-def _schema(*, paths: dict, schemas: dict | None = None) -> dict:
+def _schema(*, paths: dict[str, Any], schemas: dict[str, Any] | None = None) -> dict[str, Any]:
     return {"paths": paths, "components": {"schemas": schemas or {}}}
 
 
@@ -30,7 +31,7 @@ _TYPE_CHANGE = "property type 변경"
 # ── DEEPEN 1956: 실패주입·수치성능단언·게이트적색재현 ──────────────────────
 
 
-def _api_response_envelope(data_ref: str, meta_ref: str = "#/components/schemas/Meta") -> dict:
+def _api_response_envelope(data_ref: str, meta_ref: str = "#/components/schemas/Meta") -> dict[str, Any]:
     """ApiResponse_XXX_ 봉투 스키마를 만든다."""
     return {
         "type": "object",
@@ -41,7 +42,7 @@ def _api_response_envelope(data_ref: str, meta_ref: str = "#/components/schemas/
     }
 
 
-def _meta_schema() -> dict:
+def _meta_schema() -> dict[str, Any]:
     return {
         "type": "object",
         "properties": {
@@ -51,24 +52,24 @@ def _meta_schema() -> dict:
     }
 
 
-def _string_prop(**overrides) -> dict:
-    base = {"type": "string", "format": "uuid"}
+def _string_prop(**overrides: Any) -> dict[str, Any]:
+    base: dict[str, Any] = {"type": "string", "format": "uuid"}
     base.update(overrides)
     return base
 
 
-def _integer_prop(**overrides) -> dict:
-    base = {"type": "integer"}
+def _integer_prop(**overrides: Any) -> dict[str, Any]:
+    base: dict[str, Any] = {"type": "integer"}
     base.update(overrides)
     return base
 
 
-def _array_items_ref(data_ref: str) -> dict:
+def _array_items_ref(data_ref: str) -> dict[str, Any]:
     """배열 items의 $ref 패턴."""
     return {"type": "array", "items": {"$ref": data_ref}}
 
 
-def test_failure_injection_deleted_nested_property_via_envelope_fails():
+def test_failure_injection_deleted_nested_property_via_envelope_fails() -> None:
     """실패주입: 봉투($ref) 경유로 중첩 프로퍼티 삭제 시 MAJOR 위반을 캐야 한다.
 
     실측 시나리오: AccountConnectionView.created_at를 봉투 ApiResponse_AccountConnectionView_.data
@@ -122,7 +123,7 @@ def test_failure_injection_deleted_nested_property_via_envelope_fails():
     )
 
 
-def test_failure_injection_enum_reduction_via_nested_ref_fails():
+def test_failure_injection_enum_reduction_via_nested_ref_fails() -> None:
     """실패주입: $ref로 참조된 스키마의 enum 축소를 탐지해야 한다.
 
     enum 항목이 줄어들면 MAJOR 위반이어야 한다.
@@ -166,7 +167,7 @@ def test_failure_injection_enum_reduction_via_nested_ref_fails():
     )
 
 
-def test_failure_injection_type_change_nested_via_array_items_fails():
+def test_failure_injection_type_change_nested_via_array_items_fails() -> None:
     """실패주입: 배열 items의 $ref 대상에서 타입 변경을 탐지해야 한다.
 
     배열 items로 참조된 객체의 프로퍼티 타입이 변경되면 MAJOR 위반.
@@ -217,7 +218,7 @@ def test_failure_injection_type_change_nested_via_array_items_fails():
     )
 
 
-def test_performance_assertion_nested_ref_recursion_budget():
+def test_performance_assertion_nested_ref_recursion_budget() -> None:
     """수치 성능 단언: 중첩 $ref 재귀가 100개 스키마에서도 1초 이내에 완료된다.
 
     PLT-16의 재귀 비교가 스키마 수가 많아져도 실용적인 시간 내에 종료되어야 한다.
@@ -263,7 +264,7 @@ def test_performance_assertion_nested_ref_recursion_budget():
     assert violations == [], f"동일 스키마에서 위반이 없어야 함: {violations}"
 
 
-def test_gate_red_reproduction_account_connection_view_deletion():
+def test_gate_red_reproduction_account_connection_view_deletion() -> None:
     """게이트적색재현: 이전 실측 시나리오(AccountConnectionView.created_at 삭제) 재현.
 
      실 v1.json 패턴: ApiResponse_AccountConnectionView_.data → AccountConnectionView
@@ -326,7 +327,7 @@ def test_gate_red_reproduction_account_connection_view_deletion():
 # 원칙을 이 서브프로세스 경계에서 실증한다.
 
 
-def test_main_propagates_when_export_subprocess_fails(monkeypatch, tmp_path):
+def test_main_propagates_when_export_subprocess_fails(monkeypatch: Any, tmp_path: Any) -> None:
     """실패 주입: export_openapi.py가 비정상 종료(예: 앱 임포트 깨짐)하면
     예외가 그대로 전파돼야 한다 — 삼켜서 exit 0을 내면 안 된다."""
     baseline = _schema(
@@ -350,16 +351,16 @@ def test_main_propagates_when_export_subprocess_fails(monkeypatch, tmp_path):
     baseline_path = tmp_path / "baseline.json"
     baseline_path.write_text(json.dumps(baseline), encoding="utf-8")
 
-    def _fail(*args, **kwargs):
+    def _fail(*args: Any, **kwargs: Any) -> None:
         raise subprocess.CalledProcessError(returncode=1, cmd=["export_openapi"])
 
-    monkeypatch.setattr(compat_module.subprocess, "run", _fail)
+    monkeypatch.setattr(compat_module.subprocess, "run", _fail)  # type: ignore[attr-defined]
 
     with pytest.raises(subprocess.CalledProcessError):
         main(["--baseline", str(baseline_path)])
 
 
-def test_main_propagates_when_export_subprocess_lies_about_success(monkeypatch, tmp_path):
+def test_main_propagates_when_export_subprocess_lies_about_success(monkeypatch: Any, tmp_path: Any) -> None:
     """실패 주입: 서브프로세스가 returncode 0으로 끝나도 출력 파일을 쓰지
     않으면(부분 실패·버그) 그 누락을 놓치고 통과시키면 안 된다."""
     baseline = _schema(
@@ -383,10 +384,10 @@ def test_main_propagates_when_export_subprocess_lies_about_success(monkeypatch, 
     baseline_path = tmp_path / "baseline.json"
     baseline_path.write_text(json.dumps(baseline), encoding="utf-8")
 
-    def _noop_run(*args, **kwargs):
+    def _noop_run(*args: Any, **kwargs: Any) -> subprocess.CompletedProcess[bytes]:
         return subprocess.CompletedProcess(args=["export_openapi"], returncode=0)
 
-    monkeypatch.setattr(compat_module.subprocess, "run", _noop_run)
+    monkeypatch.setattr(compat_module.subprocess, "run", _noop_run)  # type: ignore[attr-defined]
 
     with pytest.raises(FileNotFoundError):
         main(["--baseline", str(baseline_path)])
