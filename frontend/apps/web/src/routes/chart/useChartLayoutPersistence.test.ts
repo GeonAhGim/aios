@@ -3,6 +3,7 @@ import { act, renderHook, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { createEmptyLayoutModel, encodeLayoutModel, type ChartLayoutModel } from "@aios/chart-engine/src/layout/layoutModel";
 import type { ChartingLayoutRecord, ChartingPort } from "@aios/chart-engine/src/layout/persistence";
+import { perfBudgetMs } from "../../test/perfBudget";
 import {
   useChartLayoutPersistence,
   type UseChartLayoutPersistenceOptions,
@@ -291,8 +292,8 @@ describe("failure injection: save() 결과 코드 x 기존 레이아웃 유무 �
 });
 
 describe("performance: 대량 저장 레이아웃 목록에서 최신본 선택", () => {
-  it("2,000개의 저장된 레이아웃 중 최신본을 골라 ready 상태에 도달하기까지 고정 ms 예산 이내에 끝난다", async () => {
-    const records: ChartingLayoutRecord[] = Array.from({ length: 2000 }, (_, i) =>
+  it("8,000개의 저장된 레이아웃 중 최신본을 골라 ready 상태에 도달하기까지 고정 ms 예산 이내에 끝난다", async () => {
+    const records: ChartingLayoutRecord[] = Array.from({ length: 8000 }, (_, i) =>
       layoutRecord(savedModelFor(BASE_VIEW), {
         id: `layout-${i}`,
         updatedAt: new Date(Date.UTC(2020, 0, 1, 0, 0, i)).toISOString(),
@@ -305,11 +306,19 @@ describe("performance: 대량 저장 레이아웃 목록에서 최신본 선택"
     await waitFor(() => expect(result.current.status).toBe("ready"));
     const elapsedMs = performance.now() - start;
 
-    expect(result.current.layoutId).toBe("layout-1999"); // 가장 최신 updatedAt.
-    // 넉넉한 고정 예산(상대 래칫 아님): 최신본 선택이 실수로 O(n^2)(예: 매
-    // 후보마다 배열을 다시 스캔하는 최댓값 탐색)이 되면 2,000건에서 확실히
-    // 넘긴다.
-    expect(elapsedMs).toBeLessThan(5000);
+    expect(result.current.layoutId).toBe("layout-7999"); // 가장 최신 updatedAt.
+    // task-4909 XREV(task-4907) 재실측: 2,000건 + 5,000ms 예산이던 이전 버전은
+    // 매 후보마다 배열을 다시 스캔하는 O(n^2) 최댓값 탐색 뮤턴트를 이 훅
+    // 자리에 넣고 돌려도 실측 ~92ms로 예산을 여유 있게 통과해 회귀를 잡지
+    // 못했다. 원인은 정렬 자체(O(n log n), 2,000건에서 1ms 미만)가 아니라
+    // 이 훅-레벨 테스트의 고정 오버헤드(RTL waitFor 폴링·렌더)가 ~75-95ms로
+    // 지배적이어서 O(n^2) 추가 비용(2,000건 ~92ms)이 잡음에 묻히기 때문이다.
+    // 건수를 8,000으로 늘리면 O(n^2) 추가 비용만 ~2,300-2,500ms로 커지는 반면
+    // 정렬 기반 실제 구현은 8,000건에서도 고정 오버헤드에 묻혀 ~70-95ms
+    // 그대로다(실측 6회 평균) — 실제/뮤턴트 사이에 25배 이상 여유 있는 간극이
+    // 생겨 예산을 실제 구현의 ~6배, 뮤턴트의 1/4 미만으로 좁혀도 흔들리지
+    // 않는다.
+    expect(elapsedMs).toBeLessThan(perfBudgetMs(600));
   });
 });
 
