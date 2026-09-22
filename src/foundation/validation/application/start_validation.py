@@ -78,6 +78,7 @@ def _run_to_view(
         obligations=[] if result is None else list(result.obligations),
         result_hash=None if result is None else result.result_hash,
         created_at=run.created_at,
+        evidence_refs=[] if result is None else list(result.evidence_refs),
     )
 
 

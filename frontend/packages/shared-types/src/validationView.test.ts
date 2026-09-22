@@ -54,6 +54,20 @@ describe("parseValidationResultView", () => {
     expect(parseValidationResultView({ ...RESULT, warnings: ["ok", 1] })).toBeNull();
   });
 
+  it("evidence_refs가 채워져도(증빙 스냅샷 참조) 그대로 보존한다", () => {
+    const withEvidence = { ...RESULT, evidence_refs: ["snapshot:abc123"] };
+    expect(parseValidationResultView(withEvidence)).toEqual(withEvidence);
+  });
+
+  it("negative: evidence_refs 필드가 없으면 null이다", () => {
+    const { evidence_refs: _drop, ...missing } = RESULT;
+    expect(parseValidationResultView(missing)).toBeNull();
+  });
+
+  it("negative: evidence_refs 안에 문자열이 아닌 값이 섞이면 null이다", () => {
+    expect(parseValidationResultView({ ...RESULT, evidence_refs: ["snapshot:abc", 1] })).toBeNull();
+  });
+
   it("negative: schema_version이 v1이 아니면 null이다(무음 통과 금지)", () => {
     expect(parseValidationResultView({ ...RESULT, schema_version: "v2" })).toBeNull();
   });
