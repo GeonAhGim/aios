@@ -12,10 +12,14 @@ mutating call raises instead — while the declared field type stays
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, TypeVar
+
+K = TypeVar("K")
+V = TypeVar("V")
+T = TypeVar("T")
 
 
-class FrozenDict(dict):  # type: ignore[type-arg]
+class FrozenDict(dict[K, V]):
     """`dict` subclass that raises on every mutating call."""
 
     def _blocked(self, *_args: object, **_kwargs: object) -> Any:
@@ -36,7 +40,7 @@ class FrozenDict(dict):  # type: ignore[type-arg]
         return (self.__class__, (dict(self),))
 
 
-class FrozenList(list):  # type: ignore[type-arg]
+class FrozenList(list[T]):
     """`list` subclass that raises on every mutating call — see `FrozenDict`."""
 
     def _blocked(self, *_args: object, **_kwargs: object) -> Any:

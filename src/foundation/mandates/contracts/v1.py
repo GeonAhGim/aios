@@ -149,7 +149,7 @@ class RuleHit(BaseModel, frozen=True):
     @field_validator("evidence")
     @classmethod
     def _freeze_evidence(cls, value: dict[str, Any]) -> dict[str, Any]:
-        return FrozenDict(value)
+        return FrozenDict[str, Any](value)
 
 
 class ComplianceDecision(BaseModel, frozen=True):
@@ -188,7 +188,7 @@ class ComplianceDecision(BaseModel, frozen=True):
     @field_validator("rule_hits")
     @classmethod
     def _freeze_rule_hits(cls, value: list[RuleHit]) -> list[RuleHit]:
-        return FrozenList(value)
+        return FrozenList[RuleHit](value)
 
 
 class PolicyDecisionRow(BaseModel, frozen=True):
@@ -219,7 +219,7 @@ class PolicyDecisionRow(BaseModel, frozen=True):
     @field_validator("reason_codes")
     @classmethod
     def _freeze_reason_codes(cls, value: list[str]) -> list[str]:
-        return FrozenList(value)
+        return FrozenList[str](value)
 
 
 # `policy_decision.outcome` has two states — REQUIRE_APPROVAL and
