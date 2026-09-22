@@ -9,6 +9,7 @@ from __future__ import annotations
 import uuid
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
+from typing import cast
 
 import asyncpg
 import pytest
@@ -33,17 +34,17 @@ from src.foundation.market_data.contracts.v1 import (
 
 
 @pytest.fixture
-def candle_store(pool):
+def candle_store(pool: asyncpg.Pool[asyncpg.Connection]) -> PostgresCandleStore:
     return PostgresCandleStore(pool)
 
 
 @pytest.fixture
-def batch_repo(pool):
+def batch_repo(pool: asyncpg.Pool[asyncpg.Connection]) -> PostgresBatchRepository:
     return PostgresBatchRepository(pool)
 
 
 async def _audit_event_id(conn: asyncpg.Connection) -> uuid.UUID:
-    return await conn.fetchval(
+    result = await conn.fetchval(
         "INSERT INTO foundation_audit_event "
         "(sequence_no, aggregate_type, aggregate_id, action, outcome, trace_id, "
         " payload_hash, payload, event_hash) "
@@ -51,11 +52,12 @@ async def _audit_event_id(conn: asyncpg.Connection) -> uuid.UUID:
         " gen_random_uuid(), 'deadbeef', '{}'::jsonb, 'deadbeef') RETURNING id",
         uuid.uuid4().int % (2**62),
     )
+    return cast(uuid.UUID, result)
 
 
 async def _instrument_id(conn: asyncpg.Connection) -> uuid.UUID:
     symbol = f"TEST-{uuid.uuid4().hex}"
-    return await conn.fetchval(
+    result = await conn.fetchval(
         "INSERT INTO md_instrument "
         "(venue, canonical_symbol, venue_symbol, asset_class, tick_size, lot_size, "
         " status, listed_at) "
@@ -63,10 +65,12 @@ async def _instrument_id(conn: asyncpg.Connection) -> uuid.UUID:
         "RETURNING instrument_id",
         symbol,
     )
+    return cast(uuid.UUID, result)
 
 
-def _candle(key: SeriesKey, open_time: datetime, o: float, h: float, low: float, c: float,
-            v: float) -> CandleRecord:
+def _candle(
+    key: SeriesKey, open_time: datetime, o: float, h: float, low: float, c: float, v: float
+) -> CandleRecord:
     return CandleRecord(
         key=key,
         open_time=open_time,
@@ -114,7 +118,11 @@ async def _create_batch(
     return await batch_repo.create(conn, batch)
 
 
-async def test_upsert_batch_is_idempotent_on_reingest(pool, candle_store, batch_repo):
+async def test_upsert_batch_is_idempotent_on_reingest(
+    pool: asyncpg.Pool[asyncpg.Connection],
+    candle_store: PostgresCandleStore,
+    batch_repo: PostgresBatchRepository,
+) -> None:
     async with pool.acquire() as conn, conn.transaction():
         instrument_id = await _instrument_id(conn)
         t0 = datetime.now(timezone.utc).replace(microsecond=0)
@@ -138,7 +146,11 @@ async def test_upsert_batch_is_idempotent_on_reingest(pool, candle_store, batch_
     assert len(stored) == 2
 
 
-async def test_upsert_batch_across_partition_boundary(pool, candle_store, batch_repo):
+async def test_upsert_batch_across_partition_boundary(
+    pool: asyncpg.Pool[asyncpg.Connection],
+    candle_store: PostgresCandleStore,
+    batch_repo: PostgresBatchRepository,
+) -> None:
     async with pool.acquire() as conn, conn.transaction():
         await conn.execute("SELECT md_ensure_partitions(6)")
         instrument_id = await _instrument_id(conn)
@@ -162,7 +174,11 @@ async def test_upsert_batch_across_partition_boundary(pool, candle_store, batch_
     assert [c.open_time for c in stored] == [t0, t1]
 
 
-async def test_query_as_of_snapshot_isolation_ignores_later_insert(pool, candle_store, batch_repo):
+async def test_query_as_of_snapshot_isolation_ignores_later_insert(
+    pool: asyncpg.Pool[asyncpg.Connection],
+    candle_store: PostgresCandleStore,
+    batch_repo: PostgresBatchRepository,
+) -> None:
     t0 = datetime.now(timezone.utc).replace(microsecond=0)
     t1 = t0 + timedelta(minutes=1)
     async with pool.acquire() as conn, conn.transaction():
@@ -194,7 +210,11 @@ async def test_query_as_of_snapshot_isolation_ignores_later_insert(pool, candle_
     assert [c.open_time for c in latest] == [t0, t1]
 
 
-async def test_upsert_batch_rejects_ohlc_check_violation(pool, candle_store, batch_repo):
+async def test_upsert_batch_rejects_ohlc_check_violation(
+    pool: asyncpg.Pool[asyncpg.Connection],
+    candle_store: PostgresCandleStore,
+    batch_repo: PostgresBatchRepository,
+) -> None:
     """negative: high < open인 캔들은 md_candle의 CHECK 위반으로 거부되어야 한다."""
     async with pool.acquire() as conn, conn.transaction():
         instrument_id = await _instrument_id(conn)
@@ -213,7 +233,11 @@ async def test_upsert_batch_rejects_ohlc_check_violation(pool, candle_store, bat
             await candle_store.upsert_batch(conn, batch.batch_id, [bad_candle])
 
 
-async def test_quarantine_writes_only_quarantine_table(pool, candle_store, batch_repo):
+async def test_quarantine_writes_only_quarantine_table(
+    pool: asyncpg.Pool[asyncpg.Connection],
+    candle_store: PostgresCandleStore,
+    batch_repo: PostgresBatchRepository,
+) -> None:
     async with pool.acquire() as conn, conn.transaction():
         instrument_id = await _instrument_id(conn)
         t0 = datetime.now(timezone.utc).replace(microsecond=0)
@@ -238,7 +262,11 @@ async def test_quarantine_writes_only_quarantine_table(pool, candle_store, batch
     assert last is None, "격리 캔들은 md_candle에 없으므로 last_open_time에 영향을 주면 안 된다"
 
 
-async def test_last_open_time_tracks_latest_stored_candle(pool, candle_store, batch_repo):
+async def test_last_open_time_tracks_latest_stored_candle(
+    pool: asyncpg.Pool[asyncpg.Connection],
+    candle_store: PostgresCandleStore,
+    batch_repo: PostgresBatchRepository,
+) -> None:
     async with pool.acquire() as conn, conn.transaction():
         instrument_id = await _instrument_id(conn)
         key = SeriesKey(venue=Venue.BITGET, instrument_id=instrument_id, timeframe=Timeframe.M1)
@@ -260,8 +288,10 @@ async def test_last_open_time_tracks_latest_stored_candle(pool, candle_store, ba
 
 
 async def test_batch_create_then_get_reconstructs_verdict_from_stored_candles(
-    pool, candle_store, batch_repo
-):
+    pool: asyncpg.Pool[asyncpg.Connection],
+    candle_store: PostgresCandleStore,
+    batch_repo: PostgresBatchRepository,
+) -> None:
     async with pool.acquire() as conn, conn.transaction():
         instrument_id = await _instrument_id(conn)
         t0 = datetime.now(timezone.utc).replace(microsecond=0)
@@ -281,7 +311,9 @@ async def test_batch_create_then_get_reconstructs_verdict_from_stored_candles(
     assert fetched.stored_range == (t0, t0)
 
 
-async def test_batch_create_duplicate_batch_id_raises(pool, batch_repo):
+async def test_batch_create_duplicate_batch_id_raises(
+    pool: asyncpg.Pool[asyncpg.Connection], batch_repo: PostgresBatchRepository
+) -> None:
     async with pool.acquire() as conn, conn.transaction():
         instrument_id = await _instrument_id(conn)
         t0 = datetime.now(timezone.utc).replace(microsecond=0)
@@ -297,7 +329,11 @@ async def test_batch_create_duplicate_batch_id_raises(pool, batch_repo):
             await batch_repo.create(conn, batch)
 
 
-async def test_upsert_batch_rejects_low_below_high_check_violation(pool, candle_store, batch_repo):
+async def test_upsert_batch_rejects_low_below_high_check_violation(
+    pool: asyncpg.Pool[asyncpg.Connection],
+    candle_store: PostgresCandleStore,
+    batch_repo: PostgresBatchRepository,
+) -> None:
     """negative: low > high인 캔들은 md_candle의 CHECK 위반으로 거부되어야 한다."""
     async with pool.acquire() as conn, conn.transaction():
         instrument_id = await _instrument_id(conn)
@@ -314,7 +350,11 @@ async def test_upsert_batch_rejects_low_below_high_check_violation(pool, candle_
             await candle_store.upsert_batch(conn, batch.batch_id, [bad_candle])
 
 
-async def test_upsert_batch_rejects_close_outside_range_check_violation(pool, candle_store, batch_repo):
+async def test_upsert_batch_rejects_close_outside_range_check_violation(
+    pool: asyncpg.Pool[asyncpg.Connection],
+    candle_store: PostgresCandleStore,
+    batch_repo: PostgresBatchRepository,
+) -> None:
     """negative: close가 high와 low 사이에 없으면 CHECK 위반으로 거부되어야 한다."""
     async with pool.acquire() as conn, conn.transaction():
         instrument_id = await _instrument_id(conn)
@@ -331,7 +371,11 @@ async def test_upsert_batch_rejects_close_outside_range_check_violation(pool, ca
             await candle_store.upsert_batch(conn, batch.batch_id, [bad_candle])
 
 
-async def test_upsert_batch_rejects_negative_volume(pool, candle_store, batch_repo):
+async def test_upsert_batch_rejects_negative_volume(
+    pool: asyncpg.Pool[asyncpg.Connection],
+    candle_store: PostgresCandleStore,
+    batch_repo: PostgresBatchRepository,
+) -> None:
     """negative: 음수 거래량은 CHECK 위반으로 거부되어야 한다."""
     async with pool.acquire() as conn, conn.transaction():
         instrument_id = await _instrument_id(conn)
@@ -348,7 +392,11 @@ async def test_upsert_batch_rejects_negative_volume(pool, candle_store, batch_re
             await candle_store.upsert_batch(conn, batch.batch_id, [bad_candle])
 
 
-async def test_query_with_empty_time_range(pool, candle_store, batch_repo):
+async def test_query_with_empty_time_range(
+    pool: asyncpg.Pool[asyncpg.Connection],
+    candle_store: PostgresCandleStore,
+    batch_repo: PostgresBatchRepository,
+) -> None:
     """negative: start > end인 시간 범위 조회는 빈 결과를 반환해야 한다."""
     t0 = datetime.now(timezone.utc).replace(microsecond=0)
     t1 = t0 + timedelta(minutes=5)
@@ -371,7 +419,9 @@ async def test_query_with_empty_time_range(pool, candle_store, batch_repo):
     assert len(result) == 0, "반전된 시간 범위는 빈 결과를 반환해야 한다"
 
 
-async def test_batch_repo_handles_verdict_transitions(pool, batch_repo):
+async def test_batch_repo_handles_verdict_transitions(
+    pool: asyncpg.Pool[asyncpg.Connection], batch_repo: PostgresBatchRepository
+) -> None:
     """failure-injection: 배치 생성 중 verdict 상태 전이를 검증하고 저장한다."""
     async with pool.acquire() as conn, conn.transaction():
         instrument_id = await _instrument_id(conn)
@@ -406,7 +456,11 @@ async def test_batch_repo_handles_verdict_transitions(pool, batch_repo):
         assert result.verdict.rejected == 1
 
 
-async def test_quarantine_with_multiple_candles(pool, candle_store, batch_repo):
+async def test_quarantine_with_multiple_candles(
+    pool: asyncpg.Pool[asyncpg.Connection],
+    candle_store: PostgresCandleStore,
+    batch_repo: PostgresBatchRepository,
+) -> None:
     """failure-injection: 격리 시 여러 캔들을 정확히 기록하는지 확인."""
     async with pool.acquire() as conn, conn.transaction():
         instrument_id = await _instrument_id(conn)
@@ -439,7 +493,9 @@ async def test_quarantine_with_multiple_candles(pool, candle_store, batch_repo):
         assert quarantine_count == 3, "격리된 캔들 3건이 모두 저장되어야 한다"
 
 
-async def test_last_open_time_on_empty_table(pool, candle_store):
+async def test_last_open_time_on_empty_table(
+    pool: asyncpg.Pool[asyncpg.Connection], candle_store: PostgresCandleStore
+) -> None:
     """negative: 저장된 캔들이 없으면 last_open_time은 None을 반환해야 한다."""
     async with pool.acquire() as conn, conn.transaction():
         instrument_id = await _instrument_id(conn)
