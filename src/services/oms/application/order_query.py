@@ -97,7 +97,9 @@ def _encode_cursor(created_at: datetime, order_id: UUID) -> str:
 
 def _decode_cursor(cursor: str) -> tuple[datetime, UUID]:
     try:
-        raw = base64.urlsafe_b64decode(cursor.encode("ascii")).decode("utf-8")
+        raw = base64.b64decode(cursor.encode("ascii"), altchars=b"-_", validate=True).decode(
+            "utf-8"
+        )
         created_at_str, _, order_id_str = raw.partition(_CURSOR_SEP)
         if not order_id_str:
             raise ValueError("cursor에 구분자가 없습니다")

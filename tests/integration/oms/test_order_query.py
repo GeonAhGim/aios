@@ -133,6 +133,29 @@ async def test_list_orders_invalid_cursor_raises(pool) -> None:
         await order_query.list_orders(pool, tenant_id=user_id, cursor="not-a-valid-cursor")
 
 
+async def test_list_orders_cursor_with_leading_garbage_raises(pool) -> None:
+    """negative — task-4897 REJECT: 앞에 쓰레기 문자가 섞인 커서를
+    lenient urlsafe_b64decode가 관대하게 무시하고 정상 페이지를 반환하면
+    안 된다(fail-closed 계약 위반)."""
+    user_id = await create_test_user(pool)
+    valid_cursor = order_query._encode_cursor(datetime.now(timezone.utc), uuid4())
+    with pytest.raises(order_query.InvalidOrderCursorError):
+        await order_query.list_orders(
+            pool, tenant_id=user_id, cursor="!!!garbage!!!" + valid_cursor
+        )
+
+
+async def test_list_orders_cursor_with_trailing_garbage_raises(pool) -> None:
+    """negative — task-4897 REJECT: 뒤에 쓰레기 문자가 섞인 커서도 동일하게
+    거부되어야 한다."""
+    user_id = await create_test_user(pool)
+    valid_cursor = order_query._encode_cursor(datetime.now(timezone.utc), uuid4())
+    with pytest.raises(order_query.InvalidOrderCursorError):
+        await order_query.list_orders(
+            pool, tenant_id=user_id, cursor=valid_cursor + "!!!garbage!!!"
+        )
+
+
 async def test_list_orders_naive_cursor_timestamp_rejected(pool) -> None:
     """negative — task-4901 REJECT: timezone 없는 cursor timestamp는
     asyncpg가 서버 로컬시간대로 암묵 해석할 수 있어 fail-closed로 거부해야
