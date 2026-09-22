@@ -1,27 +1,30 @@
-"""18.2 — 분쟁 티켓 조회·처리 (DisputeResolutionService).
+"""18.2 — Dispute ticket query and resolution (DisputeResolutionService).
 
-Spec: 기능설계문서_v1.20.md#FD-18.2, 14번 문서 §14.5, 8.10,
+Spec: 기능설계문서_v1.20.md#FD-18.2, document #14 §14.5, 8.10,
 docs/specs/L4_market_data_positions_ledger_v1.0.md#§4.4 REFUND, §9 LC-14.
 
-처리 결정은 두 갈래 — "정상 리스크 실현"(리스팅 상태 불변)과 "DELISTED +
-환불"(리스팅 DELISTED 전환, price_paid 전액 buyer 환불 크레딧, ADR-2026-08-29 §1).
+Two resolution paths — "NORMAL_RISK_REALIZATION" (listing status unchanged)
+and "DELISTED_AND_REFUND" (listing transitions to DELISTED, full price_paid
+refunded as buyer credit per ADR-2026-08-29 §1).
 
-LC-14(task-453) — 감사 §1.1 C2("환불이 돈을 생성") 최종 해소.
-`application/refund.py::post_refund`(LC-9 `post_entry` 단일 경로) 하나가
-buyer 적립 + seller 환수 + `PLATFORM:COMMISSION_REVENUE` 환수를 **한
-분개**로 묶는다. 그 앞에 두 보정 분개가 필요하다: (1) `purchase_service.
-_settle`가 캡처 직후 커미션을 house `AVAILABLE`로 쓸어가 환불 시점엔
-`COMMISSION_REVENUE`가 대개 0이라 되돌리는 "un-sweep", (2) seller가
-정산금을 이미 다 썼으면 house에서 차액만큼 seller `AVAILABLE`로 먼저
-옮겨(정책 — "부족분은 house가 즉시 메운다", R3의 seller `RECEIVABLE`
-대신) `post_refund`가 항상 R1/R2로만 떨어지게 한다. house 잔액 부족 시
-`InsufficientAvailableError`로 트랜잭션 전체가 롤백된다(레드팀 #41과
-동일 원칙). 레거시 투영은 LC-12 브리지로 표현 못 할 다계정 흐름이라
-`purchase_service._project`와 동일 패턴으로 직접 투영한다(원장이 이미
-진실을 기록한 **뒤**의 부수 기록일 뿐이라 이중 반영이 아니다).
+LC-14 (task-453) — Audit §1.1 C2 ("refunds do not create money") finally
+resolved. `application/refund.py::post_refund` (LC-9 `post_entry` single
+path) bundles buyer credit + seller clawback +
+`PLATFORM:COMMISSION_REVENUE` reversal into **one journal entry**. Two
+correcting entries precede it: (1) `purchase_service._settle` writes the
+commission to house `AVAILABLE` immediately after capture, so at refund time
+`COMMISSION_REVENUE` is usually 0 — an "un-sweep" restores it; (2) if the
+seller has already spent their settlement, move the shortfall from house to
+seller `AVAILABLE` first (policy — "house covers immediately instead of
+seller `RECEIVABLE` per R3), ensuring `post_refund` always falls only on
+R1/R2. On house balance shortage the entire transaction rolls back with
+`InsufficientAvailableError` (same principle as red team #41). Legacy
+projections that LC-12 bridge cannot express are projected directly using
+the same pattern as `purchase_service._project` (side-effect entries after
+the ledger has already recorded the truth — no double-counting).
 
-금전/신뢰 관련 운영자 판단이라 8.10 원칙에 따라 audit_log에 기록한다
-(FD-7.2 record_audit_log 재사용).
+Monetary/trust operator decisions are recorded in audit_log per §8.10
+(reusing FD-7.2 record_audit_log).
 """
 from __future__ import annotations
 
@@ -59,7 +62,7 @@ def _utcnow() -> datetime:
 
 
 class DisputeResolutionError(Exception):
-    """FD-18.2 실패 — 라우터가 400/404로 변환."""
+    """FD-18.2 failure — router converts to 400/404."""
 
 
 class DisputeDetail(BaseModel):
@@ -137,8 +140,9 @@ class DisputeResolutionService:
         new_listing_status = detail.listing_status
         refund_amount: Decimal | None = None
         async with self._pool.acquire() as conn, conn.transaction():
-            # RED_TEAM_FINDINGS #05 — READ COMMITTED에서 두 관리자의 동시 처리를
-            # status='OPEN' 조건부 UPDATE로 직렬화(confirm_topup()과 동일 패턴).
+            # RED_TEAM_FINDINGS #05 — Serialize concurrent handling by two admins
+            # via status='OPEN' conditional UPDATE in READ COMMITTED
+            # (same pattern as confirm_topup()).
             row = await conn.fetchrow(
                 "UPDATE disputes SET status = 'RESOLVED', resolution_decision = $2, "
                 "resolution_reason = $3, resolved_by = $4, resolved_at = now() "
@@ -155,8 +159,9 @@ class DisputeResolutionService:
                 )
                 new_listing_status = "DELISTED"
 
-                # FULL_AUDIT_2026-09-02 §2 — 재분쟁으로 재환불되던 것을 refunded_at
-                # 조건부 UPDATE로 한 번만 허용(트랜잭션 전체 롤백이 나머지 방어).
+                # FULL_AUDIT_2026-09-02 §2 — Allow refunded_at conditional UPDATE
+                # once only (prevents re-refund on re-dispute; full transaction
+                # rollback is the remaining defense).
                 purchase = await conn.fetchrow(
                     "UPDATE strategy_purchases SET refunded_at = now() "
                     "WHERE id = $1 AND refunded_at IS NULL "
@@ -192,9 +197,9 @@ class DisputeResolutionService:
         )
 
     async def _reconcile_available(self, conn: asyncpg.Connection, user_id: UUID) -> None:
-        """`user_wallets.balance` drift를 원장에 흡수(`purchase_flow.
-        _reconcile_available` 사본 — private이라 재사용 불가). 아래
-        `_refund_with_clawback`이 legacy 투영 기준으로 판정하기 전에 맞춘다."""
+        """Absorb `user_wallets.balance` drift into the ledger (copy of
+        `purchase_flow._reconcile_available` — private, cannot reuse). Aligns
+        before `_refund_with_clawback` decides based on legacy projections."""
         code = ua(user_id, UserSub.AVAILABLE)
         await ensure_account(conn, code, Currency.KRW)
         projected = await conn.fetchval(
@@ -225,7 +230,7 @@ class DisputeResolutionService:
         await post_entry(conn, event, **self._ports)
 
     @staticmethod
-    async def _project(  # purchase_service.py::_project와 동일 패턴(모듈 docstring 참고)
+    async def _project(  # same pattern as purchase_service.py::_project (see module docstring)
         conn: asyncpg.Connection, user_id: UUID, delta: Decimal, tx_type: str, purchase_id: int
     ) -> None:
         row = await conn.fetchrow(
@@ -248,7 +253,7 @@ class DisputeResolutionService:
         self, conn: asyncpg.Connection, *, purchase_id: int, buyer_user_id: UUID,
         seller_user_id: UUID, price_paid: Decimal, commission_rate: Decimal | None, admin_id: UUID,
     ) -> Decimal:
-        """레드팀 #41 / §4.4 REFUND — 총잔액 보존(모듈 docstring 참고)."""
+        """Red team #41 / §4.4 REFUND — total balance conservation (see module docstring)."""
         rate = commission_rate if commission_rate is not None else Decimal("0")
         commission_amount, payout_amount = split_commission(price_paid, rate)
         trace_id = uuid4()
