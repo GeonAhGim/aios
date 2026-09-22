@@ -96,6 +96,17 @@ def test_pct_rejects_infinity():
         pct(Decimal("-Infinity"))
 
 
+def test_pct_rejects_nan():
+    # negative — 적대적 증거: quiet NaN은 Decimal 컨텍스트 기본값으로는
+    # quantize()가 예외 없이 NaN을 그대로 통과시킨다(fail-open 누출 —
+    # 하류 `value > threshold` 비교가 항상 False가 되어 DENY가 새어
+    # 나간다). pct()가 명시적으로 막아야 한다.
+    with pytest.raises(InvalidOperation):
+        pct(Decimal("NaN"))
+    with pytest.raises(InvalidOperation):
+        pct(Decimal("sNaN"))
+
+
 def test_pct_raises_on_non_decimal_input():
     """negative + 실패 주입 — 상류 조립 코드가 실수로 `float`/`str`을
     Decimal 대신 넘기면(직렬화 왕복 버그 등), pct()는 조용히 형변환하지
