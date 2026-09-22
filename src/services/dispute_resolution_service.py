@@ -1,6 +1,6 @@
 """18.2 — Dispute ticket query and resolution (DisputeResolutionService).
 
-Spec: 기능설계문서_v1.20.md#FD-18.2, document #14 §14.5, 8.10,
+Spec: functional_spec_v1.20.md#FD-18.2, document #14 §14.5, 8.10,
 docs/specs/L4_market_data_positions_ledger_v1.0.md#§4.4 REFUND, §9 LC-14.
 
 Two resolution paths — "NORMAL_RISK_REALIZATION" (listing status unchanged)
