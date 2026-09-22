@@ -23,6 +23,12 @@ dependencies = [
     "pyotp>=2.9",
     "numpy>=2.0",
     "TA-Lib==0.7.1",
+    # IND-11 (ADR-2026-09-09-A): 명세 원안 pandas-ta는 Python>=3.12 요구라
+    # 현 런타임(>=3.10)에 설치가 안 돼 탈락 -- MIT, 공개 저장소, Python 3.10
+    # 호환인 pandas-ta-classic으로 대체. `oracle` extra(tulipy, LGPL-3.0)는
+    # 절대 설치하지 않는다(docs/design/INDICATOR_OSS_EVAL.md §5) -- 기본
+    # 의존성만 선언.
+    "pandas-ta-classic>=0.6.52",
     "pyarrow>=17.0",
     "email-validator>=2.0",
     "prometheus-client>=0.20",
@@ -327,4 +333,9 @@ ignore_missing_imports = true
 [[tool.mypy.overrides]]
 # task-2851 MUT-1: cosmic-ray ships no py.typed marker.
 module = "cosmic_ray.*"
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+# task-4036 IND-11: pandas-stubs is not installed; pandas_ta_classic ships no py.typed marker.
+module = ["pandas.*", "pandas_ta_classic.*"]
 ignore_missing_imports = true
