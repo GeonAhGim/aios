@@ -288,13 +288,11 @@ async def test_concurrent_appends_produce_contiguous_hash_chained_sequence(pool,
 # ── negative / 실패주입 (DEEPEN task-4102) ──────────────────────────────────
 
 
-async def test_append_rejects_corrupted_prev_hash(pool, repo):
-    """불변식 위반 입력: 해시체인이 단절된 prev_hash를 DB에 직접 삽입하면
-    `list_for()`가 읽어온 행들 간에 prev_hash != 이전 entry_hash가 되어
-    해시체인 무결성 위반이観측된다.
-    adapter는 현재 자동 재계산 검증은 하지 않지만, 이 테스트는
-    "불변식 위반 입력이 DB에 삽입될 수 있음"을 명시하고
-    위반 위치를 확인한다."""
+async def test_append_does_not_detect_corrupted_prev_hash_in_db(pool, repo):
+    """negative test: 해시체인이 단절된 prev_hash를 DB에 직접 삽입한 후
+    `repo.append()`를 호출하면, append()는 DB의 마지막 entry_hash를
+    prev_hash로 자동 계산하므로 변조 감지 없이 정상 엔트리를 추가한다.
+    adapter는 해시체인 재계산 검증을 하지 않는다는 불변식 한계를 명시한다."""
     _, _, position_key = await _open(pool)
 
     # 정상 엔트리 1건 작성 (첫 번째 행 — prev_hash=NULL)
@@ -337,16 +335,37 @@ async def test_append_rejects_corrupted_prev_hash(pool, repo):
             _OCCURRED_AT,
         )
 
-    # list_for가 삽입한 변조 행을 읽어올 때 prev_hash가 실제 이전 entry_hash와
-    # 다름을 확인 — adapter는 현재 재계산 검증은 안 하지만,
-    # 테스트 자체가 "불변식 위반 입력이 DB에 삽입될 수 있음"을 명시한다.
+    # append() 호출: DB의 마지막 행(sequence_no=2) entry_hash를 prev_hash로
+    # 사용하므로, append()는 변조 감지 없이 정상적으로 엔트리를 추가한다.
     async with pool.acquire() as conn, conn.transaction():
+        third = await repo.append(
+            conn,
+            position_key=position_key,
+            entry_type=JournalEntryType.FILL,
+            qty_delta=Decimal("1"),
+            price=Money(amount=Decimal("100"), currency=Currency.KRW),
+            fee=Money(amount=Decimal("1"), currency=Currency.KRW),
+            realized_pnl_base=Decimal("0"),
+            fx_rate=None,
+            fx_source=None,
+            source_event_type="fill",
+            source_event_id=uuid4().hex,
+            idempotency_key=f"fill:{uuid4().hex}",
+            occurred_at=_OCCURRED_AT,
+        )
+
+    # 세 번째 엔트리는 변조된 두 번째 엔트리의 entry_hash를 prev_hash로 연결
+    assert third.sequence_no == 3
+    async with pool.acquire() as conn:
         entries = await repo.list_for(conn, position_key)
-    assert len(entries) == 2
+    assert len(entries) == 3
+    # 두 번째 엔트리는 변조됨: prev_hash가 첫 번째 entry_hash와 다름
     assert entries[1].prev_hash == tampered_hash
     assert entries[1].prev_hash != entries[0].entry_hash, (
         "prev_hash가 의도적으로 단절됨 — 해시체인 무결성 위반"
     )
+    # 세 번째 엔트리는 append()가 DB에서 계산한 prev_hash (변조된 두 번째의 entry_hash)
+    assert entries[2].prev_hash == entries[1].entry_hash
 
 
 async def test_append_handles_db_connection_error_gracefully(pool, repo):
