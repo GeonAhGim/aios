@@ -218,7 +218,7 @@ def test_decomposition_module_is_at_most_260_lines() -> None:
     assert line_count <= 260, f"decomposition.py has {line_count} lines, exceeding the leaf cap."
 
 
-# -- DEEPEN 2511 (EM-13) — D2 하한 증빙 보강 ----------------------------------------
+# -- DEEPEN 2511 (EM-13) — D2 floor evidence strengthened ----------------------------------------
 
 
 def test_failure_injection_zero_total_cost_with_nonzero_components_rejected() -> None:
