@@ -744,3 +744,32 @@ async def test_funding_fee_rebuild_with_fee_applied(pool, ports):
         "rebuild_snapshot 적용 후 funding_base 가 펀딩피 금액으로 고쳐져야 한다"
     )
     assert row["last_journal_seq"] == 2, "펀딩피 1건 + 체결 1건 = last_journal_seq 2 여야 한다"
+
+
+async def test_invalid_position_key_format_rejected(pool, ports):
+    """음성 테스트 — 유효하지 않은 position_key format을 전달하면
+    rebuild_snapshot이 PositionKey.parse() 단계에서 ValueError를 던진다.
+    (1) separator 개수 부족, (2) UUID parsing 실패 등의 케이스를 확인."""
+    tenant_id = await create_test_tenant(pool)
+
+    invalid_keys = [
+        "",  # empty string
+        "TESTVENUE",  # too few parts
+        "TESTVENUE:INST001:default",  # only 3 parts
+        "TESTVENUE:INST001:default:paper",  # only 4 parts (missing portfolio_id)
+        f"TESTVENUE:INST001:default:paper:not-a-uuid",  # invalid UUID format
+        "TESTVENUE:INST001:default:paper:",  # empty portfolio_id
+    ]
+
+    for invalid_key in invalid_keys:
+        with pytest.raises(ValueError):
+            await rebuild_snapshot(
+                invalid_key,
+                tenant_id=tenant_id,
+                asset_class=AssetClass.CRYPTO,
+                journal=ports.journal,
+                snapshots=ports.snapshots,
+                pool=pool,
+                clock=_clock,
+                dry_run=True,
+            )
