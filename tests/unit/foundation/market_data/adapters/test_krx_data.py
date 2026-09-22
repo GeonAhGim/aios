@@ -150,10 +150,10 @@ class TestKRXIndexAdapter:
         assert quote.code == "00001"
         assert quote.name == "KOSPI"
         assert quote.price == Decimal("2.45")
-        assert quote.change == 0.78
-        assert quote.change_rate == 0.35
-        assert quote.high == 2680.50
-        assert quote.low == 2650.10
+        assert quote.change == Decimal("0.78")
+        assert quote.change_rate == Decimal("0.35")
+        assert quote.high == Decimal("2680.50")
+        assert quote.low == Decimal("2650.10")
         assert quote.volume == 450000
         assert isinstance(quote.observed_at, datetime)
         assert quote.observed_at.tzinfo == timezone.utc
@@ -173,8 +173,8 @@ class TestKRXIndexAdapter:
         assert trend.code == "00001"
         assert trend.name == "KOSPI"
         assert len(trend.points) == 2
-        assert trend.points[0] == IndexPoint("20260901", Decimal("2650.0"), -0.5)
-        assert trend.points[1] == IndexPoint("20260902", Decimal("2660.0"), 0.38)
+        assert trend.points[0] == IndexPoint("20260901", Decimal("2650.0"), Decimal("-0.5"))
+        assert trend.points[1] == IndexPoint("20260902", Decimal("2660.0"), Decimal("0.38"))
 
     async def test_get_index_trend_empty(self, fake_client: _FakeKISClient) -> None:
         fake_client.responses["FHKST030201R"] = {"output1": []}
@@ -210,10 +210,10 @@ class TestKRXInvestorAdapter:
         adapter = KRXInvestorAdapter(fake_client)
         trend = await adapter.get_investor_trend("20260915")
         assert trend.date == "20260915"
-        assert trend.individual_pct == 35.2
-        assert trend.foreign_pct == 28.7
-        assert trend.institution_pct == 34.1
-        assert trend.etc_pct == 2.0
+        assert trend.individual_pct == Decimal("35.2")
+        assert trend.foreign_pct == Decimal("28.7")
+        assert trend.institution_pct == Decimal("34.1")
+        assert trend.etc_pct == Decimal("2.0")
         assert trend.total_volume == 1200000
 
     async def test_get_investor_trend_empty(self, fake_client: _FakeKISClient) -> None:
@@ -251,7 +251,7 @@ class TestKRXShortAdapter:
         assert stocks[0].stock_name == "삼성전자"
         assert stocks[0].short_volume == 5000000
         assert stocks[0].total_volume == 50000000
-        assert stocks[0].short_ratio == 10.0
+        assert stocks[0].short_ratio == Decimal("10")
         assert stocks[0].sector == "전자제품"
         assert stocks[1].stock_code == "000660"
 
@@ -289,7 +289,7 @@ class TestKRXShortAdapter:
         adapter = KRXShortAdapter(fake_client)
         stocks = await adapter.get_short_resistance_stocks()
         assert len(stocks) == 1
-        assert stocks[0].short_ratio == 0.0
+        assert stocks[0].short_ratio == Decimal(0)
 
 
 # ---------------------------------------------------------------------------

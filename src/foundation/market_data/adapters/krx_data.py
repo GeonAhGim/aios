@@ -27,10 +27,10 @@ class IndexQuote:
     code: str
     name: str
     price: Decimal
-    change: float
-    change_rate: float
-    high: float
-    low: float
+    change: Decimal
+    change_rate: Decimal
+    high: Decimal
+    low: Decimal
     volume: int
     observed_at: datetime
 
@@ -50,7 +50,7 @@ class IndexPoint:
 
     date: str  # "YYYYMMDD"
     price: Decimal
-    change_rate: float
+    change_rate: Decimal
 
 
 @dataclass(frozen=True)
@@ -58,10 +58,10 @@ class InvestorTrend:
     """Investor-by-investor trend estimate for a single date."""
 
     date: str
-    individual_pct: float
-    foreign_pct: float
-    institution_pct: float
-    etc_pct: float
+    individual_pct: Decimal
+    foreign_pct: Decimal
+    institution_pct: Decimal
+    etc_pct: Decimal
     total_volume: int
 
 
@@ -74,7 +74,7 @@ class ShortResistanceStock:
     price: Decimal
     short_volume: int
     total_volume: int
-    short_ratio: float
+    short_ratio: Decimal
     sector: str
 
 
@@ -127,10 +127,10 @@ class KRXIndexAdapter:
             code=row.get("indicode", code),
             name=row.get("inpct_name", ""),
             price=Decimal(str(row.get("prdy_vrss", 0))),
-            change=float(row.get("prdy_crt", 0)),
-            change_rate=float(row.get("stdc_crt", 0)),
-            high=float(row.get("hts_hgpr", 0)),
-            low=float(row.get("hts_lwpr", 0)),
+            change=Decimal(str(row.get("prdy_crt", 0))),
+            change_rate=Decimal(str(row.get("stdc_crt", 0))),
+            high=Decimal(str(row.get("hts_hgpr", 0))),
+            low=Decimal(str(row.get("hts_lwpr", 0))),
             volume=int(row.get("hts_vol", 0)),
             observed_at=datetime.now(timezone.utc),
         )
@@ -159,7 +159,7 @@ class KRXIndexAdapter:
             IndexPoint(
                 date=p.get("indidate", ""),
                 price=Decimal(str(p.get("indiprice", 0))),
-                change_rate=float(p.get("indichg", 0)),
+                change_rate=Decimal(str(p.get("indichg", 0))),
             )
             for p in points_raw
         ]
@@ -206,10 +206,10 @@ class KRXInvestorAdapter:
             raise ValueError(f"No investor data for {date} in KIS response")
         return InvestorTrend(
             date=date,
-            individual_pct=float(row.get("invst_pct", 0)),
-            foreign_pct=float(row.get("frgn_by_pct", 0)),
-            institution_pct=float(row.get("inst_pct", 0)),
-            etc_pct=float(row.get("etc_pct", 0)),
+            individual_pct=Decimal(str(row.get("invst_pct", 0))),
+            foreign_pct=Decimal(str(row.get("frgn_by_pct", 0))),
+            institution_pct=Decimal(str(row.get("inst_pct", 0))),
+            etc_pct=Decimal(str(row.get("etc_pct", 0))),
             total_volume=int(row.get("invst_volume", 0)),
         )
 
@@ -244,7 +244,7 @@ class KRXShortAdapter:
         for row in rows[:limit]:
             short_vol = int(row.get("stlt_qty", 0))
             total_vol = int(row.get("qttr_qty", 0))
-            ratio = (short_vol / total_vol * 100) if total_vol else 0.0
+            ratio = (Decimal(short_vol) / Decimal(total_vol) * 100) if total_vol else Decimal(0)
             result.append(
                 ShortResistanceStock(
                     stock_code=row.get("ispr_code", ""),
