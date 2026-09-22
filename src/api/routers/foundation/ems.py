@@ -17,7 +17,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 
 from src.api.contracts.envelope import ApiResponse, ok
 from src.api.deps import get_current_user
-from src.api.foundation_deps import get_tca_result_repository
+from src.api.foundation_ems_deps import get_tca_result_repository
 from src.api.schemas.foundation.ems import ComputeTcaRequest, TcaResultView
 from src.data.models.market_data import Candle
 from src.foundation.ems.application.compute_tca import compute_tca
