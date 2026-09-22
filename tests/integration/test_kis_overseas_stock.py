@@ -161,3 +161,102 @@ async def test_get_overseas_balance_maps_holdings():
 
     assert balances[0].asset == "AAPL"
     assert balances[0].total == Decimal("10")
+
+
+# Negative tests: invariant violations (불변식 위반)
+async def test_place_overseas_order_rejects_invalid_exchange():
+    """불변식: 지원하지 않는 거래소 코드는 명시적으로 거부된다."""
+    adapter = _make_adapter(lambda request: httpx.Response(200, json=TOKEN_RESPONSE))
+    order = _order()
+
+    with pytest.raises(ValueError, match="지원하지 않는 해외주식 거래소"):
+        await adapter.place_overseas_order(order, "MARS")
+
+
+async def test_cancel_overseas_order_rejects_malformed_order_id():
+    """불변식: 주문번호 형식이 잘못되면(콜론 구분자 없음) 명시적으로 실패한다."""
+    adapter = _make_adapter(lambda request: httpx.Response(200, json=TOKEN_RESPONSE))
+
+    # ":" 구분자 없는 order_id는 split 실패
+    with pytest.raises(ValueError):
+        await adapter.cancel_overseas_order("999", "AAPL", "NASD", original_quantity=Decimal("1"))
+
+
+async def test_get_overseas_balance_rejects_invalid_exchange():
+    """불변식: 지원하지 않는 거래소 코드는 명시적으로 거부된다."""
+    adapter = _make_adapter(lambda request: httpx.Response(200, json=TOKEN_RESPONSE))
+
+    with pytest.raises(ValueError, match="지원하지 않는 해외주식 거래소"):
+        await adapter.get_overseas_balance("UNKNOWN")
+
+
+# Failure injection tests: API error responses
+async def test_get_overseas_ticker_raises_on_api_error():
+    """실패주입: API가 오류를 반환할 때(rt_cd != "0") 예외를 발생시킨다(fail-closed 원칙)."""
+    from src.core.exceptions import RetryableExchangeError
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={
+                "rt_cd": "-1",  # 오류 응답
+                "msg1": "Invalid parameter",
+                "output": {}
+            }
+        )
+
+    adapter = _make_adapter(
+        lambda request: _route(request, {"/uapi/overseas-price/v1/quotations/price": handler})
+    )
+
+    with pytest.raises(RetryableExchangeError):
+        await adapter.get_overseas_ticker("AAPL", "NASD")
+
+
+async def test_place_overseas_order_raises_on_api_error():
+    """실패주입: 주문 제출 실패(API 오류) 시 예외를 발생시킨다(fail-closed 원칙)."""
+    from src.core.exceptions import RetryableExchangeError
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={
+                "rt_cd": "-1",  # 오류 코드
+                "msg1": "Insufficient funds",
+                "output": {}
+            }
+        )
+
+    adapter = _make_adapter(
+        lambda request: _route(request, {"/uapi/overseas-stock/v1/trading/order": handler})
+    )
+    order = _order()
+
+    with pytest.raises(RetryableExchangeError):
+        await adapter.place_overseas_order(order, "NASD")
+
+
+async def test_cancel_overseas_order_raises_on_api_error():
+    """실패주입: 취소 실패(API 오류) 시 예외를 발생시킨다(fail-closed 원칙)."""
+    from src.core.exceptions import RetryableExchangeError
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={
+                "rt_cd": "-1",  # 오류 코드
+                "msg1": "Order not found",
+                "output": {}
+            }
+        )
+
+    adapter = _make_adapter(
+        lambda request: _route(
+            request, {"/uapi/overseas-stock/v1/trading/order-rvsecncl": handler}
+        )
+    )
+
+    with pytest.raises(RetryableExchangeError):
+        await adapter.cancel_overseas_order(
+            "1234:999", "AAPL", "NASD", original_quantity=Decimal("1")
+        )
