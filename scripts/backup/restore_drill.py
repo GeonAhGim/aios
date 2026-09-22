@@ -145,6 +145,7 @@ def wait_for_process_start(
     cwd: Path,
     timeout: float,
     poll_interval: float,
+    env: dict | None = None,
     sleep: Callable[[float], None] = time.sleep,
     clock: Callable[[], float] = time.monotonic,
 ) -> str | None:
@@ -160,7 +161,7 @@ def wait_for_process_start(
     대기는 wait_for_recovery로 분리했다."""
     deadline = clock() + timeout
     while True:
-        rc, tail = run_cmd([pg_ctl_bin, "status", "-D", str(data_dir)], cwd, None, 30)
+        rc, tail = run_cmd([pg_ctl_bin, "status", "-D", str(data_dir)], cwd, env, 30)
         if rc == 0:
             return None
         if clock() >= deadline:
@@ -179,6 +180,7 @@ def wait_for_recovery(
     cwd: Path,
     timeout: float,
     poll_interval: float,
+    env: dict | None = None,
     sleep: Callable[[float], None] = time.sleep,
     clock: Callable[[], float] = time.monotonic,
 ) -> str | None:
@@ -187,7 +189,7 @@ def wait_for_recovery(
     타임아웃 경로를 테스트할 수 있다)."""
     deadline = clock() + timeout
     while True:
-        rc, tail = run_cmd([psql_bin, dsn, "-tAc", "SELECT pg_is_in_recovery();"], cwd, None, 30)
+        rc, tail = run_cmd([psql_bin, dsn, "-tAc", "SELECT pg_is_in_recovery();"], cwd, env, 30)
         if rc == 0 and tail.strip() == "f":
             return None
         if clock() >= deadline:
@@ -255,6 +257,12 @@ def run_drill(
     write_recovery_config(restore_data_dir, archive_dir)
     restore_dsn = with_port(dsn_template, restore_port)
     started_server = False
+    # task-5203: pg_ctl/psql이 이 PC(cp949 로케일)에서 실패 메시지를 OS 코드페이지로
+    # 내보내는데 collect_start_failure_logs()는 항상 utf-8(errors=replace)로 읽어
+    # 실제 오류가 U+FFFD로 뭉개졌다(esc-health-backup_drill_failed). LC_ALL=C/LANG=C를
+    # 주입하면 같은 실패가 ASCII 영어 메시지로 나와 디코딩 문제 자체가 사라진다
+    # (이 PC에서 psql로 실측 확인).
+    pg_env = {**os.environ, "LC_ALL": "C", "LANG": "C"}
     try:
         # -l <logfile> prevents Windows pipe-inheritance deadlock: when pg_ctl start
         # is called with capture_output=True (PIPE), the postgres daemon inherits the
@@ -278,7 +286,7 @@ def run_drill(
                 str(log_path),
             ],
             repo_root,
-            None,
+            pg_env,
             30,
         )
 
@@ -293,6 +301,7 @@ def run_drill(
                 cwd=repo_root,
                 timeout=process_start_timeout,
                 poll_interval=process_start_poll_interval,
+                env=pg_env,
                 sleep=sleep,
                 clock=clock,
             )
@@ -315,19 +324,23 @@ def run_drill(
                 cwd=repo_root,
                 timeout=recovery_poll_timeout,
                 poll_interval=recovery_poll_interval,
+                env=pg_env,
                 sleep=sleep,
                 clock=clock,
             )
             steps["wait_recovery"] = {"ok": reason is None, "detail": reason or "recovery complete"}
 
             if reason is None:
-                env = {**os.environ, "DATABASE_URL": restore_dsn, "TEST_DATABASE_URL": restore_dsn}
+                env = {**pg_env, "DATABASE_URL": restore_dsn, "TEST_DATABASE_URL": restore_dsn}
                 rc, tail = run_cmd([python_bin, "scripts/replay_verify.py"], repo_root, env, 300)
                 steps["replay_verify"] = {"ok": rc == 0, "rc": rc, "tail": tail}
     finally:
         if started_server:
             rc, tail = run_cmd(
-                [pg_ctl_bin, "stop", "-D", str(restore_data_dir), "-m", "fast"], repo_root, None, 60
+                [pg_ctl_bin, "stop", "-D", str(restore_data_dir), "-m", "fast"],
+                repo_root,
+                pg_env,
+                60,
             )
             steps["stop_postgres"] = {"ok": rc == 0, "rc": rc, "tail": tail}
         # 복제 슬롯 aios_drill 제거 (pg_basebackup -C -S 가 생성함)
