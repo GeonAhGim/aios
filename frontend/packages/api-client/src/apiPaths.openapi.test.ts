@@ -45,6 +45,12 @@ const snapshotPathSet = new Set(snapshotPathList);
 // 되어(GET /v1/foundation/market-data/candles·candles/replay·instruments·
 // instruments/{symbol}/aliases, main.py include_router) 더 이상 유령 경로가
 // 아니다 — 아래 STALE_SNAPSHOT_WHITELIST로 옮겼다(스냅샷 재생성 전).
+// task-4922: ai.tokens.base·ai.tokens.revoke·ai.proposals.base 3건은
+// src/api/routers/ai.py가 실재하게 되어(contracts/openapi/v1.json에
+// GET/POST /v1/ai/tokens·POST /v1/ai/tokens/{token_id}:revoke·GET
+// /v1/ai/proposals 모두 ApiResponse_* 봉투로 실재 — python으로 paths 키
+// 직접 확인) 여기서 제거한다(apiRoutes.ts도 implemented=true로 맞춤). 같은
+// ai.py에 없는 providers.*·proposals.promote*·experiments.base는 그대로 남긴다.
 const GHOST_PATH_WHITELIST: ReadonlySet<ApiRouteName> = new Set<ApiRouteName>([
   "auth.sessions.list",
   "auth.sessions.revoke",
@@ -57,13 +63,11 @@ const GHOST_PATH_WHITELIST: ReadonlySet<ApiRouteName> = new Set<ApiRouteName>([
   "follow.subscriptions.base",
   "follow.subscriptions.cancel",
   "follow.subscriptions.performance",
-  // task-2657(AI-22): ai.* 8건 — apiRoutes.ts의 등록 주석 참조(src/foundation/ai
-  // 모듈·src/api/routers/ai.py 자체가 아직 없음, follow.subscriptions.*와 동일 사유).
+  // task-2657(AI-22): ai.* 5건 — apiRoutes.ts의 등록 주석 참조(src/foundation/ai
+  // 모듈은 아직 없고 ai.py도 providers/promote-ticket/promote/experiments 목록은
+  // 구현하지 않았다, follow.subscriptions.*와 동일 사유).
   "ai.providers.base",
   "ai.providers.item",
-  "ai.tokens.base",
-  "ai.tokens.revoke",
-  "ai.proposals.base",
   "ai.proposals.promoteTicket",
   "ai.proposals.promote",
   "ai.experiments.base",
@@ -100,15 +104,11 @@ const GHOST_PATH_WHITELIST: ReadonlySet<ApiRouteName> = new Set<ApiRouteName>([
 // task-3850(PLT-35-fix): riskGate.safetyControls.evaluateRecovery는 이 leaf가
 // require_break_glass를 배선하며 contracts/openapi/v1.json을 갱신해 이제 스냅샷에
 // 실재한다(python으로 paths 키 직접 확인) — STALE_SNAPSHOT_WHITELIST에서 제거한다.
-const STALE_SNAPSHOT_WHITELIST: ReadonlySet<ApiRouteName> = new Set<ApiRouteName>([
-  "charting.indicatorTemplates.base",
-  "charting.indicatorTemplates.item",
-  "marketData.coverage.get",
-  // task-2668(CM-18): compliance.decisions.get도 동일 사유 — apiRoutes.ts 등록
-  // 주석 참조(src/api/routers/foundation/compliance.py:57-63는 실재하지만
-  // contracts/openapi/v1.json은 task-2618 이후 재생성된 적이 없다).
-  "compliance.decisions.get",
-]);
+// task-4922: charting.indicatorTemplates.*(2건)·marketData.coverage.get·
+// compliance.decisions.get(4건) 모두 contracts/openapi/v1.json이 그 사이 재생성돼
+// 이제 스냅샷에 실재한다(python으로 paths 키 직접 확인 — 각각 ApiResponse_* 봉투)
+// — 전부 제거한다.
+const STALE_SNAPSHOT_WHITELIST: ReadonlySet<ApiRouteName> = new Set<ApiRouteName>([]);
 
 // KNOWN_ENVELOPE_DRIFT: task-1165 시점 전수 대조 결과, apiPaths.ts에 등록된 envelope
 // 값과 스냅샷이 실제로 말하는 봉투 여부 사이에 불일치가 0건이었다(GHOST_PATH_WHITELIST
@@ -180,6 +180,23 @@ const UNREGISTERED_ROUTE_WHITELIST: Readonly<Record<string, string>> = {
   // task-2338(FE-OPS-4): TrustPage가 status/consents:revoke/memberships(grant/suspend/
   // revoke) 5건 전부를 trust.*로 등록했다 — 여기 남아 있던 5개 항목(task-2168 원 목록)을
   // 제거한다.
+  // task-4922: contracts/openapi/v1.json 재생성으로 새로 나타난 14건 — apps/web/src와
+  // packages/api-client/src/clients/*.ts를 grep으로 대조해 화면이 하나도 호출하지
+  // 않는 것을 확인했다(경로 문자열 하드코딩 우회 0건).
+  "/v1/accounts/summary": "계정 요약 화면이 없다",
+  "/v1/ai/experiments/{experiment_id}": "AI 실험 상세 화면이 없다(AiStudioPage는 아직 목록/승격만 다룬다)",
+  "/v1/ai/experiments/{experiment_id}/lineage": "AI 실험 계보 화면이 없다",
+  "/v1/ai/proposals/{proposal_id}": "AI 제안 상세 화면이 없다",
+  "/v1/ai/tokens/{token_id}:rotate": "AI 토큰 회전 액션 UI가 없다",
+  "/v1/assistant/explain-backtest": "어시스턴트 백테스트 설명 화면이 없다",
+  "/v1/assistant/explain-script": "어시스턴트 스크립트 설명 화면이 없다",
+  "/v1/assistant/generate-script": "어시스턴트 스크립트 생성 화면이 없다",
+  "/v1/foundation/compliance/mandate/status": "컴플라이언스 위임 상태 화면이 없다",
+  "/v1/foundation/personal/bundle": "퍼스널 모드 번들 화면이 없다",
+  "/v1/foundation/personal/daily-report": "퍼스널 모드 일일 리포트 화면이 없다",
+  "/v1/foundation/personal/kill": "퍼스널 모드 킬스위치 UI가 없다",
+  "/v1/foundation/personal/promote": "퍼스널 모드 승격 액션 UI가 없다",
+  "/v1/foundation/personal/promotion-checklist": "퍼스널 모드 승격 체크리스트 화면이 없다",
 };
 
 function nonGhostRouteEntries(): Array<[ApiRouteName, ApiRouteDefinition]> {

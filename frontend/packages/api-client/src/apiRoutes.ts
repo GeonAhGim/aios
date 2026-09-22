@@ -388,9 +388,16 @@ export const API_ROUTES = defineApiRoutes({
   "ai.providers.item": route("/v1/ai/providers/:provider", true, null, false),
   // GET(list)+POST(issue)는 같은 리소스 경로를 공유한다(follow.subscriptions.base와
   // 동일 축약 관용).
-  "ai.tokens.base": route("/v1/ai/tokens", true, null, false),
-  "ai.tokens.revoke": route("/v1/ai/tokens/:tokenId:revoke", true, null, false),
-  "ai.proposals.base": route("/v1/ai/proposals", true, null, false),
+  // task-4922: src/api/routers/ai.py가 실재하게 됐다(GET/POST /v1/ai/tokens,
+  // POST /v1/ai/tokens/{token_id}:revoke, GET /v1/ai/proposals 모두
+  // contracts/openapi/v1.json에 ApiResponse_* 봉투로 실재 — python으로 paths 키
+  // 직접 확인) — implemented=true로 바꾸고 apiPaths.openapi.test.ts의
+  // GHOST_PATH_WHITELIST에서 이 3건을 제거한다. providers.*·proposals.promote*·
+  // experiments.base는 스냅샷에 여전히 없어(ai.py에 그 엔드포인트 자체가 없음)
+  // 유령 경로로 남는다.
+  "ai.tokens.base": route("/v1/ai/tokens", true, null, true),
+  "ai.tokens.revoke": route("/v1/ai/tokens/:tokenId:revoke", true, null, true),
+  "ai.proposals.base": route("/v1/ai/proposals", true, null, true),
   "ai.proposals.promoteTicket": route("/v1/ai/proposals/:proposalId:promote-ticket", true, null, false),
   "ai.proposals.promote": route("/v1/ai/proposals/:proposalId:promote", true, null, false),
   "ai.experiments.base": route("/v1/ai/experiments", true, null, false),
