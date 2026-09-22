@@ -5,12 +5,20 @@
 변환하고 커넥션 풀만 연다(`tests/integration/foundation/ledger/conftest.py`와
 동일 패턴).
 """
+
 from __future__ import annotations
 
 import os
+from typing import TYPE_CHECKING
 
 import asyncpg
 import pytest
+
+if TYPE_CHECKING:
+    from src.foundation.market_data.adapters.postgres_batch_repository import (
+        PostgresBatchRepository,
+    )
+    from src.foundation.market_data.adapters.postgres_candle_store import PostgresCandleStore
 
 
 def _asyncpg_dsn() -> str:
@@ -23,3 +31,20 @@ async def pool() -> asyncpg.Pool[asyncpg.Connection]:
     p = await asyncpg.create_pool(_asyncpg_dsn(), min_size=1, max_size=16)
     yield p
     await p.close()
+
+
+# CTO 2026-09-23: test_candle_store.py 분할(loc_over_500)로 두 모듈이 공유하는 픽스처.
+@pytest.fixture
+def candle_store(pool: asyncpg.Pool[asyncpg.Connection]) -> PostgresCandleStore:
+    from src.foundation.market_data.adapters.postgres_candle_store import PostgresCandleStore
+
+    return PostgresCandleStore(pool)
+
+
+@pytest.fixture
+def batch_repo(pool: asyncpg.Pool[asyncpg.Connection]) -> PostgresBatchRepository:
+    from src.foundation.market_data.adapters.postgres_batch_repository import (
+        PostgresBatchRepository,
+    )
+
+    return PostgresBatchRepository(pool)

@@ -53,7 +53,8 @@ from types import MappingProxyType
 from src.core.script.grammar.ast import Expr, Identifier, NumberLiteral
 from src.core.script.ir.ops import DeclareInput, IRProgram
 from src.core.script.runtime.builtins_ta import default_builtins
-from src.core.script.runtime.interpreter import ExecutionResult, execute
+from src.core.script.runtime.interpreter import execute
+from src.core.script.runtime.interpreter_types import ExecutionResult
 from src.core.script.runtime.series import Scalar, ScriptRuntimeError, Series, Value
 from src.data.models.trading import OrderSide
 from src.foundation.backtest.application.quick_backtest import (

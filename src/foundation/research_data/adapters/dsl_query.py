@@ -50,7 +50,7 @@ from src.foundation.research_data.contracts.v1 import ResearchItem, ResearchItem
 from src.foundation.research_data.domain.as_of_binding import bind_as_of
 
 if TYPE_CHECKING:
-    from src.core.script.runtime.interpreter import Builtin, CallSite
+    from src.core.script.runtime.interpreter_types import Builtin, CallSite
 
 __all__ = ["ResearchDslQueryError", "research_builtins"]
 
