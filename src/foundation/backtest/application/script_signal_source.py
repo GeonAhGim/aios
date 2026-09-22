@@ -45,7 +45,7 @@ Pure module — no I/O (TID251, backtest/application zone).
 from __future__ import annotations
 
 import math
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from decimal import Decimal
 from types import MappingProxyType
@@ -63,6 +63,8 @@ from src.foundation.backtest.application.quick_backtest import (
 )
 from src.foundation.backtest.application.quick_backtest_fill import OrderIntent
 from src.foundation.market_data.domain.candle_columns import CandleColumns
+from src.foundation.research_data.adapters.dsl_query import research_builtins
+from src.foundation.research_data.contracts.v1 import ResearchItem
 
 __all__ = ["ScriptSignalSourceError", "build_script_signal_source"]
 
@@ -82,17 +84,32 @@ def build_script_signal_source(
     bar_count: int,
     inputs: Mapping[str, Value] | None = None,
     columns: CandleColumns,
+    research_items: Sequence[ResearchItem] = (),
+    research_instrument: str | None = None,
 ) -> SignalSource:
     """Run `ir` exactly once over the full `bar_count` (= `len(columns)`) range,
     pre-compute the resulting orders per bar index, and return them. Subsequent
     `on_bar` calls are pure dictionary look-ups only (determinism/performance —
-    the interpreter is never re-run per bar)."""
+    the interpreter is never re-run per bar).
+
+    RD-9: when `research_instrument` is given, the `research.*` namespace
+    (`domain/dsl_query.research_builtins`) is merged into the builtin table so
+    the script can call `research.filing_count()` etc., auto-bound per bar to
+    that bar's `columns.ts[i]` (RD-A1 -- see `dsl_query.py` module docstring
+    for why the call shape structurally cannot request a future `as_of`).
+    `research_items` should already be the caller's point-in-time-agnostic
+    fetch for `research_instrument` (this function does no I/O)."""
     if len(columns) != bar_count:
         raise ScriptSignalSourceError(
             f"columns length ({len(columns)}) differs from bar_count ({bar_count})"
         )
     merged_inputs: dict[str, Value] = {**_market_inputs(ir, columns), **dict(inputs or {})}
-    result = execute(ir, bar_count=bar_count, inputs=merged_inputs, builtins=default_builtins())
+    builtins = dict(default_builtins())
+    if research_instrument is not None:
+        builtins.update(
+            research_builtins(research_items, columns, instrument=research_instrument)
+        )
+    result = execute(ir, bar_count=bar_count, inputs=merged_inputs, builtins=builtins)
     plan = _materialize_plan(result, bar_count)
     return _MaterializedSignalSource(plan)
 
