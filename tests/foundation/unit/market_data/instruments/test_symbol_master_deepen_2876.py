@@ -200,7 +200,12 @@ def test_resolve_meets_latency_budget_with_large_listing_set() -> None:
 
     start = time.perf_counter()
     for i in range(iterations):
-        target = f"SYM{i % n:05d}USDT"
+        # (i * n) // iterations로 조회 대상을 목록 전체(0..n-1)에 고르게
+        # 펼쳐 뒤쪽(최악 경로, 선형탐색이 끝까지 가야 하는 인덱스)도 실제로
+        # 탐색되게 한다 — i % n(iterations < n일 때 앞부분만 반복 조회)로는
+        # 대규모 목록의 최악 경로 성능 회귀를 검출하지 못한다(XREV task-3641).
+        target_idx = (i * n) // iterations
+        target = f"SYM{target_idx:05d}USDT"
         ref = sm.resolve(Venue.BITGET, target, instruments=instruments, listings=listings)
         assert ref.listing.venue_symbol == target
     elapsed = time.perf_counter() - start
