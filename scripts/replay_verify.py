@@ -75,10 +75,35 @@ _ORDER_FIELDS = (
     "fee_currency",
 )
 
+# esc-ci-replay_verify.json: local Windows CI intermittently resets the very
+# first TCP handshake to Postgres (WinError 64 / asyncpg
+# ConnectionDoesNotExistError) before a single query has run -- a transient
+# OS-level reset, not a code regression (bisect landed on an unrelated
+# comment-only commit because the flake can surface on whichever run happens
+# to race it). Retrying the initial connect a few times with backoff absorbs
+# that reset without weakening what this script actually verifies.
+_POOL_CONNECT_ATTEMPTS = 5
+_POOL_CONNECT_RETRY_BASE_DELAY = 0.5
+
 
 def _asyncpg_dsn() -> str:
     url = os.environ["DATABASE_URL"]
     return url.replace("postgresql+asyncpg://", "postgresql://")
+
+
+async def _create_pool_with_retry(dsn: str) -> asyncpg.Pool:
+    """`asyncpg.create_pool` with retry on the initial connection only --
+    fail-closed still applies: after `_POOL_CONNECT_ATTEMPTS` the original
+    exception propagates unchanged, it is never swallowed into a false
+    green."""
+    for attempt in range(_POOL_CONNECT_ATTEMPTS):
+        try:
+            return await asyncpg.create_pool(dsn, min_size=1, max_size=4)
+        except (OSError, asyncpg.exceptions.ConnectionDoesNotExistError):
+            if attempt + 1 >= _POOL_CONNECT_ATTEMPTS:
+                raise
+            await asyncio.sleep(_POOL_CONNECT_RETRY_BASE_DELAY * (attempt + 1))
+    raise AssertionError("unreachable -- loop always returns or raises")
 
 
 def window(as_of: datetime, hours: int) -> tuple[datetime, datetime]:
@@ -227,7 +252,7 @@ async def verify(pool: asyncpg.Pool, *, as_of: datetime, hours: int) -> replay.R
 
 
 async def _run(*, hours: int, as_of: datetime) -> int:
-    pool = await asyncpg.create_pool(_asyncpg_dsn(), min_size=1, max_size=4)
+    pool = await _create_pool_with_retry(_asyncpg_dsn())
     try:
         report = await verify(pool, as_of=as_of, hours=hours)
     finally:
