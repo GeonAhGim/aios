@@ -8,9 +8,14 @@ TCP socket to Postgres (WinError 64 -> asyncpg ConnectionDoesNotExistError)
 unrelated comment-only commit both times). `_create_pool_with_retry` retries
 the initial connect (task-6177); `_verify_with_retry` retries the scan
 itself for the same reset landing after the pool is already up, mid
-read-only transaction (task-6213). Neither test group touches a real socket
--- `asyncpg.create_pool` / `replay_verify.verify` are monkeypatched -- so
-they run without TEST_DATABASE_URL.
+read-only transaction (task-6213). `_close_pool_ignoring_reset` absorbs the
+same reset shape hitting an idle pooled connection during `pool.close()`
+teardown, after `verify()` has already produced its (fail-closed) result
+(task-6236) -- neither `_run`'s `finally` nor a real bug in the scan itself
+should have its outcome replaced by a teardown-only socket error. Neither
+test group touches a real socket -- `asyncpg.create_pool` /
+`replay_verify.verify` / `pool.close` are monkeypatched -- so they run
+without TEST_DATABASE_URL.
 """
 
 from __future__ import annotations
@@ -202,6 +207,57 @@ async def test_verify_with_retry_does_not_retry_a_real_mismatch_report(monkeypat
 
     assert report is mismatch_report
     assert attempts == 1
+
+
+async def test_close_pool_ignoring_reset_swallows_connection_reset() -> None:
+    """task-6236: a reset hitting an idle pooled connection during teardown
+    must not raise -- `verify()`'s result is already final by the time
+    `_run`'s `finally` calls this."""
+
+    class _ResetOnClosePool:
+        async def close(self) -> None:
+            raise asyncpg.exceptions.ConnectionDoesNotExistError(
+                "connection was closed in the middle of operation"
+            )
+
+    await replay_verify._close_pool_ignoring_reset(_ResetOnClosePool())  # must not raise
+
+
+async def test_close_pool_ignoring_reset_propagates_unrelated_exceptions() -> None:
+    """Only the transient connection-reset shape is swallowed -- a real bug
+    in `pool.close()` must still surface, not be silently hidden."""
+
+    class _BrokenPool:
+        async def close(self) -> None:
+            raise ValueError("not a connection reset")
+
+    with pytest.raises(ValueError):
+        await replay_verify._close_pool_ignoring_reset(_BrokenPool())
+
+
+async def test_run_propagates_real_failure_even_if_close_also_resets(monkeypatch) -> None:
+    """A genuine fail-closed exception from the scan (reset on every retry
+    attempt, i.e. not absorbed) must still propagate as the process's
+    failure even when `pool.close()` in the `finally` also hits a reset --
+    the close-time reset must not mask or replace it."""
+
+    class _ResetOnClosePool:
+        async def close(self) -> None:
+            raise OSError(64, "지정된 네트워크 이름을 더 이상 사용할 수 없습니다")
+
+    async def _fake_create_pool_with_retry(dsn: str) -> _ResetOnClosePool:
+        return _ResetOnClosePool()
+
+    async def _fake_verify_with_retry(
+        pool: object, *, as_of: object, hours: object
+    ) -> replay.ReplayReport:
+        raise OSError(64, "지정된 네트워크 이름을 더 이상 사용할 수 없습니다")
+
+    monkeypatch.setattr(replay_verify, "_create_pool_with_retry", _fake_create_pool_with_retry)
+    monkeypatch.setattr(replay_verify, "_verify_with_retry", _fake_verify_with_retry)
+
+    with pytest.raises(OSError):
+        await replay_verify._run(hours=24, as_of=datetime.now(timezone.utc))
 
 
 async def _no_sleep(delay: float) -> None:

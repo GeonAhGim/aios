@@ -278,12 +278,26 @@ async def _verify_with_retry(
     raise AssertionError("unreachable -- loop always returns or raises")
 
 
+async def _close_pool_ignoring_reset(pool: asyncpg.Pool) -> None:
+    """`pool.close()` after `report` is already computed and fail-closed has
+    already run its course -- a Windows TCP reset (WinError 64 /
+    `ConnectionDoesNotExistError`) hitting an idle pooled connection during
+    teardown has no bearing on the verification result and must not replace
+    it. Only the same narrow connection-reset shape `_verify_with_retry`
+    already treats as transient is swallowed here; anything else still
+    propagates unchanged."""
+    try:
+        await pool.close()
+    except (OSError, asyncpg.exceptions.ConnectionDoesNotExistError):
+        pass
+
+
 async def _run(*, hours: int, as_of: datetime) -> int:
     pool = await _create_pool_with_retry(_asyncpg_dsn())
     try:
         report = await _verify_with_retry(pool, as_of=as_of, hours=hours)
     finally:
-        await pool.close()
+        await _close_pool_ignoring_reset(pool)
 
     start, end = window(as_of, hours)
     print(
