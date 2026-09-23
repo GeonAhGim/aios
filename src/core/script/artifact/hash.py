@@ -1,22 +1,26 @@
-"""L4_analytics_authoring_backtest_marketplace_v1.0.md §2.4 표 90행/§9.4 DSL-12 —
-`script_hash`: 소스·IR·지표 레지스트리 버전·문법 버전 → 콘텐츠 해시.
+"""L4_analytics_authoring_backtest_marketplace_v1.0.md §2.4 row 90 / §9.4 DSL-12 —
+`script_hash`: source, IR, indicator registry version, grammar version -> content hash.
 
-순수 함수(I/O 없음). 네 입력을 정준 JSON(`sort_keys`, 고정 구분자,
-`ensure_ascii`)으로 직렬화해 sha256 hex(64자)를 낸다. IR은 DSL-7
-`to_bytes()`(결정론 직렬화)를 그대로 쓰므로 "같은 AST=같은 IR 바이트"
-계약이 그대로 "같은 IR=같은 script_hash"로 이어진다.
+Pure function (no I/O). Serializes the four inputs into canonical JSON
+(`sort_keys`, fixed separators, `ensure_ascii`) and produces a sha256 hex
+digest (64 chars). The IR reuses DSL-7 `to_bytes()` (deterministic
+serialization) as-is, so the "same AST = same IR bytes" contract carries
+through to "same IR = same script_hash".
 
-왜 네 입력인가(§3.3·§3.4): `ta.*`는 IND 레지스트리 버전에 고정되므로
-레지스트리가 바뀌면 같은 소스라도 다른 산출물이다 — 그래서 IND-1
-`IndicatorRegistry.registry_hash()`(스펙 정준 해시)를 `registry_version`
-으로 받는다. 문법 버전은 IR 안에도 있지만(`IRProgram.grammar_version`)
-페이로드 최상위에 명시해 IR 직렬화 형식이 바뀌어도 해시 입력 계약이
-읽히게 한다. 소스는 정규화하지 않는다(공백만 달라도 다른 스크립트
-아티팩트 — 마켓플레이스(MP-1)가 소스 그대로를 게시하므로 소스 바이트가
-곧 신원이다). 재현 키(BT-9)는 이 값을 첫 항으로 쓴다.
+Why four inputs (§3.3, §3.4): `ta.*` is pinned to the IND registry version,
+so the same source can yield a different artifact once the registry changes
+— hence `registry_version` takes IND-1 `IndicatorRegistry.registry_hash()`
+(the spec's canonical hash). The grammar version also lives inside the IR
+(`IRProgram.grammar_version`), but is repeated at the payload's top level so
+the hash-input contract stays legible even if the IR serialization format
+changes. The source is not normalized (whitespace-only differences are a
+different script artifact — the marketplace (MP-1) publishes the source
+verbatim, so the source bytes are the identity). The reproduction key (BT-9)
+uses this value as its first component.
 
-Fail-closed: 빈 소스·빈 레지스트리 버전·IRProgram이 아닌 값은 `ValueError`
-로 거부한다 — 잘못된 입력으로 그럴듯한 해시를 만들지 않는다.
+Fail-closed: an empty source, empty registry version, or a non-IRProgram
+value is rejected with `ValueError` — a plausible-looking hash is never
+built from bad input.
 """
 from __future__ import annotations
 
@@ -38,7 +42,7 @@ def hash_payload(
     registry_version: str,
     grammar_version: str = GRAMMAR_VERSION,
 ) -> dict[str, str]:
-    """해시 입력 4종을 검증해 정준 페이로드(dict)로 만든다. 테스트·감사용 공개."""
+    """Validates the four hash inputs, builds the canonical payload dict. Public for tests."""
     if not isinstance(source, str) or not source.strip():
         raise ValueError("script_hash: 소스가 비어 있습니다")
     if not isinstance(registry_version, str) or not registry_version:
@@ -64,7 +68,7 @@ def script_hash(
     registry_version: str,
     grammar_version: str = GRAMMAR_VERSION,
 ) -> str:
-    """소스·IR·레지스트리 버전·문법 버전 → sha256 hex(64자). 같은 입력 = 같은 값."""
+    """source/IR/registry/grammar version -> sha256 hex (64 chars). Same input = same value."""
     payload = hash_payload(
         source=source,
         ir=ir,
