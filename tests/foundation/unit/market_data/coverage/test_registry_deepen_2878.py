@@ -342,11 +342,18 @@ def test_coverage_span_normalizes_lowercase_ulid() -> None:
 
 def test_coverage_span_rejects_ulid_with_digit_8_or_9_as_first_char() -> None:
     """ULID 첫 글자는 타임스탬프 오버플로 방지 위해 0-7로 제한된다 —
-    8 또는 9로 시작하는 26자는 거부돼야 한다."""
+    8 또는 9로 시작하는 26자는 거부돼야 한다. (XREV task-3649: 이전 버전은
+    첫 글자를 교체하며 실수로 한 글자를 통째로 날려 25자 문자열이 됐고,
+    길이 검사만으로도 거부돼 첫 글자 제한 자체가 빠져도 통과하는 허수아비
+    테스트였다 — 길이를 명시적으로 단언해 재발을 막는다.)"""
+    starts_with_8 = "8" + _VALID_ULID[1:]
+    starts_with_9 = "9" + _VALID_ULID[1:]
+    assert len(starts_with_8) == 26, f"garbage 길이가 26이 아님: {len(starts_with_8)}"
+    assert len(starts_with_9) == 26, f"garbage 길이가 26이 아님: {len(starts_with_9)}"
     with pytest.raises(ValidationError):
-        _span(instrument_id="8ARZ3NDEKTSV4RRFFQ69G5FAV", start_at=_dt(1), end_at=_dt(2))
+        _span(instrument_id=starts_with_8, start_at=_dt(1), end_at=_dt(2))
     with pytest.raises(ValidationError):
-        _span(instrument_id="9ARZ3NDEKTSV4RRFFQ69G5FAV", start_at=_dt(1), end_at=_dt(2))
+        _span(instrument_id=starts_with_9, start_at=_dt(1), end_at=_dt(2))
 
 
 def test_merge_spans_empty_input_returns_empty_list() -> None:
