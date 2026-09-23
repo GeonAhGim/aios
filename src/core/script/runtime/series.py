@@ -1,39 +1,35 @@
 """L4_analytics_authoring_backtest_marketplace_v1.0.md §2.4 table row 88 / §9.4 DSL-8 —
 AIOS Script runtime value model: `Series` and element-wise operations (broadcast).
 
-A value has one of two shapes. `Scalar` (int/float/bool, a value independent of
-any bar) and `Series` (one per bar, length = bar count). `None` is na (missing)
-— like Pine's `na`, it means "no value yet" and is represented with the single
-sentinel `None` rather than a separate marker. Series elements may also be
-`None`.
+A value has one of two shapes. `Scalar` (int/float/bool, a value independent of any bar)
+and `Series` (one per bar, length = bar count). `None` is na (missing) — like Pine's `na`,
+it means "no value yet" and is represented with the single sentinel `None` rather than a
+separate marker. Series elements may also be `None`.
 
-§3.3 semantics (this leaf fixes the v1 rules — anything not in the spec's
-grammar table is pinned here, and the reference implementation's property
-tests independently reimplement the same definitions to cross-check):
-- Indexing `s[n]` (`shift`): the value at bar t = s's value at bar t-n, na if
-  t<n. Only the past is visible (negative n is already rejected by the
-  grammar/DSL-5; here too, below 0 is an error).
-- na propagation: arithmetic, comparison, sign negation, and cross all yield
-  na if either operand is na.
-- Logic (and/or/not) is three-valued (Kleene): `False and na = False`,
-  `True or na = True`; otherwise na mixed in yields na. Signal consumers must
-  treat only `True` as a fire (fail-closed — na means "unknown", not "no").
-- Division by zero and non-finite results (inf/nan) yield na instead of an
-  exception. Integer `/` truncates toward zero (keeps the static int type —
-  consistent with DSL-4 `promote_numeric` defining int/int→int).
-- `crosses_above(a, b)`: at bar t, `a[t] > b[t] and a[t-1] <= b[t-1]`; na if
-  t=0 or any of the four values is na. `crosses_below` reverses the
-  inequality. A cross is inherently bar-dimensioned, so the result is always
-  a length-`bar_count` series even if both operands are scalars.
-- nz/na: `nz(x, fill=0)` replaces na with `fill`, and `is_na(x)` is a bool
-  series of na-ness. Both are kept as series-only operations; which name
-  (`math.nz`, etc.) exposes them in scripts is DSL-9's builtin registry's
-  concern.
-- The integer domain rejects bool (explicit check since Python `bool` is a
-  subtype of `int`).
+§3.3 semantics (this leaf fixes the v1 rules — anything not in the spec's grammar table is
+pinned here, and the reference implementation's property tests independently reimplement
+the same definitions to cross-check):
+- Indexing `s[n]` (`shift`): the value at bar t = s's value at bar t-n, na if t<n. Only the
+  past is visible (negative n is already rejected by the grammar/DSL-5; here too, below 0
+  is an error).
+- na propagation: arithmetic, comparison, sign negation, and cross all yield na if either
+  operand is na.
+- Logic (and/or/not) is three-valued (Kleene): `False and na = False`, `True or na = True`;
+  otherwise na mixed in yields na. Signal consumers must treat only `True` as a fire
+  (fail-closed — na means "unknown", not "no").
+- Division by zero and non-finite results (inf/nan) yield na instead of an exception. Integer
+  `/` truncates toward zero (static int type; matches DSL-4 `promote_numeric`'s int/int→int).
+- `crosses_above(a, b)`: at bar t, `a[t] > b[t] and a[t-1] <= b[t-1]`; na if t=0 or any of
+  the four values is na. `crosses_below` reverses the inequality. A cross is inherently
+  bar-dimensioned, so the result is always a length-`bar_count` series even if both
+  operands are scalars.
+- nz/na: `nz(x, fill=0)` replaces na with `fill`, and `is_na(x)` is a bool series of
+  na-ness. Both are kept as series-only operations; which name (`math.nz`, etc.) exposes
+  them in scripts is DSL-9's builtin registry's concern.
+- The integer domain rejects bool (explicit check since Python `bool` is a subtype of `int`).
 
-Pure, no I/O, no recursion. Operations between series of different lengths
-raise `ScriptRuntimeError` (fail-closed — never silently truncate or pad).
+Pure, no I/O, no recursion. Operations between series of different lengths raise
+`ScriptRuntimeError` (fail-closed — never silently truncate or pad).
 """
 from __future__ import annotations
 
@@ -52,13 +48,12 @@ CrossOp = Literal["crosses_above", "crosses_below"]
 
 
 class ScriptRuntimeError(Exception):
-    """IR execution failure (shape/domain mismatch, length mismatch, unregistered
-    builtin, unbound name).
+    """IR execution failure (shape/domain mismatch, length mismatch, unregistered builtin,
+    unbound name).
 
-    §3.3's taxonomy defines only the 4 compile-error kinds. A runtime error means
-    "IR that passed checks doesn't match the input/registry the host supplied",
-    so it gets its own code and is always raised as an exception (no silent
-    default).
+    §3.3's taxonomy defines only the 4 compile-error kinds. A runtime error means "IR that
+    passed checks doesn't match the input/registry the host supplied", so it gets its own
+    code and is always raised as an exception (no silent default).
     """
 
     code: Final = "SCRIPT_RUNTIME"
