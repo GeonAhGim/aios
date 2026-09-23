@@ -1,14 +1,15 @@
-"""11.4 — 승인 설정(ApprovalMode) 관리.
+"""11.4 — Approval settings (ApprovalMode) management.
 
-Spec: 기능설계문서_v1.20.md#FD-11.3, 정책문서 4.9/4.10, 13번 §13.1
+Spec: 기능설계문서_v1.20.md#FD-11.3, policy docs 4.9/4.10, #13 §13.1
 
-mandatory_wait_seconds는 사용자 입력을 받지 않는다 — 플랫폼이 강제하는
-60초 하한(DB CHECK, 13번 §13.2)을 그대로 유지, 사용자는 mode/
-second_approver_contact만 바꿀 수 있다.
+mandatory_wait_seconds accepts no user input — the platform-enforced 60-second
+floor (DB CHECK, #13 §13.2) is maintained as-is; users may only change
+mode / second_approver_contact.
 
-SOLO 모드 선택은 FD-15.3 매칭경고 훅③ 지점이다 — RISK_MATCHING.
-APPROVAL_MODE_RISK_LEVEL 해석대로 SOLO를 "공격형"에 대응시켜 사용자
-risk_profile과 대조한다(불일치 시 경고, 명시적 동의 없이는 저장 거부).
+SOLO mode selection is the FD-15.3 matching-warnings hook ③ point — RISK_MATCHING.
+Interpreting APPROVAL_MODE_RISK_LEVEL, SOLO maps to the "aggressive" tier and is
+cross-referenced against the user's risk_profile (warning on mismatch; save rejected
+without explicit consent).
 """
 from __future__ import annotations
 
@@ -23,7 +24,7 @@ APPROVAL_MODES = ("SOLO", "DUAL")
 
 
 class ApprovalSettingsError(Exception):
-    """FD-11.3 저장 거부 — 라우터가 400으로 변환."""
+    """Save rejected by FD-11.3 rules — router converts to 400."""
 
 
 class ApprovalSettings(BaseModel):
