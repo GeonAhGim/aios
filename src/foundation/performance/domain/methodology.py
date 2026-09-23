@@ -1,16 +1,18 @@
-"""Performance 방법론 — 버전화·해시(R2).
+"""Performance methodology — versioned hashing (R2).
 
 Spec: docs/specs/L4_strategy_portfolio_backtest_v1.0.md §2.6.
 
-`pm-v1` 기본값: TWR은 현금흐름 시점마다 하위기간으로 끊어 기하연결한다
-(domain/twr.py, L46). MWR은 IRR을 이분법(최대 200회, 허용오차 1e-10)으로
-푼다(domain/mwr.py, L46). 무위험수익률은 0으로 고정 — 실제 무위험
-벤치마크 연동은 이 리프의 스콥이 아니다(필요해지면 별도 검토, 미리
-만들지 않는다는 이 세션의 반복 원칙). 연환산은 항상 호출부가
-`periods_per_year`를 명시해야 하고(암묵적 가정 금지), 벤치마크는
-statement 기간 시작 시점의 mandate 지정값에 고정한다(기간 중 mandate가
-바뀌어도 소급 반영하지 않음 — domain/rules.py의 assert_benchmark_pinned,
-L46이 실제로 강제한다).
+Default `pm-v1`: TWR splits sub-periods at each cashflow point and
+geometrically links them (domain/twr.py, L46). MWR solves IRR via
+bisection (max 200 iterations, tolerance 1e-10) (domain/mwr.py, L46).
+The risk-free rate is fixed at 0 — actual risk-free benchmark wiring
+is out of scope for this leaf (if needed later, review separately; the
+session's iterative principle is to not build ahead). Annualised
+calculations always require the caller to specify
+`periods_per_year` (implicit assumptions prohibited). The benchmark is
+pinned to the mandate value at the start of the statement period (no
+retroactive adjustment if the mandate changes mid-period — enforced by
+`assert_benchmark_pinned` in domain/rules.py, L46).
 """
 from __future__ import annotations
 
@@ -26,7 +28,7 @@ MWR_TOLERANCE = Decimal("1E-10")
 
 
 def methodology_hash(m: Methodology) -> str:
-    """`methodology_hash` 필드 자체는 해시 입력에서 제외한다(자기참조 방지)."""
+    """Exclude the `methodology_hash` field itself from hash input (prevent self-reference)."""
     payload = {
         "version": m.version,
         "twr_method": m.twr_method,
