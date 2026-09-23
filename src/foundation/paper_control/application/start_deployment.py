@@ -1,14 +1,14 @@
-"""StartDeployment/ResumeDeployment 공용 게이트 재평가.
+"""StartDeployment/ResumeDeployment shared gate re-evaluation.
 
-Spec: AIOSproject 77번 §2/§3 — "RUNNING requires current trust, active
+Spec: AIOSproject #77 §2/§3 — "RUNNING requires current trust, active
 mandate, paper-eligible non-expired package, fresh policy/risk decision,
 healthy connection/data/reconciliation, and verified paper provenance."
 
-package/reconciliation freshness는 71번 §4 Contract ownership 경계 밖(FND-04
-package lifecycle과 FND-08 reconciliation이 아직 없음, 마이그레이션
-docstring 참조) — 이 리프가 실제로 재확인하는 건 risk_gate(FND-06)의
-DEPLOYMENT 게이트(mandate+safety control 합성)와, connection이 지정됐다면
-그 freshness뿐이다."""
+package/reconciliation freshness lives outside the #71 §4 Contract ownership
+boundary (FND-04 package lifecycle and FND-08 reconciliation are not yet
+in place; see migration docstring) — this leaf actually re-verifies only
+the risk_gate (FND-06) DEPLOYMENT gate (mandate + safety control composite)
+and, if a connection is specified, its freshness alone."""
 from __future__ import annotations
 
 from uuid import UUID
@@ -140,8 +140,8 @@ async def resume_deployment(
     deployment_id: UUID,
     idempotency_key: str,
 ) -> PaperDeploymentView:
-    """77번 §3 "Resume: PAUSED only + complete reevaluation" — start와 완전히
-    같은 게이트 재평가를 거친다(단축 경로 없음)."""
+    """#77 §3 "Resume: PAUSED only + complete reevaluation" — goes through
+    the exact same gate re-evaluation as start (no shortcut path)."""
     return await _start_or_resume(
         repo,
         risk_repo,
