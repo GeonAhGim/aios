@@ -12,10 +12,17 @@ read-only transaction (task-6213). `_close_pool_ignoring_reset` absorbs the
 same reset shape hitting an idle pooled connection during `pool.close()`
 teardown, after `verify()` has already produced its (fail-closed) result
 (task-6236) -- neither `_run`'s `finally` nor a real bug in the scan itself
-should have its outcome replaced by a teardown-only socket error. Neither
-test group touches a real socket -- `asyncpg.create_pool` /
-`replay_verify.verify` / `pool.close` are monkeypatched -- so they run
-without TEST_DATABASE_URL.
+should have its outcome replaced by a teardown-only socket error. task-6256:
+the escalation recurred a 4th time with the traceback back inside
+`_create_pool_with_retry`, meaning the old 5-attempt/~5s linear backoff was
+exhausted before the shared-Postgres contention (every worktree on this
+machine terminates connections against same-named databases via
+`setup_test_db.py --reset/--drop`'s `pg_terminate_backend`) cleared --
+`_retry_delay` switches both retry loops to exponential backoff with a
+higher attempt ceiling, sized to that documented contention window instead
+of the original arbitrary guess. Neither test group touches a real socket
+-- `asyncpg.create_pool` / `replay_verify.verify` / `pool.close` are
+monkeypatched -- so they run without TEST_DATABASE_URL.
 """
 
 from __future__ import annotations
@@ -34,6 +41,24 @@ pytestmark = pytest.mark.asyncio
 
 class _FakePool:
     pass
+
+
+def test_retry_delay_grows_exponentially_and_caps() -> None:
+    """task-6256: the schedule must actually widen the contention window the
+    old linear backoff (`0.5*(attempt+1)`, ~5s total over 5 attempts) proved
+    too short for, not just add more attempts at the same short cadence."""
+    assert [replay_verify._retry_delay(a) for a in range(6)] == [0.5, 1.0, 2.0, 4.0, 8.0, 8.0]
+
+
+def test_retry_delay_total_budget_exceeds_prior_5s_window() -> None:
+    """Negative test for the regression itself: summed over
+    `_POOL_CONNECT_ATTEMPTS` retries, the new schedule must clear the ~5s
+    total the old linear backoff gave the flake in esc-ci-replay_verify.json
+    before all attempts were exhausted."""
+    total = sum(
+        replay_verify._retry_delay(a) for a in range(replay_verify._POOL_CONNECT_ATTEMPTS - 1)
+    )
+    assert total > 5.0
 
 
 async def test_create_pool_with_retry_succeeds_after_transient_reset(monkeypatch) -> None:

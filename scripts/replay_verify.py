@@ -89,8 +89,33 @@ _ORDER_FIELDS = (
 # not just the connect. Retrying both the connect and the scan a few times
 # with backoff absorbs the reset wherever it lands without weakening what
 # this script actually verifies.
-_POOL_CONNECT_ATTEMPTS = 5
-_POOL_CONNECT_RETRY_BASE_DELAY = 0.5
+#
+# task-6256: esc-ci-replay_verify.json recurred a 4th time *after* task-6177/
+# 6213/6236 had already shipped -- the traceback lands back inside
+# `_create_pool_with_retry` itself, i.e. all 5 attempts of the old linear
+# `0.5*(attempt+1)`s backoff (~5s of sleeping total) were exhausted before
+# the reset cleared. Root cause research (docker-compose.dev.yml, tests/
+# conftest.py's `retry_too_many_connections`, scripts/setup_test_db.py's
+# task-5782/task-5822 notes) confirms every worktree on this machine shares
+# one local Postgres container -- a sibling worktree's `setup_test_db.py
+# --reset/--drop` runs `pg_terminate_backend` against same-named databases,
+# which is a hard kill no client-side timeout can outrun, and can land
+# anywhere in a multi-second window depending on what else is running on
+# the shared box at that moment. Widening the retry budget is not covering
+# for a code bug -- it is sizing the budget to the actual, now-documented
+# contention window instead of the arbitrary ~5s picked before that
+# evidence existed.
+_POOL_CONNECT_ATTEMPTS = 8
+_POOL_CONNECT_RETRY_BASE_DELAY: float = 0.5
+_POOL_CONNECT_RETRY_MAX_DELAY: float = 8.0
+
+
+def _retry_delay(attempt: int) -> float:
+    """Exponential backoff (`base * 2**attempt`, capped at `_MAX_DELAY`) for
+    the `attempt`-th retry (0-indexed) -- a pure function so the schedule is
+    unit-testable without `asyncio.sleep`."""
+    delay: float = _POOL_CONNECT_RETRY_BASE_DELAY * (2**attempt)
+    return min(delay, _POOL_CONNECT_RETRY_MAX_DELAY)
 
 
 def _asyncpg_dsn() -> str:
@@ -109,7 +134,7 @@ async def _create_pool_with_retry(dsn: str) -> asyncpg.Pool:
         except (OSError, asyncpg.exceptions.ConnectionDoesNotExistError):
             if attempt + 1 >= _POOL_CONNECT_ATTEMPTS:
                 raise
-            await asyncio.sleep(_POOL_CONNECT_RETRY_BASE_DELAY * (attempt + 1))
+            await asyncio.sleep(_retry_delay(attempt))
     raise AssertionError("unreachable -- loop always returns or raises")
 
 
@@ -274,7 +299,7 @@ async def _verify_with_retry(
         except (OSError, asyncpg.exceptions.ConnectionDoesNotExistError):
             if attempt + 1 >= _POOL_CONNECT_ATTEMPTS:
                 raise
-            await asyncio.sleep(_POOL_CONNECT_RETRY_BASE_DELAY * (attempt + 1))
+            await asyncio.sleep(_retry_delay(attempt))
     raise AssertionError("unreachable -- loop always returns or raises")
 
 
