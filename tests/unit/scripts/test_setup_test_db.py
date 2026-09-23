@@ -6,10 +6,11 @@
 재현·정정한다(root cause: `DROP DATABASE`에 `IF EXISTS`가 없고, 호출 전체가
 advisory lock으로 직렬화되지 않았다).
 
-실DB 접근(`DATABASE_URL`)이 필요한 테스트는 접속 실패 시 스킵한다 — 이
-저장소 워크트리는 항상 로컬 Postgres가 떠 있지만(TESTING.md), CI worktree
-프로비저닝 이전 단계 등 DB가 없는 실행 경로에서 무음 실패 대신 스킵으로
-드러낸다.
+`DATABASE_URL`은 `tests/conftest.py`가 모듈 임포트 시점에 `TEST_DATABASE_URL`
+(없으면 즉시 ``RuntimeError``로 수집 자체를 막는다)로부터 채워 넣으므로, 이
+스위트 안의 테스트가 실행되는 시점에는 항상 설정돼 있다 — 스킵 분기는
+불필요하다(task-5820: `pytest.skip` 방어 분기가 도달 불가능한 채로 코드
+래칫 `skip_xfail`만 증가시켰다).
 """
 
 from __future__ import annotations
@@ -26,7 +27,6 @@ from uuid import uuid4
 
 import asyncpg
 import pytest
-from dotenv import dotenv_values
 
 ROOT = Path(__file__).resolve().parents[3]
 SCRIPTS_DIR = ROOT / "scripts"
@@ -53,11 +53,8 @@ def _load_module(name: str, path: Path) -> ModuleType:
 setup_test_db = _load_module("setup_test_db", SCRIPTS_DIR / "setup_test_db.py")
 
 
-def _server_url_or_skip() -> str:
-    url = os.environ.get("DATABASE_URL") or dotenv_values(ROOT / ".env").get("DATABASE_URL")
-    if not url:
-        pytest.skip("DATABASE_URL 없음 — 실DB 통합 테스트 스킵")
-    return url
+def _server_url() -> str:
+    return os.environ["DATABASE_URL"]
 
 
 async def _database_exists(server_url: str, database: str) -> bool:
@@ -94,7 +91,7 @@ def scratch_db_name() -> str:
 
 
 def test_ensure_database_creates_when_missing(scratch_db_name: str) -> None:
-    server_url = _server_url_or_skip()
+    server_url = _server_url()
     try:
         created = asyncio.run(
             setup_test_db._ensure_database(server_url, scratch_db_name, reset=False)
@@ -106,7 +103,7 @@ def test_ensure_database_creates_when_missing(scratch_db_name: str) -> None:
 
 
 def test_ensure_database_reset_recreates_existing(scratch_db_name: str) -> None:
-    server_url = _server_url_or_skip()
+    server_url = _server_url()
     try:
         first = asyncio.run(
             setup_test_db._ensure_database(server_url, scratch_db_name, reset=False)
@@ -126,7 +123,7 @@ def test_ensure_database_concurrent_reset_survives_race(scratch_db_name: str) ->
     `reset=True` 호출 중 늦게 `DROP DATABASE`를 쏘는 쪽이
     `InvalidCatalogNameError`로 죽었다(esc-ci-prepare sha 0f693214).
     """
-    server_url = _server_url_or_skip()
+    server_url = _server_url()
     asyncio.run(setup_test_db._ensure_database(server_url, scratch_db_name, reset=False))
     try:
 
@@ -205,7 +202,7 @@ def test_ensure_database_concurrent_reset_with_migrate_survives_race(
 
 
 def test_drop_database_removes_existing(scratch_db_name: str) -> None:
-    server_url = _server_url_or_skip()
+    server_url = _server_url()
     asyncio.run(setup_test_db._ensure_database(server_url, scratch_db_name, reset=False))
     try:
         dropped = asyncio.run(setup_test_db._drop_database(server_url, scratch_db_name))
@@ -216,13 +213,13 @@ def test_drop_database_removes_existing(scratch_db_name: str) -> None:
 
 
 def test_drop_database_missing_is_noop(scratch_db_name: str) -> None:
-    server_url = _server_url_or_skip()
+    server_url = _server_url()
     dropped = asyncio.run(setup_test_db._drop_database(server_url, scratch_db_name))
     assert dropped is False
 
 
 def test_list_test_databases_includes_created(scratch_db_name: str) -> None:
-    server_url = _server_url_or_skip()
+    server_url = _server_url()
     asyncio.run(setup_test_db._ensure_database(server_url, scratch_db_name, reset=False))
     try:
         rows = asyncio.run(setup_test_db._list_test_databases(server_url))
@@ -235,7 +232,7 @@ def test_list_test_databases_includes_created(scratch_db_name: str) -> None:
 
 
 def test_main_drop_flag_removes_database(scratch_db_name: str) -> None:
-    server_url = _server_url_or_skip()
+    server_url = _server_url()
     session_name = scratch_db_name.removeprefix(setup_test_db.PREFIX)
     asyncio.run(setup_test_db._ensure_database(server_url, scratch_db_name, reset=False))
     try:
@@ -247,7 +244,7 @@ def test_main_drop_flag_removes_database(scratch_db_name: str) -> None:
 
 
 def test_main_list_flag_needs_no_name(capsys: pytest.CaptureFixture[str]) -> None:
-    _server_url_or_skip()
+    _server_url()
     sys.argv = ["setup_test_db.py", "--list"]
     assert setup_test_db.main() == 0
     out = capsys.readouterr().out
