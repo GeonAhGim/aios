@@ -53,12 +53,12 @@ async def refresh(
     async with pool.acquire() as conn:
         session = await session_repository.get_active(conn, session_id)
         if session is None:
-            raise RefreshSessionNotFoundError(f"session_id={session_id}: 활성 세션이 없습니다")
+            raise RefreshSessionNotFoundError(f"session_id={session_id}: no active session")
 
         now = datetime.now(timezone.utc)
         if session.expires_at <= now:
             await session_repository.revoke(conn, session_id, reason="expired")
-            raise RefreshTokenExpiredError(f"session_id={session_id}: refresh 만료")
+            raise RefreshTokenExpiredError(f"session_id={session_id}: refresh expired")
 
         new_plaintext, new_hash = TokenIssuer.issue_refresh()
         rotated = await session_repository.rotate_refresh(
