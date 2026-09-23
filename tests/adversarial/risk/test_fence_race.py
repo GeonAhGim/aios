@@ -154,7 +154,9 @@ async def test_staged_gather_kill_switch_vs_submits_post_fence_zero(
         return_exceptions=True,
     )
     early_results = [r for r in results[:_N_EARLY] if isinstance(r, Order)]
-    late_results: list[FenceStaleError] = [r for r in results[_N_EARLY + 1 :] if isinstance(r, FenceStaleError)]
+    late_results: list[FenceStaleError] = [
+        r for r in results[_N_EARLY + 1 :] if isinstance(r, FenceStaleError)
+    ]
 
     assert all(r.status == OrderStatus.SUBMITTED for r in early_results)
     assert len(late_results) == _N_LATE
