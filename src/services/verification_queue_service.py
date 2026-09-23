@@ -1,13 +1,15 @@
-"""18.1 — 검증 대기열 조회 (VerificationQueueService).
+"""18.1 — Verification queue listing (VerificationQueueService).
 
-Spec: 기능설계문서_v1.20.md#FD-18.1, FD-13.2, 15번 문서 §15.6
+Spec: functional_design_doc_v1.20.md#FD-18.1, FD-13.2, Document-15 §15.6
 
-15번 문서 §15.6 이해상충 규칙 — 검증담당자 본인이 판매자인 리스팅은
-대기열에서 제외한다(verifier_user_id != listing.seller_user_id). 대기중인
-리스팅이 없거나 전부 본인 리스팅이라 걸러진 경우나 결과는 동일하게 빈
-목록이다 — "본인 리스팅은 다른 검증담당자가 처리해야 합니다" 안내는
-프론트엔드가 빈 목록에 대해 보여줄 문구이므로 여기서 별도 필드로
-구분하지 않는다(빈 목록 자체가 완료조건이 요구하는 결과).
+Conflict-of-interest rule (Document-15 §15.6) — listings where the
+verifier is the seller are excluded from the queue
+(verifier_user_id != listing.seller_user_id). If there are no pending
+listings or all are filtered out as self-listings, the result is an
+empty list either way. The message "Self-listings must be handled by
+another verifier" is UI text shown by the frontend for an empty list,
+so there is no separate field to distinguish this here (an empty list
+itself is the completion condition).
 """
 from __future__ import annotations
 
