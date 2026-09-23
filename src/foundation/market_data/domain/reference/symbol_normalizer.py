@@ -1,12 +1,12 @@
-"""LA-7 — venue 원시 심볼 ↔ canonical 심볼 변환 단일 규칙(순수 함수).
+"""LA-7 — single rule for venue raw symbol ↔ canonical symbol conversion (pure functions).
 
 Spec: docs/specs/L4_market_data_positions_ledger_v1.0.md#§2.2 LA-7, §9.2 LA-7.
 
-크립토(BITGET)는 "BASE/QUOTE" 슬래시 표기, KRX는 6자리 종목코드, US
-주식은 원시 티커를 그대로 canonical로 쓴다(§2.2 "US 티커 단일 규칙").
-`src/exchanges/bitget/symbols.py` 등 어댑터별로 흩어진 변환 로직을
-이 파일로 수렴하는 것이 목표이나, 어댑터 배선 교체 자체는 LA-19의
-몫이라 기존 어댑터(`src/exchanges/**`)는 건드리지 않는다. I/O 없음.
+Crypto (BITGET) uses "BASE/QUOTE" slash notation, KRX uses 6-digit stock codes,
+US stocks use the raw ticker as-is as the canonical form (§2.2 "US ticker single rule").
+The goal is to converge conversion logic scattered across adapters such as
+`src/exchanges/bitget/symbols.py` into this file, but adapter wiring changes
+themselves belong to LA-19, so existing adapters (`src/exchanges/**`) are not touched. No I/O.
 """
 from __future__ import annotations
 
@@ -16,18 +16,18 @@ from src.foundation.market_data.contracts.v1 import Venue
 
 __all__ = ["SymbolNormalizationError", "to_canonical", "to_venue"]
 
-# 미검증: 실거래소 문서 대조 없이 통용 quote만 나열(우선순위: 긴 접미사부터).
+# Unvalidated: lists common quotes without cross-checking against exchange docs (priority: longest suffix first).
 _CRYPTO_QUOTES: tuple[str, ...] = ("USDT", "USDC", "BUSD", "BTC", "ETH", "KRW")
 _KRX_CODE = re.compile(r"\d{6}")
 _US_TICKER = re.compile(r"[A-Z]{1,6}(\.[A-Z])?")
 
 
 class SymbolNormalizationError(ValueError):
-    """`MD_SYMBOL_UNKNOWN` — venue 원시/canonical 심볼을 해석할 수 없음."""
+    """`MD_SYMBOL_UNKNOWN` — cannot interpret venue raw or canonical symbol."""
 
 
 def to_canonical(venue: Venue, raw: str) -> str:
-    """venue 원시 심볼 -> canonical 표현."""
+    """Convert venue raw symbol to canonical representation."""
     if venue is Venue.BITGET:
         return _crypto_raw_to_canonical(raw)
     if venue is Venue.KIS_KRX:
@@ -38,7 +38,7 @@ def to_canonical(venue: Venue, raw: str) -> str:
 
 
 def to_venue(venue: Venue, canonical: str) -> str:
-    """canonical 표현 -> venue 원시 심볼."""
+    """Convert canonical representation to venue raw symbol."""
     if venue is Venue.BITGET:
         return _crypto_canonical_to_raw(canonical)
     if venue is Venue.KIS_KRX:
