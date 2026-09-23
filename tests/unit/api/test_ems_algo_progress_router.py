@@ -16,10 +16,10 @@ from typing import Any
 from uuid import UUID, uuid4
 
 import pytest
-from fastapi import HTTPException
 
 from src.api.routers.foundation.ems import get_algo_run_progress
 from src.data.models.trading import OrderSide, OrderStatus
+from src.foundation.ems.application.get_algo_progress import AlgoRunNotFoundError
 from src.foundation.ems.application.start_algo import AlgoRunPlan
 from src.foundation.ems.contracts.v1 import (
     AlgoKind,
@@ -122,10 +122,8 @@ async def test_get_algo_run_progress_404s_for_an_unregistered_parent_id() -> Non
     process restarted since it ran) must 404, not 500 or an empty 200."""
     scheduler = _FakeAlgoScheduler()
 
-    with pytest.raises(HTTPException) as exc_info:
+    with pytest.raises(AlgoRunNotFoundError):
         await get_algo_run_progress(uuid4(), _user=_user(), scheduler=scheduler)
-
-    assert exc_info.value.status_code == 404
 
 
 async def test_get_algo_run_progress_404s_for_a_different_registered_parent_id() -> None:
@@ -139,7 +137,5 @@ async def test_get_algo_run_progress_404s_for_a_different_registered_parent_id()
     )
     scheduler = _FakeAlgoScheduler(plans={registered_id: plan})
 
-    with pytest.raises(HTTPException) as exc_info:
+    with pytest.raises(AlgoRunNotFoundError):
         await get_algo_run_progress(requested_id, _user=_user(), scheduler=scheduler)
-
-    assert exc_info.value.status_code == 404

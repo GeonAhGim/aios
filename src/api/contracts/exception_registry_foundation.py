@@ -52,6 +52,8 @@ from src.foundation.connections.application.sync_snapshot import (
     ProviderUnavailableError,
 )
 from src.foundation.connections.domain.rules import ForbiddenCapabilityScopeError
+from src.foundation.ems.application.get_algo_progress import AlgoRunNotFoundError
+from src.foundation.ems.ports.tca_result_repository import TcaResultNotFoundError
 from src.foundation.entities.application.resolve_context import EntityContextResolutionError
 from src.foundation.evidence.domain.rules import ChainIntegrityError
 from src.foundation.ledger.application.payouts import UnknownPayoutBatchError
@@ -290,6 +292,9 @@ EXCEPTION_MAP_FOUNDATION: list[tuple[type[Exception], ErrorCode]] = [
     *EXCEPTION_MAP_FOUNDATION_PERSONAL,
     # task-2630 U-3a — assistant.py, split out (P6.line_cap).
     *EXCEPTION_MAP_AI_ASSISTANT,
+    # PLT-21(task-5598) — foundation/ems.py TCA/algo-progress read paths.
+    (TcaResultNotFoundError, ErrorCode.RESOURCE_NOT_FOUND),
+    (AlgoRunNotFoundError, ErrorCode.RESOURCE_NOT_FOUND),
 ]
 
 STATUS_OVERRIDE_FOUNDATION: list[tuple[type[Exception], int]] = [

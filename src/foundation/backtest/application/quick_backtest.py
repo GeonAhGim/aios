@@ -233,10 +233,12 @@ def _resolve_bracket_exit(
     # Invariant: if triggered_leg is set, the corresponding price must be non-None
     # (we only add legs to legs_present if their prices are not None).
     if resolution.triggered_leg == "loss":
-        assert state.loss_price is not None
+        if state.loss_price is None:
+            raise RuntimeError("resolve_oca triggered 'loss' leg with no loss_price set")
         fill_price = state.loss_price
     elif resolution.triggered_leg == "profit":
-        assert state.profit_price is not None
+        if state.profit_price is None:
+            raise RuntimeError("resolve_oca triggered 'profit' leg with no profit_price set")
         fill_price = state.profit_price
     else:
         # Trailing stop not yet implemented
