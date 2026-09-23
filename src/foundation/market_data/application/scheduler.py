@@ -1,4 +1,5 @@
-"""LA-18 — market_data scheduler: periodic per-symbol×timeframe ingest (optional) + quality metrics export.
+"""LA-18 — market_data scheduler: periodic per-symbol×timeframe ingest (optional)
++ quality metrics export.
 
 Spec: docs/specs/L4_market_data_positions_ledger_v1.0.md#§5.3, §9.2 LA-18.
 
