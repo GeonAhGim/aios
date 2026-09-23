@@ -209,6 +209,14 @@ async def test_fa2a_migration_downgrade_maintains_foreign_key_integrity(
 ) -> None:
     """FA-2a negative test: downgrade path restores users FK without data loss.
     All legal_entity rows maintain referential integrity through downgrade."""
+    from tests.integration.conftest import create_test_tenant
+
+    # Setup: a tenant's legal_entity row must exist before the downgrade --
+    # a fresh migration_db_url clone carries no rows on its own (unlike
+    # test_fa2a_migration_preserves_valid_tenant_references, which inserts
+    # its own row for the same reason).
+    tenant_id = await create_test_tenant(pool, bootstrap_default_hierarchy_rows=True)
+
     # Downgrade from post-FA-2a state (current schema has tenant FK)
     await purge_position_snapshots(pool)
     _run_alembic("downgrade", "e6b1d94a7c3f", database_url=migration_db_url)
@@ -216,9 +224,11 @@ async def test_fa2a_migration_downgrade_maintains_foreign_key_integrity(
     # Verify FK target is restored to users
     assert await _legal_entity_tenant_fk_target(pool) == "users"
 
-    # Verify all legal_entity rows still exist (from bootstrap at test start)
+    # Verify the legal_entity row created above survived the downgrade
     async with pool.acquire() as conn:
-        count = await conn.fetchval("SELECT COUNT(*) FROM legal_entity")
+        count = await conn.fetchval(
+            "SELECT COUNT(*) FROM legal_entity WHERE tenant_id = $1", tenant_id
+        )
     assert count > 0, "legal_entity rows were lost during downgrade"
 
 
