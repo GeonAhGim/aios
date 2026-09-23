@@ -1,5 +1,5 @@
 {
- "refreshed_at": "2026-09-22T17:04:05+00:00",
+ "refreshed_at": "2026-09-23T08:01:33+00:00",
  "specs": [
   {
    "file": "L4_ai_research_strategy_factory_v1.0.md",
@@ -9,26 +9,26 @@
    "inflight": 0,
    "untouched": 0,
    "hold": 0,
-   "reopened": 3,
+   "reopened": 1,
    "depth": {
-    "D2": 3,
-    "D?": 20
+    "D2": 7,
+    "D?": 16
    }
   },
   {
    "file": "L4_analytics_authoring_backtest_marketplace_v1.0.md",
    "spec": "analytics_authoring_backtest_marketplace",
    "total": 107,
-   "done": 87,
-   "inflight": 3,
+   "done": 89,
+   "inflight": 1,
    "untouched": 0,
    "hold": 17,
-   "reopened": 14,
+   "reopened": 0,
    "depth": {
     "D1": 1,
     "D2": 33,
     "D3": 19,
-    "D?": 34
+    "D?": 36
    }
   },
   {
@@ -50,13 +50,13 @@
    "file": "L4_ems_routing_algos_and_tca_v1.0.md",
    "spec": "ems_routing_algos_and_tca",
    "total": 18,
-   "done": 17,
-   "inflight": 1,
+   "done": 18,
+   "inflight": 0,
    "untouched": 0,
    "hold": 0,
-   "reopened": 6,
+   "reopened": 1,
    "depth": {
-    "D2": 7,
+    "D2": 8,
     "D3": 2,
     "D?": 8
    }
@@ -69,7 +69,7 @@
    "inflight": 0,
    "untouched": 0,
    "hold": 0,
-   "reopened": 1,
+   "reopened": 0,
    "depth": {
     "D0": 1,
     "D2": 2,
@@ -95,15 +95,15 @@
    "file": "L4_ibor_fund_accounting_and_resilience_v1.0.md",
    "spec": "ibor_fund_accounting_and_resilience",
    "total": 29,
-   "done": 26,
-   "inflight": 3,
+   "done": 28,
+   "inflight": 1,
    "untouched": 0,
    "hold": 0,
-   "reopened": 1,
+   "reopened": 0,
    "depth": {
     "D2": 2,
     "D3": 12,
-    "D?": 12
+    "D?": 14
    }
   },
   {
@@ -114,11 +114,11 @@
    "inflight": 0,
    "untouched": 0,
    "hold": 0,
-   "reopened": 6,
+   "reopened": 1,
    "depth": {
-    "D2": 5,
-    "D3": 5,
-    "D?": 53
+    "D2": 10,
+    "D3": 8,
+    "D?": 45
    }
   },
   {
@@ -129,7 +129,7 @@
    "inflight": 0,
    "untouched": 0,
    "hold": 0,
-   "reopened": 6,
+   "reopened": 0,
    "depth": {
     "D1": 2,
     "D2": 11,
@@ -145,7 +145,7 @@
    "inflight": 0,
    "untouched": 0,
    "hold": 0,
-   "reopened": 1,
+   "reopened": 0,
    "depth": {
     "D2": 14,
     "D?": 8
@@ -159,11 +159,11 @@
    "inflight": 0,
    "untouched": 0,
    "hold": 0,
-   "reopened": 1,
+   "reopened": 0,
    "depth": {
-    "D2": 5,
-    "D3": 2,
-    "D?": 11
+    "D2": 6,
+    "D3": 3,
+    "D?": 9
    }
   },
   {
@@ -188,10 +188,10 @@
    "inflight": 0,
    "untouched": 0,
    "hold": 0,
-   "reopened": 5,
+   "reopened": 0,
    "depth": {
-    "D2": 15,
-    "D?": 31
+    "D2": 16,
+    "D?": 30
    }
   }
  ]
