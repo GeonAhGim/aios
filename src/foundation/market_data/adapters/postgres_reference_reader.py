@@ -2,12 +2,12 @@
 
 Spec: docs/specs/L4_market_data_positions_ledger_v1.0.md#§9.2 LA-24.
 
-Read-only (no write path). Row→DTO conversion reuses LA-12 adapter's
-`_row_to_instrument` directly (no re-implementation). List uses
-(venue, canonical_symbol, instrument_id) ascending keyset pagination —
-cursor is the last `instrument_id` of the previous page; its sort key is
-refound via subquery and compared with `>` (no OFFSET, no duplicates/gaps
-even if inserts interleave).
+Read-only (no write path). Row-to-DTO conversion reuses `_row_to_instrument`
+from the LA-12 adapter verbatim (no reimplementation). Listings use keyset
+pagination in ascending order of (venue, canonical_symbol, instrument_id) —
+the cursor is the last `instrument_id` of the previous page, and the sort
+keys of that row are retrieved via a subquery for `>` comparison (no OFFSET;
+no duplicates or gaps even if inserts occur).
 """
 from __future__ import annotations
 
