@@ -1,14 +1,15 @@
-"""13.10 — 분쟁 접수 API.
+"""13.10 — Dispute submission API.
 
-Spec: 기능설계문서_v1.20.md#FD-13.10, 14번 문서 §14.5.1
+Spec: 기능설계문서_v1.20.md#FD-13.10, document #14 §14.5.1
 
-FD-18.2(운영자 분쟁 조회·처리)는 이 API가 만든 티켓을 조회·처리할 뿐,
-티켓 생성 자체는 별도 기능이다 — 14번 문서가 원래 요구했으나 반영이
-빠졌던 "구매자가 분쟁을 제기하는" 쪽을 여기서 채운다.
+FD-18.2 (operator dispute query/processing) only queries and processes tickets
+created by this API; ticket creation itself is a separate feature — this module
+fills in the "buyer raises a dispute" requirement originally specified in
+document #14 but previously omitted.
 
-타인 구매건에 대한 분쟁 제기는 차단(구매 소유권 확인), 구매건당 진행중
-(OPEN) 분쟁은 1개만 — DB의 부분 유니크 인덱스(idx_disputes_open_per_purchase)
-가 최종 방어선이다.
+Dispute submission for another buyer's purchase is blocked (purchase ownership
+check); at most one OPEN dispute per purchase — the DB partial unique index
+(idx_disputes_open_per_purchase) is the final defense line.
 """
 from __future__ import annotations
 
@@ -20,7 +21,7 @@ from pydantic import BaseModel
 
 
 class DisputeError(Exception):
-    """FD-13.10 실패 — 라우터가 400/403/404로 변환."""
+    """FD-13.10 failure — router translates to 400/403/404."""
 
 
 class Dispute(BaseModel):
