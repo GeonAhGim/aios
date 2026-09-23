@@ -33,6 +33,7 @@ from src.foundation.entities.adapters.postgres_repository import PostgresEntityR
 from src.foundation.evidence.adapters.postgres_repository import PostgresAuditEventRepository
 from src.foundation.evidence.domain.models import Classification, Outcome
 from src.foundation.evidence.domain.rules import compute_payload_hash
+from src.foundation.ledger.adapters.postgres_balance_repository import PostgresBalanceRepository
 from src.foundation.ledger.application import abor_snapshot, ibor_view
 from src.foundation.ledger.application.abor_snapshot import (
     AlreadyClosedError,
@@ -46,11 +47,23 @@ from src.foundation.ledger.contracts.v1 import (
     Side,
     UserSub,
 )
-from src.foundation.ledger.domain.chart_of_accounts import user_account
+from src.foundation.ledger.domain.chart_of_accounts import account_type, user_account
 from src.foundation.ledger.domain.hash_chain import entry_hash as compute_entry_hash
 from src.foundation.ledger.domain.hash_chain import lines_digest
 from tests.integration.conftest import create_test_tenant
 from tests.integration.foundation.entities.conftest import build_hierarchy
+
+_DEBIT_NORMAL_TYPES = frozenset({AccountType.ASSET, AccountType.EXPENSE})
+
+
+def _signed_delta(line: PostingLine) -> Decimal:
+    """Same §4.4 sign convention `post_entry._signed_delta`/`projections.ledger.
+    _signed_delta` apply -- reused here (not imported, both are module-private)
+    so `_insert_dated_entry`'s direct-SQL bypass of `post_entry` still keeps
+    `ledger_balance` in the same fold `post_entry` would have produced."""
+    debit_increases = account_type(line.account_code) in _DEBIT_NORMAL_TYPES
+    increases = (line.side is Side.DEBIT) == debit_increases
+    return line.amount if increases else -line.amount
 
 
 async def _account_id(pool: asyncpg.Pool, account_code: str) -> UUID:
@@ -84,7 +97,19 @@ async def _insert_dated_entry(
     워커의 테스트 DB가 영구히 오염된다(`test_migration_fa4_worm_no_backfill.
     py` 모듈 docstring이 경고하는 바로 그 사고). 실제 체인을 그대로
     재현한다: 직전 sequence_no의 `entry_hash`를 `prev_hash`로 읽고,
-    `hash_chain.entry_hash`로 진짜 값을 계산한다."""
+    `hash_chain.entry_hash`로 진짜 값을 계산한다.
+
+    esc-ci-replay_verify 근본원인 수정(task-5687): 이 helper는 `post_entry`
+    (LC-9)를 거치지 않고 저널 행을 직접 삽입하므로, 원래 `ledger_balance`가
+    갱신되지 않은 채로 남았다 -- task-5309가 이미 `PLATFORM:CASH_CLEARING`에서
+    고친 것과 정확히 같은 드리프트 클래스(저널은 자라는데 잔액은 그대로)를,
+    이 파일은 매 호출마다 신선한 `USER:*` 계정에 남겨 FA-15 `replay_verify`의
+    창(기본 24시간)에 걸릴 때마다 거짓 MISMATCH를 냈다. 저널 삽입 직후 같은
+    트랜잭션에서 `_signed_delta`(§4.4, `post_entry`/`projections.ledger`와
+    동일 부호 규약)로 순 델타를 접어 `PostgresBalanceRepository.apply`로
+    반영한다 -- `posted_at`을 과거로 통제하는 이 파일의 목적은 그대로 두고,
+    `post_entry`가 그 시각에 실제로 실행됐다면 남겼을 `ledger_balance` 상태만
+    재현한다."""
     audit_repo = PostgresAuditEventRepository(pool)
     entry_id = uuid4()
     event_ref = f"test-fa12:{entry_id}"
@@ -147,6 +172,21 @@ async def _insert_dated_entry(
                 line.currency.value,
                 fund_id,
                 portfolio_id,
+            )
+        deltas: dict[str, Decimal] = {}
+        for line in lines:
+            deltas[line.account_code] = deltas.get(
+                line.account_code, Decimal("0")
+            ) + _signed_delta(line)
+        balances = PostgresBalanceRepository(pool)
+        current = await balances.get_for_update(conn, sorted(deltas))
+        for code, delta in deltas.items():
+            await balances.apply(
+                conn,
+                code,
+                delta_balance=delta,
+                delta_held=Decimal("0"),
+                expected_seq=current[code].last_entry_seq,
             )
     return entry_id
 

@@ -360,9 +360,10 @@ async def test_get_balance_raises_drift_when_ledger_balance_row_directly_corrupt
     available_code = ua(user, UserSub.AVAILABLE)
     async with pool.acquire() as conn, conn.transaction():
         row = await conn.fetchrow(
-            "SELECT lb.account_id, lb.held, lb.pending_payout, lb.allow_negative, "
-            "lb.last_entry_seq FROM ledger_balance lb JOIN ledger_account la "
-            "ON la.account_id = lb.account_id WHERE la.account_code = $1",
+            "SELECT lb.account_id, lb.balance, lb.held, lb.pending_payout, "
+            "lb.allow_negative, lb.last_entry_seq FROM ledger_balance lb "
+            "JOIN ledger_account la ON la.account_id = lb.account_id "
+            "WHERE la.account_code = $1",
             available_code,
         )
         await conn.execute("DELETE FROM ledger_balance WHERE account_id = $1", row["account_id"])
@@ -382,12 +383,37 @@ async def test_get_balance_raises_drift_when_ledger_balance_row_directly_corrupt
             row["last_entry_seq"] + 1,
         )
 
-    with pytest.raises(WalletLedgerDriftError) as exc_info:
-        await get_balance(pool, user, balances=ports.balances)
+    try:
+        with pytest.raises(WalletLedgerDriftError) as exc_info:
+            await get_balance(pool, user, balances=ports.balances)
 
-    assert exc_info.value.user_id == user
-    assert exc_info.value.legacy_balance == Decimal("300.00")
-    assert exc_info.value.ledger_available == Decimal("999999.00")
+        assert exc_info.value.user_id == user
+        assert exc_info.value.legacy_balance == Decimal("300.00")
+        assert exc_info.value.ledger_available == Decimal("999999.00")
+    finally:
+        # task-5687/esc-ci-replay_verify: 이 테스트가 남긴 `ledger_balance`
+        # 손상이 복구되지 않으면 `bridge_credit`가 실제로 append한 저널
+        # 엔트리와 어긋난 채로 남아 FA-15 `replay_verify`의 이후 실행(같은
+        # 로컬 CI 안, 같은 공유 테스트 DB)에서 이 계정을 거짓 MISMATCH로
+        # 표면화한다(test_replay_verify.py의 `_bump_balance` tamper 테스트가
+        # 이미 `finally`로 복원하는 것과 동일한 이유). 원상복구는 검증 자체
+        # (DELETE+INSERT 손상 직후 `get_balance`가 fail-closed하는지)를
+        # 약화하지 않는다 -- 단언은 이미 위에서 손상된 상태를 대상으로 끝났다.
+        async with pool.acquire() as conn, conn.transaction():
+            await conn.execute(
+                "DELETE FROM ledger_balance WHERE account_id = $1", row["account_id"]
+            )
+            await conn.execute(
+                "INSERT INTO ledger_balance (account_id, balance, held, pending_payout, "
+                "allow_negative, last_entry_seq, updated_at) "
+                "VALUES ($1, $2, $3, $4, $5, $6, now())",
+                row["account_id"],
+                row["balance"],
+                row["held"],
+                row["pending_payout"],
+                row["allow_negative"],
+                row["last_entry_seq"],
+            )
 
 
 # ---- DEEPEN(task-2969): 성능 단언 ----
