@@ -16,6 +16,7 @@ from zoneinfo import ZoneInfo
 import pytest
 
 from scripts.check_code_language import HANGUL, count_file
+from scripts.check_code_language import main as check_code_language_main
 from src.foundation.market_data.contracts.v1 import Venue
 from src.foundation.market_data.domain.calendar.known_venues import KNOWN_SESSIONS
 from src.foundation.market_data.domain.calendar.session_rules import (
@@ -218,6 +219,8 @@ KIS_KRX의 `close_time=15:30`은 연속경쟁매매(09:00~15:20)와 그 뒤에 �
 
 def test_gate_code_language_ratchet_flags_the_pre_translation_korean_docstring(
     tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Gate-red reproduction -- commit c33c2030 (task-2114) had to translate
     part of this exact known_venues.py module docstring (the KIS_KRX
@@ -225,11 +228,16 @@ def test_gate_code_language_ratchet_flags_the_pre_translation_korean_docstring(
     growth elsewhere, it pushed scripts/check_code_language.py's Hangul
     comment/docstring ratchet over its repo-wide budget. The file's first
     paragraph predates the ADR-2026-09-07-A ratchet and is grandfathered
-    (existing Hangul is not retro-converted, only growth is blocked) -- this
-    pins the shipped file's current flagged-line count and shows that
-    reintroducing the translated paragraph verbatim (reconstructed from that
-    commit's diff) adds fresh Hangul lines beyond that baseline, i.e. exactly
-    the growth the ratchet would flag red again."""
+    (existing Hangul is not retro-converted, only growth is blocked).
+
+    This drives the gate's actual entrypoint (`main`), not just the
+    `count_file` helper, against a target tree containing the reconstructed
+    pre-translation module and a baseline pinned to the shipped file's
+    grandfathered count. A gate that was patched to always "pass" (e.g. its
+    `total > baseline` branch short-circuited to `return 0`) would still make
+    `count_file` report a higher number here, but would no longer reproduce
+    the red exit code -- this asserts on `main`'s actual return value and
+    printed FAIL line so that regression is caught, not just the raw count."""
     current_count = count_file(_KNOWN_VENUES_PATH)
     assert current_count == 4  # grandfathered first-paragraph debt only
 
@@ -237,6 +245,24 @@ def test_gate_code_language_ratchet_flags_the_pre_translation_korean_docstring(
     poisoned.write_text(_PRE_TRANSLATION_MODULE_SOURCE, encoding="utf-8")
     assert count_file(poisoned) > current_count
     assert HANGUL.search(_PRE_TRANSLATION_MODULE_SOURCE) is not None
+
+    baseline = tmp_path / "baseline.txt"
+    baseline.write_text(f"{current_count}\n", encoding="utf-8")
+
+    # count_tree() resolves scanned files relative to the module-level ROOT
+    # constant, so the target directory must live under it for a real run.
+    monkeypatch.setattr("scripts.check_code_language.ROOT", tmp_path)
+
+    exit_code = check_code_language_main(
+        ["--target", str(tmp_path), "--baseline", str(baseline)]
+    )
+    captured = capsys.readouterr()
+
+    assert exit_code == 1  # gate-red: FAIL, growth over the baseline
+    assert "FAIL" in captured.out
+    assert "limit exceeded" in captured.out
+    # baseline file must be left untouched on a FAIL -- the gate never writes on red
+    assert baseline.read_text(encoding="utf-8").strip() == str(current_count)
 
 
 def test_is_open_raises_typeerror_for_naive_datetime_adversarial_input() -> None:
