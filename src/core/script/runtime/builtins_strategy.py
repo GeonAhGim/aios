@@ -47,16 +47,16 @@ Design decisions this leaf makes (the spec leaves them open):
 - Argument resolvers live in the sibling `builtins_strategy_args.py`, not
   this file -- task-2623 pushed this file over the zone's 300-line cap
   (same reason BT-10's `quick_backtest_fill.py` split off `quick_backtest.py`).
-- Wiring (why `default_builtins()` is untouched). `grammar/parser.py`'s
-  `_NAMESPACES` (DSL-3, a file this leaf does not own or modify) is
-  currently `{"ta", "math", "series"}` -- `strategy.*` calls cannot appear
-  in AIOS Script *source text* yet, so this table is not merged into
-  `builtins_ta.default_builtins()` here. `ir/ops.py::Call.ns` itself has no
-  such restriction (it is a plain `str`), so `StrategyBuiltins().table` is
+- Wiring (why `default_builtins()` is untouched). `grammar/parser_expr.py`'s
+  `_NAMESPACES` (DSL-3, a file this leaf does not own or modify) now
+  includes `"strategy"` (task-5194), so `strategy.*` calls parse from real
+  AIOS Script *source text*. `ir/ops.py::Call.ns` itself has no such
+  restriction (it is a plain `str`), so `StrategyBuiltins().table` is
   already usable today by any host that builds an `IRProgram` directly
-  (this leaf's own tests do exactly that). Extending `_NAMESPACES` so real
-  script source can reach it, and merging the table into
-  `default_builtins()`/`script_signal_source.py`, is later-leaf work.
+  (this leaf's own tests do exactly that). Merging the table into
+  `default_builtins()`/`script_signal_source.py` so the *interpreter* also
+  resolves `strategy.*` calls end-to-end is still later-leaf work -- task-5194
+  only unblocked the parser stage.
 
 Pure module: no I/O, no clock, no recursion (DoD (e)).
 """

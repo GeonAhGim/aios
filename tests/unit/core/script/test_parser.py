@@ -208,11 +208,22 @@ def test_primary_parenthesized_expr() -> None:
     assert decl.expr == BinaryExpr(op="+", left=Identifier(name="a"), right=Identifier(name="b"))
 
 
-@pytest.mark.parametrize("ns", ["ta", "math", "series"])
+@pytest.mark.parametrize("ns", ["ta", "math", "series", "strategy"])
 def test_call_all_namespaces(ns: str) -> None:
     decl = parse(f"let x = {ns}.f(a)").decls[0]
     assert isinstance(decl, LetDecl)
     assert decl.expr == CallExpr(ns=ns, ident="f", args=(Identifier(name="a"),))
+
+
+def test_call_strategy_namespace_parses() -> None:
+    """task-5194: `strategy.*` calls must reach the parser stage (§9.4 DSL-3)
+    so `builtins_strategy.py::StrategyBuiltins` is reachable from real DSL
+    source, not just from tests that build an `IRProgram` directly."""
+    decl = parse("let qty = strategy.set_stop(1, 2)").decls[0]
+    assert isinstance(decl, LetDecl)
+    assert decl.expr == CallExpr(
+        ns="strategy", ident="set_stop", args=(NumberLiteral(value=1), NumberLiteral(value=2))
+    )
 
 
 def test_call_no_args() -> None:
@@ -313,6 +324,18 @@ def test_unknown_namespace_is_script_syntax_at_namespace_position() -> None:
     assert err.code == "SCRIPT_SYNTAX"
     assert err.line == 1
     assert err.col == 9  # 'foo' 위치
+
+
+def test_unregistered_namespace_near_strategy_is_still_script_syntax() -> None:
+    """task-5194: adding `strategy` to `_NAMESPACES` must not widen the
+    whitelist beyond that one name -- a lookalike (`strategies`) stays
+    SCRIPT_SYNTAX."""
+    with pytest.raises(ScriptSyntaxError) as excinfo:
+        parse("let x = strategies.entry(1)")
+    err = excinfo.value
+    assert err.code == "SCRIPT_SYNTAX"
+    assert err.line == 1
+    assert err.col == 9  # 'strategies' 위치
 
 
 def test_unterminated_paren_is_script_syntax_at_eof() -> None:
