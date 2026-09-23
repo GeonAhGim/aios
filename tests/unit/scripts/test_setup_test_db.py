@@ -149,6 +149,56 @@ def test_ensure_database_concurrent_reset_survives_race(scratch_db_name: str) ->
         asyncio.run(_drop_if_exists(server_url, scratch_db_name))
 
 
+def test_drop_database_removes_existing(scratch_db_name: str) -> None:
+    server_url = _server_url_or_skip()
+    asyncio.run(setup_test_db._ensure_database(server_url, scratch_db_name, reset=False))
+    try:
+        dropped = asyncio.run(setup_test_db._drop_database(server_url, scratch_db_name))
+        assert dropped is True
+        assert asyncio.run(_database_exists(server_url, scratch_db_name)) is False
+    finally:
+        asyncio.run(_drop_if_exists(server_url, scratch_db_name))
+
+
+def test_drop_database_missing_is_noop(scratch_db_name: str) -> None:
+    server_url = _server_url_or_skip()
+    dropped = asyncio.run(setup_test_db._drop_database(server_url, scratch_db_name))
+    assert dropped is False
+
+
+def test_list_test_databases_includes_created(scratch_db_name: str) -> None:
+    server_url = _server_url_or_skip()
+    asyncio.run(setup_test_db._ensure_database(server_url, scratch_db_name, reset=False))
+    try:
+        rows = asyncio.run(setup_test_db._list_test_databases(server_url))
+        names = {name for name, _size in rows}
+        assert scratch_db_name in names
+        assert all(name.startswith(setup_test_db.PREFIX) for name in names)
+        assert all(size >= 0 for _name, size in rows)
+    finally:
+        asyncio.run(_drop_if_exists(server_url, scratch_db_name))
+
+
+def test_main_drop_flag_removes_database(scratch_db_name: str) -> None:
+    server_url = _server_url_or_skip()
+    session_name = scratch_db_name.removeprefix(setup_test_db.PREFIX)
+    asyncio.run(setup_test_db._ensure_database(server_url, scratch_db_name, reset=False))
+    try:
+        sys.argv = ["setup_test_db.py", session_name, "--drop"]
+        assert setup_test_db.main() == 0
+        assert asyncio.run(_database_exists(server_url, scratch_db_name)) is False
+    finally:
+        asyncio.run(_drop_if_exists(server_url, scratch_db_name))
+
+
+def test_main_list_flag_needs_no_name(capsys: pytest.CaptureFixture[str]) -> None:
+    _server_url_or_skip()
+    sys.argv = ["setup_test_db.py", "--list"]
+    assert setup_test_db.main() == 0
+    out = capsys.readouterr().out
+    assert all(line.split()[0].startswith(setup_test_db.PREFIX) for line in out.splitlines() if line)
+
+
 def test_main_rejects_lowercase_violation() -> None:
     with pytest.raises(SystemExit):
         sys.argv = ["setup_test_db.py", "Not-Valid-Name"]
