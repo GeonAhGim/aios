@@ -1,9 +1,9 @@
-"""AppendAuditEvent 커맨드.
+"""AppendAuditEvent command.
 
-Spec: AIOSproject 79번 §1/§2. FND-01/FND-02를 포함한 다른 bounded context가
-고위험 커맨드 뒤에 이 함수를 호출해 감사 이벤트를 남긴다(아직 배선은
-안 됐다 — 71번 §3 FND-03 자체 산출물은 "envelope + in-memory adapter"까지이고,
-기존 컨텍스트에 실제로 연결하는 건 후속 리프).
+Spec: AIOSproject #79 §1/§2. Other bounded contexts including FND-01/FND-02 call
+this function after high-risk commands to record audit events (wiring is not yet
+complete — #71 §3 FND-03 deliverable stops at "envelope + in-memory adapter";
+actual integration into existing contexts is a follow-up leaf).
 """
 from __future__ import annotations
 
@@ -18,7 +18,7 @@ from src.foundation.evidence.ports.repository import AuditEventRepository
 
 
 def event_to_view(event: AuditEvent) -> AuditEventView:
-    assert event.occurred_at is not None  # DB에서 온 이벤트는 항상 NOT NULL(마이그레이션 보장)
+    assert event.occurred_at is not None  # Events from DB are always NOT NULL (guaranteed by migration)
     return AuditEventView(
         id=event.id,
         tenant_id=event.tenant_id,
