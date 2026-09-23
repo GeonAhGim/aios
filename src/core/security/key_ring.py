@@ -51,6 +51,13 @@ class KeyRing:
     def kids(self) -> tuple[str, ...]:
         return tuple(self._keys)
 
+    def with_active_kid(self, new_active_kid: str) -> KeyRing:
+        """Return a new `KeyRing` sharing the same key material with a different
+        `active_kid` (used by `LocalKeyRingKmsAdapter.rotate`). Raises
+        `KeyRingConfigError` if `new_active_kid` is not among the existing keys —
+        rotation selects among already-provisioned keys, it does not mint one."""
+        return KeyRing(self._keys, new_active_kid)
+
     @classmethod
     def from_env(cls, scope: SecretScope, *, env: Mapping[str, str] | None = None) -> KeyRing:
         source = env if env is not None else os.environ
@@ -81,6 +88,10 @@ class KeyRing:
 
         return cls(keys, active_kid)
 
+    def to_kms_port(self) -> LocalKeyRingKmsAdapter:
+        """Wrap this `KeyRing` behind the `KmsPort` protocol (FA-22)."""
+        return LocalKeyRingKmsAdapter(self)
+
     @classmethod
     def from_legacy_hex(cls, hex_key: str) -> KeyRing:
         """Construct from a single legacy key (`CREDENTIAL_ENCRYPTION_KEY`) only (kid="legacy").
@@ -89,6 +100,41 @@ class KeyRing:
         has not yet been wired into `.env.example` to still use the KeyRing contract
         (encrypt/decrypt) with the existing single `SecretBundle.credential_encryption_key`."""
         return cls({_LEGACY_KID: _decode_key(hex_key, _LEGACY_KID)}, active_kid=_LEGACY_KID)
+
+
+class LocalKeyRingKmsAdapter:
+    """`KmsPort` adapter backed by a local, env-var-provisioned `KeyRing`
+    (FA-22). Delegates `encrypt`/`decrypt` to `src.core.security.encryption`
+    so the on-disk ciphertext format (`aios1$<kid>$<b64>`) and existing
+    round-trip behaviour are unchanged — callers going through the port see
+    byte-identical results to calling `encryption.encrypt`/`decrypt` directly
+    with the same `KeyRing`.
+
+    The import of `encryption` is deferred to call time: `encryption.py`
+    imports `KeyRing` from this module, so a module-level import here would
+    be circular.
+    """
+
+    def __init__(self, ring: KeyRing) -> None:
+        self._ring = ring
+
+    def get_key(self, kid: str) -> bytes:
+        return self._ring.key(kid)
+
+    def encrypt(self, plaintext: str) -> str:
+        from src.core.security.encryption import encrypt as _encrypt
+
+        return _encrypt(plaintext, self._ring)
+
+    def decrypt(self, token: str) -> str:
+        from src.core.security.encryption import decrypt as _decrypt
+
+        return _decrypt(token, self._ring)
+
+    def rotate(self, new_active_kid: str) -> LocalKeyRingKmsAdapter:
+        """Return a new adapter whose active kid is `new_active_kid`. The kid must
+        already be present in the ring's key material (see `KeyRing.with_active_kid`)."""
+        return LocalKeyRingKmsAdapter(self._ring.with_active_kid(new_active_kid))
 
 
 def _reject_live_keys_in_paper_runtime(source: Mapping[str, str]) -> None:
