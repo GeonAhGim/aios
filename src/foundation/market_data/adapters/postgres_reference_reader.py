@@ -1,12 +1,13 @@
-"""LA-24 — `ReferenceReadRepository`(ports/reference_repository.py)의 asyncpg 구현.
+"""LA-24 — asyncpg implementation of `ReferenceReadRepository` (ports/reference_repository.py).
 
 Spec: docs/specs/L4_market_data_positions_ledger_v1.0.md#§9.2 LA-24.
 
-읽기 전용이다(쓰기 경로 없음). 행→DTO 변환은 LA-12 어댑터의
-`_row_to_instrument`를 그대로 재사용한다(재구현 금지). 목록은
-(venue, canonical_symbol, instrument_id) 오름차순 keyset 페이지네이션 —
-커서는 직전 페이지 마지막 `instrument_id`이고, 그 행의 정렬 키를 서브쿼리로
-되찾아 `>` 비교한다(OFFSET 없음, 삽입이 끼어들어도 중복/누락 없음).
+Read-only (no write path). Row→DTO conversion reuses LA-12 adapter's
+`_row_to_instrument` directly (no re-implementation). List uses
+(venue, canonical_symbol, instrument_id) ascending keyset pagination —
+cursor is the last `instrument_id` of the previous page; its sort key is
+refound via subquery and compared with `>` (no OFFSET, no duplicates/gaps
+even if inserts interleave).
 """
 from __future__ import annotations
 
