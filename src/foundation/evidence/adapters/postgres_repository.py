@@ -1,15 +1,15 @@
-"""AuditEventRepository의 asyncpg 구현.
+"""asyncpg implementation of AuditEventRepository.
 
-Spec: AIOSproject 79번 §1, 105번(동시성 표준) 정신의 INSERT 버전.
+Spec: AIOSproject #79 §1, #105 (concurrency standard) — INSERT variant.
 
-`append_event()`가 이 파일의 핵심이다 — 해시 체인은 "이전 이벤트의 hash를
-읽고, 그것과 연결된 새 hash를 계산해서 insert"라는 read-then-write지만,
-`conditional_update`는 UPDATE 전용이라 여기엔 쓸 수 없다(경합 시 막을
-"기존 행"이 없다 — 매번 새 행을 insert하니까). 대신 Postgres advisory lock으로
-같은 tenant(또는 system) 체인에 대한 append를 트랜잭션 동안 직렬화한다 —
-두 요청이 동시에 "마지막 이벤트"를 같은 것으로 보고 서로 다른 새 이벤트를
-그 뒤에 매다는 fork를 막는다.
-"""
+`append_event()` is the core of this module. The hash chain follows a
+read-then-write pattern (read the previous event's hash, compute a new
+hash linked to it), but `conditional_update` does not apply here since it
+targets UPDATE-only workflows and there is no "existing row" to guard
+against when every call inserts a new row. Instead, a Postgres advisory
+lock serializes appends to the same tenant (or system) chain across
+transactions, preventing concurrent requests from each appending a
+different new event based on a stale view of the "last event"."""
 from __future__ import annotations
 
 import json
@@ -94,18 +94,19 @@ class PostgresAuditEventRepository:
         payload: dict[str, object],
         classification: Classification,
     ) -> AuditEvent:
-        """105번 §5.1 — 호출자가 이미 열어 둔 트랜잭션(`conn`) 안에서 실행한다.
-        자체 커넥션을 획득하거나 트랜잭션을 열지 않는다(전수감사 §2 P1
-        "커넥션 쥔 채 두 번째 커넥션 획득" 금지 패턴 회피 — `post_entry` 같은
-        상위 트랜잭션이 이 함수를 호출한 뒤 실패하면 이 INSERT도 함께
-        롤백된다). advisory lock은 `pg_advisory_xact_lock`이라 트랜잭션이
-        끝나야 풀리므로, `conn`이 실제로 트랜잭션 안에 있어야 직렬화가
-        성립한다 — 호출자 책임."""
-        # 79번 §1 체인 직렬화 지점 — 같은 tenant(또는 system)에 대한
-        # append를 이 트랜잭션이 끝날 때까지 블록한다. 두 개의 int4 키를
-        # 쓰는 건 다른 advisory lock 용도(예: 다른 bounded context가
-        # tenant_id 기반 lock을 또 쓸 때)와 네임스페이스가 섞이지 않게
-        # 하기 위해서다(Postgres 관용 패턴).
+        """105 §5.1 — Executes inside a transaction (`conn`) already opened by
+        the caller. Does not acquire its own connection or start a new
+        transaction (avoids the §2 P1 "acquire a second connection while
+        holding one" anti-pattern — if a parent transaction like
+        `post_entry` fails after calling this function, this INSERT rolls
+        back with it). `pg_advisory_xact_lock` releases only when the
+        transaction ends, so `conn` must actually be inside a transaction
+        for serialization to hold — caller's responsibility."""
+        # Chain serialization point (#79 §1) — blocks appends to the same
+        # tenant (or system) until this transaction ends. Using two int4
+        # keys avoids namespace collisions with other advisory lock usages
+        # (e.g., when another bounded context also uses tenant_id-based
+        # locks) — standard Postgres idiom.
         await conn.execute(
             "SELECT pg_advisory_xact_lock(hashtext('foundation_audit_event'), "
             "hashtext($1))",
