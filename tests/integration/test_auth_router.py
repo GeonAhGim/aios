@@ -6,9 +6,10 @@ app.router.lifespan_context로 main.py의 lifespan(asyncpg pool 생성)을
 """
 
 import uuid
+from collections.abc import AsyncGenerator
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Any, AsyncGenerator
+from typing import Any
 
 import asyncpg
 import pytest

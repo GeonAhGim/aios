@@ -757,7 +757,7 @@ async def test_invalid_position_key_format_rejected(pool, ports):
         "TESTVENUE",  # too few parts
         "TESTVENUE:INST001:default",  # only 3 parts
         "TESTVENUE:INST001:default:paper",  # only 4 parts (missing portfolio_id)
-        f"TESTVENUE:INST001:default:paper:not-a-uuid",  # invalid UUID format
+        "TESTVENUE:INST001:default:paper:not-a-uuid",  # invalid UUID format
         "TESTVENUE:INST001:default:paper:",  # empty portfolio_id
     ]
 

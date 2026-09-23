@@ -11,7 +11,8 @@ from decimal import Decimal
 import pytest
 
 from src.data.models.base import Currency, FXRate, Money
-from src.foundation.positions.domain import funding_fees, fx as fx_module
+from src.foundation.positions.domain import funding_fees
+from src.foundation.positions.domain import fx as fx_module
 
 _NOW = datetime(2026, 9, 3, 12, 0, tzinfo=timezone.utc)
 
