@@ -1,10 +1,10 @@
-"""LA-2 — market_data 타임프레임 순수 규칙(길이·정렬).
+"""LA-2 — market_data timeframe pure rules (length · alignment).
 
 Spec: docs/specs/L4_market_data_positions_ledger_v1.0.md#§2.2 LA-2, §9.2 LA-2.
 
-`Timeframe`/`SessionWindow`는 LA-1 계약(contracts/v1)에서 그대로 재노출한다
-(FND-03: domain은 contracts를 import하되 재정의하지 않는다). 이 모듈은
-순수 함수만 제공한다 — I/O·전역 시계 호출 금지, 시각은 항상 인자로 받는다.
+`Timeframe`/`SessionWindow` are re-exported as-is from the LA-1 contract (contracts/v1)
+(FND-03: domain imports contracts but never redefines them). This module provides
+pure functions only — no I/O or global clock calls, timestamps always passed as arguments.
 """
 from __future__ import annotations
 
@@ -35,11 +35,11 @@ _DURATIONS: dict[Timeframe, timedelta] = {
 
 
 class UnknownTimeframeError(ValueError):
-    """`MD_TIMEFRAME_UNKNOWN` — `_DURATIONS`에 등록되지 않은 timeframe."""
+    """`MD_TIMEFRAME_UNKNOWN` — timeframe not registered in `_DURATIONS`."""
 
 
 def duration(tf: Timeframe) -> timedelta:
-    """`tf` 캔들 1개의 길이. 미등록 값은 `UnknownTimeframeError`(fail-closed)."""
+    """Length of one `tf` candle. Unregistered values raise `UnknownTimeframeError` (fail-closed)."""
     try:
         return _DURATIONS[tf]
     except KeyError as exc:
@@ -47,11 +47,11 @@ def duration(tf: Timeframe) -> timedelta:
 
 
 def align_open(ts: datetime, tf: Timeframe) -> datetime:
-    """`ts`가 속한 `tf` 캔들의 open_time(UTC, tz-aware).
+    """open_time of the `tf` candle that `ts` falls into (UTC, tz-aware).
 
-    D1은 UTC 자정 경계로 정렬한다(§8.1 "D1 UTC 기준"). 그 외 타임프레임은
-    UNIX epoch(UTC 자정) 기준 등간격 정렬이라 M1~H4 경계가 모두 정시
-    (정각/5분/15분/30분/1시간/4시간 단위)에 맞는다.
+    D1 aligns to UTC midnight boundary (§8.1 "D1 UTC basis"). All other timeframes
+    use equal-interval alignment from the UNIX epoch (UTC midnight), so M1–H4
+    boundaries all snap to clock times (hourly/5-min/15-min/30-min/1-hour/4-hour intervals).
     """
     if ts.tzinfo is None:
         raise ValueError("align_open은 tz-aware datetime만 받는다")
@@ -67,12 +67,13 @@ def align_open(ts: datetime, tf: Timeframe) -> datetime:
 def expected_opens(
     start: datetime, end: datetime, tf: Timeframe, sessions: list[SessionWindow]
 ) -> list[datetime]:
-    """`[start, end)` 구간에서 `sessions` 창 안에 열리는 `tf` 캔들의
-    open_time 목록(오름차순, 중복 없음).
+    """List of `tf` candle open_times that open within `sessions` windows
+    over the `[start, end)` interval (ascending, deduplicated).
 
-    세션 밖 시각은 절대 만들지 않는다 — 각 세션마다 `open_at`으로 정렬된
-    첫 캔들부터 `close_at` 미만까지만 순회하고, 정렬 결과가 `open_at`보다
-    앞서면 다음 캔들로 건너뛴다.
+    Never produces timestamps outside session boundaries — for each session,
+    iterates only from the first candle aligned at `open_at` up to (but not
+    including) `close_at`; if the aligned result precedes `open_at`, skips
+    to the next candle step.
     """
     if start.tzinfo is None or end.tzinfo is None:
         raise ValueError("expected_opens는 tz-aware datetime만 받는다")
