@@ -1,6 +1,6 @@
 """17.2 — Per-notification-type channel policy.
 
-Spec: 기능설계문서_v1.20.md#FD-17.2
+Spec: functional design doc (see docs/design/), section FD-17.2.
 
 Low change frequency — start as code constants (Draft); migrate to a DB
 table if operations requires frequent runtime changes (per FD-17.2 original).
