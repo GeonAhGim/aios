@@ -20,9 +20,18 @@ machine terminates connections against same-named databases via
 `setup_test_db.py --reset/--drop`'s `pg_terminate_backend`) cleared --
 `_retry_delay` switches both retry loops to exponential backoff with a
 higher attempt ceiling, sized to that documented contention window instead
-of the original arbitrary guess. Neither test group touches a real socket
--- `asyncpg.create_pool` / `replay_verify.verify` / `pool.close` are
-monkeypatched -- so they run without TEST_DATABASE_URL.
+of the original arbitrary guess. task-6267: the escalation recurred a 5th time
+on that exact commit -- `setup_test_db.py --reset`'s `pg_terminate_backend`
+-> `DROP DATABASE` -> `CREATE DATABASE` cycle means a connect attempt can
+also land inside the drop/create window itself, not just the terminate,
+raising `asyncpg.exceptions.InvalidCatalogNameError` /
+`CannotConnectNowError` -- neither is an `OSError` nor a
+`ConnectionDoesNotExistError`, so the old except clause let them propagate
+uncaught on whatever attempt raced that window, discarding the rest of the
+budget regardless of its size. `_RETRYABLE_CONNECT_ERRORS` closes that gap.
+Neither test group touches a real socket -- `asyncpg.create_pool` /
+`replay_verify.verify` / `pool.close` are monkeypatched -- so they run
+without TEST_DATABASE_URL.
 """
 
 from __future__ import annotations
@@ -105,6 +114,32 @@ async def test_create_pool_with_retry_propagates_oserror_after_exhausting_attemp
         await replay_verify._create_pool_with_retry("postgresql://u:p@localhost/db")
 
     assert attempts == replay_verify._POOL_CONNECT_ATTEMPTS
+
+
+async def test_create_pool_with_retry_succeeds_after_drop_create_race(monkeypatch) -> None:
+    """task-6267: a connect attempt landing inside `setup_test_db.py
+    --reset`'s `DROP DATABASE` -> `CREATE DATABASE` window (not just the
+    `pg_terminate_backend` itself) raises `InvalidCatalogNameError`, then
+    `CannotConnectNowError` while Postgres is starting the new database back
+    up -- both must be retried, not just `ConnectionDoesNotExistError`."""
+    attempts = 0
+
+    async def _fake_create_pool(dsn: str, **kwargs: object) -> _FakePool:
+        nonlocal attempts
+        attempts += 1
+        if attempts == 1:
+            raise asyncpg.exceptions.InvalidCatalogNameError('database "x" does not exist')
+        if attempts == 2:
+            raise asyncpg.exceptions.CannotConnectNowError("the database system is starting up")
+        return _FakePool()
+
+    monkeypatch.setattr(replay_verify.asyncpg, "create_pool", _fake_create_pool)
+    monkeypatch.setattr(replay_verify.asyncio, "sleep", _no_sleep)
+
+    pool = await replay_verify._create_pool_with_retry("postgresql://u:p@localhost/db")
+
+    assert isinstance(pool, _FakePool)
+    assert attempts == 3
 
 
 async def test_create_pool_with_retry_does_not_retry_unrelated_exceptions(monkeypatch) -> None:

@@ -109,6 +109,32 @@ _POOL_CONNECT_ATTEMPTS = 8
 _POOL_CONNECT_RETRY_BASE_DELAY: float = 0.5
 _POOL_CONNECT_RETRY_MAX_DELAY: float = 8.0
 
+# task-6267: esc-ci-replay_verify.json recurred a 5th time on the exact
+# commit that shipped the task-6256 backoff widening -- the traceback still
+# lands inside `_create_pool_with_retry`, but that does not mean the budget
+# is too small again (DECISION_GUIDELINES B-2: no further budget bump).
+# `setup_test_db.py._ensure_database`'s `--reset` path is not just a TCP
+# reset -- it is `pg_terminate_backend` -> `DROP DATABASE` -> `CREATE
+# DATABASE` against the *same name* `_create_pool_with_retry` is dialing.
+# A connect attempt landing inside that drop/create window (not just the
+# terminate itself) fails with `InvalidCatalogNameError` ("database ... does
+# not exist") or `CannotConnectNowError` ("the database system is
+# starting up") -- both are `asyncpg.exceptions.PostgresError`, not
+# `OSError` and not `ConnectionDoesNotExistError`, so the old except clause
+# let them propagate uncaught on whichever retry attempt happened to race
+# that window, discarding every remaining attempt in the budget regardless
+# of its size. This was a real gap in what counts as "the same transient
+# reset", not the budget being too short -- catching the two additional
+# shapes lets the existing backoff actually reach the attempt after the
+# sibling worktree's `CREATE DATABASE` lands, instead of aborting early on
+# whichever attempt happens to land mid-recreate.
+_RETRYABLE_CONNECT_ERRORS: tuple[type[BaseException], ...] = (
+    OSError,
+    asyncpg.exceptions.ConnectionDoesNotExistError,
+    asyncpg.exceptions.InvalidCatalogNameError,
+    asyncpg.exceptions.CannotConnectNowError,
+)
+
 
 def _retry_delay(attempt: int) -> float:
     """Exponential backoff (`base * 2**attempt`, capped at `_MAX_DELAY`) for
@@ -131,7 +157,7 @@ async def _create_pool_with_retry(dsn: str) -> asyncpg.Pool:
     for attempt in range(_POOL_CONNECT_ATTEMPTS):
         try:
             return await asyncpg.create_pool(dsn, min_size=1, max_size=4)
-        except (OSError, asyncpg.exceptions.ConnectionDoesNotExistError):
+        except _RETRYABLE_CONNECT_ERRORS:
             if attempt + 1 >= _POOL_CONNECT_ATTEMPTS:
                 raise
             await asyncio.sleep(_retry_delay(attempt))
