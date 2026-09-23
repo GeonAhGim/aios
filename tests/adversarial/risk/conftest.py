@@ -95,7 +95,7 @@ async def seed_execution(pool: asyncpg.Pool, user_id: UUID, *, exchange: str = "
             exchange,
             Decimal("500"),
         )
-    return int(row["id"]) if row is not None else 0
+    return row["id"] if row is not None else 0
 
 
 async def recorded_inputs(
@@ -213,4 +213,4 @@ async def audit_count(pool: asyncpg.Pool, action_type: str, order_id: UUID) -> i
             action_type,
             str(order_id),
         )
-        return int(result) if result is not None else 0
+        return result if result is not None else 0

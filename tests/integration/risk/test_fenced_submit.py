@@ -92,7 +92,7 @@ async def _count_by_client_id(pool: asyncpg.Pool, client_order_id: str) -> int:
         result = await conn.fetchval(
             "SELECT count(*) FROM orders WHERE client_order_id = $1", client_order_id
         )
-        return int(result) if result is not None else 0
+        return result if result is not None else 0
 
 
 async def _submit(

@@ -237,7 +237,7 @@ async def _insert_raw(
         ctx.user_id, f"raw-{uuid4().hex}", ctx.execution_id, is_liquidation,
         risk_decision_id, liquidation_request_id, created_at,
     )
-    return UUID(result) if result is not None else uuid4()
+    return result if isinstance(result, UUID) else uuid4()
 
 
 async def test_trigger_rejects_order_without_decision_once_cutover_armed(
