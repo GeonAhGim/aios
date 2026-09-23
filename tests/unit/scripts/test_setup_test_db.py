@@ -162,7 +162,7 @@ def test_ensure_database_concurrent_reset_with_migrate_survives_race(
     한다: 4-way 동시 reset+migrate가 예외 없이 전부 끝나고, 최종 DB에
     `alembic_version`이 채워져 있어야 한다(마이그레이션이 실제로 적용됐다는 증거).
     """
-    server_url = _server_url_or_skip()
+    server_url = _server_url()
     test_url = setup_test_db._with_database(server_url, scratch_db_name)
 
     async def _run_concurrent() -> list[bool]:

@@ -53,7 +53,8 @@ def mwr(
     for cf in cashflows:
         elapsed = (cf.at - start).total_seconds()
         if elapsed < 0 or elapsed > total_seconds:
-            continue  # cash flows outside the period are the caller's responsibility — silently skip
+            # cash flows outside the period are the caller's responsibility — silently skip
+            continue
         t = Decimal(elapsed) / Decimal(total_seconds)
         flows.append((t, -_signed(cf)))
     flows.append((Decimal(1), end_value))
