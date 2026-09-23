@@ -10,7 +10,13 @@ MixedSeriesError)로 증명했다(D1). 감사(2131행)는 negative<3, 실패주�
 그 대신 (a) 계약 경계(TickLineage) negative, (b) 타입힌트가 강제하지 않는
 호출 경계 오염 주입, (c) 수치 성능 단언, (d) 게이트 적색(예외) 재현이 이후
 호출을 오염시키지 않음, (e) 퍼즈·재생 결정론·동시 다중 인스턴스(D3)를
-채운다. `tick_to_candle.py`는 무수정 — 새 기능 없음, 깊이만 올림.
+채운다.
+
+task-4928(§9.10 DC-22 XREV, task-3723 교차 리뷰)에서 `ticks_to_candles`가
+`tick.venue`와 `calendar.venue` 일치를 검증하지 않아, 엉뚱한 캘린더를
+넘기면 모든 틱이 "세션 밖"으로 조용히 제외되어 오류 없이 0봉을 반환하는
+결함이 발견됐다 — `tick_to_candle.py`에 `VenueMismatchError` 검증을
+추가하고, 아래 XREV 절에서 재현·회귀 테스트를 더한다.
 """
 
 from __future__ import annotations
@@ -31,6 +37,7 @@ from src.foundation.market_data.contracts.v2.microstructure import Aggressor, Tr
 from src.foundation.market_data.domain.aggregation.tick_to_candle import (
     SessionNotFoundError,
     UnsortedTicksError,
+    VenueMismatchError,
     _session_containing,
     ticks_to_candles,
 )
@@ -45,6 +52,11 @@ _BASE_NS = 1_767_225_600_000_000_000  # 2026-01-01T00:00:00Z (Thursday)
 def _bitget_calendar() -> VenueCalendar:
     spec = KNOWN_SESSIONS[Venue.BITGET.value]
     return VenueCalendar(venue=Venue.BITGET.value, tz=spec.tz, regular=spec)
+
+
+def _krx_calendar() -> VenueCalendar:
+    spec = KNOWN_SESSIONS[Venue.KIS_KRX.value]
+    return VenueCalendar(venue=Venue.KIS_KRX.value, tz=spec.tz, regular=spec)
 
 
 def _tick(
@@ -119,6 +131,47 @@ def test_ticks_to_candles_massive_duplicate_flood_collapses_to_one_tick() -> Non
     assert len(result.columns) == 1
     assert result.lineage[0].tick_count == 1
     assert result.columns.volume == [Decimal("1")]
+
+
+# ---- XREV(task-3723) — venue/calendar 불일치는 조용한 누락이 아니라 거부 ----
+
+
+def test_ticks_to_candles_rejects_venue_calendar_mismatch() -> None:
+    """`ticks[i].venue`와 `calendar.venue`가 다르면 즉시 `VenueMismatchError`.
+    이 검증이 없으면 엉뚱한 캘린더의 세션 창과 대조되어 모든 틱이
+    "세션 밖"으로 조용히 제외되고 0봉을 반환한다(§9.10 XREV)."""
+    ticks = [_tick(0, seq=1, price="100", size="1", venue=Venue.BITGET)]
+    with pytest.raises(VenueMismatchError):
+        ticks_to_candles(ticks, Timeframe.M1, _krx_calendar())
+
+
+def test_ticks_to_candles_venue_mismatch_reproduces_xrev_sunday_scenario() -> None:
+    """XREV가 지적한 정확한 재현: 2026-09-06(일요일)은 KRX 휴장일이므로,
+    이 검증이 없으면 BITGET(24x7) 틱에 KIS_KRX 캘린더를 대면 모든 틱이
+    "세션 밖"으로 조용히 제외되어 오류 없이 0봉을 반환했다 — 유효 체결의
+    무음 누락. 지금은 그 조합 자체가 `VenueMismatchError`로 즉시 거부된다."""
+    sunday = datetime(2026, 9, 6, 12, 0, tzinfo=UTC)  # 2026-09-06은 일요일
+    ts_event = int(sunday.timestamp()) * 1_000_000_000
+    sunday_tick = TradeTick(
+        instrument_id=_ULID,
+        venue=Venue.BITGET,
+        ts_event=ts_event,
+        ts_recv=ts_event + 1_000,
+        seq=1,
+        price=Decimal("50000"),
+        size=Decimal("1"),
+        aggressor=Aggressor.BUY,
+    )
+    with pytest.raises(VenueMismatchError):
+        ticks_to_candles([sunday_tick], Timeframe.M1, _krx_calendar())
+
+
+def test_ticks_to_candles_accepts_matching_venue_calendar() -> None:
+    """`venue`가 `calendar.venue`와 일치하면 정상적으로 집계된다 — 이번
+    DEEPEN이 정상 경로를 깨지 않았다는 증거."""
+    ticks = [_tick(0, seq=1, price="100", size="1", venue=Venue.BITGET)]
+    result = ticks_to_candles(ticks, Timeframe.M1, _bitget_calendar())
+    assert len(result.columns) == 1
 
 
 # ---- 게이트 적색 재현 — 회귀(DEEPEN 중 fuzz로 발견) ----

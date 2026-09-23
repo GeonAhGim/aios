@@ -29,6 +29,10 @@ fail-closed rules (DoD):
 - ticks outside every session window are excluded because only session-
   window-derived opens are ever aggregated over; there is no separate
   in-session check to reimplement (LA-3 delegation).
+- ticks whose `venue` does not match `calendar.venue` are rejected
+  (`VenueMismatchError`) rather than aggregated — the wrong calendar's
+  session windows would otherwise exclude every tick without warning
+  (§9.10 XREV, task-3723 cross-review).
 """
 
 from __future__ import annotations
@@ -48,6 +52,7 @@ __all__ = [
     "TickToCandleResult",
     "UnsortedTicksError",
     "MixedSeriesError",
+    "VenueMismatchError",
     "SessionNotFoundError",
     "ticks_to_candles",
 ]
@@ -66,6 +71,16 @@ class MixedSeriesError(ValueError):
     """`MD_TICK_TO_CANDLE_MIXED_SERIES` — all ticks passed to one call must
     share a single `(venue, instrument_id)`; mixing series would silently
     blend two symbols' prints into one OHLCV bar."""
+
+
+class VenueMismatchError(ValueError):
+    """`MD_TICK_TO_CANDLE_VENUE_MISMATCH` — the ticks' `venue` does not match
+    `calendar.venue`. Without this check, e.g. BITGET (24x7) ticks aggregated
+    against a KIS_KRX (weekday, exchange-hours) calendar would have every
+    tick outside KRX's session windows silently excluded (§9.10 XREV,
+    task-3723 cross-review) — a Sunday BITGET print would produce zero
+    candles instead of raising, quietly dropping valid trades rather than
+    surfacing the caller's calendar/venue mismatch."""
 
 
 class SessionNotFoundError(ValueError):
@@ -148,6 +163,13 @@ def ticks_to_candles(
                 f"ticks_to_candles requires a single (venue, instrument_id) series: "
                 f"got {tick.venue!r}/{tick.instrument_id!r} alongside {venue!r}/{instrument_id!r}"
             )
+
+    if venue.value != calendar.venue:
+        raise VenueMismatchError(
+            f"ticks are for venue={venue.value!r} but calendar.venue={calendar.venue!r} — "
+            "aggregating against the wrong venue's calendar would silently exclude every "
+            "tick outside that calendar's session windows instead of raising"
+        )
 
     for i in range(len(ticks) - 1):
         if ticks[i].ts_event > ticks[i + 1].ts_event:
