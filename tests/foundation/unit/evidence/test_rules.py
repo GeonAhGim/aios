@@ -103,6 +103,15 @@ def test_tampered_payload_hash_is_detected():
         verify_chain([tampered])
 
 
+def test_missing_occurred_at_breaks_chain():
+    """occurred_at이 없으면(저장 계층 결함으로 NULL이 흘러든 경우) 해시를
+    재계산할 수 없으니 조용히 통과시키지 않고 명시적으로 체인 단절 처리한다."""
+    event = _event()
+    broken = AuditEvent(**{**event.__dict__, "occurred_at": None})
+    with pytest.raises(ChainIntegrityError):
+        verify_chain([broken])
+
+
 def test_missing_middle_event_breaks_chain():
     """AUD-003 — 중간 이벤트가 통째로 삭제되면(WORM을 우회한 경우) 다음
     이벤트의 previous_hash가 그 앞의 실제 event_hash와 안 맞아 걸린다."""

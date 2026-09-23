@@ -97,6 +97,11 @@ def verify_chain(events: list[AuditEvent]) -> None:
                 f"sequence_no={event.sequence_no}: previous_hash가 이전 이벤트의 "
                 "event_hash와 일치하지 않습니다(체인 단절 또는 변조)."
             )
+        if event.occurred_at is None:
+            raise ChainIntegrityError(
+                f"sequence_no={event.sequence_no}: occurred_at이 비어 있어 해시를 "
+                "재계산할 수 없습니다(체인 단절 또는 변조)."
+            )
         recomputed = compute_event_hash(
             previous_hash=event.previous_hash,
             tenant_id=event.tenant_id,
@@ -107,7 +112,7 @@ def verify_chain(events: list[AuditEvent]) -> None:
             outcome=event.outcome,
             payload_hash=event.payload_hash,
             classification=event.classification,
-            occurred_at=event.occurred_at,  # type: ignore[arg-type]
+            occurred_at=event.occurred_at,
         )
         if recomputed != event.event_hash:
             raise ChainIntegrityError(
