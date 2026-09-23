@@ -1,15 +1,17 @@
-"""LA-7 — 심볼 생애주기 상태기계(순수 함수).
+"""LA-7 — Symbol lifecycle state machine (pure functions).
 
 Spec: docs/specs/L4_market_data_positions_ledger_v1.0.md#§2.2 LA-7, §4.2, §9.2 LA-7.
 
-`SymbolStatus`는 LA-1 계약(contracts/v1)을 그대로 쓴다(재정의 금지).
-`LifecycleEvent`는 `LifecycleEventCommand.event` 필드와 동일한 Literal을
-그대로 옮긴 것이다 — 새 의미를 갖는 별도 타입이 아니다.
+`SymbolStatus` is reused from LA-1 contract (contracts/v1); do not override.
+`LifecycleEvent` is a direct copy of the Literal from
+`LifecycleEventCommand.event` — it carries no new meaning of its own.
 
-§4.2 표의 가드(열린 포지션 0 또는 강제 플래그, `new_venue_symbol` 미사용)는
-리포지토리 조회가 필요해 순수 함수 범위 밖이다. 이 함수는 상태×이벤트만으로
-정해지는 전이 가능 여부만 판정하고, 가드는 application 계층
-(`register_instrument.apply_lifecycle_event`, 후속 리프)의 몫이다.
+§4.2 guard conditions (open position count == 0, forced-flag, no
+`new_venue_symbol` usage) require repository lookups and fall outside
+the pure-function scope. This function only decides transition
+possibility from state×event alone; guards are the responsibility of
+the application layer
+(`register_instrument.apply_lifecycle_event`, follow-up leaf).
 """
 from __future__ import annotations
 
@@ -32,11 +34,11 @@ _TRANSITIONS: dict[tuple[SymbolStatus, LifecycleEvent], SymbolStatus] = {
 
 
 class LifecycleTransitionError(ValueError):
-    """`outcome=DENIED` — §4.2 표에 없는 (state, event) 조합(DELISTED는 전부 거부)."""
+    """`outcome=DENIED` — (state, event) pair not in §4.2 table (all DELISTED inputs denied)."""
 
 
 def transition(state: SymbolStatus, event: LifecycleEvent) -> SymbolStatus:
-    """§4.2 상태기계. 표에 없는 전이는 `LifecycleTransitionError`(fail-closed)."""
+    """§4.2 state machine. Transitions not in table raise `LifecycleTransitionError` (fail-closed)."""
     try:
         return _TRANSITIONS[(state, event)]
     except KeyError as exc:
