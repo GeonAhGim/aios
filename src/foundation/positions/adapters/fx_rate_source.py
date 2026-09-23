@@ -1,21 +1,22 @@
-"""LB-14 — 캔들 기반 환율 소스(adapters/fx_rate_source.py).
+"""LB-14 — Candle-based FX rate source (adapters/fx_rate_source.py).
 
 Spec: docs/specs/L4_market_data_positions_ledger_v1.0.md#§2.3, §9.3 LB-14, R7.
 
-**미검증(R7)**: "Bitget·KIS 참조 시세 중앙값"이 실제로 어떤
-venue/instrument 조합을 가리키는지는 이 리프가 정의하지 않는다 — 서울
-외국환중개 매매기준율 같은 기관 기준이 아직 채택되지 않았고(R7 "미확인"),
-이 리프가 그 판단을 대신하면 검증되지 않은 사실을 코드로 확정하게 된다.
-대신 호출자가 `references` 생성자 인자로 통화쌍마다 참조로 삼을
-`SeriesKey` 목록을 주입한다(각 시리즈 최신 1분봉 종가가 "1 base = X
-quote"를 뜻한다고 가정 — 방향이 반대인 시리즈를 잘못 넣으면 환율이
-역수로 계산된다, 배선 책임은 호출자에게 있다).
+**Unverified (R7)**: This leaf does not define which venue/instrument combination
+the "median price from Bitget/KIS references" actually refers to — institutional
+benchmarks such as the Seoul Foreign Exchange Market reference rate have not yet
+been adopted (R7 "unconfirmed"), and if this leaf codifies that judgment it would
+assert unverified facts as code. Instead, the caller injects via the `references`
+constructor argument a list of `SeriesKey` to use as references per currency pair
+(each series' latest 1-minute bar close is assumed to mean "1 base = X quote" —
+supplying a series with the wrong direction yields the inverse rate; wiring
+responsibility lies with the caller).
 
-스테일 판정은 `candle_mark_price_source.py`와 같은 LA-5
-`detect_stale`(k=3)을 재사용한다(task-654 decision) — 개별 참조 시리즈가
-스테일/누락이면 그 값만 제외하고 나머지로 중앙값을 계속 낸다. 전부
-없으면 `0`으로 대체하지 않고 `None`(포트 계약,
-`ports/fx_rate_source.py` docstring)."""
+Stale detection reuses the same LA-5 `detect_stale`(k=3) as
+`candle_mark_price_source.py` (task-654 decision) — if an individual reference
+series is stale/missing, its value is excluded and the median is computed from
+the remaining series. If all are absent, the result is `None` (not replaced with
+`0`) — see the port contract `ports/fx_rate_source.py` docstring."""
 from __future__ import annotations
 
 from decimal import Decimal
@@ -32,7 +33,7 @@ from src.foundation.market_data.ports.candle_store import CandleStore
 
 __all__ = ["CandleFxRateSource"]
 
-_STALE_K = 3  # LA-5 stale_detector 기본값과 동일(task-654 decision).
+_STALE_K = 3  # Same as LA-5 stale_detector default (task-654 decision).
 
 
 class CandleFxRateSource:
