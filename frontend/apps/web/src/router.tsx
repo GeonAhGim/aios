@@ -76,7 +76,8 @@ function protectAdmin(element: ReactNode) {
   );
 }
 
-export const router = createBrowserRouter([
+export const router = createBrowserRouter(
+  [
   { path: "/", element: <Navigate to="/dashboard" replace /> },
   { path: "/signup", element: <SignupPage /> },
   { path: "/login", element: <LoginPage /> },
@@ -169,4 +170,6 @@ export const router = createBrowserRouter([
   { path: "/admin/evidence-chain", element: protectAdmin(<EvidenceChainPage />) },
   { path: "/admin/trust", element: protectAdmin(<TrustPage />) },
   { path: "/admin/audit-log", element: protectAdmin(<AuditLogPage />) },
-]);
+  ],
+  { future: { v7_relativeSplatPath: true } },
+);
