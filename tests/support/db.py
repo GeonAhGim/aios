@@ -94,15 +94,23 @@ async def ensure_worker_database(template_url: str, worker_id: str) -> str:
     try:
         last_exc: asyncpg.exceptions.ObjectInUseError | None = None
         for attempt in range(_CLONE_ATTEMPTS):
-            # 템플릿·워커 DB 양쪽 다 살아있는 커넥션이 0개여야
-            # `CREATE DATABASE ... TEMPLATE`가 통과한다. 크래시로 죽은 이전
-            # 프로세스가 남긴 idle 커넥션이 있을 수 있으므로 매 시도 앞에서
-            # 종료를 재요청한다(pg_terminate_backend는 비동기 SIGTERM이라
-            # 즉시 반영되지 않을 수 있어 지수 백오프로 재시도).
+            # 워커 DB(target_db)는 이 프로세스가 배타적으로 소유하므로, 크래시로
+            # 죽은 이전 프로세스가 남긴 idle 커넥션을 강제 종료해도 안전하다
+            # (pg_terminate_backend는 비동기 SIGTERM이라 즉시 반영되지 않을 수
+            # 있어 지수 백오프로 재시도). template_db는 절대 여기서 건드리지
+            # 않는다 — template_db는 이 세션 전체(다른 테스트의 살아있는
+            # 커넥션 포함)가 공유하는 `TEST_DATABASE_URL` 그 자체일 수 있고,
+            # 거기 강제 종료를 걸면 마침 쿼리 중이던 다른 테스트가
+            # `asyncpg.exceptions.ConnectionDoesNotExistError`로 깨진다
+            # (esc-ci-pytest.json, task-6176 — task-6005가 실 DB로
+            # `ensure_worker_database`를 직접 호출하며 처음 노출됐다). template_db에
+            # 살아있는 커넥션이 남아 있으면 CREATE DATABASE ... TEMPLATE가
+            # ObjectInUseError로 거부되고, 아래에서 그대로 전파한다(모듈
+            # docstring의 "조용히 폴백하지 않는다" 계약과 일치).
             await admin.execute(
                 "SELECT pg_terminate_backend(pid) FROM pg_stat_activity "
-                "WHERE datname = ANY($1) AND pid <> pg_backend_pid()",
-                [template_db, target_db],
+                "WHERE datname = $1 AND pid <> pg_backend_pid()",
+                target_db,
             )
             await admin.execute(f'DROP DATABASE IF EXISTS "{target_db}"')
             try:
