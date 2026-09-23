@@ -220,10 +220,9 @@ async def run_one_cycle(
 
 
 async def compute_system_equity(pool: asyncpg.Pool) -> Decimal:
-    """See the module docstring's deviation note — uses the sum of
-    (allocated_capital + closed realized_pnl) across RUNNING executions as a
-    system-wide approximation of equity (grouped to one row per execution
-    after the LEFT JOIN, to avoid double-counting allocated_capital)."""
+    """See the module docstring's deviation note — sums (allocated_capital + closed realized_pnl)
+    across RUNNING executions as a system-wide equity approximation (grouped to one row per
+    execution after the LEFT JOIN, to avoid double-counting allocated_capital)."""
     async with pool.acquire() as conn:
         rows = await conn.fetch(
             """
