@@ -1,4 +1,4 @@
-"""Paper Execution & Control 도메인 모델 — pure value object.
+"""Paper Execution & Control domain model — pure value object.
 
 Spec: AIOSproject 77_paper_execution_control_l3_build_and_operational_specification_v1.0.md §1/§2.
 """
@@ -22,9 +22,9 @@ class DeploymentState(str, Enum):
 
 
 class CredentialClass(str, Enum):
-    """77번 §1 "credential_class=PAPER" — 이 컨텍스트가 다룰 수 있는 유일한
-    값. 74번 connections의 CredentialClass.READONLY와 같은 이유로 다른
-    값을 미리 만들어두지 않는다(LIVE는 60~63번 승인 게이트 이후 별도 검토)."""
+    """77 §1 "credential_class=PAPER" — the only value this context handles.
+    Like CredentialClass.READONLY in 74 connections, we do not pre-create
+    other values here (LIVE requires separate review after gates 60-63)."""
 
     PAPER = "PAPER"
 
@@ -44,9 +44,10 @@ class CommandType(str, Enum):
 
 @dataclass(frozen=True)
 class AdapterProvenance:
-    """77번 §1 "A boolean is_paper alone is insufficient" — 구조화된 근거를
-    요구한다. 이 리프는 fake adapter 하나만 있으므로 adapter_type이 사실상
-    상수지만, 필드 자체는 실 adapter가 추가될 때를 대비해 구조를 유지한다."""
+    """77 §1 "A boolean is_paper alone is insufficient" — requires structured
+    provenance. This leaf only has a fake adapter so adapter_type is
+    effectively constant, but we keep the fields structured for when real
+    adapters are added."""
 
     adapter_type: str
     credential_class: CredentialClass
