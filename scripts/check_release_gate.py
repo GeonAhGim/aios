@@ -115,8 +115,8 @@ def main(argv: list[str] | None = None) -> int:
     try:
         stages = load_stages(args.config)
         missing = check_stage(stages, args.stage, repo_root=args.repo_root)
-    except ReleaseGateConfigError as exc:
-        print(f"FAIL: {exc}")
+    except (ReleaseGateConfigError, yaml.YAMLError, KeyError) as exc:
+        print(f"FAIL: {args.config} 파싱/구성 오류 — {exc}")
         return 1
 
     if missing:
