@@ -114,7 +114,7 @@ def test_pg_basebackup_command_includes_wal_method_stream_and_replication_slot(
     assert len(captured) == 1
     cmd = captured[0]
     assert "--wal-method=stream" in cmd, "--wal-method=stream 이 없다 — WAL 소실 재발"
-    assert "--checkpoint=fast" in cmd, "--checkpoint=fast 가 없다 — 체크포인트 대기 중 WAL 재활용 재발"
+    assert "--checkpoint=fast" in cmd, "--checkpoint=fast 없음 — 체크포인트 대기 중 WAL 재활용"
     assert "-C" in cmd, "-C (replication slot 생성) 이 없다"
     assert "-S" in cmd, "-S 가 없다"
     assert "aios_drill" in cmd, "슬롯 이름 aios_drill 이 없다"
