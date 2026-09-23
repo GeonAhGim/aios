@@ -15,8 +15,8 @@ import pytest
 
 from src.data.models.market_data import Candle
 from src.data.models.trading import OrderSide
+from src.foundation.ems import api as benchmarks
 from src.foundation.ems.contracts.v1 import RouteDecision
-from src.foundation.ems.domain.tca import benchmarks
 from src.foundation.ems.ports.route_decision_repository import RouteDecisionRecord
 from src.foundation.mandates.reporting.domain.best_execution import (
     BenchmarkKind,
@@ -66,6 +66,10 @@ def test_exact_slippage(inputs: dict[str, Any], side: OrderSide, expected: str) 
 def test_delegation_failure_propagates(
     inputs: dict[str, Any], monkeypatch: pytest.MonkeyPatch, kind: BenchmarkKind, function: str,
 ) -> None:
+    # Must patch through `ems.api` (what best_execution.py actually imports), not
+    # `ems.domain.tca.benchmarks` -- api.py re-exports by name binding, so the two
+    # modules hold separate references to the same original function object and
+    # patching one leaves the other's attribute untouched (task-5404 boundary move).
     def fail(*args: object) -> Decimal:
         raise RuntimeError("EM-12 called")
     inputs["benchmark"] = kind
