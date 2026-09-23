@@ -240,7 +240,7 @@ def test_strategy_bracket_materializes_as_metadata_not_a_plan_order() -> None:
         compiled.ir, bar_count=len(columns), inputs=None, columns=columns
     )
     assert signal_source.on_bar(BarWindow(columns, 1), _POSITION) is None
-    bracket = signal_source.bracket  # type: ignore[attr-defined]
+    bracket = getattr(signal_source, "bracket", None)
     assert bracket == BracketMetadata(
         requested_qty=_D("100"),
         profit_price=_D("110"),
