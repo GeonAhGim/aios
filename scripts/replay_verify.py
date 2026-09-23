@@ -75,13 +75,20 @@ _ORDER_FIELDS = (
     "fee_currency",
 )
 
-# esc-ci-replay_verify.json: local Windows CI intermittently resets the very
-# first TCP handshake to Postgres (WinError 64 / asyncpg
-# ConnectionDoesNotExistError) before a single query has run -- a transient
-# OS-level reset, not a code regression (bisect landed on an unrelated
-# comment-only commit because the flake can surface on whichever run happens
-# to race it). Retrying the initial connect a few times with backoff absorbs
-# that reset without weakening what this script actually verifies.
+# esc-ci-replay_verify.json: local Windows CI intermittently resets the TCP
+# socket to Postgres (WinError 64 / asyncpg ConnectionDoesNotExistError) --
+# a transient OS-level reset, not a code regression (bisect landed on an
+# unrelated comment-only commit both times because the flake can surface on
+# whichever run happens to race it). The first fix (task-6177) only retried
+# `asyncpg.create_pool`'s initial handshake; task-6213 is the same reset
+# recurring *after* the pool was already up, mid read-only transaction
+# (asyncpg's own message for that shape is literally "connection was closed
+# in the middle of operation") -- `verify()` holds one connection open for
+# the whole scan, so a reset anywhere in that window still needs to unwind
+# the (read-only, side-effect-free) transaction and retry the whole scan,
+# not just the connect. Retrying both the connect and the scan a few times
+# with backoff absorbs the reset wherever it lands without weakening what
+# this script actually verifies.
 _POOL_CONNECT_ATTEMPTS = 5
 _POOL_CONNECT_RETRY_BASE_DELAY = 0.5
 
@@ -251,10 +258,30 @@ async def verify(pool: asyncpg.Pool, *, as_of: datetime, hours: int) -> replay.R
     return replay.verify_replay(streams)
 
 
+async def _verify_with_retry(
+    pool: asyncpg.Pool, *, as_of: datetime, hours: int
+) -> replay.ReplayReport:
+    """`verify()` with retry on a connection reset anywhere in its scan --
+    fail-closed still applies: after `_POOL_CONNECT_ATTEMPTS` the original
+    exception propagates unchanged, it is never swallowed into a false
+    green. Safe to retry wholesale because `verify()`'s transaction is
+    read-only (`REPEATABLE READ ... readonly=True`); a reset mid-scan has no
+    partial write to roll back, so re-running it from scratch on a fresh
+    connection reproduces the exact same read, not a different one."""
+    for attempt in range(_POOL_CONNECT_ATTEMPTS):
+        try:
+            return await verify(pool, as_of=as_of, hours=hours)
+        except (OSError, asyncpg.exceptions.ConnectionDoesNotExistError):
+            if attempt + 1 >= _POOL_CONNECT_ATTEMPTS:
+                raise
+            await asyncio.sleep(_POOL_CONNECT_RETRY_BASE_DELAY * (attempt + 1))
+    raise AssertionError("unreachable -- loop always returns or raises")
+
+
 async def _run(*, hours: int, as_of: datetime) -> int:
     pool = await _create_pool_with_retry(_asyncpg_dsn())
     try:
-        report = await verify(pool, as_of=as_of, hours=hours)
+        report = await _verify_with_retry(pool, as_of=as_of, hours=hours)
     finally:
         await pool.close()
 

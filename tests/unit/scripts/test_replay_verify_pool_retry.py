@@ -1,25 +1,28 @@
-"""FA-15 -- `scripts/replay_verify.py` initial-connect retry.
+"""FA-15 -- `scripts/replay_verify.py` connection-reset retry.
 
 Spec: docs/specs/L4_ibor_fund_accounting_and_resilience_v1.0.md#9 FA-15.
 
 esc-ci-replay_verify.json: local Windows CI hit an intermittent reset on the
-very first TCP handshake to Postgres (WinError 64 -> asyncpg
-ConnectionDoesNotExistError) inside `asyncpg.create_pool`, before any query
-ran -- a transient OS-level flake, not a code regression (bisect landed on an
-unrelated comment-only commit). `_create_pool_with_retry` retries that one
-connect a bounded number of times; these tests never touch a real socket --
-`asyncpg.create_pool` itself is monkeypatched -- so they run without
-TEST_DATABASE_URL.
+TCP socket to Postgres (WinError 64 -> asyncpg ConnectionDoesNotExistError)
+-- a transient OS-level flake, not a code regression (bisect landed on an
+unrelated comment-only commit both times). `_create_pool_with_retry` retries
+the initial connect (task-6177); `_verify_with_retry` retries the scan
+itself for the same reset landing after the pool is already up, mid
+read-only transaction (task-6213). Neither test group touches a real socket
+-- `asyncpg.create_pool` / `replay_verify.verify` are monkeypatched -- so
+they run without TEST_DATABASE_URL.
 """
 
 from __future__ import annotations
 
 import time
+from datetime import datetime, timezone
 
 import asyncpg
 import pytest
 
 from scripts import replay_verify
+from src.core.eventstore import replay
 
 pytestmark = pytest.mark.asyncio
 
@@ -117,6 +120,88 @@ async def test_create_pool_with_retry_succeeds_immediately_without_sleeping(monk
     assert isinstance(pool, _FakePool)
     assert slept is False
     assert elapsed < 0.05, f"first-attempt success took {elapsed:.3f}s, expected no backoff delay"
+
+
+async def test_verify_with_retry_succeeds_after_mid_scan_reset(monkeypatch) -> None:
+    """task-6213: the reset lands *after* the pool connected, inside
+    `verify()`'s read-only scan -- the exact
+    `asyncpg.exceptions.ConnectionDoesNotExistError("connection was closed in
+    the middle of operation")` shape from the recurrence. The retry must
+    re-run the whole (side-effect-free) scan and succeed on a later
+    attempt."""
+    attempts = 0
+    sentinel_report = replay.ReplayReport(
+        streams_checked=87, combined_digest="deadbeef", mismatches=()
+    )
+
+    async def _fake_verify(pool: object, *, as_of: object, hours: object) -> replay.ReplayReport:
+        nonlocal attempts
+        attempts += 1
+        if attempts < 3:
+            raise asyncpg.exceptions.ConnectionDoesNotExistError(
+                "connection was closed in the middle of operation"
+            )
+        return sentinel_report
+
+    monkeypatch.setattr(replay_verify, "verify", _fake_verify)
+    monkeypatch.setattr(replay_verify.asyncio, "sleep", _no_sleep)
+
+    report = await replay_verify._verify_with_retry(
+        object(), as_of=datetime.now(timezone.utc), hours=24
+    )
+
+    assert report is sentinel_report
+    assert attempts == 3
+
+
+async def test_verify_with_retry_propagates_after_exhausting_attempts(monkeypatch) -> None:
+    """Fail-closed: a reset on every attempt must still raise, not report a
+    false green."""
+    attempts = 0
+
+    async def _fake_verify(pool: object, *, as_of: object, hours: object) -> replay.ReplayReport:
+        nonlocal attempts
+        attempts += 1
+        raise OSError(64, "지정된 네트워크 이름을 더 이상 사용할 수 없습니다")
+
+    monkeypatch.setattr(replay_verify, "verify", _fake_verify)
+    monkeypatch.setattr(replay_verify.asyncio, "sleep", _no_sleep)
+
+    with pytest.raises(OSError):
+        await replay_verify._verify_with_retry(
+            object(), as_of=datetime.now(timezone.utc), hours=24
+        )
+
+    assert attempts == replay_verify._POOL_CONNECT_ATTEMPTS
+
+
+async def test_verify_with_retry_does_not_retry_a_real_mismatch_report(monkeypatch) -> None:
+    """A genuine replay mismatch is a return value (`report.ok is False`),
+    not an exception -- it must surface on the first attempt, not be masked
+    behind retries meant only for connection resets."""
+    attempts = 0
+    mismatch_report = replay.ReplayReport(
+        streams_checked=1,
+        combined_digest="mismatch",
+        mismatches=(
+            replay.StreamDiff(domain="orders", key="x", replayed_digest="a", actual_digest="b"),
+        ),
+    )
+
+    async def _fake_verify(pool: object, *, as_of: object, hours: object) -> replay.ReplayReport:
+        nonlocal attempts
+        attempts += 1
+        return mismatch_report
+
+    monkeypatch.setattr(replay_verify, "verify", _fake_verify)
+    monkeypatch.setattr(replay_verify.asyncio, "sleep", _no_sleep)
+
+    report = await replay_verify._verify_with_retry(
+        object(), as_of=datetime.now(timezone.utc), hours=24
+    )
+
+    assert report is mismatch_report
+    assert attempts == 1
 
 
 async def _no_sleep(delay: float) -> None:
