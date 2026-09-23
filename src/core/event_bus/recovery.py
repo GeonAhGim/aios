@@ -49,7 +49,8 @@ async def recover_pending_orders(
             current = await get_order_status(order)
         except Exception:
             logger.exception(
-                "Failed to reconfirm order status during restart recovery: order_id=%s", order.get("order_id")
+                "Failed to reconfirm order status during restart recovery: order_id=%s",
+                order.get("order_id"),
             )
             continue
         await republish_order_event(current)

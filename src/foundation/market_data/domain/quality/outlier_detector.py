@@ -50,7 +50,7 @@ def _spike_issue(candle: CandleRecord, reason: str) -> QualityIssue:
 
 
 def _hl_ratio_exceeded(prev: CandleRecord, cur: CandleRecord) -> bool:
-    """Return True when the high/low ratio exceeds `_HL_RATIO_CAP` relative to the previous candle."""
+    """Return True when the high/low ratio exceeds `_HL_RATIO_CAP` vs. the previous candle."""
     if prev.high > 0 and cur.high > prev.high * _HL_RATIO_CAP:
         return True
     return bool(cur.low > 0 and prev.low > cur.low * _HL_RATIO_CAP)

@@ -23,7 +23,7 @@ logger = logging.getLogger(__name__)
 
 
 class MetricsPort(Protocol):
-    """Metrics recording port. Implementations provide only three operations: counter/histogram/gauge."""
+    """Metrics recording port. Provides only three operations: counter/histogram/gauge."""
 
     def counter(self, name: str, labels: dict[str, str] | None = None) -> None: ...
 
@@ -46,7 +46,7 @@ class NullMetrics:
 
 
 class PrometheusMetrics:
-    """`prometheus_client` delegation adapter. Registers on first call per name with a label-key set.
+    """`prometheus_client` delegation adapter. Registers on first call, keyed by name and labels.
 
     Re-registering the same name with a different label-key set causes `prometheus_client` to
     raise `ValueError`, which propagates as-is (preventing registry override is the

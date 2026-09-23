@@ -257,6 +257,7 @@ extend-immutable-calls = ["fastapi.Depends", "fastapi.Query", "fastapi.Path", "f
 "src/exchanges/kis/account_mixin.py" = ["ARG002"]
 "src/exchanges/nh/account_mixin.py" = ["ARG002"]
 "src/foundation/ai/gateway/adapters/postgres_confirm_ticket_repository.py" = ["S101"]
+"src/foundation/backtest/application/quick_backtest.py" = ["S101"]
 "src/foundation/ai/gateway/adapters/postgres_token_repository.py" = ["S101"]
 "src/foundation/ai/gateway/application/revoke_token.py" = ["S101"]
 "src/foundation/ai/gateway/contracts/v1.py" = ["S105"]
