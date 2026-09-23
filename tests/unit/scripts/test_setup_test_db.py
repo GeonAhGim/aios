@@ -35,6 +35,10 @@ SCRIPTS_DIR = ROOT / "scripts"
 # 50ms)과 달리 DB *생성*은 그 축에 해당 항목이 없으므로, 동시 8개 재생성이
 # 순차 실행(각 수백ms)보다 크게 느려지지 않는다는 것만 지역 예산으로 못박는다.
 CONCURRENT_RESET_BUDGET_S = 15.0
+# task-5822: 4-way concurrent reset+migrate — each leg runs a real `alembic upgrade
+# head` subprocess against a fresh DB (all revisions, not the already-migrated
+# no-op case), so this budget is looser than CONCURRENT_RESET_BUDGET_S.
+CONCURRENT_RESET_MIGRATE_BUDGET_S = 90.0
 
 
 def _load_module(name: str, path: Path) -> ModuleType:
@@ -149,6 +153,57 @@ def test_ensure_database_concurrent_reset_survives_race(scratch_db_name: str) ->
         asyncio.run(_drop_if_exists(server_url, scratch_db_name))
 
 
+def test_ensure_database_concurrent_reset_with_migrate_survives_race(
+    scratch_db_name: str,
+) -> None:
+    """failure-injection: task-5822(esc-ci-prepare 재발) 재현 — `_ensure_database`가
+    `migrate_url`을 넘기기 전에는 advisory lock이 CREATE까지만 감싸고 락 해제
+    후 별도로 `_migrate()`를 불렀다. 그 창에서 같은 DB를 향한 동시 `--reset`
+    호출(local_ci와 ci_recheck이 겹쳐 실행하는 실제 시나리오)이 방금 만든 DB를
+    다시 DROP하면 migrate 쪽 커넥션이 `InvalidCatalogNameError`로 죽었다.
+    `migrate_url`을 넘겨 락을 쥔 채로 마이그레이션까지 끝내면 이 경합이 사라져야
+    한다: 4-way 동시 reset+migrate가 예외 없이 전부 끝나고, 최종 DB에
+    `alembic_version`이 채워져 있어야 한다(마이그레이션이 실제로 적용됐다는 증거).
+    """
+    server_url = _server_url_or_skip()
+    test_url = setup_test_db._with_database(server_url, scratch_db_name)
+
+    async def _run_concurrent() -> list[bool]:
+        results = await asyncio.gather(
+            *[
+                setup_test_db._ensure_database(
+                    server_url, scratch_db_name, reset=True, migrate_url=test_url
+                )
+                for _ in range(4)
+            ]
+        )
+        return cast("list[bool]", results)
+
+    try:
+        start = time.monotonic()
+        results = asyncio.run(_run_concurrent())
+        elapsed = time.monotonic() - start
+
+        assert results == [True] * 4
+        assert asyncio.run(_database_exists(server_url, scratch_db_name)) is True
+
+        async def _read_alembic_version() -> str | None:
+            conn = await asyncpg.connect(setup_test_db._asyncpg_dsn(test_url))
+            try:
+                return await conn.fetchval("SELECT version_num FROM alembic_version")
+            finally:
+                await conn.close()
+
+        assert asyncio.run(_read_alembic_version()) is not None
+
+        assert elapsed < CONCURRENT_RESET_MIGRATE_BUDGET_S, (
+            f"4-way concurrent reset+migrate took {elapsed:.2f}s, budget "
+            f"{CONCURRENT_RESET_MIGRATE_BUDGET_S}s"
+        )
+    finally:
+        asyncio.run(_drop_if_exists(server_url, scratch_db_name))
+
+
 def test_drop_database_removes_existing(scratch_db_name: str) -> None:
     server_url = _server_url_or_skip()
     asyncio.run(setup_test_db._ensure_database(server_url, scratch_db_name, reset=False))
@@ -196,7 +251,8 @@ def test_main_list_flag_needs_no_name(capsys: pytest.CaptureFixture[str]) -> Non
     sys.argv = ["setup_test_db.py", "--list"]
     assert setup_test_db.main() == 0
     out = capsys.readouterr().out
-    assert all(line.split()[0].startswith(setup_test_db.PREFIX) for line in out.splitlines() if line)
+    lines = [line for line in out.splitlines() if line]
+    assert all(line.split()[0].startswith(setup_test_db.PREFIX) for line in lines)
 
 
 def test_main_rejects_lowercase_violation() -> None:

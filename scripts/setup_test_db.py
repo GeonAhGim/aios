@@ -68,7 +68,9 @@ def _asyncpg_dsn(url: str) -> str:
     return url.replace("postgresql+asyncpg://", "postgresql://")
 
 
-async def _ensure_database(server_url: str, database: str, *, reset: bool) -> bool:
+async def _ensure_database(
+    server_url: str, database: str, *, reset: bool, migrate_url: str | None = None
+) -> bool:
     """maintenance DB(postgres)에 붙어 대상 DB를 만든다. 반환값: 새로 만들었는지.
 
     task-5782(esc-ci-prepare, 0f693214): 이 함수는 exists 조회 -> DROP -> CREATE가
@@ -80,6 +82,13 @@ async def _ensure_database(server_url: str, database: str, *, reset: bool) -> bo
     함수 자체를 postgres advisory lock으로 직렬화해 어떤 호출 경로든(다른
     스크립트·수동 실행 포함) 안전하게 만든다. `DROP DATABASE IF EXISTS`도 함께
     써서 락 밖에서 이미 지워진 경우(예: 수동 정리)에도 죽지 않는다.
+
+    task-5822(esc-ci-prepare 재발): 위 락은 CREATE까지만 감쌌다. `main()`은
+    락 해제 후 별도로 `_migrate()`(alembic subprocess)를 불렀는데, 그 창에서
+    같은 DB를 향한 동시 `--reset` 호출(예: local_ci와 ci_recheck이 겹쳐 실행)이
+    락을 잡아 방금 만든 DB를 다시 DROP하면, migrate 쪽 커넥션이
+    `InvalidCatalogNameError`로 죽었다. `migrate_url`을 넘기면 마이그레이션을
+    advisory lock을 쥔 채로(락 해제 전에) 실행해 그 창을 없앤다.
     """
     admin = await asyncpg.connect(_asyncpg_dsn(_with_database(server_url, "postgres")))
     try:
@@ -96,10 +105,13 @@ async def _ensure_database(server_url: str, database: str, *, reset: bool) -> bo
                 )
                 await admin.execute(f'DROP DATABASE IF EXISTS "{database}"')
                 exists = None
+            created = False
             if not exists:
                 await admin.execute(f'CREATE DATABASE "{database}"')
-                return True
-            return False
+                created = True
+            if migrate_url is not None:
+                _migrate(migrate_url)
+            return created
         finally:
             await admin.execute("SELECT pg_advisory_unlock(hashtextextended($1, 0))", database)
     finally:
@@ -207,8 +219,9 @@ def main() -> int:
 
     test_url = _with_database(server_url, database)
 
-    created = asyncio.run(_ensure_database(server_url, database, reset=args.reset))
-    _migrate(test_url)
+    created = asyncio.run(
+        _ensure_database(server_url, database, reset=args.reset, migrate_url=test_url)
+    )
 
     if args.print_env:
         print(f"TEST_DATABASE_URL={test_url}")
