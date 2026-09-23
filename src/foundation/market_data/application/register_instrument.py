@@ -157,7 +157,8 @@ async def apply_lifecycle_event(
             if cmd.event == "RENAME":
                 if not cmd.new_venue_symbol:
                     raise RenameSymbolInUseError("new_venue_symbol is required for RENAME")
-                # Format validation only (SymbolNormalizationError) — lookup and storage use the raw symbol as-is.
+                # Format validation only (SymbolNormalizationError) — lookup and storage
+                # use the raw symbol as-is.
                 to_canonical(current.venue, cmd.new_venue_symbol)
                 clash = await refs.get_instrument(
                     conn, current.venue, cmd.new_venue_symbol, cmd.effective_at

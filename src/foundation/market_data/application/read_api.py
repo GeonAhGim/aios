@@ -78,12 +78,13 @@ class MarketDataNotFoundError(Exception):
 
 
 class DataCoverageMissingError(Exception):
-    """Requested range falls outside stored coverage (expected sessions exist but zero stored candles).
-    §4.1 prohibits 0/NaN filling → 409 `DATA_COVERAGE_MISSING`."""
+    """Requested range falls outside stored coverage (expected sessions exist but zero
+    stored candles). §4.1 prohibits 0/NaN filling → 409 `DATA_COVERAGE_MISSING`."""
 
 
 class MarketDataQueryError(Exception):
-    """Invalid query parameter combination (missing identifier, naive datetime, start ≥ end) — 400."""
+    """Invalid query parameter combination (missing identifier, naive datetime,
+    start ≥ end) — 400."""
 
 
 def _require_aware(name: str, value: datetime | None) -> None:

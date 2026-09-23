@@ -31,7 +31,9 @@ _TYPE_CHANGE = "property type 변경"
 # ── DEEPEN 1956: 실패주입·수치성능단언·게이트적색재현 ──────────────────────
 
 
-def _api_response_envelope(data_ref: str, meta_ref: str = "#/components/schemas/Meta") -> dict[str, Any]:
+def _api_response_envelope(
+    data_ref: str, meta_ref: str = "#/components/schemas/Meta"
+) -> dict[str, Any]:
     """ApiResponse_XXX_ 봉투 스키마를 만든다."""
     return {
         "type": "object",
@@ -362,7 +364,9 @@ def test_main_propagates_when_export_subprocess_fails(monkeypatch: Any, tmp_path
         main(["--baseline", str(baseline_path)])
 
 
-def test_main_propagates_when_export_subprocess_lies_about_success(monkeypatch: Any, tmp_path: Any) -> None:
+def test_main_propagates_when_export_subprocess_lies_about_success(
+    monkeypatch: Any, tmp_path: Any
+) -> None:
     """실패 주입: 서브프로세스가 returncode 0으로 끝나도 출력 파일을 쓰지
     않으면(부분 실패·버그) 그 누락을 놓치고 통과시키면 안 된다."""
     baseline = _schema(

@@ -1,6 +1,7 @@
 """FA-7 — allocation/domain/average_price.py: block-order cumulative average price (pure).
 
-Spec: docs/specs/L4_ibor_fund_accounting_and_resilience_v1.0.md#FA-7 (§1 "Block order allocation" · §4 FA-A3).
+Spec: docs/specs/L4_ibor_fund_accounting_and_resilience_v1.0.md#FA-7
+(§1 "Block order allocation" · §4 FA-A3).
 
 A block order may be partially filled multiple times with different prices per fill.
 This module aggregates those partial fills into a single weighted-average price and
@@ -85,7 +86,9 @@ def apply_average_price(
     if not lines:
         raise AllocationResidualError("No allocation lines to assign average price to")
     if notional_quantum <= 0:
-        raise AllocationResidualError(f"notional_quantum must be greater than 0: {notional_quantum}")
+        raise AllocationResidualError(
+            f"notional_quantum must be greater than 0: {notional_quantum}"
+        )
 
     result = tuple(
         SubAccountAllocation(

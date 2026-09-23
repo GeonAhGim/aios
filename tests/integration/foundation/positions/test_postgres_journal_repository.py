@@ -434,7 +434,9 @@ async def test_list_for_from_seq_beyond_max_returns_empty(pool, repo):
         # from_seq=100 (max sequence_no=3보다 큼)
         result = await repo.list_for(conn, position_key, from_seq=100)
 
-    assert result == [], f"from_seq > max_sequence_no일 때 빈 리스트여야 하는데 {len(result)}개 반환됨"
+    assert result == [], (
+        f"from_seq > max_sequence_no일 때 빈 리스트여야 하는데 {len(result)}개 반환됨"
+    )
 
 
 async def test_list_for_connection_error_propagates(pool, repo):

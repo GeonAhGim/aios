@@ -195,7 +195,9 @@ async def test_mfa_setup_and_verify_round_trip(client: AsyncClient) -> None:
     assert login_with_code.status_code == 200
 
 
-async def test_mfa_resetup_without_password_rejected_when_already_enabled(client: AsyncClient) -> None:
+async def test_mfa_resetup_without_password_rejected_when_already_enabled(
+    client: AsyncClient,
+) -> None:
     """레드팀 감사 #11 후속 — 이미 켜진 MFA를 탈취한 Bearer 토큰만으로
     (비밀번호 없이) 재설정해 secret을 갈아치울 수 있으면 안 된다.
 
@@ -426,7 +428,9 @@ async def test_admin_endpoint_rejects_non_admin(client: AsyncClient) -> None:
 # ── failure-injection tests (DoD: ≥1건) ─────────────────────────────────
 
 
-async def test_login_failure_injection_db_error(client: AsyncClient, monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_login_failure_injection_db_error(
+    client: AsyncClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """실패주입 — DB 레이어에서 예외가 발생하면 500이 아닌 구조화된
     서비스 에러 응답으로 감싸져야 한다.
 

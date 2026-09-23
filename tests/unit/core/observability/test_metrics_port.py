@@ -223,7 +223,10 @@ def test_prometheus_metrics_counter_with_empty_labels_dict() -> None:
     adapter.counter("aios.test.empty_labels.count_total", {})
     families = list(adapter._registry.collect())
     sample = next(
-        s for family in families for s in family.samples if s.name == "aios_test_empty_labels_count_total"
+        s
+        for family in families
+        for s in family.samples
+        if s.name == "aios_test_empty_labels_count_total"
     )
     assert sample.value == 1.0
     assert sample.labels == {}
