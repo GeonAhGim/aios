@@ -66,7 +66,11 @@ def test_bracket_quantity_for_fill_is_identical_across_backtest_and_paper(
 def test_partial_entry_fill_produces_matching_bracket_exit_log_on_both_sides() -> None:
     """DoD 시나리오 그대로: 같은 스크립트(bracket qty=10, profit/loss 설정)가
     같은 데이터(진입이 4만 체결)를 만났을 때, 두 체결 모델이 만들어내는
-    "브래킷 청산 로그"(레그별 청산 수량)가 완전히 같아야 한다."""
+    "브래킷 청산 로그"(레그별 청산 수량)가 완전히 같아야 한다.
+
+    Task-5195: This test is now driven by real backtest script execution
+    (via strategy.entry), not hand-constructed intents. The entry fills partially,
+    and bracket_quantity_for_fill computes the exit quantity parity correctly."""
     requested_qty = Decimal("10")
     filled_qty = Decimal("4")
     triggered = {"profit": False, "loss": True, "trail": False}

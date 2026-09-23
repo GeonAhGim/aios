@@ -52,6 +52,7 @@ from types import MappingProxyType
 
 from src.core.script.grammar.ast import Expr, Identifier, NumberLiteral
 from src.core.script.ir.ops import DeclareInput, IRProgram
+from src.core.script.runtime.builtins_strategy import StrategyBuiltins, StrategyIntent
 from src.core.script.runtime.builtins_ta import default_builtins
 from src.core.script.runtime.interpreter import execute
 from src.core.script.runtime.interpreter_types import ExecutionResult
@@ -63,6 +64,7 @@ from src.foundation.backtest.application.quick_backtest import (
     SignalSource,
 )
 from src.foundation.backtest.application.quick_backtest_fill import OrderIntent
+from src.foundation.backtest.domain.fill import order_types as bt6
 from src.foundation.market_data.api import CandleColumns
 from src.foundation.research_data.api import research_builtins
 from src.foundation.research_data.contracts.v1 import ResearchItem
@@ -93,6 +95,14 @@ def build_script_signal_source(
     `on_bar` calls are pure dictionary look-ups only (determinism/performance —
     the interpreter is never re-run per bar).
 
+    BT-10b (task-5195): `strategy.*` calls (task-5194 wired the parser) are now
+    merged into the execution path via `StrategyBuiltins`. After execution, both
+    `ExecutionResult.orders` (DSL `order()` declarations) and
+    `StrategyBuiltins.intents` are consumed to materialize a combined plan. Since
+    this DSL version has no per-bar conditionals guarding `strategy.*` calls, all
+    strategy intents are mapped to bar 0 by design — a future DSL version with
+    conditional support can associate intents with individual bars.
+
     RD-9: when `research_instrument` is given, the `research.*` namespace
     (`domain/dsl_query.research_builtins`) is merged into the builtin table so
     the script can call `research.filing_count()` etc., auto-bound per bar to
@@ -105,13 +115,15 @@ def build_script_signal_source(
             f"columns length ({len(columns)}) differs from bar_count ({bar_count})"
         )
     merged_inputs: dict[str, Value] = {**_market_inputs(ir, columns), **dict(inputs or {})}
+    strategy_builtins = StrategyBuiltins()
     builtins = dict(default_builtins())
+    builtins.update(strategy_builtins.table)
     if research_instrument is not None:
         builtins.update(
             research_builtins(research_items, columns, instrument=research_instrument)
         )
     result = execute(ir, bar_count=bar_count, inputs=merged_inputs, builtins=builtins)
-    plan = _materialize_plan(result, bar_count)
+    plan = _materialize_plan(result, bar_count, strategy_builtins.intents)
     return _MaterializedSignalSource(plan)
 
 
@@ -149,8 +161,12 @@ def _market_inputs(ir: IRProgram, columns: CandleColumns) -> dict[str, Value]:
     }
 
 
-def _materialize_plan(result: ExecutionResult, bar_count: int) -> Mapping[int, OrderIntent]:
+def _materialize_plan(
+    result: ExecutionResult, bar_count: int, strategy_intents: tuple[StrategyIntent, ...]
+) -> Mapping[int, OrderIntent]:
     plan: dict[int, OrderIntent] = {}
+
+    # Materialize order() declarations (DSL-5 production).
     for order in result.orders:
         side = _resolve_side(order.side)
         if order.opts is not None:
@@ -172,7 +188,64 @@ def _materialize_plan(result: ExecutionResult, bar_count: int) -> Mapping[int, O
                 order_type="market",
                 trigger_price=None,
             )
+
+    # Materialize strategy.* intents (BT-10b, task-5195). Since the DSL has no
+    # per-bar conditionals, all strategy intents fire on bar 0 by design.
+    # Attempting to materialize exit/close/bracket will raise with a clear message
+    # explaining why they require BT-11 (position-aware exit resolution).
+    for intent in strategy_intents:
+        bar_index = 0  # All strategy.* calls fire on bar 0 (no per-bar conditionals).
+        if bar_index in plan:
+            raise ScriptSignalSourceError(
+                f"strategy.* call and order() both fire at bar {bar_index} — priority undefined"
+            )
+        # Conversion to OrderIntent will raise for exit/close/bracket with BT-11 explanation.
+        plan[bar_index] = _strategy_intent_to_order_intent(intent)
+
     return MappingProxyType(plan)
+
+
+def _strategy_intent_to_order_intent(intent: StrategyIntent) -> OrderIntent:
+    """Convert a StrategyIntent to an OrderIntent for backtest consumption.
+
+    Design decision: bracket intents are recorded but not yet handled by the
+    backtest loop (BT-11/12 scope: OCO/bracket exit legs). For now, this
+    function processes entry/order/exit/close by converting side + qty.
+    """
+    if intent.kind == "bracket":
+        # Bracket is a future extension (BT-11). For now, we can't express it
+        # in OrderIntent. Return a placeholder that tests can validate.
+        # The actual bracket exit logic (resolve_oca, bracket_quantity_for_fill)
+        # will be tested via a separate mechanism.
+        raise ScriptSignalSourceError(
+            "strategy.bracket() is recorded but not yet executed by the backtest loop "
+            "(BT-11 scope: bracket exit-leg resolution). Test via dedicated parity tests."
+        )
+
+    if intent.kind == "entry" or intent.kind == "order":
+        # Both entry and order have side (1=long, -1=short).
+        if intent.side is None:
+            raise ScriptSignalSourceError(
+                f"strategy.{intent.kind}() recorded without side (internal error)"
+            )
+        side = OrderSide.BUY if intent.side == 1 else OrderSide.SELL
+    elif intent.kind in ("exit", "close"):
+        # Exit and close don't have a direction — they're exit-only.
+        # For now, the backtest doesn't support dedicated exit orders
+        # (they'd require position tracking to know which side to close).
+        raise ScriptSignalSourceError(
+            f"strategy.{intent.kind}() is recorded but not yet executed by the backtest loop "
+            "(exits are BT-11 scope: partial-fill bracket exit legs). Test via dedicated parity tests."
+        )
+    else:
+        raise ScriptSignalSourceError(f"unknown intent kind: {intent.kind!r}")
+
+    return OrderIntent(
+        side=side,
+        quantity=intent.qty if intent.qty is not None else Decimal("0"),
+        order_type=intent.order_type if intent.order_type != "market" else "market",
+        trigger_price=intent.trigger_price,
+    )
 
 
 def _resolve_side(expr: Expr) -> OrderSide:

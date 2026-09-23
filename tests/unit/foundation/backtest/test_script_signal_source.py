@@ -187,3 +187,90 @@ def test_columns_length_mismatch_with_bar_count_is_rejected() -> None:
     compiled = compile_source("signal always = 1 < 2", registry_version=_REG)
     with pytest.raises(sss.ScriptSignalSourceError, match="bar_count"):
         sss.build_script_signal_source(compiled.ir, bar_count=5, inputs=None, columns=columns)
+
+
+# ---- BT-10b (task-5195): strategy.* builtin wiring ----
+
+
+def test_strategy_entry_markets_on_bar_zero() -> None:
+    """strategy.entry(side, qty) creates an OrderIntent on bar 0 (no per-bar conditionals).
+    BT-10b fires all strategy.* calls on bar 0 by design."""
+    columns = _columns(["100", "101", "102"])
+    source = "strategy.entry(1, 100)"
+    compiled = compile_source(source, registry_version=_REG)
+    signal_source = sss.build_script_signal_source(
+        compiled.ir, bar_count=len(columns), inputs=None, columns=columns
+    )
+    # Bar 0: strategy.entry(1, 100) fires -> BUY 100.
+    intent_bar_0 = signal_source.on_bar(BarWindow(columns, 1), _POSITION)
+    assert intent_bar_0 == OrderIntent(
+        side=OrderSide.BUY, quantity=_D("100"), order_type="market", trigger_price=None
+    )
+    # Bars 1+: no order.
+    for i in range(1, len(columns)):
+        assert signal_source.on_bar(BarWindow(columns, i + 1), _POSITION) is None
+
+
+def test_strategy_order_markets_on_bar_zero() -> None:
+    """strategy.order(side, qty) is similar to entry: markets on bar 0."""
+    columns = _columns(["100", "101", "102"])
+    source = "strategy.order(-1, 50)"
+    compiled = compile_source(source, registry_version=_REG)
+    signal_source = sss.build_script_signal_source(
+        compiled.ir, bar_count=len(columns), inputs=None, columns=columns
+    )
+    # Bar 0: strategy.order(-1, 50) fires -> SELL 50.
+    intent_bar_0 = signal_source.on_bar(BarWindow(columns, 1), _POSITION)
+    assert intent_bar_0 == OrderIntent(
+        side=OrderSide.SELL, quantity=_D("50"), order_type="market", trigger_price=None
+    )
+
+
+def test_strategy_entry_with_limit_price() -> None:
+    """strategy.entry(side, qty, trigger_price, type_code) -> limit order."""
+    columns = _columns(["100", "101", "102"])
+    source = "strategy.entry(1, 100, 99.5, 1)"  # limit at 99.5
+    compiled = compile_source(source, registry_version=_REG)
+    signal_source = sss.build_script_signal_source(
+        compiled.ir, bar_count=len(columns), inputs=None, columns=columns
+    )
+    intent = signal_source.on_bar(BarWindow(columns, 1), _POSITION)
+    assert intent == OrderIntent(
+        side=OrderSide.BUY,
+        quantity=_D("100"),
+        order_type="limit",
+        trigger_price=_D("99.5"),
+    )
+
+
+def test_strategy_bracket_is_rejected_with_bt11_explanation() -> None:
+    """strategy.bracket(qty, profit, loss, trail) is not yet executed (BT-11 scope)."""
+    columns = _columns(["100", "101"])
+    source = "strategy.bracket(100, 110, 90, 0)"
+    compiled = compile_source(source, registry_version=_REG)
+    with pytest.raises(sss.ScriptSignalSourceError, match="BT-11 scope"):
+        sss.build_script_signal_source(
+            compiled.ir, bar_count=len(columns), inputs=None, columns=columns
+        )
+
+
+def test_strategy_exit_is_rejected_with_bt11_explanation() -> None:
+    """strategy.exit(qty) is not yet executed (BT-11 scope: position-aware exits)."""
+    columns = _columns(["100", "101"])
+    source = "strategy.exit(50)"
+    compiled = compile_source(source, registry_version=_REG)
+    with pytest.raises(sss.ScriptSignalSourceError, match="BT-11 scope"):
+        sss.build_script_signal_source(
+            compiled.ir, bar_count=len(columns), inputs=None, columns=columns
+        )
+
+
+def test_strategy_close_is_rejected_with_bt11_explanation() -> None:
+    """strategy.close() is not yet executed (BT-11 scope: position-aware exits)."""
+    columns = _columns(["100", "101"])
+    source = "strategy.close()"
+    compiled = compile_source(source, registry_version=_REG)
+    with pytest.raises(sss.ScriptSignalSourceError, match="BT-11 scope"):
+        sss.build_script_signal_source(
+            compiled.ir, bar_count=len(columns), inputs=None, columns=columns
+        )
