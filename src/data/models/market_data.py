@@ -18,7 +18,7 @@ class Ticker(BaseModel):
     ask: Decimal
     volume_24h: Decimal
     timestamp: datetime
-    source_type: str  # "primary" | "reference" — 8.1-A 다중소스 교차검증용
+    source_type: str  # "primary" | "reference" — for 8.1-A multi-source cross-validation
     # ADR-2026-09-06-H D7 — for a quote received via a user-owned broker
     # connection, redistribution rights belong only to the connection's
     # owner. None means "this path hasn't tagged it yet," not "shareable" —
@@ -30,7 +30,7 @@ class Ticker(BaseModel):
 class Candle(BaseModel):
     symbol: str
     exchange: str
-    timeframe: str  # "1m", "5m", "1h" 등
+    timeframe: str  # e.g. "1m", "5m", "1h"
     open: Decimal
     high: Decimal
     low: Decimal
