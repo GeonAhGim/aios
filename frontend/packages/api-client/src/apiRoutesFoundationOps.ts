@@ -49,4 +49,27 @@ export const FOUNDATION_OPS_ROUTES = {
   "connections.confirm": route("/v1/foundation/connections/:connectionId:confirm", true, null, true),
   "connections.sync": route("/v1/foundation/connections/:connectionId:sync", true, null, true),
   "connections.revoke": route("/v1/foundation/connections/:connectionId:revoke", true, null, true),
+  // EM-18: 알고리즘 집행 진행률 및 TCA 분석 API (src/api/routers/foundation/ems/algo.py, ems/tca.py)
+  // 전부 ApiResponse 봉투를 쓴다 — contracts/openapi/v1.json에서 ApiResponse_AlgoProgressView_,
+  // ApiResponse_TcaResultView_ 참조 확인. v1Path는 foundation.* 관용으로 null.
+  // compute는 분석 계산이라 idempotencyRequired=false(기본값) 그대로 둔다.
+  "ems.algo.progress": route(
+    "/v1/foundation/ems/algo/:parentId/progress",
+    true,
+    null,
+    true,
+  ),
+  "ems.tca.latest": route("/v1/foundation/ems/tca/:parentId", true, null, true),
+  "ems.tca.revision": route(
+    "/v1/foundation/ems/tca/:parentId/revisions/:revision",
+    true,
+    null,
+    true,
+  ),
+  "ems.tca.compute": route(
+    "/v1/foundation/ems/tca/:parentId:compute",
+    true,
+    null,
+    true,
+  ),
 };

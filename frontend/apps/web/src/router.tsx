@@ -27,6 +27,8 @@ import { DecisionHistoryPage } from "./routes/decisions/DecisionHistoryPage";
 import { DisputeSubmitPage } from "./routes/disputes/DisputeSubmitPage";
 import { ExchangeManagementPage } from "./routes/exchanges/ExchangeManagementPage";
 import { ExecutionControlPage } from "./routes/executions/ExecutionControlPage";
+import { ExecutionAlgoPage } from "./routes/executions/ExecutionAlgoPage";
+import { TcaPage } from "./routes/executions/TcaPage";
 import { FollowPage } from "./routes/follow/FollowPage";
 import { CandlesPage } from "./routes/market/CandlesPage";
 import { InstrumentsPage } from "./routes/market/InstrumentsPage";
@@ -119,6 +121,8 @@ export const router = createBrowserRouter([
   { path: "/marketplace/sell", element: protect(<SellStrategyPage />) },
   { path: "/marketplace/:listingId", element: protect(<ListingDetailPage />) },
   { path: "/executions", element: protect(<ExecutionControlPage />) },
+  { path: "/executions/:parentId/algo", element: protect(<ExecutionAlgoPage />) },
+  { path: "/executions/:parentId/tca", element: protect(<TcaPage />) },
   { path: "/follow", element: protect(<FollowPage />) },
   { path: "/ai/studio", element: protect(<AiStudioPage />) },
   { path: "/portfolio", element: protect(<PortfolioPage />) },
