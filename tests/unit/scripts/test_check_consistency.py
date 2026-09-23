@@ -5,6 +5,13 @@
 `importlib.util`을 통해 스크립트를 모듈로 로드한다(scripts/는 패키지가 아니다).
 실제 파일 I/O(ast 파싱, 정규식)만 하고 DB·네트워크·subprocess(git)는 tmp_path가
 저장소 밖이라 자연히 빈 값으로 폴백한다.
+
+검사 로직 자체는 task-3725(CONSIST-1c)로 `scripts/consistency/` 검사군별
+모듈로 옮겨졌다 -- `check_consistency.py`는 그 함수들을 재노출하는 CLI
+진입점이다. `cc.check_*`는 재노출된 참조라 그대로 쓸 수 있지만,
+`_git_commit_subjects`처럼 다른 모듈(`scripts.consistency.spec_trace`) 함수
+안에서 그 모듈 자신의 전역으로 조회되는 이름을 monkeypatch할 때는 `cc` 위가
+아니라 그 정의 모듈 위에서 패치해야 실제로 먹힌다.
 """
 
 from __future__ import annotations
@@ -16,6 +23,8 @@ from pathlib import Path
 from types import ModuleType
 
 import pytest
+
+from scripts.consistency import spec_trace
 
 ROOT = Path(__file__).resolve().parents[3]
 SCRIPTS_DIR = ROOT / "scripts"
@@ -536,7 +545,7 @@ def test_spec_leaf_flags_id_that_is_prefix_of_id_in_commit_subject(
         "## 9. 리프 목록\n| 리프 ID | 파일 |\n|---|---|\n| AI-2 | src/token.py |\n",
     )
     monkeypatch.setattr(
-        cc, "_git_commit_subjects", lambda root: "feat: task-2657 AI-22 AiStudioPage\n"
+        spec_trace, "_git_commit_subjects", lambda root: "feat: task-2657 AI-22 AiStudioPage\n"
     )
     hits = cc.check_spec_leaf_traceability(tmp_path)
     assert hits == [("docs/specs#AI-2", 0)]
@@ -551,7 +560,7 @@ def test_spec_leaf_passes_when_id_appears_as_whole_token_in_commit_subject(
         "## 9. 리프 목록\n| 리프 ID | 파일 |\n|---|---|\n| AI-2 | src/token.py |\n",
     )
     monkeypatch.setattr(
-        cc, "_git_commit_subjects", lambda root: "feat: task-2600 AI-2 token_rules.py\n"
+        spec_trace, "_git_commit_subjects", lambda root: "feat: task-2600 AI-2 token_rules.py\n"
     )
     assert cc.check_spec_leaf_traceability(tmp_path) == []
 
