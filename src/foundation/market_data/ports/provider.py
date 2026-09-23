@@ -35,6 +35,11 @@ from src.core.exceptions import MihwaError
 from src.data.models.base import AssetClass
 from src.foundation.market_data.contracts.v1 import Timeframe
 from src.foundation.market_data.contracts.v2.instruments import VenueListing
+from src.foundation.market_data.contracts.v2.microstructure import (
+    BookL2,
+    QuoteL1,
+    TradeTick,
+)
 from src.foundation.market_data.domain.candle_columns import CandleColumns
 
 
@@ -126,6 +131,62 @@ class MarketDataProvider(Protocol):
         """실시간/지연 스트림. `capabilities().realtime=False`면 지연 피드
         (`delayed_seconds`)만 보낸다."""
         ...
+
+
+class MicrostructureNotSupportedError(NotImplementedError):
+    """§9.11 DC-24 — a provider does not implement tick-level microstructure
+    capabilities (`fetch_trades`/`fetch_quotes`/`subscribe_book`). This is a
+    dedicated exception, not a 5th `DataProviderErrorCode` member: that enum's
+    docstring pins the taxonomy to exactly its 4 codes (a capability gap is
+    not one of §3.1's 4 failure modes). Same precedent as
+    `adapters/providers/base_adapter.py::NormalizationNotImplementedError` —
+    fail closed with a named exception instead of a silent fallback."""
+
+    def __init__(self, provider_id: str, capability: str) -> None:
+        self.provider_id = provider_id
+        self.capability = capability
+        super().__init__(
+            f"provider {provider_id!r} does not support optional microstructure "
+            f"capability {capability!r} (§9.11 DC-24)"
+        )
+
+
+@runtime_checkable
+class MicrostructureProvider(Protocol):
+    """§9.11 DC-24 — optional microstructure capability, kept **separate**
+    from `MarketDataProvider` so existing DC-12 adapters (Bitget/KIS) are not
+    forced to grow these 3 methods. A provider that supports tick-level data
+    implements this Protocol in addition to `MarketDataProvider`; callers use
+    `require_microstructure()` (or `isinstance()`) to fail closed instead of
+    hitting a silent `AttributeError`/empty-result fallback when the vendor
+    lacks the feed."""
+
+    async def fetch_trades(
+        self, listing: VenueListing, span: TimeSpan
+    ) -> Sequence[TradeTick]: ...
+
+    async def fetch_quotes(
+        self, listing: VenueListing, span: TimeSpan
+    ) -> Sequence[QuoteL1]: ...
+
+    async def subscribe_book(
+        self, listings: Sequence[VenueListing]
+    ) -> AsyncIterator[BookL2]: ...
+
+
+def require_microstructure(
+    provider: MarketDataProvider, capability: str
+) -> MicrostructureProvider:
+    """Fail-closed capability gate (§9.11 DC-24 DoD: "capability 미지원 시
+    명시적 오류(무음 폴백 금지)"). Call this before invoking
+    `fetch_trades`/`fetch_quotes`/`subscribe_book` on a plain
+    `MarketDataProvider` reference."""
+
+    if not isinstance(provider, MicrostructureProvider):
+        raise MicrostructureNotSupportedError(
+            provider.capabilities().provider_id, capability
+        )
+    return provider
 
 
 class DataProviderErrorCode(str, Enum):
