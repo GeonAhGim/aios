@@ -11,9 +11,9 @@ and histogram sign color.
 from __future__ import annotations
 
 from src.core.indicators.generate_specs import TALIB_GROUPS as TALIB_GROUPS
+from src.core.indicators.generate_specs import OutputStyle, generate_talib_specs
 from src.core.indicators.generate_specs import _plot_kind as _plot_kind
 from src.core.indicators.generate_specs import _plots_from_talib as _plots_from_talib
-from src.core.indicators.generate_specs import generate_talib_specs
 from src.core.indicators.spec import IndicatorSpec, ParamSpec
 
 __all__ = ["TALIB_GROUPS", "TALIB_SPECS"]
@@ -50,9 +50,9 @@ def _obv_lookback(_p: dict[str, int]) -> int:
 
 # scale/pane/color/precision/legend must be filled per-indicator;
 # output_flags lacks these fields.
-_OV: dict[str, object] = {"scale": "overlay", "default_pane": "price"}
-_OSC: dict[str, object] = {"scale": "own", "default_pane": "separate", "precision": 2}
-_OS: dict[str, object] = {"scale": "own", "default_pane": "separate"}
+_OV: OutputStyle = {"scale": "overlay", "default_pane": "price"}
+_OSC: OutputStyle = {"scale": "own", "default_pane": "separate", "precision": 2}
+_OS: OutputStyle = {"scale": "own", "default_pane": "separate"}
 
 _MANUAL_OVERRIDES: dict[str, IndicatorSpec] = {
     "SMA": IndicatorSpec(

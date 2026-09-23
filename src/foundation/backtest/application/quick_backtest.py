@@ -81,6 +81,8 @@ _ZERO = Decimal("0")
 class TooManyBarsError(QuickBacktestInputError):
     """`BT_QUICK_TOO_MANY_BARS` — 즉시 백테스트 봉 수 상한 초과(BT-11 딥 백테스트 대상)."""
 
+    details: dict[str, int]
+
 
 class LookAheadError(IndexError):
     """`BT_QUICK_LOOK_AHEAD` — 전략이 현재 봉보다 뒤의 봉을 읽으려 했다."""

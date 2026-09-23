@@ -40,7 +40,7 @@ import subprocess
 import sys
 import tempfile
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_BASELINE = ROOT / "contracts" / "openapi" / "v1.json"
@@ -48,7 +48,7 @@ HTTP_METHODS = frozenset({"get", "put", "post", "delete", "options", "head", "pa
 
 
 def _load(path: Path) -> dict[str, Any]:
-    return json.loads(path.read_text(encoding="utf-8"))  # type: ignore[no-any-return]
+    return cast(dict[str, Any], json.loads(path.read_text(encoding="utf-8")))
 
 
 def _resolve(schema: dict[str, Any], components: dict[str, Any]) -> dict[str, Any]:
