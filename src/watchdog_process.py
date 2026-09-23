@@ -2,53 +2,45 @@
 
 Spec: 기능설계문서_v1.20.md#FD-9.1/FD-9.2, 정책문서 8.6-A
 
-Policy doc 8.6-A's "independent health-check process, fully isolated from main"
-principle — launched via `python -m src.watchdog_process` as a separate OS
-process from main.py (uvicorn). Shares no memory at all with the main process
-(the only shared surface is the file timestamp in core/safety/heartbeat.py and
-Postgres — main.py's InProcessEventBus/app.state are simply unreachable from
-this script, which runs as a different OS process).
+Policy doc 8.6-A's "independent health-check process, fully isolated from main" principle —
+launched via `python -m src.watchdog_process` as a separate OS process from main.py (uvicorn).
+Shares no memory with the main process (the only shared surface is the file timestamp in
+core/safety/heartbeat.py and Postgres — main.py's InProcessEventBus/app.state are simply
+unreachable from this script, a different OS process).
 
-Deviation (honest reduction, partially resolved by user approval 2026-09-02) —
-FD-9.1's loss_pct calculation (compute_equity) needed the real order-fill
-pipeline; now that execution_loop is actually running, the stub that always
-returned 0 has been removed. It now uses the sum of (allocated_capital +
-realized_pnl) across RUNNING executions as a system-wide approximation of
-equity — computable from the DB alone without exchange credentials, so it
-doesn't violate the "fully isolated from main process" principle.
+Deviation (honest reduction, partially resolved by user approval 2026-09-02) — FD-9.1's loss_pct
+calculation (compute_equity) needed the real order-fill pipeline; now that execution_loop is
+actually running, the stub that always returned 0 has been removed. It now sums
+(allocated_capital + realized_pnl) across RUNNING executions as a system-wide equity
+approximation — computable from the DB alone without exchange credentials, so it doesn't violate
+the "fully isolated from main process" principle.
 
-Remaining approximation limits (honest reduction): (1) positions.unrealized_pnl
-has no mark-to-market update path and is always 0 (only recorded as
-realized_pnl once a position closes). (2) Multi-tenancy — RUNNING executions
-across all users are summed into a single system-wide number.
-exchange_healthy calls Bitget's public ticker API (no signature verification;
-confirmed to succeed even with empty-string keys) — an account-independent
-infrastructure signal, so multi-tenancy isn't an issue here at all.
+Remaining approximation limits (honest reduction): (1) positions.unrealized_pnl has no
+mark-to-market update path and is always 0 (only recorded as realized_pnl once a position
+closes). (2) Multi-tenancy — RUNNING executions across all users are summed into one system-wide
+number. exchange_healthy calls Bitget's public ticker API (no signature verification; confirmed
+to succeed even with empty-string keys) — an account-independent infrastructure signal, so
+multi-tenancy isn't an issue here.
 
-9.3 Split-Brain diagnosis (core/safety/split_brain.py, wired in for the first
-time here) — each cycle also checks the DB connection separately, to
-distinguish a "DB-only isolated failure". When diagnosed as
-DB_ISOLATED_FAILURE, no forced action is taken (any forced action is only
-meaningful under the assumption that the DB itself is down, so the diagnosis
-is just logged).
+9.3 Split-Brain diagnosis (core/safety/split_brain.py, wired in for the first time here) — each
+cycle also checks the DB connection separately, to distinguish a "DB-only isolated failure". When
+diagnosed as DB_ISOLATED_FAILURE, no forced action is taken (a forced action is only meaningful
+under the assumption the DB itself is down, so the diagnosis is just logged).
 
-Applying the HALT/LIQUIDATE decision (only when Split-Brain judges it is not a
-DB-only isolated failure) — since R-51 (task-2357) this is delegated to
-`KillSwitchService.activate` (scope=GLOBAL): the RUNNING-execution transition
-to paused_by='SAFETY_LAYER', the paper_control fan-out, and the
-open_order_sweeper all happen inside that call (§4.3 line 412). The watchdog no
-longer reimplements this transition itself (I3 — `INSERT INTO safety_control`
-must have exactly one call site, `postgres_repository.py`). `exchange_adapters={}`
-is passed deliberately — because credential_resolver is intentionally not
-wired in, open_order_sweeper's actual exchange cancel calls all end up as
-`adapter_failed` (the local DB transition still happens; DoD(h) — this leaf
+Applying the HALT/LIQUIDATE decision (only when Split-Brain judges it is not a DB-only isolated
+failure) — since R-51 (task-2357) this is delegated to `KillSwitchService.activate`
+(scope=GLOBAL): the RUNNING-execution transition to paused_by='SAFETY_LAYER', the paper_control
+fan-out, and the open_order_sweeper all happen inside that call (§4.3 line 412). The watchdog no
+longer reimplements this transition itself (I3 — `INSERT INTO safety_control` must have exactly
+one call site, `postgres_repository.py`). `exchange_adapters={}` is passed deliberately — since
+credential_resolver is intentionally not wired in, open_order_sweeper's actual exchange cancel
+calls all end up as `adapter_failed` (the local DB transition still happens; DoD(h) — this leaf
 does not send orders).
 
-The watchdog.decision.triggered notification is not published directly by
-this process (InProcessEventBus cannot cross process boundaries) — the
-audit_log record (plus KillSwitchService's audit_event) is itself the source
-of truth, and having the main process detect that fact and re-publish it is
-the job of a separate leaf (an outbox poller).
+The watchdog.decision.triggered notification is not published directly by this process
+(InProcessEventBus cannot cross process boundaries) — the audit_log record (plus
+KillSwitchService's audit_event) is itself the source of truth, and having the main process
+detect that fact and re-publish it is the job of a separate leaf (an outbox poller).
 """
 
 from __future__ import annotations
@@ -104,10 +96,9 @@ def build_kill_switch_service(pool: asyncpg.Pool) -> KillSwitchService:
 
 
 class _LastAppliedAction:
-    """In-process state that prevents creating a new control (fence++) on every
-    cycle (5s) just because the same decision repeats. Resets once the state
-    returns to NORMAL (activate() is designed to always succeed on every call,
-    so dedup is this process's responsibility)."""
+    """In-process state that prevents creating a new control (fence++) every cycle (5s) just
+    because the same decision repeats. Resets on returning to NORMAL (activate() is designed to
+    always succeed on every call, so dedup is this process's responsibility)."""
 
     def __init__(self) -> None:
         self.value: WatchdogAction = WatchdogAction.NORMAL
@@ -116,15 +107,13 @@ class _LastAppliedAction:
 async def _apply_decision(
     pool: asyncpg.Pool, decision: WatchdogDecision, kill_switch: KillSwitchService
 ) -> None:
-    """Control creation is delegated entirely to `KillSwitchService.activate`
-    (DoD(f)). Only for LIQUIDATE, its result (control id/fence_token) is used
-    to INSERT a `liquidation_request` row as REQUESTED (§4 lines 426-430) —
-    since activate() commits its own transaction before returning (§5
-    "transaction boundary"; wrapping it while holding a connection would cause
-    a P1 deadlock), the two INSERTs are in separate transactions (a crash in
-    between is a known residual risk). Unlike a fan-out failure, a failure of
-    this INSERT is a core part of the decision's outcome, so it is not
-    swallowed."""
+    """Control creation is delegated entirely to `KillSwitchService.activate` (DoD(f)). Only for
+    LIQUIDATE, its result (control id/fence_token) is used to INSERT a `liquidation_request` row
+    as REQUESTED (§4 lines 426-430) — since activate() commits its own transaction before
+    returning (§5 "transaction boundary"; wrapping it while holding a connection would deadlock,
+    P1), the two INSERTs are separate transactions (a crash in between is a known residual risk).
+    Unlike a fan-out failure, a failure of this INSERT is core to the decision's outcome, so it is
+    not swallowed."""
     view = await kill_switch.activate(
         scope=SafetyScope.GLOBAL,
         scope_ref=None,
@@ -174,10 +163,9 @@ async def _apply_decision(
 
 
 class _LatestExchangeHealth:
-    """Addresses red-team audit finding #06 — calls check_exchange() exactly
-    once per cycle, and caches the result so take_snapshot()'s health_check
-    and split_brain.diagnose() can reuse it within the same cycle (previously
-    called twice per cycle, redundantly)."""
+    """Addresses red-team audit finding #06 — calls check_exchange() exactly once per cycle and
+    caches the result so take_snapshot()'s health_check and split_brain.diagnose() can reuse it
+    within the same cycle (previously called twice per cycle, redundantly)."""
 
     def __init__(self) -> None:
         self.value = False
@@ -197,11 +185,10 @@ async def run_one_cycle(
     kill_switch: KillSwitchService,
     last_action: _LastAppliedAction,
 ) -> None:
-    """One cycle (exchange health check -> snapshot -> Split-Brain diagnosis ->
-    decision -> conditional action) — extracted from run_forever's loop body
-    (a pure refactor, to make it testable). exchange_healthy is not an input
-    to decide()'s judgment (HALT/LIQUIDATE/NORMAL only look at loss_pct and
-    unresponsive_sec) — judging exchange responsiveness is entirely
+    """One cycle (exchange health check -> snapshot -> Split-Brain diagnosis -> decision ->
+    conditional action) — extracted from run_forever's loop body (a pure refactor, to make it
+    testable). exchange_healthy is not an input to decide()'s judgment (HALT/LIQUIDATE/NORMAL
+    only look at loss_pct and unresponsive_sec) — judging exchange responsiveness is entirely
     Split-Brain's job."""
     exchange_health_cache.value = await check_exchange()
     snapshot = await service.take_snapshot()
@@ -215,9 +202,8 @@ async def run_one_cycle(
         "Watchdog snapshot=%s decision=%s failure_domain=%s", snapshot, decision, failure_domain
     )
     if failure_domain.diagnosis == Diagnosis.DB_ISOLATED_FAILURE:
-        # Per the original FD-9.3 text — when it's a DB-only isolated failure,
-        # exclude it from forced liquidation and only hold new orders back
-        # (no forced action beyond that).
+        # Per the original FD-9.3 text — a DB-only isolated failure is excluded from forced
+        # liquidation, only holding new orders back (no forced action beyond that).
         logger.warning(
             "Split-Brain: DB 단독 장애로 진단 — Watchdog 강제조치 보류 "
             "(신규주문만 자연히 막힘, 강제청산 미실행)"
