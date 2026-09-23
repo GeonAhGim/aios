@@ -6,11 +6,17 @@ DoD("alembic upgrade head && downgrade -1 && upgrade head 왕복" +
 
 `tests/integration/conftest.py`가 import 시점에 `DATABASE_URL`을
 `TEST_DATABASE_URL`로 고정하므로(§ tests bootstrap), 여기서 띄우는 `alembic`
-서브프로세스도 같은 값을 물려받아 이 세션 전용 테스트 DB에만 접속한다.
+서브프로세스도 기본적으로 같은 값을 물려받아 이 세션 전용 테스트 DB에
+접속한다 -- 단, 실제 downgrade/upgrade 왕복을 도는
+`test_downgrade_then_upgrade_backfills_personal_tenant`는 task-5795 fix로
+`tests/support/db.ensure_worker_database`가 복제한 일회용 DB에서만 돈다
+(중단돼도 공유 세션 DB를 손상시키지 않기 위함 -- 아래 해당 테스트
+docstring 참고).
 """
 
 from __future__ import annotations
 
+import os
 import subprocess
 import sys
 import time
@@ -23,6 +29,7 @@ import pytest
 from dotenv import dotenv_values
 
 from tests.integration.conftest import create_test_user
+from tests.support.db import ensure_worker_database
 from tests.support.deep_downgrade import purge_position_snapshots
 
 _PROJECT_ROOT = Path(__file__).resolve().parents[3]
@@ -40,10 +47,12 @@ def _asyncpg_dsn() -> str:
     return url.replace("postgresql+asyncpg://", "postgresql://")
 
 
-def _run_alembic(*args: str) -> None:
+def _run_alembic(*args: str, database_url: str | None = None) -> None:
+    env = {**os.environ, "DATABASE_URL": database_url} if database_url else None
     result = subprocess.run(
         [sys.executable, "-m", "alembic", "-c", "alembic.ini", *args],
         cwd=_PROJECT_ROOT,
+        env=env,
         capture_output=True,
         text=True,
         encoding="utf-8",
@@ -78,27 +87,57 @@ async def _table_exists(pool: asyncpg.Pool, table_name: str) -> bool:
     return reg is not None
 
 
-async def test_downgrade_then_upgrade_backfills_personal_tenant(pool: asyncpg.Pool) -> None:
-    user_id = await create_test_user(pool)
+async def test_downgrade_then_upgrade_backfills_personal_tenant() -> None:
+    """task-5795 root-cause fix (same pattern as task-5783's
+    test_db_transition_trigger.py fix): this used to run its `alembic
+    downgrade 94124c286c10` / `upgrade head` round trip directly against the
+    process-shared `DATABASE_URL` -- the same session-lifetime DB every
+    other test and `scripts/replay_verify.py` reads. `94124c286c10` is
+    upstream of `073beca589d5` (oms order_events creation), so this
+    downgrade drops `order_events` too; if the pytest process is killed
+    mid-test (local_ci step timeout) before the restoring "upgrade head"
+    runs, the shared DB is permanently left without `order_events`,
+    reproducing esc-ci-replay_verify's `UndefinedTableError`. Round trip now
+    runs against its own disposable DB clone
+    (`tests/support/db.ensure_worker_database`), so an interrupted downgrade
+    can only corrupt its own throwaway DB."""
+    migration_db_url = await ensure_worker_database(
+        os.environ["DATABASE_URL"], "tenantmembershiprt"
+    )
+    migration_pool = await asyncpg.create_pool(
+        migration_db_url.replace("postgresql+asyncpg://", "postgresql://"),
+        min_size=1,
+        max_size=2,
+    )
+    try:
+        user_id = await create_test_user(migration_pool)
 
-    await purge_position_snapshots(pool)  # deep downgrade: see tests/support/deep_downgrade.py
-    _run_alembic("downgrade", "94124c286c10")  # PLT-26의 down_revision — 이후 PLT-23(§9)이
-    # head 위에 새 리비전을 쌓았으므로 상대 이동("-1")은 더 이상 tenant/
-    # tenant_membership을 벗기지 못한다(그 대신 자기 자신의 새 head만 벗김).
-    assert not await _table_exists(pool, "tenant")
-    assert not await _table_exists(pool, "tenant_membership")
+        await purge_position_snapshots(
+            migration_pool
+        )  # deep downgrade: see tests/support/deep_downgrade.py
+        _run_alembic(
+            "downgrade", "94124c286c10", database_url=migration_db_url
+        )  # PLT-26의 down_revision — 이후 PLT-23(§9)이
+        # head 위에 새 리비전을 쌓았으므로 상대 이동("-1")은 더 이상 tenant/
+        # tenant_membership을 벗기지 못한다(그 대신 자기 자신의 새 head만 벗김).
+        assert not await _table_exists(migration_pool, "tenant")
+        assert not await _table_exists(migration_pool, "tenant_membership")
 
-    _run_alembic("upgrade", "head")
-    assert await _table_exists(pool, "tenant")
-    assert await _table_exists(pool, "tenant_membership")
+        _run_alembic("upgrade", "head", database_url=migration_db_url)
+        assert await _table_exists(migration_pool, "tenant")
+        assert await _table_exists(migration_pool, "tenant_membership")
 
-    async with pool.acquire() as conn:
-        tenant_row = await conn.fetchrow("SELECT kind, state FROM tenant WHERE id = $1", user_id)
-        membership_rows = await conn.fetch(
-            "SELECT role, state, revision FROM tenant_membership "
-            "WHERE tenant_id = $1 AND subject_id = $1",
-            user_id,
-        )
+        async with migration_pool.acquire() as conn:
+            tenant_row = await conn.fetchrow(
+                "SELECT kind, state FROM tenant WHERE id = $1", user_id
+            )
+            membership_rows = await conn.fetch(
+                "SELECT role, state, revision FROM tenant_membership "
+                "WHERE tenant_id = $1 AND subject_id = $1",
+                user_id,
+            )
+    finally:
+        await migration_pool.close()
 
     assert tenant_row is not None
     assert tenant_row["kind"] == "PERSONAL"
