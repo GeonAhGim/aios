@@ -15,17 +15,15 @@ the same definitions to cross-check):
 - na propagation: arithmetic, comparison, sign negation, and cross all yield na if either
   operand is na.
 - Logic (and/or/not) is three-valued (Kleene): `False and na = False`, `True or na = True`;
-  otherwise na mixed in yields na. Signal consumers must treat only `True` as a fire
-  (fail-closed — na means "unknown", not "no").
+  otherwise na mixed in yields na. Consumers must treat only `True` as a fire (fail-closed —
+  na means "unknown", not "no").
 - Division by zero and non-finite results (inf/nan) yield na instead of an exception. Integer
   `/` truncates toward zero (static int type; matches DSL-4 `promote_numeric`'s int/int→int).
 - `crosses_above(a, b)`: at bar t, `a[t] > b[t] and a[t-1] <= b[t-1]`; na if t=0 or any of
-  the four values is na. `crosses_below` reverses the inequality. A cross is inherently
-  bar-dimensioned, so the result is always a length-`bar_count` series even if both
-  operands are scalars.
-- nz/na: `nz(x, fill=0)` replaces na with `fill`, and `is_na(x)` is a bool series of
-  na-ness. Both are kept as series-only operations; which name (`math.nz`, etc.) exposes
-  them in scripts is DSL-9's builtin registry's concern.
+  the four values is na. `crosses_below` reverses the inequality. A cross is bar-dimensioned,
+  so the result is always a length-`bar_count` series even if both operands are scalars.
+- nz/na: `nz(x, fill=0)` replaces na with `fill`, and `is_na(x)` is a bool series of na-ness.
+  Both are series-only ops; which name (`math.nz`, etc.) exposes them is DSL-9's concern.
 - The integer domain rejects bool (explicit check since Python `bool` is a subtype of `int`).
 
 Pure, no I/O, no recursion. Operations between series of different lengths raise
