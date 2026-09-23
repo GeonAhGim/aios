@@ -77,9 +77,12 @@ async def test_cross_tenant_get_collapses_to_none_at_every_level(pool, repo):
 
 
 async def test_duplicate_primary_key_is_rejected_at_every_level(pool, repo):
+    # create_* wraps asyncpg.UniqueViolationError in ConcurrencyConflictError
+    # (105 standard, task-4889) so callers get a uniform retry contract instead
+    # of a raw driver exception.
     seeded = await build_hierarchy(pool, repo)
 
-    with pytest.raises(asyncpg.UniqueViolationError):
+    with pytest.raises(ConcurrencyConflictError):
         await repo.create_legal_entity(
             LegalEntity(
                 entity_id=seeded.legal_entity.entity_id,
@@ -89,7 +92,7 @@ async def test_duplicate_primary_key_is_rejected_at_every_level(pool, repo):
                 region_tag="kr-seoul",
             )
         )
-    with pytest.raises(asyncpg.UniqueViolationError):
+    with pytest.raises(ConcurrencyConflictError):
         await repo.create_fund(
             Fund(
                 fund_id=seeded.fund.fund_id,
@@ -98,7 +101,7 @@ async def test_duplicate_primary_key_is_rejected_at_every_level(pool, repo):
                 inception=date(2026, 1, 1),
             )
         )
-    with pytest.raises(asyncpg.UniqueViolationError):
+    with pytest.raises(ConcurrencyConflictError):
         await repo.create_portfolio(
             Portfolio(
                 portfolio_id=seeded.portfolio.portfolio_id,
@@ -106,7 +109,7 @@ async def test_duplicate_primary_key_is_rejected_at_every_level(pool, repo):
                 venue_account_ref="dup",
             )
         )
-    with pytest.raises(asyncpg.UniqueViolationError):
+    with pytest.raises(ConcurrencyConflictError):
         await repo.create_sub_account(
             SubAccount(
                 sub_account_id=seeded.sub_account.sub_account_id,
