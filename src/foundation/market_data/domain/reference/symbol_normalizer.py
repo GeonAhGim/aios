@@ -16,7 +16,7 @@ from src.foundation.market_data.contracts.v1 import Venue
 
 __all__ = ["SymbolNormalizationError", "to_canonical", "to_venue"]
 
-# Unvalidated: lists common quotes without cross-checking against exchange docs (priority: longest suffix first).
+# Unvalidated: common quotes, not cross-checked vs exchange docs (priority: longest suffix first).
 _CRYPTO_QUOTES: tuple[str, ...] = ("USDT", "USDC", "BUSD", "BTC", "ETH", "KRW")
 _KRX_CODE = re.compile(r"\d{6}")
 _US_TICKER = re.compile(r"[A-Z]{1,6}(\.[A-Z])?")

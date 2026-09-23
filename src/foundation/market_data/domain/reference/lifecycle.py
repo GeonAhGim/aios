@@ -38,7 +38,7 @@ class LifecycleTransitionError(ValueError):
 
 
 def transition(state: SymbolStatus, event: LifecycleEvent) -> SymbolStatus:
-    """§4.2 state machine. Transitions not in table raise `LifecycleTransitionError` (fail-closed)."""
+    """§4.2 state machine. Unlisted transitions raise `LifecycleTransitionError` (fail-closed)."""
     try:
         return _TRANSITIONS[(state, event)]
     except KeyError as exc:

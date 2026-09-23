@@ -160,7 +160,7 @@ async def test_tenant_kind_check_constraint_rejects_invalid_kind(pool: asyncpg.P
             await conn.execute("INSERT INTO tenant (id, kind) VALUES ($1, 'INVALID_KIND')", uuid4())
 
 
-async def test_tenant_membership_role_check_constraint_rejects_invalid_role(pool: asyncpg.Pool) -> None:
+async def test_tenant_membership_role_check_rejects_invalid_role(pool: asyncpg.Pool) -> None:
     """negative — `tenant_membership.role`은 OWNER/ADMIN/MEMBER/AUDITOR/
     SERVICE만 허용한다. 임의 문자열은 거부되어야 한다."""
     subject_id = await create_test_user(pool)
