@@ -296,7 +296,9 @@ async def test_bulk_non_overlapping_inserts_meet_latency_budget(pool: asyncpg.Po
 # ---- 게이트 적색 재현(D2) — 위반이 트랜잭션 전체를 롤백함(부분 커밋 없음) ----
 
 
-async def test_gate_red_exclusion_violation_rolls_back_whole_transaction(pool: asyncpg.Pool) -> None:
+async def test_gate_red_exclusion_violation_rolls_back_whole_transaction(
+    pool: asyncpg.Pool,
+) -> None:
     """같은 트랜잭션 안에서 (a) 합법적인 새 instrument 삽입 (b) 그 뒤 겹치는
     listing 삽입(위반)을 순서대로 실행하면, 트랜잭션 전체가 롤백돼 (a)도
     커밋되지 않아야 한다 — 게이트 적색이 "이 statement만" 취소가 아니라
@@ -334,7 +336,9 @@ async def test_gate_red_exclusion_violation_rolls_back_whole_transaction(pool: a
     assert row is None, "게이트 위반 트랜잭션의 앞선 INSERT가 커밋되어 남았습니다"
 
 
-async def test_gate_red_instrument_id_update_rejects_multi_row_statement_atomically(pool: asyncpg.Pool) -> None:
+async def test_gate_red_instrument_id_update_rejects_multi_row_statement_atomically(
+    pool: asyncpg.Pool,
+) -> None:
     """한 UPDATE 문이 여러 행을 건드리고 그중 하나만 instrument_id를
     바꾸려 해도, 트리거가 그 statement 전체를 거부해 나머지 행의
     lifecycle_state 변경도 적용되지 않아야 한다(원자성)."""
