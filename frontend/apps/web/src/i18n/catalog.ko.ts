@@ -15,6 +15,8 @@ export const catalogKo = {
     save: "저장",
     loading: "불러오는 중",
     featureDisabled: "이 기능은 현재 비활성화되어 있습니다.",
+    notFound: "찾을 수 없음",
+    progress: "진행률",
   },
   errors: {
     supportCode: "지원코드: {{code}}",
@@ -398,6 +400,36 @@ export const catalogKo = {
     "/admin/reconciliation": "대사관리",
     "/admin/evidence-chain": "증빙체인검증",
     "/admin/trust": "신뢰멤버십",
+  },
+  // task-5597 (EMS-18 CI 정정): ExecutionAlgoPage/TcaPage 새 문구 -- i18n-literals
+  // ratchet(scripts/check_i18n_literals.mjs)이 baseline에 없는 새 리터럴을 막는다.
+  executionAlgoPage: {
+    pageTitle: "알고리즘 집행 진행률",
+    missingOrderId: "주문 ID가 없습니다.",
+    notFoundDescription: "알고리즘 주문이 존재하지 않습니다.",
+    unavailable: "데이터를 불러올 수 없습니다.",
+    cardTitle: "집행 진행 상태",
+    totalSlices: "전체 슬라이스",
+    submittedSlices: "제출됨",
+    pendingSlices: "대기 중",
+    status: "상태",
+    remainingQty: "미체결 수량",
+    demotedToTwap: "TWAP로 강등됨",
+    refresh: "새로고침",
+  },
+  tcaPage: {
+    pageTitle: "거래비용분석(TCA)",
+    missingOrderId: "주문 ID가 없습니다.",
+    notComputedYet: "TCA 데이터가 아직 계산되지 않았습니다.",
+    startCompute: "TCA 계산 시작",
+    noData: "TCA 데이터가 없습니다.",
+    resultTitle: "TCA 분석 결과",
+    computedAt: "계산 시간: {{time}}",
+    close: "닫기",
+    recompute: "다시 계산",
+    recomputeTitle: "TCA 재계산",
+    compute: "계산",
+    cancel: "취소",
   },
   // task-2686 (UX-2): mechanically extracted from the 102 baseline .tsx files
   // (scripts/i18n-literals-baseline.json) via an AST codemod -- one namespace per

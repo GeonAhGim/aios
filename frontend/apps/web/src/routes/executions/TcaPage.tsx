@@ -39,9 +39,9 @@ function TcaResultDisplay({
     if (isResourceNotFound(error)) {
       return (
         <div className="space-y-4">
-          <EmptyState>TCA 데이터가 아직 계산되지 않았습니다.</EmptyState>
+          <EmptyState>{t("tcaPage.notComputedYet")}</EmptyState>
           <Button onClick={() => setShowComputeForm(true)} className="w-full">
-            TCA 계산 시작
+            {t("tcaPage.startCompute")}
           </Button>
           {showComputeForm && (
             <ComputeTcaForm
@@ -68,13 +68,13 @@ function TcaResultDisplay({
   }
 
   if (!tcaResult) {
-    return <EmptyState>TCA 데이터가 없습니다.</EmptyState>;
+    return <EmptyState>{t("tcaPage.noData")}</EmptyState>;
   }
 
   return (
     <div className="space-y-4">
       <Card>
-        <CardTitle>TCA 분석 결과</CardTitle>
+        <CardTitle>{t("tcaPage.resultTitle")}</CardTitle>
         <div className="space-y-4">
           <div className="grid grid-cols-2 gap-4 md:grid-cols-3">
             <div className="rounded border border-border bg-bg-secondary p-3">
@@ -104,7 +104,7 @@ function TcaResultDisplay({
           </div>
 
           <div className="text-sm text-fg-muted">
-            계산 시간: {new Date(tcaResult.computedAt).toLocaleString()}
+            {t("tcaPage.computedAt", { time: new Date(tcaResult.computedAt).toLocaleString() })}
           </div>
 
           <Button
@@ -112,7 +112,7 @@ function TcaResultDisplay({
             variant="secondary"
             className="w-full"
           >
-            {showComputeForm ? "닫기" : "다시 계산"}
+            {showComputeForm ? t("tcaPage.close") : t("tcaPage.recompute")}
           </Button>
 
           {showComputeForm && (
@@ -130,7 +130,7 @@ function TcaResultDisplay({
 }
 
 function ComputeTcaForm({
-  parentId,
+  parentId: _parentId,
   onSubmit,
   onClose,
   isLoading,
@@ -140,6 +140,7 @@ function ComputeTcaForm({
   onClose: () => void;
   isLoading: boolean;
 }) {
+  const { t } = useTranslation();
   const [side, setSide] = useState<"BUY" | "SELL">("BUY");
   const [priceAtArrival, setPriceAtArrival] = useState("100");
   const [spreadCost, setSpreadCost] = useState("0");
@@ -165,7 +166,7 @@ function ComputeTcaForm({
 
   return (
     <Card className="border-primary-200 bg-primary-50">
-      <CardTitle>TCA 재계산</CardTitle>
+      <CardTitle>{t("tcaPage.recomputeTitle")}</CardTitle>
       <form onSubmit={handleSubmit} className="space-y-3">
         <div className="grid grid-cols-2 gap-3">
           <div>
@@ -250,7 +251,7 @@ function ComputeTcaForm({
             loading={isLoading}
             className="flex-1"
           >
-            계산
+            {t("tcaPage.compute")}
           </Button>
           <Button
             type="button"
@@ -258,7 +259,7 @@ function ComputeTcaForm({
             variant="secondary"
             className="flex-1"
           >
-            취소
+            {t("tcaPage.cancel")}
           </Button>
         </div>
       </form>
@@ -274,14 +275,16 @@ export function TcaPage() {
   if (!parentId) {
     return (
       <AppShell>
-        <NotFoundState title={t("common.notFound")} description="주문 ID가 없습니다." />
+        <NotFoundState title={t("common.notFound")} description={t("tcaPage.missingOrderId")} />
       </AppShell>
     );
   }
 
   async function handleComputeTca(request: ComputeTcaRequest) {
     try {
-      await computeMutation.mutateAsync({ parentId, request });
+      // parentId is validated non-empty by the `if (!parentId)` return above; TS
+      // control-flow narrowing doesn't carry into this nested function declaration.
+      await computeMutation.mutateAsync({ parentId: parentId!, request });
     } catch (err) {
       console.error("Failed to compute TCA:", err);
     }
@@ -290,7 +293,7 @@ export function TcaPage() {
   return (
     <AppShell>
       <div className="space-y-8">
-        <PageHeader title="거래비용분석(TCA)" />
+        <PageHeader title={t("tcaPage.pageTitle")} />
         <TcaResultDisplay
           parentId={parentId}
           onComputeTca={handleComputeTca}

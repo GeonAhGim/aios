@@ -20,13 +20,7 @@ import { ErrorMessage } from "../../components/ErrorMessage";
 import { NotFoundState } from "../../components/NotFoundState";
 import { useTranslation } from "react-i18next";
 
-function AlgoProgressDisplay({
-  parentId,
-  onRefresh,
-}: {
-  parentId: string;
-  onRefresh: () => void;
-}) {
+function AlgoProgressDisplay({ parentId }: { parentId: string }) {
   const { t } = useTranslation();
   const { data: progress, isLoading, error, refetch } = useAlgoProgress(parentId);
 
@@ -37,7 +31,7 @@ function AlgoProgressDisplay({
       return (
         <NotFoundState
           title={t("common.notFound")}
-          description="알고리즘 주문이 존재하지 않습니다."
+          description={t("executionAlgoPage.notFoundDescription")}
         />
       );
     }
@@ -55,7 +49,7 @@ function AlgoProgressDisplay({
   }
 
   if (!progress) {
-    return <EmptyState>데이터를 불러올 수 없습니다.</EmptyState>;
+    return <EmptyState>{t("executionAlgoPage.unavailable")}</EmptyState>;
   }
 
   const progressPct =
@@ -66,7 +60,7 @@ function AlgoProgressDisplay({
   return (
     <div className="space-y-4">
       <Card>
-        <CardTitle>집행 진행 상태</CardTitle>
+        <CardTitle>{t("executionAlgoPage.cardTitle")}</CardTitle>
         <div className="space-y-4">
           <div>
             <div className="mb-2 flex items-center justify-between">
@@ -78,39 +72,39 @@ function AlgoProgressDisplay({
 
           <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
             <div className="rounded border border-border bg-bg-secondary p-3">
-              <div className="text-xs font-medium text-fg-muted">전체 슬라이스</div>
+              <div className="text-xs font-medium text-fg-muted">{t("executionAlgoPage.totalSlices")}</div>
               <div className="text-lg font-semibold text-fg">{progress.totalSlices}</div>
             </div>
             <div className="rounded border border-border bg-bg-secondary p-3">
-              <div className="text-xs font-medium text-fg-muted">제출됨</div>
+              <div className="text-xs font-medium text-fg-muted">{t("executionAlgoPage.submittedSlices")}</div>
               <div className="text-lg font-semibold text-fg">{progress.submittedSlices}</div>
             </div>
             <div className="rounded border border-border bg-bg-secondary p-3">
-              <div className="text-xs font-medium text-fg-muted">대기 중</div>
+              <div className="text-xs font-medium text-fg-muted">{t("executionAlgoPage.pendingSlices")}</div>
               <div className="text-lg font-semibold text-fg">{progress.pendingSlices}</div>
             </div>
             <div className="rounded border border-border bg-bg-secondary p-3">
-              <div className="text-xs font-medium text-fg-muted">상태</div>
+              <div className="text-xs font-medium text-fg-muted">{t("executionAlgoPage.status")}</div>
               <div className="text-lg font-semibold text-fg">{progress.status}</div>
             </div>
           </div>
 
           <div>
-            <div className="mb-1 text-sm font-medium text-fg">미체결 수량</div>
+            <div className="mb-1 text-sm font-medium text-fg">{t("executionAlgoPage.remainingQty")}</div>
             <div className="text-2xl font-bold text-fg">{progress.remainingQty}</div>
           </div>
 
           {progress.demotedToTwap && (
             <div className="rounded-lg border border-warning-200 bg-warning-50 p-3">
-              <div className="text-sm font-medium text-warning-900">TWAP로 강등됨</div>
+              <div className="text-sm font-medium text-warning-900">{t("executionAlgoPage.demotedToTwap")}</div>
               {progress.demotionReason && (
                 <div className="mt-1 text-sm text-warning-800">{progress.demotionReason}</div>
               )}
             </div>
           )}
 
-          <Button onClick={onRefresh} variant="secondary" className="w-full">
-            새로고침
+          <Button onClick={() => void refetch()} variant="secondary" className="w-full">
+            {t("executionAlgoPage.refresh")}
           </Button>
         </div>
       </Card>
@@ -125,21 +119,16 @@ export function ExecutionAlgoPage() {
   if (!parentId) {
     return (
       <AppShell>
-        <NotFoundState title={t("common.notFound")} description="주문 ID가 없습니다." />
+        <NotFoundState title={t("common.notFound")} description={t("executionAlgoPage.missingOrderId")} />
       </AppShell>
     );
   }
 
-  const { refetch } = useAlgoProgress(parentId);
-
   return (
     <AppShell>
       <div className="space-y-8">
-        <PageHeader title="알고리즘 집행 진행률" />
-        <AlgoProgressDisplay
-          parentId={parentId}
-          onRefresh={() => void refetch()}
-        />
+        <PageHeader title={t("executionAlgoPage.pageTitle")} />
+        <AlgoProgressDisplay parentId={parentId} />
       </div>
     </AppShell>
   );
