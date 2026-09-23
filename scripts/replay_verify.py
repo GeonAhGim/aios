@@ -346,12 +346,23 @@ async def _close_pool_ignoring_reset(pool: asyncpg.Pool) -> None:
     already run its course -- a Windows TCP reset (WinError 64 /
     `ConnectionDoesNotExistError`) hitting an idle pooled connection during
     teardown has no bearing on the verification result and must not replace
-    it. Only the same narrow connection-reset shape `_verify_with_retry`
-    already treats as transient is swallowed here; anything else still
-    propagates unchanged."""
+    it.
+
+    task-6302: this previously only swallowed `(OSError,
+    ConnectionDoesNotExistError)`, a narrower set than
+    `_RETRYABLE_CONNECT_ERRORS` that `_create_pool_with_retry` and
+    `_verify_with_retry` already treat as the same transient
+    `setup_test_db.py --reset` drop/create race (`InvalidCatalogNameError` /
+    `CannotConnectNowError`, task-6267/6284). `pool.close()` can still dial
+    out to close pooled connections that were themselves opened moments
+    earlier by that race, so it can hit the same two shapes -- and unlike
+    the connect/scan sites, there is no retry to fall through to here: an
+    uncaught exception from this `finally`-block call replaces an already
+    -- successful `report` with a false CI failure. Swallowing the identical
+    shape closes that asymmetry instead of widening any budget."""
     try:
         await pool.close()
-    except (OSError, asyncpg.exceptions.ConnectionDoesNotExistError):
+    except _RETRYABLE_CONNECT_ERRORS:
         pass
 
 

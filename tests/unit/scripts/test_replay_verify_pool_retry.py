@@ -313,6 +313,29 @@ async def test_close_pool_ignoring_reset_swallows_connection_reset() -> None:
     await replay_verify._close_pool_ignoring_reset(_ResetOnClosePool())  # must not raise
 
 
+async def test_close_pool_ignoring_reset_swallows_drop_create_race() -> None:
+    """task-6302: `pool.close()` can itself dial out to close pooled
+    connections and land inside the same `setup_test_db.py --reset`
+    `DROP DATABASE` -> `CREATE DATABASE` window `_create_pool_with_retry`
+    and `_verify_with_retry` already treat as transient
+    (`InvalidCatalogNameError` / `CannotConnectNowError`). Unlike those two
+    call sites there is no retry here -- the only correct behavior is to
+    swallow it, matching `_RETRYABLE_CONNECT_ERRORS` exactly, since `report`
+    is already computed by the time this runs and an uncaught exception here
+    would replace an already-successful result with a false CI failure."""
+
+    class _InvalidCatalogOnClosePool:
+        async def close(self) -> None:
+            raise asyncpg.exceptions.InvalidCatalogNameError('database "x" does not exist')
+
+    class _CannotConnectNowOnClosePool:
+        async def close(self) -> None:
+            raise asyncpg.exceptions.CannotConnectNowError("the database system is starting up")
+
+    await replay_verify._close_pool_ignoring_reset(_InvalidCatalogOnClosePool())  # must not raise
+    await replay_verify._close_pool_ignoring_reset(_CannotConnectNowOnClosePool())  # must not raise
+
+
 async def test_close_pool_ignoring_reset_propagates_unrelated_exceptions() -> None:
     """Only the transient connection-reset shape is swallowed -- a real bug
     in `pool.close()` must still surface, not be silently hidden."""
