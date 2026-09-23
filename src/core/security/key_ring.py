@@ -27,7 +27,8 @@ class UnknownKeyIdError(KeyError):
 
 
 class KeyRing:
-    """kid -> 32-byte key mapping + active kid. Immutable (key list cannot change after construction)."""
+    """kid -> 32-byte key mapping + active kid. Immutable (key list cannot change after
+    construction)."""
 
     def __init__(self, keys: Mapping[str, bytes], active_kid: str) -> None:
         if active_kid not in keys:
@@ -75,7 +76,8 @@ class KeyRing:
         if not active_kid:
             if raw_keys.strip():
                 raise KeyRingConfigError(f"{kid_var}가 설정되지 않았습니다.")
-            active_kid = _LEGACY_KID  # Environment with only legacy single key (transition) — use as-is
+            # Environment with only legacy single key (transition) — use as-is
+            active_kid = _LEGACY_KID
 
         return cls(keys, active_kid)
 
@@ -107,8 +109,9 @@ def _reject_live_keys_in_paper_runtime(source: Mapping[str, str]) -> None:
 
 
 def _redact_entry(entry: str) -> str:
-    """Do not leave the raw kid:hex entry in exception messages (prevent secret leakage to logs/error trackers).
-    Preserves the kid for identification but keeps only the length of the value."""
+    """Do not leave the raw kid:hex entry in exception messages (prevent secret leakage
+    to logs/error trackers). Preserves the kid for identification but keeps only the
+    length of the value."""
     if ":" in entry:
         kid_part, _, value_part = entry.partition(":")
         return f"{kid_part.strip()!r}:<REDACTED len={len(value_part.strip())}>"

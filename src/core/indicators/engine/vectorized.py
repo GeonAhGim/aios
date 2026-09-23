@@ -1,4 +1,5 @@
-"""IND-1 — Column-oriented batch indicator computation (backtest path) + equivalence contract with incremental engine.
+"""IND-1 — Column-oriented batch indicator computation (backtest path) + equivalence
+contract with incremental engine.
 
 Spec: docs/specs/L4_analytics_authoring_backtest_marketplace_v1.0.md §2.3 `engine/vectorized.py`,
 §9.3 IND-1 (DoD: incremental == batch results within 1e-9).
@@ -53,7 +54,8 @@ def _windows(x: FloatArray, size: int) -> FloatArray:
 
 
 def _ema(x: FloatArray, period: int, skip: int = 0) -> FloatArray:
-    """SMA-seeded EMA (sequential). Skip first bars, then seed (matches MACD fast line, TA-Lib behavior)."""
+    """SMA-seeded EMA (sequential). Skip first bars, then seed (matches MACD fast line,
+    TA-Lib behavior)."""
     out = np.full(len(x), np.nan)
     start = skip + period - 1
     if start >= len(x):
@@ -258,7 +260,8 @@ def check_equivalence(
     registry: IndicatorRegistry = DEFAULT_REGISTRY,
     tolerance: float = EQUIVALENCE_TOLERANCE,
 ) -> float:
-    """Incremental == batch contract. Violation raises INDICATOR_ENGINE_MISMATCH; pass returns max scale deviation."""
+    """Incremental == batch contract. Violation raises INDICATOR_ENGINE_MISMATCH; pass
+    returns max scale deviation."""
     batch = compute(name, columns, params, registry)
     streamed = run_incremental(name, columns, params, registry)
     worst = 0.0
