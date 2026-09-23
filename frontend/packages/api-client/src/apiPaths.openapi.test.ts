@@ -83,6 +83,13 @@ const GHOST_PATH_WHITELIST: ReadonlySet<ApiRouteName> = new Set<ApiRouteName>([
   // 동일 사유).
   "researchData.search",
   "researchData.sources.list",
+  // task-5998(SIG-6): signals.sources.* 4건 — apiRoutes.ts의 등록 주석 참조
+  // (src/foundation/signals 모듈·src/api/routers/signals.py 자체가 아직 없음,
+  // researchData.*와 동일 사유).
+  "signals.sources.base",
+  "signals.sources.rotate",
+  "signals.sources.disable",
+  "signals.sources.receipts",
 ]);
 
 // STALE_SNAPSHOT_WHITELIST: GHOST_PATH_WHITELIST와는 다른 사유 — "라우터가

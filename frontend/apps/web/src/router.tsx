@@ -51,6 +51,7 @@ import { ResearchPage } from "./routes/research/ResearchPage";
 import { ScreenerPage } from "./routes/screener/ScreenerPage";
 import { WriteReviewPage } from "./routes/reviews/WriteReviewPage";
 import { ScriptEditorPage } from "./routes/scripts/ScriptEditorPage";
+import { SignalSourcesPage } from "./routes/signals/SignalSourcesPage";
 import { AccountDeletionPage } from "./routes/settings/AccountDeletionPage";
 import { ApprovalSettingsPage } from "./routes/settings/ApprovalSettingsPage";
 import { ConnectionsPage } from "./routes/settings/ConnectionsPage";
@@ -126,6 +127,7 @@ export const router = createBrowserRouter(
   { path: "/executions/:parentId/algo", element: protect(<ExecutionAlgoPage />) },
   { path: "/executions/:parentId/tca", element: protect(<TcaPage />) },
   { path: "/follow", element: protect(<FollowPage />) },
+  { path: "/signals/sources", element: protect(<SignalSourcesPage />) },
   { path: "/ai/studio", element: protect(<AiStudioPage />) },
   { path: "/portfolio", element: protect(<PortfolioPage />) },
   { path: "/portfolio/performance-statements", element: protect(<PerformanceStatementsPage />) },

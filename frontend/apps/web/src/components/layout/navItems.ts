@@ -24,6 +24,7 @@ export const MAIN_NAV_ITEMS: NavItem[] = [
   { to: "/scripts/editor", label: "nav./scripts/editor" },
   { to: "/marketplace", label: "nav./marketplace" },
   { to: "/follow", label: "nav./follow" },
+  { to: "/signals/sources", label: "nav./signals/sources" },
   { to: "/ai/studio", label: "nav./ai/studio" },
   { to: "/executions", label: "nav./executions" },
   { to: "/portfolio", label: "nav./portfolio" },

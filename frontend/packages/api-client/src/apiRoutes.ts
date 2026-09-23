@@ -467,5 +467,23 @@ export const API_ROUTES = defineApiRoutes({
   "researchData.search": route("/v1/foundation/research-data/search", true, null, false),
   "researchData.sources.list": route("/v1/foundation/research-data/sources", true, null, false),
 
+  // task-5998(SIG-6): SignalSourcesPage.tsx(시크릿 발급·회전·최근 수신 로그)는 spec
+  // L4_analytics_authoring_backtest_marketplace_v1.0.md §9.1(source line 264)이
+  // 정의하는 SIG-1~5(`src/foundation/signals/`, `src/api/routers/signals.py`,
+  // PLT-33 시크릿 회전)를 앞서가는 선행 프론트다 — 그 모듈·라우터 모두 아직 없다
+  // (src/foundation 디렉터리에 signals 부재, src/api/routers 디렉터리에 signals.py
+  // 부재 — grep으로 직접 확인). follow.subscriptions.*(task-2699)·screener.run
+  // (task-2692)과 동일한 유령 경로 사유로 4개 라우트 모두 implemented=false
+  // 등록 — SignalSourcesPage.tsx는 라우터가 생기기 전까지 네트워크 호출 대신
+  // SignalsRouteNotImplementedError(typed)로 단락한다. v1Path는 마운트 경로
+  // 확정 전이라 null. apiPaths.openapi.test.ts GHOST_PATH_WHITELIST에도 함께
+  // 추가할 것.
+  // GET(list)+POST(issue)는 같은 리소스 경로를 공유한다(follow.subscriptions.base와
+  // 동일 축약 관용).
+  "signals.sources.base": route("/v1/foundation/signals/sources", true, null, false),
+  "signals.sources.rotate": route("/v1/foundation/signals/sources/:sourceId:rotate", true, null, false),
+  "signals.sources.disable": route("/v1/foundation/signals/sources/:sourceId:disable", true, null, false),
+  "signals.sources.receipts": route("/v1/foundation/signals/sources/:sourceId/receipts", true, null, false),
+
   ...FOUNDATION_OPS_ROUTES,
 });

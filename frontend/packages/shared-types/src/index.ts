@@ -46,6 +46,7 @@ export * from "./script";
 export * from "./validationView";
 export * from "./connections";
 export * from "./follow";
+export * from "./signals";
 export * from "./advisoryDisclaimer";
 export * from "./screener";
 export * from "./whatif";
