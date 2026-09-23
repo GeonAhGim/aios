@@ -50,7 +50,7 @@ def build_entity_snapshots(
     snapshots: list[EntitySnapshot] = []
     for item in internal:
         if item.entity_key in seen:
-            raise ValueError(f"중복 entity_key: {item.entity_key!r}")
+            raise ValueError(f"duplicate entity_key: {item.entity_key!r}")
         seen.add(item.entity_key)
         snapshots.append(
             EntitySnapshot(
