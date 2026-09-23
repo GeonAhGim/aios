@@ -16,7 +16,15 @@ guarantee, only import-path indirection.
 """
 from __future__ import annotations
 
-from src.foundation.market_data.domain.candle_columns import CandleColumns
+from src.foundation.market_data.adapters.postgres_reference_reader import (
+    PostgresReferenceReader,
+)
+from src.foundation.market_data.domain.calendar.known_venues import KNOWN_SESSIONS
+from src.foundation.market_data.domain.calendar.session_rules import VenueCalendar
+from src.foundation.market_data.domain.candle_columns import (
+    CandleColumns,
+    MismatchedColumnLengthError,
+)
 from src.foundation.market_data.domain.corporate_action.opendart_filing import (
     FilingParseError,
     OpenDartFiling,
@@ -28,18 +36,26 @@ from src.foundation.market_data.domain.entitlement.source_contract import (
     SourceContractGrant,
     permits_use,
 )
+from src.foundation.market_data.domain.quality.stale_detector import detect_stale
 from src.foundation.market_data.domain.reference.symbol_normalizer import (
     SymbolNormalizationError,
     to_canonical,
 )
+from src.foundation.market_data.domain.timeframe import duration
 
 __all__ = [
+    "KNOWN_SESSIONS",
     "CandleColumns",
     "DataUse",
     "FilingParseError",
+    "MismatchedColumnLengthError",
     "OpenDartFiling",
+    "PostgresReferenceReader",
     "SourceContractGrant",
     "SymbolNormalizationError",
+    "VenueCalendar",
+    "detect_stale",
+    "duration",
     "merge_spans",
     "normalize_filing",
     "permits_use",

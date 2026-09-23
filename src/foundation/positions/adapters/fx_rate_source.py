@@ -25,10 +25,8 @@ import asyncpg
 from pydantic import AwareDatetime
 
 from src.data.models.base import Currency, FXRate
+from src.foundation.market_data.api import KNOWN_SESSIONS, detect_stale, duration
 from src.foundation.market_data.contracts.v1 import SeriesKey, Timeframe
-from src.foundation.market_data.domain.calendar.known_venues import KNOWN_SESSIONS
-from src.foundation.market_data.domain.quality.stale_detector import detect_stale
-from src.foundation.market_data.domain.timeframe import duration
 from src.foundation.market_data.ports.calendar_repository import CalendarRepository
 from src.foundation.market_data.ports.candle_store import CandleStore
 

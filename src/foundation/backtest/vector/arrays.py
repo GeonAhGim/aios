@@ -37,10 +37,7 @@ from typing import Any
 
 import numpy as np
 
-from src.foundation.market_data.domain.candle_columns import (
-    CandleColumns,
-    MismatchedColumnLengthError,
-)
+from src.foundation.market_data.api import CandleColumns, MismatchedColumnLengthError
 
 __all__ = ["ArrayDtypeError", "CandleArrays", "from_candle_columns"]
 

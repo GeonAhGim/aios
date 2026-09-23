@@ -23,12 +23,12 @@ from __future__ import annotations
 
 from uuid import UUID
 
+from src.foundation.entities.api import default_portfolio_id
 from src.foundation.entities.application.resolve_context import (
     EntityContextResolutionError,
     EntityRepository,
     resolve_portfolio_scope,
 )
-from src.foundation.entities.domain.defaults import default_portfolio_id
 from src.foundation.performance.application.statement_projection import statement_to_view
 from src.foundation.performance.contracts.v1 import PerformanceStatementView, StatementState
 from src.foundation.performance.ports.repository import PerformanceRepository

@@ -19,8 +19,8 @@ from src.foundation.paper_control.application.request_deployment import deployme
 from src.foundation.paper_control.contracts.v1 import PaperDeploymentView
 from src.foundation.paper_control.domain.models import CommandOutcome, CommandType, DeploymentState
 from src.foundation.paper_control.ports.repository import PaperControlRepository
+from src.foundation.risk_gate.api import GateKind
 from src.foundation.risk_gate.application.evaluate_risk_gate import evaluate_risk_gate
-from src.foundation.risk_gate.domain.models import GateKind
 from src.foundation.risk_gate.ports.repository import RiskGateRepository
 
 

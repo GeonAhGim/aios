@@ -51,9 +51,8 @@ from src.foundation.backtest.application.quick_backtest_fill import (
 )
 from src.foundation.backtest.domain.magnifier import validate_magnifier_config
 from src.foundation.backtest.domain.models_v2 import BacktestConfigV2
+from src.foundation.market_data.api import CandleColumns, duration
 from src.foundation.market_data.contracts.v1 import Timeframe
-from src.foundation.market_data.domain.candle_columns import CandleColumns
-from src.foundation.market_data.domain.timeframe import duration
 
 __all__ = [
     "MAX_QUICK_BARS",

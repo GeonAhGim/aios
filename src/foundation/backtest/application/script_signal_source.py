@@ -63,8 +63,8 @@ from src.foundation.backtest.application.quick_backtest import (
     SignalSource,
 )
 from src.foundation.backtest.application.quick_backtest_fill import OrderIntent
-from src.foundation.market_data.domain.candle_columns import CandleColumns
-from src.foundation.research_data.adapters.dsl_query import research_builtins
+from src.foundation.market_data.api import CandleColumns
+from src.foundation.research_data.api import research_builtins
 from src.foundation.research_data.contracts.v1 import ResearchItem
 
 __all__ = ["ScriptSignalSourceError", "build_script_signal_source"]

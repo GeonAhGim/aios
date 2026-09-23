@@ -41,8 +41,8 @@ from src.foundation.reconciliation.domain.rules import (
     compute_input_hash,
 )
 from src.foundation.reconciliation.ports.repository import ReconciliationRepository
+from src.foundation.risk_gate.api import SafetyScope
 from src.foundation.risk_gate.application.activate_safety_control import activate_safety_control
-from src.foundation.risk_gate.domain.models import SafetyScope
 from src.foundation.risk_gate.ports.repository import RiskGateRepository
 
 RULE_VERSION = "v1"
