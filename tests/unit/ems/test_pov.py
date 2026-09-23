@@ -12,10 +12,15 @@ Three tests:
   3. gate_red_reproduction — construct a scenario where the guard's
      check_participation rejects (planned qty exceeds cap), verify the
      error code and message.
+
+Also includes a numeric performance assertion (D2 floor, ADR-2026-09-09-C
+Decision 1): p99 wall-clock latency of `plan_pov_schedule` over its full
+390-slice plan must stay under the 50ms SLO budget.
 """
 
 from __future__ import annotations
 
+import time
 from datetime import datetime, timezone
 from decimal import Decimal
 from uuid import uuid4
@@ -324,3 +329,42 @@ class TestPovInvariants:
             "POV should leave shortfall when volume is insufficient"
         )
         assert total_filled > Decimal("0"), "At least some slices should be planned"
+
+
+# ---------------------------------------------------------------------------
+# Numeric performance assertion: p99 latency budget (D2 floor)
+# ---------------------------------------------------------------------------
+
+
+class TestPerformanceBenchmark:
+    """D2 floor (ADR-2026-09-09-C Decision 1): a numeric performance
+    assertion against the SLO budget table -- p99 < 50ms for planning a
+    full POV schedule."""
+
+    _P99_BUDGET_MS = 50.0
+    _ITERATIONS = 200
+
+    def test_plan_pov_schedule_p99_latency_under_budget(
+        self, parent_order: ParentOrder
+    ) -> None:
+        """Measure wall-clock latency of `plan_pov_schedule` over its full
+        390-slice plan across repeated runs and assert p99 < 50ms."""
+        slice_count = _slice_count(parent_order)
+        volume_profile = [Decimal("10000000")] * slice_count
+
+        durations_ms: list[float] = []
+        for _ in range(self._ITERATIONS):
+            start = time.perf_counter()
+            children = plan_pov_schedule(parent_order, volume_profile=volume_profile)
+            elapsed_ms = (time.perf_counter() - start) * 1000
+            durations_ms.append(elapsed_ms)
+        assert children
+
+        durations_ms.sort()
+        p99_index = min(len(durations_ms) - 1, int(len(durations_ms) * 0.99))
+        p99_ms = durations_ms[p99_index]
+        assert p99_ms < self._P99_BUDGET_MS, (
+            f"plan_pov_schedule p99 latency {p99_ms:.3f}ms exceeds the "
+            f"{self._P99_BUDGET_MS}ms SLO budget over {self._ITERATIONS} runs "
+            f"({slice_count} slices/run)"
+        )
