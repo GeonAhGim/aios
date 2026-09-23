@@ -186,16 +186,29 @@ async def test_multi_currency_entry_fails_at_commit(raw_conn) -> None:
 
 async def test_balanced_entry_commits_successfully(raw_conn) -> None:
     """위 테스트의 대조군 — deferred 트리거가 균형 잡힌 분개까지 잘못
-    막지 않는지 확인한다."""
-    audit_event_id = await insert_audit_event(raw_conn)
-    entry_id = await insert_ledger_entry(raw_conn, audit_event_id=audit_event_id)
-    accounts = await raw_conn.fetch(
-        "SELECT account_id, account_code FROM ledger_account WHERE account_code = ANY($1::text[])",
-        [PLATFORM_CASH_CLEARING, PLATFORM_COMMISSION_REVENUE],
-    )
-    account_id = {row["account_code"]: row["account_id"] for row in accounts}
+    막지 않는지 확인한다.
 
-    async with raw_conn.transaction():
+    task-5687: 여기서 참조하는 `PLATFORM_CASH_CLEARING`/`PLATFORM_COMMISSION_REVENUE`는
+    `post_entry`(LC-9) 없이 저널에 실제 커밋되면 `ledger_balance`가 갱신되지
+    않아 FA-15 replay_verify가 영구적으로 오탐(false MISMATCH)한다(task-5309와
+    동일한 결함 패턴 — TEST_DATABASE_URL은 스위트 실행마다 리셋되지 않는다).
+    `test_perf_journal.py`의 `_append_without_persisting`(task-5599)와 같은
+    convention으로, 바깥 트랜잭션을 절대 커밋하지 않고 롤백한다 — deferred
+    트리거는 `SET CONSTRAINTS ALL IMMEDIATE`로 실제 COMMIT 없이 즉시 평가해
+    "균형 잡힌 분개를 트리거가 막지 않는다"는 이 테스트의 주장을 그대로
+    검증한다."""
+    tx = raw_conn.transaction()
+    await tx.start()
+    try:
+        audit_event_id = await insert_audit_event(raw_conn)
+        entry_id = await insert_ledger_entry(raw_conn, audit_event_id=audit_event_id)
+        accounts = await raw_conn.fetch(
+            "SELECT account_id, account_code FROM ledger_account "
+            "WHERE account_code = ANY($1::text[])",
+            [PLATFORM_CASH_CLEARING, PLATFORM_COMMISSION_REVENUE],
+        )
+        account_id = {row["account_code"]: row["account_id"] for row in accounts}
+
         await raw_conn.execute(
             "INSERT INTO ledger_posting_line "
             "(entry_id, line_no, account_id, side, amount, currency) "
@@ -210,11 +223,14 @@ async def test_balanced_entry_commits_successfully(raw_conn) -> None:
             entry_id,
             account_id[PLATFORM_COMMISSION_REVENUE],
         )
+        await raw_conn.execute("SET CONSTRAINTS ALL IMMEDIATE")
 
-    row = await raw_conn.fetchrow(
-        "SELECT entry_id FROM ledger_journal_entry WHERE entry_id = $1", entry_id
-    )
-    assert row is not None
+        row = await raw_conn.fetchrow(
+            "SELECT entry_id FROM ledger_journal_entry WHERE entry_id = $1", entry_id
+        )
+        assert row is not None
+    finally:
+        await tx.rollback()
 
 
 async def test_aios_app_cannot_update_ledger_journal_entry(raw_conn) -> None:
@@ -231,14 +247,21 @@ async def test_aios_app_cannot_update_ledger_journal_entry(raw_conn) -> None:
 
 
 async def test_aios_app_cannot_delete_ledger_posting_line(raw_conn) -> None:
-    audit_event_id = await insert_audit_event(raw_conn)
-    entry_id = await insert_ledger_entry(raw_conn, audit_event_id=audit_event_id)
-    accounts = await raw_conn.fetch(
-        "SELECT account_id, account_code FROM ledger_account WHERE account_code = ANY($1::text[])",
-        [PLATFORM_CASH_CLEARING, PLATFORM_COMMISSION_REVENUE],
-    )
-    account_id = {row["account_code"]: row["account_id"] for row in accounts}
-    async with raw_conn.transaction():
+    """task-5687: `test_balanced_entry_commits_successfully`와 동일한 이유로
+    바깥 트랜잭션은 절대 커밋하지 않는다 — 삭제 시도용 posting line도 같은
+    바깥 트랜잭션 안에서 같은 세션이 만들었으므로(MVCC 동일 트랜잭션
+    가시성) 실제 COMMIT 없이도 DELETE 대상으로 보인다."""
+    tx = raw_conn.transaction()
+    await tx.start()
+    try:
+        audit_event_id = await insert_audit_event(raw_conn)
+        entry_id = await insert_ledger_entry(raw_conn, audit_event_id=audit_event_id)
+        accounts = await raw_conn.fetch(
+            "SELECT account_id, account_code FROM ledger_account "
+            "WHERE account_code = ANY($1::text[])",
+            [PLATFORM_CASH_CLEARING, PLATFORM_COMMISSION_REVENUE],
+        )
+        account_id = {row["account_code"]: row["account_id"] for row in accounts}
         await raw_conn.execute(
             "INSERT INTO ledger_posting_line "
             "(entry_id, line_no, account_id, side, amount, currency) "
@@ -253,11 +276,16 @@ async def test_aios_app_cannot_delete_ledger_posting_line(raw_conn) -> None:
             entry_id,
             account_id[PLATFORM_COMMISSION_REVENUE],
         )
+        await raw_conn.execute("SET CONSTRAINTS ALL IMMEDIATE")
 
-    with pytest.raises(asyncpg.RaiseError, match="append-only violation"):
-        async with raw_conn.transaction():
-            await raw_conn.execute("SET ROLE aios_app")
-            await raw_conn.execute("DELETE FROM ledger_posting_line WHERE entry_id = $1", entry_id)
+        with pytest.raises(asyncpg.RaiseError, match="append-only violation"):
+            async with raw_conn.transaction():
+                await raw_conn.execute("SET ROLE aios_app")
+                await raw_conn.execute(
+                    "DELETE FROM ledger_posting_line WHERE entry_id = $1", entry_id
+                )
+    finally:
+        await tx.rollback()
 
 
 # --- LC-7 (4a1d0c0de006_ledger_holds_payouts) ------------------------------
