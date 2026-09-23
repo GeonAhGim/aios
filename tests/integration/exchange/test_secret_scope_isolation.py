@@ -24,6 +24,7 @@ from src.core.security.encryption import legacy_encrypt
 from src.core.security.key_ring import KeyRing
 from src.services.exchange_credential_service import ExchangeCredentialService
 from tests.integration.conftest import create_test_user
+from tests.integration.fake_exchange_adapter import FakeExchangeAdapter
 
 # 예산표(ADR-2026-09-09-C Decision 1)에 자격증명 복호 조회 전용 항목은
 # 없다 — get_decrypted는 단일 실DB 왕복(fetchrow 1회) + 로컬 복호라는
@@ -46,20 +47,21 @@ async def pool() -> asyncpg.Pool:
     await p.close()
 
 
-class _FakeAdapter:
-    async def get_balance(self) -> list[Any]:
-        return []
-
-    async def aclose(self) -> None:
-        return None
+def _build_fake_adapter(
+    exchange: str,
+    api_key: str,
+    api_secret: str,
+    extra: dict[str, str] | None,
+    *,
+    demo_mode: bool = True,
+) -> FakeExchangeAdapter:
+    return FakeExchangeAdapter(exchange_name=exchange)
 
 
 @pytest.fixture
 def service(pool: asyncpg.Pool) -> ExchangeCredentialService:
     key_ring = KeyRing.from_legacy_hex(ENCRYPTION_KEY)
-    return ExchangeCredentialService(
-        pool, key_ring=key_ring, adapter_factory=lambda *a, **k: _FakeAdapter()  # type: ignore[arg-type]
-    )
+    return ExchangeCredentialService(pool, key_ring=key_ring, adapter_factory=_build_fake_adapter)
 
 
 async def _insert_live_row(pool: asyncpg.Pool, user_id: UUID) -> None:
@@ -170,7 +172,9 @@ async def test_get_decrypted_budget_gate_fails_on_injected_regression(
 
     original_fetchrow = asyncpg.Connection.fetchrow
 
-    async def _slow_fetchrow(self: asyncpg.Connection, *args, **kwargs):  # type: ignore[no-untyped-def]
+    async def _slow_fetchrow(
+        self: asyncpg.Connection, *args: Any, **kwargs: Any
+    ) -> asyncpg.Record | None:
         await asyncio.sleep(0.06)
         return await original_fetchrow(self, *args, **kwargs)
 
