@@ -60,11 +60,11 @@ from src.core.script.runtime.series import Scalar, ScriptRuntimeError, Series, V
 from src.data.models.trading import OrderSide
 from src.foundation.backtest.application.quick_backtest import (
     BarWindow,
+    BracketMetadata,
     PositionState,
     SignalSource,
 )
 from src.foundation.backtest.application.quick_backtest_fill import OrderIntent
-from src.foundation.backtest.domain.fill import order_types as bt6
 from src.foundation.market_data.api import CandleColumns
 from src.foundation.research_data.api import research_builtins
 from src.foundation.research_data.contracts.v1 import ResearchItem
@@ -123,13 +123,14 @@ def build_script_signal_source(
             research_builtins(research_items, columns, instrument=research_instrument)
         )
     result = execute(ir, bar_count=bar_count, inputs=merged_inputs, builtins=builtins)
-    plan = _materialize_plan(result, bar_count, strategy_builtins.intents)
-    return _MaterializedSignalSource(plan)
+    plan, bracket = _materialize_plan(result, bar_count, strategy_builtins.intents)
+    return _MaterializedSignalSource(plan, bracket)
 
 
 @dataclass(frozen=True, slots=True)
 class _MaterializedSignalSource:
     plan: Mapping[int, OrderIntent]
+    bracket: BracketMetadata | None
 
     def on_bar(self, window: BarWindow, _position: PositionState) -> OrderIntent | None:
         return self.plan.get(len(window) - 1)
@@ -163,8 +164,14 @@ def _market_inputs(ir: IRProgram, columns: CandleColumns) -> dict[str, Value]:
 
 def _materialize_plan(
     result: ExecutionResult, bar_count: int, strategy_intents: tuple[StrategyIntent, ...]
-) -> Mapping[int, OrderIntent]:
+) -> tuple[Mapping[int, OrderIntent], BracketMetadata | None]:
+    """Materialize order declarations and strategy intents into a plan.
+
+    Returns (plan dict, bracket_metadata). Bracket intents are extracted
+    separately from regular entry/order intents and not added to the plan.
+    """
     plan: dict[int, OrderIntent] = {}
+    bracket: BracketMetadata | None = None
 
     # Materialize order() declarations (DSL-5 production).
     for order in result.orders:
@@ -191,51 +198,63 @@ def _materialize_plan(
 
     # Materialize strategy.* intents (BT-10b, task-5195). Since the DSL has no
     # per-bar conditionals, all strategy intents fire on bar 0 by design.
-    # Attempting to materialize exit/close/bracket will raise with a clear message
-    # explaining why they require BT-11 (position-aware exit resolution).
     for intent in strategy_intents:
         bar_index = 0  # All strategy.* calls fire on bar 0 (no per-bar conditionals).
+
+        # Bracket intents are handled separately and not converted to OrderIntent.
+        if intent.kind == "bracket":
+            if bracket is not None:
+                raise ScriptSignalSourceError(
+                    "multiple strategy.bracket() calls on bar 0 — only one bracket allowed"
+                )
+            bracket = BracketMetadata(
+                requested_qty=intent.qty if intent.qty is not None else Decimal("0"),
+                profit_price=intent.profit_price,
+                loss_price=intent.loss_price,
+                trail_pct=intent.trail_pct,
+            )
+            continue
+
         if bar_index in plan:
             raise ScriptSignalSourceError(
                 f"strategy.* call and order() both fire at bar {bar_index} — priority undefined"
             )
-        # Conversion to OrderIntent will raise for exit/close/bracket with BT-11 explanation.
+        # Conversion to OrderIntent will raise for exit/close with clear explanation.
         plan[bar_index] = _strategy_intent_to_order_intent(intent)
 
-    return MappingProxyType(plan)
+    return MappingProxyType(plan), bracket
 
 
 def _strategy_intent_to_order_intent(intent: StrategyIntent) -> OrderIntent:
     """Convert a StrategyIntent to an OrderIntent for backtest consumption.
 
-    Design decision: bracket intents are recorded but not yet handled by the
-    backtest loop (BT-11/12 scope: OCO/bracket exit legs). For now, this
-    function processes entry/order/exit/close by converting side + qty.
+    Bracket intents are handled specially: this function accepts them but does
+    not convert them to OrderIntent (they're not executable as single orders).
+    They are instead materialized separately by the caller into bracket metadata.
     """
     if intent.kind == "bracket":
-        # Bracket is a future extension (BT-11). For now, we can't express it
-        # in OrderIntent. Return a placeholder that tests can validate.
-        # The actual bracket exit logic (resolve_oca, bracket_quantity_for_fill)
-        # will be tested via a separate mechanism.
+        # Bracket intents are handled specially by _materialize_plan and not
+        # converted to OrderIntent. If this is reached, it's a logic error.
         raise ScriptSignalSourceError(
-            "strategy.bracket() is recorded but not yet executed by the backtest loop "
-            "(BT-11 scope: bracket exit-leg resolution). Test via dedicated parity tests."
+            "bracket intent should be handled specially, not converted to OrderIntent"
         )
 
     if intent.kind == "entry" or intent.kind == "order":
-        # Both entry and order have side (1=long, -1=short).
+        # Both entry and order have side ("long" or "short" per StrategyIntent).
         if intent.side is None:
             raise ScriptSignalSourceError(
                 f"strategy.{intent.kind}() recorded without side (internal error)"
             )
-        side = OrderSide.BUY if intent.side == 1 else OrderSide.SELL
+        # After None check, intent.side is narrowed to "long" | "short"
+        side = OrderSide.BUY if intent.side == "long" else OrderSide.SELL
     elif intent.kind in ("exit", "close"):
         # Exit and close don't have a direction — they're exit-only.
         # For now, the backtest doesn't support dedicated exit orders
         # (they'd require position tracking to know which side to close).
         raise ScriptSignalSourceError(
-            f"strategy.{intent.kind}() is recorded but not yet executed by the backtest loop "
-            "(exits are BT-11 scope: partial-fill bracket exit legs). Test via dedicated parity tests."
+            f"strategy.{intent.kind}() is recorded but not yet executed "
+            "by the backtest loop (exits are BT-11 scope: partial-fill bracket exit legs). "
+            "Test via dedicated parity tests."
         )
     else:
         raise ScriptSignalSourceError(f"unknown intent kind: {intent.kind!r}")

@@ -49,6 +49,7 @@ from src.foundation.backtest.application.quick_backtest_fill import (
     submit_order,
     try_fill,
 )
+from src.foundation.backtest.domain.fill import order_types as bt6
 from src.foundation.backtest.domain.magnifier import validate_magnifier_config
 from src.foundation.backtest.domain.models_v2 import BacktestConfigV2
 from src.foundation.market_data.api import CandleColumns, duration
@@ -57,6 +58,7 @@ from src.foundation.market_data.contracts.v1 import Timeframe
 __all__ = [
     "MAX_QUICK_BARS",
     "BarWindow",
+    "BracketMetadata",
     "FillEvent",
     "LookAheadError",
     "OrderIntent",
@@ -85,6 +87,32 @@ class PositionState:
     quantity: Decimal
     cash: Decimal
     has_pending_order: bool
+
+
+@dataclass(frozen=True, slots=True)
+class BracketMetadata:
+    """Bracket exit legs configured by strategy.bracket() on bar 0.
+
+    Each leg (profit/loss/trail) is optional (None = leg not active).
+    At least one leg must be present (validated at intent creation).
+    All prices are limit/stop prices for the respective exit leg.
+    trail_pct is a trailing stop percentage (e.g., Decimal("0.05") = 5% trail).
+    """
+    requested_qty: Decimal  # Requested exit quantity (before partial-fill adjustment)
+    profit_price: Decimal | None  # Take-profit limit price (sell at >= this for BUY position)
+    loss_price: Decimal | None  # Stop-loss limit price (sell at <= this for BUY position)
+    trail_pct: Decimal | None  # Trailing stop percentage
+
+
+@dataclass(slots=True)
+class _BracketExitState:
+    """Mutable state for tracking bracket exit resolution (used internally in quick_backtest)."""
+    requested_qty: Decimal
+    filled_qty: Decimal
+    profit_price: Decimal | None
+    loss_price: Decimal | None
+    trail_pct: Decimal | None
+    resolved: bool = False
 
 
 class BarWindow:
@@ -145,6 +173,91 @@ class QuickBacktestResult:
     warnings: tuple[str, ...]
 
 
+def _resolve_bracket_exit(
+    columns: CandleColumns, bar_index: int, qty: Decimal, state: _BracketExitState
+) -> FillEvent | None:
+    """Check if any bracket exit leg triggers on this bar and generate a fill if so.
+
+    Uses bt6.is_limit_triggered/is_stop_triggered to determine leg triggers,
+    bt6.resolve_oca to handle simultaneous triggers, and bt6.bracket_quantity_for_fill
+    to size the exit correctly per entry fill.
+    """
+    bar_low = columns.low[bar_index]
+    bar_high = columns.high[bar_index]
+
+    # Determine which legs are present and build the trigger map
+    legs_present: dict[str, bool] = {}
+    legs_in_priority_order = []  # Will order them for resolve_oca
+
+    if state.loss_price is not None:
+        legs_present["loss"] = bt6.is_stop_triggered(
+            side=OrderSide.SELL if qty > 0 else OrderSide.BUY,
+            stop_price=state.loss_price,
+            bar_low=bar_low,
+            bar_high=bar_high,
+        )
+        legs_in_priority_order.append("loss")
+
+    if state.profit_price is not None:
+        legs_present["profit"] = bt6.is_limit_triggered(
+            side=OrderSide.SELL if qty > 0 else OrderSide.BUY,
+            limit_price=state.profit_price,
+            bar_low=bar_low,
+            bar_high=bar_high,
+        )
+        legs_in_priority_order.append("profit")
+
+    if state.trail_pct is not None:
+        # Trailing stops not yet fully implemented in BT-6/10 — reject for now
+        legs_present["trail"] = False
+        legs_in_priority_order.append("trail")
+
+    # If no legs present, nothing to check
+    if not legs_in_priority_order:
+        return None
+
+    # Use resolve_oca to determine which leg wins (if any)
+    resolution = bt6.resolve_oca(triggered=legs_present, priority_order=legs_in_priority_order)
+    if resolution.triggered_leg is None:
+        return None
+
+    # Compute exit quantity using bracket_quantity_for_fill
+    exit_qty = bt6.bracket_quantity_for_fill(
+        requested_qty=state.requested_qty,
+        filled_qty=state.filled_qty,
+    )
+    if exit_qty == 0:
+        return None
+
+    # Determine fill price based on which leg triggered.
+    # Invariant: if triggered_leg is set, the corresponding price must be non-None
+    # (we only add legs to legs_present if their prices are not None).
+    if resolution.triggered_leg == "loss":
+        assert state.loss_price is not None
+        fill_price = state.loss_price
+    elif resolution.triggered_leg == "profit":
+        assert state.profit_price is not None
+        fill_price = state.profit_price
+    else:
+        # Trailing stop not yet implemented
+        return None
+
+    # Generate FillEvent for the bracket exit.
+    # Exit side is opposite of entry: if we're long (qty > 0), we sell (SELL)
+    exit_side = OrderSide.SELL if qty > 0 else OrderSide.BUY
+
+    return FillEvent(
+        bar_index=bar_index,
+        open_time=columns.ts[bar_index],
+        side=exit_side,
+        order_type="market",
+        quantity=exit_qty,
+        price=fill_price,
+        commission=_ZERO,  # Bracket exit commission not yet modeled
+        remaining_quantity=_ZERO,
+    )
+
+
 def _validate(
     config: BacktestConfigV2, columns: CandleColumns, timeframe: Timeframe,
     initial_cash: Decimal, funding_rate: Decimal | None, max_bars: int,
@@ -176,11 +289,18 @@ def run_quick_backtest(
     funding_rate: Decimal | None = None,
     lower_columns: CandleColumns | None = None,
     max_bars: int = MAX_QUICK_BARS,
+    bracket: BracketMetadata | None = None,
 ) -> QuickBacktestResult:
     """`columns`(LA-23b 컬럼 경로, `timeframe` 봉) 위에서 `strategy`를 봉마다
-    한 번씩 평가하고 BT-2~8로 체결·비용을 계산한다. 대기 주문은 한 번에
-    하나 — 새 의도가 오면 기존 대기 주문을 대체(취소)한다."""
+    한 번씩 평가하고 BT-2~8로 체질·비용을 계산한다. 대기 주문은 한 번에
+    하나 — 새 의도가 오면 기존 대기 주문을 대체(취소)한다. Bracket이
+    configure되면, 진입 체결 후 후속 봉에서 bracket 청산 레그(profit/loss/trail)
+    트리거를 감시하고 resolve_oca/bracket_quantity_for_fill로 청산을 처리한다."""
     _validate(config, columns, timeframe, initial_cash, funding_rate, max_bars)
+
+    # Extract bracket metadata from strategy if present (duck typing for _MaterializedSignalSource).
+    if bracket is None:
+        bracket = getattr(strategy, 'bracket', None)
     n = len(columns)
     step = duration(timeframe)
     warnings: list[str] = []
@@ -192,6 +312,7 @@ def run_quick_backtest(
     cash, qty = initial_cash, _ZERO
     pending: PendingOrder | None = None
     holding: Holding | None = None
+    bracket_exit: _BracketExitState | None = None  # Tracks active bracket exit resolution
     funding_total = borrow_total = _ZERO
     fills: list[FillEvent] = []
     equity: list[Decimal] = []
@@ -224,6 +345,39 @@ def run_quick_backtest(
                 pending.remaining = fill.remaining_quantity
                 if pending.remaining == 0:
                     pending = None
+
+                # If bracket configured and entry filled, initialize bracket exit tracking.
+                if bracket is not None and bracket_exit is None and qty != 0:
+                    bracket_exit = _BracketExitState(
+                        requested_qty=bracket.requested_qty,
+                        filled_qty=fill.quantity,
+                        profit_price=bracket.profit_price,
+                        loss_price=bracket.loss_price,
+                        trail_pct=bracket.trail_pct,
+                    )
+
+        # Check bracket exit legs and generate exit fills when triggered.
+        if bracket_exit is not None and not bracket_exit.resolved and qty != 0:
+            bracket_exit_fill = _resolve_bracket_exit(
+                columns, i, qty, bracket_exit
+            )
+            if bracket_exit_fill is not None:
+                fills.append(bracket_exit_fill)
+                exit_signed = (
+                    bracket_exit_fill.quantity
+                    if bracket_exit_fill.side == OrderSide.BUY
+                    else -bracket_exit_fill.quantity
+                )
+                cash -= bracket_exit_fill.price * exit_signed + bracket_exit_fill.commission
+                before, qty = qty, qty + exit_signed
+                if holding is not None and (qty == 0 or (before > 0) != (qty > 0)):
+                    f_cost, b_cost = settle_costs(
+                        config, holding, bracket_exit_fill.open_time, funding_rate
+                    )
+                    funding_total, borrow_total = funding_total + f_cost, borrow_total + b_cost
+                    cash -= f_cost + b_cost
+                    holding = None
+                bracket_exit.resolved = True
 
         equity.append(cash + qty * columns.close[i])
 
