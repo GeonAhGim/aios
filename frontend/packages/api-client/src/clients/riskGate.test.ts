@@ -55,6 +55,37 @@ const RECOVERY_DECISION = {
   trace_id: "trace-2",
 };
 
+const RISK_EVALUATION = {
+  id: "e1",
+  gate_kind: "PRE_TRADE",
+  outcome: "ALLOW",
+  reason_codes: [],
+  obligations: [],
+  rule_version: "v1",
+  evaluated_at: "2026-09-09T00:00:00Z",
+  expires_at: "2026-09-09T01:00:00Z",
+  trace_id: "trace-3",
+  schema_version: "v1",
+};
+
+const RULE_BUNDLE = {
+  id: "b1",
+  scope: "GLOBAL",
+  version: "1",
+  rule_hash: "a".repeat(64),
+  engine_version: "v1",
+  policy_snapshot: {},
+  state: "APPROVED",
+  effective_from: null,
+  effective_to: null,
+  created_by: "u1",
+  approved_by: "u2",
+  approval_ref: "ref-1",
+  approved_at: "2026-09-09T00:00:00Z",
+  activated_at: null,
+  retired_at: null,
+};
+
 describe("withRiskGate: safety-controls 조회·해제(deactivate/evaluate-recovery)", () => {
   afterEach(() => {
     vi.unstubAllGlobals();
@@ -106,5 +137,65 @@ describe("withRiskGate: safety-controls 조회·해제(deactivate/evaluate-recov
     const body = JSON.parse(init.body as string);
     expect(body).toEqual({ evidence_ref: "ev-1", approval_id: 42 });
     expect(result.outcome).toBe("ALLOW");
+  });
+});
+
+describe("withRiskGate: 개통(activate)·룰번들 승인/활성화·evaluate 트리거(task-5808/FE-OPS-9)", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("activateSafetyControl: /admin/safety-controls로 scope/scopeRef/reason을 snake_case body에 실어 POST한다", async () => {
+    const fetchMock = stubFetch(envelope(CONTROL_VIEW));
+
+    const result = await makeClient().activateSafetyControl({
+      scope: "GLOBAL",
+      scopeRef: "tenant-1",
+      reason: "manual halt",
+    });
+
+    const { url, init } = requestOf(fetchMock);
+    expect(url).toBe("https://api.example.test/v1/foundation/risk-gate/admin/safety-controls");
+    expect(init.method).toBe("POST");
+    const body = JSON.parse(init.body as string);
+    expect(body).toEqual({ scope: "GLOBAL", scope_ref: "tenant-1", reason: "manual halt" });
+    expect(result.state).toBe("ACTIVE");
+  });
+
+  it("evaluateRiskGate: /evaluate로 gateKind/connectionId를 snake_case body에 실어 POST한다", async () => {
+    const fetchMock = stubFetch(envelope(RISK_EVALUATION));
+
+    const result = await makeClient().evaluateRiskGate({ gateKind: "PRE_TRADE", connectionId: "conn-1" });
+
+    const { url, init } = requestOf(fetchMock);
+    expect(url).toBe("https://api.example.test/v1/foundation/risk-gate/evaluate");
+    const body = JSON.parse(init.body as string);
+    expect(body).toEqual({ gate_kind: "PRE_TRADE", connection_id: "conn-1" });
+    expect(result.ruleVersion).toBe("v1");
+  });
+
+  it("approveRuleBundle: :bundleId:approve 경로로 approvalRef를 snake_case body에 실어 POST한다", async () => {
+    const fetchMock = stubFetch(envelope(RULE_BUNDLE));
+
+    const result = await makeClient().approveRuleBundle("b1", { approvalRef: "ref-1" });
+
+    const { url, init } = requestOf(fetchMock);
+    expect(url).toBe("https://api.example.test/v1/foundation/risk-gate/rule-bundles/b1:approve");
+    const body = JSON.parse(init.body as string);
+    expect(body).toEqual({ approval_ref: "ref-1" });
+    expect(result.approvalRef).toBe("ref-1");
+    expect(result.state).toBe("APPROVED");
+  });
+
+  it("activateRuleBundle: :bundleId:activate 경로로 body 없이 POST한다", async () => {
+    const fetchMock = stubFetch(envelope({ ...RULE_BUNDLE, state: "ACTIVE" }));
+
+    const result = await makeClient().activateRuleBundle("b1");
+
+    const { url, init } = requestOf(fetchMock);
+    expect(url).toBe("https://api.example.test/v1/foundation/risk-gate/rule-bundles/b1:activate");
+    expect(init.method).toBe("POST");
+    expect(init.body).toBeUndefined();
+    expect(result.state).toBe("ACTIVE");
   });
 });
