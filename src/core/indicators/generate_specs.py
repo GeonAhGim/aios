@@ -25,6 +25,7 @@ the deviation side is implemented only as a pure function `_deviation_range()`
 from __future__ import annotations
 
 from collections.abc import Callable, Iterable, Mapping, Sequence
+from typing import Any
 
 import talib
 from talib import abstract as talib_abstract
@@ -160,7 +161,7 @@ def _plots_from_talib(
 
 def _plots_from_info(
     talib_name: str,
-    info: Mapping[str, object],
+    info: Mapping[str, Any],
     output_names: tuple[str, ...],
     style: Mapping[str, Mapping[str, object]],
 ) -> tuple[PlotSpec, ...]:
@@ -176,13 +177,13 @@ def _plots_from_info(
     are actually markers on price, so force `kind="marker"`. Histogram outputs naturally
     split color by sign, so if `color_rule` is absent from style, auto-fill "sign".
     """
-    flags_by_output: list[list[str]] = list(info["output_flags"].values())  # type: ignore[attr-defined]
+    flags_by_output: list[list[str]] = list(info["output_flags"].values())
     if len(flags_by_output) != len(output_names):
         raise ValueError(
             f"{talib_name}: output_flags count ({len(flags_by_output)}) "
             f"!= output_names count ({len(output_names)})"
         )
-    is_candlestick = _CANDLESTICK_FLAG in (info["function_flags"] or [])  # type: ignore[operator]
+    is_candlestick = _CANDLESTICK_FLAG in (info["function_flags"] or [])
 
     upper_idx = next(
         (i for i, flags in enumerate(flags_by_output) if _UPPER_LIMIT_FLAG in flags), None

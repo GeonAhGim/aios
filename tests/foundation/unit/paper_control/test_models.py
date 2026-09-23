@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import dataclasses
 import time
+from typing import Any
 from uuid import uuid4
 
 import pytest
@@ -23,19 +24,19 @@ from src.foundation.paper_control.domain.models import (
 )
 
 
-def _provenance(**overrides: object) -> AdapterProvenance:
-    defaults: dict[str, object] = dict(
+def _provenance(**overrides: Any) -> AdapterProvenance:
+    defaults: dict[str, Any] = dict(
         adapter_type="fake-paper-v1",
         credential_class=CredentialClass.PAPER,
         endpoint_classification="SANDBOX",
         provider_sandbox_account_ref="sandbox-acct-1",
     )
     defaults.update(overrides)
-    return AdapterProvenance(**defaults)  # type: ignore[arg-type]
+    return AdapterProvenance(**defaults)
 
 
-def _deployment(**overrides: object) -> PaperDeployment:
-    defaults: dict[str, object] = dict(
+def _deployment(**overrides: Any) -> PaperDeployment:
+    defaults: dict[str, Any] = dict(
         id=uuid4(),
         tenant_id=uuid4(),
         connection_id=None,
@@ -46,7 +47,7 @@ def _deployment(**overrides: object) -> PaperDeployment:
         fence_token=1,
     )
     defaults.update(overrides)
-    return PaperDeployment(**defaults)  # type: ignore[arg-type]
+    return PaperDeployment(**defaults)
 
 
 # --- positive construction ---------------------------------------------------
@@ -117,14 +118,16 @@ def test_command_type_rejects_value_outside_enum():
 
 def test_paper_deployment_is_immutable():
     deployment = _deployment()
+    field = "state"
     with pytest.raises(dataclasses.FrozenInstanceError):
-        deployment.state = DeploymentState.RUNNING  # type: ignore[misc]
+        setattr(deployment, field, DeploymentState.RUNNING)
 
 
 def test_adapter_provenance_is_immutable():
     provenance = _provenance()
+    field = "adapter_type"
     with pytest.raises(dataclasses.FrozenInstanceError):
-        provenance.adapter_type = "other"  # type: ignore[misc]
+        setattr(provenance, field, "other")
 
 
 def test_deployment_command_is_immutable():
@@ -137,24 +140,26 @@ def test_deployment_command_is_immutable():
         outcome=CommandOutcome.ACCEPTED,
         detail=None,
     )
+    field = "outcome"
     with pytest.raises(dataclasses.FrozenInstanceError):
-        command.outcome = CommandOutcome.DENIED  # type: ignore[misc]
+        setattr(command, field, CommandOutcome.DENIED)
 
 
 # --- negative: required field missing -----------------------------------------
 
 
 def test_paper_deployment_requires_provenance():
+    incomplete: dict[str, Any] = dict(
+        id=uuid4(),
+        tenant_id=uuid4(),
+        connection_id=None,
+        package_ref="pkg-1",
+        mandate_revision_id=uuid4(),
+        state=DeploymentState.REQUESTED,
+        fence_token=1,
+    )
     with pytest.raises(TypeError):
-        PaperDeployment(  # type: ignore[call-arg]
-            id=uuid4(),
-            tenant_id=uuid4(),
-            connection_id=None,
-            package_ref="pkg-1",
-            mandate_revision_id=uuid4(),
-            state=DeploymentState.REQUESTED,
-            fence_token=1,
-        )
+        PaperDeployment(**incomplete)
 
 
 # --- failure injection: corrupted upstream data must fail closed -------------
