@@ -15,9 +15,10 @@ DB의 다른 테스트에 영향 없음).
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Mapping
+from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass
-from datetime import timedelta
+from datetime import datetime, timedelta
+from typing import Any
 from uuid import UUID, uuid4
 
 import asyncpg
@@ -62,7 +63,7 @@ class _Ctx:
     execution_id: int
     decision: RiskDecision
     f0: Mapping[str, int]
-    read: object  # FenceReader
+    read: Any  # FenceReader
 
     def gate(self) -> GateDecision:
         return GateDecision(
@@ -92,7 +93,9 @@ async def _activate(pool: asyncpg.Pool, ctx: _Ctx) -> None:
     )
 
 
-def _recording_hook(ctx: _Ctx, fence_at_place: dict[UUID, Mapping[str, int]]):
+def _recording_hook(
+    ctx: _Ctx, fence_at_place: dict[UUID, Mapping[str, int]]
+) -> Callable[[Order], Awaitable[Order]]:
     async def hook(order: Order) -> Order:
         fence_at_place[order.order_id] = await ctx.read()  # 부작용 시점의 fence
         return order.model_copy(
@@ -102,7 +105,9 @@ def _recording_hook(ctx: _Ctx, fence_at_place: dict[UUID, Mapping[str, int]]):
     return hook
 
 
-async def test_staged_gather_kill_switch_vs_submits_post_fence_zero(pool, ctx):
+async def test_staged_gather_kill_switch_vs_submits_post_fence_zero(
+    pool: asyncpg.Pool, ctx: _Ctx
+) -> None:
     metrics = SpyMetrics()
     fence_at_place: dict[UUID, Mapping[str, int]] = {}
     adapter = RecordingAdapter(on_place_order=_recording_hook(ctx, fence_at_place))
@@ -135,7 +140,8 @@ async def test_staged_gather_kill_switch_vs_submits_post_fence_zero(pool, ctx):
             calls += 1
             if calls == 1:  # F1은 fence 증가가 커밋된 뒤에 읽는다(F0는 그 전)
                 await activated.wait()
-            return await ctx.read()
+            result = await ctx.read()
+            return result  # type: ignore[no-any-return]
 
         return await submit_with_fence(
             pool, adapter, make_order(ctx.execution_id), user_id=ctx.user_id,
@@ -147,10 +153,11 @@ async def test_staged_gather_kill_switch_vs_submits_post_fence_zero(pool, ctx):
         *(early() for _ in range(_N_EARLY)), activator(), *(late() for _ in range(_N_LATE)),
         return_exceptions=True,
     )
-    early_results, late_results = results[:_N_EARLY], results[_N_EARLY + 1 :]
+    early_results = [r for r in results[:_N_EARLY] if isinstance(r, Order)]
+    late_results: list[FenceStaleError] = [r for r in results[_N_EARLY + 1 :] if isinstance(r, FenceStaleError)]
 
-    assert all(isinstance(r, Order) and r.status == OrderStatus.SUBMITTED for r in early_results)
-    assert all(isinstance(r, FenceStaleError) for r in late_results)
+    assert all(r.status == OrderStatus.SUBMITTED for r in early_results)
+    assert len(late_results) == _N_LATE
     assert adapter.place_order_call_count == _N_EARLY
     assert all(fence == ctx.f0 for fence in fence_at_place.values()), "post-fence 부작용 발생"
     assert metrics.counters.get(SAFETY_POST_FENCE_SIDE_EFFECT_COUNT_TOTAL, 0) == 0
@@ -164,7 +171,9 @@ async def test_staged_gather_kill_switch_vs_submits_post_fence_zero(pool, ctx):
         assert error.stale_pairs == (f"STRATEGY_DEPLOYMENT:exec:{ctx.execution_id}",)
 
 
-async def test_unstaged_gather_every_post_fence_effect_is_detected_and_reversed(pool, ctx):
+async def test_unstaged_gather_every_post_fence_effect_is_detected_and_reversed(
+    pool: asyncpg.Pool, ctx: _Ctx
+) -> None:
     metrics = SpyMetrics()
     fence_at_place: dict[UUID, Mapping[str, int]] = {}
     adapter = RecordingAdapter(on_place_order=_recording_hook(ctx, fence_at_place))
@@ -193,12 +202,13 @@ async def test_unstaged_gather_every_post_fence_effect_is_detected_and_reversed(
             assert result.order_id not in fence_at_place  # 거래소에 닿지 않았다
             assert (await order_row(pool, result.order_id))["status"] == "FAILED"
             continue
-        row = await order_row(pool, result.order_id)
+        row = await order_row(pool, result.order_id)  # type: ignore[union-attr]
         assert row["risk_decision_id"] == ctx.decision.decision_id
         assert row["status"] in ("SUBMITTED", "CANCELLED")
-        if result.order_id in leaked:  # fence 뒤 부작용은 반드시 되돌려졌다
+        # fence 뒤 부작용은 반드시 되돌려졌다
+        if result.order_id in leaked:  # type: ignore[union-attr]
             assert row["status"] == "CANCELLED"
-            assert result.exchange_order_id in adapter.cancelled_exchange_order_ids
+            assert result.exchange_order_id in adapter.cancelled_exchange_order_ids  # type: ignore[union-attr,operator]
     detected = metrics.counters.get(SAFETY_POST_FENCE_SIDE_EFFECT_COUNT_TOTAL, 0)
     assert detected >= len(leaked)  # F2 검출은 보수적(상위집합)
     assert len(adapter.cancelled_exchange_order_ids) == detected
@@ -212,9 +222,9 @@ async def _insert_raw(
     risk_decision_id: UUID | None = None,
     is_liquidation: bool = False,
     liquidation_request_id: UUID | None = None,
-    created_at=None,
+    created_at: datetime | None = None,
 ) -> UUID:
-    return await conn.fetchval(
+    result = await conn.fetchval(
         """
         INSERT INTO orders (
             user_id, client_order_id, strategy_id, strategy_version, execution_id, symbol,
@@ -227,9 +237,12 @@ async def _insert_raw(
         ctx.user_id, f"raw-{uuid4().hex}", ctx.execution_id, is_liquidation,
         risk_decision_id, liquidation_request_id, created_at,
     )
+    return UUID(result) if result is not None else uuid4()
 
 
-async def test_trigger_rejects_order_without_decision_once_cutover_armed(pool, ctx):
+async def test_trigger_rejects_order_without_decision_once_cutover_armed(
+    pool: asyncpg.Pool, ctx: _Ctx
+) -> None:
     arm_sql = (
         "UPDATE orders_risk_decision_cutover SET cutover_at = now(), armed_by = 'test' "
         "WHERE id = 1 AND cutover_at IS NULL RETURNING cutover_at"
@@ -261,7 +274,9 @@ async def test_trigger_rejects_order_without_decision_once_cutover_armed(pool, c
 @pytest.mark.parametrize(
     "case", ["other_tenant", "deny", "expired", "unknown", "other_execution"]
 )
-async def test_trigger_rejects_invalid_decision_reference_even_when_disarmed(pool, ctx, case):
+async def test_trigger_rejects_invalid_decision_reference_even_when_disarmed(
+    pool: asyncpg.Pool, ctx: _Ctx, case: str
+) -> None:
     if case == "other_execution":  # a7c3d9e1f2b4 — 같은 tenant·ALLOW·유효지만 다른 execution
         ref = f"exec:{await seed_execution(pool, ctx.user_id)}"
         other = await insert_decision(pool, ctx.user_id, execution_ref=ref)
@@ -282,7 +297,7 @@ async def test_trigger_rejects_invalid_decision_reference_even_when_disarmed(poo
         assert await _insert_raw(conn, ctx, risk_decision_id=ctx.decision.decision_id)  # 대조군
 
 
-async def test_trigger_liquidation_requires_request_id(pool, ctx):
+async def test_trigger_liquidation_requires_request_id(pool: asyncpg.Pool, ctx: _Ctx) -> None:
     async with pool.acquire() as conn:
         with pytest.raises(asyncpg.CheckViolationError, match="requires liquidation_request_id"):
             await _insert_raw(conn, ctx, is_liquidation=True)

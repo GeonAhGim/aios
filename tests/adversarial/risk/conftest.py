@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import os
 import uuid
-from collections.abc import Mapping
+from collections.abc import Awaitable, Callable, Mapping
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from typing import Any
@@ -35,7 +35,7 @@ def _asyncpg_dsn() -> str:
 
 
 @pytest.fixture
-async def pool():
+async def pool() -> asyncpg.Pool:
     p = await asyncpg.create_pool(_asyncpg_dsn(), min_size=2, max_size=12)
     yield p
     await p.close()
@@ -95,7 +95,7 @@ async def seed_execution(pool: asyncpg.Pool, user_id: UUID, *, exchange: str = "
             exchange,
             Decimal("500"),
         )
-    return row["id"]
+    return int(row["id"]) if row is not None else 0
 
 
 async def recorded_inputs(
@@ -183,7 +183,9 @@ def make_order(execution_id: int, *, exchange: str = "bitget") -> Order:
     )
 
 
-def fence_reader(pool: asyncpg.Pool, user_id: UUID, execution_id: int, *, exchange: str = "bitget"):
+def fence_reader(
+    pool: asyncpg.Pool, user_id: UUID, execution_id: int, *, exchange: str = "bitget"
+) -> Callable[[], Awaitable[Mapping[str, int]]]:
     """`foundation_gate._flatten_fence`와 같은 형식(`"SCOPE:ref" -> token`)."""
     repo = PostgresRiskGateRepository(pool)
     pairs = fence_pairs_for(user_id, exchange, f"exec:{execution_id}")
@@ -206,8 +208,9 @@ async def order_row(pool: asyncpg.Pool, order_id: UUID) -> asyncpg.Record:
 
 async def audit_count(pool: asyncpg.Pool, action_type: str, order_id: UUID) -> int:
     async with pool.acquire() as conn:
-        return await conn.fetchval(
+        result = await conn.fetchval(
             "SELECT count(*) FROM audit_log WHERE action_type = $1 AND target_id = $2",
             action_type,
             str(order_id),
         )
+        return int(result) if result is not None else 0
