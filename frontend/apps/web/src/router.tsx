@@ -43,6 +43,7 @@ import { MfaSetupPage } from "./routes/onboarding/MfaSetupPage";
 import { OnboardingFlowPage } from "./routes/onboarding/OnboardingFlowPage";
 import { RiskAssessmentPage } from "./routes/onboarding/RiskAssessmentPage";
 import { FeatureFlagGate } from "./components/FeatureFlagGate";
+import { PerformanceStatementsPage } from "./routes/portfolio/PerformanceStatementsPage";
 import { PortfolioPage } from "./routes/portfolio/PortfolioPage";
 import { RebalancePage } from "./routes/whatif/RebalancePage";
 import { ReportsPage } from "./routes/reports/ReportsPage";
@@ -127,6 +128,7 @@ export const router = createBrowserRouter(
   { path: "/follow", element: protect(<FollowPage />) },
   { path: "/ai/studio", element: protect(<AiStudioPage />) },
   { path: "/portfolio", element: protect(<PortfolioPage />) },
+  { path: "/portfolio/performance-statements", element: protect(<PerformanceStatementsPage />) },
   { path: "/rebalance", element: protect(<RebalancePage />) },
   { path: "/mandates", element: protect(<MandatesPage />) },
   { path: "/compliance", element: protect(<CompliancePage />) },
