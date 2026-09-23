@@ -1,5 +1,5 @@
 {
- "refreshed_at": "2026-09-23T10:54:44+00:00",
+ "refreshed_at": "2026-09-23T17:02:31+00:00",
  "specs": [
   {
    "file": "L4_ai_research_strategy_factory_v1.0.md",
@@ -39,7 +39,7 @@
    "inflight": 0,
    "untouched": 0,
    "hold": 1,
-   "reopened": 0,
+   "reopened": 1,
    "depth": {
     "D2": 6,
     "D3": 12,
@@ -69,7 +69,7 @@
    "inflight": 0,
    "untouched": 0,
    "hold": 0,
-   "reopened": 0,
+   "reopened": 1,
    "depth": {
     "D0": 1,
     "D2": 2,
@@ -114,7 +114,7 @@
    "inflight": 0,
    "untouched": 0,
    "hold": 0,
-   "reopened": 1,
+   "reopened": 2,
    "depth": {
     "D2": 10,
     "D3": 8,
@@ -129,7 +129,7 @@
    "inflight": 0,
    "untouched": 0,
    "hold": 0,
-   "reopened": 0,
+   "reopened": 3,
    "depth": {
     "D1": 2,
     "D2": 11,
@@ -159,7 +159,7 @@
    "inflight": 0,
    "untouched": 0,
    "hold": 0,
-   "reopened": 1,
+   "reopened": 0,
    "depth": {
     "D2": 6,
     "D3": 3,
@@ -174,7 +174,7 @@
    "inflight": 0,
    "untouched": 0,
    "hold": 5,
-   "reopened": 2,
+   "reopened": 0,
    "depth": {
     "D3": 27,
     "D?": 26
