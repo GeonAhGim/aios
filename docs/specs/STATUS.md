@@ -1,6 +1,6 @@
 # 명세 리프 진행 현황 (자동 생성 — C:/aios/pm/spec_status.py, 편집 금지)
 
-갱신: 2026-09-23T10:49:26+00:00
+갱신: 2026-09-23T10:54:44+00:00
 
 | 명세 | 총 | done | 재오픈 | inflight | untouched | hold | done% | 깊이(done) |
 |---|---|---|---|---|---|---|---|---|
@@ -14,9 +14,9 @@
 | market_data_positions_ledger | 63 | 63 | 1 | 0 | 0 | 0 | 100% | {'D2': 10, 'D3': 8, 'D?': 45} |
 | platform_observability_tenancy_api | 42 | 42 | 0 | 0 | 0 | 0 | 100% | {'D1': 2, 'D2': 11, 'D3': 3, 'D?': 26} |
 | product_experience_and_discovery | 22 | 22 | 0 | 0 | 0 | 0 | 100% | {'D2': 15, 'D?': 7} |
-| research_data_and_market_ecosystem | 18 | 18 | 0 | 0 | 0 | 0 | 100% | {'D2': 6, 'D3': 3, 'D?': 9} |
+| research_data_and_market_ecosystem | 18 | 18 | 1 | 0 | 0 | 0 | 100% | {'D2': 6, 'D3': 3, 'D?': 9} |
 | risk_and_safety | 58 | 53 | 2 | 0 | 0 | 5 | 91% | {'D3': 27, 'D?': 26} |
 | strategy_portfolio_backtest | 46 | 46 | 0 | 0 | 0 | 0 | 100% | {'D2': 17, 'D?': 29} |
-| **합계** | 482 | 457 | 5 | 2 | 0 | 23 | 95% | |
+| **합계** | 482 | 457 | 6 | 2 | 0 | 23 | 95% | |
 
 상태 정의: done = 해당 ID를 제목/명세에 포함한 implement task가 done(재오픈 = done인데 열린 task도 있음: DEEPEN·묶음 QA), inflight = 열린 implement task만 존재, untouched = task 미발행, hold = spec_hold.yaml. depth = QA task note의 `depth=D<n>` 최대값(ADR-2026-09-09-C: done 하한 D2, 안전축 D3). D? = QA 등급 미기록.
