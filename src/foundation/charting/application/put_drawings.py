@@ -1,4 +1,5 @@
-"""PutDrawings command — full replacement of the drawings collection + optimistic lock (standard-105).
+"""PutDrawings command — full replacement of the drawings collection + optimistic lock
+(standard-105).
 
 Run structural validation (`domain.rules.validate_drawings_document`) before
 ownership/optimistic-lock checks — if we send a broken document to another
