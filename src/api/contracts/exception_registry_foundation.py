@@ -52,8 +52,6 @@ from src.foundation.connections.application.sync_snapshot import (
     ProviderUnavailableError,
 )
 from src.foundation.connections.domain.rules import ForbiddenCapabilityScopeError
-from src.foundation.ems.application.get_algo_progress import AlgoRunNotFoundError
-from src.foundation.ems.ports.tca_result_repository import TcaResultNotFoundError
 from src.foundation.entities.application.resolve_context import EntityContextResolutionError
 from src.foundation.evidence.domain.rules import ChainIntegrityError
 from src.foundation.ledger.application.payouts import UnknownPayoutBatchError
@@ -91,7 +89,9 @@ from src.foundation.paper_control.application.start_deployment import (
 from src.foundation.paper_control.application.start_deployment import (
     InvalidDeploymentStateError as StartInvalidDeploymentStateError,
 )
-from src.foundation.paper_control.application.start_deployment import RiskGateDeniedError
+from src.foundation.paper_control.application.start_deployment import (
+    RiskGateDeniedError,
+)
 from src.foundation.paper_control.domain.rules import InvalidProvenanceError
 from src.foundation.performance.adapters.paper_input_adapter import UnreconciledInputError
 from src.foundation.performance.application.compute_statement import MethodologyNotFoundError
@@ -193,9 +193,8 @@ EXCEPTION_MAP_FOUNDATION: list[tuple[type[Exception], ErrorCode]] = [
     (ProviderUnavailableError, ErrorCode.EXCHANGE_FATAL),
     (ConnectionNotRevocableError, ErrorCode.STATE_INVALID_TRANSITION),
     # The foundation.mandates.* cluster (activate_revision/evaluate_policy/
-    # create_draft_mandate/explain) moved to
-    # exception_registry_foundation_mandates.py (task-2618, this file hit
-    # the P6.line_cap 300-line guard again).
+    # create_draft_mandate/explain) moved to exception_registry_foundation_mandates.py
+    # (task-2618, this file hit the P6.line_cap 300-line guard again).
     *EXCEPTION_MAP_FOUNDATION_MANDATES,
     # evidence.py 체인 무결성 — 없는 코드라 409 conflict로 접는다.
     (ChainIntegrityError, ErrorCode.STATE_INVALID_TRANSITION),
@@ -226,10 +225,9 @@ EXCEPTION_MAP_FOUNDATION: list[tuple[type[Exception], ErrorCode]] = [
     (UnauthorizedSafetyControlScopeError, ErrorCode.AUTHZ_FORBIDDEN),
     (MissingScopeRefError, ErrorCode.VALIDATION_INVALID_FIELD),
     (SafetyControlNotFoundError, ErrorCode.RESOURCE_NOT_FOUND),
-    # R-53 — RECOVERY gate DENY (any of evidence/approval/cooldown/fresh not
-    # met). Folded into RISK_DENIED (403) using the same convention as
-    # RiskGateDeniedError (start_deployment.py) — reason_codes ride in
-    # details (including RSK-007).
+    # R-53 — RECOVERY gate DENY (any of evidence/approval/cooldown/fresh not met).
+    # Folded into RISK_DENIED (403) using the same convention as RiskGateDeniedError
+    # (start_deployment.py) — reason_codes ride in details (including RSK-007).
     (RecoveryDeniedError, ErrorCode.RISK_DENIED),
     (DisclosureNotFoundError, ErrorCode.RESOURCE_NOT_FOUND),
     (DisclosureRetiredError, ErrorCode.VALIDATION_DISCLOSURE_RETIRED),
@@ -272,17 +270,14 @@ EXCEPTION_MAP_FOUNDATION: list[tuple[type[Exception], ErrorCode]] = [
     (ChartLayoutNotFoundError, ErrorCode.RESOURCE_NOT_FOUND),
     (CrossTenantChartLayoutAccessError, ErrorCode.RESOURCE_NOT_FOUND),
     (DrawingValidationError, ErrorCode.VALIDATION_INVALID_FIELD),
-    # CH-17b (task-1904) — foundation/charting indicator template. Another
-    # tenant's access also folds into a 404 isomorphic to nonexistence
-    # (same principle as CH-5). Duplicate creation (409) folds into
-    # ConcurrencyConflictError (already registered globally in
-    # exception_registry.py), so it is not added here again.
+    # CH-17b (task-1904) — foundation/charting indicator template. Another tenant's access folds
+    # into 404 too (same as CH-5). Duplicate creation (409) folds into ConcurrencyConflictError,
+    # already global in exception_registry.py.
     (ChartIndicatorTemplateNotFoundError, ErrorCode.RESOURCE_NOT_FOUND),
     (CrossTenantChartIndicatorTemplateAccessError, ErrorCode.RESOURCE_NOT_FOUND),
-    # FA-6(task-1944) — explicit portfolio_id scope resolution failure on
-    # the positions/performance read paths (nonexistent/closed/other
-    # tenant/unattributed). Follows the same non-disclosure-of-existence
-    # 404-uniformity principle (same as §9 LB-19) — 404, not 403.
+    # FA-6(task-1944) — explicit portfolio_id scope resolution failure on the positions/performance
+    # read paths (nonexistent/closed/other tenant/unattributed). Follows the same
+    # non-disclosure-of-existence 404-uniformity principle (same as §9 LB-19) — 404, not 403.
     (EntityContextResolutionError, ErrorCode.RESOURCE_NOT_FOUND),
     # U-2a(task-2629) — dashboard.py account summary read path. Same
     # non-disclosure-of-existence 404-uniformity principle as LB-19.
@@ -292,9 +287,6 @@ EXCEPTION_MAP_FOUNDATION: list[tuple[type[Exception], ErrorCode]] = [
     *EXCEPTION_MAP_FOUNDATION_PERSONAL,
     # task-2630 U-3a — assistant.py, split out (P6.line_cap).
     *EXCEPTION_MAP_AI_ASSISTANT,
-    # PLT-21(task-5598) — foundation/ems.py TCA/algo-progress read paths.
-    (TcaResultNotFoundError, ErrorCode.RESOURCE_NOT_FOUND),
-    (AlgoRunNotFoundError, ErrorCode.RESOURCE_NOT_FOUND),
 ]
 
 STATUS_OVERRIDE_FOUNDATION: list[tuple[type[Exception], int]] = [
