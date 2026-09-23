@@ -55,12 +55,15 @@ class PostgresTrustRepository:
 
     async def get_disclosure_by_purpose_and_revision(
         self, purpose: str, revision: int
-    ) -> Disclosure | None:
+    ) -> tuple[Disclosure, datetime] | None:
         async with self._pool.acquire() as conn:
             row = await conn.fetchrow(
-                "SELECT * FROM disclosure WHERE purpose = $1 AND revision = $2", purpose, revision
+                "SELECT *, clock_timestamp() AS server_now FROM disclosure "
+                "WHERE purpose = $1 AND revision = $2",
+                purpose,
+                revision,
             )
-        return _row_to_disclosure(row) if row is not None else None
+        return (_row_to_disclosure(row), row["server_now"]) if row is not None else None
 
     async def get_active_consent(self, tenant_id: UUID, purpose: str) -> Consent | None:
         async with self._pool.acquire() as conn:

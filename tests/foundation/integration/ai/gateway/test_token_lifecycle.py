@@ -63,22 +63,18 @@ async def test_issue_authorize_revoke_round_trip(repo: PostgresAgentTokenReposit
         now=_NOW,
     )
 
-    authorized = await authorize(repo, token_secret=issued.secret, scope=Scope.PROPOSE, now=_NOW)
+    authorized = await authorize(repo, token_secret=issued.secret, scope=Scope.PROPOSE)
     assert authorized.token_id == issued.token.token_id
     assert authorized.tenant_id == tenant_id
 
     await revoke_token(repo, tenant_id=tenant_id, token_id=issued.token.token_id, reason="test")
 
-    # revoked_at is stamped with the DB's wall-clock `now()`, which runs ahead
-    # of the module-level `_NOW` constant -- re-check against real "now" so
-    # `is_revoked()` (now >= revoked_at) actually observes the revocation.
+    # authorize() now reads its liveness clock from the same `get_by_hash`
+    # round trip as `revoked_at` (both DB-stamped), so this observes the
+    # revocation immediately regardless of any app/DB clock skew -- no
+    # `now=` to pass here anymore (see authorize.py / get_by_hash docstrings).
     with pytest.raises(TokenRevokedError):
-        await authorize(
-            repo,
-            token_secret=issued.secret,
-            scope=Scope.PROPOSE,
-            now=datetime.now(timezone.utc),
-        )
+        await authorize(repo, token_secret=issued.secret, scope=Scope.PROPOSE)
 
 
 # --- opaque 저장: 평문 secret이 DB에 절대 남지 않는다 ---
@@ -129,7 +125,7 @@ async def test_issue_token_rejects_empty_scope_request(repo: PostgresAgentTokenR
 
 async def test_authorize_rejects_unknown_secret(repo: PostgresAgentTokenRepository):
     with pytest.raises(TokenRevokedError):
-        await authorize(repo, token_secret="not-a-real-secret", scope=Scope.READ, now=_NOW)
+        await authorize(repo, token_secret="not-a-real-secret", scope=Scope.READ)
 
 
 # --- negative #3: 만료된 토큰은 거부 ---
@@ -148,7 +144,7 @@ async def test_authorize_rejects_expired_token(repo: PostgresAgentTokenRepositor
     )
 
     with pytest.raises(TokenExpiredError):
-        await authorize(repo, token_secret=issued.secret, scope=Scope.READ, now=_NOW)
+        await authorize(repo, token_secret=issued.secret, scope=Scope.READ)
 
 
 # --- negative #4: 부여되지 않은 스코프 요청은 거부(스코프 상승 없이 인가) ---
@@ -167,7 +163,7 @@ async def test_authorize_rejects_ungranted_scope(repo: PostgresAgentTokenReposit
     )
 
     with pytest.raises(ScopeDeniedError):
-        await authorize(repo, token_secret=issued.secret, scope=Scope.PAPER, now=_NOW)
+        await authorize(repo, token_secret=issued.secret, scope=Scope.PAPER)
 
 
 # --- 실패 주입: DB CHECK가 paper_only 불변조건을 애플리케이션 계층 우회에도 지킨다 ---
@@ -246,7 +242,7 @@ async def test_authorize_db_roundtrip_p95_within_budget(repo: PostgresAgentToken
     samples: list[float] = []
     for _ in range(30):
         started = time.perf_counter()
-        await authorize(repo, token_secret=issued.secret, scope=Scope.READ, now=_NOW)
+        await authorize(repo, token_secret=issued.secret, scope=Scope.READ)
         samples.append((time.perf_counter() - started) * 1000)
 
     p95_ms = _p95(samples)

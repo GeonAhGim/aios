@@ -17,7 +17,15 @@ class TrustRepository(Protocol):
 
     async def get_disclosure_by_purpose_and_revision(
         self, purpose: str, revision: int
-    ) -> Disclosure | None: ...
+    ) -> tuple[Disclosure, datetime] | None:
+        """Returns the disclosure alongside the DB server's own clock
+        (`clock_timestamp()`), read in the same round trip. The caller must
+        judge `disclosure.retired_at` against this server time, never
+        against a separately-captured application clock -- see
+        [[src/services/auth/lockout.py]]'s `register_failed_attempt`
+        docstring for why mixing app-clock and DB-clock reads around a
+        threshold comparison is a real (not theoretical) race."""
+        ...
 
     async def get_active_consent(self, tenant_id: UUID, purpose: str) -> Consent | None:
         """Return the currently ACTIVE consent for this tenant/purpose (at most one)."""

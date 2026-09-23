@@ -39,8 +39,6 @@ wiring, deferred: no leaf before AI-17 mounts this app anywhere).
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
-
 import asyncpg
 from fastapi import FastAPI, Header, HTTPException, Request, status
 
@@ -96,7 +94,6 @@ def require_scope(scope: Scope) -> ScopeDependency:
                 repo,
                 token_secret=x_aios_agent_token,
                 scope=scope,
-                now=datetime.now(timezone.utc),
             )
         except (TokenRevokedError, TokenExpiredError) as exc:
             raise HTTPException(status.HTTP_401_UNAUTHORIZED, f"AI_TOKEN_REVOKED: {exc}") from exc
