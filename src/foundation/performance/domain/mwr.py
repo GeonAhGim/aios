@@ -1,13 +1,16 @@
-"""금액가중수익률(MWR) — IRR을 이분법(bisection)으로 결정론적으로 푼다.
+"""Money-Weighted Rate of Return (MWR) — deterministically solves IRR via bisection.
 
 Spec: docs/specs/L4_strategy_portfolio_backtest_v1.0.md §2.6, methodology.py
 (`MWR_MAX_ITERATIONS=200`, `MWR_TOLERANCE=1e-10`).
 
-투자자 관점의 현금흐름열로 바꾼다 — 기간 시작의 `start_value`는 투자자가
-"넣은" 돈(유출), 기간 중 입금은 추가 유출, 출금은 유입, 기간 끝의
-`end_value`는 투자자가 "찾을 수 있는" 돈(유입)이다. 이 열의 순현재가치가
-0이 되는 할인율 r이 IRR이다. 시간축은 [0,1](기간 전체를 1로 정규화)로
-잡는다 — 연환산은 호출부(risk_metrics.py 소비자)의 몫이다.
+Converts to a cash-flow stream from the investor's perspective — the
+`start_value` at period start is money the investor "puts in" (outflow),
+deposits during the period are additional outflows, withdrawals are
+inflows, and the `end_value` at period end is money the investor
+"can withdraw" (inflow). The discount rate r that makes the net present
+value of this stream zero is the IRR. Time is normalised to [0, 1]
+(period length = 1); annualisation is the caller's responsibility
+(risk_metrics.py consumer).
 """
 from __future__ import annotations
 
@@ -50,7 +53,7 @@ def mwr(
     for cf in cashflows:
         elapsed = (cf.at - start).total_seconds()
         if elapsed < 0 or elapsed > total_seconds:
-            continue  # 기간 밖 현금흐름은 호출부 책임 — 방어적으로 무시
+            continue  # cash flows outside the period are the caller's responsibility — silently skip
         t = Decimal(elapsed) / Decimal(total_seconds)
         flows.append((t, -_signed(cf)))
     flows.append((Decimal(1), end_value))
@@ -62,7 +65,7 @@ def mwr(
     if f_high == 0:
         return high
     if (f_low > 0) == (f_high > 0):
-        return None  # 브래킷 안에서 부호가 안 바뀜 — 수렴 실패
+        return None  # sign does not change within the bracket — convergence failed
 
     for _ in range(MWR_MAX_ITERATIONS):
         mid = (low + high) / 2
@@ -73,4 +76,4 @@ def mwr(
             low, f_low = mid, f_mid
         else:
             high = mid
-    return None  # MWR_MAX_ITERATIONS 안에 수렴하지 못함
+    return None  # did not converge within MWR_MAX_ITERATIONS
