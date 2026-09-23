@@ -68,7 +68,7 @@ async def resolve_reconciliation(
         raise CrossTenantReconciliationAccessError(str(target_ref))
     if state.aggregate_status not in _RESOLVABLE_STATUSES:
         raise NotResolvableError(
-            f"{state.aggregate_status.value} 상태는 resolve 대상이 아닙니다."
+            f"{state.aggregate_status.value} status is not a resolve target."
         )
 
     updated = await repo.transition_state_status(
