@@ -130,6 +130,107 @@ def test_port_ratchet_allow_exempts_not_implemented_stub(tmp_path: Path) -> None
 
 
 # ---------------------------------------------------------------------------
+# 2b. port_protocol_unimplemented
+# ---------------------------------------------------------------------------
+
+_PROTOCOL_PORT_SRC = (
+    "from typing import Protocol\n\n"
+    "class WidgetRepository(Protocol):\n"
+    "    async def get(self) -> None: ...\n"
+    "    async def save(self) -> None: ...\n"
+)
+
+
+def test_protocol_port_flags_missing_method(tmp_path: Path) -> None:
+    _write(tmp_path, "src/ctx/ports/repository.py", _PROTOCOL_PORT_SRC)
+    _write(
+        tmp_path,
+        "src/ctx/adapters/postgres_repository.py",
+        "class PostgresWidgetRepository:\n"
+        "    async def get(self) -> None:\n        return None\n",
+    )
+    hits = cc.check_port_protocol_implementations(tmp_path)
+    assert hits == [("src/ctx/adapters/postgres_repository.py", 1)]
+
+
+def test_protocol_port_passes_when_implemented(tmp_path: Path) -> None:
+    _write(tmp_path, "src/ctx/ports/repository.py", _PROTOCOL_PORT_SRC)
+    _write(
+        tmp_path,
+        "src/ctx/adapters/postgres_repository.py",
+        "class PostgresWidgetRepository:\n"
+        "    async def get(self) -> None:\n        return None\n"
+        "    async def save(self) -> None:\n        return None\n",
+    )
+    assert cc.check_port_protocol_implementations(tmp_path) == []
+
+
+def test_protocol_port_flags_not_implemented_stub_without_ratchet_allow(tmp_path: Path) -> None:
+    _write(tmp_path, "src/ctx/ports/repository.py", _PROTOCOL_PORT_SRC)
+    _write(
+        tmp_path,
+        "src/ctx/adapters/postgres_repository.py",
+        "class PostgresWidgetRepository:\n"
+        "    async def get(self) -> None:\n        return None\n"
+        "    async def save(self) -> None:\n        raise NotImplementedError\n",
+    )
+    hits = cc.check_port_protocol_implementations(tmp_path)
+    assert len(hits) == 1
+
+
+def test_protocol_port_ratchet_allow_exempts_not_implemented_stub(tmp_path: Path) -> None:
+    _write(tmp_path, "src/ctx/ports/repository.py", _PROTOCOL_PORT_SRC)
+    _write(
+        tmp_path,
+        "src/ctx/adapters/postgres_repository.py",
+        "# ratchet-allow: fail-closed stub, intentional\n"
+        "class PostgresWidgetRepository:\n"
+        "    async def get(self) -> None:\n        return None\n"
+        "    async def save(self) -> None:\n        raise NotImplementedError\n",
+    )
+    assert cc.check_port_protocol_implementations(tmp_path) == []
+
+
+def test_protocol_port_resolves_local_mixin_inheritance(tmp_path: Path) -> None:
+    """task-1723 P1-D 스타일 분할 -- adapter가 같은 adapters/ 컨텍스트의
+    mixin에서 메서드를 상속받으면 과탐(false positive)하지 않는다."""
+    _write(tmp_path, "src/ctx/ports/repository.py", _PROTOCOL_PORT_SRC)
+    _write(
+        tmp_path,
+        "src/ctx/adapters/save_mixin.py",
+        "class _SaveMixin:\n    async def save(self) -> None:\n        return None\n",
+    )
+    _write(
+        tmp_path,
+        "src/ctx/adapters/postgres_repository.py",
+        "from src.ctx.adapters.save_mixin import _SaveMixin\n\n"
+        "class PostgresWidgetRepository(_SaveMixin):\n"
+        "    async def get(self) -> None:\n        return None\n",
+    )
+    assert cc.check_port_protocol_implementations(tmp_path) == []
+
+
+def test_protocol_port_ignores_adapter_in_unrelated_bounded_context(tmp_path: Path) -> None:
+    _write(tmp_path, "src/ctx_a/ports/repository.py", _PROTOCOL_PORT_SRC)
+    _write(
+        tmp_path,
+        "src/ctx_b/adapters/postgres_repository.py",
+        "class PostgresWidgetRepository:\n    pass\n",
+    )
+    assert cc.check_port_protocol_implementations(tmp_path) == []
+
+
+def test_protocol_port_ignores_adapter_class_name_not_matching_any_port(tmp_path: Path) -> None:
+    _write(tmp_path, "src/ctx/ports/repository.py", _PROTOCOL_PORT_SRC)
+    _write(
+        tmp_path,
+        "src/ctx/adapters/unrelated.py",
+        "class SomethingElseEntirely:\n    pass\n",
+    )
+    assert cc.check_port_protocol_implementations(tmp_path) == []
+
+
+# ---------------------------------------------------------------------------
 # 3. env_key_undocumented
 # ---------------------------------------------------------------------------
 

@@ -7,6 +7,10 @@
   1. router_unregistered       -- src/api/routers/*의 APIRouter가 앱에 include 안 됨
   2. port_method_unimplemented -- ABC 포트 메서드가 서브클래스에 없거나
                                    raise NotImplementedError인데 ratchet-allow 없음
+  2b. port_protocol_unimplemented -- 같은 컨텍스트(ports/-adapters/ 형제 디렉터리)의
+                                   Protocol 포트 메서드가, 이름이 그 Protocol로 끝나는
+                                   adapters/ 클래스에 없거나 raise NotImplementedError인데
+                                   ratchet-allow 없음(task-3724, CONSIST-1b)
   3. env_key_undocumented      -- os.environ 접근 키가 .env.example에 없음
   4. feature_flag_undocumented -- flag_enabled(...) 이름이 .env.example에 없음
   5. event_type_unconsumed     -- publish()된 topic에 subscribe() 소비자가 없음
@@ -357,6 +361,147 @@ def check_port_implementations(root: Path) -> list[Hit]:
                         if text is None:
                             text = path.read_text(encoding="utf-8", errors="replace")
                         if _ratchet_allow_reason(text) is None:
+                            hits.append((rel, impl.lineno))
+    return hits
+
+
+# ---------------------------------------------------------------------------
+# 2b. port_protocol_unimplemented
+# ---------------------------------------------------------------------------
+
+
+def _base_type_name(base: ast.expr) -> str | None:
+    if isinstance(base, ast.Subscript):
+        return _base_type_name(base.value)
+    return _callee_name(base)
+
+
+def _protocol_methods_of(node: ast.ClassDef) -> frozenset[str]:
+    return frozenset(
+        item.name
+        for item in node.body
+        if isinstance(item, ast.FunctionDef | ast.AsyncFunctionDef)
+        and not item.name.startswith("_")
+    )
+
+
+def _collect_protocol_ports(files: list[Path]) -> dict[str, frozenset[str]]:
+    ports: dict[str, frozenset[str]] = {}
+    for path in files:
+        tree = _safe_parse(path)
+        if tree is None:
+            continue
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.ClassDef):
+                continue
+            base_names = {_base_type_name(b) for b in node.bases}
+            if "Protocol" not in base_names:
+                continue
+            methods = _protocol_methods_of(node)
+            if methods:
+                ports[node.name] = methods
+    return ports
+
+
+def _ports_adapters_pairs(root: Path) -> list[tuple[Path, Path]]:
+    """같은 bounded context의 `ports/`-`adapters/` 형제 디렉터리 쌍만 대조한다
+    (task-3724 설계: 컨텍스트 밖 클래스는 대조하지 않는다)."""
+    src_dir = root / "src"
+    if not src_dir.is_dir():
+        return []
+    pairs: list[tuple[Path, Path]] = []
+    for ports_dir in sorted(src_dir.rglob("ports")):
+        rel_parts = ports_dir.relative_to(root).parts
+        if not ports_dir.is_dir() or _EXCLUDE_DIR_NAMES & set(rel_parts):
+            continue
+        adapters_dir = ports_dir.parent / "adapters"
+        if adapters_dir.is_dir():
+            pairs.append((ports_dir, adapters_dir))
+    return pairs
+
+
+_Impl = tuple[ast.FunctionDef | ast.AsyncFunctionDef, Path]
+_AdapterClass = tuple[ast.ClassDef, Path, set[str]]  # (node, path, base_names)
+
+
+def _own_methods_of(node: ast.ClassDef, path: Path) -> dict[str, _Impl]:
+    return {
+        item.name: (item, path)
+        for item in node.body
+        if isinstance(item, ast.FunctionDef | ast.AsyncFunctionDef)
+    }
+
+
+def _resolve_local_methods(
+    class_name: str,
+    local_classes: dict[str, _AdapterClass],
+    seen: set[str],
+) -> dict[str, _Impl]:
+    """같은 adapters/ 컨텍스트에서 로컬로 정의된 mixin 베이스까지 병합한 메서드
+    집합(예: P1-D 300줄 분할로 postgres_snapshot_mixin.py에 옮겨진 메서드들,
+    task-1723)을 반환한다. 자기 자신 정의가 베이스보다 우선한다."""
+    if class_name in seen or class_name not in local_classes:
+        return {}
+    seen.add(class_name)
+    node, path, base_names = local_classes[class_name]
+    merged: dict[str, _Impl] = {}
+    for base_name in base_names:
+        merged.update(_resolve_local_methods(base_name, local_classes, seen))
+    merged.update(_own_methods_of(node, path))
+    return merged
+
+
+def check_port_protocol_implementations(root: Path) -> list[Hit]:
+    hits: list[Hit] = []
+    for ports_dir, adapters_dir in _ports_adapters_pairs(root):
+        port_files = [p for p in sorted(ports_dir.rglob("*.py")) if p.name != "__init__.py"]
+        protocols = _collect_protocol_ports(port_files)
+        if not protocols:
+            continue
+        # 긴 이름부터 매칭해 접미사 부분 충돌(예: "...Source" vs "...MarkPriceSource")을 피한다.
+        protocol_names = sorted(protocols, key=len, reverse=True)
+        adapter_files = [
+            p for p in sorted(adapters_dir.rglob("*.py")) if p.name != "__init__.py"
+        ]
+        adapter_texts: dict[Path, str] = {}
+        local_classes: dict[str, _AdapterClass] = {}
+        adapter_trees: dict[Path, ast.Module] = {}
+        for path in adapter_files:
+            tree = _safe_parse(path)
+            if tree is None:
+                continue
+            adapter_trees[path] = tree
+            for node in ast.walk(tree):
+                if not isinstance(node, ast.ClassDef):
+                    continue
+                base_names: set[str] = {
+                    name for b in node.bases if (name := _base_type_name(b)) is not None
+                }
+                local_classes.setdefault(node.name, (node, path, base_names))
+        for path, tree in adapter_trees.items():
+            rel = path.relative_to(root).as_posix()
+            for node in ast.walk(tree):
+                if not isinstance(node, ast.ClassDef):
+                    continue
+                matched_protocol = next(
+                    (name for name in protocol_names if node.name.endswith(name)),
+                    None,
+                )
+                if matched_protocol is None:
+                    continue
+                by_name = _resolve_local_methods(node.name, local_classes, set())
+                for method_name in sorted(protocols[matched_protocol]):
+                    found = by_name.get(method_name)
+                    if found is None:
+                        hits.append((rel, node.lineno))
+                        continue
+                    impl, impl_path = found
+                    if _is_raise_not_implemented_body(impl):
+                        if impl_path not in adapter_texts:
+                            adapter_texts[impl_path] = impl_path.read_text(
+                                encoding="utf-8", errors="replace"
+                            )
+                        if _ratchet_allow_reason(adapter_texts[impl_path]) is None:
                             hits.append((rel, impl.lineno))
     return hits
 
@@ -1010,6 +1155,7 @@ def check_spec_template(root: Path) -> list[Hit]:
 METRICS: dict[str, Callable[[Path], list[Hit]]] = {
     "router_unregistered": check_router_wiring,
     "port_method_unimplemented": check_port_implementations,
+    "port_protocol_unimplemented": check_port_protocol_implementations,
     "env_key_undocumented": check_env_keys,
     "feature_flag_undocumented": check_feature_flags,
     "event_type_unconsumed": check_event_consumers,
