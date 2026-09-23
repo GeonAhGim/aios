@@ -1,6 +1,6 @@
 """21.1 — Device push token registration (DeviceTokenService).
 
-Spec: 기능설계문서_v1.20.md#FD-21.1, FD-17.1
+Spec: functional_design_document_v1.20.md#FD-21.1, FD-17.1
 
 FD-17.1 Gateway PUSH channel dispatch function (SendChannelFn; actual
 APNs/FCM calls are out of this session scope — still externally injected
