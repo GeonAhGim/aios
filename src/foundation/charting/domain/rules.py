@@ -1,12 +1,12 @@
-"""Drawing document (pure) validation — Python mirror of CH-4 `serialize.ts`(8bd4077)
-`fromDrawingsDocument`/`decodeDrawing`.
+"""Drawing document (pure) validation — Python mirror of CH-4 `serialize.ts`
+(8bd4077) `fromDrawingsDocument`/`decodeDrawing`.
 
 Spec: docs/specs/L4_analytics_authoring_backtest_marketplace_v1.0.md §2.2,
-§9.6 CH-5 "Layout/drawings in 1:1 with CH-4 serialize format".
+§9.6 CH-5 "layout/drawing CH-4 serialize format 1:1".
 
-fail-closed — unknown version / missing fields / unknown fields / type mismatches all
-raise `DrawingValidationError`. Never silently drop or coerce types like TS does.
-Contains only pure functions with no I/O (adapter writes the result directly to jsonb)."""
+Fail-closed — unknown version, missing fields, unknown fields, type mismatch
+all raise `DrawingValidationError`. Never silently drop or coerce like the TS
+side does. Contains only pure functions (adapter writes results directly to jsonb)."""
 from __future__ import annotations
 
 from typing import Any, NoReturn
@@ -26,10 +26,10 @@ _DOC_FIELDS = frozenset({"schema_version", "drawings"})
 
 
 class DrawingValidationError(Exception):
-    """Surface all CH-4 `DrawingError` reasons (schema mismatch, missing fields,
-    unknown fields, type mismatch, duplicate id) as a single exception — the router
-    maps it to VALIDATION_INVALID_FIELD(400) (reusing existing code without a new
-    taxonomy, task-1557 decision)."""
+    """Surface the same reasons as CH-4 `DrawingError` (schema mismatch,
+    missing field, unknown field, type mismatch, duplicate id) as a single
+    exception — the router maps to VALIDATION_INVALID_FIELD(400) (reuses
+    existing error code without new taxonomy, task-1557 decision)."""
 
 
 def _fail(slot: str, detail: str) -> NoReturn:
@@ -142,10 +142,10 @@ def _validate_drawing(index: int, value: Any) -> dict[str, Any]:
 
 
 def validate_drawings_document(document: Any) -> tuple[int, tuple[dict[str, Any], ...]]:
-    """Validate a raw `{schema_version, drawings}` dict (already JSON-parsed) and
-    return `(schema_version, drawings)`. Fails in the same order as CH-4 `fromDrawingsDocument`:
-    object check → schema_version presence/value → unknown fields → drawings array check →
-    each drawing → duplicate id within document."""
+    """Validate a raw `{schema_version, drawings}` dict (already JSON-parsed)
+    and return `(schema_version, drawings)`. Fails in the same order as
+    CH-4 `fromDrawingsDocument`: object check → schema_version present/valid
+    → unknown fields → drawings array → each drawing → duplicate id check."""
     doc = _require_object("<document>", document)
     if "schema_version" not in doc:
         _fail("<document>.schema_version", "is missing")

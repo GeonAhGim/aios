@@ -55,7 +55,7 @@ async def _check_db_pool(pool: asyncpg.Pool) -> CheckResult:
         # PLT-02 reduction: do not include root cause (DSN, driver exception message)
         # in the response. The root cause is already logged by the asyncpg/connection
         # layer for tracing.
-        return CheckResult(ok=False, detail="db_pool connection failed")
+        return CheckResult(ok=False, detail="db_pool 연결 실패")
     return CheckResult(ok=True)
 
 
@@ -64,7 +64,7 @@ def _check_loops() -> dict[str, CheckResult]:
     checks: dict[str, CheckResult] = {}
     for name, loop_status in health.snapshot().items():
         if loop_status.interval_sec <= 0:
-            checks[f"loop:{name}"] = CheckResult(ok=True, detail="interval not set — decision deferred")
+            checks[f"loop:{name}"] = CheckResult(ok=True, detail="interval 미설정 — 판정 보류")
             continue
         threshold = 3 * loop_status.interval_sec
         observed = health.last_success_age(name)
