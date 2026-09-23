@@ -291,6 +291,10 @@ def run_drill(
             [
                 pg_ctl_bin,
                 "start",
+                # CTO 2026-09-23: PostgreSQL 10+는 start의 기본이 -w(서버 준비까지 대기)라
+                # -w를 "안 쓰는" 것만으로는 비동기가 아니다 — archive recovery 중 연결 거부로
+                # 30초 타임아웃(rc=124) 재현. -W로 명시해 즉시 반환시킨다.
+                "-W",
                 "-D",
                 str(restore_data_dir),
                 "-o",
