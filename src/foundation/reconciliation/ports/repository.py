@@ -1,4 +1,8 @@
-"""Reconciliation & Resilience repository port. domain is aware of only this Protocol; actual implementation (adapters/) is unknown (§4, page 71)."""
+"""Reconciliation & Resilience repository port.
+
+domain is aware of only this Protocol; actual implementation (adapters/) is
+unknown (§4, page 71).
+"""
 from __future__ import annotations
 
 from typing import Protocol
@@ -16,7 +20,9 @@ class ReconciliationRepository(Protocol):
     async def get_run_by_input_hash(
         self, target_ref: UUID, input_hash: str
     ) -> ReconciliationRun | None:
-        """REC-004/006 — For the same target+input, return this run instead of recomputing; implementation must populate items."""
+        """REC-004/006 — For the same target+input, return this run instead of
+        recomputing; implementation must populate items.
+        """
         ...
 
     async def insert_run_with_items(
@@ -30,7 +36,9 @@ class ReconciliationRepository(Protocol):
     async def list_states(self, tenant_id: UUID) -> tuple[ReconciliationState, ...]: ...
 
     async def upsert_state(self, state: ReconciliationState) -> ReconciliationState:
-        """Insert on first creation; perform conditional update if exists (implementation uses revision-conditional UPDATE per standard-105)."""
+        """Insert on first creation; perform conditional update if exists
+        (implementation uses revision-conditional UPDATE per standard-105).
+        """
         ...
 
     async def transition_state_status(

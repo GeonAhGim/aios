@@ -18,7 +18,8 @@ from src.foundation.evidence.ports.repository import AuditEventRepository
 
 
 def event_to_view(event: AuditEvent) -> AuditEventView:
-    assert event.occurred_at is not None  # Events from DB are always NOT NULL (guaranteed by migration)
+    # Events from DB are always NOT NULL (guaranteed by migration)
+    assert event.occurred_at is not None
     return AuditEventView(
         id=event.id,
         tenant_id=event.tenant_id,
