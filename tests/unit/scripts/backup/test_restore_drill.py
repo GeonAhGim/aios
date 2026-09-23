@@ -177,7 +177,7 @@ def test_start_postgres_failure_captures_diagnostic_logs_and_preserves_them(tmp_
 
     def run_cmd(cmd, cwd, env, timeout):
         if cmd[0] == "pg_ctl" and cmd[1] == "start":
-            data_dir = Path(cmd[3])
+            data_dir = Path(cmd[cmd.index("-D") + 1])
             log_path = Path(cmd[-1])
             log_path.write_text(
                 "FATAL: could not bind IPv4 address: Address already in use", encoding="utf-8"
