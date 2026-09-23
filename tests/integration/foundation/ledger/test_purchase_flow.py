@@ -17,17 +17,21 @@ from uuid import UUID, uuid4
 
 import pytest
 
+from scripts import replay_verify
+from src.core.db.conditional_write import ConcurrencyConflictError
 from src.foundation.evidence.adapters.postgres_repository import PostgresAuditEventRepository
 from src.foundation.ledger.adapters.postgres_balance_repository import PostgresBalanceRepository
 from src.foundation.ledger.adapters.postgres_hold_repository import PostgresHoldRepository
 from src.foundation.ledger.adapters.postgres_journal_repository import PostgresJournalRepository
 from src.foundation.ledger.application.purchase_flow import (
+    CaptureResult,
     HoldConflictError,
     capture_hold,
     place_hold,
     release_hold,
 )
 from src.foundation.ledger.contracts.v1 import HoldState, HoldView, UserSub
+from src.foundation.ledger.domain.balance_rules import InsufficientAvailableError
 from src.foundation.ledger.domain.chart_of_accounts import user_account as ua
 from src.foundation.ledger.domain.hold_state import HoldExpiredError, IllegalHoldTransitionError
 from src.services.listing_service import ListingService
@@ -603,3 +607,150 @@ async def test_gate_red_conflicting_hold_rolls_back_whole_transaction(pool, port
         )
     assert leaked_hold == 0, "게이트 위반 트랜잭션의 앞선 place_hold가 커밋되어 남았습니다"
     assert await _available(pool, buyer) == balance_after_first  # 추가 차감 없음(부분 커밋 없음)
+
+
+async def test_capture_hold_concurrent_same_hold_only_one_settles(pool, ports):
+    """DEEPEN(task-4920): D3 실패주입 + INVARIANTS.md I-10("구현됨 != 작동함")
+    적대적 교차검증 — 지금까지의 negative 테스트는 전부 *순차* 재현(먼저
+    캡처를 끝낸 뒤 그 결과를 다시 캡처)이라 `capture_hold`의 가드가 실제
+    동시 DB 경합에서도 버티는지는 증명하지 않는다. 같은 PENDING 홀드를 5개
+    트랜잭션이 asyncio.gather로 동시에 capture하면, `post_entry`(LC-9)의
+    `balances.get_for_update` 행잠금이 이들을 buyer `HELD` 계정에서
+    직렬화한다 — 두 번째부터는 이미 0으로 줄어든 `HELD` 잔액을 같은 금액만큼
+    또 줄이려다 `allow_negative=False`(LIABILITY, chart_of_accounts.py) 가드에
+    걸려 `InsufficientAvailableError`로 거부되거나, 그 잠금 경쟁을 통과해도
+    `holds.transition`의 105번 표준 조건부 UPDATE(expected_state=PENDING)가
+    `ConcurrencyConflictError`로 거부한다 — 둘 중 어느 경로든 실제 지급이
+    두 번 나가는 걸 막는 fail-closed다. 이 가드가 배선만 되고 실제로
+    작동하지 않는다면(I-10) 같은 대금이 판매자에게 중복 정산되는 실물 자금
+    이중지급 사고가 된다."""
+    buyer = await create_test_user(pool)
+    seller = await create_test_user(pool)
+    price = Decimal("50.00")
+    await _seed_available(pool, buyer, price)
+    reference = f"test-concurrent-capture:{uuid4()}"
+    expires_at = _clock() + timedelta(minutes=15)
+
+    async with pool.acquire() as conn, conn.transaction():
+        hold = await place_hold(
+            conn,
+            buyer_id=buyer,
+            amount=price,
+            purpose=_TEST_PURPOSE,
+            reference=reference,
+            expires_at=expires_at,
+            actor_subject_id=buyer,
+            trace_id=uuid4(),
+            journal=ports.journal,
+            balances=ports.balances,
+            audit=ports.audit,
+            clock=ports.clock,
+            holds=ports.holds,
+        )
+
+    async def _attempt_capture() -> CaptureResult:
+        async with pool.acquire() as conn, conn.transaction():
+            return await capture_hold(
+                conn,
+                hold,
+                seller_id=seller,
+                commission_rate=Decimal("0.15"),
+                actor_subject_id=buyer,
+                trace_id=uuid4(),
+                now=_clock(),
+                journal=ports.journal,
+                balances=ports.balances,
+                audit=ports.audit,
+                clock=ports.clock,
+                holds=ports.holds,
+            )
+
+    results = await asyncio.gather(*[_attempt_capture() for _ in range(5)], return_exceptions=True)
+    successes = [r for r in results if isinstance(r, CaptureResult)]
+    rejections = [
+        r for r in results if isinstance(r, (ConcurrencyConflictError, InsufficientAvailableError))
+    ]
+    unexpected = [
+        r
+        for r in results
+        if not isinstance(r, (CaptureResult, ConcurrencyConflictError, InsufficientAvailableError))
+    ]
+    assert unexpected == [], f"예상 밖 예외/결과가 나왔습니다: {unexpected!r}"
+    assert len(successes) == 1, f"정확히 1건만 정산돼야 합니다: {results!r}"
+    assert len(rejections) == 4
+
+    async with pool.acquire() as conn:
+        hold_row = await conn.fetchrow(
+            "SELECT state, settled_entry_id FROM ledger_hold WHERE hold_id = $1", hold.hold_id
+        )
+        capture_entry_count = await conn.fetchval(
+            "SELECT COUNT(*) FROM ledger_journal_entry WHERE event_ref = $1",
+            f"hold:{hold.hold_id}:capture",
+        )
+        seller_payout = await conn.fetchval(
+            "SELECT lb.balance FROM ledger_balance lb JOIN ledger_account la "
+            "ON la.account_id = lb.account_id WHERE la.account_code = $1",
+            ua(seller, UserSub.PENDING_PAYOUT),
+        )
+    assert hold_row["state"] == "CAPTURED"
+    assert capture_entry_count == 1  # 5번 동시 시도 중 정산 분개는 정확히 1건 -- 이중 정산 없음
+    assert seller_payout == Decimal("42.50")  # 85% 딱 한 번 -- 두 번 들어갔다면 85.00일 것
+
+
+async def test_purchase_flow_replays_byte_identical(pool, ports):
+    """DEEPEN(task-4920): D3 게이트-적색 대응 축 -- `scripts/replay_verify.py`
+    (FA-15)가 이 리프의 분개도 실제로 감시 대상에 넣는지 증명한다.
+    `place_hold`+`capture_hold`가 만든 두 분개(HOLD_PLACED, HOLD_CAPTURED)로
+    바뀐 계정들이 `replay_verify.verify()`의 시간창(§ window)에 잡혀 현재
+    `ledger_balance` 행과 바이트 단위로 일치해야 한다 -- 불일치가 있으면
+    이 스위트가 새로 만든 분개 경로 자체가 FA-15 게이트를 RED로 만든다는
+    뜻이라 그 자리에서 잡아야 한다(`tests/integration/eventstore/
+    test_replay_verify.py`가 이미 이 체커 자체의 fail-closed 배선을
+    증명하므로, 여기서는 "이 리프의 분개가 그 체커에 걸리는가"만 본다)."""
+    buyer = await create_test_user(pool)
+    seller = await create_test_user(pool)
+    price = Decimal("40.00")
+    await _seed_available(pool, buyer, price)
+    reference = f"test-replay-verify:{uuid4()}"
+
+    async with pool.acquire() as conn, conn.transaction():
+        hold = await place_hold(
+            conn,
+            buyer_id=buyer,
+            amount=price,
+            purpose=_TEST_PURPOSE,
+            reference=reference,
+            expires_at=_clock() + timedelta(minutes=15),
+            actor_subject_id=buyer,
+            trace_id=uuid4(),
+            journal=ports.journal,
+            balances=ports.balances,
+            audit=ports.audit,
+            clock=ports.clock,
+            holds=ports.holds,
+        )
+        await capture_hold(
+            conn,
+            hold,
+            seller_id=seller,
+            commission_rate=Decimal("0.15"),
+            actor_subject_id=buyer,
+            trace_id=uuid4(),
+            now=_clock(),
+            journal=ports.journal,
+            balances=ports.balances,
+            audit=ports.audit,
+            clock=ports.clock,
+            holds=ports.holds,
+        )
+
+    report = await replay_verify.verify(pool, as_of=_clock() + timedelta(minutes=1), hours=1)
+
+    # buyer AVAILABLE, buyer HELD, seller PENDING_PAYOUT, PLATFORM:COMMISSION_REVENUE
+    # 최소 4개 계정이 이 창에서 감시 대상에 잡혀야 한다(안 잡히면 아래 report.ok는
+    # 그냥 "본 적 없어서 통과"인 거짓 양성이 된다).
+    assert report.streams_checked >= 4, (
+        f"이 리프가 건드린 계정이 replay_verify 감시창에 안 잡혔습니다(streams_checked="
+        f"{report.streams_checked})"
+    )
+    assert report.ok, f"replay_verify 불일치: {report.mismatches!r}"
