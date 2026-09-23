@@ -37,8 +37,42 @@ def _dotted_module_name(path: Path, root: Path) -> str:
     return ".".join(path.relative_to(root).with_suffix("").parts)
 
 
-def _collect_wired_router_modules(root: Path) -> set[str]:
+def _alias_module_map(tree: ast.Module) -> dict[str, str]:
+    alias_to_module: dict[str, str] = {}
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ImportFrom) and node.module and node.level == 0:
+            for alias in node.names:
+                alias_to_module[alias.asname or alias.name] = f"{node.module}.{alias.name}"
+    return alias_to_module
+
+
+def _include_router_dotted(node: ast.Call, alias_to_module: dict[str, str]) -> str | None:
+    if not (
+        isinstance(node.func, ast.Attribute) and node.func.attr == "include_router" and node.args
+    ):
+        return None
+    first = node.args[0]
+    if not (
+        isinstance(first, ast.Attribute)
+        and first.attr == "router"
+        and isinstance(first.value, ast.Name)
+    ):
+        return None
+    return alias_to_module.get(first.value.id)
+
+
+def _wired_modules_in_file(tree: ast.Module) -> set[str]:
+    alias_to_module = _alias_module_map(tree)
     wired: set[str] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Call):
+            dotted = _include_router_dotted(node, alias_to_module)
+            if dotted:
+                wired.add(dotted)
+    return wired
+
+
+def _scan_paths_for_wiring(root: Path) -> list[Path]:
     scan_paths: list[Path] = []
     main_py = root / "src" / "main.py"
     if main_py.exists():
@@ -46,31 +80,16 @@ def _collect_wired_router_modules(root: Path) -> set[str]:
     api_dir = root / "src" / "api"
     if api_dir.is_dir():
         scan_paths.extend(p for p in api_dir.rglob("*.py") if "__pycache__" not in p.parts)
-    for path in scan_paths:
+    return scan_paths
+
+
+def _collect_wired_router_modules(root: Path) -> set[str]:
+    wired: set[str] = set()
+    for path in _scan_paths_for_wiring(root):
         tree = _safe_parse(path)
         if tree is None:
             continue
-        alias_to_module: dict[str, str] = {}
-        for node in ast.walk(tree):
-            if isinstance(node, ast.ImportFrom) and node.module and node.level == 0:
-                for alias in node.names:
-                    alias_to_module[alias.asname or alias.name] = f"{node.module}.{alias.name}"
-        for node in ast.walk(tree):
-            if (
-                isinstance(node, ast.Call)
-                and isinstance(node.func, ast.Attribute)
-                and node.func.attr == "include_router"
-                and node.args
-            ):
-                first = node.args[0]
-                if (
-                    isinstance(first, ast.Attribute)
-                    and first.attr == "router"
-                    and isinstance(first.value, ast.Name)
-                ):
-                    dotted = alias_to_module.get(first.value.id)
-                    if dotted:
-                        wired.add(dotted)
+        wired |= _wired_modules_in_file(tree)
     return wired
 
 
@@ -159,6 +178,52 @@ def _collect_abc_ports(files: list[Path]) -> dict[str, frozenset[str]]:
     return ports
 
 
+def _matched_port_method_sets(
+    node: ast.ClassDef, ports: dict[str, frozenset[str]]
+) -> list[frozenset[str]]:
+    base_names = {_callee_name(b) for b in node.bases}
+    return [ports[n] for n in base_names if n in ports]
+
+
+def _method_impl_hits(
+    node: ast.ClassDef,
+    method_names: frozenset[str],
+    by_name: dict[str, ast.FunctionDef | ast.AsyncFunctionDef],
+    rel: str,
+    path: Path,
+) -> list[Hit]:
+    hits: list[Hit] = []
+    text: str | None = None
+    for method_name in sorted(method_names):
+        impl = by_name.get(method_name)
+        if impl is None:
+            hits.append((rel, node.lineno))
+            continue
+        if _is_raise_not_implemented_body(impl):
+            if text is None:
+                text = path.read_text(encoding="utf-8", errors="replace")
+            if _ratchet_allow_reason(text) is None:
+                hits.append((rel, impl.lineno))
+    return hits
+
+
+def _port_class_hits(
+    node: ast.ClassDef, ports: dict[str, frozenset[str]], rel: str, path: Path
+) -> list[Hit]:
+    matched = _matched_port_method_sets(node, ports)
+    if not matched or _abstract_methods_of(node):
+        return []  # 대조 대상이 없거나 아직 abstract인 중간 계층 -- 위반 아님
+    by_name = {
+        item.name: item
+        for item in node.body
+        if isinstance(item, ast.FunctionDef | ast.AsyncFunctionDef)
+    }
+    hits: list[Hit] = []
+    for method_names in matched:
+        hits.extend(_method_impl_hits(node, method_names, by_name, rel, path))
+    return hits
+
+
 def check_port_implementations(root: Path) -> list[Hit]:
     files = _iter_py_files(root, "src")
     ports = _collect_abc_ports(files)
@@ -170,32 +235,9 @@ def check_port_implementations(root: Path) -> list[Hit]:
         if tree is None:
             continue
         rel = path.relative_to(root).as_posix()
-        text: str | None = None
         for node in ast.walk(tree):
-            if not isinstance(node, ast.ClassDef):
-                continue
-            base_names = {_callee_name(b) for b in node.bases}
-            matched = [ports[n] for n in base_names if n in ports]
-            if not matched:
-                continue
-            if _abstract_methods_of(node):
-                continue  # 아직 abstract인 중간 계층 -- 위반 아님
-            by_name = {
-                item.name: item
-                for item in node.body
-                if isinstance(item, ast.FunctionDef | ast.AsyncFunctionDef)
-            }
-            for method_names in matched:
-                for method_name in sorted(method_names):
-                    impl = by_name.get(method_name)
-                    if impl is None:
-                        hits.append((rel, node.lineno))
-                        continue
-                    if _is_raise_not_implemented_body(impl):
-                        if text is None:
-                            text = path.read_text(encoding="utf-8", errors="replace")
-                        if _ratchet_allow_reason(text) is None:
-                            hits.append((rel, impl.lineno))
+            if isinstance(node, ast.ClassDef):
+                hits.extend(_port_class_hits(node, ports, rel, path))
     return hits
 
 

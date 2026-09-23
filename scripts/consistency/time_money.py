@@ -129,6 +129,38 @@ def _is_assembly_expr(node: ast.expr) -> bool:
     )
 
 
+def _assign_target_value(node: ast.AST) -> tuple[list[ast.expr], ast.expr | None, int]:
+    if isinstance(node, ast.Assign):
+        return list(node.targets), node.value, node.lineno
+    if isinstance(node, ast.AnnAssign) and node.value is not None:
+        return [node.target], node.value, node.lineno
+    return [], None, 0
+
+
+def _assign_assembly_matches(node: ast.AST, target_names: frozenset[str]) -> list[tuple[str, int]]:
+    targets, value, lineno = _assign_target_value(node)
+    if value is None or not _is_assembly_expr(value):
+        return []
+    return [(t.id, lineno) for t in targets if isinstance(t, ast.Name) and t.id in target_names]
+
+
+def _call_kw_assembly_matches(
+    node: ast.Call, target_names: frozenset[str]
+) -> list[tuple[str, int]]:
+    return [
+        (kw.arg, kw.value.lineno)
+        for kw in node.keywords
+        if kw.arg in target_names and _is_assembly_expr(kw.value)
+    ]
+
+
+def _assembly_matches(node: ast.AST, target_names: frozenset[str]) -> list[tuple[str, int]]:
+    matches = _assign_assembly_matches(node, target_names)
+    if isinstance(node, ast.Call):
+        matches = [*matches, *_call_kw_assembly_matches(node, target_names)]
+    return matches
+
+
 def check_symbol_id_assembly(root: Path) -> list[Hit]:
     hits: list[Hit] = []
     for path in _iter_py_files(root, "src"):
@@ -140,21 +172,8 @@ def check_symbol_id_assembly(root: Path) -> list[Hit]:
             continue
         rel = path.relative_to(root).as_posix()
         for node in ast.walk(tree):
-            targets: list[ast.expr] = []
-            value: ast.expr | None = None
-            lineno = 0
-            if isinstance(node, ast.Assign):
-                targets, value, lineno = node.targets, node.value, node.lineno
-            elif isinstance(node, ast.AnnAssign) and node.value is not None:
-                targets, value, lineno = [node.target], node.value, node.lineno
-            if value is not None and _is_assembly_expr(value):
-                for target in targets:
-                    if isinstance(target, ast.Name) and target.id in _ASSEMBLY_TARGET_NAMES:
-                        hits.append((rel, lineno))
-            if isinstance(node, ast.Call):
-                for kw in node.keywords:
-                    if kw.arg in _ASSEMBLY_TARGET_NAMES and _is_assembly_expr(kw.value):
-                        hits.append((rel, kw.value.lineno))
+            for _name, lineno in _assembly_matches(node, _ASSEMBLY_TARGET_NAMES):
+                hits.append((rel, lineno))
     return hits
 
 
@@ -195,23 +214,9 @@ def check_authority_duplication(root: Path) -> list[Hit]:
             continue
         rel = path.relative_to(root).as_posix()
         for node in ast.walk(tree):
-            targets: list[ast.expr] = []
-            value: ast.expr | None = None
-            lineno = 0
-            if isinstance(node, ast.Assign):
-                targets, value, lineno = node.targets, node.value, node.lineno
-            elif isinstance(node, ast.AnnAssign) and node.value is not None:
-                targets, value, lineno = [node.target], node.value, node.lineno
-            if value is not None and _is_assembly_expr(value):
-                for target in targets:
-                    if isinstance(target, ast.Name) and target.id in _AUTHORITY_TARGET_NAMES:
-                        key = (context, target.id)
-                        by_context_target.setdefault(key, []).append((rel, lineno))
-            if isinstance(node, ast.Call):
-                for kw in node.keywords:
-                    if kw.arg in _AUTHORITY_TARGET_NAMES and _is_assembly_expr(kw.value):
-                        key = (context, kw.arg)
-                        by_context_target.setdefault(key, []).append((rel, kw.value.lineno))
+            for name, lineno in _assembly_matches(node, _AUTHORITY_TARGET_NAMES):
+                key = (context, name)
+                by_context_target.setdefault(key, []).append((rel, lineno))
 
     hits: list[Hit] = []
     for sites in by_context_target.values():

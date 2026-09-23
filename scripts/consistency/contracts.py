@@ -153,6 +153,45 @@ def check_event_consumers(root: Path) -> list[Hit]:
 # ---------------------------------------------------------------------------
 
 
+def _assign_target_name(node: ast.Assign) -> str | None:
+    if len(node.targets) == 1 and isinstance(node.targets[0], ast.Name):
+        return node.targets[0].id
+    return None
+
+
+def _assign_str_value(node: ast.Assign) -> str | None:
+    if isinstance(node.value, ast.Constant) and isinstance(node.value.value, str):
+        return node.value.value
+    return None
+
+
+def _downgrade_has_body(node: ast.FunctionDef) -> bool:
+    body = [s for s in node.body if not _is_docstring_stmt(s)]
+    return any(
+        not isinstance(s, ast.Pass)
+        and not (
+            isinstance(s, ast.Expr) and isinstance(s.value, ast.Constant) and s.value.value is ...
+        )
+        for s in body
+    )
+
+
+def _migration_revision_info(tree: ast.Module) -> tuple[str | None, str | None, bool]:
+    revision: str | None = None
+    down_revision: str | None = None
+    has_downgrade_body = False
+    for node in ast.iter_child_nodes(tree):
+        if isinstance(node, ast.Assign):
+            name = _assign_target_name(node)
+            if name == "revision":
+                revision = _assign_str_value(node)
+            elif name == "down_revision":
+                down_revision = _assign_str_value(node)
+        if isinstance(node, ast.FunctionDef) and node.name == "downgrade":
+            has_downgrade_body = _downgrade_has_body(node)
+    return revision, down_revision, has_downgrade_body
+
+
 def check_migrations(root: Path) -> list[Hit]:
     versions_dir = root / "src" / "db" / "migrations" / "versions"
     if not versions_dir.is_dir():
@@ -166,39 +205,7 @@ def check_migrations(root: Path) -> list[Hit]:
         if tree is None:
             continue
         rel = path.relative_to(root).as_posix()
-        revision: str | None = None
-        down_revision: str | None = None
-        has_downgrade_body = False
-        for node in ast.iter_child_nodes(tree):
-            if (
-                isinstance(node, ast.Assign)
-                and len(node.targets) == 1
-                and isinstance(node.targets[0], ast.Name)
-            ):
-                name = node.targets[0].id
-                if (
-                    name == "revision"
-                    and isinstance(node.value, ast.Constant)
-                    and isinstance(node.value.value, str)
-                ):
-                    revision = node.value.value
-                elif (
-                    name == "down_revision"
-                    and isinstance(node.value, ast.Constant)
-                    and isinstance(node.value.value, str)
-                ):
-                    down_revision = node.value.value
-            if isinstance(node, ast.FunctionDef) and node.name == "downgrade":
-                body = [s for s in node.body if not _is_docstring_stmt(s)]
-                has_downgrade_body = any(
-                    not isinstance(s, ast.Pass)
-                    and not (
-                        isinstance(s, ast.Expr)
-                        and isinstance(s.value, ast.Constant)
-                        and s.value.value is ...
-                    )
-                    for s in body
-                )
+        revision, down_revision, has_downgrade_body = _migration_revision_info(tree)
         if revision is None:
             continue
         if not has_downgrade_body:

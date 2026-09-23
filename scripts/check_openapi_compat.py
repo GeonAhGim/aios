@@ -235,6 +235,106 @@ def _property_violations(
     return violations
 
 
+def _request_violations(
+    method: str,
+    path: str,
+    old_op: dict[str, Any],
+    new_op: dict[str, Any],
+    components_old: dict[str, Any],
+    components_new: dict[str, Any],
+) -> list[str]:
+    old_request = _content_schema(
+        (old_op.get("requestBody") or {}).get("content", {}), components_old
+    )
+    if old_request is None:
+        return []
+    new_request = _content_schema(
+        (new_op.get("requestBody") or {}).get("content", {}), components_new
+    )
+    if new_request is None:
+        return [f"request body 제거: {method.upper()} {path}"]
+    return _property_violations(
+        old_request,
+        new_request,
+        where="request",
+        label=f"{method.upper()} {path} request",
+        components_old=components_old,
+        components_new=components_new,
+    )
+
+
+def _response_violations(
+    method: str,
+    path: str,
+    old_op: dict[str, Any],
+    new_op: dict[str, Any],
+    components_old: dict[str, Any],
+    components_new: dict[str, Any],
+) -> list[str]:
+    violations: list[str] = []
+    old_responses: dict[str, Any] = old_op.get("responses", {})
+    new_responses: dict[str, Any] = new_op.get("responses", {})
+    for status, old_resp in old_responses.items():
+        new_resp = new_responses.get(status)
+        if new_resp is None:
+            violations.append(f"response 제거: {method.upper()} {path} {status}")
+            continue
+        old_schema = _content_schema(old_resp.get("content", {}), components_old)
+        if old_schema is None:
+            continue
+        new_schema = _content_schema(new_resp.get("content", {}), components_new)
+        if new_schema is None:
+            violations.append(f"response body 제거: {method.upper()} {path} {status}")
+            continue
+        violations.extend(
+            _property_violations(
+                old_schema,
+                new_schema,
+                where="response",
+                label=f"{method.upper()} {path} {status} response",
+                components_old=components_old,
+                components_new=components_new,
+            )
+        )
+    return violations
+
+
+def _method_violations(
+    method: str,
+    path: str,
+    old_op: dict[str, Any],
+    new_methods: dict[str, Any],
+    components_old: dict[str, Any],
+    components_new: dict[str, Any],
+) -> list[str]:
+    new_op = new_methods.get(method)
+    if new_op is None:
+        return [f"method 제거: {method.upper()} {path}"]
+    return [
+        *_request_violations(method, path, old_op, new_op, components_old, components_new),
+        *_response_violations(method, path, old_op, new_op, components_old, components_new),
+    ]
+
+
+def _path_violations(
+    path: str,
+    old_methods: dict[str, Any],
+    new_methods: dict[str, Any] | None,
+    components_old: dict[str, Any],
+    components_new: dict[str, Any],
+) -> list[str]:
+    if new_methods is None:
+        return [f"path 제거: {path}"]
+    violations: list[str] = []
+    for method, old_op in old_methods.items():
+        if method not in HTTP_METHODS:
+            continue
+        violations.extend(
+            _method_violations(method, path, old_op, new_methods, components_old, components_new)
+        )
+    return violations
+
+
 def find_violations(baseline: dict[str, Any], current: dict[str, Any]) -> list[str]:
     """베이스라인 대비 MAJOR 위반 목록을 반환한다. 빈 목록이면 호환."""
     components_old: dict[str, Any] = (baseline.get("components") or {}).get("schemas", {})
@@ -245,64 +345,9 @@ def find_violations(baseline: dict[str, Any], current: dict[str, Any]) -> list[s
     violations: list[str] = []
     for path, old_methods in old_paths.items():
         new_methods = new_paths.get(path)
-        if new_methods is None:
-            violations.append(f"path 제거: {path}")
-            continue
-        for method, old_op in old_methods.items():
-            if method not in HTTP_METHODS:
-                continue
-            new_op = new_methods.get(method)
-            if new_op is None:
-                violations.append(f"method 제거: {method.upper()} {path}")
-                continue
-
-            old_request = _content_schema(
-                (old_op.get("requestBody") or {}).get("content", {}), components_old
-            )
-            if old_request is not None:
-                new_request = _content_schema(
-                    (new_op.get("requestBody") or {}).get("content", {}), components_new
-                )
-                if new_request is None:
-                    violations.append(f"request body 제거: {method.upper()} {path}")
-                else:
-                    violations.extend(
-                        _property_violations(
-                            old_request,
-                            new_request,
-                            where="request",
-                            label=f"{method.upper()} {path} request",
-                            components_old=components_old,
-                            components_new=components_new,
-                        )
-                    )
-
-            old_responses: dict[str, Any] = old_op.get("responses", {})
-            new_responses: dict[str, Any] = new_op.get("responses", {})
-            for status, old_resp in old_responses.items():
-                new_resp = new_responses.get(status)
-                if new_resp is None:
-                    violations.append(f"response 제거: {method.upper()} {path} {status}")
-                    continue
-                old_schema = _content_schema(old_resp.get("content", {}), components_old)
-                if old_schema is None:
-                    continue
-                new_schema = _content_schema(new_resp.get("content", {}), components_new)
-                if new_schema is None:
-                    violations.append(
-                        f"response body 제거: {method.upper()} {path} {status}"
-                    )
-                    continue
-                violations.extend(
-                    _property_violations(
-                        old_schema,
-                        new_schema,
-                        where="response",
-                        label=f"{method.upper()} {path} {status} response",
-                        components_old=components_old,
-                        components_new=components_new,
-                    )
-                )
+        violations.extend(
+            _path_violations(path, old_methods, new_methods, components_old, components_new)
+        )
     return violations
 
 
