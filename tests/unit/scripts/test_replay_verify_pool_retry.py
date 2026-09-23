@@ -219,6 +219,36 @@ async def test_verify_with_retry_succeeds_after_mid_scan_reset(monkeypatch) -> N
     assert attempts == 3
 
 
+async def test_verify_with_retry_succeeds_after_drop_create_race(monkeypatch) -> None:
+    """task-6284: `pool.acquire()` inside `verify()`'s scan can dial a new
+    physical connection (pool growth / replacing a discarded one) that lands
+    inside `setup_test_db.py --reset`'s `DROP DATABASE` -> `CREATE DATABASE`
+    window, raising `InvalidCatalogNameError` then `CannotConnectNowError`
+    -- the exact shape `_create_pool_with_retry` already retries for the
+    initial connect. `_verify_with_retry` must retry the same shapes, not
+    just `ConnectionDoesNotExistError`."""
+    attempts = 0
+
+    async def _fake_verify(pool: object, *, as_of: object, hours: object) -> replay.ReplayReport:
+        nonlocal attempts
+        attempts += 1
+        if attempts == 1:
+            raise asyncpg.exceptions.InvalidCatalogNameError('database "x" does not exist')
+        if attempts == 2:
+            raise asyncpg.exceptions.CannotConnectNowError("the database system is starting up")
+        return replay.ReplayReport(streams_checked=3, combined_digest="cafe", mismatches=())
+
+    monkeypatch.setattr(replay_verify, "verify", _fake_verify)
+    monkeypatch.setattr(replay_verify.asyncio, "sleep", _no_sleep)
+
+    report = await replay_verify._verify_with_retry(
+        object(), as_of=datetime.now(timezone.utc), hours=24
+    )
+
+    assert report.streams_checked == 3
+    assert attempts == 3
+
+
 async def test_verify_with_retry_propagates_after_exhausting_attempts(monkeypatch) -> None:
     """Fail-closed: a reset on every attempt must still raise, not report a
     false green."""

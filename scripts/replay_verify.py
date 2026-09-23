@@ -318,11 +318,23 @@ async def _verify_with_retry(
     green. Safe to retry wholesale because `verify()`'s transaction is
     read-only (`REPEATABLE READ ... readonly=True`); a reset mid-scan has no
     partial write to roll back, so re-running it from scratch on a fresh
-    connection reproduces the exact same read, not a different one."""
+    connection reproduces the exact same read, not a different one.
+
+    task-6284: `pool.acquire()` can dial a brand-new physical connection
+    mid-scan too (growing the pool up to `max_size`, or replacing a
+    connection `_close_pool_ignoring_reset`-style resets already discarded)
+    -- a sibling worktree's `setup_test_db.py --reset` drop/create race can
+    land on that dial exactly like it can on `_create_pool_with_retry`'s
+    initial connect, raising `InvalidCatalogNameError` /
+    `CannotConnectNowError` instead of `ConnectionDoesNotExistError`. Only
+    catching the narrower reset shape here left that race able to escape
+    this retry and fail the step even though `_create_pool_with_retry`
+    already treats it as transient -- `_RETRYABLE_CONNECT_ERRORS` closes
+    that asymmetry."""
     for attempt in range(_POOL_CONNECT_ATTEMPTS):
         try:
             return await verify(pool, as_of=as_of, hours=hours)
-        except (OSError, asyncpg.exceptions.ConnectionDoesNotExistError):
+        except _RETRYABLE_CONNECT_ERRORS:
             if attempt + 1 >= _POOL_CONNECT_ATTEMPTS:
                 raise
             await asyncio.sleep(_retry_delay(attempt))
