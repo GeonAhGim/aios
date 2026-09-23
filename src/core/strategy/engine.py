@@ -72,8 +72,8 @@ class StrategyEngine:
                 )
             except IndicatorDataMissingError as exc:
                 logger.warning(
-                    "StrategyEngine: 지표 데이터 부족(execution_id=%s, key=%s) — "
-                    "판단 보류(신호 없음으로 처리)",
+                    "StrategyEngine: indicator data missing(execution_id=%s, key=%s) — "
+                    "postponing judgment (treat as no signal)",
                     execution_id,
                     exc,
                 )
