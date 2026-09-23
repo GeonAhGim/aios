@@ -270,9 +270,27 @@ def test_is_open_raises_typeerror_for_naive_datetime_adversarial_input() -> None
     compared against this calendar's tz-aware session windows and produce a
     wrong answer. Python's own aware/naive comparison rules raise TypeError
     here, and this pins that as the actual (fail-loud, not fail-silent)
-    behavior a caller who skips the repo's tz-aware-UTC convention hits."""
+    behavior a caller who skips the repo's tz-aware-UTC convention hits.
+
+    `trading_day_of` calls `at.astimezone(self.tz)`, which per Python
+    semantics does NOT raise for a naive `at` -- it presumes `at` is already
+    in the *host's* local timezone and converts from there. The TypeError
+    only fires later, when the resulting (aware) session window is compared
+    against the still-naive `at`, and only if that day actually has a
+    session. On a host whose local UTC offset differs enough from KRX's
+    fixed +9, a Thursday 10:00 naive value can roll onto a Saturday in KRX
+    time, `sessions_for` then returns `[]`, no comparison ever happens, and
+    `is_open` returns False instead of raising (observed on a UTC-08 host).
+
+    `astimezone()`'s presumed-local-time shift is bounded by the full range
+    of real UTC offsets (-12..+14), so relative to KRX's fixed +9 the result
+    lands at most 5h earlier or 21h later than the naive wall-clock value --
+    i.e. on the same day or the following day, never further. Anchoring on a
+    Wednesday 10:00 keeps both possible outcomes (Wed or Thu) a KRX trading
+    weekday with no configured holiday, so the aware/naive comparison is
+    always reached regardless of host timezone."""
     cal = _calendar(Venue.KIS_KRX)
-    naive_at = datetime(2026, 9, 4, 10, 0)  # no tzinfo -- violates repo convention
+    naive_at = datetime(2026, 9, 2, 10, 0)  # Wed -- no tzinfo, violates repo convention
     with pytest.raises(TypeError):
         cal.is_open(naive_at)
     with pytest.raises(TypeError):
