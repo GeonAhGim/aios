@@ -354,6 +354,12 @@ async def test_capture_already_captured_hold_is_rejected(pool, ports):
             holds=ports.holds,
         )
 
+    async with pool.acquire() as conn:
+        entry_count_before = await conn.fetchval(
+            "SELECT COUNT(*) FROM ledger_journal_entry WHERE event_ref LIKE $1",
+            f"hold:{hold.hold_id}%",
+        )
+
     with pytest.raises(IllegalHoldTransitionError):
         async with pool.acquire() as conn, conn.transaction():
             await capture_hold(
@@ -370,9 +376,96 @@ async def test_capture_already_captured_hold_is_rejected(pool, ports):
                 clock=ports.clock,
                 holds=ports.holds,
             )
-    # 이중 캡처 거부는 순수 FSM 가드(§4.5)라 DB 상태를 건드리지 않는다 — 원 캡처
-    # 그대로 남는다.
+    # 이중 캡처 거부는 순수 FSM 가드(§4.5, hold_state.py)라 DB 접근 전에 일어난다
+    # — capture.hold(메모리 상 값)만이 아니라 DB를 직접 재조회해 원 캡처 그대로
+    # 남고 분개도 추가되지 않았음을 증명한다(XREV: 인메모리 단언만으로는 FSM이
+    # DB UPDATE 이후에 거부하는 회귀를 검출하지 못한다).
     assert capture.hold.state == HoldState.CAPTURED
+    async with pool.acquire() as conn:
+        hold_row = await conn.fetchrow(
+            "SELECT state, settled_entry_id FROM ledger_hold WHERE hold_id = $1", hold.hold_id
+        )
+        entry_count_after = await conn.fetchval(
+            "SELECT COUNT(*) FROM ledger_journal_entry WHERE event_ref LIKE $1",
+            f"hold:{hold.hold_id}%",
+        )
+    assert hold_row["state"] == "CAPTURED"
+    assert hold_row["settled_entry_id"] == capture.entry.entry_id
+    assert entry_count_after == entry_count_before == 2  # HOLD_PLACED + HOLD_CAPTURED만, 추가 없음
+
+
+async def test_release_already_captured_hold_is_rejected(pool, ports):
+    """DEEPEN(task-4918): negative 4번째 — `release_hold`도 `capture_hold`와
+    같은 FSM 가드(§4.5)를 공유한다: CAPTURED 홀드를 release하려는 시도(전이표에
+    없는 조합)를 DB 접근 전에 거부해야 한다. `capture_hold` 쪽 이중 캡처
+    테스트(XREV 지적)와 같은 방식으로, in-memory 단언이 아니라 DB를 재조회해
+    hold 행이 CAPTURED로 남고 HOLD_RELEASED 분개가 생기지 않았음을 증명한다."""
+    buyer = await create_test_user(pool)
+    seller = await create_test_user(pool)
+    price = Decimal("30.00")
+    await _seed_available(pool, buyer, price)
+    reference = f"test-release-after-capture:{uuid4()}"
+    expires_at = _clock() + timedelta(minutes=15)
+
+    async with pool.acquire() as conn, conn.transaction():
+        hold = await place_hold(
+            conn,
+            buyer_id=buyer,
+            amount=price,
+            purpose=_TEST_PURPOSE,
+            reference=reference,
+            expires_at=expires_at,
+            actor_subject_id=buyer,
+            trace_id=uuid4(),
+            journal=ports.journal,
+            balances=ports.balances,
+            audit=ports.audit,
+            clock=ports.clock,
+            holds=ports.holds,
+        )
+        capture = await capture_hold(
+            conn,
+            hold,
+            seller_id=seller,
+            commission_rate=Decimal("0.15"),
+            actor_subject_id=buyer,
+            trace_id=uuid4(),
+            now=_clock(),
+            journal=ports.journal,
+            balances=ports.balances,
+            audit=ports.audit,
+            clock=ports.clock,
+            holds=ports.holds,
+        )
+
+    with pytest.raises(IllegalHoldTransitionError):
+        async with pool.acquire() as conn, conn.transaction():
+            await release_hold(
+                conn,
+                capture.hold,
+                reason="test-illegal-release",
+                actor_subject_id=buyer,
+                trace_id=uuid4(),
+                now=_clock(),
+                journal=ports.journal,
+                balances=ports.balances,
+                audit=ports.audit,
+                clock=ports.clock,
+                holds=ports.holds,
+            )
+
+    async with pool.acquire() as conn:
+        hold_row = await conn.fetchrow(
+            "SELECT state, settled_entry_id FROM ledger_hold WHERE hold_id = $1", hold.hold_id
+        )
+        release_entry_count = await conn.fetchval(
+            "SELECT COUNT(*) FROM ledger_journal_entry WHERE event_ref = $1",
+            f"hold:{hold.hold_id}:release",
+        )
+    assert hold_row["state"] == "CAPTURED"
+    assert hold_row["settled_entry_id"] == capture.entry.entry_id
+    assert release_entry_count == 0
+    assert await _available(pool, buyer) == Decimal("0.00")  # release가 잘못 되돌리지 않았다
 
 
 async def test_place_and_capture_hold_round_trip_under_budget(pool, ports):
