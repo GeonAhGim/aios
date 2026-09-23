@@ -403,6 +403,11 @@ async def test_get_balance_raises_drift_when_ledger_balance_row_directly_corrupt
             await conn.execute(
                 "DELETE FROM ledger_balance WHERE account_id = $1", row["account_id"]
             )
+            # audit-allow: ledger_balance_raw_seed -- restores the exact
+            # pre-tamper row captured in `row` above (same DELETE+INSERT
+            # mechanics the no-UPDATE trigger forces, see the tamper INSERT
+            # above); this is the cleanup half of the same adversarial
+            # tamper, not a new raw seed.
             await conn.execute(
                 "INSERT INTO ledger_balance (account_id, balance, held, pending_payout, "
                 "allow_negative, last_entry_seq, updated_at) "
