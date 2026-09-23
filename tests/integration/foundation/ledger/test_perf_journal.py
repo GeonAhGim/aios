@@ -52,20 +52,55 @@ task-1029(CI 상시 적색 재발): 정규화 후에도 CI 실측 p95=172.7ms가
 임계 상수를 키워 통과시키는 방식은 측정치를 무의미하게 만들고, xfail로
 감추는 방식은 이미 XPASS strict로 되돌아온 전례가 있어(task-920) 둘 다
 금지한다. src(postgres_journal_repository.py)는 무수정이다(왕복 축소는
-이미 37a5375로 끝났고, 계약·동작을 바꾸지 않는다)."""
+이미 37a5375로 끝났고, 계약·동작을 바꾸지 않는다).
+
+task-5599 fix(esc-ci-replay_verify): p95/왕복수 측정용 `journal.append()`
+호출(`_count_append_round_trips`의 워밍업·측정 호출, `test_journal_append_
+p95_under_30ms`의 100회 표본)은 `post_entry()`를 거치지 않고 `append()`
+단독을 재는 것이 이 리프의 명시된 목적이라 `test_postgres_journal_
+repository.py`(task-5309)와 같은 "post_entry로 우회" 처방을 그대로
+적용할 수 없다 — `post_entry`는 `get_for_update`/`balances.apply` 왕복을
+더해 <=7 단언 자체를 무의미하게 만든다. 대신 커밋 대신 명시적
+롤백(`tx.rollback()`)으로 바꿨다: `_count_append_round_trips`의 쿼리
+로거는 `journal.append()` 호출 구간에만 걸려 있어 그 뒤에 오는
+COMMIT/ROLLBACK 선택은 측정된 왕복 수에 영향을 주지 않고, 지연 측정도
+`async with` 블록 전체를 감싸므로 COMMIT 1회가 ROLLBACK 1회로 바뀌는 것
+외에는 프로파일이 동일하다 — 그러면서 `PLATFORM:CASH_CLEARING`에 잔액이
+갱신되지 않는 분개행을 영구히 남기지 않는다(공유 테스트 DB에서
+`replay_verify`가 그 계정을 거짓 MISMATCH로 보고한 원인, `verify_
+integrity.py` 모듈 docstring과 동일 드리프트 패턴).
+
+반면 `test_journal_append_rejects_tampered_resend_as_digest_mismatch`/
+`test_journal_append_concurrent_tampered_resend_rejects_loser`/`test_
+journal_append_rolls_back_entirely_when_audit_append_fails`의 "성공해야
+하는" 호출은 idempotency-key 재사용·동시성·재시도 결과가 실제로
+커밋되어야 그 뒤 단언(재조회로 count==1 확인 등)이 의미가 있어 롤백으로
+대체할 수 없다 — 이 세 곳은 `test_postgres_journal_repository.py`와
+동일하게 `post_entry()`로 바꿨다(프로덕션에서도 `append()`는 항상
+`post_entry` 경유로만 불리므로, "post_entry 없이 단독 호출"을 테스트하는
+쪽이 오히려 비현실적 경로였다). 실패해서 커밋되지 않는 호출(unknown
+account negative, 감사 실패 주입의 첫 시도, digest-mismatch 거부당하는
+재전송)은 그대로 `journal.append()` 직접 호출로 남겨 LC-8b 자체의 계약을
+계속 검증한다."""
 
 from __future__ import annotations
 
 import asyncio
 import time
+from datetime import datetime, timezone
 from decimal import Decimal
 from uuid import UUID, uuid4
 
 import pytest
 
 from src.data.models.base import Currency
-from src.foundation.ledger.adapters.postgres_balance_repository import UnknownAccountError
+from src.foundation.evidence.adapters.postgres_repository import PostgresAuditEventRepository
+from src.foundation.ledger.adapters.postgres_balance_repository import (
+    PostgresBalanceRepository,
+    UnknownAccountError,
+)
 from src.foundation.ledger.adapters.postgres_journal_repository import PostgresJournalRepository
+from src.foundation.ledger.application.post_entry import post_entry
 from src.foundation.ledger.contracts.v1 import (
     LedgerEvent,
     LedgerEventType,
@@ -84,6 +119,24 @@ _ROUND_TRIP_MULTIPLIER = 9
 _MAX_SEQUENTIAL_ROUND_TRIPS = 7
 _BASELINE_WARMUP = 5
 _BASELINE_SAMPLE_COUNT = 50
+
+
+def _clock() -> datetime:
+    return datetime.now(timezone.utc)
+
+
+class _Ports:
+    """`post_entry`가 요구하는 세 포트 — `test_postgres_journal_repository.py`의
+    동명 헬퍼와 같은 관례(같은 `pool` 위에 묶는다)."""
+
+    def __init__(self, pool) -> None:
+        self.balances = PostgresBalanceRepository(pool)
+        self.audit = PostgresAuditEventRepository(pool)
+
+
+@pytest.fixture
+def ports(pool):
+    return _Ports(pool)
 
 
 async def _seed_user_available_account(pool, user_id: UUID) -> None:
@@ -134,6 +187,23 @@ def _topup_event(user_id: UUID) -> LedgerEvent:
     )
 
 
+async def _append_without_persisting(
+    conn, journal: PostgresJournalRepository, event: LedgerEvent, lines: list[PostingLine]
+) -> None:
+    """`journal.append()`를 실행하되 명시적으로 롤백해 결과를 버린다 — p95/
+    왕복수 측정은 `append()` 자체의 쿼리 수·지연만 필요로 하고 결과가
+    남을 필요는 없다(모듈 docstring task-5599 fix). `conn.transaction()`
+    컨텍스트 매니저는 정상 종료 시 COMMIT하므로, 여기서는 대신 수동으로
+    시작해 `finally`에서 항상 ROLLBACK한다 — COMMIT 1회가 ROLLBACK 1회로
+    바뀌는 것 말고는 왕복 프로파일이 동일하다."""
+    tx = conn.transaction()
+    await tx.start()
+    try:
+        await journal.append(conn, event, lines)
+    finally:
+        await tx.rollback()
+
+
 async def _count_append_round_trips(pool, journal: PostgresJournalRepository) -> int:
     """journal.append() 1회가 소비하는 순차 DB 왕복 수(구조 회귀 가드).
 
@@ -156,17 +226,22 @@ async def _count_append_round_trips(pool, journal: PostgresJournalRepository) ->
 
     async with pool.acquire() as conn:
         warmup_event = _topup_event(warmup_user_id)
-        async with conn.transaction():
-            await journal.append(conn, warmup_event, posting_rules.lines_for(warmup_event))
+        await _append_without_persisting(
+            conn, journal, warmup_event, posting_rules.lines_for(warmup_event)
+        )
 
         event = _topup_event(counted_user_id)
         lines = posting_rules.lines_for(event)
-        async with conn.transaction():
+        tx = conn.transaction()
+        await tx.start()
+        try:
             conn.add_query_logger(_log)
             try:
                 await journal.append(conn, event, lines)
             finally:
                 conn.remove_query_logger(_log)
+        finally:
+            await tx.rollback()
 
     return len(queries)
 
@@ -190,8 +265,8 @@ async def test_journal_append_p95_under_30ms(pool) -> None:
         lines = posting_rules.lines_for(event)
 
         started = time.perf_counter()
-        async with pool.acquire() as conn, conn.transaction():
-            await journal.append(conn, event, lines)
+        async with pool.acquire() as conn:
+            await _append_without_persisting(conn, journal, event, lines)
         latencies_ms.append((time.perf_counter() - started) * 1000)
 
     latencies_ms.sort()
@@ -273,11 +348,13 @@ async def test_journal_append_rejects_all_unknown_accounts_not_just_first(pool) 
     assert found is None
 
 
-async def test_journal_append_rejects_tampered_resend_as_digest_mismatch(pool) -> None:
+async def test_journal_append_rejects_tampered_resend_as_digest_mismatch(pool, ports) -> None:
     """negative(2/3) — 같은 `idempotency_key`가 다른 `lines`로 재전송되면
     왕복 축소 CTE가 기존 행을 정확히 찾아 `lines_digest`를 비교해 거부한다
     (한 왕복으로 합친 조회가 여전히 정확한 기존 행을 반환하는지가 이
-    리프의 핵심 위험)."""
+    리프의 핵심 위험). 첫 성공 호출은 `post_entry()`를 거친다(모듈
+    docstring task-5599 fix — 성공 커밋은 `PLATFORM:CASH_CLEARING` 잔액을
+    저널과 함께 원자적으로 갱신해야 공유 시드 계정을 오염시키지 않는다)."""
     journal = PostgresJournalRepository(pool)
     user_id = await create_test_user(pool)
     await _seed_user_available_account(pool, user_id)
@@ -295,7 +372,10 @@ async def test_journal_append_rejects_tampered_resend_as_digest_mismatch(pool) -
         extra={},
     )
     async with pool.acquire() as conn, conn.transaction():
-        await journal.append(conn, first_event, posting_rules.lines_for(first_event))
+        await post_entry(
+            conn, first_event, journal=journal, balances=ports.balances,
+            audit=ports.audit, clock=_clock,
+        )
 
     tampered_event = first_event.model_copy(update={"amount": Decimal("999.00")})
     with pytest.raises(IdempotencyDigestMismatchError):
@@ -310,12 +390,14 @@ async def test_journal_append_rejects_tampered_resend_as_digest_mismatch(pool) -
     assert count == 1
 
 
-async def test_journal_append_concurrent_tampered_resend_rejects_loser(pool) -> None:
+async def test_journal_append_concurrent_tampered_resend_rejects_loser(pool, ports) -> None:
     """negative(3/3) + 적대적 동시성 — 같은 `idempotency_key`로 서로 다른
     내용의 두 호출이 동시에 경합하면(task-614 LC-17 gold-standard와 동일한
     asyncio.gather 패턴), 전역 advisory lock이 직렬화하는 왕복 축소 경로가
     정확히 하나만 성공시키고 나머지는 REPLAY가 아니라
-    `IdempotencyDigestMismatchError`로 거부해야 한다."""
+    `IdempotencyDigestMismatchError`로 거부해야 한다. 승자의 커밋은
+    `post_entry()`를 거친다(모듈 docstring task-5599 fix — 위와 동일한
+    이유로 공유 시드 계정 오염을 피한다)."""
     journal = PostgresJournalRepository(pool)
     user_id = await create_test_user(pool)
     await _seed_user_available_account(pool, user_id)
@@ -334,7 +416,10 @@ async def test_journal_append_concurrent_tampered_resend_rejects_loser(pool) -> 
             extra={},
         )
         async with pool.acquire() as conn, conn.transaction():
-            return await journal.append(conn, event, posting_rules.lines_for(event))
+            return await post_entry(
+                conn, event, journal=journal, balances=ports.balances,
+                audit=ports.audit, clock=_clock,
+            )
 
     results = await asyncio.gather(
         _attempt(Decimal("1.00")), _attempt(Decimal("2.00")), return_exceptions=True
@@ -354,14 +439,16 @@ async def test_journal_append_concurrent_tampered_resend_rejects_loser(pool) -> 
 
 
 async def test_journal_append_rolls_back_entirely_when_audit_append_fails(
-    pool, monkeypatch
+    pool, ports, monkeypatch
 ) -> None:
     """failure-injection — 왕복 축소 경로는 계좌 해석까지 한 왕복(CTE)으로
     끝내고 그 다음 감사 이벤트(FND-03)를 append한 뒤에야 저널·분개행을
     INSERT한다(모듈 docstring FK 제약 설명 참고). 감사 append가 I/O 장애로
     실패해도(디스크·잠금 등을 흉내) 트랜잭션 전체가 롤백돼 저널 엔트리도
     분개행도 남지 않아야 하고, 실패한 시도가 다음 재시도의 CTE 컨텍스트
-    (다음 sequence_no·prev_hash 계산)를 오염시키지 않아야 한다."""
+    (다음 sequence_no·prev_hash 계산)를 오염시키지 않아야 한다. 재시도
+    성공 호출은 `post_entry()`를 거친다(모듈 docstring task-5599 fix —
+    위와 동일한 이유로 공유 시드 계정 오염을 피한다)."""
     journal = PostgresJournalRepository(pool)
     user_id = await create_test_user(pool)
     await _seed_user_available_account(pool, user_id)
@@ -394,6 +481,9 @@ async def test_journal_append_rolls_back_entirely_when_audit_append_fails(
 
     monkeypatch.undo()
     async with pool.acquire() as conn, conn.transaction():
-        retried = await journal.append(conn, event, lines)
+        retried = await post_entry(
+            conn, event, journal=journal, balances=ports.balances,
+            audit=ports.audit, clock=_clock,
+        )
     assert retried.replayed is False
     assert retried.sequence_no >= 1
