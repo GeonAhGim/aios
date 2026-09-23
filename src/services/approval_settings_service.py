@@ -1,6 +1,6 @@
 """11.4 — Approval settings (ApprovalMode) management.
 
-Spec: 기능설계문서_v1.20.md#FD-11.3, policy docs 4.9/4.10, #13 §13.1
+Spec: Functional Design Document v1.20.md#FD-11.3, policy docs 4.9/4.10, #13 §13.1
 
 mandatory_wait_seconds accepts no user input — the platform-enforced 60-second
 floor (DB CHECK, #13 §13.2) is maintained as-is; users may only change
