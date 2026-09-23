@@ -6,6 +6,7 @@ pause_deployment/stop_deployment의 커버되지 않은 분기(멱등 캐시 히
 from __future__ import annotations
 
 import dataclasses
+from typing import Any
 from uuid import UUID, uuid4
 
 import pytest
@@ -36,7 +37,7 @@ _ACTOR_ID = uuid4()
 def _deployment(
     state: DeploymentState, fence_token: int = 0, **overrides: object
 ) -> PaperDeployment:
-    defaults: dict[str, object] = dict(
+    defaults: dict[str, Any] = dict(
         id=_DEPLOYMENT_ID,
         tenant_id=_TENANT_ID,
         connection_id=None,
@@ -52,7 +53,7 @@ def _deployment(
         fence_token=fence_token,
     )
     defaults.update(overrides)
-    return PaperDeployment(**defaults)  # type: ignore[arg-type]
+    return PaperDeployment(**defaults)
 
 
 class FakeRepo:

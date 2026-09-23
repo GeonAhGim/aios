@@ -70,7 +70,7 @@ class TestClassification:
 
     def test_invalid_value_raises(self):
         with pytest.raises(ValueError):
-            Classification("UNKNOWN")  # type: ignore[arg-type]
+            Classification("UNKNOWN")
 
     def test_str_coercion(self):
         assert Classification.HEALTHY.value == "HEALTHY"
@@ -113,7 +113,7 @@ class TestEntitySnapshot:
 
     def test_missing_internal_value_raises(self):
         with pytest.raises(ValidationError):
-            EntitySnapshot(  # type: ignore[call-arg]
+            EntitySnapshot(
                 entity_type="BALANCE",
                 entity_key="USDT_BALANCE",
             )
@@ -210,21 +210,21 @@ class TestRunReconciliationRequest:
 
     def test_missing_target_type_raises(self):
         with pytest.raises(ValidationError):
-            RunReconciliationRequest(  # type: ignore[call-arg]
+            RunReconciliationRequest(
                 target_ref=_uuid(),
                 entities=[],
             )
 
     def test_missing_target_ref_raises(self):
         with pytest.raises(ValidationError):
-            RunReconciliationRequest(  # type: ignore[call-arg]
+            RunReconciliationRequest(
                 target_type="SPOT_ACCOUNT",
                 entities=[],
             )
 
     def test_missing_entities_raises(self):
         with pytest.raises(ValidationError):
-            RunReconciliationRequest(  # type: ignore[call-arg]
+            RunReconciliationRequest(
                 target_type="SPOT_ACCOUNT",
                 target_ref=_uuid(),
             )
@@ -267,7 +267,7 @@ class TestReconciliationItemView:
 
     def test_missing_classification_raises(self):
         with pytest.raises(ValidationError):
-            ReconciliationItemView(  # type: ignore[call-arg]
+            ReconciliationItemView(
                 entity_type="BALANCE",
                 entity_key="USDT_BALANCE",
                 internal_value=Decimal("1000"),
@@ -276,7 +276,7 @@ class TestReconciliationItemView:
 
     def test_invalid_classification_raises(self):
         with pytest.raises(ValidationError):
-            ReconciliationItemView(  # type: ignore[arg-type]
+            ReconciliationItemView(
                 entity_type="BALANCE",
                 entity_key="USDT_BALANCE",
                 internal_value=Decimal("1000"),
@@ -335,7 +335,7 @@ class TestReconciliationRunView:
 
     def test_missing_id_raises(self):
         with pytest.raises(ValidationError):
-            ReconciliationRunView(  # type: ignore[call-arg]
+            ReconciliationRunView(
                 target_type="SPOT_ACCOUNT",
                 target_ref=_uuid(),
                 items=[],
@@ -345,7 +345,7 @@ class TestReconciliationRunView:
 
     def test_missing_aggregate_classification_raises(self):
         with pytest.raises(ValidationError):
-            ReconciliationRunView(  # type: ignore[call-arg]
+            ReconciliationRunView(
                 id=_uuid(),
                 target_type="SPOT_ACCOUNT",
                 target_ref=_uuid(),
@@ -370,7 +370,7 @@ class TestResolveReconciliationRequest:
 
     def test_missing_reason_raises(self):
         with pytest.raises(ValidationError):
-            ResolveReconciliationRequest()  # type: ignore[call-arg]
+            ResolveReconciliationRequest()
 
 
 # ---------------------------------------------------------------------------
@@ -417,7 +417,7 @@ class TestReconciliationStateView:
 
     def test_missing_target_ref_raises(self):
         with pytest.raises(ValidationError):
-            ReconciliationStateView(  # type: ignore[call-arg]
+            ReconciliationStateView(
                 target_type="SPOT_ACCOUNT",
                 aggregate_status=Classification.HEALTHY,
                 last_checked_at=_OK_NOW,
@@ -427,7 +427,7 @@ class TestReconciliationStateView:
 
     def test_missing_revision_raises(self):
         with pytest.raises(ValidationError):
-            ReconciliationStateView(  # type: ignore[call-arg]
+            ReconciliationStateView(
                 target_ref=_uuid(),
                 target_type="SPOT_ACCOUNT",
                 aggregate_status=Classification.HEALTHY,
