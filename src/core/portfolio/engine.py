@@ -50,17 +50,19 @@ class PortfolioEngine:
         if signal.direction == OrderSide.BUY:
             if position_quantity != 0:
                 raise PortfolioEngineError(
-                    "이미 보유 포지션이 있는 상태에서 진입(BUY) 신호가 발생했습니다 — "
-                    "IDLE에서만 entry 전이가 나와야 하므로 FD-8.1 로직 오류입니다."
+                    "BUY entry signal received while already holding a position — "
+                    "entry transition should only occur from IDLE, "
+                    "indicating FD-8.1 logic error."
                 )
             approved_quantity = allocated_capital / current_price
         else:
             if position_quantity == 0:
                 raise PortfolioEngineError(
-                    "포지션이 없는 상태에서 SELL(exit/stop_loss) 신호가 발생했습니다 — "
-                    "FD-8.1 로직 오류입니다."
+                    "SELL (exit/stop_loss) signal received while no position is held — "
+                    "FD-8.1 logic error."
                 )
-            approved_quantity = position_quantity  # Phase 1 does not support partial liquidation — full close
+            # Phase 1: no partial liquidation, full close only
+            approved_quantity = position_quantity
 
         capital_pct = (approved_quantity * current_price) / total_equity * Decimal("100")
 
