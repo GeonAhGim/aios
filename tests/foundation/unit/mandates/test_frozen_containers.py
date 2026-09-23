@@ -39,6 +39,20 @@ def test_frozen_dict_rejects_pop_and_popitem_and_setdefault() -> None:
     assert dict(frozen) == {"a": 1}
 
 
+def test_frozen_dict_rejects_ior() -> None:
+    """task-4975 QA: `dict.__ior__` (the `|=` operator, PEP 584) was not
+    overridden — `frozen |= {...}` mutated the backing dict in place via
+    `__ior__` *before* the caller's rebind of the name/attribute could ever
+    be observed, so `TypeError` from `_blocked` never fired and the content
+    was tampered silently. Reproduced against `RuleHit.evidence` directly in
+    `test_contracts_v1.py::test_rule_hit_evidence_dict_rejects_ior_operator`.
+    """
+    frozen = FrozenDict[str, int]({"a": 1})
+    with pytest.raises(TypeError):
+        frozen |= {"b": 2}
+    assert dict(frozen) == {"a": 1}
+
+
 def test_frozen_dict_rejects_clear_and_delitem() -> None:
     frozen = FrozenDict[str, int]({"a": 1})
     with pytest.raises(TypeError):

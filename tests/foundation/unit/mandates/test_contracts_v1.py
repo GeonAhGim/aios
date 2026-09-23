@@ -198,6 +198,28 @@ def test_rule_hit_evidence_dict_rejects_in_place_mutation() -> None:
     assert hit.evidence == {"key": "original"}
 
 
+def test_rule_hit_evidence_dict_rejects_ior_operator() -> None:
+    """I-09 D3 적대적(task-4975 QA — task-4937의 재구현에서 발견): `FrozenDict`는
+    `__setitem__`/`update`/`clear` 등은 막았지만 PEP 584의 `|=` 연산자
+    (`__ior__`)는 막지 않았다. `dict.__ior__`는 제자리에서 병합한 뒤 그
+    결과를 반환하고, 그 다음에야 파이썬이 `hit.evidence = result`로 재대입을
+    시도한다 — pydantic의 `frozen=True`는 이 재대입에서 `ValidationError`를
+    던지지만, evidence dict 내용은 이미 변조된 뒤라 예외가 나도 원복되지
+    않는다(호출자가 예외를 잡으면 변조를 못 봤다고 착각하게 된다).
+    """
+    hit = RuleHit(
+        rule_id="R1",
+        severity=ComplianceVerdict.DENY,
+        message="m",
+        evidence={"key": "original"},
+    )
+
+    with pytest.raises(TypeError):
+        hit.evidence |= {"injected": "value"}
+
+    assert hit.evidence == {"key": "original"}
+
+
 def test_compliance_decision_rule_hits_list_rejects_in_place_mutation() -> None:
     """I-09 D3 적대적: `decision.rule_hits`가 가리키는 list도 evidence dict와
     동일한 구멍이 있었다 — `.append()`로 존재하지 않던 위반을 감사 판정에
