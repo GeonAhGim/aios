@@ -74,6 +74,11 @@ def _run(cmd: list[str], cwd: Path, env: dict | None, timeout: int) -> tuple[int
         return 1, f"{type(exc).__name__}: {exc}"
 
 
+def libpq_dsn(url: str) -> str:
+    """SQLAlchemy 스킴(postgresql+asyncpg://)을 psql/libpq가 파싱하는 postgresql://로."""
+    return url.replace("postgresql+asyncpg://", "postgresql://")
+
+
 def with_port(url: str, port: int) -> str:
     """접속 URL의 host는 유지하고 port만 별도 인스턴스 것으로 바꾼다."""
     parts = urlsplit(url.replace("postgresql+asyncpg://", "postgresql://"))
@@ -268,6 +273,10 @@ def run_drill(
         return _finish(steps, started)
 
     write_recovery_config(restore_data_dir, archive_dir)
+    # CTO 2026-09-23: DATABASE_URL은 SQLAlchemy 스킴(postgresql+asyncpg://)이라 psql이 파싱하지
+    # 못해 기본값(localhost:5432, OS 사용자)으로 붙다가 인증 실패 — 슬롯 정리 단계가 매번
+    # 실패해 stale 슬롯 aios_drill이 남았다(다음 리허설의 -C 충돌 원인). libpq 스킴으로 정규화.
+    dsn_template = libpq_dsn(dsn_template)
     restore_dsn = with_port(dsn_template, restore_port)
     started_server = False
     # task-5203: pg_ctl/psql이 이 PC(cp949 로케일)에서 실패 메시지를 OS 코드페이지로

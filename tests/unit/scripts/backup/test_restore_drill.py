@@ -546,3 +546,12 @@ def test_pg_ctl_start_includes_log_file_flag_for_windows(tmp_path: Path):
     log_path = Path(start_cmd[log_idx + 1])
     assert log_path.name == "pg_ctl_start.log"
     assert log_path.parent == tmp_path / "restore_pgdata"
+
+
+def test_libpq_dsn_normalizes_sqlalchemy_scheme():
+    """CTO 2026-09-23: postgresql+asyncpg:// DSN이 psql에 그대로 전달돼 슬롯 정리가 인증 실패."""
+    assert (
+        restore_drill.libpq_dsn("postgresql+asyncpg://u:p@dbhost:5432/aios_dev")
+        == "postgresql://u:p@dbhost:5432/aios_dev"
+    )
+    assert restore_drill.libpq_dsn("postgresql://u@h/db") == "postgresql://u@h/db"
