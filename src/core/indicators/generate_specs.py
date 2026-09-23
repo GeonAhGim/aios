@@ -147,23 +147,42 @@ def _plots_from_talib(
 ) -> tuple[PlotSpec, ...]:
     """Derive kind/fill_between from actual output_flags of `talib_name` to build PlotSpec.
 
+    Public wrapper for callers (e.g. `specs_talib.py`'s manual overrides) that don't
+    already have `info` on hand. `generate_talib_specs()` uses `_plots_from_info`
+    directly to avoid paying for `talib_abstract.Function()` twice per indicator.
+    """
+    # talib/abstract.pyi declares only individual indicator functions and does not
+    # declare the runtime-only `Function` constructor class (talib package stub
+    # limitation) — the values actually exist at runtime.
+    info = talib_abstract.Function(talib_name).info  # type: ignore[attr-defined]
+    return _plots_from_info(talib_name, info, output_names, style)
+
+
+def _plots_from_info(
+    talib_name: str,
+    info: Mapping[str, object],
+    output_names: tuple[str, ...],
+    style: Mapping[str, Mapping[str, object]],
+) -> tuple[PlotSpec, ...]:
+    """Derive kind/fill_between from actual output_flags of `talib_name` to build PlotSpec.
+
+    `info` is the caller's already-fetched `talib_abstract.Function(talib_name).info` —
+    re-querying it here would call into the TA-Lib C library a second time per indicator
+    for no reason.
+
     `output_names` must be this module's output names that correspond 1:1 with talib's
     original output order (only names may differ) — if order is off, kind/fill_between
     will be assigned incorrectly. Candlestick functions have output_flags of `Line` but
     are actually markers on price, so force `kind="marker"`. Histogram outputs naturally
     split color by sign, so if `color_rule` is absent from style, auto-fill "sign".
     """
-    # talib/abstract.pyi declares only individual indicator functions and does not
-    # declare the runtime-only `Function` constructor class (talib package stub
-    # limitation) — the values actually exist at runtime.
-    info = talib_abstract.Function(talib_name).info  # type: ignore[attr-defined]
-    flags_by_output: list[list[str]] = list(info["output_flags"].values())
+    flags_by_output: list[list[str]] = list(info["output_flags"].values())  # type: ignore[attr-defined]
     if len(flags_by_output) != len(output_names):
         raise ValueError(
             f"{talib_name}: output_flags count ({len(flags_by_output)}) "
             f"!= output_names count ({len(output_names)})"
         )
-    is_candlestick = _CANDLESTICK_FLAG in (info["function_flags"] or [])
+    is_candlestick = _CANDLESTICK_FLAG in (info["function_flags"] or [])  # type: ignore[operator]
 
     upper_idx = next(
         (i for i, flags in enumerate(flags_by_output) if _UPPER_LIMIT_FLAG in flags), None
@@ -248,7 +267,7 @@ def generate_talib_specs(names: Iterable[str] | None = None) -> dict[str, Indica
         outputs = tuple(info["output_names"])
         scale, default_pane = _style_for_function(info["function_flags"])
         style = {out: {"scale": scale, "default_pane": default_pane} for out in outputs}
-        plots = _plots_from_talib(name, outputs, style)
+        plots = _plots_from_info(name, info, outputs, style)
         specs[name] = IndicatorSpec(
             name=name,
             inputs=inputs,
