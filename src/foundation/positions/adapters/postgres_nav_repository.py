@@ -6,7 +6,8 @@ Spec: docs/specs/L4_market_data_positions_ledger_v1.0.md#§4.3, §5, §9 LB-8/LB
 attempts `INSERT ... ON CONFLICT (account_id, nav_date) DO NOTHING RETURNING`; on
 conflict (row for that date already exists), re-reads the existing row and compares
 `source_hash` — a mismatch means the recomputed result differs from the previous one, so
-raises `NavChainBrokenError` (POS_NAV_CHAIN_BROKEN, no overwrite, requires ops intervention).
+raises `NavChainBrokenError` (POS_NAV_CHAIN_BROKEN, no overwrite, requires ops
+intervention).
 If equal, it is a retry of the same recomputation, so returns the existing row as-is
 (port docstring: caller should check idempotency via `get` first, but if a retried
 call skips that check and data is identical, we silently accept it here). Other
