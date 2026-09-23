@@ -161,10 +161,9 @@ const UNREGISTERED_ROUTE_WHITELIST: Readonly<Record<string, string>> = {
   // task-2336(FE-OPS-2): MandatesPage가 status/drafts/amendments/revisions/
   // {revision_id}:activate/mandate:pause/mandate:resume/policy:evaluate 7건 전부를
   // mandates.*로 등록했다 — 여기 남아 있던 7개 항목(task-2168 원 목록)을 제거한다.
-  "/v1/foundation/performance-statements": "실적 명세서 화면이 없다",
-  "/v1/foundation/performance-statements/{statement_id}": "실적 명세서 화면이 없다",
-  "/v1/foundation/performance-statements/{statement_id}:correct": "실적 명세서 정정 액션 UI가 없다",
-  "/v1/foundation/performance-statements:compute": "실적 명세서 계산 액션 UI가 없다",
+  // task-5803(FE-OPS-6): performanceStatements.* 4건(compute/list/get/correct)을
+  // apiRoutesFoundationOps.ts에 등록했다 — 여기 있던 4개 항목(task-2168 원 목록)을
+  // 제거한다(화면 배선은 decision상 이 리프 범위 밖, 경로·타입 등록만).
   // task-2337(FE-OPS-3): ReconciliationPage가 목록 조회·해소(resolve) 2건을
   // reconciliation.*로 등록했다 — 실행 이력(POST /runs)은 decision상 이 리프의
   // UI 범위 밖이라 그대로 남긴다(사람이 EntitySnapshot을 입력해 만드는 화면이 없다).
