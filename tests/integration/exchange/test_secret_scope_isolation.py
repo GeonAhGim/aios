@@ -14,6 +14,8 @@ from __future__ import annotations
 import asyncio
 import os
 import time
+from typing import Any
+from uuid import UUID
 
 import asyncpg
 import pytest
@@ -38,29 +40,29 @@ def _asyncpg_dsn() -> str:
 
 
 @pytest.fixture
-async def pool():
+async def pool() -> asyncpg.Pool:
     p = await asyncpg.create_pool(_asyncpg_dsn(), min_size=1, max_size=2)
     yield p
     await p.close()
 
 
 class _FakeAdapter:
-    async def get_balance(self):
+    async def get_balance(self) -> list[Any]:
         return []
 
-    async def aclose(self):
+    async def aclose(self) -> None:
         return None
 
 
 @pytest.fixture
-def service(pool):
+def service(pool: asyncpg.Pool) -> ExchangeCredentialService:
     key_ring = KeyRing.from_legacy_hex(ENCRYPTION_KEY)
     return ExchangeCredentialService(
-        pool, key_ring=key_ring, adapter_factory=lambda *a, **k: _FakeAdapter()
+        pool, key_ring=key_ring, adapter_factory=lambda *a, **k: _FakeAdapter()  # type: ignore[arg-type]
     )
 
 
-async def _insert_live_row(pool: asyncpg.Pool, user_id) -> None:
+async def _insert_live_row(pool: asyncpg.Pool, user_id: UUID) -> None:
     async with pool.acquire() as conn:
         await conn.execute(
             "INSERT INTO exchange_credentials "
@@ -74,7 +76,9 @@ async def _insert_live_row(pool: asyncpg.Pool, user_id) -> None:
         )
 
 
-async def test_paper_and_live_rows_coexist_for_same_user_and_exchange(service, pool):
+async def test_paper_and_live_rows_coexist_for_same_user_and_exchange(
+    service: ExchangeCredentialService, pool: asyncpg.Pool
+) -> None:
     user_id = await create_test_user(pool)
     await service.register(user_id, "bitget", "paper-key", "paper-secret")
 
@@ -87,7 +91,9 @@ async def test_paper_and_live_rows_coexist_for_same_user_and_exchange(service, p
     assert [r["scope"] for r in rows] == ["LIVE", "PAPER"]
 
 
-async def test_get_decrypted_never_returns_live_scope_row(service, pool):
+async def test_get_decrypted_never_returns_live_scope_row(
+    service: ExchangeCredentialService, pool: asyncpg.Pool
+) -> None:
     user_id = await create_test_user(pool)
     await _insert_live_row(pool, user_id)  # PAPER 행은 등록하지 않음
 
@@ -96,7 +102,9 @@ async def test_get_decrypted_never_returns_live_scope_row(service, pool):
     assert result is None
 
 
-async def test_list_for_user_excludes_live_scope_row(service, pool):
+async def test_list_for_user_excludes_live_scope_row(
+    service: ExchangeCredentialService, pool: asyncpg.Pool
+) -> None:
     user_id = await create_test_user(pool)
     await service.register(user_id, "bitget", "paper-key", "paper-secret")
     await _insert_live_row(pool, user_id)
@@ -107,7 +115,9 @@ async def test_list_for_user_excludes_live_scope_row(service, pool):
     assert summaries[0].exchange == "bitget"
 
 
-async def test_revoke_does_not_touch_live_scope_row(service, pool):
+async def test_revoke_does_not_touch_live_scope_row(
+    service: ExchangeCredentialService, pool: asyncpg.Pool
+) -> None:
     user_id = await create_test_user(pool)
     await service.register(user_id, "bitget", "paper-key", "paper-secret")
     await _insert_live_row(pool, user_id)
@@ -122,7 +132,9 @@ async def test_revoke_does_not_touch_live_scope_row(service, pool):
     assert live_active is True
 
 
-async def _get_decrypted_p95_ms(service, user_id, exchange, *, n: int) -> float:
+async def _get_decrypted_p95_ms(
+    service: ExchangeCredentialService, user_id: UUID, exchange: str, *, n: int
+) -> float:
     durations_ms: list[float] = []
     for _ in range(n):
         start = time.perf_counter()
@@ -132,7 +144,9 @@ async def _get_decrypted_p95_ms(service, user_id, exchange, *, n: int) -> float:
     return durations_ms[int(len(durations_ms) * 0.95)]
 
 
-async def test_get_decrypted_p95_under_borrowed_order_ack_budget(service, pool):
+async def test_get_decrypted_p95_under_borrowed_order_ack_budget(
+    service: ExchangeCredentialService, pool: asyncpg.Pool
+) -> None:
     """수치 성능 단언: get_decrypted는 단일 실DB 왕복(fetchrow 1회) + 로컬
     복호라는 점에서 "주문 제출→ACK p95 50ms(paper)"를 자체 예산으로
     차용한다(task-3160/3162 DEEPEN과 동일 차용 근거). 30회 반복 p95를
@@ -146,8 +160,8 @@ async def test_get_decrypted_p95_under_borrowed_order_ack_budget(service, pool):
 
 
 async def test_get_decrypted_budget_gate_fails_on_injected_regression(
-    monkeypatch: pytest.MonkeyPatch, service, pool
-):
+    monkeypatch: pytest.MonkeyPatch, service: ExchangeCredentialService, pool: asyncpg.Pool
+) -> None:
     """게이트 적색 재현: 위 p95 단언이 실제로 회귀를 잡는지 확인한다 —
     asyncpg.Connection.fetchrow에 60ms 인위 지연을 주입해, 같은 측정
     로직이 실제로 AssertionError를 내는지 본다(tautology 아님을 증명)."""
@@ -156,7 +170,7 @@ async def test_get_decrypted_budget_gate_fails_on_injected_regression(
 
     original_fetchrow = asyncpg.Connection.fetchrow
 
-    async def _slow_fetchrow(self, *args, **kwargs):
+    async def _slow_fetchrow(self: asyncpg.Connection, *args, **kwargs):  # type: ignore[no-untyped-def]
         await asyncio.sleep(0.06)
         return await original_fetchrow(self, *args, **kwargs)
 
