@@ -16,16 +16,16 @@ from src.foundation.evidence.domain.models import AuditEvent, Classification, Ou
 _UNSAFE_KEY_PATTERN = re.compile(
     r"(secret|token|password|passwd|private[_-]?key|api[_-]?key|credential)", re.IGNORECASE
 )
-"""79번 §2 "serializer rejects key names matching secret/token/password/
-private-key patterns"(AUD-004). 값이 아니라 **키 이름**을 검사한다 — 호출자가
-opaque ref를 넣었는지 원문을 넣었는지까지는 이 함수가 판단할 수 없지만, 최소
-한 필드 이름 자체가 위험 신호면 구조적으로 막는다(108번 §2.1과 동일 원칙,
-런타임 실행 경로에서도 강제)."""
+"""AUD-004: serializer rejects key names matching secret/token/password/
+private-key patterns (§2). Validates **key names**, not values — this function
+cannot tell whether the caller passed an opaque ref or the original text, but
+blocks structurally if the field name itself is a risk signal (same principle
+as §2.1 of spec 108, also enforced at runtime execution paths)."""
 
 
 class UnsafePayloadError(Exception):
-    """payload에 secret/token/password류로 보이는 키가 있다 — 호출자는 그
-    필드를 opaque `*_ref`로 바꿔서 다시 시도해야 한다."""
+    """Payload contains a key that looks like secret/token/password — the caller
+    must replace that field with an opaque `*_ref` and retry."""
 
 
 def assert_safe_payload(payload: dict[str, Any], *, _path: str = "") -> None:
@@ -58,8 +58,9 @@ def compute_event_hash(
     classification: Classification,
     occurred_at: datetime,
 ) -> str:
-    """79번 §1 해시 체인의 링크 하나. `previous_hash`가 None이면(그 tenant의
-    첫 이벤트) 빈 문자열로 취급해 체인이 항상 결정론적으로 시작하게 한다."""
+    """79 §1: one link in the hash chain. If `previous_hash` is None (first event
+    for that tenant), treat it as empty string so the chain always starts
+    deterministically."""
     payload = "|".join(
         [
             previous_hash or "",
@@ -78,8 +79,8 @@ def compute_event_hash(
 
 
 class ChainIntegrityError(Exception):
-    """79번 §4 `INTEGRITY_AUDIT_CHAIN_BROKEN` — 변조되거나 빠진 구간을
-    발견했다. `detail`에 어느 sequence_no에서 깨졌는지 남긴다."""
+    """79 §4 `INTEGRITY_AUDIT_CHAIN_BROKEN` — detected tampered or missing
+    segment. Records which sequence_no broke in `detail`."""
 
     def __init__(self, detail: str) -> None:
         super().__init__(detail)
@@ -87,9 +88,9 @@ class ChainIntegrityError(Exception):
 
 
 def verify_chain(events: list[AuditEvent]) -> None:
-    """AUD-003 — sequence_no 순으로 정렬된 한 tenant(또는 system)의 이벤트
-    목록이 진짜 체인인지 확인한다. 문제가 없으면 조용히 반환하고, 문제가
-    있으면 ChainIntegrityError를 던진다(호출자가 209/500류로 매핑)."""
+    """AUD-003 — verify whether a tenant's (or system's) event list sorted by
+    sequence_no forms a valid chain. Silently returns if OK, raises
+    ChainIntegrityError if broken (caller maps to 209/500-class codes)."""
     expected_previous: str | None = None
     for event in events:
         if event.previous_hash != expected_previous:
