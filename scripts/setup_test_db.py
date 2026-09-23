@@ -61,22 +61,39 @@ def _asyncpg_dsn(url: str) -> str:
 
 
 async def _ensure_database(server_url: str, database: str, *, reset: bool) -> bool:
-    """maintenance DB(postgres)에 붙어 대상 DB를 만든다. 반환값: 새로 만들었는지."""
+    """maintenance DB(postgres)에 붙어 대상 DB를 만든다. 반환값: 새로 만들었는지.
+
+    task-5782(esc-ci-prepare, 0f693214): 이 함수는 exists 조회 -> DROP -> CREATE가
+    원자적이지 않았다. 같은 이름(예: `aios_test_ci`)을 향한 두 호출이 동시에
+    `reset=True`로 들어오면 둘 다 exists=True를 보고 둘 다 `DROP DATABASE`를
+    쏘는데, 먼저 성공한 쪽이 지운 직후 늦은 쪽의 `DROP DATABASE`(IF EXISTS
+    없음)가 `InvalidCatalogNameError`로 죽었다. 호출자 쪽 락(pm/local_ci.py의
+    db_provision_lock)은 그 오케스트레이터를 거치는 경로만 보호하므로, 이
+    함수 자체를 postgres advisory lock으로 직렬화해 어떤 호출 경로든(다른
+    스크립트·수동 실행 포함) 안전하게 만든다. `DROP DATABASE IF EXISTS`도 함께
+    써서 락 밖에서 이미 지워진 경우(예: 수동 정리)에도 죽지 않는다.
+    """
     admin = await asyncpg.connect(_asyncpg_dsn(_with_database(server_url, "postgres")))
     try:
-        exists = await admin.fetchval("SELECT 1 FROM pg_database WHERE datname = $1", database)
-        if exists and reset:
-            await admin.execute(
-                "SELECT pg_terminate_backend(pid) FROM pg_stat_activity "
-                "WHERE datname = $1 AND pid <> pg_backend_pid()",
-                database,
+        await admin.execute("SELECT pg_advisory_lock(hashtextextended($1, 0))", database)
+        try:
+            exists = await admin.fetchval(
+                "SELECT 1 FROM pg_database WHERE datname = $1", database
             )
-            await admin.execute(f'DROP DATABASE "{database}"')
-            exists = None
-        if not exists:
-            await admin.execute(f'CREATE DATABASE "{database}"')
-            return True
-        return False
+            if exists and reset:
+                await admin.execute(
+                    "SELECT pg_terminate_backend(pid) FROM pg_stat_activity "
+                    "WHERE datname = $1 AND pid <> pg_backend_pid()",
+                    database,
+                )
+                await admin.execute(f'DROP DATABASE IF EXISTS "{database}"')
+                exists = None
+            if not exists:
+                await admin.execute(f'CREATE DATABASE "{database}"')
+                return True
+            return False
+        finally:
+            await admin.execute("SELECT pg_advisory_unlock(hashtextextended($1, 0))", database)
     finally:
         await admin.close()
 
