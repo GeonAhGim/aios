@@ -9,7 +9,8 @@
     "lint": "oxlint && node ../../scripts/check_i18n_literals.mjs && node ../../scripts/check_hardcoded_colors.mjs && node ../../scripts/check_a11y_baseline.mjs",
     "preview": "vite preview",
     "test": "vitest run",
-    "test:coverage": "vitest run --coverage"
+    "test:coverage": "vitest run --coverage",
+    "bench:chart-pane-row": "node bench/chartPaneRow_bench.mjs"
   },
   "dependencies": {
     "@aios/api-client": "*",
