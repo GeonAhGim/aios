@@ -1,11 +1,12 @@
-"""BT-3 — 수수료 모델(순수).
+"""BT-3 — Commission model (pure).
 
 Spec: docs/specs/L4_analytics_authoring_backtest_marketplace_v1.0.md
 §2.5 BT-3, §3.4(`commission: VenueTier{venue, maker_bps, taker_bps, min_fee}`).
 
-`VenueTierCommission`(`domain/models_v2.py`)을 그대로 소비한다. 정액
-하한(`min_fee`)은 비율 수수료가 그보다 작을 때 올림 적용한다(내림 아님)
-— 소액 체결에서 거래소가 실제로 부과하는 최소 수수료를 반영한다.
+Consumes `VenueTierCommission` (`domain/models_v2.py`) as-is. The fixed
+floor (`min_fee`) applies ceiling when the rate-based fee falls below it
+(not floor), reflecting the minimum fee exchanges actually charge on
+small trades.
 """
 from __future__ import annotations
 
@@ -18,12 +19,12 @@ _BPS = Decimal("10000")
 
 def _reject_negative_or_nan(value: Decimal, name: str) -> None:
     if value.is_nan() or value < 0:
-        raise ValueError(f"{name}는 음수·NaN을 허용하지 않는다: {value}")
+        raise ValueError(f"{name}: negative and NaN values are not allowed: {value}")
 
 
 def compute_commission(model: VenueTierCommission, *, is_maker: bool, notional: Decimal) -> Decimal:
-    """체결 명목가(`notional` = 체결가 * 수량)에 등급별 bps를 적용하고
-    `min_fee` 하한을 강제한다."""
+    """Apply tier-specific bps to trade notional (`notional` = price * quantity)
+    and enforce the `min_fee` floor."""
 
     _reject_negative_or_nan(notional, "notional")
     rate_bps = model.maker_bps if is_maker else model.taker_bps
