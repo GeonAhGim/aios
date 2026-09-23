@@ -1,8 +1,9 @@
-"""Connected Asset API — 71번 §6 규칙: router는 auth/주입/transport
-validation/command invocation만 담당한다.
+"""Connected Asset API — Rule 71 §6: router handles only auth, injection,
+transport validation, and command invocation.
 
-도메인 예외는 여기서 잡지 않는다 — `src/api/contracts/exception_mapping.py`의
-`EXCEPTION_MAP`이 전역 핸들러에서 봉투로 번역한다(§9 PLT-21 decision, task-1108).
+Domain exceptions are not caught here — `EXCEPTION_MAP` in
+`src/api/contracts/exception_mapping.py` translates them to envelopes via
+the global handler (§9 PLT-21 decision, task-1108).
 """
 from __future__ import annotations
 
