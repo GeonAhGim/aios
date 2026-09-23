@@ -19,5 +19,8 @@ from src.data.models.base import Currency, FXRate
 @runtime_checkable
 class FxRateSource(Protocol):
     async def rate(self, base: Currency, quote: Currency, at: AwareDatetime) -> FXRate | None:
-        """FX rate for `base/quote` at the given `at` timestamp. Returns `None` if not found (POS_FX_RATE_MISSING)."""
+        """FX rate for `base/quote` at the given `at` timestamp.
+
+        Returns `None` if not found (POS_FX_RATE_MISSING).
+        """
         ...
