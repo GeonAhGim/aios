@@ -1,19 +1,22 @@
-"""20.1 — 기간별 보고서 집계 API (ReportService).
+"""20.1 — Period-based report aggregation API (ReportService).
 
-Spec: 기능설계문서_v1.20.md#FD-20.1, FD-3.2/3.3, 9.4
+Spec: design_doc_v1.20.md#FD-20.1, FD-3.2/3.3, 9.4
 
-설계 원칙(Draft, 정책문서 17.9-A 과잉설계 방지) — 별도 저장 없이 매
-요청마다 즉석 집계한다. execution_id를 지정하면 그 실행만, 없으면
-사용자의 전체 포트폴리오를 집계한다.
+Design principle (Draft, policy doc 17.9-A avoid over-engineering) —
+aggregate on the fly per request without persisting. When execution_id
+is provided, aggregate only that execution; otherwise aggregate the
+user's full portfolio.
 
-closed_at이 있는 포지션(청산 완료)만 실현손익/승률/거래횟수 집계
-대상이다 — quantity=0인 포지션도 행을 삭제하지 않고 closed_at을
-기록해 이력으로 남기는 기존 원칙(positions 마이그레이션 주석)을
-그대로 이용한다.
+Only positions with a closed_at value (closed/liquidated) are included
+in realized PnL / win rate / trade count aggregation — we rely on the
+existing convention (see positions migration comment) where positions
+with quantity=0 are not deleted from rows but instead have closed_at
+recorded to preserve them as history.
 
-MDD는 이 보고서 기간 내 일별 누적손익 곡선의 최대 낙폭(절대 금액,
-고점-저점)으로 계산한다 — 시작 자본 기준값이 이 조회 스콥에 없어
-백분율이 아닌 절대 금액으로 표현한다(Draft).
+MDD is computed as the maximum drawdown (absolute amount, peak-to-trough)
+of the daily cumulative PnL curve within this report period — expressed
+as an absolute amount rather than a percentage because a starting capital
+baseline is not available in this query scope (Draft).
 """
 from __future__ import annotations
 
