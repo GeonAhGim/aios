@@ -1,9 +1,10 @@
-"""application 커맨드 공용 헬퍼 — 소유권 확인 + 뷰 변환.
+"""Application command common helpers — ownership verification + view transformation.
 
-`_load_owned_layout()`이 CH-5 DoD의 "타 테넌트도 404" 지점이다: 존재하지
-않는 layout_id와 다른 테넌트 소유 layout_id를 정확히 같은 예외/문자열
-형태로 구분 없이 취급해, 응답에서 "존재는 하는데 권한이 없다"는 정보가
-새지 않는다(reconciliation `resolve_reconciliation.py`와 동일 패턴)."""
+`_load_owned_layout()` is the CH-5 DoD "also 404 for cross-tenant" point: it treats
+a non-existent layout_id and a layout_id owned by another tenant identically,
+returning the same exception/string form so the response reveals no
+"exists but unauthorized" information (same pattern as reconciliation
+`resolve_reconciliation.py`)."""
 from __future__ import annotations
 
 from uuid import UUID
@@ -64,8 +65,8 @@ def drawing_set_to_view(drawing_set: ChartDrawingSet) -> DrawingsDocumentView:
 async def load_owned_indicator_template(
     repo: ChartingRepository, *, tenant_id: UUID, template_id: UUID
 ) -> ChartIndicatorTemplate:
-    """`load_owned_layout()`과 동일 원칙 — 미존재/타 테넌트 소유를 같은
-    예외 형태로 구분 없이 취급한다(둘 다 404)."""
+    """Same principle as `load_owned_layout()` — non-existent and cross-tenant
+    templates raise the same exception form (both 404)."""
     template = await repo.get_indicator_template(template_id)
     if template is None:
         raise ChartIndicatorTemplateNotFoundError(str(template_id))
