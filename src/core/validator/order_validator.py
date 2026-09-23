@@ -2,15 +2,15 @@
 
 Spec: 03_core_modules_v1.1.md#§3.3, 08_test_plan_v1.2.md#§8.2
 
-6.7 원칙 — 시스템 전체의 기본 방어선. 정책 위반 여부(Risk 한도 등)는
-FROZEN Zone(Risk Engine)의 책임이며, 여기서는 순수 데이터 형식·필수값
-검증만 수행한다.
+Principle 6.7 — First line of defense across the system. Policy violations
+(e.g. Risk limits) are the responsibility of the FROZEN Zone (Risk Engine);
+this module performs only pure data format and required-field validation.
 
-편차: tick_size/supported_asset_classes는 각각 ExchangeAdapter(작업트리
-6번, 아직 미구현)가 제공할 값이라 콜러가 주입하는 선택 파라미터로 두었다
-— 주어지지 않으면 해당 검사는 건너뛴다(값을 몰라서 통과시키는 것이지,
-검증 자체를 생략해도 안전하다는 뜻은 아니다. Adapter 착수 후 항상 채워
-호출해야 한다).
+Deviation: tick_size and supported_asset_classes are optional parameters
+injected by the caller, since their values will be provided by ExchangeAdapter
+(Task #6, not yet implemented). If not provided, the respective check is
+skipped — this does not mean it is safe to omit validation; always populate
+these values after the Adapter is implemented and call accordingly.
 """
 from __future__ import annotations
 
@@ -41,8 +41,9 @@ def validate_order_params(
         if (order.price.amount % tick_size) != 0:
             errors.append(f"가격이 tick_size({tick_size})의 배수가 아닙니다.")
 
-    # ADR-2026-08-28 capability-gated 원칙(02번 §2.0-A) — 대상 거래소가
-    # 지원하지 않는 자산군이면 즉시 거부(침묵 실패/임의 폴백 금지).
+    # ADR-2026-08-28 capability-gated principle (#02 §2.0-A) — reject
+    # immediately if the target exchange does not support the asset class
+    # (silence failure or arbitrary fallback prohibited).
     if supported_asset_classes is not None and order.asset_class not in supported_asset_classes:
         errors.append(f"UNSUPPORTED_ASSET_CLASS: {order.asset_class.value}")
 
