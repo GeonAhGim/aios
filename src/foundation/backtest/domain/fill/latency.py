@@ -16,12 +16,12 @@ from datetime import datetime, timedelta
 
 def _require_utc(value: datetime, name: str) -> None:
     if value.tzinfo is None or value.utcoffset() is None:
-        raise ValueError(f"{name}는 tz-aware UTC datetime이어야 한다: {value}")
+        raise ValueError(f"{name} must be a tz-aware UTC datetime: {value}")
 
 
 def _reject_negative_latency(latency_ms: int) -> None:
     if latency_ms < 0:
-        raise ValueError(f"latency_ms는 음수를 허용하지 않는다: {latency_ms}")
+        raise ValueError(f"latency_ms must not be negative: {latency_ms}")
 
 
 def delayed_arrival_time(*, submitted_at: datetime, latency_ms: int) -> datetime:
@@ -48,4 +48,4 @@ def resolve_execution_bar_index(
         _require_utc(open_time, f"bar_open_times[{index}]")
         if open_time > arrival:
             return index
-    raise LookupError("도달 시각 이후에 열리는 bar가 없다 — 데이터 범위 밖")
+    raise LookupError("No bar opens after the arrival time — outside data range")
