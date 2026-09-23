@@ -91,7 +91,12 @@ async def test_fetch_candles_maps_daily_ohlc_and_filters_range() -> None:
             json={
                 "rt_cd": "0",
                 "msg1": "ok",
-                "output2": [_daily_row("20260901"), _daily_row("20260902"), _daily_row("20260903")],
+                "output2": [
+                    _daily_row("20260901"),
+                    _daily_row("20260902"),
+                    _daily_row("20260903"),
+                    _daily_row("20260904"),  # open_time == end -- 종료 경계는 제외돼야 함
+                ],
             },
         )
 
@@ -293,7 +298,12 @@ async def test_gate_red_when_range_filter_removed_existing_test_would_fail(monke
             json={
                 "rt_cd": "0",
                 "msg1": "ok",
-                "output2": [_daily_row("20260901"), _daily_row("20260902"), _daily_row("20260903")],
+                "output2": [
+                    _daily_row("20260901"),
+                    _daily_row("20260902"),
+                    _daily_row("20260903"),
+                    _daily_row("20260904"),  # open_time == end -- 종료 경계는 제외돼야 함
+                ],
             },
         )
 
