@@ -14,12 +14,8 @@ import pytest
 from cryptography.exceptions import InvalidTag
 
 from src.core.security import encryption
-from src.core.security.key_ring import (
-    KeyRing,
-    KeyRingConfigError,
-    LocalKeyRingKmsAdapter,
-    UnknownKeyIdError,
-)
+from src.core.security.encryption import LocalKeyRingKmsAdapter
+from src.core.security.key_ring import KeyRing, KeyRingConfigError, UnknownKeyIdError
 from src.core.security.kms_port import KmsPort
 
 KEY_V1 = "11" * 32
