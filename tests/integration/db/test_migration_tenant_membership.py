@@ -14,6 +14,7 @@ from __future__ import annotations
 import subprocess
 import sys
 import time
+from collections.abc import AsyncGenerator, Generator
 from pathlib import Path
 from uuid import uuid4
 
@@ -55,14 +56,14 @@ def _run_alembic(*args: str) -> None:
 
 
 @pytest.fixture
-async def pool():
+async def pool() -> AsyncGenerator[asyncpg.Pool, None]:
     p = await asyncpg.create_pool(_asyncpg_dsn(), min_size=1, max_size=4)
     yield p
     await p.close()
 
 
 @pytest.fixture(autouse=True)
-def _ensure_head():
+def _ensure_head() -> Generator[None, None, None]:
     """각 테스트 시작 시 head 상태를 보장한다 — 정의 순서에 의존하지 않고,
     라운드트립 테스트가 assert 실패로 중단돼도 다음 테스트가 downgrade된
     스키마를 보지 않게 한다."""
@@ -77,7 +78,7 @@ async def _table_exists(pool: asyncpg.Pool, table_name: str) -> bool:
     return reg is not None
 
 
-async def test_downgrade_then_upgrade_backfills_personal_tenant(pool):
+async def test_downgrade_then_upgrade_backfills_personal_tenant(pool: asyncpg.Pool) -> None:
     user_id = await create_test_user(pool)
 
     await purge_position_snapshots(pool)  # deep downgrade: see tests/support/deep_downgrade.py
@@ -108,7 +109,7 @@ async def test_downgrade_then_upgrade_backfills_personal_tenant(pool):
     assert membership_rows[0]["revision"] == 1
 
 
-async def test_active_membership_unique_per_tenant_subject(pool):
+async def test_active_membership_unique_per_tenant_subject(pool: asyncpg.Pool) -> None:
     subject_id = await create_test_user(pool)
     tenant_id = uuid4()  # ORGANIZATION tenant는 personal backfill과 무관한 신규 id
 
@@ -151,7 +152,7 @@ async def test_active_membership_unique_per_tenant_subject(pool):
 # ----------------------------------------------------------------------
 
 
-async def test_tenant_kind_check_constraint_rejects_invalid_kind(pool):
+async def test_tenant_kind_check_constraint_rejects_invalid_kind(pool: asyncpg.Pool) -> None:
     """negative — `tenant.kind`는 PERSONAL/HOUSEHOLD/ORGANIZATION 세 값만
     허용한다(f4a6b8c0d2e4 CHECK). 임의 문자열은 거부되어야 한다."""
     async with pool.acquire() as conn:
@@ -159,7 +160,7 @@ async def test_tenant_kind_check_constraint_rejects_invalid_kind(pool):
             await conn.execute("INSERT INTO tenant (id, kind) VALUES ($1, 'INVALID_KIND')", uuid4())
 
 
-async def test_tenant_membership_role_check_constraint_rejects_invalid_role(pool):
+async def test_tenant_membership_role_check_constraint_rejects_invalid_role(pool: asyncpg.Pool) -> None:
     """negative — `tenant_membership.role`은 OWNER/ADMIN/MEMBER/AUDITOR/
     SERVICE만 허용한다. 임의 문자열은 거부되어야 한다."""
     subject_id = await create_test_user(pool)
@@ -177,7 +178,7 @@ async def test_tenant_membership_role_check_constraint_rejects_invalid_role(pool
             )
 
 
-async def test_tenant_membership_subject_must_reference_existing_user(pool):
+async def test_tenant_membership_subject_must_reference_existing_user(pool: asyncpg.Pool) -> None:
     """negative — `tenant_membership.subject_id`는 `users(user_id)` FK다.
     존재하지 않는 subject_id는 ForeignKeyViolation으로 거부되어야 한다."""
     tenant_id = uuid4()
@@ -199,7 +200,7 @@ async def test_tenant_membership_subject_must_reference_existing_user(pool):
 # ----------------------------------------------------------------------
 
 
-async def test_backfill_heals_user_left_without_tenant_row(pool):
+async def test_backfill_heals_user_left_without_tenant_row(pool: asyncpg.Pool) -> None:
     """실패 주입 — b8ac30eb4fe0 docstring이 설명하는 실제 장애(task-2020
     이전에는 `users` insert와 `tenant` insert가 원자적이지 않아, 사용자는
     생겼는데 대응 tenant가 없는 상태가 남을 수 있었다)를 직접 재현한다.
@@ -239,7 +240,7 @@ async def test_backfill_heals_user_left_without_tenant_row(pool):
 # ----------------------------------------------------------------------
 
 
-async def test_tenant_membership_insert_latency_p95_within_budget(pool):
+async def test_tenant_membership_insert_latency_p95_within_budget(pool: asyncpg.Pool) -> None:
     """수치 성능 단언 — 부분 UNIQUE 인덱스(uq_tenant_membership_active)가
     걸려 있는 상태에서 `tenant_membership` 삽입 1회의 p95 지연시간이
     예산을 넘지 않아야 한다. 실측 기준선은 로컬 DB에서 수 ms 수준이며,
@@ -278,7 +279,7 @@ async def test_tenant_membership_insert_latency_p95_within_budget(pool):
 # ----------------------------------------------------------------------
 
 
-async def test_gate_red_reproduction_without_partial_unique_index(pool):
+async def test_gate_red_reproduction_without_partial_unique_index(pool: asyncpg.Pool) -> None:
     """게이트 적색 재현 — `uq_tenant_membership_active`가 부분 인덱스
     (`WHERE state = 'ACTIVE'`)가 아니라 일반 UNIQUE였다면(그럴듯한 회귀:
     누군가 "단순화"하며 WHERE 절을 지움), 현재
