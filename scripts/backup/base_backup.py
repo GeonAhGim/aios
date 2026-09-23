@@ -100,6 +100,9 @@ def run_base_backup(
         "-l",
         backup_label,
         "--wal-method=stream",
+        # CTO 2026-09-23: 기본(spread) 체크포인트는 수십 분 대기 중 시작 WAL이 재활용돼
+        # "WAL 세그먼트 이미 제거됨"으로 실패했다(드릴 17:01/18:00 재현) — fast로 즉시 시작.
+        "--checkpoint=fast",
         "-C",
         "-S",
         "aios_drill",
