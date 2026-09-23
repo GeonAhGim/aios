@@ -1,9 +1,9 @@
-"""EvaluateTrustFreshness 쿼리.
+"""EvaluateTrustFreshness query.
 
-Spec: AIOSproject 73번 §4 (`EvaluateTrustFreshness`, query — no event).
-Mandate/Package/Paper Control 등 다른 FND 컨텍스트가 "이 tenant가 이 purpose에
-대해 유효한 동의를 갖고 있는가"만 확인할 때 쓰는 진입점(71번 §4 Contract
-ownership — trust가 owner, 다른 context는 consumer).
+Spec: AIOSproject #73 §4 (`EvaluateTrustFreshness`, query — no event).
+Entry point used by other FND contexts (Mandate/Package/Paper Control, etc.) when they
+need to check "does this tenant hold valid consent for this purpose"
+(#71 §4 Contract ownership — trust is the owner, other contexts are consumers).
 """
 from __future__ import annotations
 
@@ -20,14 +20,15 @@ async def evaluate_trust_freshness(
 ) -> TrustFreshnessDecision:
     now = datetime.now(timezone.utc)
     disclosure: Disclosure | None = await repo.get_active_disclosure(purpose)
-    # get_active_consent가 아니라 get_latest_consent를 쓴다 — "동의한 적 없음"과
-    # "동의했다가 철회함"을 구분해야 POLICY_CONSENT_REQUIRED/REVOKED 중 올바른
-    # reason_code를 반환할 수 있다(72번 §4 에러 taxonomy).
+    # Use get_latest_consent, not get_active_consent — we must distinguish
+    # "never consented" from "consented then revoked" to return the correct
+    # reason_code (POLICY_CONSENT_REQUIRED vs REVOKED) per #72 §4 error taxonomy.
     consent: Consent | None = await repo.get_latest_consent(context.tenant_id, purpose)
 
     if disclosure is None:
-        # 요구되는 disclosure 자체가 아직 발행되지 않았다 — 정책 미비를
-        # "동의 없음"과 구분해 운영자가 알 수 있게 한다.
+        # The required disclosure has not yet been published — let the operator
+        # distinguish this from "no consent" (e.g. POLICY_DISCLOSURE_NOT_PUBLISHED
+        # vs POLICY_CONSENT_REQUIRED).
         return TrustFreshnessDecision(
             tenant_id=context.tenant_id,
             purpose=purpose,
