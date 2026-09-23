@@ -1,5 +1,5 @@
-"""Trust Core API request/response schemas — keep only HTTP details (path parameters, etc.) here; the
-contract itself wraps `src/foundation/trust/contracts/v1.py` (item 106 §2)."""
+"""Trust Core API request/response schemas — keep only HTTP details (path parameters, etc.)
+here; the contract itself wraps `src/foundation/trust/contracts/v1.py` (item 106 §2)."""
 from __future__ import annotations
 
 from datetime import datetime

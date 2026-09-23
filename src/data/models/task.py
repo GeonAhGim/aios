@@ -25,7 +25,10 @@ class TaskStatus(str, Enum):
 
 
 class AIOSTask(BaseModel):
-    """1:1 Pydantic implementation of section 4.3 JSON Schema. Integrated with 16.2 Capability Token via task_id."""
+    """1:1 Pydantic implementation of section 4.3 JSON Schema.
+
+    Integrated with 16.2 Capability Token via task_id.
+    """
 
     task_id: UUID = Field(default_factory=uuid4)
     parent_task_id: UUID | None = None
