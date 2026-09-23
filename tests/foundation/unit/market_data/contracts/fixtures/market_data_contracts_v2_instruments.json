@@ -34,7 +34,7 @@
         "type": "string"
       },
       "InstrumentLifecycle": {
-        "description": "§4.2 심볼 생애주기 전이표의 상태. 전이 규칙 자체는 DC-3\n(`domain/instruments/lifecycle.py`)의 책임이며, 이 계약은 상태 값만\n정의한다.",
+        "description": "States from the §4.2 symbol lifecycle transition table. The transition\nrules themselves are the responsibility of DC-3\n(`domain/instruments/lifecycle.py`); this contract defines state values only.",
         "enum": [
           "PENDING",
           "ACTIVE",
@@ -63,7 +63,7 @@
         "type": "string"
       }
     },
-    "description": "벤처 독립적인 심볼 마스터 레코드. `instrument_id`는 불변(§4.1) —\n재상장은 같은 id를 재사용하지 않고 새 `Instrument`를 발급한다(§4.2\ndelisted→relisted: \"새 instrument 생성(구 id 유지 금지)\").\n\n`frozen=True` matches every other contract in this package\n(`candle_lineage.TickLineage`, `coverage.CoverageSpan`,\n`microstructure.TradeTick`/`QuoteL1`/`BookL2`) — the §4.1\n`instrument_id` invariant must hold in memory, not just at the DB\nconstraint (DC-4). `lifecycle_state` transitions (DC-3) never mutate\nthis object in place; the repository reconstructs a fresh\n`Instrument` from the DB `UPDATE ... RETURNING` row, so `frozen=True`\ndoes not conflict with that flow.",
+    "description": "Symbol master record, venue-independent. `instrument_id` is immutable\n(§4.1) — relisting does not reuse the same id but issues a new\n`Instrument` (§4.2 delisted→relisted: \"new instrument creation (old id\nreuse prohibited)\").\n\n`frozen=True` matches every other contract in this package\n(`candle_lineage.TickLineage`, `coverage.CoverageSpan`,\n`microstructure.TradeTick`/`QuoteL1`/`BookL2`) — the §4.1\n`instrument_id` invariant must hold in memory, not just at the DB\nconstraint (DC-4). `lifecycle_state` transitions (DC-3) never mutate\nthis object in place; the repository reconstructs a fresh\n`Instrument` from the DB `UPDATE ... RETURNING` row, so `frozen=True`\ndoes not conflict with that flow.",
     "properties": {
       "instrument_id": {
         "title": "Instrument Id",
@@ -318,7 +318,7 @@
         "type": "string"
       }
     },
-    "description": "벤처별 심볼 매핑. `(venue, venue_symbol, listed_at)`는 유일해야\n한다(§3.2) — 이 유일성은 DC-4 마이그레이션의 DB 제약(EXCLUDE)이 실제로\n강제하고, 이 DTO는 그 계약 형태만 표현한다. 심볼 변경은 구 listing에\n`delisted_at`을 채우고 새 listing을 등록하는 방식으로 표현한다\n(`instrument_id`는 그대로).\n\n`frozen=True` for the same reason as `Instrument` (consistency with\nevery other contract in this package) — nothing quietly rewrites a\nlisting-history record in memory.",
+    "description": "Venue-specific symbol mapping. `(venue, venue_symbol, listed_at)` must\nbe unique (§3.2) — this uniqueness is actually enforced by the DC-4\nmigration's DB constraint (EXCLUDE), and this DTO expresses only that\ncontract shape. A symbol change is expressed by filling `delisted_at` on\nthe old listing and registering a new listing (`instrument_id` stays the\nsame).\n\n`frozen=True` for the same reason as `Instrument` (consistency with\nevery other contract in this package) — nothing quietly rewrites a\nlisting-history record in memory.",
     "properties": {
       "instrument_id": {
         "title": "Instrument Id",
