@@ -68,7 +68,7 @@ class ReportService:
         async with self._pool.acquire() as conn:
             condition = (
                 "p.user_id = $1 AND p.closed_at IS NOT NULL "
-                "AND p.closed_at::date BETWEEN $2 AND $3"
+                "AND (p.closed_at AT TIME ZONE 'UTC')::date BETWEEN $2 AND $3"
             )
             params: list[Any] = [user_id, period_start, period_end]
             if execution_id is not None:
@@ -78,7 +78,7 @@ class ReportService:
             rows = await conn.fetch(
                 f"""
                 SELECT p.strategy_id, p.execution_id, p.realized_pnl,
-                       p.closed_at::date AS trade_date
+                       (p.closed_at AT TIME ZONE 'UTC')::date AS trade_date
                 FROM positions p
                 WHERE {condition}
                 ORDER BY p.closed_at ASC
