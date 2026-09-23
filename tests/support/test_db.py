@@ -1,4 +1,4 @@
-"""PLT-36 tests/support/db.py — negative/failure-injection tests.
+"""PLT-36 tests/support/db.py — negative/failure-injection/perf/gate tests.
 
 Spec: docs/specs/L4_platform_observability_tenancy_api_v1.0.md §2.4/§9 PLT-36.
 DoD: negative test ≥3, failure-injection ≥1, perf assertion, gate-red repro.
@@ -6,12 +6,15 @@ DoD: negative test ≥3, failure-injection ≥1, perf assertion, gate-red repro.
 
 from __future__ import annotations
 
+import os
 import sys
+import time
 from typing import TYPE_CHECKING
 
 import asyncpg
 import pytest
 
+from scripts import setup_test_db as setup_test_db_cli
 from tests.support.db import (
     _asyncpg_dsn,
     _db_name,
@@ -170,3 +173,72 @@ def test_with_database_preserves_query_and_fragment() -> None:
     base = "postgresql://u:p@localhost:5432/db?sslmode=require#frag"
     result = _with_database(base, "newdb")
     assert result == "postgresql://u:p@localhost:5432/newdb?sslmode=require#frag"
+
+
+# ── Perf assertion: real-DB clone latency (실 DB, TEST_DATABASE_URL) ──
+
+
+@pytest.mark.perf
+@pytest.mark.asyncio
+async def test_ensure_worker_database_clone_meets_latency_budget() -> None:
+    """`CREATE DATABASE ... TEMPLATE` 복제가 예산 내에 끝난다.
+
+    모듈 docstring은 "마이그레이션 재실행 없이 ~1초"를 주장한다 — 이 테스트는
+    TEST_DATABASE_URL을 템플릿으로 실제 워커 DB 하나를 복제해 그 주장을
+    실측으로 검증한다. 절대 ms 임계 대신 여유 있는 예산(10s)을 쓰는 이유는
+    `test_perf_journal.py`(task-920/1029)와 동일 — 이 리포의 공유 로컬
+    Postgres는 CI 환경별 지연 배율 편차가 커서, 좁은 절대 임계는 코드 회귀가
+    아니라 환경 변동으로 적색이 된다. 복제된 워커 DB는 측정 직후 DROP해
+    다른 세션의 `aios_test_*` 목록을 오염시키지 않는다.
+    """
+    template_url = os.environ["TEST_DATABASE_URL"]
+    worker_id = "permtest"
+    budget_sec = 10.0
+
+    start = time.perf_counter()
+    worker_url = await ensure_worker_database(template_url, worker_id)
+    elapsed = time.perf_counter() - start
+    print(f"[PLT-36 clone] ensure_worker_database elapsed={elapsed:.3f}s (budget<{budget_sec}s)")
+
+    admin = await asyncpg.connect(_asyncpg_dsn(_with_database(template_url, "postgres")))
+    try:
+        worker_db = _db_name(worker_url)
+        await admin.execute(
+            "SELECT pg_terminate_backend(pid) FROM pg_stat_activity "
+            "WHERE datname = $1 AND pid <> pg_backend_pid()",
+            worker_db,
+        )
+        await admin.execute(f'DROP DATABASE IF EXISTS "{worker_db}"')
+    finally:
+        await admin.close()
+
+    assert elapsed < budget_sec, f"워커 DB 복제가 예산({budget_sec}s)을 초과: {elapsed:.3f}s"
+
+
+# ── Gate-red/green repro: scripts/setup_test_db.py CLI exit code 계약 ──
+
+
+def test_setup_test_db_cli_rejects_invalid_name_nonzero_exit() -> None:
+    """게이트 적색 재현: DB 이름이 규칙(소문자·숫자·밑줄 40자)을 벗어나면
+    CLI가 0이 아닌 코드로 종료한다(`main()`의 `_NAME_RE` 가드, setup_test_db.py
+    line ~210)."""
+    argv = sys.argv
+    sys.argv = ["setup_test_db.py", "Bad-Name!"]
+    try:
+        with pytest.raises(SystemExit) as exc_info:
+            setup_test_db_cli.main()
+    finally:
+        sys.argv = argv
+    assert exc_info.value.code not in (0, None)
+
+
+def test_setup_test_db_cli_list_is_gate_green_real_db() -> None:
+    """게이트 초록 재현: `--list`는 실 DB(read-only, `aios_test_%` 조회만)에
+    접속해 0으로 종료한다 — 위 적색 재현과 짝을 이루는 성공 경로."""
+    argv = sys.argv
+    sys.argv = ["setup_test_db.py", "--list"]
+    try:
+        exit_code = setup_test_db_cli.main()
+    finally:
+        sys.argv = argv
+    assert exit_code == 0
