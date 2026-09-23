@@ -27,6 +27,7 @@ export const MAIN_NAV_ITEMS: NavItem[] = [
   { to: "/ai/studio", label: "nav./ai/studio" },
   { to: "/executions", label: "nav./executions" },
   { to: "/portfolio", label: "nav./portfolio" },
+  { to: "/portfolio/performance-statements", label: "nav./portfolio/performance-statements" },
   { to: "/rebalance", label: "nav./rebalance" },
   { to: "/mandates", label: "nav./mandates" },
   { to: "/compliance", label: "nav./compliance" },

@@ -358,6 +358,7 @@ export const catalogEn = {
     "/ai/studio": "AI studio",
     "/executions": "Execution control",
     "/portfolio": "Portfolio",
+    "/portfolio/performance-statements": "Performance statements",
     "/rebalance": "Rebalance",
     "/mandates": "Mandates",
     "/compliance": "Compliance",

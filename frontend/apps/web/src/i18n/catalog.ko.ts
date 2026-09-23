@@ -370,6 +370,7 @@ export const catalogKo = {
     "/ai/studio": "AI 스튜디오",
     "/executions": "실행제어판",
     "/portfolio": "포트폴리오",
+    "/portfolio/performance-statements": "성과 명세서",
     "/rebalance": "리밸런싱",
     "/mandates": "위임장",
     "/compliance": "컴플라이언스",
