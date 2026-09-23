@@ -124,6 +124,16 @@ export const catalogKoLegacyC = {
     "t8": "번들 버전",
     "t9": "판정 시각",
   },
+  "complianceExceptionApproval": {
+    "t1": "예외 승인(override)",
+    "t2": "대기 중인 예외 승인 요청이 없습니다.",
+    "t3": "예외 승인 API가 아직 연결되지 않았습니다 — 승인/거부가 비활성화됩니다.",
+    "label4": "사유",
+    "t5": "승인",
+    "t6": "거부",
+    "t7": "처리 완료.",
+    "t8": "사유를 입력하세요.",
+  },
   "disputeSubmitPage": {
     "title1": "분쟁 신고",
     "t2": "분쟁이 접수됐습니다 (#{{disputeId}}, {{status}}).",

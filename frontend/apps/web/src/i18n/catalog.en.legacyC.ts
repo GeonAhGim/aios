@@ -122,6 +122,16 @@ export const catalogEnLegacyC = {
     "t8": "Bundle version",
     "t9": "Verdict time",
   },
+  "complianceExceptionApproval": {
+    "t1": "Exception approval (override)",
+    "t2": "No pending exception approval requests.",
+    "t3": "The exception approval API is not wired up yet — approve/reject is disabled.",
+    "label4": "Reason",
+    "t5": "Approve",
+    "t6": "Reject",
+    "t7": "Processed.",
+    "t8": "Enter a reason.",
+  },
   "disputeSubmitPage": {
     "title1": "Report a dispute",
     "t2": "Dispute submitted (#{{disputeId}}, {{status}}).",
