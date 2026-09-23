@@ -19,6 +19,7 @@ from tests.support.db import (
     _asyncpg_dsn,
     _db_name,
     _with_database,
+    create_pool_with_retry,
     ensure_worker_database,
     session_database_url,
 )
@@ -151,6 +152,107 @@ async def test_ensure_worker_database_propagates_object_in_use_after_retries() -
             await ensure_worker_database(template_url, "gw0")
     finally:
         db_module2.asyncpg.connect = original_connect
+
+
+@pytest.mark.asyncio
+async def test_create_pool_with_retry_retries_transient_reset_then_succeeds(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """esc-ci-pytest.json/task-6235: a transient WinError 64 / asyncpg
+    ConnectionDoesNotExistError on the first attempt is absorbed -- the second
+    attempt's successful pool is returned, not the exception."""
+    db_module = sys.modules["tests.support.db"]
+    sentinel_pool = object()
+    calls = 0
+
+    async def _fake_create_pool(dsn: str, **kwargs: object) -> object:
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            raise asyncpg.exceptions.ConnectionDoesNotExistError(
+                "connection was closed in the middle of operation"
+            )
+        return sentinel_pool
+
+    monkeypatch.setattr(db_module.asyncpg, "create_pool", _fake_create_pool)
+    monkeypatch.setattr(db_module, "_POOL_CONNECT_RETRY_BASE_DELAY", 0.0)
+
+    result = await create_pool_with_retry("postgresql://u:p@localhost/db")
+
+    assert result is sentinel_pool
+    assert calls == 2
+
+
+@pytest.mark.asyncio
+async def test_create_pool_with_retry_retries_oserror_then_succeeds(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The same absorption applies to the raw `OSError` shape (WinError 64
+    surfaces as `ConnectionResetError`, an `OSError` subclass, before asyncpg
+    wraps it)."""
+    db_module = sys.modules["tests.support.db"]
+    sentinel_pool = object()
+    calls = 0
+
+    async def _fake_create_pool(dsn: str, **kwargs: object) -> object:
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            raise ConnectionResetError(22, "network name no longer available", None, 64, None)
+        return sentinel_pool
+
+    monkeypatch.setattr(db_module.asyncpg, "create_pool", _fake_create_pool)
+    monkeypatch.setattr(db_module, "_POOL_CONNECT_RETRY_BASE_DELAY", 0.0)
+
+    result = await create_pool_with_retry("postgresql://u:p@localhost/db")
+
+    assert result is sentinel_pool
+    assert calls == 2
+
+
+@pytest.mark.asyncio
+async def test_create_pool_with_retry_propagates_after_exhausting_attempts(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Fail-closed: a persistent reset (not just a one-off transient) still
+    raises after `_POOL_CONNECT_ATTEMPTS` -- this never becomes a false green."""
+    db_module = sys.modules["tests.support.db"]
+    calls = 0
+
+    async def _always_fails(dsn: str, **kwargs: object) -> object:
+        nonlocal calls
+        calls += 1
+        raise asyncpg.exceptions.ConnectionDoesNotExistError("connection does not exist")
+
+    monkeypatch.setattr(db_module.asyncpg, "create_pool", _always_fails)
+    monkeypatch.setattr(db_module, "_POOL_CONNECT_RETRY_BASE_DELAY", 0.0)
+
+    with pytest.raises(asyncpg.exceptions.ConnectionDoesNotExistError):
+        await create_pool_with_retry("postgresql://u:p@localhost/db")
+
+    assert calls == db_module._POOL_CONNECT_ATTEMPTS
+
+
+@pytest.mark.asyncio
+async def test_create_pool_with_retry_does_not_retry_unrelated_errors(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A non-transient failure (e.g. bad credentials) raises immediately on
+    the first attempt -- only the documented transient-reset shape retries."""
+    db_module = sys.modules["tests.support.db"]
+    calls = 0
+
+    async def _fake_create_pool(dsn: str, **kwargs: object) -> object:
+        nonlocal calls
+        calls += 1
+        raise asyncpg.exceptions.InvalidPasswordError("password authentication failed")
+
+    monkeypatch.setattr(db_module.asyncpg, "create_pool", _fake_create_pool)
+
+    with pytest.raises(asyncpg.exceptions.InvalidPasswordError):
+        await create_pool_with_retry("postgresql://u:p@localhost/db")
+
+    assert calls == 1
 
 
 # ── Boundary tests: valid inputs pass through ────────────────────────

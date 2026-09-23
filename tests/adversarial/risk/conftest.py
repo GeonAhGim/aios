@@ -27,6 +27,7 @@ from src.foundation.risk_gate.adapters.postgres_decision_repository import (
 from src.foundation.risk_gate.adapters.postgres_repository import PostgresRiskGateRepository
 from src.foundation.risk_gate.domain.fence import fence_pairs_for
 from tests.integration.fake_exchange_adapter import FakeExchangeAdapter, PlaceOrderHook
+from tests.support.db import create_pool_with_retry
 
 
 def _asyncpg_dsn() -> str:
@@ -36,7 +37,10 @@ def _asyncpg_dsn() -> str:
 
 @pytest.fixture
 async def pool() -> asyncpg.Pool:
-    p = await asyncpg.create_pool(_asyncpg_dsn(), min_size=2, max_size=12)
+    # esc-ci-pytest.json/task-6235: bounded retry absorbs the transient Windows
+    # TCP reset (WinError 64 / asyncpg.ConnectionDoesNotExistError) that can hit
+    # the initial connect -- see tests/support/db.py's create_pool_with_retry docstring.
+    p = await create_pool_with_retry(_asyncpg_dsn(), min_size=2, max_size=12)
     yield p
     await p.close()
 

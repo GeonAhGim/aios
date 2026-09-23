@@ -32,6 +32,7 @@ import pytest
 __all__ = [
     "session_database_url",
     "ensure_worker_database",
+    "create_pool_with_retry",
     "tx_conn",
     "_db_name",
     "_with_database",
@@ -42,6 +43,20 @@ __all__ = [
 _NAME_RE = re.compile(r"^[a-z0-9_]{1,40}$")
 _CLONE_ATTEMPTS = 5
 _CLONE_RETRY_BASE_DELAY = 0.5
+
+# esc-ci-pytest.json (task-6235): local Windows CI intermittently resets the TCP
+# socket to Postgres mid-connect (WinError 64 / asyncpg ConnectionDoesNotExistError,
+# "connection was closed in the middle of operation") while a fixture opens a plain
+# asyncpg.create_pool against the shared worker DB -- a transient OS-level reset, not
+# a code regression (task-6212 confirmed the deterministic template_db-termination bug
+# task-6176/9d8b281c already fixed was not the cause here; bisect kept landing on
+# unrelated commits because the flake can surface on whichever run happens to race
+# it). scripts/replay_verify.py hit the identical error shape twice
+# (c6acdac8/task-6177, eb114fb0/task-6213) and fixed it with bounded retry-with-backoff
+# on the initial connect; this mirrors that pattern for test fixtures instead of
+# widening a budget or adding an ignore (DECISION_GUIDELINES B-2).
+_POOL_CONNECT_ATTEMPTS = 5
+_POOL_CONNECT_RETRY_BASE_DELAY = 0.5
 
 
 def _db_name(url: str) -> str:
@@ -125,6 +140,22 @@ async def ensure_worker_database(template_url: str, worker_id: str) -> str:
     finally:
         await admin.close()
     return target_url
+
+
+async def create_pool_with_retry(dsn: str, **kwargs: Any) -> asyncpg.Pool:
+    """`asyncpg.create_pool` with retry on the initial connection only.
+
+    Fail-closed still applies: after `_POOL_CONNECT_ATTEMPTS` the original
+    exception propagates unchanged, it is never swallowed into a false green.
+    """
+    for attempt in range(_POOL_CONNECT_ATTEMPTS):
+        try:
+            return await asyncpg.create_pool(dsn, **kwargs)
+        except (OSError, asyncpg.exceptions.ConnectionDoesNotExistError):
+            if attempt + 1 >= _POOL_CONNECT_ATTEMPTS:
+                raise
+            await asyncio.sleep(_POOL_CONNECT_RETRY_BASE_DELAY * (attempt + 1))
+    raise AssertionError("unreachable -- loop always returns or raises")
 
 
 @pytest.fixture
