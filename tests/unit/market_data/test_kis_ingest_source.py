@@ -458,7 +458,7 @@ async def test_gate_red_when_token_lock_removed_concurrency_test_would_fail(monk
     `route`가 토큰 응답 중 실제로 event loop에 양보해야만 이 락 제거가
     관측 가능한 이중 발급으로 드러난다)."""
 
-    async def _regressed_ensure_token(self) -> str:  # type: ignore[no-untyped-def]
+    async def _regressed_ensure_token(self: _KISTokenTransportMixin) -> str:
         # 회귀: 락 없이 캐시만 확인하고 바로 재발급을 시도한다.
         cached = self._token_cache.get()
         if cached is not None:
