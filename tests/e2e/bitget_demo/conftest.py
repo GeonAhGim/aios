@@ -25,28 +25,18 @@ from collections.abc import AsyncGenerator
 import pytest
 
 from src.exchanges.bitget.adapter import BitgetAdapter
-
-CREDENTIAL_ENV_VARS = (
-    "BITGET_DEMO_API_KEY",
-    "BITGET_DEMO_API_SECRET",
-    "BITGET_DEMO_API_PASSPHRASE",
+from tests.support.bitget_demo_credentials import (
+    CREDENTIAL_ENV_VARS as CREDENTIAL_ENV_VARS,
 )
-
-
-def missing_demo_credentials() -> list[str]:
-    """어느 크리덴셜 환경변수가 비어 있는지만 이름으로 반환한다 — 값은
-    절대 반환/로그하지 않는다."""
-    return [name for name in CREDENTIAL_ENV_VARS if not os.environ.get(name)]
+from tests.support.bitget_demo_credentials import (
+    missing_demo_credentials as missing_demo_credentials,
+)
+from tests.support.bitget_demo_credentials import skip_if_missing_demo_credentials
 
 
 @pytest.fixture
 async def demo_adapter() -> AsyncGenerator[BitgetAdapter]:
-    missing = missing_demo_credentials()
-    if missing:
-        pytest.skip(
-            "Bitget 데모 e2e 테스트 skip — 누락된 환경변수: "
-            f"{', '.join(missing)} (값 자체는 절대 출력하지 않음, redaction)"
-        )
+    skip_if_missing_demo_credentials()
     adapter = BitgetAdapter(
         os.environ["BITGET_DEMO_API_KEY"],
         os.environ["BITGET_DEMO_API_SECRET"],
