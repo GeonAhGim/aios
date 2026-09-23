@@ -1,6 +1,6 @@
-"""Reconciliation & Resilience API 요청/응답 스키마 — HTTP 세부만 여기 두고,
-계약 자체는 `src/foundation/reconciliation/contracts/v1.py`를 감싼다
-(106번 §2)."""
+"""Reconciliation & Resilience API request/response schemas — HTTP details only here;
+the contract itself lives in `src/foundation/reconciliation/contracts/v1.py`
+(Standard-106 §2)."""
 from __future__ import annotations
 
 from datetime import datetime
