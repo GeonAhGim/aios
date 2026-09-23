@@ -223,6 +223,92 @@ async def test_execution_id_filter_scopes_to_single_execution(
     assert report.total_return == Decimal("100")
 
 
+async def test_period_start_after_period_end_returns_empty_not_error(
+    execution_service, report_service, pool
+):
+    """경계값: period_start > period_end (잘못된 입력) — SQL BETWEEN이 빈 집합을
+    반환하므로 예외가 아니라 빈 리포트로 fail-closed 처리되어야 한다."""
+    user_id = await create_test_tenant(pool)
+    execution_id, strategy_id, _ = await _create_running_execution(execution_service, pool, user_id)
+    today = date.today()
+
+    await _close_position(
+        pool, user_id, execution_id, strategy_id, realized_pnl=Decimal("100"), closed_at=today
+    )
+
+    report = await report_service.generate_report(
+        user_id, today + timedelta(days=1), today - timedelta(days=1)
+    )
+
+    assert report.trade_count == 0
+    assert report.total_return == Decimal("0")
+    assert report.daily_pnl == []
+
+
+async def test_nonexistent_execution_id_filter_returns_empty(
+    execution_service, report_service, pool
+):
+    """경계값: 존재하지 않는 execution_id로 필터링하면 빈 리포트를 반환해야 한다
+    (다른 execution의 realized_pnl이 새어 들어가지 않음)."""
+    user_id = await create_test_tenant(pool)
+    execution_id, strategy_id, _ = await _create_running_execution(execution_service, pool, user_id)
+    today = date.today()
+
+    await _close_position(
+        pool, user_id, execution_id, strategy_id, realized_pnl=Decimal("100"), closed_at=today
+    )
+
+    report = await report_service.generate_report(
+        user_id,
+        today - timedelta(days=1),
+        today + timedelta(days=1),
+        execution_id=execution_id + 1_000_000,
+    )
+
+    assert report.trade_count == 0
+    assert report.total_return == Decimal("0")
+
+
+async def test_other_users_positions_excluded_from_report(
+    execution_service, report_service, pool
+):
+    """잘못된 입력/경계 케이스: 다른 tenant의 포지션이 user_id 필터를 우회해
+    새어 들어가지 않는다(테넌트 격리 불변식)."""
+    owner_user_id = await create_test_tenant(pool)
+    other_user_id = await create_test_tenant(pool)
+    execution_id, strategy_id, _ = await _create_running_execution(
+        execution_service, pool, owner_user_id
+    )
+    today = date.today()
+
+    await _close_position(
+        pool, owner_user_id, execution_id, strategy_id,
+        realized_pnl=Decimal("100"), closed_at=today,
+    )
+
+    report = await report_service.generate_report(
+        other_user_id, today - timedelta(days=1), today + timedelta(days=1)
+    )
+
+    assert report.trade_count == 0
+    assert report.total_return == Decimal("0")
+    assert report.strategy_contributions == []
+
+
+async def test_pool_acquire_failure_propagates_fail_closed(report_service, monkeypatch):
+    """실패주입: 커넥션 풀 획득이 예외를 던지면 조용히 삼키지 않고 그대로
+    전파해야 한다(fail-closed 기본 원칙, CLAUDE.md §3)."""
+
+    class _ExplodingPool:
+        def acquire(self):
+            raise asyncpg.PostgresConnectionError("simulated pool exhaustion")
+
+    report_service._pool = _ExplodingPool()
+
+    with pytest.raises(asyncpg.PostgresConnectionError):
+        await report_service.generate_report(uuid4(), date(2020, 1, 1), date(2020, 1, 31))
+
+
 async def test_strategy_contributions_grouped_correctly(execution_service, report_service, pool):
     user_id = await create_test_tenant(pool)
     execution_id, strategy_id, version = await _create_running_execution(
