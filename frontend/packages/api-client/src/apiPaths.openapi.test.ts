@@ -169,13 +169,11 @@ const UNREGISTERED_ROUTE_WHITELIST: Readonly<Record<string, string>> = {
   // UI 범위 밖이라 그대로 남긴다(사람이 EntitySnapshot을 입력해 만드는 화면이 없다).
   "/v1/foundation/reconciliation/runs": "정합성 대사 실행 이력 화면이 없다",
   // task-2335(FE-OPS-1): SafetyControlsPage가 GET(list)/deactivate/evaluate-recovery
-  // 3건을 riskGate.safetyControls.*로 등록했다 — 아래 3건은 decision상 이 리프가
-  // 만들지 않는 개통(activate)·룰번들 승인/활성화·evaluate 트리거라 그대로 남긴다
-  // (후속 리프 2336~2338 소관).
-  "/v1/foundation/risk-gate/admin/safety-controls": "리스크 게이트 관리자 개통(activate) UI가 없다(decision: 이 리프는 읽기·해제만)",
-  "/v1/foundation/risk-gate/evaluate": "리스크 게이트 평가 트리거 화면이 없다",
-  "/v1/foundation/risk-gate/rule-bundles/{bundle_id}:activate": "룰번들 활성화 액션 UI가 없다",
-  "/v1/foundation/risk-gate/rule-bundles/{bundle_id}:approve": "룰번들 승인 액션 UI가 없다",
+  // 3건을 riskGate.safetyControls.*로 등록했다 — 나머지 4건(개통·룰번들 승인/활성화·
+  // evaluate 트리거)은 task-5808(FE-OPS-9)이 riskGate.safetyControls.activate·
+  // riskGate.evaluate·riskGate.ruleBundles.approve·riskGate.ruleBundles.activate로
+  // apiRoutes.ts에 등록했다 — 여기 있던 4개 항목(task-2335 원 목록)을 제거한다(화면
+  // 배선은 decision상 이 리프 범위 밖, 경로·타입 등록만).
   // task-2338(FE-OPS-4): TrustPage가 status/consents:revoke/memberships(grant/suspend/
   // revoke) 5건 전부를 trust.*로 등록했다 — 여기 남아 있던 5개 항목(task-2168 원 목록)을
   // 제거한다.

@@ -282,9 +282,8 @@ export const API_ROUTES = defineApiRoutes({
   // task-2335(FE-OPS-1): src/api/routers/foundation/risk_gate.py 원문 확인 —
   // `APIRouter(prefix="/v1/foundation/risk-gate")`(risk_gate.py:75), router_registry.py
   // include_router(추가 prefix 없음). 이 리프는 안전 통제(safety control) 조회·해제
-  // (deactivate·evaluate-recovery)만 등록한다 — 개통(POST 자가/관리자 activate)·
-  // 룰번들 승인/활성화·evaluate 트리거는 decision상 UI가 없어 apiPaths.openapi.test.ts의
-  // UNREGISTERED_ROUTE_WHITELIST에 그대로 남는다(후속 리프 2336~2338 소관).
+  // (deactivate·evaluate-recovery)만 등록했다 — 개통(POST 자가/관리자 activate)·
+  // 룰번들 승인/활성화·evaluate 트리거는 task-5808(FE-OPS-9)이 아래에 추가로 등록한다.
   // GET/POST "/safety-controls"(:97·:106)는 같은 경로를 공유하므로(apiRouteTypes.ts
   // 축약 관용) 한 항목으로 묶는다 — 이 화면은 GET(list)만 쓴다. 세 라우트 전부
   // `-> ApiResponse[...]` + `ok(...)`(:94·:136·:189)라 envelope=true. mount_v1(PLT-16)
@@ -303,6 +302,29 @@ export const API_ROUTES = defineApiRoutes({
   // 크루드 정규화가 구분 못 하는 별개의 오탐이라 그쪽 `_OPENAPI_NO_FRONTEND_UI_ALLOWLIST`에서 다룬다.
   "riskGate.safetyControls.evaluateRecovery": route(
     "/v1/foundation/risk-gate/safety-controls/:controlId:evaluate-recovery",
+    true,
+    null,
+    true,
+  ),
+
+  // task-5808(FE-OPS-9): task-2335가 decision상 UI 없음으로 미뤄뒀던 개통(admin
+  // activate)·룰번들 승인/활성화·evaluate 트리거 4건. src/api/routers/foundation/
+  // risk_gate.py 원문 확인 — POST /admin/safety-controls(:212)·POST /evaluate(:86)·
+  // POST /rule-bundles/{bundle_id}:approve(:249)·POST /rule-bundles/{bundle_id}:activate
+  // (:268), 전부 `-> ApiResponse[...]`(contracts/openapi/v1.json에서 python으로 4경로
+  // 전부 ApiResponse_SafetyControlView_/ApiResponse_RiskEvaluationView_/
+  // ApiResponse_RiskRuleBundle_ 참조 직접 확인)라 envelope=true. mount_v1(PLT-16)
+  // 미도달이라 v1Path=null(riskGate.safetyControls.*와 동일 사유).
+  "riskGate.safetyControls.activate": route("/v1/foundation/risk-gate/admin/safety-controls", true, null, true),
+  "riskGate.evaluate": route("/v1/foundation/risk-gate/evaluate", true, null, true),
+  "riskGate.ruleBundles.approve": route(
+    "/v1/foundation/risk-gate/rule-bundles/:bundleId:approve",
+    true,
+    null,
+    true,
+  ),
+  "riskGate.ruleBundles.activate": route(
+    "/v1/foundation/risk-gate/rule-bundles/:bundleId:activate",
     true,
     null,
     true,
