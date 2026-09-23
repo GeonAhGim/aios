@@ -23,9 +23,11 @@ class _StrictModel(BaseModel):
 class PersonalRiskBundleConfigV1(_StrictModel):
     name: str
     version: int = Field(gt=0)
+    # ratchet-allow: wire-boundary: v1 wire float, Decimal at app boundary (task-5762)
     position_pct_of_equity: float = Field(gt=0, le=1)
     daily_loss_kill_pct: float = Field(gt=0, le=1)
     max_exposure_pct: float = Field(gt=0, le=1)
+    # ratchet-allow: wire-boundary: v1 wire float, Decimal at app boundary (task-5762)
     default_notional_cap_krw: float = Field(gt=0)
     symbol_whitelist: list[str] = Field(default_factory=list)
     exchange_notional_caps: dict[str, float] = Field(default_factory=dict)
@@ -33,9 +35,11 @@ class PersonalRiskBundleConfigV1(_StrictModel):
 
 class PersonalRiskBundleView(BaseModel):
     name: str
+    # ratchet-allow: wire-boundary: v1 wire float, Decimal at app boundary (task-5762)
     position_pct_of_equity: float
     daily_loss_kill_pct: float
     max_exposure_pct: float
+    # ratchet-allow: wire-boundary: v1 wire float, Decimal at app boundary (task-5762)
     default_notional_cap_krw: float
     symbol_whitelist: list[str]
     schema_version: str = SCHEMA_VERSION
@@ -58,6 +62,7 @@ class KillSwitchView(BaseModel):
 
 class DailyReportView(BaseModel):
     report_date: str
+    # ratchet-allow: wire-boundary: v1 wire float, Decimal at app boundary (task-5762)
     realized_pnl_krw: float
     fill_count: int
     violation_count: int
