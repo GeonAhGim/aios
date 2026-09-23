@@ -8,6 +8,11 @@ Spec: docs/specs/L4_analytics_authoring_backtest_marketplace_v1.0.md
 §3.2 symbol change (old listing `delisted_at` set + new listing, `instrument_id`
 immutable). §4.2 delisted→relisted "create new instrument (old id reuse forbidden)" guard
 is enforced by `register()` — reusing an old delisted id raises `RelistingReuseError`.
+`register()` upper-cases `instrument_id` before comparing it against
+`existing_instruments` (XREV task-3641/4910 finding) — without this, a
+caller-supplied id differing only in case from an already-registered id would
+skip both the duplicate-ACTIVE and relisting-reuse checks, then silently
+collide with the old id once the returned DTO's `ULID` field normalizes it.
 
 Pure (no I/O · no asyncpg imports, L0-2). `instrument_id` is issued by the caller
 beforehand — if this function generated ULIDs directly, determinism breaks.
@@ -79,6 +84,22 @@ class RelistingReuseError(SymbolMasterError):
 def _require_aware(value: datetime, label: str) -> None:
     if value.tzinfo is None:
         raise SymbolMasterError(f"{label} accepts tz-aware datetime only")
+
+
+def _normalize_instrument_id(raw_instrument_id: str) -> str:
+    """Canonical (uppercase) form for comparison against `existing_instruments`.
+
+    `Instrument`/`VenueListing`'s `ULID` field type uppercases on model
+    construction (contracts/v2/instruments.py `_validate_ulid`), so comparing
+    an un-normalized caller-supplied id against already-constructed
+    `existing_instruments` entries would miss a same-id-different-case match
+    -- letting a duplicate ACTIVE registration or a DELISTED relisting-reuse
+    through the check, only to collide with the old id once the returned DTO
+    is normalized.
+    """
+    if not isinstance(raw_instrument_id, str):
+        raise SymbolMasterError(f"instrument_id must be str: {raw_instrument_id!r}")
+    return raw_instrument_id.strip().upper()
 
 
 def _normalize_symbol(venue: Venue, raw_symbol: str) -> str:
@@ -186,6 +207,7 @@ def register(
     relisting rule), `(venue, venue_symbol)` interval overlap."""
     _require_aware(listed_at, "listed_at")
     _require_aware(created_at, "created_at")
+    instrument_id = _normalize_instrument_id(instrument_id)
     normalized = _normalize_symbol(venue, venue_symbol)
     for instrument in existing_instruments:
         if instrument.instrument_id != instrument_id:
