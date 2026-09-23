@@ -1,3 +1,4 @@
+import "../../i18n";
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
@@ -6,6 +7,19 @@ import { BrowserRouter } from "react-router-dom";
 import { ExecutionAlgoPage } from "./ExecutionAlgoPage";
 import type { AlgoProgressResponse } from "@aios/shared-types";
 import * as useEmsHooks from "@aios/shared-hooks";
+import { ApiError } from "@aios/api-client";
+
+const mockRouteParams = vi.hoisted(() => ({
+  parentId: "550e8400-e29b-41d4-a716-446655440000" as string,
+}));
+
+vi.mock("react-router-dom", async () => {
+  const actual = await vi.importActual<typeof import("react-router-dom")>("react-router-dom");
+  return {
+    ...actual,
+    useParams: () => mockRouteParams,
+  };
+});
 
 const mockAlgoProgress: AlgoProgressResponse = {
   parentId: "550e8400-e29b-41d4-a716-446655440000",
@@ -38,13 +52,7 @@ function renderPage(parentId = "550e8400-e29b-41d4-a716-446655440000") {
     </QueryClientProvider>
   );
 
-  vi.doMock("react-router-dom", async () => {
-    const actual = await vi.importActual("react-router-dom");
-    return {
-      ...actual,
-      useParams: () => ({ parentId }),
-    };
-  });
+  mockRouteParams.parentId = parentId;
 
   return { queryClient, render: (el: React.ReactElement) => render(el, { wrapper: Wrapper }) };
 }
@@ -68,7 +76,7 @@ describe("ExecutionAlgoPage", () => {
     const { render: renderWithWrapper } = renderPage();
     renderWithWrapper(<ExecutionAlgoPage />);
 
-    expect(screen.getByText(/loading/i)).toBeInTheDocument();
+    expect(screen.getByText("불러오는 중...")).toBeInTheDocument();
   });
 
   it("renders algo progress data successfully", async () => {
@@ -117,8 +125,12 @@ describe("ExecutionAlgoPage", () => {
   });
 
   it("renders error state with retry button on retryable error", async () => {
-    const retryableError = new Error("Service temporarily unavailable");
-    (retryableError as any).statusCode = 503;
+    const retryableError = new ApiError(
+      503,
+      "Service temporarily unavailable",
+      undefined,
+      "DEPENDENCY_NOT_READY",
+    );
 
     const refetchMock = vi.fn();
     vi.spyOn(useEmsHooks, "useAlgoProgress").mockReturnValue({

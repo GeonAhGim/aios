@@ -169,8 +169,11 @@ function ComputeTcaForm({
       <form onSubmit={handleSubmit} className="space-y-3">
         <div className="grid grid-cols-2 gap-3">
           <div>
-            <label className="block text-sm font-medium text-fg">Side</label>
+            <label htmlFor="tca-compute-side" className="block text-sm font-medium text-fg">
+              Side
+            </label>
             <select
+              id="tca-compute-side"
               value={side}
               onChange={(e) => setSide(e.target.value as "BUY" | "SELL")}
               className="w-full rounded border border-border px-2 py-1 text-sm"
@@ -180,8 +183,11 @@ function ComputeTcaForm({
             </select>
           </div>
           <div>
-            <label className="block text-sm font-medium text-fg">Revision</label>
+            <label htmlFor="tca-compute-revision" className="block text-sm font-medium text-fg">
+              Revision
+            </label>
             <input
+              id="tca-compute-revision"
               type="number"
               value={revision}
               onChange={(e) => setRevision(e.target.value)}
@@ -190,8 +196,11 @@ function ComputeTcaForm({
             />
           </div>
           <div>
-            <label className="block text-sm font-medium text-fg">Price at Arrival</label>
+            <label htmlFor="tca-compute-price-at-arrival" className="block text-sm font-medium text-fg">
+              Price at Arrival
+            </label>
             <input
+              id="tca-compute-price-at-arrival"
               type="text"
               value={priceAtArrival}
               onChange={(e) => setPriceAtArrival(e.target.value)}
@@ -199,8 +208,11 @@ function ComputeTcaForm({
             />
           </div>
           <div>
-            <label className="block text-sm font-medium text-fg">Spread Cost</label>
+            <label htmlFor="tca-compute-spread-cost" className="block text-sm font-medium text-fg">
+              Spread Cost
+            </label>
             <input
+              id="tca-compute-spread-cost"
               type="text"
               value={spreadCost}
               onChange={(e) => setSpreadCost(e.target.value)}
@@ -208,8 +220,11 @@ function ComputeTcaForm({
             />
           </div>
           <div>
-            <label className="block text-sm font-medium text-fg">Fees</label>
+            <label htmlFor="tca-compute-fees" className="block text-sm font-medium text-fg">
+              Fees
+            </label>
             <input
+              id="tca-compute-fees"
               type="text"
               value={fees}
               onChange={(e) => setFees(e.target.value)}
@@ -217,8 +232,11 @@ function ComputeTcaForm({
             />
           </div>
           <div>
-            <label className="block text-sm font-medium text-fg">Total Cost</label>
+            <label htmlFor="tca-compute-total-cost" className="block text-sm font-medium text-fg">
+              Total Cost
+            </label>
             <input
+              id="tca-compute-total-cost"
               type="text"
               value={totalCost}
               onChange={(e) => setTotalCost(e.target.value)}

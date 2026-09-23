@@ -6,6 +6,7 @@ export { Card, CardTitle, Stat } from "./Card";
 export { Badge } from "./Badge";
 export { StatusBadge } from "./StatusBadge";
 export { Alert, EmptyState, LoadingState, PageHeader } from "./Feedback";
+export { ProgressBar } from "./ProgressBar";
 export { AllocationBarChart, type AllocationSlice } from "./AllocationBarChart";
 export { CandlestickChart, type CandlestickPoint } from "./CandlestickChart";
 export { PnlChart, type DailyPnlPoint } from "./PnlChart";
