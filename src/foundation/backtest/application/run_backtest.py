@@ -183,7 +183,11 @@ def run_backtest(
         try:
             decision = portfolio_engine.allocate(signal, portfolio_state)
         except PortfolioEngineError as exc:
-            warnings.append(f"bar {bar_index}: PortfolioEngine 예외 — {exc}")
+            if signal.direction == OrderSide.BUY:
+                reason = "이미 보유 포지션이 있는 상태에서 재진입(BUY) 신호 발생"
+            else:
+                reason = "포지션이 없는 상태에서 SELL 신호 발생"
+            warnings.append(f"bar {bar_index}: PortfolioEngine 예외 — {reason} ({exc})")
             continue
         if decision is None:
             continue
