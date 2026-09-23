@@ -39,13 +39,13 @@ wiring, deferred: no leaf before AI-17 mounts this app anywhere).
 
 from __future__ import annotations
 
-from collections.abc import Awaitable, Callable
 from datetime import datetime, timezone
 
 import asyncpg
 from fastapi import FastAPI, Header, HTTPException, Request, status
 
 from src.api.mcp import tools_paper, tools_propose, tools_read, tools_research
+from src.api.mcp.scope_types import ScopeDependency
 from src.foundation.ai.gateway.adapters.postgres_token_repository import (
     PostgresAgentTokenRepository,
 )
@@ -61,8 +61,6 @@ from src.foundation.ai.gateway.domain.token_rules import (
 __all__ = ["AGENT_TOKEN_HEADER", "ScopeDependency", "create_mcp_app", "require_scope"]
 
 AGENT_TOKEN_HEADER = "X-AIOS-Agent-Token"
-
-ScopeDependency = Callable[..., Awaitable[AgentToken]]
 
 
 def require_scope(scope: Scope) -> ScopeDependency:

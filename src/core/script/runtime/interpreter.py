@@ -37,6 +37,7 @@ from __future__ import annotations
 from collections.abc import Callable, Mapping
 from typing import Final, cast
 
+import src.core.script.runtime.mtf as mtf
 from src.core.script.ir.ops import (
     BinOp,
     Call,
@@ -56,7 +57,6 @@ from src.core.script.ir.ops import (
     Store,
     verify_stack,
 )
-from src.core.script.runtime import mtf
 from src.core.script.runtime.interpreter_types import (
     BuiltinRegistry,
     CallSite,

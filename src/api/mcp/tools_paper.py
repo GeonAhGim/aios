@@ -111,7 +111,7 @@ from src.foundation.risk_gate.adapters.postgres_repository import PostgresRiskGa
 if TYPE_CHECKING:
     from collections.abc import Callable
 
-    from src.api.mcp.server import ScopeDependency
+    from src.api.mcp.scope_types import ScopeDependency
 
 __all__ = [
     "ConfirmPromotionRequest",
