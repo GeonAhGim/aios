@@ -18,7 +18,7 @@ import asyncio
 from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass
 from datetime import datetime, timedelta
-from typing import Any
+from typing import Any, cast
 from uuid import UUID, uuid4
 
 import asyncpg
@@ -141,7 +141,7 @@ async def test_staged_gather_kill_switch_vs_submits_post_fence_zero(
             if calls == 1:  # F1은 fence 증가가 커밋된 뒤에 읽는다(F0는 그 전)
                 await activated.wait()
             result = await ctx.read()
-            return result  # type: ignore[no-any-return]
+            return cast(Mapping[str, int], result)
 
         return await submit_with_fence(
             pool, adapter, make_order(ctx.execution_id), user_id=ctx.user_id,
@@ -204,13 +204,14 @@ async def test_unstaged_gather_every_post_fence_effect_is_detected_and_reversed(
             assert result.order_id not in fence_at_place  # 거래소에 닿지 않았다
             assert (await order_row(pool, result.order_id))["status"] == "FAILED"
             continue
-        row = await order_row(pool, result.order_id)  # type: ignore[union-attr]
+        assert isinstance(result, Order)
+        row = await order_row(pool, result.order_id)
         assert row["risk_decision_id"] == ctx.decision.decision_id
         assert row["status"] in ("SUBMITTED", "CANCELLED")
         # fence 뒤 부작용은 반드시 되돌려졌다
-        if result.order_id in leaked:  # type: ignore[union-attr]
+        if result.order_id in leaked:
             assert row["status"] == "CANCELLED"
-            assert result.exchange_order_id in adapter.cancelled_exchange_order_ids  # type: ignore[union-attr,operator]
+            assert result.exchange_order_id in adapter.cancelled_exchange_order_ids
     detected = metrics.counters.get(SAFETY_POST_FENCE_SIDE_EFFECT_COUNT_TOTAL, 0)
     assert detected >= len(leaked)  # F2 검출은 보수적(상위집합)
     assert len(adapter.cancelled_exchange_order_ids) == detected
