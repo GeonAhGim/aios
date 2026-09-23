@@ -1,17 +1,20 @@
-"""LA-24 — HTTP 읽기 API가 쓰는 식별자 해석·이용권 판정·페이지 분할(순수 + 포트 호출).
+"""LA-24 — Identifier resolution, entitlement adjudication, and pagination used by
+the HTTP read API (pure code + port calls).
 
 Spec: docs/specs/L4_market_data_positions_ledger_v1.0.md#§9.2 LA-24.
 
-`src/api/routers/market_data.py`가 300줄 상한(P6.line_cap)에 닿아 전송
-계층과 무관한 부분을 여기로 분리했다. SQL·HTTP 모두 없다 — 포트
-(`ReferenceRepository`/`ReferenceReadRepository`/`EntitlementPort`/
-`VenueRegistrySource`)만 호출한다. 예외 3종은 `exception_registry_foundation.py`
-가 상태코드로 번역한다(404/409/400).
+Split out from `src/api/routers/market_data.py` which hits the 300-line cap
+(P6.line_cap); HTTP-transmission-irrelevant logic lives here. No SQL or HTTP —
+only port calls (`ReferenceRepository`/`ReferenceReadRepository`/`EntitlementPort`/
+`VenueRegistrySource`). The three exceptions are mapped to status codes by
+`exception_registry_foundation.py` (404/409/400).
 
-식별자 규칙(스펙 "둘 다 허용, 응답에 둘 다 표기"): `instrument_id`(md_instrument
-UUID)가 있으면 우선하고 `venue`는 일치 검증만 한다; 없으면 `symbol`(벤처
-심볼)을 `md_symbol_alias` 유효기간으로 해석한다. 미등록·벤처 불일치·이용권
-거부는 **전부 같은** `MarketDataNotFoundError`다(타 테넌트 404 동형).
+Identifier rule (spec: "both allowed, both returned"): when `instrument_id`
+(md_instrument UUID) is present it takes priority and `venue` is only validated
+for consistency; when absent, `symbol` (venue symbol) is resolved via
+`md_symbol_alias` within its validity window. Unregistered symbols, venue
+mismatches, and entitlement denials all fold into the **same**
+`MarketDataNotFoundError` (tenant-agnostic 404).
 
 DC-28 (ADR-2026-09-06-H D2) — `authorize_redistribution()` applies the same
 principle this file already uses ("entitlement denial is indistinguishable
@@ -70,17 +73,17 @@ _NOT_FOUND_MESSAGE = "인스트루먼트를 찾을 수 없습니다."
 
 
 class MarketDataNotFoundError(Exception):
-    """미등록 심볼/instrument_id, 벤처 불일치, 이용권 거부(타 테넌트)를 모두
-    같은 404로 접는다 — 존재 여부를 상태코드로 누설하지 않는다."""
+    """Unregistered symbol/instrument_id, venue mismatch, and entitlement denial
+    (different tenant) all fold into the same 404 — never leak existence via status code."""
 
 
 class DataCoverageMissingError(Exception):
-    """요청 구간이 저장 커버리지 밖(기대 세션은 있는데 저장 캔들 0건).
-    §4.1 0/NaN 채움 금지 → 409 `DATA_COVERAGE_MISSING`."""
+    """Requested range falls outside stored coverage (expected sessions exist but zero stored candles).
+    §4.1 prohibits 0/NaN filling → 409 `DATA_COVERAGE_MISSING`."""
 
 
 class MarketDataQueryError(Exception):
-    """쿼리 파라미터 조합 오류(식별자 없음, naive datetime, start ≥ end) — 400."""
+    """Invalid query parameter combination (missing identifier, naive datetime, start ≥ end) — 400."""
 
 
 def _require_aware(name: str, value: datetime | None) -> None:
@@ -100,9 +103,10 @@ def validate_span(start: datetime, end: datetime, *extra: tuple[str, datetime | 
 def paginate_candles(
     candles: list[CandleRecord], cursor: datetime | None, limit: int
 ) -> tuple[list[CandleRecord], str | None]:
-    """순수 — `open_time >= cursor`인 첫 캔들부터 `limit`개. 다음 커서는 그
-    다음 캔들의 `open_time`(ISO 8601), 더 없으면 None. 시계열 전체(요청 구간)를
-    한 번 읽어 자르므로 `as_of` 스냅샷 결정론이 페이지 간에도 유지된다."""
+    """Pure — takes `limit` candles starting from the first where `open_time >= cursor`.
+    Next cursor is that candle's `open_time` (ISO 8601), or None if no more. Reads the
+    full series (request range) once and slices, so `as_of` snapshot determinism is
+    preserved across pages."""
     first = 0
     if cursor is not None:
         first = next((i for i, c in enumerate(candles) if c.open_time >= cursor), len(candles))
@@ -110,7 +114,7 @@ def paginate_candles(
     after = first + limit
     if after >= len(candles):
         return page, None
-    # 응답 본문의 datetime 직렬화(pydantic, `Z`)와 같은 표기로 맞춘다.
+    # Align with datetime serialization (pydantic, `Z`) in response body.
     return page, candles[after].open_time.isoformat().replace("+00:00", "Z")
 
 
@@ -143,7 +147,7 @@ async def authorize_feed(
     port: EntitlementPort, *, tenant_id: UUID, subject_id: UUID, inst: InstrumentRef,
     timeframe: Timeframe,
 ) -> Entitlement:
-    """캔들 피드는 (venue, asset_class, instrument, timeframe) 축으로 포트에 묻는다."""
+    """Candle feed queries the port across (venue, asset_class, instrument, timeframe) axes."""
     subject = EntitlementSubject(tenant_id=tenant_id, subject_id=subject_id, grants=())
     feed = FeedRequest(
         venue=inst.venue,
@@ -161,7 +165,7 @@ async def authorize_feed(
 async def authorize_venue(
     source: VenueRegistrySource, *, tenant_id: UUID, inst: InstrumentRef
 ) -> None:
-    """참조데이터(목록·별칭)는 timeframe 축이 없어 벤처 단위 등록으로 판정한다."""
+    """Reference data (listing, aliases) has no timeframe axis — registered per-venue."""
     if inst.venue not in await source.registered_venues(tenant_id):
         raise MarketDataNotFoundError(_NOT_FOUND_MESSAGE)
 
