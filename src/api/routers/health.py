@@ -1,22 +1,23 @@
-"""PLT-09 — 헬스체크 엔드포인트: `/readyz`(readiness) · `/livez`(liveness).
+"""PLT-09 — Health-check endpoints: `/readyz` (readiness) and `/livez` (liveness).
 
 Spec: docs/specs/L4_platform_observability_tenancy_api_v1.0.md §3.2, §9 PLT-09.
 
-`ReadinessReport`/`CheckResult`는 frontend/packages/api-client/src/readiness.ts가
-이미 소비 중인 계약(task-466)을 SSOT로 그대로 따른다 — 필드명을 새로 짓지
-않는다. `/readyz`·`/livez`는 §3.3 `ApiResponse` 봉투를 쓰지 않는 예외(운영
-프로브)라 라우터가 직접 `JSONResponse`를 만든다.
+`ReadinessReport`/`CheckResult` follow the existing contract (task-466) already
+consumed by frontend/packages/api-client/src/readiness.ts as SSOT — field names
+are not renamed. `/readyz` and `/livez` are exceptions to the §3.3 `ApiResponse`
+wrapper (operational probes), so the router returns `JSONResponse` directly.
 
-`checks`는 지금 `LoopHealth`(PLT-08)에 기록이 있는 것만 담는다: `db_pool`은
-항상, `loop:<name>`은 해당 루프가 최소 1회 tick을 시도한 뒤부터. 이유 —
-`run_periodic_loop`(src/services/background_loops.py)는 `sleep(interval)` 후에
-tick하므로 막 기동한 프로세스는 어떤 루프도 아직 `LoopHealth`에 항목이 없다.
-그런 루프까지 실패로 잡으면 정상 기동 직후에도 항상 503이 된다. 반대로 tick을
-한 번이라도 *시도*한 뒤라면(성공이든 실패든) `last_success_age()`가 `+inf`를
-포함해 그대로 판정에 쓰인다 — PLT-08 `LoopHealth.last_success_age` docstring이
-명시한 의도("readyz의 age < 3×interval 판정이 그대로 실패하도록")를 그대로
-따른다. `migration_head`·`event_bus` check는 이 리프 범위 밖(decision: "최소
-DB 풀과 loop 신선도") — 후속 리프에서 추가.
+`checks` currently includes only what `LoopHealth` (PLT-08) has recorded: `db_pool`
+is always present; `loop:<name>` appears only after the loop has attempted at least
+one tick. Reason — `run_periodic_loop` (src/services/background_loops.py) ticks
+*after* `sleep(interval)`, so a freshly started process has no `LoopHealth` entries
+yet. Flagging such loops as failures would produce a constant 503 immediately after
+normal startup. Conversely, once a loop has attempted *at least one* tick (success or
+failure), `last_success_age()` — including `+inf` — is used in the decision as-is,
+following the intent explicitly stated in the PLT-08 `LoopHealth.last_success_age`
+docstring ("to let the readyz age < 3×interval check fail naturally").
+`migration_head` and `event_bus` checks are out of scope for this leaf
+(decision: "minimum DB pool and loop freshness") — to be added in a follow-up leaf.
 """
 from __future__ import annotations
 
@@ -51,8 +52,9 @@ async def _check_db_pool(pool: asyncpg.Pool) -> CheckResult:
     try:
         await pool.fetchval("SELECT 1")
     except Exception:
-        # PLT-02 레닥션: 원인(DSN·드라이버 예외 메시지)은 응답에 싣지 않는다.
-        # 실제 원인은 asyncpg/커넥션 계층이 이미 남기는 로그로 추적한다.
+        # PLT-02 reduction: do not include root cause (DSN, driver exception message)
+        # in the response. The root cause is already logged by the asyncpg/connection
+        # layer for tracing.
         return CheckResult(ok=False, detail="db_pool 연결 실패")
     return CheckResult(ok=True)
 
@@ -78,7 +80,7 @@ def _check_loops() -> dict[str, CheckResult]:
 
 @router.get("/livez")
 async def livez() -> dict[str, str]:
-    """DB 미접촉 liveness — 프로세스가 요청에 응답할 수 있는지만 확인한다."""
+    """Liveness without DB contact — confirms the process can still respond to requests."""
     return {"status": "ok"}
 
 
