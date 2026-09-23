@@ -49,13 +49,13 @@ async def recover_pending_orders(
             current = await get_order_status(order)
         except Exception:
             logger.exception(
-                "재시작 복구 중 주문 상태 재확인 실패: order_id=%s", order.get("order_id")
+                "Failed to reconfirm order status during restart recovery: order_id=%s", order.get("order_id")
             )
             continue
         await republish_order_event(current)
         recovered += 1
 
-    logger.info("재시작 복구 완료: %d건 재동기화", recovered)
+    logger.info("Restart recovery complete: %d orders re-synchronized", recovered)
     if record_recovery is not None:
         await record_recovery(recovered)
     return recovered
