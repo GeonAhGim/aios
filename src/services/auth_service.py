@@ -214,12 +214,6 @@ class AuthService:
                     conn, actor_agent=str(row["user_id"]), action_type="auth.login_failed",
                     user_id=row["user_id"], decision_data={"reason": "account_locked"},
                 )
-                # 이 요청이 SELECT를 읽은 뒤 다른 동시 요청이 방금 잠금을
-                # 걸었을 수 있다(TOCTOU) — bcrypt는 건너뛰되(DoS 완화 유지)
-                # 시도 자체는 lockout.register_failed_attempt로 원자 기록해야
-                # "동시 N회 실패 시 카운트 정확히 N"이 깨지지 않는다. 이미
-                # 잠긴 동안은 CASE 절이 locked_until을 갱신하지 않으므로
-                # 잠금 기간이 늘어나지는 않는다.
                 state = await lockout.register_failed_attempt(conn, row["user_id"], now=now)
                 raise AccountLockedError(state.retry_after_seconds)
 
