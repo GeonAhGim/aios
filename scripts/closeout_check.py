@@ -3,7 +3,9 @@
 ADR-2026-09-04-D의 T3 종료 기준 1~10, ADR-2026-09-09-B로 추가된 11항
 (H-1~H-13 전부 CI 증빙으로 닫힘), ADR-2026-09-10-C Decision 5로 추가된 12항
 ("현재 main HEAD가 quality.yml에서 독립적으로 녹색" — 과거 어느 커밋이
-녹색이었는지와는 구분)을 각각 검사 함수로 판정해 PASS/FAIL과 증빙 경로를
+녹색이었는지와는 구분), ADR-2026-09-24-A Decision 4로 추가된 13항
+(J1~J3 Playwright 사용자 여정 테스트 존재 + test.fixme 0건 + --ci-report의
+frontend 단계 녹색)을 각각 검사 함수로 판정해 PASS/FAIL과 증빙 경로를
 마크다운 표로 출력한다.
 
 전부 저장소 안 정적 증거(파일 존재·grep·순수 모듈 import)만 본다 —
@@ -109,6 +111,8 @@ __all__ = [
     "check_10_ops",
     "check_11_hardening",
     "check_12_head_actions_green",
+    "check_13_user_journeys",
+    "JOURNEY_SPECS",
     "trigger_head_workflow_dispatch",
     "wait_for_head_green",
     "render_markdown",
@@ -452,6 +456,58 @@ def _check_red_team_open(repo_root: Path) -> tuple[bool, str]:
     return ok, "OK RED_TEAM 미해결 0" if ok else f"RED_TEAM_FINDINGS.md 미해결(OPEN) {open_count}건"
 
 
+JOURNEY_SPECS: tuple[str, ...] = (
+    "frontend/e2e/journey-j1-onboarding-to-dashboard.spec.ts",
+    "frontend/e2e/journey-j2-discover-to-backtest.spec.ts",
+    "frontend/e2e/journey-j3-paper-order-to-position.spec.ts",
+)
+
+
+def _load_ci_step_ok(path: Path | None, step: str) -> tuple[bool, str]:
+    """`--ci-report`의 `steps.<step>.ok`를 읽는다(`_load_bool_report`는 top-level
+    키만 보므로 별도 헬퍼 -- `pm/local_ci.py` 산출 `pm/ci/latest.json`은
+    `{"steps": {"frontend": {"ok": bool, ...}, ...}}` 형태다)."""
+    if path is None:
+        return False, UNVERIFIED
+    if not path.is_file():
+        return False, f"리포트 없음: {path}"
+    try:
+        data = json.loads(_read(path))
+    except json.JSONDecodeError:
+        return False, f"리포트 JSON 파싱 실패: {path}"
+    steps = data.get("steps")
+    step_data = steps.get(step) if isinstance(steps, dict) else None
+    if not isinstance(step_data, dict):
+        return False, f"steps.{step} 없음: {path}"
+    ok = bool(step_data.get("ok"))
+    if ok:
+        return True, f"OK steps.{step}.ok=True"
+    return False, f"steps.{step}.ok={step_data.get('ok')!r}: {path}"
+
+
+def check_13_user_journeys(repo_root: Path, *, ci_report: Path | None) -> CheckResult:
+    """기준13(ADR-2026-09-24-A Decision 4) — J1~J3 Playwright 여정 테스트 존재 +
+    `test.fixme` 0건 + `--ci-report`의 `steps.frontend.ok` 녹색.
+
+    리포트를 넘기지 않으면(다른 항목들과 같은 ADR-D 원칙) "미검증(외부 리포트
+    미지정)"으로 FAIL 처리한다 — 모른다=통과 아님.
+    """
+    present, missing = _present_missing(repo_root, *JOURNEY_SPECS)
+    fixme_hits = [p for p in present if "test.fixme" in _read(repo_root / p)]
+    frontend_ok, frontend_note = _load_ci_step_ok(ci_report, "frontend")
+    passed = not missing and not fixme_hits and frontend_ok
+    evidence = [*present, *missing, *(f"FIXME:{p}" for p in fixme_hits), frontend_note]
+    parts = []
+    if missing:
+        parts.append(f"여정 테스트 파일 누락: {', '.join(missing)}")
+    if fixme_hits:
+        parts.append(f"test.fixme 존재: {', '.join(fixme_hits)}")
+    if not frontend_ok:
+        parts.append(f"프론트엔드 CI 단계 미확인/적색: {frontend_note}")
+    detail = "J1~J3 여정 테스트 기준 통과" if passed else "; ".join(parts)
+    return CheckResult("13_user_journeys", "사용자 여정(J1~J3)", passed, tuple(evidence), detail)
+
+
 CHECKS_1_10: tuple[Callable[..., CheckResult], ...] = (
     check_01_parity,
     check_02_safety_wiring,
@@ -479,6 +535,7 @@ def run_all(
     results.append(check_10_ops(repo_root, ci_report=ci_report, guard_report=guard_report))
     results.append(check_11_hardening(repo_root))
     results.append(head_green_result or check_12_head_actions_green(repo_root))
+    results.append(check_13_user_journeys(repo_root, ci_report=ci_report))
     return results
 
 
