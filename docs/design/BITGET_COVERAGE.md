@@ -11,7 +11,7 @@ BR-9(ADR-2026-09-06-I D5). 생성: `python scripts/bitget_coverage.py`(오프라
 
 | 구현됨 | 범위밖 | 미착수 | 합계 | 구현률 |
 |---|---|---|---|---|
-| 150 | 0 | 6 | 156 | 96.15% |
+| 156 | 0 | 0 | 156 | 100.00% |
 
 완료 정의(D5): `미착수` 0건 또는 우선순위(P0/P1/P2)로 사유가 남아있음. `범위밖`은 문서가 명시한 정책 배제(7.9 원칙, 출금)만 해당한다.
 
@@ -34,11 +34,11 @@ BR-9(ADR-2026-09-06-I D5). 생성: `python scripts/bitget_coverage.py`(오프라
 | 3.2 Trade(주문) — FD-4 주문 전송 계층과 직결 | 17 | 17 | 100.00% |
 | 3.3 Account(계좌·입출금) | 8 | 8 | 100.00% |
 | 4. Margin(마진) 엔드포인트 체크리스트 | 18 | 18 | 100.00% |
-| 5.1 Market | 11 | 13 | 84.62% |
+| 5.1 Market | 13 | 13 | 100.00% |
 | 5.2 Account | 9 | 9 | 100.00% |
-| 5.3 Position | 3 | 4 | 75.00% |
-| 5.4 Order(Trade) | 12 | 14 | 85.71% |
-| 7. Public/Common | 2 | 3 | 66.67% |
+| 5.3 Position | 4 | 4 | 100.00% |
+| 5.4 Order(Trade) | 14 | 14 | 100.00% |
+| 7. Public/Common | 3 | 3 | 100.00% |
 
 ## 전체 엔드포인트 매트릭스
 
@@ -113,8 +113,8 @@ BR-9(ADR-2026-09-06-I D5). 생성: `python scripts/bitget_coverage.py`(오프라
 | GET | `/api/v2/mix/market/candles` | 5.1 Market | 구현됨 | P0 | 캔들/과거캔들 | `02b_bitget_api_v2_full_spec_v1.md` |
 | GET | `/api/v2/mix/market/contracts` | 5.1 Market | 구현됨 | P0 | 계약 정보 조회 | `02b_bitget_api_v2_full_spec_v1.md` |
 | GET | `/api/v2/mix/market/current-fund-rate` | 5.1 Market | 구현됨 | P0 | 현재 펀딩레이트 | `02b_bitget_api_v2_full_spec_v1.md` |
-| GET | `/api/v2/mix/market/fills` | 5.1 Market | 미착수 | P2 | 체결/과거체결 | `02b_bitget_api_v2_full_spec_v1.md` |
-| GET | `/api/v2/mix/market/fills-history` | 5.1 Market | 미착수 | P2 | 체결/과거체결 | `02b_bitget_api_v2_full_spec_v1.md` |
+| GET | `/api/v2/mix/market/fills` | 5.1 Market | 구현됨 | P2 | 체결/과거체결 | `02b_bitget_api_v2_full_spec_v1.md` |
+| GET | `/api/v2/mix/market/fills-history` | 5.1 Market | 구현됨 | P2 | 체결/과거체결 | `02b_bitget_api_v2_full_spec_v1.md` |
 | GET | `/api/v2/mix/market/funding-time` | 5.1 Market | 구현됨 | P1 | 다음 펀딩 시각 | `02b_bitget_api_v2_full_spec_v1.md` |
 | GET | `/api/v2/mix/market/history-candles` | 5.1 Market | 구현됨 | P0 | 캔들/과거캔들 | `02b_bitget_api_v2_full_spec_v1.md` |
 | GET | `/api/v2/mix/market/history-fund-rate` | 5.1 Market | 구현됨 | P1 | 과거 펀딩레이트 | `02b_bitget_api_v2_full_spec_v1.md` |
@@ -123,8 +123,8 @@ BR-9(ADR-2026-09-06-I D5). 생성: `python scripts/bitget_coverage.py`(오프라
 | GET | `/api/v2/mix/market/query-position-lever` | 5.1 Market | 구현됨 | P1 | 심볼별 레버리지 구간표 | `02b_bitget_api_v2_full_spec_v1.md` |
 | GET | `/api/v2/mix/market/ticker` | 5.1 Market | 구현됨 | P0 | 현재가(단일/전체) | `02b_bitget_api_v2_full_spec_v1.md` |
 | GET | `/api/v2/mix/market/tickers` | 5.1 Market | 구현됨 | P0 | 현재가(단일/전체) | `02b_bitget_api_v2_full_spec_v1.md` |
-| POST | `/api/v2/mix/order/batch-cancel-orders` | 5.4 Order(Trade) | 미착수 | P2 | 배치 제출/취소 | `02b_bitget_api_v2_full_spec_v1.md` |
-| POST | `/api/v2/mix/order/batch-place-order` | 5.4 Order(Trade) | 미착수 | P2 | 배치 제출/취소 | `02b_bitget_api_v2_full_spec_v1.md` |
+| POST | `/api/v2/mix/order/batch-cancel-orders` | 5.4 Order(Trade) | 구현됨 | P2 | 배치 제출/취소 | `02b_bitget_api_v2_full_spec_v1.md` |
+| POST | `/api/v2/mix/order/batch-place-order` | 5.4 Order(Trade) | 구현됨 | P2 | 배치 제출/취소 | `02b_bitget_api_v2_full_spec_v1.md` |
 | POST | `/api/v2/mix/order/cancel-all-orders` | 5.4 Order(Trade) | 구현됨 | P1 | 전체 취소 | `02b_bitget_api_v2_full_spec_v1.md` |
 | POST | `/api/v2/mix/order/cancel-order` | 5.4 Order(Trade) | 구현됨 | P0 | 주문 취소 | `02b_bitget_api_v2_full_spec_v1.md` |
 | POST | `/api/v2/mix/order/close-positions` | 5.4 Order(Trade) | 구현됨 | P0 | 포지션 즉시청산 | `02b_bitget_api_v2_full_spec_v1.md` |
@@ -137,7 +137,7 @@ BR-9(ADR-2026-09-06-I D5). 생성: `python scripts/bitget_coverage.py`(오프라
 | POST/GET | `/api/v2/mix/order/place-plan-order` | 5.4 Order(Trade) | 구현됨 | P1 | 예약(Plan) 주문 제출/수정/취소/조회 | `02b_bitget_api_v2_full_spec_v1.md` |
 | POST | `/api/v2/mix/order/place-pos-tpsl` | 5.4 Order(Trade) | 구현됨 | P1 | 포지션 단위 TP/SL | `02b_bitget_api_v2_full_spec_v1.md` |
 | POST | `/api/v2/mix/order/place-tpsl-order` | 5.4 Order(Trade) | 구현됨 | P1 | TP/SL 주문 제출 | `02b_bitget_api_v2_full_spec_v1.md` |
-| GET | `/api/v2/mix/position/adlRank` | 5.3 Position | 미착수 | P2 | ADL 순위 조회 | `02b_bitget_api_v2_full_spec_v1.md` |
+| GET | `/api/v2/mix/position/adlRank` | 5.3 Position | 구현됨 | P2 | ADL 순위 조회 | `02b_bitget_api_v2_full_spec_v1.md` |
 | GET | `/api/v2/mix/position/all-position` | 5.3 Position | 구현됨 | P0 | 전체 포지션 조회 | `02b_bitget_api_v2_full_spec_v1.md` |
 | GET | `/api/v2/mix/position/history-position` | 5.3 Position | 구현됨 | P1 | 과거 포지션 조회 | `02b_bitget_api_v2_full_spec_v1.md` |
 | GET | `/api/v2/mix/position/single-position` | 5.3 Position | 구현됨 | P0 | 단일 포지션 조회 | `02b_bitget_api_v2_full_spec_v1.md` |
@@ -145,7 +145,7 @@ BR-9(ADR-2026-09-06-I D5). 생성: `python scripts/bitget_coverage.py`(오프라
 | GET | `/api/v2/p2p/merchantInfo` | 1.3 P2P(개인간 법정화폐 거래) — `p2p_mixin.py` | 구현됨 | - | 상인(merchant) 정보 조회 | `02c_bitget_api_v2_extended_spec_v1.md` |
 | GET | `/api/v2/p2p/merchantList` | 1.3 P2P(개인간 법정화폐 거래) — `p2p_mixin.py` | 구현됨 | - | P2P 지원 코인 목록 | `02c_bitget_api_v2_extended_spec_v1.md` |
 | GET | `/api/v2/p2p/orderList` | 1.3 P2P(개인간 법정화폐 거래) — `p2p_mixin.py` | 구현됨 | - | P2P 주문 목록 조회 | `02c_bitget_api_v2_extended_spec_v1.md` |
-| GET | `/api/v2/public/annoucements` | 7. Public/Common | 미착수 | P2 | 공지사항 | `02b_bitget_api_v2_full_spec_v1.md` |
+| GET | `/api/v2/public/annoucements` | 7. Public/Common | 구현됨 | P2 | 공지사항 | `02b_bitget_api_v2_full_spec_v1.md` |
 | GET | `/api/v2/public/time` | 7. Public/Common | 구현됨 | P1 | 서버 시간 | `02b_bitget_api_v2_full_spec_v1.md` |
 | GET | `/api/v2/spot/account/assets` | 3.3 Account(계좌·입출금) | 구현됨 | P0 | 자산 조회 | `02b_bitget_api_v2_full_spec_v1.md` |
 | GET | `/api/v2/spot/account/bills` | 3.3 Account(계좌·입출금) | 구현됨 | P1 | 계좌 청구서(bills) | `02b_bitget_api_v2_full_spec_v1.md` |

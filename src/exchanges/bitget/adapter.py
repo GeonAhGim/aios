@@ -33,6 +33,8 @@ from src.exchanges.bitget.copy_trading_mixin import BitgetCopyTradingMixin
 from src.exchanges.bitget.earn_mixin import BitgetEarnMixin
 from src.exchanges.bitget.error_codes import SUCCESS_CODE, classify_body_code
 from src.exchanges.bitget.futures_account_mixin import BitgetFuturesAccountMixin
+from src.exchanges.bitget.futures_batch_order_mixin import BitgetFuturesBatchOrderMixin
+from src.exchanges.bitget.futures_market_extra_mixin import BitgetFuturesMarketExtraMixin
 from src.exchanges.bitget.futures_market_mixin import BitgetFuturesMarketMixin
 from src.exchanges.bitget.futures_plan_mixin import BitgetFuturesPlanMixin
 from src.exchanges.bitget.futures_trading_mixin import BitgetFuturesTradingMixin
@@ -239,8 +241,10 @@ class BitgetAdapter(
     BitgetMarginMixin,
     BitgetMarginP2Mixin,
     BitgetFuturesMarketMixin,
+    BitgetFuturesMarketExtraMixin,
     BitgetFuturesAccountMixin,
     BitgetFuturesTradingMixin,
+    BitgetFuturesBatchOrderMixin,
     BitgetFuturesPlanMixin,
     BitgetConvertMixin,
     BitgetSubaccountMixin,
