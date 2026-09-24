@@ -1,5 +1,4 @@
 """FND-02 통합테스트 — /v1/foundation/mandates 라우터. 실제 FastAPI 앱 + 실제 dev DB."""
-import time
 import uuid
 from pathlib import Path
 
@@ -202,8 +201,19 @@ async def test_material_amendment_full_gate_flow_via_api(client, pool):
     )
     assert reauth_only_response.status_code == 403
 
-    purpose_revision = int(time.time())  # disclosure.revision은 INT(int32) — ms 단위는 넘친다
+    # `int(time.time())`는 이 purpose 문자열("portfolio_mandate_material_change")을
+    # 공유하는 다른 통합테스트 파일(test_mandate_lifecycle.py)이 같은 스위트 실행
+    # 안에서 남긴 revision을 추월하지 못할 수 있어(둘 다 "지금" epoch 기반이라
+    # 실행 순서·타이밍에 따라 역전됨), get_active_disclosure()의 "MAX(revision)이
+    # 최신" 판정이 방금 만든 이 disclosure가 아니라 그쪽을 가리켜
+    # POLICY_CONSENT_STALE_REVISION으로 order-dependent하게 실패했다. DB의 현재
+    # 최댓값을 조회해 +1 하면 무엇이 먼저 실행됐든 항상 이 disclosure가 최신이다.
     async with pool.acquire() as conn:
+        current_max = await conn.fetchval(
+            "SELECT COALESCE(MAX(revision), 0) FROM disclosure WHERE purpose = $1",
+            "portfolio_mandate_material_change",
+        )
+        purpose_revision = current_max + 1
         await conn.execute(
             "INSERT INTO disclosure (purpose, revision, content_hash) "
             "VALUES ('portfolio_mandate_material_change', $1, 'hash')",
