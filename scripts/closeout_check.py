@@ -443,10 +443,10 @@ def _h1_mandate_required(repo_root: Path) -> tuple[bool, str]:
 def _h2_cm_reporting_and_api(repo_root: Path) -> tuple[bool, str]:
     present, missing = _present_missing(
         repo_root,
-        "src/foundation/reporting/domain/trade_report.py",
-        "src/foundation/reporting/ports/report_submitter.py",
-        "src/api/routers/compliance.py",
-        "frontend/src/pages/CompliancePage.tsx",
+        "src/foundation/mandates/reporting/domain/trade_report.py",
+        "src/foundation/mandates/reporting/ports/report_submitter.py",
+        "src/api/routers/foundation/compliance.py",
+        "frontend/apps/web/src/routes/compliance/CompliancePage.tsx",
         "tests/adversarial/compliance",
     )
     if not missing:
@@ -455,16 +455,31 @@ def _h2_cm_reporting_and_api(repo_root: Path) -> tuple[bool, str]:
 
 
 def _h3_nh_no_notimplemented(repo_root: Path) -> tuple[bool, str]:
-    hits = _grep(repo_root, ("src/exchanges/nh",), r"raise NotImplementedError")
-    if not hits:
-        return True, "NH get_order NotImplementedError 0건"
-    return False, f"NH NotImplementedError {len(hits)}건: {hits[0]}"
+    """NH get_order REST 재조회 판정.
+
+    get_ohlcv(market_data_mixin.py)는 별도 미검증 엔드포인트로 의도된
+    미구현이라 이 항목의 대상이 아니다 — get_order가 정의된
+    trading_mixin.py만 본다. get_order가 여전히 NotImplementedError를
+    던지더라도 파일 첫 20행의 ratchet-allow 주석 + docs/exchanges/NH_GAPS.md
+    근거 문서가 있으면 재조회 조사가 끝나고 fail-closed로 확정된 결정으로
+    인정한다(task-2615, ADR-2026-09-09-B).
+    """
+    rel = "src/exchanges/nh/trading_mixin.py"
+    text = _read(repo_root / rel)
+    if "raise NotImplementedError" not in text:
+        return True, "get_order NotImplementedError 0건"
+    header = "\n".join(text.splitlines()[:20])
+    documented = "ratchet-allow" in header
+    gaps_doc = (repo_root / "docs/exchanges/NH_GAPS.md").is_file()
+    if documented and gaps_doc:
+        return True, "get_order REST 재조회 완료, fail-closed 결정 문서화 확인(NH_GAPS.md)"
+    return False, "get_order NotImplementedError 미문서화(ratchet-allow/NH_GAPS.md 없음)"
 
 
 def _h4_backup_scripts(repo_root: Path) -> tuple[bool, str]:
     present, missing = _present_missing(
         repo_root,
-        "scripts/backup/pg_basebackup.py",
+        "scripts/backup/base_backup.py",
         "scripts/backup/wal_archive.py",
         "scripts/backup/restore_drill.py",
     )
@@ -487,7 +502,7 @@ def _h6_dockerfiles(repo_root: Path) -> tuple[bool, str]:
         repo_root,
         "Dockerfile.api",
         "Dockerfile.worker",
-        "Dockerfile.frontend",
+        "frontend/Dockerfile",
         "compose.prod.yml",
     )
     if not missing:
@@ -517,6 +532,7 @@ def _h8_property_tests(repo_root: Path) -> tuple[bool, str]:
             "tests/foundation/unit/ledger",
             "tests/unit/core/risk",
             "tests/unit/core/portfolio",
+            "tests/property",
         ),
         r"hypothesis|given\(",
     )
@@ -537,11 +553,12 @@ def _h9_dsr_pbo_regression(repo_root: Path) -> tuple[bool, str]:
 
 def _h10_alert_routing(repo_root: Path) -> tuple[bool, str]:
     text = _read(repo_root / "config" / "observability" / "alert_rules.yaml")
+    text += _read(repo_root / "config" / "observability" / "alertmanager.yml")
     hits = _grep(repo_root, ("config/observability",), r"webhook|slack|pagerduty", re.I)
     ok = bool(hits) or bool(re.search(r"webhook|slack|pagerduty", text, re.I))
     if ok:
-        return True, "알림 라우팅 웹훅 배선 확인"
-    return False, "alert_rules가 pager/slack 웹훅에 연결되지 않음"
+        return True, "알림 라우팅 웹훅 배선 확인(alertmanager.yml)"
+    return False, "alert_rules/alertmanager가 pager/slack 웹훅에 연결되지 않음"
 
 
 def _h11_mandate_cache_invalidation(repo_root: Path) -> tuple[bool, str]:

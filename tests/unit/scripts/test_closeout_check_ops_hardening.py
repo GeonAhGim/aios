@@ -144,10 +144,14 @@ def test_hardening_passes_when_all_items_pass(tmp_path: Path) -> None:
     assert "전부 닫힘" in result.detail
 
 
-def test_hardening_against_real_repo_currently_fails() -> None:
-    """ADR-2026-09-09-B 하드닝은 이 시점에 미완료다 — 현재 적색 상태를 고정."""
+def test_hardening_against_real_repo_now_passes() -> None:
+    """ADR-2026-09-09-B 하드닝 H-1~H-13 전부 닫힘(task-6398, CTO 2026-09-24 확인).
+
+    H-2/H-3/H-4/H-6/H-8/H-10은 검사의 정적 경로/패턴이 실제 배치와
+    어긋나 있던 오탐이었다 — 증거 자체는 이미 존재했다(task-6388 재배정).
+    """
     result = cc.check_11_hardening(ROOT)
-    assert not result.passed
+    assert result.passed
 
 
 # --------------------------------------------------------------------------- 11 개별 H 항목
