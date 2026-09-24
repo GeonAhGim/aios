@@ -145,16 +145,11 @@ def _empty_result() -> TickToCandleResult:
     return TickToCandleResult(columns=empty, lineage=())
 
 
-def ticks_to_candles(
-    ticks: list[TradeTick], tf: Timeframe, calendar: VenueCalendar
-) -> TickToCandleResult:
-    """Aggregate `ticks` (a single venue/instrument series) into `tf`
-    candles. Same input always produces byte-identical output — no wall
-    clock, no randomness, no float, no set/dict iteration order dependence
-    (dedup/tie-break keys are `(int, int)` tuples, never string-hashed)."""
-    if not ticks:
-        return _empty_result()
-
+def _validate_series(ticks: list[TradeTick], calendar: VenueCalendar) -> None:
+    """Raise if `ticks` is not a single, sorted, on-venue series. Split out of
+    `ticks_to_candles` so the three independent checks (mixed series, venue
+    mismatch, unsorted input) score separately instead of stacking onto the
+    aggregation loop's cognitive complexity."""
     venue = ticks[0].venue
     instrument_id = ticks[0].instrument_id
     for tick in ticks:
@@ -178,6 +173,18 @@ def ticks_to_candles(
                 f"index {i + 1} (ts_event={ticks[i + 1].ts_event})"
             )
 
+
+def ticks_to_candles(
+    ticks: list[TradeTick], tf: Timeframe, calendar: VenueCalendar
+) -> TickToCandleResult:
+    """Aggregate `ticks` (a single venue/instrument series) into `tf`
+    candles. Same input always produces byte-identical output — no wall
+    clock, no randomness, no float, no set/dict iteration order dependence
+    (dedup/tie-break keys are `(int, int)` tuples, never string-hashed)."""
+    if not ticks:
+        return _empty_result()
+
+    _validate_series(ticks, calendar)
     deduped = _dedupe_sorted(ticks)
     tick_dt = [_ts_event_to_utc(t.ts_event) for t in deduped]
 
