@@ -439,6 +439,89 @@ describe("DEEPEN 2039 — gate red reproduction (naive fire-and-forget round-rob
   });
 });
 
+// --- DEEPEN 6705 (docs/audit/DEPTH_CH.md, task-2039 CH-18e follow-up): the
+// "rejects from the worker's { ok: false, error } reply" test above proves
+// `createBrowserWorkerPoolBackend` rejects on a real `{ ok: false }` message,
+// but nothing in the suite proves that assertion is load-bearing — i.e. that
+// a regression which stops honoring `event.data.ok` (for example a backend
+// double or a broken reimplementation that always resolves, treating every
+// reply as if it were hardcoded `ok: true`) would actually be caught. This
+// adds a red/green pair against exactly that failure mode, plus two tests
+// that kill a "hardcoded error string" mutant and a "pending state leaks
+// across messages" mutant.
+
+describe("DEEPEN 6705 — gate red reproduction: an always-resolve backend (ignores event.data.ok) vs the real ok:false handling", () => {
+  /** Reproduces the exact regression the ok:false test guards against: a `Worker`-shaped
+   * double that always resolves regardless of `event.data.ok`, as if every reply were
+   * hardcoded to `{ ok: true }`. */
+  function createAlwaysResolveBrowserBackend(createWorker: () => Worker): { run<TArgs, TResult>(task: string, args: TArgs): Promise<TResult> } {
+    const worker = createWorker() as unknown as FakeWorker;
+    return {
+      run<TArgs, TResult>(_task: string, _args: TArgs): Promise<TResult> {
+        return new Promise<TResult>((resolve) => {
+          worker.onmessage = (event: MessageEvent) => {
+            // Bug under reproduction: ignores `event.data.ok` entirely and resolves
+            // with whatever the reply carried, even a `{ ok: false, error }` payload.
+            resolve(event.data as TResult);
+          };
+        });
+      },
+    };
+  }
+
+  it("적색: always-resolve 더블은 { ok: false, error } 응답을 reject 대신 resolve해 실패를 숨긴다", async () => {
+    const worker = new FakeWorker();
+    const broken = createAlwaysResolveBrowserBackend(() => worker as unknown as Worker);
+
+    const promise = broken.run(ECHO_TASK, null);
+    worker.onmessage?.({ data: { ok: false, error: "kernel exploded" } } as MessageEvent);
+
+    // The bug: this resolves (hiding the failure) instead of rejecting.
+    await expect(promise).resolves.toEqual({ ok: false, error: "kernel exploded" });
+  });
+
+  it("녹색: 실제 createBrowserWorkerPoolBackend는 같은 { ok: false, error } 응답을 reject한다", async () => {
+    const worker = new FakeWorker();
+    const backend = createBrowserWorkerPoolBackend(() => worker as unknown as Worker);
+
+    const promise = backend.run(ECHO_TASK, null);
+    worker.onmessage?.({ data: { ok: false, error: "kernel exploded" } } as MessageEvent);
+
+    await expect(promise).rejects.toThrow("kernel exploded");
+  });
+});
+
+describe("DEEPEN 6705 — the rejected error is read from the reply, not a hardcoded string", () => {
+  it("서로 다른 두 번의 ok:false 응답이 각각 자신의 error 문자열로 reject된다 (고정 문자열 뮤턴트를 잡아낸다)", async () => {
+    const workerA = new FakeWorker();
+    const backendA = createBrowserWorkerPoolBackend(() => workerA as unknown as Worker);
+    const promiseA = backendA.run(ECHO_TASK, null);
+    workerA.onmessage?.({ data: { ok: false, error: "first failure: rate limited" } } as MessageEvent);
+    await expect(promiseA).rejects.toThrow("first failure: rate limited");
+
+    const workerB = new FakeWorker();
+    const backendB = createBrowserWorkerPoolBackend(() => workerB as unknown as Worker);
+    const promiseB = backendB.run(ECHO_TASK, null);
+    workerB.onmessage?.({ data: { ok: false, error: "second failure: out of memory" } } as MessageEvent);
+    await expect(promiseB).rejects.toThrow("second failure: out of memory");
+  });
+});
+
+describe("DEEPEN 6705 — pending state does not leak across messages (single-flight recovery after ok:false)", () => {
+  it("ok:false로 reject된 뒤에도 같은 backend가 다음 요청에서 ok:true를 정상 resolve한다", async () => {
+    const worker = new FakeWorker();
+    const backend = createBrowserWorkerPoolBackend(() => worker as unknown as Worker);
+
+    const first = backend.run(ECHO_TASK, null);
+    worker.onmessage?.({ data: { ok: false, error: "transient failure" } } as MessageEvent);
+    await expect(first).rejects.toThrow("transient failure");
+
+    const second = backend.run(ECHO_TASK, { n: 7 });
+    worker.onmessage?.({ data: { ok: true, result: 14 } } as MessageEvent);
+    await expect(second).resolves.toBe(14);
+  });
+});
+
 describe("DEEPEN 2039 — D3: multiple independent WorkerPool instances under simultaneous load don't interfere", () => {
   it("3개의 독립 풀이 동시에(인터리빙) 각자 15건씩 제출해도 각자의 동시성 상한을 독립적으로 지키고 결과가 다른 풀로 섞이지 않는다", async () => {
     const poolInstanceCount = 3;
