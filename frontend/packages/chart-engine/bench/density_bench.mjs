@@ -142,6 +142,25 @@ function sampleIndicatorWindow(values, candles, startIndex, endIndex) {
   return points;
 }
 
+/**
+ * task-6670 (esc-ci-frontend.json recurrence): `measureIndicatorAddMs` churns
+ * ~9 fresh indicator instances x 100k candle updates per sweep -- enough
+ * allocation to leave pending garbage that V8 can collect at any later,
+ * unpredictable point, including mid-measurement in a *different* function
+ * (observed: panZoomFrameMsP95 elevated across an entire run's sweeps with
+ * no matching rise in the calib probe, i.e. not host contention -- see
+ * sweepCalibRatios below). Forcing a full collection right before each timed
+ * measurement (outside the `performance.now()` window) drains that backlog
+ * proactively instead of leaving it to fire during whichever measurement
+ * happens to run next. No-op (silently) when the process was not started
+ * with `--expose-gc` (`npm run bench:density` always passes it; direct
+ * `node bench/density_bench.mjs` invocations still work, just without this
+ * noise reduction).
+ */
+function forceGc() {
+  if (typeof global.gc === "function") global.gc();
+}
+
 const NULL_RENDER_TARGET = { drawLine() {}, drawHistogram() {}, drawArea() {}, drawPolygon() {}, drawMarker() {} };
 const LINE_STYLE = { output: "primary", color: "#000000", lineWidth: 1, visible: true };
 
@@ -238,13 +257,17 @@ async function main() {
   const valuesByInstance = warmInstances(instances, candles);
 
   for (let i = 0; i < WARMUP_SWEEPS; i++) {
+    forceGc();
     measurePanZoomFrameMs(candles, instances, valuesByInstance);
+    forceGc();
     measureIndicatorAddMs(catalog, candles);
+    forceGc();
     measureTickUpdateMs(instances, candles);
   }
 
   const sweeps = [];
   const calibSamplesMs = [];
+  const sweepCalibRatios = [];
   for (let i = 0; i < MEASURE_SWEEPS; i++) {
     // Bracket each sweep with a calib probe on BOTH sides (task-6338 follow-up
     // to task-6321: that fix sampled calib only once, right before each
@@ -256,11 +279,33 @@ async function main() {
     // Sampling again right after the sweep and keeping the max of both sides
     // means contention starting mid-sweep is caught by the trailing probe
     // even when the leading probe still read quiet.
-    calibSamplesMs.push(measureCalibMs());
+    forceGc();
+    const calibLead = measureCalibMs();
+    forceGc();
     const panZoom = measurePanZoomFrameMs(candles, instances, valuesByInstance);
+    forceGc();
     const indicatorAddMs = measureIndicatorAddMs(catalog, candles);
+    forceGc();
     const tickUpdate = measureTickUpdateMs(instances, candles);
-    calibSamplesMs.push(measureCalibMs());
+    forceGc();
+    const calibTrail = measureCalibMs();
+    calibSamplesMs.push(calibLead, calibTrail);
+    // task-6670 (esc-ci-frontend.json recurrence): a *global* calib ratio
+    // (one number reduced from all MEASURE_SWEEPS*2 samples) mismatches a
+    // *per-sweep* metric median whenever host contention is non-stationary
+    // across the run instead of a flat offset -- reproduced directly from a
+    // real CI failure log where the calib probe climbed monotonically
+    // 9.3ms->19.5ms across the 9 sweeps (real, worsening contention) while
+    // panZoomFrameMsP95's own per-sweep values did not track that same
+    // ordering closely enough for a single global ratio (median of all 18
+    // calib samples) to land on the ratio that actually applied to whichever
+    // sweep ended up at the metric's median. Pairing each sweep's own
+    // measurement with that same sweep's own bracketing calib probes (MAX of
+    // the two sides, same "never let a noisy calib sample hide contention"
+    // principle `checkAbsoluteThresholds` already applies) before reducing
+    // across sweeps keeps the normalization attached to the contention that
+    // was actually present during that specific sweep's measurement.
+    sweepCalibRatios.push(Math.max(1, Math.max(calibLead, calibTrail) / CALIB_BASE_MS));
     sweeps.push({
       panZoomFrameMsP95: panZoom.p95,
       indicatorAddMs,
@@ -283,31 +328,31 @@ async function main() {
       `normalized absolute targets: ${JSON.stringify(normalized)}; raw spec targets: ${JSON.stringify(CH19_ABSOLUTE_TARGET_MS)}`,
   );
 
-  /**
-   * task-6460 (esc-ci-frontend.json): the regression ratchet and the baseline
-   * persisted on an "improvement" must NOT be normalized by the same
-   * MAX-based `calibRatio` used above for the absolute-threshold gate. MAX is
-   * the right choice there (never let one noisy calib sample turn real host
-   * contention into a false hard failure), but feeding that same inflated
-   * ratio into checkRatchet's improvement branch deflates the normalized
-   * value it writes to density-baseline.json -- one outlier calib sample
-   * permanently drags the baseline below what the code actually costs on a
-   * typical run, and every following normal run then fails as a false
-   * regression against that too-low floor (reproduced directly: see
-   * densityRatchet.mjs#decideBenchOutcome's `ratchetCalibRatio` docstring).
-   * The median across all of this run's calib samples is far more resistant
-   * to a single spike, so it is used only for the ratchet/baseline path.
-   */
-  const ratchetCalibMs = percentile(calibSamplesMs, 50);
-  const ratchetCalibRatio = Math.max(1, ratchetCalibMs / CALIB_BASE_MS);
+  // Per-sweep normalization (see sweepCalibRatios above): divide each
+  // sweep's own metrics by that same sweep's own calib ratio *before*
+  // reducing across sweeps, instead of reducing raw metrics and calib
+  // samples separately and dividing the two medians afterward -- the two
+  // reductions are only equivalent when contention is flat across the run,
+  // which the CI recurrence this fixes showed is not a safe assumption.
+  const ratchetSweeps = sweeps.map((s, i) => ({
+    panZoomFrameMsP95: s.panZoomFrameMsP95 / sweepCalibRatios[i],
+    indicatorAddMs: s.indicatorAddMs / sweepCalibRatios[i],
+    tickUpdateMsP95: s.tickUpdateMsP95 / sweepCalibRatios[i],
+  }));
+  const ratchetCurrent = {
+    panZoomFrameMsP95: percentile(ratchetSweeps.map((s) => s.panZoomFrameMsP95), 50),
+    indicatorAddMs: percentile(ratchetSweeps.map((s) => s.indicatorAddMs), 50),
+    tickUpdateMsP95: percentile(ratchetSweeps.map((s) => s.tickUpdateMsP95), 50),
+  };
   console.error(
-    `[density-bench] ratchet calib: ${ratchetCalibMs.toFixed(3)}ms (median of ${calibSamplesMs.length} samples), ratio ${ratchetCalibRatio.toFixed(3)}`,
+    `[density-bench] per-sweep calib ratios: ${JSON.stringify(sweepCalibRatios.map((r) => Math.round(r * 1000) / 1000))}; ` +
+      `ratchet current (per-sweep normalized, median across sweeps): ${JSON.stringify(ratchetCurrent)}`,
   );
 
   const baselineMeta = { candleCount: CANDLE_COUNT, indicatorInstanceCount: INDICATOR_INSTANCE_COUNT };
   const baseline = loadBaseline(BASELINE_PATH);
   const outcome = decideBenchOutcome({
-    current, baseline, absoluteFailures, calibRatio, ratchetCalibRatio, baselineMeta, baselinePath: BASELINE_PATH,
+    current: ratchetCurrent, baseline, absoluteFailures, ratchetCalibRatio: 1, baselineMeta, baselinePath: BASELINE_PATH,
   });
   for (const { level, message } of outcome.logs) console[level](message);
   if (outcome.baselineWrite) writeBaseline(BASELINE_PATH, outcome.baselineWrite.metrics, outcome.baselineWrite.meta);

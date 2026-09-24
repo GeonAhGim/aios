@@ -35,7 +35,7 @@ describe("density-bench CI wiring (DEEPEN task-3107)", () => {
 
   it("chart-engine/package.json#bench:density invokes the real bench file", () => {
     const pkg = readJson(resolvePath(CHART_ENGINE_DIR, "package.json"));
-    expect(pkg.scripts["bench:density"]).toBe("node --experimental-strip-types bench/density_bench.mjs");
+    expect(pkg.scripts["bench:density"]).toBe("node --expose-gc --experimental-strip-types bench/density_bench.mjs");
   });
 
   // task-2052's own tail comment (local_ci.py run_gates test_steps) records this
