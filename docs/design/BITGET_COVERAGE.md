@@ -11,7 +11,7 @@ BR-9(ADR-2026-09-06-I D5). 생성: `python scripts/bitget_coverage.py`(오프라
 
 | 구현됨 | 범위밖 | 미착수 | 합계 | 구현률 |
 |---|---|---|---|---|
-| 132 | 1 | 23 | 156 | 84.62% |
+| 137 | 1 | 18 | 156 | 87.82% |
 
 완료 정의(D5): `미착수` 0건 또는 우선순위(P0/P1/P2)로 사유가 남아있음. `범위밖`은 문서가 명시한 정책 배제(7.9 원칙, 출금)만 해당한다.
 
@@ -33,7 +33,7 @@ BR-9(ADR-2026-09-06-I D5). 생성: `python scripts/bitget_coverage.py`(오프라
 | 3.1 Market(공개 시세) — `src/exchanges/bitget/market_data_mixin.py` 확장 | 6 | 10 | 60.00% |
 | 3.2 Trade(주문) — FD-4 주문 전송 계층과 직결 | 12 | 17 | 70.59% |
 | 3.3 Account(계좌·입출금) | 4 | 8 | 50.00% |
-| 4. Margin(마진) 엔드포인트 체크리스트 | 13 | 18 | 72.22% |
+| 4. Margin(마진) 엔드포인트 체크리스트 | 18 | 18 | 100.00% |
 | 5.1 Market | 11 | 13 | 84.62% |
 | 5.2 Account | 9 | 9 | 100.00% |
 | 5.3 Position | 3 | 4 | 75.00% |
@@ -85,12 +85,12 @@ BR-9(ADR-2026-09-06-I D5). 생성: `python scripts/bitget_coverage.py`(오프라
 | GET | `/api/v2/margin/currencies` | 4. Margin(마진) 엔드포인트 체크리스트 | 구현됨 | P1 | 지원 통화 조회 | `02b_bitget_api_v2_full_spec_v1.md` |
 | GET | `/api/v2/margin/{marginType}/account/assets` | 4. Margin(마진) 엔드포인트 체크리스트 | 구현됨 | P0 | 계좌 자산 조회 | `02b_bitget_api_v2_full_spec_v1.md` |
 | POST | `/api/v2/margin/{marginType}/account/borrow` | 4. Margin(마진) 엔드포인트 체크리스트 | 구현됨 | P1 | 대출 실행 | `02b_bitget_api_v2_full_spec_v1.md` |
-| POST | `/api/v2/margin/{marginType}/account/flash-repay` | 4. Margin(마진) 엔드포인트 체크리스트 | 미착수 | P2 | 빠른 상환 | `02b_bitget_api_v2_full_spec_v1.md` |
+| POST | `/api/v2/margin/{marginType}/account/flash-repay` | 4. Margin(마진) 엔드포인트 체크리스트 | 구현됨 | P2 | 빠른 상환 | `02b_bitget_api_v2_full_spec_v1.md` |
 | GET | `/api/v2/margin/{marginType}/account/max-borrowable-amount` | 4. Margin(마진) 엔드포인트 체크리스트 | 구현됨 | P1 | 최대 대출가능액 | `02b_bitget_api_v2_full_spec_v1.md` |
-| GET | `/api/v2/margin/{marginType}/account/max-transfer-out-amount` | 4. Margin(마진) 엔드포인트 체크리스트 | 미착수 | P2 | 최대 이체가능액 | `02b_bitget_api_v2_full_spec_v1.md` |
+| GET | `/api/v2/margin/{marginType}/account/max-transfer-out-amount` | 4. Margin(마진) 엔드포인트 체크리스트 | 구현됨 | P2 | 최대 이체가능액 | `02b_bitget_api_v2_full_spec_v1.md` |
 | POST | `/api/v2/margin/{marginType}/account/repay` | 4. Margin(마진) 엔드포인트 체크리스트 | 구현됨 | P1 | 상환 실행 | `02b_bitget_api_v2_full_spec_v1.md` |
 | GET | `/api/v2/margin/{marginType}/account/risk-rate` | 4. Margin(마진) 엔드포인트 체크리스트 | 구현됨 | P0 | 리스크율 조회 | `02b_bitget_api_v2_full_spec_v1.md` |
-| POST | `/api/v2/margin/{marginType}/batch-place-order` | 4. Margin(마진) 엔드포인트 체크리스트 | 미착수 | P2 | 배치 주문 제출 | `02b_bitget_api_v2_full_spec_v1.md` |
+| POST | `/api/v2/margin/{marginType}/batch-place-order` | 4. Margin(마진) 엔드포인트 체크리스트 | 구현됨 | P2 | 배치 주문 제출 | `02b_bitget_api_v2_full_spec_v1.md` |
 | POST | `/api/v2/margin/{marginType}/cancel-order` | 4. Margin(마진) 엔드포인트 체크리스트 | 구현됨 | P0 | 주문 취소 | `02b_bitget_api_v2_full_spec_v1.md` |
 | GET | `/api/v2/margin/{marginType}/fills` | 4. Margin(마진) 엔드포인트 체크리스트 | 구현됨 | P1 | 체결 내역 조회 | `02b_bitget_api_v2_full_spec_v1.md` |
 | GET | `/api/v2/margin/{marginType}/history-orders` | 4. Margin(마진) 엔드포인트 체크리스트 | 구현됨 | P1 | 주문 이력 조회 | `02b_bitget_api_v2_full_spec_v1.md` |
@@ -98,8 +98,8 @@ BR-9(ADR-2026-09-06-I D5). 생성: `python scripts/bitget_coverage.py`(오프라
 | GET | `/api/v2/margin/{marginType}/liquidation-order` | 4. Margin(마진) 엔드포인트 체크리스트 | 구현됨 | P1 | 강제청산 이력 조회 | `02b_bitget_api_v2_full_spec_v1.md` |
 | GET | `/api/v2/margin/{marginType}/open-orders` | 4. Margin(마진) 엔드포인트 체크리스트 | 구현됨 | P0 | 미체결 주문 조회 | `02b_bitget_api_v2_full_spec_v1.md` |
 | POST | `/api/v2/margin/{marginType}/place-order` | 4. Margin(마진) 엔드포인트 체크리스트 | 구현됨 | P0 | 주문 제출 | `02b_bitget_api_v2_full_spec_v1.md` |
-| GET | `/api/v2/margin/{marginType}/tier-data` | 4. Margin(마진) 엔드포인트 체크리스트 | 미착수 | P2 | 담보 등급표 조회 | `02b_bitget_api_v2_full_spec_v1.md` |
-| GET | `/api/v2/margin/{marginType}/{borrow,repay,interest,liquidation}-history` | 4. Margin(마진) 엔드포인트 체크리스트 | 미착수 | P2 | 대출/상환/이자/청산/거래 이력 조회 4종 | `02b_bitget_api_v2_full_spec_v1.md` |
+| GET | `/api/v2/margin/{marginType}/tier-data` | 4. Margin(마진) 엔드포인트 체크리스트 | 구현됨 | P2 | 담보 등급표 조회 | `02b_bitget_api_v2_full_spec_v1.md` |
+| GET | `/api/v2/margin/{marginType}/{borrow,repay,interest,liquidation}-history` | 4. Margin(마진) 엔드포인트 체크리스트 | 구현됨 | P2 | 대출/상환/이자/청산/거래 이력 조회 4종 | `02b_bitget_api_v2_full_spec_v1.md` |
 | GET | `/api/v2/mix/account/account` | 5.2 Account | 구현됨 | P0 | 단일/전체 계좌 조회 | `02b_bitget_api_v2_full_spec_v1.md` |
 | GET | `/api/v2/mix/account/accounts` | 5.2 Account | 구현됨 | P0 | 단일/전체 계좌 조회 | `02b_bitget_api_v2_full_spec_v1.md` |
 | GET | `/api/v2/mix/account/bill` | 5.2 Account | 구현됨 | P1 | 계좌 청구서 | `02b_bitget_api_v2_full_spec_v1.md` |
