@@ -22,6 +22,18 @@ skip한다(빈 통과 아님) — 이 환경에는 실키가 없으므로 이번
 끝난다. `BITGET_SPOT_PROFILE.verified`를 `"LIVE_VERIFIED"`로 바꾸는 것은
 이 테스트들이 실제로 전부 통과한 뒤 사람이 하는 별도 커밋이다(ADR-2026-09-
 06-G §11 — 통과하지 않고 값만 바꾸는 것은 금지).
+
+task-6522 (esc-ci-replay_verify.json bisect_culprit=9546feaca1f0): 각 테스트
+시그니처는 `demo_adapter`를 `pool`보다 앞에 둔다 -- 같은 scope 픽스처는
+시그니처 순서대로 setup되므로(의존성 없는 한), 자격증명이 없을 때
+`demo_adapter`의 `skip_if_missing_demo_credentials()`가 먼저 발동해
+`pool`(실 `DATABASE_URL`에 직접 붙는 `tests/e2e/conftest.py`의 asyncpg
+pool, 재시도 없음)이 아예 열리지 않는다. 원래 순서(`pool` 먼저)는 자격증명
+없는 이 환경에서도 테스트마다 매번 쓸모없이 실 커넥션을 열고 닫아,
+`scripts/replay_verify.py`가 같은 `DATABASE_URL`에 거는 커넥션과 경합을
+늘렸다(esc-ci-replay_verify.json이 이 파일을 도입한 커밋을 bisect_culprit
+으로 지목한 근거) -- 재시도 예산을 더 키우는 대신 불필요한 커넥션 자체를
+없앤다(DECISION_GUIDELINES B-2).
 """
 from __future__ import annotations
 
@@ -71,7 +83,7 @@ def _order(execution_id: int, *, price: Decimal, quantity: Decimal, tag: str) ->
 
 
 async def test_submit_order_pipeline_roundtrip_confirms_paptrading_spot_validity(
-    pool: asyncpg.Pool, demo_adapter: BitgetAdapter
+    demo_adapter: BitgetAdapter, pool: asyncpg.Pool
 ) -> None:
     """happy path — DoD 본체: `submit_order()`가 실제 Bitget 데모에 스팟
     지정가 주문을 내고(place), DB에 그 결과가 영속화되며(get 동치),
@@ -106,7 +118,7 @@ async def test_submit_order_pipeline_roundtrip_confirms_paptrading_spot_validity
 
 
 async def test_tick_size_violation_fails_closed_no_position_written(
-    pool: asyncpg.Pool, demo_adapter: BitgetAdapter
+    demo_adapter: BitgetAdapter, pool: asyncpg.Pool
 ) -> None:
     """negative #1 — 틱사이즈 위반 주문은 거래소가 거부하고, `submit_order()`
     는 그 실패를 삼키지 않고 전파한다. claim 행은 UNKNOWN으로 귀결되고
@@ -141,7 +153,7 @@ async def test_tick_size_violation_fails_closed_no_position_written(
 
 
 async def test_below_min_notional_rejected_no_position_written(
-    pool: asyncpg.Pool, demo_adapter: BitgetAdapter
+    demo_adapter: BitgetAdapter, pool: asyncpg.Pool
 ) -> None:
     """negative #2 — `min_notional`(venue_profile.py 실측, $1) 미만 수량은
     거래소가 거부한다. tick 위반과 다른 별도의 거부 사유를 실제로
@@ -175,7 +187,7 @@ async def test_below_min_notional_rejected_no_position_written(
 
 
 async def test_pipeline_write_replays_byte_identical(
-    pool: asyncpg.Pool, demo_adapter: BitgetAdapter
+    demo_adapter: BitgetAdapter, pool: asyncpg.Pool
 ) -> None:
     """D3 — `scripts/replay_verify.py`(FA-15)가 이 리프의 실제 쓰기를
     byte-identical로 재생할 수 있어야 한다(§5 D3 "passing `replay_verify`").

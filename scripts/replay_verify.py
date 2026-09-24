@@ -393,6 +393,22 @@ async def _run(*, hours: int, as_of: datetime) -> int:
     return 0
 
 
+# task-6522 (esc-ci-replay_verify.json, sha 79d515e8b93b): every traceback this
+# escalation has ever shown lands in `asyncio\windows_events.py`'s `_loop_reading`
+# / `finish_recv` -- those are `ProactorEventLoop`-only internals (overlapped I/O
+# via IOCP). task-6177 through task-6302 all treated the reset as opaque and widened
+# the retry budget/coverage around it; none of them looked at *why* Windows' default
+# proactor loop is the one surfacing it. `WindowsSelectorEventLoopPolicy` drives
+# sockets through `select`/`poll` readiness instead of IOCP overlapped recv, which
+# does not have this reset-propagation path at all -- it is not a bigger retry
+# budget, it is removing the specific mechanism the traceback is coming from
+# (DECISION_GUIDELINES B-2: root-cause the regression, do not just widen the
+# tolerance around it again). No subprocess use in this script, so the selector
+# loop's lack of Windows subprocess support does not apply here.
+if sys.platform == "win32":
+    asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
