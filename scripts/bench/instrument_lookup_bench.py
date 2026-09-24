@@ -64,46 +64,52 @@ async def _measure(iterations: int) -> list[float]:
             "TEST_DATABASE_URL이 필요합니다 — 실DB 경로를 측정하는 벤치라 스킵할 수 없다."
         )
 
-    conn = await asyncpg.connect(dsn)
+    pool = await asyncpg.create_pool(dsn, min_size=1, max_size=1)
+    if pool is None:
+        raise RuntimeError("asyncpg.create_pool이 None을 반환했다 — DSN을 확인하라.")
     samples: list[float] = []
     try:
-        tx = conn.transaction()
-        await tx.start()
+        conn = await pool.acquire()
         try:
-            refs = PostgresReferenceRepository(pool=None)  # type: ignore[arg-type]
-            reader = PostgresReferenceReader(pool=None)  # type: ignore[arg-type]
-            now = datetime.now(timezone.utc)
-            inst = await refs.register(
-                conn,
-                RegisterInstrumentCommand(
-                    venue=Venue.BITGET,
-                    venue_symbol=_VENUE_SYMBOL,
-                    asset_class=AssetClass.CRYPTO,
-                    tick_size=Decimal("0.01"),
-                    lot_size=Decimal("0.001"),
-                    listed_at=now,
-                    actor_subject_id=uuid4(),
-                    trace_id=uuid4(),
-                ),
-            )
-
-            for i in range(iterations):
-                by_symbol = i % 2 == 0
-                started = time.perf_counter()
-                await resolve_instrument(
+            tx = conn.transaction()
+            await tx.start()
+            try:
+                refs = PostgresReferenceRepository(pool=pool)
+                reader = PostgresReferenceReader(pool=pool)
+                now = datetime.now(timezone.utc)
+                inst = await refs.register(
                     conn,
-                    refs=refs,
-                    reader=reader,
-                    venue=Venue.BITGET if by_symbol else None,
-                    symbol=inst.venue_symbol if by_symbol else None,
-                    instrument_id=None if by_symbol else inst.instrument_id,
-                    now=now,
+                    RegisterInstrumentCommand(
+                        venue=Venue.BITGET,
+                        venue_symbol=_VENUE_SYMBOL,
+                        asset_class=AssetClass.CRYPTO,
+                        tick_size=Decimal("0.01"),
+                        lot_size=Decimal("0.001"),
+                        listed_at=now,
+                        actor_subject_id=uuid4(),
+                        trace_id=uuid4(),
+                    ),
                 )
-                samples.append((time.perf_counter() - started) * 1000)
+
+                for i in range(iterations):
+                    by_symbol = i % 2 == 0
+                    started = time.perf_counter()
+                    await resolve_instrument(
+                        conn,
+                        refs=refs,
+                        reader=reader,
+                        venue=Venue.BITGET if by_symbol else None,
+                        symbol=inst.venue_symbol if by_symbol else None,
+                        instrument_id=None if by_symbol else inst.instrument_id,
+                        now=now,
+                    )
+                    samples.append((time.perf_counter() - started) * 1000)
+            finally:
+                await tx.rollback()
         finally:
-            await tx.rollback()
+            await pool.release(conn)
     finally:
-        await conn.close()
+        await pool.close()
     return samples
 
 

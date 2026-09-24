@@ -13,6 +13,8 @@ MP-2. 완료 하한: ADR-2026-09-09-C D2 -- negative >=3, 실패주입 1, 성능
 from __future__ import annotations
 
 import time
+from collections.abc import Callable
+from typing import Any
 
 import pytest
 
@@ -27,6 +29,13 @@ from src.foundation.marketplace.domain.visibility import (
 OWNER = ViewerContext(is_owner=True)
 STRANGER = ViewerContext()
 INVITEE = ViewerContext(is_invited=True)
+
+
+def _call_untyped(fn: Callable[..., Any], *args: Any, **kwargs: Any) -> Any:
+    """negative test에서 pydantic/enum 경계 밖의 값을 의도적으로 넘길 때
+    per-call `# type: ignore`(PLT-40 예산 소모) 대신 이 Any 경유 헬퍼를 쓴다
+    -- tests/unit/api/schemas/test_marketplace.py의 선례와 동일 패턴."""
+    return fn(*args, **kwargs)
 
 
 # ---- 4단계 판정 (positive) ----
@@ -118,7 +127,7 @@ def test_protected_source_allowed_at_non_public_grades():
 
 def test_missing_grade_is_rejected():
     with pytest.raises(ValueError, match=MarketplaceErrorCode.VISIBILITY_DENIED.value):
-        resolve_visibility(None, has_protected_source=False, viewer=STRANGER)  # type: ignore[arg-type]
+        _call_untyped(resolve_visibility, None, has_protected_source=False, viewer=STRANGER)
 
 
 def test_invalid_grade_value_is_rejected_fail_closed():
@@ -130,7 +139,9 @@ def test_invalid_grade_value_is_rejected_fail_closed():
             return "<bogus>"
 
     with pytest.raises(ValueError, match=MarketplaceErrorCode.VISIBILITY_DENIED.value):
-        resolve_visibility(_BogusGrade(), has_protected_source=False, viewer=STRANGER)  # type: ignore[arg-type]
+        _call_untyped(
+            resolve_visibility, _BogusGrade(), has_protected_source=False, viewer=STRANGER
+        )
 
 
 # ---- 실패주입 1 + 게이트 적색 재현 1 ----
@@ -146,7 +157,9 @@ def test_corrupted_grade_fails_closed_and_reproduces_on_repeat():
 
     def _attempt() -> None:
         with pytest.raises(ValueError, match=MarketplaceErrorCode.VISIBILITY_DENIED.value):
-            resolve_visibility(corrupted, has_protected_source=False, viewer=STRANGER)  # type: ignore[arg-type]
+            _call_untyped(
+                resolve_visibility, corrupted, has_protected_source=False, viewer=STRANGER
+            )
 
     # 게이트 적색 재현: 동일 오염 입력을 반복 호출해도 거부 판정이
     # 뒤집히지 않는다(우연한 1회성 통과가 아님을 증명).

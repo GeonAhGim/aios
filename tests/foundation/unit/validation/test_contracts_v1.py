@@ -269,7 +269,7 @@ def test_start_command_missing_initial_equity_raises() -> None:
 
 def test_start_command_invalid_warmup_bars_type_raises() -> None:
     kw = _valid_cmd_kwargs()
-    kw["warmup_bars"] = "twenty"  # type: ignore[dict-item]
+    kw["warmup_bars"] = "twenty"
     with pytest.raises(ValidationError):
         StartValidationCommand(**kw)
 
@@ -297,7 +297,7 @@ def test_validation_result_view_missing_created_at_raises() -> None:
 
 def test_validation_result_view_invalid_created_at_raises() -> None:
     kw = _valid_result_kwargs()
-    kw["created_at"] = "not-a-datetime"  # type: ignore[dict-item]
+    kw["created_at"] = "not-a-datetime"
     with pytest.raises(ValidationError):
         ValidationResultView(**kw)
 
@@ -324,7 +324,7 @@ def test_validation_bundle_view_missing_outcome_raises() -> None:
 
 def test_validation_bundle_view_invalid_outcome_raises() -> None:
     kw = _valid_bundle_kwargs()
-    kw["outcome"] = "bogus_outcome"  # type: ignore[dict-item]
+    kw["outcome"] = "bogus_outcome"
     with pytest.raises(ValidationError):
         ValidationBundleView(**kw)
 

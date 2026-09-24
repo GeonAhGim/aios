@@ -51,7 +51,7 @@ def test_main_records_passed_false_when_budget_is_exceeded(
 ) -> None:
     """적대적/실패 주입: 예산을 0ms로 조여 실제로 FAIL 경로(passed=false)가
     기록되는지 — 위 PASS 단언이 항상 참인 동어반복이 아님을 증명한다."""
-    monkeypatch.setattr(bench, "BUDGET_MS", 0.0)  # type: ignore[attr-defined]
+    monkeypatch.setattr(bench, "BUDGET_MS", 0.0)
     out = tmp_path / "dsl_compile_bench.json"
     rc = bench.main(["--out", str(out), "--iterations", "2"])
 
