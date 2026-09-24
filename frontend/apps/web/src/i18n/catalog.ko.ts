@@ -2,6 +2,7 @@ import { catalogKoLegacyA } from "./catalog.ko.legacyA";
 import { catalogKoLegacyB } from "./catalog.ko.legacyB";
 import { catalogKoLegacyC } from "./catalog.ko.legacyC";
 import { catalogKoLegacyD } from "./catalog.ko.legacyD";
+import { catalogKoExtra } from "./catalog.ko.extra";
 // UX-1 (task-2685): catalog.ko 골격. 실제 147개 파일의 문자열 추출·치환은 UX-1이
 // 의존하는 UX-2(task-2686)의 범위다 -- 여기서는 프레임워크가 실제로 동작함을
 // 증명할 최소 네임스페이스만 채운다. 새 화면 문구를 추가할 때는 이 카탈로그에
@@ -422,83 +423,9 @@ export const catalogKo = {
   },
   // task-5597 (EMS-18 CI 정정): ExecutionAlgoPage/TcaPage 새 문구 -- i18n-literals
   // ratchet(scripts/check_i18n_literals.mjs)이 baseline에 없는 새 리터럴을 막는다.
-  executionAlgoPage: {
-    pageTitle: "알고리즘 집행 진행률",
-    missingOrderId: "주문 ID가 없습니다.",
-    notFoundDescription: "알고리즘 주문이 존재하지 않습니다.",
-    unavailable: "데이터를 불러올 수 없습니다.",
-    cardTitle: "집행 진행 상태",
-    totalSlices: "전체 슬라이스",
-    submittedSlices: "제출됨",
-    pendingSlices: "대기 중",
-    status: "상태",
-    remainingQty: "미체결 수량",
-    demotedToTwap: "TWAP로 강등됨",
-    refresh: "새로고침",
-  },
-  tcaPage: {
-    pageTitle: "거래비용분석(TCA)",
-    missingOrderId: "주문 ID가 없습니다.",
-    notComputedYet: "TCA 데이터가 아직 계산되지 않았습니다.",
-    startCompute: "TCA 계산 시작",
-    noData: "TCA 데이터가 없습니다.",
-    resultTitle: "TCA 분석 결과",
-    computedAt: "계산 시간: {{time}}",
-    close: "닫기",
-    recompute: "다시 계산",
-    recomputeTitle: "TCA 재계산",
-    compute: "계산",
-    cancel: "취소",
-  },
-  performanceStatementsPage: {
-    title: "실적 명세서",
-    computeTitle: "명세서 계산",
-    scope: "스코프",
-    scopeAll: "전체",
-    periodStart: "기간 시작",
-    periodEnd: "기간 종료",
-    methodologyVersion: "방법론 버전",
-    methodologyVersionPlaceholder: "예: v1.0 (미입력 시 기본값)",
-    computeSubmit: "계산 요청",
-    listTitle: "명세서 목록",
-    portfolioId: "포트폴리오 ID",
-    portfolioIdPlaceholder: "선택 입력",
-    listEmpty: "실적 명세서가 없습니다.",
-    asOf: "기준 시각: {{asOf}}",
-    component: "구성 요소",
-    amount: "금액",
-    grossPnl: "총손익",
-    fees: "수수료",
-    slippage: "슬리피지",
-    funding: "펀딩",
-    fx: "환율",
-    cashflowsNet: "순현금흐름",
-    estimatedTax: "추정 세금",
-    netPnl: "순손익",
-    returns: "수익률",
-    annualized: "연환산",
-    estimated: "추정",
-    identityMismatch: "구성 요소 합계가 순손익과 일치하지 않습니다 (잔차: {{residual}}).",
-    correctReasonLabel: "정정 사유",
-    correctReasonPlaceholder: "정정 사유를 입력하세요",
-    correctSubmit: "정정 요청",
-    correctSuccess: "정정 요청이 반영되었습니다.",
-    notFoundTitle: "명세서를 찾을 수 없습니다",
-    notFoundDescription: "해당 실적 명세서가 존재하지 않습니다.",
-  },
-  // task-6320 (CM-19): MandatePage.tsx(위임장 편집·승인 흐름, routes/compliance) —
-  // legacy.mandatesPage.*(리비전 규칙 요약·상태 전환 문구)를 재사용하고, 이
-  // 네임스페이스는 목록 화면·빈 상태·초안/개정 제출 라벨만 갖는다.
-  mandatePage: {
-    pageTitle: "위임장 편집·승인",
-    listTitle: "위임장 목록",
-    listEmpty: "등록된 위임장이 없습니다.",
-    activeLabel: "활성",
-    pendingLabel: "대기",
-    noneLabel: "없음",
-    draftSubmitLabel: "초안 작성",
-    amendSubmitLabel: "개정안 제안",
-  },
+  // task-6477: executionAlgoPage/tcaPage/performanceStatementsPage/mandatePage는
+  // P6 500줄 ratchet 때문에 catalog.ko.extra.ts로 분리됐다(내용 동일, 이동만).
+  ...catalogKoExtra,
   // task-2686 (UX-2): mechanically extracted from the 102 baseline .tsx files
   // (scripts/i18n-literals-baseline.json) via an AST codemod -- one namespace per
   // file (camelCase basename), keys are sequential (t1, t2.../title1, label1...).
