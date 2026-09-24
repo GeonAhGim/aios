@@ -12,6 +12,7 @@ CI(nh_openapi_coverage.py)에서 읽어 오프라인으로 구현 상태를 분�
 이 스크립트만 네트워크 접근을 한다(`urllib`). 스냅샷을 새로 뜨려면 위 명령을 실행하고,
 생성된 JSON은 git에 커밋한다.
 """
+
 from __future__ import annotations
 
 import json
@@ -39,6 +40,78 @@ def _http_get(url: str) -> bytes:
         return bytes(resp.read())
 
 
+def _extract_request_body_param(operation: dict[str, Any]) -> dict[str, Any] | None:
+    """requestBody 파라미터 하나를 추출한다(있으면)."""
+    request_body = operation.get("requestBody")
+    if not request_body or not isinstance(request_body, dict):
+        return None
+    content = request_body.get("content", {})
+    # 대부분 application/json
+    json_content = content.get("application/json", {})
+    schema = json_content.get("schema")
+    if not schema:
+        return None
+    return {
+        "name": "body",
+        "in": "body",
+        "required": request_body.get("required", False),
+        "schema": schema if isinstance(schema, dict) else str(schema),
+    }
+
+
+def _extract_path_query_params(operation: dict[str, Any]) -> list[dict[str, Any]]:
+    """path/query 파라미터를 추출한다."""
+    params: list[dict[str, Any]] = []
+    for param in operation.get("parameters", []):
+        if isinstance(param, dict):
+            params.append(
+                {
+                    "name": param.get("name"),
+                    "in": param.get("in"),
+                    "required": param.get("required", False),
+                    "schema": param.get("schema", param.get("type")),
+                }
+            )
+    return params
+
+
+def _extract_request_params(operation: dict[str, Any]) -> list[dict[str, Any]]:
+    """operation의 요청 파라미터(body + path/query)를 모두 추출한다."""
+    request_params: list[dict[str, Any]] = []
+    body_param = _extract_request_body_param(operation)
+    if body_param is not None:
+        request_params.append(body_param)
+    request_params.extend(_extract_path_query_params(operation))
+    return request_params
+
+
+def _extract_response_schema(operation: dict[str, Any]) -> dict[str, Any] | str | None:
+    """첫 번째 성공 응답(200/201/default)의 스키마를 추출한다."""
+    responses = operation.get("responses", {})
+    for status_code in ["200", "201", "default"]:
+        response_data = responses.get(status_code)
+        if not isinstance(response_data, dict):
+            continue
+        content = response_data.get("content", {})
+        json_content = content.get("application/json", {})
+        schema = json_content.get("schema")
+        if schema:
+            return schema if isinstance(schema, dict) else str(schema)
+    return None
+
+
+def _build_endpoint(path_str: str, method_str: str, operation: dict[str, Any]) -> dict[str, Any]:
+    """path + method + operation 하나에서 endpoint 레코드를 만든다."""
+    return {
+        "path": path_str,
+        "method": method_str.upper(),
+        "summary": operation.get("summary", ""),
+        "description": operation.get("description", ""),
+        "request_params": _extract_request_params(operation),
+        "response_schema": _extract_response_schema(operation),
+    }
+
+
 def extract_endpoints(openapi_data: dict[str, Any]) -> list[dict[str, Any]]:
     """OpenAPI spec에서 모든 endpoint를 추출한다."""
     endpoints: list[dict[str, Any]] = []
@@ -52,63 +125,7 @@ def extract_endpoints(openapi_data: dict[str, Any]) -> list[dict[str, Any]]:
                 continue  # skip OpenAPI extensions
             if not isinstance(operation, dict):
                 continue
-            # operation 객체 구조: summary, description, requestBody, responses, parameters
-            method_upper = method_str.upper()
-
-            # requestBody 파라미터 추출
-            request_params: list[dict[str, Any]] = []
-            request_body = operation.get("requestBody")
-            if request_body and isinstance(request_body, dict):
-                required = request_body.get("required", False)
-                content = request_body.get("content", {})
-                # 대부분 application/json
-                json_content = content.get("application/json", {})
-                schema = json_content.get("schema")
-                if schema:
-                    request_params.append(
-                        {
-                            "name": "body",
-                            "in": "body",
-                            "required": required,
-                            "schema": schema if isinstance(schema, dict) else str(schema),
-                        }
-                    )
-
-            # path/query 파라미터 추출
-            for param in operation.get("parameters", []):
-                if isinstance(param, dict):
-                    request_params.append(
-                        {
-                            "name": param.get("name"),
-                            "in": param.get("in"),
-                            "required": param.get("required", False),
-                            "schema": param.get("schema", param.get("type")),
-                        }
-                    )
-
-            # 응답 스키마 추출 (첫 번째 성공 응답)
-            response_schema = None
-            responses = operation.get("responses", {})
-            for status_code in ["200", "201", "default"]:
-                if status_code in responses:
-                    response_data = responses[status_code]
-                    if isinstance(response_data, dict):
-                        content = response_data.get("content", {})
-                        json_content = content.get("application/json", {})
-                        schema = json_content.get("schema")
-                        if schema:
-                            response_schema = schema if isinstance(schema, dict) else str(schema)
-                            break
-
-            endpoint = {
-                "path": path_str,
-                "method": method_upper,
-                "summary": operation.get("summary", ""),
-                "description": operation.get("description", ""),
-                "request_params": request_params,
-                "response_schema": response_schema,
-            }
-            endpoints.append(endpoint)
+            endpoints.append(_build_endpoint(path_str, method_str, operation))
 
     return endpoints
 
@@ -141,8 +158,7 @@ def fetch_and_save(output: Path = DEFAULT_OUTPUT) -> int:
         )
 
         print(
-            f"OK: {len(endpoints)}개 endpoint 추출 -> {output} "
-            f"(fetched: {reference['fetched_at']})"
+            f"OK: {len(endpoints)}개 endpoint 추출 -> {output} (fetched: {reference['fetched_at']})"
         )
         return 0
 
