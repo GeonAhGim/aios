@@ -30,6 +30,10 @@ class PersonalRiskBundleConfigV1(_StrictModel):
     # ratchet-allow: wire-boundary: v1 wire float, Decimal at app boundary (task-5762)
     default_notional_cap_krw: float = Field(gt=0)
     symbol_whitelist: list[str] = Field(default_factory=list)
+    # ratchet-allow: wire-boundary: v1 wire float, Decimal at app boundary (task-5762)
+    # (check_money_float does not scan dict[str, float] value types -- kept
+    # explicit here for consistency with the scalar KRW fields above/below,
+    # since Decimal(str(v)) conversion happens at bundle_loader.py:34.)
     exchange_notional_caps: dict[str, float] = Field(default_factory=dict)
 
 
