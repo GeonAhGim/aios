@@ -260,13 +260,18 @@ class BitgetAccountMixin:
         raw = await self._request("GET", "/api/v2/spot/wallet/deposit-records", params=params)
         return list(raw["data"])
 
+    @require_paper_sandbox
     async def get_withdrawal_records(
         self: SignedRequestClient, coin: str | None = None, *, limit: int = 100
     ) -> list[dict[str, Any]]:
         """02b spec §3.3(P2) — get withdrawal history records.
 
         Note: this is a query only, not a withdrawal request; unrelated to 7.9 principle
-        (withdrawal policy restriction)."""
+        (withdrawal policy restriction). Guarded anyway — the method name matches
+        `_FUND_MOVING_NAME`'s `withdraw` pattern
+        (tests/unit/exchanges/test_live_guard_coverage.py), and the fail-closed
+        posture (CLAUDE.md §3) favors guarding a read over carving out a regex
+        exception for one method."""
         params: dict[str, Any] = {"limit": str(limit)}
         if coin is not None:
             params["coin"] = coin.upper()
