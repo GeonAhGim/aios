@@ -14,17 +14,19 @@ FND-03(`src/foundation/evidence/domain/rules.py`)과 같은 방식: 이전 엔�
 from __future__ import annotations
 
 import hashlib
-import json
 from collections.abc import Sequence
 from datetime import datetime
-from typing import Any
 
+from src.core.eventstore.canonical_json import canonical_json
 from src.foundation.ledger.contracts.v1 import JournalEntryView, LedgerEventType, PostingLine
 
-
-def canonical_json(data: Any) -> str:
-    """정렬된 키로 결정적 JSON 문자열을 만든다(`idempotency.py`가 재사용)."""
-    return json.dumps(data, sort_keys=True, default=str)
+__all__ = [
+    "canonical_json",
+    "lines_digest",
+    "entry_hash",
+    "ChainIntegrityError",
+    "verify_chain",
+]
 
 
 def lines_digest(lines: Sequence[PostingLine]) -> str:

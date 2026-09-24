@@ -18,8 +18,9 @@ extend the very fold `scripts/replay_verify.py` compares against, so the
 drift`, `actual' = actual + drift = replayed`, so `replayed' - actual' =
 drift != 0` unless drift was already 0). A derived projection that lagged its
 source cannot be caught up by adding more source events; only recomputing the
-projection converges it back to the source (`src/core/eventstore/projections/
-ledger.py::project`, the exact fold `replay_verify.py` already trusts).
+projection converges it back to the source (`src/foundation/ledger/domain/
+eventstore_projection.py::project`, the exact fold `replay_verify.py`
+already trusts).
 
 Fail-closed: refuses under `ledger_control.write_frozen` (same posture as
 `post_entry._assert_not_frozen`) and refuses an account this fold has never
@@ -33,7 +34,7 @@ from decimal import Decimal
 
 import asyncpg
 
-from src.core.eventstore.projections import ledger as ledger_projection
+from src.foundation.ledger.domain import eventstore_projection as ledger_projection
 from src.foundation.ledger.ports.balance_repository import BalanceRepository
 from src.foundation.ledger.ports.journal_repository import LedgerJournalRepository
 

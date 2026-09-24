@@ -25,7 +25,6 @@ from uuid import uuid4
 
 import pytest
 
-from src.core.eventstore.projections import ledger as ledger_projection
 from src.core.eventstore.projections import orders as orders_projection
 from src.core.eventstore.projections import positions as positions_projection
 from src.data.models.base import AssetClass, Currency, Money
@@ -36,6 +35,7 @@ from src.foundation.ledger.adapters.postgres_balance_repository import PostgresB
 from src.foundation.ledger.adapters.postgres_journal_repository import PostgresJournalRepository
 from src.foundation.ledger.application.post_entry import post_entry
 from src.foundation.ledger.contracts.v1 import AccountType, LedgerEvent, LedgerEventType, UserSub
+from src.foundation.ledger.domain import eventstore_projection as ledger_projection
 from src.foundation.ledger.domain.chart_of_accounts import user_account
 from src.foundation.positions.adapters.postgres_journal_repository import (
     PostgresJournalRepository as PositionsJournalRepository,

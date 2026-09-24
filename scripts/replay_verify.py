@@ -29,9 +29,11 @@ oversight): `projections/positions.py` (`snapshot_builder.fold`) needs an
 production. Wiring it needs an instrument registry this leaf does not have.
 
 Orders' and ledger's projection logic is reused as-is from FA-14
-(src/core/eventstore/projections/{orders,ledger}.py, task-2050 decision) --
-not re-implemented here, so "byte-identical" actually proves the projection
-and the write path agree.
+(src/core/eventstore/projections/orders.py,
+src/foundation/ledger/domain/eventstore_projection.py -- the latter moved
+out of src/core in task-6495 to fix a core-no-io violation -- task-2050
+decision) -- not re-implemented here, so "byte-identical" actually proves
+the projection and the write path agree.
 
 task-2173 fix: orders whose `order_events` chain does not start at CREATED
 are skipped (not counted a mismatch, not a crash) when they predate
@@ -60,9 +62,9 @@ from uuid import UUID
 import asyncpg
 
 from src.core.eventstore import replay
-from src.core.eventstore.projections import ledger as ledger_projection
 from src.core.eventstore.projections import orders as orders_projection
 from src.foundation.ledger.adapters.postgres_journal_repository import PostgresJournalRepository
+from src.foundation.ledger.domain import eventstore_projection as ledger_projection
 from src.services.oms.adapters.fills_repository import FillsRepository
 from src.services.oms.adapters.order_events_repository import PostgresOrderEventRepository
 
