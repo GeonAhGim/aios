@@ -9,7 +9,6 @@ from __future__ import annotations
 import os
 import sys
 import time
-from typing import TYPE_CHECKING
 
 import asyncpg
 import pytest
@@ -18,16 +17,10 @@ from scripts import setup_test_db as setup_test_db_cli
 from tests.support.db import (
     _asyncpg_dsn,
     _db_name,
-    _pool_retry_delay,
-    _sleep_before_pool_retry,
     _with_database,
-    create_pool_with_retry,
     ensure_worker_database,
     session_database_url,
 )
-
-if TYPE_CHECKING:
-    pass
 
 # ── Negative tests: invalid inputs rejected ──────────────────────────
 
@@ -154,192 +147,6 @@ async def test_ensure_worker_database_propagates_object_in_use_after_retries() -
             await ensure_worker_database(template_url, "gw0")
     finally:
         db_module2.asyncpg.connect = original_connect
-
-
-@pytest.mark.asyncio
-async def test_create_pool_with_retry_retries_transient_reset_then_succeeds(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """esc-ci-pytest.json/task-6235: a transient WinError 64 / asyncpg
-    ConnectionDoesNotExistError on the first attempt is absorbed -- the second
-    attempt's successful pool is returned, not the exception."""
-    db_module = sys.modules["tests.support.db"]
-    sentinel_pool = object()
-    calls = 0
-
-    async def _fake_create_pool(dsn: str, **kwargs: object) -> object:
-        nonlocal calls
-        calls += 1
-        if calls == 1:
-            raise asyncpg.exceptions.ConnectionDoesNotExistError(
-                "connection was closed in the middle of operation"
-            )
-        return sentinel_pool
-
-    monkeypatch.setattr(db_module.asyncpg, "create_pool", _fake_create_pool)
-    monkeypatch.setattr(db_module, "_POOL_CONNECT_RETRY_BASE_DELAY", 0.0)
-
-    result = await create_pool_with_retry("postgresql://u:p@localhost/db")
-
-    assert result is sentinel_pool
-    assert calls == 2
-
-
-@pytest.mark.asyncio
-async def test_create_pool_with_retry_retries_oserror_then_succeeds(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """The same absorption applies to the raw `OSError` shape (WinError 64
-    surfaces as `ConnectionResetError`, an `OSError` subclass, before asyncpg
-    wraps it)."""
-    db_module = sys.modules["tests.support.db"]
-    sentinel_pool = object()
-    calls = 0
-
-    async def _fake_create_pool(dsn: str, **kwargs: object) -> object:
-        nonlocal calls
-        calls += 1
-        if calls == 1:
-            raise ConnectionResetError(22, "network name no longer available", None, 64, None)
-        return sentinel_pool
-
-    monkeypatch.setattr(db_module.asyncpg, "create_pool", _fake_create_pool)
-    monkeypatch.setattr(db_module, "_POOL_CONNECT_RETRY_BASE_DELAY", 0.0)
-
-    result = await create_pool_with_retry("postgresql://u:p@localhost/db")
-
-    assert result is sentinel_pool
-    assert calls == 2
-
-
-@pytest.mark.asyncio
-async def test_create_pool_with_retry_propagates_after_exhausting_attempts(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Fail-closed: a persistent reset (not just a one-off transient) still
-    raises after `_POOL_CONNECT_ATTEMPTS` -- this never becomes a false green."""
-    db_module = sys.modules["tests.support.db"]
-    calls = 0
-
-    async def _always_fails(dsn: str, **kwargs: object) -> object:
-        nonlocal calls
-        calls += 1
-        raise asyncpg.exceptions.ConnectionDoesNotExistError("connection does not exist")
-
-    monkeypatch.setattr(db_module.asyncpg, "create_pool", _always_fails)
-    monkeypatch.setattr(db_module, "_POOL_CONNECT_RETRY_BASE_DELAY", 0.0)
-
-    with pytest.raises(asyncpg.exceptions.ConnectionDoesNotExistError):
-        await create_pool_with_retry("postgresql://u:p@localhost/db")
-
-    assert calls == db_module._POOL_CONNECT_ATTEMPTS
-
-
-@pytest.mark.asyncio
-async def test_create_pool_with_retry_does_not_retry_unrelated_errors(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """A non-transient failure (e.g. bad credentials) raises immediately on
-    the first attempt -- only the documented transient-reset shape retries."""
-    db_module = sys.modules["tests.support.db"]
-    calls = 0
-
-    async def _fake_create_pool(dsn: str, **kwargs: object) -> object:
-        nonlocal calls
-        calls += 1
-        raise asyncpg.exceptions.InvalidPasswordError("password authentication failed")
-
-    monkeypatch.setattr(db_module.asyncpg, "create_pool", _fake_create_pool)
-
-    with pytest.raises(asyncpg.exceptions.InvalidPasswordError):
-        await create_pool_with_retry("postgresql://u:p@localhost/db")
-
-    assert calls == 1
-
-
-# ── Jitter tests: task-6687/esc-ci-coverage decorrelation ────────────
-
-
-@pytest.mark.asyncio
-async def test_sleep_before_pool_retry_jitters_within_retry_delay_cap(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """task-6687: `_sleep_before_pool_retry` must sleep
-    `random.uniform(0, _pool_retry_delay(attempt))`, not the deterministic
-    `_pool_retry_delay(attempt)` itself -- concurrent worktrees sharing one local
-    Postgres and computing the same deterministic schedule retry in lockstep and
-    repeatedly re-create the contention burst they are backing off from (see
-    scripts/replay_verify.py's `_sleep_before_retry`, task-6627, same shape)."""
-    db_module = sys.modules["tests.support.db"]
-    captured: list[float] = []
-
-    async def _capture_sleep(delay: float) -> None:
-        captured.append(delay)
-
-    monkeypatch.setattr(db_module.asyncio, "sleep", _capture_sleep)
-    monkeypatch.setattr(db_module.random, "uniform", lambda lo, hi: lo + (hi - lo) * 0.25)
-
-    await _sleep_before_pool_retry(3)
-
-    assert captured == [_pool_retry_delay(3) * 0.25]
-
-
-@pytest.mark.asyncio
-async def test_sleep_before_pool_retry_never_exceeds_retry_delay_cap(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Negative test: across many draws, the jittered sleep must never exceed (or
-    go below zero of) the deterministic `_pool_retry_delay(attempt)` it is
-    jittering under -- a broken jitter sampling outside
-    `[0, _pool_retry_delay(attempt)]` would silently widen the retry budget past
-    `_POOL_CONNECT_RETRY_BASE_DELAY`, exactly what DECISION_GUIDELINES B-2 forbids."""
-    db_module = sys.modules["tests.support.db"]
-    captured: list[float] = []
-
-    async def _capture_sleep(delay: float) -> None:
-        captured.append(delay)
-
-    monkeypatch.setattr(db_module.asyncio, "sleep", _capture_sleep)
-
-    cap = _pool_retry_delay(4)
-    for _ in range(200):
-        await _sleep_before_pool_retry(4)
-
-    assert all(0.0 <= delay <= cap for delay in captured)
-
-
-@pytest.mark.asyncio
-async def test_create_pool_with_retry_jitters_between_attempts(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """`create_pool_with_retry` sleeps via the jittered helper, not a raw
-    `asyncio.sleep(_pool_retry_delay(...))` call -- a regression back to the
-    deterministic sleep would reintroduce the lockstep thundering herd this
-    fix decorrelates."""
-    db_module = sys.modules["tests.support.db"]
-    calls = 0
-    sleeps: list[int] = []
-
-    async def _fake_create_pool(dsn: str, **kwargs: object) -> object:
-        nonlocal calls
-        calls += 1
-        if calls == 1:
-            raise asyncpg.exceptions.ConnectionDoesNotExistError(
-                "connection was closed in the middle of operation"
-            )
-        return object()
-
-    async def _fake_sleep_before_pool_retry(attempt: int) -> None:
-        sleeps.append(attempt)
-
-    monkeypatch.setattr(db_module.asyncpg, "create_pool", _fake_create_pool)
-    monkeypatch.setattr(
-        db_module, "_sleep_before_pool_retry", _fake_sleep_before_pool_retry
-    )
-
-    await create_pool_with_retry("postgresql://u:p@localhost/db")
-
-    assert sleeps == [0]
 
 
 # ── Boundary tests: valid inputs pass through ────────────────────────

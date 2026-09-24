@@ -168,11 +168,29 @@ async def create_pool_with_retry(dsn: str, **kwargs: Any) -> asyncpg.Pool:
 
     Fail-closed still applies: after `_POOL_CONNECT_ATTEMPTS` the original
     exception propagates unchanged, it is never swallowed into a false green.
+
+    `asyncpg.create_pool(dsn, **kwargs)` returns a `Pool` object synchronously
+    (unconnected); connecting happens only once it is awaited
+    (`Pool.__await__` -> `_async__init__` -> `_initialize`). `_initialize`
+    connects the first holder directly, then -- when `min_size > 1` -- gathers
+    the rest concurrently. If a later holder's connect fails, `_initialize`
+    still marks `self._initialized = True` in its `finally` (see
+    asyncpg/pool.py `_async__init__`), so the already-open first holder is a
+    live Postgres connection with no one holding a reference to the `Pool` to
+    close it -- a leak on every failed attempt, previously discarded here
+    because the failed `await` expression's `Pool` was never bound to a name.
+    Retrying without terminating it compounds server-side connection pressure
+    across attempts, which is the opposite of what the retry is for. Binding
+    the `Pool` and calling the synchronous `terminate()` on failure closes
+    whatever holders did connect before raising/retrying.
     """
     for attempt in range(_POOL_CONNECT_ATTEMPTS):
+        pool = asyncpg.create_pool(dsn, **kwargs)
         try:
-            return await asyncpg.create_pool(dsn, **kwargs)
+            await pool
+            return pool
         except (OSError, asyncpg.exceptions.ConnectionDoesNotExistError):
+            pool.terminate()
             if attempt + 1 >= _POOL_CONNECT_ATTEMPTS:
                 raise
             await _sleep_before_pool_retry(attempt)
