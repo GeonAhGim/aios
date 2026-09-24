@@ -33,6 +33,7 @@ _MARGIN_HISTORY_TYPES = ("borrow", "repay", "interest", "liquidation")
 
 
 class BitgetMarginP2Mixin:
+    @require_paper_sandbox
     async def get_max_transfer_out_amount(
         self: SignedRequestClient, margin_type: str, coin: str, *, symbol: str | None = None
     ) -> Decimal:
