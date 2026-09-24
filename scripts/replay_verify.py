@@ -190,11 +190,34 @@ async def _create_pool_with_retry(dsn: str) -> asyncpg.Pool:
     """`asyncpg.create_pool` with retry on the initial connection only --
     fail-closed still applies: after `_POOL_CONNECT_ATTEMPTS` the original
     exception propagates unchanged, it is never swallowed into a false
-    green."""
+    green.
+
+    task-6714 (esc-ci-replay_verify, detail_hash 3e5bd5da1d89 recurring a 9th
+    time after task-6690's e2e-fixture audit): task-6689 found that
+    `asyncpg.create_pool(dsn, **kwargs)` returns a `Pool` synchronously
+    (unconnected) and only dials out once awaited, and that a failed
+    `return await asyncpg.create_pool(...)` expression never binds that
+    `Pool` to a name -- if `_initialize()`'s first holder connects but a
+    later one (only reachable when `min_size > 1`) fails, `Pool.__await__`
+    still marks `_initialized = True` in its `finally`, leaking the first
+    holder's live connection with nothing left able to `terminate()` it, and
+    that leak compounds on every retry attempt, adding to the exact
+    server-side connection pressure this retry loop exists to absorb.
+    tests/support/db.py's `create_pool_with_retry` got that fix; this
+    near-identical loop here did not, even though `min_size=1` currently
+    keeps it out of the `min_size > 1` gather branch that trips the leak --
+    an invariant this file's own history (task-6256, task-6267) shows was
+    never safe to assume stays true, since each of those recurrences was a
+    new asyncpg failure shape nobody predicted in advance. Binding and
+    terminating on every retryable failure closes the asymmetry outright
+    instead of relying on `min_size` staying 1 forever."""
     for attempt in range(_POOL_CONNECT_ATTEMPTS):
+        pool = asyncpg.create_pool(dsn, min_size=1, max_size=4)
         try:
-            return await asyncpg.create_pool(dsn, min_size=1, max_size=4)
+            await pool
+            return pool
         except _RETRYABLE_CONNECT_ERRORS:
+            pool.terminate()
             if attempt + 1 >= _POOL_CONNECT_ATTEMPTS:
                 raise
             await _sleep_before_retry(attempt)
