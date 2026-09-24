@@ -221,7 +221,19 @@ async function main() {
   const valuesByInstance = warmInstances(instances, candles);
 
   const sweeps = [];
+  const calibSamplesMs = [];
   for (let i = 0; i < MEASURE_SWEEPS; i++) {
+    // Bracket each sweep with its own calib probe (task-6321 root cause: a
+    // single calib sample taken once after all sweeps only sees the host's
+    // load at that one instant, so a CI box that goes bimodal -- quiet for
+    // some sweeps, contended for others -- reads as ratio~1.000 overall
+    // while individual sweeps still spike 3-4x, which is exactly what the
+    // esc-ci-frontend.json 2026-09-22 failure showed: sweeps of 3.06-15.14ms
+    // with calibRatio reported as 1.000. Taking the max calib sample across
+    // sweeps means the normalization reflects the worst contention actually
+    // observed during the measurement window, not just whatever the host
+    // happened to be doing right after the last sweep finished.
+    calibSamplesMs.push(measureCalibMs());
     const panZoom = measurePanZoomFrameMs(candles, instances, valuesByInstance);
     const indicatorAddMs = measureIndicatorAddMs(catalog, candles);
     const tickUpdate = measureTickUpdateMs(instances, candles);
@@ -238,8 +250,9 @@ async function main() {
   };
   console.log(`[density-bench] sweeps (${MEASURE_SWEEPS}):`, JSON.stringify(sweeps));
   console.log("[density-bench] measured (median across sweeps):", JSON.stringify(current));
+  console.log(`[density-bench] per-sweep calib samples (ms): ${JSON.stringify(calibSamplesMs)}`);
 
-  const calibMs = measureCalibMs();
+  const calibMs = Math.max(...calibSamplesMs);
   const { failures: absoluteFailures, normalized, calibRatio } = checkAbsoluteThresholds(current, calibMs);
   console.error(
     `[density-bench] CH-19e calib: ${calibMs.toFixed(3)}ms (base ${CALIB_BASE_MS}ms, ratio ${calibRatio.toFixed(3)}); ` +
