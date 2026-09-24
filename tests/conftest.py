@@ -177,7 +177,7 @@ def lifespan_context_with_retry(app):
     return _RetryingLifespanContext(app)
 
 
-def pytest_collection_modifyitems(items: list[pytest.Item]) -> None:
+def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item]) -> None:
     """task-645(esc-ci-532f4f0f5388): `pyproject.toml`의 전역 per-test
     타임아웃(120s)은 행(hang) 하나가 CI 2400s 상한을 통째로 잡아먹지 않도록
     막는 가드다. `perf` 마커 테스트(task-489/LB-18)는 100회 실 DB 왕복을
@@ -187,6 +187,33 @@ def pytest_collection_modifyitems(items: list[pytest.Item]) -> None:
     for item in items:
         if item.get_closest_marker("perf") is not None:
             item.add_marker(pytest.mark.timeout(600))
+
+    # task-6845(esc-ci-pytest_perf): `ci_recheck.py`의 full 모드는 perf 마커
+    # 테스트를 별도 직렬 단계로 돌리려고 CLI에 `-m "perf and not nightly and
+    # not live_demo"`를 직접 넘긴다 — pytest는 CLI `-m`이 있으면 그 값이
+    # `pyproject.toml` addopts의 `-m "not nightly and not live_demo and not
+    # redis"`를 완전히 대체한다(마지막 `-m`만 적용), addopts에 합쳐지지
+    # 않는다. 그 CLI 식이 "perf"만 요구하고 "not redis"를 다시 쓰지
+    # 않으므로, perf이면서 redis(M2-8 Phase2, 실 Redis 인스턴스 필요)이기도
+    # 한 테스트가 걸러지지 않고 새어 들어와 Redis 없는 환경에서 커넥션
+    # 실패로 적색이 됐다(`tests/integration/event_bus/
+    # test_redis_streams_event_bus.py::test_dispatch_latency_p95_under_ws_fanout_budget`).
+    # `-m`을 다시 파싱해 조건을 재구현하는 대신, 호출자의 markexpr에 그
+    # 마커 이름이 직접 등장하지 않을 때만 기본 제외를 재적용한다 — 그러면
+    # `pytest -m redis ...`처럼 명시적으로 그 마커를 요청한 실행은 여전히
+    # 그대로 동작한다.
+    markexpr = config.getoption("markexpr") or ""
+    kept: list[pytest.Item] = []
+    deselected: list[pytest.Item] = []
+    for item in items:
+        hit_markers = {m.name for m in item.iter_markers()} & _DEFAULT_EXCLUDED_MARKERS
+        if hit_markers and not any(name in markexpr for name in hit_markers):
+            deselected.append(item)
+        else:
+            kept.append(item)
+    if deselected:
+        config.hook.pytest_deselected(items=deselected)
+        items[:] = kept
 
 
 # pyproject.toml addopts(`-m "not nightly and not live_demo and not redis"`)가
@@ -223,8 +250,7 @@ def pytest_sessionfinish(session: pytest.Session, exitstatus: int) -> None:
     if not deselected:
         return
     if all(
-        any(m.name in _DEFAULT_EXCLUDED_MARKERS for m in item.iter_markers())
-        for item in deselected
+        any(m.name in _DEFAULT_EXCLUDED_MARKERS for m in item.iter_markers()) for item in deselected
     ):
         session.exitstatus = pytest.ExitCode.OK
 
