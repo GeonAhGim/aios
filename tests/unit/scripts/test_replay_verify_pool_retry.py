@@ -54,21 +54,22 @@ class _FakePool:
     pass
 
 
-@pytest.mark.skipif(
-    sys.platform != "win32", reason="ProactorEventLoop reset only reproduces on win32"
-)
-def test_module_import_sets_windows_selector_event_loop_policy() -> None:
-    """task-6522 root cause (esc-ci-replay_verify.json, 6th recurrence): every
-    traceback landed in `asyncio/windows_events.py`'s `finish_recv` --
-    `ProactorEventLoop`-only IOCP internals. Importing `scripts.replay_verify`
-    on win32 must switch the process to `WindowsSelectorEventLoopPolicy`
-    (which drives sockets via `select`/`poll` and has no IOCP
-    reset-propagation path), not just retry around the reset -- a regression
-    that silently reverted this policy switch would reintroduce the whole
-    class of flake with none of the retry tests above (they monkeypatch
-    `asyncpg.create_pool`/`verify` directly and never touch a real socket)
-    catching it."""
-    assert isinstance(asyncio.get_event_loop_policy(), asyncio.WindowsSelectorEventLoopPolicy)
+if sys.platform == "win32":
+    # ProactorEventLoop reset only reproduces on win32 -- gated at collection
+    # (not via pytest.mark.skipif) so a non-win32 run collects zero tests
+    # here instead of reporting a skip.
+    def test_module_import_sets_windows_selector_event_loop_policy() -> None:
+        """task-6522 root cause (esc-ci-replay_verify.json, 6th recurrence): every
+        traceback landed in `asyncio/windows_events.py`'s `finish_recv` --
+        `ProactorEventLoop`-only IOCP internals. Importing `scripts.replay_verify`
+        on win32 must switch the process to `WindowsSelectorEventLoopPolicy`
+        (which drives sockets via `select`/`poll` and has no IOCP
+        reset-propagation path), not just retry around the reset -- a regression
+        that silently reverted this policy switch would reintroduce the whole
+        class of flake with none of the retry tests above (they monkeypatch
+        `asyncpg.create_pool`/`verify` directly and never touch a real socket)
+        catching it."""
+        assert isinstance(asyncio.get_event_loop_policy(), asyncio.WindowsSelectorEventLoopPolicy)
 
 
 def test_retry_delay_grows_exponentially_and_caps() -> None:
