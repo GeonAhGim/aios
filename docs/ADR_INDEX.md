@@ -41,3 +41,4 @@
 | ADR-2026-09-10-A | 상황 인식 검토 — 검토 컨텍스트 MCP 서버 + 영역별 검토 스킬 + 발견 기억 | Accepted | 2026-09-10 |  |  |  | ADR-2026-09-10-A-context-aware-review.md |
 | ADR-2026-09-10-B | 워커 효율 커넥터 — 저장소 CLAUDE.md·결정론 훅을 먼저, MCP는 측정하며 붙인다 | Accepted | 2026-09-10 |  |  |  | ADR-2026-09-10-B-efficiency-connectors.md |
 | ADR-2026-09-10-C | 개발정책 3단계 전환 — 파일 길이에서 도메인 응집·불변식 지역성으로, 변경 거버넌스는 closeout 시점에 | Accepted | 2026-09-10 |  |  |  | ADR-2026-09-10-C-development-policy-phase3.md |
+| ADR-2026-09-24-A | MVP-1 종료 순서(CI 녹색+종결 게이트 우선, QA 부채 로컬 소진, D?→E2E 5종, 함대 개선 범위 축소) + 함대 조직 재사용 kit(DevEngine 기초) | Accepted | 2026-09-24 |  |  |  | design/ADR-2026-09-24-A-mvp1-exit-order-and-fleet-kit.md |
