@@ -212,8 +212,36 @@ export function checkAbsoluteThresholds(current, calibMs, calibBaseMs = CALIB_BA
  * function against fabricated current/baseline fixtures instead of the real
  * 100k-candle bench, and so density_bench.mjs's `main()` can stay a thin
  * I/O shell around it.
+ *
+ * `ratchetCalibRatio` (task-6460, esc-ci-frontend.json): defaults to
+ * `calibRatio` but density_bench.mjs now passes a separate, MEDIAN-based
+ * ratio here instead of the MAX-based one used for `absoluteFailures`.
+ * `checkRatchet` divides `current` by this ratio both to decide "did this
+ * regress" AND, on the improvement branch, to compute the value persisted
+ * back into density-baseline.json. Using the same MAX-based ratio for both
+ * was fine for the regression side (a single noisy calib sample only makes
+ * the gate MORE lenient) but silently corrupted the improvement side: one
+ * outlier calib sample anywhere in the run inflates the ratio, which
+ * deflates `value / ratio` below the metric's real reference-host cost, and
+ * that deflated number gets written to disk as the new baseline. The next
+ * normal run then measures its usual cost, compares it against that
+ * artificially low floor, and fails as a false regression -- reproduced
+ * directly: three consecutive runs with no code change (FAIL, OK, "baseline
+ * improved" to ~55-65% of the prior value), after which every subsequent
+ * normal run failed. A single calib sample is far more likely to spike than
+ * the *median* value across all `MEASURE_SWEEPS` calib samples is to be
+ * dragged down by one outlier, so the persisted baseline stays anchored to
+ * the run's typical load instead of its single luckiest calib probe.
  */
-export function decideBenchOutcome({ current, baseline, absoluteFailures, calibRatio, baselineMeta, baselinePath }) {
+export function decideBenchOutcome({
+  current,
+  baseline,
+  absoluteFailures,
+  calibRatio,
+  ratchetCalibRatio = calibRatio,
+  baselineMeta,
+  baselinePath,
+}) {
   const logs = [];
 
   if (baseline === null) {
@@ -226,7 +254,7 @@ export function decideBenchOutcome({ current, baseline, absoluteFailures, calibR
     return { exitCode: 0, logs, baselineWrite: { metrics: current, meta: baselineMeta } };
   }
 
-  const { failures, improved } = checkRatchet(current, baseline.metrics, calibRatio);
+  const { failures, improved } = checkRatchet(current, baseline.metrics, ratchetCalibRatio);
   if (failures.length > 0) {
     logs.push({ level: "error", message: "[density-bench] FAIL: regression vs baseline (per-metric tolerance):" });
     for (const failure of failures) logs.push({ level: "error", message: `  - ${failure}` });

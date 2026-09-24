@@ -7,6 +7,7 @@ import {
   CH19_ABSOLUTE_TARGET_MS,
   checkAbsoluteThresholds,
   checkRatchet,
+  decideBenchOutcome,
   loadBaseline,
   REGRESSION_FLOOR_MS,
   REGRESSION_TOLERANCE,
@@ -151,6 +152,48 @@ describe("checkAbsoluteThresholds — CH-19e fixed ms/fps gate (DEEPEN task-3096
     expect(calibRatio).toBe(1);
     expect(normalized.indicatorAddMs).toBe(CH19_ABSOLUTE_TARGET_MS.indicatorAddMs);
     expect(failures).toEqual([]);
+  });
+});
+
+// task-6460 (esc-ci-frontend.json): a single noisy calib sample anywhere in
+// the run inflated the MAX-based calibRatio that was fed into checkRatchet's
+// improvement branch, deflating the persisted baseline below the code's real
+// cost and turning every following normal run into a false regression.
+// decideBenchOutcome now takes a separate ratchetCalibRatio (median-based,
+// resistant to one outlier) for the ratchet/persistence path, defaulting to
+// calibRatio for backward compatibility.
+describe("decideBenchOutcome — ratchetCalibRatio isolates the improvement path from calib spikes (task-6460)", () => {
+  it("does not persist a deflated baseline when only the shared calibRatio is spiked by an outlier", () => {
+    const current = { panZoomFrameMsP95: 3.5 };
+    const baseline = { metrics: { panZoomFrameMsP95: 3.307 } };
+    // calibRatio=2 (one outlier calib sample) would make 3.5/2=1.75 look like
+    // a huge improvement over 3.307; ratchetCalibRatio=1 (typical load this
+    // run) correctly reports it as within normal tolerance instead.
+    const outcome = decideBenchOutcome({
+      current, baseline, absoluteFailures: [], calibRatio: 2, ratchetCalibRatio: 1,
+      baselineMeta: {}, baselinePath: "unused",
+    });
+    expect(outcome.baselineWrite).toBeNull();
+    expect(outcome.exitCode).toBe(0);
+  });
+
+  it("still persists a real improvement measured under typical (non-spiked) load", () => {
+    const current = { panZoomFrameMsP95: 2.5 };
+    const baseline = { metrics: { panZoomFrameMsP95: 3.307 } };
+    const outcome = decideBenchOutcome({
+      current, baseline, absoluteFailures: [], calibRatio: 1, ratchetCalibRatio: 1,
+      baselineMeta: {}, baselinePath: "unused",
+    });
+    expect(outcome.baselineWrite.metrics.panZoomFrameMsP95).toBe(2.5);
+  });
+
+  it("falls back to calibRatio when ratchetCalibRatio is omitted (backward compatible)", () => {
+    const current = { panZoomFrameMsP95: 10 };
+    const baseline = { metrics: { panZoomFrameMsP95: 6.6 } };
+    const outcome = decideBenchOutcome({
+      current, baseline, absoluteFailures: [], calibRatio: 1, baselineMeta: {}, baselinePath: "unused",
+    });
+    expect(outcome.exitCode).toBe(1);
   });
 });
 

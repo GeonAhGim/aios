@@ -86,10 +86,27 @@ const TICK_SAMPLE_COUNT = 500;
 const INDICATOR_ADD_RUNS = 9;
 /**
  * Number of full measurement sweeps per run, median-reduced per metric (see
- * module docstring). 5 gives the median a real middle (not just an average
- * of 2) while keeping the whole bench's wall time reasonable.
+ * module docstring). task-6460 (esc-ci-frontend.json): raised from 5 to 9 --
+ * repeated same-machine, same-code reruns showed panZoomFrameMsP95 swinging
+ * 30-45% run-to-run (median-of-5 of 3.3ms-4.7ms) even with the calib probe
+ * reading ~idle the whole time, i.e. genuine per-sweep noise (GC pause,
+ * scheduler tick landing inside the timed region), not host contention the
+ * calib ratio could normalize away. A median of 9 needs 5 outlier sweeps
+ * (not 3 of 5) to move it, the same "more samples narrows the spread"
+ * argument already applied to `INDICATOR_ADD_RUNS` above.
  */
-const MEASURE_SWEEPS = 5;
+const MEASURE_SWEEPS = 9;
+/**
+ * task-6460: sweeps run before the loop below are timed and discarded so
+ * the code under measurement (cullToViewport/downsampleLOD/renderPlot/the
+ * indicator kernels) is past its initial JIT tier-up before any measured
+ * sweep starts -- `warmInstances` above only warms the indicator *values*
+ * used as render input, not the render/indicator-add call sites themselves.
+ * Reproduced directly: a single process measuring 30 consecutive sweeps
+ * showed elevated, more scattered values in the first ~8-10 sweeps that
+ * settled into a tighter band afterward.
+ */
+const WARMUP_SWEEPS = 3;
 
 /** Feeds the full candle history through every instance, keeping the primary output aligned by candle index (null while unwarmed). */
 function warmInstances(instances, candles) {
@@ -220,6 +237,12 @@ async function main() {
   }
   const valuesByInstance = warmInstances(instances, candles);
 
+  for (let i = 0; i < WARMUP_SWEEPS; i++) {
+    measurePanZoomFrameMs(candles, instances, valuesByInstance);
+    measureIndicatorAddMs(catalog, candles);
+    measureTickUpdateMs(instances, candles);
+  }
+
   const sweeps = [];
   const calibSamplesMs = [];
   for (let i = 0; i < MEASURE_SWEEPS; i++) {
@@ -260,10 +283,31 @@ async function main() {
       `normalized absolute targets: ${JSON.stringify(normalized)}; raw spec targets: ${JSON.stringify(CH19_ABSOLUTE_TARGET_MS)}`,
   );
 
+  /**
+   * task-6460 (esc-ci-frontend.json): the regression ratchet and the baseline
+   * persisted on an "improvement" must NOT be normalized by the same
+   * MAX-based `calibRatio` used above for the absolute-threshold gate. MAX is
+   * the right choice there (never let one noisy calib sample turn real host
+   * contention into a false hard failure), but feeding that same inflated
+   * ratio into checkRatchet's improvement branch deflates the normalized
+   * value it writes to density-baseline.json -- one outlier calib sample
+   * permanently drags the baseline below what the code actually costs on a
+   * typical run, and every following normal run then fails as a false
+   * regression against that too-low floor (reproduced directly: see
+   * densityRatchet.mjs#decideBenchOutcome's `ratchetCalibRatio` docstring).
+   * The median across all of this run's calib samples is far more resistant
+   * to a single spike, so it is used only for the ratchet/baseline path.
+   */
+  const ratchetCalibMs = percentile(calibSamplesMs, 50);
+  const ratchetCalibRatio = Math.max(1, ratchetCalibMs / CALIB_BASE_MS);
+  console.error(
+    `[density-bench] ratchet calib: ${ratchetCalibMs.toFixed(3)}ms (median of ${calibSamplesMs.length} samples), ratio ${ratchetCalibRatio.toFixed(3)}`,
+  );
+
   const baselineMeta = { candleCount: CANDLE_COUNT, indicatorInstanceCount: INDICATOR_INSTANCE_COUNT };
   const baseline = loadBaseline(BASELINE_PATH);
   const outcome = decideBenchOutcome({
-    current, baseline, absoluteFailures, calibRatio, baselineMeta, baselinePath: BASELINE_PATH,
+    current, baseline, absoluteFailures, calibRatio, ratchetCalibRatio, baselineMeta, baselinePath: BASELINE_PATH,
   });
   for (const { level, message } of outcome.logs) console[level](message);
   if (outcome.baselineWrite) writeBaseline(BASELINE_PATH, outcome.baselineWrite.metrics, outcome.baselineWrite.meta);
