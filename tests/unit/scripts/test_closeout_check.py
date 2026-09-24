@@ -111,10 +111,12 @@ def test_validation_gates_pass_when_hard_fail_test_and_wiring_present(tmp_path: 
     assert result.passed
 
 
-def test_validation_gates_against_real_repo_currently_fails() -> None:
-    """rules.py는 아직 overfitting.py를 호출하지 않는다(주석뿐) — 현재 상태를 고정."""
+def test_validation_gates_against_real_repo() -> None:
+    """`checks/robustness.py`가 이제 `overfitting.deflated_sharpe`/`pbo_cscv`를
+    직접 호출한다 — 이 파일이 "아직 호출 안 함"을 고정하던 과거 상태는 이미
+    깨져 있었다(task-6389와 무관한 선행 드리프트); 실측대로 갱신한다."""
     result = cc.check_03_validation_gates(ROOT)
-    assert not result.passed
+    assert result.passed
 
 
 # --------------------------------------------------------------------------- 4: 전략 언어(DSL)
@@ -131,17 +133,45 @@ def test_strategy_language_passes_with_property_cond_v2_and_bench(tmp_path: Path
         tmp_path / "tests/unit/core/script/test_cond_v2_bridge.py",
         "# cond-v2\n" + TEST_DEF,
     )
-    _write(tmp_path / "docs/perf/dsl_compile_bench.json", "{}")
+    _write(tmp_path / "docs/perf/dsl_compile_bench.json", '{"passed": true}')
 
     result = cc.check_04_strategy_language(tmp_path)
 
     assert result.passed
 
 
-def test_strategy_language_against_real_repo_currently_fails_missing_bench() -> None:
-    result = cc.check_04_strategy_language(ROOT)
+def test_strategy_language_fails_when_bench_passed_is_false(tmp_path: Path) -> None:
+    _write(tmp_path / "tests/unit/core/script/test_interpreter_property.py", TEST_DEF)
+    _write(
+        tmp_path / "tests/unit/core/script/test_cond_v2_bridge.py",
+        "# cond-v2\n" + TEST_DEF,
+    )
+    _write(tmp_path / "docs/perf/dsl_compile_bench.json", '{"passed": false}')
+
+    result = cc.check_04_strategy_language(tmp_path)
+
     assert not result.passed
-    assert "벤치" in result.detail
+    assert "passed=false" in result.detail
+
+
+def test_strategy_language_fails_when_bench_json_is_malformed(tmp_path: Path) -> None:
+    """negative: `passed`가 없거나 JSON이 깨졌으면 "모른다=통과 아님"으로
+    fail-closed — 빈 파일만 만들어 놓고 게이트를 속일 수 없다."""
+    _write(tmp_path / "tests/unit/core/script/test_interpreter_property.py", TEST_DEF)
+    _write(
+        tmp_path / "tests/unit/core/script/test_cond_v2_bridge.py",
+        "# cond-v2\n" + TEST_DEF,
+    )
+    _write(tmp_path / "docs/perf/dsl_compile_bench.json", "{}")
+
+    result = cc.check_04_strategy_language(tmp_path)
+
+    assert not result.passed
+
+
+def test_strategy_language_against_real_repo() -> None:
+    result = cc.check_04_strategy_language(ROOT)
+    assert result.passed
 
 
 # --------------------------------------------------------------------------- 5: 지표 ≥100종
@@ -184,16 +214,29 @@ def test_backtest_realism_passes_with_contract_tests_and_bench(tmp_path: Path) -
         tmp_path / "tests/foundation/unit/backtest/test_cost_models.py",
         "# slippage/fee_tier/funding/partial_fill/latency\n" + TEST_DEF,
     )
-    _write(tmp_path / "docs/perf/backtest_instant_bench.json", "{}")
+    _write(tmp_path / "docs/perf/backtest_instant_bench.json", '{"passed": true}')
 
     result = cc.check_06_backtest_realism(tmp_path)
 
     assert result.passed
 
 
-def test_backtest_realism_against_real_repo_currently_fails_missing_bench() -> None:
-    result = cc.check_06_backtest_realism(ROOT)
+def test_backtest_realism_fails_when_bench_passed_is_false(tmp_path: Path) -> None:
+    _write(
+        tmp_path / "tests/foundation/unit/backtest/test_cost_models.py",
+        "# slippage/fee_tier/funding/partial_fill/latency\n" + TEST_DEF,
+    )
+    _write(tmp_path / "docs/perf/backtest_instant_bench.json", '{"passed": false}')
+
+    result = cc.check_06_backtest_realism(tmp_path)
+
     assert not result.passed
+    assert "passed=false" in result.detail
+
+
+def test_backtest_realism_against_real_repo() -> None:
+    result = cc.check_06_backtest_realism(ROOT)
+    assert result.passed
 
 
 # --------------------------------------------------------------------------- 7: 실행(OMS)
@@ -232,7 +275,7 @@ def test_data_fails_on_empty_repo(tmp_path: Path) -> None:
 
 
 def test_data_passes_with_bench_coverage_and_spi_tests(tmp_path: Path) -> None:
-    _write(tmp_path / "docs/perf/instrument_lookup_bench.json", "{}")
+    _write(tmp_path / "docs/perf/instrument_lookup_bench.json", '{"passed": true}')
     _write(
         tmp_path / "tests/unit/exchanges/test_coverage.py",
         "# coverage 밖 요청 fail-closed deny\n" + TEST_DEF,
@@ -247,9 +290,26 @@ def test_data_passes_with_bench_coverage_and_spi_tests(tmp_path: Path) -> None:
     assert result.passed
 
 
-def test_data_against_real_repo_currently_fails_missing_bench() -> None:
-    result = cc.check_08_data(ROOT)
+def test_data_fails_when_bench_passed_is_false(tmp_path: Path) -> None:
+    _write(tmp_path / "docs/perf/instrument_lookup_bench.json", '{"passed": false}')
+    _write(
+        tmp_path / "tests/unit/exchanges/test_coverage.py",
+        "# coverage 밖 요청 fail-closed deny\n" + TEST_DEF,
+    )
+    _write(
+        tmp_path / "tests/unit/exchanges/test_kis_contract.py",
+        "def test_kis_contract():\n    assert True\n",
+    )
+
+    result = cc.check_08_data(tmp_path)
+
     assert not result.passed
+    assert "passed=false" in result.detail
+
+
+def test_data_against_real_repo() -> None:
+    result = cc.check_08_data(ROOT)
+    assert result.passed
 
 
 # --------------------------------------------------------------------------- 9: 차트

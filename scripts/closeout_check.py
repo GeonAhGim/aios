@@ -90,6 +90,24 @@ def _present_missing(repo_root: Path, *rels: str) -> tuple[list[str], list[str]]
     return present, missing
 
 
+def _bench_passed(repo_root: Path, rel: str) -> bool | None:
+    """`docs/perf/*_bench.json`의 `passed` 필드를 읽는다.
+
+    파일이 없으면(그 자리는 `_present_missing`이 이미 FAIL로 잡는다) `None`을
+    돌려준다. 파일은 있는데 JSON이 깨졌거나 `passed`가 없거나 `bool`이 아니면
+    "모른다=통과 아님"(ADR-D) 원칙에 따라 `False`로 fail-closed.
+    """
+    path = repo_root / rel
+    if not path.is_file():
+        return None
+    try:
+        data = json.loads(_read(path))
+    except json.JSONDecodeError:
+        return False
+    passed = data.get("passed")
+    return passed if isinstance(passed, bool) else False
+
+
 # --------------------------------------------------------------------------- 1~10: T3 종료 기준
 
 
@@ -157,13 +175,16 @@ def check_04_strategy_language(repo_root: Path) -> CheckResult:
     """기준4 — DSL property 테스트 + cond-v2 변환 동일성 + 컴파일 ≤300ms 벤치 결과."""
     property_test = _has_test_def(repo_root, "tests/unit/core/script/test_interpreter_property.py")
     cond_v2_hits = _grep(repo_root, ("tests/unit/core/script",), r"cond.?v2", re.I)
-    bench_present, bench_missing = _present_missing(repo_root, "docs/perf/dsl_compile_bench.json")
-    passed = property_test and bool(cond_v2_hits) and not bench_missing
+    bench_rel = "docs/perf/dsl_compile_bench.json"
+    bench_present, bench_missing = _present_missing(repo_root, bench_rel)
+    bench_passed = _bench_passed(repo_root, bench_rel)
+    passed = property_test and bool(cond_v2_hits) and not bench_missing and bool(bench_passed)
     evidence = [
         "tests/unit/core/script/test_interpreter_property.py",
         *cond_v2_hits,
         *bench_present,
         *bench_missing,
+        f"bench_passed={bench_passed}",
     ]
     parts = []
     if not property_test:
@@ -172,6 +193,8 @@ def check_04_strategy_language(repo_root: Path) -> CheckResult:
         parts.append("cond-v2 변환 동일성 테스트 없음")
     if bench_missing:
         parts.append(f"컴파일 ≤300ms 벤치 결과 파일 없음: {bench_missing[0]}")
+    elif not bench_passed:
+        parts.append(f"컴파일 ≤300ms 벤치 결과 passed=false: {bench_rel}")
     detail = "전략 언어 기준 통과" if passed else "; ".join(parts)
     return CheckResult("04_strategy_language", "전략 언어(DSL)", passed, tuple(evidence), detail)
 
@@ -227,16 +250,18 @@ def check_06_backtest_realism(repo_root: Path) -> CheckResult:
         r"slippage|fee_tier|funding|partial_fill|latency",
         re.I,
     )
-    bench_present, bench_missing = _present_missing(
-        repo_root, "docs/perf/backtest_instant_bench.json"
-    )
-    passed = bool(contract_hits) and not bench_missing
-    evidence = [*contract_hits[:10], *bench_present, *bench_missing]
+    bench_rel = "docs/perf/backtest_instant_bench.json"
+    bench_present, bench_missing = _present_missing(repo_root, bench_rel)
+    bench_passed = _bench_passed(repo_root, bench_rel)
+    passed = bool(contract_hits) and not bench_missing and bool(bench_passed)
+    evidence = [*contract_hits[:10], *bench_present, *bench_missing, f"bench_passed={bench_passed}"]
     parts = []
     if not contract_hits:
         parts.append("체결 현실성 계약 테스트 없음")
     if bench_missing:
         parts.append(f"즉시 백테스트 ≤5s 벤치 결과 파일 없음: {bench_missing[0]}")
+    elif not bench_passed:
+        parts.append(f"즉시 백테스트 ≤5s 벤치 결과 passed=false: {bench_rel}")
     detail = "백테스트 현실성 기준 통과" if passed else "; ".join(parts)
     return CheckResult("06_backtest_realism", "백테스트 현실성", passed, tuple(evidence), detail)
 
@@ -266,19 +291,29 @@ def check_07_execution(repo_root: Path) -> CheckResult:
 
 def check_08_data(repo_root: Path) -> CheckResult:
     """기준8 — instrument_id p95 200ms 벤치 + 커버리지 밖 fail-closed + 거래소 2곳 SPI 계약."""
-    bench_present, bench_missing = _present_missing(
-        repo_root, "docs/perf/instrument_lookup_bench.json"
-    )
+    bench_rel = "docs/perf/instrument_lookup_bench.json"
+    bench_present, bench_missing = _present_missing(repo_root, bench_rel)
+    bench_passed = _bench_passed(repo_root, bench_rel)
     coverage_hits = _grep(
         repo_root, ("tests",), r"coverage.*(fail.?closed|deny)|out.?of.?coverage", re.I
     )
     spi_dirs = ("tests/exchanges", "tests/unit/exchanges", "tests/integration/exchanges")
     spi_hits = _grep(repo_root, spi_dirs, r"def test_.*(contract|spi)", re.I)
-    passed = not bench_missing and bool(coverage_hits) and len(spi_hits) > 0
-    evidence = [*bench_present, *bench_missing, *coverage_hits[:5], *spi_hits[:10]]
+    passed = (
+        not bench_missing and bool(bench_passed) and bool(coverage_hits) and len(spi_hits) > 0
+    )
+    evidence = [
+        *bench_present,
+        *bench_missing,
+        f"bench_passed={bench_passed}",
+        *coverage_hits[:5],
+        *spi_hits[:10],
+    ]
     parts = []
     if bench_missing:
         parts.append(f"instrument_id p95 200ms 벤치 결과 파일 없음: {bench_missing[0]}")
+    elif not bench_passed:
+        parts.append(f"instrument_id p95 200ms 벤치 결과 passed=false: {bench_rel}")
     if not coverage_hits:
         parts.append("커버리지 밖 요청 fail-closed 테스트 없음")
     if not spi_hits:
