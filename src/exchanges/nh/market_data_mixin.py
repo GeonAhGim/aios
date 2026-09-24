@@ -125,18 +125,65 @@ class NHMarketDataMixin:
             timestamp=datetime.now(timezone.utc),
         )
 
-    async def get_ohlcv(self, symbol: str, timeframe: str, limit: int = 100) -> list[Candle]:
-        """02e 스펙 §3 — 2026-09-03(task-114) 재확인: 공식 openapi.json으로
-        경로 자체는 `/krstock/quote/v1/currentDaily`로 확인됐지만, 이번
-        리프의 스콥(정정/취소/주문조회 + WS)에는 없어 요청 파라미터/응답
-        스키마까지는 조사하지 않았다. 아직 구현할 근거가 부족해 명시적으로
-        미구현 처리한다(추측으로 틀린 캔들 데이터를 만드는 것보다 안전 —
-        PM 배정 지침 (2)와 동일 원칙)."""
-        raise NotImplementedError(
-            "NHAdapter.get_ohlcv: 경로는 확인됨(/krstock/quote/v1/currentDaily, "
-            "공식 openapi.json) — 요청/응답 스키마는 아직 조사 안 됨(02e 스펙 "
-            "§3 참조), 후속 리프에서 구현 필요"
+    async def get_ohlcv(self: NHHTTPClient, symbol: str, timeframe: str, limit: int = 100) -> list[Candle]:
+        """주식 일별 OHLCV 데이터 조회 — POST /krstock/quote/v1/currentDaily.
+
+        Task-6695(BR-17): 공식 openapi.json에서 요청/응답 스키마 확인 완료.
+        - 요청: Input_0.iem_cd(종목코드), market_cd("KRX"), view_main_yn("Y"),
+          array_cnt(개수, 선택)
+        - 응답: Output_0[]로 배열(각 항목 = 1일 데이터)
+        - 필드: bsop_date(거래일), stck_oppr(시가), stck_hgpr(고가),
+          stck_lwpr(저가), stck_clpr(종가), acml_vol(누적거래량)
+
+        timeframe 파라미터는 adapter 계약에서 필요하나, NH API는 항상
+        일별("1d") 데이터만 제공한다. 다른 timeframe 요청 시 ValueError.
+        """
+        if timeframe != "1d":
+            raise ValueError(
+                f"NHAdapter.get_ohlcv: 일별(1d) 데이터만 지원. "
+                f"요청: {timeframe}. 다른 timeframe은 후속 리프 또는 다른 API 필요."
+            )
+
+        raw = await self._request(
+            "POST",
+            "/krstock/quote/v1/currentDaily",
+            body={
+                "iem_cd": symbol,
+                "market_cd": _MARKET_CODE,
+                "view_main_yn": "Y",
+                "array_cnt": limit,
+            },
         )
+        try:
+            candles: list[Candle] = []
+            for item in raw.get("Output_0", []):
+                # bsop_date format: "YYYYMMDD" (예: "20260924")
+                date_str = item["bsop_date"]
+                # Parse as YYYYMMDD and create midnight UTC timestamp
+                year = int(date_str[:4])
+                month = int(date_str[4:6])
+                day = int(date_str[6:8])
+                candle_date = datetime(year, month, day, tzinfo=timezone.utc)
+
+                candle = Candle(
+                    symbol=symbol,
+                    exchange="nh",
+                    timeframe="1d",
+                    open=Decimal(str(item.get("stck_oppr", item["stck_clpr"]))),
+                    high=Decimal(str(item["stck_hgpr"])),
+                    low=Decimal(str(item["stck_lwpr"])),
+                    close=Decimal(str(item["stck_clpr"])),
+                    volume=Decimal(str(item.get("acml_vol", "0"))),
+                    open_time=candle_date,
+                    close_time=candle_date,
+                )
+                candles.append(candle)
+            return candles
+        except (KeyError, ValueError) as exc:
+            raise FatalExchangeError(
+                f"NH currentDaily 응답 파싱 오류(공식 openapi.json 기준 필수 필드: "
+                f"bsop_date, stck_oppr, stck_hgpr, stck_lwpr, stck_clpr, acml_vol): {exc}"
+            ) from exc
 
     async def subscribe_ticker_stream(
         self: _WebSocketSubscribingClient,
