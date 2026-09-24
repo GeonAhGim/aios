@@ -223,20 +223,21 @@ async function main() {
   const sweeps = [];
   const calibSamplesMs = [];
   for (let i = 0; i < MEASURE_SWEEPS; i++) {
-    // Bracket each sweep with its own calib probe (task-6321 root cause: a
-    // single calib sample taken once after all sweeps only sees the host's
-    // load at that one instant, so a CI box that goes bimodal -- quiet for
-    // some sweeps, contended for others -- reads as ratio~1.000 overall
-    // while individual sweeps still spike 3-4x, which is exactly what the
-    // esc-ci-frontend.json 2026-09-22 failure showed: sweeps of 3.06-15.14ms
-    // with calibRatio reported as 1.000. Taking the max calib sample across
-    // sweeps means the normalization reflects the worst contention actually
-    // observed during the measurement window, not just whatever the host
-    // happened to be doing right after the last sweep finished.
+    // Bracket each sweep with a calib probe on BOTH sides (task-6338 follow-up
+    // to task-6321: that fix sampled calib only once, right before each
+    // sweep's real measurements, which is a preface, not a bracket -- host
+    // contention that kicks in *after* the pre-sweep probe and during the
+    // sweep's own panZoom/indicatorAdd/tick work still went undetected, which
+    // is exactly the esc-ci-frontend.json recurrence: sweeps of
+    // 10.8/15.1/3.06/3.17/12.9ms alongside a calib ratio still reading 1.000.
+    // Sampling again right after the sweep and keeping the max of both sides
+    // means contention starting mid-sweep is caught by the trailing probe
+    // even when the leading probe still read quiet.
     calibSamplesMs.push(measureCalibMs());
     const panZoom = measurePanZoomFrameMs(candles, instances, valuesByInstance);
     const indicatorAddMs = measureIndicatorAddMs(catalog, candles);
     const tickUpdate = measureTickUpdateMs(instances, candles);
+    calibSamplesMs.push(measureCalibMs());
     sweeps.push({
       panZoomFrameMsP95: panZoom.p95,
       indicatorAddMs,
