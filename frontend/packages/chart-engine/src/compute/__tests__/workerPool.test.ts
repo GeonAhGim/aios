@@ -522,6 +522,100 @@ describe("DEEPEN 6705 — pending state does not leak across messages (single-fl
   });
 });
 
+// --- DEEPEN 6709 (docs/audit/DEPTH_CH.md, task-2039 CH-18e follow-up): the
+// "rejects when the worker itself crashes (onerror)" test above proves only
+// that the *first* crashed request rejects — it never proves the backend (or
+// the pool sitting on top of it) recovers afterwards. A regression that
+// clears `pending` but forgets to reject it, or that never clears `pending`
+// at all, would pass that test yet leave the backend permanently stuck (the
+// pool's busy-tracking semaphore in `createWorkerPool` never frees that slot
+// because `release()` runs in a `finally` after the awaited promise settles —
+// if it never settles, the slot is gone for good). This adds: (1) a red/green
+// pair reproducing a silent-onerror mutant that never settles the pending
+// promise, and (2) recovery-path assertions that a backend/pool stays usable
+// for a normal request immediately after an onerror crash.
+
+describe("DEEPEN 6709 — gate red reproduction: a silent onerror (never settles) vs the real crash-then-reject handling", () => {
+  /** Reproduces a plausible onerror regression: the handler is wired but does nothing,
+   * as if a refactor dropped the `pending.reject(...)` call. The in-flight promise then
+   * never settles at all — not resolved, not rejected — which is worse than resolving
+   * wrong, because the caller (and the pool's busy slot) hangs forever. */
+  function createSilentOnErrorBackend(createWorker: () => Worker): { run<TArgs, TResult>(task: string, args: TArgs): Promise<TResult> } {
+    const worker = createWorker() as unknown as FakeWorker;
+    return {
+      run<TArgs, TResult>(_task: string, _args: TArgs): Promise<TResult> {
+        return new Promise<TResult>((resolve) => {
+          worker.onmessage = (event: MessageEvent) => resolve(event.data as TResult);
+          // Bug under reproduction: no `worker.onerror` handler is wired at all, so a
+          // worker crash leaves this promise permanently unsettled.
+        });
+      },
+    };
+  }
+
+  it("적색: silent onerror 더블은 워커 크래시 후에도 promise가 절대 settle되지 않는다 (500ms 안에 reject/resolve 어느 쪽도 없음)", async () => {
+    const worker = new FakeWorker();
+    const broken = createSilentOnErrorBackend(() => worker as unknown as Worker);
+
+    const promise = broken.run(ECHO_TASK, null);
+    worker.onerror?.({ message: "worker thread died" } as ErrorEvent);
+
+    const raced = await Promise.race([promise.then(() => "settled").catch(() => "settled"), wait(50).then(() => "still-pending")]);
+    expect(raced).toBe("still-pending");
+  });
+
+  it("녹색: 실제 createBrowserWorkerPoolBackend는 같은 크래시를 즉시 reject해 절대 매달리지 않는다", async () => {
+    const worker = new FakeWorker();
+    const backend = createBrowserWorkerPoolBackend(() => worker as unknown as Worker);
+
+    const promise = backend.run(ECHO_TASK, null);
+    worker.onerror?.({ message: "worker thread died" } as ErrorEvent);
+
+    const raced = await Promise.race([promise.then(() => "settled").catch(() => "settled"), wait(50).then(() => "still-pending")]);
+    expect(raced).toBe("settled");
+    await expect(promise).rejects.toThrow("worker thread died");
+  });
+});
+
+describe("DEEPEN 6709 — recovery path after onerror: the backend and the pool both stay usable for the next request", () => {
+  it("backend 단위: onerror로 크래시한 직후에도 같은 backend가 다음 요청을 정상적으로 resolve한다", async () => {
+    const worker = new FakeWorker();
+    const backend = createBrowserWorkerPoolBackend(() => worker as unknown as Worker);
+
+    const crashed = backend.run(ECHO_TASK, null);
+    worker.onerror?.({ message: "worker thread died" } as ErrorEvent);
+    await expect(crashed).rejects.toThrow("worker thread died");
+
+    const recovered = backend.run(ECHO_TASK, { n: 9 });
+    worker.onmessage?.({ data: { ok: true, result: 18 } } as MessageEvent);
+    await expect(recovered).resolves.toBe(18);
+  });
+
+  it("pool 단위: onerror로 크래시한 backend가 즉시 idle로 반환되어, 같은 슬롯으로 다음 제출이 막히지 않는다", async () => {
+    const worker = new FakeWorker();
+    const backend = createBrowserWorkerPoolBackend(() => worker as unknown as Worker);
+    const pool = createWorkerPool([backend]); // single backend: a stuck slot would deadlock every future submit
+
+    const crashed = pool.submit(ECHO_TASK, null);
+    // `pool.submit` resolves its idle-backend acquisition via a microtask
+    // (`Promise.resolve(index)` inside `acquire()`) before it calls
+    // `backend.run(...)`, so `pending` isn't set on this synchronous turn —
+    // flush that one tick before the FakeWorker fires its crash.
+    await Promise.resolve();
+    worker.onerror?.({ message: "worker thread died" } as ErrorEvent);
+    await expect(crashed).rejects.toMatchObject({
+      code: "WORKER_POOL_TASK_FAILED",
+      message: expect.stringContaining("worker thread died"),
+    });
+
+    const recovered = pool.submit(ECHO_TASK, { n: 5 });
+    await Promise.resolve();
+    worker.onmessage?.({ data: { ok: true, result: 10 } } as MessageEvent);
+    await expect(recovered).resolves.toBe(10);
+    pool.dispose();
+  });
+});
+
 describe("DEEPEN 2039 — D3: multiple independent WorkerPool instances under simultaneous load don't interfere", () => {
   it("3개의 독립 풀이 동시에(인터리빙) 각자 15건씩 제출해도 각자의 동시성 상한을 독립적으로 지키고 결과가 다른 풀로 섞이지 않는다", async () => {
     const poolInstanceCount = 3;
