@@ -21,6 +21,7 @@ other users`). 이 모듈은 그 경우 예외를 그대로 전파한다 — 조
 from __future__ import annotations
 
 import asyncio
+import random
 import re
 from collections.abc import AsyncGenerator
 from typing import Any
@@ -142,6 +143,26 @@ async def ensure_worker_database(template_url: str, worker_id: str) -> str:
     return target_url
 
 
+def _pool_retry_delay(attempt: int) -> float:
+    return _POOL_CONNECT_RETRY_BASE_DELAY * (attempt + 1)
+
+
+# task-6687/esc-ci-coverage: the full-mode coverage step's `pytest --cov` run
+# hit the same ConnectionDoesNotExistError/ConnectionResetError shape 5a7b61c6
+# (task-6627) already root-caused for scripts/replay_verify.py --
+# tests/adversarial/risk/conftest.py's `pool` fixture calls this exact
+# function, and every worktree on the shared local Postgres computes the same
+# deterministic `_pool_retry_delay(attempt)` schedule, so concurrent
+# worktrees' retries converge on the same wall-clock instants and repeatedly
+# recreate the contention spike they are backing off from (thundering herd).
+# Per DECISION_GUIDELINES B-2 the retry budget/attempt cap is left untouched;
+# only the sleep is randomized (full jitter: uniform over
+# `[0, _pool_retry_delay(attempt)]`) to decorrelate concurrent processes,
+# mirroring replay_verify.py's `_sleep_before_retry`.
+async def _sleep_before_pool_retry(attempt: int) -> None:
+    await asyncio.sleep(random.uniform(0, _pool_retry_delay(attempt)))  # noqa: S311 -- retry jitter, not crypto
+
+
 async def create_pool_with_retry(dsn: str, **kwargs: Any) -> asyncpg.Pool:
     """`asyncpg.create_pool` with retry on the initial connection only.
 
@@ -154,7 +175,7 @@ async def create_pool_with_retry(dsn: str, **kwargs: Any) -> asyncpg.Pool:
         except (OSError, asyncpg.exceptions.ConnectionDoesNotExistError):
             if attempt + 1 >= _POOL_CONNECT_ATTEMPTS:
                 raise
-            await asyncio.sleep(_POOL_CONNECT_RETRY_BASE_DELAY * (attempt + 1))
+            await _sleep_before_pool_retry(attempt)
     raise AssertionError("unreachable -- loop always returns or raises")
 
 
