@@ -186,3 +186,66 @@ async def test_no_executions_returns_empty_list_not_error(monitoring_service, po
     cards = await monitoring_service.list_for_user(user_id)
 
     assert cards == []
+
+
+async def test_unknown_user_id_returns_empty_list_not_error(monitoring_service):
+    cards = await monitoring_service.list_for_user(uuid4())
+
+    assert cards == []
+
+
+async def test_created_but_not_started_execution_has_none_days_since_start(
+    execution_service, monitoring_service, pool
+):
+    """created_execution() 만 호출하고 start()는 호출하지 않으면 started_at이
+    NULL이다 — days_since_start는 None이어야 하고(경계값), 실행 자체는
+    목록에서 사라지지 않아야 한다."""
+    user_id = await create_test_tenant(pool)
+    strategy_id, version = await _create_approved_strategy(pool, user_id)
+    await _link_credential(pool, user_id)
+    created = await execution_service.create_execution(
+        user_id,
+        strategy_id,
+        version,
+        allocated_capital=Decimal("500"),
+        currency="USDT",
+        exchange="bitget",
+        mode="PAPER",
+        available_balance=Decimal("10000"),
+    )
+
+    cards = await monitoring_service.list_for_user(user_id)
+
+    card = next(c for c in cards if c.execution_id == created.id)
+    assert card.days_since_start is None
+    assert card.realized_pnl == Decimal("0")
+    assert card.unrealized_pnl == Decimal("0")
+
+
+async def test_executions_are_isolated_per_user(execution_service, monitoring_service, pool):
+    """다른 사용자의 실행이 조회 결과에 섞여 들어오지 않는다(negative — 테넌트
+    격리 위반이 없어야 함, INVARIANTS 준수 확인)."""
+    user_a = await create_test_tenant(pool)
+    user_b = await create_test_tenant(pool)
+    exec_a, _ = await _create_running_execution(execution_service, pool, user_a)
+    exec_b, _ = await _create_running_execution(execution_service, pool, user_b)
+
+    cards_a = await monitoring_service.list_for_user(user_a)
+    cards_b = await monitoring_service.list_for_user(user_b)
+
+    assert {c.execution_id for c in cards_a} == {exec_a}
+    assert {c.execution_id for c in cards_b} == {exec_b}
+
+
+async def test_pool_acquire_failure_propagates_fail_closed(monitoring_service, monkeypatch):
+    """의존성(DB pool) 장애 시 조용히 빈 목록을 반환하지 않고 예외를 그대로
+    전파해야 한다(fail-closed 기본 원칙, CLAUDE.md §3) — 실패주입 테스트."""
+
+    class _FailingPool:
+        def acquire(self):
+            raise RuntimeError("connection pool exhausted")
+
+    monkeypatch.setattr(monitoring_service, "_pool", _FailingPool())
+
+    with pytest.raises(RuntimeError, match="connection pool exhausted"):
+        await monitoring_service.list_for_user(uuid4())
