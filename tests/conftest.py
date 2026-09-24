@@ -9,6 +9,7 @@ before those modules and supplies one deterministic test-only view instead.
 from __future__ import annotations
 
 import asyncio
+import logging
 import os
 from pathlib import Path
 
@@ -196,3 +197,24 @@ def _reset_rate_limiter_singleton():
     set_limiter(UnlimitedRateLimiter())
     yield
     set_limiter(UnlimitedRateLimiter())
+
+
+@pytest.fixture(autouse=True)
+def _isolate_root_logger_state():
+    """task-6371 — `configure_logging()`(src/core/logging/schema.py)는
+    앱 lifespan 시작마다 `root.handlers.clear()` + `root.setLevel(...)`로
+    루트 로거를 무조건 재구성하고, `src/main.py`의 lifespan은 반환된
+    `QueueListener`를 저장·정지하지 않는다. 이 worktree 안 20개 이상의
+    라우터 통합테스트가 `client`(lifespan) 픽스처를 쓰므로, 그런 테스트가
+    caplog 단언 테스트보다 같은 xdist 워커 안에서 먼저 돌면 루트 로거의
+    핸들러/레벨이 그 뒤로도 계속 오염된 채 남아 `caplog.records`가 실행
+    순서에 따라 비거나 채워지는 flaky를 만든다(3회 연속 적색, 매번 다른
+    caplog 테스트가 걸림 — 5904/5924/5935/6322가 그때그때 5건만 고쳤던
+    바로 그 근본 원인). 매 테스트 전후로 스냅샷·복원해 어떤 테스트가
+    루트 로거를 재구성해도 다음 테스트로 새지 않게 한다."""
+    root = logging.getLogger()
+    original_handlers = list(root.handlers)
+    original_level = root.level
+    yield
+    root.handlers[:] = original_handlers
+    root.setLevel(original_level)
