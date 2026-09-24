@@ -30,7 +30,7 @@ UPDATE 7건을 §9 R-58 리프(task-1521)로 이 장부에 등재한다. 명세 
 |---|---|---|---|---|---|---|
 | RTF-01 | #42 | `correlation_with()` 미지 페어 0.0 fail-open | 명세 §1 R3 | R-11 `900704b` · R-29 `e8d4160` · R-31 `d6f48be` | `tests/unit/core/risk/test_correlation.py` missing_pairs DENY 3건 | ✅ FIXED — 잔여: 타 심볼 보유 시 과잉거부(#42) |
 | RTF-02 | #43 | `metrics_collector.data_delay_sec` 상수 0 | 명세 §1 R3/R7 | R-42 `a0652c9` · R-43 `bb513af` · 배선 `cc6a8d0` | `tests/integration/test_circuit_breaker.py::test_unknown_data_delay_does_not_read_as_normal` | ✅ FIXED(task-1714 P0 `cc6a8d0`로 main.py 배선까지 완료) |
-| RTF-03 | #44 | watchdog `market_wide_correlated=None` 고정 → LIQUIDATE 영구 미발동 | 명세 §1 R3 | R-49 `e89217e` (판정기만) · R-51 `1504fd9` (발동 경로만) · task-2838 `0bd21d09`(failure_domain 배선) | `tests/unit/core/safety/test_market_correlation.py` · `tests/unit/core/safety/test_watchdog_decide.py` AST 스캐너 하드 게이트 | ⏳ OPEN(부분 진행) — task-2838이 `failure_domain` 미전달 배선 결함은 고쳤다(이제 `decide()`가 실제 진단 결과를 받는다). 잔여: `run_one_cycle`이 여전히 `market_wide_correlated=None` 하드코딩(#44, basket 시세 조달원 없음) |
+| RTF-03 | #44 | watchdog `market_wide_correlated=None` 고정 → LIQUIDATE 영구 미발동 | 명세 §1 R3 | R-49 `e89217e` (판정기만) · R-51 `1504fd9` (발동 경로만) · task-2838 `0bd21d09`(failure_domain 배선) · task-6391(basket 배선) | `tests/unit/core/safety/test_market_correlation.py` · `tests/unit/core/safety/test_watchdog_decide.py` AST 스캐너 하드 게이트 · `tests/unit/test_watchdog_process_basket.py` · `tests/integration/risk/test_watchdog_market_wide_liquidation_e2e.py` | ✅ FIXED — task-6391이 `run_one_cycle`에 실제 basket 시세 조달(`get_basket_returns`)을 배선, `decide(..., market_wide_correlated=...)`가 더 이상 고정 None이 아님을 E2E로 실증 |
 | RTF-04 | #45 | `foundation_gate` mandate 우회 env 플래그 | 명세 §1 R3 | R-36 `a2e2646` · H-1b `3d83e8d0`(task-3369) | `tests/integration/test_order_service_risk_gate.py` unmandated DENY 2건 · `tests/adversarial/oms/test_mandate_gate_prod_wiring.py` R-59 하드 게이트(3곳 전부) | ✅ FIXED — 조립부 3곳 전부 `require_mandate=True`(task-3369), 회귀 방지 하드 게이트가 3곳 전부 스캔(task-2836이 `wiring.py` 누락분 추가) |
 | RTF-05 | #46 | `watchdog_process._apply_decision` 무조건 UPDATE | 명세 §1 R8 | R-51 `1504fd9` | `tests/integration/risk/test_watchdog_liquidation_request.py::test_watchdog_process_has_no_unconditional_update_strategy_executions` | ✅ FIXED |
 | RTF-06 | #47 | `circuit_breaker._set_level` 무조건 UPDATE | 명세 §1 R7 | R-43 `bb513af` | `tests/integration/test_circuit_breaker.py::test_concurrent_set_level_only_one_writer_wins` | ✅ FIXED |
@@ -90,29 +90,41 @@ fail-open(78번 §1 I2 위반).
 
 ## 2026-09-05-44 · [safety] watchdog가 `market_wide_correlated=None`을 고정으로 넘겨 LIQUIDATE가 영구 미발동 — 심각도 중간 (RTF-03)
 
-**상태**: ⏳ OPEN(부분 진행, 2026-09-10 task-2838 갱신) — R-49 `e89217e`
-(task-2133)가 순수 판정기 `is_market_wide_move()`와 `decide()`의
-`failure_domain` 인자(DB_ISOLATED 강등)를 만들었고 R-51 `1504fd9`(task-2357)가
-LIQUIDATE 발동 시 `liquidation_request` INSERT 경로를 완성했다. 이후
-task-2838(커밋 `0bd21d09`)이 두 번째 배선 결함을 찾아 고쳤다 — 당시
-`run_one_cycle`이 `diagnose()`보다 *먼저* `decide()`를 호출해 `failure_domain`
-인자가 항상 기본값 None으로 고정돼 있었다(task-1806 P0-B와 동일 클래스,
-`decide()`의 `failure_domain` 인자 자체를 호출부가 안 쓰는 상태). 지금은
-`diagnose()`를 먼저 실행하고 그 결과를 `decide(..., failure_domain=failure_domain)`로
-실제로 전달한다 — `tests/unit/core/safety/test_watchdog_decide.py`의 AST
-스캐너 하드 게이트가 회귀를 잡는다. **다만 `market_wide_correlated`는 여전히
-고정 None이다** — `src/watchdog_process.py::run_one_cycle`이 basket returns를
-만들어 넘기는 코드가 없다(`decide(snapshot, market_wide_correlated=None,
-failure_domain=failure_domain)`). `core/safety/watchdog.py`의 LIQUIDATE 분기는
-`market_wide_correlated is True`일 때만 열리므로 시장 전체 급변 판정이 없는 한
-강제청산은 여전히 구조적으로 도달 불가 — "구현됨"이지 "배선"은 아니다(I-10).
-HALT 경로 및 DB_ISOLATED 강등 경로(`failure_domain.diagnosis ==
-DB_ISOLATED_FAILURE`일 때 조치를 스킵하는 분기)는 이제 실제로 진단 결과를
-받아 동작한다.
+**상태**: ✅ FIXED (task-6391, basket 배선)
 
-**해소 조건**: `run_one_cycle`에 basket 시세를 조달해 `is_market_wide_move()`
-결과를 `decide(..., market_wide_correlated=...)`에 실제로 전달하는 배선(별도
-리프, PM 판단).
+R-49 `e89217e`(task-2133)가 순수 판정기 `is_market_wide_move()`와 `decide()`의
+`failure_domain` 인자(DB_ISOLATED 강등)를 만들었고 R-51 `1504fd9`(task-2357)가
+LIQUIDATE 발동 시 `liquidation_request` INSERT 경로를 완성했다. task-2838(커밋
+`0bd21d09`)이 두 번째 배선 결함(`failure_domain` 미전달)을 고쳤다. 잔여
+갭이었던 `market_wide_correlated` 고정 None은 task-6391이 닫았다.
+
+**발견**: `src/watchdog_process.py::run_one_cycle`이 basket returns를 만들어
+넘기는 코드가 없어 `decide(snapshot, market_wide_correlated=None,
+failure_domain=failure_domain)`로 영구 고정 — `core/safety/watchdog.py`의
+LIQUIDATE 분기는 `market_wide_correlated is True`일 때만 열리므로 시장 전체
+급변 판정이 없는 한 강제청산이 구조적으로 도달 불가했다(판정기·발동 경로는
+"구현됨"이지 "배선"은 아니었다, I-10).
+
+**수정**: `src/watchdog_process.py`에 `get_basket_returns()`(Bitget
+`get_ohlcv` 기반 4개 심볼 basket: BTC/ETH/SOL/XRP-USDT, 5분봉 등락률, 조회
+실패 심볼은 0%로 대체하지 않고 basket에서 제외)를 추가하고, `run_one_cycle`이
+계좌 손실률이 `DEFAULT_LOSS_THRESHOLD_PCT` 이상일 때 이를 호출해
+`is_market_wide_move()` 결과를 `decide(..., market_wide_correlated=...)`에
+실제로 전달하도록 배선했다(`run_forever`도 동일 콜백을 주입). 기존
+`failure_domain` 패턴과 동일하게 `tests/unit/core/safety/test_watchdog_decide.py`에
+`market_wide_correlated`용 AST 스캐너 하드 게이트를 추가해 하드코딩 회귀를
+잡는다.
+
+**증명**: `tests/unit/test_watchdog_process_basket.py`(basket 조달 단위
+테스트 — 심볼별 등락률 계산, 조회 실패/빈 응답/open=0 심볼 제외 negative
+3건, 전체 실패 시 예외 전파 없이 빈 basket 반환하는 실패 주입 1건) ·
+`tests/unit/core/safety/test_watchdog_decide.py::test_watchdog_process_actually_passes_market_wide_correlated_to_decide`(회귀 하드 게이트) ·
+`tests/integration/risk/test_watchdog_market_wide_liquidation_e2e.py`
+— basket 과반(4개 중 3개)이 임계 이상 하락 + 계좌 90% 손실 시나리오에서
+`decide()`가 실제 LIQUIDATE 판정 → `liquidation_request` REQUESTED INSERT →
+`run_liquidation_worker_once`(실행 루프)가 그 행을 소비해 PLANNED + slice
+INSERT까지 전이하는 전체 경로 실증, 대조군(basket 과반 미만 하락 시
+HALT만 발동하고 `liquidation_request`는 생기지 않음)도 함께 검증.
 
 ---
 

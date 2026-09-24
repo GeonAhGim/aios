@@ -48,37 +48,38 @@ from __future__ import annotations
 import asyncio
 import logging
 from decimal import Decimal
-from uuid import UUID, uuid4
 
 import asyncpg
 
 from src.core.loader.secret_loader import load_env_secrets
-from src.core.logging.audit_log import record_audit_log
 from src.core.safety.heartbeat import DEFAULT_HEARTBEAT_PATH
+from src.core.safety.market_correlation import is_market_wide_move
 from src.core.safety.split_brain import CheckFn, Diagnosis, SplitBrainDiagnostics
 from src.core.safety.watchdog import (
+    DEFAULT_LOSS_THRESHOLD_PCT,
     DEFAULT_UNRESPONSIVE_SEC_THRESHOLD,
     WatchdogAction,
-    WatchdogDecision,
     WatchdogService,
     decide,
+)
+from src.core.safety.watchdog_basket import (
+    MARKET_WIDE_MOVE_THRESHOLD_PCT,
+    GetBasketReturnsFn,
+    get_basket_returns,
 )
 from src.exchanges.bitget.adapter import BitgetAdapter
 from src.foundation.evidence.adapters.postgres_repository import PostgresAuditEventRepository
 from src.foundation.paper_control.adapters.postgres_repository import PostgresPaperControlRepository
 from src.foundation.risk_gate.adapters.postgres_repository import PostgresRiskGateRepository
-from src.foundation.risk_gate.domain.models import SafetyScope
 from src.services.safety.kill_switch_service import KillSwitchService
+from src.services.safety.watchdog_apply import (  # noqa: F401 — re-exported for tests/callers
+    WATCHDOG_SYSTEM_ACTOR_ID,
+    apply_decision,
+)
 
 logger = logging.getLogger(__name__)
 
 POLL_INTERVAL_SECONDS = 5.0  # Draft — the interval specified in the original FD-9.1 text
-
-# Must match the system actor row seeded by e5a8c5d4f6b7_liquidation_request.py
-# — GLOBAL activate() requires a real users FK, but this decision is grounded
-# in the system as a whole rather than any single tenant, so there is no
-# tenant to borrow from (see the migration docstring).
-WATCHDOG_SYSTEM_ACTOR_ID = UUID("00000000-0000-0000-0000-000000000002")
 
 
 def _asyncpg_dsn(database_url: str) -> str:
@@ -104,64 +105,6 @@ class _LastAppliedAction:
         self.value: WatchdogAction = WatchdogAction.NORMAL
 
 
-async def _apply_decision(
-    pool: asyncpg.Pool, decision: WatchdogDecision, kill_switch: KillSwitchService
-) -> None:
-    """Control creation is delegated entirely to `KillSwitchService.activate` (DoD(f)). Only for
-    LIQUIDATE, its result (control id/fence_token) is used to INSERT a `liquidation_request` row
-    as REQUESTED (§4 lines 426-430) — since activate() commits its own transaction before
-    returning (§5 "transaction boundary"; wrapping it while holding a connection would deadlock,
-    P1), the two INSERTs are separate transactions (a crash in between is a known residual risk).
-    Unlike a fan-out failure, a failure of this INSERT is core to the decision's outcome, so it is
-    not swallowed."""
-    view = await kill_switch.activate(
-        scope=SafetyScope.GLOBAL,
-        scope_ref=None,
-        reason=decision.reason,
-        actor_subject_id=WATCHDOG_SYSTEM_ACTOR_ID,
-        actor_is_admin=True,
-        trace_id=uuid4(),
-    )
-
-    liquidation_request_id: UUID | None = None
-    if decision.action == WatchdogAction.LIQUIDATE:
-        async with pool.acquire() as conn:
-            row = await conn.fetchrow(
-                "INSERT INTO liquidation_request "
-                "(safety_control_id, scope, scope_ref, state, requested_by, fence_token) "
-                "VALUES ($1, 'GLOBAL', '', 'REQUESTED', 'watchdog_process', $2) "
-                "RETURNING id",
-                view.id,
-                view.fence_token,
-            )
-        liquidation_request_id = row["id"]
-
-    request_id_str = str(liquidation_request_id) if liquidation_request_id else None
-    async with pool.acquire() as conn, conn.transaction():
-        await record_audit_log(
-            conn,
-            actor_agent="watchdog_process",
-            action_type="watchdog.decision.applied",
-            decision_data={
-                "action": decision.action.value,
-                "reason": decision.reason,
-                "control_id": str(view.id),
-                "fence_token": view.fence_token,
-                "liquidation_request_id": request_id_str,
-            },
-            target_type="system",
-            target_id="all_running_executions",
-        )
-    logger.critical(
-        "Watchdog %s 발동: %s (control=%s, fence=%s, liquidation_request=%s)",
-        decision.action.value,
-        decision.reason,
-        view.id,
-        view.fence_token,
-        liquidation_request_id,
-    )
-
-
 class _LatestExchangeHealth:
     """Addresses red-team audit finding #06 — calls check_exchange() exactly once per cycle and
     caches the result so take_snapshot()'s health_check and split_brain.diagnose() can reuse it
@@ -184,12 +127,18 @@ async def run_one_cycle(
     exchange_health_cache: _LatestExchangeHealth,
     kill_switch: KillSwitchService,
     last_action: _LastAppliedAction,
+    get_basket_returns: GetBasketReturnsFn,
 ) -> None:
     """One cycle (exchange health check -> snapshot -> Split-Brain diagnosis -> decision ->
     conditional action) — extracted from run_forever's loop body (a pure refactor, to make it
     testable). exchange_healthy is not an input to decide()'s judgment (HALT/LIQUIDATE/NORMAL
     only look at loss_pct and unresponsive_sec) — judging exchange responsiveness is entirely
-    Split-Brain's job."""
+    Split-Brain's job.
+
+    `get_basket_returns` (RTF-03) is only invoked once loss_pct has already crossed the
+    LIQUIDATE/HALT threshold — `market_wide_correlated` is otherwise unused by `decide()`,
+    so fetching the basket every 5s cycle regardless would be a needless exchange-API call
+    rate."""
     exchange_health_cache.value = await check_exchange()
     snapshot = await service.take_snapshot()
     failure_domain = await split_brain.diagnose(
@@ -197,7 +146,17 @@ async def run_one_cycle(
         check_db=check_db,
         main_process_ok_raw=snapshot.unresponsive_sec < DEFAULT_UNRESPONSIVE_SEC_THRESHOLD,
     )
-    decision = decide(snapshot, market_wide_correlated=None, failure_domain=failure_domain)
+    market_wide_correlated: bool | None = None
+    if snapshot.loss_pct >= DEFAULT_LOSS_THRESHOLD_PCT:
+        basket_returns = await get_basket_returns()
+        market_wide_correlated = is_market_wide_move(
+            basket_returns,
+            account_loss_pct=snapshot.loss_pct,
+            move_threshold_pct=MARKET_WIDE_MOVE_THRESHOLD_PCT,
+        )
+    decision = decide(
+        snapshot, market_wide_correlated=market_wide_correlated, failure_domain=failure_domain
+    )
     logger.info(
         "Watchdog snapshot=%s decision=%s failure_domain=%s", snapshot, decision, failure_domain
     )
@@ -213,7 +172,7 @@ async def run_one_cycle(
         # applied" and the real decision would be silently skipped.
         last_action.value = WatchdogAction.NORMAL
     elif decision.action != WatchdogAction.NORMAL and decision.action != last_action.value:
-        await _apply_decision(pool, decision, kill_switch)
+        await apply_decision(pool, decision, kill_switch)
         last_action.value = decision.action
     else:
         last_action.value = decision.action
@@ -257,6 +216,9 @@ async def run_forever(pool: asyncpg.Pool) -> None:
             return False
         return True
 
+    async def get_basket_returns_cb() -> dict[str, Decimal]:
+        return await get_basket_returns(exchange_probe)
+
     exchange_health_cache = _LatestExchangeHealth()
 
     service = WatchdogService(
@@ -279,6 +241,7 @@ async def run_forever(pool: asyncpg.Pool) -> None:
                 exchange_health_cache=exchange_health_cache,
                 kill_switch=kill_switch,
                 last_action=last_action,
+                get_basket_returns=get_basket_returns_cb,
             )
             await asyncio.sleep(POLL_INTERVAL_SECONDS)
     finally:
