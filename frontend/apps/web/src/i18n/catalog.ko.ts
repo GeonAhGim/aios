@@ -374,6 +374,7 @@ export const catalogKo = {
     "/rebalance": "리밸런싱",
     "/mandates": "위임장",
     "/compliance": "컴플라이언스",
+    "/compliance/mandate": "위임장 편집·승인",
     "/decisions/history": "결정 이력",
     "/reports": "보고서",
     "/wallet": "지갑",
@@ -467,6 +468,19 @@ export const catalogKo = {
     correctSuccess: "정정 요청이 반영되었습니다.",
     notFoundTitle: "명세서를 찾을 수 없습니다",
     notFoundDescription: "해당 실적 명세서가 존재하지 않습니다.",
+  },
+  // task-6320 (CM-19): MandatePage.tsx(위임장 편집·승인 흐름, routes/compliance) —
+  // legacy.mandatesPage.*(리비전 규칙 요약·상태 전환 문구)를 재사용하고, 이
+  // 네임스페이스는 목록 화면·빈 상태·초안/개정 제출 라벨만 갖는다.
+  mandatePage: {
+    pageTitle: "위임장 편집·승인",
+    listTitle: "위임장 목록",
+    listEmpty: "등록된 위임장이 없습니다.",
+    activeLabel: "활성",
+    pendingLabel: "대기",
+    noneLabel: "없음",
+    draftSubmitLabel: "초안 작성",
+    amendSubmitLabel: "개정안 제안",
   },
   // task-2686 (UX-2): mechanically extracted from the 102 baseline .tsx files
   // (scripts/i18n-literals-baseline.json) via an AST codemod -- one namespace per

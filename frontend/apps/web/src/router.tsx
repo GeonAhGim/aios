@@ -20,6 +20,7 @@ import { AiStudioPage } from "./routes/ai/AiStudioPage";
 import { SweepResultsPage } from "./routes/backtest/SweepResultsPage";
 import { ChartPage } from "./routes/chart/ChartPage";
 import { CompliancePage } from "./routes/compliance/CompliancePage";
+import { MandatePage } from "./routes/compliance/MandatePage";
 import { LoginPage } from "./routes/auth/LoginPage";
 import { SignupPage } from "./routes/auth/SignupPage";
 import { DashboardPage } from "./routes/dashboard/DashboardPage";
@@ -134,6 +135,7 @@ export const router = createBrowserRouter(
   { path: "/rebalance", element: protect(<RebalancePage />) },
   { path: "/mandates", element: protect(<MandatesPage />) },
   { path: "/compliance", element: protect(<CompliancePage />) },
+  { path: "/compliance/mandate", element: protect(<MandatePage />) },
   { path: "/decisions/history", element: protect(<DecisionHistoryPage />) },
   { path: "/reports", element: protect(<ReportsPage />) },
   { path: "/wallet", element: protect(<WalletPage />) },
