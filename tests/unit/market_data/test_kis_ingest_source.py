@@ -46,13 +46,9 @@ _TOKEN_RESPONSE = {"access_token": "tok-1", "access_token_token_expired": "2099-
 
 @pytest.fixture(autouse=True)
 def _reset_rate_limiter_registry() -> None:
-    """`build_token_bucket`의 `_BUCKET_REGISTRY`(rate_profile.py BR-2b)는
-    프로세스 전역 싱글톤이라, 안의 `TokenBucket._lock`(asyncio.Lock)이 경합을
-    겪은 첫 테스트의 이벤트 루프에 바인딩된 채 남는다 -- pytest-asyncio가
-    테스트마다 새 루프를 만드므로, 이 파일의 동시성 테스트들처럼 실제로 락
-    경합을 일으키는 테스트 뒤에는 리셋 없이 다음 테스트가
-    `RuntimeError: <Lock> is bound to a different event loop`로 깨진다
-    (test_kis_overseas_deepen.py와 동일 패턴)."""
+    """process-wide `_BUCKET_REGISTRY`(rate_profile.py BR-2b)의 락이 이전
+    테스트 이벤트 루프에 바인딩된 채 남는 걸 막는다(동일 패턴:
+    test_kis_overseas_deepen.py)."""
     reset_token_bucket_registry_for_test()
 
 
@@ -66,7 +62,9 @@ def _make_adapter(handler) -> KISAdapter:
     client = httpx.AsyncClient(
         base_url="https://openapivts.koreainvestment.com:29443", transport=transport
     )
-    return KISAdapter("app", "secret", "12345678", "01", is_paper_trading=True, http_client=client)
+    # BR-2b 모의계좌 레이트리미터 실 sleep이 p95 예산을 잡아먹지 않도록 주입.
+    kwargs = dict(is_paper_trading=True, http_client=client, sleep_fn=lambda _s: asyncio.sleep(0))
+    return KISAdapter("app", "secret", "12345678", "01", **kwargs)
 
 
 def _krx_calendar(*, holidays: frozenset[date] = frozenset()) -> VenueCalendar:
