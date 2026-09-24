@@ -175,6 +175,46 @@ def pytest_collection_modifyitems(items: list[pytest.Item]) -> None:
             item.add_marker(pytest.mark.timeout(600))
 
 
+# pyproject.toml addopts(`-m "not nightly and not live_demo and not redis"`)가
+# 기본 실행에서 항상 제외하는 마커 — pytest_sessionfinish가 "이 마커들 때문에
+# 전부 deselect됐다"를 판별할 때 쓰는 것과 동일한 집합이어야 한다.
+_DEFAULT_EXCLUDED_MARKERS = frozenset({"nightly", "live_demo", "redis"})
+
+
+def pytest_sessionfinish(session: pytest.Session, exitstatus: int) -> None:
+    """task-6566(esc-ci-pytest.json) — local_ci의 commit 모드는 커밋이 건드린
+    테스트 파일을 직접 pytest 인자로 넘긴다(`ci_impact.select_impacted_tests`,
+    `tests/` 아래 변경 파일은 그 자신이 곧바로 impacted가 된다). 그 파일의
+    테스트가 전부 `not nightly and not live_demo and not redis`(pyproject.toml
+    addopts) 마커로 걸러지면 — 예: `tests/e2e/bitget_demo/
+    test_bitget_demo_pipeline.py`(전부 `live_demo`) 하나만 바뀐 커밋 — pytest는
+    실제로는 아무 결함도 없는데 `ExitCode.NO_TESTS_COLLECTED`(5)로 끝나
+    CI를 영구 적색으로 고착시킨다(esc-ci-pytest.json이 task-6176부터
+    task-6566까지 열댓 번 재발한 근본 원인).
+
+    `ExitCode.NO_TESTS_COLLECTED`는 서로 다른 상황을 구분하지 않는다: (a)
+    경로/이름이 틀려 애초에 수집된 항목이 0개, (b) `-k`로 사람이 직접 걸러
+    실수로 0건이 됐음, (c) 수집된 항목이 전부 addopts의 기본 제외 마커만으로
+    deselect됨. (c)만 "이번 변경과 무관한, 의도적으로 기본 실행에서 빠지는
+    테스트만 골랐다"는 유효한 결과다 — (a)/(b)는 계속 실패해야 한다. deselect된
+    모든 항목이 `_DEFAULT_EXCLUDED_MARKERS` 중 하나를 실제로 달고 있을 때만
+    (c)로 판정한다 — (b)처럼 무관한 테스트를 `-k`로 잘못 걸렀다면 그 항목들은
+    이 마커가 없으므로 여전히 적색으로 남는다."""
+    if exitstatus != pytest.ExitCode.NO_TESTS_COLLECTED:
+        return
+    reporter = session.config.pluginmanager.get_plugin("terminalreporter")
+    if reporter is None:
+        return
+    deselected = reporter.stats.get("deselected") or []
+    if not deselected:
+        return
+    if all(
+        any(m.name in _DEFAULT_EXCLUDED_MARKERS for m in item.iter_markers())
+        for item in deselected
+    ):
+        session.exitstatus = pytest.ExitCode.OK
+
+
 @pytest.fixture(autouse=True)
 def _reset_metrics_singleton():
     """`set_metrics`는 프로세스 전역 싱글턴이라, 한 테스트가 대체 구현체로
