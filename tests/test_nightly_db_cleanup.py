@@ -200,3 +200,26 @@ def test_list_subprocess_fails_closed_on_unreachable_server() -> None:
             env=env,
             check=True,
         )
+
+
+# ---------------------------------------------------------------------------
+# Red-gate regression guard: task-6626(esc-ci-prepare, 6926609d) deleted
+# scripts/cleanup_orphan_test_dbs.py and scripts/nightly_pipeline.py because
+# they were dead code that duplicated the orphan-cleanup logic this module's
+# docstring says belongs to `pm/scripts/cleanup_orphan_test_dbs.py`. The
+# duplicate treated any DB other than its own TEST_DATABASE_URL as an orphan
+# and defaulted `nightly_pipeline.run()` to `--apply` (destructive), so
+# running it locally DROPped `aios_test_ci` out from under a concurrent
+# `local_ci` mid-migration -- the exact InvalidCatalogNameError this file's
+# module docstring (task-6337) exists to guard against. If either file comes
+# back, the same regression is live again regardless of its contents.
+# ---------------------------------------------------------------------------
+
+
+def test_duplicate_cleanup_scripts_are_not_reintroduced() -> None:
+    for name in ("cleanup_orphan_test_dbs.py", "nightly_pipeline.py"):
+        assert not (SCRIPTS_DIR / name).exists(), (
+            f"scripts/{name} duplicates orphan-cleanup ownership that belongs to "
+            "pm/scripts/cleanup_orphan_test_dbs.py (task-6626, esc-ci-prepare) -- "
+            "its reappearance reopens the aios_test_ci concurrent-DROP regression."
+        )
