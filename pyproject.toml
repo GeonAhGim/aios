@@ -345,3 +345,9 @@ ignore_missing_imports = true
 # task-6382 RD-15: types-defusedxml is not installed in this environment.
 module = "defusedxml.*"
 ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+# task-6774: types-psutil is not installed; psutil is an optional
+# perf_budget fixture dependency (tests/conftest.py), not a hard one.
+module = "psutil.*"
+ignore_missing_imports = true

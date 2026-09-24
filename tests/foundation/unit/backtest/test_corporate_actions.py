@@ -23,6 +23,7 @@ from src.foundation.backtest.domain.corporate_actions import (
     split_factor,
 )
 from src.foundation.backtest.domain.models_v2 import AdjustmentsConfig
+from tests.conftest import PerfBudget
 
 _ADJ_ON = AdjustmentsConfig(splits=True, dividends=True)
 _ADJ_OFF = AdjustmentsConfig(splits=False, dividends=False)
@@ -268,25 +269,20 @@ def test_adjust_fill_no_corporate_actions_is_identity_and_still_flagged_applied(
 # --------------------------------------------------------------------------
 
 
-def test_adjust_fill_completes_within_performance_budget() -> None:
+def test_adjust_fill_completes_within_performance_budget(perf_budget: PerfBudget) -> None:
     """performance assertion: BT-20 DoD §9 성능 예산 단언. 대량 체결(1000건)
     조정이 10ms 이내 완료돼야 한다(벡터화 경로·실시간 체결 피드 대비).
 
-    task-5748이 도입한 best-of-5 `perf_counter()`(wall-clock) min도 여전히
-    flaky했다(task-6371, e29cefc0 — 8워커가 코어를 공유하는 이 CI 호스트에서
-    는 최솟값 1회조차 다른 프로세스와 스케줄러 타임슬라이스를 나눠 쓰는
-    구간을 포함할 수 있다). `time.process_time()`은 이 프로세스가 실제로
-    소비한 CPU 시간만 재므로, 다른 워커 프로세스에 코어를 뺏겨 대기한
-    시간은 애초에 계측에 잡히지 않는다 — wall-clock min-of-N보다 부하
-    노이즈에 근본적으로 강하다. 예산 수치는 그대로 유지한다."""
-    import time
-
+    task-6371(e29cefc0)이 이 테스트 한 곳에만 적용했던 `time.process_time()`
+    best-of-5 수법(wall-clock `perf_counter()` min-of-N은 8워커가 코어를
+    공유하는 이 CI 호스트에서 여전히 flaky했다)을 task-6774가 공용
+    `perf_budget` 픽스처(`tests/conftest.py`)로 일반화했다. 예산 수치는
+    그대로 유지한다."""
     dividend = CashDividend(ex_date=_SPLIT_EX_DATE, amount=Decimal(2), prior_close=Decimal(100))
     splits = [_TWO_FOR_ONE]
     dividends = [dividend]
 
-    def _run_once() -> float:
-        start = time.process_time()
+    def _run_once() -> None:
         for i in range(1000):
             adjust_fill(
                 _ADJ_ON,
@@ -297,12 +293,9 @@ def test_adjust_fill_completes_within_performance_budget() -> None:
                 splits=splits,
                 dividends=dividends,
             )
-        return (time.process_time() - start) * 1000
 
-    elapsed_ms = min(_run_once() for _ in range(5))
-
-    assert elapsed_ms < 10.0, (
-        f"1000 adjustments took {elapsed_ms:.2f}ms CPU time (best of 5), expected <10ms"
+    perf_budget.assert_within(
+        _run_once, budget_ms=10.0, label="1000 adjustments (best of 5)"
     )
 
 
