@@ -1,22 +1,27 @@
-"""NH OpenAPI 엔드포인트 커버리지 매트릭스 — BR-17(ADR-2026-09-24-A D5).
+"""NH OpenAPI endpoint coverage matrix -- BR-17 (ADR-2026-09-24-A D5).
 
-기준 목록은 `docs/design/nh_openapi_reference.json`(nh_openapi_fetch.py가
-네트워크로 내려받은 스냅샷)만 읽는다. 이 스크립트 자체는 네트워크 접근이 없다
-— 오프라인, CI 안전, 같은 입력에 같은 출력.
+Reads only `docs/design/nh_openapi_reference.json` (the snapshot
+nh_openapi_fetch.py downloads over the network) as the reference list. This
+script itself makes no network calls -- offline, CI-safe, same input yields
+same output.
 
-각 엔드포인트의 path/method를 `src/exchanges/nh/*.py` 소스에서 찾으면
-구현됨으로 판정한다. 미구현 엔드포인트는 사유를 셋 중 하나로만 표기한다:
-  - `실전계좌필요`: NH_GAPS.md에 구조적으로 불가능하다고 명시됨
-    (예: `get_order()` — mkt_orr_no ↔ itg_orr_no 매핑 없음).
-  - `범위밖`: `_SCOPE_OVERRIDES`에 명시 등록된 엔드포인트.
-  - `미착수`: 위 둘에 해당하지 않는 나머지 — 구현 대상이지만 아직 안 함.
+An endpoint's path/method is judged implemented if found in
+`src/exchanges/nh/*.py` source. Unimplemented endpoints get exactly one of
+three reason values (see `Reason` below, kept in Korean -- these are data
+values rendered into the coverage report, not code):
+  - live-account-required: NH_GAPS.md documents it as structurally
+    impossible (e.g. `get_order()` -- no mkt_orr_no <-> itg_orr_no mapping).
+  - out-of-scope: registered explicitly in `_SCOPE_OVERRIDES`.
+  - not-started: everything else -- in scope but not yet implemented.
 
-`nh-coverage.txt`는 `coverage_ratchet.py`와 동일한 래칫: 직전 구현률보다
-하락하면 FAIL, 상승하면 baseline을 그 값으로 갱신한다.
+`nh-coverage.txt` follows the same ratchet as `coverage_ratchet.py`: FAIL if
+the implementation rate drops from the prior baseline, update the baseline
+when it rises.
 
-사용: `python scripts/nh_openapi_coverage.py`(저장소 루트에서). 종료코드 0=통과,
-1=하락/오류.
+Usage: `python scripts/nh_openapi_coverage.py` (from the repo root). Exit
+code 0 = pass, 1 = drop/error.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -36,13 +41,14 @@ DEFAULT_TOLERANCE_PP = 0.0
 Reason = Literal["구현됨", "실전계좌필요", "범위밖", "미착수"]
 _VALID_REASONS = frozenset({"구현됨", "실전계좌필요", "범위밖", "미착수"})
 
-# 범위밖 확정 엔드포인트 — ADR이 제외를 결정하면 "path method: 근거"로 추가한다
-# (주로 비-KRX 도메인 또는 adapter 스콥 밖인 것들).
+# Confirmed out-of-scope endpoints -- when an ADR decides an exclusion, add it
+# as "path method: rationale" (mostly non-KRX domains or things outside the
+# adapter's scope).
 _SCOPE_OVERRIDES: dict[str, str] = {}
 
 
 class NhCoverageError(ValueError):
-    """reference/coverage 파일 형식 오류 또는 불변조건 위반."""
+    """Malformed reference/coverage file or an invariant violation."""
 
 
 @dataclass(frozen=True)
@@ -84,22 +90,23 @@ def scan_adapter_source(adapter_dir: Path) -> str:
 
 
 def classify(path: str, method: str, implemented: bool) -> Reason:
-    """엔드포인트를 분류한다.
+    """Classify an endpoint.
 
-    - 구현됨: 소스에서 path 리터럴이 발견됨
-    - 실전계좌필요: NH_GAPS.md에 구조적 이유로 불가능 명시됨
-    - 범위밖: _SCOPE_OVERRIDES에 명시됨
-    - 미착수: 나머지 (기본값)
+    - implemented: path literal found in source
+    - live-account-required: NH_GAPS.md documents a structural reason it's impossible
+    - out-of-scope: registered in _SCOPE_OVERRIDES
+    - not-started: everything else (default)
     """
     if implemented:
         return "구현됨"
 
-    # NH_GAPS.md의 구조적 불가능 목록 — 경로 기반으로 판정
-    # §1: get_order() — dailyOrderExecution 조회가 mkt_orr_no ↔ itg_orr_no 매핑 없음
+    # NH_GAPS.md's structural-impossibility list -- judged by path
+    # Section 1: get_order() -- dailyOrderExecution lookup has no
+    # mkt_orr_no <-> itg_orr_no mapping.
     if "dailyOrderExecution" in path:
         return "실전계좌필요"
 
-    # _SCOPE_OVERRIDES 체크
+    # Check _SCOPE_OVERRIDES
     key = f"{path} {method}"
     if key in _SCOPE_OVERRIDES:
         return "범위밖"
@@ -117,7 +124,7 @@ def build_matrix(reference: dict[str, Any], adapter_source: str) -> MatrixResult
         method = ep["method"]
         summary = ep.get("summary", "")
 
-        # path 리터럴이 소스에 있으면 구현됨
+        # implemented if the path literal is present in source
         is_impl = path in adapter_source
 
         reason = classify(path, method, is_impl)
