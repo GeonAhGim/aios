@@ -206,7 +206,6 @@ class AuthService:
                     },
                 )
                 raise AuthError(_GENERIC_AUTH_ERROR)
-
             now = datetime.now(timezone.utc)
             if row["locked_until"] is not None and now < row["locked_until"]:
                 _consume_verify_timing(password)
@@ -214,8 +213,8 @@ class AuthService:
                     conn, actor_agent=str(row["user_id"]), action_type="auth.login_failed",
                     user_id=row["user_id"], decision_data={"reason": "account_locked"},
                 )
-                state = await lockout.register_failed_attempt(conn, row["user_id"], now=now)
-                raise AccountLockedError(state.retry_after_seconds)
+                locked_state = await lockout.register_failed_attempt(conn, row["user_id"], now=now)
+                raise AccountLockedError(locked_state.retry_after_seconds)
 
             try:
                 _hasher.verify(row["password_hash"], password)
