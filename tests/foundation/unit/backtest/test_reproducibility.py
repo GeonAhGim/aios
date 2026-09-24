@@ -220,24 +220,29 @@ def test_reproducibility_key_still_correct_when_config_hash_stalls(
     정규화 단계에 무거운 검증이 끼어드는 상황) `reproducibility_key`가 그
     지연을 그대로 감내하면서도 여전히 지연 없는 호출과 동일한 키를 내는지
     확인한다 — 위 p95 단언이 캐시나 지름길을 재는 게 아니라 실제
-    `config_hash` 호출을 포함한 전체 조립을 재고 있음을 보장한다."""
+    `config_hash` 호출을 포함한 전체 조립을 재고 있음을 보장한다.
+
+    호출 여부는 벽시계 경과시간이 아니라 호출 횟수로 증명한다(task-6395)
+    — `-n 8` 등 병렬 워커가 코어를 다투는 CI 호스트에서는 10ms 지연이
+    타이머/스케줄러 잡음(수 ms)에 묻혀 `elapsed_s < delay_s`로 flake했다.
+    """
     original_config_hash = reproducibility_mod.config_hash
-    delay_s = 0.01
+    call_count = 0
 
     def _stalled_config_hash(config: BacktestConfigV2) -> str:
-        time.sleep(delay_s)
+        nonlocal call_count
+        call_count += 1
+        time.sleep(0.01)
         return original_config_hash(config)
 
     monkeypatch.setattr(reproducibility_mod, "config_hash", _stalled_config_hash)
 
-    started = time.perf_counter()
     stalled_key = _key()
-    elapsed_s = time.perf_counter() - started
 
     monkeypatch.undo()
     baseline_key = _key()
 
-    assert elapsed_s >= delay_s
+    assert call_count == 1
     assert stalled_key == baseline_key
 
 
