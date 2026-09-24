@@ -209,7 +209,7 @@ class BitgetMarketDataMixin:
         ]
 
     async def get_auction(self: SignedRequestClient, symbol: str) -> dict[str, Any]:
-        """02b 스펙 §3.1(P2) — 현물 콜옥션(call auction) 정보 조회."""
+        """02b spec §3.1(P2) — get call auction information."""
         raw = await self._request(
             "GET",
             "/api/v2/spot/market/auction",
@@ -220,7 +220,7 @@ class BitgetMarketDataMixin:
     async def get_merge_depth(
         self: SignedRequestClient, symbol: str, limit: int = 20
     ) -> dict[str, Any]:
-        """02b 스펙 §3.1(P2) — 병합 호가창(merge-depth) 조회."""
+        """02b spec §3.1(P2) — get merged orderbook (merge-depth)."""
         raw = await self._request(
             "GET",
             "/api/v2/spot/market/merge-depth",
@@ -229,11 +229,11 @@ class BitgetMarketDataMixin:
         return dict(raw["data"])
 
     async def get_vip_fee_rate(self: SignedRequestClient) -> dict[str, Any]:
-        """02b 스펙 §3.1(P2) — VIP 수수료율 조회."""
+        """02b spec §3.1(P2) — get VIP fee rate."""
         raw = await self._request("GET", "/api/v2/spot/market/vip-fee-rate")
         return dict(raw["data"])
 
     async def get_coins(self: SignedRequestClient) -> list[dict[str, Any]]:
-        """02b 스펙 §3.1(P2) — 현물 지원 코인 목록 조회."""
+        """02b spec §3.1(P2) — get list of supported coins for spot trading."""
         raw = await self._request("GET", "/api/v2/spot/public/coins")
         return list(raw["data"])

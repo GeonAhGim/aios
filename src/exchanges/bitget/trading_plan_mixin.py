@@ -88,7 +88,7 @@ class BitgetTradingPlanMixin:
     async def get_history_plan_orders(
         self: SignedRequestClient, symbol: str | None = None, *, limit: int = 100
     ) -> list[dict[str, Any]]:
-        """02b 스펙 §3.2(P2) — 예약 주문 이력 조회."""
+        """02b spec §3.2(P2) — get history of plan orders."""
         params: dict[str, Any] = {"limit": str(limit)}
         if symbol is not None:
             params["symbol"] = _to_bitget_symbol(symbol)
@@ -101,7 +101,7 @@ class BitgetTradingPlanMixin:
     async def modify_plan_order(
         self: SignedRequestClient, order_id: str, **kwargs: Any
     ) -> dict[str, Any]:
-        """02b 스펙 §3.2(P2) — 예약 주문 수정."""
+        """02b spec §3.2(P2) — modify a plan order."""
         body: dict[str, Any] = {"orderId": order_id}
         if "trigger_price" in kwargs:
             body["triggerPrice"] = str(kwargs["trigger_price"])
@@ -116,7 +116,7 @@ class BitgetTradingPlanMixin:
     async def batch_cancel_plan_orders(
         self: SignedRequestClient, order_ids: list[str], *, symbol: str | None = None
     ) -> bool:
-        """02b 스펙 §3.2(P2) — 예약 주문 배치 취소."""
+        """02b spec §3.2(P2) — batch cancel plan orders."""
         body: dict[str, Any] = {"orderIdList": [{"orderId": oid} for oid in order_ids]}
         if symbol is not None:
             body["symbol"] = _to_bitget_symbol(symbol)
@@ -127,8 +127,9 @@ class BitgetTradingPlanMixin:
     async def batch_cancel_replace_orders(
         self: SignedRequestClient, order_ids: list[str], *, symbol: str | None = None
     ) -> dict[str, Any]:
-        """02b 스펙 §3.2(P2) — 배치 취소·재주문. 지정된 주문들을 취소하고
-        새로운 주문 정보를 제출할 수 있다."""
+        """02b spec §3.2(P2) — batch cancel and replace orders.
+
+        Allows canceling specified orders and submitting new order information."""
         body: dict[str, Any] = {"orderIdList": [{"orderId": oid} for oid in order_ids]}
         if symbol is not None:
             body["symbol"] = _to_bitget_symbol(symbol)
@@ -139,7 +140,7 @@ class BitgetTradingPlanMixin:
 
     @require_paper_sandbox
     async def cancel_symbol_orders(self: SignedRequestClient, symbol: str) -> bool:
-        """02b 스펙 §3.2(P2) — 심볼별 전체 주문 취소."""
+        """02b spec §3.2(P2) — cancel all orders for a symbol."""
         body: dict[str, Any] = {"symbol": _to_bitget_symbol(symbol)}
         raw = await self._request("POST", "/api/v2/spot/trade/cancel-symbol-order", body=body)
         return bool(raw.get("code") == "00000")

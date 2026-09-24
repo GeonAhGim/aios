@@ -242,7 +242,7 @@ class BitgetAccountMixin:
         return bool(raw.get("code") == "00000")
 
     async def get_deposit_address(self: SignedRequestClient, coin: str) -> dict[str, Any]:
-        """02b 스펙 §3.3(P2) — 입금 주소 조회."""
+        """02b spec §3.3(P2) — get deposit address for a coin."""
         raw = await self._request(
             "GET",
             "/api/v2/spot/wallet/deposit-address",
@@ -253,7 +253,7 @@ class BitgetAccountMixin:
     async def get_deposit_records(
         self: SignedRequestClient, coin: str | None = None, *, limit: int = 100
     ) -> list[dict[str, Any]]:
-        """02b 스펙 §3.3(P2) — 입금 이력 조회."""
+        """02b spec §3.3(P2) — get deposit history records."""
         params: dict[str, Any] = {"limit": str(limit)}
         if coin is not None:
             params["coin"] = coin.upper()
@@ -263,8 +263,10 @@ class BitgetAccountMixin:
     async def get_withdrawal_records(
         self: SignedRequestClient, coin: str | None = None, *, limit: int = 100
     ) -> list[dict[str, Any]]:
-        """02b 스펙 §3.3(P2) — 출금 이력 조회. 7.9 원칙(정책적 출금 차단)과
-        무관: 이는 조회이지 출금 신청이 아니다."""
+        """02b spec §3.3(P2) — get withdrawal history records.
+
+        Note: this is a query only, not a withdrawal request; unrelated to 7.9 principle
+        (withdrawal policy restriction)."""
         params: dict[str, Any] = {"limit": str(limit)}
         if coin is not None:
             params["coin"] = coin.upper()
