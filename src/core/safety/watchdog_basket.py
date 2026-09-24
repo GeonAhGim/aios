@@ -14,8 +14,9 @@ from __future__ import annotations
 import logging
 from collections.abc import Awaitable, Callable
 from decimal import Decimal
+from typing import Protocol
 
-from src.exchanges.bitget.adapter import BitgetAdapter
+from src.data.models.market_data import Candle
 
 logger = logging.getLogger(__name__)
 
@@ -26,7 +27,16 @@ MARKET_WIDE_MOVE_THRESHOLD_PCT = Decimal("3.0")
 GetBasketReturnsFn = Callable[[], Awaitable[dict[str, Decimal]]]
 
 
-async def get_basket_returns(adapter: BitgetAdapter) -> dict[str, Decimal]:
+class OHLCVSource(Protocol):
+    """core-no-io 계약(`.importlinter`) 때문에 `src.exchanges.bitget.adapter.
+    BitgetAdapter`를 직접 타입으로 쓸 수 없다 — 이 basket 조회에 실제로 필요한
+    메서드 하나만 구조적 타입으로 선언한다. 호출부(`watchdog_process.py`,
+    core 밖)는 여전히 `BitgetAdapter` 인스턴스를 그대로 넘긴다."""
+
+    async def get_ohlcv(self, symbol: str, timeframe: str, limit: int = 100) -> list[Candle]: ...
+
+
+async def get_basket_returns(adapter: OHLCVSource) -> dict[str, Decimal]:
     """The latest closed 5m candle's (close-open)/open % move per symbol.
 
     A symbol whose fetch fails is dropped from the basket rather than defaulted
