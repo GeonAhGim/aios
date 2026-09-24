@@ -1,12 +1,8 @@
 """Task series 16xx — creation/recovery/cancellation of main.py lifespan's background loops
 (heartbeat/alert/risk_guard/execution_loop/safety/liquidation/post_trade_batch).
-
-Spec: 16_backend_signatures.md, ADR-2026-08-10-B, P6 (300-line file cap),
-L4_compliance_and_regulatory_v1.0.md#9 CM-11.
-
+Spec: 16_backend_signatures.md, ADR-2026-08-10-B, P6 (300-line cap), CM-11.
 Deviation: task-117 wanted src/app/background_loops.py, but .aios-zone doesn't declare src/app/**
 (P8 -- agents may not modify zone policy), so this lives under src/services/** (SCAFFOLD) instead.
-
 main.py assembles pool/event_bus/credential_resolver etc. and passes them to
 :func:`start_background_loops`. On shutdown it calls only the returned
 :class:`BackgroundLoops`.stop. Every loop is instrumented via `LoopHealth.record_tick`, except
@@ -46,6 +42,9 @@ from src.foundation.execution_ownership.adapters.postgres_repository import (
 from src.foundation.execution_ownership.ports.repository import ExecutionLeaseRepository
 from src.foundation.mandates.application.evaluate_post_trade import run_daily_post_trade_batch
 from src.foundation.paper_control.adapters.postgres_repository import PostgresPaperControlRepository
+from src.foundation.risk.application.personal_daily_loss_monitor import (
+    start_personal_daily_loss_monitor_task,
+)
 from src.foundation.risk_gate.adapters.postgres_repository import PostgresRiskGateRepository
 from src.services.alert_service import AlertService
 from src.services.credential_resolver import CredentialResolver
@@ -196,6 +195,8 @@ async def start_background_loops(
         )
     )
 
+    personal_daily_loss_task = start_personal_daily_loss_monitor_task(pool, health=health)
+
     # Doc 05 §5.6 + task-2151(L4-18a) — one-time startup recovery before the background loops
     # (see recovery_wiring.py for the fail-closed behavior on failure).
     recovery_state = await run_startup_recovery_gated(
@@ -284,11 +285,9 @@ async def start_background_loops(
             )
         )
 
-    tasks = [heartbeat_task, alert_task, risk_guard_task, safety_task]
-    optional_tasks = (
-        execution_loop_task, oms_dispatcher_task, liquidation_task, post_trade_batch_task,
-    )
-    tasks.extend(t for t in optional_tasks if t is not None)
+    tasks = [heartbeat_task, alert_task, risk_guard_task, safety_task, personal_daily_loss_task]
+    optional = (execution_loop_task, oms_dispatcher_task, liquidation_task, post_trade_batch_task)
+    tasks.extend(t for t in optional if t is not None)
 
     return BackgroundLoops(
         execution_scheduler=execution_scheduler,

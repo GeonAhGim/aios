@@ -171,6 +171,12 @@ extend-immutable-calls = ["fastapi.Depends", "fastapi.Query", "fastapi.Path", "f
 # ledger/positions/trust application/**: it holds the transaction boundary
 # across a lock-then-conditional-update sequence). ems domain/** stays pure.
 "src/foundation/ems/application/**" = ["TID251"]
+# task-6510 -- personal_daily_loss_monitor.py/personal_risk_snapshot_source.py
+# are the always-on periodic caller reading `positions`' NAV chain via a raw
+# `asyncpg.Pool` (no order/context to route through a port for a caller-less
+# tick). Same reasoning as ledger/positions/trust/mandates/ems application/**
+# above -- risk domain/** stays pure, only application/** is exempted.
+"src/foundation/risk/application/**" = ["TID251"]
 "src/main.py" = ["TID251"]
 "src/services/*.py" = ["TID251"]
 "src/services/execution_loop/**" = ["TID251"]
