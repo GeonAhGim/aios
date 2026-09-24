@@ -334,3 +334,8 @@ ignore_missing_imports = true
 # task-4036 IND-11: pandas-stubs is not installed; pandas_ta_classic ships no py.typed marker.
 module = ["pandas.*", "pandas_ta_classic.*"]
 ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+# task-6382 RD-15: types-defusedxml is not installed in this environment.
+module = "defusedxml.*"
+ignore_missing_imports = true
