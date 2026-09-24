@@ -18,6 +18,7 @@ import sys
 import time
 from pathlib import Path
 from types import ModuleType
+from typing import Any
 
 import pytest
 import yaml
@@ -72,7 +73,7 @@ def test_internal_paper_lists_missing_evidence_against_real_repo(
 # ---------------------------------------------------------------------------
 
 
-def _write_config(tmp_path: Path, stages: list[dict]) -> Path:
+def _write_config(tmp_path: Path, stages: list[dict[str, Any]]) -> Path:
     config_path = tmp_path / "release_gates.yaml"
     config_path.write_text(yaml.safe_dump({"stages": stages}), encoding="utf-8")
     return config_path
