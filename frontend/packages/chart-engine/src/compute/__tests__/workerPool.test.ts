@@ -4,6 +4,7 @@ import type { IndicatorCatalogPort } from "../../plugins/indicatorPlugin";
 import { loadIndicatorCatalog } from "../../plugins/indicatorPlugin";
 import { CLIENT_ENGINE_COMPUTE_TASK, ClientEngineError, KERNEL_FACTORIES, computeIndicatorSeries, createClientIncrementalIndicator } from "../clientEngine";
 import { VERIFIED_KERNEL_PINS } from "../verifiedIndicators";
+import type { WorkerPoolBackend } from "../workerPool";
 import {
   WorkerPoolError,
   createBrowserWorkerPoolBackend,
@@ -167,7 +168,7 @@ describe("createBrowserWorkerPoolBackend", () => {
     await expect(promise).rejects.toThrow("worker thread died");
   });
 
-  it("rejects with WORKER_POOL_DISPOSED after dispose, and terminates the underlying worker", async () => {
+  it("rejects with WORKER_POOL_DISPOSED after dispose, and terminates the underlying worker without ever posting to it", async () => {
     const worker = new FakeWorker();
     const backend = createBrowserWorkerPoolBackend(() => worker as unknown as Worker);
 
@@ -175,6 +176,10 @@ describe("createBrowserWorkerPoolBackend", () => {
 
     expect(worker.terminate).toHaveBeenCalledOnce();
     await expect(backend.run(ECHO_TASK, null)).rejects.toMatchObject({ code: "WORKER_POOL_DISPOSED" });
+    // The error-handling path this guards: `run()` must reject *before* reaching
+    // `worker.postMessage`, since posting to an already-terminated worker is
+    // itself an error in a real browser (DOMException: "already terminated").
+    expect(worker.posted).toHaveLength(0);
   });
 
   it("drives a real indicator compute end to end through the pool", async () => {
@@ -658,5 +663,92 @@ describe("DEEPEN 2039 — D3: multiple independent WorkerPool instances under si
     }
 
     instances.forEach(({ pool }) => pool.dispose());
+  });
+});
+
+// --- DEEPEN 6710 (docs/audit/DEPTH_CH.md, task-2039 CH-18e follow-up): the
+// "rejects with WORKER_POOL_DISPOSED after dispose" test above proved `run()`
+// rejects post-dispose, but never proved *why* that matters — it never
+// verified `run()` avoids calling `postMessage` on the now-terminated worker,
+// so a regression that dropped the `disposed` guard before `postMessage`
+// would have passed unnoticed as long as the promise still eventually
+// rejected some other way. This adds a failure-injection test against a
+// worker double that throws like a real terminated `Worker` would, plus a
+// red/green pair against the naive (unguarded) implementation.
+
+/** A `FakeWorker` whose `postMessage` throws once `terminate()` has been called,
+ * mirroring a real browser `Worker`'s `DOMException: "... worker has been terminated"`. */
+class TerminatingFakeWorker extends FakeWorker {
+  #terminated = false;
+
+  constructor() {
+    super();
+    this.terminate = vi.fn(() => {
+      this.#terminated = true;
+    });
+  }
+
+  override postMessage(message: unknown): void {
+    if (this.#terminated) {
+      throw new DOMException("Worker has been terminated", "InvalidStateError");
+    }
+    super.postMessage(message);
+  }
+}
+
+describe("DEEPEN 6710 — failure injection: postMessage throws if it ever reaches a terminated worker", () => {
+  it("dispose()-then-run() never touches postMessage, so the real terminated-worker throw is never triggered", async () => {
+    const worker = new TerminatingFakeWorker();
+    const backend = createBrowserWorkerPoolBackend(() => worker as unknown as Worker);
+
+    backend.dispose();
+
+    // If the disposed-guard were missing, this would throw synchronously inside
+    // `run()` (a `DOMException`, not a `WorkerPoolError`) instead of rejecting cleanly.
+    await expect(backend.run(ECHO_TASK, null)).rejects.toMatchObject({ code: "WORKER_POOL_DISPOSED" });
+    expect(worker.posted).toHaveLength(0);
+  });
+});
+
+describe("DEEPEN 6710 — gate red reproduction (unguarded post-dispose run vs the real disposed-guard)", () => {
+  /** Reproduces a `createBrowserWorkerPoolBackend` that forgot the `disposed` check in `run()` —
+   * exactly the regression the failure-injection test above guards against. */
+  function createUnguardedBrowserBackend(createWorker: () => Worker): WorkerPoolBackend {
+    const worker = createWorker();
+    return {
+      run<TArgs, TResult>(_task: string, args: TArgs): Promise<TResult> {
+        // Bug under reproduction: no `if (disposed) return Promise.reject(...)` guard —
+        // falls straight through to `postMessage` even after `dispose()`.
+        return new Promise<TResult>((resolve) => {
+          worker.postMessage({ task: _task, args });
+          resolve(undefined as TResult);
+        });
+      },
+      dispose(): void {
+        worker.terminate();
+      },
+    };
+  }
+
+  it("적색: 가드 없는 backend는 dispose 후 run()이 terminated worker에 postMessage를 시도해 DOMException으로 reject된다", async () => {
+    const worker = new TerminatingFakeWorker();
+    const broken = createUnguardedBrowserBackend(() => worker as unknown as Worker);
+
+    broken.dispose();
+
+    // `postMessage`'s throw happens inside the executor, so a naive Promise
+    // wrapper turns it into a rejection rather than a synchronous throw — either
+    // way it's the real DOMException, not a clean `WORKER_POOL_DISPOSED`.
+    await expect(broken.run(ECHO_TASK, null)).rejects.toThrow(DOMException);
+  });
+
+  it("녹색: 실제 createBrowserWorkerPoolBackend는 같은 조건에서 postMessage를 시도조차 하지 않고 WORKER_POOL_DISPOSED로 reject한다", async () => {
+    const worker = new TerminatingFakeWorker();
+    const backend = createBrowserWorkerPoolBackend(() => worker as unknown as Worker);
+
+    backend.dispose();
+
+    await expect(backend.run(ECHO_TASK, null)).rejects.toMatchObject({ code: "WORKER_POOL_DISPOSED" });
+    expect(worker.posted).toHaveLength(0);
   });
 });
