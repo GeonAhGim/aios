@@ -269,6 +269,13 @@ async def test_resync_raises_for_account_missing_its_balance_row(pool):
             with pytest.raises(UnknownAccountError):
                 await resync_account_balance(conn, debit_code, journal=journal, balances=balances)
     finally:
+        # audit-allow: ledger_balance_raw_seed -- this restores the exact row
+        # this same test deleted above (`saved` is that `DELETE ... RETURNING`),
+        # not a fabricated balance. It is cleanup for a white-box test of the
+        # repository/resync layer itself against the shared TEST_DATABASE_URL,
+        # not account provisioning -- the values come from the prior real
+        # journal-backed state, so there is no event-less balance left behind
+        # for `replay_verify` to trip on.
         async with pool.acquire() as conn:
             await conn.execute(
                 "INSERT INTO ledger_balance ("
