@@ -42,7 +42,13 @@ from __future__ import annotations
 import asyncpg
 from fastapi import FastAPI, Header, HTTPException, Request, status
 
-from src.api.mcp import tools_paper, tools_propose, tools_read, tools_research
+from src.api.mcp import (
+    tools_paper,
+    tools_propose,
+    tools_read,
+    tools_research,
+    tools_research_data,
+)
 from src.api.mcp.scope_types import ScopeDependency
 from src.foundation.ai.gateway.adapters.postgres_token_repository import (
     PostgresAgentTokenRepository,
@@ -105,13 +111,14 @@ def require_scope(scope: Scope) -> ScopeDependency:
 
 
 def create_mcp_app(pool: asyncpg.Pool) -> FastAPI:
-    """Assemble the full read+research+propose+paper MCP HTTP app over
-    `pool` -- AI-16 mounts the last two routers (`tools_propose`/
-    `tools_paper`)."""
+    """Assemble the full read+research+research_data+propose+paper MCP HTTP
+    app over `pool` -- AI-16 mounts the last two routers (`tools_propose`/
+    `tools_paper`), RD-16 mounts `tools_research_data`."""
     app = FastAPI(title="AIOS Agent Gateway MCP Server")
     app.state.pool = pool
     app.include_router(tools_read.build_router(require_scope))
     app.include_router(tools_research.build_router(require_scope))
+    app.include_router(tools_research_data.build_router(require_scope))
     app.include_router(tools_propose.build_router(require_scope))
     app.include_router(tools_paper.build_router(require_scope))
     return app
