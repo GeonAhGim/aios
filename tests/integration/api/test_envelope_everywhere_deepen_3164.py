@@ -99,7 +99,9 @@ class _ExplodingStrategyBuilderService:
         )
 
 
-async def test_unclassified_exception_is_enveloped_without_leaking_original_message(client: AsyncClient) -> None:
+async def test_unclassified_exception_is_enveloped_without_leaking_original_message(
+    client: AsyncClient,
+) -> None:
     """실패 주입: EXCEPTION_MAP에 없는 예외가 서비스 계층에서 터지면
     (`get_strategy_builder_service` 의존성 오버라이드로 시뮬레이션),
     전역 핸들러가 이를 삼켜 위장 성공을 반환하지 않으면서도, 원본 예외
@@ -174,7 +176,9 @@ async def _list_strategies_p95_ms(pool: asyncpg.Pool, user_id: uuid.UUID, *, n: 
     return durations_ms[int(len(durations_ms) * 0.95)]
 
 
-async def test_list_strategies_p95_under_borrowed_single_roundtrip_budget(pool: asyncpg.Pool) -> None:
+async def test_list_strategies_p95_under_borrowed_single_roundtrip_budget(
+    pool: asyncpg.Pool,
+) -> None:
     user_id = await create_test_user(pool)
 
     p95_ms = await _list_strategies_p95_ms(pool, user_id, n=_PERF_ITERATIONS)
@@ -182,7 +186,9 @@ async def test_list_strategies_p95_under_borrowed_single_roundtrip_budget(pool: 
     assert p95_ms < _PERF_BUDGET_MS
 
 
-async def test_list_strategies_budget_gate_fails_on_injected_regression(pool: asyncpg.Pool, monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_list_strategies_budget_gate_fails_on_injected_regression(
+    pool: asyncpg.Pool, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """게이트 적색 재현: 위 p95 단언이 실제로 회귀를 잡는지 확인한다 —
     `asyncpg.Connection.fetch`에 60ms 인위 지연을 주입해, 같은 측정
     로직이 실제로 AssertionError를 내는지 본다(tautology가 아님을 증명)."""

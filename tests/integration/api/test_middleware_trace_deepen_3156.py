@@ -44,7 +44,9 @@ async def pool() -> AsyncGenerator[asyncpg.Pool, None]:
     await p.close()
 
 
-async def test_record_audit_log_rejects_actor_agent_exceeding_column_length(pool: asyncpg.Pool) -> None:
+async def test_record_audit_log_rejects_actor_agent_exceeding_column_length(
+    pool: asyncpg.Pool,
+) -> None:
     """negative: `actor_agent`는 VARCHAR(100)(9ec8a1ee28d7 마이그레이션) —
     101자를 넘기면 문자열이 조용히 잘려서 다른 행위자 이름으로 오기록되는
     게 아니라, DB가 INSERT 자체를 거부한다(fail-closed)."""
@@ -58,7 +60,9 @@ async def test_record_audit_log_rejects_actor_agent_exceeding_column_length(pool
             )
 
 
-async def test_record_audit_log_rejects_action_type_exceeding_column_length(pool: asyncpg.Pool) -> None:
+async def test_record_audit_log_rejects_action_type_exceeding_column_length(
+    pool: asyncpg.Pool,
+) -> None:
     """negative: `action_type`은 VARCHAR(50) — 51자를 넘기면 거부된다."""
     async with pool.acquire() as conn:
         with pytest.raises(asyncpg.DataError):
@@ -70,7 +74,9 @@ async def test_record_audit_log_rejects_action_type_exceeding_column_length(pool
             )
 
 
-async def test_record_command_event_rejects_unsafe_payload_key_and_persists_nothing(pool: asyncpg.Pool) -> None:
+async def test_record_command_event_rejects_unsafe_payload_key_and_persists_nothing(
+    pool: asyncpg.Pool,
+) -> None:
     """negative: AUD-004(79번 §2) — payload 키 이름이 secret류 패턴에 걸리면
     `UnsafePayloadError`로 거부되고, DB에는 아무 행도 남지 않는다
     (`assert_safe_payload`가 `append_event` 호출보다 먼저 실패하므로 부분
@@ -138,7 +144,9 @@ async def _record_audit_log_p95_ms(pool: asyncpg.Pool, *, n: int) -> float:
     return durations_ms[int(len(durations_ms) * 0.95)]
 
 
-async def test_record_audit_log_write_p95_under_borrowed_single_roundtrip_budget(pool: asyncpg.Pool) -> None:
+async def test_record_audit_log_write_p95_under_borrowed_single_roundtrip_budget(
+    pool: asyncpg.Pool,
+) -> None:
     """수치 성능 단언: ADR-2026-09-09-C Decision 1 예산표에 감사 로그 단일
     쓰기 전용 항목은 없다 — 가장 가까운 유사 항목("주문 제출→ACK p95
     50ms(paper)", 동일하게 단일 실DB 왕복 1회)을 자체 예산으로 차용한다
@@ -148,7 +156,9 @@ async def test_record_audit_log_write_p95_under_borrowed_single_roundtrip_budget
     assert p95_ms < 50.0
 
 
-async def test_record_audit_log_budget_gate_fails_on_injected_regression(pool: asyncpg.Pool, monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_record_audit_log_budget_gate_fails_on_injected_regression(
+    pool: asyncpg.Pool, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """게이트 적색 재현: 위 p95 단언이 실제로 회귀를 잡는지 확인한다 —
     `asyncpg.Connection.execute`에 60ms 인위 지연을 주입해, 같은 측정
     로직이 실제로 AssertionError를 내는지 본다(tautology가 아님을 증명)."""

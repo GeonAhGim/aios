@@ -125,7 +125,9 @@ class NHMarketDataMixin:
             timestamp=datetime.now(timezone.utc),
         )
 
-    async def get_ohlcv(self: NHHTTPClient, symbol: str, timeframe: str, limit: int = 100) -> list[Candle]:
+    async def get_ohlcv(
+        self: NHHTTPClient, symbol: str, timeframe: str, limit: int = 100
+    ) -> list[Candle]:
         """주식 일별 OHLCV 데이터 조회 — POST /krstock/quote/v1/currentDaily.
 
         Task-6695(BR-17): 공식 openapi.json에서 요청/응답 스키마 확인 완료.
