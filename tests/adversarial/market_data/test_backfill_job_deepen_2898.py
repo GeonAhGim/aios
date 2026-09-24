@@ -36,6 +36,7 @@ DC 축이라 D3 하한). 이 파일이 그 부족분을 채운다:
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import AsyncIterator, Sequence
 from datetime import datetime, timezone
 from decimal import Decimal
@@ -237,6 +238,7 @@ class _FakeCandleStore:
         self.rows: dict[tuple[Venue, UUID, Timeframe], list[CandleRecord]] = {}
 
     async def upsert_batch(self, conn: object, batch_id: UUID, candles: list[CandleRecord]) -> int:
+        await asyncio.sleep(0)  # Allow event loop to schedule other tasks
         key = (candles[0].key.venue, candles[0].key.instrument_id, candles[0].key.timeframe)
         existing = self.rows.setdefault(key, [])
         existing_times = {c.open_time for c in existing}
@@ -284,6 +286,7 @@ class _FakeCoverageRepository:
         self.spans: list[StoredCoverageSpan] = []
 
     async def upsert_span(self, conn: object, span: StoredCoverageSpan) -> StoredCoverageSpan:
+        await asyncio.sleep(0)  # Allow event loop to schedule other tasks
         for existing in self.spans:
             same_axis = (
                 existing.instrument_id == span.instrument_id
