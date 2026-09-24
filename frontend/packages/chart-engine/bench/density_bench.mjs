@@ -148,8 +148,8 @@ function sampleIndicatorWindow(values, candles, startIndex, endIndex) {
  * allocation to leave pending garbage that V8 can collect at any later,
  * unpredictable point, including mid-measurement in a *different* function
  * (observed: panZoomFrameMsP95 elevated across an entire run's sweeps with
- * no matching rise in the calib probe, i.e. not host contention -- see
- * sweepCalibRatios below). Forcing a full collection right before each timed
+ * no matching rise in the calib probe, i.e. not host contention -- see the
+ * per-metric calib ratios below). Forcing a full collection right before each timed
  * measurement (outside the `performance.now()` window) drains that backlog
  * proactively instead of leaving it to fire during whichever measurement
  * happens to run next. No-op (silently) when the process was not started
@@ -267,45 +267,45 @@ async function main() {
 
   const sweeps = [];
   const calibSamplesMs = [];
-  const sweepCalibRatios = [];
+  const panZoomCalibRatios = [];
+  const indicatorAddCalibRatios = [];
+  const tickUpdateCalibRatios = [];
   for (let i = 0; i < MEASURE_SWEEPS; i++) {
-    // Bracket each sweep with a calib probe on BOTH sides (task-6338 follow-up
-    // to task-6321: that fix sampled calib only once, right before each
-    // sweep's real measurements, which is a preface, not a bracket -- host
-    // contention that kicks in *after* the pre-sweep probe and during the
-    // sweep's own panZoom/indicatorAdd/tick work still went undetected, which
-    // is exactly the esc-ci-frontend.json recurrence: sweeps of
-    // 10.8/15.1/3.06/3.17/12.9ms alongside a calib ratio still reading 1.000.
-    // Sampling again right after the sweep and keeping the max of both sides
-    // means contention starting mid-sweep is caught by the trailing probe
-    // even when the leading probe still read quiet.
+    // task-6725 (esc-ci-frontend.json recurrence of task-6670): a single
+    // calib pair bracketing the *whole sweep* (all 3 measurements) attributes
+    // every metric in that sweep the same contention ratio, even though a
+    // transient contention spike landing strictly between two of the three
+    // measurements -- not overlapping either bracket -- inflates only the
+    // metric it actually hit. Reproduced directly from a CI failure log:
+    // sweep index 3 measured panZoomFrameMsP95 at 7.857ms (the run's highest,
+    // ~1.8x its own sweep-siblings) while that sweep's shared calib brackets
+    // (15.98ms lead, 15.19ms trail) read unremarkable, so the shared ratio
+    // (1.229) undercorrected specifically for panZoom and the sweep's other
+    // two metrics (which the spike never touched) were normalized by the
+    // same inflated-looking-but-actually-fine ratio. Bracketing each of the
+    // three measurements with its own calib probe -- same "MAX of both
+    // sides" principle task-6338 established, just at per-metric instead of
+    // per-sweep granularity -- keeps each metric's normalization attached
+    // only to the contention actually present during that metric's own
+    // measurement window.
     forceGc();
-    const calibLead = measureCalibMs();
+    const calibA = measureCalibMs();
     forceGc();
     const panZoom = measurePanZoomFrameMs(candles, instances, valuesByInstance);
     forceGc();
+    const calibB = measureCalibMs();
+    forceGc();
     const indicatorAddMs = measureIndicatorAddMs(catalog, candles);
+    forceGc();
+    const calibC = measureCalibMs();
     forceGc();
     const tickUpdate = measureTickUpdateMs(instances, candles);
     forceGc();
-    const calibTrail = measureCalibMs();
-    calibSamplesMs.push(calibLead, calibTrail);
-    // task-6670 (esc-ci-frontend.json recurrence): a *global* calib ratio
-    // (one number reduced from all MEASURE_SWEEPS*2 samples) mismatches a
-    // *per-sweep* metric median whenever host contention is non-stationary
-    // across the run instead of a flat offset -- reproduced directly from a
-    // real CI failure log where the calib probe climbed monotonically
-    // 9.3ms->19.5ms across the 9 sweeps (real, worsening contention) while
-    // panZoomFrameMsP95's own per-sweep values did not track that same
-    // ordering closely enough for a single global ratio (median of all 18
-    // calib samples) to land on the ratio that actually applied to whichever
-    // sweep ended up at the metric's median. Pairing each sweep's own
-    // measurement with that same sweep's own bracketing calib probes (MAX of
-    // the two sides, same "never let a noisy calib sample hide contention"
-    // principle `checkAbsoluteThresholds` already applies) before reducing
-    // across sweeps keeps the normalization attached to the contention that
-    // was actually present during that specific sweep's measurement.
-    sweepCalibRatios.push(Math.max(1, Math.max(calibLead, calibTrail) / CALIB_BASE_MS));
+    const calibD = measureCalibMs();
+    calibSamplesMs.push(calibA, calibB, calibC, calibD);
+    panZoomCalibRatios.push(Math.max(1, Math.max(calibA, calibB) / CALIB_BASE_MS));
+    indicatorAddCalibRatios.push(Math.max(1, Math.max(calibB, calibC) / CALIB_BASE_MS));
+    tickUpdateCalibRatios.push(Math.max(1, Math.max(calibC, calibD) / CALIB_BASE_MS));
     sweeps.push({
       panZoomFrameMsP95: panZoom.p95,
       indicatorAddMs,
@@ -328,16 +328,16 @@ async function main() {
       `normalized absolute targets: ${JSON.stringify(normalized)}; raw spec targets: ${JSON.stringify(CH19_ABSOLUTE_TARGET_MS)}`,
   );
 
-  // Per-sweep normalization (see sweepCalibRatios above): divide each
-  // sweep's own metrics by that same sweep's own calib ratio *before*
-  // reducing across sweeps, instead of reducing raw metrics and calib
-  // samples separately and dividing the two medians afterward -- the two
-  // reductions are only equivalent when contention is flat across the run,
-  // which the CI recurrence this fixes showed is not a safe assumption.
+  // Per-metric normalization (see per-metric calib brackets above): divide
+  // each sweep's own metric by that same metric's own bracketing calib
+  // ratio *before* reducing across sweeps, instead of sharing one ratio
+  // across all three metrics in a sweep -- the two are only equivalent when
+  // contention is uniform across a whole sweep's measurement window, which
+  // the CI recurrence this fixes showed is not a safe assumption.
   const ratchetSweeps = sweeps.map((s, i) => ({
-    panZoomFrameMsP95: s.panZoomFrameMsP95 / sweepCalibRatios[i],
-    indicatorAddMs: s.indicatorAddMs / sweepCalibRatios[i],
-    tickUpdateMsP95: s.tickUpdateMsP95 / sweepCalibRatios[i],
+    panZoomFrameMsP95: s.panZoomFrameMsP95 / panZoomCalibRatios[i],
+    indicatorAddMs: s.indicatorAddMs / indicatorAddCalibRatios[i],
+    tickUpdateMsP95: s.tickUpdateMsP95 / tickUpdateCalibRatios[i],
   }));
   const ratchetCurrent = {
     panZoomFrameMsP95: percentile(ratchetSweeps.map((s) => s.panZoomFrameMsP95), 50),
@@ -345,8 +345,10 @@ async function main() {
     tickUpdateMsP95: percentile(ratchetSweeps.map((s) => s.tickUpdateMsP95), 50),
   };
   console.error(
-    `[density-bench] per-sweep calib ratios: ${JSON.stringify(sweepCalibRatios.map((r) => Math.round(r * 1000) / 1000))}; ` +
-      `ratchet current (per-sweep normalized, median across sweeps): ${JSON.stringify(ratchetCurrent)}`,
+    `[density-bench] per-metric calib ratios: panZoom=${JSON.stringify(panZoomCalibRatios.map((r) => Math.round(r * 1000) / 1000))} ` +
+      `indicatorAdd=${JSON.stringify(indicatorAddCalibRatios.map((r) => Math.round(r * 1000) / 1000))} ` +
+      `tickUpdate=${JSON.stringify(tickUpdateCalibRatios.map((r) => Math.round(r * 1000) / 1000))}; ` +
+      `ratchet current (per-metric normalized, median across sweeps): ${JSON.stringify(ratchetCurrent)}`,
   );
 
   const baselineMeta = { candleCount: CANDLE_COUNT, indicatorInstanceCount: INDICATOR_INSTANCE_COUNT };
