@@ -168,6 +168,23 @@ export const catalogKo = {
         linkOnly: "링크만",
       },
     },
+    // task-6384(RD-18): CoverageFreshnessPanel.tsx — 커버리지·신선도 대시보드
+    // 패널 + 알림(수집 지연·소스 장애).
+    coverageFreshness: {
+      title: "커버리지·신선도",
+      empty: "표시할 소스가 없습니다.",
+      alert: {
+        sourceDown: "소스 장애 {{count}}건 — 수집이 실패하고 있습니다.",
+        ingestDelayed: "수집 지연 {{count}}건 — 최근 적재 시각이 임계값을 초과했습니다.",
+      },
+      badge: {
+        ok: "정상",
+        degraded: "저하",
+        down: "장애",
+        delayed: "지연",
+        unknown: "판정 불가",
+      },
+    },
   },
   // task-2696(UX-12): WhatIfPanel.tsx(가상 주문 영향 미리보기)·RebalancePage.tsx
   // (목표 비중 → 리밸런싱 계획) — screener.*와 동일하게 문구를 전부 t(key)로 조회한다.

@@ -172,6 +172,21 @@ export const catalogEn = {
         linkOnly: "Link only",
       },
     },
+    coverageFreshness: {
+      title: "Coverage & freshness",
+      empty: "No sources to display.",
+      alert: {
+        sourceDown: "{{count}} source(s) down — ingestion is failing.",
+        ingestDelayed: "{{count}} source(s) delayed — last ingest exceeded the threshold.",
+      },
+      badge: {
+        ok: "OK",
+        degraded: "Degraded",
+        down: "Down",
+        delayed: "Delayed",
+        unknown: "Unknown",
+      },
+    },
   },
   whatif: {
     order: {
