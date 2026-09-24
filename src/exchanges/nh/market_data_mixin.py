@@ -128,22 +128,24 @@ class NHMarketDataMixin:
     async def get_ohlcv(
         self: NHHTTPClient, symbol: str, timeframe: str, limit: int = 100
     ) -> list[Candle]:
-        """주식 일별 OHLCV 데이터 조회 — POST /krstock/quote/v1/currentDaily.
+        """Daily OHLCV lookup — POST /krstock/quote/v1/currentDaily.
 
-        Task-6695(BR-17): 공식 openapi.json에서 요청/응답 스키마 확인 완료.
-        - 요청: Input_0.iem_cd(종목코드), market_cd("KRX"), view_main_yn("Y"),
-          array_cnt(개수, 선택)
-        - 응답: Output_0[]로 배열(각 항목 = 1일 데이터)
-        - 필드: bsop_date(거래일), stck_oppr(시가), stck_hgpr(고가),
-          stck_lwpr(저가), stck_clpr(종가), acml_vol(누적거래량)
+        Task-6695(BR-17): request/response schema confirmed from the official
+        openapi.json.
+        - Request: Input_0.iem_cd(symbol code), market_cd("KRX"),
+          view_main_yn("Y"), array_cnt(count, optional)
+        - Response: an array under Output_0[] (each item = one day of data)
+        - Fields: bsop_date(trade date), stck_oppr(open), stck_hgpr(high),
+          stck_lwpr(low), stck_clpr(close), acml_vol(cumulative volume)
 
-        timeframe 파라미터는 adapter 계약에서 필요하나, NH API는 항상
-        일별("1d") 데이터만 제공한다. 다른 timeframe 요청 시 ValueError.
+        `timeframe` is required by the adapter contract, but the NH API only
+        ever serves daily ("1d") data. Any other timeframe raises ValueError.
         """
         if timeframe != "1d":
             raise ValueError(
-                f"NHAdapter.get_ohlcv: 일별(1d) 데이터만 지원. "
-                f"요청: {timeframe}. 다른 timeframe은 후속 리프 또는 다른 API 필요."
+                f"NHAdapter.get_ohlcv: only daily (1d) data is supported. "
+                f"Requested: {timeframe}. Other timeframes need a follow-up "
+                f"leaf or a different API."
             )
 
         raw = await self._request(
@@ -159,7 +161,7 @@ class NHMarketDataMixin:
         try:
             candles: list[Candle] = []
             for item in raw.get("Output_0", []):
-                # bsop_date format: "YYYYMMDD" (예: "20260924")
+                # bsop_date format: "YYYYMMDD" (e.g. "20260924")
                 date_str = item["bsop_date"]
                 # Parse as YYYYMMDD and create midnight UTC timestamp
                 year = int(date_str[:4])
@@ -183,8 +185,9 @@ class NHMarketDataMixin:
             return candles
         except (KeyError, ValueError) as exc:
             raise FatalExchangeError(
-                f"NH currentDaily 응답 파싱 오류(공식 openapi.json 기준 필수 필드: "
-                f"bsop_date, stck_oppr, stck_hgpr, stck_lwpr, stck_clpr, acml_vol): {exc}"
+                f"NH currentDaily response parse error (required fields per "
+                f"official openapi.json: bsop_date, stck_oppr, stck_hgpr, "
+                f"stck_lwpr, stck_clpr, acml_vol): {exc}"
             ) from exc
 
     async def subscribe_ticker_stream(
