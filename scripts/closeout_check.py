@@ -10,9 +10,11 @@ ADR-2026-09-04-D의 T3 종료 기준 1~10, ADR-2026-09-09-B로 추가된 11항
 `check_release_gate.py`·`check_audit_regressions.py`와 같은 방식으로
 DB·네트워크 접근이 없어 CI worktree에서도 그대로 돈다. "최근 CI 통과"·
 "Guard veto 0" 같이 저장소 밖 상태에 의존하는 항목은 이 스크립트 혼자서는
-완전히 판정할 수 없다 — `--ci-report`/`--guard-report`로 pm/ 쪽 JSON 리포트
-경로를 넘기면 그 값을 쓰고, 안 넘기면 "미검증(외부 리포트 미지정)"으로
-FAIL 처리한다(하나라도 적색이면 종결 불가라는 ADR-D 원칙 — 모른다=통과 아님).
+완전히 판정할 수 없다 — `--ci-report`(`pm/local_ci.py`가 쓰는
+`pm/ci/latest.json`, top-level `"ok": bool`)/`--guard-report`
+(`meta/guards/run_guards.py --json out.json`이 쓰는 `"vetoed": bool`) 경로를
+넘기면 그 값을 쓰고, 안 넘기면 "미검증(외부 리포트 미지정)"으로 FAIL
+처리한다(하나라도 적색이면 종결 불가라는 ADR-D 원칙 — 모른다=통과 아님).
 
 11번(하드닝 H-1~H-13)·12번(HEAD Actions 녹색)·마크다운 렌더링은
 `scripts/closeout/` 패키지로 분할됐다(task-6475, ADR-2026-09-10-C §7 LOC
@@ -367,9 +369,17 @@ def check_09_chart(repo_root: Path) -> CheckResult:
 def check_10_ops(
     repo_root: Path, *, ci_report: Path | None, guard_report: Path | None
 ) -> CheckResult:
-    """기준10 — 로컬 CI 녹색 + Guard veto 0 + INVARIANTS 위반 0 + RED_TEAM P0 미해결 0."""
-    ci_ok, ci_note = _load_bool_report(ci_report, "passed")
-    guard_ok, guard_note = _load_bool_report(guard_report, "veto_count", expect_zero=True)
+    """기준10 — 로컬 CI 녹색 + Guard veto 0 + INVARIANTS 위반 0 + RED_TEAM P0 미해결 0.
+
+    ci_report 키(`"ok"`)·guard_report 키(`"vetoed"`)는 실제 산출 스크립트의
+    스키마를 그대로 따른다 — `pm/local_ci.py`(top-level `"ok": bool`)와
+    `meta/guards/run_guards.py --json out.json`(`Report.to_json()`의
+    `"vetoed": bool`). 이전에는 `{"passed": bool}`/`{"veto_count": int}`를
+    기대했는데, 두 산출 스크립트 어디에도 그런 키를 쓰는 곳이 없어 리포트를
+    넘겨도 항상 FAIL로 오판정했다(task-6497 근본 원인).
+    """
+    ci_ok, ci_note = _load_bool_report(ci_report, "ok")
+    guard_ok, guard_note = _load_bool_report(guard_report, "vetoed", invert=True)
     invariants_ok, invariants_note = _check_invariants(repo_root)
     red_team_ok, red_team_note = _check_red_team_open(repo_root)
 
@@ -380,8 +390,14 @@ def check_10_ops(
 
 
 def _load_bool_report(
-    path: Path | None, key: str, *, expect_zero: bool = False
+    path: Path | None, key: str, *, expect_zero: bool = False, invert: bool = False
 ) -> tuple[bool, str]:
+    """`key`가 가리키는 값을 읽어 PASS 여부를 판정한다.
+
+    `expect_zero`: 값이 정수 0이어야 PASS(레거시 카운터 스키마용).
+    `invert`: 값이 falsy여야 PASS(예: `"vetoed": false` — veto 없음이 통과).
+    기본은 값이 truthy여야 PASS.
+    """
     if path is None:
         return False, UNVERIFIED
     if not path.is_file():
@@ -394,6 +410,9 @@ def _load_bool_report(
     if expect_zero:
         ok = isinstance(value, int) and value == 0
         return ok, f"OK {key}=0" if ok else f"{key}={value!r} (0이어야 함): {path}"
+    if invert:
+        ok = not bool(value)
+        return ok, f"OK {key}=False" if ok else f"{key}={value!r} (False여야 함): {path}"
     ok = bool(value)
     return ok, f"OK {key}=True" if ok else f"{key}={value!r}: {path}"
 
@@ -470,9 +489,17 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="MVP-1 종료조건 기계 검사(ADR-2026-09-09-D)")
     parser.add_argument("--repo-root", type=Path, default=ROOT)
     parser.add_argument(
-        "--ci-report", type=Path, default=None, help='pm/ci/latest.json류 {"passed": bool}'
+        "--ci-report",
+        type=Path,
+        default=None,
+        help='pm/local_ci.py 산출 pm/ci/latest.json {"ok": bool}',
     )
-    parser.add_argument("--guard-report", type=Path, default=None, help='{"veto_count": int}')
+    parser.add_argument(
+        "--guard-report",
+        type=Path,
+        default=None,
+        help='meta/guards/run_guards.py --json 산출 {"vetoed": bool}',
+    )
     parser.add_argument(
         "--write", type=Path, default=None, help="전부 PASS일 때만 이 경로에 문서를 쓴다"
     )
