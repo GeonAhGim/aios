@@ -9,7 +9,6 @@
 from __future__ import annotations
 
 import json
-import os
 from pathlib import Path
 
 import pytest
@@ -35,20 +34,12 @@ def test_measure_raises_without_dsn(monkeypatch: pytest.MonkeyPatch) -> None:
         bench.run(iterations=1)
 
 
-@pytest.mark.skipif(
-    not (os.environ.get("TEST_DATABASE_URL") or os.environ.get("DATABASE_URL")),
-    reason="TEST_DATABASE_URL 필요",
-)
 def test_run_against_real_db_produces_one_sample_per_iteration() -> None:
     samples = bench.run(iterations=4)
     assert len(samples) == 4
     assert all(isinstance(s, float) and s >= 0 for s in samples)
 
 
-@pytest.mark.skipif(
-    not (os.environ.get("TEST_DATABASE_URL") or os.environ.get("DATABASE_URL")),
-    reason="TEST_DATABASE_URL 필요",
-)
 def test_main_writes_schema_complete_passing_json(tmp_path: Path) -> None:
     out = tmp_path / "instrument_lookup_bench.json"
     rc = bench.main(["--out", str(out), "--iterations", "5"])
@@ -73,10 +64,6 @@ def test_main_writes_schema_complete_passing_json(tmp_path: Path) -> None:
     assert data["passed"] is True  # 로컬 실DB는 200ms 예산을 크게 밑돈다
 
 
-@pytest.mark.skipif(
-    not (os.environ.get("TEST_DATABASE_URL") or os.environ.get("DATABASE_URL")),
-    reason="TEST_DATABASE_URL 필요",
-)
 def test_main_records_passed_false_when_budget_is_exceeded(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
