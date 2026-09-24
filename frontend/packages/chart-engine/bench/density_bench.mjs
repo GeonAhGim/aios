@@ -290,6 +290,20 @@ function runIndicatorAdd(catalog, candles) {
  * batches, each bracketed by its own calib pair -- same blind-window fix as
  * `measurePanZoomFrameMs`, sized down for indicatorAddMs's fewer, larger
  * samples.
+ *
+ * task-6777 (esc-ci-frontend.json recurrence of task-6752): each `fresh`
+ * instance plus its 100k-candle update loop leaves substantial garbage
+ * behind, but the only `forceGc()` call bracketing this function ran once,
+ * before the *whole* 9-run measurement (main()'s per-sweep loop) -- nothing
+ * drained the backlog between individual runs within a group. V8 could then
+ * schedule a GC pause inside any run after the first, inflating that run's
+ * raw time with zero matching rise in the calib probe (which brackets whole
+ * groups, not individual runs) -- reproduced against the CI failure log: the
+ * reported indicatorAddMs regression (11.671ms vs an 8.942ms baseline, +30%)
+ * carried a calib ratio of exactly 1.000, i.e. the normalizer saw no
+ * contention to correct for. Forcing a collection before each individual run
+ * (not just each group) closes that per-run blind window the same way
+ * task-6670 closed it at the per-metric level.
  */
 function measureIndicatorAddMs(catalog, candles) {
   const normalizedRuns = [];
@@ -297,7 +311,10 @@ function measureIndicatorAddMs(catalog, candles) {
   for (let start = 0; start < INDICATOR_ADD_RUNS; start += INDICATOR_ADD_CALIB_GROUP_SIZE) {
     const groupCount = Math.min(INDICATOR_ADD_CALIB_GROUP_SIZE, INDICATOR_ADD_RUNS - start);
     const groupTimes = [];
-    for (let i = 0; i < groupCount; i++) groupTimes.push(runIndicatorAdd(catalog, candles));
+    for (let i = 0; i < groupCount; i++) {
+      forceGc();
+      groupTimes.push(runIndicatorAdd(catalog, candles));
+    }
     const calibAfter = measureCalibMs();
     const ratio = Math.max(1, Math.max(calibSamples[calibSamples.length - 1], calibAfter) / CALIB_BASE_MS);
     calibSamples.push(calibAfter);

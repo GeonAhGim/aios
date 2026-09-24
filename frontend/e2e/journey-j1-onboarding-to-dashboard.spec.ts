@@ -40,8 +40,8 @@ async function mockOnboardingChain(page: Page): Promise<OnboardingState> {
       route,
       201,
       envelope({
-        access_token: "e2e-fixture-token",
-        refresh_token: "e2e-fixture-refresh",
+        access_token: "FAKE.E2E.ACCESS",
+        refresh_token: "FAKE.E2E.REFRESH",
         token_type: "bearer",
         expires_in: 3600,
         session_id: "e2e-session",
@@ -86,8 +86,8 @@ async function mockOnboardingChain(page: Page): Promise<OnboardingState> {
       route,
       200,
       envelope({
-        secret: "JBSWY3DPEHPK3PXP",
-        provisioning_uri: "otpauth://totp/AIOS:e2e-j1@example.com?secret=JBSWY3DPEHPK3PXP&issuer=AIOS",
+        secret: "FAKE.TOTP.SECRET",
+        provisioning_uri: "otpauth://totp/AIOS:e2e-j1@example.com?secret=FAKE.TOTP.SECRET&issuer=AIOS",
       }),
     );
   });

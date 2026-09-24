@@ -62,6 +62,7 @@ from uuid import UUID
 
 import asyncpg
 
+from scripts.replay_verify_db_pressure import await_db_capacity
 from src.core.eventstore import replay
 from src.core.eventstore.projections import orders as orders_projection
 from src.foundation.ledger.adapters.postgres_journal_repository import PostgresJournalRepository
@@ -427,7 +428,14 @@ async def _close_pool_ignoring_reset(pool: asyncpg.Pool) -> None:
 
 
 async def _run(*, hours: int, as_of: datetime) -> int:
-    pool = await _create_pool_with_retry(_asyncpg_dsn())
+    # task-6754 (esc-ci-replay_verify.json, ND-17 regeneration of task-6727): every
+    # recurrence of this escalation carries `"mode": "full"` -- i.e. it comes through
+    # pm/ci_recheck.py's direct subprocess call, which (unlike pm/local_ci.py's
+    # task-6743 pre-check) has no connection-pressure gate at all. See
+    # scripts/replay_verify_db_pressure.py's module docstring for the full trace.
+    dsn = _asyncpg_dsn()
+    await await_db_capacity(dsn, sleep=asyncio.sleep)
+    pool = await _create_pool_with_retry(dsn)
     try:
         report = await _verify_with_retry(pool, as_of=as_of, hours=hours)
     finally:
