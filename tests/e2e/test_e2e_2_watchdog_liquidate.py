@@ -57,6 +57,7 @@ from src.watchdog_process import (
 )
 from tests.integration.conftest import create_test_user
 from tests.integration.fake_exchange_adapter import FakeExchangeAdapter
+from tests.support.db import create_pool_with_retry
 
 
 def _asyncpg_dsn() -> str:
@@ -79,7 +80,7 @@ async def _clear_stale_liquidation_requests():
     스위트가 남긴 REQUESTED 행이 있으면 이 모듈의 워커 호출이 그걸 훔쳐간다
     (test_liquidation_worker.py / test_watchdog_market_wide_liquidation_e2e.py와
     동일 관례)."""
-    pool = await asyncpg.create_pool(_asyncpg_dsn(), min_size=1, max_size=2)
+    pool = await create_pool_with_retry(_asyncpg_dsn(), min_size=1, max_size=2)
     async with pool.acquire() as conn:
         await conn.execute(
             "UPDATE liquidation_request SET state='ABORTED', completed_at=now() "
