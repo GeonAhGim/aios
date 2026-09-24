@@ -25,6 +25,7 @@ test_bitget_ws_messages.py`, `tests/integration/test_bitget_websocket.py`)가
 `_send_periodic_pings`)은 무수정으로 계속 통과하도록 이 모듈에서 그대로
 재-import해 노출한다(재-import는 동일 함수 객체를 가리키므로 동작 변화 없음).
 """
+
 from __future__ import annotations
 
 import base64
@@ -144,9 +145,7 @@ class BitgetMarketDataMixin:
         }
         if end_time is not None:
             params["endTime"] = end_time
-        raw = await self._request(
-            "GET", "/api/v2/spot/market/history-candles", params=params
-        )
+        raw = await self._request("GET", "/api/v2/spot/market/history-candles", params=params)
         return parse_candles(raw["data"], symbol, timeframe)
 
     async def get_symbol_info(
@@ -158,9 +157,7 @@ class BitgetMarketDataMixin:
         params: dict[str, Any] = {}
         if symbol is not None:
             params["symbol"] = _to_bitget_symbol(symbol)
-        raw = await self._request(
-            "GET", "/api/v2/spot/public/symbols", params=params or None
-        )
+        raw = await self._request("GET", "/api/v2/spot/public/symbols", params=params or None)
         result = []
         for item in raw["data"]:
             price_precision = int(item.get("pricePrecision", "0"))
@@ -210,3 +207,33 @@ class BitgetMarketDataMixin:
             )
             for item in raw["data"]
         ]
+
+    async def get_auction(self: SignedRequestClient, symbol: str) -> dict[str, Any]:
+        """02b 스펙 §3.1(P2) — 현물 콜옥션(call auction) 정보 조회."""
+        raw = await self._request(
+            "GET",
+            "/api/v2/spot/market/auction",
+            params={"symbol": _to_bitget_symbol(symbol)},
+        )
+        return dict(raw["data"])
+
+    async def get_merge_depth(
+        self: SignedRequestClient, symbol: str, limit: int = 20
+    ) -> dict[str, Any]:
+        """02b 스펙 §3.1(P2) — 병합 호가창(merge-depth) 조회."""
+        raw = await self._request(
+            "GET",
+            "/api/v2/spot/market/merge-depth",
+            params={"symbol": _to_bitget_symbol(symbol), "limit": str(limit)},
+        )
+        return dict(raw["data"])
+
+    async def get_vip_fee_rate(self: SignedRequestClient) -> dict[str, Any]:
+        """02b 스펙 §3.1(P2) — VIP 수수료율 조회."""
+        raw = await self._request("GET", "/api/v2/spot/market/vip-fee-rate")
+        return dict(raw["data"])
+
+    async def get_coins(self: SignedRequestClient) -> list[dict[str, Any]]:
+        """02b 스펙 §3.1(P2) — 현물 지원 코인 목록 조회."""
+        raw = await self._request("GET", "/api/v2/spot/public/coins")
+        return list(raw["data"])
