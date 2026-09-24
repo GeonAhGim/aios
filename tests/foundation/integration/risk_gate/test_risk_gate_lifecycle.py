@@ -761,7 +761,8 @@ async def test_migration_round_trip_restores_gate_kinds_and_new_columns():
         assert await _column_exists(migration_pool, "safety_control", "idempotency_digest")
         assert await _column_exists(migration_pool, "strategy_executions", "paused_by_control_id")
 
-        await purge_position_snapshots(migration_pool)  # deep downgrade: see tests/support/deep_downgrade.py
+        # deep downgrade: see tests/support/deep_downgrade.py
+        await purge_position_snapshots(migration_pool)
         _run_alembic("downgrade", "c7e6a3b2d4f5", database_url=migration_db_url)
 
         after_downgrade = await _gate_kind_check_def(migration_pool)
@@ -770,7 +771,9 @@ async def test_migration_round_trip_restores_gate_kinds_and_new_columns():
         assert "RECOVERY" not in after_downgrade
         assert not await _column_exists(migration_pool, "risk_evaluation", "trace_id")
         assert not await _column_exists(migration_pool, "safety_control", "idempotency_digest")
-        assert not await _column_exists(migration_pool, "strategy_executions", "paused_by_control_id")
+        assert not await _column_exists(
+            migration_pool, "strategy_executions", "paused_by_control_id"
+        )
 
         _run_alembic("upgrade", "head", database_url=migration_db_url)
 
