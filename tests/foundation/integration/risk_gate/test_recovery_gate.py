@@ -624,7 +624,7 @@ async def test_router_recovery_denied_end_to_end_returns_403_rsk007_envelope(
         grant = await break_glass.request_grant(
             conn,
             requester_id=actor_id,
-            requester_auth_level="MFA_VERIFIED",
+            requester_mfa_verified_at=datetime.now(timezone.utc),
             scope="kill_switch_override",
             reason="test_recovery_gate",
         )
@@ -632,7 +632,7 @@ async def test_router_recovery_denied_end_to_end_returns_403_rsk007_envelope(
             conn,
             grant_id=grant.id,
             approver_id=approver_id,
-            approver_auth_level="MFA_VERIFIED",
+            approver_mfa_verified_at=datetime.now(timezone.utc),
             check_segregation_of_duty=assert_actor_not_counterparty,
         )
 

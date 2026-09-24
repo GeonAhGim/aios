@@ -16,11 +16,14 @@ ADR-2026-09-09-C D2 증빙:
   (HTTP 경로로 들어와도 `require_break_glass`의 `conn.transaction()`이 실제
   DB 오류를 롤백함을 증명 -- grant가 반쯤 소비된 상태로 남지 않는다).
 - 성능 단언 1: `test_audit_log_route_round_trip_latency_budget`.
-- 게이트 적색 재현 1:
-  `test_unfixed_admin_route_still_allows_non_mfa_admin_showing_the_original_gap`
-  (이 leaf가 고치지 않은 15+개 `get_current_admin` 전용 라우트 중 하나가
-  여전히 MFA 없이 통과됨을 보여, QA가 원래 발견한 결함이 이 3개 라우트
-  밖에서는 아직 열려 있다는 CTO 결정의 경계를 그대로 증명한다).
+- 게이트 적색 재현 2건:
+  1. `test_unfixed_admin_route_still_allows_non_mfa_admin_showing_the_original_gap`
+     (이 leaf가 고치지 않은 15+개 `get_current_admin` 전용 라우트 중 하나가
+     여전히 MFA 없이 통과됨을 보여, QA가 원래 발견한 결함이 이 3개 라우트
+     밖에서는 아직 열려 있다는 CTO 결정의 경계를 그대로 증명한다).
+  2. `test_request_grant_rejects_stale_mfa_step_up_through_http`(task-6482,
+     task-3795 재검 반영) -- `auth_level` 클레임만 봤다면 통과했을 16분 전
+     TOTP 세션이 실제 HTTP 경로에서 403으로 막힌다.
 """
 
 from __future__ import annotations
@@ -155,6 +158,33 @@ async def test_request_and_approve_grant_http_round_trip(client, pool):
         client, requester_headers, approver_headers, scope="tenant_read"
     )
     assert grant_id
+
+
+async def test_request_grant_rejects_stale_mfa_step_up_through_http(client, pool):
+    """게이트 적색 재현(MFA-bypass 시나리오, task-6482 DoD) -- task-3795가 잡은
+    결함을 실제 HTTP 경로에서 재현한다. `auth_level="MFA_VERIFIED"` 클레임만
+    보는 이전 게이트였다면, TOTP를 16분 전에 통과해 JWT는 여전히
+    "MFA_VERIFIED"를 들고 있는 이 admin의 요청이 그대로 통과했을 것이다 --
+    `mfa_verified_at`을 직접 과거로 되돌려(실제 refresh 왕복을 여러 번 거치는
+    대신, 그 결과 상태를 직접 재현) 신선도 재검사가 실제로 403을 낸다는 것을
+    증명한다."""
+    headers, user_id = await _register_mfa_admin(client, pool)
+
+    async with pool.acquire() as conn:
+        await conn.execute(
+            "UPDATE users SET mfa_verified_at = now() - interval '16 minutes' "
+            "WHERE user_id = $1",
+            uuid.UUID(user_id),
+        )
+
+    response = await client.post(
+        "/admin/break-glass/grants",
+        json={"scope": "tenant_read", "reason": "x", "ttl_minutes": 30},
+        headers=headers,
+    )
+
+    assert response.status_code == 403
+    assert response.json()["error_code"] == "AUTH_MFA_REQUIRED"
 
 
 async def test_approve_grant_self_approval_rejected_through_http(client, pool):
