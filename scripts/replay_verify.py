@@ -54,6 +54,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import os
+import random
 import sys
 from datetime import datetime, timedelta, timezone
 from typing import Any, cast
@@ -146,6 +147,40 @@ def _retry_delay(attempt: int) -> float:
     return min(delay, _POOL_CONNECT_RETRY_MAX_DELAY)
 
 
+# task-6627: esc-ci-replay_verify.json recurred a 6th time *after* task-6522's
+# proactor->selector fix -- the traceback moved from `finish_recv` to
+# `selector_events.py`'s `_read_ready__data_received` (still `WinError 10054`
+# / `ConnectionDoesNotExistError`), i.e. the reset itself is not an
+# IOCP-specific artifact, and the postgres server log shows zero
+# connection/FATAL entries for the failing window -- the reset happens below
+# Postgres, on the shared machine's loopback TCP stack. task-6256/6267 already
+# documented that every worktree on this machine hits the same local Postgres
+# concurrently (`setup_test_db.py --reset/--drop`'s `pg_terminate_backend` /
+# `DROP DATABASE` / `CREATE DATABASE`); `_retry_delay`'s schedule is
+# deterministic, so every worktree's retry loop (replay_verify's own two call
+# sites, plus setup_test_db's advisory-lock retries) computes the *same*
+# backoff for the *same* attempt number and therefore retries in lockstep --
+# a burst of resets desynchronizes each process's attempt counter only
+# briefly before they re-converge on the same wall-clock instants, repeatedly
+# re-creating the exact contention spike they are backing off from (the
+# "thundering herd" that AWS's Exponential-Backoff-and-Jitter writeup
+# describes). Retrying with the same deterministic schedule for an 8th time
+# is exactly the "widen the budget again" move DECISION_GUIDELINES B-2 rules
+# out; jittering *when within the existing cap* each process actually sleeps
+# spreads concurrent worktrees' retries across the window instead of pinning
+# them to the same instants, without raising `_POOL_CONNECT_ATTEMPTS` or
+# `_POOL_CONNECT_RETRY_MAX_DELAY`.
+async def _sleep_before_retry(attempt: int) -> None:
+    """Full-jitter sleep before the next retry: uniform over
+    `[0, _retry_delay(attempt)]` rather than the deterministic delay itself,
+    so concurrent processes computing the same schedule do not retry in
+    lockstep. `_retry_delay` itself stays a pure, deterministically-tested
+    function (its cap and growth are still exactly what
+    `test_retry_delay_grows_exponentially_and_caps` asserts) -- only the
+    actual `asyncio.sleep` call site is randomized."""
+    await asyncio.sleep(random.uniform(0, _retry_delay(attempt)))  # noqa: S311 -- retry jitter, not crypto
+
+
 def _asyncpg_dsn() -> str:
     url = os.environ["DATABASE_URL"]
     return url.replace("postgresql+asyncpg://", "postgresql://")
@@ -162,7 +197,7 @@ async def _create_pool_with_retry(dsn: str) -> asyncpg.Pool:
         except _RETRYABLE_CONNECT_ERRORS:
             if attempt + 1 >= _POOL_CONNECT_ATTEMPTS:
                 raise
-            await asyncio.sleep(_retry_delay(attempt))
+            await _sleep_before_retry(attempt)
     raise AssertionError("unreachable -- loop always returns or raises")
 
 
@@ -339,7 +374,7 @@ async def _verify_with_retry(
         except _RETRYABLE_CONNECT_ERRORS:
             if attempt + 1 >= _POOL_CONNECT_ATTEMPTS:
                 raise
-            await asyncio.sleep(_retry_delay(attempt))
+            await _sleep_before_retry(attempt)
     raise AssertionError("unreachable -- loop always returns or raises")
 
 

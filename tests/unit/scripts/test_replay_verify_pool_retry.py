@@ -393,5 +393,42 @@ async def test_run_propagates_real_failure_even_if_close_also_resets(monkeypatch
         await replay_verify._run(hours=24, as_of=datetime.now(timezone.utc))
 
 
+async def test_sleep_before_retry_jitters_within_retry_delay_cap(monkeypatch) -> None:
+    """task-6627: `_sleep_before_retry` must sleep `random.uniform(0, _retry_delay(attempt))`,
+    not the deterministic `_retry_delay(attempt)` itself -- concurrent worktrees computing the
+    same deterministic schedule would otherwise retry in lockstep and repeatedly re-create the
+    contention burst they are backing off from (the thundering-herd shape this decorrelates)."""
+    captured: list[float] = []
+
+    async def _capture_sleep(delay: float) -> None:
+        captured.append(delay)
+
+    monkeypatch.setattr(replay_verify.asyncio, "sleep", _capture_sleep)
+    monkeypatch.setattr(replay_verify.random, "uniform", lambda lo, hi: lo + (hi - lo) * 0.25)
+
+    await replay_verify._sleep_before_retry(3)
+
+    assert captured == [replay_verify._retry_delay(3) * 0.25]
+
+
+async def test_sleep_before_retry_never_exceeds_retry_delay_cap(monkeypatch) -> None:
+    """Negative test: across many draws, the jittered sleep must never exceed (or go below zero
+    of) the deterministic `_retry_delay(attempt)` it is jittering under -- a broken jitter
+    sampling outside `[0, _retry_delay(attempt)]` would silently widen the retry budget past
+    what `_POOL_CONNECT_RETRY_MAX_DELAY` caps, exactly what DECISION_GUIDELINES B-2 forbids."""
+    captured: list[float] = []
+
+    async def _capture_sleep(delay: float) -> None:
+        captured.append(delay)
+
+    monkeypatch.setattr(replay_verify.asyncio, "sleep", _capture_sleep)
+
+    cap = replay_verify._retry_delay(5)
+    for _ in range(200):
+        await replay_verify._sleep_before_retry(5)
+
+    assert all(0.0 <= delay <= cap for delay in captured)
+
+
 async def _no_sleep(delay: float) -> None:
     return None
