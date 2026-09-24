@@ -9,6 +9,7 @@ subprocess-level proof `test_replay_verify.py::
 test_replay_detects_ledger_balance_tampered_outside_the_event_trail` uses
 for the checker itself.
 """
+
 from __future__ import annotations
 
 import time
@@ -234,6 +235,54 @@ async def test_resync_raises_for_unknown_account(pool):
     async with pool.acquire() as conn, conn.transaction():
         with pytest.raises(UnknownAccountError):
             await resync_account_balance(conn, unknown_code, journal=journal, balances=balances)
+
+
+async def test_resync_raises_for_account_missing_its_balance_row(pool):
+    """Negative: `account_code` is a real `ledger_account` row (so it has
+    journal history to fold) but its `ledger_balance` row was removed --
+    distinct from `test_resync_raises_for_unknown_account` (which never had
+    an account at all). `BalanceRepository.get_for_update` joins
+    `ledger_account`/`ledger_balance`, so an orphaned account is
+    indistinguishable from an unknown one at that layer and must be
+    rejected the same way, not silently treated as zero-balance."""
+    journal = PostgresJournalRepository(pool)
+    balances = PostgresBalanceRepository(pool)
+    debit_code = await _seed_ledger_entry(pool)
+
+    # Deleting the only `ledger_balance` row for a real, journal-backed
+    # account is itself a permanent write against the shared, never-reset
+    # TEST_DATABASE_URL (same caveat `_bump_balance_outside_event_trail`
+    # carries) -- capture it and restore in `finally` so this test cannot
+    # wedge a later `replay_verify` run the way the tampered-balance test
+    # already guards against.
+    async with pool.acquire() as conn:
+        saved = await conn.fetchrow(
+            "DELETE FROM ledger_balance WHERE account_id = "
+            "(SELECT account_id FROM ledger_account WHERE account_code = $1) "
+            "RETURNING account_id, balance, held, pending_payout, allow_negative,"
+            " last_entry_seq, updated_at",
+            debit_code,
+        )
+    assert saved is not None
+    try:
+        async with pool.acquire() as conn, conn.transaction():
+            with pytest.raises(UnknownAccountError):
+                await resync_account_balance(conn, debit_code, journal=journal, balances=balances)
+    finally:
+        async with pool.acquire() as conn:
+            await conn.execute(
+                "INSERT INTO ledger_balance ("
+                " account_id, balance, held, pending_payout, allow_negative,"
+                " last_entry_seq, updated_at"
+                ") VALUES ($1, $2, $3, $4, $5, $6, $7)",
+                saved["account_id"],
+                saved["balance"],
+                saved["held"],
+                saved["pending_payout"],
+                saved["allow_negative"],
+                saved["last_entry_seq"],
+                saved["updated_at"],
+            )
 
 
 async def test_resync_completes_within_latency_budget_for_one_account_with_many_entries(pool):
