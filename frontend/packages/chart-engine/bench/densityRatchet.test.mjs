@@ -13,6 +13,23 @@ import {
   writeBaseline,
 } from "./densityRatchet.mjs";
 
+// task-6414 (esc-ci-frontend.json): reproduces the actual CI red. A quiet run
+// dipped 0.083ms (under 3%) below baseline 3.307 with no code change at all;
+// the pre-fix `improved` check (any normalized < base, no floor/margin)
+// persisted that noise as the new baseline (3.224), after which every
+// following normal-noise run (~3.87-3.91ms) failed as a false regression.
+describe("checkRatchet — improvement requires a real margin, not noise (task-6414)", () => {
+  it("does not ratchet the baseline down on a sub-margin, sub-floor dip", () => {
+    const { improved } = checkRatchet({ panZoomFrameMsP95: 3.224 }, { panZoomFrameMsP95: 3.307 }, 1);
+    expect(improved).toEqual({});
+  });
+
+  it("still ratchets down once a dip clears both the floor and IMPROVEMENT_TOLERANCE", () => {
+    const { improved } = checkRatchet({ panZoomFrameMsP95: 2.5 }, { panZoomFrameMsP95: 3.307 }, 1);
+    expect(improved.panZoomFrameMsP95).toBe(2.5);
+  });
+});
+
 describe("checkRatchet", () => {
   it("flags a real regression at calibRatio=1 (idle reference host)", () => {
     const { failures, improved } = checkRatchet({ panZoomFrameMsP95: 10 }, { panZoomFrameMsP95: 6.6 }, 1);

@@ -39,6 +39,25 @@ export const REGRESSION_TOLERANCE_OVERRIDES = {
  */
 export const REGRESSION_FLOOR_MS = 0.05;
 
+/**
+ * task-6414 (esc-ci-frontend.json): `improved` previously fired on *any*
+ * normalized value below baseline, with no floor and no relative margin --
+ * asymmetric with the regression side, which requires clearing both
+ * `tolerance` and `REGRESSION_FLOOR_MS`. A ratchet that tightens on every
+ * sub-millisecond noise dip but only loosens past a real 20%+tolerance jump
+ * has no hysteresis: repeated CI runs walk the baseline down to whatever the
+ * single luckiest sweep-median happened to be, until ordinary measurement
+ * noise alone exceeds `REGRESSION_TOLERANCE` against that artificially tight
+ * floor. Observed directly: a baseline of 3.307ms got auto-tightened to
+ * 3.224ms by one quiet run (an 0.083ms dip, under 3% -- pure noise), after
+ * which every subsequent normal run (~3.87-3.91ms) failed as a "regression"
+ * with zero code change in between. Requiring the dip to clear the same
+ * relative tolerance used on the regression side (halved, since ratcheting
+ * down should be more conservative than flagging a failure) keeps the
+ * baseline from moving on noise smaller than the gate's own noise band.
+ */
+export const IMPROVEMENT_TOLERANCE = REGRESSION_TOLERANCE / 2;
+
 export function loadBaseline(path) {
   return existsSync(path) ? JSON.parse(readFileSync(path, "utf-8")) : null;
 }
@@ -51,8 +70,10 @@ export function writeBaseline(path, metrics, meta) {
 
 /**
  * >20% slower than baseline AND more than REGRESSION_FLOOR_MS slower in
- * absolute terms fails; faster than baseline is reported for the caller to
- * persist.
+ * absolute terms fails; more than IMPROVEMENT_TOLERANCE faster than baseline
+ * AND more than REGRESSION_FLOOR_MS faster in absolute terms is reported for
+ * the caller to persist (see IMPROVEMENT_TOLERANCE's docstring for why a
+ * noise-sized dip must not tighten the baseline).
  *
  * `calibRatio` (see `checkAbsoluteThresholds` below) brings `value` back to
  * the reference host's time scale before comparing: without it, a
@@ -70,6 +91,7 @@ export function checkRatchet(
   tolerance = REGRESSION_TOLERANCE,
   floorMs = REGRESSION_FLOOR_MS,
   toleranceOverrides = REGRESSION_TOLERANCE_OVERRIDES,
+  improvementTolerance = IMPROVEMENT_TOLERANCE,
 ) {
   const failures = [];
   const improved = {};
@@ -82,7 +104,7 @@ export function checkRatchet(
       failures.push(
         `${key}: ${value}ms (host-load normalized ${normalized.toFixed(3)}ms @ calib ratio ${calibRatio.toFixed(3)}) is >${effectiveTolerance * 100}% slower than baseline ${base}ms`,
       );
-    } else if (normalized < base) {
+    } else if (normalized < base * (1 - improvementTolerance) && base - normalized > floorMs) {
       improved[key] = normalized;
     }
   }
