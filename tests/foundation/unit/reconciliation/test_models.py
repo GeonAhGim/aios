@@ -8,6 +8,7 @@ import dataclasses
 import time
 from datetime import datetime, timezone
 from decimal import Decimal
+from typing import Any, cast
 from uuid import uuid4
 
 import pytest
@@ -24,61 +25,61 @@ from src.foundation.reconciliation.domain.models import (
 NOW = datetime(2026, 9, 24, tzinfo=timezone.utc)
 
 
-def _policy(**overrides: object) -> MaterialityPolicy:
-    fields = dict(absolute_tolerance=Decimal("0.01"), relative_tolerance_pct=Decimal("0.1"))
+def _policy(**overrides: Any) -> MaterialityPolicy:
+    fields: dict[str, Any] = {"absolute_tolerance": Decimal("0.01"), "relative_tolerance_pct": Decimal("0.1")}
     fields.update(overrides)
-    return MaterialityPolicy(**fields)  # type: ignore[arg-type]
+    return cast(MaterialityPolicy, MaterialityPolicy(**cast(Any, fields)))
 
 
-def _item(**overrides: object) -> ReconciliationItem:
-    fields = dict(
-        id=uuid4(),
-        run_id=uuid4(),
-        entity_type="USDT_BALANCE",
-        entity_key="acct-1",
-        internal_value=Decimal("100.00"),
-        provider_value=Decimal("100.00"),
-        classification=Classification.HEALTHY,
-        created_at=NOW,
-    )
+def _item(**overrides: Any) -> ReconciliationItem:
+    fields: dict[str, Any] = {
+        "id": uuid4(),
+        "run_id": uuid4(),
+        "entity_type": "USDT_BALANCE",
+        "entity_key": "acct-1",
+        "internal_value": Decimal("100.00"),
+        "provider_value": Decimal("100.00"),
+        "classification": Classification.HEALTHY,
+        "created_at": NOW,
+    }
     fields.update(overrides)
-    return ReconciliationItem(**fields)  # type: ignore[arg-type]
+    return cast(ReconciliationItem, ReconciliationItem(**cast(Any, fields)))
 
 
-def _run(**overrides: object) -> ReconciliationRun:
-    fields = dict(
-        id=uuid4(),
-        tenant_id=uuid4(),
-        target_type="ACCOUNT",
-        target_ref=uuid4(),
-        connection_id=uuid4(),
-        input_hash="hash",
-        state=RunState.COMPLETED,
-        rule_version="v1",
-        items=(),
-        created_at=NOW,
-    )
+def _run(**overrides: Any) -> ReconciliationRun:
+    fields: dict[str, Any] = {
+        "id": uuid4(),
+        "tenant_id": uuid4(),
+        "target_type": "ACCOUNT",
+        "target_ref": uuid4(),
+        "connection_id": uuid4(),
+        "input_hash": "hash",
+        "state": RunState.COMPLETED,
+        "rule_version": "v1",
+        "items": (),
+        "created_at": NOW,
+    }
     fields.update(overrides)
-    return ReconciliationRun(**fields)  # type: ignore[arg-type]
+    return cast(ReconciliationRun, ReconciliationRun(**cast(Any, fields)))
 
 
-def _state(**overrides: object) -> ReconciliationState:
-    fields = dict(
-        target_ref=uuid4(),
-        target_type="ACCOUNT",
-        tenant_id=uuid4(),
-        aggregate_status=Classification.HEALTHY,
-        last_healthy_at=NOW,
-        last_checked_at=NOW,
-        blocking_reason=None,
-        revision=1,
-        safety_control_id=None,
-        resolved_by=None,
-        resolution_reason=None,
-        resolved_at=None,
-    )
+def _state(**overrides: Any) -> ReconciliationState:
+    fields: dict[str, Any] = {
+        "target_ref": uuid4(),
+        "target_type": "ACCOUNT",
+        "tenant_id": uuid4(),
+        "aggregate_status": Classification.HEALTHY,
+        "last_healthy_at": NOW,
+        "last_checked_at": NOW,
+        "blocking_reason": None,
+        "revision": 1,
+        "safety_control_id": None,
+        "resolved_by": None,
+        "resolution_reason": None,
+        "resolved_at": None,
+    }
     fields.update(overrides)
-    return ReconciliationState(**fields)  # type: ignore[arg-type]
+    return cast(ReconciliationState, ReconciliationState(**cast(Any, fields)))
 
 
 # --- positive construction ---------------------------------------------------
@@ -135,25 +136,25 @@ def test_dataclasses_with_equal_fields_compare_equal() -> None:
 def test_materiality_policy_is_frozen_and_rejects_mutation() -> None:
     p = _policy()
     with pytest.raises(dataclasses.FrozenInstanceError):
-        p.absolute_tolerance = Decimal("1")  # type: ignore[misc]
+        setattr(p, "absolute_tolerance", Decimal("1"))  # noqa: B010
 
 
 def test_reconciliation_item_is_frozen_and_rejects_mutation() -> None:
     item = _item()
     with pytest.raises(dataclasses.FrozenInstanceError):
-        item.classification = Classification.MATERIAL_MISMATCH  # type: ignore[misc]
+        setattr(item, "classification", Classification.MATERIAL_MISMATCH)  # noqa: B010
 
 
 def test_reconciliation_run_is_frozen_and_rejects_mutation() -> None:
     run = _run()
     with pytest.raises(dataclasses.FrozenInstanceError):
-        run.state = RunState.DEDUPED  # type: ignore[misc]
+        setattr(run, "state", RunState.DEDUPED)  # noqa: B010
 
 
 def test_reconciliation_state_is_frozen_and_rejects_mutation() -> None:
     state = _state()
     with pytest.raises(dataclasses.FrozenInstanceError):
-        state.revision = 2  # type: ignore[misc]
+        setattr(state, "revision", 2)  # noqa: B010
 
 
 # --- negative: invalid construction ------------------------------------------
@@ -161,24 +162,24 @@ def test_reconciliation_state_is_frozen_and_rejects_mutation() -> None:
 
 def test_reconciliation_item_missing_required_field_raises_type_error() -> None:
     with pytest.raises(TypeError):
-        ReconciliationItem(  # type: ignore[call-arg]
+        cast(Any, ReconciliationItem(
             id=uuid4(),
             run_id=uuid4(),
             entity_type="USDT_BALANCE",
             entity_key="acct-1",
             internal_value=Decimal("100.00"),
             # provider_value omitted, classification omitted
-        )
+        ))
 
 
 def test_reconciliation_run_missing_required_field_raises_type_error() -> None:
     with pytest.raises(TypeError):
-        ReconciliationRun(  # type: ignore[call-arg]
+        cast(Any, ReconciliationRun(
             id=uuid4(),
             tenant_id=uuid4(),
             target_type="ACCOUNT",
             # target_ref, connection_id, input_hash, state, rule_version omitted
-        )
+        ))
 
 
 def test_classification_rejects_unknown_value() -> None:
