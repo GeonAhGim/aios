@@ -9,6 +9,7 @@ Content-Type: application/json + locale. Demo 모드는 paptrading: 1 헤더
 추가(공식적으로는 USDT-FUTURES 문서에서 확인 — 스팟 데모도 동일 메커니즘을
 쓰는 것으로 보이나 실제 Demo API 키로 라이브 검증 전까지는 확정 아님).
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -39,6 +40,7 @@ from src.exchanges.bitget.grid_mixin import BitgetGridMixin
 from src.exchanges.bitget.inst_loan_mixin import BitgetInstLoanMixin
 from src.exchanges.bitget.loan_mixin import BitgetLoanMixin
 from src.exchanges.bitget.margin_mixin import BitgetMarginMixin
+from src.exchanges.bitget.margin_p2_mixin import BitgetMarginP2Mixin
 from src.exchanges.bitget.market_data_mixin import BitgetMarketDataMixin
 from src.exchanges.bitget.market_ws_private_mixin import BitgetMarketDataWsPrivateMixin
 from src.exchanges.bitget.market_ws_public_mixin import BitgetMarketDataWsPublicMixin
@@ -235,6 +237,7 @@ class BitgetAdapter(
     BitgetTradingMixin,
     BitgetTradingPlanMixin,
     BitgetMarginMixin,
+    BitgetMarginP2Mixin,
     BitgetFuturesMarketMixin,
     BitgetFuturesAccountMixin,
     BitgetFuturesTradingMixin,
