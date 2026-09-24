@@ -107,6 +107,30 @@ const MEASURE_SWEEPS = 9;
  * settled into a tighter band afterward.
  */
 const WARMUP_SWEEPS = 3;
+/**
+ * task-6744 (esc-ci-frontend.json recurrence of task-6725): even per-metric
+ * calib brackets (one pair bracketing panZoom's whole ~120-frame, ~250-350ms
+ * measurement window) can miss a contention spike that starts *after* the
+ * leading calib probe finishes and clears *before* the trailing one starts --
+ * fully inside the window, touching neither bracket. Reproduced directly:
+ * repeated same-code, same-machine reruns showed panZoomFrameMsP95 sweeps
+ * with calib ratio reading ~1.0-1.2 (near-idle) on the exact sweep whose raw
+ * p95 was 40-90% above its sweep-siblings -- host-load normalization had
+ * nothing to normalize because the spike never reached either probe. Slicing
+ * the same measurement into `PAN_ZOOM_CALIB_CHUNKS` pieces, each bracketed by
+ * its own calib pair, narrows that blind window proportionally (4 chunks ->
+ * ~1/4 the miss window of a single whole-measurement bracket) without
+ * touching the tolerance, baseline, or absolute targets themselves --
+ * DECISION_GUIDELINES B-2.
+ */
+const PAN_ZOOM_CALIB_CHUNKS = 4;
+/**
+ * task-6744: same blind-window problem for indicatorAddMs -- one calib pair
+ * bracketing all `INDICATOR_ADD_RUNS` runs missed contention confined to a
+ * single run's ~1-2ms window. Bracketing each group of runs independently
+ * narrows it the same way.
+ */
+const INDICATOR_ADD_CALIB_GROUP_SIZE = 3;
 
 /** Feeds the full candle history through every instance, keeping the primary output aligned by candle index (null while unwarmed). */
 function warmInstances(instances, candles) {
@@ -198,39 +222,76 @@ function panZoomViewports(candles, stepsPerPhase) {
   return viewports;
 }
 
-function measurePanZoomFrameMs(candles, instances, valuesByInstance) {
-  const viewports = panZoomViewports(candles, PAN_ZOOM_STEPS_PER_PHASE);
-  const frameTimes = [];
-  for (const viewport of viewports) {
-    const t0 = performance.now();
-    const culled = cullToViewport(candles, viewport);
-    const lod = downsampleLOD(culled.candles.length > 0 ? culled.candles : [candles[0]], TARGET_PIXEL_WIDTH);
-    const projection = projectionFor(lod);
-    for (const inst of instances) {
-      const points = sampleIndicatorWindow(valuesByInstance.get(inst), candles, culled.startIndex, culled.endIndex);
-      if (points.length === 0) continue;
-      const spec = {
-        kind: "line", scale: inst.scale, default_pane: "price",
-        fill_between: null, color_rule: null, precision: null, legend_format: null,
-      };
-      renderPlot(spec, "primary", new Map([["primary", points]]), projection, LINE_STYLE, NULL_RENDER_TARGET);
-    }
-    frameTimes.push(performance.now() - t0);
+function renderPanZoomFrame(candles, instances, valuesByInstance, viewport) {
+  const t0 = performance.now();
+  const culled = cullToViewport(candles, viewport);
+  const lod = downsampleLOD(culled.candles.length > 0 ? culled.candles : [candles[0]], TARGET_PIXEL_WIDTH);
+  const projection = projectionFor(lod);
+  for (const inst of instances) {
+    const points = sampleIndicatorWindow(valuesByInstance.get(inst), candles, culled.startIndex, culled.endIndex);
+    if (points.length === 0) continue;
+    const spec = {
+      kind: "line", scale: inst.scale, default_pane: "price",
+      fill_between: null, color_rule: null, precision: null, legend_format: null,
+    };
+    renderPlot(spec, "primary", new Map([["primary", points]]), projection, LINE_STYLE, NULL_RENDER_TARGET);
   }
-  return { p95: percentile(frameTimes, 95), sampleCount: frameTimes.length };
+  return performance.now() - t0;
 }
 
-/** Cost of backfilling one freshly-added indicator over the whole loaded history. */
-function measureIndicatorAddMs(catalog, candles) {
-  const runs = [];
-  for (let i = 0; i < INDICATOR_ADD_RUNS; i++) {
-    const fresh = createClientIncrementalIndicator("SMA", { timeperiod: 20 }, catalog);
-    const t0 = performance.now();
-    for (const candle of candles) fresh.update(candle);
-    runs.push(performance.now() - t0);
+/**
+ * Chunks `viewports` into `PAN_ZOOM_CALIB_CHUNKS` pieces, bracketing each
+ * chunk with its own calib pair (see PAN_ZOOM_CALIB_CHUNKS's docstring) so a
+ * contention spike confined to one chunk only inflates that chunk's own
+ * normalization ratio instead of being averaged away -- or missed entirely --
+ * by a single whole-measurement bracket.
+ */
+function measurePanZoomFrameMs(candles, instances, valuesByInstance) {
+  const viewports = panZoomViewports(candles, PAN_ZOOM_STEPS_PER_PHASE);
+  const chunkSize = Math.max(1, Math.ceil(viewports.length / PAN_ZOOM_CALIB_CHUNKS));
+  const normalizedFrameTimes = [];
+  const calibSamples = [measureCalibMs()];
+  for (let start = 0; start < viewports.length; start += chunkSize) {
+    const chunk = viewports.slice(start, start + chunkSize);
+    const chunkTimes = chunk.map((viewport) => renderPanZoomFrame(candles, instances, valuesByInstance, viewport));
+    const calibAfter = measureCalibMs();
+    const ratio = Math.max(1, Math.max(calibSamples[calibSamples.length - 1], calibAfter) / CALIB_BASE_MS);
+    calibSamples.push(calibAfter);
+    for (const t of chunkTimes) normalizedFrameTimes.push(t / ratio);
   }
-  runs.sort((a, b) => a - b);
-  return Math.round(runs[Math.floor(runs.length / 2)] * 1000) / 1000;
+  return { p95: percentile(normalizedFrameTimes, 95), sampleCount: normalizedFrameTimes.length, calibSamples };
+}
+
+function runIndicatorAdd(catalog, candles) {
+  const fresh = createClientIncrementalIndicator("SMA", { timeperiod: 20 }, catalog);
+  const t0 = performance.now();
+  for (const candle of candles) fresh.update(candle);
+  return performance.now() - t0;
+}
+
+/**
+ * Groups `INDICATOR_ADD_RUNS` runs into `INDICATOR_ADD_CALIB_GROUP_SIZE`-sized
+ * batches, each bracketed by its own calib pair -- same blind-window fix as
+ * `measurePanZoomFrameMs`, sized down for indicatorAddMs's fewer, larger
+ * samples.
+ */
+function measureIndicatorAddMs(catalog, candles) {
+  const normalizedRuns = [];
+  const calibSamples = [measureCalibMs()];
+  for (let start = 0; start < INDICATOR_ADD_RUNS; start += INDICATOR_ADD_CALIB_GROUP_SIZE) {
+    const groupCount = Math.min(INDICATOR_ADD_CALIB_GROUP_SIZE, INDICATOR_ADD_RUNS - start);
+    const groupTimes = [];
+    for (let i = 0; i < groupCount; i++) groupTimes.push(runIndicatorAdd(catalog, candles));
+    const calibAfter = measureCalibMs();
+    const ratio = Math.max(1, Math.max(calibSamples[calibSamples.length - 1], calibAfter) / CALIB_BASE_MS);
+    calibSamples.push(calibAfter);
+    for (const t of groupTimes) normalizedRuns.push(t / ratio);
+  }
+  normalizedRuns.sort((a, b) => a - b);
+  return {
+    value: Math.round(normalizedRuns[Math.floor(normalizedRuns.length / 2)] * 1000) / 1000,
+    calibSamples,
+  };
 }
 
 /** Cost of one new live tick propagating through every currently-active indicator instance. */
@@ -267,48 +328,38 @@ async function main() {
 
   const sweeps = [];
   const calibSamplesMs = [];
-  const panZoomCalibRatios = [];
-  const indicatorAddCalibRatios = [];
   const tickUpdateCalibRatios = [];
   for (let i = 0; i < MEASURE_SWEEPS; i++) {
-    // task-6725 (esc-ci-frontend.json recurrence of task-6670): a single
-    // calib pair bracketing the *whole sweep* (all 3 measurements) attributes
-    // every metric in that sweep the same contention ratio, even though a
-    // transient contention spike landing strictly between two of the three
-    // measurements -- not overlapping either bracket -- inflates only the
-    // metric it actually hit. Reproduced directly from a CI failure log:
-    // sweep index 3 measured panZoomFrameMsP95 at 7.857ms (the run's highest,
-    // ~1.8x its own sweep-siblings) while that sweep's shared calib brackets
-    // (15.98ms lead, 15.19ms trail) read unremarkable, so the shared ratio
-    // (1.229) undercorrected specifically for panZoom and the sweep's other
-    // two metrics (which the spike never touched) were normalized by the
-    // same inflated-looking-but-actually-fine ratio. Bracketing each of the
-    // three measurements with its own calib probe -- same "MAX of both
-    // sides" principle task-6338 established, just at per-metric instead of
-    // per-sweep granularity -- keeps each metric's normalization attached
-    // only to the contention actually present during that metric's own
-    // measurement window.
+    // task-6744 (esc-ci-frontend.json recurrence of task-6725): task-6725
+    // bracketed each of the three measurements with its own calib pair, but a
+    // contention spike confined entirely *inside* one measurement's window
+    // (not overlapping either bracket probe) still slips through undetected
+    // -- reproduced directly: repeated same-code reruns showed
+    // panZoomFrameMsP95 sweeps 40-90% above their sweep-siblings while both
+    // bracketing calib probes read near-idle (ratio ~1.0-1.2). panZoom and
+    // indicatorAdd now bracket their own internal chunks/groups (see
+    // PAN_ZOOM_CALIB_CHUNKS/INDICATOR_ADD_CALIB_GROUP_SIZE), returning an
+    // already-normalized value -- the sweep-level bracket below is kept only
+    // for tickUpdate (500 near-instant samples too cheap to chunk-bracket
+    // without the calib overhead dominating the measurement) and for
+    // collecting calib samples toward the CH-19e absolute-threshold gate.
     forceGc();
     const calibA = measureCalibMs();
     forceGc();
     const panZoom = measurePanZoomFrameMs(candles, instances, valuesByInstance);
     forceGc();
-    const calibB = measureCalibMs();
-    forceGc();
-    const indicatorAddMs = measureIndicatorAddMs(catalog, candles);
+    const indicatorAdd = measureIndicatorAddMs(catalog, candles);
     forceGc();
     const calibC = measureCalibMs();
     forceGc();
     const tickUpdate = measureTickUpdateMs(instances, candles);
     forceGc();
     const calibD = measureCalibMs();
-    calibSamplesMs.push(calibA, calibB, calibC, calibD);
-    panZoomCalibRatios.push(Math.max(1, Math.max(calibA, calibB) / CALIB_BASE_MS));
-    indicatorAddCalibRatios.push(Math.max(1, Math.max(calibB, calibC) / CALIB_BASE_MS));
+    calibSamplesMs.push(calibA, ...panZoom.calibSamples, ...indicatorAdd.calibSamples, calibC, calibD);
     tickUpdateCalibRatios.push(Math.max(1, Math.max(calibC, calibD) / CALIB_BASE_MS));
     sweeps.push({
       panZoomFrameMsP95: panZoom.p95,
-      indicatorAddMs,
+      indicatorAddMs: indicatorAdd.value,
       tickUpdateMsP95: tickUpdate.p95,
     });
   }
@@ -319,7 +370,8 @@ async function main() {
   };
   console.log(`[density-bench] sweeps (${MEASURE_SWEEPS}):`, JSON.stringify(sweeps));
   console.log("[density-bench] measured (median across sweeps):", JSON.stringify(current));
-  console.log(`[density-bench] per-sweep calib samples (ms): ${JSON.stringify(calibSamplesMs)}`);
+  console.log("[density-bench] panZoom/indicatorAdd are already chunk-normalized above; tickUpdate is normalized below.");
+  console.log(`[density-bench] calib samples (ms): ${JSON.stringify(calibSamplesMs)}`);
 
   const calibMs = Math.max(...calibSamplesMs);
   const { failures: absoluteFailures, normalized, calibRatio } = checkAbsoluteThresholds(current, calibMs);
@@ -328,15 +380,12 @@ async function main() {
       `normalized absolute targets: ${JSON.stringify(normalized)}; raw spec targets: ${JSON.stringify(CH19_ABSOLUTE_TARGET_MS)}`,
   );
 
-  // Per-metric normalization (see per-metric calib brackets above): divide
-  // each sweep's own metric by that same metric's own bracketing calib
-  // ratio *before* reducing across sweeps, instead of sharing one ratio
-  // across all three metrics in a sweep -- the two are only equivalent when
-  // contention is uniform across a whole sweep's measurement window, which
-  // the CI recurrence this fixes showed is not a safe assumption.
+  // panZoom/indicatorAdd are already chunk-normalized inside their measure
+  // functions (see PAN_ZOOM_CALIB_CHUNKS/INDICATOR_ADD_CALIB_GROUP_SIZE
+  // above); only tickUpdate still needs the sweep-level bracket applied here.
   const ratchetSweeps = sweeps.map((s, i) => ({
-    panZoomFrameMsP95: s.panZoomFrameMsP95 / panZoomCalibRatios[i],
-    indicatorAddMs: s.indicatorAddMs / indicatorAddCalibRatios[i],
+    panZoomFrameMsP95: s.panZoomFrameMsP95,
+    indicatorAddMs: s.indicatorAddMs,
     tickUpdateMsP95: s.tickUpdateMsP95 / tickUpdateCalibRatios[i],
   }));
   const ratchetCurrent = {
@@ -345,10 +394,8 @@ async function main() {
     tickUpdateMsP95: percentile(ratchetSweeps.map((s) => s.tickUpdateMsP95), 50),
   };
   console.error(
-    `[density-bench] per-metric calib ratios: panZoom=${JSON.stringify(panZoomCalibRatios.map((r) => Math.round(r * 1000) / 1000))} ` +
-      `indicatorAdd=${JSON.stringify(indicatorAddCalibRatios.map((r) => Math.round(r * 1000) / 1000))} ` +
-      `tickUpdate=${JSON.stringify(tickUpdateCalibRatios.map((r) => Math.round(r * 1000) / 1000))}; ` +
-      `ratchet current (per-metric normalized, median across sweeps): ${JSON.stringify(ratchetCurrent)}`,
+    `[density-bench] tickUpdate calib ratios: ${JSON.stringify(tickUpdateCalibRatios.map((r) => Math.round(r * 1000) / 1000))}; ` +
+      `ratchet current (panZoom/indicatorAdd chunk-normalized, tickUpdate sweep-normalized, median across sweeps): ${JSON.stringify(ratchetCurrent)}`,
   );
 
   const baselineMeta = { candleCount: CANDLE_COUNT, indicatorInstanceCount: INDICATOR_INSTANCE_COUNT };
