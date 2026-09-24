@@ -20,8 +20,9 @@ from __future__ import annotations
 import os
 import subprocess
 import sys
-from collections.abc import AsyncGenerator
+from collections.abc import AsyncGenerator, Generator
 from pathlib import Path
+from typing import Any
 
 import asyncpg
 import pytest
@@ -71,7 +72,7 @@ async def pool(migration_db_url: str) -> AsyncGenerator[asyncpg.Pool, None]:
 
 
 @pytest.fixture(autouse=True)
-def _ensure_head(migration_db_url: str) -> AsyncGenerator[None, None]:
+def _ensure_head(migration_db_url: str) -> Generator[None, None, None]:
     _run_alembic("upgrade", "head", database_url=migration_db_url)
     yield
     _run_alembic("upgrade", "head", database_url=migration_db_url)
@@ -233,7 +234,7 @@ async def test_fa2a_migration_downgrade_maintains_foreign_key_integrity(
 
 
 async def test_fa2a_migration_performance_under_load(
-    pool: asyncpg.Pool, migration_db_url: str, benchmark
+    pool: asyncpg.Pool, migration_db_url: str, benchmark: Any
 ) -> None:
     """FA-2a performance assertion: migration completes within budget.
     Simulate moderate data volume (100 legal entities) and verify p95.
