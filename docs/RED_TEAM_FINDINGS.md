@@ -321,7 +321,11 @@ RESOLVED 뒤 같은 구매에 새 분쟁을 열고 다시 `DELISTED_AND_REFUND`�
 
 ## 2026-09-02-39 · [execution_loop] 취소·거부·만료로 끝난 주문 뒤 FSM이 BUY/SELL_ORDER_PENDING에 영구 고착 — 심각도 높음
 
-**상태**: 🔴 OPEN (agent-platform-9f 배정 — 감사 보고서 §2-A)
+**상태**: ✅ FIXED (커밋 `53d56d2f`, `pending_fill.py` 분할본은 `bc2d7da9` —
+회귀 테스트 `tests/integration/test_execution_tick.py::
+test_failed_terminal_order_reverts_fsm_state_and_allows_resubmission`
+[CANCELLED/REJECTED/EXPIRED 3경로 파라미터화] +
+`test_still_open_pending_order_does_not_resubmit_new_order`)
 
 **발견**: 실행 루프를 운영 앱에 배선(`2e943c9`)하면서 확인. tick의
 `_handle_pending_fill_check`는 최신 주문이 최종 상태면 즉시 return하고
@@ -332,10 +336,20 @@ FILLED일 때만 `apply_fill` + FSM 전이를 한다(`tick.py:100-140`).
 재시작 복구(`recovery_wiring.py`)는 이 이유로 FILLED를 쓰지 않고 tick에
 위임하며, 취소·거부만 영속화한다 — 그 뒤의 FSM 복귀는 이 항목의 몫이다.
 
-**권장 수정 방향**: `_handle_pending_fill_check`에서 최종 상태가 FILLED가
-아니면 FSM을 PENDING 진입 전 상태(IDLE 또는 HOLDING — FSM 정의의
-역전이로 결정)로 조건부 갱신하고 `order.status.changed`를 발행. cancel.py는
-그대로 두고 tick 한 곳에서 처리하면 복구·취소·거부 세 경로가 모두 해결된다.
+**수정**: `_handle_pending_fill_check`(현재 `pending_fill.py`)가 최신 주문이
+`_FAILURE_TERMINAL_STATUSES`(CANCELLED/REJECTED/EXPIRED/FAILED)면
+`_previous_fsm_state()`로 FSM 정의에서 이 PENDING으로 들어오는 신호평가
+전이(ORDER_FILLED 제외)의 from_state를 찾아 조건부 UPDATE로 되돌린다
+(BUY_ORDER_PENDING→IDLE, SELL_ORDER_PENDING/STOP_LOSS→HOLDING). 동시성
+충돌 시(#22와 동일 원칙) 다음 tick 재시도로 넘긴다. cancel.py는 그대로
+두고 tick 한 곳(`pending_fill.py`)에서만 처리해 복구·취소·거부·만료 네
+경로가 모두 해결된다.
+
+**검증**: 취소/거부/만료 3경로 각각에서 (1) 되돌림 tick에서 신규 주문을
+내지 않고 IDLE로 복귀하는지, (2) 그 다음 tick에서 신규 주문이 실제로
+다시 나가 HOLDING까지 도달하는지 확인. 아직 살아있는 미체결 주문
+(SUBMITTED)은 되돌리지도 신규 주문도 내지 않는 기존 보호 불변식도 별도
+회귀 테스트로 유지 확인 — INVARIANTS 위반 없음.
 
 ---
 
