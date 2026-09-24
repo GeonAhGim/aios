@@ -135,19 +135,42 @@ export const CH19_ABSOLUTE_TARGET_MS = {
 };
 
 const CALIB_SAMPLES = 5;
-const CALIB_INNER_ITERATIONS = 300;
-const CALIB_BUFFER_SIZE = 4096;
+/**
+ * task-6752 (esc-ci-frontend.json recurrence of task-6744): the previous
+ * 4096-double (32KB) buffer, reused across all 300 inner iterations, stays
+ * resident in L1/L2 cache for the whole probe regardless of what else is
+ * running on the host -- so it measures pure arithmetic throughput, not
+ * memory-subsystem contention. The actual bench workload (100k candles;
+ * per-frame culled-candle slices, LOD arrays, point arrays, and a `Map` per
+ * instance across 30 instances x 120 pan/zoom frames) has a working set
+ * orders of magnitude larger and pays for cache misses / memory bandwidth on
+ * every frame. Reproduced directly: 10 consecutive same-code reruns showed
+ * panZoomFrameMsP95 swinging 3.6-4.5ms (a real, sustained ~10-35% band, not
+ * single-sweep noise -- see the pooled-p95 change above) while the old
+ * calib probe read ratio ~1.0-1.2 (near-idle) throughout, i.e. it was blind
+ * to whatever was actually slowing the render path down. A 1MB buffer (256x
+ * larger) exceeds typical per-core L2 (256KB-1MB) and approaches L3, so the
+ * probe now pays the same class of memory-bandwidth cost the render path
+ * does, making its ratio track real host load for this workload instead of
+ * just idling in cache. Iteration count is cut so the probe's own absolute
+ * cost stays in the same ~10-15ms band as before (see CALIB_BASE_MS).
+ */
+const CALIB_INNER_ITERATIONS = 10;
+const CALIB_BUFFER_SIZE = 131_072;
 
 /**
  * Reference calib probe cost for CH19_ABSOLUTE_TARGET_MS's "1.0x" host.
- * Measured 2026-09-09 on this session's machine (git 370d6507) with no
- * other benches running: 5 calls to measureCalibMs(), each itself a
- * median of 5 inner samples: 15.86/13.13/12.67/12.27/14.00ms, median of
- * medians 13.13ms. Rounded down slightly so a rerun on the same idle
- * machine reads as ratio<=1 (raw target, unscaled) rather than drifting
- * >1 from measurement jitter alone.
+ * task-6752: remeasured after widening the probe's buffer to 131,072
+ * doubles / 10 inner iterations (see that constant's docstring) -- the old
+ * 4096x300 probe's timing does not carry over since its cache-residency
+ * behavior is entirely different. Measured on this session's machine
+ * (git de665077): 5 calls to measureCalibMs(), each itself a median of 5
+ * inner samples: 12.71/13.31/11.02/11.94/16.97ms (single probe() call,
+ * /tmp/calib_test.mjs), median 12.71ms. Rounded down slightly for the same
+ * reason as before: a rerun on an equally idle host should read ratio<=1
+ * rather than drift above 1 from measurement jitter alone.
  */
-export const CALIB_BASE_MS = 13.0;
+export const CALIB_BASE_MS = 12.5;
 
 /**
  * Fixed-iteration float/typed-array workload with no dependency on chart

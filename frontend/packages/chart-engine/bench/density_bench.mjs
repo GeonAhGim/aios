@@ -245,6 +245,22 @@ function renderPanZoomFrame(candles, instances, valuesByInstance, viewport) {
  * contention spike confined to one chunk only inflates that chunk's own
  * normalization ratio instead of being averaged away -- or missed entirely --
  * by a single whole-measurement bracket.
+ *
+ * Returns the raw per-frame normalized times rather than reducing to a p95
+ * here (task-6752, esc-ci-frontend.json recurrence of task-6744): a p95 over
+ * only `PAN_ZOOM_STEPS_PER_PHASE * 2` (120) samples sits at rank ~114, close
+ * enough to the max that a single slow frame moves it noticeably -- median-
+ * of-9 such per-sweep p95s (main()'s previous reduction) doesn't fully tame
+ * that because each sweep's p95 is already a coarse, high-variance estimate
+ * before the cross-sweep median ever sees it. Reproduced directly: 12
+ * consecutive same-code reruns swung the gate's panZoomFrameMsP95 between
+ * 3.25ms and 4.19ms (calib ratio reading ~1.0, i.e. not host contention --
+ * see checkRatchet's failure log) against a 3.307ms baseline and 20%
+ * tolerance, failing ~40% of runs. Pooling every sweep's frames into one
+ * array before taking a single p95 (see main()) multiplies the effective
+ * sample size feeding that percentile by `MEASURE_SWEEPS` (~1080 instead of
+ * 120), which is the standard fix for percentile-estimate variance -- more
+ * data, not a looser gate.
  */
 function measurePanZoomFrameMs(candles, instances, valuesByInstance) {
   const viewports = panZoomViewports(candles, PAN_ZOOM_STEPS_PER_PHASE);
@@ -259,7 +275,7 @@ function measurePanZoomFrameMs(candles, instances, valuesByInstance) {
     calibSamples.push(calibAfter);
     for (const t of chunkTimes) normalizedFrameTimes.push(t / ratio);
   }
-  return { p95: percentile(normalizedFrameTimes, 95), sampleCount: normalizedFrameTimes.length, calibSamples };
+  return { frames: normalizedFrameTimes, calibSamples };
 }
 
 function runIndicatorAdd(catalog, candles) {
@@ -329,6 +345,7 @@ async function main() {
   const sweeps = [];
   const calibSamplesMs = [];
   const tickUpdateCalibRatios = [];
+  const pooledPanZoomFrames = [];
   for (let i = 0; i < MEASURE_SWEEPS; i++) {
     // task-6744 (esc-ci-frontend.json recurrence of task-6725): task-6725
     // bracketed each of the three measurements with its own calib pair, but a
@@ -357,19 +374,26 @@ async function main() {
     const calibD = measureCalibMs();
     calibSamplesMs.push(calibA, ...panZoom.calibSamples, ...indicatorAdd.calibSamples, calibC, calibD);
     tickUpdateCalibRatios.push(Math.max(1, Math.max(calibC, calibD) / CALIB_BASE_MS));
+    pooledPanZoomFrames.push(...panZoom.frames);
     sweeps.push({
-      panZoomFrameMsP95: panZoom.p95,
+      panZoomFrameMsP95: percentile(panZoom.frames, 95),
       indicatorAddMs: indicatorAdd.value,
       tickUpdateMsP95: tickUpdate.p95,
     });
   }
+  // panZoomFrameMsP95 is a single p95 over every sweep's pooled, already
+  // chunk-normalized frames (see measurePanZoomFrameMs's docstring) rather
+  // than a median of MEASURE_SWEEPS separate p95s -- the per-sweep values in
+  // `sweeps` above are kept only for the diagnostic log below, not fed into
+  // the gate.
+  const pooledPanZoomFrameMsP95 = percentile(pooledPanZoomFrames, 95);
   const current = {
-    panZoomFrameMsP95: percentile(sweeps.map((s) => s.panZoomFrameMsP95), 50),
+    panZoomFrameMsP95: pooledPanZoomFrameMsP95,
     indicatorAddMs: percentile(sweeps.map((s) => s.indicatorAddMs), 50),
     tickUpdateMsP95: percentile(sweeps.map((s) => s.tickUpdateMsP95), 50),
   };
-  console.log(`[density-bench] sweeps (${MEASURE_SWEEPS}):`, JSON.stringify(sweeps));
-  console.log("[density-bench] measured (median across sweeps):", JSON.stringify(current));
+  console.log(`[density-bench] sweeps (${MEASURE_SWEEPS}, panZoomFrameMsP95 here is per-sweep, diagnostic only):`, JSON.stringify(sweeps));
+  console.log("[density-bench] measured (panZoomFrameMsP95: pooled p95 over all sweeps' frames; others: median across sweeps):", JSON.stringify(current));
   console.log("[density-bench] panZoom/indicatorAdd are already chunk-normalized above; tickUpdate is normalized below.");
   console.log(`[density-bench] calib samples (ms): ${JSON.stringify(calibSamplesMs)}`);
 
@@ -384,12 +408,11 @@ async function main() {
   // functions (see PAN_ZOOM_CALIB_CHUNKS/INDICATOR_ADD_CALIB_GROUP_SIZE
   // above); only tickUpdate still needs the sweep-level bracket applied here.
   const ratchetSweeps = sweeps.map((s, i) => ({
-    panZoomFrameMsP95: s.panZoomFrameMsP95,
     indicatorAddMs: s.indicatorAddMs,
     tickUpdateMsP95: s.tickUpdateMsP95 / tickUpdateCalibRatios[i],
   }));
   const ratchetCurrent = {
-    panZoomFrameMsP95: percentile(ratchetSweeps.map((s) => s.panZoomFrameMsP95), 50),
+    panZoomFrameMsP95: pooledPanZoomFrameMsP95,
     indicatorAddMs: percentile(ratchetSweeps.map((s) => s.indicatorAddMs), 50),
     tickUpdateMsP95: percentile(ratchetSweeps.map((s) => s.tickUpdateMsP95), 50),
   };
