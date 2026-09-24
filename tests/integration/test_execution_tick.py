@@ -712,7 +712,7 @@ class _SpyRecorder(RiskDecisionRecorder):
         super().__init__(pool, PostgresDecisionRepository(pool), InProcessEventBus())
         self.calls = 0
 
-    async def record(self, decision, inputs, *, actor: str) -> None:  # type: ignore[override]
+    async def record(self, decision, inputs, *, actor: str) -> None:  # type: ignore[override]  # 상위보다 좁은 시그니처(호출 횟수 계측 전용 spy, R-32 t4)
         self.calls += 1
         await super().record(decision, inputs, actor=actor)
 

@@ -8,6 +8,7 @@ Spec: docs/specs/L4_risk_and_safety_v1.0.md §9 R-24, §4.1 I7·I12/R12.
 UPDATE해 트리거 자체가 살아있음을 증명" 재현을 `risk_decision`에 그대로
 적용한다 — task-1210 decision에 따라 새 WORM 방식을 만들지 않는다.
 """
+
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
@@ -62,7 +63,7 @@ def _decision(
         latency_us=100,
     )
     base.update(overrides)
-    return RiskDecision(**base)  # type: ignore[arg-type]
+    return RiskDecision(**base)  # type: ignore[arg-type]  # overrides dict가 생성자 kwarg 타입을 정적으로 못 좁힘(테스트 헬퍼)
 
 
 async def _insert(

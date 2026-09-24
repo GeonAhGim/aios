@@ -119,7 +119,7 @@ def test_position_key_is_frozen_and_hashable() -> None:
         portfolio_id=_PORTFOLIO_ID,
     )
     with pytest.raises(AttributeError):
-        key.venue = "kis"  # type: ignore[misc]
+        key.venue = "kis"  # type: ignore[misc]  # negative test: frozen dataclass 재할당 금지를 AttributeError로 검증
     assert hash(key) == hash(
         PositionKey(
             venue="bitget",

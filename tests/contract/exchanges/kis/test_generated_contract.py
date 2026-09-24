@@ -17,6 +17,7 @@ ADR-2026-09-06-I D7. 모의투자 계좌는 사람만 만들 수 있다(HB-3) --
 테스트가 있다. 실계좌(모의투자 서버) 왕복 검증도 범위 밖 -- BR-14
 (task-1931, tests/integration/exchanges/kis/)가 HB-3 해소 후 담당한다.
 """
+
 from __future__ import annotations
 
 import importlib
@@ -63,7 +64,7 @@ def _make_real_adapter(handler: Any) -> KISAdapter:
     adapter = KISAdapter(
         "app", "secret", "12345678", "01", is_paper_trading=True, http_client=client
     )
-    adapter._resolve_tr_id = lambda tr_id: tr_id  # type: ignore[method-assign]
+    adapter._resolve_tr_id = lambda tr_id: tr_id  # type: ignore[method-assign]  # 인스턴스 단위 치환(위 주석 참고, BR-11 tr_id 조립 검증 전용)
     return adapter
 
 

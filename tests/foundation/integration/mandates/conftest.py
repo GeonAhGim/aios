@@ -52,7 +52,7 @@ def default_rules(**overrides: object) -> MandateRuleInput:
         forbidden_assets=["XYZ"],
     )
     defaults.update(overrides)
-    return MandateRuleInput(**defaults)  # type: ignore[arg-type]
+    return MandateRuleInput(**defaults)  # type: ignore[arg-type]  # overrides dict가 생성자 kwarg 타입을 정적으로 못 좁힘(테스트 헬퍼)
 
 
 async def backdate_cooling_off(pool: asyncpg.Pool, revision_id: UUID, seconds_ago: int) -> None:

@@ -45,15 +45,15 @@ def _make_adapter(handler, *, is_paper_trading: bool = True) -> NHAdapter:
 # 원본 함수(`__wrapped__`, functools.wraps가 자동으로 남긴다)를 직접 호출해
 # 검증한다 — 소스의 가드를 우회하도록 고치는 게 아니라 테스트에서만 우회한다.
 async def _unguarded_place_order(adapter: NHAdapter, order: Order) -> Order:
-    return await NHAdapter.place_order.__wrapped__(adapter, order)  # type: ignore[attr-defined]
+    return await NHAdapter.place_order.__wrapped__(adapter, order)  # type: ignore[attr-defined]  # functools.wraps가 남긴 __wrapped__(위 주석 참고, 데코레이터 우회는 테스트 전용)
 
 
 async def _unguarded_cancel_order(adapter: NHAdapter, order_id: str) -> bool:
-    return await NHAdapter.cancel_order.__wrapped__(adapter, order_id)  # type: ignore[attr-defined]
+    return await NHAdapter.cancel_order.__wrapped__(adapter, order_id)  # type: ignore[attr-defined]  # functools.wraps가 남긴 __wrapped__(위 주석 참고, 데코레이터 우회는 테스트 전용)
 
 
 async def _unguarded_modify_order(adapter: NHAdapter, order_id: str, **kwargs) -> Order:
-    return await NHAdapter.modify_order.__wrapped__(adapter, order_id, **kwargs)  # type: ignore[attr-defined]
+    return await NHAdapter.modify_order.__wrapped__(adapter, order_id, **kwargs)  # type: ignore[attr-defined]  # functools.wraps가 남긴 __wrapped__(위 주석 참고, 데코레이터 우회는 테스트 전용)
 
 
 def _route(request: httpx.Request, routes: dict) -> httpx.Response:

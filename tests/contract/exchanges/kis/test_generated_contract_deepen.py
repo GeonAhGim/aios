@@ -89,7 +89,7 @@ def _make_adapter(handler: Any) -> KISAdapter:
         http_client=client,
         sleep_fn=_instant_sleep,
     )
-    adapter._resolve_tr_id = lambda tr_id: tr_id  # type: ignore[method-assign]
+    adapter._resolve_tr_id = lambda tr_id: tr_id  # type: ignore[method-assign]  # 인스턴스 단위 치환(위 주석 참고, BR-11 tr_id 조립 검증 전용)
     return adapter
 
 

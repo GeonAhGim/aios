@@ -6,6 +6,7 @@
 orderbook이 필요하다. `SeqRandom`은 `fill_model`/`latency_model`이 요구하는
 `RandomSource` 계약(`random() -> float`)의 스크립트형 대역이다.
 """
+
 from __future__ import annotations
 
 from datetime import datetime, timezone
@@ -19,7 +20,7 @@ class FakeReferenceAdapter(FakeExchangeAdapter):
     def __init__(
         self, *, bid: Decimal, ask: Decimal, depth_qty: Decimal = Decimal("100"), **kwargs: object
     ) -> None:
-        super().__init__(**kwargs)  # type: ignore[arg-type]
+        super().__init__(**kwargs)  # type: ignore[arg-type]  # **kwargs가 상위 생성자 키워드 타입을 정적으로 못 좁힘(테스트 픽스처)
         self._bid = bid
         self._ask = ask
         self._depth_qty = depth_qty

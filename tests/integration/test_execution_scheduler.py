@@ -70,7 +70,7 @@ def _scheduler(pool: asyncpg.Pool, **overrides: object) -> ExecutionLoopSchedule
         owner_id=_owner_id(),
     )
     kwargs.update(overrides)
-    return ExecutionLoopScheduler(pool, **kwargs)  # type: ignore[arg-type]
+    return ExecutionLoopScheduler(pool, **kwargs)  # type: ignore[arg-type]  # overrides dict가 생성자 kwarg 타입을 정적으로 못 좁힘(테스트 헬퍼)
 
 
 @pytest.fixture
@@ -407,5 +407,5 @@ async def test_tick_all_running_p95_latency_within_budget(pool):
 
 def test_interval_comes_from_risk_policy():
     policy = load_risk_policy()
-    scheduler = _scheduler(None, policy=policy)  # type: ignore[arg-type]
+    scheduler = _scheduler(None, policy=policy)  # type: ignore[arg-type]  # DB 없이 policy 인자만 검증(pool은 사용되지 않음)
     assert scheduler.interval_seconds == policy.execution_loop.interval_sec
