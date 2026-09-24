@@ -197,6 +197,56 @@ describe("decideBenchOutcome — ratchetCalibRatio isolates the improvement path
   });
 });
 
+// task-6513 (esc-ci-frontend.json recurrence): first-run baseline creation
+// used to persist `current` verbatim instead of normalizing by
+// ratchetCalibRatio like the improvement path does, so a baseline created on
+// a host slower than the reference silently became the new "reference" —
+// every later run on a faster/idle host then compared its own normalized
+// value against an artificially high floor while a run on a similarly slow
+// host passed for the wrong reason.
+describe("decideBenchOutcome — baseline creation normalizes by ratchetCalibRatio (task-6513)", () => {
+  it("stores the reference-host-equivalent value, not the raw value, when created on a loaded host", () => {
+    const outcome = decideBenchOutcome({
+      current: { panZoomFrameMsP95: 6 },
+      baseline: null,
+      absoluteFailures: [],
+      calibRatio: 2,
+      ratchetCalibRatio: 2,
+      baselineMeta: {},
+      baselinePath: "unused",
+    });
+    expect(outcome.exitCode).toBe(0);
+    expect(outcome.baselineWrite.metrics.panZoomFrameMsP95).toBe(3);
+  });
+
+  it("still persists the raw value on an idle reference host (ratio 1, no change from prior behavior)", () => {
+    const outcome = decideBenchOutcome({
+      current: { panZoomFrameMsP95: 3.307 },
+      baseline: null,
+      absoluteFailures: [],
+      calibRatio: 1,
+      ratchetCalibRatio: 1,
+      baselineMeta: {},
+      baselinePath: "unused",
+    });
+    expect(outcome.baselineWrite.metrics.panZoomFrameMsP95).toBe(3.307);
+  });
+
+  it("normalizes the baseline it writes even on the CH-19e-absolute-failure exit path", () => {
+    const outcome = decideBenchOutcome({
+      current: { panZoomFrameMsP95: 40 },
+      baseline: null,
+      absoluteFailures: ["panZoomFrameMsP95 40ms exceeds normalized target"],
+      calibRatio: 4,
+      ratchetCalibRatio: 4,
+      baselineMeta: {},
+      baselinePath: "unused",
+    });
+    expect(outcome.exitCode).toBe(1);
+    expect(outcome.baselineWrite.metrics.panZoomFrameMsP95).toBe(10);
+  });
+});
+
 describe("loadBaseline/writeBaseline — real fs failure injection (DEEPEN task-3096)", () => {
   let dir;
 

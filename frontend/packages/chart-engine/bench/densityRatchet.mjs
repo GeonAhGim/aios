@@ -245,13 +245,31 @@ export function decideBenchOutcome({
   const logs = [];
 
   if (baseline === null) {
+    // task-6513 (esc-ci-frontend.json recurrence): this branch used to persist
+    // `current` verbatim -- the raw values measured on whichever host happened
+    // to run first, regardless of how loaded that host was. Every other path
+    // (checkRatchet's `improved` branch, checkAbsoluteThresholds) treats the
+    // baseline as reference-host-equivalent and divides/multiplies by a calib
+    // ratio accordingly; a first-run baseline captured on a host slower than
+    // the reference (ratchetCalibRatio > 1) silently baked that host's slowness
+    // into the "reference" number, so any later run on the *actual* reference
+    // host — or a differently-loaded host whose own ratio undercorrects for
+    // it — compared its own normalized value against an artificially high
+    // floor (or, on a slower host than the one that created it, an
+    // artificially low one). This is the same class of bug task-6460 fixed for
+    // the improvement path, just on the creation path instead: normalizing by
+    // `ratchetCalibRatio` here keeps every baseline in the same reference-host
+    // scale no matter which host happened to create it.
+    const normalizedMetrics = Object.fromEntries(
+      Object.entries(current).map(([key, value]) => [key, value / ratchetCalibRatio]),
+    );
     logs.push({ level: "log", message: `[density-bench] BASELINE created: ${baselinePath}` });
     if (absoluteFailures.length > 0) {
       logs.push({ level: "error", message: "[density-bench] FAIL: CH-19e absolute threshold (host-load normalized):" });
       for (const failure of absoluteFailures) logs.push({ level: "error", message: `  - ${failure}` });
-      return { exitCode: 1, logs, baselineWrite: { metrics: current, meta: baselineMeta } };
+      return { exitCode: 1, logs, baselineWrite: { metrics: normalizedMetrics, meta: baselineMeta } };
     }
-    return { exitCode: 0, logs, baselineWrite: { metrics: current, meta: baselineMeta } };
+    return { exitCode: 0, logs, baselineWrite: { metrics: normalizedMetrics, meta: baselineMeta } };
   }
 
   const { failures, improved } = checkRatchet(current, baseline.metrics, ratchetCalibRatio);
