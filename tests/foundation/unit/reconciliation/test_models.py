@@ -26,7 +26,10 @@ NOW = datetime(2026, 9, 24, tzinfo=timezone.utc)
 
 
 def _policy(**overrides: Any) -> MaterialityPolicy:
-    fields: dict[str, Any] = {"absolute_tolerance": Decimal("0.01"), "relative_tolerance_pct": Decimal("0.1")}
+    fields: dict[str, Any] = {
+        "absolute_tolerance": Decimal("0.01"),
+        "relative_tolerance_pct": Decimal("0.1"),
+    }
     fields.update(overrides)
     return cast(MaterialityPolicy, MaterialityPolicy(**cast(Any, fields)))
 
