@@ -134,7 +134,7 @@ async def test_lifespan_rejects_invalid_database_url() -> None:
     거부해야 한다. pool/event_bus/루프가 부분 조립된 상태로 방치되지
     않음을 확인한다.
 
-    P6 위반 해소: src/main.py(131-132) — load_env_secrets가 raise하면
+    P6 위반 해소: src/main.py(79-81) — load_env_secrets가 raise하면
     create_pool이 호출되지 않으므로 event_bus가 등록되지 않는다.
     """
     import src.main as main_module
