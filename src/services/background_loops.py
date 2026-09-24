@@ -42,9 +42,6 @@ from src.foundation.execution_ownership.adapters.postgres_repository import (
 from src.foundation.execution_ownership.ports.repository import ExecutionLeaseRepository
 from src.foundation.mandates.application.evaluate_post_trade import run_daily_post_trade_batch
 from src.foundation.paper_control.adapters.postgres_repository import PostgresPaperControlRepository
-from src.foundation.risk.application.personal_daily_loss_monitor import (
-    start_personal_daily_loss_monitor_task,
-)
 from src.foundation.risk_gate.adapters.postgres_repository import PostgresRiskGateRepository
 from src.services.alert_service import AlertService
 from src.services.credential_resolver import CredentialResolver
@@ -54,6 +51,7 @@ from src.services.oms.application.restart_recovery import make_recovery_gate
 from src.services.oms.application.wiring import start_outbox_dispatcher_task
 from src.services.order_service import fenced_submit_wiring as fsw
 from src.services.order_service.foundation_gate import make_foundation_pre_submit_gate
+from src.services.personal_daily_loss_loop import start_personal_daily_loss_monitor_task
 from src.services.risk_guard_service import RiskGuardService
 from src.services.safety.circuit_breaker_loop import (
     MetricsHistory,
@@ -195,7 +193,9 @@ async def start_background_loops(
         )
     )
 
-    personal_daily_loss_task = start_personal_daily_loss_monitor_task(pool, health=health)
+    personal_daily_loss_task = start_personal_daily_loss_monitor_task(
+        pool, health=health, run_periodic_loop=run_periodic_loop
+    )
 
     # Doc 05 §5.6 + task-2151(L4-18a) — one-time startup recovery before the background loops
     # (see recovery_wiring.py for the fail-closed behavior on failure).
