@@ -3,6 +3,7 @@
 Contract tests for newly implemented NH market-data endpoints.
 Uses fixtures derived from openapi.json schemas; does NOT hit real API.
 """
+
 from __future__ import annotations
 
 import time
@@ -27,7 +28,7 @@ def nh_adapter() -> NHAdapter:
     return NHAdapter(
         app_key="test_key",
         app_secret="test_secret",
-        account_no="",  # Optional for market-data-only tests
+        act_no="",  # Optional for market-data-only tests
     )
 
 
@@ -139,9 +140,7 @@ async def test_get_ohlcv_implementation_present(nh_adapter: NHAdapter) -> None:
     Now it should not raise NotImplementedError on proper input.
     (This test reproduces the gate that task-6695 closes.)
     """
-    with patch.object(
-        nh_adapter, "_request", new_callable=AsyncMock
-    ) as mock_request:
+    with patch.object(nh_adapter, "_request", new_callable=AsyncMock) as mock_request:
         mock_response = {
             "Output_0": [
                 {
@@ -171,9 +170,7 @@ async def test_get_ohlcv_returns_candles(
     nh_adapter: NHAdapter, mock_current_daily_response: dict
 ) -> None:
     """Basic functionality: get_ohlcv returns list of Candle objects."""
-    with patch.object(
-        nh_adapter, "_request", new_callable=AsyncMock
-    ) as mock_request:
+    with patch.object(nh_adapter, "_request", new_callable=AsyncMock) as mock_request:
         mock_request.return_value = mock_current_daily_response
 
         result = await nh_adapter.get_ohlcv("005930", "1d", limit=2)
@@ -187,9 +184,7 @@ async def test_get_ohlcv_field_mapping(
     nh_adapter: NHAdapter, mock_current_daily_response: dict
 ) -> None:
     """Contract: Response fields map to Candle fields correctly."""
-    with patch.object(
-        nh_adapter, "_request", new_callable=AsyncMock
-    ) as mock_request:
+    with patch.object(nh_adapter, "_request", new_callable=AsyncMock) as mock_request:
         mock_request.return_value = mock_current_daily_response
 
         result = await nh_adapter.get_ohlcv("005930", "1d", limit=1)
@@ -216,9 +211,7 @@ async def test_get_ohlcv_date_parsing(
     nh_adapter: NHAdapter, mock_current_daily_response: dict
 ) -> None:
     """Contract: bsop_date (YYYYMMDD format) parses correctly."""
-    with patch.object(
-        nh_adapter, "_request", new_callable=AsyncMock
-    ) as mock_request:
+    with patch.object(nh_adapter, "_request", new_callable=AsyncMock) as mock_request:
         mock_request.return_value = mock_current_daily_response
 
         result = await nh_adapter.get_ohlcv("005930", "1d", limit=2)
@@ -238,11 +231,9 @@ async def test_get_ohlcv_date_parsing(
 @pytest.mark.asyncio
 async def test_get_ohlcv_unsupported_timeframe() -> None:
     """Negative test 1: Unsupported timeframe raises ValueError."""
-    adapter = NHAdapter(
-        app_key="test_key", app_secret="test_secret", account_no=""
-    )
+    adapter = NHAdapter(app_key="test_key", app_secret="test_secret", act_no="")
 
-    with pytest.raises(ValueError, match="일별"):
+    with pytest.raises(ValueError, match="only daily"):
         await adapter.get_ohlcv("005930", "1h", limit=100)
 
 
@@ -251,9 +242,7 @@ async def test_get_ohlcv_missing_required_date_field(
     nh_adapter: NHAdapter, mock_current_daily_missing_date: dict
 ) -> None:
     """Negative test 2: Missing required bsop_date field raises FatalExchangeError."""
-    with patch.object(
-        nh_adapter, "_request", new_callable=AsyncMock
-    ) as mock_request:
+    with patch.object(nh_adapter, "_request", new_callable=AsyncMock) as mock_request:
         mock_request.return_value = mock_current_daily_missing_date
 
         with pytest.raises(FatalExchangeError, match="bsop_date"):
@@ -265,9 +254,7 @@ async def test_get_ohlcv_missing_required_price_field(
     nh_adapter: NHAdapter, mock_current_daily_missing_price: dict
 ) -> None:
     """Negative test 3: Missing required price field raises FatalExchangeError."""
-    with patch.object(
-        nh_adapter, "_request", new_callable=AsyncMock
-    ) as mock_request:
+    with patch.object(nh_adapter, "_request", new_callable=AsyncMock) as mock_request:
         mock_request.return_value = mock_current_daily_missing_price
 
         with pytest.raises(FatalExchangeError, match="stck"):
@@ -277,9 +264,7 @@ async def test_get_ohlcv_missing_required_price_field(
 @pytest.mark.asyncio
 async def test_get_ohlcv_invalid_date_format(nh_adapter: NHAdapter) -> None:
     """Negative test 4: Invalid bsop_date format raises FatalExchangeError."""
-    with patch.object(
-        nh_adapter, "_request", new_callable=AsyncMock
-    ) as mock_request:
+    with patch.object(nh_adapter, "_request", new_callable=AsyncMock) as mock_request:
         mock_request.return_value = {
             "Output_0": [
                 {
@@ -306,9 +291,7 @@ async def test_get_ohlcv_invalid_date_format(nh_adapter: NHAdapter) -> None:
 @pytest.mark.asyncio
 async def test_get_ohlcv_http_error_injection(nh_adapter: NHAdapter) -> None:
     """Failure-injection: HTTP errors (e.g., 500) propagate as exceptions."""
-    with patch.object(
-        nh_adapter, "_request", new_callable=AsyncMock
-    ) as mock_request:
+    with patch.object(nh_adapter, "_request", new_callable=AsyncMock) as mock_request:
         mock_request.side_effect = Exception("HTTP 500: Internal Server Error")
 
         with pytest.raises(Exception, match="HTTP 500"):
@@ -320,11 +303,9 @@ async def test_get_ohlcv_malformed_response_injection(
     nh_adapter: NHAdapter,
 ) -> None:
     """Failure-injection: Malformed JSON response raises FatalExchangeError."""
-    with patch.object(
-        nh_adapter, "_request", new_callable=AsyncMock
-    ) as mock_request:
-        # Return something that looks like a response but with wrong structure
-        mock_request.return_value = {"error": "Something went wrong"}
+    with patch.object(nh_adapter, "_request", new_callable=AsyncMock) as mock_request:
+        # Output_0 items missing the required bsop_date field
+        mock_request.return_value = {"Output_0": [{"stck_clpr": "50500"}]}
 
         with pytest.raises(FatalExchangeError):
             await nh_adapter.get_ohlcv("005930", "1d", limit=1)
@@ -347,7 +328,7 @@ async def test_get_ohlcv_response_parsing_performance(
     large_response = {
         "Output_0": [
             {
-                "bsop_date": f"202609{24 - (i % 30):02d}",
+                "bsop_date": f"2026{1 + (i % 12):02d}{1 + (i % 28):02d}",
                 "stck_oppr": "50000",
                 "stck_hgpr": "51000",
                 "stck_lwpr": "49500",
@@ -360,9 +341,7 @@ async def test_get_ohlcv_response_parsing_performance(
         "message": "ok",
     }
 
-    with patch.object(
-        nh_adapter, "_request", new_callable=AsyncMock
-    ) as mock_request:
+    with patch.object(nh_adapter, "_request", new_callable=AsyncMock) as mock_request:
         mock_request.return_value = large_response
 
         start = time.perf_counter()
@@ -381,9 +360,7 @@ async def test_get_ohlcv_response_parsing_performance(
 @pytest.mark.asyncio
 async def test_get_ohlcv_empty_response(nh_adapter: NHAdapter) -> None:
     """Edge case: Empty response (no data) returns empty list."""
-    with patch.object(
-        nh_adapter, "_request", new_callable=AsyncMock
-    ) as mock_request:
+    with patch.object(nh_adapter, "_request", new_callable=AsyncMock) as mock_request:
         mock_request.return_value = {"Output_0": [], "message": "ok"}
 
         result = await nh_adapter.get_ohlcv("005930", "1d", limit=100)
@@ -396,9 +373,7 @@ async def test_get_ohlcv_zero_volume_handled(
     nh_adapter: NHAdapter, mock_current_daily_empty_volume: dict
 ) -> None:
     """Edge case: Missing acml_vol defaults to 0."""
-    with patch.object(
-        nh_adapter, "_request", new_callable=AsyncMock
-    ) as mock_request:
+    with patch.object(nh_adapter, "_request", new_callable=AsyncMock) as mock_request:
         mock_request.return_value = mock_current_daily_empty_volume
 
         result = await nh_adapter.get_ohlcv("005930", "1d", limit=1)
@@ -410,9 +385,7 @@ async def test_get_ohlcv_zero_volume_handled(
 @pytest.mark.asyncio
 async def test_get_ohlcv_limit_parameter_passed(nh_adapter: NHAdapter) -> None:
     """Contract: limit parameter is passed to API request."""
-    with patch.object(
-        nh_adapter, "_request", new_callable=AsyncMock
-    ) as mock_request:
+    with patch.object(nh_adapter, "_request", new_callable=AsyncMock) as mock_request:
         mock_request.return_value = {"Output_0": [], "message": "ok"}
 
         await nh_adapter.get_ohlcv("005930", "1d", limit=50)
@@ -427,9 +400,7 @@ async def test_get_ohlcv_limit_parameter_passed(nh_adapter: NHAdapter) -> None:
 @pytest.mark.asyncio
 async def test_get_ohlcv_request_body_format(nh_adapter: NHAdapter) -> None:
     """Contract: Request body matches NH API spec (Input_0 structure)."""
-    with patch.object(
-        nh_adapter, "_request", new_callable=AsyncMock
-    ) as mock_request:
+    with patch.object(nh_adapter, "_request", new_callable=AsyncMock) as mock_request:
         mock_request.return_value = {"Output_0": [], "message": "ok"}
 
         await nh_adapter.get_ohlcv("005930", "1d", limit=10)
@@ -477,9 +448,7 @@ async def test_get_ohlcv_multiple_symbols(nh_adapter: NHAdapter) -> None:
         },
     }
 
-    with patch.object(
-        nh_adapter, "_request", new_callable=AsyncMock
-    ) as mock_request:
+    with patch.object(nh_adapter, "_request", new_callable=AsyncMock) as mock_request:
 
         async def get_response(*args, **kwargs):
             body = kwargs.get("body", {})
