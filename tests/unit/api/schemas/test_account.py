@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from typing import cast
 from uuid import uuid4
 
 import pytest
@@ -39,7 +40,7 @@ def test_approval_settings_request_invalid_ack_type_raises() -> None:
 
 def test_approval_settings_request_missing_mode_raises() -> None:
     with pytest.raises(ValidationError):
-        ApprovalSettingsRequest()  # type: ignore[call-arg]
+        ApprovalSettingsRequest.model_validate({})
 
 
 def test_to_approval_settings_response_maps_fields() -> None:
@@ -66,15 +67,17 @@ def test_to_approval_settings_response_missing_attr_raises() -> None:
         risk_warning = None
 
     with pytest.raises(AttributeError):
-        to_approval_settings_response(_Broken())  # type: ignore[arg-type]
+        to_approval_settings_response(cast(ApprovalSettings, _Broken()))
 
 
 def test_whitelist_entry_request_missing_password_raises() -> None:
     with pytest.raises(ValidationError):
-        WhitelistEntryRequest(
-            exchange="bitget",
-            destination_address="0xabc",
-        )  # type: ignore[call-arg]
+        WhitelistEntryRequest.model_validate(
+            {
+                "exchange": "bitget",
+                "destination_address": "0xabc",
+            }
+        )
 
 
 def test_whitelist_entry_request_invalid_exchange_type_raises() -> None:
@@ -123,7 +126,7 @@ def test_whitelist_entry_response_invalid_id_type_raises() -> None:
 
 def test_deletion_request_missing_password_raises() -> None:
     with pytest.raises(ValidationError):
-        DeletionRequest()  # type: ignore[call-arg]
+        DeletionRequest.model_validate({})
 
 
 def test_deletion_response_invalid_datetime_raises() -> None:

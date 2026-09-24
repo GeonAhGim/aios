@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import dataclasses
 from datetime import datetime, timezone
+from typing import Any
 from uuid import uuid4
 
 import pytest
@@ -17,7 +18,7 @@ NOW = datetime(2026, 9, 24, tzinfo=timezone.utc)
 
 
 def _event(**overrides: object) -> AuditEvent:
-    defaults: dict[str, object] = dict(
+    defaults: dict[str, Any] = dict(
         id=uuid4(),
         tenant_id=uuid4(),
         sequence_no=1,
@@ -32,7 +33,7 @@ def _event(**overrides: object) -> AuditEvent:
         occurred_at=NOW,
     )
     defaults.update(overrides)
-    return AuditEvent(**defaults)  # type: ignore[arg-type]
+    return AuditEvent(**defaults)
 
 
 def test_construct_with_defaults():
@@ -61,24 +62,25 @@ def test_event_is_frozen_negative():
     """negative: append-only 감사 이벤트는 생성 후 필드 재할당이 금지된다."""
     event = _event()
     with pytest.raises(dataclasses.FrozenInstanceError):
-        event.action = "tampered"  # type: ignore[misc]
+        setattr(event, "action", "tampered")  # noqa: B010 -- must bypass mypy's frozen-assignment check, not the runtime one
 
 
 def test_missing_required_field_raises_negative():
     """negative: 필수 필드(payload_hash 등) 누락 시 TypeError로 즉시 실패한다."""
+    kwargs: dict[str, Any] = dict(
+        id=uuid4(),
+        tenant_id=uuid4(),
+        sequence_no=1,
+        aggregate_type="mandate_revision",
+        aggregate_id=uuid4(),
+        aggregate_revision=1,
+        action="mandate_activated",
+        outcome=Outcome.SUCCESS,
+        actor_subject_id=uuid4(),
+        trace_id=uuid4(),
+    )
     with pytest.raises(TypeError):
-        AuditEvent(  # type: ignore[call-arg]
-            id=uuid4(),
-            tenant_id=uuid4(),
-            sequence_no=1,
-            aggregate_type="mandate_revision",
-            aggregate_id=uuid4(),
-            aggregate_revision=1,
-            action="mandate_activated",
-            outcome=Outcome.SUCCESS,
-            actor_subject_id=uuid4(),
-            trace_id=uuid4(),
-        )
+        AuditEvent(**kwargs)
 
 
 def test_invalid_outcome_value_raises_negative():
