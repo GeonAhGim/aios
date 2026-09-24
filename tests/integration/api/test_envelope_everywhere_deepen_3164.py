@@ -37,6 +37,7 @@ from __future__ import annotations
 import os
 import time
 import uuid
+from collections.abc import AsyncGenerator
 
 import asyncpg
 import pytest
@@ -57,14 +58,14 @@ def _asyncpg_dsn() -> str:
 
 
 @pytest.fixture
-async def pool():  # type: ignore[no-untyped-def]
+async def pool() -> AsyncGenerator[asyncpg.Pool, None]:
     p = await asyncpg.create_pool(_asyncpg_dsn(), min_size=1, max_size=4)
     yield p
     await p.close()
 
 
 @pytest.fixture
-async def client():  # type: ignore[no-untyped-def]
+async def client() -> AsyncGenerator[AsyncClient, None]:
     async with app.router.lifespan_context(app):
         transport = ASGITransport(app=app, raise_app_exceptions=False)
         async with AsyncClient(transport=transport, base_url="http://test") as ac:

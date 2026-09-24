@@ -29,6 +29,7 @@ import pytest
 from src.core.logging.audit_log import record_audit_log
 from src.foundation.evidence.adapters.postgres_repository import PostgresAuditEventRepository
 from src.foundation.evidence.application.record_command_event import record_command_event
+from src.foundation.evidence.domain.models import AuditEvent, Classification, Outcome
 from src.foundation.evidence.domain.rules import UnsafePayloadError
 
 
@@ -114,12 +115,47 @@ async def test_record_command_event_propagates_repository_failure_without_swallo
         pass
 
     class _ExplodingRepo:
-        async def append_event(self, **kwargs: object) -> None:
+        async def append_event(
+            self,
+            *,
+            tenant_id: uuid.UUID | None,
+            aggregate_type: str,
+            aggregate_id: uuid.UUID,
+            aggregate_revision: int | None,
+            action: str,
+            outcome: Outcome,
+            actor_subject_id: uuid.UUID | None,
+            trace_id: uuid.UUID,
+            payload_hash: str,
+            payload: dict[str, object],
+            classification: Classification,
+        ) -> AuditEvent:
             raise _SimulatedDBFailure("simulated connection loss mid-commit")
+
+        async def list_timeline(
+            self,
+            tenant_id: uuid.UUID,
+            *,
+            cursor: str | None,
+            limit: int,
+            aggregate_type: str | None = None,
+            action: str | None = None,
+        ) -> tuple[list[AuditEvent], str | None]:
+            raise AssertionError("unused in this test")
+
+        async def list_chain_for_verification(
+            self, tenant_id: uuid.UUID | None
+        ) -> list[AuditEvent]:
+            raise AssertionError("unused in this test")
+
+        async def get_latest_event(
+            self, aggregate_type: str, aggregate_id: uuid.UUID, *, action: str
+        ) -> AuditEvent | None:
+            raise AssertionError("unused in this test")
 
     with pytest.raises(_SimulatedDBFailure):
         await record_command_event(
-            _ExplodingRepo(),  # type: ignore[arg-type]
+            _ExplodingRepo(),
             tenant_id=None,
             aggregate_type="test.plt07.failure",
             aggregate_id=uuid.uuid4(),

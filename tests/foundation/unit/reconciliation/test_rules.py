@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 from decimal import Decimal
+from typing import cast
 
 import pytest
 
@@ -117,8 +118,9 @@ def test_aggregate_classification_unclassified_states_fall_back_to_healthy():
 def test_compute_input_hash_raises_on_non_serializable_entities():
     """잘못된 입력(직렬화 불가능한 값) — json.dumps가 TypeError를 전파해야 하며
     조용히 성공한 것처럼 위장하지 않는다."""
+    bad_entities = cast("dict[str, tuple[str, str]]", {"BAD": (object(), "1")})
     with pytest.raises(TypeError):
-        compute_input_hash("target-1", {"BAD": (object(), "1")})  # type: ignore[dict-item]
+        compute_input_hash("target-1", bad_entities)
 
 
 def test_compute_input_hash_propagates_hashing_failure(monkeypatch):
