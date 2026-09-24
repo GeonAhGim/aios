@@ -12,6 +12,16 @@ import type { AnyConstructor } from "../http";
 // ":param" 치환이 있어 requestByRoute를 못 쓰므로 compliance.ts의
 // getComplianceDecision과 동일한 resolveEnvelope(route) ? requestEnvelope(path) :
 // request(path) 삼항을 쓴다(apiPaths.clientsScan.test.ts task-1160이 이 형태만 인정한다).
+
+// task-6856: fills/bars가 빈 배열이면 백엔드가 TCA를 계산할 수 없으므로(분모 0),
+// 요청을 보내기 전에 여기서 막는다 — foundation.ts의 requireIdempotencyKey와
+// 동일하게 런타임에서 거부하는 관용.
+function requireNonEmptyArray(value: unknown[], field: string): void {
+  if (!Array.isArray(value) || value.length === 0) {
+    throw new Error(`computeTca: "${field}"는 빈 배열일 수 없습니다.`);
+  }
+}
+
 export function withEms<TBase extends AnyConstructor>(Base: TBase) {
   return class extends Base {
     async getAlgoProgress(parentId: string): Promise<AlgoProgressResponse> {
@@ -38,6 +48,8 @@ export function withEms<TBase extends AnyConstructor>(Base: TBase) {
       parentId: string,
       request: ComputeTcaRequest,
     ): Promise<TcaResultResponse> {
+      requireNonEmptyArray(request.fills, "fills");
+      requireNonEmptyArray(request.bars, "bars");
       const path = resolvePath("ems.tca.compute").replace(":parentId", parentId);
       return this.postEnvelope(path, request);
     }

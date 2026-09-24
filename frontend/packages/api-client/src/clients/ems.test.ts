@@ -163,9 +163,9 @@ describe("withEms", () => {
     const error = new Error("Compute failed");
     const request: ComputeTcaRequest = {
       side: "SELL",
-      fills: [],
+      fills: [{ price: "100", qty: "10" }],
       priceAtArrivalTs: "100",
-      bars: [],
+      bars: [{ close: "100", volume: "1000" }],
       spreadCost: "0",
       fees: "0",
       totalCost: "0",
@@ -180,5 +180,71 @@ describe("withEms", () => {
     await expect(
       client.computeTca("550e8400-e29b-41d4-a716-446655440000", request),
     ).rejects.toThrow("Compute failed");
+  });
+
+  // task-6856: fills/bars가 빈 배열이면 서버가 0으로 나누는 등 계산 자체가
+  // 성립하지 않는다(적색 게이트 재현) — 요청을 보내기 전에 클라이언트가 거부해야 한다.
+  it("rejects computeTca before sending the request when fills is empty", async () => {
+    const request: ComputeTcaRequest = {
+      side: "BUY",
+      fills: [],
+      priceAtArrivalTs: "100",
+      bars: [{ close: "100", volume: "1000" }],
+      spreadCost: "0",
+      fees: "0",
+      totalCost: "0",
+      computedAt: "2026-09-23T10:30:00Z",
+    };
+    client.postEnvelope = vi.fn();
+
+    await expect(
+      client.computeTca("550e8400-e29b-41d4-a716-446655440000", request),
+    ).rejects.toThrow(/fills/);
+    expect(client.postEnvelope).not.toHaveBeenCalled();
+  });
+
+  it("rejects computeTca before sending the request when bars is empty", async () => {
+    const request: ComputeTcaRequest = {
+      side: "BUY",
+      fills: [{ price: "100", qty: "10" }],
+      priceAtArrivalTs: "100",
+      bars: [],
+      spreadCost: "0",
+      fees: "0",
+      totalCost: "0",
+      computedAt: "2026-09-23T10:30:00Z",
+    };
+    client.postEnvelope = vi.fn();
+
+    await expect(
+      client.computeTca("550e8400-e29b-41d4-a716-446655440000", request),
+    ).rejects.toThrow(/bars/);
+    expect(client.postEnvelope).not.toHaveBeenCalled();
+  });
+
+  // 수치 성능 단언(D2 하한): fills/bars가 큰 배열이어도 빈 배열 검증 자체는
+  // O(1)에 가까워야 한다 — 검증 로직이 실수로 배열을 순회/복사하는 회귀를 잡는다.
+  it("validates a large fills/bars payload well within budget", async () => {
+    const request: ComputeTcaRequest = {
+      side: "BUY",
+      fills: Array.from({ length: 5000 }, () => ({ price: "100", qty: "1" })),
+      priceAtArrivalTs: "100",
+      bars: Array.from({ length: 5000 }, () => ({ close: "100", volume: "1" })),
+      spreadCost: "0",
+      fees: "0",
+      totalCost: "0",
+      computedAt: "2026-09-23T10:30:00Z",
+    };
+
+    vi.spyOn(apiPaths, "resolvePath").mockReturnValue(
+      "/v1/foundation/ems/tca/:parentId:compute",
+    );
+    client.postEnvelope = vi.fn().mockResolvedValue({});
+
+    const startedAt = performance.now();
+    await client.computeTca("550e8400-e29b-41d4-a716-446655440000", request);
+    const elapsedMs = performance.now() - startedAt;
+
+    expect(elapsedMs).toBeLessThan(50);
   });
 });

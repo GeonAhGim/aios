@@ -433,6 +433,10 @@ export const catalogEn = {
     recomputeTitle: "Recompute TCA",
     compute: "Compute",
     cancel: "Cancel",
+    fillsLabel: "Fills (JSON)",
+    barsLabel: "Bars (JSON)",
+    invalidJson: "Invalid JSON format.",
+    emptyFillsOrBars: "Fills and bars cannot be empty.",
   },
   performanceStatementsPage: {
     title: "Performance statements",

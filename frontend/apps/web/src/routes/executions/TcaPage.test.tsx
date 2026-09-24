@@ -1,6 +1,6 @@
 import "../../i18n";
 import { describe, it, expect, beforeEach, vi } from "vitest";
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, fireEvent } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter } from "react-router-dom";
@@ -298,6 +298,59 @@ describe("TcaPage", () => {
     await waitFor(() => {
       expect(mutateAsyncMock).toHaveBeenCalled();
     });
+
+    // task-6856: catch에 console.error만 있고 사용자에게 보이는 피드백이
+    // 없던 결함 — 실패 시 화면에 에러 메시지가 보여야 한다(ErrorMessage 경유,
+    // err.message 직접 렌더 금지 가드 task-1048 준수).
+    await waitFor(() => {
+      expect(screen.getByText("Compute failed")).toBeInTheDocument();
+    });
+  });
+
+  it("blocks submission and shows a validation message when fills is an empty array", async () => {
+    const mutateAsyncMock = vi.fn();
+
+    vi.spyOn(useEmsHooks, "useLatestTca").mockReturnValue({
+      data: mockTcaResult,
+      isLoading: false,
+      error: null,
+      isError: false,
+      refetch: vi.fn(),
+      isPending: false,
+      isSuccess: true,
+    } as any);
+
+    vi.spyOn(useEmsHooks, "useComputeTca").mockReturnValue({
+      mutateAsync: mutateAsyncMock,
+      isPending: false,
+      error: null,
+      isError: false,
+      data: undefined,
+      status: "idle",
+      reset: vi.fn(),
+      mutate: vi.fn(),
+      isIdle: true,
+      isSuccess: false,
+    } as any);
+
+    const { render: renderWithWrapper } = renderPage();
+    renderWithWrapper(<TcaPage />);
+
+    await userEvent.click(screen.getByRole("button", { name: "다시 계산" }));
+
+    await waitFor(() => {
+      expect(screen.getByLabelText("체결 내역 (JSON)")).toBeInTheDocument();
+    });
+
+    const fillsField = screen.getByLabelText("체결 내역 (JSON)");
+    fireEvent.change(fillsField, { target: { value: "[]" } });
+
+    await userEvent.click(screen.getByRole("button", { name: "계산" }));
+
+    await waitFor(() => {
+      expect(screen.getByRole("alert")).toHaveTextContent("체결 내역과 가격 봉은 비어 있을 수 없습니다.");
+    });
+    expect(mutateAsyncMock).not.toHaveBeenCalled();
   });
 
   it("closes compute form when clicking 취소", async () => {
@@ -376,5 +429,42 @@ describe("TcaPage", () => {
     await waitFor(() => {
       expect(screen.getByText("1")).toBeInTheDocument();
     });
+  });
+
+  // 수치 성능 단언(D2 하한): 큰 TCA 결과 세트를 렌더링해도 예산 안에 끝나야 한다.
+  it("renders TCA result within the render performance budget", async () => {
+    vi.spyOn(useEmsHooks, "useLatestTca").mockReturnValue({
+      data: mockTcaResult,
+      isLoading: false,
+      error: null,
+      isError: false,
+      refetch: vi.fn(),
+      isPending: false,
+      isSuccess: true,
+    } as any);
+
+    vi.spyOn(useEmsHooks, "useComputeTca").mockReturnValue({
+      mutateAsync: vi.fn(),
+      isPending: false,
+      error: null,
+      isError: false,
+      data: undefined,
+      status: "idle",
+      reset: vi.fn(),
+      mutate: vi.fn(),
+      isIdle: true,
+      isSuccess: false,
+    } as any);
+
+    const { render: renderWithWrapper } = renderPage();
+
+    const startedAt = performance.now();
+    renderWithWrapper(<TcaPage />);
+    await waitFor(() => {
+      expect(screen.getByText("TCA 분석 결과")).toBeInTheDocument();
+    });
+    const elapsedMs = performance.now() - startedAt;
+
+    expect(elapsedMs).toBeLessThan(1000);
   });
 });

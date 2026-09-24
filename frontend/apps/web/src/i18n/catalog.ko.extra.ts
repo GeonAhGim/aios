@@ -30,6 +30,10 @@ export const catalogKoExtra = {
     recomputeTitle: "TCA 재계산",
     compute: "계산",
     cancel: "취소",
+    fillsLabel: "체결 내역 (JSON)",
+    barsLabel: "가격 봉 (JSON)",
+    invalidJson: "JSON 형식이 올바르지 않습니다.",
+    emptyFillsOrBars: "체결 내역과 가격 봉은 비어 있을 수 없습니다.",
   },
   performanceStatementsPage: {
     title: "실적 명세서",

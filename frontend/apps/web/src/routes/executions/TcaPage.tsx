@@ -24,9 +24,11 @@ import { useTranslation } from "react-i18next";
 function TcaResultDisplay({
   parentId,
   onComputeTca,
+  computeError,
 }: {
   parentId: string;
   onComputeTca: (request: ComputeTcaRequest) => void;
+  computeError: Error | null;
 }) {
   const { t } = useTranslation();
   const { data: tcaResult, isLoading, error, refetch } = useLatestTca(parentId);
@@ -49,6 +51,7 @@ function TcaResultDisplay({
               onSubmit={onComputeTca}
               onClose={() => setShowComputeForm(false)}
               isLoading={computeMutation.isPending}
+              computeError={computeError}
             />
           )}
         </div>
@@ -121,6 +124,7 @@ function TcaResultDisplay({
               onSubmit={onComputeTca}
               onClose={() => setShowComputeForm(false)}
               isLoading={computeMutation.isPending}
+              computeError={computeError}
             />
           )}
         </div>
@@ -134,27 +138,48 @@ function ComputeTcaForm({
   onSubmit,
   onClose,
   isLoading,
+  computeError,
 }: {
   parentId: string;
   onSubmit: (request: ComputeTcaRequest) => void;
   onClose: () => void;
   isLoading: boolean;
+  computeError: Error | null;
 }) {
   const { t } = useTranslation();
   const [side, setSide] = useState<"BUY" | "SELL">("BUY");
   const [priceAtArrival, setPriceAtArrival] = useState("100");
+  const [fillsJson, setFillsJson] = useState('[{"price": "100", "qty": "10"}]');
+  const [barsJson, setBarsJson] = useState('[{"close": "100", "volume": "1000"}]');
   const [spreadCost, setSpreadCost] = useState("0");
   const [fees, setFees] = useState("0");
   const [totalCost, setTotalCost] = useState("0");
   const [revision, setRevision] = useState("1");
+  const [formError, setFormError] = useState<string | null>(null);
 
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
+    setFormError(null);
+
+    let fills: unknown;
+    let bars: unknown;
+    try {
+      fills = JSON.parse(fillsJson);
+      bars = JSON.parse(barsJson);
+    } catch {
+      setFormError(t("tcaPage.invalidJson"));
+      return;
+    }
+    if (!Array.isArray(fills) || fills.length === 0 || !Array.isArray(bars) || bars.length === 0) {
+      setFormError(t("tcaPage.emptyFillsOrBars"));
+      return;
+    }
+
     const request: ComputeTcaRequest = {
       side,
-      fills: [],
+      fills,
       priceAtArrivalTs: priceAtArrival,
-      bars: [],
+      bars,
       spreadCost,
       fees,
       totalCost,
@@ -232,6 +257,30 @@ function ComputeTcaForm({
               className="w-full rounded border border-border px-2 py-1 text-sm"
             />
           </div>
+          <div className="col-span-2">
+            <label htmlFor="tca-compute-fills" className="block text-sm font-medium text-fg">
+              {t("tcaPage.fillsLabel")}
+            </label>
+            <textarea
+              id="tca-compute-fills"
+              value={fillsJson}
+              onChange={(e) => setFillsJson(e.target.value)}
+              rows={2}
+              className="w-full rounded border border-border px-2 py-1 font-mono text-sm"
+            />
+          </div>
+          <div className="col-span-2">
+            <label htmlFor="tca-compute-bars" className="block text-sm font-medium text-fg">
+              {t("tcaPage.barsLabel")}
+            </label>
+            <textarea
+              id="tca-compute-bars"
+              value={barsJson}
+              onChange={(e) => setBarsJson(e.target.value)}
+              rows={2}
+              className="w-full rounded border border-border px-2 py-1 font-mono text-sm"
+            />
+          </div>
           <div>
             <label htmlFor="tca-compute-total-cost" className="block text-sm font-medium text-fg">
               Total Cost
@@ -245,6 +294,17 @@ function ComputeTcaForm({
             />
           </div>
         </div>
+        {formError && (
+          <p role="alert" className="text-sm text-danger">
+            {formError}
+          </p>
+        )}
+        {!formError && computeError && (
+          <ErrorMessage
+            errorCode={computeError instanceof ApiError ? computeError.errorCode : undefined}
+            message={computeError.message}
+          />
+        )}
         <div className="flex gap-2">
           <Button
             type="submit"
@@ -271,6 +331,7 @@ export function TcaPage() {
   const { t } = useTranslation();
   const { parentId } = useParams<{ parentId: string }>();
   const computeMutation = useComputeTca();
+  const [computeError, setComputeError] = useState<Error | null>(null);
 
   if (!parentId) {
     return (
@@ -281,12 +342,14 @@ export function TcaPage() {
   }
 
   async function handleComputeTca(request: ComputeTcaRequest) {
+    setComputeError(null);
     try {
       // parentId is validated non-empty by the `if (!parentId)` return above; TS
       // control-flow narrowing doesn't carry into this nested function declaration.
       await computeMutation.mutateAsync({ parentId: parentId!, request });
     } catch (err) {
       console.error("Failed to compute TCA:", err);
+      setComputeError(err instanceof Error ? err : new Error(String(err)));
     }
   }
 
@@ -297,6 +360,7 @@ export function TcaPage() {
         <TcaResultDisplay
           parentId={parentId}
           onComputeTca={handleComputeTca}
+          computeError={computeError}
         />
       </div>
     </AppShell>
