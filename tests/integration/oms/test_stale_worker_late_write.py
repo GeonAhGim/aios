@@ -57,6 +57,20 @@ from tests.support.oms_outbox_fakes import (
 )
 
 
+@pytest.fixture(autouse=True)
+async def _clear_outbox_leftovers(pool):
+    """`order_command_outbox`는 워커 DB 전체가 공유하는 테이블이고 `dispatch_once()`의
+    `claim_batch`는 특정 주문으로 좁히지 않고 PENDING 행 전부를 선점한다. 같은 xdist
+    워커에서 앞서 돈 파일이 VALIDATED 주문의 PENDING SUBMIT 행을 남기면 워커 A가 그
+    행을 먼저 처리해 `gate.started`가 **다른 주문**의 place()에서 켜지고, 이 테스트는
+    자기 주문을 아직 VALIDATED로 읽어 적색이 된다(CI main run #824·#823, 로컬 xdist
+    재현: leftover 1행 심으면 결정적으로 실패). test_crash_between_send_and_commit.py·
+    test_outbox_repository.py와 같은 해법 — 테스트 전에 outbox를 비운다."""
+    async with pool.acquire() as conn:
+        await conn.execute("DELETE FROM order_command_outbox")
+    yield
+
+
 class _Gate:
     """전송 시작 신호 + 응답 보류 — 테스트가 그 사이에 복구를 끼워 넣는다."""
 
