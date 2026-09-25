@@ -207,6 +207,7 @@ def test_compile_with_imports_propagates_injected_registry_failure_fail_closed()
 # ---- DEEPEN(task-2935): 수치 성능 단언(import 해석 지연) ----
 
 
+@pytest.mark.perf
 def test_resolve_imports_diamond_graph_visits_each_library_once() -> None:
     """`resolved` 캐시(imports.py: `if ref.key() in resolved: return`)가
     없다면 다이아몬드형(공유 의존) import 그래프의 방문 횟수는 depth에

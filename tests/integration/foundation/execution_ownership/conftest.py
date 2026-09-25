@@ -16,6 +16,7 @@ import asyncpg
 import pytest
 
 from tests.integration.conftest import create_test_user
+from tests.support.db import create_pool_with_retry
 
 
 def _asyncpg_dsn() -> str:
@@ -25,7 +26,11 @@ def _asyncpg_dsn() -> str:
 
 @pytest.fixture
 async def pool():
-    p = await asyncpg.create_pool(_asyncpg_dsn(), min_size=1, max_size=8)
+    # esc-ci-pytest.json/task-6283: bounded retry absorbs the transient Windows
+    # TCP reset (WinError 64 / asyncpg.ConnectionDoesNotExistError) that can hit
+    # the initial connect -- see tests/support/db.py's create_pool_with_retry
+    # docstring and tests/adversarial/risk/conftest.py's identical fix (task-6235).
+    p = await create_pool_with_retry(_asyncpg_dsn(), min_size=1, max_size=8)
     yield p
     await p.close()
 

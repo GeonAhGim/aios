@@ -36,7 +36,7 @@ from typing import NamedTuple
 
 from src.data.models.trading import OrderSide
 from src.foundation.backtest.domain.models import BacktestMetrics, EquityPoint, SimulatedFill
-from src.foundation.performance.domain.risk_metrics import calmar
+from src.foundation.performance.api import calmar
 
 _ANNUALIZATION_MIN_SAMPLES = 2  # stdev 계산에 필요한 최소 수익률 표본 수
 

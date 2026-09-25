@@ -33,8 +33,8 @@ from src.foundation.backtest.vector.experiment_ledger import (
     record_grid_entry,
 )
 from src.foundation.backtest.vector.fills import VectorSignal, run_vector_backtest
+from src.foundation.market_data.api import CandleColumns
 from src.foundation.market_data.contracts.v1 import Timeframe
-from src.foundation.market_data.domain.candle_columns import CandleColumns
 
 __all__ = ["GridSweepResult", "sweep_grid", "sweep_grid_and_record"]
 

@@ -1,4 +1,6 @@
 """16.1 단위테스트 — 순수 상한 검증 로직."""
+
+import decimal
 from decimal import Decimal
 
 import pytest
@@ -66,4 +68,28 @@ def test_non_positive_allocation_rejected():
     with pytest.raises(CapitalAllocationError):
         validate_capital_allocation(
             Decimal("0"), Decimal("10000"), certified_badge=True, policy=POLICY
+        )
+
+
+def test_negative_allocation_rejected():
+    with pytest.raises(CapitalAllocationError):
+        validate_capital_allocation(
+            Decimal("-1"), Decimal("10000"), certified_badge=True, policy=POLICY
+        )
+
+
+def test_negative_balance_rejected():
+    with pytest.raises(CapitalAllocationError):
+        validate_capital_allocation(
+            Decimal("100"), Decimal("-10000"), certified_badge=True, policy=POLICY
+        )
+
+
+def test_policy_attribute_failure_propagates(monkeypatch):
+    # 의존성(정책 로더) 예외 주입 — 잘못된 값이 조용히 통과하지 않고
+    # 그대로 전파되는지 확인(fail-closed).
+    monkeypatch.setattr(POLICY, "unverified_max_pct", "not-a-number", raising=False)
+    with pytest.raises(decimal.InvalidOperation):
+        validate_capital_allocation(
+            Decimal("1000"), Decimal("10000"), certified_badge=False, policy=POLICY
         )

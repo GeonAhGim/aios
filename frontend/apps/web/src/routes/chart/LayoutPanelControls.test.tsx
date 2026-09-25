@@ -2,6 +2,7 @@ import "../../i18n";
 import "@testing-library/jest-dom/vitest";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { perfBudgetMs } from "../../test/perfBudget";
 import type { ChartLayoutControls } from "./ChartToolbar";
 import { LayoutPanelControls } from "./LayoutPanelControls";
 
@@ -126,6 +127,6 @@ describe("LayoutPanelControls 성능 단언(CH-19 레이아웃 패널)", () => {
     const elapsed = performance.now() - start;
 
     expect(screen.getByRole("tab", { name: "패널 1" })).toBeInTheDocument();
-    expect(elapsed).toBeLessThan(50);
+    expect(elapsed).toBeLessThan(perfBudgetMs(50));
   });
 });

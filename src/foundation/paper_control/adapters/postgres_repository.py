@@ -1,12 +1,12 @@
-"""PaperControlRepository의 asyncpg 구현.
+"""Asyncpg implementation of PaperControlRepository.
 
-Spec: AIOSproject 77번 §2/§3, 105번(동시성 표준).
+Spec: AIOSproject #77 §2/§3, #105 (concurrency standard).
 
-increment_fence()는 상태 전이와 fence 증가를 하나의 UPDATE로 묶는다 —
-conditional_write.py의 conditional_update()는 "새 값으로 SET"만 지원하고
-"현재 값 + 1" 같은 상대 증가식은 지원하지 않아 여기서는 직접 SQL을 쓴다
-(105번 §2.2 예외 기준 — 이 쿼리 자체가 이미 `WHERE state = $2` 조건부라
-표준의 핵심 원칙은 그대로 지킨다)."""
+increment_fence() bundles state transition and fence increment into a single UPDATE —
+conditional_update() in conditional_write.py only supports "SET to new value" and
+does not support relative expressions like "current value + 1", so we write raw SQL here
+(standard #105 §2.2 exception — this query already carries a `WHERE state = $2` guard,
+so it fully satisfies the core principle of the standard)."""
 from __future__ import annotations
 
 from datetime import datetime, timezone
@@ -135,9 +135,9 @@ class PostgresPaperControlRepository:
                 deployment.request_digest,
             )
             if row is None:
-                # 경합에서 졌다 — 이미 같은 (tenant_id, request_idempotency_key)로
-                # 다른 요청이 먼저 커밋했다. 그 행을 그대로 돌려준다(CON-006과
-                # 같은 ON CONFLICT DO NOTHING + 재조회 패턴).
+                # Lost the race — another request with the same
+                # (tenant_id, request_idempotency_key) already committed. Return that row
+                # as-is (ON CONFLICT DO NOTHING + re-read pattern per CON-006).
                 assert deployment.request_idempotency_key is not None
                 row = await conn.fetchrow(
                     "SELECT * FROM paper_deployment "

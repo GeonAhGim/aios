@@ -1,16 +1,19 @@
-"""DSL-12 — `POST /v1/scripts/compile` 요청·응답 스키마.
+"""DSL-12 — `POST /v1/scripts/compile` request/response schema.
 
 Spec: docs/specs/L4_analytics_authoring_backtest_marketplace_v1.0.md#§9.4 DSL-12.
 
-응답은 아티팩트 신원(`script_hash`와 그 네 입력의 버전들)과 DSL-6 자원
-산정치, IR 요약(sha256·명령 수)만 싣는다 — IR 본문은 싣지 않는다(DSL-13
-편집기 미리보기는 해시·산정치·오류 위치만 쓰고, IR 본문이 필요해지면
-필드 추가는 minor라 그때 얹는다). 오류 응답은 별도 스키마가 없다 — 전역
-핸들러의 `ApiError` 봉투(`details.code/line/col`)가 계약이다.
+The response carries only artifact identity (`script_hash` plus the four
+input versions), the DSL-6 resource estimate, and IR summary
+(sha256 · instruction count) — it does not load the IR body (DSL-13
+editor preview uses only hashes, estimates, and error locations; adding
+fields is a minor change and can be done later if needed). Error
+responses have no dedicated schema — the global handler's `ApiError`
+envelope (`details.code/line/col`) is the contract.
 
-`MAX_SOURCE_CHARS`는 렉서에 닿기 전 전송 계층 상한이다(자원 상한은 DSL-6이
-AST 기준으로 따로 건다). 초과는 pydantic이 `VALIDATION_INVALID_FIELD`
-(details.fields)로 거부한다.
+`MAX_SOURCE_CHARS` is the transport-layer ceiling before it reaches the
+lexer (the resource ceiling is enforced separately by DSL-6 on AST
+counts). Over-limit payloads are rejected by pydantic as
+`VALIDATION_INVALID_FIELD` (`details.fields`).
 """
 from __future__ import annotations
 

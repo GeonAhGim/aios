@@ -14,7 +14,7 @@ from dataclasses import dataclass
 from typing import Literal
 from uuid import UUID
 
-from src.foundation.entities.domain.defaults import (
+from src.foundation.entities.api import (
     default_entity_id,
     default_fund_id,
     default_portfolio_id,

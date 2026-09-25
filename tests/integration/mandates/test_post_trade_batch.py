@@ -255,6 +255,7 @@ async def test_market_abuse_warn_only_leaves_gate_open(
     assert decision.outcome == GateOutcome.ALLOW
 
 
+@pytest.mark.perf
 async def test_batch_meets_tenant_throughput_floor(
     pool: asyncpg.Pool, kill_switch: KillSwitchService, risk_gate_repo
 ) -> None:

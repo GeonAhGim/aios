@@ -16,6 +16,8 @@ import time
 from pathlib import Path
 from types import ModuleType
 
+import pytest
+
 ROOT = Path(__file__).resolve().parents[3]
 SCRIPTS_DIR = ROOT / "scripts"
 
@@ -202,6 +204,7 @@ def test_current_repository_has_zero_duplicate_idempotency_scope_type_names() ->
     assert finding is None
 
 
+@pytest.mark.perf
 def test_check_ledger_balance_raw_seed_completes_within_time_budget(tmp_path, monkeypatch) -> None:
     """성능단언: 대규모 저장소(수천 개 테스트 파일)에서도 raw seed 스캔이 예산
     내에 끝나는지, 그리고 그 규모 속에서도 유일한 위반을 정확히 찾는지 확인한다."""
@@ -304,6 +307,7 @@ def test_main_exits_red_when_a_checker_crash_is_a_new_unbaselined_finding(
     assert "checker_error__raising_check" in out
 
 
+@pytest.mark.perf
 def test_run_completes_within_time_budget_when_many_checkers_fail(monkeypatch) -> None:
     """성능단언: 격리 로직(try/except)이 검사 수백 개 규모에서도 예외 처리
     오버헤드로 예산을 넘기지 않는지 확인한다."""

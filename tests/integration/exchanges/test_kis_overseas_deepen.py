@@ -218,6 +218,7 @@ def _fast_success_handler(captured: list[httpx.Request]):
     return handler
 
 
+@pytest.mark.perf
 async def test_overseas_dispatch_routing_overhead_bounded_vs_raw_request_baseline() -> None:
     """`dispatch_place_order`의 US_EQUITY 분기(symbol 파싱 + 거래소 코드
     조회 + place_overseas_order)가 원시 `_request` 왕복 하나만 하는 것과

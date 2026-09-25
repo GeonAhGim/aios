@@ -1,10 +1,10 @@
-"""LA-5 — market_data 캔들/틱 정체(stale) 탐지.
+"""LA-5 — Detect stale market_data candles/ticks.
 
 Spec: docs/specs/L4_market_data_positions_ledger_v1.0.md#§2.2 LA-5, §9.2 LA-5.
 
-세션이 닫혀 있으면 새 캔들이 애초에 생기지 않으므로 정체가 아니다 —
-`session_open`은 호출자가 `calendar.VenueCalendar.is_open`으로 판단해
-넘긴다(이 모듈은 세션 판정을 재구현하지 않는다).
+When the session is closed, no new candles can form, so that is not staleness —
+`session_open` is decided by the caller via `calendar.VenueCalendar.is_open`
+(this module does not reimplement session adjudication).
 """
 from __future__ import annotations
 
@@ -24,10 +24,11 @@ __all__ = ["detect_stale"]
 def detect_stale(
     last_ts: datetime, now: datetime, tf: Timeframe, session_open: bool, k: int = 3
 ) -> QualityIssue | None:
-    """세션이 열려 있고 `now - last_ts`가 `k × duration(tf)`를 초과하면
-    STALE(WARN). 세션이 닫혀 있거나 경과가 임계 이하이면 `None`."""
+    """Return STALE(WARN) when the session is open and `now - last_ts` exceeds
+    `k × duration(tf)`. Returns `None` when the session is closed or elapsed
+    time is within the threshold."""
     if last_ts.tzinfo is None or now.tzinfo is None:
-        raise ValueError("detect_stale은 tz-aware datetime만 받는다")
+        raise ValueError("detect_stale accepts tz-aware datetime only")
     if not session_open:
         return None
     threshold = k * duration(tf)

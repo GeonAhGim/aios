@@ -27,7 +27,6 @@ docs/audit/DEPTH_DC_RD.md#1179) D1 -> D3 증빙.
 
 from __future__ import annotations
 
-import time
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from uuid import UUID, uuid4
@@ -44,6 +43,7 @@ from src.foundation.market_data.domain.entitlement.policy import (
     FeedRequest,
     allowed,
 )
+from tests.conftest import PerfBudget
 
 _TENANT = UUID("11111111-1111-1111-1111-111111111111")
 _OTHER_TENANT = UUID("22222222-2222-2222-2222-222222222222")
@@ -213,12 +213,14 @@ def test_adversarial_grant_list_mixing_wrong_tenant_and_wrong_subject_is_still_f
 
 
 @pytest.mark.perf
-def test_allowed_with_large_grant_list_meets_latency_budget() -> None:
+def test_allowed_with_large_grant_list_meets_latency_budget(
+    perf_budget: PerfBudget,
+) -> None:
     """5,000건의 grants를 가진 subject에 대한 단건 판정이 절대시간 예산
     내에 있어야 한다(선형 스캔이 이차 이상으로 퇴화하면 실시간 판정 경로가
     다건 이용권 테넌트에서 지연 SLA를 못 지킨다)."""
     n = 5_000
-    budget_sec = 1.0  # 실측 로컬 <0.05s
+    budget_ms = 1000.0  # 실측 로컬 <0.05s
     grants = tuple(
         _grant(
             instrument_ids=frozenset({f"SYM{i}-USDT"}),
@@ -231,41 +233,44 @@ def test_allowed_with_large_grant_list_meets_latency_budget() -> None:
     target = _grant(realtime=True)
     subject = _subject(grants=grants + (target,))
 
-    start = time.perf_counter()
-    result = allowed(subject, _feed(), _dt(1))
-    elapsed = time.perf_counter() - start
+    result = None
 
-    print(f"[DC-9 policy] allowed() with {n + 1} grants in {elapsed:.4f}s (budget<{budget_sec}s)")
+    def _run() -> None:
+        nonlocal result
+        result = allowed(subject, _feed(), _dt(1))
+
+    perf_budget.assert_within(
+        _run,
+        budget_ms=budget_ms,
+        label=f"allowed() with {n + 1} grants",
+    )
+    assert result is not None
     assert result.allowed is True
     assert result.mode == "realtime"
-    assert elapsed < budget_sec, (
-        f"grants {n + 1}건 판정이 예산({budget_sec}s)을 넘었습니다({elapsed:.4f}s)."
-    )
 
 
 @pytest.mark.perf
-def test_repeated_allowed_calls_meet_throughput_budget() -> None:
+def test_repeated_allowed_calls_meet_throughput_budget(
+    perf_budget: PerfBudget,
+) -> None:
     """동일 subject/feed에 대한 반복 판정(캐시 미스 시뮬레이션 — 매 호출이
     호출자 쪽에서 재구성한 새 DTO를 받는 상황)이 처리량 예산을 지켜야
     한다."""
     iterations = 10_000
-    budget_sec = 6.0  # 실측 로컬 <0.3s, CI 환경 편차 감안
+    budget_ms = 6000.0  # 실측 로컬 <0.3s, CI 환경 편차 감안
     grant = _grant(realtime=False, delayed_seconds=120)
     subject = _subject(grants=(grant,))
     feed = _feed()
 
-    start = time.perf_counter()
-    for i in range(iterations):
-        result = allowed(subject, feed, _dt(1, hour=i % 24))
-        assert result.allowed is True
-    elapsed = time.perf_counter() - start
+    def _run() -> None:
+        for i in range(iterations):
+            result = allowed(subject, feed, _dt(1, hour=i % 24))
+            assert result.allowed is True
 
-    print(
-        f"[DC-9 policy] allowed() x{iterations} repeated calls in {elapsed:.3f}s "
-        f"(budget<{budget_sec}s)"
-    )
-    assert elapsed < budget_sec, (
-        f"allowed() {iterations}회 반복이 예산({budget_sec}s)을 넘었습니다({elapsed:.3f}s)."
+    perf_budget.assert_within(
+        _run,
+        budget_ms=budget_ms,
+        label=f"allowed() x{iterations} repeated calls",
     )
 
 

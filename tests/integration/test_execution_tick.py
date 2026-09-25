@@ -444,12 +444,47 @@ async def test_concurrent_tick_race_only_submits_one_order(pool):
     assert fsm_state == "BUY_ORDER_PENDING"  # "다른 tick"이 쓴 값 그대로 — 이 tick이 덮어쓰지 않음
 
 
-async def test_cancelled_order_reverts_fsm_state_instead_of_getting_stuck(pool):
-    """PM 배정(agent-platform-12, 2026-09-02, 레드팀 #39) 회귀 테스트 —
-    이전엔 PENDING 상태에서 마지막 주문이 체결 없이 종결(CANCELLED 등)되면
-    fsm_state가 영원히 PENDING에 갇혀 이후 어떤 신호도 재평가되지 않았다.
-    지금은 신호평가로 그 PENDING에 들어오기 전 상태(IDLE)로 되돌아가야
-    한다."""
+async def _insert_terminal_order(
+    pool: asyncpg.Pool,
+    *,
+    user_id: uuid.UUID,
+    execution_id: int,
+    strategy_id: str,
+    strategy_version: str,
+    status: str,
+) -> None:
+    await pool.execute(
+        """
+        INSERT INTO orders (
+            order_id, user_id, client_order_id, exchange_order_id, strategy_id,
+            strategy_version, execution_id, symbol, exchange, side, order_type,
+            quantity, status, filled_quantity, is_liquidation, asset_class
+        ) VALUES (
+            gen_random_uuid(), $1, $2, $3, $4, $5,
+            $6, 'BTC/USDT', 'bitget', 'BUY', 'MARKET', 0.01, $7, 0, false, 'CRYPTO'
+        )
+        """,
+        user_id,
+        f"{status.lower()}-{uuid.uuid4().hex}",
+        f"ex-{status.lower()}-{uuid.uuid4().hex[:8]}",
+        strategy_id,
+        strategy_version,
+        execution_id,
+        status,
+    )
+
+
+@pytest.mark.parametrize("terminal_status", ["CANCELLED", "REJECTED", "EXPIRED"])
+async def test_failed_terminal_order_reverts_fsm_state_and_allows_resubmission(
+    pool, terminal_status
+):
+    """레드팀 #2026-09-02-39 회귀 테스트(3경로) — PENDING 상태에서 마지막
+    주문이 체결 없이 취소/거부/만료로 종결되면, 이전엔 fsm_state가
+    BUY/SELL_ORDER_PENDING에 영원히 갇혀 이후 어떤 신호도 재평가되지
+    않았다. 지금은 신호평가로 그 PENDING에 들어오기 전 상태(IDLE)로
+    되돌아가야 하고, 그 뒤 tick에서 새 주문이 실제로 다시 나가야 한다
+    (되돌림만 확인하고 끝나면 fsm_state 컬럼값만 맞고 거래는 여전히
+    멈춰 있는 회귀를 놓친다)."""
     user_id = await create_test_tenant(pool)
     execution_id = await _create_execution(pool, user_id, entry_threshold=100.0)
     async with pool.acquire() as conn:
@@ -461,32 +496,83 @@ async def test_cancelled_order_reverts_fsm_state_instead_of_getting_stuck(pool):
             "UPDATE strategy_executions SET fsm_state = 'BUY_ORDER_PENDING' WHERE id = $1",
             execution_id,
         )
-        await conn.execute(
-            """
-            INSERT INTO orders (
-                order_id, user_id, client_order_id, exchange_order_id, strategy_id,
-                strategy_version, execution_id, symbol, exchange, side, order_type,
-                quantity, status, filled_quantity, is_liquidation, asset_class
-            ) VALUES (
-                gen_random_uuid(), $1, $2, 'ex-cancelled-1', $3, $4,
-                $5, 'BTC/USDT', 'bitget', 'BUY', 'MARKET', 0.01, 'CANCELLED', 0, false, 'CRYPTO'
-            )
-            """,
-            user_id,
-            f"cancelled-{uuid.uuid4().hex}",
-            execution["strategy_id"],
-            execution["strategy_version"],
-            execution_id,
-        )
+    await _insert_terminal_order(
+        pool,
+        user_id=user_id,
+        execution_id=execution_id,
+        strategy_id=execution["strategy_id"],
+        strategy_version=execution["strategy_version"],
+        status=terminal_status,
+    )
 
-    adapter = FakeExchangeAdapter(closes=[Decimal("50")] * 65)
-    await run_execution_tick(pool, adapter, execution_id, **_engines())
+    # 1틱: PENDING에서 종결 상태를 관측 — IDLE로 복귀해야 한다.
+    revert_adapter = FakeExchangeAdapter(closes=[Decimal("50")] * 65)
+    await run_execution_tick(pool, revert_adapter, execution_id, **_engines())
 
     async with pool.acquire() as conn:
         fsm_state = await conn.fetchval(
             "SELECT fsm_state FROM strategy_executions WHERE id = $1", execution_id
         )
     assert fsm_state == "IDLE"
+    assert revert_adapter.place_order_call_count == 0  # 이 틱은 되돌림만, 신규 주문 없음
+
+    # 2틱: 복귀 이후에도 신규 주문이 영구히 막히지 않고 다시 나가야 한다.
+    resubmit_adapter = FakeExchangeAdapter(
+        closes=[Decimal("50")] * 65,
+        place_order_result_status=OrderStatus.FILLED,
+        usdt_balance=AccountBalance(
+            exchange="bitget", asset="USDT", total=Decimal("10000"), available=Decimal("10000")
+        ),
+    )
+    await run_execution_tick(pool, resubmit_adapter, execution_id, **_engines())
+
+    assert resubmit_adapter.place_order_call_count == 1
+    async with pool.acquire() as conn:
+        fsm_state_after_resubmit = await conn.fetchval(
+            "SELECT fsm_state FROM strategy_executions WHERE id = $1", execution_id
+        )
+    assert fsm_state_after_resubmit == "HOLDING"
+
+
+async def test_still_open_pending_order_does_not_resubmit_new_order(pool):
+    """미체결 보호 불변식 회귀 테스트 — 종결(취소/거부/만료) 처리를
+    추가하면서 아직 살아있는 주문(SUBMITTED, 최종 상태 아님)까지 되돌리면
+    안 된다. PENDING 상태에서 최신 주문이 아직 미종결이면 tick은 체결
+    재확인만 하고 새 주문을 내지 않아야 한다 — #39 수정이 이 기존 보호를
+    깨지 않았는지 확인."""
+    user_id = await create_test_tenant(pool)
+    execution_id = await _create_execution(pool, user_id, entry_threshold=100.0)
+
+    submit_adapter = FakeExchangeAdapter(
+        closes=[Decimal("50")] * 65,
+        place_order_result_status=OrderStatus.SUBMITTED,
+        get_order_status=OrderStatus.SUBMITTED,
+        usdt_balance=AccountBalance(
+            exchange="bitget", asset="USDT", total=Decimal("10000"), available=Decimal("10000")
+        ),
+    )
+    await run_execution_tick(pool, submit_adapter, execution_id, **_engines())
+    async with pool.acquire() as conn:
+        fsm_state = await conn.fetchval(
+            "SELECT fsm_state FROM strategy_executions WHERE id = $1", execution_id
+        )
+    assert fsm_state == "BUY_ORDER_PENDING"
+    assert submit_adapter.place_order_call_count == 1
+
+    # 아직 미체결(reconfirm도 SUBMITTED) — 다음 tick은 되돌리지도, 새 주문을
+    # 내지도 않아야 한다.
+    await run_execution_tick(pool, submit_adapter, execution_id, **_engines())
+
+    assert submit_adapter.place_order_call_count == 1  # 추가 주문 없음
+    async with pool.acquire() as conn:
+        fsm_state_after = await conn.fetchval(
+            "SELECT fsm_state FROM strategy_executions WHERE id = $1", execution_id
+        )
+        order_status = await conn.fetchval(
+            "SELECT status FROM orders WHERE execution_id = $1", execution_id
+        )
+    assert fsm_state_after == "BUY_ORDER_PENDING"  # 여전히 미체결 — PENDING 유지
+    assert order_status == "SUBMITTED"
 
 
 async def test_equity_baseline_persists_and_survives_simulated_restart(pool):
@@ -626,7 +712,7 @@ class _SpyRecorder(RiskDecisionRecorder):
         super().__init__(pool, PostgresDecisionRepository(pool), InProcessEventBus())
         self.calls = 0
 
-    async def record(self, decision, inputs, *, actor: str) -> None:  # type: ignore[override]
+    async def record(self, decision, inputs, *, actor: str) -> None:  # type: ignore[override]  # 상위보다 좁은 시그니처(호출 횟수 계측 전용 spy, R-32 t4)
         self.calls += 1
         await super().record(decision, inputs, actor=actor)
 

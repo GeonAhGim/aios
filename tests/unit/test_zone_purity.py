@@ -172,6 +172,7 @@ def test_injection_read_error_raises_gracefully() -> None:
 # ── performance assertion: 전체 domain 스캔 시간 예산 ──────────────────────
 
 
+@pytest.mark.perf
 def test_zone_scan_completes_within_budget() -> None:
     """성능 단언: 전체 domain/** 디렉터리 스캔 + AST 파싱이 _MAX_SCAN_SECONDS(5초) 내에
     완료되어야 한다. 대규모 리포에서 검사 시간이 선형으로 증가해도 예산을 지키는지 확인한다."""

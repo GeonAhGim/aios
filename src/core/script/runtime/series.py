@@ -1,31 +1,33 @@
-"""L4_analytics_authoring_backtest_marketplace_v1.0.md §2.4 표 88행/§9.4 DSL-8 —
-AIOS Script 런타임 값 모델: 시리즈(`Series`)와 원소 단위 연산(브로드캐스트).
+"""L4_analytics_authoring_backtest_marketplace_v1.0.md §2.4 table row 88 / §9.4 DSL-8 —
+AIOS Script runtime value model: `Series` and element-wise operations (broadcast).
 
-값은 두 모양이다. `Scalar`(int/float/bool, 봉과 무관한 값)와 `Series`(봉마다
-하나씩, 길이 = 봉 수). `None`은 na(결측)다 — Pine의 `na`처럼 "값이 아직
-없다"를 뜻하며 별도 센티널 대신 `None` 하나로만 표현한다. 시리즈 원소도
-`None`일 수 있다.
+A value has one of two shapes. `Scalar` (int/float/bool, a value independent of any bar)
+and `Series` (one per bar, length = bar count). `None` is na (missing) — like Pine's `na`,
+it means "no value yet" and is represented with the single sentinel `None` rather than a
+separate marker. Series elements may also be `None`.
 
-§3.3 의미론(이 리프가 확정하는 v1 규칙 — 스펙 문법표에 없는 항목은 여기서
-고정하고, 참조 구현 property 테스트가 같은 정의를 독립 구현해 대조한다):
-- 인덱싱 `s[n]`(`shift`): 봉 t의 값 = s의 봉 t-n 값, t<n이면 na. 과거만
-  본다(음수 n은 문법·DSL-5가 이미 거부, 여기서도 0 미만이면 오류).
-- na 전파: 산술·비교·부호 반전·교차는 피연산자 하나라도 na면 na.
-- 논리(and/or/not)는 3치(Kleene): `False and na = False`, `True or na = True`,
-  그 외 na가 섞이면 na. 신호 소비자는 `True`만 발화로 취급해야 한다(fail-closed —
-  na는 "모름"이지 "아니오"가 아니다).
-- 0 나눗셈·비유한 결과(inf/nan)는 예외 대신 na. 정수 `/`는 0 방향 절삭(int 정적
-  타입 유지 — DSL-4 `promote_numeric`이 int/int→int로 정한 것과 정합).
-- `crosses_above(a, b)`: 봉 t에서 `a[t] > b[t] and a[t-1] <= b[t-1]`, t=0 또는
-  넷 중 하나라도 na면 na. `crosses_below`는 부등호 반대. 교차는 본질적으로 봉
-  차원을 가지므로 피연산자가 둘 다 스칼라여도 결과는 길이 `bar_count` 시리즈다.
-- nz/na: `nz(x, fill=0)`은 na를 `fill`로 바꾸고 `is_na(x)`는 na 여부 bool
-  시리즈다. 둘 다 시리즈 연산으로만 두고, 스크립트에서 어떤 이름(`math.nz`
-  등)으로 노출할지는 DSL-9 빌트인 레지스트리의 몫이다.
-- 정수 도메인은 bool을 거부한다(Python `bool`이 `int`의 하위형이라 명시 검사).
+§3.3 semantics (this leaf fixes the v1 rules — anything not in the spec's grammar table is
+pinned here, and the reference implementation's property tests independently reimplement
+the same definitions to cross-check):
+- Indexing `s[n]` (`shift`): the value at bar t = s's value at bar t-n, na if t<n. Only the
+  past is visible (negative n is already rejected by the grammar/DSL-5; here too, below 0
+  is an error).
+- na propagation: arithmetic, comparison, sign negation, and cross all yield na if either
+  operand is na.
+- Logic (and/or/not) is three-valued (Kleene): `False and na = False`, `True or na = True`;
+  otherwise na mixed in yields na. Consumers must treat only `True` as a fire (fail-closed —
+  na means "unknown", not "no").
+- Division by zero and non-finite results (inf/nan) yield na instead of an exception. Integer
+  `/` truncates toward zero (static int type; matches DSL-4 `promote_numeric`'s int/int→int).
+- `crosses_above(a, b)`: at bar t, `a[t] > b[t] and a[t-1] <= b[t-1]`; na if t=0 or any of
+  the four values is na. `crosses_below` reverses the inequality. A cross is bar-dimensioned,
+  so the result is always a length-`bar_count` series even if both operands are scalars.
+- nz/na: `nz(x, fill=0)` replaces na with `fill`, and `is_na(x)` is a bool series of na-ness.
+  Both are series-only ops; which name (`math.nz`, etc.) exposes them is DSL-9's concern.
+- The integer domain rejects bool (explicit check since Python `bool` is a subtype of `int`).
 
-순수·I/O 없음·재귀 없음. 길이가 다른 시리즈끼리의 연산은 `ScriptRuntimeError`
-(fail-closed — 조용히 자르거나 채우지 않는다).
+Pure, no I/O, no recursion. Operations between series of different lengths raise
+`ScriptRuntimeError` (fail-closed — never silently truncate or pad).
 """
 from __future__ import annotations
 
@@ -35,7 +37,7 @@ from dataclasses import dataclass
 from typing import Final, Literal
 
 Scalar = int | float | bool | None
-"""봉과 무관한 값. `None` = na."""
+"""A value independent of any bar. `None` = na."""
 
 ArithOp = Literal["+", "-", "*", "/"]
 CompareOp = Literal["<", "<=", "==", ">=", ">"]
@@ -44,11 +46,12 @@ CrossOp = Literal["crosses_above", "crosses_below"]
 
 
 class ScriptRuntimeError(Exception):
-    """IR 실행 실패(모양·도메인 불일치, 길이 불일치, 미등록 빌트인, 미바인딩 이름).
+    """IR execution failure (shape/domain mismatch, length mismatch, unregistered builtin,
+    unbound name).
 
-    §3.3 taxonomy는 컴파일 오류 4종만 정의한다. 실행 오류는 "검사를 통과한 IR과
-    호스트가 준 입력·레지스트리가 맞지 않음"이므로 별도 코드로 두고 항상 예외로
-    낸다(조용한 기본값 없음).
+    §3.3's taxonomy defines only the 4 compile-error kinds. A runtime error means "IR that
+    passed checks doesn't match the input/registry the host supplied", so it gets its own
+    code and is always raised as an exception (no silent default).
     """
 
     code: Final = "SCRIPT_RUNTIME"
@@ -60,13 +63,13 @@ class ScriptRuntimeError(Exception):
 
 @dataclass(frozen=True)
 class Series:
-    """봉 정렬 시리즈. 원소는 float/bool/None(na). 불변."""
+    """Bar-aligned series. Elements are float/bool/None (na). Immutable."""
 
     values: tuple[Scalar, ...]
 
     @classmethod
     def of_floats(cls, values: Iterable[float | int | None]) -> Series:
-        """수치 원소 시리즈. int는 float로 올리고 bool·비유한수는 거부한다."""
+        """Numeric-element series. Promotes int to float; rejects bool and non-finite numbers."""
         out: list[Scalar] = []
         for i, v in enumerate(values):
             if v is None:
@@ -92,13 +95,13 @@ class Series:
         return len(self.values)
 
     def at(self, bar: int) -> Scalar:
-        """봉 `bar`(0 이상)의 값. 범위 밖이면 오류(조용히 na로 만들지 않는다)."""
+        """Value at bar `bar` (>= 0). Errors out of range (never silently becomes na)."""
         if not 0 <= bar < len(self.values):
             raise ScriptRuntimeError(f"봉 인덱스 범위 밖: {bar} (길이 {len(self.values)})")
         return self.values[bar]
 
     def shift(self, offset: int) -> Series:
-        """`s[offset]` — 봉 t의 값을 s[t-offset]로, 앞 `offset`개 봉은 na."""
+        """`s[offset]` — bar t's value becomes s[t-offset]; the leading `offset` bars are na."""
         if offset < 0:
             raise ScriptRuntimeError(f"시리즈 오프셋은 0 이상이어야 합니다: {offset}")
         n = len(self.values)
@@ -116,11 +119,11 @@ class Series:
 
 
 Value = Scalar | Series
-"""인터프리터 스택 값: 스칼라 또는 시리즈."""
+"""Interpreter stack value: scalar or series."""
 
 
 def broadcast(value: Value, bar_count: int) -> Series:
-    """스칼라를 길이 `bar_count` 시리즈로 편다. 시리즈면 길이만 확인한다."""
+    """Expand a scalar into a length-`bar_count` series; if already a series, only check length."""
     if isinstance(value, Series):
         if len(value) != bar_count:
             raise ScriptRuntimeError(f"시리즈 길이 불일치: {len(value)} != 봉 수 {bar_count}")
@@ -133,13 +136,13 @@ def _finite(x: float) -> float | None:
 
 
 def _int_div(a: int, b: int) -> int:
-    """0 방향 절삭 정수 나눗셈(정확, 부동소수 경유 없음). b != 0 전제."""
+    """Integer division truncated toward zero (exact, no float detour). Assumes b != 0."""
     q = abs(a) // abs(b)
     return q if (a < 0) == (b < 0) else -q
 
 
 def _number(v: Scalar, integer: bool) -> int | float | None:
-    """수치 도메인 검증 후 그대로 반환(None은 na). bool·비수치는 거부."""
+    """Validate the numeric domain and return as-is (None is na). Rejects bool and non-numeric."""
     if v is None:
         return None
     if isinstance(v, bool) or not isinstance(v, int | float):
@@ -156,7 +159,7 @@ def _boolean(v: Scalar) -> bool | None:
 
 
 def _zip(left: Value, right: Value, kernel: Callable[[Scalar, Scalar], Scalar]) -> Value:
-    """원소 단위 이항 커널을 스칼라/시리즈 조합에 브로드캐스트한다."""
+    """Broadcast an element-wise binary kernel over a scalar/series combination."""
     if isinstance(left, Series):
         if not isinstance(right, Series):
             return Series(tuple(kernel(a, right) for a in left.values))
@@ -172,11 +175,11 @@ def _map(value: Value, kernel: Callable[[Scalar], Scalar]) -> Value:
     return value.map(kernel) if isinstance(value, Series) else kernel(value)
 
 
-# ---- 산술 ----
+# ---- Arithmetic ----
 
 
 def arith(op: ArithOp, left: Value, right: Value, *, integer: bool) -> Value:
-    """+ - * /. `integer=True`면 int 도메인(DSL-4 결과 타입 int), 아니면 float."""
+    """+ - * /. `integer=True` means the int domain (DSL-4 result type int); otherwise float."""
 
     def kernel(a: Scalar, b: Scalar) -> Scalar:
         x, y = _number(a, integer), _number(b, integer)
@@ -219,7 +222,7 @@ def negate(value: Value, *, integer: bool) -> Value:
     return _map(value, kernel)
 
 
-# ---- 비교·교차 ----
+# ---- Comparison / cross ----
 
 
 def compare(op: CompareOp, left: Value, right: Value) -> Value:
@@ -245,7 +248,7 @@ def _compare_scalars(op: CompareOp, a: float, b: float) -> bool:
 
 
 def cross(op: CrossOp, left: Value, right: Value, *, bar_count: int) -> Series:
-    """교차. 모듈 docstring 정의. 결과는 항상 시리즈(봉 차원 도입)."""
+    """Cross, defined in the module docstring. Result is always a series (adds bar dimension)."""
     lv, rv = broadcast(left, bar_count).values, broadcast(right, bar_count).values
     out: list[Scalar] = []
     for t in range(bar_count):
@@ -260,7 +263,7 @@ def cross(op: CrossOp, left: Value, right: Value, *, bar_count: int) -> Series:
     return Series(tuple(out))
 
 
-# ---- 논리(3치) ----
+# ---- Logic (three-valued) ----
 
 
 def logical(op: LogicalOp, left: Value, right: Value) -> Value:
@@ -285,11 +288,11 @@ def logical_not(value: Value) -> Value:
     return _map(value, kernel)
 
 
-# ---- 인덱싱 ----
+# ---- Indexing ----
 
 
 def index(value: Value, offset: int) -> Series:
-    """`[offset]`. 정적 타입이 시리즈를 보장하므로 스칼라가 오면 IR/입력 불일치."""
+    """`[offset]`. The static type guarantees a series, so a scalar here is an IR/input mismatch."""
     if not isinstance(value, Series):
         raise ScriptRuntimeError(f"'[n]' 인덱싱 대상이 시리즈가 아닙니다: {value!r}")
     return value.shift(offset)

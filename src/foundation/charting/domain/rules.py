@@ -1,12 +1,12 @@
-"""드로잉 문서(순수) 검증 — CH-4 `serialize.ts`(8bd4077) `fromDrawingsDocument`/
-`decodeDrawing`의 Python 미러.
+"""Drawing document (pure) validation — Python mirror of CH-4 `serialize.ts`
+(8bd4077) `fromDrawingsDocument`/`decodeDrawing`.
 
 Spec: docs/specs/L4_analytics_authoring_backtest_marketplace_v1.0.md §2.2,
-§9.6 CH-5 "레이아웃·드로잉 CH-4 serialize 형식과 1:1".
+§9.6 CH-5 "layout/drawing CH-4 serialize format 1:1".
 
-fail-closed — 미지 버전/필드 누락/미지 필드/타입 불일치 전부
-`DrawingValidationError`. TS 쪽처럼 조용히 드롭하거나 강제 변환하지 않는다.
-I/O 없는 순수 함수만 담는다(어댑터가 이 결과를 그대로 jsonb에 쓴다)."""
+Fail-closed — unknown version, missing fields, unknown fields, type mismatch
+all raise `DrawingValidationError`. Never silently drop or coerce like the TS
+side does. Contains only pure functions (adapter writes results directly to jsonb)."""
 from __future__ import annotations
 
 from typing import Any, NoReturn
@@ -26,10 +26,10 @@ _DOC_FIELDS = frozenset({"schema_version", "drawings"})
 
 
 class DrawingValidationError(Exception):
-    """CH-4 `DrawingError`와 동일한 사유(스키마 불일치/필드 누락/미지 필드/
-    타입 불일치/중복 id)를 하나의 예외로 표면화한다 — 라우터는
-    VALIDATION_INVALID_FIELD(400)로 매핑한다(새 taxonomy 없이 기존 코드
-    재사용, task-1557 decision)."""
+    """Surface the same reasons as CH-4 `DrawingError` (schema mismatch,
+    missing field, unknown field, type mismatch, duplicate id) as a single
+    exception — the router maps to VALIDATION_INVALID_FIELD(400) (reuses
+    existing error code without new taxonomy, task-1557 decision)."""
 
 
 def _fail(slot: str, detail: str) -> NoReturn:
@@ -142,10 +142,10 @@ def _validate_drawing(index: int, value: Any) -> dict[str, Any]:
 
 
 def validate_drawings_document(document: Any) -> tuple[int, tuple[dict[str, Any], ...]]:
-    """`{schema_version, drawings}` 원시 dict(이미 JSON 파싱됨)를 검증하고
-    `(schema_version, drawings)`를 돌려준다. CH-4 `fromDrawingsDocument`와
-    동일한 순서로 실패한다: 객체 여부 → schema_version 존재/값 → 미지
-    필드 → drawings 배열 여부 → 각 드로잉 → 문서 내 id 중복."""
+    """Validate a raw `{schema_version, drawings}` dict (already JSON-parsed)
+    and return `(schema_version, drawings)`. Fails in the same order as
+    CH-4 `fromDrawingsDocument`: object check → schema_version present/valid
+    → unknown fields → drawings array → each drawing → duplicate id check."""
     doc = _require_object("<document>", document)
     if "schema_version" not in doc:
         _fail("<document>.schema_version", "is missing")

@@ -83,6 +83,13 @@ const GHOST_PATH_WHITELIST: ReadonlySet<ApiRouteName> = new Set<ApiRouteName>([
   // 동일 사유).
   "researchData.search",
   "researchData.sources.list",
+  // task-5998(SIG-6): signals.sources.* 4건 — apiRoutes.ts의 등록 주석 참조
+  // (src/foundation/signals 모듈·src/api/routers/signals.py 자체가 아직 없음,
+  // researchData.*와 동일 사유).
+  "signals.sources.base",
+  "signals.sources.rotate",
+  "signals.sources.disable",
+  "signals.sources.receipts",
 ]);
 
 // STALE_SNAPSHOT_WHITELIST: GHOST_PATH_WHITELIST와는 다른 사유 — "라우터가
@@ -161,27 +168,19 @@ const UNREGISTERED_ROUTE_WHITELIST: Readonly<Record<string, string>> = {
   // task-2336(FE-OPS-2): MandatesPage가 status/drafts/amendments/revisions/
   // {revision_id}:activate/mandate:pause/mandate:resume/policy:evaluate 7건 전부를
   // mandates.*로 등록했다 — 여기 남아 있던 7개 항목(task-2168 원 목록)을 제거한다.
-  "/v1/foundation/performance-statements": "실적 명세서 화면이 없다",
-  "/v1/foundation/performance-statements/{statement_id}": "실적 명세서 화면이 없다",
-  "/v1/foundation/performance-statements/{statement_id}:correct": "실적 명세서 정정 액션 UI가 없다",
-  "/v1/foundation/performance-statements:compute": "실적 명세서 계산 액션 UI가 없다",
+  // task-5803(FE-OPS-6): performanceStatements.* 4건(compute/list/get/correct)을
+  // apiRoutesFoundationOps.ts에 등록했다 — 여기 있던 4개 항목(task-2168 원 목록)을
+  // 제거한다(화면 배선은 decision상 이 리프 범위 밖, 경로·타입 등록만).
   // task-2337(FE-OPS-3): ReconciliationPage가 목록 조회·해소(resolve) 2건을
   // reconciliation.*로 등록했다 — 실행 이력(POST /runs)은 decision상 이 리프의
   // UI 범위 밖이라 그대로 남긴다(사람이 EntitySnapshot을 입력해 만드는 화면이 없다).
   "/v1/foundation/reconciliation/runs": "정합성 대사 실행 이력 화면이 없다",
-  // task-5277(EM-14): ems.ts 라우터는 생겼지만 TCA 리포트 화면(EM-18 TcaPage.tsx)은
-  // 별도 리프라 아직 없다 — 아래 3건은 그때까지 그대로 남긴다.
-  "/v1/foundation/ems/tca/{parent_id}": "TCA 리포트 화면이 없다(EM-18 후속)",
-  "/v1/foundation/ems/tca/{parent_id}/revisions/{revision}": "TCA 리포트 화면이 없다(EM-18 후속)",
-  "/v1/foundation/ems/tca/{parent_id}:compute": "TCA 계산 트리거 화면이 없다(EM-18 후속)",
   // task-2335(FE-OPS-1): SafetyControlsPage가 GET(list)/deactivate/evaluate-recovery
-  // 3건을 riskGate.safetyControls.*로 등록했다 — 아래 3건은 decision상 이 리프가
-  // 만들지 않는 개통(activate)·룰번들 승인/활성화·evaluate 트리거라 그대로 남긴다
-  // (후속 리프 2336~2338 소관).
-  "/v1/foundation/risk-gate/admin/safety-controls": "리스크 게이트 관리자 개통(activate) UI가 없다(decision: 이 리프는 읽기·해제만)",
-  "/v1/foundation/risk-gate/evaluate": "리스크 게이트 평가 트리거 화면이 없다",
-  "/v1/foundation/risk-gate/rule-bundles/{bundle_id}:activate": "룰번들 활성화 액션 UI가 없다",
-  "/v1/foundation/risk-gate/rule-bundles/{bundle_id}:approve": "룰번들 승인 액션 UI가 없다",
+  // 3건을 riskGate.safetyControls.*로 등록했다 — 나머지 4건(개통·룰번들 승인/활성화·
+  // evaluate 트리거)은 task-5808(FE-OPS-9)이 riskGate.safetyControls.activate·
+  // riskGate.evaluate·riskGate.ruleBundles.approve·riskGate.ruleBundles.activate로
+  // apiRoutes.ts에 등록했다 — 여기 있던 4개 항목(task-2335 원 목록)을 제거한다(화면
+  // 배선은 decision상 이 리프 범위 밖, 경로·타입 등록만).
   // task-2338(FE-OPS-4): TrustPage가 status/consents:revoke/memberships(grant/suspend/
   // revoke) 5건 전부를 trust.*로 등록했다 — 여기 남아 있던 5개 항목(task-2168 원 목록)을
   // 제거한다.

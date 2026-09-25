@@ -238,6 +238,7 @@ def test_align_open_fails_closed_on_corrupted_zero_duration_entry(
 # --- DEEPEN(task-2946) 수치 성능 단언 --------------------------------------------
 
 
+@pytest.mark.perf
 def test_expected_opens_completes_within_budget_for_full_year_of_m1_candles() -> None:
     """1년치 M1 캔들(단일 24/7 세션, 525,600개 open) 전개가 3초 안에 끝난다.
 

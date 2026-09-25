@@ -22,6 +22,7 @@ decision.
 
 from __future__ import annotations
 
+import operator
 from collections.abc import Callable, Mapping
 from decimal import Decimal
 
@@ -189,6 +190,35 @@ def _as_bool(value: Decimal | bool) -> bool:
     raise AssertionError("non-bool leaked into a boolean context")  # pragma: no cover
 
 
+# Table dispatch (rather than an if/elif chain) keeps `_eval`'s cognitive
+# complexity under CAP — each op is a flat lookup, not a branch.
+_BINARY_ARITH_OPS: Mapping[str, Callable[[Decimal, Decimal], Decimal | bool]] = {
+    "<": operator.lt,
+    "<=": operator.le,
+    "==": operator.eq,
+    ">=": operator.ge,
+    ">": operator.gt,
+    "+": operator.add,
+    "-": operator.sub,
+    "*": operator.mul,
+    "/": operator.truediv,
+}
+
+
+def _eval_binary(expr: BinaryExpr, row: Mapping[str, Decimal]) -> Decimal | bool:
+    if expr.op == "and":
+        return _as_bool(_eval(expr.left, row)) and _as_bool(_eval(expr.right, row))
+    if expr.op == "or":
+        return _as_bool(_eval(expr.left, row)) or _as_bool(_eval(expr.right, row))
+    left = _as_decimal(_eval(expr.left, row))
+    right = _as_decimal(_eval(expr.right, row))
+    try:
+        fn = _BINARY_ARITH_OPS[expr.op]
+    except KeyError:
+        raise AssertionError(f"unsupported binary op reached evaluator: {expr.op!r}") from None
+    return fn(left, right)
+
+
 def _eval(expr: Expr, row: Mapping[str, Decimal]) -> Decimal | bool:
     if isinstance(expr, NumberLiteral):
         return Decimal(str(expr.value))
@@ -206,31 +236,7 @@ def _eval(expr: Expr, row: Mapping[str, Decimal]) -> Decimal | bool:
         args = [_as_decimal(_eval(a, row)) for a in expr.args]
         return fn(*args)
     if isinstance(expr, BinaryExpr):
-        if expr.op == "and":
-            return _as_bool(_eval(expr.left, row)) and _as_bool(_eval(expr.right, row))
-        if expr.op == "or":
-            return _as_bool(_eval(expr.left, row)) or _as_bool(_eval(expr.right, row))
-        left = _as_decimal(_eval(expr.left, row))
-        right = _as_decimal(_eval(expr.right, row))
-        if expr.op == "<":
-            return left < right
-        if expr.op == "<=":
-            return left <= right
-        if expr.op == "==":
-            return left == right
-        if expr.op == ">=":
-            return left >= right
-        if expr.op == ">":
-            return left > right
-        if expr.op == "+":
-            return left + right
-        if expr.op == "-":
-            return left - right
-        if expr.op == "*":
-            return left * right
-        if expr.op == "/":
-            return left / right
-        raise AssertionError(f"unsupported binary op reached evaluator: {expr.op!r}")
+        return _eval_binary(expr, row)
     raise AssertionError(f"unsupported Expr kind reached evaluator: {expr!r}")  # pragma: no cover
 
 

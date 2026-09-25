@@ -140,6 +140,7 @@ def test_detect_gaps_surfaces_corrupted_duration_lookup_as_extra_gaps_not_silent
 # --- DEEPEN(task-2952) 수치 성능 단언 ---------------------------------------------
 
 
+@pytest.mark.perf
 def test_detect_gaps_completes_within_budget_for_30_days_of_m1_crypto_candles() -> None:
     """30일치 M1 24/7 캔들(43,200개 기대 open) 중 절반이 결측인 입력에서
     detect_gaps가 3초 안에 끝나고 결측 개수를 정확히 센다 — 세션마다 전체
@@ -252,6 +253,7 @@ def test_detect_gaps_fails_closed_when_expected_opens_raises(
 # --- DEEPEN(task-4111) 수치 성능 단언 ---------------------------------------------
 
 
+@pytest.mark.perf
 def test_detect_gaps_handles_10k_candles_within_budget() -> None:
     """10,000개 캔들에 대해 1초 안에 결과를 낸다 — O(캔들 수)를
     유지하는 회귀 가드다(우발적으로 O(n^2) 연산이 끼어들면 이 임계값을

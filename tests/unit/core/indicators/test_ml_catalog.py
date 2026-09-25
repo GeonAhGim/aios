@@ -154,6 +154,7 @@ def test_gate_red_a_scorer_with_hidden_state_is_caught_by_equivalence_check() ->
 # --- numeric performance assertion ---
 
 
+@pytest.mark.perf
 def test_compute_ml_signal_latency_p99_within_budget() -> None:
     """Mirrors `tests/unit/core/indicators/test_engine_equivalence.py::
     test_incremental_update_latency_p99_within_streaming_budget`'s approach:

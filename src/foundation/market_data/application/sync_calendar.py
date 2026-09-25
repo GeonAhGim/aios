@@ -1,25 +1,29 @@
-"""LA-14 — venue 거래 캘린더 연도 단위 동기화 유스케이스 + 감사 이벤트 1:1.
+"""LA-14 — venue trading calendar year-sync use case + 1:1 audit event.
 
 Spec: docs/specs/L4_market_data_positions_ledger_v1.0.md#§9.2 LA-14, §10 R4.
 
-yaml 파싱은 LA-12 `adapters/yaml_calendar_source.load_calendar`가 전담한다
-(재구현 금지) — 호출자가 그 결과(`days`)를 미리 만들어 이 함수에 넘긴다
-(scaffold 시그니처 `sync_calendar(venue, year, days, *, cal, audit, pool)`
-그대로). `CalendarRepository.upsert_days`(LA-12)가 이미 `(venue,
-trade_date)` 단위로 멱등(`ON CONFLICT ... DO UPDATE`)이므로, 이 함수는 그
-위에 트랜잭션 경계 안에서 감사 이벤트 하나만 덧붙인다.
+YAML parsing is handled exclusively by LA-12
+`adapters/yaml_calendar_source.load_calendar` (do not reimplement) — the
+caller pre-builds the result (`days`) and passes it here using the
+scaffold signature `sync_calendar(venue, year, days, *, cal, audit, pool)`
+unchanged. `CalendarRepository.upsert_days` (LA-12) is already idempotent
+at `(venue, trade_date)` level (`ON CONFLICT ... DO UPDATE`), so this
+function adds only a single audit event within a transaction boundary on
+top of that.
 
-`upsert_days` 자신도 `day.venue != venue` 불일치를 거부하지만(어댑터
-`ValueError`), 이 함수는 그 검증을 트랜잭션·감사 이벤트 **이전**에
-먼저 해서(fail-fast) 잘못된 인자로 커넥션을 점유하지 않는다 — 아무 것도
-쓰지 않았으니 감사 이벤트도 없다(§9 LA-14 "감사 이벤트 1:1"의 자연스러운
-귀결: 시도조차 하지 않은 쓰기에는 이벤트도 없다).
+`upsert_days` itself rejects `day.venue != venue` mismatches (adapter
+`ValueError`), but this function performs that validation **before** the
+transaction and audit event (fail-fast) so a bad argument does not hold
+the connection idle — nothing was written, so there is no audit event
+(natural consequence of §9 LA-14 "1:1 audit event": no event for a write
+that was never attempted).
 
-`md_venue_calendar_day`에는 자체 UUID PK가 없다(venue+trade_date 복합키,
-LA-10). 감사 이벤트는 `aggregate_id: UUID`를 요구하므로(79번 §1), 이
-동기화 "실행" 자체를 하나의 집합체로 보고 `(venue, year)`에서 결정론적으로
-파생한 UUID5를 쓴다 — 매번 같은 (venue, year)에 같은 aggregate_id가
-나오므로 그 venue·연도의 캘린더 감사 이력을 이 id로 계속 추적할 수 있다.
+`md_venue_calendar_day` has no self-contained UUID PK (composite key of
+venue+trade_date, LA-10). Audit events require `aggregate_id: UUID` (Sec.
+1, item 79), so we treat the sync "run" itself as one aggregate and use a
+UUID5 derived deterministically from `(venue, year)` — the same
+aggregate_id is produced for every `(venue, year)` pair, allowing the
+audit history for that venue and year to be tracked under a single id.
 """
 from __future__ import annotations
 
@@ -29,8 +33,13 @@ from uuid import UUID
 
 import asyncpg
 
-from src.foundation.evidence.domain.models import AuditEvent, Classification, Outcome
-from src.foundation.evidence.domain.rules import assert_safe_payload, compute_payload_hash
+from src.foundation.evidence.api import (
+    AuditEvent,
+    Classification,
+    Outcome,
+    assert_safe_payload,
+    compute_payload_hash,
+)
 from src.foundation.market_data.contracts.v1 import CalendarDay, Venue
 from src.foundation.market_data.ports.calendar_repository import CalendarRepository
 
@@ -40,9 +49,9 @@ _NAMESPACE = uuid.UUID("6f2a9d5e-0f0a-4b1a-9a3d-000000000000")
 
 
 class CalendarVenueMismatchError(Exception):
-    """`days` 중 인자 `venue`와 다른 원소가 있음 — `upsert_days`에 위임하지
-    않고 여기서 먼저 fail-closed로 걸러 잘못된 데이터가 반쯤(트랜잭션 진입
-    후) 반영되지 않게 한다."""
+    """`days` contains elements whose venue differs from the `venue` arg —
+    catch this here with fail-closed before delegating to `upsert_days` so
+    invalid data is never half-persisted (after entering a transaction)."""
 
 
 class AuditAppender(Protocol):
@@ -65,7 +74,7 @@ class AuditAppender(Protocol):
 
 
 def calendar_aggregate_id(venue: Venue, year: int) -> UUID:
-    """(venue, year) → 결정론적 UUID5. 같은 인자는 항상 같은 id를 낸다."""
+    """Deterministic UUID5 for (venue, year). Same args always produce the same id."""
     return uuid.uuid5(_NAMESPACE, f"{venue.value}:{year}")
 
 

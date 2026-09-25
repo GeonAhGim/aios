@@ -111,6 +111,7 @@ def test_size_propagates_require_positive_exception():
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.perf
 def test_size_completes_within_perf_budget():
     """size() must finish < 10 ms per 1000 iterations (budget: 100 ops/ms)."""
     iterations = 1000

@@ -38,7 +38,7 @@ from __future__ import annotations
 import asyncio
 import json
 import threading
-from collections.abc import Mapping
+from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass
 from enum import Enum
 from functools import lru_cache
@@ -64,13 +64,25 @@ class RateLimitSpec:
     burst: float
     verified: Verified
 
-    def new_bucket(self, *, observer: RateLimitWaitObserver | None = None) -> TokenBucket:
+    def new_bucket(
+        self,
+        *,
+        observer: RateLimitWaitObserver | None = None,
+        sleep: Callable[[float], Awaitable[None]] | None = None,
+    ) -> TokenBucket:
+        """`sleep` defaults to real `asyncio.sleep` (production). Tests inject a
+        fake sleep here (same pattern as `ResilientTransport`/`KISOAuthClient`'s
+        `sleep_fn`) — without this, the process-wide singleton bucket
+        (`_BUCKET_REGISTRY`) always throttles with wall-clock time regardless of
+        what the caller injected elsewhere, turning any test that exercises a
+        rate-limited TR group at volume into a multi-minute real sleep."""
+        base_sleep = sleep or asyncio.sleep
         if observer is None:
-            return TokenBucket(self.rate_per_sec, self.burst)
+            return TokenBucket(self.rate_per_sec, self.burst, sleep=base_sleep)
 
         async def _observed_sleep(seconds: float) -> None:
             observer.record_wait()
-            await asyncio.sleep(seconds)
+            await base_sleep(seconds)
 
         return TokenBucket(self.rate_per_sec, self.burst, sleep=_observed_sleep)
 
@@ -137,6 +149,7 @@ def build_token_bucket(
     tr_id: str,
     *,
     observer: RateLimitWaitObserver | None = None,
+    sleep: Callable[[float], Awaitable[None]] | None = None,
 ) -> TokenBucket:
     """Resolves `tr_id` to its group and returns the `TokenBucket` for that
     account type.
@@ -144,16 +157,20 @@ def build_token_bucket(
     Always returns the same `TokenBucket` instance for a given
     (account_type, tr_group) pair (`_BUCKET_REGISTRY`, thread-safe) — the
     per-group throughput cap is enforced regardless of whether the caller
-    caches the result. `observer` is only honored the **first** time a
-    bucket is created for a given key — an already-cached bucket's sleep
-    wrapper is not swapped for a different observer passed in on a later
-    call (the singleton keeps its first owner's observability wiring)."""
+    caches the result. `observer`/`sleep` are only honored the **first** time
+    a bucket is created for a given key — an already-cached bucket's sleep
+    wrapper is not swapped for a different observer/sleep passed in on a
+    later call (the singleton keeps its first owner's wiring). `sleep`
+    defaults to real `asyncio.sleep`; callers (e.g. tests) inject a fake one
+    the same way they already do for `KISOAuthClient`/`ResilientTransport`."""
     group = tr_group_for(tr_id)
     key = (account_type, group)
     with _BUCKET_REGISTRY_LOCK:
         bucket = _BUCKET_REGISTRY.get(key)
         if bucket is None:
-            bucket = get_rate_limit(account_type, group).new_bucket(observer=observer)
+            bucket = get_rate_limit(account_type, group).new_bucket(
+                observer=observer, sleep=sleep
+            )
             _BUCKET_REGISTRY[key] = bucket
         return bucket
 

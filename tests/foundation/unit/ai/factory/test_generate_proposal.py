@@ -1,7 +1,7 @@
 """Unit tests for `src/foundation/ai/factory/application/generate_proposal.py`
--- task-2644 AI-9 DoD ("컴파일 오류 400 위치 포함"). D2 depth (ADR-2026-09-09-C):
-negative >=3, failure injection 1, numeric performance assertion 1, gate-red
-reproduction 1.
+-- task-2644 AI-9 DoD (compile error 400 with location included).
+D2 depth (ADR-2026-09-09-C): negative >=3, failure injection 1, numeric
+performance assertion 1, gate-red reproduction 1.
 """
 
 from __future__ import annotations
@@ -153,7 +153,7 @@ async def _generate(
     return proposal, provider, repo
 
 
-# --- 정상 경로 ---
+# --- happy path ---
 
 
 @pytest.mark.asyncio
@@ -168,8 +168,9 @@ async def test_generate_proposal_full_pipeline_saves_and_returns_proposal() -> N
 
 @pytest.mark.asyncio
 async def test_generate_proposal_is_idempotent_on_token_and_script_hash() -> None:
-    """§5 "제안 제출: (token_id, script_hash) 멱등" -- 같은 토큰·같은 스크립트로
-    두 번 호출하면 두 번째는 새로 저장하지 않고 첫 결과를 그대로 돌려준다."""
+    """Per spec §5, proposal submission is idempotent on (token_id, script_hash).
+    Invoking twice with same token and script should return the same proposal
+    without saving a second time."""
     token = uuid4()
     repo = _FakeRepository()
     first, provider1, _ = await _generate(
@@ -184,7 +185,7 @@ async def test_generate_proposal_is_idempotent_on_token_and_script_hash() -> Non
     assert provider2.calls == 1  # provider is still called; only the save is skipped
 
 
-# --- 부정 테스트 (>=3) ---
+# --- negative tests (>=3) ---
 
 
 @pytest.mark.asyncio
@@ -198,7 +199,7 @@ async def test_generate_proposal_rejects_schema_invalid_payload() -> None:
 
 @pytest.mark.asyncio
 async def test_generate_proposal_rejects_compile_error_with_location() -> None:
-    """리프 DoD 그대로: 컴파일 오류는 400이고 위치(line/col)를 포함해야 한다."""
+    """Per leaf DoD: compile errors must be 400 and include line/col location."""
     with pytest.raises(ProposalCompileRejected) as exc_info:
         await _generate(payload=_draft_payload(script_source=SYNTAX_ERROR_SCRIPT))
     assert exc_info.value.code == "AI_PROPOSAL_COMPILE"
@@ -222,13 +223,13 @@ async def test_generate_proposal_rejects_forbidden_call_namespace() -> None:
     assert exc_info.value.reason == "forbidden_api"
 
 
-# --- 실패 주입 ---
+# --- failure injection ---
 
 
 @pytest.mark.asyncio
 async def test_generate_proposal_maps_provider_failure_to_503_without_saving() -> None:
-    """실패 주입: 공급자 호출 자체가 예외(네트워크 장애 등)를 내면
-    AI_PROVIDER_UNAVAILABLE(503)로 매핑되고, 저장 단계는 절대 도달하지 않는다."""
+    """Failure injection: when provider call raises (e.g., network error),
+    it maps to AI_PROVIDER_UNAVAILABLE(503) and save is never reached."""
     repo = _FakeRepository()
     provider = _FakeProvider(error=ConnectionError("upstream unreachable"))
     with pytest.raises(ProviderUnavailable) as exc_info:
@@ -247,13 +248,13 @@ async def test_generate_proposal_maps_provider_failure_to_503_without_saving() -
     assert repo.save_calls == 0
 
 
-# --- 수치 성능 단언 ---
+# --- performance assertion ---
 
 _GENERATE_BUDGET_MS = 500.0
-"""§7 SLO "제안 생성 <=60s(공급자 제외)"의 상한(60,000ms)보다 훨씬 좁게 잡은
-회귀 방지선 -- 여기 공급자는 즉시 응답하는 fake이므로 전체 파이프라인
-(공급자 호출 포함, schema/compile/coverage/저장)이 이 정도 여유 안에서
-끝나지 않으면 명백한 성능 회귀다."""
+"""Per spec §7 SLO "proposal generation <=60s (provider excluded)", set
+regression guard much tighter than 60s. Provider is fake/instant, so full
+pipeline (provider call + schema/compile/coverage/save) must complete within
+this budget or it is a clear performance regression."""
 
 
 async def _generate_latencies_ms(iterations: int = 20) -> list[float]:
@@ -279,7 +280,7 @@ async def test_generate_proposal_p95_latency_within_budget() -> None:
     assert p95_ms < _GENERATE_BUDGET_MS
 
 
-# --- 게이트 적색 재현 ---
+# --- gate-red reproduction ---
 
 
 @pytest.mark.asyncio
@@ -292,9 +293,9 @@ async def test_gate_red_budget_actually_fails_past_budget() -> None:
 
 @pytest.mark.asyncio
 async def test_gate_red_progressive_corruption_flips_pass_fail_at_each_stage() -> None:
-    """동일 원본 payload/coverage에서 시작해 한 번에 한 가지씩만 오염시켜
-    재생한다 -- 각 단계는 정확히 그 단계가 오염시킨 이유로만 거부돼야 하고,
-    이전 단계의 거부가 다음 정상 복귀 단계까지 새면 안 된다."""
+    """Starting from same good payload/coverage, corrupt one thing at a time
+    and replay. Each stage must reject for exactly the reason that stage
+    caused, and prior rejections must not leak through to later clean stages."""
     good_payload = _draft_payload()
     good_coverage = [_coverage_span()]
 

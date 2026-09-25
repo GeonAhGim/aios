@@ -19,6 +19,7 @@ P95_BUDGET_SECONDS = 1.0
 """U-4 DoD(task-2631 spec): 규칙 100개 평가 p95 < 1s."""
 
 
+@pytest.mark.perf
 @pytest.mark.asyncio
 async def test_evaluate_100_rules_p95_under_budget(tenant_id) -> None:
     repo = InMemoryAutomationRuleRepository()

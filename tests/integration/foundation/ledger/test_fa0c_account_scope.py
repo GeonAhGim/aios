@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import asyncio
 import uuid
+from collections.abc import AsyncGenerator
 
 import asyncpg
 import pytest
@@ -34,7 +35,7 @@ _TEST_TENANT_ID = uuid.UUID("00000000-0000-0000-0000-000000000001")
 
 
 @pytest.fixture(autouse=True)
-async def _cleanup_portfolio_test_accounts(pool: asyncpg.Pool):
+async def _cleanup_portfolio_test_accounts(pool: asyncpg.Pool) -> AsyncGenerator[None, None]:
     """Every row this file inserts uses the `PORTFOLIO:` prefix (real seed rows
     are `USER:`/`PLATFORM:`) — delete them after each test so a leftover row
     doesn't break other suites that replay the full migration chain against the

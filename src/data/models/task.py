@@ -1,6 +1,6 @@
 """2.3 / 2.4 — AIOSTask.
 
-Spec: 01_data_models_v1.3.md#§1.1 (4.3 스키마)
+Spec: 01_data_models_v1.3.md#§1.1 (1:1 Pydantic implementation of section 4.3 schema)
 """
 from __future__ import annotations
 
@@ -25,12 +25,15 @@ class TaskStatus(str, Enum):
 
 
 class AIOSTask(BaseModel):
-    """4.3 JSON Schema의 1:1 Pydantic 구현. 16.2 Capability Token의 task_id와 연동."""
+    """1:1 Pydantic implementation of section 4.3 JSON Schema.
+
+    Integrated with 16.2 Capability Token via task_id.
+    """
 
     task_id: UUID = Field(default_factory=uuid4)
     parent_task_id: UUID | None = None
     objective: str
-    assigned_agent: str  # 5장 Agent Registry의 agent_id 참조
+    assigned_agent: str  # refers to agent_id from Agent Registry (section 5)
     required_permission_level: int = Field(ge=0, le=6)  # 4.5 Permission Level
     status: TaskStatus = TaskStatus.PENDING
     input_payload: dict[str, Any] = Field(default_factory=dict)

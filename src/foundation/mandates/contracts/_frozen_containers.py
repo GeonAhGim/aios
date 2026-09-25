@@ -27,6 +27,7 @@ class FrozenDict(dict[K, V]):
 
     __setitem__ = _blocked
     __delitem__ = _blocked
+    __ior__ = _blocked
     clear = _blocked
     pop = _blocked
     popitem = _blocked

@@ -242,6 +242,7 @@ _NO_SIGNAL_LATENCY_CEILING_SECONDS = (
 )
 
 
+@pytest.mark.perf
 async def test_performance_no_signal_tick_round_trips_and_latency(pool):
     """성능 단언(D2) — `run_execution_tick`의 "신호 없음"(가장 빈번한, 신호가
     나지 않는 매 틱마다 반복되는) 경로가 소비하는 순차 DB 왕복 수를 정확히

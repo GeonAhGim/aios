@@ -108,6 +108,7 @@ def test_size_for_rejects_result_method_mismatch(monkeypatch: pytest.MonkeyPatch
         size_for(_config(SizingMethod.FIXED_FRACTIONAL), _inp(SizingMethod.FIXED_FRACTIONAL))
 
 
+@pytest.mark.perf
 def test_size_for_p99_latency_is_within_pre_trade_gate_budget():
     """사이징은 주문 제출 전 경로에 있으므로 ADR-2026-09-09-C Decision 1의
     "사전거래 게이트 p99 5ms" 예산이 적용된다 — 4개 산식 전부를 디스패치해도

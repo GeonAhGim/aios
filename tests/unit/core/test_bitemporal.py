@@ -196,6 +196,7 @@ def test_bitemporal_record_rejects_tx_to_not_after_tx_from():
 # ---- 성능 단언(DEPTH 감사 task-2724 D3 하한 미달 근거: "성능단언 없음") ------
 
 
+@pytest.mark.perf
 def test_as_of_hot_path_performance():
     # as_of는 4종 질의 함수(current/as_of_valid_time/as_of_transaction_time/
     # as_of_bitemporal)가 공유하는 질의 커널이므로 포지션·원장 조회 경로의

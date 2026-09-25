@@ -90,6 +90,7 @@ async def _check_reactivation(
         evidence_ref=request.context.get("evidence_ref"),
         approval_status=approval_status,
         fresh_risk_outcome=fresh_outcome,
+        policy=policy.circuit_breaker,
     )
     if decision.outcome == RiskOutcome.ALLOW:
         await cb.check_reactivation()

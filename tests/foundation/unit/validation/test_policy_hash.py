@@ -154,6 +154,7 @@ def test_check_result_rejects_raw_rules_warning_text_as_hard_fail_code():
 # --------------------------------------------------------------------------
 
 
+@pytest.mark.perf
 def test_policy_hash_throughput_within_dsl_compile_budget():
     policy = ValidationPolicy()
     start = time.perf_counter()

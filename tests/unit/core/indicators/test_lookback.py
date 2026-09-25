@@ -14,7 +14,6 @@ Output: `19 49 14 33` -> +1 each: SMA(20)=20, SMA(50)=50, RSI(14)=15, MACD(defau
 from __future__ import annotations
 
 import ast
-import time
 from collections.abc import Mapping
 from pathlib import Path
 
@@ -24,6 +23,7 @@ from scripts.check_code_language import count_file
 from src.core.indicators.lookback import indicator_required_bars, required_bars
 from src.core.indicators.registry import IndicatorError, IndicatorRegistry
 from src.core.strategy.indicator_key import IndicatorKeyError
+from tests.conftest import PerfBudget
 
 REGISTRY = IndicatorRegistry()
 LOOKBACK_PATH = Path(__file__).resolve().parents[4] / "src/core/indicators/lookback.py"
@@ -141,11 +141,14 @@ def test_l07_registry_failure_on_one_key_aborts_whole_batch_not_partial() -> Non
 # -- D2 성능 단언 --------------------------------------------------------------
 
 
-def test_l07_required_bars_throughput_budget() -> None:
+@pytest.mark.perf
+def test_l07_required_bars_throughput_budget(perf_budget: PerfBudget) -> None:
     """`required_timeframes` (L14 `market_state.py`) calls `required_bars`
     once per warm-up sizing pass; 5,000 calls over a 6-key/3-timeframe
     strategy must stay well under a 500ms budget to rule out a pathological
-    per-call regression (e.g. re-parsing specs) creeping into this path."""
+    per-call regression (e.g. re-parsing specs) creeping into this path.
+    task-7434: measured via the shared process_time-based perf_budget
+    fixture instead of raw wall-clock perf_counter()."""
     keys = [
         "SMA_timeperiod20@1h",
         "RSI_timeperiod14@1h",
@@ -154,11 +157,12 @@ def test_l07_required_bars_throughput_budget() -> None:
         "RSI_timeperiod14@1d",
         "SMA_timeperiod20@1d",
     ]
-    start = time.perf_counter()
-    for _ in range(5_000):
-        required_bars(keys, REGISTRY)
-    elapsed = time.perf_counter() - start
-    assert elapsed < 0.5, f"5,000 required_bars calls took {elapsed * 1000:.2f}ms, budget 500ms"
+
+    def _run_once() -> None:
+        for _ in range(5_000):
+            required_bars(keys, REGISTRY)
+
+    perf_budget.assert_within(_run_once, budget_ms=500.0, label="5,000 required_bars calls")
 
 
 # -- D2 게이트 적색 재현 -------------------------------------------------------

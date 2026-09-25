@@ -97,6 +97,7 @@ async def test_real_connection_refused_propagates_fail_closed_not_swallowed():
 # --- numeric performance (DEEPEN task-2866) -----------------------------------
 
 
+@pytest.mark.perf
 async def test_explain_meets_throughput_budget_over_repeated_real_calls(pool, repo, trust_repo):
     """수치 성능 단언 — 실 DB 왕복(policy_decision + policy_bundle + mandate_
     revision 3회 조회)을 포함해 같은 decision_id를 100회 연속 재현한 처리량이

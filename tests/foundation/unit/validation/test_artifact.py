@@ -99,6 +99,7 @@ def test_artifact_is_frozen_rejects_mutation():
 # --------------------------------------------------------------------------
 
 
+@pytest.mark.perf
 def test_build_artifact_large_fsm_within_dsl_compile_budget():
     large_fsm = {
         "states": [f"S{i}" for i in range(500)],

@@ -15,6 +15,8 @@ import time
 from pathlib import Path
 from types import ModuleType
 
+import pytest
+
 ROOT = Path(__file__).resolve().parents[3]
 SCRIPTS_DIR = ROOT / "scripts"
 if str(SCRIPTS_DIR) not in sys.path:
@@ -251,6 +253,7 @@ def inquire_price({signature}):
 '''
 
 
+@pytest.mark.perf
 def test_extract_trs_from_text_latency_scales_linearly_not_quadratically() -> None:
     """수치 성능 단언 — `extract_trs_from_text`는 예제 파일 하나당 정규식 추출을
     한 번 돌린다(`build_reference`가 375개 파일 각각에 호출). params 항목 수를

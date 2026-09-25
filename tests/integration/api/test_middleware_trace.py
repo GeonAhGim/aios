@@ -360,6 +360,14 @@ async def test_downstream_exception_still_emits_completion_log_before_propagatin
     capture = _StructuredCapture()
     root = logging.getLogger()
     root.addHandler(capture)
+    # dispatch()가 여기서 직접 호출돼(client fixture의 app lifespan을 거치지
+    # 않음) configure_logging()이 정상 앱 기동 시 거는 INFO 레벨을 이 테스트는
+    # 못 받는다 — root 레벨이 기본 WARNING이면 logger.info() 자체가 핸들러에
+    # 닿기 전에 걸러진다(task-6461, 이전에는 client fixture를 먼저 실행한
+    # 다른 테스트가 루트 로거를 INFO로 남겨둔 우연에 의존해 통과했었는데,
+    # _isolate_root_logger_state(task-6371)가 그 오염 누출을 막으면서
+    # 드러났다). 이 테스트 자신의 시나리오가 필요로 하는 레벨을 직접 건다.
+    root.setLevel(logging.INFO)
     middleware = RequestContextMiddleware(app=lambda scope, receive, send: None)
 
     async def exploding_call_next(request: Request) -> Response:
