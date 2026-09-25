@@ -8,6 +8,7 @@ schema.py, 메트릭/알림 검증 등)은 이 상수를 import해서 비교하�
 하드코딩하지 않는다. `StructuredLogLine`은 이 8필드에 로그 라인 자체에 필요한
 비-108 필드(timestamp/message/extra)를 더한 pydantic 모델이다.
 """
+
 from __future__ import annotations
 
 import logging
