@@ -8,6 +8,7 @@ BT-15(1/2). DoD: (a) `arrays.from_candle_columns`가 `CandleColumns`의 필드
 동일한 값을 내는지, `tests/unit/core/script/test_series.py`가 이미 진실로
 검증한 것과 같은 입력·기댓값을 재사용해 대조한다.
 """
+
 from __future__ import annotations
 
 import math
@@ -69,9 +70,19 @@ def test_from_candle_columns_field_order_and_dtypes_match_candle_columns() -> No
 
     columns_field_names = [f.name for f in fields(CandleColumns)]
     arrays_field_names = [f.name for f in fields(arrays.CandleArrays)]
-    assert arrays_field_names == columns_field_names == [
-        "ts", "open", "high", "low", "close", "volume", "quote_volume",
-    ]
+    assert (
+        arrays_field_names
+        == columns_field_names
+        == [
+            "ts",
+            "open",
+            "high",
+            "low",
+            "close",
+            "volume",
+            "quote_volume",
+        ]
+    )
     assert out.ts.dtype == np.int64
     for name in ("open", "high", "low", "close", "volume", "quote_volume"):
         assert getattr(out, name).dtype == np.float64
@@ -102,8 +113,13 @@ def test_from_candle_columns_epoch_ns_is_exact_and_monotonic() -> None:
 def test_from_candle_columns_rejects_mismatched_lengths() -> None:
     columns = _columns(3)
     bad = CandleColumns(
-        ts=columns.ts, open=columns.open, high=columns.high, low=columns.low,
-        close=columns.close[:-1], volume=columns.volume, quote_volume=columns.quote_volume,
+        ts=columns.ts,
+        open=columns.open,
+        high=columns.high,
+        low=columns.low,
+        close=columns.close[:-1],
+        volume=columns.volume,
+        quote_volume=columns.quote_volume,
     )
     with pytest.raises(MismatchedColumnLengthError):
         arrays.from_candle_columns(bad)
@@ -115,14 +131,38 @@ def test_candle_arrays_rejects_wrong_dtype_directly() -> None:
     with pytest.raises(arrays.ArrayDtypeError):
         arrays.CandleArrays(
             ts=np.zeros(n, dtype=np.int32),  # 잘못된 dtype
-            open=ok, high=ok, low=ok, close=ok, volume=ok, quote_volume=ok,
+            open=ok,
+            high=ok,
+            low=ok,
+            close=ok,
+            volume=ok,
+            quote_volume=ok,
         )
     with pytest.raises(arrays.ArrayDtypeError):
         arrays.CandleArrays(
             ts=np.zeros(n, dtype=np.int64),
             open=np.zeros(n, dtype=np.int64),  # 잘못된 dtype
-            high=ok, low=ok, close=ok, volume=ok, quote_volume=ok,
+            high=ok,
+            low=ok,
+            close=ok,
+            volume=ok,
+            quote_volume=ok,
         )
+
+
+def test_from_candle_columns_rejects_naive_datetime() -> None:
+    columns = _columns(2)
+    naive = CandleColumns(
+        ts=[columns.ts[0].replace(tzinfo=None), columns.ts[1]],
+        open=columns.open,
+        high=columns.high,
+        low=columns.low,
+        close=columns.close,
+        volume=columns.volume,
+        quote_volume=columns.quote_volume,
+    )
+    with pytest.raises(arrays.NaiveDatetimeError):
+        arrays.from_candle_columns(naive)
 
 
 def test_candle_arrays_rejects_length_mismatch_directly() -> None:
@@ -131,7 +171,12 @@ def test_candle_arrays_rejects_length_mismatch_directly() -> None:
     with pytest.raises(MismatchedColumnLengthError):
         arrays.CandleArrays(
             ts=np.zeros(2, dtype=np.int64),
-            open=ok2, high=ok2, low=ok2, close=ok3, volume=ok2, quote_volume=ok2,
+            open=ok2,
+            high=ok2,
+            low=ok2,
+            close=ok3,
+            volume=ok2,
+            quote_volume=ok2,
         )
 
 

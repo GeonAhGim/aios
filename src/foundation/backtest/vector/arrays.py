@@ -27,6 +27,7 @@ epoch values).
 
 Pure module — no I/O.
 """
+
 from __future__ import annotations
 
 from collections.abc import Sequence
@@ -39,7 +40,7 @@ import numpy as np
 
 from src.foundation.market_data.api import CandleColumns, MismatchedColumnLengthError
 
-__all__ = ["ArrayDtypeError", "CandleArrays", "from_candle_columns"]
+__all__ = ["ArrayDtypeError", "CandleArrays", "NaiveDatetimeError", "from_candle_columns"]
 
 FloatArray = np.ndarray[Any, np.dtype[np.float64]]
 TimestampArray = np.ndarray[Any, np.dtype[np.int64]]
@@ -52,6 +53,13 @@ class ArrayDtypeError(TypeError):
     """`BT_VECTOR_ARRAY_DTYPE` — rejected fail-closed when a `CandleArrays` field's dtype,
     or its field correspondence with `CandleColumns`, does not match the contract (no
     silent coercion)."""
+
+
+class NaiveDatetimeError(ValueError):
+    """`BT_VECTOR_NAIVE_DATETIME` — rejected fail-closed when `_to_epoch_ns` receives a
+    naive `datetime` (no `tzinfo`). `datetime.astimezone` silently treats a naive value
+    as local time instead of raising, which would corrupt the epoch-ns conversion without
+    any signal — every datetime crossing this boundary must already be tz-aware UTC."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -112,6 +120,11 @@ def from_candle_columns(columns: CandleColumns) -> CandleArrays:
 def _to_epoch_ns(values: Sequence[datetime]) -> TimestampArray:
     out = np.empty(len(values), dtype=np.int64)
     for i, ts in enumerate(values):
+        if ts.tzinfo is None:
+            raise NaiveDatetimeError(
+                f"CandleColumns.ts[{i}]가 naive datetime이다(tzinfo=None) — "
+                "tz-aware UTC datetime만 허용된다"
+            )
         delta = ts.astimezone(timezone.utc) - _EPOCH
         micros = delta.days * 86_400_000_000 + delta.seconds * 1_000_000 + delta.microseconds
         out[i] = micros * 1_000
