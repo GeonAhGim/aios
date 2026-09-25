@@ -47,6 +47,7 @@ green-check로 쓰이는 E2E 시나리오. 이 파일의 각 테스트가 실제
 
 from __future__ import annotations
 
+from collections.abc import AsyncIterator
 from decimal import Decimal
 from uuid import UUID
 
@@ -103,20 +104,6 @@ def _bitget_adapter(
             exchange="bitget", asset="USDT", total=Decimal("10000"), available=Decimal("10000")
         ),
     )
-
-
-@pytest.fixture(autouse=True)
-async def _clear_outbox_leftovers(pool):
-    """`order_command_outbox`는 워커 DB 전체가 공유하는 테이블이고 이 파일의 cancel
-    leg는 실 `OutboxRepository.claim_batch(limit=10)`로 PENDING 행을 선점한다 —
-    특정 주문으로 좁히지 않으므로 같은 xdist 워커에서 앞서 돈 파일이 PENDING 행을
-    10개 이상 남기면 이 주문의 CANCEL 행이 선점 묶음에 못 들어가 `claimed == []`
-    (CI main run #844 적색, 로컬 xdist 재현: leftover 12행 시드 시 결정적 실패).
-    test_stale_worker_late_write.py·test_crash_between_send_and_commit.py와 같은
-    해법 — 테스트 전에 outbox를 비운다."""
-    async with pool.acquire() as conn:
-        await conn.execute("DELETE FROM order_command_outbox")
-    yield
 
 
 async def test_signal_generates_order_that_fills_and_settles_into_position(
@@ -227,6 +214,17 @@ async def test_exchange_rejection_is_fail_closed_and_propagates_not_swallowed(
     assert order["status"] == "UNKNOWN"
     assert order["quantity"] == Decimal("20.0000000000")
     assert position is None
+
+
+@pytest.fixture(autouse=True)
+async def _clear_outbox_leftovers(pool: asyncpg.Pool) -> AsyncIterator[None]:
+    """`order_command_outbox` is shared by every test in this xdist worker DB and
+    `claim_batch(limit=10)` takes PENDING rows in queue order, so leftovers from
+    earlier files can crowd out this test's own CANCEL row (main run #36187016384:
+    claimed == 0). Same remedy as test_stale_worker_late_write.py (#89)."""
+    async with pool.acquire() as conn:
+        await conn.execute("DELETE FROM order_command_outbox")
+    yield
 
 
 async def test_cancel_request_crosses_real_outbox_boundary_to_exchange_adapter(

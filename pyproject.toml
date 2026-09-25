@@ -24,6 +24,11 @@ dependencies = [
     "pyyaml>=6.0",
     "pyotp>=2.9",
     "numpy>=2.0",
+    # IND-11 (task-4035): pandas_ta_bridge.py imports pandas directly for
+    # Series construction, not just transitively via pandas-ta-classic --
+    # deps_declared gate (task-7508) requires it declared, not just installed
+    # as a side effect of pandas-ta-classic's own dependency resolution.
+    "pandas>=2.0",
     "TA-Lib==0.7.1",
     "pyarrow>=17.0",
     "email-validator>=2.0",
@@ -41,10 +46,6 @@ dependencies = [
     # (LGPL-3.0) and must never be installed (INDICATOR_OSS_EVAL.md §5,
     # NOTICE-AIOS.md). Do not add extras to this requirement string.
     "pandas-ta-classic>=0.6.52",
-    # task-7508 finding (PR #90 check_deps_declared): pandas_ta_bridge.py imports
-    # pandas directly, so it is a first-party dependency -- not just a transitive
-    # one of pandas-ta-classic. Floor = the 3.10-compatible line the lock pins.
-    "pandas>=2.2",
 ]
 
 [project.optional-dependencies]

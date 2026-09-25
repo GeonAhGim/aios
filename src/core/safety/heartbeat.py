@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import os
 import time
+import uuid
 from pathlib import Path
 
 # main.py(메인 프로세스)와 watchdog_process.py(별도 프로세스)가 공유하는
@@ -29,13 +30,25 @@ def write_heartbeat(path: Path) -> None:
     모두 os.replace는 원자적이라 읽는 쪽은 항상 "이전 값 전체" 또는
     "새 값 전체" 중 하나만 본다."""
     path.parent.mkdir(parents=True, exist_ok=True)
-    # The temp name carries the pid: two writers sharing one heartbeat path
-    # (xdist workers in CI, or two app processes on one host) otherwise race on
-    # the same ``<name>.tmp`` -- one renames it away and the other's
-    # ``os.replace`` fails with FileNotFoundError (CI run 36191114294).
-    tmp_path = path.with_name(f"{path.name}.{os.getpid()}.tmp")
+    # The temp name must be unique per writer: with a fixed `<name>.tmp`, two
+    # processes writing the same heartbeat (several app instances on one host,
+    # or xdist workers each running the app lifespan against the shared
+    # `runtime/` dir) race -- one os.replace() consumes the other's temp file
+    # and the loser dies with FileNotFoundError (Quality Gate run 36192110851).
+    tmp_path = path.with_name(f"{path.name}.{os.getpid()}.{uuid.uuid4().hex[:8]}.tmp")
     tmp_path.write_text(str(time.time()), encoding="utf-8")
-    os.replace(tmp_path, path)
+    # Windows NTFS: a concurrent replace/read on the target briefly raises a
+    # sharing violation (PermissionError); retry a few times, then give up --
+    # the heartbeat is best-effort and the next tick rewrites it.
+    for _attempt in range(5):
+        try:
+            os.replace(tmp_path, path)
+            return
+        except PermissionError:
+            time.sleep(0.005)
+        except FileNotFoundError:
+            return
+    tmp_path.unlink(missing_ok=True)
 
 
 def read_heartbeat_age_seconds(path: Path) -> float:
