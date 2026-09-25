@@ -297,6 +297,7 @@ async def test_gate_red_repro_revocable_states_check_is_load_bearing(
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.perf
 async def test_revoke_connection_perf_budget_p95_latency() -> None:
     """No published per-axis budget covers FND-05 specifically (ADR-2026-09-09-C
     Decision 1's table); pin the same order of magnitude as the closest

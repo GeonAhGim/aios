@@ -270,6 +270,7 @@ async def test_place_credit_order_http_error_injection(nh_adapter: NHAdapter) ->
 
 
 @pytest.mark.asyncio
+@pytest.mark.perf
 async def test_place_reserved_order_response_parsing_performance(nh_adapter: NHAdapter) -> None:
     """Budget: order-path DTO construction should stay well under 50ms
     (ADR-2026-09-09-C Decision 1 default adapter-parsing budget)."""
