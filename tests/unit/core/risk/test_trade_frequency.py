@@ -3,7 +3,10 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 from decimal import Decimal
+from typing import cast
 from uuid import uuid4
+
+import pytest
 
 from src.core.loader.risk_policy_loader import RiskPolicy, load_risk_policy
 from src.core.risk.decision import RiskOutcome
@@ -101,3 +104,32 @@ def test_denies_as_missing_when_trades_last_1h_is_none():
 def test_denies_as_missing_when_trades_avg_per_hour_24h_is_none():
     result = trade_frequency(_inputs(trades_avg_per_hour_24h=None), _POLICY)
     assert result.missing_fields == ("activity.trades_avg_per_hour_24h",)
+
+
+class _BrokenTradeFrequencyAttr:
+    @property
+    def anomaly_multiplier(self) -> float:
+        raise RuntimeError("policy backend unavailable")
+
+
+class _BrokenTradeFrequencyPolicy:
+    trade_frequency = _BrokenTradeFrequencyAttr()
+
+
+def test_policy_trade_frequency_lookup_failure_propagates(monkeypatch: pytest.MonkeyPatch):
+    """A broken policy read must propagate rather than silently defaulting
+    to ALLOW."""
+    broken_policy = cast(RiskPolicy, _BrokenTradeFrequencyPolicy())
+    with pytest.raises(RuntimeError, match="policy backend unavailable"):
+        trade_frequency(_inputs(), broken_policy)
+
+
+def test_extreme_trade_count_does_not_overflow_or_misclassify():
+    """A large legacy-caller integer count must convert to Decimal exactly,
+    not just for typical small counts."""
+    result = trade_frequency(
+        _inputs(trades_last_1h=1000000, trades_avg_per_hour_24h=Decimal("1")), _POLICY
+    )
+    assert result.outcome == RiskOutcome.DENY
+    assert result.reason_code == "RISK_TRADE_FREQUENCY_ANOMALY"
+    assert result.observed == Decimal(1000000)
