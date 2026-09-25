@@ -1,13 +1,14 @@
-"""JWT 발급/검증 — HS256 고정(알고리즘 협상 금지), kid 회전 + refresh 회전용 해시.
+"""JWT issue/verify — fixed HS256 (algorithm negotiation prohibited),
+kid rotation + refresh rotation hash.
 
 Spec: docs/specs/L4_platform_observability_tenancy_api_v1.0.md §2.2, §3.4, §9 PLT-23.
 
-`TokenVerifier.verify()`는 `jwt.decode(algorithms=["HS256"])`로 허용 알고리즘을
-고정한다 — 헤더의 `alg`를 그대로 신뢰하면 `alg=none`·HMAC/RSA 혼동 공격이
-가능해지므로(§9 test_token_tamper.py), 이 리스트 밖의 서명은 PyJWT가
-`InvalidAlgorithmError`로 거부한다. refresh 토큰은 평문을 절대 저장하지
-않는다(sha256 hex만 DB에) — 회전·재사용 감지는 `session_repository.py`가
-해시만으로 수행한다.
+`TokenVerifier.verify()` fixes the allowed algorithm via
+`jwt.decode(algorithms=["HS256"])` — trusting the header's `alg` as-is
+enables `alg=none`/HMAC/RSA confusion attacks (§9 test_token_tamper.py),
+so PyJWT rejects signatures outside this list with `InvalidAlgorithmError`.
+Refresh tokens never store plaintext (only sha256 hex in DB) — rotation/reuse
+detection is performed by `session_repository.py` using hashes only.
 """
 from __future__ import annotations
 
@@ -34,9 +35,9 @@ class AccessClaims(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     sub: UUID  # user_id
-    tid: UUID  # tenant_id (personal이면 == sub)
+    tid: UUID  # tenant_id (equals sub for personal)
     sid: UUID  # auth_session.id
-    jti: UUID  # 토큰 고유 id — 세션당 access 토큰은 여러 개(refresh마다 새 jti)
+    jti: UUID  # Token unique id — multiple access tokens per session (new jti per refresh)
     iat: int
     exp: int
     nbf: int
@@ -44,21 +45,21 @@ class AccessClaims(BaseModel):
     schema_version: Literal["v1"] = "v1"
 
 
-class TokenPairResponse(BaseModel):  # /auth/login, /auth/refresh 응답 data
+class TokenPairResponse(BaseModel):  # /auth/login, /auth/refresh response data
     access_token: str
-    refresh_token: str  # 응답에 1회만 노출, 로그 금지(DENY_KEYS "token")
+    refresh_token: str  # Exposed once in response, never logged (DENY_KEYS "token")
     token_type: Literal["bearer"] = "bearer"
-    expires_in: int  # access TTL 초
+    expires_in: int  # access TTL in seconds
     session_id: UUID
 
 
-class ClientInfo(BaseModel):  # login()에 넘기는 요청 메타 — 해시만 저장
+class ClientInfo(BaseModel):  # Request metadata passed to login() — only hash is stored
     ip: str | None = None
     user_agent: str | None = None
 
 
 class SigningKeyConfigError(ValueError):
-    """JWT_SIGNING_KEYS/JWT_ACTIVE_KID 환경변수 형식/내용 오류(fail-closed)."""
+    """JWT_SIGNING_KEYS/JWT_ACTIVE_KID environment variable format/content error (fail-closed)."""
 
 
 class TokenInvalidError(Exception):
@@ -120,7 +121,7 @@ def _load_signing_keys(source: Mapping[str, str]) -> tuple[dict[str, bytes], str
 
 
 class TokenIssuer:
-    """access JWT + refresh 토큰 쌍 발급. `active_kid` 키로만 서명한다."""
+    """Issue access JWT + refresh token pair. Signs only with the `active_kid` key."""
 
     def __init__(self, keys: Mapping[str, bytes], active_kid: str) -> None:
         if active_kid not in keys:
@@ -168,13 +169,13 @@ class TokenIssuer:
 
     @staticmethod
     def issue_refresh() -> tuple[str, str]:
-        """`(평문, sha256 hex)` — 평문은 응답에만, hex는 DB에 저장한다."""
+        """`(plaintext, sha256 hex)` — plaintext for response only, hex stored in DB."""
         plaintext = secrets.token_urlsafe(_REFRESH_BYTES)
         return plaintext, hash_refresh_token(plaintext)
 
 
 class TokenVerifier:
-    """kid별 키로 access JWT를 검증한다. alg는 항상 HS256으로 고정."""
+    """Verify access JWT with kid-keyed keys. alg is always fixed to HS256."""
 
     def __init__(self, keys: Mapping[str, bytes]) -> None:
         self._keys = dict(keys)

@@ -149,6 +149,7 @@ def test_statement_to_view_raises_on_corrupted_return_method():
 # ---------- 성능 단언(D2) ----------
 
 
+@pytest.mark.perf
 def test_statement_to_view_maps_large_return_series_within_budget():
     many_returns = tuple(
         _return_figure(

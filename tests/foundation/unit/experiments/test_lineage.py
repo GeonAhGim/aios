@@ -127,6 +127,7 @@ def _p95(samples: list[float]) -> float:
     return samples[min(int(len(samples) * 0.95), len(samples) - 1)]
 
 
+@pytest.mark.perf
 def test_validate_new_experiment_p95_latency_within_budget() -> None:
     tenant_id = uuid4()
     parent = _experiment(tenant_id=tenant_id)
@@ -145,6 +146,7 @@ def test_validate_new_experiment_p95_latency_within_budget() -> None:
 # --- gate-red reproduction ---
 
 
+@pytest.mark.perf
 def test_gate_red_budget_actually_fails_past_budget() -> None:
     """Proves the perf assertion above is not a tautology -- an absurdly
     low budget against the same samples must fail."""

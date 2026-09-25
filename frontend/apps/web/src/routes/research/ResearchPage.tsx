@@ -33,6 +33,7 @@ import type { TFunction } from "i18next";
 import { Link } from "react-router-dom";
 import { AppShell } from "../../components/layout/AppShell";
 import { ErrorMessage } from "../../components/ErrorMessage";
+import { CoverageFreshnessPanel } from "../../components/CoverageFreshnessPanel";
 
 // spec docs/specs/L4_research_data_and_market_ecosystem_v1.0.md RD-17 —
 // ResearchPage.tsx(검색·소스 상태·종목 연결 표시). 선행 리프 RD-7(application/
@@ -320,6 +321,15 @@ export function ResearchPage({ researchDataClient }: ResearchPageProps) {
               ))}
             </div>
           )}
+        </Card>
+
+        <Card>
+          <CardTitle>{t("research.coverageFreshness.title")}</CardTitle>
+          {sourcesQuery.isLoading && <LoadingState />}
+          {sourcesQuery.isError && (
+            <ResearchErrorBanner error={sourcesQuery.error} onRetry={() => sourcesQuery.refetch()} />
+          )}
+          {!sourcesQuery.isLoading && !sourcesQuery.isError && <CoverageFreshnessPanel sources={sources} />}
         </Card>
       </div>
     </AppShell>

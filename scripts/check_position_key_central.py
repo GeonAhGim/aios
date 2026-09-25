@@ -67,29 +67,44 @@ def _is_assembly_expr(node: ast.expr) -> str | None:
     return None
 
 
+def _assign_target_value(node: ast.AST) -> tuple[list[ast.expr], ast.expr | None, int]:
+    if isinstance(node, ast.Assign):
+        return list(node.targets), node.value, node.lineno
+    if isinstance(node, ast.AnnAssign) and node.value is not None:
+        return [node.target], node.value, node.lineno
+    return [], None, 0
+
+
+def _assign_violations(node: ast.AST, location: str) -> list[Violation]:
+    targets, value, lineno = _assign_target_value(node)
+    if value is None:
+        return []
+    violations: list[Violation] = []
+    for target in targets:
+        if isinstance(target, ast.Name) and target.id == _TARGET_NAME:
+            reason = _is_assembly_expr(value)
+            if reason is not None:
+                violations.append(Violation(location, lineno, reason))
+    return violations
+
+
+def _call_kw_violations(node: ast.Call, location: str) -> list[Violation]:
+    violations: list[Violation] = []
+    for kw in node.keywords:
+        if kw.arg == _TARGET_NAME:
+            reason = _is_assembly_expr(kw.value)
+            if reason is not None:
+                violations.append(Violation(location, kw.value.lineno, reason))
+    return violations
+
+
 def _scan_source(source: str, location: str) -> list[Violation]:
     tree = ast.parse(source)
     violations: list[Violation] = []
     for node in ast.walk(tree):
-        targets: list[ast.expr] = []
-        value: ast.expr | None = None
-        lineno = 0
-        if isinstance(node, ast.Assign):
-            targets, value, lineno = node.targets, node.value, node.lineno
-        elif isinstance(node, ast.AnnAssign) and node.value is not None:
-            targets, value, lineno = [node.target], node.value, node.lineno
-        if value is not None:
-            for target in targets:
-                if isinstance(target, ast.Name) and target.id == _TARGET_NAME:
-                    reason = _is_assembly_expr(value)
-                    if reason is not None:
-                        violations.append(Violation(location, lineno, reason))
+        violations.extend(_assign_violations(node, location))
         if isinstance(node, ast.Call):
-            for kw in node.keywords:
-                if kw.arg == _TARGET_NAME:
-                    reason = _is_assembly_expr(kw.value)
-                    if reason is not None:
-                        violations.append(Violation(location, kw.value.lineno, reason))
+            violations.extend(_call_kw_violations(node, location))
     return violations
 
 

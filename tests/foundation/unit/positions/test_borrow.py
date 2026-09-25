@@ -377,6 +377,7 @@ def test_margin_call_rejects_currency_mismatch_on_collateral() -> None:
 # --- 수치 성능 단언 ------------------------------------------------------
 
 
+@pytest.mark.perf
 def test_check_locate_gate_hot_path_performance() -> None:
     """`check_locate_gate`는 매 매도 주문마다 호출되는 순수 계산 게이트다
     — 10,000회 호출이 1초 내에 끝나야 한다(회귀 감시, task-3003

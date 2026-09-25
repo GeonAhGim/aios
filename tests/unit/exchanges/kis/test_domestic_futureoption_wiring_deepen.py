@@ -33,13 +33,30 @@ from collections.abc import Callable
 from decimal import Decimal
 
 import httpx
+import pytest
 
 from src.data.models.base import AssetClass
 from src.data.models.trading import Order, OrderSide, OrderType
+from src.exchanges.kis import rate_profile
 from src.exchanges.kis.adapter import KISAdapter
 
 _ORDER_PATH = "/uapi/domestic-futureoption/v1/trading/order"
 _CANCEL_PATH = "/uapi/domestic-futureoption/v1/trading/order-rvsecncl"
+
+
+@pytest.fixture(autouse=True)
+def _reset_bucket_registry() -> None:
+    """The (account_type, tr_group) `TokenBucket` in `rate_profile.py` is a
+    process-wide singleton (BR-2b) — whichever test creates it first locks in
+    its `sleep` callable for every later test that shares the key. Reset
+    before/after each test here so this file's `_no_delay_sleep`-backed
+    adapters always get a freshly built bucket wired to the fake sleep,
+    instead of inheriting a real-`asyncio.sleep` bucket from test order and
+    turning `test_place_and_cancel_order_roundtrip_throughput_within_normalized_budget`'s
+    ~2,000 PAPER-throttled (2 req/s) calls into a multi-minute real wait."""
+    rate_profile.reset_token_bucket_registry_for_test()
+    yield
+    rate_profile.reset_token_bucket_registry_for_test()
 
 
 async def _no_delay_sleep(_seconds: float) -> None:
@@ -154,6 +171,7 @@ async def test_cancel_order_rmn_qty_yn_survives_retry_after_transient_failure() 
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.perf
 async def test_place_and_cancel_order_roundtrip_throughput_within_normalized_budget() -> None:
     """`place_futureoption_order`(ORD_DVSN_CD 포함)와 `cancel_futureoption_order`
     (RMN_QTY_YN 포함)를 반복 호출하는 실측 소요시간을, 동일 N 크기의 trivial

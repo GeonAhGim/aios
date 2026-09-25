@@ -7,7 +7,6 @@ failure injection 1, perf assertion 1, gate-red repro 1.
 
 from __future__ import annotations
 
-import time
 from dataclasses import FrozenInstanceError
 from decimal import Decimal
 from pathlib import Path
@@ -25,6 +24,7 @@ from src.foundation.validation.domain.models import (
     ValidationResult,
     ValidationRun,
 )
+from tests.conftest import PerfBudget
 
 _DOMAIN_DIR = Path(__file__).resolve().parents[4] / "src" / "foundation" / "validation" / "domain"
 
@@ -169,13 +169,18 @@ def test_validation_bundle_construction_catches_stale_outcome_after_hard_fail_un
 # --------------------------------------------------------------------------
 
 
-def test_validation_run_and_bundle_construction_within_dsl_compile_budget():
-    start = time.perf_counter()
-    for _ in range(10_000):
-        _run()
-        _bundle()
-    elapsed = time.perf_counter() - start
-    assert elapsed < 0.3, f"10,000x construction took {elapsed * 1000:.2f}ms, budget 300ms"
+@pytest.mark.perf
+def test_validation_run_and_bundle_construction_within_dsl_compile_budget(
+    perf_budget: PerfBudget,
+):
+    def _run_once() -> None:
+        for _ in range(10_000):
+            _run()
+            _bundle()
+
+    perf_budget.assert_within(
+        _run_once, budget_ms=300.0, label="10,000x ValidationRun/Bundle construction"
+    )
 
 
 # --------------------------------------------------------------------------

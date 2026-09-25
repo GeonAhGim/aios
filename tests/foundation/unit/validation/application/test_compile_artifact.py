@@ -105,6 +105,7 @@ async def test_underlying_lifecycle_error_type_is_not_leaked_unwrapped() -> None
 # -- D2 numeric performance assertion ----------------------------------------------
 
 
+@pytest.mark.perf
 async def test_p95_latency_within_pure_compile_budget() -> None:
     """Compiling is pure (no I/O beyond the injected fake read) -- 100
     sequential compiles of a moderately-sized FSM definition must stay well

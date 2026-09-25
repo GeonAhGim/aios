@@ -1,4 +1,4 @@
-"""Strategy Validation 계약 v1.
+"""Strategy Validation Contract v1.
 
 Spec: AIOSproject 46_strategy_package_and_validation_specification_v1.0.md,
 76_strategy_package_validation_l3_build_and_operational_specification_v1.0.md §4,
@@ -33,9 +33,10 @@ class Outcome(str, Enum):
 
 
 class StartValidationCommand(BaseModel):
-    """76번 §4 `StartValidation`. `bars`는 76번 §1 "input snapshot ref"의
-    실제 내용 — 호출자(라우터)가 어디서 가져오든(지금은 CredentialResolver
-    +거래소 adapter의 get_ohlcv) 이 계약은 신경 쓰지 않는다."""
+    """76 §4 `StartValidation`. `bars` is the actual content of 76 §1
+    "input snapshot ref" — regardless of where the caller (router) fetches
+    it (currently CredentialResolver + exchange adapter's get_ohlcv),
+    this contract takes no dependency on that detail."""
 
     strategy_id: str
     strategy_version: str

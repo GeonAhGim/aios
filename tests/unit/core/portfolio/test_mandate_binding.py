@@ -422,6 +422,7 @@ def test_float_quantity_rejected_by_binding_result_validator():
 # --- D2 성능 단언 (performance assertion) --------------------------------------
 
 
+@pytest.mark.perf
 def test_bind_p99_latency_within_pretrade_gate_budget():
     """ADR-2026-09-09-C Decision 1 축별 성능 예산: 사전거래 게이트 p99 5ms.
     `bind()`가 바로 그 사전거래 사이징 게이트다(모듈 docstring -- 매수/매도

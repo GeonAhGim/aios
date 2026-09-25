@@ -1,29 +1,37 @@
 """L4_analytics_authoring_backtest_marketplace_v1.0.md §3.3/§9.4 DSL-9(a) —
-AIOS Script `math.*` 내장함수(스칼라·시리즈 승격, na 전파).
+AIOS Script `math.*` builtins (scalar/series promotion, na propagation).
 
-순수 모듈(I/O·재귀 없음). 인터프리터(DSL-8)의 `BuiltinRegistry`에 `MATH_BUILTINS`
-표를 그대로 주입한다 — 인터프리터는 조회만 하고 본체는 여기 있다.
+Pure module (no I/O, no recursion). Injects the `MATH_BUILTINS` table as-is into
+the interpreter's (DSL-8) `BuiltinRegistry` — the interpreter only looks it up;
+the implementation lives here.
 
-타입·모양 규칙(DSL-4 `typing/types.py` 격자와 정합):
-- DSL-4 검사기는 `ns.ident(...)` 호출을 "인자가 전부 수치 계열이고, 하나라도
-  시리즈면 결과는 `series<float>`, 아니면 `float`"로 타입한다. 따라서 모든 `math.*`는
-  float 도메인 값만 낸다(int도 float로 올림, bool 반환 없음). `is_na`처럼 bool을
-  내는 함수는 검사기가 bool 반환을 모델링하기 전까지 등록하지 않는다(DSL-4 미검증
-  항목 — 여기서 임의로 타입을 만들지 않는다).
-- 승격: 인자 중 하나라도 `Series`면 스칼라 인자를 `bar_count`(호출 문맥
-  `CallSite.bar_count`)로 펴서 원소 단위로 계산하고 결과도 시리즈다. 전부 스칼라면
-  결과도 스칼라다. 시리즈 길이가 봉 수와 다르면 오류(DSL-8 `broadcast`와 동일).
-- na 전파: DSL-8 `series.py`와 같은 규칙 — 피연산자 하나라도 na(None)면 na.
-  0 나눗셈·정의역 밖(log(0)·sqrt(-1))·오버플로(exp(1000))처럼 비유한 결과는
-  예외 대신 na. 유일한 예외는 `nz`(na를 채우는 함수 자체).
-- 도메인: bool·비수치 원소는 거부(`BuiltinCallError`, fail-closed). Python `bool`이
-  `int`의 하위형이라 명시적으로 걸러낸다.
+Type/shape rules (aligned with the DSL-4 `typing/types.py` lattice):
+- The DSL-4 checker types an `ns.ident(...)` call as: "if all arguments are numeric
+  and at least one is a series, the result is `series<float>`, otherwise `float`."
+  Hence every `math.*` produces only float-domain values (int is promoted to float,
+  no bool return). A function that returns bool, like `is_na`, is not registered
+  until the checker can model a bool return (an unverified DSL-4 item — this module
+  does not invent a type on its own).
+- Promotion: if any argument is a `Series`, scalar arguments are broadcast to
+  `bar_count` (from the call site's `CallSite.bar_count`) and computed elementwise,
+  so the result is also a series. If all arguments are scalar, the result is scalar
+  too. A series whose length differs from the bar count is an error (same as DSL-8
+  `broadcast`).
+- na propagation: same rule as DSL-8 `series.py` — if any operand is na (None),
+  the result is na. Division by zero, out-of-domain inputs (log(0), sqrt(-1)), and
+  overflow (exp(1000)) yield na instead of raising. The only exception is `nz`
+  (the function whose job is to fill na).
+- Domain: bool and non-numeric elements are rejected (`BuiltinCallError`,
+  fail-closed). Python `bool` is a subtype of `int`, so it is filtered out
+  explicitly.
 
-함수 표(`math.<ident>`): abs·sign·floor·ceil·round·sqrt·log·exp(1인자),
-pow(2인자), max·min(2인자 이상), nz(1~2인자, 기본 채움 0).
-`round`는 half-away-from-zero(0.5→1, -0.5→-1)로 고정한다 — Python 내장 `round`의
-은행가 반올림은 스크립트 작성자 기대(Pine `math.round`)와 다르고, 어느 쪽이든 한
-규칙으로 결정론이 유지되면 되므로 문서화한 쪽을 택했다.
+Function table (`math.<ident>`): abs, sign, floor, ceil, round, sqrt, log, exp
+(1 argument), pow (2 arguments), max, min (2+ arguments), nz (1-2 arguments,
+default fill 0).
+`round` is fixed to half-away-from-zero (0.5→1, -0.5→-1) — Python's built-in
+`round` uses banker's rounding, which differs from what script authors expect
+(Pine's `math.round`), and since either convention preserves determinism as long
+as one rule is picked, the documented one was chosen.
 """
 from __future__ import annotations
 
@@ -34,7 +42,7 @@ from typing import TYPE_CHECKING, Final
 from src.core.script.runtime.series import Scalar, ScriptRuntimeError, Series, Value, broadcast
 
 if TYPE_CHECKING:
-    from src.core.script.runtime.interpreter import Builtin, CallSite
+    from src.core.script.runtime.interpreter_types import Builtin, CallSite
 
 __all__ = ["MATH_BUILTINS", "BuiltinCallError", "apply_elementwise"]
 
@@ -42,12 +50,14 @@ _Kernel = Callable[[Sequence[float]], float | None]
 
 
 class BuiltinCallError(ScriptRuntimeError):
-    """빌트인 호출 거부. `reason`은 API 계층이 매핑할 오류 코드(레지스트리 코드 재사용).
+    """Builtin call rejected. `reason` is the error code the API layer maps (reuses
+    the registry's codes).
 
-    코드: `SCRIPT_BUILTIN_ARITY`(인자 개수), `SCRIPT_BUILTIN_ARG`(도메인·모양),
-    그리고 `builtins_ta.py`가 지표 레지스트리/엔진에서 그대로 옮기는
-    `STRATEGY_INDICATOR_UNKNOWN`·`STRATEGY_PARAM_OUT_OF_RANGE`·`INDICATOR_INPUT_INVALID`·
-    `INDICATOR_LOOKBACK_INSUFFICIENT`·`INDICATOR_REGISTRY_MISMATCH`.
+    Codes: `SCRIPT_BUILTIN_ARITY` (argument count), `SCRIPT_BUILTIN_ARG`
+    (domain/shape), and the ones `builtins_ta.py` carries over verbatim from the
+    indicator registry/engine: `STRATEGY_INDICATOR_UNKNOWN`,
+    `STRATEGY_PARAM_OUT_OF_RANGE`, `INDICATOR_INPUT_INVALID`,
+    `INDICATOR_LOOKBACK_INSUFFICIENT`, `INDICATOR_REGISTRY_MISMATCH`.
     """
 
     def __init__(self, reason: str, message: str) -> None:
@@ -60,7 +70,7 @@ def _finite(x: float) -> float | None:
 
 
 def _numeric(v: Scalar, where: str) -> float | None:
-    """수치 도메인 검증(None은 na). bool·비수치는 거부."""
+    """Validate the numeric domain (None is na). Rejects bool and non-numeric values."""
     if v is None:
         return None
     if isinstance(v, bool) or not isinstance(v, int | float):
@@ -71,11 +81,12 @@ def _numeric(v: Scalar, where: str) -> float | None:
 def apply_elementwise(
     ident: str, args: tuple[Value, ...], bar_count: int, kernel: _Kernel
 ) -> Value:
-    """스칼라/시리즈 혼합 인자를 원소 단위 커널에 브로드캐스트한다.
+    """Broadcast a mix of scalar/series arguments to an elementwise kernel.
 
-    원소 중 하나라도 na면 커널을 부르지 않고 na를 낸다(na 전파). 커널은 float 목록을
-    받아 float 또는 None(na)을 돌려주며, 정의역 밖(`ValueError`)·오버플로·비유한
-    결과는 na로 정규화한다(DSL-8 `_finite`와 동일 규칙).
+    If any element is na, the kernel is not called and na is produced (na
+    propagation). The kernel takes a list of floats and returns a float or
+    None (na); out-of-domain (`ValueError`), overflow, and non-finite results
+    are normalized to na (same rule as DSL-8 `_finite`).
     """
     where = f"math.{ident}()"
     if not any(isinstance(a, Series) for a in args):
@@ -103,7 +114,7 @@ def _eval(kernel: _Kernel, row: list[float | None]) -> float | None:
     return None if result is None else _finite(float(result))
 
 
-# ---- 커널 ----
+# ---- kernels ----
 
 
 def _round_half_away(x: float) -> float:
@@ -161,9 +172,11 @@ def _make_variadic(ident: str, fn: Callable[[Sequence[float]], float]) -> Builti
 
 
 def _nz(args: tuple[Value, ...], site: CallSite) -> Value:
-    """`nz(x)` / `nz(x, fill)`: na → fill(기본 0). fill 자체가 na면 결과도 na.
+    """`nz(x)` / `nz(x, fill)`: na → fill (default 0). If fill itself is na, the
+    result is na too.
 
-    na를 소비하는 함수라 `apply_elementwise`(na 전파)를 쓰지 않고 직접 편다.
+    Since this function consumes na, it broadcasts directly instead of going
+    through `apply_elementwise` (which propagates na).
     """
     _check_arity("nz", len(args), 1, 2)
     where = "math.nz()"
@@ -192,4 +205,4 @@ def _table() -> dict[tuple[str, str], Builtin]:
 
 
 MATH_BUILTINS: Final[dict[tuple[str, str], Builtin]] = _table()
-"""`(ns, ident)` → 빌트인. 인터프리터 `default_builtins()`가 이 표를 그대로 등록한다."""
+"""`(ns, ident)` → builtin. The interpreter's `default_builtins()` registers this table as-is."""

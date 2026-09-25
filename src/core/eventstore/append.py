@@ -10,12 +10,12 @@ Spec: docs/specs/L4_ibor_fund_accounting_and_resilience_v1.0.md#§2.4 FA-13, §5
 조건부 INSERT만으로 fail-closed 직렬화를 얻는다 — 경쟁에서 진 쪽은
 `SequenceConflictError`로 즉시 재시도를 요구받는다(락 대기 없음).
 
-해시 체인의 정규화·다이제스트 규칙은 원장 LC-3
-`src/foundation/ledger/domain/hash_chain.py`의 `canonical_json`을 그대로
-재사용한다(task-1703 decision — 재구현 금지). `event_hash`가 필드를 이어붙여
-sha256하는 모양은 그 파일의 `entry_hash`와 같은 레시피를 이벤트 필드
-집합(대상 필드 자체는 다름)에 맞춰 다시 쓴 것이다 — 정규화 함수 자체를
-복제하지 않았다.
+해시 체인의 정규화 규칙은 `canonical_json`(`src/core/eventstore/canonical_json.py`,
+원래 원장 LC-3 `hash_chain.py` 소유였으나 task-6495에서 core-no-io 위반 정정을
+위해 core로 이전 — foundation 쪽은 이제 이 모듈에서 재수출)을 그대로 재사용한다
+(task-1703 decision — 재구현 금지). `event_hash`가 필드를 이어붙여 sha256하는
+모양은 원장 `entry_hash`와 같은 레시피를 이벤트 필드 집합(대상 필드 자체는 다름)에
+맞춰 다시 쓴 것이다 — 정규화 함수 자체를 복제하지 않았다.
 
 이 리프는 마이그레이션을 만들지 않는다(task-1703 decision: "테이블 DDL이
 필요하면 같은 커밋에 넣지 말고 needs_decision으로 물어라"). `event_store`
@@ -36,8 +36,8 @@ from typing import Any
 
 import asyncpg
 
+from src.core.eventstore.canonical_json import canonical_json
 from src.core.eventstore.contracts.v1 import DomainEvent
-from src.foundation.ledger.domain.hash_chain import canonical_json
 
 TABLE = "event_store"
 

@@ -1,10 +1,11 @@
-"""LA-9 — 캔들/틱/격리 저장·조회 포트.
+"""LA-9 — Candle/tick/quarantine storage and retrieval port.
 
 Spec: docs/specs/L4_market_data_positions_ledger_v1.0.md#§2.2, §9.2 LA-9.
 
-domain/application은 이 Protocol만 알고, 실제 구현(adapters/postgres_candle_store.py,
-LA-13)은 모른다(71번 §4). `conn`은 호출자가 이미 연 `asyncpg.Connection`을 그대로
-넘긴다는 계약만 표현한다(LC-8a `src/foundation/ledger/ports/*.py`와 같은 패턴).
+domain/application knows only this Protocol; the actual implementation
+(adapters/postgres_candle_store.py, LA-13) is unknown (71 §4). `conn` expresses
+only the contract that the caller passes an already-opened `asyncpg.Connection`
+(same pattern as LC-8a `src/foundation/ledger/ports/*.py`).
 """
 from __future__ import annotations
 
@@ -24,8 +25,8 @@ class CandleStore(Protocol):
         self, conn: asyncpg.Connection, batch_id: UUID, candles: list[CandleRecord]
     ) -> int:
         """§5 `ON CONFLICT (venue, instrument_id, timeframe, open_time) DO
-        NOTHING` — 반환값은 실제로 새로 저장된 행 수(재실행 시 0이어도
-        오류 아님)."""
+        NOTHING` — returns the count of actually inserted rows (0 on retry
+        is not an error)."""
         ...
 
     async def quarantine(
@@ -35,8 +36,8 @@ class CandleStore(Protocol):
         candles: list[CandleRecord],
         issues: list[QualityIssue],
     ) -> None:
-        """`md_quarantine_candle`에 판정 근거(issues)와 함께 격리 저장 —
-        정상 테이블에는 쓰지 않는다."""
+        """Store quarantined candles with judgment reasons (issues) in
+        `md_quarantine_candle` — do not write to the normal table."""
         ...
 
     async def query(
@@ -47,14 +48,15 @@ class CandleStore(Protocol):
         end: AwareDatetime,
         as_of: AwareDatetime | None,
     ) -> list[CandleRecord]:
-        """`as_of` 이전에 저장된 배치만 조회한다(A5 결정론). `as_of=None`이면
-        최신 저장 상태."""
+        """Query only batches saved before `as_of` (A5 determinism). If
+        `as_of=None`, return the latest saved state."""
         ...
 
     async def last_open_time(
         self, conn: asyncpg.Connection, key: SeriesKey
     ) -> AwareDatetime | None:
-        """저장된 캔들이 없으면 `None`(스케줄러가 첫 백필 범위 판단에 사용)."""
+        """Returns `None` if no candles exist (used by the scheduler to
+        determine the first backfill range)."""
         ...
 
     async def read_candles_columnar(
@@ -65,10 +67,11 @@ class CandleStore(Protocol):
         end: AwareDatetime,
         as_of: AwareDatetime | None,
     ) -> CandleColumns:
-        """LA-23b(ADR-2026-09-04-A #1) — `query()`와 같은 필터(`as_of` 스냅샷
-        포함)로 `open_time ASC` 정렬된 컬럼 배열을 돌려준다. 대량 소비자
-        (리플레이·`get_candles.load_series`)가 레코드별 pydantic 검증
-        없이(`domain/candle_columns.to_candle_records`) 순회하기 위한 내부
-        전용 경로 — `query()`를 대체하지 않는다(소량 조회는 여전히
-        `query()`가 더 단순하다, 예: positions 컨텍스트의 mark price 조회)."""
+        """LA-23b (ADR-2026-09-04-A #1) — Returns a column array sorted by
+        `open_time ASC` with the same filters as `query()` (including `as_of`
+        snapshot). An internal-only path for bulk consumers (replay,
+        `get_candles.load_series`) to iterate without per-record pydantic
+        validation (`domain/candle_columns.to_candle_records`) — does not
+        replace `query()` (for small queries, `query()` remains simpler, e.g.,
+        mark price lookup in the positions context)."""
         ...

@@ -1,4 +1,4 @@
-"""L01 — 지표 스펙 타입.
+"""L01 — Indicator specification types.
 
 Spec: L4_strategy_portfolio_backtest_v1_0.md §2.2 L01,
 L4_analytics_authoring_backtest_marketplace_v1_0.md §9.11 IND-15.
@@ -28,10 +28,10 @@ class ParamSpec:
 
 @dataclass(frozen=True)
 class PlotSpec:
-    """지표 출력 하나를 어떻게 그릴지의 선언적 표시 계약.
+    """Declarative display contract for one indicator output.
 
-    `kind`/`fill_between` 기본값은 TA-Lib `output_flags`에서 도출(ADR-2026-09-06-F D1).
-    `__post_init__`은 fail-closed 검증만 한다.
+    The `kind`/`fill_between` defaults are derived from TA-Lib `output_flags` (ADR-2026-09-06-F D1).
+    `__post_init__` performs fail-closed validation only.
     """
     kind: PlotKind
     scale: ScaleHint
@@ -54,9 +54,9 @@ class PlotSpec:
 
 @dataclass(frozen=True)
 class IndicatorSpec:
-    """지표 하나의 계산 계약: 입력, 파라미터, 출력, lookback, 표시.
+    """Computation contract for one indicator: inputs, params, outputs, lookback, display.
 
-    `plots`는 `outputs`와 1:1 대응. PlotSpec 없이 지표 등록 불가(fail-closed, IND-15).
+    `plots` maps 1:1 to `outputs`. Registration without PlotSpec is rejected (fail-closed, IND-15).
     """
     name: str
     inputs: tuple[str, ...]

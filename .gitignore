@@ -17,3 +17,11 @@ coverage.xml
 # worktree by worker_runner.ensure_bom_hooks() (core.hooksPath=.claude/hooks) --
 # local-only, never committed.
 /.claude/hooks/
+
+# graft's local graph cache — regenerable, not committed (run `graft build`).
+/graft/
+
+# task-5773: root-level node_modules/ leaked as untracked orphan output in
+# other worktrees (e.g. root vitest/vite smoke runs) -- frontend/.gitignore
+# already covers frontend/node_modules/, this covers the repo root.
+/node_modules/

@@ -310,6 +310,7 @@ def test_parse_mc_ticker_frame_fails_closed_on_non_json():
 # 새 기능 추가 없이 증빙만 보강한다 -- 아래 두 테스트가 그 보강분이다.
 
 
+@pytest.mark.perf
 def test_parse_mc_ticker_frame_meets_ws_fanout_latency_budget():
     """수치 성능 단언 -- ADR-2026-09-09-C Decision 1 예산표에 WS 프레임
     파싱 전용 항목이 없어 가장 가까운 유사 항목("WS 팬아웃 p95 500ms")을

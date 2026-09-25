@@ -3,6 +3,7 @@
 Spec: docs/specs/L4_market_data_positions_ledger_v1.0.md#§9 LC-3
 ("변조 감지: entry 1건 수정 시 체인 검증 실패").
 """
+
 from __future__ import annotations
 
 from datetime import datetime, timezone
@@ -14,6 +15,7 @@ import pytest
 from src.data.models.base import Currency
 from src.foundation.ledger.contracts.v1 import JournalEntryView, LedgerEventType, PostingLine, Side
 from src.foundation.ledger.domain import hash_chain
+from tests.conftest import PerfBudget
 
 
 def _now() -> datetime:
@@ -107,3 +109,38 @@ def test_verify_chain_rejects_forged_entry_hash() -> None:
 
     with pytest.raises(hash_chain.ChainIntegrityError):
         hash_chain.verify_chain([forged_e1])
+
+
+def test_verify_chain_propagates_typeerror_when_an_entrys_lines_field_is_corrupted_to_none() -> (
+    None
+):
+    """손상된 row에서 역직렬화되어 `lines=None`이 된 entry(pydantic
+    `model_copy`는 기본적으로 재검증하지 않으므로 이런 in-memory 상태가
+    나올 수 있다)는 체인 검증을 조용히 통과시키거나 `ChainIntegrityError`로
+    오분류하지 말고, `lines_digest`가 `None`을 순회하다가 던지는
+    `TypeError`로 곧바로(fail-closed) 실패해야 한다."""
+    e1 = _entry(seq=1, prev_hash=None)
+    tampered_e1 = e1.model_copy(update={"lines": None})
+
+    with pytest.raises(TypeError):
+        hash_chain.verify_chain([tampered_e1])
+
+
+@pytest.mark.perf
+def test_verify_chain_meets_latency_budget_over_a_long_chain(perf_budget: PerfBudget) -> None:
+    """2,000건짜리 체인 검증이 절대시간 예산 내여야 한다(선형 시간 유지
+    확인 — 체인 길이에 비해 검증이 이차로 퇴화하지 않는지)."""
+    n = 2000
+    budget_ms = 3000.0
+    prev: str | None = None
+    entries: list[JournalEntryView] = []
+    for seq in range(1, n + 1):
+        e = _entry(seq=seq, prev_hash=prev)
+        entries.append(e)
+        prev = e.entry_hash
+
+    def _run() -> None:
+        hash_chain.verify_chain(entries)
+
+    sample = perf_budget.assert_within(_run, budget_ms=budget_ms, label="verify_chain")
+    print(f"[LC-3 verify_chain] {n}-entry chain in {sample.cpu_ms:.1f}ms (budget<{budget_ms}ms)")

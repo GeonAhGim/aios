@@ -299,6 +299,7 @@ def test_compute_funding_cost_far_future_settlement_count_is_exact() -> None:
     assert count == 1
 
 
+@pytest.mark.perf
 def test_compute_borrow_cost_perf_budget() -> None:
     """perf assertion(D2): `compute_borrow_cost`는 백테스트 한 회 실행에서
     보유 포지션마다 반복 호출되는 순수 함수다 — O(1) 산술만 하므로 상한을

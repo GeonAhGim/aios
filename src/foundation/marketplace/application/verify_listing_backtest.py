@@ -34,7 +34,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Final
 
-from src.foundation.backtest.domain.models import BacktestResult
+from src.foundation.backtest.api import BacktestResult
 
 MP_UNVERIFIED_RESULT: Final = "MP_UNVERIFIED_RESULT"
 RESULT_HASH_SCHEMA: Final = "marketplace-listing-result-hash-1"

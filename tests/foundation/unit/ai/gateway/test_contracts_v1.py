@@ -31,6 +31,7 @@ from jsonschema import Draft202012Validator
 from pydantic import ValidationError
 
 from src.foundation.ai.gateway.contracts import v1
+from tests.conftest import PerfBudget
 
 FIXTURE = Path(__file__).parent / "fixtures" / "gateway_contracts_v1.json"
 
@@ -161,21 +162,26 @@ def test_agent_token_is_frozen_against_post_construction_mutation() -> None:
 
 
 @pytest.mark.perf
-def test_bulk_construction_of_many_agent_tokens_meets_latency_budget() -> None:
+def test_bulk_construction_of_many_agent_tokens_meets_latency_budget(
+    perf_budget: PerfBudget,
+) -> None:
     """MCP 도구 호출마다(§7 SLO: read 도구 p95 300ms) `authorize()`가
     `AgentToken`을 조회·검증하는 핫 패스다 -- 5,000건 구성이 절대시간
     예산 내여야 건당 상수시간에서 벗어나지 않았다고 볼 수 있다."""
     n = 5_000
-    budget_sec = 2.0  # 실측 로컬 <0.5s
+    budget_ms = 2000.0  # 실측 로컬 <500ms
     payloads = [_token_kwargs(token_id=uuid4()) for _ in range(n)]
 
-    start = time.perf_counter()
-    tokens = [v1.AgentToken(**payload) for payload in payloads]
-    elapsed = time.perf_counter() - start
+    def _construct() -> list[v1.AgentToken]:
+        tokens = [v1.AgentToken(**payload) for payload in payloads]
+        assert len(tokens) == n
+        return tokens
 
-    print(f"[AI-1 gateway contracts_v1] {n}건 construct in {elapsed:.4f}s (budget<{budget_sec}s)")
-    assert len(tokens) == n
-    assert elapsed < budget_sec, f"{n}건 구성이 예산({budget_sec}s)을 넘었습니다({elapsed:.4f}s)."
+    sample = perf_budget.assert_within(
+        _construct, budget_ms=budget_ms, label="[AI-1 gateway contracts_v1]"
+    )
+    desc = perf_budget.describe(sample, budget_ms=budget_ms)
+    print(f"[AI-1 gateway contracts_v1] {n}건 construct in {desc}")
 
 
 # ---- 게이트 적색 재현 ---------------------------------------------------------
@@ -205,6 +211,7 @@ def test_gate_red_progressive_field_corruption_flips_pass_fail_at_each_stage() -
                 v1.AgentToken(**payload)
 
 
+@pytest.mark.perf
 def test_gate_red_budget_actually_fails_past_budget() -> None:
     """위 성능 단언이 실제로 예산 초과를 잡아내는지(tautology 아님) 확인한다
     -- 예산을 실측치보다 훨씬 낮게 걸면 동일 검증 루프가 진짜로
@@ -266,13 +273,16 @@ def test_digest_schema_rejects_injected_corruption_and_recovers(mode) -> None:
 
 
 @pytest.mark.perf
-def test_digest_validation_p99_within_gate_budget() -> None:
+def test_digest_validation_p99_within_gate_budget(perf_budget: PerfBudget) -> None:
     payload = _ticket_kwargs()
-    samples = []
-    for _ in range(1000):
-        start = time.perf_counter()
-        v1.ConfirmTicket(**payload)
-        samples.append(time.perf_counter() - start)
-    p99 = sorted(samples)[989]
-    print(f"[AI-1 digest] p99={p99:.6f}s; budget=0.005s")
-    assert p99 < 0.005  # ADR-2026-09-09-C pre-trade gate budget.
+    budget_ms = 5.0  # ADR-2026-09-09-C pre-trade gate budget.
+    n = 1000
+
+    def _validate() -> v1.ConfirmTicket:
+        return v1.ConfirmTicket(**payload)
+
+    perf_samples = perf_budget.samples(_validate, n=n, warmup=0, batch=1)
+    wall_ms_list = sorted([s.wall_ms for s in perf_samples])
+    p99_wall_ms = wall_ms_list[int(len(wall_ms_list) * 0.99) - 1]
+    print(f"[AI-1 digest] p99={p99_wall_ms:.3f}ms budget<{budget_ms:.3f}ms")
+    assert p99_wall_ms < budget_ms

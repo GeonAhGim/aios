@@ -12,6 +12,8 @@ import sys
 from pathlib import Path
 from time import perf_counter
 
+import pytest
+
 from src.exchanges.common.circuit_breaker import CircuitState, VenueCircuit
 
 
@@ -104,6 +106,7 @@ def test_half_open_blocks_calls_beyond_half_open_max() -> None:
     assert circuit.allow() is False  # half_open_max=1 소진, 결과 대기중
 
 
+@pytest.mark.perf
 def test_allow_and_record_latency_budget() -> None:
     """`allow()`/`record()`는 요청마다 호출되는 hot path — 로컬 회귀 예산이며
     SLO 단언은 아니다(headless worker 지침). 정상 흐름(성공 응답이 대부분인

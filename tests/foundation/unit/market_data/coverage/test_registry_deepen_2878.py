@@ -24,7 +24,6 @@
 from __future__ import annotations
 
 import random
-import time
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
@@ -38,6 +37,7 @@ from src.foundation.market_data.contracts.v1 import Timeframe, Venue
 from src.foundation.market_data.contracts.v2.coverage import CoverageSpan, QualityGrade
 from src.foundation.market_data.contracts.v2.instruments import Instrument, InstrumentLifecycle
 from src.foundation.market_data.domain.coverage.registry import coverage_for, merge_spans
+from tests.conftest import PerfBudget
 
 _VALID_ULID = "01ARZ3NDEKTSV4RRFFQ69G5FAV"
 
@@ -159,7 +159,9 @@ def test_merge_spans_massive_duplicate_flood_stays_within_invariant() -> None:
 
 
 @pytest.mark.perf
-def test_merge_spans_meets_latency_budget_for_large_multi_axis_input() -> None:
+def test_merge_spans_meets_latency_budget_for_large_multi_axis_input(
+    perf_budget: PerfBudget,
+) -> None:
     """다축(venue x quality_grade) x 대량 span 병합은 정렬+선형 스캔
     (O(n log n))이어야 한다 — 회귀가 있다면 O(n^2) 등으로의 퇴화다."""
     rng = random.Random(2878)
@@ -178,20 +180,20 @@ def test_merge_spans_meets_latency_budget_for_large_multi_axis_input() -> None:
             spans.append(_span(venue=venue, quality_grade=grade, start_at=start, end_at=end))
     rng.shuffle(spans)
 
-    budget_sec = 2.0  # 실측 로컬 <0.3s(9축 x 1000 span = 9000개)
-    start_time = time.perf_counter()
-    result = merge_spans(spans)
-    elapsed = time.perf_counter() - start_time
+    budget_ms = 2000.0  # 실측 로컬 <0.3s(9축 x 1000 span = 9000개)
 
-    print(
-        f"[DC-6 registry] {len(spans)} spans merged into {len(result)} in "
-        f"{elapsed:.3f}s (budget<{budget_sec}s)"
+    result: list[CoverageSpan] | None = None
+
+    def _run() -> None:
+        nonlocal result
+        result = merge_spans(spans)
+
+    perf_budget.assert_within(
+        _run,
+        budget_ms=budget_ms,
+        label=f"merge {len(spans)} spans",
     )
-    assert elapsed < budget_sec, (
-        f"merge_spans({len(spans)}개)가 예산({budget_sec}s)을 넘었습니다"
-        f"({elapsed:.3f}s) — 정렬 기반 스캔이 선형탐색/제곱 비교로 퇴화했는지 "
-        "확인하세요."
-    )
+    assert result is not None
 
 
 # ---- 게이트 적색 재현(D2, 1) ----
@@ -342,11 +344,18 @@ def test_coverage_span_normalizes_lowercase_ulid() -> None:
 
 def test_coverage_span_rejects_ulid_with_digit_8_or_9_as_first_char() -> None:
     """ULID 첫 글자는 타임스탬프 오버플로 방지 위해 0-7로 제한된다 —
-    8 또는 9로 시작하는 26자는 거부돼야 한다."""
+    8 또는 9로 시작하는 26자는 거부돼야 한다. (XREV task-3649: 이전 버전은
+    첫 글자를 교체하며 실수로 한 글자를 통째로 날려 25자 문자열이 됐고,
+    길이 검사만으로도 거부돼 첫 글자 제한 자체가 빠져도 통과하는 허수아비
+    테스트였다 — 길이를 명시적으로 단언해 재발을 막는다.)"""
+    starts_with_8 = "8" + _VALID_ULID[1:]
+    starts_with_9 = "9" + _VALID_ULID[1:]
+    assert len(starts_with_8) == 26, f"garbage 길이가 26이 아님: {len(starts_with_8)}"
+    assert len(starts_with_9) == 26, f"garbage 길이가 26이 아님: {len(starts_with_9)}"
     with pytest.raises(ValidationError):
-        _span(instrument_id="8ARZ3NDEKTSV4RRFFQ69G5FAV", start_at=_dt(1), end_at=_dt(2))
+        _span(instrument_id=starts_with_8, start_at=_dt(1), end_at=_dt(2))
     with pytest.raises(ValidationError):
-        _span(instrument_id="9ARZ3NDEKTSV4RRFFQ69G5FAV", start_at=_dt(1), end_at=_dt(2))
+        _span(instrument_id=starts_with_9, start_at=_dt(1), end_at=_dt(2))
 
 
 def test_merge_spans_empty_input_returns_empty_list() -> None:

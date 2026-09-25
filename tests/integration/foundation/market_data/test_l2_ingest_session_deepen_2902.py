@@ -267,6 +267,7 @@ async def test_two_concurrent_sessions_on_different_instruments_do_not_cross_con
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.perf
 async def test_repeated_gap_cycles_meet_real_db_write_latency_budget(pool: asyncpg.Pool):
     """실 DB에 대한 반복 갭/재동기화 사이클(span 쓰기 포함)이 절대시간
     예산 내여야 한다 — 24시간 연속 수집에서 갭이 잦아도 DB 쓰기가 병목이

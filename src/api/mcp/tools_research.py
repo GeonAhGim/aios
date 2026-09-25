@@ -52,7 +52,7 @@ from src.foundation.experiments.contracts.v1 import Experiment
 if TYPE_CHECKING:
     from collections.abc import Callable
 
-    from src.api.mcp.server import ScopeDependency
+    from src.api.mcp.scope_types import ScopeDependency
 
 __all__ = [
     "ExperimentComparisonResponse",

@@ -32,8 +32,8 @@ from typing import Any
 
 from src.data.models.market_data import Candle
 from src.data.models.strategy_fsm import FSMStrategyConfig
+from src.foundation.backtest.api import BacktestMetrics
 from src.foundation.backtest.application.stress import run_stress
-from src.foundation.backtest.domain.models import BacktestMetrics
 from src.foundation.validation.checks.context import CheckContext
 from src.foundation.validation.domain.check_result import CheckResult
 from src.foundation.validation.domain.models import Outcome

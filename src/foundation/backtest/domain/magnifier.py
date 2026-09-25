@@ -60,9 +60,8 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 from decimal import Decimal
 
+from src.foundation.market_data.api import CandleColumns, duration
 from src.foundation.market_data.contracts.v1 import Timeframe
-from src.foundation.market_data.domain.candle_columns import CandleColumns
-from src.foundation.market_data.domain.timeframe import duration
 
 __all__ = [
     "HigherBar",

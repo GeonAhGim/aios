@@ -22,16 +22,21 @@ class FundRepositoryMixin:
     _pool: asyncpg.Pool
 
     async def create_fund(self, fund: Fund) -> Fund:
-        async with self._pool.acquire() as conn:
-            row = await conn.fetchrow(
-                "INSERT INTO fund (fund_id, entity_id, base_currency, mandate_ref, inception) "
-                "VALUES ($1, $2, $3, $4, $5) RETURNING *",
-                fund.fund_id,
-                fund.entity_id,
-                fund.base_currency.value,
-                fund.mandate_ref,
-                fund.inception,
-            )
+        try:
+            async with self._pool.acquire() as conn:
+                row = await conn.fetchrow(
+                    "INSERT INTO fund (fund_id, entity_id, base_currency, mandate_ref, "
+                    "inception) VALUES ($1, $2, $3, $4, $5) RETURNING *",
+                    fund.fund_id,
+                    fund.entity_id,
+                    fund.base_currency.value,
+                    fund.mandate_ref,
+                    fund.inception,
+                )
+        except asyncpg.UniqueViolationError as exc:
+            raise ConcurrencyConflictError(
+                f"fund.fund_id={fund.fund_id}: 다른 요청이 먼저 생성했습니다."
+            ) from exc
         return row_to_fund(row)
 
     async def get_fund(self, tenant_id: UUID, fund_id: UUID) -> Fund | None:

@@ -65,6 +65,7 @@ def test_timeout_budget_defaults() -> None:
     assert budget.total == 8.0
 
 
+@pytest.mark.perf
 def test_backoff_delay_latency_budget() -> None:
     """`backoff_delay`는 매 재시도마다 호출되는 hot path — 로컬 회귀 예산이며
     SLO 단언은 아니다(headless worker 지침)."""

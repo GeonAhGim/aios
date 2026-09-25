@@ -1,18 +1,18 @@
-"""LA-13 — `CandleStore`(ports/candle_store.py)의 asyncpg 구현.
+"""LA-13 — asyncpg implementation of `CandleStore` (ports/candle_store.py).
 
 Spec: docs/specs/L4_market_data_positions_ledger_v1.0.md#§2.2, §5, §9.2 LA-13.
 
-`md_candle`(LA-11, 마이그레이션 4a1d0c0de008)의 PK가 이미
-`(venue, instrument_id, timeframe, open_time)`이라 `ON CONFLICT DO NOTHING`을
-그 PK 그대로 걸면 재수집 멱등이 된다 — 별도 UNIQUE 제약을 추가로 찾을 필요가
-없다. CHECK 6종(OHLC 부등식)은 DB가 강제하므로 이 어댑터는 그 위반을
-잡아 감싸지 않고 `asyncpg.exceptions.CheckViolationError`를 그대로
-전파한다(코드 검증을 우회한 잘못된 캔들은 여기서도 거부되어야 한다는
-마이그레이션 docstring 그대로).
+The PK of `md_candle` (LA-11, migration 4a1d0c0de008) is already
+`(venue, instrument_id, timeframe, open_time)`, so attaching
+`ON CONFLICT DO NOTHING` on that PK directly makes re-collection idempotent —
+no additional UNIQUE constraint needs to be located. The 6 CHECK constraints
+(OHLC inequalities) are enforced by the DB, so this adapter does not wrap
+`asyncpg.exceptions.CheckViolationError` (candles that bypassed code validation
+must also be rejected here, as the migration docstring states).
 
-`query(as_of=...)`의 스냅샷 격리는 `md_candle.created_at`(WORM이라 이후
-갱신되지 않는다)로 구현한다 — `as_of` 이후에 들어온 배치는
-`created_at > as_of`라 필터에서 자동으로 빠진다.
+Snapshot isolation for `query(as_of=...)` is implemented via
+`md_candle.created_at` (WORM, never updated afterwards) — batches arriving
+after `as_of` have `created_at > as_of` and are automatically filtered out.
 """
 from __future__ import annotations
 
@@ -88,12 +88,13 @@ def _candle_params(candle: CandleRecord, batch_id: UUID) -> tuple[object, ...]:
 
 
 def _issue_type_for(open_time: AwareDatetime, issues: list[QualityIssue]) -> QualityIssueType:
-    """`md_quarantine_candle.issue_type`은 캔들 한 행당 하나뿐이지만
-    포트가 받는 `issues`는 배치 전체의 근거 목록이다 — 같은 `open_time`을
-    지목한 이슈를 우선 찾고, 없으면(배치 단위로만 기록된 이슈) 첫 번째
-    이슈를 대표로 쓴다. 근거 전체(`detail` 포함)는
-    `BatchRepository.add_issues`가 `md_quality_issue`에 별도로 남기므로
-    여기서는 분류 태그 역할만 하면 된다."""
+    """`md_quarantine_candle.issue_type` is singular per candle row, but
+    `issues` received by the port is the evidence list for the whole batch —
+    find issues pointing to the same `open_time` first; if none exist (issues
+    recorded at batch level only), use the first issue as a representative.
+    The full evidence (`detail` included) is left separately in
+    `md_quality_issue` by `BatchRepository.add_issues`, so this function
+    only serves as a classification tag."""
     for issue in issues:
         if issue.open_time == open_time:
             return issue.type

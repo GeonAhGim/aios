@@ -60,6 +60,7 @@ markdown-it-py==4.2.0
 MarkupSafe==3.0.3
 mdurl==0.1.2
 msgpack==1.2.2
+lightgbm==4.7.0
 mypy==2.3.1
 mypy_extensions==1.1.0
 numpy==2.2.6
@@ -84,6 +85,7 @@ PyJWT==2.14.0
 PyOTP==2.10.0
 pyparsing==3.3.2
 pyproject_hooks==1.2.0
+redis==8.1.0
 pytest==9.1.1
 pytest-asyncio==1.4.0
 pytest-benchmark==5.3.0

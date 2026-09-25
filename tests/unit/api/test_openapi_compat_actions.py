@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import json
 import subprocess
-from typing import Any
+from typing import Any, cast
 
 import pytest
 
@@ -31,7 +31,9 @@ _TYPE_CHANGE = "property type 변경"
 # ── DEEPEN 1956: 실패주입·수치성능단언·게이트적색재현 ──────────────────────
 
 
-def _api_response_envelope(data_ref: str, meta_ref: str = "#/components/schemas/Meta") -> dict[str, Any]:
+def _api_response_envelope(
+    data_ref: str, meta_ref: str = "#/components/schemas/Meta"
+) -> dict[str, Any]:
     """ApiResponse_XXX_ 봉투 스키마를 만든다."""
     return {
         "type": "object",
@@ -218,6 +220,7 @@ def test_failure_injection_type_change_nested_via_array_items_fails() -> None:
     )
 
 
+@pytest.mark.perf
 def test_performance_assertion_nested_ref_recursion_budget() -> None:
     """수치 성능 단언: 중첩 $ref 재귀가 100개 스키마에서도 1초 이내에 완료된다.
 
@@ -354,13 +357,17 @@ def test_main_propagates_when_export_subprocess_fails(monkeypatch: Any, tmp_path
     def _fail(*args: Any, **kwargs: Any) -> None:
         raise subprocess.CalledProcessError(returncode=1, cmd=["export_openapi"])
 
-    monkeypatch.setattr(compat_module.subprocess, "run", _fail)  # type: ignore[attr-defined]
+    monkeypatch.setattr(
+        cast(Any, compat_module).subprocess, "run", _fail
+    )
 
     with pytest.raises(subprocess.CalledProcessError):
         main(["--baseline", str(baseline_path)])
 
 
-def test_main_propagates_when_export_subprocess_lies_about_success(monkeypatch: Any, tmp_path: Any) -> None:
+def test_main_propagates_when_export_subprocess_lies_about_success(
+    monkeypatch: Any, tmp_path: Any
+) -> None:
     """실패 주입: 서브프로세스가 returncode 0으로 끝나도 출력 파일을 쓰지
     않으면(부분 실패·버그) 그 누락을 놓치고 통과시키면 안 된다."""
     baseline = _schema(
@@ -387,7 +394,9 @@ def test_main_propagates_when_export_subprocess_lies_about_success(monkeypatch: 
     def _noop_run(*args: Any, **kwargs: Any) -> subprocess.CompletedProcess[bytes]:
         return subprocess.CompletedProcess(args=["export_openapi"], returncode=0)
 
-    monkeypatch.setattr(compat_module.subprocess, "run", _noop_run)  # type: ignore[attr-defined]
+    monkeypatch.setattr(
+        cast(Any, compat_module).subprocess, "run", _noop_run
+    )
 
     with pytest.raises(FileNotFoundError):
         main(["--baseline", str(baseline_path)])

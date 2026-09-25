@@ -15,8 +15,14 @@ config = context.config
 
 # Interpret the config file for Python logging.
 # This line sets up loggers basically.
+# disable_existing_loggers=False: fileConfig() defaults to True, which flips
+# ``disabled=True`` on every logger that already exists in this process. When
+# migrations run in-process (tests calling ``alembic.command.upgrade``, tooling
+# embedding Alembic), that silently muted every application logger created
+# before the call -- caplog-based tests then observed empty records depending
+# on which test file ran earlier in the same worker.
 if config.config_file_name is not None:
-    fileConfig(config.config_file_name)
+    fileConfig(config.config_file_name, disable_existing_loggers=False)
 
 # 04번 문서 원칙: Alembic으로 스키마 버전 관리. 스키마는 SQLAlchemy ORM
 # 메타데이터가 아니라 04_db_schema.md의 원본 SQL을 그대로 옮긴 마이그레이션

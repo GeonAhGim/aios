@@ -29,7 +29,7 @@ from dataclasses import asdict, dataclass, is_dataclass
 from decimal import Decimal
 from typing import Any
 
-from src.foundation.ledger.domain.hash_chain import canonical_json
+from src.core.eventstore.canonical_json import canonical_json
 
 StreamKey = tuple[str, str]
 """`(domain, key)` -- e.g. `("orders", str(order_id))` or `("ledger", account_code)`."""

@@ -118,7 +118,9 @@ class VerificationService:
             # verifier could approve their own listing (the verification_queue_service's
             # queue filter alone cannot block calls that specify listing_id directly).
             if pre_check["seller_user_id"] == verifier_id:
-                raise VerificationError("Cannot verify a listing you are selling (conflict of interest).")
+                raise VerificationError(
+                    "Cannot verify a listing you are selling (conflict of interest)."
+                )
 
             if decision == "APPROVE":
                 await self._reject_if_backtest_failed(conn, listing_id)

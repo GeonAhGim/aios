@@ -1,5 +1,6 @@
 import json
 import logging
+import time
 import uuid
 from datetime import datetime, timezone
 from logging.handlers import QueueHandler
@@ -249,3 +250,64 @@ def test_formatter_fails_closed_when_required_field_unknown_to_structured_log_li
 
     with pytest.raises(KeyError):
         JSONLinesFormatter().format(record)
+
+
+# ── 성능 단언 + 게이트 적색 재현 ─────────────────────────────────────────────
+
+
+def _format_latencies_ms(iterations: int = 200) -> list[float]:
+    latencies: list[float] = []
+    for i in range(iterations):
+        record = _make_record(
+            event_type="order.status.changed",
+            correlation_id=f"c-{i}",
+            payload={"n": i},
+        )
+        start = time.perf_counter()
+        JSONLinesFormatter().format(record)
+        latencies.append((time.perf_counter() - start) * 1000)
+    return latencies
+
+
+def _p95(samples: list[float]) -> float:
+    ordered = sorted(samples)
+    index = max(0, int(len(ordered) * 0.95) - 1)
+    return ordered[index]
+
+
+# §9 PLT-03 리스크표의 "로그 sink 지연/stdout 막힘" 대응은 QueueHandler의
+# 비동기 큐잉 경로에 의존한다 — 그 경로가 실제로 non-blocking이려면
+# 리스너 스레드에서 도는 `format()` 자체도 예산 안에서 끝나야 큐가 밀리지
+# 않는다. ADR-2026-09-09-C Decision 1 축별 예산표에 로깅 전용 항목은 없어
+# (순수 인메모리 JSON 직렬화, I/O 없음), 로컬 실측(수백 마이크로초) 대비
+# 10배 이상 여유를 둔 예산을 이 리프가 자체 선언한다.
+_FORMAT_P95_BUDGET_MS = 5.0
+
+
+def test_formatter_format_latency_p95_within_self_declared_budget():
+    """성능 단언: `JSONLinesFormatter.format()`의 p95 지연이 자체 선언 예산
+    (5ms) 안에 있어야 한다 — 이 경로가 느려지면 QueueListener 스레드가 밀려
+    §9 PLT-03이 막으려는 stdout 블로킹이 큐 뒤에서 재발한다."""
+    p95_ms = _p95(_format_latencies_ms())
+    assert p95_ms < _FORMAT_P95_BUDGET_MS
+
+
+def test_gate_red_repro_format_latency_budget_actually_fails_on_regression(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """게이트 적색 재현: 위 성능 단언이 상시-녹색 tautology가 아니라는 것을
+    증명한다 — `json.dumps`에 예산을 넘는 지연을 주입하면 같은 단언식이
+    실제로 AssertionError를 내야 한다."""
+    import src.core.logging.schema as schema_module
+
+    original_dumps = schema_module.json.dumps
+
+    def _stalled_dumps(*args, **kwargs):
+        time.sleep(_FORMAT_P95_BUDGET_MS / 1000.0)
+        return original_dumps(*args, **kwargs)
+
+    monkeypatch.setattr(schema_module.json, "dumps", _stalled_dumps)
+
+    p95_ms = _p95(_format_latencies_ms(iterations=5))
+    with pytest.raises(AssertionError):
+        assert p95_ms < _FORMAT_P95_BUDGET_MS

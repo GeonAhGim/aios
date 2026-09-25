@@ -7,10 +7,20 @@ from uuid import UUID, uuid4
 import pytest
 
 from src.data.models.market_data import Candle
+from src.foundation.automation.flags import FEATURE_FLAG_NAME
 from src.foundation.automation.ports.action_sink import ActionResult
 from src.foundation.risk.ports.notifier import NotifyResult
 
 _EPOCH = datetime(2026, 1, 1, tzinfo=timezone.utc)
+
+
+@pytest.fixture(autouse=True)
+def _automation_flag_on(monkeypatch: pytest.MonkeyPatch) -> None:
+    """This package's existing tests exercise rule create/evaluate/execute
+    without knowing about the U-4a feature flag -- default it ON here so
+    that behavior stays unchanged (task-6900); tests for the OFF path
+    override it explicitly."""
+    monkeypatch.setenv(FEATURE_FLAG_NAME, "1")
 
 
 def make_candle(

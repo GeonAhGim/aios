@@ -5,6 +5,7 @@
 관심사가 아니라 CredentialResolver 자체의 핵심 요구사항이라 같은
 파일에서 다룬다.
 """
+
 import asyncio
 from pathlib import Path
 
@@ -52,7 +53,7 @@ def _factory():
         calls.append(adapter)
         return adapter
 
-    factory.calls = calls  # type: ignore[attr-defined]
+    factory.calls = calls  # type: ignore[attr-defined]  # 테스트 픽스처 전용 동적 속성(factory 함수에 정적 타입 없음)
     return factory
 
 

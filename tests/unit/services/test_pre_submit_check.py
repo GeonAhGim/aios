@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from typing import Any, cast
 from uuid import uuid4
 
 import pytest
@@ -16,10 +17,10 @@ async def test_missing_gate_fails_closed():
     호출 자체가 터진다(게이트가 아닌 값을 호출하려다 TypeError)."""
     with pytest.raises(TypeError):
         await is_submission_allowed(
-            None,
+            cast(Any, None),
             user_id=uuid4(),
             execution_id=1,
-            exchange="bitget",  # type: ignore[arg-type]
+            exchange="bitget",
         )
 
 

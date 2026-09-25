@@ -37,11 +37,15 @@ decision — "구현 대상 Protocol은 ... capabilities()... fetch_candles()...
 
 from __future__ import annotations
 
-from collections.abc import AsyncIterator, Sequence
+import asyncio
+import random
+import time
+from collections.abc import AsyncIterator, Awaitable, Callable, Sequence
 from decimal import Decimal
 
 from src.data.models.base import AssetClass
 from src.exchanges.bitget.adapter import BitgetAdapter
+from src.exchanges.common.http_policy import RetryPolicy
 from src.foundation.market_data.adapters.providers.base_adapter import BaseProviderAdapter
 from src.foundation.market_data.contracts.v1 import Timeframe, Venue
 from src.foundation.market_data.contracts.v2.instruments import VenueListing
@@ -86,8 +90,18 @@ class BitgetProvider(BaseProviderAdapter):
     """`BitgetAdapter`(기존 `src/exchanges/bitget`)에 위임하는
     `MarketDataProvider`(DC-5) 구현체."""
 
-    def __init__(self, adapter: BitgetAdapter, **kwargs: object) -> None:
-        super().__init__(_CAPABILITIES, **kwargs)  # type: ignore[arg-type]
+    def __init__(
+        self,
+        adapter: BitgetAdapter,
+        *,
+        retry_policy: RetryPolicy | None = None,
+        clock: Callable[[], float] = time.monotonic,
+        sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
+        rng: Callable[[], float] = random.random,
+    ) -> None:
+        super().__init__(
+            _CAPABILITIES, retry_policy=retry_policy, clock=clock, sleep=sleep, rng=rng
+        )
         self._adapter = adapter
 
     def capabilities(self) -> ProviderCapabilities:

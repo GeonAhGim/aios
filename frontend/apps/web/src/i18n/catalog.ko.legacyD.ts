@@ -296,4 +296,19 @@ export const catalogKoLegacyD = {
     "t9": "대상 {{targetType}} #{{targetId}}",
     "t10": "감사 로그가 없습니다.",
   },
+  // task-5998(SIG-6): SignalSourcesPage.tsx(시크릿 발급·회전·최근 수신 로그).
+  "signalSourcesPage": {
+    "t1": "{{sourceName}}의 새 시크릿이 발급되었습니다.",
+    "t2": "이 시크릿은 지금만 표시됩니다. 안전한 곳에 복사해 두세요 — 다시 조회할 수 없습니다.",
+    "t3": "확인",
+    "t4": "최근 수신된 신호가 없습니다.",
+    "t5": "로그 숨기기",
+    "t6": "최근 수신 로그",
+    "t7": "회전",
+    "title8": "신호 소스",
+    "label9": "소스 이름",
+    "placeholder10": "예: TradingView 웹훅",
+    "t11": "발급",
+    "t12": "등록된 신호 소스가 없습니다.",
+  },
 } as const;

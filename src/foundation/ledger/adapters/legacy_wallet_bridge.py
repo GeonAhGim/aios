@@ -37,7 +37,7 @@ from uuid import UUID, uuid4
 import asyncpg
 
 from src.data.models.base import Currency
-from src.foundation.evidence.adapters.postgres_repository import PostgresAuditEventRepository
+from src.foundation.evidence.api import PostgresAuditEventRepository
 from src.foundation.ledger.adapters.postgres_balance_repository import PostgresBalanceRepository
 from src.foundation.ledger.adapters.postgres_journal_repository import PostgresJournalRepository
 from src.foundation.ledger.application.post_entry import post_entry

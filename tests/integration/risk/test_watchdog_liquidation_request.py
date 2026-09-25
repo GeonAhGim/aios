@@ -21,9 +21,9 @@ from src.core.safety.watchdog import WatchdogAction, WatchdogDecision, WatchdogS
 from src.foundation.risk_gate.adapters.postgres_repository import PostgresRiskGateRepository
 from src.foundation.risk_gate.application.activate_safety_control import activate_safety_control
 from src.foundation.risk_gate.domain.models import SafetyScope
+from src.services.safety.watchdog_apply import apply_decision
 from src.watchdog_process import (
     WATCHDOG_SYSTEM_ACTOR_ID,
-    _apply_decision,
     _LastAppliedAction,
     _LatestExchangeHealth,
     build_kill_switch_service,
@@ -156,7 +156,7 @@ async def test_safety_control_fk_rejects_unknown_id(pool):
 async def test_liquidate_creates_control_and_liquidation_request_with_fence(pool, kill_switch):
     before_controls, before_requests = await _counts(pool)
 
-    await _apply_decision(
+    await apply_decision(
         pool,
         WatchdogDecision(action=WatchdogAction.LIQUIDATE, reason="market_wide_correlated_loss"),
         kill_switch,
@@ -180,7 +180,7 @@ async def test_liquidate_creates_control_and_liquidation_request_with_fence(pool
 async def test_halt_creates_control_only_no_liquidation_request(pool, kill_switch):
     before_controls, before_requests = await _counts(pool)
 
-    await _apply_decision(
+    await apply_decision(
         pool,
         WatchdogDecision(action=WatchdogAction.HALT, reason="main_process_unresponsive"),
         kill_switch,
@@ -227,12 +227,16 @@ async def test_run_one_cycle_does_not_reapply_same_decision_twice(pool, kill_swi
     last_action = _LastAppliedAction()
 
     before_controls, _ = await _counts(pool)
+    async def get_basket_returns() -> dict[str, Decimal]:
+        return {}
+
     cycle_kwargs = {
         "check_exchange": check_exchange,
         "check_db": check_db,
         "exchange_health_cache": exchange_health_cache,
         "kill_switch": kill_switch,
         "last_action": last_action,
+        "get_basket_returns": get_basket_returns,
     }
 
     await run_one_cycle(pool, service, split_brain, **cycle_kwargs)

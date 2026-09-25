@@ -1,11 +1,14 @@
-"""PutDrawings 커맨드 — 드로잉 컬렉션 전체 치환 + 낙관적 잠금(105번 표준).
+"""PutDrawings command — full replacement of the drawings collection + optimistic lock
+(standard-105).
 
-구조 검증(`domain.rules.validate_drawings_document`)을 소유권/낙관적 잠금
-검사보다 먼저 한다 — 타 테넌트 layout_id에 망가진 문서를 보내도 400
-(VALIDATION_INVALID_FIELD)이 먼저 나가버리면 "그 id가 존재한다"는 정보가
-새므로, 실제로는 검증 자체는 layout_id와 무관한 순수 함수라 순서를 바꿔도
-그 결과 자체는 같다 — 그래도 명시적으로 `load_owned_layout()`을 먼저
-부르는 순서를 지킨다(get_drawings.py·update_layout.py와 동일 원칙 유지)."""
+Run structural validation (`domain.rules.validate_drawings_document`) before
+ownership/optimistic-lock checks — if we send a broken document to another
+tenant's layout_id and get a 400 (VALIDATION_INVALID_FIELD) first, the
+response leaks the information that "that id exists". In reality the
+validation itself is a pure function independent of layout_id, so swapping
+the order would produce the same result — but we still explicitly follow
+the order of calling `load_owned_layout()` first (same principle as
+get_drawings.py and update_layout.py)."""
 from __future__ import annotations
 
 from typing import Any

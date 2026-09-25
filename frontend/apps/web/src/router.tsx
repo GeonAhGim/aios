@@ -20,6 +20,7 @@ import { AiStudioPage } from "./routes/ai/AiStudioPage";
 import { SweepResultsPage } from "./routes/backtest/SweepResultsPage";
 import { ChartPage } from "./routes/chart/ChartPage";
 import { CompliancePage } from "./routes/compliance/CompliancePage";
+import { MandatePage } from "./routes/compliance/MandatePage";
 import { LoginPage } from "./routes/auth/LoginPage";
 import { SignupPage } from "./routes/auth/SignupPage";
 import { DashboardPage } from "./routes/dashboard/DashboardPage";
@@ -27,6 +28,8 @@ import { DecisionHistoryPage } from "./routes/decisions/DecisionHistoryPage";
 import { DisputeSubmitPage } from "./routes/disputes/DisputeSubmitPage";
 import { ExchangeManagementPage } from "./routes/exchanges/ExchangeManagementPage";
 import { ExecutionControlPage } from "./routes/executions/ExecutionControlPage";
+import { ExecutionAlgoPage } from "./routes/executions/ExecutionAlgoPage";
+import { TcaPage } from "./routes/executions/TcaPage";
 import { FollowPage } from "./routes/follow/FollowPage";
 import { CandlesPage } from "./routes/market/CandlesPage";
 import { InstrumentsPage } from "./routes/market/InstrumentsPage";
@@ -41,6 +44,7 @@ import { MfaSetupPage } from "./routes/onboarding/MfaSetupPage";
 import { OnboardingFlowPage } from "./routes/onboarding/OnboardingFlowPage";
 import { RiskAssessmentPage } from "./routes/onboarding/RiskAssessmentPage";
 import { FeatureFlagGate } from "./components/FeatureFlagGate";
+import { PerformanceStatementsPage } from "./routes/portfolio/PerformanceStatementsPage";
 import { PortfolioPage } from "./routes/portfolio/PortfolioPage";
 import { RebalancePage } from "./routes/whatif/RebalancePage";
 import { ReportsPage } from "./routes/reports/ReportsPage";
@@ -48,6 +52,7 @@ import { ResearchPage } from "./routes/research/ResearchPage";
 import { ScreenerPage } from "./routes/screener/ScreenerPage";
 import { WriteReviewPage } from "./routes/reviews/WriteReviewPage";
 import { ScriptEditorPage } from "./routes/scripts/ScriptEditorPage";
+import { SignalSourcesPage } from "./routes/signals/SignalSourcesPage";
 import { AccountDeletionPage } from "./routes/settings/AccountDeletionPage";
 import { ApprovalSettingsPage } from "./routes/settings/ApprovalSettingsPage";
 import { ConnectionsPage } from "./routes/settings/ConnectionsPage";
@@ -74,7 +79,8 @@ function protectAdmin(element: ReactNode) {
   );
 }
 
-export const router = createBrowserRouter([
+export const router = createBrowserRouter(
+  [
   { path: "/", element: <Navigate to="/dashboard" replace /> },
   { path: "/signup", element: <SignupPage /> },
   { path: "/login", element: <LoginPage /> },
@@ -119,12 +125,17 @@ export const router = createBrowserRouter([
   { path: "/marketplace/sell", element: protect(<SellStrategyPage />) },
   { path: "/marketplace/:listingId", element: protect(<ListingDetailPage />) },
   { path: "/executions", element: protect(<ExecutionControlPage />) },
+  { path: "/executions/:parentId/algo", element: protect(<ExecutionAlgoPage />) },
+  { path: "/executions/:parentId/tca", element: protect(<TcaPage />) },
   { path: "/follow", element: protect(<FollowPage />) },
+  { path: "/signals/sources", element: protect(<SignalSourcesPage />) },
   { path: "/ai/studio", element: protect(<AiStudioPage />) },
   { path: "/portfolio", element: protect(<PortfolioPage />) },
+  { path: "/portfolio/performance-statements", element: protect(<PerformanceStatementsPage />) },
   { path: "/rebalance", element: protect(<RebalancePage />) },
   { path: "/mandates", element: protect(<MandatesPage />) },
   { path: "/compliance", element: protect(<CompliancePage />) },
+  { path: "/compliance/mandate", element: protect(<MandatePage />) },
   { path: "/decisions/history", element: protect(<DecisionHistoryPage />) },
   { path: "/reports", element: protect(<ReportsPage />) },
   { path: "/wallet", element: protect(<WalletPage />) },
@@ -165,4 +176,6 @@ export const router = createBrowserRouter([
   { path: "/admin/evidence-chain", element: protectAdmin(<EvidenceChainPage />) },
   { path: "/admin/trust", element: protectAdmin(<TrustPage />) },
   { path: "/admin/audit-log", element: protectAdmin(<AuditLogPage />) },
-]);
+  ],
+  { future: { v7_relativeSplatPath: true } },
+);

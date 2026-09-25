@@ -64,21 +64,149 @@ def test_bracket_quantity_for_fill_is_identical_across_backtest_and_paper(
 
 
 def test_partial_entry_fill_produces_matching_bracket_exit_log_on_both_sides() -> None:
-    """DoD 시나리오 그대로: 같은 스크립트(bracket qty=10, profit/loss 설정)가
-    같은 데이터(진입이 4만 체결)를 만났을 때, 두 체결 모델이 만들어내는
-    "브래킷 청산 로그"(레그별 청산 수량)가 완전히 같아야 한다."""
+    """DoD scenario: script with strategy.entry/bracket runs through real backtest.
+
+    A script with strategy.entry(1, 10) + strategy.bracket(10, profit, loss, trail)
+    runs through real backtest script execution with synthetic OHLC data engineered to trigger
+    a partial entry fill (qty=4) followed by a loss-leg bracket exit trigger (qty=4).
+
+    Both backtest (via run_quick_backtest + resolve_oca/bracket_quantity_for_fill)
+    and paper (via direct EM-19 function calls with SAME numbers) must produce
+    identical exit decisions and quantities, verifying parity between bounded contexts."""
+    from datetime import datetime, timezone
+
+    from src.core.script.artifact.compile import compile_source
+    from src.foundation.backtest.application.quick_backtest import run_quick_backtest
+    from src.foundation.backtest.application.script_signal_source import (
+        build_script_signal_source,
+    )
+    from src.foundation.backtest.domain.models_v2 import (
+        BacktestConfigV2,
+        PartialFillConfig,
+    )
+    from src.foundation.market_data.api import CandleColumns
+    from src.foundation.market_data.contracts.v1 import Timeframe
+
+    # Compile a script that enters and places a bracket exit.
+    # Strategy calls must be in expressions (e.g., let statements) in the current DSL.
+    # Note: Trailing stop (trail_pct) is not yet fully implemented in backtest,
+    # but we include it for API completeness; it won't be triggered.
+    # Profit and loss legs will be tested (priority: loss > profit > trail).
+    script_source = """
+input close: series<float> = 0
+input high: series<float> = 0
+input low: series<float> = 0
+input open: series<float> = 0
+
+let entry_id = strategy.entry(1, 10)
+let bracket_id = strategy.bracket(10, 120, 95, 0.05)
+"""
+    compiled = compile_source(script_source, registry_version="1.0.0")
+
+    # Synthetic OHLC data:
+    # Bar 0: 100, 101, 99, 100 (setup bar)
+    # Bar 1: 100, 100, 100, 100 (entry execution + partial fill due to low volume)
+    # Bar 2: 100, 100, 94, 100 (touches loss price 95 — bracket exit triggers loss leg)
+    # Partial fill: max 40% participation → 10 * 0.4 = 4 shares fill in bar 1 (volume 10)
+    base_time = datetime(2025, 1, 1, 9, 30, tzinfo=timezone.utc)
+
+    columns = CandleColumns(
+        ts=[
+            base_time,
+            base_time.replace(minute=31),
+            base_time.replace(minute=32),
+        ],
+        open=[Decimal("100"), Decimal("100"), Decimal("100")],
+        high=[Decimal("101"), Decimal("100"), Decimal("100")],
+        low=[Decimal("99"), Decimal("100"), Decimal("94")],
+        close=[Decimal("100"), Decimal("100"), Decimal("100")],
+        volume=[Decimal("100"), Decimal("10"), Decimal("100")],
+        quote_volume=[Decimal("10000"), Decimal("1000"), Decimal("10000")],
+    )
+
+    # Build signal source (compiles the script and sets up bracket metadata)
+    signal_source = build_script_signal_source(
+        compiled.ir, bar_count=len(columns), columns=columns
+    )
+
+    # Run backtest with partial fill config to trigger 40% (4 out of 10)
+    from src.foundation.backtest.domain.models_v2 import (
+        AdjustmentsConfig,
+        CostsConfig,
+        FixedSlippage,
+        OrderTypesConfig,
+        VenueTierCommission,
+    )
+
+    config = BacktestConfigV2(
+        slippage=FixedSlippage(bps=Decimal("1.5")),
+        commission=VenueTierCommission(
+            venue="BITGET", maker_bps=Decimal("2"), taker_bps=Decimal("4"), min_fee=Decimal("0.10")
+        ),
+        latency_ms=50,
+        partial_fill=PartialFillConfig(max_participation_pct=Decimal("0.4")),
+        order_types=OrderTypesConfig(limit=True, stop=True, oco=False, trailing=False),
+        magnifier_tf=None,
+        costs=CostsConfig(funding=True, borrow_apr=None),
+        adjustments=AdjustmentsConfig(splits=True, dividends=True),
+        calendar="24x7",
+    )
+    result = run_quick_backtest(
+        config,
+        columns,
+        timeframe=Timeframe.M1,
+        strategy=signal_source,
+        initial_cash=Decimal("10000"),
+        funding_rate=Decimal("0"),  # No funding costs for this test
+    )
+
+    # Verify the backtest produced:
+    # 1. Entry fill qty=4 (partial, 40% of 10 shares vs bar 1's volume 10)
+    # 2. Bracket exit fill qty=4 (via bracket_quantity_for_fill)
+    assert len(result.fills) >= 1, "Expected at least 1 fill (entry)"
+    entry_fill = result.fills[0]
+    assert entry_fill.quantity == Decimal("4"), (
+        f"Expected partial entry fill of 4, got {entry_fill.quantity}"
+    )
+
+    # Bracket exit fill should be in fills list (may be second if bar 2 triggers)
+    bracket_exit_fill = None
+    for fill in result.fills[1:]:
+        # Exit is opposite side of entry
+        if fill.side.name != entry_fill.side.name:
+            bracket_exit_fill = fill
+            break
+
+    assert bracket_exit_fill is not None, "Expected bracket exit fill to be generated"
+    # Exit qty must match bracket_quantity_for_fill(requested_qty=10, filled_qty=4)
+    assert bracket_exit_fill.quantity == Decimal("4"), (
+        f"Expected bracket exit qty=4, got {bracket_exit_fill.quantity}"
+    )
+
+    # Cross-check with direct paper-side calls using SAME numbers from backtest:
+    filled_qty = entry_fill.quantity  # Decimal("4")
     requested_qty = Decimal("10")
-    filled_qty = Decimal("4")
-    triggered = {"profit": False, "loss": True, "trail": False}
+    triggered_paper = {"profit": False, "loss": True, "trail": False}
 
-    backtest_qty = bt6.bracket_quantity_for_fill(requested_qty=requested_qty, filled_qty=filled_qty)
-    backtest_resolution = bt6.resolve_oca(triggered=triggered, priority_order=_PRIORITY_ORDER)
+    backtest_qty = bt6.bracket_quantity_for_fill(
+        requested_qty=requested_qty, filled_qty=filled_qty
+    )
+    paper_qty = em19.bracket_quantity_for_fill(
+        requested_qty=requested_qty, filled_qty=filled_qty
+    )
+    assert backtest_qty == paper_qty == filled_qty, (
+        f"bracket_quantity_for_fill parity: BT={backtest_qty}, EM={paper_qty}"
+    )
 
-    paper_qty = em19.bracket_quantity_for_fill(requested_qty=requested_qty, filled_qty=filled_qty)
-    paper_resolution = em19.resolve_oca(triggered=triggered, priority_order=_PRIORITY_ORDER)
-
-    assert backtest_qty == paper_qty == Decimal("4")
+    backtest_resolution = bt6.resolve_oca(
+        triggered=triggered_paper, priority_order=_PRIORITY_ORDER
+    )
+    paper_resolution = em19.resolve_oca(
+        triggered=triggered_paper, priority_order=_PRIORITY_ORDER
+    )
     assert backtest_resolution.triggered_leg == paper_resolution.triggered_leg == "loss"
     assert (
-        backtest_resolution.cancelled_legs == paper_resolution.cancelled_legs == ("profit", "trail")
+        backtest_resolution.cancelled_legs
+        == paper_resolution.cancelled_legs
+        == ("profit", "trail")
     )

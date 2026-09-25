@@ -17,7 +17,7 @@ from uuid import uuid4
 
 import pytest
 
-from src.core.script.runtime.interpreter import CallSite
+from src.core.script.runtime.interpreter_types import CallSite
 from src.core.script.runtime.series import Series
 from src.foundation.market_data.domain.candle_columns import CandleColumns
 from src.foundation.research_data.adapters.dsl_query import (

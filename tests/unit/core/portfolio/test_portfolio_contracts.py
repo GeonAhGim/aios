@@ -243,6 +243,7 @@ def test_from_dict_propagates_broken_upstream_mapping_failure():
 # --- D2 성능 단언 (performance assertion) --------------------------------------
 
 
+@pytest.mark.perf
 def test_config_hash_p99_latency_within_pretrade_gate_budget():
     """ADR-2026-09-09-C Decision 1 축별 성능 예산: 사전거래 게이트 p99 5ms.
     `config_hash()`는 `AllocationDecision.decision_hash` 재료로 사전거래

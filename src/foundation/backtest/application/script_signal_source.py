@@ -44,38 +44,31 @@ Pure module — no I/O (TID251, backtest/application zone).
 
 from __future__ import annotations
 
-import math
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from decimal import Decimal
-from types import MappingProxyType
 
-from src.core.script.grammar.ast import Expr, Identifier, NumberLiteral
 from src.core.script.ir.ops import DeclareInput, IRProgram
+from src.core.script.runtime.builtins_strategy import StrategyBuiltins
 from src.core.script.runtime.builtins_ta import default_builtins
-from src.core.script.runtime.interpreter import ExecutionResult, execute
-from src.core.script.runtime.series import Scalar, ScriptRuntimeError, Series, Value
-from src.data.models.trading import OrderSide
+from src.core.script.runtime.interpreter import execute
+from src.core.script.runtime.series import Series, Value
 from src.foundation.backtest.application.quick_backtest import (
     BarWindow,
+    BracketMetadata,
     PositionState,
     SignalSource,
 )
 from src.foundation.backtest.application.quick_backtest_fill import OrderIntent
-from src.foundation.market_data.domain.candle_columns import CandleColumns
-from src.foundation.research_data.adapters.dsl_query import research_builtins
+from src.foundation.backtest.application.script_signal_plan import (
+    ScriptSignalSourceError,
+    _materialize_plan,
+)
+from src.foundation.market_data.api import CandleColumns
+from src.foundation.research_data.api import research_builtins
 from src.foundation.research_data.contracts.v1 import ResearchItem
 
 __all__ = ["ScriptSignalSourceError", "build_script_signal_source"]
-
-_SIDE_BY_NAME: Mapping[str, OrderSide] = {"buy": OrderSide.BUY, "sell": OrderSide.SELL}
-
-
-class ScriptSignalSourceError(ScriptRuntimeError):
-    """Raised when this bridge cannot safely interpret `order()` side/qty_expr/opts
-    or when a materialised value violates the `OrderIntent` contract (fail-closed).
-    Subclass of `ScriptRuntimeError` so callers can catch "script execution/interpretation
-    failure" under one exception hierarchy."""
 
 
 def build_script_signal_source(
@@ -92,6 +85,14 @@ def build_script_signal_source(
     `on_bar` calls are pure dictionary look-ups only (determinism/performance —
     the interpreter is never re-run per bar).
 
+    BT-10b (task-5195): `strategy.*` calls (task-5194 wired the parser) are now
+    merged into the execution path via `StrategyBuiltins`. After execution, both
+    `ExecutionResult.orders` (DSL `order()` declarations) and
+    `StrategyBuiltins.intents` are consumed to materialize a combined plan. Since
+    this DSL version has no per-bar conditionals guarding `strategy.*` calls, all
+    strategy intents are mapped to bar 0 by design — a future DSL version with
+    conditional support can associate intents with individual bars.
+
     RD-9: when `research_instrument` is given, the `research.*` namespace
     (`domain/dsl_query.research_builtins`) is merged into the builtin table so
     the script can call `research.filing_count()` etc., auto-bound per bar to
@@ -104,19 +105,22 @@ def build_script_signal_source(
             f"columns length ({len(columns)}) differs from bar_count ({bar_count})"
         )
     merged_inputs: dict[str, Value] = {**_market_inputs(ir, columns), **dict(inputs or {})}
+    strategy_builtins = StrategyBuiltins()
     builtins = dict(default_builtins())
+    builtins.update(strategy_builtins.table)
     if research_instrument is not None:
         builtins.update(
             research_builtins(research_items, columns, instrument=research_instrument)
         )
     result = execute(ir, bar_count=bar_count, inputs=merged_inputs, builtins=builtins)
-    plan = _materialize_plan(result, bar_count)
-    return _MaterializedSignalSource(plan)
+    plan, bracket = _materialize_plan(result, bar_count, strategy_builtins.intents)
+    return _MaterializedSignalSource(plan, bracket)
 
 
 @dataclass(frozen=True, slots=True)
 class _MaterializedSignalSource:
     plan: Mapping[int, OrderIntent]
+    bracket: BracketMetadata | None
 
     def on_bar(self, window: BarWindow, _position: PositionState) -> OrderIntent | None:
         return self.plan.get(len(window) - 1)
@@ -147,74 +151,3 @@ def _market_inputs(ir: IRProgram, columns: CandleColumns) -> dict[str, Value]:
         if name in declared_series
     }
 
-
-def _materialize_plan(result: ExecutionResult, bar_count: int) -> Mapping[int, OrderIntent]:
-    plan: dict[int, OrderIntent] = {}
-    for order in result.orders:
-        side = _resolve_side(order.side)
-        if order.opts is not None:
-            raise ScriptSignalSourceError(
-                "order() opts meaning is not yet defined (DSL-11 responsibility) — "
-                "this bridge rejects orders with opts"
-            )
-        qty_source = _resolve_qty_source(order.qty_expr, result.bindings)
-        for i in range(bar_count):
-            if _value_at(order.when, i, bar_count) is not True:
-                continue
-            if i in plan:
-                raise ScriptSignalSourceError(
-                    f"Multiple order() calls fired at bar {i} — priority is undefined"
-                )
-            plan[i] = OrderIntent(
-                side=side,
-                quantity=_to_quantity(_value_at(qty_source, i, bar_count)),
-                order_type="market",
-                trigger_price=None,
-            )
-    return MappingProxyType(plan)
-
-
-def _resolve_side(expr: Expr) -> OrderSide:
-    if isinstance(expr, Identifier) and expr.name in _SIDE_BY_NAME:
-        return _SIDE_BY_NAME[expr.name]
-    raise ScriptSignalSourceError(
-        f"order() side only supports buy/sell identifiers (received: {expr!r})"
-    )
-
-
-def _resolve_qty_source(expr: Expr, bindings: Mapping[str, Value]) -> Value:
-    if isinstance(expr, NumberLiteral):
-        return expr.value
-    if isinstance(expr, Identifier):
-        if expr.name not in bindings:
-            raise ScriptSignalSourceError(f"order() qty_expr name is not bound: {expr.name!r}")
-        return bindings[expr.name]
-    raise ScriptSignalSourceError(
-        "order() qty_expr only supports constant literals or already-bound names — "
-        f"this bridge does not create a second interpreter (received: {expr!r})"
-    )
-
-
-def _value_at(value: Value, bar: int, bar_count: int) -> Scalar:
-    if isinstance(value, Series):
-        if len(value) != bar_count:
-            raise ScriptSignalSourceError(
-                f"series length ({len(value)}) differs from bar count ({bar_count})"
-            )
-        return value.at(bar)
-    return value
-
-
-def _to_quantity(raw: Scalar) -> Decimal:
-    if raw is None:
-        raise ScriptSignalSourceError(
-            "Order quantity is na — cannot determine quantity on the firing bar"
-        )
-    if isinstance(raw, bool) or not isinstance(raw, int | float):
-        raise ScriptSignalSourceError(f"Order quantity is not numeric: {raw!r}")
-    if isinstance(raw, float) and not math.isfinite(raw):
-        raise ScriptSignalSourceError(f"Order quantity is not a finite number: {raw!r}")
-    quantity = Decimal(str(raw))
-    if quantity.is_nan() or quantity <= 0:
-        raise ScriptSignalSourceError(f"Order quantity must be positive: {quantity}")
-    return quantity

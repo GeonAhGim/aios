@@ -22,7 +22,6 @@ DEEPEN(task-2929, docs/audit/DEPTH_DSL_IND.md#2140): D2 하한 중 negative(8건
 from __future__ import annotations
 
 import ast
-import time
 from decimal import Decimal
 from pathlib import Path
 
@@ -42,6 +41,7 @@ from src.core.script.runtime import (
     execute,
     intents_to_bytes,
 )
+from tests.conftest import PerfBudget
 
 _MODULE = Path(builtins_strategy.__file__)
 
@@ -472,16 +472,25 @@ def test_intents_to_bytes_fails_closed_on_a_corrupted_nan_qty() -> None:
 # ---- 수치 성능 단언: print만 하고 단언을 피하지 않는다 ----
 
 
-def test_twenty_thousand_calls_and_serialization_complete_within_one_second() -> None:
+@pytest.mark.perf
+def test_twenty_thousand_calls_and_serialization_complete_within_one_second(
+    perf_budget: PerfBudget,
+) -> None:
     """수치 성능 단언: 실측 20,000 (call_index=19999까지) 호출 + 직렬화가
-    예산 안에 끝나는지 실제로 단언한다 (실측 약 0.1초, 10배 여유)."""
-    sb = StrategyBuiltins()
+    예산 안에 끝나는지 실제로 단언한다 (실측 약 0.1초, 10배 여유). task-7434:
+    process_time 기반 perf_budget으로 측정한다."""
     site = CallSite("strategy", "entry", "float", 4)
-    start = time.perf_counter()
-    for _ in range(20_000):
-        sb.table[("strategy", "entry")]((1, 1.0), site)
-    intents_to_bytes(sb.intents)
-    elapsed = time.perf_counter() - start
-    assert elapsed < 1.0
+    sb = StrategyBuiltins()
+
+    def _run_once() -> None:
+        nonlocal sb
+        sb = StrategyBuiltins()
+        for _ in range(20_000):
+            sb.table[("strategy", "entry")]((1, 1.0), site)
+        intents_to_bytes(sb.intents)
+
+    perf_budget.assert_within(
+        _run_once, budget_ms=1000.0, label="20,000 strategy.entry calls + serialize"
+    )
     assert len(sb.intents) == 20_000
     assert sb.intents[-1].call_index == 19_999
