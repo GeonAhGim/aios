@@ -15,7 +15,7 @@ import logging
 from datetime import datetime, timezone
 from typing import Any, Final, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from src.core.observability.context import RequestContext
 
@@ -49,7 +49,15 @@ class StructuredLogLine(BaseModel):
 
     필드 이름·타입은 §2 표와 동일해야 한다(`test_fields.py`가 `REQUIRED_FIELDS`와
     이 모델의 필드 집합이 정확히 일치하는지 — 추가·누락 모두 실패하도록 — 검증한다).
+
+    `extra="forbid"`: pydantic's default (`extra="ignore"`) would silently drop a
+    caller's typo'd field (e.g. `trace__id`) into `.model_extra`, leaving `.trace_id`
+    to fail validation or fall back to a default with no trace of the real cause —
+    the 108 §2 8-field set is the contract, so any key outside it must surface as a
+    `ValidationError` immediately.
     """
+
+    model_config = ConfigDict(extra="forbid")
 
     timestamp: datetime
     level: Level

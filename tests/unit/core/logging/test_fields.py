@@ -132,3 +132,55 @@ def test_structured_log_line_rejects_missing_actor_subject_id():
             event="membership_granted",
             message="x",
         )
+
+
+def test_structured_log_line_rejects_unknown_field():
+    """negative — pydantic 기본값(extra="ignore")이면 오타 필드(`trace__id`)가 조용히
+    드롭되고 `trace_id`가 누락 검증 실패로만 드러나 원인이 가려진다. `extra="forbid"`가
+    설정돼 있어야 오타 자체가 즉시 실패로 드러난다."""
+    with pytest.raises(ValidationError):
+        StructuredLogLine(
+            timestamp="2026-09-03T00:00:00Z",
+            level="info",
+            trace_id="t-1",
+            actor_subject_id="system",
+            component="foundation.trust.application",
+            event="membership_granted",
+            message="x",
+            trace__id="t-1",  # 오타 필드 — REQUIRED_FIELDS에 없다
+        )
+
+
+def test_structured_log_line_rejects_unknown_field_even_with_all_required_present():
+    """negative — 필수 필드가 전부 있어도 스키마에 없는 키가 섞이면 실패해야 한다(단순
+    누락 검증과는 다른 경로임을 확인)."""
+    with pytest.raises(ValidationError):
+        StructuredLogLine(
+            timestamp="2026-09-03T00:00:00Z",
+            level="info",
+            trace_id="t-1",
+            tenant_id=None,
+            actor_subject_id="system",
+            command_id=None,
+            component="foundation.trust.application",
+            event="membership_granted",
+            duration_ms=None,
+            message="x",
+            unexpected_field="should not be silently ignored",
+        )
+
+
+def test_structured_log_line_extra_payload_field_still_accepted():
+    """positive counterpart — `extra`는 정의된 필드이므로 임의 payload 딕셔너리를 담는
+    용도는 `extra="forbid"` 이후에도 그대로 동작해야 한다."""
+    line = StructuredLogLine(
+        timestamp="2026-09-03T00:00:00Z",
+        level="info",
+        trace_id="t-1",
+        actor_subject_id="system",
+        component="foundation.trust.application",
+        event="membership_granted",
+        message="x",
+        extra={"n": 1},
+    )
+    assert line.extra == {"n": 1}

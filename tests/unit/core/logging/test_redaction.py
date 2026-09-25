@@ -376,21 +376,14 @@ class TestStructuredLogLineRejectsUnknownLevel:
         """An unknown level string must raise ValueError."""
         with pytest.raises(ValueError):
             StructuredLogLine(
+                timestamp=datetime.now(timezone.utc),
                 level="critical",
                 message="test message",
-                correlation_id="corr-1",
+                component="test",
+                event="test_event",
                 tenant_id="tenant-1",
                 trace_id="trace-1",
-                span_id="span-1",
-                session_id="session-1",
-                user_id="user-1",
-                request_id="req-1",
-                endpoint="/api/test",
-                method="GET",
-                status_code=200,
                 duration_ms=10,
-                source="test",
-                metadata={},
                 actor_subject_id="user-abc",
             )
 
@@ -398,21 +391,14 @@ class TestStructuredLogLineRejectsUnknownLevel:
         """An empty string for level must raise ValueError."""
         with pytest.raises(ValueError):
             StructuredLogLine(
+                timestamp=datetime.now(timezone.utc),
                 level="",
                 message="test message",
-                correlation_id="corr-1",
+                component="test",
+                event="test_event",
                 tenant_id="tenant-1",
                 trace_id="trace-1",
-                span_id="span-1",
-                session_id="session-1",
-                user_id="user-1",
-                request_id="req-1",
-                endpoint="/api/test",
-                method="GET",
-                status_code=200,
                 duration_ms=10,
-                source="test",
-                metadata={},
                 actor_subject_id="user-abc",
             )
 
@@ -425,19 +411,9 @@ class TestStructuredLogLineRejectsUnknownLevel:
                 message="test message",
                 component="test",
                 event="test_event",
-                correlation_id="corr-1",
                 tenant_id="tenant-1",
                 trace_id="trace-1",
-                span_id="span-1",
-                session_id="session-1",
-                user_id="user-1",
-                request_id="req-1",
-                endpoint="/api/test",
-                method="GET",
-                status_code=200,
                 duration_ms=10,
-                source="test",
-                metadata={},
                 actor_subject_id="user-abc",
             )
             assert log.level == valid_level
@@ -450,41 +426,27 @@ class TestStructuredLogLineRejectsMissingActorSubjectId:
         """actor_subject_id is a required field — omitting it raises ValueError."""
         with pytest.raises(ValueError):
             StructuredLogLine(
+                timestamp=datetime.now(timezone.utc),
                 level="info",
                 message="test message",
-                correlation_id="corr-1",
+                component="test",
+                event="test_event",
                 tenant_id="tenant-1",
                 trace_id="trace-1",
-                span_id="span-1",
-                session_id="session-1",
-                user_id="user-1",
-                request_id="req-1",
-                endpoint="/api/test",
-                method="GET",
-                status_code=200,
                 duration_ms=10,
-                source="test",
-                metadata={},
             )
 
     def test_rejects_none_actor_subject_id(self) -> None:
         """actor_subject_id=None must be rejected (not silently stored as 'None')."""
         with pytest.raises(ValueError):
             StructuredLogLine(
+                timestamp=datetime.now(timezone.utc),
                 level="info",
                 message="test message",
-                correlation_id="corr-1",
+                component="test",
+                event="test_event",
                 tenant_id="tenant-1",
                 trace_id="trace-1",
-                span_id="span-1",
-                session_id="session-1",
-                user_id="user-1",
-                request_id="req-1",
-                endpoint="/api/test",
-                method="GET",
-                status_code=200,
                 duration_ms=10,
-                source="test",
-                metadata={},
                 actor_subject_id=None,  # pyright-ignore: None is intentional
             )
