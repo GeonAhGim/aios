@@ -121,7 +121,13 @@ jobs:
       # 완전히 대체하므로 nightly/live_demo/redis 제외를 여기서 다시 쓴다.
       - name: Test
         run: pytest -q -n auto --dist loadfile -m "not perf and not nightly and not live_demo and not redis" --cov=src --cov-report=term --cov-report=xml
+      # 2026-09-26(사용자 승인, PR #91): perf 예산표(ADR-2026-09-09-C)는 로컬 기준이라 GitHub 4 vCPU
+      # 러너에서는 process_time best-of-5·p95를 써도 7~23% 초과가 계통적으로 난다(run 36188973131·
+      # 36187517934 동일 3건). 예산 수치는 CTO 결정 사항(DECISION_GUIDELINES B-2)이므로 이 단계는
+      # Actions에서 warn으로 두고 로컬 게이트(pm/local_ci)를 perf 정본으로 유지한다. 러너 배수 도입은
+      # 별도 ADR. 결과는 로그·step summary로 계속 남는다.
       - name: Test (perf, serial)
+        continue-on-error: true
         run: pytest -q -m "perf and not nightly and not live_demo and not redis" --cov=src --cov-append --cov-report=term --cov-report=xml
 
       # PLT-37 — 절대 임계치(--cov-fail-under) 대신 coverage.xml 대비 직전
