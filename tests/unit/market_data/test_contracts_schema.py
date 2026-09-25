@@ -303,10 +303,10 @@ def test_fixture_read_failure_propagates(monkeypatch: pytest.MonkeyPatch) -> Non
     """
     original_read_text = Path.read_text
 
-    def _boom(self: Path, *args: object, **kwargs: object) -> str:
+    def _boom(self: Path, encoding: str | None = None, errors: str | None = None) -> str:
         if self == FIXTURE:
             raise OSError("simulated fixture read failure")
-        return original_read_text(self, *args, **kwargs)  # type: ignore[arg-type]
+        return original_read_text(self, encoding=encoding, errors=errors)
 
     monkeypatch.setattr(Path, "read_text", _boom)
     with pytest.raises(OSError):
