@@ -163,6 +163,7 @@ class TestPolicyFailureInjection:
 class TestPolicyPerformance:
     """Performance assertions for EventBusPolicy lookups."""
 
+    @pytest.mark.perf
     def test_lookup_throughput(self):
         """ON_HANDLER_ERROR lookup should handle >=1M calls/sec."""
         key = HandlerCriticality.SAFE
