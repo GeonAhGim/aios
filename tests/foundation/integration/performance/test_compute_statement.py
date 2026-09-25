@@ -284,20 +284,25 @@ async def test_compute_statement_budget_gate_fails_on_injected_regression(
     pool, repo, inputs, evidence_repo, monkeypatch
 ):
     """게이트 적색 재현 — 위 p95 단언이 실제로 회귀를 잡는지 확인한다.
-    `asyncpg.Connection.fetchrow`에 15ms 인위 지연을 주입하면(파이프라인이
-    fetchrow만으로도 6회 이상 왕복하므로 합산 90ms+), 같은 측정 로직이 실제로
-    `AssertionError`를 내는지 본다(tautology가 아님을 증명)."""
+    `asyncpg.Connection.fetchrow` 한 번에 예산(`_PERF_BUDGET_MS`) 전체만큼
+    지연을 주입하면, 파이프라인이 fetchrow를 몇 번 왕복하든(1회만 해도)
+    측정치가 예산을 넘으므로 같은 측정 로직이 `AssertionError`를 내야 한다
+    (tautology가 아님을 증명). 왕복 횟수 × 고정 지연으로 계산하던 이전
+    방식은 왕복 수가 줄면(현재 9회 × 15ms = 135ms < 200ms) 예산 안에
+    들어와 "DID NOT RAISE"로 적색이 났다 — 주입량을 예산에 묶어 왕복 수
+    회귀와 무관하게 만든다. n=1: 표본 1개의 p95는 그 표본 자체다."""
     user_id = await create_test_tenant(pool)
     await set_reconciliation_state(pool, user_id, aggregate_status="HEALTHY")
     original_fetchrow = asyncpg.Connection.fetchrow
+    injected_delay_s = _PERF_BUDGET_MS / 1000.0
 
     async def _slow_fetchrow(self: asyncpg.Connection, *args: object, **kwargs: object) -> object:
-        await asyncio.sleep(0.015)
+        await asyncio.sleep(injected_delay_s)
         return await original_fetchrow(self, *args, **kwargs)
 
     monkeypatch.setattr(asyncpg.Connection, "fetchrow", _slow_fetchrow)
 
-    p95_ms = await _compute_statement_p95_ms(pool, repo, inputs, evidence_repo, user_id, n=3)
+    p95_ms = await _compute_statement_p95_ms(pool, repo, inputs, evidence_repo, user_id, n=1)
 
     with pytest.raises(AssertionError):
         assert p95_ms < _PERF_BUDGET_MS
