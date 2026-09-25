@@ -327,6 +327,53 @@ def test_redaction_filter_is_noop_when_payload_absent():
 # ---------------------------------------------------------------------------
 
 
+class TestStructuredLogLineRejectsMissingActorSubjectId:
+    """StructuredLogLine must reject records missing actor_subject_id (PLT-02)."""
+
+    def test_rejects_missing_actor_subject_id(self) -> None:
+        """actor_subject_id is a required field — omitting it raises ValueError."""
+        with pytest.raises(ValueError):
+            StructuredLogLine(
+                level="info",
+                message="test message",
+                correlation_id="corr-1",
+                tenant_id="tenant-1",
+                trace_id="trace-1",
+                span_id="span-1",
+                session_id="session-1",
+                user_id="user-1",
+                request_id="req-1",
+                endpoint="/api/test",
+                method="GET",
+                status_code=200,
+                duration_ms=10,
+                source="test",
+                metadata={},
+            )
+
+    def test_rejects_none_actor_subject_id(self) -> None:
+        """actor_subject_id=None must be rejected (not silently stored as 'None')."""
+        with pytest.raises(ValueError):
+            StructuredLogLine(
+                level="info",
+                message="test message",
+                correlation_id="corr-1",
+                tenant_id="tenant-1",
+                trace_id="trace-1",
+                span_id="span-1",
+                session_id="session-1",
+                user_id="user-1",
+                request_id="req-1",
+                endpoint="/api/test",
+                method="GET",
+                status_code=200,
+                duration_ms=10,
+                source="test",
+                metadata={},
+                actor_subject_id=None,  # pyright-ignore: None is intentional
+            )
+
+
 class TestStructuredLogLineRejectsUnknownLevel:
     """StructuredLogLine must reject unknown level values (level field only)."""
 
