@@ -296,9 +296,27 @@ def test_quality_issue_detail_type_enforced() -> None:
         )
 
 
+def test_fixture_read_failure_propagates(monkeypatch: pytest.MonkeyPatch) -> None:
+    """FIXTURE.read_text가 실패하면 스냅샷 테스트가 예외를 삼키지 않고 그대로 전파해야 한다.
+
+    monkeypatch로 Path.read_text에 의존성 예외(OSError)를 주입한다(107번 §8).
+    """
+    original_read_text = Path.read_text
+
+    def _boom(self: Path, encoding: str | None = None, errors: str | None = None) -> str:
+        if self == FIXTURE:
+            raise OSError("simulated fixture read failure")
+        return original_read_text(self, encoding=encoding, errors=errors)
+
+    monkeypatch.setattr(Path, "read_text", _boom)
+    with pytest.raises(OSError):
+        json.loads(FIXTURE.read_text(encoding="utf-8"))
+
+
 # ── DEEPEN: performance assertion (LA-1) ───────────────────────────────────
 
 
+@pytest.mark.perf  # wall-clock budget: serial perf stage (task-7434 guard)
 def test_candle_record_bulk_validation_throughput() -> None:
     """1,000건 CandleRecord 검증이 예산(200ms) 내에 끝나야 한다 — O(n) 이상 회귀 감지."""
     start = time.perf_counter()
