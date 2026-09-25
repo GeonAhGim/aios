@@ -308,6 +308,25 @@ def test_redact_budget_assertion_catches_regression():
         assert p99 < _PRETRADE_GATE_P99_BUDGET_SEC
 
 
+def test_multiple_deny_keys_share_identical_redacted_value_but_key_identity_preserved():
+    """DEEPEN: REDACTED 상수는 모든 deny key에 동일한 값(`<redacted>`)으로 적용된다 —
+    값만 보면 어떤 필드가 마스킹됐는지 구분할 수 없다. 하지만 `redact()`는 dict의 key를
+    그대로 보존하므로(값을 지우되 key는 지우지 않음) "어떤 필드가 redact됐는지"는 값이
+    아니라 key로 식별한다. 이 계약을 명시적으로 고정한다 — key까지 지우거나 필드별로
+    다른 placeholder를 쓰는 변경은 이 테스트를 깨야 한다."""
+    payload = {"api_key": "k1", "secret": "s1", "password": "p1", "safe": "ok"}
+
+    result = redact(payload)
+
+    assert result["api_key"] == REDACTED
+    assert result["secret"] == REDACTED
+    assert result["password"] == REDACTED
+    assert result["safe"] == "ok"
+    # 값 자체는 서로 구분 불가능하지만, key 집합은 원본과 동일하게 보존된다.
+    assert result["api_key"] == result["secret"] == result["password"]
+    assert set(result.keys()) == set(payload.keys())
+
+
 def test_redaction_filter_is_noop_when_payload_absent():
     record = logging.LogRecord(
         name="test",
