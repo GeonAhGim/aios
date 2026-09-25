@@ -51,13 +51,21 @@ async def replay(
     refs: ReferenceRepository,
     cal: CalendarRepository,
     pool: asyncpg.Pool,
+    now: datetime | None = None,
 ) -> ReplaySeries:
     """§9.2 LA-17: identical `q.as_of` (required) and range produce a
     `series_hash` identical at the byte level on repeated calls. Quarantined
     candles never mix into the result because `CandleStore.query` does not
     query the quarantine table in the first place
-    (`ReplayRequest.include_quarantined` is contractually always `False`)."""
-    ensure_as_of_not_future(q.as_of, datetime.now(timezone.utc))
+    (`ReplayRequest.include_quarantined` is contractually always `False`).
+
+    `now` is an injectable clock (defaults to the wall clock) so callers that
+    already hold a trusted "current time" (e.g. the same timestamp `q.as_of`
+    was derived from) can pass it instead of racing a second, independent
+    `datetime.now(timezone.utc)` read against a DB-server-clock `as_of` —
+    two different clock sources can disagree by sub-millisecond amounts and
+    spuriously trip `AsOfInFutureError`."""
+    ensure_as_of_not_future(q.as_of, now if now is not None else datetime.now(timezone.utc))
 
     async with pool.acquire() as conn:
         candles, issues, expected_total = await load_series(

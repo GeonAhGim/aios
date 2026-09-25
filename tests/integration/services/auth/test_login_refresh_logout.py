@@ -265,6 +265,7 @@ async def test_concurrent_refresh_with_same_token_revokes_session_fail_closed(po
 # ----------------------------------------------------------------------
 
 
+@pytest.mark.perf
 async def test_refresh_latency_p95_within_borrowed_order_ack_budget(pool):
     """수치 성능 단언 — refresh() 1회 호출(조건부 UPDATE 회전 + JWT 발급)의
     p95 지연시간이 차용 예산(50ms) 이내여야 한다. Argon2 해시 비용이 섞이지

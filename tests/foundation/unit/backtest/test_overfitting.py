@@ -16,6 +16,7 @@ from src.foundation.backtest.domain.overfitting import (
     deflated_sharpe,
     pbo_cscv,
 )
+from tests.conftest import PerfBudget
 
 _NORMAL = NormalDist()
 _GAMMA = 0.5772
@@ -238,16 +239,18 @@ def test_pbo_cscv_rejects_float_corrupted_column_from_upstream_serialization() -
 # --- DEEPEN(task-3203): 수치 성능 단언 -- pbo_cscv 조합 폭발 핫 패스 ---
 
 
-def _pbo_cscv_latencies_ms(iterations: int = 30) -> list[float]:
+def _pbo_cscv_latencies_ms(perf_budget: PerfBudget, iterations: int = 30) -> list[float]:
+    """task-6774 -- `time.process_time()` 기반 공용 `perf_budget` 픽스처로
+    측정한다(이전 `time.perf_counter()` wall-clock은 다른 워커/로컬 추론
+    프로세스에 코어를 뺏긴 시간까지 샘플에 섞여 p95를 부풀렸다). 실측 1회
+    호출(~4.3ms)이 Windows `time.process_time()`의 ~15.6ms(64Hz) 양자화
+    폭보다 작아 개별 호출을 그대로 재면 0ms/15.625ms 둘 중 하나로만
+    읽힌다 -- `batch=8`로 8회를 한 구간에 묶어 호출당 양자화 오차를
+    ~2ms로 줄인다(`perf_budget.sample` 참조)."""
     rng = random.Random(20260917)
     matrix = [[Decimal(str(rng.uniform(-1.0, 1.0))) for _ in range(8)] for _ in range(64)]
-    samples: list[float] = []
-    for _ in range(iterations):
-        started = time.perf_counter()
-        pbo_cscv(matrix, 8)
-        samples.append((time.perf_counter() - started) * 1000)
-    samples.sort()
-    return samples
+    samples = perf_budget.samples(lambda: pbo_cscv(matrix, 8), n=iterations, warmup=1, batch=8)
+    return sorted(s.cpu_ms for s in samples)
 
 
 def _p95(samples: list[float]) -> float:
@@ -257,24 +260,25 @@ def _p95(samples: list[float]) -> float:
 _PBO_CSCV_BUDGET_MS = 15.0
 
 
-def test_pbo_cscv_p95_latency_within_self_declared_budget() -> None:
+def test_pbo_cscv_p95_latency_within_self_declared_budget(perf_budget: PerfBudget) -> None:
     """수치 성능 단언: pbo_cscv는 n_blocks가 커질수록 C(n_blocks, n_blocks/2)
     조합만큼 열 평균 계산을 반복하는 조합 폭발 경로다(ADR-2026-09-09-C
     예산표에 전용 항목은 없다 -- combinations 순회 + Decimal 산술뿐인 순수
     CPU 경로라는 사실 위에 자체 예산을 건다). 64행x8열/n_blocks=8
     (C(8,4)=70 조합) 기준 로컬 실측 p95(~4.3ms) 대비 넉넉한 여유를 둔
     15ms."""
-    samples = _pbo_cscv_latencies_ms()
+    samples = _pbo_cscv_latencies_ms(perf_budget)
     p95_ms = _p95(samples)
     print(
         f"[L34 overfitting] pbo_cscv p95={p95_ms:.3f}ms "
-        f"budget<{_PBO_CSCV_BUDGET_MS:.0f}ms (n={len(samples)})"
+        f"budget<{_PBO_CSCV_BUDGET_MS:.0f}ms (n={len(samples)}) "
+        f"load={perf_budget.load_percent()}"
     )
     assert p95_ms < _PBO_CSCV_BUDGET_MS
 
 
 def test_pbo_cscv_budget_gate_actually_fails_past_budget(
-    monkeypatch: pytest.MonkeyPatch,
+    monkeypatch: pytest.MonkeyPatch, perf_budget: PerfBudget
 ) -> None:
     """게이트 적색 재현: 위 단언식이, `_split_blocks` 경로(호출당 1회) 한
     곳이 예산을 실제로 넘기도록 지연을 주입했을 때 진짜로 AssertionError를
@@ -283,12 +287,18 @@ def test_pbo_cscv_budget_gate_actually_fails_past_budget(
     original_split_blocks = overfitting_module._split_blocks
 
     def _stalled_split_blocks(n_rows: int, n_blocks: int) -> list[list[int]]:
-        time.sleep(_PBO_CSCV_BUDGET_MS / 1000.0)
+        # task-6774 -- perf_budget이 `time.process_time()`(CPU 시간)으로
+        # 측정하므로, `time.sleep()`(CPU를 실제로 놓아준다)로는 이 주입이
+        # 측정값에 전혀 잡히지 않는다 -- busy-wait으로 실제 CPU 시간을
+        # 소비해야 이 게이트 적색 재현이 여전히 유효하다.
+        busy_until = time.process_time() + (_PBO_CSCV_BUDGET_MS / 1000.0)
+        while time.process_time() < busy_until:
+            pass
         return original_split_blocks(n_rows, n_blocks)
 
     monkeypatch.setattr(overfitting_module, "_split_blocks", _stalled_split_blocks)
 
-    samples = _pbo_cscv_latencies_ms(iterations=3)
+    samples = _pbo_cscv_latencies_ms(perf_budget, iterations=3)
     p95_ms = _p95(samples)
     with pytest.raises(AssertionError):
         assert p95_ms < _PBO_CSCV_BUDGET_MS

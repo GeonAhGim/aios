@@ -4,6 +4,7 @@
 형태를 재현해 검증한다(test_bitget_adapter.py와 동일 원칙) — 필드명은
 커뮤니티 SDK 레퍼런스 기준 최선 추정치라 라이브 검증 전까지는 확정 아님.
 """
+
 from decimal import Decimal
 
 import httpx
@@ -148,9 +149,7 @@ async def test_get_futures_history_candles():
         )
 
     adapter = make_adapter(handler)
-    candles = await adapter.get_futures_history_candles(
-        "BTC/USDT", "1h", end_time="1700000000000"
-    )
+    candles = await adapter.get_futures_history_candles("BTC/USDT", "1h", end_time="1700000000000")
 
     assert candles[0].close == Decimal("80500")
 
@@ -225,3 +224,106 @@ async def test_get_futures_position_lever_tiers():
     tiers = await adapter.get_futures_position_lever_tiers("BTC/USDT")
 
     assert tiers == [{"level": "1", "maxLever": "125"}]
+
+
+async def test_get_futures_public_trades():
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == "/api/v2/mix/market/fills"
+        return json_response(
+            {
+                "code": "00000",
+                "msg": "success",
+                "requestTime": 1,
+                "data": [
+                    {
+                        "tradeId": "1",
+                        "price": "81000",
+                        "size": "0.01",
+                        "side": "buy",
+                        "ts": "1700000000000",
+                    }
+                ],
+            }
+        )
+
+    adapter = make_adapter(handler)
+    trades = await adapter.get_futures_public_trades("BTC/USDT")
+
+    assert trades[0].trade_id == "1"
+    assert trades[0].price == Decimal("81000")
+
+
+async def test_get_futures_public_trades_history():
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == "/api/v2/mix/market/fills-history"
+        assert request.url.params["endTime"] == "1700000000000"
+        return json_response(
+            {
+                "code": "00000",
+                "msg": "success",
+                "requestTime": 1,
+                "data": [
+                    {
+                        "tradeId": "2",
+                        "price": "80500",
+                        "size": "0.02",
+                        "side": "sell",
+                        "ts": "1699999999000",
+                    }
+                ],
+            }
+        )
+
+    adapter = make_adapter(handler)
+    trades = await adapter.get_futures_public_trades_history("BTC/USDT", end_time="1700000000000")
+
+    assert trades[0].trade_id == "2"
+    assert trades[0].quantity == Decimal("0.02")
+
+
+async def test_get_futures_adl_rank():
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == "/api/v2/mix/position/adlRank"
+        return json_response(
+            {
+                "code": "00000",
+                "msg": "success",
+                "requestTime": 1,
+                "data": [{"symbol": "BTCUSDT", "longAdlRank": "2", "shortAdlRank": "3"}],
+            }
+        )
+
+    adapter = make_adapter(handler)
+    ranks = await adapter.get_futures_adl_rank(symbol="BTC/USDT")
+
+    assert ranks == [{"symbol": "BTCUSDT", "longAdlRank": "2", "shortAdlRank": "3"}]
+
+
+async def test_get_public_announcements():
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == "/api/v2/public/annoucements"
+        assert request.url.params["annType"] == "latest_news"
+        return json_response(
+            {
+                "code": "00000",
+                "msg": "success",
+                "requestTime": 1,
+                "data": {"annList": [{"annId": "1", "annTitle": "maintenance"}]},
+            }
+        )
+
+    adapter = make_adapter(handler)
+    announcements = await adapter.get_public_announcements()
+
+    assert announcements == [{"annId": "1", "annTitle": "maintenance"}]
+
+
+async def test_get_public_announcements_handles_null_ann_list():
+    """Bitget이 공지사항이 없을 때 annList를 null로 반환하는 케이스도
+    안전하게 빈 리스트로 처리한다(get_futures_open_orders와 동일 판단)."""
+    adapter = make_adapter(
+        lambda request: json_response(
+            {"code": "00000", "msg": "success", "requestTime": 1, "data": {"annList": None}}
+        )
+    )
+    assert await adapter.get_public_announcements() == []

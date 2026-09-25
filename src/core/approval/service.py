@@ -49,11 +49,11 @@ from uuid import UUID
 import asyncpg
 
 from src.core.approval._shared import ApprovalError, ApprovalRequest, _fetch, _row_to_model
-from src.data.models.serialization import DecimalSafeEncoder
-from src.foundation.trust.domain.rules.segregation_of_duty import (
+from src.core.security.segregation_of_duty_port import (
     SegregationOfDutyViolation,
     assert_actor_not_counterparty,
 )
+from src.data.models.serialization import DecimalSafeEncoder
 
 __all__ = [
     "ApprovalError",

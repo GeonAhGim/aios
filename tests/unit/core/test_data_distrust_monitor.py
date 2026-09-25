@@ -2,6 +2,8 @@ import time
 from datetime import datetime, timezone
 from decimal import Decimal
 
+import pytest
+
 from src.core.safety.data_distrust import DataDistrustLevel, DataDistrustMonitor
 from src.data.models.market_data import Candle, Ticker
 
@@ -127,6 +129,7 @@ async def test_distrust_does_not_exit_before_sustain_duration():
     assert level == DataDistrustLevel.DISTRUSTED  # 아직 60초 안 지남
 
 
+@pytest.mark.perf
 async def test_distrust_exits_after_sustained_low_deviation():
     monitor = DataDistrustMonitor(exit_sustain_seconds=60.0)
     await monitor.check("BTC/USDT", _ticker("150"), [_ticker("100"), _ticker("100")], [])
@@ -161,6 +164,7 @@ async def test_publish_called_only_on_transition():
     assert published == []  # 상태 변화 없었으므로(계속 NORMAL) 발행 안 됨
 
 
+@pytest.mark.perf
 async def test_check_latency_stays_within_budget_under_repeated_calls():
     # 성능 단언(D2/D3 체크리스트) — tick.py는 매 틱(참조 2소스 포함) 이
     # check()를 순차 호출한다. 순수 계산(median/hysteresis/통계검사)이라

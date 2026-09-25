@@ -202,6 +202,7 @@ def test_restate_position_rejects_sequence_gap() -> None:
 # ---- 성능 단언(DEPTH 감사 task-2724 D1 판정 근거, 1702/1701 DEEPEN 선례와 동일 패턴) ----
 
 
+@pytest.mark.perf
 def test_restate_position_hot_path_performance() -> None:
     # restate_position은 소급 정정마다 호출되는 순수 함수(apply_one 재폴드 +
     # BitemporalRecord 재구성 + check_no_overlap)다. 10,000회 호출이 1s

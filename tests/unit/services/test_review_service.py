@@ -125,6 +125,7 @@ async def test_list_reviews_returns_reviews_when_listing_has_reviews() -> None:
     assert result[0].listing_id == LISTING_ID
 
 
+@pytest.mark.perf
 async def test_list_reviews_perf_budget_for_1000_rows() -> None:
     """perf 회귀 방어 — 1000건 조회 시 pydantic 변환 포함 200ms 예산."""
     rows = [_review_row() for _ in range(1000)]

@@ -145,6 +145,7 @@ def test_strategy_proposal_naive_datetime_in_span_rejected() -> None:
 _CONSTRUCT_BUDGET_SEC = 2.0
 
 
+@pytest.mark.perf
 def test_bulk_construction_of_many_strategy_proposals_meets_latency_budget() -> None:
     n = 3_000
     payloads = [_proposal_kwargs(proposal_id=uuid4()) for _ in range(n)]
@@ -162,6 +163,7 @@ def test_bulk_construction_of_many_strategy_proposals_meets_latency_budget() -> 
 # --- 게이트 적색 재현 ---
 
 
+@pytest.mark.perf
 def test_gate_red_budget_actually_fails_past_budget() -> None:
     n = 200
     absurdly_low_budget_sec = 1e-9

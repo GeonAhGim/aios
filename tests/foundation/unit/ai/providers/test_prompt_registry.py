@@ -141,6 +141,7 @@ def test_prompt_hash_rejects_non_string_template_body_from_upstream_corruption()
 _PROMPT_HASH_BUDGET_MS = 1.0
 
 
+@pytest.mark.perf
 def test_prompt_hash_p95_latency_within_self_declared_budget() -> None:
     template = _template(template="x" * 2000)
     samples: list[float] = []

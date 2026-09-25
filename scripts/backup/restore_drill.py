@@ -47,20 +47,36 @@ def _now() -> dt.datetime:
 
 
 def _run(cmd: list[str], cwd: Path, env: dict | None, timeout: int) -> tuple[int, str]:
+    """CTO 2026-09-23: PIPE 대신 임시 파일로 stdout/stderr를 받는다. pg_basebackup -Xs·pg_ctl은
+    자식(WAL 수신기/서버)이 파이프 핸들을 상속해 부모가 끝나도 communicate()가 EOF를 못 받아
+    Windows에서 무기한 멈춘다(task-5350의 pg_ctl 데드락과 같은 부류 — 직접 실행 82초 vs
+    파이프 캡처 1시간 타임아웃 재현). 파일이면 상속돼도 EOF 대기가 없다."""
+    import tempfile
+
     try:
-        r = subprocess.run(
-            cmd,
-            cwd=cwd,
-            env=env,
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
-            timeout=timeout,
-        )
-        return r.returncode, (r.stdout + r.stderr)[-4000:]
-    except subprocess.TimeoutExpired:
-        return 124, f"timeout {timeout}s"
+        with tempfile.TemporaryFile(mode="w+b") as out:
+            try:
+                r = subprocess.run(
+                    cmd,
+                    cwd=cwd,
+                    env=env,
+                    stdout=out,
+                    stderr=subprocess.STDOUT,
+                    timeout=timeout,
+                    check=False,
+                )
+            except subprocess.TimeoutExpired:
+                return 124, f"timeout {timeout}s"
+            out.seek(0)
+            text = out.read().decode("utf-8", errors="replace")
+        return r.returncode, text[-4000:]
+    except OSError as exc:
+        return 1, f"{type(exc).__name__}: {exc}"
+
+
+def libpq_dsn(url: str) -> str:
+    """SQLAlchemy 스킴(postgresql+asyncpg://)을 psql/libpq가 파싱하는 postgresql://로."""
+    return url.replace("postgresql+asyncpg://", "postgresql://")
 
 
 def with_port(url: str, port: int) -> str:
@@ -94,6 +110,48 @@ def write_recovery_config(data_dir: Path, archive_dir: Path) -> None:
     conf = data_dir / "postgresql.auto.conf"
     existing = conf.read_text(encoding="utf-8") if conf.exists() else ""
     conf.write_text(existing + f"\nrestore_command = '{restore_command}'\n", encoding="utf-8")
+
+
+def _copy_backup_tree(src: Path, dst: Path, timeout: float) -> tuple[bool, str]:
+    """esc-health-backup_drill_failed: 시간제한 없는 shutil.copytree가 110,830개
+    파일·2.4GB 백업(실측)을 옮기다 nightly 외부 하드킬(1200s)에 걸려 steps={}로만
+    관측됐다. Windows는 robocopy /MT(다중 I/O 스레드)+자체 timeout으로 대체 --
+    끝내 느려도 무한정 먹통이 아니라 진단 가능한 실패로 끝난다."""
+    if os.name == "nt":
+        import tempfile
+
+        cmd = [
+            "robocopy",
+            str(src),
+            str(dst),
+            "/E",
+            "/MT:32",
+            "/NFL",
+            "/NDL",
+            "/NJH",
+            "/NJS",
+            "/NP",
+            "/R:1",
+            "/W:1",
+        ]
+        try:
+            with tempfile.TemporaryFile(mode="w+b") as out:
+                try:
+                    r = subprocess.run(
+                        cmd, stdout=out, stderr=subprocess.STDOUT, timeout=timeout, check=False
+                    )
+                except subprocess.TimeoutExpired:
+                    return False, f"timeout {timeout:.0f}s"
+                out.seek(0)
+                text = out.read().decode("utf-8", errors="replace")
+            return r.returncode < 8, text[-4000:]  # robocopy: 0-7 성공, 8+ 실패
+        except OSError as exc:
+            return False, f"{type(exc).__name__}: {exc}"
+    try:
+        shutil.copytree(src, dst)
+        return True, ""
+    except OSError as exc:
+        return False, str(exc)
 
 
 def _tail_lines(text: str, n: int) -> str:
@@ -151,16 +209,10 @@ def wait_for_process_start(
     sleep: Callable[[float], None] = time.sleep,
     clock: Callable[[], float] = time.monotonic,
 ) -> str | None:
-    """postgres 프로세스가 실제로 떠 있는지(`pg_ctl status`)만 폴링한다 -- WAL replay가
-    끝나는지(pg_is_in_recovery)는 기다리지 않는다. 정상이면 None, 타임아웃까지 프로세스가
-    확인되지 않으면 사유 문자열을 돌려준다.
-
-    이전에는 `pg_ctl start -w -t 60`을 써서 -t가 '프로세스 기동'과 'WAL replay 완료'를
-    함께 기다렸다 -- archive recovery 중인 서버는 replay가 끝나야 연결을 받아들이므로
-    (hot_standby 없이는 recovery 중 연결이 거부된다), 735MB 베이스 백업 replay가 60초를
-    넘기면 실제로는 정상 진행 중인데도 start_postgres가 실패로 오분류됐다(task-4978).
-    이제 -t/이 함수의 timeout은 프로세스 기동(포트 바인딩 등)만 기다리고, replay 완료
-    대기는 wait_for_recovery로 분리했다."""
+    """postgres 프로세스가 실제로 떠 있는지(`pg_ctl status`)만 폴링한다 -- WAL replay 완료는
+    wait_for_recovery로 분리했다(이전엔 `pg_ctl start -w -t 60`이 둘 다 기다려 735MB 베이스
+    백업 replay가 60초를 넘기면 정상 진행 중인데도 실패로 오분류됐다, task-4978). 정상이면
+    None, 타임아웃까지 확인 안 되면 사유 문자열을 돌려준다."""
     deadline = clock() + timeout
     while True:
         rc, tail = run_cmd([pg_ctl_bin, "status", "-D", str(data_dir)], cwd, env, 30)
@@ -168,8 +220,7 @@ def wait_for_process_start(
             return None
         if clock() >= deadline:
             return (
-                f"{timeout:.0f}초 안에 서버 프로세스가 뜨지 않았다"
-                f"(rc={rc}, tail={tail[-200:]!r})"
+                f"{timeout:.0f}초 안에 서버 프로세스가 뜨지 않았다(rc={rc}, tail={tail[-200:]!r})"
             )
         sleep(poll_interval)
 
@@ -229,6 +280,8 @@ def run_drill(
     process_start_timeout: float = 30.0,
     process_start_poll_interval: float = 1.0,
     last_failed_restore_dir: Path = LAST_FAILED_RESTORE_DIR,
+    copy_tree: Callable[[Path, Path, float], tuple[bool, str]] = _copy_backup_tree,
+    copy_timeout: float = 300.0,
 ) -> dict:
     """복구 리허설 1회. 어느 단계에서 멈추든(백업 없음/기동 실패/복구 타임아웃/replay_verify
     불일치) `steps`에 실패한 단계가 남고 `ok`는 False가 된다 -- healthcheck의
@@ -249,14 +302,16 @@ def run_drill(
 
     if restore_data_dir.exists():
         shutil.rmtree(restore_data_dir, ignore_errors=True)
-    try:
-        shutil.copytree(backup, restore_data_dir)
-        steps["restore_files"] = {"ok": True, "detail": str(restore_data_dir)}
-    except OSError as e:
-        steps["restore_files"] = {"ok": False, "detail": str(e)}
+    copy_ok, copy_detail = copy_tree(backup, restore_data_dir, copy_timeout)
+    steps["restore_files"] = {"ok": copy_ok, "detail": copy_detail or str(restore_data_dir)}
+    if not copy_ok:
         return _finish(steps, started)
 
     write_recovery_config(restore_data_dir, archive_dir)
+    # CTO 2026-09-23: DATABASE_URL은 SQLAlchemy 스킴(postgresql+asyncpg://)이라 psql이 파싱하지
+    # 못해 기본값(localhost:5432, OS 사용자)으로 붙다가 인증 실패 — 슬롯 정리 단계가 매번
+    # 실패해 stale 슬롯 aios_drill이 남았다(다음 리허설의 -C 충돌 원인). libpq 스킴으로 정규화.
+    dsn_template = libpq_dsn(dsn_template)
     restore_dsn = with_port(dsn_template, restore_port)
     started_server = False
     # task-5203: pg_ctl/psql이 이 PC(cp949 로케일)에서 실패 메시지를 OS 코드페이지로
@@ -280,6 +335,10 @@ def run_drill(
             [
                 pg_ctl_bin,
                 "start",
+                # CTO 2026-09-23: PostgreSQL 10+는 start의 기본이 -w(서버 준비까지 대기)라
+                # -w를 "안 쓰는" 것만으로는 비동기가 아니다 — archive recovery 중 연결 거부로
+                # 30초 타임아웃(rc=124) 재현. -W로 명시해 즉시 반환시킨다.
+                "-W",
                 "-D",
                 str(restore_data_dir),
                 "-o",

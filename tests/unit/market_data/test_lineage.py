@@ -25,6 +25,8 @@ from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from uuid import UUID, uuid4
 
+import pytest
+
 from src.foundation.market_data.contracts.v1 import CandleRecord, SeriesKey, Timeframe, Venue
 from src.foundation.market_data.domain.lineage import (
     _batch_hash_reference,
@@ -127,6 +129,7 @@ def test_batch_hash_streaming_matches_reference_for_empty_and_singleton() -> Non
     assert batch_hash(solo) == _batch_hash_reference(solo)
 
 
+@pytest.mark.perf
 def test_batch_hash_large_batch_stays_order_independent() -> None:
     """task-1111(esc-ci-8e93e475afa9 후속) 실측: DB 없이 순수 함수만으로도
     `batch_hash` 대량 배치 비용을 관측 가능하게 남긴다. 실측 결과 지배적

@@ -25,8 +25,8 @@ class CandleStore(Protocol):
         self, conn: asyncpg.Connection, batch_id: UUID, candles: list[CandleRecord]
     ) -> int:
         """§5 `ON CONFLICT (venue, instrument_id, timeframe, open_time) DO
-        NOTHING` — 반환값은 실제로 새로 저장된 행 수(재실행 시 0이어도
-        오류 아님)."""
+        NOTHING` — returns the count of actually inserted rows (0 on retry
+        is not an error)."""
         ...
 
     async def quarantine(
@@ -55,7 +55,7 @@ class CandleStore(Protocol):
     async def last_open_time(
         self, conn: asyncpg.Connection, key: SeriesKey
     ) -> AwareDatetime | None:
-        """Returns `None` if no candles are saved (used by the scheduler to
+        """Returns `None` if no candles exist (used by the scheduler to
         determine the first backfill range)."""
         ...
 

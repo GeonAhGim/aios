@@ -25,6 +25,7 @@ the deviation side is implemented only as a pure function `_deviation_range()`
 from __future__ import annotations
 
 from collections.abc import Callable, Iterable, Mapping, Sequence
+from typing import Any, TypedDict
 
 import talib
 from talib import abstract as talib_abstract
@@ -40,8 +41,21 @@ from src.core.indicators.spec import (
 
 __all__ = [
     "TALIB_GROUPS",
+    "OutputStyle",
     "generate_talib_specs",
 ]
+
+
+class OutputStyle(TypedDict, total=False):
+    """`_plots_from_info`/`_plots_from_talib`의 output별 표시 스타일 오버레이 —
+    `PlotSpec`의 표시 전용 필드(color_rule/precision/legend_format)만 담는다.
+    `scale`/`default_pane`은 필수, 나머지는 선택."""
+
+    scale: ScaleHint
+    default_pane: DefaultPane
+    color_rule: str
+    precision: int
+    legend_format: str
 
 _PERIOD_MIN = 1
 _PERIOD_MAX = 2000
@@ -143,7 +157,7 @@ def _plot_kind(flags: Sequence[str]) -> PlotKind:
 def _plots_from_talib(
     talib_name: str,
     output_names: tuple[str, ...],
-    style: Mapping[str, Mapping[str, object]],
+    style: Mapping[str, OutputStyle],
 ) -> tuple[PlotSpec, ...]:
     """Derive kind/fill_between from actual output_flags of `talib_name` to build PlotSpec.
 
@@ -160,9 +174,9 @@ def _plots_from_talib(
 
 def _plots_from_info(
     talib_name: str,
-    info: Mapping[str, object],
+    info: Mapping[str, Any],
     output_names: tuple[str, ...],
-    style: Mapping[str, Mapping[str, object]],
+    style: Mapping[str, OutputStyle],
 ) -> tuple[PlotSpec, ...]:
     """Derive kind/fill_between from actual output_flags of `talib_name` to build PlotSpec.
 
@@ -176,13 +190,13 @@ def _plots_from_info(
     are actually markers on price, so force `kind="marker"`. Histogram outputs naturally
     split color by sign, so if `color_rule` is absent from style, auto-fill "sign".
     """
-    flags_by_output: list[list[str]] = list(info["output_flags"].values())  # type: ignore[attr-defined]
+    flags_by_output: list[list[str]] = list(info["output_flags"].values())
     if len(flags_by_output) != len(output_names):
         raise ValueError(
             f"{talib_name}: output_flags count ({len(flags_by_output)}) "
             f"!= output_names count ({len(output_names)})"
         )
-    is_candlestick = _CANDLESTICK_FLAG in (info["function_flags"] or [])  # type: ignore[operator]
+    is_candlestick = _CANDLESTICK_FLAG in (info["function_flags"] or [])
 
     upper_idx = next(
         (i for i, flags in enumerate(flags_by_output) if _UPPER_LIMIT_FLAG in flags), None
@@ -198,8 +212,8 @@ def _plots_from_info(
     plots = []
     for i, out_name in enumerate(output_names):
         out_style = style[out_name]
-        scale: ScaleHint = out_style["scale"]  # type: ignore[assignment]
-        default_pane: DefaultPane = out_style["default_pane"]  # type: ignore[assignment]
+        scale = out_style["scale"]
+        default_pane = out_style["default_pane"]
         kind: PlotKind = "marker" if is_candlestick else _plot_kind(flags_by_output[i])
         color_rule = out_style.get("color_rule")
         if color_rule is None and kind == "histogram":
@@ -210,9 +224,9 @@ def _plots_from_info(
                 scale=scale,
                 default_pane=default_pane,
                 fill_between=fill_between[i],
-                color_rule=color_rule,  # type: ignore[arg-type]
-                precision=out_style.get("precision"),  # type: ignore[arg-type]
-                legend_format=out_style.get("legend_format"),  # type: ignore[arg-type]
+                color_rule=color_rule,
+                precision=out_style.get("precision"),
+                legend_format=out_style.get("legend_format"),
             )
         )
     return tuple(plots)
@@ -266,7 +280,9 @@ def generate_talib_specs(names: Iterable[str] | None = None) -> dict[str, Indica
         params = _int_param_specs(info["parameters"])
         outputs = tuple(info["output_names"])
         scale, default_pane = _style_for_function(info["function_flags"])
-        style = {out: {"scale": scale, "default_pane": default_pane} for out in outputs}
+        style: dict[str, OutputStyle] = {
+            out: {"scale": scale, "default_pane": default_pane} for out in outputs
+        }
         plots = _plots_from_info(name, info, outputs, style)
         specs[name] = IndicatorSpec(
             name=name,

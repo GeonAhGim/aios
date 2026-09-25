@@ -1,23 +1,24 @@
-"""DSL-12 — `POST /v1/scripts/compile`: AIOS Script 컴파일(해시·산정치·오류 위치).
+"""DSL-12 — `POST /v1/scripts/compile`: AIOS Script compilation (hash, checksum, error location).
 
 Spec: docs/specs/L4_analytics_authoring_backtest_marketplace_v1.0.md#§9.4 DSL-12,
-§3.3(에러 taxonomy 4종·위치 정보).
+§3.3 (error taxonomy 4 types, location info).
 
-71번 §6 규칙: 라우터는 auth/TenantContext 주입·transport validation·
-`compile_source`(src/core/script/artifact/compile.py) 호출만 한다. 저장은
-없다(아티팩트 영속화는 MP/DSL 후속, task-1535 decision) — 순수 컴파일 결과만
-`ok()` 봉투로 돌려준다. 도메인 예외(`ScriptCompileError`)는 잡지 않는다 —
-`exception_registry.py`(EXCEPTION_MAP)가 `VALIDATION_INVALID_FIELD`(400)로
-번역하고 `details.code/line/col`을 봉투에 싣는다(raw HTTPException 0건,
-PLT-21 가드 대상).
+Rule §6 of 71: The router only injects auth/TenantContext, validates transport, and
+calls `compile_source` (src/core/script/artifact/compile.py). It does not persist
+anything (artifact persistence is MP/DSL follow-up, task-1535 decision) — it returns
+only the pure compilation result wrapped in the `ok()` envelope. Domain exceptions
+(`ScriptCompileError`) are not caught directly — `exception_registry.py` (EXCEPTION_MAP)
+translates them to `VALIDATION_INVALID_FIELD` (400) and loads
+`details.code/line/col` into the envelope (zero raw HTTPException calls,
+PLT-21 guard target).
 
-인증: `get_tenant_context`(PLT-28) — 게이트웨이 인증 + 테넌트 컨텍스트.
-컴파일은 테넌트 데이터를 읽지 않지만 §5 로그 공통 필드(tenant_id·
-script_hash)를 남기기 위해 컨텍스트를 받는다. 레지스트리 버전은 IND-1
-`DEFAULT_REGISTRY.registry_hash()`(스펙 정준 해시)를 그대로 쓴다.
+Authentication: `get_tenant_context` (PLT-28) — gateway auth + tenant context.
+Compilation does not read tenant data, but receives the context to emit common
+log fields (tenant_id, script_hash) per §5. Registry version uses IND-1
+`DEFAULT_REGISTRY.registry_hash()` (spec canonical hash) as-is.
 
-성능(DoD "컴파일 ≤300ms"): `elapsed_ms`를 응답에 실어 클라이언트·테스트가
-실측만 한다 — 이 라우터는 지연을 단언하지 않는다.
+Performance (DoD "compile ≤300ms"): `elapsed_ms` is included in the response so
+clients and tests can measure it empirically — this router does not assert latency.
 """
 from __future__ import annotations
 
@@ -39,7 +40,7 @@ router = APIRouter(prefix="/v1/scripts", tags=["scripts"])
 
 
 def get_indicator_registry() -> IndicatorRegistry:
-    """IND-1 기본 레지스트리(프로세스 단일 인스턴스). 테스트가 덮어쓸 수 있는 의존성."""
+    """IND-1 default registry (single process instance). Dependency that tests can override."""
     return DEFAULT_REGISTRY
 
 

@@ -53,6 +53,7 @@ as `test_duplicate_delivery_gate.py` (absolute wall-clock is print-only,
 per-call round-trip count is the CI-safe gate -- esc-826/task-1038/1521
 decision, same rationale as that file's docstring).
 """
+
 from __future__ import annotations
 
 import os
@@ -155,11 +156,23 @@ async def test_live_mode_rejection_is_o1_with_no_db_round_trip(pool: asyncpg.Poo
     broken_pool = _PoolThatFailsOnAcquire()
     n = 500
 
-    started = time.perf_counter()
-    for _ in range(n):
+    # Warmup
+    for _ in range(2):
         with pytest.raises(FrozenZoneLiveModeBlockedError):
             await _execute(broken_pool, execution_id, user_id, mode="LIVE", adapter=adapter)
-    elapsed_sec = time.perf_counter() - started
+
+    # Measure with median of 5 samples
+    samples = []
+    for _ in range(5):
+        started = time.perf_counter()
+        for _ in range(n):
+            with pytest.raises(FrozenZoneLiveModeBlockedError):
+                await _execute(broken_pool, execution_id, user_id, mode="LIVE", adapter=adapter)
+        elapsed_sec = time.perf_counter() - started
+        samples.append(elapsed_sec)
+
+    samples.sort()
+    elapsed_sec = samples[len(samples) // 2]
 
     per_call_ms = (elapsed_sec / n) * 1000
     print(
@@ -254,12 +267,18 @@ async def test_replay_after_terminal_fill_db_fault_rolls_back_cleanly_and_is_ret
     quantity = Decimal("5")
     exchange_order_id = f"ex-tamper-fault-replay-{uuid4().hex}"
     order_id, client_order_id = await _insert_order(
-        pool, user_id, execution_id=execution_id, quantity=quantity,
+        pool,
+        user_id,
+        execution_id=execution_id,
+        quantity=quantity,
         exchange_order_id=exchange_order_id,
     )
     legit = _fill_event(
-        venue="bitget", client_order_id=client_order_id, exchange_order_id=exchange_order_id,
-        quantity=quantity, provider_event_id=f"tamper-fault-legit-{uuid4().hex}",
+        venue="bitget",
+        client_order_id=client_order_id,
+        exchange_order_id=exchange_order_id,
+        quantity=quantity,
+        provider_event_id=f"tamper-fault-legit-{uuid4().hex}",
     )
     healthy_processor = InboxProcessor(pool)
     await healthy_processor.ingest(legit)
@@ -268,7 +287,9 @@ async def test_replay_after_terminal_fill_db_fault_rolls_back_cleanly_and_is_ret
     assert before["fills_count"] == 1
 
     tampered_replay = _fill_event(
-        venue="bitget", client_order_id=client_order_id, exchange_order_id=exchange_order_id,
+        venue="bitget",
+        client_order_id=client_order_id,
+        exchange_order_id=exchange_order_id,
         quantity=quantity * 10,  # inflated (tampered) double-spend attempt
         provider_event_id=f"tamper-fault-replay-{uuid4().hex}",
     )
@@ -360,24 +381,47 @@ async def test_forged_reference_rejection_throughput_and_round_trip_budget(
     processor = InboxProcessor(pool)
 
     warmup = _fill_event(
-        venue="bitget", client_order_id=f"cid-forged-{uuid4().hex}",
-        exchange_order_id=f"ex-forged-{uuid4().hex}", quantity=Decimal("1"),
+        venue="bitget",
+        client_order_id=f"cid-forged-{uuid4().hex}",
+        exchange_order_id=f"ex-forged-{uuid4().hex}",
+        quantity=Decimal("1"),
         provider_event_id=f"perf-forged-warmup-{uuid4().hex}",
     )
     assert await processor.ingest(warmup) is True  # warm-up, outside the budget
 
     queries = await _attach_round_trip_logger(pool)
-    queries.clear()
 
-    started = time.perf_counter()
+    # Measure with median of 3 samples
+    samples = []
+    for _ in range(3):
+        queries.clear()
+        started = time.perf_counter()
+        for _ in range(_FORGED_REJECTION_N):
+            ev = _fill_event(
+                venue="bitget",
+                client_order_id=f"cid-forged-{uuid4().hex}",
+                exchange_order_id=f"ex-forged-{uuid4().hex}",
+                quantity=Decimal("999"),
+                provider_event_id=f"perf-forged-{uuid4().hex}",
+            )
+            assert await processor.ingest(ev) is True  # 삽입은 성공, 매칭 실패로 IGNORED
+        elapsed_sec = time.perf_counter() - started
+        samples.append(elapsed_sec)
+
+    samples.sort()
+    elapsed_sec = samples[len(samples) // 2]
+
+    # Final query count check (perform once more to capture query state)
+    queries.clear()
     for _ in range(_FORGED_REJECTION_N):
         ev = _fill_event(
-            venue="bitget", client_order_id=f"cid-forged-{uuid4().hex}",
-            exchange_order_id=f"ex-forged-{uuid4().hex}", quantity=Decimal("999"),
-            provider_event_id=f"perf-forged-{uuid4().hex}",
+            venue="bitget",
+            client_order_id=f"cid-forged-{uuid4().hex}",
+            exchange_order_id=f"ex-forged-{uuid4().hex}",
+            quantity=Decimal("999"),
+            provider_event_id=f"perf-forged-final-{uuid4().hex}",
         )
-        assert await processor.ingest(ev) is True  # 삽입은 성공, 매칭 실패로 IGNORED
-    elapsed_sec = time.perf_counter() - started
+        await processor.ingest(ev)
 
     achieved_per_sec = _FORGED_REJECTION_N / elapsed_sec if elapsed_sec > 0 else float("inf")
     expected_round_trips = _FORGED_REJECTION_N * _FORGED_ROUND_TRIPS_PER_CALL

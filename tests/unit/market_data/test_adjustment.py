@@ -236,43 +236,35 @@ def test_adjust_ignores_candles_for_unregistered_instrument() -> None:
     assert adjusted[1].volume == Decimal("100")
 
 
-def test_factor_chain_raises_on_ratio_built_from_float_via_monkeypatch() -> None:
-    """failure injection (DEEPEN task-4112): monkeypatch로 `Decimal.__new__`를
-    모의해 float에서 Decimal을 생성할 때 `Overflow`를 유발하면, `factor_chain`
-    내부의 `_ONE / action.ratio` 계산이 InvalidRatioError가 아닌 원래 예외를
-    그대로 전파한다 — ratio 검증(ratio <= 0)이 Decimal 연산 전에 일어나므로,
-    ratio가 유효한 Decimal(예: Decimal("0"))인 경우라도 검증이 먼저 통과하고
-    Decimal 연산만 실패한다. 이는 our code의 검증 순서가 올바르다는 간접 증명이다.
+def test_factor_chain_raises_on_ratio_built_from_float_via_monkeypatch(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """failure injection (DEEPEN task-4112, review 5367/4836 후속 정정): 이 모듈은
+    I/O가 없는 순수 함수라 실제 어댑터에 fault를 주입할 지점이 없다. 여기서는
+    monkeypatch로 이미 구성된 `CorporateAction` 인스턴스의 `ratio` 필드를 사후에
+    float 값(0.0)으로 덮어써, "float에서 만들어진 ratio가 Decimal이 아니라 float
+    타입인 채로 체인에 도달하는" 경로를 실제로 주입한다(예: 이전 스키마가 float를
+    허용하던 시절의 레코드가 역직렬화 버그로 그대로 흘러드는 상황을 흉내낸다).
 
-    구체적으로: ratio=Decimal("0")인 action에 대해 factor_chain을 호출하면
-    ratio <= 0 검사가 True가 되어 InvalidRatioError를 raise한다. Decimal
-    연산에 도달하지 않는다. monkeypatch로 Decimal 연산이 실패하는 상황을
-    시뮬레이션해도 이 테스트는 InvalidRatioError를 받아야 한다."""
-    instrument_id = uuid4()
-    # ratio=0 — 유효하지 않은 ratio지만 Decimal 자체는 유효하게 생성됨
-    action = CorporateAction(
-        action_type="SPLIT",
-        instrument_id=instrument_id,
-        ex_date=date(2024, 1, 10),
-        ratio=Decimal("0"),
-        source_ref="test",
-    )
+    test_zero_ratio_raises는 정상적으로 `Decimal("0")`으로 구성된 ratio를
+    검증하지만, 이 테스트는 타입 자체가 오염된(float) ratio도 `ratio <= 0`
+    비교가 여전히 성립해 InvalidRatioError로 fail-closed됨을 검증하는 별개의
+    경로다 — monkeypatch 없이는 재현할 수 없다(정상 생성 경로로는 pydantic이
+    Decimal로 강제 변환하므로 float 타입 자체가 살아남지 않는다)."""
+    action = _split(uuid4(), date(2024, 1, 10), "1")
+    monkeypatch.setattr(action, "ratio", 0.0)
 
     with pytest.raises(InvalidRatioError):
         factor_chain([action], datetime(2024, 12, 1, tzinfo=timezone.utc))
 
 
-def test_adjust_handles_candle_with_zero_volume(monkeypatch: pytest.MonkeyPatch) -> None:
-    """failure injection (DEEPEN task-4112): monkeypatch로 CandleRecord.model_copy를
-    모의해 호출 시 `MemoryError`를 유발하면, adjust()가 candle를 처리하는 각 단계에서
-    예외가 적절히 전파되는지 확인할 수 있다. 여기서는 model_copy가 정상 동작한다는
-    전제하에 — zero-volume candle가 들어와도 Decimal 곱셈은 정의되므로(0*x=0),
-    예외 없이 0 volume candle가 반환됨을 검증한다. 이는 '예외 유발'이 아닌
-    '경계값 입력에 대한 정적 검증'이다.
-
-    진짜 failure injection: monkeypatch로 adjustment.py의 _ONE을 0으로 바꾸면
-    모든 계수가 0이 되어 prices가 0이 되는 부정을합 상태를 유도한다.
-    이 테스트는 그 역 — 정상 _ONE으로 zero-volume candle가 0으로 남음을 확인한다."""
+def test_adjust_handles_candle_with_zero_volume() -> None:
+    """negative (DEEPEN task-4112, review 5367/4836 후속 정정): 경계값 입력에 대한
+    정적 검증 — zero-volume candle가 들어와도 Decimal 곱셈은 정의되므로(0*x=0),
+    예외 없이 0 volume candle가 반환됨을 검증한다. 이 경로는 예외를 유발하는 게
+    아니라 정상 산출값을 확인하는 것이라 주입할 fault가 없으므로 monkeypatch
+    인자를 제거했다 — 실패 주입은
+    test_factor_chain_raises_on_ratio_built_from_float_via_monkeypatch가 맡는다."""
     instrument_id = uuid4()
     as_of = datetime(2024, 12, 1, tzinfo=timezone.utc)
     actions = [_split(instrument_id, date(2024, 6, 1), "2")]
@@ -291,6 +283,7 @@ def test_adjust_handles_candle_with_zero_volume(monkeypatch: pytest.MonkeyPatch)
     assert adjusted[0].volume == Decimal("0")
 
 
+@pytest.mark.perf
 def test_factor_chain_and_adjust_large_batch_stays_correct() -> None:
     """Observes large-batch timing (print) without asserting a numeric bound
     -- same policy as `test_lineage.py`'s

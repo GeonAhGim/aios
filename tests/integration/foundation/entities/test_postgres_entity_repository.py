@@ -77,9 +77,12 @@ async def test_cross_tenant_get_collapses_to_none_at_every_level(pool, repo):
 
 
 async def test_duplicate_primary_key_is_rejected_at_every_level(pool, repo):
+    # create_* wraps asyncpg.UniqueViolationError in ConcurrencyConflictError
+    # (105 standard, task-4889) so callers get a uniform retry contract instead
+    # of a raw driver exception.
     seeded = await build_hierarchy(pool, repo)
 
-    with pytest.raises(asyncpg.UniqueViolationError):
+    with pytest.raises(ConcurrencyConflictError):
         await repo.create_legal_entity(
             LegalEntity(
                 entity_id=seeded.legal_entity.entity_id,
@@ -89,7 +92,7 @@ async def test_duplicate_primary_key_is_rejected_at_every_level(pool, repo):
                 region_tag="kr-seoul",
             )
         )
-    with pytest.raises(asyncpg.UniqueViolationError):
+    with pytest.raises(ConcurrencyConflictError):
         await repo.create_fund(
             Fund(
                 fund_id=seeded.fund.fund_id,
@@ -98,7 +101,7 @@ async def test_duplicate_primary_key_is_rejected_at_every_level(pool, repo):
                 inception=date(2026, 1, 1),
             )
         )
-    with pytest.raises(asyncpg.UniqueViolationError):
+    with pytest.raises(ConcurrencyConflictError):
         await repo.create_portfolio(
             Portfolio(
                 portfolio_id=seeded.portfolio.portfolio_id,
@@ -106,7 +109,7 @@ async def test_duplicate_primary_key_is_rejected_at_every_level(pool, repo):
                 venue_account_ref="dup",
             )
         )
-    with pytest.raises(asyncpg.UniqueViolationError):
+    with pytest.raises(ConcurrencyConflictError):
         await repo.create_sub_account(
             SubAccount(
                 sub_account_id=seeded.sub_account.sub_account_id,
@@ -344,6 +347,7 @@ async def test_close_portfolio_toctou_active_sub_account_inserted_after_precheck
     assert reread.closed_at is None
 
 
+@pytest.mark.perf
 async def test_get_legal_entity_p95_latency_stays_within_normalized_ceiling(pool, repo):
     """수치 성능 단언 — 4단 계층 조회 중 가장 빈번히 호출되는
     get_legal_entity(단일 SELECT) 핫패스의 회귀 감시. 공유
@@ -411,6 +415,7 @@ async def test_concurrent_close_legal_entity_requests_leave_exactly_one_winner(p
     assert reread.closed_at is not None
 
 
+@pytest.mark.perf
 async def test_list_funds_by_entity_p95_latency_stays_within_normalized_ceiling(pool, repo):
     """수치 성능 단언 — DEPTH 재감사(task-2724)가 task-2431의 실질 수정 커밋
     (7bb3ac62, task.json commit 필드 레코드 불일치 정정 — task-3030)에 지적한
@@ -442,6 +447,7 @@ async def test_list_funds_by_entity_p95_latency_stays_within_normalized_ceiling(
     )
 
 
+@pytest.mark.perf
 async def test_close_legal_entity_not_exists_guard_throughput_stays_within_budget(pool, repo):
     """수치 성능 단언 — close_legal_entity의 조건부 UPDATE에 붙은 NOT
     EXISTS(활성 Fund) 서브쿼리(7bb3ac62, FA-2 TOCTOU 원자화)가 만드는 추가

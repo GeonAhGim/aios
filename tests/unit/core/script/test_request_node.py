@@ -224,6 +224,7 @@ def test_request_inner_expr_visitation_regression_guard() -> None:
 # ---- 성능 단언: 파서+자원산정 합산이 DSL 컴파일 예산(300ms) 안에 머문다 ----
 
 
+@pytest.mark.perf
 def test_request_heavy_script_compiles_well_within_budget() -> None:
     """수치 성능 단언(ADR-2026-09-09-C Decision 1, DSL 컴파일 300ms 예산):
     request() 8개(=DEFAULT_LIMITS.max_requests) + 일반 let 50개를 포함한

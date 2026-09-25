@@ -362,6 +362,7 @@ def test_compute_score_reflects_weakened_suite_regression() -> None:
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.perf
 def test_compute_score_and_classify_survivors_scale_to_thousands_of_mutants() -> None:
     """no accidental O(n^2): 5,000개 합성 결과에 대해 compute_score +
     classify_survivors가 500ms 안에 끝나야 한다(도메인 하나의 실측 변이 수는

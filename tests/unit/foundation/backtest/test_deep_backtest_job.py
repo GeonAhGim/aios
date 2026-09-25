@@ -40,6 +40,7 @@ from src.foundation.backtest.domain.models_v2 import (
 )
 from src.foundation.market_data.contracts.v1 import Timeframe
 from src.foundation.market_data.domain.candle_columns import CandleColumns
+from tests.conftest import PerfBudget
 
 _T0 = datetime(2026, 1, 1, tzinfo=timezone.utc)
 _CASH = Decimal("100000")
@@ -302,23 +303,19 @@ def test_empty_columns_and_blank_job_id_are_rejected() -> None:
 _DEEP_JOB_BUDGET_MS = 50.0
 
 
-def _deep_job_latencies_ms(iterations: int = 10, *, n_bars: int = 2000) -> list[float]:
+def _deep_job_latencies_ms(
+    perf_budget: PerfBudget, iterations: int = 10, *, n_bars: int = 2000
+) -> list[float]:
+    # task-7434: process_time-based samples, not wall-clock perf_counter().
     cfg, cols = _config(), _columns(n_bars)
-    samples: list[float] = []
-    for i in range(iterations):
-        store = InMemoryCheckpointStore()
-        started = time.perf_counter()
+
+    def _run_once() -> None:
         run_deep_backtest_job(
-            cfg,
-            cols,
-            timeframe=Timeframe.M1,
-            strategy=_Scripted({}),
-            initial_cash=_CASH,
-            job_id=f"perf-{i}",
-            checkpoints=store,
-            chunk_bars=200,
+            cfg, cols, timeframe=Timeframe.M1, strategy=_Scripted({}), initial_cash=_CASH,
+            job_id="perf", checkpoints=InMemoryCheckpointStore(), chunk_bars=200,
         )
-        samples.append((time.perf_counter() - started) * 1000)
+
+    samples = [s.cpu_ms for s in perf_budget.samples(_run_once, n=iterations)]
     samples.sort()
     return samples
 
@@ -327,7 +324,8 @@ def _p95(samples: list[float]) -> float:
     return samples[min(int(len(samples) * 0.95), len(samples) - 1)]
 
 
-def test_deep_job_p95_latency_within_self_declared_budget() -> None:
+@pytest.mark.perf
+def test_deep_job_p95_latency_within_self_declared_budget(perf_budget: PerfBudget) -> None:
     """수치 성능 단언: ADR-2026-09-09-C Decision 1 예산표의 "백테스트 1개월
     M1 1심볼 3초"는 단발 실행 예산이라 이 리프(구간마다 접두 구간을 처음부터
     재실행하는 체크포인트 잡, O(n^2/chunk_bars))에 그대로 대입할 수 없다 —
@@ -336,19 +334,21 @@ def test_deep_job_p95_latency_within_self_declared_budget() -> None:
     대비 약 9배 여유를 둔 50ms. 예산을 벗어나면 청크 재실행 비용이 의도한
     O(n^2/chunk_bars)를 넘어서는 회귀(예: 매 청크가 전체 컬럼을 복사하는
     실수)로 본다."""
-    samples = _deep_job_latencies_ms()
+    samples = _deep_job_latencies_ms(perf_budget)
     p95_ms = _p95(samples)
     print(f"[BT-11] run_deep_backtest_job() p95={p95_ms:.2f}ms budget<{_DEEP_JOB_BUDGET_MS:.0f}ms")
     assert p95_ms < _DEEP_JOB_BUDGET_MS
 
 
+@pytest.mark.perf
 def test_perf_budget_gate_actually_fails_when_chunk_execution_stalls(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """게이트 적색 재현: BT-10 실행 코어가 실제로 느려지면
     `test_deep_job_p95_latency_within_self_declared_budget`과 동일한 단언식이
     진짜로 `AssertionError`를 내는지(= CI가 빨간불이 되는지) 확인한다 — 그
-    단언이 항상 통과하는 tautology가 아님을 보장한다."""
+    단언이 항상 통과하는 tautology가 아님을 보장한다. task-7434: sleep()
+    지연 주입이라 process_time으로는 못 잡아, wall-clock을 유지한다."""
     original_run = quick_backtest_mod.run_quick_backtest
 
     def _stalled_run(*args: Any, **kwargs: Any) -> Any:

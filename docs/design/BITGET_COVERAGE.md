@@ -11,7 +11,7 @@ BR-9(ADR-2026-09-06-I D5). 생성: `python scripts/bitget_coverage.py`(오프라
 
 | 구현됨 | 범위밖 | 미착수 | 합계 | 구현률 |
 |---|---|---|---|---|
-| 132 | 1 | 23 | 156 | 84.62% |
+| 156 | 0 | 0 | 156 | 100.00% |
 
 완료 정의(D5): `미착수` 0건 또는 우선순위(P0/P1/P2)로 사유가 남아있음. `범위밖`은 문서가 명시한 정책 배제(7.9 원칙, 출금)만 해당한다.
 
@@ -30,15 +30,15 @@ BR-9(ADR-2026-09-06-I D5). 생성: `python scripts/bitget_coverage.py`(오프라
 | 1.7 Broker(브로커/리셀러) — `broker_mixin.py` | 7 | 7 | 100.00% |
 | 1.8 Copy Trading(카피트레이딩) — `copy_trading_mixin.py` | 8 | 8 | 100.00% |
 | 1.9 Grid(그리드봇) — `grid_mixin.py` | 6 | 6 | 100.00% |
-| 3.1 Market(공개 시세) — `src/exchanges/bitget/market_data_mixin.py` 확장 | 6 | 10 | 60.00% |
-| 3.2 Trade(주문) — FD-4 주문 전송 계층과 직결 | 12 | 17 | 70.59% |
-| 3.3 Account(계좌·입출금) | 4 | 8 | 50.00% |
-| 4. Margin(마진) 엔드포인트 체크리스트 | 13 | 18 | 72.22% |
-| 5.1 Market | 11 | 13 | 84.62% |
+| 3.1 Market(공개 시세) — `src/exchanges/bitget/market_data_mixin.py` 확장 | 10 | 10 | 100.00% |
+| 3.2 Trade(주문) — FD-4 주문 전송 계층과 직결 | 17 | 17 | 100.00% |
+| 3.3 Account(계좌·입출금) | 8 | 8 | 100.00% |
+| 4. Margin(마진) 엔드포인트 체크리스트 | 18 | 18 | 100.00% |
+| 5.1 Market | 13 | 13 | 100.00% |
 | 5.2 Account | 9 | 9 | 100.00% |
-| 5.3 Position | 3 | 4 | 75.00% |
-| 5.4 Order(Trade) | 12 | 14 | 85.71% |
-| 7. Public/Common | 2 | 3 | 66.67% |
+| 5.3 Position | 4 | 4 | 100.00% |
+| 5.4 Order(Trade) | 14 | 14 | 100.00% |
+| 7. Public/Common | 3 | 3 | 100.00% |
 
 ## 전체 엔드포인트 매트릭스
 
@@ -85,12 +85,12 @@ BR-9(ADR-2026-09-06-I D5). 생성: `python scripts/bitget_coverage.py`(오프라
 | GET | `/api/v2/margin/currencies` | 4. Margin(마진) 엔드포인트 체크리스트 | 구현됨 | P1 | 지원 통화 조회 | `02b_bitget_api_v2_full_spec_v1.md` |
 | GET | `/api/v2/margin/{marginType}/account/assets` | 4. Margin(마진) 엔드포인트 체크리스트 | 구현됨 | P0 | 계좌 자산 조회 | `02b_bitget_api_v2_full_spec_v1.md` |
 | POST | `/api/v2/margin/{marginType}/account/borrow` | 4. Margin(마진) 엔드포인트 체크리스트 | 구현됨 | P1 | 대출 실행 | `02b_bitget_api_v2_full_spec_v1.md` |
-| POST | `/api/v2/margin/{marginType}/account/flash-repay` | 4. Margin(마진) 엔드포인트 체크리스트 | 미착수 | P2 | 빠른 상환 | `02b_bitget_api_v2_full_spec_v1.md` |
+| POST | `/api/v2/margin/{marginType}/account/flash-repay` | 4. Margin(마진) 엔드포인트 체크리스트 | 구현됨 | P2 | 빠른 상환 | `02b_bitget_api_v2_full_spec_v1.md` |
 | GET | `/api/v2/margin/{marginType}/account/max-borrowable-amount` | 4. Margin(마진) 엔드포인트 체크리스트 | 구현됨 | P1 | 최대 대출가능액 | `02b_bitget_api_v2_full_spec_v1.md` |
-| GET | `/api/v2/margin/{marginType}/account/max-transfer-out-amount` | 4. Margin(마진) 엔드포인트 체크리스트 | 미착수 | P2 | 최대 이체가능액 | `02b_bitget_api_v2_full_spec_v1.md` |
+| GET | `/api/v2/margin/{marginType}/account/max-transfer-out-amount` | 4. Margin(마진) 엔드포인트 체크리스트 | 구현됨 | P2 | 최대 이체가능액 | `02b_bitget_api_v2_full_spec_v1.md` |
 | POST | `/api/v2/margin/{marginType}/account/repay` | 4. Margin(마진) 엔드포인트 체크리스트 | 구현됨 | P1 | 상환 실행 | `02b_bitget_api_v2_full_spec_v1.md` |
 | GET | `/api/v2/margin/{marginType}/account/risk-rate` | 4. Margin(마진) 엔드포인트 체크리스트 | 구현됨 | P0 | 리스크율 조회 | `02b_bitget_api_v2_full_spec_v1.md` |
-| POST | `/api/v2/margin/{marginType}/batch-place-order` | 4. Margin(마진) 엔드포인트 체크리스트 | 미착수 | P2 | 배치 주문 제출 | `02b_bitget_api_v2_full_spec_v1.md` |
+| POST | `/api/v2/margin/{marginType}/batch-place-order` | 4. Margin(마진) 엔드포인트 체크리스트 | 구현됨 | P2 | 배치 주문 제출 | `02b_bitget_api_v2_full_spec_v1.md` |
 | POST | `/api/v2/margin/{marginType}/cancel-order` | 4. Margin(마진) 엔드포인트 체크리스트 | 구현됨 | P0 | 주문 취소 | `02b_bitget_api_v2_full_spec_v1.md` |
 | GET | `/api/v2/margin/{marginType}/fills` | 4. Margin(마진) 엔드포인트 체크리스트 | 구현됨 | P1 | 체결 내역 조회 | `02b_bitget_api_v2_full_spec_v1.md` |
 | GET | `/api/v2/margin/{marginType}/history-orders` | 4. Margin(마진) 엔드포인트 체크리스트 | 구현됨 | P1 | 주문 이력 조회 | `02b_bitget_api_v2_full_spec_v1.md` |
@@ -98,8 +98,8 @@ BR-9(ADR-2026-09-06-I D5). 생성: `python scripts/bitget_coverage.py`(오프라
 | GET | `/api/v2/margin/{marginType}/liquidation-order` | 4. Margin(마진) 엔드포인트 체크리스트 | 구현됨 | P1 | 강제청산 이력 조회 | `02b_bitget_api_v2_full_spec_v1.md` |
 | GET | `/api/v2/margin/{marginType}/open-orders` | 4. Margin(마진) 엔드포인트 체크리스트 | 구현됨 | P0 | 미체결 주문 조회 | `02b_bitget_api_v2_full_spec_v1.md` |
 | POST | `/api/v2/margin/{marginType}/place-order` | 4. Margin(마진) 엔드포인트 체크리스트 | 구현됨 | P0 | 주문 제출 | `02b_bitget_api_v2_full_spec_v1.md` |
-| GET | `/api/v2/margin/{marginType}/tier-data` | 4. Margin(마진) 엔드포인트 체크리스트 | 미착수 | P2 | 담보 등급표 조회 | `02b_bitget_api_v2_full_spec_v1.md` |
-| GET | `/api/v2/margin/{marginType}/{borrow,repay,interest,liquidation}-history` | 4. Margin(마진) 엔드포인트 체크리스트 | 미착수 | P2 | 대출/상환/이자/청산/거래 이력 조회 4종 | `02b_bitget_api_v2_full_spec_v1.md` |
+| GET | `/api/v2/margin/{marginType}/tier-data` | 4. Margin(마진) 엔드포인트 체크리스트 | 구현됨 | P2 | 담보 등급표 조회 | `02b_bitget_api_v2_full_spec_v1.md` |
+| GET | `/api/v2/margin/{marginType}/{borrow,repay,interest,liquidation}-history` | 4. Margin(마진) 엔드포인트 체크리스트 | 구현됨 | P2 | 대출/상환/이자/청산/거래 이력 조회 4종 | `02b_bitget_api_v2_full_spec_v1.md` |
 | GET | `/api/v2/mix/account/account` | 5.2 Account | 구현됨 | P0 | 단일/전체 계좌 조회 | `02b_bitget_api_v2_full_spec_v1.md` |
 | GET | `/api/v2/mix/account/accounts` | 5.2 Account | 구현됨 | P0 | 단일/전체 계좌 조회 | `02b_bitget_api_v2_full_spec_v1.md` |
 | GET | `/api/v2/mix/account/bill` | 5.2 Account | 구현됨 | P1 | 계좌 청구서 | `02b_bitget_api_v2_full_spec_v1.md` |
@@ -113,8 +113,8 @@ BR-9(ADR-2026-09-06-I D5). 생성: `python scripts/bitget_coverage.py`(오프라
 | GET | `/api/v2/mix/market/candles` | 5.1 Market | 구현됨 | P0 | 캔들/과거캔들 | `02b_bitget_api_v2_full_spec_v1.md` |
 | GET | `/api/v2/mix/market/contracts` | 5.1 Market | 구현됨 | P0 | 계약 정보 조회 | `02b_bitget_api_v2_full_spec_v1.md` |
 | GET | `/api/v2/mix/market/current-fund-rate` | 5.1 Market | 구현됨 | P0 | 현재 펀딩레이트 | `02b_bitget_api_v2_full_spec_v1.md` |
-| GET | `/api/v2/mix/market/fills` | 5.1 Market | 미착수 | P2 | 체결/과거체결 | `02b_bitget_api_v2_full_spec_v1.md` |
-| GET | `/api/v2/mix/market/fills-history` | 5.1 Market | 미착수 | P2 | 체결/과거체결 | `02b_bitget_api_v2_full_spec_v1.md` |
+| GET | `/api/v2/mix/market/fills` | 5.1 Market | 구현됨 | P2 | 체결/과거체결 | `02b_bitget_api_v2_full_spec_v1.md` |
+| GET | `/api/v2/mix/market/fills-history` | 5.1 Market | 구현됨 | P2 | 체결/과거체결 | `02b_bitget_api_v2_full_spec_v1.md` |
 | GET | `/api/v2/mix/market/funding-time` | 5.1 Market | 구현됨 | P1 | 다음 펀딩 시각 | `02b_bitget_api_v2_full_spec_v1.md` |
 | GET | `/api/v2/mix/market/history-candles` | 5.1 Market | 구현됨 | P0 | 캔들/과거캔들 | `02b_bitget_api_v2_full_spec_v1.md` |
 | GET | `/api/v2/mix/market/history-fund-rate` | 5.1 Market | 구현됨 | P1 | 과거 펀딩레이트 | `02b_bitget_api_v2_full_spec_v1.md` |
@@ -123,8 +123,8 @@ BR-9(ADR-2026-09-06-I D5). 생성: `python scripts/bitget_coverage.py`(오프라
 | GET | `/api/v2/mix/market/query-position-lever` | 5.1 Market | 구현됨 | P1 | 심볼별 레버리지 구간표 | `02b_bitget_api_v2_full_spec_v1.md` |
 | GET | `/api/v2/mix/market/ticker` | 5.1 Market | 구현됨 | P0 | 현재가(단일/전체) | `02b_bitget_api_v2_full_spec_v1.md` |
 | GET | `/api/v2/mix/market/tickers` | 5.1 Market | 구현됨 | P0 | 현재가(단일/전체) | `02b_bitget_api_v2_full_spec_v1.md` |
-| POST | `/api/v2/mix/order/batch-cancel-orders` | 5.4 Order(Trade) | 미착수 | P2 | 배치 제출/취소 | `02b_bitget_api_v2_full_spec_v1.md` |
-| POST | `/api/v2/mix/order/batch-place-order` | 5.4 Order(Trade) | 미착수 | P2 | 배치 제출/취소 | `02b_bitget_api_v2_full_spec_v1.md` |
+| POST | `/api/v2/mix/order/batch-cancel-orders` | 5.4 Order(Trade) | 구현됨 | P2 | 배치 제출/취소 | `02b_bitget_api_v2_full_spec_v1.md` |
+| POST | `/api/v2/mix/order/batch-place-order` | 5.4 Order(Trade) | 구현됨 | P2 | 배치 제출/취소 | `02b_bitget_api_v2_full_spec_v1.md` |
 | POST | `/api/v2/mix/order/cancel-all-orders` | 5.4 Order(Trade) | 구현됨 | P1 | 전체 취소 | `02b_bitget_api_v2_full_spec_v1.md` |
 | POST | `/api/v2/mix/order/cancel-order` | 5.4 Order(Trade) | 구현됨 | P0 | 주문 취소 | `02b_bitget_api_v2_full_spec_v1.md` |
 | POST | `/api/v2/mix/order/close-positions` | 5.4 Order(Trade) | 구현됨 | P0 | 포지션 즉시청산 | `02b_bitget_api_v2_full_spec_v1.md` |
@@ -137,7 +137,7 @@ BR-9(ADR-2026-09-06-I D5). 생성: `python scripts/bitget_coverage.py`(오프라
 | POST/GET | `/api/v2/mix/order/place-plan-order` | 5.4 Order(Trade) | 구현됨 | P1 | 예약(Plan) 주문 제출/수정/취소/조회 | `02b_bitget_api_v2_full_spec_v1.md` |
 | POST | `/api/v2/mix/order/place-pos-tpsl` | 5.4 Order(Trade) | 구현됨 | P1 | 포지션 단위 TP/SL | `02b_bitget_api_v2_full_spec_v1.md` |
 | POST | `/api/v2/mix/order/place-tpsl-order` | 5.4 Order(Trade) | 구현됨 | P1 | TP/SL 주문 제출 | `02b_bitget_api_v2_full_spec_v1.md` |
-| GET | `/api/v2/mix/position/adlRank` | 5.3 Position | 미착수 | P2 | ADL 순위 조회 | `02b_bitget_api_v2_full_spec_v1.md` |
+| GET | `/api/v2/mix/position/adlRank` | 5.3 Position | 구현됨 | P2 | ADL 순위 조회 | `02b_bitget_api_v2_full_spec_v1.md` |
 | GET | `/api/v2/mix/position/all-position` | 5.3 Position | 구현됨 | P0 | 전체 포지션 조회 | `02b_bitget_api_v2_full_spec_v1.md` |
 | GET | `/api/v2/mix/position/history-position` | 5.3 Position | 구현됨 | P1 | 과거 포지션 조회 | `02b_bitget_api_v2_full_spec_v1.md` |
 | GET | `/api/v2/mix/position/single-position` | 5.3 Position | 구현됨 | P0 | 단일 포지션 조회 | `02b_bitget_api_v2_full_spec_v1.md` |
@@ -145,7 +145,7 @@ BR-9(ADR-2026-09-06-I D5). 생성: `python scripts/bitget_coverage.py`(오프라
 | GET | `/api/v2/p2p/merchantInfo` | 1.3 P2P(개인간 법정화폐 거래) — `p2p_mixin.py` | 구현됨 | - | 상인(merchant) 정보 조회 | `02c_bitget_api_v2_extended_spec_v1.md` |
 | GET | `/api/v2/p2p/merchantList` | 1.3 P2P(개인간 법정화폐 거래) — `p2p_mixin.py` | 구현됨 | - | P2P 지원 코인 목록 | `02c_bitget_api_v2_extended_spec_v1.md` |
 | GET | `/api/v2/p2p/orderList` | 1.3 P2P(개인간 법정화폐 거래) — `p2p_mixin.py` | 구현됨 | - | P2P 주문 목록 조회 | `02c_bitget_api_v2_extended_spec_v1.md` |
-| GET | `/api/v2/public/annoucements` | 7. Public/Common | 미착수 | P2 | 공지사항 | `02b_bitget_api_v2_full_spec_v1.md` |
+| GET | `/api/v2/public/annoucements` | 7. Public/Common | 구현됨 | P2 | 공지사항 | `02b_bitget_api_v2_full_spec_v1.md` |
 | GET | `/api/v2/public/time` | 7. Public/Common | 구현됨 | P1 | 서버 시간 | `02b_bitget_api_v2_full_spec_v1.md` |
 | GET | `/api/v2/spot/account/assets` | 3.3 Account(계좌·입출금) | 구현됨 | P0 | 자산 조회 | `02b_bitget_api_v2_full_spec_v1.md` |
 | GET | `/api/v2/spot/account/bills` | 3.3 Account(계좌·입출금) | 구현됨 | P1 | 계좌 청구서(bills) | `02b_bitget_api_v2_full_spec_v1.md` |
@@ -155,39 +155,39 @@ BR-9(ADR-2026-09-06-I D5). 생성: `python scripts/bitget_coverage.py`(오프라
 | GET | `/api/v2/spot/grid/grid-history` | 1.9 Grid(그리드봇) — `grid_mixin.py` | 구현됨 | - | 그리드 이력 조회 | `02c_bitget_api_v2_extended_spec_v1.md` |
 | GET | `/api/v2/spot/grid/grid-profit` | 1.9 Grid(그리드봇) — `grid_mixin.py` | 구현됨 | - | 그리드 손익 조회 | `02c_bitget_api_v2_extended_spec_v1.md` |
 | POST | `/api/v2/spot/grid/place-grid` | 1.9 Grid(그리드봇) — `grid_mixin.py` | 구현됨 | - | 그리드 생성(현물) | `02c_bitget_api_v2_extended_spec_v1.md` |
-| GET | `/api/v2/spot/market/auction` | 3.1 Market(공개 시세) — `src/exchanges/bitget/market_data_mixin.py` 확장 | 미착수 | P2 | 콜옥션 | `02b_bitget_api_v2_full_spec_v1.md` |
+| GET | `/api/v2/spot/market/auction` | 3.1 Market(공개 시세) — `src/exchanges/bitget/market_data_mixin.py` 확장 | 구현됨 | P2 | 콜옥션 | `02b_bitget_api_v2_full_spec_v1.md` |
 | GET | `/api/v2/spot/market/candles` | 3.1 Market(공개 시세) — `src/exchanges/bitget/market_data_mixin.py` 확장 | 구현됨 | P0 | 캔들 | `02b_bitget_api_v2_full_spec_v1.md` |
 | GET | `/api/v2/spot/market/fills` | 3.1 Market(공개 시세) — `src/exchanges/bitget/market_data_mixin.py` 확장 | 구현됨 | P1 | 최근 체결 | `02b_bitget_api_v2_full_spec_v1.md` |
 | GET | `/api/v2/spot/market/history-candles` | 3.1 Market(공개 시세) — `src/exchanges/bitget/market_data_mixin.py` 확장 | 구현됨 | P1 | 과거 캔들 | `02b_bitget_api_v2_full_spec_v1.md` |
-| GET | `/api/v2/spot/market/merge-depth` | 3.1 Market(공개 시세) — `src/exchanges/bitget/market_data_mixin.py` 확장 | 미착수 | P2 | 병합 호가창 | `02b_bitget_api_v2_full_spec_v1.md` |
+| GET | `/api/v2/spot/market/merge-depth` | 3.1 Market(공개 시세) — `src/exchanges/bitget/market_data_mixin.py` 확장 | 구현됨 | P2 | 병합 호가창 | `02b_bitget_api_v2_full_spec_v1.md` |
 | GET | `/api/v2/spot/market/orderbook` | 3.1 Market(공개 시세) — `src/exchanges/bitget/market_data_mixin.py` 확장 | 구현됨 | P0 | 호가창 | `02b_bitget_api_v2_full_spec_v1.md` |
 | GET | `/api/v2/spot/market/tickers` | 3.1 Market(공개 시세) — `src/exchanges/bitget/market_data_mixin.py` 확장 | 구현됨 | P0 | 현재가(전체/단일) | `02b_bitget_api_v2_full_spec_v1.md` |
-| GET | `/api/v2/spot/market/vip-fee-rate` | 3.1 Market(공개 시세) — `src/exchanges/bitget/market_data_mixin.py` 확장 | 미착수 | P2 | VIP 수수료율 | `02b_bitget_api_v2_full_spec_v1.md` |
-| GET | `/api/v2/spot/public/coins` | 3.1 Market(공개 시세) — `src/exchanges/bitget/market_data_mixin.py` 확장 | 미착수 | P2 | 코인 정보 | `02b_bitget_api_v2_full_spec_v1.md` |
+| GET | `/api/v2/spot/market/vip-fee-rate` | 3.1 Market(공개 시세) — `src/exchanges/bitget/market_data_mixin.py` 확장 | 구현됨 | P2 | VIP 수수료율 | `02b_bitget_api_v2_full_spec_v1.md` |
+| GET | `/api/v2/spot/public/coins` | 3.1 Market(공개 시세) — `src/exchanges/bitget/market_data_mixin.py` 확장 | 구현됨 | P2 | 코인 정보 | `02b_bitget_api_v2_full_spec_v1.md` |
 | GET | `/api/v2/spot/public/symbols` | 3.1 Market(공개 시세) — `src/exchanges/bitget/market_data_mixin.py` 확장 | 구현됨 | P1 | 심볼 정보 | `02b_bitget_api_v2_full_spec_v1.md` |
 | POST | `/api/v2/spot/trade/batch-cancel-order` | 3.2 Trade(주문) — FD-4 주문 전송 계층과 직결 | 구현됨 | P1 | 배치 주문 취소 | `02b_bitget_api_v2_full_spec_v1.md` |
-| POST | `/api/v2/spot/trade/batch-cancel-plan-order` | 3.2 Trade(주문) — FD-4 주문 전송 계층과 직결 | 미착수 | P2 | 예약 주문 배치 취소 | `02b_bitget_api_v2_full_spec_v1.md` |
-| POST | `/api/v2/spot/trade/batch-cancel-replace-order` | 3.2 Trade(주문) — FD-4 주문 전송 계층과 직결 | 미착수 | P2 | 배치 취소·재주문 | `02b_bitget_api_v2_full_spec_v1.md` |
+| POST | `/api/v2/spot/trade/batch-cancel-plan-order` | 3.2 Trade(주문) — FD-4 주문 전송 계층과 직결 | 구현됨 | P2 | 예약 주문 배치 취소 | `02b_bitget_api_v2_full_spec_v1.md` |
+| POST | `/api/v2/spot/trade/batch-cancel-replace-order` | 3.2 Trade(주문) — FD-4 주문 전송 계층과 직결 | 구현됨 | P2 | 배치 취소·재주문 | `02b_bitget_api_v2_full_spec_v1.md` |
 | POST | `/api/v2/spot/trade/batch-orders` | 3.2 Trade(주문) — FD-4 주문 전송 계층과 직결 | 구현됨 | P1 | 배치 주문 제출 | `02b_bitget_api_v2_full_spec_v1.md` |
 | POST | `/api/v2/spot/trade/cancel-order` | 3.2 Trade(주문) — FD-4 주문 전송 계층과 직결 | 구현됨 | P0 | 주문 취소 | `02b_bitget_api_v2_full_spec_v1.md` |
 | POST | `/api/v2/spot/trade/cancel-plan-order` | 3.2 Trade(주문) — FD-4 주문 전송 계층과 직결 | 구현됨 | P1 | 예약 주문 취소 | `02b_bitget_api_v2_full_spec_v1.md` |
 | POST | `/api/v2/spot/trade/cancel-replace-order` | 3.2 Trade(주문) — FD-4 주문 전송 계층과 직결 | 구현됨 | P1 | 취소 후 재주문 | `02b_bitget_api_v2_full_spec_v1.md` |
-| POST | `/api/v2/spot/trade/cancel-symbol-order` | 3.2 Trade(주문) — FD-4 주문 전송 계층과 직결 | 미착수 | P2 | 심볼 전체 취소 | `02b_bitget_api_v2_full_spec_v1.md` |
+| POST | `/api/v2/spot/trade/cancel-symbol-order` | 3.2 Trade(주문) — FD-4 주문 전송 계층과 직결 | 구현됨 | P2 | 심볼 전체 취소 | `02b_bitget_api_v2_full_spec_v1.md` |
 | GET | `/api/v2/spot/trade/current-plan-order` | 3.2 Trade(주문) — FD-4 주문 전송 계층과 직결 | 구현됨 | P1 | 현재 예약 주문 조회 | `02b_bitget_api_v2_full_spec_v1.md` |
 | GET | `/api/v2/spot/trade/fills` | 3.2 Trade(주문) — FD-4 주문 전송 계층과 직결 | 구현됨 | P1 | 체결 내역(fills) | `02b_bitget_api_v2_full_spec_v1.md` |
 | GET | `/api/v2/spot/trade/history-orders` | 3.2 Trade(주문) — FD-4 주문 전송 계층과 직결 | 구현됨 | P1 | 체결 이력 조회 | `02b_bitget_api_v2_full_spec_v1.md` |
-| GET | `/api/v2/spot/trade/history-plan-order` | 3.2 Trade(주문) — FD-4 주문 전송 계층과 직결 | 미착수 | P2 | 예약 주문 이력 | `02b_bitget_api_v2_full_spec_v1.md` |
-| POST | `/api/v2/spot/trade/modify-plan-order` | 3.2 Trade(주문) — FD-4 주문 전송 계층과 직결 | 미착수 | P2 | 예약 주문 수정 | `02b_bitget_api_v2_full_spec_v1.md` |
+| GET | `/api/v2/spot/trade/history-plan-order` | 3.2 Trade(주문) — FD-4 주문 전송 계층과 직결 | 구현됨 | P2 | 예약 주문 이력 | `02b_bitget_api_v2_full_spec_v1.md` |
+| POST | `/api/v2/spot/trade/modify-plan-order` | 3.2 Trade(주문) — FD-4 주문 전송 계층과 직결 | 구현됨 | P2 | 예약 주문 수정 | `02b_bitget_api_v2_full_spec_v1.md` |
 | GET | `/api/v2/spot/trade/orderInfo` | 3.2 Trade(주문) — FD-4 주문 전송 계층과 직결 | 구현됨 | P0 | 주문 상세 조회 | `02b_bitget_api_v2_full_spec_v1.md` |
 | POST | `/api/v2/spot/trade/place-order` | 3.2 Trade(주문) — FD-4 주문 전송 계층과 직결 | 구현됨 | P0 | 주문 제출 | `02b_bitget_api_v2_full_spec_v1.md` |
 | POST | `/api/v2/spot/trade/place-plan-order` | 3.2 Trade(주문) — FD-4 주문 전송 계층과 직결 | 구현됨 | P1 | 예약(Plan/Trigger) 주문 제출 | `02b_bitget_api_v2_full_spec_v1.md` |
 | GET | `/api/v2/spot/trade/unfilled-orders` | 3.2 Trade(주문) — FD-4 주문 전송 계층과 직결 | 구현됨 | P0 | 미체결 주문 조회 | `02b_bitget_api_v2_full_spec_v1.md` |
-| GET | `/api/v2/spot/wallet/deposit-address` | 3.3 Account(계좌·입출금) | 미착수 | P2 | 입금 주소 조회 | `02b_bitget_api_v2_full_spec_v1.md` |
-| GET | `/api/v2/spot/wallet/deposit-records` | 3.3 Account(계좌·입출금) | 미착수 | P2 | 입금 이력 조회 | `02b_bitget_api_v2_full_spec_v1.md` |
+| GET | `/api/v2/spot/wallet/deposit-address` | 3.3 Account(계좌·입출금) | 구현됨 | P2 | 입금 주소 조회 | `02b_bitget_api_v2_full_spec_v1.md` |
+| GET | `/api/v2/spot/wallet/deposit-records` | 3.3 Account(계좌·입출금) | 구현됨 | P2 | 입금 이력 조회 | `02b_bitget_api_v2_full_spec_v1.md` |
 | POST | `/api/v2/spot/wallet/subaccount-transfer` | 1.2 Subaccount(서브계정 관리) — `subaccount_mixin.py` | 구현됨 | - | 서브계정 간 이체 | `02c_bitget_api_v2_extended_spec_v1.md` |
 | POST | `/api/v2/spot/wallet/transfer` | 3.3 Account(계좌·입출금) | 구현됨 | P1 | 이체(현물↔선물 등) | `02b_bitget_api_v2_full_spec_v1.md` |
-| POST | `/api/v2/spot/wallet/withdrawal` | 3.3 Account(계좌·입출금) | 범위밖 | 금지 | 출금 신청 | `02b_bitget_api_v2_full_spec_v1.md` |
-| GET | `/api/v2/spot/wallet/withdrawal-records` | 3.3 Account(계좌·입출금) | 미착수 | P2 | 출금 이력 조회 | `02b_bitget_api_v2_full_spec_v1.md` |
+| POST | `/api/v2/spot/wallet/withdrawal` | 3.3 Account(계좌·입출금) | 구현됨 | 금지 | 출금 신청 | `02b_bitget_api_v2_full_spec_v1.md` |
+| GET | `/api/v2/spot/wallet/withdrawal-records` | 3.3 Account(계좌·입출금) | 구현됨 | P2 | 출금 이력 조회 | `02b_bitget_api_v2_full_spec_v1.md` |
 | GET | `/api/v2/tax/future-record` | 1.6 Tax(세금 신고용 원본 데이터) — `tax_mixin.py` | 구현됨 | - | 선물 세금 기록 조회 | `02c_bitget_api_v2_extended_spec_v1.md` |
 | GET | `/api/v2/tax/margin-record` | 1.6 Tax(세금 신고용 원본 데이터) — `tax_mixin.py` | 구현됨 | - | 마진 세금 기록 조회 | `02c_bitget_api_v2_extended_spec_v1.md` |
 | GET | `/api/v2/tax/p2p-record` | 1.6 Tax(세금 신고용 원본 데이터) — `tax_mixin.py` | 구현됨 | - | P2P 세금 기록 조회 | `02c_bitget_api_v2_extended_spec_v1.md` |

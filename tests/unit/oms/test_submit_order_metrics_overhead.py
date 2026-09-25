@@ -15,6 +15,8 @@ from __future__ import annotations
 import time
 from dataclasses import dataclass, field
 
+import pytest
+
 from src.core.observability.metric_names import (
     OMS_ORDER_SUBMIT_COUNT_TOTAL,
     OMS_ORDER_SUBMIT_DURATION_SECONDS,
@@ -53,6 +55,7 @@ def _record_submit_order_style(m: MetricsPort, venue: str, outcome: str) -> None
     m.observe(OMS_ORDER_SUBMIT_DURATION_SECONDS, elapsed, {"venue": venue})
 
 
+@pytest.mark.perf
 def test_null_metrics_instrumentation_overhead_p99_under_200us() -> None:
     m = NullMetrics()
     samples_ms: list[float] = []
@@ -67,6 +70,7 @@ def test_null_metrics_instrumentation_overhead_p99_under_200us() -> None:
     assert p99 < _P99_TARGET_MS, msg
 
 
+@pytest.mark.perf
 def test_spy_metrics_instrumentation_overhead_p99_under_200us() -> None:
     """리스트에 실제로 append하는(참조용 스파이 포트) 구현도 같은 예산 안에 든다
     — `NullMetrics`가 no-op이라 지나치게 낙관적인 수치를 낼 위험을 상쇄한다."""

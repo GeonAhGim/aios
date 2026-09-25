@@ -5,6 +5,7 @@ Split out of the former single `tests/integration/test_bitget_adapter.py`
 code handling, retry backoff, server-time offset sync) plus the generic
 error-code-to-exception mapping (retryable vs fatal).
 """
+
 from decimal import Decimal
 
 import httpx
@@ -131,3 +132,33 @@ async def test_sync_server_time_falls_back_to_zero_offset_on_failure(make_adapte
     await adapter.sync_server_time()
 
     assert adapter._time_offset_ms == 0
+
+
+# ---------- task-6876 QA — negative: empty-data responses for BR-16b spot endpoints ----------
+
+
+async def test_get_coins_returns_empty_list_on_empty_data(make_adapter, json_response):
+    adapter = make_adapter(
+        lambda request: json_response(
+            {"code": "00000", "msg": "success", "requestTime": 1, "data": []}
+        )
+    )
+    assert await adapter.get_coins() == []
+
+
+async def test_get_deposit_records_returns_empty_list_on_empty_data(make_adapter, json_response):
+    adapter = make_adapter(
+        lambda request: json_response(
+            {"code": "00000", "msg": "success", "requestTime": 1, "data": []}
+        )
+    )
+    assert await adapter.get_deposit_records("BTC") == []
+
+
+async def test_get_withdrawal_records_returns_empty_list_on_empty_data(make_adapter, json_response):
+    adapter = make_adapter(
+        lambda request: json_response(
+            {"code": "00000", "msg": "success", "requestTime": 1, "data": []}
+        )
+    )
+    assert await adapter.get_withdrawal_records("USDT") == []

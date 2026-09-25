@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from decimal import Decimal
+from typing import Any
 
 import httpx
 import pytest
@@ -88,8 +89,8 @@ def order_row() -> Callable[..., dict]:
 
 @pytest.fixture
 def new_order() -> Callable[..., Order]:
-    def _new_order(**overrides: object) -> Order:
-        defaults: dict[str, object] = {
+    def _new_order(**overrides: Any) -> Order:
+        defaults: dict[str, Any] = {
             "client_order_id": "c-1",
             "strategy_id": "s-1",
             "strategy_version": "v1",
@@ -102,6 +103,6 @@ def new_order() -> Callable[..., Order]:
             "price": None,
         }
         defaults.update(overrides)
-        return Order(**defaults)  # type: ignore[arg-type]
+        return Order(**defaults)
 
     return _new_order

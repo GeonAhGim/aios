@@ -5,6 +5,7 @@ from __future__ import annotations
 import time
 from collections.abc import Callable
 from decimal import Decimal
+from unittest.mock import patch
 from uuid import uuid4
 
 import pytest
@@ -122,7 +123,54 @@ def test_cancellation_targets_only_open_children() -> None:
     assert set(pending) == {open_child_id, partially_filled_child_id}
 
 
-# -- DEEPEN 2070 (EM-2) — D2 하한 증빙 보강 -------------------------------
+def test_children_pending_cancellation_all_terminal_returns_empty() -> None:
+    """Negative test: 모든 child 가 terminal(FILLED/CANCELLED/REJECTED)일 때 빈 리스트 반환.
+
+    혼합 상태가 아닌 극단 케이스 — 현재 test_cancellation_targets_only_open_children는
+    OPEN+PARTIALLY_FILLED+TERMINAL 혼합만 테스트하므로 "전부 terminal" edge case 누락이었음.
+    """
+    children = [
+        ChildFillState(uuid4(), Decimal("100"), OrderStatus.FILLED),
+        ChildFillState(uuid4(), Decimal("0"), OrderStatus.CANCELLED),
+        ChildFillState(uuid4(), Decimal("0"), OrderStatus.REJECTED),
+    ]
+    # terminal 상태만 있으므로 cancellation 대상 없음
+    assert children_pending_cancellation(children) == []
+
+
+def test_children_pending_cancellation_failure_injection_terminal_status_guard() -> None:
+    """Failure injection: TERMINAL_ORDER_STATUSES 상수를 monkeypatch해 filtering 로직이
+    해당 상수에 의존하는지 검증 — guard bypass 시 filtering 이 no-op 이 되는 것 확인.
+    """
+    # 정상: TERMINAL_ORDER_STATUSES = ["FILLED", "CANCELLED", "REJECTED"]
+    # → FILLED child 는 filtering 에 제외됨
+    normal_result = children_pending_cancellation(
+        [
+            ChildFillState(uuid4(), Decimal("100"), OrderStatus.FILLED),
+            ChildFillState(uuid4(), Decimal("0"), OrderStatus.ACKNOWLEDGED),
+        ]
+    )
+    assert len(normal_result) == 1  # OPEN만 통과
+
+    # Failure injection: parent_child 모듈에서 TERMINAL_ORDER_STATUSES 를 빈 리스트로 우회
+    # → filtering 이 no-op 이 되어 모든 child 가 반환됨
+    import src.foundation.ems.domain.parent_child as pc_module
+
+    original = pc_module.TERMINAL_ORDER_STATUSES
+    try:
+        pc_module.TERMINAL_ORDER_STATUSES = []
+        # FILLED child 도 no-op filtering 에 통과
+        result = children_pending_cancellation(
+            [
+                ChildFillState(uuid4(), Decimal("100"), OrderStatus.FILLED),
+                ChildFillState(uuid4(), Decimal("0"), OrderStatus.ACKNOWLEDGED),
+            ]
+        )
+        assert len(result) == 2  # 정상なら 1 → 2=all children (filtering broken)
+    finally:
+        pc_module.TERMINAL_ORDER_STATUSES = original
+
+
 # Task-3114: failure-injection 1건, 수치 성능 단언 1건, 게이트 적색 재현 1건
 
 
@@ -224,7 +272,6 @@ def test_gate_red_proof_invariant_mutation_turns_red() -> None:
     the gate was not a no-op by showing that removing the check
     causes a failure.
     """
-    from unittest.mock import patch
 
     # With the real implementation, this MUST raise.
     with pytest.raises(AlgoConstraintError, match="exceeding"):
@@ -270,7 +317,6 @@ def test_compute_child_state_failure_injection_propagates_dependency_exception()
     `compute_child_state` must propagate the failure rather than swallowing
     it and reporting a false success -- fail-closed, not fail-open.
     """
-    from unittest.mock import patch
 
     parent_id = uuid4()
     children = [ChildFillState(uuid4(), Decimal("10"), OrderStatus.PARTIALLY_FILLED)]
@@ -281,3 +327,172 @@ def test_compute_child_state_failure_injection_propagates_dependency_exception()
     ):
         with pytest.raises(RuntimeError, match="audit dependency unreachable"):
             compute_child_state(parent_id, children, _PARENT_QTY)
+
+
+# -- DEEPEN 6915: negative filled_qty must be rejected, not silently netted --
+
+
+def test_aggregate_parent_state_rejects_negative_child_filled_qty() -> None:
+    """Negative test: a child with a negative `filled_qty` is an invariant
+    violation (fills only ever accumulate) and must be rejected rather than
+    silently netted into the parent rollup.
+    """
+    children = [
+        ChildFillState(uuid4(), Decimal("30"), OrderStatus.PARTIALLY_FILLED),
+        ChildFillState(uuid4(), Decimal("-10"), OrderStatus.PARTIALLY_FILLED),
+    ]
+    with pytest.raises(AlgoConstraintError, match="negative filled_qty") as exc_info:
+        aggregate_parent_state(_PARENT_QTY, OrderStatus.SUBMITTED, children)
+    assert exc_info.value.code == EmsErrorCode.ALGO_CONSTRAINT
+
+
+def test_validate_aggregate_fills_rejects_negative_child_filled_qty() -> None:
+    """Negative test: `validate_aggregate_fills` must reject a negative
+    per-child `filled_qty` even when the (netted) aggregate sum would stay
+    within `parent_qty` -- a negative value could otherwise mask a genuine
+    EM-A1 overshoot elsewhere in the same batch.
+    """
+    parent_id = uuid4()
+    children = [
+        ChildFillState(uuid4(), Decimal("90"), OrderStatus.PARTIALLY_FILLED),
+        ChildFillState(uuid4(), Decimal("20"), OrderStatus.PARTIALLY_FILLED),
+        # Without the guard, -10 nets the sum back down to 100 (== parent_qty,
+        # not > it), hiding the fact that a real overshoot occurred.
+        ChildFillState(uuid4(), Decimal("-10"), OrderStatus.PARTIALLY_FILLED),
+    ]
+    with pytest.raises(AlgoConstraintError, match="negative filled_qty") as exc_info:
+        validate_aggregate_fills(parent_id, children, _PARENT_QTY)
+    assert exc_info.value.code == EmsErrorCode.ALGO_CONSTRAINT
+
+
+def test_compute_child_state_failure_injection_negative_fill_guard_bypass() -> None:
+    """Failure injection: monkeypatch `_assert_no_negative_fills` to a no-op
+    and confirm the negative-fill guard was actually load-bearing -- i.e.
+    without it, a negative filled_qty would slip through undetected."""
+    import src.foundation.ems.domain.parent_child as pc_module
+
+    parent_id = uuid4()
+    children = [ChildFillState(uuid4(), Decimal("-5"), OrderStatus.PARTIALLY_FILLED)]
+
+    with pytest.raises(AlgoConstraintError, match="negative filled_qty"):
+        compute_child_state(parent_id, children, _PARENT_QTY)
+
+    with patch.object(pc_module, "_assert_no_negative_fills", lambda _children: None):
+        # Guard bypassed: the negative fill now slips through without error.
+        compute_child_state(parent_id, children, _PARENT_QTY)
+
+
+class TestAggregateParentStateEdgeCases:
+    """Negative tests for aggregate_parent_state edge cases."""
+
+    def test_empty_children_returns_zero_filled_full_remaining(self) -> None:
+        """children=[] 빈 리스트 — filled_sum=0, remaining=parent_qty.
+
+        aggregate_parent_state가 children가 빈 리스트일 때 예외 없이
+        0 채움, 전체 남은 상태로 집계하는지 검증 (negative: edge-case input).
+        """
+        filled, status = aggregate_parent_state(
+            parent_qty=Decimal("100000"),
+            current_status=OrderStatus.SUBMITTED,
+            children=[],
+        )
+        assert filled == Decimal("0")
+        assert status == OrderStatus.SUBMITTED
+
+    def test_cancelled_parent_empty_children_returns_zero_remaining(self) -> None:
+        """parent_status=CANCELLED + children=[] — filled=0, remaining=0.
+
+        부모가 이미 취소된 상태에서는 남은 qty가 0이어야 함 (negative: cancelled
+        parent에 대한 집계).
+        """
+        filled, status = aggregate_parent_state(
+            parent_qty=Decimal("50000"),
+            current_status=OrderStatus.CANCELLED,
+            children=[],
+        )
+        assert filled == Decimal("0")
+        assert status == OrderStatus.CANCELLED
+
+    def test_empty_children_preserves_decimal_type(self) -> None:
+        """negative: children=[] 반환값이 (Decimal, OrderStatus) 타입 정확히 반환.
+
+        aggregate_parent_state가 빈 리스트에서도 float/str이 아닌
+        Decimal·OrderStatus를 반환하는지 검증 — 타입 드리프트 방지.
+        """
+        filled, status = aggregate_parent_state(
+            parent_qty=Decimal("100"),
+            current_status=OrderStatus.FILLED,
+            children=[],
+        )
+        assert isinstance(filled, Decimal)
+        assert isinstance(status, OrderStatus)
+        assert filled == Decimal("0")
+        assert status == OrderStatus.FILLED
+
+
+# -- tasks 6918/6922: numeric performance assertions for validate_aggregate_fills
+# and compute_child_state specifically -- the existing perf test above only
+# covers aggregate_parent_state.
+
+
+def _best_of_n_elapsed_seconds(fn: Callable[[], None], *, trials: int = 5) -> float:
+    """Best-of-`trials` (minimum) wall-clock elapsed time for `fn()`.
+
+    The minimum, rather than a mean or a single sample, discards scheduling
+    noise (GC pause, CI host contention) that can only ever slow a trial
+    down, never speed it up -- so the fastest observed trial is the closest
+    proxy for the function's own cost.
+    """
+    return min(_timed_trial(fn) for _ in range(trials))
+
+
+def _timed_trial(fn: Callable[[], None]) -> float:
+    start = time.perf_counter()
+    fn()
+    return time.perf_counter() - start
+
+
+def test_validate_aggregate_fills_performance_bounded_for_1000_children() -> None:
+    """Numeric performance assertion (D2 floor): `validate_aggregate_fills`
+    over 1,000 children must stay well under a tolerant absolute budget.
+
+    Best-of-5 avoids a flaky tight wall-clock assertion -- a single slow
+    trial (GC pause, CI host contention) would otherwise fail a healthy
+    implementation. The 250ms budget is generous relative to the ~0.1ms
+    this function actually takes on 1,000 children (measured locally); it
+    exists to catch an accidental O(n^2) regression or a stray I/O call,
+    not to pin a tight per-item cost that would vary across CI hosts.
+    """
+    parent_id = uuid4()
+    children = [ChildFillState(uuid4(), Decimal("1"), OrderStatus.FILLED) for _ in range(1_000)]
+
+    elapsed = _best_of_n_elapsed_seconds(
+        lambda: validate_aggregate_fills(parent_id, children, Decimal("1000"))
+    )
+
+    assert elapsed < 0.25, (
+        f"Performance regression: validate_aggregate_fills over 1,000 children "
+        f"took {elapsed * 1000:.1f}ms (best of 5), exceeding the 250ms budget"
+    )
+
+
+def test_compute_child_state_performance_bounded_for_1000_children() -> None:
+    """Numeric performance assertion (D2 floor): `compute_child_state` over
+    1,000 children must stay well under a tolerant absolute budget.
+
+    See `test_validate_aggregate_fills_performance_bounded_for_1000_children`
+    for the best-of-5/absolute-budget rationale -- `compute_child_state` is a
+    thin wrapper around `validate_aggregate_fills`, so its own budget mirrors
+    that test's.
+    """
+    parent_id = uuid4()
+    children = [ChildFillState(uuid4(), Decimal("1"), OrderStatus.FILLED) for _ in range(1_000)]
+
+    elapsed = _best_of_n_elapsed_seconds(
+        lambda: compute_child_state(parent_id, children, Decimal("1000"))
+    )
+
+    assert elapsed < 0.25, (
+        f"Performance regression: compute_child_state over 1,000 children "
+        f"took {elapsed * 1000:.1f}ms (best of 5), exceeding the 250ms budget"
+    )

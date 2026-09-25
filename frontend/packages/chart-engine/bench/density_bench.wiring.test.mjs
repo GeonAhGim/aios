@@ -35,7 +35,7 @@ describe("density-bench CI wiring (DEEPEN task-3107)", () => {
 
   it("chart-engine/package.json#bench:density invokes the real bench file", () => {
     const pkg = readJson(resolvePath(CHART_ENGINE_DIR, "package.json"));
-    expect(pkg.scripts["bench:density"]).toBe("node --experimental-strip-types bench/density_bench.mjs");
+    expect(pkg.scripts["bench:density"]).toBe("node --expose-gc --experimental-strip-types bench/density_bench.mjs");
   });
 
   // task-2052's own tail comment (local_ci.py run_gates test_steps) records this
@@ -55,7 +55,7 @@ describe("density-bench CI wiring (DEEPEN task-3107)", () => {
         // module, syntax error) is what "wiring silently rotted" looks like --
         // that must fail this test regardless of exit code.
         expect(result.error).toBeUndefined();
-        expect(result.stdout).toMatch(/\[density-bench\] measured \(median across sweeps\):/);
+        expect(result.stdout).toMatch(/\[density-bench\] measured \(panZoomFrameMsP95: pooled p95/);
         // Exit 0 (within thresholds) and 1 (a real ratchet/absolute-threshold
         // failure) are both proof the wiring works -- only a crash (anything
         // else, e.g. an uncaught exception before main() resolves) is wiring rot.

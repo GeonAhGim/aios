@@ -1,13 +1,13 @@
-"""BeginConnection 커맨드 — PENDING_CONSENT 상태의 connection을 만든다.
+"""BeginConnection command — creates a connection in PENDING_CONSENT state.
 
-Spec: AIOSproject 44번 §3, 74번 §2/§5.
+Spec: AIOSproject #44 §3, #74 §2/§5.
 
-74번 §5 "Connection commands require MFA and active ACCOUNT_READ consent" —
-MFA는 호출부(라우터)가 세션 자체로 이미 증명한다(mandates의
-`get_tenant_context().mfa_verified`와 동일 패턴, foundation_deps.py 참조).
-동의는 Trust Core(FND-01)의 기존 동의 메커니즘을 그대로 재사용한다(71번 §4
-Contract ownership — trust가 owner, connections는 소비자일 뿐 별도 동의
-플로우를 만들지 않는다).
+#74 §5 "Connection commands require MFA and active ACCOUNT_READ consent" —
+MFA is already proven by the caller (router) via the session itself
+(same pattern as `get_tenant_context().mfa_verified` in mandates, see
+foundation_deps.py). Consent reuses the existing mechanism from Trust Core
+(FND-01) without introducing a separate consent flow (#71 §4 Contract
+ownership — trust is the owner, connections are consumers only).
 """
 from __future__ import annotations
 
@@ -47,8 +47,8 @@ class ConsentRequiredError(Exception):
 
 
 def _mask(opaque_account_ref: str) -> str:
-    """74번 §4 "masked provider/account label" — opaque ref는 이미 provider
-    원문 계좌번호가 아니지만, 그마저도 뒤 4자만 노출한다."""
+    """#74 §4 "masked provider/account label" — opaque ref is not the provider's
+    original account number, but expose only its last 4 characters anyway."""
     if len(opaque_account_ref) <= 4:
         return "*" * len(opaque_account_ref)
     return "*" * (len(opaque_account_ref) - 4) + opaque_account_ref[-4:]

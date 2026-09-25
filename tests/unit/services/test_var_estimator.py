@@ -14,6 +14,8 @@ from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from uuid import uuid4
 
+import pytest
+
 from src.core.loader.risk_policy_loader import VarPolicy, load_risk_policy
 from src.core.risk.decision import RiskOutcome
 from src.core.risk.inputs import (
@@ -236,6 +238,7 @@ def test_unsupported_var_method_returns_none_not_crash():
     assert result is None
 
 
+@pytest.mark.perf
 def test_repeated_multi_symbol_estimation_has_no_performance_regression():
     """성능 단언 — 3종목 250봉 포트폴리오 VaR/ES 계산 300회가 느슨한 상한
     (3000ms, 회귀 감지용 — 절대 성능목표 아님) 안에 끝나야 한다."""

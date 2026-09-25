@@ -232,6 +232,7 @@ async def test_insert_policy_bundle_race_returns_existing_row_without_update(
 # --- Numeric performance/throughput (DEEPEN task-2857) ----------------------
 
 
+@pytest.mark.perf
 async def test_insert_policy_decision_meets_throughput_budget(pool, repo, trust_repo):
     """수치 성능/처리량 단언: 실 DB(TEST_DATABASE_URL) 왕복을 포함해 policy_decision
     200건을 연속 INSERT한 처리량이 하한(20 rows/s, 예산 10.0s) 아래로 떨어지면

@@ -265,6 +265,7 @@ async def test_aborted_transaction_propagates_instead_of_appearing_as_zero_match
         await pool.release(conn)
 
 
+@pytest.mark.perf
 async def test_pause_executions_completes_within_single_round_trip_latency_bound(pool):
     """성능 단언 — 매칭 50건 + 비매칭 50건이 섞여 있어도 단일 UPDATE...
     RETURNING 왕복 하나로 끝난다(행별 개별 쿼리로 퇴화하는 회귀를 방지).

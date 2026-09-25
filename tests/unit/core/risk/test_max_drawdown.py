@@ -1,6 +1,10 @@
 """L4_risk_and_safety_v1.0.md#2.1, §8, §9 R-06 — max_drawdown 규칙 테스트."""
 from decimal import Decimal
+from typing import cast
 
+import pytest
+
+from src.core.loader.risk_policy_loader import RiskPolicy
 from src.core.risk.decision import RiskOutcome
 from src.core.risk.inputs import EquityInputs
 from src.core.risk.rules import max_drawdown
@@ -45,3 +49,34 @@ def test_missing_drawdown_denies():
     result = max_drawdown.check(inputs, POLICY)
     assert result.outcome == RiskOutcome.DENY
     assert result.missing_fields == ("equity.drawdown_pct",)
+
+
+def test_denies_at_hard_stop_boundary_plus_tiny_epsilon():
+    result = max_drawdown.check(_inputs_with_drawdown("15.000001"), POLICY)
+    assert result.outcome == RiskOutcome.DENY
+    assert result.reason_code == "RISK_MDD_HARD_STOP"
+
+
+def test_escalates_at_hard_stop_boundary_minus_tiny_epsilon():
+    """A hair below hard_stop_pct=15.0 must still ESCALATE (warn), proving
+    the `pct()` quantization to 6 decimal places does not round this value
+    up into the hard-stop bucket."""
+    result = max_drawdown.check(_inputs_with_drawdown("14.999999"), POLICY)
+    assert result.outcome == RiskOutcome.ESCALATE
+    assert result.reason_code == "RISK_MDD_WARN"
+
+
+class _BrokenMaxDrawdownAttr:
+    @property
+    def hard_stop_pct(self) -> float:
+        raise RuntimeError("policy backend unavailable")
+
+
+class _BrokenMaxDrawdownPolicy:
+    max_drawdown = _BrokenMaxDrawdownAttr()
+
+
+def test_policy_max_drawdown_lookup_failure_propagates(monkeypatch: pytest.MonkeyPatch):
+    broken_policy = cast(RiskPolicy, _BrokenMaxDrawdownPolicy())
+    with pytest.raises(RuntimeError, match="policy backend unavailable"):
+        max_drawdown.check(_inputs_with_drawdown("1.0"), broken_policy)

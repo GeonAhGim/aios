@@ -54,6 +54,7 @@ def test_greek_failure_injection_is_fail_closed() -> None:
         asyncio.run(GreekCalculator().calculate(GreekIndicatorRequest(uuid4(), uuid4())))
 
 
+@pytest.mark.perf
 def test_chain_contract_validation_is_under_budget() -> None:
     start = time.perf_counter()
     for _ in range(500):

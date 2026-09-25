@@ -249,6 +249,7 @@ def test_dpo_is_causal_changing_future_candles_does_not_change_past_output() -> 
 # --- 수치 성능 단언 ------------------------------------------------------------
 
 
+@pytest.mark.perf
 def test_registered_indicators_compute_within_budget() -> None:
     """예산: 3종 x 2000봉 = 전부 순수 numpy/pandas 연산(네트워크·DB 없음) —
     ADR-2026-09-09-C Decision 1에 이 리프 전용 항목은 없어(가장 가까운 항목은

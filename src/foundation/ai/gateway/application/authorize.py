@@ -13,7 +13,6 @@ code."""
 
 from __future__ import annotations
 
-from datetime import datetime
 from decimal import Decimal
 
 from src.foundation.ai.gateway.adapters.postgres_token_repository import (
@@ -29,14 +28,19 @@ async def authorize(
     *,
     token_secret: str,
     scope: Scope,
-    now: datetime,
     instrument: str | None = None,
     notional: Decimal | None = None,
 ) -> AgentToken:
     token_hash = hash_token_secret(token_secret)
-    token = await repo.get_by_hash(token_hash)
-    if token is None:
+    found = await repo.get_by_hash(token_hash)
+    if found is None:
         raise token_rules.TokenRevokedError("unknown token secret -- no matching agent_token hash")
+    token, now = found
 
+    # `now` is the DB's own clock (read alongside `token` in the same round
+    # trip), not the caller's wall clock -- `revoked_at`/`expires_at` are
+    # both DB-stamped, and comparing them against a separately-captured
+    # application `datetime.now()` races whenever the two clocks disagree by
+    # even a few ms (see get_by_hash's docstring).
     token_rules.authorize(token, scope, now, instrument=instrument, notional=notional)
     return token

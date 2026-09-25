@@ -39,7 +39,8 @@ class UnknownTimeframeError(ValueError):
 
 
 def duration(tf: Timeframe) -> timedelta:
-    """Length of one `tf` candle. Unregistered values raise `UnknownTimeframeError` (fail-closed)."""
+    """Length of one `tf` candle. Unregistered values raise `UnknownTimeframeError`
+    (fail-closed)."""
     try:
         return _DURATIONS[tf]
     except KeyError as exc:

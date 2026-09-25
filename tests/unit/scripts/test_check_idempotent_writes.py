@@ -236,7 +236,11 @@ def _p95(samples: list[float]) -> float:
     return ordered[index]
 
 
+@pytest.mark.perf
 def test_scan_tree_p95_latency_within_budget_for_real_repo():
+    # task-7434: scan_tree() walks the real repo tree (disk I/O), so this
+    # stays on raw wall-clock perf_counter() -- process_time would not
+    # capture I/O wait and would understate real scan latency.
     samples = []
     for _ in range(3):
         started = time.perf_counter()
@@ -245,9 +249,12 @@ def test_scan_tree_p95_latency_within_budget_for_real_repo():
     assert _p95(samples) < _SCAN_P95_BUDGET_SECONDS
 
 
+@pytest.mark.perf
 def test_perf_budget_guard_fails_on_injected_scan_delay(monkeypatch: pytest.MonkeyPatch):
     """Proves the assertion above is not vacuously green -- injecting a delay
-    per scanned file must push elapsed time past the same budget."""
+    per scanned file must push elapsed time past the same budget. task-7434:
+    the injected delay is a real `time.sleep()`, so this keeps raw
+    wall-clock perf_counter() (process_time would not see the sleep)."""
     original_scan_source = civ._scan_source
 
     def _slow_scan_source(source: str, location: str):

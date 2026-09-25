@@ -37,4 +37,27 @@ class SegregationOfDutyChecker(Protocol):
     ) -> None: ...
 
 
-__all__ = ["SegregationOfDutyChecker", "SegregationOfDutyViolation"]
+def assert_actor_not_counterparty(
+    actor_id: Hashable, counterparty_id: Hashable | None, *, action: str
+) -> None:
+    """Rejects if actor_id equals this action's counterparty_id.
+
+    Pure comparison (no I/O), so the primitive itself lives here in core
+    rather than behind the `SegregationOfDutyChecker` port -- only the
+    injection boundary (`core/security/break_glass.py`) needs the port.
+    `foundation.trust.domain.rules.segregation_of_duty` re-exports this for
+    the call sites that are allowed to import foundation directly.
+
+    If `counterparty_id` is `None` (no one has taken that role yet -- e.g.
+    before the first DUAL-approval signature, before a mandate draft
+    proposal), there is nothing to compare against, so it passes through.
+    """
+    if counterparty_id is not None and actor_id == counterparty_id:
+        raise SegregationOfDutyViolation(actor_id, action)
+
+
+__all__ = [
+    "SegregationOfDutyChecker",
+    "SegregationOfDutyViolation",
+    "assert_actor_not_counterparty",
+]

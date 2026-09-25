@@ -25,6 +25,17 @@ apply` docstring) — this fold advances it the same way LC-9 does: +1 per
 entry that touches the account, once per entry even if the entry has
 multiple lines on that account (mirrors `post_entry.post_entry`'s
 per-account `deltas` aggregation).
+
+task-6495: moved here from `src.core.eventstore.projections.ledger` — this
+fold is inherently coupled to the ledger aggregate's own domain types
+(`JournalEntryView`, `PostingLine`, `Side`, `AccountType`, `Balance`,
+`balance_rules`, `chart_of_accounts`), so keeping it under `src/core`
+required five direct `src.foundation` imports, violating `.importlinter`'s
+`core-no-io` contract (`src/core` may not import `src/foundation`). Unlike
+`canonical_json`(see `hash_chain.py`) this isn't a generic, I/O-free
+primitive that core code elsewhere needs — it is ledger-aggregate business
+logic, so it belongs in `src.foundation.ledger.domain` rather than behind a
+core-owned port.
 """
 from __future__ import annotations
 

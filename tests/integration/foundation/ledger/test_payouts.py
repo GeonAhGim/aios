@@ -383,6 +383,7 @@ async def test_schedule_payouts_rejects_forged_capture_entry_reference(pool, por
     assert await _balance(pool, seller_pending) == Decimal("25.50")
 
 
+@pytest.mark.perf
 async def test_schedule_payouts_batch_meets_latency_budget(pool, ports):
     """수치 성능 단언 -- 한 판매자에게 30건의 캡처가 몰린 정산 배치 하나를
     실 DB로 만드는 데 걸리는 시간에 예산을 둔다. `create_batch`가 캡처마다

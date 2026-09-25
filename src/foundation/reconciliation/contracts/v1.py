@@ -27,10 +27,10 @@ class Classification(str, Enum):
 
 
 class EntitySnapshot(BaseModel):
-    """80번 §1 "typed snapshots" — entity_key(예: "USDT_BALANCE",
-    "BTCUSDT_POSITION")별 내부/provider 값 한 쌍. provider_value가 없으면
-    (None) provider가 그 항목을 아예 반환하지 않은 것 — 0으로 해석하지
-    않는다(§2)."""
+    """Per §80 §1 "typed snapshots" — one pair of internal/provider values
+    per entity_key (e.g. "USDT_BALANCE", "BTCUSDT_POSITION"). A missing
+    provider_value (None) means the provider did not return that item at all
+    — do not interpret it as zero (§2)."""
 
     entity_type: str
     entity_key: str

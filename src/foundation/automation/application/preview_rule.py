@@ -26,6 +26,7 @@ from src.foundation.automation.contracts.v1 import (
     PreviewResult,
 )
 from src.foundation.automation.domain.evaluate import MarketSnapshot, evaluate_conditions
+from src.foundation.automation.flags import require_flag_enabled
 from src.foundation.backtest.api import ListBars
 
 __all__ = ["preview_rule"]
@@ -62,6 +63,7 @@ def preview_rule(
     indicators_by_symbol: Mapping[str, Sequence[Mapping[str, Decimal]]] = _EMPTY_INDICATORS,
     disclosures_by_symbol: Mapping[str, Sequence[frozenset[str]]] = _EMPTY_DISCLOSURES,
 ) -> PreviewResult:
+    require_flag_enabled()
     symbols = tuple(sorted({s for s in (_symbol_of(c) for c in conditions) if s is not None}))
     if not symbols:
         raise InvalidRuleDefinitionError(

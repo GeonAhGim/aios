@@ -9,6 +9,7 @@ Spec: docs/specs/L4_market_data_positions_ledger_v1.0.md#§3.1 (A), §9.2 LA-1.
 """
 
 import json
+import time
 from datetime import date, datetime, timezone
 from decimal import Decimal
 from pathlib import Path
@@ -293,3 +294,16 @@ def test_quality_issue_detail_type_enforced() -> None:
                 "detail": {"price": 12345},
             }
         )
+
+
+# ── DEEPEN: performance assertion (LA-1) ───────────────────────────────────
+
+
+@pytest.mark.perf  # wall-clock budget: serial perf stage (task-7434 guard)
+def test_candle_record_bulk_validation_throughput() -> None:
+    """1,000건 CandleRecord 검증이 예산(200ms) 내에 끝나야 한다 — O(n) 이상 회귀 감지."""
+    start = time.perf_counter()
+    for _ in range(1_000):
+        _sample_candle()
+    elapsed_ms = (time.perf_counter() - start) * 1000
+    assert elapsed_ms < 200, f"1,000건 CandleRecord 검증이 {elapsed_ms:.1f}ms — 200ms 예산 초과"

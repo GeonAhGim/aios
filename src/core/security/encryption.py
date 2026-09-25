@@ -75,3 +75,35 @@ def decrypt(token: str, ring: KeyRing) -> str:
     nonce, ciphertext = raw[:_NONCE_SIZE], raw[_NONCE_SIZE:]
     aesgcm = AESGCM(ring.key(kid))
     return aesgcm.decrypt(nonce, ciphertext, aad).decode("utf-8")
+
+
+class LocalKeyRingKmsAdapter:
+    """`KmsPort` adapter (FA-22) backed by a local, env-var-provisioned `KeyRing`.
+    Delegates `encrypt`/`decrypt` to the module-level functions above so the
+    on-disk ciphertext format (`aios1$<kid>$<b64>`) and existing round-trip
+    behaviour are unchanged — callers going through the port see byte-identical
+    results to calling `encrypt`/`decrypt` directly with the same `KeyRing`.
+
+    Lives here (not in `key_ring.py`) so `KeyRing` never needs to import this
+    module — `key_ring.py` -> `encryption.py` is the only allowed edge between
+    the two (`encryption.py` already imports `KeyRing`; the reverse direction
+    would be a cycle even as a function-local import, per `check_import_linter.py`
+    `cycles:src`, which scans all `Import`/`ImportFrom` nodes regardless of scope).
+    """
+
+    def __init__(self, ring: KeyRing) -> None:
+        self._ring = ring
+
+    def get_key(self, kid: str) -> bytes:
+        return self._ring.key(kid)
+
+    def encrypt(self, plaintext: str) -> str:
+        return encrypt(plaintext, self._ring)
+
+    def decrypt(self, token: str) -> str:
+        return decrypt(token, self._ring)
+
+    def rotate(self, new_active_kid: str) -> LocalKeyRingKmsAdapter:
+        """Return a new adapter whose active kid is `new_active_kid`. The kid must
+        already be present in the ring's key material (see `KeyRing.with_active_kid`)."""
+        return LocalKeyRingKmsAdapter(self._ring.with_active_kid(new_active_kid))

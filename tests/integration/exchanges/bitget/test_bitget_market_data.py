@@ -6,6 +6,7 @@ symbol-info/public-trades/account/health-check, i.e. read-only endpoints.
 Real Bitget Demo account API keys aren't available (.env BITGET_API_KEY is
 empty), so httpx.MockTransport replays captured Bitget response shapes.
 """
+
 from decimal import Decimal
 
 import httpx
@@ -309,3 +310,174 @@ async def test_get_trade_rate_returns_raw_dict(make_adapter, json_response):
     rate = await adapter.get_trade_rate("BTC/USDT")
 
     assert rate == {"makerFeeRate": "0.001", "takerFeeRate": "0.001"}
+
+
+async def test_get_auction_returns_raw_dict(make_adapter, json_response):
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == "/api/v2/spot/market/auction"
+        assert request.url.params["symbol"] == "BTCUSDT"
+        return json_response(
+            {
+                "code": "00000",
+                "msg": "success",
+                "requestTime": 1,
+                "data": {
+                    "symbol": "BTCUSDT",
+                    "auctionPrice": "80000",
+                    "auctionTime": "1700000000000",
+                },
+            }
+        )
+
+    adapter = make_adapter(handler)
+    auction = await adapter.get_auction("BTC/USDT")
+
+    assert auction["symbol"] == "BTCUSDT"
+    assert auction["auctionPrice"] == "80000"
+
+
+async def test_get_merge_depth_returns_raw_dict(make_adapter, json_response):
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == "/api/v2/spot/market/merge-depth"
+        assert request.url.params["symbol"] == "BTCUSDT"
+        assert request.url.params["limit"] == "20"
+        return json_response(
+            {
+                "code": "00000",
+                "msg": "success",
+                "requestTime": 1,
+                "data": {
+                    "asks": [["80000", "1.0"]],
+                    "bids": [["79999", "1.0"]],
+                    "ts": "1700000000000",
+                },
+            }
+        )
+
+    adapter = make_adapter(handler)
+    depth = await adapter.get_merge_depth("BTC/USDT", limit=20)
+
+    assert "asks" in depth
+    assert "bids" in depth
+    assert depth["asks"][0][0] == "80000"
+
+
+async def test_get_vip_fee_rate_returns_raw_dict(make_adapter, json_response):
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == "/api/v2/spot/market/vip-fee-rate"
+        return json_response(
+            {
+                "code": "00000",
+                "msg": "success",
+                "requestTime": 1,
+                "data": {"level": "vip0", "makerFeeRate": "0.001", "takerFeeRate": "0.001"},
+            }
+        )
+
+    adapter = make_adapter(handler)
+    fee_rate = await adapter.get_vip_fee_rate()
+
+    assert fee_rate["level"] == "vip0"
+    assert fee_rate["makerFeeRate"] == "0.001"
+
+
+async def test_get_coins_returns_list(make_adapter, json_response):
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == "/api/v2/spot/public/coins"
+        return json_response(
+            {
+                "code": "00000",
+                "msg": "success",
+                "requestTime": 1,
+                "data": [
+                    {"coin": "BTC", "name": "Bitcoin", "chains": ["BTC", "ETH"]},
+                    {"coin": "USDT", "name": "Tether", "chains": ["TRX", "ETH"]},
+                ],
+            }
+        )
+
+    adapter = make_adapter(handler)
+    coins = await adapter.get_coins()
+
+    assert len(coins) == 2
+    assert coins[0]["coin"] == "BTC"
+    assert coins[1]["coin"] == "USDT"
+
+
+async def test_get_deposit_address_returns_raw_dict(make_adapter, json_response):
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == "/api/v2/spot/wallet/deposit-address"
+        assert request.url.params["coin"] == "BTC"
+        return json_response(
+            {
+                "code": "00000",
+                "msg": "success",
+                "requestTime": 1,
+                "data": {"coin": "BTC", "address": "1A1z7agoat", "chain": "BTC"},
+            }
+        )
+
+    adapter = make_adapter(handler)
+    addr = await adapter.get_deposit_address("BTC")
+
+    assert addr["address"] == "1A1z7agoat"
+    assert addr["coin"] == "BTC"
+
+
+async def test_get_deposit_records_returns_list(make_adapter, json_response):
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == "/api/v2/spot/wallet/deposit-records"
+        assert request.url.params["coin"] == "BTC"
+        assert request.url.params["limit"] == "50"
+        return json_response(
+            {
+                "code": "00000",
+                "msg": "success",
+                "requestTime": 1,
+                "data": [
+                    {
+                        "depositId": "d-1",
+                        "coin": "BTC",
+                        "amount": "0.5",
+                        "status": "success",
+                        "cTime": "1700000000000",
+                    }
+                ],
+            }
+        )
+
+    adapter = make_adapter(handler)
+    records = await adapter.get_deposit_records("BTC", limit=50)
+
+    assert len(records) == 1
+    assert records[0]["depositId"] == "d-1"
+    assert records[0]["status"] == "success"
+
+
+async def test_get_withdrawal_records_returns_list(make_adapter, json_response):
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == "/api/v2/spot/wallet/withdrawal-records"
+        assert request.url.params["coin"] == "USDT"
+        return json_response(
+            {
+                "code": "00000",
+                "msg": "success",
+                "requestTime": 1,
+                "data": [
+                    {
+                        "withdrawalId": "w-1",
+                        "coin": "USDT",
+                        "amount": "100",
+                        "status": "success",
+                        "cTime": "1700000000000",
+                    }
+                ],
+            }
+        )
+
+    adapter = make_adapter(handler)
+    records = await adapter.get_withdrawal_records("USDT")
+
+    assert len(records) == 1
+    assert records[0]["withdrawalId"] == "w-1"
+    assert records[0]["status"] == "success"

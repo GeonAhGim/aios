@@ -42,6 +42,16 @@ class OrderRiskDecision:
     should_kill: bool
 
 
+def should_kill_for_daily_loss(
+    bundle: PersonalRiskBundle, daily_realized_pnl_pct: Decimal
+) -> bool:
+    """task-6510 — split out of `evaluate_personal_order` so the periodic
+    always-on monitor (`application/personal_daily_loss_monitor.py`) can
+    reuse the exact same kill threshold without an `OrderRiskCheckInput`
+    (it has no order to evaluate, only a daily P&L ratio)."""
+    return daily_realized_pnl_pct <= -bundle.daily_loss_kill_pct
+
+
 def evaluate_personal_order(
     bundle: PersonalRiskBundle, order: OrderRiskCheckInput
 ) -> OrderRiskDecision:
@@ -75,7 +85,7 @@ def evaluate_personal_order(
     if projected_exposure_pct > bundle.max_exposure_pct:
         violations.append(PersonalRiskViolation.EXPOSURE_LIMIT_EXCEEDED)
 
-    should_kill = order.daily_realized_pnl_pct <= -bundle.daily_loss_kill_pct
+    should_kill = should_kill_for_daily_loss(bundle, order.daily_realized_pnl_pct)
     if should_kill:
         violations.append(PersonalRiskViolation.DAILY_LOSS_LIMIT_BREACHED)
 

@@ -246,6 +246,7 @@ async def test_compute_exception_releases_claim_and_allows_retry(pool):
     assert calls == 2  # 실패한 첫 시도 후 재시도가 실제로 compute()를 다시 실행함
 
 
+@pytest.mark.perf
 def test_compute_body_digest_p99_latency_within_budget():
     """`compute_body_digest`는 I/O 없이 순수 CPU(정렬+직렬화+sha256)만 쓰므로
     ADR-2026-09-09-C 예산표의 "사전거래 게이트 p99 5ms"를 자체 예산으로
@@ -261,6 +262,7 @@ def test_compute_body_digest_p99_latency_within_budget():
     assert _p99(samples) < _DIGEST_P99_BUDGET_SECONDS
 
 
+@pytest.mark.perf
 def test_gate_red_reproduction_digest_p99_budget_guard_catches_regression(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

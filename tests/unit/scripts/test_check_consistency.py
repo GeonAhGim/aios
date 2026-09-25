@@ -650,6 +650,44 @@ def test_money_float_regression_task_4188_krx_data_stays_clean() -> None:
     assert "src/foundation/market_data/adapters/krx_data.py" not in hits
 
 
+def test_money_float_wire_boundary_allow_suppresses_annotated_field(tmp_path: Path) -> None:
+    """task-5762 -- a v1 wire contract may keep a money-shaped field `float`
+    (compatibility surface, ADR-2026-09-10-C P5) if the line explicitly
+    marks the reason. Without the marker the same field still flags."""
+    _write(
+        tmp_path,
+        "src/contracts/v1.py",
+        "class Foo:\n"
+        "    # ratchet-allow: wire-boundary: v1 wire float, Decimal at boundary\n"
+        "    amount: float\n",
+    )
+    assert cc.check_money_float(tmp_path) == []
+
+
+def test_money_float_wire_boundary_allow_requires_explicit_marker(tmp_path: Path) -> None:
+    """The marker text is not free-form -- an unrelated comment on the
+    field's line or the line above must not suppress the hit (task-5762)."""
+    _write(
+        tmp_path,
+        "src/contracts/v1.py",
+        "class Foo:\n    # some unrelated comment\n    amount: float\n",
+    )
+    hits = cc.check_money_float(tmp_path)
+    assert hits == [("src/contracts/v1.py", 3)]
+
+
+def test_money_float_regression_task_5762_mandates_risk_contracts_stay_clean() -> None:
+    """task-5762 회귀 가드 -- QA(task-5117)가 발견한 mandates/contracts/v1.py,
+    risk/contracts/v1.py의 8개 S등급 필드가 다시 무표시 float로 돌아가면(즉
+    `# ratchet-allow: wire-boundary:` 주석 없이) 실제 저장소를 스캔하는 이
+    테스트가 즉시 잡는다. 계약 v1 타입 자체는 유지하고(CTO 결정,
+    2026-09-23), Decimal 정정은 application 경계(evaluate_policy.py,
+    create_draft_mandate.py, bundle_loader.py, personal.py)에 있다."""
+    hits = dict(cc.check_money_float(ROOT))
+    assert "src/foundation/mandates/contracts/v1.py" not in hits
+    assert "src/foundation/risk/contracts/v1.py" not in hits
+
+
 # ---------------------------------------------------------------------------
 # 11. symbol_id_assembly
 # ---------------------------------------------------------------------------

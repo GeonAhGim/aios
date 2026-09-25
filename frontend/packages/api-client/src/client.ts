@@ -12,6 +12,7 @@ import { withFoundation } from "./clients/foundation";
 import { withMandates } from "./clients/mandates";
 import { withMarketplace } from "./clients/marketplace";
 import { withNotifications } from "./clients/notifications";
+import { withPerformance } from "./clients/performance";
 import { withPlatform } from "./clients/platform";
 import { withPortfolio } from "./clients/portfolio";
 import { withReconciliation } from "./clients/reconciliation";
@@ -39,8 +40,10 @@ const ComposedApiClient = withPlatform(
                         withReconciliation(
                           withCompliance(
                             withMandates(
-                              withRiskGate(
-                                withExchange(withExecutions(withPortfolio(withAccount(withAuth(ApiClientBase))))),
+                              withPerformance(
+                                withRiskGate(
+                                  withExchange(withExecutions(withPortfolio(withAccount(withAuth(ApiClientBase))))),
+                                ),
                               ),
                             ),
                           ),

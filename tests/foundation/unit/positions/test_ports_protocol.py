@@ -333,6 +333,7 @@ async def test_fx_rate_source_raises_on_missing_rate() -> None:
 # ── DEEPEN: 성능 단언 ─────────────────────────────────────────────────────────
 
 
+@pytest.mark.perf
 def test_isinstance_port_check_is_fast() -> None:
     """성능 단언: isinstance()로 Protocol 체크하는 overhead는 1회당
     100us 미만이어야 한다(10만 회/초 기준). 구조 검사라도 N번 호출하면

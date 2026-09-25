@@ -1,6 +1,8 @@
 """L4_risk_and_safety_v1.0.md#2.1, §8, §9 R-05 — daily_loss 규칙 테스트."""
 from decimal import Decimal
 
+import pytest
+
 from src.core.risk.decision import RiskOutcome
 from src.core.risk.inputs import EquityInputs
 from src.core.risk.rules import daily_loss
@@ -47,3 +49,31 @@ def test_missing_daily_pnl_denies():
     result = daily_loss.check(inputs, POLICY)
     assert result.outcome == RiskOutcome.DENY
     assert result.missing_fields == ("equity.daily_pnl_pct",)
+
+
+def test_denies_at_halt_boundary_plus_tiny_epsilon():
+    # A hair worse than halt_pct=5.0 must still cross into DENY/HALT —
+    # proves the `>` comparison isn't misled by Decimal quantization.
+    result = daily_loss.check(_inputs_with_daily_pnl("-5.000001"), POLICY)
+    assert result.outcome == RiskOutcome.DENY
+    assert result.reason_code == "RISK_DAILY_LOSS_HALT"
+
+
+def test_escalates_at_halt_boundary_minus_tiny_epsilon():
+    # A hair better than halt_pct=5.0 must stay in the warning band —
+    # proves Decimal quantization via pct() doesn't misclassify a value a
+    # hair better than the true limit as HALT.
+    result = daily_loss.check(_inputs_with_daily_pnl("-4.999999"), POLICY)
+    assert result.outcome == RiskOutcome.ESCALATE
+    assert result.reason_code == "RISK_DAILY_LOSS_WARN"
+
+
+def test_policy_daily_loss_lookup_failure_propagates(monkeypatch: pytest.MonkeyPatch) -> None:
+    class _BrokenDailyLoss:
+        @property
+        def halt_pct(self) -> float:
+            raise RuntimeError("policy backend unavailable")
+
+    monkeypatch.setattr(POLICY, "daily_loss", _BrokenDailyLoss())
+    with pytest.raises(RuntimeError, match="policy backend unavailable"):
+        daily_loss.check(_inputs_with_daily_pnl("-1.0"), POLICY)

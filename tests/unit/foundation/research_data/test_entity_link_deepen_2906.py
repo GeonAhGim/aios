@@ -29,6 +29,8 @@ from datetime import datetime, timezone
 from unittest.mock import Mock
 from uuid import uuid4
 
+import pytest
+
 from src.foundation.research_data.contracts.v1 import ResearchItem
 from src.foundation.research_data.domain.entity_link import (
     EntityKey,
@@ -100,6 +102,7 @@ def test_link_item_crash_on_first_key_does_not_silently_fall_through_to_second_k
 # ---- 성능 단언 ----
 
 
+@pytest.mark.perf
 def test_extract_entity_key_throughput_meets_latency_budget() -> None:
     """순수 함수(I/O 없음)이므로 대량 처리도 빨라야 한다 -- OpenDART 배치
     수집 시 하루 수만 건의 `instruments` 원문을 분류해야 하는 실제 부하를

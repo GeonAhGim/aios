@@ -21,7 +21,7 @@ from __future__ import annotations
 
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, status
 
 from src.api.contracts.envelope import ApiResponse, ok
 from src.api.deps import get_current_user
@@ -29,13 +29,14 @@ from src.api.foundation_ems_deps import get_algo_scheduler, get_tca_result_repos
 from src.api.schemas.foundation.ems import AlgoProgressView, ComputeTcaRequest, TcaResultView
 from src.data.models.market_data import Candle
 from src.foundation.ems.application.compute_tca import compute_tca
-from src.foundation.ems.application.get_algo_progress import (
-    AlgoRunNotFoundError,
-    get_algo_progress,
-)
+from src.foundation.ems.application.get_algo_progress import get_algo_progress
 from src.foundation.ems.application.tick_algo import AlgoScheduler
 from src.foundation.ems.domain.tca.benchmarks import Fill
-from src.foundation.ems.ports.tca_result_repository import TcaResultRecord, TcaResultRepository
+from src.foundation.ems.ports.tca_result_repository import (
+    TcaResultNotFoundError,
+    TcaResultRecord,
+    TcaResultRepository,
+)
 from src.services.auth_service import User
 
 router = APIRouter(prefix="/v1/foundation/ems/tca", tags=["foundation:ems:tca"])
@@ -99,7 +100,7 @@ async def get_latest_tca(
 ) -> ApiResponse[TcaResultView]:
     record = await repo.get_latest(parent_id)
     if record is None:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "해당 parent_id의 TCA 결과가 없습니다.")
+        raise TcaResultNotFoundError(str(parent_id))
     return ok(_to_view(record))
 
 
@@ -112,7 +113,7 @@ async def get_tca_revision(
 ) -> ApiResponse[TcaResultView]:
     record = await repo.get_by_revision(parent_id, revision)
     if record is None:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "해당 revision의 TCA 결과가 없습니다.")
+        raise TcaResultNotFoundError(f"{parent_id}:{revision}")
     return ok(_to_view(record))
 
 
@@ -123,10 +124,7 @@ async def get_algo_run_progress(
     scheduler: AlgoScheduler = Depends(get_algo_scheduler),
 ) -> ApiResponse[AlgoProgressView]:
     plan = scheduler.active_plan(parent_id)
-    try:
-        progress = get_algo_progress(plan, parent_id=parent_id)
-    except AlgoRunNotFoundError as exc:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, str(exc)) from exc
+    progress = get_algo_progress(plan, parent_id=parent_id)
     return ok(
         AlgoProgressView(
             parent_id=progress.parent_id,

@@ -307,6 +307,7 @@ def test_failure_injection_transpile_program_raises() -> None:
 
 
 # 2. 수치 성능 단언 (numerical performance): transpile 지연이 임계치 이하
+@pytest.mark.perf
 def test_transpile_latency_under_threshold() -> None:
     """DoD "수치 성능 단언" — 공개 예제 30개를 transpile_and_verify할 때
     총 지연이 10초 미만이어야 한다(성능 회귀 가드)."""

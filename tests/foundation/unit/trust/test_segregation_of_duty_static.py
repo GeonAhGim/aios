@@ -8,11 +8,14 @@ ADR-2026-09-06-G §9: "'작성자≠승인자'가 기능마다 따로 구현된�
 1. `src/` 전체에 이 모듈 밖에서 actor/approver 계열 식별자와 counterparty/
    requester/proposer 계열 식별자를 직접 `==`/`!=`로 비교하는 코드가 없다
    (있으면 인라인 재발명 — 이 모듈을 거치도록 고쳐야 한다).
-2. 실존하는 세 호출처(`core/approval/service.py`의 DUAL 2차 서명 검사,
-   `mandates/application/activate_revision.py`의 CM-5 작성자≠승인자,
-   `api/routers/admin_break_glass.py`의 PLT-35 자기승인 방지 — RATCHET-2
-   core-no-io로 인해 task-5311부터 `core/security/break_glass.py`가 아니라
-   이 composition root가 import한다)가 모두 이 모듈을 실제로 import한다.
+2. 실존하는 세 호출처(`core/approval/service.py`의 DUAL 2차 서명 검사 —
+   RATCHET-2 core-no-io로 인해 task-6495부터 `core.security.
+   segregation_of_duty_port`(실제 정의가 이전된 core 소유 모듈, foundation의
+   `segregation_of_duty.py`가 재수출)를 import한다, `mandates/application/
+   activate_revision.py`의 CM-5 작성자≠승인자, `api/routers/
+   admin_break_glass.py`의 PLT-35 자기승인 방지 — RATCHET-2 core-no-io로
+   인해 task-5311부터 `core/security/break_glass.py`가 아니라 이
+   composition root가 import한다)가 모두 이 primitive를 실제로 import한다.
 3. 게이트 적색 재현(DEEPEN task-3192): `core/security/break_glass.py`는
    2026-09-16 이전에는 이 primitive를 거치지 않고
    `existing["requester_id"] == approver_id`처럼 dict-subscript로 감싼
@@ -36,7 +39,7 @@ import pytest
 
 SRC_ROOT = Path(__file__).resolve().parents[4] / "src"
 
-_EXEMPT_SUFFIXES = ("segregation_of_duty.py",)
+_EXEMPT_SUFFIXES = ("segregation_of_duty.py", "segregation_of_duty_port.py")
 
 # actor측: 이 action을 수행하려는 주체. counterparty측: 이미 그 action에
 # 관여한(또는 그 action의 대상인) 다른 주체. 두 측을 직접 == / != 로
@@ -63,9 +66,12 @@ _REINVENTION_PATTERN = re.compile(
 )
 
 _KNOWN_CALL_SITES = (
-    "core/approval/service.py",
-    "foundation/mandates/application/activate_revision.py",
-    "api/routers/admin_break_glass.py",
+    ("core/approval/service.py", "core.security.segregation_of_duty_port import"),
+    (
+        "foundation/mandates/application/activate_revision.py",
+        "trust.domain.rules.segregation_of_duty import",
+    ),
+    ("api/routers/admin_break_glass.py", "trust.domain.rules.segregation_of_duty import"),
 )
 
 
@@ -129,10 +135,12 @@ def test_no_inline_reinvention_outside_segregation_of_duty_module() -> None:
     )
 
 
-@pytest.mark.parametrize("relative_path", _KNOWN_CALL_SITES)
-def test_known_call_site_imports_segregation_of_duty(relative_path: str) -> None:
+@pytest.mark.parametrize("relative_path,expected_import", _KNOWN_CALL_SITES)
+def test_known_call_site_imports_segregation_of_duty(
+    relative_path: str, expected_import: str
+) -> None:
     text = (SRC_ROOT / relative_path).read_text(encoding="utf-8")
-    assert "trust.domain.rules.segregation_of_duty import" in text
+    assert expected_import in text
     assert "assert_actor_not_counterparty" in text
 
 

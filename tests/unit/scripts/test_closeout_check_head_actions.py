@@ -143,7 +143,8 @@ def test_run_all_includes_head_green_result_when_supplied(tmp_path: Path) -> Non
 
     results = cc.run_all(tmp_path, head_green_result=injected)
 
-    assert results[-1] is injected
+    assert injected in results
+    assert results[-2] is injected
 
 
 # ------------------------------------------------------------- HEAD 재검증(workflow_dispatch)

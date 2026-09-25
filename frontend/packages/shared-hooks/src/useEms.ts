@@ -1,5 +1,5 @@
 import { useMutation, useQuery } from "@tanstack/react-query";
-import type { ComputeTcaRequest, TcaResultResponse } from "@aios/shared-types";
+import type { ComputeTcaRequest } from "@aios/shared-types";
 import { apiClient } from "./clientInstance";
 
 // EM-18: 알고리즘 집행 진행률 및 TCA 분석 훅.

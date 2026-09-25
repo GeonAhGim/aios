@@ -8,7 +8,6 @@ function tests only.
 from __future__ import annotations
 
 import ast
-import time
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from pathlib import Path
@@ -34,6 +33,7 @@ from src.foundation.ems.domain.algo.is_shortfall import (
 )
 from src.foundation.ems.domain.algo.twap import AlgoConstraintError as TwapAlgoConstraintError
 from src.foundation.ems.domain.algo.twap import ParentTerminalError as TwapParentTerminalError
+from tests.conftest import PerfBudget
 
 _IS_PATH = Path(__file__).resolve().parents[4] / "src/foundation/ems/domain/algo/is_shortfall.py"
 _T0 = datetime(2026, 1, 1, tzinfo=timezone.utc)
@@ -360,11 +360,16 @@ def test_corrupted_participation_cap_is_rejected_even_when_every_slice_qty_is_ze
 # -- DEEPEN 2502 (D2): numeric performance assertion -------------------------
 
 
-def test_plan_is_schedule_stays_under_budget_at_the_max_slice_count() -> None:
+@pytest.mark.perf
+def test_plan_is_schedule_stays_under_budget_at_the_max_slice_count(
+    perf_budget: PerfBudget,
+) -> None:
     """500 slices (the module's own `_MAX_SLICE_COUNT` cap) x 50 calls must
-    finish well under a generous wall-clock budget -- a regression that
-    turned the per-slice O(n) loop, weight computation, or the guard calls
-    into something O(n^2) would blow well past this on 500 slices."""
+    finish well under a generous budget -- a regression that turned the
+    per-slice O(n) loop, weight computation, or the guard calls into
+    something O(n^2) would blow well past this on 500 slices. task-7434:
+    measured via the shared process_time-based perf_budget fixture instead
+    of raw wall-clock perf_counter()."""
     parent = _parent(
         qty=Decimal("1000000"),
         algo=_algo(
@@ -376,13 +381,13 @@ def test_plan_is_schedule_stays_under_budget_at_the_max_slice_count() -> None:
         ),
     )
     profile = [Decimal("100000")] * 500
-    started = time.perf_counter()
-    for _ in range(50):
-        plan_is_schedule(parent, volume_profile=profile)
-    elapsed_ms = (time.perf_counter() - started) * 1000
-    assert elapsed_ms < 800, (
-        f"plan_is_schedule took {elapsed_ms:.1f}ms for 50 calls at 500 slices, "
-        "exceeding the 800ms budget."
+
+    def _run_once() -> None:
+        for _ in range(50):
+            plan_is_schedule(parent, volume_profile=profile)
+
+    perf_budget.assert_within(
+        _run_once, budget_ms=800.0, label="50 plan_is_schedule calls at 500 slices"
     )
 
 

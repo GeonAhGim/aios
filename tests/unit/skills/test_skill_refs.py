@@ -8,8 +8,12 @@ RTF 항목·ADR/spec 문서(#앵커)·git 커밋·문서 내 리프/이니셔티
 후보 표시("후보")이며, 반례 코드블록이 2개 이상, "이 축에서 났던 사고" 절이
 실제로 존재하는 git 커밋을 3건 이상 인용하는지 확인한다.
 
-git 커밋 조회는 이 저장소 안에서만 하고(subprocess, 네트워크 없음) 존재 여부만
-`git cat-file -e`로 확인한다 -- 원격 fetch는 하지 않는다.
+git 커밋 조회는 이 저장소 안에서만 하고(subprocess, 네트워크 없음), 객체 존재뿐
+아니라 `origin/main`(원격이 없으면 HEAD)의 조상인지까지 `git merge-base
+--is-ancestor`로 확인한다 -- 원격 fetch는 하지 않는다. 객체가 로컬 odb에 있어도
+(예: 다른 워크트리 전용 원격에서 fetch된 loose object) 검토 대상 브랜치의 조상이
+아니면 근거로 인정하지 않는다 -- 그런 커밋은 origin만 clone하는 CI에서는 애초에
+객체조차 존재하지 않아 거짓 녹색(로컬에서만 통과)이 된다(task-7435).
 """
 
 from __future__ import annotations
@@ -65,14 +69,29 @@ def _section(body: str, heading: str) -> str:
 
 
 @cache
-def _git_commit_exists(sha: str) -> bool:
+def _reachability_target() -> str:
     result = subprocess.run(
-        ["git", "cat-file", "-e", f"{sha}^{{commit}}"],
+        ["git", "rev-parse", "--verify", "-q", "origin/main"],
+        cwd=ROOT,
+        capture_output=True,
+        check=False,
+    )
+    return "origin/main" if result.returncode == 0 else "HEAD"
+
+
+def _is_ancestor(sha: str, target: str) -> bool:
+    result = subprocess.run(
+        ["git", "merge-base", "--is-ancestor", sha, target],
         cwd=ROOT,
         capture_output=True,
         check=False,
     )
     return result.returncode == 0
+
+
+@cache
+def _git_commit_exists(sha: str) -> bool:
+    return _is_ancestor(sha, _reachability_target())
 
 
 @cache
@@ -173,6 +192,31 @@ def _checklist_items(body: str) -> list[str]:
 
 def _incident_bullets(body: str) -> list[str]:
     return _split_blocks(_section(body, "이 축에서 났던 사고"), _BULLET_START_RE)
+
+
+def test_ancestor_guard_rejects_reachable_but_non_ancestor_commit() -> None:
+    """워크트리 전용 원격에서 fetch된 커밋처럼, 조상 관계가 아닌 커밋은 거부한다."""
+    target = _reachability_target()
+    old_sha = subprocess.run(
+        ["git", "rev-list", "-1", "--skip=200", target],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout.strip()
+    head_sha = subprocess.run(
+        ["git", "rev-parse", target],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout.strip()
+    assert old_sha and head_sha and old_sha != head_sha
+    assert _is_ancestor(old_sha, head_sha), "old_sha는 head_sha의 조상이어야 한다"
+    assert not _is_ancestor(head_sha, old_sha), (
+        "head_sha는 old_sha의 조상이 아니므로 거부돼야 한다 -- "
+        "이 실패는 가드가 도달성을 확인하지 않고 있다는 뜻이다"
+    )
 
 
 def test_exactly_eight_skill_files() -> None:

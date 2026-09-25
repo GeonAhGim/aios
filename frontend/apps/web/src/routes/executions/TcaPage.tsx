@@ -24,9 +24,11 @@ import { useTranslation } from "react-i18next";
 function TcaResultDisplay({
   parentId,
   onComputeTca,
+  computeError,
 }: {
   parentId: string;
   onComputeTca: (request: ComputeTcaRequest) => void;
+  computeError: Error | null;
 }) {
   const { t } = useTranslation();
   const { data: tcaResult, isLoading, error, refetch } = useLatestTca(parentId);
@@ -39,9 +41,9 @@ function TcaResultDisplay({
     if (isResourceNotFound(error)) {
       return (
         <div className="space-y-4">
-          <EmptyState>TCA 데이터가 아직 계산되지 않았습니다.</EmptyState>
+          <EmptyState>{t("tcaPage.notComputedYet")}</EmptyState>
           <Button onClick={() => setShowComputeForm(true)} className="w-full">
-            TCA 계산 시작
+            {t("tcaPage.startCompute")}
           </Button>
           {showComputeForm && (
             <ComputeTcaForm
@@ -49,6 +51,7 @@ function TcaResultDisplay({
               onSubmit={onComputeTca}
               onClose={() => setShowComputeForm(false)}
               isLoading={computeMutation.isPending}
+              computeError={computeError}
             />
           )}
         </div>
@@ -68,13 +71,13 @@ function TcaResultDisplay({
   }
 
   if (!tcaResult) {
-    return <EmptyState>TCA 데이터가 없습니다.</EmptyState>;
+    return <EmptyState>{t("tcaPage.noData")}</EmptyState>;
   }
 
   return (
     <div className="space-y-4">
       <Card>
-        <CardTitle>TCA 분석 결과</CardTitle>
+        <CardTitle>{t("tcaPage.resultTitle")}</CardTitle>
         <div className="space-y-4">
           <div className="grid grid-cols-2 gap-4 md:grid-cols-3">
             <div className="rounded border border-border bg-bg-secondary p-3">
@@ -104,7 +107,7 @@ function TcaResultDisplay({
           </div>
 
           <div className="text-sm text-fg-muted">
-            계산 시간: {new Date(tcaResult.computedAt).toLocaleString()}
+            {t("tcaPage.computedAt", { time: new Date(tcaResult.computedAt).toLocaleString() })}
           </div>
 
           <Button
@@ -112,7 +115,7 @@ function TcaResultDisplay({
             variant="secondary"
             className="w-full"
           >
-            {showComputeForm ? "닫기" : "다시 계산"}
+            {showComputeForm ? t("tcaPage.close") : t("tcaPage.recompute")}
           </Button>
 
           {showComputeForm && (
@@ -121,6 +124,7 @@ function TcaResultDisplay({
               onSubmit={onComputeTca}
               onClose={() => setShowComputeForm(false)}
               isLoading={computeMutation.isPending}
+              computeError={computeError}
             />
           )}
         </div>
@@ -130,30 +134,52 @@ function TcaResultDisplay({
 }
 
 function ComputeTcaForm({
-  parentId,
+  parentId: _parentId,
   onSubmit,
   onClose,
   isLoading,
+  computeError,
 }: {
   parentId: string;
   onSubmit: (request: ComputeTcaRequest) => void;
   onClose: () => void;
   isLoading: boolean;
+  computeError: Error | null;
 }) {
+  const { t } = useTranslation();
   const [side, setSide] = useState<"BUY" | "SELL">("BUY");
   const [priceAtArrival, setPriceAtArrival] = useState("100");
+  const [fillsJson, setFillsJson] = useState('[{"price": "100", "qty": "10"}]');
+  const [barsJson, setBarsJson] = useState('[{"close": "100", "volume": "1000"}]');
   const [spreadCost, setSpreadCost] = useState("0");
   const [fees, setFees] = useState("0");
   const [totalCost, setTotalCost] = useState("0");
   const [revision, setRevision] = useState("1");
+  const [formError, setFormError] = useState<string | null>(null);
 
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
+    setFormError(null);
+
+    let fills: unknown;
+    let bars: unknown;
+    try {
+      fills = JSON.parse(fillsJson);
+      bars = JSON.parse(barsJson);
+    } catch {
+      setFormError(t("tcaPage.invalidJson"));
+      return;
+    }
+    if (!Array.isArray(fills) || fills.length === 0 || !Array.isArray(bars) || bars.length === 0) {
+      setFormError(t("tcaPage.emptyFillsOrBars"));
+      return;
+    }
+
     const request: ComputeTcaRequest = {
       side,
-      fills: [],
+      fills,
       priceAtArrivalTs: priceAtArrival,
-      bars: [],
+      bars,
       spreadCost,
       fees,
       totalCost,
@@ -165,7 +191,7 @@ function ComputeTcaForm({
 
   return (
     <Card className="border-primary-200 bg-primary-50">
-      <CardTitle>TCA 재계산</CardTitle>
+      <CardTitle>{t("tcaPage.recomputeTitle")}</CardTitle>
       <form onSubmit={handleSubmit} className="space-y-3">
         <div className="grid grid-cols-2 gap-3">
           <div>
@@ -231,6 +257,30 @@ function ComputeTcaForm({
               className="w-full rounded border border-border px-2 py-1 text-sm"
             />
           </div>
+          <div className="col-span-2">
+            <label htmlFor="tca-compute-fills" className="block text-sm font-medium text-fg">
+              {t("tcaPage.fillsLabel")}
+            </label>
+            <textarea
+              id="tca-compute-fills"
+              value={fillsJson}
+              onChange={(e) => setFillsJson(e.target.value)}
+              rows={2}
+              className="w-full rounded border border-border px-2 py-1 font-mono text-sm"
+            />
+          </div>
+          <div className="col-span-2">
+            <label htmlFor="tca-compute-bars" className="block text-sm font-medium text-fg">
+              {t("tcaPage.barsLabel")}
+            </label>
+            <textarea
+              id="tca-compute-bars"
+              value={barsJson}
+              onChange={(e) => setBarsJson(e.target.value)}
+              rows={2}
+              className="w-full rounded border border-border px-2 py-1 font-mono text-sm"
+            />
+          </div>
           <div>
             <label htmlFor="tca-compute-total-cost" className="block text-sm font-medium text-fg">
               Total Cost
@@ -244,13 +294,24 @@ function ComputeTcaForm({
             />
           </div>
         </div>
+        {formError && (
+          <p role="alert" className="text-sm text-danger">
+            {formError}
+          </p>
+        )}
+        {!formError && computeError && (
+          <ErrorMessage
+            errorCode={computeError instanceof ApiError ? computeError.errorCode : undefined}
+            message={computeError.message}
+          />
+        )}
         <div className="flex gap-2">
           <Button
             type="submit"
             loading={isLoading}
             className="flex-1"
           >
-            계산
+            {t("tcaPage.compute")}
           </Button>
           <Button
             type="button"
@@ -258,7 +319,7 @@ function ComputeTcaForm({
             variant="secondary"
             className="flex-1"
           >
-            취소
+            {t("tcaPage.cancel")}
           </Button>
         </div>
       </form>
@@ -270,30 +331,36 @@ export function TcaPage() {
   const { t } = useTranslation();
   const { parentId } = useParams<{ parentId: string }>();
   const computeMutation = useComputeTca();
+  const [computeError, setComputeError] = useState<Error | null>(null);
 
   if (!parentId) {
     return (
       <AppShell>
-        <NotFoundState title={t("common.notFound")} description="주문 ID가 없습니다." />
+        <NotFoundState title={t("common.notFound")} description={t("tcaPage.missingOrderId")} />
       </AppShell>
     );
   }
 
   async function handleComputeTca(request: ComputeTcaRequest) {
+    setComputeError(null);
     try {
-      await computeMutation.mutateAsync({ parentId, request });
+      // parentId is validated non-empty by the `if (!parentId)` return above; TS
+      // control-flow narrowing doesn't carry into this nested function declaration.
+      await computeMutation.mutateAsync({ parentId: parentId!, request });
     } catch (err) {
       console.error("Failed to compute TCA:", err);
+      setComputeError(err instanceof Error ? err : new Error(String(err)));
     }
   }
 
   return (
     <AppShell>
       <div className="space-y-8">
-        <PageHeader title="거래비용분석(TCA)" />
+        <PageHeader title={t("tcaPage.pageTitle")} />
         <TcaResultDisplay
           parentId={parentId}
           onComputeTca={handleComputeTca}
+          computeError={computeError}
         />
       </div>
     </AppShell>

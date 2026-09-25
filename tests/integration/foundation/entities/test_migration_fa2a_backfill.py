@@ -28,7 +28,22 @@ a0e7e1454b60 자체의 동작인지 구분할 수 없다:
 `e6b1d94a7c3f`까지 내려가는 것은 FA-4(`963d5f3cfb1b`) 아래이므로
 `purge_position_snapshots`가 필요하다(tests/support/deep_downgrade.py).
 매 테스트 뒤에는 autouse 픽스처가 다시 head까지 올려 다음 테스트/파일에
-영향을 남기지 않는다."""
+영향을 남기지 않는다.
+
+task-5840 root-cause fix (esc-ci-pytest, same class of bug as task-5783's
+test_db_transition_trigger.py): this file used to run its real `alembic
+downgrade e6b1d94a7c3f` / `upgrade head` round trips directly against the
+process's shared `DATABASE_URL` -- the same session-lifetime DB every other
+integration/e2e test (e.g. test_kill_switch_blocks_submission.py) reads.
+If the pytest process is interrupted mid-test (step timeout, growing suite
+runtime), the round trip can be interrupted between the downgrade (which
+drops `users` down to the `e6b1d94a7c3f` shape) and the restoring `upgrade
+head` in this test's own body/fixture teardown, permanently leaving the
+*shared* DB without the head-shape `users` table for the rest of the CI
+run -- exactly esc-ci-pytest's `UndefinedTableError: "users"` in an
+unrelated e2e test. Every downgrade/upgrade call in this file now runs
+against its own disposable DB clone (`tests/support/db.ensure_worker_database`)
+so an interrupted downgrade can never corrupt state anything else reads."""
 
 from __future__ import annotations
 
@@ -36,6 +51,7 @@ import os
 import subprocess
 import sys
 import time
+from collections.abc import AsyncGenerator, Iterator
 from pathlib import Path
 from uuid import UUID, uuid4
 
@@ -43,6 +59,7 @@ import asyncpg
 import pytest
 
 from tests.integration.conftest import create_test_tenant, create_test_user
+from tests.support.db import ensure_worker_database
 from tests.support.deep_downgrade import purge_position_snapshots
 
 _PROJECT_ROOT = Path(__file__).resolve().parents[4]
@@ -64,14 +81,16 @@ class _Rollback(Exception):
     """트랜잭션을 롤백시키기 위한 신호 전용 예외 — 테스트 실패가 아니다."""
 
 
-def _asyncpg_dsn() -> str:
-    return os.environ["DATABASE_URL"].replace("postgresql+asyncpg://", "postgresql://")
+def _asyncpg_dsn(url: str) -> str:
+    return url.replace("postgresql+asyncpg://", "postgresql://")
 
 
-def _run_alembic(*args: str) -> None:
+def _run_alembic(*args: str, database_url: str) -> None:
+    env = {**os.environ, "DATABASE_URL": database_url}
     result = subprocess.run(
         [sys.executable, "-m", "alembic", "-c", "alembic.ini", *args],
         cwd=_PROJECT_ROOT,
+        env=env,
         capture_output=True,
         text=True,
         encoding="utf-8",
@@ -84,17 +103,24 @@ def _run_alembic(*args: str) -> None:
 
 
 @pytest.fixture
-async def pool():
-    p = await asyncpg.create_pool(_asyncpg_dsn(), min_size=1, max_size=4)
+async def migration_db_url(request: pytest.FixtureRequest) -> AsyncGenerator[str, None]:
+    worker_id = f"fa2abf{abs(hash(request.node.name)) % 10_000_000}"
+    url = await ensure_worker_database(os.environ["DATABASE_URL"], worker_id)
+    yield url
+
+
+@pytest.fixture
+async def pool(migration_db_url: str) -> AsyncGenerator[asyncpg.Pool, None]:
+    p = await asyncpg.create_pool(_asyncpg_dsn(migration_db_url), min_size=1, max_size=4)
     yield p
     await p.close()
 
 
 @pytest.fixture(autouse=True)
-def _ensure_head():
-    _run_alembic("upgrade", "head")
+def _ensure_head(migration_db_url: str) -> Iterator[None]:
+    _run_alembic("upgrade", "head", database_url=migration_db_url)
     yield
-    _run_alembic("upgrade", "head")
+    _run_alembic("upgrade", "head", database_url=migration_db_url)
 
 
 async def _insert_legal_entity_at_fa2(pool: asyncpg.Pool, *, tenant_id: UUID) -> UUID:
@@ -125,23 +151,23 @@ async def _first_tenant_id(pool: asyncpg.Pool) -> UUID | None:
     return UUID(str(value)) if value is not None else None
 
 
-async def test_valid_tenant_id_is_not_remapped_by_backfill(pool):
+async def test_valid_tenant_id_is_not_remapped_by_backfill(pool, migration_db_url: str):
     # 대조군 — 정상 행은 백필이 값을 건드리지 않는다.
     await purge_position_snapshots(pool)
-    _run_alembic("downgrade", _FA2_REVISION)
+    _run_alembic("downgrade", _FA2_REVISION, database_url=migration_db_url)
     tenant_id = await create_test_tenant(pool, bootstrap_default_hierarchy_rows=False)
     entity_id = await _insert_legal_entity_at_fa2(pool, tenant_id=tenant_id)
 
-    _run_alembic("upgrade", _FA2A_REVISION)
+    _run_alembic("upgrade", _FA2A_REVISION, database_url=migration_db_url)
 
     assert await _tenant_id_of(pool, entity_id) == tenant_id
 
 
-async def test_orphaned_tenant_id_is_remapped_to_first_tenant(pool):
+async def test_orphaned_tenant_id_is_remapped_to_first_tenant(pool, migration_db_url: str):
     # 실패주입 — 행이 가리키던 tenant가 사라진 뒤(불변식 파손) 백필이
     # docstring이 약속한 fallback(첫 번째 tenant)으로 재매핑하는지 확인한다.
     await purge_position_snapshots(pool)
-    _run_alembic("downgrade", _FA2_REVISION)
+    _run_alembic("downgrade", _FA2_REVISION, database_url=migration_db_url)
     doomed_tenant = await create_test_tenant(pool, bootstrap_default_hierarchy_rows=False)
     entity_id = await _insert_legal_entity_at_fa2(pool, tenant_id=doomed_tenant)
 
@@ -151,23 +177,23 @@ async def test_orphaned_tenant_id_is_remapped_to_first_tenant(pool):
     expected_fallback = await _first_tenant_id(pool)
     assert expected_fallback is not None, "재매핑 표적이 있어야 이 시나리오가 성립한다"
 
-    _run_alembic("upgrade", _FA2A_REVISION)
+    _run_alembic("upgrade", _FA2A_REVISION, database_url=migration_db_url)
 
     assert await _tenant_id_of(pool, entity_id) == expected_fallback
 
 
-async def test_remapped_row_still_rejects_the_now_deleted_tenant_id(pool):
+async def test_remapped_row_still_rejects_the_now_deleted_tenant_id(pool, migration_db_url: str):
     # negative — 재매핑 이후에도 FK는 여전히 강제된다: 사라진 옛 tenant_id로
     # 되돌리려는 시도는 새 FK(tenant)가 거부해야 한다.
     await purge_position_snapshots(pool)
-    _run_alembic("downgrade", _FA2_REVISION)
+    _run_alembic("downgrade", _FA2_REVISION, database_url=migration_db_url)
     doomed_tenant = await create_test_tenant(pool, bootstrap_default_hierarchy_rows=False)
     entity_id = await _insert_legal_entity_at_fa2(pool, tenant_id=doomed_tenant)
 
     async with pool.acquire() as conn:
         await conn.execute("DELETE FROM tenant WHERE id = $1", doomed_tenant)
 
-    _run_alembic("upgrade", _FA2A_REVISION)
+    _run_alembic("upgrade", _FA2A_REVISION, database_url=migration_db_url)
 
     with pytest.raises(asyncpg.ForeignKeyViolationError):
         async with pool.acquire() as conn:
@@ -178,7 +204,7 @@ async def test_remapped_row_still_rejects_the_now_deleted_tenant_id(pool):
             )
 
 
-async def test_backfill_is_noop_when_no_tenant_rows_exist(pool):
+async def test_backfill_is_noop_when_no_tenant_rows_exist(pool, migration_db_url: str):
     # negative — EXISTS 가드 회귀 방지: tenant가 하나도 없으면 백필 UPDATE는
     # `tenant_id`를 NULL로 덮어써 NOT NULL 위반으로 죽어서는 안 되고, orphan
     # 값을 그대로 둬야 한다. ALTER TABLE ADD CONSTRAINT 단계까지 가면(orphan이
@@ -187,7 +213,7 @@ async def test_backfill_is_noop_when_no_tenant_rows_exist(pool):
     # 커밋하지 않는다(끝에서 `_Rollback`으로 되돌려 tenant/tenant_membership
     # 행을 그대로 복구).
     await purge_position_snapshots(pool)
-    _run_alembic("downgrade", _FA2_REVISION)
+    _run_alembic("downgrade", _FA2_REVISION, database_url=migration_db_url)
     orphan_user_id = await create_test_user(pool)
     entity_id = await _insert_legal_entity_at_fa2(pool, tenant_id=orphan_user_id)
 
@@ -215,14 +241,15 @@ async def test_backfill_is_noop_when_no_tenant_rows_exist(pool):
     assert await _tenant_id_of(pool, entity_id) == orphan_user_id
 
 
-async def test_backfill_of_fifty_orphaned_rows_completes_within_budget(pool):
+@pytest.mark.perf
+async def test_backfill_of_fifty_orphaned_rows_completes_within_budget(pool, migration_db_url: str):
     # 성능단언 — 오염된 행 다수에 대한 백필이 예산 안에서 끝나는지 확인한다
     # (감사가 지적한 "성능단언 없음" 공백). fallback 표적은 이 테스트가 만든
     # tenant가 아니라 DB 전체에서 가장 오래된 tenant일 수 있으므로(공유
     # TEST_DATABASE_URL에 과거 테스트가 남긴 행이 쌓여 있다) 미리 값을
     # 고정하지 않고 백필 직전에 동적으로 조회한다.
     await purge_position_snapshots(pool)
-    _run_alembic("downgrade", _FA2_REVISION)
+    _run_alembic("downgrade", _FA2_REVISION, database_url=migration_db_url)
 
     doomed_tenants = [
         await create_test_tenant(pool, bootstrap_default_hierarchy_rows=False)
@@ -238,7 +265,7 @@ async def test_backfill_of_fifty_orphaned_rows_completes_within_budget(pool):
     assert expected_fallback is not None, "재매핑 표적이 있어야 이 시나리오가 성립한다"
 
     started = time.monotonic()
-    _run_alembic("upgrade", _FA2A_REVISION)
+    _run_alembic("upgrade", _FA2A_REVISION, database_url=migration_db_url)
     elapsed = time.monotonic() - started
 
     assert elapsed < _PERF_BUDGET_SECONDS, (

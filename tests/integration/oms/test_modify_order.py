@@ -3,6 +3,7 @@
 Spec: docs/specs/L4_execution_oms_and_exchange_v1.0.md §9 L4-17 DoD("NH
 supports_modify=False 거부"), §4.2 MODIFY_REQUESTED 행.
 """
+
 from __future__ import annotations
 
 import json
@@ -54,7 +55,9 @@ def _profile(**overrides: object) -> VenueCapabilityProfile:
 def _nh_profile(**overrides: object) -> VenueCapabilityProfile:
     """NH — 문서 근거만(§3.2 확정값): supports_modify=False."""
     defaults: dict[str, object] = {
-        "venue": "nh", "supports_modify": False, "supports_cancel": "UNVERIFIED",
+        "venue": "nh",
+        "supports_modify": False,
+        "supports_cancel": "UNVERIFIED",
     }
     defaults.update(overrides)
     return _profile(**defaults)
@@ -133,6 +136,15 @@ async def test_modify_order_acknowledged_limit_self_loop_and_enqueues_outbox(poo
     assert payload["changes"] == {"price": "110", "size": "2"}
     assert event_count == 1
 
+    # 이 테스트는 outbox에 MODIFY 행을 쓰기만 하고 디스패치하지 않는다 — 지우지
+    # 않으면 공유 TEST_DATABASE_URL의 전역 claim 큐(claim_batch는 주문/테스트로
+    # 필터하지 않는다, `outbox_repository.py` §5.1)에 PENDING 행이 영구히 남아,
+    # 이후(다른 세션의) perf 스위트가 자기 행 대신 이 오래된 행을 클레임해
+    # `report.acknowledged`가 spuriously 모자라지는 flake를 유발한다
+    # (esc-ci-pytest_perf, task-6845/6861/6883).
+    async with pool.acquire() as conn:
+        await conn.execute("DELETE FROM order_command_outbox WHERE order_id = $1", order_id)
+
 
 async def test_modify_order_nh_supports_modify_false_rejected_with_zero_writes(pool):
     """DoD — NH `supports_modify=False`는 DB에 손대지 않고(0행) fail-closed
@@ -197,9 +209,7 @@ async def test_modify_order_partially_filled_rejected(pool):
 
 async def test_modify_order_terminal_order_rejected(pool):
     user_id = await create_test_user(pool)
-    order_id = await _insert_order(
-        pool, user_id, status="FILLED", filled_quantity=Decimal("1")
-    )
+    order_id = await _insert_order(pool, user_id, status="FILLED", filled_quantity=Decimal("1"))
     cmd = _command(order_id, user_id)
 
     with pytest.raises(InvalidOrderTransitionError):

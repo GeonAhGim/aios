@@ -4,7 +4,7 @@ Spec: AIOSproject §4 (`AcceptDisclosure` -> `trust.consent_accepted.v1`).
 """
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import timedelta
 
 from src.foundation.trust.contracts.v1 import ConsentDecision, ConsentState, TenantContext
 from src.foundation.trust.domain.rules import is_disclosure_acceptable
@@ -42,11 +42,16 @@ async def accept_disclosure(
     purpose: str,
     disclosure_revision: int,
 ) -> ConsentDecision:
-    disclosure = await repo.get_disclosure_by_purpose_and_revision(purpose, disclosure_revision)
-    if disclosure is None:
+    found = await repo.get_disclosure_by_purpose_and_revision(purpose, disclosure_revision)
+    if found is None:
         raise DisclosureNotFoundError(f"{purpose} revision={disclosure_revision}")
+    disclosure, now = found
 
-    now = datetime.now(timezone.utc)
+    # `now` is the DB's own clock (read alongside `disclosure` in the same
+    # round trip), not a separately-captured application clock -- comparing
+    # `disclosure.retired_at` (also DB-stamped) against a local
+    # `datetime.now()` races whenever the two clocks disagree by even a few
+    # ms, which flaked this exact check in CI (esc-ci-pytest.json).
     if not is_disclosure_acceptable(disclosure, now=now):
         raise DisclosureRetiredError(f"{purpose} revision={disclosure_revision}은(는) 폐기됨")
 

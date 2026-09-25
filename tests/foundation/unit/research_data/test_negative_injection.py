@@ -13,7 +13,6 @@ RD는 ADR-2026-09-09-C의 D3 필수 축(R, L4, LA/LB/LC, FA, CM, EO, DC) 목록�
 
 from __future__ import annotations
 
-import time
 from datetime import datetime, timedelta, timezone
 from uuid import uuid4
 
@@ -27,6 +26,7 @@ from src.foundation.research_data.adapters.dsl_query import (
 )
 from src.foundation.research_data.contracts.v1 import ResearchItem
 from src.foundation.research_data.domain.as_of_binding import AsOfBindingError, bind_as_of
+from tests.conftest import PerfBudget
 
 _INSTRUMENT = "KR:A005930"
 _BASE = datetime(2026, 6, 1, tzinfo=timezone.utc)
@@ -183,16 +183,18 @@ def test_bind_as_of_rejection_repeats_deterministically_under_repeated_retries()
 
 
 @pytest.mark.perf
-def test_research_builtin_meets_throughput_budget_over_5000_bars() -> None:
+def test_research_builtin_meets_throughput_budget_over_5000_bars(perf_budget: PerfBudget) -> None:
     """5,000봉(바) 백테스트 구간에 대해 `research.filing_count()`를 평가하는
     비용이 절대시간 예산 내여야 한다 -- ADR-2026-09-09-C의 "5k봉 조회 p95
     200ms" 예산과 동일 규모(5k)를 기준으로, 여기서는 `search()` 선형 스캔이
     bar마다 반복 호출되므로(§dsl_query.py `_KnownCountBuiltin.__call__`)
     더 넉넉한 절대 예산을 건다(순수 파이썬 반복 + 선형 스캔 100개 항목
-    x 5,000회 = 500,000 비교 상당)."""
+    x 5,000회 = 500,000 비교 상당). task-6774 -- 공용 `perf_budget`
+    픽스처(`time.process_time()` 기준 best-of-5)로 통일해 부하 중 이 단일
+    wall-clock 측정이 흔들리던 문제를 없앤다."""
     n_bars = 5_000
     n_items = 100
-    budget_sec = 3.0  # 실측 로컬 <0.5s, CI 편차 감안
+    budget_ms = 3_000.0  # 실측 로컬 <500ms, CI 편차 감안
     ts = _linear_ts(n_bars)
     items = [_item(known_at=ts[i * (n_bars // n_items)]) for i in range(n_items)]
     columns = _columns(ts)
@@ -200,18 +202,13 @@ def test_research_builtin_meets_throughput_budget_over_5000_bars() -> None:
     builtin = table[("research", "filing_count")]
     site = CallSite("research", "filing_count", "series<float>", n_bars)
 
-    start = time.perf_counter()
+    perf_budget.assert_within(
+        lambda: builtin((), site),
+        budget_ms=budget_ms,
+        label=f"filing_count() over {n_bars} bars x {n_items} items",
+    )
     result = builtin((), site)
-    elapsed = time.perf_counter() - start
-
-    print(
-        f"[RD-9 dsl_query] filing_count() over {n_bars} bars x {n_items} items "
-        f"in {elapsed:.4f}s (budget<{budget_sec}s)"
-    )
     assert result.at(n_bars - 1) == float(n_items)
-    assert elapsed < budget_sec, (
-        f"{n_bars}봉 처리량이 예산({budget_sec}s)을 넘었습니다({elapsed:.4f}s)."
-    )
 
 
 # ---- 게이트 적색 재현 ---------------------------------------------------------

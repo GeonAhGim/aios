@@ -51,6 +51,13 @@ class KeyRing:
     def kids(self) -> tuple[str, ...]:
         return tuple(self._keys)
 
+    def with_active_kid(self, new_active_kid: str) -> KeyRing:
+        """Return a new `KeyRing` sharing the same key material with a different
+        `active_kid` (used by `LocalKeyRingKmsAdapter.rotate`). Raises
+        `KeyRingConfigError` if `new_active_kid` is not among the existing keys —
+        rotation selects among already-provisioned keys, it does not mint one."""
+        return KeyRing(self._keys, new_active_kid)
+
     @classmethod
     def from_env(cls, scope: SecretScope, *, env: Mapping[str, str] | None = None) -> KeyRing:
         source = env if env is not None else os.environ

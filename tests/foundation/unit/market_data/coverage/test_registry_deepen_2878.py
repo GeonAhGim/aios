@@ -24,7 +24,6 @@
 from __future__ import annotations
 
 import random
-import time
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
@@ -38,6 +37,7 @@ from src.foundation.market_data.contracts.v1 import Timeframe, Venue
 from src.foundation.market_data.contracts.v2.coverage import CoverageSpan, QualityGrade
 from src.foundation.market_data.contracts.v2.instruments import Instrument, InstrumentLifecycle
 from src.foundation.market_data.domain.coverage.registry import coverage_for, merge_spans
+from tests.conftest import PerfBudget
 
 _VALID_ULID = "01ARZ3NDEKTSV4RRFFQ69G5FAV"
 
@@ -159,7 +159,9 @@ def test_merge_spans_massive_duplicate_flood_stays_within_invariant() -> None:
 
 
 @pytest.mark.perf
-def test_merge_spans_meets_latency_budget_for_large_multi_axis_input() -> None:
+def test_merge_spans_meets_latency_budget_for_large_multi_axis_input(
+    perf_budget: PerfBudget,
+) -> None:
     """다축(venue x quality_grade) x 대량 span 병합은 정렬+선형 스캔
     (O(n log n))이어야 한다 — 회귀가 있다면 O(n^2) 등으로의 퇴화다."""
     rng = random.Random(2878)
@@ -178,20 +180,20 @@ def test_merge_spans_meets_latency_budget_for_large_multi_axis_input() -> None:
             spans.append(_span(venue=venue, quality_grade=grade, start_at=start, end_at=end))
     rng.shuffle(spans)
 
-    budget_sec = 2.0  # 실측 로컬 <0.3s(9축 x 1000 span = 9000개)
-    start_time = time.perf_counter()
-    result = merge_spans(spans)
-    elapsed = time.perf_counter() - start_time
+    budget_ms = 2000.0  # 실측 로컬 <0.3s(9축 x 1000 span = 9000개)
 
-    print(
-        f"[DC-6 registry] {len(spans)} spans merged into {len(result)} in "
-        f"{elapsed:.3f}s (budget<{budget_sec}s)"
+    result: list[CoverageSpan] | None = None
+
+    def _run() -> None:
+        nonlocal result
+        result = merge_spans(spans)
+
+    perf_budget.assert_within(
+        _run,
+        budget_ms=budget_ms,
+        label=f"merge {len(spans)} spans",
     )
-    assert elapsed < budget_sec, (
-        f"merge_spans({len(spans)}개)가 예산({budget_sec}s)을 넘었습니다"
-        f"({elapsed:.3f}s) — 정렬 기반 스캔이 선형탐색/제곱 비교로 퇴화했는지 "
-        "확인하세요."
-    )
+    assert result is not None
 
 
 # ---- 게이트 적색 재현(D2, 1) ----

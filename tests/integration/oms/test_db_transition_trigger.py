@@ -11,9 +11,27 @@ I2/I4/I6(전이표·터미널 불변·이벤트 동반)는 `oms_order_transition
 docstring) — 이 파일의 관련 테스트는 트랜잭션 안에서 무장한 뒤 항상
 롤백해 공유 테스트 DB의 다른 테스트에 영향을 남기지 않는다
 (tests/adversarial/risk/test_fence_race.py와 동일 관례).
+
+task-5783 root-cause fix: `test_downgrade_then_upgrade_round_trip` used to run
+its real `alembic downgrade`/`upgrade head` round trip directly against the
+process's shared `DATABASE_URL` -- the same session-lifetime DB every other
+test in the suite uses, and the same one `scripts/replay_verify.py` scans
+right after the full suite finishes (local_ci.py's PLT-36 worker-DB
+redirect). If the pytest process is killed mid-test (local_ci's own step
+timeout, growing suite runtime), the round trip can be interrupted between
+"downgrade e1d9b5ed8d7d" (which drops `order_events`) and the restoring
+"upgrade head" in this test's own body/fixture teardown, permanently
+leaving the *shared* DB without `order_events` for the rest of the CI run
+-- exactly esc-ci-replay_verify's `UndefinedTableError: "order_events"`
+(bisect landed on an unrelated docstring commit because the real trigger is
+suite runtime crossing the step timeout, not any single commit's logic).
+The round trip now runs against its own disposable DB clone
+(`tests/support/db.ensure_worker_database`) so an interrupted downgrade can
+never corrupt state anything else reads.
 """
 from __future__ import annotations
 
+import os
 import subprocess
 import sys
 from decimal import Decimal
@@ -29,15 +47,18 @@ from tests.integration.oms.conftest import (
     insert_event,
     insert_order,
 )
+from tests.support.db import ensure_worker_database
 from tests.support.deep_downgrade import purge_position_snapshots
 
 _PROJECT_ROOT = Path(__file__).resolve().parents[3]
 
 
-def _run_alembic(*args: str) -> None:
+def _run_alembic(*args: str, database_url: str | None = None) -> None:
+    env = {**os.environ, "DATABASE_URL": database_url} if database_url else None
     result = subprocess.run(
         [sys.executable, "-m", "alembic", "-c", "alembic.ini", *args],
         cwd=_PROJECT_ROOT,
+        env=env,
         capture_output=True,
         text=True,
         encoding="utf-8",
@@ -64,53 +85,66 @@ async def _table_exists(pool: asyncpg.Pool, table_name: str) -> bool:
     return reg is not None
 
 
-async def test_downgrade_then_upgrade_round_trip(pool):
-    for table in (
-        "order_events",
-        "order_command_outbox",
-        "provider_event_inbox",
-        "fills",
-        "order_idempotency",
-        "oms_order_transition_cutover",
-    ):
-        assert await _table_exists(pool, table)
+async def test_downgrade_then_upgrade_round_trip():
+    """Disposable DB clone (task-5783) -- never the shared session DB other
+    tests and `scripts/replay_verify.py` depend on. See module docstring."""
+    migration_db_url = await ensure_worker_database(os.environ["DATABASE_URL"], "migrationrt")
+    migration_pool = await asyncpg.create_pool(
+        migration_db_url.replace("postgresql+asyncpg://", "postgresql://"),
+        min_size=1,
+        max_size=2,
+    )
+    try:
+        for table in (
+            "order_events",
+            "order_command_outbox",
+            "provider_event_inbox",
+            "fills",
+            "order_idempotency",
+            "oms_order_transition_cutover",
+        ):
+            assert await _table_exists(migration_pool, table)
 
-    # "-1"이 아니라 073beca589d5의 down_revision을 명시한다 — 이 리프 위에
-    # 다른 마이그레이션(d0a580db5ce8 등)이 쌓이면 "-1"은 그 최신 마이그레이션만
-    # 되돌려 이 테스트의 전제(073beca589d5가 되돌려짐)가 깨진다.
-    await purge_position_snapshots(pool)  # deep downgrade: see tests/support/deep_downgrade.py
-    _run_alembic("downgrade", "e1d9b5ed8d7d")
-    for table in (
-        "order_events",
-        "order_command_outbox",
-        "provider_event_inbox",
-        "fills",
-        "order_idempotency",
-        "oms_order_transition_cutover",
-    ):
-        assert not await _table_exists(pool, table)
+        # "-1"이 아니라 073beca589d5의 down_revision을 명시한다 — 이 리프 위에
+        # 다른 마이그레이션(d0a580db5ce8 등)이 쌓이면 "-1"은 그 최신 마이그레이션만
+        # 되돌려 이 테스트의 전제(073beca589d5가 되돌려짐)가 깨진다.
+        await purge_position_snapshots(
+            migration_pool
+        )  # deep downgrade: see tests/support/deep_downgrade.py
+        _run_alembic("downgrade", "e1d9b5ed8d7d", database_url=migration_db_url)
+        for table in (
+            "order_events",
+            "order_command_outbox",
+            "provider_event_inbox",
+            "fills",
+            "order_idempotency",
+            "oms_order_transition_cutover",
+        ):
+            assert not await _table_exists(migration_pool, table)
 
-    async with pool.acquire() as conn:
-        cols = await conn.fetch(
-            "SELECT column_name FROM information_schema.columns WHERE table_name = 'orders'"
-        )
-    assert "version" not in {c["column_name"] for c in cols}
+        async with migration_pool.acquire() as conn:
+            cols = await conn.fetch(
+                "SELECT column_name FROM information_schema.columns WHERE table_name = 'orders'"
+            )
+        assert "version" not in {c["column_name"] for c in cols}
 
-    _run_alembic("upgrade", "head")
-    for table in (
-        "order_events",
-        "order_command_outbox",
-        "provider_event_inbox",
-        "fills",
-        "order_idempotency",
-        "oms_order_transition_cutover",
-    ):
-        assert await _table_exists(pool, table)
-    async with pool.acquire() as conn:
-        cols = await conn.fetch(
-            "SELECT column_name FROM information_schema.columns WHERE table_name = 'orders'"
-        )
-    assert "version" in {c["column_name"] for c in cols}
+        _run_alembic("upgrade", "head", database_url=migration_db_url)
+        for table in (
+            "order_events",
+            "order_command_outbox",
+            "provider_event_inbox",
+            "fills",
+            "order_idempotency",
+            "oms_order_transition_cutover",
+        ):
+            assert await _table_exists(migration_pool, table)
+        async with migration_pool.acquire() as conn:
+            cols = await conn.fetch(
+                "SELECT column_name FROM information_schema.columns WHERE table_name = 'orders'"
+            )
+        assert "version" in {c["column_name"] for c in cols}
+    finally:
+        await migration_pool.close()
 
 
 async def test_version_auto_increments_on_every_update(pool):

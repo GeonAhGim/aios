@@ -75,7 +75,12 @@ def _asyncpg_dsn(database_url: str) -> str:
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # 07번 §7.1 — JSON Lines 구조화 로깅. 스키마는 있었으나 호출자가 없어
     # 운영에서 한 번도 활성화되지 않았다(전수감사 §3).
-    configure_logging(os.environ.get("LOG_LEVEL", "INFO"))
+    # configure_logging()의 반환값(QueueListener)을 저장해 finally에서 반드시
+    # stop() 한다 — 저장하지 않으면 리스너 스레드가 매 lifespan(=테스트의 client
+    # 픽스처 매 사용)마다 하나씩 영원히 새어, 전체 스위트를 오래 돌릴수록 스레드가
+    # 누적되며 관측된 flaky(esc-ci-pytest: 매번 다른 테스트가 걸리는 asyncpg/Windows
+    # 커넥션 오류)의 근본 원인이 된다(schema.py의 configure_logging docstring 경고).
+    log_listener = configure_logging(os.environ.get("LOG_LEVEL", "INFO"))
     secrets = load_env_secrets()
     policy = load_risk_policy()
     pool = await asyncpg.create_pool(_asyncpg_dsn(secrets.database_url.get_secret_value()))
@@ -253,6 +258,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         if event_bus is not None:
             await event_bus.stop()
         await pool.close()
+        log_listener.stop()
 
 
 def create_app() -> FastAPI:

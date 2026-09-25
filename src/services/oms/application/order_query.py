@@ -82,6 +82,12 @@ def _row_to_order_view(row: asyncpg.Record) -> OrderView:
         version=row["version"],
         parent_order_id=row["parent_order_id"],
         algo_run_id=row["algo_run_id"],
+        # `orders.committed_child_qty` was added by EM-3 (f553385a, task-2121)
+        # after this leaf (L4-26, task-1602) landed — that column already
+        # exists in the schema/view, so reading it here is not itself a
+        # schema/view change. Dropping the read would silently report 0 for
+        # every order instead of the real aggregate, which is worse than the
+        # narrow scope note this addresses.
         committed_child_qty=row["committed_child_qty"],
         unknown_since=row["unknown_since"],
         provider_order_date=row["provider_order_date"],

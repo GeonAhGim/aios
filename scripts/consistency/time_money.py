@@ -6,6 +6,7 @@ check_consistency.py에서 분리(순수 이동, 판정 로직 변경 없음).
 from __future__ import annotations
 
 import ast
+import re
 from pathlib import Path
 
 from scripts.consistency.common import Hit, _iter_py_files, _safe_parse
@@ -91,6 +92,30 @@ def _is_float_annotation(node: ast.expr | None) -> bool:
     return False
 
 
+# A public contract (e.g. `src/foundation/*/contracts/v1.py`) is a wire schema
+# whose field types are a compatibility surface (ADR-2026-09-10-C P5 --
+# in-place type changes to a published v1 contract are a hard veto, not a
+# ratchet). Such a field stays float on the wire and is converted to Decimal
+# at the adapter/application boundary instead of at the contract itself --
+# `check_money_float` accepts that as compliant when the line carries an
+# explicit `# ratchet-allow: wire-boundary: <reason>` marker (task-5762, CTO
+# decision 2026-09-23), same "explicit escape hatch, not a blanket exemption"
+# shape as `_ratchet_allow_reason` in common.py.
+_WIRE_BOUNDARY_ALLOW_RE = re.compile(r"#\s*ratchet-allow:\s*wire-boundary:\s*(\S.*)")
+
+
+def _is_wire_boundary_allowed(source_lines: list[str], lineno: int) -> bool:
+    """Marker may sit on the field's own line, or on the line directly above
+    it (a standalone comment) when the inline form would overflow the repo's
+    line-length limit."""
+    for candidate in (lineno, lineno - 1):
+        if 1 <= candidate <= len(source_lines) and _WIRE_BOUNDARY_ALLOW_RE.search(
+            source_lines[candidate - 1]
+        ):
+            return True
+    return False
+
+
 def check_money_float(root: Path) -> list[Hit]:
     hits: list[Hit] = []
     for path in _iter_py_files(root, "src"):
@@ -98,13 +123,22 @@ def check_money_float(root: Path) -> list[Hit]:
         if tree is None:
             continue
         rel = path.relative_to(root).as_posix()
+        source_lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
         for node in ast.walk(tree):
             if isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name):
-                if _is_float_annotation(node.annotation) and _is_money_name(node.target.id):
+                if (
+                    _is_float_annotation(node.annotation)
+                    and _is_money_name(node.target.id)
+                    and not _is_wire_boundary_allowed(source_lines, node.lineno)
+                ):
                     hits.append((rel, node.lineno))
             elif isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef):
                 for arg in [*node.args.args, *node.args.kwonlyargs]:
-                    if _is_float_annotation(arg.annotation) and _is_money_name(arg.arg):
+                    if (
+                        _is_float_annotation(arg.annotation)
+                        and _is_money_name(arg.arg)
+                        and not _is_wire_boundary_allowed(source_lines, arg.lineno)
+                    ):
                         hits.append((rel, node.lineno))
     return hits
 
