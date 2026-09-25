@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-09-25T22:07:41+00:00",
+  "generated_at": "2026-09-25T22:19:22+00:00",
   "tasks": [
     {
       "id": 7594,
@@ -236,6 +236,18 @@
       "tier": "",
       "role": "backend",
       "hold_note": "[cloud_session] 클라우드 적합: 저장소만으로 완결(fake 전송, 실키 불필요), 주문경로 아님"
+    },
+    {
+      "id": 7628,
+      "title": "[janitor] 2026-09-26 — rate limiter 파편화 점검(src/exchanges/common/rate_limiter.py vs src/core/rate_limit/limiter.py)",
+      "spec": "일일 janitor(task-7593 착지 전 임시 규칙, PM_CYCLE_PROMPT.md #B-1(i)): src/exchanges/common/rate_limiter.py와 src/core/rate_limit/limiter.py 두 rate limiter 구현을 git grep으로 호출부 전부 확인해 실제로 같은 책임(윈도우/버킷 기반 호출 제한)을 중복 구현한 것인지 비교한다. 필드/동작이 동일하면 하나로 합치고 나머지를 위임 shim으로 축소(공개 계약 유지, 동작 변경 0). 동일하지 않으면(예: 하나는 exchange별 venue rate limit, 하나는 범용 API rate limit) 합치지 말고 그 차이를 note에 보고만 한다. FROZEN/S 경로(주문·정산·리스크)를 건드리면 안 되고, ratchet(loc_over_500 등) 상향 금지.",
+      "files": [
+        "src/exchanges/common/rate_limiter.py",
+        "src/core/rate_limit/limiter.py"
+      ],
+      "tier": "",
+      "role": "backend",
+      "hold_note": "[cloud_session] 클라우드 적합: 저장소만으로 완결, 일일 janitor(task-7593 착지 전 임시), fake로 검증 가능"
     }
   ]
 }
