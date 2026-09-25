@@ -5,6 +5,15 @@ updates:
     schedule:
       interval: weekly
     open-pull-requests-limit: 10
+    groups:
+      # pydantic은 pydantic-core를 정확한 버전(==)으로 요구한다. 따로 올라온 #61(pydantic-core
+      # 2.49.0)은 lock의 pydantic 2.13.5(pydantic-core==2.46.5)와 충돌해 설치 단계에서
+      # ResolutionImpossible로 실패했다(run 36187508697). 두 패키지를 한 PR로 묶는다.
+      pydantic:
+        patterns:
+          - "pydantic"
+          - "pydantic-core"
+          - "pydantic_core"
 
   - package-ecosystem: npm
     directory: "/frontend"
