@@ -68,6 +68,42 @@ def test_redacts_secret_nested_inside_dict():
     assert result["user"]["id"] == 1
 
 
+def test_redacts_nested_dict_headers_authorization():
+    """PLT-02 DEEPEN: 중첩 dict의 sensitive key(예: headers.authorization)도 필터링."""
+    payload = {"headers": {"authorization": "Bearer xyz123"}}
+
+    result = redact(payload)
+
+    assert result == {"headers": {"authorization": "<redacted>"}}
+
+
+def test_redacts_deeply_nested_dict_three_levels():
+    """PLT-02 DEEPEN: 3단계 중첩 dict에서도 sensitive key가 redact된다."""
+    payload = {"a": {"b": {"c": {"password": "deep_secret"}}}}
+
+    result = redact(payload)
+
+    assert result == {"a": {"b": {"c": {"password": "<redacted>"}}}}
+
+
+def test_redacts_nested_dict_with_mixed_keys():
+    """PLT-02 DEEPEN: 중첩 dict에서 sensitive/non-sensitive 키가 혼합된 경우."""
+    payload = {"request": {"method": "GET", "api_key": "sk-123", "path": "/users"}}
+
+    result = redact(payload)
+
+    assert result == {"request": {"method": "GET", "api_key": "<redacted>", "path": "/users"}}
+
+
+def test_redacts_list_of_dicts_with_sensitive_keys():
+    """PLT-02 DEEPEN: list 내부 dict의 sensitive key도 redact된다."""
+    payload = {"items": [{"token": "abc"}, {"safe": "value"}]}
+
+    result = redact(payload)
+
+    assert result == {"items": [{"token": "<redacted>"}, {"safe": "value"}]}
+
+
 def test_redacts_secret_nested_inside_list():
     payload = {"items": [{"token": "abc.def.ghi"}, {"safe": "value"}]}
 
