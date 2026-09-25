@@ -87,6 +87,7 @@ def test_encoder_default_non_decimal_passes_through(monkeypatch):
         json.dumps({"ts": object()}, cls=DecimalSafeEncoder)
 
 
+@pytest.mark.perf
 def test_perf_serialize_1000_decimals():
     """performance: 1000 Decimal fields must serialise under 50 ms."""
     import time

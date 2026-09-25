@@ -120,6 +120,7 @@ def test_load_env_secrets_propagates_dotenv_read_failure(monkeypatch: pytest.Mon
         load_env_secrets()
 
 
+@pytest.mark.perf
 def test_load_env_secrets_repeated_calls_stay_within_perf_budget():
     """성능 단언 — load_env_secrets는 부팅 경로에서 반복 호출될 수 있으니
     (헬스체크·워커 재기동 등) 단일 호출 비용이 병적으로 커지면 안 된다."""
