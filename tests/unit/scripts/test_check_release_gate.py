@@ -11,6 +11,7 @@ exit 1을 내는지)과 수치 성능 단언(실제 5-stage 체인 전수 검사
 `test_check_migration_chain_real_versions_dir_completes_within_time_budget`
 패턴을 따른다.
 """
+
 from __future__ import annotations
 
 import importlib.util
@@ -37,9 +38,7 @@ def _load_module(name: str, path: Path) -> ModuleType:
     return module
 
 
-check_release_gate = _load_module(
-    "check_release_gate", SCRIPTS_DIR / "check_release_gate.py"
-)
+check_release_gate = _load_module("check_release_gate", SCRIPTS_DIR / "check_release_gate.py")
 
 
 # ---------------------------------------------------------------------------
@@ -236,6 +235,60 @@ def test_evidence_entry_missing_path_key_fails_closed(
     assert "FAIL" in out
 
 
+def test_yaml_null_path_rejected_at_load(tmp_path: Path) -> None:
+    """PLT-39: YAML에서 `path: null`/`path:` (valueless)은 Python None으로 파싱되므로
+    load_stages()에서 즉시 ValueError를 일으켜 fail-closed 한다.
+    """
+    config_path = tmp_path / "release_gates.yaml"
+    # YAML 1.1: null, Null, NULL, ~, empty value → Python None
+    config_path.write_text(
+        "stages:\n"
+        "- name: a\n"
+        "  depends_on: []\n"
+        "  required_evidence:\n"
+        "  - description: null 경로\n"
+        "    path: null\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="path는 빈 문자열이어야 합니다"):
+        check_release_gate.load_stages(config_path)
+
+
+def test_empty_path_string_rejected_at_load(tmp_path: Path) -> None:
+    """PLT-39: `path: ''` (빈 문자열)도 load_stages()에서 거부한다."""
+    config_path = tmp_path / "release_gates.yaml"
+    config_path.write_text(
+        "stages:\n"
+        "- name: a\n"
+        "  depends_on: []\n"
+        "  required_evidence:\n"
+        "  - description: 빈 경로\n"
+        "    path: ''\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="path는 빈 문자열이어야 합니다"):
+        check_release_gate.load_stages(config_path)
+
+
+def test_non_string_path_rejected_at_load(tmp_path: Path) -> None:
+    """PLT-39: `path: 123` (숫자) 같은 비문자열 값도 load_stages()에서 거부한다."""
+    config_path = tmp_path / "release_gates.yaml"
+    config_path.write_text(
+        "stages:\n"
+        "- name: a\n"
+        "  depends_on: []\n"
+        "  required_evidence:\n"
+        "  - description: 숫자 경로\n"
+        "    path: 123\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="path는 빈 문자열이어야 합니다"):
+        check_release_gate.load_stages(config_path)
+
+
 # ---------------------------------------------------------------------------
 # 성능 단언 — 실제 저장소 5-stage 체인 전수 해석이 예산 내에 끝나는지.
 # ---------------------------------------------------------------------------
@@ -253,9 +306,7 @@ def test_full_chain_resolution_completes_within_time_budget() -> None:
 
     start = time.perf_counter()
     for _ in range(100):
-        check_release_gate.check_stage(
-            stages, "marketplace_commercialization", repo_root=ROOT
-        )
+        check_release_gate.check_stage(stages, "marketplace_commercialization", repo_root=ROOT)
     elapsed = time.perf_counter() - start
 
     assert elapsed < 0.05 * 100, f"100회 반복 해석이 {elapsed:.3f}s — 예산(5.0s) 초과"
