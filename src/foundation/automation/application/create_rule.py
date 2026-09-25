@@ -4,6 +4,7 @@ from datetime import datetime, timezone
 from uuid import UUID, uuid4
 
 from src.foundation.automation.contracts.v1 import Action, AutomationRule, Condition, RuleStatus
+from src.foundation.automation.flags import require_flag_enabled
 from src.foundation.automation.ports.repository import AutomationRuleRepository
 
 __all__ = ["create_rule"]
@@ -17,6 +18,7 @@ async def create_rule(
     conditions: tuple[Condition, ...],
     action: Action,
 ) -> AutomationRule:
+    require_flag_enabled()
     now = datetime.now(timezone.utc)
     rule = AutomationRule(
         rule_id=uuid4(),
