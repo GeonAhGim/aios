@@ -329,6 +329,7 @@ def test_apply_one_propagates_cost_basis_selector_fault_without_swallowing(
         _fold([entry])
 
 
+@pytest.mark.perf
 def test_fold_completes_within_latency_budget_for_10000_entries() -> None:
     """수치 성능 단언: 10,000개 저널 엔트리 fold가 1초 예산 안에 끝나야 한다
     (실측 약 0.06초, ~16배 여유). `apply_one`은 매 FILL 스텝마다

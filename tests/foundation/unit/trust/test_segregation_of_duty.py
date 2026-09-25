@@ -71,6 +71,7 @@ def test_comparison_crash_propagates_fail_closed() -> None:
         assert_actor_not_counterparty(exploding, exploding, action="break_glass.approve_grant")
 
 
+@pytest.mark.perf
 def test_bulk_calls_complete_within_latency_budget() -> None:
     """수치 성능 단언: PLT-43은 매 DUAL 2차 서명·CM-5 활성화 호출마다 동기 경로에서
     실행되므로(순수 함수, I/O 없음), 만 번 호출이 평균 50us/call을 넘으면 이 primitive가

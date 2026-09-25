@@ -357,6 +357,7 @@ def test_scan_raises_on_syntax_error_source_instead_of_silently_skipping_file(
 # ── 수치 성능/처리량 단언 ────────────────────────────────────────────────
 
 
+@pytest.mark.perf
 def test_matches_kis_order_tr_id_scales_linearly_not_quadratically_with_tr_id_count():
     """수치 성능 단언 — DEPTH 감사(#1975)가 지적한 공백. `_matches_kis_order_tr_id`는
     스캔 대상 이름마다 `order_tr_ids`(실제 기준 목록 기준 수백 건)를 선형 스캔한다

@@ -20,9 +20,9 @@ from dotenv import dotenv_values
 from src.core.safety.heartbeat import write_heartbeat
 from src.core.safety.split_brain import SplitBrainDiagnostics
 from src.core.safety.watchdog import WatchdogAction, WatchdogDecision, WatchdogService, decide
+from src.services.safety.watchdog_apply import apply_decision
 from src.watchdog_process import (
     WATCHDOG_SYSTEM_ACTOR_ID,
-    _apply_decision,
     _LastAppliedAction,
     _LatestExchangeHealth,
     build_kill_switch_service,
@@ -30,6 +30,14 @@ from src.watchdog_process import (
     run_one_cycle,
 )
 from tests.integration.conftest import create_test_user
+
+
+async def _empty_basket_returns() -> dict[str, Decimal]:
+    """Most tests here aren't exercising the RTF-03 griefing-defense basket
+    wiring — an empty basket (`< min_symbols`) makes `is_market_wide_move`
+    return None, the same safe-side value `run_one_cycle` always used before
+    the basket was wired in."""
+    return {}
 
 
 def _asyncpg_dsn() -> str:
@@ -53,7 +61,7 @@ def kill_switch(pool):
 
 @pytest.fixture(autouse=True)
 async def _deactivate_watchdog_controls_after(pool):
-    """이 파일의 여러 테스트가 _apply_decision/run_one_cycle을 통해
+    """이 파일의 여러 테스트가 apply_decision/run_one_cycle을 통해
     WATCHDOG_SYSTEM_ACTOR_ID로 GLOBAL safety_control을 만든다 — ACTIVE로
     남으면 공유 테스트 DB의 다른 risk-gate 테스트가 RISK_KILL_SWITCH_ACTIVE_
     GLOBAL로 오염된다. 이 파일이 만든 통제만 지운다(actor_subject_id로 한정)."""
@@ -99,7 +107,7 @@ async def test_apply_decision_pauses_running_executions(pool, kill_switch):
     user_id = await create_test_user(pool)
     execution_id = await _create_running_execution(pool, user_id)
 
-    await _apply_decision(
+    await apply_decision(
         pool,
         WatchdogDecision(action=WatchdogAction.HALT, reason="main_process_unresponsive"),
         kill_switch,
@@ -117,7 +125,7 @@ async def test_apply_decision_records_audit_log(pool, kill_switch):
     user_id = await create_test_user(pool)
     await _create_running_execution(pool, user_id)
 
-    await _apply_decision(
+    await apply_decision(
         pool,
         WatchdogDecision(action=WatchdogAction.LIQUIDATE, reason="market_wide_correlated_loss"),
         kill_switch,
@@ -160,7 +168,7 @@ async def test_stale_heartbeat_leads_to_halt_and_real_pause(pool, kill_switch, t
     assert decision.action == WatchdogAction.HALT
     assert decision.reason == "main_process_unresponsive"
 
-    await _apply_decision(pool, decision, kill_switch)
+    await apply_decision(pool, decision, kill_switch)
 
     async with pool.acquire() as conn:
         row = await conn.fetchrow(
@@ -209,6 +217,7 @@ async def test_run_one_cycle_suppresses_action_on_db_isolated_failure(pool, kill
         exchange_health_cache=exchange_health_cache,
         kill_switch=kill_switch,
         last_action=last_action,
+        get_basket_returns=_empty_basket_returns,
     )
     await asyncio.sleep(0.02)  # entry_confirm_seconds 경과시켜 히스테리시스 확정
     await run_one_cycle(
@@ -220,6 +229,7 @@ async def test_run_one_cycle_suppresses_action_on_db_isolated_failure(pool, kill
         exchange_health_cache=exchange_health_cache,
         kill_switch=kill_switch,
         last_action=last_action,
+        get_basket_returns=_empty_basket_returns,
     )
 
     async with pool.acquire() as conn:
@@ -265,6 +275,7 @@ async def test_run_one_cycle_applies_action_when_not_db_isolated(pool, kill_swit
         exchange_health_cache=exchange_health_cache,
         kill_switch=kill_switch,
         last_action=last_action,
+        get_basket_returns=_empty_basket_returns,
     )
     await asyncio.sleep(0.02)
     await run_one_cycle(
@@ -276,6 +287,7 @@ async def test_run_one_cycle_applies_action_when_not_db_isolated(pool, kill_swit
         exchange_health_cache=exchange_health_cache,
         kill_switch=kill_switch,
         last_action=last_action,
+        get_basket_returns=_empty_basket_returns,
     )
 
     async with pool.acquire() as conn:
@@ -323,6 +335,7 @@ async def test_run_one_cycle_calls_check_exchange_exactly_once(pool, kill_switch
         exchange_health_cache=exchange_health_cache,
         kill_switch=kill_switch,
         last_action=_LastAppliedAction(),
+        get_basket_returns=_empty_basket_returns,
     )
 
     assert call_count == 1

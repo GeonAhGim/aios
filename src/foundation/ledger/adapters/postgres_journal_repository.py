@@ -30,9 +30,13 @@ from uuid import UUID, uuid4
 import asyncpg
 
 from src.data.models.base import Currency
-from src.foundation.evidence.adapters.postgres_repository import PostgresAuditEventRepository
-from src.foundation.evidence.domain.models import Classification, Outcome
-from src.foundation.evidence.domain.rules import assert_safe_payload, compute_payload_hash
+from src.foundation.evidence.api import (
+    Classification,
+    Outcome,
+    PostgresAuditEventRepository,
+    assert_safe_payload,
+    compute_payload_hash,
+)
 from src.foundation.ledger.adapters.postgres_balance_repository import UnknownAccountError
 from src.foundation.ledger.contracts.v1 import (
     JournalEntryView,

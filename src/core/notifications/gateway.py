@@ -1,17 +1,17 @@
-"""17.1 — 알림 발송 게이트웨이.
+"""17.1 — Notification dispatch gateway.
 
 Spec: 기능설계문서_v1.20.md#FD-17.1
 
-설계 원칙(FD-17 원문) — 새 인프라를 만들지 않는다. EventBus(05번)의
-구독자(Subscriber)로 붙어 CRITICAL 등록한다 — 발송 실패 시 EventBus의
-지수 백오프 재시도(최대 5회) + 최종 실패 시 audit_log 기록(§4.5)을 그대로
-재사용한다(EventHandlerError를 던지기만 하면 됨, 이 게이트웨이가 재시도
-로직을 직접 구현하지 않는다).
+Design principle (FD-17 original) — Do not create new infrastructure. Attach
+as a Subscriber to EventBus (#05) and register with CRITICAL criticality — on
+send failure, reuse EventBus's exponential backoff retry (up to 5 attempts) +
+final-failure audit_log recording (§4.5) as-is (just raise EventHandlerError;
+this gateway does not implement retry logic directly).
 
-편차: 실제 이메일/푸시 발송기(SMTP·FCM/APNs)는 아직 미확정(Draft, FD-17.1
-원문)이라 콜백으로 주입받는다. db/session.py(작업트리 16번)가 아직 없어
-notifications 테이블 기록은 asyncpg pool을 직접 받는다(audit_log.py와
-동일 패턴).
+Deviation: Actual email/push senders (SMTP · FCM/APNs) are still undetermined
+(Draft, FD-17.1 original), so they are injected as callbacks. db/session.py
+(worktree #16) does not exist yet, so notification table records receive the
+asyncpg pool directly (same pattern as audit_log.py).
 """
 from __future__ import annotations
 
@@ -27,10 +27,10 @@ from src.core.event_bus.policy import HandlerCriticality
 from src.core.exceptions import EventHandlerError
 from src.core.notifications.channel_policy import NotificationChannel, get_channel_policy
 
-# (user_id, event_type, payload) -> 발송 성공 여부
+# (user_id, event_type, payload) -> whether channel send succeeded
 SendChannelFn = Callable[[UUID, str, dict[str, Any]], Awaitable[bool]]
 
-# FD-17.1이 나열한 대상 topic 전체 — EventBus 구독 대상.
+# All topic types listed by FD-17.1 — EventBus subscription targets.
 SUBSCRIBED_EVENT_TYPES = (
     "approval.request.created",
     "watchdog.decision.triggered",
@@ -59,9 +59,9 @@ class NotificationGateway:
         senders: dict[NotificationChannel, SendChannelFn] | None = None,
     ) -> None:
         self._pool = pool
-        # 미확정 채널(Draft)은 기본적으로 "발송 실패"로 취급 — 조용히 성공한
-        # 척 하지 않는다(FD-17.1 "발송됐는지 확인 못 하는 상태 자체가
-        # 안전 이슈" 원칙).
+        # Undetermined channels (Draft) are treated as "send failure" by default —
+        # do not silently pretend success (FD-17.1 principle: "inability to confirm
+        # delivery is itself a safety issue").
         self._senders = senders or {}
 
     def register(self, event_bus: EventBus) -> None:
@@ -74,8 +74,8 @@ class NotificationGateway:
         event_type = payload["event_type"]
         user_id = _coerce_user_id(payload.get("user_id"))
         if user_id is None:
-            # FD-17의 모든 이벤트는 특정 사용자 대상 알림이다 — user_id 없이
-            # 발행된 이벤트는 발행부의 버그이므로 조용히 넘기지 않는다.
+            # All FD-17 events target a specific user — an event published without
+            # user_id is a bug in the publisher, so do not silently ignore it.
             raise EventHandlerError(f"[{event_type}] user_id 없는 알림 이벤트")
         policy = get_channel_policy(event_type)
 
@@ -88,8 +88,8 @@ class NotificationGateway:
                 failures.append(rule.channel)
 
         if failures:
-            # EventBus의 CRITICAL 재시도(최대 5회)+최종실패 audit_log 기록을
-            # 그대로 트리거한다 — 이 게이트웨이는 재시도를 직접 구현하지 않는다.
+            # Triggers EventBus's CRITICAL retry (up to 5)+final-failure audit_log
+            # recording as-is — this gateway does not implement retry directly.
             raise EventHandlerError(
                 f"[{event_type}] 알림 발송 실패 채널: {[c.value for c in failures]}"
             )

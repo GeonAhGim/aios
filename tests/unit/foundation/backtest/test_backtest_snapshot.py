@@ -9,7 +9,6 @@ Spec: docs/specs/L4_strategy_portfolio_backtest_v1.0.md#§9 L25.
 from __future__ import annotations
 
 import ast
-import time
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from pathlib import Path
@@ -26,6 +25,7 @@ from src.foundation.backtest.domain.snapshot import (
     BarSnapshotRef,
     compute_bar_snapshot_hash,
 )
+from tests.conftest import PerfBudget
 
 _T0 = datetime(2026, 1, 1, tzinfo=timezone.utc)
 
@@ -169,21 +169,24 @@ def test_domain_file_has_no_io_or_nondeterministic_imports(filename: str) -> Non
 # --------------------------------------------------------------------------
 
 
-def test_bar_snapshot_hash_one_month_m1_single_symbol_within_backtest_budget() -> None:
+@pytest.mark.perf
+def test_bar_snapshot_hash_one_month_m1_single_symbol_within_backtest_budget(
+    perf_budget: PerfBudget,
+) -> None:
     """스냅샷 해싱은 백테스트 파이프라인의 한 단계일 뿐이므로, 예산 전체(3초)가
     아니라 그 상당한 여유(1초)만 쓴다고 단언한다 -- 1개월치 M1(1분봉) 단일 심볼은
     43,200개 bar이며, `canonical_json`의 정규화(Decimal.normalize 등)가 병리적으로
-    느려지는 회귀가 생기면 이 예산을 넘는다."""
+    느려지는 회귀가 생기면 이 예산을 넘는다. task-7434: process_time 기반
+    perf_budget으로 측정한다."""
     bars = [
         _bar(index=i, volume=Decimal("10"))
         for i in range(30 * 24 * 60)  # 30일 * 24시간 * 60분 = 43,200 M1 bar
     ]
-    start = time.perf_counter()
-    compute_bar_snapshot_hash(bars, source="binance", as_of=_T0)
-    elapsed = time.perf_counter() - start
-    assert elapsed < 1.0, (
-        f"43,200-bar(1개월 M1 1심볼) snapshot hash took {elapsed * 1000:.2f}ms, "
-        "budget 1000ms(ADR-2026-09-09-C 3초 예산의 여유분)"
+
+    perf_budget.assert_within(
+        lambda: compute_bar_snapshot_hash(bars, source="binance", as_of=_T0),
+        budget_ms=1000.0,
+        label="43,200-bar snapshot hash",
     )
 
 

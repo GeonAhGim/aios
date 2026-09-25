@@ -57,7 +57,7 @@ from src.core.observability.metric_names import (
 )
 from src.core.observability.metrics_registry import MetricsRegistry
 from src.data.models.base import Currency
-from src.foundation.market_data.domain.calendar.session_rules import VenueCalendar
+from src.foundation.market_data.api import VenueCalendar
 from src.foundation.positions.application.compute_daily_nav import (
     CashSource,
     ComputeDailyNavCommand,

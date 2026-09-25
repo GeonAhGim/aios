@@ -493,6 +493,7 @@ async def test_entitlement_port_failure_fails_closed_not_open(client, seeded):
     assert "simulated entitlement backend outage" not in body["message"]
 
 
+@pytest.mark.perf
 async def test_candles_full_page_latency_stays_within_normalized_ceiling(client, seeded):
     """수치 성능 단언 — 공유 TEST_DATABASE_URL 지연 변동성 때문에 절대
     임계 대신, 가벼운 1건짜리 baseline 요청 대비 정규화한 상한만 게이트로

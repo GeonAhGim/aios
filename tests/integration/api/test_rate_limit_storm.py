@@ -167,6 +167,7 @@ async def test_broken_limiter_backend_fails_closed_not_silently_allowed(client):
     assert response.status_code >= 500
 
 
+@pytest.mark.perf
 async def test_acquire_p99_latency_within_budget():
     """`InMemoryTokenBucket.acquire()`는 I/O 없이 dict 조회 + 락만 쓰므로
     ADR-2026-09-09-C 예산표의 "사전거래 게이트 p99 5ms"를 자체 예산으로
@@ -183,6 +184,7 @@ async def test_acquire_p99_latency_within_budget():
     assert _p99(samples) < _ACQUIRE_P99_BUDGET_SECONDS
 
 
+@pytest.mark.perf
 async def test_gate_red_reproduction_acquire_p99_budget_guard_catches_lock_regression(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -208,3 +210,101 @@ async def test_gate_red_reproduction_acquire_p99_budget_guard_catches_lock_regre
 
     with pytest.raises(AssertionError):
         assert _p99(samples) < _ACQUIRE_P99_BUDGET_SECONDS
+
+
+# ---------------------------------------------------------------------------
+# Negative tests — 불변식 위반 입력을 명시적으로 거부하는 케이스
+# ---------------------------------------------------------------------------
+
+
+async def test_malformed_jwt_falls_back_to_ip_key_not_crash(client):
+    """_resolve_key() 가 유효하지 않은 JWT(잘못된 서명/만료) 를 받으면
+    JWT 디코딩 실패를 잡아 IP 키로 폴백한다 — 예외가 상위로 전파되어
+    5xx 를 반환하면 안 된다. PLT-25 불변식: 키_resolve 는 항상 문자열
+     key 를 반환해야 한다."""
+    response = await client.get(
+        "/openapi.json",
+        headers={"Authorization": "Bearer not-a-real-token.junk.payload"},
+    )
+
+    # 120개 read 한도 안에서 200 이어야 한다(429 도 5xx 도 아님)
+    assert response.status_code == 200
+
+
+async def test_missing_client_ip_uses_unknown_key_not_crash(monkeypatch: pytest.MonkeyPatch):
+    """_client_ip() 가 request.client == None 을 받으면 "unknown" 을
+    반환한다 — None 이 그대로 키에 들어가서 버킷 충돌을 일으키지 않는다.
+    InMemoryTokenBucket 자체는 "unknown" 키를 정상적으로接受하므로,
+    이 테스트는 키_resolve 경로가 None 을 통과하지 않음을 검증한다."""
+    from src.api.middleware import rate_limit as rl_module
+
+    def fake_client_ip(_request) -> str:
+        return "unknown"
+
+    monkeypatch.setattr(rl_module, "_client_ip", fake_client_ip)
+
+    # "unknown" 키로 정책=read(120개) 를 소진한 뒤, 121 번째가 429 가 됨.
+    # 만약 "unknown" 이 아닌 None 이 키로 들어가면 버킷 키가 불변하고
+    # 예상과 다른 행동을 하므로, "unknown" 이 정상적으로 쓰임을 확인한다.
+    bucket = InMemoryTokenBucket(clock=lambda: 0.0)
+    set_limiter(bucket)
+    policy = POLICIES["read"]
+
+    for _ in range(policy.limit):
+        dec = await bucket.acquire(policy, "unknown")
+        assert dec.allowed
+
+    denied = await bucket.acquire(policy, "unknown")
+    assert not denied.allowed
+    assert denied.remaining == 0
+
+
+async def test_unknown_policy_route_bypasses_rate_limit_safely(client):
+    """resolve_policy() 가 None 을 반환하는 경로(매칭되는 정책 없음) 는
+    rate limit 을 우회한다 — PLT-25 의 의도적 동작이지만, 이 우회가
+    5xx 로 이어지지 않고 정상적인 라우팅 결과(404 등) 를 반환함을
+    검증한다. 즉, "제한 없음"이 "오류" 가 아님을 확인한다."""
+    # OPTIONS 메서드는 default_resolve_policy 에서 None 을 반환한다.
+    response = await client.options("/openapi.json")
+
+    # CORS 미들웨어가 OPTIONS 에 대한 응답을 처리하므로 200 이 될 수 있다.
+    # 중요한 것은 5xx 가 아닌 것 — 라우팅까지 도달했거나 CORS 가 처리했음.
+    assert response.status_code != 429
+    assert response.status_code < 500
+
+
+async def test_limiter_backend_raises_during_dispatch_returns_5xx(
+    client, monkeypatch: pytest.MonkeyPatch
+):
+    """실패주입: limiter() 싱글턴이 매 요청 시 RuntimeError 를 던지면,
+    미들웨어가 그 예외를 삼키지 않고 5xx 로 끝난다 — fail-closed
+     (CLAUDE.md §3) 위반 방지. `test_broken_limiter_backend_fails_closed` 가
+    _BrokenLimiter 클래스로 동일 행위를 클래스 수준에서 검증했다면,
+    이 테스트는 monkeypatch 로 runtime 에 싱글턴 게터를 교체하는 방식으로
+    동일한 불변식을 검증한다."""
+    import src.api.middleware.rate_limit as rl_module
+
+    monkeypatch.setattr(rl_module, "limiter", lambda: _BrokenLimiter())
+
+    response = await client.get("/openapi.json")
+
+    assert response.status_code != 200
+    assert response.status_code >= 500
+
+
+async def test_different_policies_have_independent_limits(client):
+    """read(120개/60s) 와 mutation(10개/60s) 는 서로 다른 버킷을 사용한다 —
+    read 한도를 모두 소진해도 mutation 요청은 여전히 허용되어야 한다.
+    PLT-25: 정책별 독립 버킷 불변식."""
+    # read 한도 소진
+    for _ in range(120):
+        response = await client.get("/openapi.json")
+        assert response.status_code == 200
+
+    # read 는 이제 429
+    response = await client.get("/openapi.json")
+    assert response.status_code == 429
+
+    # mutation 은 여전히 허용 (다른 버킷)
+    response = await client.post("/no-such-mutation-route")
+    assert response.status_code == 404

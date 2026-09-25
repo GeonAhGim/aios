@@ -132,6 +132,7 @@ def test_grid_sweep_bad_combo_raises_without_returning_partial_results() -> None
         sweep_grid(cols, combos, _config(), timeframe=Timeframe.M1, initial_cash=_CASH)
 
 
+@pytest.mark.perf
 def test_grid_sweep_normalized_performance_threshold() -> None:
     """절대 초 상한이 아니라 1조합 실측 x N x 1.5로 단언한다(BT-17과 동일
     선례, 공유 CI CPU 편차를 흡수하기 위함). N=1,000은 §9.9 DoD 문자

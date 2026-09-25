@@ -258,6 +258,7 @@ def test_stress_error_from_run_stress_propagates_uncaught(monkeypatch: pytest.Mo
 # -- D2 numeric performance assertion ---------------------------------------
 
 
+@pytest.mark.perf
 def test_p95_latency_within_local_stress_replay_budget() -> None:
     """ADR-2026-09-09-C axis performance budget: 5 required scenarios over a
     40-bar fixture, 3 iterations, generous 3s p95 floor (mirrors

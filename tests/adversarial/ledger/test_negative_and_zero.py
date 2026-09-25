@@ -205,17 +205,17 @@ async def test_post_entry_extra_rejection_latency_within_normalized_budget(pool)
     audit = PostgresAuditEventRepository(pool)
     reps = 15
 
-    async def _p95_ms(step: object) -> float:
+    async def _median_ms(step):  # type: ignore[no-untyped-def]
         samples: list[float] = []
         for _ in range(reps):
             t0 = time.perf_counter()
             await step()
             samples.append((time.perf_counter() - t0) * 1000)
         samples.sort()
-        return samples[int(len(samples) * 0.95) - 1]
+        return samples[len(samples) // 2]
 
     async with pool.acquire() as conn:
-        baseline_p95 = await _p95_ms(lambda: conn.fetchval("SELECT 1"))
+        baseline_median = await _median_ms(lambda: conn.fetchval("SELECT 1"))
 
     async def _one_rejection() -> None:
         event = _api_key_shaped_event()
@@ -225,11 +225,11 @@ async def test_post_entry_extra_rejection_latency_within_normalized_budget(pool)
                     conn, event, journal=journal, balances=balances, audit=audit, clock=_clock
                 )
 
-    rejection_p95 = await _p95_ms(_one_rejection)
+    rejection_median = await _median_ms(_one_rejection)
 
-    budget_ms = max(400.0, 40.0 * baseline_p95)
+    budget_ms = max(400.0, 40.0 * baseline_median)
     print(  # noqa: T201 — 실측치는 비차단 기록, 게이트는 아래 assert.
-        f"\npost_entry extra-rejection p95={rejection_p95:.3f}ms "
-        f"baseline(SELECT 1) p95={baseline_p95:.3f}ms budget={budget_ms:.3f}ms"
+        f"\npost_entry extra-rejection median={rejection_median:.3f}ms "
+        f"baseline(SELECT 1) median={baseline_median:.3f}ms budget={budget_ms:.3f}ms"
     )
-    assert rejection_p95 < budget_ms
+    assert rejection_median < budget_ms

@@ -3,6 +3,7 @@
 pg_basebackup 실행 파일 없이도(`which`/`run_cmd` 주입) 성공/실패 경로를 모두 검증한다.
 DB·네트워크 접근 없음.
 """
+
 from __future__ import annotations
 
 import json
@@ -30,7 +31,8 @@ def test_run_base_backup_missing_binary_raises(tmp_path: Path):
 
 def test_run_base_backup_success_writes_manifest(tmp_path: Path):
     manifest = base_backup.run_base_backup(
-        tmp_path, "postgresql://x/y",
+        tmp_path,
+        "postgresql://x/y",
         which=lambda _b: "/usr/bin/pg_basebackup",
         run_cmd=lambda cmd, env, timeout: (0, "backup done"),
     )
@@ -44,7 +46,8 @@ def test_run_base_backup_success_writes_manifest(tmp_path: Path):
 
 def test_run_base_backup_failure_removes_dir_and_records_failed_marker(tmp_path: Path):
     manifest = base_backup.run_base_backup(
-        tmp_path, "postgresql://x/y",
+        tmp_path,
+        "postgresql://x/y",
         which=lambda _b: "/usr/bin/pg_basebackup",
         run_cmd=lambda cmd, env, timeout: (1, "connection refused"),
     )
@@ -84,3 +87,34 @@ def test_latest_backup_dir_ignores_corrupt_manifest(tmp_path: Path):
     (corrupt / "manifest.json").write_text("{not json", encoding="utf-8")
 
     assert base_backup.latest_backup_dir(tmp_path) is None
+
+
+def test_pg_basebackup_command_includes_wal_method_stream_and_replication_slot(
+    tmp_path: Path,
+) -> None:
+    """pg_basebackup 호출에 --wal-method=stream 과 -C -S aios_drill 이 반드시 포함됨을 확인한다.
+
+    WAL 소실(requested WAL already removed) 오류를 방지하기 위해 stream 모드로
+    WAL 을 백업 중 실시간 전송하고, 복제 슬롯 aios_drill 로 WAL 보존을 보장한다
+    (task-4940).
+    """
+    captured: list[list[str]] = []
+
+    def run_cmd(cmd: list[str], env: dict | None, timeout: int) -> tuple[int, str]:
+        captured.append(cmd)
+        return (0, "backup done")
+
+    base_backup.run_base_backup(
+        tmp_path,
+        "postgresql://x/y",
+        which=lambda _b: "/usr/bin/pg_basebackup",
+        run_cmd=run_cmd,
+    )
+
+    assert len(captured) == 1
+    cmd = captured[0]
+    assert "--wal-method=stream" in cmd, "--wal-method=stream 이 없다 — WAL 소실 재발"
+    assert "--checkpoint=fast" in cmd, "--checkpoint=fast 없음 — 체크포인트 대기 중 WAL 재활용"
+    assert "-C" in cmd, "-C (replication slot 생성) 이 없다"
+    assert "-S" in cmd, "-S 가 없다"
+    assert "aios_drill" in cmd, "슬롯 이름 aios_drill 이 없다"

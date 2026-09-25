@@ -61,4 +61,29 @@ describe("StatusLine — CH-16e OHLCV 상태줄", () => {
     expect(screen.getByTestId("chart-status-line-Chg")).toHaveTextContent("--");
     expect(screen.getByTestId("chart-status-line-Chg%")).toHaveTextContent("--");
   });
+
+  it("극단값 입력: 극히 큰 가격 변화(9950% 등락)도 정상 표시된다", () => {
+    const extremeCandle1 = candle(3_000, "1.00", "1.50", "1.00", "1.00", "100");
+    const extremeCandle2 = candle(4_000, "1.00", "100.00", "1.00", "100.00", "50");
+    render(<StatusLine candles={[extremeCandle1, extremeCandle2]} crosshairTimeMs={null} />);
+
+    expect(screen.getByTestId("chart-status-line-C")).toHaveTextContent("100.00");
+    expect(screen.getByTestId("chart-status-line-Chg")).toHaveTextContent("+99.00");
+    expect(screen.getByTestId("chart-status-line-Chg%")).toHaveTextContent("+9900.00%");
+  });
+});
+
+describe("StatusLine 성능 단언(CH-15 고밀도 스트림)", () => {
+  it("캔들 1000개 스트림도 50ms 내로 렌더된다", () => {
+    const manyCandles = Array.from({ length: 1000 }, (_, i) =>
+      candle(1_000 + i * 1_000, "100.00", "105.00", "95.00", "100.00" + (i % 10), String(i % 20))
+    );
+
+    const start = performance.now();
+    render(<StatusLine candles={manyCandles} crosshairTimeMs={null} />);
+    const elapsed = performance.now() - start;
+
+    expect(screen.getByTestId("chart-status-line-C")).toBeInTheDocument();
+    expect(elapsed).toBeLessThan(50);
+  });
 });

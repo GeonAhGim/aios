@@ -25,7 +25,6 @@ from uuid import uuid4
 
 import pytest
 
-from src.core.eventstore.projections import ledger as ledger_projection
 from src.core.eventstore.projections import orders as orders_projection
 from src.core.eventstore.projections import positions as positions_projection
 from src.data.models.base import AssetClass, Currency, Money
@@ -36,6 +35,7 @@ from src.foundation.ledger.adapters.postgres_balance_repository import PostgresB
 from src.foundation.ledger.adapters.postgres_journal_repository import PostgresJournalRepository
 from src.foundation.ledger.application.post_entry import post_entry
 from src.foundation.ledger.contracts.v1 import AccountType, LedgerEvent, LedgerEventType, UserSub
+from src.foundation.ledger.domain import eventstore_projection as ledger_projection
 from src.foundation.ledger.domain.chart_of_accounts import user_account
 from src.foundation.positions.adapters.postgres_journal_repository import (
     PostgresJournalRepository as PositionsJournalRepository,
@@ -475,6 +475,7 @@ async def test_positions_projection_rejects_sequence_gap_from_dropped_middle_ent
         )
 
 
+@pytest.mark.perf
 def test_positions_projection_folds_ten_thousand_fee_entries_under_budget() -> None:
     """성능 단언(D2): `project()`는 순수 fold(모듈 docstring, I/O 없음)라 DB
     없이도 측정할 수 있다 — `apply_one`이 엔트리마다 로트 전체를 다시

@@ -129,6 +129,54 @@ async def test_insert_for_other_tenant_is_rejected(pool):
             )
 
 
+async def test_update_moving_row_to_other_tenant_is_rejected(pool):
+    tenant_a = await create_test_tenant(pool)
+    tenant_b = await create_test_tenant(pool)
+    await _seed_consent(pool, tenant_a)
+
+    async with pool.acquire() as conn, AppRoleTx(conn, tenant_id=tenant_a):
+        with pytest.raises(asyncpg.InsufficientPrivilegeError):
+            await conn.execute(
+                "UPDATE consent_record SET tenant_id = $1 WHERE tenant_id = $2",
+                tenant_b,
+                tenant_a,
+            )
+
+
+async def test_delete_for_other_tenant_affects_no_rows(pool):
+    tenant_a = await create_test_tenant(pool)
+    tenant_b = await create_test_tenant(pool)
+    await _seed_consent(pool, tenant_b)
+
+    async with pool.acquire() as conn, AppRoleTx(conn, tenant_id=tenant_a):
+        result = await conn.execute("DELETE FROM consent_record WHERE tenant_id = $1", tenant_b)
+
+    assert result == "DELETE 0"
+
+
+async def test_tenant_transaction_binding_failure_raises_without_yielding_connection(
+    monkeypatch: pytest.MonkeyPatch, pool
+):
+    """실패주입: `set_config` 호출이 예외를 내면 [[tenant_transaction]]이 그
+    예외를 그대로 전파해야 한다 — GUC 바인딩 없이 커넥션을 넘겨 RLS 없이
+    쿼리가 실행되는 fail-open 경로가 있으면 안 된다(fail-closed 기본,
+    CLAUDE.md §3)."""
+    tenant_a = await create_test_tenant(pool)
+
+    original_execute = asyncpg.Connection.execute
+
+    async def _raise_on_set_config(self, query, *args, **kwargs):
+        if "set_config" in query:
+            raise RuntimeError("injected GUC binding failure")
+        return await original_execute(self, query, *args, **kwargs)
+
+    monkeypatch.setattr(asyncpg.Connection, "execute", _raise_on_set_config)
+
+    with pytest.raises(RuntimeError, match="injected GUC binding failure"):
+        async with tenant_transaction(pool, tenant_a) as conn:
+            await conn.fetch("SELECT 1")
+
+
 async def test_system_role_reads_null_tenant_audit_event_only(pool):
     tenant_a = await create_test_tenant(pool)
     await _seed_audit_event(pool, tenant_a, _sequence_no())

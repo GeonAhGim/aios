@@ -2,9 +2,11 @@
 
 Spec: AIOSproject 45번 §3 (`CreateMandate` -> draft revision).
 """
+
 from __future__ import annotations
 
 from dataclasses import replace
+from decimal import Decimal
 from uuid import UUID, uuid4
 
 from src.foundation.mandates.contracts.v1 import Autonomy as ContractAutonomy
@@ -30,7 +32,7 @@ def revision_to_view(revision: DomainRevision) -> MandateRevisionView:
         state=ContractRevisionState(revision.state.value),
         max_total_exposure_pct=revision.max_total_exposure_pct,
         max_single_instrument_pct=revision.max_single_instrument_pct,
-        min_cash_buffer_pct=revision.min_cash_buffer_pct,
+        min_cash_buffer_pct=float(revision.min_cash_buffer_pct),
         max_daily_loss_pct=revision.max_daily_loss_pct,
         allowed_autonomy=ContractAutonomy(revision.allowed_autonomy.value),
         forbidden_assets=list(revision.forbidden_assets),
@@ -72,7 +74,7 @@ async def create_draft_mandate(
         state=DomainRevisionState.DRAFT,
         max_total_exposure_pct=rules.max_total_exposure_pct,
         max_single_instrument_pct=rules.max_single_instrument_pct,
-        min_cash_buffer_pct=rules.min_cash_buffer_pct,
+        min_cash_buffer_pct=Decimal(str(rules.min_cash_buffer_pct)),
         max_daily_loss_pct=rules.max_daily_loss_pct,
         allowed_autonomy=DomainAutonomy(rules.allowed_autonomy.value),
         forbidden_assets=tuple(rules.forbidden_assets),

@@ -1,17 +1,18 @@
-"""LB-9 — `NavRepository`(ports/nav_repository.py)의 asyncpg 구현.
+"""LB-9 — asyncpg implementation of `NavRepository` (ports/nav_repository.py).
 
 Spec: docs/specs/L4_market_data_positions_ledger_v1.0.md#§4.3, §5, §9 LB-8/LB-9.
 
-`pos_nav_daily`는 WORM(§9 LB-8 마이그레이션)이라 `insert`만 있다. §5 표
-그대로 `INSERT ... ON CONFLICT (account_id, nav_date) DO NOTHING RETURNING`
-을 시도하고, 충돌(이미 그 날짜 행이 있음)이면 기존 행을 다시 읽어
-`source_hash`를 비교한다 — 다르면 재계산 결과가 이전과 달라졌다는 뜻이므로
-`NavChainBrokenError`(POS_NAV_CHAIN_BROKEN, 덮어쓰기 금지·운영 개입).
-같으면 동일한 재계산의 재시도이므로 기존 행을 그대로 반환한다(포트
-docstring: 호출자가 먼저 `get`으로 멱등 여부를 판단해야 하지만, 그 확인을
-건너뛴 재시도가 들어와도 데이터가 실제로 같다면 여기서도 조용히 안전하게
-받아준다). `CHECK(closing_nav = cash + positions_mv)` 등 다른 제약 위반은
-asyncpg 예외를 그대로 전파한다(자체 래핑 없이 fail-closed)."""
+`pos_nav_daily` is WORM (§9 LB-8 migration), so only `insert` is allowed. Per §5 table,
+attempts `INSERT ... ON CONFLICT (account_id, nav_date) DO NOTHING RETURNING`; on
+conflict (row for that date already exists), re-reads the existing row and compares
+`source_hash` — a mismatch means the recomputed result differs from the previous one, so
+raises `NavChainBrokenError` (POS_NAV_CHAIN_BROKEN, no overwrite, requires ops
+intervention).
+If equal, it is a retry of the same recomputation, so returns the existing row as-is
+(port docstring: caller should check idempotency via `get` first, but if a retried
+call skips that check and data is identical, we silently accept it here). Other
+constraint violations such as `CHECK(closing_nav = cash + positions_mv)` propagate as
+raw asyncpg exceptions (fail-closed, no custom wrapping)."""
 from __future__ import annotations
 
 import json
@@ -34,8 +35,8 @@ _INSERT_SQL = (
 
 
 class NavChainBrokenError(Exception):
-    """POS_NAV_CHAIN_BROKEN — 같은 `(account_id, nav_date)`가 다른
-    `source_hash`로 재계산됐다. 덮어쓰기 금지, 재시도 불가(운영 개입)."""
+    """POS_NAV_CHAIN_BROKEN — the same `(account_id, nav_date)` was recomputed with a
+    different `source_hash`. No overwrite allowed, no retry (operations intervention required)."""
 
     def __init__(self, account_id: UUID, nav_date: date) -> None:
         super().__init__(

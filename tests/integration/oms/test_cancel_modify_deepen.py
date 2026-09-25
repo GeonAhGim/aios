@@ -41,6 +41,7 @@ transition`(VENUE_EXPIRED, 인스턴스 B — 예: reconciler)이 같은 주문�
 `InvalidOrderTransitionError`로 거부된다 — 절대 두 인스턴스가 서로 다른
 최종 상태를 "동시에 맞다"고 믿는 상황(오손 상태)이 나오지 않는다.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -168,7 +169,8 @@ async def _row_counts(pool: asyncpg.Pool, order_id: uuid.UUID, event: str) -> di
         version = await conn.fetchval("SELECT version FROM orders WHERE order_id = $1", order_id)
         events = await conn.fetchval(
             "SELECT count(*) FROM order_events WHERE order_id = $1 AND event = $2",
-            order_id, event,
+            order_id,
+            event,
         )
         outbox = await conn.fetchval(
             "SELECT count(*) FROM order_command_outbox WHERE order_id = $1", order_id
@@ -179,9 +181,7 @@ async def _row_counts(pool: asyncpg.Pool, order_id: uuid.UUID, event: str) -> di
 # ---- D3: failure-injection (crash / DB-error / dropped-message) -----------
 
 
-async def test_simulated_db_error_during_cancel_transition_rolls_back_atomically(
-    pool, monkeypatch
-):
+async def test_simulated_db_error_during_cancel_transition_rolls_back_atomically(pool, monkeypatch):
     """DB-error simulation — `cancel_order`의 유일한 쓰기 단계(`_orders.
     transition`, order_events INSERT + orders UPDATE)에서 커넥션이 끊겼다고
     가정한다. `ok=True`는 이 호출 *다음* 줄에서만 세팅되므로 여기서 죽으면
@@ -315,6 +315,14 @@ async def test_cancel_order_ack_self_loop_latency_within_normalized_budget(pool)
         f"\ncancel_order ACK self-loop p95={cancel_p95:.3f}ms "
         f"baseline(SELECT 1) p95={baseline_p95:.3f}ms budget={budget_ms:.3f}ms"
     )
+    # 매 반복이 outbox에 CANCEL 행을 enqueue하지만 이 테스트는 디스패치하지
+    # 않는다 — 지우지 않으면 공유 TEST_DATABASE_URL의 전역 claim 큐(claim_batch는
+    # 주문/테스트로 필터하지 않는다, `outbox_repository.py` §5.1)에 PENDING 행이
+    # 남아, 이후(다른 세션의) perf 스위트가 자기 행 대신 이 오래된 행을 클레임해
+    # `report.acknowledged`가 spuriously 모자라지는 flake를 유발한다
+    # (esc-ci-pytest_perf, task-6845/6861/6883).
+    async with pool.acquire() as conn:
+        await conn.execute("DELETE FROM order_command_outbox WHERE order_id = $1", order_id)
     assert cancel_p95 < budget_ms
 
 
@@ -340,6 +348,11 @@ async def test_modify_order_ack_limit_self_loop_latency_within_normalized_budget
         f"\nmodify_order ACK/LIMIT self-loop p95={modify_p95:.3f}ms "
         f"baseline(SELECT 1) p95={baseline_p95:.3f}ms budget={budget_ms:.3f}ms"
     )
+    # `test_cancel_order_ack_self_loop_latency_within_normalized_budget`와 동일한
+    # 이유로 — 이 테스트도 outbox에 MODIFY 행을 enqueue만 하고 디스패치하지
+    # 않는다(esc-ci-pytest_perf, task-6845/6861/6883).
+    async with pool.acquire() as conn:
+        await conn.execute("DELETE FROM order_command_outbox WHERE order_id = $1", order_id)
     assert modify_p95 < budget_ms
 
 
@@ -380,8 +393,13 @@ def _assert_commit_rollback_gate_flips_red(
     env = dict(os.environ, PYTHONPATH=repo_root, PYTEST_ADDOPTS="", PYTHONIOENCODING="utf-8")
 
     baseline = subprocess.run(
-        command, capture_output=True, encoding="utf-8", errors="replace",
-        env=env, timeout=120, check=False,
+        command,
+        capture_output=True,
+        encoding="utf-8",
+        errors="replace",
+        env=env,
+        timeout=120,
+        check=False,
     )
     assert baseline.returncode == 0, baseline.stdout + baseline.stderr
     assert "1 passed" in baseline.stdout
@@ -392,8 +410,12 @@ def _assert_commit_rollback_gate_flips_red(
 
     mutated = subprocess.run(
         [*command[:-1], "-p", plugin_module_name, command[-1]],
-        capture_output=True, encoding="utf-8", errors="replace",
-        env=mutated_env, timeout=120, check=False,
+        capture_output=True,
+        encoding="utf-8",
+        errors="replace",
+        env=mutated_env,
+        timeout=120,
+        check=False,
     )
     assert mutated.returncode != 0, mutated.stdout + mutated.stderr
     assert "1 passed" not in mutated.stdout

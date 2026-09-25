@@ -240,6 +240,7 @@ def test_run_scheduled_sleeps_interval_hours_in_seconds_between_cycles() -> None
 # --- 성능 단언(D2) ----------------------------------------------------------------
 
 
+@pytest.mark.perf
 def test_run_backup_verify_orchestration_overhead_within_budget(tmp_path: Path) -> None:
     """단계 자체(pg_basebackup/asyncpg/pg_ctl)는 즉시 반환하는 가짜로 대체했으므로,
     남는 시간은 순수 오케스트레이션(딕셔너리 조립·조건 분기) 오버헤드뿐이다. 절대시간

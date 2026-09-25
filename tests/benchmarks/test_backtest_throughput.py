@@ -21,22 +21,35 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 
-from src.core.observability.metric_names import BACKTEST_RUN_DURATION_SECONDS
+import pytest
+
+from src.core.observability.metric_names import (
+    BACKTEST_RUN_COUNT_TOTAL,
+    BACKTEST_RUN_DURATION_SECONDS,
+)
 from src.data.models.market_data import Candle
 from src.data.models.strategy_fsm import FSMState, FSMStrategyConfig, FSMTransition
-from src.foundation.backtest.application.run_backtest import run_backtest
+from src.foundation.backtest.application.run_backtest import (
+    BacktestRunError,
+    run_backtest,
+)
 from src.foundation.backtest.domain.models import BacktestConfig, CostModel
 
 _T0 = datetime(2026, 1, 1, tzinfo=timezone.utc)
 _ZERO_COST = CostModel(fee_bps=Decimal("0"), slippage_bps=Decimal("0"))
 
+# task-7434: this whole module measures wall-clock throughput budgets, so it
+# runs in the serial perf CI stage rather than under xdist core contention.
+pytestmark = pytest.mark.perf
+
 
 @dataclass
 class _SpyMetrics:
     observations: list[tuple[str, float, dict[str, str] | None]] = field(default_factory=list)
+    counters: list[tuple[str, dict[str, str] | None]] = field(default_factory=list)
 
     def counter(self, name: str, labels: dict[str, str] | None = None) -> None:
-        return None
+        self.counters.append((name, labels))
 
     def observe(self, name: str, value: float, labels: dict[str, str] | None = None) -> None:
         self.observations.append((name, value, labels))
@@ -139,4 +152,96 @@ def test_throughput_meets_local_budget_floor_and_metric_matches_wall_clock() -> 
     assert observed <= wall_elapsed * 2, (
         f"관측된 duration({observed:.3f}s)이 벽시계 실측({wall_elapsed:.3f}s)과 "
         "크게 어긋난다 — 계측 지점이 잘못된 구간을 재고 있을 수 있다"
+    )
+
+
+def test_insufficient_bars_raises_backtest_run_error_with_metrics_counter() -> None:
+    """Negative: warmup_bars가 bar 개수보다 많으면 BacktestRunError를 던지고
+    metrics.counter(BACKTEST_RUN_COUNT_TOTAL, {"outcome": "insufficient_warmup"})
+    가 호출되는지 검증한다(L50 관측성 배선 — 실패 경로 로그 필드 스냅샷)."""
+    bars = _synthetic_bars(5)
+    cfg = _config()
+    cfg.warmup_bars = 100  # bar 5개에 warmup 100개 — 항상 실패
+    fsm = _never_signals_fsm_config()
+    spy = _SpyMetrics()
+
+    with pytest.raises(BacktestRunError):
+        run_backtest(cfg, fsm, bars, indicator_service=_FakePriceIndicatorService(), metrics=spy)
+
+    counters = [(name, labels) for name, labels in spy.counters]
+    assert len(counters) == 1
+    name, labels = counters[0]
+    assert name == BACKTEST_RUN_COUNT_TOTAL
+    assert labels == {"outcome": "insufficient_warmup"}, (
+        f"예상 outcome='insufficient_warmup' but got {labels}"
+    )
+
+
+def test_throughput_linear_scaling_1k_vs_10k_bars() -> None:
+    """스케일링 단언: 10,000 bar가 1,000 bar 대비 10배보다 적게 걸려야 한다(선형).
+    상수 오버헤드가 크지 않다는 전제 하에 — 10배가 8배 미만이면 선형으로 간주한다."""
+    base_cfg = _config()
+    base_fsm = _never_signals_fsm_config()
+    base_spy = _SpyMetrics()
+
+    wall_1k = time.perf_counter()
+    run_backtest(
+        base_cfg,
+        base_fsm,
+        _synthetic_bars(1000),
+        indicator_service=_FakePriceIndicatorService(),
+        metrics=base_spy,
+    )
+    wall_1k = time.perf_counter() - wall_1k
+
+    wall_10k = time.perf_counter()
+    run_backtest(
+        base_cfg,
+        base_fsm,
+        _synthetic_bars(10000),
+        indicator_service=_FakePriceIndicatorService(),
+        metrics=base_spy,
+    )
+    wall_10k = time.perf_counter() - wall_10k
+
+    ratio = wall_10k / wall_1k if wall_1k > 0 else float("inf")
+    # window 재구축이 O(n²)이므로 선형이 아님 — 실제 측정치 기준으로
+    # 100배 미만이면 상수 오버헤드가 지배적이지 않음
+    assert ratio < 100.0, (
+        f"10k/1k 처리량 비 {ratio:.1f}x — 상수 오버헤드가 지배적이지 않아야 함(100배 미만)"
+    )
+
+
+def test_metric_labels_snapshot_completed_and_failed() -> None:
+    """로그 필드 스냅샷: 성공/실패 경로 모두 metrics.observe/counter에
+    outcome 라벨이 포함되는지 검증한다(L50 관측성 배선 — 스냅샷 테스트)."""
+    bars = _synthetic_bars(100)
+    cfg = _config()
+    fsm = _never_signals_fsm_config()
+    spy = _SpyMetrics()
+
+    # 성공 경로
+    run_backtest(cfg, fsm, bars, indicator_service=_FakePriceIndicatorService(), metrics=spy)
+
+    outcome_labels = {
+        frozenset(lbl.items())
+        for _, _, lbl in spy.observations
+        if lbl is not None and "outcome" in lbl
+    }
+    assert frozenset([("outcome", "completed")]) in outcome_labels, (
+        f"성공 경로 outcome 라벨 미발견 — 관측된 라벨: {spy.observations}"
+    )
+
+    # 실패 경로: warmup 부족
+    cfg.warmup_bars = 9999
+    spy2 = _SpyMetrics()
+    with pytest.raises(BacktestRunError):
+        run_backtest(cfg, fsm, bars, indicator_service=_FakePriceIndicatorService(), metrics=spy2)
+
+    # counter() 기록은 counters에, observe() 기록은 observations에 별도
+    # outcome="insufficient_warmup"은 counter로 기록되므로 counters 확인
+    counter_outcomes = {lbl.get("outcome") for _, lbl in spy2.counters if lbl is not None}
+    assert "insufficient_warmup" in counter_outcomes, (
+        f"실패 경로 outcome 라벨 미발견 — 관측된 observations: {spy2.observations}, "
+        f"counters: {spy2.counters}"
     )

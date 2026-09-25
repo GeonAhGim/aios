@@ -1,11 +1,15 @@
+import re
+
 import pytest
 
+from src.core.strategy import condition_evaluator as condition_evaluator_module
 from src.core.strategy.condition_evaluator import (
     ConditionEvaluationError,
     ConditionEvaluator,
     IndicatorDataMissingError,
     extract_indicator_keys,
 )
+from src.core.strategy.indicator_key import IndicatorKeyError
 
 
 @pytest.fixture
@@ -76,3 +80,40 @@ def test_extract_indicator_keys_or_combination():
         "RSI",
         "SMA_timeperiod20",
     ]
+
+
+def test_empty_expression_raises_evaluation_error(evaluator: ConditionEvaluator):
+    with pytest.raises(ConditionEvaluationError):
+        evaluator.evaluate("", {}, None)
+
+
+def test_extract_indicator_keys_with_lowercase_indicator_raises_key_error():
+    # 컴파일러가 만들 수 없는 형태(indicator_key 문법 위반) — parse_key의
+    # IndicatorKeyError가 그대로 전파되어야 한다(컴파일러 버그 신호).
+    with pytest.raises(IndicatorKeyError):
+        extract_indicator_keys("rsi > 30")
+
+
+def test_extract_indicator_keys_propagates_parse_key_failure(monkeypatch: pytest.MonkeyPatch):
+    def _boom(key: str) -> None:
+        raise IndicatorKeyError(f"injected failure for {key!r}")
+
+    monkeypatch.setattr(condition_evaluator_module, "parse_key", _boom)
+
+    with pytest.raises(IndicatorKeyError):
+        extract_indicator_keys("RSI > 30")
+
+
+def test_unsupported_operator_raises_evaluation_error(
+    evaluator: ConditionEvaluator, monkeypatch: pytest.MonkeyPatch
+):
+    # _ATOMIC_RE가 실제로는 알려진 연산자만 매칭시키므로, 공개 API로는
+    # 도달할 수 없는 방어 분기(라인 107) — 컴파일러 문법이 확장돼도
+    # ConditionEvaluator가 조용히 틀린 값을 반환하지 않고 실패해야 함을 검증.
+    permissive_re = re.compile(
+        r"^(?P<key>\S+)\s+(?P<op>\S+)\s+(?P<threshold>-?\d+(?:\.\d+)?)$"
+    )
+    monkeypatch.setattr(condition_evaluator_module, "_ATOMIC_RE", permissive_re)
+
+    with pytest.raises(ConditionEvaluationError):
+        evaluator.evaluate("RSI XOR 30", {"RSI": 31.0}, None)

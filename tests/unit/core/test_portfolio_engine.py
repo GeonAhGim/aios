@@ -188,6 +188,7 @@ def test_failure_injection_corrupted_total_equity_lookup_propagates_fail_closed(
 # --- 성능 단언 (1) --------------------------------------------------------
 
 
+@pytest.mark.perf
 def test_performance_allocate_p99_latency_within_pretrade_gate_budget():
     """ADR-2026-09-09-C Decision 1 예산: 사전거래 게이트 p99 5ms.
     PortfolioEngine.allocate는 주문 제출 이전(수량 승인) 경로이므로 이

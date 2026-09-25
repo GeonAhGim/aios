@@ -91,6 +91,36 @@ def _resolve_relative(module_dotted: str, is_package: bool, level: int, module: 
     return ".".join(p for p in package_parts if p)
 
 
+def _import_names(node: ast.Import) -> set[str]:
+    return {alias.name for alias in node.names}
+
+
+def _relative_import_targets(
+    node: ast.ImportFrom, module_dotted: str, is_package: bool
+) -> set[str]:
+    base = _resolve_relative(module_dotted, is_package, node.level, node.module)
+    if not base:
+        return set()
+    targets = {base}
+    targets.update(f"{base}.{alias.name}" for alias in node.names if alias.name != "*")
+    return targets
+
+
+def _absolute_import_targets(node: ast.ImportFrom) -> set[str]:
+    if not node.module:
+        return set()
+    targets = {node.module}
+    if node.module == "src" or node.module.startswith("src."):
+        targets.update(f"{node.module}.{alias.name}" for alias in node.names if alias.name != "*")
+    return targets
+
+
+def _importfrom_targets(node: ast.ImportFrom, module_dotted: str, is_package: bool) -> set[str]:
+    if node.level and node.level > 0:
+        return _relative_import_targets(node, module_dotted, is_package)
+    return _absolute_import_targets(node)
+
+
 def _imports_of(path: Path, module_dotted: str, is_package: bool) -> set[str]:
     try:
         tree = ast.parse(path.read_text(encoding="utf-8", errors="replace"), filename=str(path))
@@ -99,22 +129,9 @@ def _imports_of(path: Path, module_dotted: str, is_package: bool) -> set[str]:
     targets: set[str] = set()
     for node in ast.walk(tree):
         if isinstance(node, ast.Import):
-            for alias in node.names:
-                targets.add(alias.name)
+            targets.update(_import_names(node))
         elif isinstance(node, ast.ImportFrom):
-            if node.level and node.level > 0:
-                base = _resolve_relative(module_dotted, is_package, node.level, node.module)
-                if base:
-                    targets.add(base)
-                    for alias in node.names:
-                        if alias.name != "*":
-                            targets.add(f"{base}.{alias.name}")
-            elif node.module:
-                targets.add(node.module)
-                if node.module == "src" or node.module.startswith("src."):
-                    for alias in node.names:
-                        if alias.name != "*":
-                            targets.add(f"{node.module}.{alias.name}")
+            targets.update(_importfrom_targets(node, module_dotted, is_package))
     return targets
 
 

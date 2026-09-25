@@ -1,12 +1,18 @@
 """Strategy Validation repository port. domain은 이 Protocol만 알고, 실제 구현
 (adapters/)은 모른다(71번 §4)."""
+
 from __future__ import annotations
 
 from decimal import Decimal
 from typing import Any, Protocol
 from uuid import UUID
 
-from src.foundation.validation.domain.models import ValidationResult, ValidationRun
+from src.foundation.validation.domain.models import (
+    Outcome,
+    ValidationBundle,
+    ValidationResult,
+    ValidationRun,
+)
 
 
 class ValidationRepository(Protocol):
@@ -30,10 +36,20 @@ class ValidationRepository(Protocol):
         warmup_bars: int,
         periods_per_year: int,
         initial_equity: Decimal,
+        artifact_hash: str | None = None,
+        policy_version: str = "vp-v1",
+        seed: int = 0,
+        data_snapshot_hash: str | None = None,
+        trace_id: str | None = None,
     ) -> ValidationRun:
         """QUEUED 상태로 새 run을 만든다. `get_run_by_snapshot`이 이미 있다고
         확인한 뒤에만 호출하는 게 아니라면, UNIQUE 위반 시
-        ConcurrencyConflictError를 던진다(구현체 책임 — 105번 §2.2)."""
+        ConcurrencyConflictError를 던진다(구현체 책임 — 105번 §2.2).
+
+        L37 (§9 L37) -- `artifact_hash`/`policy_version`/`seed`/
+        `data_snapshot_hash`/`trace_id` all have defaults, so a pre-L37
+        caller (`start_validation.py`) that never passes them keeps working
+        unchanged (107 §3.3 MINOR rule, same defaults as `domain/models.py`)."""
         ...
 
     async def mark_running(self, run_id: UUID) -> ValidationRun:
@@ -52,3 +68,42 @@ class ValidationRepository(Protocol):
         ...
 
     async def get_result_for_run(self, run_id: UUID) -> ValidationResult | None: ...
+
+
+class ValidationBundleRepository(Protocol):
+    """L37 (§9 L37) -- persistence for `domain/models.ValidationBundle`
+    (migration M3's `strategy_validation_bundle` table). Separate Protocol
+    from `ValidationRepository` because no caller in this codebase composes
+    both yet (`application/build_bundle.py`, the writer, is a later leaf per
+    §9 L43) -- keeping them apart means that leaf can depend on just this
+    narrower port instead of the whole run/result surface."""
+
+    async def get_bundle(
+        self, artifact_hash: str, policy_version: str, data_snapshot_hash: str
+    ) -> ValidationBundle | None:
+        """76 §1 reproducibility/idempotency -- returns the existing bundle
+        for this exact (artifact, policy, snapshot) combination instead of
+        re-evaluating it. The UNIQUE constraint (migration 627bd92ec750)
+        guarantees this lookup and `create_bundle` below never race at the
+        schema level (105 §2.2)."""
+        ...
+
+    async def create_bundle(
+        self,
+        *,
+        artifact_hash: str,
+        policy_version: str,
+        data_snapshot_hash: str,
+        outcome: Outcome,
+        check_run_ids: tuple[UUID, ...],
+        bundle_hash: str,
+        hard_fail_reasons: tuple[str, ...] = (),
+        obligations: tuple[str, ...] = (),
+    ) -> ValidationBundle:
+        """Creates a new bundle. Unless the caller already confirmed via
+        `get_bundle` that none exists, a UNIQUE violation raises
+        `ConcurrencyConflictError` (implementation's responsibility -- same
+        pattern as `ValidationRepository.create_run`). I6 (both directions)
+        is enforced at construction time by `ValidationBundle.__post_init__`,
+        not by this method."""
+        ...

@@ -142,6 +142,41 @@ def test_request_context_rejects_invalid_actor_subject_id():
         )
 
 
+def test_request_context_rejects_invalid_schema_version():
+    """불변식 위반 입력 — schema_version은 Literal["v1"]여야 한다.
+    다른 버전(예: "v2")을 생성하면 ValidationError를 던진다.
+    bind()가 model_copy(update=...)로 복사할 때 검증이 우회되므로,
+    새 RequestContext 생성 시 불변식이 반드시 걸러지는지를 직접 검증한다.
+    이는 버전 마이그레이션 중 새 컨텍스트 생성을 막는 불변식이다."""
+    with pytest.raises(ValidationError):
+        RequestContext(
+            trace_id=uuid.uuid4(),
+            request_id="test",
+            schema_version="v2",
+        )
+
+
+def test_bind_failure_in_component_copy_does_not_leak_partial_context():
+    """실패 주입 — bind() 내부에서 model_copy(update=overrides)가 예외를
+    던지면 _context_var/request_id_var 어느 쪽도 set되지 않아야 한다.
+    fail-closed: 예외가 인자 평가 단계가 아닌 컨텍스트 복사 단계에서 나더라도
+    원본 컨텍스트는 변경되지 않는다."""
+    before_ctx = current()
+    before_rid = request_id_var.get()
+
+    def _broken_copy(self, /, **kwargs):
+        raise RuntimeError("model_copy boom")
+
+    with patch.object(RequestContext, "model_copy", _broken_copy):
+        with pytest.raises(RuntimeError):
+            with bind(component="api.broken"):
+                pass
+
+    # 바깥 컨텍스트가 손상되지 않았는지 확인
+    assert current().component == before_ctx.component
+    assert request_id_var.get() == before_rid
+
+
 def test_bind_system_failure_during_trace_id_generation_leaves_no_partial_context():
     """실패 주입 — bind_system이 새 trace_id/request_id를 만드는 도중(uuid.uuid4) 예외가
     나면 fail-closed여야 한다: 예외가 인자 평가 단계에서 나므로 `_context_var`/

@@ -8,9 +8,19 @@ from __future__ import annotations
 
 from datetime import date
 from typing import Protocol
+from uuid import UUID
 
 
 class PersonalOperationStatePort(Protocol):
+    async def personal_mode_account_id(self) -> UUID | None:
+        """The single account/tenant id personal-conservative mode is
+        scoped to for this deployment, or `None` if not configured/enabled.
+        task-3986 — `foundation_gate.py`'s 4th layer only evaluates orders
+        for the account matching this id; every other account's existing
+        3-layer flow is untouched (no global enforcement, per-account
+        opt-in only)."""
+        ...
+
     async def is_kill_engaged(self) -> bool: ...
 
     async def kill_reason(self) -> str | None: ...

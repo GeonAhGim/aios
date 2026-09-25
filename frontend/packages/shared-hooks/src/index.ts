@@ -19,6 +19,7 @@ export {
   useRegisterExchangeCredential,
   useRevokeExchangeCredential,
   useExchangeBalance,
+  useExchangePositions,
 } from "./useExchanges";
 export {
   useIndicators,
@@ -65,8 +66,17 @@ export {
   usePendingApprovalRequests,
   useApproveRequest,
   useRejectRequest,
+  useAuditLog,
 } from "./useAdmin";
-export { useSafetyControls, useDeactivateSafetyControl, useEvaluateRecovery } from "./useRiskGate";
+export {
+  useSafetyControls,
+  useDeactivateSafetyControl,
+  useEvaluateRecovery,
+  useActivateSafetyControl,
+  useEvaluateRiskGate,
+  useApproveRuleBundle,
+  useActivateRuleBundle,
+} from "./useRiskGate";
 export {
   useMandateStatus,
   useCreateMandateDraft,
@@ -110,3 +120,9 @@ export {
   usePausePaperDeployment,
   useStopPaperDeployment,
 } from "./usePaperControl";
+export {
+  useAlgoProgress,
+  useLatestTca,
+  useTcaRevision,
+  useComputeTca,
+} from "./useEms";

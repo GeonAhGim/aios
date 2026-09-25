@@ -17,7 +17,6 @@ DEPTH_DC_RD 소급감사 task-2726) D1 -> D3 증빙.
 from __future__ import annotations
 
 import random
-import time
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
 
@@ -27,6 +26,7 @@ from src.foundation.market_data.domain.point_in_time import (
     ReferenceAttribute,
     latest_attributes_as_of,
 )
+from tests.conftest import PerfBudget
 
 _INSTRUMENT_ID = "TEST-INSTRUMENT-DEEPEN"
 _T0 = datetime(2026, 1, 1, tzinfo=timezone.utc)
@@ -84,12 +84,14 @@ def test_far_future_known_at_never_leaks_into_present_query() -> None:
 
 
 @pytest.mark.perf
-def test_latest_attributes_as_of_meets_latency_budget_with_many_keys_and_corrections() -> None:
+def test_latest_attributes_as_of_meets_latency_budget_with_many_keys_and_corrections(
+    perf_budget: PerfBudget,
+) -> None:
     """2,000개 attr_key x 3건 정정(6,000 레코드)에 대한 단건 판정이 절대시간
     예산 내여야 한다(선형 스캔이 이차로 퇴화하지 않았는지 -- FA-9 `as_of`
     필터링 + 이 모듈의 attr_key별 최댓값 리듀스 둘 다 대상)."""
     n_keys = 2_000
-    budget_sec = 2.0  # 실측 로컬 <0.3s
+    budget_ms = 2000.0  # 실측 로컬 <300ms
     as_of = _T0 + timedelta(days=2)
     records: list[ReferenceAttribute] = []
     for i in range(n_keys):
@@ -100,45 +102,39 @@ def test_latest_attributes_as_of_meets_latency_budget_with_many_keys_and_correct
             _attr(key=key, value="v2", known_at=_T0 + timedelta(days=3))
         )  # 미래(안 보임)
 
-    start = time.perf_counter()
-    result = latest_attributes_as_of(records, as_of=as_of)
-    elapsed = time.perf_counter() - start
+    def _run() -> None:
+        result = latest_attributes_as_of(records, as_of=as_of)
+        assert len(result) == n_keys
+        assert result["attr_0"].attr_value == "v1"  # v2는 as_of보다 미래라 안 보임
 
+    sample = perf_budget.assert_within(_run, budget_ms=budget_ms, label="point_in_time")
     print(
         f"[DC-21 point_in_time] latest_attributes_as_of with {len(records)} records "
-        f"({n_keys} keys) in {elapsed:.4f}s (budget<{budget_sec}s)"
-    )
-    assert len(result) == n_keys
-    assert result["attr_0"].attr_value == "v1"  # v2는 as_of보다 미래라 안 보임
-    assert elapsed < budget_sec, (
-        f"{len(records)}건 판정이 예산({budget_sec}s)을 넘었습니다({elapsed:.4f}s)."
+        f"({n_keys} keys) in {sample.cpu_ms:.1f}ms (budget<{budget_ms}ms)"
     )
 
 
 @pytest.mark.perf
-def test_repeated_calls_meet_throughput_budget() -> None:
+def test_repeated_calls_meet_throughput_budget(perf_budget: PerfBudget) -> None:
     """동일 레코드 집합에 대한 반복 판정(호출자가 매번 as_of만 바꾸는
     폴링 패턴)이 처리량 예산을 지켜야 한다."""
     iterations = 5_000
-    budget_sec = 4.0  # 실측 로컬 <0.5s, CI 편차 감안
+    budget_ms = 4000.0  # 실측 로컬 <500ms, CI 편차 감안
     records = [
         _attr(key="lot_size", value="10", known_at=_T0),
         _attr(key="lot_size", value="20", known_at=_T0 + timedelta(days=1)),
         _attr(key="tick_size", value="0.01", known_at=_T0),
     ]
 
-    start = time.perf_counter()
-    for i in range(iterations):
-        result = latest_attributes_as_of(records, as_of=_T0 + timedelta(hours=i % 48))
-        assert "lot_size" in result
-    elapsed = time.perf_counter() - start
+    def _run() -> None:
+        for i in range(iterations):
+            result = latest_attributes_as_of(records, as_of=_T0 + timedelta(hours=i % 48))
+            assert "lot_size" in result
 
+    sample = perf_budget.assert_within(_run, budget_ms=budget_ms, label="throughput")
     print(
         f"[DC-21 point_in_time] latest_attributes_as_of x{iterations} repeated calls "
-        f"in {elapsed:.3f}s (budget<{budget_sec}s)"
-    )
-    assert elapsed < budget_sec, (
-        f"{iterations}회 반복이 예산({budget_sec}s)을 넘었습니다({elapsed:.3f}s)."
+        f"in {sample.cpu_ms:.1f}ms (budget<{budget_ms}ms)"
     )
 
 

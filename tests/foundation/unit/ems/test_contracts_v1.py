@@ -22,6 +22,13 @@ from src.foundation.ems.contracts.v1 import (
     RouteDecision,
     TcaResult,
 )
+from src.foundation.ems.domain.parent_child import (
+    AlgoConstraintError,
+    ParentTerminalError,
+    assert_can_create_child,
+    assert_parent_accepts_new_child,
+    assert_slice_within_parent_qty,
+)
 
 _NOW = datetime(2026, 9, 7, 0, 0, tzinfo=timezone.utc)
 
@@ -129,16 +136,18 @@ def test_parent_order_and_child_order_roundtrip() -> None:
 
 def test_parent_order_qty_rejects_float() -> None:
     with pytest.raises(ValidationError):
-        ParentOrder(
-            parent_id=uuid4(),
-            instrument_id="BTC/USDT",
-            side=OrderSide.BUY,
-            qty=1.5,
-            algo=_algo_spec(),
-            constraints=ParentOrderConstraints(max_participation_pct=Decimal("10")),
-            fund_id=uuid4(),
-            portfolio_id=uuid4(),
-            arrival_ts=_NOW,
+        ParentOrder.model_validate(
+            {
+                "parent_id": uuid4(),
+                "instrument_id": "BTC/USDT",
+                "side": OrderSide.BUY,
+                "qty": 1.5,
+                "algo": _algo_spec(),
+                "constraints": ParentOrderConstraints(max_participation_pct=Decimal("10")),
+                "fund_id": uuid4(),
+                "portfolio_id": uuid4(),
+                "arrival_ts": _NOW,
+            }
         )
 
 
@@ -169,7 +178,9 @@ def test_route_decision_requires_reason_codes() -> None:
 
 def test_route_decision_expected_cost_bps_rejects_float() -> None:
     with pytest.raises(ValidationError):
-        RouteDecision(venue="binance", reason_codes=["BEST_FEE"], expected_cost_bps=1.2)
+        RouteDecision.model_validate(
+            {"venue": "binance", "reason_codes": ["BEST_FEE"], "expected_cost_bps": 1.2}
+        )
 
 
 def test_tca_result_fields_are_strict_decimal() -> None:
@@ -182,12 +193,14 @@ def test_tca_result_fields_are_strict_decimal() -> None:
     )
     assert result.schema_version == "v1"
     with pytest.raises(ValidationError):
-        TcaResult(
-            arrival_bps=1.0,
-            vwap_bps=Decimal("2"),
-            impact_bps=Decimal("3"),
-            fees_bps=Decimal("4"),
-            opportunity_bps=Decimal("5"),
+        TcaResult.model_validate(
+            {
+                "arrival_bps": 1.0,
+                "vwap_bps": Decimal("2"),
+                "impact_bps": Decimal("3"),
+                "fees_bps": Decimal("4"),
+                "opportunity_bps": Decimal("5"),
+            }
         )
 
 
@@ -272,9 +285,11 @@ def test_tca_decomposition_identity() -> None:
 
 def test_gate_red_parent_terminal_blocks_child_creation() -> None:
     """Gate red reproduction — EM-A4: terminal parent may not spawn children
-    (DoD: 게이트 적색 재현 1건). ParentOrder status가 terminal일 때
-    ChildOrder 생성이 논리적으로 금지되어야 한다 — 계약 레벨에서
-    status 검증이 실패하는 상황을 주입한다."""
+    (DoD: 게이트 적색 재현 1건). 실제 도메인 게이트
+    (`assert_parent_accepts_new_child` / `assert_can_create_child`)를
+    terminal parent status로 호출해 `ParentTerminalError`가 발생하고,
+    그 예외의 `.code`가 스펙의 `EM_PARENT_TERMINAL` taxonomy와 정확히
+    일치함을 검증한다 — 스키마 검증이 아니라 실제 게이트 실패 동작 재현."""
     terminal_parent = ParentOrder(
         parent_id=uuid4(),
         instrument_id="BTC/USDT",
@@ -288,7 +303,43 @@ def test_gate_red_parent_terminal_blocks_child_creation() -> None:
         status=OrderStatus.FILLED,  # terminal 상태
     )
     assert terminal_parent.status in TERMINAL_ORDER_STATUSES
-    # Gate red: terminal parent에서 child 생성 시도 시
-    # 도메인 레이어에서 예외가 발생해야 함 (계약 레벨에서 status 확인 가능)
-    assert terminal_parent.status == OrderStatus.FILLED
-    assert terminal_parent.status not in {OrderStatus.CREATED, OrderStatus.PARTIALLY_FILLED}
+
+    with pytest.raises(ParentTerminalError) as excinfo:
+        assert_parent_accepts_new_child(terminal_parent.status)
+    assert excinfo.value.code == EmsErrorCode.PARENT_TERMINAL
+    assert HTTP_STATUS[excinfo.value.code] == 409
+
+    # EM-A4 precedence: the combinator must raise the same taxonomy even
+    # when the EM-A1 quantity check would also fail on a non-terminal parent.
+    with pytest.raises(ParentTerminalError) as combinator_excinfo:
+        assert_can_create_child(
+            parent_status=terminal_parent.status,
+            parent_qty=Decimal("1.0"),
+            committed_child_qty=Decimal("0"),
+            new_slice_qty=Decimal("1.0"),
+        )
+    assert combinator_excinfo.value.code == EmsErrorCode.PARENT_TERMINAL
+
+    # negative control: a non-terminal parent does not trip EM_PARENT_TERMINAL.
+    assert_parent_accepts_new_child(OrderStatus.CREATED)
+
+
+def test_gate_red_algo_constraint_blocks_oversized_slice() -> None:
+    """Gate red reproduction — EM-A1: a slice pushing committed child qty
+    past parent qty raises `AlgoConstraintError` with taxonomy
+    `EM_ALGO_CONSTRAINT` (400), not merely a schema validation error."""
+    with pytest.raises(AlgoConstraintError) as excinfo:
+        assert_slice_within_parent_qty(
+            parent_qty=Decimal("1.0"),
+            committed_child_qty=Decimal("0.6"),
+            new_slice_qty=Decimal("0.5"),
+        )
+    assert excinfo.value.code == EmsErrorCode.ALGO_CONSTRAINT
+    assert HTTP_STATUS[excinfo.value.code] == 400
+
+    # boundary case: exact equality is allowed, no error.
+    assert_slice_within_parent_qty(
+        parent_qty=Decimal("1.0"),
+        committed_child_qty=Decimal("0.6"),
+        new_slice_qty=Decimal("0.4"),
+    )

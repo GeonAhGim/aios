@@ -24,11 +24,8 @@ from dataclasses import dataclass
 from typing import Protocol, runtime_checkable
 from uuid import UUID
 
+from src.foundation.market_data.api import SymbolNormalizationError, to_canonical
 from src.foundation.market_data.contracts.v1 import Venue
-from src.foundation.market_data.domain.reference.symbol_normalizer import (
-    SymbolNormalizationError,
-    to_canonical,
-)
 from src.foundation.research_data.contracts.v1 import ResearchItem
 
 __all__ = [

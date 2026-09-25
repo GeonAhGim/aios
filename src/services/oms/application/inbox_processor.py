@@ -52,7 +52,7 @@ import asyncpg
 
 from src.core.db.conditional_write import conditional_update
 from src.core.observability.metric_names import OMS_INBOX_DUPLICATE_COUNT_TOTAL
-from src.core.observability.metrics import MetricsPort, NullMetrics
+from src.core.observability.metrics import MetricsPort, NullMetrics, safe_counter
 from src.data.models.trading import OrderStatus
 from src.services.oms.adapters.fills_repository import FillsRepository
 from src.services.oms.adapters.inbox_repository import InboxRepository, InboxRow
@@ -99,8 +99,10 @@ class InboxProcessor:
         async with self._pool.acquire() as conn, conn.transaction():
             inserted = await self._inbox.insert_if_absent(conn, ev)
             if not inserted:
-                self._metrics.counter(
-                    OMS_INBOX_DUPLICATE_COUNT_TOTAL, {"venue": ev.venue, "source": ev.source}
+                safe_counter(
+                    self._metrics,
+                    OMS_INBOX_DUPLICATE_COUNT_TOTAL,
+                    {"venue": ev.venue, "source": ev.source},
                 )
                 logger.info(
                     "inbox_processor: 중복 이벤트 흡수 venue=%s event=%s",

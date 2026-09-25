@@ -4,6 +4,7 @@ Spec: docs/specs/L4_platform_observability_tenancy_api_v1.0.md §9 PLT-08.
 `clock`을 주입해 stale 판정을 `asyncio.sleep` 없이 결정론적으로 검증한다
 (task-423/d3227c9 결정론화 관례).
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass, field
@@ -153,3 +154,108 @@ def test_set_loop_health_replaces_singleton() -> None:
         assert loop_health() is replacement
     finally:
         set_loop_health(original)
+
+
+# ── Negative tests (불변식 위반 입력 처리) ──────────────────────────────
+
+
+def test_record_tick_with_empty_loop_name_does_not_crash() -> None:
+    """빈 문자열 루프 이름이 들어와도 예외 없이 기록되고 snapshot에 분리된다."""
+    clock = _FakeClock(0.0)
+    spy = _SpyMetrics()
+    health = LoopHealth(clock=clock, metrics_port=spy)
+
+    health.record_tick("", True, 0.01, interval_sec=1.0)
+
+    status = health.snapshot()[""]
+    assert status.last_success_at == 0.0
+
+
+def test_record_tick_with_negative_duration_records_negative_age() -> None:
+    """음수 duration_s가 들어와도 내부 상태가 깨지지 않고 게이지에 반영된다."""
+    clock = _FakeClock(100.0)
+    spy = _SpyMetrics()
+    health = LoopHealth(clock=clock, metrics_port=spy)
+
+    health.record_tick("degraded", True, -1.0, interval_sec=5.0)
+
+    # duration_s 음수가 last_success_age에 직접 영향을 준다(음수 게이지).
+    # 이 테스트는 "음수 입력이 예외/hung를 유발하지 않음"을 검증한다.
+    assert (LOOP_LAST_SUCCESS_AGE_SECONDS, 0.0, {"loop": "degraded"}) in spy.gauges
+
+
+def test_snapshot_returns_independent_copy() -> None:
+    """snapshot()이 반환된 딕셔너리를 수정해도 내부 상태에 영향을 주지 않는다."""
+    clock = _FakeClock(0.0)
+    health = LoopHealth(clock=clock, metrics_port=_SpyMetrics())
+
+    health.record_tick("loop_a", True, 0.01, interval_sec=5.0)
+
+    snap = health.snapshot()
+    snap["loop_a"] = LoopStatus(last_success_at=999.0, consecutive_failures=999, interval_sec=999.0)
+
+    real = health.snapshot()["loop_a"]
+    assert real.last_success_at == 0.0
+    assert real.consecutive_failures == 0
+
+
+# ── Failure-injection tests (의존성 예외 유발) ─────────────────────────
+
+
+class _FailingMetrics:
+    """모든 메트릭 호출에서 예외를 던지는 포트 — 의존성 고장 시 루프가 멈추지 않는지 검증."""
+
+    def counter(self, name: str, labels: dict[str, str] | None = None) -> None:
+        raise RuntimeError("prometheus connection refused")
+
+    def observe(self, name: str, value: float, labels: dict[str, str] | None = None) -> None:
+        raise RuntimeError("prometheus connection refused")
+
+    def gauge(self, name: str, value: float, labels: dict[str, str] | None = None) -> None:
+        raise RuntimeError("prometheus connection refused")
+
+
+def test_record_tick_metrics_failure_does_not_crash_loop() -> None:
+    """metrics 포트가 예외를 던져도 record_tick은 내부 상태만 갱신하고 예외를 전파하지 않는다."""
+    clock = _FakeClock(0.0)
+    health = LoopHealth(clock=clock, metrics_port=_FailingMetrics())
+
+    # 예외가 전파되면 여기서 RuntimeError가 터진다.
+    health.record_tick("critical_loop", True, 0.5, interval_sec=10.0)
+
+    # 내부 상태는 성공 tick으로 갱신되어야 한다.
+    status = health.snapshot()["critical_loop"]
+    assert status.last_success_at == 0.0
+    assert status.consecutive_failures == 0
+
+
+def test_record_tick_failure_with_metrics_crash_still_counts_failures() -> None:
+    """metrics 포트 고장 중 failure tick도 consecutive_failures를 올바르게 증가시킨다."""
+    clock = _FakeClock(0.0)
+    health = LoopHealth(clock=clock, metrics_port=_FailingMetrics())
+
+    health.record_tick("unstable", False, 0.1, interval_sec=5.0)
+    health.record_tick("unstable", False, 0.1, interval_sec=5.0)
+
+    status = health.snapshot()["unstable"]
+    assert status.consecutive_failures == 2
+
+
+# ── Performance assertion (성능 예산) ───────────────────────────────────
+
+
+@pytest.mark.perf
+def test_record_tick_latency_under_budget() -> None:
+    """10,000회 record_tick 호출이 1초 미만에 완료되어야 한다 (PLT-08 성능 예산)."""
+    import time as _time
+
+    clock = _FakeClock(0.0)
+    spy = _SpyMetrics()
+    health = LoopHealth(clock=clock, metrics_port=spy)
+
+    start = _time.perf_counter()
+    for _i in range(10_000):
+        health.record_tick("perf_loop", True, 0.001, interval_sec=1.0)
+    elapsed = _time.perf_counter() - start
+
+    assert elapsed < 1.0, f"10,000 calls took {elapsed:.3f}s — exceeds 1s budget"

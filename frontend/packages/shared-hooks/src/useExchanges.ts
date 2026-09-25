@@ -32,3 +32,11 @@ export function useExchangeBalance(exchange: string | null) {
     enabled: !!exchange,
   });
 }
+
+export function useExchangePositions(exchange: string | null) {
+  return useQuery({
+    queryKey: ["exchangePositions", exchange],
+    queryFn: () => apiClient.getExchangePositions(exchange as string),
+    enabled: !!exchange,
+  });
+}

@@ -2,6 +2,7 @@
 
 Spec: AIOSproject 76번 §1/§2, 105번(동시성 표준).
 """
+
 from __future__ import annotations
 
 import json
@@ -16,6 +17,7 @@ from src.core.db.conditional_write import ConcurrencyConflictError, conditional_
 from src.foundation.validation.domain.models import (
     Outcome,
     RunState,
+    ValidationBundle,
     ValidationResult,
     ValidationRun,
 )
@@ -35,6 +37,11 @@ def _row_to_run(row: asyncpg.Record) -> ValidationRun:
         state=RunState(row["state"]),
         created_at=row["created_at"],
         completed_at=row["completed_at"],
+        artifact_hash=row["artifact_hash"],
+        policy_version=row["policy_version"],
+        seed=row["seed"],
+        data_snapshot_hash=row["data_snapshot_hash"],
+        trace_id=row["trace_id"],
     )
 
 
@@ -48,6 +55,22 @@ def _row_to_result(row: asyncpg.Record) -> ValidationResult:
         hard_fail_reasons=tuple(row["hard_fail_reasons"]),
         obligations=tuple(row["obligations"]),
         result_hash=row["result_hash"],
+        created_at=row["created_at"],
+        evidence_refs=tuple(row["evidence_refs"]),
+    )
+
+
+def _row_to_bundle(row: asyncpg.Record) -> ValidationBundle:
+    return ValidationBundle(
+        id=row["id"],
+        artifact_hash=row["artifact_hash"],
+        policy_version=row["policy_version"],
+        data_snapshot_hash=row["data_snapshot_hash"],
+        outcome=Outcome(row["outcome"]),
+        check_run_ids=tuple(row["check_run_ids"]),
+        bundle_hash=row["bundle_hash"],
+        hard_fail_reasons=tuple(row["hard_fail_reasons"]),
+        obligations=tuple(row["obligations"]),
         created_at=row["created_at"],
     )
 
@@ -82,14 +105,21 @@ class PostgresValidationRepository:
         warmup_bars: int,
         periods_per_year: int,
         initial_equity: Decimal,
+        artifact_hash: str | None = None,
+        policy_version: str = "vp-v1",
+        seed: int = 0,
+        data_snapshot_hash: str | None = None,
+        trace_id: str | None = None,
     ) -> ValidationRun:
         async with self._pool.acquire() as conn:
             try:
                 row = await conn.fetchrow(
                     "INSERT INTO strategy_validation_run "
                     "(strategy_id, strategy_version, check_type, input_snapshot_hash, "
-                    " cost_model, warmup_bars, periods_per_year, initial_equity) "
-                    "VALUES ($1, $2, $3, $4, $5::jsonb, $6, $7, $8) RETURNING *",
+                    " cost_model, warmup_bars, periods_per_year, initial_equity, "
+                    " artifact_hash, policy_version, seed, data_snapshot_hash, trace_id) "
+                    "VALUES ($1, $2, $3, $4, $5::jsonb, $6, $7, $8, $9, $10, $11, $12, $13) "
+                    "RETURNING *",
                     strategy_id,
                     strategy_version,
                     check_type,
@@ -98,6 +128,11 @@ class PostgresValidationRepository:
                     warmup_bars,
                     periods_per_year,
                     initial_equity,
+                    artifact_hash,
+                    policy_version,
+                    seed,
+                    data_snapshot_hash,
+                    trace_id,
                 )
             except asyncpg.UniqueViolationError as exc:
                 raise ConcurrencyConflictError(
@@ -154,8 +189,8 @@ class PostgresValidationRepository:
             result_row = await conn.fetchrow(
                 "INSERT INTO strategy_validation_result "
                 "(id, run_id, outcome, metrics, warnings, hard_fail_reasons, obligations, "
-                " result_hash) "
-                "VALUES ($1, $2, $3, $4::jsonb, $5, $6, $7, $8) RETURNING *",
+                " result_hash, evidence_refs) "
+                "VALUES ($1, $2, $3, $4::jsonb, $5, $6, $7, $8, $9) RETURNING *",
                 uuid4(),
                 run_id,
                 result.outcome.value,
@@ -164,6 +199,7 @@ class PostgresValidationRepository:
                 list(result.hard_fail_reasons),
                 list(result.obligations),
                 result.result_hash,
+                list(result.evidence_refs),
             )
         return _row_to_run(run_row), _row_to_result(result_row)
 
@@ -173,3 +209,60 @@ class PostgresValidationRepository:
                 "SELECT * FROM strategy_validation_result WHERE run_id = $1", run_id
             )
         return _row_to_result(row) if row is not None else None
+
+
+class PostgresValidationBundleRepository:
+    """asyncpg implementation of `ValidationBundleRepository` (migration
+    627bd92ec750, `strategy_validation_bundle`)."""
+
+    def __init__(self, pool: asyncpg.Pool) -> None:
+        self._pool = pool
+
+    async def get_bundle(
+        self, artifact_hash: str, policy_version: str, data_snapshot_hash: str
+    ) -> ValidationBundle | None:
+        async with self._pool.acquire() as conn:
+            row = await conn.fetchrow(
+                "SELECT * FROM strategy_validation_bundle "
+                "WHERE artifact_hash = $1 AND policy_version = $2 AND data_snapshot_hash = $3",
+                artifact_hash,
+                policy_version,
+                data_snapshot_hash,
+            )
+        return _row_to_bundle(row) if row is not None else None
+
+    async def create_bundle(
+        self,
+        *,
+        artifact_hash: str,
+        policy_version: str,
+        data_snapshot_hash: str,
+        outcome: Outcome,
+        check_run_ids: tuple[UUID, ...],
+        bundle_hash: str,
+        hard_fail_reasons: tuple[str, ...] = (),
+        obligations: tuple[str, ...] = (),
+    ) -> ValidationBundle:
+        async with self._pool.acquire() as conn:
+            try:
+                row = await conn.fetchrow(
+                    "INSERT INTO strategy_validation_bundle "
+                    "(artifact_hash, policy_version, data_snapshot_hash, outcome, "
+                    " check_run_ids, bundle_hash, hard_fail_reasons, obligations) "
+                    "VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING *",
+                    artifact_hash,
+                    policy_version,
+                    data_snapshot_hash,
+                    outcome.value,
+                    list(check_run_ids),
+                    bundle_hash,
+                    list(hard_fail_reasons),
+                    list(obligations),
+                )
+            except asyncpg.UniqueViolationError as exc:
+                raise ConcurrencyConflictError(
+                    f"strategy_validation_bundle: {artifact_hash}/{policy_version}/"
+                    f"{data_snapshot_hash}에 대한 이 정확한 조합은 이미 다른 요청이 먼저 "
+                    "만들었습니다."
+                ) from exc
+        return _row_to_bundle(row)

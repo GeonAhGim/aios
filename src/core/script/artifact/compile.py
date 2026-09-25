@@ -1,27 +1,33 @@
 """L4_analytics_authoring_backtest_marketplace_v1.0.md §9.4 DSL-12 —
-AIOS Script 컴파일 파이프라인 조립(순수, I/O 없음).
+Assembles the AIOS Script compile pipeline (pure, no I/O).
 
-DSL-2 렉서 → DSL-3 파서 → DSL-4 타입 → DSL-5 미래참조 → DSL-6 자원 →
-DSL-7 IR 순서 그대로 호출한다(task-1535 spec 문구). 각 단계는 재구현하지
-않고 그 단계의 공개 함수만 부른다. 성공하면 `CompiledScript`(IR·IR 바이트·
-자원 산정치·`script_hash`)를, 실패하면 §3.3 taxonomy 4종(`SCRIPT_SYNTAX`·
-`SCRIPT_TYPE`·`SCRIPT_LOOKAHEAD`·`SCRIPT_RESOURCE_LIMIT`)을 하나의
-`ScriptCompileError`로 감싸 (line, col)과 함께 낸다.
+Calls DSL-2 lexer -> DSL-3 parser -> DSL-4 type -> DSL-5 lookahead -> DSL-6
+resource -> DSL-7 IR in that exact order (task-1535 spec wording). Each
+stage is not reimplemented; only that stage's public function is called.
+On success this yields a `CompiledScript` (IR, IR bytes, resource estimate,
+`script_hash`); on failure it wraps one of the §3.3 taxonomy's 4 kinds
+(`SCRIPT_SYNTAX`, `SCRIPT_TYPE`, `SCRIPT_LOOKAHEAD`, `SCRIPT_RESOURCE_LIMIT`)
+into a single `ScriptCompileError` together with (line, col).
 
-오류 위치 복원(§3.3 "위치 정보 포함"): 렉서·파서·lookahead 오류는 토큰
-위치를 이미 갖는다. 타입·자원 오류는 AST에 위치가 없어(DSL-1 decision)
-"선언 접두(prefix) 이분탐색"으로 복원한다 — 타입 검사는 선언을 소스 순서로
-훑고 첫 오류에서 멈추며, 자원 산정치는 모두 선언이 늘수록 단조 증가하므로
-`Program(decls[:k])`가 실패하는 최소 k의 k번째 선언이 원인이다. 선언은
-문법상 반드시 `input|let|plot|signal|order` 키워드로 시작하고 그 키워드는
-표현식 안에 올 수 없으므로 k번째 선언 시작 키워드 토큰의 (line, col)이
-곧 선언 위치다.
+Error position recovery (§3.3 "includes position info"): lexer, parser, and
+lookahead errors already carry a token position. Type and resource errors
+have no position on the AST (DSL-1 decision), so they are recovered via
+"declaration-prefix binary search" — type checking walks declarations in
+source order and stops at the first error, and resource estimates are all
+monotonically non-decreasing as declarations accumulate, so the k-th
+declaration at the smallest k where `Program(decls[:k])` fails is the
+cause. Grammar requires every declaration to start with one of the
+`input|let|plot|signal|order` keywords, and that keyword can never appear
+inside an expression, so the (line, col) of the k-th declaration's leading
+keyword token is exactly the declaration's position.
 
-단계 순서의 결과: 음수·변수 postfix 인덱스는 파서(DSL-3)가 lookahead보다
-먼저 `SCRIPT_SYNTAX`로 거부한다. `SCRIPT_LOOKAHEAD`는 파서를 통과하는
-형태(`ta.security(...)`류)에서 난다. `ScriptLowerError`(DSL-7)는 taxonomy
-밖 — 타입검사를 통과한 §3.3 AST는 항상 내려가야 하므로 계약 위반이며,
-여기서 감싸지 않고 그대로 전파한다(API 계층에서 500 INTERNAL_ERROR).
+Consequence of the stage order: negative or variable postfix indices are
+rejected by the parser (DSL-3) as `SCRIPT_SYNTAX` before lookahead ever
+runs. `SCRIPT_LOOKAHEAD` only fires on forms that pass the parser (e.g.
+`ta.security(...)`-style calls). `ScriptLowerError` (DSL-7) is outside the
+taxonomy — a §3.3 AST that has passed type checking must always lower
+successfully, so a lowering failure is a contract violation; it is not
+wrapped here and propagates as-is (500 INTERNAL_ERROR at the API layer).
 """
 from __future__ import annotations
 
@@ -52,16 +58,17 @@ _DECL_KEYWORDS: Final = frozenset({"input", "let", "plot", "signal", "order"})
 
 
 class ScriptCompileError(Exception):
-    """§3.3 taxonomy 4종을 하나로 감싼 컴파일 오류(400, 재시도 불가).
+    """A compile error wrapping one of the §3.3 taxonomy's 4 kinds (400, not retryable).
 
-    `code`는 4종 중 하나, `line`/`col`은 1-기반 위치. `details`는 API 봉투의
-    `ApiError.details`에 그대로 실리는 dict(`code`/`line`/`col`) — 최상위
-    error_code는 기존 taxonomy(`VALIDATION_INVALID_FIELD`) 안에 머문다.
+    `code` is one of the 4 kinds; `line`/`col` are 1-based positions.
+    `details` is the dict (`code`/`line`/`col`) carried as-is in the API
+    envelope's `ApiError.details` — the top-level error_code stays within
+    the existing taxonomy (`VALIDATION_INVALID_FIELD`).
     """
 
     def __init__(self, code: str, message: str, line: int, col: int) -> None:
         if code not in SCRIPT_ERROR_CODES:
-            raise ValueError(f"§3.3 taxonomy 밖 코드: {code!r}")
+            raise ValueError(f"code outside §3.3 taxonomy: {code!r}")
         super().__init__(f"[{code}] {message} (line {line}, col {col})")
         self.code = code
         self.message = message
@@ -88,7 +95,7 @@ def compile_source(
     registry_version: str,
     limits: ResourceLimits = DEFAULT_LIMITS,
 ) -> CompiledScript:
-    """소스 → `CompiledScript`. 실패는 `ScriptCompileError`(4종) 하나로 낸다."""
+    """Source -> `CompiledScript`. On failure, raises one `ScriptCompileError` (one of 4 kinds)."""
     try:
         tokens = tokenize(source)  # DSL-2
         program = parse(source)  # DSL-3
@@ -108,7 +115,7 @@ def compile_source(
     except ScriptResourceLimitError as exc:
         line, col = _locate_failing_decl(tokens, program, _resource_fails(limits))
         raise ScriptCompileError(exc.code, exc.message, line, col) from exc
-    ir = lower_program(program)  # DSL-7 — ScriptLowerError는 감싸지 않는다(모듈 docstring)
+    ir = lower_program(program)  # DSL-7 -- ScriptLowerError is not wrapped (see module docstring)
     ir_bytes = to_bytes(ir)
     digest = script_hash(source=source, ir=ir, registry_version=registry_version)
     return CompiledScript(
@@ -121,7 +128,7 @@ def compile_source(
     )
 
 
-# ---- 위치 복원 ----
+# ---- position recovery ----
 
 
 def _type_fails(prefix: Program) -> bool:
@@ -144,7 +151,7 @@ def _resource_fails(limits: ResourceLimits) -> Callable[[Program], bool]:
 
 
 def decl_positions(tokens: list[Token]) -> list[tuple[int, int]]:
-    """k번째 선언 시작 키워드 토큰의 (line, col) 목록. 선언 개수와 1:1이다."""
+    """List of (line, col) for each decl's leading keyword token, 1:1 with declaration count."""
     return [
         (tok.line, tok.col)
         for tok in tokens
@@ -155,9 +162,10 @@ def decl_positions(tokens: list[Token]) -> list[tuple[int, int]]:
 def _locate_failing_decl(
     tokens: list[Token], program: Program, fails: Callable[[Program], bool]
 ) -> tuple[int, int]:
-    """`fails(Program(decls[:k]))`가 참이 되는 최소 k(1-기반)를 이분탐색해 그
-    선언의 위치를 돌려준다. 접두 단조성은 모듈 docstring 참조. 판정 함수가
-    전체에서도 거짓이면(호출 계약 위반) 소스 시작 (1, 1)로 fail-closed."""
+    """Binary-searches the smallest 1-based k where `fails(Program(decls[:k]))`
+    holds and returns that declaration's position. See the module docstring
+    for the prefix-monotonicity argument. If `fails` is false even over the
+    full program (a caller contract violation), fail-closed to (1, 1)."""
     positions = decl_positions(tokens)
     n = len(program.decls)
     if n == 0 or len(positions) != n:

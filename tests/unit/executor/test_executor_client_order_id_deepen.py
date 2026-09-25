@@ -223,6 +223,7 @@ async def test_adapter_exception_leaves_terminal_failed_order_and_retry_does_not
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.perf
 def test_deriving_5000_client_order_ids_stays_under_latency_budget_and_never_collides():
     tenant_id = uuid.uuid4()
     window_start = datetime.now(timezone.utc)

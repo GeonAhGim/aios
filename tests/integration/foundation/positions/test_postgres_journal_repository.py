@@ -283,3 +283,186 @@ async def test_concurrent_appends_produce_contiguous_hash_chained_sequence(pool,
     for entry in chain:
         assert entry.prev_hash == expected_prev, f"seq={entry.sequence_no} 해시체인 단절"
         expected_prev = entry.entry_hash
+
+
+# ── negative / 실패주입 (DEEPEN task-4102) ──────────────────────────────────
+
+
+async def test_append_does_not_detect_corrupted_prev_hash_in_db(pool, repo):
+    """negative test: 해시체인이 단절된 prev_hash를 DB에 직접 삽입한 후
+    `repo.append()`를 호출하면, append()는 DB의 마지막 entry_hash를
+    prev_hash로 자동 계산하므로 변조 감지 없이 정상 엔트리를 추가한다.
+    adapter는 해시체인 재계산 검증을 하지 않는다는 불변식 한계를 명시한다."""
+    _, _, position_key = await _open(pool)
+
+    # 정상 엔트리 1건 작성 (첫 번째 행 — prev_hash=NULL)
+    await _append(repo, pool, position_key)
+
+    # DB에 직접 해시체인이 단절된 행을 삽입 (test-only)
+    tampered_hash = "0" * 64
+    async with pool.acquire() as conn, conn.transaction():
+        await conn.execute(
+            "INSERT INTO pos_journal "
+            "(tenant_id, account_id, position_key, sequence_no, entry_type, "
+            " qty_delta, price, price_ccy, fee, fee_ccy, "
+            " realized_pnl_base, fx_rate, fx_source, "
+            " source_event_type, source_event_id, idempotency_key, "
+            " digest, prev_hash, entry_hash, occurred_at) "
+            "VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20)",
+            await conn.fetchval(
+                "SELECT tenant_id FROM pos_snapshot WHERE position_key = $1", position_key
+            ),
+            await conn.fetchval(
+                "SELECT account_id FROM pos_snapshot WHERE position_key = $1", position_key
+            ),
+            position_key,
+            2,
+            JournalEntryType.FILL.value,
+            Decimal("1"),
+            Decimal("100"),
+            "KRW",
+            Decimal("1"),
+            "KRW",
+            Decimal("0"),
+            None,
+            None,
+            "fill",
+            uuid4().hex,
+            f"tamper:{uuid4().hex}",
+            "0" * 64,
+            tampered_hash,
+            "0" * 64,
+            _OCCURRED_AT,
+        )
+
+    # append() 호출: DB의 마지막 행(sequence_no=2) entry_hash를 prev_hash로
+    # 사용하므로, append()는 변조 감지 없이 정상적으로 엔트리를 추가한다.
+    async with pool.acquire() as conn, conn.transaction():
+        third = await repo.append(
+            conn,
+            position_key=position_key,
+            entry_type=JournalEntryType.FILL,
+            qty_delta=Decimal("1"),
+            price=Money(amount=Decimal("100"), currency=Currency.KRW),
+            fee=Money(amount=Decimal("1"), currency=Currency.KRW),
+            realized_pnl_base=Decimal("0"),
+            fx_rate=None,
+            fx_source=None,
+            source_event_type="fill",
+            source_event_id=uuid4().hex,
+            idempotency_key=f"fill:{uuid4().hex}",
+            occurred_at=_OCCURRED_AT,
+        )
+
+    # 세 번째 엔트리는 변조된 두 번째 엔트리의 entry_hash를 prev_hash로 연결
+    assert third.sequence_no == 3
+    async with pool.acquire() as conn:
+        entries = await repo.list_for(conn, position_key)
+    assert len(entries) == 3
+    # 두 번째 엔트리는 변조됨: prev_hash가 첫 번째 entry_hash와 다름
+    assert entries[1].prev_hash == tampered_hash
+    assert entries[1].prev_hash != entries[0].entry_hash, (
+        "prev_hash가 의도적으로 단절됨 — 해시체인 무결성 위반"
+    )
+    # 세 번째 엔트리는 append()가 DB에서 계산한 prev_hash (변조된 두 번째의 entry_hash)
+    assert entries[2].prev_hash == entries[1].entry_hash
+
+
+async def test_append_handles_db_connection_error_gracefully(pool, repo):
+    """실패주입: `conn.execute()`가 asyncpg 예외를 던지면 `append()`가
+    원상 복귀된 예외를 그대로 전파한다 — 호출자가 TransactionError 등을
+    캐치하고 재시도할 수 있어야 한다."""
+    import asyncpg
+
+    _, _, position_key = await _open(pool)
+
+    async with pool.acquire() as conn, conn.transaction():
+        # asyncpg PoolConnectionProxy는 setattr가 제한되므로
+        # __dict__가 없는 경우를 위해 types.SimpleNamespace 래퍼 사용
+
+        class _ExecuteFailure:
+            async def __call__(self, *args, **kwargs):
+                raise asyncpg.InterfaceError("connection reset by peer")
+
+        # execute를 직접 재할당할 수 없으므로,
+        # repo 내부에서 conn.execute를 호출하는 부분을
+        # conn 자체를 래퍼로 교체하는 방식으로 모의
+        original_conn = conn
+
+        class _FailingConn:
+            """execute()만 예외를 던지는 연결 래퍼."""
+
+            def __init__(self, real):
+                self._real = real
+
+            async def execute(self, *args, **kwargs):
+                raise asyncpg.InterfaceError("connection reset by peer")
+
+            def __getattr__(self, name):
+                return getattr(self._real, name)
+
+        failing_conn = _FailingConn(original_conn)
+
+        with pytest.raises(asyncpg.InterfaceError, match="connection reset by peer"):
+            await repo.append(
+                failing_conn,
+                position_key=position_key,
+                entry_type=JournalEntryType.FILL,
+                qty_delta=Decimal("1"),
+                price=Money(amount=Decimal("100"), currency=Currency.KRW),
+                fee=Money(amount=Decimal("1"), currency=Currency.KRW),
+                realized_pnl_base=Decimal("0"),
+                fx_rate=None,
+                fx_source=None,
+                source_event_type="fill",
+                source_event_id=uuid4().hex,
+                idempotency_key=f"fill:{uuid4().hex}",
+                occurred_at=_OCCURRED_AT,
+            )
+
+
+async def test_list_for_from_seq_beyond_max_returns_empty(pool, repo):
+    """negative test: from_seq > max(sequence_no)인 경우 빈 리스트를 반환한다.
+    이 경계 조건은 pagination 사용자가 의존하는 불변식이다."""
+    _, _, position_key = await _open(pool)
+
+    # 3개 엔트리 추가
+    for _ in range(3):
+        await _append(repo, pool, position_key)
+
+    async with pool.acquire() as conn, conn.transaction():
+        # from_seq=100 (max sequence_no=3보다 큼)
+        result = await repo.list_for(conn, position_key, from_seq=100)
+
+    assert result == [], (
+        f"from_seq > max_sequence_no일 때 빈 리스트여야 하는데 {len(result)}개 반환됨"
+    )
+
+
+async def test_list_for_connection_error_propagates(pool, repo):
+    """실패주입: `list_for()` 내 `conn.fetch()`가 asyncpg 예외를 던지면
+    호출자가 처리할 수 있도록 그대로 전파된다."""
+    import asyncpg
+
+    _, _, position_key = await _open(pool)
+    await _append(repo, pool, position_key)
+
+    async with pool.acquire() as conn, conn.transaction():
+        original_conn = conn
+
+        class _FailingFetchConn:
+            """fetch()만 예외를 던지는 연결 래퍼."""
+
+            def __init__(self, real):
+                self._real = real
+
+            async def fetch(self, *args, **kwargs):
+                raise asyncpg.InterfaceError("network timeout")
+
+            def __getattr__(self, name):
+                return getattr(self._real, name)
+
+        failing_conn = _FailingFetchConn(original_conn)
+
+        with pytest.raises(asyncpg.InterfaceError, match="network timeout"):
+            await repo.list_for(failing_conn, position_key)

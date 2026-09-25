@@ -127,6 +127,7 @@ async def test_three_workers_claim_each_row_exactly_once(pool):
         assert len(rows) <= 3  # limit 준수 — 정확한 분배 비율은 스케줄링에 의존
 
 
+@pytest.mark.perf
 async def test_claim_batch_is_single_round_trip_with_bounded_latency(pool):
     """DEPTH_L4_BR(task-2722) D2 — 수치 성능 단언(CI 차단 게이트).
 

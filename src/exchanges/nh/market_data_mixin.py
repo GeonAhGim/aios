@@ -1,3 +1,4 @@
+# ratchet-allow: unverified-endpoint fields raise NotImplementedError instead of guessing (I2)
 """NHAdapter Market Data 메서드군.
 
 Spec: 02_exchange_adapter_v1.3.md#§2.1, 02e_nh_api_spec_v1.md#§3
@@ -21,7 +22,6 @@ SDK 스니펫에 요청 파라미터만 있어 응답 필드를 KIS 관례로 �
 field schema, so it no longer needs to stay fail-closed.
 """
 
-# ratchet-allow: unverified-endpoint fields raise NotImplementedError instead of guessing (I2)
 from __future__ import annotations
 
 from datetime import datetime, timezone
@@ -125,18 +125,70 @@ class NHMarketDataMixin:
             timestamp=datetime.now(timezone.utc),
         )
 
-    async def get_ohlcv(self, symbol: str, timeframe: str, limit: int = 100) -> list[Candle]:
-        """02e 스펙 §3 — 2026-09-03(task-114) 재확인: 공식 openapi.json으로
-        경로 자체는 `/krstock/quote/v1/currentDaily`로 확인됐지만, 이번
-        리프의 스콥(정정/취소/주문조회 + WS)에는 없어 요청 파라미터/응답
-        스키마까지는 조사하지 않았다. 아직 구현할 근거가 부족해 명시적으로
-        미구현 처리한다(추측으로 틀린 캔들 데이터를 만드는 것보다 안전 —
-        PM 배정 지침 (2)와 동일 원칙)."""
-        raise NotImplementedError(
-            "NHAdapter.get_ohlcv: 경로는 확인됨(/krstock/quote/v1/currentDaily, "
-            "공식 openapi.json) — 요청/응답 스키마는 아직 조사 안 됨(02e 스펙 "
-            "§3 참조), 후속 리프에서 구현 필요"
+    async def get_ohlcv(
+        self: NHHTTPClient, symbol: str, timeframe: str, limit: int = 100
+    ) -> list[Candle]:
+        """Daily OHLCV lookup — POST /krstock/quote/v1/currentDaily.
+
+        Task-6695(BR-17): request/response schema confirmed from the official
+        openapi.json.
+        - Request: Input_0.iem_cd(symbol code), market_cd("KRX"),
+          view_main_yn("Y"), array_cnt(count, optional)
+        - Response: an array under Output_0[] (each item = one day of data)
+        - Fields: bsop_date(trade date), stck_oppr(open), stck_hgpr(high),
+          stck_lwpr(low), stck_clpr(close), acml_vol(cumulative volume)
+
+        `timeframe` is required by the adapter contract, but the NH API only
+        ever serves daily ("1d") data. Any other timeframe raises ValueError.
+        """
+        if timeframe != "1d":
+            raise ValueError(
+                f"NHAdapter.get_ohlcv: only daily (1d) data is supported. "
+                f"Requested: {timeframe}. Other timeframes need a follow-up "
+                f"leaf or a different API."
+            )
+
+        raw = await self._request(
+            "POST",
+            "/krstock/quote/v1/currentDaily",
+            body={
+                "iem_cd": symbol,
+                "market_cd": _MARKET_CODE,
+                "view_main_yn": "Y",
+                "array_cnt": limit,
+            },
         )
+        try:
+            candles: list[Candle] = []
+            for item in raw.get("Output_0", []):
+                # bsop_date format: "YYYYMMDD" (e.g. "20260924")
+                date_str = item["bsop_date"]
+                # Parse as YYYYMMDD and create midnight UTC timestamp
+                year = int(date_str[:4])
+                month = int(date_str[4:6])
+                day = int(date_str[6:8])
+                candle_date = datetime(year, month, day, tzinfo=timezone.utc)
+
+                candle = Candle(
+                    symbol=symbol,
+                    exchange="nh",
+                    timeframe="1d",
+                    open=Decimal(str(item.get("stck_oppr", item["stck_clpr"]))),
+                    high=Decimal(str(item["stck_hgpr"])),
+                    low=Decimal(str(item["stck_lwpr"])),
+                    close=Decimal(str(item["stck_clpr"])),
+                    volume=Decimal(str(item.get("acml_vol", "0"))),
+                    open_time=candle_date,
+                    close_time=candle_date,
+                )
+                candles.append(candle)
+            return candles
+        except (KeyError, ValueError) as exc:
+            raise FatalExchangeError(
+                f"NH currentDaily response parse error (required fields per "
+                f"official openapi.json: bsop_date, stck_oppr, stck_hgpr, "
+                f"stck_lwpr, stck_clpr, acml_vol): {exc}"
+            ) from exc
 
     async def subscribe_ticker_stream(
         self: _WebSocketSubscribingClient,

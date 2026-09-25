@@ -39,6 +39,7 @@ import os
 import subprocess
 import sys
 import time
+from collections.abc import Coroutine
 from decimal import Decimal
 from pathlib import Path
 
@@ -54,6 +55,7 @@ from src.data.models.base import AssetClass
 from src.data.models.trading import Order, OrderSide, OrderStatus, OrderType
 from src.exchanges.kis.adapter import KISAdapter
 from src.exchanges.kis.order_dispatch import dispatch_place_order
+from src.exchanges.kis.rate_profile import reset_token_bucket_registry_for_test
 
 _TOKEN_PATH = "/oauth2/tokenP"
 _QUOTE_PATH = "/uapi/overseas-price/v1/quotations/price"
@@ -61,6 +63,17 @@ _ORDER_PATH = "/uapi/overseas-stock/v1/trading/order"
 _CANCEL_PATH = "/uapi/overseas-stock/v1/trading/order-rvsecncl"
 
 _TOKEN_RESPONSE = {"access_token": "t", "access_token_token_expired": ""}
+
+
+@pytest.fixture(autouse=True)
+def _reset_rate_limiter_registry() -> None:
+    """`build_token_bucket`의 `_BUCKET_REGISTRY`는 프로세스 전역 싱글톤이라
+    (rate_profile.py BR-2b) 그 안의 `TokenBucket._lock`(asyncio.Lock)이 먼저
+    실행된 테스트의 이벤트 루프에 바인딩된 채 남는다 — pytest-asyncio가 테스트
+    마다 새 루프를 만들므로 리셋 없이는 뒤 테스트가 `RuntimeError: <Lock> is
+    bound to a different event loop`로 깨진다. 모듈이 이 용도로 제공하는
+    `reset_token_bucket_registry_for_test()`를 매 테스트마다 호출한다."""
+    reset_token_bucket_registry_for_test()
 
 
 async def _instant_sleep(_seconds: float) -> None:
@@ -205,6 +218,7 @@ def _fast_success_handler(captured: list[httpx.Request]):
     return handler
 
 
+@pytest.mark.perf
 async def test_overseas_dispatch_routing_overhead_bounded_vs_raw_request_baseline() -> None:
     """`dispatch_place_order`의 US_EQUITY 분기(symbol 파싱 + 거래소 코드
     조회 + place_overseas_order)가 원시 `_request` 왕복 하나만 하는 것과
@@ -379,13 +393,24 @@ async def test_concurrent_overseas_and_domestic_calls_issue_token_exactly_once()
     """토큰 미보유 상태에서 해외주식/국내주식 시세조회를 동시에 10개
     섞어 호출해도 토큰 발급 엔드포인트는 정확히 1회만 불린다(double-checked
     locking, `_token_lock`) — 해외 진입점을 추가해도 기존 단일화 보장이
-    깨지지 않음을 확인한다."""
+    깨지지 않음을 확인한다.
+
+    이전 버전은 `sleep(0.01)`로 나머지 9개가 `_token_lock` 대기열에 합류할
+    "시간"을 벌었다 — CI 부하로 스케줄링이 그 창보다 밀리면 재현이 깨졌다
+    (asyncio는 단일 스레드 협력형이라 순서는 항상 결정론적인데, "충분히
+    대기했는가"를 실제 시간에 의존해 판단한 게 결함이었다). 대신 barrier
+    (`asyncio.Event`)로 강제한다 — 토큰 핸들러는 실시간이 아니라 "10개가
+    전부 시작됐다"는 카운터를 기다렸다가 응답한다. 나머지 9개는 시작 시점과
+    락 대기 사이에 실제 중단점이 없으므로(non-blocking dict 조회/경합 없는
+    락 획득) 카운터 10 도달 시점엔 이미 전부 대기열에 있다."""
     token_calls = {"n": 0}
+    started = {"n": 0}
+    all_started = asyncio.Event()
 
     async def handler(request: httpx.Request) -> httpx.Response:
         if request.url.path == _TOKEN_PATH:
             token_calls["n"] += 1
-            await asyncio.sleep(0.01)
+            await all_started.wait()
             return httpx.Response(200, json=_TOKEN_RESPONSE)
         if request.url.path == _QUOTE_PATH:
             output = {"last": "10.5", "tvol": "1"}
@@ -400,9 +425,15 @@ async def test_concurrent_overseas_and_domestic_calls_issue_token_exactly_once()
 
     adapter = _make_paper_adapter(handler)
 
-    calls = [adapter.get_overseas_ticker("AAPL", "NASD") for _ in range(5)] + [
-        adapter.get_ticker("005930") for _ in range(5)
-    ]
+    async def _tracked(coro: Coroutine[object, object, object]) -> object:
+        started["n"] += 1
+        if started["n"] == 10:
+            all_started.set()
+        return await coro
+
+    calls = [
+        _tracked(adapter.get_overseas_ticker("AAPL", "NASD")) for _ in range(5)
+    ] + [_tracked(adapter.get_ticker("005930")) for _ in range(5)]
     await asyncio.gather(*calls)
 
     assert token_calls["n"] == 1

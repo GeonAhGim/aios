@@ -25,6 +25,7 @@ export const VALIDATION_CONTRACT_FIELD_SPECS: readonly ContractFieldSpec[] = [
       "obligations",
       "result_hash",
       "created_at",
+      "evidence_refs",
     ],
   },
 ];

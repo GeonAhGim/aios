@@ -1,25 +1,28 @@
-"""ConnectionRepository의 asyncpg 구현 — 스냅샷/헬스 부분.
+"""asyncpg implementation of ConnectionRepository — snapshot/health portion.
 
-Spec: AIOSproject 74번 §2/§5, 105번(동시성 표준).
+Spec: AIOSproject #74 §2/§5, #105 (concurrency standard).
 
-task-1723 P1-D: postgres_repository.py(330줄, P6 300줄 초과)에서 스냅샷/헬스
-관련 메서드를 믹스인으로 분리한 파일(순수 이동, KISWebSocketMixin과 동일한
-분리 관례). `persist_snapshot_if_syncable()`이 CON-004(동시 revoke와 sync
-경합)의 실제 방어 지점이다 — "connection이 여전히
-ACTIVE_READONLY/DEGRADED인가" 재확인과 snapshot/health 저장을 한 트랜잭션 +
-row lock(`SELECT ... FOR UPDATE`)으로 묶는다. 처음엔 `get_connection()`으로
-먼저 읽고 나중에 별도 호출로 `insert_snapshot()`하는 두 단계였는데, 그 두
-왕복 사이에 revoke가 커밋될 수 있는 진짜 TOCTOU 틈이 있었다(리뷰 중 발견,
-2026-09-02) — 재확인과 쓰기가 같은 트랜잭션에 있어야만 그 틈이 없어진다는
-걸 확인하고 이 메서드로 합쳤다.
+task-1723 P1-D: Extracted snapshot/health methods from postgres_repository.py
+(330 lines, exceeding P6's 300-line threshold) into this mixin (pure move,
+following the same separation convention as KISWebSocketMixin).
+`persist_snapshot_if_syncable()` is the actual defense point for CON-004
+(concurrent revoke vs. sync race) — it re-asserts whether the connection is
+still ACTIVE_READONLY/DEGRADED, then persists snapshot + health in a single
+transaction with a row lock (`SELECT ... FOR UPDATE`). Initially this was a
+two-step process: read via `get_connection()` first, then call
+`insert_snapshot()` separately — a real TOCTOU gap where a revoke could
+commit between the two round-trips (discovered during review, 2026-09-02).
+Confirmed that only re-assertion + write within the same transaction closes
+that gap, so they were merged into this method.
 
-task-1718 P0-E — `persist_snapshot_if_syncable()`은 이제 `tenant_id`를
-필수로 받아 `tenant_transaction()`(PLT-30)으로 연결을 연다. 재확인 SELECT에
-`AND tenant_id = $2`도 명시로 남겼다 — 이 환경의 DATABASE_URL 롤이
-슈퍼유저(rolbypassrls=true)라 RLS 단독으론 아무것도 못 막기 때문에, 이
-WHERE 조건이 지금 당장의 실질 방어선이고 tenant_transaction()은 운영 DSN이
-비슈퍼유저로 바뀐 뒤를 대비한 두 번째 방어선이다(postgres_repository.py의
-`transition_connection_state`와 동일 근거).
+task-1718 P0-E — `persist_snapshot_if_syncable()` now requires `tenant_id`
+and opens the connection via `tenant_transaction()` (PLT-30). Left an explicit
+`AND tenant_id = $2` on the re-assertion SELECT — in this environment the
+DATABASE_URL role is a superuser (rolbypassrls=true), so RLS alone cannot
+block anything; this WHERE clause is the current practical defense line, while
+tenant_transaction() serves as a second defense line for when the production
+DSN switches to a non-superuser role (same rationale as
+`transition_connection_state` in postgres_repository.py).
 """
 from __future__ import annotations
 
@@ -65,7 +68,7 @@ def _row_to_health(row: asyncpg.Record) -> ConnectionHealth:
 
 
 class _SnapshotHealthMixin:
-    """`PostgresConnectionRepository`가 상속한다 — `self._pool`을 기대한다."""
+    """`PostgresConnectionRepository` inherits this — expects `self._pool`."""
 
     _pool: asyncpg.Pool
 
@@ -77,10 +80,11 @@ class _SnapshotHealthMixin:
         health: ConnectionHealth,
     ) -> AccountSnapshot:
         async with tenant_transaction(self._pool, tenant_id) as conn:
-            # CON-004 진짜 방어 지점 — 이 SELECT가 행을 잠가서, 이 트랜잭션이
-            # 커밋될 때까지 같은 connection에 대한 revoke_connection()의
-            # transition_connection_state() UPDATE는 블록된다(같은 행을 대상으로
-            # 하므로). 재확인과 쓰기 사이에 별도 왕복이 없어 TOCTOU 틈이 없다.
+            # CON-004 Real defense point — this SELECT locks the row so that
+            # UPDATEs from revoke_connection()'s transition_connection_state() on
+            # the same connection are blocked until this transaction commits
+            # (same target row). No separate round-trip between re-assertion and
+            # write means no TOCTOU gap.
             row = await conn.fetchrow(
                 "SELECT state FROM account_connection WHERE id = $1 AND tenant_id = $2 "
                 "FOR UPDATE",
@@ -96,13 +100,14 @@ class _SnapshotHealthMixin:
                     "종료됐습니다(동시 처리 충돌) — 스냅샷을 저장하지 않습니다."
                 )
 
-            # CON-006 방어의 마지막 층 — application 계층의 classify_provider_
-            # response()는 이 트랜잭션 밖에서 latest_snapshot을 조회하므로, 두
-            # sync가 동시에 "이 provider_as_of는 처음 본다"고 판단하고 여기까지
-            # 올 수 있다. UNIQUE(connection_id, provider_as_of, source_evidence_ref)
-            # 위반을 에러로 올리지 않고 ON CONFLICT DO NOTHING + 기존 행 재조회로
-            # 흡수한다 — "이미 그 정확한 스냅샷이 있다"는 실패가 아니라 중복
-            # 응답의 정상적인 결과다.
+            # CON-006 Last layer of defense — the application layer's
+            # classify_provider_response() queries latest_snapshot outside this
+            # transaction, so two concurrent syncs can both decide "this
+            # provider_as_of is new" and reach this point. Instead of propagating
+            # a UNIQUE(connection_id, provider_as_of, source_evidence_ref)
+            # violation as an error, we absorb it via ON CONFLICT DO NOTHING +
+            # re-fetch of the existing row — not a failure of "snapshot already
+            # exists", but a normal outcome of duplicate responses.
             snapshot_row = await conn.fetchrow(
                 "INSERT INTO account_snapshot (connection_id, provider_as_of, freshness, "
                 " currency, source_evidence_ref) VALUES ($1, $2, $3, $4, $5) "
@@ -124,9 +129,9 @@ class _SnapshotHealthMixin:
                     snapshot.source_evidence_ref,
                 )
             if newly_inserted:
-                # 이 트랜잭션이 실제로 새로 만든 행일 때만 값을 쓴다 — 위
-                # ON CONFLICT DO NOTHING으로 기존 행을 재조회한 경우(중복
-                # 응답)는 그 값도 이미 저장돼 있다.
+                # Only write values when this transaction actually created a new
+                # row — when ON CONFLICT DO NOTHING above re-fetched an existing
+                # row (duplicate response), its values are already persisted.
                 for value in snapshot.values:
                     await conn.execute(
                         "INSERT INTO account_snapshot_value "

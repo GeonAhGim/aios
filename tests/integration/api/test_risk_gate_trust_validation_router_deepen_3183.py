@@ -218,26 +218,44 @@ async def _evaluate_p99_ms(
     return durations_ms[int(len(durations_ms) * 0.99)]
 
 
+async def _delete_risk_evaluations(pool: asyncpg.Pool, tenant_id: UUID) -> None:
+    # task-4042 -- evaluate_risk_gate()'s warmup call commits a real
+    # risk_evaluation row (PRE_TRADE, outside the 6-value CHECK's old
+    # 2-value predecessor). Left uncleaned, it survives past this test and
+    # makes any later full-suite migration round trip that downgrades
+    # f4b9d6e5a7c8 fail with CheckViolationError when it tries to restore
+    # the old 2-value CHECK -- the same failure mode
+    # test_risk_gate_lifecycle.py::test_gate_kind_check_accepts_all_six_values
+    # already guards against by deleting what it inserts.
+    async with pool.acquire() as conn:
+        await conn.execute("DELETE FROM risk_evaluation WHERE tenant_id = $1", tenant_id)
+
+
+@pytest.mark.perf
 async def test_evaluate_risk_gate_p99_under_pre_trade_gate_budget(client, pool):
     _headers, tenant_id = await _register(client)
     repo = PostgresRiskGateRepository(pool)
     mandate_repo = PostgresMandateRepository(pool)
     connection_repo = PostgresConnectionRepository(pool)
 
-    # 캐시를 채우는 워밍업 호출 — 이 예산은 캐시 히트(steady-state) 지연을
-    # 잰다(첫 호출은 mandate 정책 평가·list_active_controls·insert까지 더
-    # 든다).
-    await evaluate_risk_gate(
-        repo, mandate_repo, connection_repo, tenant_id=tenant_id, gate_kind=GateKind.PRE_TRADE
-    )
+    try:
+        # 캐시를 채우는 워밍업 호출 — 이 예산은 캐시 히트(steady-state) 지연을
+        # 잰다(첫 호출은 mandate 정책 평가·list_active_controls·insert까지 더
+        # 든다).
+        await evaluate_risk_gate(
+            repo, mandate_repo, connection_repo, tenant_id=tenant_id, gate_kind=GateKind.PRE_TRADE
+        )
 
-    p99_ms = await _evaluate_p99_ms(
-        repo, mandate_repo, connection_repo, tenant_id, n=_PERF_ITERATIONS
-    )
+        p99_ms = await _evaluate_p99_ms(
+            repo, mandate_repo, connection_repo, tenant_id, n=_PERF_ITERATIONS
+        )
 
-    assert p99_ms < _PERF_BUDGET_MS
+        assert p99_ms < _PERF_BUDGET_MS
+    finally:
+        await _delete_risk_evaluations(pool, tenant_id)
 
 
+@pytest.mark.perf
 async def test_evaluate_risk_gate_budget_gate_fails_on_injected_regression(
     client, pool, monkeypatch
 ):
@@ -248,19 +266,24 @@ async def test_evaluate_risk_gate_budget_gate_fails_on_injected_regression(
     repo = PostgresRiskGateRepository(pool)
     mandate_repo = PostgresMandateRepository(pool)
     connection_repo = PostgresConnectionRepository(pool)
-    await evaluate_risk_gate(
-        repo, mandate_repo, connection_repo, tenant_id=tenant_id, gate_kind=GateKind.PRE_TRADE
-    )
+    try:
+        await evaluate_risk_gate(
+            repo, mandate_repo, connection_repo, tenant_id=tenant_id, gate_kind=GateKind.PRE_TRADE
+        )
 
-    original_fetchrow = asyncpg.Connection.fetchrow
+        original_fetchrow = asyncpg.Connection.fetchrow
 
-    async def _slow_fetchrow(self: asyncpg.Connection, *args: object, **kwargs: object) -> object:
-        await asyncio.sleep(0.01)
-        return await original_fetchrow(self, *args, **kwargs)
+        async def _slow_fetchrow(
+            self: asyncpg.Connection, *args: object, **kwargs: object
+        ) -> object:
+            await asyncio.sleep(0.01)
+            return await original_fetchrow(self, *args, **kwargs)
 
-    monkeypatch.setattr(asyncpg.Connection, "fetchrow", _slow_fetchrow)
+        monkeypatch.setattr(asyncpg.Connection, "fetchrow", _slow_fetchrow)
 
-    p99_ms = await _evaluate_p99_ms(repo, mandate_repo, connection_repo, tenant_id, n=5)
+        p99_ms = await _evaluate_p99_ms(repo, mandate_repo, connection_repo, tenant_id, n=5)
 
-    with pytest.raises(AssertionError):
-        assert p99_ms < _PERF_BUDGET_MS
+        with pytest.raises(AssertionError):
+            assert p99_ms < _PERF_BUDGET_MS
+    finally:
+        await _delete_risk_evaluations(pool, tenant_id)

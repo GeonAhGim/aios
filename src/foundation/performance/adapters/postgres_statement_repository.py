@@ -1,12 +1,13 @@
-"""`performance_statement`의 Decimal 필드 JSONB 직렬화/역직렬화 및 행 매핑.
+"""Decimal field JSONB serialization/deserialization and row mapping for `performance_statement`.
 
 Spec: docs/specs/L4_strategy_portfolio_backtest_v1.0.md §2.6/§3.7 M5.
 
-`components`/`returns`/`risk`/`benchmark`는 JSONB에 넣어야 하므로 Decimal을
-문자열로 직렬화한다(부동소수 표현 오차로 값이 흔들리지 않게 — 이 세션
-전반의 관례, reconciliation의 `compute_input_hash`와 같은 이유).
-postgres_repository.py의 `PostgresPerformanceRepository`가 이 모듈의
-함수들을 호출해 statement 행을 읽고 쓴다(P6: 300줄 초과 분할)."""
+`components`, `returns`, `risk`, and `benchmark` are stored as JSONB, so Decimal
+values are serialized to strings to avoid floating-point representation errors
+— a convention throughout this session, same rationale as reconciliation's
+`compute_input_hash`).
+`PostgresPerformanceRepository` in postgres_repository.py calls these functions
+to read and write statement rows (P6: split at 300+ lines)."""
 from __future__ import annotations
 
 import json

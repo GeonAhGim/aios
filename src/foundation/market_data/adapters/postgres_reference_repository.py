@@ -1,22 +1,25 @@
-"""LA-12 — `ReferenceRepository`(ports/reference_repository.py)의 asyncpg 구현.
+"""LA-12 — asyncpg implementation of `ReferenceRepository` (ports/reference_repository.py).
 
 Spec: docs/specs/L4_market_data_positions_ledger_v1.0.md#§2.2, §5, §9.2 LA-12.
 
-`md_instrument.venue_symbol`은 등록 시점의 원 심볼을 그대로 보존하는
-불변 감사 필드이고(이 리프에는 그것을 갱신하는 메서드가 없다 — RENAME 후
-"현재" 심볼 갱신은 LA-14 애플리케이션 계층 소관), 시점(`at`)별 심볼 해석은
-전부 `md_symbol_alias`(LA-10 `EXCLUDE USING gist` 기간 배제)로 한다.
-`register()`가 등록 원 심볼을 최초 별칭(`valid_from=listed_at,
-valid_to=NULL`)으로도 함께 심어, 등록 직후부터 `get_instrument`가 별칭
-경로로도 동일 결과를 내도록 한다(migration 4a1d0c0de007 설계 의도).
+`md_instrument.venue_symbol` is an immutable audit field that preserves the
+original symbol at registration time (this leaf has no method to update it —
+updating the "current" symbol after RENAME is the LA-14 application layer's
+responsibility); all point-in-time (`at`) symbol lookups go through
+`md_symbol_alias` (LA-10 `EXCLUDE USING gist` period exclusion).
+`register()` also seeds the original symbol as the first alias
+(`valid_from=listed_at, valid_to=NULL`) so that `get_instrument` returns
+the same result via the alias path from the moment of registration
+(design intent of migration 4a1d0c0de007).
 
-`get_instrument`는 `md_symbol_alias`에서 `venue`+`alias_symbol`이 `at`
-시점에 유효한 행만 찾아 그 `instrument_id`로 인스트루먼트를 반환한다 —
-`md_instrument.canonical_symbol` 직접 매치는 쓰지 않는다(그 컬럼은 RENAME
-후에도 갱신되지 않아 직접 매치를 허용하면 옛 심볼이 기간과 무관하게
-영원히 유효한 것처럼 조회돼 RENAME 별칭의 기간 정확성이 깨진다).
-§9.2 LA-12 DoD: "심볼 RENAME 별칭이 기간(valid_from/valid_to)으로 정확히
-해석됨"이 이 설계의 근거다.
+`get_instrument` finds only rows in `md_symbol_alias` where `venue`+`alias_symbol`
+are valid at the `at` point in time and returns the instrument by that
+`instrument_id` — it does not match against `md_instrument.canonical_symbol`
+directly (that column is not updated after RENAME; allowing direct matches
+would make old symbols appear perpetually valid regardless of period,
+breaking the period accuracy of RENAME aliases).
+Basis for this design: §9.2 LA-12 DoD — "symbol RENAME aliases are
+correctly interpreted via period (valid_from/valid_to)".
 """
 from __future__ import annotations
 
@@ -44,23 +47,23 @@ __all__ = [
 
 
 class DuplicateInstrumentError(Exception):
-    """`register()`가 같은 (venue, venue_symbol)에 대해 두 번째로 불림 —
-    상태 전이(RENAME 등)는 `add_alias`의 몫이지 재등록이 아니다."""
+    """`register()` called a second time for the same (venue, venue_symbol) —
+    state transitions (RENAME, etc.) belong to `add_alias`, not re-registration."""
 
 
 class AliasPeriodOverlapError(Exception):
-    """`md_symbol_alias`의 `EXCLUDE USING gist` 위반 — 같은 (venue,
-    alias_symbol)에 겹치는 유효기간을 서로 다른 인스트루먼트가 주장함."""
+    """`md_symbol_alias` `EXCLUDE USING gist` violation — different instruments
+    claim overlapping validity periods for the same (venue, alias_symbol)."""
 
 
 class CorporateActionDigestMismatchError(Exception):
-    """`(instrument_id, action_type, ex_date)`가 같은데 ratio/cash_amount/
-    source_ref가 다르게 재전송됨 — 조용히 기존 값을 덮지 않는다(fail-closed)."""
+    """`(instrument_id, action_type, ex_date)` resent with different ratio/cash_amount/
+    source_ref — do not silently overwrite the existing value (fail-closed)."""
 
 
 def _split_base_quote(venue: Venue, canonical_symbol: str) -> tuple[str | None, str | None]:
-    """크립토(`BASE/QUOTE`)만 분해한다 — KRX/US canonical은 base/quote 개념이
-    없어 항상 `None`."""
+    """Decompose only crypto (`BASE/QUOTE`) — KRX/US canonical has no
+    base/quote concept and always returns `None`."""
     if venue is Venue.BITGET and "/" in canonical_symbol:
         base, _, quote = canonical_symbol.partition("/")
         return base, quote
@@ -114,7 +117,7 @@ async def _insert_alias(
         )
     except asyncpg.exceptions.ExclusionViolationError as exc:
         raise AliasPeriodOverlapError(
-            f"별칭 기간 중복: venue={venue.value} alias_symbol={alias_symbol}"
+            f"Alias period overlap: venue={venue.value} alias_symbol={alias_symbol}"
         ) from exc
 
 
@@ -125,12 +128,13 @@ class PostgresReferenceRepository:
     async def get_instrument(
         self, conn: asyncpg.Connection, venue: Venue, canonical: str, at: AwareDatetime
     ) -> InstrumentRef | None:
-        """`md_instrument.canonical_symbol`은 등록 시점에 고정되고 RENAME 후에도
-        갱신되지 않으므로(이 리프에 그런 메서드가 없다) 직접 매치는 쓰지
-        않는다 — 대신 `md_symbol_alias`(등록 시 최초 별칭 포함, `register()`
-        참고)만이 진짜 소스다. 그래야 과거 심볼로 조회할 때 그 유효기간
-        밖에서는 정확히 `None`이 나온다(RENAME 후 옛 심볼이 영원히 유효한
-        것처럼 보이는 버그를 막는다)."""
+        """`md_instrument.canonical_symbol` is fixed at registration and never
+        updated after RENAME (this leaf has no such method) — do not match it
+        directly. Instead, `md_symbol_alias` (including the first alias at
+        registration, see `register()`) is the real source. This ensures that
+        lookups by an old symbol return exactly `None` outside its validity
+        period (prevents the bug where an old symbol appears perpetually valid
+        after RENAME)."""
         alias_row = await conn.fetchrow(
             "SELECT instrument_id FROM md_symbol_alias WHERE venue = $1 AND alias_symbol = $2 "
             "AND valid_from <= $3 AND (valid_to IS NULL OR $3 < valid_to)",
@@ -157,7 +161,7 @@ class PostgresReferenceRepository:
         )
         if already:
             raise DuplicateInstrumentError(
-                f"이미 등록됨: venue={cmd.venue.value} venue_symbol={cmd.venue_symbol}"
+                f"Already registered: venue={cmd.venue.value} venue_symbol={cmd.venue_symbol}"
             )
 
         base, quote = _split_base_quote(cmd.venue, canonical_symbol)
@@ -235,7 +239,7 @@ class PostgresReferenceRepository:
                 existing_action.source_ref,
             ) != (action.ratio, action.cash_amount, action.source_ref):
                 raise CorporateActionDigestMismatchError(
-                    f"다른 내용으로 재전송됨: instrument_id={action.instrument_id} "
+                    f"Resent with different content: instrument_id={action.instrument_id} "
                     f"action_type={action.action_type} ex_date={action.ex_date}"
                 )
             return existing_action

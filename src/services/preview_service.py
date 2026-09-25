@@ -1,15 +1,17 @@
-"""14.4 — 프리뷰 계산기 (경량 미리보기).
+"""14.4 — Preview calculator (lightweight preview).
 
 Spec: 기능설계문서_v1.20.md#FD-14.4
 
-정식 백테스트(9.3)가 아니다 — 저장 없이 즉석으로 지표 조건을 최근
-캔들에 적용해 신호가 발생했을 시점만 보여주는 가벼운 미리보기.
-FD-14.2(정식 조건 조합 UI + FSM 컴파일)는 프론트엔드 영역이라 이 세션
-스콥 밖 — 여기서는 그보다 단순한 형태(지표+비교연산자+임계값 목록을
-AND/OR로 결합)만 지원한다.
+Not a full backtest (9.3) — a lightweight preview that applies indicator
+conditions to recent candles on-the-fly without saving, showing only
+the timepoints where a signal would fire.
+FD-14.2 (full condition-combination UI + FSM compile) is a frontend
+concern and out of scope here — we support a simpler form only
+(indicator + comparison operator + threshold list combined via AND/OR).
 
-이 계산기가 만드는 신호는 FD-8(FROZEN, 실제 매매판단)과 전혀 무관하다 —
-이 결과로 실제 주문이 나가는 경로는 어디에도 없다.
+Signals produced by this calculator are unrelated to FD-8 (FROZEN,
+actual trade decisions) — no code path places real orders from these
+results.
 """
 from __future__ import annotations
 

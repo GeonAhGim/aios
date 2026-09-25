@@ -1,10 +1,11 @@
-"""18.3 — 사용자 조회·상태변경 (UserAdminService).
+"""18.3 — User lookup and status change (UserAdminService).
 
-Spec: 기능설계문서_v1.20.md#FD-18.3, 15번 문서 §15.6, FD-11.1, FD-11.4
+Spec: 기능설계문서_v1.20.md#FD-18.3, Document #15 §15.6, FD-11.1, FD-11.4
 
-DELETED/PENDING_DELETION 전이는 FD-11.4 탈퇴 흐름 전용이라 운영자가
-직접 세팅할 수 없다 — 사용자 본인 의사와 무관한 강제탈퇴 경로를 만들지
-않는다. 운영자는 ACTIVE↔SUSPENDED만 오갈 수 있다.
+Transitions to DELETED/PENDING_DELETION are exclusive to the FD-11.4
+withdrawal flow and cannot be set directly by operators — do not
+create a forced-withdrawal path independent of the user's own consent.
+Operators can only toggle between ACTIVE and SUSPENDED.
 """
 from __future__ import annotations
 
@@ -20,12 +21,12 @@ ADMIN_SETTABLE_STATUSES = ("ACTIVE", "SUSPENDED")
 
 
 class UserAdminError(Exception):
-    """FD-18.3 실패 — 라우터가 400/404로 변환."""
+    """FD-18.3 failure — router converts to 400/404."""
 
 
 class UserAdminNotFoundError(UserAdminError):
-    """QA task-1163 — 존재하지 않는 대상 사용자. RESOURCE_NOT_FOUND(404)로
-    구분해야 프런트가 400(잘못된 값)과 구별할 수 있다."""
+    """QA task-1163 — target user does not exist. Must distinguish as
+    RESOURCE_NOT_FOUND(404) so the frontend can tell it apart from 400(bad value)."""
 
 
 class UserSummary(BaseModel):
@@ -77,8 +78,8 @@ class UserAdminService:
             )
             if row is None:
                 raise UserAdminNotFoundError("존재하지 않는 사용자입니다.")
-            # actor_agent는 대상 본인이 아니라 이 변경을 실행한 운영자다 —
-            # dispute_resolution_service.resolve()와 동일한 원칙.
+            # actor_agent is the operator who executed this change, not the target user themselves —
+            # same principle as dispute_resolution_service.resolve().
             await record_audit_log(
                 conn, actor_agent=str(admin_user_id), action_type="user.status_changed",
                 user_id=user_id,

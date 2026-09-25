@@ -183,6 +183,24 @@ def test_venue_listing_is_primary_required() -> None:
         )
 
 
+def test_venue_listing_invalid_venue_enum_rejected() -> None:
+    with pytest.raises(ValidationError):
+        _sample_listing(venue="NOT_A_VENUE")
+
+
+def test_venue_listing_venue_symbol_wrong_type_rejected() -> None:
+    with pytest.raises(ValidationError):
+        _sample_listing(venue_symbol=12345)
+
+
+def test_venue_listing_delisted_at_naive_datetime_rejected() -> None:
+    """`delisted_at`은 optional이지만 값이 있을 때는 `listed_at`과 같은
+    AwareDatetime 제약을 받는다 — naive 값을 조용히 허용하면 §4.1의
+    tz-aware 불변조건이 optional 필드에서만 구멍난다."""
+    with pytest.raises(ValidationError):
+        _sample_listing(delisted_at=datetime(2026, 9, 3, 0, 0))
+
+
 # --- DC-20: derivative-symbol fields (kind/underlying_id/expiry/strike/
 # option_right/contract_multiplier/settlement/currency/country/mic) ---
 
@@ -355,6 +373,28 @@ def test_ulid_validator_failure_injection_fails_closed(monkeypatch: pytest.Monke
         _sample_listing()
 
 
+def test_currency_country_mic_validator_failure_injection_fails_closed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Same failure-injection guarantee as the ULID pattern above, for the
+    DC-20 `currency`/`country`/`mic` format validators: if a future refactor
+    leaves one of `_CURRENCY_PATTERN`/`_COUNTRY_PATTERN`/`_MIC_PATTERN`
+    unset, construction must fail closed (`AttributeError` from
+    `AfterValidator`) rather than silently accepting an unvalidated code."""
+    monkeypatch.setattr(v2, "_CURRENCY_PATTERN", None)
+    with pytest.raises(AttributeError):
+        _sample_instrument(currency="USD")
+
+    monkeypatch.setattr(v2, "_COUNTRY_PATTERN", None)
+    with pytest.raises(AttributeError):
+        _sample_instrument(country="US")
+
+    monkeypatch.setattr(v2, "_MIC_PATTERN", None)
+    with pytest.raises(AttributeError):
+        _sample_instrument(mic="XNAS")
+
+
+@pytest.mark.perf
 def test_bulk_instrument_construction_completes_within_latency_budget() -> None:
     """Numeric performance assertion: constructing a large symbol-master
     page must not become a bottleneck for callers (DC-2 symbol_master,

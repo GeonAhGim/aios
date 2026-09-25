@@ -16,6 +16,7 @@ from zoneinfo import ZoneInfo
 import pytest
 
 from scripts.check_code_language import HANGUL, count_file
+from scripts.check_code_language import main as check_code_language_main
 from src.foundation.market_data.contracts.v1 import Venue
 from src.foundation.market_data.domain.calendar.known_venues import KNOWN_SESSIONS
 from src.foundation.market_data.domain.calendar.session_rules import (
@@ -172,6 +173,7 @@ def test_is_open_and_next_open_propagate_failure_from_corrupted_sessions_for(
         cal.next_open(at)
 
 
+@pytest.mark.perf
 def test_next_open_throughput_within_latency_budget() -> None:
     """Numeric performance assertion -- 5,000 `next_open` calls spanning
     ~13.7 years of daily timestamps (pure in-memory computation, no I/O) must
@@ -218,6 +220,8 @@ KIS_KRX의 `close_time=15:30`은 연속경쟁매매(09:00~15:20)와 그 뒤에 �
 
 def test_gate_code_language_ratchet_flags_the_pre_translation_korean_docstring(
     tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Gate-red reproduction -- commit c33c2030 (task-2114) had to translate
     part of this exact known_venues.py module docstring (the KIS_KRX
@@ -225,11 +229,16 @@ def test_gate_code_language_ratchet_flags_the_pre_translation_korean_docstring(
     growth elsewhere, it pushed scripts/check_code_language.py's Hangul
     comment/docstring ratchet over its repo-wide budget. The file's first
     paragraph predates the ADR-2026-09-07-A ratchet and is grandfathered
-    (existing Hangul is not retro-converted, only growth is blocked) -- this
-    pins the shipped file's current flagged-line count and shows that
-    reintroducing the translated paragraph verbatim (reconstructed from that
-    commit's diff) adds fresh Hangul lines beyond that baseline, i.e. exactly
-    the growth the ratchet would flag red again."""
+    (existing Hangul is not retro-converted, only growth is blocked).
+
+    This drives the gate's actual entrypoint (`main`), not just the
+    `count_file` helper, against a target tree containing the reconstructed
+    pre-translation module and a baseline pinned to the shipped file's
+    grandfathered count. A gate that was patched to always "pass" (e.g. its
+    `total > baseline` branch short-circuited to `return 0`) would still make
+    `count_file` report a higher number here, but would no longer reproduce
+    the red exit code -- this asserts on `main`'s actual return value and
+    printed FAIL line so that regression is caught, not just the raw count."""
     current_count = count_file(_KNOWN_VENUES_PATH)
     assert current_count == 4  # grandfathered first-paragraph debt only
 
@@ -238,15 +247,51 @@ def test_gate_code_language_ratchet_flags_the_pre_translation_korean_docstring(
     assert count_file(poisoned) > current_count
     assert HANGUL.search(_PRE_TRANSLATION_MODULE_SOURCE) is not None
 
+    baseline = tmp_path / "baseline.txt"
+    baseline.write_text(f"{current_count}\n", encoding="utf-8")
+
+    # count_tree() resolves scanned files relative to the module-level ROOT
+    # constant, so the target directory must live under it for a real run.
+    monkeypatch.setattr("scripts.check_code_language.ROOT", tmp_path)
+
+    exit_code = check_code_language_main(
+        ["--target", str(tmp_path), "--baseline", str(baseline)]
+    )
+    captured = capsys.readouterr()
+
+    assert exit_code == 1  # gate-red: FAIL, growth over the baseline
+    assert "FAIL" in captured.out
+    assert "limit exceeded" in captured.out
+    # baseline file must be left untouched on a FAIL -- the gate never writes on red
+    assert baseline.read_text(encoding="utf-8").strip() == str(current_count)
+
 
 def test_is_open_raises_typeerror_for_naive_datetime_adversarial_input() -> None:
     """Adversarial input -- a naive datetime (no tzinfo) must not be silently
     compared against this calendar's tz-aware session windows and produce a
     wrong answer. Python's own aware/naive comparison rules raise TypeError
     here, and this pins that as the actual (fail-loud, not fail-silent)
-    behavior a caller who skips the repo's tz-aware-UTC convention hits."""
+    behavior a caller who skips the repo's tz-aware-UTC convention hits.
+
+    `trading_day_of` calls `at.astimezone(self.tz)`, which per Python
+    semantics does NOT raise for a naive `at` -- it presumes `at` is already
+    in the *host's* local timezone and converts from there. The TypeError
+    only fires later, when the resulting (aware) session window is compared
+    against the still-naive `at`, and only if that day actually has a
+    session. On a host whose local UTC offset differs enough from KRX's
+    fixed +9, a Thursday 10:00 naive value can roll onto a Saturday in KRX
+    time, `sessions_for` then returns `[]`, no comparison ever happens, and
+    `is_open` returns False instead of raising (observed on a UTC-08 host).
+
+    `astimezone()`'s presumed-local-time shift is bounded by the full range
+    of real UTC offsets (-12..+14), so relative to KRX's fixed +9 the result
+    lands at most 5h earlier or 21h later than the naive wall-clock value --
+    i.e. on the same day or the following day, never further. Anchoring on a
+    Wednesday 10:00 keeps both possible outcomes (Wed or Thu) a KRX trading
+    weekday with no configured holiday, so the aware/naive comparison is
+    always reached regardless of host timezone."""
     cal = _calendar(Venue.KIS_KRX)
-    naive_at = datetime(2026, 9, 4, 10, 0)  # no tzinfo -- violates repo convention
+    naive_at = datetime(2026, 9, 2, 10, 0)  # Wed -- no tzinfo, violates repo convention
     with pytest.raises(TypeError):
         cal.is_open(naive_at)
     with pytest.raises(TypeError):

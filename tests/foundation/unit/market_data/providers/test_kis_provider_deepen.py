@@ -163,6 +163,7 @@ def _large_candle_set(n: int) -> list[Candle]:
     return [_candle(n - d) for d in range(n)]
 
 
+@pytest.mark.perf
 async def test_fetch_candles_filter_sort_throughput_bounded_vs_trivial_baseline() -> None:
     """`fetch_candles`의 구간 필터+정렬 파이프라인이 대용량(2000개) 캔들에서
     30회 반복 처리하는 총소요시간이, 같은 프로세스가 방금 측정한 구조적으로

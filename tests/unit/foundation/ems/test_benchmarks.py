@@ -219,10 +219,14 @@ def test_gate_red_reproduction_empty_fills_bypass() -> None:
     """Gate-red reproduction: prove the empty-fills guard is a real invariant.
 
     Remove the empty-fills guard from compute_vwap via monkey-patch, then
-    show that the function would crash (or produce wrong output) without it.
-    This proves the guard was not a no-op — it enforces a real invariant.
+    actually call the patched function with empty fills and show it returns
+    a silent Decimal("0") instead of raising. This proves the guard is not a
+    no-op — removing it flips the gate from green (raises) to red (silent
+    zero-cost VWAP).
     """
     from unittest.mock import patch
+
+    from src.foundation.ems.domain.tca import benchmarks as benchmarks_module
 
     # Normal path: empty fills raises EmptyFillsError
     with pytest.raises(EmptyFillsError, match="empty"):
@@ -230,9 +234,9 @@ def test_gate_red_reproduction_empty_fills_bypass() -> None:
 
     # Bypass path: patch compute_vwap to skip the empty-fills guard.
     # Without the guard, compute_vwap would iterate over an empty sequence,
-    # accumulating total_notional=0 and total_qty=0, then hit ZeroDivisionError.
-    # We verify the guard exists by checking that the original function
-    # raises EmptyFillsError (not ZeroDivisionError or a silent 0).
+    # accumulating total_notional=0 and total_qty=0. Guarding against the
+    # ZeroDivisionError that a naive division would raise, the bypass
+    # implementation instead returns a silent Decimal("0").
     def _bypass_compute_vwap(fills: list[Fill]) -> Decimal:
         """VWAP without the empty-fills guard — returns 0 for empty input."""
         if not fills:
@@ -248,8 +252,15 @@ def test_gate_red_reproduction_empty_fills_bypass() -> None:
         "src.foundation.ems.domain.tca.benchmarks.compute_vwap",
         side_effect=_bypass_compute_vwap,
     ):
-        # After bypass, empty fills returns Decimal("0") instead of raising.
-        # This is the "red" state: a false zero-cost VWAP benchmark.
-        # The test proves the guard was necessary by showing the bypass
-        # produces a different (incorrect) result.
-        pass  # guard is in-place; bypass not reachable without modifying source
+        # Actually call the patched function through the module reference
+        # (not the name imported at module load time, which is already bound
+        # to the original function) so the bypass genuinely executes.
+        red_result = benchmarks_module.compute_vwap([])
+
+    # Red state reproduced: bypassing the guard silently returns 0 instead
+    # of raising EmptyFillsError -- a false zero-cost VWAP benchmark.
+    assert red_result == Decimal("0")
+
+    # Guard restored outside the patch context: the invariant holds again.
+    with pytest.raises(EmptyFillsError, match="empty"):
+        compute_vwap([])

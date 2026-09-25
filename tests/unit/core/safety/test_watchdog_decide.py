@@ -136,6 +136,7 @@ def test_decide_fails_loud_on_corrupted_nan_loss_pct():
 # --- 성능 단언 --------------------------------------------------------------
 
 
+@pytest.mark.perf
 def test_decide_perf_bound_for_bulk_calls():
     """성능 단언 — decide()는 필드 비교 몇 개뿐인 O(1) 순수 함수다.
     watchdog_process 루프는 5초 주기로 한 번 호출하지만, 누군가 실수로
@@ -245,4 +246,19 @@ def test_watchdog_process_actually_passes_failure_domain_to_decide():
     assert calls, "watchdog_process.py에서 decide() 호출을 찾지 못함"
     assert any("failure_domain" in kws for kws in calls), (
         "decide() 호출부가 failure_domain을 실제 값으로 전달하지 않음 — RTF-03 재발"
+    )
+
+
+def test_watchdog_process_actually_passes_market_wide_correlated_to_decide():
+    """RTF-03 종결 하드 게이트 — xfail 없음. `run_one_cycle`이 예전엔
+    `decide(snapshot, market_wide_correlated=None, ...)`로 영구 고정해 basket
+    상관 판정이 LIQUIDATE 분기에 결코 닿지 못했다(docs/RED_TEAM_FINDINGS.md
+    2026-09-05-44 잔여 갭). 지금은 `get_basket_returns` 콜백으로 조달한 basket
+    수익률을 `is_market_wide_move()`에 넣어 실제 변수를 `decide()`로 넘긴다 —
+    이 스캐너는 그 호출 지점이 리터럴 None으로 되돌아가지 않는지 감시한다."""
+    source = (_REPO_ROOT / "src" / "watchdog_process.py").read_text(encoding="utf-8")
+    calls = _decide_call_keyword_sets(source)
+    assert calls, "watchdog_process.py에서 decide() 호출을 찾지 못함"
+    assert any("market_wide_correlated" in kws for kws in calls), (
+        "decide() 호출부가 market_wide_correlated를 실제 값으로 전달하지 않음 — RTF-03 재발"
     )

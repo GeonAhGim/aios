@@ -171,6 +171,7 @@ def test_to_dict_propagates_serialization_failure_instead_of_masking_it(
         to_dict(program)
 
 
+@pytest.mark.perf
 def test_serialization_round_trip_latency_is_bounded() -> None:
     """수치 성능 단언: 중간 크기 프로그램의 `to_dict`→`program_from_dict`
     왕복 평균 지연이 예산(2ms/회)을 넘지 않는다 — 우연한 이차 복잡도 회귀나

@@ -1,14 +1,15 @@
-"""18.4 — 판매자 정지 처리 (SellerSuspensionService).
+"""18.4 — Seller suspension handling (SellerSuspensionService).
 
 Spec: 기능설계문서_v1.20.md#FD-18.4, 14번 문서 §14.5.3, 정책문서 8.10
 
-users.seller_suspended를 토글한다 — 정지 시 신규 리스팅 생성이 거부된다
-(ListingService.create_listing이 이 플래그를 확인). 이미 정지된 판매자를
-재정지 시도해도 멱등 처리(에러 아님, 현재 상태 그대로 반환).
+Toggles users.seller_suspended — when suspended, new listing creation
+is rejected (ListingService.create_listing checks this flag). Attempting
+to re-suspend an already-suspended seller is idempotent (not an error;
+returns the current state unchanged).
 
-reason은 사용자에게는 비공개(분쟁 사유가 민감할 수 있음)지만 내부
-기록용이다 — 8.10 원칙에 따라 audit_log에 남긴다(18.2와 동일하게
-record_audit_log 재사용).
+The reason is private to end users (dispute reasons may be sensitive)
+but recorded internally — written to audit_log per 8.10 principle
+(reusing record_audit_log, same as 18.2).
 """
 from __future__ import annotations
 
@@ -22,7 +23,7 @@ from src.core.logging.audit_log import record_audit_log
 
 
 class SellerSuspensionError(Exception):
-    """FD-18.4 실패 — 라우터가 404로 변환."""
+    """FD-18.4 failure — router converts to 404."""
 
 
 class SellerSuspensionResult(BaseModel):

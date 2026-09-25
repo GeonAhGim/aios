@@ -147,6 +147,51 @@ async def test_route_order_rejects_duplicate_venue_candidates(pool, repo):
     assert await repo.get_by_order_id(order_id) is None
 
 
+async def test_route_order_rejects_negative_weights(pool, repo):
+    """Negative -- invariant violation: negative weights are rejected by
+    ``VenueScoreWeights.__post_init__`` before any DB call, so no row is
+    written (fail-closed)."""
+    order_id = uuid4()
+    candidates = [
+        VenueCandidate(venue="ALPHA", fee_bps=Decimal("2.5"), liquidity_score=Decimal("0.6")),
+    ]
+
+    with pytest.raises(ValueError, match="weights must be >= 0"):
+        await route_order(
+            repo,
+            order_id=order_id,
+            candidates=candidates,
+            decided_at=datetime.now(timezone.utc),
+            weights=VenueScoreWeights(fee_weight=Decimal("-1"), liquidity_weight=Decimal("1")),
+        )
+
+    assert await _row_count(pool, order_id) == 0
+    assert await repo.get_by_order_id(order_id) is None
+
+
+async def test_route_order_repository_failure_raises(pool, repo):
+    """Failure injection -- when ``repo.insert_or_get`` raises (e.g. DB
+    outage), ``route_order`` propagates the exception and no row is
+    written."""
+    order_id = uuid4()
+    candidates = [
+        VenueCandidate(venue="ALPHA", fee_bps=Decimal("2.5"), liquidity_score=Decimal("0.6")),
+    ]
+
+    async def _fail_insert(*args, **kwargs):
+        raise OSError("connection refused")
+
+    repo.insert_or_get = _fail_insert  # monkeypatch for failure injection
+
+    with pytest.raises(OSError, match="connection refused"):
+        await route_order(
+            repo, order_id=order_id, candidates=candidates, decided_at=datetime.now(timezone.utc)
+        )
+
+    assert await _row_count(pool, order_id) == 0
+    assert await repo.get_by_order_id(order_id) is None
+
+
 async def test_route_order_concurrent_calls_are_idempotent(pool, repo):
     """DoD 3 -- 20 concurrent route_order calls for the same order_id leave
     exactly one route_decisions row."""

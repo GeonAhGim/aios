@@ -61,6 +61,7 @@ from src.services.oms.application.wiring import (
 )
 from src.services.oms.contracts.v1_commands import OrderIdempotencyScope, SubmitOrderCommand
 from src.services.oms.domain.errors import UnknownSymbolError
+from src.services.oms.domain.idempotency import client_order_id as derive_client_order_id
 from src.services.order_service.gate import GateDecision, GateOutcome, OrderContext
 from tests.integration.oms.conftest import create_test_tenant, seed_entity_context
 from tests.support.oms_outbox_fakes import ScriptedAdapter
@@ -147,10 +148,28 @@ async def _row_counts(pool: asyncpg.Pool, *, execution_id: int) -> dict[str, int
 
 
 async def _assert_zero_footprint_and_zero_adapter_calls(
-    pool: asyncpg.Pool, *, execution_id: int
+    pool: asyncpg.Pool, *, execution_id: int, cmds: list[SubmitOrderCommand]
 ) -> None:
+    """`report.claimed == 0`/`spy.calls == []`(전역 outbox가 완전히 비어야
+    통과)는 이 프로세스가 통제하지 못하는 CI 부하 하에서 다른 실행이 남긴
+    정상적인 PENDING 행과 경합해 타이밍 의존 실패를 낸다 — 우리 execution_id
+    스코프의 0행(`_row_counts`, DB 단언이라 경합 없음)과, 디스패처가 실제로
+    돌아도 *우리* 주문들의 `client_order_id`(scope에서 결정론적으로 파생,
+    submit_order.py와 동일 함수)로는 절대 호출되지 않는다는 스코프 단언으로
+    대체한다 — 전역 공백이 아니라 우리 주문에 대한 무영향을 증명한다.
+    `cmds`는 이번 테스트가 제출을 시도한 커맨드 전부(동시성 테스트는 intent_seq
+    별로 서로 다른 client_order_id를 파생시키는 커맨드 여러 개를 시도한다)."""
     counts = await _row_counts(pool, execution_id=execution_id)
     assert counts == {"orders": 0, "outbox": 0}
+
+    our_client_ids = {
+        derive_client_order_id(
+            cmd.scope,
+            max_len=BITGET_SPOT_PROFILE.client_order_id_max_len,
+            charset=BITGET_SPOT_PROFILE.client_order_id_charset,
+        )
+        for cmd in cmds
+    }
 
     spy = ScriptedAdapter()
 
@@ -164,9 +183,8 @@ async def _assert_zero_footprint_and_zero_adapter_calls(
         order_repo=PostgresOrderRepository(),
         worker_id=f"fail-closed-fi-test-{uuid.uuid4().hex[:8]}",
     )
-    report = await dispatcher.dispatch_once()
-    assert report.claimed == 0
-    assert spy.calls == []
+    await dispatcher.dispatch_once()
+    assert not (our_client_ids & set(spy.calls))
 
 
 # ---- D3: failure-injection (DB error / network failure / crash) against ----
@@ -202,7 +220,7 @@ async def test_db_error_during_gate_lookup_still_fails_closed_zero_rows(
             entity_repo=PostgresEntityRepository(pool),
         )
 
-    await _assert_zero_footprint_and_zero_adapter_calls(pool, execution_id=execution_id)
+    await _assert_zero_footprint_and_zero_adapter_calls(pool, execution_id=execution_id, cmds=[cmd])
 
 
 async def test_network_failure_during_gate_lookup_still_fails_closed_zero_rows(
@@ -230,7 +248,7 @@ async def test_network_failure_during_gate_lookup_still_fails_closed_zero_rows(
             entity_repo=PostgresEntityRepository(pool),
         )
 
-    await _assert_zero_footprint_and_zero_adapter_calls(pool, execution_id=execution_id)
+    await _assert_zero_footprint_and_zero_adapter_calls(pool, execution_id=execution_id, cmds=[cmd])
 
 
 async def test_worker_crash_during_gate_lookup_still_fails_closed_zero_rows(
@@ -263,7 +281,7 @@ async def test_worker_crash_during_gate_lookup_still_fails_closed_zero_rows(
             entity_repo=PostgresEntityRepository(pool),
         )
 
-    await _assert_zero_footprint_and_zero_adapter_calls(pool, execution_id=execution_id)
+    await _assert_zero_footprint_and_zero_adapter_calls(pool, execution_id=execution_id, cmds=[cmd])
 
 
 # ---- D2: numeric performance/latency assertion -----------------------------
@@ -333,8 +351,11 @@ async def test_concurrent_unknown_symbol_submissions_all_fail_closed_zero_rows(
     entity_repo = PostgresEntityRepository(pool)
     registry = build_production_symbol_registry()
 
-    async def _one_attempt(intent_seq: int) -> BaseException | None:
-        cmd = _command(user_id, execution_id, symbol="ZZZUSDT", intent_seq=intent_seq)
+    cmds = [
+        _command(user_id, execution_id, symbol="ZZZUSDT", intent_seq=seq) for seq in range(1, 11)
+    ]
+
+    async def _one_attempt(cmd: SubmitOrderCommand) -> BaseException | None:
         try:
             await submit_order(
                 cmd, pool=pool, profile=BITGET_SPOT_PROFILE, registry=registry,
@@ -345,11 +366,11 @@ async def test_concurrent_unknown_symbol_submissions_all_fail_closed_zero_rows(
             return exc
         return None
 
-    results = await asyncio.gather(*(_one_attempt(seq) for seq in range(1, 11)))
+    results = await asyncio.gather(*(_one_attempt(cmd) for cmd in cmds))
 
     assert len(results) == 10
     assert all(isinstance(r, UnknownSymbolError) for r in results)
-    await _assert_zero_footprint_and_zero_adapter_calls(pool, execution_id=execution_id)
+    await _assert_zero_footprint_and_zero_adapter_calls(pool, execution_id=execution_id, cmds=cmds)
 
 
 @pytest.mark.parametrize(
@@ -388,7 +409,7 @@ async def test_adversarial_symbol_variants_of_registered_canonical_fail_closed_z
             entity_repo=entity_repo,
         )
 
-    await _assert_zero_footprint_and_zero_adapter_calls(pool, execution_id=execution_id)
+    await _assert_zero_footprint_and_zero_adapter_calls(pool, execution_id=execution_id, cmds=[cmd])
 
 
 async def test_registered_canonical_used_against_unregistered_venue_fails_closed(
@@ -416,4 +437,4 @@ async def test_registered_canonical_used_against_unregistered_venue_fails_closed
             entity_repo=entity_repo,
         )
 
-    await _assert_zero_footprint_and_zero_adapter_calls(pool, execution_id=execution_id)
+    await _assert_zero_footprint_and_zero_adapter_calls(pool, execution_id=execution_id, cmds=[cmd])

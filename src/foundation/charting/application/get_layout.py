@@ -1,6 +1,6 @@
-"""GetChartLayout 쿼리 — 존재하지 않거나 타 테넌트 소유면 둘 다 404
-(`ChartLayoutNotFoundError`/`CrossTenantChartLayoutAccessError`, 둘 다
-RESOURCE_NOT_FOUND로 매핑)."""
+"""GetChartLayout query — returns 404 for both not-found and cross-tenant
+(`ChartLayoutNotFoundError`/`CrossTenantChartLayoutAccessError`, both
+mapped to RESOURCE_NOT_FOUND)."""
 from __future__ import annotations
 
 from uuid import UUID

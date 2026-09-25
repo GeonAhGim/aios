@@ -1,4 +1,4 @@
-"""foundation/* 라우터 공용 의존성 — src/api/suitability_deps.py와 동일 패턴."""
+"""Shared dependencies for foundation/* routers — same pattern as src/api/suitability_deps.py."""
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
@@ -149,9 +149,9 @@ def get_paper_statement_input_adapter(
     return PaperStatementInputAdapter(pool)
 
 
-# LA-24(task-1376) — market_data 읽기 API. 어댑터는 main.py lifespan의
-# MarketDataQualityScheduler가 쓰는 것과 같은 클래스(단일출처). 이용권 포트는
-# 여기서만 구현이 결정된다 — DC-9 정책 구현으로 교체할 때 이 한 함수만 바꾼다.
+# LA-24(task-1376) — market_data read API. Adapter uses the same class as
+# MarketDataQualityScheduler in main.py lifespan (single source of truth). The entitlement port
+# implementation is decided only here — change only this function when swapping to DC-9 policy.
 def get_candle_store(pool: asyncpg.Pool = Depends(get_pool)) -> CandleStore:
     return PostgresCandleStore(pool)
 
@@ -184,16 +184,16 @@ def get_entitlement_port(
     return PaperTenantVenueEntitlement(source)
 
 
-# 전수감사(agent-platform-12, docs/FULL_AUDIT_2026-09-02.md §6) 발견 반영 —
-# 예전에는 여기서 무조건 FakeReadonlyAccountProvider를 반환해, 운영 경로가
-# 실제로는 한 번도 실 거래소를 만지지 않았다. 이제 connection_id 경로
-# 파라미터(FastAPI가 이름으로 자동 바인딩)로 connection을 먼저 읽어
-# provider_code에 맞는 실 어댑터(legacy CredentialResolver 기반,
-# adapters/live_provider.py)를 구성한다 — Fake는 이제 이 DI 경로 어디서도
-# 안 쓴다. 테스트가 필요하면 애플리케이션 함수를 직접 호출하며 Fake를
-# 명시적으로 넘기거나(기존 통합테스트가 이미 그렇게 함), FastAPI
-# `app.dependency_overrides`로 이 함수 자체를 교체한다 — "테스트 전용
-# 플래그로만" 도달 가능하다는 게 이 뜻이다.
+# Full-audit (agent-platform-12, docs/FULL_AUDIT_2026-09-02.md §6) finding —
+# Previously always returned FakeReadonlyAccountProvider, so the production path
+# never actually touched a real exchange. Now reads the connection via the
+# connection_id path parameter (FastAPI auto-binds by name) first, then
+# constructs the real adapter matching provider_code (legacy CredentialResolver-based,
+# adapters/live_provider.py) — Fake is no longer used anywhere in this DI path.
+# For tests: call the application function directly with Fake injected (existing
+# integration tests already do this), or replace this function itself via FastAPI
+# `app.dependency_overrides` — this is what "only reachable via test-only
+# flag" means.
 async def get_readonly_account_provider(
     connection_id: UUID,
     user: User = Depends(get_current_user),
@@ -202,9 +202,9 @@ async def get_readonly_account_provider(
 ) -> ReadonlyAccountProvider:
     connection = await connection_repo.get_connection(connection_id)
     if connection is None or connection.tenant_id != user.user_id:
-        # 존재하지 않거나 다른 tenant 소유 — 여기서 곧장 404. 커맨드
-        # 함수도 같은 검사를 다시 하지만(방어적 중복, 74번 §5), provider를
-        # 만들 수 없는 이 시점에는 어차피 더 진행할 수 없다.
+        # Does not exist or belongs to a different tenant — 404 here. The command
+        # function also re-checks the same condition (defensive duplication, #74 §5), but at
+        # this point we cannot proceed anyway since we cannot create the provider.
         raise HTTPException(status.HTTP_404_NOT_FOUND, "존재하지 않는 연결입니다.")
     if connection.provider_code not in SUPPORTED_EXCHANGES:
         raise HTTPException(
@@ -224,24 +224,24 @@ def get_credential_encryption_key(request: Request) -> str:
     return str(secrets.credential_encryption_key.get_secret_value())
 
 
-# 73번 §6 규칙 2 "issued within configured step-up window" — 이 창을 넘으면
-# mfa_enabled=True인 계정이라도 "최근 실제로 TOTP를 통과했다"고 볼 수 없다.
-# 로그인 세션(JWT, 기본 60분)보다 짧게 잡는다 — 세션이 살아있는 동안에도
-# 민감 커맨드는 "로그인했다"가 아니라 "최근 재확인했다"를 요구해야 한다.
+# Rule 2 of #73 §6 "issued within configured step-up window" — past this window,
+# even an account with mfa_enabled=True cannot be considered as "recently passed TOTP".
+# Set shorter than the login session (JWT, default 60 min) — even while the session
+# is alive, sensitive commands must require "recently re-verified", not just "logged in".
 MFA_STEP_UP_WINDOW = timedelta(minutes=15)
 
 
 def _compute_mfa_verified(user: User) -> bool:
-    """전수감사(agent-platform-12, docs/FULL_AUDIT_2026-09-02.md §2-B) 발견 반영 —
-    예전에는 `mfa_verified = user.mfa_enabled`로, "계정에 MFA가 켜져 있다"(계정
-    설정)와 "이 세션이 최근 실제로 TOTP를 통과했다"(세션 사실)를 구분하지
-    못했다. `auth_service.py`의 `mfa_verified_at`(TOTP 통과 시각, 마이그레이션
-    cdd905e63ffe)을 기준으로 `MFA_STEP_UP_WINDOW` 안에 있을 때만 True다 —
-    로그인 후 오래 켜둔 세션은 다시 step-up하지 않는 한 "MFA 검증됨"으로
-    보지 않는다. mfa_enabled=False인 계정은 여전히 항상 False(애초에 검증할
-    대상이 없다). PLT-28 — `get_tenant_context`가 async I/O(헤더/DB)를 갖게
-    되면서, 순수 계산만 하던 기존 단위테스트(`test_foundation_deps.py`)가
-    계속 동기적으로 부를 수 있게 이 부분만 별도 함수로 뺐다(시그니처 안정)."""
+    """Full-audit (agent-platform-12, docs/FULL_AUDIT_2026-09-02.md §2-B) finding —
+    Previously `mfa_verified = user.mfa_enabled` conflated "MFA enabled on the account"
+    (account setting) with "this session recently passed TOTP" (session fact).
+    Based on `mfa_verified_at` from `auth_service.py` (timestamp of TOTP pass, migration
+    cdd905e63ffe), returns True only within `MFA_STEP_UP_WINDOW` — a session left open
+    long after login is not considered "MFA verified" without a fresh step-up. Accounts
+    with mfa_enabled=False always return False (no verification target). PLT-28 —
+    `get_tenant_context` now has async I/O (header/DB), so this was extracted to a
+    separate function so existing unit tests (`test_foundation_deps.py`) can still
+    call it synchronously (signature stability)."""
     return bool(
         user.mfa_enabled
         and user.mfa_verified_at is not None
@@ -255,13 +255,12 @@ async def get_tenant_context(
     pool: asyncpg.Pool = Depends(get_pool),
     membership_repo: MembershipRepository = Depends(get_membership_repository),
 ) -> TenantContext:
-    """71번 §4 "API body에서 생성 금지" — 게이트웨이 인증(get_current_user)에서만
-    발급한다. `X-Tenant-Id` 헤더가 없으면 personal tenant(id == user_id)로
-    발급하고(P0 스콥, 84b7d0faf14f 마이그레이션 편차 설명 참조), 있으면
-    PLT-28 `resolve_tenant_context`가 그 tenant에 대한 활성 멤버십을 확인한다
-    — 없으면(비회원) 403 `AUTH_TENANT_MISMATCH`. 성공하면 `rebind_tenant()`로
-    관측성 컨텍스트의 tenant_id/actor_subject_id를 이 값으로 재바인딩한다
-    (§2.1(A), tenant_binding.py)."""
+    """#71 §4 "do not create in API body" — issued only via gateway auth (get_current_user).
+    If no `X-Tenant-Id` header, issues a personal tenant (id == user_id) (P0 scope, see
+    84b7d0faf14f migration deviation note); if present, PLT-28 `resolve_tenant_context`
+    verifies active membership for that tenant — if not found (non-member), returns 403
+    `AUTH_TENANT_MISMATCH`. On success, rebinds the observability context's tenant_id/
+    actor_subject_id to this value via `rebind_tenant()` (§2.1(A), tenant_binding.py)."""
     mfa_verified = _compute_mfa_verified(user)
     header_value = request.headers.get("X-Tenant-Id")
     try:

@@ -34,7 +34,7 @@ from pydantic import BaseModel
 
 from src.core.risk.decision import GateKind, RiskDecision, RiskOutcome, RuleResult
 from src.core.risk.hashing import canonical_json, sha256_hex
-from src.foundation.connections.domain.models import ConnectionState, HealthState
+from src.foundation.connections.api import ConnectionState, HealthState
 from src.foundation.connections.ports.repository import ConnectionRepository
 from src.foundation.risk_gate.domain.fence import fence_pairs_for
 from src.foundation.risk_gate.domain.models import FenceSnapshot, SafetyControl

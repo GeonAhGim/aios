@@ -47,7 +47,7 @@ from uuid import UUID
 import asyncpg
 
 from src.core.observability.metric_names import OMS_UNKNOWN_RESOLUTION_DURATION_SECONDS
-from src.core.observability.metrics import MetricsPort, NullMetrics
+from src.core.observability.metrics import MetricsPort, NullMetrics, safe_observe
 from src.data.models.trading import OrderStatus
 from src.exchanges.common.adapter import ExchangeAdapter
 from src.foundation.risk_gate.ports.repository import RiskGateRepository
@@ -141,4 +141,4 @@ async def resolve_unknown(
 
 def _observe(m: MetricsPort, start: float, outcome: str) -> None:
     elapsed = time.monotonic() - start
-    m.observe(OMS_UNKNOWN_RESOLUTION_DURATION_SECONDS, elapsed, {"outcome": outcome})
+    safe_observe(m, OMS_UNKNOWN_RESOLUTION_DURATION_SECONDS, elapsed, {"outcome": outcome})

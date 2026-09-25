@@ -1,29 +1,33 @@
-"""7.1 — LogEntry 스키마 + 로거 초기화.
+"""7.1 — LogEntry schema + logger initialization.
 
 Spec: 07_logging_config_v1.3.md#§7.1,
 docs/specs/L4_platform_observability_tenancy_api_v1.0.md#§9 PLT-03.
 
-Phase 1은 stdout으로 JSON Lines 출력 — 로그 수집기(Datadog/Loki 등)는 팀
-확정 후 연결한다(과잉설계 방지, 17.9-A).
+Phase 1 outputs JSON Lines to stdout — log collectors (Datadog, Loki, etc.)
+will be connected after the team finalizes them (prevents over-engineering,
+17.9-A).
 
-로그 레벨 사용 기준:
-DEBUG    — 개발 중에만. 프로덕션 기본 비활성.
-INFO     — 정상 주문 생성/체결, 정상 상태 전이.
-WARNING  — 재시도 발생, Reconciliation 1회 불일치(8.4), Circuit Breaker 경고.
-ERROR    — Handler 예외(EventHandlerError), 주문 거부, API 인증 실패.
-CRITICAL — Watchdog 발동, Circuit Breaker 거래중지 이상, Kill Switch 발동.
-           이 레벨은 반드시 audit_log 테이블에도 동시 기록(8.10 원칙) —
-           실제 연결은 7.4(audit_log 기록 유틸)가 준비된 후 애플리케이션
-           조립 단계(main.py)에서 CRITICAL 핸들러로 배선한다.
+Log level usage criteria:
+DEBUG    — Development only. Disabled by default in production.
+INFO     — Normal order creation/filling, normal state transitions.
+WARNING  — Retry triggered, 1 Reconciliation mismatch (8.4), Circuit Breaker alert.
+ERROR    — Handler exception (EventHandlerError), order rejection, API auth failure.
+CRITICAL — Watchdog triggered, Circuit Breaker halt above threshold, Kill Switch activated.
+           This level must also be recorded simultaneously in the audit_log table (8.10 principle) —
+           actual wiring to the CRITICAL handler occurs in the application
+           assembly stage (main.py) after 7.4 (audit_log recording utility) is ready.
 
-PLT-03: `LogEntry`(07 §7.1 계약, 기존 소비처 존재)는 필드 이름·값 계약을 그대로
-유지하고, 108 §2 8필드는 `fields.py`(단일 출처, PLT-02)에서 위임받아 JSON 출력에
-추가한다. 필드 목록은 여기서 다시 하드코딩하지 않고 `fields.REQUIRED_FIELDS`를
-순회해 `LogEntry`에 없는 키만 채운다 — 유일한 예외는 `level`이다. `LogEntry`가
-이미 동일한 이름의 필드를 갖고 있고(`record.levelname` 원문, 예: "WARNING") 108
-쪽은 소문자 매핑값("warn")을 쓰므로, 기존 소비처의 값 계약을 깨지 않기 위해
-108의 `level`로 덮어쓰지 않는다.
+PLT-03: `LogEntry` (07 §7.1 contract, existing consumers exist) preserves its
+field name/value contract as-is, and the 8 fields in 108 §2 are delegated
+from `fields.py` (single source of truth, PLT-02) and appended to JSON output.
+The field list is not hardcoded here; instead we iterate `fields.REQUIRED_FIELDS`
+and fill only keys not already present in `LogEntry` — the sole exception is
+`level`. `LogEntry` already has a field with the same name
+(`record.levelname` original, e.g. "WARNING"), while 108 uses the lowercase
+mapped value ("warn"), so we do not overwrite with 108's `level` to avoid
+breaking existing consumers' value contract.
 """
+
 from __future__ import annotations
 
 import json
@@ -45,24 +49,26 @@ class LogEntry(BaseModel):
     timestamp: datetime
     level: str
     module: str
-    event_type: str  # 05번 문서 Topic 명명규칙과 동일 체계(예: "order.status.changed")
-    correlation_id: str | None = None  # AIOSTask.task_id 또는 Order.client_order_id
+    event_type: str  # Same naming scheme as doc 05 Topic conventions (e.g. "order.status.changed")
+    correlation_id: str | None = None  # AIOSTask.task_id or Order.client_order_id
     message: str
     extra: dict[str, Any] = Field(default_factory=dict)
 
 
 class JSONLinesFormatter(logging.Formatter):
-    """`logger.info(msg, extra={"event_type": ..., "correlation_id": ..., "payload": {...}})`
-    형태로 호출하면 각각 LogEntry.event_type/correlation_id/extra로 매핑된다.
+    """When called as:
+    `logger.info(msg, extra={"event_type": ..., "correlation_id": ..., "payload": {...}})`,
+    each extra key maps to LogEntry.event_type/correlation_id/extra respectively.
 
-    출력 JSON 라인은 `LogEntry` 7필드에 더해 108 §2 8필드(`fields.REQUIRED_FIELDS`)를
-    싣는다 — `level`을 제외한 7개는 `fields.from_record()`가 현재 `RequestContext`로
-    계산한 값이고, `level`은 위 docstring 이유로 `LogEntry`가 채운 값을 유지한다.
+    The output JSON line carries `LogEntry`'s 7 fields plus 8 fields from 108 §2
+    (`fields.REQUIRED_FIELDS`) — the 7 fields excluding `level` are computed by
+    `fields.from_record()` from the current `RequestContext`, and `level` preserves
+    the value filled by `LogEntry` for the reason stated above in this docstring.
     """
 
     def format(self, record: logging.LogRecord) -> str:
-        # 호출자가 correlation_id를 명시하지 않았으면 요청 미들웨어가 채워둔
-        # request_id로 대체한다(HTTP 요청 컨텍스트 밖이면 여전히 None).
+        # If the caller did not specify correlation_id, fall back to the
+        # request_id populated by request middleware (still None outside HTTP request context).
         correlation_id = getattr(record, "correlation_id", None) or get_current_request_id()
         entry = LogEntry(
             timestamp=datetime.fromtimestamp(record.created, tz=timezone.utc),
@@ -75,12 +81,13 @@ class JSONLinesFormatter(logging.Formatter):
         )
         line = entry.model_dump(mode="json")
 
-        # QueueHandler 경로에서는 `_ContextCapturingQueueHandler.prepare()`가 호출
-        # 스레드(=원래 RequestContext가 바인딩된 스레드)에서 미리 떠 둔 스냅샷을
-        # 쓴다 — 이 format()이 실행되는 QueueListener 스레드는 ContextVar가
-        # 전파되지 않아 `current_request_context()`를 여기서 다시 호출하면 항상
-        # fallback(기본) 값이 된다. QueueHandler를 거치지 않는 직접 호출(테스트 등)은
-        # 스냅샷이 없으므로 지금 스레드에서 그대로 계산한다.
+        # On the QueueHandler path, `_ContextCapturingQueueHandler.prepare()`
+        # pre-takes a snapshot on the original thread (= the thread where RequestContext
+        # was bound) and attaches it — the QueueListener thread running this
+        # format() does not propagate ContextVars, so calling `current_request_context()`
+        # here would always return the fallback (default) value. Direct calls that
+        # bypass QueueHandler (tests, etc.) have no snapshot, so we compute it
+        # on this thread directly.
         ctx = getattr(record, "structured_context", None) or current_request_context()
         structured = log_fields.from_record(record, ctx)
         structured_line = structured.model_dump(mode="json")
@@ -91,13 +98,14 @@ class JSONLinesFormatter(logging.Formatter):
 
 
 class _ContextCapturingQueueHandler(QueueHandler):
-    """`QueueHandler.prepare()` 기본 구현은 큐에 넣기 전에 `self.format()`으로
-    레코드를 완성된 문자열로 덮어쓴다 — 리스너 스레드가 같은 포매터로 다시
-    `format()`을 호출하면 이미 JSON인 문자열을 또 감싸는 이중 인코딩이 된다.
-    그래서 여기서는 문자열로 굳히지 않고, 호출 스레드(=RequestContext가 실제로
-    바인딩된 스레드)에 있는 지금 이 순간의 컨텍스트만 레코드에 스냅샷으로
-    얹어 둔다 — 실제 JSON 렌더링은 기존 설계대로 리스너 스레드의
-    `target_handler`가 한 번만 수행한다."""
+    """The default `QueueHandler.prepare()` implementation overwrites the
+    record with a fully formatted string via `self.format()` before queueing —
+    if the listener thread calls `format()` again with the same formatter,
+    it double-encodes an already-JSON string. So we do not materialize as a
+    string here, but instead only snapshot the current context from the calling
+    thread (= the thread where RequestContext is actually bound) onto the record —
+    actual JSON rendering is performed exactly once by the listener thread's
+    `target_handler`, as per the original design."""
 
     def prepare(self, record: logging.LogRecord) -> logging.LogRecord:
         record.structured_context = current_request_context()
@@ -105,14 +113,17 @@ class _ContextCapturingQueueHandler(QueueHandler):
 
 
 def configure_logging(level: str = "INFO", *, redact: bool = True) -> QueueListener:
-    """애플리케이션 시작 시 1회 호출 — 루트 로거에 비차단 `QueueHandler`를 부착한다.
+    """Call once at application startup — attaches a non-blocking `QueueHandler`
+    to the root logger.
 
-    실제 stdout 쓰기(포맷팅 + 선택적 레닥션)는 `QueueListener`가 별도 스레드에서
-    수행한다 — 호출 스레드(주문 실행 경로 포함)는 큐에 넣기만 하고 즉시 반환하므로
-    로그 sink 지연/stdout 막힘이 거래 경로를 블로킹하지 않는다(§9 PLT-03 리스크
-    대응표: "로그 sink 지연/stdout 막힘" → "QueueHandler로 로깅 비동기화"). 반환된
-    `QueueListener`는 호출자가 `stop()`으로 명시적으로 멈춰야 한다 — 특히 테스트에서
-    멈추지 않으면 리스너 스레드가 다음 테스트로 새어 나가 flaky의 원인이 된다.
+    Actual stdout writing (formatting + optional redaction) is performed by
+    `QueueListener` on a separate thread — the calling thread (including order
+    execution paths) only queues the record and returns immediately, so log
+    sink latency/stdout blocking does not block the trading path (§9 PLT-03
+    risk mitigation table: "log sink latency/stdout blocking" → "async logging
+    via QueueHandler"). The returned `QueueListener` must be explicitly stopped
+    by the caller via `stop()` — especially in tests, if not stopped the
+    listener thread leaks into the next test, causing flakiness.
     """
     formatter = JSONLinesFormatter()
 
@@ -126,11 +137,11 @@ def configure_logging(level: str = "INFO", *, redact: bool = True) -> QueueListe
     listener.start()
 
     queue_handler = _ContextCapturingQueueHandler(log_queue)
-    # emit() 자체는 여전히 큐에 넣기만 한다 — 실제 포맷팅은 위 target_handler가
-    # 리스너 스레드에서 수행한다(prepare()는 컨텍스트 스냅샷만 얹는다, 위 클래스
-    # docstring 참조). 그래도 formatter를 여기 붙여두는 건 하위호환 때문이다: 이
-    # 핸들러가 부착되기 전에도 `root.handlers[0].formatter`로 JSONLinesFormatter
-    # 존재를 확인하던 소비처가 있다.
+    # emit() itself still only queues — actual formatting is done by the above
+    # target_handler on the listener thread (prepare() only attaches a context
+    # snapshot, see the class docstring above). We keep the formatter here for
+    # backward compatibility: there are consumers that check for JSONLinesFormatter
+    # existence via `root.handlers[0].formatter` even before this handler is attached.
     queue_handler.setFormatter(formatter)
 
     root = logging.getLogger()

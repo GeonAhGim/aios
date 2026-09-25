@@ -32,6 +32,7 @@ from decimal import Decimal
 from pathlib import Path
 
 import httpx
+import pytest
 
 from src.exchanges.nh.adapter import NHAdapter
 
@@ -73,6 +74,7 @@ def _make_balance_adapter(n: int) -> NHAdapter:
     return _make_adapter(handler)
 
 
+@pytest.mark.perf
 async def test_balance_parsing_throughput_within_normalized_budget() -> None:
     """`get_balance`가 2000행 응답을 파싱하는 실측 소요시간을 동일 N
     크기의 trivial Decimal 생성 루프(같은 프로세스, 같은 측정 시점) 대비

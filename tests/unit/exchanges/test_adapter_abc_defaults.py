@@ -299,6 +299,7 @@ def test_status_map_new_and_init_marked_acknowledged_unknown_otherwise():
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.perf
 async def test_default_unsupported_raises_have_bounded_latency_under_concurrent_load():
     """수치 성능 단언(D2) — 기본 구현 5종은 순수 예외 발생이라 I/O가
     전혀 없어야 한다. 500개의 독립 `_MinimalAdapter` 인스턴스가 동시에

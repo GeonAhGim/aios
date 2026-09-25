@@ -1,37 +1,42 @@
-"""LA-18 — 최근 배치·스테일 상태를 관측성 게이지로 내보낸다.
+"""LA-18 — Exports recent-batch and staleness state as observability gauges.
 
-Spec: docs/specs/L4_market_data_positions_ledger_v1.0.md#§4.1(STALE 강제
-위치: 스케줄러), §7(`md_staleness_seconds`, `md_gap_ratio_24h` 게이지), §9.2
+Spec: docs/specs/L4_market_data_positions_ledger_v1.0.md#§4.1(STALE forced
+at: scheduler), §7(`md_staleness_seconds`, `md_gap_ratio_24h` gauges), §9.2
 LA-18.
 
-STALE 판정은 `domain/quality/stale_detector.detect_stale`(LA-5)를 그대로
-쓴다 — `ingest_candles`(LA-15)가 이 판정을 파이프라인에서 뺀 이유(그 모듈
-docstring 참조)가 바로 이 함수다. 세션 열림 여부(§4.1 "세션이 열려 있고")는
-`ingest_candles._sessions_in_range`와 같은 근거로: 크립토(BITGET,
-continuous)는 캘린더 조회 없이 상수 스펙만으로, KRX/US는
-`CalendarRepository`(LA-12)로 조회한다.
+STALE determination uses `domain/quality/stale_detector.detect_stale`(LA-5)
+unchanged — this function is exactly why `ingest_candles`(LA-15) removed
+that check from the pipeline (see that module docstring). Session-open
+status (§4.1 "session is open") is resolved the same way as
+`ingest_candles._sessions_in_range`: crypto (BITGET, continuous) uses a
+constant spec without calendar lookup; KRX/US queries
+`CalendarRepository`(LA-12).
 
-편차 1: 명세 §2.2 표는 이 모듈의 의존(포트)을 "batches, store"로만 적지만,
-STALE 판정에 세션 열림 여부가 필요해(§4.1) `cal: CalendarRepository`를
-추가로 받는다 — 재구현 금지 원칙상 세션 판정을 여기서 다시 만들지 않기
-위해서다.
+Deviation 1: Spec §2.2 table lists this module's dependencies (ports) as
+"batches, store" only, but STALE determination needs session-open status
+(§4.1), so we also accept `cal: CalendarRepository` — not to re-implement
+session logic here, which the no-reimplementation rule forbids.
 
-편차 2: "어떤 (venue, instrument, timeframe) 시계열을 볼지" 결정하는
-포트가 이 리프 범위(LA-9 포트 5개)에 없다 — `ReferenceRepository`에는
-전체 목록 조회가, `BatchRepository`에는 최근 배치 목록 조회가 없다.
-`LedgerIntegrityScheduler._fetch_payout_capture_candidates`와 같은 선례를
-따라 최근 24시간 안에 배치가 있었던 시계열을 `md_ingest_batch`에 직접
-SQL로 조회해 대상으로 삼는다(포트 하나에 담기 애매한 횡단 목록 조회는
-application 계층이 `pool`로 직접 한다는 이 코드베이스의 기존 패턴).
+Deviation 2: No port in this leaf scope (LA-9, 5 ports) provides "which
+(venue, instrument, timeframe) series to observe" — `ReferenceRepository`
+has no list-all method, `BatchRepository` has no recent-batch list.
+Following the precedent of
+`LedgerIntegrityScheduler._fetch_payout_capture_candidates`, we query
+`md_ingest_batch` directly via SQL to select series that had a batch in
+the last 24h (cross-cutting lists that don't fit a single port are
+handled by the application layer querying `pool` directly — an existing
+pattern in this codebase).
 
-`gap_ratio_24h`/`reject_ratio_24h`는 정확한 24시간 누적이 아니라 각
-시계열의 **가장 최근 배치**(`batches.get()`이 재구성한 `QualityVerdict`)
-기준이다 — 여러 배치에 걸친 누적 집계를 시도하면 배치마다
-`batches.get()`을 반복 호출해야 해서(각 호출이 `md_candle`/
-`md_quarantine_candle` COUNT 2회 + 이슈 전체 조회) 시계열 수가 늘수록
-스케줄러 주기 비용이 선형이 아니라 눈덩이가 된다. "최근 배치 하나"는
-근사치이지만 §4.1 GAP/REJECT 판정 자체가 배치 단위로 이뤄지므로 이번
-배치 상태를 그대로 반영한다는 점에서 방향은 맞다(Draft, §10 미기재).
+`gap_ratio_24h`/`reject_ratio_24h` are not exact 24h accumulations but
+are based on each series' **most recent batch** (`QualityVerdict`
+reconstructed by `batches.get()`) — attempting cumulative aggregation
+across multiple batches would require repeated `batches.get()` calls
+(each call does 2 COUNTs on `md_candle`/`md_quarantine_candle` + full
+issue scan), making scheduler-cycle cost grow super-linearly as series
+count increases. "Most recent single batch" is an approximation, but
+since §4.1 GAP/REJECT determinations are themselves batch-scoped,
+reflecting this batch's state is the right direction (Draft, §10
+unspecified).
 """
 from __future__ import annotations
 
@@ -83,7 +88,7 @@ async def _session_open(
 async def _active_series(
     conn: asyncpg.Connection, window_start: datetime
 ) -> list[SeriesKey]:
-    """최근 `_ACTIVITY_WINDOW` 안에 `md_ingest_batch` 행이 하나라도 있는 시계열."""
+    """Series that have at least one row in `md_ingest_batch` within the last `_ACTIVITY_WINDOW`."""
     rows = await conn.fetch(
         "SELECT DISTINCT venue, instrument_id, timeframe FROM md_ingest_batch "
         "WHERE created_at >= $1",
@@ -102,11 +107,12 @@ async def _active_series(
 async def _latest_batch(
     conn: asyncpg.Connection, key: SeriesKey, window_start: datetime
 ) -> tuple[UUID, UUID | None] | None:
-    """`(batch_id, tenant_id)` — 스케줄러는 전 tenant를 훑는 내부 잡이라
-    이 조회 자체는 tenant로 좁히지 않는다(§4.1 편차 2). 뒤이은
-    `batches.get()` 호출에 넘길 소유자 `tenant_id`를 같이 반환한다 —
-    LA-22가 `get()`에 tenant 필터를 추가한 뒤로는 아무 tenant_id나 넘기면
-    "존재 비노출"에 걸려 자기 배치도 못 읽으므로."""
+    """`(batch_id, tenant_id)` — the scheduler is an internal job that scans
+    all tenants, so this query itself is not narrowed by tenant (§4.1 Deviation 2).
+    We also return the owning `tenant_id` to pass through to the subsequent
+    `batches.get()` call — after LA-22 added tenant filtering to `get()`,
+    passing any arbitrary tenant_id would trigger a "not-found-hidden" error
+    and prevent reading our own batch."""
     row = await conn.fetchrow(
         "SELECT id, tenant_id FROM md_ingest_batch WHERE venue = $1 AND instrument_id = $2 "
         "AND timeframe = $3 AND created_at >= $4 ORDER BY created_at DESC LIMIT 1",
@@ -158,11 +164,13 @@ async def _export_one(
         if batch is not None:
             verdict = batch.verdict
             record_count = verdict.accepted + verdict.quarantined + verdict.rejected
-            # `verdict.rejected`(재구성값)는 REJECT 캔들도 격리 테이블에 저장되는
-            # 현 어댑터 동작상 사실상 항상 0이다(postgres_batch_repository.py
-            # docstring 참조) — 대신 이슈 목록에서 REJECT 심각도를 직접 센다.
-            # 캔들 하나가 이슈 여러 개(예: high<open과 volume<0 동시 위반)를
-            # 낼 수 있어 open_time으로 중복 제거한다.
+            # `verdict.rejected`(reconstructed value) is effectively always 0
+            # due to current adapter behavior where REJECT candles are also
+            # stored in the quarantine table (see postgres_batch_repository.py
+            # docstring) — instead, we count REJECT severity directly from the
+            # issues list. A single candle can produce multiple issues
+            # (e.g., high<open and volume<0 violations simultaneously),
+            # so we deduplicate by open_time.
             gap_count = len(
                 {i.open_time for i in verdict.issues if i.type is QualityIssueType.GAP}
             )
@@ -208,11 +216,12 @@ async def export_quality_metrics(
     registry: MetricsRegistry,
     clock: Clock,
 ) -> list[DataQualityMetrics]:
-    """최근 24시간 활동이 있는 시계열마다 스테일·갭·거부 비율 게이지를 갱신한다.
+    """Updates staleness/gap/reject-ratio gauges for each series with activity
+    in the last 24 hours.
 
-    시계열 하나의 계산 실패(예외)는 로그만 남기고 건너뛴다 — 나머지
-    시계열은 계속 처리한다(§9 LA-18 DoD: "심볼 1개 실패가 나머지 차단
-    안 함")."""
+    A computation failure (exception) for one series is logged and skipped —
+    remaining series continue processing (§9 LA-18 DoD: "failure on one
+    symbol must not block the rest")."""
     now = clock()
     window_start = now - _ACTIVITY_WINDOW
 

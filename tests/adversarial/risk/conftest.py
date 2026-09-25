@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import os
 import uuid
-from collections.abc import Mapping
+from collections.abc import Awaitable, Callable, Mapping
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from typing import Any
@@ -27,6 +27,7 @@ from src.foundation.risk_gate.adapters.postgres_decision_repository import (
 from src.foundation.risk_gate.adapters.postgres_repository import PostgresRiskGateRepository
 from src.foundation.risk_gate.domain.fence import fence_pairs_for
 from tests.integration.fake_exchange_adapter import FakeExchangeAdapter, PlaceOrderHook
+from tests.support.db import create_pool_with_retry
 
 
 def _asyncpg_dsn() -> str:
@@ -35,8 +36,11 @@ def _asyncpg_dsn() -> str:
 
 
 @pytest.fixture
-async def pool():
-    p = await asyncpg.create_pool(_asyncpg_dsn(), min_size=2, max_size=12)
+async def pool() -> asyncpg.Pool:
+    # esc-ci-pytest.json/task-6235: bounded retry absorbs the transient Windows
+    # TCP reset (WinError 64 / asyncpg.ConnectionDoesNotExistError) that can hit
+    # the initial connect -- see tests/support/db.py's create_pool_with_retry docstring.
+    p = await create_pool_with_retry(_asyncpg_dsn(), min_size=2, max_size=12)
     yield p
     await p.close()
 
@@ -95,7 +99,7 @@ async def seed_execution(pool: asyncpg.Pool, user_id: UUID, *, exchange: str = "
             exchange,
             Decimal("500"),
         )
-    return row["id"]
+    return row["id"] if row is not None else 0
 
 
 async def recorded_inputs(
@@ -183,7 +187,9 @@ def make_order(execution_id: int, *, exchange: str = "bitget") -> Order:
     )
 
 
-def fence_reader(pool: asyncpg.Pool, user_id: UUID, execution_id: int, *, exchange: str = "bitget"):
+def fence_reader(
+    pool: asyncpg.Pool, user_id: UUID, execution_id: int, *, exchange: str = "bitget"
+) -> Callable[[], Awaitable[Mapping[str, int]]]:
     """`foundation_gate._flatten_fence`와 같은 형식(`"SCOPE:ref" -> token`)."""
     repo = PostgresRiskGateRepository(pool)
     pairs = fence_pairs_for(user_id, exchange, f"exec:{execution_id}")
@@ -206,8 +212,9 @@ async def order_row(pool: asyncpg.Pool, order_id: UUID) -> asyncpg.Record:
 
 async def audit_count(pool: asyncpg.Pool, action_type: str, order_id: UUID) -> int:
     async with pool.acquire() as conn:
-        return await conn.fetchval(
+        result = await conn.fetchval(
             "SELECT count(*) FROM audit_log WHERE action_type = $1 AND target_id = $2",
             action_type,
             str(order_id),
         )
+        return result if result is not None else 0

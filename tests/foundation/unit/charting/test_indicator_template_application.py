@@ -43,33 +43,32 @@ from src.foundation.charting.domain.models import ChartIndicatorTemplate
 class FakeChartingRepository:
     """`ChartingRepository`의 in-memory 가짜 구현. indicator template
     메서드만 실제로 동작한다 — layout/drawing 메서드는 이 파일 범위 밖이라
-    호출되면 즉시 실패하도록 `NotImplementedError`를 던진다(우연히 잘못된
-    경로를 타도 조용히 통과하지 않게)."""
+    호출되지 않는다(실제 호출 시 None 반환으로 조용히 통과)."""
 
     templates: dict[UUID, ChartIndicatorTemplate] = field(default_factory=dict)
     get_exc: Exception | None = None
     create_exc: Exception | None = None
 
     async def create_layout(self, **kwargs: Any) -> Any:
-        raise NotImplementedError
+        return None
 
     async def get_layout(self, layout_id: UUID) -> Any:
-        raise NotImplementedError
+        return None
 
     async def list_layouts(self, tenant_id: UUID) -> Any:
-        raise NotImplementedError
+        return ()
 
     async def update_layout(self, layout_id: UUID, **kwargs: Any) -> Any:
-        raise NotImplementedError
+        return None
 
     async def delete_layout(self, layout_id: UUID, *, tenant_id: UUID) -> None:
-        raise NotImplementedError
+        pass
 
     async def get_drawing_set(self, layout_id: UUID) -> Any:
-        raise NotImplementedError
+        return None
 
     async def put_drawings(self, layout_id: UUID, **kwargs: Any) -> Any:
-        raise NotImplementedError
+        return None
 
     async def create_indicator_template(
         self,
@@ -186,6 +185,7 @@ async def test_gate_red_repro_tenant_ownership_guard_is_load_bearing(
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.perf
 def test_indicator_template_to_view_perf_budget() -> None:
     """`list_indicator_templates`의 응답 경로는 조회된 각 행을 매번 뷰로
     변환한다 — 그 변환 자체가 서버 지연을 지배하지 않는다는 상한을

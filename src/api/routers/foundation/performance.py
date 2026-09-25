@@ -1,20 +1,20 @@
-"""Performance Reporting API — 71번 §6 규칙: router는 auth/주입/transport
-validation/command invocation만 담당한다.
+"""Performance Reporting API — Rule §6: router handles only auth/injection/transport
+validation/command invocation.
 
 Spec: docs/specs/L4_strategy_portfolio_backtest_v1.0.md §2.6/§9(L49).
 
-`scope=LIVE`는 아직 거부한다 — `PaperStatementInputAdapter`(L48)만 배선돼
-있고 LIVE용 `StatementInputPort` 구현은 이 리프의 스콥이 아니다(있는 척
-하지 않는다, reconciliation의 "never assume zero"와 같은 태도). 이 거부는
-도메인 규칙이 아니라 아직 배선되지 않은 어댑터 부재를 알리는 API 계층
-사정이라 `exception_mapping.UnsupportedStatementScopeError`로 표현한다
+`scope=LIVE` is rejected for now — only `PaperStatementInputAdapter`(L48) is wired;
+the LIVE `StatementInputPort` implementation is out of scope for this leaf
+(do not pretend it exists, same attitude as reconciliation's "never assume zero").
+This rejection is not a domain rule but an API-layer fact about a missing adapter,
+so it raises `exception_mapping.UnsupportedStatementScopeError`
 (§9 PLT-21b decision, task-1217).
 
-도메인 예외는 여기서 잡지 않는다 — `src/api/contracts/exception_mapping.py`의
-`EXCEPTION_MAP`이 전역 핸들러에서 봉투로 번역한다. get_statement.py와
-correct_statement.py가 이름은 같지만 서로 다른
-StatementNotFoundError/CrossTenantStatementAccessError 클래스를 각자
-so `EXCEPTION_MAP` registers both classes.
+Domain exceptions are not caught here — `EXCEPTION_MAP` in
+`src/api/contracts/exception_mapping.py` translates them in the global handler.
+get_statement.py and correct_statement.py share the same name but define different
+StatementNotFoundError/CrossTenantStatementAccessError classes, so
+`EXCEPTION_MAP` registers both classes.
 
 FA-6: an optional `portfolio_id` query parameter was added to both GET
 endpoints (not a new route) — scope validation is done by

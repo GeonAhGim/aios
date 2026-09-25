@@ -2,6 +2,7 @@ import { catalogKoLegacyA } from "./catalog.ko.legacyA";
 import { catalogKoLegacyB } from "./catalog.ko.legacyB";
 import { catalogKoLegacyC } from "./catalog.ko.legacyC";
 import { catalogKoLegacyD } from "./catalog.ko.legacyD";
+import { catalogKoExtra } from "./catalog.ko.extra";
 // UX-1 (task-2685): catalog.ko 골격. 실제 147개 파일의 문자열 추출·치환은 UX-1이
 // 의존하는 UX-2(task-2686)의 범위다 -- 여기서는 프레임워크가 실제로 동작함을
 // 증명할 최소 네임스페이스만 채운다. 새 화면 문구를 추가할 때는 이 카탈로그에
@@ -15,10 +16,19 @@ export const catalogKo = {
     save: "저장",
     loading: "불러오는 중",
     featureDisabled: "이 기능은 현재 비활성화되어 있습니다.",
+    notFound: "찾을 수 없음",
+    progress: "진행률",
   },
   errors: {
     supportCode: "지원코드: {{code}}",
     retryAfterSeconds: "{{seconds}}초 후 재시도 가능",
+  },
+  // task-4003(FE-OPS-10c): ExchangePositionsCard의 새 문구.
+  exchangePositions: {
+    title: "보유 포지션",
+    selectPrompt: "거래소를 선택하면 보유 포지션을 볼 수 있습니다.",
+    notFoundTitle: "이 거래소의 자격증명이 없습니다.",
+    empty: "{{exchange}}에 보유 포지션이 없습니다.",
   },
   // task-2657(AI-22): AiStudioPage.tsx는 이 카탈로그가 골격 이상으로 실제 채워진
   // 첫 화면이다 — 새 화면 문구는 리터럴 대신 여기 키를 만들고 t(key)만 쓴다
@@ -157,6 +167,23 @@ export const catalogKo = {
         storeFull: "본문 저장",
         storeExcerpt: "발췌 저장",
         linkOnly: "링크만",
+      },
+    },
+    // task-6384(RD-18): CoverageFreshnessPanel.tsx — 커버리지·신선도 대시보드
+    // 패널 + 알림(수집 지연·소스 장애).
+    coverageFreshness: {
+      title: "커버리지·신선도",
+      empty: "표시할 소스가 없습니다.",
+      alert: {
+        sourceDown: "소스 장애 {{count}}건 — 수집이 실패하고 있습니다.",
+        ingestDelayed: "수집 지연 {{count}}건 — 최근 적재 시각이 임계값을 초과했습니다.",
+      },
+      badge: {
+        ok: "정상",
+        degraded: "저하",
+        down: "장애",
+        delayed: "지연",
+        unknown: "판정 불가",
       },
     },
   },
@@ -361,9 +388,11 @@ export const catalogKo = {
     "/ai/studio": "AI 스튜디오",
     "/executions": "실행제어판",
     "/portfolio": "포트폴리오",
+    "/portfolio/performance-statements": "성과 명세서",
     "/rebalance": "리밸런싱",
     "/mandates": "위임장",
     "/compliance": "컴플라이언스",
+    "/compliance/mandate": "위임장 편집·승인",
     "/decisions/history": "결정 이력",
     "/reports": "보고서",
     "/wallet": "지갑",
@@ -392,6 +421,11 @@ export const catalogKo = {
     "/admin/evidence-chain": "증빙체인검증",
     "/admin/trust": "신뢰멤버십",
   },
+  // task-5597 (EMS-18 CI 정정): ExecutionAlgoPage/TcaPage 새 문구 -- i18n-literals
+  // ratchet(scripts/check_i18n_literals.mjs)이 baseline에 없는 새 리터럴을 막는다.
+  // task-6477: executionAlgoPage/tcaPage/performanceStatementsPage/mandatePage는
+  // P6 500줄 ratchet 때문에 catalog.ko.extra.ts로 분리됐다(내용 동일, 이동만).
+  ...catalogKoExtra,
   // task-2686 (UX-2): mechanically extracted from the 102 baseline .tsx files
   // (scripts/i18n-literals-baseline.json) via an AST codemod -- one namespace per
   // file (camelCase basename), keys are sequential (t1, t2.../title1, label1...).

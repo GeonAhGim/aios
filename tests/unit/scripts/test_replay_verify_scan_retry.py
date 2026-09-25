@@ -1,0 +1,252 @@
+"""FA-15 -- `scripts/replay_verify.py` scan/teardown-phase retry & cleanup.
+
+Split from `test_replay_verify_pool_retry.py` (task-6714): that file's
+`_create_pool_with_retry` coverage crossed the 500-line file-policy warn
+threshold (ADR-2026-09-10-C Section 7) once its new terminate()-on-failure
+test was added. The initial-connect retry (`_create_pool_with_retry`) and the
+post-connect scan/teardown retry (`_verify_with_retry`,
+`_close_pool_ignoring_reset`, `_run`) are already distinct change axes --
+mirrors tests/support/test_db.py's split into test_db_pool_retry.py.
+
+Neither test group touches a real socket -- `replay_verify.verify` /
+`pool.close` are monkeypatched -- so they run without TEST_DATABASE_URL.
+"""
+
+from __future__ import annotations
+
+from datetime import datetime, timezone
+
+import asyncpg
+import pytest
+
+from scripts import replay_verify
+from src.core.eventstore import replay
+
+pytestmark = pytest.mark.asyncio
+
+
+async def test_verify_with_retry_succeeds_after_mid_scan_reset(monkeypatch) -> None:
+    """task-6213: the reset lands *after* the pool connected, inside
+    `verify()`'s read-only scan -- the exact
+    `asyncpg.exceptions.ConnectionDoesNotExistError("connection was closed in
+    the middle of operation")` shape from the recurrence. The retry must
+    re-run the whole (side-effect-free) scan and succeed on a later
+    attempt."""
+    attempts = 0
+    sentinel_report = replay.ReplayReport(
+        streams_checked=87, combined_digest="deadbeef", mismatches=()
+    )
+
+    async def _fake_verify(pool: object, *, as_of: object, hours: object) -> replay.ReplayReport:
+        nonlocal attempts
+        attempts += 1
+        if attempts < 3:
+            raise asyncpg.exceptions.ConnectionDoesNotExistError(
+                "connection was closed in the middle of operation"
+            )
+        return sentinel_report
+
+    monkeypatch.setattr(replay_verify, "verify", _fake_verify)
+    monkeypatch.setattr(replay_verify.asyncio, "sleep", _no_sleep)
+
+    report = await replay_verify._verify_with_retry(
+        object(), as_of=datetime.now(timezone.utc), hours=24
+    )
+
+    assert report is sentinel_report
+    assert attempts == 3
+
+
+async def test_verify_with_retry_succeeds_after_drop_create_race(monkeypatch) -> None:
+    """task-6284: `pool.acquire()` inside `verify()`'s scan can dial a new
+    physical connection (pool growth / replacing a discarded one) that lands
+    inside `setup_test_db.py --reset`'s `DROP DATABASE` -> `CREATE DATABASE`
+    window, raising `InvalidCatalogNameError` then `CannotConnectNowError`
+    -- the exact shape `_create_pool_with_retry` already retries for the
+    initial connect. `_verify_with_retry` must retry the same shapes, not
+    just `ConnectionDoesNotExistError`."""
+    attempts = 0
+
+    async def _fake_verify(pool: object, *, as_of: object, hours: object) -> replay.ReplayReport:
+        nonlocal attempts
+        attempts += 1
+        if attempts == 1:
+            raise asyncpg.exceptions.InvalidCatalogNameError('database "x" does not exist')
+        if attempts == 2:
+            raise asyncpg.exceptions.CannotConnectNowError("the database system is starting up")
+        return replay.ReplayReport(streams_checked=3, combined_digest="cafe", mismatches=())
+
+    monkeypatch.setattr(replay_verify, "verify", _fake_verify)
+    monkeypatch.setattr(replay_verify.asyncio, "sleep", _no_sleep)
+
+    report = await replay_verify._verify_with_retry(
+        object(), as_of=datetime.now(timezone.utc), hours=24
+    )
+
+    assert report.streams_checked == 3
+    assert attempts == 3
+
+
+async def test_verify_with_retry_propagates_after_exhausting_attempts(monkeypatch) -> None:
+    """Fail-closed: a reset on every attempt must still raise, not report a
+    false green."""
+    attempts = 0
+
+    async def _fake_verify(pool: object, *, as_of: object, hours: object) -> replay.ReplayReport:
+        nonlocal attempts
+        attempts += 1
+        raise OSError(64, "지정된 네트워크 이름을 더 이상 사용할 수 없습니다")
+
+    monkeypatch.setattr(replay_verify, "verify", _fake_verify)
+    monkeypatch.setattr(replay_verify.asyncio, "sleep", _no_sleep)
+
+    with pytest.raises(OSError):
+        await replay_verify._verify_with_retry(
+            object(), as_of=datetime.now(timezone.utc), hours=24
+        )
+
+    assert attempts == replay_verify._POOL_CONNECT_ATTEMPTS
+
+
+async def test_verify_with_retry_does_not_retry_a_real_mismatch_report(monkeypatch) -> None:
+    """A genuine replay mismatch is a return value (`report.ok is False`),
+    not an exception -- it must surface on the first attempt, not be masked
+    behind retries meant only for connection resets."""
+    attempts = 0
+    mismatch_report = replay.ReplayReport(
+        streams_checked=1,
+        combined_digest="mismatch",
+        mismatches=(
+            replay.StreamDiff(domain="orders", key="x", replayed_digest="a", actual_digest="b"),
+        ),
+    )
+
+    async def _fake_verify(pool: object, *, as_of: object, hours: object) -> replay.ReplayReport:
+        nonlocal attempts
+        attempts += 1
+        return mismatch_report
+
+    monkeypatch.setattr(replay_verify, "verify", _fake_verify)
+    monkeypatch.setattr(replay_verify.asyncio, "sleep", _no_sleep)
+
+    report = await replay_verify._verify_with_retry(
+        object(), as_of=datetime.now(timezone.utc), hours=24
+    )
+
+    assert report is mismatch_report
+    assert attempts == 1
+
+
+async def test_close_pool_ignoring_reset_swallows_connection_reset() -> None:
+    """task-6236: a reset hitting an idle pooled connection during teardown
+    must not raise -- `verify()`'s result is already final by the time
+    `_run`'s `finally` calls this."""
+
+    class _ResetOnClosePool:
+        async def close(self) -> None:
+            raise asyncpg.exceptions.ConnectionDoesNotExistError(
+                "connection was closed in the middle of operation"
+            )
+
+    await replay_verify._close_pool_ignoring_reset(_ResetOnClosePool())  # must not raise
+
+
+async def test_close_pool_ignoring_reset_swallows_drop_create_race() -> None:
+    """task-6302: `pool.close()` can itself dial out to close pooled
+    connections and land inside the same `setup_test_db.py --reset`
+    `DROP DATABASE` -> `CREATE DATABASE` window `_create_pool_with_retry`
+    and `_verify_with_retry` already treat as transient
+    (`InvalidCatalogNameError` / `CannotConnectNowError`). Unlike those two
+    call sites there is no retry here -- the only correct behavior is to
+    swallow it, matching `_RETRYABLE_CONNECT_ERRORS` exactly, since `report`
+    is already computed by the time this runs and an uncaught exception here
+    would replace an already-successful result with a false CI failure."""
+
+    class _InvalidCatalogOnClosePool:
+        async def close(self) -> None:
+            raise asyncpg.exceptions.InvalidCatalogNameError('database "x" does not exist')
+
+    class _CannotConnectNowOnClosePool:
+        async def close(self) -> None:
+            raise asyncpg.exceptions.CannotConnectNowError("the database system is starting up")
+
+    await replay_verify._close_pool_ignoring_reset(_InvalidCatalogOnClosePool())  # must not raise
+    await replay_verify._close_pool_ignoring_reset(_CannotConnectNowOnClosePool())  # must not raise
+
+
+async def test_close_pool_ignoring_reset_propagates_unrelated_exceptions() -> None:
+    """Only the transient connection-reset shape is swallowed -- a real bug
+    in `pool.close()` must still surface, not be silently hidden."""
+
+    class _BrokenPool:
+        async def close(self) -> None:
+            raise ValueError("not a connection reset")
+
+    with pytest.raises(ValueError):
+        await replay_verify._close_pool_ignoring_reset(_BrokenPool())
+
+
+async def test_run_propagates_real_failure_even_if_close_also_resets(monkeypatch) -> None:
+    """A genuine fail-closed exception from the scan (reset on every retry
+    attempt, i.e. not absorbed) must still propagate as the process's
+    failure even when `pool.close()` in the `finally` also hits a reset --
+    the close-time reset must not mask or replace it."""
+
+    class _ResetOnClosePool:
+        async def close(self) -> None:
+            raise OSError(64, "지정된 네트워크 이름을 더 이상 사용할 수 없습니다")
+
+    async def _fake_create_pool_with_retry(dsn: str) -> _ResetOnClosePool:
+        return _ResetOnClosePool()
+
+    async def _fake_verify_with_retry(
+        pool: object, *, as_of: object, hours: object
+    ) -> replay.ReplayReport:
+        raise OSError(64, "지정된 네트워크 이름을 더 이상 사용할 수 없습니다")
+
+    monkeypatch.setattr(replay_verify, "_create_pool_with_retry", _fake_create_pool_with_retry)
+    monkeypatch.setattr(replay_verify, "_verify_with_retry", _fake_verify_with_retry)
+
+    with pytest.raises(OSError):
+        await replay_verify._run(hours=24, as_of=datetime.now(timezone.utc))
+
+
+async def test_sleep_before_retry_jitters_within_retry_delay_cap(monkeypatch) -> None:
+    """task-6627: `_sleep_before_retry` must sleep `random.uniform(0, _retry_delay(attempt))`,
+    not the deterministic `_retry_delay(attempt)` itself -- concurrent worktrees computing the
+    same deterministic schedule would otherwise retry in lockstep and repeatedly re-create the
+    contention burst they are backing off from (the thundering-herd shape this decorrelates)."""
+    captured: list[float] = []
+
+    async def _capture_sleep(delay: float) -> None:
+        captured.append(delay)
+
+    monkeypatch.setattr(replay_verify.asyncio, "sleep", _capture_sleep)
+    monkeypatch.setattr(replay_verify.random, "uniform", lambda lo, hi: lo + (hi - lo) * 0.25)
+
+    await replay_verify._sleep_before_retry(3)
+
+    assert captured == [replay_verify._retry_delay(3) * 0.25]
+
+
+async def test_sleep_before_retry_never_exceeds_retry_delay_cap(monkeypatch) -> None:
+    """Negative test: across many draws, the jittered sleep must never exceed (or go below zero
+    of) the deterministic `_retry_delay(attempt)` it is jittering under -- a broken jitter
+    sampling outside `[0, _retry_delay(attempt)]` would silently widen the retry budget past
+    what `_POOL_CONNECT_RETRY_MAX_DELAY` caps, exactly what DECISION_GUIDELINES B-2 forbids."""
+    captured: list[float] = []
+
+    async def _capture_sleep(delay: float) -> None:
+        captured.append(delay)
+
+    monkeypatch.setattr(replay_verify.asyncio, "sleep", _capture_sleep)
+
+    cap = replay_verify._retry_delay(5)
+    for _ in range(200):
+        await replay_verify._sleep_before_retry(5)
+
+    assert all(0.0 <= delay <= cap for delay in captured)
+
+
+async def _no_sleep(delay: float) -> None:
+    return None
