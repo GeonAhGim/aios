@@ -112,6 +112,60 @@ def write_recovery_config(data_dir: Path, archive_dir: Path) -> None:
     conf.write_text(existing + f"\nrestore_command = '{restore_command}'\n", encoding="utf-8")
 
 
+def _copy_backup_tree(src: Path, dst: Path, timeout: float) -> tuple[bool, str]:
+    """백업 디렉터리를 restore_data_dir로 복사한다.
+
+    실측(2026-09-25, esc-health-backup_drill_failed): 이 저장소의 베이스 백업이
+    110,830개 파일·2.4GB로 자랐다 -- 단순 os.walk 순회만으로도 120초를 넘겼다. 이전에는
+    시간제한 없는 shutil.copytree(파일 하나당 Python-level stat/open/read/write 오버헤드)로
+    복사해, nightly의 외부 하드킬(20분, `C:\\aios\\pm\\nightly.py` STEP_TIMEOUT_SEC)에
+    걸릴 때까지 진행 상황을 전혀 관측할 수 없었다(steps={} -- 이 단계가 시작됐는지조차
+    리포트에 안 남았다). Windows robocopy /MT(멀티스레드 I/O)는 같은 트리를 수 분 내로
+    끝내고, 여기서 자체 timeout도 걸어 무한정 먹통이 되는 대신 진단 가능한 실패로
+    끝나게 한다.
+    """
+    if os.name == "nt":
+        import tempfile
+
+        cmd = [
+            "robocopy",
+            str(src),
+            str(dst),
+            "/E",
+            "/MT:32",
+            "/NFL",
+            "/NDL",
+            "/NJH",
+            "/NJS",
+            "/NP",
+            "/R:1",
+            "/W:1",
+        ]
+        try:
+            with tempfile.TemporaryFile(mode="w+b") as out:
+                try:
+                    r = subprocess.run(
+                        cmd,
+                        stdout=out,
+                        stderr=subprocess.STDOUT,
+                        timeout=timeout,
+                        check=False,
+                    )
+                except subprocess.TimeoutExpired:
+                    return False, f"timeout {timeout:.0f}s"
+                out.seek(0)
+                text = out.read().decode("utf-8", errors="replace")
+            # robocopy: 0-7은 성공(파일 복사/스킵 조합), 8 이상이 실패.
+            return r.returncode < 8, text[-4000:]
+        except OSError as exc:
+            return False, f"{type(exc).__name__}: {exc}"
+    try:
+        shutil.copytree(src, dst)
+        return True, ""
+    except OSError as exc:
+        return False, str(exc)
+
+
 def _tail_lines(text: str, n: int) -> str:
     return "\n".join(text.splitlines()[-n:])
 
@@ -184,8 +238,7 @@ def wait_for_process_start(
             return None
         if clock() >= deadline:
             return (
-                f"{timeout:.0f}초 안에 서버 프로세스가 뜨지 않았다"
-                f"(rc={rc}, tail={tail[-200:]!r})"
+                f"{timeout:.0f}초 안에 서버 프로세스가 뜨지 않았다(rc={rc}, tail={tail[-200:]!r})"
             )
         sleep(poll_interval)
 
@@ -245,6 +298,8 @@ def run_drill(
     process_start_timeout: float = 30.0,
     process_start_poll_interval: float = 1.0,
     last_failed_restore_dir: Path = LAST_FAILED_RESTORE_DIR,
+    copy_tree: Callable[[Path, Path, float], tuple[bool, str]] = _copy_backup_tree,
+    copy_timeout: float = 300.0,
 ) -> dict:
     """복구 리허설 1회. 어느 단계에서 멈추든(백업 없음/기동 실패/복구 타임아웃/replay_verify
     불일치) `steps`에 실패한 단계가 남고 `ok`는 False가 된다 -- healthcheck의
@@ -265,11 +320,9 @@ def run_drill(
 
     if restore_data_dir.exists():
         shutil.rmtree(restore_data_dir, ignore_errors=True)
-    try:
-        shutil.copytree(backup, restore_data_dir)
-        steps["restore_files"] = {"ok": True, "detail": str(restore_data_dir)}
-    except OSError as e:
-        steps["restore_files"] = {"ok": False, "detail": str(e)}
+    copy_ok, copy_detail = copy_tree(backup, restore_data_dir, copy_timeout)
+    steps["restore_files"] = {"ok": copy_ok, "detail": copy_detail or str(restore_data_dir)}
+    if not copy_ok:
         return _finish(steps, started)
 
     write_recovery_config(restore_data_dir, archive_dir)
