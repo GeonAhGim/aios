@@ -277,6 +277,27 @@ def test_data_quality_metrics_missing_key_rejected() -> None:
         )
 
 
+# ── DEEPEN: numeric 패턴(^(?!^[-+.]*$)[+-]?0*\d*\.?\d*$) invalid numeric (LA-1) ──
+
+
+def test_candle_record_multiple_decimal_points_rejected() -> None:
+    """Decimal 필드 문자열에 소수점이 두 개면 스키마 pattern 위반으로 거부된다."""
+    with pytest.raises(ValidationError):
+        _sample_candle(open="1.2.3")
+
+
+def test_candle_record_thousands_separator_rejected() -> None:
+    """Decimal 필드 문자열에 천단위 콤마가 있으면 스키마 pattern 위반으로 거부된다."""
+    with pytest.raises(ValidationError):
+        _sample_candle(high="1,000.50")
+
+
+def test_candle_record_lone_sign_numeric_rejected() -> None:
+    """부호 문자만 있는 문자열("-")은 numeric pattern의 음의 전방탐색에 걸려 거부된다."""
+    with pytest.raises(ValidationError):
+        _sample_candle(low="-")
+
+
 # ── DEEPEN: failure-injection test (LA-1) ─────────────────────────────────
 
 
