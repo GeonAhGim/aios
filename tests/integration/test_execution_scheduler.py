@@ -18,6 +18,7 @@ import time
 import uuid
 from datetime import datetime, timezone
 from decimal import Decimal
+from typing import Any, cast
 
 import asyncpg
 import pytest
@@ -60,8 +61,8 @@ def _owner_id() -> str:
     return f"scheduler-test-owner-{uuid.uuid4().hex[:8]}"
 
 
-def _scheduler(pool: asyncpg.Pool, **overrides: object) -> ExecutionLoopScheduler:
-    kwargs: dict[str, object] = dict(
+def _scheduler(pool: asyncpg.Pool, **overrides: Any) -> ExecutionLoopScheduler:
+    kwargs: dict[str, Any] = dict(
         resolve_adapter=_resolver_for({}),
         policy=load_risk_policy(),
         pre_submit_gate=_allow_all,
@@ -70,7 +71,7 @@ def _scheduler(pool: asyncpg.Pool, **overrides: object) -> ExecutionLoopSchedule
         owner_id=_owner_id(),
     )
     kwargs.update(overrides)
-    return ExecutionLoopScheduler(pool, **kwargs)  # type: ignore[arg-type]  # overrides dict가 생성자 kwarg 타입을 정적으로 못 좁힘(테스트 헬퍼)
+    return ExecutionLoopScheduler(pool, **kwargs)
 
 
 @pytest.fixture
@@ -407,5 +408,7 @@ async def test_tick_all_running_p95_latency_within_budget(pool):
 
 def test_interval_comes_from_risk_policy():
     policy = load_risk_policy()
-    scheduler = _scheduler(None, policy=policy)  # type: ignore[arg-type]  # DB 없이 policy 인자만 검증(pool은 사용되지 않음)
+    # DB 없이 policy 인자만 검증(pool은 사용되지 않음) — cast로 실제 asyncpg.Pool
+    # 시그니처는 그대로 두고 이 호출 지점에서만 None을 허용한다.
+    scheduler = _scheduler(cast(asyncpg.Pool, None), policy=policy)
     assert scheduler.interval_seconds == policy.execution_loop.interval_sec
