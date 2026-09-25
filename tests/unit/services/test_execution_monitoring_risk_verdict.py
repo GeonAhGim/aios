@@ -7,6 +7,10 @@ tests/integration/test_execution_monitoring_service.py가 실 DB로 검증한다
 — 여기서는 그 SQL이 반환했을 법한 행(dict, asyncpg.Record와 동일하게
 `row["col"]`로 접근 가능)을 가짜 pool/conn으로 주입해 서비스가
 `LastRiskVerdict`를 올바르게 조립/생략하는지만 본다.
+
+가짜 pool은 `cast(asyncpg.Pool, ...)`로 서비스에 주입한다 —
+`# type: ignore[arg-type]`를 쓰면 `type: ignore` 예산 게이트
+(scripts/check_code_ratchets.py)를 소모하므로 cast가 더 저렴하다.
 """
 
 from __future__ import annotations
@@ -14,9 +18,10 @@ from __future__ import annotations
 import time
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
-from typing import Any
+from typing import Any, cast
 from uuid import uuid4
 
+import asyncpg
 import pytest
 
 from src.services.execution_monitoring_service import ExecutionMonitoringService
@@ -72,11 +77,14 @@ class _FakePool:
         return _FakeAcquireCM(_FakeConn(self._rows))
 
 
+def _service(rows: list[dict[str, Any]]) -> ExecutionMonitoringService:
+    return ExecutionMonitoringService(cast(asyncpg.Pool, _FakePool(rows)))
+
+
 async def test_verdict_absent_when_no_risk_decision_row() -> None:
     """주문 생성 시점에 risk_decision이 아직 붙지 않은 실행 — DoD 케이스 1
     (판정 없음)."""
-    pool = _FakePool([_base_row()])
-    service = ExecutionMonitoringService(pool)  # type: ignore[arg-type]
+    service = _service([_base_row()])
 
     cards = await service.list_for_user(uuid4())
 
@@ -85,7 +93,7 @@ async def test_verdict_absent_when_no_risk_decision_row() -> None:
 
 async def test_verdict_present_with_allow_outcome() -> None:
     """정상 ALLOW 판정 조인 — DoD 케이스 2 (판정 있음)."""
-    pool = _FakePool(
+    service = _service(
         [
             _base_row(
                 risk_outcome="ALLOW",
@@ -94,7 +102,6 @@ async def test_verdict_present_with_allow_outcome() -> None:
             )
         ]
     )
-    service = ExecutionMonitoringService(pool)  # type: ignore[arg-type]
 
     cards = await service.list_for_user(uuid4())
 
@@ -108,7 +115,7 @@ async def test_verdict_present_with_allow_outcome() -> None:
 async def test_verdict_deny_includes_reason_codes() -> None:
     """DENY 판정은 reason_codes를 그대로 노출한다 — DoD 케이스 3
     (DENY-reason_codes 포함)."""
-    pool = _FakePool(
+    service = _service(
         [
             _base_row(
                 risk_outcome="DENY",
@@ -117,7 +124,6 @@ async def test_verdict_deny_includes_reason_codes() -> None:
             )
         ]
     )
-    service = ExecutionMonitoringService(pool)  # type: ignore[arg-type]
 
     cards = await service.list_for_user(uuid4())
 
@@ -131,7 +137,7 @@ async def test_verdict_null_reason_codes_normalize_to_empty_list() -> None:
     """negative — Postgres TEXT[] 컬럼이 outcome은 있는데 reason_codes를
     NULL로 반환하는 경계 상황(방어적 asyncpg 드라이버 동작 차이)에서도
     KeyError/None 전파 없이 빈 리스트로 정규화돼야 한다."""
-    pool = _FakePool(
+    service = _service(
         [
             _base_row(
                 risk_outcome="ALLOW",
@@ -140,17 +146,18 @@ async def test_verdict_null_reason_codes_normalize_to_empty_list() -> None:
             )
         ]
     )
-    service = ExecutionMonitoringService(pool)  # type: ignore[arg-type]
 
     cards = await service.list_for_user(uuid4())
 
-    assert cards[0].last_risk_verdict.reason_codes == []  # type: ignore[union-attr]
+    verdict = cards[0].last_risk_verdict
+    assert verdict is not None
+    assert verdict.reason_codes == []
 
 
 async def test_multiple_executions_each_get_own_verdict_not_mixed() -> None:
     """negative — 테넌트 안에 실행이 여럿일 때 판정이 서로 섞여 들어오지
     않는다(조인 카디널리티 회귀 방지)."""
-    pool = _FakePool(
+    service = _service(
         [
             _base_row(
                 execution_id=1,
@@ -167,12 +174,15 @@ async def test_multiple_executions_each_get_own_verdict_not_mixed() -> None:
             _base_row(execution_id=3),
         ]
     )
-    service = ExecutionMonitoringService(pool)  # type: ignore[arg-type]
 
     cards = {c.execution_id: c for c in await service.list_for_user(uuid4())}
 
-    assert cards[1].last_risk_verdict.outcome == "ALLOW"  # type: ignore[union-attr]
-    assert cards[2].last_risk_verdict.outcome == "DENY"  # type: ignore[union-attr]
+    verdict_1 = cards[1].last_risk_verdict
+    verdict_2 = cards[2].last_risk_verdict
+    assert verdict_1 is not None
+    assert verdict_1.outcome == "ALLOW"
+    assert verdict_2 is not None
+    assert verdict_2.outcome == "DENY"
     assert cards[3].last_risk_verdict is None
 
 
@@ -184,7 +194,7 @@ async def test_pool_acquire_failure_propagates_fail_closed() -> None:
         def acquire(self) -> Any:
             raise RuntimeError("connection pool exhausted")
 
-    service = ExecutionMonitoringService(_FailingPool())  # type: ignore[arg-type]
+    service = ExecutionMonitoringService(cast(asyncpg.Pool, _FailingPool()))
 
     with pytest.raises(RuntimeError, match="connection pool exhausted"):
         await service.list_for_user(uuid4())
@@ -203,8 +213,7 @@ async def test_verdict_mapping_throughput_for_large_result_set() -> None:
         )
         for i in range(500)
     ]
-    pool = _FakePool(rows)
-    service = ExecutionMonitoringService(pool)  # type: ignore[arg-type]
+    service = _service(rows)
 
     start = time.perf_counter()
     cards = await service.list_for_user(uuid4())
