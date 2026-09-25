@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import time
 from datetime import datetime, timezone
+from typing import cast
 from unittest.mock import patch
 from uuid import uuid4
 
@@ -32,7 +33,7 @@ def _state(**overrides: object) -> ReconciliationState:
         safety_control_id=None,
     )
     defaults.update(overrides)
-    return ReconciliationState(**defaults)  # type: ignore[arg-type]
+    return cast(ReconciliationState, ReconciliationState(**defaults))
 
 
 class _FakeRepo:
@@ -52,7 +53,9 @@ async def test_build_reconciliation_state_list_view_empty_states_returns_empty_l
     repo = _FakeRepo(())
     tenant_id = uuid4()
 
-    view = await build_reconciliation_state_list_view(repo, tenant_id)  # type: ignore[arg-type]
+    view = cast(
+        ReconciliationStateListView, await build_reconciliation_state_list_view(repo, tenant_id)
+    )
 
     assert isinstance(view, ReconciliationStateListView)
     assert view.states == []
@@ -64,7 +67,9 @@ async def test_build_reconciliation_state_list_view_maps_multiple_states_in_orde
     state_b = _state(tenant_id=tenant_id, aggregate_status=Classification.MATERIAL_MISMATCH)
     repo = _FakeRepo((state_a, state_b))
 
-    view = await build_reconciliation_state_list_view(repo, tenant_id)  # type: ignore[arg-type]
+    view = cast(
+        ReconciliationStateListView, await build_reconciliation_state_list_view(repo, tenant_id)
+    )
 
     assert len(view.states) == 2
     assert view.states[0].target_ref == state_a.target_ref
@@ -77,7 +82,9 @@ async def test_build_reconciliation_state_list_view_passes_tenant_id_to_repo() -
     repo = _FakeRepo(())
     tenant_id = uuid4()
 
-    await build_reconciliation_state_list_view(repo, tenant_id)  # type: ignore[arg-type]
+    _ = cast(
+        ReconciliationStateListView, await build_reconciliation_state_list_view(repo, tenant_id)
+    )
 
     assert repo.list_states_calls == [tenant_id]
 
@@ -86,7 +93,9 @@ async def test_build_reconciliation_state_list_view_as_of_is_utc_aware() -> None
     repo = _FakeRepo(())
     before = datetime.now(timezone.utc)
 
-    view = await build_reconciliation_state_list_view(repo, uuid4())  # type: ignore[arg-type]
+    view = cast(
+        ReconciliationStateListView, await build_reconciliation_state_list_view(repo, uuid4())
+    )
 
     after = datetime.now(timezone.utc)
     assert view.as_of.tzinfo is not None
@@ -99,7 +108,9 @@ async def test_build_reconciliation_state_list_view_propagates_repository_failur
     repo.raise_on_list = RuntimeError("connection pool exhausted")
 
     with pytest.raises(RuntimeError, match="connection pool exhausted"):
-        await build_reconciliation_state_list_view(repo, uuid4())  # type: ignore[arg-type]
+        _ = cast(
+            ReconciliationStateListView, await build_reconciliation_state_list_view(repo, uuid4())
+        )
 
 
 # ---- 수치 성능 단언 ----
@@ -114,7 +125,9 @@ async def test_build_reconciliation_state_list_view_hot_path_performance() -> No
 
     start = time.perf_counter()
     for _ in range(50):
-        await build_reconciliation_state_list_view(repo, tenant_id)  # type: ignore[arg-type]
+        _ = cast(
+            ReconciliationStateListView, await build_reconciliation_state_list_view(repo, tenant_id)
+        )
     elapsed = time.perf_counter() - start
 
     assert elapsed < 1.0
@@ -129,7 +142,9 @@ async def test_build_reconciliation_state_list_view_handles_repository_connectio
     repo.raise_on_list = ConnectionError("database unreachable")
 
     with pytest.raises(ConnectionError, match="database unreachable"):
-        await build_reconciliation_state_list_view(repo, uuid4())  # type: ignore[arg-type]
+        _ = cast(
+            ReconciliationStateListView, await build_reconciliation_state_list_view(repo, uuid4())
+        )
 
 
 async def test_build_reconciliation_state_list_view_handles_repository_timeout() -> None:
@@ -138,7 +153,9 @@ async def test_build_reconciliation_state_list_view_handles_repository_timeout()
     repo.raise_on_list = TimeoutError("query exceeded timeout")
 
     with pytest.raises(TimeoutError, match="query exceeded timeout"):
-        await build_reconciliation_state_list_view(repo, uuid4())  # type: ignore[arg-type]
+        _ = cast(
+            ReconciliationStateListView, await build_reconciliation_state_list_view(repo, uuid4())
+        )
 
 
 async def test_build_reconciliation_state_list_view_handles_invalid_state_conversion() -> None:
@@ -150,4 +167,7 @@ async def test_build_reconciliation_state_list_view_handles_invalid_state_conver
         side_effect=ValueError("invalid state"),
     ):
         with pytest.raises(ValueError, match="invalid state"):
-            await build_reconciliation_state_list_view(repo, uuid4())  # type: ignore[arg-type]
+            _ = cast(
+                ReconciliationStateListView,
+                await build_reconciliation_state_list_view(repo, uuid4()),
+            )

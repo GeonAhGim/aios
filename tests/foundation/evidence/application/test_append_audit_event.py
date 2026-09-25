@@ -7,6 +7,7 @@ Coverage: append_audit_event(), event_to_view() with negative/edge cases.
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from typing import cast
 from uuid import uuid4
 
 import pytest
@@ -81,7 +82,7 @@ def _make_audit_event(**overrides: object) -> AuditEvent:
         occurred_at=now,
     )
     defaults.update(overrides)
-    return AuditEvent(**defaults)  # type: ignore[arg-type]
+    return cast(AuditEvent, AuditEvent(**defaults))
 
 
 def _make_command(**overrides: object) -> RecordAuditEventCommand:
@@ -99,7 +100,7 @@ def _make_command(**overrides: object) -> RecordAuditEventCommand:
         classification=Classification.INTERNAL,
     )
     defaults.update(overrides)
-    return RecordAuditEventCommand(**defaults)  # type: ignore[arg-type]
+    return cast(RecordAuditEventCommand, RecordAuditEventCommand(**defaults))
 
 
 class TestEventToView:
