@@ -329,6 +329,59 @@ def test_compute_child_state_failure_injection_propagates_dependency_exception()
             compute_child_state(parent_id, children, _PARENT_QTY)
 
 
+# -- DEEPEN 6915: negative filled_qty must be rejected, not silently netted --
+
+
+def test_aggregate_parent_state_rejects_negative_child_filled_qty() -> None:
+    """Negative test: a child with a negative `filled_qty` is an invariant
+    violation (fills only ever accumulate) and must be rejected rather than
+    silently netted into the parent rollup.
+    """
+    children = [
+        ChildFillState(uuid4(), Decimal("30"), OrderStatus.PARTIALLY_FILLED),
+        ChildFillState(uuid4(), Decimal("-10"), OrderStatus.PARTIALLY_FILLED),
+    ]
+    with pytest.raises(AlgoConstraintError, match="negative filled_qty") as exc_info:
+        aggregate_parent_state(_PARENT_QTY, OrderStatus.SUBMITTED, children)
+    assert exc_info.value.code == EmsErrorCode.ALGO_CONSTRAINT
+
+
+def test_validate_aggregate_fills_rejects_negative_child_filled_qty() -> None:
+    """Negative test: `validate_aggregate_fills` must reject a negative
+    per-child `filled_qty` even when the (netted) aggregate sum would stay
+    within `parent_qty` -- a negative value could otherwise mask a genuine
+    EM-A1 overshoot elsewhere in the same batch.
+    """
+    parent_id = uuid4()
+    children = [
+        ChildFillState(uuid4(), Decimal("90"), OrderStatus.PARTIALLY_FILLED),
+        ChildFillState(uuid4(), Decimal("20"), OrderStatus.PARTIALLY_FILLED),
+        # Without the guard, -10 nets the sum back down to 100 (== parent_qty,
+        # not > it), hiding the fact that a real overshoot occurred.
+        ChildFillState(uuid4(), Decimal("-10"), OrderStatus.PARTIALLY_FILLED),
+    ]
+    with pytest.raises(AlgoConstraintError, match="negative filled_qty") as exc_info:
+        validate_aggregate_fills(parent_id, children, _PARENT_QTY)
+    assert exc_info.value.code == EmsErrorCode.ALGO_CONSTRAINT
+
+
+def test_compute_child_state_failure_injection_negative_fill_guard_bypass() -> None:
+    """Failure injection: monkeypatch `_assert_no_negative_fills` to a no-op
+    and confirm the negative-fill guard was actually load-bearing -- i.e.
+    without it, a negative filled_qty would slip through undetected."""
+    import src.foundation.ems.domain.parent_child as pc_module
+
+    parent_id = uuid4()
+    children = [ChildFillState(uuid4(), Decimal("-5"), OrderStatus.PARTIALLY_FILLED)]
+
+    with pytest.raises(AlgoConstraintError, match="negative filled_qty"):
+        compute_child_state(parent_id, children, _PARENT_QTY)
+
+    with patch.object(pc_module, "_assert_no_negative_fills", lambda _children: None):
+        # Guard bypassed: the negative fill now slips through without error.
+        compute_child_state(parent_id, children, _PARENT_QTY)
+
+
 class TestAggregateParentStateEdgeCases:
     """Negative tests for aggregate_parent_state edge cases."""
 
