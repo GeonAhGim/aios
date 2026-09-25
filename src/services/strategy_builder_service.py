@@ -1,28 +1,32 @@
-"""14.3 — 전략 저장 및 생애주기 연동 (StrategyBuilderService).
+"""14.3 — Strategy persistence and lifecycle wiring (StrategyBuilderService).
 
-Spec: 기능설계문서_v1.20.md#FD-14.3, 9.9(절대원칙), 13번 §13.5
+Spec: functional_design_doc_v1.20.md#FD-14.3, 9.9 (absolute principle), item 13 §13.5
 
-FD-14.2(조건 조합 → FSM 컴파일)는 프론트엔드+컴파일러 영역이라 이 세션
-(backend 전용) 스콥 밖 — 이 서비스는 이미 컴파일된 FSMStrategyConfig
-JSON을 받아 저장하는 지점부터 시작한다.
+FD-14.2 (condition composition → FSM compilation) is frontend+compiler territory,
+outside this session's (backend-only) scope — this service starts from the point
+of receiving an already-compiled FSMStrategyConfig JSON and persisting it.
 
-9.9 절대원칙 — 생애주기는 반드시 정해진 순서(GENERATED→BACKTESTING→
-VALIDATING→STRESS_TESTING→RISK_REVIEW→PAPER_TRADING→APPROVED→DEPLOYED→
-MONITORING→REVIEW→RETIRED)를 예외 없이 통과해야 하며 건너뛸 수 없다.
-REJECTED/FAILED는 이 순서 어느 단계에서든 진입 가능한 종단 상태다.
+9.9 absolute principle — the lifecycle must pass through the fixed order
+(GENERATED→BACKTESTING→VALIDATING→STRESS_TESTING→RISK_REVIEW→PAPER_TRADING→
+APPROVED→DEPLOYED→MONITORING→REVIEW→RETIRED) with no exceptions and no
+skipping steps. REJECTED/FAILED are terminal states reachable from any point
+in that order.
 
-assert_executable()은 FD-14.3 예외상황("저장 직후 실행 시도 → 시스템
-차단")의 실제 강제 지점 — FD-16(실행 제어판, 아직 없음)이
-strategy_executions을 만들기 직전 호출해야 한다.
+assert_executable() is the actual enforcement point for the FD-14.3 exception
+scenario ("attempt to execute right after saving → system blocks it") — FD-16
+(execution control panel, not yet built) must call this right before creating
+strategy_executions.
 
-APPROVED 전이는 FD-15.3 매칭경고 훅②(전략 소유자 자신의 risk_profile
-vs 그 전략의 risk_level) 지점이다 — 불일치인데 미동의 상태면 전이 자체를
-막는다(FD-15.3 처리: "경고 노출 + 명시적 동의 필요 → 동의 후에만 진행").
+The APPROVED transition is FD-15.3 mismatch-warning hook ②'s point (the
+strategy owner's own risk_profile vs. that strategy's risk_level) — on a
+mismatch without acknowledgment, the transition itself is blocked (FD-15.3
+handling: "show warning + require explicit consent → proceed only after
+consent").
 
-편차(2026-09-01, 앱 조립 이후 발견된 갭 해소): "내 전략 목록" 조회
-엔드포인트가 스펙 어디에도 명시되지 않아, 마켓플레이스 리스팅 등록
-화면(SellStrategyPage.tsx)이 strategy_id/version을 사용자가 직접
-타이핑해야 했다 — list_strategies()로 채운다.
+Deviation (2026-09-01, gap found after app assembly): the "my strategies list"
+lookup endpoint isn't specified anywhere in the spec, so the marketplace
+listing registration screen (SellStrategyPage.tsx) had users type in
+strategy_id/version by hand — list_strategies() fills that gap.
 """
 from __future__ import annotations
 
@@ -34,6 +38,8 @@ from uuid import UUID
 import asyncpg
 from pydantic import BaseModel
 
+from src.core.strategy.condition_evaluator import _ATOMIC_RE as _CONDITION_ATOMIC_RE
+from src.services.condition_compiler import ORDER_FILLED
 from src.services.risk_matching import check_mismatch
 
 LIFECYCLE_ORDER = (
@@ -54,15 +60,51 @@ EXECUTABLE_STATUSES = frozenset({"APPROVED", "DEPLOYED", "MONITORING"})
 
 
 class StrategyLifecycleError(Exception):
-    """FD-14.3 실패 — 저장 거부 또는 잘못된 상태전이. VALIDATION_INVALID_FIELD(400)."""
+    """FD-14.3 failure — save rejected or invalid state transition.
+    VALIDATION_INVALID_FIELD(400)."""
 
 
 class StrategyNotFoundError(StrategyLifecycleError):
-    """`get_strategy()` 조회 대상이 없거나 소유자가 아님 — RESOURCE_NOT_FOUND(404)로
-    구분 매핑되도록 별도 서브클래스를 둔다(exception_mapping.py EXCEPTION_MAP은
-    타입 기반이라 `StrategyLifecycleError` 그대로면 저장 시 409/400 사유와
-    상태코드를 하나로만 고를 수 있다 — PLT-17 `ExchangeCredentialNotFoundError`와
-    동일 근거)."""
+    """Raised when `get_strategy()` finds no matching row or the caller isn't the
+    owner — kept as a separate subclass so it maps to RESOURCE_NOT_FOUND(404)
+    distinctly (exception_mapping.py's EXCEPTION_MAP is type-based, so leaving
+    it as a plain `StrategyLifecycleError` would force save-time 409/400
+    reasons and this 404 onto the same status code — same rationale as
+    PLT-17's `ExchangeCredentialNotFoundError`)."""
+
+
+def _validate_condition_syntax(condition: str) -> None:
+    """L16 — validates `fsm_definition.transitions[].condition` against the same
+    single grammar ConditionEvaluator uses (condition_evaluator.py, FROZEN):
+    `_ATOMIC_RE` (`{key} {operator} {threshold}`, combined with AND/OR).
+    `ConditionEvaluator._evaluate_atomic` only checks this grammar at execution
+    time, so a syntax error saved as-is would surface only at execution
+    (a possible violation of the 9.9 absolute principle) — this blocks it
+    earlier, at save time. Whether `key` itself is registered in the indicator
+    registry is out of scope here — raw market-data columns (e.g. `close`),
+    as used in stop-loss conditions, are also valid keys that
+    `ConditionEvaluator` accepts as-is (it just needs to be in `market_state`)."""
+    if " AND " in condition:
+        clauses = condition.split(" AND ")
+    elif " OR " in condition:
+        clauses = condition.split(" OR ")
+    else:
+        clauses = [condition]
+
+    for clause in clauses:
+        if _CONDITION_ATOMIC_RE.match(clause.strip()) is None:
+            raise StrategyLifecycleError(f"fsm_definition 조건식 문법 오류: {clause!r}")
+
+
+def _validate_fsm_definition(fsm_definition: dict[str, Any]) -> None:
+    transitions = fsm_definition.get("transitions")
+    if not transitions:
+        return
+    for transition in transitions:
+        condition = transition.get("condition") if isinstance(transition, dict) else None
+        if not condition or condition == ORDER_FILLED:
+            continue
+        _validate_condition_syntax(condition)
 
 
 class SavedStrategy(BaseModel):
@@ -109,6 +151,7 @@ class StrategyBuilderService:
         fsm_definition: dict[str, Any],
         author_agent: str = "user",
     ) -> SavedStrategy:
+        _validate_fsm_definition(fsm_definition)
         async with self._pool.acquire() as conn:
             existing = await conn.fetchval(
                 "SELECT 1 FROM strategies WHERE strategy_id = $1 AND version = $2",
@@ -141,8 +184,9 @@ class StrategyBuilderService:
     async def get_strategy(
         self, owner_user_id: UUID, strategy_id: str, version: str
     ) -> StrategyDetail:
-        """FD-14 Draft "GET /strategies/{id}" — 소유자 전용 조회다(FD-13.4의
-        구매자 포함 접근권한 판정과는 별개, 편집기는 본인 작업물만 본다)."""
+        """FD-14 Draft "GET /strategies/{id}" — owner-only lookup (separate from
+        FD-13.4's access-rights determination which also covers buyers; the
+        editor only ever shows the owner's own work)."""
         async with self._pool.acquire() as conn:
             row = await conn.fetchrow(
                 "SELECT strategy_id, version, owner_user_id, target_asset, market, exchange, "
@@ -216,11 +260,13 @@ class StrategyBuilderService:
                 if risk_warning is not None and not risk_warning_acknowledged:
                     raise StrategyLifecycleError(risk_warning)
 
-            # 레드팀 감사(docs/RED_TEAM_FINDINGS.md #17) 반영 — 04/05/08/09/16번과
-            # 같은 "읽고 나서 별도로 조건 없이 쓰기" 패턴이었다. 방금 읽은
-            # lifecycle_status를 UPDATE 자체의 조건으로 걸어, 그 사이 다른
-            # 요청(예: 관리자의 REJECTED 판정과 자동 파이프라인의 다음 단계
-            # 전이)이 먼저 커밋됐다면 조용히 덮어쓰지 않고 실패시킨다.
+            # Addresses red-team audit finding (docs/RED_TEAM_FINDINGS.md #17) —
+            # this had the same "read, then write separately with no condition"
+            # pattern as findings #04/05/08/09/16. Gate the UPDATE itself on the
+            # lifecycle_status just read, so that if another request (e.g. an
+            # admin's REJECTED verdict racing the automated pipeline's next
+            # transition) committed first, this fails loudly instead of
+            # silently overwriting it.
             updated = await conn.fetchrow(
                 "UPDATE strategies SET lifecycle_status = $3, updated_at = now() "
                 "WHERE strategy_id = $1 AND version = $2 AND lifecycle_status = $4 "

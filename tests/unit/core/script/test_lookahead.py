@@ -163,6 +163,7 @@ def test_truncated_token_stream_from_upstream_failure_fails_closed() -> None:
 # ---- 성능 단언: 정적 검출 지연(ADR-2026-09-09-C) ----
 
 
+@pytest.mark.perf
 def test_static_detection_latency_p95_within_compile_budget_slice() -> None:
     """수치 성능 단언: ADR-2026-09-09-C 축별 성능 예산 "DSL 컴파일 300ms"
     중 lookahead 정적 검출 단계 몫을 50ms로 상한 잡는다(나머지는 렉스/파스/

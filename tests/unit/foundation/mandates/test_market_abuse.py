@@ -400,6 +400,7 @@ def test_spoofing_corrupted_order_qty_fails_closed_not_a_crash():
 # -- Numeric performance (DEEPEN) ------------------------------------------
 
 
+@pytest.mark.perf
 def test_detect_meets_latency_budget_over_many_calls_on_a_realistic_window():
     """수치 성능 단언: wash-trade는 체결 수의 제곱에 비례하므로(O(n^2)),
     현실적인 윈도 크기(30건)에 대해 다회 반복 호출의 총 지연이 넉넉한

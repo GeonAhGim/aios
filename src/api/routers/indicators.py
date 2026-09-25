@@ -1,18 +1,19 @@
-"""IND-12 — `GET /v1/indicators`: 3층(코어/OSS/스크립트) 지표 카탈로그 목록.
+"""IND-12 — `GET /v1/indicators`: 3-tier (core/OSS/script) indicator catalog list.
 
 Spec: docs/specs/L4_analytics_authoring_backtest_marketplace_v1.0.md#§9.9 IND-12
-(선행 IND-10/task-1729).
+(Precedes IND-10/task-1729).
 
-71번 §6 규칙: 라우터는 auth/TenantContext 주입·transport validation·순수
-함수(`registry_tiers.py`) 호출만 한다. 도메인 예외(`InvalidIndicatorCursorError`)
-는 잡지 않는다 — EXCEPTION_MAP 전역 핸들러가 400 VALIDATION_INVALID_FIELD로
-번역한다(raw HTTPException 0건, PLT-17~21 규약).
+Rule 71 §6: The router performs only auth/TenantContext injection, transport validation,
+and pure function calls (`registry_tiers.py`). It does not catch domain exceptions
+(`InvalidIndicatorCursorError`) — the global EXCEPTION_MAP handler translates them to
+400 VALIDATION_INVALID_FIELD (0 raw HTTPException, PLT-17~21 protocol).
 
-SCRIPT 층 저장소(`ScriptIndicatorSource`)는 아직 실제 구현이 없다(스크립트
-지표 영속화는 이 leaf 범위 밖 — custom/dsl_indicator.py 후속) —
-`NullScriptIndicatorSource`로 배선해 두고 빈 목록을 반환한다. 실제 저장소가
-생기면 `get_script_indicator_source` 의존성만 교체하면 된다(테스트도
-`dependency_overrides`로 동일하게 교체해 교차 테넌트 격리를 검증한다).
+The SCRIPT tier storage (`ScriptIndicatorSource`) has no real implementation yet
+(script indicator persistence is outside this leaf scope — follow-up in
+custom/dsl_indicator.py) — wired to `NullScriptIndicatorSource` which returns an
+empty list. When a real storage backend appears, only the `get_script_indicator_source`
+dependency needs replacement (tests also swap it via `dependency_overrides` to verify
+cross-tenant isolation).
 """
 from __future__ import annotations
 
@@ -40,10 +41,10 @@ _PAGE_MAX = 200
 
 
 class NullScriptIndicatorSource:
-    """SCRIPT 층 저장소가 아직 없을 때의 기본 구현 — 항상 빈 목록."""
+    """Fallback when SCRIPT tier storage is unavailable — always returns empty list."""
 
     def list_for_tenant(self, tenant_id: UUID) -> tuple[ScriptIndicatorEntry, ...]:
-        del tenant_id  # Protocol 시그니처 충족용 — 저장소가 아직 없어 항상 빈 목록
+        del tenant_id  # Satisfies Protocol signature — storage unavailable, returns empty list
         return ()
 
 

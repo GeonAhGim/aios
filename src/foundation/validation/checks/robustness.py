@@ -41,18 +41,16 @@ from typing import Any
 
 from src.core.indicators.registry import DEFAULT_REGISTRY
 from src.data.models.strategy_fsm import FSMStrategyConfig
-from src.foundation.backtest.application.param_sweep import sweep
-from src.foundation.backtest.domain.overfitting import (
+from src.foundation.backtest.api import (
     OverfittingError,
-    deflated_sharpe,
-    pbo_cscv,
-)
-from src.foundation.backtest.domain.param_stability import (
     ParamGrid,
     ParamStabilityError,
     Point,
+    deflated_sharpe,
+    pbo_cscv,
     stability_score,
 )
+from src.foundation.backtest.application.param_sweep import sweep
 from src.foundation.validation.checks.context import CheckContext
 from src.foundation.validation.domain.check_result import CheckResult
 from src.foundation.validation.domain.models import Outcome

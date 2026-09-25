@@ -17,8 +17,16 @@ import os
 from datetime import date
 from pathlib import Path
 from typing import Any
+from uuid import UUID
 
 DEFAULT_STATE_PATH = Path(__file__).resolve().parents[4] / "var" / "personal_mode_state.json"
+
+# task-3986 -- same convention as promotion_checklist.py's
+# PERSONAL_ADR_0829E_CONDITION2_MET: an operational fact this single-operator
+# tool cannot discover on its own, decided by an explicit .env slot (fail-closed
+# default: unset/empty means personal mode is not scoped to any account, so
+# foundation_gate.py's 4th layer never activates).
+_PERSONAL_MODE_ACCOUNT_ENV = "PERSONAL_MODE_ACCOUNT_ID"
 
 
 def _empty_state() -> dict[str, Any]:
@@ -45,6 +53,10 @@ class JsonPersonalStateStore:
         tmp = self._path.with_suffix(".tmp")
         tmp.write_text(json.dumps(state), encoding="utf-8")
         os.replace(tmp, self._path)
+
+    async def personal_mode_account_id(self) -> UUID | None:
+        raw = os.environ.get(_PERSONAL_MODE_ACCOUNT_ENV, "").strip()
+        return UUID(raw) if raw else None
 
     async def is_kill_engaged(self) -> bool:
         return bool(self._read()["kill_engaged"])

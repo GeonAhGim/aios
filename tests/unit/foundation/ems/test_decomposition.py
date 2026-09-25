@@ -6,6 +6,7 @@ Spec: docs/specs/L4_ems_routing_algos_and_tca_v1.0.md #9 EM-13 DoD (a)-(d).
 from __future__ import annotations
 
 import ast
+import time
 from decimal import Decimal
 from pathlib import Path
 
@@ -218,7 +219,7 @@ def test_decomposition_module_is_at_most_260_lines() -> None:
     assert line_count <= 260, f"decomposition.py has {line_count} lines, exceeding the leaf cap."
 
 
-# -- DEEPEN 2511 (EM-13) — D2 하한 증빙 보강 ----------------------------------------
+# -- DEEPEN 2511 (EM-13) — D2 floor evidence strengthened ----------------------------------------
 
 
 def test_failure_injection_zero_total_cost_with_nonzero_components_rejected() -> None:
@@ -305,6 +306,49 @@ def test_numerical_assertion_decomposition_multi_fill_exact_decimal() -> None:
         + result.residual
     )
     assert total == result.total_cost == Decimal("3000.00")
+
+
+@pytest.mark.perf
+def test_decompose_cost_p95_latency_stays_under_budget_at_500_fills() -> None:
+    """Numeric performance assertion (DEEPEN 2511 fix): measured p95 latency.
+
+    task-4764 rejected the prior "numerical assertion" test because it only
+    checked Decimal exactness, not the p95/p99 latency or throughput budget
+    the D2 floor (ADR-2026-09-09-C Decision 1) requires. This test actually
+    times `decompose_cost` -- 200 samples of a realistic 500-fill parent
+    order -- and asserts the measured p95 wall-clock latency against a
+    fixed millisecond budget, so an accidental O(n^2) regression in the
+    fill-accumulation loop (`_total_filled_qty`) would fail the gate.
+    """
+    fills = [
+        Fill(price=Decimal("1000") + Decimal(i % 7), qty=Decimal("10"))
+        for i in range(500)
+    ]
+    samples = 200
+    latencies_ms: list[float] = []
+    for _ in range(samples):
+        started = time.perf_counter()
+        decompose_cost(
+            fills=fills,
+            side=OrderSide.BUY,
+            arrival_price=Decimal("1000"),
+            vwap_price=Decimal("1002.5"),
+            close_price=Decimal("1003"),
+            spread_cost=Decimal("5.00"),
+            fees=Decimal("10.00"),
+            total_cost=Decimal("50000.00"),
+        )
+        latencies_ms.append((time.perf_counter() - started) * 1000)
+
+    latencies_ms.sort()
+    p95_index = int(len(latencies_ms) * 0.95)
+    p95_latency_ms = latencies_ms[min(p95_index, len(latencies_ms) - 1)]
+
+    assert p95_latency_ms < 5.0, (
+        f"decompose_cost p95 latency was {p95_latency_ms:.3f}ms over {samples} "
+        "samples at 500 fills, exceeding the 5ms pre-trade-gate-class budget "
+        "(ADR-2026-09-09-C Decision 1)."
+    )
 
 
 def test_gate_red_reproduction_empty_fills_bypass() -> None:

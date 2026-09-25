@@ -14,7 +14,7 @@ from uuid import UUID
 
 from src.data.models.market_data import Candle
 from src.data.models.trading import OrderSide
-from src.foundation.ems.domain.tca import benchmarks
+from src.foundation.ems import api as benchmarks
 from src.foundation.ems.ports.route_decision_repository import RouteDecisionRecord
 
 

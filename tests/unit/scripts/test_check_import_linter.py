@@ -336,6 +336,7 @@ def test_decrease_without_update_leaves_baseline_unchanged(tmp_path: Path) -> No
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.perf
 def test_build_graph_throughput_budget(tmp_path: Path) -> None:
     """300개 모듈 임포트 그래프 구성이 5초 예산 안에 끝난다(D2 DoD 성능 단언)."""
     _touch_pkg(tmp_path, "src", "foundation")

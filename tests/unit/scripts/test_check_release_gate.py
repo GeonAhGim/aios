@@ -4,13 +4,22 @@ DoD: `--stage internal_development`는 실제 저장소에서 exit 0,
 `--stage internal_paper`는 미충족 required_evidence를 출력하며 exit 1 —
 두 경로 모두 `main()`을 직접 실행해 단언한다(문자열 mock 금지).
 DB·네트워크 접근 없음 — 임시 디렉터리와 파일 존재 여부만 쓴다.
+
+DEEPEN(task-6006): 실패 주입(손상된 YAML이 예외로 죽지 않고 fail-closed
+exit 1을 내는지)과 수치 성능 단언(실제 5-stage 체인 전수 검사 시간 예산)을
+추가한다 — `tests/unit/scripts/test_check_migration_chain.py`의
+`test_check_migration_chain_real_versions_dir_completes_within_time_budget`
+패턴을 따른다.
 """
+
 from __future__ import annotations
 
 import importlib.util
 import sys
+import time
 from pathlib import Path
 from types import ModuleType
+from typing import Any
 
 import pytest
 import yaml
@@ -29,9 +38,7 @@ def _load_module(name: str, path: Path) -> ModuleType:
     return module
 
 
-check_release_gate = _load_module(
-    "check_release_gate", SCRIPTS_DIR / "check_release_gate.py"
-)
+check_release_gate = _load_module("check_release_gate", SCRIPTS_DIR / "check_release_gate.py")
 
 
 # ---------------------------------------------------------------------------
@@ -65,7 +72,7 @@ def test_internal_paper_lists_missing_evidence_against_real_repo(
 # ---------------------------------------------------------------------------
 
 
-def _write_config(tmp_path: Path, stages: list[dict]) -> Path:
+def _write_config(tmp_path: Path, stages: list[dict[str, Any]]) -> Path:
     config_path = tmp_path / "release_gates.yaml"
     config_path.write_text(yaml.safe_dump({"stages": stages}), encoding="utf-8")
     return config_path
@@ -162,3 +169,187 @@ def test_missing_config_file_fails(tmp_path: Path) -> None:
     )
 
     assert exit_code == 1
+
+
+# ---------------------------------------------------------------------------
+# 실패 주입 — 파싱 자체가 깨지는 상황(손상된 YAML)을 시뮬레이션한다.
+# ---------------------------------------------------------------------------
+
+
+def test_corrupted_yaml_fails_closed_instead_of_crashing(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """운영 장애 시뮬레이션: config 파일이 잘려서 잘못된 YAML이 된 상태.
+
+    이전 구현은 `yaml.safe_load`의 `yaml.YAMLError`를 잡지 않아 트레이스백과
+    함께 죽었다 — CI 게이트 스텝이 "이 스크립트가 죽었다"와 "게이트가 정상
+    작동해 막았다"를 구분 못 하게 만든다. fail-closed 원칙(CLAUDE.md §3)상
+    이런 파싱 실패도 깨끗한 FAIL 메시지 + exit 1이어야 한다.
+    """
+    corrupted_config = tmp_path / "release_gates.yaml"
+    corrupted_config.write_text(
+        "stages:\n  - name: a\n    required_evidence: [unterminated\n",
+        encoding="utf-8",
+    )
+
+    exit_code = check_release_gate.main(
+        [
+            "--stage",
+            "a",
+            "--config",
+            str(corrupted_config),
+            "--repo-root",
+            str(tmp_path),
+        ]
+    )
+
+    assert exit_code == 1
+    out = capsys.readouterr().out
+    assert "FAIL" in out
+
+
+def test_evidence_entry_missing_path_key_fails_closed(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """실패 주입: required_evidence 항목에 `path` 키가 빠진 상태(예: 편집 실수로
+    필드명이 잘못 붙거나 병합 충돌이 절반만 해결된 config)를 시뮬레이션한다.
+    이전 구현은 `item["path"]`에서 `KeyError`를 그대로 흘려보냈다.
+    """
+    config_path = _write_config(
+        tmp_path,
+        [
+            {
+                "name": "a",
+                "depends_on": [],
+                "required_evidence": [{"description": "경로 필드 누락"}],
+            }
+        ],
+    )
+
+    exit_code = check_release_gate.main(
+        ["--stage", "a", "--config", str(config_path), "--repo-root", str(tmp_path)]
+    )
+
+    assert exit_code == 1
+    out = capsys.readouterr().out
+    assert "FAIL" in out
+
+
+def test_yaml_null_path_rejected_at_load(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """PLT-39: YAML에서 `path: null`/`path:` (valueless)은 Python None으로 파싱되므로
+    load_stages()에서 즉시 ValueError를 일으켜 fail-closed 한다.
+
+    DEEPEN(task-6717): `test_evidence_entry_missing_path_key_fails_closed`(path 키
+    완전 누락)는 `main()`을 통한 CLI 종료코드/FAIL 출력까지 단언하는데, 이 테스트는
+    이전에 `load_stages()` 예외만 확인하고 `main()` 경로는 검증하지 않았다 —
+    ReleaseGateConfigError가 실제로 main()의 except 절까지 도달해 exit 1 +
+    "FAIL" 출력으로 이어지는지까지 같은 방식으로 단언한다.
+    """
+    config_path = tmp_path / "release_gates.yaml"
+    # YAML 1.1: null, Null, NULL, ~, empty value → Python None
+    config_path.write_text(
+        "stages:\n"
+        "- name: a\n"
+        "  depends_on: []\n"
+        "  required_evidence:\n"
+        "  - description: null 경로\n"
+        "    path: null\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="path는 빈 문자열이어야 합니다"):
+        check_release_gate.load_stages(config_path)
+
+    exit_code = check_release_gate.main(
+        ["--stage", "a", "--config", str(config_path), "--repo-root", str(tmp_path)]
+    )
+    assert exit_code == 1
+    assert "FAIL" in capsys.readouterr().out
+
+
+def test_empty_path_string_rejected_at_load(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """PLT-39: `path: ''` (빈 문자열)도 load_stages()에서 거부한다.
+
+    DEEPEN(task-6717): main() 경로의 fail-closed(exit 1 + FAIL 출력)도 함께 확인한다.
+    """
+    config_path = tmp_path / "release_gates.yaml"
+    config_path.write_text(
+        "stages:\n"
+        "- name: a\n"
+        "  depends_on: []\n"
+        "  required_evidence:\n"
+        "  - description: 빈 경로\n"
+        "    path: ''\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="path는 빈 문자열이어야 합니다"):
+        check_release_gate.load_stages(config_path)
+
+    exit_code = check_release_gate.main(
+        ["--stage", "a", "--config", str(config_path), "--repo-root", str(tmp_path)]
+    )
+    assert exit_code == 1
+    assert "FAIL" in capsys.readouterr().out
+
+
+def test_non_string_path_rejected_at_load(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """PLT-39: `path: 123` (숫자) 같은 비문자열 값도 load_stages()에서 거부한다.
+
+    DEEPEN(task-6717): main() 경로의 fail-closed(exit 1 + FAIL 출력)도 함께 확인한다.
+    """
+    config_path = tmp_path / "release_gates.yaml"
+    config_path.write_text(
+        "stages:\n"
+        "- name: a\n"
+        "  depends_on: []\n"
+        "  required_evidence:\n"
+        "  - description: 숫자 경로\n"
+        "    path: 123\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="path는 빈 문자열이어야 합니다"):
+        check_release_gate.load_stages(config_path)
+
+    exit_code = check_release_gate.main(
+        ["--stage", "a", "--config", str(config_path), "--repo-root", str(tmp_path)]
+    )
+    assert exit_code == 1
+    assert "FAIL" in capsys.readouterr().out
+
+
+# ---------------------------------------------------------------------------
+# 성능 단언 — 실제 저장소 5-stage 체인 전수 해석이 예산 내에 끝나는지.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.perf
+def test_full_chain_resolution_completes_within_time_budget() -> None:
+    """수치 성능 단언: 가장 깊은 stage(`marketplace_commercialization`, 5단계
+    depends_on 체인)의 evidence 누적 해석 + 파일 존재 확인이 예산 내에
+    끝나는지 확인한다. `test_check_migration_chain.py`의 시간 예산 패턴과
+    동일 — 정적 파일 존재 확인만 하므로 CI 스텝 예산(수 초)보다 훨씬 낮은
+    50ms를 예산으로 건다.
+
+    PLT-39 DoD: 성능 테스트는 timing뿐만 아니라 check_stage 결과의 정정(validity)도
+    함께 단언해야 한다. 결과가 틀리면 성능 수치만으로는 결함을 놓칠 수 있다.
+    """
+    stages = check_release_gate.load_stages(REAL_CONFIG)
+    assert len(stages) >= 5  # 벤치마크가 무의미해지지 않도록 stage 수를 보장
+
+    start = time.perf_counter()
+    for _ in range(100):
+        result = check_release_gate.check_stage(stages, "internal_development", repo_root=ROOT)
+        # 결과 정정 단언: 성능만 보고 결과가 틀렸으면 의미 없음
+        assert isinstance(result, list)
+        assert len(result) == 0  # 모든 필수 증거가 존재해야 함 (미충족 목록이 빈 list)
+    elapsed = time.perf_counter() - start
+
+    assert elapsed < 0.05 * 100, f"100회 반복 해석이 {elapsed:.3f}s — 예산(5.0s) 초과"

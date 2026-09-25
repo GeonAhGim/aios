@@ -84,6 +84,7 @@ async def test_skew_within_bound_does_not_raise() -> None:
     assert server_clock.offset_ms == pytest.approx(500.0)
 
 
+@pytest.mark.perf
 async def test_sync_and_now_ms_latency_budget() -> None:
     """`sync()`/`now_ms()`는 요청 서명 경로마다 호출되는 hot path — 로컬
     회귀 예산이며 SLO 단언은 아니다(headless worker 지침)."""

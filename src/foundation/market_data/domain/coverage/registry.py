@@ -1,27 +1,29 @@
-"""DC-6 — 커버리지 선언 질의·병합(순수).
+"""DC-6 — Coverage declaration query and merge (pure).
 
 Spec: docs/specs/L4_analytics_authoring_backtest_marketplace_v1.0.md
-§2.1 DC-6, §4.1(fail-closed, `coverage_spans` 겹침 금지 EXCLUDE 제약과
-동일 의미론), §9.2 DC-6.
+§2.1 DC-6, §4.1(fail-closed, same semantics as `coverage_spans` overlap-prohibit
+EXCLUDE constraint), §9.2 DC-6.
 
-커버리지 선언은 (벤처×자산군×TF×기간×품질등급) 축이다
+A coverage declaration is an (instrument×asset_class×TF×period×quality_grade) axis
 (`CoverageSpan`, contracts/v2/coverage.py — task-1127 decision: DC-7
-`gaps.plan_fetch`가 이 반환 타입에 의존하므로 domain이 아니라 contracts에
-둔다). 이 모듈은 그 선언들을 instrument×timeframe으로 질의하고, 같은
-(instrument_id, venue, asset_class, timeframe, quality_grade) 축 안에서
-겹치거나 경계가 맞닿은(adjacent) span을 하나로 병합한다. 축이 다르면
-(venue가 다르거나 quality_grade가 다르면) 같은 기간이 겹쳐도 병합하지
-않는다 — 서로 다른 소스·품질의 독립적 선언이기 때문이다.
+`gaps.plan_fetch` depends on this return type, so it lives in contracts, not domain).
+This module queries those declarations by instrument×timeframe and merges
+overlapping or adjacent (adjacent) spans into one within the same
+(instrument_id, venue, asset_class, timeframe, quality_grade) axis. If the axes
+differ (different venue or quality_grade), spans are not merged even if their
+periods overlap — they are independent declarations from different sources
+and quality levels.
 
-병합 결과에 겹침이 남으면 DB EXCLUDE 제약(§4.1)이 거부할 데이터이므로
-반드시 없어야 한다 — `merge_spans`가 그 불변조건을 코드로 증명한다.
-경계가 정확히 맞닿은 두 span(`a.end_at == b.start_at`)은 연속 구간이므로
-병합하고, 사이에 간격이 있는 두 span은 불연속이므로 별개로 남긴다.
+If overlaps remain in the merge result, the DB EXCLUDE constraint (§4.1) will
+reject the data, so overlaps must be eliminated — `merge_spans` proves that
+invariant in code. Two spans whose boundaries exactly touch
+(`a.end_at == b.start_at`) are contiguous and should be merged; two spans with
+a gap between them are discontinuous and should remain separate.
 
-저장소 조회·I/O는 없다 — 호출자(application/adapters)가 이미 읽은
-`CoverageSpan` 목록을 넘긴다. 커버리지 밖 구간을 0/NaN으로 채우는 것은
-이 모듈의 책임이 아니다(§4.1) — DC-7 `gaps.py`가 그 fail-closed 판정을
-이어받는다.
+No repository lookup or I/O — the caller (application/adapters) passes an
+already-fetched list of `CoverageSpan` objects. Filling periods outside
+coverage with 0/NaN is not this module's responsibility (§4.1) — DC-7
+`gaps.py` takes over that fail-closed determination.
 """
 from __future__ import annotations
 
@@ -48,11 +50,11 @@ def _axis_key(span: CoverageSpan) -> _AxisKey:
 
 
 def merge_spans(spans: Sequence[CoverageSpan]) -> list[CoverageSpan]:
-    """같은 축 안에서 겹치거나 경계가 맞닿은 span을 결정론적으로 병합한다.
+    """Deterministically merge spans that overlap or touch within the same axis.
 
-    각 축 그룹을 `(start_at, end_at)` 오름차순으로 정렬한 뒤 스캔한다 —
-    입력 순서와 무관하게 항상 같은 결과가 나온다(결정론). 반환 순서는
-    축 키 오름차순 → 그 안에서 `start_at` 오름차순으로 고정된다.
+    Sort each axis group by `(start_at, end_at)` ascending, then scan —
+    always produces the same result regardless of input order (deterministic).
+    Return order is fixed: axis key ascending, then `start_at` ascending within.
     """
     groups: dict[_AxisKey, list[CoverageSpan]] = defaultdict(list)
     for span in spans:
@@ -64,11 +66,11 @@ def merge_spans(spans: Sequence[CoverageSpan]) -> list[CoverageSpan]:
         current = ordered[0]
         for candidate in ordered[1:]:
             if candidate.start_at <= current.end_at:
-                # 겹침(start < 현재 end) 또는 경계 맞닿음(start == 현재 end) — 병합.
+                # Overlap (start < current end) or boundary touch (start == current end) — merge.
                 if candidate.end_at > current.end_at:
                     current = current.model_copy(update={"end_at": candidate.end_at})
             else:
-                # 사이 간격이 있는 불연속 span — 별개로 남긴다.
+                # Discontinuous span with a gap — leave separate.
                 merged.append(current)
                 current = candidate
         merged.append(current)
@@ -78,12 +80,12 @@ def merge_spans(spans: Sequence[CoverageSpan]) -> list[CoverageSpan]:
 def coverage_for(
     spans: Sequence[CoverageSpan], instrument: Instrument, tf: Timeframe
 ) -> list[CoverageSpan]:
-    """`instrument`×`tf`에 해당하는 커버리지 선언을 질의·병합해 반환한다.
+    """Query and merge coverage declarations matching `instrument`×`tf`.
 
-    `spans`는 임의 instrument·timeframe이 섞인 원본 선언 목록일 수 있다
-    — 먼저 `instrument.instrument_id`와 `tf`로 필터링한 뒤 `merge_spans`로
-    병합한다. 일치하는 선언이 없으면 빈 리스트(커버리지 없음 — 호출자가
-    `DATA_COVERAGE_MISSING`으로 판정할 근거).
+    `spans` may be a raw list mixing arbitrary instruments and timeframes —
+    first filter by `instrument.instrument_id` and `tf`, then merge via
+    `merge_spans`. Returns an empty list if no matching declaration exists
+    (no coverage — the caller's basis for `DATA_COVERAGE_MISSING`).
     """
     matching = [
         span

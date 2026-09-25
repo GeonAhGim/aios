@@ -24,12 +24,15 @@ export const MAIN_NAV_ITEMS: NavItem[] = [
   { to: "/scripts/editor", label: "nav./scripts/editor" },
   { to: "/marketplace", label: "nav./marketplace" },
   { to: "/follow", label: "nav./follow" },
+  { to: "/signals/sources", label: "nav./signals/sources" },
   { to: "/ai/studio", label: "nav./ai/studio" },
   { to: "/executions", label: "nav./executions" },
   { to: "/portfolio", label: "nav./portfolio" },
+  { to: "/portfolio/performance-statements", label: "nav./portfolio/performance-statements" },
   { to: "/rebalance", label: "nav./rebalance" },
   { to: "/mandates", label: "nav./mandates" },
   { to: "/compliance", label: "nav./compliance" },
+  { to: "/compliance/mandate", label: "nav./compliance/mandate" },
   { to: "/decisions/history", label: "nav./decisions/history" },
   { to: "/reports", label: "nav./reports" },
   { to: "/wallet", label: "nav./wallet" },
@@ -64,6 +67,7 @@ export const ADMIN_NAV_ITEMS: NavItem[] = [
   { to: "/admin/reconciliation", label: "nav./admin/reconciliation" },
   { to: "/admin/evidence-chain", label: "nav./admin/evidence-chain" },
   { to: "/admin/trust", label: "nav./admin/trust" },
+  { to: "/admin/audit-log", label: "nav./admin/audit-log" },
 ];
 
 export const ALL_NAV_ITEMS: NavItem[] = [

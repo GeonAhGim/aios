@@ -84,6 +84,7 @@ def test_ci_sample_has_no_unexpected_exclusions() -> None:
     assert set(result.report.excluded) <= set(verify_job.KNOWN_UNVERIFIED)
 
 
+@pytest.mark.perf
 def test_ci_sample_completes_within_latency_budget() -> None:
     """Numeric performance assertion: the 30-name CI sample runs on every
     commit (unmarked, no `nightly` gate), so a regression that made it scale

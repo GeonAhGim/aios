@@ -43,7 +43,22 @@ import pytest
 from src.core.exceptions import RetryableExchangeError
 from src.data.models.base import AssetClass
 from src.data.models.trading import Order, OrderSide, OrderStatus, OrderType
+from src.exchanges.kis import rate_profile
 from src.exchanges.kis.adapter import KISAdapter
+
+
+@pytest.fixture(autouse=True)
+def _reset_bucket_registry() -> None:
+    """`rate_profile.py`'s (account_type, tr_group) `TokenBucket` is a
+    process-wide singleton (BR-2b) — whichever test creates it first locks in
+    its `sleep` callable for every later test sharing the key. Reset before/
+    after each test so this file's adapters always get a freshly built
+    bucket wired to their own injected fake sleep, instead of possibly
+    inheriting a real-`asyncio.sleep` bucket from test order."""
+    rate_profile.reset_token_bucket_registry_for_test()
+    yield
+    rate_profile.reset_token_bucket_registry_for_test()
+
 
 _TOKEN_PATH = "/oauth2/tokenP"
 _QUOTE_PATH = "/uapi/overseas-price/v1/quotations/price"
@@ -178,6 +193,7 @@ def _fast_order_handler(captured: list[httpx.Request]):
     return handler
 
 
+@pytest.mark.perf
 async def test_place_overseas_order_overhead_bounded_vs_raw_request_baseline() -> None:
     """`place_overseas_order`(이 리프의 대상 함수)는 `_exchange_codes`
     조회 + body 조립 + `_request` 왕복 1회만 하므로, 원시 `_request` 왕복

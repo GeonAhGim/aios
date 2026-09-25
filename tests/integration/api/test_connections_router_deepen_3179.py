@@ -247,3 +247,51 @@ async def test_list_connections_budget_gate_fails_on_injected_regression(client,
 
     with pytest.raises(AssertionError):
         assert p95_ms < _PERF_BUDGET_MS
+
+
+# --- 경계값/잘못된 입력 negative test (task-4639) ---
+
+
+async def test_list_connections_without_bearer_token_is_401(client):
+    """경계값: `Authorization` 헤더 없이 목록 조회를 호출하면
+    `get_current_user`가 401로 거부하는지 확인한다(인증 경계)."""
+    response = await client.get(BASE)
+
+    assert response.status_code == 401
+
+
+async def test_confirm_connection_with_malformed_uuid_is_400(client, pool):
+    """잘못된 입력: `{connection_id}` 경로 파라미터가 UUID 형식이 아니면
+    FastAPI 경로 파싱 단계에서 `RequestValidationError` -> 400
+    VALIDATION_INVALID_FIELD로 거부되고, 도메인 함수(`confirm_connection`)
+    까지 도달하지 않는지 확인한다."""
+    headers, _tenant_id = await _register(client)
+
+    response = await client.post(f"{BASE}/not-a-uuid:confirm", headers=headers)
+
+    assert response.status_code == 400
+    assert response.json()["error_code"] == "VALIDATION_INVALID_FIELD"
+
+
+async def test_begin_connection_with_missing_required_field_is_400(client, pool):
+    """잘못된 입력: `BeginConnectionRequest`의 필수 필드
+    (`opaque_account_ref`)가 빠진 요청 바디는 pydantic 검증에서 400
+    VALIDATION_INVALID_FIELD로 거부되고, 커넥션이 생성되지 않는지
+    확인한다."""
+    headers, tenant_id = await _register(client)
+    await _enable_mfa(pool, tenant_id)
+    await _grant_consent(pool, tenant_id)
+
+    response = await client.post(
+        BASE,
+        headers=headers,
+        json={"provider_code": "fake-broker", "requested_capability_profile": ["READ_BALANCE"]},
+    )
+
+    assert response.status_code == 400
+    assert response.json()["error_code"] == "VALIDATION_INVALID_FIELD"
+    async with pool.acquire() as conn:
+        count = await conn.fetchval(
+            "SELECT count(*) FROM account_connection WHERE tenant_id = $1", tenant_id
+        )
+    assert count == 0

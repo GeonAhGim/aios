@@ -1,13 +1,13 @@
-"""LA-12 — `CalendarRepository`(ports/calendar_repository.py)의 asyncpg 구현.
+"""LA-12 — asyncpg implementation of `CalendarRepository` (ports/calendar_repository.py).
 
 Spec: docs/specs/L4_market_data_positions_ledger_v1.0.md#§2.2, §5, §9.2 LA-12.
 
-`md_venue_calendar_day`(LA-10)는 거래일을 전부 저장하지 않는다 — 휴장일
-(`is_trading_day=false`)과 조기폐장(`early_close=true`)만 예외로 적재하고,
-정규 개장 여부는 `VenueCalendar.sessions_for`(LA-3)이 요일+예외 조합으로
-계산한다. `load()`는 그 예외 집합만 조회해 `VenueCalendar`를 조립하고,
-정규 세션 스펙(tz/개장시각/요일)은 `known_venues.KNOWN_SESSIONS`(LA-3)를
-그대로 재사용한다(값 중복 정의 금지).
+`md_venue_calendar_day`(LA-10) does not store every calendar day — it loads only
+exceptions: holidays (`is_trading_day=false`) and early close days (`early_close=true`).
+Whether a regular session opens is computed by `VenueCalendar.sessions_for`(LA-3) from
+the day-of-week + exception combination. `load()` queries only that exception set to
+assemble the `VenueCalendar`; regular session specs (tz/open time/day-of-week) are
+reused directly from `known_venues.KNOWN_SESSIONS`(LA-3) (no duplicate value definitions).
 """
 from __future__ import annotations
 
@@ -23,8 +23,8 @@ __all__ = ["CalendarNotLoadedError", "PostgresCalendarRepository"]
 
 
 class CalendarNotLoadedError(Exception):
-    """`load()` 대상 venue/year에 적재된 캘린더 행이 없음 — §4.1 fail-closed:
-    휴장일 데이터 없이 갭 판정을 내리지 않는다."""
+    """No calendar rows loaded for the target venue/year — §4.1 fail-closed:
+    do not make gap determinations without holiday data."""
 
 
 class PostgresCalendarRepository:

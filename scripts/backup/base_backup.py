@@ -14,6 +14,7 @@ DATABASE_URL(환경변수 -> .env)에서 접속정보를 얻는다(scripts/setup
 디렉터리는 지우고(다음 restore_drill이 실패작을 최신 백업으로 오인해 집어가지 않도록)
 <dest-dir>/<타임스탬프>-FAILED.json에 실패 사실만 남긴다.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -53,12 +54,30 @@ def pg_conn_args(url: str) -> list[str]:
 
 
 def _run(cmd: list[str], env: dict | None, timeout: int) -> tuple[int, str]:
+    """CTO 2026-09-23: PIPE 대신 임시 파일로 stdout/stderr를 받는다. pg_basebackup -Xs·pg_ctl은
+    자식(WAL 수신기/서버)이 파이프 핸들을 상속해 부모가 끝나도 communicate()가 EOF를 못 받아
+    Windows에서 무기한 멈춘다(task-5350의 pg_ctl 데드락과 같은 부류 — 직접 실행 82초 vs
+    파이프 캡처 1시간 타임아웃 재현). 파일이면 상속돼도 EOF 대기가 없다."""
+    import tempfile
+
     try:
-        r = subprocess.run(cmd, env=env, capture_output=True, text=True, encoding="utf-8",
-                           errors="replace", timeout=timeout)
-        return r.returncode, (r.stdout + r.stderr)[-4000:]
-    except subprocess.TimeoutExpired:
-        return 124, f"timeout {timeout}s"
+        with tempfile.TemporaryFile(mode="w+b") as out:
+            try:
+                r = subprocess.run(
+                    cmd,
+                    env=env,
+                    stdout=out,
+                    stderr=subprocess.STDOUT,
+                    timeout=timeout,
+                    check=False,
+                )
+            except subprocess.TimeoutExpired:
+                return 124, f"timeout {timeout}s"
+            out.seek(0)
+            text = out.read().decode("utf-8", errors="replace")
+        return r.returncode, text[-4000:]
+    except OSError as exc:
+        return 1, f"{type(exc).__name__}: {exc}"
 
 
 def run_base_backup(
@@ -81,8 +100,24 @@ def run_base_backup(
     target = dest_dir / stamp
     target.mkdir(parents=True, exist_ok=False)
     backup_label = label or f"aios-base-{stamp}"
-    cmd = [pg_basebackup_bin, *pg_conn_args(dsn), "-D", str(target),
-           "-Fp", "-Xs", "-P", "-l", backup_label]
+    cmd = [
+        pg_basebackup_bin,
+        *pg_conn_args(dsn),
+        "-D",
+        str(target),
+        "-Fp",
+        "-Xs",
+        "-P",
+        "-l",
+        backup_label,
+        "--wal-method=stream",
+        # CTO 2026-09-23: 기본(spread) 체크포인트는 수십 분 대기 중 시작 WAL이 재활용돼
+        # "WAL 세그먼트 이미 제거됨"으로 실패했다(드릴 17:01/18:00 재현) — fast로 즉시 시작.
+        "--checkpoint=fast",
+        "-C",
+        "-S",
+        "aios_drill",
+    ]
     env = {**os.environ}
     rc, tail = run_cmd(cmd, env, timeout)
     finished = _now()
@@ -112,7 +147,8 @@ def latest_backup_dir(dest_dir: Path) -> Path | None:
         return None
     candidates = sorted(
         (p for p in dest_dir.iterdir() if p.is_dir() and (p / "manifest.json").is_file()),
-        key=lambda p: p.name, reverse=True,
+        key=lambda p: p.name,
+        reverse=True,
     )
     for p in candidates:
         try:
@@ -126,7 +162,8 @@ def latest_backup_dir(dest_dir: Path) -> Path | None:
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
-        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
+    )
     parser.add_argument("--dest-dir", required=True, help="백업을 쌓을 상위 디렉터리")
     parser.add_argument("--dsn", help="생략하면 DATABASE_URL(.env)을 쓴다")
     parser.add_argument("--label", help="pg_basebackup -l 라벨")
@@ -141,8 +178,9 @@ def main(argv: list[str] | None = None) -> int:
         print(f"base_backup 실패: {e}", file=sys.stderr)
         return 1
     if not manifest["ok"]:
-        print(f"pg_basebackup 실패(rc={manifest['returncode']}): {manifest['tail']}",
-              file=sys.stderr)
+        print(
+            f"pg_basebackup 실패(rc={manifest['returncode']}): {manifest['tail']}", file=sys.stderr
+        )
         return 1
     print(f"base backup 완료: {manifest['dest']}")
     return 0

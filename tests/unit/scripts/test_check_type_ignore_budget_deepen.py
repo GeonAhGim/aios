@@ -123,6 +123,7 @@ def test_failure_injection_corrupted_python_file_does_not_crash_scan(tmp_path: P
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.perf
 def test_numerical_assertion_exact_count_across_many_files_within_time_budget(
     tmp_path: Path,
 ) -> None:

@@ -117,6 +117,144 @@ async def test_save_strategy_rejects_duplicate_id_version(service, pool):
         )
 
 
+async def test_save_strategy_accepts_well_formed_condition(service, pool):
+    owner = await create_test_user(pool)
+    strategy_id = f"test-strategy-{uuid4().hex[:8]}"
+
+    saved = await service.save_strategy(
+        owner,
+        strategy_id,
+        "1.0.0",
+        target_asset="BTC/USDT",
+        market="crypto",
+        exchange="bitget",
+        fsm_definition={
+            "states": ["IDLE", "HOLDING"],
+            "transitions": [
+                {
+                    "from_state": "IDLE",
+                    "to_state": "HOLDING",
+                    "condition": "RSI_timeperiod14 < 30",
+                }
+            ],
+        },
+    )
+
+    assert saved.lifecycle_status == "GENERATED"
+
+
+async def test_save_strategy_rejects_syntax_error_in_condition(service, pool):
+    """L16 DoD — 문법 오류 fsm_definition 저장 400. `RSI_timeperiod14`와 임계값
+    사이에 비교 연산자가 없어 `_ATOMIC_RE`가 매칭되지 않는 절이다."""
+    owner = await create_test_user(pool)
+    strategy_id = f"test-strategy-{uuid4().hex[:8]}"
+
+    with pytest.raises(StrategyLifecycleError):
+        await service.save_strategy(
+            owner,
+            strategy_id,
+            "1.0.0",
+            target_asset="BTC/USDT",
+            market="crypto",
+            exchange="bitget",
+            fsm_definition={
+                "states": ["IDLE", "HOLDING"],
+                "transitions": [
+                    {
+                        "from_state": "IDLE",
+                        "to_state": "HOLDING",
+                        "condition": "RSI_timeperiod14 30",
+                    }
+                ],
+            },
+        )
+
+
+async def test_save_strategy_rejects_syntax_error_in_and_combined_condition(service, pool):
+    """조합(AND)의 두 번째 절만 문법 오류인 경우에도 저장을 거부해야 한다 —
+    첫 절만 검사하고 통과시키는 회귀를 막는다."""
+    owner = await create_test_user(pool)
+    strategy_id = f"test-strategy-{uuid4().hex[:8]}"
+
+    with pytest.raises(StrategyLifecycleError):
+        await service.save_strategy(
+            owner,
+            strategy_id,
+            "1.0.0",
+            target_asset="BTC/USDT",
+            market="crypto",
+            exchange="bitget",
+            fsm_definition={
+                "states": ["IDLE", "HOLDING"],
+                "transitions": [
+                    {
+                        "from_state": "IDLE",
+                        "to_state": "HOLDING",
+                        "condition": "RSI_timeperiod14 < 30 AND close BROKEN 90",
+                    }
+                ],
+            },
+        )
+
+
+async def test_save_strategy_accepts_raw_market_column_condition(service, pool):
+    """ConditionCompiler는 손절 조건에 지표가 아닌 raw market-data 컬럼(`close`
+    등)도 그대로 쓴다(`condition_compiler.py`) — 이 조건도 `_ATOMIC_RE` 문법만
+    지키면 저장은 통과해야 한다."""
+    owner = await create_test_user(pool)
+    strategy_id = f"test-strategy-{uuid4().hex[:8]}"
+
+    saved = await service.save_strategy(
+        owner,
+        strategy_id,
+        "1.0.0",
+        target_asset="BTC/USDT",
+        market="crypto",
+        exchange="bitget",
+        fsm_definition={
+            "states": ["HOLDING", "STOP_LOSS"],
+            "transitions": [
+                {
+                    "from_state": "HOLDING",
+                    "to_state": "STOP_LOSS",
+                    "condition": "close < 90",
+                }
+            ],
+        },
+    )
+
+    assert saved.lifecycle_status == "GENERATED"
+
+
+async def test_save_strategy_accepts_order_filled_reserved_literal(service, pool):
+    """`ORDER_FILLED`(condition_compiler.ORDER_FILLED)는 사용자 조건식이 아니라
+    주문 체결 시스템 이벤트를 나타내는 예약 리터럴이라 `_ATOMIC_RE` 문법
+    대상이 아니다 — 저장이 막히면 안 된다."""
+    owner = await create_test_user(pool)
+    strategy_id = f"test-strategy-{uuid4().hex[:8]}"
+
+    saved = await service.save_strategy(
+        owner,
+        strategy_id,
+        "1.0.0",
+        target_asset="BTC/USDT",
+        market="crypto",
+        exchange="bitget",
+        fsm_definition={
+            "states": ["IDLE", "BUY_ORDER_PENDING"],
+            "transitions": [
+                {
+                    "from_state": "IDLE",
+                    "to_state": "BUY_ORDER_PENDING",
+                    "condition": "ORDER_FILLED",
+                }
+            ],
+        },
+    )
+
+    assert saved.lifecycle_status == "GENERATED"
+
+
 async def test_transition_to_next_stage_succeeds(service, pool):
     owner = await create_test_user(pool)
     strategy_id = f"test-strategy-{uuid4().hex[:8]}"

@@ -128,3 +128,47 @@ def test_truncated_indicator_backend_fails_closed_instead_of_silent_partial_sign
 
     with pytest.raises(IndexError):
         calc.preview(_candles([100 + i for i in range(10)]), [condition])
+
+
+def test_unknown_indicator_raises_rejection():
+    """알 수 없는 지표명은 즉시 예외로 거부해야 한다 (fail-closed).
+    I-07: 검증 게이트의 hard-fail 조건은 도메인 코드가 실제로 FAIL을
+    반환해야 한다."""
+    from src.core.indicators.registry import IndicatorError
+
+    condition = PreviewCondition(indicator="NONEXISTENT_INDICATOR", operator=">", threshold=50)
+
+    with pytest.raises(IndicatorError, match="STRATEGY_INDICATOR_UNKNOWN"):
+        PreviewCalculator().preview(_candles([100 + i for i in range(20)]), [condition])
+
+
+def test_empty_candles_list_returns_no_signals():
+    """캔들 목록이 비어있으면 신호 없이 종료해야 한다 (fail-closed)."""
+    condition = PreviewCondition(
+        indicator="RSI", params={"timeperiod": 2}, operator=">", threshold=50
+    )
+
+    result = PreviewCalculator().preview([], [condition])
+
+    assert result.signal_indices == []
+    assert result.message is not None
+
+
+def test_indicator_service_raises_on_calculate():
+    """의존성(IndicatorService)가 계산 중 예외를 raise하면,
+    PreviewCalculator는 예외를 전파하여 fail-closed 한다.
+    실패주입: monkeypatch로 calculate를 손상시켜 Exception 유발."""
+    condition = PreviewCondition(
+        indicator="SMA", params={"timeperiod": 2}, operator=">", threshold=0
+    )
+
+    class _FailingIndicatorService:
+        def calculate(
+            self, indicator: str, candles: list[Candle], **params: int
+        ) -> IndicatorResult:
+            raise RuntimeError("backend connection lost")
+
+    calc = PreviewCalculator(indicator_service=_FailingIndicatorService())
+
+    with pytest.raises(RuntimeError, match="backend connection lost"):
+        calc.preview(_candles([100 + i for i in range(10)]), [condition])

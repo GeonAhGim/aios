@@ -281,6 +281,7 @@ def test_digest_detects_single_field_corruption_in_every_column(tmp_path: Path):
         assert _digest(corrupted) != base_digest
 
 
+@pytest.mark.perf
 def test_promote_year_completes_within_budget_for_twenty_thousand_minute_bars(tmp_path: Path):
     """수치 성능 단언: 실측상 M1 1년치에 근접한 20,000행 승격(read+write+
     round-trip 검증+digest)이 ~0.4초대에 끝난다(로컬 실측) — print만 하지

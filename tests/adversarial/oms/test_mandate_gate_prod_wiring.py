@@ -330,6 +330,7 @@ def test_scan_file_fails_closed_on_undecodable_file(tmp_path):
 # --- 성능 단언 ---------------------------------------------------------------
 
 
+@pytest.mark.perf
 def test_scan_source_perf_bound_for_large_synthetic_file():
     """성능 단언 — 3000개의 무관한 호출 사이에 대상 호출 1개를 섞은 합성
     대형 소스에서도 스캔이 선형 시간 안에 끝나야 한다. `_scan_source`가

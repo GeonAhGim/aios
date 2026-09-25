@@ -114,6 +114,62 @@ def _extract_priority(cells: list[str]) -> str:
     return match.group(0) if match else ""
 
 
+def _resolve_full_path(token: str, base_path: str | None) -> str | None:
+    if token.startswith("/api/"):
+        return token
+    suffix = token if token.startswith("/") else "/" + token
+    if base_path is None:
+        return None  # 선행 완전 경로 없이 접미사만 등장 — 파싱 불가, 건너뜀
+    return base_path.rsplit("/", 1)[0] + suffix
+
+
+def _rows_from_method_cell(
+    cell: str,
+    cells: list[str],
+    i: int,
+    current_category: str,
+    source_name: str,
+    base_path: str | None,
+) -> tuple[list[EndpointRow], str | None]:
+    if i + 1 >= len(cells):
+        return [], base_path
+    tokens = _PATH_TOKEN_RE.findall(cells[i + 1])
+    if not tokens:
+        return [], base_path
+    label = cells[0] if cells[0] else "(제목 없음)"
+    priority = _extract_priority(cells[i + 2 :])
+    rows: list[EndpointRow] = []
+    for token in tokens:
+        full_path = _resolve_full_path(token, base_path)
+        if full_path is None:
+            continue
+        base_path = full_path
+        rows.append(
+            EndpointRow(
+                method=cell,
+                path=full_path,
+                label=label,
+                category=current_category,
+                priority=priority,
+                source_doc=source_name,
+            )
+        )
+    return rows, base_path
+
+
+def _rows_from_table_row(
+    cells: list[str],
+    current_category: str,
+    source_name: str,
+    base_path: str | None,
+) -> tuple[list[EndpointRow], str | None]:
+    for i, cell in enumerate(cells):
+        if not _METHOD_RE.match(cell):
+            continue
+        return _rows_from_method_cell(cell, cells, i, current_category, source_name, base_path)
+    return [], base_path
+
+
 def parse_spec_doc(path: Path) -> list[EndpointRow]:
     if not path.exists():
         raise BitgetCoverageError(f"스펙 문서 없음: {path}")
@@ -131,36 +187,8 @@ def parse_spec_doc(path: Path) -> list[EndpointRow]:
         cells = [c.strip() for c in line.strip().strip("|").split("|")]
         if _is_separator_row(cells) or not cells:
             continue
-        for i, cell in enumerate(cells):
-            if not _METHOD_RE.match(cell):
-                continue
-            if i + 1 >= len(cells):
-                break
-            tokens = _PATH_TOKEN_RE.findall(cells[i + 1])
-            if not tokens:
-                break
-            label = cells[0] if cells[0] else "(제목 없음)"
-            priority = _extract_priority(cells[i + 2 :])
-            for token in tokens:
-                if token.startswith("/api/"):
-                    full_path = token
-                else:
-                    suffix = token if token.startswith("/") else "/" + token
-                    if base_path is None:
-                        continue  # 선행 완전 경로 없이 접미사만 등장 — 파싱 불가, 건너뜀
-                    full_path = base_path.rsplit("/", 1)[0] + suffix
-                base_path = full_path
-                rows.append(
-                    EndpointRow(
-                        method=cell,
-                        path=full_path,
-                        label=label,
-                        category=current_category,
-                        priority=priority,
-                        source_doc=path.name,
-                    )
-                )
-            break
+        new_rows, base_path = _rows_from_table_row(cells, current_category, path.name, base_path)
+        rows.extend(new_rows)
     return rows
 
 

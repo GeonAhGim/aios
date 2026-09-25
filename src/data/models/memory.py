@@ -1,4 +1,4 @@
-"""2.12 — Memory 모델 (4.6-A Provenance Tracking).
+"""2.12 — Memory model (4.6-A Provenance Tracking).
 
 Spec: 01_data_models_v1.3.md#§1.5
 """
@@ -25,7 +25,7 @@ class MemoryType(str, Enum):
 
 
 class MemoryEntry(BaseModel):
-    """4.6-A — 모든 Memory 항목은 출처·신뢰도·검증상태를 가진다."""
+    """4.6-A — Every Memory item carries provenance, confidence, and verification status."""
 
     memory_id: UUID = Field(default_factory=uuid4)
     memory_type: MemoryType
@@ -34,6 +34,6 @@ class MemoryEntry(BaseModel):
     source_task_id: UUID | None = None
     confidence: float = Field(ge=0.0, le=1.0, default=0.5)
     status: ProvenanceStatus = ProvenanceStatus.UNVERIFIED
-    verified_by: str | None = None  # 검증한 Agent (Auditor 등)
+    verified_by: str | None = None  # Agent that verified (e.g., Auditor)
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     verified_at: datetime | None = None

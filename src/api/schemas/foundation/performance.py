@@ -1,10 +1,11 @@
-"""Performance Reporting API 요청/응답 스키마 — HTTP 세부만 여기 두고, 계약
-자체는 `src/foundation/performance/contracts/v1.py`를 감싼다(106번 §2).
+"""Performance Reporting API request/response schemas — HTTP details only;
+the contract itself is wrapped in `src/foundation/performance/contracts/v1.py` (106 §2).
 
-`scope_ref`는 요청 본문에서 받지 않는다 — PAPER 스코프는 항상 호출자
-자신의 `user_id`다(P0 스콥 tenant_id == user_id). 클라이언트가 임의
-`scope_ref`를 보낼 수 있게 하면 다른 tenant의 원장을 긁어 자기 이름으로
-statement를 만들 수 있는 경로가 생긴다 — 라우터가 서버 쪽에서 채운다."""
+`scope_ref` is not accepted in the request body — PAPER scope is always the
+caller's own `user_id` (P0 scope: tenant_id == user_id). Allowing clients to
+send arbitrary `scope_ref` values would let them scrape another tenant's
+ledger and fabricate a statement under their own name — the router fills this
+on the server side."""
 from __future__ import annotations
 
 from datetime import datetime

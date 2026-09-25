@@ -356,6 +356,7 @@ async def test_submit_order_replay_after_denial_succeeds_exactly_once(pool):
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.perf
 async def test_reclaim_expired_leases_wall_time_scales_sublinearly(pool):
     """수치 성능 단언 — `reclaim_expired_leases`는 단일 `DELETE` 왕복이다
     (per-row 왕복이 아니다). 행 수가 150배 늘어도 소요시간이 그만큼

@@ -208,28 +208,33 @@ def test_report_config_hash_still_correct_when_config_hash_stalls(
     `build_tearsheet`이 그 지연을 그대로 감내하면서도 지연 없는 호출과
     동일한 config_hash를 report에 담는지 확인한다 — 아래 p95 단언이
     캐시나 지름길이 아니라 실제 config_hash 호출을 포함한 전체 조립을
-    재고 있음을 보장한다."""
+    재고 있음을 보장한다.
+
+    호출 여부는 벽시계 경과시간이 아니라 호출 횟수로 증명한다(task-6395)
+    — `-n 8` 등 병렬 워커가 코어를 다투는 CI 호스트에서는 10ms 지연이
+    타이머/스케줄러 잡음(수 ms)에 묻혀 `elapsed_s < delay_s`로 flake했다.
+    """
     curve = [_point(0, "100"), _point(1, "110"), _point(2, "120")]
     config = _config()
     result = _result(curve, config=config)
 
     original_config_hash = BacktestConfig.config_hash
-    delay_s = 0.01
+    call_count = 0
 
     def _stalled_config_hash(self: BacktestConfig) -> str:
-        time.sleep(delay_s)
+        nonlocal call_count
+        call_count += 1
+        time.sleep(0.01)
         return original_config_hash(self)
 
     monkeypatch.setattr(BacktestConfig, "config_hash", _stalled_config_hash)
 
-    started = time.perf_counter()
     stalled_view = build_tearsheet(result)
-    elapsed_s = time.perf_counter() - started
 
     monkeypatch.undo()
     baseline_view = build_tearsheet(result)
 
-    assert elapsed_s >= delay_s
+    assert call_count == 1
     assert stalled_view.config_hash == baseline_view.config_hash
 
 
@@ -250,6 +255,7 @@ def _p95_ms(samples: list[float]) -> float:
     return ordered[min(int(len(ordered) * 0.95), len(ordered) - 1)] * 1000
 
 
+@pytest.mark.perf
 def test_build_tearsheet_p95_latency_within_backtest_budget_slice() -> None:
     """DEEPEN(task-3054): ADR-2026-09-09-C Decision 1 예산 중 리포트 뷰
     조립 몫(2ms)을 실제로 단언한다."""
@@ -270,6 +276,7 @@ def test_build_tearsheet_p95_latency_within_backtest_budget_slice() -> None:
 # ---- DEEPEN(task-3054): 게이트 적색 재현 ----
 
 
+@pytest.mark.perf
 def test_budget_gate_actually_fails_when_config_hash_stalls_past_budget(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

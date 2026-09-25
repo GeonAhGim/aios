@@ -111,54 +111,72 @@ def cognitive_complexity(func: FunctionNode) -> int:
             for stmt in orelse:
                 visit(stmt, nesting + 1)
 
+    def visit_children(node: ast.AST, nesting: int) -> None:
+        for child in ast.iter_child_nodes(node):
+            visit(child, nesting)
+
+    def handle_if(node: ast.If, nesting: int) -> None:
+        nonlocal score
+        score += 1 + nesting
+        visit(node.test, nesting)
+        for stmt in node.body:
+            visit(stmt, nesting + 1)
+        visit_orelse(node.orelse, nesting)
+
+    def handle_loop(node: ast.AST, nesting: int) -> None:
+        nonlocal score
+        score += 1 + nesting
+        for child in ast.iter_child_nodes(node):
+            visit(child, nesting + 1)
+
+    def handle_ifexp(node: ast.IfExp, nesting: int) -> None:
+        nonlocal score
+        score += 1 + nesting
+        for child in ast.iter_child_nodes(node):
+            visit(child, nesting + 1)
+
+    def handle_boolop(node: ast.BoolOp, nesting: int) -> None:
+        nonlocal score
+        score += 1
+        for child in ast.iter_child_nodes(node):
+            visit(child, nesting)
+
+    def handle_match(node: ast.Match, nesting: int) -> None:
+        nonlocal score
+        for case in node.cases:
+            score += 1 + nesting
+            for stmt in case.body:
+                visit(stmt, nesting + 1)
+
+    def handle_recursive_call(node: ast.Call, nesting: int) -> None:
+        nonlocal score
+        score += 1
+        for child in ast.iter_child_nodes(node):
+            visit(child, nesting)
+
     def visit(node: ast.AST, nesting: int) -> None:
         """`node` 자신의 종류를 먼저 판정한 뒤(가산), 자식은 알맞은 중첩 깊이로
-        재귀한다 -- 자식만 검사하고 진입 노드 자신은 건너뛰던 버그(모든 최상위
-        구조가 채점되지 않던 원인)를 피하기 위해 진입점 포함 모든 호출이 이
-        하나의 함수를 거친다."""
-        nonlocal score
+        재귀한다 -- 각 노드 종류의 채점 로직은 `handle_*`로 위임해 이 dispatcher
+        자체는 분기 판정만 한다(재귀 호출도 `handle_*`쪽에 있어 dispatcher는
+        자기 자신을 직접 호출하지 않는다)."""
         if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef | ast.Lambda):
             return
         if isinstance(node, ast.If):
-            score += 1 + nesting
-            visit(node.test, nesting)
-            for stmt in node.body:
-                visit(stmt, nesting + 1)
-            visit_orelse(node.orelse, nesting)
-            return
-        if isinstance(node, ast.For | ast.AsyncFor | ast.While):
-            score += 1 + nesting
-            for child in ast.iter_child_nodes(node):
-                visit(child, nesting + 1)
-            return
-        if isinstance(node, ast.ExceptHandler):
-            score += 1 + nesting
-            for child in ast.iter_child_nodes(node):
-                visit(child, nesting + 1)
-            return
-        if isinstance(node, ast.IfExp):
-            score += 1 + nesting
-            for child in ast.iter_child_nodes(node):
-                visit(child, nesting + 1)
-            return
-        if isinstance(node, ast.BoolOp):
-            score += 1
-            for child in ast.iter_child_nodes(node):
-                visit(child, nesting)
-            return
-        if hasattr(ast, "Match") and isinstance(node, ast.Match):
-            for case in node.cases:
-                score += 1 + nesting
-                for stmt in case.body:
-                    visit(stmt, nesting + 1)
-            return
-        if isinstance(node, ast.Call) and _callee_name(node.func) == func.name:
-            score += 1
-            for child in ast.iter_child_nodes(node):
-                visit(child, nesting)
-            return
-        for child in ast.iter_child_nodes(node):
-            visit(child, nesting)
+            handle_if(node, nesting)
+        elif isinstance(node, ast.For | ast.AsyncFor | ast.While):
+            handle_loop(node, nesting)
+        elif isinstance(node, ast.ExceptHandler):
+            handle_loop(node, nesting)
+        elif isinstance(node, ast.IfExp):
+            handle_ifexp(node, nesting)
+        elif isinstance(node, ast.BoolOp):
+            handle_boolop(node, nesting)
+        elif hasattr(ast, "Match") and isinstance(node, ast.Match):
+            handle_match(node, nesting)
+        elif isinstance(node, ast.Call) and _callee_name(node.func) == func.name:
+            handle_recursive_call(node, nesting)
+        else:
+            visit_children(node, nesting)
 
     for stmt in func.body:
         visit(stmt, 0)

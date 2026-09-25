@@ -15,7 +15,6 @@ D2 증빙 보강(task-2924, DEEPEN 1728 — docs/audit/DEPTH_DSL_IND.md): 원 �
 
 from __future__ import annotations
 
-import time
 from typing import Any, cast
 
 import pytest
@@ -27,6 +26,7 @@ from src.core.indicators.generate_specs import generate_talib_specs
 from src.core.indicators.registry import DEFAULT_REGISTRY
 from src.core.indicators.spec import IndicatorSpec, ParamSpec, PlotSpec
 from src.core.indicators.specs_talib import TALIB_SPECS, _plot_kind, _plots_from_talib
+from tests.conftest import PerfBudget
 
 # --- 스냅샷: 11개 코어 지표 전부 PlotSpec 보유, kind/fill_between이 output_flags와 일치 ---
 
@@ -187,7 +187,7 @@ def test_indicator_spec_rejects_extra_plot_without_matching_output() -> None:
 
 
 def test_indicator_spec_rejects_fill_between_referencing_unknown_output() -> None:
-    with pytest.raises(ValueError, match="fill_between references unknown output"):
+    with pytest.raises(ValueError, match="fill_between 'does_not_exist' not in outputs"):
         IndicatorSpec(
             name="BAD_FILL",
             inputs=("close",),
@@ -245,19 +245,22 @@ def test_generate_talib_specs_propagates_talib_introspection_failure_instead_of_
 # -- D2 성능 단언 --------------------------------------------------------------
 
 
-def test_registry_hash_serialization_throughput_budget() -> None:
+@pytest.mark.perf
+def test_registry_hash_serialization_throughput_budget(perf_budget: PerfBudget) -> None:
     """`IndicatorRegistry.registry_hash()` runs once per `POST
     /v1/scripts/compile` request (`src/api/routers/scripts.py`) and once per
     script-facade compile (`src/core/strategy/script_facade.py`) — it walks
     all 161 `TALIB_SPECS` entries and JSON-serializes every `PlotSpec` field
     (`canonical_spec_dict`, `registry.py`) per call. 200 calls must stay well
     under a 500ms budget to rule out the new PlotSpec fields turning this
-    hot-path serialization pathological (observed ~90ms locally)."""
-    start = time.perf_counter()
-    for _ in range(200):
-        DEFAULT_REGISTRY.registry_hash()
-    elapsed = time.perf_counter() - start
-    assert elapsed < 0.5, f"200 registry_hash() calls took {elapsed * 1000:.2f}ms, budget 500ms"
+    hot-path serialization pathological (observed ~90ms locally). task-7434:
+    measured via the shared process_time-based perf_budget fixture."""
+
+    def _run_once() -> None:
+        for _ in range(200):
+            DEFAULT_REGISTRY.registry_hash()
+
+    perf_budget.assert_within(_run_once, budget_ms=500.0, label="200 registry_hash() calls")
 
 
 # -- D2 게이트 적색 재현 -------------------------------------------------------

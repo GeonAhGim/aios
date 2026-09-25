@@ -17,10 +17,12 @@ segregation-of-duty check in `activate_revision.py` has nothing to compare
 against and passes through (same semantics as
 `assert_actor_not_counterparty(..., counterparty_id=None, ...)`).
 """
+
 from __future__ import annotations
 
 from dataclasses import replace
 from datetime import datetime, timezone
+from decimal import Decimal
 from uuid import UUID, uuid4
 
 from src.foundation.evidence.application.record_command_event import record_command_event
@@ -70,7 +72,7 @@ async def propose_amendment(
         state=MandateRevisionState.PROPOSED,
         max_total_exposure_pct=rules.max_total_exposure_pct,
         max_single_instrument_pct=rules.max_single_instrument_pct,
-        min_cash_buffer_pct=rules.min_cash_buffer_pct,
+        min_cash_buffer_pct=Decimal(str(rules.min_cash_buffer_pct)),
         max_daily_loss_pct=rules.max_daily_loss_pct,
         allowed_autonomy=DomainAutonomy(rules.allowed_autonomy.value),
         forbidden_assets=tuple(rules.forbidden_assets),

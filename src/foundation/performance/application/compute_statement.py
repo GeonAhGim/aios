@@ -1,17 +1,19 @@
-"""ComputeStatement 커맨드 — 81번 §2 파이프라인.
+"""ComputeStatement command — §2 pipeline 81.
 
 select reconciled snapshots/fills/cashflows → apply methodology version →
 value positions → compute costs/returns/risk → validate identity → persist
 immutable statement + evidence.
 
-한계(명시, paper_input_adapter.py의 스콥 축소를 그대로 물려받는다):
-`StatementInputPort`가 항상 스냅샷을 정확히 1개(현재 시점)만 주므로 TWR/MWR
-계산에 필요한 경계값 2개를 채울 수 없다 — `returns`는 항상 `value_pct=None`
-(PENDING)이다. `fees`/`slippage`/`funding`/`fx`/`estimated_tax`도 원장에
-해당 컬럼이 없어 항상 `None`이다. `gross_pnl`(포지션 realized+unrealized
-합)과 `cashflows_net`(실행 시작 시 allocated_capital 합)만 실제로 채워진다.
-0으로 대체하지 않는다(PRF-002) — 이 리프가 실제로 검증하는 건 "입력이
-부족하면 억지로 항등식을 통과시키지 않는다"는 이 규율 자체다.
+Limitations (explicit, inherited from paper_input_adapter.py scope reduction):
+`StatementInputPort` always provides exactly one snapshot (current point), so
+it cannot supply the two boundary values needed for TWR/MWR computation —
+`returns.value_pct` is always `None` (PENDING). `fees`/`slippage`/`funding`/`fx`/`estimated_tax`
+are also always `None` because the ledger lacks those columns. Only
+`gross_pnl` (sum of position realized+unrealized PnL) and
+`cashflows_net` (sum of allocated_capital at execution start) are actually
+populated. We do not substitute zeros (PRF-002) — what this leaf truly
+validates is the discipline itself: "do not force the identity to pass when
+input is insufficient."
 """
 
 from __future__ import annotations
@@ -171,11 +173,11 @@ async def compute_statement(
 
     evidence_refs: tuple[str, ...] = ()
     if evidence_repo is not None:
-        # WORM 테이블(performance_statement)은 UPDATE가 없다 — insert 뒤에
-        # evidence_refs를 채우려고 다시 insert하면 UNIQUE(revision_no) 충돌이
-        # 난다. 그래서 statement_id를 먼저 확정해 감사 이벤트를 statement
-        # insert *이전에* 기록하고, 그 event.id를 evidence_refs에 담아 단
-        # 한 번만 insert한다.
+        # The performance_statement WORM table has no UPDATE — inserting again
+        # to populate evidence_refs after the initial insert would hit a
+        # UNIQUE(revision_no) conflict. So we fix the statement_id first,
+        # record the audit event *before* the statement insert, and insert only
+        # once with that event.id in evidence_refs.
         event = await record_command_event(
             evidence_repo,
             tenant_id=tenant_id,

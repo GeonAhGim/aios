@@ -1,13 +1,14 @@
-"""16.1 — 자본 배분 상한 검증.
+"""16.1 — Capital allocation upper-bound enforcement.
 
-Spec: 기능설계문서_v1.20.md#FD-16.1, 정책문서 8.2-B, 9.1
+Spec: 기능설계문서_v1.20.md#FD-16.1, Policy docs 8.2-B, 9.1
 
-전략의 인증 상태(certified_badge)에 따라 적용 상한이 다르다 — 미인증
-(직접 제작 또는 미인증 구매 전략, FD-14 편집기 산출물 포함)은
-unverified_max_pct(Draft 10%), 9.5-A 인증 통과(certified_badge=true)는
-certified_level4_max_pct(Draft 25%). 초과 시 저장 자체를 거부한다
-(FROZEN Risk 정책을 UI가 우회하지 않음) — 정확한 초과분과 현재 상한을
-함께 안내한다(FD-1.2 "추측하게 하지 않는다" 원칙).
+The applicable cap depends on the strategy's certification status (certified_badge):
+unverified strategies (self-built or uncertified purchases, including FD-14 editor outputs)
+are limited to unverified_max_pct (Draft 10%), while strategies that pass 9.5-A certification
+(certified_badge=true) may allocate up to certified_level4_max_pct (Draft 25%).
+Allocation requests exceeding the cap are rejected at storage — the UI cannot bypass the
+FROZEN Risk policy. The error reports the exact overage and current cap
+(FD-1.2 "Do not make users guess" principle).
 """
 from __future__ import annotations
 
@@ -17,7 +18,7 @@ from src.core.loader.risk_policy_loader import StrategyAllocationPolicy
 
 
 class CapitalAllocationError(Exception):
-    """FD-16.1 저장 거부 — 라우터가 400으로 변환."""
+    """FD-16.1 Storage rejected — router translates to 400."""
 
 
 def allocation_cap_pct(certified_badge: bool, policy: StrategyAllocationPolicy) -> Decimal:

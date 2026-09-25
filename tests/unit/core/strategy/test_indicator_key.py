@@ -90,6 +90,7 @@ def test_extract_indicator_keys_propagates_compiler_regression_malformed_key() -
 # -- D2 성능 단언 --------------------------------------------------------------
 
 
+@pytest.mark.perf
 def test_parse_and_format_key_round_trip_throughput_budget() -> None:
     """`parse_key`/`format_key` run once per required indicator key on every
     execution-loop tick (`market_state.build_market_state`); 10,000 round

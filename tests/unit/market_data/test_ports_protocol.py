@@ -20,8 +20,8 @@ DEPTH 감사(task-2723, docs/audit/DEPTH_LA_LB_LC.md 417)가 지적한 4개 공�
 
 from __future__ import annotations
 
-import time
 from datetime import datetime, timezone
+from typing import Any
 
 import pytest
 from pydantic import ValidationError
@@ -32,6 +32,7 @@ from src.foundation.market_data.ports.calendar_repository import CalendarReposit
 from src.foundation.market_data.ports.candle_store import CandleStore
 from src.foundation.market_data.ports.ingest_source import IngestSource
 from src.foundation.market_data.ports.reference_repository import ReferenceRepository
+from tests.conftest import PerfBudget
 
 
 def _now() -> datetime:
@@ -39,37 +40,43 @@ def _now() -> datetime:
 
 
 class _FullCandleStore:
-    async def upsert_batch(self, conn, batch_id, candles): ...
-    async def quarantine(self, conn, batch_id, candles, issues): ...
-    async def query(self, conn, key, start, end, as_of): ...
-    async def last_open_time(self, conn, key): ...
-    async def read_candles_columnar(self, conn, key, start, end, as_of): ...
+    async def upsert_batch(self, conn: Any, batch_id: Any, candles: Any) -> None: ...
+    async def quarantine(self, conn: Any, batch_id: Any, candles: Any, issues: Any) -> None: ...
+    async def query(self, conn: Any, key: Any, start: Any, end: Any, as_of: Any) -> Any: ...
+    async def last_open_time(self, conn: Any, key: Any) -> Any: ...
+    async def read_candles_columnar(
+        self, conn: Any, key: Any, start: Any, end: Any, as_of: Any
+    ) -> Any: ...
 
 
 class _MissingLastOpenTimeCandleStore:
     """`last_open_time`이 빠진 불완전 구현 — 포트를 만족하지 못해야 한다."""
 
-    async def upsert_batch(self, conn, batch_id, candles): ...
-    async def quarantine(self, conn, batch_id, candles, issues): ...
-    async def query(self, conn, key, start, end, as_of): ...
+    async def upsert_batch(self, conn: Any, batch_id: Any, candles: Any) -> None: ...
+    async def quarantine(self, conn: Any, batch_id: Any, candles: Any, issues: Any) -> None: ...
+    async def query(self, conn: Any, key: Any, start: Any, end: Any, as_of: Any) -> Any: ...
 
 
 class _FullReferenceRepository:
-    async def get_instrument(self, conn, venue, canonical, at): ...
-    async def register(self, conn, cmd): ...
-    async def add_alias(self, conn, instrument_id, venue, venue_symbol): ...
-    async def list_actions(self, conn, instrument_id): ...
-    async def record_action(self, conn, action): ...
+    async def get_instrument(self, conn: Any, venue: Any, canonical: Any, at: Any) -> Any: ...
+    async def register(self, conn: Any, cmd: Any) -> Any: ...
+    async def add_alias(
+        self, conn: Any, instrument_id: Any, venue: Any, venue_symbol: Any
+    ) -> Any: ...
+    async def list_actions(self, conn: Any, instrument_id: Any) -> Any: ...
+    async def record_action(self, conn: Any, action: Any) -> Any: ...
 
 
 class _MissingRecordActionReferenceRepository:
     """`record_action`이 빠진 불완전 구현 — `CandleStore`가 아닌 다른
     포트에서도 fail-closed가 우연이 아님을 보이는 세 번째 negative test용."""
 
-    async def get_instrument(self, conn, venue, canonical, at): ...
-    async def register(self, conn, cmd): ...
-    async def add_alias(self, conn, instrument_id, venue, venue_symbol): ...
-    async def list_actions(self, conn, instrument_id): ...
+    async def get_instrument(self, conn: Any, venue: Any, canonical: Any, at: Any) -> Any: ...
+    async def register(self, conn: Any, cmd: Any) -> Any: ...
+    async def add_alias(
+        self, conn: Any, instrument_id: Any, venue: Any, venue_symbol: Any
+    ) -> Any: ...
+    async def list_actions(self, conn: Any, instrument_id: Any) -> Any: ...
 
 
 class _SyncLastOpenTimeCandleStore:
@@ -78,12 +85,14 @@ class _SyncLastOpenTimeCandleStore:
     보지 않고 이름 존재만 확인하므로 이 구조적 결함도 통과시킨다(게이트
     적색 재현용 fixture)."""
 
-    async def upsert_batch(self, conn, batch_id, candles): ...
-    async def quarantine(self, conn, batch_id, candles, issues): ...
-    async def query(self, conn, key, start, end, as_of): ...
-    async def read_candles_columnar(self, conn, key, start, end, as_of): ...
+    async def upsert_batch(self, conn: Any, batch_id: Any, candles: Any) -> None: ...
+    async def quarantine(self, conn: Any, batch_id: Any, candles: Any, issues: Any) -> None: ...
+    async def query(self, conn: Any, key: Any, start: Any, end: Any, as_of: Any) -> Any: ...
+    async def read_candles_columnar(
+        self, conn: Any, key: Any, start: Any, end: Any, as_of: Any
+    ) -> Any: ...
 
-    def last_open_time(self, conn, key):
+    def last_open_time(self, conn: Any, key: Any) -> Any:
         return None
 
 
@@ -94,28 +103,32 @@ class _InjectableCandleStore:
     반영되지 않는다(캐시는 `register()`/새 클래스 생성 시점에만 무효화된다).
     그래서 이 fixture는 다른 테스트와 공유하지 않는 전용 클래스로 둔다."""
 
-    async def upsert_batch(self, conn, batch_id, candles): ...
-    async def quarantine(self, conn, batch_id, candles, issues): ...
-    async def query(self, conn, key, start, end, as_of): ...
-    async def last_open_time(self, conn, key): ...
-    async def read_candles_columnar(self, conn, key, start, end, as_of): ...
+    async def upsert_batch(self, conn: Any, batch_id: Any, candles: Any) -> None: ...
+    async def quarantine(self, conn: Any, batch_id: Any, candles: Any, issues: Any) -> None: ...
+    async def query(self, conn: Any, key: Any, start: Any, end: Any, as_of: Any) -> Any: ...
+    async def last_open_time(self, conn: Any, key: Any) -> Any: ...
+    async def read_candles_columnar(
+        self, conn: Any, key: Any, start: Any, end: Any, as_of: Any
+    ) -> Any: ...
 
 
 class _FullCalendarRepository:
-    async def load(self, conn, venue, year): ...
-    async def upsert_days(self, conn, venue, days): ...
+    async def load(self, conn: Any, venue: Any, year: Any) -> Any: ...
+    async def upsert_days(self, conn: Any, venue: Any, days: Any) -> Any: ...
 
 
 class _FullIngestSource:
-    async def fetch_candles(self, venue, raw_symbol, tf, start, end): ...
+    async def fetch_candles(
+        self, venue: Any, raw_symbol: Any, tf: Any, start: Any, end: Any
+    ) -> Any: ...
 
 
 class _FullBatchRepository:
-    async def create(self, conn, batch): ...
-    async def add_issues(self, conn, batch_id, issues): ...
-    async def get(self, conn, batch_id, tenant_id): ...
-    async def create_tick_batch(self, conn, batch): ...
-    async def get_tick_batch(self, conn, batch_id, tenant_id): ...
+    async def create(self, conn: Any, batch: Any) -> Any: ...
+    async def add_issues(self, conn: Any, batch_id: Any, issues: Any) -> Any: ...
+    async def get(self, conn: Any, batch_id: Any, tenant_id: Any) -> Any: ...
+    async def create_tick_batch(self, conn: Any, batch: Any) -> Any: ...
+    async def get_tick_batch(self, conn: Any, batch_id: Any, tenant_id: Any) -> Any: ...
 
 
 class _DictReturningBatchRepository:
@@ -123,12 +136,12 @@ class _DictReturningBatchRepository:
     `IngestBatchResult` 대신 얕은 dict를 돌려준다 — mypy가 없으면 구조 검사만
     으로는 이 차이를 잡지 못한다는 것을 보이는 fixture."""
 
-    async def create(self, conn, batch): ...
-    async def add_issues(self, conn, batch_id, issues): ...
-    async def create_tick_batch(self, conn, batch): ...
-    async def get_tick_batch(self, conn, batch_id, tenant_id): ...
+    async def create(self, conn: Any, batch: Any) -> Any: ...
+    async def add_issues(self, conn: Any, batch_id: Any, issues: Any) -> Any: ...
+    async def create_tick_batch(self, conn: Any, batch: Any) -> Any: ...
+    async def get_tick_batch(self, conn: Any, batch_id: Any, tenant_id: Any) -> Any: ...
 
-    async def get(self, conn, batch_id, tenant_id):
+    async def get(self, conn: Any, batch_id: Any, tenant_id: Any) -> dict[str, str]:
         return {"batch_id": str(batch_id)}
 
 
@@ -179,12 +192,16 @@ def test_runtime_method_removal_flips_isinstance_to_false(
     assert not isinstance(_InjectableCandleStore(), CandleStore)
 
 
-def test_isinstance_checks_over_thousands_of_instances_stay_fast() -> None:
+@pytest.mark.perf
+def test_isinstance_checks_over_thousands_of_instances_stay_fast(
+    perf_budget: PerfBudget,
+) -> None:
     """수치 성능 단언: `runtime_checkable` Protocol의 isinstance()는 멤버
     이름 개수에 비례하는 저비용 해시조회여야 한다 — 이 전제가 깨지면(예:
     누군가 실수로 무거운 `__instancecheck__`/검증 로직을 끼워 넣으면) 포트
     판정이 호출되는 모든 경로(등록·조회·인제스트)가 함께 느려진다. 5개
-    포트 x 10,000회 = 50,000회 isinstance() 호출이 1초 미만에 끝나야 한다."""
+    포트 x 10,000회 = 50,000회 isinstance() 호출이 1초 미만에 끝나야 한다.
+    task-7434: process_time 기반 perf_budget으로 측정한다."""
     fakes: list[tuple[object, type]] = [
         (_FullCandleStore(), CandleStore),
         (_FullReferenceRepository(), ReferenceRepository),
@@ -193,13 +210,73 @@ def test_isinstance_checks_over_thousands_of_instances_stay_fast() -> None:
         (_FullBatchRepository(), BatchRepository),
     ]
 
-    start = time.perf_counter()
-    for _ in range(10_000):
-        for instance, port in fakes:
-            assert isinstance(instance, port)
-    elapsed = time.perf_counter() - start
+    def _run_once() -> None:
+        for _ in range(10_000):
+            for instance, port in fakes:
+                assert isinstance(instance, port)
 
-    assert elapsed < 1.0
+    perf_budget.assert_within(_run_once, budget_ms=1000.0, label="50,000 isinstance() checks")
+
+
+class _MissingLoadCalendarRepository:
+    """`load` 메서드가 빠진 CalendarRepository 불완전 구현 — 두 번째 포트
+    타입에서 fail-closed가 우연이 아님을 보이는 추가 negative test."""
+
+    async def upsert_days(self, conn: Any, venue: Any, days: Any) -> Any: ...
+
+
+class _MissingFetchIngestSource:
+    """`fetch_candles` 메서드가 빠진 IngestSource 불완전 구현 — 세 번째
+    포트 타입에서 fail-closed가 우연이 아님을 보이는 추가 negative test."""
+
+
+def test_calendar_repository_missing_load_fails_port_check() -> None:
+    """추가 negative test 1건: `CalendarRepository`에서 `load` 메서드
+    누락 → isinstance() False. CandleStore/ReferenceRepository에 국한되지
+    않는 fail-closed 행동을 증명한다."""
+    assert not isinstance(_MissingLoadCalendarRepository(), CalendarRepository)
+
+
+def test_ingest_source_missing_fetch_fails_port_check() -> None:
+    """추가 negative test 2건: `IngestSource`에서 `fetch_candles` 메서드
+    누락 → isinstance() False. 구조적 계약이 모든 포트 타입에서 fail-closed
+    됨을 확인한다."""
+    assert not isinstance(_MissingFetchIngestSource(), IngestSource)
+
+
+async def test_upsert_batch_failure_injection_raises() -> None:
+    """실패주입 케이스 1건: `CandleStore.upsert_batch`가 의존하는
+    데이터베이스 레이어에서 예외가 발생하는 상황을 monkeypatch로 재현한다.
+    어댑터가 이 예외를 silently吃掉하면 배치 손실을 알 수 없으므로,
+    isinstance() 통과한 구현체가 실제 예외를 그대로 전파하는지 검증한다."""
+    from src.foundation.market_data.ports.candle_store import CandleStore
+
+    class _FailingCandleStore:
+        async def upsert_batch(self, conn: Any, batch_id: Any, candles: Any) -> None:
+            raise ConnectionRefusedError("simulated db connection lost")
+
+        async def quarantine(self, conn: Any, batch_id: Any, candles: Any, issues: Any) -> None: ...
+
+        async def query(self, conn: Any, key: Any, start: Any, end: Any, as_of: Any) -> list[Any]:
+            return []
+
+        async def last_open_time(self, conn: Any, key: Any) -> None:
+            return None
+
+        async def read_candles_columnar(
+            self, conn: Any, key: Any, start: Any, end: Any, as_of: Any
+        ) -> Any:
+            from src.foundation.market_data.domain.candle_columns import (
+                CandleColumns,
+            )
+
+            return CandleColumns([], [], [], [], [], [], [])
+
+    fake = _FailingCandleStore()
+    assert isinstance(fake, CandleStore)  # 구조는 만족
+
+    with pytest.raises(ConnectionRefusedError):
+        await fake.upsert_batch(conn=None, batch_id=None, candles=[])
 
 
 async def test_sync_method_silently_satisfies_async_protocol_gate_red() -> None:

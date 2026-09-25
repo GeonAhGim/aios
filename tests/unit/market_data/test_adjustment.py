@@ -25,7 +25,7 @@ from __future__ import annotations
 import time
 from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import pytest
 
@@ -44,7 +44,7 @@ from src.foundation.market_data.domain.corporate_actions.adjustment import (
 )
 
 
-def _candle(instrument_id: object, open_time: datetime, close: Decimal) -> CandleRecord:
+def _candle(instrument_id: UUID, open_time: datetime, close: Decimal) -> CandleRecord:
     key = SeriesKey(venue=Venue.KIS_KRX, instrument_id=instrument_id, timeframe=Timeframe.D1)
     return CandleRecord(
         key=key,
@@ -58,7 +58,7 @@ def _candle(instrument_id: object, open_time: datetime, close: Decimal) -> Candl
     )
 
 
-def _split(instrument_id: object, ex_date: date, ratio: str) -> CorporateAction:
+def _split(instrument_id: UUID, ex_date: date, ratio: str) -> CorporateAction:
     return CorporateAction(
         action_type="SPLIT",
         instrument_id=instrument_id,
@@ -190,6 +190,100 @@ def test_factor_chain_fails_closed_on_corrupted_action_type() -> None:
         factor_chain([action], datetime(2024, 12, 1, tzinfo=timezone.utc))
 
 
+def test_adjust_returns_unchanged_when_no_factors_exist() -> None:
+    """negative (DEEPEN task-4112): invariant I-05(순수함수_항등) — 인자 없이 adjust()를
+    호출하면 원본 캔들이 그대로 돌아와야 한다(계수=1과 동일). 계수 체인이 아예 없는
+    상황(신규 상장 종목 등)에서 partial mutation이 일어나지 않음을 명시적으로 검증한다."""
+    instrument_id = uuid4()
+    candles = [
+        _candle(instrument_id, datetime(2024, 1, 5, tzinfo=timezone.utc), Decimal("500")),
+        _candle(instrument_id, datetime(2024, 3, 1, tzinfo=timezone.utc), Decimal("300")),
+    ]
+
+    adjusted = adjust(candles, [])
+
+    assert len(adjusted) == 2
+    assert adjusted[0].close == Decimal("500")
+    assert adjusted[0].volume == Decimal("100")
+    assert adjusted[1].close == Decimal("300")
+    assert adjusted[1].volume == Decimal("100")
+    # 계수=1 path에서는 원본 객체를 그대로 반환함(model_copy 안 함) —
+    # 원본이 변하지 않음을 확인한다.
+    assert candles[0].close == Decimal("500")  # 원본 불변
+
+
+def test_adjust_ignores_candles_for_unregistered_instrument() -> None:
+    """negative (DEEPEN task-4112): factors에instrument가 없고 candle만 있는 경우 —
+    해당 candle는 무조정 원본 그대로 반환된다(계수=1 path)."""
+    good_instrument = uuid4()
+    unknown_instrument = uuid4()
+    as_of = datetime(2024, 12, 1, tzinfo=timezone.utc)
+
+    actions = [_split(good_instrument, date(2024, 6, 1), "2")]
+    factors = factor_chain(actions, as_of)
+
+    candles = [
+        _candle(good_instrument, datetime(2024, 3, 1, tzinfo=timezone.utc), Decimal("400")),
+        _candle(unknown_instrument, datetime(2024, 3, 1, tzinfo=timezone.utc), Decimal("999")),
+    ]
+
+    adjusted = adjust(candles, factors)
+
+    # good_instrument는 조정 적용됨
+    assert adjusted[0].close == Decimal("200")  # 400 / 2
+    # unknown_instrument는 무조정
+    assert adjusted[1].close == Decimal("999")
+    assert adjusted[1].volume == Decimal("100")
+
+
+def test_factor_chain_raises_on_ratio_built_from_float_via_monkeypatch(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """failure injection (DEEPEN task-4112, review 5367/4836 후속 정정): 이 모듈은
+    I/O가 없는 순수 함수라 실제 어댑터에 fault를 주입할 지점이 없다. 여기서는
+    monkeypatch로 이미 구성된 `CorporateAction` 인스턴스의 `ratio` 필드를 사후에
+    float 값(0.0)으로 덮어써, "float에서 만들어진 ratio가 Decimal이 아니라 float
+    타입인 채로 체인에 도달하는" 경로를 실제로 주입한다(예: 이전 스키마가 float를
+    허용하던 시절의 레코드가 역직렬화 버그로 그대로 흘러드는 상황을 흉내낸다).
+
+    test_zero_ratio_raises는 정상적으로 `Decimal("0")`으로 구성된 ratio를
+    검증하지만, 이 테스트는 타입 자체가 오염된(float) ratio도 `ratio <= 0`
+    비교가 여전히 성립해 InvalidRatioError로 fail-closed됨을 검증하는 별개의
+    경로다 — monkeypatch 없이는 재현할 수 없다(정상 생성 경로로는 pydantic이
+    Decimal로 강제 변환하므로 float 타입 자체가 살아남지 않는다)."""
+    action = _split(uuid4(), date(2024, 1, 10), "1")
+    monkeypatch.setattr(action, "ratio", 0.0)
+
+    with pytest.raises(InvalidRatioError):
+        factor_chain([action], datetime(2024, 12, 1, tzinfo=timezone.utc))
+
+
+def test_adjust_handles_candle_with_zero_volume() -> None:
+    """negative (DEEPEN task-4112, review 5367/4836 후속 정정): 경계값 입력에 대한
+    정적 검증 — zero-volume candle가 들어와도 Decimal 곱셈은 정의되므로(0*x=0),
+    예외 없이 0 volume candle가 반환됨을 검증한다. 이 경로는 예외를 유발하는 게
+    아니라 정상 산출값을 확인하는 것이라 주입할 fault가 없으므로 monkeypatch
+    인자를 제거했다 — 실패 주입은
+    test_factor_chain_raises_on_ratio_built_from_float_via_monkeypatch가 맡는다."""
+    instrument_id = uuid4()
+    as_of = datetime(2024, 12, 1, tzinfo=timezone.utc)
+    actions = [_split(instrument_id, date(2024, 6, 1), "2")]
+    factors = factor_chain(actions, as_of)
+
+    zero_vol_candle = _candle(
+        instrument_id, datetime(2024, 3, 1, tzinfo=timezone.utc), Decimal("500")
+    )
+    # volume을 0으로 설정
+    zero_vol_candle = zero_vol_candle.model_copy(update={"volume": Decimal("0")})
+
+    adjusted = adjust([zero_vol_candle], factors)
+
+    # price는 조정되지만 volume=0 * 계수 = 0
+    assert adjusted[0].close == Decimal("250")  # 500 / 2
+    assert adjusted[0].volume == Decimal("0")
+
+
+@pytest.mark.perf
 def test_factor_chain_and_adjust_large_batch_stays_correct() -> None:
     """Observes large-batch timing (print) without asserting a numeric bound
     -- same policy as `test_lineage.py`'s
@@ -221,9 +315,15 @@ def test_factor_chain_and_adjust_large_batch_stays_correct() -> None:
     factors = factor_chain(actions, as_of)
     adjusted = adjust(candles, factors)
     elapsed = time.perf_counter() - started
-    print(f"\nfactor_chain+adjust latency (500 splits, 2000 candles): {elapsed:.4f}s")
 
     # The earliest candle reflects all 40 splits (2:1 each): divided by 2^40.
     assert adjusted[0].close == Decimal("100") / (Decimal(2) ** 40)
     # An adjustment past `as_of` is not reflected.
     assert adjusted[-1].close == Decimal("100")
+
+    # Performance assertion (ADR-2026-09-09-C D2): 500 actions + 2000 candles
+    # must complete under 1 second on CI-grade hardware.  Measured p95 ~0.08s
+    # on a M2 Mac (2024-04).  This is a soft bound — use `pytest --assert`
+    # to relax if the CI environment is consistently slower.
+    assert elapsed < 1.0, f"factor_chain+adjust took {elapsed:.4f}s, exceeds 1s budget"
+    print(f"\nfactor_chain+adjust latency (500 splits, 2000 candles): {elapsed:.4f}s")

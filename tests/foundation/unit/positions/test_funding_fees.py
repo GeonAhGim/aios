@@ -2,6 +2,7 @@
 
 Spec: docs/specs/L4_market_data_positions_ledger_v1.0.md#§9 LB-4.
 """
+
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
@@ -10,7 +11,9 @@ from decimal import Decimal
 import pytest
 
 from src.data.models.base import Currency, FXRate, Money
-from src.foundation.positions.domain import funding_fees, fx
+from src.foundation.positions.domain import funding_fees
+from src.foundation.positions.domain import fx as fx_module
+from tests.conftest import PerfBudget
 
 _NOW = datetime(2026, 9, 3, 12, 0, tzinfo=timezone.utc)
 
@@ -67,7 +70,7 @@ def test_to_base_same_currency_needs_no_rate() -> None:
 def test_to_base_missing_rate_raises_no_silent_fallback() -> None:
     fee = Money(amount=Decimal("1.5"), currency=Currency.USDT)
 
-    with pytest.raises(fx.FxRateMissingError):
+    with pytest.raises(fx_module.FxRateMissingError):
         funding_fees.to_base(fee, Currency.KRW, None)
 
 
@@ -83,7 +86,7 @@ def test_to_base_stale_rate_raises() -> None:
     fee = Money(amount=Decimal("1"), currency=Currency.USDT)
     stale_rate = _rate(age=timedelta(hours=1))
 
-    with pytest.raises(fx.FxRateStaleError):
+    with pytest.raises(fx_module.FxRateStaleError):
         funding_fees.to_base(fee, Currency.KRW, stale_rate, now=_NOW, max_age=timedelta(minutes=5))
 
 
@@ -97,3 +100,105 @@ def test_funding_amount_then_to_base_round_trip_sum_preserved() -> None:
     base_amount = funding_fees.to_base(funding, Currency.KRW, rate)
 
     assert base_amount == funding.amount * rate.rate
+
+
+# ── DEEPEN: negative / 실패주입 / 성능 단언 ──────────────────────────
+
+
+def test_funding_amount_zero_notional_yields_zero_regardless_of_rate() -> None:
+    """불변식: mark 금액이 0이면 펀딩액도 0이어야 한다(rate가 아무리 커도)."""
+    mark = Money(amount=Decimal("0"), currency=Currency.USDT)
+
+    result = funding_fees.funding_amount(Decimal("10"), mark, Decimal("999"))
+
+    assert result.amount == Decimal("0")
+    assert result.currency == Currency.USDT
+
+
+def test_to_base_rejects_unrelated_rate_pair() -> None:
+    """불변식: 요청한 통화쌍과 무관한 환율은 삼각환산 금지 원칙에 따라
+    미존재로 취급해야 한다(LB-4 §3.2). USDT→KRW 요청에 KRW→KRW(자기
+    자신 대상) 환율은 정방향/역방향 둘 다 매칭되지 않아야 한다."""
+    fee = Money(amount=Decimal("1"), currency=Currency.USDT)
+    unrelated_rate = FXRate(
+        base=Currency.KRW, quote=Currency.KRW, rate=Decimal("1"), timestamp=_NOW, source="test"
+    )
+
+    with pytest.raises(fx_module.FxRateMissingError):
+        funding_fees.to_base(fee, Currency.KRW, unrelated_rate)
+
+
+def test_funding_amount_negative_rate_flips_sign() -> None:
+    """음의 펀딩률: 롱 포지션이 펀딩을 수령한다(양액)."""
+    mark = Money(amount=Decimal("100"), currency=Currency.USDT)
+
+    result = funding_fees.funding_amount(Decimal("10"), mark, Decimal("-0.001"))
+
+    assert result.amount == Decimal("-1")
+
+
+def test_to_base_propagates_fx_convert_exception_via_monkeypatch(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """실패 주입: `fx.convert`가 예외를 던지면 `to_base`가 삼키지 않고
+    그대로 전파해야 한다(fail-closed). 잘못된 환산값이 조용히 0으로
+    대체되는 것을 방지한다."""
+
+    def _boom(*_args: object, **_kwargs: object) -> None:
+        raise fx_module.FxRateMissingError(Currency.USDT, Currency.KRW)
+
+    monkeypatch.setattr(fx_module, "convert", _boom)
+    fee = Money(amount=Decimal("1"), currency=Currency.USDT)
+
+    with pytest.raises(fx_module.FxRateMissingError):
+        funding_fees.to_base(fee, Currency.KRW, _rate())
+
+
+@pytest.mark.perf
+def test_to_base_batch_10000_calls_within_latency_budget(perf_budget: PerfBudget) -> None:
+    """수치 성능 단언: 10,000회 환산이 50ms 예산 안에 끝나야 한다
+    (순수 Decimal 연산 — O(1) per call, 실측 ~0.001초). task-7434: wall-clock
+    perf_counter() 대신 공용 perf_budget(process_time 기반)으로 측정한다."""
+    fee = Money(amount=Decimal("1"), currency=Currency.USDT)
+    rate = _rate()
+    n = 10_000
+    budget_ms = 50.0
+
+    def _run_once() -> None:
+        for _ in range(n):
+            funding_fees.to_base(fee, Currency.KRW, rate)
+
+    perf_budget.assert_within(_run_once, budget_ms=budget_ms, label=f"{n} to_base calls")
+
+
+def test_to_base_accepts_reverse_rate_and_inverts() -> None:
+    """불변식: reverse rate(KRW→USDT)를 USDT→KRW 환산에 건네면, 역수로
+    계산해야 한다(삼각환산 금지 원칙 하에서 유일한 경로). USDT 1 × (1/1350) = 0.000740740..."""
+    fee = Money(amount=Decimal("1"), currency=Currency.USDT)
+    reverse_rate = FXRate(
+        base=Currency.KRW,
+        quote=Currency.USDT,
+        rate=Decimal("1") / Decimal("1350"),
+        timestamp=_NOW,
+        source="test",
+    )
+
+    result = funding_fees.to_base(fee, Currency.KRW, reverse_rate)
+
+    assert result == Decimal("1") / (Decimal("1") / Decimal("1350"))
+
+
+def test_to_base_rejects_zero_rate() -> None:
+    """불변식: 환율이 정확히 0이면(역수 계산 시 0으로 나누기 방지) reverse path도
+    삼각환산으로 취급해 FxRateMissingError를 발생시켜야 한다."""
+    fee = Money(amount=Decimal("1"), currency=Currency.USDT)
+    zero_rate = FXRate(
+        base=Currency.KRW,
+        quote=Currency.USDT,
+        rate=Decimal("0"),
+        timestamp=_NOW,
+        source="test",
+    )
+
+    with pytest.raises(fx_module.FxRateMissingError):
+        funding_fees.to_base(fee, Currency.KRW, zero_rate)

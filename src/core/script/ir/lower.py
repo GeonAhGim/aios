@@ -1,28 +1,34 @@
-"""L4_analytics_authoring_backtest_marketplace_v1.0.md §2.4 표 87행/§9.4 DSL-7 —
-DSL-1 AST(`Program`) → IR(`ops.IRProgram`) 로우어링.
+"""L4_analytics_authoring_backtest_marketplace_v1.0.md §2.4 table row 87 / §9.4 DSL-7 —
 
-입력은 DSL-3이 만든 `Program`과 DSL-4 타입검사 결과(`TypeEnv`)다. 로우어링은
-언제나 `check_program`을 스스로 다시 돌려 환경을 얻는다 — 호출자가 넘긴
-`env`는 그 결과와 같아야 하며 다르면 거부한다(fail-closed: 검사되지 않은
-AST나 다른 프로그램의 환경으로 IR을 만들 수 없다). 재선언이 `SCRIPT_TYPE`으로
-막히므로 "최종 환경"으로 모든 decl의 표현식을 다시 추론해도 decl 시점의
-환경과 결과가 같다(전방 참조는 검사기가 이미 거부했다).
+DSL-1 AST (`Program`) → IR (`ops.IRProgram`) lowering.
 
-타입은 `typing.checker.infer_type`으로 노드마다 다시 묻는다(승격 규칙의
-단일 출처를 DSL-4에 둔다). 트리 깊이만큼 중복 순회가 생기지만 스크립트
-크기는 DSL-6 리소스 상한이 묶는다.
+Inputs are the `Program` produced by DSL-3 and the type-check result
+(`TypeEnv`) from DSL-4. Lowering always re-runs `check_program` itself to
+obtain the environment — the caller-supplied `env` must match that result,
+otherwise it is rejected (fail-closed: IR must not be built from an
+un-checked AST or an environment belonging to a different program). Because
+re-declarations are blocked by `SCRIPT_TYPE`, re-inferring every decl's
+expression with the "final environment" yields the same result as at decl
+time (forward references were already rejected by the checker).
 
-결정론: 순회 순서는 post-order·왼쪽 우선으로 고정이고, 산출물은 불변
-pydantic 모델 + 튜플이라 같은 `Program` 값이면 같은 `IRProgram` 값 → 같은
-`to_bytes()` 바이트다. 산출 직후 `verify_stack`으로 스택 규율을 자기검증한다.
+Types are re-queried per-node via `typing.checker.infer_type` (the single
+source of promotion rules lives in DSL-4). Traversal duplicates work equal
+to tree depth, but script size is bounded by the DSL-6 resource cap.
 
-미지원 노드(§3.3 밖 객체, AST 판별 union에 없는 타입)는 `ScriptLowerError`로
-거부한다 — 조용히 건너뛰거나 임의 명령으로 대체하지 않는다.
+Determinism: traversal order is fixed post-order, left-first; outputs are
+immutable pydantic models + tuples, so the same `Program` value always
+produces the same `IRProgram` value → the same `to_bytes()` bytes.
+`verify_stack` self-verifies stack discipline immediately after production.
 
-에러 코드: §3.3 taxonomy(SYNTAX/TYPE/LOOKAHEAD/RESOURCE_LIMIT)에는 로우어링
-항목이 없다 — 타입검사를 통과한 §3.3 AST는 항상 내려가야 하기 때문이다.
-`ScriptLowerError`는 그 계약이 깨졌음(또는 비유한 상수)을 뜻하며, HTTP
-매핑(400/500)은 `POST /scripts/compile`(DSL-12) 계약에서 정한다(미확정).
+Unsupported nodes (objects outside §3.3, types not in the AST discriminant
+union) are rejected via `ScriptLowerError` — never silently skipped or
+replaced with a synthetic instruction.
+
+Error codes: the §3.3 taxonomy (SYNTAX / TYPE / LOOKAHEAD / RESOURCE_LIMIT)
+has no lowering entries — a §3.3 AST that passed type-check must always
+lower. `ScriptLowerError` signals that this contract was broken (or an
+unspecified constant was encountered); HTTP mapping (400 / 500) is defined
+by the `POST /scripts/compile` (DSL-12) contract (TBD).
 """
 from __future__ import annotations
 
@@ -44,6 +50,7 @@ from src.core.script.grammar.ast import (
     PlotDecl,
     PostfixExpr,
     Program,
+    RequestExpr,
     SignalDecl,
     UnaryExpr,
 )
@@ -61,6 +68,7 @@ from src.core.script.ir.ops import (
     Not,
     Order,
     Plot,
+    Request,
     Signal,
     Store,
     verify_stack,
@@ -70,7 +78,8 @@ from src.core.script.typing.types import Type
 
 
 class ScriptLowerError(Exception):
-    """AST→IR 로우어링 실패(미지원 노드·비유한 상수·환경 불일치). 모듈 docstring 참조."""
+    """AST→IR lowering failure (unsupported node, unspecified constant,
+    env mismatch). See module docstring."""
 
     code = "SCRIPT_LOWER"
 
@@ -80,9 +89,9 @@ class ScriptLowerError(Exception):
 
 
 def lower_program(program: Program, env: Mapping[str, Type] | None = None) -> IRProgram:
-    """`Program` → `IRProgram`. 타입 오류는 DSL-4 `ScriptTypeError`가 그대로 전파된다.
+    """`Program` → `IRProgram`. Type errors from DSL-4 `ScriptTypeError` propagate as-is.
 
-    `env`를 넘기면 `check_program(program)` 결과와 일치해야 한다(불일치 = 거부).
+    If `env` is provided it must match `check_program(program)` result (mismatch = reject).
     """
     if not isinstance(program, Program):
         raise ScriptLowerError(f"Program 노드가 아닙니다: {type(program).__name__}")
@@ -99,7 +108,8 @@ def lower_program(program: Program, env: Mapping[str, Type] | None = None) -> IR
 
 
 def lower_expr(expr: Expr, env: TypeEnv) -> tuple[Instr, ...]:
-    """표현식 하나 → 값 1개를 스택에 남기는 명령열(post-order). 테스트·DSL-8용 공개 API."""
+    """Single expression → instruction sequence leaving one value on
+    the stack (post-order). Public API for tests / DSL-8."""
     out: list[Instr] = []
     _emit_expr(expr, env, out)
     return tuple(out)
@@ -134,7 +144,7 @@ def _lower_decl(decl: Decl, env: TypeEnv, out: list[Instr]) -> None:
         raise ScriptLowerError(f"지원하지 않는 decl 노드: {type(decl).__name__}")
 
 
-# ---- expr (post-order, 왼쪽 우선) ----
+# ---- expr (post-order, left-first) ----
 
 
 def _emit_expr(expr: Expr, env: TypeEnv, out: list[Instr]) -> None:
@@ -162,13 +172,18 @@ def _emit_expr(expr: Expr, env: TypeEnv, out: list[Instr]) -> None:
         out.append(
             Call(ns=expr.ns, ident=expr.ident, argc=len(expr.args), type=infer_type(expr, env))
         )
+    elif isinstance(expr, RequestExpr):
+        _emit_expr(expr.expr, env, out)
+        out.append(
+            Request(symbol=expr.symbol, timeframe=expr.timeframe, type=infer_type(expr, env))
+        )
     else:
         raise ScriptLowerError(f"지원하지 않는 Expr 노드: {type(expr).__name__}")
 
 
 def _const(literal: NumberLiteral) -> Instr:
     value = literal.value
-    if isinstance(value, bool):  # DSL-1 `int | float`에 bool이 섞여 들어온 경우 — 문법 밖
+    if isinstance(value, bool):  # bool leaked into DSL-1 `int | float` — outside grammar
         raise ScriptLowerError("숫자 리터럴 자리에 bool 값이 있습니다")
     if isinstance(value, int):
         return ConstInt(value=value)

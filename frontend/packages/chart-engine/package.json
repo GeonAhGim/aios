@@ -7,7 +7,7 @@
   "types": "src/index.ts",
   "scripts": {
     "test": "vitest run",
-    "bench:density": "node --experimental-strip-types bench/density_bench.mjs"
+    "bench:density": "node --expose-gc --experimental-strip-types bench/density_bench.mjs"
   },
   "dependencies": {
     "@aios/shared-types": "*"

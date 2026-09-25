@@ -58,11 +58,34 @@ export const API_ROUTES = defineApiRoutes({
   "admin.approvalRequests.approve": route("/admin/approval-requests/:requestId/approve", true),
   "admin.approvalRequests.reject": route("/admin/approval-requests/:requestId/reject", true),
   "admin.approvalRequests.pending": route("/admin/approval-requests/pending", true),
+  // task-4024(FE-OPS-7a): src/api/routers/admin.py:84 GET /admin/audit-log 원문 확인 —
+  // `-> ApiResponse[AuditLogPage]` + `ok(...)`(:94/:102)라 envelope=true(스냅샷 컴포넌트
+  // ApiResponse_AuditLogPage_로 재확인, python으로 contracts/openapi/v1.json 직접 대조).
+  // PLT-35-fix(task-3850)가 require_break_glass("tenant_read")를 얹어 X-Break-Glass-Grant
+  // 헤더(UUID)가 필수다 — clients/admin.ts의 listAuditLog가 호출자에게서 grant id를
+  // 받아 헤더로 흘려보낸다. 다른 admin.* 관용대로 v1Path는 명시하지 않는다(기본값
+  // /api/v1/admin/audit-log).
+  "admin.auditLog": route("/admin/audit-log", true),
+  // task-4024(FE-OPS-7a): src/api/routers/foundation/ledger_admin.py:53 POST
+  // /admin/ledger/payouts/{batch_id}/paid 원문 확인 — `-> ApiResponse[PayoutBatchView]`
+  // + `ok(...)`(:53/:69)라 envelope=true(스냅샷 ApiResponse_PayoutBatchView_로 재확인).
+  // 위 admin.auditLog와 동일하게 require_break_glass("tenant_read") 헤더가 필수다.
+  // idempotencyRequired는 표시하지 않는다 — mark_payout_paid(LC-15a)는 배치 상태
+  // (SCHEDULED/RELEASED→PAID) 조건부 UPDATE로 재확정을 막고(ConcurrencyConflictError),
+  // 라우터 자체도 require_idempotency_key를 쓰지 않는다(admin.py의 wallet 확정 라우트와
+  // 달리 import조차 없음) — spec §9 PLT-15 금전 라우트 표(L4_platform_observability_
+  // tenancy_api_v1.0.md 라인 438)에도 이 라우트가 없다. idempotencyScan.test.ts의
+  // PLT15_MONEY_ROUTES 양방향 대조를 깨지 않으려면 이 표식을 붙이지 않아야 한다.
+  "admin.ledger.payoutsMarkPaid": route("/admin/ledger/payouts/:batchId/paid", true),
 
   // task-1333: §9 PLT-15 금전 라우트 — idempotencyRequired=true.
   "exchange.credentials.base": route("/exchange-credentials", false, undefined, undefined, true),
   "exchange.credentials.item": route("/exchange-credentials/:exchange", false),
   "exchange.credentials.balance": route("/exchange-credentials/:exchange/balance", false),
+  // task-4001(FE-OPS-10a): src/api/routers/exchange_credentials.py:97-104 get_positions는
+  // list[Position]을 그대로 반환한다(ApiResponse 봉투 아님) — balance/capabilities와
+  // 동일하게 envelope=false.
+  "exchange.credentials.positions": route("/exchange-credentials/:exchange/positions", false),
   "exchange.credentials.capabilities": route("/exchange-credentials/:exchange/capabilities", false),
 
   // task-1333: §9 PLT-15 금전 라우트(create/start/convertToLive) — idempotencyRequired=true.
@@ -259,9 +282,8 @@ export const API_ROUTES = defineApiRoutes({
   // task-2335(FE-OPS-1): src/api/routers/foundation/risk_gate.py 원문 확인 —
   // `APIRouter(prefix="/v1/foundation/risk-gate")`(risk_gate.py:75), router_registry.py
   // include_router(추가 prefix 없음). 이 리프는 안전 통제(safety control) 조회·해제
-  // (deactivate·evaluate-recovery)만 등록한다 — 개통(POST 자가/관리자 activate)·
-  // 룰번들 승인/활성화·evaluate 트리거는 decision상 UI가 없어 apiPaths.openapi.test.ts의
-  // UNREGISTERED_ROUTE_WHITELIST에 그대로 남는다(후속 리프 2336~2338 소관).
+  // (deactivate·evaluate-recovery)만 등록했다 — 개통(POST 자가/관리자 activate)·
+  // 룰번들 승인/활성화·evaluate 트리거는 task-5808(FE-OPS-9)이 아래에 추가로 등록한다.
   // GET/POST "/safety-controls"(:97·:106)는 같은 경로를 공유하므로(apiRouteTypes.ts
   // 축약 관용) 한 항목으로 묶는다 — 이 화면은 GET(list)만 쓴다. 세 라우트 전부
   // `-> ApiResponse[...]` + `ok(...)`(:94·:136·:189)라 envelope=true. mount_v1(PLT-16)
@@ -280,6 +302,29 @@ export const API_ROUTES = defineApiRoutes({
   // 크루드 정규화가 구분 못 하는 별개의 오탐이라 그쪽 `_OPENAPI_NO_FRONTEND_UI_ALLOWLIST`에서 다룬다.
   "riskGate.safetyControls.evaluateRecovery": route(
     "/v1/foundation/risk-gate/safety-controls/:controlId:evaluate-recovery",
+    true,
+    null,
+    true,
+  ),
+
+  // task-5808(FE-OPS-9): task-2335가 decision상 UI 없음으로 미뤄뒀던 개통(admin
+  // activate)·룰번들 승인/활성화·evaluate 트리거 4건. src/api/routers/foundation/
+  // risk_gate.py 원문 확인 — POST /admin/safety-controls(:212)·POST /evaluate(:86)·
+  // POST /rule-bundles/{bundle_id}:approve(:249)·POST /rule-bundles/{bundle_id}:activate
+  // (:268), 전부 `-> ApiResponse[...]`(contracts/openapi/v1.json에서 python으로 4경로
+  // 전부 ApiResponse_SafetyControlView_/ApiResponse_RiskEvaluationView_/
+  // ApiResponse_RiskRuleBundle_ 참조 직접 확인)라 envelope=true. mount_v1(PLT-16)
+  // 미도달이라 v1Path=null(riskGate.safetyControls.*와 동일 사유).
+  "riskGate.safetyControls.activate": route("/v1/foundation/risk-gate/admin/safety-controls", true, null, true),
+  "riskGate.evaluate": route("/v1/foundation/risk-gate/evaluate", true, null, true),
+  "riskGate.ruleBundles.approve": route(
+    "/v1/foundation/risk-gate/rule-bundles/:bundleId:approve",
+    true,
+    null,
+    true,
+  ),
+  "riskGate.ruleBundles.activate": route(
+    "/v1/foundation/risk-gate/rule-bundles/:bundleId:activate",
     true,
     null,
     true,
@@ -365,9 +410,16 @@ export const API_ROUTES = defineApiRoutes({
   "ai.providers.item": route("/v1/ai/providers/:provider", true, null, false),
   // GET(list)+POST(issue)는 같은 리소스 경로를 공유한다(follow.subscriptions.base와
   // 동일 축약 관용).
-  "ai.tokens.base": route("/v1/ai/tokens", true, null, false),
-  "ai.tokens.revoke": route("/v1/ai/tokens/:tokenId:revoke", true, null, false),
-  "ai.proposals.base": route("/v1/ai/proposals", true, null, false),
+  // task-4922: src/api/routers/ai.py가 실재하게 됐다(GET/POST /v1/ai/tokens,
+  // POST /v1/ai/tokens/{token_id}:revoke, GET /v1/ai/proposals 모두
+  // contracts/openapi/v1.json에 ApiResponse_* 봉투로 실재 — python으로 paths 키
+  // 직접 확인) — implemented=true로 바꾸고 apiPaths.openapi.test.ts의
+  // GHOST_PATH_WHITELIST에서 이 3건을 제거한다. providers.*·proposals.promote*·
+  // experiments.base는 스냅샷에 여전히 없어(ai.py에 그 엔드포인트 자체가 없음)
+  // 유령 경로로 남는다.
+  "ai.tokens.base": route("/v1/ai/tokens", true, null, true),
+  "ai.tokens.revoke": route("/v1/ai/tokens/:tokenId:revoke", true, null, true),
+  "ai.proposals.base": route("/v1/ai/proposals", true, null, true),
   "ai.proposals.promoteTicket": route("/v1/ai/proposals/:proposalId:promote-ticket", true, null, false),
   "ai.proposals.promote": route("/v1/ai/proposals/:proposalId:promote", true, null, false),
   "ai.experiments.base": route("/v1/ai/experiments", true, null, false),
@@ -414,6 +466,24 @@ export const API_ROUTES = defineApiRoutes({
   // 함께 추가할 것.
   "researchData.search": route("/v1/foundation/research-data/search", true, null, false),
   "researchData.sources.list": route("/v1/foundation/research-data/sources", true, null, false),
+
+  // task-5998(SIG-6): SignalSourcesPage.tsx(시크릿 발급·회전·최근 수신 로그)는 spec
+  // L4_analytics_authoring_backtest_marketplace_v1.0.md §9.1(source line 264)이
+  // 정의하는 SIG-1~5(`src/foundation/signals/`, `src/api/routers/signals.py`,
+  // PLT-33 시크릿 회전)를 앞서가는 선행 프론트다 — 그 모듈·라우터 모두 아직 없다
+  // (src/foundation 디렉터리에 signals 부재, src/api/routers 디렉터리에 signals.py
+  // 부재 — grep으로 직접 확인). follow.subscriptions.*(task-2699)·screener.run
+  // (task-2692)과 동일한 유령 경로 사유로 4개 라우트 모두 implemented=false
+  // 등록 — SignalSourcesPage.tsx는 라우터가 생기기 전까지 네트워크 호출 대신
+  // SignalsRouteNotImplementedError(typed)로 단락한다. v1Path는 마운트 경로
+  // 확정 전이라 null. apiPaths.openapi.test.ts GHOST_PATH_WHITELIST에도 함께
+  // 추가할 것.
+  // GET(list)+POST(issue)는 같은 리소스 경로를 공유한다(follow.subscriptions.base와
+  // 동일 축약 관용).
+  "signals.sources.base": route("/v1/foundation/signals/sources", true, null, false),
+  "signals.sources.rotate": route("/v1/foundation/signals/sources/:sourceId:rotate", true, null, false),
+  "signals.sources.disable": route("/v1/foundation/signals/sources/:sourceId:disable", true, null, false),
+  "signals.sources.receipts": route("/v1/foundation/signals/sources/:sourceId/receipts", true, null, false),
 
   ...FOUNDATION_OPS_ROUTES,
 });

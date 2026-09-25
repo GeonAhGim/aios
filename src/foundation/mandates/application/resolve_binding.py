@@ -31,9 +31,11 @@ exist, or `active_revision_id` is NULL (including a mandate where no
 revision has ever been activated), it returns `None` — "absent" isn't a
 branch of the result type but true absence, hence `Optional`.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass
+from decimal import Decimal
 from enum import Enum
 from uuid import UUID
 
@@ -62,7 +64,7 @@ def _row_to_revision(row: asyncpg.Record) -> MandateRevision:
         state=MandateRevisionState(row["state"]),
         max_total_exposure_pct=float(row["max_total_exposure_pct"]),
         max_single_instrument_pct=float(row["max_single_instrument_pct"]),
-        min_cash_buffer_pct=float(row["min_cash_buffer_pct"]),
+        min_cash_buffer_pct=Decimal(str(row["min_cash_buffer_pct"])),
         max_daily_loss_pct=float(row["max_daily_loss_pct"]),
         allowed_autonomy=Autonomy(row["allowed_autonomy"]),
         forbidden_assets=tuple(row["forbidden_assets"]),

@@ -20,8 +20,9 @@ dataclass/mapper module can actually exercise:
     input (`test_frozen_...`, `test_replay_across_independent_processes...`).
 """
 
+import multiprocessing
+import os
 import time
-from concurrent.futures import ProcessPoolExecutor
 from datetime import datetime, timezone
 from typing import Any, cast
 from uuid import uuid4
@@ -170,6 +171,106 @@ def test_frozen_decision_and_rule_hit_reject_post_construction_tampering() -> No
         cast(Any, hit).severity = ComplianceVerdict.ALLOW
 
 
+def test_rule_hit_evidence_dict_rejects_in_place_mutation() -> None:
+    """I-09 D3 적대적(task-4937, task-4916 REJECT 후속): `frozen=True`는
+    `hit.evidence = {...}` 같은 필드 재대입만 막을 뿐, `hit.evidence`가
+    가리키는 dict 객체 자체는 평범한 가변 dict라서 `.clear()`/`.update()`
+    등으로 감사 증거가 조용히 변조될 수 있었다. 생성 시점에 `_FrozenDict`로
+    감싸 그 경로 자체를 예외로 막는다 — 선언된 필드 타입(`dict[str, Any]`)은
+    그대로 유지한다(P5 guard: 공개 계약 타입 변경 금지).
+    """
+    hit = RuleHit(
+        rule_id="R1",
+        severity=ComplianceVerdict.DENY,
+        message="m",
+        evidence={"key": "original"},
+    )
+
+    with pytest.raises(TypeError):
+        hit.evidence.clear()
+    with pytest.raises(TypeError):
+        hit.evidence["key"] = "tampered"
+    with pytest.raises(TypeError):
+        hit.evidence.update({"injected": "value"})
+    with pytest.raises(TypeError):
+        hit.evidence.pop("key")
+
+    assert hit.evidence == {"key": "original"}
+
+
+def test_rule_hit_evidence_dict_rejects_ior_operator() -> None:
+    """I-09 D3 적대적(task-4975 QA — task-4937의 재구현에서 발견): `FrozenDict`는
+    `__setitem__`/`update`/`clear` 등은 막았지만 PEP 584의 `|=` 연산자
+    (`__ior__`)는 막지 않았다. `dict.__ior__`는 제자리에서 병합한 뒤 그
+    결과를 반환하고, 그 다음에야 파이썬이 `hit.evidence = result`로 재대입을
+    시도한다 — pydantic의 `frozen=True`는 이 재대입에서 `ValidationError`를
+    던지지만, evidence dict 내용은 이미 변조된 뒤라 예외가 나도 원복되지
+    않는다(호출자가 예외를 잡으면 변조를 못 봤다고 착각하게 된다).
+    """
+    hit = RuleHit(
+        rule_id="R1",
+        severity=ComplianceVerdict.DENY,
+        message="m",
+        evidence={"key": "original"},
+    )
+
+    ev = hit.evidence  # local to avoid mypy property-assignment error
+    with pytest.raises(TypeError):
+        ev |= {"injected": "value"}
+
+    assert hit.evidence == {"key": "original"}
+
+
+def test_compliance_decision_rule_hits_list_rejects_in_place_mutation() -> None:
+    """I-09 D3 적대적: `decision.rule_hits`가 가리키는 list도 evidence dict와
+    동일한 구멍이 있었다 — `.append()`로 존재하지 않던 위반을 감사 판정에
+    사후 주입하거나 `.clear()`로 DENY 근거를 전부 지울 수 있었다.
+    """
+    original_hit = RuleHit(rule_id="R1", severity=ComplianceVerdict.DENY, message="m", evidence={})
+    decision = ComplianceDecision(
+        decision_id=uuid4(),
+        verdict=ComplianceVerdict.DENY,
+        rule_hits=[original_hit],
+        inputs_hash=_hex_digest("tamper-rule-hits"),
+        bundle_version=_hex_digest("tamper-rule-hits-bundle"),
+        evaluated_at=NOW,
+    )
+
+    injected_hit = RuleHit(
+        rule_id="INJECTED", severity=ComplianceVerdict.ALLOW, message="m", evidence={}
+    )
+    with pytest.raises(TypeError):
+        decision.rule_hits.append(injected_hit)
+    with pytest.raises(TypeError):
+        decision.rule_hits.clear()
+    with pytest.raises(TypeError):
+        decision.rule_hits[0] = injected_hit
+
+    assert decision.rule_hits == [original_hit]
+
+
+def test_policy_decision_row_reason_codes_list_rejects_in_place_mutation() -> None:
+    """I-09 D3 적대적: 매퍼 입력인 `PolicyDecisionRow.reason_codes`가 매핑
+    이전에 변조되면 `compliance_decision_from_policy_decision`이 만드는
+    `rule_hits`도 함께 오염된다 — 입력 경계에서부터 막아야 한다.
+    """
+    row = PolicyDecisionRow(
+        decision_id=uuid4(),
+        outcome=PolicyOutcome.DENY,
+        reason_codes=["ORIGINAL_CODE"],
+        inputs_hash=_hex_digest("tamper-reason-codes"),
+        bundle_version=_hex_digest("tamper-reason-codes-bundle"),
+        evaluated_at=NOW,
+    )
+
+    with pytest.raises(TypeError):
+        row.reason_codes.append("INJECTED_CODE")
+    with pytest.raises(TypeError):
+        row.reason_codes.clear()
+
+    assert row.reason_codes == ["ORIGINAL_CODE"]
+
+
 def test_mapper_propagates_rule_hit_construction_failure_instead_of_silently_allowing(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -196,6 +297,7 @@ def test_mapper_propagates_rule_hit_construction_failure_instead_of_silently_all
         contracts_v1.compliance_decision_from_policy_decision(row)
 
 
+@pytest.mark.perf
 def test_mapping_large_reason_code_set_completes_within_latency_budget() -> None:
     """수치 성능 단언: §7 SLO는 사전 판정 경로에 p99 30ms를 배정한다. CM-1의
     매퍼는 그 경로 하류에서 실행되므로 그 자체가 병목이 되어서는 안 된다.
@@ -231,11 +333,11 @@ def test_outcome_to_verdict_mapping_total_over_enum_members_ci_guard() -> None:
     assert set(_OUTCOME_TO_VERDICT.keys()) == set(PolicyOutcome)
 
 
-def _replay_in_subprocess(row: PolicyDecisionRow) -> str:
-    """Module-level so it is picklable for `ProcessPoolExecutor` on
-    Windows (spawn start method)."""
+def _replay_in_subprocess(row: PolicyDecisionRow, out: multiprocessing.Queue) -> None:
+    """Module-level so it is picklable for the spawn start method (Windows).
+    Puts a (json_bytes, pid) tuple on ``out``."""
     decision = compliance_decision_from_policy_decision(row)
-    return decision.model_dump_json()
+    out.put((decision.model_dump_json(), os.getpid()))
 
 
 def test_replay_across_independent_processes_is_byte_identical() -> None:
@@ -244,6 +346,11 @@ def test_replay_across_independent_processes_is_byte_identical() -> None:
     동일한 `ComplianceDecision`을 내야 한다 — 프로세스 지역 캐시나 임포트
     순서에 우연히 기대는 비결정성이 없음을 실증한다(CM-A4 재현성이 단일
     프로세스에 국한되지 않음).
+
+    `ProcessPoolExecutor.map`은 빠른 작업을 이미 놀고 있는 워커에 재사용하므로
+    "PID 3개가 서로 다르다"는 전제가 부하에 따라 깨진다(CI xdist에서 3개 모두
+    같은 PID 관측). 프로세스 3개를 명시적으로 띄워 서로 다른 OS 프로세스임을
+    구조적으로 보장한다.
     """
     row = PolicyDecisionRow(
         decision_id=uuid4(),
@@ -254,8 +361,20 @@ def test_replay_across_independent_processes_is_byte_identical() -> None:
         evaluated_at=NOW,
     )
 
-    with ProcessPoolExecutor(max_workers=3) as pool:
-        results = list(pool.map(_replay_in_subprocess, [row, row, row]))
+    out: multiprocessing.Queue = multiprocessing.Queue()
+    procs = [
+        multiprocessing.Process(target=_replay_in_subprocess, args=(row, out)) for _ in range(3)
+    ]
+    for proc in procs:
+        proc.start()
+    results = [out.get(timeout=30) for _ in procs]
+    for proc in procs:
+        proc.join(timeout=30)
+        assert proc.exitcode == 0
 
-    assert len(results) == 3
-    assert len(set(results)) == 1
+    jsons, pids = zip(*results, strict=True)
+
+    assert len(pids) == 3
+    assert len(set(pids)) == 3, "각 워커 PID는 고유해야 한다"
+    assert all(pid != os.getpid() for pid in pids), "워커 PID는 부모와 달라야 한다"
+    assert len(set(jsons)) == 1

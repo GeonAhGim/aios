@@ -110,6 +110,57 @@ def test_prometheus_metrics_counter_propagates_underlying_empty_name_failure() -
         adapter.counter("")
 
 
+def test_null_metrics_ignores_empty_name_without_crash() -> None:
+    """불변식 위반 입력: 빈 이름도 NullMetrics는 noop으로 삼킨다(기본값의 안전성)."""
+    sink = NullMetrics()
+    assert sink.counter("") is None
+    assert sink.observe("", 0.0) is None
+    assert sink.gauge("", 0.0) is None
+
+
+def test_prometheus_metrics_rejects_empty_name_counter() -> None:
+    """불변식 위반: 빈 문자열 이름으로 counter() 호출 시 prometheus_client가 ValueError
+    를 던지며, 어댑터가 이를 삼키지 않고 전파한다(fail-closed).
+    """
+    adapter = PrometheusMetrics()
+    with pytest.raises(ValueError):
+        adapter.counter("")
+
+
+def test_prometheus_metrics_rejects_empty_name_observe() -> None:
+    """불변식 위반: 빈 문자열 이름으로 observe() 호출 시 ValueError 전파."""
+    adapter = PrometheusMetrics()
+    with pytest.raises(ValueError):
+        adapter.observe("", 0.5)
+
+
+def test_prometheus_metrics_rejects_empty_name_gauge() -> None:
+    """불변식 위반: 빈 문자열 이름으로 gauge() 호출 시 ValueError 전파."""
+    adapter = PrometheusMetrics()
+    with pytest.raises(ValueError):
+        adapter.gauge("", 0.0)
+
+
+def test_safe_counter_catches_metrics_port_exception() -> None:
+    """실패주입: MetricsPort.counter() 가 예외를 던지면 safe_counter() 는 이를
+    잡아 warning 로그를 남기고 None 을 반환한다(주문 경로 차단 금지).
+    """
+    from unittest.mock import MagicMock, patch
+
+    from src.core.observability.metrics import safe_counter
+
+    breaking_port = MagicMock()
+    breaking_port.counter.side_effect = RuntimeError("downstream failure")
+
+    with patch("src.core.observability.metrics.logger") as mock_logger:
+        safe_counter(breaking_port, "aios.test.fail.count_total", {"route": "/x"})
+
+    breaking_port.counter.assert_called_once_with("aios.test.fail.count_total", {"route": "/x"})
+    mock_logger.warning.assert_called_once()
+    assert "metrics.counter failed" in mock_logger.warning.call_args[0][0]
+
+
+@pytest.mark.perf
 def test_prometheus_metrics_counter_increments_within_perf_budget() -> None:
     """수치 성능 단언: `_get_or_create`가 이름당 1회만 등록한다면(캐시 적중) 5,000회
     반복이 300ms 안에 끝나야 한다. 캐시가 없다면 두 번째 호출부터 동일 이름의 중복
@@ -123,3 +174,89 @@ def test_prometheus_metrics_counter_increments_within_perf_budget() -> None:
         adapter.counter("aios.test.perf.count_total")
     elapsed_ms = (time.perf_counter() - start) * 1000
     assert elapsed_ms < 300, f"{iterations}회 counter() 호출 {elapsed_ms:.1f}ms — 상한 300ms 초과"
+
+
+def test_safe_observe_catches_metrics_port_exception() -> None:
+    """실패주입: MetricsPort.observe()가 예외를 던지면 safe_observe()는 이를
+    잡아 warning 로그를 남기고 None을 반환한다(주문 경로 차단 금지).
+    """
+    from unittest.mock import MagicMock, patch
+
+    from src.core.observability.metrics import safe_observe
+
+    breaking_port = MagicMock()
+    breaking_port.observe.side_effect = RuntimeError("histogram failure")
+
+    with patch("src.core.observability.metrics.logger") as mock_logger:
+        safe_observe(breaking_port, "aios.test.fail.duration_seconds", 0.25, {"route": "/y"})
+
+    breaking_port.observe.assert_called_once_with(
+        "aios.test.fail.duration_seconds", 0.25, {"route": "/y"}
+    )
+    mock_logger.warning.assert_called_once()
+    assert "metrics.observe failed" in mock_logger.warning.call_args[0][0]
+
+
+def test_safe_gauge_catches_metrics_port_exception() -> None:
+    """실패주입: MetricsPort.gauge()가 예외를 던지면 safe_gauge()는 이를
+    잡아 warning 로그를 남기고 None을 반환한다(주문 경로 차단 금지).
+    """
+    from unittest.mock import MagicMock, patch
+
+    from src.core.observability.metrics import safe_gauge
+
+    breaking_port = MagicMock()
+    breaking_port.gauge.side_effect = RuntimeError("gauge failure")
+
+    with patch("src.core.observability.metrics.logger") as mock_logger:
+        safe_gauge(breaking_port, "aios.test.fail.gauge", 42.0, {"check": "memory"})
+
+    breaking_port.gauge.assert_called_once_with("aios.test.fail.gauge", 42.0, {"check": "memory"})
+    mock_logger.warning.assert_called_once()
+    assert "metrics.gauge failed" in mock_logger.warning.call_args[0][0]
+
+
+def test_prometheus_metrics_counter_with_empty_labels_dict() -> None:
+    """불변식 위반 입력: 명시적으로 빈 dict를 labels로 전달해도
+    counter()는 정상 작동한다(라벨 키 0개로 등록).
+    """
+    adapter = PrometheusMetrics()
+    adapter.counter("aios.test.empty_labels.count_total", {})
+    families = list(adapter._registry.collect())
+    sample = next(
+        s
+        for family in families
+        for s in family.samples
+        if s.name == "aios_test_empty_labels_count_total"
+    )
+    assert sample.value == 1.0
+    assert sample.labels == {}
+
+
+def test_prometheus_metrics_observe_with_empty_labels_dict() -> None:
+    """불변식 위반 입력: 명시적으로 빈 dict를 labels로 전달해도
+    observe()는 정상 작동한다(라벨 키 0개로 등록).
+    """
+    adapter = PrometheusMetrics()
+    adapter.observe("aios.test.empty_labels.duration_seconds", 0.1, {})
+    families = list(adapter._registry.collect())
+    count_sample = next(
+        s
+        for family in families
+        for s in family.samples
+        if s.name == "aios_test_empty_labels_duration_seconds_count"
+    )
+    assert count_sample.value == 1.0
+
+
+def test_prometheus_metrics_gauge_with_empty_labels_dict() -> None:
+    """불변식 위반 입력: 명시적으로 빈 dict를 labels로 전달해도
+    gauge()는 정상 작동한다(라벨 키 0개로 등록).
+    """
+    adapter = PrometheusMetrics()
+    adapter.gauge("aios.test.empty_labels.gauge", 5.0, {})
+    families = list(adapter._registry.collect())
+    sample = next(
+        s for family in families for s in family.samples if s.name == "aios_test_empty_labels_gauge"
+    )
+    assert sample.value == 5.0

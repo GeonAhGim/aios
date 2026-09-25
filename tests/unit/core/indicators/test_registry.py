@@ -17,6 +17,7 @@ import inspect
 import time
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
+from typing import Any, cast
 
 import numpy as np
 import pytest
@@ -38,7 +39,7 @@ def _default_params(spec: IndicatorSpec) -> dict[str, int]:
     return {p.name: p.default for p in spec.params}
 
 
-def _synthetic_ohlcv(n: int = 300) -> dict[str, np.ndarray]:
+def _synthetic_ohlcv(n: int = 300) -> dict[str, np.ndarray[Any, np.dtype[Any]]]:
     rng = np.random.default_rng(42)
     close = np.cumsum(rng.normal(size=n)) + 100.0
     high = close + np.abs(rng.normal(size=n)) + 0.5
@@ -47,7 +48,7 @@ def _synthetic_ohlcv(n: int = 300) -> dict[str, np.ndarray]:
     return {"open": close, "high": high, "low": low, "close": close, "volume": volume}
 
 
-def _leading_nan_count(arr: np.ndarray) -> int:
+def _leading_nan_count(arr: np.ndarray[Any, np.dtype[np.floating[Any]]]) -> int:
     valid = np.where(~np.isnan(arr))[0]
     return int(valid[0]) if len(valid) else len(arr)
 
@@ -104,7 +105,7 @@ def test_specs_out_of_range_param_is_rejected() -> None:
 def test_param_spec_is_frozen() -> None:
     spec = ParamSpec(name="timeperiod", min=2, max=500, default=20)
     with pytest.raises(AttributeError):
-        spec.default = 30  # type: ignore[misc]
+        setattr(spec, "default", 30)  # noqa: B010 — frozen model must reject assignment
 
 
 # --- L02 registry.py: 조회·검증·lookback·registry_hash ---------------------
@@ -143,7 +144,7 @@ def test_registry_validate_params_out_of_range_raises(timeperiod: int) -> None:
 def test_registry_validate_params_rejects_non_int_value() -> None:
     registry = IndicatorRegistry()
     with pytest.raises(IndicatorError) as excinfo:
-        registry.validate_params("SMA", {"timeperiod": 20.5})  # type: ignore[dict-item]
+        registry.validate_params("SMA", cast(dict[str, int], {"timeperiod": 20.5}))
     assert excinfo.value.code == "STRATEGY_PARAM_OUT_OF_RANGE"
 
 
@@ -152,6 +153,24 @@ def test_registry_validate_params_unknown_indicator_raises() -> None:
     with pytest.raises(IndicatorError) as excinfo:
         registry.validate_params("ICHIMOKU", {})
     assert excinfo.value.code == "STRATEGY_INDICATOR_UNKNOWN"
+
+
+def test_registry_validate_params_rejects_unknown_param_names() -> None:
+    """범위 밖 파라미터(스펙에 정의되지 않은 이름)를 명시적으로 거부해야 한다.
+    호출자가 오타나 잘못된 파라미터 이름을 전달해도 조용히 무시하지 않고
+    fail-closed로 차단한다."""
+    registry = IndicatorRegistry()
+    with pytest.raises(IndicatorError) as excinfo:
+        registry.validate_params("SMA", {"timeperiod": 20, "fake_param": 42})
+    assert excinfo.value.code == "STRATEGY_PARAM_UNKNOWN"
+
+
+def test_registry_validate_params_rejects_multiple_unknown_param_names() -> None:
+    """여러 개의 알려지지 않은 파라미터 이름도 모두 거부한다."""
+    registry = IndicatorRegistry()
+    with pytest.raises(IndicatorError) as excinfo:
+        registry.validate_params("SMA", {"bogus1": 1, "bogus2": 2})
+    assert excinfo.value.code == "STRATEGY_PARAM_UNKNOWN"
 
 
 def test_registry_lookback_delegates_to_spec_with_resolved_params() -> None:
@@ -425,9 +444,9 @@ def test_registry_hash_budget_gate_actually_fails_past_budget(
     통과하는 tautology인지 아무도 검증하지 못한다."""
     original_sha256 = hashlib.sha256
 
-    def _stalled_sha256(*args: object, **kwargs: object) -> object:
+    def _stalled_sha256(data: bytes, **kwargs: object) -> object:
         time.sleep(_REGISTRY_HASH_BUDGET_MS / 1000.0)
-        return original_sha256(*args, **kwargs)
+        return original_sha256(data)
 
     monkeypatch.setattr("src.core.indicators.registry.hashlib.sha256", _stalled_sha256)
 
@@ -452,7 +471,7 @@ def test_lookback_nan_count_gate_turns_red_when_lookback_formula_is_off_by_one()
     inputs = [arrays[key] for key in spec.inputs]
     params = _default_params(spec)
 
-    raw_output = talib.SMA(*inputs, **params)
+    raw_output = cast(Any, talib).SMA(*inputs, **params)
     actual_leading_nan = _leading_nan_count(raw_output)
 
     broken_spec = IndicatorSpec(

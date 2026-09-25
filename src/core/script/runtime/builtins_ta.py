@@ -1,38 +1,45 @@
 """L4_analytics_authoring_backtest_marketplace_v1.0.md §3.3/§9.4 DSL-9(a) —
-AIOS Script `ta.*` 내장함수: 지표 레지스트리(L02) 버전 고정 + IND-1 증분 엔진 위임.
+AIOS Script `ta.*` built-in functions: indicator registry (L02) version pinning +
+IND-1 incremental engine delegation.
 
-순수 모듈(I/O 없음). 이 파일 안에는 지표 산식이 없다(I-04 단일출처): 스펙 조회·
-파라미터 검증·lookback은 `src/core/indicators/registry.py`(L02), 계산은
-`engine/incremental.py`(IND-1 `IncrementalIndicator`)에 그대로 위임한다. 테스트가
-엔진 호출을 스파이로 증명한다(I-10).
+Pure module (no I/O). This file contains no indicator computation (I-04 single-source):
+spec lookup, parameter validation, and lookback are handled by
+`src/core/indicators/registry.py` (L02); computation is delegated as-is to
+`engine/incremental.py` (IND-1 `IncrementalIndicator`). Tests prove engine calls
+via spy (I-10).
 
-레지스트리 버전 고정(§3.3 "`ta.*`는 IND 레지스트리 버전에 고정"):
-- `TaBuiltins.registry_version` = `IndicatorRegistry.registry_hash()`(스펙 정준 해시,
-  L02 88fbbbf). DSL-12 `artifact/hash.py`의 `registry_version` 입력과 같은 문자열이라
-  "같은 script_hash = 같은 레지스트리로 계산"이 성립한다.
-- 컴파일 산출물이 기록한 버전을 `expected_registry_version`으로 넘기면 현재
-  레지스트리 해시와 다를 때 표를 만들지 않고 거부한다(`INDICATOR_REGISTRY_MISMATCH`,
-  fail-closed — 다른 레지스트리로 조용히 계산하지 않는다).
-- 호출마다 `TaCall`(지표·출력·검증된 파라미터·lookback·registry_hash)을 `calls`
-  장부에 남긴다. `Series`는 값만 담는 불변 타입이라 메타데이터를 값에 붙이지 않고
-  장부로 기록한다(백테스트 리포트·감사 증거 입력).
+Registry version pinning (§3.3 "`ta.*` pins to IND registry version"):
+- `TaBuiltins.registry_version` = `IndicatorRegistry.registry_hash()` (spec canonical
+  hash, L02 88fbbbf). Matches the same string used as input for DSL-12 `artifact/hash.py`
+  `registry_version`, ensuring "same script_hash = same registry computation" holds.
+- If the compiled artifact passes a recorded version as `expected_registry_version`,
+  the registry rejects table creation (rather than silently computing under a different
+  registry) when it differs (`INDICATOR_REGISTRY_MISMATCH`, fail-closed).
+- Each call records a `TaCall` (indicator, output, validated params, lookback,
+  registry_hash) in the `calls` ledger. `Series` is an immutable type holding only
+  values, so metadata is recorded in the ledger rather than attached to values
+  (backtest reports, audit evidence inputs).
 
-호출 규약 `ta.<ident>(<inputs...>, <params...>)`:
-- ident는 레지스트리에서 파생한다: 단일 출력 지표는 소문자 이름(`ta.sma`), 다중
-  출력 지표는 `<이름>_<출력>` 전부(`ta.macd_signal`·`ta.bbands_upperband`·
-  `ta.stoch_slowd`)와 첫 출력의 별칭인 소문자 이름(`ta.macd` = macd 라인).
-- 앞 `len(spec.inputs)`개 인자는 입력 시리즈(spec.inputs 순서: `ta.atr(high, low,
-  close, 14)`). 스칼라가 오면 봉 수로 편다(`close[1]`처럼 정적 타입은 float이지만
-  런타임은 시리즈인 값이 정당하므로 DSL-8 `broadcast`와 같은 규칙).
-- 뒤 인자는 파라미터(spec.params 순서). 생략하면 레지스트리 기본값. 각 값은 스칼라
-  int여야 하고(bool·float·시리즈 거부) 범위는 레지스트리가 검증한다.
-- na: 입력의 *선행* na 구간(`[n]` 시프트가 만드는 접두)은 건너뛰고 첫 완전 봉부터
-  엔진에 흘린다(그 구간 출력은 na). 접두 이후의 내부 na는 `INDICATOR_INPUT_INVALID`
-  거부(0 대체 금지). 엔진에 흘릴 봉 수가 lookback 이하라 값이 하나도 나올 수 없으면
-  `INDICATOR_LOOKBACK_INSUFFICIENT` 거부(전부-na 시리즈로 폴백하지 않는다).
+Call convention `ta.<ident>(<inputs...>, <params...>)`:
+- ident is derived from the registry: single-output indicators use the lowercase name
+  (`ta.sma`); multi-output indicators expose all `<name>_<output>` keys
+  (`ta.macd_signal`, `ta.bbands_upperband`, `ta.stoch_slowd`) plus the lowercase alias
+  for the first output (`ta.macd` = macd line).
+- The first `len(spec.inputs)` arguments are input series (in spec.inputs order:
+  `ta.atr(high, low, close, 14)`). When a scalar arrives, it is broadcast to bar count
+  (same rule as DSL-8 `broadcast`: static type may be float but the runtime value is a
+  series, which is valid).
+- Subsequent arguments are parameters (in spec.params order). Defaults from the registry
+  apply when omitted. Each value must be a scalar int (bool, float, and series are
+  rejected); the registry validates the range.
+- na: skip the *leading* na region in inputs (prefix created by `[n]` shift) and feed
+  from the first complete bar onward (output in that region is na). Internal na after the
+  prefix raises `INDICATOR_INPUT_INVALID` (zero substitution forbidden). If the number of
+  bars fed to the engine is ≤ lookback and no values can be produced, raise
+  `INDICATOR_LOOKBACK_INSUFFICIENT` (do not fall back to an all-na series).
 
-오류는 전부 `BuiltinCallError`(`ScriptRuntimeError` 하위, `reason`=코드). 레지스트리·
-엔진의 `IndicatorError.code`는 그대로 `reason`으로 옮긴다.
+All errors are `BuiltinCallError` (subclass of `ScriptRuntimeError`, `reason`=code).
+`IndicatorError.code` from the registry/engine is passed through as `reason` unchanged.
 """
 from __future__ import annotations
 
@@ -47,7 +54,7 @@ from src.core.script.runtime.builtins_math import MATH_BUILTINS, BuiltinCallErro
 from src.core.script.runtime.series import Scalar, ScriptRuntimeError, Series, Value, broadcast
 
 if TYPE_CHECKING:
-    from src.core.script.runtime.interpreter import Builtin, CallSite
+    from src.core.script.runtime.interpreter_types import Builtin, CallSite
 
 __all__ = ["TaBuiltins", "TaCall", "default_builtins", "ta_idents"]
 
@@ -56,7 +63,7 @@ _NS = "ta"
 
 @dataclass(frozen=True)
 class TaCall:
-    """`ta.*` 호출 한 건의 장부 항목(레지스트리 버전 고정 증거)."""
+    """Ledger entry for one `ta.*` call (evidence of registry version pinning)."""
 
     ident: str
     indicator: str
@@ -66,11 +73,11 @@ class TaCall:
     registry_hash: str
     bar_count: int
     fed_from: int
-    """엔진에 흘린 첫 봉 인덱스(선행 na 접두 길이)."""
+    """Index of the first bar fed to the engine (leading na prefix length)."""
 
 
 def ta_idents(spec: IndicatorSpec) -> dict[str, str]:
-    """스펙 하나가 노출하는 `ident → output` 표(모듈 docstring 규약)."""
+    """`ident → output` table exposed by one spec (module docstring convention)."""
     lowered = spec.name.lower()
     if spec.outputs == ("value",):
         return {lowered: "value"}
@@ -80,7 +87,7 @@ def ta_idents(spec: IndicatorSpec) -> dict[str, str]:
 
 
 class TaBuiltins:
-    """레지스트리 하나에 고정된 `ta.*` 빌트인 표 + 호출 장부."""
+    """Fixed `ta.*` builtin table on one registry + call ledger."""
 
     def __init__(
         self,
@@ -115,7 +122,7 @@ class TaBuiltins:
 
         return builtin
 
-    # ---- 호출 ----
+    # ---- calls ----
 
     def _call(
         self, ident: str, name: str, output: str, args: tuple[Value, ...], bar_count: int
@@ -174,20 +181,22 @@ def default_builtins(
     *,
     registry_version: str | None = None,
 ) -> dict[tuple[str, str], Builtin]:
-    """DSL-9a 내장 테이블 등록: `math.*`(MATH_BUILTINS) + `ta.*`(레지스트리 고정).
+    """Register DSL-9a builtin table: `math.*` (MATH_BUILTINS) + `ta.*` (fixed registry).
 
-    `registry_version`(컴파일 산출물이 기록한 레지스트리 해시)을 주면 현재
-    레지스트리와 다를 때 `TaBuiltins`가 거부한다. 호출 장부가 필요하면 `TaBuiltins`를
-    직접 만들어 `.table`을 합친다. `interpreter.py`는 지표 레지스트리를 임포트하지
-    않으므로(DSL-8 순수성 정적 검사) 이 진입점은 여기 둔다.
+    Pass `registry_version` (registry hash recorded by the compiled artifact) to make
+    `TaBuiltins` reject when it differs from the current
+    registry. Create `TaBuiltins` directly and merge `.table` if the call ledger is
+    needed. `interpreter.py` does not import the indicator registry (DSL-8 purity static
+    check), so this entry point lives here.
     """
     ta = TaBuiltins(registry, expected_registry_version=registry_version)
     return {**MATH_BUILTINS, **ta.table}
 
 
 def registry_names(registry: IndicatorRegistry) -> tuple[str, ...]:
-    """레지스트리에 등록된 지표 이름. L02가 열거 API를 두지 않아 스펙 사전을 읽는다."""
-    specs: Mapping[str, IndicatorSpec] = registry._specs  # L02 열거 API 부재(읽기 전용)
+    """Indicator names registered in the registry. Reads spec dict since
+    L02 lacks an enumeration API."""
+    specs: Mapping[str, IndicatorSpec] = registry._specs  # L02 lacks enumeration API (read-only)
     return tuple(specs)
 
 
@@ -227,7 +236,7 @@ def _param_values(where: str, spec: IndicatorSpec, args: tuple[Value, ...]) -> d
 
 
 def _leading_na(columns: Mapping[str, tuple[float | None, ...]], bar_count: int) -> int:
-    """모든 입력이 non-na인 첫 봉 인덱스(없으면 bar_count)."""
+    """Index of the first bar where all inputs are non-na (returns bar_count if none)."""
     for t in range(bar_count):
         if all(col[t] is not None for col in columns.values()):
             return t

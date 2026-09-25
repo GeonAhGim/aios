@@ -1,27 +1,30 @@
-"""DC-8 — `ports/instrument_repository.py`(DC-5)의 asyncpg 구현.
+"""DC-8 — asyncpg implementation of `ports/instrument_repository.py`(DC-5).
 
 Spec: docs/specs/L4_analytics_authoring_backtest_marketplace_v1.0.md
-§2.1 DC-5·DC-8, §3.2(계약), §4.1(불변조건), §9.2 DC-8.
+§2.1 DC-5·DC-8, §3.2(contracts), §4.1(invariants), §9.2 DC-8.
 
-DC-4(dbaf260f2917) 마이그레이션이 만든 `instruments`/`venue_listings`
-테이블 위에 `InstrumentRepository` Protocol을 그대로 구현한다 — 필드·
-메서드 시그니처는 포트 정의를 재정의하지 않는다(task-1195 decision).
+DC-4(dbaf260f2917) migration created `instruments`/`venue_listings`
+tables; this module implements the `InstrumentRepository` Protocol on top
+of them — field/method signatures follow the port definition verbatim
+(task-1195 decision).
 
-`instrument_id` 불변·`venue_listings` 기간 겹침 금지(§4.1)는 DB 제약
-(트리거·`EXCLUDE USING gist`, DC-4)이 이미 강제하므로 이 어댑터는 그
-예외(`CheckViolationError`/`ExclusionViolationError`)를 도메인 예외로
-바꿔 던지기만 하고 앱 레벨 사전 검사를 다시 하지 않는다.
+`instrument_id` immutability and `venue_listings` period overlap prohibition
+(§4.1) are already enforced by DB constraints (trigger + `EXCLUDE USING gist`,
+DC-4), so this adapter does not re-check at the app level; it only translates
+the resulting exceptions (`CheckViolationError`/`ExclusionViolationError`) into
+domain exceptions.
 
-`update_lifecycle_state`는 "읽은 상태를 쓰기 조건으로 건다"(105번 동시성
-표준 규칙 1)를 따른다 — DC-3(`domain/instruments/lifecycle.py`)이 현재
-상태를 읽고 `transition()`으로 다음 상태를 계산한 뒤 이 메서드를 부르는
-호출 순서라, 그 사이 다른 트랜잭션이 먼저 상태를 바꿨을 가능성을
-`expected_state` WHERE 조건 없이 무시하면 안 된다(예: ACTIVE에서 동시에
-HALT·DELIST 두 전이가 경합하면 나중 커밋이 조용히 이긴다). 조건 불일치는
-공용 `ConcurrencyConflictError`(`src/core/db/conditional_write.py`)로,
-instrument_id 자체가 없으면 `InstrumentNotFoundError`로 구분한다
-(`postgres_balance_repository.apply`와 동일 패턴 — 실패 시 존재 여부를
-별도 SELECT로 한 번 더 확인).
+`update_lifecycle_state` follows the "read-state-as-write-condition" rule
+(standard-105 concurrency rule #1): DC-3 (`domain/instruments/lifecycle.py`)
+reads the current state, computes the next via `transition()`, then calls this
+method. Because another transaction may have already changed the state in the
+gap, ignoring a mismatch without an `expected_state` WHERE clause is not
+acceptable (e.g. if ACTIVE→HALT and ACTIVE→DELIST race, the later commit wins
+silently). Mismatches are raised as the shared
+`ConcurrencyConflictError` (`src/core/db/conditional_write.py`); when the
+instrument_id itself is missing, `InstrumentNotFoundError` is raised instead
+(same pattern as `postgres_balance_repository.apply` — on failure, verify
+existence with an extra SELECT).
 """
 from __future__ import annotations
 
@@ -46,19 +49,20 @@ __all__ = [
 
 
 class DuplicateInstrumentIdError(Exception):
-    """`create()`가 이미 존재하는 `instrument_id`로 불림 — §4.1
-    `instrument_id` 불변, 이 메서드에 UPDATE 경로는 없다(instruments PK
-    위반을 그대로 노출하지 않고 도메인 예외로 감싼다)."""
+    """`create()` called with an already-existing `instrument_id` — §4.1
+    `instrument_id` is immutable; there is no UPDATE path through this
+    method (wraps instruments PK violation as a domain exception)."""
 
 
 class InstrumentNotFoundError(Exception):
-    """`update_lifecycle_state()`가 존재하지 않는 `instrument_id`를
-    대상으로 불림 — 조용히 무시하지 않고 fail-closed로 예외를 던진다."""
+    """`update_lifecycle_state()` called with a non-existent `instrument_id` —
+    raises fail-closed instead of silently ignoring."""
 
 
 class VenueListingOverlapError(Exception):
-    """`add_listing()`이 같은 (venue, venue_symbol)에 겹치는 기간을
-    주장함 — `venue_listings`의 `EXCLUDE USING gist` 제약(DC-4) 위반."""
+    """`add_listing()` claims an overlapping period for the same
+    (venue, venue_symbol) — violates the `EXCLUDE USING gist` constraint
+    on `venue_listings` (DC-4)."""
 
 
 def _row_to_instrument(row: asyncpg.Record) -> Instrument:

@@ -18,6 +18,8 @@ from uuid import UUID
 
 from pydantic import BaseModel, field_validator
 
+from src.foundation.mandates.contracts._frozen_containers import FrozenDict, FrozenList
+
 SCHEMA_VERSION = "v1"
 
 _SHA256_HEX_RE = re.compile(r"^[0-9a-f]{64}$")
@@ -69,6 +71,7 @@ class MandateRuleInput(BaseModel):
 
     max_total_exposure_pct: float
     max_single_instrument_pct: float
+    # ratchet-allow: wire-boundary: v1 wire float, Decimal at app boundary (task-5762)
     min_cash_buffer_pct: float
     max_daily_loss_pct: float
     allowed_autonomy: Autonomy
@@ -82,6 +85,7 @@ class MandateRevisionView(BaseModel):
     state: MandateRevisionState
     max_total_exposure_pct: float
     max_single_instrument_pct: float
+    # ratchet-allow: wire-boundary: v1 wire float, Decimal at app boundary (task-5762)
     min_cash_buffer_pct: float
     max_daily_loss_pct: float
     allowed_autonomy: Autonomy
@@ -100,6 +104,7 @@ class PolicyEvaluationSubject(BaseModel):
     command_type: str
     instrument_exposure_pct: float | None = None
     total_exposure_pct: float | None = None
+    # ratchet-allow: wire-boundary: v1 wire float, Decimal at app boundary (task-5762)
     cash_buffer_pct: float | None = None
     projected_daily_loss_pct: float | None = None
     requested_autonomy: Autonomy | None = None
@@ -144,6 +149,11 @@ class RuleHit(BaseModel, frozen=True):
     message: str
     evidence: dict[str, Any] = {}
 
+    @field_validator("evidence")
+    @classmethod
+    def _freeze_evidence(cls, value: dict[str, Any]) -> dict[str, Any]:
+        return FrozenDict[str, Any](value)
+
 
 class ComplianceDecision(BaseModel, frozen=True):
     """L4_compliance_and_regulatory_v1.0.md §3/§9 CM-1.
@@ -178,6 +188,11 @@ class ComplianceDecision(BaseModel, frozen=True):
     def _check_tz(cls, value: datetime) -> datetime:
         return _validate_tz_aware(value)
 
+    @field_validator("rule_hits")
+    @classmethod
+    def _freeze_rule_hits(cls, value: list[RuleHit]) -> list[RuleHit]:
+        return FrozenList[RuleHit](value)
+
 
 class PolicyDecisionRow(BaseModel, frozen=True):
     """Source data for `compliance_decision_from_policy_decision` — a plain
@@ -203,6 +218,11 @@ class PolicyDecisionRow(BaseModel, frozen=True):
     @classmethod
     def _check_tz(cls, value: datetime) -> datetime:
         return _validate_tz_aware(value)
+
+    @field_validator("reason_codes")
+    @classmethod
+    def _freeze_reason_codes(cls, value: list[str]) -> list[str]:
+        return FrozenList[str](value)
 
 
 # `policy_decision.outcome` has two states — REQUIRE_APPROVAL and

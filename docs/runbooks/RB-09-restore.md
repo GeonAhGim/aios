@@ -85,10 +85,29 @@ scripts.backup.{base_backup,wal_archive,restore_drill}`)도 여전히 동작하�
      - `preflight`: `pg_ctl`/`psql`이 PATH에 없다 — 실행 환경 문제, 스크립트가 손댈 일이 아니다.
      - `find_backup`: 성공한 베이스 백업이 하나도 없다 — 정기 리허설 §1을 먼저 확인한다.
      - `restore_files`: 디스크 공간·권한 문제로 백업 파일 복사가 실패했다.
-     - `start_postgres`: 복구용 인스턴스가 기동하지 않았다(포트 충돌, 손상된 백업).
-     - `wait_recovery`: 기동은 됐지만 `recovery.signal` 처리가 끝나지 않는다 —
-       대개 `archive_dir`에 필요한 WAL 파일이 없다(아카이빙이 그 사이 끊겼을 가능성,
-       §"WAL 아카이빙이 죽어 있을 때" 확인).
+     - `start_postgres`: 복구용 인스턴스 프로세스 자체가 뜨지 않았다(포트 충돌, 손상된
+       백업, 권한 오류). `restore_data_dir`는 드릴 종료 후 항상 지워지므로, 실패 시
+       `steps.start_postgres.detail`에 `pg_ctl_start.log` 전체와(logging_collector가
+       켜져 있으면) `restore_data_dir/log/*.log`의 마지막 80줄이 그대로 남고, 같은
+       로그가 정리 전에 `C:\aios\pm\backup_runtime\last_failed_restore\`로 복사된다(task-4978).
+       판독법: `detail`/복사된 로그에 `Address already in use`류 bind 실패가 보이면
+       포트 충돌(`--restore-port`가 이미 쓰이고 있음), `Permission denied`류는 권한/경로
+       오류, `FATAL`/`PANIC` 없이 그냥 시간 안에 프로세스가 안 뜬 것처럼 보이면 디스크
+       I/O 병목을 의심한다. 이 단계는 **프로세스가 뜨는지만** 확인한다(2)를 참고 —
+       WAL replay가 오래 걸리는 것은 이 단계가 아니라 `wait_recovery`에서 잡힌다.
+     - `wait_recovery`: 프로세스는 떴지만 `recovery.signal` 처리(WAL replay)가 끝나지
+       않는다. 두 가지 원인이 있다: (a) `archive_dir`에 필요한 WAL 파일이 없다(아카이빙이
+       그 사이 끊겼을 가능성, §"WAL 아카이빙이 죽어 있을 때" 확인) — 대개 몇 초 안에
+       거부되는 패턴으로 나타난다; (b) 베이스 백업이 크고 WAL이 많이 쌓여 replay 자체가
+       오래 걸린다 — `restore_drill.run_drill`의 `recovery_poll_timeout`(기본 300초)
+       예산 안에서 진행 중인지는 `pg_controldata <restore_data_dir>`의
+       `Minimum recovery ending location`/redo 진행 상황이나 preserve된 postgres 로그의
+       `redo done at` 라인으로 확인한다. `start_postgres`는 프로세스 기동(`pg_ctl status`
+       폴링)만 기다리도록 분리돼 있어(이전에는 `pg_ctl start -w -t 60`이 replay 완료까지
+       기다리다 큰 백업에서 60초를 넘겨 `start_postgres`를 오탐 실패시켰다), replay가
+       오래 걸리는 정상 상황과 프로세스 기동 실패(포트 충돌 등)가 서로 다른 단계로
+       분류된다. `recovery_poll_timeout`을 늘려야 할 정도로 replay가 오래 걸린다면
+       `-t`를 무작정 늘리는 것이 아니라 이 값을 조정한다.
      - `replay_verify`: 복구는 됐지만 데이터가 운영과 다르다 — **가장 심각한 경우**다.
        베이스 백업 자체가 손상됐거나 WAL 재생 로직에 결함이 있다는 뜻이므로, 이
        백업 세대는 복구 신뢰 대상에서 제외하고 플랫폼 엔지니어링 리드에게 즉시

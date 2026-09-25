@@ -1,3 +1,4 @@
+# loc-allow: comprehensive negative/failure-injection/replay/perf tests for LB-16 reconcile_provider
 """LB-16 `reconcile_account`/`ExchangeBalanceSource` 통합테스트 — 실 DB
 (TEST_DATABASE_URL) 대상.
 
@@ -258,6 +259,7 @@ async def test_unknown_connection_id_raises_unknown_connection_error(pool):
         )
 
 
+@pytest.mark.perf
 async def test_reconcile_account_completes_within_cycle_safety_margin(pool):
     """수치 성능 단언 — spec §7 B "브레이크 표면화: 감지 -> 알림 < 2분(대사
     주기 60s + 처리)"의 60s 주기 예산 대비 넉넉한 안전마진(30s)으로 단일
@@ -456,3 +458,72 @@ async def test_concurrent_reconciliation_is_isolated_when_one_account_is_under_a
     assert healthy_result.aggregate_classification == Classification.HEALTHY
     assert mismatch_result.aggregate_classification == Classification.MATERIAL_MISMATCH
     assert isinstance(failing_result, ConnectionError)
+
+
+async def test_provider_returns_zero_balance_for_open_position_reports_mismatch(pool):
+    """negative #4 — 거래소 잔고가 0인데 포지션 수량이 양수이면 MATERIAL_MISMATCH
+    로 분류된다(잔고 "없음"과 잔고 "0"은 동일: 둘 다 drift가 크다).
+    LB-6 불변식: internal(포지션 수량) ≠ provider(거래소 잔고) → mismatch."""
+    registry = MetricsRegistry()
+    tenant_id = await create_test_tenant(pool)
+    account_id = await create_pos_account(pool, tenant_id, venue="bitget")
+    asset = f"COIN{uuid4().hex[:8]}"
+    await _open_position(
+        pool,
+        tenant_id=tenant_id,
+        account_id=account_id,
+        asset=asset,
+        quantity=Decimal("5"),
+    )
+    connection_id = uuid4()
+    # 거래소는 이 자산에 잔고가 0이라고 보고
+    provider = ExchangeBalanceSource({connection_id: FakeAdapter([_balance(asset, Decimal("0"))])})
+
+    result = await reconcile_account(
+        tenant_id,
+        account_id,
+        connection_id=connection_id,
+        snapshots=PostgresSnapshotRepository(pool),
+        provider=provider,
+        recon=_recon(pool),
+        pool=pool,
+        registry=registry,
+    )
+
+    assert result.aggregate_classification == Classification.MATERIAL_MISMATCH
+    # 메트릭도 증가해야 함
+    assert registry.counter(POSITIONS_RECONCILIATION_MISMATCH_COUNT_TOTAL).samples() == {(): 1.0}
+
+
+async def test_provider_balance_raises_runtime_error_propagates(pool):
+    """실패주입 #3 — `get_balance()` 가 `RuntimeError`(예: 거래소 내부 오류) 를
+    던지면 `reconcile_account`가 이를 삼키지 않고 그대로 전파한다(fail-closed,
+    doD #3). FakeAdapter가 아닌 실제 monkeypatch로 의존성 예외를 유도한다."""
+    registry = MetricsRegistry()
+    tenant_id = await create_test_tenant(pool)
+    account_id = await create_pos_account(pool, tenant_id, venue="bitget")
+    connection_id = uuid4()
+    # FakeAdapter 대신 실제 ExchangeBalanceSource._adapters.get_balance 를
+    # monkeypatch로 예외를 던지게 한다.
+    real_source = ExchangeBalanceSource({connection_id: FakeAdapter()})
+
+    async def _broken_get_balance(*args, **kwargs):
+        raise RuntimeError("exchange internal server error")
+
+    with pytest.raises(RuntimeError, match="exchange internal server error"):
+        with pytest.MonkeyPatch.context() as mp:
+            mp.setattr(
+                type(real_source._adapters[connection_id]),
+                "get_balance",
+                _broken_get_balance,
+            )
+            await reconcile_account(
+                tenant_id,
+                account_id,
+                connection_id=connection_id,
+                snapshots=PostgresSnapshotRepository(pool),
+                provider=real_source,
+                recon=_recon(pool),
+                pool=pool,
+                registry=registry,
+            )

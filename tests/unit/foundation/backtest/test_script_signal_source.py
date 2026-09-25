@@ -8,6 +8,7 @@ na), (6) `ScriptRuntimeError`(및 그 하위) 전파. 컴파일·실행은 DSL-1
 `compile_source`/DSL-8 `execute`를 그대로 쓴다 — 이 테스트는 렉서·파서·
 인터프리터를 재구현하지 않는다.
 """
+
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
@@ -23,6 +24,7 @@ from src.data.models.trading import OrderSide
 from src.foundation.backtest.application import script_signal_source as sss
 from src.foundation.backtest.application.quick_backtest import (
     BarWindow,
+    BracketMetadata,
     PositionState,
     SignalSource,
 )
@@ -122,8 +124,8 @@ def test_when_series_length_mismatch_is_rejected() -> None:
         when=bad_when, side=Identifier(name="buy"), qty_expr=NumberLiteral(value=1), opts=None
     )
     result = ExecutionResult(bar_count=5, bindings={}, signals={}, plots=(), orders=(order,))
-    with pytest.raises(sss.ScriptSignalSourceError, match="시리즈 길이"):
-        sss._materialize_plan(result, bar_count=5)
+    with pytest.raises(sss.ScriptSignalSourceError, match="series length"):
+        sss._materialize_plan(result, bar_count=5, strategy_intents=())
 
 
 # ---- negative: side/qty가 상수로 접히지 않는다 ----
@@ -156,18 +158,14 @@ def test_unknown_side_identifier_is_rejected() -> None:
 def test_zero_quantity_on_firing_bar_is_rejected() -> None:
     columns = _columns(["100", "101"])
     source = "input qty: int = 0\norder(buy, qty) when 1 < 2"
-    with pytest.raises(sss.ScriptSignalSourceError, match="양수"):
+    with pytest.raises(sss.ScriptSignalSourceError, match="positive"):
         _build(source, columns)
 
 
 def test_na_quantity_on_firing_bar_is_rejected() -> None:
     """`close[1]`은 bar0에서 na다 — bar0에서 발화하면 수량을 확정할 수 없다."""
     columns = _columns(["100", "101"])
-    source = (
-        "input close: series<float> = 0\n"
-        "let q = close[1]\n"
-        "order(buy, q) when 1 < 2"
-    )
+    source = "input close: series<float> = 0\nlet q = close[1]\norder(buy, q) when 1 < 2"
     with pytest.raises(sss.ScriptSignalSourceError, match="na"):
         _build(source, columns)
 
@@ -190,3 +188,84 @@ def test_columns_length_mismatch_with_bar_count_is_rejected() -> None:
     compiled = compile_source("signal always = 1 < 2", registry_version=_REG)
     with pytest.raises(sss.ScriptSignalSourceError, match="bar_count"):
         sss.build_script_signal_source(compiled.ir, bar_count=5, inputs=None, columns=columns)
+
+
+# ---- BT-10b (task-5195): strategy.* builtin wiring ----
+
+
+def test_strategy_entry_markets_on_bar_zero() -> None:
+    """strategy.entry(side, qty) creates an OrderIntent on bar 0 (no per-bar conditionals).
+    BT-10b fires all strategy.* calls on bar 0 by design."""
+    columns = _columns(["100", "101", "102"])
+    source = "let _e = strategy.entry(1, 100)"
+    compiled = compile_source(source, registry_version=_REG)
+    signal_source = sss.build_script_signal_source(
+        compiled.ir, bar_count=len(columns), inputs=None, columns=columns
+    )
+    # Bar 0: strategy.entry(1, 100) fires -> BUY 100.
+    intent_bar_0 = signal_source.on_bar(BarWindow(columns, 1), _POSITION)
+    assert intent_bar_0 == OrderIntent(
+        side=OrderSide.BUY, quantity=_D("100"), order_type="market", trigger_price=None
+    )
+    # Bars 1+: no order.
+    for i in range(1, len(columns)):
+        assert signal_source.on_bar(BarWindow(columns, i + 1), _POSITION) is None
+
+
+def test_strategy_entry_with_limit_price() -> None:
+    """strategy.entry(side, qty, trigger_price, type_code) -> limit order."""
+    columns = _columns(["100", "101", "102"])
+    source = "let _e = strategy.entry(1, 100, 99.5, 1)"  # limit at 99.5
+    compiled = compile_source(source, registry_version=_REG)
+    signal_source = sss.build_script_signal_source(
+        compiled.ir, bar_count=len(columns), inputs=None, columns=columns
+    )
+    intent = signal_source.on_bar(BarWindow(columns, 1), _POSITION)
+    assert intent == OrderIntent(
+        side=OrderSide.BUY,
+        quantity=_D("100"),
+        order_type="limit",
+        trigger_price=_D("99.5"),
+    )
+
+
+def test_strategy_bracket_materializes_as_metadata_not_a_plan_order() -> None:
+    """strategy.bracket(qty, profit, loss, trail) is consumed by
+    `run_quick_backtest`'s bracket exit-leg tracking (task-5195), not turned into
+    a bar-0 `OrderIntent` in the plan."""
+    columns = _columns(["100", "101"])
+    source = "let _b = strategy.bracket(100, 110, 90, 0.05)"
+    compiled = compile_source(source, registry_version=_REG)
+    signal_source = sss.build_script_signal_source(
+        compiled.ir, bar_count=len(columns), inputs=None, columns=columns
+    )
+    assert signal_source.on_bar(BarWindow(columns, 1), _POSITION) is None
+    bracket = getattr(signal_source, "bracket", None)
+    assert bracket == BracketMetadata(
+        requested_qty=_D("100"),
+        profit_price=_D("110"),
+        loss_price=_D("90"),
+        trail_pct=_D("0.05"),
+    )
+
+
+def test_strategy_exit_is_rejected_with_bt11_explanation() -> None:
+    """strategy.exit(qty) is not yet executed (BT-11 scope: position-aware exits)."""
+    columns = _columns(["100", "101"])
+    source = "let _x = strategy.exit(50)"
+    compiled = compile_source(source, registry_version=_REG)
+    with pytest.raises(sss.ScriptSignalSourceError, match="BT-11 scope"):
+        sss.build_script_signal_source(
+            compiled.ir, bar_count=len(columns), inputs=None, columns=columns
+        )
+
+
+def test_strategy_close_is_rejected_with_bt11_explanation() -> None:
+    """strategy.close() is not yet executed (BT-11 scope: position-aware exits)."""
+    columns = _columns(["100", "101"])
+    source = "let _c = strategy.close()"
+    compiled = compile_source(source, registry_version=_REG)
+    with pytest.raises(sss.ScriptSignalSourceError, match="BT-11 scope"):
+        sss.build_script_signal_source(
+            compiled.ir, bar_count=len(columns), inputs=None, columns=columns
+        )

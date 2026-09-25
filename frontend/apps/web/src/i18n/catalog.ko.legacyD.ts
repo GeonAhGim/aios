@@ -276,4 +276,39 @@ export const catalogKoLegacyD = {
     "t2": "이전",
     "t3": "다음",
   },
+  // task-4025(FE-OPS-7b): admin.py:84 GET /admin/audit-log는 PLT-35-fix(task-3850)의
+  // require_break_glass("tenant_read")를 소비한다 — 그랜트 발급/승인 화면이 아직 없어
+  // (packages/api-client/src/clients/admin.ts 주석 참고) PayoutsPage(task-4026)와
+  // 같은 관용으로 호출자가 이미 들고 있는 그랜트 id를 직접 입력받는다.
+  "auditLogPage": {
+    "title1": "감사 로그",
+    "label2": "Break-Glass 그랜트 ID",
+    "placeholder2": "그랜트 ID(UUID)",
+    "label3": "액션 타입",
+    "placeholder3": "액션 타입(선택)",
+    "label4": "대상 타입",
+    "placeholder4": "대상 타입(선택)",
+    "label5": "대상 ID",
+    "placeholder5": "대상 ID(선택)",
+    "t6": "조회",
+    "t7": "그랜트 ID를 입력하고 조회하세요.",
+    "t8": "{{actorAgent}} · 사용자 {{userId}}",
+    "t9": "대상 {{targetType}} #{{targetId}}",
+    "t10": "감사 로그가 없습니다.",
+  },
+  // task-5998(SIG-6): SignalSourcesPage.tsx(시크릿 발급·회전·최근 수신 로그).
+  "signalSourcesPage": {
+    "t1": "{{sourceName}}의 새 시크릿이 발급되었습니다.",
+    "t2": "이 시크릿은 지금만 표시됩니다. 안전한 곳에 복사해 두세요 — 다시 조회할 수 없습니다.",
+    "t3": "확인",
+    "t4": "최근 수신된 신호가 없습니다.",
+    "t5": "로그 숨기기",
+    "t6": "최근 수신 로그",
+    "t7": "회전",
+    "title8": "신호 소스",
+    "label9": "소스 이름",
+    "placeholder10": "예: TradingView 웹훅",
+    "t11": "발급",
+    "t12": "등록된 신호 소스가 없습니다.",
+  },
 } as const;

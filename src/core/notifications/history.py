@@ -1,9 +1,10 @@
-"""17.3 — 알림 이력 조회.
+"""17.3 — Notification history lookup.
 
 Spec: 기능설계문서_v1.20.md#FD-17.3
 
-승인요청이 실제로 언제 전달됐는지 사후 증명 가능하게 한다 — 4.9 강제대기·
-이중서명 절차의 신뢰성이 "알림이 실제로 갔다"는 사실에 의존한다.
+Enables post-hoc proof of when approval requests were actually delivered — the
+reliability of 4.9 forced-wait and dual-signature procedures depends on the fact
+that "the notification actually reached the recipient."
 """
 from __future__ import annotations
 
@@ -29,7 +30,8 @@ async def list_notification_history(
     start: datetime | None = None,
     end: datetime | None = None,
 ) -> list[NotificationHistoryEntry]:
-    """예외 상황(FD-17.3) — 해당 기간 이력이 없으면 빈 목록(오류 아님)."""
+    """Edge case (FD-17.3) — returns an empty list when no history exists
+    for the period (not an error)."""
     conditions = ["user_id = $1"]
     params: list[object] = [user_id]
 

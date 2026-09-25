@@ -1,22 +1,25 @@
-"""LB-5 — 저널 엔트리 열을 접어(fold) `pos_snapshot`을 만드는 규칙(snapshot_builder).
+"""LB-5 — rule (snapshot_builder) that folds the journal entry stream into `pos_snapshot`.
 
 Spec: docs/specs/L4_market_data_positions_ledger_v1.0.md#§4.3, §9 LB-5.
 
-§4.3 "스냅샷 = fold(저널)"을 그대로 구현한다: [[apply_one]]이 엔트리 하나를
-누적 상태(`SnapshotFold`)에 접고, [[fold]]는 `functools.reduce(apply_one, ...)`
-그 자체다 — 별도 최적화 경로를 두지 않는다. 재빌드(`rebuild_snapshot`, LB-13)가
-저널만으로 스냅샷을 다시 만들 수 있어야 하므로, 원가법(FIFO/WEIGHTED) 로트도
-매 `FILL` 엔트리마다 [[cost_basis.selector.cost_basis_for]]로 다시 계산한다
-(LB-3 위임, 중복 구현 금지) — 엔트리에 이미 저장된 `realized_pnl_base`는
-신뢰해 그대로 누적하고, 원가법 재적용은 로트/수량 갱신에만 쓴다.
+Implements §4.3 "snapshot = fold(journal)" literally: [[apply_one]] folds one
+entry into the accumulated state (`SnapshotFold`), and [[fold]] is nothing more
+than `functools.reduce(apply_one, ...)` — no separate optimized path exists.
+Since rebuild (`rebuild_snapshot`, LB-13) must be able to reconstruct the
+snapshot from the journal alone, cost-basis (FIFO/WEIGHTED) lots are also
+recomputed on every `FILL` entry via [[cost_basis.selector.cost_basis_for]]
+(delegated to LB-3, no duplicate implementation) — the `realized_pnl_base`
+already stored on the entry is trusted and accumulated as-is; reapplying the
+cost method is used only to update lots/quantity.
 
-`fees_base` 적립 규칙은 [[journal_rules]]와 공유한다: `entry.fee`가 있으면
-`entry.fee.amount * (entry.fx_rate or 1)`을 더한다 — entry_type과 무관하게
-전부 적용한다(체결에 딸린 수수료도, 독립 `FEE` 엔트리도 같은 컬럼을 쓰므로).
-`funding_base`는 `FUNDING` 엔트리의 `realized_pnl_base` 컬럼(재사용, §
-[[journal_rules.funding_entry]] 참고)에서만 적립한다.
+The `fees_base` accrual rule is shared with [[journal_rules]]: if `entry.fee`
+is present, add `entry.fee.amount * (entry.fx_rate or 1)` — applied
+unconditionally regardless of entry_type (fees attached to a fill and standalone
+`FEE` entries both use the same column). `funding_base` is accrued only from
+the `realized_pnl_base` column of `FUNDING` entries (reused; see
+[[journal_rules.funding_entry]]).
 
-순수 도메인(DB/HTTP import 0).
+Pure domain (zero DB/HTTP imports).
 """
 from __future__ import annotations
 
@@ -40,10 +43,11 @@ from src.foundation.positions.domain.journal_rules import validate_sequence
 
 
 class UnsupportedEntryTypeError(ValueError):
-    """`apply_one`이 아직 접는 법을 모르는 `entry_type`(`ADJUSTMENT`,
-    `CORP_ACTION` — 이 리프 범위 밖). [[cost_basis.selector.
-    UnknownAssetClassError]]와 같은 전례를 따라 침묵 스킵 대신 예외로
-    드러낸다 — LB-1 taxonomy에 정확히 대응하는 `POS_*` 코드는 없다."""
+    """`entry_type` that `apply_one` does not yet know how to fold
+    (`ADJUSTMENT`, `CORP_ACTION` — out of scope for this leaf). Following the
+    same precedent as [[cost_basis.selector.UnknownAssetClassError]], this
+    surfaces as an exception instead of a silent skip — there is no `POS_*`
+    code that maps exactly to the LB-1 taxonomy."""
 
     def __init__(self, position_key: str, entry_type: JournalEntryType) -> None:
         super().__init__(f"{position_key}: 지원하지 않는 entry_type입니다: {entry_type.value}")
@@ -53,10 +57,12 @@ class UnsupportedEntryTypeError(ValueError):
 
 @dataclass(frozen=True, slots=True)
 class SnapshotFold:
-    """`pos_snapshot`의 접힘 가능한 부분집합(§9 LB-5 DoD가 명시한 필드만 —
-    `tenant_id`/`account_id`/`instrument_id`/`base_currency`/`updated_at` 등
-    계좌 정적 컨텍스트는 저널만으로 알 수 없으므로 이 타입에 없다. 전체
-    `PositionSnapshotView`는 호출자가 이 결과에 그 컨텍스트를 얹어 만든다)."""
+    """The foldable subset of `pos_snapshot` (only the fields listed in the §9
+    LB-5 DoD — static account context such as
+    `tenant_id`/`account_id`/`instrument_id`/`base_currency`/`updated_at` is
+    absent from this type since it cannot be derived from the journal alone.
+    The caller builds the full `PositionSnapshotView` by layering that context
+    onto this result)."""
 
     quantity: Decimal = Decimal("0")
     avg_cost: Decimal = Decimal("0")
@@ -70,9 +76,10 @@ class SnapshotFold:
 def _seeded_cost_basis(
     cost_method: CostMethod, asset_class: AssetClass, lots: tuple[Lot, ...]
 ) -> CostBasis:
-    """[[cost_basis.selector.cost_basis_for]]로 FIFO/WEIGHTED 중 무엇을 쓸지
-    고르되(asset_class가 파생상품이면 WEIGHTED 강제 — 위임, 중복 구현 금지),
-    selector가 늘 빈 인스턴스를 반환하므로 여기서 기존 `lots`를 시드한다."""
+    """Picks FIFO vs WEIGHTED via [[cost_basis.selector.cost_basis_for]]
+    (WEIGHTED is forced when asset_class is a derivative — delegated, no
+    duplicate implementation), and seeds the existing `lots` here since the
+    selector always returns an empty instance."""
     template = cost_basis_for(cost_method, asset_class)
     if isinstance(template, FifoLots):
         return FifoLots(lots)
@@ -95,9 +102,9 @@ def apply_one(
     cost_method: CostMethod,
     asset_class: AssetClass,
 ) -> SnapshotFold:
-    """엔트리 하나를 `state`에 접는다. §4.3 "(position_key, sequence_no) 유일·
-    연속" — 순서가 뒤바뀌거나 건너뛴 엔트리는 `SequenceConflictError`로
-    거부한다(`journal_rules.validate_sequence` 재사용)."""
+    """Folds one entry into `state`. §4.3 "(position_key, sequence_no) unique,
+    contiguous" — an out-of-order or skipped entry is rejected with
+    `SequenceConflictError` (reuses `journal_rules.validate_sequence`)."""
     validate_sequence(position_key, state.last_journal_seq, entry.sequence_no)
 
     quantity = state.quantity
@@ -152,9 +159,10 @@ def fold(
     asset_class: AssetClass,
     initial: SnapshotFold | None = None,
 ) -> SnapshotFold:
-    """`entries`(sequence_no 오름차순)를 처음부터 접는다 —
-    `functools.reduce(apply_one, entries, initial)` 그 자체(결정성·결합성은
-    `apply_one`이 순수 함수이므로 자동으로 따라온다)."""
+    """Folds `entries` (ascending sequence_no) from the start —
+    literally `functools.reduce(apply_one, entries, initial)` (determinism
+    and associativity follow automatically since `apply_one` is a pure
+    function)."""
     start = initial if initial is not None else SnapshotFold()
     return reduce(
         lambda acc, entry: apply_one(

@@ -1,23 +1,28 @@
-"""13.5 — 구매한 전략 실행 연동 (실행 접근권한 판정).
+"""13.5 — Purchased strategy execution integration (execution access authority determination).
 
-Spec: 기능설계문서_v1.20.md#FD-13.4, 정책문서 10.3-B/4.10 교차테넌트 리스크2
+Spec: 기능설계문서_v1.20.md#FD-13.4, Policy document 10.3-B/4.10 cross-tenant risk 2
 
-owner_user_id(원 제작자)는 그대로 유지하고, 실행 접근권한만 별도로
-판정한다 — 소유자 본인이거나, **결제가 확정(payment_status='CONFIRMED')
-된** 구매 기록이 있는 구매자만 전략의 FSM 정의(실행에 필요한 상세
-로직)에 접근할 수 있다. FD-13.4 원문 자체가 "구매 완료 직후"가 아니라
-"결제 확인(FD-18.5b) 직후"로 명시 정정했다 — 입금 확인 전에 실행 권한이
-생기는 구멍을 막기 위해서다. (갱신 — 앱 조립 단계에서 FD-18.5b가
-/admin/payments/{purchase_id}/confirm으로 실제 노출돼 CONFIRMED 전이가
-살아있는 경로가 됐다.)
+The owner_user_id (original creator) is preserved as-is, and execution
+access authority is evaluated separately — only the owner themselves, or
+a buyer whose purchase record has a confirmed payment
+(payment_status='CONFIRMED'), may access the strategy's FSM definition
+(the detailed logic required for execution). The original FD-13.4 text
+explicitly corrected "immediately after purchase completion" to
+"immediately after payment confirmation (FD-18.5b)" — to close the gap
+where execution authority would arise before deposit confirmation.
+(Updated — during the app assembly phase, FD-18.5b was actually exposed
+as /admin/payments/{purchase_id}/confirm, making the transition to
+CONFIRMED a live path.)
 
-10.3-B 블랙박스 원칙: 이 서비스는 strategies/strategy_purchases/
-strategy_listings만 조회하고 구매자별 실행 상태(FD-16 소관)는 전혀
-다루지 않는다 — 판매자가 구매자의 실행 데이터를 볼 경로 자체가 없다.
+10.3-B Black-box principle: This service queries only strategies,
+strategy_purchases, and strategy_listings, and does not handle buyer-level
+execution state (FD-16 responsibility) at all — there is no path for a
+seller to view a buyer's execution data.
 
-예외(FD-13.4): 판매자가 사후에 리스팅을 DELISTED해도 이미 CONFIRMED된
-구매의 접근권한은 유지된다 — 이 판정 로직이 listing.status를 전혀 보지
-않기 때문에 자연히 보장된다.
+Exception (FD-13.4): Even if the seller later DELISTs the listing, access
+authority for an already CONFIRMED purchase is maintained — this is
+naturally guaranteed because this determination logic does not inspect
+listing.status at all.
 """
 from __future__ import annotations
 
@@ -29,7 +34,7 @@ from pydantic import BaseModel
 
 
 class StrategyAccessError(Exception):
-    """FD-13.4 접근 거부 — 라우터가 403으로 변환."""
+    """FD-13.4 access denied — router converts to 403."""
 
 
 class StrategyDefinition(BaseModel):

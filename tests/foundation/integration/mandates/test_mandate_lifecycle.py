@@ -1,7 +1,6 @@
 """FND-02 Portfolio Mandate 통합테스트 — 실제 dev DB 대상. 71번 §7 "정상 흐름 +
 negative test"."""
 import asyncio
-import time
 from pathlib import Path
 
 import asyncpg
@@ -77,27 +76,36 @@ async def _tenant(pool):
     return await create_test_tenant(pool)
 
 
-_material_change_disclosure_revision_counter = int(time.time())
-
-
-def _next_material_change_disclosure_revision() -> int:
+async def _next_material_change_disclosure_revision(pool) -> int:
     """`get_active_disclosure()`(FND-01)는 purpose당 revision이 가장 큰 것 하나를
-    "최신"으로 취급한다 — 무작위 값은 나중에 실행되는 테스트가 먼저 실행된
-    테스트보다 우연히 더 작은 값을 뽑으면, 자기가 방금 동의한 게 아니라 다른
-    테스트의 (숫자만 더 큰) revision이 "최신"이 돼버려 곧바로
-    POLICY_CONSENT_STALE_REVISION으로 실패한다. 단조증가 카운터를 쓰면 이 파일
-    안에서 실행 순서대로 항상 "지금 막 만든 게 최신"이 보장된다."""
-    global _material_change_disclosure_revision_counter
-    _material_change_disclosure_revision_counter += 1
-    return _material_change_disclosure_revision_counter
+    "최신"으로 취급한다. 이전에는 모듈 임포트 시점에 `int(time.time())`로
+    한 번만 시드한 프로세스 내 카운터를 썼는데, 이 파일과 같은 purpose
+    문자열("portfolio_mandate_material_change")을 공유하는 다른 통합테스트
+    파일(tests/integration/test_foundation_mandates_router.py)도 독립적으로
+    `int(time.time())` 기반 revision을 커밋해 두면, 전체 스위트 한 번의
+    실행 안에서 이 카운터가 그 값을 추월하지 못하는 경우가 생겨 방금 만든
+    동의가 아니라 그 다른 파일이 남긴(숫자만 더 큰) revision이 "최신"으로
+    판정되고 곧바로 POLICY_CONSENT_STALE_REVISION으로 실패했다(order-dependent
+    flake — 격리 없이 공유하는 실 DB 위에서 프로세스 로컬 카운터로는 다른
+    파일의 쓰기를 볼 수 없다). tests/foundation/integration/mandates/
+    test_policy_repository.py의 `_consent_to_material_change`가 이미 쓰는
+    대로, 실행 시점에 DB의 현재 MAX(revision)을 조회해 +1 하면 이 파일이 무엇을
+    실행했든, 다른 파일이 그 사이 무엇을 커밋했든 "방금 만든 게 항상 최신"이
+    보장된다."""
+    async with pool.acquire() as conn:
+        current_max = await conn.fetchval(
+            "SELECT COALESCE(MAX(revision), 0) FROM disclosure WHERE purpose = $1",
+            "portfolio_mandate_material_change",
+        )
+    return current_max + 1
 
 
 async def _consent_to_material_change_disclosure(pool, trust_repo, tenant_id) -> None:
     """MATERIAL_CHANGE_CONSENT_PURPOSE(activate_revision.py)는 앱 상수라 여러
-    테스트가 같은 purpose 문자열을 공유한다 — disclosure.revision을 매번 단조
-    증가시켜 `UNIQUE(purpose, revision)` 충돌 없이, 그리고 "최신" 판정이 항상
-    이 호출 쪽을 가리키게 한다."""
-    revision = _next_material_change_disclosure_revision()
+    테스트가 같은 purpose 문자열을 공유한다 — disclosure.revision을 매번
+    DB의 현재 최댓값보다 크게 잡아 `UNIQUE(purpose, revision)` 충돌 없이,
+    그리고 "최신" 판정이 항상 이 호출 쪽을 가리키게 한다."""
+    revision = await _next_material_change_disclosure_revision(pool)
     await create_disclosure(pool, purpose="portfolio_mandate_material_change", revision=revision)
     trust_context = TrustTenantContext(
         tenant_id=tenant_id, subject_id=tenant_id, mfa_verified=True

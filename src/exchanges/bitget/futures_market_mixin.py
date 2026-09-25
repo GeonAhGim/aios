@@ -3,25 +3,29 @@
 Spec: 02b_bitget_api_v2_full_spec_v1.md §5.1(P0), §9(작업 분해 3번)
 
 `ExchangeAdapter` ABC에는 아직 없는 Bitget 전용 확장 메서드다(margin_mixin.py
-모듈 docstring과 동일 원칙). `productType`(Bitget V2 무기한 선물 상품
-구분자) 기본값은 `USDT-FUTURES`(가장 일반적인 USDT 담보 무기한 선물) —
-06번 §6.1-A 자산군 확장 원칙에 따라 다른 상품(COIN-FUTURES/USDC-FUTURES)은
-필요해지면 같은 함수에 파라미터로 그대로 전달.
+모듈 docstring과 동일 원칙). `productType` 기본값은 `USDT-FUTURES` —
+다른 상품(COIN-FUTURES/USDC-FUTURES)은 필요해지면 파라미터로 전달.
 
 엔드포인트(커뮤니티 SDK 레퍼런스 기준, 라이브 검증 필요):
-- GET /api/v2/mix/market/contracts
-- GET /api/v2/mix/market/ticker
-- GET /api/v2/mix/market/merge-depth
-- GET /api/v2/mix/market/candles
-- GET /api/v2/mix/market/current-fund-rate
+- GET /api/v2/mix/market/{contracts,ticker,merge-depth,candles,current-fund-rate}
+
+2026-09-25 task-6797(P6.line_cap) — remaining 4 GET methods moved to
+`futures_market_extra_mixin.py` (pure move, no behavior change).
 """
+
 from __future__ import annotations
 
 from datetime import datetime, timezone
 from decimal import Decimal
 from typing import Any
 
-from src.data.models.market_data import Candle, FundingRate, OrderBook, OrderBookLevel, Ticker
+from src.data.models.market_data import (
+    Candle,
+    FundingRate,
+    OrderBook,
+    OrderBookLevel,
+    Ticker,
+)
 from src.data.models.trading import FuturesContractInfo
 from src.exchanges.bitget.symbols import to_bitget_symbol as _to_bitget_symbol
 from src.exchanges.bitget.symbols import to_canonical_symbol as _to_canonical_symbol
@@ -29,10 +33,7 @@ from src.exchanges.common.http_client import SignedRequestClient
 
 DEFAULT_PRODUCT_TYPE = "USDT-FUTURES"
 
-# AIOS 표준 timeframe -> Bitget mix candles granularity(spot과 동일 규칙,
-# market_data_mixin.py의 _GRANULARITY_MAP 재사용하고 싶지만 순환 임포트
-# 방지를 위해 짧은 목록이라 이 파일에 복제 — 값 자체가 바뀌면 두 곳 다
-# 갱신 필요함을 docstring으로 남긴다).
+# market_data_mixin.py의 _GRANULARITY_MAP과 값 동기화 필요(순환 임포트 방지 위해 복제).
 _GRANULARITY_MAP = {
     "1m": "1m",
     "5m": "5m",
@@ -188,9 +189,7 @@ class BitgetFuturesMarketMixin:
         end_time: str | None = None,
         product_type: str = DEFAULT_PRODUCT_TYPE,
     ) -> list[Candle]:
-        """02b 스펙 §5.1(P0) — get_futures_candles()와 짝을 이루는 과거
-        캔들 조회(FD-2.3 백테스트 데이터, market_data_mixin.py의
-        get_history_candles()와 동일 목적의 Futures 버전)."""
+        """02b 스펙 §5.1(P0) — get_futures_candles()의 과거 캔들 버전(FD-2.3)."""
         granularity = _GRANULARITY_MAP.get(timeframe)
         if granularity is None:
             raise ValueError(f"지원하지 않는 timeframe: {timeframe}")
@@ -202,9 +201,7 @@ class BitgetFuturesMarketMixin:
         }
         if end_time is not None:
             params["endTime"] = end_time
-        raw = await self._request(
-            "GET", "/api/v2/mix/market/history-candles", params=params
-        )
+        raw = await self._request("GET", "/api/v2/mix/market/history-candles", params=params)
         return _rows_to_candles(raw["data"], symbol, timeframe)
 
     async def get_futures_history_funding_rate(
@@ -266,9 +263,7 @@ class BitgetFuturesMarketMixin:
     async def get_futures_position_lever_tiers(
         self: SignedRequestClient, symbol: str, *, product_type: str = DEFAULT_PRODUCT_TYPE
     ) -> list[dict[str, Any]]:
-        """02b 스펙 §5.1(P1) — 심볼별 레버리지 구간표. 구간별 필드가
-        제각각이라(최대레버리지/최대포지션/유지증거금율 등) 아직 모델화
-        하지 않는다(raw dict, get_fills와 동일 판단)."""
+        """02b 스펙 §5.1(P1) — 레버리지 구간표. 필드가 제각각이라 raw dict 유지."""
         raw = await self._request(
             "GET",
             "/api/v2/mix/market/query-position-lever",

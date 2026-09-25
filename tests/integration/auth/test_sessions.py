@@ -108,6 +108,102 @@ async def test_rotate_refresh_on_unknown_session_raises_reuse_detected(pool):
             )
 
 
+async def test_insert_session_rejects_duplicate_refresh_hash(pool):
+    """불변식: refresh_hash는 UNIQUE(§3.4) — 이미 쓰인 해시로 두 번째 세션을
+    만들려는 시도는 DB 제약에서 명시적으로 거부돼야 한다."""
+    user_id = await create_test_user(pool)
+    session = await _insert_session(pool, user_id)
+
+    async with pool.acquire() as conn:
+        with pytest.raises(asyncpg.UniqueViolationError):
+            await sessions.insert_session(
+                conn,
+                user_id=user_id,
+                tenant_id=user_id,
+                refresh_hash=session.refresh_hash,
+                ip_hash=None,
+                ua_hash=None,
+                expires_at=_expires_at(),
+            )
+
+
+async def test_insert_session_rejects_invalid_auth_level(pool):
+    """불변식: auth_level은 ('PASSWORD','MFA_VERIFIED')만 허용하는 CHECK 제약
+    (a9445f6ca04c) — 그 외 값은 애플리케이션 검증 이전에 DB에서 거부돼야 한다.
+    `insert_session()`의 `auth_level` 매개변수는 `Literal["PASSWORD",
+    "MFA_VERIFIED"]`라 잘못된 문자열을 타입 그대로 넘길 수 없으므로, CHECK
+    제약 자체를 직접 검증하기 위해 raw INSERT를 쓴다."""
+    user_id = await create_test_user(pool)
+    _plaintext, refresh_hash = TokenIssuer.issue_refresh()
+
+    async with pool.acquire() as conn:
+        with pytest.raises(asyncpg.CheckViolationError):
+            await conn.execute(
+                "INSERT INTO auth_session "
+                "(user_id, tenant_id, refresh_hash, auth_level, expires_at) "
+                "VALUES ($1, $2, $3, $4, $5)",
+                user_id,
+                user_id,
+                refresh_hash,
+                "ADMIN_BYPASS",
+                _expires_at(),
+            )
+
+
+async def test_insert_session_rejects_unknown_user_id(pool):
+    """불변식: user_id는 users(user_id) FK(a9445f6ca04c) — 존재하지 않는
+    사용자로 세션을 만드는 시도는 거부돼야 한다."""
+    unknown_user_id = uuid4()
+    _plaintext, refresh_hash = TokenIssuer.issue_refresh()
+
+    async with pool.acquire() as conn:
+        with pytest.raises(asyncpg.ForeignKeyViolationError):
+            await sessions.insert_session(
+                conn,
+                user_id=unknown_user_id,
+                tenant_id=unknown_user_id,
+                refresh_hash=refresh_hash,
+                ip_hash=None,
+                ua_hash=None,
+                expires_at=_expires_at(),
+            )
+
+
+async def test_rotate_refresh_reuse_detection_propagates_revoke_failure(pool, monkeypatch):
+    """실패주입: 재사용 감지 후 호출하는 `revoke()`의 `conn.execute`가 DB 의존성
+    예외로 실패하면, `rotate_refresh`는 그 예외를 그대로 전파해야 한다 —
+    삼켜서 `RefreshReuseDetected`로 위장하면 "세션을 revoke했다"는 거짓 보장이
+    되어(§3.4, 이 함수 docstring) 탈취된 세션이 활성 상태로 남는 fail-open이
+    된다."""
+    user_id = await create_test_user(pool)
+    session = await _insert_session(pool, user_id)
+    old_hash = session.refresh_hash
+    _second_plaintext, second_hash = TokenIssuer.issue_refresh()
+
+    async with pool.acquire() as conn:
+        await sessions.rotate_refresh(
+            conn, session.id, expected_hash=old_hash, new_hash=second_hash
+        )
+
+        original_execute = asyncpg.Connection.execute
+
+        async def _boom(
+            self: asyncpg.Connection, query: str, *args: object, **kwargs: object
+        ) -> object:
+            if "auth_session" in query:
+                raise ConnectionError("simulated dependency failure")
+            return await original_execute(self, query, *args, **kwargs)
+
+        monkeypatch.setattr(asyncpg.Connection, "execute", _boom)
+
+        # 옛 해시로 다시 회전을 시도 -> ConcurrencyConflictError -> revoke() 호출
+        # -> 그 conn.execute가 실패 -> 이 예외가 그대로 전파돼야 한다(삼켜지지 않음).
+        with pytest.raises(ConnectionError):
+            await sessions.rotate_refresh(
+                conn, session.id, expected_hash=old_hash, new_hash="cc" * 32
+            )
+
+
 async def test_revoke_is_idempotent(pool):
     user_id = await create_test_user(pool)
     session = await _insert_session(pool, user_id)

@@ -35,6 +35,7 @@ from src.core.security.break_glass import (
     BreakGlassMfaRequiredError,
     BreakGlassSelfApprovalError,
 )
+from src.foundation.trust.domain.rules.segregation_of_duty import assert_actor_not_counterparty
 from tests.integration.conftest import create_test_user
 
 
@@ -97,11 +98,22 @@ def _mfa_admin(user_id) -> AuthenticatedUser:
     )
 
 
+def _fresh() -> datetime:
+    return datetime.now(timezone.utc)
+
+
+def _stale() -> datetime:
+    """Just past MFA_STEP_UP_WINDOW (15min) -- task-3795: a session that
+    passed TOTP 16 minutes ago must be treated as unverified, not as the
+    still-"MFA_VERIFIED" JWT claim it would carry for up to 14 days."""
+    return datetime.now(timezone.utc) - timedelta(minutes=16)
+
+
 async def _request(pool, conn, requester_id, *, scope="credential_revoke", ttl_minutes=60):
     return await break_glass.request_grant(
         conn,
         requester_id=requester_id,
-        requester_auth_level="MFA_VERIFIED",
+        requester_mfa_verified_at=_fresh(),
         scope=scope,
         reason="incident-123",
         ttl_minutes=ttl_minutes,
@@ -121,7 +133,11 @@ async def test_request_approve_consume_happy_path(pool, spy_metrics):
         assert grant.state == "REQUESTED"
 
         approved = await break_glass.approve_grant(
-            conn, grant_id=grant.id, approver_id=approver_id, approver_auth_level="MFA_VERIFIED"
+            conn,
+            grant_id=grant.id,
+            approver_id=approver_id,
+            approver_mfa_verified_at=_fresh(),
+            check_segregation_of_duty=assert_actor_not_counterparty,
         )
         assert approved.state == "APPROVED"
         assert approved.approver_id == approver_id
@@ -146,7 +162,8 @@ async def test_self_approval_rejected_by_app_guard(pool):
                 conn,
                 grant_id=grant.id,
                 approver_id=requester_id,
-                approver_auth_level="MFA_VERIFIED",
+                approver_mfa_verified_at=_fresh(),
+                check_segregation_of_duty=assert_actor_not_counterparty,
             )
         # 거부 후에도 REQUESTED 상태 그대로(승인 처리가 일부라도 진행되지 않음).
         row = await conn.fetchrow(
@@ -214,7 +231,11 @@ async def test_double_consume_rejected(pool):
     async with pool.acquire() as conn:
         grant = await _request(pool, conn, requester_id)
         await break_glass.approve_grant(
-            conn, grant_id=grant.id, approver_id=approver_id, approver_auth_level="MFA_VERIFIED"
+            conn,
+            grant_id=grant.id,
+            approver_id=approver_id,
+            approver_mfa_verified_at=_fresh(),
+            check_segregation_of_duty=assert_actor_not_counterparty,
         )
         await break_glass.consume(conn, grant_id=grant.id, admin_id=admin_id)
         with pytest.raises(BreakGlassInvalidStateError, match="이미 소비"):
@@ -228,7 +249,11 @@ async def test_expired_grant_consume_rejected(pool):
     async with pool.acquire() as conn:
         grant = await _request(pool, conn, requester_id, ttl_minutes=1)
         await break_glass.approve_grant(
-            conn, grant_id=grant.id, approver_id=approver_id, approver_auth_level="MFA_VERIFIED"
+            conn,
+            grant_id=grant.id,
+            approver_id=approver_id,
+            approver_mfa_verified_at=_fresh(),
+            check_segregation_of_duty=assert_actor_not_counterparty,
         )
         # 실제 60초를 기다리지 않고 expires_at을 과거로 되돌려 만료를 재현한다
         # (실패 주입 -- 시계열 조건을 직접 조작).
@@ -245,10 +270,48 @@ async def test_request_grant_requires_mfa():
         await break_glass.request_grant(
             None,  # MFA 검사가 conn 접근보다 먼저 일어남을 증명(연결 없이도 거부)
             requester_id=uuid4(),
-            requester_auth_level="PASSWORD",
+            requester_mfa_verified_at=None,
             scope="tenant_read",
             reason="x",
         )
+
+
+# --- negative: stale MFA step-up rejected (task-3795) -----------------------
+
+
+async def test_request_grant_rejects_stale_mfa_step_up():
+    """task-3795: a JWT `auth_level="MFA_VERIFIED"` claim survives up to
+    REFRESH_TTL_DAYS(14) unchanged across refresh -- `mfa_verified_at` must be
+    re-checked for freshness on every call, not trusted as a one-time claim."""
+    with pytest.raises(BreakGlassMfaRequiredError):
+        await break_glass.request_grant(
+            None,
+            requester_id=uuid4(),
+            requester_mfa_verified_at=_stale(),
+            scope="tenant_read",
+            reason="x",
+        )
+
+
+async def test_approve_grant_rejects_stale_mfa_step_up(pool):
+    requester_id = await create_test_user(pool)
+    approver_id = await create_test_user(pool)
+    async with pool.acquire() as conn:
+        grant = await _request(pool, conn, requester_id)
+        with pytest.raises(BreakGlassMfaRequiredError):
+            await break_glass.approve_grant(
+                conn,
+                grant_id=grant.id,
+                approver_id=approver_id,
+                approver_mfa_verified_at=_stale(),
+                check_segregation_of_duty=assert_actor_not_counterparty,
+            )
+        # 거부 후에도 REQUESTED 상태 그대로(승인 처리가 일부라도 진행되지 않음).
+        row = await conn.fetchrow(
+            "SELECT state, approver_id FROM break_glass_grant WHERE id = $1", grant.id
+        )
+        assert row["state"] == "REQUESTED"
+        assert row["approver_id"] is None
 
 
 # --- failure injection: audit INSERT failure rolls back the whole approval --
@@ -278,7 +341,8 @@ async def test_audit_failure_rolls_back_approval(pool, monkeypatch):
                 conn,
                 grant_id=grant.id,
                 approver_id=approver_id,
-                approver_auth_level="MFA_VERIFIED",
+                approver_mfa_verified_at=_fresh(),
+                check_segregation_of_duty=assert_actor_not_counterparty,
             )
 
     async with pool.acquire() as conn:
@@ -292,6 +356,7 @@ async def test_audit_failure_rolls_back_approval(pool, monkeypatch):
 # --- performance assertion ---------------------------------------------------
 
 
+@pytest.mark.perf
 async def test_consume_latency_budget(pool):
     """단일 조건부 UPDATE(consume)는 관리자 작업치고 관대한 예산인 p95 100ms
     아래여야 한다(이 축은 §4 성능 예산 표에 별도 수치가 없어 임시로 정한
@@ -309,7 +374,8 @@ async def test_consume_latency_budget(pool):
                 conn,
                 grant_id=grant.id,
                 approver_id=approver_id,
-                approver_auth_level="MFA_VERIFIED",
+                approver_mfa_verified_at=_fresh(),
+                check_segregation_of_duty=assert_actor_not_counterparty,
             )
             started = time.perf_counter()
             await break_glass.consume(conn, grant_id=grant.id, admin_id=admin_id)
@@ -331,7 +397,11 @@ async def test_require_break_glass_consumes_grant_on_matching_scope(pool):
     async with pool.acquire() as conn:
         grant = await _request(pool, conn, requester_id, scope="credential_revoke")
         await break_glass.approve_grant(
-            conn, grant_id=grant.id, approver_id=approver_id, approver_auth_level="MFA_VERIFIED"
+            conn,
+            grant_id=grant.id,
+            approver_id=approver_id,
+            approver_mfa_verified_at=_fresh(),
+            check_segregation_of_duty=assert_actor_not_counterparty,
         )
 
     dependency = require_break_glass("credential_revoke")
@@ -347,7 +417,11 @@ async def test_require_break_glass_scope_mismatch_rejected(pool):
     async with pool.acquire() as conn:
         grant = await _request(pool, conn, requester_id, scope="tenant_read")
         await break_glass.approve_grant(
-            conn, grant_id=grant.id, approver_id=approver_id, approver_auth_level="MFA_VERIFIED"
+            conn,
+            grant_id=grant.id,
+            approver_id=approver_id,
+            approver_mfa_verified_at=_fresh(),
+            check_segregation_of_duty=assert_actor_not_counterparty,
         )
 
     dependency = require_break_glass("credential_revoke")

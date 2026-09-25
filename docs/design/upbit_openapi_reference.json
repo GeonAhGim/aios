@@ -1,0 +1,400 @@
+{
+  "endpoint_count": 39,
+  "endpoints": [
+    {
+      "description": "",
+      "kind": "REST",
+      "method": "GET",
+      "path": "/v1/accounts",
+      "request_params": [],
+      "response_schema": null,
+      "summary": "전체 계좌 조회",
+      "verified_status": 401
+    },
+    {
+      "description": "",
+      "kind": "REST",
+      "method": "GET",
+      "path": "/v1/api_keys",
+      "request_params": [],
+      "response_schema": null,
+      "summary": "API 키 리스트 조회",
+      "verified_status": 401
+    },
+    {
+      "description": "",
+      "kind": "REST",
+      "method": "GET",
+      "path": "/v1/candles/days",
+      "request_params": [],
+      "response_schema": null,
+      "summary": "일(Day) 캔들 조회",
+      "verified_status": 200
+    },
+    {
+      "description": "",
+      "kind": "REST",
+      "method": "GET",
+      "path": "/v1/candles/minutes/1",
+      "request_params": [],
+      "response_schema": null,
+      "summary": "분(Minute) 캔들 조회",
+      "verified_status": 200
+    },
+    {
+      "description": "",
+      "kind": "REST",
+      "method": "GET",
+      "path": "/v1/candles/months",
+      "request_params": [],
+      "response_schema": null,
+      "summary": "월(Month) 캔들 조회",
+      "verified_status": 200
+    },
+    {
+      "description": "",
+      "kind": "REST",
+      "method": "GET",
+      "path": "/v1/candles/seconds",
+      "request_params": [],
+      "response_schema": null,
+      "summary": "초(Second) 캔들 조회",
+      "verified_status": 200
+    },
+    {
+      "description": "",
+      "kind": "REST",
+      "method": "GET",
+      "path": "/v1/candles/weeks",
+      "request_params": [],
+      "response_schema": null,
+      "summary": "주(Week) 캔들 조회",
+      "verified_status": 200
+    },
+    {
+      "description": "",
+      "kind": "REST",
+      "method": "GET",
+      "path": "/v1/deposit",
+      "request_params": [],
+      "response_schema": null,
+      "summary": "개별 입금 조회",
+      "verified_status": 401
+    },
+    {
+      "description": "",
+      "kind": "REST",
+      "method": "GET",
+      "path": "/v1/deposits",
+      "request_params": [],
+      "response_schema": null,
+      "summary": "입금 리스트 조회",
+      "verified_status": 401
+    },
+    {
+      "description": "",
+      "kind": "REST",
+      "method": "GET",
+      "path": "/v1/deposits/coin_address",
+      "request_params": [],
+      "response_schema": null,
+      "summary": "개별 입금 주소 조회",
+      "verified_status": 401
+    },
+    {
+      "description": "",
+      "kind": "REST",
+      "method": "GET",
+      "path": "/v1/deposits/coin_addresses",
+      "request_params": [],
+      "response_schema": null,
+      "summary": "전체 입금 주소 조회",
+      "verified_status": 401
+    },
+    {
+      "description": "",
+      "kind": "REST",
+      "method": "POST",
+      "path": "/v1/deposits/generate_coin_address",
+      "request_params": [],
+      "response_schema": null,
+      "summary": "입금 주소 생성 요청",
+      "verified_status": 401
+    },
+    {
+      "description": "",
+      "kind": "REST",
+      "method": "POST",
+      "path": "/v1/deposits/krw",
+      "request_params": [],
+      "response_schema": null,
+      "summary": "원화 입금하기",
+      "verified_status": 401
+    },
+    {
+      "description": "",
+      "kind": "REST",
+      "method": "GET",
+      "path": "/v1/market/all",
+      "request_params": [],
+      "response_schema": null,
+      "summary": "마켓 코드 조회",
+      "verified_status": 200
+    },
+    {
+      "description": "",
+      "kind": "REST",
+      "method": "DELETE",
+      "path": "/v1/order",
+      "request_params": [],
+      "response_schema": null,
+      "summary": "주문 취소 접수",
+      "verified_status": 401
+    },
+    {
+      "description": "",
+      "kind": "REST",
+      "method": "GET",
+      "path": "/v1/order",
+      "request_params": [],
+      "response_schema": null,
+      "summary": "개별 주문 조회",
+      "verified_status": 401
+    },
+    {
+      "description": "",
+      "kind": "REST",
+      "method": "GET",
+      "path": "/v1/orderbook",
+      "request_params": [],
+      "response_schema": null,
+      "summary": "호가 정보 조회",
+      "verified_status": 200
+    },
+    {
+      "description": "",
+      "kind": "REST",
+      "method": "GET",
+      "path": "/v1/orderbook/instruments",
+      "request_params": [],
+      "response_schema": null,
+      "summary": "호가 모아보기 지원 정보 조회",
+      "verified_status": 200
+    },
+    {
+      "description": "",
+      "kind": "REST",
+      "method": "POST",
+      "path": "/v1/orders",
+      "request_params": [],
+      "response_schema": null,
+      "summary": "주문하기",
+      "verified_status": 401
+    },
+    {
+      "description": "",
+      "kind": "REST",
+      "method": "POST",
+      "path": "/v1/orders/cancel_and_new",
+      "request_params": [],
+      "response_schema": null,
+      "summary": "취소 후 재주문",
+      "verified_status": 401
+    },
+    {
+      "description": "",
+      "kind": "REST",
+      "method": "GET",
+      "path": "/v1/orders/chance",
+      "request_params": [],
+      "response_schema": null,
+      "summary": "주문 가능 정보 조회",
+      "verified_status": 401
+    },
+    {
+      "description": "",
+      "kind": "REST",
+      "method": "GET",
+      "path": "/v1/orders/closed",
+      "request_params": [],
+      "response_schema": null,
+      "summary": "종료된 주문 조회",
+      "verified_status": 401
+    },
+    {
+      "description": "",
+      "kind": "REST",
+      "method": "DELETE",
+      "path": "/v1/orders/open",
+      "request_params": [],
+      "response_schema": null,
+      "summary": "주문 일괄 취소 접수",
+      "verified_status": 401
+    },
+    {
+      "description": "",
+      "kind": "REST",
+      "method": "GET",
+      "path": "/v1/orders/open",
+      "request_params": [],
+      "response_schema": null,
+      "summary": "체결 대기 주문 조회",
+      "verified_status": 401
+    },
+    {
+      "description": "",
+      "kind": "REST",
+      "method": "GET",
+      "path": "/v1/orders/uuids",
+      "request_params": [],
+      "response_schema": null,
+      "summary": "UUID로 주문 리스트 조회",
+      "verified_status": 401
+    },
+    {
+      "description": "",
+      "kind": "REST",
+      "method": "GET",
+      "path": "/v1/status/wallet",
+      "request_params": [],
+      "response_schema": null,
+      "summary": "입출금 현황 조회",
+      "verified_status": 401
+    },
+    {
+      "description": "",
+      "kind": "REST",
+      "method": "GET",
+      "path": "/v1/ticker",
+      "request_params": [],
+      "response_schema": null,
+      "summary": "현재가 정보 조회",
+      "verified_status": 200
+    },
+    {
+      "description": "",
+      "kind": "REST",
+      "method": "GET",
+      "path": "/v1/trades/ticks",
+      "request_params": [],
+      "response_schema": null,
+      "summary": "최근 체결 내역 조회",
+      "verified_status": 200
+    },
+    {
+      "description": "",
+      "kind": "REST",
+      "method": "GET",
+      "path": "/v1/withdraw",
+      "request_params": [],
+      "response_schema": null,
+      "summary": "개별 출금 조회",
+      "verified_status": 401
+    },
+    {
+      "description": "",
+      "kind": "REST",
+      "method": "GET",
+      "path": "/v1/withdraws",
+      "request_params": [],
+      "response_schema": null,
+      "summary": "출금 리스트 조회",
+      "verified_status": 401
+    },
+    {
+      "description": "",
+      "kind": "REST",
+      "method": "GET",
+      "path": "/v1/withdraws/chance",
+      "request_params": [],
+      "response_schema": null,
+      "summary": "출금 가능 정보 조회",
+      "verified_status": 401
+    },
+    {
+      "description": "",
+      "kind": "REST",
+      "method": "POST",
+      "path": "/v1/withdraws/coin",
+      "request_params": [],
+      "response_schema": null,
+      "summary": "코인 출금하기",
+      "verified_status": 401
+    },
+    {
+      "description": "",
+      "kind": "REST",
+      "method": "GET",
+      "path": "/v1/withdraws/coin_addresses",
+      "request_params": [],
+      "response_schema": null,
+      "summary": "출금 허용 주소 조회",
+      "verified_status": 401
+    },
+    {
+      "description": "",
+      "kind": "REST",
+      "method": "POST",
+      "path": "/v1/withdraws/krw",
+      "request_params": [],
+      "response_schema": null,
+      "summary": "원화 출금하기",
+      "verified_status": 401
+    },
+    {
+      "description": "",
+      "kind": "WS",
+      "method": "WS:myAsset",
+      "path": "/websocket/v1",
+      "request_params": [],
+      "response_schema": null,
+      "summary": "실시간 내 자산(myAsset) 구독 -- 인증 필요",
+      "verified_status": 101
+    },
+    {
+      "description": "",
+      "kind": "WS",
+      "method": "WS:myOrder",
+      "path": "/websocket/v1",
+      "request_params": [],
+      "response_schema": null,
+      "summary": "실시간 내 주문/체결(myOrder) 구독 -- 인증 필요",
+      "verified_status": 101
+    },
+    {
+      "description": "",
+      "kind": "WS",
+      "method": "WS:orderbook",
+      "path": "/websocket/v1",
+      "request_params": [],
+      "response_schema": null,
+      "summary": "실시간 호가(orderbook) 구독",
+      "verified_status": 101
+    },
+    {
+      "description": "",
+      "kind": "WS",
+      "method": "WS:ticker",
+      "path": "/websocket/v1",
+      "request_params": [],
+      "response_schema": null,
+      "summary": "실시간 현재가(ticker) 구독",
+      "verified_status": 101
+    },
+    {
+      "description": "",
+      "kind": "WS",
+      "method": "WS:trade",
+      "path": "/websocket/v1",
+      "request_params": [],
+      "response_schema": null,
+      "summary": "실시간 체결(trade) 구독",
+      "verified_status": 101
+    }
+  ],
+  "extraction_method": "no public OpenAPI/Swagger JSON exists for docs.upbit.com (ReadMe.io SPA, requires an authenticated internal API to hydrate reference pages); entries are human-curated candidates confirmed live against api.upbit.com (REST: 200/401, WS: 101 handshake) -- unconfirmed candidates are dropped",
+  "fetched_at": "2026-09-25T09:47:14+00:00",
+  "source_url": "https://docs.upbit.com/kr/reference",
+  "spec_title": "Upbit Open API (Quotation/Exchange/WebSocket)",
+  "spec_version": "unversioned (curated + live-verified, not machine-parsed)"
+}

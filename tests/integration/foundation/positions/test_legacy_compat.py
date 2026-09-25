@@ -1,3 +1,5 @@
+# loc-allow: integration test file for legacy_positions_projection; 4 negative/invariant tests +
+#   failure-injection + performance assertions require substantial fixture/setup code
 """LegacyPositionsProjection 통합테스트 — 실 DB(TEST_DATABASE_URL) 대상.
 
 Spec: docs/specs/L4_market_data_positions_ledger_v1.0.md#§9.3 LB-10.
@@ -326,6 +328,7 @@ async def test_get_positions_propagates_connection_fault_without_swallowing(proj
         )
 
 
+@pytest.mark.perf
 async def test_get_positions_completes_within_latency_budget_for_many_reentries(pool, projection):
     """legacy 재진입(같은 계정·심볼, 서로 다른 `entry_time`)이 300건 쌓인
     계정에서도 조회가 예산 안에 끝나야 한다(수치 성능 단언) — 이전엔 DoD
@@ -412,6 +415,126 @@ async def test_different_exchange_same_symbol_not_leaked(pool, projection):
     assert len(projected) == 1
     assert projected[0].legacy_position_id == legacy_id_a
     assert projected[0].exchange == _EXCHANGE
+
+
+async def test_negative_zero_quantity_not_filtered_by_adapter(pool, projection):
+    """불변식 검증: LegacyPositionsProjection은 읽기 전용 투영 어댑터로
+    domain 불변식(quantity > 0)을 검증하지 않는다 — 이 테스트는 그 사실을
+    명시적으로 기록한다(음수 quantity 행이 투영되더라도 adapter는 전파할
+    뿐 필터링하지 않음). domain 검증은 journal_rules/snapshot_builder
+    쓰기 경로에서 해야 한다."""
+    tenant_id, account_id = await _setup_account(pool)
+    symbol = f"SYM{uuid.uuid4().hex[:8]}"
+    legacy_id, position_key = await _seed_linked_pair(
+        pool,
+        tenant_id=tenant_id,
+        account_id=account_id,
+        symbol=symbol,
+        quantity=Decimal("0"),
+        price=Decimal("100"),
+    )
+    # 수량을 음수로 변경 — 불변식 위반 입력
+    await force_row_replace(
+        pool,
+        table="positions",
+        id_column="id",
+        id_value=legacy_id,
+        quantity=Decimal("-5"),
+    )
+    await force_row_replace(
+        pool,
+        table="pos_snapshot",
+        id_column="position_key",
+        id_value=position_key,
+        quantity=Decimal("-5"),
+    )
+
+    projected = await _project(projection, pool, user_id=tenant_id, symbol=symbol)
+
+    # adapter는 읽기 전용: 음수 quantity 행도 투영한다(domain 검증 아님)
+    assert len(projected) == 1
+    assert projected[0].quantity == Decimal("-5"), (
+        "LegacyPositionsProjection is read-only — it projects what the DB holds "
+        "without domain validation; quantity > 0 check belongs in journal_rules."
+    )
+
+
+async def test_negative_test_mismatched_exchange_filter(pool, projection):
+    """불변식 위반: 다른 거래소 행이 같은 user_id·symbol로 존재해도
+    exchange 필터가 빠지면 유출된다 — exchange 파라미터를 무시하는
+    코드는 이 테스트에서 적색이 된다."""
+    tenant_id, account_id = await _setup_account(pool)
+    symbol = f"SYM{uuid.uuid4().hex[:8]}"
+    # TESTEX 행
+    legacy_main, _ = await _seed_linked_pair(
+        pool,
+        tenant_id=tenant_id,
+        account_id=account_id,
+        symbol=symbol,
+        quantity=Decimal("1"),
+        price=Decimal("10"),
+    )
+    # TESTEX-B 행 (같은 user_id·symbol)
+    await _seed_linked_pair(
+        pool,
+        tenant_id=tenant_id,
+        account_id=account_id,
+        symbol=symbol,
+        quantity=Decimal("999"),
+        price=Decimal("999"),
+        exchange=_EXCHANGE_B,
+    )
+
+    # TESTEX만 조회 — TESTEX-B가 유출되면 실패
+    projected = await _project(projection, pool, user_id=tenant_id, symbol=symbol)
+
+    assert len(projected) == 1
+    assert projected[0].legacy_position_id == legacy_main
+    assert projected[0].exchange == _EXCHANGE
+    assert projected[0].quantity != Decimal("999")
+
+
+async def test_negative_test_tenant_isolation_violation(pool, projection):
+    """불변식 위반: user_id(tenant_id) 필터가 빠지면 다른 테넌트의
+    포지션이 유출된다 — user_id=$1 바인딩이 없으면 이 테스트가 적색."""
+    tenant_a, account_a = await _setup_account(pool)
+    tenant_b, account_b = await _setup_account(pool)
+    symbol = f"SYM{uuid.uuid4().hex[:8]}"
+    legacy_b, _ = await _seed_linked_pair(
+        pool,
+        tenant_id=tenant_b,
+        account_id=account_b,
+        symbol=symbol,
+        quantity=Decimal("42"),
+        price=Decimal("42"),
+    )
+
+    # tenant_a로 조회 — tenant_b의 포지션이 유출되면 실패
+    projected = await _project(projection, pool, user_id=tenant_a, symbol=symbol)
+
+    assert projected == [] or all(row.legacy_position_id != legacy_b for row in projected), (
+        "Tenant B's position must not leak into Tenant A's query"
+    )
+
+
+async def test_failure_injection_db_connection_reset(pool, projection):
+    """실패주입: conn.fetch()가 OperationalError를 발생시키면 어댑터가
+    삼키지 않고 전파한다 — DB 연결이 갑자기 끊기는 상황을 시뮬레이션."""
+    import asyncpg
+
+    class _ConnectionReset:
+        async def fetch(self, *args, **kwargs):
+            raise asyncpg.exceptions.ConnectionDoesNotExistError(
+                {"description__": "connection reset"}
+            )
+
+    with pytest.raises(asyncpg.exceptions.ConnectionDoesNotExistError):
+        await projection.get_positions(
+            _ConnectionReset(),  # duck-typed conn; mypy flags unused-ignore
+            user_id=uuid.uuid4(),
+            symbol="ANY",
+            exchange=_EXCHANGE,
+        )
 
 
 async def test_concurrent_queries_for_different_tenants_stay_isolated(pool, projection):

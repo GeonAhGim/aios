@@ -1,4 +1,7 @@
 export { AiosApiClient, ApiError, buildApiError } from "./client";
+// task-4003(FE-OPS-10c): withExchange(client.ts에 합성)의 응답 타입을 소비 화면
+// (ExchangePositionsCard)이 쓸 수 있게 재수출한다 — task-4002가 남긴 승격 지점.
+export type { ExchangePosition, ExchangePositionMoney } from "./clients/exchange";
 export { keysToCamel, keysToSnake } from "./caseConvert";
 export { unwrap, EnvelopeFormatError, deriveFreshness } from "./envelope";
 export { configureUnauthorizedHandler, resetUnauthorizedGuard, configureTenantHeadersProvider } from "./http";
@@ -139,6 +142,12 @@ export type { AiClient } from "./clients/ai";
 // (ScreenerRouteNotImplementedError 참조, src/api/routers/screener.py 미구현, UX-6).
 export { createScreenerClient, ScreenerRouteNotImplementedError } from "./clients/screener";
 export type { ScreenerClient } from "./clients/screener";
+// task-5998(SIG-6): §9.1 신호 소스 시크릿 발급·회전·최근 수신 로그 클라이언트
+// (follow.ts와 동일 관용 — AiosApiClient 합성에는 얹지 않고 화면이
+// createSignalsClient로 직접 만든다). 런타임에는 유령 경로
+// (SignalsRouteNotImplementedError 참조, src/api/routers/signals.py 미구현, SIG-5).
+export { createSignalsClient, SignalsRouteNotImplementedError } from "./clients/signals";
+export type { SignalsClient } from "./clients/signals";
 // task-2696(UX-12): §2.3 가상 주문 영향 미리보기·리밸런싱 계획 클라이언트(screener.ts와
 // 동일 관용 — AiosApiClient 합성에는 얹지 않고 화면이 createWhatIfClient로 직접
 // 만든다). 런타임에는 유령 경로(WhatIfRouteNotImplementedError 참조,

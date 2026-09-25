@@ -141,6 +141,7 @@ async def test_tcp_eof_before_acceptance_preserves_state(order: ChildOrder) -> N
                 assert session.sent == {"accepted"}
 
 
+@pytest.mark.perf
 @pytest.mark.asyncio
 async def test_local_acceptance_performance(order: ChildOrder) -> None:
     """Local contract budget only, not network or venue throughput."""

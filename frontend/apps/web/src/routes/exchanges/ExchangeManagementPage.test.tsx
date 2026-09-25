@@ -15,6 +15,13 @@ vi.mock("@aios/shared-hooks", () => ({
   useRegisterExchangeCredential: () => ({ mutateAsync, isPending: false }),
   useRevokeExchangeCredential: () => ({ mutateAsync: revokeMutateAsync }),
   useExchangeBalance: () => ({ data: undefined }),
+  useExchangePositions: () => ({
+    data: undefined,
+    isLoading: false,
+    isError: false,
+    error: null,
+    refetch: vi.fn(),
+  }),
   useMe: () => ({ data: { email: "a@example.com" } }),
   useLogout: () => vi.fn(),
 }));

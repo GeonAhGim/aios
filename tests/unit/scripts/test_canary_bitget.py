@@ -519,6 +519,7 @@ def test_write_report_creates_file_under_out_dir(tmp_path: Path) -> None:
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.perf
 def test_evaluate_pretrade_gate_throughput_budget() -> None:
     limits = _limits()
     state = canary.CanarySessionState()

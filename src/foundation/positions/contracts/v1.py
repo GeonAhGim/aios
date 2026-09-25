@@ -1,18 +1,20 @@
-"""LB-1 — 포지션/PnL 원장(positions) 계약 v1.
+"""LB-1 — positions/PnL ledger contract v1.
 
 Spec: docs/specs/L4_market_data_positions_ledger_v1.0.md#§3.2 (B), §9 LB-1,
 107_contract_versioning_and_compatibility_standard_v1.0.md.
 
-이 모듈은 포지션 저널·스냅샷·PnL·NAV의 유일한 공개 표면이다.
-`domain/`은 이 파일을 import하지만, 이 파일은 `domain/`을 import하지
-않는다(71번 §4, FND-03·LC-1과 동일 원칙). 필드 추가는 minor(107번, 기본값
-필수) — 제거·의미 변경은 `v2` 모듈 신설.
+This module is the sole public surface for the position journal, snapshot,
+PnL, and NAV. `domain/` imports this file, but this file does not import
+`domain/` (same principle as doc 71 §4, FND-03/LC-1). Adding a field is
+minor (doc 107, default required) — removal or a meaning change requires a
+new `v2` module.
 
-금액·수량은 원시 `Decimal`이 아니라 `Money`(계좌 통화)로 표현하되,
-기준통화 환산값(`*_base` 필드)은 `Decimal`이다 — §3.4 "PnL 기준통화
-금액은 NUMERIC(30,10) 저장, 절대 반올림하지 않음"과 짝을 이룬다. 모든
-`datetime` 필드는 `AwareDatetime`으로 naive 값을 거부한다(tz-naive는
-거래소 응답을 잘못 해석했다는 신호이지 정상 입력이 아니다).
+Amounts and quantities are represented as `Money` (account currency)
+rather than a raw `Decimal`, while base-currency conversions (`*_base`
+fields) are `Decimal` — this pairs with §3.4 "PnL base-currency amounts
+are stored as NUMERIC(30,10) and never rounded." Every `datetime` field is
+`AwareDatetime`, rejecting naive values (a tz-naive value signals a
+misparsed exchange response, not a valid input).
 """
 from __future__ import annotations
 
@@ -44,24 +46,25 @@ class JournalEntryType(str, Enum):
 
 
 class PositionErrorCode(str, Enum):
-    """§3.2 에러 taxonomy(B) 8종. 각 값의 재시도 가능성·호출자 조치는
-    스펙 본문을 그대로 옮긴 주석을 참고한다 — 이 계약 파일은 코드만
-    정의하고, 실제 예외 클래스는 이를 사용하는 domain 리프(LB-2 이후)의
-    책임이다."""
+    """The 8 error-taxonomy codes from §3.2 (B). See the spec body for each
+    value's retryability and the caller's required action — the comments
+    here just carry that text over verbatim. This contract file only
+    defines the codes; the actual exception classes are owned by the
+    domain leaves that consume them (LB-2 onward)."""
 
-    IDEMPOTENT_REPLAY = "POS_IDEMPOTENT_REPLAY"  # 오류 아님, 기존 뷰 반환
-    IDEMPOTENCY_DIGEST_MISMATCH = "POS_IDEMPOTENCY_DIGEST_MISMATCH"  # 불가, 호출자 버그
-    SEQUENCE_CONFLICT = "POS_SEQUENCE_CONFLICT"  # 가능, 재조회 후 재시도
-    NEGATIVE_QUANTITY = "POS_NEGATIVE_QUANTITY"  # 불가, 현물 공매도 금지 — 주문 경로 버그
-    FX_RATE_MISSING = "POS_FX_RATE_MISSING"  # 가능, 환율 도착 후 — 0으로 대체 금지
-    MARK_STALE = "POS_MARK_STALE"  # 가능, 미실현은 None 유지
-    NAV_CHAIN_BROKEN = "POS_NAV_CHAIN_BROKEN"  # 불가, 운영 개입
-    ACCOUNT_UNKNOWN = "POS_ACCOUNT_UNKNOWN"  # 불가
+    IDEMPOTENT_REPLAY = "POS_IDEMPOTENT_REPLAY"  # Not an error, returns the existing view
+    IDEMPOTENCY_DIGEST_MISMATCH = "POS_IDEMPOTENCY_DIGEST_MISMATCH"  # Not retryable, caller bug
+    SEQUENCE_CONFLICT = "POS_SEQUENCE_CONFLICT"  # Retryable, re-fetch and retry
+    NEGATIVE_QUANTITY = "POS_NEGATIVE_QUANTITY"  # Not retryable, no spot shorting — order bug
+    FX_RATE_MISSING = "POS_FX_RATE_MISSING"  # Retryable once FX rate arrives — never substitute 0
+    MARK_STALE = "POS_MARK_STALE"  # Retryable, unrealized stays None
+    NAV_CHAIN_BROKEN = "POS_NAV_CHAIN_BROKEN"  # Not retryable, requires ops intervention
+    ACCOUNT_UNKNOWN = "POS_ACCOUNT_UNKNOWN"  # Not retryable
 
 
 class RecordFillCommand(BaseModel):
-    """`record_fill`(LB-11)의 입력. 멱등키는 `f"fill:{order_id}:{fill_seq}"`
-    (§5 저널 append 멱등성)."""
+    """Input for `record_fill` (LB-11). Idempotency key is
+    `f"fill:{order_id}:{fill_seq}"` (§5 journal append idempotency)."""
 
     tenant_id: UUID
     account_id: UUID
@@ -79,7 +82,7 @@ class RecordFillCommand(BaseModel):
 
 
 class RecordFundingCommand(BaseModel):
-    """`record_funding_fee`(LB-13)의 입력. 멱등키는
+    """Input for `record_funding_fee` (LB-13). Idempotency key is
     `f"funding:{funding_id}"`."""
 
     tenant_id: UUID
@@ -94,7 +97,7 @@ class RecordFundingCommand(BaseModel):
 
 
 class PositionJournalEntryView(BaseModel):
-    """append-only `pos_journal` 행 하나의 뷰(§4.3 저널 불변조건)."""
+    """View of a single append-only `pos_journal` row (§4.3 journal invariants)."""
 
     id: int
     position_key: str
@@ -117,7 +120,7 @@ class PositionJournalEntryView(BaseModel):
 
 
 class Lot(BaseModel):
-    """원가법 로트 하나(FIFO/WEIGHTED 공통 표현, LB-2/LB-3 소비)."""
+    """A single cost-basis lot (shared FIFO/WEIGHTED representation, consumed by LB-2/LB-3)."""
 
     quantity: Decimal
     unit_cost: Decimal
@@ -126,8 +129,8 @@ class Lot(BaseModel):
 
 
 class PositionSnapshotView(BaseModel):
-    """저널의 fold 결과(§4.3 "스냅샷 = fold(저널)"). 미실현 PnL은 마크
-    없으면 `None`(0 아님)."""
+    """The fold result of the journal (§4.3 "snapshot = fold(journal)").
+    Unrealized PnL is `None` (not 0) when there is no mark."""
 
     position_key: str
     tenant_id: UUID
@@ -161,8 +164,8 @@ class PnLBreakdown(BaseModel):
 
 
 class NAVSnapshot(BaseModel):
-    """일별 NAV 체인 한 행(§4.3 "전일 NAV + 손익 + 자금흐름 = 당일 NAV",
-    DB `CHECK(closing_nav = cash + positions_mv)`)."""
+    """One row of the daily NAV chain (§4.3 "prior-day NAV + PnL + cash
+    flows = current-day NAV", DB `CHECK(closing_nav = cash + positions_mv)`)."""
 
     account_id: UUID
     nav_date: date
@@ -182,8 +185,9 @@ class NAVSnapshot(BaseModel):
 
 
 class RebuildReport(BaseModel):
-    """`rebuild_snapshot`(LB-13) 결과 — 재빌드 전후 값이 다른 필드만
-    `drift`에 `(old, new)`로 기록한다(§4.3 재빌드 drift 검증)."""
+    """Result of `rebuild_snapshot` (LB-13) — only fields whose value
+    changed across the rebuild are recorded in `drift` as `(old, new)`
+    (§4.3 rebuild drift verification)."""
 
     position_key: str
     entries: int

@@ -3,16 +3,25 @@
 ADR-2026-09-04-D의 T3 종료 기준 1~10, ADR-2026-09-09-B로 추가된 11항
 (H-1~H-13 전부 CI 증빙으로 닫힘), ADR-2026-09-10-C Decision 5로 추가된 12항
 ("현재 main HEAD가 quality.yml에서 독립적으로 녹색" — 과거 어느 커밋이
-녹색이었는지와는 구분)을 각각 검사 함수로 판정해 PASS/FAIL과 증빙 경로를
+녹색이었는지와는 구분), ADR-2026-09-24-A Decision 4로 추가된 13항
+(J1~J3 Playwright 사용자 여정 테스트 존재 + test.fixme 0건 + --ci-report의
+frontend 단계 녹색)을 각각 검사 함수로 판정해 PASS/FAIL과 증빙 경로를
 마크다운 표로 출력한다.
 
 전부 저장소 안 정적 증거(파일 존재·grep·순수 모듈 import)만 본다 —
 `check_release_gate.py`·`check_audit_regressions.py`와 같은 방식으로
 DB·네트워크 접근이 없어 CI worktree에서도 그대로 돈다. "최근 CI 통과"·
 "Guard veto 0" 같이 저장소 밖 상태에 의존하는 항목은 이 스크립트 혼자서는
-완전히 판정할 수 없다 — `--ci-report`/`--guard-report`로 pm/ 쪽 JSON 리포트
-경로를 넘기면 그 값을 쓰고, 안 넘기면 "미검증(외부 리포트 미지정)"으로
-FAIL 처리한다(하나라도 적색이면 종결 불가라는 ADR-D 원칙 — 모른다=통과 아님).
+완전히 판정할 수 없다 — `--ci-report`(`pm/local_ci.py`가 쓰는
+`pm/ci/latest.json`, top-level `"ok": bool`)/`--guard-report`
+(`meta/guards/run_guards.py --json out.json`이 쓰는 `"vetoed": bool`) 경로를
+넘기면 그 값을 쓰고, 안 넘기면 "미검증(외부 리포트 미지정)"으로 FAIL
+처리한다(하나라도 적색이면 종결 불가라는 ADR-D 원칙 — 모른다=통과 아님).
+
+11번(하드닝 H-1~H-13)·12번(HEAD Actions 녹색)·마크다운 렌더링은
+`scripts/closeout/` 패키지로 분할됐다(task-6475, ADR-2026-09-10-C §7 LOC
+관측 임계 -- `scripts/consistency/`와 같은 전례). 이 파일은 1~10번 종료
+기준과 CLI 진입점만 담당한다.
 
 사용: `python scripts/closeout_check.py [--ci-report P] [--guard-report P] [--write PATH]
 [--live-head-check] [--trigger-head-recheck]`.
@@ -23,71 +32,110 @@ FAIL 처리한다(하나라도 적색이면 종결 불가라는 ADR-D 원칙 —
 
 from __future__ import annotations
 
+# ruff: noqa: E402 -- sys.path 보정(직접 실행 시 scripts/closeout.* 절대
+# 임포트를 가능하게 함)이 다른 임포트보다 먼저 실행돼야 한다.
 import argparse
 import importlib
 import json
 import re
 import subprocess
 import sys
-import time
-from collections.abc import Callable, Sequence
-from dataclasses import dataclass
+from collections.abc import Callable
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parents[1]
+_REPO_ROOT = Path(__file__).resolve().parents[1]
+if str(_REPO_ROOT) not in sys.path:
+    # `python scripts/closeout_check.py` 직접 실행 시 sys.path[0]은 scripts/가
+    # 된다 -- `scripts.closeout.*`를 절대 임포트로 쓰려면 저장소 루트가
+    # sys.path에 있어야 한다.
+    sys.path.insert(0, str(_REPO_ROOT))
+
+from scripts.closeout.common import (
+    CheckResult,
+    bench_passed,
+    grep,
+    has_test_def,
+    present_missing,
+    read_text,
+)
+from scripts.closeout.hardening import (
+    HardeningItem,
+    _h1_mandate_required,
+    _h2_cm_reporting_and_api,
+    _h3_nh_no_notimplemented,
+    _h4_backup_scripts,
+    _h5_supply_chain_gate,
+    _h6_dockerfiles,
+    _h7_e2e_suites,
+    _h8_property_tests,
+    _h9_dsr_pbo_regression,
+    _h10_alert_routing,
+    _h11_mandate_cache_invalidation,
+    _h12_legacy_wallet_bridge_sentinel,
+    _h13_env_config,
+    check_11_hardening,
+)
+from scripts.closeout.head_actions import (
+    check_12_head_actions_green,
+    default_gh_run,
+    trigger_head_workflow_dispatch,
+    wait_for_head_green,
+)
+from scripts.closeout.report import render_markdown, write_closeout_doc
+
+ROOT = _REPO_ROOT
 
 UNVERIFIED = "미검증(외부 리포트 미지정)"
 
+# 1~10번 종료 기준 함수는 scripts/closeout/common.py의 순수 헬퍼를 그대로 쓴다.
+_bench_passed = bench_passed
+_grep = grep
+_has_test_def = has_test_def
+_present_missing = present_missing
+_read = read_text
+_default_gh_run = default_gh_run
 
-@dataclass(frozen=True)
-class CheckResult:
-    key: str
-    title: str
-    passed: bool
-    evidence: tuple[str, ...]
-    detail: str
-
-
-# --------------------------------------------------------------------------- 공용 헬퍼
-
-
-def _read(p: Path) -> str:
-    try:
-        return p.read_text(encoding="utf-8", errors="replace")
-    except OSError:
-        return ""
-
-
-def _iter_py(repo_root: Path, *rels: str) -> list[Path]:
-    out: list[Path] = []
-    for rel in rels:
-        base = repo_root / rel
-        if base.is_file():
-            out.append(base)
-        elif base.is_dir():
-            out.extend(p for p in sorted(base.rglob("*.py")) if "__pycache__" not in p.parts)
-    return out
-
-
-def _has_test_def(repo_root: Path, rel: str) -> bool:
-    path = repo_root / rel
-    return path.is_file() and re.search(r"^\s*(async )?def test_", _read(path), re.M) is not None
-
-
-def _grep(repo_root: Path, rels: Sequence[str], pattern: str, flags: int = 0) -> list[str]:
-    rx = re.compile(pattern, flags)
-    hits: list[str] = []
-    for p in _iter_py(repo_root, *rels):
-        for i, line in enumerate(_read(p).splitlines(), 1):
-            if rx.search(line):
-                hits.append(f"{p.relative_to(repo_root).as_posix()}:{i}")
-    return hits
-
-
-def _present_missing(repo_root: Path, *rels: str) -> tuple[list[str], list[str]]:
-    present = [r for r in rels if (repo_root / r).exists()]
-    missing = [r for r in rels if r not in present]
-    return present, missing
+__all__ = [
+    "CheckResult",
+    "UNVERIFIED",
+    "HardeningItem",
+    "check_01_parity",
+    "check_02_safety_wiring",
+    "check_03_validation_gates",
+    "check_04_strategy_language",
+    "check_05_indicators",
+    "check_06_backtest_realism",
+    "check_07_execution",
+    "check_08_data",
+    "check_09_chart",
+    "check_10_ops",
+    "check_11_hardening",
+    "check_12_head_actions_green",
+    "check_13_user_journeys",
+    "JOURNEY_SPECS",
+    "trigger_head_workflow_dispatch",
+    "wait_for_head_green",
+    "render_markdown",
+    "write_closeout_doc",
+    "run_all",
+    "main",
+    "_load_bool_report",
+    "_check_invariants",
+    "_check_red_team_open",
+    "_h1_mandate_required",
+    "_h2_cm_reporting_and_api",
+    "_h3_nh_no_notimplemented",
+    "_h4_backup_scripts",
+    "_h5_supply_chain_gate",
+    "_h6_dockerfiles",
+    "_h7_e2e_suites",
+    "_h8_property_tests",
+    "_h9_dsr_pbo_regression",
+    "_h10_alert_routing",
+    "_h11_mandate_cache_invalidation",
+    "_h12_legacy_wallet_bridge_sentinel",
+    "_h13_env_config",
+]
 
 
 # --------------------------------------------------------------------------- 1~10: T3 종료 기준
@@ -157,13 +205,16 @@ def check_04_strategy_language(repo_root: Path) -> CheckResult:
     """기준4 — DSL property 테스트 + cond-v2 변환 동일성 + 컴파일 ≤300ms 벤치 결과."""
     property_test = _has_test_def(repo_root, "tests/unit/core/script/test_interpreter_property.py")
     cond_v2_hits = _grep(repo_root, ("tests/unit/core/script",), r"cond.?v2", re.I)
-    bench_present, bench_missing = _present_missing(repo_root, "docs/perf/dsl_compile_bench.json")
-    passed = property_test and bool(cond_v2_hits) and not bench_missing
+    bench_rel = "docs/perf/dsl_compile_bench.json"
+    bench_present, bench_missing = _present_missing(repo_root, bench_rel)
+    passed_bench = _bench_passed(repo_root, bench_rel)
+    passed = property_test and bool(cond_v2_hits) and not bench_missing and bool(passed_bench)
     evidence = [
         "tests/unit/core/script/test_interpreter_property.py",
         *cond_v2_hits,
         *bench_present,
         *bench_missing,
+        f"bench_passed={passed_bench}",
     ]
     parts = []
     if not property_test:
@@ -172,6 +223,8 @@ def check_04_strategy_language(repo_root: Path) -> CheckResult:
         parts.append("cond-v2 변환 동일성 테스트 없음")
     if bench_missing:
         parts.append(f"컴파일 ≤300ms 벤치 결과 파일 없음: {bench_missing[0]}")
+    elif not passed_bench:
+        parts.append(f"컴파일 ≤300ms 벤치 결과 passed=false: {bench_rel}")
     detail = "전략 언어 기준 통과" if passed else "; ".join(parts)
     return CheckResult("04_strategy_language", "전략 언어(DSL)", passed, tuple(evidence), detail)
 
@@ -227,16 +280,18 @@ def check_06_backtest_realism(repo_root: Path) -> CheckResult:
         r"slippage|fee_tier|funding|partial_fill|latency",
         re.I,
     )
-    bench_present, bench_missing = _present_missing(
-        repo_root, "docs/perf/backtest_instant_bench.json"
-    )
-    passed = bool(contract_hits) and not bench_missing
-    evidence = [*contract_hits[:10], *bench_present, *bench_missing]
+    bench_rel = "docs/perf/backtest_instant_bench.json"
+    bench_present, bench_missing = _present_missing(repo_root, bench_rel)
+    passed_bench = _bench_passed(repo_root, bench_rel)
+    passed = bool(contract_hits) and not bench_missing and bool(passed_bench)
+    evidence = [*contract_hits[:10], *bench_present, *bench_missing, f"bench_passed={passed_bench}"]
     parts = []
     if not contract_hits:
         parts.append("체결 현실성 계약 테스트 없음")
     if bench_missing:
         parts.append(f"즉시 백테스트 ≤5s 벤치 결과 파일 없음: {bench_missing[0]}")
+    elif not passed_bench:
+        parts.append(f"즉시 백테스트 ≤5s 벤치 결과 passed=false: {bench_rel}")
     detail = "백테스트 현실성 기준 통과" if passed else "; ".join(parts)
     return CheckResult("06_backtest_realism", "백테스트 현실성", passed, tuple(evidence), detail)
 
@@ -266,19 +321,29 @@ def check_07_execution(repo_root: Path) -> CheckResult:
 
 def check_08_data(repo_root: Path) -> CheckResult:
     """기준8 — instrument_id p95 200ms 벤치 + 커버리지 밖 fail-closed + 거래소 2곳 SPI 계약."""
-    bench_present, bench_missing = _present_missing(
-        repo_root, "docs/perf/instrument_lookup_bench.json"
-    )
+    bench_rel = "docs/perf/instrument_lookup_bench.json"
+    bench_present, bench_missing = _present_missing(repo_root, bench_rel)
+    passed_bench = _bench_passed(repo_root, bench_rel)
     coverage_hits = _grep(
         repo_root, ("tests",), r"coverage.*(fail.?closed|deny)|out.?of.?coverage", re.I
     )
     spi_dirs = ("tests/exchanges", "tests/unit/exchanges", "tests/integration/exchanges")
     spi_hits = _grep(repo_root, spi_dirs, r"def test_.*(contract|spi)", re.I)
-    passed = not bench_missing and bool(coverage_hits) and len(spi_hits) > 0
-    evidence = [*bench_present, *bench_missing, *coverage_hits[:5], *spi_hits[:10]]
+    passed = (
+        not bench_missing and bool(passed_bench) and bool(coverage_hits) and len(spi_hits) > 0
+    )
+    evidence = [
+        *bench_present,
+        *bench_missing,
+        f"bench_passed={passed_bench}",
+        *coverage_hits[:5],
+        *spi_hits[:10],
+    ]
     parts = []
     if bench_missing:
         parts.append(f"instrument_id p95 200ms 벤치 결과 파일 없음: {bench_missing[0]}")
+    elif not passed_bench:
+        parts.append(f"instrument_id p95 200ms 벤치 결과 passed=false: {bench_rel}")
     if not coverage_hits:
         parts.append("커버리지 밖 요청 fail-closed 테스트 없음")
     if not spi_hits:
@@ -308,9 +373,17 @@ def check_09_chart(repo_root: Path) -> CheckResult:
 def check_10_ops(
     repo_root: Path, *, ci_report: Path | None, guard_report: Path | None
 ) -> CheckResult:
-    """기준10 — 로컬 CI 녹색 + Guard veto 0 + INVARIANTS 위반 0 + RED_TEAM P0 미해결 0."""
-    ci_ok, ci_note = _load_bool_report(ci_report, "passed")
-    guard_ok, guard_note = _load_bool_report(guard_report, "veto_count", expect_zero=True)
+    """기준10 — 로컬 CI 녹색 + Guard veto 0 + INVARIANTS 위반 0 + RED_TEAM P0 미해결 0.
+
+    ci_report 키(`"ok"`)·guard_report 키(`"vetoed"`)는 실제 산출 스크립트의
+    스키마를 그대로 따른다 — `pm/local_ci.py`(top-level `"ok": bool`)와
+    `meta/guards/run_guards.py --json out.json`(`Report.to_json()`의
+    `"vetoed": bool`). 이전에는 `{"passed": bool}`/`{"veto_count": int}`를
+    기대했는데, 두 산출 스크립트 어디에도 그런 키를 쓰는 곳이 없어 리포트를
+    넘겨도 항상 FAIL로 오판정했다(task-6497 근본 원인).
+    """
+    ci_ok, ci_note = _load_bool_report(ci_report, "ok")
+    guard_ok, guard_note = _load_bool_report(guard_report, "vetoed", invert=True)
     invariants_ok, invariants_note = _check_invariants(repo_root)
     red_team_ok, red_team_note = _check_red_team_open(repo_root)
 
@@ -321,8 +394,14 @@ def check_10_ops(
 
 
 def _load_bool_report(
-    path: Path | None, key: str, *, expect_zero: bool = False
+    path: Path | None, key: str, *, expect_zero: bool = False, invert: bool = False
 ) -> tuple[bool, str]:
+    """`key`가 가리키는 값을 읽어 PASS 여부를 판정한다.
+
+    `expect_zero`: 값이 정수 0이어야 PASS(레거시 카운터 스키마용).
+    `invert`: 값이 falsy여야 PASS(예: `"vetoed": false` — veto 없음이 통과).
+    기본은 값이 truthy여야 PASS.
+    """
     if path is None:
         return False, UNVERIFIED
     if not path.is_file():
@@ -335,6 +414,9 @@ def _load_bool_report(
     if expect_zero:
         ok = isinstance(value, int) and value == 0
         return ok, f"OK {key}=0" if ok else f"{key}={value!r} (0이어야 함): {path}"
+    if invert:
+        ok = not bool(value)
+        return ok, f"OK {key}=False" if ok else f"{key}={value!r} (False여야 함): {path}"
     ok = bool(value)
     return ok, f"OK {key}=True" if ok else f"{key}={value!r}: {path}"
 
@@ -374,6 +456,61 @@ def _check_red_team_open(repo_root: Path) -> tuple[bool, str]:
     return ok, "OK RED_TEAM 미해결 0" if ok else f"RED_TEAM_FINDINGS.md 미해결(OPEN) {open_count}건"
 
 
+JOURNEY_SPECS: tuple[str, ...] = (
+    "frontend/e2e/journey-j1-onboarding-to-dashboard.spec.ts",
+    "frontend/e2e/journey-j2-discover-to-backtest.spec.ts",
+    "frontend/e2e/journey-j3-paper-order-to-position.spec.ts",
+)
+
+
+def _load_ci_step_ok(path: Path | None, step: str) -> tuple[bool, str]:
+    """`--ci-report`의 `steps.<step>.ok`를 읽는다(`_load_bool_report`는 top-level
+    키만 보므로 별도 헬퍼 -- `pm/local_ci.py` 산출 `pm/ci/latest.json`은
+    `{"steps": {"frontend": {"ok": bool, ...}, ...}}` 형태다)."""
+    if path is None:
+        return False, UNVERIFIED
+    if not path.is_file():
+        return False, f"리포트 없음: {path}"
+    try:
+        data = json.loads(_read(path))
+    except json.JSONDecodeError:
+        return False, f"리포트 JSON 파싱 실패: {path}"
+    steps = data.get("steps")
+    step_data = steps.get(step) if isinstance(steps, dict) else None
+    if not isinstance(step_data, dict):
+        return False, f"steps.{step} 없음: {path}"
+    ok = bool(step_data.get("ok"))
+    if ok:
+        return True, f"OK steps.{step}.ok=True"
+    return False, f"steps.{step}.ok={step_data.get('ok')!r}: {path}"
+
+
+def check_13_user_journeys(repo_root: Path, *, ci_report: Path | None) -> CheckResult:
+    """기준13(ADR-2026-09-24-A Decision 4) — J1~J3 Playwright 여정 테스트 존재 +
+    `test.fixme` 0건 + `--ci-report`의 `steps.journeys.ok` 녹색
+    (pm/local_ci full 모드 J1~J3 단계, task-7145).
+
+    리포트를 넘기지 않으면(다른 항목들과 같은 ADR-D 원칙) "미검증(외부 리포트
+    미지정)"으로 FAIL 처리한다 — 모른다=통과 아님.
+    """
+    present, missing = _present_missing(repo_root, *JOURNEY_SPECS)
+    fixme_hits = [p for p in present if "test.fixme" in _read(repo_root / p)]
+    # task-7145: pm/local_ci full 모드가 J1~J3만 따로 돌려 steps.journeys에 기록한다 —
+    # steps.frontend.ok(lint/build/vitest)는 여정을 실제로 실행했다는 증거가 아니었다.
+    journeys_ok, journeys_note = _load_ci_step_ok(ci_report, "journeys")
+    passed = not missing and not fixme_hits and journeys_ok
+    evidence = [*present, *missing, *(f"FIXME:{p}" for p in fixme_hits), journeys_note]
+    parts = []
+    if missing:
+        parts.append(f"여정 테스트 파일 누락: {', '.join(missing)}")
+    if fixme_hits:
+        parts.append(f"test.fixme 존재: {', '.join(fixme_hits)}")
+    if not journeys_ok:
+        parts.append(f"여정 CI 단계(steps.journeys) 미확인/적색: {journeys_note}")
+    detail = "J1~J3 여정 테스트 기준 통과" if passed else "; ".join(parts)
+    return CheckResult("13_user_journeys", "사용자 여정(J1~J3)", passed, tuple(evidence), detail)
+
+
 CHECKS_1_10: tuple[Callable[..., CheckResult], ...] = (
     check_01_parity,
     check_02_safety_wiring,
@@ -387,395 +524,7 @@ CHECKS_1_10: tuple[Callable[..., CheckResult], ...] = (
 )
 
 
-# --------------------------------------------------------------------------- 11번째: 하드닝
-
-
-@dataclass(frozen=True)
-class HardeningItem:
-    id: str
-    label: str
-    check: Callable[[Path], tuple[bool, str]]
-
-
-def _h1_mandate_required(repo_root: Path) -> tuple[bool, str]:
-    hits = _grep(repo_root, ("src/api", "src/services"), r"require_mandate\s*=\s*False")
-    hits = [h for h in hits if "wiring.py:14" not in h]
-    if not hits:
-        return True, "require_mandate=False 0건"
-    return False, f"require_mandate=False {len(hits)}건: {hits[0]}"
-
-
-def _h2_cm_reporting_and_api(repo_root: Path) -> tuple[bool, str]:
-    present, missing = _present_missing(
-        repo_root,
-        "src/foundation/reporting/domain/trade_report.py",
-        "src/foundation/reporting/ports/report_submitter.py",
-        "src/api/routers/compliance.py",
-        "frontend/src/pages/CompliancePage.tsx",
-        "tests/adversarial/compliance",
-    )
-    if not missing:
-        return True, "CM-15~20 전부 존재"
-    return False, f"CM-15~20 누락: {', '.join(missing)}"
-
-
-def _h3_nh_no_notimplemented(repo_root: Path) -> tuple[bool, str]:
-    hits = _grep(repo_root, ("src/exchanges/nh",), r"raise NotImplementedError")
-    if not hits:
-        return True, "NH get_order NotImplementedError 0건"
-    return False, f"NH NotImplementedError {len(hits)}건: {hits[0]}"
-
-
-def _h4_backup_scripts(repo_root: Path) -> tuple[bool, str]:
-    present, missing = _present_missing(
-        repo_root,
-        "scripts/backup/pg_basebackup.py",
-        "scripts/backup/wal_archive.py",
-        "scripts/backup/restore_drill.py",
-    )
-    if not missing:
-        return True, "백업/복구 스크립트 존재"
-    return False, f"누락: {', '.join(missing)}"
-
-
-def _h5_supply_chain_gate(repo_root: Path) -> tuple[bool, str]:
-    text = _read(repo_root / ".github" / "workflows" / "quality.yml")
-    dependabot = (repo_root / ".github" / "dependabot.yml").is_file()
-    ok = "run_pip_audit" in text and "npm audit" in text and dependabot
-    if ok:
-        return True, "공급망 게이트 배선 확인"
-    return False, "pip-audit/npm audit/dependabot 중 미배선 항목 있음"
-
-
-def _h6_dockerfiles(repo_root: Path) -> tuple[bool, str]:
-    present, missing = _present_missing(
-        repo_root,
-        "Dockerfile.api",
-        "Dockerfile.worker",
-        "Dockerfile.frontend",
-        "compose.prod.yml",
-    )
-    if not missing:
-        return True, "Dockerfile/compose.prod.yml 존재"
-    dockerfiles = list(repo_root.glob("Dockerfile*")) + list(repo_root.glob("**/Dockerfile"))
-    if dockerfiles:
-        return False, f"일부 Dockerfile 존재하나 규격 미충족: {missing}"
-    return False, "Dockerfile 0건, compose.prod.yml 없음"
-
-
-def _h7_e2e_suites(repo_root: Path) -> tuple[bool, str]:
-    backend_e2e = len(_grep(repo_root, ("tests/e2e",), r"^\s*(async )?def test_"))
-    playwright_present = (repo_root / "frontend" / "playwright.config.ts").is_file()
-    ok = backend_e2e >= 3 and playwright_present
-    return ok, (
-        f"백엔드 e2e {backend_e2e}건, playwright 설정 존재"
-        if ok
-        else f"백엔드 e2e {backend_e2e}건(<3) 또는 playwright 설정 없음"
-    )
-
-
-def _h8_property_tests(repo_root: Path) -> tuple[bool, str]:
-    hits = _grep(
-        repo_root,
-        (
-            "tests/unit/core/ledger",
-            "tests/foundation/unit/ledger",
-            "tests/unit/core/risk",
-            "tests/unit/core/portfolio",
-        ),
-        r"hypothesis|given\(",
-    )
-    ok = bool(hits)
-    if ok:
-        return True, f"hypothesis property 테스트 {len(hits)}건"
-    return False, "ledger/risk/position 축 hypothesis 테스트 없음"
-
-
-def _h9_dsr_pbo_regression(repo_root: Path) -> tuple[bool, str]:
-    rel = "tests/foundation/unit/backtest/test_overfitting.py"
-    text = _read(repo_root / rel)
-    ok = "0.9004" in text and "0.9505" in text
-    if ok:
-        return True, "Bailey & Lopez de Prado 수치 회귀 확인"
-    return False, "논문 수치 회귀 테스트 없음/불일치"
-
-
-def _h10_alert_routing(repo_root: Path) -> tuple[bool, str]:
-    text = _read(repo_root / "config" / "observability" / "alert_rules.yaml")
-    hits = _grep(repo_root, ("config/observability",), r"webhook|slack|pagerduty", re.I)
-    ok = bool(hits) or bool(re.search(r"webhook|slack|pagerduty", text, re.I))
-    if ok:
-        return True, "알림 라우팅 웹훅 배선 확인"
-    return False, "alert_rules가 pager/slack 웹훅에 연결되지 않음"
-
-
-def _h11_mandate_cache_invalidation(repo_root: Path) -> tuple[bool, str]:
-    hits = _grep(repo_root, ("src/services", "src/foundation"), r"mandate.*(cache|invalidat)", re.I)
-    race_test = bool(_grep(repo_root, ("tests",), r"mandate.*(cache|stale)", re.I))
-    ok = bool(hits) and race_test
-    if ok:
-        return True, "mandate 캐시 무효화 배선+경합 테스트 확인"
-    return False, "mandate 캐시 이벤트 기반 무효화 또는 경합 테스트 없음"
-
-
-def _h12_legacy_wallet_bridge_sentinel(repo_root: Path) -> tuple[bool, str]:
-    path = repo_root / "src" / "foundation" / "ledger" / "adapters" / "legacy_wallet_bridge.py"
-    text = _read(path)
-    placeholder_cast = bool(re.search(r"cast\(\s*asyncpg\.Pool\s*,\s*None\s*\)", text))
-    return not placeholder_cast, (
-        "pool 주입 정식화 확인"
-        if not placeholder_cast
-        else "여전히 cast(asyncpg.Pool, None) placeholder 사용 중"
-    )
-
-
-def _h13_env_config(repo_root: Path) -> tuple[bool, str]:
-    present, missing = _present_missing(
-        repo_root, "config/dev.yaml", "config/staging.yaml", "config/live.yaml"
-    )
-    if not missing:
-        return True, "env별 설정 파일 존재"
-    return False, f"누락: {', '.join(missing)}"
-
-
-HARDENING_ITEMS: tuple[HardeningItem, ...] = (
-    HardeningItem("H-1", "mandate 바인딩 require_mandate=True", _h1_mandate_required),
-    HardeningItem("H-2", "CM-11/15/16/17/20 완결", _h2_cm_reporting_and_api),
-    HardeningItem("H-3", "NH get_order REST 재조회", _h3_nh_no_notimplemented),
-    HardeningItem("H-4", "백업·PITR·복구 리허설", _h4_backup_scripts),
-    HardeningItem("H-5", "공급망 취약점 게이트", _h5_supply_chain_gate),
-    HardeningItem("H-6", "Dockerfile/compose.prod", _h6_dockerfiles),
-    HardeningItem("H-7", "backend e2e 3 + Playwright 3", _h7_e2e_suites),
-    HardeningItem("H-8", "hypothesis property 테스트", _h8_property_tests),
-    HardeningItem("H-9", "Deflated Sharpe/PBO 원문 검증", _h9_dsr_pbo_regression),
-    HardeningItem("H-10", "alert_rules pager/slack 라우팅", _h10_alert_routing),
-    HardeningItem("H-11", "mandate 캐시 즉시 무효화", _h11_mandate_cache_invalidation),
-    HardeningItem("H-12", "legacy_wallet_bridge sentinel", _h12_legacy_wallet_bridge_sentinel),
-    HardeningItem("H-13", "env별 설정 분리", _h13_env_config),
-)
-
-
-def check_11_hardening(
-    repo_root: Path, *, items: tuple[HardeningItem, ...] = HARDENING_ITEMS
-) -> CheckResult:
-    """기준11(ADR-2026-09-09-B) — 하드닝 H-1~H-13 전부 닫힘."""
-    evidence: list[str] = []
-    all_ok = True
-    for item in items:
-        ok, note = item.check(repo_root)
-        all_ok = all_ok and ok
-        mark = "PASS" if ok else "FAIL"
-        evidence.append(f"[{mark}] {item.id} {item.label}: {note}")
-    fail_ids = [e.split()[1] for e in evidence if e.startswith("[FAIL]")]
-    detail = "H-1~H-13 전부 닫힘" if all_ok else f"미완료: {', '.join(fail_ids)}"
-    title = "하드닝(ADR-09-09-B H-1~13)"
-    return CheckResult("11_hardening", title, all_ok, tuple(evidence), detail)
-
-
-# --------------------------------------------------------------------------- 12: HEAD Actions 녹색
-
-
-GH_QUALITY_WORKFLOW = "quality.yml"
-HEAD_WAIT_TIMEOUT_SEC = 40 * 60
-HEAD_WAIT_POLL_SEC = 30.0
-
-GhRunner = Callable[[Sequence[str]], "subprocess.CompletedProcess[str]"]
-
-
-@dataclass(frozen=True)
-class ActionsRun:
-    head_sha: str
-    conclusion: str | None
-    status: str
-    url: str
-
-
-def _default_gh_run(args: Sequence[str]) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(  # noqa: S603,S607 - 고정 gh 서브커맨드, 사용자 입력 없음
-        ["gh", *args],
-        capture_output=True,
-        text=True,
-        encoding="utf-8",
-        errors="replace",
-        timeout=60,
-    )
-
-
-def _default_git_head(repo_root: Path) -> str | None:
-    result = subprocess.run(  # noqa: S603,S607 - 고정 git 서브커맨드, 사용자 입력 없음
-        ["git", "rev-parse", "HEAD"],
-        cwd=repo_root,
-        capture_output=True,
-        text=True,
-        encoding="utf-8",
-        errors="replace",
-        timeout=30,
-    )
-    if result.returncode != 0:
-        return None
-    sha = result.stdout.strip()
-    return sha or None
-
-
-def _list_quality_runs(gh_run: GhRunner, *, limit: int = 20) -> list[ActionsRun] | None:
-    result = gh_run(
-        [
-            "run",
-            "list",
-            "--workflow",
-            GH_QUALITY_WORKFLOW,
-            "--json",
-            "headSha,conclusion,status,url",
-            "--limit",
-            str(limit),
-        ]
-    )
-    if result.returncode != 0:
-        return None
-    try:
-        rows = json.loads(result.stdout)
-    except json.JSONDecodeError:
-        return None
-    return [
-        ActionsRun(
-            head_sha=row.get("headSha", ""),
-            conclusion=row.get("conclusion") or None,
-            status=row.get("status", ""),
-            url=row.get("url", ""),
-        )
-        for row in rows
-    ]
-
-
-def check_12_head_actions_green(
-    repo_root: Path,
-    *,
-    gh_run: GhRunner | None = None,
-    git_head: Callable[[Path], str | None] = _default_git_head,
-) -> CheckResult:
-    """기준12(ADR-2026-09-10-C Decision 5) — 현재 main HEAD가 quality.yml에서 success.
-
-    "최근 어떤 커밋이 녹색이었나"와 구분한다: 과거에 성공한 실행이 있어도
-    그 headSha가 지금의 HEAD와 다르면 FAIL이다 — 그 사이 커밋들은 Actions
-    독립 환경에서 아직 검증되지 않았을 수 있다. `gh` 호출은 네트워크·GitHub
-    인증에 의존하므로 이 함수 혼자서는 완전히 판정할 수 없다 — 이 스크립트의
-    다른 정적 검사와 달리 `gh_run`을 명시적으로 넘겨야 실제로 조회한다
-    (안 넘기면 UNVERIFIED로 FAIL — 모른다=통과 아님, ADR-D 원칙).
-    """
-    key, title = "12_head_actions_green", "현재 HEAD Actions 녹색"
-    head_sha = git_head(repo_root)
-    if head_sha is None:
-        return CheckResult(key, title, False, (), "git rev-parse HEAD 실패 — 저장소 아님/git 없음")
-    if gh_run is None:
-        return CheckResult(
-            key,
-            title,
-            False,
-            (f"head={head_sha}", UNVERIFIED),
-            f"{UNVERIFIED}: --live-head-check 없이는 gh를 호출하지 않는다",
-        )
-    runs = _list_quality_runs(gh_run)
-    if runs is None:
-        return CheckResult(
-            key,
-            title,
-            False,
-            (f"head={head_sha}",),
-            "gh run list 실패(네트워크/인증 문제로 추정) — 미검증",
-        )
-    match = next((r for r in runs if r.head_sha == head_sha), None)
-    if match is None:
-        recent_note = (
-            f"최근 실행 headSha={runs[0].head_sha[:8]}({runs[0].conclusion})"
-            if runs
-            else "quality.yml 실행 이력 없음"
-        )
-        return CheckResult(
-            key,
-            title,
-            False,
-            (f"head={head_sha}", recent_note),
-            f"HEAD({head_sha[:8]})에 대한 quality.yml 실행 없음 — {recent_note}"
-            "(다른 커밋이 녹색인 것과는 구분)",
-        )
-    passed = match.conclusion == "success"
-    evidence = (f"head={head_sha}", f"run_url={match.url}", f"conclusion={match.conclusion}")
-    detail = (
-        f"HEAD({head_sha[:8]})가 quality.yml에서 success: {match.url}"
-        if passed
-        else f"HEAD({head_sha[:8]}) quality.yml conclusion={match.conclusion}: {match.url}"
-    )
-    return CheckResult(key, title, passed, evidence, detail)
-
-
-def trigger_head_workflow_dispatch(
-    gh_run: GhRunner = _default_gh_run, *, ref: str = "main"
-) -> bool:
-    """`quality.yml`을 workflow_dispatch로 수동 트리거한다(HEAD 재검증 스크립트)."""
-    result = gh_run(["workflow", "run", GH_QUALITY_WORKFLOW, "--ref", ref])
-    return result.returncode == 0
-
-
-def wait_for_head_green(
-    repo_root: Path,
-    *,
-    gh_run: GhRunner = _default_gh_run,
-    git_head: Callable[[Path], str | None] = _default_git_head,
-    sleep: Callable[[float], None] = time.sleep,
-    now: Callable[[], float] = time.monotonic,
-    timeout_sec: float = HEAD_WAIT_TIMEOUT_SEC,
-    poll_sec: float = HEAD_WAIT_POLL_SEC,
-) -> CheckResult:
-    """HEAD가 이미 녹색이면 그대로 반환하고, 아니면 workflow_dispatch로 재검증을
-    트리거한 뒤 최대 `timeout_sec`(기본 40분) 폴링하며 결과를 기다린다.
-
-    Actions 스케줄(3시간 주기)을 기다리지 않고 지금 이 HEAD를 즉시 재검증하기
-    위한 수동 트리거 경로 — closeout 직전 "혹시 아직 한 번도 안 돌았나"를
-    확인할 때 쓴다.
-    """
-    result = check_12_head_actions_green(repo_root, gh_run=gh_run, git_head=git_head)
-    if result.passed:
-        return result
-    head_sha = git_head(repo_root)
-    if head_sha is None:
-        return result
-    if not trigger_head_workflow_dispatch(gh_run):
-        return CheckResult(
-            result.key,
-            result.title,
-            False,
-            result.evidence,
-            f"{result.detail}; workflow_dispatch 트리거 실패",
-        )
-    deadline = now() + timeout_sec
-    while now() < deadline:
-        sleep(poll_sec)
-        runs = _list_quality_runs(gh_run)
-        if not runs:
-            continue
-        match = next((r for r in runs if r.head_sha == head_sha), None)
-        if match is None or match.status != "completed":
-            continue
-        passed = match.conclusion == "success"
-        evidence = (f"head={head_sha}", f"run_url={match.url}", f"conclusion={match.conclusion}")
-        detail = (
-            f"workflow_dispatch 재검증 후 HEAD({head_sha[:8]}) success: {match.url}"
-            if passed
-            else f"workflow_dispatch 재검증 후 HEAD({head_sha[:8]}) "
-            f"conclusion={match.conclusion}: {match.url}"
-        )
-        return CheckResult(result.key, result.title, passed, evidence, detail)
-    minutes = int(timeout_sec // 60)
-    return CheckResult(
-        result.key,
-        result.title,
-        False,
-        result.evidence,
-        f"{result.detail}; workflow_dispatch 트리거 후 {minutes}분 대기했지만 완료되지 않음",
-    )
-
-
-# --------------------------------------------------------------------------- 리포트
+# --------------------------------------------------------------------------- 리포트/CLI
 
 
 def run_all(
@@ -789,31 +538,8 @@ def run_all(
     results.append(check_10_ops(repo_root, ci_report=ci_report, guard_report=guard_report))
     results.append(check_11_hardening(repo_root))
     results.append(head_green_result or check_12_head_actions_green(repo_root))
+    results.append(check_13_user_journeys(repo_root, ci_report=ci_report))
     return results
-
-
-def render_markdown(results: list[CheckResult]) -> str:
-    lines = ["| # | 항목 | 판정 | 요약 |", "|---|---|---|---|"]
-    for i, r in enumerate(results, 1):
-        mark = "PASS" if r.passed else "FAIL"
-        lines.append(f"| {i} | {r.title} | {mark} | {r.detail} |")
-    lines.append("")
-    lines.append("## 증빙")
-    for i, r in enumerate(results, 1):
-        lines.append(f"\n### {i}. {r.title} — {'PASS' if r.passed else 'FAIL'}")
-        for e in r.evidence:
-            lines.append(f"- {e}")
-    return "\n".join(lines) + "\n"
-
-
-def write_closeout_doc(path: Path, results: list[CheckResult]) -> None:
-    body = (
-        "# MVP-1 종료 확인서 (CLOSEOUT)\n\n"
-        "ADR-2026-09-04-D 종료 기준 1~10 + ADR-2026-09-09-B 11항(H-1~13) — "
-        "`scripts/closeout_check.py` 전항 PASS 시점 스냅샷.\n\n" + render_markdown(results)
-    )
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(body, encoding="utf-8")
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -823,9 +549,17 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="MVP-1 종료조건 기계 검사(ADR-2026-09-09-D)")
     parser.add_argument("--repo-root", type=Path, default=ROOT)
     parser.add_argument(
-        "--ci-report", type=Path, default=None, help='pm/ci/latest.json류 {"passed": bool}'
+        "--ci-report",
+        type=Path,
+        default=None,
+        help='pm/local_ci.py 산출 pm/ci/latest.json {"ok": bool}',
     )
-    parser.add_argument("--guard-report", type=Path, default=None, help='{"veto_count": int}')
+    parser.add_argument(
+        "--guard-report",
+        type=Path,
+        default=None,
+        help='meta/guards/run_guards.py --json 산출 {"vetoed": bool}',
+    )
     parser.add_argument(
         "--write", type=Path, default=None, help="전부 PASS일 때만 이 경로에 문서를 쓴다"
     )

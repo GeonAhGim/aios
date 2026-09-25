@@ -1,45 +1,53 @@
-"""LA-8/LA-23b — 배치 계보(lineage) 해시. §A4(문서 §31행) 감사 이벤트 바인딩용 다이제스트.
+"""LA-8/LA-23b — Batch lineage hash. Digest for §A4 (doc §31) audit event binding.
 
 Spec: docs/specs/L4_market_data_positions_ledger_v1.0.md#§2.2 LA-8, §9.2 LA-8,
 docs/design/ADR-2026-09-04-A-market-data-replay-perf.md#2.
 
-`src/foundation/ledger/domain/hash_chain.py`의 canonical JSON 규칙(정렬된
-키·UTF-8·`default=str`로 Decimal 등을 문자열화)을 그대로 따른다. `batch_hash`는
-`hash_chain.lines_digest`와 같은 이유로 입력 순서 무관이어야 한다 — 저장소가
-다른 정렬로 레코드를 읽어 오더라도 같은 배치는 같은 해시를 내야 검증이
-흔들리지 않는다. I/O 없음 — 순수 함수만 담는다.
+Follows the canonical JSON rules from
+`src/foundation/ledger/domain/hash_chain.py` (sorted keys, UTF-8,
+`default=str` to stringify Decimal, etc.). `batch_hash` must be order-
+independent for the same reason as `hash_chain.lines_digest` — even if the
+store reads records with a different sort order, the same batch must produce
+the same hash so verification does not waver. No I/O — contains pure
+functions only.
 
-**ADR-2026-09-04-A #2 스트리밍 재구현 노트**: ADR 본문은 "ORDER BY로 가져오면
-전체 정렬이 사라진다"고 적었지만, 이 함수는 `ingest_candles`/`ingest_ticks`가
-쓰기 시점에 이미 저장한 `batch_hash` 값과 바이트 단위로 동일해야 한다(P3
-WORM, 저장 해시 재계산·backfill 금지 — 같은 ADR #2). 정렬 키는 레코드의
-canonical JSON 문자열 자체(주로 첫 알파벳 필드 값, 예: `CandleRecord`는
-`close`)라 DB의 `open_time ORDER BY`와 무관하다 — 그래서 이 구현은 정렬은
-그대로 두고, 대신 두 가지만 없앤다: (1) 대량 소비자는 이제 컬럼지향 경로
-(`domain/candle_columns`)로 읽어 레코드 생성 자체의 pydantic 검증 비용이
-빠졌고, (2) 정렬된 문자열을 `"\\n".join()`으로 한 번에 이어붙인 뒤 해시하던
-방식을, 큰 중간 문자열을 만들지 않는 증분 `hashlib` 스트리밍으로 바꿨다.
-sha256(Merkle–Damgård 계열)은 연속된 `update()` 호출과 이어붙인 전체를 한
-번에 해시한 것이 항상 바이트 단위로 같다 — `_batch_hash_reference`(옛 구현,
-비교 전용으로 보존)와의 동일성은
-`tests/unit/market_data/test_lineage.py`의 property 테스트(무작위 배치
-200건 이상)가 증명한다.
+**ADR-2026-09-04-A #2 streaming re-implementation note**: The ADR text says
+"fetching with ORDER BY loses the full sort order", but this function must
+match the `batch_hash` value already stored at write time by
+`ingest_candles`/`ingest_ticks`, byte-for-byte (P3 WORM, no recompute or
+backfill of stored hashes — same ADR #2). The sort key is the record's own
+canonical JSON string (primarily the first alphabetic field value; e.g.,
+`CandleRecord` sorts on `close`), independent of the DB's `open_time ORDER
+BY` — so this implementation keeps the sort but removes two things: (1) the
+bulk consumer now reads via the column-oriented path
+(`domain/candle_columns`), eliminating pydantic validation cost at record
+creation itself, and (2) instead of joining sorted strings with
+`"\\n".join()` at once and then hashing, we switched to incremental
+`hashlib` streaming that avoids creating a large intermediate string.
+sha256 (Merkle-Damgard construction) guarantees that a sequence of
+`update()` calls produces byte-identical output to hashing the concatenated
+whole at once — its identity with `_batch_hash_reference` (legacy impl,
+preserved for comparison only) is proven by the property test in
+`tests/unit/market_data/test_lineage.py` (200+ random batches).
 
-**task-1136(esc-ci-8e93e475afa9 QA) 직렬화 비용 노트**: 대량 배치에서
-`batch_hash`의 지배 비용은 정렬이 아니라 레코드별 canonical JSON 문자열
-생성이다(실측 2만~10만 건: `model_dump(mode="json")`과 `json.dumps`가 대략
-반씩).
-해시 값을 바꾸지 않고 줄일 수 있는 부분은 `json.dumps`가 호출마다 새로
-만드는 `JSONEncoder` 생성·인자 검사 오버헤드뿐이라, 동일 인자
-(`sort_keys=True, default=str`, 나머지 기본값)의 encoder 하나를 모듈 수준에
-두고 재사용한다 — `json.dumps(obj, sort_keys=True, default=str)`는 표준
-라이브러리 구현상 정확히 `JSONEncoder(sort_keys=True, default=str).encode(obj)`
-이므로 출력 바이트가 같다(`_batch_hash_reference`는 이 가정에 기대지 않도록
-`json.dumps`를 직접 호출한 채로 두고, 고정 벡터 golden 테스트가 다이제스트
-값 자체를 고정한다). `model_dump_json()`·`TypeAdapter(list[T])` 일괄 직렬화
-같은 더 큰 절감은 바이트가 달라지거나(전자) 서브클래스 인스턴스를 선언
-타입으로 직렬화해 `model_dump()`와 어긋날 수 있어(후자) `hash_version=2`
-없이는 쓰지 않는다(P3 WORM).
+**task-1136 (esc-ci-8e93e475afa9 QA) serialization-cost note**: In large
+batches, the dominant cost of `batch_hash` is not sorting but creating the
+per-record canonical JSON string (measured at 20k-100k records:
+`model_dump(mode="json")` and `json.dumps` each take roughly half).
+The only part we can reduce without changing the hash value is the
+`JSONEncoder` creation and argument-checking overhead that `json.dumps`
+constructs on every call. We reuse a single encoder at module level with
+identical arguments (`sort_keys=True, default=str`, rest defaults) —
+`json.dumps(obj, sort_keys=True, default=str)` is, per the stdlib
+implementation, exactly equivalent to
+`JSONEncoder(sort_keys=True, default=str).encode(obj)`, so output bytes
+are identical (`_batch_hash_reference` keeps calling `json.dumps` directly
+so it does not rely on this assumption, and the fixed-vector golden test
+pins the digest value itself). Larger savings like `model_dump_json()` or
+`TypeAdapter(list[T])` bulk serialization are not used without
+`hash_version=2` (P3 WORM) because they either produce different bytes
+(former) or may desync from `model_dump()` by serializing subclass
+instances as declared types (latter).
 """
 from __future__ import annotations
 
@@ -52,9 +60,10 @@ from pydantic import BaseModel
 
 __all__ = ["batch_hash", "request_fingerprint"]
 
-# `json.dumps(value, sort_keys=True, default=str)`와 동일한 encoder(모듈 docstring
-# task-1136 노트). 상태가 없어(순환 검사용 markers는 encode 호출마다 새로 만든다)
-# 재사용·동시 호출이 안전하다.
+# Identical encoder to `json.dumps(value, sort_keys=True, default=str)`
+# (module docstring, task-1136 note). Safe to reuse and call concurrently —
+# it has no mutable state (markers for cycle detection are created fresh per
+# encode call).
 _CANONICAL_ENCODER = json.JSONEncoder(sort_keys=True, default=str)
 
 
@@ -65,30 +74,34 @@ def _canonical_json(value: Any) -> str:
 
 
 def _canonical_json_reference(value: Any) -> str:
-    """옛 구현 — 삭제 금지. `_canonical_json`이 재사용 encoder로 바꾼 뒤에도
-    `json.dumps` 직접 호출과 바이트 단위로 같은지 대조하는 기준선."""
+    """Legacy implementation — do not delete. Baseline to verify that
+    `_canonical_json` still produces byte-identical output to a direct
+    `json.dumps` call after switching to the reusable encoder."""
     if isinstance(value, BaseModel):
         value = value.model_dump(mode="json")
     return json.dumps(value, sort_keys=True, default=str)
 
 
 def _batch_hash_reference(records: Sequence[Any]) -> str:
-    """옛 구현 — 삭제 금지. `batch_hash`가 계속 이 함수와 바이트 단위로
-    동일한 값을 내는지 property 테스트가 대조하는 기준선이다(모듈 docstring).
-    직렬화·정렬·집계 모두 옛 경로(`_canonical_json_reference` + `"\\n".join`)라
-    새 구현의 어느 단계가 바뀌어도 잡는다."""
+    """Legacy implementation — do not delete. Baseline the property test
+    compares against, to verify `batch_hash` still produces byte-identical
+    output (module docstring). Serialisation, sorting, and aggregation all
+    follow the old path (`_canonical_json_reference` + `"\\n".join`), so any
+    step change in the new impl will be caught."""
     canonical_rows = sorted(_canonical_json_reference(record) for record in records)
     payload = "\n".join(canonical_rows)
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 
 def batch_hash(records: Sequence[Any]) -> str:
-    """레코드 배치의 다이제스트. 입력 순서와 무관하게 동일한 값을 내며,
-    `_batch_hash_reference`와 바이트 단위로 동일하다(모듈 docstring 참고).
+    """Digest of a record batch. Produces the same value regardless of input
+    order, and is byte-identical to `_batch_hash_reference` (see module
+    docstring).
 
-    각 레코드를 정렬된 키의 canonical JSON 문자열로 만든 뒤, 그 문자열들을
-    사전순으로 정렬하고, 하나의 문자열로 합치지 않고 구분자 `\\n`과 함께
-    순서대로 `hashlib`에 흘려 넣는다(증분 스트리밍)."""
+    Serialises each record to a canonical JSON string with sorted keys,
+    sorts those strings lexicographically, then feeds them one-by-one into
+    `hashlib` with `\\n` delimiters (incremental streaming) instead of
+    joining into a single string."""
     canonical_rows = sorted(_canonical_json(record) for record in records)
     hasher = hashlib.sha256()
     for index, row in enumerate(canonical_rows):

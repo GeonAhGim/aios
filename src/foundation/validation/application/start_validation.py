@@ -23,8 +23,8 @@ from src.core.observability.metric_names import (
 from src.core.observability.metrics import MetricsPort, NullMetrics
 from src.data.models.market_data import Candle
 from src.data.models.strategy_fsm import FSMStrategyConfig
+from src.foundation.backtest.api import BacktestConfig, CostModel
 from src.foundation.backtest.application.run_backtest import BacktestRunError, run_backtest
-from src.foundation.backtest.domain.models import BacktestConfig, CostModel
 from src.foundation.validation.contracts.v1 import Outcome as ContractOutcome
 from src.foundation.validation.contracts.v1 import RunState as ContractRunState
 from src.foundation.validation.contracts.v1 import StartValidationCommand, ValidationResultView
@@ -78,6 +78,7 @@ def _run_to_view(
         obligations=[] if result is None else list(result.obligations),
         result_hash=None if result is None else result.result_hash,
         created_at=run.created_at,
+        evidence_refs=[] if result is None else list(result.evidence_refs),
     )
 
 

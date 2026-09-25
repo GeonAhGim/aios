@@ -9,6 +9,7 @@ work). The actual foundation call is implemented by `foundation_gate.py`
 assembly point (scheduler) injects that implementation via
 `submit_order(pre_submit_gate=...)`.
 """
+
 from __future__ import annotations
 
 from collections.abc import Awaitable, Callable, Mapping
@@ -27,6 +28,26 @@ from src.core.observability.metrics import MetricsPort
 class GateOutcome(str, Enum):
     ALLOW = "ALLOW"
     DENY = "DENY"
+
+
+@dataclass(frozen=True)
+class PersonalOrderRiskSnapshot:
+    """task-3986 -- caller-supplied numeric snapshot for the
+    personal-conservative risk layer (`foundation_gate.py`'s 4th layer,
+    `foundation_personal_gate.py`). Mirrors `foundation.risk.domain.rules.
+    OrderRiskCheckInput`'s fields rather than importing it -- this module
+    does not know foundation (module docstring above). No live
+    account-equity/exposure source is wired yet (docs/ops/PERSONAL_MODE.md,
+    "known limitations" section) -- a caller that omits this field (leaves
+    `OrderContext.personal_risk_snapshot=None`) simply skips the 4th layer's numeric
+    checks, the same way `observed_fence=None` skips the freshness check
+    above."""
+
+    symbol: str
+    order_notional_krw: Decimal
+    account_equity_krw: Decimal
+    current_exposure_krw: Decimal
+    daily_realized_pnl_pct: Decimal
 
 
 @dataclass(frozen=True)
@@ -55,6 +76,11 @@ class OrderContext:
     symbol: str | None = None
     side: str | None = None
     quantity: Decimal | None = None
+    # task-3986 -- see `PersonalOrderRiskSnapshot` above. None for every call
+    # site that has not been updated to supply it (all of them today except
+    # tests) -- foundation_gate.py's 4th layer treats that as "nothing to
+    # evaluate" and stays a no-op, not a fail-closed deny.
+    personal_risk_snapshot: PersonalOrderRiskSnapshot | None = None
 
 
 @dataclass(frozen=True)

@@ -27,11 +27,7 @@ and retry, both are not-retryable denials.
 """
 from __future__ import annotations
 
-from src.foundation.market_data.domain.entitlement.source_contract import (
-    DataUse,
-    SourceContractGrant,
-    permits_use,
-)
+from src.foundation.market_data.api import DataUse, SourceContractGrant, permits_use
 from src.foundation.research_data.contracts.v1 import (
     ResearchDataErrorCode,
     ResearchItem,

@@ -34,7 +34,7 @@ from src.foundation.mandates.domain.evaluator import evaluate_bundle
 from src.foundation.mandates.domain.market_abuse import AbuseHit
 from src.foundation.mandates.domain.rule_bundle import RuleBundle, RuleSpec
 from src.foundation.mandates.domain.rules import short_sale, wash_trade
-from src.foundation.risk_gate.domain.models import SafetyScope
+from src.foundation.risk_gate.api import SafetyScope
 from src.foundation.risk_gate.ports.repository import RiskGateRepository
 from src.services.safety.kill_switch_service import KillSwitchService
 
