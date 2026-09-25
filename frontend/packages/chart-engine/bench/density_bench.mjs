@@ -118,12 +118,25 @@ const WARMUP_SWEEPS = 3;
  * p95 was 40-90% above its sweep-siblings -- host-load normalization had
  * nothing to normalize because the spike never reached either probe. Slicing
  * the same measurement into `PAN_ZOOM_CALIB_CHUNKS` pieces, each bracketed by
- * its own calib pair, narrows that blind window proportionally (4 chunks ->
- * ~1/4 the miss window of a single whole-measurement bracket) without
+ * its own calib pair, narrows that blind window proportionally (8 chunks ->
+ * ~1/8 the miss window of a single whole-measurement bracket) without
  * touching the tolerance, baseline, or absolute targets themselves --
  * DECISION_GUIDELINES B-2.
+ *
+ * task-7559 (esc-ci-frontend.json recurrence): the previous 4-chunk split
+ * still lets a short contention burst confined to a few frames inside a
+ * ~15-frame chunk get diluted by that chunk's other unaffected frames before
+ * the chunk-wide ratio is computed, so the correction under-corrects the
+ * burst. Reproduced directly on this shared multi-worktree host: one sweep's
+ * raw panZoomFrameMsP95 spiked to 11.358ms against ~3.2-3.7ms siblings while
+ * both calib probes bracketing that sweep's chunks read ~1.0 (no host-wide
+ * signal), pushing the pooled p95 from a 3.127ms baseline to 3.946ms (a 26%
+ * "regression" that self-resolved on the very next unmodified rerun,
+ * 3.489ms). Doubling the chunk count halves each chunk's frame span, the
+ * same "more, narrower brackets" fix as the 1->4 change above -- still no
+ * change to tolerance, baseline, or absolute targets.
  */
-const PAN_ZOOM_CALIB_CHUNKS = 4;
+const PAN_ZOOM_CALIB_CHUNKS = 8;
 /**
  * task-6744: same blind-window problem for indicatorAddMs -- one calib pair
  * bracketing all `INDICATOR_ADD_RUNS` runs missed contention confined to a

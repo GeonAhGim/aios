@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 from pathlib import Path
 
 import pytest
@@ -21,6 +22,18 @@ def _fake_backup_dir(tmp_path: Path) -> Path:
     (backup / "base").mkdir(parents=True)
     (backup / "base" / "PG_VERSION").write_text("16", encoding="utf-8")
     return backup / "base"
+
+
+def _fake_copy_tree(src: Path, dst: Path, timeout: float) -> tuple[bool, str]:
+    """단위 테스트용 restore_files 단계 -- 실제 robocopy 서브프로세스를 스폰하지 않고
+    plain shutil.copytree로 대체한다(테스트 픽스처는 파일 몇 개뿐이라 실제 robocopy
+    호출은 매 테스트마다 초당 프로세스 기동 비용만 추가하고 아무것도 검증하지 못한다
+    -- _copy_backup_tree 자체의 동작은 별도 단위 테스트로 검증한다)."""
+    try:
+        shutil.copytree(src, dst)
+        return True, ""
+    except OSError as exc:
+        return False, str(exc)
 
 
 def _dispatching_run_cmd(
@@ -72,6 +85,7 @@ def _common_kwargs(tmp_path: Path, **overrides):
         psql_bin="psql",
         python_bin="python",
         last_failed_restore_dir=tmp_path / "last_failed_restore",
+        copy_tree=_fake_copy_tree,
     )
     kwargs.update(overrides)
     return kwargs
@@ -108,10 +122,7 @@ def test_success_path_records_all_steps_and_stops_server(tmp_path: Path):
     stop_calls = [c for c in calls if c[0] == "pg_ctl" and c[1] == "stop"]
     assert len(stop_calls) == 1  # 성공해도 임시 인스턴스는 반드시 내린다
     # DROP_SLOT 쿼리가 호출되었는지 확인
-    drop_calls = [
-        c for c in calls
-        if c[0] == "psql" and "pg_drop_replication_slot" in c[-1]
-    ]
+    drop_calls = [c for c in calls if c[0] == "psql" and "pg_drop_replication_slot" in c[-1]]
     assert len(drop_calls) == 1
     assert not (tmp_path / "restore_pgdata").exists()  # 임시 데이터 디렉터리는 정리된다
 
@@ -126,10 +137,7 @@ def test_start_postgres_failure_stops_drill_without_stopping_unstarted_server(tm
     # 못 띄운 서버를 내리려 하지 않는다
     assert not any(c[0] == "pg_ctl" and c[1] == "stop" for c in calls)
     # 서버가 안 떴어도 finally 에서 DROP_SLOT 은 호출된다
-    drop_calls = [
-        c for c in calls
-        if c[0] == "psql" and "pg_drop_replication_slot" in c[-1]
-    ]
+    drop_calls = [c for c in calls if c[0] == "psql" and "pg_drop_replication_slot" in c[-1]]
     assert len(drop_calls) == 1
     assert result["steps"]["drop_replication_slot"]["ok"] is True
 
@@ -141,10 +149,7 @@ def test_drop_slot_called_when_existing_slot_exists(tmp_path: Path):
     result = restore_drill.run_drill(**_common_kwargs(tmp_path, run_cmd=run_cmd))
 
     assert result["ok"] is True
-    drop_calls = [
-        c for c in calls
-        if c[0] == "psql" and "pg_drop_replication_slot" in c[-1]
-    ]
+    drop_calls = [c for c in calls if c[0] == "psql" and "pg_drop_replication_slot" in c[-1]]
     assert len(drop_calls) == 1
     # DROP_SLOT 쿼리가 성공(ok=True)으로 기록됨
     assert result["steps"]["drop_replication_slot"]["ok"] is True
@@ -413,9 +418,9 @@ def test_write_recovery_config_creates_signal_and_restore_command(tmp_path: Path
     assert "\\" not in conf
     # 플랫폼별 명령어 검증: Windows→copy, Unix→cp
     if os.name == "nt":
-        assert 'copy' in conf, "Windows에서 restore_command는 copy 명령어야 한다"
+        assert "copy" in conf, "Windows에서 restore_command는 copy 명령어야 한다"
     else:
-        assert 'cp' in conf, "Unix에서 restore_command는 cp 명령어야 한다"
+        assert "cp" in conf, "Unix에서 restore_command는 cp 명령어야 한다"
 
 
 def test_wait_for_recovery_returns_none_when_recovery_complete():
@@ -514,8 +519,7 @@ def test_write_recovery_config_escapes_windows_backslashes(tmp_path: Path):
     # 전체 archive_dir 경로(forward slash 변환됨)가 conf에 포함되는지 명시적 검증
     expected_path = str(archive_dir).replace("\\", "/")
     assert expected_path in conf_content, (
-        f"전체 경로 '{expected_path}'이 conf에 없음 — "
-        "restore_command가 잘못된 경로로 WAL을 찾는다"
+        f"전체 경로 '{expected_path}'이 conf에 없음 — restore_command가 잘못된 경로로 WAL을 찾는다"
     )
     # 백슬래시가 남아있지 않아야 함
     assert "\\" not in conf_content or '""' in conf_content  # double-quote 내부면 허용
@@ -555,3 +559,91 @@ def test_libpq_dsn_normalizes_sqlalchemy_scheme():
         == "postgresql://u:p@dbhost:5432/aios_dev"
     )
     assert restore_drill.libpq_dsn("postgresql://u@h/db") == "postgresql://u@h/db"
+
+
+def test_copy_backup_tree_non_windows_uses_shutil_copytree(tmp_path: Path, monkeypatch):
+    """esc-health-backup_drill_failed: 110,830개 파일·2.4GB 백업을 shutil.copytree로
+    옮기는 데 시간제한이 없어 nightly의 외부 1200s 하드킬에 걸렸다(steps={}). posix에서는
+    여전히 shutil.copytree를 쓰지만(robocopy는 Windows 전용), 결과 계약은 동일하다."""
+    monkeypatch.setattr(restore_drill.os, "name", "posix")
+    src = tmp_path / "src"
+    src.mkdir()
+    (src / "PG_VERSION").write_text("16", encoding="utf-8")
+    dst = tmp_path / "dst"
+
+    ok, detail = restore_drill._copy_backup_tree(src, dst, 30.0)
+
+    assert ok is True
+    assert detail == ""
+    assert (dst / "PG_VERSION").read_text(encoding="utf-8") == "16"
+
+
+def test_copy_backup_tree_windows_uses_robocopy_and_succeeds_on_low_returncode(
+    tmp_path: Path, monkeypatch
+):
+    """robocopy 종료코드 0-7은 성공(파일 복사/스킵 조합) -- 8 이상만 실패다."""
+    monkeypatch.setattr(restore_drill.os, "name", "nt")
+
+    class _FakeCompleted:
+        returncode = 1  # robocopy: 파일이 복사됨
+
+    def fake_run(cmd, stdout, stderr, timeout, check):
+        assert cmd[0] == "robocopy"
+        return _FakeCompleted()
+
+    monkeypatch.setattr(restore_drill.subprocess, "run", fake_run)
+
+    ok, detail = restore_drill._copy_backup_tree(tmp_path / "src", tmp_path / "dst", 30.0)
+
+    assert ok is True
+
+
+def test_copy_backup_tree_windows_high_returncode_is_failure(tmp_path: Path, monkeypatch):
+    """robocopy 종료코드 8 이상은 실패 -- 성공으로 오분류하면 손상된 복구본을 그대로
+    기동 시도하게 된다."""
+    monkeypatch.setattr(restore_drill.os, "name", "nt")
+
+    class _FakeCompleted:
+        returncode = 16  # robocopy: 심각한 오류(예: 소스 접근 실패)
+
+    def fake_run(cmd, stdout, stderr, timeout, check):
+        return _FakeCompleted()
+
+    monkeypatch.setattr(restore_drill.subprocess, "run", fake_run)
+
+    ok, _detail = restore_drill._copy_backup_tree(tmp_path / "src", tmp_path / "dst", 30.0)
+
+    assert ok is False
+
+
+def test_copy_backup_tree_windows_timeout_returns_diagnostic_instead_of_hanging(
+    tmp_path: Path, monkeypatch
+):
+    """esc-health-backup_drill_failed의 핵심 결함: 복사 단계에 시간제한이 없어 무엇이
+    멈췄는지조차 관측 못 했다. 이제 timeout이 있으면 진단 가능한 실패로 끝난다."""
+    monkeypatch.setattr(restore_drill.os, "name", "nt")
+
+    def fake_run(cmd, stdout, stderr, timeout, check):
+        raise restore_drill.subprocess.TimeoutExpired(cmd, timeout)
+
+    monkeypatch.setattr(restore_drill.subprocess, "run", fake_run)
+
+    ok, detail = restore_drill._copy_backup_tree(tmp_path / "src", tmp_path / "dst", 5.0)
+
+    assert ok is False
+    assert detail == "timeout 5s"
+
+
+def test_run_drill_fails_fast_when_copy_tree_fails(tmp_path: Path):
+    """restore_files 복사가 실패하면(로컬 디스크 가득/robocopy 오류 등) 뒤 단계(pg_ctl
+    기동 등)로 넘어가지 않고 즉시 실패로 끝난다 -- find_backup_없음과 동일한 단락 계약."""
+
+    def failing_copy_tree(src, dst, timeout):
+        return False, "디스크 공간 부족(시뮬레이션)"
+
+    result = restore_drill.run_drill(**_common_kwargs(tmp_path, copy_tree=failing_copy_tree))
+
+    assert result["ok"] is False
+    assert result["steps"]["restore_files"]["ok"] is False
+    assert result["steps"]["restore_files"]["detail"] == "디스크 공간 부족(시뮬레이션)"
+    assert "start_postgres" not in result["steps"]
