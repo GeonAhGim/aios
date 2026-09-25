@@ -1,5 +1,6 @@
-"""ListChartLayouts 쿼리 — 호출자 tenant 소유 레이아웃만(저장소 쿼리 자체가
-tenant_id로 필터하므로 여기서 별도 소유권 검사가 필요 없다)."""
+"""ListChartLayouts query — caller sees only layouts owned by their tenant
+(the repository query itself filters by tenant_id, so no separate ownership check is needed here)."""
+
 from __future__ import annotations
 
 from uuid import UUID
