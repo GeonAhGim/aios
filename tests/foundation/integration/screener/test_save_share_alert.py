@@ -407,6 +407,7 @@ async def test_evaluate_screen_alerts_skips_failing_alert_and_continues(
 # run_screen.py already budgets ----
 
 
+@pytest.mark.perf
 async def test_evaluate_screen_alerts_5000_symbol_scan_within_adr_budget(
     pool, saved_repo, alert_repo
 ) -> None:

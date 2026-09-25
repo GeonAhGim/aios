@@ -104,6 +104,7 @@ async def test_lifespan_can_start_and_stop_twice() -> None:
     assert tasks_after - tasks_before == set()
 
 
+@pytest.mark.perf
 async def test_lifespan_startup_performance_meets_budget() -> None:
     """성능 단언(DoD): lifespan 초기화/정리 시간이 예산 내인지 확인한다.
     ADR-2026-09-09-C 성능 예산 기준:

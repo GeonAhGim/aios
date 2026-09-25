@@ -183,6 +183,7 @@ _P95_TARGET_MS = 1.0
 _THROUGHPUT_TARGET_PER_SEC = 20_000.0
 
 
+@pytest.mark.perf
 def test_stop_trailing_oco_tick_pipeline_perf_p95_and_throughput() -> None:
     """실거래 핫패스(틱마다 스톱·트레일링·OCO 판정을 순서대로 호출)를 흉내내
     p95 지연과 처리량을 단언한다 — 순수 함수라 결정적 실패는 주입할 수

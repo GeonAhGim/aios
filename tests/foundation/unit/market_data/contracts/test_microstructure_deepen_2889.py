@@ -27,7 +27,6 @@ docs/audit/DEPTH_DC_RD.md#2068) D1 -> D3 증빙.
 
 from __future__ import annotations
 
-import time
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 from decimal import Decimal
@@ -37,6 +36,7 @@ from pydantic import ValidationError
 
 from src.foundation.market_data.contracts.v1 import Venue
 from src.foundation.market_data.contracts.v2 import microstructure as v2
+from tests.conftest import PerfBudget
 
 _VALID_ULID = "01ARZ3NDEKTSV4RRFFQ69G5FAV"
 _NS_EVENT = 1_767_225_600_123_456_789
@@ -176,50 +176,52 @@ def test_book_l2_is_frozen_against_mutation() -> None:
 
 
 @pytest.mark.perf
-def test_trade_tick_bulk_validation_meets_throughput_budget() -> None:
+def test_trade_tick_bulk_validation_meets_throughput_budget(
+    perf_budget: PerfBudget,
+) -> None:
     """수신 스트림에서 틱마다 새로 역직렬화되는 상황을 흉내 — 대량 반복
     검증이 처리량 예산을 지켜야 한다."""
     iterations = 100_000
-    budget_sec = 5.0  # 실측 로컬 <1.0s, CI 환경 편차 감안
+    budget_ms = 5000.0  # 실측 로컬 <1.0s, CI 환경 편차 감안
 
-    start = time.perf_counter()
-    for i in range(iterations):
-        tick = _trade_tick(seq=i, ts_event=_NS_EVENT + i)
-        assert tick.seq == i
-    elapsed = time.perf_counter() - start
+    def _run() -> None:
+        for i in range(iterations):
+            tick = _trade_tick(seq=i, ts_event=_NS_EVENT + i)
+            assert tick.seq == i
 
-    print(
-        f"[DC-19 microstructure] TradeTick.model_validate() x{iterations} in "
-        f"{elapsed:.3f}s (budget<{budget_sec}s)"
-    )
-    assert elapsed < budget_sec, (
-        f"TradeTick 검증 {iterations}회 반복이 예산({budget_sec}s)을 넘었습니다({elapsed:.3f}s)."
+    perf_budget.assert_within(
+        _run,
+        budget_ms=budget_ms,
+        label=f"TradeTick.model_validate() x{iterations}",
     )
 
 
 @pytest.mark.perf
-def test_large_book_l2_construction_meets_latency_budget() -> None:
+def test_large_book_l2_construction_meets_latency_budget(
+    perf_budget: PerfBudget,
+) -> None:
     """레벨 수가 큰(각 5,000개) BookL2 구성 + 정렬 검증이 절대시간 예산
     내여야 한다(정렬 위반 검사가 이차로 퇴화하지 않았는지 — 깊은 호가창을
     제공하는 벤더가 늘수록 이 값도 커진다)."""
     n = 5_000
-    budget_sec = 2.0  # 실측 로컬 <0.3s
+    budget_ms = 2000.0  # 실측 로컬 <0.3s
     bids = tuple(_book_level(str(Decimal("50000.0") - Decimal(i)), "1.0") for i in range(n))
     asks = tuple(_book_level(str(Decimal("50000.5") + Decimal(i)), "1.0") for i in range(n))
 
-    start = time.perf_counter()
-    book = _book_l2(bids=bids, asks=asks)
-    elapsed = time.perf_counter() - start
+    book: v2.BookL2 | None = None
 
-    print(
-        f"[DC-19 microstructure] BookL2({n}x2 levels) construction in {elapsed:.4f}s "
-        f"(budget<{budget_sec}s)"
+    def _run() -> None:
+        nonlocal book
+        book = _book_l2(bids=bids, asks=asks)
+
+    perf_budget.assert_within(
+        _run,
+        budget_ms=budget_ms,
+        label=f"BookL2({n}x2 levels) construction",
     )
+    assert book is not None
     assert len(book.bids) == n
     assert len(book.asks) == n
-    assert elapsed < budget_sec, (
-        f"대용량 BookL2 구성이 예산({budget_sec}s)을 넘었습니다({elapsed:.4f}s)."
-    )
 
 
 # ---- 3. 게이트 적색 재현 — 필드 단위로 순서대로 망가뜨려 재생 --------------

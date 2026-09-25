@@ -230,6 +230,7 @@ def test_failure_injection_settle_fill_propagates_corrupted_feed_error_fail_clos
 # --- D2: numeric performance assertion (pre-trade gate budget, ADR-2026-09-09-C) --
 
 
+@pytest.mark.perf
 def test_perf_reserve_settle_release_cycle_p99_within_pre_trade_gate_budget():
     """reserve()/settle_fill()/release() sit directly on the pre-trade gate
     path (an order cannot be placed until cash is reserved against it), so

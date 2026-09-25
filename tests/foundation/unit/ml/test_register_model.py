@@ -251,6 +251,7 @@ def _p95(samples: list[float]) -> float:
     return samples[min(int(len(samples) * 0.95), len(samples) - 1)]
 
 
+@pytest.mark.perf
 async def test_register_model_orchestration_p95_within_budget() -> None:
     registry = _FakeModelRegistry()
     artifacts = _FakeArtifactStore()

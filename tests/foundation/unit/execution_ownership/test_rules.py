@@ -133,6 +133,7 @@ def test_execution_lease_rejects_adversarial_tzinfo_with_none_utcoffset():
         )
 
 
+@pytest.mark.perf
 def test_is_lease_available_hot_path_performance():
     # 성능 단언: EO-03 스케줄러가 매 tick마다 후보군 전체에 대해 이 순수
     # 함수를 호출할 수 있어야 하므로(§4.1), 10,000회 호출이 100ms 내로

@@ -199,6 +199,7 @@ def test_gate_red_repro_bypassing_the_guard_lets_contamination_through(
 # --- 성능 단언 ---------------------------------------------------------------
 
 
+@pytest.mark.perf
 def test_load_profile_config_p95_latency_under_50ms() -> None:
     """로컬 성능 예산: 설정 파일 하나 읽기는 가벼운 I/O라 5k봉 조회
     p95 200ms(ADR-2026-09-09-C Decision 1)보다 훨씬 낮은 예산인 50ms를

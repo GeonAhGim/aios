@@ -123,6 +123,7 @@ def test_parse_candles_unknown_timeframe_raises():
         parse_candles(REAL_BITGET_CANDLES, "BTC/USDT", "3m")
 
 
+@pytest.mark.perf
 def test_parse_ticker_throughput_meets_hot_path_floor():
     """수치 처리량 단언 — `parse_ticker`는 WS 퍼블릭 채널 틱마다 호출되는
     핫패스다(`market_ws_public_mixin.py`). 순수 dict 접근 + Decimal
@@ -144,6 +145,7 @@ def test_parse_ticker_throughput_meets_hot_path_floor():
     )
 
 
+@pytest.mark.perf
 def test_parse_candles_latency_scales_linearly_not_quadratically():
     """수치 지연 단언 — `parse_candles`는 캔들 개수만큼 순회하며 각
     항목을 독립적으로 변환하므로 이론상 선형(O(n))이다. 입력을 10배로

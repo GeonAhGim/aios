@@ -13,6 +13,7 @@ import os
 import uuid
 from datetime import datetime, timezone
 from decimal import Decimal
+from typing import Any
 
 import asyncpg
 import pytest
@@ -45,8 +46,8 @@ async def pool():
     await p.close()
 
 
-def _profile(**overrides: object) -> VenueCapabilityProfile:
-    defaults: dict[str, object] = {
+def _profile(**overrides: Any) -> VenueCapabilityProfile:
+    defaults: dict[str, Any] = {
         "venue": "bitget",
         "asset_classes": [AssetClass.CRYPTO],
         "order_types": {OrderType.MARKET, OrderType.LIMIT},
@@ -70,7 +71,7 @@ def _profile(**overrides: object) -> VenueCapabilityProfile:
         "verified": "DOC_ONLY",
     }
     defaults.update(overrides)
-    return VenueCapabilityProfile(**defaults)  # type: ignore[arg-type]  # overrides dict가 생성자 kwarg 타입을 정적으로 못 좁힘(테스트 헬퍼)
+    return VenueCapabilityProfile(**defaults)
 
 
 def _registry() -> SymbolRegistry:

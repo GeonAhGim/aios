@@ -275,6 +275,7 @@ def _p95(samples: list[float]) -> float:
     return samples[min(int(len(samples) * 0.95), len(samples) - 1)]
 
 
+@pytest.mark.perf
 async def test_run_train_job_orchestration_overhead_within_budget() -> None:
     repo = _FakeRepository()
     durations: list[float] = []

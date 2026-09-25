@@ -220,6 +220,7 @@ def test_failure_injection_type_change_nested_via_array_items_fails() -> None:
     )
 
 
+@pytest.mark.perf
 def test_performance_assertion_nested_ref_recursion_budget() -> None:
     """수치 성능 단언: 중첩 $ref 재귀가 100개 스키마에서도 1초 이내에 완료된다.
 

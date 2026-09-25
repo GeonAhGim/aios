@@ -101,6 +101,7 @@ def test_compile_p95_latency_within_adr_budget() -> None:
     assert p95_ms < budget_ms
 
 
+@pytest.mark.perf
 def test_compile_still_returns_correct_result_when_a_pipeline_stage_stalls(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

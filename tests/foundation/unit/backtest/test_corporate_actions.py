@@ -269,6 +269,7 @@ def test_adjust_fill_no_corporate_actions_is_identity_and_still_flagged_applied(
 # --------------------------------------------------------------------------
 
 
+@pytest.mark.perf
 def test_adjust_fill_completes_within_performance_budget(perf_budget: PerfBudget) -> None:
     """performance assertion: BT-20 DoD §9 성능 예산 단언. 대량 체결(1000건)
     조정이 10ms 이내 완료돼야 한다(벡터화 경로·실시간 체결 피드 대비).

@@ -203,6 +203,7 @@ def test_red_gate_reproduction_main_exits_1_when_kis_regresses(
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.perf
 def test_check_matrix_has_bounded_latency_for_repeated_runs():
     """검사 로직이 실계좌/네트워크 I/O 없이 순수 클래스 속성 비교만 하므로,
     실제 4개 어댑터 행렬을 200회 반복 실행해도 벽시계 지연이 명시적 상한

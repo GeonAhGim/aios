@@ -92,6 +92,7 @@ def test_truncated_runbook_fails_as_failure_injection(runbook_text: str) -> None
         validate_dr_runbook(truncated)
 
 
+@pytest.mark.perf
 def test_validate_dr_runbook_perf_budget(runbook_text: str) -> None:
     """ADR-2026-09-09-C 예산표에 문서 검증 항목은 없다(docs-only 리프) —
     수 KB 텍스트에 대한 리터럴 스캔 규모에 맞춘 보수적 로컬 상한(단일 실행 50ms)."""

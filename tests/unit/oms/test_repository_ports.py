@@ -201,6 +201,7 @@ async def test_mark_retry_and_mark_dead_propagate_simulated_connection_drop() ->
         await repo.mark_dead(conn, uuid4(), reason="x", expected_worker="A")
 
 
+@pytest.mark.perf
 def test_outbox_row_bulk_validation_latency_budget() -> None:
     """`claim_batch`가 돌려주는 배치를 `OutboxRow`로 파싱하는 비용 — 로컬
     회귀 예산이며 SLO 단언은 아니다(headless worker 지침)."""

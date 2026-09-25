@@ -267,6 +267,7 @@ async def test_check_paper_trading_eligibility_denies_on_acquire_failure() -> No
     assert eligible is False
 
 
+@pytest.mark.perf
 async def test_check_paper_trading_eligibility_p95_latency(pool) -> None:
     """성능 단언 — check_paper_trading_eligibility의 p95 레이턴시 <= 2s."""
     import time

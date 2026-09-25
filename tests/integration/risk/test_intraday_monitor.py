@@ -529,6 +529,7 @@ async def test_kill_switch_activation_failure_still_commits_signal_and_continues
 # 전체 스캔을 추가하는 회귀) 방지. ------------------------------------------
 
 
+@pytest.mark.perf
 async def test_many_accounts_completes_within_latency_budget(
     pool, signal_repo, kill_switch_service
 ):

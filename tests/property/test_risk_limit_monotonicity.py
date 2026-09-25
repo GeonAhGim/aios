@@ -22,6 +22,7 @@ from datetime import datetime, timezone
 from decimal import Decimal
 from uuid import UUID, uuid4
 
+import pytest
 from hypothesis import assume, given
 from hypothesis import strategies as st
 
@@ -155,6 +156,7 @@ def test_missing_trades_last_1h_always_denies_regardless_of_limit_value(
 # ---- 성능 단언: 사전거래 게이트 p99 5ms(ADR-2026-09-09-C 성능 예산표) ----
 
 
+@pytest.mark.perf
 def test_check_exposure_limits_p99_latency_stays_within_pre_trade_gate_budget() -> None:
     inputs = _inputs_with_notional(Decimal("500.00"))
     limits = tuple(_order_limit(Decimal(i)) for i in range(1, 21))

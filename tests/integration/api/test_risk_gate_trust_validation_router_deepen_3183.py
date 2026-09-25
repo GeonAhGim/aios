@@ -231,6 +231,7 @@ async def _delete_risk_evaluations(pool: asyncpg.Pool, tenant_id: UUID) -> None:
         await conn.execute("DELETE FROM risk_evaluation WHERE tenant_id = $1", tenant_id)
 
 
+@pytest.mark.perf
 async def test_evaluate_risk_gate_p99_under_pre_trade_gate_budget(client, pool):
     _headers, tenant_id = await _register(client)
     repo = PostgresRiskGateRepository(pool)
@@ -254,6 +255,7 @@ async def test_evaluate_risk_gate_p99_under_pre_trade_gate_budget(client, pool):
         await _delete_risk_evaluations(pool, tenant_id)
 
 
+@pytest.mark.perf
 async def test_evaluate_risk_gate_budget_gate_fails_on_injected_regression(
     client, pool, monkeypatch
 ):

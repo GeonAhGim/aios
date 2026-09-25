@@ -217,6 +217,7 @@ async def test_gate_red_repro_duplicate_venue_guard_is_load_bearing(
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.perf
 async def test_route_order_perf_budget_many_candidates() -> None:
     """`route_order` builds two snapshots (`candidates_snapshot`,
     `score_snapshot`) per candidate on top of EM-5's O(n log n) rank -- this

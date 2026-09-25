@@ -229,6 +229,7 @@ def _p95(samples: list[float]) -> float:
     return samples[min(int(len(samples) * 0.95), len(samples) - 1)]
 
 
+@pytest.mark.perf
 async def test_save_db_roundtrip_p95_within_budget(repo: PostgresSnapshotRepository) -> None:
     samples: list[float] = []
     for i in range(30):

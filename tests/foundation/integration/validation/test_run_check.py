@@ -312,6 +312,7 @@ async def test_backtest_engine_error_fails_run_and_records_error_evidence(
 # -- D2 numeric performance assertion ----------------------------------------------
 
 
+@pytest.mark.perf
 async def test_p95_latency_within_local_run_check_budget(pool, validation_repo, strategy_service):
     """ADR-2026-09-09-C axis performance budget: end-to-end `run_check` for a
     small (10-bar) replay against a real DB stays within a generous 2s

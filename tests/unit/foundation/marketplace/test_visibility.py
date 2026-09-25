@@ -173,6 +173,7 @@ def test_corrupted_grade_fails_closed_and_reproduces_on_repeat():
 # 선례와 동일 사유). 남는 성능 단언을 hot path에 건다.
 
 
+@pytest.mark.perf
 def test_resolve_visibility_hot_path_performance():
     start = time.perf_counter()
     for _ in range(10_000):

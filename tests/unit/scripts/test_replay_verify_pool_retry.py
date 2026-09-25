@@ -251,6 +251,7 @@ async def test_create_pool_with_retry_does_not_retry_unrelated_exceptions(monkey
     assert attempts == 1
 
 
+@pytest.mark.perf
 async def test_create_pool_with_retry_succeeds_immediately_without_sleeping(monkeypatch) -> None:
     """Perf assertion: the happy path (first attempt succeeds) must not pay
     any backoff delay -- `asyncio.sleep` is only reached on a retry."""

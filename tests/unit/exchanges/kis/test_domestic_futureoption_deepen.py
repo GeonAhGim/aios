@@ -184,6 +184,7 @@ def _synthetic_balance_rows(n: int) -> list[dict[str, str]]:
     ]
 
 
+@pytest.mark.perf
 async def test_balance_parsing_throughput_within_normalized_budget() -> None:
     """`get_futureoption_balance`가 2000행 응답을 파싱하는 실측 소요시간을
     동일 N 크기의 trivial Decimal 생성 루프(같은 프로세스, 같은 측정

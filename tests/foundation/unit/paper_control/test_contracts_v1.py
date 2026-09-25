@@ -131,6 +131,7 @@ def test_view_mapping_fails_closed_on_corrupted_repository_row(monkeypatch):
 # --- performance assertion ----------------------------------------------------
 
 
+@pytest.mark.perf
 def test_paper_deployment_view_construction_throughput():
     """Pydantic model construction has no I/O; 5k instances must build well
     under 1s (budget: >= 5k ops/sec) — regression guard against someone later

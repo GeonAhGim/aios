@@ -1,6 +1,7 @@
 """주문 상태 전이표 단위테스트 — L4-02. DB 없음."""
 from __future__ import annotations
 
+import time
 from decimal import Decimal
 
 import pytest
@@ -197,3 +198,25 @@ def test_filled_to_cancel_requested_is_rejected() -> None:
     FILLED -> CANCEL_REQUESTED row, so it must not be reachable even though
     CANCEL_REQUESTED is now a real OrderStatus member."""
     assert OrderStatus.CANCEL_REQUESTED not in ALLOWED[OrderStatus.FILLED]
+
+
+def test_fill_negative_quantity_is_invalid() -> None:
+    """task-7484 — a strictly negative filled_qty is a distinct rejection
+    input from the zero-quantity case above: it signals a mis-signed fill
+    delta from a venue adapter bug, not merely an empty fill."""
+    with pytest.raises(InvalidOrderTransitionError):
+        next_status(
+            OrderStatus.SUBMITTED, OrderEvent.FILL, filled_qty=Decimal("-1"), qty=Decimal("1")
+        )
+
+
+@pytest.mark.perf
+def test_next_status_meets_latency_budget_over_many_calls() -> None:
+    n = 50_000
+    start = time.perf_counter()
+    for _ in range(n):
+        result = next_status(OrderStatus.SUBMITTED, OrderEvent.ACK)
+    elapsed_s = time.perf_counter() - start
+
+    assert result == OrderStatus.ACKNOWLEDGED
+    assert elapsed_s < 1.0

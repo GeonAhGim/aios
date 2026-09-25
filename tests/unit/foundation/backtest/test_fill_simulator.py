@@ -206,6 +206,7 @@ def test_wrapper_fill_bar_index_caught_by_domain_lookahead_rule_on_regression() 
 # -- D2 performance assertion --------------------------------------------------
 
 
+@pytest.mark.perf
 def test_bar_fill_simulator_throughput_budget() -> None:
     """`BarFillSimulator.simulate()` runs once per pending-order fill on
     every bar of the replay loop (`run_backtest.py`); 10,000 calls must stay

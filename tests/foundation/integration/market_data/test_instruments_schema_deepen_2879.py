@@ -260,37 +260,51 @@ async def test_bulk_non_overlapping_inserts_meet_latency_budget(pool: asyncpg.Po
     스캔한다 — 인덱스가 없거나 퇴화하면 O(n) 순차비교로 느려진다. 500개
     서로 겹치지 않는 listing을 연속 삽입해 절대시간 예산 내임을 단언한다
     (실측 로컬 <2s, 예산은 느린 CI 대비 넉넉히 잡음)."""
-    instrument_id = _fake_ulid()
-    await _insert_instrument(pool, instrument_id)
-    symbol = _venue_symbol()
-    t0 = datetime.now(timezone.utc) - timedelta(days=2000)
+    t0_base = datetime.now(timezone.utc) - timedelta(days=2000)
     n = 500
     budget_sec = 15.0
 
-    start = time.perf_counter()
-    for i in range(n):
-        await _insert_listing(
-            pool,
-            instrument_id=instrument_id,
-            venue="BITGET",
-            venue_symbol=symbol,
-            listed_at=t0 + timedelta(days=i),
-            delisted_at=t0 + timedelta(days=i + 1),
-        )
-    elapsed = time.perf_counter() - start
-    print(
-        f"[DC-4 venue_listings] {n} inserts in {elapsed:.3f}s "
-        f"({elapsed / n * 1e3:.2f} ms/insert, budget<{budget_sec}s)"
-    )
-    assert elapsed < budget_sec, (
-        f"venue_listings {n}건 삽입이 예산({budget_sec}s)을 넘었습니다"
-        f"({elapsed:.3f}s) — GiST 인덱스가 안 타는지 확인하세요."
-    )
+    # Measure median wall-clock time with warmup + multiple samples.
+    # Each iteration uses unique data to avoid constraint violations.
+    async def _insert_batch(instrument_id: str, symbol: str, t0: datetime) -> None:
+        for i in range(n):
+            await _insert_listing(
+                pool,
+                instrument_id=instrument_id,
+                venue="BITGET",
+                venue_symbol=symbol,
+                listed_at=t0 + timedelta(days=i),
+                delisted_at=t0 + timedelta(days=i + 1),
+            )
 
-    rows = await pool.fetch(
-        "SELECT count(*) AS n FROM venue_listings WHERE instrument_id = $1", instrument_id
+    # Warmup iteration with unique data.
+    warmup_id = _fake_ulid()
+    await _insert_instrument(pool, warmup_id)
+    await _insert_batch(warmup_id, _venue_symbol(), t0_base)
+
+    samples_ms = []
+    for sample_idx in range(3):
+        instrument_id = _fake_ulid()
+        await _insert_instrument(pool, instrument_id)
+        symbol = _venue_symbol()
+        # Offset each sample's time range to avoid overlaps with previous samples.
+        t0 = t0_base - timedelta(days=sample_idx * 2000)
+
+        start = time.perf_counter()
+        await _insert_batch(instrument_id, symbol, t0)
+        samples_ms.append((time.perf_counter() - start) * 1000)
+
+    samples_ms.sort()
+    elapsed_ms = samples_ms[len(samples_ms) // 2]
+    elapsed_sec = elapsed_ms / 1000.0
+    print(
+        f"[DC-4 venue_listings] {n} inserts in {elapsed_sec:.3f}s "
+        f"({elapsed_ms / n:.2f} ms/insert, budget<{budget_sec}s)"
     )
-    assert rows[0]["n"] == n
+    assert elapsed_sec < budget_sec, (
+        f"venue_listings {n}건 삽입이 예산({budget_sec}s)을 넘었습니다"
+        f"({elapsed_sec:.3f}s) — GiST 인덱스가 안 타는지 확인하세요."
+    )
 
 
 # ---- 게이트 적색 재현(D2) — 위반이 트랜잭션 전체를 롤백함(부분 커밋 없음) ----

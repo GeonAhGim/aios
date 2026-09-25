@@ -262,6 +262,7 @@ def test_unrecognized_expr_in_untyped_order_field_fails_closed() -> None:
 # ---- 성능 단언: 자원 산정 지연(ADR-2026-09-09-C) ----
 
 
+@pytest.mark.perf
 def test_estimation_latency_p95_within_compile_budget_slice() -> None:
     """수치 성능 단언: ADR-2026-09-09-C 축별 성능 예산 "DSL 컴파일 300ms" 중
     자원 산정(DSL-6) 단계 몫을 30ms로 상한 잡는다(나머지는 렉스/파스/타입체크/

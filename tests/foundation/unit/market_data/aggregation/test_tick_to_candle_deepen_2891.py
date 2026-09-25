@@ -22,7 +22,6 @@ task-4928(§9.10 DC-22 XREV, task-3723 교차 리뷰)에서 `ticks_to_candles`�
 from __future__ import annotations
 
 import random
-import time
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from decimal import Decimal
@@ -43,6 +42,7 @@ from src.foundation.market_data.domain.aggregation.tick_to_candle import (
 )
 from src.foundation.market_data.domain.calendar.known_venues import KNOWN_SESSIONS
 from src.foundation.market_data.domain.calendar.session_rules import VenueCalendar
+from tests.conftest import PerfBudget
 
 UTC = timezone.utc
 _ULID = "01ARZ3NDEKTSV4RRFFQ69G5FAV"
@@ -219,30 +219,33 @@ def test_session_not_found_error_fires_for_open_time_missing_from_session_list()
 
 
 @pytest.mark.perf
-def test_ticks_to_candles_meets_latency_budget_for_large_tick_series() -> None:
+def test_ticks_to_candles_meets_latency_budget_for_large_tick_series(
+    perf_budget: PerfBudget,
+) -> None:
     """50,000틱(100틱/초 x 500초 ~= 9개 M1창)을 집계하는 시간이 절대시간
     예산 내여야 한다 — 두-포인터 스캔이 창마다 처음부터 다시 훑는 식으로
     퇴화(O(n x windows))하면 이 예산을 넘는다."""
     n = 50_000
+    budget_ms = 8000.0  # 실측 로컬 단독 실행 <200ms, 스위트 동시부하 시 변동 감안
     rng = random.Random(2891)
     ticks = [
         _tick(i // 100, seq=i, price=str(100 + rng.randint(-5, 5)), size="1") for i in range(n)
     ]
+    calendar = _bitget_calendar()
 
-    budget_sec = 8.0  # 실측 로컬 단독 실행 <0.2s, 스위트 동시부하 시 변동 감안
-    start = time.perf_counter()
-    result = ticks_to_candles(ticks, Timeframe.M1, _bitget_calendar())
-    elapsed = time.perf_counter() - start
+    def _aggregate() -> object:
+        result = ticks_to_candles(ticks, Timeframe.M1, calendar)
+        total_ticks = sum(lin.tick_count for lin in result.lineage)
+        assert total_ticks == n
+        return result
 
+    sample = perf_budget.assert_within(
+        _aggregate, budget_ms=budget_ms, label="[DC-22 tick_to_candle]"
+    )
+    result = _aggregate()
     print(
         f"[DC-22 tick_to_candle] {n}틱 -> {len(result.columns)}봉, "
-        f"{elapsed:.3f}s (budget<{budget_sec}s)"
-    )
-    total_ticks = sum(lin.tick_count for lin in result.lineage)
-    assert total_ticks == n
-    assert elapsed < budget_sec, (
-        f"ticks_to_candles({n}틱)가 예산({budget_sec}s)을 넘었습니다({elapsed:.3f}s) — "
-        "두-포인터 스캔이 창마다 재스캔으로 퇴화했는지 확인하세요."
+        f"{perf_budget.describe(sample, budget_ms=budget_ms)}"
     )
 
 

@@ -251,6 +251,7 @@ def test_baseline_missing_metric_key_fails(tmp_path: Path) -> None:
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.perf
 def test_scan_tree_throughput_budget(tmp_path: Path) -> None:
     """200개 파일(각 20개 함수) 스캔이 5초 예산 안에 끝난다 -- 회귀 시 CI 스텝이
     조용히 느려지는 것을 막는 처리량 단언(D2 DoD 성능 단언 1건)."""

@@ -267,6 +267,7 @@ def test_vectorized_matches_talib_reference_default_params(name: str) -> None:
 # ---- DEEPEN(task-2916): 수치 성능 단언(증분 update 지연) ----
 
 
+@pytest.mark.perf
 def test_incremental_update_latency_p99_within_streaming_budget() -> None:
     """ADR-2026-09-09-C Decision 1의 축별 성능 예산 표는 지표 축에 "증분=일괄 동일"만
     걸어 두고 지연 자체는 수치화하지 않았다 — 이 리프에서 실측으로 보강한다. 리플레이·

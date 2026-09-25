@@ -259,6 +259,7 @@ def test_write_reference_returns_0_when_all_trs_have_path_and_method(
 # 상시 적색이 되지 않으면서도 I/O나 역순회 같은 실질 회귀만 잡는다.
 
 
+@pytest.mark.perf
 def test_extract_trs_from_file_throughput_meets_batch_generation_floor(monkeypatch) -> None:
     monkeypatch.setattr(
         kis_tr_fetch, "_http_get", lambda url: _SAMPLE_FILE_REAL_PAPER_SPLIT.encode("utf-8")

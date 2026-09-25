@@ -139,6 +139,7 @@ def test_corrupt_dependency_cannot_emit_evidence(
         best_execution(**inputs)
 
 
+@pytest.mark.perf
 @pytest.mark.parametrize("side,expected", [(OrderSide.BUY, "100"), (OrderSide.SELL, "-100")])
 def test_weighted_window_exact_cost_and_performance(
     inputs: dict[str, Any], side: OrderSide, expected: str,

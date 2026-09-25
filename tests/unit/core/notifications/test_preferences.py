@@ -190,6 +190,7 @@ class TestUpdateNotificationPreferencesFailureInjection:
 
 
 class TestUpdateNotificationPreferencesPerformance:
+    @pytest.mark.perf
     async def test_p95_latency_within_budget(self, pool):
         """Numeric perf assertion: 20 sequential upserts, p95 < 100ms (single-row upsert budget)."""
         user_id = await create_test_user(pool)

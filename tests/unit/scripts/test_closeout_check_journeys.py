@@ -1,7 +1,7 @@
 """scripts/closeout_check.py 단위 테스트 — task-6667, 종료조건 13(사용자 여정).
 
 ADR-2026-09-24-A Decision 4: J1~J3 Playwright 여정 테스트 파일 3개 존재 +
-`test.fixme` 0건 + `--ci-report`의 `steps.frontend.ok` 녹색. 리포트를 넘기지
+`test.fixme` 0건 + `--ci-report`의 `steps.journeys.ok` 녹색. 리포트를 넘기지
 않으면 다른 항목들과 같은 ADR-D 원칙("모른다=통과 아님")으로 FAIL 처리한다.
 종료조건 1~9는 `test_closeout_check.py`, 10~11은
 `test_closeout_check_ops_hardening.py`, 12는
@@ -16,7 +16,7 @@ from pathlib import Path
 
 from tests.unit.scripts.closeout_check_loader import ROOT, _write, cc
 
-_GREEN_REPORT = {"steps": {"frontend": {"ok": True}}}
+_GREEN_REPORT = {"steps": {"journeys": {"ok": True}}}
 
 
 def _write_all_specs(tmp_path: Path, *, with_fixme: bool = False) -> None:
@@ -76,17 +76,17 @@ def test_journeys_fail_when_ci_report_missing_without_report_path(tmp_path: Path
     assert cc.UNVERIFIED in result.evidence
 
 
-def test_journeys_fail_when_frontend_step_is_red(tmp_path: Path) -> None:
+def test_journeys_fail_when_journeys_step_is_red(tmp_path: Path) -> None:
     _write_all_specs(tmp_path)
-    _write_ci_report(tmp_path, {"steps": {"frontend": {"ok": False}}})
+    _write_ci_report(tmp_path, {"steps": {"journeys": {"ok": False}}})
 
     result = cc.check_13_user_journeys(tmp_path, ci_report=tmp_path / "ci.json")
 
     assert not result.passed
-    assert "프론트엔드 CI 단계" in result.detail
+    assert "여정 CI 단계(steps.journeys)" in result.detail
 
 
-def test_journeys_fail_when_frontend_step_absent_from_report(tmp_path: Path) -> None:
+def test_journeys_fail_when_journeys_step_absent_from_report(tmp_path: Path) -> None:
     _write_all_specs(tmp_path)
     _write_ci_report(tmp_path, {"steps": {"ruff": {"ok": True}}})
 
@@ -108,13 +108,13 @@ def test_journeys_fail_when_ci_report_json_is_malformed(tmp_path: Path) -> None:
     result = cc.check_13_user_journeys(tmp_path, ci_report=path)
 
     assert not result.passed
-    assert "JSON 파싱 실패" in result.detail or "steps.frontend" in result.detail
+    assert "JSON 파싱 실패" in result.detail or "steps.journeys" in result.detail
 
 
 # --------------------------------------------------------------------------- positive
 
 
-def test_journeys_pass_when_specs_present_no_fixme_and_frontend_green(tmp_path: Path) -> None:
+def test_journeys_pass_when_specs_present_no_fixme_and_journeys_green(tmp_path: Path) -> None:
     _write_all_specs(tmp_path)
     _write_ci_report(tmp_path, _GREEN_REPORT)
 

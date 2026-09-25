@@ -277,6 +277,7 @@ def test_main_missing_baseline_requires_update_flag(
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.perf
 def test_count_tree_full_src_scan_completes_within_budget() -> None:
     start = time.perf_counter()
     total, _per_file, scanned = check_code_language.count_tree(ROOT / "src")

@@ -167,6 +167,7 @@ async def test_broken_limiter_backend_fails_closed_not_silently_allowed(client):
     assert response.status_code >= 500
 
 
+@pytest.mark.perf
 async def test_acquire_p99_latency_within_budget():
     """`InMemoryTokenBucket.acquire()`는 I/O 없이 dict 조회 + 락만 쓰므로
     ADR-2026-09-09-C 예산표의 "사전거래 게이트 p99 5ms"를 자체 예산으로
@@ -183,6 +184,7 @@ async def test_acquire_p99_latency_within_budget():
     assert _p99(samples) < _ACQUIRE_P99_BUDGET_SECONDS
 
 
+@pytest.mark.perf
 async def test_gate_red_reproduction_acquire_p99_budget_guard_catches_lock_regression(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

@@ -168,6 +168,7 @@ async def test_dividend_disclosures_token_fetch_failure_raises_fatal() -> None:
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.perf
 async def test_credit_balance_ranking_overhead_bounded_vs_raw_request_baseline() -> None:
     """`get_credit_balance_ranking`이 원시 `_request` 왕복 하나만 하고
     `_as_rows`/`_require`로 두 output을 정규화하는 것 말고는 추가 HTTP

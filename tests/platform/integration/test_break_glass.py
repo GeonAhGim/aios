@@ -356,6 +356,7 @@ async def test_audit_failure_rolls_back_approval(pool, monkeypatch):
 # --- performance assertion ---------------------------------------------------
 
 
+@pytest.mark.perf
 async def test_consume_latency_budget(pool):
     """단일 조건부 UPDATE(consume)는 관리자 작업치고 관대한 예산인 p95 100ms
     아래여야 한다(이 축은 §4 성능 예산 표에 별도 수치가 없어 임시로 정한

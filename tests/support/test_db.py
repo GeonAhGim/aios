@@ -149,6 +149,84 @@ async def test_ensure_worker_database_propagates_object_in_use_after_retries() -
         db_module2.asyncpg.connect = original_connect
 
 
+@pytest.mark.asyncio
+async def test_ensure_worker_database_propagates_unique_violation_after_retries() -> None:
+    """task-7375(esc-ci-pytest_perf): 동시 CREATE DATABASE 경합이 계속되면
+    `UniqueViolationError`를 최종 raise한다.
+
+    두 프로세스가 같은 worker_id의 DB를 동시에 복제하려 하면 `CREATE DATABASE
+    ... TEMPLATE`가 `ObjectInUseError`가 아니라 `pg_database_datname_index`
+    UNIQUE 제약 위반(`UniqueViolationError`)으로 거부될 수 있다 — 이것도
+    ObjectInUseError와 동일하게 재시도 대상이어야 하고, 경합이 재시도 소진까지
+    계속되면 결국 예외를 전파해야 한다(조용히 폴백하지 않는다).
+    """
+    template_url = "postgresql+asyncpg://user:pass@localhost:5432/aios_test"
+
+    class _FakeConnection:
+        async def execute(self, sql: str, *args: object, **kwargs: object) -> str:
+            if "CREATE" in sql:
+                raise asyncpg.exceptions.UniqueViolationError(
+                    'duplicate key value violates unique constraint "pg_database_datname_index"'
+                )
+            return "0"
+
+        async def close(self) -> None:
+            pass
+
+    db_module3 = sys.modules["tests.support.db"]
+    original_connect = asyncpg.connect
+
+    async def _fake_connect3(*args: object, **kwargs: object) -> _FakeConnection:
+        return _FakeConnection()
+
+    try:
+        db_module3.asyncpg.connect = _fake_connect3  # pyright: ignore[reportAttributeAccessIssue]
+        with pytest.raises(asyncpg.exceptions.UniqueViolationError):
+            await ensure_worker_database(template_url, "gw0")
+    finally:
+        db_module3.asyncpg.connect = original_connect
+
+
+@pytest.mark.asyncio
+async def test_ensure_worker_database_recovers_from_transient_unique_violation() -> None:
+    """첫 CREATE만 `UniqueViolationError`로 경합하고 재시도에서 성공하면
+    조용히 복구한다 — 재시도 없이 즉시 전파해 버리면 정상 경합 상황에서도
+    `pytest_perf`가 매번 적색이 된다."""
+    template_url = "postgresql+asyncpg://user:pass@localhost:5432/aios_test"
+
+    class _FakeConnection:
+        def __init__(self) -> None:
+            self.create_calls = 0
+
+        async def execute(self, sql: str, *args: object, **kwargs: object) -> str:
+            if "CREATE" in sql:
+                self.create_calls += 1
+                if self.create_calls == 1:
+                    raise asyncpg.exceptions.UniqueViolationError(
+                        'duplicate key value violates unique constraint "pg_database_datname_index"'
+                    )
+            return "0"
+
+        async def close(self) -> None:
+            pass
+
+    db_module4 = sys.modules["tests.support.db"]
+    original_connect = asyncpg.connect
+    fake_conn = _FakeConnection()
+
+    async def _fake_connect4(*args: object, **kwargs: object) -> _FakeConnection:
+        return fake_conn
+
+    try:
+        db_module4.asyncpg.connect = _fake_connect4  # pyright: ignore[reportAttributeAccessIssue]
+        result_url = await ensure_worker_database(template_url, "gw0")
+    finally:
+        db_module4.asyncpg.connect = original_connect
+
+    assert "gw0" in result_url
+    assert fake_conn.create_calls == 2
+
+
 # ── Boundary tests: valid inputs pass through ────────────────────────
 
 

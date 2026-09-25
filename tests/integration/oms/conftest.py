@@ -6,6 +6,7 @@ Spec: docs/specs/L4_execution_oms_and_exchange_v1.0.md §9 L4-06.
 등은 전부 NULL 허용이라 이 트리거 테스트에는 필요 없다(tests/adversarial/
 risk/conftest.py의 `_insert_raw`와 같은 관례, 그쪽보다 훨씬 좁은 범위).
 """
+
 from __future__ import annotations
 
 import os
@@ -54,6 +55,19 @@ def _asyncpg_dsn() -> str:
 
 @pytest.fixture
 async def pool():
+    # min_size=1 — 이 파일 대부분의 테스트(190+건)는 예열이 필요 없는 단발
+    # 커넥션 사용이다. 아래 `pool_warm`은 동시 레이스를 재현하는 소수 테스트
+    # 전용이다(task-7332 — min_size=4를 이 공유 픽스처 전체에 적용하면 매
+    # 테스트마다 4개씩 실커넥션을 열어, 전체 스위트를 함께 돌릴 때(다른
+    # 워커/프로세스와 동시에 같은 Postgres 인스턴스에 접속) 커넥션 풀 생성이
+    # 지연·정체되어 CI pytest 단계가 통째로 타임아웃하는 회귀를 낳았다).
+    p = await asyncpg.create_pool(_asyncpg_dsn(), min_size=1, max_size=4)
+    yield p
+    await p.close()
+
+
+@pytest.fixture
+async def pool_warm():
     # min_size=4(동시 워커 수만큼 사전 예열, task-4981) — min_size=1이면 동시
     # 워커 중 1개만 미리 연결돼 있고 나머지는 asyncio.gather 시작 시점에
     # 새로 커넥션을 맺는다. 그 연결 수립 지연이 의도된 0.05s 레이스 창보다
@@ -61,7 +75,9 @@ async def pool():
     # (test_broken_claim_atomicity_is_caught_by_exactly_once_gate_real_db,
     # test_missing_row_lock_lets_conflicting_transition_write_orphan_event)가
     # 재현하려는 레이스가 사라진다 — 코드 회귀가 아니라 이 픽스처의 콜드
-    # 커넥션 지연이 게이트를 무력화시키는 결함이었다.
+    # 커넥션 지연이 게이트를 무력화시키는 결함이었다. 이 예열 비용은 실제로
+    # 필요한 두 테스트에만 한정한다(task-7332 — 전체 픽스처에 적용하면 전체
+    # 스위트 커넥션 풀 압박으로 CI가 타임아웃한다).
     p = await asyncpg.create_pool(_asyncpg_dsn(), min_size=4, max_size=4)
     yield p
     await p.close()

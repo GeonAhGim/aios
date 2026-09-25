@@ -241,6 +241,7 @@ def test_non_finite_value_in_base_column_fails_closed_not_silently_propagated() 
     assert excinfo.value.code == "INDICATOR_INPUT_INVALID"
 
 
+@pytest.mark.perf
 def test_resolve_chain_latency_is_bounded_for_max_depth_chain() -> None:
     """수치 성능 단언: 그래프 해석(`resolve_chain`의 위상 정렬)과 lookback
     체인 합성은 깊이 상한(MAX_CHAIN_DEPTH) 그래프에서도 호출당 5ms를 넘지

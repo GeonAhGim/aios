@@ -227,6 +227,7 @@ async def test_worm_trigger_allows_state_transition_unrelated_columns(repo, pool
     assert activated.rule_hash == draft.rule_hash
 
 
+@pytest.mark.perf
 async def test_get_active_and_transition_are_single_round_trip_and_latency_bounded(
     repo, pool, monkeypatch
 ):

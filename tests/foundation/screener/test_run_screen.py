@@ -314,6 +314,7 @@ async def test_run_screen_times_out_on_slow_field_source() -> None:
 # ---- perf assertion: ADR-2026-09-09-C 축별 예산 "스크리너 5k 심볼 2초" ----
 
 
+@pytest.mark.perf
 async def test_run_screen_scans_5000_symbols_within_adr_budget() -> None:
     # No row matches ("close" always 50 <= 100) so the scan must walk the full
     # 5,000-symbol universe end to end instead of stopping early at the

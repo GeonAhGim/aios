@@ -161,6 +161,7 @@ def test_future_item_leak_injection() -> None:
 # --- performance assertion ---
 
 
+@pytest.mark.perf
 def test_search_latency_under_budget() -> None:
     """RD-7 performance: 10,000 items must search in < 300ms (budget=300).
 

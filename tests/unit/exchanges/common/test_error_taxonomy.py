@@ -84,6 +84,7 @@ def test_explicit_retryable_override_is_respected() -> None:
     assert err.circuit_open is True
 
 
+@pytest.mark.perf
 def test_classify_and_error_construction_latency_budget() -> None:
     """`classify_http`/`ExchangeError` 생성은 요청 경로마다 한 번씩 호출되는
     hot path — 로컬 회귀 예산이며 SLO 단언은 아니다(headless worker 지침)."""

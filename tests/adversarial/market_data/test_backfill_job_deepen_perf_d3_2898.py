@@ -83,16 +83,35 @@ def _checkerboard(
 async def test_backfill_job_meets_latency_budget_with_many_disjoint_gaps() -> None:
     n_gaps = 250
     budget_sec = 5.0  # 실측 로컬 <1s, CI 편차 감안
+
+    async def _run_once() -> None:
+        start, end, covered_spans, answers = _checkerboard(n_gaps)
+        store = _FakeCandleStore()
+        coverage_repo = _FakeCoverageRepository()
+        coverage_repo.spans = list(covered_spans)
+        _seed_covered_candles(store, covered_spans)
+        provider = _FakeProvider(answers)
+        await _run(provider, store, coverage_repo, range_start=start, range_end=end)
+
+    # Warmup iteration (not counted)
+    await _run_once()
+
+    samples = []
+    for _ in range(7):
+        t0 = time.perf_counter()
+        await _run_once()
+        samples.append(time.perf_counter() - t0)
+    samples.sort()
+    elapsed = samples[len(samples) // 2]
+
+    # Final run to capture result for assertions
     start, end, covered_spans, answers = _checkerboard(n_gaps)
     store = _FakeCandleStore()
     coverage_repo = _FakeCoverageRepository()
     coverage_repo.spans = list(covered_spans)
     _seed_covered_candles(store, covered_spans)
     provider = _FakeProvider(answers)
-
-    t0 = time.perf_counter()
     result = await _run(provider, store, coverage_repo, range_start=start, range_end=end)
-    elapsed = time.perf_counter() - t0
 
     print(f"[DC-16 backfill_job] {n_gaps}개 분리 갭 처리 {elapsed:.4f}s (budget<{budget_sec}s)")
     assert result.gaps_planned == n_gaps
@@ -117,9 +136,19 @@ async def test_backfill_job_scales_sub_quadratically_with_gap_count() -> None:
         coverage_repo.spans = list(covered_spans)
         _seed_covered_candles(store, covered_spans)
         provider = _FakeProvider(answers)
-        t0 = time.perf_counter()
-        await _run(provider, store, coverage_repo, range_start=start, range_end=end)
-        return time.perf_counter() - t0
+
+        async def _run_once() -> None:
+            await _run(provider, store, coverage_repo, range_start=start, range_end=end)
+
+        # Warmup and median of 7 samples
+        await _run_once()
+        samples = []
+        for _ in range(7):
+            t0 = time.perf_counter()
+            await _run_once()
+            samples.append(time.perf_counter() - t0)
+        samples.sort()
+        return samples[len(samples) // 2]
 
     small = await _time_for(60)
     large = await _time_for(240)  # 4배

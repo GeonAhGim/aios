@@ -14,6 +14,8 @@ from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from uuid import uuid4
 
+import pytest
+
 from src.core.loader.risk_policy_loader import load_risk_policy
 from src.core.risk.decision import RiskOutcome
 from src.core.risk.inputs import (
@@ -218,6 +220,7 @@ def test_flat_price_history_returns_none_when_correlation_is_mathematically_unde
     assert max_corr is None
 
 
+@pytest.mark.perf
 def test_repeated_calls_over_many_positions_has_no_performance_regression():
     """성능 단언 — 10개 포지션·30봉 히스토리에 대한 상관 노출 계산 30회가
     느슨한 상한(10000ms, 이 headless worker 환경의 CPU 경합을 감안한 회귀
