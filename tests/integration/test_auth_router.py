@@ -466,3 +466,29 @@ async def test_login_failure_injection_db_error(
         assert "trace_id" in body
     finally:
         del app.dependency_overrides[real_dep]
+
+
+# ── performance assertion (DoD: 1건) ──────────────────────────────────────
+
+
+@pytest.mark.perf
+async def test_login_latency_within_budget(client: AsyncClient) -> None:
+    """수치 성능 단언 — 로그인 요청이 충분히 빠르게 응답해야 한다.
+    20회 순차 로그인이 1000ms 예산 내에 완료되어야 한다 (평균 50ms/회)."""
+    import time
+
+    email = _unique_email()
+    await client.post("/auth/register", json={"email": email, "password": STRONG_PASSWORD})
+
+    latency_budget = 1.5  # seconds
+    started = time.perf_counter()
+
+    for _ in range(20):
+        response = await client.post(
+            "/auth/login", json={"email": email, "password": STRONG_PASSWORD}
+        )
+        assert response.status_code == 200
+
+    elapsed = time.perf_counter() - started
+
+    assert elapsed < latency_budget, f"20회 로그인 {elapsed:.3f}s — 예산 {latency_budget}s 초과"
