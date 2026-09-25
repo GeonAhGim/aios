@@ -44,3 +44,58 @@ def test_build_risk_inputs_new_entry_defaults_reduce_only_false():
         now=datetime(2026, 9, 3, tzinfo=timezone.utc),
     )
     assert result.intent.reduce_only is False
+
+
+def test_zero_position_quantity_yields_zero_open_positions_count():
+    """An explicit zero position must be treated the same as no position,
+    not as a truthy present dict key."""
+    allocation = _Allocation("BTC/USDT", "strat-1", Decimal("0.1"), Decimal("10"))
+    result = build_risk_inputs(
+        RiskInputs,
+        allocation,
+        {"position_quantity": Decimal(0)},
+        tenant_id=uuid4(),
+        execution_id=1,
+        now=datetime(2026, 9, 3, tzinfo=timezone.utc),
+    )
+    assert result.exposure.open_positions_count == 0
+
+
+def test_nonzero_position_quantity_yields_one_open_position_count():
+    allocation = _Allocation("BTC/USDT", "strat-1", Decimal("0.1"), Decimal("10"))
+    result = build_risk_inputs(
+        RiskInputs,
+        allocation,
+        {"position_quantity": Decimal("0.5")},
+        tenant_id=uuid4(),
+        execution_id=1,
+        now=datetime(2026, 9, 3, tzinfo=timezone.utc),
+    )
+    assert result.exposure.open_positions_count == 1
+
+
+def test_avg_trade_count_24h_int_is_converted_to_decimal():
+    allocation = _Allocation("BTC/USDT", "strat-1", Decimal("0.1"), Decimal("10"))
+    result = build_risk_inputs(
+        RiskInputs,
+        allocation,
+        {"avg_trade_count_24h": 12},
+        tenant_id=uuid4(),
+        execution_id=1,
+        now=datetime(2026, 9, 3, tzinfo=timezone.utc),
+    )
+    assert result.activity.trades_avg_per_hour_24h == Decimal(12)
+    assert isinstance(result.activity.trades_avg_per_hour_24h, Decimal)
+
+
+def test_missing_avg_trade_count_24h_stays_none():
+    allocation = _Allocation("BTC/USDT", "strat-1", Decimal("0.1"), Decimal("10"))
+    result = build_risk_inputs(
+        RiskInputs,
+        allocation,
+        {},
+        tenant_id=uuid4(),
+        execution_id=1,
+        now=datetime(2026, 9, 3, tzinfo=timezone.utc),
+    )
+    assert result.activity.trades_avg_per_hour_24h is None
