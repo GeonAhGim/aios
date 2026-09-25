@@ -409,6 +409,7 @@ async def test_concurrent_boundary_reservation_with_gate_deny_releases_under_loa
 # -- performance assertion --------------------------------------------------------
 
 
+@pytest.mark.perf
 async def test_many_concurrent_algo_runs_stay_within_latency_budget(pool):
     """Performance assertion -- an adversarial flood of `_CONCURRENT_RUNS`
     distinct algo runs ticking simultaneously (each its own parent, no lock

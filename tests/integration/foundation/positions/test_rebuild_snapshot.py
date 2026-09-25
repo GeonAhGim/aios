@@ -12,6 +12,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 from decimal import Decimal
+from typing import Any
 from uuid import UUID, uuid4
 
 import asyncpg
@@ -62,18 +63,18 @@ def _key(tenant_id: UUID) -> str:
 
 
 class _RealPorts:
-    def __init__(self, pool):
+    def __init__(self, pool: asyncpg.Pool) -> None:
         self.journal = PostgresJournalRepository(pool)
         self.snapshots = PostgresSnapshotRepository(pool)
         self.audit = PostgresAuditEventRepository(pool)
 
 
 @pytest.fixture
-def ports(pool):
+def ports(pool: asyncpg.Pool) -> _RealPorts:
     return _RealPorts(pool)
 
 
-async def _open(pool):
+async def _open(pool: asyncpg.Pool) -> tuple[UUID, UUID, str]:
     tenant_id = await create_test_tenant(pool)
     account_id = await create_pos_account(pool, tenant_id)
     position_key = _key(tenant_id)
@@ -82,8 +83,18 @@ async def _open(pool):
 
 
 async def _fill(
-    pool, ports, *, tenant_id, account_id, position_key, side, quantity, price, fill_seq, order_id
-):
+    pool: asyncpg.Pool,
+    ports: _RealPorts,
+    *,
+    tenant_id: UUID,
+    account_id: UUID,
+    position_key: str,
+    side: OrderSide,
+    quantity: Decimal,
+    price: Decimal,
+    fill_seq: int,
+    order_id: UUID,
+) -> object:
     async with pool.acquire() as conn, conn.transaction():
         return await record_fill(
             conn,
@@ -108,7 +119,16 @@ async def _fill(
         )
 
 
-async def _funding(pool, ports, *, tenant_id, account_id, position_key, amount, funding_id):
+async def _funding(
+    pool: asyncpg.Pool,
+    ports: _RealPorts,
+    *,
+    tenant_id: UUID,
+    account_id: UUID,
+    position_key: str,
+    amount: Decimal,
+    funding_id: str,
+) -> object:
     async with pool.acquire() as conn, conn.transaction():
         return await record_funding_fee(
             conn,
@@ -130,7 +150,7 @@ async def _funding(pool, ports, *, tenant_id, account_id, position_key, amount, 
         )
 
 
-async def test_unknown_position_rejected(pool, ports):
+async def test_unknown_position_rejected(pool: asyncpg.Pool, ports: _RealPorts) -> None:
     tenant_id = await create_test_tenant(pool)
     with pytest.raises(UnknownPositionError):
         await rebuild_snapshot(
@@ -144,7 +164,7 @@ async def test_unknown_position_rejected(pool, ports):
         )
 
 
-async def test_healthy_snapshot_has_no_drift(pool, ports):
+async def test_healthy_snapshot_has_no_drift(pool: asyncpg.Pool, ports: _RealPorts) -> None:
     tenant_id, account_id, position_key = await _open(pool)
     order_id = uuid4()
     await _fill(
@@ -197,7 +217,7 @@ async def test_healthy_snapshot_has_no_drift(pool, ports):
     assert report.entries == 3
 
 
-async def test_dry_run_reports_drift_without_writing(pool, ports):
+async def test_dry_run_reports_drift_without_writing(pool: asyncpg.Pool, ports: _RealPorts) -> None:
     tenant_id, account_id, position_key = await _open(pool)
     order_id = uuid4()
     await _fill(
@@ -246,7 +266,9 @@ async def test_dry_run_reports_drift_without_writing(pool, ports):
     assert snapshot_row["realized_pnl_base"] == Decimal("42")
 
 
-async def test_apply_fixes_drift_without_touching_journal(pool, ports):
+async def test_apply_fixes_drift_without_touching_journal(
+    pool: asyncpg.Pool, ports: _RealPorts
+) -> None:
     tenant_id, account_id, position_key = await _open(pool)
     order_id = uuid4()
     await _fill(
@@ -320,7 +342,7 @@ async def test_apply_fixes_drift_without_touching_journal(pool, ports):
     assert snapshot_row["last_journal_seq"] == 2
 
 
-async def test_apply_with_no_drift_is_noop(pool, ports):
+async def test_apply_with_no_drift_is_noop(pool: asyncpg.Pool, ports: _RealPorts) -> None:
     tenant_id, account_id, position_key = await _open(pool)
     await _fill(
         pool,
@@ -369,19 +391,19 @@ class _QueryCountingConnectionCtx:
     노출하지 않고 자체 pool.acquire()를 여는 운영 도구라 pool 자체를 얇게
     감싼다)."""
 
-    def __init__(self, inner_ctx: object, sink: list[str]) -> None:
+    def __init__(self, inner_ctx: Any, sink: list[str]) -> None:
         self._inner_ctx = inner_ctx
         self._sink = sink
-        self._conn = None
-        self._log = None
+        self._conn: Any = None
+        self._log: Any = None
 
-    async def __aenter__(self):
+    async def __aenter__(self) -> Any:
         self._conn = await self._inner_ctx.__aenter__()
         self._log = lambda record: self._sink.append(getattr(record, "query", ""))
         self._conn.add_query_logger(self._log)
         return self._conn
 
-    async def __aexit__(self, exc_type, exc, tb):
+    async def __aexit__(self, exc_type: Any, exc: Any, tb: Any) -> Any:
         if self._conn is not None and self._log is not None:
             self._conn.remove_query_logger(self._log)
         return await self._inner_ctx.__aexit__(exc_type, exc, tb)
@@ -390,7 +412,7 @@ class _QueryCountingConnectionCtx:
 class _QueryCountingPool:
     """rebuild_snapshot(pool, ...)가 유일하게 쓰는 `pool.acquire()`만 감싼다."""
 
-    def __init__(self, pool) -> None:
+    def __init__(self, pool: asyncpg.Pool) -> None:
         self._pool = pool
         self.queries: list[str] = []
 
@@ -403,7 +425,9 @@ _MAX_REBUILD_LATENCY_MS = 2000.0
 
 
 @pytest.mark.perf
-async def test_rebuild_snapshot_round_trip_and_latency_guard(pool, ports):
+async def test_rebuild_snapshot_round_trip_and_latency_guard(
+    pool: asyncpg.Pool, ports: _RealPorts
+) -> None:
     """수치 성능 단언(DEEPEN task-2958) — DEPTH 감사(task-2723,
     docs/audit/DEPTH_LA_LB_LC.md #452)가 원 리프(2c9bf78)에 이 축 증빙이
     전무하다고 판정했다. task-2959/2962/2970/2974/2977과 같은 결정을
@@ -470,8 +494,8 @@ async def test_rebuild_snapshot_round_trip_and_latency_guard(pool, ports):
 
 
 async def test_bypassing_position_lock_causes_concurrent_rebuild_conflict_gate_red(
-    pool, ports, monkeypatch
-):
+    pool: asyncpg.Pool, ports: _RealPorts, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """게이트 적색 재현(DEEPEN task-2958) + 동시성 증명 — 모듈독스트링이
     전제하는 `_acquire_position_lock`(pg_advisory_xact_lock, record_fill과
     같은 네임스페이스)이 없다면, rebuild_snapshot이 스냅샷을 읽은 *직후*
@@ -490,7 +514,7 @@ async def test_bypassing_position_lock_causes_concurrent_rebuild_conflict_gate_r
 
     tenant_id, account_id, position_key = await _open(pool)
 
-    async def _noop_lock(conn, key):
+    async def _noop_lock(conn: object, key: str) -> None:
         return None
 
     monkeypatch.setattr(rebuild_snapshot_module, "_acquire_position_lock", _noop_lock)
@@ -498,7 +522,9 @@ async def test_bypassing_position_lock_causes_concurrent_rebuild_conflict_gate_r
     real_get = PostgresSnapshotRepository.get
     raced = False
 
-    async def _get_then_race(self, conn, tenant_id_, position_key_):
+    async def _get_then_race(
+        self: PostgresSnapshotRepository, conn: Any, tenant_id_: UUID, position_key_: str
+    ) -> Any:
         nonlocal raced
         snapshot = await real_get(self, conn, tenant_id_, position_key_)
         if not raced:
@@ -549,7 +575,9 @@ async def test_bypassing_position_lock_causes_concurrent_rebuild_conflict_gate_r
 # --- DEEPEN additions: negative / failure-injection tests ---
 
 
-async def test_rebuild_snapshot_journal_list_failure(pool, ports, monkeypatch):
+async def test_rebuild_snapshot_journal_list_failure(
+    pool: asyncpg.Pool, ports: _RealPorts, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """실패주입(DEEPEN) — journal.list_for 가 DB 예외를 던지면 rebuild_snapshot
     은 트랜잭션 롤백으로 전체 연산을 취소해야 한다. 저널 행 수가 늘지 않고
     스냅샷도 변하지 않아야 한다."""
@@ -578,7 +606,7 @@ async def test_rebuild_snapshot_journal_list_failure(pool, ports, monkeypatch):
         )
 
     # Monkeypatch journal.list_for to raise
-    async def _raise_list_for(conn, position_key_):
+    async def _raise_list_for(conn: object, position_key_: str) -> None:
         raise asyncpg.PostgresError("simulated connection reset")
 
     monkeypatch.setattr(ports.journal, "list_for", _raise_list_for)
@@ -607,7 +635,9 @@ async def test_rebuild_snapshot_journal_list_failure(pool, ports, monkeypatch):
     assert qty_after == qty_before, "DB 예외 발생 시 스냅샷이 변하면 안 된다"
 
 
-async def test_rebuild_snapshot_upsert_failure_isolation(pool, ports, monkeypatch):
+async def test_rebuild_snapshot_upsert_failure_isolation(
+    pool: asyncpg.Pool, ports: _RealPorts, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """실패주입(DEEPEN) — fold 계산은 성공했지만 snapshots.upsert 가 예외를
     던지는 경우. 트랜잭션이 롤백되어 저널/스냅샷 모두 원상태여야 한다.
     rebuild_snapshot 자체는 예외를 전파한다."""
@@ -645,7 +675,7 @@ async def test_rebuild_snapshot_upsert_failure_isolation(pool, ports, monkeypatc
         )
 
     # Monkeypatch upsert to raise
-    async def _raise_upsert(conn, snapshot, expected_seq):
+    async def _raise_upsert(conn: object, snapshot: object, expected_seq: object) -> None:
         raise asyncpg.IntegrityConstraintViolationError(
             'duplicate key value violates constraint "pos_snapshot_pkey"'
         )
@@ -676,7 +706,7 @@ async def test_rebuild_snapshot_upsert_failure_isolation(pool, ports, monkeypatc
     assert seq_after == seq_before, "upsert 실패 시 last_journal_seq 가 변하면 안 된다"
 
 
-async def test_funding_fee_rebuild_with_fee_applied(pool, ports):
+async def test_funding_fee_rebuild_with_fee_applied(pool: asyncpg.Pool, ports: _RealPorts) -> None:
     """음성 테스트 — 펀딩피가 기록된 포지션에 rebuild_snapshot(dry_run=False)
     을 호출하면 funding_base drift 가 정확히 보고되고 적용된다.
     fundings가 fold 에 제대로 반영되는지 검증."""
@@ -744,3 +774,32 @@ async def test_funding_fee_rebuild_with_fee_applied(pool, ports):
         "rebuild_snapshot 적용 후 funding_base 가 펀딩피 금액으로 고쳐져야 한다"
     )
     assert row["last_journal_seq"] == 2, "펀딩피 1건 + 체결 1건 = last_journal_seq 2 여야 한다"
+
+
+async def test_invalid_position_key_format_rejected(pool: asyncpg.Pool, ports: _RealPorts) -> None:
+    """음성 테스트 — 유효하지 않은 position_key format을 전달하면
+    rebuild_snapshot이 PositionKey.parse() 단계에서 ValueError를 던진다.
+    (1) separator 개수 부족, (2) UUID parsing 실패 등의 케이스를 확인."""
+    tenant_id = await create_test_tenant(pool)
+
+    invalid_keys = [
+        "",  # empty string
+        "TESTVENUE",  # too few parts
+        "TESTVENUE:INST001:default",  # only 3 parts
+        "TESTVENUE:INST001:default:paper",  # only 4 parts (missing portfolio_id)
+        "TESTVENUE:INST001:default:paper:not-a-uuid",  # invalid UUID format
+        "TESTVENUE:INST001:default:paper:",  # empty portfolio_id
+    ]
+
+    for invalid_key in invalid_keys:
+        with pytest.raises(ValueError):
+            await rebuild_snapshot(
+                invalid_key,
+                tenant_id=tenant_id,
+                asset_class=AssetClass.CRYPTO,
+                journal=ports.journal,
+                snapshots=ports.snapshots,
+                pool=pool,
+                clock=_clock,
+                dry_run=True,
+            )

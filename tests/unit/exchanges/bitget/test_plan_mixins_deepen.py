@@ -19,6 +19,7 @@ from __future__ import annotations
 import ast
 import asyncio
 import time
+from collections.abc import Callable
 from decimal import Decimal
 
 import httpx
@@ -37,7 +38,9 @@ async def _no_delay_sleep(_seconds: float) -> None:
     await asyncio.sleep(0)
 
 
-def _make_adapter(handler, *, demo_mode: bool = True) -> BitgetAdapter:
+def _make_adapter(
+    handler: Callable[[httpx.Request], httpx.Response], *, demo_mode: bool = True
+) -> BitgetAdapter:
     transport = httpx.MockTransport(handler)
     http_client = httpx.AsyncClient(base_url="https://api.bitget.com", transport=transport)
     return BitgetAdapter(
@@ -50,7 +53,7 @@ def _make_adapter(handler, *, demo_mode: bool = True) -> BitgetAdapter:
     )
 
 
-def _envelope(code: str, data: object) -> dict:
+def _envelope(code: str, data: object) -> dict[str, object]:
     return {"code": code, "msg": "test", "requestTime": 1, "data": data}
 
 
@@ -73,13 +76,13 @@ def _order(quantity: Decimal = Decimal("0.01")) -> Order:
 # ---------------------------------------------------------------------------
 
 
-async def test_place_futures_tpsl_order_rejects_zero_trigger_price():
+async def test_place_futures_tpsl_order_rejects_zero_trigger_price() -> None:
     adapter = _make_adapter(lambda request: pytest.fail("가드가 막았어야 할 요청"))
     with pytest.raises(ValueError):
         await adapter.place_futures_tpsl_order("BTC/USDT", "profit_plan", Decimal("0"))
 
 
-async def test_place_futures_tpsl_order_rejects_negative_size():
+async def test_place_futures_tpsl_order_rejects_negative_size() -> None:
     adapter = _make_adapter(lambda request: pytest.fail("가드가 막았어야 할 요청"))
     with pytest.raises(ValueError):
         await adapter.place_futures_tpsl_order(
@@ -87,19 +90,19 @@ async def test_place_futures_tpsl_order_rejects_negative_size():
         )
 
 
-async def test_place_futures_plan_order_rejects_zero_quantity():
+async def test_place_futures_plan_order_rejects_zero_quantity() -> None:
     adapter = _make_adapter(lambda request: pytest.fail("가드가 막았어야 할 요청"))
     with pytest.raises(ValueError):
         await adapter.place_futures_plan_order(_order(quantity=Decimal("0")), Decimal("75000"))
 
 
-async def test_place_futures_plan_order_rejects_negative_trigger_price():
+async def test_place_futures_plan_order_rejects_negative_trigger_price() -> None:
     adapter = _make_adapter(lambda request: pytest.fail("가드가 막았어야 할 요청"))
     with pytest.raises(ValueError):
         await adapter.place_futures_plan_order(_order(), Decimal("-1"))
 
 
-async def test_place_futures_position_tpsl_rejects_zero_take_profit_even_though_provided():
+async def test_place_futures_position_tpsl_rejects_zero_take_profit_even_though_provided() -> None:
     """경계값 — `take_profit_trigger=0`은 `is not None` 검사는 통과하지만
     (즉 "적어도 하나는 필요" 에러가 아니라) 0보다 커야 한다는 별도 검증에
     걸려야 한다. 두 체크를 혼동하면(예: `if not take_profit_trigger`) 0을
@@ -109,7 +112,7 @@ async def test_place_futures_position_tpsl_rejects_zero_take_profit_even_though_
         await adapter.place_futures_position_tpsl("BTC/USDT", take_profit_trigger=Decimal("0"))
 
 
-async def test_place_futures_position_tpsl_rejects_negative_stop_loss():
+async def test_place_futures_position_tpsl_rejects_negative_stop_loss() -> None:
     adapter = _make_adapter(lambda request: pytest.fail("가드가 막았어야 할 요청"))
     with pytest.raises(ValueError):
         await adapter.place_futures_position_tpsl("BTC/USDT", stop_loss_trigger=Decimal("-100"))
@@ -120,7 +123,7 @@ async def test_place_futures_position_tpsl_rejects_negative_stop_loss():
 # ---------------------------------------------------------------------------
 
 
-async def test_health_check_swallows_unexpected_exception_from_get_balance():
+async def test_health_check_swallows_unexpected_exception_from_get_balance() -> None:
     """비즈니스 오류(빈 잔고 등)가 아니라 완전히 예상 밖의 예외(파싱 버그,
     None 역참조 등)가 get_balance()에서 올라와도 health_check()는 여전히
     False만 반환해야 한다 — Watchdog이 health_check() 호출 자체로 죽으면
@@ -135,7 +138,7 @@ async def test_health_check_swallows_unexpected_exception_from_get_balance():
     assert await adapter.health_check() is False
 
 
-async def test_health_check_swallows_infra_failure_after_retries_exhausted():
+async def test_health_check_swallows_infra_failure_after_retries_exhausted() -> None:
     """failure-injection — 인프라 장애(`httpx.ConnectError`)가
     `ResilientTransport`의 재시도 예산(max_attempts=4)을 전부 소진해
     `RetryableExchangeError`로 표면화되어도 health_check()는 그 예외를
@@ -157,7 +160,8 @@ async def test_health_check_swallows_infra_failure_after_retries_exhausted():
 # ---------------------------------------------------------------------------
 
 
-async def test_get_futures_current_plan_orders_parses_large_list_within_normalized_budget():
+@pytest.mark.perf
+async def test_get_futures_current_plan_orders_parses_large_list_within_normalized_budget() -> None:
     """수치 성능 단언 — `list(raw["data"].get("entrustedList") or [])`는
     얕은 복사뿐이라 항목 수에 선형으로 늘어야 한다. 절대 ms 상수 대신 같은
     프로세스에서 잰 동일 크기 trivial list 생성 대비 정규화 배율을 쓴다
@@ -222,7 +226,7 @@ _PLAN_MIXIN_FUND_MOVING_METHODS = (
 )
 
 
-def test_gate_flags_plan_mixin_methods_if_guard_decorator_is_dropped():
+def test_gate_flags_plan_mixin_methods_if_guard_decorator_is_dropped() -> None:
     """게이트 적색 재현 — trading_plan_mixin.py/futures_plan_mixin.py의
     실제 자금이동 메서드 이름들로 만든 합성 소스에서 데코레이터를 제거하면
     `test_live_guard_coverage.py`의 AST 스캐너(`_has_guard_decorator`)가
@@ -245,7 +249,7 @@ def test_gate_flags_plan_mixin_methods_if_guard_decorator_is_dropped():
         )
 
 
-def test_gate_recognizes_guard_decorator_present_on_plan_mixin_methods():
+def test_gate_recognizes_guard_decorator_present_on_plan_mixin_methods() -> None:
     """위 테스트의 반대 방향 — 실제 데코레이터가 붙은 합성 소스는 스캐너가
     위반으로 오탐하지 않아야 한다(거짓 양성 방지, 대칭 검증)."""
     src = "class X:\n" + "".join(

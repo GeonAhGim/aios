@@ -35,10 +35,9 @@ DSL-4가 `close[1]`의 정적 타입을 원소 타입 `float`로 정했지만 �
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping
-from dataclasses import dataclass
-from typing import Final, Protocol, cast
+from typing import Final, cast
 
-from src.core.script.grammar.ast import Expr
+import src.core.script.runtime.mtf as mtf
 from src.core.script.ir.ops import (
     BinOp,
     Call,
@@ -53,9 +52,17 @@ from src.core.script.ir.ops import (
     Not,
     Order,
     Plot,
+    Request,
     Signal,
     Store,
     verify_stack,
+)
+from src.core.script.runtime.interpreter_types import (
+    BuiltinRegistry,
+    CallSite,
+    ExecutionResult,
+    OrderOutput,
+    PlotOutput,
 )
 from src.core.script.runtime.series import (
     ArithOp,
@@ -73,55 +80,12 @@ from src.core.script.runtime.series import (
     negate,
 )
 from src.core.script.runtime.values import check_value
-from src.core.script.typing.types import Type, is_series
+from src.core.script.typing.types import is_series
 
 _ARITH: Final[frozenset[str]] = frozenset({"+", "-", "*", "/"})
 _COMPARE: Final[frozenset[str]] = frozenset({"<", "<=", "==", ">=", ">"})
 _CROSS: Final[frozenset[str]] = frozenset({"crosses_above", "crosses_below"})
 _LOGICAL: Final[frozenset[str]] = frozenset({"and", "or"})
-
-
-@dataclass(frozen=True)
-class CallSite:
-    """빌트인에 넘기는 호출 문맥. 반환값은 `result_type`·`bar_count`와 대조된다."""
-
-    ns: str
-    ident: str
-    result_type: Type
-    bar_count: int
-
-
-class Builtin(Protocol):
-    def __call__(self, args: tuple[Value, ...], site: CallSite) -> Value: ...
-
-
-BuiltinRegistry = Mapping[tuple[str, str], Builtin]
-"""(ns, ident) → 빌트인. DSL-9가 채운다. 인터프리터는 조회만 한다."""
-
-
-@dataclass(frozen=True)
-class PlotOutput:
-    value: Value
-    type: Type
-    style: Expr | None
-
-
-@dataclass(frozen=True)
-class OrderOutput:
-    when: Value
-    side: Expr
-    qty_expr: Expr
-    opts: Expr | None
-
-
-@dataclass(frozen=True)
-class ExecutionResult:
-    bar_count: int
-    bindings: Mapping[str, Value]
-    """input/let/signal 이름 전부(선언 순서)."""
-    signals: Mapping[str, Value]
-    plots: tuple[PlotOutput, ...]
-    orders: tuple[OrderOutput, ...]
 
 
 def execute(
@@ -130,12 +94,19 @@ def execute(
     bar_count: int,
     inputs: Mapping[str, Value] | None = None,
     builtins: BuiltinRegistry | None = None,
+    symbol: str | None = None,
+    base_timeframe: str | None = None,
 ) -> ExecutionResult:
-    """IR을 실행한다. 실패는 전부 `ScriptRuntimeError`(또는 IR 자체 결함이면 `IRStackError`)."""
+    """IR을 실행한다. 실패는 전부 `ScriptRuntimeError`(또는 IR 자체 결함이면 `IRStackError`).
+
+    `symbol`/`base_timeframe`은 IR에 `request(...)`(M2-2b `Request` 명령)가
+    하나라도 있을 때만 필요하다 — 없으면 기본값 `None`으로 충분하다(기존
+    호출부와 하위호환). `request(...)`가 있는데 둘 중 하나라도 빠지면
+    `ScriptRuntimeError`(fail-closed, MTF 평가 불가)."""
     if isinstance(bar_count, bool) or not isinstance(bar_count, int) or bar_count < 0:
         raise ScriptRuntimeError(f"bar_count는 0 이상 정수여야 합니다: {bar_count!r}")
     verify_stack(ir)
-    machine = _Machine(bar_count, dict(inputs or {}), builtins or {})
+    machine = _Machine(bar_count, dict(inputs or {}), builtins or {}, symbol, base_timeframe)
     machine.run(ir)
     return machine.result()
 
@@ -144,10 +115,19 @@ def execute(
 
 
 class _Machine:
-    def __init__(self, bar_count: int, inputs: dict[str, Value], builtins: BuiltinRegistry):
+    def __init__(
+        self,
+        bar_count: int,
+        inputs: dict[str, Value],
+        builtins: BuiltinRegistry,
+        symbol: str | None = None,
+        base_timeframe: str | None = None,
+    ):
         self._n = bar_count
         self._inputs = inputs
         self._builtins = builtins
+        self._symbol = symbol
+        self._base_timeframe = base_timeframe
         self._stack: list[Value] = []
         self._bindings: dict[str, Value] = {}
         self._signals: dict[str, Value] = {}
@@ -167,6 +147,7 @@ class _Machine:
             "plot": self._plot,
             "signal": self._signal,
             "order": self._order,
+            "request": self._request,
         }
 
     def run(self, ir: IRProgram) -> None:
@@ -253,6 +234,24 @@ class _Machine:
         result = fn(args, site)
         self._stack.append(
             check_value(result, instr.type, self._n, f"{instr.ns}.{instr.ident}() 반환값")
+        )
+
+    def _request(self, instr: Instr) -> None:
+        """`request(symbol, timeframe, expr)`(M2-2b). 내부 expr 값은 이미 스택
+        위에 있다(post-order) — 검증·확정봉 리샘플 본체는 `mtf.evaluate_request`."""
+        assert isinstance(instr, Request)  # noqa: S101
+        resampled = mtf.evaluate_request(
+            self._pop(),
+            bar_count=self._n,
+            symbol=self._symbol,
+            base_timeframe=self._base_timeframe,
+            request_symbol=instr.symbol,
+            request_timeframe=instr.timeframe,
+        )
+        self._stack.append(
+            check_value(
+                resampled, instr.type, self._n, f"request({instr.symbol!r}, {instr.timeframe!r})"
+            )
         )
 
     # -- decl --

@@ -226,6 +226,7 @@ def test_allocate_rejects_unknown_policy():
 # 성능 단언만 추가한다(선례: dceb4b2b, 63764b46, 775370f2).
 
 
+@pytest.mark.perf
 def test_allocate_by_weight_hot_path_performance():
     # pro_rata/fixed_weight가 공유하는 _allocate_by_weight 커널 — 잔여
     # 흡수 루프가 우연히 O(n^2)로 퇴화하는 회귀를 잡는다.
@@ -237,6 +238,7 @@ def test_allocate_by_weight_hot_path_performance():
     assert elapsed < 1.0
 
 
+@pytest.mark.perf
 def test_allocate_manual_hot_path_performance():
     targets = [
         ManualTarget(sub_account_id=uuid4(), quantity=Decimal(str(q))) for q in (10, 20, 30, 40)

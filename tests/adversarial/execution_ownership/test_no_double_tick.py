@@ -20,6 +20,7 @@ from decimal import Decimal
 from uuid import UUID
 
 import asyncpg
+import pytest
 
 from src.core.loader.risk_policy_loader import load_risk_policy
 from src.core.safety.data_distrust import DataDistrustMonitor
@@ -237,6 +238,7 @@ async def test_lease_repo_failure_is_fail_closed_and_does_not_block_other_owner(
     assert shared_adapter.place_order_call_count == 1
 
 
+@pytest.mark.perf
 async def test_five_schedulers_race_completes_within_budget(pool):
     """성능 단언 — 경쟁자를 5개로 늘려도 tick_all_running()이 로컬 budget
     5초 안에 끝난다(§7 "1회 왕복" 배치 UPSERT 설계가 경쟁자 수에 선형으로

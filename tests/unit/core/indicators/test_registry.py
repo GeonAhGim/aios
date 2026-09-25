@@ -17,7 +17,7 @@ import inspect
 import time
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
-from typing import Any
+from typing import Any, cast
 
 import numpy as np
 import pytest
@@ -105,7 +105,7 @@ def test_specs_out_of_range_param_is_rejected() -> None:
 def test_param_spec_is_frozen() -> None:
     spec = ParamSpec(name="timeperiod", min=2, max=500, default=20)
     with pytest.raises(AttributeError):
-        spec.default = 30  # type: ignore[misc]
+        setattr(spec, "default", 30)  # noqa: B010 — frozen model must reject assignment
 
 
 # --- L02 registry.py: 조회·검증·lookback·registry_hash ---------------------
@@ -144,7 +144,7 @@ def test_registry_validate_params_out_of_range_raises(timeperiod: int) -> None:
 def test_registry_validate_params_rejects_non_int_value() -> None:
     registry = IndicatorRegistry()
     with pytest.raises(IndicatorError) as excinfo:
-        registry.validate_params("SMA", {"timeperiod": 20.5})  # type: ignore[dict-item]
+        registry.validate_params("SMA", cast(dict[str, int], {"timeperiod": 20.5}))
     assert excinfo.value.code == "STRATEGY_PARAM_OUT_OF_RANGE"
 
 
@@ -471,7 +471,7 @@ def test_lookback_nan_count_gate_turns_red_when_lookback_formula_is_off_by_one()
     inputs = [arrays[key] for key in spec.inputs]
     params = _default_params(spec)
 
-    raw_output = talib.SMA(*inputs, **params)  # type: ignore[arg-type]
+    raw_output = cast(Any, talib).SMA(*inputs, **params)
     actual_leading_nan = _leading_nan_count(raw_output)
 
     broken_spec = IndicatorSpec(

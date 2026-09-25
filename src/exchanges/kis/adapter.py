@@ -15,9 +15,11 @@ here — the mutation test in `test_overseas_futureoption_tr_reference.py`
 monkeypatches `_PAPER_SWAP_PREFIXES` directly on this module
 (`adapter_module`) at global scope (see oauth_client.py's module docstring).
 """
+
 from __future__ import annotations
 
 from decimal import Decimal
+from typing import TYPE_CHECKING
 
 from src.data.models.base import AssetClass
 from src.data.models.trading import Order
@@ -38,7 +40,11 @@ from src.exchanges.kis.overseas_futureoption_mixin import KISOverseasFutureoptio
 from src.exchanges.kis.overseas_stock_mixin import KISOverseasStockMixin
 from src.exchanges.kis.trading_mixin import KISTradingMixin
 from src.exchanges.kis.trading_query_mixin import KISTradingQueryMixin
+from src.exchanges.kis.venue_profile import KIS_KR_EQUITY_PROFILE
 from src.exchanges.kis.websocket_mixin import KISWebSocketMixin
+
+if TYPE_CHECKING:
+    from src.services.oms.domain.venue_profile import VenueCapabilityProfile
 
 # tests/contract/exchanges/kis/test_generated_contract.py imports these
 # names — re-exported as-is from oauth_client.py (not a duplicate definition).
@@ -164,6 +170,15 @@ class KISAdapter(
                 trading_days=["MON", "TUE", "WED", "THU", "FRI"],
             ),
         )
+
+    def venue_profile(self) -> VenueCapabilityProfile:
+        """BR-18 fix — `KIS_KR_EQUITY_PROFILE` in
+        `exchanges/kis/venue_profile.py` existed but this method was never
+        wired to return it, so calls silently fell through to the ABC
+        default (`UnsupportedCapabilityError`). Caught by
+        `scripts/check_exchange_spi.py`'s capability-vs-implementation
+        cross-check; wiring mirrors Bitget's `venue_profile()`."""
+        return KIS_KR_EQUITY_PROFILE
 
     @require_paper_sandbox
     async def place_order(self, order: Order) -> Order:

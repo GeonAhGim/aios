@@ -1,9 +1,12 @@
 """3자 대사 비교 규칙 단위테스트 — L4-05. DB 없음."""
 from __future__ import annotations
 
+import time
 from datetime import datetime, timezone
 from decimal import Decimal
 from uuid import uuid4
+
+import pytest
 
 from src.data.models.trading import OrderSide, OrderStatus, OrderType
 from src.foundation.reconciliation.contracts.v1 import Classification
@@ -141,3 +144,33 @@ def test_balance_matching_within_tolerance_is_not_flagged() -> None:
         policy=_POLICY,
     )
     assert result == []
+
+
+def test_balance_difference_within_absolute_tolerance_is_flagged_as_minor_not_material() -> None:
+    """A nonzero but within-tolerance difference is still reported (not
+    silently dropped like the exact-HEALTHY case) but correctly downgraded
+    to MINOR_DIFFERENCE rather than MATERIAL_MISMATCH — a distinction the
+    HEALTHY/MATERIAL_MISMATCH tests above never exercise."""
+    result = compare_triple(
+        [],
+        [],
+        [],
+        balances={"USDT": Decimal("100.0005")},
+        ledger_balances={"USDT": Decimal("100.0000")},
+        policy=_POLICY,
+    )
+    assert len(result) == 1
+    assert result[0].kind == "BALANCE_MISMATCH"
+    assert classify(result[0]) == Classification.MINOR_DIFFERENCE
+
+
+@pytest.mark.perf
+def test_compare_triple_meets_latency_budget_with_a_thousand_matching_orders() -> None:
+    orders = [_order_view(order_id=uuid4()) for _ in range(1000)]
+
+    start = time.perf_counter()
+    result = compare_triple(orders, orders, [], {}, {}, _POLICY)
+    elapsed_s = time.perf_counter() - start
+
+    assert result == []
+    assert elapsed_s < 2.0

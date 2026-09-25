@@ -201,7 +201,7 @@ async def test_risk_gate_repo_none_is_rejected_i01() -> None:
             order.order_id,
             adapter=_LookupAdapter(results=[None]),
             pool=_FakePool(),
-            risk_gate_repo=None,  # type: ignore[arg-type]
+            risk_gate_repo=None,  # type: ignore[arg-type]  # negative test: I-01 fail-closed(TypeError) 검증을 위한 의도적 None
             clock=lambda: BASE,
             sleep=_no_sleep,
             order_repo=_FakeOrderRepo(order),

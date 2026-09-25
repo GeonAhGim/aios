@@ -133,6 +133,26 @@ async def test_list_orders_invalid_cursor_raises(pool) -> None:
         await order_query.list_orders(pool, tenant_id=user_id, cursor="not-a-valid-cursor")
 
 
+async def test_list_orders_cursor_with_valid_alphabet_leading_garbage_raises(pool) -> None:
+    """negative — task-4964: `!!!` 같은 알파벳 밖 문자가 아니라, base64
+    알파벳 안에 속하는 쓰레기 블록(`AAAA`)을 앞에 붙여도 거부해야 한다.
+    `!!!garbage!!!` 케이스는 `binascii.Error`(알파벳 검증)만으로 걸러져
+    strict 디코드 이후의 partition/fromisoformat/UUID 파싱 경로를 실제로
+    거치지 않는다 — 이 케이스가 그 경로를 검증한다."""
+    user_id = await create_test_user(pool)
+    valid_cursor = order_query._encode_cursor(datetime.now(timezone.utc), uuid4())
+    with pytest.raises(order_query.InvalidOrderCursorError):
+        await order_query.list_orders(pool, tenant_id=user_id, cursor="AAAA" + valid_cursor)
+
+
+async def test_list_orders_cursor_with_valid_alphabet_trailing_garbage_raises(pool) -> None:
+    """negative — task-4964: 위와 동일하되 뒤에 붙는 경우."""
+    user_id = await create_test_user(pool)
+    valid_cursor = order_query._encode_cursor(datetime.now(timezone.utc), uuid4())
+    with pytest.raises(order_query.InvalidOrderCursorError):
+        await order_query.list_orders(pool, tenant_id=user_id, cursor=valid_cursor + "AAAA")
+
+
 async def test_list_orders_cursor_with_leading_garbage_raises(pool) -> None:
     """negative — task-4897 REJECT: 앞에 쓰레기 문자가 섞인 커서를
     lenient urlsafe_b64decode가 관대하게 무시하고 정상 페이지를 반환하면

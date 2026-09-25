@@ -32,10 +32,21 @@ constant this module invents. The one estimate this module does make --
 (chars/4) used only to refuse an over-cap call *before* spending anything
 (`ports/model_provider.py` docstring); it never substitutes for the real
 post-call `usage` figures in the returned `StructuredOutput.cost`.
+
+The pre-flight estimate is computed over the full request payload the wire call
+actually sends -- `prompt.template` *and* the JSON-serialized `schema` (the
+`tools[0].input_schema` block, forced via `tool_choice`) -- not `prompt.template`
+alone. Anthropic bills the whole `/v1/messages` request body as input tokens;
+counting only the prompt text under-estimates the pre-flight cost by the size of
+the caller's schema, which for a nontrivial JSON Schema is not negligible and
+would let a call through that the schema's real weight should have refused
+before spending anything (the exact failure `AnthropicCostCapExceededError`
+exists to prevent).
 """
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
 from decimal import Decimal
 from typing import Any
@@ -101,6 +112,13 @@ def _estimate_input_tokens(text: str) -> int:
     return max(1, len(text) // _CHARS_PER_TOKEN_ESTIMATE)
 
 
+def _estimate_request_input_tokens(prompt: PromptTemplate, schema: dict[str, Any]) -> int:
+    """Pre-flight estimate over everything the wire call bills as input --
+    the prompt text *and* the forced tool's `input_schema` (module docstring:
+    undercounting the schema would let an over-cap call through)."""
+    return _estimate_input_tokens(prompt.template) + _estimate_input_tokens(json.dumps(schema))
+
+
 def _extract_tool_input(body: dict[str, Any]) -> dict[str, Any]:
     for block in body.get("content", []):
         if isinstance(block, dict) and block.get("type") == "tool_use":
@@ -146,7 +164,8 @@ class AnthropicProvider:
         budget: GenerationBudget,
     ) -> StructuredOutput:
         estimated_cost = (
-            Decimal(_estimate_input_tokens(prompt.template)) * self._pricing.input_cost_per_token
+            Decimal(_estimate_request_input_tokens(prompt, schema))
+            * self._pricing.input_cost_per_token
             + Decimal(budget.max_output_tokens) * self._pricing.output_cost_per_token
         )
         if estimated_cost > budget.cost_cap:

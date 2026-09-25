@@ -5,7 +5,9 @@ httpx.MockTransport 기반 검증(test_kis_adapter.py와 동일 원칙). tr_id�
 T→V로 치환된다(기존 KISAdapter._resolve_tr_id() 규칙 재확인).
 """
 import json
+from collections.abc import Callable
 from decimal import Decimal
+from typing import Any
 
 import httpx
 import pytest
@@ -15,9 +17,10 @@ from src.data.models.trading import Order, OrderSide, OrderStatus, OrderType
 from src.exchanges.kis.adapter import KISAdapter
 
 TOKEN_RESPONSE = {"access_token": "tok-1", "access_token_token_expired": "2099-01-01 00:00:00"}
+Handler = Callable[[httpx.Request], httpx.Response]
 
 
-def _make_adapter(handler) -> KISAdapter:
+def _make_adapter(handler: Handler) -> KISAdapter:
     transport = httpx.MockTransport(handler)
     client = httpx.AsyncClient(
         base_url="https://openapivts.koreainvestment.com:29443", transport=transport
@@ -25,7 +28,7 @@ def _make_adapter(handler) -> KISAdapter:
     return KISAdapter("app", "secret", "12345678", "01", is_paper_trading=True, http_client=client)
 
 
-def _route(request: httpx.Request, routes: dict) -> httpx.Response:
+def _route(request: httpx.Request, routes: dict[str, Handler]) -> httpx.Response:
     if request.url.path == "/oauth2/tokenP":
         return httpx.Response(200, json=TOKEN_RESPONSE)
     handler = routes.get(request.url.path)
@@ -33,8 +36,8 @@ def _route(request: httpx.Request, routes: dict) -> httpx.Response:
     return handler(request)
 
 
-def _order(**overrides) -> Order:
-    defaults = dict(
+def _order(**overrides: Any) -> Order:
+    defaults: dict[str, Any] = dict(
         client_order_id="c-1",
         strategy_id="s-1",
         strategy_version="v1",
@@ -49,7 +52,7 @@ def _order(**overrides) -> Order:
     return Order(**defaults)
 
 
-async def test_get_overseas_ticker_uses_quote_exchange_code():
+async def test_get_overseas_ticker_uses_quote_exchange_code() -> None:
     def handler(request: httpx.Request) -> httpx.Response:
         assert request.headers["tr_id"] == "HHDFS00000300"
         assert request.url.params["EXCD"] == "NAS"
@@ -66,13 +69,13 @@ async def test_get_overseas_ticker_uses_quote_exchange_code():
     assert ticker.price == Decimal("225.50")
 
 
-async def test_get_overseas_ticker_rejects_unknown_market():
+async def test_get_overseas_ticker_rejects_unknown_market() -> None:
     adapter = _make_adapter(lambda request: httpx.Response(200, json=TOKEN_RESPONSE))
     with pytest.raises(ValueError):
         await adapter.get_overseas_ticker("AAPL", "MARS")
 
 
-async def test_place_overseas_order_uses_order_exchange_code_and_buy_tr_id():
+async def test_place_overseas_order_uses_order_exchange_code_and_buy_tr_id() -> None:
     def handler(request: httpx.Request) -> httpx.Response:
         assert request.headers["tr_id"] == "VTTT1002U"  # 모의투자 치환 확인(TTTT1002U -> V)
         body = json.loads(request.content)
@@ -98,7 +101,7 @@ async def test_place_overseas_order_uses_order_exchange_code_and_buy_tr_id():
     assert result.status == OrderStatus.SUBMITTED
 
 
-async def test_place_overseas_order_sell_uses_sell_tr_id():
+async def test_place_overseas_order_sell_uses_sell_tr_id() -> None:
     def handler(request: httpx.Request) -> httpx.Response:
         assert request.headers["tr_id"] == "VTTT1006U"  # sell tr_id(TTTT1006U)의 모의투자 치환
         return httpx.Response(
@@ -118,7 +121,7 @@ async def test_place_overseas_order_sell_uses_sell_tr_id():
     await adapter.place_overseas_order(order, "NASD")
 
 
-async def test_cancel_overseas_order_returns_true_on_success():
+async def test_cancel_overseas_order_returns_true_on_success() -> None:
     def handler(request: httpx.Request) -> httpx.Response:
         assert request.headers["tr_id"] == "VTTT1004U"  # 모의투자 치환 확인
         body = json.loads(request.content)
@@ -137,7 +140,7 @@ async def test_cancel_overseas_order_returns_true_on_success():
     assert result is True
 
 
-async def test_get_overseas_balance_maps_holdings():
+async def test_get_overseas_balance_maps_holdings() -> None:
     def handler(request: httpx.Request) -> httpx.Response:
         assert request.headers["tr_id"] == "VTTS3012R"  # 모의투자 치환 확인
         assert request.url.params["OVRS_EXCG_CD"] == "NASD"
@@ -161,3 +164,102 @@ async def test_get_overseas_balance_maps_holdings():
 
     assert balances[0].asset == "AAPL"
     assert balances[0].total == Decimal("10")
+
+
+# Negative tests: invariant violations (불변식 위반)
+async def test_place_overseas_order_rejects_invalid_exchange() -> None:
+    """불변식: 지원하지 않는 거래소 코드는 명시적으로 거부된다."""
+    adapter = _make_adapter(lambda request: httpx.Response(200, json=TOKEN_RESPONSE))
+    order = _order()
+
+    with pytest.raises(ValueError, match="지원하지 않는 해외주식 거래소"):
+        await adapter.place_overseas_order(order, "MARS")
+
+
+async def test_cancel_overseas_order_rejects_malformed_order_id() -> None:
+    """불변식: 주문번호 형식이 잘못되면(콜론 구분자 없음) 명시적으로 실패한다."""
+    adapter = _make_adapter(lambda request: httpx.Response(200, json=TOKEN_RESPONSE))
+
+    # ":" 구분자 없는 order_id는 split 실패
+    with pytest.raises(ValueError):
+        await adapter.cancel_overseas_order("999", "AAPL", "NASD", original_quantity=Decimal("1"))
+
+
+async def test_get_overseas_balance_rejects_invalid_exchange() -> None:
+    """불변식: 지원하지 않는 거래소 코드는 명시적으로 거부된다."""
+    adapter = _make_adapter(lambda request: httpx.Response(200, json=TOKEN_RESPONSE))
+
+    with pytest.raises(ValueError, match="지원하지 않는 해외주식 거래소"):
+        await adapter.get_overseas_balance("UNKNOWN")
+
+
+# Failure injection tests: API error responses
+async def test_get_overseas_ticker_raises_on_api_error() -> None:
+    """실패주입: API가 오류를 반환할 때(rt_cd != "0") 예외를 발생시킨다(fail-closed 원칙)."""
+    from src.core.exceptions import RetryableExchangeError
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={
+                "rt_cd": "-1",  # 오류 응답
+                "msg1": "Invalid parameter",
+                "output": {}
+            }
+        )
+
+    adapter = _make_adapter(
+        lambda request: _route(request, {"/uapi/overseas-price/v1/quotations/price": handler})
+    )
+
+    with pytest.raises(RetryableExchangeError):
+        await adapter.get_overseas_ticker("AAPL", "NASD")
+
+
+async def test_place_overseas_order_raises_on_api_error() -> None:
+    """실패주입: 주문 제출 실패(API 오류) 시 예외를 발생시킨다(fail-closed 원칙)."""
+    from src.core.exceptions import RetryableExchangeError
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={
+                "rt_cd": "-1",  # 오류 코드
+                "msg1": "Insufficient funds",
+                "output": {}
+            }
+        )
+
+    adapter = _make_adapter(
+        lambda request: _route(request, {"/uapi/overseas-stock/v1/trading/order": handler})
+    )
+    order = _order()
+
+    with pytest.raises(RetryableExchangeError):
+        await adapter.place_overseas_order(order, "NASD")
+
+
+async def test_cancel_overseas_order_raises_on_api_error() -> None:
+    """실패주입: 취소 실패(API 오류) 시 예외를 발생시킨다(fail-closed 원칙)."""
+    from src.core.exceptions import RetryableExchangeError
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={
+                "rt_cd": "-1",  # 오류 코드
+                "msg1": "Order not found",
+                "output": {}
+            }
+        )
+
+    adapter = _make_adapter(
+        lambda request: _route(
+            request, {"/uapi/overseas-stock/v1/trading/order-rvsecncl": handler}
+        )
+    )
+
+    with pytest.raises(RetryableExchangeError):
+        await adapter.cancel_overseas_order(
+            "1234:999", "AAPL", "NASD", original_quantity=Decimal("1")
+        )

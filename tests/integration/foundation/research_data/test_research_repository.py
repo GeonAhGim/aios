@@ -16,11 +16,20 @@ DEEPEN task-2908 (DEPTH_DC_RD task-2726 audit: negative/failure-inject were
 already satisfied by the real-DB WORM trigger rejections above; the D2 gap
 was numeric perf assertions and a gate-red reproduction):
 (g) `append_item` latency and idempotent-replay throughput stay within an
-    explicit numeric budget (`@pytest.mark.perf`)
+    explicit numeric budget (`@pytest.mark.perf`) -- the spec (§4 RD-4 perf
+    row) only pins a search-path budget ("검색 p95 400ms, 10만 항목 기준",
+    line 89) and an ingest-job freshness budget ("수집 잡 지연 <= 소스
+    발표 + 5분"); it has no explicit number for a single `append_item`
+    write. The budgets below are deliberately generous relative to those
+    two anchors -- a single WORM insert well under 1s and >=5 idempotent
+    replays/sec are both several orders of magnitude inside the 5-minute
+    ingest-freshness budget, so they exist as a regression tripwire (catch
+    an accidental N+1 or missing index), not as a tuned SLA.
 (h) mutation test: disabling `research_items_worm_guard_trg` (inside a
-    transaction that is always rolled back) lets the UPDATE through --
-    proving the trigger itself, not REVOKE or adapter-level checks, is what
-    turns the gate red/green
+    transaction that is always rolled back) lets the UPDATE and the
+    DELETE both through -- proving the trigger itself, not REVOKE or
+    adapter-level checks, is what turns the gate red/green for either
+    write path (RD-A2's DELETE side, not just UPDATE)
 """
 
 from __future__ import annotations
@@ -384,3 +393,42 @@ async def test_gate_red_when_worm_trigger_disabled(
                 "UPDATE research_items SET title = 'tampered-again' WHERE item_id = $1",
                 item_id,
             )
+
+
+async def test_gate_red_when_worm_trigger_disabled_for_delete(
+    pool: asyncpg.Pool, repo: PostgresResearchRepository
+) -> None:
+    """RD-A2's DELETE side of the same mutation test as
+    `test_gate_red_when_worm_trigger_disabled` above -- disabling the trigger
+    must let DELETE through too, not just UPDATE, or a regression that only
+    re-guards UPDATE would slip past CI unnoticed. Runs inside a transaction
+    that always rolls back, so the DISABLE TRIGGER mutation never persists."""
+
+    class _RollbackToKeepDbClean(Exception):
+        pass
+
+    source_id = await _seed_source(repo)
+    tenant_id = await create_test_tenant(pool)
+    item = _item(source_id=source_id)
+    item_id = await repo.append_item(tenant_id, item, external_id="ext-mutation-delete")
+
+    with pytest.raises(_RollbackToKeepDbClean):
+        async with pool.acquire() as conn, conn.transaction():
+            await conn.execute(
+                "ALTER TABLE research_items DISABLE TRIGGER research_items_worm_guard_trg"
+            )
+            await conn.execute("DELETE FROM research_items WHERE item_id = $1", item_id)
+            remaining = await conn.fetchval(
+                "SELECT count(*) FROM research_items WHERE item_id = $1", item_id
+            )
+            assert remaining == 0
+            raise _RollbackToKeepDbClean()
+
+    # Outside the rolled-back transaction: the trigger is re-enabled and the
+    # row was never actually deleted.
+    got = await repo.get_item(tenant_id, item_id)
+    assert got is not None
+
+    with pytest.raises(asyncpg.RaiseError, match="append-only violation"):
+        async with pool.acquire() as conn, conn.transaction():
+            await conn.execute("DELETE FROM research_items WHERE item_id = $1", item_id)

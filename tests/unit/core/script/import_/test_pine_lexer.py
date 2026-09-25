@@ -7,12 +7,11 @@
 
 from __future__ import annotations
 
-import time
-
 import pytest
 
 import src.core.script.import_.pine.lexer as pine_lexer
 from src.core.script.import_.pine.lexer import KEYWORDS, PineSyntaxError, TokenKind, tokenize
+from tests.conftest import PerfBudget
 
 
 def _kinds(source: str) -> list[TokenKind]:
@@ -142,12 +141,17 @@ def test_internal_dependency_failure_propagates_instead_of_silent_success(
         pine_lexer.tokenize("close")
 
 
-def test_tokenize_throughput_within_dsl_compile_budget() -> None:
+@pytest.mark.perf
+def test_tokenize_throughput_within_dsl_compile_budget(perf_budget: PerfBudget) -> None:
     """성능 단언: DSL 컴파일 예산 300ms(ADR-2026-09-09-C Decision 1) 중 렉싱 단계가
-    차지할 수 있는 상한을 실사용 스크립트보다 훨씬 큰 2000줄 합성 소스로 검증한다."""
+    차지할 수 있는 상한을 실사용 스크립트보다 훨씬 큰 2000줄 합성 소스로 검증한다.
+    task-7434: process_time 기반 perf_budget으로 측정한다."""
     source = "\n".join(f"len_{i} = {i} + close * {i}.5" for i in range(2000))
-    start = time.perf_counter()
-    tokens = tokenize(source)
-    elapsed = time.perf_counter() - start
-    assert elapsed < 0.3
+    tokens: list = []
+
+    def _run_once() -> None:
+        nonlocal tokens
+        tokens = tokenize(source)
+
+    perf_budget.assert_within(_run_once, budget_ms=300.0, label="tokenize 2000-line source")
     assert tokens[-1].kind is TokenKind.EOF

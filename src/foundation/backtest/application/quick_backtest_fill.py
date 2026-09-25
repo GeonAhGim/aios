@@ -38,9 +38,8 @@ from src.foundation.backtest.domain.fill.partial_fill import compute_partial_fil
 from src.foundation.backtest.domain.fill.slippage import apply_slippage
 from src.foundation.backtest.domain.magnifier import HigherBar, magnify
 from src.foundation.backtest.domain.models_v2 import BacktestConfigV2
+from src.foundation.market_data.api import CandleColumns, duration
 from src.foundation.market_data.contracts.v1 import Timeframe
-from src.foundation.market_data.domain.candle_columns import CandleColumns
-from src.foundation.market_data.domain.timeframe import duration
 
 OrderType = Literal["market", "limit", "stop"]
 _ZERO = Decimal("0")

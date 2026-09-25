@@ -25,7 +25,7 @@ from uuid import UUID
 
 import asyncpg
 
-from src.foundation.market_data.adapters.postgres_reference_reader import PostgresReferenceReader
+from src.foundation.market_data.api import PostgresReferenceReader
 from src.foundation.market_data.contracts.v1 import InstrumentRef, SymbolStatus, Timeframe, Venue
 
 __all__ = ["PostgresScreenerFieldSource"]

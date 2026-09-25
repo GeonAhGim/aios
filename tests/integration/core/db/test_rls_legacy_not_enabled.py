@@ -5,10 +5,28 @@ Spec: docs/specs/L4_platform_observability_tenancy_api_v1.0.md §10 리스크1
 ("레거시 테이블은 정책만 만들고 ENABLE하지 않는다 — 기존 pool.acquire()
 경로가 0행을 받아 깨지는 것을 막는다"), §9 PLT-30 DoD("upgrade/downgrade
 왕복").
+
+task-5823 root-cause fix: `test_upgrade_downgrade_round_trip` used to run its
+real `alembic downgrade`/`upgrade head` round trip directly against the
+process's shared `DATABASE_URL` -- the same session-lifetime DB
+`scripts/replay_verify.py` and every other test reads. `_PRE_RLS_REVISION`
+(5a0aedee0af0) sits well before 073beca589d5 in the migration chain, so this
+downgrade also drops `order_events`; a process kill or a concurrent reader
+landing inside the downgrade window before the `finally: upgrade head` runs
+permanently leaves the *shared* DB without `order_events` for the rest of the
+CI run -- exactly esc-ci-replay_verify's `UndefinedTableError:
+"order_events"`. Same root cause task-5783/5794/5795 already fixed for
+tests/integration/oms/test_db_transition_trigger.py,
+tests/integration/foundation/entities/test_migration_roundtrip.py and
+tests/integration/db/test_migration_tenant_membership.py. The round trip now
+runs against its own disposable DB clone
+(`tests/support/db.ensure_worker_database`) so an interrupted downgrade can
+never corrupt state anything else reads.
 """
 
 from __future__ import annotations
 
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -19,6 +37,7 @@ import pytest
 
 from tests.integration.conftest import create_test_user
 from tests.integration.core.db.conftest import AppRoleTx
+from tests.support.db import ensure_worker_database
 from tests.support.deep_downgrade import purge_position_snapshots
 
 _PROJECT_ROOT = Path(__file__).resolve().parents[4]
@@ -132,10 +151,12 @@ async def test_aios_app_cannot_create_permissive_bypass_policy_on_legacy_table(p
             await conn.execute(f"CREATE POLICY bypass_everything ON {table} USING (true)")
 
 
-def _run_alembic(*args: str) -> None:
+def _run_alembic(*args: str, database_url: str | None = None) -> None:
+    env = {**os.environ, "DATABASE_URL": database_url} if database_url else None
     result = subprocess.run(
         [sys.executable, "-m", "alembic", "-c", "alembic.ini", *args],
         cwd=_PROJECT_ROOT,
+        env=env,
         capture_output=True,
         text=True,
         encoding="utf-8",
@@ -168,21 +189,34 @@ def test_run_alembic_raises_on_nonzero_returncode(monkeypatch: pytest.MonkeyPatc
         _run_alembic("upgrade", "head")
 
 
-async def test_upgrade_downgrade_round_trip(pool):
+async def test_upgrade_downgrade_round_trip():
+    """Disposable DB clone (task-5823) -- never the shared session DB other
+    tests and `scripts/replay_verify.py` depend on. See module docstring."""
+    migration_db_url = await ensure_worker_database(os.environ["DATABASE_URL"], "rlslegacyrt")
+    migration_pool = await asyncpg.create_pool(
+        migration_db_url.replace("postgresql+asyncpg://", "postgresql://"),
+        min_size=1,
+        max_size=2,
+    )
     try:
-        await purge_position_snapshots(pool)  # deep downgrade: see tests/support/deep_downgrade.py
-        _run_alembic("downgrade", _PRE_RLS_REVISION)
-        for table in _FOUNDATION_TABLES:
-            assert await _relrowsecurity(pool, table) is False
-            assert not await _policy_exists(pool, table)
-        for table in _LEGACY_TABLES:
-            assert not await _policy_exists(pool, table)
-    finally:
-        _run_alembic("upgrade", "head")
+        try:
+            await purge_position_snapshots(
+                migration_pool
+            )  # deep downgrade: see tests/support/deep_downgrade.py
+            _run_alembic("downgrade", _PRE_RLS_REVISION, database_url=migration_db_url)
+            for table in _FOUNDATION_TABLES:
+                assert await _relrowsecurity(migration_pool, table) is False
+                assert not await _policy_exists(migration_pool, table)
+            for table in _LEGACY_TABLES:
+                assert not await _policy_exists(migration_pool, table)
+        finally:
+            _run_alembic("upgrade", "head", database_url=migration_db_url)
 
-    for table in _FOUNDATION_TABLES:
-        assert await _relrowsecurity(pool, table) is True
-        assert await _policy_exists(pool, table)
-    for table in _LEGACY_TABLES:
-        assert await _policy_exists(pool, table)
-        assert await _relrowsecurity(pool, table) is False
+        for table in _FOUNDATION_TABLES:
+            assert await _relrowsecurity(migration_pool, table) is True
+            assert await _policy_exists(migration_pool, table)
+        for table in _LEGACY_TABLES:
+            assert await _policy_exists(migration_pool, table)
+            assert await _relrowsecurity(migration_pool, table) is False
+    finally:
+        await migration_pool.close()

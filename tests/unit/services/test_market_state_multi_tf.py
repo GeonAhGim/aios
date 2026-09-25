@@ -198,6 +198,7 @@ def test_build_market_state_propagates_indicator_service_failure_mid_batch() -> 
 # -- D2 numeric performance assertion -----------------------------------------
 
 
+@pytest.mark.perf
 def test_build_market_state_throughput_budget() -> None:
     """`run_execution_tick` (tick.py) calls `build_market_state` once per
     execution per tick; 300 calls over a realistic 2-timeframe/2-key

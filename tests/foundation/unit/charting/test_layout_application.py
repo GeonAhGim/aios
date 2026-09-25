@@ -307,6 +307,7 @@ async def test_gate_red_repro_tenant_ownership_guard_is_load_bearing(
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.perf
 def test_layout_and_drawing_set_to_view_perf_budget() -> None:
     """응답 경로는 조회된 각 행을 매번 뷰로 변환한다 — 그 변환 자체가 서버
     지연을 지배하지 않는다는 상한을 고정한다(2,000회 <300ms, 로컬 CI 잡음

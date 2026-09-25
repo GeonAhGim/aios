@@ -40,10 +40,14 @@ responsibility). Both raise `NotImplementedError` (fail-closed).
 
 from __future__ import annotations
 
-from collections.abc import AsyncIterator, Sequence
+import asyncio
+import random
+import time
+from collections.abc import AsyncIterator, Awaitable, Callable, Sequence
 from decimal import Decimal
 
 from src.data.models.base import AssetClass
+from src.exchanges.common.http_policy import RetryPolicy
 from src.exchanges.kis.adapter import KISAdapter
 from src.foundation.market_data.adapters.providers.base_adapter import BaseProviderAdapter
 from src.foundation.market_data.contracts.v1 import Timeframe, Venue
@@ -81,8 +85,18 @@ class KISProvider(BaseProviderAdapter):
     `KISAdapter` (existing `src/exchanges/kis`). Domestic stocks only
     (`Venue.KIS_KRX`) (Phase 1 capability-gated scope, see module docstring)."""
 
-    def __init__(self, adapter: KISAdapter, **kwargs: object) -> None:
-        super().__init__(_CAPABILITIES, **kwargs)  # type: ignore[arg-type]
+    def __init__(
+        self,
+        adapter: KISAdapter,
+        *,
+        retry_policy: RetryPolicy | None = None,
+        clock: Callable[[], float] = time.monotonic,
+        sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
+        rng: Callable[[], float] = random.random,
+    ) -> None:
+        super().__init__(
+            _CAPABILITIES, retry_policy=retry_policy, clock=clock, sleep=sleep, rng=rng
+        )
         self._adapter = adapter
 
     def capabilities(self) -> ProviderCapabilities:

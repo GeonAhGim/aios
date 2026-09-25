@@ -1,24 +1,27 @@
-"""DC-8 — `ports/coverage_repository.py`(DC-5)의 asyncpg 구현.
+"""DC-8 — asyncpg implementation of `ports/coverage_repository.py`(DC-5).
 
 Spec: docs/specs/L4_analytics_authoring_backtest_marketplace_v1.0.md
-§2.1 DC-5·DC-8, §4.1(fail-closed), §6(커버리지 밖 구간 0/NaN 채움 금지),
+§2.1 DC-5·DC-8, §4.1(fail-closed), §6(forbid filling gaps outside coverage with 0/NaN),
 §9.2 DC-8.
 
-`ports/coverage_repository.py`가 정의한 `CoverageSpan`(instrument_id·
-venue·timeframe·quality·start·end)을 그대로 쓴다 — 그 모듈이 이미 이
-타입을 "저장 계약"이라고 명시하므로 재정의하지 않는다(task-1195 decision:
-"DC-5 Protocol을 재정의 없이 구현"). `contracts/v2/coverage.py`(DC-6)의
-동명 타입은 이 어댑터가 쓰지 않는다 — 필드 집합이 달라(asset_class 유무,
-quality_grade 3단계 vs quality 2단계) 서로 변환 없이 호환되지 않고, 그
-계약 통합은 이 리프 범위 밖이다.
+Uses `CoverageSpan`(instrument_id·venue·timeframe·quality·start·end)
+defined in `ports/coverage_repository.py` as-is — that module already
+specifies this type as the "storage contract" (task-1195 decision:
+"Implement DC-5 Protocol without overriding"). The similarly-named type
+in `contracts/v2/coverage.py`(DC-6) is not used by this adapter — the
+field sets differ(asset_class presence, quality_grade 3-level vs quality
+2-level) so they are incompatible without conversion, and that contract
+integration is out of scope for this leaf.
 
-겹침 병합(`domain/coverage/registry.merge_spans`)은 이 어댑터가 호출하지
-않는다 — 그 함수는 `contracts/v2/coverage.CoverageSpan`(다른 타입)에서만
-동작하고, 이 리프의 `upsert_span`/`list_spans`는 병합이 아니라 저장·단순
-조회만 한다(포트 docstring: "병합은 domain/coverage/registry.py(DC-6)
-소관, 여기는 저장만 한다"). 겹치는 구간 삽입은 DB EXCLUDE 제약(DC-8
-마이그레이션)이 거부하며, 병합해서 넣는 것은 호출자(상위 application
-계층)의 책임이다.
+Overlap merging (`domain/coverage/registry.merge_spans`) is not called
+by this adapter — that function only works with
+`contracts/v2/coverage.CoverageSpan`(a different type), and this
+leaf's `upsert_span`/`list_spans` perform storage and simple lookup,
+not merging (port docstring: "Merging is the responsibility of
+domain/coverage/registry.py(DC-6), this module only stores"). Inserting
+overlapping spans is rejected by the DB EXCLUDE constraint(DC-8
+migration); merging before insert is the caller's responsibility
+(upper application layer).
 """
 from __future__ import annotations
 
@@ -31,11 +34,12 @@ __all__ = ["CoverageSpanOverlapError", "PostgresCoverageRepository"]
 
 
 class CoverageSpanOverlapError(Exception):
-    """`upsert_span()`이 같은 (instrument_id, venue, timeframe, quality)
-    축 안에서 겹치는 `[start, end)` 구간을 주장함 — `coverage_spans`의
-    `EXCLUDE USING gist` 제약(DC-8) 위반. §4.1: 겹치는 원본 선언을 그대로
-    삽입하는 것은 fail-closed로 거부돼야 한다 — 병합은 호출자가
-    `domain/coverage/registry.merge_spans`로 먼저 해야 한다."""
+    """Raised when `upsert_span()` claims overlapping `[start, end)` spans
+    within the same (instrument_id, venue, timeframe, quality) axis —
+    violation of the `EXCLUDE USING gist` constraint on `coverage_spans`
+    (DC-8). §4.1: inserting overlapping raw declarations must be rejected
+    fail-closed; merging must be done first by the caller via
+    `domain/coverage/registry.merge_spans`."""
 
 
 def _row_to_span(row: asyncpg.Record) -> CoverageSpan:

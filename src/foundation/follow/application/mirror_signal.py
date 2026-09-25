@@ -33,9 +33,9 @@ from src.foundation.mandates.application.evaluate_pre_trade import (
 )
 from src.foundation.mandates.contracts.v1 import ComplianceVerdict
 from src.foundation.mandates.ports.repository import MandateRepository
+from src.foundation.risk_gate.api import GateKind
 from src.foundation.risk_gate.application.evaluate_risk_gate import evaluate_risk_gate
 from src.foundation.risk_gate.contracts.v1 import RiskOutcome
-from src.foundation.risk_gate.domain.models import GateKind
 from src.foundation.risk_gate.ports.repository import RiskGateRepository
 
 __all__ = [

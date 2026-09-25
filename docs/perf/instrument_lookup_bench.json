@@ -1,0 +1,13 @@
+{
+  "benchmark": "instrument_lookup_bench",
+  "generated_at": "2026-09-24T04:05:07.417274+00:00",
+  "git_sha": "dc88ec694e7db5240a8bbb07e72b84ccdac57197",
+  "machine": "Windows-/CPython-3.10.11",
+  "budget_ms": 200.0,
+  "samples": 50,
+  "p50_ms": 0.192,
+  "p95_ms": 0.423,
+  "max_ms": 3.231,
+  "passed": true,
+  "note": "resolve_instrument, TEST_DATABASE_URL 실DB(PostgresReferenceRepository/Reader), symbol/instrument_id 경로 번갈아 측정, 트랜잭션 롤백으로 무흔적"
+}

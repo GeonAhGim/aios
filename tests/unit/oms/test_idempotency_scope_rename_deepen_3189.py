@@ -158,6 +158,7 @@ _PERF_ITERATIONS = 1000
 _PERF_BUDGET_P99_MS = 5.0
 
 
+@pytest.mark.perf
 def test_scope_hash_and_client_order_id_and_command_digest_meet_borrowed_p99_budget() -> None:
     """순수 계산 경로(scope_hash -> client_order_id -> command_digest) p99가
     차용 예산(5ms) 내에 있어야 한다 — sha256/정렬 알고리즘이 실수로

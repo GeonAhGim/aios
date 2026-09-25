@@ -1,16 +1,18 @@
-"""15.1 — 적합성평가 설문 (SuitabilityQuestionnaire).
+"""15.1 — Suitability Questionnaire (SuitabilityQuestionnaire).
 
-Spec: 기능설계문서_v1.20.md#FD-15.1
+Legacy spec: FD-15.1 (design doc v1.20) — superseded by L4_*.md specs.
 
-법적 지위: 아래 문항·점수·기준치는 전부 Draft다 — 18.3/19장 법률검토가
-완료되기 전까지 법적 구속력 있는 기준으로 취급하지 않는다(FD-15 원문
-경고 그대로). 지금은 UX 골격만 확정한다.
+Legal status: All items, scores, and thresholds below are Draft — do not
+treat them as legally binding until the legal review in sections 18.3/19
+is complete (per the FD-15 original warning). For now, only the UX
+skeleton is finalised.
 
-용도(2026-08-10 확정): 강제 차단이 아니라 ①조언 참고 ②본인 성향과
-어긋나는 정책·전략 실행 시 경고(FD-15.3) 용도로만 쓴다.
+Use case (confirmed 2026-08-10): Used solely for ① advisory reference
+and ② warning when executing a policy or strategy that conflicts with
+the user's own risk profile (FD-15.3). Not a hard block.
 
-5개 문항 각각 0~3점, 합산 0~15점을 3단계 위험등급으로 매핑(Draft
-경계값): 0~5 안정형, 6~10 중립형, 11~15 공격형.
+Scoring: 5 items, each 0-3 points, total 0-15 mapped to 3 risk tiers
+(Draft thresholds): 0-5 Stable, 6-10 Neutral, 11-15 Aggressive.
 """
 from __future__ import annotations
 
@@ -36,8 +38,8 @@ class LiquidityNeed(str, Enum):
 
 class SuitabilityAnswers(BaseModel):
     years_of_experience: int  # 0, 1~3, 4~10, 10+
-    investable_ratio_pct: int  # 순자산 대비 투자가능 비중(%)
-    loss_tolerance_pct: int  # 원금 대비 손실 감내 수준(%)
+    investable_ratio_pct: int  # Investable assets as % of net worth
+    loss_tolerance_pct: int  # Maximum loss tolerance as % of principal
     investment_goal: InvestmentGoal
     liquidity_need: LiquidityNeed
 

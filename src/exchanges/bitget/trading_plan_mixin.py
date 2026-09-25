@@ -14,6 +14,7 @@ Spec: 02_exchange_adapter_v1.3.md#§2.1, 02b_bitget_api_v2_full_spec_v1.md#§3.2
 2026-09-03 task-1032(PLT-40a 선행) — `trading_mixin.py`(314줄, P6
 line_cap 초과)에서 순수 이동(동작 변경 0).
 """
+
 from __future__ import annotations
 
 from decimal import Decimal
@@ -61,9 +62,7 @@ class BitgetTradingPlanMixin:
         }
         if order_price is not None:
             body["executePrice"] = str(order_price)
-        raw = await self._request(
-            "POST", "/api/v2/spot/trade/place-plan-order", body=body
-        )
+        raw = await self._request("POST", "/api/v2/spot/trade/place-plan-order", body=body)
         return dict(raw["data"])
 
     @require_paper_sandbox
@@ -85,6 +84,66 @@ class BitgetTradingPlanMixin:
             "GET", "/api/v2/spot/trade/current-plan-order", params=params or None
         )
         return list(raw["data"])
+
+    async def get_history_plan_orders(
+        self: SignedRequestClient, symbol: str | None = None, *, limit: int = 100
+    ) -> list[dict[str, Any]]:
+        """02b spec §3.2(P2) — get history of plan orders."""
+        params: dict[str, Any] = {"limit": str(limit)}
+        if symbol is not None:
+            params["symbol"] = _to_bitget_symbol(symbol)
+        raw = await self._request(
+            "GET", "/api/v2/spot/trade/history-plan-order", params=params or None
+        )
+        return list(raw["data"])
+
+    @require_paper_sandbox
+    async def modify_plan_order(
+        self: SignedRequestClient, order_id: str, **kwargs: Any
+    ) -> dict[str, Any]:
+        """02b spec §3.2(P2) — modify a plan order."""
+        body: dict[str, Any] = {"orderId": order_id}
+        if "trigger_price" in kwargs:
+            body["triggerPrice"] = str(kwargs["trigger_price"])
+        if "order_price" in kwargs:
+            body["executePrice"] = str(kwargs["order_price"])
+        if "order_type" in kwargs:
+            body["orderType"] = kwargs["order_type"].value.lower()
+        raw = await self._request("POST", "/api/v2/spot/trade/modify-plan-order", body=body)
+        return dict(raw["data"])
+
+    @require_paper_sandbox
+    async def batch_cancel_plan_orders(
+        self: SignedRequestClient, order_ids: list[str], *, symbol: str | None = None
+    ) -> bool:
+        """02b spec §3.2(P2) — batch cancel plan orders."""
+        body: dict[str, Any] = {"orderIdList": [{"orderId": oid} for oid in order_ids]}
+        if symbol is not None:
+            body["symbol"] = _to_bitget_symbol(symbol)
+        raw = await self._request("POST", "/api/v2/spot/trade/batch-cancel-plan-order", body=body)
+        return bool(raw.get("code") == "00000")
+
+    @require_paper_sandbox
+    async def batch_cancel_replace_orders(
+        self: SignedRequestClient, order_ids: list[str], *, symbol: str | None = None
+    ) -> dict[str, Any]:
+        """02b spec §3.2(P2) — batch cancel and replace orders.
+
+        Allows canceling specified orders and submitting new order information."""
+        body: dict[str, Any] = {"orderIdList": [{"orderId": oid} for oid in order_ids]}
+        if symbol is not None:
+            body["symbol"] = _to_bitget_symbol(symbol)
+        raw = await self._request(
+            "POST", "/api/v2/spot/trade/batch-cancel-replace-order", body=body
+        )
+        return dict(raw["data"])
+
+    @require_paper_sandbox
+    async def cancel_symbol_orders(self: SignedRequestClient, symbol: str) -> bool:
+        """02b spec §3.2(P2) — cancel all orders for a symbol."""
+        body: dict[str, Any] = {"symbol": _to_bitget_symbol(symbol)}
+        raw = await self._request("POST", "/api/v2/spot/trade/cancel-symbol-order", body=body)
+        return bool(raw.get("code") == "00000")
 
     async def health_check(self: _BalanceReadingClient) -> bool:
         """Watchdog이 State DB와 무관하게 호출하는 경량 응답성 확인."""

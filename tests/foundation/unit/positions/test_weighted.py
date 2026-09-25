@@ -8,10 +8,12 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 from decimal import Decimal
+from typing import Any, cast
 
 import pytest
 
 from src.data.models.trading import OrderSide
+from src.foundation.positions.contracts.v1 import Lot
 from src.foundation.positions.domain.cost_basis.fifo import NegativeQuantityError
 from src.foundation.positions.domain.cost_basis.weighted import FillEvent, WeightedAverage
 
@@ -99,13 +101,15 @@ def test_sell_with_no_position_rejected() -> None:
 
 def test_zero_quantity_fill_rejected() -> None:
     """불변식: quantity > 0. Zero 수량은 FillEvent 생성 단계에서 거부된다."""
-    with pytest.raises(ValueError, match="quantity는 양수여야 합니다"):
+    with pytest.raises(ValueError) as exc_info:
         FillEvent(
             side=OrderSide.BUY,
             quantity=Decimal("0"),
             price=Decimal("100"),
             occurred_at=_now(),
         )
+    # Language-agnostic: check exception type + that the message mentions quantity
+    assert "quantity" in str(exc_info.value)
 
 
 def test_apply_lot_model_copy_failure_propagates() -> None:
@@ -113,20 +117,22 @@ def test_apply_lot_model_copy_failure_propagates() -> None:
     wavg = WeightedAverage()
     wavg.apply(_fill(OrderSide.BUY, "10", "100"))
 
-    original_model_copy = type(wavg._lot).model_copy
+    lot_cls = type(cast(Lot, wavg._lot))
+    original_model_copy = lot_cls.model_copy
 
-    def failing_model_copy(self, **kwargs):
+    def failing_model_copy(self: Any, **kwargs: Any) -> Any:
         raise RuntimeError("simulated persistence failure")
 
-    type(wavg._lot).model_copy = failing_model_copy
+    setattr(lot_cls, "model_copy", failing_model_copy)  # noqa: B010
 
     try:
         with pytest.raises(RuntimeError, match="simulated persistence failure"):
             wavg.apply(_fill(OrderSide.SELL, "5", "120"))
     finally:
-        type(wavg._lot).model_copy = original_model_copy
+        setattr(lot_cls, "model_copy", original_model_copy)  # noqa: B010
 
 
+@pytest.mark.perf
 def test_weighted_average_10k_fills_within_budget() -> None:
     """성능 단언: 10,000회 연속 매수+매도 사이클이 5초 이내야 한다."""
     import time

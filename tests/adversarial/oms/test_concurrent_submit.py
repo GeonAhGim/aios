@@ -4,6 +4,7 @@ Spec: docs/specs/L4_execution_oms_and_exchange_v1.0.md §9 L4-09 DoD
 "동시 50 submit → 1행(adversarial)". 절대 지연(sleep 시간) 단언은 하지
 않는다 — 구조(행 수) 단언과 print만(TESTING.md 관례).
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -12,6 +13,7 @@ import os
 import uuid
 from datetime import datetime, timezone
 from decimal import Decimal
+from typing import Any
 
 import asyncpg
 import pytest
@@ -44,8 +46,8 @@ async def pool():
     await p.close()
 
 
-def _profile(**overrides: object) -> VenueCapabilityProfile:
-    defaults: dict[str, object] = {
+def _profile(**overrides: Any) -> VenueCapabilityProfile:
+    defaults: dict[str, Any] = {
         "venue": "bitget",
         "asset_classes": [AssetClass.CRYPTO],
         "order_types": {OrderType.MARKET, OrderType.LIMIT},
@@ -69,14 +71,19 @@ def _profile(**overrides: object) -> VenueCapabilityProfile:
         "verified": "DOC_ONLY",
     }
     defaults.update(overrides)
-    return VenueCapabilityProfile(**defaults)  # type: ignore[arg-type]
+    return VenueCapabilityProfile(**defaults)
 
 
 def _registry() -> SymbolRegistry:
     reg = SymbolRegistry()
     reg.register(
-        "BTC/USDT", "bitget", "BTCUSDT",
-        tick=Decimal("0.1"), lot=Decimal("0.0001"), min_notional=Decimal("5"), quote_ccy="USDT",
+        "BTC/USDT",
+        "bitget",
+        "BTCUSDT",
+        tick=Decimal("0.1"),
+        lot=Decimal("0.0001"),
+        min_notional=Decimal("5"),
+        quote_ccy="USDT",
     )
     return reg
 
@@ -92,7 +99,9 @@ async def _create_running_execution(pool: asyncpg.Pool, user_id: uuid.UUID) -> i
             VALUES ($1, '1.0.0', $2, 'BTC/USDT', 'crypto', 'bitget', $3::jsonb,
                     'test-author', 'APPROVED')
             """,
-            strategy_id, user_id, json.dumps({}),
+            strategy_id,
+            user_id,
+            json.dumps({}),
         )
         row = await conn.fetchrow(
             """
@@ -102,21 +111,33 @@ async def _create_running_execution(pool: asyncpg.Pool, user_id: uuid.UUID) -> i
             VALUES ($1, '1.0.0', $2, 'bitget', 'PAPER', 100, 'USDT', 'RUNNING')
             RETURNING id
             """,
-            strategy_id, user_id,
+            strategy_id,
+            user_id,
         )
     return row["id"]
 
 
 def _command(user_id: uuid.UUID, execution_id: int) -> SubmitOrderCommand:
     scope = OrderIdempotencyScope(
-        tenant_id=user_id, account_ref="acct-1", provider="bitget", strategy_id="s1",
-        strategy_version="1.0.0", execution_id=execution_id, intent_seq=1,
+        tenant_id=user_id,
+        account_ref="acct-1",
+        provider="bitget",
+        strategy_id="s1",
+        strategy_version="1.0.0",
+        execution_id=execution_id,
+        intent_seq=1,
         window_start=datetime.now(timezone.utc),
     )
     return SubmitOrderCommand(
-        command_id=uuid.uuid4(), trace_id=uuid.uuid4(), scope=scope, symbol="BTC/USDT",
-        side=OrderSide.BUY, order_type=OrderType.MARKET, quantity=Decimal("0.01"),
-        asset_class=AssetClass.CRYPTO, actor_subject_id=user_id,
+        command_id=uuid.uuid4(),
+        trace_id=uuid.uuid4(),
+        scope=scope,
+        symbol="BTC/USDT",
+        side=OrderSide.BUY,
+        order_type=OrderType.MARKET,
+        quantity=Decimal("0.01"),
+        asset_class=AssetClass.CRYPTO,
+        actor_subject_id=user_id,
         issued_at=datetime.now(timezone.utc),
     )
 
@@ -142,8 +163,12 @@ async def test_50_concurrent_same_intent_submits_produce_exactly_one_row(pool):
     results = await asyncio.gather(
         *[
             submit_order(
-                cmd, pool=pool, profile=_profile(), registry=_registry(),
-                pre_submit_gate=_allow_gate, entity_context=entity_context,
+                cmd,
+                pool=pool,
+                profile=_profile(),
+                registry=_registry(),
+                pre_submit_gate=_allow_gate,
+                entity_context=entity_context,
                 entity_repo=entity_repo,
             )
             for _ in range(_CONCURRENCY)
@@ -173,9 +198,13 @@ async def test_gate_none_is_fail_closed_type_error(pool):
 
     with pytest.raises(TypeError):
         await submit_order(
-            cmd, pool=pool, profile=_profile(), registry=_registry(),
-            pre_submit_gate=None,  # type: ignore[arg-type]
-            entity_context=entity_context, entity_repo=PostgresEntityRepository(pool),
+            cmd,
+            pool=pool,
+            profile=_profile(),
+            registry=_registry(),
+            pre_submit_gate=None,  # type: ignore[arg-type]  # negative test: I-01 fail-closed(TypeError) 검증을 위한 의도적 None
+            entity_context=entity_context,
+            entity_repo=PostgresEntityRepository(pool),
         )
 
     async with pool.acquire() as conn:
@@ -194,8 +223,12 @@ async def test_kill_switch_active_denies_with_zero_rows(pool):
 
     with pytest.raises(OrderSubmitDeniedError):
         await submit_order(
-            cmd, pool=pool, profile=_profile(), registry=_registry(),
-            pre_submit_gate=_kill_switch_gate, entity_context=entity_context,
+            cmd,
+            pool=pool,
+            profile=_profile(),
+            registry=_registry(),
+            pre_submit_gate=_kill_switch_gate,
+            entity_context=entity_context,
             entity_repo=PostgresEntityRepository(pool),
         )
 

@@ -55,9 +55,8 @@ from src.foundation.ai.factory.contracts.v1 import ProposalEvaluation, StrategyP
 from src.foundation.experiments.application.record import record_experiment
 from src.foundation.experiments.contracts.v1 import Experiment, ExperimentKind
 from src.foundation.experiments.ports.repository import ExperimentRepository
-from src.foundation.validation.domain.check_result import CheckResult
-from src.foundation.validation.domain.models import Outcome as ValidationOutcome
-from src.foundation.validation.domain.rules import evaluate_bundle
+from src.foundation.validation.api import CheckResult, evaluate_bundle
+from src.foundation.validation.api import Outcome as ValidationOutcome
 
 __all__ = [
     "EvaluateProposalError",

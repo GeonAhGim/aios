@@ -21,14 +21,20 @@ class SubAccountRepositoryMixin:
     _pool: asyncpg.Pool
 
     async def create_sub_account(self, sub_account: SubAccount) -> SubAccount:
-        async with self._pool.acquire() as conn:
-            row = await conn.fetchrow(
-                "INSERT INTO sub_account (sub_account_id, portfolio_id, owner_ref) "
-                "VALUES ($1, $2, $3) RETURNING *",
-                sub_account.sub_account_id,
-                sub_account.portfolio_id,
-                sub_account.owner_ref,
-            )
+        try:
+            async with self._pool.acquire() as conn:
+                row = await conn.fetchrow(
+                    "INSERT INTO sub_account (sub_account_id, portfolio_id, owner_ref) "
+                    "VALUES ($1, $2, $3) RETURNING *",
+                    sub_account.sub_account_id,
+                    sub_account.portfolio_id,
+                    sub_account.owner_ref,
+                )
+        except asyncpg.UniqueViolationError as exc:
+            raise ConcurrencyConflictError(
+                f"sub_account.sub_account_id={sub_account.sub_account_id}: 다른 요청이 "
+                "먼저 생성했습니다."
+            ) from exc
         return row_to_sub_account(row)
 
     async def get_sub_account(self, tenant_id: UUID, sub_account_id: UUID) -> SubAccount | None:

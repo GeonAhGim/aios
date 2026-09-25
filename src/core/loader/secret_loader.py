@@ -1,10 +1,10 @@
-"""5.3 — Loader.load_env_secrets() + SecretBundle 마스킹.
+"""5.3 — Loader.load_env_secrets() + SecretBundle masking.
 
 Spec: 03_core_modules_v1.1.md#§3.1, 07_logging_config_v1.3.md#§7.3
-(.env.example 전체 목록과 1:1 대응)
+(.env.example full list — 1:1 correspondence)
 
-7.4 원칙 — 이 함수의 반환값(SecretBundle)은 절대 로그에 평문 출력되지
-않는다(SecretBundle.__repr__이 이미 마스킹 처리, 01번 §1.4).
+7.4 Principle — this function's return value (SecretBundle) is never printed
+in plaintext to logs (SecretBundle.__repr__ already masks, 01 §1.4).
 """
 from __future__ import annotations
 
@@ -21,7 +21,7 @@ _PROJECT_ROOT = Path(__file__).resolve().parents[3]
 
 
 def _merged_environment() -> Mapping[str, str]:
-    """os.environ이 .env 파일보다 우선한다(실제 배포 환경변수가 로컬 .env를 덮어씀)."""
+    """os.environ takes precedence over .env file (real deployment vars override local .env)."""
     file_values = dotenv_values(_PROJECT_ROOT / ".env")
     merged: dict[str, str] = {k: v for k, v in file_values.items() if v is not None}
     merged.update(os.environ)
@@ -29,10 +29,10 @@ def _merged_environment() -> Mapping[str, str]:
 
 
 def load_env_secrets(source: Mapping[str, str] | None = None) -> SecretBundle:
-    """.env(+ 실제 환경변수)를 읽어 SecretBundle로 검증·반환한다.
+    """Read .env (+ real env vars) and validate/return as SecretBundle.
 
-    `source`를 명시하면 그 매핑만 사용한다(테스트 전용 — 실제 .env 파일에
-    의존하지 않고 격리된 값으로 검증 가능하게 함).
+    When `source` is provided, use only that mapping (test-only — allows
+    validation with isolated values without depending on actual .env file).
     """
     env = source if source is not None else _merged_environment()
 

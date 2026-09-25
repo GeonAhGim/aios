@@ -1,10 +1,11 @@
-"""LA-24 — `VenueRegistrySource`(ports/entitlement.py)의 asyncpg 구현.
+"""LA-24 — asyncpg implementation of `VenueRegistrySource` (ports/entitlement.py).
 
 Spec: docs/specs/L4_market_data_positions_ledger_v1.0.md#§9.2 LA-24.
 
-DC-8(9049e2b6b0b7) `entitlements` 테이블에서 테넌트의 미만료 행 `venue`
-집합만 읽는다. 쓰기 경로는 없다(이용권 발급은 이 리프 범위 밖). 판정
-로직은 갖지 않는다 — `PaperTenantVenueEntitlement`가 이 집합으로 판정한다.
+DC-8 (9049e2b6b0b7): reads only the set of non-expired `venue` rows from the
+`entitlements` table for a tenant. No write path (issuing entitlements is
+out of scope for this leaf). No decision logic —
+`PaperTenantVenueEntitlement` uses this set for its entitlement check.
 """
 from __future__ import annotations
 

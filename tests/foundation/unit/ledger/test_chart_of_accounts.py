@@ -199,6 +199,7 @@ def test_default_scope_is_deterministic_across_repeated_replays() -> None:
     assert len(set(replays)) == 1
 
 
+@pytest.mark.perf
 def test_default_scope_derivation_throughput_stays_within_budget() -> None:
     """수치 성능 단언 -- DEPTH 재감사(task-2724)가 지적한 공백을 메운다.
     `default_scope()`는 I/O 없는 순수 함수지만 계정 조회 경로마다 호출될 수

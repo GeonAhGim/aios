@@ -290,6 +290,7 @@ async def test_get_statement_concurrent_mixed_tenants_do_not_cross_leak(
     assert [r.id for r in results] == expected_ids
 
 
+@pytest.mark.perf
 async def test_get_statement_portfolio_scope_p95_latency_stays_within_normalized_ceiling(
     pool, perf_repo, entity_repo
 ):

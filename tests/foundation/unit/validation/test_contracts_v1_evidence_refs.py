@@ -161,6 +161,7 @@ def test_negative_evidence_refs_none_rejected() -> None:
         )
 
 
+@pytest.mark.perf
 def test_construction_throughput_p99_under_budget() -> None:
     # Perf assertion (ADR-2026-09-09-C budget table, generic pydantic view
     # construction): p99 for 1000 constructions stays well under 5ms/call.

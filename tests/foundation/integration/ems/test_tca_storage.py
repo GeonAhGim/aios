@@ -220,6 +220,7 @@ async def test_insert_or_get_propagates_connection_failure_without_partial_write
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.perf
 async def test_insert_or_get_perf_budget_sequential_inserts(pool, repo):
     """50 sequential `insert_or_get` calls (distinct parent_ids) each pay
     one advisory-lock acquisition + one existence-check SELECT + one

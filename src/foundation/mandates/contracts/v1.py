@@ -71,6 +71,7 @@ class MandateRuleInput(BaseModel):
 
     max_total_exposure_pct: float
     max_single_instrument_pct: float
+    # ratchet-allow: wire-boundary: v1 wire float, Decimal at app boundary (task-5762)
     min_cash_buffer_pct: float
     max_daily_loss_pct: float
     allowed_autonomy: Autonomy
@@ -84,6 +85,7 @@ class MandateRevisionView(BaseModel):
     state: MandateRevisionState
     max_total_exposure_pct: float
     max_single_instrument_pct: float
+    # ratchet-allow: wire-boundary: v1 wire float, Decimal at app boundary (task-5762)
     min_cash_buffer_pct: float
     max_daily_loss_pct: float
     allowed_autonomy: Autonomy
@@ -102,6 +104,7 @@ class PolicyEvaluationSubject(BaseModel):
     command_type: str
     instrument_exposure_pct: float | None = None
     total_exposure_pct: float | None = None
+    # ratchet-allow: wire-boundary: v1 wire float, Decimal at app boundary (task-5762)
     cash_buffer_pct: float | None = None
     projected_daily_loss_pct: float | None = None
     requested_autonomy: Autonomy | None = None

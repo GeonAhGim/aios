@@ -1,12 +1,12 @@
-"""PauseDeployment/StopDeployment 공용 — 둘 다 fence token을 증가시켜
-진행 중인(또는 미래의) tick/intent를 무효화한다.
+"""Shared PauseDeployment/StopDeployment — both increment the fence token to
+invalidate in-flight (or future) ticks/intents.
 
-Spec: AIOSproject 77번 §3 "Pause: fence token increments, cancel future
-ticks/intents" / "Stop: terminal stop, cancel work". "STOP과 risk/emergency
-PAUSE는 START/RESUME보다 우선한다"(77번 §2)는 이 코드베이스에 아직 진짜
-동시 커맨드 스케줄러가 없어 idempotency_key 유일성으로 순서를 보장하는
-선까지만 구현한다(PAP-003의 완전한 "동시 시작/정지" 재현은 105번 §4
-형태 A 테스트로 검증)."""
+Spec: AIOSproject §3 "Pause: fence token increments, cancel future
+ticks/intents" / "Stop: terminal stop, cancel work". "STOP and risk/emergency
+PAUSE take precedence over START/RESUME" (§2) is implemented only up to the
+point where idempotency_key uniqueness guarantees ordering, since this
+codebase lacks a true concurrent command scheduler (full "concurrent start/stop"
+reproduction in PAP-003 is verified via 105 §4 Form A tests)."""
 from __future__ import annotations
 
 from uuid import UUID
@@ -130,10 +130,11 @@ async def stop_deployment(
             new_state=DeploymentState.STOPPED.value,
         )
     except ConcurrencyConflictError:
-        # PAP-003 "simultaneous start/stop results in STOPPED" — 다른 요청이
-        # 먼저 상태를 바꿨다면(예: RUNNING으로 막 전이) 최신 상태를 다시 읽어
-        # 그 상태에서 재시도한다. STOP은 "우선한다"는 원칙(77번 §2)을 여기서
-        # 재시도로 구현한다 — 이미 STOPPED/FAILED라면 그대로 idempotent.
+        # PAP-003 "simultaneous start/stop results in STOPPED" — if another
+        # request already changed the state (e.g., just transitioned to RUNNING),
+        # re-read the latest state and retry from there. STOP "takes precedence"
+        # principle (§2) is implemented here via retry — already STOPPED/FAILED
+        # remains idempotent.
         refreshed = await repo.get_deployment(deployment_id)
         assert refreshed is not None
         if refreshed.state in (DeploymentState.STOPPED, DeploymentState.FAILED):

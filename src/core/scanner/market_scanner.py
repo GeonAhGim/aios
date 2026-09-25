@@ -2,11 +2,12 @@
 
 Spec: 03_core_modules_v1.1.md#§3.4
 
-6.8 원칙 — 투자전략 자체와 분리. 조건에 맞는 종목을 찾을 뿐 매매 판단은
-하지 않는다.
+Principle 6.8 — kept separate from the trading strategy itself. This only
+finds symbols matching criteria; it never makes a trade decision.
 
-편차: ExchangeAdapter(작업트리 6번)가 아직 없어, 실제 시세 조회를 콜백으로
-주입받는 순수 오케스트레이션 함수로 설계했다(recovery.py와 동일 패턴).
+Deviation: ExchangeAdapter (worktree 6) does not exist yet, so this is
+designed as a pure orchestration function that receives live quote lookups
+via injected callbacks (same pattern as recovery.py).
 """
 from __future__ import annotations
 
@@ -28,7 +29,7 @@ class ScanCriteria(BaseModel):
 
 
 def _realized_volatility(candles: list[Candle]) -> Decimal:
-    """종가 기준 수익률의 표준편차(무차원 비율) — 최소 2개 캔들 필요."""
+    """Standard deviation of close-to-close returns (dimensionless ratio) — needs >=2 candles."""
     if len(candles) < 2:
         return Decimal("0")
     closes = [c.close for c in candles]
@@ -45,10 +46,10 @@ async def scan_market(
     fetch_tickers: FetchTickers,
     fetch_candles: FetchCandles | None = None,
 ) -> list[str]:
-    """criteria.exchanges 각각에서 fetch_tickers(exchange)로 후보를 조회하고
-    min_volume_24h로 1차 필터링한다. min_volatility가 설정되면
-    fetch_candles(exchange, symbol)로 최근 캔들을 받아 실현 변동성을 계산해
-    2차 필터링한다(호출 비용이 크므로 필요할 때만 호출)."""
+    """Fetches candidates from fetch_tickers(exchange) for each of criteria.exchanges
+    and applies a first-pass filter on min_volume_24h. If min_volatility is set,
+    fetches recent candles via fetch_candles(exchange, symbol) to compute realized
+    volatility for a second-pass filter (called only when needed, since it's costly)."""
     matched: list[str] = []
     for exchange in criteria.exchanges:
         tickers = await fetch_tickers(exchange)

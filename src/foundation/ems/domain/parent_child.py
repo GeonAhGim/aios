@@ -96,6 +96,21 @@ def assert_can_create_child(
     assert_slice_within_parent_qty(parent_qty, committed_child_qty, new_slice_qty)
 
 
+def _assert_no_negative_fills(children: list[ChildFillState]) -> None:
+    """Fail-closed guard -- a child's `filled_qty` can never be negative.
+
+    A negative per-child fill is physically meaningless (fills only ever
+    accumulate) and, if let through, could offset a genuine overshoot in
+    another child and mask an EM-A1 violation in the aggregate sum.
+    """
+    for child in children:
+        if child.filled_qty < 0:
+            raise AlgoConstraintError(
+                f"child {child.child_id} has negative filled_qty {child.filled_qty} "
+                "-- fills can never be negative"
+            )
+
+
 def aggregate_parent_state(
     parent_qty: Decimal,
     current_status: OrderStatus,
@@ -113,7 +128,10 @@ def aggregate_parent_state(
     - Otherwise (no children yet, or open children with zero fill) ->
       `current_status` is returned unchanged -- this function only
       produces an opinion once there is something to aggregate.
+
+    Raises AlgoConstraintError if any child has a negative `filled_qty`.
     """
+    _assert_no_negative_fills(children)
     filled_qty = sum((child.filled_qty for child in children), start=Decimal("0"))
 
     if filled_qty > 0 and filled_qty >= parent_qty:
@@ -148,7 +166,12 @@ def validate_aggregate_fills(
     Raises AlgoConstraintError when ``sum(child.filled_qty for child in children)``
     is strictly greater than ``parent_qty``.  Message matches
     ``aggregate.*exceeds`` for test assertion.
+
+    Also raises AlgoConstraintError if any individual child has a negative
+    `filled_qty` -- otherwise a negative value could offset a genuine
+    overshoot elsewhere in the sum and mask an EM-A1 violation.
     """
+    _assert_no_negative_fills(children)
     total = sum((child.filled_qty for child in children), start=Decimal("0"))
     if total > parent_qty:
         raise AlgoConstraintError(

@@ -1,5 +1,5 @@
-"""Connected Asset repository port. domain은 이 Protocol만 알고, 실제 구현
-(adapters/)은 모른다(71번 §4)."""
+"""Connected Asset repository port. The domain knows only this Protocol;
+actual implementations (adapters/) remain hidden(71 §4)."""
 from __future__ import annotations
 
 from typing import Protocol
@@ -31,13 +31,15 @@ class ConnectionRepository(Protocol):
         expected_state: str,
         new_state: str,
     ) -> AccountConnection:
-        """105번 표준의 conditional_update로 상태 전이(revoke/disconnect 등
-        단발 전이용). sync 경로의 CON-004 방어는 이 메서드가 아니라 아래
-        `persist_snapshot_if_syncable()`이 담당한다 — 재확인과 저장 사이에
-        또 다른 왕복이 끼면 이 메서드 하나만으로는 그 틈을 못 막는다.
-        task-1718 P0-E — `tenant_id`는 `tenant_transaction()`을 열고 WHERE
-        조건에도 명시로 들어간다(adapters/postgres_repository.py 참조):
-        호출부의 tenant 검증이 뚫려도 이 메서드가 0행으로 막는다."""
+        """State transition via conditional_update per standard-105 (for
+        one-shot transitions such as revoke/disconnect). CON-004 defense on
+        the sync path is handled by `persist_snapshot_if_syncable()` below,
+        not this method — a round-trp between re-confirmation and storage
+        cannot be closed by this method alone.
+        task-1718 P0-E — `tenant_id` opens `tenant_transaction()` and is
+        explicitly included in the WHERE clause (see adapters/postgres_repository.py):
+        even if the caller's tenant check is bypassed, this method blocks it
+        by matching zero rows."""
         ...
 
     async def insert_consent_link(self, link: ConnectionConsent) -> ConnectionConsent: ...
@@ -49,8 +51,9 @@ class ConnectionRepository(Protocol):
     async def get_credential_binding(self, connection_id: UUID) -> CredentialBinding | None: ...
 
     async def revoke_credential_binding(self, connection_id: UUID) -> None:
-        """vault_secret_ref가 가리키는 값 자체는 여기서 지우지 않는다(감사
-        추적 보존, 49번 원칙) — expires_at을 과거로 당겨 재사용을 막는다."""
+        """Do not erase the value pointed to by vault_secret_ref here
+        (preserve audit trail, principle-49) — pull expires_at into the past
+        to prevent reuse."""
         ...
 
     async def persist_snapshot_if_syncable(
@@ -60,15 +63,15 @@ class ConnectionRepository(Protocol):
         snapshot: AccountSnapshot,
         health: ConnectionHealth,
     ) -> AccountSnapshot:
-        """CON-004 — "connection이 여전히 ACTIVE_READONLY/DEGRADED인가" 재확인과
-        snapshot/health 저장(+ DEGRADED였다면 ACTIVE_READONLY로 복구)을 하나의
-        트랜잭션 + row lock(`SELECT ... FOR UPDATE`)으로 묶는다. `get_connection()`
-        으로 먼저 읽고 나중에 `insert_snapshot()`을 따로 호출하는 두 번의 왕복
-        사이에는 revoke가 끼어들 진짜 틈(TOCTOU)이 남는다 — 이 메서드는 그 틈을
-        구조적으로 없앤다. 그 사이 revoke/disconnect가 커밋됐으면
-        ConcurrencyConflictError(105번 표준). task-1718 P0-E — `tenant_id`는
-        `tenant_transaction()`을 열고, 재확인 SELECT의 WHERE 조건에도
-        명시로 들어간다."""
+        """CON-004 — re-confirm "is the connection still ACTIVE_READONLY/DEGRADED?"
+        and bundle snapshot/health storage (+ recovery from DEGRADED to
+        ACTIVE_READONLY) in a single transaction + row lock (`SELECT ... FOR UPDATE`).
+        Between an initial read via `get_connection()` and a separate
+        `insert_snapshot()` call, a revoke could slip through (TOCTOU gap) —
+        this method eliminates that gap structurally. If revoke/disconnect
+        committed in between, raise ConcurrencyConflictError(standard-105).
+        task-1718 P0-E — `tenant_id` opens `tenant_transaction()` and is
+        explicitly included in the WHERE clause of the re-confirmation SELECT."""
         ...
 
     async def get_latest_snapshot(self, connection_id: UUID) -> AccountSnapshot | None: ...

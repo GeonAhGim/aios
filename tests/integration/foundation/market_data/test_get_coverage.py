@@ -344,6 +344,7 @@ async def test_get_coverage_instrument_lookup_failure_propagates_fail_closed(
             )
 
 
+@pytest.mark.perf
 async def test_get_coverage_latency_stays_within_normalized_ceiling_as_span_count_grows(
     pool, instrument_repo, coverage_repo, venue_registry
 ):

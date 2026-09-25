@@ -170,6 +170,7 @@ def test_tests_zone_blanket_ignore_does_not_leak_into_unlisted_rule(tmp_path: Pa
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.perf
 def test_ruff_check_repo_perf_budget() -> None:
     """CLAUDE.md 게이트 커맨드(`ruff check src tests scripts`)를 실제로 돌려
     5초 예산 안에 끝나는지 확인한다(로컬 실측 ~0.3s, 스캔 결과는 exit 0 --

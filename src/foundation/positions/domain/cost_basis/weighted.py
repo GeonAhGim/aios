@@ -1,22 +1,23 @@
-"""LB-3 — 가중평균 원가법(weighted average).
+"""LB-3 — Weighted average cost method.
 
 Spec: docs/specs/L4_market_data_positions_ledger_v1.0.md#§9 LB-3
-(`domain/cost_basis/weighted.py`: "가중평균: 매수 시 평단 재계산, 매도 시
-평단 유지"), `unit/positions/test_weighted.py` DoD("평단 재계산, 매도 시
-평단 불변").
+(`domain/cost_basis/weighted.py`: "weighted average: recompute average on buy,
+hold average on sell"), `unit/positions/test_weighted.py` DoD("recompute average
+on buy, invariant average on sell").
 
-`FillEvent`/`CostBasisResult`/`NegativeQuantityError`는 [[fifo]]의 계약을
-그대로 재사용한다 — FIFO/WEIGHTED는 같은 입출력 표현을 공유하는 서로 다른
-로트 관리 전략일 뿐이다(중복 정의 금지). `Lot`은 LB-1 계약
-(`contracts/v1.py`)을 그대로 쓴다.
+`FillEvent`/`CostBasisResult`/`NegativeQuantityError` are reused from [[fifo]] as-is —
+FIFO/WEIGHTED are different lot-management strategies sharing the same I/O
+representation (no duplicate definitions). `Lot` uses the LB-1 contract
+(`contracts/v1.py`) unchanged.
 
-가중평균은 로트를 여러 개 쌓지 않고 포지션 전체를 단일 평단으로 뭉친다 —
-`lots`는 항상 0개(무포지션) 또는 1개(단일 블렌디드 로트)다. 매수 시
-평단 = (기존수량×기존평단 + 체결수량×체결가) / (기존수량+체결수량)을
-§3.4 정밀도(`NUMERIC(30,10)`, `Decimal("1e-10")`, `ROUND_HALF_EVEN`)로
-quantize한다. 매도는 평단을 바꾸지 않고 실현손익 = (체결가−평단)×수량만
-계산한다 — 초과 매도는 FIFO와 동일하게 `NegativeQuantityError`. 순수
-도메인(I/O import 0) — 시각·통화 변환·영속화는 호출자 책임.
+Weighted average merges the entire position into a single blended average instead of
+stacking lots — `lots` is always 0 (no position) or 1 (single blended lot). On buy,
+average = (prev_qty × prev_avg + fill_qty × fill_price) / (prev_qty + fill_qty),
+quantized to §3.4 precision (`NUMERIC(30,10)`, `Decimal("1e-10")`, `ROUND_HALF_EVEN`).
+On sell, the average is unchanged; realized PnL = (fill_price − avg) × qty is computed
+only — over-sell raises `NegativeQuantityError`, same as FIFO. Pure domain (zero I/O
+imports) — time formatting, currency conversion, and persistence are the caller's
+responsibility.
 """
 from __future__ import annotations
 
@@ -36,8 +37,8 @@ _PRICE_QUANTUM = Decimal("1e-10")
 
 
 class WeightedAverage:
-    """가중평균 원가법. 매수마다 평단을 재계산하고, 매도는 평단을 유지한
-    채 실현손익만 뽑아낸다."""
+    """Weighted average cost method. Recomputes the average on every buy; on sell,
+    keeps the average unchanged and extracts only realized PnL."""
 
     def __init__(self, lot: Lot | None = None) -> None:
         self._lot = lot
@@ -72,7 +73,7 @@ class WeightedAverage:
             raise NegativeQuantityError(
                 f"매도 수량({fill.quantity})이 보유 수량({available})을 초과합니다."
             )
-        assert self._lot is not None  # available > 0이면 _lot은 반드시 존재한다
+        assert self._lot is not None  # if available > 0, _lot must exist
 
         realized = (fill.price - self._lot.unit_cost) * fill.quantity
         remaining_quantity = self._lot.quantity - fill.quantity

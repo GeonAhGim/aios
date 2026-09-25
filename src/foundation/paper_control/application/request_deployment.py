@@ -19,7 +19,7 @@ import hashlib
 import json
 from uuid import UUID, uuid4
 
-from src.foundation.mandates.domain.models import MandateRevisionState
+from src.foundation.mandates.api import MandateRevisionState
 from src.foundation.mandates.ports.repository import MandateRepository
 from src.foundation.paper_control.contracts.v1 import DeploymentState as ContractState
 from src.foundation.paper_control.contracts.v1 import PaperDeploymentView

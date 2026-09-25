@@ -48,7 +48,7 @@ import asyncpg
 from pydantic import AwareDatetime, BaseModel
 
 from src.data.models.base import Currency, FXRate, Money
-from src.foundation.market_data.domain.calendar.session_rules import VenueCalendar
+from src.foundation.market_data.api import VenueCalendar
 from src.foundation.positions.contracts.v1 import NAVSnapshot, PositionSnapshotView
 from src.foundation.positions.domain import fx as fx_calc
 from src.foundation.positions.domain import nav

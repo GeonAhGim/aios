@@ -160,6 +160,7 @@ def test_construction_propagates_upstream_bar_source_failure() -> None:
 # -- D2 성능 단언 --------------------------------------------------------------
 
 
+@pytest.mark.perf
 def test_upto_p95_latency_within_5k_bar_budget() -> None:
     """ADR-2026-09-09-C Decision 1 축별 성능 예산: 5k봉 조회 p95 200ms."""
     fixture = _bars(5_000)

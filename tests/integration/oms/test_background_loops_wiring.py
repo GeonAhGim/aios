@@ -18,6 +18,7 @@ import logging
 from datetime import datetime, timezone
 from uuid import UUID
 
+import src.foundation.risk.application.personal_daily_loss_monitor as pdl_monitor_module
 import src.services.background_loops as background_loops_module
 from src.core.event_bus.in_process import InProcessEventBus
 from src.core.loader.risk_policy_loader import load_risk_policy
@@ -127,9 +128,10 @@ async def test_flag_off_logs_warning_and_skips_dispatcher_task(pool, monkeypatch
     try:
         messages = [r.getMessage() for r in caplog.records]
         assert any(m.startswith("oms_dispatcher:") and OMS_DISPATCHER_FLAG in m for m in messages)
-        # heartbeat/alert/risk_guard/safety 4개뿐 — execution_loop도 플래그 off,
-        # oms_dispatcher도 플래그 off라 태스크가 추가되지 않았다.
-        assert len(loops.tasks) == 4
+        # heartbeat/alert/risk_guard/safety/personal_daily_loss_monitor 5개뿐 —
+        # execution_loop도 플래그 off, oms_dispatcher도 플래그 off라 태스크가
+        # 추가되지 않았다(task-6510 — personal_daily_loss_monitor는 플래그 없이 상시).
+        assert len(loops.tasks) == 5
     finally:
         await loops.stop()
 
@@ -143,21 +145,32 @@ async def test_start_background_loops_wires_four_core_loops_and_scheduler(
     보고, `test_loop_health.py`는 `LoopHealth` 자체의 순수 단위테스트라
     `start_background_loops`를 호출하지 않는다.
 
+    task-6510 — personal_daily_loss_monitor(플래그 없이 상시)가 5번째 코어
+    루프로 추가됐다(XREV task-3820 REJECT 수정: 상시 호출자 부재로 개인
+    모드 일일 손실 3% kill이 prod에서 발동하지 않던 결함).
+
     간격 상수를 monkeypatch로 짧게 낮춰(module-level 상수는 `start_background_
-    loops` 호출 시점에 읽히므로 몽키패치가 먹힌다) 4개 전부 실제 asyncio 태스크
+    loops` 호출 시점에 읽히므로 몽키패치가 먹힌다) 5개 전부 실제 asyncio 태스크
     로 돌며 주입한 `LoopHealth`에 성공 tick을 남기는지 결정론적으로 짧게
     기다려 확인한다."""
     monkeypatch.setattr(background_loops_module, "HEARTBEAT_INTERVAL_SECONDS", 0.05)
     monkeypatch.setattr(background_loops_module, "ALERT_EVALUATION_INTERVAL_SECONDS", 0.05)
     monkeypatch.setattr(background_loops_module, "RISK_GUARD_INTERVAL_SECONDS", 0.05)
     monkeypatch.setattr(background_loops_module, "SAFETY_REACTIVATION_INTERVAL_SECONDS", 0.05)
+    monkeypatch.setattr(
+        pdl_monitor_module, "PERSONAL_DAILY_LOSS_MONITOR_INTERVAL_SECONDS", 0.05
+    )
+    monkeypatch.delenv("PERSONAL_MODE_ACCOUNT_ID", raising=False)
     monkeypatch.setenv("AIOS_EXECUTION_LOOP_ENABLED", "0")
     monkeypatch.setenv("AIOS_LIQUIDATION_WORKER_ENABLED", "0")
     monkeypatch.setenv("AIOS_POST_TRADE_BATCH_ENABLED", "0")
     monkeypatch.setenv("AIOS_STARTUP_RECOVERY_ENABLED", "0")
 
     health = LoopHealth()
-    core_loop_names = ("heartbeat", "alert_evaluation", "risk_guard", "safety_reactivation")
+    core_loop_names = (
+        "heartbeat", "alert_evaluation", "risk_guard", "safety_reactivation",
+        "personal_daily_loss_monitor",
+    )
 
     loops = await background_loops_module.start_background_loops(
         pool=pool,
@@ -180,11 +193,11 @@ async def test_start_background_loops_wires_four_core_loops_and_scheduler(
             await asyncio.sleep(0.05)
         else:
             raise AssertionError(
-                "4개 코어 루프가 시한 안에 전부 성공 tick을 남기지 않았다 — 배선 회귀"
+                "5개 코어 루프가 시한 안에 전부 성공 tick을 남기지 않았다 — 배선 회귀"
             )
         assert isinstance(loops.execution_scheduler, ExecutionLoopScheduler)
         # execution_loop/liquidation_worker/post_trade_batch/oms_dispatcher 전부
-        # 플래그 off라 코어 4개만 남는다.
-        assert len(loops.tasks) == 4
+        # 플래그 off라 코어 5개만 남는다.
+        assert len(loops.tasks) == 5
     finally:
         await loops.stop()

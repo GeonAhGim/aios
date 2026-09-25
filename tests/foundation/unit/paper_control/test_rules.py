@@ -1,10 +1,12 @@
 """FND-07 Paper Execution & Control 순수 규칙 단위테스트 — DB 없음."""
+
 from __future__ import annotations
 
 import dataclasses
 
 import pytest
 
+from src.foundation.paper_control.domain import rules
 from src.foundation.paper_control.domain.models import (
     AdapterProvenance,
     CredentialClass,
@@ -13,8 +15,10 @@ from src.foundation.paper_control.domain.models import (
     PaperDeployment,
 )
 from src.foundation.paper_control.domain.rules import (
+    InvalidDeploymentTransitionError,
     InvalidProvenanceError,
     is_transition_allowed,
+    require_transition_allowed,
     validate_provenance,
 )
 from src.foundation.paper_control.ports.paper_adapter import PaperExecutionAdapter
@@ -51,6 +55,20 @@ def test_validate_provenance_rejects_live_looking_endpoint():
         validate_provenance(_provenance(endpoint_classification="LIVE_PRODUCTION"))
 
 
+def test_validate_provenance_rejects_non_paper_credential_class():
+    """PAP-002 — credential_class가 PAPER가 아니면 어댑터 호출 전에 거부한다.
+    CredentialClass Enum에는 PAPER만 존재하므로(§1) 실제 운영에서 발생할 수
+    없는 값을 frozen dataclass에 직접 주입해 방어 분기가 살아있는지 확인한다."""
+
+    class _FakeLiveCredentialClass:
+        value = "LIVE"
+
+    tampered = _provenance()
+    object.__setattr__(tampered, "credential_class", _FakeLiveCredentialClass())
+    with pytest.raises(InvalidProvenanceError):
+        validate_provenance(tampered)
+
+
 @pytest.mark.parametrize(
     ("current", "target", "allowed"),
     [
@@ -73,6 +91,30 @@ def test_validate_provenance_rejects_live_looking_endpoint():
 )
 def test_is_transition_allowed_matches_state_table(current, target, allowed):
     assert is_transition_allowed(current, target) is allowed
+
+
+def test_require_transition_allowed_passes_silently_for_valid_transition():
+    require_transition_allowed(DeploymentState.REQUESTED, DeploymentState.READY)  # no raise
+
+
+def test_require_transition_allowed_raises_for_invalid_transition():
+    with pytest.raises(InvalidDeploymentTransitionError):
+        require_transition_allowed(DeploymentState.STOPPED, DeploymentState.RUNNING)
+
+
+def test_require_transition_allowed_rejects_terminal_failed_state():
+    """경계값 — FAILED는 §2 전이표에서 out-edge가 전혀 없는 종단 상태다."""
+    with pytest.raises(InvalidDeploymentTransitionError):
+        require_transition_allowed(DeploymentState.FAILED, DeploymentState.REQUESTED)
+
+
+def test_is_transition_allowed_fail_closed_when_transition_table_corrupted(monkeypatch):
+    """실패주입 — 내부 전이표(_ALLOWED_TRANSITIONS)가 손상된 상황을 monkeypatch로
+    강제하여, 손상 시 조용히 허용(True)으로 새지 않고 예외로 fail-closed 되는지
+    확인한다."""
+    monkeypatch.setattr(rules, "_ALLOWED_TRANSITIONS", {DeploymentState.REQUESTED: None})
+    with pytest.raises(TypeError):
+        rules.is_transition_allowed(DeploymentState.REQUESTED, DeploymentState.READY)
 
 
 def test_paper_execution_adapter_has_no_credential_or_generic_exchange_method():

@@ -244,6 +244,7 @@ def test_record_tick_failure_with_metrics_crash_still_counts_failures() -> None:
 # ── Performance assertion (성능 예산) ───────────────────────────────────
 
 
+@pytest.mark.perf
 def test_record_tick_latency_under_budget() -> None:
     """10,000회 record_tick 호출이 1초 미만에 완료되어야 한다 (PLT-08 성능 예산)."""
     import time as _time

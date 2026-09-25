@@ -85,6 +85,7 @@ def register_routers(app: FastAPI) -> None:
     app.include_router(foundation_reconciliation.router)
     app.include_router(foundation_performance.router)
     app.include_router(foundation_ems.router)  # EM-14(task-5277) /v1/foundation/ems/tca
+    app.include_router(foundation_ems.algo_router)  # EM-15b(task-4033) /v1/foundation/ems/algo
     app.include_router(charting.router)  # CH-5(task-1557) /v1/foundation/charting
     app.include_router(market_data.router)  # LA-24(task-1376) /v1/foundation/market-data
     app.include_router(research_data.router)  # RD-8(task-2709) /v1/foundation/research

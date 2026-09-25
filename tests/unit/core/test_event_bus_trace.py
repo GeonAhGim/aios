@@ -231,6 +231,7 @@ async def test_audit_sink_failure_does_not_kill_worker_loop():
 # ----------------------------------------------------------------------
 
 
+@pytest.mark.perf
 async def test_publish_dispatch_latency_p95_within_budget():
     """수치 성능 단언 — publish()(봉투 wrap + 큐 적재) 1회 호출의 p95
     지연시간이 예산(5ms)을 넘지 않아야 한다. 실측 기준선은 ~0.01ms

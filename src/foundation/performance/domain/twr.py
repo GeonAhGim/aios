@@ -1,20 +1,18 @@
-"""시간가중수익률(TWR) — `pm-v1` 방법론의 "PERIOD_LINKED_CASHFLOW_AT_START".
+"""Time-Weighted Return (TWR) — "PERIOD_LINKED_CASHFLOW_AT_START" from the `pm-v1` methodology.
 
 Spec: docs/specs/L4_strategy_portfolio_backtest_v1.0.md §2.6.
 
-현금흐름이 있는 경계마다 하위기간으로 끊어 기하연결한다(GIPS 표준 TWR,
-Modified Dietz 근사가 아니다) — 그래서 각 현금흐름 시각에 정확히 일치하는
-평가액(`valuations`)이 있어야 한다. 없으면 근사치를 만드는 대신 명시적으로
-거부한다(reconciliation의 "never assume zero"와 같은 태도 — 있는 척하지
-않는다).
+Splits the period at each boundary with a cash flow and geometrically links sub-period returns
+(GIPS-standard TWR, not a Modified Dietz approximation) — therefore an exact valuation must
+exist at every cash flow timestamp (`valuations`). When one is missing, explicitly reject
+rather than approximate (consistent with the reconciliation "never assume zero" principle).
 
-경계 `t_k`의 평가액은 그 시각에 발생한 현금흐름이 반영되기 **직전** 값으로
-받는다(관례) — 하위기간 `[t_{k-1}, t_k]`의 실제 투자원금은
-`valuations[t_{k-1}].value + cashflow_at(t_{k-1})`이다("현금흐름을 기초에
-반영").
+The valuation at boundary `t_k` is taken **just before** the cash flow at that time is applied
+(convention) — the actual investable base for sub-period `[t_{k-1}, t_k]` is
+`valuations[t_{k-1}].value + cashflow_at(t_{k-1})` ("cash flow reflected in the base").
 
-반환값은 비율(0.0523 = 5.23%)이지 백분율 숫자가 아니다 — `%` 표시는
-contracts 계층(`ReturnValue.value_pct`)의 몫이다.
+The returned value is a ratio (0.0523 = 5.23%), not a percentage number — the `%` display is
+the responsibility of the contracts layer (`ReturnValue.value_pct`).
 """
 from __future__ import annotations
 
@@ -25,9 +23,9 @@ from src.foundation.performance.domain.models import Cashflow, CashflowKind
 
 
 class MissingInputError(Exception):
-    """72번 에러 taxonomy `INTEGRITY_STATEMENT_INPUT_UNRECONCILED` — 이 함수가
-    필요로 하는 입력(현금흐름 시점 평가액 등)이 없다. 0이나 보간값으로
-    메우지 않는다."""
+    """Error taxonomy `INTEGRITY_STATEMENT_INPUT_UNRECONCILED` — the inputs this function
+    requires (valuations at cash flow timestamps, etc.) are missing. Do not fill with zero
+    or interpolated values."""
 
     def __init__(self, detail: str) -> None:
         super().__init__(f"INTEGRITY_STATEMENT_INPUT_UNRECONCILED: {detail}")
@@ -43,7 +41,7 @@ def twr(
     cashflows: list[Cashflow],
 ) -> Decimal:
     if len(valuations) < 2:
-        raise MissingInputError("twr()에는 최소 2개(기간 시작/끝) 평가액이 필요합니다.")
+        raise MissingInputError("twr() requires at least 2 valuations (period start/end).")
 
     ordered = sorted(valuations, key=lambda v: v[0])
     valuation_times = {at for at, _ in ordered}
@@ -51,7 +49,7 @@ def twr(
     for cf in cashflows:
         if cf.at not in valuation_times:
             raise MissingInputError(
-                f"현금흐름 시각 {cf.at.isoformat()}에 일치하는 평가액이 없습니다."
+                f"No matching valuation at cash flow time {cf.at.isoformat()}."
             )
         cashflow_by_time[cf.at] = cashflow_by_time.get(cf.at, Decimal(0)) + _signed(cf)
 
@@ -60,7 +58,7 @@ def twr(
         base = prev_value + cashflow_by_time.get(prev_at, Decimal(0))
         if base == 0:
             raise MissingInputError(
-                f"{prev_at.isoformat()} 하위기간의 투자원금이 0이라 수익률을 정의할 수 없습니다."
+                f"Investable base at {prev_at.isoformat()} is zero — cannot define return."
             )
         subperiod_return = cur_value / base - 1
         linked *= Decimal(1) + subperiod_return

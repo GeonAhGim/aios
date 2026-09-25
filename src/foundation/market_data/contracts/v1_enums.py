@@ -9,6 +9,7 @@ sole public surface (see the v1.py module docstring) still holds. Callers
 keep importing via `from src.foundation.market_data.contracts.v1 import
 Venue` etc. and never need to reference this file directly.
 """
+
 from __future__ import annotations
 
 from enum import Enum
@@ -44,6 +45,7 @@ class Venue(str, Enum):
     BITGET = "BITGET"
     KIS_KRX = "KIS_KRX"
     KIS_US = "KIS_US"
+    NH_KRX = "NH_KRX"
     BINANCE = "BINANCE"  # RD-19 in-house L2 collector
     BYBIT = "BYBIT"  # RD-19
     OKX = "OKX"  # RD-19

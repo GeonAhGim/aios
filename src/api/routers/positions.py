@@ -1,20 +1,24 @@
-"""LB-19 — positions HTTP 읽기 API(positions·journal·nav). 71번 §6 규칙:
-router는 auth/주입/transport validation/query 호출만 담당한다.
+"""LB-19 — positions HTTP read API (positions, journal, nav). Rule 71 §6:
+
+The router is responsible only for auth, dependency injection, transport
+validation, and query calls.
 
 Spec: docs/specs/L4_market_data_positions_ledger_v1.0.md §9 LB-19.
 
-쓰기 엔드포인트는 없다 — 저널 append·스냅샷 갱신은 `record_fill` 등
-application 커맨드(LB-11~15)만의 책임이고 HTTP로 열지 않는다. 세 엔드포인트
-모두 LB-17 `application/queries.py`에 위임한다. 테넌트는 PLT-28
-`get_tenant_context`가 돌려준 `tenant_id`만 신뢰한다(쿼리 파라미터로
-tenant를 받지 않는다). 타 테넌트 리소스는 존재하지 않는 것과 같은 404
-(`RESOURCE_NOT_FOUND`)로 응답한다 — 예외 클래스는 queries.py가 정의하고
-`exception_registry_foundation.py`가 봉투로 번역한다(raw HTTPException 없음).
+No write endpoints exist — journal append and snapshot updates are the
+sole responsibility of application commands (LB-11 through LB-15) such as
+`record_fill`, and are not exposed via HTTP. All three endpoints delegate
+to LB-17 `application/queries.py`. For tenant identity, trust only the
+`tenant_id` returned by PLT-28 `get_tenant_context` (the router never
+accepts a tenant via query parameter). Access to another tenant's resource
+must return 404 (`RESOURCE_NOT_FOUND`) as if it does not exist — the
+exception class is defined in queries.py and translated to a raw HTTP
+response by `exception_registry_foundation.py` (no bare HTTPException).
 
-`GET /positions/nav`는 `/{position_key}/journal`보다 먼저 선언한다 —
-지금은 경로가 겹치지 않지만, 정적 세그먼트가 동적 세그먼트보다 앞서는
-관례를 유지해 후속 엔드포인트가 추가돼도 `nav`가 position_key로 잡히지
-does not get caught.
+`GET /positions/nav` is declared before `/{position_key}/journal` — the
+paths do not overlap today, but keeping static segments before dynamic
+ones ensures that future endpoints will not accidentally capture `nav` as
+a `position_key` value.
 
 FA-6: an optional `portfolio_id` query parameter was added to
 `GET /positions` (not a new route). Omitting it makes the response

@@ -1,7 +1,7 @@
-"""TrustRepository의 asyncpg 구현.
+"""Asyncpg implementation of TrustRepository.
 
-Spec: AIOSproject 73번 §2.1/§7, 105번(동시성 표준) — revoke_consent()는
-conditional_update()를 통해서만 상태를 바꾼다.
+Spec: AIOSproject #73 §2.1/§7, #105 (concurrency standard) — revoke_consent()
+changes state only through conditional_update().
 """
 from __future__ import annotations
 
@@ -55,12 +55,15 @@ class PostgresTrustRepository:
 
     async def get_disclosure_by_purpose_and_revision(
         self, purpose: str, revision: int
-    ) -> Disclosure | None:
+    ) -> tuple[Disclosure, datetime] | None:
         async with self._pool.acquire() as conn:
             row = await conn.fetchrow(
-                "SELECT * FROM disclosure WHERE purpose = $1 AND revision = $2", purpose, revision
+                "SELECT *, clock_timestamp() AS server_now FROM disclosure "
+                "WHERE purpose = $1 AND revision = $2",
+                purpose,
+                revision,
             )
-        return _row_to_disclosure(row) if row is not None else None
+        return (_row_to_disclosure(row), row["server_now"]) if row is not None else None
 
     async def get_active_consent(self, tenant_id: UUID, purpose: str) -> Consent | None:
         async with self._pool.acquire() as conn:
@@ -101,10 +104,11 @@ class PostgresTrustRepository:
         disclosure_revision: int,
         expires_at: datetime | None,
     ) -> Consent:
-        # uq_consent_record_active_purpose 부분 unique index(84b7d0faf14f)가 같은
-        # tenant/purpose에 ACTIVE 레코드가 둘 이상 생기는 걸 DB 레벨에서 막는다 —
-        # 이게 이 append-only insert 경로의 동시성 방어(105번 §2.2 예외 기준 중
-        # "단일 소유자가 스키마 레벨 UNIQUE 제약으로 보장되는 경우"에 해당).
+        # The partial unique index uq_consent_record_active_purpose (84b7d0faf14f)
+        # prevents the DB from allowing more than one ACTIVE row per tenant/purpose —
+        # this is the concurrency guard for this append-only insert path, matching
+        # the 105 standard §2.2 exception: "cases where a single owner is guaranteed
+        # by a schema-level UNIQUE constraint".
         async with self._pool.acquire() as conn:
             try:
                 row = await conn.fetchrow(
@@ -120,11 +124,12 @@ class PostgresTrustRepository:
                     expires_at,
                 )
             except asyncpg.UniqueViolationError as exc:
-                # uq_consent_record_active_purpose 위반 — 이 요청이 존재 여부를
-                # 확인한 시점(get_active_consent) 이후, INSERT 시점 사이에 다른
-                # 요청이 먼저 같은 tenant/purpose에 ACTIVE consent를 만들었다.
-                # 105번 §2.2가 인정하는 "스키마 UNIQUE 제약이 단일 소유자를
-                # 보장" 케이스의 경합 신호를 표준 예외로 번역한다.
+                # Unique index violation on uq_consent_record_active_purpose —
+                # between the time we checked existence (get_active_consent) and this
+                # INSERT, another request created an ACTIVE consent for the same
+                # tenant/purpose first. Translate this collision signal into the
+                # standard exception, matching the 105 §2.2 case where a schema
+                # UNIQUE constraint guarantees single ownership.
                 raise ConcurrencyConflictError(
                     f"consent_record: tenant_id={tenant_id} purpose={purpose}에 대한 ACTIVE "
                     "동의가 그 사이 다른 요청으로 먼저 생성됐습니다(동시 처리 충돌)."

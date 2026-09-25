@@ -118,6 +118,7 @@ def test_compile_rejects_unsupported_operator(compiler):
         compiler.compile(**kwargs)
 
 
+@pytest.mark.perf
 def test_compile_p95_latency_is_within_dsl_compile_budget(compiler):
     """ADR-2026-09-09-C Decision 1 "DSL 컴파일 300ms" 예산 — 조건 3그룹을
     FSM 6전이로 컴파일하는 이 경로도 같은 컴파일 축 예산을 적용받는다."""

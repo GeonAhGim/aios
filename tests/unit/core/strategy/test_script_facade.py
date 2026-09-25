@@ -190,6 +190,7 @@ def test_frozen_evaluator_drift_is_caught_by_the_parity_gate(
 # ---- 수치 성능 단언: 파사드 오버헤드 ----
 
 
+@pytest.mark.perf
 def test_script_path_overhead_over_cond_v2_stays_within_budget() -> None:
     """수치 성능 단언 (task-2931 DEEPEN): the AIOS Script path adds a
     bridge+compile+execute layer on top of the same `IncrementalIndicator`

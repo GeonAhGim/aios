@@ -11,6 +11,8 @@ from __future__ import annotations
 from datetime import date
 from decimal import Decimal
 
+import pytest
+
 from src.foundation.risk.application.evaluate_personal_order import check_personal_order
 from src.foundation.risk.domain.models import PersonalRiskBundle
 from src.foundation.risk.domain.rules import OrderRiskCheckInput, PersonalRiskViolation
@@ -166,6 +168,7 @@ async def test_allowed_order_never_records_violation_or_notifies():
     assert notifier.sent == []
 
 
+@pytest.mark.perf
 async def test_bulk_evaluation_stays_fast_pure_function_no_io_per_call():
     """perf 회귀 감시 — 순수 규칙 함수는 I/O가 없으므로 1000회 평가가
     수백 ms를 넘지 않아야 한다(회귀 시 domain/rules.py에 실수로 I/O가

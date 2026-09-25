@@ -46,6 +46,7 @@ from uuid import UUID, uuid5
 from pydantic import BaseModel
 
 from src.core.approval.service import ApprovalRequest
+from src.core.loader.risk_policy_loader import CircuitBreakerPolicy
 from src.core.risk.decision import GateKind, RiskDecision, RiskOutcome, RuleResult
 from src.core.risk.hashing import canonical_json, sha256_hex
 from src.core.safety.circuit_breaker import (
@@ -91,6 +92,7 @@ class RecoveryGateRepos:
     decision_recorder: RiskDecisionRecorder
     cooldown_sec: int
     approval_ttl_sec: int
+    circuit_breaker_policy: CircuitBreakerPolicy
 
 
 class _RecoveryInputs(BaseModel, frozen=True):
@@ -162,6 +164,7 @@ async def evaluate_recovery(
         evidence_ref=evidence_ref,
         approval_status=approval_status,
         fresh_risk_outcome=fresh_outcome,
+        policy=repos.circuit_breaker_policy,
     )
     reason_codes = (
         (_TAXONOMY.get(verdict.reason_code, verdict.reason_code),) if verdict.reason_code else ()
