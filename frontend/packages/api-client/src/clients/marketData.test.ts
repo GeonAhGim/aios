@@ -1,137 +1,28 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { API_ROUTES, resolveEnvelope } from "../apiPaths";
 import { ApiError } from "../httpErrors";
-import { createMarketDataClient, type CandleQueryParams } from "./marketData";
-
-function jsonResponse(status: number, body: unknown): Response {
-  return new Response(JSON.stringify(body), {
-    status,
-    headers: { "Content-Type": "application/json" },
-  });
-}
-
-function stubFetch(body: unknown, status = 200): ReturnType<typeof vi.fn> {
-  const fetchMock = vi.fn().mockResolvedValue(jsonResponse(status, body));
-  vi.stubGlobal("fetch", fetchMock);
-  return fetchMock;
-}
-
-function makeClient() {
-  return createMarketDataClient("https://api.example.test", () => null);
-}
-
-function requestUrl(fetchMock: ReturnType<typeof vi.fn>): string {
-  const [url] = fetchMock.mock.calls[0] as [string, RequestInit];
-  return url;
-}
-
-// task-1525: fixture는 LA-24(task-1376) 실라우터의 응답 JSON 형태를 그대로 쓴다 —
-// src/api/contracts/envelope.py ApiResponse{data, meta{trace_id, as_of, page}} 봉투 안에
-// src/api/schemas/market_data.py CandleSeriesView(= contracts/v1 CandleSeries + instrument_id
-// /symbol/canonical_symbol/entitlement) · ReplaySeriesView · InstrumentListView{items,
-// next_cursor} · list[SymbolAliasRef]가 들어간다. parseCandleSeries/parseInstrumentView는
-// 계약 필드만 읽으므로 부가 필드(entitlement 등)에 영향받지 않아야 한다(무수정 확인).
-const INSTRUMENT_ID = "11111111-1111-4111-8111-111111111111";
-const TRACE_ID = "22222222-2222-4222-8222-222222222222";
-
-const seriesKey = { venue: "BITGET", instrument_id: INSTRUMENT_ID, timeframe: "1m" };
-
-const candleRecord = {
-  key: seriesKey,
-  open_time: "2026-09-03T00:00:00Z",
-  close_time: "2026-09-03T00:01:00Z",
-  open: "100.0",
-  high: "101.0",
-  low: "99.0",
-  close: "100.5",
-  volume: "10.0",
-  quote_volume: null,
-};
-
-const entitlement = { mode: "delayed", delayed_seconds: 0 };
-
-// market_data.py:129-134 CandleSeriesView(계약 필드 + 식별자·이용권 부가 필드).
-const candleSeriesView = {
-  schema_version: "v1",
-  key: seriesKey,
-  candles: [candleRecord],
-  gaps: [],
-  adjustment: "RAW",
-  as_of: "2026-09-03T00:05:00Z",
-  series_hash: "abc123",
-  instrument_id: INSTRUMENT_ID,
-  symbol: "BTCUSDT",
-  canonical_symbol: "BTC/USDT",
-  entitlement,
-};
-
-// market_data.py:175-180 ReplaySeriesView(expected_count/missing_count 추가, 페이지 없음).
-const replaySeriesView = { ...candleSeriesView, expected_count: 1, missing_count: 0 };
-
-function envelope(data: unknown, page: Record<string, unknown> | null = null) {
-  return { data, meta: { trace_id: TRACE_ID, as_of: "2026-09-03T00:05:01Z", page } };
-}
-
-const candlePage = { total: null, page: null, size: 500, next_cursor: null };
-
-// contracts/v1.py InstrumentRef(schema_version 포함) 그대로 — InstrumentListView.items 항목.
-const instrumentRef = {
-  instrument_id: INSTRUMENT_ID,
-  venue: "BITGET",
-  canonical_symbol: "BTC/USDT",
-  venue_symbol: "BTCUSDT",
-  asset_class: "CRYPTO",
-  base: "BTC",
-  quote: "USDT",
-  tick_size: "0.1",
-  lot_size: "0.001",
-  status: "LISTED",
-  listed_at: "2024-01-01T00:00:00Z",
-  delisted_at: null,
-  schema_version: "v1",
-};
-
-// ports/reference_repository.py:61 SymbolAliasRef 그대로 — aliases 응답 data는 배열.
-const symbolAliasRef = {
-  alias_id: "33333333-3333-4333-8333-333333333333",
-  instrument_id: INSTRUMENT_ID,
-  venue: "BITGET",
-  alias_symbol: "XBTUSDT",
-  valid_from: "2024-01-01T00:00:00Z",
-  valid_to: null,
-};
-
-// 409 DATA_COVERAGE_MISSING 에러 봉투(envelope.py ApiError, error_codes.py:63·:95).
-const coverageMissingError = {
-  error_code: "DATA_COVERAGE_MISSING",
-  message: "요청 구간 [2026-09-01T00:00:00+00:00, 2026-09-03T00:00:00+00:00)에 저장된 캔들이 없습니다.",
-  details: {},
-  trace_id: TRACE_ID,
-  retry_after_seconds: null,
-};
-
-const rejectQualityVerdictBody = {
-  schema_version: "v1",
-  verdict: "REJECT",
-  accepted: 0,
-  quarantined: 0,
-  rejected: 1,
-  issues: [
-    { type: "OHLC_INCONSISTENT", severity: "REJECT", open_time: "2026-09-03T00:00:00Z", detail: { reason: "high<low" } },
-  ],
-};
-
-const baseParams: CandleQueryParams = {
-  venue: "BITGET",
-  instrumentId: INSTRUMENT_ID,
-  timeframe: "1m",
-  start: "2026-09-01T00:00:00Z",
-  end: "2026-09-03T00:00:00Z",
-};
+import type { CandleQueryParams } from "./marketData";
+import {
+  baseParams,
+  candlePage,
+  candleSeriesView,
+  coverageMissingError,
+  envelope,
+  INSTRUMENT_ID,
+  instrumentRef,
+  makeClient,
+  rejectQualityVerdictBody,
+  replaySeriesView,
+  requestUrl,
+  stubFetch,
+  symbolAliasRef,
+  TRACE_ID,
+} from "./marketData.fixtures";
 
 describe("createMarketDataClient", () => {
   afterEach(() => {
     vi.unstubAllGlobals();
+    vi.useRealTimers();
   });
 
   it("경로·봉투 여부는 apiPaths.ts 레지스트리에만 정의되어 있다(4경로 전부 envelope=true, task-1525)", () => {
@@ -145,6 +36,15 @@ describe("createMarketDataClient", () => {
     ] as const) {
       expect(resolveEnvelope(route)).toBe(true);
     }
+  });
+
+  // task-2196(DC-18b): coverage 경로는 위 목록에서 의도적으로 분리했다 — task-2195
+  // decision 당시 openapi 스냅샷이 재생성되지 않아 apiPaths.openapi.test.ts의
+  // STALE_SNAPSHOT_WHITELIST에 등재된 예외 경로이므로, 그 사정을 별도 테스트로
+  // 남겨 향후 스냅샷이 갱신될 때 이 등재도 같이 지워야 함을 드러낸다.
+  it("marketData.coverage.get 경로도 envelope=true로 등록되어 있다", () => {
+    expect(API_ROUTES["marketData.coverage.get"].legacyPath).toBe("/v1/foundation/market-data/coverage");
+    expect(resolveEnvelope("marketData.coverage.get")).toBe(true);
   });
 
   it("1) 정상 응답(실응답 CandleSeriesView 봉투): 계약 필드로 ok 판별하고 부가 필드(entitlement 등)에 깨지지 않는다", async () => {

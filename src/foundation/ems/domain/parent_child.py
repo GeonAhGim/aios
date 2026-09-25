@@ -17,6 +17,7 @@ Status values are the shared `OrderStatus` (`src/data/models/trading.py`,
 also reused verbatim by `src/foundation/ems/contracts/v1.py`) -- this
 module does not define a parallel status axis.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -95,6 +96,21 @@ def assert_can_create_child(
     assert_slice_within_parent_qty(parent_qty, committed_child_qty, new_slice_qty)
 
 
+def _assert_no_negative_fills(children: list[ChildFillState]) -> None:
+    """Fail-closed guard -- a child's `filled_qty` can never be negative.
+
+    A negative per-child fill is physically meaningless (fills only ever
+    accumulate) and, if let through, could offset a genuine overshoot in
+    another child and mask an EM-A1 violation in the aggregate sum.
+    """
+    for child in children:
+        if child.filled_qty < 0:
+            raise AlgoConstraintError(
+                f"child {child.child_id} has negative filled_qty {child.filled_qty} "
+                "-- fills can never be negative"
+            )
+
+
 def aggregate_parent_state(
     parent_qty: Decimal,
     current_status: OrderStatus,
@@ -112,7 +128,10 @@ def aggregate_parent_state(
     - Otherwise (no children yet, or open children with zero fill) ->
       `current_status` is returned unchanged -- this function only
       produces an opinion once there is something to aggregate.
+
+    Raises AlgoConstraintError if any child has a negative `filled_qty`.
     """
+    _assert_no_negative_fills(children)
     filled_qty = sum((child.filled_qty for child in children), start=Decimal("0"))
 
     if filled_qty > 0 and filled_qty >= parent_qty:
@@ -131,3 +150,42 @@ def children_pending_cancellation(children: list[ChildFillState]) -> list[UUID]:
     excluded -- there is nothing left to cancel on them.
     """
     return [child.child_id for child in children if child.status not in TERMINAL_ORDER_STATUSES]
+
+
+def validate_aggregate_fills(
+    parent_id: UUID,
+    children: list[ChildFillState],
+    parent_qty: Decimal,
+) -> None:
+    """EM-A1 guard -- reject when aggregate child fills exceed parent quantity.
+
+    This is a fail-closed invariant check: even if the audit layer drops
+    its log entry, the domain layer must still raise AlgoConstraintError
+    because it owns the invariant independently.
+
+    Raises AlgoConstraintError when ``sum(child.filled_qty for child in children)``
+    is strictly greater than ``parent_qty``.  Message matches
+    ``aggregate.*exceeds`` for test assertion.
+
+    Also raises AlgoConstraintError if any individual child has a negative
+    `filled_qty` -- otherwise a negative value could offset a genuine
+    overshoot elsewhere in the sum and mask an EM-A1 violation.
+    """
+    _assert_no_negative_fills(children)
+    total = sum((child.filled_qty for child in children), start=Decimal("0"))
+    if total > parent_qty:
+        raise AlgoConstraintError(
+            f"aggregate fill {total} exceeds parent qty {parent_qty} (parent={parent_id})"
+        )
+
+
+def compute_child_state(
+    parent_id: UUID,
+    children: list[ChildFillState],
+    parent_qty: Decimal,
+) -> None:
+    """Thin wrapper around ``validate_aggregate_fills`` for performance testing.
+
+    Delegates to the domain invariant check; returns ``None`` on success.
+    """
+    validate_aggregate_fills(parent_id, children, parent_qty)

@@ -5,6 +5,7 @@ import type { ReactNode } from "react";
 import { Alert } from "@aios/ui-web";
 import { PLOT_ERROR_REASONS, type PlotLayerResult } from "./ChartPlotLayer";
 import { SURFACE_WIDTH_PX } from "./chartPanesModel";
+import { useTranslation } from "react-i18next";
 
 export interface ChartPaneRowProps {
   readonly paneId: string;
@@ -36,6 +37,7 @@ export function ChartPaneRow({
   onMouseLeave,
   onRemoveSubOverlay,
 }: ChartPaneRowProps) {
+  const { t } = useTranslation();
   return (
     <div
       data-testid={`chart-pane-${paneId}`}
@@ -48,7 +50,7 @@ export function ChartPaneRow({
         onMouseMove={(e) => onMouseMove(e.clientX)}
         onMouseLeave={onMouseLeave}
       >
-        {isMain ? mainContent : <p className="p-2 text-xs text-fg-muted">서브패널 · {subLabel}</p>}
+        {isMain ? mainContent : <p className="p-2 text-xs text-fg-muted">{t("legacy.chartPaneRow.t1", { subLabel: subLabel })}</p>}
       </div>
       <svg
         className="pointer-events-none absolute inset-0"
@@ -63,8 +65,7 @@ export function ChartPaneRow({
           <Alert tone="warning">
             {plotLayer.issues.map((issue) => (
               <p key={`${issue.overlayId}:${issue.output}`}>
-                지표 표시 실패: {issue.overlayId}.{issue.output} — {PLOT_ERROR_REASONS[issue.code]} ({issue.code})
-              </p>
+                {t("legacy.chartPaneRow.t2", { overlayId: issue.overlayId, output: issue.output, val: PLOT_ERROR_REASONS[issue.code], code: issue.code })}</p>
             ))}
           </Alert>
         </div>

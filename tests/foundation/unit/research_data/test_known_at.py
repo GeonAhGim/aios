@@ -3,10 +3,12 @@
 Spec: docs/specs/L4_research_data_and_market_ecosystem_v1.0.md §4 RD-A1,
 §9 RD-2 DoD (c)(d).
 """
+
 from __future__ import annotations
 
 from collections.abc import Sequence
 from datetime import datetime, timedelta, timezone
+from time import perf_counter
 from uuid import uuid4
 
 import pytest
@@ -109,3 +111,23 @@ def test_naive_as_of_rejected_by_fa9_kernel() -> None:
     item = _item(known_at=datetime(2026, 9, 8, 12, 0, tzinfo=timezone.utc))
     with pytest.raises(ValueError):
         assert_point_in_time(item, datetime(2026, 9, 8, 12, 0))
+
+
+# ---- 성능 단언(DEPTH 감사 task-2724 D1 판정 근거, 1702/1701/2058 DEEPEN 선례와 동일 패턴) ----
+
+
+@pytest.mark.perf
+def test_assert_point_in_time_hot_path_performance() -> None:
+    # assert_point_in_time은 모든 read path가 아이템을 반환하기 전에 호출하는
+    # 순수 함수(BitemporalRecord 구성 + FA-9 as_of 위임)다. 10,000회 호출이
+    # 1s 내로 끝나야 한다 -- I/O 없는 순수 계약의 실측 증명.
+    as_of_time = datetime(2026, 9, 8, 12, 0, tzinfo=timezone.utc)
+    item = _item(known_at=as_of_time - timedelta(days=1))
+    iterations = 10_000
+
+    started = perf_counter()
+    for _ in range(iterations):
+        assert_point_in_time(item, as_of_time)
+    elapsed = perf_counter() - started
+
+    assert elapsed < 1.0, f"{iterations}회 호출에 {elapsed:.4f}s — 순수 함수치고 너무 느리다"

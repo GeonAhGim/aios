@@ -171,3 +171,143 @@ describe("createKlinechartsChartEngine — vendor delegation", () => {
     expect(engine.priceScale.yToPrice(y)).toBeCloseTo(11, 1); // vendor rounds y to whole pixels
   });
 });
+
+// DEEPEN(task-3072) of task-1501 (CH-1b, commit 03f5929), per DEPTH_CH audit
+// (task-2729, docs/audit/DEPTH_CH.md): the original leaf had 8 passing tests
+// exercising real vendor delegation through jsdom stubs, but zero
+// negative-path coverage, no failure injection, no numeric performance
+// assertion, and no gate-red reproduction. This block fills those gaps
+// against the *real* vendor Chart object (never mocked) — failure injection
+// spies on genuine vendor methods to prove KlinechartsBackend never swallows
+// a vendor error, and the gate-red tests would fail if the mount/remount
+// branching in klinechartsBackend.ts were simplified away.
+describe("createKlinechartsChartEngine — DEEPEN(task-3072): negative path, failure injection, perf, gate-red, D3", () => {
+  it("negative: renderer.mount(null) tears the chart down instead of throwing", () => {
+    const engine = mountEngine();
+
+    expect(() => engine.renderer.mount(null)).not.toThrow();
+
+    expect(engine.vendor.chart).toBeNull();
+    expect(container.getAttribute("k-line-chart-id")).toBeNull();
+  });
+
+  it("negative: removeSeries on an id that was never created is a silent no-op against the vendor", () => {
+    const engine = mountEngine();
+
+    expect(() => engine.removeSeries("missing")).not.toThrow();
+
+    expect(engine.vendor.chart!.getDataList()).toEqual([]);
+  });
+
+  it("negative: creating a second series with a duplicate id throws before the vendor is touched", () => {
+    const engine = mountEngine();
+    engine.createSeries({ id: "main", type: "candlestick" });
+    const indicatorsBefore = engine.vendor.chart!.getIndicators().length;
+
+    expect(() => engine.createSeries({ id: "main", type: "line" })).toThrow(/already exists/);
+
+    expect(engine.vendor.chart!.getIndicators().length).toBe(indicatorsBefore);
+  });
+
+  it("실패 주입: a real vendor createIndicator() failure propagates out of createSeries instead of being swallowed", () => {
+    const engine = mountEngine();
+    engine.createSeries({ id: "main", type: "candlestick" }).setData(BASE);
+    vi.spyOn(engine.vendor.chart!, "createIndicator").mockImplementation(() => {
+      throw new Error("vendor: indicator engine exhausted");
+    });
+
+    expect(() => engine.createSeries({ id: "ema", type: "line" })).toThrow(/indicator engine exhausted/);
+  });
+
+  it("실패 주입: a real vendor resetData() failure propagates out of series.setData instead of being swallowed", () => {
+    const engine = mountEngine();
+    const series = engine.createSeries({ id: "main", type: "candlestick" });
+    vi.spyOn(engine.vendor.chart!, "resetData").mockImplementation(() => {
+      throw new Error("vendor: loader rejected");
+    });
+
+    expect(() => series.setData(BASE)).toThrow(/loader rejected/);
+  });
+
+  it("실패 주입: a real vendor setDataLoader() failure propagates out of createSeries when attaching a candlestick binding", () => {
+    const engine = mountEngine();
+    vi.spyOn(engine.vendor.chart!, "setDataLoader").mockImplementation(() => {
+      throw new Error("vendor: loader rejected on attach");
+    });
+
+    expect(() => engine.createSeries({ id: "main", type: "candlestick" })).toThrow(/loader rejected on attach/);
+  });
+
+  it("실패 주입: a real vendor resize() failure propagates out of engine.resize instead of being swallowed", () => {
+    const engine = mountEngine();
+    vi.spyOn(engine.vendor.chart!, "resize").mockImplementation(() => {
+      throw new Error("vendor: canvas context lost");
+    });
+
+    expect(() => engine.resize({ width: 100, height: 100 })).toThrow(/canvas context lost/);
+  });
+
+  it("게이트 적색 재현: remounting to a different container disposes the old vendor chart instead of leaking it", () => {
+    const engine = mountEngine();
+    const oldChart = engine.vendor.chart!;
+    const containerB = document.createElement("div");
+    document.body.appendChild(containerB);
+
+    engine.renderer.mount(containerB);
+
+    expect(container.getAttribute("k-line-chart-id")).toBeNull(); // old container cleaned up, not leaked
+    expect(engine.vendor.chart).not.toBe(oldChart);
+    expect(engine.vendor.chart!.getDataList()).toEqual([]);
+
+    engine.dispose();
+    containerB.remove();
+  });
+
+  it("게이트 적색 재현: remounting the exact same container is a no-op that preserves vendor chart identity and data", () => {
+    const engine = mountEngine();
+    engine.createSeries({ id: "main", type: "candlestick" }).setData(BASE);
+    const chartBefore = engine.vendor.chart;
+
+    engine.renderer.mount(container);
+
+    expect(engine.vendor.chart).toBe(chartBefore); // not torn down and recreated
+    expect(vendorTimestamps(engine)).toEqual([60_000, 120_000, 180_000]);
+  });
+
+  it("수치 성능: 2,000 live-bar updates through the real vendor candle loader stay under a 3000ms budget", () => {
+    const engine = mountEngine();
+    const series = engine.createSeries({ id: "main", type: "candlestick" });
+    series.setData(BASE);
+
+    const startedAt = performance.now();
+    for (let i = 0; i < 2000; i++) {
+      series.update(candle(180_000 + (i + 1) * 60_000, 12 + (i % 7)));
+    }
+    const elapsedMs = performance.now() - startedAt;
+
+    expect(vendorTimestamps(engine)).toHaveLength(3 + 2000);
+    expect(elapsedMs).toBeLessThan(3000);
+  });
+
+  it("어드버서리얼(D3): two independently mounted engines never share vendor chart state or DOM ids", () => {
+    const containerB = document.createElement("div");
+    document.body.appendChild(containerB);
+    const engineA = mountEngine();
+    const engineB = createKlinechartsChartEngine({ container: containerB, initialSize: SIZE });
+
+    engineA.createSeries({ id: "main", type: "candlestick" }).setData(BASE);
+    engineB.createSeries({ id: "main", type: "candlestick" }).setData([candle(60_000, 99)]);
+
+    expect(engineA.vendor.chart).not.toBe(engineB.vendor.chart);
+    expect(container.getAttribute("k-line-chart-id")).not.toBe(containerB.getAttribute("k-line-chart-id"));
+    expect(engineA.vendor.chart!.getDataList()).toHaveLength(3);
+    expect(engineB.vendor.chart!.getDataList()).toHaveLength(1);
+
+    engineA.dispose();
+    expect(engineB.vendor.chart).not.toBeNull();
+    expect(engineB.vendor.chart!.getDataList()).toHaveLength(1);
+
+    engineB.dispose();
+    containerB.remove();
+  });
+});

@@ -1,3 +1,4 @@
+import "./i18n";
 import "@testing-library/jest-dom/vitest";
 import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
 import { RouterProvider } from "react-router-dom";
@@ -34,7 +35,7 @@ vi.mock("@aios/shared-hooks", async (importOriginal) => {
 const { router } = await import("./router");
 
 function renderRouter() {
-  return render(<RouterProvider router={router} />);
+  return render(<RouterProvider router={router} future={{ v7_startTransition: true }} />);
 }
 
 function loginFullyOnboarded() {

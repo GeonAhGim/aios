@@ -26,6 +26,7 @@ import { ForbiddenNotice } from "../../components/ForbiddenNotice";
 import { Pagination } from "../../components/Pagination";
 import { exchangeLabel } from "../../lib/exchangeLabels";
 import { derivePageState } from "../../lib/pagination";
+import { useTranslation } from "react-i18next";
 
 // spec §3.3 에러 taxonomy: 알림 생성 실패는 err.message를 직접 노출하지 않고
 // routeApiError(task-483)로 판정해 400/403/그 외를 각각 BadRequestNotice/
@@ -72,6 +73,7 @@ const STATUS_LABEL: Record<string, string> = {
 };
 
 export function AlertsPage() {
+  const { t } = useTranslation();
   const { data: alerts, isLoading } = useMyAlerts();
   const { data: indicatorList } = useIndicators();
   const createAlert = useCreateAlert();
@@ -123,19 +125,19 @@ export function AlertsPage() {
         threshold: Number(threshold),
       });
     } catch (err) {
-      setError(err instanceof ApiError ? err : new Error("알림 생성에 실패했습니다."));
+      setError(err instanceof ApiError ? err : new Error(t("legacy.alertsPage.t18")));
     }
   }
 
   return (
     <AppShell>
       <div className="space-y-6">
-        <PageHeader title="가격/지표 알림" />
+        <PageHeader title={t("legacy.alertsPage.title1")} />
 
         <Card className="max-w-2xl">
           <form onSubmit={handleSubmit} className="space-y-3">
             <div className="grid grid-cols-2 gap-3">
-              <Field label="거래소">
+              <Field label={t("legacy.alertsPage.label2")}>
                 <Select
                   value={exchange}
                   onChange={(e) => setExchange(e.target.value)}
@@ -147,7 +149,7 @@ export function AlertsPage() {
                   ))}
                 </Select>
               </Field>
-              <Field label="종목/심볼">
+              <Field label={t("legacy.alertsPage.label3")}>
                 <Input
                   type="text"
                   required
@@ -158,7 +160,7 @@ export function AlertsPage() {
               </Field>
             </div>
             <div className="grid grid-cols-2 gap-3">
-              <Field label="지표">
+              <Field label={t("legacy.alertsPage.label4")}>
                 <Select
                   value={indicator}
                   onChange={(e) => setIndicator(e.target.value)}
@@ -170,7 +172,7 @@ export function AlertsPage() {
                   ))}
                 </Select>
               </Field>
-              <Field label="기간(period)">
+              <Field label={t("legacy.alertsPage.label5")}>
                 <Input
                   type="number"
                   value={period}
@@ -179,18 +181,18 @@ export function AlertsPage() {
               </Field>
             </div>
             <div className="grid grid-cols-3 gap-3">
-              <Field label="타임프레임">
+              <Field label={t("legacy.alertsPage.label6")}>
                 <Select
                   value={timeframe}
                   onChange={(e) => setTimeframe(e.target.value)}
                 >
-                  <option value="15m">15분</option>
-                  <option value="1h">1시간</option>
-                  <option value="4h">4시간</option>
-                  <option value="1d">1일</option>
+                  <option value="15m">{t("legacy.alertsPage.t7")}</option>
+                  <option value="1h">{t("legacy.alertsPage.t8")}</option>
+                  <option value="4h">{t("legacy.alertsPage.t9")}</option>
+                  <option value="1d">{t("legacy.alertsPage.t10")}</option>
                 </Select>
               </Field>
-              <Field label="조건">
+              <Field label={t("legacy.alertsPage.label11")}>
                 <Select
                   value={operator}
                   onChange={(e) =>
@@ -206,7 +208,7 @@ export function AlertsPage() {
                   ))}
                 </Select>
               </Field>
-              <Field label="임계값">
+              <Field label={t("legacy.alertsPage.label12")}>
                 <Input
                   type="number"
                   value={threshold}
@@ -215,17 +217,14 @@ export function AlertsPage() {
               </Field>
             </div>
             <p className="text-xs text-fg-muted">
-              예: RSI가 30 밑으로(&lt;) 떨어지면 알림 — 약 1분마다 조건을
-              확인합니다.
-            </p>
+              {t("legacy.alertsPage.t13")}</p>
             {error !== null && <CreateAlertError error={error} />}
             <Button
               type="submit"
               loading={createAlert.isPending}
               className="w-full"
             >
-              알림 등록
-            </Button>
+              {t("legacy.alertsPage.t14")}</Button>
           </form>
         </Card>
 
@@ -254,8 +253,7 @@ export function AlertsPage() {
                     </p>
                     {a.status === "TRIGGERED" && (
                       <p className="tabular text-sm text-success">
-                        발동값 {a.triggeredValue} (
-                        {a.triggeredAt &&
+                        {t("legacy.alertsPage.t15", { triggeredValue: a.triggeredValue ?? "" })}{a.triggeredAt &&
                           new Date(a.triggeredAt).toLocaleString()}
                         )
                       </p>
@@ -269,8 +267,7 @@ export function AlertsPage() {
                       loading={cancelAlert.isPending}
                       onClick={() => cancelAlert.mutate(a.id)}
                     >
-                      취소
-                    </Button>
+                      {t("legacy.alertsPage.t16")}</Button>
                   )}
                 </li>
               ))}
@@ -278,7 +275,7 @@ export function AlertsPage() {
             <Pagination state={pageState} onPageChange={goToPage} />
           </>
         ) : (
-          <EmptyState>등록된 알림이 없습니다.</EmptyState>
+          <EmptyState>{t("legacy.alertsPage.t17")}</EmptyState>
         )}
       </div>
     </AppShell>

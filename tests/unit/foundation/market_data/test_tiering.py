@@ -3,10 +3,13 @@
 Spec: docs/specs/L4_analytics_authoring_backtest_marketplace_v1.0.md §9.2 DC-15.
 DoD (a)~(d)를 각각 하나 이상의 테스트로 반증한다.
 """
+
 from __future__ import annotations
 
 import asyncio
-from dataclasses import dataclass, field
+import json
+import time
+from dataclasses import dataclass, field, replace
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from pathlib import Path
@@ -16,6 +19,7 @@ import pytest
 
 from src.foundation.market_data.adapters.storage.tiering import (
     VerificationFailedError,
+    _digest,
     promote_year,
     read_lineage,
 )
@@ -227,3 +231,78 @@ def test_promoting_empty_hot_year_is_a_noop(tmp_path: Path):
     assert outcome.row_count == 0
     assert hot.delete_calls == []
     assert read_lineage(tmp_path, _KEY) == []
+
+
+def test_corrupted_lineage_line_fails_closed_instead_of_silently_dropping(tmp_path: Path):
+    """negative #3: 계보 파일의 한 줄이 손상되면(JSON 파싱 불가) `read_lineage`
+    가 그 줄만 조용히 건너뛰지 않고 예외로 실패한다 — 손상된 계보를 마치
+    부분적으로 신뢰 가능한 것처럼 보고하지 않는다(fail-closed)."""
+    warm = WarmParquetStorage(tmp_path)
+    hot = _FakeHot(by_year={2026: _daily_columns(2026, [0, 1])})
+    asyncio.run(promote_year(hot, warm, tmp_path, _KEY, 2026))
+
+    series_dir = tmp_path / _KEY.venue.value / _KEY.timeframe.value / str(_KEY.instrument_id)
+    lineage_path = series_dir / "lineage.jsonl"
+    with lineage_path.open("a", encoding="utf-8") as f:
+        f.write("{not valid json\n")
+
+    with pytest.raises(json.JSONDecodeError):
+        read_lineage(tmp_path, _KEY)
+
+
+def test_digest_detects_single_field_corruption_in_every_column(tmp_path: Path):
+    """게이트 적색 재현: `_TamperingWarm`(위 테스트)은 `open` 필드 하나만
+    건드리므로, 누군가 실수로 `_digest`에서 다른 필드(예: `quote_volume`)를
+    빠뜨리는 회귀를 저질러도 기존 테스트는 계속 초록불일 수 있다. 7개 컬럼을
+    각각 하나씩 훼손해 `_digest`가 매번 값을 바꾸는지 직접 확인함으로써, 그런
+    누락이 실제로 이 테스트를 적색으로 만든다는 것을 증명한다."""
+    original = _daily_columns(2026, [0, 1, 2])
+    base_digest = _digest(original)
+
+    corrupted_variants = [
+        replace(original, ts=[original.ts[0] + timedelta(seconds=1), *original.ts[1:]]),
+        replace(original, open=[original.open[0] + Decimal("0.0000000001"), *original.open[1:]]),
+        replace(original, high=[original.high[0] + Decimal("0.0000000001"), *original.high[1:]]),
+        replace(original, low=[original.low[0] + Decimal("0.0000000001"), *original.low[1:]]),
+        replace(original, close=[original.close[0] + Decimal("0.0000000001"), *original.close[1:]]),
+        replace(
+            original, volume=[original.volume[0] + Decimal("0.0000000001"), *original.volume[1:]]
+        ),
+        replace(
+            original,
+            quote_volume=[
+                Decimal("0") if original.quote_volume[0] is None else None,
+                *original.quote_volume[1:],
+            ],
+        ),
+    ]
+
+    for corrupted in corrupted_variants:
+        assert _digest(corrupted) != base_digest
+
+
+@pytest.mark.perf
+def test_promote_year_completes_within_budget_for_twenty_thousand_minute_bars(tmp_path: Path):
+    """수치 성능 단언: 실측상 M1 1년치에 근접한 20,000행 승격(read+write+
+    round-trip 검증+digest)이 ~0.4초대에 끝난다(로컬 실측) — print만 하지
+    않고 예산 5.0초(약 10배 여유)로 실제 단언한다."""
+    n = 20_000
+    ts = [datetime(2026, 1, 1, tzinfo=timezone.utc) + timedelta(minutes=i) for i in range(n)]
+    columns = CandleColumns(
+        ts=ts,
+        open=[Decimal("100.1000000000") + Decimal(i) for i in range(n)],
+        high=[Decimal("101.5000000000") + Decimal(i) for i in range(n)],
+        low=[Decimal("99.0000000000") + Decimal(i) for i in range(n)],
+        close=[Decimal("100.9000000000") + Decimal(i) for i in range(n)],
+        volume=[Decimal("12.3400000000") + Decimal(i) for i in range(n)],
+        quote_volume=[None if i % 2 else Decimal("1234.5600000000") for i in range(n)],
+    )
+    warm = WarmParquetStorage(tmp_path)
+    hot = _FakeHot(by_year={2026: columns})
+
+    start = time.perf_counter()
+    outcome = asyncio.run(promote_year(hot, warm, tmp_path, _KEY, 2026))
+    elapsed = time.perf_counter() - start
+
+    assert outcome.row_count == n
+    assert elapsed < 5.0

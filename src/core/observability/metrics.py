@@ -1,25 +1,30 @@
-"""메트릭 포트 + Prometheus 어댑터.
+"""Metrics port + Prometheus adapter.
 
 Spec: docs/specs/L4_platform_observability_tenancy_api_v1.0.md §7.2, §9 PLT-04.
-`MetricsPort`는 counter/observe/gauge 세 연산만 노출하는 순수 인터페이스다. 계측 지점은
-`metric_names.py`의 상수만 이름으로 쓰고, 이 모듈이 `metrics_registry.py`(인메모리 레지스트리,
-task-129)의 재구현이 아니라 그 위에 얹히는 얇은 어댑터라는 점에 유의 — 레지스트리 로직은
-여기서 다시 만들지 않는다.
+`MetricsPort` is a pure interface exposing only three operations: counter/observe/gauge.
+Instrumentation sites reference only the constants in `metric_names.py` by name, and this
+module is a thin adapter layered on top of `metrics_registry.py` (in-memory registry,
+task-129) — do not mistake it for a reimplementation; registry logic is not rebuilt here.
 
-`prometheus-client`는 `PrometheusMetrics.__init__` 안에서만 지연 import한다: 패키지가
-설치되지 않은 환경에서도 기본값인 `NullMetrics` 경로는 그대로 동작해야 하기 때문이다
+`prometheus-client` is lazy-imported only inside `PrometheusMetrics.__init__`: the default
+`NullMetrics` path must remain functional even when the package is not installed
 (§9 PLT-04 decision).
 """
+
 from __future__ import annotations
 
+import logging
 import threading
 from typing import Any, Protocol
 
 from src.core.observability.metric_names import to_prom
 
+logger = logging.getLogger(__name__)
+
 
 class MetricsPort(Protocol):
-    """메트릭 기록 포트. 구현체는 counter/histogram/gauge 세 연산만 제공한다."""
+    """Metrics recording port. Implementations provide only three operations:
+    counter/histogram/gauge."""
 
     def counter(self, name: str, labels: dict[str, str] | None = None) -> None: ...
 
@@ -29,7 +34,7 @@ class MetricsPort(Protocol):
 
 
 class NullMetrics:
-    """기본값 — 아무것도 기록하지 않는다(테스트·미설정 환경의 안전한 기본값)."""
+    """Default — records nothing (safe no-op for tests and unconfigured environments)."""
 
     def counter(self, name: str, labels: dict[str, str] | None = None) -> None:
         return None
@@ -42,11 +47,12 @@ class NullMetrics:
 
 
 class PrometheusMetrics:
-    """`prometheus_client` 위임 어댑터. 이름당 최초 호출 시 라벨 키 집합으로 등록한다.
+    """`prometheus_client` delegation adapter. Registers on first call per name
+    with a label-key set.
 
-    같은 이름을 다른 라벨 키 집합으로 다시 호출하면 `prometheus_client`가 던지는
-    `ValueError`가 그대로 전파된다(레지스트리 재정의 방지는 어댑터가 아니라 계측 지점의
-    일관성 책임).
+    Re-registering the same name with a different label-key set causes `prometheus_client` to
+    raise `ValueError`, which propagates as-is (preventing registry override is the
+    responsibility of instrumentation-site consistency, not the adapter).
     """
 
     def __init__(self) -> None:
@@ -64,9 +70,7 @@ class PrometheusMetrics:
         with self._lock:
             metric = store.get(name)
             if metric is None:
-                metric = factory(
-                    to_prom(name), name, list(label_names), registry=self._registry
-                )
+                metric = factory(to_prom(name), name, list(label_names), registry=self._registry)
                 store[name] = metric
             return metric
 
@@ -96,11 +100,50 @@ _current_metrics: MetricsPort = NullMetrics()
 
 
 def metrics() -> MetricsPort:
-    """프로세스 싱글턴 메트릭 포트. 기본값은 `NullMetrics`."""
+    """Process-singleton metrics port. Default is `NullMetrics`."""
     return _current_metrics
 
 
 def set_metrics(port: MetricsPort) -> None:
-    """싱글턴을 교체한다(테스트는 `set_metrics(NullMetrics())`로 격리)."""
+    """Replaces the singleton (tests isolate with `set_metrics(NullMetrics())`)."""
     global _current_metrics
     _current_metrics = port
+
+
+def safe_counter(
+    metrics_port: MetricsPort, name: str, labels: dict[str, str] | None = None
+) -> None:
+    """Isolates a metrics-hook failure from the caller's order path (L4-27 D3).
+
+    `PrometheusMetrics` raises `ValueError` when the same name is re-registered
+    with a different label-key set (see that class's docstring) -- one mistake
+    at an instrumentation site must not roll back an order/fill/resolution
+    transaction or propagate as an exception to the caller."""
+    try:
+        metrics_port.counter(name, labels)
+    except Exception:
+        logger.warning(
+            "metrics.counter failed name=%s -- order path continues", name, exc_info=True
+        )
+
+
+def safe_observe(
+    metrics_port: MetricsPort, name: str, value: float, labels: dict[str, str] | None = None
+) -> None:
+    """Same rationale as `safe_counter`, for the `observe` hook."""
+    try:
+        metrics_port.observe(name, value, labels)
+    except Exception:
+        logger.warning(
+            "metrics.observe failed name=%s -- order path continues", name, exc_info=True
+        )
+
+
+def safe_gauge(
+    metrics_port: MetricsPort, name: str, value: float, labels: dict[str, str] | None = None
+) -> None:
+    """Same rationale as `safe_counter`, for the `gauge` hook."""
+    try:
+        metrics_port.gauge(name, value, labels)
+    except Exception:
+        logger.warning("metrics.gauge failed name=%s -- order path continues", name, exc_info=True)

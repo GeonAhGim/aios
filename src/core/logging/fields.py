@@ -8,13 +8,14 @@ schema.py, 메트릭/알림 검증 등)은 이 상수를 import해서 비교하�
 하드코딩하지 않는다. `StructuredLogLine`은 이 8필드에 로그 라인 자체에 필요한
 비-108 필드(timestamp/message/extra)를 더한 pydantic 모델이다.
 """
+
 from __future__ import annotations
 
 import logging
 from datetime import datetime, timezone
 from typing import Any, Final, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from src.core.observability.context import RequestContext
 
@@ -48,7 +49,15 @@ class StructuredLogLine(BaseModel):
 
     필드 이름·타입은 §2 표와 동일해야 한다(`test_fields.py`가 `REQUIRED_FIELDS`와
     이 모델의 필드 집합이 정확히 일치하는지 — 추가·누락 모두 실패하도록 — 검증한다).
+
+    `extra="forbid"`: pydantic's default (`extra="ignore"`) would silently drop a
+    caller's typo'd field (e.g. `trace__id`) into `.model_extra`, leaving `.trace_id`
+    to fail validation or fall back to a default with no trace of the real cause —
+    the 108 §2 8-field set is the contract, so any key outside it must surface as a
+    `ValidationError` immediately.
     """
+
+    model_config = ConfigDict(extra="forbid")
 
     timestamp: datetime
     level: Level
@@ -61,6 +70,13 @@ class StructuredLogLine(BaseModel):
     duration_ms: int | None = None
     message: str
     extra: dict[str, Any] = Field(default_factory=dict)
+
+    @field_validator("timestamp")
+    @classmethod
+    def _timestamp_must_be_tz_aware(cls, value: datetime) -> datetime:
+        if value.tzinfo is None or value.utcoffset() is None:
+            raise ValueError("timestamp must be a tz-aware UTC datetime, got a naive datetime")
+        return value
 
 
 def from_record(record: logging.LogRecord, ctx: RequestContext) -> StructuredLogLine:

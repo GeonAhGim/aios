@@ -9,6 +9,7 @@ import { DataFreshness } from "../../components/DataFreshness";
 import { ErrorMessage } from "../../components/ErrorMessage";
 import { LedgerEntryList } from "../../components/LedgerEntryList";
 import { useCursorPage } from "../../hooks/useCursorPage";
+import { useTranslation } from "react-i18next";
 
 // spec §3.3 (C) JournalEntryView 목록 GET 라우트. task-657(LedgerEntryList·
 // ledgerView.ts)·task-462(useCursorPage)·task-353(DataFreshness)를 처음으로 한
@@ -40,6 +41,7 @@ export function LedgerHistoryPage({ fetchPage = fetchLedgerHistoryPageDefault, s
   // state로 들고 있다가 넘긴다(같은 hook을 두 번 호출해 navigator를 두 개 만들지
   // 않는다). effect가 아니라 렌더 중 상태 조정(React 공식 패턴)으로 갱신해
   // 불필요한 커밋 왕복을 피한다.
+  const { t } = useTranslation();
   const [committed, setCommitted] = useState<{ cursor: string | undefined; meta: ApiResponsePageMeta | null } | null>(
     null,
   );
@@ -64,7 +66,7 @@ export function LedgerHistoryPage({ fetchPage = fetchLedgerHistoryPageDefault, s
     <AppShell>
       <div className="max-w-3xl space-y-4">
         <PageHeader
-          title="원장 내역"
+          title={t("legacy.ledgerHistoryPage.title1")}
           action={query.data && <DataFreshness asOf={query.data.meta.as_of} staleAfterSec={staleAfterSec} now={now} />}
         />
 
@@ -83,11 +85,9 @@ export function LedgerHistoryPage({ fetchPage = fetchLedgerHistoryPageDefault, s
         {!query.isError && (query.data || cursorPage.hasPrev) && (
           <div className="flex items-center justify-center gap-2">
             <Button type="button" variant="secondary" size="sm" disabled={!cursorPage.hasPrev} onClick={cursorPage.prev}>
-              이전
-            </Button>
+              {t("legacy.ledgerHistoryPage.t2")}</Button>
             <Button type="button" variant="secondary" size="sm" disabled={!cursorPage.hasNext} onClick={cursorPage.next}>
-              다음
-            </Button>
+              {t("legacy.ledgerHistoryPage.t3")}</Button>
           </div>
         )}
       </div>

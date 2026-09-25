@@ -1,10 +1,12 @@
 import type {
   ApprovalRequest,
+  AuditLogPage,
   DisputeDetail,
   DisputeResolutionResult,
   DisputeResolveRequest,
   DisputeSummary,
   ListingResponse,
+  MarkPayoutPaidResult,
   PlatformListingCreateRequest,
   QueuedListing,
   SellerSuspensionResult,
@@ -103,6 +105,52 @@ export function withAdmin<TBase extends AnyConstructor>(Base: TBase) {
     async listPendingApprovalRequests(scope?: "USER" | "PLATFORM"): Promise<ApprovalRequest[]> {
       const path = this.withQuery(resolvePath("admin.approvalRequests.pending"), { scope });
       return resolveEnvelope("admin.approvalRequests.pending") ? this.requestEnvelope(path) : this.request(path);
+    }
+
+    // task-4024(FE-OPS-7a): admin.py:84 GET /admin/audit-log · ledger_admin.py:53 POST
+    // /admin/ledger/payouts/{batch_id}/paid 둘 다 PLT-35-fix(task-3850)의
+    // require_break_glass("tenant_read")를 소비한다(X-Break-Glass-Grant 헤더, UUID) —
+    // 그 헤더를 채우는 그랜트 요청/승인 화면은 아직 없어(apiPaths.openapi.test.ts의
+    // UNREGISTERED_ROUTE_WHITELIST에 남은 /admin/break-glass/grants* 항목 참고) 이
+    // 리프는 호출자가 이미 들고 있는 grant id를 헤더로 그대로 흘려보내기만 한다.
+    async listAuditLog(
+      breakGlassGrantId: string,
+      filters: {
+        actionType?: string;
+        targetType?: string;
+        targetId?: string;
+        page?: number;
+        pageSize?: number;
+      } = {},
+    ): Promise<AuditLogPage> {
+      const path = this.withQuery(resolvePath("admin.auditLog"), {
+        action_type: filters.actionType,
+        target_type: filters.targetType,
+        target_id: filters.targetId,
+        page: filters.page,
+        page_size: filters.pageSize,
+      });
+      const init: RequestInit = { headers: { "X-Break-Glass-Grant": breakGlassGrantId } };
+      return resolveEnvelope("admin.auditLog") ? this.requestEnvelope(path, init) : this.request(path, init);
+    }
+
+    // apiRoutes.ts의 admin.ledger.payoutsMarkPaid 등록 주석 참조 — mark_payout_paid
+    // (LC-15a)는 배치 상태 조건부 UPDATE로 재확정을 막아 spec §9 PLT-15 금전 라우트
+    // 표에 없다(postEnvelopeIdempotent 대상이 아니다). http.ts의 postEnvelope에
+    // extraHeaders(task-4024)를 얹어 X-Break-Glass-Grant를 싣는다 — resolveDispute·
+    // changeUserStatus 등 다른 admin.* POST/PATCH와 동일하게 "항상 봉투"를 postEnvelope
+    // 선택으로 표현한다(apiPaths.clientsScan.test.ts §task-1160가 this.requestEnvelope
+    // 직접 호출의 하드코딩 분기를 금지한다).
+    async markPayoutPaid(
+      batchId: string,
+      externalRef: string,
+      breakGlassGrantId: string,
+    ): Promise<MarkPayoutPaidResult> {
+      return this.postEnvelope(
+        resolvePath("admin.ledger.payoutsMarkPaid").replace(":batchId", batchId),
+        { externalRef },
+        { "X-Break-Glass-Grant": breakGlassGrantId },
+      );
     }
   };
 }

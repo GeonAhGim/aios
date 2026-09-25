@@ -1,0 +1,599 @@
+{
+  "CompatRange": {
+    "description": "spec \u00a73.5 `compat: {asset_classes, timeframes, min_history}`.",
+    "properties": {
+      "asset_classes": {
+        "items": {
+          "type": "string"
+        },
+        "minItems": 1,
+        "title": "Asset Classes",
+        "type": "array"
+      },
+      "min_history_days": {
+        "exclusiveMinimum": 0,
+        "title": "Min History Days",
+        "type": "integer"
+      },
+      "schema_version": {
+        "const": "v1",
+        "default": "v1",
+        "title": "Schema Version",
+        "type": "string"
+      },
+      "timeframes": {
+        "items": {
+          "type": "string"
+        },
+        "minItems": 1,
+        "title": "Timeframes",
+        "type": "array"
+      }
+    },
+    "required": [
+      "asset_classes",
+      "timeframes",
+      "min_history_days"
+    ],
+    "title": "CompatRange",
+    "type": "object"
+  },
+  "ListingPrice": {
+    "$defs": {
+      "PriceKind": {
+        "description": "spec \u00a73.5 `price: OneTime|Subscription{period, trial_days}`.",
+        "enum": [
+          "ONE_TIME",
+          "SUBSCRIPTION"
+        ],
+        "title": "PriceKind",
+        "type": "string"
+      },
+      "SubscriptionTerms": {
+        "description": "spec \u00a73.5 `price: Subscription{period, trial_days}`.\n\n`period_days` spells out the billing period as a concrete integer\n(rather than a free-text cadence like \"monthly\") because MP-6\n(`domain/subscription_rules.py`, period-key/pro-rated-refund math)\nneeds a number to compute `(subscription_id, period_start)` idempotency\nkeys (\u00a75) -- deferring that shape choice to MP-6 would mean re-touching\nthis contract then.",
+        "properties": {
+          "period_days": {
+            "exclusiveMinimum": 0,
+            "title": "Period Days",
+            "type": "integer"
+          },
+          "schema_version": {
+            "const": "v1",
+            "default": "v1",
+            "title": "Schema Version",
+            "type": "string"
+          },
+          "trial_days": {
+            "default": 0,
+            "minimum": 0,
+            "title": "Trial Days",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "period_days"
+        ],
+        "title": "SubscriptionTerms",
+        "type": "object"
+      }
+    },
+    "description": "spec \u00a73.5 `price: OneTime|Subscription{...}` union, modeled as a\ntagged `kind` instead of a Python union type so `model_json_schema()`\nproduces a stable, diffable shape for the snapshot test (a `Union`\nrenders as `anyOf` and reorders across pydantic point releases --\ntests/foundation/unit/ai/gateway saw this exact class of instability,\nsee requirements-lock.txt's pydantic pin note).",
+    "properties": {
+      "amount": {
+        "anyOf": [
+          {
+            "exclusiveMinimum": 0.0,
+            "type": "number"
+          },
+          {
+            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+            "type": "string"
+          }
+        ],
+        "title": "Amount"
+      },
+      "currency": {
+        "maxLength": 3,
+        "minLength": 3,
+        "title": "Currency",
+        "type": "string"
+      },
+      "kind": {
+        "$ref": "#/$defs/PriceKind"
+      },
+      "schema_version": {
+        "const": "v1",
+        "default": "v1",
+        "title": "Schema Version",
+        "type": "string"
+      },
+      "subscription": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/SubscriptionTerms"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null
+      }
+    },
+    "required": [
+      "kind",
+      "amount",
+      "currency"
+    ],
+    "title": "ListingPrice",
+    "type": "object"
+  },
+  "ReproductionKey": {
+    "description": "spec \u00a73.4 `reproducibility_key = sha256(script_hash ||\ndata_lineage_hash || rollup_version || config_hash || model_hash)`.\n\nEvery input component is carried alongside the final digest (`key`) --\nnot just the opaque hex string -- so a listing can be re-verified\nagainst a later backtest run (MP-11's `verify_listing_backtest.py`)\nwithout needing to re-derive lineage out of a single hash. Composing\n`key` from the other fields is BT-1's job (`src/foundation/backtest`);\nthis contract only validates that all five components and the digest\nare well-formed hex strings.",
+    "properties": {
+      "config_hash": {
+        "maxLength": 64,
+        "minLength": 64,
+        "pattern": "^[0-9a-f]{64}$",
+        "title": "Config Hash",
+        "type": "string"
+      },
+      "data_lineage_hash": {
+        "maxLength": 64,
+        "minLength": 64,
+        "pattern": "^[0-9a-f]{64}$",
+        "title": "Data Lineage Hash",
+        "type": "string"
+      },
+      "key": {
+        "maxLength": 64,
+        "minLength": 64,
+        "pattern": "^[0-9a-f]{64}$",
+        "title": "Key",
+        "type": "string"
+      },
+      "model_hash": {
+        "maxLength": 64,
+        "minLength": 64,
+        "pattern": "^[0-9a-f]{64}$",
+        "title": "Model Hash",
+        "type": "string"
+      },
+      "rollup_version": {
+        "minLength": 1,
+        "title": "Rollup Version",
+        "type": "string"
+      },
+      "schema_version": {
+        "const": "v1",
+        "default": "v1",
+        "title": "Schema Version",
+        "type": "string"
+      },
+      "script_hash": {
+        "maxLength": 64,
+        "minLength": 64,
+        "pattern": "^[0-9a-f]{64}$",
+        "title": "Script Hash",
+        "type": "string"
+      }
+    },
+    "required": [
+      "script_hash",
+      "data_lineage_hash",
+      "rollup_version",
+      "config_hash",
+      "model_hash",
+      "key"
+    ],
+    "title": "ReproductionKey",
+    "type": "object"
+  },
+  "ReputationSnapshot": {
+    "description": "spec \u00a73.5 `ReputationScore{verified_runs, reproduced_backtests,\ndispute_rate, weighted_score}`; \u00a74.3 gives the weighting formula\n(`0.5*f(verified_runs) + 0.3*g(reproduced_backtests) +\n0.2*(1 - dispute_rate)`) that MP-4's `domain/reputation.py` computes --\n`weighted_score` here is a *reported* value this contract accepts as\ngiven, not a value it derives, which is what keeps MP-1 schema-only.",
+    "properties": {
+      "dispute_rate": {
+        "anyOf": [
+          {
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "type": "number"
+          },
+          {
+            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+            "type": "string"
+          }
+        ],
+        "title": "Dispute Rate"
+      },
+      "reproduced_backtests": {
+        "minimum": 0,
+        "title": "Reproduced Backtests",
+        "type": "integer"
+      },
+      "schema_version": {
+        "const": "v1",
+        "default": "v1",
+        "title": "Schema Version",
+        "type": "string"
+      },
+      "verified_runs": {
+        "minimum": 0,
+        "title": "Verified Runs",
+        "type": "integer"
+      },
+      "weighted_score": {
+        "anyOf": [
+          {
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "type": "number"
+          },
+          {
+            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+            "type": "string"
+          }
+        ],
+        "title": "Weighted Score"
+      }
+    },
+    "required": [
+      "verified_runs",
+      "reproduced_backtests",
+      "dispute_rate",
+      "weighted_score"
+    ],
+    "title": "ReputationSnapshot",
+    "type": "object"
+  },
+  "ScriptListing": {
+    "$defs": {
+      "CompatRange": {
+        "description": "spec \u00a73.5 `compat: {asset_classes, timeframes, min_history}`.",
+        "properties": {
+          "asset_classes": {
+            "items": {
+              "type": "string"
+            },
+            "minItems": 1,
+            "title": "Asset Classes",
+            "type": "array"
+          },
+          "min_history_days": {
+            "exclusiveMinimum": 0,
+            "title": "Min History Days",
+            "type": "integer"
+          },
+          "schema_version": {
+            "const": "v1",
+            "default": "v1",
+            "title": "Schema Version",
+            "type": "string"
+          },
+          "timeframes": {
+            "items": {
+              "type": "string"
+            },
+            "minItems": 1,
+            "title": "Timeframes",
+            "type": "array"
+          }
+        },
+        "required": [
+          "asset_classes",
+          "timeframes",
+          "min_history_days"
+        ],
+        "title": "CompatRange",
+        "type": "object"
+      },
+      "ListingPrice": {
+        "description": "spec \u00a73.5 `price: OneTime|Subscription{...}` union, modeled as a\ntagged `kind` instead of a Python union type so `model_json_schema()`\nproduces a stable, diffable shape for the snapshot test (a `Union`\nrenders as `anyOf` and reorders across pydantic point releases --\ntests/foundation/unit/ai/gateway saw this exact class of instability,\nsee requirements-lock.txt's pydantic pin note).",
+        "properties": {
+          "amount": {
+            "anyOf": [
+              {
+                "exclusiveMinimum": 0.0,
+                "type": "number"
+              },
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                "type": "string"
+              }
+            ],
+            "title": "Amount"
+          },
+          "currency": {
+            "maxLength": 3,
+            "minLength": 3,
+            "title": "Currency",
+            "type": "string"
+          },
+          "kind": {
+            "$ref": "#/$defs/PriceKind"
+          },
+          "schema_version": {
+            "const": "v1",
+            "default": "v1",
+            "title": "Schema Version",
+            "type": "string"
+          },
+          "subscription": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/SubscriptionTerms"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          }
+        },
+        "required": [
+          "kind",
+          "amount",
+          "currency"
+        ],
+        "title": "ListingPrice",
+        "type": "object"
+      },
+      "ListingVisibility": {
+        "description": "spec \u00a73.5 `Visibility = public|protected|invite|private` verbatim --\ninventing a fifth tier is forbidden, this enum is the single source of\ntruth for MP-2's `domain/visibility.py`.\n\n`PROTECTED` means the script source is never exposed to a subscriber --\nserver-side execution only, with the reproducibility key published\ninstead of the source (MP-2 owns enforcing that; this contract only\nnames the tier).",
+        "enum": [
+          "PUBLIC",
+          "PROTECTED",
+          "INVITE",
+          "PRIVATE"
+        ],
+        "title": "ListingVisibility",
+        "type": "string"
+      },
+      "PriceKind": {
+        "description": "spec \u00a73.5 `price: OneTime|Subscription{period, trial_days}`.",
+        "enum": [
+          "ONE_TIME",
+          "SUBSCRIPTION"
+        ],
+        "title": "PriceKind",
+        "type": "string"
+      },
+      "ReproductionKey": {
+        "description": "spec \u00a73.4 `reproducibility_key = sha256(script_hash ||\ndata_lineage_hash || rollup_version || config_hash || model_hash)`.\n\nEvery input component is carried alongside the final digest (`key`) --\nnot just the opaque hex string -- so a listing can be re-verified\nagainst a later backtest run (MP-11's `verify_listing_backtest.py`)\nwithout needing to re-derive lineage out of a single hash. Composing\n`key` from the other fields is BT-1's job (`src/foundation/backtest`);\nthis contract only validates that all five components and the digest\nare well-formed hex strings.",
+        "properties": {
+          "config_hash": {
+            "maxLength": 64,
+            "minLength": 64,
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Config Hash",
+            "type": "string"
+          },
+          "data_lineage_hash": {
+            "maxLength": 64,
+            "minLength": 64,
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Data Lineage Hash",
+            "type": "string"
+          },
+          "key": {
+            "maxLength": 64,
+            "minLength": 64,
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Key",
+            "type": "string"
+          },
+          "model_hash": {
+            "maxLength": 64,
+            "minLength": 64,
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Model Hash",
+            "type": "string"
+          },
+          "rollup_version": {
+            "minLength": 1,
+            "title": "Rollup Version",
+            "type": "string"
+          },
+          "schema_version": {
+            "const": "v1",
+            "default": "v1",
+            "title": "Schema Version",
+            "type": "string"
+          },
+          "script_hash": {
+            "maxLength": 64,
+            "minLength": 64,
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Script Hash",
+            "type": "string"
+          }
+        },
+        "required": [
+          "script_hash",
+          "data_lineage_hash",
+          "rollup_version",
+          "config_hash",
+          "model_hash",
+          "key"
+        ],
+        "title": "ReproductionKey",
+        "type": "object"
+      },
+      "ReputationSnapshot": {
+        "description": "spec \u00a73.5 `ReputationScore{verified_runs, reproduced_backtests,\ndispute_rate, weighted_score}`; \u00a74.3 gives the weighting formula\n(`0.5*f(verified_runs) + 0.3*g(reproduced_backtests) +\n0.2*(1 - dispute_rate)`) that MP-4's `domain/reputation.py` computes --\n`weighted_score` here is a *reported* value this contract accepts as\ngiven, not a value it derives, which is what keeps MP-1 schema-only.",
+        "properties": {
+          "dispute_rate": {
+            "anyOf": [
+              {
+                "maximum": 1.0,
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                "type": "string"
+              }
+            ],
+            "title": "Dispute Rate"
+          },
+          "reproduced_backtests": {
+            "minimum": 0,
+            "title": "Reproduced Backtests",
+            "type": "integer"
+          },
+          "schema_version": {
+            "const": "v1",
+            "default": "v1",
+            "title": "Schema Version",
+            "type": "string"
+          },
+          "verified_runs": {
+            "minimum": 0,
+            "title": "Verified Runs",
+            "type": "integer"
+          },
+          "weighted_score": {
+            "anyOf": [
+              {
+                "maximum": 1.0,
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                "type": "string"
+              }
+            ],
+            "title": "Weighted Score"
+          }
+        },
+        "required": [
+          "verified_runs",
+          "reproduced_backtests",
+          "dispute_rate",
+          "weighted_score"
+        ],
+        "title": "ReputationSnapshot",
+        "type": "object"
+      },
+      "SubscriptionTerms": {
+        "description": "spec \u00a73.5 `price: Subscription{period, trial_days}`.\n\n`period_days` spells out the billing period as a concrete integer\n(rather than a free-text cadence like \"monthly\") because MP-6\n(`domain/subscription_rules.py`, period-key/pro-rated-refund math)\nneeds a number to compute `(subscription_id, period_start)` idempotency\nkeys (\u00a75) -- deferring that shape choice to MP-6 would mean re-touching\nthis contract then.",
+        "properties": {
+          "period_days": {
+            "exclusiveMinimum": 0,
+            "title": "Period Days",
+            "type": "integer"
+          },
+          "schema_version": {
+            "const": "v1",
+            "default": "v1",
+            "title": "Schema Version",
+            "type": "string"
+          },
+          "trial_days": {
+            "default": 0,
+            "minimum": 0,
+            "title": "Trial Days",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "period_days"
+        ],
+        "title": "SubscriptionTerms",
+        "type": "object"
+      }
+    },
+    "description": "spec \u00a73.5 `ScriptListing{listing_id, script_hash, version, changelog,\nvisibility, price, compat, reputation}` verbatim, plus an optional\n`reproduction_key` (\u00a73.4) -- `PROTECTED` listings (see\n`ListingVisibility`) publish the reproduction key in place of source\naccess, so it has to be part of the listing a subscriber receives.\n\n\u00a74.4 `draft -> compiled(hash fixed) -> published(visibility) ->\ndeprecated; a published version's source/IR is immutable (an edit is a\nnew version)` is why `frozen=True` here mirrors `AgentToken`/\n`ComplianceDecision` -- a listing object must not be mutable in memory\nonce constructed; a new version is a new `ScriptListing`, not an\nin-place edit.",
+    "properties": {
+      "changelog": {
+        "default": "",
+        "title": "Changelog",
+        "type": "string"
+      },
+      "compat": {
+        "$ref": "#/$defs/CompatRange"
+      },
+      "listing_id": {
+        "format": "uuid",
+        "title": "Listing Id",
+        "type": "string"
+      },
+      "price": {
+        "$ref": "#/$defs/ListingPrice"
+      },
+      "reproduction_key": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/ReproductionKey"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null
+      },
+      "reputation": {
+        "$ref": "#/$defs/ReputationSnapshot"
+      },
+      "schema_version": {
+        "const": "v1",
+        "default": "v1",
+        "title": "Schema Version",
+        "type": "string"
+      },
+      "script_hash": {
+        "maxLength": 64,
+        "minLength": 64,
+        "pattern": "^[0-9a-f]{64}$",
+        "title": "Script Hash",
+        "type": "string"
+      },
+      "version": {
+        "exclusiveMinimum": 0,
+        "title": "Version",
+        "type": "integer"
+      },
+      "visibility": {
+        "$ref": "#/$defs/ListingVisibility"
+      }
+    },
+    "required": [
+      "listing_id",
+      "script_hash",
+      "version",
+      "visibility",
+      "price",
+      "compat",
+      "reputation"
+    ],
+    "title": "ScriptListing",
+    "type": "object"
+  },
+  "SubscriptionTerms": {
+    "description": "spec \u00a73.5 `price: Subscription{period, trial_days}`.\n\n`period_days` spells out the billing period as a concrete integer\n(rather than a free-text cadence like \"monthly\") because MP-6\n(`domain/subscription_rules.py`, period-key/pro-rated-refund math)\nneeds a number to compute `(subscription_id, period_start)` idempotency\nkeys (\u00a75) -- deferring that shape choice to MP-6 would mean re-touching\nthis contract then.",
+    "properties": {
+      "period_days": {
+        "exclusiveMinimum": 0,
+        "title": "Period Days",
+        "type": "integer"
+      },
+      "schema_version": {
+        "const": "v1",
+        "default": "v1",
+        "title": "Schema Version",
+        "type": "string"
+      },
+      "trial_days": {
+        "default": 0,
+        "minimum": 0,
+        "title": "Trial Days",
+        "type": "integer"
+      }
+    },
+    "required": [
+      "period_days"
+    ],
+    "title": "SubscriptionTerms",
+    "type": "object"
+  }
+}

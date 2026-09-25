@@ -2,8 +2,11 @@
 
 Spec: docs/specs/L4_strategy_portfolio_backtest_v1.0.md#L26 DoD (b)(c)(d).
 """
+
 from __future__ import annotations
 
+import time
+from collections.abc import Iterator
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 
@@ -134,3 +137,65 @@ def test_upto_result_mutation_does_not_affect_internal_state() -> None:
     result = bars.upto(4)
     result.append(_candle(99))
     assert len(bars) == 5
+
+
+# -- D2 실패 주입 --------------------------------------------------------------
+
+
+def test_construction_propagates_upstream_bar_source_failure() -> None:
+    """A generator standing in for an interrupted market-data fetch raises
+    partway through iteration. `ListBars.__init__` must let that exception
+    propagate (fail-closed) instead of silently building a truncated,
+    partial bar sequence that a replay loop would then treat as complete."""
+
+    def _flaky_source() -> Iterator[Candle]:
+        yield _candle(0)
+        yield _candle(1)
+        raise ConnectionError("market data stream dropped mid-fetch")
+
+    with pytest.raises(ConnectionError, match="dropped mid-fetch"):
+        ListBars(_flaky_source())
+
+
+# -- D2 성능 단언 --------------------------------------------------------------
+
+
+@pytest.mark.perf
+def test_upto_p95_latency_within_5k_bar_budget() -> None:
+    """ADR-2026-09-09-C Decision 1 축별 성능 예산: 5k봉 조회 p95 200ms."""
+    fixture = _bars(5_000)
+    bars = ListBars(fixture)
+    samples: list[float] = []
+    for bar_index in range(len(fixture)):
+        start = time.perf_counter()
+        bars.upto(bar_index)
+        samples.append(time.perf_counter() - start)
+
+    samples.sort()
+    p95_index = int(len(samples) * 0.95)
+    p95_seconds = samples[p95_index]
+    assert p95_seconds < 0.2, f"p95={p95_seconds * 1000:.2f}ms exceeds 200ms budget"
+
+
+# -- D2 게이트 적색 재현 -------------------------------------------------------
+
+
+def test_bounds_check_gate_catches_removal_regression() -> None:
+    """`ListBars._check_bounds`가 없다면(회귀) 음수 인덱스가 Python의
+    "끝에서부터 세기" 관례로 조용히 통과해 미래 참조를 마스킹한다 -- 실제
+    구현은 그 적색 상태를 fail-closed로 막아야 한다."""
+    fixture = _bars(5)
+    regressed_bars: tuple[Candle, ...] = tuple(fixture)
+
+    def _regressed_at(bar_index: int) -> Candle:
+        # `_check_bounds` 호출을 빼먹은 회귀본 -- bare tuple indexing.
+        return regressed_bars[bar_index]
+
+    # 적색: 가드가 없으면 -1이 마지막 봉을 조용히 반환한다 (미래 참조 은폐).
+    assert _regressed_at(-1) is fixture[-1]
+
+    # 녹색: 실제 구현은 같은 입력을 fail-closed로 거부한다.
+    bars = ListBars(fixture)
+    with pytest.raises(BacktestLookaheadError) as exc_info:
+        bars.at(-1)
+    assert exc_info.value.error_code == "BACKTEST_LOOKAHEAD_VIOLATION"

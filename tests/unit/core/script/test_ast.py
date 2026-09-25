@@ -3,14 +3,18 @@
 
 직렬화 왕복(§3.3 전 프로덕션을 최소 1회씩 사용)이 항등임을 단언하고,
 불변성·postfix 과거참조(`[n]`은 상수 n>=0만) 제약을 negative test로
-검증한다.
+검증한다. DEPTH 감사(task-2727) D2 보강: 실패 주입(직렬화 도중 예외
+전파)·수치 성능 단언(왕복 지연 예산)·게이트 적색 재현(`extra=forbid`
+회귀 시뮬레이션)을 추가한다.
 """
+
 from __future__ import annotations
 
+import time
 from typing import Any
 
 import pytest
-from pydantic import ValidationError
+from pydantic import BaseModel, ConfigDict, ValidationError
 
 from src.core.script.grammar.ast import (
     GRAMMAR_VERSION,
@@ -146,5 +150,69 @@ def test_program_rejects_unknown_field() -> None:
 def test_program_rejects_grammar_version_mismatch() -> None:
     data = to_dict(_sample_program())
     data["grammar_version"] = "aios-script-2"
+    with pytest.raises(ValidationError):
+        program_from_dict(data)
+
+
+def test_to_dict_propagates_serialization_failure_instead_of_masking_it(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """실패 주입: 직렬화 도중(예: pydantic 내부 회귀) 예외가 나면 `to_dict`가
+    빈 dict나 부분 결과로 조용히 대체하지 않고 예외를 그대로 전파해야 한다
+    — fail-closed. 손상된 산출물을 성공으로 위장하는 것이 가장 위험하다."""
+    program = _sample_program()
+
+    def _boom(self: Program, *args: Any, **kwargs: Any) -> Any:
+        raise RuntimeError("simulated corrupted serialization")
+
+    monkeypatch.setattr(Program, "model_dump", _boom)
+
+    with pytest.raises(RuntimeError, match="simulated corrupted serialization"):
+        to_dict(program)
+
+
+@pytest.mark.perf
+def test_serialization_round_trip_latency_is_bounded() -> None:
+    """수치 성능 단언: 중간 크기 프로그램의 `to_dict`→`program_from_dict`
+    왕복 평균 지연이 예산(2ms/회)을 넘지 않는다 — 우연한 이차 복잡도 회귀나
+    검증기 재구성 누락을 조기에 검출한다."""
+    program = _sample_program()
+
+    for _ in range(20):  # JIT/캐시 워밍업 — 첫 호출 지연을 측정에서 배제
+        program_from_dict(to_dict(program))
+
+    iterations = 500
+    start = time.perf_counter()
+    for _ in range(iterations):
+        program_from_dict(to_dict(program))
+    elapsed_s = time.perf_counter() - start
+
+    avg_ms = (elapsed_s / iterations) * 1000
+    assert avg_ms < 2.0, f"직렬화 왕복 평균 {avg_ms:.3f}ms > 2.0ms 예산"
+
+
+def test_extra_forbid_regression_would_be_caught_by_unknown_field_guard() -> None:
+    """게이트 적색 재현: `test_program_rejects_unknown_field`가 실제로
+    `ScriptNode`의 `extra=forbid` 설정에 의존한다는 것을 증명한다.
+    `extra=forbid`가 빠진 회귀를 시뮬레이션하면 같은 손상 입력(미지 필드)이
+    조용히 통과해 그 가드 테스트가 빨간불이 됨을 보여준다."""
+
+    class _RegressedScriptNode(BaseModel):
+        model_config = ConfigDict(frozen=True, extra="allow")
+
+    class _RegressedProgram(_RegressedScriptNode):
+        kind: str = "program"
+        grammar_version: str = GRAMMAR_VERSION
+        decls: tuple[Any, ...] = ()
+
+    data = to_dict(_sample_program())
+    data["unexpected"] = True
+
+    # 회귀 상태(extra=allow)에서는 미지 필드가 거부되지 않고 조용히 통과한다
+    # — 이 라인이 예외 없이 성공하는 것 자체가 "가드가 빨간불이 됨"이다.
+    regressed = _RegressedProgram.model_validate(data)
+    assert regressed.model_dump()["unexpected"] is True
+
+    # 실제 Program은 extra=forbid를 상속하므로 동일 입력을 여전히 거부한다.
     with pytest.raises(ValidationError):
         program_from_dict(data)

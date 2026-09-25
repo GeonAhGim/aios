@@ -9,10 +9,12 @@ deterministic id from `services/oms/domain/idempotency.py` (L4-03) plus the
 existing `orders.client_order_id` UNIQUE claim in `order_service.submit`
 absorb the retry before it ever reaches the adapter.
 """
+
 from __future__ import annotations
 
 import json
 import uuid
+from datetime import datetime, timezone
 from decimal import Decimal
 from pathlib import Path
 
@@ -20,12 +22,18 @@ import asyncpg
 import pytest
 from dotenv import dotenv_values
 
-from src.core.executor.executor import _CLIENT_ORDER_ID_CHARSET, Executor
+from src.core.exceptions import FrozenZoneLiveModeBlockedError, FrozenZonePaperAdapterBlockedError
+from src.core.executor.executor import (
+    _CLIENT_ORDER_ID_CHARSET,
+    Executor,
+    _floor_to_window,
+)
 from src.core.portfolio.models import AllocationDecision
 from src.core.risk.models import RiskCheckResult
 from src.data.models.strategy_fsm import FSMState
 from src.data.models.trading import OrderSide
 from src.services.condition_compiler import ConditionCompiler
+from src.services.oms.domain.idempotency import client_order_id as _client_order_id_fn
 from src.services.order_service.gate import GateDecision, GateOutcome
 from src.services.preview_service import PreviewCondition
 from tests.integration.conftest import create_test_tenant
@@ -175,3 +183,119 @@ async def test_client_order_id_respects_the_configured_charset_and_max_len(pool)
 
     assert len(submitted.client_order_id) <= 40
     assert all(c in _CLIENT_ORDER_ID_CHARSET for c in submitted.client_order_id)
+
+
+# ── Negative tests (invariant-violating inputs) ───────────────────────────
+
+
+async def test_client_order_id_rejects_zero_max_len(pool):
+    """Negative: client_order_id() must raise ValueError when max_len <= 0."""
+    from src.services.oms.domain.idempotency import build_scope
+
+    user_id = await create_test_tenant(pool)
+    scope = build_scope(
+        tenant_id=user_id,
+        account_ref="",
+        provider="bitget",
+        strategy_id="test",
+        strategy_version="1.0.0",
+        execution_id=1,
+        intent_seq=0,
+        window_start=_floor_to_window(datetime.now(timezone.utc)),
+    )
+    with pytest.raises(ValueError, match="max_len은 1 이상이어야 합니다."):
+        _client_order_id_fn(scope, max_len=0, charset=_CLIENT_ORDER_ID_CHARSET)
+
+
+async def test_client_order_id_rejects_empty_charset(pool):
+    """Negative: client_order_id() must raise ValueError when charset is empty."""
+    from src.services.oms.domain.idempotency import build_scope
+
+    user_id = await create_test_tenant(pool)
+    scope = build_scope(
+        tenant_id=user_id,
+        account_ref="",
+        provider="bitget",
+        strategy_id="test",
+        strategy_version="1.0.0",
+        execution_id=1,
+        intent_seq=0,
+        window_start=_floor_to_window(datetime.now(timezone.utc)),
+    )
+    with pytest.raises(ValueError, match="charset은 비어 있을 수 없습니다."):
+        _client_order_id_fn(scope, max_len=10, charset="")
+
+
+async def test_executor_rejects_live_mode(pool):
+    """Negative: Executor.execute() must block LIVE mode with FrozenZoneLiveModeBlockedError."""
+    user_id = await create_test_tenant(pool)
+    execution_id = await _create_execution(pool, user_id)
+    adapter = FakeExchangeAdapter()
+
+    with pytest.raises(FrozenZoneLiveModeBlockedError):
+        await Executor().execute(
+            _allocation(),
+            _approved_risk_result(),
+            adapter,
+            execution_id=execution_id,
+            user_id=user_id,
+            strategy_version="1.0.0",
+            mode="LIVE",  # LIVE → blocked
+            side=OrderSide.BUY,
+            pending_fsm_state=FSMState.BUY_ORDER_PENDING,
+            fsm_config=_fsm_config(),
+            fsm_state_writer=_noop_fsm_state_writer,
+            pool=pool,
+            pre_submit_gate=_allow_gate,
+        )
+
+
+# ── Failure-injection tests (dependency exceptions) ───────────────────────
+
+
+async def test_executor_propagates_adapter_place_order_failure(pool):
+    """Failure-injection: adapter.place_order raises → Executor re-raises."""
+    user_id = await create_test_tenant(pool)
+    execution_id = await _create_execution(pool, user_id)
+    adapter = FakeExchangeAdapter()
+
+    async def _broken_place_order(order):
+        raise ConnectionError("adapter network failure")
+
+    adapter.place_order = _broken_place_order
+
+    with pytest.raises(ConnectionError, match="adapter network failure"):
+        await _execute_once(pool, adapter, execution_id, user_id)
+
+
+async def test_executor_rejects_non_paper_adapter(pool):
+    """Failure-injection: adapter is_paper_trading=False → FrozenZonePaperAdapterBlockedError."""
+    user_id = await create_test_tenant(pool)
+    execution_id = await _create_execution(pool, user_id)
+    adapter = FakeExchangeAdapter(is_paper_trading=False)
+
+    with pytest.raises(FrozenZonePaperAdapterBlockedError):
+        await _execute_once(pool, adapter, execution_id, user_id)
+
+
+# ── Determinism negative: same scope always yields same id ────────────────
+
+
+async def test_deterministic_client_order_id_same_scope(pool):
+    """Negative/robustness: two calls with identical scope produce identical client_order_id."""
+    user_id = await create_test_tenant(pool)
+    from src.services.oms.domain.idempotency import build_scope
+
+    scope = build_scope(
+        tenant_id=user_id,
+        account_ref="",
+        provider="bitget",
+        strategy_id="strat-cid-test",
+        strategy_version="1.0.0",
+        execution_id=42,
+        intent_seq=0,
+        window_start=datetime(2026, 1, 1, 0, 0, 0, tzinfo=timezone.utc),
+    )
+    first = _client_order_id_fn(scope, max_len=40, charset=_CLIENT_ORDER_ID_CHARSET)
+    second = _client_order_id_fn(scope, max_len=40, charset=_CLIENT_ORDER_ID_CHARSET)
+    assert first == second

@@ -6,6 +6,7 @@ import { useEffect, useState, type FormEvent } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { ErrorMessage } from "../../components/ErrorMessage";
 import { AuthLayout } from "./AuthLayout";
+import { useTranslation } from "react-i18next";
 
 // task-354: ProtectedRoute가 세션 만료·미로그인 시 남긴 ?next=<원경로>로
 // 로그인 성공 후 복귀한다. 외부 사이트로 여는 open-redirect를 막기 위해
@@ -16,6 +17,7 @@ function sanitizeNextPath(next: string | null): string {
 }
 
 export function LoginPage() {
+  const { t } = useTranslation();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [totpCode, setTotpCode] = useState("");
@@ -41,7 +43,7 @@ export function LoginPage() {
       await login.mutateAsync({ email, password, totpCode: totpCode || undefined });
       navigate(sanitizeNextPath(searchParams.get("next")));
     } catch (err) {
-      setError(err instanceof ApiError ? err : new Error("로그인에 실패했습니다."));
+      setError(err instanceof ApiError ? err : new Error(t("legacy.loginPage.t9")));
       setLockoutRemainingSec(deriveLockout(err).retryAfterSec);
     }
   }
@@ -59,9 +61,9 @@ export function LoginPage() {
   const canRetry = routed?.kind === "backoff_retry";
 
   return (
-    <AuthLayout title="AIOS 로그인">
+    <AuthLayout title={t("legacy.loginPage.title1")}>
       <form onSubmit={handleSubmit} className="space-y-4">
-        <Field label="이메일" htmlFor="email">
+        <Field label={t("legacy.loginPage.label2")} htmlFor="email">
           <Input
             id="email"
             type="email"
@@ -72,7 +74,7 @@ export function LoginPage() {
             onChange={(e) => setEmail(e.target.value)}
           />
         </Field>
-        <Field label="비밀번호" htmlFor="password">
+        <Field label={t("legacy.loginPage.label3")} htmlFor="password">
           <Input
             id="password"
             type="password"
@@ -83,7 +85,7 @@ export function LoginPage() {
             onChange={(e) => setPassword(e.target.value)}
           />
         </Field>
-        <Field label="2단계 인증 코드" htmlFor="totp" hint="설정한 경우만 입력">
+        <Field label={t("legacy.loginPage.label4")} htmlFor="totp" hint="설정한 경우만 입력">
           <Input
             id="totp"
             type="text"
@@ -104,17 +106,14 @@ export function LoginPage() {
         )}
         {locked && (
           <p role="status" className="text-sm text-fg-muted">
-            {lockoutRemainingSec}초 후 다시 시도할 수 있습니다.
-          </p>
+            {t("legacy.loginPage.t5", { lockoutRemainingSec: lockoutRemainingSec })}</p>
         )}
         <Button type="submit" loading={login.isPending} disabled={locked} className="w-full">
-          로그인
-        </Button>
+          {t("legacy.loginPage.t6")}</Button>
         <p className="text-center text-sm text-fg-muted">
-          계정이 없으신가요?{" "}
+          {t("legacy.loginPage.t7", { val: " " })}
           <Link to="/signup" className="text-accent-hover hover:underline">
-            회원가입
-          </Link>
+            {t("legacy.loginPage.t8")}</Link>
         </p>
       </form>
     </AuthLayout>

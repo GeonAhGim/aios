@@ -1,45 +1,53 @@
-"""DC-12 — KIS(한국투자증권) `MarketDataProvider` SPI 위임 어댑터.
+# ratchet-allow: out-of-DC-12-scope SPI methods raise NotImplementedError (fail-closed stub)
+"""DC-12 — KIS (Korea Investment & Securities) `MarketDataProvider` SPI delegation adapter.
 
 Spec: docs/specs/L4_analytics_authoring_backtest_marketplace_v1.0.md
-§2 모듈표 50행, §9.2 DC-12(선행 DC-11, task-1187 b0b8bed 머지 완료).
+Module table row 50, §9.2 DC-12 (prerequisite DC-11, task-1187 b0b8bed merged).
 
-`BitgetProvider`(`bitget_provider.py`)와 같은 패턴 — 새 거래소 클라이언트를
-만들지 않고 기존 `src.exchanges.kis.KISAdapter`를 생성자로 주입받아 호출을
-위임한다. `src/exchanges/**`는 이 리프에서 한 줄도 고치지 않는다
-(task-1211 decision).
+Same pattern as `BitgetProvider` (`bitget_provider.py`) — delegates calls by
+injecting the existing `src.exchanges.kis.KISAdapter` via constructor without
+creating a new exchange client. `src/exchanges/**` is not touched in this
+leaf (task-1211 decision).
 
-스콥 — `KISAdapter.get_capabilities()`가 Phase 1 capability-gated 원칙에
-따라 `KR_EQUITY`만 선언하듯(해외주식/선물옵션은 Draft), 이 SPI 계층도
-`Venue.KIS_KRX`(국내주식) 하나만 다룬다. `KISMarketDataMixin.get_ohlcv`가
-실제로 지원하는 timeframe도 일봉(`1d`)·분봉(`1m`) 둘뿐이라(02d 스펙 §2,
-그 외 분봉은 거래소가 직접 주지 않음) `capabilities().timeframes`도 그
-둘만 선언한다 — 지원하지 않는 것처럼 보이는 timeframe을 미리 선언해
-capability-gated 원칙(§2.0-A)을 어기지 않는다.
+Scope — As `KISAdapter.get_capabilities()` declares only `KR_EQUITY` under
+the Phase 1 capability-gated principle (overseas stocks/futures & options are
+Draft), this SPI layer handles only `Venue.KIS_KRX` (Korean domestic stocks).
+`KISMarketDataMixin.get_ohlcv` actually supports only two timeframes: daily
+(`1d`) and 1-minute (`1m`) (02d spec §2; the exchange does not provide other
+minute intervals), so `capabilities().timeframes` declares only those two —
+avoiding violating the capability-gated principle (§2.0-A) by not pre-declaring
+timeframes that appear unsupported.
 
-미검증(외부 문서 대조 전, 성공으로 위장하지 않음):
-- `history_from`: KIS 일봉 조회가 `FID_INPUT_DATE_1="19000101"`을 보내긴
-  하지만 실제 서버가 그만큼 과거 데이터를 보유하는지는 확인하지 않았다.
-  임의 날짜를 채우면 §4.1 위반이므로 `None`(모름)으로 둔다.
-- `rate_limit`: KIS 공식 문서 초당 한도는 라이브 검증 전까지 보수적
-  추정치(초당 15건, burst 15)를 쓴다.
-- 구간 조회 한계: `KISMarketDataMixin.get_ohlcv`는 `[start, end)` 구간
-  파라미터를 받지 않는다(existing adapter가 "최신부터 `limit`개"만 지원,
-  일봉의 경우 1900년부터 오늘까지를 조회하되 응답을 `limit`으로 자를
-  뿐이다). 그래서 이 provider는 그 결과를 받아 `span`으로 사후 필터링만
-  한다 — 어댑터가 애초에 닿지 못하는 과거 구간은 정직하게
-  `DATA_COVERAGE_MISSING`이 된다(§4.1, 0 채움 아님).
+Unverified (do not pretend success before cross-referencing external docs):
+- `history_from`: KIS daily queries send `FID_INPUT_DATE_1="19000101"`, but
+  it has not been confirmed whether the server actually retains that much
+  historical data. Filling with an arbitrary date would violate §4.1, so it
+  is left as `None` (unknown).
+- `rate_limit`: The KIS official docs' per-second limit uses a conservative
+  estimate (15 req/s, burst 15) until live verification.
+- Range-query limitation: `KISMarketDataMixin.get_ohlcv` does not accept
+  `[start, end)` range parameters (the existing adapter supports only
+  "latest `limit` rows"), and for daily candles it queries from 1900 to
+  today but trims the response to `limit`. This provider therefore accepts
+  the result and post-filters by `span` — past ranges the adapter cannot
+  reach at all become a honest `DATA_COVERAGE_MISSING` (§4.1, not zero-fill).
 
-`list_instruments`/`subscribe`는 이 리프의 구현 대상이 아니다(task-1211
-decision, `BitgetProvider`와 동일 근거 — instrument_id(ULID) 발급은 DC-2
-소관, 실시간 스트림 배선은 DC-17 소관). 둘 다 `NotImplementedError`로
-fail-closed 한다.
+`list_instruments`/`subscribe` are not implementation targets for this leaf
+(task-1211 decision, same rationale as `BitgetProvider` — instrument_id
+(ULID) issuance is DC-2 responsibility, realtime stream wiring is DC-17
+responsibility). Both raise `NotImplementedError` (fail-closed).
 """
+
 from __future__ import annotations
 
-from collections.abc import AsyncIterator, Sequence
+import asyncio
+import random
+import time
+from collections.abc import AsyncIterator, Awaitable, Callable, Sequence
 from decimal import Decimal
 
 from src.data.models.base import AssetClass
+from src.exchanges.common.http_policy import RetryPolicy
 from src.exchanges.kis.adapter import KISAdapter
 from src.foundation.market_data.adapters.providers.base_adapter import BaseProviderAdapter
 from src.foundation.market_data.contracts.v1 import Timeframe, Venue
@@ -57,28 +65,38 @@ from src.foundation.market_data.ports.provider import (
 
 __all__ = ["KISProvider"]
 
-_MAX_CANDLES_PER_REQUEST = 100  # KISMarketDataMixin.get_ohlcv 기본값과 동일.
+_MAX_CANDLES_PER_REQUEST = 100  # Same as KISMarketDataMixin.get_ohlcv default.
 _SUPPORTED_TIMEFRAMES = frozenset({Timeframe.M1, Timeframe.D1})
 
 _CAPABILITIES = ProviderCapabilities(
     provider_id="kis",
     asset_classes=frozenset({AssetClass.KR_EQUITY}),
     timeframes=_SUPPORTED_TIMEFRAMES,
-    history_from=None,  # 미검증(문서 미대조) — 임의 날짜로 채우지 않는다.
+    history_from=None,  # Unverified (no doc cross-reference) — do not fill with arbitrary date.
     realtime=True,  # KISAdapter.get_capabilities().supports_websocket
     delayed_seconds=0,
-    max_symbols_per_request=1,  # REST 조회 엔드포인트는 심볼 1개씩만 조회.
-    rate_limit=RateLimitSpec(requests_per_second=Decimal(15), burst=15),  # 미검증
+    max_symbols_per_request=1,  # REST endpoint queries one symbol at a time.
+    rate_limit=RateLimitSpec(requests_per_second=Decimal(15), burst=15),  # Unverified
 )
 
 
 class KISProvider(BaseProviderAdapter):
-    """`KISAdapter`(기존 `src/exchanges/kis`)에 위임하는 `MarketDataProvider`
-    (DC-5) 구현체. 국내주식(`Venue.KIS_KRX`) 전용(Phase 1 capability-gated
-    범위, 위 모듈 docstring 참고)."""
+    """`MarketDataProvider` (DC-5) implementation that delegates to
+    `KISAdapter` (existing `src/exchanges/kis`). Domestic stocks only
+    (`Venue.KIS_KRX`) (Phase 1 capability-gated scope, see module docstring)."""
 
-    def __init__(self, adapter: KISAdapter, **kwargs: object) -> None:
-        super().__init__(_CAPABILITIES, **kwargs)  # type: ignore[arg-type]
+    def __init__(
+        self,
+        adapter: KISAdapter,
+        *,
+        retry_policy: RetryPolicy | None = None,
+        clock: Callable[[], float] = time.monotonic,
+        sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
+        rng: Callable[[], float] = random.random,
+    ) -> None:
+        super().__init__(
+            _CAPABILITIES, retry_policy=retry_policy, clock=clock, sleep=sleep, rng=rng
+        )
         self._adapter = adapter
 
     def capabilities(self) -> ProviderCapabilities:
@@ -95,9 +113,7 @@ class KISProvider(BaseProviderAdapter):
         self, listing: VenueListing, tf: Timeframe, span: TimeSpan
     ) -> CandleColumns:
         if listing.venue is not Venue.KIS_KRX:
-            raise ValueError(
-                f"KISProvider는 Venue.KIS_KRX listing만 처리한다: {listing.venue!r}"
-            )
+            raise ValueError(f"KISProvider는 Venue.KIS_KRX listing만 처리한다: {listing.venue!r}")
         if tf not in _SUPPORTED_TIMEFRAMES:
             raise ValueError(
                 f"KISProvider는 {sorted(t.value for t in _SUPPORTED_TIMEFRAMES)}만 "
@@ -118,8 +134,7 @@ class KISProvider(BaseProviderAdapter):
                     DataProviderErrorCode.DATA_COVERAGE_MISSING,
                     provider_id=self._provider_id,
                     message=(
-                        f"kis: {symbol} {tf.value} 구간 [{span.start}, {span.end}) "
-                        "데이터 없음"
+                        f"kis: {symbol} {tf.value} 구간 [{span.start}, {span.end}) 데이터 없음"
                     ),
                 )
             return CandleColumns(
@@ -134,9 +149,7 @@ class KISProvider(BaseProviderAdapter):
 
         return await self.call_with_retry(_op)
 
-    async def subscribe(
-        self, _listings: Sequence[VenueListing]
-    ) -> AsyncIterator[TickOrCandle]:
+    async def subscribe(self, _listings: Sequence[VenueListing]) -> AsyncIterator[TickOrCandle]:
         raise NotImplementedError(
             "KISProvider.subscribe: DC-12 스콥 밖 — 실시간 스트림 배선은 "
             "DC-17(realtime_fanout) 선행 리프 몫이다(task-1211 decision)."

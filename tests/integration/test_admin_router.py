@@ -1,20 +1,24 @@
 """18번대 통합테스트 — /admin 라우터. 실제 FastAPI 앱 + 실제 dev DB."""
+
 import json
 import uuid
 from decimal import Decimal
 from pathlib import Path
 
 import asyncpg
+import pyotp
 import pytest
 from dotenv import dotenv_values
 from fastapi import Depends
 from httpx import ASGITransport, AsyncClient
 
+from src.api.admin_deps import get_audit_log_read_service
 from src.api.deps import get_event_bus, get_pool
 from src.api.service_deps import get_credential_resolver
 from src.data.models.trading import AccountBalance
 from src.main import app
 from tests.integration.conftest import NoopEventBus
+from tests.integration.mfa_clock import mfa_clock_shifted, totp_at
 
 STRONG_PASSWORD = "Str0ng!Passw0rd"
 
@@ -94,6 +98,47 @@ async def _make_admin(pool, user_id):
         await conn.execute(
             "UPDATE users SET is_platform_admin = true WHERE user_id = $1", uuid.UUID(user_id)
         )
+
+
+async def _mfa_verified_admin_headers(client, pool) -> dict:
+    """PLT-35-fix(task-3850): `/admin/audit-log`가 이제 `require_break_glass
+    ("tenant_read")`를 요구해, `get_current_admin`만으로는 더 이상 충분하지
+    않다 -- 실제 MFA 설정/로그인 왕복으로 MFA_VERIFIED 토큰을 발급받는다
+    (tests/integration/test_admin_break_glass_router.py의 `_register_mfa_admin`과
+    동일 패턴)."""
+    email = _unique_email()
+    register_response = await client.post(
+        "/auth/register", json={"email": email, "password": STRONG_PASSWORD}
+    )
+    token = register_response.json()["data"]["access_token"]
+    headers = {"Authorization": f"Bearer {token}"}
+    me = await client.get("/users/me", headers=headers)
+    await _make_admin(pool, me.json()["data"]["user_id"])
+
+    setup_response = await client.post("/auth/mfa/setup", headers=headers)
+    secret = setup_response.json()["data"]["secret"]
+    verify_code = pyotp.totp.TOTP(secret).now()
+    await client.post("/auth/mfa/verify", json={"totp_code": verify_code}, headers=headers)
+
+    with mfa_clock_shifted(app, 31) as shifted_now:
+        login_code = totp_at(secret, shifted_now())
+        login_response = await client.post(
+            "/auth/login",
+            json={"email": email, "password": STRONG_PASSWORD, "totp_code": login_code},
+        )
+    mfa_token = login_response.json()["data"]["access_token"]
+    return {"Authorization": f"Bearer {mfa_token}"}
+
+
+async def _approved_break_glass_grant(client, requester_headers, approver_headers, *, scope):
+    request_response = await client.post(
+        "/admin/break-glass/grants",
+        json={"scope": scope, "reason": "test_admin_router", "ttl_minutes": 30},
+        headers=requester_headers,
+    )
+    grant_id = request_response.json()["data"]["id"]
+    await client.post(f"/admin/break-glass/grants/{grant_id}:approve", headers=approver_headers)
+    return grant_id
 
 
 async def _make_verifier(pool, user_id):
@@ -290,6 +335,49 @@ async def test_dispute_endpoints_require_admin_role(client):
     assert response.status_code == 403
 
 
+async def test_resolve_dispute_rejects_unknown_decision(client, pool):
+    """불변식 위반: `decision`은 `VALID_DECISIONS` 화이트리스트 밖 값을
+    명시적으로 거부해야 한다(임의 문자열을 그대로 저장하지 않는다)."""
+    admin_headers, admin_id = await _register(client)
+    await _make_admin(pool, admin_id)
+    dispute, _ = await _create_dispute(client, pool)
+    dispute_id = dispute["dispute_id"]
+
+    response = await client.post(
+        f"/admin/disputes/{dispute_id}/resolve",
+        json={"decision": "BOGUS_DECISION", "reason": "무효 결정"},
+        headers=admin_headers,
+    )
+
+    assert response.status_code == 409
+    assert response.json()["error_code"] == "STATE_INVALID_TRANSITION"
+
+
+async def test_resolve_dispute_twice_returns_conflict(client, pool):
+    """불변식: OPEN 상태인 분쟁만 처리 가능 — 이미 RESOLVED된 분쟁을
+    다시 resolve하면 409로 거부돼야 한다(중복 환불/상태 덮어쓰기 방지)."""
+    admin_headers, admin_id = await _register(client)
+    await _make_admin(pool, admin_id)
+    dispute, _ = await _create_dispute(client, pool)
+    dispute_id = dispute["dispute_id"]
+
+    first = await client.post(
+        f"/admin/disputes/{dispute_id}/resolve",
+        json={"decision": "DELISTED_AND_REFUND", "reason": "환불 처리"},
+        headers=admin_headers,
+    )
+    assert first.status_code == 200
+
+    second = await client.post(
+        f"/admin/disputes/{dispute_id}/resolve",
+        json={"decision": "DELISTED_AND_REFUND", "reason": "환불 처리"},
+        headers=admin_headers,
+    )
+
+    assert second.status_code == 409
+    assert second.json()["error_code"] == "STATE_INVALID_TRANSITION"
+
+
 async def test_admin_can_list_and_change_user_status(client, pool):
     admin_headers, admin_id = await _register(client)
     await _make_admin(pool, admin_id)
@@ -337,6 +425,38 @@ async def test_admin_cannot_set_deleted_status(client, pool):
     assert response.json()["error_code"] == "VALIDATION_INVALID_FIELD"
 
 
+async def test_admin_rejects_unknown_status_value(client, pool):
+    """불변식 위반: `UserStatusChangeRequest.status`는 자유 문자열이지만
+    `ADMIN_SETTABLE_STATUSES`에 없는 값은 서비스 레이어가 명시적으로
+    거부해야 한다 (DELETED만 막는 게 아니라 임의 오타/미정의 상태 전체)."""
+    admin_headers, admin_id = await _register(client)
+    await _make_admin(pool, admin_id)
+    _, target_id = await _register(client)
+
+    response = await client.patch(
+        f"/admin/users/{target_id}/status",
+        json={"status": "BOGUS_STATUS"},
+        headers=admin_headers,
+    )
+
+    assert response.status_code == 400
+    assert response.json()["error_code"] == "VALIDATION_INVALID_FIELD"
+
+
+async def test_admin_change_status_for_nonexistent_user_returns_404(client, pool):
+    admin_headers, admin_id = await _register(client)
+    await _make_admin(pool, admin_id)
+
+    response = await client.patch(
+        f"/admin/users/{uuid.uuid4()}/status",
+        json={"status": "SUSPENDED"},
+        headers=admin_headers,
+    )
+
+    assert response.status_code == 404
+    assert response.json()["error_code"] == "RESOURCE_NOT_FOUND"
+
+
 async def test_admin_can_suspend_seller(client, pool):
     admin_headers, admin_id = await _register(client)
     await _make_admin(pool, admin_id)
@@ -362,10 +482,18 @@ async def test_admin_can_list_audit_log(client, pool):
         headers=admin_headers,
     )
 
+    # PLT-35-fix(task-3850): 감사로그 조회는 이제 승인된 break-glass grant를
+    # 요구한다 -- 요청자 본인은 승인할 수 없으므로(I12) 별도 MFA admin이 승인한다.
+    reader_headers = await _mfa_verified_admin_headers(client, pool)
+    approver_headers = await _mfa_verified_admin_headers(client, pool)
+    grant_id = await _approved_break_glass_grant(
+        client, reader_headers, approver_headers, scope="tenant_read"
+    )
+
     response = await client.get(
         "/admin/audit-log",
         params={"action_type": "seller.suspended", "target_id": target_id},
-        headers=admin_headers,
+        headers={**reader_headers, "X-Break-Glass-Grant": grant_id},
     )
 
     assert response.status_code == 200
@@ -380,6 +508,37 @@ async def test_audit_log_requires_admin_role(client):
     response = await client.get("/admin/audit-log", headers=headers)
 
     assert response.status_code == 403
+
+
+async def test_audit_log_service_failure_propagates_as_error(client, pool):
+    """실패주입: `AuditLogReadService` 의존성이 예외를 던지면 그대로
+    전파돼야 한다 -- fail-closed 기본값(CLAUDE.md §3)이 지켜지는지 검증한다.
+    조용히 빈 목록/가짜 성공으로 위장하면 감사로그 열람 실패를 숨기게
+    된다."""
+    admin_headers, admin_id = await _register(client)
+    await _make_admin(pool, admin_id)
+
+    reader_headers = await _mfa_verified_admin_headers(client, pool)
+    approver_headers = await _mfa_verified_admin_headers(client, pool)
+    grant_id = await _approved_break_glass_grant(
+        client, reader_headers, approver_headers, scope="tenant_read"
+    )
+
+    class _FailingAuditLogService:
+        async def list_entries(self, **kwargs):
+            raise RuntimeError("simulated audit-log backend failure")
+
+    app.dependency_overrides[get_audit_log_read_service] = lambda: _FailingAuditLogService()
+    try:
+        response = await client.get(
+            "/admin/audit-log",
+            params={"action_type": "seller.suspended"},
+            headers={**reader_headers, "X-Break-Glass-Grant": grant_id},
+        )
+    finally:
+        app.dependency_overrides.pop(get_audit_log_read_service, None)
+
+    assert response.status_code == 500
 
 
 async def test_admin_can_view_and_confirm_pending_wallet_topup(client, pool):
@@ -505,6 +664,57 @@ async def test_pending_approval_requests_require_admin_role(client):
     assert response.status_code == 403
 
 
+async def test_approve_nonexistent_approval_request_returns_conflict(client, pool):
+    """불변식 위반: 존재하지 않는 approval request id도 `ApprovalError`로
+    잡혀 409(STATE_INVALID_TRANSITION)로 응답해야 한다 — 500으로 새거나
+    조용히 성공 취급하면 안 된다."""
+    admin_headers, admin_id = await _register(client)
+    await _make_admin(pool, admin_id)
+
+    response = await client.post(
+        "/admin/approval-requests/999999999/approve", headers=admin_headers
+    )
+
+    assert response.status_code == 409
+    assert response.json()["error_code"] == "STATE_INVALID_TRANSITION"
+
+
+async def test_reject_already_rejected_approval_request_returns_conflict(client, pool):
+    """불변식: PENDING 요청만 reject 가능 — 이미 REJECTED된 요청을 다시
+    reject하면 409로 거부돼야 한다(이중 처리 방지)."""
+    admin_headers, admin_id = await _register(client)
+    await _make_admin(pool, admin_id)
+    owner_headers, owner_id = await _register(client)
+    strategy_id, version = await _create_approved_strategy(pool, owner_id)
+    await _link_credential(pool, owner_id)
+
+    create_response = await client.post(
+        "/executions",
+        json={
+            "strategy_id": strategy_id,
+            "strategy_version": version,
+            "allocated_capital": "500",
+            "currency": "USDT",
+            "exchange": "bitget",
+            "mode": "LIVE",
+        },
+        headers=owner_headers,
+    )
+    request_id = create_response.json()["approval_request_id"]
+
+    first = await client.post(
+        f"/admin/approval-requests/{request_id}/reject", headers=admin_headers
+    )
+    assert first.status_code == 200
+
+    second = await client.post(
+        f"/admin/approval-requests/{request_id}/reject", headers=admin_headers
+    )
+
+    assert second.status_code == 409
+    assert second.json()["error_code"] == "STATE_INVALID_TRANSITION"
+
+
 async def test_admin_can_approve_live_execution_request(client, pool):
     admin_headers, admin_id = await _register(client)
     await _make_admin(pool, admin_id)
@@ -528,8 +738,7 @@ async def test_admin_can_approve_live_execution_request(client, pool):
 
     async with pool.acquire() as conn:
         await conn.execute(
-            "UPDATE approval_requests SET created_at = now() - interval '2 minutes' "
-            "WHERE id = $1",
+            "UPDATE approval_requests SET created_at = now() - interval '2 minutes' WHERE id = $1",
             request_id,
         )
 

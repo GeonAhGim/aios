@@ -2,15 +2,20 @@
 
 DoD: (1) 커버리지 하락 시 FAIL, (2) 사유 없는 미구현 TR은 존재할 수 없음(classify()가
 항상 4종 중 하나만 반환 — 여기서는 그 불변조건을 회귀 테스트로 고정한다), (3) 같은 입력에
-같은 바이트가 나온다. 전부 합성 데이터(tmp_path)로 검증 — 네트워크·실제 저장소 접근 없음.
+같은 바이트가 나온다, (4) 수치 처리량 단언(DEPTH 감사 task-2722의 유일한 미달 사유 보완 —
+docs/audit/DEPTH_L4_BR.md #1779). 전부 합성 데이터(tmp_path)로 검증 — 네트워크·실제
+저장소 접근 없음.
 """
 from __future__ import annotations
 
 import importlib.util
 import json
 import sys
+import time
+from collections.abc import Callable
 from pathlib import Path
 from types import ModuleType
+from typing import Any
 
 import pytest
 
@@ -193,6 +198,84 @@ def test_render_coverage_txt_is_byte_identical_for_same_input() -> None:
     first = kis_tr_coverage.render_coverage_txt(matrix)
     second = kis_tr_coverage.render_coverage_txt(matrix)
     assert first == second
+
+
+# ---------------------------------------------------------------------------
+# 수치 처리량 단언 — DEPTH 감사(task-2722, docs/audit/DEPTH_L4_BR.md #1779)의
+# 유일한 미달 사유: "No numeric performance/throughput assertion exists in the
+# suite". 절대 ms 임계값은 공유 CI 머신 속도차에 취약하므로(이 저장소의 기존
+# perf 회귀 테스트들이 실DB p95를 baseline 대비 상대 배율로 단언하는 것과 동일한
+# 이유), 같은 프로세스·같은 N에서 측정한 트리비얼 베이스라인 루프 대비 배율로
+# 단언한다 — 머신이 느리면 분자·분모가 같이 느려져 비율은 그대로다.
+# ---------------------------------------------------------------------------
+
+
+def _synthetic_reference(n: int) -> dict[str, Any]:
+    domains = (
+        "domestic_stock",
+        "domestic_bond",
+        "overseas_stock",
+        "domestic_futureoption",
+        "overseas_futureoption",
+    )
+    trs = [
+        {
+            "tr_id": f"TTTC{i:05d}U",
+            "domain": domains[i % len(domains)],
+            "label": f"[합성] TR {i}",
+            "source_path": f"synthetic_{i % 20}.py",
+        }
+        for i in range(n)
+    ]
+    return {
+        "source_repo": "koreainvestment/open-trading-api",
+        "source_ref": "main",
+        "source_commit": "deadbeef" * 5,
+        "fetched_at": "2026-09-06T00:00:00+00:00",
+        "trs": trs,
+    }
+
+
+def _min_elapsed_seconds(fn: Callable[[], None], repeats: int = 3) -> float:
+    times = []
+    for _ in range(repeats):
+        start = time.perf_counter()
+        fn()
+        times.append(time.perf_counter() - start)
+    return min(times)
+
+
+def test_build_matrix_and_render_throughput_within_normalized_budget() -> None:
+    n = 2000
+    reference = _synthetic_reference(n)
+    implemented_ids = [row["tr_id"] for row in reference["trs"][::2]]
+    adapter_source = "\n".join(f'tr_id = "{tr_id}"' for tr_id in implemented_ids)
+
+    def pipeline() -> None:
+        matrix = kis_tr_coverage.build_matrix(reference, adapter_source)
+        kis_tr_coverage.render_markdown(reference, matrix)
+        kis_tr_coverage.render_coverage_txt(matrix)
+
+    def baseline() -> None:
+        acc = 0
+        for i in range(n):
+            acc += len(str(i))
+        assert acc >= 0
+
+    pipeline_seconds = _min_elapsed_seconds(pipeline)
+    baseline_seconds = _min_elapsed_seconds(baseline)
+
+    assert baseline_seconds > 0.0
+    ratio = pipeline_seconds / baseline_seconds
+    # 측정 배율은 이 저장소 CI 머신에서 통상 65~85배(TR당 어댑터 소스 전체 부분
+    # 문자열 검색 비용). 300배는 그 위에 ~4배 여유를 두어 O(N^2) 위에 또 다른
+    # O(N) 스캔이 얹히는 회귀(예: 도메인별 재정렬을 행 루프 안으로 옮김, 마크다운
+    # 렌더링에서 문자열을 매 행마다 재결합)는 잡되 머신 잡음에는 흔들리지 않는다.
+    assert ratio < 300.0, (
+        f"kis_tr_coverage 파이프라인이 트리비얼 베이스라인 대비 {ratio:.1f}배 "
+        f"(N={n}, pipeline={pipeline_seconds:.4f}s, baseline={baseline_seconds:.4f}s) — "
+        "선형 스캔 위에 예상 밖의 추가 스캔이 얹힌 회귀로 의심됨"
+    )
 
 
 # ---------------------------------------------------------------------------

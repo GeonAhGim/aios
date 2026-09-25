@@ -13,6 +13,7 @@ import { useMutation } from "@tanstack/react-query";
 import { AppShell } from "../../components/layout/AppShell";
 import { ErrorMessage } from "../../components/ErrorMessage";
 import { ScriptEditor, type ScriptEditorMarker } from "../../components/ScriptEditor";
+import { useTranslation } from "react-i18next";
 
 // DSL-13a: DSL-12(POST /v1/scripts/compile, 선행 task-1535) 컴파일 미리보기
 // 화면. 컴파일 오류는 별도 스키마가 없다(오류가 하나의 code/line/col만
@@ -62,14 +63,15 @@ function createInitialPreviewState(): ScriptPreviewState {
 const EMPTY_OVERLAY_REGISTRY = createOverlayRegistry();
 
 function ScriptPreviewPanes({ registry }: { registry: IndicatorPluginRegistry }) {
+  const { t } = useTranslation();
   if (registry.entries.length === 0) return null;
   return (
     <div data-testid="script-preview-panes" className="space-y-1 rounded-md border border-border p-2 text-xs">
-      <p className="text-fg-muted">미리보기 서브패널 ({registry.entries.length})</p>
+      <p className="text-fg-muted">{t("legacy.scriptEditorPage.t1", { length: registry.entries.length })}</p>
       <ul className="space-y-0.5">
         {registry.entries.map((entry, index) => (
           <li key={entry.instanceId} data-testid={`script-preview-pane-${index}`}>
-            플롯 {index + 1}
+            {t("legacy.scriptEditorPage.t2")}{index + 1}
           </li>
         ))}
       </ul>
@@ -78,21 +80,22 @@ function ScriptPreviewPanes({ registry }: { registry: IndicatorPluginRegistry })
 }
 
 function CompilePreview({ result }: { result: CompileScriptView }) {
+  const { t } = useTranslation();
   return (
     <Alert tone="success">
       <p data-testid="compile-preview-hash" className="font-mono text-xs break-all">
-        스크립트 해시: {result.scriptHash}
+        {t("legacy.scriptEditorPage.t3", { scriptHash: result.scriptHash })}
       </p>
       <dl className="mt-2 grid grid-cols-2 gap-x-4 gap-y-1 text-xs">
-        <dt className="text-fg-muted">명령 수</dt>
+        <dt className="text-fg-muted">{t("legacy.scriptEditorPage.t4")}</dt>
         <dd>{result.instrCount}</dd>
-        <dt className="text-fg-muted">시리즈 수</dt>
+        <dt className="text-fg-muted">{t("legacy.scriptEditorPage.t5")}</dt>
         <dd>{result.resources.seriesCount}</dd>
-        <dt className="text-fg-muted">연산 수</dt>
+        <dt className="text-fg-muted">{t("legacy.scriptEditorPage.t6")}</dt>
         <dd>{result.resources.opCount}</dd>
-        <dt className="text-fg-muted">플롯 수</dt>
+        <dt className="text-fg-muted">{t("legacy.scriptEditorPage.t7")}</dt>
         <dd>{result.resources.plotCount}</dd>
-        <dt className="text-fg-muted">컴파일 시간</dt>
+        <dt className="text-fg-muted">{t("legacy.scriptEditorPage.t8")}</dt>
         <dd data-testid="compile-preview-elapsed">{result.elapsedMs}ms</dd>
       </dl>
     </Alert>
@@ -100,6 +103,7 @@ function CompilePreview({ result }: { result: CompileScriptView }) {
 }
 
 export function ScriptEditorPage({ compileScript = apiClient.compileScript.bind(apiClient) }: ScriptEditorPageProps) {
+  const { t } = useTranslation();
   const [source, setSource] = useState(DEFAULT_SOURCE);
   const mutation = useMutation({ mutationFn: compileScript });
   const [preview, setPreview] = useState<ScriptPreviewState>(createInitialPreviewState);
@@ -143,7 +147,7 @@ export function ScriptEditorPage({ compileScript = apiClient.compileScript.bind(
   return (
     <AppShell>
       <div className="max-w-3xl space-y-4">
-        <PageHeader title="스크립트 편집기" />
+        <PageHeader title={t("legacy.scriptEditorPage.title9")} />
 
         <ScriptEditor value={source} onChange={handleSourceChange} markers={markers} disabled={mutation.isPending} />
 

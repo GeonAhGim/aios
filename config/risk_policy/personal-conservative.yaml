@@ -1,0 +1,27 @@
+# PERSONAL 모드 보수 리스크 정책 번들 — task-2749 U-15.
+# ADR-2026-09-09-B Decision C 확장(사용자 개인 운영 곁가지). 1인 운영자가
+# 소액으로 직접 운용할 때 쓰는 기본값이며, 코드에 하드코딩하지 않고 이
+# 파일로 관리한다(8.2-B 원칙). 로더: src/foundation/risk/adapters/bundle_loader.py.
+
+name: personal-conservative
+version: 1
+
+# 포지션당 계좌 자본 대비 상한 (2%)
+position_pct_of_equity: 0.02
+
+# 일일 손실 이 비율(3%)에 도달하면 자동 kill 발동
+daily_loss_kill_pct: 0.03
+
+# 전체 계좌 자본 대비 최대 노출 상한 (30%)
+max_exposure_pct: 0.30
+
+# 거래소별 기본 소액 상한 (KRW 100만 상당) — exchange_notional_caps에
+# override가 없는 거래소는 이 값을 쓴다.
+default_notional_cap_krw: 1000000
+
+# 신규 심볼 화이트리스트 — 비어 있으면 어떤 심볼도 허용되지 않는다
+# (fail-closed). 운영자가 직접 거래할 심볼을 명시적으로 추가해야 한다.
+symbol_whitelist: []
+
+# 거래소코드 -> KRW 소액 상한 override. 예: {"bitget": 500000}
+exchange_notional_caps: {}

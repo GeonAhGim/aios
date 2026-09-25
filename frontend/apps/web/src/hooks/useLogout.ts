@@ -4,8 +4,17 @@
 // 함께 비우는 배선만 담당한다.
 //
 // task-427/413~415와의 충돌을 피하기 위해 http.ts·AiosApiClient에는
-// 아직 연결하지 않는다(이 leaf의 decision) — AppShell 등 실제 사용처
-// 교체는 후속 리프에서 한 번에 한다.
+// 아직 연결하지 않는다(이 leaf의 decision).
+//
+// task-3323: AppShell 등 실사용처의 "로그아웃 no-op" 감사 지적은 이 훅을
+// AppShell에 새로 배선하는 대신 @aios/shared-hooks(useAuth.ts)의 기존
+// useLogout 구현 자체를 이 파일과 같은 createLogoutClient 배선으로
+// 교체해 해소했다 — AppShell을 비롯한 수십 개 페이지 테스트가 이미
+// "@aios/shared-hooks" 모듈 전체를 목으로 대체하는 경계에 맞춰져 있어서,
+// 그 경계 안에서 실제 서버 호출을 추가하는 쪽이 새 QueryClientProvider
+// 배선을 모든 호출부 테스트에 추가하는 것보다 훨씬 작은 변경이었다.
+// 이 훅은 여전히 유효한 독립 진입점(예: logoutAll 등 다른 실사용처가
+// 필요해지면 재사용)으로 남겨둔다.
 import { createLogoutClient, type LogoutClient } from "@aios/api-client";
 import { useAuthStore } from "@aios/shared-hooks";
 import { useQueryClient } from "@tanstack/react-query";

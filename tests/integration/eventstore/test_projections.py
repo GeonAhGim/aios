@@ -14,25 +14,28 @@ DoD(1) 필드 단위 동일(불일치 1건이면 FAIL). DoD(2) 배선증명 nega
 이벤트만으로 재구성할 수 없다는 것이 단일 원천 시도에서 나온 발견이다 —
 자세한 근거는 `src/core/eventstore/projections/orders.py` 모듈 docstring.
 """
+
 from __future__ import annotations
 
 import hashlib
 from datetime import datetime, timezone
 from decimal import Decimal
+from time import perf_counter
 from uuid import uuid4
 
 import pytest
 
-from src.core.eventstore.projections import ledger as ledger_projection
 from src.core.eventstore.projections import orders as orders_projection
 from src.core.eventstore.projections import positions as positions_projection
 from src.data.models.base import AssetClass, Currency, Money
 from src.data.models.trading import OrderSide, OrderStatus
+from src.foundation.entities.domain.defaults import default_portfolio_id
 from src.foundation.evidence.adapters.postgres_repository import PostgresAuditEventRepository
 from src.foundation.ledger.adapters.postgres_balance_repository import PostgresBalanceRepository
 from src.foundation.ledger.adapters.postgres_journal_repository import PostgresJournalRepository
 from src.foundation.ledger.application.post_entry import post_entry
 from src.foundation.ledger.contracts.v1 import AccountType, LedgerEvent, LedgerEventType, UserSub
+from src.foundation.ledger.domain import eventstore_projection as ledger_projection
 from src.foundation.ledger.domain.chart_of_accounts import user_account
 from src.foundation.positions.adapters.postgres_journal_repository import (
     PostgresJournalRepository as PositionsJournalRepository,
@@ -41,7 +44,13 @@ from src.foundation.positions.adapters.postgres_snapshot_repository import (
     PostgresSnapshotRepository,
 )
 from src.foundation.positions.application.record_fill import record_fill
-from src.foundation.positions.contracts.v1 import CostMethod, RecordFillCommand
+from src.foundation.positions.contracts.v1 import (
+    CostMethod,
+    JournalEntryType,
+    PositionJournalEntryView,
+    RecordFillCommand,
+)
+from src.foundation.positions.domain import journal_rules
 from src.foundation.positions.domain.position_key import PositionKey
 from src.services.oms.adapters.fills_repository import FillsRepository
 from src.services.oms.adapters.order_events_repository import PostgresOrderEventRepository
@@ -86,26 +95,44 @@ async def _run_three_transitions(pool) -> tuple:
     async with pool.acquire() as conn:
         order_id = await insert_order(conn, user_id, status="CREATED")
         await repo.transition(
-            conn, order_id=order_id, expected_status=OrderStatus.CREATED, expected_version=0,
-            new_status=OrderStatus.VALIDATED, patch={},
+            conn,
+            order_id=order_id,
+            expected_status=OrderStatus.CREATED,
+            expected_version=0,
+            new_status=OrderStatus.VALIDATED,
+            patch={},
             event=_order_event(
-                order_id, from_status=OrderStatus.CREATED, to_status=OrderStatus.VALIDATED,
+                order_id,
+                from_status=OrderStatus.CREATED,
+                to_status=OrderStatus.VALIDATED,
                 event="VALIDATED",
             ),
         )
         await repo.transition(
-            conn, order_id=order_id, expected_status=OrderStatus.VALIDATED, expected_version=1,
-            new_status=OrderStatus.SUBMITTED, patch={},
+            conn,
+            order_id=order_id,
+            expected_status=OrderStatus.VALIDATED,
+            expected_version=1,
+            new_status=OrderStatus.SUBMITTED,
+            patch={},
             event=_order_event(
-                order_id, from_status=OrderStatus.VALIDATED, to_status=OrderStatus.SUBMITTED,
+                order_id,
+                from_status=OrderStatus.VALIDATED,
+                to_status=OrderStatus.SUBMITTED,
                 event="SUBMITTED",
             ),
         )
         await repo.transition(
-            conn, order_id=order_id, expected_status=OrderStatus.SUBMITTED, expected_version=2,
-            new_status=OrderStatus.ACKNOWLEDGED, patch={},
+            conn,
+            order_id=order_id,
+            expected_status=OrderStatus.SUBMITTED,
+            expected_version=2,
+            new_status=OrderStatus.ACKNOWLEDGED,
+            patch={},
             event=_order_event(
-                order_id, from_status=OrderStatus.SUBMITTED, to_status=OrderStatus.ACKNOWLEDGED,
+                order_id,
+                from_status=OrderStatus.SUBMITTED,
+                to_status=OrderStatus.ACKNOWLEDGED,
                 event="ACKNOWLEDGED",
             ),
         )
@@ -190,18 +217,30 @@ async def _run_two_fills_via_inbox(pool) -> tuple:
             "SELECT client_order_id FROM orders WHERE order_id = $1", order_id
         )
         await repo.transition(
-            conn, order_id=order_id, expected_status=OrderStatus.CREATED, expected_version=0,
-            new_status=OrderStatus.VALIDATED, patch={},
+            conn,
+            order_id=order_id,
+            expected_status=OrderStatus.CREATED,
+            expected_version=0,
+            new_status=OrderStatus.VALIDATED,
+            patch={},
             event=_order_event(
-                order_id, from_status=OrderStatus.CREATED, to_status=OrderStatus.VALIDATED,
+                order_id,
+                from_status=OrderStatus.CREATED,
+                to_status=OrderStatus.VALIDATED,
                 event="VALIDATED",
             ),
         )
         await repo.transition(
-            conn, order_id=order_id, expected_status=OrderStatus.VALIDATED, expected_version=1,
-            new_status=OrderStatus.SUBMITTED, patch={},
+            conn,
+            order_id=order_id,
+            expected_status=OrderStatus.VALIDATED,
+            expected_version=1,
+            new_status=OrderStatus.SUBMITTED,
+            patch={},
             event=_order_event(
-                order_id, from_status=OrderStatus.VALIDATED, to_status=OrderStatus.SUBMITTED,
+                order_id,
+                from_status=OrderStatus.VALIDATED,
+                to_status=OrderStatus.SUBMITTED,
                 event="SUBMITTED",
             ),
         )
@@ -266,13 +305,14 @@ async def _record_two_fills(pool) -> tuple:
     account_id = await create_pos_account(pool, tenant_id)
     position_key = str(
         PositionKey(
-            venue="TESTVENUE", instrument_id=f"INST{uuid4().hex[:8]}", strategy_id="default",
-            execution_id="paper", portfolio_id=uuid4(),
+            venue="TESTVENUE",
+            instrument_id=f"INST{uuid4().hex[:8]}",
+            strategy_id="default",
+            execution_id="paper",
+            portfolio_id=default_portfolio_id(tenant_id),
         )
     )
-    await open_position(
-        pool, tenant_id=tenant_id, account_id=account_id, position_key=position_key
-    )
+    await open_position(pool, tenant_id=tenant_id, account_id=account_id, position_key=position_key)
     order_id = uuid4()
 
     async def _fill(side: OrderSide, quantity: Decimal, price: Decimal, fill_seq: int):
@@ -280,13 +320,23 @@ async def _record_two_fills(pool) -> tuple:
             return await record_fill(
                 conn,
                 RecordFillCommand(
-                    tenant_id=tenant_id, account_id=account_id, position_key=position_key,
-                    order_id=order_id, fill_seq=fill_seq, side=side, quantity=quantity,
-                    price=Money(amount=price, currency=Currency.KRW), fee=None,
-                    occurred_at=_OCCURRED_AT, trace_id=uuid4(),
+                    tenant_id=tenant_id,
+                    account_id=account_id,
+                    position_key=position_key,
+                    order_id=order_id,
+                    fill_seq=fill_seq,
+                    side=side,
+                    quantity=quantity,
+                    price=Money(amount=price, currency=Currency.KRW),
+                    fee=None,
+                    occurred_at=_OCCURRED_AT,
+                    trace_id=uuid4(),
                 ),
-                asset_class=AssetClass.CRYPTO, journal=journal, snapshots=snapshots,
-                audit=audit, clock=_clock,
+                asset_class=AssetClass.CRYPTO,
+                journal=journal,
+                snapshots=snapshots,
+                audit=audit,
+                clock=_clock,
             )
 
     await _fill(OrderSide.BUY, Decimal("10"), Decimal("100"), 1)
@@ -306,7 +356,9 @@ async def test_positions_projection_matches_current_snapshot_after_full_replay(p
     position_key, entries, row = await _record_two_fills(pool)
 
     folded = positions_projection.project(
-        entries, position_key=position_key, cost_method=CostMethod.FIFO,
+        entries,
+        position_key=position_key,
+        cost_method=CostMethod.FIFO,
         asset_class=AssetClass.CRYPTO,
     )
 
@@ -325,11 +377,146 @@ async def test_positions_projection_detects_dropped_entry(pool):
     assert len(entries) == 2
 
     dropped = positions_projection.project(
-        entries[:1], position_key=position_key, cost_method=CostMethod.FIFO,
+        entries[:1],
+        position_key=position_key,
+        cost_method=CostMethod.FIFO,
         asset_class=AssetClass.CRYPTO,
     )
 
     assert dropped.quantity != row["quantity"]
+
+
+async def test_positions_projection_rejects_fill_entry_missing_price(pool):
+    """실패 주입(D2): 이벤트가 빠진 게 아니라, 실제로 존재하는 FILL 엔트리의
+    `price` 필드가 백엔드 회귀(예: 직렬화 버그로 원본 체결가 유실)로 손상된
+    경우를 흉내낸다 — `apply_one`이 조용히 스킵하지 않고 ValueError로
+    드러내는지 확인한다(늘 통과하는 대조가 아님)."""
+    position_key, entries, _row = await _record_two_fills(pool)
+    corrupted = entries[0].model_copy(update={"price": None})
+
+    with pytest.raises(ValueError, match="price"):
+        positions_projection.project(
+            [corrupted],
+            position_key=position_key,
+            cost_method=CostMethod.FIFO,
+            asset_class=AssetClass.CRYPTO,
+        )
+
+
+async def _record_three_fills(pool) -> tuple:
+    """`_record_two_fills`와 같은 계좌 설정에 체결을 하나 더 쌓아, 시퀀스
+    가운데(2번)를 건너뛴 재생이 `SequenceConflictError`로 실제 발동하는지
+    볼 수 있는 3건짜리 저널을 만든다."""
+    journal = PositionsJournalRepository(pool)
+    snapshots = PostgresSnapshotRepository(pool)
+    audit = PostgresAuditEventRepository(pool)
+    tenant_id = await create_test_tenant(pool)
+    account_id = await create_pos_account(pool, tenant_id)
+    position_key = str(
+        PositionKey(
+            venue="TESTVENUE",
+            instrument_id=f"INST{uuid4().hex[:8]}",
+            strategy_id="default",
+            execution_id="paper",
+            portfolio_id=default_portfolio_id(tenant_id),
+        )
+    )
+    await open_position(pool, tenant_id=tenant_id, account_id=account_id, position_key=position_key)
+    order_id = uuid4()
+
+    async def _fill(side: OrderSide, quantity: Decimal, price: Decimal, fill_seq: int):
+        async with pool.acquire() as conn, conn.transaction():
+            return await record_fill(
+                conn,
+                RecordFillCommand(
+                    tenant_id=tenant_id,
+                    account_id=account_id,
+                    position_key=position_key,
+                    order_id=order_id,
+                    fill_seq=fill_seq,
+                    side=side,
+                    quantity=quantity,
+                    price=Money(amount=price, currency=Currency.KRW),
+                    fee=None,
+                    occurred_at=_OCCURRED_AT,
+                    trace_id=uuid4(),
+                ),
+                asset_class=AssetClass.CRYPTO,
+                journal=journal,
+                snapshots=snapshots,
+                audit=audit,
+                clock=_clock,
+            )
+
+    await _fill(OrderSide.BUY, Decimal("10"), Decimal("100"), 1)
+    await _fill(OrderSide.SELL, Decimal("4"), Decimal("120"), 2)
+    await _fill(OrderSide.SELL, Decimal("2"), Decimal("130"), 3)
+
+    async with pool.acquire() as conn:
+        entries = await journal.list_for(conn, position_key)
+    return position_key, entries
+
+
+async def test_positions_projection_rejects_sequence_gap_from_dropped_middle_entry(pool):
+    """게이트 적색 재현(D2): §4.3 연속성 불변을 강제하는 `journal_rules.
+    validate_sequence`(POS_SEQUENCE_CONFLICT)가 실제로 배선돼 있음을, 값
+    분기가 아니라 그 가드가 직접 던지는 예외로 증명한다 — 가운데 엔트리
+    (2번)를 빼고 1·3번만 재생하면 3번의 sequence_no=3이 기대값(prev+1=2)과
+    달라 즉시 거부된다."""
+    position_key, entries = await _record_three_fills(pool)
+    assert [e.sequence_no for e in entries] == [1, 2, 3]
+
+    with pytest.raises(journal_rules.SequenceConflictError):
+        positions_projection.project(
+            [entries[0], entries[2]],
+            position_key=position_key,
+            cost_method=CostMethod.FIFO,
+            asset_class=AssetClass.CRYPTO,
+        )
+
+
+@pytest.mark.perf
+def test_positions_projection_folds_ten_thousand_fee_entries_under_budget() -> None:
+    """성능 단언(D2): `project()`는 순수 fold(모듈 docstring, I/O 없음)라 DB
+    없이도 측정할 수 있다 — `apply_one`이 엔트리마다 로트 전체를 다시
+    스캔하는 등 O(n) 밖의 비용을 갖고 있지 않은지 10,000건으로 상한을
+    건다."""
+    position_key = f"perf-{uuid4().hex}"
+    now = datetime.now(timezone.utc)
+    entries = [
+        PositionJournalEntryView(
+            id=seq,
+            position_key=position_key,
+            sequence_no=seq,
+            entry_type=JournalEntryType.FEE,
+            qty_delta=Decimal("0"),
+            price=None,
+            fee=Money(amount=Decimal("0.01"), currency=Currency.KRW),
+            realized_pnl_base=Decimal("0"),
+            fx_rate=None,
+            fx_source=None,
+            source_event_type="fee",
+            source_event_id=f"fee-{seq}",
+            idempotency_key=f"fee:{seq}",
+            prev_hash=None,
+            entry_hash="e" * 64,
+            occurred_at=now,
+            recorded_at=now,
+        )
+        for seq in range(1, 10_001)
+    ]
+
+    started = perf_counter()
+    folded = positions_projection.project(
+        entries,
+        position_key=position_key,
+        cost_method=CostMethod.FIFO,
+        asset_class=AssetClass.CRYPTO,
+    )
+    elapsed_ms = (perf_counter() - started) * 1000
+
+    assert folded.fees_base == Decimal("100.00")
+    assert elapsed_ms < 800, f"10,000건 fold가 {elapsed_ms:.1f}ms 걸림(예산 800ms)"
 
 
 # ----------------------------------------------------------------ledger ---
@@ -347,12 +534,16 @@ async def _create_ledger_test_account(
         account_id = await conn.fetchval(
             "INSERT INTO ledger_account (account_code, account_type, currency, allow_negative) "
             "VALUES ($1, $2, $3, $4) RETURNING account_id",
-            code, kind.value, Currency.KRW.value, allow_negative,
+            code,
+            kind.value,
+            Currency.KRW.value,
+            allow_negative,
         )
         await conn.execute(
             "INSERT INTO ledger_balance (account_id, allow_negative, last_entry_seq) "
             "VALUES ($1, $2, 0)",
-            account_id, allow_negative,
+            account_id,
+            allow_negative,
         )
     return code
 
@@ -392,7 +583,12 @@ async def _post_two_manual_adjustments(pool) -> tuple:
         )
         async with pool.acquire() as conn, conn.transaction():
             return await post_entry(
-                conn, event, journal=journal, balances=balances, audit=audit, clock=_clock,
+                conn,
+                event,
+                journal=journal,
+                balances=balances,
+                audit=audit,
+                clock=_clock,
             )
 
     await _adjust(Decimal("10.00"))

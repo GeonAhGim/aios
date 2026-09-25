@@ -1,5 +1,6 @@
 """ChartingRepository port. domain은 이 Protocol만 알고, 실제 구현(adapters/)은
 모른다(71번 §4)."""
+
 from __future__ import annotations
 
 from typing import Any, Protocol
@@ -35,16 +36,21 @@ class ChartingRepository(Protocol):
         self,
         layout_id: UUID,
         *,
+        tenant_id: UUID,
         expected_revision: int,
         name: str | None,
         layout_state: dict[str, Any] | None,
     ) -> ChartLayout:
         """105번 표준 조건부 UPDATE — `expected_revision` 불일치는
-        `ConcurrencyConflictError`(409)."""
+        `ConcurrencyConflictError`(409). `tenant_id` is also carried in the
+        WHERE clause, defending again at this layer independent of the
+        caller's ownership check."""
         ...
 
-    async def delete_layout(self, layout_id: UUID) -> None:
-        """`chart_drawing_set`은 FK `ON DELETE CASCADE`로 함께 지워진다."""
+    async def delete_layout(self, layout_id: UUID, *, tenant_id: UUID) -> None:
+        """`chart_drawing_set`은 FK `ON DELETE CASCADE`로 함께 지워진다.
+        `tenant_id` is also carried in the WHERE clause, defending again at
+        this layer."""
         ...
 
     async def get_drawing_set(self, layout_id: UUID) -> ChartDrawingSet | None: ...
@@ -80,4 +86,8 @@ class ChartingRepository(Protocol):
         self, tenant_id: UUID
     ) -> tuple[ChartIndicatorTemplate, ...]: ...
 
-    async def delete_indicator_template(self, template_id: UUID) -> None: ...
+    async def delete_indicator_template(self, template_id: UUID, *, tenant_id: UUID) -> None:
+        """`tenant_id` is also carried in the WHERE clause, defending again at
+        this layer independent of the caller's ownership check — same
+        principle as `delete_layout()`."""
+        ...

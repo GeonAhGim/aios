@@ -5,7 +5,7 @@
 - 리프: BT-14 (`docs/specs/L4_analytics_authoring_backtest_marketplace_v1.0.md` §9.9)
 - 근거: ADR-2026-09-05-A D1(OSS 어댑터 층, 카피레프트·상업 사용 제한 라이선스 코드 차용 금지) + ADR-2026-09-06-G §4(라이선스 게이트 정정 — "배지만 보면 통과하는 함정", Apache-2.0 + Commons Clause를 명시적 거부 등급으로 추가)
 - 형식: CH-0(`CHART_ENGINE_FORK_EVAL.md`, b0826da) 채점표 형식과 IND-9(`docs/design/INDICATOR_OSS_EVAL.md`, task-1536 da52f3c)의 재사용 선례를 따른다. BT-14는 스코프가 좁아(후보 4종, 전부 §C 게이트가 1차 결정 요인) 가중치 채점표 대신 후보별 라이선스 원문 인용 표 + 판정으로 축소한다.
-- 범위: **문서만.** 코드 변경 0, `pyproject.toml` 의존성 추가 0. BT-15~17은 이 문서가 CA 확정 전에는 배정하지 않는다.
+- 범위: **문서만.** 코드 변경 0, `pyproject.toml` 의존성 추가 0. BT-15~17은 이 문서가 CA 확정 전에는 배정하지 않는다. task-3048 deepen: `src/foundation/backtest/domain/vector_oss_eval_gate.py`가 §1 코드 차용 거부 후보(vectorbt·vectorbtpro·pybroker)·§4 numpy-only 결론을 실제 `pyproject.toml` 선언 의존성과 대조하는 순수 게이트를 추가했다 — 이 채점 자체를 바꾸는 기능은 아니며, 향후 누군가 이 문서가 거부한 패키지나 §4가 유보한 numba를 의존성에 추가하면 기계적으로 적색이 되게 하는 회귀 방지선이다. CLI: `python scripts/check_backtest_vector_oss_eval.py`(OPS-42: CI 필수 게이트 미승격·warn 후보).
 - 확인일: 2026-09-08. 모든 라이선스 원문은 각 프로젝트의 GitHub 저장소 `raw.githubusercontent.com` 원문 파일 또는 PyPI 배포 메타데이터에서 직접 읽었다(배지·README 요약 미사용). vectorbtpro는 공개 저장소가 없는 초대제 상용 제품이라 공식 사이트의 `Software License` 페이지(`vectorbt.pro/terms/software-license/`) 원문을 인용했다. 확인하지 못한 항목은 "미확인"으로 남기고 추정하지 않았다.
 
 ## 0. 전제 — 왜 4종인가

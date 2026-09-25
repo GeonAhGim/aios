@@ -1,21 +1,23 @@
-"""13.1/13.2 — 마켓플레이스 리스팅의 "3개월 Paper Trading 이력" 게이트(9.5-A 원칙).
+"""13.1/13.2 — "3-month Paper Trading history" gate for marketplace listings (9.5-A principle).
 
-listing_service.py의 verify_paper_trading_eligibility DI 콜백 구현체.
-strategy_executions(FD-16)에 mode='PAPER'로 최소 3개월 전에 시작된 실행이
-있는지를 실제로 조회한다 — 해당하는 실행이 없으면(아직 시작 안 했거나
-3개월 미만) 거부한다(fail-closed). 이전 구현(_always_eligible)은 FD-16이
-없던 시절 무조건 True를 반환했으나, 지금은 테이블이 존재하므로 실제
-이력을 확인한다.
+Implementation of the verify_paper_trading_eligibility DI callback in
+listing_service.py. Actually queries strategy_executions (FD-16) to confirm
+that at least one execution started at least 3 months ago with mode='PAPER'
+— if no such execution exists (not yet started or less than 3 months), it
+rejects the listing (fail-closed). The previous implementation (_always_eligible)
+always returned True before FD-16 existed, but now that the table exists, it
+verifies actual history.
 
-task-1803(리뷰 task-1799 REJECT 후속) 결함 수정 2건:
-(1) 조회 자체가 strategy_id+strategy_version만 필터해 타 사용자(리스팅을
-    시도하는 판매자가 아닌 다른 유저)의 PAPER 이력으로도 게이트를 통과할
-    수 있었다 — strategy_executions.user_id = seller_user_id를 추가해
-    리스팅을 시도하는 판매자 본인의 이력만 인정한다.
-(2) DB 조회 예외(asyncpg.PostgresError/OSError)를 잡지 않아 장애 시 500이
-    그대로 전파되고 "거부"가 보장되지 않았다 — 이제 예외를 잡아 False
-    (거부)를 반환하고, 구조화 로그(자격증명·쿼리 원문 없이 strategy_id/
-    strategy_version/seller_user_id만)를 남긴다(fail-closed).
+Two defect fixes from task-1803 (follow-up to review task-1799 REJECT):
+(1) The query alone only filtered by strategy_id+strategy_version, allowing the
+    gate to pass using PAPER history from other users (not the seller attempting
+    the listing) — added strategy_executions.user_id = seller_user_id to only
+    accept the seller's own history.
+(2) DB query exceptions (asyncpg.PostgresError/OSError) were not caught, so
+    failures propagated as 500 errors and "rejection" was not guaranteed — now
+    catches exceptions to return False (rejection) and logs structured logs
+    (strategy_id/strategy_version/seller_user_id only, no credentials or query
+    text) (fail-closed).
 """
 from __future__ import annotations
 
@@ -32,14 +34,14 @@ _MIN_PAPER_TRADING_MONTHS = 3
 async def check_paper_trading_eligibility(
     pool: asyncpg.Pool, strategy_id: str, strategy_version: str, seller_user_id: UUID
 ) -> bool:
-    """listing_service.VerifyEligibilityFn 시그니처(strategy_id, strategy_version,
-    seller_user_id) -> bool에 맞춰 app 조립 단계에서 functools.partial(check_
-    paper_trading_eligibility, pool)로 바인딩해 사용한다(risk_matching.check_
-    purchase_risk_warning과 동일 패턴).
+    """Binds check_paper_trading_eligibility(pool) via functools.partial at app
+    assembly time to match the listing_service.VerifyEligibilityFn signature
+    (strategy_id, strategy_version, seller_user_id) -> bool (same pattern as
+    risk_matching.check_purchase_risk_warning).
 
-    조회 실패는 예외를 전파하지 않고 False(거부)로 fail-closed한다 —
-    DB 장애가 "이력 확인 불가"를 "이력 있음"으로 오인시켜 미검증 전략의
-    리스팅을 통과시키면 안 되기 때문이다.
+    Query failure does not propagate the exception — it fails closed with False
+    (rejection). A DB outage must not misinterpret "history unavailable" as
+    "history exists" and let an unverified strategy pass the listing gate.
     """
     try:
         async with pool.acquire() as conn:
@@ -57,7 +59,7 @@ async def check_paper_trading_eligibility(
             )
     except (asyncpg.PostgresError, OSError):
         logger.exception(
-            "check_paper_trading_eligibility: 조회 실패로 fail-closed 거부 "
+            "check_paper_trading_eligibility: fail-closed rejection due to query failure "
             "(strategy_id=%s, strategy_version=%s, seller_user_id=%s)",
             strategy_id,
             strategy_version,

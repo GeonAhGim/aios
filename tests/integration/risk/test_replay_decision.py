@@ -9,6 +9,7 @@ WORM 우회(트리거 비활성화 후 직접 UPDATE)로 `reason_codes`를 바�
 재구현 0 — `replay_decision.py`는 `Decimal`도, 숫자 리터럴 비교도 갖지 않는다
 (evaluator 호출 결과만 대조).
 """
+
 from __future__ import annotations
 
 import re
@@ -19,6 +20,8 @@ import asyncpg
 import pytest
 from dotenv import dotenv_values
 
+from src.core.observability.metric_names import CORE_RISK_REPLAY_MISMATCH_COUNT_TOTAL
+from src.core.observability.metrics_registry import get_registry
 from src.core.risk.decision import GateKind
 from src.core.risk.evaluator import evaluate
 from src.core.risk.policy_bundle import BundleState, RiskRuleBundle
@@ -29,7 +32,11 @@ from src.foundation.risk_gate.adapters.postgres_decision_repository import (
     DecisionCorruptError,
     PostgresDecisionRepository,
 )
-from src.foundation.risk_gate.application.replay_decision import BundleNotFoundError, replay
+from src.foundation.risk_gate.application.replay_decision import (
+    INTEGRITY_RISK_REPLAY_MISMATCH,
+    BundleNotFoundError,
+    replay,
+)
 from src.tools import risk_replay
 from tests.integration.conftest import create_test_tenant
 from tests.unit.core.risk._rule_test_helpers import NOW, POLICY, sample_inputs
@@ -102,8 +109,7 @@ async def _tamper_reason_codes(pool: asyncpg.Pool, decision_id) -> None:
         await conn.execute(f"ALTER TABLE risk_decision DISABLE TRIGGER {_WORM_TRIGGER}")
         try:
             await conn.execute(
-                "UPDATE risk_decision SET reason_codes = ARRAY['TAMPERED'] "
-                "WHERE decision_id = $1",
+                "UPDATE risk_decision SET reason_codes = ARRAY['TAMPERED'] WHERE decision_id = $1",
                 decision_id,
             )
         finally:
@@ -149,9 +155,72 @@ async def test_replay_detects_tampered_reason_codes(pool, decision_repo, bundle_
 
     assert result.match is False
     assert "reason_codes" in result.diff
+    assert result.error_code == INTEGRITY_RISK_REPLAY_MISMATCH
 
     exit_code = await risk_replay._run(decision_id=decision.decision_id, since=None)
     assert exit_code == 2
+
+
+async def test_replay_match_leaves_error_code_none(pool, decision_repo, bundle_repo):
+    """`error_code`는 추가전용 필드 — 일치 시에는 None이라 기존 match/diff 소비자에
+    영향을 주지 않는다."""
+    tenant_id = await create_test_tenant(pool)
+    decision = await _seed_decision(pool, decision_repo, bundle_repo, tenant_id=tenant_id)
+
+    result = await replay(decision_repo, bundle_repo, decision_id=decision.decision_id)
+
+    assert result.match is True
+    assert result.error_code is None
+
+
+async def test_replay_mismatch_increments_replay_mismatch_counter(pool, decision_repo, bundle_repo):
+    """리뷰 3469 결함(2) — L113 `counter.inc()`를 검증하는 테스트가 0건이었다.
+    불일치 1회당 `aios.core_risk.replay_mismatch.count_total`이 정확히 1만큼
+    증가하는지 실측한다(전역 레지스트리라 절대값이 아닌 델타로 비교)."""
+    tenant_id = await create_test_tenant(pool)
+    decision = await _seed_decision(pool, decision_repo, bundle_repo, tenant_id=tenant_id)
+    await _tamper_reason_codes(pool, decision.decision_id)
+
+    counter = get_registry().counter(CORE_RISK_REPLAY_MISMATCH_COUNT_TOTAL)
+    before = sum(counter.samples().values())
+
+    result = await replay(decision_repo, bundle_repo, decision_id=decision.decision_id)
+
+    assert result.match is False
+    after = sum(counter.samples().values())
+    assert after == before + 1.0
+
+
+async def test_replay_match_does_not_increment_replay_mismatch_counter(
+    pool, decision_repo, bundle_repo
+):
+    tenant_id = await create_test_tenant(pool)
+    decision = await _seed_decision(pool, decision_repo, bundle_repo, tenant_id=tenant_id)
+
+    counter = get_registry().counter(CORE_RISK_REPLAY_MISMATCH_COUNT_TOTAL)
+    before = sum(counter.samples().values())
+
+    result = await replay(decision_repo, bundle_repo, decision_id=decision.decision_id)
+
+    assert result.match is True
+    after = sum(counter.samples().values())
+    assert after == before
+
+
+async def test_cli_mismatch_line_carries_error_code(pool, decision_repo, bundle_repo, capsys):
+    """결함(1) — CLI stderr가 불일치를 `INTEGRITY_RISK_REPLAY_MISMATCH`로
+    식별 가능해야 한다(구조화 로그 소비자가 diff 파싱 없이 코드로 필터링)."""
+    tenant_id = await create_test_tenant(pool)
+    decision = await _seed_decision(pool, decision_repo, bundle_repo, tenant_id=tenant_id)
+    await _tamper_reason_codes(pool, decision.decision_id)
+
+    exit_code = await risk_replay._run(decision_id=decision.decision_id, since=None)
+
+    assert exit_code == 2
+    captured = capsys.readouterr()
+    assert f"MISMATCH {decision.decision_id} error_code={INTEGRITY_RISK_REPLAY_MISMATCH}" in (
+        captured.err
+    )
 
 
 async def test_cli_since_reports_only_the_tampered_decision(

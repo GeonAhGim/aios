@@ -1,23 +1,23 @@
-"""FD-14(신설) — 가격/지표 알림 (AlertService).
+"""FD-14 (new) — Price/indicator alerts (AlertService).
 
-Spec: 사용자 요청(2026-09-01) — "가격/지표 알림" 기능. 조건 스키마는
-condition_compiler.py/preview_service.py가 이미 쓰는 지표+연산자+임계값
-계약을 그대로 재사용한다(condition_evaluation.py::compare_value 공유).
+Spec: User request (2026-09-01) — "price/indicator alert" feature. The condition
+schema reuses the indicator+operator+threshold contract already in use by
+condition_compiler.py/preview_service.py (shares condition_evaluation.py::compare_value).
 
-편차: 이 시스템에는 아직 백그라운드 스케줄러가 없다(main.py의
-heartbeat 루프가 유일한 선례) — evaluate_all_active()를 그 루프와 같은
-패턴(주기적 asyncio.sleep 루프, main.py lifespan)으로 호출한다. 알림
-평가는 사용자별 거래소 자격증명을 통해 캔들을 가져오는데, 자격증명이
-해지됐거나 일시적으로 조회에 실패해도 그 알림 하나만 이번 주기에
-건너뛰고 다음 주기에 재시도한다 — 다른 사용자의 알림 평가를 막으면 안
-되므로 루프 전체를 실패시키지 않는다(보안/금전 이벤트가 아니라 감사
-로그 대상은 아님).
+Deviation: This system has no background scheduler yet (main.py's
+heartbeat loop is the only precedent) — call evaluate_all_active() in the same
+pattern as that loop (periodic asyncio.sleep loop, main.py lifespan). Alert
+evaluation fetches candles via per-user exchange credentials; if a credential
+has been revoked or temporarily fails to query, only that one alert is skipped
+this cycle and retried next cycle — the loop must not fail entirely, because
+other users' alert evaluations must not be blocked (not a security/monetary
+event, not an audit-log target).
 
-알림이 발동하면 FD-17(알림 게이트웨이)의 "alert.triggered" 이벤트로
-발행한다 — 실제 이메일/푸시 발송기가 아직 없어(다른 FD-17 이벤트와 동일)
-발송 자체는 여전히 "실패"로 정직하게 기록되지만, 그 발동 사실은
-triggered_at/triggered_value로 DB에 남아 사용자가 알림 목록 화면에서
-확인할 수 있다.
+When an alert fires, it publishes an "alert.triggered" event to FD-17 (alert
+gateway) — since the actual email/push sender is not yet implemented (same as
+other FD-17 events), the send itself is honestly recorded as "failed", but the
+fire fact remains in the DB via triggered_at/triggered_value so users can see
+it on the alert list screen.
 """
 from __future__ import annotations
 
@@ -36,11 +36,11 @@ from src.services.condition_evaluation import Operator, compare_value
 from src.services.credential_resolver import CredentialNotFoundError, CredentialResolver
 
 DEFAULT_CANDLE_LIMIT = 200
-# 레드팀 #24 — 사용자당 ACTIVE 알림 상한. evaluate_all_active()가 전체
-# 알림을 순차 for 루프로 도는 구조라, 한 사용자가 대량 생성하면 그
-# 사용자 몫만큼 매 평가 주기의 처리 시간이 늘어나 다른 모든 사용자의
-# 평가도 함께 지연된다 — Draft 값(정책 문서에 정식 근거는 아직 없음,
-# DoS 방지 목적의 안전한 상한).
+# Red team #24 — Max ACTIVE alerts per user. Since evaluate_all_active() iterates
+# all alerts in a sequential for loop, if one user creates a large number, their
+# share increases processing time each evaluation cycle and delays evaluation for
+# all other users — a safe upper limit (Draft value; no formal policy doc basis yet,
+# DoS prevention purpose).
 MAX_ACTIVE_ALERTS_PER_USER = 50
 
 logger = logging.getLogger(__name__)
@@ -49,14 +49,14 @@ PublishFn = Callable[[str, dict[str, Any]], Awaitable[None]]
 
 
 class AlertError(Exception):
-    """FD-14 생성 실패(활성 알림 상한 도달 등) — VALIDATION_INVALID_FIELD(400)."""
+    """FD-14 creation failure (active alert limit reached, etc.) — VALIDATION_INVALID_FIELD(400)."""
 
 
 class AlertNotFoundError(AlertError):
-    """취소하려는 활성 알림이 없음 — RESOURCE_NOT_FOUND(404)로 구분 매핑되도록
-    별도 서브클래스를 둔다(exception_mapping.py EXCEPTION_MAP은 타입 기반이라
-    같은 클래스면 상태코드를 하나로만 고를 수 있다 — PLT-17의
-    ExchangeCredentialNotFoundError와 동일 관행)."""
+    """No active alert to cancel — kept as a separate subclass so it maps to
+    RESOURCE_NOT_FOUND(404) (exception_mapping.py EXCEPTION_MAP is type-based,
+    so the same class can only map to one status code — same practice as
+    PLT-17's ExchangeCredentialNotFoundError)."""
 
 
 class PriceAlert(BaseModel):
@@ -156,9 +156,9 @@ class AlertService:
         return _row_to_alert(row)
 
     async def evaluate_all_active(self) -> list[PriceAlert]:
-        """활성 알림을 전부 순회해 조건이 충족된 것만 TRIGGERED로 전이시키고
-        반환한다. 자격증명 미등록 등 사용자별 일시적 실패는 그 알림만
-        건너뛴다(모듈 docstring 참조)."""
+        """Iterate all active alerts, transition only those whose conditions are met
+        to TRIGGERED, and return them. Per-user transient failures such as
+        unregistered credentials skip only that alert (see module docstring)."""
         async with self._pool.acquire() as conn:
             rows = await conn.fetch("SELECT * FROM price_alerts WHERE status = 'ACTIVE'")
         alerts = [_row_to_alert(row) for row in rows]
@@ -173,11 +173,12 @@ class AlertService:
             except CredentialNotFoundError:
                 continue
 
-            # 레드팀 #2026-09-02-21 — 미검증 indicator/params가 여기서 예외를
-            # 던지면(IndicatorError/TypeError 등) 이 알림 하나만 건너뛰어야
-            # 한다(위 docstring 약속) — 원래는 이 호출이 try/except 밖에 있어
-            # 예외가 루프(그리고 그 루프를 감싼 백그라운드 태스크)를 통째로
-            # 죽여 전체 사용자의 알림 평가가 영구 정지했다.
+            # Red team #2026-09-02-21 — If unverified indicator/params throw an
+            # exception here (IndicatorError/TypeError, etc.), only this one alert
+            # should be skipped (promise in the docstring above) — originally this
+            # call was outside try/except, so an exception would kill the entire
+            # loop (and the background task wrapping it), permanently freezing
+            # alert evaluation for all users.
             try:
                 result = self._indicators.calculate(alert.indicator, candles, **alert.params)
             except Exception:
@@ -207,7 +208,7 @@ class AlertService:
                     value,
                 )
             if row is None:
-                continue  # 동시에 취소되는 등 이미 다른 경로가 상태를 바꿈
+                continue  # another path already changed the state (e.g. concurrently cancelled)
             updated = _row_to_alert(row)
             triggered.append(updated)
 

@@ -1,14 +1,17 @@
+import "../../i18n";
 import "@testing-library/jest-dom/vitest";
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ApiError, type ApiResponseMeta } from "@aios/api-client";
-import { PayoutsPage, type FetchHoldsPage, type FetchPayoutBatchesPage } from "./PayoutsPage";
+import { PayoutsPage, type FetchHoldsPage, type FetchPayoutBatchesPage, type MarkPayoutPaidFn } from "./PayoutsPage";
+import { perfBudgetMs } from "../../test/perfBudget";
 
 vi.mock("@aios/shared-hooks", () => ({
   useMe: () => ({ data: { email: "a@example.com", isPlatformAdmin: false } }),
   useLogout: () => vi.fn(),
+  apiClient: { markPayoutPaid: vi.fn() },
 }));
 
 afterEach(cleanup);
@@ -56,7 +59,12 @@ function meta(overrides: Partial<ApiResponseMeta> = {}): ApiResponseMeta {
 const noHolds: FetchHoldsPage = async () => ({ items: [], meta: meta() });
 const noPayoutBatches: FetchPayoutBatchesPage = async () => ({ items: [], meta: meta() });
 
-function renderPage(opts: { fetchHolds?: FetchHoldsPage; fetchPayoutBatches?: FetchPayoutBatchesPage; now?: Date }) {
+function renderPage(opts: {
+  fetchHolds?: FetchHoldsPage;
+  fetchPayoutBatches?: FetchPayoutBatchesPage;
+  markPayoutPaid?: MarkPayoutPaidFn;
+  now?: Date;
+}) {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   render(
     <QueryClientProvider client={queryClient}>
@@ -64,6 +72,7 @@ function renderPage(opts: { fetchHolds?: FetchHoldsPage; fetchPayoutBatches?: Fe
         <PayoutsPage
           fetchHolds={opts.fetchHolds ?? noHolds}
           fetchPayoutBatches={opts.fetchPayoutBatches ?? noPayoutBatches}
+          markPayoutPaid={opts.markPayoutPaid}
           now={opts.now}
         />
       </MemoryRouter>
@@ -147,5 +156,167 @@ describe("PayoutsPage", () => {
 
     await waitFor(() => expect(screen.getByText("홀드 정보를 해석할 수 없습니다.")).toBeInTheDocument());
     expect(screen.getByText(/지원하지 않는 schema_version입니다 \(v2\)/)).toBeInTheDocument();
+  });
+
+  // task-4026(FE-OPS-7c) 정산 배치 확정 액션. ADR-2026-09-09-C D2 증거:
+  // negative >=3(아래 세 건), failure injection 1(break-glass 거부/LC-15a 상태충돌),
+  // perf assertion 1(다건 렌더 예산), gate-red repro는 이 리프가 새 정적 게이트를
+  // 만들지 않아 N/A(check_i18n_literals.test.mjs가 스캐너 자체의 red 재현을 전역
+  // 커버, 위 npm run lint 실행이 이 파일에 대해 그 게이트 green을 이미 확인).
+  describe("정산 배치 확정(markPayoutPaid)", () => {
+    it("[negative] 정산 대기(RELEASED) 상태 배치에만 확정 액션을 노출한다", async () => {
+      renderPage({
+        fetchPayoutBatches: async () => ({
+          items: [
+            payoutBatch({ batch_id: "b-released", state: "RELEASED", release_entry_id: "e-4" }),
+            payoutBatch({ batch_id: "b-paid", state: "PAID", release_entry_id: "e-4", paid_entry_id: "e-5" }),
+          ],
+          meta: meta(),
+        }),
+      });
+
+      await waitFor(() => expect(screen.getAllByTestId("payout-batch-card")).toHaveLength(2));
+      expect(screen.getAllByTestId("payout-batch-mark-paid")).toHaveLength(1);
+    });
+
+    it("[negative] SCHEDULED·FAILED 상태 배치는 확정 폼을 전혀 보여주지 않는다", async () => {
+      renderPage({
+        fetchPayoutBatches: async () => ({
+          items: [
+            payoutBatch({ batch_id: "b-scheduled", state: "SCHEDULED" }),
+            payoutBatch({ batch_id: "b-failed", state: "FAILED" }),
+          ],
+          meta: meta(),
+        }),
+      });
+
+      await waitFor(() => expect(screen.getAllByTestId("payout-batch-card")).toHaveLength(2));
+      expect(screen.queryByTestId("payout-batch-mark-paid")).not.toBeInTheDocument();
+    });
+
+    it("[negative] 외부 참조번호 또는 그랜트 ID가 비어 있으면 확정 버튼이 비활성화된다", async () => {
+      renderPage({
+        fetchPayoutBatches: async () => ({
+          items: [payoutBatch({ batch_id: "b-released", state: "RELEASED", release_entry_id: "e-4" })],
+          meta: meta(),
+        }),
+      });
+
+      await waitFor(() => expect(screen.getByTestId("payout-batch-mark-paid")).toBeInTheDocument());
+      const form = screen.getByTestId("payout-batch-mark-paid");
+      const button = within(form).getByRole("button", { name: "정산 확정" });
+      const [refInput, grantInput] = within(form).getAllByRole("textbox");
+      expect(button).toBeDisabled();
+
+      fireEvent.change(refInput, { target: { value: "ext-ref-1" } });
+      expect(button).toBeDisabled();
+
+      fireEvent.change(grantInput, { target: { value: "grant-uuid-1" } });
+      expect(button).toBeEnabled();
+    });
+
+    it("외부 참조번호·그랜트 ID를 입력해 확정하면 성공 배지를 보여주고 입력 폼을 감춘다", async () => {
+      const markPayoutPaid = vi.fn(async () => ({
+        batchId: "b-released",
+        sellerUserId: "u-2",
+        periodStart: "2026-08-01",
+        periodEnd: "2026-08-31",
+        amount: "5000.00",
+        state: "PAID" as const,
+        captureEntryIds: ["e-2", "e-3"],
+        releaseEntryId: "e-4",
+        paidEntryId: "e-6",
+      }));
+      renderPage({
+        fetchPayoutBatches: async () => ({
+          items: [payoutBatch({ batch_id: "b-released", state: "RELEASED", release_entry_id: "e-4" })],
+          meta: meta(),
+        }),
+        markPayoutPaid,
+      });
+
+      await waitFor(() => expect(screen.getByTestId("payout-batch-mark-paid")).toBeInTheDocument());
+      const form = screen.getByTestId("payout-batch-mark-paid");
+      const [refInput, grantInput] = within(form).getAllByRole("textbox");
+      fireEvent.change(refInput, { target: { value: "ext-ref-1" } });
+      fireEvent.change(grantInput, { target: { value: "grant-uuid-1" } });
+      fireEvent.click(within(form).getByRole("button", { name: "정산 확정" }));
+
+      await waitFor(() =>
+        expect(screen.getByText("정산 배치가 지급 완료로 확정됐습니다.")).toBeInTheDocument(),
+      );
+      expect(screen.queryByTestId("payout-batch-mark-paid")).not.toBeInTheDocument();
+      expect(markPayoutPaid).toHaveBeenCalledWith("b-released", "ext-ref-1", "grant-uuid-1");
+    });
+
+    it("[failure-injection] break-glass 그랜트가 무효하면(403) 서버 메시지 대신 매핑된 권한 문구를 보여준다", async () => {
+      const markPayoutPaid: MarkPayoutPaidFn = async () => {
+        throw new ApiError(403, "grant expired", "trace-grant-1", "AUTHZ_FORBIDDEN");
+      };
+      renderPage({
+        fetchPayoutBatches: async () => ({
+          items: [payoutBatch({ batch_id: "b-released", state: "RELEASED", release_entry_id: "e-4" })],
+          meta: meta(),
+        }),
+        markPayoutPaid,
+      });
+
+      await waitFor(() => expect(screen.getByTestId("payout-batch-mark-paid")).toBeInTheDocument());
+      const form = screen.getByTestId("payout-batch-mark-paid");
+      const [refInput, grantInput] = within(form).getAllByRole("textbox");
+      fireEvent.change(refInput, { target: { value: "ext-ref-1" } });
+      fireEvent.change(grantInput, { target: { value: "expired-grant" } });
+      fireEvent.click(within(form).getByRole("button", { name: "정산 확정" }));
+
+      await waitFor(() =>
+        expect(screen.getByText("이 작업을 수행할 권한이 없습니다.")).toBeInTheDocument(),
+      );
+      expect(screen.queryByText("grant expired")).not.toBeInTheDocument();
+    });
+
+    it("[failure-injection] 다른 요청이 이미 확정한 배치(LC-15a 조건부 UPDATE 충돌)를 다시 확정하면 재시도 없이 상태 오류를 보여준다", async () => {
+      const markPayoutPaid: MarkPayoutPaidFn = async () => {
+        throw new ApiError(409, "already paid", "trace-conflict-1", "STATE_INVALID_TRANSITION");
+      };
+      renderPage({
+        fetchPayoutBatches: async () => ({
+          items: [payoutBatch({ batch_id: "b-released", state: "RELEASED", release_entry_id: "e-4" })],
+          meta: meta(),
+        }),
+        markPayoutPaid,
+      });
+
+      await waitFor(() => expect(screen.getByTestId("payout-batch-mark-paid")).toBeInTheDocument());
+      const form = screen.getByTestId("payout-batch-mark-paid");
+      const [refInput, grantInput] = within(form).getAllByRole("textbox");
+      fireEvent.change(refInput, { target: { value: "ext-ref-1" } });
+      fireEvent.change(grantInput, { target: { value: "grant-uuid-1" } });
+      fireEvent.click(within(form).getByRole("button", { name: "정산 확정" }));
+
+      await waitFor(() =>
+        expect(screen.getByText("현재 상태에서는 수행할 수 없는 작업입니다.")).toBeInTheDocument(),
+      );
+      expect(screen.queryByRole("button", { name: "다시 시도" })).not.toBeInTheDocument();
+    });
+
+    it(
+      "[perf] 정산 대기 배치 60건을 확정 폼과 함께 렌더링해도 예산 안에서 끝난다(카드별 O(1) 렌더 가드)",
+      async () => {
+        const items = Array.from({ length: 60 }, (_, i) =>
+          payoutBatch({ batch_id: `b-${i}`, state: "RELEASED", release_entry_id: `e-${i}` }),
+        );
+        const startedAt = performance.now();
+        renderPage({ fetchPayoutBatches: async () => ({ items, meta: meta() }) });
+
+        await waitFor(() => expect(screen.getAllByTestId("payout-batch-mark-paid")).toHaveLength(60));
+        const elapsedMs = performance.now() - startedAt;
+
+        // PortfolioPage.test.tsx와 같은 사유(task-1968/3460): jsdom 렌더 + 공유 CI
+        // 머신 경합으로 절대 임계값을 넉넉히 둔다 — 카드마다 O(1) 렌더가 카드마다
+        // 전체 목록을 재스캔하는 O(n^2)로 퇴행하면 60건도 이 임계값을 넘긴다.
+        expect(elapsedMs).toBeLessThan(perfBudgetMs(8000));
+      },
+      20000,
+    );
   });
 });

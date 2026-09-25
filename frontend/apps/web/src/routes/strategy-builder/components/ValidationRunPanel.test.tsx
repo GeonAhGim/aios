@@ -1,3 +1,4 @@
+import "../../../i18n";
 import "@testing-library/jest-dom/vitest";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -29,6 +30,7 @@ const PASS_RESULT: ValidationResultView = {
   obligations: [],
   result_hash: "hash-1",
   created_at: "2026-09-08T00:00:00Z",
+  evidence_refs: [],
 };
 
 function renderPanel() {

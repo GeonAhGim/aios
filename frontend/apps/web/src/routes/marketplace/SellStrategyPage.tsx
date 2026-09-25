@@ -9,6 +9,7 @@ import { BadRequestNotice } from "../../components/BadRequestNotice";
 import { ErrorMessage } from "../../components/ErrorMessage";
 import { ForbiddenNotice } from "../../components/ForbiddenNotice";
 import { useFieldErrors } from "../../hooks/useFieldErrors";
+import { useTranslation } from "react-i18next";
 
 function strategyKey(strategyId: string, version: string): string {
   return `${strategyId}@${version}`;
@@ -39,6 +40,7 @@ function CreateListingError({ error, fieldErrors }: { error: unknown; fieldError
 }
 
 export function SellStrategyPage() {
+  const { t } = useTranslation();
   const { data: strategies, isLoading } = useMyStrategies();
   const [selectedKey, setSelectedKey] = useState("");
   const [price, setPrice] = useState("10.00");
@@ -61,7 +63,7 @@ export function SellStrategyPage() {
     setFromError(null);
     const [strategyId, strategyVersion] = selectedKey.split("@");
     if (!strategyId || !strategyVersion) {
-      setClientError("판매할 전략을 선택해주세요.");
+      setClientError(t("legacy.sellStrategyPage.t7"));
       return;
     }
     try {
@@ -72,7 +74,7 @@ export function SellStrategyPage() {
       });
       navigate(`/marketplace/${listing.id}`, { state: { listing } });
     } catch (err) {
-      setError(err instanceof ApiError ? err : new Error("리스팅 생성에 실패했습니다."));
+      setError(err instanceof ApiError ? err : new Error(t("legacy.sellStrategyPage.t8")));
       setFromError(err);
     }
   }
@@ -80,15 +82,14 @@ export function SellStrategyPage() {
   return (
     <AppShell>
       <div className="max-w-md space-y-6">
-        <PageHeader title="내 전략 판매하기" />
+        <PageHeader title={t("legacy.sellStrategyPage.title1")} />
         {isLoading ? (
           <LoadingState />
         ) : !strategies || strategies.length === 0 ? (
           <EmptyState>
-            등록된 전략이 없습니다.{" "}
+            {t("legacy.sellStrategyPage.t2", { val: " " })}
             <Link to="/strategy-builder" className="text-accent-hover hover:underline">
-              전략 편집기에서 먼저 만들어보세요
-            </Link>
+              {t("legacy.sellStrategyPage.t3")}</Link>
             .
           </EmptyState>
         ) : (
@@ -96,7 +97,7 @@ export function SellStrategyPage() {
             onSubmit={handleSubmit}
             className="space-y-3 rounded-lg border border-border bg-surface p-6"
           >
-            <Field label="판매할 전략" error={fieldErrors.strategy_id ?? fieldErrors.strategy_version}>
+            <Field label={t("legacy.sellStrategyPage.label4")} error={fieldErrors.strategy_id ?? fieldErrors.strategy_version}>
               <Select
                 value={selectedKey}
                 onChange={(e) => {
@@ -112,7 +113,7 @@ export function SellStrategyPage() {
                 ))}
               </Select>
             </Field>
-            <Field label="가격 (크레딧)" error={fieldErrors.price}>
+            <Field label={t("legacy.sellStrategyPage.label5")} error={fieldErrors.price}>
               <Input
                 type="number"
                 step="0.01"
@@ -126,8 +127,7 @@ export function SellStrategyPage() {
             {clientError && <Alert>{clientError}</Alert>}
             {error !== null && <CreateListingError error={error} fieldErrors={fieldErrors} />}
             <Button type="submit" loading={createListing.isPending} className="w-full">
-              리스팅 등록 (초안)
-            </Button>
+              {t("legacy.sellStrategyPage.t6")}</Button>
           </form>
         )}
       </div>

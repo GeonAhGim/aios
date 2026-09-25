@@ -1,26 +1,29 @@
-"""ConnectionRepository의 asyncpg 구현.
+"""asyncpg implementation of ConnectionRepository.
 
-Spec: AIOSproject 74번 §2/§5, 105번(동시성 표준).
+Spec: AIOSproject #74 §2/§5, #105 (concurrency standard).
 
-task-1723 P1-D: 원래 330줄(P6 300줄 초과)이던 이 모듈을 순수 이동으로
-분할했다 — 스냅샷/헬스 관련 메서드는 postgres_snapshot_mixin.py로
-분리(KISWebSocketMixin과 동일한 믹스인 분리 관례). `PostgresConnectionRepository`가
-그 믹스인을 상속해 공개 메서드 집합·시그니처·동작은 그대로 유지한다.
+task-1723 P1-D: this module was originally 330 lines (over the P6 300-line
+limit) and was split by pure relocation — the snapshot/health methods were
+moved to postgres_snapshot_mixin.py (the same mixin-split convention used for
+KISWebSocketMixin). `PostgresConnectionRepository` inherits that mixin so the
+public method set, signatures, and behavior are unchanged.
 
-task-1718 P0-E 파일럿 — `account_connection`이 RLS 대상(b3c7f19ad2e6) +
-FORCE(c9f4e2a1b6d7)이므로, tenant가 이미 알려진 쓰기 경로
-(`insert_pending_connection`/`transition_connection_state`/
-`persist_snapshot_if_syncable`, 후자는 postgres_snapshot_mixin.py)와 tenant
-스코프 읽기(`list_connections`)는 `tenant_transaction()`(PLT-30,
-[[src/core/db/tenant_scope.py]])으로 연결을 연다. 이 환경의 DATABASE_URL
-롤이 슈퍼유저(rolbypassrls=true)라 RLS는 지금 당장 아무것도 막지 못한다 —
-그래서 `transition_connection_state`/`persist_snapshot_if_syncable`의 SQL에도
-`tenant_id` 조건을 명시로 남겨, 운영 DSN이 비슈퍼유저로 바뀌기 전까지는 이
-WHERE 조건이 실질 방어선이고 `tenant_transaction()`은 그 전환 이후를 대비한
-두 번째 방어선이 되게 했다. `get_connection(connection_id)`는 의도적으로
-그대로 뒀다 — risk_gate(`evaluate_risk_gate.py`)도 이 메서드를 tenant_id
-없이 호출하고, 그쪽은 동시 진행 중인 P0-B/P0-D(task-1715/1717) 스콥이라 이
-리프에서 시그니처를 바꾸지 않는다(task note 참조).
+task-1718 P0-E pilot — since `account_connection` is subject to RLS
+(b3c7f19ad2e6) + FORCE (c9f4e2a1b6d7), write paths where the tenant is already
+known (`insert_pending_connection`/`transition_connection_state`/
+`persist_snapshot_if_syncable`, the latter in postgres_snapshot_mixin.py) and
+the tenant-scoped read (`list_connections`) open their connection via
+`tenant_transaction()` (PLT-30, [[src/core/db/tenant_scope.py]]). This
+environment's DATABASE_URL role is a superuser (rolbypassrls=true), so RLS
+does not block anything right now — which is why the SQL in
+`transition_connection_state`/`persist_snapshot_if_syncable` also keeps an
+explicit `tenant_id` condition: until the production DSN switches to a
+non-superuser role, that WHERE condition is the actual line of defense, and
+`tenant_transaction()` is the second line of defense for after that switch.
+`get_connection(connection_id)` was deliberately left as-is — risk_gate
+(`evaluate_risk_gate.py`) also calls this method without a tenant_id, and that
+is in the scope of the concurrently in-progress P0-B/P0-D (task-1715/1717), so
+this leaf does not change the signature (see task note).
 """
 from __future__ import annotations
 
@@ -92,13 +95,15 @@ class PostgresConnectionRepository(_SnapshotHealthMixin):
         return _row_to_connection(row) if row is not None else None
 
     async def list_connections(self, tenant_id: UUID) -> list[AccountConnection]:
-        # WHERE tenant_id = $1은 그대로 둔다 — 지금 이 환경의 DATABASE_URL
-        # 롤은 슈퍼유저(rolbypassrls=true)라 RLS가 전혀 적용되지 않는다(PG는
-        # 슈퍼유저에 RLS 자체를 미적용, task-1718 note). RLS만 믿고 이 WHERE를
-        # 지우면 운영 DSN이 슈퍼유저인 한 tenant_transaction()이 아무 것도
-        # 막지 못한 채 전체 테이블이 새 나간다 — tenant_transaction()은 운영
-        # DSN이 비소유자 비슈퍼유저(aios_app 등)로 바뀌었을 때를 대비한 추가
-        # 방어선이지, 이 WHERE를 대체하는 게 아니다.
+        # Keep the WHERE tenant_id = $1 as-is — this environment's
+        # DATABASE_URL role is currently a superuser (rolbypassrls=true), so
+        # RLS is not applied at all (PostgreSQL does not apply RLS to
+        # superusers, see task-1718 note). If we drop this WHERE and rely on
+        # RLS alone, then as long as the production DSN is a superuser,
+        # tenant_transaction() blocks nothing and the entire table leaks —
+        # tenant_transaction() is an extra line of defense for when the
+        # production DSN switches to a non-owner, non-superuser role (e.g.
+        # aios_app), not a replacement for this WHERE.
         async with tenant_transaction(self._pool, tenant_id) as conn:
             rows = await conn.fetch(
                 "SELECT * FROM account_connection WHERE tenant_id = $1 ORDER BY created_at",
@@ -133,13 +138,15 @@ class PostgresConnectionRepository(_SnapshotHealthMixin):
         expected_state: str,
         new_state: str,
     ) -> AccountConnection:
-        # extra_conditions로 tenant_id를 WHERE에 명시한다 — 이 환경의
-        # DATABASE_URL 롤이 슈퍼유저(rolbypassrls=true)라 RLS 단독으로는
-        # 아무것도 막지 못한다(task-1718 note). tenant_transaction()이 여는
-        # RLS 스코프는 운영 DSN이 비슈퍼유저로 바뀌었을 때를 대비한 추가
-        # 방어선이고, 이 WHERE 조건이 지금 당장의 실질적 방어선이다 — 호출부
-        # (confirm/revoke/sync_snapshot)가 이미 tenant_id를 검증했더라도, 그
-        # 검증이 뚫리면 여기서 0행(RETURNING 없음)으로 fail-closed된다.
+        # Add tenant_id to the WHERE explicitly via extra_conditions — this
+        # environment's DATABASE_URL role is a superuser (rolbypassrls=true),
+        # so RLS alone blocks nothing (task-1718 note). The RLS scope opened
+        # by tenant_transaction() is an extra line of defense for when the
+        # production DSN switches to a non-superuser role, and this WHERE
+        # condition is the actual line of defense right now — even if the
+        # caller (confirm/revoke/sync_snapshot) has already validated
+        # tenant_id, if that validation is bypassed this fails closed here
+        # with zero rows (no RETURNING).
         async with tenant_transaction(self._pool, tenant_id) as conn:
             row = await conditional_update(
                 conn,

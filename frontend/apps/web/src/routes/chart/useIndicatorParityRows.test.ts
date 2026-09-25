@@ -76,6 +76,24 @@ describe("useIndicatorParityRows — CH-18d 화이트리스트 게이트(동기)
 
     expect(result.current).toEqual([{ id: "BBANDS", source: "unverified", value: null, fallbackReason: null, computeNote: null }]);
   });
+
+  // 실패주입: 서버 참조 포트가 (null 반환이 아니라) 예외를 던지는 실패 모드 —
+  // buildGateRow는 이전에 이 예외를 잡지 않아 렌더 전체가 죽었다. try/catch를
+  // 추가해 null-반환과 동일하게 unverified로 fail-closed 하는지 훅 레벨에서
+  // 직접 확인한다(IndicatorParityPanel.test.tsx CH-18c의 컴포넌트 레벨 회귀와 쌍).
+  it("서버 참조 포트가 예외를 던지면 훅 자체가 죽지 않고 BBANDS는 unverified로 fail-closed 표시된다", () => {
+    const resolveServerSeries: ServerIndicatorSeriesPort = vi.fn(() => {
+      throw new Error("NETWORK_DOWN");
+    });
+    const bars = manyBars(2);
+    const overlays = [BBANDS];
+    const catalog = smaVerifiedCatalog();
+
+    expect(() => renderHook(() => useIndicatorParityRows(bars, overlays, catalog, resolveServerSeries, null))).not.toThrow();
+
+    const { result } = renderHook(() => useIndicatorParityRows(bars, overlays, catalog, resolveServerSeries, null));
+    expect(result.current).toEqual([{ id: "BBANDS", source: "unverified", value: null, fallbackReason: null, computeNote: null }]);
+  });
 });
 
 describe("useIndicatorParityRows — CH-18e 워커 없는 환경 폴백 표기", () => {

@@ -1,0 +1,11 @@
+# H-13 dev 프로필 (ADR-2026-09-09-B). 비밀 없는 설정만 둔다 — 자격증명/키는
+# 계속 .env 또는 KeyRing(src/core/security/key_ring.py)에서 읽는다.
+#
+# `environment` 값은 파일명(dev.yaml -> "dev")과 반드시 일치해야 한다 —
+# src/core/config/profile.py의 로더가 이를 대조해 파일이 잘못 복사되는
+# 사고(staging.yaml 내용을 dev.yaml에 붙여넣는 등)를 막는다.
+environment: dev
+log_level: DEBUG
+cors_allowed_origins:
+  - http://localhost:5173
+  - http://localhost:3000

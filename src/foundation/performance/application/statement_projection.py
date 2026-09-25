@@ -1,13 +1,15 @@
-"""도메인 `PerformanceStatement` → 계약 `PerformanceStatementView` 매핑.
+"""Domain `PerformanceStatement` → contract `PerformanceStatementView` mapping.
 
-compute_statement/correct_statement/get_statement이 전부 같은 변환을 쓴다
-(71번 §4 "domain은 순수 계산, contracts는 소비자 대상 표현"의 경계를 한
-지점에 모은다).
+compute_statement / correct_statement / get_statement all share the same
+conversion (layering the boundary defined in Leaf 71 §4: "domain is pure
+computation; contracts are consumer-facing representations") in one place.
 
-`MoneyValue`가 요구하는 currency/precision은 domain에 없다 — `pm-v1` 방법론
-스콥에서 statement 전체가 단일 통화(KRW)라고 가정한다(strategy_executions.
-currency의 기본값과 동일, ADR-2026-08-28 다자산군 확장 이전 전제). 여러
-통화를 섞어 계산하는 시나리오는 이 리프의 스콥이 아니다(§10 미확인 항목).
+The `MoneyValue` contract requires currency/precision, but the domain model
+does not carry them — the `pm-v1` methodology assumes the entire statement
+is denominated in a single currency (KRW), matching the default of
+`strategy_executions.currency` (premise before the multi-asset-class
+expansion in ADR-2026-08-28). Scenarios that mix currencies in computation
+are out of scope for this leaf (§10 unverified items).
 """
 from __future__ import annotations
 

@@ -15,6 +15,7 @@ import { ErrorMessage } from "../../components/ErrorMessage";
 import { ForbiddenNotice } from "../../components/ForbiddenNotice";
 import { RiskWarningModal } from "../../components/RiskWarningModal";
 import { TenantSwitcher } from "../../components/TenantSwitcher";
+import { useTranslation } from "react-i18next";
 
 // 활성 테넌트 멤버십 목록 API(PLT-29 trust_memberships)는 서버 미구현이라
 // TenantSwitcher에 아직 실제 멤버십을 공급할 수 없다 — personal(전권한)만
@@ -41,6 +42,7 @@ function UpdateSettingsError({ error }: { error: unknown }) {
 }
 
 export function ApprovalSettingsPage() {
+  const { t } = useTranslation();
   const { data: settings, isLoading } = useApprovalSettings();
   const update = useUpdateApprovalSettings();
   const [mode, setMode] = useState<"SOLO" | "DUAL">("SOLO");
@@ -73,13 +75,13 @@ export function ApprovalSettingsPage() {
         // 보내므로, getApiErrorMessage로 매핑한 결과(폴백 시 서버 message와 동일)를
         // 판별에 쓴다. 새 error_code를 만들지 않는다(task-901 DoD, ListingDetailPage 선례).
         const mapped = getApiErrorMessage(err.errorCode, err.message);
-        if (!acknowledged && mapped.includes("위험등급")) {
+        if (!acknowledged && mapped.includes(t("legacy.approvalSettingsPage.t8"))) {
           setRiskWarningReason(mapped);
           return;
         }
         setError(err);
       } else {
-        setError(new Error("설정 변경에 실패했습니다."));
+        setError(new Error(t("legacy.approvalSettingsPage.t9")));
       }
     }
   }
@@ -87,10 +89,10 @@ export function ApprovalSettingsPage() {
   return (
     <AppShell>
       <div className="max-w-md space-y-6">
-        <PageHeader title="승인 방식 설정" />
+        <PageHeader title={t("legacy.approvalSettingsPage.title1")} />
         <TenantSwitcher memberships={NO_MEMBERSHIPS} onCapabilitiesChange={setCapabilities} />
         {!capabilities.canTrade && (
-          <Alert>감사자(읽기전용) 역할이라 이 테넌트의 승인 방식을 변경할 수 없습니다.</Alert>
+          <Alert>{t("legacy.approvalSettingsPage.t2")}</Alert>
         )}
         {isLoading ? (
           <LoadingState />
@@ -104,8 +106,7 @@ export function ApprovalSettingsPage() {
                   onChange={() => setMode("SOLO")}
                   className="accent-accent"
                 />
-                SOLO — 본인 1인 승인(강제 대기 60초)
-              </label>
+                {t("legacy.approvalSettingsPage.t3")}</label>
               <label className="flex items-center gap-2 text-sm text-fg">
                 <input
                   type="radio"
@@ -113,11 +114,10 @@ export function ApprovalSettingsPage() {
                   onChange={() => setMode("DUAL")}
                   className="accent-accent"
                 />
-                DUAL — 서로 다른 두 계정의 순차 서명
-              </label>
+                {t("legacy.approvalSettingsPage.t4")}</label>
             </div>
             {mode === "DUAL" && (
-              <Field label="2차 승인자 연락처">
+              <Field label={t("legacy.approvalSettingsPage.label5")}>
                 <Input
                   type="text"
                   value={secondApproverContact}
@@ -127,8 +127,7 @@ export function ApprovalSettingsPage() {
             )}
             {settings && (
               <p className="text-sm text-fg-muted">
-                현재 강제 대기시간: {settings.mandatoryWaitSeconds}초
-              </p>
+                {t("legacy.approvalSettingsPage.t6", { mandatoryWaitSeconds: settings.mandatoryWaitSeconds })}</p>
             )}
             {error !== null && <UpdateSettingsError error={error} />}
             <Button
@@ -137,8 +136,7 @@ export function ApprovalSettingsPage() {
               loading={update.isPending}
               disabled={!capabilities.canTrade}
             >
-              저장
-            </Button>
+              {t("legacy.approvalSettingsPage.t7")}</Button>
           </div>
         )}
       </div>

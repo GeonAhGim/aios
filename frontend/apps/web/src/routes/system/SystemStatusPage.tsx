@@ -4,6 +4,7 @@ import { Alert, LoadingState, PageHeader } from "@aios/ui-web";
 import { AppShell } from "../../components/layout/AppShell";
 import { DataFreshness } from "../../components/DataFreshness";
 import { ReadinessChecksTable } from "../../components/ReadinessChecksTable";
+import { useTranslation } from "react-i18next";
 
 // spec §3.2/§9 PLT-09: 읽기 전용 진단 화면 — 재시작·복구 조작 버튼은 두지 않는다
 // (task-494 decision). fetch·파싱은 usePlatformReadiness(apiClient.getReadiness)와
@@ -11,22 +12,22 @@ import { ReadinessChecksTable } from "../../components/ReadinessChecksTable";
 const STALE_AFTER_SEC = 300;
 
 function StatusSummary({ summary }: { summary: ReadinessSummary }) {
+  const { t } = useTranslation();
   if (summary.status === "ready") {
-    return <Alert tone="success">모든 체크가 정상입니다.</Alert>;
+    return <Alert tone="success">{t("legacy.systemStatusPage.t1")}</Alert>;
   }
 
   if (summary.status === "unknown") {
     return (
       <Alert tone="warning">
-        상태를 확인할 수 없습니다 — 서버 응답이 없거나 형식이 예상과 다릅니다.
-      </Alert>
+        {t("legacy.systemStatusPage.t2")}</Alert>
     );
   }
 
   return (
     <Alert tone="danger">
       <div data-testid="readiness-failure-summary">
-        <p className="font-medium">저하됨 — 원인 체크 {summary.failedChecks.length}건</p>
+        <p className="font-medium">{t("legacy.systemStatusPage.t3", { length: summary.failedChecks.length })}</p>
         {summary.failedChecks.length > 0 && (
           <ul className="mt-1 list-disc pl-5">
             {summary.failedChecks.map((fc) => (
@@ -40,13 +41,14 @@ function StatusSummary({ summary }: { summary: ReadinessSummary }) {
 }
 
 export function SystemStatusPage() {
+  const { t } = useTranslation();
   const { data, isLoading, isError } = usePlatformReadiness();
 
   if (isLoading) {
     return (
       <AppShell>
         <div className="space-y-6">
-          <PageHeader title="시스템 상태" />
+          <PageHeader title={t("legacy.systemStatusPage.title4")} />
           <LoadingState />
         </div>
       </AppShell>
@@ -65,7 +67,7 @@ export function SystemStatusPage() {
     <AppShell>
       <div className="space-y-6">
         <PageHeader
-          title="시스템 상태"
+          title={t("legacy.systemStatusPage.title5")}
           action={<DataFreshness asOf={asOf} staleAfterSec={STALE_AFTER_SEC} />}
         />
         <StatusSummary summary={summary} />

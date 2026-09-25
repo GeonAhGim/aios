@@ -2,6 +2,7 @@ import { useExecutions, usePortfolio, useRiskProfile } from "@aios/shared-hooks"
 import {
   AllocationBarChart,
   Badge,
+  Button,
   Card,
   CardTitle,
   EmptyState,
@@ -10,11 +11,14 @@ import {
   Stat,
   StatusBadge,
 } from "@aios/ui-web";
+import { Link } from "react-router-dom";
 import { AppShell } from "../../components/layout/AppShell";
 import { DataFreshness } from "../../components/DataFreshness";
 import { exchangeLabel } from "../../lib/exchangeLabels";
+import { useTranslation } from "react-i18next";
 
 export function DashboardPage() {
+  const { t } = useTranslation();
   const { data: riskProfile } = useRiskProfile();
   const { data: portfolio, isLoading: portfolioLoading } = usePortfolio();
   const { data: executions, isLoading: executionsLoading } = useExecutions();
@@ -23,13 +27,13 @@ export function DashboardPage() {
     <AppShell>
       <div className="space-y-8">
         <PageHeader
-          title="대시보드"
-          action={riskProfile && <Badge tone="accent">위험등급 {riskProfile.riskProfile}</Badge>}
+          title={t("legacy.dashboardPage.title1")}
+          action={riskProfile && <Badge tone="accent">{t("legacy.dashboardPage.t2", { riskProfile: riskProfile.riskProfile })}</Badge>}
         />
 
         <Card>
           <div className="flex items-center justify-between">
-            <CardTitle>포트폴리오 요약</CardTitle>
+            <CardTitle>{t("legacy.dashboardPage.t3")}</CardTitle>
             {/* GET /portfolio는 아직 ApiResponse 봉투 미적용(apiPaths.ts "portfolio.get" ·
                 PLT-19 예정)이라 meta.as_of가 없다 — react-query dataUpdatedAt(클라이언트가
                 응답을 받은 시각)을 as_of 대신 넣으면 항상 "방금" 취급되어 실제 서버 데이터가
@@ -42,9 +46,9 @@ export function DashboardPage() {
           ) : portfolio ? (
             <div className="space-y-6">
               <div className="grid grid-cols-3 gap-4">
-                <Stat label="총 포트폴리오 가치" value={portfolio.totalPortfolioValue} />
-                <Stat label="미배분 현금" value={portfolio.unallocatedCash} />
-                <Stat label="배분된 실행 수" value={portfolio.allocations.length} />
+                <Stat label={t("legacy.dashboardPage.label4")} value={portfolio.totalPortfolioValue} />
+                <Stat label={t("legacy.dashboardPage.label5")} value={portfolio.unallocatedCash} />
+                <Stat label={t("legacy.dashboardPage.label6")} value={portfolio.allocations.length} />
               </div>
               {portfolio.allocations.length > 0 && (
                 <AllocationBarChart
@@ -60,7 +64,7 @@ export function DashboardPage() {
         </Card>
 
         <Card>
-          <CardTitle>실행 중인 전략</CardTitle>
+          <CardTitle>{t("legacy.dashboardPage.t7")}</CardTitle>
           {executionsLoading ? (
             <LoadingState />
           ) : executions && executions.length > 0 ? (
@@ -78,7 +82,17 @@ export function DashboardPage() {
               ))}
             </ul>
           ) : (
-            <EmptyState>실행 중인 전략이 없습니다.</EmptyState>
+            <EmptyState
+              action={
+                <Link to="/onboarding/first-run">
+                  <Button type="button" variant="secondary" size="sm">
+                    {t("onboarding.emptyStateCta")}
+                  </Button>
+                </Link>
+              }
+            >
+              {t("legacy.dashboardPage.t8")}
+            </EmptyState>
           )}
         </Card>
       </div>

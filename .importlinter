@@ -1,0 +1,41 @@
+# .importlinter -- RATCHET-2(task-3256) 프로젝트 로컬 의존 방향 계약.
+#
+# 주의: PyPI `import-linter` 패키지의 공식 스키마가 아니다 -- 그 패키지는 이
+# venv에 설치되어 있지 않고, CLAUDE.md 규칙 #8("환경 제약만으로는 의존성 추가를
+# 승인하지 않는다")에 따라 이 task는 그 설치를 대신 결정할 권한이 없다. 이 파일은
+# `scripts/check_import_linter.py`가 configparser로 직접 읽는 이 저장소 전용
+# 최소 포맷이다(실제 import-linter CLI로는 실행되지 않는다).
+#
+# 섹션 이름은 "<type>:<id>" 형식. 3종 계약을 담는다:
+#   forbidden -- source 접두사 아래 모듈이 forbidden 접두사 중 하나를 임포트하면 위반
+#   forbidden_suffix -- 같은 bounded context 안에서 source_suffix 경로 세그먼트를
+#                        가진 모듈이 forbidden_suffix 세그먼트를 가진 형제 모듈을
+#                        임포트하면 위반(domain -> adapters 역의존)
+#   boundary -- root 아래 서로 다른 애그리게잇이 상대방의 internal_suffixes 내부
+#               경로로 직접 들어가면 위반(교차 애그리게잇 경계)
+#   cycles -- root 아래 임포트 그래프에 순환이 있으면 위반
+
+[forbidden:core-no-io]
+description = src/core는 순수 도메인 규칙(무 I/O) -- adapter/exchange/api/foundation 계층을 임포트할 수 없다
+source = src.core
+forbidden =
+    src.exchanges
+    src.api
+    src.foundation
+
+[forbidden_suffix:domain-no-adapters]
+description = 각 foundation 애그리게잇의 domain/은 같은 애그리게잇의 adapters/를 임포트할 수 없다(역의존 금지)
+root = src.foundation
+source_suffix = domain
+forbidden_suffix = adapters
+
+[boundary:foundation-aggregates]
+description = foundation 애그리게잇은 서로의 domain/adapters 내부 경로로 직접 들어갈 수 없다(교차 애그리게잇 경계, application/ports/contracts/최상위 패키지 경유만 허용)
+root = src.foundation
+internal_suffixes =
+    domain
+    adapters
+
+[cycles:src]
+description = src/ 내부 모듈 임포트 그래프에 순환이 없어야 한다
+root = src

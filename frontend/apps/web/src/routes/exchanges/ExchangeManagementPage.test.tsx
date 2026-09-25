@@ -1,3 +1,4 @@
+import "../../i18n";
 import "@testing-library/jest-dom/vitest";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -14,6 +15,13 @@ vi.mock("@aios/shared-hooks", () => ({
   useRegisterExchangeCredential: () => ({ mutateAsync, isPending: false }),
   useRevokeExchangeCredential: () => ({ mutateAsync: revokeMutateAsync }),
   useExchangeBalance: () => ({ data: undefined }),
+  useExchangePositions: () => ({
+    data: undefined,
+    isLoading: false,
+    isError: false,
+    error: null,
+    refetch: vi.fn(),
+  }),
   useMe: () => ({ data: { email: "a@example.com" } }),
   useLogout: () => vi.fn(),
 }));

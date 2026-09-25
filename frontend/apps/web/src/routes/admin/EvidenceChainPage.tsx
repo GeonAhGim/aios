@@ -8,6 +8,7 @@ import { ErrorMessage } from "../../components/ErrorMessage";
 import { ForbiddenNotice } from "../../components/ForbiddenNotice";
 import { useCursorPage } from "../../hooks/useCursorPage";
 import type { CursorNavigatorMeta } from "../../lib/cursorPagination";
+import { useTranslation } from "react-i18next";
 
 // task-2337(FE-OPS-3): spec §3.3 에러 taxonomy — 이 화면의 모든 실패는
 // SafetyControlsPage와 동일 2-way 패턴(403/그 외)이다. 400 갈래가 없는 이유:
@@ -36,6 +37,7 @@ interface CommittedPage {
 // 않는다 — "체인이 깨졌다"는 판정 자체가 서버 권위다(decision: LC-3 hash_chain
 // 재구현 금지). 성공 응답 {verified:true}만 여기서 렌더한다.
 export function EvidenceChainPage() {
+  const { t } = useTranslation();
   const [committed, setCommitted] = useState<CommittedPage | null>(null);
   const meta: CursorNavigatorMeta | null = committed ? { next_cursor: committed.nextCursor } : null;
   const pager = useCursorPage(meta);
@@ -60,28 +62,26 @@ export function EvidenceChainPage() {
   return (
     <AppShell>
       <div className="space-y-6">
-        <PageHeader title="증빙(Evidence) 감사 체인 검증" />
+        <PageHeader title={t("legacy.evidenceChainPage.title1")} />
 
         <div className="rounded-lg border border-border bg-surface p-4">
-          <p className="font-medium text-fg">감사 체인 무결성 검증(AUD-003)</p>
+          <p className="font-medium text-fg">{t("legacy.evidenceChainPage.t2")}</p>
           <p className="text-sm text-fg-muted">
-            테넌트 ID를 비워두면 system 이벤트(tenant_id 없음) 체인만 검증합니다.
-          </p>
+            {t("legacy.evidenceChainPage.t3")}</p>
           <div className="mt-2 flex items-end gap-2">
             <Input
               type="text"
-              placeholder="테넌트 ID(선택)"
+              placeholder={t("legacy.evidenceChainPage.placeholder4")}
               value={tenantId}
               onChange={(e) => setTenantId(e.target.value)}
               className="w-72"
             />
             <Button type="button" variant="primary" size="sm" loading={verify.isPending} onClick={handleVerify}>
-              체인 검증
-            </Button>
+              {t("legacy.evidenceChainPage.t5")}</Button>
           </div>
           {verify.isSuccess && verify.data && (
             <p className="mt-2 text-sm text-fg">
-              검증 결과: <StatusBadge status={verify.data.verified ? "SUCCESS" : "ERROR"} />
+              {t("legacy.evidenceChainPage.t6")}<StatusBadge status={verify.data.verified ? "SUCCESS" : "ERROR"} />
             </p>
           )}
           {verify.isError && (
@@ -92,7 +92,7 @@ export function EvidenceChainPage() {
         </div>
 
         <div>
-          <p className="mb-2 font-medium text-fg">감사 타임라인</p>
+          <p className="mb-2 font-medium text-fg">{t("legacy.evidenceChainPage.t7")}</p>
           {timeline.isError ? (
             <EvidenceActionError error={timeline.error} onRetry={() => timeline.refetch()} />
           ) : timeline.isLoading ? (
@@ -111,12 +111,12 @@ export function EvidenceChainPage() {
                     seq {event.sequenceNo} · {new Date(event.occurredAt).toLocaleString()}
                     {event.tenantId && ` · tenant ${event.tenantId}`}
                   </p>
-                  <p className="text-xs text-fg-muted">해시 {event.eventHash}</p>
+                  <p className="text-xs text-fg-muted">{t("legacy.evidenceChainPage.t8", { eventHash: event.eventHash })}</p>
                 </li>
               ))}
             </ul>
           ) : (
-            <EmptyState>타임라인 이벤트가 없습니다.</EmptyState>
+            <EmptyState>{t("legacy.evidenceChainPage.t9")}</EmptyState>
           )}
 
           <div className="mt-2 flex gap-2">
@@ -127,8 +127,7 @@ export function EvidenceChainPage() {
               onClick={pager.prev}
               disabled={!pager.hasPrev || timeline.isFetching}
             >
-              이전
-            </Button>
+              {t("legacy.evidenceChainPage.t10")}</Button>
             <Button
               type="button"
               variant="secondary"
@@ -136,8 +135,7 @@ export function EvidenceChainPage() {
               onClick={pager.next}
               disabled={!pager.hasNext || timeline.isFetching}
             >
-              다음
-            </Button>
+              {t("legacy.evidenceChainPage.t11")}</Button>
           </div>
         </div>
       </div>

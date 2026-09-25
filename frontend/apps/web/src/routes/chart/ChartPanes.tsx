@@ -63,6 +63,7 @@ import {
 } from "./chartPanesModel";
 import { useChartPanesObjectTree } from "./useChartPanesObjectTree";
 import { useWiredCandleRenderer } from "./useVisibleCandles";
+import { useTranslation } from "react-i18next";
 
 export interface ChartPanesProps {
   /** 메인 페인 시계열 — 크로스헤어 시간 도메인 계산에 쓰인다. */
@@ -107,6 +108,7 @@ export function ChartPanes({
   onLockedIndicatorIdsChange,
   children,
 }: ChartPanesProps) {
+  const { t } = useTranslation();
   const subOverlayIds = useMemo(() => subOverlays.map((o) => o.id), [subOverlays]);
 
   const [{ paneModel, layoutErrorCode }, setState] = useState<{
@@ -181,7 +183,7 @@ export function ChartPanes({
       {layoutErrorCode && (
         <div data-testid="chart-panes-layout-error">
           <Alert tone="warning">
-            <p>저장된 페인 레이아웃을 적용하지 못했습니다: {PANE_ERROR_REASONS[layoutErrorCode]}</p>
+            <p>{t("legacy.chartPanes.t1", { val: PANE_ERROR_REASONS[layoutErrorCode] })}</p>
           </Alert>
         </div>
       )}

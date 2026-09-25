@@ -45,12 +45,51 @@ const snapshotPathSet = new Set(snapshotPathList);
 // 되어(GET /v1/foundation/market-data/candles·candles/replay·instruments·
 // instruments/{symbol}/aliases, main.py include_router) 더 이상 유령 경로가
 // 아니다 — 아래 STALE_SNAPSHOT_WHITELIST로 옮겼다(스냅샷 재생성 전).
+// task-4922: ai.tokens.base·ai.tokens.revoke·ai.proposals.base 3건은
+// src/api/routers/ai.py가 실재하게 되어(contracts/openapi/v1.json에
+// GET/POST /v1/ai/tokens·POST /v1/ai/tokens/{token_id}:revoke·GET
+// /v1/ai/proposals 모두 ApiResponse_* 봉투로 실재 — python으로 paths 키
+// 직접 확인) 여기서 제거한다(apiRoutes.ts도 implemented=true로 맞춤). 같은
+// ai.py에 없는 providers.*·proposals.promote*·experiments.base는 그대로 남긴다.
 const GHOST_PATH_WHITELIST: ReadonlySet<ApiRouteName> = new Set<ApiRouteName>([
   "auth.sessions.list",
   "auth.sessions.revoke",
   // task-2428(BT-18): backtests.sweep — apiRoutes.ts의 등록 주석 참조(실행 라우터
   // 자체가 아직 없음, sessions.*와 동일 사유).
   "backtests.sweep",
+  // task-2699(UX-15): follow.subscriptions.* 3건 — apiRoutes.ts의 등록 주석 참조
+  // (src/foundation/follow 모듈·src/api/routers/follow.py 자체가 아직 없음,
+  // sessions.*와 동일 사유).
+  "follow.subscriptions.base",
+  "follow.subscriptions.cancel",
+  "follow.subscriptions.performance",
+  // task-2657(AI-22): ai.* 5건 — apiRoutes.ts의 등록 주석 참조(src/foundation/ai
+  // 모듈은 아직 없고 ai.py도 providers/promote-ticket/promote/experiments 목록은
+  // 구현하지 않았다, follow.subscriptions.*와 동일 사유).
+  "ai.providers.base",
+  "ai.providers.item",
+  "ai.proposals.promoteTicket",
+  "ai.proposals.promote",
+  "ai.experiments.base",
+  // task-2692(UX-8): screener.run — apiRoutes.ts의 등록 주석 참조(src/foundation/
+  // screener 모듈·src/api/routers/screener.py 자체가 아직 없음, ai.*와 동일 사유).
+  "screener.run",
+  // task-2696(UX-12): whatif.* 2건 — apiRoutes.ts의 등록 주석 참조(src/foundation/
+  // whatif 모듈·src/api/routers/whatif.py 자체가 아직 없음, screener.run과 동일 사유).
+  "whatif.previewOrder",
+  "whatif.rebalancePlan",
+  // task-2718(RD-17): researchData.* 2건 — apiRoutes.ts의 등록 주석 참조
+  // (src/foundation/research_data에는 API 라우터가 아직 없음, whatif.*와
+  // 동일 사유).
+  "researchData.search",
+  "researchData.sources.list",
+  // task-5998(SIG-6): signals.sources.* 4건 — apiRoutes.ts의 등록 주석 참조
+  // (src/foundation/signals 모듈·src/api/routers/signals.py 자체가 아직 없음,
+  // researchData.*와 동일 사유).
+  "signals.sources.base",
+  "signals.sources.rotate",
+  "signals.sources.disable",
+  "signals.sources.receipts",
 ]);
 
 // STALE_SNAPSHOT_WHITELIST: GHOST_PATH_WHITELIST와는 다른 사유 — "라우터가
@@ -69,15 +108,14 @@ const GHOST_PATH_WHITELIST: ReadonlySet<ApiRouteName> = new Set<ApiRouteName>([
 // src/api/routers/market_data.py에 실재하게 됐지만(GET .../market-data/coverage),
 // 스냅샷은 그 병합 이후 재생성된 적이 없다 — charting.indicatorTemplates.*와
 // 동일 사유(라우터는 있는데 스냅샷이 낡음)라 STALE_SNAPSHOT_WHITELIST에 둔다.
-// task-2335(FE-OPS-1): riskGate.safetyControls.evaluateRecovery도 동일 사유 —
-// src/api/routers/foundation/risk_gate.py:161 post_evaluate_recovery는 실재하지만
-// contracts/openapi/v1.json에는 없다(grep 직접 확인, risk-gate 6경로 중 유일).
-const STALE_SNAPSHOT_WHITELIST: ReadonlySet<ApiRouteName> = new Set<ApiRouteName>([
-  "charting.indicatorTemplates.base",
-  "charting.indicatorTemplates.item",
-  "marketData.coverage.get",
-  "riskGate.safetyControls.evaluateRecovery",
-]);
+// task-3850(PLT-35-fix): riskGate.safetyControls.evaluateRecovery는 이 leaf가
+// require_break_glass를 배선하며 contracts/openapi/v1.json을 갱신해 이제 스냅샷에
+// 실재한다(python으로 paths 키 직접 확인) — STALE_SNAPSHOT_WHITELIST에서 제거한다.
+// task-4922: charting.indicatorTemplates.*(2건)·marketData.coverage.get·
+// compliance.decisions.get(4건) 모두 contracts/openapi/v1.json이 그 사이 재생성돼
+// 이제 스냅샷에 실재한다(python으로 paths 키 직접 확인 — 각각 ApiResponse_* 봉투)
+// — 전부 제거한다.
+const STALE_SNAPSHOT_WHITELIST: ReadonlySet<ApiRouteName> = new Set<ApiRouteName>([]);
 
 // KNOWN_ENVELOPE_DRIFT: task-1165 시점 전수 대조 결과, apiPaths.ts에 등록된 envelope
 // 값과 스냅샷이 실제로 말하는 봉투 여부 사이에 불일치가 0건이었다(GHOST_PATH_WHITELIST
@@ -109,9 +147,16 @@ const KNOWN_ENVELOPE_DRIFT: ReadonlySet<ApiRouteName> = new Set<ApiRouteName>([]
 // 실제로 부른다(StrategyBuilderPage → ValidationRunPanel → validation.start,
 // apiRoutes.ts에 등록) — 여기 있던 항목을 제거한다.
 const UNREGISTERED_ROUTE_WHITELIST: Readonly<Record<string, string>> = {
-  "/admin/audit-log": "관리자 감사 로그 화면이 없다(apps/web/src/routes/admin에 audit-log 라우트 없음)",
-  "/admin/ledger/payouts/{batch_id}/paid": "정산 배치 확정 액션 UI가 없다",
-  "/exchange-credentials/{exchange}/positions": "exchange.ts 클라이언트에 balance/capabilities만 있고 positions 조회는 없다",
+  // task-3850(PLT-35-fix): break-glass grant 요청/승인 HTTP 엔드포인트를 새로 열었지만
+  // 이 리프의 스콥은 백엔드 배선(DI 체인 403 증명)뿐이다 — 관리자 콘솔에서 grant를
+  // 요청/승인하는 화면은 후속 리프.
+  "/admin/break-glass/grants": "break-glass grant 요청 콘솔 화면이 없다",
+  "/admin/break-glass/grants/{grant_id}:approve": "break-glass grant 승인 콘솔 화면이 없다",
+  // task-4024(FE-OPS-7a): admin.auditLog·admin.ledger.payoutsMarkPaid로 apiRoutes.ts에
+  // 등록했다(API 레이어만 — 화면 배선은 후속 FE-OPS-7b 소관) — 여기 있던 두 항목을
+  // 제거한다.
+  // task-4001(FE-OPS-10a): exchange.credentials.positions로 apiRoutes.ts에 등록했다 —
+  // 여기 있던 항목을 제거한다(실제 화면 배선은 FE-OPS-10b 소관, §E는 등록 여부만 본다).
   "/livez": "인프라 헬스체크 프로브다(k8s liveness) — 앱 API 표면이 아니다",
   "/metrics": "인프라 메트릭 엔드포인트다(모니터링 전용) — 앱 API 표면이 아니다",
   "/readyz": "인프라 헬스체크 프로브다(k8s readiness) — 앱 API 표면이 아니다",
@@ -123,25 +168,44 @@ const UNREGISTERED_ROUTE_WHITELIST: Readonly<Record<string, string>> = {
   // task-2336(FE-OPS-2): MandatesPage가 status/drafts/amendments/revisions/
   // {revision_id}:activate/mandate:pause/mandate:resume/policy:evaluate 7건 전부를
   // mandates.*로 등록했다 — 여기 남아 있던 7개 항목(task-2168 원 목록)을 제거한다.
-  "/v1/foundation/performance-statements": "실적 명세서 화면이 없다",
-  "/v1/foundation/performance-statements/{statement_id}": "실적 명세서 화면이 없다",
-  "/v1/foundation/performance-statements/{statement_id}:correct": "실적 명세서 정정 액션 UI가 없다",
-  "/v1/foundation/performance-statements:compute": "실적 명세서 계산 액션 UI가 없다",
+  // task-5803(FE-OPS-6): performanceStatements.* 4건(compute/list/get/correct)을
+  // apiRoutesFoundationOps.ts에 등록했다 — 여기 있던 4개 항목(task-2168 원 목록)을
+  // 제거한다(화면 배선은 decision상 이 리프 범위 밖, 경로·타입 등록만).
   // task-2337(FE-OPS-3): ReconciliationPage가 목록 조회·해소(resolve) 2건을
   // reconciliation.*로 등록했다 — 실행 이력(POST /runs)은 decision상 이 리프의
   // UI 범위 밖이라 그대로 남긴다(사람이 EntitySnapshot을 입력해 만드는 화면이 없다).
   "/v1/foundation/reconciliation/runs": "정합성 대사 실행 이력 화면이 없다",
   // task-2335(FE-OPS-1): SafetyControlsPage가 GET(list)/deactivate/evaluate-recovery
-  // 3건을 riskGate.safetyControls.*로 등록했다 — 아래 3건은 decision상 이 리프가
-  // 만들지 않는 개통(activate)·룰번들 승인/활성화·evaluate 트리거라 그대로 남긴다
-  // (후속 리프 2336~2338 소관).
-  "/v1/foundation/risk-gate/admin/safety-controls": "리스크 게이트 관리자 개통(activate) UI가 없다(decision: 이 리프는 읽기·해제만)",
-  "/v1/foundation/risk-gate/evaluate": "리스크 게이트 평가 트리거 화면이 없다",
-  "/v1/foundation/risk-gate/rule-bundles/{bundle_id}:activate": "룰번들 활성화 액션 UI가 없다",
-  "/v1/foundation/risk-gate/rule-bundles/{bundle_id}:approve": "룰번들 승인 액션 UI가 없다",
+  // 3건을 riskGate.safetyControls.*로 등록했다 — 나머지 4건(개통·룰번들 승인/활성화·
+  // evaluate 트리거)은 task-5808(FE-OPS-9)이 riskGate.safetyControls.activate·
+  // riskGate.evaluate·riskGate.ruleBundles.approve·riskGate.ruleBundles.activate로
+  // apiRoutes.ts에 등록했다 — 여기 있던 4개 항목(task-2335 원 목록)을 제거한다(화면
+  // 배선은 decision상 이 리프 범위 밖, 경로·타입 등록만).
   // task-2338(FE-OPS-4): TrustPage가 status/consents:revoke/memberships(grant/suspend/
   // revoke) 5건 전부를 trust.*로 등록했다 — 여기 남아 있던 5개 항목(task-2168 원 목록)을
   // 제거한다.
+  // task-4922: contracts/openapi/v1.json 재생성으로 새로 나타난 14건 — apps/web/src와
+  // packages/api-client/src/clients/*.ts를 grep으로 대조해 화면이 하나도 호출하지
+  // 않는 것을 확인했다(경로 문자열 하드코딩 우회 0건).
+  "/v1/accounts/summary": "계정 요약 화면이 없다",
+  "/v1/ai/experiments/{experiment_id}": "AI 실험 상세 화면이 없다(AiStudioPage는 아직 목록/승격만 다룬다)",
+  "/v1/ai/experiments/{experiment_id}/lineage": "AI 실험 계보 화면이 없다",
+  "/v1/ai/proposals/{proposal_id}": "AI 제안 상세 화면이 없다",
+  "/v1/ai/tokens/{token_id}:rotate": "AI 토큰 회전 액션 UI가 없다",
+  "/v1/assistant/explain-backtest": "어시스턴트 백테스트 설명 화면이 없다",
+  "/v1/assistant/explain-script": "어시스턴트 스크립트 설명 화면이 없다",
+  "/v1/assistant/generate-script": "어시스턴트 스크립트 생성 화면이 없다",
+  "/v1/foundation/compliance/mandate/status": "컴플라이언스 위임 상태 화면이 없다",
+  "/v1/foundation/personal/bundle": "퍼스널 모드 번들 화면이 없다",
+  "/v1/foundation/personal/daily-report": "퍼스널 모드 일일 리포트 화면이 없다",
+  "/v1/foundation/personal/kill": "퍼스널 모드 킬스위치 UI가 없다",
+  "/v1/foundation/personal/promote": "퍼스널 모드 승격 액션 UI가 없다",
+  "/v1/foundation/personal/promotion-checklist": "퍼스널 모드 승격 체크리스트 화면이 없다",
+  // task-4968: contracts/openapi/v1.json 재생성으로 새로 나타난 2건 — apps/web/src와
+  // packages/api-client/src/clients/*.ts를 grep으로 대조해 화면이 호출하지 않음을 확인했다.
+  "/v1/foundation/market-data/options/chain": "옵션 체인 화면이 없다(82eeff67 백엔드 경계만 추가)",
+  "/v1/foundation/research/items": "리서치 아이템 목록 화면이 없다(9359c634 RD-8 라우터만 추가)",
+  "/v1/foundation/research/items/{item_id}": "리서치 아이템 상세 화면이 없다(9359c634 RD-8 라우터만 추가)",
 };
 
 function nonGhostRouteEntries(): Array<[ApiRouteName, ApiRouteDefinition]> {

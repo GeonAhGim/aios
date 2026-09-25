@@ -1,0 +1,37 @@
+# Alertmanager 라우팅 -- H-10(ADR-2026-09-09-B): config/observability/alert_rules.yaml의
+# 11개 규칙(A1~A11)이 severity 라벨(warn|critical)로 여기까지 도착해 Slack으로 나간다.
+#
+# `api_url`은 배포 시 .env의 ALERT_WEBHOOK_URL(Slack Incoming Webhook URL)로 치환한다
+# (H-6 compose/컨테이너 기동 단계에서 envsubst 등으로 대체 -- 이 파일 자체는 자격증명을
+# 담지 않는다). Alertmanager 컨테이너/서비스 배선 자체는 H-6 범위이며, 이 파일은 그
+# 배선이 붙었을 때 바로 마운트할 수 있는 라우팅 규칙을 미리 정의해 둔다.
+route:
+  receiver: webhook-default
+  group_by: ["alertname"]
+  group_wait: 10s
+  group_interval: 5m
+  repeat_interval: 4h
+  routes:
+    - matchers: ["severity = critical"]
+      receiver: webhook-critical
+      repeat_interval: 30m
+    - matchers: ["severity = warn"]
+      receiver: webhook-warn
+
+receivers:
+  - name: webhook-critical
+    slack_configs:
+      - api_url: "${ALERT_WEBHOOK_URL}"
+        send_resolved: true
+        title: "{{ .CommonLabels.alertname }} ({{ .CommonLabels.severity }})"
+        text: "{{ .CommonAnnotations.summary }}\nrunbook: {{ .CommonLabels.runbook }}"
+  - name: webhook-warn
+    slack_configs:
+      - api_url: "${ALERT_WEBHOOK_URL}"
+        send_resolved: true
+        title: "{{ .CommonLabels.alertname }} ({{ .CommonLabels.severity }})"
+        text: "{{ .CommonAnnotations.summary }}\nrunbook: {{ .CommonLabels.runbook }}"
+  - name: webhook-default
+    slack_configs:
+      - api_url: "${ALERT_WEBHOOK_URL}"
+        send_resolved: true

@@ -253,7 +253,7 @@ async def test_verifier_cannot_decide_own_listing(service, pool):
     seller = await create_test_user(pool)
     listing = await _pending_listing(pool, seller)
 
-    with pytest.raises(VerificationError, match="이해상충"):
+    with pytest.raises(VerificationError, match="conflict of interest"):
         await service.decide(listing.id, seller, "APPROVE")
 
     async with pool.acquire() as conn:

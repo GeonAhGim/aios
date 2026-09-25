@@ -30,6 +30,7 @@ EXCEPTION_MAP/STATUS_OVERRIDE 데이터와 그 재료가 되는 도메인 예외
 P6.line_cap(300줄) 상한에 닿아 task-1218에서 분리했다(공개 API는 그대로 이
 모듈 경로에 남긴다 — 다른 모듈이 `from src.api.contracts.exception_mapping
 import X`로 쓰던 클래스/함수 이름이 전부 그대로다)."""
+
 from __future__ import annotations
 
 from src.api.contracts.error_codes import ErrorCode
@@ -45,6 +46,8 @@ from src.api.contracts.exception_registry_foundation import (
     ConsentNotFoundError,
     UnsupportedStatementScopeError,
 )
+from src.api.contracts.exception_registry_foundation_ai_gateway import EXCEPTION_MAP_AI_GATEWAY
+from src.api.contracts.exception_registry_foundation_ems import EXCEPTION_MAP_EMS
 
 __all__ = [
     "ApprovalOwnershipError",
@@ -55,8 +58,12 @@ __all__ = [
     "override_status",
 ]
 
+# task-2652 AI-17 -- ai.py's exceptions live in their own split module
+# (exception_registry_foundation.py is already at the P6.line_cap 300-line
+# ceiling, see that module's own docstring) but fold into the same combined
+# EXCEPTION_MAP here rather than growing a third addend inside that file.
 EXCEPTION_MAP: list[tuple[type[Exception], ErrorCode]] = (
-    EXCEPTION_MAP_SERVICES + EXCEPTION_MAP_FOUNDATION
+    EXCEPTION_MAP_SERVICES + EXCEPTION_MAP_FOUNDATION + EXCEPTION_MAP_AI_GATEWAY + EXCEPTION_MAP_EMS
 )
 STATUS_OVERRIDE: list[tuple[type[Exception], int]] = (
     STATUS_OVERRIDE_SERVICES + STATUS_OVERRIDE_FOUNDATION

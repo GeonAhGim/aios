@@ -15,6 +15,7 @@ import { type CandlestickPoint, EmptyState, PageHeader } from "@aios/ui-web";
 import { Link } from "react-router-dom";
 import { AppShell } from "../../components/layout/AppShell";
 import type { CompareSymbolRef } from "./CompareSymbols";
+import { useTranslation } from "react-i18next";
 
 // CH-13b: compareSymbolIds(useChartLayout.ts)와 동일한 "VENUE:instrumentId" 인코딩을
 // 이 화면 경계에서만 구조체로 풀고 다시 만든다 — 훅은 문자열만 안다(파일 범위 제한).
@@ -79,15 +80,15 @@ export function createDrawing(id: string, kind: DrawingKind, time: number, price
 }
 
 export function NoInstrumentSelected() {
+  const { t } = useTranslation();
   return (
     <AppShell>
       <div className="max-w-5xl space-y-4">
-        <PageHeader title="차트" />
+        <PageHeader title={t("legacy.chartPageHelpers.title1")} />
         <EmptyState>
-          심볼을 먼저 선택하세요.{" "}
+          {t("legacy.chartPageHelpers.t2", { val: " " })}
           <Link to="/market/instruments" className="underline">
-            심볼 목록으로 이동
-          </Link>
+            {t("legacy.chartPageHelpers.t3")}</Link>
         </EmptyState>
       </div>
     </AppShell>

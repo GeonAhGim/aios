@@ -4,7 +4,7 @@ Spec: docs/specs/L4_research_data_and_market_ecosystem_v1.0.md §2.2
 `adapters/postgres_repository.py`, §4 RD-A2, §9 RD-4. Migration
 `f5529244403f` is the schema this adapter talks to.
 
-`append_item` is the RD-4 idempotency boundary (§3 "재수집은 같은 행"):
+`append_item` is the RD-4 idempotency boundary (§3 "re-collection is the same row"):
 the unique key is `(tenant_id, source_id, external_id)` — `external_id`
 is the source's own document id (e.g. a DART receipt number), not part
 of RD-2's `ResearchItem` contract, so it is a required parameter here
@@ -148,3 +148,24 @@ class PostgresResearchRepository:
                 tenant_id,
             )
         return _row_to_item(row) if row is not None else None
+
+    async def list_by_tenant(
+        self, tenant_id: UUID, *, source_id: str, limit: int = 200
+    ) -> list[ResearchItem]:
+        """RD-8 -- candidate fetch for the HTTP search endpoint. Scoped to a
+        single `(tenant_id, source_id)` pair -- source-level entitlement
+        (`application/authorize_access.py`) is checked against exactly this
+        `source_id` before this call, so the candidate set this method
+        returns is never wider than what was already authorized.
+        `application/query.search()` applies the remaining `instruments`/
+        `kinds`/`span`/`as_of` filters in memory on top of this candidate
+        set (RD-7)."""
+        async with self._pool.acquire() as conn:
+            rows = await conn.fetch(
+                "SELECT * FROM research_items WHERE tenant_id = $1 AND source_id = $2 "
+                "ORDER BY known_at DESC, item_id DESC LIMIT $3",
+                tenant_id,
+                source_id,
+                limit,
+            )
+        return [_row_to_item(row) for row in rows]

@@ -5,9 +5,20 @@ Spec: docs/specs/L4_market_data_positions_ledger_v1.0.md#§4.4, §8.2
 test_payouts.py, §9 LC-15.
 DoD: 홀드 창 경과 후 RELEASE, PAID 후 `PLATFORM:PAYOUT_CLEARING` 증가, 같은
 (seller_user_id, period_end) 배치 재실행 멱등 — 세 케이스 전부 실 DB로 단언.
+
+task-2961(DEEPEN, docs/audit/DEPTH_LA_LB_LC.md task-486 행): 원 리프가
+negative≥3·failure-injection(재처리 시 `ConcurrencyConflictError`)·replay/
+멱등 증명은 갖췄으나 수치 성능 단언과 게이트 적색 재현이 없어 D3 축 하한
+(D2 4요건 전부) 미달로 판정됐다. 이 파일에 두 케이스를 보강한다:
+`test_schedule_payouts_batch_meets_latency_budget`(수치 성능 단언)과
+`test_schedule_payouts_rejects_forged_capture_entry_reference`(게이트 적색
+재현 — `postgres_payout_repository.UnknownCaptureEntryError` fail-closed
+가드가 실제로 발동함을 실증, 기존 4케이스 중 누구도 이 가드를 밟지 않았다).
 """
+
 from __future__ import annotations
 
+import time
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from uuid import uuid4
@@ -20,7 +31,10 @@ from src.foundation.evidence.adapters.postgres_repository import PostgresAuditEv
 from src.foundation.ledger.adapters.postgres_balance_repository import PostgresBalanceRepository
 from src.foundation.ledger.adapters.postgres_hold_repository import PostgresHoldRepository
 from src.foundation.ledger.adapters.postgres_journal_repository import PostgresJournalRepository
-from src.foundation.ledger.adapters.postgres_payout_repository import PostgresPayoutRepository
+from src.foundation.ledger.adapters.postgres_payout_repository import (
+    PostgresPayoutRepository,
+    UnknownCaptureEntryError,
+)
 from src.foundation.ledger.application.payouts import (
     UnknownPayoutBatchError,
     mark_payout_paid,
@@ -79,15 +93,32 @@ async def _captured_hold(pool, ports, buyer, seller, price: Decimal) -> CaptureR
     await _seed_available(pool, buyer, price)
     async with pool.acquire() as conn, conn.transaction():
         hold = await place_hold(
-            conn, buyer_id=buyer, amount=price, purpose=_TEST_PURPOSE, reference=reference,
-            expires_at=_clock() + timedelta(minutes=15), actor_subject_id=buyer, trace_id=uuid4(),
-            journal=ports.journal, balances=ports.balances, audit=ports.audit, clock=ports.clock,
+            conn,
+            buyer_id=buyer,
+            amount=price,
+            purpose=_TEST_PURPOSE,
+            reference=reference,
+            expires_at=_clock() + timedelta(minutes=15),
+            actor_subject_id=buyer,
+            trace_id=uuid4(),
+            journal=ports.journal,
+            balances=ports.balances,
+            audit=ports.audit,
+            clock=ports.clock,
             holds=ports.holds,
         )
         capture = await capture_hold(
-            conn, hold, seller_id=seller, commission_rate=Decimal("0.15"),
-            actor_subject_id=buyer, trace_id=uuid4(), now=_clock(),
-            journal=ports.journal, balances=ports.balances, audit=ports.audit, clock=ports.clock,
+            conn,
+            hold,
+            seller_id=seller,
+            commission_rate=Decimal("0.15"),
+            actor_subject_id=buyer,
+            trace_id=uuid4(),
+            now=_clock(),
+            journal=ports.journal,
+            balances=ports.balances,
+            audit=ports.audit,
+            clock=ports.clock,
             holds=ports.holds,
         )
     return capture
@@ -119,21 +150,36 @@ async def test_schedule_payouts_releases_only_after_window_elapsed(pool, ports):
     # 창 미경과: 아직 정산 대상이 아니다(negative case) — 잔액도 그대로.
     async with pool.acquire() as conn, conn.transaction():
         too_early = await schedule_payouts(
-            conn, [record], period_start=period_start, period_end=period_end,
-            now=posted_at, actor_subject_id=None, settlement_window=_WINDOW,
-            journal=ports.journal, balances=ports.balances, audit=ports.audit,
-            clock=ports.clock, payouts=ports.payouts,
+            conn,
+            [record],
+            period_start=period_start,
+            period_end=period_end,
+            now=posted_at,
+            actor_subject_id=None,
+            settlement_window=_WINDOW,
+            journal=ports.journal,
+            balances=ports.balances,
+            audit=ports.audit,
+            clock=ports.clock,
+            payouts=ports.payouts,
         )
     assert too_early == []
     assert await _balance(pool, seller_pending) == Decimal("85.00")
 
     async with pool.acquire() as conn, conn.transaction():
         batches = await schedule_payouts(
-            conn, [record], period_start=period_start, period_end=period_end,
-            now=posted_at + _WINDOW + timedelta(seconds=1), actor_subject_id=None,
+            conn,
+            [record],
+            period_start=period_start,
+            period_end=period_end,
+            now=posted_at + _WINDOW + timedelta(seconds=1),
+            actor_subject_id=None,
             settlement_window=_WINDOW,
-            journal=ports.journal, balances=ports.balances, audit=ports.audit,
-            clock=ports.clock, payouts=ports.payouts,
+            journal=ports.journal,
+            balances=ports.balances,
+            audit=ports.audit,
+            clock=ports.clock,
+            payouts=ports.payouts,
         )
 
     assert len(batches) == 1
@@ -163,10 +209,18 @@ async def test_schedule_payouts_same_batch_key_is_idempotent(pool, ports):
     async def _run() -> list:
         async with pool.acquire() as conn, conn.transaction():
             return await schedule_payouts(
-                conn, [record], period_start=period_start, period_end=period_end,
-                now=now, actor_subject_id=None, settlement_window=_WINDOW,
-                journal=ports.journal, balances=ports.balances, audit=ports.audit,
-                clock=ports.clock, payouts=ports.payouts,
+                conn,
+                [record],
+                period_start=period_start,
+                period_end=period_end,
+                now=now,
+                actor_subject_id=None,
+                settlement_window=_WINDOW,
+                journal=ports.journal,
+                balances=ports.balances,
+                audit=ports.audit,
+                clock=ports.clock,
+                payouts=ports.payouts,
             )
 
     first = await _run()
@@ -209,11 +263,18 @@ async def test_mark_payout_paid_moves_available_to_payout_clearing(pool, ports):
 
     async with pool.acquire() as conn, conn.transaction():
         batches = await schedule_payouts(
-            conn, [record], period_start=period_start, period_end=period_end,
-            now=posted_at + _WINDOW + timedelta(seconds=1), actor_subject_id=None,
+            conn,
+            [record],
+            period_start=period_start,
+            period_end=period_end,
+            now=posted_at + _WINDOW + timedelta(seconds=1),
+            actor_subject_id=None,
             settlement_window=_WINDOW,
-            journal=ports.journal, balances=ports.balances, audit=ports.audit,
-            clock=ports.clock, payouts=ports.payouts,
+            journal=ports.journal,
+            balances=ports.balances,
+            audit=ports.audit,
+            clock=ports.clock,
+            payouts=ports.payouts,
         )
     batch = batches[0]
     seller_available = ua(seller, UserSub.AVAILABLE)
@@ -223,9 +284,15 @@ async def test_mark_payout_paid_moves_available_to_payout_clearing(pool, ports):
     admin = await create_test_user(pool)
     async with pool.acquire() as conn, conn.transaction():
         paid = await mark_payout_paid(
-            conn, batch.batch_id, admin_id=admin, external_ref="test-wire-001",
-            journal=ports.journal, balances=ports.balances, audit=ports.audit,
-            clock=ports.clock, payouts=ports.payouts,
+            conn,
+            batch.batch_id,
+            admin_id=admin,
+            external_ref="test-wire-001",
+            journal=ports.journal,
+            balances=ports.balances,
+            audit=ports.audit,
+            clock=ports.clock,
+            payouts=ports.payouts,
         )
 
     assert paid.state == "PAID"
@@ -237,9 +304,15 @@ async def test_mark_payout_paid_moves_available_to_payout_clearing(pool, ports):
     async with pool.acquire() as conn, conn.transaction():
         with pytest.raises(ConcurrencyConflictError):
             await mark_payout_paid(
-                conn, batch.batch_id, admin_id=admin, external_ref="test-wire-002",
-                journal=ports.journal, balances=ports.balances, audit=ports.audit,
-                clock=ports.clock, payouts=ports.payouts,
+                conn,
+                batch.batch_id,
+                admin_id=admin,
+                external_ref="test-wire-002",
+                journal=ports.journal,
+                balances=ports.balances,
+                audit=ports.audit,
+                clock=ports.clock,
+                payouts=ports.payouts,
             )
 
 
@@ -248,7 +321,113 @@ async def test_mark_payout_paid_unknown_batch_is_rejected(pool, ports):
     async with pool.acquire() as conn, conn.transaction():
         with pytest.raises(UnknownPayoutBatchError):
             await mark_payout_paid(
-                conn, uuid4(), admin_id=admin, external_ref="test-wire-unknown",
-                journal=ports.journal, balances=ports.balances, audit=ports.audit,
-                clock=ports.clock, payouts=ports.payouts,
+                conn,
+                uuid4(),
+                admin_id=admin,
+                external_ref="test-wire-unknown",
+                journal=ports.journal,
+                balances=ports.balances,
+                audit=ports.audit,
+                clock=ports.clock,
+                payouts=ports.payouts,
             )
+
+
+async def test_schedule_payouts_rejects_forged_capture_entry_reference(pool, ports):
+    """게이트 적색 재현 -- `capture_entry_id`가 이 판매자 `PENDING_PAYOUT`
+    계정으로 실제 CREDIT을 남긴 분개가 아니면(위조/오배선된 참조) 배치를
+    조용히 만들지 않고 `UnknownCaptureEntryError`로 fail-closed 거부한다
+    (`postgres_payout_repository.py` 모듈 docstring 계약). 기존 4케이스는
+    모두 정직한 `CaptureRecord`만 다뤄 이 가드를 한 번도 밟지 않았다 --
+    판매자에게 진짜 캡처 하나를 먼저 태워 `PENDING_PAYOUT` 계정 자체는
+    존재하게 한 뒤, `entry_id`만 무관한 값으로 위조해 그 가드를 정확히
+    겨냥한다."""
+    buyer = await create_test_user(pool)
+    seller = await create_test_user(pool)
+    capture = await _captured_hold(pool, ports, buyer, seller, Decimal("30.00"))
+    posted_at = capture.entry.posted_at
+    period_start = posted_at.date()
+    period_end = period_start + timedelta(days=1)
+    seller_pending = ua(seller, UserSub.PENDING_PAYOUT)
+
+    forged_record = CaptureRecord(
+        entry_id=uuid4(),
+        seller_user_id=seller,
+        amount=capture.payout_amount,
+        currency=Currency.KRW,
+        captured_at=posted_at,
+    )
+
+    # pytest.raises가 `conn.transaction()` 블록 *밖에서* 예외를 받아야
+    # 롤백이 실제로 발동한다 -- 안에서 잡으면 asyncpg는 예외 없이 정상
+    # 종료로 보고 커밋해 버린다(그 자체가 이 가드의 fail-closed 여부를
+    # 가리는 함정이라 일부러 바깥에 둔다).
+    with pytest.raises(UnknownCaptureEntryError):
+        async with pool.acquire() as conn, conn.transaction():
+            await schedule_payouts(
+                conn,
+                [forged_record],
+                period_start=period_start,
+                period_end=period_end,
+                now=posted_at + _WINDOW + timedelta(seconds=1),
+                actor_subject_id=None,
+                settlement_window=_WINDOW,
+                journal=ports.journal,
+                balances=ports.balances,
+                audit=ports.audit,
+                clock=ports.clock,
+                payouts=ports.payouts,
+            )
+
+    # 거부된 트랜잭션은 롤백되어 판매자 PENDING_PAYOUT도 그대로다(부분 반영 없음).
+    assert await _balance(pool, seller_pending) == Decimal("25.50")
+
+
+@pytest.mark.perf
+async def test_schedule_payouts_batch_meets_latency_budget(pool, ports):
+    """수치 성능 단언 -- 한 판매자에게 30건의 캡처가 몰린 정산 배치 하나를
+    실 DB로 만드는 데 걸리는 시간에 예산을 둔다. `create_batch`가 캡처마다
+    순차 SELECT+INSERT 2회씩(어댑터 docstring, 드리프트 방지를 위해 새로
+    계산하지 않고 기존 분개에서 읽기만 함)을 쓰므로 항목 수에 선형이다 --
+    이 예산은 그 선형 비용이 조용히 폭증(예: N+1이 N*M으로 퇴행)하는 것만
+    잡는 느슨한 상한이며 절대 하한 최적화를 요구하지 않는다."""
+    buyer = await create_test_user(pool)
+    seller = await create_test_user(pool)
+    capture_count = 30
+    captures: list[CaptureRecord] = []
+    posted_at: datetime | None = None
+    for _ in range(capture_count):
+        capture = await _captured_hold(pool, ports, buyer, seller, Decimal("10.00"))
+        posted_at = capture.entry.posted_at
+        captures.append(_record_for(capture, seller))
+    assert posted_at is not None
+
+    period_start = min(c.captured_at for c in captures).date()
+    period_end = period_start + timedelta(days=1)
+
+    started = time.perf_counter()
+    async with pool.acquire() as conn, conn.transaction():
+        batches = await schedule_payouts(
+            conn,
+            captures,
+            period_start=period_start,
+            period_end=period_end,
+            now=posted_at + _WINDOW + timedelta(seconds=1),
+            actor_subject_id=None,
+            settlement_window=_WINDOW,
+            journal=ports.journal,
+            balances=ports.balances,
+            audit=ports.audit,
+            clock=ports.clock,
+            payouts=ports.payouts,
+        )
+    elapsed_s = time.perf_counter() - started
+
+    print(
+        f"\nschedule_payouts batch of {capture_count} captures took {elapsed_s:.3f}s (budget 3.0s)"
+    )
+    assert len(batches) == 1
+    assert batches[0].amount == Decimal("8.50") * capture_count
+    assert elapsed_s < 3.0, (
+        f"schedule_payouts over {capture_count} captures took {elapsed_s:.3f}s (budget 3.0s)"
+    )

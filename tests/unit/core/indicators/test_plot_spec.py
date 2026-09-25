@@ -6,13 +6,27 @@ Spec: docs/specs/L4_analytics_authoring_backtest_marketplace_v1.0.md §9.11 IND-
 DoD: 기존 지표 전부 PlotSpec 보유(스냅샷) + 일목구름·볼린저 채움이 스펙만으로
 표현됨 + PlotSpec 없는 지표는 등록 거부(fail-closed) + negative(미지 kind/scale,
 fill_between 미지 출력 참조 거부).
+
+D2 증빙 보강(task-2924, DEEPEN 1728 — docs/audit/DEPTH_DSL_IND.md): 원 커밋
+1a7facb는 negative 8건은 있었으나 실패 주입·수치 성능 단언·게이트 적색 재현이
+없어 ADR-2026-09-09-C Decision 1의 D2 하한에 미달이었다. 이 파일 하단 3개
+섹션이 그 증빙이다.
 """
+
 from __future__ import annotations
 
-import pytest
+from typing import Any, cast
 
+import pytest
+from talib import abstract as talib_abstract
+
+from scripts.check_import_linter import ROOT as LINTER_ROOT
+from scripts.check_import_linter import _eval_forbidden, _imports_of, parse_contracts
+from src.core.indicators.generate_specs import generate_talib_specs
+from src.core.indicators.registry import DEFAULT_REGISTRY
 from src.core.indicators.spec import IndicatorSpec, ParamSpec, PlotSpec
 from src.core.indicators.specs_talib import TALIB_SPECS, _plot_kind, _plots_from_talib
+from tests.conftest import PerfBudget
 
 # --- 스냅샷: 11개 코어 지표 전부 PlotSpec 보유, kind/fill_between이 output_flags와 일치 ---
 
@@ -173,7 +187,7 @@ def test_indicator_spec_rejects_extra_plot_without_matching_output() -> None:
 
 
 def test_indicator_spec_rejects_fill_between_referencing_unknown_output() -> None:
-    with pytest.raises(ValueError, match="fill_between references unknown output"):
+    with pytest.raises(ValueError, match="fill_between 'does_not_exist' not in outputs"):
         IndicatorSpec(
             name="BAD_FILL",
             inputs=("close",),
@@ -195,3 +209,82 @@ def test_param_spec_and_plot_spec_are_both_frozen() -> None:
     param = ParamSpec(name="timeperiod", min=2, max=500, default=20)
     with pytest.raises(AttributeError):
         param.default = 30  # type: ignore[misc]
+
+
+# -- D2 실패 주입 --------------------------------------------------------------
+
+
+def test_generate_talib_specs_propagates_talib_introspection_failure_instead_of_skipping(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """`generate_talib_specs` builds `TALIB_SPECS` (module import time, merged
+    with `_MANUAL_OVERRIDES` in `specs_talib.py`) by calling
+    `talib_abstract.Function(name).info` per TA-Lib function to derive each
+    `PlotSpec` (kind/fill_between, ADR-2026-09-06-F D1). If that real
+    collaborator broke for a single function (corrupted native extension, a
+    TA-Lib version drift changing `output_flags` shape) and the loop caught
+    and skipped it per-name instead of propagating, the catalog would shrink
+    silently — quietly violating the IND-15 DoD `기존 지표 전부 PlotSpec 보유`
+    without ever tripping the fail-closed `IndicatorSpec.__post_init__` check,
+    because the indicator would simply be absent rather than malformed.
+    Injecting a failure in the real collaborator (not a hand-built bad input)
+    proves no such silent skip exists."""
+    real_function = cast(Any, talib_abstract).Function
+
+    def _flaky_function(name: str, *args: object, **kwargs: object) -> object:
+        if name == "RSI":
+            raise RuntimeError("simulated TA-Lib native extension corruption")
+        return real_function(name, *args, **kwargs)
+
+    monkeypatch.setattr(talib_abstract, "Function", _flaky_function)
+
+    with pytest.raises(RuntimeError, match="simulated TA-Lib"):
+        generate_talib_specs(["SMA", "RSI"])
+
+
+# -- D2 성능 단언 --------------------------------------------------------------
+
+
+@pytest.mark.perf
+def test_registry_hash_serialization_throughput_budget(perf_budget: PerfBudget) -> None:
+    """`IndicatorRegistry.registry_hash()` runs once per `POST
+    /v1/scripts/compile` request (`src/api/routers/scripts.py`) and once per
+    script-facade compile (`src/core/strategy/script_facade.py`) — it walks
+    all 161 `TALIB_SPECS` entries and JSON-serializes every `PlotSpec` field
+    (`canonical_spec_dict`, `registry.py`) per call. 200 calls must stay well
+    under a 500ms budget to rule out the new PlotSpec fields turning this
+    hot-path serialization pathological (observed ~90ms locally). task-7434:
+    measured via the shared process_time-based perf_budget fixture."""
+
+    def _run_once() -> None:
+        for _ in range(200):
+            DEFAULT_REGISTRY.registry_hash()
+
+    perf_budget.assert_within(_run_once, budget_ms=500.0, label="200 registry_hash() calls")
+
+
+# -- D2 게이트 적색 재현 -------------------------------------------------------
+
+
+def test_import_linter_core_no_io_catches_spec_foundation_import_regression() -> None:
+    """`spec.py`'s module docstring states it is a pure data/type module with
+    no I/O (`순수 데이터/타입 모듈 — I/O·계산 로직 없음`) — exactly the invariant
+    `.importlinter`'s `core-no-io` forbidden contract enforces (`src.core` may
+    not import `src.exchanges`/`src.api`/`src.foundation`). This proves that
+    contract's real evaluator (`scripts/check_import_linter.py`) fires red for
+    a synthetic regression shape (spec.py importing a foundation module to
+    reach display-formatting logic, say), and stays green for this module's
+    real current imports — using a synthetic graph so the test doesn't
+    require the regression to exist in the tree first."""
+    contracts = parse_contracts(LINTER_ROOT / ".importlinter")
+    core_no_io = next(c for c in contracts if c["id"] == "core-no-io")
+
+    regressed_graph = {"src.core.indicators.spec": {"src.foundation.charting.render_contract"}}
+    hits = _eval_forbidden(regressed_graph, core_no_io)
+    assert len(hits) == 1
+    assert hits[0][0] == "src.core.indicators.spec"
+
+    real_imports = _imports_of(
+        LINTER_ROOT / "src/core/indicators/spec.py", "src.core.indicators.spec", is_package=False
+    )
+    assert _eval_forbidden({"src.core.indicators.spec": real_imports}, core_no_io) == []

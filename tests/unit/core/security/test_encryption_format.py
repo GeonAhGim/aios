@@ -3,11 +3,26 @@
 Spec: docs/specs/L4_platform_observability_tenancy_api_v1.0.md#§9 PLT-31
 (+ §2 101행). 핵심 불변: 기존 `legacy_encrypt`가 만든 토큰이 새
 `decrypt(token, ring)`으로 그대로(평문 왕복) 복호돼야 한다.
+
+DEEPEN(task-3138): task-458 DEPTH 감사가 원 리프(commit 401c16dd)에 실패
+주입·수치 성능 단언·게이트 적색 재현이 없다고 지적함 — 새 기능 추가 없이
+이 리프의 증빙만 보강한다. 실패 주입은 근본 암호 라이브러리(AESGCM)가
+`InvalidTag`가 아닌 예기치 못한 예외를 던졌을 때 `decrypt`가 이를 삼켜
+"복호 실패=평문 없음"을 성공처럼 위장하지 않고 그대로 전파하는지 확인한다
+(fail-closed 회귀 방지). 성능 단언은 ADR-2026-09-09-C Decision 1 예산표에
+`encrypt`/`decrypt` 전용 항목이 없어(가장 가까운 항목은 "사전거래 게이트
+p99 5ms") 이 리프가 그 값을 자체 예산으로 차용한다 — AES-256-GCM 왕복은
+순수 CPU 연산(디스크·네트워크 없음)이라 로컬 실측 p95는 이보다 수백 배
+낮다(2026-09-16 실측 ~0.01ms).
 """
+
 from __future__ import annotations
+
+import time
 
 import pytest
 from cryptography.exceptions import InvalidTag
+from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
 from src.core.security.encryption import decrypt, encrypt, legacy_decrypt, legacy_encrypt
 from src.core.security.key_ring import KeyRing, UnknownKeyIdError
@@ -92,3 +107,79 @@ def test_decrypt_rejects_tampered_ciphertext() -> None:
     tampered_body = body[:-4] + ("A" if body[-4] != "A" else "B") + body[-3:]
     with pytest.raises((InvalidTag, ValueError)):
         decrypt(f"{prefix}${kid}${tampered_body}", ring)
+
+
+# --- DEEPEN(task-3138): 실패 주입 — AESGCM 내부 실패가 삼켜지지 않는지 -----
+
+
+def test_decrypt_propagates_unexpected_aesgcm_failure_instead_of_swallowing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """실패 주입: 근본 암호 라이브러리(AESGCM.decrypt)가 `InvalidTag`가 아닌
+    예기치 못한 예외(예: 손상된 크립토 백엔드)를 던지면 `decrypt()`가 이를
+    삼켜 '복호 실패=평문 없음'을 성공처럼 위장하지 않고 그대로 전파해야
+    한다(fail-closed) — 향후 누군가 여기 broad except를 추가해도 이
+    테스트가 잡는다."""
+    ring = _ring()
+    token = encrypt("payload", ring)
+
+    def _boom(self: AESGCM, nonce: bytes, data: bytes, associated_data: bytes | None) -> bytes:
+        raise RuntimeError("simulated crypto backend failure")
+
+    monkeypatch.setattr(AESGCM, "decrypt", _boom)
+    with pytest.raises(RuntimeError, match="simulated crypto backend failure"):
+        decrypt(token, ring)
+
+
+# --- DEEPEN(task-3138): 수치 성능 단언 — encrypt+decrypt 왕복 지연 ---------
+
+_ROUND_TRIP_ITERATIONS = 50
+_ROUND_TRIP_BUDGET_MS = 5.0  # ADR-2026-09-09-C Decision 1의 "사전거래 게이트
+# p99 5ms"를 가장 가까운 유사 항목으로 차용(전용 예산 항목 없음) — AES-256-GCM
+# 왕복은 순수 CPU 연산(디스크·네트워크 없음)이라 로컬 실측 p95(2026-09-16
+# ~0.01ms)는 이보다 수백 배 낮다.
+
+
+def _round_trip_latencies_ms(iterations: int = _ROUND_TRIP_ITERATIONS) -> list[float]:
+    ring = _ring()
+    samples = []
+    for _ in range(iterations):
+        started = time.perf_counter()
+        token = encrypt("perf-probe-plaintext", ring)
+        decrypt(token, ring)
+        samples.append((time.perf_counter() - started) * 1000)
+    samples.sort()
+    return samples
+
+
+def _p95(samples: list[float]) -> float:
+    return samples[min(int(len(samples) * 0.95), len(samples) - 1)]
+
+
+def test_encrypt_decrypt_round_trip_p95_latency_within_self_declared_budget() -> None:
+    samples = _round_trip_latencies_ms()
+    p95_ms = _p95(samples)
+    print(f"[PLT-31] encrypt+decrypt p95={p95_ms:.4f}ms budget<{_ROUND_TRIP_BUDGET_MS:.0f}ms")
+    assert p95_ms < _ROUND_TRIP_BUDGET_MS
+
+
+def test_round_trip_budget_gate_actually_fails_past_budget(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """게이트 적색 재현: 위 단언식이 실제 지연 주입에 대해 `AssertionError`를
+    내는지 확인한다 — 이 테스트가 없으면 위 단언이 항상 통과하는
+    tautology인지 아무도 검증하지 못한다."""
+    original_encrypt = AESGCM.encrypt
+
+    def _slow_encrypt(
+        self: AESGCM, nonce: bytes, data: bytes, associated_data: bytes | None
+    ) -> bytes:
+        time.sleep(_ROUND_TRIP_BUDGET_MS / 1000.0)
+        return original_encrypt(self, nonce, data, associated_data)
+
+    monkeypatch.setattr(AESGCM, "encrypt", _slow_encrypt)
+
+    samples = _round_trip_latencies_ms(iterations=3)
+    p95_ms = _p95(samples)
+    with pytest.raises(AssertionError):
+        assert p95_ms < _ROUND_TRIP_BUDGET_MS

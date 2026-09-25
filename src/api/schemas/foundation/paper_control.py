@@ -1,6 +1,7 @@
-"""Paper Execution & Control API 요청/응답 스키마 — HTTP 세부만 여기 두고,
-계약 자체는 `src/foundation/paper_control/contracts/v1.py`를 감싼다
-(106번 §2)."""
+"""Paper Execution & Control API request/response schemas — HTTP details live here;
+the contract itself is wrapped by `src/foundation/paper_control/contracts/v1.py`
+(Section 106 §2)."""
+
 from __future__ import annotations
 
 from datetime import datetime

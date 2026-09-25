@@ -15,15 +15,17 @@ PROPOSED revision이 동시에 ACTIVE로 전이할 수 있고, 트랜잭션 내�
 active_revision_id IS NOT DISTINCT FROM $expected` 자체가 행 잠금 + 커밋 후
 재검사(EvalPlanQual)이므로 별도 FOR UPDATE는 불필요하다.
 """
+
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from decimal import Decimal
 from uuid import UUID
 
 import asyncpg
 
 from src.core.db.conditional_write import ConcurrencyConflictError, conditional_update
-from src.foundation.entities.domain.defaults import default_portfolio_id
+from src.foundation.entities.api import default_portfolio_id
 from src.foundation.mandates.adapters.postgres_policy_repository import (
     PostgresPolicyRepositoryMixin,
 )
@@ -54,7 +56,7 @@ def _row_to_revision(row: asyncpg.Record) -> MandateRevision:
         state=MandateRevisionState(row["state"]),
         max_total_exposure_pct=float(row["max_total_exposure_pct"]),
         max_single_instrument_pct=float(row["max_single_instrument_pct"]),
-        min_cash_buffer_pct=float(row["min_cash_buffer_pct"]),
+        min_cash_buffer_pct=Decimal(str(row["min_cash_buffer_pct"])),
         max_daily_loss_pct=float(row["max_daily_loss_pct"]),
         allowed_autonomy=Autonomy(row["allowed_autonomy"]),
         forbidden_assets=tuple(row["forbidden_assets"]),
@@ -114,9 +116,7 @@ class PostgresMandateRepository(PostgresPolicyRepositoryMixin):
 
     async def get_revision(self, revision_id: UUID) -> MandateRevision | None:
         async with self._pool.acquire() as conn:
-            row = await conn.fetchrow(
-                "SELECT * FROM mandate_revision WHERE id = $1", revision_id
-            )
+            row = await conn.fetchrow("SELECT * FROM mandate_revision WHERE id = $1", revision_id)
         return _row_to_revision(row) if row is not None else None
 
     async def get_active_revision(self, mandate_id: UUID) -> MandateRevision | None:

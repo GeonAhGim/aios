@@ -1,19 +1,21 @@
-"""RunReconciliation 커맨드.
+"""RunReconciliation command.
 
-Spec: AIOSproject 50번 §3, 80번 §1/§2.
+Spec: AIOSproject ticket 50 §3, ticket 80 §1/§2.
 
-내부/provider 값은 둘 다 호출자가 `EntitySnapshot`으로 공급한다 —
-paper_control(FND-07)에 아직 fill/position/balance 내부 원장이 없고,
-connections(FND-05)의 account_snapshot도 실제 숫자를 갖지 않아(마이그레이션
-docstring 참조) 이 리프가 원천 데이터를 직접 읽어올 대상이 없다. 이
-커맨드가 실제로 제공하는 건 분류·집계·상태 갱신·kill switch 연동
-로직이다 — 두 원장이 실제 값을 갖게 되면 입력 조립부만 교체한다.
+Both internal/provider values are supplied by the caller via `EntitySnapshot` —
+paper_control (FND-07) has no internal ledger for fill/position/balance yet,
+and the account_snapshot from connections (FND-05) carries no real numbers
+(see migration docstring), so this leaf has no source to read directly. What
+this command actually provides is classification, aggregation, state update,
+and kill-switch wiring logic — once both ledgers hold real values, only the
+input assembly layer needs replacement.
 
-MATERIAL_MISMATCH/PROVIDER_UNAVAILABLE 시 risk_gate(FND-06)에
-STRATEGY_DEPLOYMENT 범위 safety control을 건다(80번 §1 "creates a
-SafetyControl request and block new submissions") — 이 트리거는 사람이
-아니라 reconciliation 엔진 자신이므로 `actor_is_admin=True`로 호출한다
-(사람의 self-service ACCOUNT 범위 제한과는 별개 경로)."""
+On MATERIAL_MISMATCH/PROVIDER_UNAVAILABLE, it triggers a safety control at
+STRATEGY_DEPLOYMENT scope in risk_gate (FND-06) (ticket 80 §1 "creates a
+SafetyControl request and block new submissions") — the trigger is the
+reconciliation engine itself, not a person, so it calls with
+`actor_is_admin=True` (separate path from the person's self-service ACCOUNT
+scope restriction)."""
 from __future__ import annotations
 
 from datetime import datetime, timezone
@@ -41,8 +43,8 @@ from src.foundation.reconciliation.domain.rules import (
     compute_input_hash,
 )
 from src.foundation.reconciliation.ports.repository import ReconciliationRepository
+from src.foundation.risk_gate.api import SafetyScope
 from src.foundation.risk_gate.application.activate_safety_control import activate_safety_control
-from src.foundation.risk_gate.domain.models import SafetyScope
 from src.foundation.risk_gate.ports.repository import RiskGateRepository
 
 RULE_VERSION = "v1"
@@ -102,9 +104,9 @@ async def run_reconciliation(
         aggregate = aggregate_classification(tuple(i.classification for i in existing.items))
         return run_to_view(existing, aggregate)
 
-    # 80번 §2 "Provider timeout creates PROVIDER_UNAVAILABLE; it never
-    # assumes zero balance/fill" — connection 자체가 unhealthy면 개별 항목
-    # 분류 이전에 전체를 PROVIDER_UNAVAILABLE로 본다.
+    # Ticket 80 §2 "Provider timeout creates PROVIDER_UNAVAILABLE; it never
+    # assumes zero balance/fill" — if the connection itself is unhealthy,
+    # treat the entire run as PROVIDER_UNAVAILABLE before per-item classification.
     connection_unavailable = False
     if connection_id is not None:
         health = await connection_repo.get_latest_health(connection_id)
@@ -120,7 +122,7 @@ async def run_reconciliation(
         items.append(
             ReconciliationItem(
                 id=uuid4(),
-                run_id=uuid4(),  # adapter가 실제 run_id로 덮어씀(insert_run_with_items)
+                run_id=uuid4(),  # adapter overwrites with the real run_id (insert_run_with_items)
                 entity_type=entity.entity_type,
                 entity_key=entity.entity_key,
                 internal_value=entity.internal_value,

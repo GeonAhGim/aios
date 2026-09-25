@@ -10,8 +10,10 @@ property 스타일이지만 hypothesis 없이 시드 고정 RNG로 (지표 × �
 소비). TA-Lib 참조 대조는 마지막 테스트 하나에서 함수 내부 import로만 쓴다 —
 미설치면 skip이 아니라 실패한다(fail-closed, 저장소는 이미 talib에 하드 의존).
 """
+
 from __future__ import annotations
 
+import time
 from decimal import Decimal
 from typing import Any
 
@@ -260,3 +262,84 @@ def test_vectorized_matches_talib_reference_default_params(name: str) -> None:
         finite = ~np.isnan(a)
         scale = np.maximum(1.0, np.abs(b[finite]))
         assert np.max(np.abs(a[finite] - b[finite]) / scale) <= 1e-6, (name, key)
+
+
+# ---- DEEPEN(task-2916): 수치 성능 단언(증분 update 지연) ----
+
+
+@pytest.mark.perf
+def test_incremental_update_latency_p99_within_streaming_budget() -> None:
+    """ADR-2026-09-09-C Decision 1의 축별 성능 예산 표는 지표 축에 "증분=일괄 동일"만
+    걸어 두고 지연 자체는 수치화하지 않았다 — 이 리프에서 실측으로 보강한다. 리플레이·
+    실시간 루프는 bar 하나당 `IncrementalIndicator.update()`를 딱 한 번 부른다(모듈
+    docstring 1행 "리플레이·실시간 동일 결과"). `_STATES`에 손으로 구현된 11개 지표
+    전부에 5,000 bar를 흘려 넣고 update() 호출별 지연을 재 p99를 구한다 — 로컬 실측
+    (EMA 1.1us ~ STOCH 3.2us, 창·Wilder·EMA 전부 O(period) 또는 O(1) 갱신이라 5,000
+    bar에서도 안 늘어난다)에 CI 기계 편차 감안 30배 이상 여유를 둔 100us를 예산으로
+    건다."""
+    rng = np.random.default_rng(21)
+    n = 5000
+    cols = _ohlcv(rng, n, 100.0)
+    budget_sec = 100e-6
+    for name in NAMES:
+        spec = TALIB_SPECS[name]
+        params = {p.name: p.default for p in spec.params}
+        ind = IncrementalIndicator(name, params)
+        keys = ind.spec.inputs
+        samples = np.empty(n)
+        for i in range(n):
+            bar = {k: float(cols[k][i]) for k in keys}
+            start = time.perf_counter()
+            ind.update(bar)
+            samples[i] = time.perf_counter() - start
+        samples.sort()
+        p99 = samples[int(n * 0.99)]
+        p99_us, budget_us = p99 * 1e6, budget_sec * 1e6
+        print(f"[IND-1 incremental] {name} n={n} p99={p99_us:.2f}us budget<{budget_us:.0f}us")
+        assert p99 < budget_sec, (name, p99)
+
+
+# ---- DEEPEN(task-2916): 게이트 적색 재현(증분 준비도 자기검증) ----
+
+
+def test_incremental_readiness_self_check_prevents_premature_value_regression(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """`IncrementalIndicator.update()`의 준비도 자기검증(`(values is not None) !=
+    (bars_seen > lookback)`이면 `INDICATOR_LOOKBACK_MISMATCH`, incremental.py 모듈
+    docstring "창 산식이 L01과 조용히 어긋나는 것을 막는 자기검증")이 없었다면 무슨
+    일이 일어나는지 먼저 재현한다: SMA 상태를 한 bar 이르게(`period - 1`개만 모이면)
+    값을 내놓도록 바꿔치기한다 — registry lookback(=`period - 1`=9, `timeperiod=10`)
+    보다 한 bar 이른 값이다. 자기검증 없이 상태만 직접 굴리면 그 틀린 값이 조용히
+    반환된다(레드 — 아무도 못 잡는다). 실장 코드는 `update()`의 준비도 비교가 상태를
+    바꿔치기해도 즉시 `INDICATOR_LOOKBACK_MISMATCH`로 fail-closed 한다."""
+    import src.core.indicators.engine.incremental as incremental_module
+
+    params = {"timeperiod": 10}
+    lookback = DEFAULT_REGISTRY.lookback("SMA", params)
+    cols = _ohlcv(np.random.default_rng(5), lookback + 5, 100.0)
+
+    class _PrematureSma:
+        def __init__(self, p: dict[str, int]) -> None:
+            self._period = p["timeperiod"]
+            self._buf: list[float] = []
+
+        def update(self, bar: dict[str, float]) -> tuple[float] | None:
+            self._buf.append(bar["close"])
+            if len(self._buf) < self._period - 1:
+                return None
+            window = self._buf[-(self._period - 1) :]
+            return (sum(window) / len(window),)
+
+    # 레드 재현: 자기검증 없이 상태만 굴리면 lookback(9)보다 한 bar 이른 값이 나온다.
+    bare_state = _PrematureSma(params)
+    bare_values = [bare_state.update({"close": float(c)}) for c in cols["close"][:lookback]]
+    assert bare_values[-1] is not None  # 자기검증이 없다면 아무도 못 잡는 undetected 상태
+
+    # 실장: IncrementalIndicator.update()의 준비도 자기검증이 즉시 잡는다.
+    monkeypatch.setitem(incremental_module._STATES, "SMA", _PrematureSma)
+    ind = IncrementalIndicator("SMA", params)
+    with pytest.raises(IndicatorError) as exc:
+        for c in cols["close"]:
+            ind.update({"close": float(c)})
+    assert exc.value.code == "INDICATOR_LOOKBACK_MISMATCH"

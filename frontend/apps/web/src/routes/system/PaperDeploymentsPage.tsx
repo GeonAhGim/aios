@@ -33,6 +33,7 @@ import { ForbiddenNotice } from "../../components/ForbiddenNotice";
 import { NotFoundState } from "../../components/NotFoundState";
 import { DuplicateSubmitError, useIdempotentSubmit } from "../../hooks/useIdempotentSubmit";
 import { useConflictRetry } from "../../hooks/useConflictRetry";
+import { useTranslation } from "react-i18next";
 
 // spec §9 PLT-15/§3.7: 에러 표시는 ExecutionControlPage(task-901/937)와 동일한
 // 세 갈래(400/403/기타) 판정을 재사용한다 — 판정 로직을 다시 만들지 않는다.
@@ -53,10 +54,11 @@ function CommandError({ error, onRetry }: { error: unknown; onRetry?: () => void
 }
 
 function DeploymentsListError({ error, onRetry }: { error: unknown; onRetry: () => void }) {
+  const { t } = useTranslation();
   if (isResourceNotFound(error)) {
     return (
       <NotFoundState
-        title="배포 목록을 찾을 수 없습니다"
+        title={t("legacy.paperDeploymentsPage.title1")}
         description="삭제되었거나 존재하지 않는 데이터입니다."
       />
     );
@@ -82,6 +84,7 @@ interface DeploymentRowProps {
 }
 
 function DeploymentRow({ deployment }: DeploymentRowProps) {
+  const { t } = useTranslation();
   const start = useStartPaperDeployment();
   const resume = useResumePaperDeployment();
   const pause = usePausePaperDeployment();
@@ -110,7 +113,7 @@ function DeploymentRow({ deployment }: DeploymentRowProps) {
         <div>
           <p className="font-medium text-fg">{deployment.packageRef}</p>
           <p className="text-sm text-fg-muted">
-            연결 {deployment.connectionId ?? "미지정"} · fence {deployment.fenceToken}
+            {t("legacy.paperDeploymentsPage.t2")}{deployment.connectionId ?? "미지정"} · fence {deployment.fenceToken}
           </p>
         </div>
         <StatusBadge status={deployment.state} />
@@ -125,8 +128,7 @@ function DeploymentRow({ deployment }: DeploymentRowProps) {
             loading={start.isPending}
             onClick={() => void run(submitStart, start.mutateAsync)}
           >
-            시작
-          </Button>
+            {t("legacy.paperDeploymentsPage.t3")}</Button>
         )}
         {deployment.state === "PAUSED" && (
           <Button
@@ -136,8 +138,7 @@ function DeploymentRow({ deployment }: DeploymentRowProps) {
             loading={resume.isPending}
             onClick={() => void run(submitResume, resume.mutateAsync)}
           >
-            재개
-          </Button>
+            {t("legacy.paperDeploymentsPage.t4")}</Button>
         )}
         {deployment.state === "RUNNING" && (
           <Button
@@ -147,8 +148,7 @@ function DeploymentRow({ deployment }: DeploymentRowProps) {
             loading={pause.isPending}
             onClick={() => void run(submitPause, pause.mutateAsync)}
           >
-            일시정지
-          </Button>
+            {t("legacy.paperDeploymentsPage.t5")}</Button>
         )}
         {STOPPABLE_STATES.has(deployment.state) && (
           <Button
@@ -158,8 +158,7 @@ function DeploymentRow({ deployment }: DeploymentRowProps) {
             loading={stop.isPending}
             onClick={() => void run(submitStop, stop.mutateAsync)}
           >
-            중지
-          </Button>
+            {t("legacy.paperDeploymentsPage.t6")}</Button>
         )}
       </div>
     </div>
@@ -167,6 +166,7 @@ function DeploymentRow({ deployment }: DeploymentRowProps) {
 }
 
 export function PaperDeploymentsPage() {
+  const { t } = useTranslation();
   const { data, isLoading, refetch, error: listError, isError: listIsError } = usePaperDeployments();
   const requestDeployment = useRequestPaperDeployment();
   const { submit } = useIdempotentSubmit("paperDeployments.request");
@@ -203,7 +203,7 @@ export function PaperDeploymentsPage() {
       setProviderSandboxAccountRef("");
     } catch (err) {
       if (err instanceof DuplicateSubmitError) return;
-      setError(err instanceof ApiError ? err : new Error("배포 요청에 실패했습니다."));
+      setError(err instanceof ApiError ? err : new Error(t("legacy.paperDeploymentsPage.t16")));
     }
   }
 
@@ -217,21 +217,21 @@ export function PaperDeploymentsPage() {
   return (
     <AppShell>
       <div className="space-y-8">
-        <PageHeader title="페이퍼 배포 제어" />
+        <PageHeader title={t("legacy.paperDeploymentsPage.title7")} />
 
         <Card>
-          <CardTitle>새 배포 요청</CardTitle>
+          <CardTitle>{t("legacy.paperDeploymentsPage.t8")}</CardTitle>
           <form onSubmit={handleSubmit} className="grid grid-cols-2 gap-4 md:grid-cols-5">
-            <Field label="패키지 참조">
+            <Field label={t("legacy.paperDeploymentsPage.label9")}>
               <Input required value={packageRef} onChange={(e) => setPackageRef(e.target.value)} />
             </Field>
-            <Field label="연결 ID(선택)">
+            <Field label={t("legacy.paperDeploymentsPage.label10")}>
               <Input value={connectionId} onChange={(e) => setConnectionId(e.target.value)} />
             </Field>
-            <Field label="어댑터 유형">
+            <Field label={t("legacy.paperDeploymentsPage.label11")}>
               <Input required value={adapterType} onChange={(e) => setAdapterType(e.target.value)} />
             </Field>
-            <Field label="샌드박스 계정 참조">
+            <Field label={t("legacy.paperDeploymentsPage.label12")}>
               <Input
                 required
                 value={providerSandboxAccountRef}
@@ -240,8 +240,7 @@ export function PaperDeploymentsPage() {
             </Field>
             <div className="col-span-2 flex items-end md:col-span-1">
               <Button type="submit" loading={requestDeployment.isPending} className="w-full">
-                배포 요청
-              </Button>
+                {t("legacy.paperDeploymentsPage.t13")}</Button>
             </div>
           </form>
           {error !== null && (
@@ -252,7 +251,7 @@ export function PaperDeploymentsPage() {
         </Card>
 
         <section className="space-y-4">
-          <h2 className="text-lg font-medium text-fg">배포 목록</h2>
+          <h2 className="text-lg font-medium text-fg">{t("legacy.paperDeploymentsPage.t14")}</h2>
           {listIsError ? (
             <DeploymentsListError error={listError} onRetry={() => void refetch()} />
           ) : isLoading ? (
@@ -264,7 +263,7 @@ export function PaperDeploymentsPage() {
               ))}
             </div>
           ) : (
-            <EmptyState>페이퍼 배포가 없습니다.</EmptyState>
+            <EmptyState>{t("legacy.paperDeploymentsPage.t15")}</EmptyState>
           )}
         </section>
       </div>

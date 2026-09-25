@@ -7,7 +7,13 @@ approval" — /evaluate는 조회 트리거일 뿐 클라이언트가 outcome을
 
 도메인 예외는 여기서 잡지 않는다 — `src/api/contracts/exception_mapping.py`의
 `EXCEPTION_MAP`이 전역 핸들러에서 봉투로 번역한다(§9 PLT-21b decision,
-task-1218)."""
+task-1218).
+
+PLT-35-fix(task-3850): `post_evaluate_recovery` releases/recovers a
+triggered safety control -- a kill-switch-override path -- so it now also
+carries `require_break_glass("kill_switch_override")`, the one route among
+the three scopes whose name matches literally."""
+
 from __future__ import annotations
 
 from uuid import UUID, uuid4
@@ -15,6 +21,7 @@ from uuid import UUID, uuid4
 import asyncpg
 from fastapi import APIRouter, Depends, status
 
+from src.api.admin_deps import require_break_glass
 from src.api.contracts.envelope import ApiResponse, ok
 from src.api.deps import get_current_admin, get_current_user, get_pool
 from src.api.foundation_deps import (
@@ -43,6 +50,7 @@ from src.core.event_bus.in_process import InProcessEventBus
 from src.core.loader.risk_policy_loader import RiskPolicy
 from src.core.risk.policy_bundle import RiskRuleBundle
 from src.core.safety.circuit_breaker import CircuitBreakerService
+from src.core.security.break_glass import BreakGlassGrant
 from src.foundation.connections.ports.repository import ConnectionRepository
 from src.foundation.evidence.ports.repository import AuditEventRepository
 from src.foundation.mandates.ports.repository import MandateRepository
@@ -168,6 +176,7 @@ async def post_evaluate_recovery(
     pool: asyncpg.Pool = Depends(get_pool),
     cb: CircuitBreakerService = Depends(get_circuit_breaker_service),
     policy: RiskPolicy = Depends(get_risk_policy),
+    _grant: BreakGlassGrant = Depends(require_break_glass("kill_switch_override")),  # noqa: B008 -- same existing convention as admin_deps.py (the factory call itself is the Depends argument)
 ) -> ApiResponse[RecoveryDecisionView]:
     repos = RecoveryGateRepos(
         risk_gate=repo,
@@ -178,6 +187,7 @@ async def post_evaluate_recovery(
         ),
         cooldown_sec=policy.reactivation.cooldown_sec,
         approval_ttl_sec=policy.reactivation.approval_ttl_sec,
+        circuit_breaker_policy=policy.circuit_breaker,
     )
     decision = await evaluate_recovery(
         repos,

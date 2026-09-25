@@ -15,6 +15,7 @@ Spec: docs/specs/L4_market_data_positions_ledger_v1.0.md#§2.2 LA-8, §9.2 LA-8.
 MERGER의 정확한 전환 비율 관례도 **미검증**이며 SPLIT과 동일한 공식을 쓴다.
 I/O 없음 — 순수 함수만 담는다.
 """
+
 from __future__ import annotations
 
 from collections import defaultdict
@@ -25,7 +26,13 @@ from uuid import UUID
 
 from src.foundation.market_data.contracts.v1 import CandleRecord, CorporateAction
 
-__all__ = ["AdjustmentFactor", "InvalidRatioError", "adjust", "factor_chain"]
+__all__ = [
+    "AdjustmentFactor",
+    "InvalidActionTypeError",
+    "InvalidRatioError",
+    "adjust",
+    "factor_chain",
+]
 
 _ONE = Decimal(1)
 
@@ -37,6 +44,21 @@ class InvalidRatioError(ValueError):
         super().__init__(
             f"instrument_id={action.instrument_id} ex_date={action.ex_date}: "
             f"ratio={action.ratio}는 양수여야 합니다."
+        )
+        self.action = action
+
+
+class InvalidActionTypeError(ValueError):
+    """`action_type` is none of the 4 known values (SPLIT/REVERSE_SPLIT/
+    CASH_DIVIDEND/MERGER). `CorporateAction.action_type` is a Literal, so
+    this cannot happen via normal construction — but a corrupted record
+    (e.g. `model_construct` bypassing validation, or a stale value left by
+    an earlier, looser schema) could still reach here, so fail closed."""
+
+    def __init__(self, action: CorporateAction) -> None:
+        super().__init__(
+            f"instrument_id={action.instrument_id} ex_date={action.ex_date}: "
+            f"unknown action_type={action.action_type!r}"
         )
         self.action = action
 
@@ -60,8 +82,10 @@ def _action_factors(action: CorporateAction) -> tuple[Decimal, Decimal]:
         raise InvalidRatioError(action)
     if action.action_type == "REVERSE_SPLIT":
         return action.ratio, _ONE / action.ratio
-    # SPLIT, MERGER, CASH_DIVIDEND(ratio=1 관례 — 위 모듈 docstring 참고)
-    return _ONE / action.ratio, action.ratio
+    if action.action_type in ("SPLIT", "MERGER", "CASH_DIVIDEND"):
+        # CASH_DIVIDEND ratio=1 convention -- see module docstring above.
+        return _ONE / action.ratio, action.ratio
+    raise InvalidActionTypeError(action)
 
 
 def factor_chain(actions: list[CorporateAction], as_of: datetime) -> list[AdjustmentFactor]:

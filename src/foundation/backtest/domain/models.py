@@ -5,6 +5,7 @@ specification_v1.0.md §3, §5; docs/specs/L4_strategy_portfolio_backtest_v1.0.m
 §2.4 (`domain/models.py` row -- MINOR extension of `CostModel`/`BacktestConfig`/
 `BacktestMetrics`, existing fields unchanged).
 """
+
 from __future__ import annotations
 
 from datetime import datetime
@@ -84,9 +85,7 @@ class BacktestConfig(BaseModel):
     timeframe: str | None = None
     data_snapshot_hash: str | None = None
     fill_policy: Literal["NEXT_OPEN", "NEXT_OPEN_WITH_GAP_CHECK"] = "NEXT_OPEN"
-    survivorship_policy: Literal["UNIVERSE_SNAPSHOT_REQUIRED"] = (
-        "UNIVERSE_SNAPSHOT_REQUIRED"
-    )
+    survivorship_policy: Literal["UNIVERSE_SNAPSHOT_REQUIRED"] = "UNIVERSE_SNAPSHOT_REQUIRED"
 
     def config_hash(self) -> str:
         """Reuses R-01 -- canonical hash of every field, including `cost_model`."""
@@ -118,9 +117,12 @@ class BacktestMetrics(BaseModel):
     "한계·가정"의 최소 구현 — 조용히 0을 내지 않는다).
 
     v2 (MINOR): adds gross/net split, cost totals, calmar, exposure time,
-    annualization factor and the reporting `basis`. Stays `None` until
-    L31 (`compute_metrics.py`) fills it in, keeping "not yet computed"
-    distinct from zero."""
+    annualization factor and the reporting `basis` -- filled in by L31
+    (`compute_metrics.py`). `total_funding` stays `None`: Phase 1
+    `simulate_fill.py` does not yet apply funding cost per fill (BT-8's
+    `domain/costs/funding.py` exists but is not wired into the fill loop),
+    so there is nothing to sum -- "not yet computed" stays distinct from
+    zero rather than guessing."""
 
     period_start: datetime
     period_end: datetime

@@ -1,6 +1,7 @@
 {
   "name": "mihwa-aios-frontend",
   "private": true,
+  "type": "module",
   "workspaces": [
     "apps/*",
     "packages/*"
@@ -12,7 +13,22 @@
     "check:filesize": "node scripts/check_frontend_file_size.mjs",
     "check:unwired-modules": "node scripts/check_unwired_modules.mjs",
     "test:unwired-modules": "node --test scripts/check_unwired_modules.test.mjs",
+    "check:i18n-literals": "node scripts/check_i18n_literals.mjs",
+    "test:i18n-literals": "node --test scripts/check_i18n_literals.test.mjs",
+    "check:hardcoded-colors": "node scripts/check_hardcoded_colors.mjs",
+    "test:hardcoded-colors": "node --test scripts/check_hardcoded_colors.test.mjs",
+    "check:a11y-baseline": "node scripts/check_a11y_baseline.mjs",
+    "test:a11y-baseline": "node --test scripts/check_a11y_baseline.test.mjs",
+    "check:lockfile-workspaces": "node scripts/check_lockfile_workspaces.mjs",
+    "test:lockfile-workspaces": "node --test scripts/check_lockfile_workspaces.test.mjs",
     "bench:density": "npm run bench:density --workspace=packages/chart-engine",
-    "check:coverage": "npm run test:coverage --workspace=apps/web && node ../scripts/frontend_coverage_ratchet.mjs"
+    "bench:idempotency-scan": "npm run bench:idempotency-scan --workspace=packages/api-client",
+    "bench:chart-pane-row": "npm run bench:chart-pane-row --workspace=apps/web",
+    "check:coverage": "npm run test:coverage --workspace=apps/web && node ../scripts/frontend_coverage_ratchet.mjs",
+    "test:coverage-ratchet": "node --test ../scripts/frontend_coverage_ratchet.test.mjs",
+    "test:e2e": "playwright test"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.63.0"
   }
 }

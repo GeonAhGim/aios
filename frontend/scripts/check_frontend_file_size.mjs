@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // P6 file-size ratchet (task-2026): frontend/apps/web/src and frontend/packages/*/src
-// must stay under 300 lines per .ts/.tsx file. Files already over budget are pinned
+// must stay under LINE_LIMIT lines per .ts/.tsx file (ADR-2026-09-10-C). Files already over budget are pinned
 // in frontend-file-size-baseline.json; the ratchet only rejects growth past that
 // pinned count (or a brand-new file starting over budget). Shrinking a baseline
 // entry is never auto-applied — a human commits the lower number, same policy as
@@ -9,7 +9,9 @@ import { readFileSync, readdirSync, statSync } from "node:fs";
 import { join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 
-export const LINE_LIMIT = 300;
+// ADR-2026-09-10-C: file size is an observation metric; 500 warns, growth past baseline
+// still fails, and a hard cap lives at 1000 (loc-allow exceptions).
+export const LINE_LIMIT = 500;
 
 const EXCLUDED_SEGMENTS = new Set(["vendor", "node_modules", "dist"]);
 const INCLUDED_EXTENSIONS = [".ts", ".tsx"];
@@ -80,7 +82,7 @@ export function checkRatchet(scanned, baseline) {
   for (const { path, lines } of scanned) {
     const base = baseline[path];
     if (base === undefined) {
-      if (lines > LINE_LIMIT) violations.push({ path, lines, reason: "new file over the 300-line limit" });
+      if (lines > LINE_LIMIT) violations.push({ path, lines, reason: `new file over the ${LINE_LIMIT}-line limit` });
       continue;
     }
     if (lines > base) {

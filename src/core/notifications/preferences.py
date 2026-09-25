@@ -1,12 +1,12 @@
-"""17.4 — 알림 설정 관리.
+"""17.4 — Notification preferences management.
 
 Spec: 기능설계문서_v1.20.md#FD-17.4
 
-강제 채널 필드는 애초에 notification_preferences 테이블에 컬럼으로 없다
-(04번 DB스키마, 이중 방어) — 여기서는 그 컬럼 화이트리스트만 신뢰하고,
-그 외 요청 필드는 전부 거부 대상으로 보고한다(호출부인 API 레이어가 이
-`rejected_fields`를 근거로 403을 함께 반환할지 결정, FD-17.4 원문: "요청
-전체를 거부하지 않고 허용된 필드는 처리").
+The forced-channel fields do not exist as columns in the notification_preferences table
+(DB schema #04, defence-in-depth) — this module trusts only the column whitelist.
+Any request fields outside the whitelist are reported as rejected (the calling API layer
+decides whether to return 403 alongside this list; FD-17.4 original: "process allowed
+fields without rejecting the entire request").
 """
 from __future__ import annotations
 

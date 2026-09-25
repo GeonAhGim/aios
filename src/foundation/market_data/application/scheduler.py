@@ -1,22 +1,25 @@
-"""LA-18 — market_data 스케줄러: 심볼×tf별 주기 ingest(선택) + 품질 지표 export.
+"""LA-18 — market_data scheduler: periodic per-symbol×timeframe ingest (optional)
++ quality metrics export.
 
 Spec: docs/specs/L4_market_data_positions_ledger_v1.0.md#§5.3, §9.2 LA-18.
 
-`src/services/execution_loop/scheduler.py`·`src/foundation/ledger/application/
-scheduler.py`와 같은 설계 원칙을 따른다 — 한 주기의 실패(예외)가 루프 자체를
-죽이지 않고 다음 주기에 다시 시도하며, 항목 하나(watched series 하나)의
-실패가 나머지를 막지 않는다(§9 LA-18 DoD).
+Follows the same design principles as `src/services/execution_loop/scheduler.py`
+and `src/foundation/ledger/application/scheduler.py` — a failure (exception) in
+one cycle does not kill the loop; it retries on the next cycle, and a failure
+in one item (one watched series) does not block the rest (§9 LA-18 DoD).
 
-편차: 명세 표는 시그니처를 `async def run_market_data_scheduler(app_state, *,
-interval_s, stop: asyncio.Event)` 자유 함수로 적지만, 이미 병합된 같은 계층의
-두 스케줄러(`ExecutionLoopScheduler`, `LedgerIntegrityScheduler`)가 전부
-클래스 + `run_forever()` 메서드 패턴이라 그쪽을 따른다(main.py 배선 지점이
-이미 그 패턴을 전제로 만들어져 있다 — task-712 decision).
+Deviation: the spec table writes the signature as `async def
+run_market_data_scheduler(app_state, *, interval_s, stop: asyncio.Event)` a
+free function, but the two already-merged same-layer schedulers
+(`ExecutionLoopScheduler`, `LedgerIntegrityScheduler`) all use the class +
+`run_forever()` method pattern, so we follow that (the main.py wiring point
+already assumes that pattern — task-712 decision).
 
-ingest 부분은 이 리프 범위에 "어떤 심볼을 주기적으로 수집할지" 결정하는
-포트·설정이 없어(LA-9 포트 5개에 없음, config에도 없음) 호출자가 명시적으로
-넘기는 `watched: Sequence[WatchedSeries]`로만 동작한다(기본값 빈 시퀀스 —
-품질 지표 export만 수행). 운영 심볼 목록·자격증명 배선은 후속(§10, 미확정).
+The ingest portion has no port/config in this leaf scope to decide "which
+symbols to collect periodically" (not among LA-9's 5 ports, not in config),
+so it operates only on the `watched: Sequence[WatchedSeries]` passed explicitly
+by the caller (default empty sequence — performs quality metrics export only).
+Operational symbol lists and credential wiring are subsequent (§10, undetermined).
 """
 from __future__ import annotations
 
@@ -59,9 +62,9 @@ def _utcnow() -> datetime:
 
 @dataclass(frozen=True)
 class WatchedSeries:
-    """스케줄러가 매 주기 다시 fetch할 (venue, 심볼, timeframe). `lookback`은
-    매 주기 `[now - lookback, now)`를 다시 수집한다 — `md_candle`은 `ON
-    CONFLICT DO NOTHING`(§5)이라 겹치는 범위를 반복 수집해도 안전하다."""
+    """(venue, symbol, timeframe) the scheduler re-fetches each cycle. `lookback`
+    re-collects `[now - lookback, now)` every cycle — `md_candle` uses `ON
+    CONFLICT DO NOTHING` (§5), so repeating overlapping ranges is safe."""
 
     venue: Venue
     canonical_symbol: str
@@ -110,7 +113,7 @@ class MarketDataQualityScheduler:
         self._clock: Clock = clock
 
     async def _ingest_one(self, target: WatchedSeries, now: datetime) -> None:
-        assert self._source is not None and self._audit is not None  # __init__ 불변조건
+        assert self._source is not None and self._audit is not None  # invariant from __init__
         cmd = IngestCandlesCommand(
             tenant_id=target.tenant_id,
             venue=target.venue,
@@ -133,11 +136,11 @@ class MarketDataQualityScheduler:
         )
 
     async def run_once(self) -> CycleReport:
-        """한 주기: 감시 대상 ingest(항목별 실패 격리) → 품질 게이지 export.
+        """One cycle: ingest watched series (failure-isolated per item) → quality gauge export.
 
-        ingest 실패는 이 주기의 export를 막지 않는다 — export는 이미 저장된
-        배치를 훑을 뿐이라 이번 주기에 새로 들어오지 못한 데이터가 있어도
-        그 자체로 STALE 게이지에 반영된다(§4.1)."""
+        An ingest failure does not block this cycle's export — export only walks
+        already-stored batches, so data that did not arrive this cycle is itself
+        reflected in the STALE gauge (§4.1)."""
         now = self._clock()
         report = CycleReport()
         for target in self._watched:
@@ -163,8 +166,8 @@ class MarketDataQualityScheduler:
         return report
 
     async def run_forever(self) -> None:
-        """main.py 백그라운드 태스크 본체. 한 주기 전체 실패가 루프를 죽이지
-        않는다(execution_loop/scheduler.py와 동일 설계)."""
+        """main.py background task body. A full-cycle failure does not kill the
+        loop (same design as execution_loop/scheduler.py)."""
         while True:
             await asyncio.sleep(self.interval_seconds)
             try:

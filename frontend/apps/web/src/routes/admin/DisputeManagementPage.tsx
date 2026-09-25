@@ -7,6 +7,7 @@ import { useRef, useState } from "react";
 import { AppShell } from "../../components/layout/AppShell";
 import { ErrorMessage } from "../../components/ErrorMessage";
 import { ForbiddenNotice } from "../../components/ForbiddenNotice";
+import { useTranslation } from "react-i18next";
 
 // spec §3.3 에러 taxonomy: 분쟁 처리(resolve) 실패는 err.message를 직접 노출하지
 // 않고 routeApiError로 판정해 403/그 외를 각각 ForbiddenNotice/ErrorMessage
@@ -28,6 +29,7 @@ function ResolveDisputeError({ error, onRetry }: { error: unknown; onRetry: () =
 }
 
 export function DisputeManagementPage() {
+  const { t } = useTranslation();
   const { data: disputes, isLoading } = useAdminDisputes();
   const resolve = useResolveDispute();
   const [reasons, setReasons] = useState<Record<number, string>>({});
@@ -51,7 +53,7 @@ export function DisputeManagementPage() {
   return (
     <AppShell>
       <div className="space-y-6">
-        <PageHeader title="분쟁 관리" />
+        <PageHeader title={t("legacy.disputeManagementPage.title1")} />
         {isLoading ? (
           <LoadingState />
         ) : disputes && disputes.length > 0 ? (
@@ -62,7 +64,7 @@ export function DisputeManagementPage() {
                   <div>
                     <div className="flex items-center gap-2">
                       <p className="font-medium text-fg">
-                        분쟁 #{d.id} · 구매 #{d.purchaseId}
+                        {t("legacy.disputeManagementPage.t2", { id: d.id, purchaseId: d.purchaseId })}
                       </p>
                       <StatusBadge status={d.status} />
                     </div>
@@ -75,7 +77,7 @@ export function DisputeManagementPage() {
                     <div className="flex items-center gap-2">
                       <Input
                         type="text"
-                        placeholder="처리 사유"
+                        placeholder={t("legacy.disputeManagementPage.placeholder3")}
                         value={reasons[d.id] ?? ""}
                         onChange={(e) => setReasons((r) => ({ ...r, [d.id]: e.target.value }))}
                         className="w-40"
@@ -91,8 +93,7 @@ export function DisputeManagementPage() {
                           })
                         }
                       >
-                        정상 리스크 실현(기각)
-                      </Button>
+                        {t("legacy.disputeManagementPage.t4")}</Button>
                       <Button
                         type="button"
                         variant="secondary"
@@ -104,8 +105,7 @@ export function DisputeManagementPage() {
                           })
                         }
                       >
-                        상장폐지+환불
-                      </Button>
+                        {t("legacy.disputeManagementPage.t5")}</Button>
                     </div>
                   )}
                 </div>
@@ -118,7 +118,7 @@ export function DisputeManagementPage() {
             ))}
           </ul>
         ) : (
-          <EmptyState>분쟁 건이 없습니다.</EmptyState>
+          <EmptyState>{t("legacy.disputeManagementPage.t6")}</EmptyState>
         )}
       </div>
     </AppShell>

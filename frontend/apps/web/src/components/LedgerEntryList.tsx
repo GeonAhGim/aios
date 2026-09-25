@@ -3,6 +3,7 @@ import { isLinesBalanced, parseJournalEntryView, type JournalEntryView, type Pos
 import { Alert, Badge, Card, EmptyState, LoadingState } from "@aios/ui-web";
 import { Pagination } from "./Pagination";
 import { derivePageState } from "../lib/pagination";
+import { useTranslation } from "react-i18next";
 
 // spec §3.3 (C) JournalEntryView 목록 화면. 서버 라우트가 아직 없으므로(task-628과
 // 같은 decision) fetch는 하지 않고 이미 받아온 raw 항목 배열을 props로 받아 각각
@@ -25,35 +26,39 @@ const SIDE_LABEL: Record<PostingLine["side"], string> = {
 };
 
 function PostingLinesTable({ lines }: { lines: PostingLine[] }) {
+  const { t } = useTranslation();
   return (
-    <table className="w-full text-sm">
-      <thead>
-        <tr className="text-left text-xs text-fg-muted">
-          <th className="py-1 pr-2 font-normal">#</th>
-          <th className="py-1 pr-2 font-normal">계정</th>
-          <th className="py-1 pr-2 font-normal">구분</th>
-          <th className="py-1 pr-2 text-right font-normal">금액</th>
-          <th className="py-1 font-normal">통화</th>
-        </tr>
-      </thead>
-      <tbody>
-        {lines.map((line) => (
-          <tr key={line.line_no} className="border-t border-border">
-            <td className="py-1 pr-2 text-fg-muted">{line.line_no}</td>
-            <td className="py-1 pr-2 font-mono text-xs">{line.account_code}</td>
-            <td className="py-1 pr-2">
-              <Badge tone={line.side === "DEBIT" ? "neutral" : "accent"}>{SIDE_LABEL[line.side]}</Badge>
-            </td>
-            <td className="tabular py-1 pr-2 text-right">{line.amount}</td>
-            <td className="py-1">{line.currency}</td>
+    <div className="overflow-x-auto">
+      <table className="w-full text-sm">
+        <thead>
+          <tr className="text-left text-xs text-fg-muted">
+            <th className="py-1 pr-2 font-normal">#</th>
+            <th className="py-1 pr-2 font-normal">{t("legacy.ledgerEntryList.t1")}</th>
+            <th className="py-1 pr-2 font-normal">{t("legacy.ledgerEntryList.t2")}</th>
+            <th className="py-1 pr-2 text-right font-normal">{t("legacy.ledgerEntryList.t3")}</th>
+            <th className="py-1 font-normal">{t("legacy.ledgerEntryList.t4")}</th>
           </tr>
-        ))}
-      </tbody>
-    </table>
+        </thead>
+        <tbody>
+          {lines.map((line) => (
+            <tr key={line.line_no} className="border-t border-border">
+              <td className="py-1 pr-2 text-fg-muted">{line.line_no}</td>
+              <td className="py-1 pr-2 font-mono text-xs">{line.account_code}</td>
+              <td className="py-1 pr-2">
+                <Badge tone={line.side === "DEBIT" ? "neutral" : "accent"}>{SIDE_LABEL[line.side]}</Badge>
+              </td>
+              <td className="tabular py-1 pr-2 text-right">{line.amount}</td>
+              <td className="py-1">{line.currency}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
   );
 }
 
 function JournalEntryCard({ entry }: { entry: JournalEntryView }) {
+  const { t } = useTranslation();
   const balanced = isLinesBalanced(entry.lines);
   return (
     <Card data-testid="journal-entry-card">
@@ -67,11 +72,10 @@ function JournalEntryCard({ entry }: { entry: JournalEntryView }) {
           </p>
         </div>
         <div className="flex items-center gap-2">
-          {entry.replayed && <Badge tone="warning">재생됨</Badge>}
+          {entry.replayed && <Badge tone="warning">{t("legacy.ledgerEntryList.t5")}</Badge>}
           {!balanced && (
             <Badge tone="danger" data-testid="sum-mismatch-badge">
-              합계 불일치
-            </Badge>
+              {t("legacy.ledgerEntryList.t6")}</Badge>
           )}
         </div>
       </div>
@@ -83,9 +87,7 @@ function JournalEntryCard({ entry }: { entry: JournalEntryView }) {
       {!balanced && (
         <div className="mt-3">
           <Alert tone="danger">
-            차변 합계와 대변 합계가 일치하지 않습니다. 원본 데이터를 신뢰할 수 없으니 표시된 금액을
-            그대로 사용하지 마세요.
-          </Alert>
+            {t("legacy.ledgerEntryList.t7")}</Alert>
         </div>
       )}
     </Card>
@@ -93,27 +95,29 @@ function JournalEntryCard({ entry }: { entry: JournalEntryView }) {
 }
 
 function EntryError({ kind, received }: { kind: "unsupported_schema_version" | "invalid"; received?: unknown }) {
+  const { t } = useTranslation();
   if (kind === "unsupported_schema_version") {
     return (
       <Card data-testid="journal-entry-error">
-        <Alert tone="danger">지원하지 않는 schema_version입니다 ({String(received)}).</Alert>
+        <Alert tone="danger">{t("legacy.ledgerEntryList.t8", { string: String(received) })}</Alert>
       </Card>
     );
   }
   return (
     <Card data-testid="journal-entry-error">
-      <Alert tone="danger">거래내역을 해석할 수 없습니다.</Alert>
+      <Alert tone="danger">{t("legacy.ledgerEntryList.t9")}</Alert>
     </Card>
   );
 }
 
 export function LedgerEntryList({ entries, pageMeta = null, onPageChange, isLoading = false }: LedgerEntryListProps) {
+  const { t } = useTranslation();
   if (isLoading) {
     return <LoadingState />;
   }
 
   if (entries.length === 0) {
-    return <EmptyState>거래내역이 없습니다.</EmptyState>;
+    return <EmptyState>{t("legacy.ledgerEntryList.t10")}</EmptyState>;
   }
 
   const pageState = derivePageState(pageMeta);

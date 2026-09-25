@@ -58,11 +58,34 @@ export const API_ROUTES = defineApiRoutes({
   "admin.approvalRequests.approve": route("/admin/approval-requests/:requestId/approve", true),
   "admin.approvalRequests.reject": route("/admin/approval-requests/:requestId/reject", true),
   "admin.approvalRequests.pending": route("/admin/approval-requests/pending", true),
+  // task-4024(FE-OPS-7a): src/api/routers/admin.py:84 GET /admin/audit-log 원문 확인 —
+  // `-> ApiResponse[AuditLogPage]` + `ok(...)`(:94/:102)라 envelope=true(스냅샷 컴포넌트
+  // ApiResponse_AuditLogPage_로 재확인, python으로 contracts/openapi/v1.json 직접 대조).
+  // PLT-35-fix(task-3850)가 require_break_glass("tenant_read")를 얹어 X-Break-Glass-Grant
+  // 헤더(UUID)가 필수다 — clients/admin.ts의 listAuditLog가 호출자에게서 grant id를
+  // 받아 헤더로 흘려보낸다. 다른 admin.* 관용대로 v1Path는 명시하지 않는다(기본값
+  // /api/v1/admin/audit-log).
+  "admin.auditLog": route("/admin/audit-log", true),
+  // task-4024(FE-OPS-7a): src/api/routers/foundation/ledger_admin.py:53 POST
+  // /admin/ledger/payouts/{batch_id}/paid 원문 확인 — `-> ApiResponse[PayoutBatchView]`
+  // + `ok(...)`(:53/:69)라 envelope=true(스냅샷 ApiResponse_PayoutBatchView_로 재확인).
+  // 위 admin.auditLog와 동일하게 require_break_glass("tenant_read") 헤더가 필수다.
+  // idempotencyRequired는 표시하지 않는다 — mark_payout_paid(LC-15a)는 배치 상태
+  // (SCHEDULED/RELEASED→PAID) 조건부 UPDATE로 재확정을 막고(ConcurrencyConflictError),
+  // 라우터 자체도 require_idempotency_key를 쓰지 않는다(admin.py의 wallet 확정 라우트와
+  // 달리 import조차 없음) — spec §9 PLT-15 금전 라우트 표(L4_platform_observability_
+  // tenancy_api_v1.0.md 라인 438)에도 이 라우트가 없다. idempotencyScan.test.ts의
+  // PLT15_MONEY_ROUTES 양방향 대조를 깨지 않으려면 이 표식을 붙이지 않아야 한다.
+  "admin.ledger.payoutsMarkPaid": route("/admin/ledger/payouts/:batchId/paid", true),
 
   // task-1333: §9 PLT-15 금전 라우트 — idempotencyRequired=true.
   "exchange.credentials.base": route("/exchange-credentials", false, undefined, undefined, true),
   "exchange.credentials.item": route("/exchange-credentials/:exchange", false),
   "exchange.credentials.balance": route("/exchange-credentials/:exchange/balance", false),
+  // task-4001(FE-OPS-10a): src/api/routers/exchange_credentials.py:97-104 get_positions는
+  // list[Position]을 그대로 반환한다(ApiResponse 봉투 아님) — balance/capabilities와
+  // 동일하게 envelope=false.
+  "exchange.credentials.positions": route("/exchange-credentials/:exchange/positions", false),
   "exchange.credentials.capabilities": route("/exchange-credentials/:exchange/capabilities", false),
 
   // task-1333: §9 PLT-15 금전 라우트(create/start/convertToLive) — idempotencyRequired=true.
@@ -259,9 +282,8 @@ export const API_ROUTES = defineApiRoutes({
   // task-2335(FE-OPS-1): src/api/routers/foundation/risk_gate.py 원문 확인 —
   // `APIRouter(prefix="/v1/foundation/risk-gate")`(risk_gate.py:75), router_registry.py
   // include_router(추가 prefix 없음). 이 리프는 안전 통제(safety control) 조회·해제
-  // (deactivate·evaluate-recovery)만 등록한다 — 개통(POST 자가/관리자 activate)·
-  // 룰번들 승인/활성화·evaluate 트리거는 decision상 UI가 없어 apiPaths.openapi.test.ts의
-  // UNREGISTERED_ROUTE_WHITELIST에 그대로 남는다(후속 리프 2336~2338 소관).
+  // (deactivate·evaluate-recovery)만 등록했다 — 개통(POST 자가/관리자 activate)·
+  // 룰번들 승인/활성화·evaluate 트리거는 task-5808(FE-OPS-9)이 아래에 추가로 등록한다.
   // GET/POST "/safety-controls"(:97·:106)는 같은 경로를 공유하므로(apiRouteTypes.ts
   // 축약 관용) 한 항목으로 묶는다 — 이 화면은 GET(list)만 쓴다. 세 라우트 전부
   // `-> ApiResponse[...]` + `ok(...)`(:94·:136·:189)라 envelope=true. mount_v1(PLT-16)
@@ -273,12 +295,36 @@ export const API_ROUTES = defineApiRoutes({
     null,
     true,
   ),
-  // evaluate-recovery(risk_gate.py:161)는 contracts/openapi/v1.json에 아직 없다(grep
-  // 직접 확인 — risk-gate 6경로 중 :evaluate-recovery만 스냅샷에 없음) — 라우터는
-  // 실재하므로 GHOST_PATH_WHITELIST(라우터 자체가 없음)가 아니라
-  // STALE_SNAPSHOT_WHITELIST(라우터는 있는데 스냅샷이 낡음, CH-17c 선례)로 뺀다.
+  // task-3850(PLT-35-fix): require_break_glass 배선과 함께 contracts/openapi/v1.json을
+  // 갱신해 이제 스냅샷에 실재한다 — STALE_SNAPSHOT_WHITELIST에서 뺐다(apiPaths.openapi.test.ts).
+  // `:controlId:evaluate-recovery`(camelCase+콜론 복합 세그먼트) vs 서버의
+  // `{control_id}:evaluate-recovery`(snake_case) 표기 차이는 scripts/check_consistency.py의
+  // 크루드 정규화가 구분 못 하는 별개의 오탐이라 그쪽 `_OPENAPI_NO_FRONTEND_UI_ALLOWLIST`에서 다룬다.
   "riskGate.safetyControls.evaluateRecovery": route(
     "/v1/foundation/risk-gate/safety-controls/:controlId:evaluate-recovery",
+    true,
+    null,
+    true,
+  ),
+
+  // task-5808(FE-OPS-9): task-2335가 decision상 UI 없음으로 미뤄뒀던 개통(admin
+  // activate)·룰번들 승인/활성화·evaluate 트리거 4건. src/api/routers/foundation/
+  // risk_gate.py 원문 확인 — POST /admin/safety-controls(:212)·POST /evaluate(:86)·
+  // POST /rule-bundles/{bundle_id}:approve(:249)·POST /rule-bundles/{bundle_id}:activate
+  // (:268), 전부 `-> ApiResponse[...]`(contracts/openapi/v1.json에서 python으로 4경로
+  // 전부 ApiResponse_SafetyControlView_/ApiResponse_RiskEvaluationView_/
+  // ApiResponse_RiskRuleBundle_ 참조 직접 확인)라 envelope=true. mount_v1(PLT-16)
+  // 미도달이라 v1Path=null(riskGate.safetyControls.*와 동일 사유).
+  "riskGate.safetyControls.activate": route("/v1/foundation/risk-gate/admin/safety-controls", true, null, true),
+  "riskGate.evaluate": route("/v1/foundation/risk-gate/evaluate", true, null, true),
+  "riskGate.ruleBundles.approve": route(
+    "/v1/foundation/risk-gate/rule-bundles/:bundleId:approve",
+    true,
+    null,
+    true,
+  ),
+  "riskGate.ruleBundles.activate": route(
+    "/v1/foundation/risk-gate/rule-bundles/:bundleId:activate",
     true,
     null,
     true,
@@ -303,9 +349,141 @@ export const API_ROUTES = defineApiRoutes({
   "mandates.mandate.resume": route("/v1/foundation/mandates/mandate:resume", true, null, true),
   "mandates.policy.evaluate": route("/v1/foundation/mandates/policy:evaluate", true, null, true),
 
+  // task-2668(CM-18): src/api/routers/foundation/compliance.py 원문 확인(task-2618,
+  // 098380f7) — `APIRouter(prefix="/v1/foundation/compliance")`, GET
+  // "/decisions/{decision_id}" -> ApiResponse[ComplianceDecisionView] + ok(...)
+  // (compliance.py:57-63). envelope=true, mount_v1(PLT-16) 미도달이라 v1Path=null
+  // (mandates.*와 동일 사유). contracts/openapi/v1.json은 task-2618 병합 이후
+  // 재생성된 적이 없어 이 경로가 아직 없다(grep 직접 확인) — 라우터 자체는
+  // 실재하므로 GHOST_PATH_WHITELIST가 아니라 STALE_SNAPSHOT_WHITELIST
+  // (riskGate.safetyControls.evaluateRecovery와 동일 처리, apiPaths.openapi.test.ts)로 뺀다.
+  "compliance.decisions.get": route(
+    "/v1/foundation/compliance/decisions/:decisionId",
+    true,
+    null,
+    true,
+  ),
+
   // task-2412(FE-OPS-8): src/api/routers/foundation/validation.py 원문 확인 — POST
   // "/{strategy_id}/{strategy_version}" -> ApiResponse[ValidationResultView] + ok(...).
   // envelope=true, mount_v1(PLT-16) 미도달이라 v1Path=null(foundation.*와 동일 사유).
   "validation.start": route("/v1/foundation/validation-runs/:strategyId/:strategyVersion", true, null, true),
+
+  // task-2699(UX-15): FollowPage.tsx(팔로우 관리·성과 비교)는 spec
+  // L4_product_experience_and_discovery_v1.0.md §2.4/UX-13/UX-14가 정의하는
+  // `src/foundation/follow/` 모듈을 앞서가는 선행 프론트다 — UX-13(contracts/
+  // mirror_rules)·UX-14(mirror_signal)·이를 감싸는 API 라우터
+  // (src/api/routers/follow.py) 모두 아직 없다(src/api/routers 디렉터리에
+  // follow.py 부재, src/foundation/follow 디렉터리 자체가 없음 — grep으로 직접
+  // 확인). auth.sessions.*(task-1325)·backtests.sweep(task-2428)과 동일한 유령
+  // 경로 사유로 4개 라우트 모두 implemented=false 등록 — FollowPage.tsx는 라우터가
+  // 생기기 전까지 네트워크 호출 대신 FollowRouteNotImplementedError(typed)로
+  // 단락한다. v1Path는 마운트 경로 확정 전이라 null. apiPaths.openapi.test.ts
+  // GHOST_PATH_WHITELIST에도 함께 추가할 것.
+  // GET(list)+POST(create)는 같은 리소스 경로를 공유한다(marketplace.listings.base와
+  // 동일 축약 관용, apiRouteTypes.ts 주석 참조) — 항목 하나로 묶는다.
+  "follow.subscriptions.base": route("/v1/foundation/follow/subscriptions", true, null, false),
+  "follow.subscriptions.cancel": route(
+    "/v1/foundation/follow/subscriptions/:subscriptionId",
+    true,
+    null,
+    false,
+  ),
+  "follow.subscriptions.performance": route(
+    "/v1/foundation/follow/subscriptions/:subscriptionId/performance",
+    true,
+    null,
+    false,
+  ),
+
+  // task-2657(AI-22): AiStudioPage.tsx(공급자 설정·토큰·제안 목록·실험 비교·승격
+  // 버튼 확인 흐름)는 spec L4_ai_research_strategy_factory_v1.0.md §2.1/§2.2/§2.3/
+  // §2.4가 정의하는 gateway·providers·factory·experiments 모듈을 앞서가는 선행
+  // 프론트다 — 그 모듈들과 이를 감싸는 API 라우터(src/api/routers/ai.py, AI-17)
+  // 모두 아직 없다(src/api/routers 디렉터리에 ai.py 부재, src/foundation/ai 디렉터리
+  // 자체가 없음 — grep으로 직접 확인). follow.subscriptions.*(task-2699)와 동일한
+  // 유령 경로 사유로 8개 라우트 모두 implemented=false 등록 — AiStudioPage.tsx는
+  // 라우터가 생기기 전까지 네트워크 호출 대신 AiRouteNotImplementedError(typed)로
+  // 단락한다. v1Path는 마운트 경로 확정 전이라 null. apiPaths.openapi.test.ts
+  // GHOST_PATH_WHITELIST에도 함께 추가할 것.
+  "ai.providers.base": route("/v1/ai/providers", true, null, false),
+  "ai.providers.item": route("/v1/ai/providers/:provider", true, null, false),
+  // GET(list)+POST(issue)는 같은 리소스 경로를 공유한다(follow.subscriptions.base와
+  // 동일 축약 관용).
+  // task-4922: src/api/routers/ai.py가 실재하게 됐다(GET/POST /v1/ai/tokens,
+  // POST /v1/ai/tokens/{token_id}:revoke, GET /v1/ai/proposals 모두
+  // contracts/openapi/v1.json에 ApiResponse_* 봉투로 실재 — python으로 paths 키
+  // 직접 확인) — implemented=true로 바꾸고 apiPaths.openapi.test.ts의
+  // GHOST_PATH_WHITELIST에서 이 3건을 제거한다. providers.*·proposals.promote*·
+  // experiments.base는 스냅샷에 여전히 없어(ai.py에 그 엔드포인트 자체가 없음)
+  // 유령 경로로 남는다.
+  "ai.tokens.base": route("/v1/ai/tokens", true, null, true),
+  "ai.tokens.revoke": route("/v1/ai/tokens/:tokenId:revoke", true, null, true),
+  "ai.proposals.base": route("/v1/ai/proposals", true, null, true),
+  "ai.proposals.promoteTicket": route("/v1/ai/proposals/:proposalId:promote-ticket", true, null, false),
+  "ai.proposals.promote": route("/v1/ai/proposals/:proposalId:promote", true, null, false),
+  "ai.experiments.base": route("/v1/ai/experiments", true, null, false),
+
+  // task-2692(UX-8): ScreenerPage.tsx(필터 빌더·결과 표·차트/백테스트 연결)는 spec
+  // L4_product_experience_and_discovery_v1.0.md §2.2/UX-5/UX-6이 정의하는
+  // `src/foundation/screener/` 모듈을 앞서가는 선행 프론트다 — contracts/v1.py
+  // (UX-5)·application/run_screen.py(UX-6)·이를 감싸는 API 라우터
+  // (src/api/routers/screener.py) 모두 아직 없다(src/api/routers 디렉터리에
+  // screener.py 부재, src/foundation/screener 디렉터리 자체가 없음 — grep으로 직접
+  // 확인). follow.subscriptions.*(task-2699)·ai.*(task-2657)와 동일한 유령 경로
+  // 사유로 implemented=false 등록 — ScreenerPage.tsx는 라우터가 생기기 전까지
+  // 네트워크 호출 대신 ScreenerRouteNotImplementedError(typed)로 단락한다. v1Path는
+  // 마운트 경로 확정 전이라 null. apiPaths.openapi.test.ts GHOST_PATH_WHITELIST에도
+  // 함께 추가할 것.
+  "screener.run": route("/v1/foundation/screener/run", true, null, false),
+
+  // task-2696(UX-12): WhatIfPanel.tsx·RebalancePage.tsx는 spec
+  // L4_product_experience_and_discovery_v1.0.md §2.3/UX-9/UX-10/UX-11이 정의하는
+  // `src/foundation/whatif/` 모듈을 앞서가는 선행 프론트다 — domain/impact.py
+  // (UX-9)·application/preview_order.py(UX-10)·application/rebalance_plan.py
+  // (UX-11)·이를 감싸는 API 라우터(src/api/routers/whatif.py) 모두 아직 없다
+  // (src/api/routers 디렉터리에 whatif.py 부재, src/foundation/whatif 디렉터리
+  // 자체가 없음 — grep으로 직접 확인). screener.run(task-2692)과 동일한 유령
+  // 경로 사유로 implemented=false 등록 — WhatIfPanel·RebalancePage는 라우터가
+  // 생기기 전까지 네트워크 호출 대신 WhatIfRouteNotImplementedError(typed)로
+  // 단락한다. v1Path는 마운트 경로 확정 전이라 null. apiPaths.openapi.test.ts
+  // GHOST_PATH_WHITELIST에도 함께 추가할 것.
+  "whatif.previewOrder": route("/v1/foundation/whatif/preview-order", true, null, false),
+  "whatif.rebalancePlan": route("/v1/foundation/whatif/rebalance-plan", true, null, false),
+
+  // task-2718(RD-17): ResearchPage.tsx(검색·소스 상태·종목 연결 표시)는 spec
+  // L4_research_data_and_market_ecosystem_v1.0.md §2.1/RD-2~RD-5가 정의하는
+  // `src/foundation/research_data/` 모듈을 앞서가는 선행 프론트다 —
+  // application/query.py(RD-7, as_of PIT 필터)·entitlement 연동 + 이를 감싸는
+  // API 라우터(src/api/routers/research_data.py, RD-8) 모두 아직 없다
+  // (src/api/routers 디렉터리에 research_data.py 부재 — grep으로 직접 확인;
+  // src/foundation/research_data에는 contracts/domain/adapters/application만
+  // 있고 API 라우터가 없다). screener.run(task-2692)·whatif.*(task-2696)와
+  // 동일한 유령 경로 사유로 2개 라우트 모두 implemented=false 등록 —
+  // ResearchPage.tsx는 라우터가 생기기 전까지 네트워크 호출 대신
+  // ResearchDataRouteNotImplementedError(typed)로 단락한다. v1Path는 마운트
+  // 경로 확정 전이라 null. apiPaths.openapi.test.ts GHOST_PATH_WHITELIST에도
+  // 함께 추가할 것.
+  "researchData.search": route("/v1/foundation/research-data/search", true, null, false),
+  "researchData.sources.list": route("/v1/foundation/research-data/sources", true, null, false),
+
+  // task-5998(SIG-6): SignalSourcesPage.tsx(시크릿 발급·회전·최근 수신 로그)는 spec
+  // L4_analytics_authoring_backtest_marketplace_v1.0.md §9.1(source line 264)이
+  // 정의하는 SIG-1~5(`src/foundation/signals/`, `src/api/routers/signals.py`,
+  // PLT-33 시크릿 회전)를 앞서가는 선행 프론트다 — 그 모듈·라우터 모두 아직 없다
+  // (src/foundation 디렉터리에 signals 부재, src/api/routers 디렉터리에 signals.py
+  // 부재 — grep으로 직접 확인). follow.subscriptions.*(task-2699)·screener.run
+  // (task-2692)과 동일한 유령 경로 사유로 4개 라우트 모두 implemented=false
+  // 등록 — SignalSourcesPage.tsx는 라우터가 생기기 전까지 네트워크 호출 대신
+  // SignalsRouteNotImplementedError(typed)로 단락한다. v1Path는 마운트 경로
+  // 확정 전이라 null. apiPaths.openapi.test.ts GHOST_PATH_WHITELIST에도 함께
+  // 추가할 것.
+  // GET(list)+POST(issue)는 같은 리소스 경로를 공유한다(follow.subscriptions.base와
+  // 동일 축약 관용).
+  "signals.sources.base": route("/v1/foundation/signals/sources", true, null, false),
+  "signals.sources.rotate": route("/v1/foundation/signals/sources/:sourceId:rotate", true, null, false),
+  "signals.sources.disable": route("/v1/foundation/signals/sources/:sourceId:disable", true, null, false),
+  "signals.sources.receipts": route("/v1/foundation/signals/sources/:sourceId/receipts", true, null, false),
+
   ...FOUNDATION_OPS_ROUTES,
 });

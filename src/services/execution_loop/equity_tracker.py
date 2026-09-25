@@ -54,9 +54,12 @@ class ExecutionEquityTracker:
         """재시작 복구 — DB에서 읽은 기존 기준점을 메모리에 주입한다.
         이미 메모리에 값이 있으면 덮어쓰지 않는다(`is_seeded`로 호출부가
         먼저 걸러내는 게 정상 경로지만, 방어적으로 여기서도 재확인)."""
-        have_baseline = day_start_date is not None and day_start_equity is not None
-        if execution_id not in self._day_start_equity and have_baseline:
-            self._day_start_equity[execution_id] = (day_start_date, day_start_equity)  # type: ignore[assignment]
+        if (
+            execution_id not in self._day_start_equity
+            and day_start_date is not None
+            and day_start_equity is not None
+        ):
+            self._day_start_equity[execution_id] = (day_start_date, day_start_equity)
         if execution_id not in self._peak_equity and peak_equity is not None:
             self._peak_equity[execution_id] = peak_equity
 

@@ -13,6 +13,7 @@ import { useState } from "react";
 import { BadRequestNotice } from "../../../components/BadRequestNotice";
 import { ErrorMessage } from "../../../components/ErrorMessage";
 import { ForbiddenNotice } from "../../../components/ForbiddenNotice";
+import { useTranslation } from "react-i18next";
 
 const GOAL_LABELS: Record<StrategyGoal, string> = {
   STEADY_GROWTH: "안정적 성장",
@@ -53,6 +54,7 @@ export function StrategyWizardPanel({
 }: {
   onApply: (generated: GeneratedConditions) => void;
 }) {
+  const { t } = useTranslation();
   const [mode, setMode] = useState<Mode>("WIZARD");
   const [goal, setGoal] = useState<StrategyGoal>("STEADY_GROWTH");
   const [riskTolerance, setRiskTolerance] = useState<RiskTolerance>("MEDIUM");
@@ -72,7 +74,7 @@ export function StrategyWizardPanel({
           : await generateFromPrompt.mutateAsync({ prompt });
       setResult(generated);
     } catch (err) {
-      setError(err instanceof ApiError ? err : new Error("생성에 실패했습니다."));
+      setError(err instanceof ApiError ? err : new Error(t("legacy.strategyWizardPanel.t10")));
     }
   }
 
@@ -81,7 +83,7 @@ export function StrategyWizardPanel({
   return (
     <Card className="space-y-4">
       <div className="flex items-center justify-between">
-        <h2 className="text-lg font-semibold text-fg">고차원 전략 생성</h2>
+        <h2 className="text-lg font-semibold text-fg">{t("legacy.strategyWizardPanel.t1")}</h2>
         <div className="flex gap-1 rounded-md bg-bg p-1">
           <button
             type="button"
@@ -94,8 +96,7 @@ export function StrategyWizardPanel({
               mode === "WIZARD" ? "bg-accent-muted text-accent-hover" : "text-fg-muted"
             }`}
           >
-            마법사
-          </button>
+            {t("legacy.strategyWizardPanel.t2")}</button>
           <button
             type="button"
             onClick={() => {
@@ -107,15 +108,14 @@ export function StrategyWizardPanel({
               mode === "PROMPT" ? "bg-accent-muted text-accent-hover" : "text-fg-muted"
             }`}
           >
-            AI 프롬프트
-          </button>
+            {t("legacy.strategyWizardPanel.t3")}</button>
         </div>
       </div>
 
       {mode === "WIZARD" ? (
         <div className="grid grid-cols-2 gap-3">
           <label className="space-y-1 text-sm">
-            <span className="text-fg-secondary">투자 목표</span>
+            <span className="text-fg-secondary">{t("legacy.strategyWizardPanel.t4")}</span>
             <Select value={goal} onChange={(e) => setGoal(e.target.value as StrategyGoal)}>
               {(Object.keys(GOAL_LABELS) as StrategyGoal[]).map((g) => (
                 <option key={g} value={g}>
@@ -125,7 +125,7 @@ export function StrategyWizardPanel({
             </Select>
           </label>
           <label className="space-y-1 text-sm">
-            <span className="text-fg-secondary">위험 허용도</span>
+            <span className="text-fg-secondary">{t("legacy.strategyWizardPanel.t5")}</span>
             <Select
               value={riskTolerance}
               onChange={(e) => setRiskTolerance(e.target.value as RiskTolerance)}
@@ -140,11 +140,11 @@ export function StrategyWizardPanel({
         </div>
       ) : (
         <label className="block space-y-1 text-sm">
-          <span className="text-fg-secondary">전략을 말로 설명해주세요</span>
+          <span className="text-fg-secondary">{t("legacy.strategyWizardPanel.t6")}</span>
           <Textarea
             value={prompt}
             onChange={(e) => setPrompt(e.target.value)}
-            placeholder="예: RSI 과매도에서 반등 매수하고 과매수에서 매도하는 전략"
+            placeholder={t("legacy.strategyWizardPanel.placeholder7")}
             rows={3}
           />
         </label>
@@ -157,8 +157,7 @@ export function StrategyWizardPanel({
         loading={isPending}
         disabled={mode === "PROMPT" && !prompt.trim()}
       >
-        생성하기
-      </Button>
+        {t("legacy.strategyWizardPanel.t8")}</Button>
 
       {error !== null && <GenerateError error={error} />}
 
@@ -166,8 +165,7 @@ export function StrategyWizardPanel({
         <div className="space-y-3 rounded-lg border border-border-strong bg-bg p-4">
           <p className="text-sm text-fg-secondary">{result.explanation}</p>
           <Button type="button" onClick={() => onApply(result)}>
-            이 조건 적용하기
-          </Button>
+            {t("legacy.strategyWizardPanel.t9")}</Button>
         </div>
       )}
     </Card>

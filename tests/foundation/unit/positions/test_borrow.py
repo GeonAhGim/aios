@@ -4,9 +4,17 @@ Spec: ADR-2026-09-06-G §9 ("공매도·차입·마진 개념 자체가 없다(l
 없음)"). DoD 3항목을 각각 검증한다: (1) 일별 차입 이자 적립,
 (2) 마진콜 임계 돌파 3개 픽스처 시나리오 누락 없이 알림,
 (3) locate 없는 공매도 주문 게이트 거부.
+
+task-3000(DEEPEN, docs/audit/DEPTH_LA_LB_LC.md task-1752 행): 순수 도메인
+계층에 수치 성능 단언이 없다는 공백을 메운다 —
+`test_check_locate_gate_hot_path_performance`(task-3003 `test_bitemporal.py`
+선례와 동일 패턴: 주문마다 호출되는 게이트 커널의 호출 횟수 기반 회귀
+감시).
 """
+
 from __future__ import annotations
 
+import time
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 
@@ -364,3 +372,28 @@ def test_margin_call_rejects_currency_mismatch_on_collateral() -> None:
             maintenance_margin_rate=Decimal("0.3"),
             as_of=_NOW,
         )
+
+
+# --- 수치 성능 단언 ------------------------------------------------------
+
+
+@pytest.mark.perf
+def test_check_locate_gate_hot_path_performance() -> None:
+    """`check_locate_gate`는 매 매도 주문마다 호출되는 순수 계산 게이트다
+    — 10,000회 호출이 1초 내에 끝나야 한다(회귀 감시, task-3003
+    `test_bitemporal.py::test_as_of_hot_path_performance` 선례와 동일
+    판단)."""
+    locates = [_locate(quantity="30")]
+
+    start = time.monotonic()
+    for _ in range(10_000):
+        borrow.check_locate_gate(
+            side=OrderSide.SELL,
+            quantity=Decimal("80"),
+            current_position_quantity=Decimal("50"),
+            locates=locates,
+            as_of=_NOW,
+        )
+    elapsed = time.monotonic() - start
+
+    assert elapsed < 1.0, f"10,000회 호출이 1초 예산을 초과: {elapsed:.3f}s"

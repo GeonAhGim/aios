@@ -8,8 +8,10 @@ test_cross_tenant_isolation.py`가 별도로 증명한다 — 이 파일은 단�
 tenant 관점에서 조회 함수 3개(get_order/list_orders/list_order_events)의
 정상 동작·페이지네이션·negative case(유효하지 않은 cursor)만 다룬다.
 """
+
 from __future__ import annotations
 
+import base64
 from datetime import datetime, timedelta, timezone
 from uuid import uuid4
 
@@ -19,6 +21,14 @@ from src.data.models.trading import OrderStatus
 from src.services.oms.application import order_query
 from src.services.oms.ports.repository import OrderQueryPort
 from tests.integration.oms.conftest import create_test_user, insert_order
+
+
+def _raw_cursor(created_at_str: str, order_id: str) -> str:
+    """Build a cursor with an arbitrary (possibly malformed) timestamp string,
+    bypassing `_encode_cursor`'s always-aware `datetime` — mirrors how an
+    external caller could craft one."""
+    raw = f"{created_at_str}|{order_id}"
+    return base64.urlsafe_b64encode(raw.encode("utf-8")).decode("ascii")
 
 
 def test_order_query_module_satisfies_port() -> None:
@@ -60,9 +70,7 @@ async def test_list_orders_pages_newest_first_with_keyset_cursor(pool) -> None:
     assert [v.order_id for v in page1] == newest_first[:2]
     assert cursor1 is not None
 
-    page2, cursor2 = await order_query.list_orders(
-        pool, tenant_id=user_id, limit=2, cursor=cursor1
-    )
+    page2, cursor2 = await order_query.list_orders(pool, tenant_id=user_id, limit=2, cursor=cursor1)
     assert [v.order_id for v in page2] == newest_first[2:]
     assert cursor2 is None
 
@@ -123,6 +131,87 @@ async def test_list_orders_invalid_cursor_raises(pool) -> None:
     user_id = await create_test_user(pool)
     with pytest.raises(order_query.InvalidOrderCursorError):
         await order_query.list_orders(pool, tenant_id=user_id, cursor="not-a-valid-cursor")
+
+
+async def test_list_orders_cursor_with_valid_alphabet_leading_garbage_raises(pool) -> None:
+    """negative — task-4964: `!!!` 같은 알파벳 밖 문자가 아니라, base64
+    알파벳 안에 속하는 쓰레기 블록(`AAAA`)을 앞에 붙여도 거부해야 한다.
+    `!!!garbage!!!` 케이스는 `binascii.Error`(알파벳 검증)만으로 걸러져
+    strict 디코드 이후의 partition/fromisoformat/UUID 파싱 경로를 실제로
+    거치지 않는다 — 이 케이스가 그 경로를 검증한다."""
+    user_id = await create_test_user(pool)
+    valid_cursor = order_query._encode_cursor(datetime.now(timezone.utc), uuid4())
+    with pytest.raises(order_query.InvalidOrderCursorError):
+        await order_query.list_orders(pool, tenant_id=user_id, cursor="AAAA" + valid_cursor)
+
+
+async def test_list_orders_cursor_with_valid_alphabet_trailing_garbage_raises(pool) -> None:
+    """negative — task-4964: 위와 동일하되 뒤에 붙는 경우."""
+    user_id = await create_test_user(pool)
+    valid_cursor = order_query._encode_cursor(datetime.now(timezone.utc), uuid4())
+    with pytest.raises(order_query.InvalidOrderCursorError):
+        await order_query.list_orders(pool, tenant_id=user_id, cursor=valid_cursor + "AAAA")
+
+
+async def test_list_orders_cursor_with_leading_garbage_raises(pool) -> None:
+    """negative — task-4897 REJECT: 앞에 쓰레기 문자가 섞인 커서를
+    lenient urlsafe_b64decode가 관대하게 무시하고 정상 페이지를 반환하면
+    안 된다(fail-closed 계약 위반)."""
+    user_id = await create_test_user(pool)
+    valid_cursor = order_query._encode_cursor(datetime.now(timezone.utc), uuid4())
+    with pytest.raises(order_query.InvalidOrderCursorError):
+        await order_query.list_orders(
+            pool, tenant_id=user_id, cursor="!!!garbage!!!" + valid_cursor
+        )
+
+
+async def test_list_orders_cursor_with_trailing_garbage_raises(pool) -> None:
+    """negative — task-4897 REJECT: 뒤에 쓰레기 문자가 섞인 커서도 동일하게
+    거부되어야 한다."""
+    user_id = await create_test_user(pool)
+    valid_cursor = order_query._encode_cursor(datetime.now(timezone.utc), uuid4())
+    with pytest.raises(order_query.InvalidOrderCursorError):
+        await order_query.list_orders(
+            pool, tenant_id=user_id, cursor=valid_cursor + "!!!garbage!!!"
+        )
+
+
+async def test_list_orders_naive_cursor_timestamp_rejected(pool) -> None:
+    """negative — task-4901 REJECT: timezone 없는 cursor timestamp는
+    asyncpg가 서버 로컬시간대로 암묵 해석할 수 있어 fail-closed로 거부해야
+    한다."""
+    user_id = await create_test_user(pool)
+    naive_cursor = _raw_cursor("2026-01-01T00:00:00", str(uuid4()))
+
+    with pytest.raises(order_query.InvalidOrderCursorError):
+        await order_query.list_orders(pool, tenant_id=user_id, cursor=naive_cursor)
+
+
+async def test_list_orders_non_utc_offset_cursor_paginates_correctly(pool) -> None:
+    """negative-adjacent — UTC가 아닌 offset(+09:00)이 붙은 cursor는
+    거부되지 않고, 정보 손실 없이 올바른 순서로 keyset 비교된다."""
+    user_id = await create_test_user(pool)
+    base = datetime.now(timezone.utc)
+    order_ids = []
+    async with pool.acquire() as conn:
+        for i in range(3):
+            order_ids.append(
+                await insert_order(conn, user_id, created_at=base + timedelta(seconds=i))
+            )
+    newest_first = list(reversed(order_ids))
+
+    page1, cursor1 = await order_query.list_orders(pool, tenant_id=user_id, limit=2)
+    assert cursor1 is not None
+    cursor_created_at, cursor_order_id = order_query._decode_cursor(cursor1)
+    kst = timezone(timedelta(hours=9))
+    kst_cursor = _raw_cursor(cursor_created_at.astimezone(kst).isoformat(), str(cursor_order_id))
+
+    page2, cursor2 = await order_query.list_orders(
+        pool, tenant_id=user_id, limit=2, cursor=kst_cursor
+    )
+
+    assert [v.order_id for v in page2] == newest_first[2:]
+    assert cursor2 is None
 
 
 async def test_list_order_events_returns_timeline_in_seq_order(pool) -> None:

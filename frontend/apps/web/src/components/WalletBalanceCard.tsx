@@ -1,5 +1,6 @@
 import { formatCreditAmount, parseWalletBalance, type WalletBalance } from "@aios/shared-types";
 import { Alert, Card, CardTitle, Stat } from "@aios/ui-web";
+import { useTranslation } from "react-i18next";
 
 // task-618 — LC-16 응답(available/held/pendingPayout)을 3분할 표시한다. 판정
 // 로직(구버전 폴백·경고 판단·구매 가능 여부)은 전부 parseWalletBalance(순수
@@ -10,11 +11,12 @@ interface WalletBalanceCardProps {
 }
 
 export function WalletBalanceCard({ balance, isLoading = false }: WalletBalanceCardProps) {
+  const { t } = useTranslation();
   if (isLoading) {
     return (
       <Card data-testid="wallet-balance-card">
-        <CardTitle>보유 크레딧</CardTitle>
-        <p className="text-sm text-fg-muted">불러오는 중...</p>
+        <CardTitle>{t("legacy.walletBalanceCard.t1")}</CardTitle>
+        <p className="text-sm text-fg-muted">{t("legacy.walletBalanceCard.t2")}</p>
       </Card>
     );
   }
@@ -24,8 +26,8 @@ export function WalletBalanceCard({ balance, isLoading = false }: WalletBalanceC
   if (parsed.mode === "invalid") {
     return (
       <Card data-testid="wallet-balance-card">
-        <CardTitle>보유 크레딧</CardTitle>
-        <Alert tone="danger">잔액 정보를 표시할 수 없습니다 ({parsed.reason}).</Alert>
+        <CardTitle>{t("legacy.walletBalanceCard.t3")}</CardTitle>
+        <Alert tone="danger">{t("legacy.walletBalanceCard.t4", { reason: parsed.reason })}</Alert>
       </Card>
     );
   }
@@ -34,10 +36,10 @@ export function WalletBalanceCard({ balance, isLoading = false }: WalletBalanceC
 
   return (
     <Card data-testid="wallet-balance-card">
-      <CardTitle>보유 크레딧</CardTitle>
+      <CardTitle>{t("legacy.walletBalanceCard.t5")}</CardTitle>
       <div className="space-y-3">
         <Stat
-          label="구매 가능 크레딧"
+          label={t("legacy.walletBalanceCard.label6")}
           value={`${formatCreditAmount(purchasableAmount)} 크레딧`}
           tone={parsed.canPurchase ? "default" : "danger"}
         />
@@ -45,31 +47,26 @@ export function WalletBalanceCard({ balance, isLoading = false }: WalletBalanceC
         {parsed.mode === "full" && (
           <dl className="grid grid-cols-2 gap-3 text-sm text-fg-muted">
             <div>
-              <dt>주문 보류</dt>
+              <dt>{t("legacy.walletBalanceCard.t7")}</dt>
               <dd className="tabular font-medium text-fg">
-                {formatCreditAmount(parsed.held)} 크레딧
-              </dd>
+                {t("legacy.walletBalanceCard.t8", { formatCreditAmount: formatCreditAmount(parsed.held) })}</dd>
             </div>
             <div>
-              <dt>정산 대기</dt>
+              <dt>{t("legacy.walletBalanceCard.t9")}</dt>
               <dd className="tabular font-medium text-fg">
-                {formatCreditAmount(parsed.pendingPayout)} 크레딧
-              </dd>
+                {t("legacy.walletBalanceCard.t10", { formatCreditAmount: formatCreditAmount(parsed.pendingPayout) })}</dd>
             </div>
           </dl>
         )}
 
         {parsed.mode === "full" && parsed.hasHold && (
           <Alert tone="warning">
-            주문 보류 중인 금액이 있어 구매 가능 크레딧에서 제외되었습니다.
-          </Alert>
+            {t("legacy.walletBalanceCard.t11")}</Alert>
         )}
 
         {parsed.warnings.length > 0 && (
           <Alert tone="danger">
-            잔액 데이터에 이상이 감지되었습니다 ({parsed.warnings.join(", ")}). 관리자에게
-            문의해주세요.
-          </Alert>
+            {t("legacy.walletBalanceCard.t12", { val: parsed.warnings.join(", ") })}</Alert>
         )}
       </div>
     </Card>

@@ -155,6 +155,7 @@ def test_universe_module_takes_candle_columns_not_a_new_time_series_type() -> No
 _YEAR_D1_BARS = 365
 
 
+@pytest.mark.perf
 def test_sweep_100_symbols_1y_d1_within_normalized_threshold() -> None:
     """절대 초 상한이 아니라 1종목 실측 x 100 x 1.5로 단언한다 — 공유 CI의
     CPU 시간 편차에 흔들리지 않기 위함(BT-16a와 동일 선례, docs/specs 참고)."""

@@ -6,7 +6,7 @@ R-05~R-13 규칙 9종이 이 시그니처에 직렬 의존한다(§2.1 rules/*.p
 """
 from __future__ import annotations
 
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
 from typing import Literal, Protocol
 
 from src.core.loader.risk_policy_loader import RiskPolicy
@@ -48,5 +48,11 @@ def rule_error(rule_id: str, *, unit: RuleUnit = "count") -> RuleResult:
 
 
 def pct(value: Decimal) -> Decimal:
-    """비율 값을 §3.2 정밀도(0–100, 소수 6자리)로 quantize한다."""
+    """비율 값을 §3.2 정밀도(0–100, 소수 6자리)로 quantize한다.
+
+    quiet NaN은 `quantize()`가 예외 없이 NaN을 그대로 반환한다(fail-open
+    누출 — 하류 비교 `value > threshold`가 항상 False가 되어 DENY가 새어
+    나간다). Infinity와 동일하게 명시적으로 거부한다(I2, fail-closed)."""
+    if value.is_nan():
+        raise InvalidOperation(f"pct() received NaN: {value!r}")
     return value.quantize(_PCT_QUANTUM)

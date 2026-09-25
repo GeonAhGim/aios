@@ -13,6 +13,7 @@ import { AppShell } from "../../components/layout/AppShell";
 import { BadRequestNotice } from "../../components/BadRequestNotice";
 import { ErrorMessage } from "../../components/ErrorMessage";
 import { ForbiddenNotice } from "../../components/ForbiddenNotice";
+import { useTranslation } from "react-i18next";
 
 // task-2337(FE-OPS-3): spec §3.3 에러 taxonomy — 목록 조회·해소(resolve) 실패는
 // err.message를 직접 노출하지 않고 routeApiError로 판정해 400/403/그 외를
@@ -37,6 +38,7 @@ function ReconciliationActionError({ error, onRetry }: { error: unknown; onRetry
 }
 
 export function ReconciliationPage() {
+  const { t } = useTranslation();
   const { data, isLoading, isError, error, refetch } = useReconciliationStates();
   const resolve = useResolveReconciliation();
 
@@ -72,7 +74,7 @@ export function ReconciliationPage() {
         </div>
         {state.blockingReason && <p className="text-sm text-fg-muted">{state.blockingReason}</p>}
         <p className="text-xs text-fg-muted">
-          최근 확인: {new Date(state.lastCheckedAt).toLocaleString()}
+          {t("legacy.reconciliationPage.t1")}{new Date(state.lastCheckedAt).toLocaleString()}
           {state.lastHealthyAt && ` · 최근 정상: ${new Date(state.lastHealthyAt).toLocaleString()}`}
           {" · revision "}
           {state.revision}
@@ -80,7 +82,7 @@ export function ReconciliationPage() {
         {resolvable && (
           <div className="mt-3 flex items-end gap-2">
             <Textarea
-              placeholder="해소 사유"
+              placeholder={t("legacy.reconciliationPage.placeholder2")}
               rows={2}
               value={reasonFor(state.targetRef)}
               onChange={(e) => setReasons((prev) => ({ ...prev, [state.targetRef]: e.target.value }))}
@@ -93,8 +95,7 @@ export function ReconciliationPage() {
               loading={resolve.isPending}
               onClick={() => handleResolve(state.targetRef)}
             >
-              불일치 해소
-            </Button>
+              {t("legacy.reconciliationPage.t3")}</Button>
           </div>
         )}
         {actionError?.targetRef === state.targetRef && (
@@ -109,7 +110,7 @@ export function ReconciliationPage() {
   return (
     <AppShell>
       <div className="space-y-6">
-        <PageHeader title="대사(Reconciliation) 불일치 해소" />
+        <PageHeader title={t("legacy.reconciliationPage.title4")} />
         {isError ? (
           <ReconciliationActionError error={error} onRetry={() => refetch()} />
         ) : isLoading ? (
@@ -117,7 +118,7 @@ export function ReconciliationPage() {
         ) : data && data.states.length > 0 ? (
           <ul className="space-y-3">{data.states.map(renderState)}</ul>
         ) : (
-          <EmptyState>대사 상태가 없습니다.</EmptyState>
+          <EmptyState>{t("legacy.reconciliationPage.t5")}</EmptyState>
         )}
       </div>
     </AppShell>

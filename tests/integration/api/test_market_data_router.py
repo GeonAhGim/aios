@@ -18,8 +18,10 @@ DC-28(ADR-2026-09-06-H D2) — `source_contract`는 `source_id`가 PK인 전역
 패턴) — 기본은 DISPLAY(기존 동작과 동치: 우리 사용자에게 표시는 하되
 재판매는 안 함), 재배포 거부 테스트만 개별적으로 재정의한다.
 """
+
 from __future__ import annotations
 
+import time
 import uuid
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
@@ -29,6 +31,7 @@ import jwt
 import pytest
 from httpx import ASGITransport, AsyncClient
 
+from src.api.foundation_deps import get_entitlement_port, get_venue_registry_source
 from src.api.routers.market_data import get_source_contract_repository
 from src.foundation.market_data.adapters.postgres_batch_repository import PostgresBatchRepository
 from src.foundation.market_data.adapters.postgres_candle_store import PostgresCandleStore
@@ -57,11 +60,17 @@ BASE = "/v1/foundation/market-data"
 def _source_contract(scope: RedistributionScope, *, source_id: str = "BITGET") -> SourceContract:
     now = datetime.now(timezone.utc)
     return SourceContract(
-        source_id=source_id, tier=SourceContractTier.ENTERPRISE, credential_ref="test:none",
-        redistribution_scope=scope, rate_limit=1000, quota=1_000_000,
-        valid_from=now - timedelta(days=365), valid_to=None,
+        source_id=source_id,
+        tier=SourceContractTier.ENTERPRISE,
+        credential_ref="test:none",
+        redistribution_scope=scope,
+        rate_limit=1000,
+        quota=1_000_000,
+        valid_from=now - timedelta(days=365),
+        valid_to=None,
         capability=SourceCapability(
-            asset_classes=frozenset({"CRYPTO"}), resolutions=frozenset({"1m"}),
+            asset_classes=frozenset({"CRYPTO"}),
+            resolutions=frozenset({"1m"}),
         ),
     )
 
@@ -131,9 +140,14 @@ async def _audit_event_id(conn: asyncpg.Connection) -> uuid.UUID:
 
 def _candle(key: SeriesKey, open_time: datetime, price: int) -> CandleRecord:
     return CandleRecord(
-        key=key, open_time=open_time, close_time=open_time + timedelta(minutes=1),
-        open=Decimal(price), high=Decimal(price + 10), low=Decimal(price - 10),
-        close=Decimal(price + 5), volume=Decimal(10),
+        key=key,
+        open_time=open_time,
+        close_time=open_time + timedelta(minutes=1),
+        open=Decimal(price),
+        high=Decimal(price + 10),
+        low=Decimal(price - 10),
+        close=Decimal(price + 5),
+        volume=Decimal(10),
     )
 
 
@@ -142,12 +156,19 @@ async def _seed_candles(
 ) -> SeriesKey:
     key = SeriesKey(venue=Venue.BITGET, instrument_id=instrument_id, timeframe=Timeframe.M1)
     batch = IngestBatchResult(
-        batch_id=uuid.uuid4(), source="test", venue=Venue.BITGET, instrument_id=instrument_id,
-        timeframe=Timeframe.M1, range_start=t0, range_end=t0 + timedelta(minutes=n),
+        batch_id=uuid.uuid4(),
+        source="test",
+        venue=Venue.BITGET,
+        instrument_id=instrument_id,
+        timeframe=Timeframe.M1,
+        range_start=t0,
+        range_end=t0 + timedelta(minutes=n),
         request_fingerprint=f"fp-{uuid.uuid4().hex}",
-        verdict=QualityVerdict(verdict=Verdict.ACCEPT, accepted=n, quarantined=0, rejected=0,
-                               issues=[]),
-        batch_hash=f"hash-{uuid.uuid4().hex}", audit_event_id=await _audit_event_id(conn),
+        verdict=QualityVerdict(
+            verdict=Verdict.ACCEPT, accepted=n, quarantined=0, rejected=0, issues=[]
+        ),
+        batch_hash=f"hash-{uuid.uuid4().hex}",
+        audit_event_id=await _audit_event_id(conn),
         stored_range=None,
     )
     await PostgresBatchRepository(pool).create(conn, batch)
@@ -176,8 +197,12 @@ async def seeded(client: AsyncClient) -> dict:
         await _seed_candles(conn, pool, instrument_id, t0, 3)
         await _grant_venue(conn, tenant_a)
     return {
-        "a": headers_a, "b": headers_b, "instrument_id": instrument_id, "other_id": other_id,
-        "symbol": symbol, "t0": t0,
+        "a": headers_a,
+        "b": headers_b,
+        "instrument_id": instrument_id,
+        "other_id": other_id,
+        "symbol": symbol,
+        "t0": t0,
     }
 
 
@@ -189,8 +214,12 @@ def _span(t0: datetime, start_min: int, end_min: int) -> dict:
 
 
 async def test_candles_by_symbol_returns_envelope_with_both_ids_and_entitlement(client, seeded):
-    params = {"venue": "BITGET", "timeframe": "1m", "symbol": seeded["symbol"],
-              **_span(seeded["t0"], 0, 3)}
+    params = {
+        "venue": "BITGET",
+        "timeframe": "1m",
+        "symbol": seeded["symbol"],
+        **_span(seeded["t0"], 0, 3),
+    }
     response = await client.get(f"{BASE}/candles", params=params, headers=seeded["a"])
 
     assert response.status_code == 200, response.text
@@ -207,8 +236,13 @@ async def test_candles_by_symbol_returns_envelope_with_both_ids_and_entitlement(
 
 
 async def test_candles_by_instrument_id_paginates_with_open_time_cursor(client, seeded):
-    base = {"venue": "BITGET", "timeframe": "1m", "instrument_id": str(seeded["instrument_id"]),
-            "limit": 2, **_span(seeded["t0"], 0, 3)}
+    base = {
+        "venue": "BITGET",
+        "timeframe": "1m",
+        "instrument_id": str(seeded["instrument_id"]),
+        "limit": 2,
+        **_span(seeded["t0"], 0, 3),
+    }
     first = (await client.get(f"{BASE}/candles", params=base, headers=seeded["a"])).json()
     assert len(first["data"]["candles"]) == 2
     cursor = first["meta"]["page"]["next_cursor"]
@@ -252,8 +286,12 @@ async def test_internal_scope_source_denies_candles_display(client, seeded):
     )
     response = await client.get(
         f"{BASE}/candles",
-        params={"venue": "BITGET", "timeframe": "1m", "symbol": seeded["symbol"],
-                **_span(seeded["t0"], 0, 3)},
+        params={
+            "venue": "BITGET",
+            "timeframe": "1m",
+            "symbol": seeded["symbol"],
+            **_span(seeded["t0"], 0, 3),
+        },
         headers=seeded["a"],
     )
     assert response.status_code == 404, response.text
@@ -267,8 +305,13 @@ async def test_internal_scope_source_denies_replay(client, seeded):
     as_of = datetime.now(timezone.utc).isoformat()
     response = await client.get(
         f"{BASE}/candles/replay",
-        params={"venue": "BITGET", "timeframe": "1m", "symbol": seeded["symbol"], "as_of": as_of,
-                **_span(seeded["t0"], 0, 3)},
+        params={
+            "venue": "BITGET",
+            "timeframe": "1m",
+            "symbol": seeded["symbol"],
+            "as_of": as_of,
+            **_span(seeded["t0"], 0, 3),
+        },
         headers=seeded["a"],
     )
     assert response.status_code == 404, response.text
@@ -283,8 +326,12 @@ async def test_unspecified_source_contract_denies_candles(client, seeded):
     )
     response = await client.get(
         f"{BASE}/candles",
-        params={"venue": "BITGET", "timeframe": "1m", "symbol": seeded["symbol"],
-                **_span(seeded["t0"], 0, 3)},
+        params={
+            "venue": "BITGET",
+            "timeframe": "1m",
+            "symbol": seeded["symbol"],
+            **_span(seeded["t0"], 0, 3),
+        },
         headers=seeded["a"],
     )
     assert response.status_code == 404, response.text
@@ -294,8 +341,12 @@ async def test_unspecified_source_contract_denies_candles(client, seeded):
 async def test_span_outside_coverage_is_409_data_coverage_missing(client, seeded):
     response = await client.get(
         f"{BASE}/candles",
-        params={"venue": "BITGET", "timeframe": "1m", "symbol": seeded["symbol"],
-                **_span(seeded["t0"], 10, 12)},
+        params={
+            "venue": "BITGET",
+            "timeframe": "1m",
+            "symbol": seeded["symbol"],
+            **_span(seeded["t0"], 10, 12),
+        },
         headers=seeded["a"],
     )
     assert response.status_code == 409, response.text
@@ -347,7 +398,8 @@ async def test_instruments_list_is_scoped_to_registered_venues_and_paginates(cli
 
 async def test_aliases_by_symbol_and_uuid_and_cross_tenant_404(client, seeded):
     by_symbol = await client.get(
-        f"{BASE}/instruments/{seeded['symbol']}/aliases", params={"venue": "BITGET"},
+        f"{BASE}/instruments/{seeded['symbol']}/aliases",
+        params={"venue": "BITGET"},
         headers=seeded["a"],
     )
     assert by_symbol.status_code == 200, by_symbol.text
@@ -382,8 +434,13 @@ async def test_negative_missing_identifier_and_future_as_of_are_400(client, seed
 
     future = await client.get(
         f"{BASE}/candles",
-        params={"venue": "BITGET", "timeframe": "1m", "symbol": seeded["symbol"], **span,
-                "as_of": (datetime.now(timezone.utc) + timedelta(days=1)).isoformat()},
+        params={
+            "venue": "BITGET",
+            "timeframe": "1m",
+            "symbol": seeded["symbol"],
+            **span,
+            "as_of": (datetime.now(timezone.utc) + timedelta(days=1)).isoformat(),
+        },
         headers=seeded["a"],
     )
     assert future.status_code == 400, future.text
@@ -393,6 +450,115 @@ async def test_unauthenticated_request_is_401_envelope(client):
     response = await client.get(f"{BASE}/instruments")
     assert response.status_code == 401
     assert "error_code" in response.json()
+
+
+# --- DEEPEN task-2994 (docs/audit/DEPTH_LA_LB_LC.md, 원 task-1376 D1) — 이
+# 리프의 D3 하한 미달 3건(failure-injection 없음; 수치 성능 단언 없음;
+# 게이트 적색 재현 없음)을 채운다. ---
+
+
+class _BoomEntitlementPort:
+    """실패 주입 — 엔타이틀먼트 포트가 예외를 던진다(DB 커넥션 유실 등
+    실장애 시뮬레이션). `authorize_feed`가 이 예외를 삼켜 "허용"으로
+    바꿔치기하면 fail-open이 된다."""
+
+    async def allowed(self, subject, feed):  # noqa: ANN001, ARG002
+        raise ConnectionError("simulated entitlement backend outage")
+
+
+async def test_entitlement_port_failure_fails_closed_not_open(client, seeded):
+    """실패 주입 — 엔타이틀먼트 포트 장애는 데이터 노출(fail-open)이 아니라
+    500 `INTERNAL_ERROR` 봉투로 접혀야 한다(전역 핸들러,
+    src/api/contracts/handlers.py). 원인 문자열도 클라이언트에 노출되지
+    않는다(고정 메시지 + trace_id만)."""
+    app.dependency_overrides[get_entitlement_port] = lambda: _BoomEntitlementPort()
+    try:
+        response = await client.get(
+            f"{BASE}/candles",
+            params={
+                "venue": "BITGET",
+                "timeframe": "1m",
+                "symbol": seeded["symbol"],
+                **_span(seeded["t0"], 0, 3),
+            },
+            headers=seeded["a"],
+        )
+    finally:
+        app.dependency_overrides.pop(get_entitlement_port, None)
+
+    assert response.status_code == 500, response.text
+    body = response.json()
+    assert body["error_code"] == "INTERNAL_ERROR"
+    assert "data" not in body, "장애 상황에서 candles 데이터가 노출되면 안 된다(fail-closed)"
+    assert "simulated entitlement backend outage" not in body["message"]
+
+
+@pytest.mark.perf
+async def test_candles_full_page_latency_stays_within_normalized_ceiling(client, seeded):
+    """수치 성능 단언 — 공유 TEST_DATABASE_URL 지연 변동성 때문에 절대
+    임계 대신, 가벼운 1건짜리 baseline 요청 대비 정규화한 상한만 게이트로
+    쓴다(LA-18 test_quality_metrics.py test_export_quality_metrics_latency_*와
+    동일 교훈)."""
+    t1 = seeded["t0"] + timedelta(minutes=100)
+    pool = app.state.pool
+    async with pool.acquire() as conn, conn.transaction():
+        await _seed_candles(conn, pool, seeded["instrument_id"], t1, 200)
+    span = _span(t1, 0, 200)
+    base_params = {"venue": "BITGET", "timeframe": "1m", "symbol": seeded["symbol"], **span}
+
+    baseline_start = time.perf_counter()
+    baseline = await client.get(
+        f"{BASE}/candles", params={**base_params, "limit": 1}, headers=seeded["a"]
+    )
+    baseline_elapsed = time.perf_counter() - baseline_start
+    assert baseline.status_code == 200, baseline.text
+
+    full_start = time.perf_counter()
+    full = await client.get(
+        f"{BASE}/candles", params={**base_params, "limit": 200}, headers=seeded["a"]
+    )
+    full_elapsed = time.perf_counter() - full_start
+    assert full.status_code == 200, full.text
+    assert len(full.json()["data"]["candles"]) == 200
+
+    ceiling = baseline_elapsed * 20 + 0.5
+    assert full_elapsed <= ceiling, (
+        f"200개 캔들 전체 페이지 조회가 {full_elapsed:.3f}s 걸림 "
+        f"(baseline {baseline_elapsed:.3f}s, 정규화 상한 {ceiling:.3f}s)"
+    )
+
+
+class _LeakyVenueRegistrySource:
+    """게이트 적색 재현용 결함 시뮬레이션 — `registered_venues`가
+    `tenant_id` 인자를 무시하고 모든 테넌트에게 BITGET을 등록된 것으로
+    답한다(어댑터 SQL이 tenant_id WHERE 절을 빠뜨리는 흔한 실수)."""
+
+    async def registered_venues(self, tenant_id):  # noqa: ANN001, ARG002
+        return frozenset({Venue.BITGET})
+
+
+async def test_aliases_gate_red_reproduction_if_venue_registry_source_ignores_tenant(
+    client, seeded
+):
+    """게이트 적색 재현 — `authorize_venue()`(read_api.py)의 교차 테넌트
+    방어는 `VenueRegistrySource`가 tenant_id로 올바르게 스코프될 때만
+    유효하다. 이 어댑터가 tenant 필터링을 빠뜨리면, 정상 시나리오에서는
+    404였던 타 테넌트 조회(test_aliases_by_symbol_and_uuid_and_cross_tenant_404)가
+    200으로 새어나간다 — 이 결함을 대조 재현한다(200이 "정상"이라는 뜻이
+    아니라 재현된 결함이라는 뜻)."""
+    app.dependency_overrides[get_venue_registry_source] = lambda: _LeakyVenueRegistrySource()
+    try:
+        leaked = await client.get(
+            f"{BASE}/instruments/{seeded['instrument_id']}/aliases", headers=seeded["b"]
+        )
+    finally:
+        app.dependency_overrides.pop(get_venue_registry_source, None)
+
+    assert leaked.status_code == 200, (
+        "VenueRegistrySource가 tenant_id를 무시하면 authorize_venue()의 방어는 무력화된다"
+        f" — got {leaked.status_code}: {leaked.text}"
+    )
+    assert leaked.json()["data"][0]["instrument_id"] == str(seeded["instrument_id"])
 
 
 def test_paginate_candles_pure_cursor_semantics():

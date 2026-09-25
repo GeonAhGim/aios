@@ -17,12 +17,14 @@ import { ForbiddenNotice } from "../../components/ForbiddenNotice";
 import { NotFoundState } from "../../components/NotFoundState";
 import { RiskWarningModal } from "../../components/RiskWarningModal";
 import { DuplicateSubmitError, useIdempotentSubmit } from "../../hooks/useIdempotentSubmit";
+import { useTranslation } from "react-i18next";
 
 // spec §3.3 에러 taxonomy: 구매 실패는 err.message를 직접 노출하지 않고
 // routeApiError(task-483)로 판정해 400/403/그 외를 각각 BadRequestNotice/
 // ForbiddenNotice/ErrorMessage 경로로만 보여준다(task-901). 402(잔액 부족)는
 // statusCode로만 판별해 지갑 충전 링크를 붙인다 — 메시지 문자열 매칭은 하지 않는다.
 function PurchaseError({ error }: { error: unknown }) {
+  const { t } = useTranslation();
   if (classifyBadRequest(error)) return <BadRequestNotice error={error} />;
   if (classifyForbidden(error)) return <ForbiddenNotice error={error} />;
   const routed = routeApiError(error);
@@ -37,14 +39,14 @@ function PurchaseError({ error }: { error: unknown }) {
       />
       {isInsufficientBalance && (
         <Link to="/wallet" className="text-sm underline">
-          지갑 충전하기
-        </Link>
+          {t("legacy.listingDetailPage.t1")}</Link>
       )}
     </div>
   );
 }
 
 export function ListingDetailPage() {
+  const { t } = useTranslation();
   const { listingId } = useParams<{ listingId: string }>();
   const location = useLocation();
   const listing = (location.state as { listing?: ListingSummary } | null)?.listing;
@@ -84,13 +86,13 @@ export function ListingDetailPage() {
         // errorCode를 먼저 매핑하면 VALIDATION_INVALID_FIELD의 EXACT_MESSAGES
         // 고정 문구("입력값을 확인해주세요.")가 원문을 가려 이 분기가 죽은
         // 코드가 된다(task-1215) — 새 error_code를 만들지 않는다(task-901 DoD).
-        if (!acknowledged && err.message.includes("위험등급")) {
+        if (!acknowledged && err.message.includes(t("legacy.listingDetailPage.t12"))) {
           setRiskWarningReason(err.message);
           return;
         }
         setError(err);
       } else {
-        setError(new Error("구매에 실패했습니다."));
+        setError(new Error(t("legacy.listingDetailPage.t13")));
       }
     }
   }
@@ -103,7 +105,7 @@ export function ListingDetailPage() {
             <h1 className="text-2xl font-semibold text-fg">
               {listing?.strategyId ?? `리스팅 #${id}`}
             </h1>
-            {listing?.sellerType === "PLATFORM" && <Badge tone="accent">플랫폼</Badge>}
+            {listing?.sellerType === "PLATFORM" && <Badge tone="accent">{t("legacy.listingDetailPage.t2")}</Badge>}
           </div>
           {listing && (
             <p className="tabular mt-1 text-sm text-fg-muted">
@@ -114,15 +116,12 @@ export function ListingDetailPage() {
 
         {purchased ? (
           <Alert tone="success">
-            구매가 완료됐습니다 (구매ID {purchased.purchaseId}, 상태: {purchased.status}) — 지갑
-            잔액에서 즉시 결제되어 실행 권한이 바로 부여됩니다.
-          </Alert>
+            {t("legacy.listingDetailPage.t3", { purchaseId: purchased.purchaseId, status: purchased.status })}</Alert>
         ) : (
           <div className="space-y-2">
             {error !== null && <PurchaseError error={error} />}
             <Button type="button" onClick={() => attemptPurchase(false)} loading={purchase.isPending}>
-              구매하기
-            </Button>
+              {t("legacy.listingDetailPage.t4")}</Button>
           </div>
         )}
 
@@ -132,29 +131,26 @@ export function ListingDetailPage() {
             onClick={() => submitForVerification.mutate(id)}
             className="text-fg-muted hover:text-fg"
           >
-            검수 제출 (판매자)
-          </button>
+            {t("legacy.listingDetailPage.t5")}</button>
           <Link to="/disputes/submit" className="text-fg-muted hover:text-fg">
-            분쟁 신고
-          </Link>
+            {t("legacy.listingDetailPage.t6")}</Link>
         </div>
 
         <Card>
           <div className="mb-4 flex items-center justify-between">
-            <h2 className="text-lg font-semibold text-fg">리뷰</h2>
+            <h2 className="text-lg font-semibold text-fg">{t("legacy.listingDetailPage.t7")}</h2>
             {purchased && (
               <Link
                 to={`/reviews/write/${purchased.purchaseId}`}
                 className="text-sm text-accent-hover hover:underline"
               >
-                리뷰 작성
-              </Link>
+                {t("legacy.listingDetailPage.t8")}</Link>
             )}
           </div>
           {reviewsError ? (
             isResourceNotFound(reviewsError) ? (
               <NotFoundState
-                title="리스팅을 찾을 수 없습니다"
+                title={t("legacy.listingDetailPage.title9")}
                 description="삭제되었거나 존재하지 않는 리스팅입니다."
               />
             ) : (
@@ -166,8 +162,7 @@ export function ListingDetailPage() {
           ) : reviews && reviews.reviewCount > 0 ? (
             <div className="space-y-3">
               <p className="text-sm text-fg-muted">
-                평균 {reviews.averageRating?.toFixed(1)} · {reviews.reviewCount}개 리뷰
-              </p>
+                {t("legacy.listingDetailPage.t10", { val: reviews.averageRating?.toFixed(1) ?? "", reviewCount: reviews.reviewCount })}</p>
               <ul className="space-y-2">
                 {reviews.reviews.map((r) => (
                   <li key={r.reviewId} className="rounded-md border border-border p-3 text-sm">
@@ -178,7 +173,7 @@ export function ListingDetailPage() {
               </ul>
             </div>
           ) : (
-            <EmptyState>아직 리뷰가 없습니다.</EmptyState>
+            <EmptyState>{t("legacy.listingDetailPage.t11")}</EmptyState>
           )}
         </Card>
       </div>

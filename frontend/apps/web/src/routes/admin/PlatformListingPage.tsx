@@ -7,6 +7,7 @@ import { AppShell } from "../../components/layout/AppShell";
 import { ErrorMessage } from "../../components/ErrorMessage";
 import { ForbiddenNotice } from "../../components/ForbiddenNotice";
 import { useFieldErrors } from "../../hooks/useFieldErrors";
+import { useTranslation } from "react-i18next";
 
 // ADR-2026-08-29 §2 — 플랫폼이 하우스 계정 명의로 직접 등록하는 리스팅.
 // 제3자 판매자용 검증 절차 없이 등록 즉시 LISTED로 게시된다.
@@ -35,6 +36,7 @@ function CreateListingError({ error, fieldErrors }: { error: unknown; fieldError
 }
 
 export function PlatformListingPage() {
+  const { t } = useTranslation();
   const [strategyId, setStrategyId] = useState("");
   const [strategyVersion, setStrategyVersion] = useState("1.0.0");
   const [price, setPrice] = useState("");
@@ -56,7 +58,7 @@ export function PlatformListingPage() {
       });
       setCreated({ id: listing.id });
     } catch (err) {
-      setError(err instanceof ApiError ? err : new Error("리스팅 등록에 실패했습니다."));
+      setError(err instanceof ApiError ? err : new Error(t("legacy.platformListingPage.t8")));
       setFromError(err);
     }
   }
@@ -64,16 +66,14 @@ export function PlatformListingPage() {
   return (
     <AppShell>
       <div className="max-w-md space-y-6">
-        <PageHeader title="플랫폼 전략 등록" />
+        <PageHeader title={t("legacy.platformListingPage.title1")} />
         <p className="text-xs text-fg-muted">
-          플랫폼(하우스 계정) 명의로 직접 판매하는 전략입니다 — 검증 절차 없이 등록 즉시
-          마켓플레이스에 게시됩니다.
-        </p>
+          {t("legacy.platformListingPage.t2")}</p>
         <form
           onSubmit={handleSubmit}
           className="space-y-3 rounded-lg border border-border bg-surface p-6"
         >
-          <Field label="전략 ID" error={fieldErrors.strategy_id}>
+          <Field label={t("legacy.platformListingPage.label3")} error={fieldErrors.strategy_id}>
             <Input
               type="text"
               required
@@ -84,7 +84,7 @@ export function PlatformListingPage() {
               }}
             />
           </Field>
-          <Field label="버전" error={fieldErrors.strategy_version}>
+          <Field label={t("legacy.platformListingPage.label4")} error={fieldErrors.strategy_version}>
             <Input
               type="text"
               required
@@ -95,7 +95,7 @@ export function PlatformListingPage() {
               }}
             />
           </Field>
-          <Field label="가격 (크레딧, 비워두면 무료)" error={fieldErrors.price}>
+          <Field label={t("legacy.platformListingPage.label5")} error={fieldErrors.price}>
             <Input
               type="number"
               step="0.01"
@@ -107,10 +107,9 @@ export function PlatformListingPage() {
             />
           </Field>
           {error !== null && <CreateListingError error={error} fieldErrors={fieldErrors} />}
-          {created && <Alert tone="success">리스팅 #{created.id} 게시 완료</Alert>}
+          {created && <Alert tone="success">{t("legacy.platformListingPage.t6", { id: created.id })}</Alert>}
           <Button type="submit" loading={createPlatformListing.isPending} className="w-full">
-            등록
-          </Button>
+            {t("legacy.platformListingPage.t7")}</Button>
         </form>
       </div>
     </AppShell>

@@ -8,6 +8,7 @@ import { BadRequestNotice } from "../../components/BadRequestNotice";
 import { ErrorMessage } from "../../components/ErrorMessage";
 import { ForbiddenNotice } from "../../components/ForbiddenNotice";
 import { useFieldErrors } from "../../hooks/useFieldErrors";
+import { useTranslation } from "react-i18next";
 
 // spec §3.3 에러 taxonomy: 분쟁 신고 실패는 err.message를 직접 노출하지 않고
 // routeApiError(task-483)로 판정해 400/403/그 외를 각각 BadRequestNotice/
@@ -34,6 +35,7 @@ function SubmitDisputeError({ error, fieldErrors }: { error: unknown; fieldError
 }
 
 export function DisputeSubmitPage() {
+  const { t } = useTranslation();
   const [purchaseId, setPurchaseId] = useState("");
   const [reason, setReason] = useState("");
   const [error, setError] = useState<unknown>(null);
@@ -52,7 +54,7 @@ export function DisputeSubmitPage() {
       });
       setSubmitted({ disputeId: result.disputeId, status: result.status });
     } catch (err) {
-      setError(err instanceof ApiError ? err : new Error("분쟁 신고에 실패했습니다."));
+      setError(err instanceof ApiError ? err : new Error(t("legacy.disputeSubmitPage.t6")));
       setFromError(err);
     }
   }
@@ -60,14 +62,13 @@ export function DisputeSubmitPage() {
   return (
     <AppShell>
       <div className="max-w-md space-y-6">
-        <PageHeader title="분쟁 신고" />
+        <PageHeader title={t("legacy.disputeSubmitPage.title1")} />
         {submitted ? (
           <Alert tone="success">
-            분쟁이 접수됐습니다 (#{submitted.disputeId}, {submitted.status}).
-          </Alert>
+            {t("legacy.disputeSubmitPage.t2", { disputeId: submitted.disputeId, status: submitted.status })}</Alert>
         ) : (
           <form onSubmit={handleSubmit} className="space-y-3 rounded-lg border border-border bg-surface p-6">
-            <Field label="구매 ID" error={fieldErrors.purchase_id}>
+            <Field label={t("legacy.disputeSubmitPage.label3")} error={fieldErrors.purchase_id}>
               <Input
                 type="number"
                 required
@@ -78,7 +79,7 @@ export function DisputeSubmitPage() {
                 }}
               />
             </Field>
-            <Field label="사유" error={fieldErrors.reason}>
+            <Field label={t("legacy.disputeSubmitPage.label4")} error={fieldErrors.reason}>
               <Textarea
                 required
                 value={reason}
@@ -91,8 +92,7 @@ export function DisputeSubmitPage() {
             </Field>
             {error !== null && <SubmitDisputeError error={error} fieldErrors={fieldErrors} />}
             <Button type="submit" loading={submitDispute.isPending} className="w-full">
-              분쟁 신고 제출
-            </Button>
+              {t("legacy.disputeSubmitPage.t5")}</Button>
           </form>
         )}
       </div>

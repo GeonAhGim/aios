@@ -2,6 +2,7 @@ import { Button, Card, CardTitle, Field, Input, Select } from "@aios/ui-web";
 import type { FormEvent } from "react";
 import { exchangeLabel } from "../../lib/exchangeLabels";
 import { RegisterCredentialError } from "./ExchangeCredentialErrors";
+import { useTranslation } from "react-i18next";
 
 const EXCHANGES = ["bitget", "kis"];
 
@@ -34,11 +35,12 @@ export function RegisterCredentialForm({
   onSubmit: (e: FormEvent) => void;
   onRetry: () => void;
 }) {
+  const { t } = useTranslation();
   return (
     <Card className="max-w-lg">
-      <CardTitle>새 거래소 연동</CardTitle>
+      <CardTitle>{t("legacy.registerCredentialForm.t1")}</CardTitle>
       <form onSubmit={onSubmit} className="space-y-3">
-        <Field label="거래소" error={fieldErrors.exchange}>
+        <Field label={t("legacy.registerCredentialForm.label2")} error={fieldErrors.exchange}>
           <Select value={exchange} onChange={(e) => onExchangeChange(e.target.value)}>
             {EXCHANGES.map((ex) => (
               <option key={ex} value={ex}>
@@ -77,8 +79,7 @@ export function RegisterCredentialForm({
           <RegisterCredentialError error={error} onRetry={onRetry} fieldErrors={fieldErrors} />
         )}
         <Button type="submit" loading={isPending} className="w-full">
-          등록
-        </Button>
+          {t("legacy.registerCredentialForm.t3")}</Button>
       </form>
     </Card>
   );

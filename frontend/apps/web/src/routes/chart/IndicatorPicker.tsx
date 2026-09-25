@@ -16,6 +16,7 @@ import { useInfiniteQuery } from "@tanstack/react-query";
 import type { KeyboardEvent, ReactNode } from "react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { ErrorMessage } from "../../components/ErrorMessage";
+import { useTranslation } from "react-i18next";
 
 // IND-14: CH-6a가 로컬 overlayRegistry 목록만 보여주던 자리를, IND-12(task-1730)
 // `GET /v1/indicators` 코어·OSS·스크립트 3층 카탈로그로 실배선한다(탐색·검색·
@@ -66,6 +67,7 @@ export function IndicatorPicker({
   onToggle,
   listIndicators = defaultIndicatorsClient.listIndicators,
 }: IndicatorPickerProps) {
+  const { t } = useTranslation();
   const [open, setOpen] = useState(false);
   const [activeIndex, setActiveIndex] = useState(0);
   const [searchInput, setSearchInput] = useState("");
@@ -163,14 +165,14 @@ export function IndicatorPicker({
   } else if (query.isLoading) {
     body = <LoadingState />;
   } else if (visibleItems.length === 0) {
-    body = <EmptyState>지표가 없습니다.</EmptyState>;
+    body = <EmptyState>{t("legacy.indicatorPicker.t1")}</EmptyState>;
   } else {
     body = (
       <ul
         id={LISTBOX_ID}
         role="listbox"
         aria-multiselectable="true"
-        aria-label="지표 목록"
+        aria-label={t("legacy.indicatorPicker.ariaLabel2")}
         aria-activedescendant={visibleItems[activeIndex] ? `indicator-option-${visibleItems[activeIndex].name}` : undefined}
         tabIndex={0}
         className="max-h-64 overflow-auto"
@@ -218,21 +220,20 @@ export function IndicatorPicker({
         aria-controls={LISTBOX_ID}
         onClick={() => setOpen((prev) => !prev)}
       >
-        지표 선택 ({selectedIds.length})
-      </Button>
+        {t("legacy.indicatorPicker.t3", { length: selectedIds.length })}</Button>
 
       {open && (
         <div className="absolute z-10 mt-1 w-72 rounded-md border border-border bg-surface p-2 shadow-lg">
           <div className="mb-2 flex gap-1.5">
             <Input
-              aria-label="지표 검색"
-              placeholder="이름 검색"
+              aria-label={t("legacy.indicatorPicker.ariaLabel4")}
+              placeholder={t("legacy.indicatorPicker.placeholder5")}
               value={searchInput}
               onChange={(e) => setSearchInput(e.target.value)}
               className="flex-1"
             />
             <Select
-              aria-label="지표 계층 필터"
+              aria-label={t("legacy.indicatorPicker.ariaLabel6")}
               value={tierFilter}
               onChange={(e) => setTierFilter(e.target.value as TierFilter)}
               className="w-28 flex-none"
@@ -261,7 +262,7 @@ export function IndicatorPicker({
       )}
 
       {selectedIds.length > 0 && (
-        <ul className="mt-2 flex flex-wrap gap-1.5" aria-label="선택된 지표">
+        <ul className="mt-2 flex flex-wrap gap-1.5" aria-label={t("legacy.indicatorPicker.ariaLabel7")}>
           {selectedIds.map((id) => (
             <li key={id}>
               <Button type="button" variant="ghost" size="sm" onClick={() => onToggle(id)}>

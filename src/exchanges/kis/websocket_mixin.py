@@ -39,9 +39,13 @@ H0STCNI0)뿐이던 공백을 메운다. `tr_key`는 호출부가 거래소 접�
 구독 메시지를 재전송)를 그대로 재사용해 만족한다 — 국내 스트림과
 동일 보증(tests/integration/test_kis_websocket.py 기존 패턴 참조).
 """
+
 from __future__ import annotations
 
 from collections.abc import Awaitable, Callable
+from typing import Protocol, runtime_checkable
+
+import httpx
 
 from src.data.models.market_data import OrderBook
 from src.data.models.trading import Order
@@ -110,23 +114,35 @@ OrderBookCallback = Callable[[OrderBook], Awaitable[None]]
 OrderCallback = Callable[[Order], Awaitable[None]]
 
 
+@runtime_checkable
+class _ApprovalKeyClient(Protocol):
+    """`_KISTokenTransportMixin` transport/credential contract (nh `_TokenizedClient` pattern)."""
+
+    _client: httpx.AsyncClient
+    _app_key: str
+    _app_secret: str
+    _is_paper_trading: bool
+
+    async def get_ws_approval_key(self) -> str: ...
+
+
 class KISWebSocketMixin:
-    async def get_ws_approval_key(self) -> str:
+    async def get_ws_approval_key(self: _ApprovalKeyClient) -> str:
         """REST 접근토큰(`_ensure_token()`)과 별개의 WS 전용 승인키 —
         `secretkey` 필드명이 REST의 `appsecret`과 다름(공식 예제 확인)."""
-        response = await self._client.post(  # type: ignore[attr-defined]
+        response = await self._client.post(
             "/oauth2/Approval",
             json={
                 "grant_type": "client_credentials",
-                "appkey": self._app_key,  # type: ignore[attr-defined]
-                "secretkey": self._app_secret,  # type: ignore[attr-defined]
+                "appkey": self._app_key,
+                "secretkey": self._app_secret,
             },
             headers={"Content-Type": "application/json; charset=UTF-8"},
         )
         return str(response.json()["approval_key"])
 
     async def subscribe_ticker_stream(
-        self,
+        self: _ApprovalKeyClient,
         symbol: str,
         callback: TickerCallback,
         *,
@@ -137,7 +153,7 @@ class KISWebSocketMixin:
         """02d 스펙 §6(P0) — 기존 NotImplementedError를 실제 구현으로
         대체(승인키 인증 확인 완료, 모듈 docstring 참조)."""
         approval_key = await self.get_ws_approval_key()
-        url = WS_PAPER_URL if self._is_paper_trading else WS_REAL_URL  # type: ignore[attr-defined]
+        url = WS_PAPER_URL if self._is_paper_trading else WS_REAL_URL
         subscribe_msg = _build_subscribe_message(approval_key, "H0STCNT0", symbol)
 
         async def on_data_frame(raw: str) -> None:
@@ -154,7 +170,7 @@ class KISWebSocketMixin:
         )
 
     async def subscribe_orderbook_stream(
-        self,
+        self: _ApprovalKeyClient,
         symbol: str,
         callback: OrderBookCallback,
         *,
@@ -165,7 +181,7 @@ class KISWebSocketMixin:
         """`ExchangeAdapter` ABC에는 아직 없음(Bitget 확장 메서드들과
         동일 원칙 — 소비하는 FD-2 호출부가 생기기 전까지 KIS 전용)."""
         approval_key = await self.get_ws_approval_key()
-        url = WS_PAPER_URL if self._is_paper_trading else WS_REAL_URL  # type: ignore[attr-defined]
+        url = WS_PAPER_URL if self._is_paper_trading else WS_REAL_URL
         subscribe_msg = _build_subscribe_message(approval_key, "H0STASP0", symbol)
 
         async def on_data_frame(raw: str) -> None:
@@ -183,7 +199,7 @@ class KISWebSocketMixin:
         )
 
     async def subscribe_order_notification_stream(
-        self,
+        self: _ApprovalKeyClient,
         callback: OrderCallback,
         *,
         on_reconnecting: ReconnectHook | None = None,
@@ -195,8 +211,8 @@ class KISWebSocketMixin:
         두 스트림보다 신뢰도가 낮다 — 모듈 docstring의 AES 관련 caveat
         참조. `tr_key`는 문서 관례상 공백(계좌 전체 대상)."""
         approval_key = await self.get_ws_approval_key()
-        url = WS_PAPER_URL if self._is_paper_trading else WS_REAL_URL  # type: ignore[attr-defined]
-        tr_id = "H0STCNI9" if self._is_paper_trading else "H0STCNI0"  # type: ignore[attr-defined]
+        url = WS_PAPER_URL if self._is_paper_trading else WS_REAL_URL
+        tr_id = "H0STCNI9" if self._is_paper_trading else "H0STCNI0"
         subscribe_msg = _build_subscribe_message(approval_key, tr_id, "")
 
         key_iv: dict[str, str] = {}
@@ -223,7 +239,7 @@ class KISWebSocketMixin:
         )
 
     async def subscribe_overseas_ticker_stream(
-        self,
+        self: _ApprovalKeyClient,
         tr_key: str,
         callback: TickerCallback,
         *,
@@ -235,7 +251,7 @@ class KISWebSocketMixin:
         체결가(HDFSCNT0). `tr_key`는 거래소 접두 코드 + 종목코드를 호출부가
         이미 조합해 전달한다(모듈 docstring 참조, 접두코드 매핑은 범위 밖)."""
         approval_key = await self.get_ws_approval_key()
-        url = WS_PAPER_URL if self._is_paper_trading else WS_REAL_URL  # type: ignore[attr-defined]
+        url = WS_PAPER_URL if self._is_paper_trading else WS_REAL_URL
         subscribe_msg = _build_subscribe_message(approval_key, "HDFSCNT0", tr_key)
 
         async def on_data_frame(raw: str) -> None:
@@ -252,7 +268,7 @@ class KISWebSocketMixin:
         )
 
     async def subscribe_overseas_orderbook_stream(
-        self,
+        self: _ApprovalKeyClient,
         tr_key: str,
         callback: OrderBookCallback,
         *,
@@ -265,7 +281,7 @@ class KISWebSocketMixin:
         시세가 무료로 제공됩니다" — 국내 10호가와 달리 1호가만 온다.
         `tr_key` 관례는 위 체결가 메서드와 동일."""
         approval_key = await self.get_ws_approval_key()
-        url = WS_PAPER_URL if self._is_paper_trading else WS_REAL_URL  # type: ignore[attr-defined]
+        url = WS_PAPER_URL if self._is_paper_trading else WS_REAL_URL
         subscribe_msg = _build_subscribe_message(approval_key, "HDFSASP0", tr_key)
 
         async def on_data_frame(raw: str) -> None:

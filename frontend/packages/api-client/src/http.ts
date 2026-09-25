@@ -220,9 +220,13 @@ export class ApiClientBaseCore {
     return { data: keysToCamel<T>(result.data), meta: result.meta };
   }
 
-  protected postEnvelope<T>(path: string, body?: unknown): Promise<T> {
+  // task-4024: extraHeaders는 하위호환 추가(3번째) 파라미터다 — 기존 호출부(2개
+  // 인자까지)는 그대로 컴파일된다. admin.ts의 markPayoutPaid처럼 라우트별 고정
+  // 헤더(X-Break-Glass-Grant)가 필요한 소수 라우트만 넘긴다.
+  protected postEnvelope<T>(path: string, body?: unknown, extraHeaders?: Record<string, string>): Promise<T> {
     return this.requestEnvelope<T>(path, {
       method: "POST",
+      headers: extraHeaders,
       body: body !== undefined ? JSON.stringify(keysToSnake(body)) : undefined,
     });
   }

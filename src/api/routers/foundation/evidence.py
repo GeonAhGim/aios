@@ -1,7 +1,8 @@
-"""Audit Evidence 읽기 전용 API — 71번 §6 규칙.
+"""Read-only Audit Evidence API — Rule 71 §6.
 
-도메인 예외는 여기서 잡지 않는다 — `src/api/contracts/exception_mapping.py`의
-`EXCEPTION_MAP`이 전역 핸들러에서 봉투로 번역한다(§9 PLT-21 decision, task-1108).
+Domain exceptions are not caught here — `EXCEPTION_MAP` in
+`src/api/contracts/exception_mapping.py` wraps and translates them via the
+global handler (§9 PLT-21 decision, task-1108).
 """
 from __future__ import annotations
 
@@ -47,9 +48,10 @@ async def post_verify_chain(
     admin: User = Depends(get_current_admin),
     repo: AuditEventRepository = Depends(get_audit_event_repository),
 ) -> ApiResponse[dict[str, bool]]:
-    """AUD-003 운영 도구 — 79번 §4. 관리자 전용(체인 전체 또는 특정
-    tenant를 조회할 수 있어 일반 사용자에게는 열지 않는다). `tenant_id`를
-    생략하면 system 이벤트(tenant_id IS NULL) 체인만 검증한다 — 전체
-    tenant 순회는 이 리프의 스콥 밖(운영 배치 작업 대상)."""
+    """AUD-003 operational tool — Rule 79 §4. Admin-only (not exposed to
+    regular users since it can query the full chain or a specific tenant).
+    Omitting `tenant_id` verifies only the system event chain (tenant_id IS
+    NULL) — iterating all tenants is out of scope for this leaf (operational
+    batch task target)."""
     await verify_audit_chain(repo, tenant_id)
     return ok({"verified": True})

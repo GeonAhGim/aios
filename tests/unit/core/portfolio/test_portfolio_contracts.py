@@ -3,12 +3,15 @@
 DoD (a)-(f) must all be falsifiable: dropping a single field, using the
 wrong type, or breaking a value rule must fail some test in this file.
 """
+
+import time
+from collections.abc import Mapping
 from datetime import datetime, timezone
 from decimal import Decimal
 from typing import Any
 
 import pytest
-from pydantic import ValidationError
+from pydantic import BaseModel, ValidationError
 
 from src.core.portfolio.config import CostModelRef, PortfolioConfig, SizingMethod
 from src.core.portfolio.state_input import PortfolioAggregate, PortfolioStateInput
@@ -206,3 +209,74 @@ def test_portfolio_state_input_accepts_exposures_aggregate():
     )
     assert inp.exposures is not None
     assert inp.exposures.total_equity == Decimal("10000")
+
+
+# --- D2 실패 주입 (failure injection) -----------------------------------------
+
+
+class _BrokenPortfolioStateMapping(Mapping[str, Any]):
+    """Stand-in for an upstream `current_portfolio_state` source (e.g. a
+    corrupted `execution_loop.tick` snapshot) whose iteration breaks partway
+    through instead of yielding a clean dict."""
+
+    def __iter__(self):
+        yield "allocated_capital"
+        raise RuntimeError("upstream portfolio state snapshot corrupted mid-read")
+
+    def __len__(self) -> int:
+        return 1
+
+    def __getitem__(self, key: str) -> Any:
+        if key == "allocated_capital":
+            return Decimal("1000")
+        raise KeyError(key)
+
+
+def test_from_dict_propagates_broken_upstream_mapping_failure():
+    """`from_dict` must let a broken upstream source's exception propagate
+    (fail-closed) instead of silently building a partial/empty state that a
+    downstream sizing decision would then treat as complete."""
+    with pytest.raises(RuntimeError, match="corrupted mid-read"):
+        PortfolioStateInput.from_dict(_BrokenPortfolioStateMapping())
+
+
+# --- D2 성능 단언 (performance assertion) --------------------------------------
+
+
+@pytest.mark.perf
+def test_config_hash_p99_latency_within_pretrade_gate_budget():
+    """ADR-2026-09-09-C Decision 1 축별 성능 예산: 사전거래 게이트 p99 5ms.
+    `config_hash()`는 `AllocationDecision.decision_hash` 재료로 사전거래
+    사이징 경로마다 호출된다(§2 226행)."""
+    cfg = _config()
+    samples: list[float] = []
+    for _ in range(1000):
+        start = time.perf_counter()
+        cfg.config_hash()
+        samples.append(time.perf_counter() - start)
+
+    samples.sort()
+    p99_seconds = samples[int(len(samples) * 0.99)]
+    assert p99_seconds < 0.005, f"p99={p99_seconds * 1000:.3f}ms exceeds 5ms budget"
+
+
+# --- D2 게이트 적색 재현 (gate-red reproduction) --------------------------------
+
+
+def test_non_negative_notional_guard_catches_removal_regression():
+    """`PortfolioConfig._check_non_negative`가 없다면(회귀) 음수
+    `min_trade_notional`이 pydantic의 기본 lax 검증을 조용히 통과해 사이징
+    엔진에 음수 최소 주문 금액을 전달할 수 있다 -- 실제 구현은 그 적색
+    상태를 fail-closed로 막아야 한다."""
+
+    class _RegressedConfig(BaseModel):
+        # `_check_non_negative` validator 호출을 빼먹은 회귀본.
+        min_trade_notional: Decimal
+
+    # 적색: 가드가 없으면 음수 notional이 조용히 통과한다.
+    regressed = _RegressedConfig(min_trade_notional=Decimal("-1"))
+    assert regressed.min_trade_notional == Decimal("-1")
+
+    # 녹색: 실제 구현은 같은 입력을 fail-closed로 거부한다.
+    with pytest.raises(ValidationError):
+        _config(min_trade_notional=Decimal("-1"))

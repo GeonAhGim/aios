@@ -45,12 +45,23 @@ from src.foundation.evidence.domain.rules import assert_safe_payload, compute_pa
 from src.foundation.ledger.adapters.postgres_balance_repository import PostgresBalanceRepository
 from src.foundation.ledger.adapters.postgres_journal_repository import PostgresJournalRepository
 from src.foundation.ledger.application.post_entry import post_entry
-from src.foundation.ledger.contracts.v1 import AccountType, LedgerEvent, LedgerEventType, UserSub
+from src.foundation.ledger.contracts.v1 import (
+    AccountType,
+    LedgerEvent,
+    LedgerEventType,
+    Side,
+    UserSub,
+)
 from src.foundation.ledger.domain import posting_rules
-from src.foundation.ledger.domain.chart_of_accounts import PLATFORM_CASH_CLEARING, user_account
+from src.foundation.ledger.domain.chart_of_accounts import (
+    PLATFORM_CASH_CLEARING,
+    account_type,
+    user_account,
+)
 from src.foundation.ledger.domain.hash_chain import entry_hash, lines_digest
 from src.foundation.ledger.domain.idempotency import idempotency_key
 from tests.integration.conftest import create_test_tenant
+from tests.support.deep_downgrade import purge_position_snapshots
 
 _PROJECT_ROOT = Path(__file__).resolve().parents[4]
 _DOWN_REVISION = "789c138f13fe"
@@ -82,16 +93,36 @@ async def pool():
     await p.close()
 
 
+def _sweep_synthetic_snapshots(prefix: str) -> None:
+    """FA-0d-fix (task-771991202): rows this module inserts below FA-4 carry
+    synthetic non-5-part keys that `cdb114b6903f` (FA-0d) refuses fail-closed,
+    so they are removed before the schema is brought back to head."""
+    import asyncio
+
+    async def _sweep() -> None:
+        conn = await asyncpg.connect(_asyncpg_dsn())
+        try:
+            await conn.execute(
+                "DELETE FROM pos_snapshot WHERE position_key LIKE $1", f"{prefix}%"
+            )
+        finally:
+            await conn.close()
+
+    asyncio.run(_sweep())
+
+
 @pytest.fixture(autouse=True)
 def _ensure_head():
     _run_alembic("upgrade", "head")
     yield
+    _sweep_synthetic_snapshots("fa4-worm-test-")
     _run_alembic("upgrade", "head")
 
 
 async def test_pos_journal_never_backfilled_because_worm_blocks_update(pool):
     tenant_id = await create_test_tenant(pool)
 
+    await purge_position_snapshots(pool)  # deep downgrade: see tests/support/deep_downgrade.py
     _run_alembic("downgrade", _DOWN_REVISION)
     async with pool.acquire() as conn:
         account_id = await conn.fetchval(
@@ -120,7 +151,7 @@ async def test_pos_journal_never_backfilled_because_worm_blocks_update(pool):
             f"fa4-worm-test-{uuid4().hex}",
         )
 
-    _run_alembic("upgrade", "head")
+    _run_alembic("upgrade", "963d5f3cfb1b")
 
     async with pool.acquire() as conn:
         row = await conn.fetchrow(
@@ -266,10 +297,32 @@ async def _insert_pre_fa4_ledger_entry(pool: asyncpg.Pool, event_ref: str, user_
                 entry_id, line.line_no, account_ids[line.account_code],
                 line.side.value, line.amount, line.currency.value,
             )
+
+        # task-5687: keep `ledger_balance` in lockstep with the hand-written
+        # journal entry above, same as the real (pre-FA8) `post_entry` write
+        # path would have -- otherwise PLATFORM_CASH_CLEARING (shared, seeded
+        # by LC-6, never reset across CI runs) drifts from the journal fold
+        # forever, and FA-15 replay_verify reports a permanent false
+        # MISMATCH on it (same bug class as task-5309).
+        balances = PostgresBalanceRepository(pool)
+        deltas: dict[str, Decimal] = {}
+        for line in lines:
+            debit_increases = account_type(line.account_code) in {
+                AccountType.ASSET, AccountType.EXPENSE,
+            }
+            increases = (line.side is Side.DEBIT) == debit_increases
+            signed = line.amount if increases else -line.amount
+            deltas[line.account_code] = deltas.get(line.account_code, Decimal("0")) + signed
+        current = await balances.get_for_update(conn, list(deltas))
+        for account_code, delta in deltas.items():
+            await balances.apply(
+                conn, account_code, delta, Decimal("0"), current[account_code].last_entry_seq
+            )
     return entry_id
 
 
 async def test_ledger_journal_entry_and_posting_line_never_backfilled(pool):
+    await purge_position_snapshots(pool)  # deep downgrade: see tests/support/deep_downgrade.py
     _run_alembic("downgrade", _DOWN_REVISION)
     entry_id = await _insert_pre_fa4_ledger_entry(
         pool, f"fa4-worm-test:{uuid4().hex}", uuid4()

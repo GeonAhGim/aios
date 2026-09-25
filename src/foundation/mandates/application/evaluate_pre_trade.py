@@ -1,7 +1,7 @@
 """L4_compliance_and_regulatory_v1.0.md#9 CM-8 — the sole pre-trade
 compliance judgment entry point on the order submission path (§2.2
-"application/evaluate_pre_trade.py = 주문 제출 경로에서 호출되는 유일한 사전
-판정 진입").
+"application/evaluate_pre_trade.py = the sole pre-trade judgment entry
+called on the order submission path").
 
 Distinct from `application/evaluate_policy.py` (which evaluates the mandate
 revision's *numeric* fields — exposure/autonomy/cash-buffer — against a
@@ -10,9 +10,9 @@ checks (`domain/rules/{restricted_list,concentration,leverage}.py`) through
 CM-3's `domain/rule_bundle.py`/`domain/evaluator.py` machinery, producing a
 `ComplianceDecision` (CM-1 `contracts/v1.py`) — a second, independent
 authority from both risk (`src.core.risk`) and the numeric mandate policy
-(§0 권위 원칙: "리스크와 컴플라이언스는 분리된 두 권위다").
+(§0 authority principle: "risk and compliance are two separate authorities").
 
-Known gap (미검증/TODO, out of scope for CM-8): `domain/rules/{liquidity,
+Known gap (unverified/TODO, out of scope for CM-8): `domain/rules/{liquidity,
 position_limit}.py` (CM-7) need `max_pct_of_adv`/`max_position_notional`
 params that `MandateRevision` has no field for yet — `assemble_rule_bundle`
 accepts them as optional overrides so a future leaf can wire real values in
@@ -50,8 +50,9 @@ from src.foundation.mandates.ports.repository import MandateRepository
 
 DECISION_TTL_SECONDS = 30
 """Matches `evaluate_policy.DECISION_CACHE_TTL_SECONDS` — same "short TTL,
-same fingerprint" idempotency contract (§5 "판정: (order_intent_hash,
-bundle_version) 멱등"), applied here to `(bundle_hash, inputs_hash)`."""
+same fingerprint" idempotency contract (§5 "judgment: idempotent on
+(order_intent_hash, bundle_version)"), applied here to
+`(bundle_hash, inputs_hash)`."""
 
 
 class ComplianceMandateMissingError(Exception):
@@ -63,8 +64,8 @@ class ComplianceMandateMissingError(Exception):
 class ComplianceBundleInactiveError(Exception):
     """The mandate exists but its active revision is not `ACTIVE` (e.g.
     `PAUSED`/`DRAFT`/`SUPERSEDED`) — §3 `CM_BUNDLE_INACTIVE` (409), §6
-    "번들 미활성 → 409 fail-closed(무규칙 통과 금지)". Always fail-closed,
-    never gated by a caller flag (unlike mandate-missing)."""
+    "inactive bundle -> 409 fail-closed (no rule-free pass-through)". Always
+    fail-closed, never gated by a caller flag (unlike mandate-missing)."""
 
 
 def assemble_rule_bundle(

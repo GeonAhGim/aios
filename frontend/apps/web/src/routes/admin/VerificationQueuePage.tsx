@@ -7,6 +7,7 @@ import { useState } from "react";
 import { AppShell } from "../../components/layout/AppShell";
 import { ErrorMessage } from "../../components/ErrorMessage";
 import { ForbiddenNotice } from "../../components/ForbiddenNotice";
+import { useTranslation } from "react-i18next";
 
 // spec §3.3 에러 taxonomy: 검수 판정(verify) 실패는 err.message를 직접 노출하지
 // 않고 routeApiError로 판정해 403/그 외를 각각 ForbiddenNotice/ErrorMessage
@@ -27,6 +28,7 @@ function VerifyActionError({ error, onRetry }: { error: unknown; onRetry?: () =>
 }
 
 export function VerificationQueuePage() {
+  const { t } = useTranslation();
   const {
     data: queue,
     isLoading,
@@ -51,7 +53,7 @@ export function VerificationQueuePage() {
   return (
     <AppShell>
       <div className="space-y-6">
-        <PageHeader title="전략 검수 대기열" />
+        <PageHeader title={t("legacy.verificationQueuePage.title1")} />
         {queueIsError ? (
           <VerifyActionError error={queueError} onRetry={() => refetchQueue()} />
         ) : isLoading ? (
@@ -69,14 +71,14 @@ export function VerificationQueuePage() {
                       {item.strategyId}@{item.strategyVersion}
                     </p>
                     <p className="tabular text-sm text-fg-muted">
-                      가격 {item.price ?? "미정"} · 제출일{" "}
+                      {t("legacy.verificationQueuePage.t2")}{item.price ?? "미정"} {t("legacy.verificationQueuePage.t3", { val: " " })}
                       {new Date(item.submittedAt).toLocaleString()}
                     </p>
                   </div>
                   <div className="flex items-center gap-2">
                     <Input
                       type="text"
-                      placeholder="반려 사유"
+                      placeholder={t("legacy.verificationQueuePage.placeholder4")}
                       value={rejectReasons[item.listingId] ?? ""}
                       onChange={(e) =>
                         setRejectReasons((r) => ({ ...r, [item.listingId]: e.target.value }))
@@ -94,16 +96,14 @@ export function VerificationQueuePage() {
                         })
                       }
                     >
-                      반려
-                    </Button>
+                      {t("legacy.verificationQueuePage.t5")}</Button>
                     <Button
                       type="button"
                       size="sm"
                       className="!bg-success hover:!bg-success/90"
                       onClick={() => submitVerify(item.listingId, { decision: "APPROVE" })}
                     >
-                      승인
-                    </Button>
+                      {t("legacy.verificationQueuePage.t6")}</Button>
                   </div>
                 </div>
                 {actionError?.listingId === item.listingId && (
@@ -115,7 +115,7 @@ export function VerificationQueuePage() {
             ))}
           </ul>
         ) : (
-          <EmptyState>대기 중인 검수 건이 없습니다.</EmptyState>
+          <EmptyState>{t("legacy.verificationQueuePage.t7")}</EmptyState>
         )}
       </div>
     </AppShell>

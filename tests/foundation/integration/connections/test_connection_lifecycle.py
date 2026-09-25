@@ -1,5 +1,6 @@
 """FND-05 Connected Asset 통합테스트 — 실제 dev DB 대상. 74번 §6 CON-001~010 중
 provider/real infra 없이 재현 가능한 범위."""
+
 from __future__ import annotations
 
 import asyncio
@@ -37,6 +38,7 @@ from src.foundation.connections.application.sync_snapshot import (
 from src.foundation.connections.domain.models import (
     CapabilityScope,
     ProviderSnapshot,
+    ScopeProof,
     SnapshotValue,
 )
 from src.foundation.connections.domain.rules import ForbiddenCapabilityScopeError
@@ -90,8 +92,7 @@ async def _begin(pool, repo, trust_repo, tenant_id, *, scopes=None):
         mfa_verified=True,
         provider_code="fake-broker",
         opaque_account_ref="ACCT-1234567890",
-        requested_capability_profile=scopes
-        or ["READ_BALANCE", "READ_POSITION", "READ_ACTIVITY"],
+        requested_capability_profile=scopes or ["READ_BALANCE", "READ_POSITION", "READ_ACTIVITY"],
     )
 
 
@@ -149,9 +150,7 @@ async def test_full_lifecycle_begin_confirm_sync_revoke_masks_opaque_refs(pool, 
     assert "fake-cred-" not in binding.vault_secret_ref
     assert legacy_decrypt(binding.vault_secret_ref, ENCRYPTION_KEY).startswith("fake-cred-")
 
-    snapshot = await sync_snapshot(
-        repo, provider, tenant_id=tenant_id, connection_id=created.id
-    )
+    snapshot = await sync_snapshot(repo, provider, tenant_id=tenant_id, connection_id=created.id)
     assert snapshot.currency == "USD"
 
     revoked = await revoke_connection(repo, tenant_id=tenant_id, connection_id=created.id)
@@ -207,7 +206,7 @@ async def test_concurrent_revoke_during_sync_discards_snapshot(pool, repo, trust
 
     class RevokingProvider:
         async def verify_readonly_scope(self, lease: SecretLease):  # noqa: ANN201
-            raise NotImplementedError
+            raise RuntimeError("revoked")
 
         async def fetch_snapshot(self, account_ref: OpaqueRef, as_of: datetime):
             # provider 호출이 진행되는 "동안" 다른 요청이 revoke를 먼저 커밋했다고
@@ -219,9 +218,7 @@ async def test_concurrent_revoke_during_sync_discards_snapshot(pool, repo, trust
 
     revoking_provider: ReadonlyAccountProvider = RevokingProvider()
     with pytest.raises(ConnectionRevokedDuringSyncError):
-        await sync_snapshot(
-            repo, revoking_provider, tenant_id=tenant_id, connection_id=created.id
-        )
+        await sync_snapshot(repo, revoking_provider, tenant_id=tenant_id, connection_id=created.id)
 
     assert await repo.get_latest_snapshot(created.id) is None
 
@@ -239,9 +236,7 @@ async def test_provider_failure_degrades_connection_without_leaking_error_body(
 
     failing_provider = FakeReadonlyAccountProvider(fail_fetch=True)
     with pytest.raises(ProviderUnavailableError) as excinfo:
-        await sync_snapshot(
-            repo, failing_provider, tenant_id=tenant_id, connection_id=created.id
-        )
+        await sync_snapshot(repo, failing_provider, tenant_id=tenant_id, connection_id=created.id)
     assert "시뮬레이션" not in str(excinfo.value)
 
     connection = await repo.get_connection(created.id)
@@ -303,7 +298,7 @@ async def test_real_concurrent_revoke_and_sync_never_leaves_post_revocation_snap
 
     class _SlowProvider:
         async def verify_readonly_scope(self, lease: SecretLease):  # noqa: ANN201
-            raise NotImplementedError
+            raise RuntimeError("revoked")
 
         async def fetch_snapshot(self, account_ref: OpaqueRef, as_of: datetime):
             # provider 호출 자체에 약간의 지연을 둬서, revoke_connection()이
@@ -353,7 +348,14 @@ class _FixedAsOfProvider:
         self._values = values
 
     async def verify_readonly_scope(self, lease: SecretLease):  # noqa: ANN201
-        raise NotImplementedError
+        return ScopeProof(
+            granted_scopes=(
+                CapabilityScope.READ_BALANCE,
+                CapabilityScope.READ_POSITION,
+                CapabilityScope.READ_ACTIVITY,
+            ),
+            provider_credential_ref="fixed-as-of-test",
+        )
 
     async def fetch_snapshot(self, account_ref: OpaqueRef, as_of: datetime) -> ProviderSnapshot:
         return ProviderSnapshot(
@@ -364,9 +366,7 @@ class _FixedAsOfProvider:
         )
 
 
-async def test_stale_provider_response_does_not_overwrite_latest_snapshot(
-    pool, repo, trust_repo
-):
+async def test_stale_provider_response_does_not_overwrite_latest_snapshot(pool, repo, trust_repo):
     """CON-006 — 지연 도착·재전송된 오래된 응답은 저장된 "최신"을 덮어쓰지
     않는다. sync 자체는 실패로 취급하지 않는다(provider 호출은 정상적으로
     성공했으므로) — 기존 최신 스냅샷을 그대로 반환한다."""
@@ -379,9 +379,7 @@ async def test_stale_provider_response_does_not_overwrite_latest_snapshot(
 
     now = datetime.now(timezone.utc)
     fresh_provider: ReadonlyAccountProvider = _FixedAsOfProvider(now)
-    first = await sync_snapshot(
-        repo, fresh_provider, tenant_id=tenant_id, connection_id=created.id
-    )
+    first = await sync_snapshot(repo, fresh_provider, tenant_id=tenant_id, connection_id=created.id)
 
     stale_provider: ReadonlyAccountProvider = _FixedAsOfProvider(now - timedelta(hours=1))
     second = await sync_snapshot(

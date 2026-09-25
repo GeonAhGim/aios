@@ -40,6 +40,7 @@ import { useChartDrawings } from "./useChartDrawings";
 import { useChartLayout, type ChartViewSnapshot } from "./useChartLayout";
 import { useChartReplaySession } from "./useChartReplaySession";
 import { useIndicatorSelection } from "./useIndicatorSelection";
+import { useTranslation } from "react-i18next";
 
 // CH-6a — 화면 조립 리프: chart-engine의 CH-2(candleStream)·CH-3(overlayRegistry)
 // ·CH-4(drawings)·CH-7(replayController) 공개 API를 이 화면에서만 소비한다.
@@ -62,6 +63,7 @@ export function ChartPage({
   resolveServerIndicatorSeries,
   now,
 }: ChartPageProps) {
+  const { t } = useTranslation();
   const [searchParams, setSearchParams] = useSearchParams();
   const instrumentId = searchParams.get("instrument_id");
   const [venue, setVenue] = useState<Venue>(DEFAULT_VENUE);
@@ -170,7 +172,7 @@ export function ChartPage({
   return (
     <AppShell>
       <div className="max-w-5xl space-y-4">
-        <PageHeader title="차트" />
+        <PageHeader title={t("legacy.chartPage.title1")} />
 
         <div className="flex items-end gap-3">
           <p className="px-3 py-2 text-sm text-fg" data-testid="chart-instrument-id">
@@ -226,7 +228,7 @@ export function ChartPage({
         ) : query.isLoading ? (
           <LoadingState />
         ) : points.length === 0 ? (
-          <EmptyState>표시할 캔들이 없습니다.</EmptyState>
+          <EmptyState>{t("legacy.chartPage.t2")}</EmptyState>
         ) : (
           <ChartPanes
             key={paneRemountKey}

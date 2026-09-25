@@ -22,7 +22,9 @@ concurrency:
 jobs:
   verify:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    # 2026-09-26: 전체 스위트를 직렬로 돌리면 20분 상한을 넘겨 Test 단계에서 cancelled(15:04·15:27 실측 2회).
+    # conftest가 PYTEST_XDIST_WORKER별 DB를 복제하므로 xdist 병렬(-n auto)로 돌리고 상한은 45분.
+    timeout-minutes: 45
     services:
       postgres:
         image: postgres:16
@@ -56,7 +58,8 @@ jobs:
 
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.11"
+          # CTO 2026-09-25: 로컬 게이트(pm/local_ci, venv 3.10 + requirements-lock.txt)와 동일 환경.
+          python-version: "3.10"
           cache: pip
 
       # pip-audit이 setuptools 자체를 감사 대상에 넣는데, actions/setup-python이 심는
@@ -66,7 +69,10 @@ jobs:
         run: python -m pip install --upgrade pip setuptools
 
       - name: Install application and quality dependencies
-        run: python -m pip install -e ".[test,dev]"
+        # requirements-lock.txt가 정본(ruff/mypy/pytest 핀 포함) — extras 해석은 버전 드리프트를 만들었다.
+        run: |
+          python -m pip install -r requirements-lock.txt
+          python -m pip install -e ".[test,dev,mutation]"  # test/dev/mutation(cosmic-ray, tests/unit/scripts/test_run_mutation.py) extras(hypothesis·jsonschema·pandas·cosmic-ray 등)는 lock 밖 — 핀은 lock이 우선
 
       # H-5(ADR-2026-09-09-B) — pip-audit(--strict 대신 scripts/run_pip_audit.py가
       # 판정을 대신한다). 저장소가 스스로를 editable로 설치하므로 pip-audit --strict를
@@ -89,13 +95,34 @@ jobs:
       - name: Zone manifest
         run: python scripts/check_zone_manifest.py
 
+      # OPS-45(task-3387) — 957ae247 커밋 메시지가 BOM으로 시작했고, 5a20db30 이전에는
+      # BOM이 남은 소스 파일이 AST 게이트를 깼다(둘 다 Claude Code 훅이 적용되지 않는
+      # 외부 엔진 커밋 경로). scripts/check_no_bom.py 참조.
+      - name: No BOM
+        run: python scripts/check_no_bom.py
+
       # CM-8 — CM-A1 정적 검사(컴플라이언스 판정 없이 주문이 제출되는 경로
       # 부재). scripts/check_compliance_gate.py 참조.
       - name: Compliance gate wiring
         run: python scripts/check_compliance_gate.py
 
+      # EM-3(task-2121/2585) — EM-A2 정적 검사(자식 주문이 submit_order 밖에서
+      # parent_order_id/algo_run_id를 세팅하는 경로 부재). 이 스크립트의
+      # test_submit_order_still_sets_child_columns/main()은 파일명이 test_*.py가
+      # 아니라 pytest 기본 수집 대상이 아니다 — 전체 pytest(위 Test 스텝)가 실제로
+      # 돌리는 건 tests/adversarial/ems/test_child_order_bypass.py의 동등한 스캔
+      # 뿐이라 이 스크립트 자체는 이 스텝 없이는 CI에서 한 번도 실행되지 않는다.
+      # scripts/check_child_order_path.py 참조.
+      - name: Child order path gate wiring
+        run: python scripts/check_child_order_path.py
+
+      # 2026-09-26: 로컬 ci_recheck full 모드와 같은 분할 — 기본 단계는 xdist 병렬(-m "not perf"),
+      # perf 마커(예산 단언) 테스트는 코어 경합을 피해 직렬 단계로 돈다. CLI -m은 addopts의 -m을
+      # 완전히 대체하므로 nightly/live_demo/redis 제외를 여기서 다시 쓴다.
       - name: Test
-        run: pytest -q --cov=src --cov-report=term --cov-report=xml
+        run: pytest -q -n auto --dist loadfile -m "not perf and not nightly and not live_demo and not redis" --cov=src --cov-report=term --cov-report=xml
+      - name: Test (perf, serial)
+        run: pytest -q -m "perf and not nightly and not live_demo and not redis" --cov=src --cov-append --cov-report=term --cov-report=xml
 
       # PLT-37 — 절대 임계치(--cov-fail-under) 대신 coverage.xml 대비 직전
       # baseline에서 하락(허용 오차 0.5%p)했을 때만 FAIL한다. coverage.xml만

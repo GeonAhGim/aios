@@ -1,15 +1,20 @@
 """L27 -- BarFillSimulator port compliance + numeric parity with the
 pre-L27 application/simulate_fill.py implementation (origin/main 486dadb9).
 """
+
 from __future__ import annotations
 
 import ast
 import inspect
+import time
 from datetime import datetime, timezone
 from decimal import Decimal
+from pathlib import Path
 
 import pytest
 
+from scripts.check_code_language import ROOT as LANGUAGE_GATE_ROOT
+from scripts.check_code_language import count_file
 from src.data.models.market_data import Candle
 from src.data.models.trading import OrderSide
 from src.foundation.backtest.adapters import bar_fill_simulator as bar_fill_simulator_module
@@ -17,7 +22,10 @@ from src.foundation.backtest.adapters.bar_fill_simulator import BarFillSimulator
 from src.foundation.backtest.application import simulate_fill as simulate_fill_module
 from src.foundation.backtest.application.simulate_fill import simulate_fill
 from src.foundation.backtest.domain.models import CostModel
-from src.foundation.backtest.domain.rules import LookaheadViolationError
+from src.foundation.backtest.domain.rules import (
+    LookaheadViolationError,
+    assert_fill_after_signal,
+)
 from src.foundation.backtest.ports.fill_simulator import FillSimulatorPort
 
 _NOW = datetime(2026, 1, 2, tzinfo=timezone.utc)
@@ -164,3 +172,86 @@ def test_rejects_negative_slippage_bps() -> None:
             cost_model=cost_model,
             seed=0,
         )
+
+
+# -- D2 failure injection -----------------------------------------------------
+
+
+def test_wrapper_fill_bar_index_caught_by_domain_lookahead_rule_on_regression() -> None:
+    """`application/simulate_fill.py`'s wrapper signature has no
+    `signal_bar_index` parameter of its own -- the real caller
+    (`run_backtest.py`'s replay loop) is the one responsible for keeping the
+    triggering signal's bar_index and the fill's bar_index apart. This
+    reproduces the regression where a future caller (that loop, or a PAPER
+    `FillSimulatorPort` implementer) wires the same bar_index for both --
+    e.g. an off-by-one that fills within the signal bar instead of the bar
+    after -- and proves I-05's actual downstream guard
+    (`domain.rules.assert_fill_after_signal`) still rejects it using this
+    wrapper's real `SimulatedFill` output, not a hand-built stand-in."""
+    fill = simulate_fill(
+        bar=_bar(),
+        bar_index=5,
+        side=OrderSide.BUY,
+        quantity=Decimal("1"),
+        cost_model=CostModel(fee_bps=Decimal("0"), slippage_bps=Decimal("0")),
+    )
+
+    class _RegressedSignalEvent:
+        bar_index = 5  # same bar as the fill above -- the injected regression
+
+    with pytest.raises(LookaheadViolationError):
+        assert_fill_after_signal(_RegressedSignalEvent(), fill)
+
+
+# -- D2 performance assertion --------------------------------------------------
+
+
+@pytest.mark.perf
+def test_bar_fill_simulator_throughput_budget() -> None:
+    """`BarFillSimulator.simulate()` runs once per pending-order fill on
+    every bar of the replay loop (`run_backtest.py`); 10,000 calls must stay
+    well under a 300ms budget to rule out an accidental O(n) loop or Decimal
+    context regression creeping into this hot path."""
+    cost_model = CostModel(fee_bps=Decimal("5"), slippage_bps=Decimal("10"))
+    bar = _bar(open_price="100")
+    simulator = BarFillSimulator()
+    start = time.perf_counter()
+    for i in range(10_000):
+        simulator.simulate(
+            bar=bar,
+            bar_index=i,
+            side=OrderSide.BUY,
+            quantity=Decimal("1"),
+            cost_model=cost_model,
+            seed=0,
+        )
+    elapsed = time.perf_counter() - start
+    assert elapsed < 0.3, f"10,000 simulate() calls took {elapsed * 1000:.2f}ms, budget 300ms"
+
+
+# -- D2 gate-red repro ---------------------------------------------------------
+
+
+def test_check_code_language_gate_flags_synthetic_korean_comment_regression(
+    tmp_path: Path,
+) -> None:
+    """Comments/docstrings under `src/` must be English (ADR-2026-09-07-A,
+    `scripts/check_code_language.py`'s Hangul ratchet). Proves the gate's
+    real detector (`count_file`) fires on a synthetic Korean-comment
+    regression, and that this leaf's actual files stay green -- rather than
+    trusting that "no Korean in the diff" holds without ever exercising the
+    scanner that enforces it."""
+    regressed = tmp_path / "regressed_bar_fill_simulator.py"
+    regressed.write_text(
+        "def simulate() -> None:\n    # 잘못된 한글 주석 -- 회귀 시나리오\n    pass\n",
+        encoding="utf-8",
+    )
+    assert count_file(regressed) == 1
+
+    assert (
+        count_file(LANGUAGE_GATE_ROOT / "src/foundation/backtest/adapters/bar_fill_simulator.py")
+        == 0
+    )
+    assert (
+        count_file(LANGUAGE_GATE_ROOT / "src/foundation/backtest/application/simulate_fill.py") == 0
+    )

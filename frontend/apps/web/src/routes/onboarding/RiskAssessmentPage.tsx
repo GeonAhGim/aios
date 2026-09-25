@@ -13,6 +13,7 @@ import { useNavigate } from "react-router-dom";
 import { BadRequestNotice } from "../../components/BadRequestNotice";
 import { ErrorMessage } from "../../components/ErrorMessage";
 import { ForbiddenNotice } from "../../components/ForbiddenNotice";
+import { useTranslation } from "react-i18next";
 
 // spec §3.3/§3.4: 제출 실패는 err.message를 직접 노출하지 않고
 // routeApiError(task-483)로 판정한다. 이 화면은 FD-15.1 필수 게이트라 작성
@@ -35,6 +36,7 @@ function SubmitError({ error }: { error: unknown }) {
 
 // FD-15.1 필수 게이트 — 회원가입 직후(MFA 완료 후) 스킵 불가.
 export function RiskAssessmentPage() {
+  const { t } = useTranslation();
   const [yearsOfExperience, setYearsOfExperience] = useState(0);
   const [investableRatioPct, setInvestableRatioPct] = useState(10);
   const [lossTolerancePct, setLossTolerancePct] = useState(10);
@@ -57,7 +59,7 @@ export function RiskAssessmentPage() {
       });
       navigate("/dashboard");
     } catch (err) {
-      setError(err instanceof ApiError ? err : new Error("평가 제출에 실패했습니다."));
+      setError(err instanceof ApiError ? err : new Error(t("legacy.riskAssessmentPage.t12")));
     }
   }
 
@@ -68,15 +70,13 @@ export function RiskAssessmentPage() {
           <span className="mx-auto mb-3 flex h-11 w-11 items-center justify-center rounded-xl bg-accent text-lg font-bold text-bg">
             A
           </span>
-          <h1 className="text-xl font-semibold text-fg">투자자 적합성평가 (필수)</h1>
+          <h1 className="text-xl font-semibold text-fg">{t("legacy.riskAssessmentPage.t1")}</h1>
           <p className="mt-1 text-sm text-fg-muted">
-            투자 경험과 위험 감내도를 바탕으로 맞는 위험등급을 안내해드립니다. 강제 차단이
-            아니라 참고용 조언·불일치 경고 목적으로만 사용됩니다.
-          </p>
+            {t("legacy.riskAssessmentPage.t2")}</p>
         </div>
 
         <form onSubmit={handleSubmit} className="space-y-4 rounded-xl border border-border bg-surface p-6">
-          <Field label="투자 경험 연수">
+          <Field label={t("legacy.riskAssessmentPage.label3")}>
             <Input
               type="number"
               min={0}
@@ -108,31 +108,30 @@ export function RiskAssessmentPage() {
             />
           </Field>
 
-          <Field label="투자 목표">
+          <Field label={t("legacy.riskAssessmentPage.label4")}>
             <Select
               value={investmentGoal}
               onChange={(e) => setInvestmentGoal(e.target.value as InvestmentGoal)}
             >
-              <option value="SHORT_TERM_PROFIT">단기 수익 추구</option>
-              <option value="LONG_TERM_GROWTH">장기 자산 성장</option>
+              <option value="SHORT_TERM_PROFIT">{t("legacy.riskAssessmentPage.t5")}</option>
+              <option value="LONG_TERM_GROWTH">{t("legacy.riskAssessmentPage.t6")}</option>
             </Select>
           </Field>
 
-          <Field label="자금 필요 시점">
+          <Field label={t("legacy.riskAssessmentPage.label7")}>
             <Select
               value={liquidityNeed}
               onChange={(e) => setLiquidityNeed(e.target.value as LiquidityNeed)}
             >
-              <option value="WITHIN_1_YEAR">1년 이내</option>
-              <option value="1_TO_3_YEARS">1~3년</option>
-              <option value="OVER_3_YEARS">3년 이상</option>
+              <option value="WITHIN_1_YEAR">{t("legacy.riskAssessmentPage.t8")}</option>
+              <option value="1_TO_3_YEARS">{t("legacy.riskAssessmentPage.t9")}</option>
+              <option value="OVER_3_YEARS">{t("legacy.riskAssessmentPage.t10")}</option>
             </Select>
           </Field>
 
           {error !== null && <SubmitError error={error} />}
           <Button type="submit" loading={submit.isPending} className="w-full">
-            제출하기
-          </Button>
+            {t("legacy.riskAssessmentPage.t11")}</Button>
         </form>
       </div>
     </div>

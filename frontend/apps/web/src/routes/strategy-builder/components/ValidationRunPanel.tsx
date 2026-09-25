@@ -12,6 +12,7 @@ import { useState } from "react";
 import { BadRequestNotice } from "../../../components/BadRequestNotice";
 import { ErrorMessage } from "../../../components/ErrorMessage";
 import { ForbiddenNotice } from "../../../components/ForbiddenNotice";
+import { useTranslation } from "react-i18next";
 
 // spec §3.3 에러 taxonomy: 검증 실행 실패는 err.message를 직접 노출하지 않고
 // routeApiError(task-483)로 판정해 400/403/그 외를 각각 BadRequestNotice/
@@ -57,6 +58,7 @@ export function ValidationRunPanel({
   exchange: string;
   symbol: string;
 }) {
+  const { t } = useTranslation();
   const startValidation = useStartValidation();
   const [error, setError] = useState<unknown>(null);
   const [result, setResult] = useState<ValidationResultView | null>(null);
@@ -76,19 +78,19 @@ export function ValidationRunPanel({
         },
       });
       if (view === null) {
-        setError(new Error("검증 결과 형식을 확인할 수 없습니다."));
+        setError(new Error(t("legacy.validationRunPanel.t6")));
         return;
       }
       setResult(view);
     } catch (err) {
-      setError(err instanceof ApiError ? err : new Error("전략 검증 실행에 실패했습니다."));
+      setError(err instanceof ApiError ? err : new Error(t("legacy.validationRunPanel.t7")));
     }
   }
 
   return (
     <Card className="space-y-3">
       <div className="flex items-center justify-between">
-        <h2 className="text-lg font-semibold text-fg">전략 검증 실행</h2>
+        <h2 className="text-lg font-semibold text-fg">{t("legacy.validationRunPanel.t1")}</h2>
         <Button
           type="button"
           variant="secondary"
@@ -96,18 +98,17 @@ export function ValidationRunPanel({
           loading={startValidation.isPending}
           disabled={!strategyId.trim()}
         >
-          검증 실행
-        </Button>
+          {t("legacy.validationRunPanel.t2")}</Button>
       </div>
 
       {error !== null && <ValidationRunError error={error} />}
 
       {result && (
         <div className="space-y-2 rounded-lg border border-border-strong bg-bg p-4 text-sm">
-          <p className="font-medium text-fg">판정: {outcomeLabel(result)}</p>
+          <p className="font-medium text-fg">{t("legacy.validationRunPanel.t3", { outcomeLabel: outcomeLabel(result) })}</p>
           {result.hard_fail_reasons.length > 0 && (
             <div>
-              <p className="text-fg-secondary">불합격 사유</p>
+              <p className="text-fg-secondary">{t("legacy.validationRunPanel.t4")}</p>
               <ul className="list-disc pl-5 text-fg-muted">
                 {result.hard_fail_reasons.map((reason) => (
                   <li key={reason}>{reason}</li>
@@ -117,7 +118,7 @@ export function ValidationRunPanel({
           )}
           {result.warnings.length > 0 && (
             <div>
-              <p className="text-fg-secondary">경고</p>
+              <p className="text-fg-secondary">{t("legacy.validationRunPanel.t5")}</p>
               <ul className="list-disc pl-5 text-fg-muted">
                 {result.warnings.map((warning) => (
                   <li key={warning}>{warning}</li>

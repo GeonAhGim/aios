@@ -1,12 +1,13 @@
 import { describe, expect, it, vi } from "vitest";
 import { createTrendLine } from "../drawings/tools";
-import { LayoutModelError, createEmptyLayoutModel, type ChartLayoutModel } from "./layoutModel";
+import { LayoutModelError, createEmptyLayoutModel, encodeLayoutModel, type ChartLayoutModel } from "./layoutModel";
 import {
   type ChartingDrawingsRecord,
   type ChartingLayoutRecord,
   type ChartingPort,
   createLayout,
   deleteLayout,
+  listLayouts,
   loadDrawings,
   loadLayout,
   saveDrawings,
@@ -154,5 +155,84 @@ describe("negative: empty/malformed layout_state is never silently defaulted", (
     };
     const port = fakePort({ getDrawings: vi.fn().mockResolvedValue(record) });
     await expect(loadDrawings(port, "layout-1")).rejects.toThrow("CHART_DRAWING_SCHEMA_UNSUPPORTED");
+  });
+});
+
+describe("numeric perf: listLayouts decode budget", () => {
+  it("decodes 500 layout records (multi-panel model each) within a 200ms budget", async () => {
+    const encoded = encodeLayoutModel(sampleModel);
+    const records: ChartingLayoutRecord[] = Array.from({ length: 500 }, (_, i) =>
+      layoutRecord({ id: `layout-${i}`, layoutState: encoded }),
+    );
+    const port = fakePort({ listLayouts: vi.fn(async () => records) });
+
+    const startedAt = performance.now();
+    const result = await listLayouts(port);
+    const elapsedMs = performance.now() - startedAt;
+
+    expect(result).toHaveLength(500);
+    expect(elapsedMs).toBeLessThan(200);
+  });
+});
+
+// classify()'s "conflict" branch on GET-only/no-revision endpoints (getLayout,
+// deleteLayout, getDrawings) is defensive: the server contract (charting.py)
+// never returns 409 for them, so loadLayout/deleteLayout/loadDrawings each
+// throw a diagnostic "unexpected conflict classification on <op>" Error
+// instead of falling through to `outcome.value`, which doesn't exist on the
+// conflict variant and would otherwise surface as an opaque
+// "Cannot read properties of undefined" crash. These pin that diagnostic
+// message: delete the guard and these fail with a different, worse error,
+// which is exactly the gate-red this leaf reproduces.
+describe("gate-red reproduction: contract-violation guard on conflict-impossible ops", () => {
+  it("loadLayout throws a diagnostic error (not an undefined-property crash) if the server ever 409s on GET", async () => {
+    const port = fakePort({ getLayout: vi.fn().mockRejectedValue(CONCURRENCY_CONFLICT()) });
+    await expect(loadLayout(port, "layout-1")).rejects.toThrow("unexpected conflict classification on getLayout");
+  });
+
+  it("deleteLayout throws a diagnostic error if the server ever 409s on DELETE (delete_layout takes no expected_revision)", async () => {
+    const port = fakePort({ deleteLayout: vi.fn().mockRejectedValue(CONCURRENCY_CONFLICT()) });
+    await expect(deleteLayout(port, "layout-1")).rejects.toThrow("unexpected conflict classification on delete_layout");
+  });
+
+  it("loadDrawings throws a diagnostic error if the server ever 409s on GET drawings", async () => {
+    const port = fakePort({ getDrawings: vi.fn().mockRejectedValue(CONCURRENCY_CONFLICT()) });
+    await expect(loadDrawings(port, "layout-1")).rejects.toThrow("unexpected conflict classification on getDrawings");
+  });
+});
+
+describe("D3: adversarial + multi-instance", () => {
+  it("adversarial: a server-supplied layoutState carrying a __proto__ pollution attempt is rejected, not merged into the model or Object.prototype", async () => {
+    const malicious = { ...(encodeLayoutModel(sampleModel) as Record<string, unknown>) };
+    // JSON.parse (untrusted server body) produces an own enumerable
+    // "__proto__" data property, not a prototype mutation — defineProperty
+    // reproduces that exactly (a literal `{ __proto__: ... }` would instead
+    // set the actual prototype and not exercise assertKnownFields at all).
+    Object.defineProperty(malicious, "__proto__", {
+      value: { polluted: true },
+      enumerable: true,
+      configurable: true,
+      writable: true,
+    });
+    const port = fakePort({ getLayout: vi.fn(async () => layoutRecord({ layoutState: malicious })) });
+
+    await expect(loadLayout(port, "layout-1")).rejects.toBeInstanceOf(LayoutModelError);
+    expect(({} as Record<string, unknown>).polluted).toBeUndefined();
+  });
+
+  it("multi-instance: two concurrent loadLayout calls against independent ports/ids never cross-contaminate results (no shared module state)", async () => {
+    const modelA: ChartLayoutModel = { ...sampleModel, activePanelId: "p1" };
+    const modelB: ChartLayoutModel = { ...sampleModel, activePanelId: null };
+    const portA = fakePort({
+      getLayout: vi.fn(async () => layoutRecord({ id: "layout-a", layoutState: encodeLayoutModel(modelA) })),
+    });
+    const portB = fakePort({
+      getLayout: vi.fn(async () => layoutRecord({ id: "layout-b", layoutState: encodeLayoutModel(modelB) })),
+    });
+
+    const [resultA, resultB] = await Promise.all([loadLayout(portA, "layout-a"), loadLayout(portB, "layout-b")]);
+
+    expect(resultA).toEqual({ kind: "ok", value: { meta: expect.objectContaining({ id: "layout-a" }), model: modelA } });
+    expect(resultB).toEqual({ kind: "ok", value: { meta: expect.objectContaining({ id: "layout-b" }), model: modelB } });
   });
 });

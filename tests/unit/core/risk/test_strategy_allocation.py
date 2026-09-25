@@ -85,3 +85,20 @@ def test_missing_total_equity_denies():
     result = strategy_allocation.check(inputs, POLICY)
     assert result.outcome == RiskOutcome.DENY
     assert result.missing_fields == ("equity.total_equity",)
+
+
+def test_zero_total_equity_denies_as_missing():
+    # total_equity=0 is a distinct fail-closed guard from None (corrupted
+    # equity snapshot), not just an absent field — must classify identically
+    # to missing rather than dividing by zero.
+    inputs = _inputs(certified_badge=True, allocated_capital="1000", total_equity="0")
+    result = strategy_allocation.check(inputs, POLICY)
+    assert result.outcome == RiskOutcome.DENY
+    assert result.missing_fields == ("equity.total_equity",)
+
+
+def test_negative_total_equity_denies_as_missing():
+    inputs = _inputs(certified_badge=True, allocated_capital="1000", total_equity="-500")
+    result = strategy_allocation.check(inputs, POLICY)
+    assert result.outcome == RiskOutcome.DENY
+    assert result.missing_fields == ("equity.total_equity",)

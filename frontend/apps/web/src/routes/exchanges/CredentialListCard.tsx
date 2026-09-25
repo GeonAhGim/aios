@@ -3,6 +3,7 @@ import { Badge, Button, Card, CardTitle, EmptyState, LoadingState } from "@aios/
 import { exchangeLabel } from "../../lib/exchangeLabels";
 import { credentialScope, LIVE_BLOCKED_NOTICE, type CredentialWithSecretRef } from "./credentialScope";
 import { RevokeCredentialError } from "./ExchangeCredentialErrors";
+import { useTranslation } from "react-i18next";
 
 export function CredentialListCard({
   credentials,
@@ -25,9 +26,10 @@ export function CredentialListCard({
   onRevoke: (exchange: string) => void;
   onRetryRevoke: () => void;
 }) {
+  const { t } = useTranslation();
   return (
     <Card>
-      <CardTitle>연동된 거래소</CardTitle>
+      <CardTitle>{t("legacy.credentialListCard.t1")}</CardTitle>
       {isLoading ? (
         <LoadingState />
       ) : credentials && credentials.length > 0 ? (
@@ -45,7 +47,7 @@ export function CredentialListCard({
                     <Badge tone={scope.tone}>{scope.label}</Badge>
                   </div>
                   <p className="text-sm text-fg-muted">
-                    연동일 {new Date(c.linkedAt).toLocaleDateString()}
+                    {t("legacy.credentialListCard.t2")}{new Date(c.linkedAt).toLocaleDateString()}
                   </p>
                   {c.withdrawalPermissionWarning && (
                     <p className="mt-1 text-sm text-warning">⚠ {c.withdrawalPermissionWarning}</p>
@@ -59,8 +61,7 @@ export function CredentialListCard({
                     size="sm"
                     onClick={() => onSelectExchange(c.exchange)}
                   >
-                    잔고 조회
-                  </Button>
+                    {t("legacy.credentialListCard.t3")}</Button>
                   <Button
                     type="button"
                     variant="danger"
@@ -68,15 +69,14 @@ export function CredentialListCard({
                     disabled={scope.isLive || revokingExchange === c.exchange}
                     onClick={() => onRevoke(c.exchange)}
                   >
-                    해지
-                  </Button>
+                    {t("legacy.credentialListCard.t4")}</Button>
                 </div>
               </li>
             );
           })}
         </ul>
       ) : (
-        <EmptyState>연동된 거래소가 없습니다.</EmptyState>
+        <EmptyState>{t("legacy.credentialListCard.t5")}</EmptyState>
       )}
 
       {revokeError !== null && (
@@ -87,7 +87,7 @@ export function CredentialListCard({
 
       {selectedExchange && balances && (
         <div className="mt-4 rounded-md border border-border bg-surface-hover p-4">
-          <p className="mb-2 text-sm text-fg-secondary">{exchangeLabel(selectedExchange)} 잔고</p>
+          <p className="mb-2 text-sm text-fg-secondary">{t("legacy.credentialListCard.t6", { exchangeLabel: exchangeLabel(selectedExchange) })}</p>
           {balances.length > 0 ? (
             <ul className="tabular space-y-1 text-sm text-fg">
               {balances.map((b) => (
@@ -97,7 +97,7 @@ export function CredentialListCard({
               ))}
             </ul>
           ) : (
-            <p className="text-sm text-fg-muted">잔고 정보가 없습니다.</p>
+            <p className="text-sm text-fg-muted">{t("legacy.credentialListCard.t7")}</p>
           )}
         </div>
       )}

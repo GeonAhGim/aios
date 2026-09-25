@@ -11,27 +11,36 @@ from src.foundation.trust.domain.models import Consent, Disclosure
 
 class TrustRepository(Protocol):
     async def get_active_disclosure(self, purpose: str) -> Disclosure | None:
-        """해당 purpose의 현재 활성(미폐기) disclosure 중 최신 revision을 반환."""
+        """Return the latest revision of the currently active
+        (non-destroyed) disclosure for the given purpose."""
         ...
 
     async def get_disclosure_by_purpose_and_revision(
         self, purpose: str, revision: int
-    ) -> Disclosure | None: ...
+    ) -> tuple[Disclosure, datetime] | None:
+        """Returns the disclosure alongside the DB server's own clock
+        (`clock_timestamp()`), read in the same round trip. The caller must
+        judge `disclosure.retired_at` against this server time, never
+        against a separately-captured application clock -- see
+        [[src/services/auth/lockout.py]]'s `register_failed_attempt`
+        docstring for why mixing app-clock and DB-clock reads around a
+        threshold comparison is a real (not theoretical) race."""
+        ...
 
     async def get_active_consent(self, tenant_id: UUID, purpose: str) -> Consent | None:
-        """해당 tenant/purpose의 현재 ACTIVE 동의(있다면 정확히 하나)."""
+        """Return the currently ACTIVE consent for this tenant/purpose (at most one)."""
         ...
 
     async def get_latest_consent(self, tenant_id: UUID, purpose: str) -> Consent | None:
-        """상태(ACTIVE/REVOKED) 무관하게 가장 최근 레코드 — freshness 판정이
-        "동의한 적 없음"(POLICY_CONSENT_REQUIRED)과 "동의했다가 철회함"
-        (POLICY_CONSENT_REVOKED)을 구분하려면 REVOKED 레코드도 봐야 한다.
-        `get_active_consent`는 ACTIVE만 보므로 이 구분을 할 수 없다."""
+        """Most recent record regardless of state (ACTIVE/REVOKED). Distinguishing
+        "never consented" (POLICY_CONSENT_REQUIRED) from "consented then revoked"
+        (POLICY_CONSENT_REVOKED) requires seeing REVOKED records.
+        `get_active_consent` only sees ACTIVE, so it cannot make this distinction."""
         ...
 
     async def list_active_consents(self, tenant_id: UUID) -> list[Consent]:
-        """TrustStatusView 프로젝션(projections.py)이 쓰는 조회 — 해당 tenant의
-        현재 ACTIVE 동의 전체."""
+        """Query used by the TrustStatusView projection (projections.py) — all
+        currently ACTIVE consents for this tenant."""
         ...
 
     async def insert_consent(
@@ -44,13 +53,13 @@ class TrustRepository(Protocol):
         disclosure_revision: int,
         expires_at: datetime | None,
     ) -> Consent:
-        """새 ACTIVE consent를 append한다 — 기존 레코드를 덮어쓰지 않는다(73번
-        §3.2 append-only)."""
+        """Append a new ACTIVE consent — never overwrite an existing record (§3.2 append-only)."""
         ...
 
     async def revoke_consent(self, consent_id: UUID, *, tenant_id: UUID) -> Consent:
-        """105번 표준의 조건부 UPDATE(state=ACTIVE 조건)로 REVOKED 전이.
+        """Conditional UPDATE (state=ACTIVE guard) per the standard-105 pattern
+        to transition to REVOKED.
 
-        대상이 이미 REVOKED이거나 다른 tenant 소유면
-        `ConcurrencyConflictError`/`PermissionError`를 던진다(구현체 책임)."""
+        Raises `ConcurrencyConflictError`/`PermissionError` if the target is
+        already REVOKED or belongs to another tenant (implementor responsibility)."""
         ...

@@ -16,6 +16,7 @@ import { Badge, Select } from "@aios/ui-web";
 import { useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, type ChangeEvent } from "react";
 import { useTenant } from "../hooks/useTenant";
+import { useTranslation } from "react-i18next";
 
 const ROLE_LABELS: Record<MembershipRole, string> = {
   OWNER: "소유자",
@@ -52,6 +53,7 @@ export interface TenantSwitcherProps {
 }
 
 export function TenantSwitcher({ memberships, onCapabilitiesChange }: TenantSwitcherProps) {
+  const { t } = useTranslation();
   const { activeTenantId, setActiveTenant } = useTenant();
   const queryClient = useQueryClient();
 
@@ -93,10 +95,10 @@ export function TenantSwitcher({ memberships, onCapabilitiesChange }: TenantSwit
       <Select
         value={activeTenantId ?? "PERSONAL"}
         onChange={handleChange}
-        aria-label="활성 테넌트"
+        aria-label={t("legacy.tenantSwitcher.ariaLabel1")}
         className="w-auto"
       >
-        <option value="PERSONAL">개인(PERSONAL)</option>
+        <option value="PERSONAL">{t("legacy.tenantSwitcher.t2")}</option>
         {memberships.map((m) => (
           <option key={m.tenantId} value={m.tenantId}>
             {m.tenantId}

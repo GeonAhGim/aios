@@ -1,4 +1,5 @@
 """L4_strategy_portfolio_backtest_v1.0.md#§2 row 94, §8 line 572 — selector.py tests."""
+
 from __future__ import annotations
 
 from datetime import datetime, timezone
@@ -58,9 +59,7 @@ def _inp(method: SizingMethod, **overrides: Any) -> PortfolioStateInput:
     return PortfolioStateInput.model_validate(base)
 
 
-@pytest.mark.parametrize(
-    "method", [m for m in SizingMethod], ids=[m.value for m in SizingMethod]
-)
+@pytest.mark.parametrize("method", [m for m in SizingMethod], ids=[m.value for m in SizingMethod])
 def test_size_for_dispatches_to_the_matching_module(method: SizingMethod):
     cfg = _config(method)
     inp = _inp(method)
@@ -107,3 +106,25 @@ def test_size_for_rejects_result_method_mismatch(monkeypatch: pytest.MonkeyPatch
 
     with pytest.raises(SizingResultTamperedError):
         size_for(_config(SizingMethod.FIXED_FRACTIONAL), _inp(SizingMethod.FIXED_FRACTIONAL))
+
+
+@pytest.mark.perf
+def test_size_for_p99_latency_is_within_pre_trade_gate_budget():
+    """사이징은 주문 제출 전 경로에 있으므로 ADR-2026-09-09-C Decision 1의
+    "사전거래 게이트 p99 5ms" 예산이 적용된다 — 4개 산식 전부를 디스패치해도
+    한 번의 size_for() 호출이 그 예산 안에 들어야 한다."""
+    import time
+
+    cfg = _config(SizingMethod.FIXED_FRACTIONAL)
+    inp = _inp(SizingMethod.FIXED_FRACTIONAL)
+
+    samples_us: list[float] = []
+    for _ in range(500):
+        start = time.perf_counter()
+        size_for(cfg, inp)
+        samples_us.append((time.perf_counter() - start) * 1_000_000)
+
+    samples_us.sort()
+    p99_us = samples_us[int(len(samples_us) * 0.99)]
+
+    assert p99_us < 5_000, f"size_for() p99={p99_us:.1f}us exceeds 5ms pre-trade gate budget"

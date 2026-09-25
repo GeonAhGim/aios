@@ -28,8 +28,10 @@ from uuid import uuid4
 import asyncpg
 import pytest
 
+from src.foundation.entities.domain.defaults import default_portfolio_id
 from src.foundation.positions.domain.position_key import PositionKey
 from tests.integration.conftest import create_test_tenant
+from tests.integration.foundation.positions.conftest import create_pos_account, open_position
 from tests.support.entities_seed import bootstrap_default_portfolio
 
 _PROJECT_ROOT = Path(__file__).resolve().parents[4]
@@ -192,7 +194,9 @@ async def test_backfill_fails_closed_and_rolls_back_whole_migration_when_portfol
 
     try:
         assert result.returncode != 0
-        assert "역산 불가" in result.stdout + result.stderr
+        # ASCII marker: the child process console encoding (Windows cp949) would
+        # mangle the Korean message text, but never the exception class name.
+        assert "UnbackfillablePositionKeyError" in result.stdout + result.stderr
 
         async with pool.acquire() as conn:
             version = await conn.fetchval("SELECT version_num FROM alembic_version")
@@ -216,4 +220,58 @@ async def test_backfill_fails_closed_and_rolls_back_whole_migration_when_portfol
             await conn.execute(
                 "DELETE FROM pos_account WHERE account_id = ANY($1::uuid[])",
                 [resolvable_account_id, bare_account_id],
+            )
+
+
+async def test_adapter_written_snapshot_survives_fa0d_downgrade_upgrade_round_trip(pool):
+    """Gate-red reproduction (task-771991202, CI 77871f67): a snapshot written
+    through `PostgresSnapshotRepository.upsert` must carry `portfolio_id` in
+    the column (not only inside the key string), otherwise this migration's
+    downgrade (5->4 parts) followed by upgrade fails closed and leaves the
+    database stuck below head. Red before the adapter fix, green after."""
+    tenant_id = await create_test_tenant(pool)
+    account_id = await create_pos_account(pool, tenant_id)
+    portfolio_id = default_portfolio_id(tenant_id)
+    position_key = str(
+        PositionKey(
+            venue="TESTVENUE", instrument_id=f"INST{uuid4().hex[:8]}", strategy_id="default",
+            execution_id="paper", portfolio_id=portfolio_id,
+        )
+    )
+    await open_position(
+        pool, tenant_id=tenant_id, account_id=account_id, position_key=position_key
+    )
+    legacy_key = ":".join(position_key.split(":")[:4])
+    try:
+        async with pool.acquire() as conn:
+            column_value = await conn.fetchval(
+                "SELECT portfolio_id FROM pos_snapshot WHERE position_key = $1", position_key
+            )
+        assert column_value == portfolio_id, "adapter left pos_snapshot.portfolio_id NULL"
+
+        _run_alembic_ok("downgrade", _DOWN_REVISION)
+        async with pool.acquire() as conn:
+            downgraded = await conn.fetchrow(
+                "SELECT portfolio_id FROM pos_snapshot WHERE position_key = $1", legacy_key
+            )
+        assert downgraded is not None and downgraded["portfolio_id"] == portfolio_id
+
+        _run_alembic_ok("upgrade", "head")
+        async with pool.acquire() as conn:
+            restored = await conn.fetchrow(
+                "SELECT tenant_id, portfolio_id FROM pos_snapshot WHERE position_key = $1",
+                position_key,
+            )
+            leftover = await conn.fetchval(
+                "SELECT count(*) FROM pos_snapshot WHERE position_key = $1", legacy_key
+            )
+        assert restored is not None
+        assert restored["tenant_id"] == tenant_id
+        assert restored["portfolio_id"] == portfolio_id
+        assert leftover == 0
+    finally:
+        async with pool.acquire() as conn:
+            await conn.execute(
+                "DELETE FROM pos_snapshot WHERE position_key = ANY($1::varchar[])",
+                [position_key, legacy_key],
             )

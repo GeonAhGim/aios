@@ -19,11 +19,12 @@ Spec: docs/specs/L4_risk_and_safety_v1.0.md §2.3/§9(R-47), §10 "참조 시세
   가깝지만, 문서상 레이트리밋·가용성이 "미검증"이라 실패를 흔한 경로로
   취급한다(재시도하지 않고 그 틱은 그냥 None).
 """
+
 from __future__ import annotations
 
 from datetime import datetime, timezone
 from decimal import Decimal, InvalidOperation
-from typing import Protocol
+from typing import Any, Protocol
 
 import httpx
 
@@ -42,7 +43,7 @@ class _FuturesTickerCapable(Protocol):
 
 
 def _to_binance_symbol(symbol: str) -> str:
-    """"BTC/USDT" -> "BTCUSDT" — Binance는 슬래시 없는 표기를 쓴다."""
+    """ "BTC/USDT" -> "BTCUSDT" — Binance는 슬래시 없는 표기를 쓴다."""
     return symbol.replace("/", "")
 
 
@@ -96,3 +97,30 @@ class BinancePublicTickerReference:
             timestamp=datetime.now(timezone.utc),
             source_type="reference",
         )
+
+
+class DefaultDistrustProviderFactory:
+    """R-48/task-2810 -- the `(adapter, exchange) -> providers` wiring helper
+    that `ExecutionLoopScheduler` calls every tick. Binance is an
+    exchange-agnostic public API, so one instance is shared across all
+    calls; Bitget futures mark price is freshly wrapped per the adapter
+    resolved for that tick (per-account auth sessions differ, so it can't be
+    reused). Other exchanges (kis/nh and other non-crypto assets) are not
+    yet in scope for this R-48 reference quorum, so only Binance is used as
+    a reference."""
+
+    def __init__(self, *, binance: BinancePublicTickerReference | None = None) -> None:
+        self._binance = binance or BinancePublicTickerReference()
+
+    def __call__(self, adapter: Any, exchange: str) -> list[ReferenceQuoteProvider]:
+        # adapter is the real exchange adapter already resolved by
+        # `ExecutionLoopScheduler` (at runtime, a BitgetAdapter, or one
+        # wrapped by InstrumentedAdapter -- the latter does not inherit
+        # ExchangeAdapter and only delegates via __getattr__, see
+        # instrumented_adapter.py). It doesn't statically satisfy the
+        # `_FuturesTickerCapable` structural Protocol, so it's accepted as
+        # Any.
+        providers: list[ReferenceQuoteProvider] = [self._binance]
+        if exchange == "bitget":
+            providers.append(BitgetFuturesMarkPriceReference(adapter))
+        return providers

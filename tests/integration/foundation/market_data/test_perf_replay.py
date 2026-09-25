@@ -33,9 +33,23 @@ docs/design/ADR-2026-09-04-A-market-data-replay-perf.md.
 `test_round_trip_gate_detects_extra_query`는 이 게이트의 negative test다 —
 왕복을 하나 더 내는 저장소를 끼우면 계수가 상한을 넘겨 실제로 실패하는지
 증명한다(I-10: 게이트는 "있다"가 아니라 "작동함이 증명됨"이어야 한다).
+
+**red→green 회귀 증거(task-826 DEPTH 재감사)**: 위 문단은 task-1405 사고를
+말로 서술할 뿐 코드로 증명하지 않는다는 지적(docs/audit/DEPTH_LA_LB_LC.md
+leaf 826)에 따라, `test_absolute_time_assertion_would_flake_but_round_trip_gate_stays_green`
+가 그 진단을 실행 가능한 코드로 재현한다: 인위적 지연으로 task-1405가
+겪은 CPU 시간 편차를 흉내 내면 옛 절대시간 단언은 실제로 RED(실패)가
+되고, 왕복 수+정합성 게이트는 같은 조건에서 GREEN(통과)으로 남는다.
+
+**적대적/다중인스턴스-동시성 증거**: `test_concurrent_write_during_replay_cannot_leak_past_as_of`
+는 여러 리플레이 인스턴스가 동시에 도는 동안 같은 시계열에 끼어드는
+동시 쓰기(적대적 writer)가 이미 캡처된 `as_of` 스냅샷(LA-13
+`created_at` 필터) 뒤로 새지 않는지 증명한다.
 """
+
 from __future__ import annotations
 
+import asyncio
 import time
 import uuid
 from datetime import datetime, timedelta, timezone
@@ -52,8 +66,9 @@ from src.foundation.market_data.adapters.postgres_candle_store import PostgresCa
 from src.foundation.market_data.adapters.postgres_reference_repository import (
     PostgresReferenceRepository,
 )
-from src.foundation.market_data.application.replay_candles import replay
+from src.foundation.market_data.application.replay_candles import ReplayIncompleteError, replay
 from src.foundation.market_data.contracts.v1 import ReplayRequest, SeriesKey
+from src.foundation.market_data.domain.candle_columns import CandleColumns
 from tests.integration.foundation.market_data.perf_replay_support import (
     DAY_ROW_COUNT,
     MONTH_ROW_COUNT,
@@ -112,15 +127,24 @@ async def _seeded_request(
         pool, batch_repo, instrument_id=instrument_id, t0=t0, row_count=row_count
     )
     request = ReplayRequest(
-        key=series_key(instrument_id), start=t0, end=t0 + timedelta(minutes=row_count),
+        key=series_key(instrument_id),
+        start=t0,
+        end=t0 + timedelta(minutes=row_count),
         as_of=as_of,
     )
     return request, instrument_id
 
 
 async def _measure_and_gate(
-    pool, request: ReplayRequest, *, label: str, row_count: int, target_seconds: float,
-    candle_store, reference_repo, calendar_repo,
+    pool,
+    request: ReplayRequest,
+    *,
+    label: str,
+    row_count: int,
+    target_seconds: float,
+    candle_store,
+    reference_repo,
+    calendar_repo,
 ) -> None:
     round_trip_count = await count_replay_round_trips(
         pool, request, store=candle_store, refs=reference_repo, cal=calendar_repo
@@ -159,9 +183,14 @@ async def test_replay_1day_1440_candles_under_5s(
         pool, batch_repo, t0=_next_utc_midnight(), row_count=DAY_ROW_COUNT
     )
     await _measure_and_gate(
-        pool, request, label="1day", row_count=DAY_ROW_COUNT,
-        target_seconds=_DAY_TARGET_SECONDS, candle_store=candle_store,
-        reference_repo=reference_repo, calendar_repo=calendar_repo,
+        pool,
+        request,
+        label="1day",
+        row_count=DAY_ROW_COUNT,
+        target_seconds=_DAY_TARGET_SECONDS,
+        candle_store=candle_store,
+        reference_repo=reference_repo,
+        calendar_repo=calendar_repo,
     )
 
 
@@ -175,9 +204,14 @@ async def test_replay_43200_candles_under_5s(
     t0 = datetime.now(timezone.utc).replace(second=0, microsecond=0) + timedelta(minutes=1)
     request, _ = await _seeded_request(pool, batch_repo, t0=t0, row_count=MONTH_ROW_COUNT)
     await _measure_and_gate(
-        pool, request, label="1month", row_count=MONTH_ROW_COUNT,
-        target_seconds=_MONTH_TARGET_SECONDS, candle_store=candle_store,
-        reference_repo=reference_repo, calendar_repo=calendar_repo,
+        pool,
+        request,
+        label="1month",
+        row_count=MONTH_ROW_COUNT,
+        target_seconds=_MONTH_TARGET_SECONDS,
+        candle_store=candle_store,
+        reference_repo=reference_repo,
+        calendar_repo=calendar_repo,
     )
 
 
@@ -191,9 +225,7 @@ class _ChattyCandleStore(PostgresCandleStore):
 
 
 @pytest.mark.perf
-async def test_round_trip_gate_detects_extra_query(
-    pool, batch_repo, reference_repo, calendar_repo
-):
+async def test_round_trip_gate_detects_extra_query(pool, batch_repo, reference_repo, calendar_repo):
     """negative: 왕복을 하나 더 내는 저장소를 끼우면 계수가 상한(2)을 넘긴다
     — 위 게이트가 실제 구조 회귀를 잡는다는 증명(I-10)."""
     request, _ = await _seeded_request(
@@ -204,3 +236,147 @@ async def test_round_trip_gate_detects_extra_query(
     )
     assert round_trip_count == _MAX_REPLAY_ROUND_TRIPS + 1
     assert round_trip_count > _MAX_REPLAY_ROUND_TRIPS
+
+
+class _LossyCandleStore(PostgresCandleStore):
+    """negative test 전용 — 컬럼 조회에서 마지막 캔들 하나를 조용히
+    누락시킨다(LA-23b 컬럼 경로가 행을 드롭하는 회귀의 최소 재현)."""
+
+    async def read_candles_columnar(
+        self, conn: asyncpg.Connection, key: SeriesKey, start, end, as_of
+    ) -> CandleColumns:
+        columns = await super().read_candles_columnar(conn, key, start, end, as_of)
+        if len(columns) == 0:
+            return columns
+        return CandleColumns(
+            ts=columns.ts[:-1],
+            open=columns.open[:-1],
+            high=columns.high[:-1],
+            low=columns.low[:-1],
+            close=columns.close[:-1],
+            volume=columns.volume[:-1],
+            quote_volume=columns.quote_volume[:-1],
+        )
+
+
+@pytest.mark.perf
+async def test_consistency_gate_detects_missing_rows(
+    pool, batch_repo, reference_repo, calendar_repo
+):
+    """negative: 컬럼 조회가 행을 하나 누락시키면 `_measure_and_gate`의
+    정합성 단언(`expected_count`/`missing_count`)이 통과할 기회조차 없이
+    `replay()`가 strict 게이트(`ReplayIncompleteError`)로 먼저 거부한다 —
+    위 게이트들이 실제 데이터 누락 회귀를 잡는다는 증명(I-10)."""
+    request, _ = await _seeded_request(
+        pool, batch_repo, t0=_next_utc_midnight(), row_count=DAY_ROW_COUNT
+    )
+    with pytest.raises(ReplayIncompleteError) as exc_info:
+        await replay(
+            request,
+            store=_LossyCandleStore(pool),
+            refs=reference_repo,
+            cal=calendar_repo,
+            pool=pool,
+        )
+    assert exc_info.value.expected_count == DAY_ROW_COUNT
+    assert exc_info.value.missing_count == 1
+
+
+class _SlowCandleStore(PostgresCandleStore):
+    """red→green 증거 전용 — 컬럼 조회에 인위적 지연을 주입해 task-1405가
+    진단한 "공유 CI 부하 하의 CPU 시간 편차"를 결정론적으로 재현한다(모듈
+    docstring 서술이 아니라 실행 가능한 코드 증명, I-10)."""
+
+    def __init__(self, pool: asyncpg.Pool, *, delay_seconds: float) -> None:
+        super().__init__(pool)
+        self._delay_seconds = delay_seconds
+
+    async def read_candles_columnar(
+        self, conn: asyncpg.Connection, key: SeriesKey, start, end, as_of
+    ) -> CandleColumns:
+        await asyncio.sleep(self._delay_seconds)
+        return await super().read_candles_columnar(conn, key, start, end, as_of)
+
+
+@pytest.mark.perf
+async def test_absolute_time_assertion_would_flake_but_round_trip_gate_stays_green(
+    pool, batch_repo, reference_repo, calendar_repo
+):
+    """red→green 회귀 증거(task-826 DEPTH 재감사, docs/audit/DEPTH_LA_LB_LC.md
+    leaf 826): task-1405가 겪은 CPU 시간 편차를 인위적 지연으로 재현하면—
+
+    RED: 예전에 기본 CI 게이트였던 절대시간 단언(`elapsed < _DAY_TARGET_SECONDS`)
+    은 이 지연 아래서 실제로 실패한다(코드로 실행해 실패시킨다 — 서술이
+    아니다).
+
+    GREEN: 이 파일이 지금 쓰는 왕복 수(`_MAX_REPLAY_ROUND_TRIPS`)+정합성
+    게이트는 같은 지연 아래서도 그대로 통과한다 — 절대시간을 기본 CI
+    게이트에서 뺀 결정(90f5c17f)이 노이즈에 강하다는 증명."""
+    request, _ = await _seeded_request(
+        pool, batch_repo, t0=_next_utc_midnight(), row_count=DAY_ROW_COUNT
+    )
+    slow_store = _SlowCandleStore(pool, delay_seconds=_DAY_TARGET_SECONDS + 0.1)
+
+    round_trip_count = await count_replay_round_trips(
+        pool, request, store=slow_store, refs=reference_repo, cal=calendar_repo
+    )
+
+    started = time.perf_counter()
+    series = await replay(
+        request, store=slow_store, refs=reference_repo, cal=calendar_repo, pool=pool
+    )
+    elapsed_seconds = time.perf_counter() - started
+
+    with pytest.raises(AssertionError):
+        assert elapsed_seconds < _DAY_TARGET_SECONDS, "RED: 옛 절대시간 단언 재현"
+
+    assert round_trip_count <= _MAX_REPLAY_ROUND_TRIPS
+    assert series.expected_count == DAY_ROW_COUNT
+    assert series.missing_count == 0
+
+
+@pytest.mark.perf
+async def test_concurrent_write_during_replay_cannot_leak_past_as_of(
+    pool, batch_repo, reference_repo, calendar_repo, candle_store
+):
+    """적대적 + 다중인스턴스-동시성(task-826 DEPTH 재감사): 5개의 동시
+    리플레이 인스턴스(여러 백테스트 워커를 흉내)가 도는 동안, 같은
+    시계열의 나머지 캔들을 밀어 넣는 동시 쓰기(적대적 writer)가 있어도
+    이미 캡처된 `as_of` 스냅샷(LA-13 `created_at` 필터,
+    postgres_candle_store.py docstring) 뒤로는 새지 않아야 한다 — strict
+    게이트가 경쟁 상태에서도 흔들림 없이 결측(60개)을 잡는지 증명한다."""
+    t0 = _next_utc_midnight()
+    seeded_count = DAY_ROW_COUNT - 60
+    async with pool.acquire() as conn:
+        instrument_id = await new_instrument_id(conn)
+    _, as_of = await seed_candles(
+        pool, batch_repo, instrument_id=instrument_id, t0=t0, row_count=seeded_count
+    )
+    request = ReplayRequest(
+        key=series_key(instrument_id),
+        start=t0,
+        end=t0 + timedelta(minutes=DAY_ROW_COUNT),
+        as_of=as_of,
+    )
+
+    async def racing_writer() -> None:
+        await seed_candles(
+            pool,
+            batch_repo,
+            instrument_id=instrument_id,
+            t0=t0 + timedelta(minutes=seeded_count),
+            row_count=60,
+        )
+
+    async def run_replay() -> ReplayIncompleteError:
+        with pytest.raises(ReplayIncompleteError) as exc_info:
+            await replay(
+                request, store=candle_store, refs=reference_repo, cal=calendar_repo, pool=pool
+            )
+        return exc_info.value
+
+    results = await asyncio.gather(*(run_replay() for _ in range(5)), racing_writer())
+    errors = results[:5]
+    for err in errors:
+        assert err.expected_count == DAY_ROW_COUNT
+        assert err.missing_count == 60

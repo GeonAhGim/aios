@@ -112,7 +112,9 @@ mkdir -p src/{api/{routers,schemas},services,core/{loader,parser,validator,scann
    전체 목록 그대로) → `CODEOWNERS`+`.aios-zone`(**10번 문서 §1.4에 실제
    YAML/CODEOWNERS 내용이 있음 — 그대로 파일로 만들면 됨**)
 2. `docker compose -f docker-compose.dev.yml up -d`(11번 §11.7 실제 내용)
-3. `pip install -e . --break-system-packages`
+3. `pip install -r requirements-lock.txt && pip install -e . --no-deps`
+   (task-3577: pyproject만으로 재해석하면 매번 다른 버전이 뜬다 — 잠금 파일
+   설치·갱신 절차는 `docs/DEPENDENCIES.md` 참조)
 4. `cp .env.example .env` 후 값 채우기(로컬 개발용 — Bitget Demo, KIS 모의투자)
 
 ### Day 1 이후 — 착수 순서 (10번 문서 대분류 순서 그대로)

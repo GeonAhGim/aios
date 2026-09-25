@@ -159,8 +159,38 @@ class BinaryExpr(ScriptNode):
     right: Expr
 
 
+# ---- request "(" STRING "," STRING "," expr ")" ----
+# §3.3 원문 문법표 밖 확장(M2-2a, ADR-2026-09-09-B) — 다른 심볼/타임프레임의
+# 시리즈를 요청한다. symbol/timeframe은 파서(DSL-3)가 STRING 토큰으로만
+# 받아들여 컴파일 시 상수로 고정한다(동적 심볼 금지): 이 필드를 `str`로
+# 선언해 AST 수준에서도 "리터럴이 아닌 값"이 애초에 조립 불가능하게 한다.
+# MTF 런타임 평가·미래참조 검출은 M2-2b(후속 리프) 몫이라 여기서는 구조만
+# 고정한다.
+
+
+class RequestExpr(ScriptNode):
+    kind: Literal["request"] = "request"
+    symbol: str
+    timeframe: str
+    expr: Expr
+
+    @field_validator("symbol", "timeframe")
+    @classmethod
+    def _check_nonempty(cls, value: str) -> str:
+        if not value:
+            raise ValueError("request()의 symbol/timeframe은 빈 문자열일 수 없습니다")
+        return value
+
+
 Expr = Annotated[
-    NumberLiteral | Identifier | CallExpr | UnaryExpr | PostfixExpr | NotExpr | BinaryExpr,
+    NumberLiteral
+    | Identifier
+    | CallExpr
+    | UnaryExpr
+    | PostfixExpr
+    | NotExpr
+    | BinaryExpr
+    | RequestExpr,
     Field(discriminator="kind"),
 ]
 
@@ -246,6 +276,7 @@ for _cls in (
     PostfixExpr,
     NotExpr,
     BinaryExpr,
+    RequestExpr,
     LetDecl,
     PlotDecl,
     SignalDecl,

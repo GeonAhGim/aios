@@ -2,6 +2,7 @@ import { DRAWING_KINDS, type DrawingKind } from "@aios/chart-engine/src/drawings
 import type { ReplayStatus } from "@aios/chart-engine/src/replay/replayController";
 import { Button } from "@aios/ui-web";
 import { type ButtonSpec, useRovingToolbar } from "./useRovingToolbar";
+import { useTranslation } from "react-i18next";
 
 const DRAWING_LABELS: Record<DrawingKind, string> = {
   trendline: "추세선",
@@ -34,6 +35,7 @@ export function DrawingReplayToolbar({
   onPause,
   onStep,
 }: DrawingReplayToolbarProps) {
+  const { t } = useTranslation();
   const buttons: ButtonSpec[] = [
     ...DRAWING_KINDS.map((kind) => ({ id: `tool-${kind}`, disabled: false })),
     { id: "add-drawing", disabled: addDrawingDisabled },
@@ -51,7 +53,7 @@ export function DrawingReplayToolbar({
     <div
       ref={groupRef}
       role="toolbar"
-      aria-label="그리기·재생 도구"
+      aria-label={t("legacy.drawingReplayToolbar.ariaLabel1")}
       className="flex flex-wrap items-center gap-2"
       onKeyDown={onKeyDown}
     >
@@ -83,15 +85,14 @@ export function DrawingReplayToolbar({
         onFocus={() => onFocusButton("add-drawing")}
         onClick={onAddDrawing}
       >
-        그리기 추가
-      </Button>
+        {t("legacy.drawingReplayToolbar.t2")}</Button>
 
       <Button
         id="replay-step-back"
         type="button"
         variant="ghost"
         size="sm"
-        aria-label="이전 봉"
+        aria-label={t("legacy.drawingReplayToolbar.ariaLabel3")}
         disabled={replayDisabled}
         tabIndex={tabIndexFor("replay-step-back")}
         onFocus={() => onFocusButton("replay-step-back")}
@@ -117,7 +118,7 @@ export function DrawingReplayToolbar({
         type="button"
         variant="ghost"
         size="sm"
-        aria-label="다음 봉"
+        aria-label={t("legacy.drawingReplayToolbar.ariaLabel4")}
         disabled={replayDisabled}
         tabIndex={tabIndexFor("replay-step-forward")}
         onFocus={() => onFocusButton("replay-step-forward")}

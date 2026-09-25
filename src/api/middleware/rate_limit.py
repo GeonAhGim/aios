@@ -1,21 +1,24 @@
-"""HTTP 진입점 rate limit 미들웨어.
+"""HTTP entry-point rate limit middleware.
 
 Spec: docs/specs/L4_platform_observability_tenancy_api_v1.0.md §9 PLT-25
 
-편차: 스펙 원문은 `RateLimitMiddleware(app, limiter, resolve_policy)`로
-limiter를 생성자 인자로 받는 시그니처를 제시하지만, 그러면 미들웨어가 앱 조립
-시점(`src.main` 모듈 임포트, 프로세스당 1회)에 구체 인스턴스를 캡처해버려
-통합테스트가 `set_limiter(...)`로 격리할 방법이 없다(이미 등록된
-`RequestContextMiddleware`가 `metrics()` 싱글턴을 생성자가 아니라 매 요청
-`dispatch()`에서 조회하는 것과 같은 이유). 그래서 여기서도 `limiter()` 싱글턴
-게터를 매 요청 조회한다 — `limiter/policy` 값 자체는 스펙과 동일하다.
+Deviation: The spec describes `RateLimitMiddleware(app, limiter, resolve_policy)`
+with `limiter` as a constructor argument, but that would pin a concrete instance
+at app assembly time (`src.main` module import, once per process), leaving no way
+for integration tests to isolate via `set_limiter(...)` (same reason
+`RequestContextMiddleware` looks up the `metrics()` singleton per-request in
+`dispatch()` rather than in `__init__`). So this middleware also resolves the
+`limiter()` singleton getter per request — the `limiter/policy` values themselves
+match the spec exactly.
 
-등록 순서(main.py, §9 PLT-25 표): RateLimit → RequestContext → CORS — 이
-미들웨어가 스택 가장 바깥이라, 거부된 요청은 trace_id 컨텍스트 바인딩·구조화
-로그(RequestContextMiddleware)를 거치지 않는다. 폭주 상황에서 그 바인딩·로깅
-비용조차 치르지 않고 최대한 빨리 거절하는 게 목적이라 의도적인 트레이드오프다
-— 그래서 429 응답의 `X-Request-ID`/`X-Trace-Id`는 이 미들웨어가 직접 채운다.
+Registration order (main.py, §9 PLT-25 table): RateLimit → RequestContext → CORS.
+Because this middleware sits on the outside of the stack, rejected requests skip
+trace_id context binding and structured logging (RequestContextMiddleware). The
+intentional trade-off is to reject as fast as possible, even skipping the binding
+and logging overhead, especially during traffic spikes. Therefore this middleware
+itself populates `X-Request-ID`/`X-Trace-Id` on 429 responses.
 """
+
 from __future__ import annotations
 
 import logging
@@ -45,7 +48,7 @@ def _client_ip(request: Request) -> str:
 
 
 def default_resolve_policy(request: Request) -> RateLimitPolicy | None:
-    """경로/메서드 → 정책 매핑. `OPTIONS`(CORS preflight)는 제한하지 않는다."""
+    """Route/method → policy mapping. Does not limit `OPTIONS` (CORS preflight)."""
     path = request.url.path
     method = request.method.upper()
     if method == "POST" and path == "/auth/login":
@@ -54,6 +57,8 @@ def default_resolve_policy(request: Request) -> RateLimitPolicy | None:
         return POLICIES["admin"]
     if path == "/metrics":
         return POLICIES["metrics"]
+    if path.startswith("/v1/assistant"):
+        return POLICIES["ai_assistant"]
     if method in ("GET", "HEAD"):
         return POLICIES["read"]
     if method in ("POST", "PUT", "PATCH", "DELETE"):
@@ -67,12 +72,13 @@ def _resolve_key(request: Request, policy: RateLimitPolicy) -> str:
     if policy.key == "tenant":
         tenant_id = request.headers.get("X-Tenant-Id")
         return f"tenant:{tenant_id}" if tenant_id else f"ip:{_client_ip(request)}"
-    # "subject" — Authorization 헤더의 JWT를 서명 검증까지 마치고 sub만 쓴다.
-    # (get_current_user와 같은 secret/algorithm) 검증 없이 sub를 신뢰하면
-    # 공격자가 임의의 타인 user_id를 자처해 그 사람의 read/mutation 버킷을
-    # 대신 소진시킬 수 있다(피해자 본인이 정작 429를 맞는 침묵형 DoS) — DB
-    # 조회(get_user_by_id, 계정 상태 확인)까지는 하지 않는다. 버킷을 나누는
-    # 용도일 뿐 인증 판정이 아니고, 그건 여전히 get_current_user 책임이다.
+    # "subject" — Decode the JWT from the Authorization header and use only `sub`
+    # after signature verification (same secret/algorithm as get_current_user).
+    # Trusting `sub` without verification would let an attacker impersonate any
+    # user_id, exhausting that user's read/mutation bucket on their behalf
+    # (silent DoS where the real victim gets 429). We do not perform a DB lookup
+    # (get_user_by_id, account status check). This is only for bucket separation,
+    # not authentication — that remains get_current_user's responsibility.
     auth_header = request.headers.get("authorization", "")
     if auth_header.lower().startswith("bearer "):
         secrets = request.app.state.secrets
@@ -112,7 +118,7 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
             request_id = request.headers.get(REQUEST_ID_HEADER) or uuid.uuid4().hex
             trace_id = uuid.uuid4()
             logger.warning(
-                "rate limit 초과: policy=%s key=%s",
+                "rate limit exceeded: policy=%s key=%s",
                 policy.name,
                 key,
                 extra={

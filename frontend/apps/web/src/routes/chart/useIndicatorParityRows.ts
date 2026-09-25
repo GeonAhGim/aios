@@ -86,7 +86,15 @@ function buildGateRow(
   if (isVerifiedIndicator(overlay.id, catalog)) {
     return { id: overlay.id, source: "pending", value: null, fallbackReason: null, ...NO_NOTE };
   }
-  const server = resolveServerSeries({ name: overlay.id, params: paramsFor(overlay.id), bars });
+  let server: IndicatorSeriesResult | null;
+  try {
+    server = resolveServerSeries({ name: overlay.id, params: paramsFor(overlay.id), bars });
+  } catch (err) {
+    // eslint-disable-next-line no-console -- DoD: a server-reference port failure must fail closed
+    // (unverified) observably, never crash the whole render tree (CH-18c "무음 금지" extends to thrown ports).
+    console.warn(`CH-18c server reference port threw, indicator unverifiable: ${overlay.id} (${err instanceof Error ? err.message : String(err)})`);
+    return { id: overlay.id, source: "unverified", value: null, fallbackReason: null, ...NO_NOTE };
+  }
   if (server === null) {
     return { id: overlay.id, source: "unverified", value: null, fallbackReason: null, ...NO_NOTE };
   }

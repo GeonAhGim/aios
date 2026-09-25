@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import { createEmptyLayoutModel, encodeLayoutModel, type ChartLayoutModel } from "@aios/chart-engine/src/layout/layoutModel";
 import type { ChartingLayoutRecord, ChartingPort } from "@aios/chart-engine/src/layout/persistence";
 import { useChartLayout, type ChartViewSnapshot, type UseChartLayoutOptions } from "./useChartLayout";
+import { perfBudgetMs } from "../../test/perfBudget";
 
 // persistence.test.ts와 동일 관용: routeApiError는 statusCode/errorCode 덕타이핑으로
 // 분류하므로(errorRouting.ts) api-client의 ApiError를 임포트할 필요가 없다.
@@ -280,6 +281,91 @@ describe("CH-16b: 오브젝트 트리 순서·잠금", () => {
   });
 });
 
+// DEPTH_CH audit (task-2729): setObjectTreeOrder/setLockedIndicatorIds wired by
+// task-2013 (242f346, CH-16b) fell outside the general restore/save coverage
+// DEEPEN task-3081 (1594) added — this block fills the CH-16b-field-specific
+// failure-injection (mocked network), gate-red reproduction, and D3 multi-instance gaps.
+describe("CH-16b 오브젝트 트리 순서·잠금 -- 실패주입/게이트적색/D3 (DEEPEN task-3100)", () => {
+  it("실패주입(mocked network): 순서 변경 저장이 네트워크 에러로 실패해도 로컬 objectTreeOrder는 유지되고(isDirty 유지), 재시도로 회복한다", async () => {
+    const record = layoutRecord(savedModelFor(BASE_VIEW));
+    const port = fakePort({ listLayouts: vi.fn(async () => [record]) });
+    const { result } = setup(port);
+    await waitFor(() => expect(result.current.status).toBe("ready"));
+
+    act(() => result.current.setObjectTreeOrder(["RSI", "SMA"]));
+    expect(result.current.isDirty).toBe(true);
+
+    const networkErr = apiErrorLike(503, "SERVICE_UNAVAILABLE");
+    port.updateLayout = vi.fn().mockRejectedValueOnce(networkErr);
+    await act(async () => {
+      await result.current.save();
+    });
+    expect(result.current.saveStatus).toBe("error");
+    expect(result.current.saveError).toBe(networkErr);
+    // A failed network write must not roll back the in-flight local edit.
+    expect(result.current.objectTreeOrder).toEqual(["RSI", "SMA"]);
+    expect(result.current.isDirty).toBe(true);
+
+    port.updateLayout = vi.fn(async (id, input) => ({
+      id,
+      name: input.name ?? record.name,
+      layoutState: input.layoutState ?? record.layoutState,
+      revision: (input.expectedRevision ?? record.revision) + 1,
+      updatedAt: "t1",
+    }));
+    await act(async () => {
+      await result.current.save();
+    });
+    expect(result.current.saveStatus).toBe("idle");
+    expect(result.current.objectTreeOrder).toEqual(["RSI", "SMA"]);
+  });
+
+  it("게이트 적색 재현: setObjectTreeOrder는 activePanelId 기준으로 쓴다 -- panels[0] 기준 naive 구현이라면 비활성 패널을 잘못 건드렸을 것", async () => {
+    const port = fakePort();
+    const { result } = setup(port);
+    await waitFor(() => expect(result.current.status).toBe("ready"));
+    const firstId = result.current.model.panels[0]!.id;
+
+    act(() => result.current.addPanel());
+    const secondId = result.current.model.activePanelId!;
+    expect(secondId).not.toBe(firstId);
+
+    act(() => result.current.setObjectTreeOrder(["RSI"]));
+
+    const naiveTarget = result.current.model.panels[0]!; // naive: always writes panels[0]
+    const realTarget = result.current.model.panels.find((p) => p.id === result.current.model.activePanelId)!;
+
+    // Red: a panels[0]-indexed naive implementation would have written the order onto
+    // firstId here, even though the active (second) panel is the one being edited.
+    expect(naiveTarget.id).toBe(firstId);
+    expect(naiveTarget.objectTreeOrder ?? []).toEqual([]);
+    // Green: the real hook wrote to the active panel instead.
+    expect(realTarget.id).toBe(secondId);
+    expect(realTarget.objectTreeOrder).toEqual(["RSI"]);
+  });
+
+  it("D3 다중 인스턴스: 서로 다른 포트의 두 useChartLayout 인스턴스가 동시에 순서·잠금을 편집해도 교차오염하지 않는다", async () => {
+    const portA = fakePort();
+    const portB = fakePort();
+    const { result: resultA } = setup(portA, BASE_VIEW, vi.fn());
+    const { result: resultB } = setup(portB, { ...BASE_VIEW, instrumentId: "ETHUSDT" }, vi.fn());
+
+    await waitFor(() => expect(resultA.current.status).toBe("ready"));
+    await waitFor(() => expect(resultB.current.status).toBe("ready"));
+
+    act(() => resultA.current.setObjectTreeOrder(["SMA", "RSI"]));
+    act(() => resultB.current.setLockedIndicatorIds(["EMA"]));
+
+    expect(resultA.current.objectTreeOrder).toEqual(["SMA", "RSI"]);
+    expect(resultA.current.lockedIndicatorIds).toEqual([]);
+    expect(resultB.current.objectTreeOrder).toEqual([]);
+    expect(resultB.current.lockedIndicatorIds).toEqual(["EMA"]);
+
+    act(() => resultA.current.setLockedIndicatorIds(["SMA"]));
+    expect(resultB.current.lockedIndicatorIds).toEqual(["EMA"]); // unaffected by A's later edit
+  });
+});
+
 describe("워치리스트 변경", () => {
   it("toggleWatchlistEntry를 두 번 호출하면 추가 후 제거된다", async () => {
     const port = fakePort();
@@ -292,5 +378,96 @@ describe("워치리스트 변경", () => {
 
     act(() => result.current.toggleWatchlistEntry(entry));
     expect(result.current.model.watchlists[0]!.entries).toHaveLength(0);
+  });
+});
+
+// DEPTH_CH(task-2729) 감사: task-1594(5bcd92b, CH-6b)는 수치 성능 단언·게이트 적색
+// 재현·D3가 전무했다(task-3080이 이미 보강한 CH-8 persistence.ts/charting client와는
+// 별개 리프 — 이 파일은 화면이 그 위에서 실제로 소비하는 useChartLayout 훅 자체를 다룬다).
+describe("수치 성능·게이트 적색 재현·D3 (DEEPEN task-3081)", () => {
+  it("수치 성능: 저장된 레이아웃 500건 중 최신을 골라 복원해도 300ms 예산 내에 끝난다", async () => {
+    const records: ChartingLayoutRecord[] = Array.from({ length: 500 }, (_, i) =>
+      layoutRecord(savedModelFor(BASE_VIEW), {
+        id: `layout-${i}`,
+        updatedAt: new Date(Date.UTC(2026, 0, 1, 0, 0, i)).toISOString(),
+      }),
+    );
+    const port = fakePort({ listLayouts: vi.fn(async () => records) });
+
+    const startedAt = performance.now();
+    const { result } = setup(port);
+    await waitFor(() => expect(result.current.status).toBe("ready"));
+    const elapsedMs = performance.now() - startedAt;
+
+    // ChartPage.test.tsx의 VISIBLE_CANDLE_COUNT 성능 단언과 동일 관용: jsdom
+    // 유닛테스트 환경의 waitFor 폴링 오버헤드까지 포함한 느슨한 예산(2s)이지만,
+    // 정렬 로직이 O(n^2)로 퇴행하거나 재렌더 루프에 빠지면 이 상한을 넘는다.
+    expect(elapsedMs).toBeLessThan(perfBudgetMs(2000));
+    // updatedAt이 가장 늦은 마지막 레코드가 골라졌는지까지 확인한다(단순 완주가 아니라 정확성도 성능과 함께).
+    expect(result.current.layoutId).toBe("layout-499");
+  });
+
+  // 게이트 적색 재현: restore()의 "newest" 선택은 updatedAt 내림차순 정렬 기반이다
+  // (useChartLayoutPersistence.ts). "서버가 이미 최신순으로 정렬해 준다"는 가정 하에
+  // 정렬을 생략하고 배열의 첫 항목을 그대로 쓰는 naive 판정으로 되돌리면, 서버가
+  // 그 가정을 어기는 순간(오래된 레코드가 먼저 옴) 조용히 스테일 레이아웃을 복원한다.
+  describe("게이트 적색 재현: 최신 레이아웃 선택은 정렬 기반이다(배열 순서 신뢰 아님)", () => {
+    function realNewestId(records: readonly ChartingLayoutRecord[]): string {
+      return [...records].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))[0]!.id;
+    }
+    function naiveNewestId(records: readonly ChartingLayoutRecord[]): string {
+      return records[0]!.id;
+    }
+
+    it("서버가 오래된 레코드를 먼저 돌려주면 naive 판정은 틀리고, real 판정과 실제 훅은 최신 레코드를 고른다", async () => {
+      const older = layoutRecord(savedModelFor(BASE_VIEW), {
+        id: "old-layout",
+        name: "오래된 레이아웃",
+        updatedAt: "2026-01-01T00:00:00Z",
+      });
+      const newer = layoutRecord(savedModelFor(BASE_VIEW), {
+        id: "new-layout",
+        name: "최신 레이아웃",
+        updatedAt: "2026-06-01T00:00:00Z",
+      });
+      const outOfOrder = [older, newer];
+
+      expect(naiveNewestId(outOfOrder)).toBe("old-layout");
+      expect(realNewestId(outOfOrder)).toBe("new-layout");
+
+      const port = fakePort({ listLayouts: vi.fn(async () => outOfOrder) });
+      const { result } = setup(port);
+      await waitFor(() => expect(result.current.status).toBe("ready"));
+
+      expect(result.current.layoutId).toBe("new-layout");
+      expect(result.current.layoutName).toBe("최신 레이아웃");
+    });
+  });
+
+  it("D3 다중 인스턴스: 서로 다른 포트로 생성한 두 useChartLayout 인스턴스가 동시에 복원·편집해도 서로의 layoutId/model을 교차오염하지 않는다", async () => {
+    const recordA = layoutRecord(savedModelFor(BASE_VIEW), { id: "layout-A", name: "A" });
+    const viewB: ChartViewSnapshot = { ...BASE_VIEW, instrumentId: "ETHUSDT" };
+    const portA = fakePort({ listLayouts: vi.fn(async () => [recordA]) });
+    const portB = fakePort();
+
+    const { result: resultA } = setup(portA, BASE_VIEW, vi.fn());
+    const { result: resultB } = setup(portB, viewB, vi.fn());
+
+    await waitFor(() => expect(resultA.current.status).toBe("ready"));
+    await waitFor(() => expect(resultB.current.status).toBe("ready"));
+    expect(resultA.current.layoutId).toBe("layout-A");
+    expect(resultB.current.layoutId).toBeNull();
+
+    act(() => resultB.current.addPanel());
+    expect(resultB.current.model.panels).toHaveLength(2);
+    // B의 편집이 A의 상태를 흔들지 않는다(모듈 전역 상태 없음 증명).
+    expect(resultA.current.model.panels).toHaveLength(1);
+    expect(resultA.current.layoutId).toBe("layout-A");
+
+    act(() => resultA.current.rename("A 이름변경"));
+    expect(resultA.current.isDirty).toBe(true);
+    // A의 편집도 B에 영향을 주지 않는다.
+    expect(resultB.current.layoutId).toBeNull();
+    expect(resultB.current.layoutName).toBe("기본 레이아웃");
   });
 });

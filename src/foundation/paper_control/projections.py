@@ -1,8 +1,8 @@
-"""DeploymentListView 조립 — 77번 §5 Control Center 목록용.
+"""DeploymentListView assembly — for Control Center list (spec 77 §5).
 
-71번 §4 "read model may lag" — 다른 FND 컨텍스트와 동일하게 지금은 프로젝션
-워커 없이 같은 DB를 직접 읽으므로 지연이 없지만, `as_of`는 항상
-포함한다(108번 §2).
+71 §4 "read model may lag" — same as other FND contexts, currently reading
+from the same DB directly without a projection worker, so there is no latency,
+but `as_of` must always be included (spec 108 §2).
 """
 from __future__ import annotations
 

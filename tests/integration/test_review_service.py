@@ -3,6 +3,7 @@
 30일 대기 실제 경과 대신, DB의 purchased_at을 직접 과거로 돌려
 "30일이 지난 상태"를 결정적으로 재현한다.
 """
+
 import json
 from decimal import Decimal
 from pathlib import Path
@@ -14,7 +15,7 @@ from dotenv import dotenv_values
 
 from src.services.listing_service import ListingService
 from src.services.purchase_service import PurchaseService
-from src.services.review_service import ReviewError, ReviewService
+from src.services.review_service import ReviewError, ReviewNotFoundError, ReviewService
 from src.services.verification_service import VerificationService
 from tests.integration.conftest import create_test_user
 
@@ -189,3 +190,17 @@ async def test_rating_summary_shown_at_threshold(service, pool):
 
     assert summary.review_count == 5
     assert summary.average_rating == 4.0
+
+
+async def test_list_reviews_raises_not_found_for_nonexistent_listing(service):
+    with pytest.raises(ReviewNotFoundError):
+        await service.list_reviews(2**31 - 1)
+
+
+async def test_list_reviews_returns_empty_list_for_listing_without_reviews(service, pool):
+    seller = await create_test_user(pool)
+    listing_id = await _create_listed_listing(pool, seller)
+
+    reviews = await service.list_reviews(listing_id)
+
+    assert reviews == []

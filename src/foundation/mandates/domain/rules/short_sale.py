@@ -1,3 +1,5 @@
+# ratchet-allow: krx_uptick_required raises NotImplementedError — KRX uptick
+# statute text (Enforcement Decree of FSCMA §208) not yet confirmed, task-3849
 """L4_compliance_and_regulatory_v1.0.md#9 CM-9 — short-sale surveillance
 rule, a pure compliance rule.
 
@@ -9,16 +11,23 @@ covered when `snapshot["borrow_available_qty"]` is at least the excess —
 LA-25's `pos_borrow_position` (task-1752) locate data, passed in as a
 snapshot field. This rule never queries a borrow desk or database itself.
 
-KRX uptick note (UNVERIFIED): the Korean short-sale price
-restriction (the "short-sale price restriction", Enforcement Decree of the
-Financial Investment Services and Capital Markets Act §208) is modeled here as
-"a short sale's order price must not be below the last trade price" when
-`params["krx_uptick_required"]` is set and `snapshot["venue"] == "KRX"`.
-The exact regulatory tick/exception conditions (e.g. an intraday uptick
-already having occurred, ETF/ELW carve-outs) have not been verified against
-the statute text and are out of scope for this leaf — only the core "no
-short below last price" case is implemented.
+KRX uptick note (task-3849/CM-9-fix, reviewer REJECT on task-3502): the
+Korean short-sale price restriction (Enforcement Decree of the Financial
+Investment Services and Capital Markets Act §208) was previously modeled
+here as "a short sale's order price must not be below the last trade price"
+whenever `params["krx_uptick_required"]` was set — a guess never checked
+against the statute text (the exact tick/exception conditions, e.g. an
+intraday uptick already having occurred, ETF/ELW carve-outs, were never
+verified). Per CLAUDE.md §3 (unverified external facts must fail closed, not
+guess), `check()` now raises `NotImplementedError` whenever
+`params["krx_uptick_required"]` is set and `snapshot["venue"] == "KRX"`,
+instead of applying the guessed rule. `evaluate_bundle`'s exception handling
+(CM-A2) turns this into a DENY hit, so the fail-closed posture holds through
+the real gate, not just in this function. A follow-up leaf must cite the
+confirmed statute/KRX business-rule text before implementing this branch for
+real; PM tracks that leaf separately.
 """
+
 from __future__ import annotations
 
 from collections.abc import Mapping
@@ -86,25 +95,11 @@ def check(params: Mapping[str, Any], snapshot: Mapping[str, Any]) -> RuleHit | N
         )
 
     if params.get("krx_uptick_required") and snapshot.get("venue") == "KRX":
-        order_price = _decimal_or_none(snapshot, "order_price")
-        if order_price is None:
-            return _missing("snapshot.order_price")
-        last_price = _decimal_or_none(snapshot, "last_price")
-        if last_price is None:
-            return _missing("snapshot.last_price")
-        if order_price < last_price:
-            return RuleHit(
-                rule_id=RULE_ID,
-                severity=ComplianceVerdict.DENY,
-                message=(
-                    f"{RULE_ID}: KRX uptick violation — order price {order_price} "
-                    f"is below last price {last_price}"
-                ),
-                evidence={
-                    "order_price": str(order_price),
-                    "last_price": str(last_price),
-                    "venue": "KRX",
-                },
-            )
+        raise NotImplementedError(
+            f"{RULE_ID}: krx_uptick_required is not implemented — the KRX "
+            "short-sale price restriction (Enforcement Decree of FSCMA §208) "
+            "text has not been confirmed for this leaf (task-3849); refusing "
+            "to apply a guessed rule instead of denying fail-closed"
+        )
 
     return None

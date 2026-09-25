@@ -1,20 +1,22 @@
-"""DC-7 — 커버리지 갭 fail-closed 판정(순수), LA-5 재사용.
+"""DC-7 — fail-closed coverage-gap determination (pure), reuses LA-5.
 
 Spec: docs/specs/L4_analytics_authoring_backtest_marketplace_v1.0.md
-§2.1 DC-7(선행 DC-6), §9.2 DC-7.
+§2.1 DC-7 (prerequisite DC-6), §9.2 DC-7.
 
-갭 탐지는 `domain/quality/gap_detector.detect_gaps`(LA-5), 세션·휴장은
-`VenueCalendar`(LA-3), 타임프레임 정렬은 `domain/timeframe`(LA-2)에
-위임한다(LA-19). DC-6 `registry.merge_spans`도 재사용 — 이 파일은 그
-위에 "커버리지 선언 대비 실제 캔들" 대조 판정만 얹는다.
+Gap detection is delegated to `domain/quality/gap_detector.detect_gaps` (LA-5),
+session/holiday calendar to `VenueCalendar` (LA-3), and timeframe alignment
+to `domain/timeframe` (LA-2) (LA-19). DC-6 `registry.merge_spans` is also
+reused — this file only overlays the "coverage declaration vs actual candles"
+comparison on top of that.
 
-세 갈래 판정: (1) 세션 밖(휴장·마감 후)은 갭이 아니다(LA-5와 동일
-의미론). (2) 세션 안인데 커버리지 선언이 없으면 `NOT_COVERED`.
-(3) 선언은 있는데 실제 캔들이 없으면 `MISSING_CANDLES`(LA-5 그대로).
+Three-way determination: (1) Outside session (holiday/closed after market
+close) is not a gap (same semantics as LA-5). (2) Inside session but no
+coverage declaration → `NOT_COVERED`. (3) Declaration exists but no actual
+candles → `MISSING_CANDLES` (identical to LA-5).
 
-판정 전제(요청 timeframe·axis 혼입, naive 시각, 역전 구간)가 깨지면
-"갭 없음"을 반환하지 않는다 — `IndeterminateCoverageError`로
-fail-closed 표면화한다.
+If preconditions for determination (mixed request timeframe/axis, naive
+datetimes, reversed interval) are violated, do NOT return "no gaps" — surface
+as `IndeterminateCoverageError` with fail-closed semantics.
 """
 from __future__ import annotations
 
@@ -34,7 +36,8 @@ __all__ = ["GapReason", "CoverageGap", "IndeterminateCoverageError", "plan_fetch
 
 
 class IndeterminateCoverageError(ValueError):
-    """판정 불가(fail-closed) — 빈 갭 목록은 "충분히 커버됨"으로 오독될 위험이 있다."""
+    """Indeterminate coverage (fail-closed) — an empty gap list could be
+    misread as "sufficiently covered"."""
 
 
 class GapReason(str, Enum):
@@ -44,7 +47,8 @@ class GapReason(str, Enum):
 
 @dataclass(frozen=True, order=True)
 class CoverageGap:
-    """`[start_at, end_at)` 반개구간 — `CoverageSpan`과 동일 의미론."""
+    """Left-closed, right-open interval `[start_at, end_at)` — same semantics
+    as `CoverageSpan`."""
 
     start_at: datetime
     end_at: datetime
@@ -52,8 +56,9 @@ class CoverageGap:
 
 
 def _validate_axis(spans: Sequence[CoverageSpan], tf: Timeframe, calendar: VenueCalendar) -> None:
-    """단일 (instrument_id, venue, asset_class, quality_grade, tf) 축이고
-    venue가 `calendar`와 일치하는지 검증한다(fail-closed)."""
+    """Validates that spans share a single
+    (instrument_id, venue, asset_class, quality_grade, tf) axis and that the
+    venue matches `calendar` (fail-closed)."""
     if any(s.timeframe != tf for s in spans):
         raise IndeterminateCoverageError(
             f"spans에 요청 timeframe({tf.value})과 다른 timeframe이 섞였다(fail-closed)."
@@ -102,6 +107,8 @@ def _intersect_windows(
 
 
 def _coalesce(points: Sequence[datetime], step: timedelta, reason: GapReason) -> list[CoverageGap]:
+    """Merge consecutive missing time-points into continuous `CoverageGap`
+    segments (fail-closed)."""
     """연속한(간격이 정확히 `step`인) open_time들을 하나의 `CoverageGap`으로 묶는다."""
     if not points:
         return []
@@ -129,9 +136,9 @@ def plan_fetch(
     range_start: datetime,
     range_end: datetime,
 ) -> list[CoverageGap]:
-    """`spans`(DC-6 `coverage_for` 결과 등, 단일 축)와 `candles` 실측을
-    `[range_start, range_end)`에서 대조해, 항상 `start_at` 기준
-    결정론적으로 정렬된 갭 목록을 반환한다(입력 순서 무관)."""
+    """Compare `spans` (result of DC-6 `coverage_for`, single-axis) against
+    actual `candles` over `[range_start, range_end)` and return a
+    deterministically sorted gap list by `start_at` (input order irrelevant)."""
     if range_start.tzinfo is None or range_end.tzinfo is None:
         raise IndeterminateCoverageError(
             "range_start/range_end는 tz-aware datetime이어야 한다(fail-closed)."

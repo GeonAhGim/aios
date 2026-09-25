@@ -12,6 +12,7 @@ import { DuplicateSubmitError, useIdempotentSubmit } from "../../../hooks/useIde
 import { exchangeLabel } from "../../../lib/exchangeLabels";
 import { ErrorMessage } from "../../../components/ErrorMessage";
 import { ForbiddenNotice } from "../../../components/ForbiddenNotice";
+import { useTranslation } from "react-i18next";
 
 interface ExecutionCardProps {
   execution: ExecutionCardResponse;
@@ -39,6 +40,7 @@ function StartExecutionError({ error }: { error: unknown }) {
 // start() 시점에 SAFETY_LAYER 여부를 검사해 거부하므로, 재시작 시도 후
 // 에러 메시지로 실제 원인을 사용자에게 보여준다.
 export function ExecutionCard({ execution }: ExecutionCardProps) {
+  const { t } = useTranslation();
   const start = useStartExecution();
   const pause = usePauseExecution();
   const retire = useRetireExecution();
@@ -65,31 +67,30 @@ export function ExecutionCard({ execution }: ExecutionCardProps) {
         <div>
           <p className="font-medium text-fg">{execution.strategyId}</p>
           <p className="text-sm text-fg-muted">
-            {exchangeLabel(execution.exchange)} · {execution.mode} · 배분{" "}
-            {execution.allocatedCapital}
+            {t("legacy.executionCard.t1", { exchangeLabel: exchangeLabel(execution.exchange), mode: execution.mode, val: " ", allocatedCapital: execution.allocatedCapital })}
           </p>
         </div>
         <StatusBadge status={execution.status} />
       </div>
       <div className="tabular mt-3 grid grid-cols-2 gap-x-4 text-sm">
         <p className={realized >= 0 ? "text-success" : "text-danger"}>
-          실현 손익 {execution.realizedPnl}
+          {t("legacy.executionCard.t2", { realizedPnl: execution.realizedPnl })}
         </p>
         <p className={unrealized >= 0 ? "text-success" : "text-danger"}>
-          미실현 손익 {execution.unrealizedPnl}
+          {t("legacy.executionCard.t3", { unrealizedPnl: execution.unrealizedPnl })}
         </p>
       </div>
       {start.isError && <StartExecutionError error={start.error} />}
       {execution.status !== "RETIRED" && (
         <div className="mt-3 flex items-center gap-2 text-xs">
-          <span className="text-fg-muted">위험 관리 — 손실 한도(%)</span>
+          <span className="text-fg-muted">{t("legacy.executionCard.t4")}</span>
           <Input
             type="number"
             min="0"
             max="100"
             value={maxDrawdown}
             onChange={(e) => setMaxDrawdown(e.target.value)}
-            placeholder="비활성"
+            placeholder={t("legacy.executionCard.placeholder5")}
             className="w-20 py-1"
           />
           <Button
@@ -104,8 +105,7 @@ export function ExecutionCard({ execution }: ExecutionCardProps) {
               })
             }
           >
-            적용
-          </Button>
+            {t("legacy.executionCard.t6")}</Button>
         </div>
       )}
       <div className="mt-3 flex gap-2">
@@ -117,8 +117,7 @@ export function ExecutionCard({ execution }: ExecutionCardProps) {
             onClick={() => void handleStart()}
             loading={start.isPending}
           >
-            시작
-          </Button>
+            {t("legacy.executionCard.t7")}</Button>
         )}
         {execution.status === "RUNNING" && (
           <Button
@@ -128,8 +127,7 @@ export function ExecutionCard({ execution }: ExecutionCardProps) {
             onClick={() => pause.mutate(execution.executionId)}
             loading={pause.isPending}
           >
-            일시정지
-          </Button>
+            {t("legacy.executionCard.t8")}</Button>
         )}
         {execution.status !== "RETIRED" && (
           <Button
@@ -139,8 +137,7 @@ export function ExecutionCard({ execution }: ExecutionCardProps) {
             onClick={() => retire.mutate({ executionId: execution.executionId })}
             loading={retire.isPending}
           >
-            중지
-          </Button>
+            {t("legacy.executionCard.t9")}</Button>
         )}
       </div>
     </div>

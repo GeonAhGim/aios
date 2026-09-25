@@ -1,3 +1,4 @@
+# ratchet-allow: unverified-endpoint fields raise NotImplementedError instead of guessing (I2)
 """NHAdapter Market Data 메서드군.
 
 Spec: 02_exchange_adapter_v1.3.md#§2.1, 02e_nh_api_spec_v1.md#§3
@@ -14,18 +15,45 @@ SDK 스니펫에 요청 파라미터만 있어 응답 필드를 KIS 관례로 �
 - 호가 10단계 전체(`askp1..10`/`bidp1..10`, 잔량 `askp_rsqn{1..10}`/
   `bidp_rsqn{1..10}`)도 같은 응답에 포함된다 — 별도 호가 조회 엔드포인트가
   없다는 이전 추정이 맞았다(currentPrice가 시세+호가를 겸함).
+
+`subscribe_ticker_stream()` (2026-09-16, task-2615): see the
+`websocket_parsing.py` module docstring -- the official openapi.json's
+`x-realtime-channels` confirmed the `tr_cd="mc"` channel's data-frame
+field schema, so it no longer needs to stay fail-closed.
 """
+
 from __future__ import annotations
 
 from datetime import datetime, timezone
 from decimal import Decimal
+from typing import Protocol
 
 from src.core.exceptions import FatalExchangeError
 from src.data.models.market_data import Candle, OrderBook, OrderBookLevel, Ticker
 from src.exchanges.common.http_client import NHHTTPClient
 from src.exchanges.common.types import TickerCallback
+from src.exchanges.nh.websocket_mixin import ConnectFn, RawFrameHandler, _connect
+from src.exchanges.nh.websocket_parsing import parse_mc_ticker_frame
 
 _MARKET_CODE = "KRX"
+_TICKER_TR_CD = "mc"
+
+
+class _WebSocketSubscribingClient(Protocol):
+    """`subscribe_ticker_stream()` calls `NHWebSocketMixin.
+    connect_and_subscribe()` on the same instance, but that contract isn't
+    visible from within this file, so it is declared explicitly here (same
+    pattern as `_BalanceReadingClient` in trading_mixin.py)."""
+
+    async def connect_and_subscribe(
+        self,
+        tr_cd: str,
+        tr_key: str,
+        on_raw_frame: RawFrameHandler,
+        *,
+        is_domestic: bool = True,
+        connect_fn: ConnectFn = _connect,
+    ) -> None: ...
 
 
 class NHMarketDataMixin:
@@ -97,30 +125,95 @@ class NHMarketDataMixin:
             timestamp=datetime.now(timezone.utc),
         )
 
-    async def get_ohlcv(self, symbol: str, timeframe: str, limit: int = 100) -> list[Candle]:
-        """02e 스펙 §3 — 2026-09-03(task-114) 재확인: 공식 openapi.json으로
-        경로 자체는 `/krstock/quote/v1/currentDaily`로 확인됐지만, 이번
-        리프의 스콥(정정/취소/주문조회 + WS)에는 없어 요청 파라미터/응답
-        스키마까지는 조사하지 않았다. 아직 구현할 근거가 부족해 명시적으로
-        미구현 처리한다(추측으로 틀린 캔들 데이터를 만드는 것보다 안전 —
-        PM 배정 지침 (2)와 동일 원칙)."""
-        raise NotImplementedError(
-            "NHAdapter.get_ohlcv: 경로는 확인됨(/krstock/quote/v1/currentDaily, "
-            "공식 openapi.json) — 요청/응답 스키마는 아직 조사 안 됨(02e 스펙 "
-            "§3 참조), 후속 리프에서 구현 필요"
-        )
+    async def get_ohlcv(
+        self: NHHTTPClient, symbol: str, timeframe: str, limit: int = 100
+    ) -> list[Candle]:
+        """Daily OHLCV lookup — POST /krstock/quote/v1/currentDaily.
 
-    async def subscribe_ticker_stream(self, symbol: str, callback: TickerCallback) -> None:
-        """02e 스펙 §4 — 2026-09-03(task-114) 재확인: 공식 SDK 소스코드
-        (nhplug/realtime.py)로 접속(wss://{host}:{port}/websocket)·구독
-        메시지(header.token + body.tr_cd)·재연결까지 확인했고
-        websocket_mixin.py의 `connect_and_subscribe()`로 구현했다. 다만
-        **데이터 프레임의 `body` 내부 필드 스키마**(채널별 실제 필드명)는
-        SDK가 파싱을 호출부에 위임해 여전히 미확인이다 — 잘못된 파서로
-        조용히 틀린 Ticker를 만드는 것보다 명시적 미구현이 안전하다
-        (websocket_mixin.py 모듈 docstring 참조)."""
-        raise NotImplementedError(
-            "NHAdapter.subscribe_ticker_stream: 연결/구독은 구현됨"
-            "(websocket_mixin.connect_and_subscribe) — 데이터 프레임 필드 "
-            "추가 조사 필요"
+        Task-6695(BR-17): request/response schema confirmed from the official
+        openapi.json.
+        - Request: Input_0.iem_cd(symbol code), market_cd("KRX"),
+          view_main_yn("Y"), array_cnt(count, optional)
+        - Response: an array under Output_0[] (each item = one day of data)
+        - Fields: bsop_date(trade date), stck_oppr(open), stck_hgpr(high),
+          stck_lwpr(low), stck_clpr(close), acml_vol(cumulative volume)
+
+        `timeframe` is required by the adapter contract, but the NH API only
+        ever serves daily ("1d") data. Any other timeframe raises ValueError.
+        """
+        if timeframe != "1d":
+            raise ValueError(
+                f"NHAdapter.get_ohlcv: only daily (1d) data is supported. "
+                f"Requested: {timeframe}. Other timeframes need a follow-up "
+                f"leaf or a different API."
+            )
+
+        raw = await self._request(
+            "POST",
+            "/krstock/quote/v1/currentDaily",
+            body={
+                "iem_cd": symbol,
+                "market_cd": _MARKET_CODE,
+                "view_main_yn": "Y",
+                "array_cnt": limit,
+            },
         )
+        try:
+            candles: list[Candle] = []
+            for item in raw.get("Output_0", []):
+                # bsop_date format: "YYYYMMDD" (e.g. "20260924")
+                date_str = item["bsop_date"]
+                # Parse as YYYYMMDD and create midnight UTC timestamp
+                year = int(date_str[:4])
+                month = int(date_str[4:6])
+                day = int(date_str[6:8])
+                candle_date = datetime(year, month, day, tzinfo=timezone.utc)
+
+                candle = Candle(
+                    symbol=symbol,
+                    exchange="nh",
+                    timeframe="1d",
+                    open=Decimal(str(item.get("stck_oppr", item["stck_clpr"]))),
+                    high=Decimal(str(item["stck_hgpr"])),
+                    low=Decimal(str(item["stck_lwpr"])),
+                    close=Decimal(str(item["stck_clpr"])),
+                    volume=Decimal(str(item.get("acml_vol", "0"))),
+                    open_time=candle_date,
+                    close_time=candle_date,
+                )
+                candles.append(candle)
+            return candles
+        except (KeyError, ValueError) as exc:
+            raise FatalExchangeError(
+                f"NH currentDaily response parse error (required fields per "
+                f"official openapi.json: bsop_date, stck_oppr, stck_hgpr, "
+                f"stck_lwpr, stck_clpr, acml_vol): {exc}"
+            ) from exc
+
+    async def subscribe_ticker_stream(
+        self: _WebSocketSubscribingClient,
+        symbol: str,
+        callback: TickerCallback,
+        *,
+        connect_fn: ConnectFn = _connect,
+    ) -> None:
+        """02e spec S4 -- 2026-09-16 (task-2615) re-confirmed: the official
+        asset-class openapi.json's `x-realtime-channels` confirmed the
+        `body` field schema of `tr_cd="mc"` (domestic consolidated
+        real-time trade price) data frames (see websocket_parsing.py
+        module docstring, docs/exchanges/NH_GAPS.md S2). The earlier
+        session's (task-114) "unconfirmed, SDK delegates parsing"
+        conclusion only held for the SDK source; the openapi.json itself
+        actually has per-channel field lists and examples. `mb` (order
+        book) / `d2` (execution notice) channels also have a confirmed
+        schema but no consuming method yet, so they are out of this
+        leaf's scope (NH_GAPS.md S2-3). `connect_fn` is test-injection
+        only, same as KIS's `subscribe_ticker_stream()` (default is a
+        real WebSocket connection)."""
+
+        async def on_raw_frame(raw: str) -> None:
+            ticker = parse_mc_ticker_frame(raw)
+            if ticker is not None:
+                await callback(ticker)
+
+        await self.connect_and_subscribe(_TICKER_TR_CD, symbol, on_raw_frame, connect_fn=connect_fn)

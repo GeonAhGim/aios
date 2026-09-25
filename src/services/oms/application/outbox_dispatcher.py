@@ -42,7 +42,7 @@ import asyncpg
 
 from src.core.db.conditional_write import ConcurrencyConflictError
 from src.core.observability.metric_names import OMS_OUTBOX_DISPATCH_DURATION_SECONDS
-from src.core.observability.metrics import MetricsPort, NullMetrics
+from src.core.observability.metrics import MetricsPort, NullMetrics, safe_observe
 from src.data.models.trading import OrderStatus
 from src.exchanges.common.http_policy import RetryPolicy
 from src.services.oms.application.dispatch_outcome import OutcomeKind, SendOutcome
@@ -207,7 +207,7 @@ class OutboxDispatcher:
             await self._finalize_submit(conn, row, order, outcome, report)
         labels = {"venue": order.exchange, "command_type": row.command_type}
         elapsed = time.monotonic() - start
-        self._metrics.observe(OMS_OUTBOX_DISPATCH_DURATION_SECONDS, elapsed, labels)
+        safe_observe(self._metrics, OMS_OUTBOX_DISPATCH_DURATION_SECONDS, elapsed, labels)
 
     async def _abandon_pre_send(
         self, conn: asyncpg.Connection, row: OutboxRow, order: OrderView, reason: str

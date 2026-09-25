@@ -1,14 +1,14 @@
-"""FD-7.2(신설 읽기 축) — audit_log 조회 (AuditLogReadService).
+"""FD-7.2 (new read axis) — audit_log reads (AuditLogReadService).
 
-Spec: 04_db_schema_v1.6.md(Audit Log, 8.10 원칙), src/core/logging/audit_log.py
-(기록 전용, WORM)
+Spec: 04_db_schema_v1.6.md (Audit Log, principle 8.10), src/core/logging/audit_log.py
+(write-only, WORM)
 
-편차: 스펙 어디에도 감사로그 "조회" 엔드포인트가 명시되지 않아 관리자가
-실제로 감사 이력을 확인할 방법이 없었다 — 8.10 원칙 자체가 "누가 언제
-무엇을 했는지 추적 가능해야 한다"는 감사 목적인데, 기록만 하고 조회
-경로가 없으면 그 목적을 달성하지 못한다. WORM 원칙(REVOKE UPDATE/DELETE
-FROM PUBLIC, 마이그레이션 9ec8a1ee28d7 참조)은 읽기를 막지 않는다 —
-이 서비스는 SELECT만 수행한다.
+Deviation: The spec never defines an audit log "read" endpoint, so there was no
+way for operators to actually inspect audit history — principle 8.10 states
+"it must be traceable who did what and when" for audit purposes, but recording
+without a read path defeats that purpose. The WORM principle
+(REVOKE UPDATE/DELETE FROM PUBLIC, see migration 9ec8a1ee28d7) does not block
+reads — this service performs SELECT only.
 """
 from __future__ import annotations
 

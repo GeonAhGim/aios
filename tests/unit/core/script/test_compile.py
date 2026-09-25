@@ -5,12 +5,19 @@ DoD "4종 오류 코드"·"오류 위치 응답": `SCRIPT_SYNTAX`·`SCRIPT_TYPE`
 `SCRIPT_LOOKAHEAD`·`SCRIPT_RESOURCE_LIMIT` 각각이 `ScriptCompileError`로
 (line, col)과 함께 나오는지, 타입·자원 오류의 위치가 "원인 선언"의 시작
 키워드 위치로 복원되는지(접두 이분탐색), DSL-7 `ScriptLowerError`는 감싸지지
-않고 전파되는지(taxonomy 밖 = 계약 위반) 단언한다. 성능(≤300ms)은 print
-실측만 하고 단언하지 않는다(task-1535 note "절대 지연 단언 금지").
+않고 전파되는지(taxonomy 밖 = 계약 위반) 단언한다.
+
+DEEPEN(task-2918): 성능(ADR-2026-09-09-C Decision 1 "DSL 컴파일 300ms" 예산)은
+원래 print 실측만 하고 단언을 의도적으로 피했다(task-1535 note "절대 지연 단언
+금지", task-2727 DEPTH 감사가 ADR 예산 위반 소지로 지적) — 이 리프에서 실제
+수치 단언으로 승격하고, 파이프라인 한 단계가 예산을 실제로 넘기면 그 단언이
+정말로 실패(=CI 적색)하는지도 재현한다.
 """
+
 from __future__ import annotations
 
 import time
+from collections.abc import Mapping
 
 import pytest
 
@@ -23,10 +30,12 @@ from src.core.script.artifact import (
     decl_positions,
     script_hash,
 )
-from src.core.script.grammar.ast import GRAMMAR_VERSION
+from src.core.script.grammar.ast import GRAMMAR_VERSION, Program
 from src.core.script.grammar.lexer import tokenize
 from src.core.script.grammar.parser import parse
-from src.core.script.ir import IR_VERSION, ScriptLowerError, to_bytes
+from src.core.script.ir import IR_VERSION, IRProgram, ScriptLowerError, to_bytes
+from src.core.script.ir.lower import lower_program
+from src.core.script.typing.types import Type
 
 SAMPLE = (
     "input length: int = 14\n"
@@ -67,13 +76,81 @@ def test_compile_is_deterministic() -> None:
     assert a.ir_bytes == b.ir_bytes
 
 
-def test_compile_elapsed_print_only() -> None:
-    """DoD ≤300ms — 실측 print만(단언 금지)."""
+def _compile_latencies_sec(source: str, registry_version: str, iterations: int = 30) -> list[float]:
+    samples = []
+    for _ in range(iterations):
+        started = time.perf_counter()
+        compile_source(source, registry_version=registry_version)
+        samples.append(time.perf_counter() - started)
+    samples.sort()
+    return samples
+
+
+def _p95(samples: list[float]) -> float:
+    return samples[min(int(len(samples) * 0.95), len(samples) - 1)]
+
+
+def test_compile_p95_latency_within_adr_budget() -> None:
+    """DEEPEN(task-2918): ADR-2026-09-09-C Decision 1 'DSL 컴파일 300ms' 예산을
+    실제로 단언한다(이전 `test_compile_elapsed_print_only`는 print만 하고 단언을
+    의도적으로 피했다 — task-2727 DEPTH 감사가 ADR 예산 위반 소지로 지적)."""
+    samples = _compile_latencies_sec(SAMPLE, REG)
+    p95_ms = _p95(samples) * 1000
+    budget_ms = 300.0
+    print(f"[DSL-12] compile_source p95={p95_ms:.2f}ms budget<{budget_ms:.0f}ms (n={len(samples)})")
+    assert p95_ms < budget_ms
+
+
+@pytest.mark.perf
+def test_compile_still_returns_correct_result_when_a_pipeline_stage_stalls(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """실패 주입: DSL-7 로우어링 단계가 실제로 느려지면(예: 외부 지표 레지스트리
+    조회 hang) `compile_source`가 그 지연을 숨기지 않고 그대로 감내한 뒤에도
+    여전히 올바른 결과를 내는지 확인한다 — 위 p95 단언이 실제 파이프라인 전체의
+    벽시계를 재는 것이지, 내부적으로 캐시되거나 지름길을 타는 값을 재는 게
+    아님을 보장한다."""
+    original_lower = lower_program
+    delay_s = 0.05
+
+    def _stalled_lower(program: Program, env: Mapping[str, Type] | None = None) -> IRProgram:
+        time.sleep(delay_s)
+        return original_lower(program, env)
+
+    monkeypatch.setattr("src.core.script.artifact.compile.lower_program", _stalled_lower)
+
     started = time.perf_counter()
-    for _ in range(20):
-        compile_source(SAMPLE, registry_version=REG)
-    per_call_ms = (time.perf_counter() - started) * 1000 / 20
-    print(f"[DSL-12] compile_source avg {per_call_ms:.2f} ms/call (SAMPLE, 7 decls)")
+    compiled = compile_source(SAMPLE, registry_version=REG)
+    elapsed = time.perf_counter() - started
+
+    # Windows 타이머 해상도상 time.sleep(delay_s)가 요청한 시간보다 근소하게(<1ms) 일찍
+    # 반환할 수 있어, 지연이 실제로 감내됐는지는 90% 문턱으로 확인한다(정확히 delay_s 이상을
+    # 요구하면 타이머 해상도 노이즈로 flaky해진다).
+    assert elapsed >= delay_s * 0.9
+    assert compiled.script_hash == script_hash(source=SAMPLE, ir=compiled.ir, registry_version=REG)
+
+
+def test_compile_budget_gate_actually_fails_when_pipeline_stalls_past_300ms(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """게이트 적색 재현: 파이프라인 한 단계가 300ms 예산을 실제로 넘기도록 지연을
+    주입하면, `test_compile_p95_latency_within_adr_budget`과 동일한 단언식이
+    실제로 `AssertionError`를 내는지(= CI가 실제로 빨간불이 되는지) 확인한다.
+    이 테스트가 없으면 위 단언이 항상 통과하는 무의미한 단언(tautology)인지
+    아무도 검증하지 못한다."""
+    original_lower = lower_program
+
+    def _stalled_lower(program: Program, env: Mapping[str, Type] | None = None) -> IRProgram:
+        time.sleep(0.35)  # > 300ms 예산
+        return original_lower(program, env)
+
+    monkeypatch.setattr("src.core.script.artifact.compile.lower_program", _stalled_lower)
+
+    samples = _compile_latencies_sec(SAMPLE, REG, iterations=3)
+    p95_ms = _p95(samples) * 1000
+    budget_ms = 300.0
+    with pytest.raises(AssertionError):
+        assert p95_ms < budget_ms
 
 
 # ---- 4종 오류 + 위치 ----

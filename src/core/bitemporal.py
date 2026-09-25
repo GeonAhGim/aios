@@ -1,25 +1,28 @@
-"""FA-9 — 양시간축(valid_time·transaction_time) 순수 질의 규칙.
+"""FA-9 — Bitemporal (valid_time · transaction_time) pure query rules.
 
 Spec: docs/specs/L4_ibor_fund_accounting_and_resilience_v1.0.md#FA-9
-(§2.3 양시간축 장부, §3 계약 "양시간축", §4 FA-A2 UPDATE/DELETE 금지).
+(§2.3 bitemporal ledger, §3 contract "bitemporal", §4 FA-A2 UPDATE/DELETE prohibition).
 
-Postgres `TSTZRANGE`(`valid_from`·`valid_to`·`tx_from`·`tx_to`)에 대응하는
-순수 구간 대수만 정의한다 — 실제 DDL·EXCLUDE 제약·UPDATE 금지 트리거는
-FA-10의 몫이고, 이 모듈은 I/O를 전혀 하지 않는다.
+Defines only pure interval arithmetic matching Postgres `TSTZRANGE`
+(`valid_from`, `valid_to`, `tx_from`, `tx_to`) — actual DDL, EXCLUDE
+constraints, and UPDATE-prohibit triggers belong to FA-10; this module
+performs zero I/O.
 
-경계 규약: 두 구간 모두 반열림 `[from, to)` — `from`은 포함, `to`는
-배제(Postgres `TSTZRANGE`의 기본 표준형과 동일). "현재" 행은 `to=None`
-으로 표현한다(무한대, `tx_to = 'infinity'`에 대응). tz-naive datetime은
-입력 단계에서 거부한다(LB-1/EO-01 선례 —
+Boundary contract: both intervals are half-open `[from, to)` — `from` is
+inclusive, `to` is exclusive (same canonical form as Postgres `TSTZRANGE`).
+"Current" rows use `to=None` (infinity, corresponding to
+`tx_to = 'infinity'`). tz-naive datetimes are rejected at the input stage
+(LB-1/EO-01 precedent —
 `src/foundation/execution_ownership/domain/rules.py:is_lease_available`).
 
-`as_of(valid_time, tx_time)`가 유일한 질의 커널이다. 명세가 말하는
-"4종 질의"는 이 커널에 `valid_time`/`tx_time` 각각을 명시값 또는 `now`로
-넣는 2×2 조합이다(아래 4개 함수 = 그 조합의 이름 있는 별칭):
-  1. `current`               — (valid=now,  tx=now)  지금 아는 현재 사실
-  2. `as_of_valid_time`      — (valid=given, tx=now)  최신 지식 기준 과거 시점
-  3. `as_of_transaction_time`— (valid=now,   tx=given) 과거 지식 기준 "지금"
-  4. `as_of_bitemporal`      — (valid=given, tx=given) 완전 소급(롤백) 질의
+`as_of(valid_time, tx_time)` is the sole query kernel. The spec's "four
+query types" are the 2×2 combinations of passing `valid_time`/`tx_time`
+as explicit values or `now` into this kernel (the four functions below
+are named aliases of those combinations):
+  1. `current`               — (valid=now,  tx=now)  what is true now
+  2. `as_of_valid_time`      — (valid=given, tx=now) past point in time under latest knowledge
+  3. `as_of_transaction_time`— (valid=now,   tx=given) "now" under past knowledge
+  4. `as_of_bitemporal`      — (valid=given, tx=given) full retroactive (rollback) query
 """
 from __future__ import annotations
 
@@ -34,9 +37,11 @@ FA_BITEMPORAL_OVERLAP = "FA_BITEMPORAL_OVERLAP"
 
 
 class BitemporalOverlapError(ValueError):
-    """FA_BITEMPORAL_OVERLAP(409) — 같은 키의 두 구간이 valid·tx 양쪽에서 겹친다.
+    """FA_BITEMPORAL_OVERLAP(409) — Two intervals for the same key
+    overlap on both valid and tx axes.
 
-    HTTP 매핑(§3 에러 taxonomy)은 API 계층 소관이다 — 이 모듈은 판정만 한다.
+    HTTP mapping (§3 error taxonomy) is the API layer's concern —
+    this module only decides.
     """
 
     error_code = FA_BITEMPORAL_OVERLAP
@@ -45,32 +50,41 @@ class BitemporalOverlapError(ValueError):
         self.first = first
         self.second = second
         super().__init__(
-            f"{FA_BITEMPORAL_OVERLAP}: valid/tx 구간이 겹친다 — "
+            f"{FA_BITEMPORAL_OVERLAP}: valid/tx intervals overlap — "
             f"first=[{first.valid_from},{first.valid_to})x[{first.tx_from},{first.tx_to}) "
             f"second=[{second.valid_from},{second.valid_to})x[{second.tx_from},{second.tx_to})"
         )
 
 
 def _require_tz_aware(value: datetime, *, name: str) -> None:
+    """Ensure `value` is timezone-aware."""
     if value.tzinfo is None:
-        raise ValueError(f"{name}: naive datetime은 허용하지 않는다 — tz-aware UTC만 사용한다")
+        raise ValueError(f"{name}: naive datetime is not allowed — use tz-aware UTC only")
 
 
 def _require_valid_bound(from_: datetime, to: datetime | None, *, label: str) -> None:
+    """Ensure `from_` and `to` are tz-aware and `to > from_`.
+
+    Half-open intervals must be non-empty.
+    """
     _require_tz_aware(from_, name=f"{label}_from")
     if to is not None:
         _require_tz_aware(to, name=f"{label}_to")
         if to <= from_:
-            raise ValueError(f"{label}_to는 {label}_from보다 뒤여야 한다(반열림 구간이 비어있음)")
+            raise ValueError(
+                f"{label}_to must be after {label}_from "
+                "(half-open interval must be non-empty)"
+            )
 
 
 @dataclass(frozen=True, slots=True)
 class BitemporalRecord(Generic[T]):
-    """상태성 테이블 한 행에 대응하는 순수 값 객체.
+    """Pure value object corresponding to one row in a state-change table.
 
-    `valid_from <= valid_time < valid_to`이고 `tx_from <= tx_time < tx_to`인
-    좌표에서만 `value`가 유효하다. `valid_to`/`tx_to`가 `None`이면 무한대
-    (각각 "아직 유효 종료 미정"·"아직 정정되지 않은 현재 행").
+    `value` is valid only at coordinates where
+    `valid_from <= valid_time < valid_to` and `tx_from <= tx_time < tx_to`.
+    `valid_to`/`tx_to` as `None` means infinity (respectively "end date
+    not yet determined" and "current row not yet corrected").
     """
 
     value: T
@@ -84,40 +98,46 @@ class BitemporalRecord(Generic[T]):
         _require_valid_bound(self.tx_from, self.tx_to, label="tx")
 
     def _contains_valid(self, instant: datetime) -> bool:
+        """Check whether `instant` falls within the valid interval."""
         return self.valid_from <= instant and (self.valid_to is None or instant < self.valid_to)
 
     def _contains_tx(self, instant: datetime) -> bool:
+        """Check whether `instant` falls within the transaction interval."""
         return self.tx_from <= instant and (self.tx_to is None or instant < self.tx_to)
 
     def contains(self, *, valid_time: datetime, tx_time: datetime) -> bool:
-        """이 레코드가 주어진 (valid_time, tx_time) 좌표를 덮는가."""
+        """Does this record cover the given (valid_time, tx_time) coordinates?"""
         return self._contains_valid(valid_time) and self._contains_tx(tx_time)
 
     def overlaps(self, other: BitemporalRecord[Any]) -> bool:
-        """valid·tx 두 구간이 모두 겹치면 True(FA_BITEMPORAL_OVERLAP 판정용)."""
+        """Return True when both valid and tx intervals overlap.
+
+        Used for FA_BITEMPORAL_OVERLAP decision.
+        """
         return _ranges_overlap(
             self.valid_from, self.valid_to, other.valid_from, other.valid_to
         ) and _ranges_overlap(self.tx_from, self.tx_to, other.tx_from, other.tx_to)
 
 
 def _ranges_overlap(
-    a_from: datetime, a_to: datetime | None, b_from: datetime, b_to: datetime | None
+    a_from: datetime, a_to: datetime | None,
+    b_from: datetime, b_to: datetime | None,
 ) -> bool:
-    """반열림 구간 `[a_from, a_to)`와 `[b_from, b_to)`가 겹치는지(`None`=무한대)."""
+    """Check whether two half-open intervals `[from, to)` overlap."""
     a_ends_before_b_starts = a_to is not None and a_to <= b_from
     b_ends_before_a_starts = b_to is not None and b_to <= a_from
     return not (a_ends_before_b_starts or b_ends_before_a_starts)
 
 
 def check_no_overlap(records: Sequence[BitemporalRecord[T]]) -> None:
-    """같은 키 그룹의 레코드 목록에서 valid·tx 구간이 겹치는 쌍이 있으면 거부한다.
+    """Reject if any pair of records in the same key group has overlapping valid·tx intervals.
 
-    FA-A2(상태성 테이블 UPDATE/DELETE 금지 — 정정은 새 행 + `tx_to` 마감)를
-    저장 전에 순수 함수 레벨로 사전 검증한다. 실제 DB 제약
-    (`EXCLUDE USING gist`)은 FA-10의 몫이고, 여기서는 애플리케이션 레벨의
-    fail-closed 방어선만 제공한다. 호출자는 이미 같은 논리 엔티티(예: 같은
-    `position_id`)로 그룹핑한 레코드만 넘겨야 한다 — 이 함수는 그룹 경계를
-    모른다.
+    FA-A2 (state-change table UPDATE/DELETE prohibition — corrections use a new row
+    with `tx_to` to close the old one) is pre-validated at the pure function level
+    before storage. Actual DB constraints (`EXCLUDE USING gist`) belong to FA-10;
+    this module provides only the application-level fail-closed defense line.
+    Callers must pass records already grouped by the same logical entity
+    (e.g. the same `position_id`) — this function knows nothing about group boundaries.
     """
     for i, first in enumerate(records):
         for second in records[i + 1 :]:
@@ -128,11 +148,11 @@ def check_no_overlap(records: Sequence[BitemporalRecord[T]]) -> None:
 def as_of(
     records: Sequence[BitemporalRecord[T]], *, valid_time: datetime, tx_time: datetime
 ) -> list[BitemporalRecord[T]]:
-    """질의 커널: `(valid_time, tx_time)` 좌표를 덮는 모든 레코드.
+    """Query kernel: all records covering `(valid_time, tx_time)` coordinates.
 
-    정상적으로(겹침 없이) 적재된 단일 엔티티의 레코드라면 결과는 0개 또는
-    1개다 — 겹침 방지는 `check_no_overlap`이 적재 시점에 보장한다. 이
-    함수 자체는 그 불변조건을 가정하지 않고 그냥 필터링만 한다.
+    For a single entity loaded without overlaps the result is 0 or 1 —
+    overlap prevention is guaranteed by `check_no_overlap` at load time.
+    This function makes no such assumption and simply filters.
     """
     _require_tz_aware(valid_time, name="valid_time")
     _require_tz_aware(tx_time, name="tx_time")
@@ -140,16 +160,16 @@ def as_of(
 
 
 def current(records: Sequence[BitemporalRecord[T]], *, now: datetime) -> list[BitemporalRecord[T]]:
-    """질의 1/4: 지금(`now`) 시스템이 아는, 지금(`now`) 참인 사실."""
+    """Query 1/4: what is true now (`now`) and known now (`now`)."""
     return as_of(records, valid_time=now, tx_time=now)
 
 
 def as_of_valid_time(
     records: Sequence[BitemporalRecord[T]], *, valid_time: datetime, now: datetime
 ) -> list[BitemporalRecord[T]]:
-    """질의 2/4: 지금(`now`) 아는 최신 지식 기준으로, `valid_time`에 참이었던 사실.
+    """Query 2/4: what was true at `valid_time`, under the latest knowledge at `now`.
 
-    예: "오늘 알고 있는 바로, 지난달 15일 포지션은 얼마였나."
+    Example: "what was the position value on the 15th of last month, as we know it today."
     """
     return as_of(records, valid_time=valid_time, tx_time=now)
 
@@ -157,10 +177,10 @@ def as_of_valid_time(
 def as_of_transaction_time(
     records: Sequence[BitemporalRecord[T]], *, tx_time: datetime, now: datetime
 ) -> list[BitemporalRecord[T]]:
-    """질의 3/4: 과거 시스템 시각(`tx_time`)에, "지금"(`now`)에 대해 알던 사실.
+    """Query 3/4: what the system knew "now" (`now`) about, at past system time (`tx_time`).
 
-    예: "어제 마감 시점(tx_time)에 시스템은 오늘자 포지션을 얼마로 알고
-    있었나" — 정정 전 값을 재현하는 롤백 질의.
+    Example: "what position value did the system know for today, as of yesterday's
+    close (`tx_time`)" — a rollback query reproducing a pre-correction value.
     """
     return as_of(records, valid_time=now, tx_time=tx_time)
 
@@ -168,7 +188,8 @@ def as_of_transaction_time(
 def as_of_bitemporal(
     records: Sequence[BitemporalRecord[T]], *, valid_time: datetime, tx_time: datetime
 ) -> list[BitemporalRecord[T]]:
-    """질의 4/4: 완전 소급 — 과거 시스템 시각(`tx_time`)에 시스템이 `valid_time`
-    시점에 대해 참이라고 믿었던 사실. IBOR(지금 아는 진실)과 ABOR(그때 알던
-    장부)를 같은 데이터로 재구성하는 §1 요구의 핵심 질의."""
+    """Query 4/4: full retroactive — what the system believed at system time
+    `tx_time` to be true at `valid_time`. Core query for reconstructing
+    both IBOR (today's known truth) and ABOR (the ledger as it was then)
+    from the same data store (§1 requirement)."""
     return as_of(records, valid_time=valid_time, tx_time=tx_time)

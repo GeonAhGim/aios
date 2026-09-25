@@ -7,7 +7,9 @@ Spec: docs/specs/L4_market_data_positions_ledger_v1.0.md#§3.1 (A), §9.2 LA-1.
 실패"). 필드 추가는 minor 변경이므로 허용되고, 그 경우에만 fixture를 함께
 갱신한다.
 """
+
 import json
+import time
 from datetime import date, datetime, timezone
 from decimal import Decimal
 from pathlib import Path
@@ -192,3 +194,116 @@ def test_calendar_day_naive_open_at_rejected() -> None:
             close_at=_now(),
             source="test",
         )
+
+
+# ── DEEPEN: negative tests (LA-1) ──────────────────────────────────────────
+
+
+def test_register_instrument_command_naive_listed_at_rejected() -> None:
+    """RegisterInstrumentCommand.listed_at은 AwareDatetime — naive 거부."""
+    with pytest.raises(ValidationError):
+        v1.RegisterInstrumentCommand(
+            venue=v1.Venue.KIS_KRX,
+            venue_symbol="005930.KS",
+            asset_class=AssetClass.KR_EQUITY,
+            tick_size=Decimal("1"),
+            lot_size=Decimal("1"),
+            listed_at=datetime(2026, 9, 3, 0, 0),
+            actor_subject_id=uuid4(),
+            trace_id=uuid4(),
+        )
+
+
+def test_lifecycle_event_command_naive_effective_at_rejected() -> None:
+    """LifecycleEventCommand.effective_at은 AwareDatetime — naive 거부."""
+    with pytest.raises(ValidationError):
+        v1.LifecycleEventCommand(
+            instrument_id=uuid4(),
+            event="LIST",
+            effective_at=datetime(2026, 9, 3, 0, 0),
+            source_ref="test",
+            actor_subject_id=uuid4(),
+            trace_id=uuid4(),
+        )
+
+
+def test_quality_issue_naive_open_time_rejected() -> None:
+    """QualityIssue.open_time가 AwareDatetime | None — None은 허용, naive datetime은 거부."""
+    with pytest.raises(ValidationError):
+        v1.QualityIssue(
+            type=v1.QualityIssueType.GAP,
+            severity=v1.Severity.REJECT,
+            open_time=datetime(2026, 9, 3, 0, 0),
+            detail={"detail": "gap detected"},
+        )
+
+
+def test_ingest_batch_result_missing_required_rejected() -> None:
+    """IngestBatchResult는 모든 필드가 NOT NULL — 누락 시 ValidationError."""
+    with pytest.raises(ValidationError):
+        v1.IngestBatchResult.model_validate(
+            {
+                "batch_id": str(uuid4()),
+                "source": "test",
+                "venue": "KIS_KRX",
+                "instrument_id": str(uuid4()),
+                "timeframe": "M1",
+                "range_start": _now().isoformat(),
+                "range_end": _now().isoformat(),
+                "request_fingerprint": "abc",
+                "verdict": {
+                    "verdict": "ACCEPT",
+                    "accepted": 1,
+                    "quarantined": 0,
+                    "rejected": 0,
+                    "issues": [],
+                },
+                "batch_hash": "sha256fake",
+                # audit_event_id 누락
+            }
+        )
+
+
+def test_data_quality_metrics_missing_key_rejected() -> None:
+    """DataQualityMetrics.key는 필수 — 누락 시 ValidationError."""
+    with pytest.raises(ValidationError):
+        v1.DataQualityMetrics.model_validate(
+            {
+                "staleness_s": 300,
+                "gap_ratio_24h": "0.01",
+                "reject_ratio_24h": "0.00",
+                "last_batch_id": None,
+            }
+        )
+
+
+# ── DEEPEN: failure-injection test (LA-1) ─────────────────────────────────
+
+
+def test_quality_issue_detail_type_enforced() -> None:
+    """QualityIssue.detail은 dict[str, str] — value가 str이 아니면 거부.
+
+    model_validate로 dict에 int value를 주입해 런타임 검증 거부를 유도한다.
+    """
+    with pytest.raises(ValidationError):
+        v1.QualityIssue.model_validate(
+            {
+                "type": "SPIKE",
+                "severity": "WARN",
+                "open_time": None,
+                "detail": {"price": 12345},
+            }
+        )
+
+
+# ── DEEPEN: performance assertion (LA-1) ───────────────────────────────────
+
+
+@pytest.mark.perf  # wall-clock budget: serial perf stage (task-7434 guard)
+def test_candle_record_bulk_validation_throughput() -> None:
+    """1,000건 CandleRecord 검증이 예산(200ms) 내에 끝나야 한다 — O(n) 이상 회귀 감지."""
+    start = time.perf_counter()
+    for _ in range(1_000):
+        _sample_candle()
+    elapsed_ms = (time.perf_counter() - start) * 1000
+    assert elapsed_ms < 200, f"1,000건 CandleRecord 검증이 {elapsed_ms:.1f}ms — 200ms 예산 초과"

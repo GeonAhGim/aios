@@ -9,8 +9,10 @@ Spec: docs/specs/L4_analytics_authoring_backtest_marketplace_v1.0.md
 `OrderTypeDisabledError`로 거부한다(`models_v2.py` docstring이
 이 모듈에 위임한 책임).
 """
+
 from __future__ import annotations
 
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from decimal import Decimal
 from typing import Literal
@@ -130,3 +132,50 @@ def update_trailing_stop(
         new_extreme = min(state.extreme_price, bar_low)
         new_stop = new_extreme * (Decimal(1) + trail_pct)
     return TrailingStopState(extreme_price=new_extreme, stop_price=new_stop)
+
+
+@dataclass(frozen=True, slots=True)
+class OcaResolution:
+    """N-way generalization of `OcoResolution` -- task-2623 bracket exit
+    (profit/loss/trail legs). Isomorphic to the live path's
+    `src/services/oms/domain/order_types/oca.py::resolve_oca` (same
+    signature, same decision rule) -- parity between the two is asserted by
+    `tests/unit/oms/test_bracket_oca_parity.py`, not by importing one from
+    the other (foundation/backtest and services/oms are separate bounded
+    contexts, deliberately duplicated the same way `resolve_oco` already
+    is on both sides)."""
+
+    triggered_leg: str | None
+    cancelled_legs: tuple[str, ...]
+
+
+def resolve_oca(*, triggered: Mapping[str, bool], priority_order: Sequence[str]) -> OcaResolution:
+    """Bracket exit is an OCA (one-cancels-all) group of up to 3 legs
+    (`profit`/`loss`/`trail`). The first leg in `priority_order` that is
+    triggered wins; every other leg in the group is cancelled -- including
+    legs that also triggered on the same bar (the ambiguous-tie case
+    `resolve_oco` already documents: caller states a conservative
+    assumption via ordering instead of this module guessing). No leg
+    triggered -> `triggered_leg=None`, nothing cancelled yet."""
+
+    if not priority_order:
+        raise ValueError("priority_order는 최소 1개 레그가 필요하다")
+    if set(triggered) != set(priority_order):
+        raise ValueError("triggered와 priority_order의 레그 집합이 일치해야 한다")
+    for leg in priority_order:
+        if triggered[leg]:
+            cancelled = tuple(other for other in priority_order if other != leg)
+            return OcaResolution(triggered_leg=leg, cancelled_legs=cancelled)
+    return OcaResolution(triggered_leg=None, cancelled_legs=())
+
+
+def bracket_quantity_for_fill(*, requested_qty: Decimal, filled_qty: Decimal) -> Decimal:
+    """Bracket exit legs must never cover more than what the entry actually
+    filled (partial-fill quantity parity) -- if the entry only partially
+    fills, the bracket's exit legs are sized to `filled_qty`, never the
+    originally requested quantity. Isomorphic to the live-side function of
+    the same name in `src/services/oms/domain/order_types/oca.py`."""
+
+    _reject_negative_or_nan(requested_qty, "requested_qty")
+    _reject_negative_or_nan(filled_qty, "filled_qty")
+    return min(requested_qty, filled_qty)

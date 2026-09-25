@@ -11,10 +11,19 @@ This file runs unmarked (no `@pytest.mark.nightly`), so it collects into
 the default `tests/unit/core/indicators/` pytest path and runs on every CI
 without separate wiring -- the 30-name sample is the everyday gate; the
 full catalog is `scripts/verify_indicators_nightly.py`'s job.
+
+DEEPEN (task-2933, docs/audit/DEPTH_DSL_IND.md IND-13 row): the original
+leaf (0b50cad8) had explicit-rejection negative coverage of exactly 1 case
+(exclusion-reason non-empty). This file adds two more explicit-rejection
+cases on `KNOWN_UNVERIFIED` (stale/typo'd catalog membership, reason must
+cite its source test) plus a `ValueError` boundary case on `sample_job_names`,
+and one numeric performance assertion on `run_ci_sample`'s wall-clock budget.
 """
+
 from __future__ import annotations
 
 import logging
+import time
 
 import pytest
 
@@ -39,6 +48,26 @@ def test_sample_job_names_excludes_known_unverified_with_documented_reason() -> 
         assert verify_job.KNOWN_UNVERIFIED[name].strip()  # exclusion reason is a real string
 
 
+def test_known_unverified_names_are_real_catalog_members() -> None:
+    """A stale or typo'd `KNOWN_UNVERIFIED` key silently excludes nothing --
+    it just never matches anything in `sample_job_names`'s eligible pool.
+    Reject that drift explicitly instead of letting it hide."""
+    for name in verify_job.KNOWN_UNVERIFIED:
+        assert name in verify_all.VERIFIABLE_NAMES, (
+            f"{name} is not in verify_all.VERIFIABLE_NAMES -- exclusion is a no-op"
+        )
+
+
+def test_known_unverified_reason_cites_its_source_test() -> None:
+    """The exclusion reason must point at the underlying evidence (IND-7g's
+    fixed-known-state test), not just be any non-empty string -- otherwise a
+    future edit could hollow it out to a placeholder and still pass the
+    weaker non-empty check."""
+    for reason in verify_job.KNOWN_UNVERIFIED.values():
+        assert "verify_all.py" in reason
+        assert "test_full_verification_matches_known_state" in reason
+
+
 def test_sample_job_names_caps_at_eligible_catalog_size() -> None:
     eligible = set(verify_all.VERIFIABLE_NAMES) - set(verify_job.KNOWN_UNVERIFIED)
     assert set(verify_job.sample_job_names(30)) == eligible
@@ -55,7 +84,28 @@ def test_ci_sample_has_no_unexpected_exclusions() -> None:
     assert set(result.report.excluded) <= set(verify_job.KNOWN_UNVERIFIED)
 
 
+@pytest.mark.perf
+def test_ci_sample_completes_within_latency_budget() -> None:
+    """Numeric performance assertion: the 30-name CI sample runs on every
+    commit (unmarked, no `nightly` gate), so a regression that made it scale
+    like the full catalog (or worse) must show up as a real gate failure, not
+    just a slow-CI complaint. Measured baseline is ~0.1s on CI hardware; 5s
+    leaves >40x headroom for slower machines without masking an actual
+    blow-up (e.g. accidentally running the full corpus per call)."""
+    start = time.perf_counter()
+    verify_job.run_ci_sample()
+    elapsed = time.perf_counter() - start
+    assert elapsed < 5.0, f"CI sample took {elapsed:.3f}s, budget is 5.0s"
+
+
 # ---------------------------------------------------------------- negative --
+
+
+def test_sample_job_names_rejects_negative_sample_size() -> None:
+    """`k` is a count, not an offset -- a negative sample size must fail
+    closed instead of silently returning something (e.g. the full pool)."""
+    with pytest.raises(ValueError):
+        verify_job.sample_job_names(-1)
 
 
 def test_injected_reference_drift_is_caught_by_ci_sample(monkeypatch: pytest.MonkeyPatch) -> None:

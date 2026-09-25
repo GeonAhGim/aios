@@ -1,5 +1,35 @@
-import { describe, expect, it } from "vitest";
-import { checkRatchet } from "./densityRatchet.mjs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { afterEach, describe, expect, it } from "vitest";
+import {
+  CALIB_BASE_MS,
+  CH19_ABSOLUTE_TARGET_MS,
+  checkAbsoluteThresholds,
+  checkRatchet,
+  decideBenchOutcome,
+  loadBaseline,
+  REGRESSION_FLOOR_MS,
+  REGRESSION_TOLERANCE,
+  writeBaseline,
+} from "./densityRatchet.mjs";
+
+// task-6414 (esc-ci-frontend.json): reproduces the actual CI red. A quiet run
+// dipped 0.083ms (under 3%) below baseline 3.307 with no code change at all;
+// the pre-fix `improved` check (any normalized < base, no floor/margin)
+// persisted that noise as the new baseline (3.224), after which every
+// following normal-noise run (~3.87-3.91ms) failed as a false regression.
+describe("checkRatchet — improvement requires a real margin, not noise (task-6414)", () => {
+  it("does not ratchet the baseline down on a sub-margin, sub-floor dip", () => {
+    const { improved } = checkRatchet({ panZoomFrameMsP95: 3.224 }, { panZoomFrameMsP95: 3.307 }, 1);
+    expect(improved).toEqual({});
+  });
+
+  it("still ratchets down once a dip clears both the floor and IMPROVEMENT_TOLERANCE", () => {
+    const { improved } = checkRatchet({ panZoomFrameMsP95: 2.5 }, { panZoomFrameMsP95: 3.307 }, 1);
+    expect(improved.panZoomFrameMsP95).toBe(2.5);
+  });
+});
 
 describe("checkRatchet", () => {
   it("flags a real regression at calibRatio=1 (idle reference host)", () => {
@@ -30,5 +60,221 @@ describe("checkRatchet", () => {
     const { improved } = checkRatchet({ panZoomFrameMsP95: 20 }, { panZoomFrameMsP95: 6.6 }, 10);
     expect(improved.panZoomFrameMsP95).toBeLessThan(6.6);
     expect(improved.panZoomFrameMsP95).toBe(2);
+  });
+});
+
+// task-3311: follow-up to task-2089's CI red — 20% was too tight for
+// indicatorAddMs's noise profile on this machine (observed 2/18
+// false-positive rate). REGRESSION_TOLERANCE_OVERRIDES widens that one
+// metric only; every other metric must keep the original 20% behavior.
+describe("checkRatchet — per-metric tolerance overrides (task-3311)", () => {
+  it("does not flag indicatorAddMs at 25% slower, which the shared 20% tolerance would have failed", () => {
+    const current = { indicatorAddMs: 28.51 * 1.25 };
+    const baseline = { indicatorAddMs: 28.51 };
+    const { failures } = checkRatchet(current, baseline, 1);
+    expect(failures).toEqual([]);
+  });
+
+  it("still flags indicatorAddMs once it exceeds its own 30% override", () => {
+    const current = { indicatorAddMs: 28.51 * 1.5 };
+    const baseline = { indicatorAddMs: 28.51 };
+    const { failures } = checkRatchet(current, baseline, 1);
+    expect(failures.length).toBe(1);
+    expect(failures[0]).toMatch(/indicatorAddMs/);
+    expect(failures[0]).toContain(">30%");
+  });
+
+  it("leaves other metrics at the shared 20% tolerance unaffected by the indicatorAddMs override", () => {
+    const current = { panZoomFrameMsP95: 6.6 * 1.25 };
+    const baseline = { panZoomFrameMsP95: 6.6 };
+    const { failures } = checkRatchet(current, baseline, 1);
+    expect(failures.length).toBe(1);
+    expect(failures[0]).toMatch(/panZoomFrameMsP95/);
+    expect(failures[0]).toContain(">20%");
+  });
+
+  it("an explicit empty overrides map falls back every metric to the shared tolerance", () => {
+    const current = { indicatorAddMs: 28.51 * 1.25 };
+    const baseline = { indicatorAddMs: 28.51 };
+    const { failures } = checkRatchet(current, baseline, 1, REGRESSION_TOLERANCE, REGRESSION_FLOOR_MS, {});
+    expect(failures.length).toBe(1);
+    expect(failures[0]).toContain(">20%");
+  });
+});
+
+// DEPTH_CH(task-2729) audit of task-1959 (4226858): checkRatchet had no unit
+// tests at all at audit time, negative<3, and no gate-red reproduction using
+// the spec's own fixed ms/fps absolute targets (CH19_ABSOLUTE_TARGET_MS) —
+// only the relative ratchet was exercised. checkAbsoluteThresholds and the
+// baseline file's own failure modes were entirely untested. DEEPEN task-3096
+// fills those: real gate-red reproduction against the actual CH-19 spec
+// constants, plus real (not mocked-network — this file has none) fs failure
+// injection for the baseline load/write path.
+describe("checkAbsoluteThresholds — CH-19e fixed ms/fps gate (DEEPEN task-3096)", () => {
+  it("flags a metric that exceeds the spec's own absolute target at calibRatio=1 (idle reference host)", () => {
+    // panZoomFrameMsP95's real spec target is 16.7ms (CH19_ABSOLUTE_TARGET_MS) — this uses
+    // that exact constant, not a fabricated threshold, so the assertion is anchored to §9.11 CH-19.
+    const current = { panZoomFrameMsP95: 20, indicatorAddMs: 50, tickUpdateMsP95: 5 };
+    const { failures, calibRatio } = checkAbsoluteThresholds(current, CALIB_BASE_MS);
+    expect(calibRatio).toBe(1);
+    expect(failures.length).toBe(1);
+    expect(failures[0]).toMatch(/panZoomFrameMsP95/);
+    expect(failures[0]).toContain(`${CH19_ABSOLUTE_TARGET_MS.panZoomFrameMsP95}`);
+  });
+
+  it("passes when every metric sits within the spec's absolute targets", () => {
+    const current = { panZoomFrameMsP95: 10, indicatorAddMs: 50, tickUpdateMsP95: 5 };
+    const { failures } = checkAbsoluteThresholds(current, CALIB_BASE_MS);
+    expect(failures).toEqual([]);
+  });
+
+  it("scales the target up for a contended host instead of failing on host load alone", () => {
+    // calibMs 5x CALIB_BASE_MS -> calibRatio=5 -> panZoomFrameMsP95 target becomes 16.7*5=83.5ms.
+    // 80ms would fail the raw (unscaled) spec target but passes once host load is accounted for.
+    const current = { panZoomFrameMsP95: 80, indicatorAddMs: 50, tickUpdateMsP95: 5 };
+    const { failures, normalized } = checkAbsoluteThresholds(current, CALIB_BASE_MS * 5);
+    expect(normalized.panZoomFrameMsP95).toBeCloseTo(83.5, 5);
+    expect(failures).toEqual([]);
+  });
+
+  it("still catches a regression beyond what host-load normalization explains (gate-red on a contended host)", () => {
+    const current = { panZoomFrameMsP95: 10, indicatorAddMs: 50, tickUpdateMsP95: 100 };
+    const { failures } = checkAbsoluteThresholds(current, CALIB_BASE_MS * 5);
+    expect(failures.length).toBe(1);
+    expect(failures[0]).toMatch(/tickUpdateMsP95/);
+  });
+
+  it("never tightens the target below spec on a fast/idle host (ratio floored at 1)", () => {
+    // calibMs far below CALIB_BASE_MS (a very fast/idle host) must not lower the target below
+    // the raw spec value -- CH-19 is already the floor, not something a fast host can shrink.
+    const current = { panZoomFrameMsP95: 5, indicatorAddMs: CH19_ABSOLUTE_TARGET_MS.indicatorAddMs, tickUpdateMsP95: 5 };
+    const { failures, normalized, calibRatio } = checkAbsoluteThresholds(current, CALIB_BASE_MS / 10);
+    expect(calibRatio).toBe(1);
+    expect(normalized.indicatorAddMs).toBe(CH19_ABSOLUTE_TARGET_MS.indicatorAddMs);
+    expect(failures).toEqual([]);
+  });
+});
+
+// task-6460 (esc-ci-frontend.json): a single noisy calib sample anywhere in
+// the run inflated the MAX-based calibRatio that was fed into checkRatchet's
+// improvement branch, deflating the persisted baseline below the code's real
+// cost and turning every following normal run into a false regression.
+// decideBenchOutcome now takes a separate ratchetCalibRatio (median-based,
+// resistant to one outlier) for the ratchet/persistence path, defaulting to
+// calibRatio for backward compatibility.
+describe("decideBenchOutcome — ratchetCalibRatio isolates the improvement path from calib spikes (task-6460)", () => {
+  it("does not persist a deflated baseline when only the shared calibRatio is spiked by an outlier", () => {
+    const current = { panZoomFrameMsP95: 3.5 };
+    const baseline = { metrics: { panZoomFrameMsP95: 3.307 } };
+    // calibRatio=2 (one outlier calib sample) would make 3.5/2=1.75 look like
+    // a huge improvement over 3.307; ratchetCalibRatio=1 (typical load this
+    // run) correctly reports it as within normal tolerance instead.
+    const outcome = decideBenchOutcome({
+      current, baseline, absoluteFailures: [], calibRatio: 2, ratchetCalibRatio: 1,
+      baselineMeta: {}, baselinePath: "unused",
+    });
+    expect(outcome.baselineWrite).toBeNull();
+    expect(outcome.exitCode).toBe(0);
+  });
+
+  it("still persists a real improvement measured under typical (non-spiked) load", () => {
+    const current = { panZoomFrameMsP95: 2.5 };
+    const baseline = { metrics: { panZoomFrameMsP95: 3.307 } };
+    const outcome = decideBenchOutcome({
+      current, baseline, absoluteFailures: [], calibRatio: 1, ratchetCalibRatio: 1,
+      baselineMeta: {}, baselinePath: "unused",
+    });
+    expect(outcome.baselineWrite.metrics.panZoomFrameMsP95).toBe(2.5);
+  });
+
+  it("falls back to calibRatio when ratchetCalibRatio is omitted (backward compatible)", () => {
+    const current = { panZoomFrameMsP95: 10 };
+    const baseline = { metrics: { panZoomFrameMsP95: 6.6 } };
+    const outcome = decideBenchOutcome({
+      current, baseline, absoluteFailures: [], calibRatio: 1, baselineMeta: {}, baselinePath: "unused",
+    });
+    expect(outcome.exitCode).toBe(1);
+  });
+});
+
+// task-6513 (esc-ci-frontend.json recurrence): first-run baseline creation
+// used to persist `current` verbatim instead of normalizing by
+// ratchetCalibRatio like the improvement path does, so a baseline created on
+// a host slower than the reference silently became the new "reference" —
+// every later run on a faster/idle host then compared its own normalized
+// value against an artificially high floor while a run on a similarly slow
+// host passed for the wrong reason.
+describe("decideBenchOutcome — baseline creation normalizes by ratchetCalibRatio (task-6513)", () => {
+  it("stores the reference-host-equivalent value, not the raw value, when created on a loaded host", () => {
+    const outcome = decideBenchOutcome({
+      current: { panZoomFrameMsP95: 6 },
+      baseline: null,
+      absoluteFailures: [],
+      calibRatio: 2,
+      ratchetCalibRatio: 2,
+      baselineMeta: {},
+      baselinePath: "unused",
+    });
+    expect(outcome.exitCode).toBe(0);
+    expect(outcome.baselineWrite.metrics.panZoomFrameMsP95).toBe(3);
+  });
+
+  it("still persists the raw value on an idle reference host (ratio 1, no change from prior behavior)", () => {
+    const outcome = decideBenchOutcome({
+      current: { panZoomFrameMsP95: 3.307 },
+      baseline: null,
+      absoluteFailures: [],
+      calibRatio: 1,
+      ratchetCalibRatio: 1,
+      baselineMeta: {},
+      baselinePath: "unused",
+    });
+    expect(outcome.baselineWrite.metrics.panZoomFrameMsP95).toBe(3.307);
+  });
+
+  it("normalizes the baseline it writes even on the CH-19e-absolute-failure exit path", () => {
+    const outcome = decideBenchOutcome({
+      current: { panZoomFrameMsP95: 40 },
+      baseline: null,
+      absoluteFailures: ["panZoomFrameMsP95 40ms exceeds normalized target"],
+      calibRatio: 4,
+      ratchetCalibRatio: 4,
+      baselineMeta: {},
+      baselinePath: "unused",
+    });
+    expect(outcome.exitCode).toBe(1);
+    expect(outcome.baselineWrite.metrics.panZoomFrameMsP95).toBe(10);
+  });
+});
+
+describe("loadBaseline/writeBaseline — real fs failure injection (DEEPEN task-3096)", () => {
+  let dir;
+
+  afterEach(() => {
+    if (dir) rmSync(dir, { recursive: true, force: true });
+    dir = undefined;
+  });
+
+  it("throws on a corrupted baseline file instead of silently treating it as 'no baseline' (crashed prior run)", () => {
+    // A real fs fault, not a numeric-value deviation: a prior bench run crashed mid-write and
+    // left truncated/invalid JSON on disk. Swallowing this would make loadBaseline() === null,
+    // which density_bench.mjs treats as "first run" and re-baselines over a real regression.
+    dir = mkdtempSync(join(tmpdir(), "density-ratchet-test-"));
+    const corruptPath = join(dir, "density-baseline.json");
+    writeFileSync(corruptPath, "{ not valid json", "utf-8");
+    expect(() => loadBaseline(corruptPath)).toThrow();
+  });
+
+  it("loadBaseline returns null only when the file is genuinely absent, not when it exists but is corrupted", () => {
+    dir = mkdtempSync(join(tmpdir(), "density-ratchet-test-"));
+    const missingPath = join(dir, "does-not-exist.json");
+    expect(loadBaseline(missingPath)).toBeNull();
+  });
+
+  it("writeBaseline throws (fails loud) when the target directory does not exist", () => {
+    // Real ENOENT from node:fs, injected via a path outside any created directory --
+    // a bench run misconfigured to write outside its own package must not fail silently.
+    const unwritablePath = join(tmpdir(), "density-ratchet-test-missing-dir", "density-baseline.json");
+    expect(() => writeBaseline(unwritablePath, { panZoomFrameMsP95: 1 }, {})).toThrow();
   });
 });

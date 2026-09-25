@@ -1,5 +1,6 @@
 import type { ParsedPnLBreakdown, ParsedPositionSnapshot, PositionSnapshotView } from "@aios/shared-types";
 import { Alert, Badge, Card, CardTitle, Stat } from "@aios/ui-web";
+import { useTranslation } from "react-i18next";
 
 // spec §3.2 (B) PositionSnapshotView/PnLBreakdown 표시 전용 카드. 서버 라우트가
 // 아직 없으므로(task-628 decision) fetch는 하지 않고, 이미 파싱된 결과를 그대로
@@ -18,13 +19,15 @@ function moneyLabel(amount: string, currency: string): string {
 }
 
 function UnrealizedStat({ snapshot }: { snapshot: PositionSnapshotView }) {
+  const { t } = useTranslation();
   if (snapshot.unrealized_pnl_base === null) {
-    return <Stat label="미실현 손익" value="평가 불가" tone="default" />;
+    return <Stat label={t("legacy.positionPnLCard.label1")} value="평가 불가" tone="default" />;
   }
-  return <Stat label="미실현 손익" value={snapshot.unrealized_pnl_base} />;
+  return <Stat label={t("legacy.positionPnLCard.label2")} value={snapshot.unrealized_pnl_base} />;
 }
 
 function SnapshotBody({ snapshot }: { snapshot: PositionSnapshotView }) {
+  const { t } = useTranslation();
   const isMarkStale = snapshot.mark_price === null || snapshot.mark_at === null;
 
   return (
@@ -33,20 +36,19 @@ function SnapshotBody({ snapshot }: { snapshot: PositionSnapshotView }) {
         <CardTitle className="mb-0 font-mono">{snapshot.position_key}</CardTitle>
         {isMarkStale && (
           <Badge tone="warning" data-testid="mark-stale-badge">
-            마크 가격 스테일
-          </Badge>
+            {t("legacy.positionPnLCard.t3")}</Badge>
         )}
       </div>
       <div className="mt-4 grid grid-cols-2 gap-4 sm:grid-cols-4">
-        <Stat label="수량" value={snapshot.quantity} />
-        <Stat label="평균단가" value={moneyLabel(snapshot.avg_cost.amount, snapshot.avg_cost.currency)} />
-        <Stat label="원가법" value={snapshot.cost_method} />
+        <Stat label={t("legacy.positionPnLCard.label4")} value={snapshot.quantity} />
+        <Stat label={t("legacy.positionPnLCard.label5")} value={moneyLabel(snapshot.avg_cost.amount, snapshot.avg_cost.currency)} />
+        <Stat label={t("legacy.positionPnLCard.label6")} value={snapshot.cost_method} />
         <UnrealizedStat snapshot={snapshot} />
-        <Stat label="실현 손익" value={snapshot.realized_pnl_base} />
-        <Stat label="수수료" value={snapshot.fees_base} />
-        <Stat label="펀딩" value={snapshot.funding_base} />
+        <Stat label={t("legacy.positionPnLCard.label7")} value={snapshot.realized_pnl_base} />
+        <Stat label={t("legacy.positionPnLCard.label8")} value={snapshot.fees_base} />
+        <Stat label={t("legacy.positionPnLCard.label9")} value={snapshot.funding_base} />
         <Stat
-          label="마크 가격"
+          label={t("legacy.positionPnLCard.label10")}
           value={snapshot.mark_price ? moneyLabel(snapshot.mark_price.amount, snapshot.mark_price.currency) : "-"}
         />
       </div>
@@ -55,24 +57,26 @@ function SnapshotBody({ snapshot }: { snapshot: PositionSnapshotView }) {
 }
 
 function PnLBreakdownRow({ pnl }: { pnl: ParsedPnLBreakdown }) {
+  const { t } = useTranslation();
   if (pnl.kind !== "ok") return null;
   const { realized, unrealized, fees, funding, total, base_currency } = pnl.value;
   return (
     <div className="mt-4 grid grid-cols-2 gap-4 sm:grid-cols-5" data-testid="pnl-breakdown">
-      <Stat label="실현(합산)" value={moneyLabel(realized, base_currency)} />
-      <Stat label="미실현(합산)" value={moneyLabel(unrealized, base_currency)} />
-      <Stat label="수수료(합산)" value={moneyLabel(fees, base_currency)} />
-      <Stat label="펀딩(합산)" value={moneyLabel(funding, base_currency)} />
-      <Stat label="합계" value={moneyLabel(total, base_currency)} />
+      <Stat label={t("legacy.positionPnLCard.label11")} value={moneyLabel(realized, base_currency)} />
+      <Stat label={t("legacy.positionPnLCard.label12")} value={moneyLabel(unrealized, base_currency)} />
+      <Stat label={t("legacy.positionPnLCard.label13")} value={moneyLabel(fees, base_currency)} />
+      <Stat label={t("legacy.positionPnLCard.label14")} value={moneyLabel(funding, base_currency)} />
+      <Stat label={t("legacy.positionPnLCard.label15")} value={moneyLabel(total, base_currency)} />
     </div>
   );
 }
 
 export function PositionPnLCard({ snapshot, pnl }: PositionPnLCardProps) {
+  const { t } = useTranslation();
   if (snapshot.kind === "unsupported_schema_version") {
     return (
       <Card data-testid="position-pnl-card">
-        <Alert tone="danger">지원하지 않는 schema_version입니다 ({String(snapshot.received)}).</Alert>
+        <Alert tone="danger">{t("legacy.positionPnLCard.t16", { string: String(snapshot.received) })}</Alert>
       </Card>
     );
   }
@@ -80,7 +84,7 @@ export function PositionPnLCard({ snapshot, pnl }: PositionPnLCardProps) {
   if (snapshot.kind !== "ok") {
     return (
       <Card data-testid="position-pnl-card">
-        <Alert tone="danger">포지션 데이터를 해석할 수 없습니다.</Alert>
+        <Alert tone="danger">{t("legacy.positionPnLCard.t17")}</Alert>
       </Card>
     );
   }

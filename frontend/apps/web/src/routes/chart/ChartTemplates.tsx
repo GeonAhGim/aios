@@ -23,6 +23,7 @@ import type { ObjectTreeEntry } from "@aios/chart-engine/src/legend/objectTree";
 import { routeApiError } from "@aios/shared-types";
 import { Button, EmptyState, Input, LoadingState } from "@aios/ui-web";
 import { ErrorMessage } from "../../components/ErrorMessage";
+import { useTranslation } from "react-i18next";
 
 const TEMPLATE_PANEL_ID = "template-panel";
 const MAIN_PANE_ID = "main";
@@ -113,6 +114,7 @@ function TemplateOpError({ error }: { error: unknown }) {
 }
 
 export function ChartTemplates({ port, mainIndicatorIds, subIndicatorIds, knownIndicatorIds, onApplied }: ChartTemplatesProps) {
+  const { t } = useTranslation();
   const [open, setOpen] = useState(false);
   const [name, setName] = useState("");
   const [captureError, setCaptureError] = useState<unknown>(null);
@@ -166,15 +168,14 @@ export function ChartTemplates({ port, mainIndicatorIds, subIndicatorIds, knownI
   return (
     <div className="relative inline-block" data-testid="chart-templates">
       <Button type="button" variant="secondary" size="sm" aria-expanded={open} onClick={() => setOpen((prev) => !prev)}>
-        템플릿
-      </Button>
+        {t("legacy.chartTemplates.t1")}</Button>
 
       {open && (
         <div className="absolute z-10 mt-1 w-80 space-y-3 rounded-md border border-border bg-surface p-3 shadow-lg">
           <div className="flex items-end gap-1.5">
             <Input
-              aria-label="템플릿 이름"
-              placeholder="템플릿 이름"
+              aria-label={t("legacy.chartTemplates.ariaLabel2")}
+              placeholder={t("legacy.chartTemplates.placeholder3")}
               value={name}
               onChange={(e) => setName(e.target.value)}
               className="flex-1"
@@ -187,8 +188,7 @@ export function ChartTemplates({ port, mainIndicatorIds, subIndicatorIds, knownI
               onClick={handleSave}
               data-testid="chart-templates-save"
             >
-              현재 차트 저장
-            </Button>
+              {t("legacy.chartTemplates.t4")}</Button>
           </div>
           {!!captureError && <TemplateOpError error={captureError} />}
           {saveMutation.isError && <TemplateOpError error={saveMutation.error} />}
@@ -199,32 +199,30 @@ export function ChartTemplates({ port, mainIndicatorIds, subIndicatorIds, knownI
           ) : query.isLoading ? (
             <LoadingState />
           ) : templates.length === 0 ? (
-            <EmptyState>저장된 템플릿이 없습니다.</EmptyState>
+            <EmptyState>{t("legacy.chartTemplates.t5")}</EmptyState>
           ) : (
-            <ul aria-label="템플릿 목록" className="space-y-1">
-              {templates.map((t) => (
-                <li key={t.id} className="flex items-center justify-between gap-2 text-sm text-fg">
-                  <span>{t.name}</span>
+            <ul aria-label={t("legacy.chartTemplates.ariaLabel6")} className="space-y-1">
+              {templates.map((template) => (
+                <li key={template.id} className="flex items-center justify-between gap-2 text-sm text-fg">
+                  <span>{template.name}</span>
                   <span className="flex gap-1.5">
                     <Button
                       type="button"
                       variant="secondary"
                       size="sm"
-                      onClick={() => handleApply(t)}
-                      data-testid={`chart-templates-apply-${t.id}`}
+                      onClick={() => handleApply(template)}
+                      data-testid={`chart-templates-apply-${template.id}`}
                     >
-                      적용
-                    </Button>
+                      {t("legacy.chartTemplates.t7")}</Button>
                     <Button
                       type="button"
                       variant="ghost"
                       size="sm"
                       disabled={deleteMutation.isPending}
-                      onClick={() => deleteMutation.mutate(t.id)}
-                      data-testid={`chart-templates-delete-${t.id}`}
+                      onClick={() => deleteMutation.mutate(template.id)}
+                      data-testid={`chart-templates-delete-${template.id}`}
                     >
-                      삭제
-                    </Button>
+                      {t("legacy.chartTemplates.t8")}</Button>
                   </span>
                 </li>
               ))}

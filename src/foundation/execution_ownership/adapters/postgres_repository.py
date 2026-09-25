@@ -1,23 +1,24 @@
-"""ExecutionLeaseRepository의 asyncpg 구현.
+"""Asyncpg implementation of ExecutionLeaseRepository.
 
 Spec: docs/specs/L4_execution_ownership_and_safety_gate_wiring_v1.0.md
-§3.2, §5.1, §7. `acquire_or_renew_many`는 §5.1 조건부 UPSERT SQL을
-`UNNEST($1::bigint[])`로 배치 확장해 execution_id 여러 개를 **1회 왕복**
-으로 처리한다(§7 "execution마다 개별 왕복하지 않는다"). asyncpg는 Python
-`list[int]` → `bigint[]` 바인딩을 기본 지원하므로(§10 "타입 바인딩 확인
-필요"였던 항목 — 이 구현으로 확인 완료) `executemany` 폴백은 필요하지
-않았다. 배치 1왕복 단언은
+§3.2, §5.1, §7. `acquire_or_renew_many` batch-expands the §5.1 conditional
+UPSERT SQL via `UNNEST($1::bigint[])` to handle multiple execution_ids in
+**one round-trip** (§7: "do not make individual round-trips per execution").
+Asyncpg natively binds Python `list[int]` → `bigint[]` (§10 "confirm type
+binding" — resolved by this implementation), so no `executemany` fallback
+was needed. The one-round-trip-per-batch assertion is proven by
 `tests/integration/foundation/execution_ownership/test_postgres_lease_repository.py`
-가 `conn.fetch` 호출 횟수를 세어 증명한다.
+counting `conn.fetch` calls.
 
-execution_ids에 같은 id가 두 번 들어오면 Postgres는 한 문장 안에서 같은
-행을 두 번 갱신할 수 없어 `CardinalityViolationError`("ON CONFLICT DO
-UPDATE command cannot affect row a second time")로 **배치 전체**를 실패
-시킨다 — 그러면 그 주기의 모든 execution이 tick되지 못한다. 그래서
-바인딩 전에 순서를 유지한 채 중복을 제거한다(QA task-1143에서 실DB로
-재현). 존재하지 않는 execution_id(FK 위반)는 의도적으로 걸러내지 않는다
-— §5.1 SQL을 그대로 쓰고, 호출자(EO-03 `list_candidates`)가
-`strategy_executions`에서 읽은 id만 넘기는 것이 계약이다.
+If the same id appears twice in execution_ids, Postgres cannot update the
+same row twice within a single statement and will fail the **entire batch**
+with `CardinalityViolationError` ("ON CONFLICT DO UPDATE command cannot
+affect row a second time"), leaving all executions in that tick un-ticked.
+Deduplication preserves insertion order before binding (reproduced against
+real DB in QA task-1143). Non-existent execution_ids (FK violations) are
+intentionally not filtered out — the §5.1 SQL is used as-is, and the
+contract is that the caller (EO-03 `list_candidates`) passes only ids read
+from `strategy_executions`.
 """
 from __future__ import annotations
 

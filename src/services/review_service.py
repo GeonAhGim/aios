@@ -10,6 +10,7 @@ UNIQUE 제약이 최종 방어선).
 집계: 리뷰 5건 미만인 리스팅은 평균 별점 대신 "리뷰 부족" 표시 — 개별
 리뷰 원문은 건수와 무관하게 항상 노출한다(별점만 신뢰도 임계치 적용).
 """
+
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
@@ -24,6 +25,10 @@ MIN_REVIEWS_FOR_RATING = 5
 
 class ReviewError(Exception):
     """FD-13.9 실패 — 라우터가 400/403으로 변환."""
+
+
+class ReviewNotFoundError(ReviewError):
+    """No listing exists for the given listing_id -- maps to RESOURCE_NOT_FOUND(404)."""
 
 
 class Review(BaseModel):
@@ -88,6 +93,12 @@ class ReviewService:
 
     async def list_reviews(self, listing_id: int) -> list[Review]:
         async with self._pool.acquire() as conn:
+            exists = await conn.fetchval(
+                "SELECT 1 FROM strategy_listings WHERE id = $1", listing_id
+            )
+            if exists is None:
+                raise ReviewNotFoundError("존재하지 않는 리스팅입니다.")
+
             rows = await conn.fetch(
                 "SELECT * FROM reviews WHERE listing_id = $1 ORDER BY created_at DESC",
                 listing_id,

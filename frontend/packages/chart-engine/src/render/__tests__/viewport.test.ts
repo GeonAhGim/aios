@@ -3,6 +3,7 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import type { LodCandle } from "../lod";
 import { ViewportError, cullToViewport } from "../viewport";
+import { createRng } from "./arbitraries";
 
 function makeCandle(time: number): LodCandle {
   return { time, open: time, high: time + 1, low: time - 1, close: time, volume: 1 };
@@ -64,6 +65,99 @@ describe("cullToViewport", () => {
     } catch (err) {
       expect((err as ViewportError).code).toBe("VIEWPORT_INVALID_RANGE");
     }
+  });
+});
+
+// --- DEEPEN 1958 (docs/audit/DEPTH_CH.md): the original leaf had no failure
+// injection, no ms/fps numeric performance assertion, and no gate-red
+// reproduction. lod.ts/viewport.ts are untouched; the three axes below are
+// test-only additions.
+
+describe("DEEPEN 1958 — malformed-value failure injection (mocked network/DB injection is structurally impossible for a pure function; this shows the module is immune to it because it only ever reads `.time`)", () => {
+  it("corrupting open/high/low/close/volume with NaN/Infinity/negative values never perturbs the culled result (200 seeded corruptions)", () => {
+    const range = { startTime: 55, endTime: 95 };
+    const clean = cullToViewport(SERIES, range);
+
+    for (let seed = 0; seed < 200; seed++) {
+      const rng = createRng(seed);
+      const corrupted = SERIES.map((c) => {
+        if (!rng.bool()) return c;
+        const field = rng.pick(["open", "high", "low", "close", "volume"] as const);
+        const value = rng.pick([Number.NaN, Infinity, -Infinity, -1]);
+        return { ...c, [field]: value };
+      });
+
+      const dirty = cullToViewport(corrupted, range);
+      expect(dirty.startIndex).toBe(clean.startIndex);
+      expect(dirty.endIndex).toBe(clean.endIndex);
+      expect(dirty.candles.map((c) => c.time)).toEqual(clean.candles.map((c) => c.time));
+    }
+  });
+});
+
+describe("DEEPEN 1958 — malformed timestamp bypasses the ascending guard", () => {
+  it("a NaN timestamp is not caught by assertAscending (NaN <= x is false in both directions) and can silently exclude later in-range candles from the cull, without throwing", () => {
+    // times: 0, 10, NaN, 5, 20 — the drop from 10 to 5 right after the NaN is a
+    // real regression, but every comparison touching the NaN evaluates false,
+    // so assertAscending's pairwise `<=` check never fires on it.
+    const malformed: LodCandle[] = [0, 10, Number.NaN, 5, 20].map((t) => makeCandle(t));
+
+    expect(() => cullToViewport(malformed, { startTime: 0, endTime: 20 })).not.toThrow();
+    const result = cullToViewport(malformed, { startTime: 0, endTime: 20 });
+    // time=20 is inside [0, 20], but the NaN at index 2 breaks the binary
+    // search's monotonicity assumption, so it — and every candle after it,
+    // including the in-range time=20 — is silently dropped from the result.
+    expect(result.candles.map((c) => c.time)).toEqual([0, 10]);
+    expect(result.endIndex).toBe(2);
+  });
+});
+
+describe("DEEPEN 1958 — numeric performance assertion", () => {
+  it("culls a 100,000-candle series across 100 viewport queries (a pan/zoom scrub) within a 1500ms budget", () => {
+    // cullToViewport re-validates ascending order on the full array on every
+    // call, so its cost is O(candles) per query, not just the O(log candles)
+    // binary search -- repeated scrubbing is the realistic worst case.
+    const total = 100_000;
+    const big: LodCandle[] = Array.from({ length: total }, (_, i) => makeCandle(i));
+
+    const startedAt = performance.now();
+    let touched = 0;
+    for (let q = 0; q < 100; q++) {
+      const t = (q * 37) % total;
+      const result = cullToViewport(big, { startTime: t, endTime: t + 50 });
+      touched += result.candles.length;
+    }
+    const elapsedMs = performance.now() - startedAt;
+
+    expect(touched).toBeGreaterThan(0);
+    expect(elapsedMs).toBeLessThan(1500);
+  });
+});
+
+describe("DEEPEN 1958 — gate red reproduction (naive exclusive-end binary search vs. the shipped inclusive cullToViewport)", () => {
+  /**
+   * A naive viewport cull that treats `endTime` as EXCLUSIVE (a common
+   * off-by-one a from-scratch reimplementation would make), unlike the
+   * shipped inclusive `[startTime, endTime]` contract.
+   */
+  function naiveExclusiveEndCull(candles: readonly LodCandle[], viewport: { startTime: number; endTime: number }) {
+    let startIndex = 0;
+    while (startIndex < candles.length && candles[startIndex]!.time < viewport.startTime) startIndex++;
+    let endIndex = startIndex;
+    while (endIndex < candles.length && candles[endIndex]!.time < viewport.endTime) endIndex++;
+    return { startIndex, endIndex, candles: candles.slice(startIndex, endIndex) };
+  }
+
+  it("적색: naive exclusive-end cull drops the candle sitting exactly on endTime; 녹색: cullToViewport keeps it", () => {
+    const viewport = { startTime: SERIES[0]!.time, endTime: SERIES.at(-1)!.time };
+
+    const naive = naiveExclusiveEndCull(SERIES, viewport);
+    expect(naive.candles).not.toContainEqual(SERIES.at(-1));
+    expect(naive.candles).toHaveLength(SERIES.length - 1);
+
+    const real = cullToViewport(SERIES, viewport);
+    expect(real.candles).toContainEqual(SERIES.at(-1));
+    expect(real.candles).toHaveLength(SERIES.length);
   });
 });
 

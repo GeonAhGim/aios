@@ -1,5 +1,6 @@
 import { Button } from "@aios/ui-web";
 import type { PageState } from "../lib/pagination";
+import { useTranslation } from "react-i18next";
 
 // derivePageState(§9 PLT-12)의 출력을 받아 이전/다음 버튼과 현재 페이지만
 // 그리는 표시 전용 컴포넌트. 클램프·비활성 조건은 derivePageState가 이미
@@ -10,6 +11,7 @@ interface PaginationProps {
 }
 
 export function Pagination({ state, onPageChange }: PaginationProps) {
+  const { t } = useTranslation();
   if (state.totalPages !== null && state.totalPages <= 1) {
     return null;
   }
@@ -23,8 +25,7 @@ export function Pagination({ state, onPageChange }: PaginationProps) {
         disabled={!state.hasPrev}
         onClick={() => onPageChange(state.page - 1)}
       >
-        이전
-      </Button>
+        {t("legacy.pagination.t1")}</Button>
       <span className="tabular flex items-center px-2 text-sm text-fg-muted">
         {state.totalPages !== null
           ? `${state.page} / ${state.totalPages}`
@@ -37,8 +38,7 @@ export function Pagination({ state, onPageChange }: PaginationProps) {
         disabled={!state.hasNext}
         onClick={() => onPageChange(state.page + 1)}
       >
-        다음
-      </Button>
+        {t("legacy.pagination.t2")}</Button>
     </div>
   );
 }

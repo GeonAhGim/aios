@@ -1,3 +1,4 @@
+import "../i18n";
 import "@testing-library/jest-dom/vitest";
 import { buildApiError } from "@aios/api-client";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";

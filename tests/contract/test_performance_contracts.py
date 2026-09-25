@@ -1,6 +1,7 @@
 """Performance 계약(v1) 테스트 — 107번 §3 호환 규칙.
 
 Spec: docs/specs/L4_strategy_portfolio_backtest_v1.0.md §8 (L45 DoD)."""
+
 from __future__ import annotations
 
 from datetime import datetime, timezone
@@ -114,3 +115,18 @@ def test_compute_statement_command_defaults_methodology_to_none():
         period_end=_NOW,
     )
     assert command.methodology_version is None
+
+
+def test_money_value_rejects_state_outside_estimated_final_literal():
+    """negative 3 (task-3196 DEEPEN) — `MoneyValue.state`는 `"ESTIMATED"` |
+    `"FINAL"`만 허용한다(§3.4). "CORRECTED"는 `PerformanceStatementView.state`의
+    값이라 여기 혼입되면 안 된다 — 필드 하나가 실수로 str로 넓어지는 회귀를
+    잡는다."""
+    with pytest.raises(ValidationError):
+        MoneyValue(
+            amount=Decimal("1"),
+            currency="USDT",
+            precision=2,
+            as_of=_NOW,
+            state="CORRECTED",
+        )

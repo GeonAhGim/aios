@@ -77,12 +77,13 @@ from __future__ import annotations
 import time
 from datetime import datetime, timezone
 from decimal import Decimal
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import pytest
 
 from src.data.models.base import AssetClass, Currency, Money
 from src.data.models.trading import OrderSide
+from src.foundation.entities.domain.defaults import default_portfolio_id
 from src.foundation.evidence.adapters.postgres_repository import PostgresAuditEventRepository
 from src.foundation.positions.adapters.postgres_journal_repository import (
     PostgresJournalRepository,
@@ -109,9 +110,9 @@ def _clock() -> datetime:
     return datetime.now(timezone.utc)
 
 
-def _key() -> str:
+def _key(tenant_id: UUID) -> str:
     return str(
-        PositionKey(portfolio_id=uuid4(), 
+        PositionKey(portfolio_id=default_portfolio_id(tenant_id),
             venue="TESTVENUE",
             instrument_id=f"INST{uuid4().hex[:8]}",
             strategy_id="default",
@@ -148,7 +149,7 @@ async def _count_record_fill_round_trips(
     """record_fill() 1회가 소비하는 순차 DB 왕복 수(구조 회귀 가드)."""
     tenant_id = await create_test_tenant(pool)
     account_id = await create_pos_account(pool, tenant_id)
-    position_key = _key()
+    position_key = _key(tenant_id)
     await open_position(pool, tenant_id=tenant_id, account_id=account_id, position_key=position_key)
     command = RecordFillCommand(
         tenant_id=tenant_id,
@@ -204,7 +205,7 @@ async def test_record_fill_journal_append_p95_under_30ms(pool) -> None:
     for _ in range(_SAMPLE_COUNT):
         tenant_id = await create_test_tenant(pool)
         account_id = await create_pos_account(pool, tenant_id)
-        position_key = _key()
+        position_key = _key(tenant_id)
         await open_position(
             pool, tenant_id=tenant_id, account_id=account_id, position_key=position_key
         )

@@ -24,6 +24,7 @@ export interface ValidationResultView {
   obligations: string[];
   result_hash: string | null;
   created_at: string;
+  evidence_refs: string[];
 }
 
 // StartValidationRequest(src/api/schemas/foundation/validation.py) 요청 body — camelCase로
@@ -70,7 +71,8 @@ function isValidationResultBody(value: Record<string, unknown>): boolean {
     isStringArray(value.hard_fail_reasons) &&
     isStringArray(value.obligations) &&
     isNullableString(value.result_hash) &&
-    typeof value.created_at === "string"
+    typeof value.created_at === "string" &&
+    isStringArray(value.evidence_refs)
   );
 }
 

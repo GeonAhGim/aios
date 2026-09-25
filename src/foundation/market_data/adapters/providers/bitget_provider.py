@@ -1,3 +1,4 @@
+# ratchet-allow: out-of-DC-12-scope SPI methods raise NotImplementedError (fail-closed stub)
 """DC-12 — Bitget `MarketDataProvider` SPI 위임 어댑터.
 
 Spec: docs/specs/L4_analytics_authoring_backtest_marketplace_v1.0.md
@@ -33,13 +34,18 @@ decision — "구현 대상 Protocol은 ... capabilities()... fetch_candles()...
 몫이다. 둘 다 `NotImplementedError`로 fail-closed 한다 — 조용히 빈
 결과를 돌려주면 "지원하지 않음"과 "아직 안 함"이 구분되지 않는다.
 """
+
 from __future__ import annotations
 
-from collections.abc import AsyncIterator, Sequence
+import asyncio
+import random
+import time
+from collections.abc import AsyncIterator, Awaitable, Callable, Sequence
 from decimal import Decimal
 
 from src.data.models.base import AssetClass
 from src.exchanges.bitget.adapter import BitgetAdapter
+from src.exchanges.common.http_policy import RetryPolicy
 from src.foundation.market_data.adapters.providers.base_adapter import BaseProviderAdapter
 from src.foundation.market_data.contracts.v1 import Timeframe, Venue
 from src.foundation.market_data.contracts.v2.instruments import VenueListing
@@ -84,8 +90,18 @@ class BitgetProvider(BaseProviderAdapter):
     """`BitgetAdapter`(기존 `src/exchanges/bitget`)에 위임하는
     `MarketDataProvider`(DC-5) 구현체."""
 
-    def __init__(self, adapter: BitgetAdapter, **kwargs: object) -> None:
-        super().__init__(_CAPABILITIES, **kwargs)  # type: ignore[arg-type]
+    def __init__(
+        self,
+        adapter: BitgetAdapter,
+        *,
+        retry_policy: RetryPolicy | None = None,
+        clock: Callable[[], float] = time.monotonic,
+        sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
+        rng: Callable[[], float] = random.random,
+    ) -> None:
+        super().__init__(
+            _CAPABILITIES, retry_policy=retry_policy, clock=clock, sleep=sleep, rng=rng
+        )
         self._adapter = adapter
 
     def capabilities(self) -> ProviderCapabilities:
@@ -102,9 +118,7 @@ class BitgetProvider(BaseProviderAdapter):
         self, listing: VenueListing, tf: Timeframe, span: TimeSpan
     ) -> CandleColumns:
         if listing.venue is not Venue.BITGET:
-            raise ValueError(
-                f"BitgetProvider는 Venue.BITGET listing만 처리한다: {listing.venue!r}"
-            )
+            raise ValueError(f"BitgetProvider는 Venue.BITGET listing만 처리한다: {listing.venue!r}")
         symbol = to_canonical(Venue.BITGET, listing.venue_symbol)
 
         async def _op() -> CandleColumns:
@@ -121,8 +135,7 @@ class BitgetProvider(BaseProviderAdapter):
                     DataProviderErrorCode.DATA_COVERAGE_MISSING,
                     provider_id=self._provider_id,
                     message=(
-                        f"bitget: {symbol} {tf.value} 구간 [{span.start}, {span.end}) "
-                        "데이터 없음"
+                        f"bitget: {symbol} {tf.value} 구간 [{span.start}, {span.end}) 데이터 없음"
                     ),
                 )
             return CandleColumns(
@@ -137,9 +150,7 @@ class BitgetProvider(BaseProviderAdapter):
 
         return await self.call_with_retry(_op)
 
-    async def subscribe(
-        self, _listings: Sequence[VenueListing]
-    ) -> AsyncIterator[TickOrCandle]:
+    async def subscribe(self, _listings: Sequence[VenueListing]) -> AsyncIterator[TickOrCandle]:
         raise NotImplementedError(
             "BitgetProvider.subscribe: DC-12 스콥 밖 — 실시간 스트림 배선은 "
             "DC-17(realtime_fanout) 선행 리프 몫이다(task-1211 decision)."

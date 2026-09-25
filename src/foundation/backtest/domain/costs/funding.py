@@ -14,13 +14,14 @@ Spec: docs/specs/L4_analytics_authoring_backtest_marketplace_v1.0.md
 수취(수익)다. `side=BUY`는 롱, `side=SELL`은 숏 포지션을 뜻한다(주문
 방향이 아니라 보유 포지션 방향).
 """
+
 from __future__ import annotations
 
 from datetime import datetime, timezone
 from decimal import Decimal
 
 from src.data.models.trading import OrderSide
-from src.foundation.backtest.domain.costs import round_cost
+from src.foundation.backtest.domain.costs import exact_total_seconds, round_cost
 from src.foundation.backtest.domain.models_v2 import CostsConfig
 
 _EPOCH = datetime(1970, 1, 1, tzinfo=timezone.utc)
@@ -64,8 +65,8 @@ def count_funding_settlements(
         )
 
     interval_seconds = Decimal(interval_hours) * Decimal(3600)
-    entry_offset = Decimal((entry_time - _EPOCH).total_seconds())
-    exit_offset = Decimal((exit_time - _EPOCH).total_seconds())
+    entry_offset = exact_total_seconds(entry_time - _EPOCH)
+    exit_offset = exact_total_seconds(exit_time - _EPOCH)
     first_n = _ceil_div(entry_offset, interval_seconds)
     last_n_exclusive = _ceil_div(exit_offset, interval_seconds)
     return max(0, last_n_exclusive - first_n)

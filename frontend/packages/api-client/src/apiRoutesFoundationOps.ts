@@ -49,4 +49,47 @@ export const FOUNDATION_OPS_ROUTES = {
   "connections.confirm": route("/v1/foundation/connections/:connectionId:confirm", true, null, true),
   "connections.sync": route("/v1/foundation/connections/:connectionId:sync", true, null, true),
   "connections.revoke": route("/v1/foundation/connections/:connectionId:revoke", true, null, true),
+  // EM-18: 알고리즘 집행 진행률 및 TCA 분석 API (src/api/routers/foundation/ems/algo.py, ems/tca.py)
+  // 전부 ApiResponse 봉투를 쓴다 — contracts/openapi/v1.json에서 ApiResponse_AlgoProgressView_,
+  // ApiResponse_TcaResultView_ 참조 확인. v1Path는 foundation.* 관용으로 null.
+  // compute는 분석 계산이라 idempotencyRequired=false(기본값) 그대로 둔다.
+  "ems.algo.progress": route(
+    "/v1/foundation/ems/algo/:parentId/progress",
+    true,
+    null,
+    true,
+  ),
+  "ems.tca.latest": route("/v1/foundation/ems/tca/:parentId", true, null, true),
+  "ems.tca.revision": route(
+    "/v1/foundation/ems/tca/:parentId/revisions/:revision",
+    true,
+    null,
+    true,
+  ),
+  "ems.tca.compute": route(
+    "/v1/foundation/ems/tca/:parentId:compute",
+    true,
+    null,
+    true,
+  ),
+  // task-5803(FE-OPS-6): src/api/routers/foundation/performance.py 원문 확인 —
+  // `APIRouter(prefix="/v1/foundation/performance-statements")`, POST ":compute"/
+  // GET ""(목록)/GET "/{statement_id}"/POST "/{statement_id}:correct" 4라우트 전부
+  // `-> ApiResponse[...]`+`return ok(...)`라 envelope=true. contracts/openapi/v1.json에
+  // 4경로 전부 실재함을 node로 직접 확인(paths 키 대조) — STALE_SNAPSHOT_WHITELIST
+  // 대상 아님. v1Path는 mandates.*/connections.*와 동일 사유(mount_v1 PLT-16 미도달)로
+  // null. §9 PLT-15 금전 라우트 표(문서 438행)에 performance-statements는 없어
+  // idempotencyRequired=false(기본값) 그대로 둔다. apiPaths.openapi.test.ts의
+  // UNREGISTERED_ROUTE_WHITELIST에 있던 4개 항목("실적 명세서 화면이 없다" 등)을
+  // 여기 등록으로 제거한다 — 이 리프는 경로·타입 등록만 하고(decision: 화면은 후속
+  // 리프), 4라우트가 화면 없이 뜨는 문제는 그 후속 리프 소관이다.
+  "performanceStatements.compute": route("/v1/foundation/performance-statements:compute", true, null, true),
+  "performanceStatements.list": route("/v1/foundation/performance-statements", true, null, true),
+  "performanceStatements.get": route("/v1/foundation/performance-statements/:statementId", true, null, true),
+  "performanceStatements.correct": route(
+    "/v1/foundation/performance-statements/:statementId:correct",
+    true,
+    null,
+    true,
+  ),
 };

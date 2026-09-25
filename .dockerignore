@@ -1,0 +1,30 @@
+# H-6(ADR-2026-09-09-B) -- 빌드 컨텍스트에서 시크릿·개발 산출물을 제외한다.
+# 이미지에 .env가 절대 포함되지 않게 하는 것이 DoD 항목 -- 최우선으로 명시.
+.env
+.env.*
+!.env.example
+
+/.git
+/.github
+/.venv
+node_modules
+**/node_modules
+__pycache__
+**/__pycache__
+*.pyc
+/.mypy_cache
+/.ruff_cache
+/.pytest_cache
+/.coverage
+/coverage.xml
+*.egg-info
+
+/docs
+/tests
+frontend/e2e
+frontend/**/coverage
+frontend/**/dist
+/runtime
+
+*.md
+!README.md

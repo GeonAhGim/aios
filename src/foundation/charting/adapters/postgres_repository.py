@@ -4,6 +4,7 @@ Spec: 105번(동시성 표준). `create_layout()`이 두 테이블을 하나의 
 묶는 유일한 쓰기 경로다 — 그 결과 `put_drawings()`는 `chart_drawing_set`
 행이 항상 존재한다고 가정하고 조건부 UPDATE 하나만 한다(INSERT-or-UPDATE
 분기의 first-write 경합을 설계로 없앤다, ports/repository.py 참조)."""
+
 from __future__ import annotations
 
 import json
@@ -102,6 +103,7 @@ class PostgresChartingRepository:
         self,
         layout_id: UUID,
         *,
+        tenant_id: UUID,
         expected_revision: int,
         name: str | None,
         layout_state: dict[str, Any] | None,
@@ -109,8 +111,16 @@ class PostgresChartingRepository:
         # `conditional_write.conditional_update()`를 쓰지 않는다 — name/
         # layout_state가 각각 선택적 부분 갱신이고 jsonb 캐스트도 필요해
         # 공용 헬퍼의 고정 `set_values` 바인딩 방식으로는 표현할 수 없다.
+        # `tenant_id` is stated explicitly in the WHERE clause -- even though
+        # the caller (application/update_layout.py) already checked ownership
+        # via `load_owned_layout()`, the same principle as the connections
+        # module's `transition_connection_state()` applies: if that check is
+        # ever bypassed or breaks, this fails closed here with 0 rows (no
+        # RETURNING) -- it doesn't rely solely on RLS/`tenant_transaction()`
+        # (RLS blocks nothing once the production DSN is a superuser, same
+        # reason as the task-1718 note).
         assignments = ["revision = revision + 1", "updated_at = now()"]
-        params: list[Any] = [layout_id, expected_revision]
+        params: list[Any] = [layout_id, expected_revision, tenant_id]
         if name is not None:
             params.append(name)
             assignments.append(f"name = ${len(params)}")
@@ -120,7 +130,7 @@ class PostgresChartingRepository:
         async with self._pool.acquire() as conn:
             row = await conn.fetchrow(
                 "UPDATE chart_layout SET " + ", ".join(assignments) + " "  # noqa: S608
-                "WHERE id = $1 AND revision = $2 RETURNING *",
+                "WHERE id = $1 AND revision = $2 AND tenant_id = $3 RETURNING *",
                 *params,
             )
         if row is None:
@@ -130,9 +140,14 @@ class PostgresChartingRepository:
             )
         return _row_to_layout(row)
 
-    async def delete_layout(self, layout_id: UUID) -> None:
+    async def delete_layout(self, layout_id: UUID, *, tenant_id: UUID) -> None:
+        # Same reason as update_layout() -- tenant_id is stated explicitly in the WHERE clause.
         async with self._pool.acquire() as conn:
-            await conn.execute("DELETE FROM chart_layout WHERE id = $1", layout_id)
+            await conn.execute(
+                "DELETE FROM chart_layout WHERE id = $1 AND tenant_id = $2",
+                layout_id,
+                tenant_id,
+            )
 
     async def get_drawing_set(self, layout_id: UUID) -> ChartDrawingSet | None:
         async with self._pool.acquire() as conn:
@@ -205,19 +220,19 @@ class PostgresChartingRepository:
             )
         return _row_to_indicator_template(row) if row is not None else None
 
-    async def list_indicator_templates(
-        self, tenant_id: UUID
-    ) -> tuple[ChartIndicatorTemplate, ...]:
+    async def list_indicator_templates(self, tenant_id: UUID) -> tuple[ChartIndicatorTemplate, ...]:
         async with self._pool.acquire() as conn:
             rows = await conn.fetch(
-                "SELECT * FROM chart_indicator_template WHERE tenant_id = $1 "
-                "ORDER BY created_at",
+                "SELECT * FROM chart_indicator_template WHERE tenant_id = $1 ORDER BY created_at",
                 tenant_id,
             )
         return tuple(_row_to_indicator_template(row) for row in rows)
 
-    async def delete_indicator_template(self, template_id: UUID) -> None:
+    async def delete_indicator_template(self, template_id: UUID, *, tenant_id: UUID) -> None:
+        # Same reason as delete_layout() -- tenant_id is stated explicitly in the WHERE clause.
         async with self._pool.acquire() as conn:
             await conn.execute(
-                "DELETE FROM chart_indicator_template WHERE id = $1", template_id
+                "DELETE FROM chart_indicator_template WHERE id = $1 AND tenant_id = $2",
+                template_id,
+                tenant_id,
             )

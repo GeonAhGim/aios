@@ -10,6 +10,7 @@ import { Alert, Card, EmptyState, LoadingState } from "@aios/ui-web";
 import type { UseQueryResult } from "@tanstack/react-query";
 import { ErrorMessage } from "./ErrorMessage";
 import { NotFoundState } from "./NotFoundState";
+import { useTranslation } from "react-i18next";
 
 // InstrumentsPage(task-824)의 행 클릭 상세 패널. "생애주기 전이 이력"은 서버에
 // 별도 이벤트 로그 테이블이 없다(LA-10 마이그레이션 목록에 md_instrument/
@@ -57,6 +58,7 @@ interface InstrumentDetailPanelProps {
 }
 
 export function InstrumentDetailPanel({ instrument, aliasQuery }: InstrumentDetailPanelProps) {
+  const { t } = useTranslation();
   const validAliases = (aliasQuery.data ?? []).filter((a) => a.kind === "ok").map((a) => a.value);
   const timeline = buildLifecycleTimeline(instrument, validAliases);
 
@@ -66,25 +68,25 @@ export function InstrumentDetailPanel({ instrument, aliasQuery }: InstrumentDeta
         {instrument.canonical_symbol} ({instrument.venue_symbol}) · {instrument.venue}
       </p>
       <p className="mt-1 text-xs text-fg-muted">
-        틱 {instrument.tick_size} · 랏 {instrument.lot_size} · 상장 {instrument.listed_at}
-        {instrument.delisted_at && <> · 상장폐지 {instrument.delisted_at}</>}
+        {t("legacy.instrumentDetailPanel.t1", { ticksize: instrument.tick_size, lotsize: instrument.lot_size, listedat: instrument.listed_at })}
+        {instrument.delisted_at && <> {t("legacy.instrumentDetailPanel.t2", { delistedat: instrument.delisted_at })}</>}
       </p>
 
       <div className="mt-4">
-        <p className="text-sm font-medium text-fg">별칭</p>
+        <p className="text-sm font-medium text-fg">{t("legacy.instrumentDetailPanel.t3")}</p>
         {aliasQuery.isLoading ? (
           <LoadingState />
         ) : aliasQuery.isError ? (
           isResourceNotFound(aliasQuery.error) ? (
             <NotFoundState
-              title="별칭 정보를 찾을 수 없습니다"
+              title={t("legacy.instrumentDetailPanel.title4")}
               description="삭제되었거나 존재하지 않는 심볼입니다."
             />
           ) : (
             <ErrorBanner error={aliasQuery.error} onRetry={() => aliasQuery.refetch()} />
           )
         ) : (aliasQuery.data ?? []).length === 0 ? (
-          <EmptyState>등록된 별칭이 없습니다.</EmptyState>
+          <EmptyState>{t("legacy.instrumentDetailPanel.t5")}</EmptyState>
         ) : (
           <ul className="mt-1 space-y-1" data-testid="alias-list">
             {(aliasQuery.data ?? []).map((parsed, index) =>
@@ -94,7 +96,7 @@ export function InstrumentDetailPanel({ instrument, aliasQuery }: InstrumentDeta
                 </li>
               ) : (
                 <li key={`invalid-${index}`}>
-                  <Alert tone="danger">별칭 정보를 해석할 수 없습니다.</Alert>
+                  <Alert tone="danger">{t("legacy.instrumentDetailPanel.t6")}</Alert>
                 </li>
               ),
             )}
@@ -104,7 +106,7 @@ export function InstrumentDetailPanel({ instrument, aliasQuery }: InstrumentDeta
 
       {!aliasQuery.isError && (
         <div className="mt-4">
-          <p className="text-sm font-medium text-fg">생애주기 전이 이력</p>
+          <p className="text-sm font-medium text-fg">{t("legacy.instrumentDetailPanel.t7")}</p>
           <ul className="mt-1 space-y-1" data-testid="lifecycle-timeline">
             {timeline.map((entry, index) => (
               <li key={index} className="text-xs text-fg-muted">

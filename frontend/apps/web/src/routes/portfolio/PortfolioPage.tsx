@@ -21,6 +21,7 @@ import { ForbiddenNotice } from "../../components/ForbiddenNotice";
 import { DuplicateSubmitError, useIdempotentSubmit } from "../../hooks/useIdempotentSubmit";
 import { PortfolioPositionsLive } from "./PortfolioPositionsLive";
 import type { PositionsClientLike } from "../../hooks/usePositions";
+import { useTranslation } from "react-i18next";
 
 // spec §3.3 에러 taxonomy: 재조정 실패는 err.message를 직접 노출하지 않고
 // routeApiError(task-483)로 판정해 400/403/그 외를 각각 BadRequestNotice/
@@ -47,6 +48,7 @@ export interface PortfolioPageProps {
 }
 
 export function PortfolioPage({ positionsClient, now }: PortfolioPageProps = {}) {
+  const { t } = useTranslation();
   const { data: portfolio, isLoading, isError, error: portfolioError, refetch } = usePortfolio();
   const rebalance = useRebalancePortfolio();
   const { submit } = useIdempotentSubmit("portfolio.rebalance");
@@ -75,7 +77,7 @@ export function PortfolioPage({ positionsClient, now }: PortfolioPageProps = {})
       setDrafts({});
     } catch (err) {
       if (err instanceof DuplicateSubmitError) return;
-      setError(err instanceof ApiError ? err : new Error("재조정에 실패했습니다."));
+      setError(err instanceof ApiError ? err : new Error(t("legacy.portfolioPage.t14")));
     }
   }
 
@@ -83,7 +85,7 @@ export function PortfolioPage({ positionsClient, now }: PortfolioPageProps = {})
     <AppShell>
       <div className="space-y-6">
         <PageHeader
-          title="포트폴리오"
+          title={t("legacy.portfolioPage.title1")}
           // GET /portfolio는 아직 ApiResponse 봉투 미적용(apiPaths.ts "portfolio.get" ·
           // PLT-19 예정)이라 meta.as_of가 없다 — dataUpdatedAt(react-query가 응답을 받은
           // 시각)을 as_of 대신 쓰면 항상 fresh로 보여 stale 배지가 절대 뜨지 않는다
@@ -107,17 +109,17 @@ export function PortfolioPage({ positionsClient, now }: PortfolioPageProps = {})
         ) : portfolio ? (
           <>
             <div className="grid grid-cols-3 gap-4">
-              <Stat label="총 포트폴리오 가치" value={portfolio.totalPortfolioValue} />
+              <Stat label={t("legacy.portfolioPage.label2")} value={portfolio.totalPortfolioValue} />
               <Stat
-                label="미배분 현금"
+                label={t("legacy.portfolioPage.label3")}
                 value={`${portfolio.unallocatedCash} (${portfolio.unallocatedCashWeightPct}%)`}
               />
-              <Stat label="배분된 실행 수" value={portfolio.allocations.length} />
+              <Stat label={t("legacy.portfolioPage.label4")} value={portfolio.allocations.length} />
             </div>
 
             {portfolio.allocations.length > 0 && (
               <Card>
-                <CardTitle>자산 배분</CardTitle>
+                <CardTitle>{t("legacy.portfolioPage.t5")}</CardTitle>
                 <AllocationBarChart
                   allocations={portfolio.allocations.map((a) => ({
                     name: a.strategyId,
@@ -129,17 +131,17 @@ export function PortfolioPage({ positionsClient, now }: PortfolioPageProps = {})
             )}
 
             <Card>
-              <CardTitle>배분 내역 · 재조정</CardTitle>
+              <CardTitle>{t("legacy.portfolioPage.t6")}</CardTitle>
               {portfolio.allocations.length > 0 ? (
                 <div className="space-y-3">
                   <div className="overflow-x-auto">
                     <table className="w-full text-sm">
                       <thead className="text-left text-fg-muted">
                         <tr>
-                          <th className="pb-2 font-normal">전략</th>
-                          <th className="pb-2 font-normal">비중</th>
-                          <th className="pb-2 font-normal">손익</th>
-                          <th className="pb-2 font-normal">새 배분 자본</th>
+                          <th className="pb-2 font-normal">{t("legacy.portfolioPage.t7")}</th>
+                          <th className="pb-2 font-normal">{t("legacy.portfolioPage.t8")}</th>
+                          <th className="pb-2 font-normal">{t("legacy.portfolioPage.t9")}</th>
+                          <th className="pb-2 font-normal">{t("legacy.portfolioPage.t10")}</th>
                         </tr>
                       </thead>
                       <tbody className="tabular text-fg">
@@ -166,16 +168,14 @@ export function PortfolioPage({ positionsClient, now }: PortfolioPageProps = {})
                   </div>
                   {error !== null && <RebalanceError error={error} />}
                   <Button type="button" onClick={handleRebalance} loading={rebalance.isPending}>
-                    재조정 적용
-                  </Button>
+                    {t("legacy.portfolioPage.t11")}</Button>
                   {rebalance.data && (
                     <p className="text-sm text-fg-muted">
-                      적용됨 {rebalance.data.adjusted}건, 승인대기 {rebalance.data.pendingApproval}건
-                    </p>
+                      {t("legacy.portfolioPage.t12", { adjusted: rebalance.data.adjusted, pendingApproval: rebalance.data.pendingApproval })}</p>
                   )}
                 </div>
               ) : (
-                <EmptyState>배분된 실행이 없습니다.</EmptyState>
+                <EmptyState>{t("legacy.portfolioPage.t13")}</EmptyState>
               )}
             </Card>
 

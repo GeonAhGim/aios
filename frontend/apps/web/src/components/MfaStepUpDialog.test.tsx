@@ -1,3 +1,4 @@
+import "../i18n";
 import "@testing-library/jest-dom/vitest";
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -108,5 +109,23 @@ describe("MfaStepUpDialog", () => {
     unmount();
 
     await expect(resultPromise).resolves.toBe(false);
+  });
+
+  // UX-4 task-2688: role="dialog" + Esc 닫기 baseline 증빙(AlertFromChart.test.tsx와
+  // 같은 계약, @aios/ui-web의 useDialogFocusTrap 공용 훅으로 배선됐다).
+  it("dialog 역할과 제목에 연결된 aria-labelledby를 가지며, Esc를 누르면 취소와 동일하게 false로 resolve한다", async () => {
+    render(<MfaStepUpDialog />);
+
+    const resultPromise = openDialog();
+    const dialog = screen.getByRole("dialog");
+    expect(dialog).toHaveAttribute("aria-modal", "true");
+    const labelledBy = dialog.getAttribute("aria-labelledby");
+    expect(labelledBy).toBeTruthy();
+    expect(document.getElementById(labelledBy!)).toHaveTextContent("추가 인증이 필요합니다");
+
+    fireEvent.keyDown(document, { key: "Escape" });
+
+    await expect(resultPromise).resolves.toBe(false);
+    expect(mutateAsyncMock).not.toHaveBeenCalled();
   });
 });

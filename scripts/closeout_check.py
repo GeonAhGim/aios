@@ -1,0 +1,612 @@
+"""MVP-1 종료조건 기계 검사 — ADR-2026-09-09-D Decision 3.
+
+ADR-2026-09-04-D의 T3 종료 기준 1~10, ADR-2026-09-09-B로 추가된 11항
+(H-1~H-13 전부 CI 증빙으로 닫힘), ADR-2026-09-10-C Decision 5로 추가된 12항
+("현재 main HEAD가 quality.yml에서 독립적으로 녹색" — 과거 어느 커밋이
+녹색이었는지와는 구분), ADR-2026-09-24-A Decision 4로 추가된 13항
+(J1~J3 Playwright 사용자 여정 테스트 존재 + test.fixme 0건 + --ci-report의
+frontend 단계 녹색)을 각각 검사 함수로 판정해 PASS/FAIL과 증빙 경로를
+마크다운 표로 출력한다.
+
+전부 저장소 안 정적 증거(파일 존재·grep·순수 모듈 import)만 본다 —
+`check_release_gate.py`·`check_audit_regressions.py`와 같은 방식으로
+DB·네트워크 접근이 없어 CI worktree에서도 그대로 돈다. "최근 CI 통과"·
+"Guard veto 0" 같이 저장소 밖 상태에 의존하는 항목은 이 스크립트 혼자서는
+완전히 판정할 수 없다 — `--ci-report`(`pm/local_ci.py`가 쓰는
+`pm/ci/latest.json`, top-level `"ok": bool`)/`--guard-report`
+(`meta/guards/run_guards.py --json out.json`이 쓰는 `"vetoed": bool`) 경로를
+넘기면 그 값을 쓰고, 안 넘기면 "미검증(외부 리포트 미지정)"으로 FAIL
+처리한다(하나라도 적색이면 종결 불가라는 ADR-D 원칙 — 모른다=통과 아님).
+
+11번(하드닝 H-1~H-13)·12번(HEAD Actions 녹색)·마크다운 렌더링은
+`scripts/closeout/` 패키지로 분할됐다(task-6475, ADR-2026-09-10-C §7 LOC
+관측 임계 -- `scripts/consistency/`와 같은 전례). 이 파일은 1~10번 종료
+기준과 CLI 진입점만 담당한다.
+
+사용: `python scripts/closeout_check.py [--ci-report P] [--guard-report P] [--write PATH]
+[--live-head-check] [--trigger-head-recheck]`.
+`--write`는 전부 PASS일 때만 그 경로에 `MVP-1_CLOSEOUT.md`류 문서를 쓴다
+(ADR-D: "전부 녹색이면 문서 생성", 하나라도 적색이면 쓰지 않는다).
+종료코드: 0=전부 PASS, 1=하나 이상 FAIL.
+"""
+
+from __future__ import annotations
+
+# ruff: noqa: E402 -- sys.path 보정(직접 실행 시 scripts/closeout.* 절대
+# 임포트를 가능하게 함)이 다른 임포트보다 먼저 실행돼야 한다.
+import argparse
+import importlib
+import json
+import re
+import subprocess
+import sys
+from collections.abc import Callable
+from pathlib import Path
+
+_REPO_ROOT = Path(__file__).resolve().parents[1]
+if str(_REPO_ROOT) not in sys.path:
+    # `python scripts/closeout_check.py` 직접 실행 시 sys.path[0]은 scripts/가
+    # 된다 -- `scripts.closeout.*`를 절대 임포트로 쓰려면 저장소 루트가
+    # sys.path에 있어야 한다.
+    sys.path.insert(0, str(_REPO_ROOT))
+
+from scripts.closeout.common import (
+    CheckResult,
+    bench_passed,
+    grep,
+    has_test_def,
+    present_missing,
+    read_text,
+)
+from scripts.closeout.hardening import (
+    HardeningItem,
+    _h1_mandate_required,
+    _h2_cm_reporting_and_api,
+    _h3_nh_no_notimplemented,
+    _h4_backup_scripts,
+    _h5_supply_chain_gate,
+    _h6_dockerfiles,
+    _h7_e2e_suites,
+    _h8_property_tests,
+    _h9_dsr_pbo_regression,
+    _h10_alert_routing,
+    _h11_mandate_cache_invalidation,
+    _h12_legacy_wallet_bridge_sentinel,
+    _h13_env_config,
+    check_11_hardening,
+)
+from scripts.closeout.head_actions import (
+    check_12_head_actions_green,
+    default_gh_run,
+    trigger_head_workflow_dispatch,
+    wait_for_head_green,
+)
+from scripts.closeout.report import render_markdown, write_closeout_doc
+
+ROOT = _REPO_ROOT
+
+UNVERIFIED = "미검증(외부 리포트 미지정)"
+
+# 1~10번 종료 기준 함수는 scripts/closeout/common.py의 순수 헬퍼를 그대로 쓴다.
+_bench_passed = bench_passed
+_grep = grep
+_has_test_def = has_test_def
+_present_missing = present_missing
+_read = read_text
+_default_gh_run = default_gh_run
+
+__all__ = [
+    "CheckResult",
+    "UNVERIFIED",
+    "HardeningItem",
+    "check_01_parity",
+    "check_02_safety_wiring",
+    "check_03_validation_gates",
+    "check_04_strategy_language",
+    "check_05_indicators",
+    "check_06_backtest_realism",
+    "check_07_execution",
+    "check_08_data",
+    "check_09_chart",
+    "check_10_ops",
+    "check_11_hardening",
+    "check_12_head_actions_green",
+    "check_13_user_journeys",
+    "JOURNEY_SPECS",
+    "trigger_head_workflow_dispatch",
+    "wait_for_head_green",
+    "render_markdown",
+    "write_closeout_doc",
+    "run_all",
+    "main",
+    "_load_bool_report",
+    "_check_invariants",
+    "_check_red_team_open",
+    "_h1_mandate_required",
+    "_h2_cm_reporting_and_api",
+    "_h3_nh_no_notimplemented",
+    "_h4_backup_scripts",
+    "_h5_supply_chain_gate",
+    "_h6_dockerfiles",
+    "_h7_e2e_suites",
+    "_h8_property_tests",
+    "_h9_dsr_pbo_regression",
+    "_h10_alert_routing",
+    "_h11_mandate_cache_invalidation",
+    "_h12_legacy_wallet_bridge_sentinel",
+    "_h13_env_config",
+]
+
+
+# --------------------------------------------------------------------------- 1~10: T3 종료 기준
+
+
+def check_01_parity(repo_root: Path) -> CheckResult:
+    """기준1 — 패리티(I-05): 백테스트=PAPER 동일 신호·체결 테스트 존재."""
+    paths = (
+        "tests/integration/backtest/test_parity_harness.py",
+        "tests/integration/foundation/backtest/test_vector_event_parity.py",
+    )
+    ok = [p for p in paths if _has_test_def(repo_root, p)]
+    missing = [p for p in paths if p not in ok]
+    passed = not missing
+    detail = (
+        '패리티 테스트 파일 존재(정적 확인). "최근 CI 통과"는 --ci-report로만 판정한다.'
+        if passed
+        else f"패리티 테스트 파일 누락: {', '.join(missing)}"
+    )
+    return CheckResult("01_parity", "패리티(I-05)", passed, tuple(ok + missing), detail)
+
+
+def check_02_safety_wiring(repo_root: Path) -> CheckResult:
+    """기준2 — kill switch/DataDistrust 적대 테스트 + 게이트 인자 Optional 0건(I-01)."""
+    kill_switch = "tests/adversarial/order_service/test_kill_switch_blocks_execution_loop.py"
+    kill_switch_ok = _has_test_def(repo_root, kill_switch)
+    distrust_hits = _grep(
+        repo_root, ("tests/adversarial", "tests/foundation/adversarial"), r"DataDistrust|DEGRADED"
+    )
+    optional_gate_hits = _grep(
+        repo_root,
+        ("src/services/order_service", "src/services/oms", "src/services/execution_loop"),
+        r"(pre_submit_gate|pre_send_gate|pre_start_gate)\s*:\s*[^=\n]*\|\s*None",
+    )
+    passed = kill_switch_ok and bool(distrust_hits) and not optional_gate_hits
+    evidence = [kill_switch, *distrust_hits, *(f"OPTIONAL:{h}" for h in optional_gate_hits)]
+    parts = []
+    if not kill_switch_ok:
+        parts.append("kill switch 적대 테스트 없음")
+    if not distrust_hits:
+        parts.append("DataDistrust/DEGRADED 적대 테스트 없음")
+    if optional_gate_hits:
+        parts.append(f"안전 게이트 인자 Optional {len(optional_gate_hits)}건(I-01 위반)")
+    detail = "안전 배선 증명 통과" if passed else "; ".join(parts)
+    return CheckResult("02_safety_wiring", "안전 배선 증명", passed, tuple(evidence), detail)
+
+
+def check_03_validation_gates(repo_root: Path) -> CheckResult:
+    """기준3 — 임계 미달 전략이 실제 FAIL(I-07) + DSR/PBO가 승인 경로에서 조회됨."""
+    hard_fail_test = _has_test_def(repo_root, "tests/foundation/unit/validation/test_rules.py")
+    dsr_pbo_wired = _grep(
+        repo_root,
+        ("src/foundation/validation", "src/api"),
+        r"from\s+src\.foundation\.backtest\.domain\.overfitting\s+import|overfitting\.(deflated_sharpe|pbo_cscv)",
+    )
+    passed = hard_fail_test and bool(dsr_pbo_wired)
+    evidence = ["tests/foundation/unit/validation/test_rules.py", *dsr_pbo_wired]
+    detail = (
+        "검증 게이트 실효 확인"
+        if passed
+        else "DSR/PBO(overfitting.py)가 마켓 승인 경로(validation/api)에서 아직 조회되지 않는다"
+    )
+    return CheckResult("03_validation_gates", "검증 게이트 실효", passed, tuple(evidence), detail)
+
+
+def check_04_strategy_language(repo_root: Path) -> CheckResult:
+    """기준4 — DSL property 테스트 + cond-v2 변환 동일성 + 컴파일 ≤300ms 벤치 결과."""
+    property_test = _has_test_def(repo_root, "tests/unit/core/script/test_interpreter_property.py")
+    cond_v2_hits = _grep(repo_root, ("tests/unit/core/script",), r"cond.?v2", re.I)
+    bench_rel = "docs/perf/dsl_compile_bench.json"
+    bench_present, bench_missing = _present_missing(repo_root, bench_rel)
+    passed_bench = _bench_passed(repo_root, bench_rel)
+    passed = property_test and bool(cond_v2_hits) and not bench_missing and bool(passed_bench)
+    evidence = [
+        "tests/unit/core/script/test_interpreter_property.py",
+        *cond_v2_hits,
+        *bench_present,
+        *bench_missing,
+        f"bench_passed={passed_bench}",
+    ]
+    parts = []
+    if not property_test:
+        parts.append("DSL property 테스트 없음")
+    if not cond_v2_hits:
+        parts.append("cond-v2 변환 동일성 테스트 없음")
+    if bench_missing:
+        parts.append(f"컴파일 ≤300ms 벤치 결과 파일 없음: {bench_missing[0]}")
+    elif not passed_bench:
+        parts.append(f"컴파일 ≤300ms 벤치 결과 passed=false: {bench_rel}")
+    detail = "전략 언어 기준 통과" if passed else "; ".join(parts)
+    return CheckResult("04_strategy_language", "전략 언어(DSL)", passed, tuple(evidence), detail)
+
+
+def _default_indicator_count(repo_root: Path) -> int | None:
+    """`src.core.indicators.specs_talib.TALIB_SPECS` 개수(순수 모듈, I/O 없음).
+
+    스크립트가 어디서 실행되든 `src` 패키지를 찾도록 repo_root를 sys.path
+    맨 앞에 넣는다 — `python scripts/closeout_check.py`처럼 직접 실행하면
+    sys.path[0]이 scripts/가 되어 `from src...`가 실패하기 때문이다.
+    """
+    if str(repo_root) not in sys.path:
+        sys.path.insert(0, str(repo_root))
+    sys.modules.pop("src.core.indicators.specs_talib", None)
+    try:
+        module = importlib.import_module("src.core.indicators.specs_talib")
+    except Exception:  # noqa: BLE001 - import 실패 자체가 이 검사의 FAIL 신호다
+        return None
+    count = getattr(module, "TALIB_SPECS", None)
+    return len(count) if count is not None else None
+
+
+def check_05_indicators(
+    repo_root: Path,
+    *,
+    count_indicators: Callable[[Path], int | None] = _default_indicator_count,
+) -> CheckResult:
+    """기준5 — 지표 ≥100종 + 참조 벡터/증분=일괄 동일성 테스트."""
+    count = count_indicators(repo_root)
+    ref_test = _has_test_def(repo_root, "tests/unit/core/indicators/test_engine_equivalence.py")
+    passed = count is not None and count >= 100 and ref_test
+    evidence = [f"registry_count={count}", "tests/unit/core/indicators/test_engine_equivalence.py"]
+    if count is None:
+        detail = "지표 레지스트리 import 실패"
+    elif count < 100:
+        detail = f"지표 {count}종 < 100"
+    elif not ref_test:
+        detail = "참조 벡터/증분=일괄 동일성 테스트 없음"
+    else:
+        detail = f"지표 {count}종, 참조 벡터 테스트 확인"
+    return CheckResult("05_indicators", "지표 ≥100종", passed, tuple(evidence), detail)
+
+
+def check_06_backtest_realism(repo_root: Path) -> CheckResult:
+    """기준6 — 슬리피지·수수료·지연·부분체결·주문유형·펀딩 계약 테스트 + ≤5s 즉시 백테스트 벤치."""
+    contract_hits = _grep(
+        repo_root,
+        (
+            "tests/foundation/unit/backtest",
+            "tests/foundation/integration/backtest",
+            "tests/integration/backtest",
+        ),
+        r"slippage|fee_tier|funding|partial_fill|latency",
+        re.I,
+    )
+    bench_rel = "docs/perf/backtest_instant_bench.json"
+    bench_present, bench_missing = _present_missing(repo_root, bench_rel)
+    passed_bench = _bench_passed(repo_root, bench_rel)
+    passed = bool(contract_hits) and not bench_missing and bool(passed_bench)
+    evidence = [*contract_hits[:10], *bench_present, *bench_missing, f"bench_passed={passed_bench}"]
+    parts = []
+    if not contract_hits:
+        parts.append("체결 현실성 계약 테스트 없음")
+    if bench_missing:
+        parts.append(f"즉시 백테스트 ≤5s 벤치 결과 파일 없음: {bench_missing[0]}")
+    elif not passed_bench:
+        parts.append(f"즉시 백테스트 ≤5s 벤치 결과 passed=false: {bench_rel}")
+    detail = "백테스트 현실성 기준 통과" if passed else "; ".join(parts)
+    return CheckResult("06_backtest_realism", "백테스트 현실성", passed, tuple(evidence), detail)
+
+
+def check_07_execution(repo_root: Path) -> CheckResult:
+    """기준7 — OMS 상태기계 실배선 통합테스트 + pre-trade 지연 CI 단언(R-57)."""
+    wiring_hits = _grep(
+        repo_root,
+        ("tests/integration/oms", "tests/adversarial/oms"),
+        r"partial.?fill|cancel|amend|recover|reconcil",
+        re.I,
+    )
+    latency_hits = _grep(repo_root, ("tests",), r"@pytest\.mark\.perf")
+    pretrade_latency_hits = [
+        h for h in latency_hits if "pre_trade" in h.lower() or "pre_submit" in h.lower()
+    ]
+    passed = bool(wiring_hits) and bool(pretrade_latency_hits)
+    evidence = [*wiring_hits[:10], *pretrade_latency_hits[:5]]
+    parts = []
+    if not wiring_hits:
+        parts.append("OMS 부분체결/취소/정정/복구/대사 통합테스트 없음")
+    if not pretrade_latency_hits:
+        parts.append("pre-trade 지연 perf 단언(R-57) 없음")
+    detail = "실행 기준 통과" if passed else "; ".join(parts)
+    return CheckResult("07_execution", "실행(OMS)", passed, tuple(evidence), detail)
+
+
+def check_08_data(repo_root: Path) -> CheckResult:
+    """기준8 — instrument_id p95 200ms 벤치 + 커버리지 밖 fail-closed + 거래소 2곳 SPI 계약."""
+    bench_rel = "docs/perf/instrument_lookup_bench.json"
+    bench_present, bench_missing = _present_missing(repo_root, bench_rel)
+    passed_bench = _bench_passed(repo_root, bench_rel)
+    coverage_hits = _grep(
+        repo_root, ("tests",), r"coverage.*(fail.?closed|deny)|out.?of.?coverage", re.I
+    )
+    spi_dirs = ("tests/exchanges", "tests/unit/exchanges", "tests/integration/exchanges")
+    spi_hits = _grep(repo_root, spi_dirs, r"def test_.*(contract|spi)", re.I)
+    passed = (
+        not bench_missing and bool(passed_bench) and bool(coverage_hits) and len(spi_hits) > 0
+    )
+    evidence = [
+        *bench_present,
+        *bench_missing,
+        f"bench_passed={passed_bench}",
+        *coverage_hits[:5],
+        *spi_hits[:10],
+    ]
+    parts = []
+    if bench_missing:
+        parts.append(f"instrument_id p95 200ms 벤치 결과 파일 없음: {bench_missing[0]}")
+    elif not passed_bench:
+        parts.append(f"instrument_id p95 200ms 벤치 결과 passed=false: {bench_rel}")
+    if not coverage_hits:
+        parts.append("커버리지 밖 요청 fail-closed 테스트 없음")
+    if not spi_hits:
+        parts.append("거래소 SPI 계약 테스트 없음")
+    detail = "데이터 기준 통과" if passed else "; ".join(parts)
+    return CheckResult("08_data", "데이터", passed, tuple(evidence), detail)
+
+
+def check_09_chart(repo_root: Path) -> CheckResult:
+    """기준9 — 캔들·오버레이·드로잉 저장/복원(교차 테넌트 404) + 빌드/vitest 설정."""
+    cross_tenant_hits = _grep(repo_root, ("tests",), r"chart.*tenant|drawing.*tenant", re.I)
+    frontend_dir = repo_root / "frontend"
+    vitest_present, vitest_missing = _present_missing(
+        repo_root, "frontend/vitest.config.ts", "frontend/package.json"
+    )
+    passed = bool(cross_tenant_hits) and not vitest_missing and frontend_dir.is_dir()
+    evidence = [*cross_tenant_hits[:5], *vitest_present, *vitest_missing]
+    parts = []
+    if not cross_tenant_hits:
+        parts.append("차트/드로잉 교차 테넌트 404 테스트 없음")
+    if vitest_missing:
+        parts.append(f"vitest/frontend 설정 없음: {', '.join(vitest_missing)}")
+    detail = "차트 기준 통과(정적)" if passed else "; ".join(parts)
+    return CheckResult("09_chart", "차트", passed, tuple(evidence), detail)
+
+
+def check_10_ops(
+    repo_root: Path, *, ci_report: Path | None, guard_report: Path | None
+) -> CheckResult:
+    """기준10 — 로컬 CI 녹색 + Guard veto 0 + INVARIANTS 위반 0 + RED_TEAM P0 미해결 0.
+
+    ci_report 키(`"ok"`)·guard_report 키(`"vetoed"`)는 실제 산출 스크립트의
+    스키마를 그대로 따른다 — `pm/local_ci.py`(top-level `"ok": bool`)와
+    `meta/guards/run_guards.py --json out.json`(`Report.to_json()`의
+    `"vetoed": bool`). 이전에는 `{"passed": bool}`/`{"veto_count": int}`를
+    기대했는데, 두 산출 스크립트 어디에도 그런 키를 쓰는 곳이 없어 리포트를
+    넘겨도 항상 FAIL로 오판정했다(task-6497 근본 원인).
+    """
+    ci_ok, ci_note = _load_bool_report(ci_report, "ok")
+    guard_ok, guard_note = _load_bool_report(guard_report, "vetoed", invert=True)
+    invariants_ok, invariants_note = _check_invariants(repo_root)
+    red_team_ok, red_team_note = _check_red_team_open(repo_root)
+
+    passed = ci_ok and guard_ok and invariants_ok and red_team_ok
+    evidence = [ci_note, guard_note, invariants_note, red_team_note]
+    detail = "운영 기준 통과" if passed else "; ".join(e for e in evidence if "OK" not in e[:2])
+    return CheckResult("10_ops", "운영", passed, tuple(evidence), detail)
+
+
+def _load_bool_report(
+    path: Path | None, key: str, *, expect_zero: bool = False, invert: bool = False
+) -> tuple[bool, str]:
+    """`key`가 가리키는 값을 읽어 PASS 여부를 판정한다.
+
+    `expect_zero`: 값이 정수 0이어야 PASS(레거시 카운터 스키마용).
+    `invert`: 값이 falsy여야 PASS(예: `"vetoed": false` — veto 없음이 통과).
+    기본은 값이 truthy여야 PASS.
+    """
+    if path is None:
+        return False, UNVERIFIED
+    if not path.is_file():
+        return False, f"리포트 없음: {path}"
+    try:
+        data = json.loads(_read(path))
+    except json.JSONDecodeError:
+        return False, f"리포트 JSON 파싱 실패: {path}"
+    value = data.get(key)
+    if expect_zero:
+        ok = isinstance(value, int) and value == 0
+        return ok, f"OK {key}=0" if ok else f"{key}={value!r} (0이어야 함): {path}"
+    if invert:
+        ok = not bool(value)
+        return ok, f"OK {key}=False" if ok else f"{key}={value!r} (False여야 함): {path}"
+    ok = bool(value)
+    return ok, f"OK {key}=True" if ok else f"{key}={value!r}: {path}"
+
+
+def _check_invariants(repo_root: Path) -> tuple[bool, str]:
+    script = repo_root / "scripts" / "check_audit_regressions.py"
+    if not script.is_file():
+        return False, "scripts/check_audit_regressions.py 없음"
+    baseline = repo_root / "audit-baseline.json"
+    try:
+        open_findings = json.loads(_read(baseline)).get("open", {})
+    except json.JSONDecodeError:
+        open_findings = {}
+    result = subprocess.run(  # noqa: S603 - 저장소 내 고정 경로 스크립트, 사용자 입력 없음
+        [sys.executable, str(script)],
+        cwd=repo_root,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        timeout=120,
+    )
+    ok = result.returncode == 0 and not open_findings
+    if not ok and result.returncode != 0:
+        return False, "check_audit_regressions.py FAIL(신규/미해소 회귀 있음)"
+    if open_findings:
+        names = ", ".join(open_findings)
+        return False, f"audit-baseline.json에 열린 항목 {len(open_findings)}건: {names}"
+    return True, "OK INVARIANTS 위반 0"
+
+
+def _check_red_team_open(repo_root: Path) -> tuple[bool, str]:
+    path = repo_root / "docs" / "RED_TEAM_FINDINGS.md"
+    text = _read(path)
+    open_count = text.count("⏳ OPEN")
+    ok = open_count == 0
+    return ok, "OK RED_TEAM 미해결 0" if ok else f"RED_TEAM_FINDINGS.md 미해결(OPEN) {open_count}건"
+
+
+JOURNEY_SPECS: tuple[str, ...] = (
+    "frontend/e2e/journey-j1-onboarding-to-dashboard.spec.ts",
+    "frontend/e2e/journey-j2-discover-to-backtest.spec.ts",
+    "frontend/e2e/journey-j3-paper-order-to-position.spec.ts",
+)
+
+
+def _load_ci_step_ok(path: Path | None, step: str) -> tuple[bool, str]:
+    """`--ci-report`의 `steps.<step>.ok`를 읽는다(`_load_bool_report`는 top-level
+    키만 보므로 별도 헬퍼 -- `pm/local_ci.py` 산출 `pm/ci/latest.json`은
+    `{"steps": {"frontend": {"ok": bool, ...}, ...}}` 형태다)."""
+    if path is None:
+        return False, UNVERIFIED
+    if not path.is_file():
+        return False, f"리포트 없음: {path}"
+    try:
+        data = json.loads(_read(path))
+    except json.JSONDecodeError:
+        return False, f"리포트 JSON 파싱 실패: {path}"
+    steps = data.get("steps")
+    step_data = steps.get(step) if isinstance(steps, dict) else None
+    if not isinstance(step_data, dict):
+        return False, f"steps.{step} 없음: {path}"
+    ok = bool(step_data.get("ok"))
+    if ok:
+        return True, f"OK steps.{step}.ok=True"
+    return False, f"steps.{step}.ok={step_data.get('ok')!r}: {path}"
+
+
+def check_13_user_journeys(repo_root: Path, *, ci_report: Path | None) -> CheckResult:
+    """기준13(ADR-2026-09-24-A Decision 4) — J1~J3 Playwright 여정 테스트 존재 +
+    `test.fixme` 0건 + `--ci-report`의 `steps.journeys.ok` 녹색
+    (pm/local_ci full 모드 J1~J3 단계, task-7145).
+
+    리포트를 넘기지 않으면(다른 항목들과 같은 ADR-D 원칙) "미검증(외부 리포트
+    미지정)"으로 FAIL 처리한다 — 모른다=통과 아님.
+    """
+    present, missing = _present_missing(repo_root, *JOURNEY_SPECS)
+    fixme_hits = [p for p in present if "test.fixme" in _read(repo_root / p)]
+    # task-7145: pm/local_ci full 모드가 J1~J3만 따로 돌려 steps.journeys에 기록한다 —
+    # steps.frontend.ok(lint/build/vitest)는 여정을 실제로 실행했다는 증거가 아니었다.
+    journeys_ok, journeys_note = _load_ci_step_ok(ci_report, "journeys")
+    passed = not missing and not fixme_hits and journeys_ok
+    evidence = [*present, *missing, *(f"FIXME:{p}" for p in fixme_hits), journeys_note]
+    parts = []
+    if missing:
+        parts.append(f"여정 테스트 파일 누락: {', '.join(missing)}")
+    if fixme_hits:
+        parts.append(f"test.fixme 존재: {', '.join(fixme_hits)}")
+    if not journeys_ok:
+        parts.append(f"여정 CI 단계(steps.journeys) 미확인/적색: {journeys_note}")
+    detail = "J1~J3 여정 테스트 기준 통과" if passed else "; ".join(parts)
+    return CheckResult("13_user_journeys", "사용자 여정(J1~J3)", passed, tuple(evidence), detail)
+
+
+CHECKS_1_10: tuple[Callable[..., CheckResult], ...] = (
+    check_01_parity,
+    check_02_safety_wiring,
+    check_03_validation_gates,
+    check_04_strategy_language,
+    check_05_indicators,
+    check_06_backtest_realism,
+    check_07_execution,
+    check_08_data,
+    check_09_chart,
+)
+
+
+# --------------------------------------------------------------------------- 리포트/CLI
+
+
+def run_all(
+    repo_root: Path,
+    *,
+    ci_report: Path | None = None,
+    guard_report: Path | None = None,
+    head_green_result: CheckResult | None = None,
+) -> list[CheckResult]:
+    results = [fn(repo_root) for fn in CHECKS_1_10]
+    results.append(check_10_ops(repo_root, ci_report=ci_report, guard_report=guard_report))
+    results.append(check_11_hardening(repo_root))
+    results.append(head_green_result or check_12_head_actions_green(repo_root))
+    results.append(check_13_user_journeys(repo_root, ci_report=ci_report))
+    return results
+
+
+def main(argv: list[str] | None = None) -> int:
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")  # Windows cp949 방지
+
+    parser = argparse.ArgumentParser(description="MVP-1 종료조건 기계 검사(ADR-2026-09-09-D)")
+    parser.add_argument("--repo-root", type=Path, default=ROOT)
+    parser.add_argument(
+        "--ci-report",
+        type=Path,
+        default=None,
+        help='pm/local_ci.py 산출 pm/ci/latest.json {"ok": bool}',
+    )
+    parser.add_argument(
+        "--guard-report",
+        type=Path,
+        default=None,
+        help='meta/guards/run_guards.py --json 산출 {"vetoed": bool}',
+    )
+    parser.add_argument(
+        "--write", type=Path, default=None, help="전부 PASS일 때만 이 경로에 문서를 쓴다"
+    )
+    parser.add_argument(
+        "--live-head-check",
+        action="store_true",
+        help="12번 항목을 실제 `gh run list`로 조회한다(네트워크·GitHub 인증 필요)",
+    )
+    parser.add_argument(
+        "--trigger-head-recheck",
+        action="store_true",
+        help=(
+            "12번 항목이 FAIL이면 workflow_dispatch로 quality.yml을 재트리거하고 "
+            "최대 40분 대기해 재검증한다(네트워크·GitHub 인증 필요, --live-head-check 함의)"
+        ),
+    )
+    args = parser.parse_args(argv)
+
+    head_green_result: CheckResult | None = None
+    if args.trigger_head_recheck:
+        head_green_result = wait_for_head_green(args.repo_root)
+    elif args.live_head_check:
+        head_green_result = check_12_head_actions_green(args.repo_root, gh_run=_default_gh_run)
+
+    results = run_all(
+        args.repo_root,
+        ci_report=args.ci_report,
+        guard_report=args.guard_report,
+        head_green_result=head_green_result,
+    )
+    print(render_markdown(results))
+
+    all_passed = all(r.passed for r in results)
+    if args.write is not None:
+        if all_passed:
+            write_closeout_doc(args.write, results)
+            print(f"OK: {args.write} 작성 완료")
+        else:
+            print(f"FAIL: 하나 이상 적색 — {args.write} 미작성")
+
+    if all_passed:
+        print("OK: MVP-1 종료조건 전항 PASS")
+        return 0
+    fail_titles = [r.title for r in results if not r.passed]
+    print(f"FAIL: 적색 항목 {len(fail_titles)}건 — {', '.join(fail_titles)}")
+    return 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())

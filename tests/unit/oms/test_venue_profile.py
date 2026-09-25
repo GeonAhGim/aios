@@ -1,4 +1,5 @@
 """거래소 capability 프로파일 단위테스트 — L4-04. DB 없음."""
+
 from __future__ import annotations
 
 from datetime import datetime, timezone
@@ -97,6 +98,24 @@ def test_assert_supported_rejects_unsupported_tif() -> None:
     with pytest.raises(OrderValidationError) as exc_info:
         assert_supported(profile, _command(time_in_force="FOK"))
     assert exc_info.value.code == "OMS_VALIDATION_UNSUPPORTED_TIF"
+
+
+def test_assert_supported_rejects_trigger_price_not_wired() -> None:
+    """QA(task-1961) — EM-19 trigger_price는 계약 필드로만 존재하고 submit_order
+    실행 경로에 배선되지 않았다(I-10). 배선 전까지는 조용히 시장가/지정가로
+    나가지 않도록 fail-closed로 거부해야 한다."""
+    with pytest.raises(OrderValidationError) as exc_info:
+        assert_supported(_profile(), _command(trigger_price=Decimal("100")))
+    assert exc_info.value.code == "OMS_VALIDATION_TRIGGER_ORDER_NOT_WIRED"
+
+
+def test_assert_supported_rejects_trailing_offset_not_wired() -> None:
+    with pytest.raises(OrderValidationError) as exc_info:
+        assert_supported(
+            _profile(),
+            _command(trigger_price=Decimal("100"), trailing_offset=Decimal("5")),
+        )
+    assert exc_info.value.code == "OMS_VALIDATION_TRIGGER_ORDER_NOT_WIRED"
 
 
 def test_verified_field_records_confidence_level() -> None:

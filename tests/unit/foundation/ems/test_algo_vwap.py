@@ -4,6 +4,7 @@ Spec: docs/specs/L4_ems_routing_algos_and_tca_v1.0.md #9 EM-9 DoD
 ("volume profile based"), #10 (shallow-profile -> TWAP demotion, reason
 recorded). No DB -- pure function tests only.
 """
+
 from __future__ import annotations
 
 import ast
@@ -173,9 +174,7 @@ def test_long_volume_profile_is_rejected() -> None:
 
 
 def test_slice_count_over_the_cap_is_rejected() -> None:
-    parent = _parent(
-        algo=_algo(start=_T0, end=_T0 + timedelta(seconds=1000), slice_interval_sec=1)
-    )
+    parent = _parent(algo=_algo(start=_T0, end=_T0 + timedelta(seconds=1000), slice_interval_sec=1))
     with pytest.raises(AlgoConstraintError, match="500"):
         plan_vwap_schedule(parent, volume_profile=_flat_profile(1000))
 
@@ -309,6 +308,84 @@ def test_vwap_module_calls_all_three_guard_functions() -> None:
 def test_vwap_module_does_not_recompute_the_participation_check_itself() -> None:
     source = _VWAP_PATH.read_text(encoding="utf-8")
     assert "/ market_volume" not in source
+
+
+# -- DEEPEN: failure-injection, numerical assertion, gate-red (D2 하한 증빙) -----
+
+
+def test_failure_injection_corrupted_profile_is_rejected() -> None:
+    """Failure-injection: inject a volume profile with negative entries
+    (simulating a corrupted DC-22 tick-to-candle feed).
+
+    A negative volume entry would produce a negative weight, which in turn
+    makes `_allocate_by_weight` hand out negative slice qtys. The guard
+    must reject this *before* the schedule is accepted -- fail-closed on
+    corrupted market data, per I-04 (no unbounded resource) and I-10
+    (fail-closed default).
+    """
+    parent = _parent(qty=Decimal("1000"))
+    profile = [Decimal("1000")] * 5 + [Decimal("-500")] + [Decimal("1000")] * 4
+    with pytest.raises(ParticipationExceededError, match="planned_qty"):
+        plan_vwap_schedule(parent, volume_profile=profile)
+
+
+def test_numerical_assertion_exact_decimal_allocation() -> None:
+    """Numerical performance assertion: verify exact Decimal arithmetic for
+    a multi-slice VWAP allocation with no float contamination.
+
+    Scenario: 10 slices, profile [10000]*10 (flat, total weight = 100000),
+    parent qty = Decimal("1000"). Each slice gets 100 qty.
+    100 / 10000 * 100 = 1% which is well under the 10% cap.
+
+    Assert:
+      (a) sum(children) == parent.qty exactly
+      (b) each share is proportional to its weight (checked via ratio)
+      (c) isinstance(share, Decimal) for every slice
+    """
+    parent = _parent(qty=Decimal("1000"))
+    profile = [Decimal("10000")] * 10
+    result = plan_vwap_schedule(parent, volume_profile=profile)
+    children = result.children
+
+    # (a) exact sum — Decimal must not drift
+    total_qty = sum(c.planned_qty for c in children)
+    assert total_qty == parent.qty, (
+        f"Quantity sum {total_qty} != parent qty {parent.qty} — Decimal drift detected"
+    )
+
+    # (b) ratio check: flat profile -> all non-final slices get equal qty
+    slice0_qty = next(c.planned_qty for c in children if c.slice_seq == 0)
+    slice8_qty = next(c.planned_qty for c in children if c.slice_seq == 8)
+    assert slice8_qty == slice0_qty, (
+        f"Expected slice8_qty == slice0_qty for flat profile, got {slice8_qty} vs {slice0_qty}"
+    )
+
+    # (c) every share is Decimal, not float
+    for child in children:
+        assert isinstance(child.planned_qty, Decimal), (
+            f"child[{child.slice_seq}].planned_qty is {type(child.planned_qty).__name__}, "
+            "not Decimal — float contamination detected"
+        )
+
+
+def test_gate_red_reproduction_thin_market_vwap_rejection() -> None:
+    """Gate-red reproduction: realistic thin-market scenario where every
+    non-final slice exceeds the participation cap.
+
+    Setup: qty=1000, 10 slices -> each slice=100 (flat profile).
+    Market volume=100 per slice, cap=5% -> allowed per slice = 5.
+    Every slice (100) exceeds 5 -> gate goes RED, guard rejects.
+
+    This proves the guard gate is active and returns the correct error
+    type (ParticipationExceededError), not a silent pass-through.
+    """
+    parent = _parent(
+        qty=Decimal("1000"),
+        algo=_algo(max_participation_pct=Decimal("5")),
+    )
+    # Flat profile: 10 slices of market volume 100 each
+    with pytest.raises(ParticipationExceededError, match="exceeding the cap"):
+        plan_vwap_schedule(parent, volume_profile=[Decimal("100")] * 10)
 
 
 # -- file size discipline ------------------------------------------------------

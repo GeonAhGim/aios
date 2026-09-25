@@ -22,6 +22,7 @@ task-105(f3799ba)가 `bitget/market_ws_connection.py::_run_ws_subscription`에
 미검증: Bitget이 평문 "ping"에 평문 "pong"으로 답한다는 것은 문서 근거만
 (§10 U5) — `HeartbeatSpec`으로 파라미터화해 두었다.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -30,7 +31,7 @@ import logging
 from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import AbstractAsyncContextManager
 from dataclasses import dataclass
-from typing import Any, Protocol
+from typing import Any, Protocol, cast
 
 from websockets.asyncio.client import connect as _default_connect
 from websockets.exceptions import ConnectionClosed
@@ -55,9 +56,12 @@ ConnectFn = Callable[[str], AbstractAsyncContextManager[WsConnection]]
 
 
 def default_connect(url: str) -> AbstractAsyncContextManager[WsConnection]:
-    """`websockets.asyncio.client.connect`의 좁은 타입 래퍼 — 테스트가
-    주입하는 가짜 `connect_fn`과 같은 시그니처로 맞춘다."""
-    return _default_connect(url)  # type: ignore[return-value]
+    """Narrow type wrapper around `websockets.asyncio.client.connect` —
+    matches the signature of the fake `connect_fn` tests inject. mypy
+    doesn't recognize the library's return type as a subtype of
+    `AbstractAsyncContextManager` (same root cause as the nh PLT-40c
+    investigation) — `cast()` is a no-op at runtime."""
+    return cast(AbstractAsyncContextManager[WsConnection], _default_connect(url))
 
 
 @dataclass(frozen=True)
@@ -194,7 +198,10 @@ class WsSession:
                     self._misses.inc(venue=self._venue)
                 logger.warning(
                     "WS 연결 끊김(venue=%s channel=%s): %s — %.1f초 후 재연결",
-                    self._venue, self._channel, exc, backoff,
+                    self._venue,
+                    self._channel,
+                    exc,
+                    backoff,
                 )
                 if not distrusted:
                     distrusted = True
@@ -253,7 +260,10 @@ class WsSession:
                     self._gaps.inc(venue=self._venue, channel=self._channel)
                     logger.warning(
                         "WS seq 갭(venue=%s channel=%s): %d → %d — REST 재동기화",
-                        self._venue, self._channel, last_seq, seq,
+                        self._venue,
+                        self._channel,
+                        last_seq,
+                        seq,
                     )
                     await self._resync()
                 last_seq = seq if last_seq is None else max(last_seq, seq)

@@ -1,4 +1,5 @@
 """EM-1 contracts/v1.py — 계약 레벨 검증(스키마·에러 taxonomy 스냅샷)."""
+
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
@@ -11,6 +12,7 @@ from pydantic import ValidationError
 from src.data.models.trading import OrderSide, OrderStatus
 from src.foundation.ems.contracts.v1 import (
     HTTP_STATUS,
+    TERMINAL_ORDER_STATUSES,
     AlgoKind,
     AlgoSpec,
     ChildOrder,
@@ -19,6 +21,13 @@ from src.foundation.ems.contracts.v1 import (
     ParentOrderConstraints,
     RouteDecision,
     TcaResult,
+)
+from src.foundation.ems.domain.parent_child import (
+    AlgoConstraintError,
+    ParentTerminalError,
+    assert_can_create_child,
+    assert_parent_accepts_new_child,
+    assert_slice_within_parent_qty,
 )
 
 _NOW = datetime(2026, 9, 7, 0, 0, tzinfo=timezone.utc)
@@ -127,16 +136,18 @@ def test_parent_order_and_child_order_roundtrip() -> None:
 
 def test_parent_order_qty_rejects_float() -> None:
     with pytest.raises(ValidationError):
-        ParentOrder(
-            parent_id=uuid4(),
-            instrument_id="BTC/USDT",
-            side=OrderSide.BUY,
-            qty=1.5,
-            algo=_algo_spec(),
-            constraints=ParentOrderConstraints(max_participation_pct=Decimal("10")),
-            fund_id=uuid4(),
-            portfolio_id=uuid4(),
-            arrival_ts=_NOW,
+        ParentOrder.model_validate(
+            {
+                "parent_id": uuid4(),
+                "instrument_id": "BTC/USDT",
+                "side": OrderSide.BUY,
+                "qty": 1.5,
+                "algo": _algo_spec(),
+                "constraints": ParentOrderConstraints(max_participation_pct=Decimal("10")),
+                "fund_id": uuid4(),
+                "portfolio_id": uuid4(),
+                "arrival_ts": _NOW,
+            }
         )
 
 
@@ -167,7 +178,9 @@ def test_route_decision_requires_reason_codes() -> None:
 
 def test_route_decision_expected_cost_bps_rejects_float() -> None:
     with pytest.raises(ValidationError):
-        RouteDecision(venue="binance", reason_codes=["BEST_FEE"], expected_cost_bps=1.2)
+        RouteDecision.model_validate(
+            {"venue": "binance", "reason_codes": ["BEST_FEE"], "expected_cost_bps": 1.2}
+        )
 
 
 def test_tca_result_fields_are_strict_decimal() -> None:
@@ -180,12 +193,14 @@ def test_tca_result_fields_are_strict_decimal() -> None:
     )
     assert result.schema_version == "v1"
     with pytest.raises(ValidationError):
-        TcaResult(
-            arrival_bps=1.0,
-            vwap_bps=Decimal("2"),
-            impact_bps=Decimal("3"),
-            fees_bps=Decimal("4"),
-            opportunity_bps=Decimal("5"),
+        TcaResult.model_validate(
+            {
+                "arrival_bps": 1.0,
+                "vwap_bps": Decimal("2"),
+                "impact_bps": Decimal("3"),
+                "fees_bps": Decimal("4"),
+                "opportunity_bps": Decimal("5"),
+            }
         )
 
 
@@ -212,3 +227,119 @@ def test_error_taxonomy_http_status_snapshot() -> None:
 def test_every_error_code_has_an_http_status() -> None:
     for code in EmsErrorCode:
         assert code in HTTP_STATUS
+
+
+# ---------------------------------------------------------------------------
+# DEEPEN — task-3113: 3 additional tests (serialization, numerical, gate-red)
+# ---------------------------------------------------------------------------
+
+
+def test_tca_result_json_serialisation_roundtrip() -> None:
+    """Serialization boundary — pydantic model_dump_json → model_validate
+    must preserve Decimal values exactly (DoD: 직렬화 경계 실패 주입 1건)."""
+    result = TcaResult(
+        arrival_bps=Decimal("1.2345"),
+        vwap_bps=Decimal("2.3456"),
+        impact_bps=Decimal("3.4567"),
+        fees_bps=Decimal("4.5678"),
+        opportunity_bps=Decimal("5.6789"),
+    )
+    dumped = result.model_dump_json()
+    restored = TcaResult.model_validate_json(dumped)
+    assert restored.arrival_bps == Decimal("1.2345")
+    assert restored.vwap_bps == Decimal("2.3456")
+    assert restored.impact_bps == Decimal("3.4567")
+    assert restored.fees_bps == Decimal("4.5678")
+    assert restored.opportunity_bps == Decimal("5.6789")
+
+
+def test_tca_result_serialisation_rejects_float() -> None:
+    """Serialization boundary — JSON 경계에 float가 들어오면 거부된다
+    (직렬화 실패 주입 2번째)."""
+    with pytest.raises(ValidationError):
+        TcaResult.model_validate_json(
+            '{"arrival_bps": 1.5, "vwap_bps": 2, '
+            '"impact_bps": 3, "fees_bps": 4, '
+            '"opportunity_bps": 5}'
+        )
+
+
+def test_tca_decomposition_identity() -> None:
+    """Numerical assertion — EM-A5/§8: total cost ≈ impact + fees +
+    opportunity (DoD: 수치 성능 단언 1건). arrival_bps는 분해의 기준이며
+    impact_bps + fees_bps + opportunity_bps가 arrival_bps와 0.01bps 오차
+    범위 안에 있어야 한다."""
+    result = TcaResult(
+        arrival_bps=Decimal("10.000"),
+        vwap_bps=Decimal("9.800"),
+        impact_bps=Decimal("6.000"),
+        fees_bps=Decimal("3.000"),
+        opportunity_bps=Decimal("1.000"),
+    )
+    decomposition_sum = result.impact_bps + result.fees_bps + result.opportunity_bps
+    tolerance = Decimal("0.01")
+    assert abs(decomposition_sum - result.arrival_bps) <= tolerance, (
+        f"decomposition {decomposition_sum} != arrival {result.arrival_bps}"
+    )
+
+
+def test_gate_red_parent_terminal_blocks_child_creation() -> None:
+    """Gate red reproduction — EM-A4: terminal parent may not spawn children
+    (DoD: 게이트 적색 재현 1건). 실제 도메인 게이트
+    (`assert_parent_accepts_new_child` / `assert_can_create_child`)를
+    terminal parent status로 호출해 `ParentTerminalError`가 발생하고,
+    그 예외의 `.code`가 스펙의 `EM_PARENT_TERMINAL` taxonomy와 정확히
+    일치함을 검증한다 — 스키마 검증이 아니라 실제 게이트 실패 동작 재현."""
+    terminal_parent = ParentOrder(
+        parent_id=uuid4(),
+        instrument_id="BTC/USDT",
+        side=OrderSide.BUY,
+        qty=Decimal("1.0"),
+        algo=_algo_spec(),
+        constraints=ParentOrderConstraints(max_participation_pct=Decimal("10")),
+        fund_id=uuid4(),
+        portfolio_id=uuid4(),
+        arrival_ts=_NOW,
+        status=OrderStatus.FILLED,  # terminal 상태
+    )
+    assert terminal_parent.status in TERMINAL_ORDER_STATUSES
+
+    with pytest.raises(ParentTerminalError) as excinfo:
+        assert_parent_accepts_new_child(terminal_parent.status)
+    assert excinfo.value.code == EmsErrorCode.PARENT_TERMINAL
+    assert HTTP_STATUS[excinfo.value.code] == 409
+
+    # EM-A4 precedence: the combinator must raise the same taxonomy even
+    # when the EM-A1 quantity check would also fail on a non-terminal parent.
+    with pytest.raises(ParentTerminalError) as combinator_excinfo:
+        assert_can_create_child(
+            parent_status=terminal_parent.status,
+            parent_qty=Decimal("1.0"),
+            committed_child_qty=Decimal("0"),
+            new_slice_qty=Decimal("1.0"),
+        )
+    assert combinator_excinfo.value.code == EmsErrorCode.PARENT_TERMINAL
+
+    # negative control: a non-terminal parent does not trip EM_PARENT_TERMINAL.
+    assert_parent_accepts_new_child(OrderStatus.CREATED)
+
+
+def test_gate_red_algo_constraint_blocks_oversized_slice() -> None:
+    """Gate red reproduction — EM-A1: a slice pushing committed child qty
+    past parent qty raises `AlgoConstraintError` with taxonomy
+    `EM_ALGO_CONSTRAINT` (400), not merely a schema validation error."""
+    with pytest.raises(AlgoConstraintError) as excinfo:
+        assert_slice_within_parent_qty(
+            parent_qty=Decimal("1.0"),
+            committed_child_qty=Decimal("0.6"),
+            new_slice_qty=Decimal("0.5"),
+        )
+    assert excinfo.value.code == EmsErrorCode.ALGO_CONSTRAINT
+    assert HTTP_STATUS[excinfo.value.code] == 400
+
+    # boundary case: exact equality is allowed, no error.
+    assert_slice_within_parent_qty(
+        parent_qty=Decimal("1.0"),
+        committed_child_qty=Decimal("0.6"),
+        new_slice_qty=Decimal("0.4"),
+    )

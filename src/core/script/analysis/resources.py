@@ -21,6 +21,11 @@ DSL-4(`typing/checker.py`)가 통과시킨 `Program`(DSL-1 AST)만 입력으로
 - call_count     : `ns.ident(...)` 호출 총수(지표 호출 수).
 - call_depth     : 호출 인자 안에 호출이 중첩된 최대 깊이(§3.3 "호출 깊이").
 - plot_count     : plot decl 수.
+- request_count  : `request(symbol, timeframe, expr)`(M2-2a, §3.3 밖 확장)
+                   노드 수. request(...)는 항상 series<float>로 타입 추론돼
+                   (DSL-4) 이를 담는 decl의 series_count에는 그 경로로 이미
+                   반영되므로, 여기서는 이중 계상하지 않고 `max_requests`로
+                   별도 상한만 건다(§상한 근거).
 
 Fail-closed(산정 불가 = 거부): 타입 추론이 실패하는 AST(DSL-4를 거치지
 않았거나 env가 어긋남), 음수 기간 인자, bool 리터럴로 선언된 int input을
@@ -36,6 +41,11 @@ Fail-closed(산정 불가 = 거부): 타입 추론이 실패하는 AST(DSL-4를 
   없어 노드 수가 곧 봉당 연산 수다. 한 봉당 2000 노드·호출 100개면 DSL-12
   컴파일 ≤300ms·즉시 백테스트 예산 안에 넉넉히 든다. 깊이 8은 사람이 읽을
   수 있는 중첩의 상한이자 인터프리터(DSL-8) 스택 보호선.
+- max_requests 8(M2-2a): `request(symbol, timeframe, expr)` 하나마다 다른
+  심볼/타임프레임의 시리즈 버퍼 전체를 별도로 구체화해야 해서 일반 시리즈
+  binding보다 훨씬 무겁다 — `max_calls`(100)의 1/10 미만으로 별도 상한을
+  둔다. MTF 런타임 비용의 실측치는 M2-2b가 붙기 전까지 없어 보수적 기본값
+  (§미검증).
 
 미검증: 호출별 실제 lookback은 IND 레지스트리(DSL-9 `builtins_ta.py`)가
 붙어야 정확히 알 수 있다. 그때까지 "정적 정수 인자 최댓값"은 보수적
@@ -58,6 +68,7 @@ from src.core.script.grammar.ast import (
     PlotDecl,
     PostfixExpr,
     Program,
+    RequestExpr,
     SignalDecl,
     UnaryExpr,
 )
@@ -87,6 +98,7 @@ class ResourceLimits:
     max_calls: int = 100
     max_call_depth: int = 8
     max_plots: int = 32
+    max_requests: int = 8
 
 
 DEFAULT_LIMITS = ResourceLimits()
@@ -100,6 +112,7 @@ class ResourceEstimate:
     call_count: int = 0
     call_depth: int = 0
     plot_count: int = 0
+    request_count: int = 0
 
 
 # (산정 항목, 상한 항목) — 검사 순서가 곧 오류 메시지 우선순위다.
@@ -110,6 +123,7 @@ _CHECKS: tuple[tuple[str, str], ...] = (
     ("call_count", "max_calls"),
     ("call_depth", "max_call_depth"),
     ("plot_count", "max_plots"),
+    ("request_count", "max_requests"),
 )
 
 
@@ -176,6 +190,7 @@ def estimate_resources(program: Program, env: TypeEnv) -> ResourceEstimate:
         call_count=acc.calls,
         call_depth=acc.call_depth,
         plot_count=acc.plots,
+        request_count=acc.requests,
     )
 
 
@@ -191,6 +206,7 @@ class _Acc:
         self.calls = 0
         self.call_depth = 0
         self.plots = 0
+        self.requests = 0
 
     def type_of(self, expr: Expr) -> Type:
         try:
@@ -221,6 +237,15 @@ class _Acc:
             self.lookback += self._call_period(expr)
             for arg in expr.args:
                 self.visit(arg, depth + 1)
+            return
+        if isinstance(expr, RequestExpr):
+            # request(...) 자체는 항상 series<float>로 타입 추론되므로(DSL-4
+            # `_infer_request`) 이를 담는 상위 decl의 series_count는 그 경로로
+            # 이미 반영된다 — 여기서는 request_count만 별도로 센다(이중 계상
+            # 방지). 요청의 "무게"는 request_count·max_requests가 따로 상한을
+            # 건다(§상한 근거).
+            self.requests += 1
+            self.visit(expr.expr, depth)
             return
         raise ScriptResourceLimitError(  # pragma: no cover — Expr union은 닫혀 있다
             f"자원 산정 불가: 알 수 없는 표현식 {expr!r}"

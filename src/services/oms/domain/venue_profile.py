@@ -18,6 +18,7 @@ http_policy.py`(L4-11, 아직 없음)에 의존하지 않는다. L4-11이 실제
 권위 있는 taxonomy로 보고 `OrderValidationError`를 던진다 — `errors.py`의
 클래스 계층과도 일관적이다(핵심 판단력=주문 검증 실패라는 성격이 같음).
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -76,6 +77,19 @@ class VenueCapabilityProfile(BaseModel):
 
 
 def assert_supported(profile: VenueCapabilityProfile, cmd: SubmitOrderCommand) -> None:
+    # EM-19(task-1751) -- trigger_price/trailing_offset are wired into the
+    # contract/command_digest (§9 EM-19), but no leaf yet connects the actual
+    # trigger evaluation (domain/order_types/*) to this execution path
+    # (submit_order.py -> outbox -> venue). Silently accepting it before that
+    # wiring exists would send a "stop order" out immediately as market/limit
+    # (I-10 violation, a silently ignored trigger) -- reject fail-closed
+    # until the wiring exists.
+    if cmd.trigger_price is not None or cmd.trailing_offset is not None:
+        raise OrderValidationError(
+            "TRIGGER_ORDER_NOT_WIRED",
+            "trigger_price/trailing_offset은 아직 실행 경로에 배선되지 않았습니다 "
+            "— 조건부(스톱·스톱리밋·트레일링) 주문은 현재 제출을 거부합니다(I-10).",
+        )
     if cmd.asset_class not in profile.asset_classes:
         raise OrderValidationError(
             "UNSUPPORTED_TYPE",
