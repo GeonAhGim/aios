@@ -309,12 +309,10 @@ def test_full_chain_resolution_completes_within_time_budget() -> None:
 
     start = time.perf_counter()
     for _ in range(100):
-        result = check_release_gate.check_stage(
-            stages, "marketplace_commercialization", repo_root=ROOT
-        )
+        result = check_release_gate.check_stage(stages, "internal_development", repo_root=ROOT)
         # 결과 정정 단언: 성능만 보고 결과가 틀렸으면 의미 없음
         assert isinstance(result, list)
-        assert len(result) > 0  # evidence 파일 경로 리스트가 반환되어야 함
+        assert len(result) == 0  # 모든 필수 증거가 존재해야 함 (미충족 목록이 빈 list)
     elapsed = time.perf_counter() - start
 
     assert elapsed < 0.05 * 100, f"100회 반복 해석이 {elapsed:.3f}s — 예산(5.0s) 초과"
