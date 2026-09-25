@@ -12,7 +12,7 @@ BR-17(ADR-2026-09-24-A D5). 생성: `python scripts/nh_openapi_coverage.py`(오�
 
 | 구현됨 | 실전계좌필요 | 범위밖 | 미착수 | 합계 | 구현률 |
 |---|---|---|---|---|---|
-| 12 | 0 | 0 | 19 | 31 | 38.71% |
+| 21 | 0 | 0 | 10 | 31 | 67.74% |
 
 완료 정의(ADR D2): `미착수` 0건. `실전계좌필요`·`범위밖`은 남을 수 있으나 각각 사유가 있다.
 
@@ -40,14 +40,14 @@ BR-17(ADR-2026-09-24-A D5). 생성: `python scripts/nh_openapi_coverage.py`(오�
 | `/krstock/order/v1/modify` | POST | 구현됨 | 주식주문(정정취소) 정정 |
 | `/krstock/order/v1/reservedCancel` | POST | 구현됨 | 주식예약주문취소 |
 | `/krstock/order/v1/reservedOrder` | POST | 구현됨 | 주식예약주문 |
-| `/krstock/quote/v1/afterHoursCurrent` | POST | 미착수 | 국내주식 시간외현재가 |
-| `/krstock/quote/v1/afterHoursExpected` | POST | 미착수 | 주식현재가 시간외시간별예상 |
-| `/krstock/quote/v1/currentAfterHoursDaily` | POST | 미착수 | 주식현재가 시간외일자별주가 |
-| `/krstock/quote/v1/currentAfterHoursExecution` | POST | 미착수 | 주식현재가 시간외시간별체결 |
+| `/krstock/quote/v1/afterHoursCurrent` | POST | 구현됨 | 국내주식 시간외현재가 |
+| `/krstock/quote/v1/afterHoursExpected` | POST | 구현됨 | 주식현재가 시간외시간별예상 |
+| `/krstock/quote/v1/currentAfterHoursDaily` | POST | 구현됨 | 주식현재가 시간외일자별주가 |
+| `/krstock/quote/v1/currentAfterHoursExecution` | POST | 구현됨 | 주식현재가 시간외시간별체결 |
 | `/krstock/quote/v1/currentDaily` | POST | 구현됨 | 주식현재가 일자별 |
-| `/krstock/quote/v1/currentExecution` | POST | 미착수 | 주식현재가 당일시간대별체결 |
-| `/krstock/quote/v1/currentInvestor` | POST | 미착수 | 주식현재가 투자자 |
+| `/krstock/quote/v1/currentExecution` | POST | 구현됨 | 주식현재가 당일시간대별체결 |
+| `/krstock/quote/v1/currentInvestor` | POST | 구현됨 | 주식현재가 투자자 |
 | `/krstock/quote/v1/currentPrice` | POST | 구현됨 | 주식현재가 시세 |
-| `/krstock/quote/v1/etfComponents` | POST | 미착수 | ETF 구성종목시세 |
-| `/krstock/quote/v1/etfCurrent` | POST | 미착수 | ETF/ETN 현재가 |
-| `/krstock/quote/v1/period` | POST | 미착수 | 국내주식기간별시세(일/주/월/년) |
+| `/krstock/quote/v1/etfComponents` | POST | 구현됨 | ETF 구성종목시세 |
+| `/krstock/quote/v1/etfCurrent` | POST | 구현됨 | ETF/ETN 현재가 |
+| `/krstock/quote/v1/period` | POST | 구현됨 | 국내주식기간별시세(일/주/월/년) |
