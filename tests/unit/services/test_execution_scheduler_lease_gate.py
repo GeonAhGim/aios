@@ -208,3 +208,29 @@ async def test_no_running_rows_skips_lease_repository_roundtrip() -> None:
 
     assert await scheduler.list_candidates() == []
     assert repo.calls == []
+
+
+async def test_one_execution_failing_does_not_abort_the_batch(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """negative/failure-injection — 배치 중 하나가 예외를 던져도 나머지는 격리되어 계속 진행된다."""
+    captured: list[int] = []
+
+    async def _fake_run_execution_tick(
+        pool: Any, adapter: Any, execution_id: int, **kwargs: Any
+    ) -> None:
+        captured.append(execution_id)
+        if execution_id == 7:
+            raise RuntimeError("boom")
+
+    monkeypatch.setattr(scheduler_module, "run_execution_tick", _fake_run_execution_tick)
+    scheduler = ExecutionLoopScheduler(
+        _FakePool(_rows(7, 8)), **_required_kwargs(_RecordingLeaseRepo({7, 8}))
+    )
+
+    report = await scheduler.tick_all_running()
+
+    assert 8 in report.ticked
+    assert 7 in report.failed
+    assert report.failed[7]
+    assert set(captured) == {7, 8}
