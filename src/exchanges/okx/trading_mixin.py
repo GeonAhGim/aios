@@ -91,9 +91,10 @@ def _split_exchange_order_id(exchange_order_id: str) -> tuple[str, str]:
 
 
 def _first_data_row(raw: dict[str, Any], *, path: str) -> dict[str, Any]:
-    """OKX는 배치 API 형태를 단일 주문에도 그대로 쓴다 -- `data`가 빈
-    배열이면(배치 자체는 code=="0"으로 통과했지만 담긴 행이 없는 기형
-    응답) 조용히 인덱스 에러를 내는 대신 즉시 실패한다."""
+    """OKX reuses its batch-order response shape even for a single order --
+    if `data` is an empty array (the batch itself passed with code=="0" but
+    carries no row, a malformed response), fail immediately instead of
+    silently raising an index error."""
     data = raw.get("data")
     if not data:
         raise FatalExchangeError(f"OKX {path} 응답에 data 배열이 비어 있음: {raw!r}")
