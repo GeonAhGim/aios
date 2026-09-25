@@ -29,7 +29,11 @@ def write_heartbeat(path: Path) -> None:
     모두 os.replace는 원자적이라 읽는 쪽은 항상 "이전 값 전체" 또는
     "새 값 전체" 중 하나만 본다."""
     path.parent.mkdir(parents=True, exist_ok=True)
-    tmp_path = path.with_name(path.name + ".tmp")
+    # The temp name carries the pid: two writers sharing one heartbeat path
+    # (xdist workers in CI, or two app processes on one host) otherwise race on
+    # the same ``<name>.tmp`` -- one renames it away and the other's
+    # ``os.replace`` fails with FileNotFoundError (CI run 36191114294).
+    tmp_path = path.with_name(f"{path.name}.{os.getpid()}.tmp")
     tmp_path.write_text(str(time.time()), encoding="utf-8")
     os.replace(tmp_path, path)
 
