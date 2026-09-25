@@ -164,6 +164,15 @@ def _probe_rest(path: str, method: str, query: str = "", timeout: float = FETCH_
         return exc.code
 
 
+def _ws_nonce() -> str:
+    """RFC 6455 Sec-WebSocket-Key: 16바이트 난수의 base64. RFC 예제 상수를 리터럴로 두면
+    gitleaks(Quality Gate Secret scan)가 시크릿으로 잡아 매 실행 적색이었다(CTO 2026-09-25)."""
+    import base64
+    import os
+
+    return base64.b64encode(os.urandom(16)).decode("ascii")
+
+
 def _probe_ws(path: str, timeout: float = FETCH_TIMEOUT) -> int:
     request = (
         f"GET {path} HTTP/1.1\r\n"
@@ -171,7 +180,7 @@ def _probe_ws(path: str, timeout: float = FETCH_TIMEOUT) -> int:
         "Connection: Upgrade\r\n"
         "Upgrade: websocket\r\n"
         "Sec-WebSocket-Version: 13\r\n"
-        "Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n"
+        f"Sec-WebSocket-Key: {_ws_nonce()}\r\n"
         "\r\n"
     )
     ctx = ssl.create_default_context()

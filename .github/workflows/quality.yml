@@ -56,7 +56,8 @@ jobs:
 
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.11"
+          # CTO 2026-09-25: 로컬 게이트(pm/local_ci, venv 3.10 + requirements-lock.txt)와 동일 환경.
+          python-version: "3.10"
           cache: pip
 
       # pip-audit이 setuptools 자체를 감사 대상에 넣는데, actions/setup-python이 심는
@@ -66,7 +67,10 @@ jobs:
         run: python -m pip install --upgrade pip setuptools
 
       - name: Install application and quality dependencies
-        run: python -m pip install -e ".[test,dev]"
+        # requirements-lock.txt가 정본(ruff/mypy/pytest 핀 포함) — extras 해석은 버전 드리프트를 만들었다.
+        run: |
+          python -m pip install -r requirements-lock.txt
+          python -m pip install -e ".[test,dev]" --no-deps
 
       # H-5(ADR-2026-09-09-B) — pip-audit(--strict 대신 scripts/run_pip_audit.py가
       # 판정을 대신한다). 저장소가 스스로를 editable로 설치하므로 pip-audit --strict를

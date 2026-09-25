@@ -84,6 +84,7 @@ PyJWT==2.14.0
 PyOTP==2.10.0
 pyparsing==3.3.2
 pyproject_hooks==1.2.0
+redis==8.1.0
 pytest==9.1.1
 pytest-asyncio==1.4.0
 pytest-benchmark==5.3.0
