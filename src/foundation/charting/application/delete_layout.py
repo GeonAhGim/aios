@@ -1,5 +1,6 @@
-"""DeleteChartLayout 커맨드 — `chart_drawing_set`은 FK `ON DELETE CASCADE`로
-함께 지워진다."""
+"""DeleteChartLayout command — `chart_drawing_set` rows are deleted via FK
+`ON DELETE CASCADE` when the layout is removed."""
+
 from __future__ import annotations
 
 from uuid import UUID
