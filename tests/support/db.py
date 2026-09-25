@@ -22,6 +22,7 @@ other users`). 이 모듈은 그 경우 예외를 그대로 전파한다 — 조
 from __future__ import annotations
 
 import asyncio
+import os
 import random
 import re
 from collections.abc import AsyncGenerator
@@ -72,6 +73,25 @@ def _with_database(url: str, database: str) -> str:
 
 def _asyncpg_dsn(url: str) -> str:
     return url.replace("postgresql+asyncpg://", "postgresql://")
+
+
+TEMPLATE_DATABASE_URL_ENV = "AIOS_TEST_TEMPLATE_DATABASE_URL"
+
+
+def template_database_url() -> str:
+    """일회용 DB 클론(마이그레이션 왕복 등)의 템플릿으로 쓸 URL.
+
+    xdist 워커 안에서 `os.environ["DATABASE_URL"]`은 이미 이 워커 전용 DB
+    (`..._gwN`)이고, 거기에는 같은 워커의 픽스처 풀이 살아 있다. PostgreSQL의
+    `CREATE DATABASE ... TEMPLATE`는 템플릿 DB에 다른 세션이 하나라도 붙어 있으면
+    `ObjectInUseError`("is being accessed by other users")로 거부하므로, 워커 DB를
+    템플릿으로 삼는 클론은 인접 테스트의 커넥션 수에 따라 흔들린다(CI run
+    36191114294: "There are 10 other sessions using the database"). tests/conftest.py가
+    워커 DB로 갈아끼우기 전의 원본 `TEST_DATABASE_URL`(어느 워커도 붙지 않는
+    순수 템플릿)을 `AIOS_TEST_TEMPLATE_DATABASE_URL`에 남겨 두고 여기서 돌려준다.
+    xdist 없이(master) 실행하면 그 변수가 없으므로 기존처럼 `DATABASE_URL`을 쓴다.
+    """
+    return os.environ.get(TEMPLATE_DATABASE_URL_ENV) or os.environ["DATABASE_URL"]
 
 
 def session_database_url(template_url: str, worker_id: str) -> str:

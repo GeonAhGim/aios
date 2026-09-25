@@ -26,7 +26,7 @@ import pytest
 
 from src.core.observability.metrics import NullMetrics, set_metrics
 from src.core.rate_limit.limiter import UnlimitedRateLimiter, set_limiter
-from tests.support.db import ensure_worker_database
+from tests.support.db import TEMPLATE_DATABASE_URL_ENV, ensure_worker_database
 from tests.support.db import tx_conn as tx_conn  # noqa: F401 -- re-exported fixture
 
 try:
@@ -65,6 +65,9 @@ if not _TEST_DATABASE_URL:
 # 아무 것도 복제하지 않고 기존과 동일하게 TEST_DATABASE_URL을 그대로 쓴다.
 _WORKER_ID = os.environ.get("PYTEST_XDIST_WORKER", "master")
 if _WORKER_ID != "master":
+    # 일회용 클론(tests/support/db.template_database_url)이 살아있는 워커 DB가 아닌
+    # 원본 템플릿에서 복제할 수 있도록, 갈아끼우기 전 URL을 남겨 둔다.
+    os.environ[TEMPLATE_DATABASE_URL_ENV] = _TEST_DATABASE_URL
     _TEST_DATABASE_URL = asyncio.run(ensure_worker_database(_TEST_DATABASE_URL, _WORKER_ID))
 
 # Do not use an operator's credentials even if their shell or local .env has
