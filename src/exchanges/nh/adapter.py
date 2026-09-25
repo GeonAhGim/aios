@@ -39,6 +39,7 @@ from src.exchanges.common.oauth_http import MonotonicTokenCache
 from src.exchanges.common.transport import ResilientTransport
 from src.exchanges.common.types import ExchangeCapability, MarketHours
 from src.exchanges.nh.account_mixin import NHAccountMixin
+from src.exchanges.nh.credit_reserved_mixin import NHCreditReservedMixin
 from src.exchanges.nh.market_data_mixin import NHMarketDataMixin
 from src.exchanges.nh.trading_mixin import NHTradingMixin
 from src.exchanges.nh.venue_profile import NH_KR_EQUITY_PROFILE
@@ -207,6 +208,7 @@ class NHAdapter(
     NHMarketDataMixin,
     NHAccountMixin,
     NHTradingMixin,
+    NHCreditReservedMixin,
     NHWebSocketMixin,
     ExchangeAdapter,
 ):
