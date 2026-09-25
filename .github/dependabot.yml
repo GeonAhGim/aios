@@ -11,6 +11,17 @@ updates:
     schedule:
       interval: weekly
     open-pull-requests-limit: 10
+    groups:
+      # react와 react-dom은 정확히 같은 버전이어야 한다(react.dev/warnings/version-mismatch).
+      # 따로 올라온 #71(react 19.3)·#57(react-dom 19.3)은 각각 단독으로는 vitest 195개
+      # 파일 전부가 "Incompatible React versions"로 깨졌다. 런타임 두 패키지와 타입 두
+      # 패키지를 한 PR로 묶는다.
+      react:
+        patterns:
+          - "react"
+          - "react-dom"
+          - "@types/react"
+          - "@types/react-dom"
     ignore:
       # task-5308: vitest 5.x breaks `tsc -b` across ~140 test files — @testing-library/jest-dom's
       # `vitest.d.ts` module augmentation still declares `interface Assertion<T = any>` (one
