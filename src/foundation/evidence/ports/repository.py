@@ -1,13 +1,15 @@
 """Audit Event repository port. The domain knows only this Protocol; actual
 implementations (adapters/) remain unknown to it (Rule 71 §4)."""
+
 from __future__ import annotations
 
-from typing import Protocol
+from typing import Protocol, runtime_checkable
 from uuid import UUID
 
 from src.foundation.evidence.domain.models import AuditEvent, Classification, Outcome
 
 
+@runtime_checkable
 class AuditEventRepository(Protocol):
     async def append_event(
         self,
