@@ -394,6 +394,7 @@ def test_currency_country_mic_validator_failure_injection_fails_closed(
         _sample_instrument(mic="XNAS")
 
 
+@pytest.mark.perf
 def test_bulk_instrument_construction_completes_within_latency_budget() -> None:
     """Numeric performance assertion: constructing a large symbol-master
     page must not become a bottleneck for callers (DC-2 symbol_master,

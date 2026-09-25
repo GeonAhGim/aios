@@ -10,7 +10,9 @@ RATCHET-split(task-4222) — 원래 `test_db_schema.py`(1176줄) 단일 파일�
 redefinition으로 걸린다).
 """
 
+from collections.abc import AsyncGenerator as AbcAsyncGenerator
 from pathlib import Path
+from typing import TYPE_CHECKING
 from uuid import uuid4
 
 import asyncpg
@@ -18,6 +20,9 @@ import pytest
 from dotenv import dotenv_values
 from sqlalchemy.ext.asyncio import create_async_engine
 from sqlalchemy.pool import NullPool
+
+if TYPE_CHECKING:
+    from sqlalchemy.ext.asyncio import AsyncConnection
 
 
 def _database_url() -> str:
@@ -28,7 +33,7 @@ def _database_url() -> str:
 
 
 @pytest.fixture
-async def db_conn():
+async def db_conn() -> AbcAsyncGenerator["AsyncConnection", None]:
     # 이벤트 루프마다 새 엔진 필요 — pytest-asyncio가 테스트별 새 루프를 만들고
     # asyncpg 커넥션은 루프에 종속되기 때문(NullPool로 커넥션 재사용 방지).
     engine = create_async_engine(_database_url(), poolclass=NullPool)
@@ -38,7 +43,7 @@ async def db_conn():
 
 
 @pytest.fixture
-async def raw_conn():
+async def raw_conn() -> AbcAsyncGenerator[asyncpg.Connection, None]:
     """LC-6 트랜잭션·롤 테스트용 — deferred 트리거의 커밋 시점 동작과
     `SET ROLE`은 asyncpg 원시 커넥션(`test_db_roles.py`와 동일 패턴)으로만
     직접 검증할 수 있다(SQLAlchemy `AsyncConnection`은 커밋 시점을 감춘다)."""

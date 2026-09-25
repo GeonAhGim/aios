@@ -12,6 +12,8 @@ dependencies = [
     "pydantic>=2.9",
     "sqlalchemy[asyncio]>=2.0",
     "asyncpg>=0.30",
+    "redis>=5,<9",
+    "lightgbm>=4.3,<5",  # src/foundation/ml/adapters/local_trainer.py(task-2655) — 미선언 의존성, CTO 2026-09-25  # src/core/event_bus/redis_streams.py — CTO 2026-09-25: 로컬 venv에만 수동 설치돼 GitHub mypy import-not-found
     "alembic>=1.13",
     "pyjwt>=2.9",
     "argon2-cffi>=23.1",
@@ -171,6 +173,12 @@ extend-immutable-calls = ["fastapi.Depends", "fastapi.Query", "fastapi.Path", "f
 # ledger/positions/trust application/**: it holds the transaction boundary
 # across a lock-then-conditional-update sequence). ems domain/** stays pure.
 "src/foundation/ems/application/**" = ["TID251"]
+# task-6510 -- personal_daily_loss_monitor.py/personal_risk_snapshot_source.py
+# are the always-on periodic caller reading `positions`' NAV chain via a raw
+# `asyncpg.Pool` (no order/context to route through a port for a caller-less
+# tick). Same reasoning as ledger/positions/trust/mandates/ems application/**
+# above -- risk domain/** stays pure, only application/** is exempted.
+"src/foundation/risk/application/**" = ["TID251"]
 "src/main.py" = ["TID251"]
 "src/services/*.py" = ["TID251"]
 "src/services/execution_loop/**" = ["TID251"]
@@ -257,6 +265,7 @@ extend-immutable-calls = ["fastapi.Depends", "fastapi.Query", "fastapi.Path", "f
 "src/exchanges/kis/account_mixin.py" = ["ARG002"]
 "src/exchanges/nh/account_mixin.py" = ["ARG002"]
 "src/foundation/ai/gateway/adapters/postgres_confirm_ticket_repository.py" = ["S101"]
+"src/foundation/backtest/application/quick_backtest.py" = ["S101"]
 "src/foundation/ai/gateway/adapters/postgres_token_repository.py" = ["S101"]
 "src/foundation/ai/gateway/application/revoke_token.py" = ["S101"]
 "src/foundation/ai/gateway/contracts/v1.py" = ["S105"]
@@ -332,4 +341,15 @@ ignore_missing_imports = true
 [[tool.mypy.overrides]]
 # task-4036 IND-11: pandas-stubs is not installed; pandas_ta_classic ships no py.typed marker.
 module = ["pandas.*", "pandas_ta_classic.*"]
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+# task-6382 RD-15: types-defusedxml is not installed in this environment.
+module = "defusedxml.*"
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+# task-6774: types-psutil is not installed; psutil is an optional
+# perf_budget fixture dependency (tests/conftest.py), not a hard one.
+module = "psutil.*"
 ignore_missing_imports = true

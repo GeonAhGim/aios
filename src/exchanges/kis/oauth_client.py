@@ -171,7 +171,10 @@ class _KISTokenTransportMixin:
             transport = self._tr_group_transports.get(group)
             if transport is None:
                 bucket = build_token_bucket(
-                    self._account_type(), tr_id, observer=self._rate_limit_observer
+                    self._account_type(),
+                    tr_id,
+                    observer=self._rate_limit_observer,
+                    sleep=self._sleep_fn,
                 )
                 transport = ResilientTransport(
                     venue="kis", rate_limiter=bucket, sleep=self._sleep_fn

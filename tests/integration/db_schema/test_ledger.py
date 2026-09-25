@@ -6,6 +6,7 @@ Spec: 04_db_schema_v1.7.md.
 """
 
 from datetime import datetime, timedelta, timezone
+from typing import TYPE_CHECKING
 from uuid import uuid4
 
 import asyncpg
@@ -13,6 +14,9 @@ import pytest
 from sqlalchemy import text
 
 from src.foundation.ledger.contracts.v1 import AccountType
+
+if TYPE_CHECKING:
+    from sqlalchemy.ext.asyncio import AsyncConnection
 from src.foundation.ledger.domain.chart_of_accounts import (
     PLATFORM_CASH_CLEARING,
     PLATFORM_COMMISSION_REVENUE,
@@ -34,7 +38,7 @@ LEDGER_CORE_TABLES = {
 PLATFORM_HOUSE_USER_ID = "00000000-0000-0000-0000-000000000001"
 
 
-async def test_ledger_core_tables_exist(db_conn) -> None:
+async def test_ledger_core_tables_exist(db_conn: "AsyncConnection") -> None:
     result = await db_conn.execute(
         text(
             "SELECT table_name FROM information_schema.tables "
@@ -47,7 +51,9 @@ async def test_ledger_core_tables_exist(db_conn) -> None:
 
 
 @pytest.mark.parametrize("table", ["ledger_journal_entry", "ledger_posting_line"])
-async def test_ledger_entry_and_line_worm_revoked_from_public(db_conn, table: str) -> None:
+async def test_ledger_entry_and_line_worm_revoked_from_public(
+    db_conn: "AsyncConnection", table: str
+) -> None:
     result = await db_conn.execute(
         text(
             "SELECT privilege_type FROM information_schema.table_privileges "
@@ -60,7 +66,7 @@ async def test_ledger_entry_and_line_worm_revoked_from_public(db_conn, table: st
     assert "DELETE" not in granted
 
 
-async def test_ledger_platform_and_house_accounts_seeded(db_conn) -> None:
+async def test_ledger_platform_and_house_accounts_seeded(db_conn: "AsyncConnection") -> None:
     """계정코드·유형이 `domain/chart_of_accounts.py`(LC-2)의 상수와 어긋나면
     LC-9(post_entry)가 계정을 못 찾거나 잘못된 부호로 분개한다 — 마이그레이션
     시드값이 도메인 모듈과 같은 값인지 여기서 고정한다."""
@@ -87,7 +93,9 @@ async def test_ledger_platform_and_house_accounts_seeded(db_conn) -> None:
         assert row.allow_negative is False, code
 
 
-async def test_ledger_balance_seeded_for_platform_and_house_accounts(db_conn) -> None:
+async def test_ledger_balance_seeded_for_platform_and_house_accounts(
+    db_conn: "AsyncConnection",
+) -> None:
     """balance/held/pending_payout는 시드 시점엔 0이지만, 같은 TEST_DATABASE_URL을
     공유하는 test_post_entry.py/test_backfill.py 등이 이 플랫폼 계정으로 실제
     커밋되는 분개를 내며 값을 바꾼다(전체 스위트 실행 순서에 따라 값이 달라짐) —
@@ -115,7 +123,7 @@ async def test_ledger_balance_seeded_for_platform_and_house_accounts(db_conn) ->
         assert row.allow_negative is False
 
 
-async def test_ledger_control_singleton_seeded(db_conn) -> None:
+async def test_ledger_control_singleton_seeded(db_conn: "AsyncConnection") -> None:
     result = await db_conn.execute(text("SELECT id, write_frozen FROM ledger_control"))
     rows = list(result)
     assert len(rows) == 1
@@ -123,7 +131,7 @@ async def test_ledger_control_singleton_seeded(db_conn) -> None:
     assert rows[0].write_frozen is False
 
 
-async def test_unbalanced_entry_fails_at_commit(raw_conn) -> None:
+async def test_unbalanced_entry_fails_at_commit(raw_conn: asyncpg.Connection) -> None:
     """§4.4 deferred constraint trigger — Σ차변 != Σ대변인 분개는 개별
     INSERT가 아니라 COMMIT 시점에 실패해야 한다(entry의 모든 행이 다
     들어온 뒤에야 판정 가능하므로)."""
@@ -153,7 +161,7 @@ async def test_unbalanced_entry_fails_at_commit(raw_conn) -> None:
             )
 
 
-async def test_multi_currency_entry_fails_at_commit(raw_conn) -> None:
+async def test_multi_currency_entry_fails_at_commit(raw_conn: asyncpg.Connection) -> None:
     """§4.4 deferred constraint trigger의 두 번째 판정 분기 — 같은 entry에
     서로 다른 통화의 posting line이 섞이면(금액이 맞아떨어져도) COMMIT
     시점에 실패해야 한다. `test_unbalanced_entry_fails_at_commit`은 차대
@@ -184,18 +192,31 @@ async def test_multi_currency_entry_fails_at_commit(raw_conn) -> None:
             )
 
 
-async def test_balanced_entry_commits_successfully(raw_conn) -> None:
+async def test_balanced_entry_commits_successfully(raw_conn: asyncpg.Connection) -> None:
     """위 테스트의 대조군 — deferred 트리거가 균형 잡힌 분개까지 잘못
-    막지 않는지 확인한다."""
-    audit_event_id = await insert_audit_event(raw_conn)
-    entry_id = await insert_ledger_entry(raw_conn, audit_event_id=audit_event_id)
-    accounts = await raw_conn.fetch(
-        "SELECT account_id, account_code FROM ledger_account WHERE account_code = ANY($1::text[])",
-        [PLATFORM_CASH_CLEARING, PLATFORM_COMMISSION_REVENUE],
-    )
-    account_id = {row["account_code"]: row["account_id"] for row in accounts}
+    막지 않는지 확인한다.
 
-    async with raw_conn.transaction():
+    task-5687: 여기서 참조하는 `PLATFORM_CASH_CLEARING`/`PLATFORM_COMMISSION_REVENUE`는
+    `post_entry`(LC-9) 없이 저널에 실제 커밋되면 `ledger_balance`가 갱신되지
+    않아 FA-15 replay_verify가 영구적으로 오탐(false MISMATCH)한다(task-5309와
+    동일한 결함 패턴 — TEST_DATABASE_URL은 스위트 실행마다 리셋되지 않는다).
+    `test_perf_journal.py`의 `_append_without_persisting`(task-5599)와 같은
+    convention으로, 바깥 트랜잭션을 절대 커밋하지 않고 롤백한다 — deferred
+    트리거는 `SET CONSTRAINTS ALL IMMEDIATE`로 실제 COMMIT 없이 즉시 평가해
+    "균형 잡힌 분개를 트리거가 막지 않는다"는 이 테스트의 주장을 그대로
+    검증한다."""
+    tx = raw_conn.transaction()
+    await tx.start()
+    try:
+        audit_event_id = await insert_audit_event(raw_conn)
+        entry_id = await insert_ledger_entry(raw_conn, audit_event_id=audit_event_id)
+        accounts = await raw_conn.fetch(
+            "SELECT account_id, account_code FROM ledger_account "
+            "WHERE account_code = ANY($1::text[])",
+            [PLATFORM_CASH_CLEARING, PLATFORM_COMMISSION_REVENUE],
+        )
+        account_id = {row["account_code"]: row["account_id"] for row in accounts}
+
         await raw_conn.execute(
             "INSERT INTO ledger_posting_line "
             "(entry_id, line_no, account_id, side, amount, currency) "
@@ -210,14 +231,17 @@ async def test_balanced_entry_commits_successfully(raw_conn) -> None:
             entry_id,
             account_id[PLATFORM_COMMISSION_REVENUE],
         )
+        await raw_conn.execute("SET CONSTRAINTS ALL IMMEDIATE")
 
-    row = await raw_conn.fetchrow(
-        "SELECT entry_id FROM ledger_journal_entry WHERE entry_id = $1", entry_id
-    )
-    assert row is not None
+        row = await raw_conn.fetchrow(
+            "SELECT entry_id FROM ledger_journal_entry WHERE entry_id = $1", entry_id
+        )
+        assert row is not None
+    finally:
+        await tx.rollback()
 
 
-async def test_aios_app_cannot_update_ledger_journal_entry(raw_conn) -> None:
+async def test_aios_app_cannot_update_ledger_journal_entry(raw_conn: asyncpg.Connection) -> None:
     audit_event_id = await insert_audit_event(raw_conn)
     entry_id = await insert_ledger_entry(raw_conn, audit_event_id=audit_event_id)
 
@@ -230,15 +254,22 @@ async def test_aios_app_cannot_update_ledger_journal_entry(raw_conn) -> None:
             )
 
 
-async def test_aios_app_cannot_delete_ledger_posting_line(raw_conn) -> None:
-    audit_event_id = await insert_audit_event(raw_conn)
-    entry_id = await insert_ledger_entry(raw_conn, audit_event_id=audit_event_id)
-    accounts = await raw_conn.fetch(
-        "SELECT account_id, account_code FROM ledger_account WHERE account_code = ANY($1::text[])",
-        [PLATFORM_CASH_CLEARING, PLATFORM_COMMISSION_REVENUE],
-    )
-    account_id = {row["account_code"]: row["account_id"] for row in accounts}
-    async with raw_conn.transaction():
+async def test_aios_app_cannot_delete_ledger_posting_line(raw_conn: asyncpg.Connection) -> None:
+    """task-5687: `test_balanced_entry_commits_successfully`와 동일한 이유로
+    바깥 트랜잭션은 절대 커밋하지 않는다 — 삭제 시도용 posting line도 같은
+    바깥 트랜잭션 안에서 같은 세션이 만들었으므로(MVCC 동일 트랜잭션
+    가시성) 실제 COMMIT 없이도 DELETE 대상으로 보인다."""
+    tx = raw_conn.transaction()
+    await tx.start()
+    try:
+        audit_event_id = await insert_audit_event(raw_conn)
+        entry_id = await insert_ledger_entry(raw_conn, audit_event_id=audit_event_id)
+        accounts = await raw_conn.fetch(
+            "SELECT account_id, account_code FROM ledger_account "
+            "WHERE account_code = ANY($1::text[])",
+            [PLATFORM_CASH_CLEARING, PLATFORM_COMMISSION_REVENUE],
+        )
+        account_id = {row["account_code"]: row["account_id"] for row in accounts}
         await raw_conn.execute(
             "INSERT INTO ledger_posting_line "
             "(entry_id, line_no, account_id, side, amount, currency) "
@@ -253,11 +284,16 @@ async def test_aios_app_cannot_delete_ledger_posting_line(raw_conn) -> None:
             entry_id,
             account_id[PLATFORM_COMMISSION_REVENUE],
         )
+        await raw_conn.execute("SET CONSTRAINTS ALL IMMEDIATE")
 
-    with pytest.raises(asyncpg.RaiseError, match="append-only violation"):
-        async with raw_conn.transaction():
-            await raw_conn.execute("SET ROLE aios_app")
-            await raw_conn.execute("DELETE FROM ledger_posting_line WHERE entry_id = $1", entry_id)
+        with pytest.raises(asyncpg.RaiseError, match="append-only violation"):
+            async with raw_conn.transaction():
+                await raw_conn.execute("SET ROLE aios_app")
+                await raw_conn.execute(
+                    "DELETE FROM ledger_posting_line WHERE entry_id = $1", entry_id
+                )
+    finally:
+        await tx.rollback()
 
 
 # --- LC-7 (4a1d0c0de006_ledger_holds_payouts) ------------------------------
@@ -270,7 +306,7 @@ LEDGER_HOLDS_PAYOUTS_TABLES = {
 }
 
 
-async def test_ledger_holds_payouts_tables_exist(db_conn):
+async def test_ledger_holds_payouts_tables_exist(db_conn: "AsyncConnection") -> None:
     result = await db_conn.execute(
         text(
             "SELECT table_name FROM information_schema.tables "
@@ -282,14 +318,16 @@ async def test_ledger_holds_payouts_tables_exist(db_conn):
     assert found == LEDGER_HOLDS_PAYOUTS_TABLES
 
 
-async def _cash_clearing_account_id(conn: asyncpg.Connection):
+async def _cash_clearing_account_id(conn: asyncpg.Connection) -> object:
     return await conn.fetchval(
         "SELECT account_id FROM ledger_account WHERE account_code = $1",
         PLATFORM_CASH_CLEARING,
     )
 
 
-async def test_ledger_hold_duplicate_purpose_reference_rejected(raw_conn):
+async def test_ledger_hold_duplicate_purpose_reference_rejected(
+    raw_conn: asyncpg.Connection,
+) -> None:
     """LC-7 DoD — UNIQUE(purpose, reference) negative: 같은 (purpose, reference)
     쌍은 두 번째 홀드 생성 시도를 막아야 한다(이중 홀드 방지)."""
     audit_event_id = await insert_audit_event(raw_conn)
@@ -322,7 +360,7 @@ async def test_ledger_hold_duplicate_purpose_reference_rejected(raw_conn):
         )
 
 
-async def test_ledger_hold_invalid_state_rejected(raw_conn):
+async def test_ledger_hold_invalid_state_rejected(raw_conn: asyncpg.Connection) -> None:
     """LC-7 DoD — state CHECK negative: `HoldState`(§4.5)에 없는 값은 DB
     레벨에서 거부되어야 한다(도메인 검증 우회 시 최후 방어선)."""
     audit_event_id = await insert_audit_event(raw_conn)
@@ -343,7 +381,7 @@ async def test_ledger_hold_invalid_state_rejected(raw_conn):
         )
 
 
-async def test_aios_app_cannot_update_ledger_integrity_check(raw_conn):
+async def test_aios_app_cannot_update_ledger_integrity_check(raw_conn: asyncpg.Connection) -> None:
     """LC-7 DoD — `ledger_integrity_check`는 WORM: `aios_app` 롤로 UPDATE를
     시도하면 append-only 가드 트리거가 막아야 한다(LC-6 패턴과 동일)."""
     check_id = await raw_conn.fetchval(

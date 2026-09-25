@@ -1,12 +1,13 @@
-"""DC-5 — 심볼 마스터(`Instrument`/`VenueListing`) 저장 포트.
+"""DC-5 — Symbol master (`Instrument`/`VenueListing`) persistence port.
 
 Spec: docs/specs/L4_analytics_authoring_backtest_marketplace_v1.0.md
-§2.1 DC-5, §3.2(계약), §4.1·§4.2(불변조건), §9.2 DC-5.
+§2.1 DC-5, §3.2(contract), §4.1·§4.2(invariants), §9.2 DC-5.
 
-domain/application은 이 Protocol만 알고 실제 구현(adapters/storage/*)은
-모른다(71번 §4). `contracts/v2/instruments`(DC-1)를 그대로 쓴다 —
-`instrument_id` 불변, `venue_listings` 기간 겹침 금지(§4.1)는 DB의 EXCLUDE
-제약(DC-4)이 실제로 강제하고 이 Protocol은 계약 형태만 표현한다.
+domain/application knows only this Protocol and not the actual
+implementation (adapters/storage/*) (71 §4). Reuses `contracts/v2/instruments`(DC-1) as-is —
+`instrument_id` is immutable, and the prohibition on overlapping `venue_listings` periods (§4.1) is
+actually enforced by the DB EXCLUDE constraint (DC-4); this Protocol
+expresses only the contract shape.
 """
 from __future__ import annotations
 
@@ -26,12 +27,12 @@ from src.foundation.market_data.contracts.v2.instruments import (
 @runtime_checkable
 class InstrumentRepository(Protocol):
     async def get(self, conn: asyncpg.Connection, instrument_id: str) -> Instrument | None:
-        """없으면 `None`."""
+        """`None` if not found."""
         ...
 
     async def create(self, conn: asyncpg.Connection, instrument: Instrument) -> Instrument:
-        """신규 발급. 같은 `instrument_id` 재삽입은 어댑터가 예외를 던진다
-        (§4.1 `instrument_id` 불변 — 이 메서드에 UPDATE 경로는 없다)."""
+        """Issue a new record. The adapter raises on re-insertion of the same
+        `instrument_id` (§4.1 `instrument_id` immutable — no UPDATE path on this method)."""
         ...
 
     async def update_lifecycle_state(
@@ -42,24 +43,26 @@ class InstrumentRepository(Protocol):
         expected_state: InstrumentLifecycle,
         state: InstrumentLifecycle,
     ) -> Instrument:
-        """§4.2 전이표를 이미 통과한 결과만 여기로 온다 — 전이 자체의 검증은
-        DC-3(`domain/instruments/lifecycle.py`) 소관, 이 메서드는 저장만.
+        """§4.2 Only results that have already passed the transition table arrive here —
+        validation of the transition itself is DC-3's (`domain/instruments/lifecycle.py`)
+        responsibility; this method only persists.
 
-        `expected_state`는 호출자가 전이 판정 직전에 읽은 현재 상태 그대로
-        전달해야 한다(105번 동시성 표준) — 어댑터는 이를 UPDATE의 WHERE 조건으로
-        걸어, 판정과 쓰기 사이에 다른 트랜잭션이 먼저 상태를 바꾼 경우
-        `ConcurrencyConflictError`로 fail-closed 거부한다."""
+        `expected_state` must be passed as-is from the caller's current state read
+        just before the transition decision (105 concurrency standard) — the adapter uses
+        it as the WHERE condition of the UPDATE, and rejects with
+        `ConcurrencyConflictError` (fail-closed) if another transaction changed the
+        state between the decision and the write."""
         ...
 
     async def get_listing(
         self, conn: asyncpg.Connection, venue: Venue, venue_symbol: str, at: AwareDatetime
     ) -> VenueListing | None:
-        """`at` 시점에 유효한(`listed_at <= at`이고 `delisted_at`이 `NULL`이거나
-        `at` 이후인) listing. 없으면 `None`."""
+        """Listing valid at `at` (`listed_at <= at` and `delisted_at` is `NULL` or
+        after `at`). `None` if not found."""
         ...
 
     async def add_listing(self, conn: asyncpg.Connection, listing: VenueListing) -> VenueListing:
-        """심볼 변경은 구 listing에 `delisted_at`을 채운 뒤 새 listing을
-        추가하는 방식(§3.2) — 이 메서드는 추가만 하고, 구 listing 종료는
-        호출자가 별도로 한다."""
+        """Symbol changes use the approach of filling `delisted_at` on the old listing then
+        adding a new one (§3.2) — this method only performs the addition; the caller
+        closes the old listing separately."""
         ...

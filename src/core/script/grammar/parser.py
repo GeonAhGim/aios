@@ -3,7 +3,7 @@
 Spec: L4_analytics_authoring_backtest_marketplace_v1.0.md §3.3(문법 전
 프로덕션), §9.4(DSL-3), §2.4(상한 280줄). DSL-2 `tokenize()` 토큰만
 입력으로 받고 DSL-1 `ast.py` 노드만 출력한다(decision: 재구현 금지).
-문법표 밖 프로덕션(반복문·`security()`류, ta/math/series 밖 네임스페이스,
+문법표 밖 프로덕션(반복문·`security()`류, ta/math/series/strategy 밖 네임스페이스,
 변수·음수 postfix 인덱스)은 노드를 만들지 않고 전부 `SCRIPT_SYNTAX`(렉서의
 `ScriptSyntaxError` 재사용 — taxonomy를 늘리지 않는다)로 (line, col)과
 함께 거부한다. 타입·미래참조·리소스 검사는 DSL-4/5/6 몫이라 선취하지

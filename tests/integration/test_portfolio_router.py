@@ -18,9 +18,12 @@ from src.api.deps import get_pool
 from src.api.service_deps import get_credential_resolver, get_exchange_credential_service
 from src.core.security.key_ring import KeyRing
 from src.exchanges.common.types import ExchangeCapability
+from src.foundation.mandates.adapters.postgres_repository import PostgresMandateRepository
+from src.foundation.trust.adapters.postgres_repository import PostgresTrustRepository
 from src.main import app
 from src.services.credential_resolver import CredentialResolver
 from src.services.exchange_credential_service import ExchangeCredentialService
+from tests.foundation.integration.risk_gate.conftest import activate_mandate_with_defaults
 
 STRONG_PASSWORD = "Str0ng!Passw0rd"
 ENCRYPTION_KEY = "44" * 32
@@ -127,6 +130,18 @@ async def _link_credential(client, headers):
     )
 
 
+async def _activate_mandate(pool, owner_user_id: str) -> None:
+    """execution_deps.py의 pre_start_gate가 require_mandate=True로 배선돼
+    있어(task-3369 H-1b), mandate 없이 /start를 호출하면 RISK_MANDATE_REQUIRED로
+    DENY된다 — 라우터 테스트도 unit 테스트(test_execution_service_risk_gate.py)와
+    동일하게 tenant에 ACTIVE mandate를 먼저 붙여야 한다."""
+    mandate_repo = PostgresMandateRepository(pool)
+    trust_repo = PostgresTrustRepository(pool)
+    await activate_mandate_with_defaults(
+        mandate_repo, trust_repo, tenant_id=uuid.UUID(owner_user_id)
+    )
+
+
 async def _create_approved_strategy(pool, owner_user_id, *, certified_badge=False):
     strategy_id = f"test-strategy-{uuid.uuid4().hex[:8]}"
     version = "1.0.0"
@@ -164,6 +179,7 @@ async def test_portfolio_with_no_executions_is_all_unallocated_cash(client):
 async def test_portfolio_reflects_running_execution(client, pool):
     headers, user_id = await _register(client)
     await _link_credential(client, headers)
+    await _activate_mandate(pool, user_id)
     strategy_id, version = await _create_approved_strategy(pool, user_id)
 
     create_response = await client.post(
@@ -195,6 +211,7 @@ async def test_portfolio_reflects_running_execution(client, pool):
 async def test_rebalance_decrease_needs_no_approval(client, pool):
     headers, user_id = await _register(client)
     await _link_credential(client, headers)
+    await _activate_mandate(pool, user_id)
     strategy_id, version = await _create_approved_strategy(pool, user_id)
     create_response = await client.post(
         "/executions",
@@ -226,6 +243,7 @@ async def test_rebalance_decrease_needs_no_approval(client, pool):
 async def test_rebalance_over_cash_balance_rejected(client, pool):
     headers, user_id = await _register(client)
     await _link_credential(client, headers)
+    await _activate_mandate(pool, user_id)
     strategy_id, version = await _create_approved_strategy(pool, user_id)
     create_response = await client.post(
         "/executions",

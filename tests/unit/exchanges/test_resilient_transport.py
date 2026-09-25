@@ -214,6 +214,7 @@ async def test_circuit_open_never_consumes_rate_limit_token_gate_red_regression(
     assert spy_bucket.acquire_calls == 0  # 회귀 시 >=1이 되어 적색
 
 
+@pytest.mark.perf
 async def test_circuit_open_fast_fail_latency_bound_under_load() -> None:
     """수치 성능 단언 — 서킷 OPEN 상태의 fast-fail 경로는 네트워크 I/O가
     전혀 없어야 하므로, 동시 200건을 처리해도 실측 벽시계 지연이 명시적

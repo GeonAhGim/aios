@@ -1,12 +1,8 @@
 """Task series 16xx — creation/recovery/cancellation of main.py lifespan's background loops
 (heartbeat/alert/risk_guard/execution_loop/safety/liquidation/post_trade_batch).
-
-Spec: 16_backend_signatures.md, ADR-2026-08-10-B, P6 (300-line file cap),
-L4_compliance_and_regulatory_v1.0.md#9 CM-11.
-
+Spec: 16_backend_signatures.md, ADR-2026-08-10-B, P6 (300-line cap), CM-11.
 Deviation: task-117 wanted src/app/background_loops.py, but .aios-zone doesn't declare src/app/**
 (P8 -- agents may not modify zone policy), so this lives under src/services/** (SCAFFOLD) instead.
-
 main.py assembles pool/event_bus/credential_resolver etc. and passes them to
 :func:`start_background_loops`. On shutdown it calls only the returned
 :class:`BackgroundLoops`.stop. Every loop is instrumented via `LoopHealth.record_tick`, except
@@ -55,6 +51,7 @@ from src.services.oms.application.restart_recovery import make_recovery_gate
 from src.services.oms.application.wiring import start_outbox_dispatcher_task
 from src.services.order_service import fenced_submit_wiring as fsw
 from src.services.order_service.foundation_gate import make_foundation_pre_submit_gate
+from src.services.personal_daily_loss_loop import start_personal_daily_loss_monitor_task
 from src.services.risk_guard_service import RiskGuardService
 from src.services.safety.circuit_breaker_loop import (
     MetricsHistory,
@@ -67,11 +64,11 @@ from src.services.safety.reference_quotes import DefaultDistrustProviderFactory
 
 logger = logging.getLogger(__name__)
 
-HEARTBEAT_INTERVAL_SECONDS = 2.0  # Draft — watchdog_process.py의 5초 폴링 주기보다 짧게
-ALERT_EVALUATION_INTERVAL_SECONDS = 60.0  # Draft — 가격/지표 알림 평가 주기
-RISK_GUARD_INTERVAL_SECONDS = 30.0  # Draft — 손실 한도 자동정지 평가 주기
-SAFETY_REACTIVATION_INTERVAL_SECONDS = 10.0  # Draft — Circuit Breaker 재가동 승인 반영 주기
-LIQUIDATION_WORKER_INTERVAL_SECONDS = 3.0  # Draft — slice.not_before 최소 간격(2s)보다 촘촘히
+HEARTBEAT_INTERVAL_SECONDS = 2.0  # Draft — shorter than watchdog_process.py's 5s poll interval
+ALERT_EVALUATION_INTERVAL_SECONDS = 60.0  # Draft — price/indicator alert evaluation interval
+RISK_GUARD_INTERVAL_SECONDS = 30.0  # Draft — loss-limit auto-stop evaluation interval
+SAFETY_REACTIVATION_INTERVAL_SECONDS = 10.0  # Draft — circuit breaker reactivation approval
+LIQUIDATION_WORKER_INTERVAL_SECONDS = 3.0  # Draft — tighter than slice.not_before's min (2s)
 POST_TRADE_BATCH_INTERVAL_SECONDS = 86400.0  # task-2616 -- CM-11 once daily (was 3600.0/hourly)
 
 
@@ -83,7 +80,7 @@ def flag_enabled(name: str) -> bool:
 
 @dataclass
 class BackgroundLoops:
-    """lifespan이 시작·정지시키는 백그라운드 태스크 묶음."""
+    """Bundle of background tasks that lifespan starts and stops."""
 
     execution_scheduler: ExecutionLoopScheduler
     lease_repo: ExecutionLeaseRepository
@@ -97,8 +94,8 @@ class BackgroundLoops:
         for task in self.tasks:
             with contextlib.suppress(asyncio.CancelledError):
                 await task
-        # §6 — 정상 종료는 TTL을 기다리지 않고 즉시 리스를 넘긴다(execution_loop_task를 먼저
-        # 취소했으므로 release 이후 새 리스를 다시 획득하는 레이스는 없다).
+        # §6 — a graceful shutdown hands off the lease immediately instead of waiting for the TTL
+        # (execution_loop_task cancelled first, so no race re-acquires a lease after release).
         await self.lease_repo.release_all(self.owner_id)
 
 
@@ -106,7 +103,7 @@ async def _run_instrumented(
     name: str, interval_sec: float, tick: Callable[[], Awaitable[Any]], *,
     health: LoopHealth, on_error: str,
 ) -> None:
-    """PLT-08 공용 계측 래퍼 — 예외는 여기서 삼키고(로그만) 루프는 죽지 않는다."""
+    """PLT-08 shared instrumentation wrapper — swallows exceptions (logs only) so loop survives."""
     start = time.monotonic()
     ok = True
     try:
@@ -123,7 +120,7 @@ async def run_periodic_loop(
     name: str, interval_sec: float, tick: Callable[[], Awaitable[Any]], *,
     health: LoopHealth, on_error: str,
 ) -> None:
-    """`sleep(interval_sec)` → 계측된 tick 1회, 무한 반복(export — main.py도 직접 쓴다)."""
+    """`sleep(interval_sec)` -> one instrumented tick, forever (exported — main.py uses it too)."""
     while True:
         await asyncio.sleep(interval_sec)
         await _run_instrumented(name, interval_sec, tick, health=health, on_error=on_error)
@@ -143,9 +140,9 @@ async def start_background_loops(
     health = health if health is not None else loop_health()
 
     async def _heartbeat_loop() -> None:
-        """FD-9.1 — watchdog_process.py가 메인 프로세스 생사를 판정하는 유일한 신호
-        (파일 타임스탬프). 다른 루프와 달리 예외를 삼키지 않고 `LoopHealth` 기록 후
-        다시 던져 태스크를 죽인다 — watchdog이 실패를 곧바로 감지하도록."""
+        """FD-9.1 — the only signal watchdog_process.py uses to judge whether the main process
+        is alive (file timestamp). Unlike the other loops, this does not swallow exceptions —
+        it records to `LoopHealth` and re-raises to kill the task so watchdog detects it fast."""
         while True:
             start = time.monotonic()
             ok = True
@@ -164,11 +161,11 @@ async def start_background_loops(
 
     heartbeat_task = asyncio.create_task(_heartbeat_loop())
 
-    # FD-14 — 가격/지표 알림 평가 루프(알림 하나 실패해도 다음 주기로 계속).
+    # FD-14 — price/indicator alert evaluation loop (one alert failing still continues next cycle).
     alert_service = AlertService(
         pool, credential_resolver=credential_resolver, publish=event_bus.publish)
 
-    # 레드팀 #2026-09-02-21 — evaluate_all_active()가 예외를 내도 run_periodic_loop가 잡는다.
+    # Red team #2026-09-02-21 — even if evaluate_all_active() raises, run_periodic_loop catches it.
     alert_task = asyncio.create_task(
         run_periodic_loop(
             "alert_evaluation", ALERT_EVALUATION_INTERVAL_SECONDS,
@@ -177,8 +174,8 @@ async def start_background_loops(
         )
     )
 
-    # R-41 손실 한도(%) 자동 정지 — 실제 정지는 KillSwitchService(R-40)에 위임(전역 자격증명
-    # 없어 exchange_adapters는 빈 매핑). risk_gate_repo는 CM-11 post_trade_batch도 공유한다.
+    # R-41 loss-limit (%) auto-stop — actual stop delegated to KillSwitchService (R-40); no
+    # global credentials, so exchange_adapters is empty. risk_gate_repo is shared by CM-11 too.
     risk_gate_repo = PostgresRiskGateRepository(pool)
     kill_switch_service = KillSwitchService(
         risk_gate_repo=risk_gate_repo, pg_pool=pool,
@@ -187,7 +184,7 @@ async def start_background_loops(
     )
     risk_guard_service = RiskGuardService(pool, kill_switch_service, publish=event_bus.publish)
 
-    # 레드팀 #25 — alert 루프와 같은 방어선(이 호출 자체가 예외를 내면 영구히 죽는다).
+    # Red team #25 — same defense line as the alert loop (a raise here kills it permanently).
     risk_guard_task = asyncio.create_task(
         run_periodic_loop(
             "risk_guard", RISK_GUARD_INTERVAL_SECONDS,
@@ -196,8 +193,12 @@ async def start_background_loops(
         )
     )
 
-    # Doc 05 §5.6 + task-2151(L4-18a) — 백그라운드 루프 전, 1회 startup recovery(실패 시
-    # fail-closed는 recovery_wiring.py 참조).
+    personal_daily_loss_task = start_personal_daily_loss_monitor_task(
+        pool, health=health, run_periodic_loop=run_periodic_loop
+    )
+
+    # Doc 05 §5.6 + task-2151(L4-18a) — one-time startup recovery before the background loops
+    # (see recovery_wiring.py for the fail-closed behavior on failure).
     recovery_state = await run_startup_recovery_gated(
         pool,
         resolve_adapter=credential_resolver.get_adapter,
@@ -228,8 +229,8 @@ async def start_background_loops(
             "execution_loop: AIOS_EXECUTION_LOOP_ENABLED=0 — 실행 루프를 띄우지 않습니다."
         )
     oms_dispatcher_task = start_outbox_dispatcher_task(pool, credential_resolver.get_adapter)
-    # R-45 — 수집→evaluate→recovery_gate→check_reactivation. history는 프로세스 수명 동안
-    # 유지되는 이력 버퍼(안 넘기면 여기서 만든다).
+    # R-45 — collect -> evaluate -> recovery_gate -> check_reactivation. history is a history
+    # buffer kept alive for the process lifetime (created here if not passed in).
     circuit_breaker = CircuitBreakerService(pool, policy.circuit_breaker, publish=event_bus.publish)
     history = (
         reactivation_history
@@ -249,8 +250,8 @@ async def start_background_loops(
         )
     )
 
-    # R-52(task-2358) -- GLOBAL liquidation_request엔 단일 소유 tenant가 없어 exchange별
-    # 매핑(kill_switch_service의 exchange_adapters와 같은 이유).
+    # R-52(task-2358) -- GLOBAL liquidation_request has no single owning tenant, so it maps
+    # per exchange (same reason as kill_switch_service's exchange_adapters).
     liquidation_adapters = {"bitget": BitgetAdapter("", "", "", demo_mode=True)}
 
     async def _liquidation_tick() -> None:
@@ -284,11 +285,9 @@ async def start_background_loops(
             )
         )
 
-    tasks = [heartbeat_task, alert_task, risk_guard_task, safety_task]
-    optional_tasks = (
-        execution_loop_task, oms_dispatcher_task, liquidation_task, post_trade_batch_task,
-    )
-    tasks.extend(t for t in optional_tasks if t is not None)
+    tasks = [heartbeat_task, alert_task, risk_guard_task, safety_task, personal_daily_loss_task]
+    optional = (execution_loop_task, oms_dispatcher_task, liquidation_task, post_trade_batch_task)
+    tasks.extend(t for t in optional if t is not None)
 
     return BackgroundLoops(
         execution_scheduler=execution_scheduler,

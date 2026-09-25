@@ -1,18 +1,19 @@
-"""L01 — TA-Lib 161종 카탈로그: 자동 생성 + 11개 수기 오버라이드.
+"""L01 — TA-Lib 161-category catalog: auto-generated + 11 manual overrides.
 
 Spec: L4_strategy_portfolio_backtest_v1_0.md §2.2 L01,
 L4_analytics_authoring_backtest_marketplace_v1_0.md §9.9 IND-10, §9.11 IND-15.
 
-`TALIB_SPECS`는 `generate_talib_specs()`(161종 자동 생성) 위에
-`_MANUAL_OVERRIDES`(11개 — SMA/EMA/RSI/ATR/CCI/WILLR/MFI/MACD/BBANDS/STOCH/OBV)를
-덮어쓴 것. 오버라이드는 스케일·정밀도·히스토그램 부호 색상 등 표시 세부만 보정.
+{TALIB_SPECS} overlays on top of `generate_talib_specs()` (161 auto-generated types),
+with `_MANUAL_OVERRIDES` (11 — SMA/EMA/RSI/ATR/CCI/WILLR/MFI/MACD/BBANDS/STOCH/OBV)
+applied on top. Overrides only adjust display details such as scale, precision,
+and histogram sign color.
 """
 from __future__ import annotations
 
 from src.core.indicators.generate_specs import TALIB_GROUPS as TALIB_GROUPS
+from src.core.indicators.generate_specs import OutputStyle, generate_talib_specs
 from src.core.indicators.generate_specs import _plot_kind as _plot_kind
 from src.core.indicators.generate_specs import _plots_from_talib as _plots_from_talib
-from src.core.indicators.generate_specs import generate_talib_specs
 from src.core.indicators.spec import IndicatorSpec, ParamSpec
 
 __all__ = ["TALIB_GROUPS", "TALIB_SPECS"]
@@ -31,7 +32,7 @@ def _ma_lookback(p: dict[str, int]) -> int:
 
 
 def _acc_lookback(p: dict[str, int]) -> int:
-    """RSI/ATR/MFI — Wilder 평활화: timeperiod."""
+    """RSI/ATR/MFI — Wilder smoothing: timeperiod."""
     return p["timeperiod"]
 
 
@@ -47,10 +48,11 @@ def _obv_lookback(_p: dict[str, int]) -> int:
     return 0
 
 
-# scale/페인/색상/정밀도/범례는 output_flags에 없어 지표별로 수기 채움.
-_OV: dict[str, object] = {"scale": "overlay", "default_pane": "price"}
-_OSC: dict[str, object] = {"scale": "own", "default_pane": "separate", "precision": 2}
-_OS: dict[str, object] = {"scale": "own", "default_pane": "separate"}
+# scale/pane/color/precision/legend must be filled per-indicator;
+# output_flags lacks these fields.
+_OV: OutputStyle = {"scale": "overlay", "default_pane": "price"}
+_OSC: OutputStyle = {"scale": "own", "default_pane": "separate", "precision": 2}
+_OS: OutputStyle = {"scale": "own", "default_pane": "separate"}
 
 _MANUAL_OVERRIDES: dict[str, IndicatorSpec] = {
     "SMA": IndicatorSpec(

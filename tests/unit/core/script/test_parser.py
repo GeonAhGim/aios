@@ -23,7 +23,6 @@ fail-closed함을 대조)을 추가한다.
 from __future__ import annotations
 
 import sys
-import time
 
 import pytest
 
@@ -48,6 +47,7 @@ from src.core.script.grammar.ast import (
 )
 from src.core.script.grammar.lexer import ScriptSyntaxError
 from src.core.script.grammar.parser import parse
+from tests.conftest import PerfBudget
 
 # ---- §3.3 decl 5종: 파싱 성공 ----
 
@@ -208,11 +208,22 @@ def test_primary_parenthesized_expr() -> None:
     assert decl.expr == BinaryExpr(op="+", left=Identifier(name="a"), right=Identifier(name="b"))
 
 
-@pytest.mark.parametrize("ns", ["ta", "math", "series"])
+@pytest.mark.parametrize("ns", ["ta", "math", "series", "strategy"])
 def test_call_all_namespaces(ns: str) -> None:
     decl = parse(f"let x = {ns}.f(a)").decls[0]
     assert isinstance(decl, LetDecl)
     assert decl.expr == CallExpr(ns=ns, ident="f", args=(Identifier(name="a"),))
+
+
+def test_call_strategy_namespace_parses() -> None:
+    """task-5194: `strategy.*` calls must reach the parser stage (§9.4 DSL-3)
+    so `builtins_strategy.py::StrategyBuiltins` is reachable from real DSL
+    source, not just from tests that build an `IRProgram` directly."""
+    decl = parse("let qty = strategy.set_stop(1, 2)").decls[0]
+    assert isinstance(decl, LetDecl)
+    assert decl.expr == CallExpr(
+        ns="strategy", ident="set_stop", args=(NumberLiteral(value=1), NumberLiteral(value=2))
+    )
 
 
 def test_call_no_args() -> None:
@@ -315,6 +326,18 @@ def test_unknown_namespace_is_script_syntax_at_namespace_position() -> None:
     assert err.col == 9  # 'foo' 위치
 
 
+def test_unregistered_namespace_near_strategy_is_still_script_syntax() -> None:
+    """task-5194: adding `strategy` to `_NAMESPACES` must not widen the
+    whitelist beyond that one name -- a lookalike (`strategies`) stays
+    SCRIPT_SYNTAX."""
+    with pytest.raises(ScriptSyntaxError) as excinfo:
+        parse("let x = strategies.entry(1)")
+    err = excinfo.value
+    assert err.code == "SCRIPT_SYNTAX"
+    assert err.line == 1
+    assert err.col == 9  # 'strategies' 위치
+
+
 def test_unterminated_paren_is_script_syntax_at_eof() -> None:
     with pytest.raises(ScriptSyntaxError) as excinfo:
         parse("let x = (1 + 2")
@@ -413,25 +436,28 @@ def test_deeply_nested_parens_fail_closed_under_low_recursion_limit() -> None:
 # ---- DEEPEN(task-2911): 수치 성능 단언(파싱 지연) ----
 
 
-def test_parse_latency_stays_within_half_of_dsl_compile_budget() -> None:
+@pytest.mark.perf
+def test_parse_latency_stays_within_half_of_dsl_compile_budget(perf_budget: PerfBudget) -> None:
     """ADR-2026-09-09-C Decision 1의 DSL 컴파일 예산은(로컬 기준) 300ms다.
     파서는 그 파이프라인의 한 단계일 뿐이므로 예산 전체를 단독으로 써서는
     안 된다. or/and/cmp/arith/term/postfix/call 계층을 모두 섞은 1000개
     decl짜리 스크립트를 파싱해, 파서 단계 지연이 예산의 절반(150ms) 안에
     머무름을 확인한다 — 선형 이상(이차 이상)의 성능 저하를 조기에
-    드러낸다."""
+    드러낸다. task-7434: process_time 기반 perf_budget으로 측정한다
+    (coverage tracer 정지 포함)."""
     lines = [
         f"let v{i} = ta.rsi(close[{i % 5}], 14) + v{i - 1} * 2 - 1 and v{i - 1} > 0"
         for i in range(1, 1000)
     ]
     source = "let v0 = close\n" + "\n".join(lines)
+    program = None
 
-    start = time.perf_counter()
-    program = parse(source)
-    elapsed = time.perf_counter() - start
+    def _run_once() -> None:
+        nonlocal program
+        program = parse(source)
 
+    perf_budget.assert_within(_run_once, budget_ms=150.0, label="1000-decl parse")
     assert len(program.decls) == 1000
-    assert elapsed < 0.15
 
 
 # ---- DEEPEN(task-2911): 게이트 적색 재현(SCRIPT_SYNTAX 회귀 방지) ----

@@ -153,7 +153,9 @@ class ExecutionLoopScheduler:
         return report
 
     async def _tick_one(self, row: dict[str, object], report: TickReport) -> None:
-        execution_id = int(row["id"])  # type: ignore[call-overload]
+        raw_execution_id = row["id"]
+        assert isinstance(raw_execution_id, int)
+        execution_id = raw_execution_id
         user_id = row["user_id"]
         exchange = str(row["exchange"])
         assert isinstance(user_id, UUID)

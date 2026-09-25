@@ -389,4 +389,11 @@ async def test_replay_fails_closed_when_batch_hash_dependency_raises(
     )
 
     with pytest.raises(RuntimeError, match="batch_hash dependency failure"):
-        await replay(request, store=candle_store, refs=reference_repo, cal=calendar_repo, pool=pool)
+        await replay(
+            request,
+            store=candle_store,
+            refs=reference_repo,
+            cal=calendar_repo,
+            pool=pool,
+            now=as_of,
+        )

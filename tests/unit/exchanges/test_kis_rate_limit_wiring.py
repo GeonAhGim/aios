@@ -51,6 +51,7 @@ def _paper_client(handler: Callable[[httpx.Request], httpx.Response]) -> _KISHTT
     )
 
 
+@pytest.mark.perf
 async def test_20_consecutive_tr_calls_through_real_request_path_absorb_rate_limit_as_real_wait(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

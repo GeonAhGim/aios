@@ -82,7 +82,7 @@ if TYPE_CHECKING:
     from collections.abc import Callable
     from uuid import UUID
 
-    from src.api.mcp.server import ScopeDependency
+    from src.api.mcp.scope_types import ScopeDependency
 
 __all__ = ["SubmitProposalRequest", "build_router"]
 

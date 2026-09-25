@@ -1,23 +1,25 @@
-"""LB-14 — 캔들 기반 마크가격 소스(adapters/candle_mark_price_source.py).
+"""LB-14 — Candle-based mark price source (adapters/candle_mark_price_source.py).
 
 Spec: docs/specs/L4_market_data_positions_ledger_v1.0.md#§2.3, §9.3 LB-14.
 
-A(`market_data`)의 최신 1분봉 종가를 마크가격으로 쓴다. 스테일 판정은
-새로 만들지 않고 LA-5 `stale_detector.detect_stale`(k×duration 임계, k=3
-기본값)을 그대로 재사용한다(task-654 decision) — 마크가 없거나 스테일
-하면 `0`이나 직전값으로 채우지 않고 `None`을 반환한다(포트 계약,
-`ports/mark_price_source.py` docstring).
+Uses the latest 1-minute candle close price from A(`market_data`) as the mark
+price. Reuses LA-5 `stale_detector.detect_stale` (k×duration threshold, k=3
+default) from task-654 decision rather than building a new stale check — returns
+`None` (not `0` or the previous value) when there is no mark or the candle is
+stale (per the port contract in `ports/mark_price_source.py` docstring).
 
-`PositionKey.instrument_id`(`venue:instrument_id:strategy_id:execution_id`
-의 두 번째 필드)가 실제로 market_data 참조데이터의 어떤 별칭
-(`md_symbol_alias.alias_symbol`)과 일치하는지는 이 리프가 보장하지
-않는다 — `ReferenceRepository.get_instrument`가 `None`을 돌려주면(등록
-안 됨/형식 불일치 포함) 마크도 그냥 `None`이다(§9 LA-17 `get_candles.py`
-모듈독스트링의 근사치 취급과 같은 정신).
+This leaf does not guarantee that `PositionKey.instrument_id`
+(`venue:instrument_id:strategy_id:execution_id`, the second field) actually
+matches any alias in the market_data reference data
+(`md_symbol_alias.alias_symbol`) — if
+`ReferenceRepository.get_instrument` returns `None` (not registered or format
+mismatch), the mark is simply `None`, following the same approximate-treatment
+spirit described in the §9 LA-17 `get_candles.py` module docstring.
 
-`venue`가 `market_data.Venue`(BITGET/KIS_KRX/KIS_US)가 아니면(예:
-paper/backtest 전용 venue 문자열) 조회 자체를 시도하지 않고 `None` —
-아직 캔들 소스가 없는 venue라는 뜻이지 오류가 아니다.
+If `venue` is not a `market_data.Venue` (BITGET/KIS_KRX/KIS_US) — e.g. a
+paper/backtest-only venue string — the lookup is never attempted and `None` is
+returned immediately; this means no candle source exists for that venue yet,
+not an error.
 """
 from __future__ import annotations
 
@@ -34,7 +36,7 @@ from src.foundation.positions.domain.position_key import PositionKey
 
 __all__ = ["CandleMarkPriceSource"]
 
-_STALE_K = 3  # LA-5 stale_detector 기본값과 동일(task-654 decision).
+_STALE_K = 3  # Same default as LA-5 stale_detector (task-654 decision).
 
 
 class CandleMarkPriceSource:

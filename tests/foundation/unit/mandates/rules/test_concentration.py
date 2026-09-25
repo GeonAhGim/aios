@@ -32,6 +32,8 @@ from concurrent.futures import ProcessPoolExecutor
 from datetime import datetime, timezone
 from typing import Any
 
+import pytest
+
 from src.foundation.mandates.contracts.v1 import ComplianceVerdict
 from src.foundation.mandates.domain.evaluator import evaluate_bundle
 from src.foundation.mandates.domain.rule_bundle import RuleBundle, RuleSpec
@@ -136,6 +138,7 @@ def test_non_numeric_observed_fails_closed_through_the_gate() -> None:
 # --- Numeric performance (DEEPEN) -------------------------------------------
 
 
+@pytest.mark.perf
 def test_check_meets_latency_budget_over_many_calls() -> None:
     """수치 성능 단언: 10,000회 반복 호출의 총 지연이 넉넉한 상한(1.0s,
     호출당 평균 100us) 안에 들어야 한다."""

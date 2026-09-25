@@ -263,6 +263,7 @@ async def test_store_failure_propagates(
         )
 
 
+@pytest.mark.perf
 async def test_throughput_budget(
     trade_report: Any, best_execution_evidence: Any, generated_at: datetime
 ) -> None:

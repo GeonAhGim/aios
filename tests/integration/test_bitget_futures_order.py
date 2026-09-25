@@ -4,6 +4,7 @@
 형태를 재현해 검증한다(test_bitget_adapter.py와 동일 원칙) — 필드명은
 커뮤니티 SDK 레퍼런스 기준 최선 추정치라 라이브 검증 전까지는 확정 아님.
 """
+
 import json
 from decimal import Decimal
 
@@ -45,9 +46,7 @@ async def test_place_futures_order_blocked_on_live_configured_adapter():
 
     transport = httpx.MockTransport(handler)
     client = httpx.AsyncClient(base_url="https://api.bitget.com", transport=transport)
-    live_adapter = BitgetAdapter(
-        "key", "secret", "passphrase", demo_mode=False, http_client=client
-    )
+    live_adapter = BitgetAdapter("key", "secret", "passphrase", demo_mode=False, http_client=client)
 
     with pytest.raises(FrozenZonePaperAdapterBlockedError):
         await live_adapter.place_futures_order(make_order())
@@ -290,3 +289,107 @@ async def test_get_futures_current_plan_orders_handles_null_entrusted_list():
 
     adapter = make_adapter(handler)
     assert await adapter.get_futures_current_plan_orders() == []
+
+
+async def test_place_futures_batch_orders():
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == "/api/v2/mix/order/batch-place-order"
+        body = json.loads(request.content)
+        assert body["marginMode"] == "crossed"
+        assert len(body["orderList"]) == 1
+        return json_response(
+            {
+                "code": "00000",
+                "msg": "success",
+                "requestTime": 1,
+                "data": {
+                    "successList": [{"orderId": "888", "clientOid": "c-1"}],
+                    "failureList": [],
+                },
+            }
+        )
+
+    adapter = make_adapter(handler)
+    result = await adapter.place_futures_batch_orders([make_order()])
+
+    assert result[0].exchange_order_id == "888"
+    assert result[0].status == OrderStatus.SUBMITTED
+
+
+async def test_place_futures_batch_orders_marks_failures_rejected():
+    order = make_order()
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return json_response(
+            {
+                "code": "00000",
+                "msg": "success",
+                "requestTime": 1,
+                "data": {
+                    "successList": [],
+                    "failureList": [{"clientOid": order.client_order_id, "errorMsg": "denied"}],
+                },
+            }
+        )
+
+    adapter = make_adapter(handler)
+    result = await adapter.place_futures_batch_orders([order])
+
+    assert result[0].status == OrderStatus.REJECTED
+
+
+async def test_place_futures_batch_orders_empty_list_short_circuits():
+    adapter = make_adapter(
+        lambda request: (_ for _ in ()).throw(
+            AssertionError("빈 리스트는 요청을 보내면 안 됩니다.")
+        )
+    )
+    assert await adapter.place_futures_batch_orders([]) == []
+
+
+async def test_place_futures_batch_orders_blocked_on_live_configured_adapter():
+    """레드팀 #2026-09-02-32 회귀 테스트(place_futures_order와 동일 가드)."""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        raise AssertionError("가드가 막았어야 할 요청이 실제로 나갔습니다.")
+
+    transport = httpx.MockTransport(handler)
+    client = httpx.AsyncClient(base_url="https://api.bitget.com", transport=transport)
+    live_adapter = BitgetAdapter("key", "secret", "passphrase", demo_mode=False, http_client=client)
+
+    with pytest.raises(FrozenZonePaperAdapterBlockedError):
+        await live_adapter.place_futures_batch_orders([make_order()])
+
+
+async def test_cancel_futures_batch_orders_with_explicit_ids():
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == "/api/v2/mix/order/batch-cancel-orders"
+        body = json.loads(request.content)
+        assert body["orderIdList"] == [{"orderId": "1"}, {"orderId": "2"}]
+        return json_response({"code": "00000", "msg": "success", "requestTime": 1, "data": {}})
+
+    adapter = make_adapter(handler)
+    assert await adapter.cancel_futures_batch_orders(["1", "2"], symbol="BTC/USDT") is True
+
+
+async def test_cancel_futures_batch_orders_without_ids_cancels_all_for_symbol():
+    def handler(request: httpx.Request) -> httpx.Response:
+        body = json.loads(request.content)
+        assert "orderIdList" not in body
+        assert body["symbol"] == "BTCUSDT"
+        return json_response({"code": "00000", "msg": "success", "requestTime": 1, "data": {}})
+
+    adapter = make_adapter(handler)
+    assert await adapter.cancel_futures_batch_orders(symbol="BTC/USDT") is True
+
+
+async def test_cancel_futures_batch_orders_blocked_on_live_configured_adapter():
+    def handler(request: httpx.Request) -> httpx.Response:
+        raise AssertionError("가드가 막았어야 할 요청이 실제로 나갔습니다.")
+
+    transport = httpx.MockTransport(handler)
+    client = httpx.AsyncClient(base_url="https://api.bitget.com", transport=transport)
+    live_adapter = BitgetAdapter("key", "secret", "passphrase", demo_mode=False, http_client=client)
+
+    with pytest.raises(FrozenZonePaperAdapterBlockedError):
+        await live_adapter.cancel_futures_batch_orders(symbol="BTC/USDT")

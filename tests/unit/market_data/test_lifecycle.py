@@ -109,6 +109,7 @@ def test_transition_fails_closed_when_table_is_cleared(
 # --- DEEPEN(task-2951) 수치 성능 단언 ------------------------------------------
 
 
+@pytest.mark.perf
 def test_transition_completes_within_budget_for_bulk_lookups() -> None:
     """전이표 조회는 O(1) 딕셔너리 lookup이라, 20만 회 반복 호출(허용/거부
     조합 균등 혼합)이 1초 안에 끝난다 — 향후 리팩터가 이를 순차 if-elif

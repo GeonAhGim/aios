@@ -27,7 +27,6 @@ docs/audit/DEPTH_DC_RD.md#1178) D1 -> D3 증빙.
 
 from __future__ import annotations
 
-import time
 from collections.abc import Sequence
 from concurrent.futures import ThreadPoolExecutor
 from datetime import date, datetime, timedelta, timezone
@@ -49,6 +48,7 @@ from src.foundation.market_data.domain.coverage.gaps import (
     plan_fetch,
 )
 from src.foundation.market_data.domain.timeframe import UnknownTimeframeError, duration
+from tests.conftest import PerfBudget
 
 _ULID = "01ARZ3NDEKTSV4RRFFQ69G5FAV"
 
@@ -170,7 +170,9 @@ def test_calendar_adapter_crash_propagates_instead_of_empty_gaps() -> None:
 
 
 @pytest.mark.perf
-def test_plan_fetch_meets_latency_budget_for_large_continuous_range() -> None:
+def test_plan_fetch_meets_latency_budget_for_large_continuous_range(
+    perf_budget: PerfBudget,
+) -> None:
     """400일치(9,600시간) BITGET(continuous) H1 구간에서, 절반은 캔들이
     비어 결측(MISSING_CANDLES)인 대량 대조도 절대시간 예산 내에 있어야
     한다 — 회귀가 있다면 선형 스캔이 제곱으로 퇴화했는지 확인한다."""
@@ -184,26 +186,28 @@ def test_plan_fetch_meets_latency_budget_for_large_continuous_range() -> None:
         if h % 2 == 0  # 절반만 존재 -> 나머지는 MISSING_CANDLES
     ]
 
-    budget_sec = 5.0  # 실측 로컬 예산(회귀 감지용 여유 포함)
-    start = time.perf_counter()
-    gaps = plan_fetch(
-        spans=[span],
-        candles=candles,
-        tf=Timeframe.H1,
-        calendar=_calendar(),
-        range_start=range_start,
-        range_end=range_end,
-    )
-    elapsed = time.perf_counter() - start
+    budget_ms = 5000.0  # 실측 로컬 예산(회귀 감지용 여유 포함)
 
-    print(
-        f"[DC-7 gaps] {days}d({days * 24}h) H1 대조 -> {len(gaps)}개 갭 in "
-        f"{elapsed:.3f}s (budget<{budget_sec}s)"
+    gaps: Sequence[CoverageGap] | None = None
+
+    def _run() -> None:
+        nonlocal gaps
+        gaps = plan_fetch(
+            spans=[span],
+            candles=candles,
+            tf=Timeframe.H1,
+            calendar=_calendar(),
+            range_start=range_start,
+            range_end=range_end,
+        )
+
+    perf_budget.assert_within(
+        _run,
+        budget_ms=budget_ms,
+        label=f"{days}d({days * 24}h) H1 gap planning",
     )
+    assert gaps is not None
     assert all(g.reason == GapReason.MISSING_CANDLES for g in gaps)
-    assert elapsed < budget_sec, (
-        f"{days}일 H1 대조가 예산({budget_sec}s)을 넘었습니다({elapsed:.3f}s)."
-    )
 
 
 # ---- 게이트 적색 재현 ----

@@ -1,23 +1,26 @@
-"""LA-14 — 기업행위(corporate action) 기록 유스케이스 + 감사 이벤트 1:1.
+"""LA-14 — Corporate action recording use case + 1:1 audit event.
 
 Spec: docs/specs/L4_market_data_positions_ledger_v1.0.md#§5, §9.2 LA-14.
 
-`ReferenceRepository.record_action`(LA-12)이 이미 `(instrument_id,
-action_type, ex_date)` 멱등을 자신의 트랜잭션 안에서 처리한다(같은 내용
-재전송은 새 행을 만들지 않고 기존 값을 그대로 반환). 이 함수가 그 어댑터의
-`CorporateActionDigestMismatchError`(어댑터 전용 타입)를 직접 import해
-잡지 않는 이유는 domain/application이 adapters를 몰라야 하기 때문이다
-(71번 §4) — 대신 `record_action`을 부르기 **전에** `list_actions`로 기존
-행을 직접 비교해 내용이 다르면 어댑터를 아예 호출하지 않고 이 파일
-소유의 `CorporateActionConflictError`로 거부한다(레이스는 어댑터가 여전히
-막는다 — 이 사전 비교는 감사 이벤트를 붙이기 위한 것이지 유일한 방어선이
-아니다).
+`ReferenceRepository.record_action`(LA-12) already handles `(instrument_id,
+action_type, ex_date)` idempotency within its own transaction (resending
+the same content does not create a new row but returns the existing value
+unchanged). This function does not directly import the adapter's
+`CorporateActionDigestMismatchError` (adapter-specific type) because the
+domain/application layer must not know about adapters (71 §4) — instead,
+it compares the existing row directly via `list_actions` **before** calling
+`record_action`, and if the content differs, it rejects with this file's
+own `CorporateActionConflictError` without invoking the adapter at all
+(the adapter still prevents races — this pre-check exists to attach an
+audit event, not to serve as the sole defense line).
 
-`record_fill`의 관례를 그대로 따른다: 내용이 같은 재전송(REPLAY)은 감사
-이벤트를 만들지 않는다("REPLAY는 감사 이벤트도 만들지 않는다" 원칙). 내용이
-다른 재전송(CONFLICT)은 `post_entry`의 관례(DENIED 감사를 커밋한 뒤 예외를
-던짐)를 따르되, 이 함수는 자체 `pool`에서 트랜잭션을 열므로(호출자 `conn`을
-받지 않음) DENIED 행을 살리려면 예외를 `async with` 블록 **밖**에서 던진다.
+Follows the `record_fill` convention exactly: a resend with identical
+content (REPLAY) does not create an audit event (principle: "REPLAY does
+not create an audit event either"). A resend with different content
+(CONFLICT) follows the `post_entry` convention (commit a DENIED audit
+then raise), but since this function opens its own transaction on its
+own `pool` (it does not accept the caller's `conn`), the exception must
+be raised **outside** the `async with` block to persist the DENIED row.
 """
 from __future__ import annotations
 
@@ -40,8 +43,9 @@ __all__ = ["AuditAppender", "CorporateActionConflictError", "record_corporate_ac
 
 
 class CorporateActionConflictError(Exception):
-    """`(instrument_id, action_type, ex_date)`가 같은 기존 행과 ratio/
-    cash_amount/source_ref가 달라 재전송됨 — 조용히 덮지 않는다(fail-closed)."""
+    """Resent with different ratio/cash_amount/source_ref for an existing
+    row with the same `(instrument_id, action_type, ex_date)` — does not
+    silently overwrite (fail-closed)."""
 
     def __init__(self, action: CorporateAction) -> None:
         super().__init__(

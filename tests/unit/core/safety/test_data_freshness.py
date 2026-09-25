@@ -210,6 +210,7 @@ async def test_get_ohlcv_failure_does_not_record_and_propagates() -> None:
     assert tracker.error_rate_pct() == Decimal("100")
 
 
+@pytest.mark.perf
 def test_max_delay_sec_scales_to_many_symbols_within_budget() -> None:
     """성능 단언 — 10,000개 (exchange, symbol) 쌍을 기록한 뒤에도
     `max_delay_sec`이 선형 스캔 예산(2초) 안에서 끝나야 한다. dict 갱신을

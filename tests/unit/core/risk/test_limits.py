@@ -280,6 +280,7 @@ def test_corrupted_nan_gross_leverage_raises_instead_of_silently_allowing():
 # ---- 성능 단언 ----
 
 
+@pytest.mark.perf
 def test_bulk_evaluation_against_many_non_matching_limits_stays_within_perf_budget():
     """성능 단언 — R-16 evaluator가 매 결정마다 호출한다(§9). 실제 배포에서는
     한 주문에 수십 개의 scope 한도가 걸릴 수 있으므로, scope 미매칭 한도들을

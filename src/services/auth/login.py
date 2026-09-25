@@ -1,15 +1,16 @@
-"""PLT-24 — 로그인 유스케이스: authenticate + 세션 생성 + 토큰 쌍 발급.
+"""PLT-24 — Login use case: authenticate + session creation + token pair issuance.
 
 Spec: docs/specs/L4_platform_observability_tenancy_api_v1.0.md §2.2, §3.4, §9 PLT-24.
 
-`AuthService.authenticate()`(PLT-22 lockout 원자화 경로 포함, 계정열거
-방지 포함)를 그대로 호출한다 — 잠금 판정·타이밍 정규화 로직을 여기서
-재구현하지 않는다. `issue_token_pair()`는 이미 인증된 user(가입 직후
-또는 로그인 성공)에 세션+토큰을 발급하는 공용 경로라 `/auth/register`도
-그대로 재사용한다.
+Calls `AuthService.authenticate()` as-is (includes PLT-22 lockout atomicity
+path and account enumeration prevention) — does not re-implement lock
+determination or timing normalization logic here. `issue_token_pair()` is a
+shared path that issues session + token for an already-authenticated user
+(shortly after signup or after successful login), so `/auth/register`
+reuses it unchanged.
 
-PLT-26(테넌시) 이전 스콥 — 개인 테넌트만 존재하므로 `tenant_id ==
-user_id` 고정이다(session_repository 통합테스트와 동일 관례).
+Pre-PLT-26 (tenancy) scope — only personal tenants exist, so `tenant_id ==
+user_id` is fixed (same convention as session_repository integration tests).
 """
 from __future__ import annotations
 
@@ -47,9 +48,10 @@ async def issue_token_pair(
     *,
     client: ClientInfo | None = None,
 ) -> TokenPairResponse:
-    """이미 인증된(가입 직후 또는 authenticate 성공) user에 세션을 새로
-    만들고 토큰 쌍을 발급한다. 세션 CRUD는 `session_repository`(PLT-23)에,
-    JWT 발급은 `TokenIssuer`(PLT-23)에 그대로 위임한다."""
+    """Create a session and issue a token pair for an already-authenticated user
+    (shortly after signup or after a successful authenticate call). Session CRUD
+    is delegated to `session_repository` (PLT-23); JWT issuance to
+    `TokenIssuer` (PLT-23)."""
     client = client or ClientInfo()
     refresh_plain, refresh_hash = TokenIssuer.issue_refresh()
     auth_level = _auth_level_for(user)

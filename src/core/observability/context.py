@@ -1,4 +1,5 @@
-"""Request context ContextVar (8 fields) — propagated through middleware, event bus, and background loops.
+"""Request context ContextVar (8 fields) — propagated through middleware, event bus,
+and background loops.
 
 Spec: docs/specs/L4_platform_observability_tenancy_api_v1.0.md §2.1(A), §3.1 PLT-01.
 

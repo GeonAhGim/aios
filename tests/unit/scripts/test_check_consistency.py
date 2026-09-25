@@ -5,6 +5,13 @@
 `importlib.util`을 통해 스크립트를 모듈로 로드한다(scripts/는 패키지가 아니다).
 실제 파일 I/O(ast 파싱, 정규식)만 하고 DB·네트워크·subprocess(git)는 tmp_path가
 저장소 밖이라 자연히 빈 값으로 폴백한다.
+
+검사 로직 자체는 task-3725(CONSIST-1c)로 `scripts/consistency/` 검사군별
+모듈로 옮겨졌다 -- `check_consistency.py`는 그 함수들을 재노출하는 CLI
+진입점이다. `cc.check_*`는 재노출된 참조라 그대로 쓸 수 있지만,
+`_git_commit_subjects`처럼 다른 모듈(`scripts.consistency.spec_trace`) 함수
+안에서 그 모듈 자신의 전역으로 조회되는 이름을 monkeypatch할 때는 `cc` 위가
+아니라 그 정의 모듈 위에서 패치해야 실제로 먹힌다.
 """
 
 from __future__ import annotations
@@ -16,6 +23,8 @@ from pathlib import Path
 from types import ModuleType
 
 import pytest
+
+from scripts.consistency import spec_trace
 
 ROOT = Path(__file__).resolve().parents[3]
 SCRIPTS_DIR = ROOT / "scripts"
@@ -127,6 +136,107 @@ def test_port_ratchet_allow_exempts_not_implemented_stub(tmp_path: Path) -> None
         "    def do(self) -> None:\n        raise NotImplementedError\n",
     )
     assert cc.check_port_implementations(tmp_path) == []
+
+
+# ---------------------------------------------------------------------------
+# 2b. port_protocol_unimplemented
+# ---------------------------------------------------------------------------
+
+_PROTOCOL_PORT_SRC = (
+    "from typing import Protocol\n\n"
+    "class WidgetRepository(Protocol):\n"
+    "    async def get(self) -> None: ...\n"
+    "    async def save(self) -> None: ...\n"
+)
+
+
+def test_protocol_port_flags_missing_method(tmp_path: Path) -> None:
+    _write(tmp_path, "src/ctx/ports/repository.py", _PROTOCOL_PORT_SRC)
+    _write(
+        tmp_path,
+        "src/ctx/adapters/postgres_repository.py",
+        "class PostgresWidgetRepository:\n"
+        "    async def get(self) -> None:\n        return None\n",
+    )
+    hits = cc.check_port_protocol_implementations(tmp_path)
+    assert hits == [("src/ctx/adapters/postgres_repository.py", 1)]
+
+
+def test_protocol_port_passes_when_implemented(tmp_path: Path) -> None:
+    _write(tmp_path, "src/ctx/ports/repository.py", _PROTOCOL_PORT_SRC)
+    _write(
+        tmp_path,
+        "src/ctx/adapters/postgres_repository.py",
+        "class PostgresWidgetRepository:\n"
+        "    async def get(self) -> None:\n        return None\n"
+        "    async def save(self) -> None:\n        return None\n",
+    )
+    assert cc.check_port_protocol_implementations(tmp_path) == []
+
+
+def test_protocol_port_flags_not_implemented_stub_without_ratchet_allow(tmp_path: Path) -> None:
+    _write(tmp_path, "src/ctx/ports/repository.py", _PROTOCOL_PORT_SRC)
+    _write(
+        tmp_path,
+        "src/ctx/adapters/postgres_repository.py",
+        "class PostgresWidgetRepository:\n"
+        "    async def get(self) -> None:\n        return None\n"
+        "    async def save(self) -> None:\n        raise NotImplementedError\n",
+    )
+    hits = cc.check_port_protocol_implementations(tmp_path)
+    assert len(hits) == 1
+
+
+def test_protocol_port_ratchet_allow_exempts_not_implemented_stub(tmp_path: Path) -> None:
+    _write(tmp_path, "src/ctx/ports/repository.py", _PROTOCOL_PORT_SRC)
+    _write(
+        tmp_path,
+        "src/ctx/adapters/postgres_repository.py",
+        "# ratchet-allow: fail-closed stub, intentional\n"
+        "class PostgresWidgetRepository:\n"
+        "    async def get(self) -> None:\n        return None\n"
+        "    async def save(self) -> None:\n        raise NotImplementedError\n",
+    )
+    assert cc.check_port_protocol_implementations(tmp_path) == []
+
+
+def test_protocol_port_resolves_local_mixin_inheritance(tmp_path: Path) -> None:
+    """task-1723 P1-D 스타일 분할 -- adapter가 같은 adapters/ 컨텍스트의
+    mixin에서 메서드를 상속받으면 과탐(false positive)하지 않는다."""
+    _write(tmp_path, "src/ctx/ports/repository.py", _PROTOCOL_PORT_SRC)
+    _write(
+        tmp_path,
+        "src/ctx/adapters/save_mixin.py",
+        "class _SaveMixin:\n    async def save(self) -> None:\n        return None\n",
+    )
+    _write(
+        tmp_path,
+        "src/ctx/adapters/postgres_repository.py",
+        "from src.ctx.adapters.save_mixin import _SaveMixin\n\n"
+        "class PostgresWidgetRepository(_SaveMixin):\n"
+        "    async def get(self) -> None:\n        return None\n",
+    )
+    assert cc.check_port_protocol_implementations(tmp_path) == []
+
+
+def test_protocol_port_ignores_adapter_in_unrelated_bounded_context(tmp_path: Path) -> None:
+    _write(tmp_path, "src/ctx_a/ports/repository.py", _PROTOCOL_PORT_SRC)
+    _write(
+        tmp_path,
+        "src/ctx_b/adapters/postgres_repository.py",
+        "class PostgresWidgetRepository:\n    pass\n",
+    )
+    assert cc.check_port_protocol_implementations(tmp_path) == []
+
+
+def test_protocol_port_ignores_adapter_class_name_not_matching_any_port(tmp_path: Path) -> None:
+    _write(tmp_path, "src/ctx/ports/repository.py", _PROTOCOL_PORT_SRC)
+    _write(
+        tmp_path,
+        "src/ctx/adapters/unrelated.py",
+        "class SomethingElseEntirely:\n    pass\n",
+    )
+    assert cc.check_port_protocol_implementations(tmp_path) == []
 
 
 # ---------------------------------------------------------------------------
@@ -435,7 +545,7 @@ def test_spec_leaf_flags_id_that_is_prefix_of_id_in_commit_subject(
         "## 9. 리프 목록\n| 리프 ID | 파일 |\n|---|---|\n| AI-2 | src/token.py |\n",
     )
     monkeypatch.setattr(
-        cc, "_git_commit_subjects", lambda root: "feat: task-2657 AI-22 AiStudioPage\n"
+        spec_trace, "_git_commit_subjects", lambda root: "feat: task-2657 AI-22 AiStudioPage\n"
     )
     hits = cc.check_spec_leaf_traceability(tmp_path)
     assert hits == [("docs/specs#AI-2", 0)]
@@ -450,7 +560,7 @@ def test_spec_leaf_passes_when_id_appears_as_whole_token_in_commit_subject(
         "## 9. 리프 목록\n| 리프 ID | 파일 |\n|---|---|\n| AI-2 | src/token.py |\n",
     )
     monkeypatch.setattr(
-        cc, "_git_commit_subjects", lambda root: "feat: task-2600 AI-2 token_rules.py\n"
+        spec_trace, "_git_commit_subjects", lambda root: "feat: task-2600 AI-2 token_rules.py\n"
     )
     assert cc.check_spec_leaf_traceability(tmp_path) == []
 
@@ -538,6 +648,44 @@ def test_money_float_regression_task_4188_krx_data_stays_clean() -> None:
     다시 float로 되돌리면 실제 저장소를 스캔하는 이 테스트가 즉시 잡는다."""
     hits = dict(cc.check_money_float(ROOT))
     assert "src/foundation/market_data/adapters/krx_data.py" not in hits
+
+
+def test_money_float_wire_boundary_allow_suppresses_annotated_field(tmp_path: Path) -> None:
+    """task-5762 -- a v1 wire contract may keep a money-shaped field `float`
+    (compatibility surface, ADR-2026-09-10-C P5) if the line explicitly
+    marks the reason. Without the marker the same field still flags."""
+    _write(
+        tmp_path,
+        "src/contracts/v1.py",
+        "class Foo:\n"
+        "    # ratchet-allow: wire-boundary: v1 wire float, Decimal at boundary\n"
+        "    amount: float\n",
+    )
+    assert cc.check_money_float(tmp_path) == []
+
+
+def test_money_float_wire_boundary_allow_requires_explicit_marker(tmp_path: Path) -> None:
+    """The marker text is not free-form -- an unrelated comment on the
+    field's line or the line above must not suppress the hit (task-5762)."""
+    _write(
+        tmp_path,
+        "src/contracts/v1.py",
+        "class Foo:\n    # some unrelated comment\n    amount: float\n",
+    )
+    hits = cc.check_money_float(tmp_path)
+    assert hits == [("src/contracts/v1.py", 3)]
+
+
+def test_money_float_regression_task_5762_mandates_risk_contracts_stay_clean() -> None:
+    """task-5762 회귀 가드 -- QA(task-5117)가 발견한 mandates/contracts/v1.py,
+    risk/contracts/v1.py의 8개 S등급 필드가 다시 무표시 float로 돌아가면(즉
+    `# ratchet-allow: wire-boundary:` 주석 없이) 실제 저장소를 스캔하는 이
+    테스트가 즉시 잡는다. 계약 v1 타입 자체는 유지하고(CTO 결정,
+    2026-09-23), Decimal 정정은 application 경계(evaluate_policy.py,
+    create_draft_mandate.py, bundle_loader.py, personal.py)에 있다."""
+    hits = dict(cc.check_money_float(ROOT))
+    assert "src/foundation/mandates/contracts/v1.py" not in hits
+    assert "src/foundation/risk/contracts/v1.py" not in hits
 
 
 # ---------------------------------------------------------------------------

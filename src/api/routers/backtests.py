@@ -123,7 +123,7 @@ async def quick_backtest_endpoint(
             initial_cash=body.initial_cash, funding_rate=body.funding_rate, max_bars=MAX_QUICK_BARS,
         )
     except TooManyBarsError as exc:
-        exc.details = {"bars": len(columns), "max": MAX_QUICK_BARS}  # type: ignore[attr-defined]
+        exc.details = {"bars": len(columns), "max": MAX_QUICK_BARS}
         raise
 
     logger.info(

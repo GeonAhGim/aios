@@ -3,7 +3,7 @@ from decimal import Decimal
 
 import pytest
 
-from src.core.scanner.market_scanner import ScanCriteria, scan_market
+from src.core.scanner.market_scanner import ScanCriteria, _realized_volatility, scan_market
 from src.data.models.market_data import Candle, Ticker
 
 
@@ -98,3 +98,107 @@ async def test_scan_market_multiple_exchanges():
     )
 
     assert result == ["BTC/bitget", "BTC/kis"]
+
+
+# --- Negative tests: boundary values and invalid inputs ---
+
+
+async def test_scan_market_empty_exchanges_returns_empty():
+    async def fetch_tickers(exchange):
+        return []
+
+    result = await scan_market(
+        ScanCriteria(exchanges=[], tickers=None),
+        fetch_tickers=fetch_tickers,
+    )
+    assert result == []
+
+
+async def test_scan_market_empty_tickers_returns_empty():
+    async def fetch_tickers(exchange):
+        return []
+
+    result = await scan_market(
+        ScanCriteria(exchanges=["bitget"]),
+        fetch_tickers=fetch_tickers,
+    )
+    assert result == []
+
+
+async def test_scan_market_volume_boundary_equal_min():
+    """ticker volume_24h == min_volume_24h should pass (>=)"""
+    tickers = [_ticker("BTC/USDT", "1000")]
+
+    async def fetch_tickers(exchange):
+        return tickers
+
+    result = await scan_market(
+        ScanCriteria(min_volume_24h=Decimal("1000"), exchanges=["bitget"]),
+        fetch_tickers=fetch_tickers,
+    )
+    assert result == ["BTC/USDT"]
+
+
+async def test_scan_market_volume_boundary_below_min():
+    """ticker volume_24h < min_volume_24h should be excluded"""
+    tickers = [_ticker("DOGE/USDT", "999")]
+
+    async def fetch_tickers(exchange):
+        return tickers
+
+    result = await scan_market(
+        ScanCriteria(min_volume_24h=Decimal("1000"), exchanges=["bitget"]),
+        fetch_tickers=fetch_tickers,
+    )
+    assert result == []
+
+
+# --- Failure injection tests ---
+
+
+async def test_scan_market_fetch_tickers_raises():
+    """fetch_tickers raises → error should propagate"""
+    async def fetch_tickers(exchange):
+        raise ConnectionError("exchange unreachable")
+
+    with pytest.raises(ConnectionError, match="exchange unreachable"):
+        await scan_market(
+            ScanCriteria(exchanges=["bitget"]),
+            fetch_tickers=fetch_tickers,
+        )
+
+
+async def test_scan_market_fetch_candles_raises():
+    """fetch_candles raises during volatility scan → error should propagate"""
+    async def fetch_tickers(exchange):
+        return [_ticker("BTC/USDT", "1000")]
+
+    async def fetch_candles(exchange, symbol):
+        raise ConnectionError("candle data unavailable")
+
+    with pytest.raises(ConnectionError, match="candle data unavailable"):
+        await scan_market(
+            ScanCriteria(
+                min_volatility=Decimal("0.01"),
+                exchanges=["bitget"],
+            ),
+            fetch_tickers=fetch_tickers,
+            fetch_candles=fetch_candles,
+        )
+
+
+# --- Negative: _realized_volatility edge cases ---
+
+
+def test_realized_volatility_single_candle_returns_zero():
+    """When candles list has fewer than 2 elements, volatility is 0."""
+    result = _realized_volatility(
+        candles=[{"close": Decimal("50000")}],
+    )
+    assert result == Decimal("0")
+
+
+def test_realized_volatility_empty_candles_returns_zero():
+    """Empty candles list → 0 volatility."""
+    result = _realized_volatility(candles=[])
+    assert result == Decimal("0")

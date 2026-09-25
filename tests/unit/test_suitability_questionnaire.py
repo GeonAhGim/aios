@@ -1,4 +1,8 @@
 """15.1 단위테스트 — 순수 점수화 로직."""
+import pytest
+from pydantic import ValidationError
+
+from src.services import suitability_questionnaire as sq_module
 from src.services.suitability_questionnaire import (
     RISK_PROFILE_AGGRESSIVE,
     RISK_PROFILE_NEUTRAL,
@@ -71,3 +75,49 @@ def test_score_boundaries_are_inclusive_on_lower_band():
 
     assert result.score == 3
     assert result.risk_profile == RISK_PROFILE_STABLE
+
+
+def test_loss_tolerance_mid_boundary_scores_one_point():
+    result = SuitabilityQuestionnaire().evaluate(
+        _answers(loss_tolerance_pct=15, investment_goal=InvestmentGoal.SHORT_TERM_PROFIT)
+    )
+
+    # loss_tolerance_pct=15 -> 1점, investable_ratio_pct=5 -> 0점,
+    # years_of_experience=0 -> 0점, investment_goal SHORT_TERM_PROFIT -> 3점,
+    # liquidity_need WITHIN_1_YEAR -> 0점
+    assert result.score == 4
+
+
+def test_invalid_investment_goal_raises_validation_error():
+    with pytest.raises(ValidationError):
+        _answers(investment_goal="NOT_A_GOAL")
+
+
+def test_invalid_liquidity_need_raises_validation_error():
+    with pytest.raises(ValidationError):
+        _answers(liquidity_need="NOT_A_LIQUIDITY_NEED")
+
+
+def test_missing_required_field_raises_validation_error():
+    with pytest.raises(ValidationError):
+        SuitabilityAnswers(
+            investable_ratio_pct=5,
+            loss_tolerance_pct=5,
+            investment_goal=InvestmentGoal.LONG_TERM_GROWTH,
+            liquidity_need=LiquidityNeed.WITHIN_1_YEAR,
+        )
+
+
+def test_non_integer_years_of_experience_raises_validation_error():
+    with pytest.raises(ValidationError):
+        _answers(years_of_experience="many years")
+
+
+def test_evaluate_propagates_scoring_dependency_failure(monkeypatch):
+    def _boom(_pct: int) -> int:
+        raise RuntimeError("scoring dependency unavailable")
+
+    monkeypatch.setattr(sq_module, "_score_loss_tolerance", _boom)
+
+    with pytest.raises(RuntimeError, match="scoring dependency unavailable"):
+        SuitabilityQuestionnaire().evaluate(_answers())

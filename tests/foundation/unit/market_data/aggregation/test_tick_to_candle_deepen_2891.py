@@ -10,13 +10,18 @@ MixedSeriesError)로 증명했다(D1). 감사(2131행)는 negative<3, 실패주�
 그 대신 (a) 계약 경계(TickLineage) negative, (b) 타입힌트가 강제하지 않는
 호출 경계 오염 주입, (c) 수치 성능 단언, (d) 게이트 적색(예외) 재현이 이후
 호출을 오염시키지 않음, (e) 퍼즈·재생 결정론·동시 다중 인스턴스(D3)를
-채운다. `tick_to_candle.py`는 무수정 — 새 기능 없음, 깊이만 올림.
+채운다.
+
+task-4928(§9.10 DC-22 XREV, task-3723 교차 리뷰)에서 `ticks_to_candles`가
+`tick.venue`와 `calendar.venue` 일치를 검증하지 않아, 엉뚱한 캘린더를
+넘기면 모든 틱이 "세션 밖"으로 조용히 제외되어 오류 없이 0봉을 반환하는
+결함이 발견됐다 — `tick_to_candle.py`에 `VenueMismatchError` 검증을
+추가하고, 아래 XREV 절에서 재현·회귀 테스트를 더한다.
 """
 
 from __future__ import annotations
 
 import random
-import time
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from decimal import Decimal
@@ -31,11 +36,13 @@ from src.foundation.market_data.contracts.v2.microstructure import Aggressor, Tr
 from src.foundation.market_data.domain.aggregation.tick_to_candle import (
     SessionNotFoundError,
     UnsortedTicksError,
+    VenueMismatchError,
     _session_containing,
     ticks_to_candles,
 )
 from src.foundation.market_data.domain.calendar.known_venues import KNOWN_SESSIONS
 from src.foundation.market_data.domain.calendar.session_rules import VenueCalendar
+from tests.conftest import PerfBudget
 
 UTC = timezone.utc
 _ULID = "01ARZ3NDEKTSV4RRFFQ69G5FAV"
@@ -45,6 +52,11 @@ _BASE_NS = 1_767_225_600_000_000_000  # 2026-01-01T00:00:00Z (Thursday)
 def _bitget_calendar() -> VenueCalendar:
     spec = KNOWN_SESSIONS[Venue.BITGET.value]
     return VenueCalendar(venue=Venue.BITGET.value, tz=spec.tz, regular=spec)
+
+
+def _krx_calendar() -> VenueCalendar:
+    spec = KNOWN_SESSIONS[Venue.KIS_KRX.value]
+    return VenueCalendar(venue=Venue.KIS_KRX.value, tz=spec.tz, regular=spec)
 
 
 def _tick(
@@ -121,6 +133,47 @@ def test_ticks_to_candles_massive_duplicate_flood_collapses_to_one_tick() -> Non
     assert result.columns.volume == [Decimal("1")]
 
 
+# ---- XREV(task-3723) — venue/calendar 불일치는 조용한 누락이 아니라 거부 ----
+
+
+def test_ticks_to_candles_rejects_venue_calendar_mismatch() -> None:
+    """`ticks[i].venue`와 `calendar.venue`가 다르면 즉시 `VenueMismatchError`.
+    이 검증이 없으면 엉뚱한 캘린더의 세션 창과 대조되어 모든 틱이
+    "세션 밖"으로 조용히 제외되고 0봉을 반환한다(§9.10 XREV)."""
+    ticks = [_tick(0, seq=1, price="100", size="1", venue=Venue.BITGET)]
+    with pytest.raises(VenueMismatchError):
+        ticks_to_candles(ticks, Timeframe.M1, _krx_calendar())
+
+
+def test_ticks_to_candles_venue_mismatch_reproduces_xrev_sunday_scenario() -> None:
+    """XREV가 지적한 정확한 재현: 2026-09-06(일요일)은 KRX 휴장일이므로,
+    이 검증이 없으면 BITGET(24x7) 틱에 KIS_KRX 캘린더를 대면 모든 틱이
+    "세션 밖"으로 조용히 제외되어 오류 없이 0봉을 반환했다 — 유효 체결의
+    무음 누락. 지금은 그 조합 자체가 `VenueMismatchError`로 즉시 거부된다."""
+    sunday = datetime(2026, 9, 6, 12, 0, tzinfo=UTC)  # 2026-09-06은 일요일
+    ts_event = int(sunday.timestamp()) * 1_000_000_000
+    sunday_tick = TradeTick(
+        instrument_id=_ULID,
+        venue=Venue.BITGET,
+        ts_event=ts_event,
+        ts_recv=ts_event + 1_000,
+        seq=1,
+        price=Decimal("50000"),
+        size=Decimal("1"),
+        aggressor=Aggressor.BUY,
+    )
+    with pytest.raises(VenueMismatchError):
+        ticks_to_candles([sunday_tick], Timeframe.M1, _krx_calendar())
+
+
+def test_ticks_to_candles_accepts_matching_venue_calendar() -> None:
+    """`venue`가 `calendar.venue`와 일치하면 정상적으로 집계된다 — 이번
+    DEEPEN이 정상 경로를 깨지 않았다는 증거."""
+    ticks = [_tick(0, seq=1, price="100", size="1", venue=Venue.BITGET)]
+    result = ticks_to_candles(ticks, Timeframe.M1, _bitget_calendar())
+    assert len(result.columns) == 1
+
+
 # ---- 게이트 적색 재현 — 회귀(DEEPEN 중 fuzz로 발견) ----
 
 
@@ -166,30 +219,33 @@ def test_session_not_found_error_fires_for_open_time_missing_from_session_list()
 
 
 @pytest.mark.perf
-def test_ticks_to_candles_meets_latency_budget_for_large_tick_series() -> None:
+def test_ticks_to_candles_meets_latency_budget_for_large_tick_series(
+    perf_budget: PerfBudget,
+) -> None:
     """50,000틱(100틱/초 x 500초 ~= 9개 M1창)을 집계하는 시간이 절대시간
     예산 내여야 한다 — 두-포인터 스캔이 창마다 처음부터 다시 훑는 식으로
     퇴화(O(n x windows))하면 이 예산을 넘는다."""
     n = 50_000
+    budget_ms = 8000.0  # 실측 로컬 단독 실행 <200ms, 스위트 동시부하 시 변동 감안
     rng = random.Random(2891)
     ticks = [
         _tick(i // 100, seq=i, price=str(100 + rng.randint(-5, 5)), size="1") for i in range(n)
     ]
+    calendar = _bitget_calendar()
 
-    budget_sec = 8.0  # 실측 로컬 단독 실행 <0.2s, 스위트 동시부하 시 변동 감안
-    start = time.perf_counter()
-    result = ticks_to_candles(ticks, Timeframe.M1, _bitget_calendar())
-    elapsed = time.perf_counter() - start
+    def _aggregate() -> object:
+        result = ticks_to_candles(ticks, Timeframe.M1, calendar)
+        total_ticks = sum(lin.tick_count for lin in result.lineage)
+        assert total_ticks == n
+        return result
 
+    sample = perf_budget.assert_within(
+        _aggregate, budget_ms=budget_ms, label="[DC-22 tick_to_candle]"
+    )
+    result = _aggregate()
     print(
         f"[DC-22 tick_to_candle] {n}틱 -> {len(result.columns)}봉, "
-        f"{elapsed:.3f}s (budget<{budget_sec}s)"
-    )
-    total_ticks = sum(lin.tick_count for lin in result.lineage)
-    assert total_ticks == n
-    assert elapsed < budget_sec, (
-        f"ticks_to_candles({n}틱)가 예산({budget_sec}s)을 넘었습니다({elapsed:.3f}s) — "
-        "두-포인터 스캔이 창마다 재스캔으로 퇴화했는지 확인하세요."
+        f"{perf_budget.describe(sample, budget_ms=budget_ms)}"
     )
 
 

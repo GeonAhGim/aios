@@ -39,13 +39,13 @@ input contract, and how `TaBuiltins` receives a repository-free
 
 from __future__ import annotations
 
+import bisect
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Final
 
 from src.core.script.runtime.series import ScriptRuntimeError, Series, Value
 from src.foundation.market_data.api import CandleColumns
-from src.foundation.research_data.application.query import search
 from src.foundation.research_data.contracts.v1 import ResearchItem, ResearchItemKind
 from src.foundation.research_data.domain.as_of_binding import bind_as_of
 
@@ -88,19 +88,21 @@ class _KnownCountBuiltin:
             )
         if len(self.columns) != site.bar_count:
             raise ResearchDslQueryError(
-                f"columns length ({len(self.columns)}) differs from "
-                f"bar_count ({site.bar_count})"
+                f"columns length ({len(self.columns)}) differs from bar_count ({site.bar_count})"
             )
+        # Pre-sort the (kind, instrument)-filtered known_at values once so each bar's
+        # count is a bisect (O(log items)) instead of a fresh linear `search()` scan
+        # (O(items)) -- the item set/filter is fixed for the whole call, only `as_of`
+        # advances bar-by-bar, so re-scanning it `bar_count` times was pure waste.
+        sorted_known_at = sorted(
+            item.known_at
+            for item in self.items
+            if item.kind == self.kind and self.instrument in item.instruments
+        )
         counts: list[float] = []
         for i in range(site.bar_count):
             as_of = bind_as_of(self.columns.ts[i])
-            visible = search(
-                self.items,
-                instruments=[self.instrument],
-                kinds=[self.kind],
-                as_of=as_of,
-            )
-            counts.append(float(len(visible)))
+            counts.append(float(bisect.bisect_right(sorted_known_at, as_of)))
         return Series.of_floats(counts)
 
 

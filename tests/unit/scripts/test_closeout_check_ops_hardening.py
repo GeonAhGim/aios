@@ -49,6 +49,26 @@ def test_load_bool_report_expect_zero_fails_when_nonzero(tmp_path: Path) -> None
     assert "3" in note
 
 
+def test_load_bool_report_invert_passes_when_falsy(tmp_path: Path) -> None:
+    path = tmp_path / "guard.json"
+    path.write_text(json.dumps({"vetoed": False}), encoding="utf-8")
+
+    ok, note = cc._load_bool_report(path, "vetoed", invert=True)
+
+    assert ok
+    assert "OK" in note
+
+
+def test_load_bool_report_invert_fails_when_truthy(tmp_path: Path) -> None:
+    path = tmp_path / "guard.json"
+    path.write_text(json.dumps({"vetoed": True}), encoding="utf-8")
+
+    ok, note = cc._load_bool_report(path, "vetoed", invert=True)
+
+    assert not ok
+    assert "True" in note
+
+
 def test_check_invariants_fails_when_baseline_has_open_findings(tmp_path: Path) -> None:
     _write(
         tmp_path / "scripts/check_audit_regressions.py",
@@ -105,17 +125,38 @@ def test_ops_check_fails_on_empty_repo_without_external_reports(tmp_path: Path) 
 
 
 def test_ops_check_passes_when_everything_supplied_and_green(tmp_path: Path) -> None:
+    """ci_report/guard_report는 실제 산출 스크립트 스키마를 그대로 반영한다.
+
+    `pm/local_ci.py`는 top-level `"ok": bool`을, `meta/guards/run_guards.py
+    --json`(`Report.to_json()`)은 `"vetoed": bool`을 쓴다 — `{"passed": ...}`/
+    `{"veto_count": ...}`는 어느 산출 스크립트에도 없던 존재하지 않는 키였다
+    (task-6497 근본 원인: 실제로 리포트를 넘겨도 항상 FAIL 오판정).
+    """
     _write(tmp_path / "scripts/check_audit_regressions.py", "import sys\nsys.exit(0)\n")
     _write(tmp_path / "audit-baseline.json", json.dumps({"open": {}}))
     _write(tmp_path / "docs/RED_TEAM_FINDINGS.md", "no open findings")
     ci_report = tmp_path / "ci.json"
-    ci_report.write_text(json.dumps({"passed": True}), encoding="utf-8")
+    ci_report.write_text(json.dumps({"ok": True}), encoding="utf-8")
     guard_report = tmp_path / "guard.json"
-    guard_report.write_text(json.dumps({"veto_count": 0}), encoding="utf-8")
+    guard_report.write_text(json.dumps({"vetoed": False}), encoding="utf-8")
 
     result = cc.check_10_ops(tmp_path, ci_report=ci_report, guard_report=guard_report)
 
     assert result.passed
+
+
+def test_ops_check_fails_when_real_schema_reports_ci_red_or_guard_vetoed(tmp_path: Path) -> None:
+    _write(tmp_path / "scripts/check_audit_regressions.py", "import sys\nsys.exit(0)\n")
+    _write(tmp_path / "audit-baseline.json", json.dumps({"open": {}}))
+    _write(tmp_path / "docs/RED_TEAM_FINDINGS.md", "no open findings")
+    ci_report = tmp_path / "ci.json"
+    ci_report.write_text(json.dumps({"ok": False}), encoding="utf-8")
+    guard_report = tmp_path / "guard.json"
+    guard_report.write_text(json.dumps({"vetoed": True}), encoding="utf-8")
+
+    result = cc.check_10_ops(tmp_path, ci_report=ci_report, guard_report=guard_report)
+
+    assert not result.passed
 
 
 # --------------------------------------------------------------------------- 11: 하드닝 집계 로직
@@ -144,10 +185,14 @@ def test_hardening_passes_when_all_items_pass(tmp_path: Path) -> None:
     assert "전부 닫힘" in result.detail
 
 
-def test_hardening_against_real_repo_currently_fails() -> None:
-    """ADR-2026-09-09-B 하드닝은 이 시점에 미완료다 — 현재 적색 상태를 고정."""
+def test_hardening_against_real_repo_now_passes() -> None:
+    """ADR-2026-09-09-B 하드닝 H-1~H-13 전부 닫힘(task-6398, CTO 2026-09-24 확인).
+
+    H-2/H-3/H-4/H-6/H-8/H-10은 검사의 정적 경로/패턴이 실제 배치와
+    어긋나 있던 오탐이었다 — 증거 자체는 이미 존재했다(task-6388 재배정).
+    """
     result = cc.check_11_hardening(ROOT)
-    assert not result.passed
+    assert result.passed
 
 
 # --------------------------------------------------------------------------- 11 개별 H 항목

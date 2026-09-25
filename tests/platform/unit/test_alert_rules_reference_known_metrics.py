@@ -206,6 +206,7 @@ def test_missing_groups_key_raises_instead_of_returning_empty(tmp_path: Path) ->
         _load_rules(bad_path)
 
 
+@pytest.mark.perf
 def test_full_validation_pipeline_p95_latency_within_budget() -> None:
     """수치 성능 단언: 이 파일의 정적 검증은 CI 게이트마다 매번 실행된다. 전체 규칙
     (11개)에 대해 메트릭 토큰 대조 + 필수 필드 + runbook 검증을 1회 통과하는 시간의

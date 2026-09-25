@@ -132,6 +132,7 @@ def test_apply_lot_model_copy_failure_propagates() -> None:
         setattr(lot_cls, "model_copy", original_model_copy)  # noqa: B010
 
 
+@pytest.mark.perf
 def test_weighted_average_10k_fills_within_budget() -> None:
     """성능 단언: 10,000회 연속 매수+매도 사이클이 5초 이내야 한다."""
     import time

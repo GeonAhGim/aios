@@ -1,30 +1,35 @@
-"""DC-9 — 테넌트/사용자 데이터 이용권(entitlement) 판정(순수).
+"""DC-9 — pure decision logic for tenant/user data entitlement.
 
 Spec: docs/specs/L4_analytics_authoring_backtest_marketplace_v1.0.md
-§2.1 DC-9, §3.1(SPI 에러 taxonomy 중 `DATA_ENTITLEMENT_DENIED`), §9.2 DC-9.
+§2.1 DC-9, §3.1 (`DATA_ENTITLEMENT_DENIED` in the SPI error taxonomy), §9.2 DC-9.
 
-이 모듈은 이용권 저장 스키마(`entitlements` 테이블, DC-8 소관)를 모른다 —
-호출자(application/adapters)가 이미 읽어 넘긴 `EntitlementGrant` 순수 DTO
-목록을 받아 `allowed(subject, feed) -> Entitlement`로 판정만 한다. HTTP
-403 응답 생성이나 라우터 배선은 하지 않는다(§3.3 EXCEPTION_MAP 소관,
-task-1179 decision) — 거부 시 `Entitlement.error_code`에 DC-5
-(`ports/provider.py`)가 이미 정의한 `DataProviderErrorCode.
-DATA_ENTITLEMENT_DENIED`를 그대로 담아, 그 값이 §3.3 taxonomy의 403으로
-매핑 가능한 구조화 값임을 보장한다(중복 정의 대신 단일출처 재사용).
+This module has no knowledge of the entitlement storage schema (the
+`entitlements` table, owned by DC-8) — it only decides
+`allowed(subject, feed) -> Entitlement` from a list of pure `EntitlementGrant`
+DTOs that the caller (application/adapters) has already read and passed in. It
+does not build HTTP 403 responses or wire routers (owned by §3.3
+EXCEPTION_MAP, task-1179 decision) — on denial it stores the
+`DataProviderErrorCode.DATA_ENTITLEMENT_DENIED` value already defined by DC-5
+(`ports/provider.py`) as-is in `Entitlement.error_code`, guaranteeing that
+value is a structured value mappable to the §3.3 taxonomy's 403 (reused from
+a single source instead of redefined here).
 
-테넌트 식별자는 PLT-28 `resolve_tenant_context`(task-1090)가 확립한 개념을
-그대로 쓴다 — `tenant_id`/`subject_id`는 `TenantContext`와 동일하게 `UUID`이고,
-P0 스콥에서는 `tenant_id == subject_id`(개인 계정)다. 교차 테넌트 열람 차단은
-LA-22(task-825)와 동일 원칙으로 "테넌트 불일치=거부"가 기본값이다 — `subject`가
-들고 온 `grants` 중 `tenant_id`가 다른 항목은 판정에서 아예 제외한다(설령
-uuid나 캐시 오염으로 섞여 들어왔더라도 신뢰하지 않는다, fail-closed).
+Tenant identifiers reuse the concept established by PLT-28
+`resolve_tenant_context` (task-1090) as-is — `tenant_id`/`subject_id` are
+`UUID`, same as `TenantContext`, and in P0 scope `tenant_id == subject_id`
+(personal account). Cross-tenant access is blocked on the same principle as
+LA-22 (task-825): "tenant mismatch = deny" is the default — any `grants` the
+`subject` brings in whose `tenant_id` differs are excluded from the decision
+entirely (never trusted even if they got mixed in via a UUID or cache
+corruption; fail-closed).
 
-판정은 4단계 깔때기다(각 단계에서 후보가 전부 걸러지면 그 단계의 사유가
-거부 사유가 된다): ① 테넌트/사용자 스코프 → ② 만료 → ③ venue·자산군·종목·TF
-스코프 → ④ 실시간 권한. ①②③ 어느 단계든 후보가 0개로 줄면 거부
-(fail-closed — 이용권 정보가 결손이면 허용이 아니라 거부). ④에서
-실시간을 요청했는데 스코프에 맞는 이용권이 지연 피드만 허용하면
-거부가 아니라 부분허용(`mode="delayed"`)이다.
+The decision is a 4-stage funnel (if every candidate is filtered out at a
+stage, that stage's reason becomes the denial reason): ① tenant/subject scope
+→ ② expiry → ③ venue/asset class/instrument/timeframe scope → ④ realtime
+entitlement. If any of stages ①②③ reduces the candidates to zero, it's a
+denial (fail-closed — missing entitlement info means deny, not allow). At
+stage ④, if realtime was requested but the entitlements matching scope only
+allow a delayed feed, it's a partial allow (`mode="delayed"`), not a denial.
 """
 from __future__ import annotations
 
@@ -50,16 +55,17 @@ __all__ = [
 
 
 class EntitlementGrant(BaseModel, frozen=True):
-    """이용권 레코드 1건의 순수 표현(`entitlements` 테이블 1행에 대응 —
-    이 모듈은 그 테이블 스키마를 모른다, DC-8 소관)."""
+    """Pure representation of a single entitlement record (corresponds to one
+    row of the `entitlements` table — this module has no knowledge of that
+    table's schema, owned by DC-8)."""
 
     tenant_id: UUID
     subject_id: UUID | None
-    """`None`이면 테넌트 전체(모든 사용자)에 적용되는 이용권."""
+    """`None` means the entitlement applies to the whole tenant (all users)."""
     venue: Venue
     asset_class: AssetClass
     instrument_ids: frozenset[str] | None
-    """`None`이면 `venue`×`asset_class` 전체 종목에 적용."""
+    """`None` means it applies to all instruments of `venue` x `asset_class`."""
     timeframes: frozenset[Timeframe]
     realtime: bool
     delayed_seconds: int
@@ -67,8 +73,9 @@ class EntitlementGrant(BaseModel, frozen=True):
 
 
 class EntitlementSubject(BaseModel, frozen=True):
-    """판정 대상(누가 묻는가) + 그가 보유한 이용권 목록. `resolve_tenant_context`
-    가 발급한 `TenantContext`와 동일한 `tenant_id`/`subject_id` 개념이다."""
+    """The decision subject (who is asking) plus the entitlements they hold.
+    Uses the same `tenant_id`/`subject_id` concept as the `TenantContext`
+    issued by `resolve_tenant_context`."""
 
     tenant_id: UUID
     subject_id: UUID
@@ -76,7 +83,8 @@ class EntitlementSubject(BaseModel, frozen=True):
 
 
 class FeedRequest(BaseModel, frozen=True):
-    """무엇을 요청하는가(누가 묻는지는 `EntitlementSubject`가 이미 담는다)."""
+    """What is being requested (who is asking is already carried by
+    `EntitlementSubject`)."""
 
     venue: Venue
     asset_class: AssetClass
@@ -93,8 +101,9 @@ class EntitlementDenialReason(str, Enum):
 
 
 class Entitlement(BaseModel, frozen=True):
-    """판정 결과. 허용/거부가 서로 배타적인 필드 조합만 표현하도록
-    `model_validator`로 강제한다(잘못된 절반-허용 상태 생성 자체를 막는다)."""
+    """The decision result. A `model_validator` enforces that only mutually
+    exclusive allow/deny field combinations can be represented (preventing
+    the construction of an invalid half-allowed state)."""
 
     allowed: bool
     mode: Literal["realtime", "delayed"] | None
@@ -139,10 +148,11 @@ def _matches_scope(grant: EntitlementGrant, feed: FeedRequest) -> bool:
 
 
 def allowed(subject: EntitlementSubject, feed: FeedRequest, as_of: datetime) -> Entitlement:
-    """`subject`가 `feed`를 `as_of` 시점에 조회할 수 있는지 판정한다.
+    """Decide whether `subject` may access `feed` as of `as_of`.
 
-    `as_of`는 만료 판정에 쓰는 결정론적 시계 입력이다(순수 함수는 현재
-    시각을 스스로 읽지 않는다) — 호출자가 tz-aware UTC로 넘긴다.
+    `as_of` is the deterministic clock input used for the expiry check (a
+    pure function does not read the current time itself) — the caller passes
+    it in as tz-aware UTC.
     """
     if as_of.tzinfo is None:
         raise ValueError("as_of는 tz-aware datetime만 받는다")

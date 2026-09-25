@@ -14,6 +14,7 @@ import shutil
 import sys
 import time
 import uuid
+from collections.abc import Iterator
 from pathlib import Path
 from types import ModuleType
 
@@ -42,7 +43,7 @@ def _write_py(path: Path, content: str) -> Path:
 
 
 @pytest.fixture
-def in_repo_dir():
+def in_repo_dir() -> Iterator[Path]:
     """count_tree()가 위반 파일의 상대 경로를 ROOT 기준으로 계산하므로(per_file
     보고용), 실제 위반이 있는 픽스처는 pytest의 기본 tmp_path(저장소 밖)가 아니라
     ROOT 아래에 둬야 한다."""
@@ -128,7 +129,7 @@ def test_count_tree_reports_zero_scanned_for_missing_dir(tmp_path: Path) -> None
 
 
 def test_main_refuses_to_touch_baseline_when_target_is_empty(
-    tmp_path: Path, capsys
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     empty_target = tmp_path / "wrong-cwd-target"
     empty_target.mkdir()
@@ -148,7 +149,7 @@ def test_main_refuses_to_touch_baseline_when_target_is_empty(
 
 
 def test_main_gate_red_reproduction_real_violation_still_fails(
-    in_repo_dir: Path, tmp_path: Path, capsys
+    in_repo_dir: Path, tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     """scanned==0 가드가 진짜 위반까지 숨기면 안 된다 -- 실제 초과분이 있으면
     여전히 FAIL·exit=1이어야 한다 (원래 게이트의 red 경로 재현)."""
@@ -168,7 +169,7 @@ def test_main_gate_red_reproduction_real_violation_still_fails(
 
 
 def test_main_decrease_reports_without_update_baseline_flag(
-    in_repo_dir: Path, tmp_path: Path, capsys
+    in_repo_dir: Path, tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     """A real, plausible reduction is not silently written -- --update-baseline is
     required, so a plain CI run never mutates the baseline file underneath a reviewer."""
@@ -213,7 +214,9 @@ def test_main_decrease_writes_baseline_with_update_flag(
 # ---------------------------------------------------------------------------
 
 
-def test_main_zero_total_refuses_to_touch_baseline(tmp_path: Path, capsys) -> None:
+def test_main_zero_total_refuses_to_touch_baseline(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
     """전량 영어(측정치 0)는 정말 다 고쳤다는 증거가 아니라 십중팔구 측정 오류다 --
     baseline이 무엇이든 rc=2로 거부하고 파일은 그대로 둔다."""
     target = tmp_path / "src"
@@ -233,7 +236,7 @@ def test_main_zero_total_refuses_to_touch_baseline(tmp_path: Path, capsys) -> No
 
 
 def test_main_below_half_baseline_refuses_to_touch_baseline(
-    in_repo_dir: Path, tmp_path: Path, capsys
+    in_repo_dir: Path, tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     """직전 baseline의 50% 미만으로 급락한 측정치도 같은 실패 모드다(4acc2620처럼
     잘못된 target이 부분적으로만 스캔됐을 때) -- 0이 아니어도 거부한다."""
@@ -253,7 +256,7 @@ def test_main_below_half_baseline_refuses_to_touch_baseline(
 
 
 def test_main_missing_baseline_requires_update_flag(
-    in_repo_dir: Path, tmp_path: Path, capsys
+    in_repo_dir: Path, tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     target = in_repo_dir / "src"
     _write_py(target / "a.py", "x = 1  # 한글\n")
@@ -274,6 +277,7 @@ def test_main_missing_baseline_requires_update_flag(
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.perf
 def test_count_tree_full_src_scan_completes_within_budget() -> None:
     start = time.perf_counter()
     total, _per_file, scanned = check_code_language.count_tree(ROOT / "src")

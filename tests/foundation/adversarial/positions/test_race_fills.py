@@ -91,7 +91,9 @@ async def _delete_pos_snapshot(pool: asyncpg.Pool, *, position_key: str) -> None
         await conn.execute("DELETE FROM pos_snapshot WHERE position_key = $1", position_key)
 
 
-async def _fill_once(pool: asyncpg.Pool, *, tenant_id: UUID, account_id: UUID, position_key: str) -> None:
+async def _fill_once(
+    pool: asyncpg.Pool, *, tenant_id: UUID, account_id: UUID, position_key: str
+) -> None:
     journal = PostgresJournalRepository(pool)
     snapshots = PostgresSnapshotRepository(pool)
     audit = PostgresAuditEventRepository(pool)
@@ -357,6 +359,7 @@ async def test_journal_write_failure_preserves_atomicity(pool: asyncpg.Pool) -> 
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.perf
 async def test_concurrent_fills_serializable(pool: asyncpg.Pool) -> None:
     tenant_id = await create_test_tenant(pool)
     account_id = await create_pos_account(pool, tenant_id)

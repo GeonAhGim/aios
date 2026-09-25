@@ -20,7 +20,6 @@ DEPTH 감사(task-2723, docs/audit/DEPTH_LA_LB_LC.md 417)가 지적한 4개 공�
 
 from __future__ import annotations
 
-import time
 from datetime import datetime, timezone
 from typing import Any
 
@@ -33,6 +32,7 @@ from src.foundation.market_data.ports.calendar_repository import CalendarReposit
 from src.foundation.market_data.ports.candle_store import CandleStore
 from src.foundation.market_data.ports.ingest_source import IngestSource
 from src.foundation.market_data.ports.reference_repository import ReferenceRepository
+from tests.conftest import PerfBudget
 
 
 def _now() -> datetime:
@@ -44,7 +44,9 @@ class _FullCandleStore:
     async def quarantine(self, conn: Any, batch_id: Any, candles: Any, issues: Any) -> None: ...
     async def query(self, conn: Any, key: Any, start: Any, end: Any, as_of: Any) -> Any: ...
     async def last_open_time(self, conn: Any, key: Any) -> Any: ...
-    async def read_candles_columnar(self, conn: Any, key: Any, start: Any, end: Any, as_of: Any) -> Any: ...
+    async def read_candles_columnar(
+        self, conn: Any, key: Any, start: Any, end: Any, as_of: Any
+    ) -> Any: ...
 
 
 class _MissingLastOpenTimeCandleStore:
@@ -58,7 +60,9 @@ class _MissingLastOpenTimeCandleStore:
 class _FullReferenceRepository:
     async def get_instrument(self, conn: Any, venue: Any, canonical: Any, at: Any) -> Any: ...
     async def register(self, conn: Any, cmd: Any) -> Any: ...
-    async def add_alias(self, conn: Any, instrument_id: Any, venue: Any, venue_symbol: Any) -> Any: ...
+    async def add_alias(
+        self, conn: Any, instrument_id: Any, venue: Any, venue_symbol: Any
+    ) -> Any: ...
     async def list_actions(self, conn: Any, instrument_id: Any) -> Any: ...
     async def record_action(self, conn: Any, action: Any) -> Any: ...
 
@@ -69,7 +73,9 @@ class _MissingRecordActionReferenceRepository:
 
     async def get_instrument(self, conn: Any, venue: Any, canonical: Any, at: Any) -> Any: ...
     async def register(self, conn: Any, cmd: Any) -> Any: ...
-    async def add_alias(self, conn: Any, instrument_id: Any, venue: Any, venue_symbol: Any) -> Any: ...
+    async def add_alias(
+        self, conn: Any, instrument_id: Any, venue: Any, venue_symbol: Any
+    ) -> Any: ...
     async def list_actions(self, conn: Any, instrument_id: Any) -> Any: ...
 
 
@@ -82,7 +88,9 @@ class _SyncLastOpenTimeCandleStore:
     async def upsert_batch(self, conn: Any, batch_id: Any, candles: Any) -> None: ...
     async def quarantine(self, conn: Any, batch_id: Any, candles: Any, issues: Any) -> None: ...
     async def query(self, conn: Any, key: Any, start: Any, end: Any, as_of: Any) -> Any: ...
-    async def read_candles_columnar(self, conn: Any, key: Any, start: Any, end: Any, as_of: Any) -> Any: ...
+    async def read_candles_columnar(
+        self, conn: Any, key: Any, start: Any, end: Any, as_of: Any
+    ) -> Any: ...
 
     def last_open_time(self, conn: Any, key: Any) -> Any:
         return None
@@ -99,7 +107,9 @@ class _InjectableCandleStore:
     async def quarantine(self, conn: Any, batch_id: Any, candles: Any, issues: Any) -> None: ...
     async def query(self, conn: Any, key: Any, start: Any, end: Any, as_of: Any) -> Any: ...
     async def last_open_time(self, conn: Any, key: Any) -> Any: ...
-    async def read_candles_columnar(self, conn: Any, key: Any, start: Any, end: Any, as_of: Any) -> Any: ...
+    async def read_candles_columnar(
+        self, conn: Any, key: Any, start: Any, end: Any, as_of: Any
+    ) -> Any: ...
 
 
 class _FullCalendarRepository:
@@ -108,7 +118,9 @@ class _FullCalendarRepository:
 
 
 class _FullIngestSource:
-    async def fetch_candles(self, venue: Any, raw_symbol: Any, tf: Any, start: Any, end: Any) -> Any: ...
+    async def fetch_candles(
+        self, venue: Any, raw_symbol: Any, tf: Any, start: Any, end: Any
+    ) -> Any: ...
 
 
 class _FullBatchRepository:
@@ -180,12 +192,16 @@ def test_runtime_method_removal_flips_isinstance_to_false(
     assert not isinstance(_InjectableCandleStore(), CandleStore)
 
 
-def test_isinstance_checks_over_thousands_of_instances_stay_fast() -> None:
+@pytest.mark.perf
+def test_isinstance_checks_over_thousands_of_instances_stay_fast(
+    perf_budget: PerfBudget,
+) -> None:
     """수치 성능 단언: `runtime_checkable` Protocol의 isinstance()는 멤버
     이름 개수에 비례하는 저비용 해시조회여야 한다 — 이 전제가 깨지면(예:
     누군가 실수로 무거운 `__instancecheck__`/검증 로직을 끼워 넣으면) 포트
     판정이 호출되는 모든 경로(등록·조회·인제스트)가 함께 느려진다. 5개
-    포트 x 10,000회 = 50,000회 isinstance() 호출이 1초 미만에 끝나야 한다."""
+    포트 x 10,000회 = 50,000회 isinstance() 호출이 1초 미만에 끝나야 한다.
+    task-7434: process_time 기반 perf_budget으로 측정한다."""
     fakes: list[tuple[object, type]] = [
         (_FullCandleStore(), CandleStore),
         (_FullReferenceRepository(), ReferenceRepository),
@@ -194,13 +210,12 @@ def test_isinstance_checks_over_thousands_of_instances_stay_fast() -> None:
         (_FullBatchRepository(), BatchRepository),
     ]
 
-    start = time.perf_counter()
-    for _ in range(10_000):
-        for instance, port in fakes:
-            assert isinstance(instance, port)
-    elapsed = time.perf_counter() - start
+    def _run_once() -> None:
+        for _ in range(10_000):
+            for instance, port in fakes:
+                assert isinstance(instance, port)
 
-    assert elapsed < 1.0
+    perf_budget.assert_within(_run_once, budget_ms=1000.0, label="50,000 isinstance() checks")
 
 
 class _MissingLoadCalendarRepository:
@@ -248,7 +263,9 @@ async def test_upsert_batch_failure_injection_raises() -> None:
         async def last_open_time(self, conn: Any, key: Any) -> None:
             return None
 
-        async def read_candles_columnar(self, conn: Any, key: Any, start: Any, end: Any, as_of: Any) -> Any:
+        async def read_candles_columnar(
+            self, conn: Any, key: Any, start: Any, end: Any, as_of: Any
+        ) -> Any:
             from src.foundation.market_data.domain.candle_columns import (
                 CandleColumns,
             )

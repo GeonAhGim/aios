@@ -166,7 +166,8 @@ class PaperStatementInputAdapter:
                 "average_fill_price": (
                     str(r["average_fill_price"]) if r["average_fill_price"] is not None else None
                 ),
-                "fee": None,  # no fee column in orders — always PENDING (see module docstring above)
+                # no fee column in orders — always PENDING (see module docstring above)
+                "fee": None,
                 "at": r["updated_at"].isoformat(),
             }
             for r in rows

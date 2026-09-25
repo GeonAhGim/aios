@@ -4,6 +4,7 @@ Split out of the former single `tests/integration/test_bitget_adapter.py`
 (788 lines, task-4225) — this file covers place/cancel/modify/batch/plan
 orders, row-to-order mapping, and wallet transfer.
 """
+
 import json
 from decimal import Decimal
 
@@ -337,3 +338,115 @@ async def test_transfer_returns_true_on_success(make_adapter, json_response):
     result = await adapter.transfer("spot", "usdt_futures", Decimal("100"), "usdt")
 
     assert result is True
+
+
+async def test_get_history_plan_orders_returns_raw_rows(make_adapter, json_response):
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == "/api/v2/spot/trade/history-plan-order"
+        assert request.url.params["symbol"] == "BTCUSDT"
+        assert request.url.params["limit"] == "50"
+        return json_response(
+            {
+                "code": "00000",
+                "msg": "success",
+                "requestTime": 1,
+                "data": [
+                    {
+                        "orderId": "p-1",
+                        "symbol": "BTCUSDT",
+                        "triggerPrice": "75000",
+                        "status": "success",
+                    }
+                ],
+            }
+        )
+
+    adapter = make_adapter(handler)
+    orders = await adapter.get_history_plan_orders("BTC/USDT", limit=50)
+
+    assert len(orders) == 1
+    assert orders[0]["orderId"] == "p-1"
+    assert orders[0]["status"] == "success"
+
+
+async def test_modify_plan_order_updates_trigger_price(make_adapter, json_response):
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == "/api/v2/spot/trade/modify-plan-order"
+        body = json.loads(request.content)
+        assert body["orderId"] == "p-1"
+        assert body["triggerPrice"] == "76000"
+        return json_response(
+            {
+                "code": "00000",
+                "msg": "success",
+                "requestTime": 1,
+                "data": {"orderId": "p-1", "triggerPrice": "76000"},
+            }
+        )
+
+    adapter = make_adapter(handler)
+    result = await adapter.modify_plan_order("p-1", trigger_price=Decimal("76000"))
+
+    assert result["orderId"] == "p-1"
+    assert result["triggerPrice"] == "76000"
+
+
+async def test_batch_cancel_plan_orders_returns_true_on_success(make_adapter, json_response):
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == "/api/v2/spot/trade/batch-cancel-plan-order"
+        body = json.loads(request.content)
+        assert body["orderIdList"] == [{"orderId": "p-1"}, {"orderId": "p-2"}]
+        assert body["symbol"] == "BTCUSDT"
+        return json_response({"code": "00000", "msg": "success", "requestTime": 1, "data": {}})
+
+    adapter = make_adapter(handler)
+    result = await adapter.batch_cancel_plan_orders(["p-1", "p-2"], symbol="BTC/USDT")
+
+    assert result is True
+
+
+async def test_batch_cancel_replace_orders_returns_data(make_adapter, json_response):
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == "/api/v2/spot/trade/batch-cancel-replace-order"
+        body = json.loads(request.content)
+        assert body["orderIdList"] == [{"orderId": "999"}]
+        return json_response(
+            {
+                "code": "00000",
+                "msg": "success",
+                "requestTime": 1,
+                "data": {"successList": [{"orderId": "1000"}]},
+            }
+        )
+
+    adapter = make_adapter(handler)
+    result = await adapter.batch_cancel_replace_orders(["999"])
+
+    assert result == {"successList": [{"orderId": "1000"}]}
+
+
+async def test_cancel_symbol_orders_returns_true_on_success(make_adapter, json_response):
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == "/api/v2/spot/trade/cancel-symbol-order"
+        body = json.loads(request.content)
+        assert body["symbol"] == "BTCUSDT"
+        return json_response({"code": "00000", "msg": "success", "requestTime": 1, "data": {}})
+
+    adapter = make_adapter(handler)
+    result = await adapter.cancel_symbol_orders("BTC/USDT")
+
+    assert result is True
+
+
+# ---------- task-6876 QA — negative: empty-data response ----------
+
+
+async def test_get_history_plan_orders_returns_empty_list_on_empty_data(
+    make_adapter, json_response
+):
+    adapter = make_adapter(
+        lambda request: json_response(
+            {"code": "00000", "msg": "success", "requestTime": 1, "data": []}
+        )
+    )
+    assert await adapter.get_history_plan_orders("BTC/USDT") == []

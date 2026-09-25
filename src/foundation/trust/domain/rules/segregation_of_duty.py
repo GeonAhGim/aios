@@ -40,24 +40,9 @@ and re-exports for the two call sites that still import it directly).
 
 from __future__ import annotations
 
-from collections.abc import Hashable
-
-from src.core.security.segregation_of_duty_port import SegregationOfDutyViolation
+from src.core.security.segregation_of_duty_port import (
+    SegregationOfDutyViolation,
+    assert_actor_not_counterparty,
+)
 
 __all__ = ["SegregationOfDutyViolation", "assert_actor_not_counterparty"]
-
-
-def assert_actor_not_counterparty(
-    actor_id: Hashable, counterparty_id: Hashable | None, *, action: str
-) -> None:
-    """Rejects if actor_id equals this action's counterparty_id.
-
-    If `counterparty_id` is `None` (no one has taken that role yet — e.g.
-    before the first DUAL-approval signature, before a mandate draft
-    proposal), there is nothing to compare against, so it passes through.
-    Equality between the two ids is decided with `==`, so this works as-is
-    for any identifier type that supports value equality (`UUID`, `str`,
-    `int`, etc.).
-    """
-    if counterparty_id is not None and actor_id == counterparty_id:
-        raise SegregationOfDutyViolation(actor_id, action)

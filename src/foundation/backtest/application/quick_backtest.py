@@ -38,6 +38,11 @@ from decimal import Decimal
 from typing import Protocol
 
 from src.data.models.trading import OrderSide
+from src.foundation.backtest.application.quick_backtest_bracket import (
+    BracketExitState,
+    BracketMetadata,
+    resolve_bracket_exit,
+)
 from src.foundation.backtest.application.quick_backtest_fill import (
     FillEvent,
     Holding,
@@ -57,6 +62,7 @@ from src.foundation.market_data.contracts.v1 import Timeframe
 __all__ = [
     "MAX_QUICK_BARS",
     "BarWindow",
+    "BracketMetadata",
     "FillEvent",
     "LookAheadError",
     "OrderIntent",
@@ -74,6 +80,8 @@ _ZERO = Decimal("0")
 
 class TooManyBarsError(QuickBacktestInputError):
     """`BT_QUICK_TOO_MANY_BARS` — 즉시 백테스트 봉 수 상한 초과(BT-11 딥 백테스트 대상)."""
+
+    details: dict[str, int]
 
 
 class LookAheadError(IndexError):
@@ -176,11 +184,18 @@ def run_quick_backtest(
     funding_rate: Decimal | None = None,
     lower_columns: CandleColumns | None = None,
     max_bars: int = MAX_QUICK_BARS,
+    bracket: BracketMetadata | None = None,
 ) -> QuickBacktestResult:
     """`columns`(LA-23b 컬럼 경로, `timeframe` 봉) 위에서 `strategy`를 봉마다
-    한 번씩 평가하고 BT-2~8로 체결·비용을 계산한다. 대기 주문은 한 번에
-    하나 — 새 의도가 오면 기존 대기 주문을 대체(취소)한다."""
+    한 번씩 평가하고 BT-2~8로 체질·비용을 계산한다. 대기 주문은 한 번에
+    하나 — 새 의도가 오면 기존 대기 주문을 대체(취소)한다. Bracket이
+    configure되면, 진입 체결 후 후속 봉에서 bracket 청산 레그(profit/loss/trail)
+    트리거를 감시하고 resolve_oca/bracket_quantity_for_fill로 청산을 처리한다."""
     _validate(config, columns, timeframe, initial_cash, funding_rate, max_bars)
+
+    # Extract bracket metadata from strategy if present (duck typing for _MaterializedSignalSource).
+    if bracket is None:
+        bracket = getattr(strategy, 'bracket', None)
     n = len(columns)
     step = duration(timeframe)
     warnings: list[str] = []
@@ -192,6 +207,7 @@ def run_quick_backtest(
     cash, qty = initial_cash, _ZERO
     pending: PendingOrder | None = None
     holding: Holding | None = None
+    bracket_exit: BracketExitState | None = None  # Tracks active bracket exit resolution
     funding_total = borrow_total = _ZERO
     fills: list[FillEvent] = []
     equity: list[Decimal] = []
@@ -224,6 +240,39 @@ def run_quick_backtest(
                 pending.remaining = fill.remaining_quantity
                 if pending.remaining == 0:
                     pending = None
+
+                # If bracket configured and entry filled, initialize bracket exit tracking.
+                if bracket is not None and bracket_exit is None and qty != 0:
+                    bracket_exit = BracketExitState(
+                        requested_qty=bracket.requested_qty,
+                        filled_qty=fill.quantity,
+                        profit_price=bracket.profit_price,
+                        loss_price=bracket.loss_price,
+                        trail_pct=bracket.trail_pct,
+                    )
+
+        # Check bracket exit legs and generate exit fills when triggered.
+        if bracket_exit is not None and not bracket_exit.resolved and qty != 0:
+            bracket_exit_fill = resolve_bracket_exit(
+                columns, i, qty, bracket_exit
+            )
+            if bracket_exit_fill is not None:
+                fills.append(bracket_exit_fill)
+                exit_signed = (
+                    bracket_exit_fill.quantity
+                    if bracket_exit_fill.side == OrderSide.BUY
+                    else -bracket_exit_fill.quantity
+                )
+                cash -= bracket_exit_fill.price * exit_signed + bracket_exit_fill.commission
+                before, qty = qty, qty + exit_signed
+                if holding is not None and (qty == 0 or (before > 0) != (qty > 0)):
+                    f_cost, b_cost = settle_costs(
+                        config, holding, bracket_exit_fill.open_time, funding_rate
+                    )
+                    funding_total, borrow_total = funding_total + f_cost, borrow_total + b_cost
+                    cash -= f_cost + b_cost
+                    holding = None
+                bracket_exit.resolved = True
 
         equity.append(cash + qty * columns.close[i])
 

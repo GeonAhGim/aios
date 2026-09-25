@@ -11,7 +11,9 @@ from decimal import Decimal
 import pytest
 
 from src.data.models.base import Currency, FXRate, Money
-from src.foundation.positions.domain import funding_fees, fx as fx_module
+from src.foundation.positions.domain import funding_fees
+from src.foundation.positions.domain import fx as fx_module
+from tests.conftest import PerfBudget
 
 _NOW = datetime(2026, 9, 3, 12, 0, tzinfo=timezone.utc)
 
@@ -152,22 +154,21 @@ def test_to_base_propagates_fx_convert_exception_via_monkeypatch(
         funding_fees.to_base(fee, Currency.KRW, _rate())
 
 
-def test_to_base_batch_10000_calls_within_latency_budget() -> None:
+@pytest.mark.perf
+def test_to_base_batch_10000_calls_within_latency_budget(perf_budget: PerfBudget) -> None:
     """수치 성능 단언: 10,000회 환산이 50ms 예산 안에 끝나야 한다
-    (순수 Decimal 연산 — O(1) per call, 실측 ~0.001초)."""
-    import time
-
+    (순수 Decimal 연산 — O(1) per call, 실측 ~0.001초). task-7434: wall-clock
+    perf_counter() 대신 공용 perf_budget(process_time 기반)으로 측정한다."""
     fee = Money(amount=Decimal("1"), currency=Currency.USDT)
     rate = _rate()
     n = 10_000
-    budget = 0.050  # 50ms
+    budget_ms = 50.0
 
-    t0 = time.perf_counter()
-    for _ in range(n):
-        funding_fees.to_base(fee, Currency.KRW, rate)
-    elapsed = time.perf_counter() - t0
+    def _run_once() -> None:
+        for _ in range(n):
+            funding_fees.to_base(fee, Currency.KRW, rate)
 
-    assert elapsed < budget, f"환산 {n}회 기준 {elapsed:.4f}s — 예산 {budget}s 초과"
+    perf_budget.assert_within(_run_once, budget_ms=budget_ms, label=f"{n} to_base calls")
 
 
 def test_to_base_accepts_reverse_rate_and_inverts() -> None:

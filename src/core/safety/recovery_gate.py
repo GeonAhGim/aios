@@ -19,22 +19,18 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
-from decimal import Decimal
 
 from pydantic import BaseModel, model_validator
 
+from src.core.loader.risk_policy_loader import CircuitBreakerPolicy
 from src.core.risk.decision import RiskOutcome
-from src.core.safety.circuit_breaker import CircuitBreakerLevel, CircuitBreakerMetrics
+from src.core.safety.circuit_breaker import (
+    CircuitBreakerLevel,
+    CircuitBreakerMetrics,
+    compute_level,
+)
 
 _REACTIVATABLE = (CircuitBreakerLevel.HALTED, CircuitBreakerLevel.EMERGENCY)
-_ZERO = Decimal("0")
-_METRIC_FIELDS = (
-    "api_error_rate_pct",
-    "data_delay_sec",
-    "order_reject_rate_pct",
-    "daily_loss_pct",
-    "api_disconnect_sec",
-)
 
 
 class RecoveryDecision(BaseModel, frozen=True):
@@ -55,13 +51,19 @@ def _deny(reason_code: str) -> RecoveryDecision:
     return RecoveryDecision(outcome=RiskOutcome.DENY, reason_code=reason_code)
 
 
-def _is_baseline(metrics: CircuitBreakerMetrics) -> bool:
-    # data_delay_sec가 None("모름", R-43)이면 baseline이 아니다 — 지연을
-    # 관측하지 못한 상태를 "지연 없음"으로 읽으면 재가동 판정이 fail-open된다.
-    return all(
-        (value := getattr(metrics, field)) is not None and value <= _ZERO
-        for field in _METRIC_FIELDS
-    )
+def _is_baseline(metrics: CircuitBreakerMetrics, policy: CircuitBreakerPolicy) -> bool:
+    """§4.3 CB table row 4 -- a history sample is baseline when it stays
+    *below the warning thresholds* (``compute_level`` yields NORMAL), not when
+    every metric is exactly zero. ``data_delay_sec`` and ``api_disconnect_sec``
+    are time-since-last-observation measurements, so a real tick never sees
+    an exact zero; requiring zero made reactivation unreachable with live
+    trackers. ``data_delay_sec=None`` ("unknown", R-43) is never baseline --
+    ``compute_level`` already treats unknown delay as HALTED (fail-closed), the
+    explicit check keeps that contract visible here.
+    """
+    if metrics.data_delay_sec is None:
+        return False
+    return compute_level(metrics, policy) == CircuitBreakerLevel.NORMAL
 
 
 def can_reactivate(
@@ -72,8 +74,13 @@ def can_reactivate(
     evidence_ref: str | None,
     approval_status: str,
     fresh_risk_outcome: RiskOutcome,
+    policy: CircuitBreakerPolicy,
 ) -> RecoveryDecision:
-    """§4.3 CB 표 행 4 — 4가지 조건을 전부 만족해야 ALLOW, 그 외 전부 DENY."""
+    """§4.3 CB 표 행 4 — 4가지 조건을 전부 만족해야 ALLOW, 그 외 전부 DENY.
+
+    ``policy`` supplies the thresholds that define a baseline sample (row 4:
+    "metrics history below warning for the whole cooldown").
+    """
     if current_level not in _REACTIVATABLE:
         return _deny("RECOVERY_LEVEL_NOT_DEGRADED")
     if not evidence_ref:
@@ -82,7 +89,7 @@ def can_reactivate(
         return _deny("RECOVERY_COOLDOWN_NOT_MET")
     if len(metrics_history) < cooldown_sec:
         return _deny("RECOVERY_COOLDOWN_NOT_MET")
-    if not all(_is_baseline(m) for m in metrics_history):
+    if not all(_is_baseline(m, policy) for m in metrics_history):
         return _deny("RECOVERY_COOLDOWN_NOT_MET")
     if approval_status != "APPROVED":
         return _deny("RECOVERY_APPROVAL_NOT_APPROVED")

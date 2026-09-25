@@ -1,10 +1,13 @@
-"""Trust Core membership admin API — 71번 §6 규칙: router는 auth/TenantContext
-주입/transport validation/command invocation만 담당한다. `X-Tenant-Id`는 직접
-읽지 않고 `get_tenant_context`(PLT-28)가 돌려준 컨텍스트만 신뢰한다 — cross-
-tenant 시도는 그 의존성 단계에서 이미 403 `AUTH_TENANT_MISMATCH`로 막힌다.
+"""Trust Core membership admin API — Rule §6 (71): the router is responsible
+only for auth/TenantContext injection, transport validation, and command
+invocation. It does not read `X-Tenant-Id` directly; it trusts only the
+context returned by `get_tenant_context` (PLT-28) — cross-tenant attempts
+are already blocked with 403 `AUTH_TENANT_MISMATCH` at that dependency
+stage.
 
-도메인 예외는 여기서 잡지 않는다 — `src/api/contracts/exception_mapping.py`의
-`EXCEPTION_MAP`이 전역 핸들러에서 봉투로 번역한다(§9 PLT-29 decision).
+Domain exceptions are not caught here — the `EXCEPTION_MAP` in
+`src/api/contracts/exception_mapping.py` translates them in the global
+handler (§9 PLT-29 decision).
 """
 from __future__ import annotations
 

@@ -234,6 +234,7 @@ def test_failure_injection_plan_rebalance_propagates_corrupted_aggregate_feed():
 # --- D2: numeric performance assertion (pre-trade gate budget, ADR-2026-09-09-C) --
 
 
+@pytest.mark.perf
 def test_perf_plan_rebalance_p99_within_pre_trade_gate_budget():
     """plan_rebalance() produces the trade list that precedes order
     submission, so it sits on the same pre-trade gate path as L18's

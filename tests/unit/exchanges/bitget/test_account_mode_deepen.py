@@ -44,6 +44,7 @@ from collections.abc import Callable
 from decimal import Decimal
 
 import httpx
+import pytest
 
 from src.exchanges.bitget.account_mode import BitgetAccountMode
 from src.exchanges.bitget.adapter import BitgetAdapter
@@ -113,6 +114,7 @@ async def test_get_balance_survives_infra_failures_then_switches_to_unified_on_4
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.perf
 async def test_get_balance_classic_roundtrip_throughput_within_normalized_budget() -> None:
     """실패 없는 CLASSIC 경로 get_balance() 왕복의 실측 소요시간을, 동일 N
     크기의 trivial dict 생성 루프(같은 프로세스, 같은 측정 시점) 대비

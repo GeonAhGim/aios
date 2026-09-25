@@ -290,6 +290,7 @@ p99 5ms"(실 DB 기준) 예산을 그대로 가져다 쓸 수는 없다 — 대�
 단언이 잡는다)."""
 
 
+@pytest.mark.perf
 async def test_repeated_mirror_calls_stay_within_budget() -> None:
     risk_repo = FakeRiskGateRepository()
     mandate_repo = FakeMandateRepository()

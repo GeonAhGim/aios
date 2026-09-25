@@ -174,6 +174,7 @@ def test_record_grid_entry_delegates_to_bt9_reproducibility_key() -> None:
 # ================= DEEPEN(task-3053): 실패 주입 =================
 
 
+@pytest.mark.perf
 def test_record_grid_entry_still_correct_when_bt9_key_stalls(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

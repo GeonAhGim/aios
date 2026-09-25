@@ -17,6 +17,8 @@ import time
 from pathlib import Path
 from types import ModuleType
 
+import pytest
+
 ROOT = Path(__file__).resolve().parents[3]
 SCRIPTS_DIR = ROOT / "scripts"
 
@@ -216,6 +218,7 @@ def test_main_check_fails_when_index_file_missing(tmp_path):
     assert rc == 2
 
 
+@pytest.mark.perf
 def test_collect_and_render_throughput_budget(tmp_path):
     """Numeric performance assertion: this repo currently has ~35 ADR files; assert
     collect_adrs+render_table stays well under budget for a corpus an order of

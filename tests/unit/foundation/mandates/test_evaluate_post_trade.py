@@ -182,6 +182,7 @@ def test_violation_reason_encodes_tenant_scoped_key() -> None:
     assert reason == f"COMPLIANCE:{WASH_TRADE_RULE_ID}:2026-01-05"
 
 
+@pytest.mark.perf
 def test_evaluate_tenant_day_meets_latency_and_throughput_budget() -> None:
     """수치 성능/처리량 -- 이 배치는 스케줄러(`background_loops.py`, 일 1회
     고정 시각)에서 돌아가므로 evaluate_tenant_day 자체가 병목이 되면 tenant

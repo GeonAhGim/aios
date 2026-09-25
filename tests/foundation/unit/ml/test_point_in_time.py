@@ -106,6 +106,7 @@ def _p95(samples: list[float]) -> float:
     return samples[min(int(len(samples) * 0.95), len(samples) - 1)]
 
 
+@pytest.mark.perf
 def test_check_point_in_time_p95_latency_within_budget() -> None:
     backtest_start = _NOW
     card = _model_card(lineage_end=backtest_start - timedelta(days=1))

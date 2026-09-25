@@ -160,6 +160,7 @@ def test_safe_counter_catches_metrics_port_exception() -> None:
     assert "metrics.counter failed" in mock_logger.warning.call_args[0][0]
 
 
+@pytest.mark.perf
 def test_prometheus_metrics_counter_increments_within_perf_budget() -> None:
     """수치 성능 단언: `_get_or_create`가 이름당 1회만 등록한다면(캐시 적중) 5,000회
     반복이 300ms 안에 끝나야 한다. 캐시가 없다면 두 번째 호출부터 동일 이름의 중복
@@ -223,7 +224,10 @@ def test_prometheus_metrics_counter_with_empty_labels_dict() -> None:
     adapter.counter("aios.test.empty_labels.count_total", {})
     families = list(adapter._registry.collect())
     sample = next(
-        s for family in families for s in family.samples if s.name == "aios_test_empty_labels_count_total"
+        s
+        for family in families
+        for s in family.samples
+        if s.name == "aios_test_empty_labels_count_total"
     )
     assert sample.value == 1.0
     assert sample.labels == {}

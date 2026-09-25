@@ -24,7 +24,7 @@ from src.core.script.grammar.ast import (
 )
 from src.core.script.grammar.lexer import ScriptSyntaxError, Token, TokenKind
 
-_NAMESPACES = frozenset({"ta", "math", "series"})
+_NAMESPACES = frozenset({"ta", "math", "series", "strategy"})
 _CMP_OPS = frozenset({"<", "<=", "==", ">=", ">"})
 _CROSS_OPS = frozenset({"crosses_above", "crosses_below"})
 _ARITH_OPS = frozenset({"+", "-"})
@@ -151,11 +151,11 @@ class _ExprParser:
         raise ScriptSyntaxError(f"예상치 못한 토큰 {tok.value!r}", tok.line, tok.col)
 
     def _call(self) -> CallExpr:
-        """call := ns "." ident "(" args ")" — ns ∈ {ta, math, series}."""
+        """call := ns "." ident "(" args ")" — ns ∈ {ta, math, series, strategy}."""
         ns_tok = self._advance()
         if ns_tok.value not in _NAMESPACES:
             raise ScriptSyntaxError(
-                f"알 수 없는 네임스페이스 {ns_tok.value!r}(ta/math/series만 허용)",
+                f"알 수 없는 네임스페이스 {ns_tok.value!r}(ta/math/series/strategy만 허용)",
                 ns_tok.line,
                 ns_tok.col,
             )

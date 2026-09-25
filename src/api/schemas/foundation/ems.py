@@ -18,6 +18,7 @@ from src.data.models.trading import OrderSide
 from src.foundation.ems.contracts.v1 import TcaResult
 
 __all__ = [
+    "AlgoProgressView",
     "ComputeTcaBar",
     "ComputeTcaFill",
     "ComputeTcaRequest",
@@ -52,3 +53,14 @@ class TcaResultView(BaseModel):
     revision: int
     result: TcaResult
     computed_at: datetime
+
+
+class AlgoProgressView(BaseModel):
+    parent_id: UUID
+    status: str
+    total_slices: int
+    submitted_slices: int
+    pending_slices: int
+    remaining_qty: Decimal
+    demoted_to_twap: bool
+    demotion_reason: str | None

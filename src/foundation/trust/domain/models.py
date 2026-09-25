@@ -1,4 +1,4 @@
-"""Trust Core 도메인 모델 — pure value object. FastAPI/asyncpg에 의존하지 않는다.
+"""Trust Core domain model — pure value object. No dependency on FastAPI/asyncpg.
 
 Spec: AIOSproject 73_trust_core_l3_build_and_operational_specification_v1.0.md §2.1,
 106_module_scaffold_and_naming_standard_v1.0.md §2.
@@ -44,8 +44,8 @@ class MembershipState(str, Enum):
 
 @dataclass(frozen=True)
 class Disclosure:
-    """불변 발행 텍스트/버전. 본문은 별도 document store에 있고 여기는
-    `content_hash`만 참조한다(73번 §2.1)."""
+    """Immutable published text/version. The body lives in a separate document store;
+    this record holds only `content_hash` (spec 73 §2.1)."""
 
     id: UUID
     purpose: str
@@ -57,10 +57,10 @@ class Disclosure:
 
 @dataclass(frozen=True)
 class Consent:
-    """subject의 특정 disclosure purpose/revision에 대한 동의 또는 철회.
+    """Consent or revocation by a subject for a specific disclosure purpose/revision.
 
-    상태 전이(73번 §3.2): NONE -> ACTIVE -> REVOKED. 새 disclosure revision은
-    새 ACTIVE 레코드를 요구하며 이전 레코드를 덮어쓰지 않는다 — append-only.
+    State transitions (spec 73 §3.2): NONE -> ACTIVE -> REVOKED. A new disclosure
+    revision requires a new ACTIVE record and never overwrites the prior one — append-only.
     """
 
     id: UUID
@@ -77,8 +77,8 @@ class Consent:
 
 @dataclass(frozen=True)
 class Tenant:
-    """격리 경계(73번 §2). PERSONAL tenant는 `id == user_id`(84b7d0faf14f 이후
-    불변조건, PLT-26 backfill이 이를 만족시킨다)."""
+    """Isolation boundary (spec 73 §2). A PERSONAL tenant has `id == user_id` (invariant
+    since commit 84b7d0faf14f; PLT-26 backfill satisfies this)."""
 
     id: UUID
     kind: TenantKind
@@ -88,8 +88,9 @@ class Tenant:
 
 @dataclass(frozen=True)
 class Membership:
-    """subject의 tenant 내 역할 바인딩(73번 §3.1 상태 머신). 전이는
-    `rules.is_membership_transition_allowed`가 판정한다 — 여기는 값만 담는다."""
+    """Role binding of a subject within a tenant (spec 73 §3.1 state machine).
+    Transitions are governed by `rules.is_membership_transition_allowed` — this
+    class holds only the value."""
 
     id: UUID
     tenant_id: UUID

@@ -42,6 +42,7 @@ def test_recovery_gate_denies_reactivation_when_history_sample_missing_data_dela
         evidence_ref="evidence://task-1762",
         approval_status="APPROVED",
         fresh_risk_outcome=RiskOutcome.ALLOW,
+        policy=load_risk_policy().circuit_breaker,
     )
 
     assert decision.outcome == RiskOutcome.DENY

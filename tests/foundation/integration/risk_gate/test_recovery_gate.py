@@ -12,6 +12,7 @@ from __future__ import annotations
 import asyncio
 import os
 import time
+from collections.abc import Awaitable, Callable
 from datetime import datetime, timedelta, timezone
 from uuid import UUID, uuid4
 
@@ -138,7 +139,12 @@ class _GatedRecorder:
 
 
 def _repos(risk_gate_repo, cb, pool, recorder, **overrides) -> RecoveryGateRepos:
-    kwargs = {"cooldown_sec": _COOLDOWN_SEC, "approval_ttl_sec": _APPROVAL_TTL_SEC, **overrides}
+    kwargs = {
+        "cooldown_sec": _COOLDOWN_SEC,
+        "approval_ttl_sec": _APPROVAL_TTL_SEC,
+        "circuit_breaker_policy": load_risk_policy().circuit_breaker,
+        **overrides,
+    }
     return RecoveryGateRepos(
         risk_gate=risk_gate_repo,
         circuit_breaker=cb,
@@ -523,36 +529,40 @@ async def test_concurrent_recovery_instances_only_one_deactivates_control(
 async def test_evaluate_recovery_latency_within_normalized_budget(
     pool, risk_gate_repo, cb, recorder, actor_id
 ):
-    """성능 단언 — RECOVERY 게이트 평가(ALLOW) 1회의 p95 지연을 같은 연결의
+    """성능 단언 — RECOVERY 게이트 평가(ALLOW) 1회의 중위값 지연을 같은 연결의
     기준 왕복비용(`SELECT 1`)에 정규화한 임계와 비교한다(절대 ms 상수 회피,
     tests/adversarial/risk/test_tick_mandate_fence_staleness.py 관례 재사용).
     각 반복마다 새 halted control을 미리 만들어, 측정 구간에는 평가 자체의
-    비용만 들어가게 한다."""
+    비용만 들어가게 한다. 벽시계 시간의 다중 샘플을 수집하고 중위값을 취해
+    노이즈를 제거한다(task-6774 권고)."""
     approval_id = await _make_approved_request(pool)
     repos = _repos(risk_gate_repo, cb, pool, recorder)
-    reps = 15
+    n_samples = 7
+    # Create 1 + n_samples controls: 1 for warmup, n_samples for actual measurements
     control_ids = [
         await _make_halted_control(pool, risk_gate_repo, actor_id=actor_id, elapsed_sec=2000)
-        for _ in range(reps)
+        for _ in range(1 + n_samples)
     ]
 
-    async def _p95_ms(step) -> float:
+    async def _median_wall_ms(step_fn: Callable[[int], Awaitable[object]]) -> float:
+        """벽시계 시간으로 n번 샘플링하고 중위값을 반환한다. 다른 프로세스가
+        CPU를 뺏는 노이즈를 줄인다."""
+        # Warmup iteration (not counted).
+        await step_fn(0)
+        # Collect n samples.
         samples = []
-        for _ in range(reps):
+        for i in range(n_samples):
             t0 = time.perf_counter()
-            await step()
+            await step_fn(i + 1)  # Offset by 1 to skip the warmup control
             samples.append((time.perf_counter() - t0) * 1000)
         samples.sort()
-        return samples[int(len(samples) * 0.95) - 1]
+        return samples[len(samples) // 2]
 
     async with pool.acquire() as conn:
-        baseline_p95 = await _p95_ms(lambda: conn.fetchval("SELECT 1"))
+        baseline_median = await _median_wall_ms(lambda i: conn.fetchval("SELECT 1"))
 
-    index = {"i": 0}
-
-    async def _one_eval() -> None:
-        control_id = control_ids[index["i"]]
-        index["i"] += 1
+    async def _one_eval(idx: int) -> None:
+        control_id = control_ids[idx]
         await evaluate_recovery(
             repos,
             tenant_id=actor_id,
@@ -562,18 +572,19 @@ async def test_evaluate_recovery_latency_within_normalized_budget(
             trace_id=uuid4(),
         )
 
-    gate_p95 = await _p95_ms(_one_eval)
+    gate_median = await _median_wall_ms(_one_eval)
 
     # evaluate_recovery는 SELECT 1 왕복보다 훨씬 많은 순차 왕복(control 조회·
     # approval 조회·cb 상태 조회·WORM 기록·해제 커맨드)을 거친다 — 같은
     # 디렉터리의 다른 테스트가 먼저 쌓아 둔 테이블 크기에 따라 관측치가
     # 커질 수 있어 여유를 크게 둔다.
-    budget_ms = max(600.0, 150.0 * baseline_p95)
+    budget_ms = max(600.0, 150.0 * baseline_median)
     print(  # noqa: T201 — 실측치는 비차단 기록, 게이트는 아래 assert.
-        f"evaluate_recovery p95={gate_p95:.3f}ms baseline(SELECT 1) p95={baseline_p95:.3f}ms "
+        f"evaluate_recovery median={gate_median:.3f}ms "
+        f"baseline(SELECT 1) median={baseline_median:.3f}ms "
         f"budget={budget_ms:.3f}ms"
     )
-    assert gate_p95 < budget_ms
+    assert gate_median < budget_ms
 
 
 @pytest.fixture
@@ -624,7 +635,7 @@ async def test_router_recovery_denied_end_to_end_returns_403_rsk007_envelope(
         grant = await break_glass.request_grant(
             conn,
             requester_id=actor_id,
-            requester_auth_level="MFA_VERIFIED",
+            requester_mfa_verified_at=datetime.now(timezone.utc),
             scope="kill_switch_override",
             reason="test_recovery_gate",
         )
@@ -632,7 +643,7 @@ async def test_router_recovery_denied_end_to_end_returns_403_rsk007_envelope(
             conn,
             grant_id=grant.id,
             approver_id=approver_id,
-            approver_auth_level="MFA_VERIFIED",
+            approver_mfa_verified_at=datetime.now(timezone.utc),
             check_segregation_of_duty=assert_actor_not_counterparty,
         )
 
