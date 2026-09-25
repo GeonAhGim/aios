@@ -450,3 +450,39 @@ class TestStructuredLogLineRejectsMissingActorSubjectId:
                 duration_ms=10,
                 actor_subject_id=None,  # pyright-ignore: None is intentional
             )
+
+    def test_rejects_non_string_actor_subject_id(self) -> None:
+        """DEEPEN negative: a non-string value (int) must be rejected too — pydantic
+        does not coerce int -> str for this field, so a caller passing a raw numeric
+        id (e.g. a DB PK) fails loudly instead of silently storing the wrong type."""
+        with pytest.raises(ValueError):
+            StructuredLogLine(
+                timestamp=datetime.now(timezone.utc),
+                level="info",
+                message="test message",
+                component="test",
+                event="test_event",
+                tenant_id="tenant-1",
+                trace_id="trace-1",
+                duration_ms=10,
+                actor_subject_id=123,  # pyright-ignore: wrong type is intentional
+            )
+
+    def test_missing_actor_subject_id_error_names_the_field(self) -> None:
+        """DEEPEN: proves the ValueError above is not tautological (`pytest.raises`
+        would also pass for an error raised by an unrelated field). The message must
+        name `actor_subject_id` specifically — that's the only way this test would
+        actually break if the field were renamed or the validation moved elsewhere."""
+        with pytest.raises(ValueError) as exc_info:
+            StructuredLogLine(
+                timestamp=datetime.now(timezone.utc),
+                level="info",
+                message="test message",
+                component="test",
+                event="test_event",
+                tenant_id="tenant-1",
+                trace_id="trace-1",
+                duration_ms=10,
+            )
+
+        assert "actor_subject_id" in str(exc_info.value)
