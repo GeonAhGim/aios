@@ -46,6 +46,10 @@ dependencies = [
     # (LGPL-3.0) and must never be installed (INDICATOR_OSS_EVAL.md §5,
     # NOTICE-AIOS.md). Do not add extras to this requirement string.
     "pandas-ta-classic>=0.6.52",
+    # SBX-2 (ADR-2026-09-26-B, task-7616): sandboxed_script_eval.py watcher
+    # thread reads child-process RSS -- previously only declared as an
+    # optional test fixture dependency (see the mypy override below).
+    "psutil>=6.0",
 ]
 
 [project.optional-dependencies]
@@ -354,8 +358,9 @@ module = "defusedxml.*"
 ignore_missing_imports = true
 
 [[tool.mypy.overrides]]
-# task-6774: types-psutil is not installed; psutil is an optional
-# perf_budget fixture dependency (tests/conftest.py), not a hard one.
+# task-6774/task-7616: types-psutil is not installed. psutil is now a hard
+# dependency (SBX-2 sandboxed_script_eval.py, plus tests/conftest.py's
+# perf_budget fixture), but it ships no py.typed marker either way.
 module = "psutil.*"
 ignore_missing_imports = true
 
