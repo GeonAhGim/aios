@@ -1,5 +1,6 @@
 import logging
 import time
+from datetime import datetime, timezone
 from unittest.mock import patch
 
 import pytest
@@ -327,6 +328,80 @@ def test_redaction_filter_is_noop_when_payload_absent():
 # ---------------------------------------------------------------------------
 
 
+class TestStructuredLogLineRejectsUnknownLevel:
+    """StructuredLogLine must reject unknown log levels (PLT-02)."""
+
+    def test_rejects_unknown_level_string(self) -> None:
+        """An unknown level string must raise ValueError."""
+        with pytest.raises(ValueError):
+            StructuredLogLine(
+                level="critical",
+                message="test message",
+                correlation_id="corr-1",
+                tenant_id="tenant-1",
+                trace_id="trace-1",
+                span_id="span-1",
+                session_id="session-1",
+                user_id="user-1",
+                request_id="req-1",
+                endpoint="/api/test",
+                method="GET",
+                status_code=200,
+                duration_ms=10,
+                source="test",
+                metadata={},
+                actor_subject_id="user-abc",
+            )
+
+    def test_rejects_empty_level(self) -> None:
+        """An empty string for level must raise ValueError."""
+        with pytest.raises(ValueError):
+            StructuredLogLine(
+                level="",
+                message="test message",
+                correlation_id="corr-1",
+                tenant_id="tenant-1",
+                trace_id="trace-1",
+                span_id="span-1",
+                session_id="session-1",
+                user_id="user-1",
+                request_id="req-1",
+                endpoint="/api/test",
+                method="GET",
+                status_code=200,
+                duration_ms=10,
+                source="test",
+                metadata={},
+                actor_subject_id="user-abc",
+            )
+
+    def test_accepts_valid_levels(self) -> None:
+        """All valid levels must be accepted without error."""
+        for valid_level in ("debug", "info", "warn", "error"):
+            log = StructuredLogLine(
+                timestamp=datetime.now(timezone.utc),
+                level=valid_level,
+                message="test message",
+                component="test",
+                event="test_event",
+                correlation_id="corr-1",
+                tenant_id="tenant-1",
+                trace_id="trace-1",
+                span_id="span-1",
+                session_id="session-1",
+                user_id="user-1",
+                request_id="req-1",
+                endpoint="/api/test",
+                method="GET",
+                status_code=200,
+                duration_ms=10,
+                source="test",
+                metadata={},
+                actor_subject_id="user-abc",
+            )
+            assert log.level == valid_level
+
+
 class TestStructuredLogLineRejectsMissingActorSubjectId:
     """StructuredLogLine must reject records missing actor_subject_id (PLT-02)."""
 
@@ -371,29 +446,4 @@ class TestStructuredLogLineRejectsMissingActorSubjectId:
                 source="test",
                 metadata={},
                 actor_subject_id=None,  # pyright-ignore: None is intentional
-            )
-
-
-class TestStructuredLogLineRejectsUnknownLevel:
-    """StructuredLogLine must reject unknown level values (level field only)."""
-
-    @pytest.mark.parametrize("level", ["critical", "debug", "not a level"])
-    def test_rejects_unknown_level(self, level: str) -> None:
-        with pytest.raises(ValueError):
-            StructuredLogLine(
-                level=level,
-                message="test message",
-                correlation_id="corr-1",
-                tenant_id="tenant-1",
-                trace_id="trace-1",
-                span_id="span-1",
-                session_id="session-1",
-                user_id="user-1",
-                request_id="req-1",
-                endpoint="/api/test",
-                method="GET",
-                status_code=200,
-                duration_ms=10,
-                source="test",
-                metadata={},
             )
