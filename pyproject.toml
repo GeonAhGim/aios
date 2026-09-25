@@ -358,3 +358,11 @@ ignore_missing_imports = true
 # perf_budget fixture dependency (tests/conftest.py), not a hard one.
 module = "psutil.*"
 ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+# task-7508: tomllib is stdlib in Python 3.11+ but not in 3.10; tomli is used
+# as fallback (scripts/check_deps_declared.py). Mypy running on 3.10 can't find
+# tomllib stubs, so we ignore the import-not-found error rather than using
+# type: ignore[import-not-found] in the code (to keep type: ignore budget clean).
+module = "tomllib"
+ignore_missing_imports = true
