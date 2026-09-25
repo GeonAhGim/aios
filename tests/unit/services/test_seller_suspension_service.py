@@ -195,6 +195,7 @@ async def test_gate_red_repro_nonexistent_user_guard_blocks_audit_log(
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.perf
 async def test_suspend_perf_budget_p95_latency() -> None:
     """FD-18.4에 전용 예산이 없어 가장 가까운 공개 예산("order submit ->
     ACK p95 50ms, paper", ADR-2026-09-09-C Decision 1)과 동일 자릿수를
