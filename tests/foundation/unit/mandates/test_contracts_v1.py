@@ -214,8 +214,9 @@ def test_rule_hit_evidence_dict_rejects_ior_operator() -> None:
         evidence={"key": "original"},
     )
 
+    ev = hit.evidence  # local to avoid mypy property-assignment error
     with pytest.raises(TypeError):
-        hit.evidence |= {"injected": "value"}
+        ev |= {"injected": "value"}
 
     assert hit.evidence == {"key": "original"}
 
@@ -331,7 +332,7 @@ def test_outcome_to_verdict_mapping_total_over_enum_members_ci_guard() -> None:
     assert set(_OUTCOME_TO_VERDICT.keys()) == set(PolicyOutcome)
 
 
-def _replay_in_subprocess(row: PolicyDecisionRow) -> tuple:
+def _replay_in_subprocess(row: PolicyDecisionRow) -> tuple[str, int]:
     """Module-level so it is picklable for `ProcessPoolExecutor` on
     Windows (spawn start method). Returns (json_bytes, pid) tuple."""
     decision = compliance_decision_from_policy_decision(row)
