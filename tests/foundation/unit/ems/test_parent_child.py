@@ -5,6 +5,7 @@ from __future__ import annotations
 import time
 from collections.abc import Callable
 from decimal import Decimal
+from unittest.mock import patch
 from uuid import uuid4
 
 import pytest
@@ -122,7 +123,54 @@ def test_cancellation_targets_only_open_children() -> None:
     assert set(pending) == {open_child_id, partially_filled_child_id}
 
 
-# -- DEEPEN 2070 (EM-2) — D2 하한 증빙 보강 -------------------------------
+def test_children_pending_cancellation_all_terminal_returns_empty() -> None:
+    """Negative test: 모든 child 가 terminal(FILLED/CANCELLED/REJECTED)일 때 빈 리스트 반환.
+
+    혼합 상태가 아닌 극단 케이스 — 현재 test_cancellation_targets_only_open_children는
+    OPEN+PARTIALLY_FILLED+TERMINAL 혼합만 테스트하므로 "전부 terminal" edge case 누락이었음.
+    """
+    children = [
+        ChildFillState(uuid4(), Decimal("100"), OrderStatus.FILLED),
+        ChildFillState(uuid4(), Decimal("0"), OrderStatus.CANCELLED),
+        ChildFillState(uuid4(), Decimal("0"), OrderStatus.REJECTED),
+    ]
+    # terminal 상태만 있으므로 cancellation 대상 없음
+    assert children_pending_cancellation(children) == []
+
+
+def test_children_pending_cancellation_failure_injection_terminal_status_guard() -> None:
+    """Failure injection: TERMINAL_ORDER_STATUSES 상수를 monkeypatch해 filtering 로직이
+    해당 상수에 의존하는지 검증 — guard bypass 시 filtering 이 no-op 이 되는 것 확인.
+    """
+    # 정상: TERMINAL_ORDER_STATUSES = ["FILLED", "CANCELLED", "REJECTED"]
+    # → FILLED child 는 filtering 에 제외됨
+    normal_result = children_pending_cancellation(
+        [
+            ChildFillState(uuid4(), Decimal("100"), OrderStatus.FILLED),
+            ChildFillState(uuid4(), Decimal("0"), OrderStatus.ACKNOWLEDGED),
+        ]
+    )
+    assert len(normal_result) == 1  # OPEN만 통과
+
+    # Failure injection: parent_child 모듈에서 TERMINAL_ORDER_STATUSES 를 빈 리스트로 우회
+    # → filtering 이 no-op 이 되어 모든 child 가 반환됨
+    import src.foundation.ems.domain.parent_child as pc_module
+
+    original = pc_module.TERMINAL_ORDER_STATUSES
+    try:
+        pc_module.TERMINAL_ORDER_STATUSES = []
+        # FILLED child 도 no-op filtering 에 통과
+        result = children_pending_cancellation(
+            [
+                ChildFillState(uuid4(), Decimal("100"), OrderStatus.FILLED),
+                ChildFillState(uuid4(), Decimal("0"), OrderStatus.ACKNOWLEDGED),
+            ]
+        )
+        assert len(result) == 2  # 정상なら 1 → 2=all children (filtering broken)
+    finally:
+        pc_module.TERMINAL_ORDER_STATUSES = original
+
+
 # Task-3114: failure-injection 1건, 수치 성능 단언 1건, 게이트 적색 재현 1건
 
 
@@ -224,7 +272,6 @@ def test_gate_red_proof_invariant_mutation_turns_red() -> None:
     the gate was not a no-op by showing that removing the check
     causes a failure.
     """
-    from unittest.mock import patch
 
     # With the real implementation, this MUST raise.
     with pytest.raises(AlgoConstraintError, match="exceeding"):
@@ -270,7 +317,6 @@ def test_compute_child_state_failure_injection_propagates_dependency_exception()
     `compute_child_state` must propagate the failure rather than swallowing
     it and reporting a false success -- fail-closed, not fail-open.
     """
-    from unittest.mock import patch
 
     parent_id = uuid4()
     children = [ChildFillState(uuid4(), Decimal("10"), OrderStatus.PARTIALLY_FILLED)]
