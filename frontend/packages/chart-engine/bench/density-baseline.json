@@ -2,9 +2,9 @@
   "candleCount": 100000,
   "indicatorInstanceCount": 30,
   "metrics": {
-    "panZoomFrameMsP95": 3.307,
-    "indicatorAddMs": 8.942,
-    "tickUpdateMsP95": 0.005
+    "panZoomFrameMsP95": 3.6022568960713297,
+    "indicatorAddMs": 11.031345778768461,
+    "tickUpdateMsP95": 0.007
   },
-  "updated_at": "2026-09-24T01:35:44.615Z"
+  "updated_at": "2026-09-25T09:05:11.904Z"
 }
