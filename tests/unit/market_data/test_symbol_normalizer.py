@@ -45,6 +45,21 @@ def test_us_roundtrip() -> None:
     assert to_venue(Venue.KIS_US, "AAPL") == "AAPL"
 
 
+def test_nh_krx_roundtrip() -> None:
+    assert to_canonical(Venue.NH_KRX, "005930") == "005930"
+    assert to_venue(Venue.NH_KRX, "005930") == "005930"
+
+
+def test_nh_krx_empty_string_raises() -> None:
+    with pytest.raises(SymbolNormalizationError):
+        to_canonical(Venue.NH_KRX, "")
+
+
+def test_nh_krx_seven_digit_raises() -> None:
+    with pytest.raises(SymbolNormalizationError):
+        to_canonical(Venue.NH_KRX, "0059301")
+
+
 def test_unknown_quote_raw_raises() -> None:
     with pytest.raises(SymbolNormalizationError):
         to_canonical(Venue.BITGET, "BTCXYZ")

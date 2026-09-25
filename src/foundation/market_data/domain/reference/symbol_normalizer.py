@@ -8,6 +8,7 @@ The goal is to converge conversion logic scattered across adapters such as
 `src/exchanges/bitget/symbols.py` into this file, but adapter wiring changes
 themselves belong to LA-19, so existing adapters (`src/exchanges/**`) are not touched. No I/O.
 """
+
 from __future__ import annotations
 
 import re
@@ -33,6 +34,8 @@ def to_canonical(venue: Venue, raw: str) -> str:
         return _crypto_raw_to_canonical(raw)
     if venue is Venue.KIS_KRX:
         return _krx_validate(raw)
+    if venue is Venue.NH_KRX:
+        return _krx_validate(raw)
     if venue is Venue.KIS_US:
         return _us_validate(raw)
     raise SymbolNormalizationError(f"알 수 없는 venue: {venue!r}")
@@ -43,6 +46,8 @@ def to_venue(venue: Venue, canonical: str) -> str:
     if venue is Venue.BITGET:
         return _crypto_canonical_to_raw(canonical)
     if venue is Venue.KIS_KRX:
+        return _krx_validate(canonical)
+    if venue is Venue.NH_KRX:
         return _krx_validate(canonical)
     if venue is Venue.KIS_US:
         return _us_validate(canonical)
