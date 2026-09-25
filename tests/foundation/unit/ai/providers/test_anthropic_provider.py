@@ -162,6 +162,36 @@ async def test_over_cap_estimate_refuses_upstream_call_before_spending(
     assert captured == []
 
 
+async def test_over_cap_estimate_counts_schema_size_not_just_prompt(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """음수 회귀 방지: 프롬프트가 짧아도 스키마가 크면 사전 비용 추정에 반영돼야
+    한다. 스키마를 세지 않으면(과거 버그) 이 케이스가 실제로는 상한을 넘는데도
+    업스트림 호출을 통과시킨다."""
+    captured: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured.append(request)
+        return _tool_use_response({"hypothesis": "x"})
+
+    _mock_transport(monkeypatch, httpx.MockTransport(handler))
+    provider = _provider()
+    tiny_prompt = _prompt("hi")
+    huge_schema = {
+        "type": "object",
+        "properties": {
+            f"field_{i}": {"type": "string", "description": "x" * 200} for i in range(50)
+        },
+    }
+    # cap sized to cover the tiny prompt alone but not the (much larger) schema.
+    budget = _budget(cost_cap="0.0000009", max_output_tokens=1)
+
+    with pytest.raises(AnthropicCostCapExceededError):
+        await provider.generate(huge_schema, tiny_prompt, budget)
+
+    assert captured == []
+
+
 async def test_http_4xx_raises_upstream_error_with_status_and_body(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
