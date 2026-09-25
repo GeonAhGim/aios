@@ -292,6 +292,7 @@ async def test_resync_raises_for_account_missing_its_balance_row(pool):
             )
 
 
+@pytest.mark.perf
 async def test_resync_completes_within_latency_budget_for_one_account_with_many_entries(pool):
     """Numeric performance assertion -- `compute_drift` folds the *entire*
     journal from sequence 1 every call (same unbounded-fold design

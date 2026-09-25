@@ -12,6 +12,8 @@ Spec: docs/specs/L4_platform_observability_tenancy_api_v1.0.md#§3.3
 
 import time
 
+import pytest
+
 from src.api.contracts import exception_mapping as exception_mapping_module
 from src.api.contracts.error_codes import ErrorCode
 from src.api.contracts.exception_mapping import map_exception
@@ -82,6 +84,7 @@ def test_corrupted_registration_order_collapses_notfound_into_parent_code(monkey
     assert code == ErrorCode.VALIDATION_INVALID_FIELD
 
 
+@pytest.mark.perf
 def test_map_exception_lookup_stays_within_budget():
     """성능단언(D2) — map_exception은 순수 인메모리 리스트 스캔(I/O 없음)이라
     호출 5,000회가 500ms 안에 끝나야 한다(로컬 CI 기준 여유 있는 예산; 이

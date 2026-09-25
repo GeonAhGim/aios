@@ -308,6 +308,7 @@ def test_numerical_assertion_decomposition_multi_fill_exact_decimal() -> None:
     assert total == result.total_cost == Decimal("3000.00")
 
 
+@pytest.mark.perf
 def test_decompose_cost_p95_latency_stays_under_budget_at_500_fills() -> None:
     """Numeric performance assertion (DEEPEN 2511 fix): measured p95 latency.
 

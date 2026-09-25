@@ -436,3 +436,17 @@ async def test_cancel_symbol_orders_returns_true_on_success(make_adapter, json_r
     result = await adapter.cancel_symbol_orders("BTC/USDT")
 
     assert result is True
+
+
+# ---------- task-6876 QA — negative: empty-data response ----------
+
+
+async def test_get_history_plan_orders_returns_empty_list_on_empty_data(
+    make_adapter, json_response
+):
+    adapter = make_adapter(
+        lambda request: json_response(
+            {"code": "00000", "msg": "success", "requestTime": 1, "data": []}
+        )
+    )
+    assert await adapter.get_history_plan_orders("BTC/USDT") == []

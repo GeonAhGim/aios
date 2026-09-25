@@ -165,6 +165,25 @@ def test_from_candle_columns_rejects_naive_datetime() -> None:
         arrays.from_candle_columns(naive)
 
 
+def test_from_candle_columns_rejects_non_utc_timezone() -> None:
+    columns = _columns(2)
+    from datetime import timezone as tz
+
+    non_utc = tz(timedelta(hours=9))
+    ts_with_non_utc = [columns.ts[0].astimezone(non_utc), columns.ts[1]]
+    non_utc_columns = CandleColumns(
+        ts=ts_with_non_utc,
+        open=columns.open,
+        high=columns.high,
+        low=columns.low,
+        close=columns.close,
+        volume=columns.volume,
+        quote_volume=columns.quote_volume,
+    )
+    with pytest.raises(arrays.NaiveDatetimeError):
+        arrays.from_candle_columns(non_utc_columns)
+
+
 def test_candle_arrays_rejects_length_mismatch_directly() -> None:
     ok2 = np.zeros(2, dtype=np.float64)
     ok3 = np.zeros(3, dtype=np.float64)

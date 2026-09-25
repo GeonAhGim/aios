@@ -179,6 +179,7 @@ async def test_subscribe_book_missing_yields_nothing_not_none() -> None:
     assert books == []
 
 
+@pytest.mark.perf
 def test_require_microstructure_check_is_fast_at_scale() -> None:
     """성능 어서션(D2 필수) — capability 게이트는 캔들/틱 핫 경로에서
     호출당 마이크로초 단위여야 하므로, 10,000회 반복이 200ms(p_all)를

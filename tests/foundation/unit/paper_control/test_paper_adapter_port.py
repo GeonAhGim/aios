@@ -80,3 +80,43 @@ async def test_submit_paper_intent_failure_injection_propagates() -> None:
 
     with pytest.raises(ConnectionError):
         await adapter.submit_paper_intent(context, sequence=1)
+
+
+@pytest.mark.asyncio
+async def test_cancel_paper_order_failure_injection_propagates() -> None:
+    """Failure injection: cancel_paper_order must propagate adapter exceptions."""
+    adapter: PaperExecutionAdapter = FakePaperExecutionAdapter(fail_cancel=True)
+    context = PaperExecutionContext(deployment_id=str(uuid4()), provenance=_provenance())
+
+    with pytest.raises(ConnectionError):
+        await adapter.cancel_paper_order(context, provider_order_ref="ref-123")
+
+
+@pytest.mark.asyncio
+async def test_fetch_paper_state_failure_injection_propagates() -> None:
+    """Failure injection: fetch_paper_state must propagate adapter exceptions."""
+    adapter: PaperExecutionAdapter = FakePaperExecutionAdapter(fail_fetch=True)
+    context = PaperExecutionContext(deployment_id=str(uuid4()), provenance=_provenance())
+
+    with pytest.raises(ConnectionError):
+        await adapter.fetch_paper_state(context)
+
+
+@pytest.mark.asyncio
+async def test_cancel_paper_order_succeeds_with_valid_ref() -> None:
+    """Happy path: cancel_paper_order completes without error."""
+    adapter: PaperExecutionAdapter = FakePaperExecutionAdapter()
+    context = PaperExecutionContext(deployment_id=str(uuid4()), provenance=_provenance())
+
+    await adapter.cancel_paper_order(context, provider_order_ref="ref-abc123")
+
+
+@pytest.mark.asyncio
+async def test_fetch_paper_state_returns_state_string() -> None:
+    """Happy path: fetch_paper_state returns a valid state string."""
+    adapter: PaperExecutionAdapter = FakePaperExecutionAdapter()
+    context = PaperExecutionContext(deployment_id=str(uuid4()), provenance=_provenance())
+
+    state = await adapter.fetch_paper_state(context)
+
+    assert isinstance(state, str)

@@ -175,6 +175,7 @@ def _fast_success_handler(captured: list[httpx.Request]):
     return handler
 
 
+@pytest.mark.perf
 async def test_generated_method_call_overhead_bounded_vs_raw_request_baseline() -> None:
     """A generated method (`search_stock_info_ctpf1002r`) does nothing beyond
     `return await self._request(...)` — it must not add measurable overhead

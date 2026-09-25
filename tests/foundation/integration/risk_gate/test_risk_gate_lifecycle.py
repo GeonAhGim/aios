@@ -786,6 +786,7 @@ async def test_migration_round_trip_restores_gate_kinds_and_new_columns():
         await migration_pool.close()
 
 
+@pytest.mark.perf
 async def test_idempotency_digest_unique_violation_detection_stays_fast_at_scale(pool):
     """성능 단언(D2) — safety_control.idempotency_digest UNIQUE는 인덱스를
     타야 한다. 인덱스 없이 순차 스캔이면 위반 감지 시간이 기존 행 수에

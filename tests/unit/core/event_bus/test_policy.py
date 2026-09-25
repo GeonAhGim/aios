@@ -127,32 +127,33 @@ class TestPolicyNegative:
 
 
 class TestPolicyFailureInjection:
-    """Failure injection: mutate ON_HANDLER_ERROR to simulate missing handler."""
+    """Failure injection: mutate ON_HANDLER_ERROR to simulate missing handler.
 
-    def test_missing_handler_critical_entry_causes_lookup_failure(self):
+    Uses a per-test copy of the dict swapped onto the class via monkeypatch
+    instead of mutating the shared class-level dict in place — pytest-xdist
+    runs this suite under `-n auto`/`--dist loadfile`, and an in-place
+    mutation left uncleaned by a crashed/interrupted worker would corrupt
+    ON_HANDLER_ERROR for every other test in that worker for the rest of the
+    session (task-7495).
+    """
+
+    def test_missing_handler_critical_entry_causes_lookup_failure(self, monkeypatch):
         """If a handler reports CRITICAL but ON_HANDLER_ERROR lacks the key,
         the system should fail loudly (KeyError), not silently continue."""
-        # Monkeypatch: remove the CRITICAL entry temporarily
-        original = dict(EventBusPolicy.ON_HANDLER_ERROR)
-        try:
-            EventBusPolicy.ON_HANDLER_ERROR.pop(HandlerCriticality.CRITICAL)
-            with pytest.raises(KeyError):
-                EventBusPolicy.ON_HANDLER_ERROR[HandlerCriticality.CRITICAL]
-        finally:
-            EventBusPolicy.ON_HANDLER_ERROR.clear()
-            EventBusPolicy.ON_HANDLER_ERROR.update(original)
+        patched = dict(EventBusPolicy.ON_HANDLER_ERROR)
+        patched.pop(HandlerCriticality.CRITICAL)
+        monkeypatch.setattr(EventBusPolicy, "ON_HANDLER_ERROR", patched)
+        with pytest.raises(KeyError):
+            EventBusPolicy.ON_HANDLER_ERROR[HandlerCriticality.CRITICAL]
 
-    def test_corrupted_handler_error_value_causes_action_failure(self):
+    def test_corrupted_handler_error_value_causes_action_failure(self, monkeypatch):
         """If ON_HANDLER_ERROR value is not a string (e.g. None), action
         dispatch should fail."""
-        original = dict(EventBusPolicy.ON_HANDLER_ERROR)
-        try:
-            EventBusPolicy.ON_HANDLER_ERROR[HandlerCriticality.SAFE] = None  # type: ignore[assignment]
-            action = EventBusPolicy.ON_HANDLER_ERROR[HandlerCriticality.SAFE]
-            assert action is None, "Expected corrupted value to be retrievable"
-        finally:
-            EventBusPolicy.ON_HANDLER_ERROR.clear()
-            EventBusPolicy.ON_HANDLER_ERROR.update(original)
+        patched = dict(EventBusPolicy.ON_HANDLER_ERROR)
+        patched[HandlerCriticality.SAFE] = None  # type: ignore[assignment]
+        monkeypatch.setattr(EventBusPolicy, "ON_HANDLER_ERROR", patched)
+        action = EventBusPolicy.ON_HANDLER_ERROR[HandlerCriticality.SAFE]
+        assert action is None, "Expected corrupted value to be retrievable"
 
 
 # ---------------------------------------------------------------------------
@@ -163,6 +164,7 @@ class TestPolicyFailureInjection:
 class TestPolicyPerformance:
     """Performance assertions for EventBusPolicy lookups."""
 
+    @pytest.mark.perf
     def test_lookup_throughput(self):
         """ON_HANDLER_ERROR lookup should handle >=1M calls/sec."""
         key = HandlerCriticality.SAFE

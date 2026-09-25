@@ -130,6 +130,7 @@ async def test_decorator_wired_against_a_real_async_db_call() -> None:
         await guarded()
 
 
+@pytest.mark.perf
 def test_session_policy_overhead_budget() -> None:
     """Numeric performance assertion: this guard wraps every DB session in
     the codebase, so its own bookkeeping overhead (two `time.monotonic()`

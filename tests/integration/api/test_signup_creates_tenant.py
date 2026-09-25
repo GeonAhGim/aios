@@ -146,6 +146,7 @@ async def test_tenant_insert_failure_rolls_back_user_row(client, pool, monkeypat
     )
 
 
+@pytest.mark.perf
 async def test_register_p95_latency_stays_within_normalized_ceiling(client):
     """수치 성능 단언 — 공유 TEST_DATABASE_URL의 절대 지연 변동성 때문에
     절대 ms 임계 대신 baseline 호출 1건 대비 정규화한 상한만 게이트로 쓴다

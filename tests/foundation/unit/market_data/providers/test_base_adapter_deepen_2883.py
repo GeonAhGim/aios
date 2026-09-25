@@ -97,6 +97,7 @@ def _adapter(
 # ---- 1. 성능 단언(수치) — 벽시계 예산 -------------------------------------
 
 
+@pytest.mark.perf
 async def test_many_successful_calls_stay_within_wall_clock_budget() -> None:
     """버킷이 고갈되지 않는 2,000회 연속 성공 호출의 실측 경과 시간이
     예산(2초) 내여야 한다 — 호출 횟수만 세는 게 아니라 락 획득·`_refill`
@@ -115,6 +116,7 @@ async def test_many_successful_calls_stay_within_wall_clock_budget() -> None:
     assert sleeper.calls == []  # 버킷 고갈 없음 -- 대기 없이 전부 즉시 통과
 
 
+@pytest.mark.perf
 async def test_concurrent_calls_stay_within_wall_clock_budget() -> None:
     """500개 동시 호출(`asyncio.gather`)도 절대 시간 예산 내에서 끝나야
     한다 -- 락 경합이 순차 실행 수준으로 직렬화되더라도 예산을 넘기면 안 된다."""

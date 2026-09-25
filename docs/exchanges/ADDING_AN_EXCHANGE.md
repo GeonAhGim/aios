@@ -104,6 +104,21 @@ adapter_factory`로 열린 거래소는 정상 동작한다.
 새 거래소를 추가하면 `scripts/check_exchange_spi.py`의 `adapter_matrix()`에
 항목을 추가하고, 그 어댑터가 위반 없이 통과하는지 확인한다.
 
+위 SPI 커버리지(우리 어댑터가 `ExchangeAdapter` 메서드를 다 구현했는가)와는
+별개로, **원본 거래소 REST/WebSocket 엔드포인트 커버리지**(그 거래소가 공개한
+API 중 우리가 몇 개를 감쌌는가)도 추적한다 — bitget(`scripts/bitget_coverage.py`
+→ `docs/design/BITGET_COVERAGE.md`), KIS(`docs/design/KIS_TR_COVERAGE.md`), NH
+(`scripts/nh_openapi_fetch.py` + `scripts/nh_openapi_coverage.py` →
+`docs/design/NH_COVERAGE.md`), Upbit(`scripts/upbit_openapi_fetch.py` +
+`scripts/upbit_openapi_coverage.py` → `docs/design/UPBIT_COVERAGE.md`, BR-21)가
+그 예다. 거래소가 기계 판독 가능한 OpenAPI/Swagger 스펙을 공개하면 NH 패턴
+(네트워크 fetch 스크립트가 스냅샷 JSON을 만들고, 오프라인 coverage 스크립트가
+그 스냅샷만 읽어 매트릭스를 낸다)을 그대로 복제한다. 공개하지 않으면(Upbit처럼
+문서 사이트가 인증된 내부 API로만 하이드레이트되는 SPA인 경우) fetch 스크립트가
+문서에서 사람이 큐레이션한 후보 목록을 실제 엔드포인트에 라이브 프로브해
+확인된 것만 스냅샷에 남기는 절충안을 쓴다(`upbit_openapi_fetch.py`의
+`probe_candidate`/`build_reference` 참고) — 추측으로 채우지 않는다.
+
 ## 5. 계약 테스트 킷 + ratchet 파일
 
 - **계약 테스트**: `tests/contract/exchanges/<venue>/`에 실제 거래소 응답

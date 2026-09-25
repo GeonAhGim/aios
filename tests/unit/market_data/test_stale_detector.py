@@ -97,6 +97,7 @@ def test_detect_stale_fails_closed_when_duration_lookup_is_corrupted(
 # --- DEEPEN(task-2952) 수치 성능 단언 ---------------------------------------------
 
 
+@pytest.mark.perf
 def test_detect_stale_handles_100k_calls_within_budget() -> None:
     """100,000회 연속 호출이 2초 안에 끝난다 — 호출당 O(1)을 유지하는 회귀
     가드다(우발적으로 무거운 연산·I/O가 끼어들면 이 임계값을 넘는다).

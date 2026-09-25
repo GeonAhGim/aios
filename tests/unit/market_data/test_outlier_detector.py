@@ -151,6 +151,7 @@ def test_detect_spikes_propagates_failure_from_corrupted_median() -> None:
         monkeypatch.undo()
 
 
+@pytest.mark.perf
 def test_detect_spikes_throughput_within_latency_budget() -> None:
     """Numeric performance assertion -- 20,000 candles (pure in-memory
     computation, no I/O) must finish well inside a generous budget. A

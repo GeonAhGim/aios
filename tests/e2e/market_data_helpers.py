@@ -9,6 +9,7 @@ ingest_candles 호출을 위한 상장 상품/커맨드 조립은 E2E-3의 5개 
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from datetime import datetime, timedelta
 from decimal import Decimal
 from types import SimpleNamespace
@@ -22,7 +23,9 @@ from src.foundation.market_data.application.register_instrument import (
 )
 from src.foundation.market_data.contracts.v1 import (
     CandleRecord,
+    IngestBatchResult,
     IngestCandlesCommand,
+    InstrumentRef,
     LifecycleEventCommand,
     RegisterInstrumentCommand,
     Timeframe,
@@ -62,7 +65,7 @@ class MockIngestSource(IngestSource):
         return self.candles
 
 
-def _clock(t0: datetime):
+def _clock(t0: datetime) -> Callable[[], datetime]:
     """테스트용 clock: 고정 시각."""
 
     def clock() -> datetime:
@@ -71,7 +74,9 @@ def _clock(t0: datetime):
     return clock
 
 
-async def listed_instrument(deps: SimpleNamespace, venue: Venue, base_date: datetime) -> object:
+async def listed_instrument(
+    deps: SimpleNamespace, venue: Venue, base_date: datetime
+) -> InstrumentRef:
     """테스트용 상장 상품 생성."""
     listed_at = base_date - timedelta(days=1)
     # BITGET symbols must end with USDT (crypto normalizer requirement)
@@ -107,7 +112,7 @@ async def listed_instrument(deps: SimpleNamespace, venue: Venue, base_date: date
 
 
 def ingest_cmd(
-    instrument, start: datetime, end: datetime, *, venue: Venue = Venue.BITGET
+    instrument: InstrumentRef, start: datetime, end: datetime, *, venue: Venue = Venue.BITGET
 ) -> IngestCandlesCommand:
     """테스트용 ingest command."""
     return IngestCandlesCommand(
@@ -127,7 +132,7 @@ async def run_ingest(
     source: IngestSource,
     *,
     clock_at: datetime,
-) -> object:
+) -> IngestBatchResult:
     """테스트용 ingest_candles 호출."""
     return await ingest_candles(
         cmd,

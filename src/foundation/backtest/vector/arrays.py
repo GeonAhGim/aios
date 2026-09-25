@@ -125,7 +125,12 @@ def _to_epoch_ns(values: Sequence[datetime]) -> TimestampArray:
                 f"CandleColumns.ts[{i}]가 naive datetime이다(tzinfo=None) — "
                 "tz-aware UTC datetime만 허용된다"
             )
-        delta = ts.astimezone(timezone.utc) - _EPOCH
+        if ts.tzinfo != timezone.utc:
+            raise NaiveDatetimeError(
+                f"CandleColumns.ts[{i}]의 timezone이 UTC가 아니다(tzinfo={ts.tzinfo}) — "
+                "tz-aware UTC datetime만 허용된다"
+            )
+        delta = ts - _EPOCH
         micros = delta.days * 86_400_000_000 + delta.seconds * 1_000_000 + delta.microseconds
         out[i] = micros * 1_000
     return out

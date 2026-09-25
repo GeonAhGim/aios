@@ -171,6 +171,7 @@ async def test_cancel_order_rmn_qty_yn_survives_retry_after_transient_failure() 
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.perf
 async def test_place_and_cancel_order_roundtrip_throughput_within_normalized_budget() -> None:
     """`place_futureoption_order`(ORD_DVSN_CD 포함)와 `cancel_futureoption_order`
     (RMN_QTY_YN 포함)를 반복 호출하는 실측 소요시간을, 동일 N 크기의 trivial

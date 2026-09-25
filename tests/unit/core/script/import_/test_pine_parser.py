@@ -248,6 +248,7 @@ def test_lexer_failure_from_tokenize_propagates_without_being_swallowed(
         parse("len = 14")
 
 
+@pytest.mark.perf
 def test_lexing_and_parsing_large_script_within_latency_budget() -> None:
     """수치 성능 단언(렉싱/파싱 지연) — 실사용 스크립트보다 훨씬 큰 5,000문
     스크립트도 합리적 예산(3초) 안에 렉싱+파싱이 끝나야 한다. 재귀 하강

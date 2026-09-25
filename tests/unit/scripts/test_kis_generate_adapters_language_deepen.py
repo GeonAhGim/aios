@@ -172,6 +172,7 @@ def test_generate_files_aborts_whole_batch_on_one_poisoned_row() -> None:
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.perf
 def test_generate_files_throughput_at_10x_real_reference_scale() -> None:
     """The real reference currently generates ~290 methods across a handful
     of domains in well under a second. This synthesizes ~3,000 rows (~10x)

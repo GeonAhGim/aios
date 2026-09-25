@@ -118,6 +118,7 @@ def test_ensure_database_reset_recreates_existing(scratch_db_name: str) -> None:
         asyncio.run(_drop_if_exists(server_url, scratch_db_name))
 
 
+@pytest.mark.perf
 def test_ensure_database_concurrent_reset_survives_race(scratch_db_name: str) -> None:
     """failure-injection: task-5782 회귀 직접 재현 — 정정 전에는 여러 동시
     `reset=True` 호출 중 늦게 `DROP DATABASE`를 쏘는 쪽이
@@ -150,6 +151,7 @@ def test_ensure_database_concurrent_reset_survives_race(scratch_db_name: str) ->
         asyncio.run(_drop_if_exists(server_url, scratch_db_name))
 
 
+@pytest.mark.perf
 def test_ensure_database_concurrent_reset_with_migrate_survives_race(
     scratch_db_name: str,
 ) -> None:

@@ -2,6 +2,8 @@ import asyncio
 from collections.abc import Callable, Coroutine
 from typing import Any, cast
 
+import pytest
+
 from src.core.safety.split_brain import Diagnosis, SplitBrainDiagnostics
 
 
@@ -204,6 +206,7 @@ async def test_inject_db_check_exception_injected_via_monkeypatch() -> None:
 # --- performance assertion: diagnose() must complete within budget ---
 
 
+@pytest.mark.perf
 async def test_diagnose_completes_within_100ms_budget() -> None:
     """성능 단언: diagnose() 호출 하나당 100ms 이내 완료 (budget: ADR-2026-09-09-C).
     실제 환경에서 폴링 주기와 충돌하지 않도록 충분한 마크업.

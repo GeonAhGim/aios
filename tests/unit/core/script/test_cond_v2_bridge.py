@@ -158,6 +158,7 @@ def test_all_fixture_cases_are_covered() -> None:
 # ---- DEEPEN(task-2921): 수치 성능 단언 ----
 
 
+@pytest.mark.perf
 def test_bridge_latency_p95_within_compile_budget_slice() -> None:
     """DEEPEN(task-2921): ADR-2026-09-09-C Decision 1 'DSL 컴파일 300ms' 예산 중
     브리지(정규식 분해 + 레지스트리 조회 + DSL-3 재파싱) 몫을 20ms로 상한, 전체
@@ -177,6 +178,7 @@ def test_bridge_latency_p95_within_compile_budget_slice() -> None:
     assert p95_ms < budget_ms
 
 
+@pytest.mark.perf
 def test_bridge_budget_gate_actually_fails_when_batch_stalls_past_20ms(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

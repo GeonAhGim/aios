@@ -255,6 +255,7 @@ def _p95_ms(samples: list[float]) -> float:
     return ordered[min(int(len(ordered) * 0.95), len(ordered) - 1)] * 1000
 
 
+@pytest.mark.perf
 def test_build_tearsheet_p95_latency_within_backtest_budget_slice() -> None:
     """DEEPEN(task-3054): ADR-2026-09-09-C Decision 1 예산 중 리포트 뷰
     조립 몫(2ms)을 실제로 단언한다."""
@@ -275,6 +276,7 @@ def test_build_tearsheet_p95_latency_within_backtest_budget_slice() -> None:
 # ---- DEEPEN(task-3054): 게이트 적색 재현 ----
 
 
+@pytest.mark.perf
 def test_budget_gate_actually_fails_when_config_hash_stalls_past_budget(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

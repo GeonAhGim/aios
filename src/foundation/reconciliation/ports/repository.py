@@ -3,9 +3,10 @@
 domain is aware of only this Protocol; actual implementation (adapters/) is
 unknown (§4, page 71).
 """
+
 from __future__ import annotations
 
-from typing import Protocol
+from typing import Protocol, runtime_checkable
 from uuid import UUID
 
 from src.foundation.reconciliation.domain.models import (
@@ -16,6 +17,7 @@ from src.foundation.reconciliation.domain.models import (
 )
 
 
+@runtime_checkable
 class ReconciliationRepository(Protocol):
     async def get_run_by_input_hash(
         self, target_ref: UUID, input_hash: str
@@ -50,5 +52,4 @@ class ReconciliationRepository(Protocol):
         blocking_reason: str | None,
         resolved_by: UUID | None = None,
         resolution_reason: str | None = None,
-    ) -> ReconciliationState:
-        ...
+    ) -> ReconciliationState: ...

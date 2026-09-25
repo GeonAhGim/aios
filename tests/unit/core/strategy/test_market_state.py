@@ -123,6 +123,7 @@ def test_construction_propagates_upstream_indicator_stream_failure() -> None:
 # -- D2 성능 단언 --------------------------------------------------------------
 
 
+@pytest.mark.perf
 def test_market_state_construction_p95_latency_within_budget_for_many_keys() -> None:
     """ADR-2026-09-09-C Decision 1 성능 예산 축 차용: 매 틱 조립되는
     `MarketState` 생성(키 1,000개 각각 `parse_key` 검증 포함)이 가장 빠듯한

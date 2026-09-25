@@ -487,23 +487,26 @@ def _load_ci_step_ok(path: Path | None, step: str) -> tuple[bool, str]:
 
 def check_13_user_journeys(repo_root: Path, *, ci_report: Path | None) -> CheckResult:
     """기준13(ADR-2026-09-24-A Decision 4) — J1~J3 Playwright 여정 테스트 존재 +
-    `test.fixme` 0건 + `--ci-report`의 `steps.frontend.ok` 녹색.
+    `test.fixme` 0건 + `--ci-report`의 `steps.journeys.ok` 녹색
+    (pm/local_ci full 모드 J1~J3 단계, task-7145).
 
     리포트를 넘기지 않으면(다른 항목들과 같은 ADR-D 원칙) "미검증(외부 리포트
     미지정)"으로 FAIL 처리한다 — 모른다=통과 아님.
     """
     present, missing = _present_missing(repo_root, *JOURNEY_SPECS)
     fixme_hits = [p for p in present if "test.fixme" in _read(repo_root / p)]
-    frontend_ok, frontend_note = _load_ci_step_ok(ci_report, "frontend")
-    passed = not missing and not fixme_hits and frontend_ok
-    evidence = [*present, *missing, *(f"FIXME:{p}" for p in fixme_hits), frontend_note]
+    # task-7145: pm/local_ci full 모드가 J1~J3만 따로 돌려 steps.journeys에 기록한다 —
+    # steps.frontend.ok(lint/build/vitest)는 여정을 실제로 실행했다는 증거가 아니었다.
+    journeys_ok, journeys_note = _load_ci_step_ok(ci_report, "journeys")
+    passed = not missing and not fixme_hits and journeys_ok
+    evidence = [*present, *missing, *(f"FIXME:{p}" for p in fixme_hits), journeys_note]
     parts = []
     if missing:
         parts.append(f"여정 테스트 파일 누락: {', '.join(missing)}")
     if fixme_hits:
         parts.append(f"test.fixme 존재: {', '.join(fixme_hits)}")
-    if not frontend_ok:
-        parts.append(f"프론트엔드 CI 단계 미확인/적색: {frontend_note}")
+    if not journeys_ok:
+        parts.append(f"여정 CI 단계(steps.journeys) 미확인/적색: {journeys_note}")
     detail = "J1~J3 여정 테스트 기준 통과" if passed else "; ".join(parts)
     return CheckResult("13_user_journeys", "사용자 여정(J1~J3)", passed, tuple(evidence), detail)
 

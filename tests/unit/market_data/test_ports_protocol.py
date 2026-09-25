@@ -20,7 +20,6 @@ DEPTH 감사(task-2723, docs/audit/DEPTH_LA_LB_LC.md 417)가 지적한 4개 공�
 
 from __future__ import annotations
 
-import time
 from datetime import datetime, timezone
 from typing import Any
 
@@ -33,6 +32,7 @@ from src.foundation.market_data.ports.calendar_repository import CalendarReposit
 from src.foundation.market_data.ports.candle_store import CandleStore
 from src.foundation.market_data.ports.ingest_source import IngestSource
 from src.foundation.market_data.ports.reference_repository import ReferenceRepository
+from tests.conftest import PerfBudget
 
 
 def _now() -> datetime:
@@ -192,12 +192,16 @@ def test_runtime_method_removal_flips_isinstance_to_false(
     assert not isinstance(_InjectableCandleStore(), CandleStore)
 
 
-def test_isinstance_checks_over_thousands_of_instances_stay_fast() -> None:
+@pytest.mark.perf
+def test_isinstance_checks_over_thousands_of_instances_stay_fast(
+    perf_budget: PerfBudget,
+) -> None:
     """수치 성능 단언: `runtime_checkable` Protocol의 isinstance()는 멤버
     이름 개수에 비례하는 저비용 해시조회여야 한다 — 이 전제가 깨지면(예:
     누군가 실수로 무거운 `__instancecheck__`/검증 로직을 끼워 넣으면) 포트
     판정이 호출되는 모든 경로(등록·조회·인제스트)가 함께 느려진다. 5개
-    포트 x 10,000회 = 50,000회 isinstance() 호출이 1초 미만에 끝나야 한다."""
+    포트 x 10,000회 = 50,000회 isinstance() 호출이 1초 미만에 끝나야 한다.
+    task-7434: process_time 기반 perf_budget으로 측정한다."""
     fakes: list[tuple[object, type]] = [
         (_FullCandleStore(), CandleStore),
         (_FullReferenceRepository(), ReferenceRepository),
@@ -206,13 +210,12 @@ def test_isinstance_checks_over_thousands_of_instances_stay_fast() -> None:
         (_FullBatchRepository(), BatchRepository),
     ]
 
-    start = time.perf_counter()
-    for _ in range(10_000):
-        for instance, port in fakes:
-            assert isinstance(instance, port)
-    elapsed = time.perf_counter() - start
+    def _run_once() -> None:
+        for _ in range(10_000):
+            for instance, port in fakes:
+                assert isinstance(instance, port)
 
-    assert elapsed < 1.0
+    perf_budget.assert_within(_run_once, budget_ms=1000.0, label="50,000 isinstance() checks")
 
 
 class _MissingLoadCalendarRepository:

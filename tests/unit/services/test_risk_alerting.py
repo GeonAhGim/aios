@@ -239,6 +239,7 @@ async def test_concurrent_breaches_for_same_key_result_in_exactly_one_dispatch()
     assert len(gateway.calls) == 1
 
 
+@pytest.mark.perf
 @pytest.mark.asyncio
 async def test_suppressed_path_dispatch_overhead_stays_under_5ms_p99() -> None:
     """Performance assertion: `on_breach` is called inline in the

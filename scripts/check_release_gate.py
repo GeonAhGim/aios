@@ -12,6 +12,7 @@ LIVE 단계를 정의하더라도 이 스크립트는 판정만 한다 — 어�
 사용: `python scripts/check_release_gate.py --stage internal_development`.
 종료코드 0=통과, 1=설정 오류 또는 미충족 증거 있음.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -43,18 +44,28 @@ class Stage:
 
 
 def load_stages(config_path: Path) -> dict[str, Stage]:
+    """release_gates.yaml config를 읽어 stage 목록을 반환한다.
+
+    YAML에서 path 값이 null/None인 경우(예: `path: nul`) 즉시 오류로 처리한다.
+    """
     raw = yaml.safe_load(config_path.read_text(encoding="utf-8")) or {}
     stages: dict[str, Stage] = {}
     for entry in raw.get("stages", []):
         name = entry["name"]
-        evidence = tuple(
-            EvidenceItem(description=item["description"], path=item["path"])
-            for item in entry.get("required_evidence", [])
-        )
+        evidence: list[EvidenceItem] = []
+        for item in entry.get("required_evidence", []):
+            path_val = item.get("path")
+            if not isinstance(path_val, str) or not path_val:
+                raise ReleaseGateConfigError(
+                    f"stage '{name}': required_evidence 항목 "
+                    f"'{item.get('description', '<unknown>')}'의 path는 "
+                    f"빈 문자열이어야 합니다 (got: {path_val!r})"
+                )
+            evidence.append(EvidenceItem(description=item["description"], path=path_val))
         stages[name] = Stage(
             name=name,
             depends_on=tuple(entry.get("depends_on") or []),
-            required_evidence=evidence,
+            required_evidence=tuple(evidence),
         )
     return stages
 

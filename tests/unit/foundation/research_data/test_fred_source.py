@@ -3,6 +3,7 @@
 Spec: docs/specs/L4_research_data_and_market_ecosystem_v1.0.md sec.9 RD-13
 DoD ("거시 시계열").
 """
+
 from __future__ import annotations
 
 from datetime import date, datetime, timezone
@@ -62,7 +63,7 @@ def test_parse_fred_observations_drops_missing_value_sentinel() -> None:
 
 
 def test_parse_fred_observations_empty_list() -> None:
-    payload = {"observations": []}
+    payload: dict[str, Any] = {"observations": []}
     assert (
         parse_fred_observations(
             payload, series_id="UNRATE", frequency=MacroFrequency.MONTHLY, publication_lag_days=0
@@ -147,9 +148,7 @@ async def test_fetch_fred_series_denied_when_admission_flips() -> None:
         "src.foundation.research_data.adapters.sources.fred.EXPECTED_ADMISSION", admission_override
     ):
         with pytest.raises(FredApiError):
-            await fetch_fred_series(
-                client, api_key="key", request=request, publication_lag_days=20
-            )
+            await fetch_fred_series(client, api_key="key", request=request, publication_lag_days=20)
     client.get_json.assert_not_called()
 
 

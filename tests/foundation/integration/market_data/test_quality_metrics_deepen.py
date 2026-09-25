@@ -218,22 +218,32 @@ async def test_export_quality_metrics_latency_stays_within_normalized_ceiling(de
         await _ingest(deps, instrument, candles, start=t0, end=t0 + timedelta(minutes=1), at=t0)
         instruments.append(instrument)
 
-    baseline_started = time.perf_counter()
-    async with deps.pool.acquire() as conn:
-        await conn.fetchval("SELECT 1")
-    baseline_ms = (time.perf_counter() - baseline_started) * 1000
+    # Measure baseline (SELECT 1) with median of multiple samples.
+    baseline_samples_ms = []
+    for _ in range(3):
+        t0_baseline = time.perf_counter()
+        async with deps.pool.acquire() as conn:
+            await conn.fetchval("SELECT 1")
+        baseline_samples_ms.append((time.perf_counter() - t0_baseline) * 1000)
+    baseline_samples_ms.sort()
+    baseline_ms = baseline_samples_ms[len(baseline_samples_ms) // 2]
 
     later = _clock(t0 + timedelta(minutes=10))
-    started = time.perf_counter()
-    results = await export_quality_metrics(
-        batches=deps.batches,
-        store=deps.store,
-        cal=deps.cal,
-        pool=deps.pool,
-        registry=MetricsRegistry(),
-        clock=later,
-    )
-    elapsed_ms = (time.perf_counter() - started) * 1000
+    # Measure export_quality_metrics with median of multiple samples.
+    export_samples_ms = []
+    for _ in range(3):
+        started = time.perf_counter()
+        results = await export_quality_metrics(
+            batches=deps.batches,
+            store=deps.store,
+            cal=deps.cal,
+            pool=deps.pool,
+            registry=MetricsRegistry(),
+            clock=later,
+        )
+        export_samples_ms.append((time.perf_counter() - started) * 1000)
+    export_samples_ms.sort()
+    elapsed_ms = export_samples_ms[len(export_samples_ms) // 2]
 
     result_ids = {m.key.instrument_id for m in results}
     for instrument in instruments:
@@ -312,4 +322,3 @@ async def test_scheduler_concurrent_run_once_invocations_do_not_corrupt_shared_p
         )
     assert count_a == 1, "동시 실행이 서로의 candle 저장을 중복·오염시키지 않아야 한다"
     assert count_b == 1, "동시 실행이 서로의 candle 저장을 중복·오염시키지 않아야 한다"
-

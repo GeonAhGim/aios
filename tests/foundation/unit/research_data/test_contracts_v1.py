@@ -127,6 +127,7 @@ def test_source_meta_link_only_roundtrip() -> None:
 # ---- 성능 단언(DEPTH 감사 task-2724 D1 판정 근거, 1702/1701/2058 DEEPEN 선례와 동일 패턴) ----
 
 
+@pytest.mark.perf
 def test_research_item_construction_hot_path_performance() -> None:
     # ResearchItem(**payload) 생성/검증은 모든 수집 어댑터가 아이템 하나마다
     # 호출하는 순수 경로(pydantic validation)다. 10,000회 호출이 1s 내로

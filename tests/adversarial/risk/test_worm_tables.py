@@ -12,6 +12,7 @@ UPDATE해 트리거 자체가 살아있음을 증명" 재현을 `risk_decision`�
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
+from typing import Any
 from uuid import uuid4
 
 import asyncpg
@@ -38,10 +39,10 @@ def repo(pool: asyncpg.Pool) -> PostgresDecisionRepository:
 
 
 def _decision(
-    *, tenant_id: object, execution_ref: str = "exec:1", **overrides: object
+    *, tenant_id: object, execution_ref: str = "exec:1", **overrides: Any
 ) -> RiskDecision:
     now = datetime.now(timezone.utc)
-    base: dict[str, object] = dict(
+    base: dict[str, Any] = dict(
         decision_id=uuid4(),
         gate_kind=GateKind.PRE_TRADE,
         tenant_id=tenant_id,
@@ -63,7 +64,7 @@ def _decision(
         latency_us=100,
     )
     base.update(overrides)
-    return RiskDecision(**base)  # type: ignore[arg-type]  # overrides dict가 생성자 kwarg 타입을 정적으로 못 좁힘(테스트 헬퍼)
+    return RiskDecision(**base)
 
 
 async def _insert(

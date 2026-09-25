@@ -90,6 +90,7 @@ async def _drop_if_exists(server_url: str, database: str) -> None:
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.perf
 def test_list_subprocess_output_is_parseable_and_includes_scratch_db(
     scratch_db_name: str,
 ) -> None:

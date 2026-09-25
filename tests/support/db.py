@@ -18,6 +18,7 @@ other users`). 이 모듈은 그 경우 예외를 그대로 전파한다 — 조
 복제된다(`ensure_worker_database` 참고) — 이전 실행이 죽으며 남긴 오염이 다음
 실행으로 넘어가지 않는다.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -108,7 +109,9 @@ async def ensure_worker_database(template_url: str, worker_id: str) -> str:
     template_db = _db_name(template_url)
     admin = await asyncpg.connect(_asyncpg_dsn(_with_database(template_url, "postgres")))
     try:
-        last_exc: asyncpg.exceptions.ObjectInUseError | None = None
+        last_exc: (
+            asyncpg.exceptions.ObjectInUseError | asyncpg.exceptions.UniqueViolationError | None
+        ) = None
         for attempt in range(_CLONE_ATTEMPTS):
             # 워커 DB(target_db)는 이 프로세스가 배타적으로 소유하므로, 크래시로
             # 죽은 이전 프로세스가 남긴 idle 커넥션을 강제 종료해도 안전하다
@@ -123,6 +126,17 @@ async def ensure_worker_database(template_url: str, worker_id: str) -> str:
             # 살아있는 커넥션이 남아 있으면 CREATE DATABASE ... TEMPLATE가
             # ObjectInUseError로 거부되고, 아래에서 그대로 전파한다(모듈
             # docstring의 "조용히 폴백하지 않는다" 계약과 일치).
+            #
+            # task-7375(esc-ci-pytest_perf): 같은 worker_id(예: "gw0")를 쓰는 두
+            # 프로세스(로컬 CI의 `pytest_perf`/`pytest` 단계가 겹쳐 돌 때 등)가 이
+            # 루프에 동시에 들어오면, 한쪽의 DROP 이후 다른 쪽의 DROP은 이미 없는
+            # 이름이라 조용히 지나가고, 두 CREATE DATABASE가 거의 동시에 실행돼
+            # 먼저 커밋된 쪽만 성공하고 나머지는 `ObjectInUseError`가 아니라
+            # `pg_database_datname_index`(이름 UNIQUE 인덱스) 위반인
+            # `UniqueViolationError`로 거부된다(관측: `conftest.py` 임포트 단계에서
+            # 그대로 전파돼 `pytest_perf` 전체가 ImportError로 적색). ObjectInUseError와
+            # 동일하게 재시도 대상에 포함한다 — DROP+CREATE 루프가 다음 회차에
+            # 승자의 DB를 그대로 재사용하거나 다시 만들어 준다.
             await admin.execute(
                 "SELECT pg_terminate_backend(pid) FROM pg_stat_activity "
                 "WHERE datname = $1 AND pid <> pg_backend_pid()",
@@ -132,7 +146,10 @@ async def ensure_worker_database(template_url: str, worker_id: str) -> str:
             try:
                 await admin.execute(f'CREATE DATABASE "{target_db}" TEMPLATE "{template_db}"')
                 break
-            except asyncpg.exceptions.ObjectInUseError as exc:
+            except (
+                asyncpg.exceptions.ObjectInUseError,
+                asyncpg.exceptions.UniqueViolationError,
+            ) as exc:
                 last_exc = exc
                 await asyncio.sleep(_CLONE_RETRY_BASE_DELAY * (attempt + 1))
         else:

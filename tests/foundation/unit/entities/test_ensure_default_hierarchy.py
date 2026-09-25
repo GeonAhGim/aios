@@ -254,6 +254,7 @@ async def test_concurrent_bootstrap_for_different_users_does_not_cross_contamina
     assert len(repo.portfolios) == 2
 
 
+@pytest.mark.perf
 async def test_race_recovery_costs_at_most_one_extra_get_per_level():
     """Numeric performance assertion: recovering from a lost create-vs-create
     race must cost exactly one extra `get_*` re-query per level, not an

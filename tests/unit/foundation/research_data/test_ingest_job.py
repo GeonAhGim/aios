@@ -15,6 +15,8 @@ from contextlib import AbstractAsyncContextManager, asynccontextmanager
 from datetime import datetime, timezone
 from uuid import UUID, uuid4
 
+import pytest
+
 from src.exchanges.common.error_taxonomy import ExchangeError, ExchangeErrorKind
 from src.exchanges.common.http_policy import RetryPolicy
 from src.foundation.research_data.application.ingest_job import (
@@ -321,6 +323,7 @@ async def test_concurrent_jobs_same_lock_key_are_serialized() -> None:
     assert max(max_concurrent) == 1
 
 
+@pytest.mark.perf
 async def test_page_processing_throughput_bounded() -> None:
     """Numeric performance assertion (throughput): storing 1,000 items
     through `ingest_job` must not regress into superlinear behavior.

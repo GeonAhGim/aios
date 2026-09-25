@@ -134,6 +134,7 @@ def test_frozen_dict_generic_subscript_is_usable_at_runtime() -> None:
     assert isinstance(frozen, dict)
 
 
+@pytest.mark.perf
 def test_frozen_list_construction_scales_within_budget() -> None:
     """Numeric performance assertion: wrapping a 50,000-entry list (an
     upper-bound `rule_hits`/`reason_codes` size) must stay well under a

@@ -164,6 +164,7 @@ async def test_identical_strategy_replicated_across_two_portfolios_does_not_coll
         await _delete_pos_snapshot(pool, position_keys=[key_a, key_b])
 
 
+@pytest.mark.perf
 async def test_ten_portfolios_concurrent_fills_for_identical_strategy_stay_isolated(pool):
     """다중 인스턴스/동시성 D3 증거 + 수치 성능 단언 -- 같은 전략을 복제하는
     서로 다른 포트폴리오 10개가 asyncio.gather로 동시에 첫 체결을 기록해도

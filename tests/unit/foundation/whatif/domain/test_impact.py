@@ -227,6 +227,7 @@ class TestFailureInjection:
 
 
 class TestPerformance:
+    @pytest.mark.perf
     def test_impact_computes_under_1ms_for_100_symbols(self) -> None:
         """D2 perf assertion: delta_impact must complete in < 1 ms
         even with 100 symbols in the portfolio."""
