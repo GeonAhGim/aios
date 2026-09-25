@@ -300,13 +300,21 @@ def test_full_chain_resolution_completes_within_time_budget() -> None:
     끝나는지 확인한다. `test_check_migration_chain.py`의 시간 예산 패턴과
     동일 — 정적 파일 존재 확인만 하므로 CI 스텝 예산(수 초)보다 훨씬 낮은
     50ms를 예산으로 건다.
+
+    PLT-39 DoD: 성능 테스트는 timing뿐만 아니라 check_stage 결과의 정정(validity)도
+    함께 단언해야 한다. 결과가 틀리면 성능 수치만으로는 결함을 놓칠 수 있다.
     """
     stages = check_release_gate.load_stages(REAL_CONFIG)
     assert len(stages) >= 5  # 벤치마크가 무의미해지지 않도록 stage 수를 보장
 
     start = time.perf_counter()
     for _ in range(100):
-        check_release_gate.check_stage(stages, "marketplace_commercialization", repo_root=ROOT)
+        result = check_release_gate.check_stage(
+            stages, "marketplace_commercialization", repo_root=ROOT
+        )
+        # 결과 정정 단언: 성능만 보고 결과가 틀렸으면 의미 없음
+        assert isinstance(result, list)
+        assert len(result) > 0  # evidence 파일 경로 리스트가 반환되어야 함
     elapsed = time.perf_counter() - start
 
     assert elapsed < 0.05 * 100, f"100회 반복 해석이 {elapsed:.3f}s — 예산(5.0s) 초과"
