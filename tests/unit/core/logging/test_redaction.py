@@ -323,6 +323,28 @@ def test_redaction_filter_is_noop_when_payload_absent():
     assert not hasattr(record, "payload") or record.payload == {}
 
 
+@pytest.mark.parametrize("non_mapping_payload", [None, ["a", "b"], "raw-string", 42])
+def test_redaction_filter_does_not_raise_on_non_mapping_payload(non_mapping_payload):
+    """PLT-02 DEEPEN negative — filter()는 record.payload가 dict가 아니어도(None,
+    list, str, int) AttributeError를 내지 않는다. Mapping이 아니면 마스킹을 건너뛰고
+    원래 값을 그대로 둔다 — 로깅 파이프라인 전체를 죽이는 것보다 안전하다."""
+    record = logging.LogRecord(
+        name="test",
+        level=logging.INFO,
+        pathname=__file__,
+        lineno=1,
+        msg="x",
+        args=(),
+        exc_info=None,
+    )
+    record.payload = non_mapping_payload
+
+    result = RedactionFilter().filter(record)
+
+    assert result is True
+    assert record.payload == non_mapping_payload
+
+
 # ---------------------------------------------------------------------------
 # PLT-02: StructuredLogLine — level-only validation (deepen)
 # ---------------------------------------------------------------------------
