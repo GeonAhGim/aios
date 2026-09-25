@@ -5,3 +5,5 @@
 # 커밋 이력은 고칠 수 없으니 그 커밋의 지문을 허용 목록에 추가한다(과거 주석 문구를 여기 다시 적지 않는다).
 f6dc4110f977654cd8e6590377486a5e23bd944a:frontend/packages/api-client/src/clients/foundation.test.ts:generic-api-key:254
 7c6286fb98b97063d3948dca61d68d3318305f80:.gitleaksignore:generic-api-key:2
+# 2026-09-25 CTO: task-7147 커밋의 RFC 6455 예제 WebSocket 키(dGhlIHNhbXBsZSBub25jZQ==) — 시크릿 아님. HEAD는 런타임 난수로 정정(5ec6abaa), 이력 지문만 허용
+97e046059a79cb709ddb33fecd2d2b41192989c2:scripts/upbit_openapi_fetch.py:generic-api-key:174
