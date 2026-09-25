@@ -281,3 +281,35 @@ def test_compute_child_state_failure_injection_propagates_dependency_exception()
     ):
         with pytest.raises(RuntimeError, match="audit dependency unreachable"):
             compute_child_state(parent_id, children, _PARENT_QTY)
+
+
+class TestAggregateParentStateEdgeCases:
+    """Negative tests for aggregate_parent_state edge cases."""
+
+    def test_empty_children_returns_zero_filled_full_remaining(self) -> None:
+        """children=[] 빈 리스트 — filled_sum=0, remaining=parent_qty.
+
+        aggregate_parent_state가 children가 빈 리스트일 때 예외 없이
+        0 채움, 전체 남은 상태로 집계하는지 검증 (negative: edge-case input).
+        """
+        filled, status = aggregate_parent_state(
+            parent_qty=Decimal("100000"),
+            current_status=OrderStatus.SUBMITTED,
+            children=[],
+        )
+        assert filled == Decimal("0")
+        assert status == OrderStatus.SUBMITTED
+
+    def test_cancelled_parent_empty_children_returns_zero_remaining(self) -> None:
+        """parent_status=CANCELLED + children=[] — filled=0, remaining=0.
+
+        부모가 이미 취소된 상태에서는 남은 qty가 0이어야 함 (negative: cancelled
+        parent에 대한 집계).
+        """
+        filled, status = aggregate_parent_state(
+            parent_qty=Decimal("50000"),
+            current_status=OrderStatus.CANCELLED,
+            children=[],
+        )
+        assert filled == Decimal("0")
+        assert status == OrderStatus.CANCELLED
