@@ -359,3 +359,19 @@ class TestAggregateParentStateEdgeCases:
         )
         assert filled == Decimal("0")
         assert status == OrderStatus.CANCELLED
+
+    def test_empty_children_preserves_decimal_type(self) -> None:
+        """negative: children=[] 반환값이 (Decimal, OrderStatus) 타입 정확히 반환.
+
+        aggregate_parent_state가 빈 리스트에서도 float/str이 아닌
+        Decimal·OrderStatus를 반환하는지 검증 — 타입 드리프트 방지.
+        """
+        filled, status = aggregate_parent_state(
+            parent_qty=Decimal("100"),
+            current_status=OrderStatus.FILLED,
+            children=[],
+        )
+        assert isinstance(filled, Decimal)
+        assert isinstance(status, OrderStatus)
+        assert filled == Decimal("0")
+        assert status == OrderStatus.FILLED
