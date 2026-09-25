@@ -1,6 +1,6 @@
 """ListChartLayouts query — caller sees only layouts owned by their tenant
-(the repository query itself filters by tenant_id, so no separate ownership
-check is needed here)."""
+(the repository query itself filters by tenant_id, so no separate
+ownership check is needed here)."""
 
 from __future__ import annotations
 
