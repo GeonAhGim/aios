@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-09-25T21:54:13+00:00",
+  "generated_at": "2026-09-25T22:07:41+00:00",
   "tasks": [
     {
       "id": 7594,
@@ -163,6 +163,79 @@
       "tier": "",
       "role": "backend",
       "hold_note": "[cloud_session] 클라우드 적합: 설정+스냅샷, 저장소만으로 완결(CI 배선은 후속 ops 리프)"
+    },
+    {
+      "id": 7618,
+      "title": "ADR-2026-09-26-B SBX-3 — execution_loop가 전략 코드를 같은 프로세스에서 실행하지 않음을 정적 테스트로 고정",
+      "spec": "ADR-2026-09-26-B Decision 1(SBX-3). src/services/execution_loop/** (LIVE/PAPER 실주문 루프)가 src.core.script.runtime.interpreter의 execute/compile_source/_Machine을 직접 import하지 않음을 정적으로 고정한다(AST 기반 import 그래프 검사, tests/adversarial/assistant/test_no_execution_access.py의 FORBIDDEN_MODULE_PREFIXES 기법 재사용 — 새 상수만 추가, 기존 파일은 건드리지 않는다). execution_loop는 이미 계산된 전략 평가 결과(신호/주문 의도)만 소비해야 하며, 코드 실행 자체는 SBX-2 sandbox(별도 프로세스)나 FSM 엔진(src/core/strategy, FROZEN_PAPER_ONLY)이 담당한다.\nDoD:\n1) src/services/execution_loop/ 아래 모든 .py 파일의 import 문을 AST로 파싱해 src.core.script.runtime.interpreter 관련 심볼이 하나도 없음을 assert\n2) negative: tmp_path에 위반 import를 넣은 가짜 파일을 만들어 검사 함수가 실제로 위반을 잡는지 확인(최소 1건) — 항상 통과만 하는 허수아비 검사가 아님을 증명\n3) 현재 코드베이스가 이미 위반 0건임을 테스트 결과로 확인\n4) 파일당 300줄 상한",
+      "files": [
+        "new:tests/adversarial/execution_loop/test_no_inprocess_script_eval.py"
+      ],
+      "tier": "",
+      "role": "backend",
+      "hold_note": "[cloud_session] 클라우드 적합: 저장소 완결 정적 import 검사, 실행/DB 불필요"
+    },
+    {
+      "id": 7619,
+      "title": "ADR-2026-09-26-B SRC-2 — ReproductionKey 해시체인 증명 문서화",
+      "spec": "ADR-2026-09-26-B Decision 2(SRC-2). 실행 결과 증명을 ReproductionKey 해시체인으로 한다는 결정(ZK 실행은 매매 경로에 채택하지 않고 사후 감사 증명 후보로만 기록)을 문서화한다. src/foundation/backtest/domain/reproducibility.py(BT-19 parity_harness가 쓰는 결정론 재현 계약)를 근거로 ReproductionKey를 '입력(스크립트 IR 해시 + 데이터 스냅샷 해시 + 파라미터 해시)을 체이닝한 단방향 해시'로 정의하고, 검증자가 재실행 없이 체인만으로 재현성을 감사할 수 있는 절차(입력 재구성 불가능성, 위조 시 체인 불일치 검출)를 적는다. 코드 변경 없음 — 문서 리프.\nDoD:\n1) docs/design/REPRODUCTION_KEY_PROOF.md에 해시체인 구성 요소·계산 순서·검증 절차 명시\n2) 기존 reproducibility.py의 실제 필드/함수명과 문서의 용어가 일치(존재하지 않는 함수를 인용하지 않음 — git grep으로 확인)\n3) 'ZK 실행은 매매 경로에 채택하지 않음, 사후 감사 후보로만 기록'을 명시적 결정으로 기재\n4) 코드 변경 0(문서만)",
+      "files": [
+        "new:docs/design/REPRODUCTION_KEY_PROOF.md"
+      ],
+      "tier": "",
+      "role": "backend",
+      "hold_note": "[cloud_session] 클라우드 적합: 문서 리프, 코드 변경 0"
+    },
+    {
+      "id": 7620,
+      "title": "ADR-2026-09-26-B DOM-2 — zone 매니페스트 SCAFFOLD 표기: 5계층 미완 도메인 사유 명시 + 검사기 강제",
+      "spec": "ADR-2026-09-26-B Decision 4(DOM-2). src/foundation/<ctx>/의 5계층(domain/application/ports/adapters/contracts) 중 하나 이상이 비어 있는 컨텍스트(실측: marketplace는 ports/adapters 없음)를 .aios-zone에 새 맵 scaffold_reasons: {<ctx>: '<계층>: <사유>'}로 명시하고, scripts/check_zone_manifest.py가 src/foundation/* 하위를 스캔해 5계층 중 없는 것이 있는데 scaffold_reasons에도 없으면 실패(새 코드가 계층 위치를 정하지 않고 방치하는 것을 fail-closed로 막는다)하도록 확장한다. 이 검사는 warn 모드로 도입한다(OPS-42 규약과 같은 정신 — pyproject/CI 배선은 ops 후속 리프, 이 리프는 스캐너 로직과 매니페스트 항목만).\nDoD:\n1) marketplace(ports/adapters 없음) 등 실제 미완 컨텍스트 전부가 scaffold_reasons에 사유와 함께 등재\n2) check_zone_manifest.py가 5계층 결측 + scaffold_reasons 누락 조합을 감지하는 함수 단위 테스트(negative 최소 2건: 결측+사유없음 실패, 결측+사유있음 통과)\n3) 현재 실제 .aios-zone/코드베이스 조합이 이 검사를 통과함을 테스트로 확인(자기 회귀)\n4) note에 'CI(local_ci.py) 배선은 pm 저장소 파일이라 별도 ops 후속 리프 필요'를 명시\n5) 파일당 300줄 상한",
+      "files": [
+        ".aios-zone",
+        "scripts/check_zone_manifest.py",
+        "new:tests/unit/scripts/test_zone_manifest_layers.py"
+      ],
+      "tier": "",
+      "role": "claude-local",
+      "hold_note": "[cloud_session] 클라우드 적합: 스캐너+매니페스트 저장소 완결, 실키/DB 불필요"
+    },
+    {
+      "id": 7622,
+      "title": "BR-23 키움증권 거래소 추가 (b) — 인증/HTTP/서명·rate-limit 클라이언트 + market_data_mixin + capabilities/venue_profile + factory 등록",
+      "spec": "docs/specs/execution_oms_and_exchange.md#BR-23; docs/exchanges/ADDING_AN_EXCHANGE.md 6단계 (b)",
+      "files": [
+        "new:src/exchanges/kiwoom/auth.py",
+        "new:src/exchanges/kiwoom/market_data_mixin.py",
+        "new:src/exchanges/kiwoom/venue_profile.py",
+        "new:src/exchanges/kiwoom/factory.py"
+      ],
+      "tier": "",
+      "role": "backend",
+      "hold_note": "[cloud_session] 클라우드 적합: 저장소만으로 완결(fake 전송, 실키 불필요), 주문경로 아님"
+    },
+    {
+      "id": 7623,
+      "title": "BR-23 키움증권 거래소 추가 (c) — 계좌/잔고/체결 조회(account_mixin)",
+      "spec": "docs/specs/execution_oms_and_exchange.md#BR-23; docs/exchanges/ADDING_AN_EXCHANGE.md 6단계 (c)",
+      "files": [
+        "new:src/exchanges/kiwoom/account_mixin.py",
+        "new:tests/exchanges/kiwoom/test_kiwoom_account_mixin.py"
+      ],
+      "tier": "",
+      "role": "backend",
+      "hold_note": "[cloud_session] 클라우드 적합: 저장소만으로 완결(fake 전송, 실키 불필요), 주문경로 아님"
+    },
+    {
+      "id": 7625,
+      "title": "BR-23 키움증권 거래소 추가 (e) — WebSocket 실시간(체결·호가·개인 주문 이벤트)",
+      "spec": "docs/specs/execution_oms_and_exchange.md#BR-23; docs/exchanges/ADDING_AN_EXCHANGE.md 6단계 (e)",
+      "files": [
+        "new:src/exchanges/kiwoom/websocket.py",
+        "new:tests/exchanges/kiwoom/test_kiwoom_websocket.py"
+      ],
+      "tier": "",
+      "role": "backend",
+      "hold_note": "[cloud_session] 클라우드 적합: 저장소만으로 완결(fake 전송, 실키 불필요), 주문경로 아님"
     }
   ]
 }
