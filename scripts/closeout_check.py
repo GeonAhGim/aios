@@ -487,7 +487,8 @@ def _load_ci_step_ok(path: Path | None, step: str) -> tuple[bool, str]:
 
 def check_13_user_journeys(repo_root: Path, *, ci_report: Path | None) -> CheckResult:
     """기준13(ADR-2026-09-24-A Decision 4) — J1~J3 Playwright 여정 테스트 존재 +
-    `test.fixme` 0건 + `--ci-report`의 `steps.journeys.ok` 녹색(pm/local_ci full 모드 J1~J3 단계, task-7145).
+    `test.fixme` 0건 + `--ci-report`의 `steps.journeys.ok` 녹색
+    (pm/local_ci full 모드 J1~J3 단계, task-7145).
 
     리포트를 넘기지 않으면(다른 항목들과 같은 ADR-D 원칙) "미검증(외부 리포트
     미지정)"으로 FAIL 처리한다 — 모른다=통과 아님.
