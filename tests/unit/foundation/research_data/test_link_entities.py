@@ -233,7 +233,9 @@ async def test_link_item_propagates_resolver_exception() -> None:
 
 
 class _CrashingRepository:
-    async def list_unlinked(self, tenant_id: UUID, limit: int) -> list[ResearchItem]:
+    async def list_unlinked(
+        self, conn: object, *, tenant_id: UUID, limit: int
+    ) -> list[ResearchItem]:
         raise ConnectionError("db_down")
 
 

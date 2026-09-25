@@ -3,6 +3,10 @@ no gate; live-trading actions (order/hedge/kill) only reach
 `AutomationActionSink` when `AutomationGatePort` returns ALLOW — a DENY or
 missing evidence means zero sink calls (U-4 DoD adversarial test,
 INVARIANTS.md I-09).
+
+`FF_U4A_RULE_ENGINE` (task-6900) is checked first, ahead of the Notify
+branch too -- while off, every action kind (including notify, which
+otherwise bypasses the gate) is a no-op.
 """
 
 from __future__ import annotations
@@ -16,6 +20,7 @@ from src.foundation.automation.contracts.v1 import (
     NotifyAction,
     OrderAction,
 )
+from src.foundation.automation.flags import FEATURE_FLAG_NAME, flag_enabled
 from src.foundation.automation.ports.action_sink import ActionResult, AutomationActionSink
 from src.foundation.automation.ports.gate import ActionIntent, AutomationGatePort
 from src.foundation.risk.ports.notifier import (
@@ -37,6 +42,13 @@ async def execute_action(
     sink: AutomationActionSink,
     notifier: PersonalNotifierPort,
 ) -> ActionResult:
+    if not flag_enabled():
+        # Checked ahead of the NotifyAction branch too -- notify otherwise
+        # bypasses the gate entirely, so a disabled flag must block it here
+        # rather than rely on the gate/sink path below (U-4a DoD: zero
+        # actions of any kind, order included, while the flag is off).
+        return ActionResult(executed=False, detail="feature_disabled", error=FEATURE_FLAG_NAME)
+
     if isinstance(action, NotifyAction):
         result = await notifier.send(
             PersonalNotification(

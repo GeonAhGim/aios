@@ -308,6 +308,25 @@ def test_redact_budget_assertion_catches_regression():
         assert p99 < _PRETRADE_GATE_P99_BUDGET_SEC
 
 
+def test_multiple_deny_keys_share_identical_redacted_value_but_key_identity_preserved():
+    """DEEPEN: REDACTED 상수는 모든 deny key에 동일한 값(`<redacted>`)으로 적용된다 —
+    값만 보면 어떤 필드가 마스킹됐는지 구분할 수 없다. 하지만 `redact()`는 dict의 key를
+    그대로 보존하므로(값을 지우되 key는 지우지 않음) "어떤 필드가 redact됐는지"는 값이
+    아니라 key로 식별한다. 이 계약을 명시적으로 고정한다 — key까지 지우거나 필드별로
+    다른 placeholder를 쓰는 변경은 이 테스트를 깨야 한다."""
+    payload = {"api_key": "k1", "secret": "s1", "password": "p1", "safe": "ok"}
+
+    result = redact(payload)
+
+    assert result["api_key"] == REDACTED
+    assert result["secret"] == REDACTED
+    assert result["password"] == REDACTED
+    assert result["safe"] == "ok"
+    # 값 자체는 서로 구분 불가능하지만, key 집합은 원본과 동일하게 보존된다.
+    assert result["api_key"] == result["secret"] == result["password"]
+    assert set(result.keys()) == set(payload.keys())
+
+
 def test_redaction_filter_is_noop_when_payload_absent():
     record = logging.LogRecord(
         name="test",
@@ -357,21 +376,14 @@ class TestStructuredLogLineRejectsUnknownLevel:
         """An unknown level string must raise ValueError."""
         with pytest.raises(ValueError):
             StructuredLogLine(
+                timestamp=datetime.now(timezone.utc),
                 level="critical",
                 message="test message",
-                correlation_id="corr-1",
+                component="test",
+                event="test_event",
                 tenant_id="tenant-1",
                 trace_id="trace-1",
-                span_id="span-1",
-                session_id="session-1",
-                user_id="user-1",
-                request_id="req-1",
-                endpoint="/api/test",
-                method="GET",
-                status_code=200,
                 duration_ms=10,
-                source="test",
-                metadata={},
                 actor_subject_id="user-abc",
             )
 
@@ -379,21 +391,14 @@ class TestStructuredLogLineRejectsUnknownLevel:
         """An empty string for level must raise ValueError."""
         with pytest.raises(ValueError):
             StructuredLogLine(
+                timestamp=datetime.now(timezone.utc),
                 level="",
                 message="test message",
-                correlation_id="corr-1",
+                component="test",
+                event="test_event",
                 tenant_id="tenant-1",
                 trace_id="trace-1",
-                span_id="span-1",
-                session_id="session-1",
-                user_id="user-1",
-                request_id="req-1",
-                endpoint="/api/test",
-                method="GET",
-                status_code=200,
                 duration_ms=10,
-                source="test",
-                metadata={},
                 actor_subject_id="user-abc",
             )
 
@@ -406,19 +411,9 @@ class TestStructuredLogLineRejectsUnknownLevel:
                 message="test message",
                 component="test",
                 event="test_event",
-                correlation_id="corr-1",
                 tenant_id="tenant-1",
                 trace_id="trace-1",
-                span_id="span-1",
-                session_id="session-1",
-                user_id="user-1",
-                request_id="req-1",
-                endpoint="/api/test",
-                method="GET",
-                status_code=200,
                 duration_ms=10,
-                source="test",
-                metadata={},
                 actor_subject_id="user-abc",
             )
             assert log.level == valid_level
@@ -431,41 +426,63 @@ class TestStructuredLogLineRejectsMissingActorSubjectId:
         """actor_subject_id is a required field — omitting it raises ValueError."""
         with pytest.raises(ValueError):
             StructuredLogLine(
+                timestamp=datetime.now(timezone.utc),
                 level="info",
                 message="test message",
-                correlation_id="corr-1",
+                component="test",
+                event="test_event",
                 tenant_id="tenant-1",
                 trace_id="trace-1",
-                span_id="span-1",
-                session_id="session-1",
-                user_id="user-1",
-                request_id="req-1",
-                endpoint="/api/test",
-                method="GET",
-                status_code=200,
                 duration_ms=10,
-                source="test",
-                metadata={},
             )
 
     def test_rejects_none_actor_subject_id(self) -> None:
         """actor_subject_id=None must be rejected (not silently stored as 'None')."""
         with pytest.raises(ValueError):
             StructuredLogLine(
+                timestamp=datetime.now(timezone.utc),
                 level="info",
                 message="test message",
-                correlation_id="corr-1",
+                component="test",
+                event="test_event",
                 tenant_id="tenant-1",
                 trace_id="trace-1",
-                span_id="span-1",
-                session_id="session-1",
-                user_id="user-1",
-                request_id="req-1",
-                endpoint="/api/test",
-                method="GET",
-                status_code=200,
                 duration_ms=10,
-                source="test",
-                metadata={},
                 actor_subject_id=None,  # pyright-ignore: None is intentional
             )
+
+    def test_rejects_non_string_actor_subject_id(self) -> None:
+        """DEEPEN negative: a non-string value (int) must be rejected too — pydantic
+        does not coerce int -> str for this field, so a caller passing a raw numeric
+        id (e.g. a DB PK) fails loudly instead of silently storing the wrong type."""
+        with pytest.raises(ValueError):
+            StructuredLogLine(
+                timestamp=datetime.now(timezone.utc),
+                level="info",
+                message="test message",
+                component="test",
+                event="test_event",
+                tenant_id="tenant-1",
+                trace_id="trace-1",
+                duration_ms=10,
+                actor_subject_id=123,  # pyright-ignore: wrong type is intentional
+            )
+
+    def test_missing_actor_subject_id_error_names_the_field(self) -> None:
+        """DEEPEN: proves the ValueError above is not tautological (`pytest.raises`
+        would also pass for an error raised by an unrelated field). The message must
+        name `actor_subject_id` specifically — that's the only way this test would
+        actually break if the field were renamed or the validation moved elsewhere."""
+        with pytest.raises(ValueError) as exc_info:
+            StructuredLogLine(
+                timestamp=datetime.now(timezone.utc),
+                level="info",
+                message="test message",
+                component="test",
+                event="test_event",
+                tenant_id="tenant-1",
+                trace_id="trace-1",
+                duration_ms=10,
+            )
+
+        assert "actor_subject_id" in str(exc_info.value)

@@ -22,7 +22,9 @@ concurrency:
 jobs:
   verify:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    # 2026-09-26: 전체 스위트를 직렬로 돌리면 20분 상한을 넘겨 Test 단계에서 cancelled(15:04·15:27 실측 2회).
+    # conftest가 PYTEST_XDIST_WORKER별 DB를 복제하므로 xdist 병렬(-n auto)로 돌리고 상한은 45분.
+    timeout-minutes: 45
     services:
       postgres:
         image: postgres:16
@@ -114,8 +116,13 @@ jobs:
       - name: Child order path gate wiring
         run: python scripts/check_child_order_path.py
 
+      # 2026-09-26: 로컬 ci_recheck full 모드와 같은 분할 — 기본 단계는 xdist 병렬(-m "not perf"),
+      # perf 마커(예산 단언) 테스트는 코어 경합을 피해 직렬 단계로 돈다. CLI -m은 addopts의 -m을
+      # 완전히 대체하므로 nightly/live_demo/redis 제외를 여기서 다시 쓴다.
       - name: Test
-        run: pytest -q --cov=src --cov-report=term --cov-report=xml
+        run: pytest -q -n auto --dist loadfile -m "not perf and not nightly and not live_demo and not redis" --cov=src --cov-report=term --cov-report=xml
+      - name: Test (perf, serial)
+        run: pytest -q -m "perf and not nightly and not live_demo and not redis" --cov=src --cov-append --cov-report=term --cov-report=xml
 
       # PLT-37 — 절대 임계치(--cov-fail-under) 대신 coverage.xml 대비 직전
       # baseline에서 하락(허용 오차 0.5%p)했을 때만 FAIL한다. coverage.xml만
