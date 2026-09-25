@@ -12,9 +12,9 @@ DEEPEN(task-2827, DEPTH 감사 docs/audit/DEPTH_R_EO.md#1331) D2->D3 증빙:
 표본 하나만 오염시켜도 거부되는 적대적 배치, (4) 재생(replay) 결정론,
 (5) 다중 스레드(다중 인스턴스 시뮬레이션) 동시 호출 교차오염 없음.
 """
+
 from __future__ import annotations
 
-import time
 from concurrent.futures import ThreadPoolExecutor
 from decimal import Decimal
 
@@ -24,6 +24,7 @@ from pydantic import ValidationError
 from src.core.risk.decision import RiskOutcome
 from src.core.safety.circuit_breaker import CircuitBreakerLevel, CircuitBreakerMetrics
 from src.core.safety.recovery_gate import RecoveryDecision, can_reactivate
+from tests.conftest import PerfBudget
 
 COOLDOWN_SEC = 3
 
@@ -189,29 +190,42 @@ def test_adversarial_single_tainted_sample_deep_in_large_clean_history_denies() 
 
 
 @pytest.mark.perf
-def test_can_reactivate_meets_latency_budget_under_repeated_large_history_calls() -> None:
+def test_can_reactivate_meets_latency_budget_under_repeated_large_history_calls(
+    perf_budget: PerfBudget,
+) -> None:
     """순수 Decimal/불리언 비교 조합이라 매우 빨라야 한다 — 절대시간 예산은
     느린 CI 머신을 감안해 넉넉히 잡되(회귀만 잡는 목적), 큰 이력을 반복
     스캔하는 호출이 예산을 넘으면 baseline 스캔 비용이 O(n)에서 퇴화했다는
-    신호다."""
+    신호다.
+
+    task-7018(esc-ci-pytest_perf) — `time.perf_counter()` wall-clock
+    min-of-1은 이 CI 호스트의 다른 워커 프로세스에 코어를 뺏기면 그 대기
+    시간까지 계측에 섞여 flaky해진다(2.699s 관측, 로컬 단독 실행에서는
+    0.27s대로 예산의 1/7 수준 — 코드 자체의 회귀가 아니라 측정 방식의
+    부하 민감성이었다). task-6774가 공용화한 `perf_budget` 픽스처
+    (`time.process_time()` 기준 best-of-5)로 옮겨 다른 워커의 CPU 점유가
+    이 프로세스의 계측에 섞이지 않게 한다. 예산 수치는 그대로 유지한다."""
     iterations = 300
     large_cooldown = 2000
     kwargs = _base_kwargs()
     kwargs["metrics_history"] = _clean_history(large_cooldown)
     kwargs["cooldown_sec"] = large_cooldown
-    budget_sec = 2.0
+    budget_ms = 2000.0
 
-    start = time.perf_counter()
-    for _ in range(iterations):
-        decision = can_reactivate(**kwargs)
-    elapsed = time.perf_counter() - start
+    decision: RecoveryDecision | None = None
 
-    assert decision.outcome == RiskOutcome.ALLOW
-    assert elapsed < budget_sec, (
-        f"can_reactivate {iterations}x(history={large_cooldown}) 가 예산"
-        f"({budget_sec}s)을 넘었습니다({elapsed:.3f}s) — baseline 스캔 비용 "
-        "회귀 확인 필요."
+    def _run_once() -> None:
+        nonlocal decision
+        for _ in range(iterations):
+            decision = can_reactivate(**kwargs)
+
+    perf_budget.assert_within(
+        _run_once,
+        budget_ms=budget_ms,
+        label=f"can_reactivate {iterations}x(history={large_cooldown})",
     )
+    assert decision is not None
+    assert decision.outcome == RiskOutcome.ALLOW
 
 
 # ---- 리플레이 결정론 + 동시 다중 인스턴스(D3) ----
