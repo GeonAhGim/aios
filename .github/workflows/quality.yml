@@ -70,7 +70,7 @@ jobs:
         # requirements-lock.txt가 정본(ruff/mypy/pytest 핀 포함) — extras 해석은 버전 드리프트를 만들었다.
         run: |
           python -m pip install -r requirements-lock.txt
-          python -m pip install -e ".[test,dev]"  # test/dev extras(hypothesis·jsonschema·pandas·cosmic-ray 등)는 lock 밖 — 핀은 lock이 우선
+          python -m pip install -e ".[test,dev,mutation]"  # test/dev/mutation(cosmic-ray, tests/unit/scripts/test_run_mutation.py) extras(hypothesis·jsonschema·pandas·cosmic-ray 등)는 lock 밖 — 핀은 lock이 우선
 
       # H-5(ADR-2026-09-09-B) — pip-audit(--strict 대신 scripts/run_pip_audit.py가
       # 판정을 대신한다). 저장소가 스스로를 editable로 설치하므로 pip-audit --strict를
