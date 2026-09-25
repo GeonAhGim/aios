@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 from decimal import Decimal
+from typing import Any
 from uuid import UUID
 
 import pytest
@@ -31,7 +32,7 @@ def test_list_connections(client: TestClient, monkeypatch) -> None:
         created_at=datetime(2026, 1, 1, tzinfo=timezone.utc),
     )
 
-    async def mock_build(repo, user_id):  # type: ignore
+    async def mock_build(repo: Any, user_id: Any):
         from src.foundation.connections.projections import ConnectionListView
 
         return ConnectionListView(
@@ -49,7 +50,7 @@ def test_list_connections(client: TestClient, monkeypatch) -> None:
 def test_list_connections_empty(client: TestClient, monkeypatch) -> None:
     """Test empty list."""
 
-    async def mock_build(repo, user_id):  # type: ignore
+    async def mock_build(repo: Any, user_id: Any):
         from src.foundation.connections.projections import ConnectionListView
 
         return ConnectionListView(connections=[], as_of=datetime(2026, 1, 1, tzinfo=timezone.utc))
@@ -73,7 +74,7 @@ def test_post_begin_connection(client: TestClient, monkeypatch) -> None:
         created_at=datetime(2026, 1, 1, tzinfo=timezone.utc),
     )
 
-    async def mock_begin(repo, trust_repo, **kwargs):  # type: ignore
+    async def mock_begin(repo: Any, trust_repo: Any, **kwargs: Any):
         return conn
 
     from src.api.routers.foundation import connections
@@ -107,7 +108,7 @@ def test_post_confirm_connection(client: TestClient, monkeypatch) -> None:
         created_at=datetime(2026, 1, 1, tzinfo=timezone.utc),
     )
 
-    async def mock_confirm(repo, provider, **kwargs):  # type: ignore
+    async def mock_confirm(repo: Any, provider: Any, **kwargs: Any):
         return conn
 
     from src.api.routers.foundation import connections
@@ -138,7 +139,7 @@ def test_post_sync_connection(client: TestClient, monkeypatch) -> None:
         values=[SnapshotValueView(entity_type="bal", entity_key="key", value=Decimal("100"))],
     )
 
-    async def mock_sync(repo, provider, **kwargs):  # type: ignore
+    async def mock_sync(repo: Any, provider: Any, **kwargs: Any):
         return snap
 
     from src.api.routers.foundation import connections
@@ -167,7 +168,7 @@ def test_post_revoke_connection(client: TestClient, monkeypatch) -> None:
         created_at=datetime(2026, 1, 1, tzinfo=timezone.utc),
     )
 
-    async def mock_revoke(repo, **kwargs):  # type: ignore
+    async def mock_revoke(repo: Any, **kwargs: Any):
         return conn
 
     from src.api.routers.foundation import connections
@@ -186,7 +187,7 @@ def test_post_revoke_invalid_uuid(client: TestClient) -> None:
 def test_post_begin_exception(client: TestClient, monkeypatch) -> None:
     """Failure injection: begin_connection raises."""
 
-    async def mock_fail(repo, trust_repo, **kwargs):  # type: ignore
+    async def mock_fail(repo: Any, trust_repo: Any, **kwargs: Any):
         raise RuntimeError("error")
 
     from src.api.routers.foundation import connections
