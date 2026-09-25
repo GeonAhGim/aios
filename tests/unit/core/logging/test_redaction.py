@@ -5,6 +5,7 @@ from unittest.mock import patch
 import pytest
 
 import src.core.logging.redaction as redaction_module
+from src.core.logging.fields import StructuredLogLine
 from src.core.logging.redaction import REDACTED, RedactionFilter, redact
 
 # ADR-2026-09-09-C Decision 1 예산표에 로그 레닥션 전용 항목은 없다. redact()는 로그 라인
@@ -282,3 +283,33 @@ def test_redaction_filter_is_noop_when_payload_absent():
 
     assert RedactionFilter().filter(record) is True
     assert not hasattr(record, "payload") or record.payload == {}
+
+
+# ---------------------------------------------------------------------------
+# PLT-02: StructuredLogLine — level-only validation (deepen)
+# ---------------------------------------------------------------------------
+
+
+class TestStructuredLogLineRejectsUnknownLevel:
+    """StructuredLogLine must reject unknown level values (level field only)."""
+
+    @pytest.mark.parametrize("level", ["critical", "debug", "not a level"])
+    def test_rejects_unknown_level(self, level: str) -> None:
+        with pytest.raises(ValueError):
+            StructuredLogLine(
+                level=level,
+                message="test message",
+                correlation_id="corr-1",
+                tenant_id="tenant-1",
+                trace_id="trace-1",
+                span_id="span-1",
+                session_id="session-1",
+                user_id="user-1",
+                request_id="req-1",
+                endpoint="/api/test",
+                method="GET",
+                status_code=200,
+                duration_ms=10,
+                source="test",
+                metadata={},
+            )
