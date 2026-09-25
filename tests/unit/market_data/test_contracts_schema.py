@@ -299,6 +299,7 @@ def test_quality_issue_detail_type_enforced() -> None:
 # ── DEEPEN: performance assertion (LA-1) ───────────────────────────────────
 
 
+@pytest.mark.perf  # wall-clock budget: serial perf stage (task-7434 guard)
 def test_candle_record_bulk_validation_throughput() -> None:
     """1,000건 CandleRecord 검증이 예산(200ms) 내에 끝나야 한다 — O(n) 이상 회귀 감지."""
     start = time.perf_counter()
