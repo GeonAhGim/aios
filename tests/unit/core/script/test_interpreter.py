@@ -43,6 +43,7 @@ from src.core.script.runtime import (
     broadcast,
     execute,
 )
+from tests.conftest import paused_coverage
 
 _RUNTIME_DIR = Path(__file__).resolve().parents[4] / "src" / "core" / "script" / "runtime"
 
@@ -314,9 +315,10 @@ def test_execution_latency_p95_within_backtest_budget_slice() -> None:
 
     samples = []
     for _ in range(20):
-        start = time.perf_counter()
-        execute(ir, bar_count=bar_count, inputs={"close": close})
-        samples.append(time.perf_counter() - start)
+        with paused_coverage():
+            start = time.perf_counter()
+            execute(ir, bar_count=bar_count, inputs={"close": close})
+            samples.append(time.perf_counter() - start)
     samples.sort()
     p95 = samples[min(int(len(samples) * 0.95), len(samples) - 1)]
 

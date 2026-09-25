@@ -48,6 +48,7 @@ from src.core.script.grammar.ast import (
 )
 from src.core.script.grammar.lexer import ScriptSyntaxError
 from src.core.script.grammar.parser import parse
+from tests.conftest import paused_coverage
 
 # ---- §3.3 decl 5종: 파싱 성공 ----
 
@@ -449,9 +450,10 @@ def test_parse_latency_stays_within_half_of_dsl_compile_budget() -> None:
     ]
     source = "let v0 = close\n" + "\n".join(lines)
 
-    start = time.perf_counter()
-    program = parse(source)
-    elapsed = time.perf_counter() - start
+    with paused_coverage():
+        start = time.perf_counter()
+        program = parse(source)
+        elapsed = time.perf_counter() - start
 
     assert len(program.decls) == 1000
     assert elapsed < 0.15

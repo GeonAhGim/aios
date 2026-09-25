@@ -59,6 +59,7 @@ from src.core.script.ir import (
     verify_stack,
 )
 from src.core.script.typing.checker import ScriptTypeError, check_program
+from tests.conftest import paused_coverage
 
 _REPO_ROOT = Path(__file__).resolve().parents[4]
 
@@ -352,10 +353,11 @@ def test_lowering_latency_p95_within_compile_budget_slice() -> None:
 
     samples = []
     for _ in range(30):
-        start = time.perf_counter()
-        for expr in exprs:
-            lower_expr(expr, env)
-        samples.append(time.perf_counter() - start)
+        with paused_coverage():
+            start = time.perf_counter()
+            for expr in exprs:
+                lower_expr(expr, env)
+            samples.append(time.perf_counter() - start)
     samples.sort()
     p95 = samples[min(int(len(samples) * 0.95), len(samples) - 1)]
 

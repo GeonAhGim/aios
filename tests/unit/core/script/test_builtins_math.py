@@ -34,6 +34,7 @@ from src.core.script.runtime import (
     default_builtins,
     execute,
 )
+from tests.conftest import paused_coverage
 
 SITE = CallSite("math", "x", "float", 4)
 S = Series.of_floats([1.5, -2.5, None, 4.0])
@@ -247,9 +248,10 @@ def test_series_builtin_call_latency_p95_within_backtest_budget_slice() -> None:
 
     samples = []
     for _ in range(20):
-        start = time.perf_counter()
-        fn((series,), site)
-        samples.append(time.perf_counter() - start)
+        with paused_coverage():
+            start = time.perf_counter()
+            fn((series,), site)
+            samples.append(time.perf_counter() - start)
     samples.sort()
     p95 = samples[min(int(len(samples) * 0.95), len(samples) - 1)]
 
