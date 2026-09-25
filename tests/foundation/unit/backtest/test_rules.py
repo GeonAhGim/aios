@@ -124,7 +124,8 @@ def test_assert_fill_after_signal_throughput_within_budget(perf_budget: PerfBudg
     호출한다(spec §9 L29, I2) -- 100,000회 호출이 200ms 예산 안에 들어
     루프 병목이 아님을 보증한다. task-7434: wall-clock `perf_counter()` 대신
     공용 `perf_budget`(process_time 기반)으로 측정해 xdist 코어 경합
-    노이즈를 배제한다."""
+    노이즈를 배제한다. `batch=10`은 Windows `GetProcessTimes()` 틱(15.625ms)
+    양자화 오차를 호출당 ~1.6ms로 줄인다(200ms 예산 대비 안전)."""
     order_ev = _FakeEvent(bar_index=1)
     fill_ev = _FakeEvent(bar_index=2)
 
@@ -133,7 +134,7 @@ def test_assert_fill_after_signal_throughput_within_budget(perf_budget: PerfBudg
             assert_fill_after_signal(order_ev, fill_ev)
 
     perf_budget.assert_within(
-        _run_once, budget_ms=200.0, label="100k assert_fill_after_signal calls"
+        _run_once, budget_ms=200.0, batch=10, label="100k assert_fill_after_signal calls"
     )
 
 

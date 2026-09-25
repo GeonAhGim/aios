@@ -7,6 +7,7 @@ the sum identity, defaulting `as_of`, or letting `total_equity<=0` reach a
 
 from __future__ import annotations
 
+import time
 from datetime import datetime, timezone
 from decimal import Decimal, InvalidOperation
 from typing import cast
@@ -20,7 +21,6 @@ from src.core.portfolio.aggregation import (
     NonPositiveEquityError,
     aggregate,
 )
-from tests.conftest import PerfBudget
 
 _AS_OF = datetime(2026, 9, 9, tzinfo=timezone.utc)
 
@@ -165,11 +165,13 @@ def test_aggregate_propagates_broken_exposure_feed_failure():
 
 
 @pytest.mark.perf
-def test_aggregate_p99_latency_within_pretrade_gate_budget(perf_budget: PerfBudget):
+def test_aggregate_p99_latency_within_pretrade_gate_budget():
     """ADR-2026-09-09-C Decision 1 축별 성능 예산: 사전거래 게이트 p99 5ms.
     `aggregate()`는 L17 `PortfolioStateInput.exposures` 조립 경로에서 사이징
-    직전에 호출된다(모듈 docstring). task-7434: process_time 기반
-    perf_budget으로 측정해 xdist 코어 경합 노이즈를 배제한다."""
+    직전에 호출된다(모듈 docstring). task-7434: 5ms 예산이 Windows
+    `GetProcessTimes()` 틱(15.625ms)보다 작아 `perf_budget`(process_time
+    기반)으로 재면 매 호출이 결정적으로 예산을 넘겨 보인다 -- wall-clock
+    perf_counter()를 유지한다(마커로 코어 경합만 제거)."""
     exposures = [
         ExecutionExposure(
             execution_id=i,
@@ -179,13 +181,15 @@ def test_aggregate_p99_latency_within_pretrade_gate_budget(perf_budget: PerfBudg
         )
         for i in range(500)
     ]
+    samples: list[float] = []
+    for _ in range(200):
+        start = time.perf_counter()
+        aggregate(exposures, cash=Decimal("5000"), as_of=_AS_OF)
+        samples.append(time.perf_counter() - start)
 
-    samples = perf_budget.samples(
-        lambda: aggregate(exposures, cash=Decimal("5000"), as_of=_AS_OF), n=200
-    )
-    cpu_values_ms = sorted(s.cpu_ms for s in samples)
-    p99_ms = cpu_values_ms[int(len(cpu_values_ms) * 0.99)]
-    assert p99_ms < 5.0, f"p99={p99_ms:.3f}ms exceeds 5ms budget"
+    samples.sort()
+    p99_seconds = samples[int(len(samples) * 0.99)]
+    assert p99_seconds < 0.005, f"p99={p99_seconds * 1000:.3f}ms exceeds 5ms budget"
 
 
 # --- D2 게이트 적색 재현 (gate-red reproduction) --------------------------------

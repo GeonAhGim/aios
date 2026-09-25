@@ -168,7 +168,7 @@ def test_to_base_batch_10000_calls_within_latency_budget(perf_budget: PerfBudget
         for _ in range(n):
             funding_fees.to_base(fee, Currency.KRW, rate)
 
-    perf_budget.assert_within(_run_once, budget_ms=budget_ms, label=f"{n} to_base calls")
+    perf_budget.assert_within(_run_once, budget_ms=budget_ms, batch=10, label=f"{n} to_base calls")
 
 
 def test_to_base_accepts_reverse_rate_and_inverts() -> None:

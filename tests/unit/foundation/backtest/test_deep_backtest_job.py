@@ -306,7 +306,7 @@ _DEEP_JOB_BUDGET_MS = 50.0
 def _deep_job_latencies_ms(
     perf_budget: PerfBudget, iterations: int = 10, *, n_bars: int = 2000
 ) -> list[float]:
-    # task-7434: process_time-based samples, not wall-clock perf_counter().
+    # task-7434: process_time samples; batch=3 keeps Windows tick quantization under budget.
     cfg, cols = _config(), _columns(n_bars)
 
     def _run_once() -> None:
@@ -315,7 +315,7 @@ def _deep_job_latencies_ms(
             job_id="perf", checkpoints=InMemoryCheckpointStore(), chunk_bars=200,
         )
 
-    samples = [s.cpu_ms for s in perf_budget.samples(_run_once, n=iterations)]
+    samples = [s.cpu_ms for s in perf_budget.samples(_run_once, n=iterations, batch=3)]
     samples.sort()
     return samples
 
