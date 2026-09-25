@@ -1,7 +1,7 @@
-"""AIOS Script 호환 패키지(§2.4/§9.4 DSL-10) — 기존 cond-v2 조건식을 DSL-1 AST로
-변환하는 `cond_v2_bridge.py`. 신규 패키지, `src/core/**` SCAFFOLD zone. 순수
-(I/O 없음). `src/core/strategy/**`(FROZEN_PAPER_ONLY)는 읽기 전용 — 수정하지 않는다.
-소비자: DSL-11 `script_facade.py`, 아티팩트 `compat_map` 필드.
+"""AIOS Script compatibility package (§2.4/§9.4 DSL-10) — `cond_v2_bridge.py` bridges
+legacy cond-v2 conditionals to DSL-1 AST. New package, `src/core/**` SCAFFOLD zone. Pure
+(no I/O). `src/core/strategy/**` (FROZEN_PAPER_ONLY) is read-only — do not modify.
+Consumers: DSL-11 `script_facade.py`, artifact `compat_map` field.
 """
 from __future__ import annotations
 

@@ -6,6 +6,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
+import os
 import subprocess
 import sys
 import time
@@ -44,6 +45,7 @@ from src.foundation.risk_gate.domain.models import GateKind, SafetyScope
 from src.foundation.trust.adapters.postgres_repository import PostgresTrustRepository
 from tests.foundation.integration.risk_gate.conftest import activate_mandate_with_defaults
 from tests.integration.conftest import create_test_tenant
+from tests.support.db import ensure_worker_database
 from tests.support.deep_downgrade import purge_position_snapshots
 
 
@@ -574,10 +576,12 @@ async def test_activate_and_deactivate_safety_control_record_audit_events(pool, 
 _PROJECT_ROOT = Path(__file__).resolve().parents[4]
 
 
-def _run_alembic(*args: str) -> None:
+def _run_alembic(*args: str, database_url: str | None = None) -> None:
+    env = {**os.environ, "DATABASE_URL": database_url} if database_url else None
     result = subprocess.run(
         [sys.executable, "-m", "alembic", "-c", "alembic.ini", *args],
         cwd=_PROJECT_ROOT,
+        env=env,
         capture_output=True,
         text=True,
         encoding="utf-8",
@@ -735,41 +739,54 @@ async def test_evaluate_risk_gate_always_records_trace_id_from_context(
     assert row["trace_id"] == expected_trace_id
 
 
-async def test_migration_round_trip_restores_gate_kinds_and_new_columns(pool):
+async def test_migration_round_trip_restores_gate_kinds_and_new_columns():
     """DoD(2) — upgrade→downgrade→upgrade 왕복을 실DB로 재현: downgrade는
     3개 신규 컬럼을 지우고 CHECK를 옛 2종으로 되돌리며, 재차 upgrade하면
-    정확히 원래(6종 + 3개 컬럼) 상태로 복원돼야 한다."""
+    정확히 원래(6종 + 3개 컬럼) 상태로 복원돼야 한다. Disposable DB clone
+    (task-5783) -- never the shared session DB other tests and
+    `scripts/replay_verify.py` depend on. An interrupted downgrade can only
+    corrupt its own throwaway DB."""
+    migration_db_url = await ensure_worker_database(os.environ["DATABASE_URL"], "migrationrt_fnd06")
+    migration_pool = await asyncpg.create_pool(
+        migration_db_url.replace("postgresql+asyncpg://", "postgresql://"),
+        min_size=1,
+        max_size=2,
+    )
     try:
-        before = await _gate_kind_check_def(pool)
+        before = await _gate_kind_check_def(migration_pool)
         assert "PRE_SUBMIT" in before
         assert "INTRADAY" in before
         assert "RECOVERY" in before
-        assert await _column_exists(pool, "risk_evaluation", "trace_id")
-        assert await _column_exists(pool, "safety_control", "idempotency_digest")
-        assert await _column_exists(pool, "strategy_executions", "paused_by_control_id")
+        assert await _column_exists(migration_pool, "risk_evaluation", "trace_id")
+        assert await _column_exists(migration_pool, "safety_control", "idempotency_digest")
+        assert await _column_exists(migration_pool, "strategy_executions", "paused_by_control_id")
 
-        await purge_position_snapshots(pool)  # deep downgrade: see tests/support/deep_downgrade.py
-        _run_alembic("downgrade", "c7e6a3b2d4f5")
+        # deep downgrade: see tests/support/deep_downgrade.py
+        await purge_position_snapshots(migration_pool)
+        _run_alembic("downgrade", "c7e6a3b2d4f5", database_url=migration_db_url)
 
-        after_downgrade = await _gate_kind_check_def(pool)
+        after_downgrade = await _gate_kind_check_def(migration_pool)
         assert "PRE_SUBMIT" not in after_downgrade
         assert "INTRADAY" not in after_downgrade
         assert "RECOVERY" not in after_downgrade
-        assert not await _column_exists(pool, "risk_evaluation", "trace_id")
-        assert not await _column_exists(pool, "safety_control", "idempotency_digest")
-        assert not await _column_exists(pool, "strategy_executions", "paused_by_control_id")
+        assert not await _column_exists(migration_pool, "risk_evaluation", "trace_id")
+        assert not await _column_exists(migration_pool, "safety_control", "idempotency_digest")
+        assert not await _column_exists(
+            migration_pool, "strategy_executions", "paused_by_control_id"
+        )
 
-        _run_alembic("upgrade", "head")
+        _run_alembic("upgrade", "head", database_url=migration_db_url)
 
-        after_upgrade = await _gate_kind_check_def(pool)
+        after_upgrade = await _gate_kind_check_def(migration_pool)
         assert after_upgrade == before
-        assert await _column_exists(pool, "risk_evaluation", "trace_id")
-        assert await _column_exists(pool, "safety_control", "idempotency_digest")
-        assert await _column_exists(pool, "strategy_executions", "paused_by_control_id")
+        assert await _column_exists(migration_pool, "risk_evaluation", "trace_id")
+        assert await _column_exists(migration_pool, "safety_control", "idempotency_digest")
+        assert await _column_exists(migration_pool, "strategy_executions", "paused_by_control_id")
     finally:
-        _run_alembic("upgrade", "head")
+        await migration_pool.close()
 
 
+@pytest.mark.perf
 async def test_idempotency_digest_unique_violation_detection_stays_fast_at_scale(pool):
     """성능 단언(D2) — safety_control.idempotency_digest UNIQUE는 인덱스를
     타야 한다. 인덱스 없이 순차 스캔이면 위반 감지 시간이 기존 행 수에

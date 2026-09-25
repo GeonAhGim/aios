@@ -144,6 +144,7 @@ def test_is_member_corrupted_window_defaults_false_not_crash_or_true() -> None:
 # -- (f) D2 보강: 수치 성능 단언 ------------------------------------------------
 
 
+@pytest.mark.perf
 def test_is_member_p95_latency_within_budget_for_large_snapshot() -> None:
     """수치 성능 단언: 5,000개 심볼을 담은 스냅샷에서도 `is_member`(선형 탐색)
     단일 조회가 실사용 규모(거래소 상장 종목 수 상한)에서 예산 안에 든다

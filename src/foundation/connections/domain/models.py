@@ -1,4 +1,4 @@
-"""Connected Asset(읽기전용 계좌 연결) 도메인 모델 — pure value object.
+"""Connected Asset (read-only account connection) domain model — pure value object.
 
 Spec: AIOSproject 74_connected_asset_l3_build_and_operational_specification_v1.0.md §1/§2.
 """
@@ -21,10 +21,10 @@ class ConnectionState(str, Enum):
 
 
 class CapabilityScope(str, Enum):
-    """74번 §1 "P0 capability profile is a closed enum set" — 이 세 값 외에는
-    전부 하드 거부 대상이다(TRADE_*, WITHDRAW, TRANSFER, SIGN_* 포함).
-    실제 열거값이 아니라 임의 문자열이 들어올 수 있는 입력 경로(요청 바디)는
-    rules.validate_capability_profile()이 이 enum으로 변환하며 걸러낸다."""
+    """74 §1 "P0 capability profile is a closed enum set" — anything other than
+    these three values is a hard reject (including TRADE_*, WITHDRAW, TRANSFER, SIGN_*).
+    Input paths that may receive arbitrary strings instead of actual enum values
+    (request body) are converted and filtered by rules.validate_capability_profile()."""
 
     READ_BALANCE = "READ_BALANCE"
     READ_POSITION = "READ_POSITION"
@@ -32,10 +32,10 @@ class CapabilityScope(str, Enum):
 
 
 class CredentialClass(str, Enum):
-    """74번 §1 "credential class must be READONLY" — P0에서 이 enum이 갖는
-    유일한 합법값은 READONLY뿐이다. 다른 값을 미리 만들어두지 않는다(35번
-    §9.2 "미리 만들어두지 않는다" 원칙 — 실제 TRADE 자격증명이 필요해지면
-    그때 별도 검토를 거쳐 추가한다)."""
+    """74 §1 "credential class must be READONLY" — the only valid value for
+    this enum at P0 is READONLY. Do not pre-create other values (35 §9.2
+    "do not pre-create" principle — when actual TRADE credentials are needed,
+    add them after separate review)."""
 
     READONLY = "READONLY"
 
@@ -63,19 +63,21 @@ class CredentialBinding:
     expires_at: datetime | None
     rotation_state: str = "CURRENT"
     scope_verified: bool = False
-    """감사 §6 — provider가 실제로 승인된 스코프를 독립적으로 확인해줬는지.
-    거래소 API에는 AIOS의 READ_BALANCE/READ_POSITION/READ_ACTIVITY 분류로
-    직접 매핑되는 조회 수단이 없어(LiveReadonlyAccountProvider 참조), 실
-    provider 경로는 이 값을 항상 False로 정직하게 남긴다 — 연결 자체를
-    막지는 않는다. FakeReadonlyAccountProvider(시뮬레이션)만 True다."""
+    """Audit §6 — whether the provider independently confirmed the actually
+    granted scope. The exchange API has no lookup tool that directly maps
+    to AIOS's READ_BALANCE/READ_POSITION/READ_ACTIVITY classification
+    (see LiveReadonlyAccountProvider), so the live provider path leaves
+    this value honestly as False — it does not block the connection itself.
+    Only FakeReadonlyAccountProvider (simulation) sets True."""
 
 
 @dataclass(frozen=True)
 class ConnectionConsent:
-    """74번 §1 `connection_consent` — 이 connection이 Trust Core(FND-01)의
-    어느 동의 레코드를 근거로 활성화됐는지 가리키는 포인터 테이블이다.
-    동의 자체의 신선도/철회 판정은 Trust가 소유하며(71번 §4), 이 테이블은
-    "이 connection은 그 시점에 어떤 동의를 근거로 삼았는가"만 기록한다."""
+    """74 §1 `connection_consent` — a pointer table indicating which Trust
+    Core (FND-01) consent record this connection is activated upon.
+    Freshness/revocation judgment of the consent itself is owned by Trust
+    (71 §4); this table records only "which consent did this connection
+    rely on at that point in time."""
 
     connection_id: UUID
     consent_ref: UUID
@@ -85,11 +87,12 @@ class ConnectionConsent:
 
 @dataclass(frozen=True)
 class SnapshotValue:
-    """스냅샷 하나가 실제로 담는 수치 하나 — reconciliation(FND-08)의
-    `EntitySnapshot.provider_value`가 그대로 소비할 수 있는 (entity_type,
-    entity_key, value) 모양이다. entity_type="BALANCE"만 실제로 채워진다
-    (get_positions()는 이 리프가 붙이는 거래소 전부 spot이라 항상 빈
-    리스트 — LiveReadonlyAccountProvider 참조)."""
+    """A single numeric value contained in a snapshot — shaped as
+    (entity_type, entity_key, value) so that reconciliation (FND-08)'s
+    `EntitySnapshot.provider_value` can consume it directly. Only
+    entity_type="BALANCE" is actually populated (get_positions() returns
+    an empty list for all exchanges attached to this leaf, as they are
+    all spot — see LiveReadonlyAccountProvider)."""
 
     entity_type: str
     entity_key: str
@@ -125,22 +128,22 @@ class ConnectionHealth:
 
 @dataclass(frozen=True)
 class ScopeProof:
-    """74번 §3 ReadonlyAccountProvider.verify_readonly_scope()의 반환값 —
-    provider가 실제로 승인한 스코프(요청과 다를 수 있음, "scope drift")."""
+    """Return value of 74 §3 ReadonlyAccountProvider.verify_readonly_scope() —
+    the scope actually granted by the provider (may differ from the request, "scope drift")."""
 
     granted_scopes: tuple[CapabilityScope, ...]
     provider_credential_ref: str
     provider_verified: bool = False
-    """감사 §6 — provider 자신이 이 스코프를 독립적으로 확인해준 것인지
-    (True), 아니면 요청한 스코프를 그대로 승인된 것으로 가정한 것인지
-    (False). 거래소 API에는 이 taxonomy로 직접 매핑되는 조회 수단이 없어
-    LiveReadonlyAccountProvider는 항상 False다 — FakeReadonlyAccountProvider
-    (시뮬레이션)만 True."""
+    """Audit §6 — whether the provider itself independently verified this scope
+    (True), or simply assumed the requested scopes as granted (False).
+    The exchange API has no lookup tool that directly maps to this taxonomy,
+    so LiveReadonlyAccountProvider always returns False — only
+    FakeReadonlyAccountProvider (simulation) returns True."""
 
 
 @dataclass(frozen=True)
 class ProviderSnapshot:
-    """74번 §3 ReadonlyAccountProvider.fetch_snapshot()의 반환값."""
+    """Return value of 74 §3 ReadonlyAccountProvider.fetch_snapshot()."""
 
     provider_as_of: datetime
     currency: str

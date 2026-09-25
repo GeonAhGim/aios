@@ -74,6 +74,7 @@ async def test_acquire_more_than_burst_rejected_immediately() -> None:
     assert sleep_calls == []
 
 
+@pytest.mark.perf
 async def test_acquire_within_burst_latency_budget() -> None:
     """버스트 내 `acquire`는 대기 없이 반환되는 hot path — 로컬 회귀 예산이며
     SLO 단언은 아니다(headless worker 지침)."""
@@ -148,6 +149,7 @@ async def test_two_independent_buckets_do_not_share_tokens() -> None:
     assert sleep_calls_b == []
 
 
+@pytest.mark.perf
 async def test_concurrent_acquire_calls_do_not_over_issue_tokens() -> None:
     """적대적 동시성 증명(D3) — `TokenBucket.acquire`는 토큰 부족을 확인하고
     `await self._sleep(...)`로 대기한 뒤에야 실제로 차감한다. 락 없이는 동시에

@@ -65,8 +65,12 @@ from uuid import UUID, uuid4
 import asyncpg
 
 from src.core.observability.metrics_registry import MetricsRegistry
-from src.foundation.evidence.domain.models import Classification, Outcome
-from src.foundation.evidence.domain.rules import assert_safe_payload, compute_payload_hash
+from src.foundation.evidence.api import (
+    Classification,
+    Outcome,
+    assert_safe_payload,
+    compute_payload_hash,
+)
 from src.foundation.ledger.application.post_entry import AuditAppender
 from src.foundation.ledger.contracts.v1 import AccountType, IntegrityReport
 from src.foundation.ledger.domain import trial_balance

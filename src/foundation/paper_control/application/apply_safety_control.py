@@ -38,7 +38,7 @@ from src.foundation.paper_control.domain.models import (
     DeploymentState,
 )
 from src.foundation.paper_control.ports.repository import PaperControlRepository
-from src.foundation.risk_gate.domain.models import SafetyScope
+from src.foundation.risk_gate.api import SafetyScope
 
 _TENANT_SCOPED = frozenset({SafetyScope.TENANT, SafetyScope.ACCOUNT})
 

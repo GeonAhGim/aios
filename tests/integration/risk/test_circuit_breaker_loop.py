@@ -336,6 +336,7 @@ async def test_run_circuit_breaker_tick_reproduces_gate_red_via_collected_metric
     assert events.count("risk.circuit_breaker.level_changed") == 1
 
 
+@pytest.mark.perf
 async def test_check_reactivation_meets_latency_budget_with_large_history(pool, cb, policy):
     """성능 단언(D2) — `can_reactivate`의 baseline 스캔은 metrics_history
     길이에 비례한다(O(n)). 큰 이력(5000 표본)을 매 호출마다 반복 스캔해도

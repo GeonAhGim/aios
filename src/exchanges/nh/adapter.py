@@ -27,7 +27,7 @@ from __future__ import annotations
 import asyncio
 from collections.abc import Awaitable, Callable
 from decimal import Decimal
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import httpx
 
@@ -39,9 +39,17 @@ from src.exchanges.common.oauth_http import MonotonicTokenCache
 from src.exchanges.common.transport import ResilientTransport
 from src.exchanges.common.types import ExchangeCapability, MarketHours
 from src.exchanges.nh.account_mixin import NHAccountMixin
+from src.exchanges.nh.credit_reserved_mixin import NHCreditReservedMixin
+from src.exchanges.nh.inquiry_extra_mixin import NHInquiryExtraMixin
 from src.exchanges.nh.market_data_mixin import NHMarketDataMixin
+from src.exchanges.nh.quote_after_hours_mixin import NHQuoteAfterHoursMixin
+from src.exchanges.nh.quote_extra_mixin import NHQuoteExtraMixin
 from src.exchanges.nh.trading_mixin import NHTradingMixin
+from src.exchanges.nh.venue_profile import NH_KR_EQUITY_PROFILE
 from src.exchanges.nh.websocket_mixin import NHWebSocketMixin
+
+if TYPE_CHECKING:
+    from src.services.oms.domain.venue_profile import VenueCapabilityProfile
 
 REAL_BASE_URL = "https://api.nhplug.com:8443"
 PAPER_BASE_URL = "https://moapi.nhplug.com:8443"
@@ -201,8 +209,12 @@ class _NHHTTPClient:
 class NHAdapter(
     _NHHTTPClient,
     NHMarketDataMixin,
+    NHQuoteAfterHoursMixin,
+    NHQuoteExtraMixin,
     NHAccountMixin,
     NHTradingMixin,
+    NHCreditReservedMixin,
+    NHInquiryExtraMixin,
     NHWebSocketMixin,
     ExchangeAdapter,
 ):
@@ -275,3 +287,12 @@ class NHAdapter(
                 trading_days=["MON", "TUE", "WED", "THU", "FRI"],
             ),
         )
+
+    def venue_profile(self) -> VenueCapabilityProfile:
+        """BR-18 fix — `NH_KR_EQUITY_PROFILE` in
+        `exchanges/nh/venue_profile.py` was never wired to this method, so
+        calls silently fell through to the ABC default
+        (`UnsupportedCapabilityError`) — same defect as KIS, caught by
+        `scripts/check_exchange_spi.py`'s capability-vs-implementation
+        cross-check."""
+        return NH_KR_EQUITY_PROFILE

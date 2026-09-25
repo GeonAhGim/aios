@@ -1,4 +1,4 @@
-"""Connected Asset 순수 규칙 함수 — DB/HTTP 없이 단위 테스트 가능해야 한다.
+"""Connected Asset pure rule functions — must be unit-testable without DB/HTTP.
 
 Spec: AIOSproject 74_connected_asset_l3_build_and_operational_specification_v1.0.md §1/§2.
 """
@@ -12,9 +12,9 @@ from src.foundation.connections.domain.models import CapabilityScope, Connection
 
 _ALLOWED_SCOPES = frozenset(s.value for s in CapabilityScope)
 
-# 74번 §2 상태 전이표를 그대로 코드로 옮긴다 — "지금 이 경로를 두 곳에서
-# 동시에 부를 방법이 없어 보인다"는 이유로 표에 없는 전이를 허용하지 않는다
-# (105번 §2.2 원칙과 동일).
+# Port the §2 state-transition table verbatim — do not allow transitions
+# not in the table under the rationale that "there seems no way to call
+# this path from two places simultaneously" (same principle as §2.2 of 105).
 _ALLOWED_TRANSITIONS: dict[ConnectionState, frozenset[ConnectionState]] = {
     ConnectionState.PENDING_CONSENT: frozenset({ConnectionState.CONNECTING}),
     ConnectionState.CONNECTING: frozenset({ConnectionState.ACTIVE_READONLY}),
@@ -47,8 +47,9 @@ class InvalidConnectionTransitionError(Exception):
 
 
 def validate_capability_profile(requested: list[str]) -> tuple[CapabilityScope, ...]:
-    """요청된 scope 문자열 목록을 검증한다. 하나라도 P0 closed set 밖이면
-    전체를 거부한다(일부만 승인하는 부분 허용은 없음 — "hard rejection")."""
+    """Validate a list of requested scope strings. Reject the entire list if
+    any scope falls outside the P0 closed set (no partial acceptance —
+    "hard rejection")."""
     if not requested:
         raise ForbiddenCapabilityScopeError(rejected=["<empty>"])
     rejected = [s for s in requested if s not in _ALLOWED_SCOPES]
@@ -58,9 +59,10 @@ def validate_capability_profile(requested: list[str]) -> tuple[CapabilityScope, 
 
 
 def compute_scope_fingerprint(scopes: tuple[CapabilityScope, ...]) -> str:
-    """정렬된 scope 목록의 안정적 해시 — CredentialBinding.scope_fingerprint와
-    provider가 실제로 승인한 ScopeProof.granted_scopes를 비교해 scope drift를
-    탐지하는 데 쓴다(74번 §5 "Alert on scope drift")."""
+    """Stable hash of the sorted scope list — used to detect scope drift by
+    comparing CredentialBinding.scope_fingerprint with the
+    ScopeProof.granted_scopes the provider actually granted
+    (74 §5 "Alert on scope drift")."""
     payload = ",".join(sorted(s.value for s in scopes))
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
@@ -84,8 +86,8 @@ def require_transition_allowed(current: ConnectionState, target: ConnectionState
 
 class ProviderResponseClassification(str, Enum):
     """CON-006 "malformed/stale/duplicate provider response is classified
-    and does not overwrite history" — 이 세 판정 중 FRESH만 실제로 저장
-    대상이다."""
+    and does not overwrite history" — among these three classifications,
+    only FRESH is a storage target."""
 
     FRESH = "FRESH"
     STALE = "STALE"
@@ -98,12 +100,13 @@ def classify_provider_response(
     latest_known_as_of: datetime | None,
     now: datetime,
 ) -> ProviderResponseClassification:
-    """provider가 미래 시각을 보고하면(시계 오류·변조) FUTURE_DATED —
-    저장 자체를 거부한다(76번 문서군이 공유하는 "INTEGRITY_FUTURE_DATA"
-    원칙과 동일). 이미 알고 있는 것보다 과거이거나 같은 시각이면 STALE —
-    지연 도착/재전송된 오래된 응답이라 "최신"을 덮어쓰지 않는다(순서가
-    뒤바뀐 응답이 `captured_at`만 보고 최신인 척하는 걸 막는다). 그 외엔
-    FRESH."""
+    """Return FUTURE_DATED when the provider reports a future timestamp
+    (clock skew / tampering) — reject storage entirely (same
+    "INTEGRITY_FUTURE_DATA" principle shared by §76 documents). Return
+    STALE when the timestamp is earlier than or equal to what is already
+    known — do not overwrite "latest" with a late-arriving / retransmitted
+    old response (prevents out-of-order responses from masquerading as
+    latest by inspecting only `captured_at`). Otherwise return FRESH."""
     if provider_as_of > now:
         return ProviderResponseClassification.FUTURE_DATED
     if latest_known_as_of is not None and provider_as_of <= latest_known_as_of:

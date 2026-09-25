@@ -24,6 +24,11 @@ from uuid import UUID
 from src.foundation.ems.contracts.v1 import TcaResult
 
 
+class TcaResultNotFoundError(LookupError):
+    """`EM_TCA_RESULT_NOT_FOUND` -- no `tca_results` row for the requested
+    `parent_id` (and, for revision lookups, `revision`)."""
+
+
 @dataclass(frozen=True)
 class TcaResultRecord:
     """One persisted `tca_results` row.

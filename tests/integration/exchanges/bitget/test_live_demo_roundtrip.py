@@ -43,15 +43,11 @@ from src.data.models.base import AssetClass, Currency, Money
 from src.data.models.trading import Order, OrderSide, OrderStatus, OrderType
 from src.exchanges.bitget.adapter import BitgetAdapter
 from src.exchanges.bitget.venue_profile import BITGET_SPOT_PROFILE
+from tests.support.bitget_demo_credentials import skip_if_missing_demo_credentials
 
 pytestmark = pytest.mark.live_demo
 
 _SYMBOL = "BTC/USDT"
-_CREDENTIAL_ENV_VARS = (
-    "BITGET_DEMO_API_KEY",
-    "BITGET_DEMO_API_SECRET",
-    "BITGET_DEMO_API_PASSPHRASE",
-)
 
 # 왕복용 지정가 — 실측(2026-09-08) 공개 심볼가보다 훨씬 낮게 잡아 체결
 # 위험 없이 미체결 상태로 place/get/cancel을 왕복한다. 수량은 min_notional
@@ -60,18 +56,9 @@ _SAFE_PRICE = Decimal("10000")
 _SAFE_QUANTITY = Decimal("0.0002")
 
 
-def _missing_credential_env_vars() -> list[str]:
-    return [name for name in _CREDENTIAL_ENV_VARS if not os.environ.get(name)]
-
-
 @pytest.fixture
 async def demo_adapter() -> BitgetAdapter:
-    missing = _missing_credential_env_vars()
-    if missing:
-        pytest.skip(
-            "Bitget 데모 왕복 테스트 skip — 누락된 환경변수: "
-            f"{', '.join(missing)} (값 자체는 절대 출력하지 않음, redaction)"
-        )
+    skip_if_missing_demo_credentials()
     adapter = BitgetAdapter(
         os.environ["BITGET_DEMO_API_KEY"],
         os.environ["BITGET_DEMO_API_SECRET"],

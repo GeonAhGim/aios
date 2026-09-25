@@ -1,3 +1,4 @@
-"""L4 §9 PLT-25 — rate limit 정책/판정. `policy.py`(값)와 `limiter.py`(판정)를
-분리한 이유는 `policy.py` docstring 참조."""
+"""L4 §9 PLT-25 — rate limit policy and decision. See `policy.py` docstring for
+the rationale behind separating policy (values) from limiter (decision logic)."""
+
 from __future__ import annotations

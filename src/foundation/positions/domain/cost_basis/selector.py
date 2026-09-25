@@ -1,22 +1,25 @@
-"""LB-3 — 계좌 `cost_method`·자산군으로 원가법 구현 선택(selector).
+"""LB-3 — Select cost-basis implementation by account `cost_method` and asset class.
 
 Spec: docs/specs/L4_market_data_positions_ledger_v1.0.md#§9 LB-3
-(`domain/cost_basis/selector.py`: "계좌 cost_method·자산군으로 구현
-선택(파생상품은 가중평균 강제, 현물 기본 FIFO — Draft)"),
+(`domain/cost_basis/selector.py`: "Select implementation by account
+cost_method and asset class (derivatives force weighted average, spot defaults
+to FIFO — Draft)"),
 `unit/positions/test_cost_basis_selector.py`.
 
-§4.3(`unit/positions/test_ports_protocol.py` 인접 규칙, 저널 불변조건 표
-"현물(`asset_class ∈ {CRYPTO, *_EQUITY, *_ETF, *_ETN}`) 수량 ≥ 0")이
-현물 자산군 집합을 명시하므로, 이 리프는 그 여집합(선물·옵션)을 파생상품
-집합으로 다룬다 — `AssetClass`에 `PERPETUAL` 멤버는 존재하지 않는다(크립토
-무기한선물은 이 스펙에서 `CRYPTO`=현물로 분류된다; **미검증** — 향후
-크립토 파생 전용 asset_class가 추가되면 이 집합도 갱신해야 한다).
+§4.3 (`unit/positions/test_ports_protocol.py` adjacent rule, journal invariant table
+"spot (`asset_class ∈ {CRYPTO, *_EQUITY, *_ETF, *_ETN}`) quantity ≥ 0")
+explicitly defines the spot asset-class set, so this leaf treats its complement
+(futures · options) as the derivatives set — `AssetClass` has no `PERPETUAL`
+member (crypto perpetuals are classified as `CRYPTO`=spot in this spec;
+**unverified** — if a crypto-derivatives-only asset_class is added later, this
+set must be updated).
 
-`AssetClass`는 닫힌 enum이라 현재는 두 집합의 합이 전체를 덮지만, 새
-값이 추가돼 어느 집합에도 없는 상태로 들어오면 침묵으로 현물(FIFO)에
-떨어뜨리지 않고 `UnknownAssetClassError`를 던진다 — 자산군 오분류가
-원가법을 조용히 틀리게 만드는 사고를 막기 위함이다. 순수 도메인(I/O
-import 0) — 반환값은 새로 생성한 [[fifo]]/[[weighted]] 인스턴스다.
+`AssetClass` is a closed enum so the two sets currently cover the whole space,
+but if a new value arrives that belongs to neither set, we raise
+`UnknownAssetClassError` instead of silently falling back to spot (FIFO) — to
+prevent misclassification from silently choosing the wrong cost-basis method.
+Pure domain (0 I/O imports) — returns a freshly created [[fifo]] or [[weighted]]
+instance.
 """
 from __future__ import annotations
 
@@ -50,16 +53,16 @@ _DERIVATIVE_ASSET_CLASSES: frozenset[AssetClass] = frozenset(
 
 
 class UnknownAssetClassError(ValueError):
-    """현물·파생상품 어느 집합에도 속하지 않는 `asset_class` — 침묵
-    fallback 금지, 호출자가 분류 규칙을 갱신해야 한다."""
+    """`asset_class` does not belong to either the spot or derivatives set —
+    silent fallback is forbidden; the caller must update the classification rules."""
 
 
 def cost_basis_for(method: CostMethod, asset_class: AssetClass) -> CostBasis:
-    """`method`·`asset_class`로 원가법 구현을 고른다.
+    """Select the cost-basis implementation by `method` and `asset_class`.
 
-    파생상품(`_DERIVATIVE_ASSET_CLASSES`)이면 계좌 `cost_method`와 무관하게
-    `WeightedAverage`를 강제한다. 현물이면 `method`를 그대로 따른다(기본은
-    호출부가 `CostMethod.FIFO`를 넘긴다).
+    For derivatives (`_DERIVATIVE_ASSET_CLASSES`), force `WeightedAverage`
+    regardless of the account `cost_method`. For spot, follow `method` as-is
+    (the caller typically passes `CostMethod.FIFO`).
     """
     if asset_class in _DERIVATIVE_ASSET_CLASSES:
         return WeightedAverage()

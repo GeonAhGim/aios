@@ -44,6 +44,7 @@ import numpy as np
 
 from src.core.indicators.engine.vectorized import compute as _compute_indicator
 from src.core.indicators.registry import DEFAULT_REGISTRY, IndicatorError, IndicatorRegistry
+from src.foundation.backtest.api import BacktestConfigV2
 from src.foundation.backtest.application.quick_backtest import (
     MAX_QUICK_BARS,
     LookAheadError,
@@ -55,7 +56,6 @@ from src.foundation.backtest.application.quick_backtest import (
 from src.foundation.backtest.application.quick_backtest import (
     run_quick_backtest as _run_quick_backtest,
 )
-from src.foundation.backtest.domain.models_v2 import BacktestConfigV2
 from src.foundation.experiments.application.compare import (
     CorruptedReproductionSetError,
     ExperimentComparison,
@@ -74,8 +74,8 @@ from src.foundation.experiments.application.query import get_lineage_chain as _g
 from src.foundation.experiments.application.query import list_reproductions as _list_reproductions
 from src.foundation.experiments.contracts.v1 import Experiment
 from src.foundation.experiments.ports.repository import ExperimentRepository
+from src.foundation.market_data.api import CandleColumns
 from src.foundation.market_data.contracts.v1 import Timeframe
-from src.foundation.market_data.domain.candle_columns import CandleColumns
 
 __all__ = [
     "MAX_QUICK_BARS",

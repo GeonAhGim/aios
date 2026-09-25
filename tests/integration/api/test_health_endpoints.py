@@ -173,6 +173,7 @@ class _SlowPool:
         return 1
 
 
+@pytest.mark.perf
 async def test_readyz_p95_latency_within_read_route_budget(client: AsyncClient) -> None:
     samples: list[float] = []
     for _ in range(30):
@@ -184,6 +185,7 @@ async def test_readyz_p95_latency_within_read_route_budget(client: AsyncClient) 
     assert _p95(samples) < _READYZ_READ_ROUTE_P95_BUDGET_SECONDS
 
 
+@pytest.mark.perf
 async def test_readyz_p95_latency_budget_fails_when_db_pool_is_slow(
     client: AsyncClient,
 ) -> None:

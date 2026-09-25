@@ -39,6 +39,7 @@ from decimal import Decimal
 from typing import Any, cast
 
 import httpx
+import pytest
 
 from src.data.models.base import AssetClass
 from src.data.models.trading import Order, OrderSide, OrderStatus, OrderType
@@ -84,6 +85,7 @@ def _order() -> Order:
     )
 
 
+@pytest.mark.perf
 async def test_place_order_throughput_within_normalized_budget_vs_ticker() -> None:
     """PLT-40c(task-1105)가 만진 두 믹스인 경로의 처리량 배율을 단언한다
     (모듈 docstring 참조) — DEPTH 감사 결손: "no numeric performance/

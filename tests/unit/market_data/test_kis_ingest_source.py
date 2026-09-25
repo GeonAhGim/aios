@@ -26,6 +26,8 @@ import pytest
 
 from src.core.exceptions import FatalExchangeError, RetryableExchangeError
 from src.exchanges.kis.adapter import KISAdapter
+from src.exchanges.kis.oauth_client import _KISTokenTransportMixin
+from src.exchanges.kis.rate_profile import reset_token_bucket_registry_for_test
 from src.foundation.market_data.adapters.kis_ingest_source import (
     KisIngestSource,
     UnsupportedTimeframeError,
@@ -42,6 +44,14 @@ from src.foundation.market_data.domain.timeframe import expected_opens
 _TOKEN_RESPONSE = {"access_token": "tok-1", "access_token_token_expired": "2099-01-01 00:00:00"}
 
 
+@pytest.fixture(autouse=True)
+def _reset_rate_limiter_registry() -> None:
+    """process-wide `_BUCKET_REGISTRY`(rate_profile.py BR-2b)의 락이 이전
+    테스트 이벤트 루프에 바인딩된 채 남는 걸 막는다(동일 패턴:
+    test_kis_overseas_deepen.py)."""
+    reset_token_bucket_registry_for_test()
+
+
 def _make_adapter(handler) -> KISAdapter:
     def route(request: httpx.Request) -> httpx.Response:
         if request.url.path == "/oauth2/tokenP":
@@ -52,7 +62,9 @@ def _make_adapter(handler) -> KISAdapter:
     client = httpx.AsyncClient(
         base_url="https://openapivts.koreainvestment.com:29443", transport=transport
     )
-    return KISAdapter("app", "secret", "12345678", "01", is_paper_trading=True, http_client=client)
+    # BR-2b 모의계좌 레이트리미터 실 sleep이 p95 예산을 잡아먹지 않도록 주입.
+    kwargs = dict(is_paper_trading=True, http_client=client, sleep_fn=lambda _s: asyncio.sleep(0))
+    return KISAdapter("app", "secret", "12345678", "01", **kwargs)
 
 
 def _krx_calendar(*, holidays: frozenset[date] = frozenset()) -> VenueCalendar:
@@ -91,7 +103,12 @@ async def test_fetch_candles_maps_daily_ohlc_and_filters_range() -> None:
             json={
                 "rt_cd": "0",
                 "msg1": "ok",
-                "output2": [_daily_row("20260901"), _daily_row("20260902"), _daily_row("20260903")],
+                "output2": [
+                    _daily_row("20260901"),
+                    _daily_row("20260902"),
+                    _daily_row("20260903"),
+                    _daily_row("20260904"),  # open_time == end -- 종료 경계는 제외돼야 함
+                ],
             },
         )
 
@@ -293,7 +310,12 @@ async def test_gate_red_when_range_filter_removed_existing_test_would_fail(monke
             json={
                 "rt_cd": "0",
                 "msg1": "ok",
-                "output2": [_daily_row("20260901"), _daily_row("20260902"), _daily_row("20260903")],
+                "output2": [
+                    _daily_row("20260901"),
+                    _daily_row("20260902"),
+                    _daily_row("20260903"),
+                    _daily_row("20260904"),  # open_time == end -- 종료 경계는 제외돼야 함
+                ],
             },
         )
 
@@ -386,10 +408,16 @@ async def test_fetch_candles_concurrent_symbols_no_cross_contamination_single_to
     token_calls = 0
     expected_close = {"005930": "70050", "000660": "55000"}
 
-    def route(request: httpx.Request) -> httpx.Response:
+    async def route(request: httpx.Request) -> httpx.Response:
         nonlocal token_calls
         if request.url.path == "/oauth2/tokenP":
             token_calls += 1
+            # 실제 event-loop 양보 지점 -- 동기 MockTransport는 절대 컨텍스트
+            # 스위치를 만들지 않아, 락을 걷어내는 회귀도 이 지점 없이는 토큰
+            # 발급 경합을 재현하지 못한다(XREV task-3644). `_ensure_token`이
+            # 락을 쥔 채로 이 await에서 정지하는 동안 나머지 gather 태스크가
+            # 진짜로 경합하며 락 획득을 시도한다.
+            await asyncio.sleep(0.01)
             return httpx.Response(200, json=_TOKEN_RESPONSE)
         symbol = request.url.params.get("FID_INPUT_ISCD")
         row = _daily_row("20260902", close=expected_close[symbol])
@@ -418,3 +446,53 @@ async def test_fetch_candles_concurrent_symbols_no_cross_contamination_single_to
         )
 
     assert token_calls == 1, f"동시 첫 호출인데도 토큰이 {token_calls}회 발급됨 -- 락 경합 증거"
+
+
+async def test_gate_red_when_token_lock_removed_concurrency_test_would_fail(monkeypatch) -> None:
+    """게이트 적색 재현: `_ensure_token`의 `asyncio.Lock` 이중 확인을 제거하는
+    회귀를 주입하면 바로 위 동시성 테스트가 지키는
+    `token_calls == 1` 단언이 green에서 red로 뒤집힘을 직접 재현한다(XREV
+    task-3644 -- 동기 MockTransport는 이 회귀를 절대 검출하지 못했다;
+    `route`가 토큰 응답 중 실제로 event loop에 양보해야만 이 락 제거가
+    관측 가능한 이중 발급으로 드러난다)."""
+
+    async def _regressed_ensure_token(self: _KISTokenTransportMixin) -> str:
+        # 회귀: 락 없이 캐시만 확인하고 바로 재발급을 시도한다.
+        cached = self._token_cache.get()
+        if cached is not None:
+            return cached
+        return await self._fetch_token()
+
+    monkeypatch.setattr(_KISTokenTransportMixin, "_ensure_token", _regressed_ensure_token)
+
+    token_calls = 0
+    expected_close = {"005930": "70050", "000660": "55000"}
+
+    async def route(request: httpx.Request) -> httpx.Response:
+        nonlocal token_calls
+        if request.url.path == "/oauth2/tokenP":
+            token_calls += 1
+            await asyncio.sleep(0.01)
+            return httpx.Response(200, json=_TOKEN_RESPONSE)
+        symbol = request.url.params.get("FID_INPUT_ISCD")
+        row = _daily_row("20260902", close=expected_close[symbol])
+        return httpx.Response(200, json={"rt_cd": "0", "msg1": "ok", "output2": [row]})
+
+    transport = httpx.MockTransport(route)
+    client = httpx.AsyncClient(
+        base_url="https://openapivts.koreainvestment.com:29443", transport=transport
+    )
+    adapter = KISAdapter(
+        "app", "secret", "12345678", "01", is_paper_trading=True, http_client=client
+    )
+    source = KisIngestSource(adapter)
+    start = datetime(2026, 9, 2, tzinfo=timezone.utc)
+    end = datetime(2026, 9, 3, tzinfo=timezone.utc)
+
+    symbols = ["005930", "000660"] * 5
+    await asyncio.gather(
+        *[source.fetch_candles(Venue.KIS_KRX, s, Timeframe.D1, start, end) for s in symbols]
+    )
+
+    with pytest.raises(AssertionError):
+        assert token_calls == 1, f"동시 첫 호출인데도 토큰이 {token_calls}회 발급됨 -- 락 경합 증거"

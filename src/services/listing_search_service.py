@@ -1,22 +1,27 @@
-"""13.8 — 리스팅 검색·정렬 API.
+"""13.8 -- Listing search and sort API.
 
-Spec: 기능설계문서_v1.20.md#FD-13.8, 14번 문서 §14.4
+Spec: functional_design_v1.20.md#FD-13.8, document #14 §14.4
 
-기본 정렬(sort_by="RECOMMENDED")은 리스팅 생성일이 아니라 검증통과일
-(verified_at, FD-13.2 완료 시각) 역순 — 판매자가 재등록으로 상단 노출을
-조작하는 것을 막는다(검증통과일은 검증담당자를 거쳐야만 갱신되므로
-조작이 어렵다). 동점 시 2차 정렬은 샤프비율 내림차순(NULL은 항상 마지막).
+Default sort (sort_by="RECOMMENDED") orders by verification date
+(verified_at, FD-13.2 completion time) descending -- not by listing
+creation date -- to prevent sellers from gaming top placement via
+re-registration (verification date only updates after review by a
+verifier, making manipulation difficult). Ties are broken by Sharpe
+ratio descending (NULL always last).
 
-편차(범위 축소): `min_backtest_months` 필터는 이 leaf에서 구현하지
-않는다 — 실제 백테스트 기간을 추적하는 데이터 소스가 시스템 어디에도
-없다(FD-16/백테스트 엔진 스콥 밖). 존재하지 않는 것을 거짓으로 필터링
-하는 대신, 데이터 소스가 생기기 전까지 파라미터 자체를 받지 않는다
-(12.2의 "출금권한 미지원 시 정직하게 경고"와 같은 원칙).
+Deviation (scope reduction): `min_backtest_months` filter is not
+implemented in this leaf -- no data source anywhere in the system tracks
+actual backtest duration (outside FD-16/backtest engine scope). Instead
+of filtering non-existent data to false, the parameter is not accepted
+at all until such a data source exists (same principle as 12.2
+"warn honestly when withdrawal authority is unsupported").
 
-편차(2026-09-02, 사용자 요청): ZuluTrade의 ZuluRank(성과 기반 판매자
-랭킹)에 대응하는 sort_by="SHARPE_RATIO" 옵션을 추가한다 — 순수 샤프
-비율 내림차순(NULL 마지막)으로, 검증통과일과 무관하게 "성과가 좋은
-전략"만 보고 싶은 사용자를 위한 명시적 선택지다."""
+Deviation (2026-09-02, user request): Add sort_by="SHARPE_RATIO" option
+corresponding to ZuluTrade's ZuluRank (performance-based seller ranking)
+-- pure Sharpe ratio descending (NULL last), an explicit choice for users
+who want to see only "high-performing strategies" regardless of
+verification date."""
+
 from __future__ import annotations
 
 from datetime import datetime

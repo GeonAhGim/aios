@@ -1,4 +1,8 @@
 import asyncio
+from collections.abc import Callable, Coroutine
+from typing import Any, cast
+
+import pytest
 
 from src.core.safety.split_brain import Diagnosis, SplitBrainDiagnostics
 
@@ -20,50 +24,50 @@ class _FakeClock:
         self._now += seconds
 
 
-def _diag(**overrides):
-    defaults = dict(
+def _diag(**overrides: Any) -> SplitBrainDiagnostics:
+    defaults: dict[str, float | Callable[[], float]] = dict(
         entry_confirm_seconds=0.05, recovery_confirm_seconds=0.1, check_timeout_seconds=0.05
     )
     defaults.update(overrides)
-    return SplitBrainDiagnostics(**defaults)
+    return SplitBrainDiagnostics(**cast(dict[str, Any], defaults))
 
 
-def _diag_with_clock(**overrides):
+def _diag_with_clock(**overrides: Any) -> tuple[SplitBrainDiagnostics, _FakeClock]:
     clock = _FakeClock()
     diag = _diag(clock=clock, **overrides)
     return diag, clock
 
 
-async def _ok():
+async def _ok() -> bool:
     return True
 
 
-async def _fail():
+async def _fail() -> bool:
     return False
 
 
-async def _raises():
+async def _raises() -> bool:
     raise ConnectionError("boom")
 
 
-async def _hangs():
+async def _hangs() -> bool:
     await asyncio.sleep(10)
     return True
 
 
-async def test_all_healthy_is_normal():
+async def test_all_healthy_is_normal() -> None:
     diag = _diag()
     result = await diag.diagnose(check_exchange=_ok, check_db=_ok, main_process_ok_raw=True)
     assert result.diagnosis == Diagnosis.NORMAL
 
 
-async def test_momentary_failure_does_not_immediately_flip_confirmed_state():
+async def test_momentary_failure_does_not_immediately_flip_confirmed_state() -> None:
     diag = _diag(entry_confirm_seconds=1.0)
     result = await diag.diagnose(check_exchange=_fail, check_db=_ok, main_process_ok_raw=True)
     assert result.exchange_ok is True  # 1초 안 지났으므로 아직 confirmed OK
 
 
-async def test_sustained_failure_flips_after_entry_duration():
+async def test_sustained_failure_flips_after_entry_duration() -> None:
     diag, clock = _diag_with_clock(entry_confirm_seconds=0.05)
     await diag.diagnose(check_exchange=_fail, check_db=_ok, main_process_ok_raw=True)
 
@@ -80,7 +84,7 @@ async def test_sustained_failure_flips_after_entry_duration():
     assert result.diagnosis == Diagnosis.APPLY_WATCHDOG_DECISION
 
 
-async def test_db_isolated_failure_diagnosis():
+async def test_db_isolated_failure_diagnosis() -> None:
     diag, clock = _diag_with_clock(entry_confirm_seconds=0.05)
     await diag.diagnose(check_exchange=_ok, check_db=_fail, main_process_ok_raw=True)
     clock.advance(0.06)
@@ -92,7 +96,7 @@ async def test_db_isolated_failure_diagnosis():
     assert result.diagnosis == Diagnosis.DB_ISOLATED_FAILURE
 
 
-async def test_recovery_requires_longer_sustained_success():
+async def test_recovery_requires_longer_sustained_success() -> None:
     diag, clock = _diag_with_clock(entry_confirm_seconds=0.02, recovery_confirm_seconds=0.1)
     await diag.diagnose(check_exchange=_fail, check_db=_ok, main_process_ok_raw=True)
     clock.advance(0.03)
@@ -110,19 +114,19 @@ async def test_recovery_requires_longer_sustained_success():
     assert recovered.exchange_ok is True
 
 
-async def test_check_exception_treated_as_failure():
+async def test_check_exception_treated_as_failure() -> None:
     diag = _diag(entry_confirm_seconds=0.0)
     result = await diag.diagnose(check_exchange=_raises, check_db=_ok, main_process_ok_raw=True)
     assert result.exchange_ok is False
 
 
-async def test_check_timeout_treated_as_failure():
+async def test_check_timeout_treated_as_failure() -> None:
     diag = _diag(entry_confirm_seconds=0.0, check_timeout_seconds=0.05)
     result = await diag.diagnose(check_exchange=_hangs, check_db=_ok, main_process_ok_raw=True)
     assert result.exchange_ok is False
 
 
-async def test_main_process_unresponsive_triggers_apply_watchdog_decision():
+async def test_main_process_unresponsive_triggers_apply_watchdog_decision() -> None:
     diag = _diag(entry_confirm_seconds=0.0)
     result = await diag.diagnose(check_exchange=_ok, check_db=_ok, main_process_ok_raw=False)
     assert result.diagnosis == Diagnosis.APPLY_WATCHDOG_DECISION
@@ -131,7 +135,7 @@ async def test_main_process_unresponsive_triggers_apply_watchdog_decision():
 # --- negative tests: invariant-violating inputs must be explicitly rejected ---
 
 
-async def test_both_exchange_and_db_fail_yields_apply_watchdog_not_db_isolated():
+async def test_both_exchange_and_db_fail_yields_apply_watchdog_not_db_isolated() -> None:
     """불변식: DB만 단독 장애일 때만 DB_ISOLATED_FAILURE.
     거래소+DB 동시 실패는 DB 고립이 아니므로 APPLY_WATCHDOG_DECISION 이어야 한다.
     """
@@ -142,7 +146,7 @@ async def test_both_exchange_and_db_fail_yields_apply_watchdog_not_db_isolated()
     assert result.db_ok is False
 
 
-async def test_exchange_failure_with_main_process_failure_also_triggers_watchdog():
+async def test_exchange_failure_with_main_process_failure_also_triggers_watchdog() -> None:
     """불변식: exchange가 실패하고 main_process도 실패하면 APPLY_WATCHDOG_DECISION.
     DB가 살아있어도 exchange+main_process 동시 실패는-watchdog 개입 필요.
     """
@@ -152,7 +156,7 @@ async def test_exchange_failure_with_main_process_failure_also_triggers_watchdog
     assert result.exchange_ok is False
 
 
-async def test_db_isolated_failure_does_not_mask_as_normal():
+async def test_db_isolated_failure_does_not_mask_as_normal() -> None:
     """불변식: DB가 실패하면 NORMAL이 절대 될 수 없다.
     exchange와 main_process가 살아있어도 DB 단독 실패는 DB_ISOLATED_FAILURE여야 한다.
     """
@@ -165,13 +169,13 @@ async def test_db_isolated_failure_does_not_mask_as_normal():
 # --- failure-injection tests: monkeypatch dependency to raise ---
 
 
-async def test_inject_exchange_check_exception_injected_via_monkeypatch():
+async def test_inject_exchange_check_exception_injected_via_monkeypatch() -> None:
     """실패주입: check_exchange 의존성이 ConnectionError를 유발하면
     exchange_ok=False로 처리되어야 한다(낙관적 True 취급 금지).
     """
     diag = _diag(entry_confirm_seconds=0.0)
 
-    def _injected_failure():
+    def _injected_failure() -> Coroutine[Any, Any, bool]:
         raise ConnectionRefusedError("port already in use")
 
     result = await diag.diagnose(
@@ -182,13 +186,13 @@ async def test_inject_exchange_check_exception_injected_via_monkeypatch():
     assert result.diagnosis == Diagnosis.APPLY_WATCHDOG_DECISION
 
 
-async def test_inject_db_check_exception_injected_via_monkeypatch():
+async def test_inject_db_check_exception_injected_via_monkeypatch() -> None:
     """실패주입: check_db 의존성이 OSError를 유발하면 db_ok=False.
     exchange가 살아있으므로 DB_ISOLATED_FAILURE가 되어야 한다.
     """
     diag = _diag(entry_confirm_seconds=0.0)
 
-    def _injected_db_failure():
+    def _injected_db_failure() -> Coroutine[Any, Any, bool]:
         raise OSError("disk full")
 
     result = await diag.diagnose(
@@ -202,7 +206,8 @@ async def test_inject_db_check_exception_injected_via_monkeypatch():
 # --- performance assertion: diagnose() must complete within budget ---
 
 
-async def test_diagnose_completes_within_100ms_budget():
+@pytest.mark.perf
+async def test_diagnose_completes_within_100ms_budget() -> None:
     """성능 단언: diagnose() 호출 하나당 100ms 이내 완료 (budget: ADR-2026-09-09-C).
     실제 환경에서 폴링 주기와 충돌하지 않도록 충분한 마크업.
     """

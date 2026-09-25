@@ -1,8 +1,9 @@
-"""TrustStatusView 조립 — 73번 §5 GET /v1/trust/status.
+"""Build TrustStatusView — 73 §5 GET /v1/trust/status.
 
-71번 §4 "read model may lag" — 지금은 command handler와 같은 DB를 직접 읽으므로
-지연이 없지만(단일 Postgres, 별도 프로젝션 워커 없음), 인터페이스는 나중에
-비동기 프로젝션으로 교체 가능하게 `as_of`를 항상 포함한다(108번 §2 필드 표준).
+71 §4 "read model may lag" — currently reads the same DB directly from the command
+handler so there is no lag (single Postgres, no separate projection worker), but
+always includes `as_of` so the interface can be swapped to an async projection later
+(108 §2 field standard).
 """
 from __future__ import annotations
 

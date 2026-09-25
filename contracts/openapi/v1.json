@@ -510,6 +510,63 @@
         "title": "AlertCreateRequest",
         "type": "object"
       },
+      "AlgoProgressView": {
+        "properties": {
+          "demoted_to_twap": {
+            "title": "Demoted To Twap",
+            "type": "boolean"
+          },
+          "demotion_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Demotion Reason"
+          },
+          "parent_id": {
+            "format": "uuid",
+            "title": "Parent Id",
+            "type": "string"
+          },
+          "pending_slices": {
+            "title": "Pending Slices",
+            "type": "integer"
+          },
+          "remaining_qty": {
+            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+            "title": "Remaining Qty",
+            "type": "string"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "submitted_slices": {
+            "title": "Submitted Slices",
+            "type": "integer"
+          },
+          "total_slices": {
+            "title": "Total Slices",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "parent_id",
+          "status",
+          "total_slices",
+          "submitted_slices",
+          "pending_slices",
+          "remaining_qty",
+          "demoted_to_twap",
+          "demotion_reason"
+        ],
+        "title": "AlgoProgressView",
+        "type": "object"
+      },
       "ApiResponse_AccountConnectionView_": {
         "properties": {
           "data": {
@@ -588,6 +645,22 @@
           "meta"
         ],
         "title": "ApiResponse[AgentTokenView]",
+        "type": "object"
+      },
+      "ApiResponse_AlgoProgressView_": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/AlgoProgressView"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/Meta"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "title": "ApiResponse[AlgoProgressView]",
         "type": "object"
       },
       "ApiResponse_ApprovalRequest_": {
@@ -16974,6 +17047,54 @@
         "summary": "Post Sync Connection",
         "tags": [
           "foundation:connections"
+        ]
+      }
+    },
+    "/v1/foundation/ems/algo/{parent_id}/progress": {
+      "get": {
+        "operationId": "get_algo_run_progress_v1_foundation_ems_algo__parent_id__progress_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "parent_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Parent Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiResponse_AlgoProgressView_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Get Algo Run Progress",
+        "tags": [
+          "foundation:ems:algo"
         ]
       }
     },

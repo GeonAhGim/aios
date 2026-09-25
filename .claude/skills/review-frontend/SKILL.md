@@ -79,9 +79,10 @@ const { data: positions } = useQuery(["positions"], fetchPositions);
 
 - 접근성 baseline(포커스·레이블·대비)이 없어 CI에서 회귀를 못 잡던 상태에 검사를
   신설 (git:a4cf25a2)
-- 대시보드가 문서 섹션 번호로 리프 목록을 찾다가 문서 구조가 바뀌자 "0/0"으로 표시되던
-  결함 — 섹션 번호가 아니라 '리프 목록' 헤더 텍스트로 찾도록 수정
-  (git:c4d3561c)
+- `task-5803`/`5804`가 `router.tsx`에 `/portfolio/performance-statements`를
+  등록하면서 nav 링크를 빠뜨려 reachability 스캐너(`navReachability.test.ts`)가
+  도달 불가능한 화면으로 CI를 적색 처리 — 화이트리스트 예외가 아니라 실제 nav
+  항목(+ en/ko 카탈로그 라벨)을 추가하는 근본 수정 (git:31f0ec88)
 - `useAuthStore`가 `localStorage`가 `undefined`인 환경(SSR/프라이빗 모드)에서 방어 없이
   접근해 초기화가 깨지던 결함에 방어 코드 + 회귀 테스트를 추가 (git:028d089a)
 - 계약 드리프트 가드에 `walletBalance` 응답 파서가 등재되지 않아 백엔드 스키마 변경을

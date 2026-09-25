@@ -38,10 +38,10 @@ from datetime import datetime
 
 import asyncpg
 
+from src.foundation.market_data.api import DataUse, permits_use
 from src.foundation.market_data.application.authorize_source_access import (
     authorize_source_access,
 )
-from src.foundation.market_data.domain.entitlement.source_contract import DataUse, permits_use
 from src.foundation.market_data.ports.source_contract_repository import SourceContractRepository
 from src.foundation.research_data.contracts.v1 import ResearchItem
 

@@ -1,5 +1,4 @@
-"""Reconciliation & Resilience 순수 규칙 함수 — DB/HTTP 없이 단위 테스트
-가능해야 한다.
+"""Reconciliation & Resilience pure rule functions — must be unit-testable without DB/HTTP.
 
 Spec: AIOSproject 80_reconciliation_resilience_l3_build_and_operational_specification_v1.0.md §1/§2.
 """
@@ -11,8 +10,8 @@ from decimal import Decimal
 
 from src.foundation.reconciliation.domain.models import Classification, MaterialityPolicy
 
-# 80번 §2 "Rules have ordered severity"(risk_gate/78번과 동일 원칙)를
-# 집계에도 적용한다 — 항목 하나라도 더 심각하면 run/state 전체가 그 등급.
+# Apply §2 "Rules have ordered severity" (same principle as risk_gate/78) to aggregation
+# as well — if any single item is more severe, the entire run/state gets that grade.
 _SEVERITY_ORDER = (
     Classification.MATERIAL_MISMATCH,
     Classification.PROVIDER_UNAVAILABLE,
@@ -27,8 +26,8 @@ def classify_item(
     policy: MaterialityPolicy,
 ) -> Classification:
     """80번 §1 "Missing/unreadable input yields ... never assumes zero
-    balance/fill"(§2) — provider_value가 없으면 즉시 PROVIDER_UNAVAILABLE,
-    0으로 취급하지 않는다."""
+    balance/fill"(§2) — when provider_value is missing, immediately return
+    PROVIDER_UNAVAILABLE; do not treat it as zero."""
     if provider_value is None:
         return Classification.PROVIDER_UNAVAILABLE
 
@@ -58,9 +57,9 @@ def compute_input_hash(
     target_ref: str, entities: dict[str, tuple[str, str]]
 ) -> str:
     """REC-004/006 "concurrent scheduled/manual runs dedupe ... safe retry
-    does not duplicate" — 같은 target에 같은 내부/외부 값 조합이면 같은
-    해시가 나온다. `entities`는 `{entity_key: (internal_value_str,
-    provider_value_str)}` — Decimal을 문자열로 직렬화해 부동소수 표현
-    차이로 해시가 흔들리지 않게 한다(호출부가 str(Decimal(...))로 넘김)."""
+    does not duplicate" — same target + same internal/provider value combo produces the
+    same hash. `entities` is `{entity_key: (internal_value_str, provider_value_str)}` —
+    serializing Decimal as string avoids hash instability from floating-point
+    representation differences (caller passes str(Decimal(...)))."""
     payload = json.dumps({"target_ref": target_ref, "entities": entities}, sort_keys=True)
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()

@@ -8,6 +8,8 @@ token), §2.3 AI-13 (`application/promote_to_paper.py`), §9 AI-16 DoD
 ("confirmation token round trip + adversarial: ticket reuse -> 409"),
 INVARIANTS.md I-11.
 
+# ratchet-allow: C901 spec §3 error catalog (AI_CONFIRM_REQUIRED, AI_CONFIRM_MISMATCH, etc)
+
 Two tools, matching the spec's own "preview then execute" split:
 
 - `preview_promotion`: computes `action_digest` (a canonical hash of the
@@ -111,7 +113,7 @@ from src.foundation.risk_gate.adapters.postgres_repository import PostgresRiskGa
 if TYPE_CHECKING:
     from collections.abc import Callable
 
-    from src.api.mcp.server import ScopeDependency
+    from src.api.mcp.scope_types import ScopeDependency
 
 __all__ = [
     "ConfirmPromotionRequest",

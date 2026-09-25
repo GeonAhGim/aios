@@ -212,6 +212,7 @@ async def test_source_contract_repository_failure_fails_closed_not_open(client, 
     assert "simulated source_contract backend outage" not in body["message"]
 
 
+@pytest.mark.perf
 async def test_search_items_latency_stays_within_normalized_ceiling(client, seeded):
     """Numeric perf assertion -- baseline-normalized ceiling (same technique
     as test_market_data_router.py) instead of an absolute threshold, since

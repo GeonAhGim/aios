@@ -25,6 +25,7 @@ test_rate_limiter.py::test_pytest_gate_turns_red_when_timeout_check_is_removed`
 가 green(1 passed)에서 red(1 failed, `UniqueViolationError` — 테이블
 UNIQUE 제약 자체는 살아있으므로 예외로 드러난다)로 바뀌는 것까지 증명한다.
 """
+
 from __future__ import annotations
 
 import hashlib
@@ -90,7 +91,10 @@ async def _seed_order(pool: asyncpg.Pool) -> tuple[str, str]:
             ) VALUES ($1,$2,$3,'oms-gate-test','1.0.0','BTC/USDT','bitget','BUY',
                       'MARKET',$4,'SUBMITTED',0,false,'CRYPTO')
             """,
-            user_id, client_order_id, exchange_order_id, Decimal("1"),
+            user_id,
+            client_order_id,
+            exchange_order_id,
+            Decimal("1"),
         )
     return client_order_id, exchange_order_id
 
@@ -99,16 +103,32 @@ def _full_fill_event(*, client_order_id: str, exchange_order_id: str) -> Provide
     fill_id = f"gate-fill-{uuid4().hex}"
     now = datetime.now(timezone.utc)
     fill = FillEvent(
-        provider_fill_id=fill_id, venue="bitget", order_id=None,
-        exchange_order_id=exchange_order_id, symbol="BTC/USDT", side=OrderSide.BUY,
-        quantity=Decimal("1"), price=Decimal("100"), fee=Decimal("0"), fee_currency="USDT",
-        liquidity="TAKER", venue_ts=now,
+        provider_fill_id=fill_id,
+        venue="bitget",
+        order_id=None,
+        exchange_order_id=exchange_order_id,
+        symbol="BTC/USDT",
+        side=OrderSide.BUY,
+        quantity=Decimal("1"),
+        price=Decimal("100"),
+        fee=Decimal("0"),
+        fee_currency="USDT",
+        liquidity="TAKER",
+        venue_ts=now,
     )
     return ProviderOrderEvent(
-        provider_event_id=fill_id, venue="bitget", venue_symbol="BTCUSDT",
-        exchange_order_id=exchange_order_id, client_order_id=client_order_id,
-        venue_status="FILLED", filled_quantity=Decimal("1"), average_price=Decimal("100"),
-        last_fill=fill, venue_ts=now, received_at=now, source="WS",
+        provider_event_id=fill_id,
+        venue="bitget",
+        venue_symbol="BTCUSDT",
+        exchange_order_id=exchange_order_id,
+        client_order_id=client_order_id,
+        venue_status="FILLED",
+        filled_quantity=Decimal("1"),
+        average_price=Decimal("100"),
+        last_fill=fill,
+        venue_ts=now,
+        received_at=now,
+        source="WS",
         raw_hash=hashlib.sha256(fill_id.encode()).hexdigest(),
     )
 
@@ -124,11 +144,32 @@ async def test_sequential_redelivery_absorption_round_trips_and_throughput_budge
     assert await processor.ingest(ev) is True  # 승자 — 워밍업, 예산 밖
 
     queries = await _attach_round_trip_logger(pool)
-    queries.clear()
 
-    started = time.perf_counter()
-    results = [await processor.ingest(ev) for _ in range(_DUP_REDELIVERY_N)]
-    elapsed_sec = time.perf_counter() - started
+    # Warmup (not counted)
+    for _ in range(2):
+        await processor.ingest(ev)
+
+    # Measure with median of 3 samples, counting queries on the last run
+    samples = []
+    for sample_idx in range(3):
+        if sample_idx < 2:
+            # First two runs: measure timing only, don't count queries
+            started = time.perf_counter()
+            results = [await processor.ingest(ev) for _ in range(_DUP_REDELIVERY_N)]
+            elapsed_sec = time.perf_counter() - started
+            samples.append(elapsed_sec)
+            assert all(r is False for r in results)  # 전량 흡수 — F9
+        else:
+            # Final run: measure timing and count queries
+            queries.clear()
+            started = time.perf_counter()
+            results = [await processor.ingest(ev) for _ in range(_DUP_REDELIVERY_N)]
+            elapsed_sec = time.perf_counter() - started
+            samples.append(elapsed_sec)
+            assert all(r is False for r in results)  # 전량 흡수 — F9
+
+    samples.sort()
+    elapsed_sec = samples[len(samples) // 2]
 
     achieved_per_sec = _DUP_REDELIVERY_N / elapsed_sec if elapsed_sec > 0 else float("inf")
     expected_round_trips = _DUP_REDELIVERY_N * _DUP_ROUND_TRIPS_PER_CALL
@@ -137,7 +178,6 @@ async def test_sequential_redelivery_absorption_round_trips_and_throughput_budge
         f"흡수 = {achieved_per_sec:.1f} absorbed/s(비차단 — task-1038/1521 decision); "
         f"순차 DB 왕복 수={len(queries)}(예산=={expected_round_trips})"
     )
-    assert all(r is False for r in results)  # 전량 흡수 — F9
     assert len(queries) == expected_round_trips, (
         f"중복 흡수 경로 순차 DB 왕복 수({len(queries)})가 예산({expected_round_trips})과 "
         "다릅니다 — 흡수 경로가 더 이상 insert_if_absent 한 번에서 끝나지 않는다는 뜻이므로"
@@ -175,15 +215,24 @@ def test_pytest_gate_turns_red_when_inbox_dedup_guard_is_removed(tmp_path: Path)
     red가 되는 것까지 증명한다(gate/CI red-line regression proof,
     DEPTH_L4_BR task-1553 D2 미달 사유 해소)."""
     command = [
-        sys.executable, "-m", "pytest", "-q", "-p", "no:cacheprovider", _TARGET_TEST,
+        sys.executable,
+        "-m",
+        "pytest",
+        "-q",
+        "-p",
+        "no:cacheprovider",
+        _TARGET_TEST,
     ]
     repo_root = str(Path.cwd())
-    env = dict(
-        os.environ, PYTHONPATH=repo_root, PYTEST_ADDOPTS="", PYTHONIOENCODING="utf-8"
-    )
+    env = dict(os.environ, PYTHONPATH=repo_root, PYTEST_ADDOPTS="", PYTHONIOENCODING="utf-8")
     baseline = subprocess.run(
-        command, capture_output=True, encoding="utf-8", errors="replace",
-        env=env, timeout=120, check=False,
+        command,
+        capture_output=True,
+        encoding="utf-8",
+        errors="replace",
+        env=env,
+        timeout=120,
+        check=False,
     )
     assert baseline.returncode == 0, baseline.stdout + baseline.stderr
     assert "1 passed" in baseline.stdout
@@ -194,8 +243,12 @@ def test_pytest_gate_turns_red_when_inbox_dedup_guard_is_removed(tmp_path: Path)
 
     mutated = subprocess.run(
         [*command[:-1], "-p", _MUTATED_MODULE_NAME, command[-1]],
-        capture_output=True, encoding="utf-8", errors="replace",
-        env=mutated_env, timeout=120, check=False,
+        capture_output=True,
+        encoding="utf-8",
+        errors="replace",
+        env=mutated_env,
+        timeout=120,
+        check=False,
     )
     assert mutated.returncode != 0, mutated.stdout + mutated.stderr
     assert "1 passed" not in mutated.stdout

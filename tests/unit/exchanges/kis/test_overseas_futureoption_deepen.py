@@ -40,12 +40,27 @@ import pytest
 from src.core.exceptions import RetryableExchangeError
 from src.data.models.base import AssetClass
 from src.data.models.trading import Order, OrderSide, OrderType
+from src.exchanges.kis import rate_profile
 from src.exchanges.kis.adapter import PAPER_BASE_URL, KISAdapter
 
 _QUOTE_FUTURES_PATH = "/uapi/overseas-futureoption/v1/quotations/inquire-price"
 _ORDER_PATH = "/uapi/overseas-futureoption/v1/trading/order"
 _BALANCE_PATH = "/uapi/overseas-futureoption/v1/trading/inquire-unpd"
 _TOKEN_PATH = "/oauth2/tokenP"
+
+
+@pytest.fixture(autouse=True)
+def _reset_bucket_registry() -> None:
+    """The (account_type, tr_group) `TokenBucket` in `rate_profile.py` is a
+    process-wide singleton (BR-2b) — whichever test creates it first locks in
+    its `sleep` callable for every later test sharing the key. Reset before/
+    after each test so this file's adapters always get a freshly built
+    bucket, instead of possibly inheriting a real-`asyncio.sleep` bucket from
+    test order and turning `test_balance_parsing_throughput_bounded_vs_overseas_stock_baseline`'s
+    100 PAPER-throttled (2 req/s) calls into a multi-minute real wait."""
+    rate_profile.reset_token_bucket_registry_for_test()
+    yield
+    rate_profile.reset_token_bucket_registry_for_test()
 
 _FAR_FUTURE_EXPIRY = date(2099, 12, 1)
 
@@ -208,7 +223,7 @@ def _make_futureoption_balance_adapter() -> KISAdapter:
             return _ok_token(request)
         return httpx.Response(200, json=_futureoption_balance_payload())
 
-    return _make_adapter(handler)
+    return _make_adapter(handler, sleep_fn=_no_delay)
 
 
 def _make_stock_balance_adapter() -> KISAdapter:
@@ -217,7 +232,7 @@ def _make_stock_balance_adapter() -> KISAdapter:
             return _ok_token(request)
         return httpx.Response(200, json=_stock_balance_payload())
 
-    return _make_adapter(handler)
+    return _make_adapter(handler, sleep_fn=_no_delay)
 
 
 async def _min_elapsed_seconds(fn: Callable[[], Awaitable[None]], repeats: int = 5) -> float:

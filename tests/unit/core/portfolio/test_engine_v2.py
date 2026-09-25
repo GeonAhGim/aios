@@ -147,18 +147,18 @@ class TestFD82Regression:
         assert decision.approved_quantity == Decimal("10")
 
     def test_buy_with_position_raises(self) -> None:
-        """BUY + 이미 포지션 → PortfolioEngineError."""
+        """BUY + already holding position → PortfolioEngineError."""
         engine = PortfolioEngine()
-        with pytest.raises(PortfolioEngineError, match="이미 보유"):
+        with pytest.raises(PortfolioEngineError, match="already holding"):
             engine.allocate(
                 _signal(direction=OrderSide.BUY),
                 _state(position_quantity=Decimal("5"), current_price=Decimal("50000")),
             )
 
     def test_sell_without_position_raises(self) -> None:
-        """SELL + 포지션 없음 → PortfolioEngineError."""
+        """SELL + no position held → PortfolioEngineError."""
         engine = PortfolioEngine()
-        with pytest.raises(PortfolioEngineError, match="포지션이 없는"):
+        with pytest.raises(PortfolioEngineError, match="no position"):
             engine.allocate(
                 _signal(direction=OrderSide.SELL),
                 _state(position_quantity=Decimal("0"), current_price=Decimal("50000")),
@@ -251,6 +251,7 @@ def test_failure_injection_corrupted_total_equity_lookup_propagates_fail_closed(
 # --- 성능 단언 (1) ----------------------------------------------------------
 
 
+@pytest.mark.perf
 def test_performance_allocate_p99_latency_within_pretrade_gate_budget() -> None:
     """ADR-2026-09-09-C Decision 1 예산: 사전거래 게이트 p99 5ms."""
     engine = PortfolioEngine()

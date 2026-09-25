@@ -109,6 +109,7 @@ def test_dedupe_propagates_equality_fault_without_misclassifying() -> None:
         dedupe(faulty_candles)
 
 
+@pytest.mark.perf
 def test_dedupe_handles_large_batch_within_latency_budget() -> None:
     """수치 성능 단언: 20,000개 고유 캔들 + 중복 그룹 하나가 O(n) 유지 하에
     3초 예산 안에 끝난다."""

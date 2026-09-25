@@ -250,6 +250,7 @@ _RAW_SYMBOLS = [f"SYM{i}USDT" for i in range(_N_SYMBOLS)]
 _CANONICAL_SYMBOLS = [f"SYM{i}/USDT" for i in range(_N_SYMBOLS)]
 
 
+@pytest.mark.perf
 def test_bitget_symbol_conversion_throughput_bounded_vs_trivial_baseline() -> None:
     """symbols.py는 I/O 없는 순수 함수라 처리량 회귀는 벤치마크로만 드러난다.
     공유 CI 환경에서 절대 ms 임계는 상시 적색을 낳으므로(선례:

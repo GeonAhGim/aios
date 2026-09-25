@@ -1,18 +1,19 @@
-"""L01 — TA-Lib 161종 카탈로그: 자동 생성 + 11개 수기 오버라이드.
+"""L01 — TA-Lib 161-category catalog: auto-generated + 11 manual overrides.
 
 Spec: L4_strategy_portfolio_backtest_v1_0.md §2.2 L01,
 L4_analytics_authoring_backtest_marketplace_v1_0.md §9.9 IND-10, §9.11 IND-15.
 
-`TALIB_SPECS`는 `generate_talib_specs()`(161종 자동 생성) 위에
-`_MANUAL_OVERRIDES`(11개 — SMA/EMA/RSI/ATR/CCI/WILLR/MFI/MACD/BBANDS/STOCH/OBV)를
-덮어쓴 것. 오버라이드는 스케일·정밀도·히스토그램 부호 색상 등 표시 세부만 보정.
+{TALIB_SPECS} overlays on top of `generate_talib_specs()` (161 auto-generated types),
+with `_MANUAL_OVERRIDES` (11 — SMA/EMA/RSI/ATR/CCI/WILLR/MFI/MACD/BBANDS/STOCH/OBV)
+applied on top. Overrides only adjust display details such as scale, precision,
+and histogram sign color.
 """
 from __future__ import annotations
 
 from src.core.indicators.generate_specs import TALIB_GROUPS as TALIB_GROUPS
+from src.core.indicators.generate_specs import OutputStyle, generate_talib_specs
 from src.core.indicators.generate_specs import _plot_kind as _plot_kind
 from src.core.indicators.generate_specs import _plots_from_talib as _plots_from_talib
-from src.core.indicators.generate_specs import generate_talib_specs
 from src.core.indicators.spec import IndicatorSpec, ParamSpec
 
 __all__ = ["TALIB_GROUPS", "TALIB_SPECS"]
@@ -31,7 +32,7 @@ def _ma_lookback(p: dict[str, int]) -> int:
 
 
 def _acc_lookback(p: dict[str, int]) -> int:
-    """RSI/ATR/MFI — Wilder 평활화: timeperiod."""
+    """RSI/ATR/MFI — Wilder smoothing: timeperiod."""
     return p["timeperiod"]
 
 
@@ -47,77 +48,78 @@ def _obv_lookback(_p: dict[str, int]) -> int:
     return 0
 
 
-# scale/페인/색상/정밀도/범례는 output_flags에 없어 지표별로 수기 채움.
-_OV: dict[str, object] = {"scale": "overlay", "default_pane": "price"}
-_OSC: dict[str, object] = {"scale": "own", "default_pane": "separate", "precision": 2}
-_OS: dict[str, object] = {"scale": "own", "default_pane": "separate"}
+# scale/pane/color/precision/legend must be filled per-indicator;
+# output_flags lacks these fields.
+_OV: OutputStyle = {"scale": "overlay", "default_pane": "price"}
+_OSC: OutputStyle = {"scale": "own", "default_pane": "separate", "precision": 2}
+_OS: OutputStyle = {"scale": "own", "default_pane": "separate"}
 
 _MANUAL_OVERRIDES: dict[str, IndicatorSpec] = {
     "SMA": IndicatorSpec(
-        "SMA", ("close",), (_period("timeperiod", 20),),
-        ("value",), _ma_lookback,
-        _plots_from_talib("SMA", ("value",), {"value": _OV}),
+        name="SMA", inputs=("close",), params=(_period("timeperiod", 20),),
+        outputs=("value",), lookback=_ma_lookback,
+        plots=_plots_from_talib("SMA", ("value",), {"value": _OV}),
     ),
     "EMA": IndicatorSpec(
-        "EMA", ("close",), (_period("timeperiod", 20),),
-        ("value",), _ma_lookback,
-        _plots_from_talib("EMA", ("value",), {"value": _OV}),
+        name="EMA", inputs=("close",), params=(_period("timeperiod", 20),),
+        outputs=("value",), lookback=_ma_lookback,
+        plots=_plots_from_talib("EMA", ("value",), {"value": _OV}),
     ),
     "RSI": IndicatorSpec(
-        "RSI", ("close",), (_period("timeperiod", 14),),
-        ("value",), _acc_lookback,
-        _plots_from_talib("RSI", ("value",), {"value": _OSC}),
+        name="RSI", inputs=("close",), params=(_period("timeperiod", 14),),
+        outputs=("value",), lookback=_acc_lookback,
+        plots=_plots_from_talib("RSI", ("value",), {"value": _OSC}),
     ),
     "ATR": IndicatorSpec(
-        "ATR", ("high", "low", "close"), (_period("timeperiod", 14),),
-        ("value",), _acc_lookback,
-        _plots_from_talib("ATR", ("value",), {"value": {**_OS, "precision": 4}}),
+        name="ATR", inputs=("high", "low", "close"), params=(_period("timeperiod", 14),),
+        outputs=("value",), lookback=_acc_lookback,
+        plots=_plots_from_talib("ATR", ("value",), {"value": {**_OS, "precision": 4}}),
     ),
     "CCI": IndicatorSpec(
-        "CCI", ("high", "low", "close"), (_period("timeperiod", 14),),
-        ("value",), _ma_lookback,
-        _plots_from_talib("CCI", ("value",), {"value": _OSC}),
+        name="CCI", inputs=("high", "low", "close"), params=(_period("timeperiod", 14),),
+        outputs=("value",), lookback=_ma_lookback,
+        plots=_plots_from_talib("CCI", ("value",), {"value": _OSC}),
     ),
     "WILLR": IndicatorSpec(
-        "WILLR", ("high", "low", "close"), (_period("timeperiod", 14),),
-        ("value",), _ma_lookback,
-        _plots_from_talib("WILLR", ("value",), {"value": _OSC}),
+        name="WILLR", inputs=("high", "low", "close"), params=(_period("timeperiod", 14),),
+        outputs=("value",), lookback=_ma_lookback,
+        plots=_plots_from_talib("WILLR", ("value",), {"value": _OSC}),
     ),
     "MFI": IndicatorSpec(
-        "MFI", ("high", "low", "close", "volume"),
-        (_period("timeperiod", 14),), ("value",),
-        _acc_lookback,
-        _plots_from_talib("MFI", ("value",), {"value": _OSC}),
+        name="MFI", inputs=("high", "low", "close", "volume"),
+        params=(_period("timeperiod", 14),), outputs=("value",),
+        lookback=_acc_lookback,
+        plots=_plots_from_talib("MFI", ("value",), {"value": _OSC}),
     ),
     "MACD": IndicatorSpec(
-        "MACD", ("close",),
-        (_period("fastperiod", 12), _period("slowperiod", 26),
-         _period("signalperiod", 9)),
-        ("macd", "signal", "hist"), _macd_lookback,
-        _plots_from_talib("MACD", ("macd", "signal", "hist"),
-                          {"macd": _OS, "signal": _OS,
-                           "hist": {**_OS, "color_rule": "sign"}}),
+        name="MACD", inputs=("close",),
+        params=(_period("fastperiod", 12), _period("slowperiod", 26),
+                 _period("signalperiod", 9)),
+        outputs=("macd", "signal", "hist"), lookback=_macd_lookback,
+        plots=_plots_from_talib("MACD", ("macd", "signal", "hist"),
+                                 {"macd": _OS, "signal": _OS,
+                                  "hist": {**_OS, "color_rule": "sign"}}),
     ),
     "BBANDS": IndicatorSpec(
-        "BBANDS", ("close",), (_period("timeperiod", 5),),
-        ("upperband", "middleband", "lowerband"),
-        _ma_lookback,
-        _plots_from_talib("BBANDS", ("upperband", "middleband", "lowerband"),
-                          {"upperband": _OV, "middleband": _OV,
-                           "lowerband": _OV}),
+        name="BBANDS", inputs=("close",), params=(_period("timeperiod", 5),),
+        outputs=("upperband", "middleband", "lowerband"),
+        lookback=_ma_lookback,
+        plots=_plots_from_talib("BBANDS", ("upperband", "middleband", "lowerband"),
+                                 {"upperband": _OV, "middleband": _OV,
+                                  "lowerband": _OV}),
     ),
     "STOCH": IndicatorSpec(
-        "STOCH", ("high", "low", "close"),
-        (_period("fastk_period", 5), _period("slowk_period", 3),
-         _period("slowd_period", 3)),
-        ("slowk", "slowd"), _stoch_lookback,
-        _plots_from_talib("STOCH", ("slowk", "slowd"),
-                          {"slowk": _OSC, "slowd": _OSC}),
+        name="STOCH", inputs=("high", "low", "close"),
+        params=(_period("fastk_period", 5), _period("slowk_period", 3),
+                 _period("slowd_period", 3)),
+        outputs=("slowk", "slowd"), lookback=_stoch_lookback,
+        plots=_plots_from_talib("STOCH", ("slowk", "slowd"),
+                                 {"slowk": _OSC, "slowd": _OSC}),
     ),
     "OBV": IndicatorSpec(
-        "OBV", ("close", "volume"), (), ("value",),
-        _obv_lookback,
-        _plots_from_talib("OBV", ("value",), {"value": _OS}),
+        name="OBV", inputs=("close", "volume"), params=(), outputs=("value",),
+        lookback=_obv_lookback,
+        plots=_plots_from_talib("OBV", ("value",), {"value": _OS}),
     ),
 }
 

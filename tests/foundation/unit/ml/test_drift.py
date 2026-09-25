@@ -107,6 +107,7 @@ def _p95(samples: list[float]) -> float:
     return samples[min(int(len(samples) * 0.95), len(samples) - 1)]
 
 
+@pytest.mark.perf
 def test_evaluate_drift_p95_latency_within_budget() -> None:
     baseline = _stable_sample()
     current = _stable_sample()
@@ -124,6 +125,7 @@ def test_evaluate_drift_p95_latency_within_budget() -> None:
 # --- gate-red reproduction ---
 
 
+@pytest.mark.perf
 def test_gate_red_absurdly_low_budget_actually_fails() -> None:
     """Proves the perf assertion above is not a tautology -- an absurdly
     low budget against the same kind of samples must fail."""

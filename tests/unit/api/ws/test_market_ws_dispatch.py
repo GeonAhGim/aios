@@ -74,6 +74,7 @@ def _subject(feed: FeedRequest) -> EntitlementSubject:
     return EntitlementSubject(tenant_id=_TENANT, subject_id=_SUBJECT, grants=(grant,))
 
 
+@pytest.mark.perf
 async def test_load_500_subscribers_p95_latency_within_500ms() -> None:
     fanout = RealtimeFanout(metrics=NullMetrics())
     feed = _feed()

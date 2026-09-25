@@ -1,6 +1,6 @@
-"""74번 §7 rollout gate 1단계 "fake provider" — 실 provider 통합은 이 리프의
-스콥이 아니다(71번 §6, 74번 §7 "This specification does not authorize trading
-integration"). 테스트와, 실 provider가 승인되기 전까지의 유일한 어댑터.
+"""74th §7 rollout gate step 1 "fake provider" — real provider integration is out of scope for
+this leaf (task-71 §6, task-74 §7 "This specification does not authorize trading
+integration"). Test-only adapter; the only adapter until the real provider is approved.
 """
 from __future__ import annotations
 
@@ -17,8 +17,8 @@ from src.foundation.connections.ports.provider import OpaqueRef, SecretLease
 
 
 class FakeReadonlyAccountProvider:
-    """`granted_scopes`를 생성 시점에 고정해 scope drift(CON-002 계열) 테스트를
-    결정적으로 만든다 — 기본값은 요청 스코프를 그대로 승인하는 정상 경로."""
+    """Fix `granted_scopes` at construction time to make scope drift (CON-002 series) tests
+    deterministic — default is the happy path that approves all requested scopes."""
 
     def __init__(
         self,

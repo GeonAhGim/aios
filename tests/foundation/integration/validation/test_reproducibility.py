@@ -342,6 +342,7 @@ async def test_result_hash_reproducible_across_fail_outcome_too(
 # ---- 성능 단언 ----
 
 
+@pytest.mark.perf
 async def test_validation_run_stays_within_backtest_budget(pool, validation_repo, strategy_service):
     """ADR-2026-09-09-C Decision 1 -- 백테스트 1개월 M1 1심볼 3초 예산.
     start_validation()이 내부에서 그 백테스트 엔진을 호출하므로 같은
@@ -365,6 +366,7 @@ async def test_validation_run_stays_within_backtest_budget(pool, validation_repo
 # ---- 게이트 적색 재현 ----
 
 
+@pytest.mark.perf
 async def test_budget_gate_actually_fails_when_result_hash_computation_stalls(
     pool, validation_repo, strategy_service
 ):

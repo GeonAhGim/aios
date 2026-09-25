@@ -30,7 +30,6 @@ docs/audit/DEPTH_DC_RD.md#1154) D1/D0 -> D3 증빙.
 
 from __future__ import annotations
 
-import time
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
@@ -52,6 +51,7 @@ from src.foundation.market_data.domain.candle_columns import (
     MismatchedColumnLengthError,
 )
 from src.foundation.market_data.domain.timeframe import UnknownTimeframeError
+from tests.conftest import PerfBudget
 
 UTC = timezone.utc
 
@@ -123,24 +123,22 @@ def test_session_containing_rejects_open_outside_every_window() -> None:
 
 
 @pytest.mark.perf
-def test_rollup_large_input_meets_latency_budget() -> None:
+def test_rollup_large_input_meets_latency_budget(perf_budget: PerfBudget) -> None:
     """30일치 continuous venue M1(43,200행)을 H1로 롤업해도 절대시간
     예산 내에 있어야 한다 -- 두-포인터 집계가 선형 이상으로 퇴화하는
     회귀를 잡는다."""
     n = 30 * 24 * 60  # 43,200
-    budget_sec = 5.0  # 실측 로컬 <1.5s
+    budget_ms = 5000.0  # 실측 로컬 <1500ms
     columns = _m1_columns(_minutes_rows(n))
     calendar = _bitget_calendar()
 
-    start = time.perf_counter()
-    result = rollup(columns, Timeframe.H1, calendar)
-    elapsed = time.perf_counter() - start
+    def _rollup() -> object:
+        result = rollup(columns, Timeframe.H1, calendar)
+        assert len(result.columns) == 30 * 24
+        return result
 
-    print(f"[DC-10 rollup] M1 x{n} -> H1 in {elapsed:.3f}s (budget<{budget_sec}s)")
-    assert len(result.columns) == 30 * 24
-    assert elapsed < budget_sec, (
-        f"M1 {n}행 -> H1 롤업이 예산({budget_sec}s)을 넘었습니다({elapsed:.3f}s)."
-    )
+    sample = perf_budget.assert_within(_rollup, budget_ms=budget_ms, label="[DC-10 rollup]")
+    print(f"[DC-10 rollup] M1 x{n} -> H1 in {perf_budget.describe(sample, budget_ms=budget_ms)}")
 
 
 # ---- 게이트 적색 재현 — 적법/불법 호출을 섞어 재생해도 서로 오염시키지 않는다 ----

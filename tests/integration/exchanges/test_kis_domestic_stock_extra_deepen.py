@@ -37,7 +37,22 @@ import httpx
 import pytest
 
 from src.core.exceptions import FatalExchangeError, RetryableExchangeError
+from src.exchanges.kis import rate_profile
 from src.exchanges.kis.adapter import KISAdapter
+
+
+@pytest.fixture(autouse=True)
+def _reset_bucket_registry() -> None:
+    """`rate_profile.py`'s (account_type, tr_group) `TokenBucket` is a
+    process-wide singleton (BR-2b) — whichever test creates it first locks in
+    its `sleep` callable for every later test sharing the key. Reset before/
+    after each test so this file's adapters always get a freshly built
+    bucket wired to their own injected fake sleep, instead of possibly
+    inheriting a real-`asyncio.sleep` bucket from test order."""
+    rate_profile.reset_token_bucket_registry_for_test()
+    yield
+    rate_profile.reset_token_bucket_registry_for_test()
+
 
 _TOKEN_PATH = "/oauth2/tokenP"
 _CREDIT_RANKING_PATH = "/uapi/domestic-stock/v1/ranking/credit-balance"
@@ -153,6 +168,7 @@ async def test_dividend_disclosures_token_fetch_failure_raises_fatal() -> None:
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.perf
 async def test_credit_balance_ranking_overhead_bounded_vs_raw_request_baseline() -> None:
     """`get_credit_balance_ranking`이 원시 `_request` 왕복 하나만 하고
     `_as_rows`/`_require`로 두 output을 정규화하는 것 말고는 추가 HTTP

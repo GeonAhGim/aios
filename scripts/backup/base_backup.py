@@ -54,19 +54,30 @@ def pg_conn_args(url: str) -> list[str]:
 
 
 def _run(cmd: list[str], env: dict | None, timeout: int) -> tuple[int, str]:
+    """CTO 2026-09-23: PIPE 대신 임시 파일로 stdout/stderr를 받는다. pg_basebackup -Xs·pg_ctl은
+    자식(WAL 수신기/서버)이 파이프 핸들을 상속해 부모가 끝나도 communicate()가 EOF를 못 받아
+    Windows에서 무기한 멈춘다(task-5350의 pg_ctl 데드락과 같은 부류 — 직접 실행 82초 vs
+    파이프 캡처 1시간 타임아웃 재현). 파일이면 상속돼도 EOF 대기가 없다."""
+    import tempfile
+
     try:
-        r = subprocess.run(
-            cmd,
-            env=env,
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
-            timeout=timeout,
-        )
-        return r.returncode, (r.stdout + r.stderr)[-4000:]
-    except subprocess.TimeoutExpired:
-        return 124, f"timeout {timeout}s"
+        with tempfile.TemporaryFile(mode="w+b") as out:
+            try:
+                r = subprocess.run(
+                    cmd,
+                    env=env,
+                    stdout=out,
+                    stderr=subprocess.STDOUT,
+                    timeout=timeout,
+                    check=False,
+                )
+            except subprocess.TimeoutExpired:
+                return 124, f"timeout {timeout}s"
+            out.seek(0)
+            text = out.read().decode("utf-8", errors="replace")
+        return r.returncode, text[-4000:]
+    except OSError as exc:
+        return 1, f"{type(exc).__name__}: {exc}"
 
 
 def run_base_backup(
@@ -100,6 +111,9 @@ def run_base_backup(
         "-l",
         backup_label,
         "--wal-method=stream",
+        # CTO 2026-09-23: 기본(spread) 체크포인트는 수십 분 대기 중 시작 WAL이 재활용돼
+        # "WAL 세그먼트 이미 제거됨"으로 실패했다(드릴 17:01/18:00 재현) — fast로 즉시 시작.
+        "--checkpoint=fast",
         "-C",
         "-S",
         "aios_drill",

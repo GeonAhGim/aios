@@ -27,7 +27,7 @@ from __future__ import annotations
 
 import time
 from concurrent.futures import ThreadPoolExecutor
-from typing import Any
+from typing import Any, cast
 
 import pytest
 
@@ -108,7 +108,7 @@ def test_transition_never_returns_unhashable_lookup_crash() -> None:
     `LifecycleTransitionError`로 통일해 호출자가 예외 타입을 하나만 알면
     되게 한다 — 내부 구현(dict)이 새는 것을 막는 방어."""
     with pytest.raises(LifecycleTransitionError):
-        transition([InstrumentLifecycle.ACTIVE], "listed")  # type: ignore[arg-type]
+        transition(cast(Any, [InstrumentLifecycle.ACTIVE]), cast(Any, "listed"))
 
 
 # ---- 성능 단언(D2) ----

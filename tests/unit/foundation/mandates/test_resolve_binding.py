@@ -192,6 +192,7 @@ async def test_closed_pool_raises_instead_of_returning_none() -> None:
         await resolve_mandate_revision(dedicated, uuid4())
 
 
+@pytest.mark.perf
 async def test_resolve_latency_is_bounded(pool, repo) -> None:
     """성능 단언 -- 단일 조회는 인덱스된 FK 조인 하나뿐이라 로컬 Postgres에서
     수백 ms를 넘으면 회귀(예: 실수로 N+1 조회나 테이블 스캔이 섞였다는

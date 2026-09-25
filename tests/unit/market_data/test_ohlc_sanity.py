@@ -130,6 +130,7 @@ def test_duration_lookup_fault_propagates_without_swallowing(
         check_candle(_candle())
 
 
+@pytest.mark.perf
 def test_check_candle_handles_large_batch_within_latency_budget() -> None:
     """수치 성능 단언: 50,000개 캔들 검사가 O(n) 유지 하에 3초 예산 안에 끝난다."""
     candles = [
@@ -292,6 +293,7 @@ def test_multiple_invalid_prices_report_all_non_finite_fields() -> None:
 # ── 추가 성능 단언 ──
 
 
+@pytest.mark.perf
 def test_check_candle_batch_p95_within_budget() -> None:
     """수치 성능 단언: 100,000개 캔들(위반 케이스 혼합) 검사가 p95 < 100ms."""
     valid = _candle()

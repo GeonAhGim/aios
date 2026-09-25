@@ -18,18 +18,47 @@ other users`). 이 모듈은 그 경우 예외를 그대로 전파한다 — 조
 복제된다(`ensure_worker_database` 참고) — 이전 실행이 죽으며 남긴 오염이 다음
 실행으로 넘어가지 않는다.
 """
+
 from __future__ import annotations
 
 import asyncio
+import random
 import re
+from collections.abc import AsyncGenerator
+from typing import Any
 from urllib.parse import urlsplit, urlunsplit
 
 import asyncpg
 import pytest
 
+__all__ = [
+    "session_database_url",
+    "ensure_worker_database",
+    "create_pool_with_retry",
+    "tx_conn",
+    "_db_name",
+    "_with_database",
+    "_asyncpg_dsn",
+    "asyncpg",
+]
+
 _NAME_RE = re.compile(r"^[a-z0-9_]{1,40}$")
 _CLONE_ATTEMPTS = 5
 _CLONE_RETRY_BASE_DELAY = 0.5
+
+# esc-ci-pytest.json (task-6235): local Windows CI intermittently resets the TCP
+# socket to Postgres mid-connect (WinError 64 / asyncpg ConnectionDoesNotExistError,
+# "connection was closed in the middle of operation") while a fixture opens a plain
+# asyncpg.create_pool against the shared worker DB -- a transient OS-level reset, not
+# a code regression (task-6212 confirmed the deterministic template_db-termination bug
+# task-6176/9d8b281c already fixed was not the cause here; bisect kept landing on
+# unrelated commits because the flake can surface on whichever run happens to race
+# it). scripts/replay_verify.py hit the identical error shape twice
+# (c6acdac8/task-6177, eb114fb0/task-6213) and fixed it with bounded retry-with-backoff
+# on the initial connect; this mirrors that pattern for test fixtures instead of
+# widening a budget or adding an ignore (DECISION_GUIDELINES B-2).
+_POOL_CONNECT_ATTEMPTS = 5
+_POOL_CONNECT_RETRY_BASE_DELAY = 0.5
 
 
 def _db_name(url: str) -> str:
@@ -80,23 +109,47 @@ async def ensure_worker_database(template_url: str, worker_id: str) -> str:
     template_db = _db_name(template_url)
     admin = await asyncpg.connect(_asyncpg_dsn(_with_database(template_url, "postgres")))
     try:
-        last_exc: asyncpg.exceptions.ObjectInUseError | None = None
+        last_exc: (
+            asyncpg.exceptions.ObjectInUseError | asyncpg.exceptions.UniqueViolationError | None
+        ) = None
         for attempt in range(_CLONE_ATTEMPTS):
-            # 템플릿·워커 DB 양쪽 다 살아있는 커넥션이 0개여야
-            # `CREATE DATABASE ... TEMPLATE`가 통과한다. 크래시로 죽은 이전
-            # 프로세스가 남긴 idle 커넥션이 있을 수 있으므로 매 시도 앞에서
-            # 종료를 재요청한다(pg_terminate_backend는 비동기 SIGTERM이라
-            # 즉시 반영되지 않을 수 있어 지수 백오프로 재시도).
+            # 워커 DB(target_db)는 이 프로세스가 배타적으로 소유하므로, 크래시로
+            # 죽은 이전 프로세스가 남긴 idle 커넥션을 강제 종료해도 안전하다
+            # (pg_terminate_backend는 비동기 SIGTERM이라 즉시 반영되지 않을 수
+            # 있어 지수 백오프로 재시도). template_db는 절대 여기서 건드리지
+            # 않는다 — template_db는 이 세션 전체(다른 테스트의 살아있는
+            # 커넥션 포함)가 공유하는 `TEST_DATABASE_URL` 그 자체일 수 있고,
+            # 거기 강제 종료를 걸면 마침 쿼리 중이던 다른 테스트가
+            # `asyncpg.exceptions.ConnectionDoesNotExistError`로 깨진다
+            # (esc-ci-pytest.json, task-6176 — task-6005가 실 DB로
+            # `ensure_worker_database`를 직접 호출하며 처음 노출됐다). template_db에
+            # 살아있는 커넥션이 남아 있으면 CREATE DATABASE ... TEMPLATE가
+            # ObjectInUseError로 거부되고, 아래에서 그대로 전파한다(모듈
+            # docstring의 "조용히 폴백하지 않는다" 계약과 일치).
+            #
+            # task-7375(esc-ci-pytest_perf): 같은 worker_id(예: "gw0")를 쓰는 두
+            # 프로세스(로컬 CI의 `pytest_perf`/`pytest` 단계가 겹쳐 돌 때 등)가 이
+            # 루프에 동시에 들어오면, 한쪽의 DROP 이후 다른 쪽의 DROP은 이미 없는
+            # 이름이라 조용히 지나가고, 두 CREATE DATABASE가 거의 동시에 실행돼
+            # 먼저 커밋된 쪽만 성공하고 나머지는 `ObjectInUseError`가 아니라
+            # `pg_database_datname_index`(이름 UNIQUE 인덱스) 위반인
+            # `UniqueViolationError`로 거부된다(관측: `conftest.py` 임포트 단계에서
+            # 그대로 전파돼 `pytest_perf` 전체가 ImportError로 적색). ObjectInUseError와
+            # 동일하게 재시도 대상에 포함한다 — DROP+CREATE 루프가 다음 회차에
+            # 승자의 DB를 그대로 재사용하거나 다시 만들어 준다.
             await admin.execute(
                 "SELECT pg_terminate_backend(pid) FROM pg_stat_activity "
-                "WHERE datname = ANY($1) AND pid <> pg_backend_pid()",
-                [template_db, target_db],
+                "WHERE datname = $1 AND pid <> pg_backend_pid()",
+                target_db,
             )
             await admin.execute(f'DROP DATABASE IF EXISTS "{target_db}"')
             try:
                 await admin.execute(f'CREATE DATABASE "{target_db}" TEMPLATE "{template_db}"')
                 break
-            except asyncpg.exceptions.ObjectInUseError as exc:
+            except (
+                asyncpg.exceptions.ObjectInUseError,
+                asyncpg.exceptions.UniqueViolationError,
+            ) as exc:
                 last_exc = exc
                 await asyncio.sleep(_CLONE_RETRY_BASE_DELAY * (attempt + 1))
         else:
@@ -107,8 +160,62 @@ async def ensure_worker_database(template_url: str, worker_id: str) -> str:
     return target_url
 
 
+def _pool_retry_delay(attempt: int) -> float:
+    return _POOL_CONNECT_RETRY_BASE_DELAY * (attempt + 1)
+
+
+# task-6687/esc-ci-coverage: the full-mode coverage step's `pytest --cov` run
+# hit the same ConnectionDoesNotExistError/ConnectionResetError shape 5a7b61c6
+# (task-6627) already root-caused for scripts/replay_verify.py --
+# tests/adversarial/risk/conftest.py's `pool` fixture calls this exact
+# function, and every worktree on the shared local Postgres computes the same
+# deterministic `_pool_retry_delay(attempt)` schedule, so concurrent
+# worktrees' retries converge on the same wall-clock instants and repeatedly
+# recreate the contention spike they are backing off from (thundering herd).
+# Per DECISION_GUIDELINES B-2 the retry budget/attempt cap is left untouched;
+# only the sleep is randomized (full jitter: uniform over
+# `[0, _pool_retry_delay(attempt)]`) to decorrelate concurrent processes,
+# mirroring replay_verify.py's `_sleep_before_retry`.
+async def _sleep_before_pool_retry(attempt: int) -> None:
+    await asyncio.sleep(random.uniform(0, _pool_retry_delay(attempt)))  # noqa: S311 -- retry jitter, not crypto
+
+
+async def create_pool_with_retry(dsn: str, **kwargs: Any) -> asyncpg.Pool:
+    """`asyncpg.create_pool` with retry on the initial connection only.
+
+    Fail-closed still applies: after `_POOL_CONNECT_ATTEMPTS` the original
+    exception propagates unchanged, it is never swallowed into a false green.
+
+    `asyncpg.create_pool(dsn, **kwargs)` returns a `Pool` object synchronously
+    (unconnected); connecting happens only once it is awaited
+    (`Pool.__await__` -> `_async__init__` -> `_initialize`). `_initialize`
+    connects the first holder directly, then -- when `min_size > 1` -- gathers
+    the rest concurrently. If a later holder's connect fails, `_initialize`
+    still marks `self._initialized = True` in its `finally` (see
+    asyncpg/pool.py `_async__init__`), so the already-open first holder is a
+    live Postgres connection with no one holding a reference to the `Pool` to
+    close it -- a leak on every failed attempt, previously discarded here
+    because the failed `await` expression's `Pool` was never bound to a name.
+    Retrying without terminating it compounds server-side connection pressure
+    across attempts, which is the opposite of what the retry is for. Binding
+    the `Pool` and calling the synchronous `terminate()` on failure closes
+    whatever holders did connect before raising/retrying.
+    """
+    for attempt in range(_POOL_CONNECT_ATTEMPTS):
+        pool = asyncpg.create_pool(dsn, **kwargs)
+        try:
+            await pool
+            return pool
+        except (OSError, asyncpg.exceptions.ConnectionDoesNotExistError):
+            pool.terminate()
+            if attempt + 1 >= _POOL_CONNECT_ATTEMPTS:
+                raise
+            await _sleep_before_pool_retry(attempt)
+    raise AssertionError("unreachable -- loop always returns or raises")
+
+
 @pytest.fixture
-async def tx_conn(pool):
+async def tx_conn(pool: Any) -> AsyncGenerator[Any, None]:
     """단일 커넥션 트랜잭션 픽스처 — 테스트 종료 시 항상 ROLLBACK.
 
     커넥션 풀 전체가 아니라 한 커넥션 안에서만 격리하면 되는 가벼운 테스트용

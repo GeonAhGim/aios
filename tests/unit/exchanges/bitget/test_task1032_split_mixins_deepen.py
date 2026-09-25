@@ -17,6 +17,7 @@ from __future__ import annotations
 import ast
 import asyncio
 import time
+from collections.abc import Callable
 from decimal import Decimal
 
 import httpx
@@ -35,7 +36,7 @@ async def _no_delay_sleep(_seconds: float) -> None:
     await asyncio.sleep(0)
 
 
-def _make_adapter(handler) -> BitgetAdapter:
+def _make_adapter(handler: Callable[[httpx.Request], httpx.Response]) -> BitgetAdapter:
     transport = httpx.MockTransport(handler)
     http_client = httpx.AsyncClient(base_url="https://api.bitget.com", transport=transport)
     return BitgetAdapter(
@@ -48,7 +49,7 @@ def _make_adapter(handler) -> BitgetAdapter:
     )
 
 
-def _envelope(code: str, data: object) -> dict:
+def _envelope(code: str, data: object) -> dict[str, object]:
     return {"code": code, "msg": "test", "requestTime": 1, "data": data}
 
 
@@ -71,19 +72,19 @@ def _order(quantity: Decimal = Decimal("0.01")) -> Order:
 # ---------------------------------------------------------------------------
 
 
-async def test_place_futures_order_rejects_zero_quantity():
+async def test_place_futures_order_rejects_zero_quantity() -> None:
     adapter = _make_adapter(lambda request: pytest.fail("가드가 막았어야 할 요청"))
     with pytest.raises(ValueError):
         await adapter.place_futures_order(_order(quantity=Decimal("0")))
 
 
-async def test_place_futures_order_rejects_negative_quantity():
+async def test_place_futures_order_rejects_negative_quantity() -> None:
     adapter = _make_adapter(lambda request: pytest.fail("가드가 막았어야 할 요청"))
     with pytest.raises(ValueError):
         await adapter.place_futures_order(_order(quantity=Decimal("-0.01")))
 
 
-async def test_get_ohlcv_rejects_unsupported_timeframe():
+async def test_get_ohlcv_rejects_unsupported_timeframe() -> None:
     """market_data_mixin.py::get_ohlcv — `_GRANULARITY_MAP`에 없는
     timeframe은 요청이 나가기 전에 거부돼야 한다(get_history_candles와
     동일 계약, KIS test_get_ohlcv_rejects_unsupported_timeframe와 동일
@@ -93,13 +94,13 @@ async def test_get_ohlcv_rejects_unsupported_timeframe():
         await adapter.get_ohlcv("BTC/USDT", "3m")
 
 
-async def test_get_history_candles_rejects_unsupported_timeframe():
+async def test_get_history_candles_rejects_unsupported_timeframe() -> None:
     adapter = _make_adapter(lambda request: pytest.fail("가드가 막았어야 할 요청"))
     with pytest.raises(ValueError):
         await adapter.get_history_candles("BTC/USDT", "2h")
 
 
-async def test_get_futures_order_raises_keyerror_on_response_missing_order_id():
+async def test_get_futures_order_raises_keyerror_on_response_missing_order_id() -> None:
     """fail-closed 계약 — `_row_to_futures_order`가 `data["orderId"]`를
     직접 인덱싱하므로, 거래소가 성공 코드와 함께 계약을 어긴(orderId
     누락) 바디를 주면 조용히 빈 값으로 넘어가지 않고 KeyError로 즉시
@@ -118,7 +119,7 @@ async def test_get_futures_order_raises_keyerror_on_response_missing_order_id():
 # ---------------------------------------------------------------------------
 
 
-async def test_place_futures_order_survives_infra_failures_then_succeeds():
+async def test_place_futures_order_survives_infra_failures_then_succeeds() -> None:
     """failure-injection — 이 주문 경로는 지금까지 어떤 테스트에서도 실제
     전송계층 실패(`httpx.ConnectError`)를 주입받은 적이 없었다(기존
     negative는 전부 로컬 검증뿐). `ResilientTransport`가 2회의 연결 실패를
@@ -146,7 +147,8 @@ async def test_place_futures_order_survives_infra_failures_then_succeeds():
 # ---------------------------------------------------------------------------
 
 
-async def test_get_futures_open_orders_parses_large_list_within_normalized_budget():
+@pytest.mark.perf
+async def test_get_futures_open_orders_parses_large_list_within_normalized_budget() -> None:
     """수치 성능 단언 — `[_row_to_futures_order(row) for row in ...]`은
     항목 수에 선형으로 늘어야 한다. 절대 ms 상수 대신 같은 프로세스에서
     잰 동일 크기 baseline 대비 정규화 배율을 쓴다(task-2807
@@ -217,7 +219,7 @@ _SPLIT_MIXIN_FUND_MOVING_METHODS = (
 )
 
 
-def test_gate_flags_split_mixin_methods_if_guard_decorator_is_dropped():
+def test_gate_flags_split_mixin_methods_if_guard_decorator_is_dropped() -> None:
     """게이트 적색 재현 — trading_mixin.py/futures_trading_mixin.py의 실제
     자금이동 메서드 이름들로 만든 합성 소스에서 데코레이터를 제거하면
     `test_live_guard_coverage.py`의 AST 스캐너가 전부 위반으로 잡아내는지
@@ -239,7 +241,7 @@ def test_gate_flags_split_mixin_methods_if_guard_decorator_is_dropped():
         )
 
 
-def test_gate_recognizes_guard_decorator_present_on_split_mixin_methods():
+def test_gate_recognizes_guard_decorator_present_on_split_mixin_methods() -> None:
     """대칭 검증 — 실제 데코레이터가 붙은 합성 소스는 스캐너가 위반으로
     오탐하지 않아야 한다."""
     src = "class X:\n" + "".join(
@@ -253,7 +255,7 @@ def test_gate_recognizes_guard_decorator_present_on_split_mixin_methods():
             assert _has_guard_decorator(node.decorator_list)
 
 
-def test_bitget_adapter_actually_declares_all_split_mixin_bases():
+def test_bitget_adapter_actually_declares_all_split_mixin_bases() -> None:
     """게이트 적색 재현 보강 — task-1032가 분할한 믹스인 중 하나라도
     `BitgetAdapter`의 MRO에서 빠지면(예: import 누락) 위 두 스캐너 테스트는
     소스 전체 스캔이 아니라 합성 소스만 보므로 못 잡는다. 실제 어댑터가

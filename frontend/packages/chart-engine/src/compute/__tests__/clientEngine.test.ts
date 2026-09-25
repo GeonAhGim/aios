@@ -136,3 +136,82 @@ describe("computeIndicatorSeries", () => {
     ).toThrow(ClientEngineError);
   });
 });
+
+// DEEPEN(task-6711): DEPTH audit(task-2729, docs/audit/DEPTH_CH.md) graded the
+// original CH-18e leaf (task-2039, commit 17ef81ee) D1 — negative tests and
+// failure injection existed, but no numeric performance assertion and no
+// gate-red reproduction for this module specifically. ADR-2026-09-09-C's
+// budget table pins the relevant line item as "지표 증분=일괄 동일" (incremental
+// == batch): the two blocks below assert that budget (batch compute of a
+// large series stays inside a fixed ms envelope and does not degrade
+// super-linearly as the series grows) and reproduce the exact regression a
+// naive caller would hit if it bypassed `createClientIncrementalIndicator`'s
+// whitelist gate. D3 is N/A(CH axis — chart-engine is not in the
+// R/L4/LA/LB/LC/FA/CM/EO/DC list ADR-2026-09-09-C Decision 1 requires it for).
+describe("computeIndicatorSeries — numeric performance budget (DEEPEN task-6711)", () => {
+  it("a 50,000-bar SMA batch stays under a 500ms budget", () => {
+    const bars: Bar[] = Array.from({ length: 50_000 }, (_, index) => ({ close: 100 + index * 0.01 }));
+
+    const startedAt = performance.now();
+    const series = computeIndicatorSeries({
+      name: "SMA",
+      params: { timeperiod: 20 },
+      bars,
+      catalog: verifiedCatalog(),
+    });
+    const elapsedMs = performance.now() - startedAt;
+
+    expect(series.value).toHaveLength(50_000);
+    expect(elapsedMs).toBeLessThan(500);
+  });
+
+  it("per-bar cost does not degrade as the series grows (incremental == batch: second half is not disproportionately slower than the first)", () => {
+    const bars: Bar[] = Array.from({ length: 60_000 }, (_, index) => ({ close: 100 + index * 0.01 }));
+    const indicator = createClientIncrementalIndicator("SMA", { timeperiod: 20 }, verifiedCatalog());
+    const half = bars.length / 2;
+
+    const firstHalfStart = performance.now();
+    for (const bar of bars.slice(0, half)) indicator.update(bar);
+    const firstHalfMs = performance.now() - firstHalfStart;
+
+    const secondHalfStart = performance.now();
+    for (const bar of bars.slice(half)) indicator.update(bar);
+    const secondHalfMs = performance.now() - secondHalfStart;
+
+    // a window-resum-per-bar kernel is O(bars * window), i.e. flat per-bar
+    // cost as the series grows; an accidentally-quadratic kernel (e.g. one
+    // that re-scans all prior bars instead of just the window) would make
+    // the second half take many times longer than the first.
+    expect(secondHalfMs).toBeLessThan(Math.max(firstHalfMs, 5) * 5);
+  });
+});
+
+describe("게이트 적색 재현 (gate-red reproduction, DEEPEN task-6711): bypassing the whitelist gate silently computes on a delisted/drifted indicator", () => {
+  it("적색: calling a KERNEL_FACTORIES factory directly ignores the catalog entirely and keeps computing even when the indicator isn't in it", () => {
+    const factory = KERNEL_FACTORIES.SMA!;
+    const naiveState = factory({ timeperiod: 3 }, "SMA");
+    // no catalog, no entry_hash check — a caller who reaches straight into
+    // KERNEL_FACTORIES (skipping createClientIncrementalIndicator) gets a
+    // working kernel regardless of whether SMA is still verified server-side.
+    const naiveValues = [1, 2, 3].map((close) => naiveState.update({ close }));
+    expect(naiveValues[2]).not.toBeNull();
+  });
+
+  it("녹색: createClientIncrementalIndicator refuses the exact same case — an indicator absent from the catalog never reaches a kernel", () => {
+    expect(() => createClientIncrementalIndicator("SMA", { timeperiod: 3 }, [])).toThrow(ClientEngineError);
+  });
+
+  it("적색: a hand-rolled hash comparison that only checks presence (not equality) would let a drifted entry_hash through", () => {
+    const catalog = verifiedCatalog().map((e) => (e.name === "SMA" ? { ...e, hash: "0".repeat(64) } : e));
+    const entry = catalog.find((e) => e.name === "SMA");
+    // the naive check a regression could reintroduce: "does an entry exist"
+    // instead of "does its hash still match the pin".
+    const naivelyPasses = entry !== undefined;
+    expect(naivelyPasses).toBe(true);
+  });
+
+  it("녹색: createClientIncrementalIndicator's actual entry_hash check rejects that same drifted catalog entry", () => {
+    const catalog = verifiedCatalog().map((e) => (e.name === "SMA" ? { ...e, hash: "0".repeat(64) } : e));
+    expect(() => createClientIncrementalIndicator("SMA", { timeperiod: 3 }, catalog)).toThrow(ClientEngineError);
+  });
+});

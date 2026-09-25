@@ -27,6 +27,13 @@ self.addEventListener("fetch", (event) => {
   if (request.method !== "GET") return;
 
   const url = new URL(request.url);
+  // 오프라인 셸은 앱 자체 오리진의 정적 자원만 대상으로 한다 — API 백엔드는
+  // 별도 오리진(VITE_API_BASE_URL, clientInstance.ts)이라 origin 검사 없이
+  // pathname만 보면 교차 오리진 API GET(예: /executions, /users/me — /v1/
+  // 접두사가 없는 레거시 라우트)까지 SW가 가로채 자신의 워커 컨텍스트에서
+  // 재요청하게 된다. 그 재요청은 페이지 쪽 네트워크 계층(Playwright
+  // page.route 포함)을 우회해 별도 실패 경로가 된다.
+  if (url.origin !== self.location.origin) return;
   if (url.pathname.startsWith("/v1/")) return;
 
   if (request.mode === "navigate") {

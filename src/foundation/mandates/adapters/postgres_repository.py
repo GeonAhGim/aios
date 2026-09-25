@@ -25,7 +25,7 @@ from uuid import UUID
 import asyncpg
 
 from src.core.db.conditional_write import ConcurrencyConflictError, conditional_update
-from src.foundation.entities.domain.defaults import default_portfolio_id
+from src.foundation.entities.api import default_portfolio_id
 from src.foundation.mandates.adapters.postgres_policy_repository import (
     PostgresPolicyRepositoryMixin,
 )

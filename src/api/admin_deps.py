@@ -63,7 +63,15 @@ def get_audit_log_read_service(pool: asyncpg.Pool = Depends(get_pool)) -> AuditL
 async def get_current_mfa_admin(
     admin: AuthenticatedUser = Depends(get_current_admin),
 ) -> AuthenticatedUser:
-    if admin.auth_level != "MFA_VERIFIED":
+    """task-3795 (REJECT) finding: checking `admin.auth_level == "MFA_VERIFIED"`
+    alone is not enough -- that claim is fixed into the JWT at login/refresh and
+    stays "MFA_VERIFIED" for the whole refresh-token life (up to 14 days,
+    `src/services/auth/tokens.py::REFRESH_TTL_DAYS`) even long after the TOTP
+    step-up window has passed. `admin.mfa_verified_at` is a DB column re-read on
+    every request by `get_current_user` (never stale like the JWT claim), so
+    checking its freshness against `break_glass.MFA_STEP_UP_WINDOW` (15 min) is
+    the actual re-verification this leaf's DoD requires."""
+    if not break_glass.mfa_step_up_fresh(admin.mfa_verified_at):
         raise AdminMfaRequiredError(
             f"user_id={admin.user_id}: 이 관리자 작업은 MFA 재확인이 필요합니다."
         )

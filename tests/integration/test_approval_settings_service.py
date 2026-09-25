@@ -1,5 +1,6 @@
 """11.4 통합테스트 — 실제 dev DB 대상."""
 from pathlib import Path
+from unittest.mock import AsyncMock
 
 import asyncpg
 import pytest
@@ -73,3 +74,52 @@ async def test_update_upserts_existing_row(service, pool):
     assert settings.mode == "SOLO"
     refetched = await service.get(user_id)
     assert refetched.mode == "SOLO"
+
+
+async def _set_risk_profile(pool: asyncpg.Pool, user_id, risk_profile: str) -> None:
+    async with pool.acquire() as conn:
+        await conn.execute(
+            "UPDATE users SET risk_profile = $1 WHERE user_id = $2", risk_profile, user_id
+        )
+
+
+async def test_update_rejects_mismatch_without_acknowledgement(service, pool):
+    """FD-15.3 훅 ③ — 안정형 사용자가 SOLO(공격형)로 바꾸면 미승인 시 거부된다."""
+    user_id = await create_test_user(pool)
+    await _set_risk_profile(pool, user_id, "안정형")
+
+    with pytest.raises(ApprovalSettingsError):
+        await service.update(user_id, mode="SOLO")
+
+
+async def test_update_accepts_mismatch_when_acknowledged(service, pool):
+    user_id = await create_test_user(pool)
+    await _set_risk_profile(pool, user_id, "안정형")
+
+    settings = await service.update(
+        user_id, mode="SOLO", risk_warning_acknowledged=True
+    )
+
+    assert settings.mode == "SOLO"
+    assert settings.risk_warning is not None
+
+
+async def test_update_no_warning_when_profile_matches(service, pool):
+    user_id = await create_test_user(pool)
+    await _set_risk_profile(pool, user_id, "공격형")
+
+    settings = await service.update(user_id, mode="SOLO")
+
+    assert settings.risk_warning is None
+
+
+async def test_update_propagates_pool_failure(service, pool, monkeypatch):
+    """실패주입 — DB 커넥션 획득이 예외를 던지면 그대로 전파돼야 한다(fail-closed)."""
+    user_id = await create_test_user(pool)
+
+    broken_pool = AsyncMock(spec=asyncpg.Pool)
+    broken_pool.acquire.side_effect = ConnectionError("db unavailable")
+    broken_service = ApprovalSettingsService(broken_pool)
+
+    with pytest.raises(ConnectionError):
+        await broken_service.update(user_id, mode="SOLO")

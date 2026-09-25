@@ -1,8 +1,8 @@
-"""SuspendMembership 커맨드.
+"""SuspendMembership command.
 
 Spec: docs/specs/L4_platform_observability_tenancy_api_v1.0.md#§4.1 Membership,
-§9 PLT-29. 세션 폐기 부작용은 PLT-24 `logout_all`(services/auth/logout.py)을
-그대로 호출한다 — `auth_session`을 직접 UPDATE하지 않는다.
+§9 PLT-29. Session invalidation side-effect delegates to PLT-24 `logout_all`
+(services/auth/logout.py) — never UPDATEs `auth_session` directly.
 """
 from __future__ import annotations
 
@@ -21,17 +21,17 @@ from src.services.auth.logout import logout_all
 
 
 class SuspendTargetNotFoundError(Exception):
-    """context.tenant_id에 subject_id의 ACTIVE 멤버십이 없다(다른 tenant 소유
-    포함 — 73번 §8.3 "404 동형"). 404 RESOURCE_NOT_FOUND."""
+    """No ACTIVE membership for subject_id under context.tenant_id (includes
+    ownership by another tenant — 73 §8.3 "404 isomorphism"). 404 RESOURCE_NOT_FOUND."""
 
 
 class SuspendAuthorizationError(Exception):
-    """73번 §4.1 전이표 — actor role이 ACTIVE->SUSPENDED 전이를 수행할 수 없다.
+    """73 §4.1 transition table — actor role is not authorised for ACTIVE->SUSPENDED.
     403 AUTHZ_FORBIDDEN."""
 
 
 class SuspendLastOwnerError(Exception):
-    """73번 I4 "tenant당 ACTIVE OWNER >= 1". 409 STATE_INVALID_TRANSITION."""
+    """73 I4 "ACTIVE OWNER >= 1 per tenant". 409 STATE_INVALID_TRANSITION."""
 
 
 async def suspend_membership(
@@ -60,9 +60,10 @@ async def suspend_membership(
                 "정지할 권한이 없습니다."
             )
 
-        # 73번 §6-5 "same transaction" — last-owner 판정 직전 활성 OWNER 행을
-        # FOR UPDATE로 잠근다(count_active_owners). 이 트랜잭션 밖에서 세면
-        # 판정과 실제 UPDATE 사이에 경합이 생길 수 있다.
+        # 73 §6-5 "same transaction" — FOR UPDATE-lock active OWNER rows
+        # (count_active_owners) just before last-owner check. Race window:
+        # between this predicate and the actual UPDATE, another transaction
+        # may suspend a different OWNER in the same tenant.
         active_owners = await membership_repo.count_active_owners(conn, context.tenant_id)
         if would_remove_last_owner(
             active_owners, membership.role == MembershipRole.OWNER, MembershipState.SUSPENDED

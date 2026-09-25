@@ -421,6 +421,7 @@ async def test_place_order_exception_marks_order_and_slice_failed_not_silent_suc
     assert order["status"] == "FAILED"
 
 
+@pytest.mark.perf
 async def test_slice_send_tick_round_trip_budget(pool, ctx):
     """성능 단언(D2) -- 슬라이스 1건을 전송하는 틱의 순차 DB 왕복 수가 고정
     예산을 넘지 않는다(재시도·불필요한 재조회가 섞여들면 회귀). 절대

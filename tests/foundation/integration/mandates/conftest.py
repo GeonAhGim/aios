@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any
 from uuid import UUID
 
 import asyncpg
@@ -42,8 +43,8 @@ def audit_repo(pool):
     return PostgresAuditEventRepository(pool)
 
 
-def default_rules(**overrides: object) -> MandateRuleInput:
-    defaults: dict[str, object] = dict(
+def default_rules(**overrides: Any) -> MandateRuleInput:
+    defaults: dict[str, Any] = dict(
         max_total_exposure_pct=80.0,
         max_single_instrument_pct=20.0,
         min_cash_buffer_pct=5.0,
@@ -52,7 +53,7 @@ def default_rules(**overrides: object) -> MandateRuleInput:
         forbidden_assets=["XYZ"],
     )
     defaults.update(overrides)
-    return MandateRuleInput(**defaults)  # type: ignore[arg-type]
+    return MandateRuleInput(**defaults)
 
 
 async def backdate_cooling_off(pool: asyncpg.Pool, revision_id: UUID, seconds_ago: int) -> None:

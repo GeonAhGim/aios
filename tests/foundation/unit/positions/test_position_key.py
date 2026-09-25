@@ -14,7 +14,6 @@ tests/foundation/integration/positions/test_position_key_adversarial.py에 둔�
 
 from __future__ import annotations
 
-import time
 from typing import cast
 from uuid import UUID, uuid4
 
@@ -24,6 +23,7 @@ from src.foundation.positions.domain.position_key import (
     InvalidPositionKeyError,
     PositionKey,
 )
+from tests.conftest import PerfBudget
 
 _PORTFOLIO_ID = UUID("11111111-1111-1111-1111-111111111111")
 
@@ -119,7 +119,7 @@ def test_position_key_is_frozen_and_hashable() -> None:
         portfolio_id=_PORTFOLIO_ID,
     )
     with pytest.raises(AttributeError):
-        key.venue = "kis"  # type: ignore[misc]
+        key.venue = "kis"  # type: ignore[misc]  # negative test: frozen dataclass 재할당 금지를 AttributeError로 검증
     assert hash(key) == hash(
         PositionKey(
             venue="bitget",
@@ -164,37 +164,41 @@ def test_parse_str_round_trip_is_deterministic_across_repeated_replays() -> None
     assert len(set(replays)) == 1
 
 
-def test_construction_and_round_trip_throughput_stays_within_budget() -> None:
+@pytest.mark.perf
+def test_construction_and_round_trip_throughput_stays_within_budget(
+    perf_budget: PerfBudget,
+) -> None:
     """수치 성능 단언 -- DEPTH 재감사(task-2724)가 지적한 공백을 메운다.
     이 순수 값객체는 I/O가 없어 실DB 왕복 예산(task-3030/905 관례)이 아니라
     처리량(ops/sec) 하한을 건다 -- `record_fill`/`rebuild_snapshot`/
     `record_funding_fee`가 매 호출마다 `PositionKey.parse()`로 이 경로를
     타므로(중앙 생성자 강제), 순수 파싱조차 병목이면 그 상위 핫패스 전부가
-    영향을 받는다."""
+    영향을 받는다. task-7434: wall-clock perf_counter() 대신 공용
+    perf_budget(process_time 기반)으로 측정한다."""
     n = 20_000
-    budget_sec = 2.0
+    budget_ms = 2000.0
     min_ops_per_sec = 50_000.0
 
-    start = time.perf_counter()
-    for i in range(n):
-        key = PositionKey(
-            venue="bitget",
-            instrument_id=f"INST{i}",
-            strategy_id="strat-1",
-            execution_id="exec-1",
-            portfolio_id=_PORTFOLIO_ID,
-        )
-        parsed = PositionKey.parse(str(key))
-        assert parsed == key
-    elapsed = time.perf_counter() - start
-    ops_per_sec = n / elapsed
+    def _run_once() -> None:
+        for i in range(n):
+            key = PositionKey(
+                venue="bitget",
+                instrument_id=f"INST{i}",
+                strategy_id="strat-1",
+                execution_id="exec-1",
+                portfolio_id=_PORTFOLIO_ID,
+            )
+            parsed = PositionKey.parse(str(key))
+            assert parsed == key
+
+    sample = perf_budget.assert_within(
+        _run_once, budget_ms=budget_ms, label=f"{n} PositionKey construct+str+parse"
+    )
+    ops_per_sec = n / (sample.cpu_ms / 1000)
 
     print(
-        f"[task-1943/3032 PositionKey construct+str+parse] {n} rounds {elapsed:.3f}s "
-        f"({ops_per_sec:.0f} ops/s, budget<{budget_sec}s, min>{min_ops_per_sec:.0f} ops/s)"
-    )
-    assert elapsed < budget_sec, (
-        f"{n}회 construct+str+parse가 예산({budget_sec}s)을 넘었습니다({elapsed:.3f}s)."
+        f"[task-1943/3032 PositionKey construct+str+parse] {n} rounds cpu={sample.cpu_ms:.1f}ms "
+        f"({ops_per_sec:.0f} ops/s, budget<{budget_ms:.0f}ms, min>{min_ops_per_sec:.0f} ops/s)"
     )
     assert ops_per_sec > min_ops_per_sec, (
         f"PositionKey round-trip 처리량이 최소값({min_ops_per_sec:.0f} ops/s)에 "

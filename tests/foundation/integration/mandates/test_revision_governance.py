@@ -193,6 +193,7 @@ async def _all_activation_events(pool, revision_id: UUID) -> list[UUID]:
     return [row["id"] for row in rows]
 
 
+@pytest.mark.perf
 async def test_propose_and_activate_cycle_meets_throughput_budget(
     pool, repo, trust_repo, audit_repo
 ):

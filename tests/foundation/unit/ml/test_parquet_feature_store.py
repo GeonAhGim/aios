@@ -130,6 +130,7 @@ def _p95(samples: list[float]) -> float:
     return samples[min(int(len(samples) * 0.95), len(samples) - 1)]
 
 
+@pytest.mark.perf
 def test_read_batch_p95_within_budget(tmp_path: Path) -> None:
     store = ParquetFeatureStore(tmp_path)
     rows = [_row(f"E{i}", 10, str(float(i))) for i in range(500)]
