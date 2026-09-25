@@ -3,6 +3,9 @@
 Spec: 79_audit_evidence_l3_build_and_operational_specification_v1.0.md §3
 "opaque cursor, time range, aggregate/action filter and maximum bounded page".
 """
+# ratchet-allow: mock protocol implementation raises NotImplementedError for
+# unused interface methods (append_event, list_chain_for_verification, get_latest_event)
+# to match AuditEventRepository contract without full implementation
 
 from __future__ import annotations
 
