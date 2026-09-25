@@ -40,6 +40,7 @@ from src.exchanges.common.transport import ResilientTransport
 from src.exchanges.common.types import ExchangeCapability, MarketHours
 from src.exchanges.nh.account_mixin import NHAccountMixin
 from src.exchanges.nh.credit_reserved_mixin import NHCreditReservedMixin
+from src.exchanges.nh.inquiry_extra_mixin import NHInquiryExtraMixin
 from src.exchanges.nh.market_data_mixin import NHMarketDataMixin
 from src.exchanges.nh.quote_after_hours_mixin import NHQuoteAfterHoursMixin
 from src.exchanges.nh.quote_extra_mixin import NHQuoteExtraMixin
@@ -213,6 +214,7 @@ class NHAdapter(
     NHAccountMixin,
     NHTradingMixin,
     NHCreditReservedMixin,
+    NHInquiryExtraMixin,
     NHWebSocketMixin,
     ExchangeAdapter,
 ):
