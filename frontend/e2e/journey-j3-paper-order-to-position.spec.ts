@@ -9,13 +9,16 @@ import { mockBackend } from "./support/mockBackend";
 // route를 먼저 검사하므로 mockBackend(page) 호출 뒤에 추가해야 mockBackend의 폴백
 // (catch-all)과 충돌하지 않는다.
 //
-// 갭 노트(문서 UX_JOURNEYS.md §2 J3 단계표 기준, 코드로 재확인): 2단계 "리스크/
-// 컴플라이언스 판정 표시"는 G-4(부분 갭) — ExecutionCard.tsx/ExecutionControlPage.tsx
-// 어디에도 riskGate/verdict/reasonCode 전용 패널이 없다(grep 0건, PortfolioPage.tsx의
-// RebalanceError와 동일하게 BadRequestNotice/ForbiddenNotice/ErrorMessage 일반 오류
-// 배너로만 판정 결과가 표면화된다). 전용 판정 패널이 생기기 전까지 "승인/거부 사유가
-// 별도 패널로 표시"라는 원 성공 조건은 test.fixme로 남기고, 실제로 동작하는 일반
-// 오류 배너 경로를 별도의 실패 주입 테스트로 대신 검증한다 — 우회하지 않는다.
+// 갭 노트(문서 UX_JOURNEYS.md §2 J3 단계표/§4 G-4 — task-7500으로 해소): 2단계
+// "리스크/컴플라이언스 판정 표시"는 ExecutionControlPage.tsx가 실행 생성 제출과
+// 함께 트리거하는 evaluateRiskGate(PRE_SUBMIT)의 RiskEvaluationView를
+// RiskVerdictPanel(routes/executions/components/RiskVerdictPanel.tsx, 뒤
+// FF_J3_RISK_PANEL)로 보여준다 — ALLOW/DENY, reason_codes, rule_version(규칙
+// 근거), evaluated_at(판정 시각)을 그대로 옮긴다(CM-A5와 동일 결정: 판정 로직
+// 재구현 금지). 아래 "2단계" 테스트가 이 전용 패널을 실제로 검증한다(fixme 해소).
+// 일반 오류 배너 경로(BadRequestNotice/ForbiddenNotice/ErrorMessage)는 여전히
+// createExecution 자체가 4xx로 거부될 때의 표면화 경로라 별도의 실패 주입 테스트로
+// 계속 검증한다 — 두 경로는 서로 대체하지 않는다.
 //
 // sw.js(서비스 워커)의 fetch 핸들러는 "/v1/"로 시작하지 않는 GET(예: /executions,
 // /portfolio, /alerts, /notifications/history)을 캐시 우선(cache-first)으로 처리하며
@@ -71,6 +74,21 @@ async function mockNotificationHistory(page: Page, entries: Record<string, unkno
   await page.route(`${API_BASE}/notifications/history**`, (route) => json(route, 200, entries));
 }
 
+// RiskEvaluationView(riskGate.ts) 1:1 대응 — snake_case 그대로 응답하면 postEnvelope가
+// camelCase로 옮긴다(packages/api-client/src/clients/riskGate.test.ts RISK_EVALUATION
+// 픽스처와 동일 관용).
+async function mockRiskGateEvaluate(page: Page, view: Record<string, unknown>) {
+  await page.route(`${API_BASE}/v1/foundation/risk-gate/evaluate`, (route) =>
+    json(route, 200, envelope(view)),
+  );
+}
+
+async function enableRiskVerdictPanel(page: Page) {
+  await page.addInitScript(() =>
+    window.localStorage.setItem("aios_feature_flag:FF_J3_RISK_PANEL", "true"),
+  );
+}
+
 test.describe("J3 여정: 페이퍼 주문 → 리스크/컴플라이언스 판정 → 체결·취소·거부 → 포지션 반영 → 알림", () => {
   test("1단계 주문 제출 시 실행 목록에 새 카드가 나타난다", async ({ page }) => {
     await mockBackend(page);
@@ -86,19 +104,41 @@ test.describe("J3 여정: 페이퍼 주문 → 리스크/컴플라이언스 판�
     await expect(page.getByText("e2e-paper-order-strategy")).toBeVisible();
   });
 
-  // 갭 G-4(부분 갭): "판정 결과(승인/거부 사유)가 별도 패널로 표시"는 아직 재현 대상이
-  // 없다 — ExecutionCard.tsx/ExecutionControlPage.tsx를 읽어 확인했다. 전용 판정 UI가
-  // 생기기 전까지 채우지 않는다.
-  test.fixme(
-    "2단계 [부분 갭 G-4] 주문 제출 시 리스크/컴플라이언스 판정이 전용 패널로 승인/거부 사유와 함께 표시된다",
-    async ({ page }) => {
-      // 갭 G-4: ExecutionControlPage.tsx/ExecutionCard.tsx 어디에도 riskGate/verdict/
-      // reasonCode 패턴이 없다(grep 0건) — 거부는 일반 오류 배너로만 표면화된다.
-      // 전용 판정 패널이 추가되면 이 테스트를 채운다.
-      await mockBackend(page);
-      await page.goto("/executions");
-    },
-  );
+  // task-7500(G-4 해소): FF_J3_RISK_PANEL을 켠 상태에서 RiskVerdictPanel이 실제로
+  // evaluateRiskGate(PRE_SUBMIT)의 outcome/reason_codes/rule_version/evaluated_at을
+  // 그대로 보여주는지 검증한다. createExecution 자체는 평소처럼 성공(201)하고,
+  // 리스크 게이트 evaluate만 DENY를 돌려준다 — 두 경로(생성 성공 여부 vs 판정 결과)가
+  // 서로 독립적임을 함께 보여준다.
+  test("2단계 주문 제출 시 리스크/컴플라이언스 판정이 전용 패널로 승인/거부 사유와 함께 표시된다", async ({
+    page,
+  }) => {
+    await enableRiskVerdictPanel(page);
+    await mockBackend(page);
+    await mockRiskGateEvaluate(page, {
+      id: "e2e-risk-eval-1",
+      gate_kind: "PRE_SUBMIT",
+      outcome: "DENY",
+      reason_codes: ["RISK_MAX_DRAWDOWN_EXCEEDED"],
+      obligations: [],
+      rule_version: "risk-rules-v3",
+      evaluated_at: "2026-01-01T00:00:00Z",
+      expires_at: null,
+      trace_id: "e2e-risk-eval-trace",
+      schema_version: "v1",
+    });
+    await page.goto("/executions");
+
+    await fieldControl(page, "전략 ID").fill("e2e-verdict-panel-strategy");
+    await fieldControl(page, "버전").fill("1.0.0");
+    await fieldControl(page, "배분 자본(USDT)").fill("500");
+    await page.getByRole("button", { name: "실행 생성" }).click();
+
+    await expect(page.getByRole("region", { name: "리스크/컴플라이언스 판정" })).toBeVisible();
+    await expect(page.getByText("DENY", { exact: true })).toBeVisible();
+    await expect(page.getByText("최대 손실 한도를 초과하여 거부되었습니다.")).toBeVisible();
+    await expect(page.getByText("risk-rules-v3")).toBeVisible();
+    await expect(page.getByText("2026-01-01T00:00:00Z")).toBeVisible();
+  });
 
   test("[실패 주입] 2단계 리스크 게이트 거부(403)는 전용 판정 패널 대신 일반 권한 오류 배너로 표면화되고 목록에 반영되지 않는다", async ({
     page,
