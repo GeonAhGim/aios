@@ -33,6 +33,7 @@ DEPTH_L4_BR(task-2722)가 원 리프(task-1567, 46ace35 — 이 파일 아래쪽
 서브쿼리+UPDATE가 한 문장인 원자성을 SELECT 후보 조회와 상태 재확인 없는
 UPDATE로 쪼개서, 실DB에서도 이 분리가 중복 전송을 낸다는 것을 증명한다.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -188,8 +189,10 @@ class _RacyOutboxRepo(InMemoryOutboxRepo):
         for row in candidates:
             new = row.model_copy(
                 update={
-                    "state": "SENDING", "worker_id": worker_id,
-                    "lease_until": now + timedelta(seconds=lease_sec), "updated_at": now,
+                    "state": "SENDING",
+                    "worker_id": worker_id,
+                    "lease_until": now + timedelta(seconds=lease_sec),
+                    "updated_at": now,
                 }
             )
             self._put(conn, new)
@@ -306,8 +309,12 @@ async def test_three_workers_send_each_row_exactly_once_real_db(pool):
 
     dispatchers = [
         OutboxDispatcher(
-            pool, outbox_repo=outbox_repo, order_repo=order_repo, resolve_adapter=resolve,
-            pre_send_gate=allow_gate, worker_id=w,
+            pool,
+            outbox_repo=outbox_repo,
+            order_repo=order_repo,
+            resolve_adapter=resolve,
+            pre_send_gate=allow_gate,
+            worker_id=w,
         )
         for w in WORKERS
     ]
@@ -384,7 +391,7 @@ class _RacyOutboxRepository(OutboxRepository):
         ]
 
 
-async def test_broken_claim_atomicity_is_caught_by_exactly_once_gate_real_db(pool):
+async def test_broken_claim_atomicity_is_caught_by_exactly_once_gate_real_db(pool_warm):
     """DEPTH_L4_BR(task-2722) — 실DB 명시적 CI red-line 회귀 테스트.
 
     `_RacyOutboxRepository`로 실 `_CLAIM_SQL`의 원자성만 제거하고 나머지는
@@ -398,7 +405,7 @@ async def test_broken_claim_atomicity_is_caught_by_exactly_once_gate_real_db(poo
     exactly_once_real_db`의 "행당 정확히 1회" 단언들이 실DB에서도 장식이
     아니라 회귀를 실제로 적색으로 만드는 게이트임을 증명한다.
     """
-    _, _, order_ids, client_order_ids = await _setup_real_orders(pool, 10)
+    _, _, order_ids, client_order_ids = await _setup_real_orders(pool_warm, 10)
     order_repo, outbox_repo = PostgresOrderRepository(), _RacyOutboxRepository()
     adapter = ScriptedAdapter()
 
@@ -407,8 +414,12 @@ async def test_broken_claim_atomicity_is_caught_by_exactly_once_gate_real_db(poo
 
     dispatchers = [
         OutboxDispatcher(
-            pool, outbox_repo=outbox_repo, order_repo=order_repo, resolve_adapter=resolve,
-            pre_send_gate=allow_gate, worker_id=w,
+            pool_warm,
+            outbox_repo=outbox_repo,
+            order_repo=order_repo,
+            resolve_adapter=resolve,
+            pre_send_gate=allow_gate,
+            worker_id=w,
         )
         for w in WORKERS
     ]

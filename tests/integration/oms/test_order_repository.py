@@ -28,6 +28,7 @@ DEPTH_L4_BR(task-2722)가 원 리프(task-1564, 13f805a7)를 D1로 판정 — ne
   의존하는 게이트임을 증명하는 red-line(잠금 없이는 패자의 `order_events`
   행이 최종 주문 상태와 불일치한 orphan으로 남는다).
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -138,9 +139,7 @@ async def test_transition_and_event_are_atomic_rollback_removes_both(pool):
                     )
                     raise RuntimeError("simulated downstream failure")
 
-            status = await conn.fetchval(
-                "SELECT status FROM orders WHERE order_id = $1", order_id
-            )
+            status = await conn.fetchval("SELECT status FROM orders WHERE order_id = $1", order_id)
             version = await conn.fetchval(
                 "SELECT version FROM orders WHERE order_id = $1", order_id
             )
@@ -349,7 +348,7 @@ class _LockFreeOrderRepository(PostgresOrderRepository):
         return _row_to_view(row)
 
 
-async def test_missing_row_lock_lets_conflicting_transition_write_orphan_event(pool):
+async def test_missing_row_lock_lets_conflicting_transition_write_orphan_event(pool_warm):
     """DEPTH_L4_BR(task-2722) — 명시적 CI red-line 회귀 테스트.
 
     `_LockFreeOrderRepository`로 `get_for_update`의 행 잠금만 제거하고 동시
@@ -363,12 +362,12 @@ async def test_missing_row_lock_lets_conflicting_transition_write_orphan_event(p
     전제한다) — 이 테스트가 그 전제가 실제로 잠금에 의존함을 확인한다.
     """
     repo = _LockFreeOrderRepository()
-    user_id = await create_test_user(pool)
-    async with pool.acquire() as conn:
+    user_id = await create_test_user(pool_warm)
+    async with pool_warm.acquire() as conn:
         order_id = await insert_order(conn, user_id, status="CREATED")
 
     async def attempt(to_status: OrderStatus, event_name: str) -> OrderStatus:
-        async with pool.acquire() as conn:
+        async with pool_warm.acquire() as conn:
             ev = _transition_event(
                 order_id, from_status="CREATED", to_status=to_status.value, event=event_name
             )
@@ -393,7 +392,7 @@ async def test_missing_row_lock_lets_conflicting_transition_write_orphan_event(p
     assert len(successes) == 1
     assert len(failures) == 1
 
-    async with pool.acquire() as conn:
+    async with pool_warm.acquire() as conn:
         event_count = await conn.fetchval(
             "SELECT COUNT(*) FROM order_events WHERE order_id = $1", order_id
         )
