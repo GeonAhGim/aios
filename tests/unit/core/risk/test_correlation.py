@@ -100,3 +100,12 @@ def test_denies_as_missing_when_correlated_exposure_pct_is_none():
 def test_denies_as_missing_when_max_correlation_is_none():
     result = correlation(_inputs(max_correlation=None), _POLICY)
     assert result.missing_fields == ("stats.max_correlation",)
+
+
+def test_allow_when_exposure_exceeds_cap_but_correlation_below_threshold():
+    # AND가 실수로 OR로 코딩되면 이 케이스는 DENY로 새어나간다 — threshold(0.7) 미만이면
+    # exposure가 cap(30.0)을 아무리 넘어도(99.0) ALLOW여야 한다(두 조건은 AND).
+    result = correlation(
+        _inputs(max_correlation=0.1, correlated_exposure_pct=Decimal("99.0")), _POLICY
+    )
+    assert result.outcome == RiskOutcome.ALLOW

@@ -132,3 +132,15 @@ def test_denies_as_missing_when_execution_paused_by_safety_is_none():
 def test_denies_as_missing_when_connection_fresh_is_none():
     result = safety_state(_inputs(connection_fresh=None), _POLICY)
     assert result.missing_fields == ("safety.connection_fresh",)
+
+
+def test_denies_on_halted_circuit_breaker_level():
+    result = safety_state(_inputs(circuit_breaker_level="halted"), _POLICY)
+    assert result.outcome == RiskOutcome.DENY
+    assert result.reason_code == "RISK_CIRCUIT_BREAKER_HALTED"
+
+
+def test_denies_on_emergency_circuit_breaker_level():
+    result = safety_state(_inputs(circuit_breaker_level="emergency"), _POLICY)
+    assert result.outcome == RiskOutcome.DENY
+    assert result.reason_code == "RISK_CIRCUIT_BREAKER_EMERGENCY"
