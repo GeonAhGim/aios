@@ -249,7 +249,7 @@ def test_series_builtin_call_latency_p95_within_backtest_budget_slice(
     site = CallSite("math", "abs", "series<float>", bar_count)
     fn = MATH_BUILTINS[("math", "abs")]
 
-    samples = perf_budget.samples(lambda: fn((series,), site), n=20)
+    samples = perf_budget.samples(lambda: fn((series,), site), n=20, batch=4)
     cpu_values_ms = sorted(s.cpu_ms for s in samples)
     p95_ms = cpu_values_ms[min(int(len(cpu_values_ms) * 0.95), len(cpu_values_ms) - 1)]
 
