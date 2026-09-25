@@ -1,11 +1,12 @@
 """16번 — 실행 제어판 API 요청·응답 스키마."""
+
 from __future__ import annotations
 
 from decimal import Decimal
 
 from pydantic import BaseModel
 
-from src.services.execution_monitoring_service import ExecutionCard
+from src.services.execution_monitoring_service import ExecutionCard, LastRiskVerdict
 from src.services.execution_service import ExecutionSummary
 
 
@@ -66,6 +67,7 @@ class ExecutionCardResponse(BaseModel):
     realized_pnl: Decimal
     unrealized_pnl: Decimal
     max_drawdown_pct: Decimal | None
+    last_risk_verdict: LastRiskVerdict | None
 
 
 def to_execution_card_response(card: ExecutionCard) -> ExecutionCardResponse:
