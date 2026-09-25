@@ -9,6 +9,7 @@ R-30 equity 기준점 seed SELECT(execution당 최초 1회), R-28 캔들 캐시 
 (어댑터 호출, DB 아님). `conn.transaction()`의 BEGIN/COMMIT은 실제 서버
 왕복이라 계수에 포함된다(asyncpg는 인자 없는 `execute()`도 로거에 남긴다).
 """
+
 from __future__ import annotations
 
 import json
@@ -76,16 +77,21 @@ class FakeHealthyConnectionRepo:
     async def list_connections(self, tenant_id: UUID) -> list[AccountConnection]:
         return [
             AccountConnection(
-                id=self._connection_id, tenant_id=self._tenant_id,
-                owner_subject_id=self._tenant_id, provider_code=PROVIDER,
-                opaque_account_ref="ACCT-PERF", state=ConnectionState.ACTIVE_READONLY,
-                capability_profile=(), revision=1,
+                id=self._connection_id,
+                tenant_id=self._tenant_id,
+                owner_subject_id=self._tenant_id,
+                provider_code=PROVIDER,
+                opaque_account_ref="ACCT-PERF",
+                state=ConnectionState.ACTIVE_READONLY,
+                capability_profile=(),
+                revision=1,
             )
         ]
 
     async def get_latest_health(self, connection_id: UUID) -> ConnectionHealth | None:
         return ConnectionHealth(
-            connection_id=connection_id, evaluated_at=datetime.now(timezone.utc),
+            connection_id=connection_id,
+            evaluated_at=datetime.now(timezone.utc),
             state=HealthState.HEALTHY,
         )
 
@@ -97,13 +103,20 @@ async def _create_execution(pool, user_id: UUID, *, allocated_capital: Decimal) 
             "INSERT INTO strategies (strategy_id, version, owner_user_id, target_asset, "
             "market, exchange, fsm_definition, author_agent, lifecycle_status) "
             "VALUES ($1, '1.0.0', $2, $3, 'crypto', $4, $5::jsonb, 'perf', 'APPROVED')",
-            strategy_id, user_id, SYMBOL, PROVIDER, json.dumps({}),
+            strategy_id,
+            user_id,
+            SYMBOL,
+            PROVIDER,
+            json.dumps({}),
         )
         row = await conn.fetchrow(
             "INSERT INTO strategy_executions (strategy_id, strategy_version, user_id, "
             "exchange, mode, allocated_capital, currency, status) "
             "VALUES ($1, '1.0.0', $2, $3, 'PAPER', $4, 'USDT', 'RUNNING') RETURNING id",
-            strategy_id, user_id, PROVIDER, allocated_capital,
+            strategy_id,
+            user_id,
+            PROVIDER,
+            allocated_capital,
         )
     return int(row["id"]), strategy_id
 
@@ -119,18 +132,28 @@ class PreTradeScenario:
         self.adapter = FakeExchangeAdapter(
             closes=[_PRICE] * 100,
             usdt_balance=AccountBalance(
-                exchange=PROVIDER, asset="USDT", total=Decimal("10000"),
+                exchange=PROVIDER,
+                asset="USDT",
+                total=Decimal("10000"),
                 available=Decimal("10000"),
             ),
         )
         self.signal = Signal(
-            strategy_id=strategy_id, strategy_version="1.0.0", symbol=SYMBOL,
-            direction=OrderSide.BUY, confidence=1.0, target_position=Decimal("20"),
-            stop_loss=None, take_profit=None, timestamp=datetime.now(timezone.utc),
+            strategy_id=strategy_id,
+            strategy_version="1.0.0",
+            symbol=SYMBOL,
+            direction=OrderSide.BUY,
+            confidence=1.0,
+            target_position=Decimal("20"),
+            stop_loss=None,
+            take_profit=None,
+            timestamp=datetime.now(timezone.utc),
             to_state=FSMState.BUY_ORDER_PENDING,
         )
         self.allocation = AllocationDecision(
-            symbol=SYMBOL, strategy_id=strategy_id, approved_quantity=Decimal("20"),
+            symbol=SYMBOL,
+            strategy_id=strategy_id,
+            approved_quantity=Decimal("20"),
             capital_pct=Decimal("10"),
         )
         self.policy = load_risk_policy()
@@ -142,12 +165,23 @@ class PreTradeScenario:
         candles = await self.adapter.get_ohlcv(SYMBOL, "1m", limit=100)
         balances = await self.adapter.get_balance()
         return await run_pre_trade_risk_phase(
-            pool, self.adapter, execution_id=self.execution_id, user_id=self.user_id,
-            certified_badge=False, allocated_capital=Decimal("1000"), signal=self.signal,
-            allocation=self.allocation, candles=candles, balances=balances,
-            position_quantity=Decimal("0"), distrust_level="NORMAL",
-            risk_engine=self.risk_engine, recorder=recorder, caches=self.caches,
-            candle_cache=self.candle_cache, policy=self.policy,
+            pool,
+            self.adapter,
+            execution_id=self.execution_id,
+            user_id=self.user_id,
+            certified_badge=False,
+            allocated_capital=Decimal("1000"),
+            signal=self.signal,
+            allocation=self.allocation,
+            candles=candles,
+            balances=balances,
+            position_quantity=Decimal("0"),
+            distrust_level="NORMAL",
+            risk_engine=self.risk_engine,
+            recorder=recorder,
+            caches=self.caches,
+            candle_cache=self.candle_cache,
+            policy=self.policy,
             now=datetime.now(timezone.utc),
         )
 
@@ -171,7 +205,8 @@ async def seed_normal_distrust_symbol(pool) -> str:
             "INSERT INTO data_distrust_state "
             "(exchange, symbol, level, since, sources_available, updated_at) "
             "VALUES ($1, $2, 'NORMAL', now(), 3, now())",
-            PROVIDER, symbol,
+            PROVIDER,
+            symbol,
         )
     return symbol
 
@@ -184,7 +219,9 @@ def _query_logger(queries: list[str]) -> Callable[[object], None]:
 
 
 async def count_pre_trade_round_trips(
-    pool, scenario: PreTradeScenario, *,
+    pool,
+    scenario: PreTradeScenario,
+    *,
     recorder_cls: type[RiskDecisionRecorder] = RiskDecisionRecorder,
 ) -> int:
     """`run_pre_trade_risk_phase` 1회(정상 상태)가 소비하는 순차 DB 왕복 수."""
@@ -193,7 +230,9 @@ async def count_pre_trade_round_trips(
     async with pool.acquire() as conn:
         pinned = PinnedConnectionPool(conn)
         recorder = recorder_cls(
-            pinned, PostgresDecisionRepository(pinned), NoopEventBus()  # type: ignore[arg-type]
+            pinned,
+            PostgresDecisionRepository(pinned),
+            NoopEventBus(),  # type: ignore[arg-type]  # PinnedConnectionPool은 pool 프로토콜의 perf 계측 전용 대역
         )
         outcome = await scenario.run_once(pinned, recorder)  # 워밍업(seed·코덱·캔들 캐시)
         assert outcome is not None and outcome.decision.outcome == RiskOutcome.ALLOW
@@ -207,7 +246,9 @@ async def count_pre_trade_round_trips(
 
 
 async def count_pre_submit_round_trips(
-    pool, tenant_id: UUID, *,
+    pool,
+    tenant_id: UUID,
+    *,
     repo_cls: type[PostgresRiskGateRepository] = PostgresRiskGateRepository,
 ) -> int:
     """`evaluate_pre_submit` 1회(ALLOW 경로)가 소비하는 순차 DB 왕복 수.
@@ -220,17 +261,25 @@ async def count_pre_submit_round_trips(
     symbol = await seed_normal_distrust_symbol(pool)
     async with pool.acquire() as conn:
         pinned = PinnedConnectionPool(conn)
-        risk_repo = repo_cls(pinned)  # type: ignore[arg-type]
+        risk_repo = repo_cls(pinned)  # type: ignore[arg-type]  # PinnedConnectionPool은 pool 프로토콜의 perf 계측 전용 대역
         recorder = RiskDecisionRecorder(
-            pinned, PostgresDecisionRepository(pinned), NoopEventBus()  # type: ignore[arg-type]
+            pinned,
+            PostgresDecisionRepository(pinned),
+            NoopEventBus(),  # type: ignore[arg-type]  # 위와 동일: perf 계측 전용 대역
         )
         connection_repo = FakeHealthyConnectionRepo(tenant_id)
 
         async def _once():
             return await evaluate_pre_submit(
-                risk_repo, connection_repo, recorder, tenant_id=tenant_id,  # type: ignore[arg-type]
-                execution_ref="exec:perf", provider_code=PROVIDER, symbol=symbol,
-                side="BUY", quantity=Decimal("20"),  # task-1532 I10 결속 키(WORM 스냅샷 전용, DB 0)
+                risk_repo,
+                connection_repo,
+                recorder,
+                tenant_id=tenant_id,  # type: ignore[arg-type]  # risk_repo가 pinned 대역이라 프로토콜 타입을 정적으로 못 좁힘
+                execution_ref="exec:perf",
+                provider_code=PROVIDER,
+                symbol=symbol,
+                side="BUY",
+                quantity=Decimal("20"),  # task-1532 I10 결속 키(WORM 스냅샷 전용, DB 0)
                 trace_id=uuid4(),
             )
 

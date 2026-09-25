@@ -45,9 +45,19 @@ from src.foundation.evidence.domain.rules import assert_safe_payload, compute_pa
 from src.foundation.ledger.adapters.postgres_balance_repository import PostgresBalanceRepository
 from src.foundation.ledger.adapters.postgres_journal_repository import PostgresJournalRepository
 from src.foundation.ledger.application.post_entry import post_entry
-from src.foundation.ledger.contracts.v1 import AccountType, LedgerEvent, LedgerEventType, UserSub
+from src.foundation.ledger.contracts.v1 import (
+    AccountType,
+    LedgerEvent,
+    LedgerEventType,
+    Side,
+    UserSub,
+)
 from src.foundation.ledger.domain import posting_rules
-from src.foundation.ledger.domain.chart_of_accounts import PLATFORM_CASH_CLEARING, user_account
+from src.foundation.ledger.domain.chart_of_accounts import (
+    PLATFORM_CASH_CLEARING,
+    account_type,
+    user_account,
+)
 from src.foundation.ledger.domain.hash_chain import entry_hash, lines_digest
 from src.foundation.ledger.domain.idempotency import idempotency_key
 from tests.integration.conftest import create_test_tenant
@@ -286,6 +296,27 @@ async def _insert_pre_fa4_ledger_entry(pool: asyncpg.Pool, event_ref: str, user_
                 "VALUES ($1, $2, $3, $4, $5, $6)",
                 entry_id, line.line_no, account_ids[line.account_code],
                 line.side.value, line.amount, line.currency.value,
+            )
+
+        # task-5687: keep `ledger_balance` in lockstep with the hand-written
+        # journal entry above, same as the real (pre-FA8) `post_entry` write
+        # path would have -- otherwise PLATFORM_CASH_CLEARING (shared, seeded
+        # by LC-6, never reset across CI runs) drifts from the journal fold
+        # forever, and FA-15 replay_verify reports a permanent false
+        # MISMATCH on it (same bug class as task-5309).
+        balances = PostgresBalanceRepository(pool)
+        deltas: dict[str, Decimal] = {}
+        for line in lines:
+            debit_increases = account_type(line.account_code) in {
+                AccountType.ASSET, AccountType.EXPENSE,
+            }
+            increases = (line.side is Side.DEBIT) == debit_increases
+            signed = line.amount if increases else -line.amount
+            deltas[line.account_code] = deltas.get(line.account_code, Decimal("0")) + signed
+        current = await balances.get_for_update(conn, list(deltas))
+        for account_code, delta in deltas.items():
+            await balances.apply(
+                conn, account_code, delta, Decimal("0"), current[account_code].last_entry_seq
             )
     return entry_id
 

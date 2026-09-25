@@ -42,8 +42,8 @@ from src.foundation.ai.factory.domain.schema import (
     ProposalSchemaError,
     validate_draft,
 )
+from src.foundation.market_data.api import merge_spans
 from src.foundation.market_data.contracts.v2.coverage import CoverageSpan
-from src.foundation.market_data.domain.coverage.registry import merge_spans
 
 __all__ = [
     "ALLOWED_CALL_NAMESPACES",

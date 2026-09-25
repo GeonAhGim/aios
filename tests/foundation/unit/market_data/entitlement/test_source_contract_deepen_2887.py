@@ -31,7 +31,6 @@ source_id의 계약 하나를 시간축으로 재생하며(미등록 -> 발효 �
 from __future__ import annotations
 
 import itertools
-import time
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
 
@@ -48,6 +47,7 @@ from src.foundation.market_data.domain.entitlement.source_contract import (
     authorize_source,
     permits_use,
 )
+from tests.conftest import PerfBudget
 
 _NOW = datetime(2026, 9, 7, 0, 0, tzinfo=timezone.utc)
 
@@ -188,57 +188,59 @@ def test_permits_use_fail_closed_for_every_undeclared_combination() -> None:
 
 
 @pytest.mark.perf
-def test_authorize_source_repeated_calls_meet_throughput_budget() -> None:
+def test_authorize_source_repeated_calls_meet_throughput_budget(
+    perf_budget: PerfBudget,
+) -> None:
     """동일 계약에 대한 반복 판정(요청마다 저장소에서 새로 읽어온 DTO를
     받는 상황을 흉내)이 처리량 예산을 지켜야 한다."""
     iterations = 100_000
-    budget_sec = 5.0  # 실측 로컬 <0.5s, CI 환경 편차 감안
+    budget_ms = 5000.0  # 실측 로컬 <0.5s, CI 환경 편차 감안
     contract = _contract(valid_from=_NOW - timedelta(days=30), valid_to=None)
 
-    start = time.perf_counter()
-    for i in range(iterations):
-        result = authorize_source(contract, _NOW + timedelta(seconds=i % 3600))
-        assert result.allowed is True
-    elapsed = time.perf_counter() - start
+    def _run() -> None:
+        for i in range(iterations):
+            result = authorize_source(contract, _NOW + timedelta(seconds=i % 3600))
+            assert result.allowed is True
 
-    print(
-        f"[DC-27 source_contract] authorize_source() x{iterations} in {elapsed:.3f}s "
-        f"(budget<{budget_sec}s)"
-    )
-    assert elapsed < budget_sec, (
-        f"authorize_source {iterations}회 반복이 예산({budget_sec}s)을 넘었습니다({elapsed:.3f}s)."
+    perf_budget.assert_within(
+        _run,
+        budget_ms=budget_ms,
+        label=f"authorize_source() x{iterations}",
     )
 
 
 @pytest.mark.perf
-def test_large_capability_construction_meets_latency_budget() -> None:
+def test_large_capability_construction_meets_latency_budget(
+    perf_budget: PerfBudget,
+) -> None:
     """자산군/해상도 문자열이 대량(각 5,000개)인 capability를 가진 계약
     구성이 절대시간 예산 내여야 한다(pydantic frozenset 검증이 이차로
     퇴화하지 않았는지 — 다자산 통합 소스가 늘어날수록 이 값도 커진다)."""
     n = 5_000
-    budget_sec = 2.0  # 실측 로컬 <0.2s
+    budget_ms = 2000.0  # 실측 로컬 <0.2s
     asset_classes = frozenset(f"ASSET_{i}" for i in range(n))
     resolutions = frozenset(f"RES_{i}" for i in range(n))
 
-    start = time.perf_counter()
-    contract = _contract(
-        capability=SourceCapability(
-            asset_classes=asset_classes, resolutions=resolutions, corporate_actions=True
-        )
-    )
-    grant = authorize_source(contract, _NOW)
-    elapsed = time.perf_counter() - start
+    grant = None
 
-    print(
-        f"[DC-27 source_contract] capability({n}x2) construction+authorize in {elapsed:.4f}s "
-        f"(budget<{budget_sec}s)"
+    def _run() -> None:
+        nonlocal grant
+        contract = _contract(
+            capability=SourceCapability(
+                asset_classes=asset_classes, resolutions=resolutions, corporate_actions=True
+            )
+        )
+        grant = authorize_source(contract, _NOW)
+
+    perf_budget.assert_within(
+        _run,
+        budget_ms=budget_ms,
+        label=f"capability({n}x2) construction+authorize",
     )
+    assert grant is not None
     assert grant.allowed is True
     assert grant.capability is not None
     assert len(grant.capability.asset_classes) == n
-    assert elapsed < budget_sec, (
-        f"대용량 capability 구성이 예산({budget_sec}s)을 넘었습니다({elapsed:.4f}s)."
-    )
 
 
 # ---- 게이트 적색 재현 — 동일 source_id 계약을 시간축으로 재생 ----

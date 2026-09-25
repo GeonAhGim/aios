@@ -1,5 +1,6 @@
 """FD-7.2 통합테스트 — audit_log 조회, 실제 dev DB 대상."""
 from pathlib import Path
+from unittest.mock import MagicMock
 from uuid import uuid4
 
 import asyncpg
@@ -73,3 +74,51 @@ async def test_list_entries_paginates(service, pool):
 
     assert page.total == 3
     assert len(page.items) == 2
+
+
+async def test_list_entries_no_match_returns_empty_page(service):
+    marker = uuid4().hex[:8]
+
+    page = await service.list_entries(action_type=f"test.nonexistent.{marker}")
+
+    assert page.total == 0
+    assert page.items == []
+
+
+async def test_list_entries_missing_verification_chain_is_none(service, pool):
+    marker = uuid4().hex[:8]
+    action_type = f"test.nochain.{marker}"
+    await _record(pool, action_type=action_type, target_type="widget", target_id=marker)
+
+    page = await service.list_entries(action_type=action_type)
+
+    assert page.items[0].verification_chain is None
+
+
+async def test_list_entries_rejects_page_zero(service, pool):
+    marker = uuid4().hex[:8]
+    action_type = f"test.pagezero.{marker}"
+    await _record(pool, action_type=action_type, target_type="widget", target_id=marker)
+
+    with pytest.raises(asyncpg.exceptions.InvalidRowCountInResultOffsetClauseError):
+        await service.list_entries(action_type=action_type, page=0)
+
+
+async def test_list_entries_page_size_zero_returns_no_items(service, pool):
+    marker = uuid4().hex[:8]
+    action_type = f"test.pagesizezero.{marker}"
+    await _record(pool, action_type=action_type, target_type="widget", target_id=marker)
+
+    page = await service.list_entries(action_type=action_type, page=1, page_size=0)
+
+    assert page.total == 1
+    assert page.items == []
+
+
+async def test_list_entries_propagates_pool_acquire_failure():
+    fake_pool = MagicMock()
+    fake_pool.acquire.side_effect = RuntimeError("pool exhausted")
+    service = AuditLogReadService(fake_pool)
+
+    with pytest.raises(RuntimeError, match="pool exhausted"):
+        await service.list_entries()

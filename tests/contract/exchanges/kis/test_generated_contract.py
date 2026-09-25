@@ -17,10 +17,12 @@ ADR-2026-09-06-I D7. 모의투자 계좌는 사람만 만들 수 있다(HB-3) --
 테스트가 있다. 실계좌(모의투자 서버) 왕복 검증도 범위 밖 -- BR-14
 (task-1931, tests/integration/exchanges/kis/)가 HB-3 해소 후 담당한다.
 """
+
 from __future__ import annotations
 
 import importlib
 import json
+from collections.abc import Iterator
 from dataclasses import replace
 from typing import Any
 
@@ -28,6 +30,7 @@ import httpx
 import pytest
 
 from src.core.exceptions import FrozenZonePaperAdapterBlockedError
+from src.exchanges.kis import rate_profile
 from src.exchanges.kis.adapter import REAL_BASE_URL, KISAdapter
 from tests.fixtures.kis.generated_cases import (
     GeneratedCase,
@@ -46,6 +49,26 @@ _TOKEN_RESPONSE = {
 }
 
 
+@pytest.fixture(autouse=True)
+def _reset_bucket_registry() -> Iterator[None]:
+    """`rate_profile.py`'s (account_type, tr_group) `TokenBucket` is a
+    process-wide singleton (BR-2b) - whichever test creates it first locks in
+    its `sleep` callable for every later test sharing the key. Reset before/
+    after each test so this file's adapters always get a freshly built bucket
+    wired to the fake sleep injected below, instead of inheriting a
+    real-`asyncio.sleep` bucket from test order (task-5596 precedent)."""
+    rate_profile.reset_token_bucket_registry_for_test()
+    yield
+    rate_profile.reset_token_bucket_registry_for_test()
+
+
+async def _instant_sleep(_seconds: float) -> None:
+    """Skip the BR-2b token-bucket throttle wait (PAPER is 2 req/s). Without
+    this the ~289 canned-response REST roundtrips below each block on a real
+    `asyncio.sleep`, turning a sub-second file into minutes and blowing past
+    pytest-timeout's 120s per-test cap (task-5596 root cause, same fix)."""
+
+
 def _case_id(case: GeneratedCase) -> str:
     return case.tr_id
 
@@ -61,9 +84,15 @@ def _make_real_adapter(handler: Any) -> KISAdapter:
     # 인스턴스 단위로 치환을 무력화해, 생성 코드가 스스로 조립한 tr_id/path가
     # 그대로 실리는지만(BR-11 문자 그대로 일치) 계속 검증한다.
     adapter = KISAdapter(
-        "app", "secret", "12345678", "01", is_paper_trading=True, http_client=client
+        "app",
+        "secret",
+        "12345678",
+        "01",
+        is_paper_trading=True,
+        http_client=client,
+        sleep_fn=_instant_sleep,
     )
-    adapter._resolve_tr_id = lambda tr_id: tr_id  # type: ignore[method-assign]
+    adapter._resolve_tr_id = lambda tr_id: tr_id  # type: ignore[method-assign]  # 인스턴스 단위 치환(위 주석 참고, BR-11 tr_id 조립 검증 전용)
     return adapter
 
 

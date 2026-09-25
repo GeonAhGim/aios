@@ -175,6 +175,7 @@ def test_hedge_unrealized_pnl_signaling_nan_rate_fails_loud_not_silent() -> None
         fxf.hedge_unrealized_pnl(contract, corrupted)
 
 
+@pytest.mark.perf
 def test_unhedged_exposure_perf_and_precision_at_volume() -> None:
     """수치 성능/지연 단언: 기존 수치검증(소규모 hand-calc 4자리 일치)은
     정확성만 봤다. 여기서는 10,000건 규모(매칭 통화쌍 5,000 + 무관 통화쌍

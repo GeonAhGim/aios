@@ -462,6 +462,7 @@ async def test_replay_still_raises_for_post_cutover_broken_event_chain(pool):
             )
 
 
+@pytest.mark.perf
 async def test_replay_verify_completes_within_latency_budget_for_fifty_streams(pool):
     """수치 성능 단언 (DEPTH_FA 감사 task-3019/FA-15 유일 미달 항목) -- `verify()`의
     원장 쪽은 매 실행마다 `PostgresJournalRepository.list_since`로 저널 전체를

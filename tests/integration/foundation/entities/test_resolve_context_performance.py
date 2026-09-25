@@ -19,6 +19,8 @@ from __future__ import annotations
 import math
 import time
 
+import pytest
+
 from src.foundation.entities.application.resolve_context import (
     ResolveContextRequest,
     resolve_context,
@@ -26,6 +28,7 @@ from src.foundation.entities.application.resolve_context import (
 from tests.integration.conftest import create_test_tenant
 
 
+@pytest.mark.perf
 async def test_resolve_context_p95_latency_stays_within_normalized_ceiling(pool, repo):
     # `create_test_tenant()` persists the FA-1 default hierarchy by default
     # (see its docstring) -- `resolve_context()`'s deterministic ids resolve

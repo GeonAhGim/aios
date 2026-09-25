@@ -103,6 +103,7 @@ def test_failure_injection_corrupted_upstream_result_fails_closed():
 # --- 성능 단언 (1) ----------------------------------------------------------
 
 
+@pytest.mark.perf
 def test_performance_compute_confidence_p99_latency_within_pretrade_gate_budget():
     """ADR-2026-09-09-C Decision 1 예산: 사전거래 게이트 p99 5ms.
     confidence 산출은 신호 생성 경로(주문 제출 이전)의 일부다."""

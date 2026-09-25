@@ -1,11 +1,11 @@
-"""Audit Event 계약 v1.
+"""Audit event contract v1.
 
 Spec: AIOSproject 49_audit_evidence_and_explainability_specification_v1.0.md,
 79_audit_evidence_l3_build_and_operational_specification_v1.0.md §1/§3,
 107_contract_versioning_and_compatibility_standard_v1.0.md.
 
-다른 bounded context(FND-01/02 등)는 이 파일을 통해서만 감사 이벤트를
-기록·조회한다 — domain/models.py를 직접 참조하지 않는다(71번 §4).
+Other bounded contexts (FND-01/02, etc.) record and query audit events
+only through this file — they must not reference domain/models.py directly (71st §4).
 """
 from __future__ import annotations
 
@@ -34,9 +34,9 @@ class Classification(str, Enum):
 
 
 class RecordAuditEventCommand(BaseModel):
-    """AppendAuditEvent의 입력. `tenant_id`가 None이면 system 이벤트(79번 §1).
-    `payload`는 78번(AUD-004) 안전성 검사를 통과해야 한다 — secret류 키가
-    있으면 domain.rules.assert_safe_payload()가 UnsafePayloadError를 던진다."""
+    """Input for AppendAuditEvent. If `tenant_id` is None, this is a system event (79th §1).
+    `payload` must pass the safety check in 78th (AUD-004) — if it contains secret-like keys,
+    domain.rules.assert_safe_payload() raises UnsafePayloadError."""
 
     tenant_id: UUID | None
     aggregate_type: str
@@ -71,8 +71,8 @@ class AuditEventView(BaseModel):
 
 
 class AuditTimelinePage(BaseModel):
-    """79번 §3 "opaque cursor, time range, aggregate/action filter and
-    maximum bounded page" — `next_cursor`가 None이면 더 없음."""
+    """79th §3 "opaque cursor, time range, aggregate/action filter and
+    maximum bounded page" — if `next_cursor` is None, there are no more pages."""
 
     items: list[AuditEventView]
     next_cursor: str | None

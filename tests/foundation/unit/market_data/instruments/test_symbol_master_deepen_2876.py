@@ -137,6 +137,39 @@ def test_change_symbol_rejects_non_str_new_symbol_fail_closed(garbage_symbol: An
         sm.change_symbol(current=current, new_venue_symbol=garbage_symbol, changed_at=_t(5))
 
 
+def test_register_rejects_non_str_instrument_id_fail_closed() -> None:
+    """`instrument_id`가 `str`이 아니면(역직렬화 경로 오염 등) `AttributeError`
+    누출 없이 `SymbolMasterError`로 fail-closed 거부돼야 한다."""
+    with pytest.raises(sm.SymbolMasterError):
+        _register(instrument_id=None)
+
+
+def test_register_duplicate_active_instrument_id_case_mismatch_rejected() -> None:
+    """XREV(task-3641/4910) 발견 재현: 기존 ACTIVE instrument_id가 대문자로
+    저장돼 있을 때, 소문자로 전달된 동일 id는 정규화 전 비교로는 다르게
+    보이지만 정규화 후에는 같은 id다 -- 정규화 없이 비교하면 중복 등록
+    가드를 우회하고, 반환 DTO에서 대문자로 정규화되며 기존 id와 충돌한다."""
+    existing = _instrument(_ID_A, InstrumentLifecycle.ACTIVE)
+    with pytest.raises(sm.SymbolConflictError):
+        _register(instrument_id=_ID_A.lower(), existing_instruments=[existing])
+
+
+def test_register_relisting_reuse_case_mismatch_rejected() -> None:
+    """위와 동일한 우회를 DELISTED 재상장 경로에서 재현한다: 소문자로 전달된
+    id가 정규화 없이 비교되면 `RelistingReuseError` 가드를 우회한다."""
+    existing = _instrument(_ID_A, InstrumentLifecycle.DELISTED)
+    with pytest.raises(sm.RelistingReuseError):
+        _register(instrument_id=_ID_A.lower(), existing_instruments=[existing])
+
+
+def test_register_normalizes_lowercase_instrument_id_in_result() -> None:
+    """충돌이 없는 정상 경로에서도 소문자로 전달된 instrument_id는 결과
+    DTO에서 대문자 정규 ULID 형태로 일관되게 저장된다."""
+    ref = _register(instrument_id=_ID_A.lower())
+    assert ref.instrument.instrument_id == _ID_A
+    assert ref.listing.instrument_id == _ID_A
+
+
 def test_resolve_rejects_garbage_venue_fail_closed() -> None:
     """`Venue` 아닌 임의 값도 `to_canonical`의 알 수 없는 venue 경로를 통해
     `SymbolMasterError`로 수렴한다(크래시 아님)."""
@@ -167,7 +200,12 @@ def test_resolve_meets_latency_budget_with_large_listing_set() -> None:
 
     start = time.perf_counter()
     for i in range(iterations):
-        target = f"SYM{i % n:05d}USDT"
+        # (i * n) // iterations로 조회 대상을 목록 전체(0..n-1)에 고르게
+        # 펼쳐 뒤쪽(최악 경로, 선형탐색이 끝까지 가야 하는 인덱스)도 실제로
+        # 탐색되게 한다 — i % n(iterations < n일 때 앞부분만 반복 조회)로는
+        # 대규모 목록의 최악 경로 성능 회귀를 검출하지 못한다(XREV task-3641).
+        target_idx = (i * n) // iterations
+        target = f"SYM{target_idx:05d}USDT"
         ref = sm.resolve(Venue.BITGET, target, instruments=instruments, listings=listings)
         assert ref.listing.venue_symbol == target
     elapsed = time.perf_counter() - start

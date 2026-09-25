@@ -1,13 +1,15 @@
-"""Audit Event repository port. domain은 이 Protocol만 알고, 실제 구현
-(adapters/)은 모른다(71번 §4)."""
+"""Audit Event repository port. The domain knows only this Protocol; actual
+implementations (adapters/) remain unknown to it (Rule 71 §4)."""
+
 from __future__ import annotations
 
-from typing import Protocol
+from typing import Protocol, runtime_checkable
 from uuid import UUID
 
 from src.foundation.evidence.domain.models import AuditEvent, Classification, Outcome
 
 
+@runtime_checkable
 class AuditEventRepository(Protocol):
     async def append_event(
         self,
@@ -24,11 +26,12 @@ class AuditEventRepository(Protocol):
         payload: dict[str, object],
         classification: Classification,
     ) -> AuditEvent:
-        """79번 §1 해시 체인에 새 링크를 원자적으로 추가한다. 구현체는 같은
-        tenant(또는 system) 체인에 대한 동시 append가 서로의 `previous_hash`를
-        보지 못한 채 분기(fork)하지 않도록 직렬화할 책임이 있다(105번 표준의
-        정신 — 다만 이건 UPDATE가 아니라 INSERT 경합이라 conditional_update가
-        아니라 tenant 범위 advisory lock으로 막는다)."""
+        """Atomically append a new link to the hash chain (Rule 79 §1). The
+        implementation must serialise concurrent appends so that tenants (or
+        the system chain) never fork by writing each other's
+        `previous_hash` values. This follows the spirit of Rule 105 —
+        however, since this is an INSERT contention (not UPDATE), use a
+        tenant-scoped advisory lock instead of conditional_update."""
         ...
 
     async def list_timeline(
@@ -40,12 +43,12 @@ class AuditEventRepository(Protocol):
         aggregate_type: str | None = None,
         action: str | None = None,
     ) -> tuple[list[AuditEvent], str | None]:
-        """79번 §3 — opaque cursor 페이지네이션. 반환값은 (items, next_cursor)."""
+        """Opaque-cursor pagination (Rule 79 §3). Returns (items, next_cursor)."""
         ...
 
     async def list_chain_for_verification(self, tenant_id: UUID | None) -> list[AuditEvent]:
-        """AUD-003 체인 검증용 — sequence_no 오름차순 전체. `tenant_id=None`이면
-        system 체인."""
+        """Full sequence_no ascending list for AUD-003 chain verification.
+        When `tenant_id=None`, returns the system chain."""
         ...
 
     async def get_latest_event(

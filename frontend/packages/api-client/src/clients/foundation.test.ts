@@ -171,7 +171,7 @@ describe("withFoundation: paper-deployments 5개 + trust/consents", () => {
   });
 
   it("같은 키·다른 body면 서버 왕복 전에 차단한다(task-427 checkDigest 재사용)", async () => {
-    const key = "same-key-mismatch-test-01";
+    const key = "key-same-mismatch-fixture";
     const first = stubFetch(envelope(deploymentView), 201);
     const client = makeClient();
 
@@ -192,7 +192,7 @@ describe("withFoundation: paper-deployments 5개 + trust/consents", () => {
   });
 
   it("같은 키·같은 body 재전송(replay)은 서버 왕복을 허용한다", async () => {
-    const key = "same-key-replay-test-01";
+    const key = "key-same-replay-fixture";
     const client = makeClient();
     const body = { packageRef: "pkg-a", adapterType: "bitget-sandbox", providerSandboxAccountRef: "acct-1" };
 
@@ -205,7 +205,7 @@ describe("withFoundation: paper-deployments 5개 + trust/consents", () => {
   });
 
   it("acceptTrustConsent: 같은 키·다른 body는 서버 왕복 전에 차단한다", async () => {
-    const key = "trust-consent-mismatch-test-01";
+    const key = "key-trust-mismatch-fixture";
     const client = makeClient();
 
     stubFetch(envelope(consentView), 201);
@@ -219,7 +219,7 @@ describe("withFoundation: paper-deployments 5개 + trust/consents", () => {
   });
 
   it("paper-deployments와 trust/consents가 우연히 같은 키를 써도 라우트별로 독립적으로 취급한다", async () => {
-    const key = "cross-route-shared-key-0001-abcdefgh";
+    const key = "key-cross-route-shared-fixture";
     const client = makeClient();
 
     stubFetch(envelope(deploymentView), 201);
@@ -251,7 +251,7 @@ describe("DEEPEN 3185: 수치 성능 단언 + 게이트 적색 재현", () => {
   // 단락(short-circuit)됐다고 볼 수 있다.
   it("수치 성능: 같은 키·다른 body 거부는 네트워크 왕복(200ms)을 기다리지 않고 그 절반 미만에서 즉시 실패한다", async () => {
     const NETWORK_LATENCY_MS = 200;
-    const key = "perf-mismatch-test-0001-abcdefgh";
+    const key = "key-perf-mismatch-fixture";
     const client = makeClient();
 
     stubFetch(envelope(deploymentView), 201);

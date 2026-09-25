@@ -1,4 +1,9 @@
-import type { RecoverySafetyControlRequest } from "@aios/shared-types";
+import type {
+  ActivateSafetyControlRequest,
+  ApproveRuleBundleRequest,
+  EvaluateRiskGateRequest,
+  RecoverySafetyControlRequest,
+} from "@aios/shared-types";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiClient } from "./clientInstance";
 
@@ -30,5 +35,33 @@ export function useEvaluateRecovery() {
       body: RecoverySafetyControlRequest;
     }) => apiClient.evaluateRecovery(controlId, body),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["safetyControls"] }),
+  });
+}
+
+// task-5810(FE-OPS-9): 개통(admin activate)·룰번들 승인/활성화·evaluate 트리거 훅.
+export function useActivateSafetyControl() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (body: ActivateSafetyControlRequest) => apiClient.activateSafetyControl(body),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["safetyControls"] }),
+  });
+}
+
+export function useEvaluateRiskGate() {
+  return useMutation({
+    mutationFn: (body: EvaluateRiskGateRequest) => apiClient.evaluateRiskGate(body),
+  });
+}
+
+export function useApproveRuleBundle() {
+  return useMutation({
+    mutationFn: ({ bundleId, body }: { bundleId: string; body: ApproveRuleBundleRequest }) =>
+      apiClient.approveRuleBundle(bundleId, body),
+  });
+}
+
+export function useActivateRuleBundle() {
+  return useMutation({
+    mutationFn: (bundleId: string) => apiClient.activateRuleBundle(bundleId),
   });
 }

@@ -19,12 +19,13 @@ _ATOMIC_RE = re.compile(
 
 
 class ConditionEvaluationError(Exception):
-    """컴파일러가 만들 수 없는 형태의 문자열 — 컴파일러 자체의 버그 신호."""
+    """A string in a form the compiler cannot produce — signals a bug in the compiler itself."""
 
 
 class IndicatorDataMissingError(Exception):
-    """market_state에 조건식이 참조하는 지표 키가 없음(FD-8.1 예외상황) —
-    판단 보류 대상이지 오류가 아니다. 어떤 키가 없었는지 메시지에 담는다."""
+    """The indicator key referenced by the condition expression is missing from market_state
+    (FD-8.1 exception case) — this is a hold-for-judgment condition, not an error. The
+    message carries which key was absent."""
 
 
 def extract_indicator_keys(expression: str) -> list[str]:

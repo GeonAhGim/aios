@@ -35,7 +35,9 @@ oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/auth/login", auto_error=False)
 
 class AuthenticatedUser(User):
     """PLT-24 — The actual return type of `get_current_user()`. Subclass of
-    `User` so existing routers (15+) declared with `user: User = Depends(get_current_user)` continue to work (extra fields are simply ignored) — only new routers that need `session_id`/`auth_level` (e.g., `/auth/logout`) should declare this type."""
+    `User` so existing routers (15+) declared with `user: User = Depends(get_current_user)`
+    continue to work (extra fields are simply ignored) — only new routers that need
+    `session_id`/`auth_level` (e.g., `/auth/logout`) should declare this type."""
 
     session_id: UUID
     auth_level: AuthLevel

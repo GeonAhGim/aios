@@ -82,10 +82,23 @@ class PostgresAgentTokenRepository:
             row = await conn.fetchrow("SELECT * FROM agent_token WHERE token_id = $1", token_id)
         return None if row is None else _row_to_token(row)
 
-    async def get_by_hash(self, token_hash: str) -> AgentToken | None:
+    async def get_by_hash(self, token_hash: str) -> tuple[AgentToken, datetime] | None:
+        """Returns the token alongside the DB server's own clock
+        (`clock_timestamp()`), read in the same round trip -- so
+        `application/authorize.py`'s liveness check (`revoked_at`/
+        `expires_at`, both DB-stamped) never has to compare against a
+        separately-captured application clock. Mixing the two clocks around
+        a threshold comparison is a real race (same class of bug as
+        [[src/services/auth/lockout.py]]'s `register_failed_attempt`), not a
+        theoretical one -- it flaked `test_issue_authorize_revoke_round_trip`
+        in CI (esc-ci-pytest.json)."""
         async with self._pool.acquire() as conn:
-            row = await conn.fetchrow("SELECT * FROM agent_token WHERE token_hash = $1", token_hash)
-        return None if row is None else _row_to_token(row)
+            row = await conn.fetchrow(
+                "SELECT *, clock_timestamp() AS server_now FROM agent_token "
+                "WHERE token_hash = $1",
+                token_hash,
+            )
+        return None if row is None else (_row_to_token(row), row["server_now"])
 
     async def list_for_tenant(self, tenant_id: UUID) -> tuple[AgentToken, ...]:
         """AI-17 -- `api/routers/ai.py`'s "token management" list view. Newest

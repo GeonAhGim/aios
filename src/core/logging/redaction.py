@@ -9,6 +9,7 @@ docs/specs/L4_platform_observability_tenancy_api_v1.0.md#§9 PLT-02.
 지워버리면 로그 자체가 무의미해지므로 부분 일치 오탐을 피한다. 키 매칭은 스펙이
 명시한 대로 부분 일치·대소문자 무시다(`user_api_key`도 `api_key`로 걸린다).
 """
+
 from __future__ import annotations
 
 import logging
@@ -20,20 +21,21 @@ REDACTED: Final[str] = "<redacted>"
 
 # 108 §2.1: 원문 secret/토큰/복호화 credential은 절대 로그에 남기지 않는다 —
 # 이 키들과 부분 일치(대소문자 무시)하면 값 형태와 무관하게 마스킹한다.
-DENY_KEYS: Final[frozenset[str]] = frozenset(
-    {
-        "api_key",
-        "api_secret",
-        "secret",
-        "password",
-        "totp",
-        "token",
-        "authorization",
-        "private_key",
-        "raw_payload",
-        "answers",
-    }
-)
+_DEFAULT_DENY_KEYS: set[str] = {
+    "api_key",
+    "api_secret",
+    "secret",
+    "password",
+    "totp",
+    "token",
+    "authorization",
+    "private_key",
+    "raw_payload",
+    "answers",
+}
+
+# Backwards-compatible alias for callers that import `DENY_KEYS`.
+DENY_KEYS = _DEFAULT_DENY_KEYS
 
 # opaque reference(secret_ref.py)는 108 §2.1이 허용하는 안전한 값이므로
 # 아래 값 기반 패턴에 우연히 걸려도 마스킹하지 않는다.

@@ -1,29 +1,30 @@
-"""LA-15 — Bitget 캔들 소스 어댑터(`IngestSource`, LA-9 포트 구현).
+"""LA-15 — Bitget candle source adapter (`IngestSource`, LA-9 port impl).
 
 Spec: docs/specs/L4_market_data_positions_ledger_v1.0.md#§2.2, §9.2 LA-15, §10 R8.
 
-`ExchangeAdapter.get_ohlcv`(`src/exchanges/common/adapter.py`)만 호출한다 —
-Bitget 전용 페이지네이션 메서드(`get_history_candles`)는 이 추상 인터페이스에
-없으므로 쓰지 않는다(모듈 표 §2.2 LA-15 의존 = `adapter.py` 하나). `get_ohlcv`
-는 `start`/`end` 파라미터가 없어(가장 최근 `limit`개만 반환) 응답을
-`[start, end)` 범위로 클라이언트 측 필터링한다 — 요청 구간이 거래소가 실제로
-반환하는 최신 구간보다 과거이면 빈 리스트가 될 수 있다(**미검증**: 서버
-페이지네이션·시간 오프셋, §10 R8).
+Calls only `ExchangeAdapter.get_ohlcv` (`src/exchanges/common/adapter.py`) —
+the Bitget-specific pagination method (`get_history_candles`) is not on this
+abstract interface and must not be used (module table §2.2 LA-15 dependency =
+`adapter.py` only). `get_ohlcv` has no `start`/`end` params (returns only the
+most recent `limit` candles), so the response is client-side filtered to the
+`[start, end)` window — if the requested range is older than what the exchange
+actually returns as the latest window the result may be an empty list
+(**unverified**: server pagination / time offset, §10 R8).
 
-`limit`은 요청 구간에 필요한 캔들 수(+1 여유)로 계산하되 §10 R8 "최대
-200으로 보수적으로 설정" 상한을 절대 넘지 않는다(실측 없이 도입하는 값이라
-보수적으로 잡는다).
+Compute `limit` from the number of candles needed for the requested span (+1
+headroom) but never exceed the §10 R8 "conservatively cap at 200" upper bound
+(this is a value introduced without live measurement, so we keep it conservative).
 
-`raw_symbol`(포트 파라미터, venue 원시 심볼 — 예: "BTCUSDT")을 받아 이
-어댑터 내부에서만 `symbol_normalizer.to_canonical`로 "BTC/USDT" 형식으로
-바꿔 `get_ohlcv`에 넘긴다(`BitgetMarketDataMixin.get_ohlcv`가 내부적으로
-`to_bitget_symbol`을 다시 거는 것과 대칭 — LA-7 규칙을 재구현하지 않고
-그대로 위임).
+Accepts `raw_symbol` (port param, venue-native symbol, e.g. "BTCUSDT") and
+converts it internally via `symbol_normalizer.to_canonical` to "BTC/USDT"
+format before passing to `get_ohlcv` (symmetric with
+`BitgetMarketDataMixin.get_ohlcv` which runs `to_bitget_symbol` again — do not
+re-implement LA-7 rules, just delegate).
 
-반환하는 `CandleRecord.key.instrument_id`는 알 수 없다(이 어댑터는 DB를
-모른다, 71번 §4) — 플레이스홀더 UUID(nil)를 채운다. `ingest_candles`가
-참조데이터에서 조회한 진짜 instrument_id로 무조건 다시 키를 씌우므로
-호출자는 이 값에 의존하지 않는다.
+The returned `CandleRecord.key.instrument_id` is unknown (this adapter knows
+no DB, #71 §4) — fill with a placeholder UUID (nil). `ingest_candles` will
+always re-key with the real `instrument_id` looked up from reference data, so
+callers must not depend on this value.
 """
 from __future__ import annotations
 
@@ -41,12 +42,12 @@ from src.foundation.market_data.domain.timeframe import duration
 
 __all__ = ["BitgetIngestSource", "UnsupportedVenueError"]
 
-_MAX_LIMIT = 200  # §10 R8 미확인 — 보수적 상한, 실측 후 조정
+_MAX_LIMIT = 200  # §10 R8 unverified — conservative cap, adjust after live measurement
 _PLACEHOLDER_INSTRUMENT_ID = UUID(int=0)
 
 
 class UnsupportedVenueError(ValueError):
-    """`BitgetIngestSource`는 `Venue.BITGET`만 지원한다."""
+    """`BitgetIngestSource` supports only `Venue.BITGET`."""
 
 
 def _to_candle_record(candle: Candle, tf: Timeframe) -> CandleRecord:
@@ -85,9 +86,9 @@ class BitgetIngestSource:
         end: AwareDatetime,
     ) -> list[CandleRecord]:
         if venue is not Venue.BITGET:
-            raise UnsupportedVenueError(f"BitgetIngestSource는 BITGET 전용: {venue!r}")
+            raise UnsupportedVenueError(f"BitgetIngestSource is BITGET-only: {venue!r}")
         if start.tzinfo is None or end.tzinfo is None:
-            raise ValueError("fetch_candles는 tz-aware datetime만 받는다")
+            raise ValueError("fetch_candles accepts tz-aware datetime only")
 
         canonical = to_canonical(venue, raw_symbol)
         limit = _limit_for_range(start, end, tf, self._max_limit)

@@ -290,4 +290,18 @@ export const catalogEnLegacyD = {
     "t9": "target {{targetType}} #{{targetId}}",
     "t10": "No audit log entries.",
   },
+  "signalSourcesPage": {
+    "t1": "A new secret for {{sourceName}} has been issued.",
+    "t2": "This secret is shown only now. Copy it somewhere safe -- it cannot be retrieved again.",
+    "t3": "Confirm",
+    "t4": "No signals received recently.",
+    "t5": "Hide log",
+    "t6": "Recent receipt log",
+    "t7": "Rotate",
+    "title8": "Signal sources",
+    "label9": "Source name",
+    "placeholder10": "e.g. TradingView webhook",
+    "t11": "Issue",
+    "t12": "No signal sources registered.",
+  },
 } as const;

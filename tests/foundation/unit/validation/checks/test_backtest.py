@@ -198,6 +198,7 @@ def test_unexpected_replay_exception_is_not_swallowed(monkeypatch: pytest.Monkey
 # -- D2 numeric performance assertion ------------------------------------------
 
 
+@pytest.mark.perf
 def test_p95_latency_within_local_replay_budget() -> None:
     """ADR-2026-09-09-C axis performance budget: this check's own overhead
     (cost gate + benchmark calc) on top of `run_backtest` for a 60-bar

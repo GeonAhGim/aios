@@ -150,6 +150,7 @@ async def test_update_tenant_id_to_nonexistent_value_raises_fk_violation(pool, r
             )
 
 
+@pytest.mark.perf
 async def test_fk_violation_round_trip_p95_latency_within_local_budget(pool, repo):
     # ADR-2026-09-09-C Decision 1의 축별 성능 예산 표는 사전거래 게이트/
     # 주문 제출/봉 조회 등만 나열하고 FK 왕복 지연은 다루지 않는다(N/A인

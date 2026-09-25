@@ -199,6 +199,7 @@ async def test_account_lockout_is_audit_logged(auth, pool):
     assert decision_data["failed_attempts"] == 5
 
 
+@pytest.mark.perf
 async def test_nonexistent_account_timing_matches_wrong_password_timing(auth):
     """docs/RED_TEAM_FINDINGS.md #12 회귀 — 계정 미존재 경로가 Argon2
     verify()를 건너뛰면 존재하는 계정+틀린 비밀번호 경로보다 훨씬 빨리

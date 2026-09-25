@@ -1,4 +1,5 @@
 """79번 §1/§2 규칙의 단위테스트 — DB 없이 순수 함수만 검증한다."""
+import time
 from datetime import datetime, timezone
 from uuid import uuid4
 
@@ -103,6 +104,15 @@ def test_tampered_payload_hash_is_detected():
         verify_chain([tampered])
 
 
+def test_missing_occurred_at_breaks_chain():
+    """occurred_at이 없으면(저장 계층 결함으로 NULL이 흘러든 경우) 해시를
+    재계산할 수 없으니 조용히 통과시키지 않고 명시적으로 체인 단절 처리한다."""
+    event = _event()
+    broken = AuditEvent(**{**event.__dict__, "occurred_at": None})
+    with pytest.raises(ChainIntegrityError):
+        verify_chain([broken])
+
+
 def test_missing_middle_event_breaks_chain():
     """AUD-003 — 중간 이벤트가 통째로 삭제되면(WORM을 우회한 경우) 다음
     이벤트의 previous_hash가 그 앞의 실제 event_hash와 안 맞아 걸린다."""
@@ -111,3 +121,36 @@ def test_missing_middle_event_breaks_chain():
     third = _event(sequence_no=3, previous_hash=second.event_hash)
     with pytest.raises(ChainIntegrityError):
         verify_chain([first, third])  # second가 삭제된 상황
+
+
+@pytest.mark.perf
+def test_verify_chain_throughput_budget():
+    """D2 성능 단언 — 79번 스펙에 축별 예산표가 아직 없는 신규 모듈이라, 5k
+    이벤트/500ms(=10k events/sec 이상 처리량)를 로컬 기준으로 고정한다. 순수
+    해시 계산이므로 CI 러너에서도 여유 있게 통과해야 하고, 회귀 시(예: 매
+    이벤트마다 불필요한 재직렬화 추가) 여기서 잡힌다."""
+    events: list[AuditEvent] = []
+    previous_hash: str | None = None
+    for sequence_no in range(1, 5001):
+        event = _event(sequence_no=sequence_no, previous_hash=previous_hash)
+        events.append(event)
+        previous_hash = event.event_hash
+
+    started = time.perf_counter()
+    verify_chain(events)
+    elapsed = time.perf_counter() - started
+
+    assert elapsed < 0.5
+
+
+def test_replayed_stale_event_breaks_chain_red_gate_repro():
+    """게이트 적색 재현 — AUD-003의 실제 공격 시나리오: 오래된(이미 체인에
+    포함된) 이벤트를 뒤쪽 sequence_no로 재주입해 감사 로그를 부풀리거나
+    최신 이벤트를 가리는 replay 공격. previous_hash가 실제로 그 자리에
+    와야 할 직전 이벤트의 event_hash와 다르므로 verify_chain이 이 조작을
+    막아야 한다 — 79번 §4 `INTEGRITY_AUDIT_CHAIN_BROKEN`로 매핑되는 경로."""
+    first = _event(sequence_no=1)
+    second = _event(sequence_no=2, previous_hash=first.event_hash)
+    replayed_first_as_third = _event(sequence_no=3, previous_hash=first.event_hash)
+    with pytest.raises(ChainIntegrityError):
+        verify_chain([first, second, replayed_first_as_third])

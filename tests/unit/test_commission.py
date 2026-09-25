@@ -1,5 +1,6 @@
 """13.7 단위테스트 — 순수 계산 로직."""
 
+import time
 from decimal import Decimal, InvalidOperation
 from unittest.mock import patch
 
@@ -121,3 +122,24 @@ def test_split_commission_exception_propagates_as_commission_error() -> None:
     ):
         with pytest.raises(InvalidOperation):
             calculate_commission(Decimal("100.00"))
+
+
+# --- Performance assertion (DEEPEN budget: ≤500µs per call at n=1000) ---
+
+
+def test_calculate_commission_performance() -> None:
+    """Verify that 1000 commission calculations complete within 500ms total.
+
+    Budget from ADR-2026-09-09-C: commission path must stay below 1 ms per call
+    at p99 under normal load.  This test enforces a generous 500µs/call budget
+    (500 ms for 1000 iterations) with no I/O.
+    """
+    iterations = 1000
+    price = Decimal("100000")
+    rate = Decimal("0.05")
+    t0 = time.perf_counter_ns()
+    for _ in range(iterations):
+        calculate_commission(price, rate)
+    elapsed_ms = (time.perf_counter_ns() - t0) / 1_000_000
+    # Budget: 500 µs/call × 1000 = 500 ms total
+    assert elapsed_ms < 500, f"Commission calculation exceeded 500 ms budget: {elapsed_ms:.1f} ms"

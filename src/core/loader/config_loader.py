@@ -2,7 +2,7 @@
 
 Spec: 03_core_modules_v1.1.md#§3.1
 
-6.5 원칙 — 데이터를 해석하거나 투자판단을 하지 않는다. 읽기만 한다.
+Principle 6.5 — Do not interpret data or make investment decisions. Read only.
 """
 from __future__ import annotations
 
@@ -13,10 +13,11 @@ import yaml
 
 
 def load_config(path: Path) -> dict[str, Any]:
-    """YAML 설정 파일(risk_policy.yaml 등)을 읽어 dict로 반환한다.
+    """Load a YAML config file (e.g. risk_policy.yaml) and return a dict.
 
-    스키마 검증(값이 올바른 범위인지 등)은 이 함수의 책임이 아니다 — 각
-    설정 소비자(예: RiskPolicyGate)가 자신의 스키마로 검증한다(7.3 원칙).
+    Schema validation (whether values are in valid ranges, etc.) is not this
+    function's responsibility — each config consumer (e.g. RiskPolicyGate)
+    validates against its own schema (principle 7.3).
     """
     with path.open(encoding="utf-8") as f:
         data = yaml.safe_load(f)

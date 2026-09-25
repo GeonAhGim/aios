@@ -44,6 +44,7 @@ from collections.abc import Callable
 from decimal import Decimal
 
 import httpx
+import pytest
 
 from src.data.models.base import AssetClass, Currency, Money
 from src.data.models.trading import Order, OrderSide, OrderStatus, OrderType
@@ -184,6 +185,7 @@ async def test_cancel_order_survives_transient_network_failure_then_succeeds() -
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.perf
 async def test_place_get_cancel_roundtrip_throughput_within_normalized_budget() -> None:
     """place_order/get_order/cancel_order 왕복 실측 소요시간을, 동일 N 크기의
     trivial dict 생성 루프(같은 프로세스, 같은 측정 시점) 대비 정규화한

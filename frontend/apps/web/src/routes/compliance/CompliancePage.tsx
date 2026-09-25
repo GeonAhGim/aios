@@ -4,16 +4,21 @@ import { AppShell } from "../../components/layout/AppShell";
 import { ComplianceActionError } from "./ComplianceActionError";
 import { ComplianceDecisionLookupPanel } from "./ComplianceDecisionLookupPanel";
 import { ComplianceDecisionPanel } from "./ComplianceDecisionPanel";
+import { ComplianceExceptionApproval } from "./ComplianceExceptionApproval";
 import { ComplianceMandateStatusCard } from "./ComplianceMandateStatusCard";
 import { useTranslation } from "react-i18next";
 
-// task-2620(H-2 CM-17 프론트) + task-2668(CM-18): ADR-2026-09-09-B H-2, spec
-// L4_compliance_and_regulatory §9. mandate 편집·승인 흐름(CM-19)은 이 화면 범위
-// 밖이라 조회 전용 카드만 둔다. ComplianceDecisionPanel(CM-17 시점, 이 파일 하단
-// 소스 참조)은 policy:evaluate 위의 reasonCodes 평면 목록이고,
-// ComplianceDecisionLookupPanel(CM-18)이 task-2618의 GET /decisions/{id}로 실제
-// ComplianceDecision/RuleHit(규칙 히트, severity·evidence)를 렌더한다 — 두 패널은
-// 서로 다른 API·다른 판정 표현이라 하나로 합치지 않는다(각자 파일 상단 주석 참조).
+// task-2620(H-2 CM-17 프론트) + task-2668(CM-18) + task-5996(CM-18 예외 승인):
+// ADR-2026-09-09-B H-2, spec L4_compliance_and_regulatory §9. mandate 편집·승인
+// 흐름(CM-19)은 이 화면 범위 밖이라 조회 전용 카드만 둔다. ComplianceDecisionPanel
+// (CM-17 시점, 이 파일 하단 소스 참조)은 policy:evaluate 위의 reasonCodes 평면
+// 목록이고, ComplianceDecisionLookupPanel(CM-18)이 task-2618의 GET
+// /decisions/{id}로 실제 ComplianceDecision/RuleHit(규칙 히트, severity·evidence)
+// 를 렌더한다 — 두 패널은 서로 다른 API·다른 판정 표현이라 하나로 합치지 않는다
+// (각자 파일 상단 주석 참조). ComplianceExceptionApproval(task-5996)은 규칙
+// 위반 건에 대한 예외 승인 UI 골격이다 — 대기 목록을 채울 서버 API가 아직 없어
+// 빈 배열을 넘기고, `onSubmit`도 아직 배선하지 않는다(그 파일 상단 주석 참조:
+// CM_EXCEPTION_REQUIRED 토큰 엔드포인트는 별도 백엔드 리프에서 나온다).
 export function CompliancePage() {
   const { t } = useTranslation();
   const { data, isLoading, isError, error, refetch } = useMandateStatus();
@@ -50,6 +55,7 @@ export function CompliancePage() {
         />
         <ComplianceDecisionPanel />
         <ComplianceDecisionLookupPanel />
+        <ComplianceExceptionApproval pendingExceptions={[]} />
       </div>
     </AppShell>
   );

@@ -367,6 +367,7 @@ async def test_children_awaiting_cancel_propagates_db_failure() -> None:
     repo.list_children_for_update.assert_awaited()
 
 
+@pytest.mark.perf
 async def test_recompute_parent_aggregate_perf_budget_many_children() -> None:
     """성능 단언 -- `recompute_parent_aggregate`는 호출마다 자식 목록 전체를
     순회해 롤업한다(EM-2 `aggregate_parent_state`, O(n)). 자식 300개 x 반복

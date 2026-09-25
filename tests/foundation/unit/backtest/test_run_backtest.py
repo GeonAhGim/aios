@@ -344,6 +344,7 @@ def _never_signals_fsm_config() -> FSMStrategyConfig:
     )
 
 
+@pytest.mark.perf
 def test_throughput_meets_local_budget_floor() -> None:
     """성능 단언(수치): ADR-2026-09-09-C §축별 성능 예산 "백테스트 1개월 M1
     1심볼 3초"의 극히 일부 구간(2,000 bar ≈ 1.4일치 M1)조차 여유 있게
@@ -357,6 +358,7 @@ def test_throughput_meets_local_budget_floor() -> None:
     assert elapsed < 1.0
 
 
+@pytest.mark.perf
 def test_quadratic_window_rebuild_is_a_known_gate_red_against_monthly_budget() -> None:
     """게이트 적색 재현: run_backtest()는 매 bar마다 `bars[: bar_index + 1]`로
     전체 누적 윈도를 새로 만들어 build_market_state에 넘긴다(L28

@@ -269,6 +269,7 @@ async def test_get_propagates_cancelled_error_instead_of_swallowing_it(
         await cache.get(adapter, "BTC/USDT", bars=30, owner_id=_OWNER)
 
 
+@pytest.mark.perf
 async def test_get_cache_hit_makes_no_adapter_call_and_is_fast() -> None:
     """성능 단언(D2) — TTL 이내 재요청은 어댑터를 다시 부르지 않는 O(1)
     dict 조회여야 한다. 500회 캐시 히트가 느슨한 상한(200ms, 회귀 감지용

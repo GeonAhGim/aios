@@ -45,15 +45,15 @@ def _make_adapter(handler, *, is_paper_trading: bool = True) -> NHAdapter:
 # 원본 함수(`__wrapped__`, functools.wraps가 자동으로 남긴다)를 직접 호출해
 # 검증한다 — 소스의 가드를 우회하도록 고치는 게 아니라 테스트에서만 우회한다.
 async def _unguarded_place_order(adapter: NHAdapter, order: Order) -> Order:
-    return await NHAdapter.place_order.__wrapped__(adapter, order)  # type: ignore[attr-defined]
+    return await NHAdapter.place_order.__wrapped__(adapter, order)  # type: ignore[attr-defined]  # functools.wraps가 남긴 __wrapped__(위 주석 참고, 데코레이터 우회는 테스트 전용)
 
 
 async def _unguarded_cancel_order(adapter: NHAdapter, order_id: str) -> bool:
-    return await NHAdapter.cancel_order.__wrapped__(adapter, order_id)  # type: ignore[attr-defined]
+    return await NHAdapter.cancel_order.__wrapped__(adapter, order_id)  # type: ignore[attr-defined]  # functools.wraps가 남긴 __wrapped__(위 주석 참고, 데코레이터 우회는 테스트 전용)
 
 
 async def _unguarded_modify_order(adapter: NHAdapter, order_id: str, **kwargs) -> Order:
-    return await NHAdapter.modify_order.__wrapped__(adapter, order_id, **kwargs)  # type: ignore[attr-defined]
+    return await NHAdapter.modify_order.__wrapped__(adapter, order_id, **kwargs)  # type: ignore[attr-defined]  # functools.wraps가 남긴 __wrapped__(위 주석 참고, 데코레이터 우회는 테스트 전용)
 
 
 def _route(request: httpx.Request, routes: dict) -> httpx.Response:
@@ -265,10 +265,40 @@ async def test_get_orderbook_raises_fatal_when_depth_quantity_missing():
         await adapter.get_orderbook("005930")
 
 
-async def test_get_ohlcv_not_implemented():
+async def test_get_ohlcv_returns_daily_candles():
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == "/krstock/quote/v1/currentDaily"
+        body = json.loads(request.content)
+        assert body["iem_cd"] == "005930"
+        return httpx.Response(
+            200,
+            json=_success(
+                [
+                    {
+                        "bsop_date": "20260924",
+                        "stck_oppr": "50000",
+                        "stck_hgpr": "51000",
+                        "stck_lwpr": "49500",
+                        "stck_clpr": "50500",
+                        "acml_vol": "1000000",
+                    }
+                ]
+            ),
+        )
+
+    adapter = _make_adapter(
+        lambda request: _route(request, {"/krstock/quote/v1/currentDaily": handler})
+    )
+    candles = await adapter.get_ohlcv("005930", "1d")
+
+    assert len(candles) == 1
+    assert candles[0].close == Decimal("50500")
+
+
+async def test_get_ohlcv_rejects_unsupported_timeframe():
     adapter = _make_adapter(lambda request: httpx.Response(200, json=TOKEN_RESPONSE))
-    with pytest.raises(NotImplementedError):
-        await adapter.get_ohlcv("005930", "1d")
+    with pytest.raises(ValueError, match="only daily"):
+        await adapter.get_ohlcv("005930", "1h")
 
 
 async def test_capabilities_declare_websocket_supported():

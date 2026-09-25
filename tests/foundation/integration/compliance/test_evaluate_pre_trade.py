@@ -232,6 +232,7 @@ async def test_real_connection_refused_propagates_fail_closed_not_swallowed():
 # --- Numeric performance/latency (DEEPEN task-2861) --------------------------
 
 
+@pytest.mark.perf
 async def test_evaluate_pre_trade_meets_latency_budget(pool, repo, trust_repo):
     """수치 성능/지연 단언: 실 DB 왕복(mandate/revision 조회 + 번들 캐시
     조회 + policy_decision INSERT)을 포함해 서로 다른 심볼 100건을 연속

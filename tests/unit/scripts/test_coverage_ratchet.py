@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import importlib.util
 import sys
+import time
 from pathlib import Path
 from types import ModuleType
 
@@ -218,3 +219,57 @@ def test_custom_tolerance_is_respected(tmp_path: Path) -> None:
     )
 
     assert exit_code == 0
+
+
+# ---------------------------------------------------------------------------
+# 실패 주입 — baseline 갱신 쓰기가 중간에 실패해도 조용히 통과 보고하지 않는다
+# ---------------------------------------------------------------------------
+
+
+def test_baseline_write_failure_propagates_instead_of_silent_pass(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """DoD: 실패 주입 — 커버리지가 올라 baseline을 갱신해야 하는 경로에서 디스크
+    풀/권한 오류로 쓰기가 실패하면, CI는 "OK"를 출력하며 조용히 넘어가는 대신
+    예외가 그대로 전파되어 비정상 종료(fail-closed)해야 한다. `main()`은
+    `CoverageRatchetError`만 잡으므로 쓰기 단계의 `OSError`는 잡히지 않고
+    올라와야 한다 — 그렇지 않으면 baseline이 새 값으로 갱신되지 않았는데도
+    다음 실행이 그 사실을 모른 채 이전 baseline과 비교하는 사고로 이어진다."""
+    xml_path = _write_coverage_xml(tmp_path, 0.85)
+    baseline_path = _write_baseline(tmp_path, 80.00)
+
+    def _raise_disk_full(self: Path, *args: object, **kwargs: object) -> None:
+        raise OSError("No space left on device")
+
+    monkeypatch.setattr(Path, "write_text", _raise_disk_full)
+
+    with pytest.raises(OSError, match="No space left on device"):
+        coverage_ratchet.main(
+            ["--coverage-xml", str(xml_path), "--baseline", str(baseline_path)]
+        )
+
+
+# ---------------------------------------------------------------------------
+# 수치 성능 단언 — 순수 파서/비교 경로는 CI 스텝에서 매 커밋 실행되므로 저지연이어야 한다
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.perf
+def test_main_p95_latency_within_budget(tmp_path: Path) -> None:
+    """coverage.xml 파싱 + baseline 비교는 파일 I/O 두 번뿐인 순수 경로다 —
+    CI가 매 커밋 이 스크립트를 실행하므로 100회 반복 p95가 50ms를 넘으면
+    안 된다(로컬 SSD 기준 예산; ADR-2026-09-09-C D2 "성능 단언 1" 요건)."""
+    xml_path = _write_coverage_xml(tmp_path, 0.80)
+    baseline_path = _write_baseline(tmp_path, 80.00)
+    args = ["--coverage-xml", str(xml_path), "--baseline", str(baseline_path)]
+
+    samples: list[float] = []
+    for _ in range(100):
+        start = time.perf_counter()
+        exit_code = coverage_ratchet.main(args)
+        samples.append(time.perf_counter() - start)
+        assert exit_code == 0
+
+    samples.sort()
+    p95 = samples[int(len(samples) * 0.95) - 1]
+    assert p95 < 0.05, f"p95={p95 * 1000:.2f}ms exceeds 50ms budget"

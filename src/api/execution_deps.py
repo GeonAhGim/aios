@@ -19,9 +19,10 @@ def get_execution_service(
     policy: RiskPolicy = Depends(get_risk_policy),
     event_bus: EventBus = Depends(get_event_bus),
 ) -> ExecutionService:
-    # EO-05 — 실행 시작(FD-16.3 start())도 실행 루프(EO-03/EO-04)와 동일한
-    # kill switch 게이트를 물려, 운영자가 kill switch를 올렸을 때 이미
-    # RUNNING인 실행뿐 아니라 새로 "시작"을 누르는 경로도 막는다.
+    # EO-05 — execution start (FD-16.3 start()) shares the same
+    # kill switch gate as the execution loop (EO-03/EO-04), so when an
+    # operator raises the kill switch it blocks both RUNNING executions
+    # and any new "start" attempt.
     return ExecutionService(
         pool,
         policy,

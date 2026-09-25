@@ -112,6 +112,7 @@ def _config() -> BacktestConfigV2:
     )
 
 
+@pytest.mark.perf
 @pytest.mark.nightly
 @pytest.mark.timeout(540)  # 43,200봉 x 200조합 실측은 기본 120s 타임아웃을 넘는다
 def test_grid_sweep_full_month_m1_throughput() -> None:

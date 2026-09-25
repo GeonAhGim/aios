@@ -40,6 +40,7 @@ import os
 import subprocess
 import sys
 import time
+from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
 
@@ -47,6 +48,7 @@ import httpx
 import pytest
 
 from src.core.exceptions import FatalExchangeError, RetryableExchangeError
+from src.exchanges.kis import rate_profile
 from src.exchanges.kis.adapter import REAL_BASE_URL, KISAdapter
 from tests.fixtures.kis.generated_cases import (
     GeneratedCase,
@@ -66,6 +68,19 @@ _TOKEN_RESPONSE = {
 
 _PARAMS_CASE = next(c for c in _REST_CASES if c.arg_style == "params")
 _BODY_CASE = next(c for c in _REST_CASES if c.arg_style == "body")
+
+
+@pytest.fixture(autouse=True)
+def _reset_bucket_registry() -> Iterator[None]:
+    """`rate_profile.py`'s (account_type, tr_group) `TokenBucket` is a
+    process-wide singleton (BR-2b) - whichever test creates it first locks in
+    its `sleep` callable for every later test sharing the key. Without this
+    reset the adapters below inherit a real-`asyncio.sleep` bucket from test
+    order and the n=100 perf loop blocks on PAPER's 2 req/s throttle for real
+    (task-5596 precedent)."""
+    rate_profile.reset_token_bucket_registry_for_test()
+    yield
+    rate_profile.reset_token_bucket_registry_for_test()
 
 
 async def _instant_sleep(_seconds: float) -> None:
@@ -89,7 +104,7 @@ def _make_adapter(handler: Any) -> KISAdapter:
         http_client=client,
         sleep_fn=_instant_sleep,
     )
-    adapter._resolve_tr_id = lambda tr_id: tr_id  # type: ignore[method-assign]
+    adapter._resolve_tr_id = lambda tr_id: tr_id  # type: ignore[method-assign]  # 인스턴스 단위 치환(위 주석 참고, BR-11 tr_id 조립 검증 전용)
     return adapter
 
 
@@ -213,6 +228,7 @@ def _fast_handler(case: GeneratedCase, captured: list[httpx.Request]) -> Any:
     return handler
 
 
+@pytest.mark.perf
 async def test_generated_method_call_overhead_bounded_vs_raw_request_baseline() -> None:
     """생성 메서드는 얇은 래퍼일 뿐이라(`return await self._request(...)`,
     src/exchanges/kis/generated/*_mixin.py 전수 확인) 원시 `_request` 왕복

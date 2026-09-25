@@ -277,6 +277,7 @@ def _p95_ms(samples: list[float]) -> float:
     return ordered[min(int(len(ordered) * 0.95), len(ordered) - 1)] * 1000
 
 
+@pytest.mark.perf
 def test_run_p95_latency_within_budget(monkeypatch: pytest.MonkeyPatch) -> None:
     ctx = _ctx(_bars(50))
     samples: list[float] = []
@@ -289,6 +290,7 @@ def test_run_p95_latency_within_budget(monkeypatch: pytest.MonkeyPatch) -> None:
     assert p95_ms < _BUDGET_MS
 
 
+@pytest.mark.perf
 def test_budget_gate_actually_fails_when_run_walk_forward_stalls(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

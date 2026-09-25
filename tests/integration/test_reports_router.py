@@ -115,6 +115,32 @@ async def test_report_aggregates_closed_positions(client, pool):
     assert body["strategy_contributions"][0]["strategy_id"] == "strat-a"
 
 
+async def test_report_buckets_by_utc_date_regardless_of_session_timezone(client, pool):
+    """Regression guard for task-6301: a closed_at just before UTC midnight rolls to the
+    next calendar day under a non-UTC Postgres session TimeZone (this env runs Asia/Seoul,
+    UTC+9) unless the query explicitly anchors the ``::date`` cast to UTC. Pin closed_at to
+    2020-01-01T20:00:00Z (2020-01-02 05:00 KST) and request a period that only covers
+    2020-01-01 UTC -- a session-local cast would bucket the row into 2020-01-02 and drop it.
+    """
+    headers, user_id = await _register(client)
+    closed_at = datetime(2020, 1, 1, 20, 0, 0, tzinfo=timezone.utc)
+    strategy_id = f"strat-{uuid.uuid4().hex}"
+    await _insert_closed_position(
+        pool, user_id, realized_pnl=Decimal("10"), closed_at=closed_at, strategy_id=strategy_id
+    )
+
+    response = await client.get(
+        "/reports",
+        params={"period_start": "2020-01-01", "period_end": "2020-01-01"},
+        headers=headers,
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["trade_count"] == 1
+    assert body["daily_pnl"][0]["trade_date"] == "2020-01-01"
+
+
 async def test_reports_require_authentication(client):
     response = await client.get(
         "/reports", params={"period_start": "2020-01-01", "period_end": "2020-01-31"}

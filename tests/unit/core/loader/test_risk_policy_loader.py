@@ -247,6 +247,7 @@ def test_corrupted_policy_field_raises_instead_of_silently_hashing():
         verify_policy_against_bundle(corrupted, bundle)
 
 
+@pytest.mark.perf
 def test_bulk_verify_policy_against_bundle_stays_within_perf_budget():
     """성능 단언 — I6 게이트는 R-16 evaluator가 매 결정마다(PRE_TRADE/
     PRE_SUBMIT) 호출한다(§9). 재해시 비용이 병적으로 커지면 판단 계층

@@ -23,8 +23,10 @@ import os
 import subprocess
 import sys
 import time
+from collections.abc import Callable, Generator, Mapping
 from decimal import Decimal
 from pathlib import Path
+from typing import Any
 
 import httpx
 import pytest
@@ -32,11 +34,26 @@ import pytest
 from src.core.exceptions import FatalExchangeError
 from src.data.models.base import AssetClass
 from src.data.models.trading import Order, OrderSide, OrderType
+from src.exchanges.kis import rate_profile
 from src.exchanges.kis.account_mixin import KISAccountMixin
 from src.exchanges.kis.adapter import KISAdapter
 from src.exchanges.kis.market_data_mixin import KISMarketDataMixin
 from src.exchanges.kis.overseas_stock_mixin import KISOverseasStockMixin
 from src.exchanges.kis.trading_mixin import KISTradingMixin
+
+
+@pytest.fixture(autouse=True)
+def _reset_bucket_registry() -> Generator[None, None, None]:
+    """`rate_profile.py`'s (account_type, tr_group) `TokenBucket` is a
+    process-wide singleton (BR-2b) — whichever test creates it first locks in
+    its `sleep` callable for every later test sharing the key. Reset before/
+    after each test so this file's adapters always get a freshly built
+    bucket wired to their own injected fake sleep, instead of possibly
+    inheriting a real-`asyncio.sleep` bucket from test order."""
+    rate_profile.reset_token_bucket_registry_for_test()
+    yield
+    rate_profile.reset_token_bucket_registry_for_test()
+
 
 _TOKEN_PATH = "/oauth2/tokenP"
 _TOKEN_RESPONSE = {"access_token": "t", "access_token_token_expired": "2099-01-01 00:00:00"}
@@ -47,7 +64,11 @@ async def _instant_sleep(_seconds: float) -> None:
     실제 시간만큼 기다리지 않게 한다(오직 이 목적)."""
 
 
-def _make_adapter(handler, *, sleep_fn=None) -> KISAdapter:
+def _make_adapter(
+    handler: Callable[[httpx.Request], httpx.Response],
+    *,
+    sleep_fn: Callable[[float], Any] | None = None,
+) -> KISAdapter:
     transport = httpx.MockTransport(handler)
     http_client = httpx.AsyncClient(
         base_url="https://openapivts.koreainvestment.com:29443", transport=transport
@@ -63,7 +84,10 @@ def _make_adapter(handler, *, sleep_fn=None) -> KISAdapter:
     )
 
 
-def _route(request: httpx.Request, routes: dict) -> httpx.Response:
+def _route(
+    request: httpx.Request,
+    routes: Mapping[str, Callable[[httpx.Request], httpx.Response]],
+) -> httpx.Response:
     if request.url.path == _TOKEN_PATH:
         return httpx.Response(200, json=_TOKEN_RESPONSE)
     handler = routes.get(request.url.path)
@@ -91,7 +115,7 @@ def _order(quantity: Decimal = Decimal("10")) -> Order:
 # ---------------------------------------------------------------------------
 
 
-async def test_get_ticker_missing_expected_field_raises_fatal_exchange_error():
+async def test_get_ticker_missing_expected_field_raises_fatal_exchange_error() -> None:
     """`get_ticker`는 두 엔드포인트 응답을 조합하는데, 지금까지 성공
     경로(test_get_ticker_combines_price_and_orderbook_endpoints)만
     있었고 응답 스키마가 깨진 경우(가격 필드 누락)는 한 번도 검증된
@@ -116,7 +140,7 @@ async def test_get_ticker_missing_expected_field_raises_fatal_exchange_error():
         await adapter.get_ticker("005930")
 
 
-async def test_get_orderbook_missing_output1_raises_fatal_exchange_error():
+async def test_get_orderbook_missing_output1_raises_fatal_exchange_error() -> None:
     """`get_orderbook`은 지금까지 이 저장소의 어떤 테스트에서도 호출된
     적이 없다(get_ticker 경유로만 같은 엔드포인트를 간접적으로 쳤다) —
     독립 호출 경로 자체와 그 fail-closed 가드를 함께 고정한다."""
@@ -135,7 +159,7 @@ async def test_get_orderbook_missing_output1_raises_fatal_exchange_error():
         await adapter.get_orderbook("005930")
 
 
-async def test_get_ohlcv_1d_missing_expected_field_raises_fatal_exchange_error():
+async def test_get_ohlcv_1d_missing_expected_field_raises_fatal_exchange_error() -> None:
     """일봉 조회 행에서 예상 필드(`stck_oprc`)가 없으면 조용히 0으로
     채우지 않고 즉시 FatalExchangeError로 터져야 한다 — 지금까지 1d
     경로의 negative test가 전혀 없었다."""
@@ -156,7 +180,7 @@ async def test_get_ohlcv_1d_missing_expected_field_raises_fatal_exchange_error()
         await adapter.get_ohlcv("005930", "1d")
 
 
-async def test_get_ohlcv_1m_missing_expected_field_raises_fatal_exchange_error():
+async def test_get_ohlcv_1m_missing_expected_field_raises_fatal_exchange_error() -> None:
     """PLT-40b가 `_IntradayCandleClient` Protocol로 계약에 편입한 교차
     믹스인 호출(`get_ohlcv`→`_get_intraday_candles`)이 실제로 배선돼
     있고, 그 안의 fail-closed 가드도 살아 있는지 함께 확인한다 —
@@ -179,7 +203,7 @@ async def test_get_ohlcv_1m_missing_expected_field_raises_fatal_exchange_error()
         await adapter.get_ohlcv("005930", "1m")
 
 
-async def test_get_order_raises_fatal_when_no_matching_rows():
+async def test_get_order_raises_fatal_when_no_matching_rows() -> None:
     """`get_order`(trading_mixin.py)가 주문 조회 응답에 일치하는 행이
     없을 때 빈 Order를 만들어 돌려주지 않고 명시적으로 거부하는지 —
     `_OrderMutatingClient` Protocol이 `modify_order`에 노출하는 바로 그
@@ -204,7 +228,7 @@ async def test_get_order_raises_fatal_when_no_matching_rows():
 # ---------------------------------------------------------------------------
 
 
-async def test_health_check_swallows_infra_failure_from_get_balance_after_retries():
+async def test_health_check_swallows_infra_failure_from_get_balance_after_retries() -> None:
     """`_BalanceCheckingClient` Protocol이 `health_check`(trading_mixin.py)
     에 노출하는 `get_balance`(account_mixin.py)가 네트워크 유실로 재시도
     예산(4회)을 전부 소진해 `RetryableExchangeError`를 던져도,
@@ -226,7 +250,7 @@ async def test_health_check_swallows_infra_failure_from_get_balance_after_retrie
     assert calls == 4  # RetryPolicy 기본 max_attempts, 전부 소진 후 삼켜짐
 
 
-async def test_modify_order_propagates_get_order_failure_after_successful_rvsecncl():
+async def test_modify_order_propagates_get_order_failure_after_successful_rvsecncl() -> None:
     """`_OrderMutatingClient` Protocol이 `modify_order`에 잇는 두 번째
     교차 믹스인 호출(`get_order`)이 실패하면, 정정 요청(`_rvsecncl`) 자체는
     거래소에 이미 성공적으로 접수됐더라도 `modify_order`가 그 실패를
@@ -254,7 +278,8 @@ async def test_modify_order_propagates_get_order_failure_after_successful_rvsecn
 # ---------------------------------------------------------------------------
 
 
-async def test_get_ohlcv_1d_parses_large_response_within_normalized_budget():
+@pytest.mark.perf
+async def test_get_ohlcv_1d_parses_large_response_within_normalized_budget() -> None:
     """market_data_mixin.py::get_ohlcv(1d 경로)는 항목 수에 선형으로
     늘어야 한다. 절대 ms 상수 대신 같은 프로세스에서 잰 동일 크기
     baseline(dict 얕은 복사) 대비 정규화 배율을 쓴다(task-2807/
@@ -349,7 +374,7 @@ def pytest_configure(config):
 
 
 def test_pytest_gate_turns_red_when_get_order_not_found_guard_is_removed(
-    tmp_path: Path,
+    tmp_path: Path
 ) -> None:
     """`get_order`의 "주문 없음" fail-closed 가드(`_OrderMutatingClient`
     Protocol이 `modify_order`에 노출하는 바로 그 메서드)를 자식 pytest
@@ -406,7 +431,7 @@ def test_pytest_gate_turns_red_when_get_order_not_found_guard_is_removed(
 # ---------------------------------------------------------------------------
 
 
-def test_kis_adapter_actually_declares_all_task1011_mixin_bases():
+def test_kis_adapter_actually_declares_all_task1011_mixin_bases() -> None:
     assert issubclass(KISAdapter, KISMarketDataMixin)
     assert issubclass(KISAdapter, KISTradingMixin)
     assert issubclass(KISAdapter, KISAccountMixin)

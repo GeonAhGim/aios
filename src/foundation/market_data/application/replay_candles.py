@@ -32,9 +32,9 @@ __all__ = ["ReplayIncompleteError", "UnknownSeriesError", "replay"]
 
 
 class ReplayIncompleteError(Exception):
-    """`MD_REPLAY_INCOMPLETE` — strict 모드에서 기대 open_time 대비 결측이
-    있다. 재시도 불가(같은 입력은 같은 결측을 낸다) — 갭을 채운 뒤
-    재실행해야 한다."""
+    """`MD_REPLAY_INCOMPLETE` — missing candles detected against expected
+    open_time in strict mode. Not retryable (same input produces same gap) —
+    must refill the gap and re-run."""
 
     def __init__(self, *, expected_count: int, missing_count: int) -> None:
         super().__init__(
@@ -51,12 +51,21 @@ async def replay(
     refs: ReferenceRepository,
     cal: CalendarRepository,
     pool: asyncpg.Pool,
+    now: datetime | None = None,
 ) -> ReplaySeries:
-    """§9.2 LA-17: `q.as_of`(필수)와 구간이 같으면 두 번 호출해도
-    `series_hash`가 바이트 단위로 같다. 격리 캔들은 `CandleStore.query`가
-    애초에 격리 테이블을 보지 않으므로 결과에 섞이지 않는다(`ReplayRequest.
-    include_quarantined`는 계약상 항상 `False`)."""
-    ensure_as_of_not_future(q.as_of, datetime.now(timezone.utc))
+    """§9.2 LA-17: identical `q.as_of` (required) and range produce a
+    `series_hash` identical at the byte level on repeated calls. Quarantined
+    candles never mix into the result because `CandleStore.query` does not
+    query the quarantine table in the first place
+    (`ReplayRequest.include_quarantined` is contractually always `False`).
+
+    `now` is an injectable clock (defaults to the wall clock) so callers that
+    already hold a trusted "current time" (e.g. the same timestamp `q.as_of`
+    was derived from) can pass it instead of racing a second, independent
+    `datetime.now(timezone.utc)` read against a DB-server-clock `as_of` —
+    two different clock sources can disagree by sub-millisecond amounts and
+    spuriously trip `AsOfInFutureError`."""
+    ensure_as_of_not_future(q.as_of, now if now is not None else datetime.now(timezone.utc))
 
     async with pool.acquire() as conn:
         candles, issues, expected_total = await load_series(

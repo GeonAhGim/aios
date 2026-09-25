@@ -1,19 +1,21 @@
-"""IND-1 — 컬럼지향 일괄 지표 계산(백테스트 경로) + 증분 엔진과의 동일성 계약.
+"""IND-1 — Column-oriented batch indicator computation (backtest path) + equivalence
+contract with incremental engine.
 
 Spec: docs/specs/L4_analytics_authoring_backtest_marketplace_v1.0.md §2.3 `engine/vectorized.py`,
-§9.3 IND-1 (DoD: 증분 = 일괄 결과 1e-9 이내 동일).
+§9.3 IND-1 (DoD: incremental == batch results within 1e-9).
 
-순수 모듈 — I/O 없음. 창 통계는 `sliding_window_view`로 창마다 독립 계산하고
-(누적합 drift 없음), EMA·Wilder 재귀는 본질적으로 순차라 `incremental.py`와
-같은 산식으로 순차 루프를 돈다. lookback은 `engine/__init__.resolve_request`
-(L02→L01 TA-Lib 실측값)만 쓰고, 산출된 NaN 접두 길이가 그 값과 다르면
-`INDICATOR_LOOKBACK_MISMATCH`로 fail-closed 한다. lookback 미충족 구간은
-NaN으로 명시 반환한다(0 대체 금지).
+Pure module — no I/O. Window statistics are computed independently per window via
+`sliding_window_view` (no cumulative sum drift); EMA and Wilder recursions are
+inherently sequential, so they share the same iterative loop expression as
+`incremental.py`. Lookback is read only from `engine/__init__.resolve_request`
+(L02→L01 TA-Lib measured values); if the produced NaN prefix length differs from
+that value, fail-closed with `INDICATOR_LOOKBACK_MISMATCH`. Unmet lookback
+regions are explicitly returned as NaN (zero substitution is forbidden).
 
-`check_equivalence()`가 두 엔진의 동일성 계약이다: 같은 컬럼을 증분 엔진에
-bar 단위로 흘려 넣고 일괄 결과와 비교해 NaN 위치가 다르거나 스케일 편차
-`|a-b| / max(1, |a|, |b|)`가 `EQUIVALENCE_TOLERANCE`(1e-9)를 넘으면
-`INDICATOR_ENGINE_MISMATCH`를 낸다.
+`check_equivalence()` is the equivalence contract between the two engines: feed
+the same columns into the incremental engine bar-by-bar, compare against batch
+results — raises `INDICATOR_ENGINE_MISMATCH` if NaN positions differ or scale
+deviation `|a-b| / max(1, |a|, |b|)` exceeds `EQUIVALENCE_TOLERANCE` (1e-9).
 """
 from __future__ import annotations
 
@@ -38,7 +40,7 @@ _Kernel = Callable[[dict[str, FloatArray], dict[str, int]], tuple[FloatArray, ..
 
 
 def _pad(values: FloatArray, n: int) -> FloatArray:
-    """오른쪽 정렬: 앞쪽 lookback 구간을 NaN으로 채운다."""
+    """Right-align: pad leading lookback period with NaN."""
     out = np.full(n, np.nan)
     if len(values):
         out[n - len(values) :] = values
@@ -52,7 +54,8 @@ def _windows(x: FloatArray, size: int) -> FloatArray:
 
 
 def _ema(x: FloatArray, period: int, skip: int = 0) -> FloatArray:
-    """SMA 시드 EMA(순차). `skip`개 bar를 버린 뒤 시드(MACD fast 라인, TA-Lib 동일)."""
+    """SMA-seeded EMA (sequential). Skip first bars, then seed (matches MACD fast line,
+    TA-Lib behavior)."""
     out = np.full(len(x), np.nan)
     start = skip + period - 1
     if start >= len(x):
@@ -216,7 +219,7 @@ def compute(
     params: Mapping[str, int] | None = None,
     registry: IndicatorRegistry = DEFAULT_REGISTRY,
 ) -> dict[str, FloatArray]:
-    """컬럼 → 출력별 float64 배열(길이 n). 앞 lookback개는 NaN, 그 뒤는 전부 유한."""
+    """Columns → float64 arrays per output (length n). Leading lookback NaNs, rest all finite."""
     spec, resolved, lookback = resolve_request(name, params, registry)
     kernel = _KERNELS.get(name)
     if kernel is None:
@@ -237,7 +240,7 @@ def run_incremental(
     params: Mapping[str, int] | None = None,
     registry: IndicatorRegistry = DEFAULT_REGISTRY,
 ) -> dict[str, FloatArray]:
-    """같은 컬럼을 증분 엔진에 bar 단위로 흘려 넣어 `compute()`와 같은 형태로 모은다."""
+    """Feed same columns bar-by-bar into incremental engine; collect results in compute() format."""
     indicator = IncrementalIndicator(name, params, registry)
     arrays = _as_columns(indicator.spec.inputs, columns)
     n = len(next(iter(arrays.values())))
@@ -257,7 +260,8 @@ def check_equivalence(
     registry: IndicatorRegistry = DEFAULT_REGISTRY,
     tolerance: float = EQUIVALENCE_TOLERANCE,
 ) -> float:
-    """증분 == 일괄 계약. 위반 시 `INDICATOR_ENGINE_MISMATCH`, 통과 시 최대 스케일 편차."""
+    """Incremental == batch contract. Violation raises INDICATOR_ENGINE_MISMATCH; pass
+    returns max scale deviation."""
     batch = compute(name, columns, params, registry)
     streamed = run_incremental(name, columns, params, registry)
     worst = 0.0

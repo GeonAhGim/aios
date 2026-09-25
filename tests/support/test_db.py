@@ -1,4 +1,4 @@
-"""PLT-36 tests/support/db.py — negative/failure-injection tests.
+"""PLT-36 tests/support/db.py — negative/failure-injection/perf/gate tests.
 
 Spec: docs/specs/L4_platform_observability_tenancy_api_v1.0.md §2.4/§9 PLT-36.
 DoD: negative test ≥3, failure-injection ≥1, perf assertion, gate-red repro.
@@ -6,9 +6,14 @@ DoD: negative test ≥3, failure-injection ≥1, perf assertion, gate-red repro.
 
 from __future__ import annotations
 
+import os
+import sys
+import time
+
 import asyncpg
 import pytest
 
+from scripts import setup_test_db as setup_test_db_cli
 from tests.support.db import (
     _asyncpg_dsn,
     _db_name,
@@ -20,26 +25,26 @@ from tests.support.db import (
 # ── Negative tests: invalid inputs rejected ──────────────────────────
 
 
-def test_session_database_url_rejects_uppercase_db_name():
+def test_session_database_url_rejects_uppercase_db_name() -> None:
     """DB 이름에 대문자가混入되면 ValueError로 거부한다."""
     with pytest.raises(ValueError, match="예상치 못한 템플릿 DB 이름"):
         session_database_url("postgresql://user:pass@localhost/MyDB", "gw0")
 
 
-def test_session_database_url_rejects_special_chars_in_db_name():
+def test_session_database_url_rejects_special_chars_in_db_name() -> None:
     """DB 이름에 특수문자(-)가 있으면 ValueError로 거부한다."""
     with pytest.raises(ValueError, match="예상치 못한 템플릿 DB 이름"):
         session_database_url("postgresql://user:pass@localhost/my-db", "gw0")
 
 
-def test_session_database_url_rejects_db_name_exceeding_40_chars():
+def test_session_database_url_rejects_db_name_exceeding_40_chars() -> None:
     """DB 이름이 40자를 초과하면 ValueError로 거부한다."""
     long_name = "a" * 41
     with pytest.raises(ValueError, match="예상치 못한 템플릿 DB 이름"):
         session_database_url(f"postgresql://user:pass@localhost/{long_name}", "gw0")
 
 
-def test_session_database_url_rejects_long_worker_db_name():
+def test_session_database_url_rejects_long_worker_db_name() -> None:
     """템플릿+워커 접미사가 40자를 초과하면 ValueError로 거부한다."""
     # template 36 chars + "_gw0" = 40 chars exactly — OK
     # template 37 chars + "_gw0" = 41 chars — should fail
@@ -48,26 +53,26 @@ def test_session_database_url_rejects_long_worker_db_name():
         session_database_url(f"postgresql://user:pass@localhost/{long_template}", "gw0")
 
 
-def test_session_database_url_master_returns_template_unchanged():
+def test_session_database_url_master_returns_template_unchanged() -> None:
     """worker_id == "master"면 template URL을 그대로 반환한다."""
     url = "postgresql://user:pass@localhost:5432/aios_test"
     assert session_database_url(url, "master") == url
 
 
-def test_db_name_strips_leading_slash():
+def test_db_name_strips_leading_slash() -> None:
     """urlsplit path의 선행 슬래시를 제거한다."""
     assert _db_name("postgresql://u:p@localhost/aios") == "aios"
     assert _db_name("postgresql://u:p@localhost//aios") == "aios"
 
 
-def test_with_database_replaces_database_path():
+def test_with_database_replaces_database_path() -> None:
     """기존 database 경로를 새 이름으로 교체한다."""
     base = "postgresql://user:pass@localhost:5432/template_db"
     result = _with_database(base, "worker_db")
     assert result == "postgresql://user:pass@localhost:5432/worker_db"
 
 
-def test_asyncpg_dsn_strips_plus_asyncpg_scheme():
+def test_asyncpg_dsn_strips_plus_asyncpg_scheme() -> None:
     """postgresql+asyncpg:// → postgresql:// 변환한다."""
     assert _asyncpg_dsn("postgresql+asyncpg://u:p@localhost/db") == "postgresql://u:p@localhost/db"
     # 일반 postgresql://은 변경 없음
@@ -78,7 +83,7 @@ def test_asyncpg_dsn_strips_plus_asyncpg_scheme():
 
 
 @pytest.mark.asyncio
-async def test_ensure_worker_database_propagates_connect_failure():
+async def test_ensure_worker_database_propagates_connect_failure() -> None:
     """asyncpg.connect가 예외를 raise하면 전파된다 — 조용히 폴백하지 않는다.
 
     미확인 가정(모듈 docstring 참조): 템플릿 DB에 활성 커넥션이 남아 있으면
@@ -87,13 +92,14 @@ async def test_ensure_worker_database_propagates_connect_failure():
     """
     template_url = "postgresql+asyncpg://user:pass@localhost:5432/aios_test"
 
-    async def _fake_connect(*args, **kwargs):
+    async def _fake_connect(*args: object, **kwargs: object) -> None:
         raise asyncpg.exceptions.ConnectionDoesNotExistError("connection does not exist")
 
     # Monkeypatch asyncpg.connect via module __dict__ to avoid mypy assignment
     # type error (Callable vs asyncpg.connect signature mismatch).
-    import tests.support.db as db_module
+    import sys
 
+    db_module = sys.modules["tests.support.db"]
     original_connect = asyncpg.connect
     try:
         db_module.asyncpg.connect = _fake_connect  # pyright: ignore[reportAttributeAccessIssue]
@@ -104,7 +110,7 @@ async def test_ensure_worker_database_propagates_connect_failure():
 
 
 @pytest.mark.asyncio
-async def test_ensure_worker_database_propagates_object_in_use_after_retries():
+async def test_ensure_worker_database_propagates_object_in_use_after_retries() -> None:
     """pg_terminate_backend가 커넥션 종료를 실패하면 ObjectInUseError를 최종 raise한다.
 
     ensure_worker_database는 최대 5회 지수 백오프로 재시도하지만, 템플릿 DB에
@@ -116,7 +122,7 @@ async def test_ensure_worker_database_propagates_object_in_use_after_retries():
         """가짜 asyncpg connection. terminate/execute 성공,
         drop/create는 ObjectInUseError."""
 
-        async def execute(self, sql: str, *args, **kwargs):
+        async def execute(self, sql: str, *args: object, **kwargs: object) -> str:
             # pg_terminate_backend 호출은 "성공" (行数 반환)
             # DROP DATABASE 및 CREATE DATABASE 호출은 ObjectInUseError
             if "DROP" in sql or "CREATE" in sql:
@@ -125,41 +131,188 @@ async def test_ensure_worker_database_propagates_object_in_use_after_retries():
                 )
             return "0"
 
-        async def close(self):
+        async def close(self) -> None:
             pass
 
-    import tests.support.db as db_module2
+    db_module2 = sys.modules["tests.support.db"]
 
     original_connect = asyncpg.connect
 
-    async def _fake_connect(*args, **kwargs):
+    async def _fake_connect2(*args: object, **kwargs: object) -> _FakeConnection:
         return _FakeConnection()
 
     try:
-        db_module2.asyncpg.connect = _fake_connect  # pyright: ignore[reportAttributeAccessIssue]
+        db_module2.asyncpg.connect = _fake_connect2  # pyright: ignore[reportAttributeAccessIssue]
         with pytest.raises(asyncpg.exceptions.ObjectInUseError):
             await ensure_worker_database(template_url, "gw0")
     finally:
         db_module2.asyncpg.connect = original_connect
 
 
+@pytest.mark.asyncio
+async def test_ensure_worker_database_propagates_unique_violation_after_retries() -> None:
+    """task-7375(esc-ci-pytest_perf): 동시 CREATE DATABASE 경합이 계속되면
+    `UniqueViolationError`를 최종 raise한다.
+
+    두 프로세스가 같은 worker_id의 DB를 동시에 복제하려 하면 `CREATE DATABASE
+    ... TEMPLATE`가 `ObjectInUseError`가 아니라 `pg_database_datname_index`
+    UNIQUE 제약 위반(`UniqueViolationError`)으로 거부될 수 있다 — 이것도
+    ObjectInUseError와 동일하게 재시도 대상이어야 하고, 경합이 재시도 소진까지
+    계속되면 결국 예외를 전파해야 한다(조용히 폴백하지 않는다).
+    """
+    template_url = "postgresql+asyncpg://user:pass@localhost:5432/aios_test"
+
+    class _FakeConnection:
+        async def execute(self, sql: str, *args: object, **kwargs: object) -> str:
+            if "CREATE" in sql:
+                raise asyncpg.exceptions.UniqueViolationError(
+                    'duplicate key value violates unique constraint "pg_database_datname_index"'
+                )
+            return "0"
+
+        async def close(self) -> None:
+            pass
+
+    db_module3 = sys.modules["tests.support.db"]
+    original_connect = asyncpg.connect
+
+    async def _fake_connect3(*args: object, **kwargs: object) -> _FakeConnection:
+        return _FakeConnection()
+
+    try:
+        db_module3.asyncpg.connect = _fake_connect3  # pyright: ignore[reportAttributeAccessIssue]
+        with pytest.raises(asyncpg.exceptions.UniqueViolationError):
+            await ensure_worker_database(template_url, "gw0")
+    finally:
+        db_module3.asyncpg.connect = original_connect
+
+
+@pytest.mark.asyncio
+async def test_ensure_worker_database_recovers_from_transient_unique_violation() -> None:
+    """첫 CREATE만 `UniqueViolationError`로 경합하고 재시도에서 성공하면
+    조용히 복구한다 — 재시도 없이 즉시 전파해 버리면 정상 경합 상황에서도
+    `pytest_perf`가 매번 적색이 된다."""
+    template_url = "postgresql+asyncpg://user:pass@localhost:5432/aios_test"
+
+    class _FakeConnection:
+        def __init__(self) -> None:
+            self.create_calls = 0
+
+        async def execute(self, sql: str, *args: object, **kwargs: object) -> str:
+            if "CREATE" in sql:
+                self.create_calls += 1
+                if self.create_calls == 1:
+                    raise asyncpg.exceptions.UniqueViolationError(
+                        'duplicate key value violates unique constraint "pg_database_datname_index"'
+                    )
+            return "0"
+
+        async def close(self) -> None:
+            pass
+
+    db_module4 = sys.modules["tests.support.db"]
+    original_connect = asyncpg.connect
+    fake_conn = _FakeConnection()
+
+    async def _fake_connect4(*args: object, **kwargs: object) -> _FakeConnection:
+        return fake_conn
+
+    try:
+        db_module4.asyncpg.connect = _fake_connect4  # pyright: ignore[reportAttributeAccessIssue]
+        result_url = await ensure_worker_database(template_url, "gw0")
+    finally:
+        db_module4.asyncpg.connect = original_connect
+
+    assert "gw0" in result_url
+    assert fake_conn.create_calls == 2
+
+
 # ── Boundary tests: valid inputs pass through ────────────────────────
 
 
-def test_session_database_url_valid_name_concats_worker_suffix():
+def test_session_database_url_valid_name_concats_worker_suffix() -> None:
     """유효한 DB 이름에 워커 접미사가 올바르게 붙는다."""
     result = session_database_url("postgresql://user:pass@localhost:5432/aios_test", "gw0")
     assert "aios_test_gw0" in result
     assert result != "postgresql://user:pass@localhost:5432/aios_test"
 
 
-def test_db_name_with_port_in_url():
+def test_db_name_with_port_in_url() -> None:
     """포트 번호가 URL에 포함되어도 DB 이름만 추출한다."""
     assert _db_name("postgresql://u:p@localhost:5432/mydb") == "mydb"
 
 
-def test_with_database_preserves_query_and_fragment():
+def test_with_database_preserves_query_and_fragment() -> None:
     """_with_database는 query와 fragment를 보존한다."""
     base = "postgresql://u:p@localhost:5432/db?sslmode=require#frag"
     result = _with_database(base, "newdb")
     assert result == "postgresql://u:p@localhost:5432/newdb?sslmode=require#frag"
+
+
+# ── Perf assertion: real-DB clone latency (실 DB, TEST_DATABASE_URL) ──
+
+
+@pytest.mark.perf
+@pytest.mark.asyncio
+async def test_ensure_worker_database_clone_meets_latency_budget() -> None:
+    """`CREATE DATABASE ... TEMPLATE` 복제가 예산 내에 끝난다.
+
+    모듈 docstring은 "마이그레이션 재실행 없이 ~1초"를 주장한다 — 이 테스트는
+    TEST_DATABASE_URL을 템플릿으로 실제 워커 DB 하나를 복제해 그 주장을
+    실측으로 검증한다. 절대 ms 임계 대신 여유 있는 예산(10s)을 쓰는 이유는
+    `test_perf_journal.py`(task-920/1029)와 동일 — 이 리포의 공유 로컬
+    Postgres는 CI 환경별 지연 배율 편차가 커서, 좁은 절대 임계는 코드 회귀가
+    아니라 환경 변동으로 적색이 된다. 복제된 워커 DB는 측정 직후 DROP해
+    다른 세션의 `aios_test_*` 목록을 오염시키지 않는다.
+    """
+    template_url = os.environ["TEST_DATABASE_URL"]
+    worker_id = "permtest"
+    budget_sec = 10.0
+
+    start = time.perf_counter()
+    worker_url = await ensure_worker_database(template_url, worker_id)
+    elapsed = time.perf_counter() - start
+    print(f"[PLT-36 clone] ensure_worker_database elapsed={elapsed:.3f}s (budget<{budget_sec}s)")
+
+    admin = await asyncpg.connect(_asyncpg_dsn(_with_database(template_url, "postgres")))
+    try:
+        worker_db = _db_name(worker_url)
+        await admin.execute(
+            "SELECT pg_terminate_backend(pid) FROM pg_stat_activity "
+            "WHERE datname = $1 AND pid <> pg_backend_pid()",
+            worker_db,
+        )
+        await admin.execute(f'DROP DATABASE IF EXISTS "{worker_db}"')
+    finally:
+        await admin.close()
+
+    assert elapsed < budget_sec, f"워커 DB 복제가 예산({budget_sec}s)을 초과: {elapsed:.3f}s"
+
+
+# ── Gate-red/green repro: scripts/setup_test_db.py CLI exit code 계약 ──
+
+
+def test_setup_test_db_cli_rejects_invalid_name_nonzero_exit() -> None:
+    """게이트 적색 재현: DB 이름이 규칙(소문자·숫자·밑줄 40자)을 벗어나면
+    CLI가 0이 아닌 코드로 종료한다(`main()`의 `_NAME_RE` 가드, setup_test_db.py
+    line ~210)."""
+    argv = sys.argv
+    sys.argv = ["setup_test_db.py", "Bad-Name!"]
+    try:
+        with pytest.raises(SystemExit) as exc_info:
+            setup_test_db_cli.main()
+    finally:
+        sys.argv = argv
+    assert exc_info.value.code not in (0, None)
+
+
+def test_setup_test_db_cli_list_is_gate_green_real_db() -> None:
+    """게이트 초록 재현: `--list`는 실 DB(read-only, `aios_test_%` 조회만)에
+    접속해 0으로 종료한다 — 위 적색 재현과 짝을 이루는 성공 경로."""
+    argv = sys.argv
+    sys.argv = ["setup_test_db.py", "--list"]
+    try:
+        exit_code = setup_test_db_cli.main()
+    finally:
+        sys.argv = argv
+    assert exit_code == 0

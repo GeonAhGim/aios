@@ -15,6 +15,7 @@ FAIL(rc=1); 위반 수가 과거보다 늘지 않았다고 봐주는 baseline이
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 from pathlib import Path
 
@@ -34,16 +35,18 @@ def has_bom(path: Path) -> bool:
 
 
 def _scan(base: Path) -> list[Path]:
+    """os.walk with in-place pruning: rglob("*") descended into every skipped directory
+    (node_modules/.venv/__pycache__) before filtering, so a full scan took ~60s and hit the
+    CI step budget (esc-ci-no_bom, 2026-09-25). Pruning keeps the scan to tracked-size trees."""
     if not base.is_dir():
         return []
     found = []
-    for path in base.rglob("*"):
-        if not path.is_file():
-            continue
-        if SKIP_DIR_NAMES & set(path.relative_to(base).parts[:-1]):
-            continue
-        if has_bom(path):
-            found.append(path)
+    for dirpath, dirnames, filenames in os.walk(base):
+        dirnames[:] = [d for d in dirnames if d not in SKIP_DIR_NAMES]
+        for name in filenames:
+            path = Path(dirpath) / name
+            if has_bom(path):
+                found.append(path)
     return found
 
 
@@ -54,7 +57,14 @@ def frontend_src_dirs(repo_root: Path) -> list[Path]:
     frontend = repo_root / "frontend"
     if not frontend.is_dir():
         return []
-    return sorted({p for p in frontend.rglob("src") if p.is_dir()})
+    # Pruned walk: rglob("src") descended into node_modules (tens of thousands of entries).
+    found: set[Path] = set()
+    for dirpath, dirnames, _files in os.walk(frontend):
+        dirnames[:] = [d for d in dirnames if d not in SKIP_DIR_NAMES]
+        if Path(dirpath).name == "src":
+            found.add(Path(dirpath))
+            dirnames[:] = []  # a src/ tree is scanned by _scan; no nested src lookup needed
+    return sorted(found)
 
 
 def find_bom_files(repo_root: Path) -> list[Path]:

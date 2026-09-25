@@ -1,23 +1,25 @@
-"""10.3 — 비상 출금 패닉 프롬프트 생성기.
+"""10.3 — Emergency withdrawal panic prompt generator.
 
-Spec: 기능설계문서_v1.20.md#FD-10.3, 정책문서 7.10-A
+Spec: design_doc_v1.20.md#FD-10.3, policy document 7.10-A
 
-카운터파티(거래소) 리스크 심각 신호 감지 시, 사전 등록된 출금 목적지
-화이트리스트만으로 프롬프트를 생성한다 — 신규 목적지 입력 경로 자체가
-없어, 위기 상황을 가장해 공격자 주소로 유도하는 사회공학 공격을
-원천 차단한다(정책문서 20.1-B "위기 이전 준비" 원칙).
+When a severe counterparty (exchange) risk signal is detected, this module
+generates a prompt using only pre-registered withdrawal destination whitelists.
+Because there is no path for entering a new destination address, social-engineering
+attacks that impersonate a crisis to lure users into an attacker-controlled address
+are blocked at the source (policy document 20.1-B "prepare before crisis" principle).
 
-최소 2개 독립 소스가 모순 없이 corroborate한 경우에만 신속경로를 연다.
-1개뿐이거나 서로 모순되면 확실하지 않은 상황에서 "빠른 길"을 열어주지
-않고 FD-10.1 일반 승인 절차로 격하한다.
+The fast path is opened only when at least 2 independent sources corroborate without
+contradiction. If there is only 1 source or they contradict each other, the prompt
+falls back to the FD-10.1 general approval procedure rather than opening a "fast path"
+in an uncertain situation.
 
-화이트리스트 조회는 DI 콜백으로 주입받는다(이 세션에서 반복 적용한
-패턴). (갱신 — WithdrawalWhitelistService.fetch_for_panic_prompt()가
-이제 실제로 이 시그니처를 만족하므로 연결 자체는 가능하다. 다만 이
-생성기의 실제 트리거인 "카운터파티 리스크 심각 신호 감지"는 자동
-모니터링 파이프라인이 필요한데 그게 아직 없어(Watchdog와 동일한 이유,
-FD-9) HTTP 엔드포인트로 노출할 지점이 없다 — corroboration 신호를
-누가 채워 넣는지가 스펙에 없는 채로 API를 만들면 추측성 구현이 된다.)
+Whitelist lookup is injected via a DI callback (a pattern repeated in this session).
+(Note — WithdrawalWhitelistService.fetch_for_panic_prompt() now actually satisfies
+this signature, so wiring is possible. However, the real trigger for this generator,
+"severe counterparty risk signal detection," requires an automated monitoring pipeline
+(the same reason as Watchdog, FD-9), so there is no HTTP endpoint to expose. Building
+an API without knowing who fills in the corroboration signals would be speculative
+implementation.)
 """
 from __future__ import annotations
 
@@ -54,8 +56,8 @@ FetchWhitelistFn = Callable[[UUID, str], Awaitable[list[WhitelistEntry]]]
 
 
 def _corroborates(signals: list[CorroborationSignal]) -> bool:
-    """최소 2개 소스가 전원 위험을 확인해야 corroborate로 인정한다 — 1개
-    뿐이거나 하나라도 부정하면(모순) 신뢰하지 않는다."""
+    """At least 2 sources must all confirm risk to count as corroboration — if
+    there is only 1 source or any one denies it (contradiction), do not trust."""
     if len(signals) < MIN_CORROBORATION_SOURCES:
         return False
     return all(signal.risk_confirmed for signal in signals)

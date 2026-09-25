@@ -149,6 +149,22 @@ async def test_raw_http_exception_with_unmapped_status_code_keeps_envelope_shape
     assert body["message"] == "Payment required"
 
 
+# --- PATCH /users/me: envelope 없이 405 Method Not Allowed ---
+# PLT-17~21: PATCH는 /users/me 라우터에 정의되지 않음 — 415(envelope-required)가
+# 아닌 405(Method Not Allowed)를 반환해야 한다. envelope 포맷이 지원되지 않는
+# 메서드인 경우 415가 아닌 HTTP 표준 405가 우선한다.
+
+
+async def test_patch_users_me_returns_405_not_415(client: AsyncClient):
+    """PATCH /users/me는 정의되지 않은 메서드 — 405 Method Not Allowed.
+    envelope 포맷이 지원되지 않는 메서드인 경우 415가 아닌 HTTP 표준 405가 우선한다."""
+    response = await client.patch("/users/me")
+    assert response.status_code == 405
+    body = response.json()
+    assert "detail" in body
+    assert body["detail"] == "Method Not Allowed"
+
+
 # --- 수치 성능 단언: ApprovalSettingsService.get() 단일 SELECT 왕복 p95 ---
 
 _PERF_ITERATIONS = 30

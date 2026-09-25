@@ -259,6 +259,7 @@ async def test_unknown_connection_id_raises_unknown_connection_error(pool):
         )
 
 
+@pytest.mark.perf
 async def test_reconcile_account_completes_within_cycle_safety_margin(pool):
     """수치 성능 단언 — spec §7 B "브레이크 표면화: 감지 -> 알림 < 2분(대사
     주기 60s + 처리)"의 60s 주기 예산 대비 넉넉한 안전마진(30s)으로 단일

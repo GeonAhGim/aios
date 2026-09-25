@@ -185,6 +185,7 @@ async def test_gate_red_repro_tenant_ownership_guard_is_load_bearing(
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.perf
 def test_indicator_template_to_view_perf_budget() -> None:
     """`list_indicator_templates`의 응답 경로는 조회된 각 행을 매번 뷰로
     변환한다 — 그 변환 자체가 서버 지연을 지배하지 않는다는 상한을

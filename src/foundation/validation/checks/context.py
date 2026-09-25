@@ -16,9 +16,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from src.foundation.backtest.domain.models import BacktestConfig
-from src.foundation.backtest.domain.snapshot import BarSnapshotRef
-from src.foundation.backtest.domain.universe import UniverseSnapshot
+from src.foundation.backtest.api import BacktestConfig, BarSnapshotRef, UniverseSnapshot
 from src.foundation.backtest.ports.bar_source import PointInTimeBars
 from src.foundation.validation.domain.artifact import StrategyArtifact
 from src.foundation.validation.domain.check_result import CheckResult

@@ -155,6 +155,20 @@ class Order(IRNode):
     when_type: Type
 
 
+class Request(IRNode):
+    """`request(symbol, timeframe, expr)`(M2-2a 확장 문법): pop 1(내부 expr 값),
+    push 1(항상 `series<float>` — `typing/checker.py` `_infer_request` 결정).
+    `symbol`/`timeframe`은 M2-2a가 파싱 시점 상수로 고정했다(AST `RequestExpr`가
+    `str` 필드로만 받아 동적 인자 자체를 조립 불가능하게 함). MTF 리샘플(확정봉만
+    참조, lookahead=off 고정)은 런타임(DSL-8 `runtime/mtf.py`, M2-2b)이 맡는다 —
+    이 명령은 그 평가에 필요한 symbol/timeframe만 실어 나른다."""
+
+    op: Literal["request"] = "request"
+    symbol: str
+    timeframe: str
+    type: Type
+
+
 Instr = Annotated[
     ConstInt
     | ConstFloat
@@ -168,7 +182,8 @@ Instr = Annotated[
     | Store
     | Plot
     | Signal
-    | Order,
+    | Order
+    | Request,
     Field(discriminator="op"),
 ]
 
@@ -220,7 +235,7 @@ def stack_effect(instr: Instr) -> tuple[int, int]:
     """명령의 (pop 수, push 수). 인터프리터·검증기가 공유하는 단일 정의."""
     if isinstance(instr, ConstInt | ConstFloat | Load):
         return (0, 1)
-    if isinstance(instr, Neg | Not | Index):
+    if isinstance(instr, Neg | Not | Index | Request):
         return (1, 1)
     if isinstance(instr, BinOp):
         return (2, 1)

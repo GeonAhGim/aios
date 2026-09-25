@@ -373,6 +373,7 @@ def test_model_dump_failure_propagates_instead_of_silent_fallback_hash():
         compute_rule_hash(cast(Any, _CorruptedPolicy()), _ENGINE_VERSION)
 
 
+@pytest.mark.perf
 def test_compute_rule_hash_repeated_calls_stay_bounded(tmp_path):
     # canonical_json의 정규화가 정책 크기에 대해 병적으로(지수적으로) 느려
     # 지지 않는지 — 200회 반복이 여유 있는 상한 내에 끝나야 한다. 리스크

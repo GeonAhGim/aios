@@ -11,6 +11,7 @@ official documentation research and are **UNVERIFIED** until confirmed
 against a real UTA account round trip; see `_parse_v3_balance_row`
 docstring).
 """
+
 from __future__ import annotations
 
 from datetime import datetime, timezone
@@ -202,9 +203,7 @@ class BitgetAccountMixin:
         params: dict[str, Any] = {"limit": str(limit)}
         if coin is not None:
             params["coin"] = coin.upper()
-        raw = await self._request(
-            "GET", "/api/v2/spot/account/bills", params=params
-        )
+        raw = await self._request("GET", "/api/v2/spot/account/bills", params=params)
         return list(raw["data"])
 
     @require_paper_sandbox
@@ -239,7 +238,42 @@ class BitgetAccountMixin:
         }
         if symbol is not None:
             body["symbol"] = _to_bitget_symbol(symbol)
-        raw = await self._request(
-            "POST", "/api/v2/spot/wallet/transfer", body=body
-        )
+        raw = await self._request("POST", "/api/v2/spot/wallet/transfer", body=body)
         return bool(raw.get("code") == "00000")
+
+    async def get_deposit_address(self: SignedRequestClient, coin: str) -> dict[str, Any]:
+        """02b spec §3.3(P2) — get deposit address for a coin."""
+        raw = await self._request(
+            "GET",
+            "/api/v2/spot/wallet/deposit-address",
+            params={"coin": coin.upper()},
+        )
+        return dict(raw["data"])
+
+    async def get_deposit_records(
+        self: SignedRequestClient, coin: str | None = None, *, limit: int = 100
+    ) -> list[dict[str, Any]]:
+        """02b spec §3.3(P2) — get deposit history records."""
+        params: dict[str, Any] = {"limit": str(limit)}
+        if coin is not None:
+            params["coin"] = coin.upper()
+        raw = await self._request("GET", "/api/v2/spot/wallet/deposit-records", params=params)
+        return list(raw["data"])
+
+    @require_paper_sandbox
+    async def get_withdrawal_records(
+        self: SignedRequestClient, coin: str | None = None, *, limit: int = 100
+    ) -> list[dict[str, Any]]:
+        """02b spec §3.3(P2) — get withdrawal history records.
+
+        Note: this is a query only, not a withdrawal request; unrelated to 7.9 principle
+        (withdrawal policy restriction). Guarded anyway — the method name matches
+        `_FUND_MOVING_NAME`'s `withdraw` pattern
+        (tests/unit/exchanges/test_live_guard_coverage.py), and the fail-closed
+        posture (CLAUDE.md §3) favors guarding a read over carving out a regex
+        exception for one method."""
+        params: dict[str, Any] = {"limit": str(limit)}
+        if coin is not None:
+            params["coin"] = coin.upper()
+        raw = await self._request("GET", "/api/v2/spot/wallet/withdrawal-records", params=params)
+        return list(raw["data"])

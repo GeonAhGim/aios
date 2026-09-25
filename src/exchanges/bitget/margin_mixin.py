@@ -16,6 +16,7 @@ Bitget V2는 cross/isolated를 `marginType`(`crossed`|`isolated`) 경로
 - POST /api/v2/margin/{marginType}/cancel-order
 - GET  /api/v2/margin/{marginType}/open-orders
 """
+
 from __future__ import annotations
 
 from decimal import Decimal
@@ -89,9 +90,7 @@ class BitgetMarginMixin:
                 borrowed=Decimal(item.get("borrow", "0")),
                 interest=Decimal(item.get("interest", "0")),
                 net_asset=Decimal(item.get("netAsset", item["available"])),
-                risk_rate=(
-                    Decimal(item["riskRate"]) if item.get("riskRate") is not None else None
-                ),
+                risk_rate=(Decimal(item["riskRate"]) if item.get("riskRate") is not None else None),
             )
             for item in raw["data"]
         ]
@@ -134,9 +133,7 @@ class BitgetMarginMixin:
         if order.price is not None:
             body["price"] = str(order.price.amount)
 
-        raw = await self._request(
-            "POST", f"/api/v2/margin/{margin_type}/place-order", body=body
-        )
+        raw = await self._request("POST", f"/api/v2/margin/{margin_type}/place-order", body=body)
         data = raw["data"]
         return order.model_copy(
             update={"exchange_order_id": data["orderId"], "status": OrderStatus.SUBMITTED}
@@ -182,9 +179,7 @@ class BitgetMarginMixin:
         body: dict[str, Any] = {"coin": coin.upper(), "borrowAmount": str(amount)}
         if symbol is not None:
             body["symbol"] = _to_bitget_symbol(symbol)
-        raw = await self._request(
-            "POST", f"/api/v2/margin/{margin_type}/account/borrow", body=body
-        )
+        raw = await self._request("POST", f"/api/v2/margin/{margin_type}/account/borrow", body=body)
         return dict(raw["data"])
 
     @require_paper_sandbox
@@ -203,9 +198,7 @@ class BitgetMarginMixin:
         body: dict[str, Any] = {"coin": coin.upper(), "repayAmount": str(amount)}
         if symbol is not None:
             body["symbol"] = _to_bitget_symbol(symbol)
-        raw = await self._request(
-            "POST", f"/api/v2/margin/{margin_type}/account/repay", body=body
-        )
+        raw = await self._request("POST", f"/api/v2/margin/{margin_type}/account/repay", body=body)
         return dict(raw["data"])
 
     async def get_max_borrowable_amount(

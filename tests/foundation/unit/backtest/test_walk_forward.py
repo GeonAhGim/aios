@@ -36,6 +36,7 @@ def _p95_ms(samples: list[float]) -> float:
     return ordered[min(int(len(ordered) * 0.95), len(ordered) - 1)] * 1000
 
 
+@pytest.mark.perf
 def test_run_walk_forward_p95_latency_within_backtest_budget_slice() -> None:
     samples: list[float] = []
     for _ in range(_ITERATIONS):
@@ -54,6 +55,7 @@ def test_run_walk_forward_p95_latency_within_backtest_budget_slice() -> None:
     assert p95_ms < _BUDGET_MS
 
 
+@pytest.mark.perf
 def test_run_walk_forward_still_correct_when_run_backtest_stalls(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -99,6 +101,7 @@ def test_run_walk_forward_still_correct_when_run_backtest_stalls(
     assert stalled_report.oos_stitched_metrics == baseline_report.oos_stitched_metrics
 
 
+@pytest.mark.perf
 def test_budget_gate_actually_fails_when_run_backtest_stalls_past_budget(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

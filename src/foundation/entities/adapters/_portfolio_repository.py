@@ -22,14 +22,20 @@ class PortfolioRepositoryMixin:
     _pool: asyncpg.Pool
 
     async def create_portfolio(self, portfolio: Portfolio) -> Portfolio:
-        async with self._pool.acquire() as conn:
-            row = await conn.fetchrow(
-                "INSERT INTO portfolio (portfolio_id, fund_id, venue_account_ref) "
-                "VALUES ($1, $2, $3) RETURNING *",
-                portfolio.portfolio_id,
-                portfolio.fund_id,
-                portfolio.venue_account_ref,
-            )
+        try:
+            async with self._pool.acquire() as conn:
+                row = await conn.fetchrow(
+                    "INSERT INTO portfolio (portfolio_id, fund_id, venue_account_ref) "
+                    "VALUES ($1, $2, $3) RETURNING *",
+                    portfolio.portfolio_id,
+                    portfolio.fund_id,
+                    portfolio.venue_account_ref,
+                )
+        except asyncpg.UniqueViolationError as exc:
+            raise ConcurrencyConflictError(
+                f"portfolio.portfolio_id={portfolio.portfolio_id}: 다른 요청이 먼저 "
+                "생성했습니다."
+            ) from exc
         return row_to_portfolio(row)
 
     async def get_portfolio(self, tenant_id: UUID, portfolio_id: UUID) -> Portfolio | None:

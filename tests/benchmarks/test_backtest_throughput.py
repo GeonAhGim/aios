@@ -38,6 +38,10 @@ from src.foundation.backtest.domain.models import BacktestConfig, CostModel
 _T0 = datetime(2026, 1, 1, tzinfo=timezone.utc)
 _ZERO_COST = CostModel(fee_bps=Decimal("0"), slippage_bps=Decimal("0"))
 
+# task-7434: this whole module measures wall-clock throughput budgets, so it
+# runs in the serial perf CI stage rather than under xdist core contention.
+pytestmark = pytest.mark.perf
+
 
 @dataclass
 class _SpyMetrics:
