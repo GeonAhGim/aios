@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-09-25T21:51:20+00:00",
+  "generated_at": "2026-09-25T21:54:13+00:00",
   "tasks": [
     {
       "id": 7594,
@@ -102,6 +102,67 @@
       "tier": "",
       "role": "backend",
       "hold_note": "[cloud_session] 클라우드 적합: Binance WS 파싱, 저장소만으로 완결"
+    },
+    {
+      "id": 7604,
+      "title": "BR-23 키움증권 거래소 추가 (a) — 엔드포인트 매트릭스 + 계약 테스트 생성기",
+      "spec": "ADR-2026-09-26-A(CTO 2026-09-26) 거래소 확장 — 키움증권(2025 공개 REST/WebSocket OpenAPI, 모의투자 제공). task-7569/7570/7571/7572가 이미 (b)(c)(d)(e) 구현 리프로 발행돼 있으나 (a) 매트릭스 단계가 아직 없다(발행 전 git grep -r 'kiwoom' docs/design로 KIWOOM_COVERAGE.md 부재를 확인). NH 패턴(공식 OpenAPI 있으면 nh_openapi_fetch.py처럼 오프라인 스냅샷화, scripts/nh_openapi_coverage.py처럼 스냅샷만 읽는 커버리지 스크립트)을 적용한다. 최소 카테고리: 시세, 계좌/잔고, 주문(신규/취소/정정). 이 리프는 (b)(c)(d)(e)와 파일이 겹치지 않는다(매트릭스/문서/계약테스트 생성기만).\nDoD:\n1) docs/design/KIWOOM_COVERAGE.md 생성 — 카테고리별 엔드포인트 수 표\n2) scripts/kiwoom_endpoint_coverage.py는 스냅샷 JSON만 읽는다(네트워크 호출 0건)\n3) tests/exchanges/kiwoom/test_kiwoom_contract_generated.py: 계약 테스트 최소 5건, negative 최소 3건\n4) 파일당 300줄 상한\n5) 실키 불필요",
+      "files": [
+        "new:scripts/kiwoom_endpoint_coverage.py",
+        "new:docs/design/KIWOOM_COVERAGE.md",
+        "new:tests/exchanges/kiwoom/test_kiwoom_contract_generated.py"
+      ],
+      "tier": "",
+      "role": "backend",
+      "hold_note": "[cloud_session] 클라우드 적합: 키움 매트릭스+계약테스트, (b)(c)(d)(e)와 파일 미겹침, 저장소만으로 완결"
+    },
+    {
+      "id": 7605,
+      "title": "ADR-2026-09-26-B SBX-1 — 전략 인터프리터 런타임 스텝/연산 예산(fail-closed)",
+      "spec": "ADR-2026-09-26-B Decision 1(SBX-1). src/core/script/runtime/interpreter.py의 _Machine 실행 루프(_Machine.run의 `for pos, instr in enumerate(ir.instrs)`, 약 158행)에 실행된 명령(instr) 카운터를 두고, 컴파일 시 정적 상한(DSL-6, src/core/script/analysis/resources.py의 ScriptResourceLimitError와는 별개)인 런타임 상한 상수 SCRIPT_RUNTIME_LIMIT(연산 수 기준 정수, 예: 1_000_000)을 초과하면 신규 예외 ScriptRuntimeLimitError를 던져 실행을 fail-closed로 중단한다. DSL-6이 컴파일 시점에 못 잡는 경우(반복 바 수가 런타임 입력 길이에 비례해 커지는 경우)를 실제로 재현하는 테스트가 있어야 한다.\nDoD:\n1) SCRIPT_RUNTIME_LIMIT 초과 시 ScriptRuntimeLimitError 발생 — 구체 입력: instr 실행 횟수가 SCRIPT_RUNTIME_LIMIT+1이 되는 IR로 재현\n2) 정상 스크립트(명령 수 < 상한)는 기존 동작과 동일(회귀 없음 — 기존 tests/unit/core/script/ 스위트 통과)\n3) negative(경계값) 최소 3건: 상한-1(통과)/상한(통과 또는 정확히 여기서 차단, 구현에서 결정하고 테스트로 고정)/상한+1(차단)\n4) 주석/독스트링에 DSL-6 정적 검사와 다른 경로임을 1줄로 명시(영문)",
+      "files": [
+        "src/core/script/runtime/interpreter.py",
+        "new:tests/unit/core/script/test_runtime_step_budget.py"
+      ],
+      "tier": "",
+      "role": "backend",
+      "hold_note": "[cloud_session] 클라우드 적합: 순수 인터프리터 로직, 저장소만으로 완결, fake IR로 검증"
+    },
+    {
+      "id": 7606,
+      "title": "ADR-2026-09-26-B SRC-1 — 마켓플레이스 source_retention=IR-only 정책 판정",
+      "spec": "ADR-2026-09-26-B Decision 2(SRC-1) 정책 판정 부분만(암호화 키 관리·at-rest 암호화 구현 자체는 tier S 후속 리프로 범위 밖 — 이 리프는 정책 판정 순수 함수만). src/foundation/marketplace/domain/visibility.py에 source_retention 옵션(Literal['IR_ONLY','SOURCE_STORED'])과 순수 함수 validate_source_retention(visibility: ListingVisibility, retention: str) -> None(위반 시 raise)을 추가 — PROTECTED/INVITE/PRIVATE에 SOURCE_STORED를 지정하면 명시적으로 거부한다(기본값은 IR_ONLY).\nDoD:\n1) PROTECTED+SOURCE_STORED, INVITE+SOURCE_STORED, PRIVATE+SOURCE_STORED 3건 모두 명시적 예외로 거부(negative 3건)\n2) PUBLIC+SOURCE_STORED는 허용\n3) has_protected_source=True인 리스팅은 retention과 무관하게 기존 validate_visibility_grade의 PUBLIC 거부 로직과 충돌 없음(회귀 없음)\n4) 파일당 300줄 상한\n5) note에 '암호화 키 관리는 범위 밖(후속 tier S 리프)'을 명시",
+      "files": [
+        "src/foundation/marketplace/domain/visibility.py",
+        "new:tests/foundation/unit/marketplace/test_source_retention.py"
+      ],
+      "tier": "",
+      "role": "backend",
+      "hold_note": "[cloud_session] 클라우드 적합: 순수 도메인 정책 판정, 저장소만으로 완결(암호화 구현은 범위 밖)"
+    },
+    {
+      "id": 7607,
+      "title": "ADR-2026-09-26-B AIS-1 — INVARIANTS I-12 추가 + test_no_execution_access를 불변식 검사로 등록",
+      "spec": "ADR-2026-09-26-B Decision 3(AIS-1). docs/design/INVARIANTS.md 표에 I-12 행 추가: 'AI/에이전트는 LIVE 주문 경로에 도달할 수 없고, PAPER 승격·실행은 confirm ticket 필수' — 강제 지점 컬럼에 tests/adversarial/assistant/test_no_execution_access.py(이미 존재, FORBIDDEN_MODULE_PREFIXES 임포트 그래프 정적 검사)를 명시. 기존 테스트는 임포트 그래프만 검사하므로, PAPER 승격 부분(confirm ticket 없이 실행 도달 불가)을 확인하는 케이스를 최소 1개 추가한다.\nDoD:\n1) INVARIANTS.md에 I-12 행 추가(기존 표 형식과 동일, I-01~I-11 뒤에 이어붙임)\n2) test_no_execution_access.py에 confirm ticket 관련 negative 케이스 최소 1건 추가(ticket 없이 PAPER 승격/실행 시도 시 거부 또는 정적으로 도달 불가함을 재확인)\n3) 기존 FORBIDDEN_MODULE_PREFIXES 테스트 전부 회귀 없이 통과\n4) I-12 관련 실패 시나리오(F-xx) 추가가 불필요하면 note에 사유 1줄",
+      "files": [
+        "docs/design/INVARIANTS.md",
+        "tests/adversarial/assistant/test_no_execution_access.py"
+      ],
+      "tier": "",
+      "role": "backend",
+      "hold_note": "[cloud_session] 클라우드 적합: 문서+기존 정적 테스트 확장, 저장소만으로 완결"
+    },
+    {
+      "id": 7608,
+      "title": "ADR-2026-09-26-B DOM-1 — pyproject importlinter 도메인 경계 계약 + baseline 스냅샷(warn)",
+      "spec": "ADR-2026-09-26-B Decision 4(DOM-1). pyproject.toml에 [tool.importlinter] 섹션 추가, contracts 4개: (1) foundation 하위 도메인 간 직접 import 금지(contracts/ports 경유만), (2) services -> foundation 단방향(foundation이 services를 import 금지), (3) domain -> adapters 역의존 금지, (4) core는 foundation을 참조하지 않음. import-linter 패키지를 requirements/pyproject dependencies에 선언(scripts/check_deps_declared.py 통과 필수). 도입 시점 기존 위반이 있을 수 있으므로 OPS-42 규약(CLAUDE.md §새 CI 게이트 도입 규약)과 같은 정신으로 `lint-imports --config pyproject.toml` 실행 결과(위반 수 + 위반 목록)를 docs/design/import_linter_baseline.json에 스냅샷으로 남긴다 — 이 파일은 aios 저장소에 처음 도입되는 baseline이므로 task-3936 기준선 완화 금지 규약의 규제 대상이 아니다(base_ref에 없던 신규 파일 최초 도입). CI(local_ci.py) STEP_MODE 등록·warn 배선은 이번 리프 범위 밖(pm 저장소 파일이라 role backend로 건드릴 수 없다 — 별도 ops 후속 리프로 남긴다, note에 명시).\nDoD:\n1) pyproject.toml에 [tool.importlinter] + 4개 contract 정의\n2) import-linter가 dependencies에 선언되고 scripts/check_deps_declared.py 통과\n3) `lint-imports` 실행 결과를 docs/design/import_linter_baseline.json에 위반 수와 함께 기록\n4) note에 'ci_recheck.py STEP_MODE 등록은 별도 ops 후속 리프 필요'를 명시",
+      "files": [
+        "pyproject.toml",
+        "new:docs/design/import_linter_baseline.json"
+      ],
+      "tier": "",
+      "role": "backend",
+      "hold_note": "[cloud_session] 클라우드 적합: 설정+스냅샷, 저장소만으로 완결(CI 배선은 후속 ops 리프)"
     }
   ]
 }
