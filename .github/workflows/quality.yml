@@ -22,7 +22,9 @@ concurrency:
 jobs:
   verify:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    # 2026-09-26: 전체 스위트를 직렬로 돌리면 20분 상한을 넘겨 Test 단계에서 cancelled(15:04·15:27 실측 2회).
+    # conftest가 PYTEST_XDIST_WORKER별 DB를 복제하므로 xdist 병렬(-n auto)로 돌리고 상한은 45분.
+    timeout-minutes: 45
     services:
       postgres:
         image: postgres:16
@@ -115,7 +117,7 @@ jobs:
         run: python scripts/check_child_order_path.py
 
       - name: Test
-        run: pytest -q --cov=src --cov-report=term --cov-report=xml
+        run: pytest -q -n auto --dist loadfile --cov=src --cov-report=term --cov-report=xml
 
       # PLT-37 — 절대 임계치(--cov-fail-under) 대신 coverage.xml 대비 직전
       # baseline에서 하락(허용 오차 0.5%p)했을 때만 FAIL한다. coverage.xml만
