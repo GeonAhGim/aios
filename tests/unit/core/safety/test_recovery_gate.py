@@ -21,12 +21,14 @@ from decimal import Decimal
 import pytest
 from pydantic import ValidationError
 
+from src.core.loader.risk_policy_loader import load_risk_policy
 from src.core.risk.decision import RiskOutcome
 from src.core.safety.circuit_breaker import CircuitBreakerLevel, CircuitBreakerMetrics
 from src.core.safety.recovery_gate import RecoveryDecision, can_reactivate
 from tests.conftest import PerfBudget
 
 COOLDOWN_SEC = 3
+_POLICY = load_risk_policy().circuit_breaker
 
 
 def _clean_history(n: int = COOLDOWN_SEC) -> list[CircuitBreakerMetrics]:
@@ -41,6 +43,7 @@ def _base_kwargs() -> dict:
         evidence_ref="evidence://ref-1",
         approval_status="APPROVED",
         fresh_risk_outcome=RiskOutcome.ALLOW,
+        policy=_POLICY,
     )
 
 
@@ -70,7 +73,65 @@ def test_cooldown_not_met_by_short_history_denies() -> None:
 def test_cooldown_not_met_by_degraded_sample_denies() -> None:
     kwargs = _base_kwargs()
     history = _clean_history()
-    history[-1] = CircuitBreakerMetrics(api_error_rate_pct=Decimal("0.01"))
+    history[-1] = CircuitBreakerMetrics(
+        api_error_rate_pct=Decimal(str(_POLICY.warning.api_error_rate_pct))
+    )
+    kwargs["metrics_history"] = history
+    decision = can_reactivate(**kwargs)
+    assert decision.outcome == RiskOutcome.DENY
+    assert decision.reason_code == "RECOVERY_COOLDOWN_NOT_MET"
+
+
+def test_sub_warning_nonzero_samples_are_baseline_and_allow() -> None:
+    """§4.3 CB 표 행 4 — baseline은 "warning 미만"이지 "정확히 0"이 아니다.
+    data_delay_sec·api_disconnect_sec는 마지막 관측 이후 경과 시간이라 실제
+    tick에서는 0이 될 수 없다(수 µs~수 초). 0을 요구하면 실 트래커 배선
+    (R-45)에서 재가동이 영원히 불가능해지는 회귀 — CI 적색
+    `test_run_circuit_breaker_tick_drives_full_reactivation_end_to_end`로
+    잡혔다. warning 임계 바로 아래의 0이 아닌 표본은 baseline이다."""
+    kwargs = _base_kwargs()
+    below_warning = CircuitBreakerMetrics(
+        data_delay_sec=Decimal(str(_POLICY.warning.data_delay_sec)) - Decimal("0.001"),
+        api_disconnect_sec=Decimal("0.5"),
+        api_error_rate_pct=Decimal(str(_POLICY.warning.api_error_rate_pct)) - Decimal("0.01"),
+    )
+    kwargs["metrics_history"] = [below_warning for _ in range(COOLDOWN_SEC)]
+    decision = can_reactivate(**kwargs)
+    assert decision.outcome == RiskOutcome.ALLOW
+
+
+@pytest.mark.parametrize(
+    "sample",
+    [
+        pytest.param(
+            CircuitBreakerMetrics(data_delay_sec=Decimal(str(_POLICY.warning.data_delay_sec))),
+            id="data_delay_at_warning",
+        ),
+        pytest.param(
+            CircuitBreakerMetrics(
+                order_reject_rate_pct=Decimal(str(_POLICY.restricted.order_reject_rate_pct))
+            ),
+            id="order_reject_at_restricted",
+        ),
+        pytest.param(
+            CircuitBreakerMetrics(daily_loss_pct=Decimal(str(_POLICY.emergency.daily_loss_pct))),
+            id="daily_loss_at_emergency",
+        ),
+        pytest.param(
+            CircuitBreakerMetrics(
+                api_disconnect_sec=Decimal(str(_POLICY.emergency.api_disconnect_sec))
+            ),
+            id="api_disconnect_at_emergency",
+        ),
+    ],
+)
+def test_sample_at_any_threshold_is_not_baseline_and_denies(sample: CircuitBreakerMetrics) -> None:
+    """negative — 어느 지표든 자기 임계(warning/restricted/emergency)에 닿은
+    표본이 cooldown 이력에 하나라도 있으면 baseline이 아니다(compute_level이
+    NORMAL이 아님)."""
+    kwargs = _base_kwargs()
+    history = _clean_history()
+    history[0] = sample
     kwargs["metrics_history"] = history
     decision = can_reactivate(**kwargs)
     assert decision.outcome == RiskOutcome.DENY
@@ -177,7 +238,9 @@ def test_adversarial_single_tainted_sample_deep_in_large_clean_history_denies() 
     스캔이 실제로 일어남을 증명한다."""
     n = 5000
     history = _clean_history(n)
-    history[n // 2] = CircuitBreakerMetrics(order_reject_rate_pct=Decimal("0.001"))
+    history[n // 2] = CircuitBreakerMetrics(
+        order_reject_rate_pct=Decimal(str(_POLICY.restricted.order_reject_rate_pct))
+    )
     kwargs = _base_kwargs()
     kwargs["metrics_history"] = history
     kwargs["cooldown_sec"] = n

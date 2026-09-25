@@ -319,6 +319,10 @@ def _isolate_root_logger_state():
                 "handlers": list(logger.handlers),
                 "level": logger.level,
                 "propagate": logger.propagate,
+                # logging.config.fileConfig/dictConfig(disable_existing_loggers=True)는
+                # 기존 로거의 disabled 플래그를 켠다 — 핸들러·레벨·propagate만
+                # 복원하면 이 오염은 그대로 남는다(src/db/migrations/env.py 사례).
+                "disabled": logger.disabled,
             }
         except (AttributeError, RuntimeError):
             # race condition — 다른 스레드가 동시에 로거를 생성/삭제할 수 있음
@@ -334,6 +338,7 @@ def _isolate_root_logger_state():
             logger.handlers[:] = state["handlers"]
             logger.setLevel(state["level"])
             logger.propagate = state["propagate"]
+            logger.disabled = state["disabled"]
         except (AttributeError, RuntimeError):
             pass
 
