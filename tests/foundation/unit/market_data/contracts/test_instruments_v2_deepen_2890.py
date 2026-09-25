@@ -26,7 +26,6 @@ I/O가 없어 DB/네트워크 실패주입은 원천적으로 성립하지 않�
 
 from __future__ import annotations
 
-import time
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from decimal import Decimal
@@ -37,6 +36,7 @@ from pydantic import AwareDatetime, BaseModel, ValidationError
 
 from src.data.models.base import AssetClass
 from src.foundation.market_data.contracts.v2 import instruments as v2
+from tests.conftest import PerfBudget
 
 _CROCKFORD_ALPHABET = "0123456789ABCDEFGHJKMNPQRSTVWXYZ"
 _ULID_PREFIX = "01ARZ3NDEKTSV4RRFFQ6"  # 20 chars, leaves 6 for a per-seed suffix
@@ -134,41 +134,40 @@ def test_malformed_overrides_do_not_partially_construct_instance() -> None:
 
 
 @pytest.mark.perf
-def test_bulk_mixed_kind_instrument_construction_meets_latency_budget() -> None:
+def test_bulk_mixed_kind_instrument_construction_meets_latency_budget(
+    perf_budget: PerfBudget,
+) -> None:
     """옵션/선물/현물이 섞인 5,000건 생성이 예산 내여야 한다 — ULID/통화/
     국가/MIC 정규식이 모듈 로드 시 1회만 컴파일되고 호출마다 재컴파일되는
     회귀가 있다면 이 예산을 넘는다(실측 로컬 <0.2s, 느린 CI 대비 10배 이상
     여유)."""
     kinds = (v2.InstrumentKind.OPTION, v2.InstrumentKind.FUTURE, v2.InstrumentKind.SPOT)
     n = 5_000
-    budget_sec = 2.0
+    budget_ms = 2000.0
 
-    start = time.perf_counter()
-    for i in range(n):
-        kind = kinds[i % 3]
-        is_spot = kind is v2.InstrumentKind.SPOT
-        _sample_instrument(
-            instrument_id=_ulid(i),
-            kind=kind,
-            underlying_id=None if is_spot else _ulid(i + 1_000_000),
-            expiry=None if is_spot else _now(),
-            strike=Decimal("70000") if kind is v2.InstrumentKind.OPTION else None,
-            option_right=v2.OptionRight.CALL if kind is v2.InstrumentKind.OPTION else None,
-            contract_multiplier=None if is_spot else Decimal("1"),
-            settlement=None if is_spot else v2.SettlementType.CASH,
-            currency="USD",
-            country="US",
-            mic="XNAS",
-        )
-    elapsed = time.perf_counter() - start
-    print(
-        f"[DC-20 instruments] {n} mixed-kind constructions in {elapsed:.3f}s "
-        f"({elapsed / n * 1e3:.3f} ms/each, budget<{budget_sec}s)"
+    def _construct_all() -> None:
+        for i in range(n):
+            kind = kinds[i % 3]
+            is_spot = kind is v2.InstrumentKind.SPOT
+            _sample_instrument(
+                instrument_id=_ulid(i),
+                kind=kind,
+                underlying_id=None if is_spot else _ulid(i + 1_000_000),
+                expiry=None if is_spot else _now(),
+                strike=Decimal("70000") if kind is v2.InstrumentKind.OPTION else None,
+                option_right=v2.OptionRight.CALL if kind is v2.InstrumentKind.OPTION else None,
+                contract_multiplier=None if is_spot else Decimal("1"),
+                settlement=None if is_spot else v2.SettlementType.CASH,
+                currency="USD",
+                country="US",
+                mic="XNAS",
+            )
+
+    sample = perf_budget.assert_within(
+        _construct_all, budget_ms=budget_ms, label="[DC-20 instruments]"
     )
-    assert elapsed < budget_sec, (
-        f"{n}건 생성이 예산({budget_sec}s)을 넘었습니다({elapsed:.3f}s) — "
-        "검증기 정규식이 재컴파일되는 등으로 퇴화했는지 확인하세요."
-    )
+    desc = perf_budget.describe(sample, budget_ms=budget_ms)
+    print(f"[DC-20 instruments] {n} mixed-kind constructions in {desc}")
 
 
 # ---- 3. 게이트 적색 재현(D2) — DC-20 이전 스키마는 파생 필드를 조용히
