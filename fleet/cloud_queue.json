@@ -1,17 +1,6 @@
 {
-  "generated_at": "2026-09-25T21:20:15+00:00",
+  "generated_at": "2026-09-25T21:30:36+00:00",
   "tasks": [
-    {
-      "id": 6976,
-      "title": "DEEPEN: tests/unit/market_data/test_contracts_schema.py — 성능 단언 테스트 없음 — schema validate/serialize에 대한 p95/p99 또는 thro",
-      "spec": "원 리프 task-3604(미이행 후속 회수: market_data contracts/v1 스키마 ) 대상 DEEPEN — 현재 negative test 0건(<3), 실패주입/성능단언 마커 없음(task-4084 DEEPEN 기준).\n\nDoD 체크리스트:\n- [ ] negative test 3건 이상 추가(불변식 위반 입력을 명시적으로 거부하는 케이스)\n- [ ] 실패주입 케이스 1건 이상 추가(monkeypatch로 의존성 예외 유발 등)\n- [ ] `python -m pytest tests/unit/market_data/fixtures/market_data_contracts_v1.json -q` 통과\n- [ ] docs/design/INVARIANTS.md 위반 없음",
-      "files": [
-        "tests/unit/market_data/test_contracts_schema.py"
-      ],
-      "tier": "",
-      "role": "backend",
-      "hold_note": "[cloud_session] CTO 2026-09-26: 로컬 턴 한도 2회·backend 이관 실패 — 저장소만으로 완결되는 테스트 DEEPEN이라 클라우드 세션으로. 보존 패치(logs/patches/task-6976-*.patch)는 참고만."
-    },
     {
       "id": 6978,
       "title": "DEEPEN: tests/unit/market_data/test_contracts_schema.py — optional field(CandleRecord.quote_volume,trade_count 등) None",
