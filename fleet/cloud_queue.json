@@ -1,16 +1,4 @@
 {
-  "generated_at": "2026-09-25T21:30:36+00:00",
-  "tasks": [
-    {
-      "id": 6978,
-      "title": "DEEPEN: tests/unit/market_data/test_contracts_schema.py — optional field(CandleRecord.quote_volume,trade_count 등) None",
-      "spec": "원 리프 task-3604(미이행 후속 회수: market_data contracts/v1 스키마 ) 대상 DEEPEN — 현재 negative test 0건(<3), 실패주입/성능단언 마커 없음(task-4084 DEEPEN 기준).\n\nDoD 체크리스트:\n- [ ] negative test 3건 이상 추가(불변식 위반 입력을 명시적으로 거부하는 케이스)\n- [ ] 실패주입 케이스 1건 이상 추가(monkeypatch로 의존성 예외 유발 등)\n- [ ] `python -m pytest tests/unit/market_data/fixtures/market_data_contracts_v1.json -q` 통과\n- [ ] docs/design/INVARIANTS.md 위반 없음",
-      "files": [
-        "tests/unit/market_data/test_contracts_schema.py"
-      ],
-      "tier": "",
-      "role": "backend",
-      "hold_note": "[cloud_session] CTO 2026-09-26: 로컬 턴 한도 3회 — 클라우드 세션으로(재hold: 이전 hold가 실행 중 worker 종료 쓰기에 덮였음)"
-    }
-  ]
+  "generated_at": "2026-09-25T21:40:51+00:00",
+  "tasks": []
 }
