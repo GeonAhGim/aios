@@ -122,6 +122,43 @@ def test_redacts_secret_inside_list_of_lists():
     assert result["batches"][0][0]["authorization"] == REDACTED
 
 
+def test_accepts_valid_payload():
+    """PLT-02 §8 required fields:
+    actor.type/actor.tenant_id/actor.id/level/message/correlation_id/event_type/detail/payload."""
+    record = logging.LogRecord(
+        name="test",
+        level=logging.INFO,
+        pathname=__file__,
+        lineno=1,
+        msg="test log",
+        args=(),
+        exc_info=None,
+    )
+
+    record.payload = {
+        "actor": {"type": "user", "tenant_id": "t1", "id": "USR-001"},
+        "level": "info",
+        "message": "Order placed successfully",
+        "correlation_id": "corr-1",
+        "event_type": "order.placed",
+        "detail": {"order_id": "ORD-42"},
+        "payload": {"sku": "WIDGET", "qty": 3},
+    }
+
+    RedactionFilter().filter(record)
+
+    # all 8 required fields must survive redaction
+    assert record.payload["actor"]["type"] == "user"
+    assert record.payload["actor"]["tenant_id"] == "t1"
+    assert record.payload["actor"]["id"] == "USR-001"
+    assert record.payload["level"] == "info"
+    assert record.payload["message"] == "Order placed successfully"
+    assert record.payload["correlation_id"] == "corr-1"
+    assert record.payload["event_type"] == "order.placed"
+    assert record.payload["detail"]["order_id"] == "ORD-42"
+    assert record.payload["payload"]["sku"] == "WIDGET"
+
+
 def test_original_payload_is_unchanged_after_redact():
     original = {"user": {"api_key": "abcd1234", "id": 1}, "items": [{"token": "abc"}]}
     snapshot = {"user": {"api_key": "abcd1234", "id": 1}, "items": [{"token": "abc"}]}
