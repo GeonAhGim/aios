@@ -364,6 +364,7 @@ async def test_tick_algo_releases_reservation_on_unexpected_submit_failure_and_k
 # -- performance assertion --------------------------------------------------------
 
 
+@pytest.mark.perf
 async def test_tick_algo_processes_many_due_slices_within_latency_budget(pool):
     """Performance assertion -- a single tick over a realistic worst-case
     slice count (500, EM-8~11's own `_MAX_SLICE_COUNT`) must not blow up

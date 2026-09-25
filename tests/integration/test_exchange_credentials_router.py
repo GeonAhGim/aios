@@ -318,6 +318,7 @@ async def test_get_balance_fails_closed_when_key_ring_rotates_after_registration
     assert "good-key" not in response.text
 
 
+@pytest.mark.perf
 async def test_list_credentials_p95_latency_within_budget(client):
     """성능 단언 — `list_credentials`는 top-level 배열을 반환하는 단순 조회
     경로다(파일 상단 docstring이 지적하듯 아직 `ApiResponse` 봉투가 아니다).

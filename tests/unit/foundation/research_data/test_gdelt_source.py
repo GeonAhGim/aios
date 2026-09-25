@@ -154,6 +154,7 @@ async def test_fetch_gdelt_gkg_export_builds_items() -> None:
 # --- numeric performance assertion (D2 floor, ADR-2026-09-09-C) ------------
 
 
+@pytest.mark.perf
 def test_parse_gdelt_gkg_export_throughput_floor() -> None:
     text = "\n".join(_row(record_id=f"rec-{i}") for i in range(2_000))
     started = time.perf_counter()

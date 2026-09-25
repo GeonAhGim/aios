@@ -16,7 +16,6 @@ import hashlib
 import os
 import subprocess
 import sys
-import time
 from pathlib import Path
 from types import SimpleNamespace
 from typing import cast
@@ -59,7 +58,7 @@ from src.core.script.ir import (
     verify_stack,
 )
 from src.core.script.typing.checker import ScriptTypeError, check_program
-from tests.conftest import paused_coverage
+from tests.conftest import PerfBudget
 
 _REPO_ROOT = Path(__file__).resolve().parents[4]
 
@@ -334,14 +333,16 @@ def test_deeply_nested_unary_chain_fails_closed_under_low_recursion_limit() -> N
 # ---- DEEPEN(task-2915): 수치 성능 단언(로우어링 지연) ----
 
 
-def test_lowering_latency_p95_within_compile_budget_slice() -> None:
+@pytest.mark.perf
+def test_lowering_latency_p95_within_compile_budget_slice(perf_budget: PerfBudget) -> None:
     """ADR-2026-09-09-C Decision 1의 DSL 컴파일 예산(로컬 기준 300ms) 중
     로우어링(`_emit_expr` 트리 순회) 단계 몫을 40ms로 상한한다. `lower_program`은
     호출마다 `check_program`을 다시 돌려 환경 불일치를 fail-closed로 잡는데
     (모듈 docstring), 그 비용은 DSL-4 자체 성능 단언(test_checker.py)이 이미
     잰다 — 여기서는 이중으로 재지 않도록 env를 미리 한 번만 계산해 두고
     `lower_expr`만 500개 표현식에 30회 반복해 p95로 로우어링 트리 순회
-    자체의 지연만 분리해서 잰다."""
+    자체의 지연만 분리해서 잰다. task-7434: process_time 기반 perf_budget으로
+    측정한다(coverage tracer 정지 포함)."""
     lines = [f"let v{i} = ta.rsi(close[{i % 5}], length) + v{i - 1} * 2 - 1" for i in range(1, 500)]
     source = "input length: int = 14\ninput close: series<float> = 0\nlet v0 = close\n" + "\n".join(
         lines
@@ -351,19 +352,17 @@ def test_lowering_latency_p95_within_compile_budget_slice() -> None:
     exprs = [decl.expr for decl in program.decls if isinstance(decl, LetDecl)]
     assert len(exprs) == 500
 
-    samples = []
-    for _ in range(30):
-        with paused_coverage():
-            start = time.perf_counter()
-            for expr in exprs:
-                lower_expr(expr, env)
-            samples.append(time.perf_counter() - start)
-    samples.sort()
-    p95 = samples[min(int(len(samples) * 0.95), len(samples) - 1)]
+    def _run_once() -> None:
+        for expr in exprs:
+            lower_expr(expr, env)
 
-    budget_sec = 0.04
-    print(f"[DSL-7 lower] 500-expr p95={p95 * 1e3:.3f}ms budget<{budget_sec * 1e3:.0f}ms")
-    assert p95 < budget_sec
+    samples = perf_budget.samples(_run_once, n=30)
+    cpu_values_ms = sorted(s.cpu_ms for s in samples)
+    p95_ms = cpu_values_ms[min(int(len(cpu_values_ms) * 0.95), len(cpu_values_ms) - 1)]
+
+    budget_ms = 40.0
+    print(f"[DSL-7 lower] 500-expr p95={p95_ms:.3f}ms budget<{budget_ms:.0f}ms")
+    assert p95_ms < budget_ms
 
 
 # ---- DEEPEN(task-2915): 게이트 적색 재현(decl 경계 잔여값 가드) ----

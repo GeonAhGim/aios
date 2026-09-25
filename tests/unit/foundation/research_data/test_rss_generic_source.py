@@ -161,6 +161,7 @@ async def test_fetch_rss_feed_builds_items_on_success() -> None:
 # --- numeric performance assertion (D2 floor, ADR-2026-09-09-C) ------------
 
 
+@pytest.mark.perf
 def test_parse_rss_feed_throughput_floor() -> None:
     items_xml = "".join(
         f"<item><title>T{i}</title><link>https://example.com/{i}</link>"

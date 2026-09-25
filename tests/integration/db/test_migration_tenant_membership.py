@@ -279,6 +279,7 @@ async def test_backfill_heals_user_left_without_tenant_row(pool: asyncpg.Pool) -
 # ----------------------------------------------------------------------
 
 
+@pytest.mark.perf
 async def test_tenant_membership_insert_latency_p95_within_budget(pool: asyncpg.Pool) -> None:
     """수치 성능 단언 — 부분 UNIQUE 인덱스(uq_tenant_membership_active)가
     걸려 있는 상태에서 `tenant_membership` 삽입 1회의 p95 지연시간이

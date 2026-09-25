@@ -187,6 +187,7 @@ def test_advance_propagates_malformed_key_from_bypassed_validation() -> None:
 # -- D2 성능 단언 --------------------------------------------------------------
 
 
+@pytest.mark.perf
 def test_advance_p95_latency_within_budget_for_many_keys() -> None:
     """ADR-2026-09-09-C Decision 1 성능 예산 축 차용: `advance()`는 매 틱마다
     실행되는 순수 상태 전이이므로 가장 빠듯한 축인 사전거래 게이트(p99 5ms)에

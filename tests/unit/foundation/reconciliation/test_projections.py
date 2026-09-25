@@ -118,6 +118,7 @@ async def test_build_reconciliation_state_list_view_propagates_repository_failur
 # 조립 hot path에 성능 단언을 건다.
 
 
+@pytest.mark.perf
 async def test_build_reconciliation_state_list_view_hot_path_performance() -> None:
     tenant_id = uuid4()
     states = tuple(_state(tenant_id=tenant_id) for _ in range(200))

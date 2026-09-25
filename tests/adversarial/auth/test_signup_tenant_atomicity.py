@@ -150,6 +150,7 @@ async def test_signup_rolls_back_user_row_on_unexpected_tenant_insert_failure(
     assert count == 0
 
 
+@pytest.mark.perf
 async def test_signup_p95_latency_within_budget(auth, pool):
     """성능 단언(D2) — 이 leaf(PLT-26/28)는 ADR-2026-09-09-C Decision 1
     예산표에 전용 행이 없는 비-실행축이다. argon2 해시 + 로컬 DB 왕복을 포함해도

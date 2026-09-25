@@ -90,6 +90,7 @@ def test_empty_corrupt_and_wrong_schema(tmp_path):
         list(store.read_columns(VENUE, ID, DAY, kind="trades"))
 
 
+@pytest.mark.perf
 @pytest.mark.timeout(600)
 def test_million_ticks_bounded_arrow_memory(tmp_path: Path):
     store = TickParquetStorage(tmp_path, batch_size=65536)

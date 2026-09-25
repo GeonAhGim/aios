@@ -184,6 +184,7 @@ def test_broken_bar_source_propagates_instead_of_reporting_false_result() -> Non
 # -- D2 numeric performance assertion ------------------------------------------
 
 
+@pytest.mark.perf
 def test_p95_latency_within_5k_bar_budget() -> None:
     """ADR-2026-09-09-C axis performance budget: 5k-bar point-in-time scan
     stays well within a 200ms floor (mirrors L26 `ListBars.upto`'s own

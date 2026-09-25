@@ -136,6 +136,7 @@ def test_decide_fails_loud_on_corrupted_nan_loss_pct():
 # --- 성능 단언 --------------------------------------------------------------
 
 
+@pytest.mark.perf
 def test_decide_perf_bound_for_bulk_calls():
     """성능 단언 — decide()는 필드 비교 몇 개뿐인 O(1) 순수 함수다.
     watchdog_process 루프는 5초 주기로 한 번 호출하지만, 누군가 실수로

@@ -70,6 +70,7 @@ def test_transition_dependency_failure_propagates_fail_closed(monkeypatch):
         FSMTransition(from_state=FSMState.IDLE, to_state=FSMState.HOLDING, condition="buy_signal")
 
 
+@pytest.mark.perf
 def test_fsm_strategy_config_construction_throughput():
     iterations = 500
     start = time.perf_counter()

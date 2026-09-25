@@ -297,6 +297,7 @@ def test_mapper_propagates_rule_hit_construction_failure_instead_of_silently_all
         contracts_v1.compliance_decision_from_policy_decision(row)
 
 
+@pytest.mark.perf
 def test_mapping_large_reason_code_set_completes_within_latency_budget() -> None:
     """수치 성능 단언: §7 SLO는 사전 판정 경로에 p99 30ms를 배정한다. CM-1의
     매퍼는 그 경로 하류에서 실행되므로 그 자체가 병목이 되어서는 안 된다.

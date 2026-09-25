@@ -185,6 +185,7 @@ def test_non_numeric_mdd_value_raises_instead_of_silently_passing() -> None:
 # -- D2 numeric performance assertion -----------------------------------------
 
 
+@pytest.mark.perf
 def test_p95_latency_within_local_budget() -> None:
     """This check does no I/O and no replay -- pure dict lookup + one
     multiplication -- so its own overhead budget is tight (5ms)."""

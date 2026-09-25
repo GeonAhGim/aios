@@ -117,6 +117,7 @@ def test_krx_validate_fails_closed_when_regex_corrupted(
 # --- DEEPEN(task-2951) 수치 성능 단언(적대적 입력 포함) -------------------------
 
 
+@pytest.mark.perf
 def test_to_canonical_completes_within_budget_for_bulk_and_adversarial_inputs() -> None:
     """정규식 기반 검증기(`_KRX_CODE`, `_US_TICKER`)는 유효 입력 10만 건과,
     매칭에 실패해야 하는 긴 적대적 입력(비-ASCII 폭주 문자열 포함)을 섞어도

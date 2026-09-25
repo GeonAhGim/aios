@@ -156,6 +156,7 @@ def test_failure_injection_upstream_payload_corrupted_to_state_fails_closed(monk
 # --- 성능 단언 (1) --------------------------------------------------------
 
 
+@pytest.mark.perf
 def test_performance_signal_construction_p99_within_pretrade_gate_budget():
     """ADR-2026-09-09-C Decision 1 예산: 사전거래 게이트 p99 5ms.
     Signal은 FD-8.1 evaluate()의 직접 출력이므로 이 예산에 포함된다."""

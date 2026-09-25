@@ -193,6 +193,7 @@ def _fast_order_handler(captured: list[httpx.Request]):
     return handler
 
 
+@pytest.mark.perf
 async def test_place_overseas_order_overhead_bounded_vs_raw_request_baseline() -> None:
     """`place_overseas_order`(이 리프의 대상 함수)는 `_exchange_codes`
     조회 + body 조립 + `_request` 왕복 1회만 하므로, 원시 `_request` 왕복

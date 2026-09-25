@@ -194,6 +194,7 @@ drives) must complete well within that window; this asserts 1/6 of it for
 this file's small in-repo dataset."""
 
 
+@pytest.mark.perf
 def test_train_step_latency_within_budget(tmp_path):
     trainer = LocalTrainer(tmp_path)
     samples = _samples()

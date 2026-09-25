@@ -115,6 +115,7 @@ def test_pct_raises_on_non_decimal_input():
         pct(cast(Any, "12.3"))
 
 
+@pytest.mark.perf
 def test_pct_bulk_calls_stay_within_perf_budget():
     # 성능 단언 — R-05~R-13이 매 평가마다 여러 번 호출한다(§9). 숨은 I/O나
     # O(n^2) 회귀가 생기면 게이트 지연(latency_us)에 그대로 누적된다.

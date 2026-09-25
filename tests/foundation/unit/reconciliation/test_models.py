@@ -213,6 +213,7 @@ def test_classification_construction_surfaces_injected_lookup_failure(
 # --- performance ---------------------------------------------------------------
 
 
+@pytest.mark.perf
 def test_bulk_construction_meets_latency_budget() -> None:
     """10k instantiations of every value object must stay well under 1s (p50 budget
     for pure in-memory dataclass construction, ADR-2026-09-09-C Decision 1 default)."""

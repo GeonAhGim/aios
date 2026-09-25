@@ -256,6 +256,7 @@ def test_production_empty_volume_map_pattern_stays_fail_closed_for_every_symbol(
 # accidental O(n^2) regression in the per-slice SHA-256 draws. --
 
 
+@pytest.mark.perf
 def test_planning_many_positions_completes_within_latency_budget() -> None:
     policy = _policy(slice_count_min=3, slice_count_max=20, max_slice_notional=1)
     positions = [

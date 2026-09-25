@@ -27,7 +27,6 @@ determinism test is single-process only). Added below:
 
 from __future__ import annotations
 
-import time
 from concurrent.futures import ProcessPoolExecutor
 from datetime import datetime, timezone
 from typing import Any
@@ -40,6 +39,7 @@ from src.core.risk.hashing import canonical_json, sha256_hex
 from src.foundation.mandates.contracts.v1 import ComplianceVerdict, RuleHit
 from src.foundation.mandates.domain.evaluator import _VERDICT_RANK, evaluate_bundle
 from src.foundation.mandates.domain.rule_bundle import RuleBundle, RuleSpec
+from tests.conftest import PerfBudget
 
 _NOW = datetime(2026, 9, 7, 0, 0, tzinfo=timezone.utc)
 
@@ -168,10 +168,13 @@ def test_decision_id_is_deterministic_for_same_bundle_and_snapshot():
 # --- Numeric performance (DEEPEN) -------------------------------------------
 
 
-def test_evaluate_bundle_meets_latency_budget_over_many_calls() -> None:
+@pytest.mark.perf
+def test_evaluate_bundle_meets_latency_budget_over_many_calls(perf_budget: PerfBudget) -> None:
     """수치 성능 단언: 규칙 3개짜리 번들을 10,000회 반복 평가한 총 지연이
     넉넉한 상한(1.0s, 호출당 평균 100us) 안에 들어야 한다 — 이후 회귀로
-    순수 함수(정렬·해싱 포함)가 눈에 띄게 느려지면 이 테스트가 잡는다."""
+    순수 함수(정렬·해싱 포함)가 눈에 띄게 느려지면 이 테스트가 잡는다.
+    task-7434: wall-clock perf_counter() 대신 공용 perf_budget(process_time
+    기반)으로 측정한다."""
     bundle = _bundle(
         RuleSpec(rule_id="R_ALLOW", params={"max_pct": 10.0}, check=_allow),
         RuleSpec(rule_id="R_WARN", params={}, check=_warn),
@@ -179,12 +182,11 @@ def test_evaluate_bundle_meets_latency_budget_over_many_calls() -> None:
     )
     snapshot = {"asset": "BTC", "qty": 1.5}
 
-    started = time.perf_counter()
-    for _ in range(10_000):
-        evaluate_bundle(bundle, snapshot, now=_NOW)
-    elapsed_s = time.perf_counter() - started
+    def _run_once() -> None:
+        for _ in range(10_000):
+            evaluate_bundle(bundle, snapshot, now=_NOW)
 
-    assert elapsed_s < 1.0, f"10,000 evaluations took {elapsed_s:.3f}s (budget 1.0s)"
+    perf_budget.assert_within(_run_once, budget_ms=1000.0, label="10,000 evaluate_bundle calls")
 
 
 # --- Gate/CI red regression guard (DEEPEN) -----------------------------------

@@ -283,6 +283,7 @@ async def test_main_query_db_failure_propagates_not_swallowed(pool, risk_guard, 
         await risk_guard.evaluate_all_running()
 
 
+@pytest.mark.perf
 async def test_evaluate_all_running_stays_fast_at_scale(pool, risk_guard):
     """성능 단언(D2) — 실행-포지션 조인·집계가 200개 규모에서도 인덱스
     기반으로 짧게 끝나는지 확인한다(순차 스캔이면 시간이 행 수에 비례해

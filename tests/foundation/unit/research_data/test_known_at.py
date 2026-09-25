@@ -116,6 +116,7 @@ def test_naive_as_of_rejected_by_fa9_kernel() -> None:
 # ---- 성능 단언(DEPTH 감사 task-2724 D1 판정 근거, 1702/1701/2058 DEEPEN 선례와 동일 패턴) ----
 
 
+@pytest.mark.perf
 def test_assert_point_in_time_hot_path_performance() -> None:
     # assert_point_in_time은 모든 read path가 아이템을 반환하기 전에 호출하는
     # 순수 함수(BitemporalRecord 구성 + FA-9 as_of 위임)다. 10,000회 호출이

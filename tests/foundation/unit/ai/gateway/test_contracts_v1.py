@@ -211,6 +211,7 @@ def test_gate_red_progressive_field_corruption_flips_pass_fail_at_each_stage() -
                 v1.AgentToken(**payload)
 
 
+@pytest.mark.perf
 def test_gate_red_budget_actually_fails_past_budget() -> None:
     """위 성능 단언이 실제로 예산 초과를 잡아내는지(tautology 아님) 확인한다
     -- 예산을 실측치보다 훨씬 낮게 걸면 동일 검증 루프가 진짜로

@@ -283,6 +283,7 @@ def test_adjust_handles_candle_with_zero_volume() -> None:
     assert adjusted[0].volume == Decimal("0")
 
 
+@pytest.mark.perf
 def test_factor_chain_and_adjust_large_batch_stays_correct() -> None:
     """Observes large-batch timing (print) without asserting a numeric bound
     -- same policy as `test_lineage.py`'s

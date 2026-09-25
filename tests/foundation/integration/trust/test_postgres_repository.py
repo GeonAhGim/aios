@@ -208,6 +208,7 @@ async def test_revoke_consent_wrong_tenant_raises_permission_error(pool, repo, p
     assert still_active.id == consent.id
 
 
+@pytest.mark.perf
 async def test_get_active_consent_read_p95_latency_within_budget(pool, repo, purpose):
     """ADR-2026-09-09-C 예산표 — 단순 인덱스 조회(FA 축)는 p95 50ms 이하를 기대한다."""
     tenant_id = await _make_tenant(pool)

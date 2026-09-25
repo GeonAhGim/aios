@@ -40,6 +40,7 @@ def _make_sleep():
     return _sleep, delays
 
 
+@pytest.mark.perf
 async def test_await_db_capacity_returns_immediately_under_threshold() -> None:
     """Perf assertion: no pressure on the first probe means zero sleeps and the
     call returns without paying any of the backoff schedule."""

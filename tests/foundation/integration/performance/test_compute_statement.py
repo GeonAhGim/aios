@@ -264,6 +264,7 @@ async def _compute_statement_p95_ms(
     return durations_ms[int(len(durations_ms) * 0.95)]
 
 
+@pytest.mark.perf
 async def test_compute_statement_p95_latency_under_borrowed_budget(
     pool, repo, inputs, evidence_repo
 ):
@@ -280,6 +281,7 @@ async def test_compute_statement_p95_latency_under_borrowed_budget(
     )
 
 
+@pytest.mark.perf
 async def test_compute_statement_budget_gate_fails_on_injected_regression(
     pool, repo, inputs, evidence_repo, monkeypatch
 ):

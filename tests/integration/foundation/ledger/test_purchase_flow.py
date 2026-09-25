@@ -472,6 +472,7 @@ async def test_release_already_captured_hold_is_rejected(pool, ports):
     assert await _available(pool, buyer) == Decimal("0.00")  # release가 잘못 되돌리지 않았다
 
 
+@pytest.mark.perf
 async def test_place_and_capture_hold_round_trip_under_budget(pool, ports):
     """DEEPEN(task-2960): 수치 성능 단언 — `place_hold`+`capture_hold` 왕복
     20회(각자 fresh reference, 순차 실행)가 절대시간 예산 내에 있음을

@@ -1,6 +1,5 @@
 """Backtest domain/rules.py 단위테스트 — DB 없이 순수 함수만 검증."""
 
-import time
 from dataclasses import dataclass
 from decimal import Decimal
 
@@ -16,6 +15,7 @@ from src.foundation.backtest.domain.rules import (
     require_cost_model,
     warn_if_zero_cost,
 )
+from tests.conftest import PerfBudget
 
 
 @dataclass
@@ -118,17 +118,23 @@ def test_assert_fill_after_signal_propagates_poisoned_event_exception() -> None:
 # -- D2 보강: 수치 성능 단언 -----------------------------------------------------
 
 
-def test_assert_fill_after_signal_throughput_within_budget() -> None:
+@pytest.mark.perf
+def test_assert_fill_after_signal_throughput_within_budget(perf_budget: PerfBudget) -> None:
     """수치 성능 단언: 백테스트 이벤트 루프는 매 bar마다 이 순수 검증을
     호출한다(spec §9 L29, I2) -- 100,000회 호출이 200ms 예산 안에 들어
-    루프 병목이 아님을 보증한다."""
+    루프 병목이 아님을 보증한다. task-7434: wall-clock `perf_counter()` 대신
+    공용 `perf_budget`(process_time 기반)으로 측정해 xdist 코어 경합
+    노이즈를 배제한다."""
     order_ev = _FakeEvent(bar_index=1)
     fill_ev = _FakeEvent(bar_index=2)
-    start = time.perf_counter()
-    for _ in range(100_000):
-        assert_fill_after_signal(order_ev, fill_ev)
-    elapsed_ms = (time.perf_counter() - start) * 1000
-    assert elapsed_ms < 200.0, f"100k calls took {elapsed_ms:.1f}ms, exceeds 200ms budget"
+
+    def _run_once() -> None:
+        for _ in range(100_000):
+            assert_fill_after_signal(order_ev, fill_ev)
+
+    perf_budget.assert_within(
+        _run_once, budget_ms=200.0, label="100k assert_fill_after_signal calls"
+    )
 
 
 # -- D2 보강: 게이트 적색 재현 ----------------------------------------------------

@@ -35,6 +35,7 @@ from datetime import datetime, timedelta, timezone
 from uuid import UUID
 
 import asyncpg
+import pytest
 
 from src.data.models.trading import Order, OrderStatus
 from src.services.oms.adapters.order_repository import PostgresOrderRepository
@@ -238,6 +239,7 @@ def _asyncpg_dsn() -> str:
     return os.environ["DATABASE_URL"].replace("postgresql+asyncpg://", "postgresql://")
 
 
+@pytest.mark.perf
 async def test_stale_write_rejection_round_trip_budget_real_db() -> None:
     """DEPTH_L4_BR(task-2722) D2 — 실DB 늦은 쓰기 거부 경로의 수치 성능 단언.
 

@@ -147,6 +147,7 @@ async def test_place_futures_order_survives_infra_failures_then_succeeds() -> No
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.perf
 async def test_get_futures_open_orders_parses_large_list_within_normalized_budget() -> None:
     """수치 성능 단언 — `[_row_to_futures_order(row) for row in ...]`은
     항목 수에 선형으로 늘어야 한다. 절대 ms 상수 대신 같은 프로세스에서

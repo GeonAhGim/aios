@@ -6,7 +6,6 @@ Spec: docs/specs/L4_ibor_fund_accounting_and_resilience_v1.0.md#§9 FA-11.
 from __future__ import annotations
 
 from decimal import Decimal
-from time import perf_counter
 from uuid import uuid4
 
 import pytest
@@ -21,6 +20,7 @@ from src.foundation.ledger.domain.correction import (
     build_correction,
     reversal_lines,
 )
+from tests.conftest import PerfBudget
 
 _DEBIT_ACCOUNT = "PLATFORM:CASH_CLEARING"
 
@@ -155,23 +155,26 @@ def test_build_correction_propagates_unbalanced_corrected_lines() -> None:
 # ---- 성능 단언(DEPTH 감사 task-2724 D1 판정 근거, 1702/1701 DEEPEN 선례와 동일 패턴) ----
 
 
-def test_build_correction_hot_path_performance() -> None:
+@pytest.mark.perf
+def test_build_correction_hot_path_performance(perf_budget: PerfBudget) -> None:
     # build_correction은 정정 요청마다 호출되는 순수 함수(reversal_lines +
     # check_balanced x2 + lines_digest 비교)다. 10,000회 호출이 1s 내로
-    # 끝나야 한다 — I/O 없는 순수 계약의 실측 증명.
+    # 끝나야 한다 — I/O 없는 순수 계약의 실측 증명. task-7434: wall-clock
+    # perf_counter() 대신 공용 perf_budget(process_time 기반)으로 측정한다.
     original_id = uuid4()
     original = _lines(amount=Decimal("100.00"))
     corrected = _lines(amount=Decimal("150.00"))
     iterations = 10_000
 
-    started = perf_counter()
-    for _ in range(iterations):
-        build_correction(
-            original_entry_id=original_id,
-            original_lines=original,
-            corrected_lines=corrected,
-            reason="perf regression guard",
-        )
-    elapsed = perf_counter() - started
+    def _run_once() -> None:
+        for _ in range(iterations):
+            build_correction(
+                original_entry_id=original_id,
+                original_lines=original,
+                corrected_lines=corrected,
+                reason="perf regression guard",
+            )
 
-    assert elapsed < 1.0, f"{iterations}회 호출에 {elapsed:.4f}s — 순수 함수치고 너무 느리다"
+    perf_budget.assert_within(
+        _run_once, budget_ms=1000.0, label=f"{iterations} build_correction calls"
+    )

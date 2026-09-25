@@ -205,6 +205,7 @@ def test_in_memory_source_register_replaces_prior_entry_same_key() -> None:
 # ---- D2 수치 성능 단언 --------------------------------------------------------
 
 
+@pytest.mark.perf
 def test_compile_script_indicator_conversion_overhead_stays_within_budget() -> None:
     """§9.4 DSL-12 already budgets raw `compile_source` at <=300ms
     (ADR-2026-09-09-C Decision 1, `test_compile.py`). This pins the marginal

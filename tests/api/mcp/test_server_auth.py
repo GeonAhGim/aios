@@ -201,6 +201,7 @@ def _p95(samples: list[float]) -> float:
     return samples[min(int(len(samples) * 0.95), len(samples) - 1)]
 
 
+@pytest.mark.perf
 async def test_mcp_roundtrip_p95_within_budget(client, token_repo: PostgresAgentTokenRepository):
     issued = await issue(token_repo, tenant_id=uuid4(), scopes=frozenset({Scope.READ}))
     samples: list[float] = []
@@ -222,6 +223,7 @@ async def test_mcp_roundtrip_p95_within_budget(client, token_repo: PostgresAgent
 # --- 게이트 적색 재현 ---
 
 
+@pytest.mark.perf
 async def test_gate_red_budget_actually_fails_past_budget(
     client, token_repo: PostgresAgentTokenRepository
 ):

@@ -100,6 +100,7 @@ def test_connection_list_response_dependency_failure_injected(
         )
 
 
+@pytest.mark.perf
 def test_connection_list_response_construction_throughput_budget() -> None:
     """p95 construction latency for 500 responses stays under 50ms/op budget
     (ADR-2026-09-09-C Decision 1 — simple schema construction path)."""

@@ -227,6 +227,7 @@ def _p95(samples: list[float]) -> float:
     return samples[min(int(len(samples) * 0.95), len(samples) - 1)]
 
 
+@pytest.mark.perf
 async def test_authorize_db_roundtrip_p95_within_budget(repo: PostgresAgentTokenRepository):
     tenant_id = uuid4()
     issued = await issue_token(
