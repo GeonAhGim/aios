@@ -11,6 +11,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import sys
 import time
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -358,10 +359,25 @@ class PerfBudget:
         묶으면 총 CPU 시간이 그 틱 폭보다 커져 양자화 오차가 호출당
         `tick/batch`로 줄어든다(예: batch=8이면 오차가 ~2ms로 줄어든다)."""
         result: _T | None = None
+        # task-7253(esc-ci-pytest_perf): the `pytest_perf` CI step runs with
+        # `--cov=src --cov-append` for coverage accounting. coverage.py's line
+        # tracer hooks via `sys.settrace()` and adds real per-line CPU work in
+        # *this* process, so `time.process_time()` captures tracer overhead
+        # alongside the code under test -- a tight inner loop (e.g. a few
+        # hundred thousand comparisons) can see its measured cpu_ms multiply
+        # under coverage even though the code itself did not regress. Suspend
+        # tracing for the timed section only; coverage of the surrounding test
+        # body (not the hot loop) is unaffected since it is retraced right
+        # after restore.
+        active_tracer = sys.gettrace()
         wall_start = time.perf_counter()
         cpu_start = time.process_time()
-        for _ in range(batch):
-            result = fn()
+        sys.settrace(None)
+        try:
+            for _ in range(batch):
+                result = fn()
+        finally:
+            sys.settrace(active_tracer)
         cpu_ms = (time.process_time() - cpu_start) * 1000 / batch
         wall_ms = (time.perf_counter() - wall_start) * 1000 / batch
         return PerfSample(cpu_ms=cpu_ms, wall_ms=wall_ms, result=result)
